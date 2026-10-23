@@ -8,7 +8,7 @@ use crate::op_set2::types::{Action, KeyRef, MarkData, PropRef, ScalarValue as Op
 use crate::op_set2::SuccInsert;
 use crate::patches::Events;
 use crate::types::{
-    ActorId, ElemId, ObjId, ObjType, OpId, ScalarValue, SequenceType, SmallHashMap,
+    ActorId, ElemId, ObjId, ObjType, OpId, ScalarValue, SequenceType, SmallHashMap, SmallHasher,
 };
 use crate::{Automerge, Change, ChangeHash, PatchLog, PatchLogMismatch};
 use crate::{AutomergeError, TextEncoding};
@@ -61,6 +61,75 @@ struct Untangler<'a> {
     index: usize,
     max: usize,
     width: usize,
+    // ops in this object the walk must reach before it may stop early
+    targets: Vec<OpId>,
+    // the walk may end once the rest of it would change nothing
+    stop_early: bool,
+}
+
+// Finding where the change begins costs at most this many seeks, and one read of this many
+// rows either side of the first op found.
+const MAX_WINDOW_SEEKS: usize = 8;
+const WINDOW_READ_RADIUS: usize = 4000;
+
+struct RowSearch<'a> {
+    ops: &'a OpSet,
+    range: &'a Range<usize>,
+    wanted: HashSet<OpId, SmallHasher>,
+    found: Vec<OpId>,
+    rows: Vec<usize>,
+    seeks: usize,
+}
+
+impl<'a> RowSearch<'a> {
+    fn new(ops: &'a OpSet, range: &'a Range<usize>, wanted: HashSet<OpId, SmallHasher>) -> Self {
+        Self {
+            ops,
+            range,
+            wanted,
+            found: Vec::new(),
+            rows: Vec::new(),
+            seeks: 0,
+        }
+    }
+
+    fn seek(&mut self, id: OpId) -> Option<usize> {
+        self.seeks += 1;
+        self.wanted.remove(&id);
+        let row = self.ops.get_op_id_pos(id)?;
+        if !self.range.contains(&row) {
+            return None;
+        }
+        self.record(id, row);
+        Some(row)
+    }
+
+    fn read_around(&mut self, center: usize) {
+        let start = center
+            .saturating_sub(WINDOW_READ_RADIUS)
+            .max(self.range.start);
+        let end = (center + WINDOW_READ_RADIUS).min(self.range.end);
+        let rows = start..end;
+        for (row, id) in rows.clone().zip(self.ops.id_iter_range(&rows)) {
+            if self.wanted.is_empty() {
+                break;
+            }
+            if self.wanted.remove(&id) {
+                self.record(id, row);
+            }
+        }
+    }
+
+    fn seek_remaining(&mut self) {
+        for id in std::mem::take(&mut self.wanted) {
+            self.seek(id);
+        }
+    }
+
+    fn record(&mut self, id: OpId, row: usize) {
+        self.found.push(id);
+        self.rows.push(row);
+    }
 }
 
 impl<'a> Untangler<'a> {
@@ -175,7 +244,7 @@ impl<'a> Untangler<'a> {
         if let Some(v) = self.entry.remove(&id) {
             self.stack.extend(v);
         }
-        if let Some(u) = self.updates.get(&ElemId(id)) {
+        if let Some(u) = self.updates.remove(&ElemId(id)) {
             self.updates_stack.extend(u.iter().rev());
         }
     }
@@ -301,6 +370,8 @@ impl<'a> Untangler<'a> {
         }
         let updates_stack = Vec::with_capacity(change_ops.len());
         Self {
+            targets: Vec::new(),
+            stop_early: true,
             gosub,
             entry,
             stack,
@@ -319,6 +390,87 @@ impl<'a> Untangler<'a> {
             max,
         }
     }
+
+    /// Every change op is placed and every predecessor found, so the rest of the walk would
+    /// change nothing.
+    fn is_done(&self) -> bool {
+        self.stop_early
+            && self.stack.is_empty()
+            && self.entry.is_empty()
+            && self.updates.is_empty()
+            && self.updates_stack.is_empty()
+            && self.targets.iter().all(|id| !self.pred.contains_key(id))
+    }
+
+    /// Where the walk of `range` can begin: the first element the change touches, with the
+    /// index and marks a walk from the start would have there. The start of `range` otherwise.
+    fn window_start(&mut self, ops: &OpSet, range: &Range<usize>) -> usize {
+        // `pred` holds the predecessors of every object in the batch: count it before collecting it
+        if self.pred.len() > self.elements_touched() + MAX_WINDOW_SEEKS {
+            return self.full_walk_start(range);
+        }
+        let mut search = RowSearch::new(ops, range, self.wanted_ids());
+        if let Some(element) = self.any_element() {
+            if let Some(row) = search.seek(element) {
+                search.read_around(row);
+            }
+        }
+        if search.seeks + search.wanted.len() > MAX_WINDOW_SEEKS {
+            return self.full_walk_start(range);
+        }
+        search.seek_remaining();
+
+        self.targets = search.found;
+        // from the start of the sequence, still stopping early once the change is placed
+        if self.inserts_at_head() {
+            return range.start;
+        }
+        match search.rows.iter().min() {
+            Some(&row) if self.seed(ops, range, row) => row,
+            _ => range.start,
+        }
+    }
+
+    fn full_walk_start(&mut self, range: &Range<usize>) -> usize {
+        self.stop_early = false;
+        range.start
+    }
+
+    fn elements_touched(&self) -> usize {
+        self.entry.len() + self.updates.len()
+    }
+
+    fn element_ids(&self) -> impl Iterator<Item = OpId> + '_ {
+        let inserted_after = self.entry.keys().copied();
+        let updated = self.updates.keys().map(|element| element.0);
+        inserted_after.chain(updated)
+    }
+
+    fn any_element(&self) -> Option<OpId> {
+        self.element_ids().next()
+    }
+
+    fn wanted_ids(&self) -> HashSet<OpId, SmallHasher> {
+        let predecessors = self.pred.keys().copied();
+        self.element_ids().chain(predecessors).collect()
+    }
+
+    fn inserts_at_head(&self) -> bool {
+        !self.stack.is_empty()
+    }
+
+    /// Take the state a walk of `range` from its start has on reaching the element at `pos`.
+    fn seed(&mut self, ops: &OpSet, range: &Range<usize>, pos: usize) -> bool {
+        let Some((index, marks)) = ops.seq_state_at(range, pos, self.seq_type) else {
+            return false;
+        };
+        self.index = index;
+        for (id, data) in marks.map {
+            self.value.marks.before.mark_begin(id, data.clone());
+            self.value.marks.after.mark_begin(id, data);
+        }
+        true
+    }
 }
 
 fn walk_list<'a>(
@@ -328,6 +480,9 @@ fn walk_list<'a>(
     log: &mut Events<'_>,
 ) {
     for op in doc_ops {
+        if op.insert && ut.is_done() {
+            break;
+        }
         ut.element_update(&op);
 
         if op.insert {
@@ -792,9 +947,9 @@ impl BatchApply {
                     let mut walker = ObjWalker::new(doc.ops());
                     for os in obj_spans {
                         let obj_range = walker.seek_to_obj(os.obj);
-                        let doc_ops = doc.ops().iter_range(&obj_range);
                         match obj_info.object_type(&os.obj) {
                             Some(ObjType::Map) => {
+                                let doc_ops = doc.ops().iter_range(&obj_range);
                                 let value = ValueState::new(
                                     os.obj,
                                     SequenceType::List,
@@ -820,14 +975,16 @@ impl BatchApply {
                                     mask0.as_ref(),
                                     doc.ops(),
                                 );
-                                let ut = Untangler::new(
+                                let mut ut = Untangler::new(
                                     value,
                                     conflicts,
                                     &mut ops[os.span.clone()],
                                     pred,
-                                    doc_ops.end_pos(),
+                                    obj_range.end,
                                 );
-                                walk_list(ut, doc_ops, succ, log);
+                                let start = ut.window_start(doc.ops(), &obj_range);
+                                let window = doc.ops().iter_range(&(start..obj_range.end));
+                                walk_list(ut, window, succ, log);
                             }
                             _ => panic!("Obj {:?} Missing from Index", os.obj),
                         }
@@ -1103,12 +1260,14 @@ impl Automerge {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::exid::ExId;
     use crate::marks::{ExpandMark, Mark};
     use crate::read::ReadDoc;
     use crate::transaction::Transactable;
     use crate::types;
-    use crate::{make_rng, ActorId, AutoCommit, ROOT};
+    use crate::{make_rng, ActorId, AutoCommit, Patch, ROOT};
     use rand::prelude::*;
+    use rand::rngs::SmallRng;
 
     /// InsertQuery::resolve had a bug where an increment op before a trailing
     /// insert made the insert resolve to the wrong position. That corrupted the
@@ -1997,5 +2156,163 @@ mod tests {
 
         let mut doc2 = AutoCommit::new();
         doc2.apply_changes_batch(changes).unwrap();
+    }
+
+    /// Applies the last change `author` made to `doc` and returns its patches. The author placed
+    /// the ops of that change as it made them, without the walk in this file, so its document is
+    /// what `doc` must become.
+    fn receive(doc: &mut AutoCommit, author: &mut AutoCommit) -> Vec<Patch> {
+        let change = author.get_last_local_change().unwrap();
+        doc.update_diff_cursor();
+        doc.apply_changes([change]).unwrap();
+        assert!(doc.validate_top_index());
+        doc.debug_cmp(author);
+        doc.diff_incremental()
+    }
+
+    /// As `receive`, and the patches are those of a diff across the change. (For some edits to
+    /// marks and blocks the two differ whichever way the change is walked, hence the plain
+    /// `receive` in the fuzz test.)
+    fn receive_and_diff(doc: &mut AutoCommit, author: &mut AutoCommit) {
+        let before = doc.get_heads();
+        let patches = receive(doc, author);
+        assert_eq!(patches, author.diff(&before, &doc.get_heads()));
+    }
+
+    fn long_text() -> (AutoCommit, ExId) {
+        let mut doc = AutoCommit::new().with_actor("aa".try_into().unwrap());
+        let text = doc.put_object(&ROOT, "text", ObjType::Text).unwrap();
+        doc.splice_text(&text, 0, 0, &"abcdefghij".repeat(5_000))
+            .unwrap();
+        let bold = Mark::new("bold".into(), true, 100, 45_000);
+        doc.mark(&text, bold, ExpandMark::Both).unwrap();
+        doc.commit();
+        (doc, text)
+    }
+
+    #[test]
+    fn edit_mid_text() {
+        let (mut doc, text) = long_text();
+        let mut author = doc.fork().with_actor("bb".try_into().unwrap());
+        author.splice_text(&text, 25_000, 3, "xyz").unwrap();
+        receive_and_diff(&mut doc, &mut author);
+    }
+
+    #[test]
+    fn delete_long_run() {
+        let (mut doc, text) = long_text();
+        let mut author = doc.fork().with_actor("bb".try_into().unwrap());
+        author.splice_text(&text, 25_000, 500, "").unwrap();
+        receive_and_diff(&mut doc, &mut author);
+    }
+
+    #[test]
+    fn edits_too_far_apart_to_seek() {
+        let (mut doc, text) = long_text();
+        let mut author = doc.fork().with_actor("bb".try_into().unwrap());
+        for place in (0..=MAX_WINDOW_SEEKS).rev() {
+            let index = place * (WINDOW_READ_RADIUS + 1);
+            author.splice_text(&text, index, 1, "").unwrap();
+        }
+        receive_and_diff(&mut doc, &mut author);
+    }
+
+    #[test]
+    fn head_insert_and_far_edit() {
+        let (mut doc, text) = long_text();
+        let mut author = doc.fork().with_actor("bb".try_into().unwrap());
+        author.splice_text(&text, 40_000, 1, "x").unwrap();
+        author.splice_text(&text, 0, 0, "y").unwrap();
+        receive_and_diff(&mut doc, &mut author);
+    }
+
+    #[test]
+    fn insert_beside_concurrent_insert() {
+        let (mut doc, text) = long_text();
+        let heads = doc.get_heads();
+        doc.splice_text(&text, 25_000, 0, "first").unwrap();
+        doc.commit();
+        let mut author = doc.fork().with_actor("bb".try_into().unwrap());
+        author.isolate(&heads);
+        author.splice_text(&text, 25_000, 0, "second").unwrap();
+        author.integrate();
+        receive_and_diff(&mut doc, &mut author);
+    }
+
+    /// A malformed change: its delete of a map key names a character of the text as the
+    /// predecessor, which deletes that character. The walk must reach it on either side of the
+    /// insert.
+    #[test]
+    fn predecessor_in_another_object() {
+        for (insert_at, pred_at, expected) in [(8, 1, "acdefghzij"), (2, 8, "abzcdefghj")] {
+            let mut doc = AutoCommit::new().with_actor("aa".try_into().unwrap());
+            let text = doc.put_object(&ROOT, "text", ObjType::Text).unwrap();
+            doc.splice_text(&text, 0, 0, "abcdefghij").unwrap();
+            doc.put(&ROOT, "key", 1).unwrap();
+            let (_, pred) = doc.get(&text, pred_at).unwrap().unwrap();
+
+            let mut author = doc.fork().with_actor("bb".try_into().unwrap());
+            author.splice_text(&text, insert_at, 0, "z").unwrap();
+            author.delete(&ROOT, "key").unwrap();
+            let mut change = author.get_last_local_change().unwrap().decode();
+            let delete = change.operations.last_mut().unwrap();
+            delete.pred = vec![pred.to_string().parse().unwrap()].into();
+
+            doc.apply_changes([Change::from(change)]).unwrap();
+            assert_eq!(doc.text(&text).unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn fuzz_concurrent_edits() {
+        let mut rng = make_rng();
+        for encoding in [
+            TextEncoding::UnicodeCodePoint,
+            TextEncoding::Utf8CodeUnit,
+            TextEncoding::Utf16CodeUnit,
+            TextEncoding::GraphemeCluster,
+        ] {
+            let mut doc = AutoCommit::new_with_encoding(encoding).with_actor(rng.random());
+            let text = doc.put_object(&ROOT, "text", ObjType::Text).unwrap();
+            doc.splice_text(&text, 0, 0, "hello world").unwrap();
+            let list = doc.put_object(&ROOT, "list", ObjType::List).unwrap();
+            doc.insert(&list, 0, ScalarValue::counter(0)).unwrap();
+            let mut heads = vec![doc.get_heads()];
+
+            for _ in 0..100 {
+                let mut author = doc.fork().with_actor(rng.random());
+                // edit as of an earlier point, so the change is concurrent with what came after
+                author.isolate(&heads[rng.random_range(0..heads.len())]);
+                for _ in 0..rng.random_range(1..=3) {
+                    random_edit(&mut author, &text, &list, &mut rng);
+                }
+                author.integrate();
+                if author.get_last_local_change().is_some() {
+                    receive(&mut doc, &mut author);
+                    heads.push(doc.get_heads());
+                }
+            }
+        }
+    }
+
+    fn random_edit(doc: &mut AutoCommit, text: &ExId, list: &ExId, rng: &mut SmallRng) {
+        let start = rng.random_range(0..=doc.length(text));
+        let end = rng.random_range(start..=doc.length(text));
+        let item = rng.random_range(0..doc.length(list).max(1));
+        let chars = ["a", "é", "e\u{301}", "👩🏿‍🚒"][rng.random_range(0..4)];
+        let expand = [ExpandMark::Both, ExpandMark::None][rng.random_range(0..2)];
+        // an edit the document refuses (an index inside a character, say) is skipped
+        let _ = match rng.random_range(0..12) {
+            0..=2 => doc.splice_text(text, start, 0, chars),
+            3 => doc.splice_text(text, start, 1, chars),
+            4 => doc.splice_text(text, start, (end - start) as isize, ""),
+            5 => doc.mark(text, Mark::new("bold".into(), true, start, end), expand),
+            6 => doc.unmark(text, "bold", start, end, expand),
+            7 => doc.split_block(text, start).map(|_| ()),
+            8 => doc.insert(list, item, ScalarValue::counter(0)),
+            9 => doc.put(list, item, "x"),
+            10 => doc.increment(list, item, 1),
+            _ => doc.delete(list, item),
+        };
     }
 }
