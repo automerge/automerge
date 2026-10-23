@@ -1188,8 +1188,9 @@ pub(crate) fn runs<T: PartialEq>(
     })
 }
 
+/// As [`vis_succ`], op by op.
 fn vis_num(op: &Op<'_>, clock: Option<&Clock>) -> u32 {
-    if op.is_inc() {
+    if op.is_inc() || op.action == Action::Delete {
         return u32::MAX;
     }
     match clock {

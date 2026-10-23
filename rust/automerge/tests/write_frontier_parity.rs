@@ -1257,3 +1257,38 @@ fn regression_isolated_view_keeps_resolved_boundaries() {
     }
     runner.drain().unwrap();
 }
+
+/// A merge under a mask carries a delete row for a target outside the
+/// bundle; the merge drops that row, so it must not take the key's `top`.
+#[test]
+fn masked_merge_with_an_external_delete_keeps_the_new_value_on_top() {
+    let ops = vec![
+        Op::PeerNested {
+            peer: 1,
+            key: 105,
+            child: 0,
+            val: 0,
+        },
+        Op::Merge { peer: 1 },
+        Op::SpliceText {
+            peer: 0,
+            pos: 0,
+            del: 0,
+            text: "a".into(),
+        },
+        Op::SyncChanges { pair: 101 },
+        Op::BulkReplacePolicy {
+            alice_at: Some(0),
+            bob_at: None,
+            carol_at: None,
+        },
+        Op::PeerDelete { peer: 1, key: 5 },
+        Op::PeerPut {
+            peer: 1,
+            key: 15,
+            val: 0,
+        },
+        Op::Merge { peer: 1 },
+    ];
+    run(ops, &RefCell::new(BTreeMap::new())).unwrap();
+}
