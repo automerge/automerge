@@ -9,6 +9,7 @@ use crate::actor::{ActorIndexed, ActorRefs, ActorRemoval, ActorShift, ActorTable
 use crate::author::Authors;
 use crate::change_id::ChangeId;
 use crate::hash_retention::{Full, HashRetention, Retained};
+use crate::types::SmallHashMap;
 use crate::{
     clock::{Clock, SeqClock},
     error::AutomergeError,
@@ -46,8 +47,8 @@ pub struct ChangeGraph<H: HashRetention = Retained> {
     extra_bytes_meta: hexane::PrefixColumn<ValueMeta>,
     extra_bytes_raw: Vec<u8>,
     heads: BTreeSet<ChangeHash>,
-    nodes_by_hash: HashMap<ChangeHash, NodeIdx>,
-    clock_cache: HashMap<NodeIdx, SeqClock>,
+    nodes_by_hash: SmallHashMap<ChangeHash, NodeIdx>,
+    clock_cache: SmallHashMap<NodeIdx, SeqClock>,
     seq_index: ActorIndexed<Vec<NodeIdx>>,
     /// Each actor's level > 0 changes in seq order: where fragment
     /// boundaries sit, whether or not a fragment still heads at them.
@@ -182,7 +183,7 @@ impl<H: HashRetention> ChangeGraph<H> {
             gc_mode: crate::automerge::GcMode::default(),
             gc_owed: false,
             pins: Pins::default(),
-            nodes_by_hash: HashMap::new(),
+            nodes_by_hash: SmallHashMap::default(),
             hashes: H::default(),
             actors: ActorRefs::default(),
             max_ops: Vec::new(),
@@ -196,7 +197,7 @@ impl<H: HashRetention> ChangeGraph<H> {
             extra_bytes_meta: hexane::PrefixColumn::new(),
             extra_bytes_raw: Vec::new(),
             heads: BTreeSet::new(),
-            clock_cache: HashMap::new(),
+            clock_cache: SmallHashMap::default(),
             seq_index: ActorIndexed::new(actors),
             leveled: ActorIndexed::new(actors),
             fragments: vec![],
@@ -535,6 +536,25 @@ impl<H: HashRetention> ChangeGraph<H> {
         self.seq_index[usize::from(self.actors[n.0 as usize])].last() == Some(&n)
     }
 
+    /// Appends `node` as `actor`'s tip, which must keep its hash; the old
+    /// tip's hash may now be freed.
+    fn push_tip(&mut self, actor: usize, node: NodeIdx) {
+        if Self::tracks_pins() {
+            if let Some(old) = self.seq_index[actor].last() {
+                self.pins.candidates.push(*old);
+            }
+            self.pins.fresh.push(node);
+        }
+        self.seq_index.as_mut_slice()[actor].push(node);
+    }
+
+    /// Removes the head `hash` of `node`, whose hash may now be freed.
+    fn demote_head(&mut self, node: NodeIdx, hash: &ChangeHash) {
+        if self.heads.remove(hash) && Self::tracks_pins() {
+            self.pins.candidates.push(node);
+        }
+    }
+
     /// Whether the hash of `n` (if held) must stay.
     fn must_keep(&self, n: NodeIdx, hash: &ChangeHash) -> bool {
         self.pins.is_pinned(n)
@@ -543,21 +563,19 @@ impl<H: HashRetention> ChangeGraph<H> {
             || self.heads.contains(hash)
     }
 
-    /// The hashes this document must retain but lacks, among those pinned
-    /// since the last check and the actor tips.
+    /// The hashes this document must retain but lacks, among the nodes
+    /// pinned or made actor tips since the last check.
     pub(crate) fn missing_retained_hashes(&mut self) -> Vec<NodeIdx> {
         if !Self::tracks_pins() {
             return Vec::new();
         }
         debug_assert!(self.pins.deferred_from.is_none(), "loose pins deferred");
         let mut missing = std::mem::take(&mut self.pins.fresh);
-        missing.retain(|n| self.pins.is_pinned(*n) && self.hashes.get(*n).is_none());
-        missing.extend(
-            self.seq_index
-                .iter()
-                .filter_map(|seqs| seqs.last())
-                .filter(|n| self.hashes.get(**n).is_none()),
-        );
+        missing.retain(|n| {
+            (self.pins.is_pinned(*n) || self.is_actor_tip(*n)) && self.hashes.get(*n).is_none()
+        });
+        missing.sort_unstable();
+        missing.dedup();
         missing
     }
 
@@ -1126,7 +1144,9 @@ impl<H: HashRetention> ChangeGraph<H> {
 
     fn update_heads(&mut self, change: &Change) {
         for d in change.deps() {
-            self.heads.remove(d);
+            if let Some(node) = self.nodes_by_hash.get(d).copied() {
+                self.demote_head(node, d);
+            }
         }
         self.heads.insert(change.hash());
     }
@@ -1181,7 +1201,7 @@ impl<H: HashRetention> ChangeGraph<H> {
 
             assert!(actor < self.seq_index.len());
             assert_eq!(self.seq_index[actor].len() + 1, change.seq() as usize);
-            self.seq_index.as_mut_slice()[actor].push(node_idx);
+            self.push_tip(actor, node_idx);
 
             let ResolvedHashes { nodes, missing } = self.resolve_hashes(change.deps().iter())?;
             if !missing.is_empty() {
@@ -1880,17 +1900,15 @@ impl<H: HashRetention> ChangeGraph<H> {
         to_visit: &mut BTreeSet<NodeIdx>,
         limit: usize,
     ) {
-        let mut visited = BTreeSet::new();
-
         // The merge of every cached clock absorbed so far: a node it covers
         // is already accounted for, subtree and all. Without this pruning the
         // walk fans out exponentially on merge-heavy graphs.
         let mut covered = self.empty_clock();
+        let mut visited = 0;
 
+        // parents sort below their children, so a popped node never returns
         while let Some(idx) = to_visit.pop_last() {
-            assert!(!visited.contains(&idx));
-            assert!(visited.len() <= self.len());
-            visited.insert(idx);
+            visited += 1;
 
             let actor = self.actors[idx.0 as usize];
             let data = self.clock_data_for(idx);
@@ -1907,8 +1925,8 @@ impl<H: HashRetention> ChangeGraph<H> {
                 SeqClock::merge(clock, cached);
                 SeqClock::merge(&mut covered, cached);
             } else {
-                to_visit.extend(self.parents(idx).filter(|p| !visited.contains(p)));
-                if visited.len() > limit {
+                to_visit.extend(self.parents(idx));
+                if visited > limit {
                     break;
                 }
             }
@@ -2031,7 +2049,9 @@ impl<H: HashRetention> ChangeGraph<H> {
     /// graph. Costs one full clock walk per older node they depend on.
     fn cache_clocks_from(&mut self, base: usize) {
         let n = self.len();
-        if n < CACHE_STEP as usize || n <= base {
+        // a clock is cached at every `CACHE_STEP`th node only
+        let first_cached = (base as u32 + 1).next_multiple_of(CACHE_STEP) - 1;
+        if first_cached as usize >= n {
             return;
         }
 
@@ -2056,36 +2076,36 @@ impl<H: HashRetention> ChangeGraph<H> {
         let template = self.empty_clock();
 
         const DEAD: u32 = u32::MAX;
-        const PINNED: u32 = u32::MAX;
-        let mut slot_of = vec![DEAD; n]; // node -> pool slot while its row is live
+        // indexed by node - base, so a small apply costs O(apply), not O(graph)
+        let mut slot_of = vec![DEAD; n - base]; // node -> pool slot while its row is live
+        let mut pending_children = vec![0u32; n - base];
         let mut pool: Vec<SeqClock> = Vec::new();
         let mut free: Vec<u32> = Vec::new();
         let mut parent_buf: Vec<usize> = Vec::new();
 
-        // only children inside the swept range keep a row alive; a seeded
-        // row from before `base` is pinned for the whole sweep
-        let mut pending_children = vec![0u32; n];
-        let mut seeds: Vec<usize> = Vec::new();
+        // a parent from before `base` keeps its row for the whole sweep
+        let mut seed_slot: SmallHashMap<usize, u32> = SmallHashMap::default();
         for i in base..n {
             for p in self.parents(NodeIdx(i as u32)) {
                 let p = p.0 as usize;
-                pending_children[p] += 1;
-                if p < base && slot_of[p] == DEAD {
-                    slot_of[p] = 0; // mark; the real slot is assigned below
-                    seeds.push(p);
+                if p >= base {
+                    pending_children[p - base] += 1;
+                } else if let std::collections::hash_map::Entry::Vacant(e) = seed_slot.entry(p) {
+                    pool.push(self.calculate_clock(vec![NodeIdx(p as u32)]));
+                    e.insert((pool.len() - 1) as u32);
                 }
             }
         }
-        for &p in &seeds {
-            let clock = self.calculate_clock(vec![NodeIdx(p as u32)]);
-            pool.push(clock);
-            slot_of[p] = (pool.len() - 1) as u32;
-            pending_children[p] = PINNED;
-        }
+        let slot_for = |slot_of: &[u32], p: usize| {
+            if p >= base {
+                slot_of[p - base]
+            } else {
+                seed_slot[&p]
+            }
+        };
 
         for i in base..n {
             let idx = NodeIdx(i as u32);
-
             parent_buf.clear();
             for p in self.parents(idx) {
                 let p = p.0 as usize;
@@ -2095,11 +2115,11 @@ impl<H: HashRetention> ChangeGraph<H> {
 
             let slot = match parent_buf.split_first() {
                 Some((&first, rest)) => {
-                    let first_slot = slot_of[first];
+                    let first_slot = slot_for(&slot_of, first);
                     debug_assert_ne!(first_slot, DEAD);
-                    let slot = if pending_children[first] == 1 && first >= base {
+                    let slot = if first >= base && pending_children[first - base] == 1 {
                         // sole remaining child: reuse the row
-                        slot_of[first] = DEAD;
+                        slot_of[first - base] = DEAD;
                         first_slot
                     } else {
                         let s = alloc(&mut pool, &mut free, &template);
@@ -2108,7 +2128,7 @@ impl<H: HashRetention> ChangeGraph<H> {
                         s
                     };
                     for &p in rest {
-                        let p_slot = slot_of[p];
+                        let p_slot = slot_for(&slot_of, p);
                         if p_slot == DEAD || p_slot == slot {
                             continue; // duplicate dep
                         }
@@ -2125,13 +2145,14 @@ impl<H: HashRetention> ChangeGraph<H> {
             };
 
             for &p in &parent_buf {
-                if pending_children[p] == PINNED {
+                if p < base {
                     continue;
                 }
-                pending_children[p] -= 1;
-                if pending_children[p] == 0 && slot_of[p] != DEAD {
-                    free.push(slot_of[p]);
-                    slot_of[p] = DEAD;
+                let pending = &mut pending_children[p - base];
+                *pending -= 1;
+                if *pending == 0 && slot_of[p - base] != DEAD {
+                    free.push(slot_of[p - base]);
+                    slot_of[p - base] = DEAD;
                 }
             }
 
@@ -2142,10 +2163,10 @@ impl<H: HashRetention> ChangeGraph<H> {
                 self.clock_cache.insert(idx, pool[slot as usize].clone());
             }
 
-            if pending_children[i] == 0 && i >= base {
+            if pending_children[i - base] == 0 {
                 free.push(slot);
             } else {
-                slot_of[i] = slot;
+                slot_of[i - base] = slot;
             }
         }
     }
@@ -2233,7 +2254,7 @@ impl<H: HashRetention> ChangeGraph<H> {
 
             assert!(m.actor < self.seq_index.len());
             assert_eq!(self.seq_index[m.actor].len() + 1, m.seq as usize);
-            self.seq_index.as_mut_slice()[m.actor].push(node_idx);
+            self.push_tip(m.actor, node_idx);
 
             parent_buf.clear();
             parent_buf.extend(m.deps.iter().map(|d| match d {
@@ -2245,7 +2266,7 @@ impl<H: HashRetention> ChangeGraph<H> {
             }));
             for &parent in &parent_buf {
                 if let Some(h) = self.hashes.get(parent) {
-                    self.heads.remove(&h);
+                    self.demote_head(parent, &h);
                 }
             }
             self.push_parents(node_idx, parent_buf.iter().copied());
@@ -2389,7 +2410,7 @@ impl<H: HashRetention> ChangeGraph<H> {
             // appended members are not heads yet
             if *parent < base {
                 if let Some(h) = self.hashes.get(*parent) {
-                    self.heads.remove(&h);
+                    self.demote_head(*parent, &h);
                 }
             }
         }
@@ -2403,7 +2424,7 @@ impl<H: HashRetention> ChangeGraph<H> {
                 self.seq_index[actor].len() + 1,
                 member_seqs[i].get() as usize
             );
-            self.seq_index.as_mut_slice()[actor].push(base + i);
+            self.push_tip(actor, base + i);
         }
 
         self.cache_clocks_from(base.0 as usize);
@@ -2437,8 +2458,7 @@ impl ChangeGraph<Retained> {
                 continue;
             }
             if self.is_actor_tip(n) || self.heads.contains(&hash) {
-                // no event when these stop being tips or heads
-                self.pins.candidates.push(n);
+                // re-queued by `push_tip` or `demote_head`
                 continue;
             }
             self.hashes.forget(n);
@@ -2453,7 +2473,7 @@ impl ChangeGraph<Full> {
     pub(crate) fn into_retained(mut self) -> ChangeGraph<Retained> {
         self.rebuild_pins();
         let len = self.hashes.len();
-        let map: HashMap<NodeIdx, ChangeHash> = self
+        let map: SmallHashMap<NodeIdx, ChangeHash> = self
             .hashes
             .iter()
             .filter(|(n, hash)| self.must_keep(*n, hash))
@@ -2626,7 +2646,7 @@ impl ChangeGraphCols {
         // blank - to be filled out later
         let clock_cache = HashMap::default();
         let hashes = Retained::default();
-        let nodes_by_hash = HashMap::new();
+        let nodes_by_hash = SmallHashMap::default();
         let fragments = vec![];
         let leveled = ActorIndexed::new(actor_table);
         let fragment_top = SeqClock::new(actor_table);
@@ -3691,7 +3711,7 @@ struct FragmentNode {
 /// hashes, heads and actor tips are kept without pins.
 #[derive(Debug, Clone, Default)]
 struct Pins {
-    count: HashMap<NodeIdx, NonZeroU32>,
+    count: SmallHashMap<NodeIdx, NonZeroU32>,
     /// Pinned since the last check that every pin has its hash.
     fresh: Vec<NodeIdx>,
     /// Hashes the next GC may free: learned, or unpinned to zero, since.

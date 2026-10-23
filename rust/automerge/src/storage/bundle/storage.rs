@@ -8,7 +8,7 @@ use crate::actor::ActorTable;
 use crate::op_set2::change::ChangeCollector;
 use crate::op_set2::types::ActorIdx;
 use crate::op_set2::OpSet;
-use crate::storage::change::{OpReadState, Unverified, Verified};
+use crate::storage::change::{OpReadState, Unverified, Verified, DEFLATE_MIN_SIZE};
 use crate::storage::columns::compression;
 
 use crate::storage::{parse, RawColumns};
@@ -22,10 +22,7 @@ use super::{BundleChange, BundleChangeCols, BundleChangeIterUnverified, ParseErr
 pub(crate) struct BundleStorage<'a, OpReadState> {
     /// Uncompressed in-memory form. Iterators index into this.
     pub(crate) bytes: Cow<'a, [u8]>,
-    /// On-disk form, if columns were DEFLATE-compressed. `None` for
-    /// bundles that were written or received in fully-uncompressed form
-    /// (in which case `bytes` is also the on-disk form).
-    pub(crate) compressed_bytes: Option<Cow<'a, [u8]>>,
+    pub(crate) compressed: Compressed<'a>,
     pub(crate) deps: Vec<ChangeHash>,
     pub(crate) actors: Vec<ActorId>,
     pub(crate) ops_meta: RawColumns<compression::Uncompressed>,
@@ -41,11 +38,53 @@ pub(crate) struct BundleStorage<'a, OpReadState> {
     pub(crate) _phantom: PhantomData<OpReadState>,
 }
 
+/// The column bytes a bundle is written with.
+#[derive(Clone, Debug)]
+pub(crate) enum Compressed<'a> {
+    /// As received, with some columns DEFLATE-compressed.
+    Stored(Cow<'a, [u8]>),
+    /// Received uncompressed: written as received.
+    AsIs,
+    /// Built here: large columns are compressed when written.
+    Lazy,
+}
+
 impl<O: OpReadState> BundleStorage<'_, O> {
+    /// The columns as written: large ones DEFLATE-compressed, unless they
+    /// arrived uncompressed.
+    pub(crate) fn wire_columns(&self) -> Cow<'_, [u8]> {
+        match &self.compressed {
+            Compressed::Stored(c) => Cow::Borrowed(c),
+            Compressed::AsIs => Cow::Borrowed(&self.bytes),
+            Compressed::Lazy => Cow::Owned(self.compress_columns()),
+        }
+    }
+
+    fn compress_columns(&self) -> Vec<u8> {
+        let meta_len = self.changes_meta.write(&mut Vec::new());
+        let prefix_end = self.changes_data.start - meta_len;
+        let mut out = self.bytes[..prefix_end].to_vec();
+        let mut cols = Vec::new();
+        for (meta, range) in [
+            (&self.changes_meta, &self.changes_data),
+            (&self.ops_meta, &self.ops_data),
+        ] {
+            cols.clear();
+            meta.compress(&self.bytes[range.clone()], &mut cols, DEFLATE_MIN_SIZE)
+                .write(&mut out);
+            out.extend_from_slice(&cols);
+        }
+        out
+    }
+
     pub(crate) fn into_owned(self) -> BundleStorage<'static, O> {
         BundleStorage {
             bytes: Cow::Owned(self.bytes.into_owned()),
-            compressed_bytes: self.compressed_bytes.map(|c| Cow::Owned(c.into_owned())),
+            compressed: match self.compressed {
+                Compressed::Stored(c) => Compressed::Stored(Cow::Owned(c.into_owned())),
+                Compressed::AsIs => Compressed::AsIs,
+                Compressed::Lazy => Compressed::Lazy,
+            },
             deps: self.deps,
             actors: self.actors,
             ops_meta: self.ops_meta,
@@ -193,7 +232,7 @@ impl<'a> BundleStorage<'a, Unverified> {
                 parse::Input::empty(),
                 BundleStorage {
                     bytes: full_bytes.into(),
-                    compressed_bytes: None,
+                    compressed: Compressed::AsIs,
                     deps,
                     actors,
                     ops_meta,
@@ -249,7 +288,7 @@ impl<'a> BundleStorage<'a, Unverified> {
             parse::Input::empty(),
             BundleStorage {
                 bytes: Cow::Owned(out),
-                compressed_bytes: Some(full_bytes.into()),
+                compressed: Compressed::Stored(full_bytes.into()),
                 deps,
                 actors,
                 ops_meta,
@@ -273,7 +312,7 @@ impl<'a> BundleStorage<'a, Unverified> {
         }
         Ok(BundleStorage {
             bytes: self.bytes,
-            compressed_bytes: self.compressed_bytes,
+            compressed: self.compressed,
             deps: self.deps,
             actors: self.actors,
             ops_meta: self.ops_meta,

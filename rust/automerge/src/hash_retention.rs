@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use crate::automerge::{AuditMode, Automerge};
 use crate::change_graph::{ChangeGraph, Members, NodeIdx, UncheckedHashes};
 use crate::storage::bundle::Bundle;
@@ -141,12 +139,12 @@ impl HashRetention for Full {
 /// Only the retained set of hashes is kept.
 #[derive(Debug, Clone, Default)]
 pub struct Retained {
-    map: HashMap<NodeIdx, ChangeHash>,
+    map: crate::types::SmallHashMap<NodeIdx, ChangeHash>,
     len: usize,
 }
 
 impl Retained {
-    pub(crate) fn new(map: HashMap<NodeIdx, ChangeHash>, len: usize) -> Self {
+    pub(crate) fn new(map: crate::types::SmallHashMap<NodeIdx, ChangeHash>, len: usize) -> Self {
         Retained { map, len }
     }
 
@@ -208,7 +206,16 @@ impl HashRetention for Retained {
     }
 
     fn leveled_members(&self, members: &Members<'_>) -> Vec<(NodeIdx, ChangeHash)> {
-        // far fewer retained hashes than members
+        // walk the smaller side: a small export of a document that hasn't
+        // been GC'd holds far more hashes than members
+        if members.nodes().len() <= self.map.len() {
+            return members
+                .nodes()
+                .iter()
+                .filter_map(|n| Some((*n, *self.map.get(n)?)))
+                .filter(|(_, h)| h.fragment_level() > 0)
+                .collect();
+        }
         let mut found: Vec<_> = self
             .map
             .iter()

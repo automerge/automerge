@@ -11,12 +11,11 @@ use crate::op_set2::meta::ValueMeta;
 use crate::op_set2::op::{Op, OpBuilder};
 use crate::op_set2::types::{Action, ActorIdx, KeyRef};
 use crate::op_set2::{ReadOpError, ScalarValue};
-use crate::storage::change::DEFLATE_MIN_SIZE;
 use crate::storage::columns::{compression, ColumnType};
 use crate::storage::{RawColumn, RawColumns};
 use crate::types::{ChangeHash, ElemId, ObjId, OpId};
 
-use super::{BundleChange, BundleStorage, ParseError};
+use super::{BundleChange, BundleStorage, Compressed, ParseError};
 
 /// Apply the actor remap inline to a nullable actor encoder and write the
 /// remapped bytes to `data`, eliding an all-`None` column to an empty range.
@@ -51,6 +50,10 @@ pub(crate) struct BundleBuilder<'a> {
     max_op: u64,
     copier: Option<crate::op_set2::op_set::RowCopier<'a>>,
     verbatim_rows: Option<Range<usize>>,
+    /// the document rows of the members' ops, in walk order
+    member_rows: Vec<usize>,
+    /// each hint target, with the row of a member op that targets it
+    target_rows: Vec<(OpId, usize)>,
 }
 
 impl<'a> BundleBuilder<'a> {
@@ -82,6 +85,8 @@ impl<'a> BundleBuilder<'a> {
             max_op: 0,
             copier: Some(crate::op_set2::op_set::RowCopier::new(op_set)),
             verbatim_rows: None,
+            member_rows: Vec::new(),
+            target_rows: Vec::new(),
         })
     }
 
@@ -106,6 +111,8 @@ impl<'a> BundleBuilder<'a> {
             max_op: 0,
             copier: None,
             verbatim_rows: None,
+            member_rows: Vec::new(),
+            target_rows: Vec::new(),
         }
     }
 
@@ -129,9 +136,13 @@ impl<'a> BundleBuilder<'a> {
 
         let pred = self.preds.remove(&op.id).unwrap_or_default();
 
-        if let Some(index) = self.builders_index(op.id) {
+        if self.builders_index(op.id).is_some() {
+            self.member_rows.push(op.pos);
             // `op.key`, not `elemid_or_key`: an insert's target is its anchor
             let target = self.hint_target(&op.key);
+            if let Some(t) = target {
+                self.target_rows.push((t, op.pos));
+            }
             if self.copier.is_some()
                 && pred.is_empty()
                 && target.is_none()
@@ -148,7 +159,7 @@ impl<'a> BundleBuilder<'a> {
                 .collect();
             let op = op.build(pred);
             self.op_writer
-                .add_with_target(&op, &member_succ, index, &mut self.mapper, target);
+                .add(&op, &member_succ, &mut self.mapper, target);
         }
     }
 
@@ -185,9 +196,8 @@ impl<'a> BundleBuilder<'a> {
             for (id, pred) in pending {
                 let op = Op::del(id, obj, key.clone());
                 let op = op.build(pred);
-                if let Some(index) = self.builders_index(op.id) {
-                    self.op_writer
-                        .add_with_target(&op, &[], index, &mut self.mapper, target);
+                if self.builders_index(op.id).is_some() {
+                    self.op_writer.add(&op, &[], &mut self.mapper, target);
                 }
             }
         }
@@ -218,6 +228,19 @@ impl<'a> BundleBuilder<'a> {
             by_obj.entry(*obj).or_default().insert(*id);
         }
         by_obj
+    }
+
+    /// The document rows of the members' ops, sorted.
+    pub(crate) fn take_member_rows(&mut self) -> Vec<usize> {
+        let mut rows = std::mem::take(&mut self.member_rows);
+        rows.sort_unstable();
+        rows
+    }
+
+    /// Each hint target, with the row of a member op that targets it: the
+    /// target's own row comes before that one.
+    pub(crate) fn take_target_rows(&mut self) -> Vec<(OpId, usize)> {
+        std::mem::take(&mut self.target_rows)
     }
 
     pub(crate) fn is_member(&self, id: OpId) -> bool {
@@ -254,43 +277,21 @@ impl<'a> BundleBuilder<'a> {
         let change_cols = self.change_writer.finish(&mapper, &mut change_data_buf);
         let written_changes_meta = change_cols.raw_columns();
         let mut ops_data_buf = Vec::new();
-        let ops_cols = self
-            .op_writer
-            .finish_with_ranks(&mapper, &mut ops_data_buf, ranks);
+        let ops_cols = self.op_writer.finish(&mapper, &mut ops_data_buf, ranks);
         let written_ops_meta = ops_cols.raw_columns();
 
-        // ---- Uncompressed assembly (used in-memory for iteration) ----
         // The writers' buffers aren't in spec order, which readers assume.
-        let mut data_u = prefix.clone();
+        // Compressing waits for `Bundle::bytes`: most bundles never leave
+        // the process.
+        let mut data = prefix;
         let (changes_meta, changes_data_u_range) =
-            write_in_spec_order(&written_changes_meta, &change_data_buf, &mut data_u);
+            write_in_spec_order(&written_changes_meta, &change_data_buf, &mut data);
         let (ops_meta, ops_data_u_range) =
-            write_in_spec_order(&written_ops_meta, &ops_data_buf, &mut data_u);
-
-        let bytes_u = data_u;
-
-        // ---- Compressed assembly (used as the on-disk/wire form) ----
-        // Per-column DEFLATE above DEFLATE_MIN_SIZE, mirroring Document.
-        let mut data_c = prefix;
-        let mut compressed_change_data = Vec::new();
-        let changes_meta_c = written_changes_meta.compress(
-            &change_data_buf,
-            &mut compressed_change_data,
-            DEFLATE_MIN_SIZE,
-        );
-        changes_meta_c.write(&mut data_c);
-        data_c.extend_from_slice(&compressed_change_data);
-        let mut compressed_ops_data = Vec::new();
-        let ops_meta_c =
-            written_ops_meta.compress(&ops_data_buf, &mut compressed_ops_data, DEFLATE_MIN_SIZE);
-        ops_meta_c.write(&mut data_c);
-        data_c.extend_from_slice(&compressed_ops_data);
-
-        let bytes_c = data_c;
+            write_in_spec_order(&written_ops_meta, &ops_data_buf, &mut data);
 
         let storage = BundleStorage {
-            bytes: Cow::Owned(bytes_u),
-            compressed_bytes: Some(Cow::Owned(bytes_c)),
+            bytes: Cow::Owned(data),
+            compressed: Compressed::Lazy,
             ops_meta,
             ops_data: ops_data_u_range,
             deps,
@@ -461,17 +462,6 @@ impl<'a> BundleOpWriter<'a> {
         &mut self,
         op: &OpBuilder<'_>,
         succ: &[OpId],
-        _index: usize,
-        mapper: &mut ActorMapper<'a>,
-    ) {
-        self.add_with_target(op, succ, _index, mapper, None)
-    }
-
-    pub(crate) fn add_with_target(
-        &mut self,
-        op: &OpBuilder<'_>,
-        succ: &[OpId],
-        _index: usize,
         mapper: &mut ActorMapper<'a>,
         target: Option<OpId>,
     ) {
@@ -508,13 +498,9 @@ impl<'a> BundleOpWriter<'a> {
         self.id_ctr.append(Some(op.id.counter() as i64));
     }
 
-    pub(crate) fn finish(self, mapper: &ActorMapper<'a>, data: &mut Vec<u8>) -> BundleOpsColumns {
-        self.finish_with_ranks(mapper, data, &Default::default())
-    }
-
     /// `ranks` maps each hint target to its value in the hint column (see
     /// [`ops::HINT_COL_ID`]).
-    pub(crate) fn finish_with_ranks(
+    pub(crate) fn finish(
         self,
         mapper: &ActorMapper<'a>,
         data: &mut Vec<u8>,

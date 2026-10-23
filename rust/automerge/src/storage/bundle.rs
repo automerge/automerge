@@ -20,7 +20,7 @@ pub(crate) use builder::{
     BundleOpWriter, CleanRun, DeltaRunGrouper, ManifoldOp, ManifoldOps, TailRun,
 };
 pub(crate) use error::ParseError;
-pub(crate) use storage::BundleStorage;
+pub(crate) use storage::{BundleStorage, Compressed};
 
 /// EXPERIMENTAL: A set of changes in compressed columnar form, plus the
 /// fragment metadata needed to apply them to a document that does not know
@@ -324,17 +324,29 @@ impl Bundle {
         node_sets: Vec<Vec<crate::change_graph::NodeIdx>>,
     ) -> Result<Vec<BundleStorage<'static, Verified>>, AutomergeError> {
         let mut jobs = Vec::with_capacity(node_sets.len());
+        let current = change_graph.current_clock();
         for nodes in node_sets {
             let clock = change_graph.clock_for_nodes(nodes.clone());
             let mapper = ActorMapper::new(&op_set.actors);
             let collector = BundleBuilder::from_graph(op_set, change_graph, &nodes, mapper)?;
             let collector = Self::walk_ops(op_set, collector);
-            jobs.push(HintJob {
+            let mut job = HintJob {
                 targets_by_obj: collector.hint_targets_by_obj(),
-                collector,
-                clock,
                 ranks: std::collections::HashMap::new(),
-            });
+                clock,
+                collector,
+            };
+            if job
+                .clock
+                .counters()
+                .zip(current.counters())
+                .all(|(c, d)| c >= d)
+            {
+                let member_rows = job.collector.take_member_rows();
+                let target_rows = job.collector.take_target_rows();
+                Self::rank_hints_by_position(op_set, &member_rows, &target_rows, &mut job);
+            }
+            jobs.push(job);
         }
 
         Self::resolve_hint_ranks(op_set, &mut jobs);
@@ -342,6 +354,56 @@ impl Bundle {
             .into_iter()
             .map(|j| j.collector.finish_with_ranks(&j.ranks))
             .collect())
+    }
+
+    /// [`Self::resolve_hint_ranks`] for a job whose clock covers every op
+    /// in the document: every row of an object before a target counts
+    /// except the members', so a target's rank needs only its position.
+    /// O(targets · log rows + members).
+    fn rank_hints_by_position(
+        op_set: &OpSet,
+        member_rows: &[usize],
+        target_rows: &[(crate::types::OpId, usize)],
+        job: &mut HintJob<'_>,
+    ) {
+        #[cfg(feature = "slow_path_assertions")]
+        let expected = {
+            let targets = job.targets_by_obj.clone();
+            Self::resolve_hint_ranks(op_set, std::slice::from_mut(job));
+            job.targets_by_obj = targets;
+            std::mem::take(&mut job.ranks)
+        };
+        // an anchor almost always sits just before the op that targets it,
+        // and a short scan back costs less than a column search
+        const NEAR: usize = 32;
+        let near: rustc_hash::FxHashMap<_, _> = target_rows.iter().copied().collect();
+        let mut obj_id_iter = op_set.obj_id_iter();
+        let mut objs: Vec<_> = job.targets_by_obj.drain().collect();
+        objs.sort_unstable_by_key(|(obj, _)| *obj);
+        for (obj, targets) in objs {
+            let start = obj_id_iter.seek_to_value(obj).start;
+            for target in targets {
+                let nearby = near.get(&target).and_then(|&after| {
+                    let from = after.saturating_sub(NEAR).max(start);
+                    op_set
+                        .id_iter_range(&(from..after))
+                        .position(|id| id == target)
+                        .map(|i| from + i)
+                });
+                let row = nearby
+                    .or_else(|| op_set.get_op_id_pos(target))
+                    .expect("a hint target is an op of the document");
+                let members_before = member_rows.partition_point(|r| *r < row)
+                    - member_rows.partition_point(|r| *r < start);
+                job.ranks
+                    .insert(target, (row - start - members_before) as u64);
+            }
+        }
+        #[cfg(feature = "slow_path_assertions")]
+        assert_eq!(
+            job.ranks, expected,
+            "hint ranks by position diverge from the scan"
+        );
     }
 
     fn resolve_hint_ranks(op_set: &OpSet, jobs: &mut [HintJob<'_>]) {
@@ -420,18 +482,6 @@ impl Bundle {
         collector
     }
 
-    /// The inner chunk: the carried changes on their own, with per-column
-    /// DEFLATE applied where each column is large enough to benefit.
-    /// Falls back to the uncompressed buffer for storage built before the
-    /// per-column compression pass (or parsed from input with no
-    /// compressed columns).
-    fn compressed_column_bytes(&self) -> &[u8] {
-        match &self.storage.compressed_bytes {
-            Some(c) => c,
-            None => &self.storage.bytes,
-        }
-    }
-
     /// The encoded chunk, with large columns DEFLATE-compressed.
     pub fn bytes(&self) -> Vec<u8> {
         self.bytes_with(true)
@@ -495,11 +545,11 @@ impl Bundle {
             leb128::write::unsigned(&mut data, *a).unwrap();
             leb128::write::unsigned(&mut data, *s).unwrap();
         }
-        data.extend_from_slice(if deflate {
-            self.compressed_column_bytes()
+        if deflate {
+            data.extend_from_slice(&self.storage.wire_columns());
         } else {
-            &self.storage.bytes
-        });
+            data.extend_from_slice(&self.storage.bytes);
+        }
 
         let header = Header::new(ChunkType::Bundle, &data);
         let mut out = Vec::with_capacity(header.len() + data.len());

@@ -34,15 +34,72 @@ pub(super) fn doc_order_cmp(a: &ChangeOp, b: &ChangeOp) -> Ordering {
     })
 }
 
+/// Fewer targets than this are found by seeking to each one's row; more
+/// are found by scanning the object, since each seek costs a column search.
+const SEEK_TARGETS: usize = 16;
+
+/// Orders `idxs`, the batch's ops in the sequence `obj_range` holds, and
+/// records in `hints` the rank in the object of each document element they
+/// insert after or update.
 pub(super) fn untangle_order_idx(
     ops: &[ChangeOp],
     idxs: &mut [u32],
-    mut ids: crate::op_set2::op_set::OpIdIter<'_>,
-    mut inserts: hexane::Iter<'_, bool>,
+    op_set: &OpSet,
+    obj_range: Range<usize>,
+    hints: &mut HashMap<OpId, u64>,
 ) {
     let mut ut = UntangleLiteIdx::new(ops, idxs);
-    for id in ids.by_ref() {
+    let mut targets: Vec<OpId> = ut
+        .entry
+        .keys()
+        .copied()
+        .chain(ut.updates.keys().map(|e| e.0))
+        .collect();
+    targets.sort_unstable();
+    targets.dedup();
+    let mut pending = targets.len();
+    let seek_rows = (pending <= SEEK_TARGETS).then(|| {
+        let mut rows: Vec<usize> = targets
+            .iter()
+            .filter_map(|id| op_set.get_op_id_pos(*id))
+            .filter(|row| obj_range.contains(row))
+            .collect();
+        rows.sort_unstable();
+        rows
+    });
+    let mut next_seek = 0;
+    let mut ids = op_set.id_iter_range(&obj_range);
+    let mut inserts = op_set.insert().values().iter_range(obj_range.clone());
+    let mut row = obj_range.start;
+    loop {
+        // with nothing stacked, a row that is no target changes nothing
+        if ut.stack.is_empty() && ut.updates_stack.is_empty() {
+            if pending == 0 {
+                break;
+            }
+            if let Some(rows) = &seek_rows {
+                while rows.get(next_seek).is_some_and(|r| *r < row) {
+                    next_seek += 1;
+                }
+                let Some(&target_row) = rows.get(next_seek) else {
+                    break;
+                };
+                if target_row > row {
+                    ids.nth(target_row - row - 1);
+                    inserts.nth(target_row - row - 1);
+                    row = target_row;
+                }
+            }
+        }
+        let Some(id) = ids.next() else {
+            break;
+        };
         let insert = inserts.next().expect("insert column length matches ids");
+        if ut.entry.contains_key(&id) || ut.updates.contains_key(&ElemId(id)) {
+            hints.insert(id, (row - obj_range.start) as u64);
+            pending -= 1;
+        }
+        row += 1;
         ut.element_update(insert, id);
         if insert {
             ut.untangle_inserts(id);
@@ -281,8 +338,12 @@ impl BatchApply {
         let clock_before_batch = doc.change_graph.current_clock();
         self.move_in_batch_preds_to_succ(&clock_before_batch);
 
-        let idxs = self.doc_ordered_indexes(doc);
-        let (raw, data) = encode_bundle_ops(idxs.iter().map(|&i| &self.ops[i as usize]), doc.ops());
+        let (idxs, hints) = self.doc_ordered_indexes(doc);
+        let (raw, data) = encode_bundle_ops(
+            idxs.iter().map(|&i| &self.ops[i as usize]),
+            doc.ops(),
+            &hints,
+        );
 
         let first_authors: Vec<_> = self
             .changes
@@ -318,10 +379,12 @@ impl BatchApply {
         Ok(())
     }
 
+    /// The batch's ops in document order, and the hints
+    /// [`untangle_order_idx`] found for them.
     fn doc_ordered_indexes<H: crate::hash_retention::HashRetention>(
         &self,
         doc: &Automerge<H>,
-    ) -> Vec<u32> {
+    ) -> (Vec<u32>, HashMap<OpId, u64>) {
         // sort indexes rather than the much larger ChangeOps
         let mut idxs: Vec<u32> = (0..self.ops.len() as u32)
             .filter(|&i| {
@@ -339,6 +402,7 @@ impl BatchApply {
             }
         }
         let mut walker = ObjWalker::new(doc.ops());
+        let mut hints = HashMap::new();
         let mut start = 0;
         while start < idxs.len() {
             let obj = self.ops[idxs[start] as usize].bld.obj;
@@ -354,13 +418,14 @@ impl BatchApply {
                 untangle_order_idx(
                     &self.ops,
                     &mut idxs[start..end],
-                    doc.ops().id_iter_range(&obj_range),
-                    doc.ops().insert().values().iter_range(obj_range.clone()),
+                    doc.ops(),
+                    obj_range,
+                    &mut hints,
                 );
             }
             start = end;
         }
-        idxs
+        (idxs, hints)
     }
 }
 
@@ -385,6 +450,7 @@ impl<'a> ObjWalker<'a> {
 pub(super) fn encode_bundle_ops<'x, I>(
     ops: I,
     op_set: &OpSet,
+    hints: &HashMap<OpId, u64>,
 ) -> (
     crate::storage::RawColumns<crate::storage::columns::compression::Uncompressed>,
     Vec<u8>,
@@ -397,13 +463,17 @@ where
     let mut writer = crate::storage::bundle::BundleOpWriter::default();
     for op in ops {
         let succ_ids: Vec<OpId> = op.succ.iter().map(|s| s.0).collect();
-        writer.add(&op.bld, &succ_ids, 0, &mut mapper);
+        let target = match &op.bld.key {
+            KeyRef::Seq(e) if hints.contains_key(&e.0) => Some(e.0),
+            _ => None,
+        };
+        writer.add(&op.bld, &succ_ids, &mut mapper, target);
     }
     mapper.mapping = (0..actors_len)
         .map(|i| Some(crate::op_set2::types::ActorIdx::from(i)))
         .collect();
     let mut data = Vec::new();
-    let cols = writer.finish(&mapper, &mut data);
+    let cols = writer.finish(&mapper, &mut data, hints);
     (cols.raw_columns(), data)
 }
 

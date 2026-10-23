@@ -1139,7 +1139,7 @@ impl OpSet {
         Some((elemid, last_pos))
     }
 
-    fn get_op_id_pos(&self, id: OpId) -> Option<usize> {
+    pub(crate) fn get_op_id_pos(&self, id: OpId) -> Option<usize> {
         self.cols
             .id_ctr
             .find_by_value(id.counter() as u32)
