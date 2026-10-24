@@ -3660,15 +3660,15 @@ mod tests {
 
     #[test]
     fn bundle_after_rebuilds_the_document_from_any_heads() {
-        let mut rng = make_rng();
-        let mut doc = Automerge::new();
+        let mut rng = <rand::rngs::SmallRng as rand::SeedableRng>::seed_from_u64(7);
+        let mut doc = Automerge::new().with_actor(crate::ActorId::from(&[7u8][..]));
         let cuts = [1, 300, 999, 1_500, 1_999];
         let mut snapshots = vec![(vec![], vec![])];
         for i in 1..=2_000 {
             let key = format!("k{}", rng.random::<u32>() % 32);
             let mut tx = doc.transaction();
             tx.put(ROOT, key, rng.random::<u32>() as i64).unwrap();
-            tx.commit();
+            tx.commit_with(crate::transaction::CommitOptions::default().with_time(0));
             if cuts.contains(&i) {
                 snapshots.push((doc.get_heads(), doc.save()));
             }
