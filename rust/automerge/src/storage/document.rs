@@ -137,15 +137,10 @@ impl<'a> Document<'a> {
 
         // parse the suffix, which may be empty if this document was produced by an older version
         // of the JS automerge implementation
-        let (i, suffix) = if i.is_empty() {
-            (i, 0)
-        } else {
-            let (i, parsed) = parse::range_of(
-                |i| parse::apply_n(heads.len(), parse::leb128_u64::<ParseError>)(i),
-                i,
-            )?;
-            (i, parsed.range.start)
-        };
+        let (i, Range { start: suffix, .. }) = parse::range_only_unless_empty(
+            |i| parse::apply_n(heads.len(), parse::leb128_u64::<ParseError>)(i),
+            i,
+        )?;
 
         let compression::Decompressed {
             change_bytes,
@@ -213,6 +208,8 @@ impl<'a> Document<'a> {
         let mut change_out = Vec::new();
         let change_metadata = change_graph.encode(&mut change_out);
 
+        // The ActorTable is sorted by construction, so the stored order is
+        // canonical and a later load can adopt the columns directly.
         let actors = ActorList::from_stored(op_set.actors.to_vec());
 
         let mut data = Vec::with_capacity(ops_out_b.len() + change_out.len());
@@ -306,6 +303,7 @@ impl<'a> Document<'a> {
         self.header.checksum_valid()
     }
 
+    /// The document's actor list, in the order it was stored.
     pub(crate) fn actors(&self) -> &ActorList {
         &self.actors
     }

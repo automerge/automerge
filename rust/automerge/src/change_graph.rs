@@ -933,7 +933,6 @@ impl<H: HashRetention> ChangeGraph<H> {
             ranges.clear();
         }
         for range in ranges {
-            let n = range.len();
             for run in self.actors[range.clone()].chunk_by(|a, b| a == b) {
                 mapper.process_actor(usize::from(run[0]));
                 writer.actor.append_n(run[0], run.len());
@@ -983,7 +982,6 @@ impl<H: HashRetention> ChangeGraph<H> {
             for i in range {
                 unnamed += self.write_member_deps(NodeIdx(i as u32), members, writer, &mut deps);
             }
-            writer.len += n;
         }
         if unnamed > 0 {
             return Err(UnretainedHashes {
@@ -1079,7 +1077,6 @@ impl<H: HashRetention> ChangeGraph<H> {
         max_op.flush(&mut writer.max_op);
         deps.flush(&mut writer.deps);
         timestamp.flush(&mut writer.timestamp);
-        writer.len += nodes.len();
         unnamed
     }
 

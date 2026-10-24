@@ -101,10 +101,8 @@ impl<O: OpReadState> BundleStorage<'_, O> {
         BundleChangeCols::try_new(&self.changes_meta, &self.bytes[self.changes_data.clone()])
     }
 
-    /// Each member's actor and sequence number, checking that actors are
-    /// in range and sequence numbers non-zero. No other column is validated.
-    /// Each member's actor and seq, and the members no other member
-    /// depends on, ascending.
+    /// Each member's actor and seq, checking that actors are in range and
+    /// seqs non-zero, and the members no other member depends on, ascending.
     pub(crate) fn member_ids(&self) -> Result<MemberIds, ParseError> {
         let bad = ParseError::InvalidChangeMetadata;
         let cols = self.change_cols()?;
@@ -199,12 +197,6 @@ fn decode_change_meta(
         .collect()
 }
 
-fn primed<T>(value: T) -> OnceLock<T> {
-    let cell = OnceLock::new();
-    let _ = cell.set(value);
-    cell
-}
-
 impl<'a> BundleStorage<'a, Unverified> {
     pub(crate) fn parse_columns(
         input: parse::Input<'a>,
@@ -236,67 +228,63 @@ impl<'a> BundleStorage<'a, Unverified> {
         let ops_data_range = ops.range.clone();
 
         // Fast path: nothing is compressed — keep input bytes as-is.
-        if let (Some(changes_meta), Some(ops_meta)) =
-            (changes_meta_raw.uncompressed(), ops_meta_raw.uncompressed())
-        {
-            let bundle_ops = OpSet::load_bundle_cols(&ops_meta, ops.value, actors.len())
-                .and_then(|o| {
-                    o.validate_foreign_bundle(&ops_meta, ops.value, !deps.is_empty())?;
-                    Ok(o)
-                })
-                .map_err(|e| parse::ParseError::Error(ParseError::InvalidColumns(Box::new(e))))?;
-            return Ok((
-                parse::Input::empty(),
-                BundleStorage {
-                    bytes: full_bytes.into(),
-                    compressed: Compressed::AsIs,
-                    deps,
-                    actors,
-                    ops_meta,
-                    ops_data: ops_data_range,
+        let (bytes, compressed, changes_meta, changes_data, ops_meta, ops_data) =
+            if let (Some(changes_meta), Some(ops_meta)) =
+                (changes_meta_raw.uncompressed(), ops_meta_raw.uncompressed())
+            {
+                (
+                    Cow::Borrowed(full_bytes),
+                    Compressed::AsIs,
                     changes_meta,
-                    changes_data: changes_data_range,
-                    changes: OnceLock::new(),
-                    bundle_ops: primed(bundle_ops),
-                    _phantom: PhantomData,
-                },
-            ));
-        }
+                    changes_data_range,
+                    ops_meta,
+                    ops_data_range,
+                )
+            } else {
+                // Slow path: at least one column is DEFLATE-encoded. Reconstruct a
+                // fully-uncompressed buffer with the same section layout:
+                //   deps | actors | change_meta' | change_data' | ops_meta' | ops_data'
+                // where the primed sections use uncompressed column specs and
+                // inflated data. We keep the compressed input around for
+                // re-emission.
+                let mut out = Vec::with_capacity(full_bytes.len());
+                out.extend_from_slice(&full_bytes[..prefix_end]);
 
-        // Slow path: at least one column is DEFLATE-encoded. Reconstruct a
-        // fully-uncompressed buffer with the same section layout:
-        //   deps | actors | change_meta' | change_data' | ops_meta' | ops_data'
-        // where the primed sections use uncompressed column specs and
-        // inflated data. We keep the compressed input around for
-        // re-emission.
-        let mut out = Vec::with_capacity(full_bytes.len());
-        out.extend_from_slice(&full_bytes[..prefix_end]);
+                let mut changes_data_buf = Vec::new();
+                let changes_meta = changes_meta_raw
+                    .uncompress(
+                        &full_bytes[changes_data_range.clone()],
+                        &mut changes_data_buf,
+                    )
+                    .map_err(|_| parse::ParseError::Error(ParseError::CompressedChangeCols))?;
+                changes_meta.write(&mut out);
+                let new_changes_start = out.len();
+                out.extend_from_slice(&changes_data_buf);
+                let new_changes_end = out.len();
 
-        let mut changes_data_buf = Vec::new();
-        let changes_meta = changes_meta_raw
-            .uncompress(
-                &full_bytes[changes_data_range.clone()],
-                &mut changes_data_buf,
-            )
-            .map_err(|_| parse::ParseError::Error(ParseError::CompressedChangeCols))?;
-        changes_meta.write(&mut out);
-        let new_changes_start = out.len();
-        out.extend_from_slice(&changes_data_buf);
-        let new_changes_end = out.len();
+                let mut ops_data_buf = Vec::new();
+                let ops_meta = ops_meta_raw
+                    .uncompress(&full_bytes[ops_data_range.clone()], &mut ops_data_buf)
+                    .map_err(|_| parse::ParseError::Error(ParseError::CompressedOpCols))?;
+                ops_meta.write(&mut out);
+                let new_ops_start = out.len();
+                out.extend_from_slice(&ops_data_buf);
+                let new_ops_end = out.len();
 
-        let mut ops_data_buf = Vec::new();
-        let ops_meta = ops_meta_raw
-            .uncompress(&full_bytes[ops_data_range.clone()], &mut ops_data_buf)
-            .map_err(|_| parse::ParseError::Error(ParseError::CompressedOpCols))?;
-        ops_meta.write(&mut out);
-        let new_ops_start = out.len();
-        out.extend_from_slice(&ops_data_buf);
-        let new_ops_end = out.len();
+                (
+                    Cow::Owned(out),
+                    Compressed::Stored(full_bytes.into()),
+                    changes_meta,
+                    new_changes_start..new_changes_end,
+                    ops_meta,
+                    new_ops_start..new_ops_end,
+                )
+            };
 
-        let ops_data = &out[new_ops_start..new_ops_end];
-        let bundle_ops = OpSet::load_bundle_cols(&ops_meta, ops_data, actors.len())
+        let ops = &bytes[ops_data.clone()];
+        let bundle_ops = OpSet::load_bundle_cols(&ops_meta, ops, actors.len())
             .and_then(|o| {
-                o.validate_foreign_bundle(&ops_meta, ops_data, !deps.is_empty())?;
+                o.validate_foreign_bundle(&ops_meta, ops, !deps.is_empty())?;
                 Ok(o)
             })
             .map_err(|e| parse::ParseError::Error(ParseError::InvalidColumns(Box::new(e))))?;
@@ -304,16 +292,16 @@ impl<'a> BundleStorage<'a, Unverified> {
         Ok((
             parse::Input::empty(),
             BundleStorage {
-                bytes: Cow::Owned(out),
-                compressed: Compressed::Stored(full_bytes.into()),
+                bytes,
+                compressed,
                 deps,
                 actors,
                 ops_meta,
-                ops_data: new_ops_start..new_ops_end,
+                ops_data,
                 changes_meta,
-                changes_data: new_changes_start..new_changes_end,
+                changes_data,
                 changes: OnceLock::new(),
-                bundle_ops: primed(bundle_ops),
+                bundle_ops: OnceLock::from(bundle_ops),
                 _phantom: PhantomData,
             },
         ))

@@ -1156,13 +1156,9 @@ impl<H: HashRetention> Automerge<H> {
             }
             storage::Chunk::BundleV0(bundle) => {
                 tracing::trace!("first chunk is a BundleV0 chunk");
-                let storage = bundle
-                    .into_owned()
-                    .verify()
-                    .map_err(|e| load::Error::InvalidBundleV0Column(Box::new(e)))?;
-                let bundle_changes = storage
+                let bundle_changes = bundle
                     .to_changes()
-                    .map_err(|e| load::Error::InvalidBundleV0Change(Box::new(e)))?;
+                    .map_err(|e| load::Error::InvalidBundleV0(Box::new(e)))?;
                 changes.extend(
                     bundle_changes
                         .into_iter()

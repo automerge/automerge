@@ -38,12 +38,8 @@ pub enum Error {
     InvalidOpsColumns(Box<dyn std::error::Error + Send + Sync + 'static>),
     #[error("a chunk contained leftover data")]
     LeftoverData,
-    #[error("a BundleV0 contained an invalid column")]
-    InvalidBundleV0Column(Box<dyn std::error::Error + Send + Sync + 'static>),
-    #[error("a BundleV0 contained an invalid change")]
-    InvalidBundleV0Change(Box<dyn std::error::Error + Send + Sync + 'static>),
-    #[error("invalid bundle: {0}")]
-    InvalidBundle(Box<dyn std::error::Error + Send + Sync + 'static>),
+    #[error("invalid BundleV0: {0}")]
+    InvalidBundleV0(Box<dyn std::error::Error + Send + Sync + 'static>),
     #[error("error inflating document chunk ops: {0}")]
     InflateDocument(Box<dyn std::error::Error + Send + Sync + 'static>),
     #[error("bad checksum")]
@@ -58,11 +54,11 @@ pub(crate) enum LoadedChunk {
 }
 
 pub(crate) enum LoadedChanges<'a> {
-    /// All the data was succesfully loaded
+    /// All the data was succesfully loaded into a list of changes
     Complete(Vec<LoadedChunk>),
-    /// We only managed to load _some_ of it.
+    /// We only managed to load _some_ changes.
     Partial {
-        /// The succesfully loaded chunks
+        /// The succesfully loaded changes
         loaded: Vec<LoadedChunk>,
         /// The data which we were unable to parse
         #[allow(dead_code)]
@@ -155,13 +151,9 @@ fn load_next_change<'a, H: crate::hash_retention::HashRetention>(
         }
         storage::Chunk::BundleV0(bundle) => {
             tracing::trace!("loading a BundleV0 chunk");
-            let storage = bundle
-                .into_owned()
-                .verify()
-                .map_err(|e| Error::InvalidBundleV0Column(Box::new(e)))?;
-            let bundle_changes = storage
+            let bundle_changes = bundle
                 .to_changes()
-                .map_err(|e| Error::InvalidBundleV0Change(Box::new(e)))?;
+                .map_err(|e| Error::InvalidBundleV0(Box::new(e)))?;
             changes.extend(
                 bundle_changes
                     .into_iter()
