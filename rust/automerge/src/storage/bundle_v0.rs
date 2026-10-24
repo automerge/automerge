@@ -6,10 +6,8 @@
 //! format has diverged (its reader silently drops a BundleV0's object
 //! ids). When chunk id 3 no longer needs supporting, delete this
 //! file, the `BundleV0` chunk arm and the `ChunkType::BundleV0` variant.
-#![allow(dead_code)]
 
 use std::borrow::Cow;
-use std::marker::PhantomData;
 use std::ops::Range;
 
 use crate::op_set2::change::ChangeCollector;
@@ -18,26 +16,15 @@ use crate::op_set2::op::OpBuilder;
 use crate::op_set2::types::{Action, ActorIdx, KeyRef};
 use crate::op_set2::{ReadOpError, ScalarValue};
 use crate::storage::bundle::{BundleChange, ParseError};
-use crate::storage::change::{OpReadState, Unverified, Verified};
-use crate::storage::columns::{compression, ColumnId, ColumnType};
+use crate::storage::columns::{compression, ColumnType};
 use crate::storage::{parse, Header, RawColumns};
 use crate::types::{ActorId, ChangeHash, ObjId, OpId};
 use crate::Change;
 
-/// `(actor, counter)` order index of the `ID_CTR_INVERSE` column.
-const ID_CTR_INVERSE_COL_ID: ColumnId = ColumnId::new(11);
-
-/// Column id of the doc-order `ID_CTR` column.
-const ID_COL_ID: ColumnId = ColumnId::new(2);
-
 #[derive(Clone, Debug)]
-pub(crate) struct BundleV0Storage<'a, OpReadState> {
+pub(crate) struct BundleV0Storage<'a> {
     /// Uncompressed in-memory form. Iterators index into this.
     pub(crate) bytes: Cow<'a, [u8]>,
-    /// On-disk form, if columns were DEFLATE-compressed. `None` for
-    /// chunks that were written or received in fully-uncompressed form
-    /// (in which case `bytes` is also the on-disk form).
-    pub(crate) compressed_bytes: Option<Cow<'a, [u8]>>,
     pub(crate) header: Header,
     pub(crate) deps: Vec<ChangeHash>,
     pub(crate) actors: Vec<ActorId>,
@@ -50,26 +37,9 @@ pub(crate) struct BundleV0Storage<'a, OpReadState> {
     /// handed to `V0OpIter` as a plain slice — no columnar encoding round
     /// trip.
     pub(crate) id_ctr: Vec<i64>,
-    pub(crate) _phantom: PhantomData<OpReadState>,
 }
 
-impl<O: OpReadState> BundleV0Storage<'_, O> {
-    pub(crate) fn into_owned(self) -> BundleV0Storage<'static, O> {
-        BundleV0Storage {
-            bytes: Cow::Owned(self.bytes.into_owned()),
-            compressed_bytes: self.compressed_bytes.map(|c| Cow::Owned(c.into_owned())),
-            header: self.header,
-            deps: self.deps,
-            actors: self.actors,
-            ops_meta: self.ops_meta,
-            ops_data: self.ops_data,
-            changes_meta: self.changes_meta,
-            changes_data: self.changes_data,
-            id_ctr: self.id_ctr,
-            _phantom: self._phantom,
-        }
-    }
-
+impl BundleV0Storage<'_> {
     pub(crate) fn checksum_valid(&self) -> bool {
         self.header.checksum_valid()
     }
@@ -95,11 +65,11 @@ fn extract_id_ctr_values(
             continue;
         }
         match spec.id() {
-            id if id == ID_CTR_INVERSE_COL_ID => {
+            id if id == ops::ID_CTR_INVERSE_COL_ID => {
                 let d = col.data();
                 inverse_bytes = Some(&ops_data[d.start..d.end]);
             }
-            id if id == ID_COL_ID => {
+            id if id == ops::ID_COL_ID => {
                 let d = col.data();
                 id_ctr_bytes = Some(&ops_data[d.start..d.end]);
             }
@@ -113,7 +83,7 @@ fn extract_id_ctr_values(
         let inverse: Vec<i64> = decode_delta_int(inverse_bytes)?;
 
         let mut change_meta: Vec<(usize, u64, u64, u64)> =
-            V0ChangeIterUnverified::try_new(changes_meta, changes_data)?
+            V0ChangeIter::try_new(changes_meta, changes_data)?
                 .map(|c| c.map(|c| (c.actor, c.seq, c.start_op, c.max_op)))
                 .collect::<Result<_, _>>()?;
         change_meta.sort_unstable_by_key(|(actor, seq, _, _)| (*actor, *seq));
@@ -154,11 +124,11 @@ fn decode_delta_int(bytes: &[u8]) -> Result<Vec<i64>, ParseError> {
         .collect()
 }
 
-impl<'a> BundleV0Storage<'a, Unverified> {
+impl<'a> BundleV0Storage<'a> {
     pub(crate) fn parse_following_header(
         input: parse::Input<'a>,
         header: Header,
-    ) -> parse::ParseResult<'a, BundleV0Storage<'a, Unverified>, ParseError> {
+    ) -> parse::ParseResult<'a, BundleV0Storage<'a>, ParseError> {
         // `input.bytes()` returns the full chunk (header + body); positions
         // tracked by the parser are absolute offsets within that buffer.
         let full_bytes = input.bytes();
@@ -196,7 +166,6 @@ impl<'a> BundleV0Storage<'a, Unverified> {
                 parse::Input::empty(),
                 BundleV0Storage {
                     bytes: full_bytes.into(),
-                    compressed_bytes: None,
                     header,
                     deps,
                     actors,
@@ -205,7 +174,6 @@ impl<'a> BundleV0Storage<'a, Unverified> {
                     changes_meta,
                     changes_data: changes_data_range,
                     id_ctr,
-                    _phantom: PhantomData,
                 },
             ));
         }
@@ -252,7 +220,6 @@ impl<'a> BundleV0Storage<'a, Unverified> {
             parse::Input::empty(),
             BundleV0Storage {
                 bytes: Cow::Owned(out),
-                compressed_bytes: Some(full_bytes.into()),
                 header,
                 deps,
                 actors,
@@ -261,70 +228,24 @@ impl<'a> BundleV0Storage<'a, Unverified> {
                 changes_meta,
                 changes_data: new_changes_start..new_changes_end,
                 id_ctr,
-                _phantom: PhantomData,
             },
         ))
     }
 
-    pub(crate) fn verify(self) -> Result<BundleV0Storage<'a, Verified>, ParseError> {
-        for c in self.iter_change_meta() {
-            let _ = c?;
-        }
-        for o in self.iter_ops() {
-            let _ = o?;
-        }
-        Ok(BundleV0Storage {
-            bytes: self.bytes,
-            compressed_bytes: self.compressed_bytes,
-            header: self.header,
-            deps: self.deps,
-            actors: self.actors,
-            ops_meta: self.ops_meta,
-            ops_data: self.ops_data,
-            changes_meta: self.changes_meta,
-            changes_data: self.changes_data,
-            id_ctr: self.id_ctr,
-            _phantom: PhantomData,
-        })
-    }
-
-    pub(crate) fn iter_ops(&self) -> V0OpIterUnverified<'_> {
-        let bytes = &self.bytes[self.ops_data.clone()];
-        V0OpIterUnverified::new(&self.ops_meta, bytes, &self.id_ctr)
-    }
-
-    fn iter_change_meta(&self) -> V0ChangeIterUnverified<'_> {
-        let change_data = &self.bytes[self.changes_data.clone()];
-        V0ChangeIterUnverified::new(&self.changes_meta, change_data)
-    }
-}
-
-impl BundleV0Storage<'_, Verified> {
     pub(crate) fn to_changes(&self) -> Result<Vec<Change>, ParseError> {
-        let change_meta = self.iter_change_meta().collect();
+        let change_meta =
+            V0ChangeIter::try_new(&self.changes_meta, &self.bytes[self.changes_data.clone()])?
+                .collect::<Result<_, _>>()?;
         let actors = crate::actor::ActorTable::from_sorted(self.actors.clone())?;
         let mut collector = ChangeCollector::from_bundle_changes(change_meta, &actors);
-        for op in self.iter_ops() {
-            collector.add(op);
+        let ops = &self.bytes[self.ops_data.clone()];
+        for op in V0OpIter::try_new(&self.ops_meta, ops, &self.id_ctr)? {
+            collector.add(op?);
         }
         let bundle = collector
             .decode_bundle(&actors, &self.deps)
             .map_err(|e| ParseError::DecodeBundle(Box::new(e)))?;
         Ok(bundle)
-    }
-
-    pub(crate) fn iter_ops(&self) -> V0OpIter<'_> {
-        let bytes = &self.bytes[self.ops_data.clone()];
-        V0OpIter::new(&self.ops_meta, bytes, &self.id_ctr)
-    }
-
-    pub(crate) fn iter_change_meta(&self) -> V0ChangeIter<'_> {
-        let change_data = &self.bytes[self.changes_data.clone()];
-        V0ChangeIter::new_from_verified(&self.changes_meta, change_data)
-    }
-
-    pub(crate) fn deps(&self) -> &[ChangeHash] {
-        &self.deps
     }
 }
 
@@ -339,10 +260,10 @@ fn check_columns(
     let invalid = |e| parse::ParseError::Error(ParseError::InvalidColumns(Box::new(e)));
     validate_columns(changes_meta, changes).map_err(invalid)?;
     validate_columns(ops_meta, ops).map_err(invalid)?;
-    V0ChangeIterUnverified::try_new(changes_meta, changes).map_err(invalid)?;
+    V0ChangeIter::try_new(changes_meta, changes).map_err(invalid)?;
     let id_ctr = extract_id_ctr_values(changes_meta, changes, ops_meta, ops)
         .map_err(parse::ParseError::Error)?;
-    V0OpIterUnverified::try_new(ops_meta, ops, &id_ctr).map_err(invalid)?;
+    V0OpIter::try_new(ops_meta, ops, &id_ctr).map_err(invalid)?;
     Ok(id_ctr)
 }
 
@@ -372,33 +293,8 @@ fn validate_columns(
     Ok(())
 }
 
-pub(crate) struct V0ChangeIter<'a>(V0ChangeIterUnverified<'a>);
-
-impl<'a> V0ChangeIter<'a> {
-    // this will panic if passed unverified bytes
-    pub(crate) fn new_from_verified(
-        columns: &RawColumns<compression::Uncompressed>,
-        data: &'a [u8],
-    ) -> Self {
-        Self(V0ChangeIterUnverified::try_new(columns, data).unwrap())
-    }
-}
-
-impl<'a> Iterator for V0ChangeIter<'a> {
-    type Item = BundleChange<'a>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.0.next().transpose().unwrap()
-    }
-}
-
 #[derive(Debug)]
-pub(crate) struct V0ChangeIterUnverified<'a> {
-    inner: Option<V0ChangeIterInner<'a>>,
-}
-
-#[derive(Debug)]
-struct V0ChangeIterInner<'a> {
+struct V0ChangeIter<'a> {
     actor: hexane::Decoder<'a, Option<ActorIdx>>,
     seq: hexane::DeltaDecoder<'a, Option<i64>>,
     max_op: hexane::DeltaDecoder<'a, Option<i64>>,
@@ -411,36 +307,15 @@ struct V0ChangeIterInner<'a> {
     extra: &'a [u8],
 }
 
-impl<'a> Iterator for V0ChangeIterUnverified<'a> {
+impl<'a> Iterator for V0ChangeIter<'a> {
     type Item = Result<BundleChange<'a>, ParseError>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.inner
-            .as_mut()?
-            .try_next()
-            .inspect_err(|_| self.inner = None)
-            .transpose()
+        self.try_next().transpose()
     }
 }
 
-impl<'a> V0ChangeIterUnverified<'a> {
-    pub(crate) fn new(columns: &RawColumns<compression::Uncompressed>, data: &'a [u8]) -> Self {
-        Self {
-            inner: V0ChangeIterInner::try_new(columns, data).ok(),
-        }
-    }
-
-    pub(crate) fn try_new(
-        columns: &RawColumns<compression::Uncompressed>,
-        data: &'a [u8],
-    ) -> Result<Self, ParseError> {
-        Ok(Self {
-            inner: Some(V0ChangeIterInner::try_new(columns, data)?),
-        })
-    }
-}
-
-impl<'a> V0ChangeIterInner<'a> {
+impl<'a> V0ChangeIter<'a> {
     fn try_new(
         columns: &RawColumns<compression::Uncompressed>,
         data: &'a [u8],
@@ -542,33 +417,7 @@ impl<'a> V0ChangeIterInner<'a> {
     }
 }
 
-pub(crate) struct V0OpIterUnverified<'a> {
-    inner: Option<V0OpIterInner<'a>>,
-}
-
-impl<'a> V0OpIterUnverified<'a> {
-    pub(crate) fn new(
-        columns: &RawColumns<compression::Uncompressed>,
-        data: &'a [u8],
-        id_ctr_values: &'a [i64],
-    ) -> Self {
-        Self {
-            inner: V0OpIterInner::try_new(columns, data, id_ctr_values).ok(),
-        }
-    }
-
-    pub(crate) fn try_new(
-        columns: &RawColumns<compression::Uncompressed>,
-        data: &'a [u8],
-        id_ctr_values: &'a [i64],
-    ) -> Result<Self, ParseError> {
-        Ok(Self {
-            inner: Some(V0OpIterInner::try_new(columns, data, id_ctr_values)?),
-        })
-    }
-}
-
-struct V0OpIterInner<'a> {
+struct V0OpIter<'a> {
     obj_actor: hexane::Decoder<'a, Option<ActorIdx>>,
     obj_ctr: hexane::DeltaDecoder<'a, Option<i64>>,
     key_actor: hexane::Decoder<'a, Option<ActorIdx>>,
@@ -588,43 +437,15 @@ struct V0OpIterInner<'a> {
     value: &'a [u8],
 }
 
-pub(crate) struct V0OpIter<'a> {
-    iter: V0OpIterUnverified<'a>,
+impl<'a> Iterator for V0OpIter<'a> {
+    type Item = Result<OpBuilder<'a>, ParseError>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.try_next().transpose()
+    }
 }
 
 impl<'a> V0OpIter<'a> {
-    pub(crate) fn new(
-        columns: &RawColumns<compression::Uncompressed>,
-        data: &'a [u8],
-        id_ctr_values: &'a [i64],
-    ) -> Self {
-        Self {
-            iter: V0OpIterUnverified::new(columns, data, id_ctr_values),
-        }
-    }
-}
-
-impl<'a> Iterator for V0OpIter<'a> {
-    type Item = OpBuilder<'a>;
-
-    fn next(&mut self) -> Option<OpBuilder<'a>> {
-        self.iter.next().map(|v| v.unwrap())
-    }
-}
-
-impl<'a> Iterator for V0OpIterUnverified<'a> {
-    type Item = Result<OpBuilder<'a>, ParseError>;
-
-    fn next(&mut self) -> Option<Result<OpBuilder<'a>, ParseError>> {
-        self.inner
-            .as_mut()?
-            .try_next()
-            .inspect_err(|_| self.inner = None)
-            .transpose()
-    }
-}
-
-impl<'a> V0OpIterInner<'a> {
     fn try_next(&mut self) -> Result<Option<OpBuilder<'a>>, ParseError> {
         let id_actor = self.id_actor.next().flatten();
         let id_ctr = self.id_ctr.next().copied();
@@ -763,8 +584,8 @@ impl<'a> V0OpIterInner<'a> {
     }
 }
 
-pub(crate) mod ops {
-    use crate::storage::{columns::ColumnId, ColumnSpec};
+mod ops {
+    use crate::storage::columns::ColumnId;
 
     pub(super) const OBJ_COL_ID: ColumnId = ColumnId::new(0);
     pub(super) const KEY_COL_ID: ColumnId = ColumnId::new(1);
@@ -775,33 +596,11 @@ pub(crate) mod ops {
     pub(super) const PRED_COL_ID: ColumnId = ColumnId::new(7);
     pub(super) const EXPAND_COL_ID: ColumnId = ColumnId::new(9);
     pub(super) const MARK_NAME_COL_ID: ColumnId = ColumnId::new(10);
-    /// Inverse permutation of doc positions. For each op in canonical
-    /// `(actor, counter)` order, stores its doc-order index as a
-    /// delta-int. Readers reconstruct each op's `counter` from this
-    /// column plus the change metadata — no separate `ID_CTR` column on
-    /// the wire.
     pub(super) const ID_CTR_INVERSE_COL_ID: ColumnId = ColumnId::new(11);
-
-    pub(super) const ID_ACTOR: ColumnSpec = ColumnSpec::new_actor(ID_COL_ID);
-    pub(super) const ID_CTR_INVERSE: ColumnSpec = ColumnSpec::new_delta(ID_CTR_INVERSE_COL_ID);
-    pub(super) const OBJ_ACTOR: ColumnSpec = ColumnSpec::new_actor(OBJ_COL_ID);
-    pub(super) const OBJ_CTR: ColumnSpec = ColumnSpec::new_delta(OBJ_COL_ID);
-    pub(super) const KEY_ACTOR: ColumnSpec = ColumnSpec::new_actor(KEY_COL_ID);
-    pub(super) const KEY_CTR: ColumnSpec = ColumnSpec::new_delta(KEY_COL_ID);
-    pub(super) const KEY_STR: ColumnSpec = ColumnSpec::new_string(KEY_COL_ID);
-    pub(super) const PRED_COUNT: ColumnSpec = ColumnSpec::new_group(PRED_COL_ID);
-    pub(super) const PRED_ACTOR: ColumnSpec = ColumnSpec::new_actor(PRED_COL_ID);
-    pub(super) const PRED_CTR: ColumnSpec = ColumnSpec::new_delta(PRED_COL_ID);
-    pub(super) const INSERT: ColumnSpec = ColumnSpec::new_boolean(INSERT_COL_ID);
-    pub(super) const ACTION: ColumnSpec = ColumnSpec::new_integer(ACTION_COL_ID);
-    pub(super) const VALUE_META: ColumnSpec = ColumnSpec::new_value_metadata(VAL_COL_ID);
-    pub(super) const VALUE: ColumnSpec = ColumnSpec::new_value(VAL_COL_ID);
-    pub(super) const MARK_NAME: ColumnSpec = ColumnSpec::new_string(MARK_NAME_COL_ID);
-    pub(super) const EXPAND: ColumnSpec = ColumnSpec::new_boolean(EXPAND_COL_ID);
 }
 
 #[rustfmt::skip]
-pub(crate) mod change {
+mod change {
     use crate::storage::{columns::ColumnId, ColumnSpec};
 
     pub(super) const ACTOR_COL_ID:           ColumnId = ColumnId::new(0);

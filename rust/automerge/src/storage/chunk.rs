@@ -15,7 +15,7 @@ pub(crate) enum Chunk<'a> {
     Document(Document<'a>),
     Change(Change<'a, Unverified>),
     /// A BundleV0 (chunk type 3), a frozen format — see [`super::bundle_v0`].
-    BundleV0(Box<BundleV0Storage<'a, Unverified>>),
+    BundleV0(Box<BundleV0Storage<'a>>),
     BundleColumns(Box<crate::storage::Bundle>, Header),
     CompressedChange(Change<'static, Unverified>, Compressed<'a>),
 }
