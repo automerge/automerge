@@ -68,9 +68,6 @@ impl MarkOrderValidator {
         op: &Op<'_>,
         mark_index: &Option<MarkIndexBuilder>,
     ) {
-        if self.error.is_some() {
-            return;
-        }
         self.check_mark_op(op, mark_index);
     }
 
@@ -86,6 +83,9 @@ impl MarkOrderValidator {
     }
 
     fn check_mark(&mut self, obj: ObjId, op_id: OpId, mark_index: &Option<MarkIndexBuilder>) {
+        if self.error.is_some() {
+            return;
+        }
         match mark_index {
             Some(MarkIndexBuilder::Start(id, _)) => {
                 self.begins.insert(*id, obj);
@@ -369,6 +369,7 @@ impl IndexBuilder {
     #[allow(clippy::too_many_arguments)]
     fn process_op_parts(
         &mut self,
+        obj: ObjId,
         id: OpId,
         mark_index: Option<MarkIndexBuilder>,
         inc_value: Option<i64>,
@@ -376,11 +377,7 @@ impl IndexBuilder {
         succ_vis: u32,
         width: u32,
     ) {
-        self.mark_order.check_mark(
-            obj_info.map(|o| o.parent).unwrap_or_default(),
-            id,
-            &mark_index,
-        );
+        self.mark_order.check_mark(obj, id, &mark_index);
         self.push_mark(mark_index);
         self.apply_increment(id, inc_value, true);
 
@@ -728,7 +725,7 @@ impl IndexBuilder {
             let is_counter = matches!(value, ScalarValue::Counter(_));
             let succ_vis = vis_succ(run);
 
-            self.process_op_parts(id, mark_index, inc_value, obj_info, succ_vis, width);
+            self.process_op_parts(obj, id, mark_index, inc_value, obj_info, succ_vis, width);
 
             if run.succ > 0 {
                 if is_counter {

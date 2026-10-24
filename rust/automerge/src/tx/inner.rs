@@ -1474,4 +1474,35 @@ mod tests {
         tx.put(&a, "b", 1).unwrap();
         assert!(tx.get(&a, "b").unwrap().is_some());
     }
+
+    #[test]
+    fn loading_a_mark_that_ends_in_another_object_fails() {
+        let mut doc = Automerge::new();
+        let mut tx = doc.transaction();
+        let a = tx.put_object(ROOT, "a", ObjType::Text).unwrap();
+        let b = tx.put_object(ROOT, "b", ObjType::Text).unwrap();
+        tx.splice_text(&a, 0, 0, "xy").unwrap();
+        tx.splice_text(&b, 0, 0, "xy").unwrap();
+        tx.commit();
+
+        let mut inner = TransactionInner::new(doc.transaction_args(None));
+        let a = inner.exid_to_obj_in_scope(&doc, &a).unwrap();
+        let b = inner.exid_to_obj_in_scope(&doc, &b).unwrap();
+        let mark = Mark::new("bold".into(), true, 0, 1);
+        let begin = OpType::MarkBegin(false, mark.old_data());
+        inner
+            .do_insert_op(&mut doc, &a, SequenceType::Text, 0, begin)
+            .unwrap();
+        inner
+            .do_insert_op(&mut doc, &b, SequenceType::Text, 1, OpType::MarkEnd(false))
+            .unwrap();
+        inner.commit(&mut doc, None, None);
+
+        let bytes = doc.save_with_options(crate::automerge::SaveOptions {
+            format: crate::automerge::SaveFormat::Legacy,
+            ..Default::default()
+        });
+        assert!(Automerge::load(&bytes).is_err());
+        assert!(Automerge::rescue(&bytes).is_ok());
+    }
 }
