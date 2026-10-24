@@ -555,29 +555,35 @@ impl IndexBuilder {
             bounds.start_obj(seq, obj_len, split)?;
 
             while let Some((group_len, repeat)) = bounds.next_batch()? {
-                let singletons = group_len == 1 && repeat > 1;
-                let (spans, span_len) = if singletons {
-                    (1, repeat)
-                } else {
-                    (repeat, group_len)
-                };
-                for _ in 0..spans {
-                    let mut remaining = span_len;
+                if group_len == 1 && repeat > 1 {
+                    let mut remaining = repeat;
                     while remaining > 0 {
                         let run = iter
                             .next_run(remaining)?
                             .ok_or(ReadOpError::MissingValue("index columns"))?;
                         remaining -= run.count;
                         if self.is_rare(&run) {
-                            self.rare_run(&run, pos, obj, objrep, &mut rare, singletons)?;
-                        } else if singletons {
-                            self.stream_singletons(&run, objrep, &mut rare)?;
+                            self.rare_run(&run, pos, obj, objrep, &mut rare, true)?;
                         } else {
-                            self.buffer_run(&run, objrep, &mut rare)?;
+                            self.stream_singletons(&run, objrep, &mut rare)?;
                         }
                         pos += run.count;
                     }
-                    if !singletons {
+                } else {
+                    for _ in 0..repeat {
+                        let mut remaining = group_len;
+                        while remaining > 0 {
+                            let run = iter
+                                .next_run(remaining)?
+                                .ok_or(ReadOpError::MissingValue("index columns"))?;
+                            remaining -= run.count;
+                            if self.is_rare(&run) {
+                                self.rare_run(&run, pos, obj, objrep, &mut rare, false)?;
+                            } else {
+                                self.buffer_run(&run, objrep, &mut rare)?;
+                            }
+                            pos += run.count;
+                        }
                         self.flush();
                     }
                 }

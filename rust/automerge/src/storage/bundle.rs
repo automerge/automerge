@@ -313,11 +313,7 @@ impl Bundle {
             }));
         }
         let mut op_writer = BundleOpWriter::default();
-        crate::op_set2::op_set::RowCopier::new(op_set).copy(
-            0..op_set.len(),
-            &mut op_writer,
-            &mut mapper,
-        );
+        op_set.write_all_bundle_ops(&mut op_writer, &mut mapper);
         Ok(BundleBuilder::encode(
             mapper,
             change_writer,

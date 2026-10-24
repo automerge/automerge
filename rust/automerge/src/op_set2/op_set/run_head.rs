@@ -69,7 +69,7 @@ pub(crate) struct RunHead<S: RunSource> {
     src: S,
     head: Option<S::Run>,
     /// names the column in errors
-    pub(super) name: &'static str,
+    name: &'static str,
 }
 
 impl<'a, T, S> RunHead<Rle<'a, T, S>>
