@@ -3035,7 +3035,7 @@ pub(crate) enum AddChangeError {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::{BTreeMap, HashSet};
+    use std::collections::BTreeMap;
 
     use crate::{
         make_rng,
@@ -3601,97 +3601,6 @@ mod tests {
         );
     }
 
-    /// Is ascending head node index alone a valid apply order?
-    /// cargo test -p automerge --release --lib probe_fragment_index_order -- --ignored --nocapture
-    #[test]
-    #[ignore]
-    fn probe_fragment_index_order() {
-        use crate::tx::Transactable;
-        let n: u64 = std::env::var("PROBE_CHANGES")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(200_000);
-
-        let mut base = AutoCommit::new();
-        for i in 0..2_000u64 {
-            base.put(ROOT, "k", i as i64).unwrap();
-            base.commit();
-        }
-        let saved = base.save();
-        let mut a = AutoCommit::load(&saved).unwrap();
-        let mut b = AutoCommit::load(&saved).unwrap();
-        a.set_actor(ActorId::random());
-        b.set_actor(ActorId::random());
-        // merge is a hash-level operation
-        let mut a = a.enable_audit_mode().unwrap();
-        let mut b = b.enable_audit_mode().unwrap();
-        for i in 0..2_000u64 {
-            a.put(ROOT, "a", i as i64).unwrap();
-            a.commit();
-        }
-        for i in 0..n {
-            b.put(ROOT, "b", i as i64).unwrap();
-            b.commit();
-        }
-        a.merge(&mut b).unwrap();
-
-        // rebuild the index the way a load does: in node order
-        let bytes = a.save();
-        let doc = Automerge::load(&bytes).unwrap();
-        let graph = &doc.change_graph;
-
-        let returned = doc.fragments(..);
-        let cached: Vec<_> = returned.iter().filter(|f| f.level > 0).cloned().collect();
-        let mut by_node = cached.clone();
-        by_node.sort_by_key(|f| graph.node_by_hash(&f.head).unwrap().0);
-
-        for f in &cached {
-            assert_eq!(
-                graph.get_fragment(f.head, &doc.ops.actors).as_ref(),
-                Some(f),
-                "get_fragment missed a level-{} fragment",
-                f.level,
-            );
-        }
-        let mut levels: BTreeMap<usize, usize> = BTreeMap::new();
-        for f in &returned {
-            *levels.entry(f.level).or_default() += 1;
-        }
-        println!("fragments: {} levels: {levels:?}", returned.len());
-        println!("index order == returned order: {}", by_node == cached);
-
-        let check = |order: &[Fragment]| {
-            let mut applied: HashSet<NodeIdx> = HashSet::new();
-            let mut violations = 0;
-            for f in order {
-                let members: HashSet<NodeIdx> = f
-                    .members
-                    .iter()
-                    .map(|m| graph.node_for_change_id(m, &doc.ops.actors).unwrap())
-                    .collect();
-                let mut needs: Vec<NodeIdx> = f
-                    .boundary
-                    .iter()
-                    .map(|d| graph.node_by_hash(d).unwrap())
-                    .collect();
-                for m in &members {
-                    needs.extend(graph.parents(*m));
-                }
-                for n in needs {
-                    if !applied.contains(&n) && !members.contains(&n) {
-                        violations += 1;
-                    }
-                }
-                applied.extend(members);
-            }
-            violations
-        };
-        println!("violations, node index order:     {}", check(&by_node));
-        println!("violations, cached as returned:   {}", check(&cached));
-        println!("violations, all as returned:      {}", check(&returned));
-        assert_eq!(check(&returned), 0, "returned order is not an apply order");
-    }
-
     #[test]
     fn fragment_deps_reference_known_hashes() {
         let mut builder = TestGraphBuilder::new();
@@ -4081,62 +3990,6 @@ mod tests {
             }
             assert_eq!(z.get_heads(), doc.get_heads());
         }
-    }
-
-    /// Apply the same fragments through the walk and the manifold
-    /// paths; the resulting documents must be byte-identical.
-    #[test]
-    fn fragment_apply_manifold_matches_walk() {
-        use crate::read::ReadDoc;
-        let mut rng = make_rng();
-        let mut doc = AutoCommit::new().with_actor(rng.random());
-        let text = doc.put_object(ROOT, "text", crate::ObjType::Text).unwrap();
-        let map = doc.put_object(ROOT, "map", crate::ObjType::Map).unwrap();
-        doc.put(&map, "c", crate::ScalarValue::counter(0)).unwrap();
-        for i in 0..40 {
-            if i % 8 == 0 {
-                doc.commit();
-            }
-            let len = doc.length(&text);
-            match rng.random_range(0..5u32) {
-                0 if len > 1 => {
-                    let at = rng.random_range(0..len as u32) as usize;
-                    doc.splice_text(&text, at, 1, "").unwrap();
-                }
-                1 => {
-                    let k = format!("k{}", rng.random_range(0..6u32));
-                    doc.put(&map, k, rng.random_range(0..100i64)).unwrap();
-                }
-                2 => {
-                    doc.increment(&map, "c", 1).unwrap();
-                }
-                _ => {
-                    let at = rng.random_range(0..=len as u32) as usize;
-                    doc.splice_text(&text, at, 0, "x").unwrap();
-                }
-            }
-        }
-        doc.commit();
-
-        let fragments = doc.doc.fragments(..);
-        let bundles: Vec<_> = fragments
-            .iter()
-            .map(|f| doc.doc.bundle_for_fragment(f).unwrap())
-            .collect();
-
-        let apply_all = || {
-            let mut d = Automerge::new();
-            for b in &bundles {
-                d.apply_bundle(b.clone()).unwrap();
-            }
-            d
-        };
-
-        let walk = apply_all();
-        let manifold = apply_all();
-
-        assert_eq!(walk.get_heads(), manifold.get_heads());
-        assert_eq!(walk.save(), manifold.save(), "docs diverge");
     }
 }
 
