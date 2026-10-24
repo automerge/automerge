@@ -266,7 +266,7 @@ impl Bundle {
         &self.storage.actors
     }
 
-    #[cfg(debug_assertions)]
+    #[cfg(feature = "slow_path_assertions")]
     pub(crate) fn storage_for_hashes<I, H: crate::hash_retention::HashRetention>(
         op_set: &OpSet,
         change_graph: &ChangeGraph<H>,
@@ -307,16 +307,18 @@ impl Bundle {
         let mut mapper = ActorMapper::new(&op_set.actors);
         let mut change_writer = BundleChangeWriter::new(members.nodes().len());
         change_graph.write_bundle_changes(members, &mut change_writer, &mut mapper)?;
-        let builder = if mapper.sees_every_actor() {
-            let mut data = Vec::new();
-            let ops = op_set.write_bundle_op_columns(&mut data);
-            BundleBuilder::from_written_ops(mapper, change_writer, ops, data)
-        } else {
-            let mut op_writer = BundleOpWriter::default();
-            op_set.write_all_bundle_ops(&mut op_writer, &mut mapper);
-            BundleBuilder::from_writers(mapper, change_writer, op_writer)
-        };
-        Ok(builder.finish_with_ranks(&std::collections::HashMap::new()))
+        if mapper.sees_every_actor() {
+            return Ok(BundleBuilder::encode(mapper, change_writer, |_, data| {
+                op_set.write_bundle_op_columns(data)
+            }));
+        }
+        let mut op_writer = BundleOpWriter::default();
+        op_set.write_all_bundle_ops(&mut op_writer, &mut mapper);
+        Ok(BundleBuilder::encode(
+            mapper,
+            change_writer,
+            |mapper, data| op_writer.finish(mapper, data, &std::collections::HashMap::new()),
+        ))
     }
 
     /// [`Self::storage_for_nodes`] for several bundles at once.
@@ -636,58 +638,6 @@ impl Bundle {
         out.extend(data);
         out
     }
-
-    pub(crate) fn parse_prefix(
-        i: parse::Input<'_>,
-    ) -> parse::ParseResult<'_, ParsedPrefix, parse::leb128::Error> {
-        let (i, actors) = parse::length_prefixed(parse::actor_id)(i)?;
-
-        let (i, n_heads) = parse::leb128_u64(i)?;
-        let mut i = i;
-        let mut heads = Vec::with_capacity(entry_capacity(&i, n_heads, HASH + MIN_ULEB));
-        for _ in 0..n_heads {
-            let (j, h) = parse::change_hash(i)?;
-            let (j, idx) = parse::leb128_u64(j)?;
-            heads.push((h, idx as usize));
-            i = j;
-        }
-
-        let (i, checkpoints) = parse_indexed_hashes(i)?;
-        let (i, retained) = parse_indexed_hashes(i)?;
-
-        let (i, n_boundary) = parse::leb128_u64(i)?;
-        let mut i = i;
-        let mut boundary = Vec::with_capacity(entry_capacity(&i, n_boundary, HASH + 2 * MIN_ULEB));
-        for _ in 0..n_boundary {
-            let (j, h) = parse::change_hash(i)?;
-            let (j, a) = parse::leb128_u64(j)?;
-            let (j, s) = parse::leb128_u64(j)?;
-            boundary.push((h, a, s));
-            i = j;
-        }
-
-        let (i, n_deps) = parse::leb128_u64(i)?;
-        let mut i = i;
-        let mut deps = Vec::with_capacity(entry_capacity(&i, n_deps, 2 * MIN_ULEB));
-        for _ in 0..n_deps {
-            let (j, a) = parse::leb128_u64(i)?;
-            let (j, s) = parse::leb128_u64(j)?;
-            deps.push((a, s));
-            i = j;
-        }
-
-        Ok((
-            i,
-            ParsedPrefix {
-                actors,
-                heads,
-                checkpoints,
-                retained,
-                boundary,
-                deps,
-            },
-        ))
-    }
 }
 
 struct HintJob<'a> {
@@ -695,9 +645,7 @@ struct HintJob<'a> {
     clock: crate::clock::Clock,
     /// the clock covers every op of the document
     covers_all: bool,
-    /// see [`BundleBuilder::take_member_rows`]
     member_rows: Vec<usize>,
-    /// see [`BundleBuilder::take_target_rows`]
     near: Vec<(crate::types::OpId, usize)>,
     targets_by_obj:
         std::collections::HashMap<crate::types::ObjId, rustc_hash::FxHashSet<crate::types::OpId>>,
@@ -707,18 +655,28 @@ struct HintJob<'a> {
 const HASH: usize = 32;
 const MIN_ULEB: usize = 1;
 
-fn parse_indexed_hashes(
-    i: parse::Input<'_>,
-) -> parse::ParseResult<'_, Vec<(usize, ChangeHash)>, parse::leb128::Error> {
+type PrefixResult<'a, T> = parse::ParseResult<'a, T, parse::leb128::Error>;
+
+/// A uleb count, then that many entries.
+fn parse_entries<'a, T>(
+    i: parse::Input<'a>,
+    min_entry_bytes: usize,
+    entry: impl Fn(parse::Input<'a>) -> PrefixResult<'a, T>,
+) -> PrefixResult<'a, Vec<T>> {
     let (mut i, count) = parse::leb128_u64(i)?;
-    let mut out = Vec::with_capacity(entry_capacity(&i, count, MIN_ULEB + HASH));
+    let mut out = Vec::with_capacity(entry_capacity(&i, count, min_entry_bytes));
     for _ in 0..count {
-        let (j, idx) = parse::leb128_u64(i)?;
-        let (j, h) = parse::change_hash(j)?;
-        out.push((idx as usize, h));
+        let (j, e) = entry(i)?;
+        out.push(e);
         i = j;
     }
     Ok((i, out))
+}
+
+fn indexed_hash(i: parse::Input<'_>) -> PrefixResult<'_, (usize, ChangeHash)> {
+    let (i, idx) = parse::leb128_u64(i)?;
+    let (i, h) = parse::change_hash(i)?;
+    Ok((i, (idx as usize, h)))
 }
 
 /// A wire-supplied `count` clamped to what the remaining input could hold,
@@ -726,16 +684,6 @@ fn parse_indexed_hashes(
 fn entry_capacity(i: &parse::Input<'_>, count: u64, min_entry_bytes: usize) -> usize {
     let ceiling = i.unconsumed_bytes().len() / min_entry_bytes;
     usize::try_from(count).unwrap_or(usize::MAX).min(ceiling)
-}
-
-#[derive(Debug)]
-pub(crate) struct ParsedPrefix {
-    actors: Vec<ActorId>,
-    heads: Vec<(ChangeHash, usize)>,
-    checkpoints: Vec<(usize, ChangeHash)>,
-    retained: Vec<(usize, ChangeHash)>,
-    boundary: Vec<(ChangeHash, u64, u64)>,
-    deps: Vec<(u64, u64)>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -814,13 +762,13 @@ impl AuditedMember for ChangeHash {
     }
 }
 
-fn parse_bundle_columns(bytes: &[u8]) -> Result<BundleStorage<'static, Verified>, String> {
+fn parse_bundle_columns(bytes: &[u8]) -> Result<BundleStorage<'static, Verified>, InvalidBundle> {
     let input = parse::Input::new(bytes);
     let (_i, stored) = BundleStorage::parse_columns(input)
-        .map_err(|e| format!("invalid carried changes: {}", e))?;
+        .map_err(|e| InvalidBundle(format!("invalid carried changes: {}", e)))?;
     let verified = stored
         .verify()
-        .map_err(|e| format!("unable to verify ops: {}", e))?;
+        .map_err(|e| InvalidBundle(format!("unable to verify ops: {}", e)))?;
     Ok(verified.into_owned())
 }
 
@@ -890,82 +838,93 @@ impl TryFrom<&[u8]> for Bundle {
 impl Bundle {
     pub(crate) fn parse_after_header(i: parse::Input<'_>) -> Result<Self, InvalidBundle> {
         let bad = |s: &str| InvalidBundle(s.to_string());
-        let (i, prefix) =
-            Self::parse_prefix(i).map_err(|e| InvalidBundle(format!("invalid prefix: {}", e)))?;
+        let invalid = |e: parse::ParseError<_>| InvalidBundle(format!("invalid prefix: {}", e));
+        let (i, actors) = parse::length_prefixed(parse::actor_id)(i).map_err(invalid)?;
+        let (i, heads) = parse_entries(i, HASH + MIN_ULEB, |i| {
+            let (i, h) = parse::change_hash(i)?;
+            let (i, idx) = parse::leb128_u64(i)?;
+            Ok((i, (h, idx as usize)))
+        })
+        .map_err(invalid)?;
+        let (i, checkpoints) = parse_entries(i, MIN_ULEB + HASH, indexed_hash).map_err(invalid)?;
+        let (i, retained) = parse_entries(i, MIN_ULEB + HASH, indexed_hash).map_err(invalid)?;
+        let (i, boundary) = parse_entries(i, HASH + 2 * MIN_ULEB, |i| {
+            let (i, h) = parse::change_hash(i)?;
+            let (i, a) = parse::leb128_u64(i)?;
+            let (i, s) = parse::leb128_u64(i)?;
+            Ok((i, (h, a, s)))
+        })
+        .map_err(invalid)?;
+        let (i, deps) = parse_entries(i, 2 * MIN_ULEB, |i| {
+            let (i, a) = parse::leb128_u64(i)?;
+            let (i, s) = parse::leb128_u64(i)?;
+            Ok((i, (a, s)))
+        })
+        .map_err(invalid)?;
 
         let resolve = |a: u64| -> Result<ActorId, InvalidBundle> {
-            prefix
-                .actors
+            actors
                 .get(a as usize)
                 .cloned()
                 .ok_or_else(|| bad("bad actor index"))
         };
         let seq = |s: u64| NonZeroU64::new(s).ok_or_else(|| bad("change sequence number is zero"));
         let change_id = |a: u64, s: u64| Ok(ChangeId::new(seq(s)?, resolve(a)?, 0));
-        let boundary = prefix
-            .boundary
+        let boundary = boundary
             .iter()
             .map(|(h, a, s)| Ok((*h, change_id(*a, *s)?)))
             .collect::<Result<Vec<_>, InvalidBundle>>()?;
-        let dep_ids = prefix
-            .deps
+        let dep_ids = deps
             .iter()
             .map(|(a, s)| change_id(*a, *s))
             .collect::<Result<Vec<_>, InvalidBundle>>()?;
 
-        let storage = parse_bundle_columns(i.unconsumed_bytes())
-            .map_err(|e| InvalidBundle(format!("invalid carried changes: {}", e)))?;
+        let storage = parse_bundle_columns(i.unconsumed_bytes())?;
 
         if dep_ids.len() != storage.deps().len() {
             return Err(bad("dep ids do not match the carried changes' deps"));
         }
         let members = storage
             .member_ids()
-            .map_err(|e| InvalidBundle(format!("invalid change metadata: {}", e)))?;
+            .map_err(|e| InvalidBundle(e.to_string()))?;
         let (member_actors, member_seqs) = (members.actors, members.seqs);
         let num_members = member_seqs.len();
-        let mut declared_heads: Vec<usize> = prefix.heads.iter().map(|(_, i)| *i).collect();
+        let mut declared_heads: Vec<usize> = heads.iter().map(|(_, i)| *i).collect();
         declared_heads.sort_unstable();
         if declared_heads != members.heads {
             return Err(bad("heads are not the members nothing depends on"));
         }
-        if prefix.checkpoints.iter().any(|(i, _)| *i >= num_members) {
+        if checkpoints.iter().any(|(i, _)| *i >= num_members) {
             return Err(bad("checkpoint index out of range"));
         }
         // completeness is not checked: it would need every member's hash
-        if prefix
-            .checkpoints
-            .iter()
-            .any(|(_, h)| h.fragment_level() == 0)
-        {
+        if checkpoints.iter().any(|(_, h)| h.fragment_level() == 0) {
             return Err(bad("checkpoint is not a fragment head"));
         }
-        if prefix
-            .checkpoints
+        if checkpoints
             .iter()
-            .any(|(_, c)| prefix.heads.iter().any(|(h, _)| h == c))
+            .any(|(_, c)| heads.iter().any(|(h, _)| h == c))
         {
             return Err(bad("checkpoint duplicates a delivered head"));
         }
-        if prefix.retained.iter().any(|(i, _)| *i >= num_members) {
+        if retained.iter().any(|(i, _)| *i >= num_members) {
             return Err(bad("retained hash index out of range"));
         }
         // a level > 0 retained hash would bypass the checkpoint checks
-        if prefix.retained.iter().any(|(_, h)| h.fragment_level() > 0) {
+        if retained.iter().any(|(_, h)| h.fragment_level() > 0) {
             return Err(bad("retained hash is a fragment head"));
         }
-        if prefix
-            .retained
+        if retained
             .iter()
-            .any(|(_, r)| prefix.heads.iter().any(|(h, _)| h == r))
+            .any(|(_, r)| heads.iter().any(|(h, _)| h == r))
         {
             return Err(bad("retained hash duplicates a delivered head"));
         }
 
         Ok(Bundle {
-            heads: prefix.heads,
-            checkpoints: prefix.checkpoints,
-            retained: prefix.retained,
+            heads,
+            checkpoints,
+            retained,
             boundary,
             dep_ids,
             member_actors,

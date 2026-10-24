@@ -977,7 +977,7 @@ impl<'a> ChangeCollector<'a> {
             }
         }
         let r1 = Self::from_build_meta_inner(op_set, change_graph, changes);
-        #[cfg(debug_assertions)]
+        #[cfg(feature = "slow_path_assertions")]
         {
             // the bundle encoder reorders changes: compare as sets
             let bundle_changes = crate::storage::Bundle::storage_for_hashes(

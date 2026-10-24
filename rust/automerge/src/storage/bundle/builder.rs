@@ -49,7 +49,7 @@ pub(crate) struct BundleBuilder<'a> {
     builders: Vec<ChangeBuilder>,
     last: Option<(ObjId, KeyRef<'a>)>,
     preds: HashMap<OpId, Vec<OpId>>,
-    copier: Option<crate::op_set2::op_set::RowCopier<'a>>,
+    copier: crate::op_set2::op_set::RowCopier<'a>,
     verbatim_rows: Option<Range<usize>>,
     /// the document rows of the members' ops, in walk order
     member_rows: Vec<usize>,
@@ -57,8 +57,6 @@ pub(crate) struct BundleBuilder<'a> {
     target_rows: Vec<(OpId, usize)>,
     /// the first row whose op a pending delete removes
     pred_row: Option<usize>,
-    /// op columns written already, in place of `op_writer`'s
-    written_ops: Option<(BundleOpsColumns, Vec<u8>)>,
 }
 
 impl<'a> BundleBuilder<'a> {
@@ -87,12 +85,11 @@ impl<'a> BundleBuilder<'a> {
             builders,
             last: None,
             preds: HashMap::default(),
-            copier: Some(crate::op_set2::op_set::RowCopier::new(op_set)),
+            copier: crate::op_set2::op_set::RowCopier::new(op_set),
             verbatim_rows: None,
             member_rows: Vec::new(),
             target_rows: Vec::new(),
             pred_row: None,
-            written_ops: None,
         })
     }
 
@@ -102,69 +99,27 @@ impl<'a> BundleBuilder<'a> {
         min.unwrap_or(0)..max.unwrap_or(0) + 1
     }
 
-    pub(crate) fn from_writers(
-        mapper: ActorMapper<'a>,
-        change_writer: BundleChangeWriter<'a>,
-        op_writer: BundleOpWriter<'a>,
-    ) -> BundleBuilder<'a> {
-        BundleBuilder {
-            mapper,
-            change_writer,
-            op_writer,
-            builders: Vec::new(),
-            last: None,
-            preds: HashMap::default(),
-            copier: None,
-            verbatim_rows: None,
-            member_rows: Vec::new(),
-            target_rows: Vec::new(),
-            pred_row: None,
-            written_ops: None,
-        }
-    }
-
-    /// [`Self::from_writers`] with op columns already written.
-    pub(crate) fn from_written_ops(
-        mapper: ActorMapper<'a>,
-        change_writer: BundleChangeWriter<'a>,
-        ops: BundleOpsColumns,
-        data: Vec<u8>,
-    ) -> BundleBuilder<'a> {
-        let mut builder = Self::from_writers(mapper, change_writer, BundleOpWriter::default());
-        builder.written_ops = Some((ops, data));
-        builder
-    }
-
-    pub(crate) fn process_op(&mut self, op: Op<'a>, succ: &[OpId]) {
-        let next = Some((op.obj, op.elemid_or_key()));
-        let flush = self.last != next;
-
-        self.process_op_internal(op, succ, flush);
-
-        if flush {
+    fn enter_key_group(&mut self, obj: ObjId, key: KeyRef<'a>) {
+        let next = Some((obj, key));
+        if self.last != next {
+            self.flush_deletes();
             self.last = next;
         }
     }
 
-    fn process_op_internal(&mut self, op: Op<'a>, succ: &[OpId], flush: bool) {
-        if flush {
-            self.flush_deletes();
-        }
+    pub(crate) fn process_op(&mut self, op: Op<'a>, succ: &[OpId]) {
+        self.enter_key_group(op.obj, op.elemid_or_key());
 
         let pred = self.preds.remove(&op.id).unwrap_or_default();
 
-        if self.builders_index(op.id).is_some() {
+        if self.is_member(op.id) {
             self.member_rows.push(op.pos);
             // `op.key`, not `elemid_or_key`: an insert's target is its anchor
             let target = self.hint_target(&op.key);
             if let Some(t) = target {
                 self.target_rows.push((t, op.pos));
             }
-            if self.copier.is_some()
-                && pred.is_empty()
-                && target.is_none()
-                && succ.iter().all(|s| self.is_member(*s))
-            {
+            if pred.is_empty() && target.is_none() && succ.iter().all(|s| self.is_member(*s)) {
                 self.push_verbatim_row(op.pos);
                 return;
             }
@@ -182,9 +137,7 @@ impl<'a> BundleBuilder<'a> {
 
     fn hint_target(&self, key: &crate::op_set2::types::KeyRef<'_>) -> Option<OpId> {
         match key {
-            crate::op_set2::types::KeyRef::Seq(e)
-                if !e.is_head() && self.builders_index(e.0).is_none() =>
-            {
+            crate::op_set2::types::KeyRef::Seq(e) if !e.is_head() && !self.is_member(e.0) => {
                 Some(e.0)
             }
             _ => None,
@@ -202,11 +155,7 @@ impl<'a> BundleBuilder<'a> {
         succ: &[OpId],
     ) {
         debug_assert!(!self.is_member(id));
-        let next = Some((obj, key));
-        if self.last != next {
-            self.flush_deletes();
-            self.last = next;
-        }
+        self.enter_key_group(obj, key);
         for s in succ {
             self.process_succ(id, row, *s);
         }
@@ -243,7 +192,7 @@ impl<'a> BundleBuilder<'a> {
             for (id, pred) in pending {
                 let op = Op::del(id, obj, key.clone());
                 let op = op.build(pred);
-                if self.builders_index(op.id).is_some() {
+                if self.is_member(op.id) {
                     self.op_writer.add(&op, &[], &mut self.mapper, target);
                 }
             }
@@ -269,16 +218,16 @@ impl<'a> BundleBuilder<'a> {
     fn copy_keeping_member_succ(&mut self, rows: Range<usize>) {
         self.flush_verbatim_rows();
         let builders = &self.builders;
-        if let Some(copier) = &mut self.copier {
-            copier.copy_keeping(rows, &mut self.op_writer, &mut self.mapper, |id| {
-                builders_index(builders, id).is_some()
+        self.copier
+            .copy_keeping(rows, &mut self.op_writer, &mut self.mapper, |id| {
+                contains_op(builders, id)
             });
-        }
     }
 
     fn flush_verbatim_rows(&mut self) {
-        if let (Some(rows), Some(copier)) = (self.verbatim_rows.take(), &mut self.copier) {
-            copier.copy(rows, &mut self.op_writer, &mut self.mapper);
+        if let Some(rows) = self.verbatim_rows.take() {
+            self.copier
+                .copy(rows, &mut self.op_writer, &mut self.mapper);
         }
     }
 
@@ -307,7 +256,7 @@ impl<'a> BundleBuilder<'a> {
     }
 
     pub(crate) fn is_member(&self, id: OpId) -> bool {
-        self.builders_index(id).is_some()
+        contains_op(&self.builders, id)
     }
 
     pub(crate) fn finish_with_ranks(
@@ -316,12 +265,21 @@ impl<'a> BundleBuilder<'a> {
     ) -> BundleStorage<'static, crate::storage::change::Verified> {
         self.flush_deletes();
         self.flush_verbatim_rows();
+        let op_writer = self.op_writer;
+        Self::encode(self.mapper, self.change_writer, |mapper, data| {
+            op_writer.finish(mapper, data, ranks)
+        })
+    }
 
-        let mut mapper = self.mapper;
-
+    /// `write_ops` writes the op columns once the actor mapping is built.
+    pub(crate) fn encode(
+        mut mapper: ActorMapper<'a>,
+        mut change_writer: BundleChangeWriter<'a>,
+        write_ops: impl FnOnce(&ActorMapper<'a>, &mut Vec<u8>) -> BundleOpsColumns,
+    ) -> BundleStorage<'static, crate::storage::change::Verified> {
         mapper.build_mapping(None);
 
-        let deps = self.change_writer.external.clone();
+        let deps = std::mem::take(&mut change_writer.external);
         let actors = mapper.iter().collect::<Vec<_>>();
 
         // Prefix: deps + actors. Identical in both the uncompressed and
@@ -338,16 +296,10 @@ impl<'a> BundleBuilder<'a> {
 
         // Column data (uncompressed) and per-column metadata.
         let mut change_data_buf = Vec::new();
-        let change_cols = self.change_writer.finish(&mapper, &mut change_data_buf);
+        let change_cols = change_writer.finish(&mapper, &mut change_data_buf);
         let written_changes_meta = change_cols.raw_columns();
-        let (ops_cols, ops_data_buf) = match self.written_ops {
-            Some(written) => written,
-            None => {
-                let mut data = Vec::new();
-                let cols = self.op_writer.finish(&mapper, &mut data, ranks);
-                (cols, data)
-            }
-        };
+        let mut ops_data_buf = Vec::new();
+        let ops_cols = write_ops(&mapper, &mut ops_data_buf);
         let written_ops_meta = ops_cols.raw_columns();
 
         // The writers' buffers aren't in spec order, which readers assume.
@@ -359,7 +311,7 @@ impl<'a> BundleBuilder<'a> {
         let (ops_meta, ops_data_u_range) =
             write_in_spec_order(&written_ops_meta, &ops_data_buf, &mut data);
 
-        let storage = BundleStorage {
+        BundleStorage {
             bytes: Cow::Owned(data),
             compressed: Compressed::Lazy,
             ops_meta,
@@ -371,17 +323,11 @@ impl<'a> BundleBuilder<'a> {
             changes: Default::default(),
             bundle_ops: Default::default(),
             _phantom: PhantomData,
-        };
-
-        storage
-    }
-
-    fn builders_index(&self, id: OpId) -> Option<usize> {
-        builders_index(&self.builders, id)
+        }
     }
 }
 
-fn builders_index(builders: &[ChangeBuilder], id: OpId) -> Option<usize> {
+fn contains_op(builders: &[ChangeBuilder], id: OpId) -> bool {
     builders
         .binary_search_by(|builder| {
             builder
@@ -393,7 +339,7 @@ fn builders_index(builders: &[ChangeBuilder], id: OpId) -> Option<usize> {
                     _ => Ordering::Equal,
                 })
         })
-        .ok()
+        .is_ok()
 }
 
 /// Feeds a [`hexane::DeltaEncoder`] a run of equal deltas at a time.
@@ -446,7 +392,6 @@ impl DeltaRunGrouper {
 
 #[derive(Default)]
 pub(crate) struct BundleChangeWriter<'a> {
-    pub(crate) len: usize,
     pub(crate) cap: usize,
     pub(crate) seen: HashMap<ChangeHash, usize>,
     pub(crate) external: Vec<ChangeHash>,
@@ -1042,7 +987,6 @@ impl BundleKey<'_> {
     }
 }
 
-/// How many of the next `max` items satisfy `pred`; tests once per run.
 fn write_in_spec_order(
     columns: &RawColumns<compression::Uncompressed>,
     data: &[u8],
@@ -1061,11 +1005,16 @@ fn write_in_spec_order(
     (columns, start..out.len())
 }
 
-fn run_len_while<D: hexane::RunDecoder>(
-    mut d: D,
+/// How many of the next `max` items satisfy `pred`; tests once per run.
+fn run_len_while<D: hexane::RunDecoder + Clone>(
+    d: &D,
     max: usize,
     pred: impl Fn(&D::Item) -> bool,
 ) -> usize {
+    if max == 0 {
+        return 0;
+    }
+    let mut d = d.clone();
     let mut n = 0;
     while n < max {
         match d.next_run_max(max - n) {
@@ -1364,33 +1313,15 @@ impl<'a> ManifoldOps<'a> {
     /// How many upcoming ops are plain `Set` inserts into the same object
     /// with no preds and no succ.
     pub(crate) fn clean_insert_run(&self) -> usize {
-        let mut n = self.len - self.pos;
-        if n == 0 {
-            return 0;
-        }
-        n = n.min(run_len_while(self.insert.clone(), n, |i| *i));
-        if n == 0 {
-            return 0;
-        }
-        n = n.min(run_len_while(self.action.clone(), n, |a| {
-            *a == Some(Action::Set)
-        }));
-        if n == 0 {
-            return 0;
-        }
+        let mut n = run_len_while(&self.insert, self.len - self.pos, |i| *i);
+        n = run_len_while(&self.action, n, |a| *a == Some(Action::Set));
         if !self.pred_absent {
-            n = n.min(run_len_while(self.pred_count.clone(), n, is_zero_count));
-        }
-        if n == 0 {
-            return 0;
+            n = run_len_while(&self.pred_count, n, is_zero_count);
         }
         if !self.succ_absent {
-            n = n.min(run_len_while(self.succ_count.clone(), n, is_zero_count));
+            n = run_len_while(&self.succ_count, n, is_zero_count);
         }
-        if n == 0 {
-            return 0;
-        }
-        n.min(self.same_obj_run(n))
+        self.same_obj_run(n)
     }
 
     /// How many upcoming ops carry no preds.
@@ -1398,37 +1329,22 @@ impl<'a> ManifoldOps<'a> {
         if self.pred_absent {
             return self.len - self.pos;
         }
-        run_len_while(self.pred_count.clone(), self.len - self.pos, is_zero_count)
+        run_len_while(&self.pred_count, self.len - self.pos, is_zero_count)
     }
 
     /// How many upcoming ops still belong to the last-read op's object
     /// (bounded by `max`).
     pub(crate) fn same_obj_run(&self, max: usize) -> usize {
         if self.obj_absent {
-            // every op is in the root object
             return max.min(self.len - self.pos);
         }
-        let mut n = 0;
-        let mut ctr = self.obj_ctr.clone();
-        while n < max {
-            match ctr.next_run_max(max - n) {
-                Some(run) if run.value == self.cur_obj_raw.1 => n += run.count,
-                _ => break,
-            }
-        }
-        let mut m = 0;
-        let mut act = self.obj_actor.clone();
-        while m < n {
-            match act.next_run_max(n - m) {
-                Some(run) if run.value == self.cur_obj_raw.0 => m += run.count,
-                _ => break,
-            }
-        }
-        m
+        let (actor, ctr) = self.cur_obj_raw;
+        let n = run_len_while(&self.obj_ctr, max, |c| *c == ctr);
+        run_len_while(&self.obj_actor, n, |a| *a == actor)
     }
 
     pub(crate) fn make_free_run(&self, max: usize) -> usize {
-        run_len_while(self.action.clone(), max, makes_no_object)
+        run_len_while(&self.action, max, makes_no_object)
     }
 
     /// Marks every remaining row consumed without advancing the decoders,
@@ -1461,27 +1377,8 @@ impl<'a> ManifoldOps<'a> {
                 None
             }
         };
-        self.obj_actor.advance_by(n);
-        self.obj_ctr.advance_by(n);
-        self.key_actor.advance_by(n);
-        self.key_ctr.advance_by(n);
-        self.key_str.advance_by(n);
-        self.insert.advance_by(n);
-        self.action.advance_by(n);
-        self.pred_count.advance_by(n);
-        self.hint.advance_by(n);
-
-        let mut sub = 0usize;
-        let mut m = 0usize;
-        while m < n {
-            match self.succ_count.next_run_max(n - m) {
-                Some(run) => {
-                    sub += run.value.unwrap_or(0) as usize * run.count;
-                    m += run.count;
-                }
-                None => break, // elided column: no successors
-            }
-        }
+        self.advance_row_cols(n);
+        let sub = run_sum(&mut self.succ_count, n, |c| c.unwrap_or(0) as usize);
         self.succ_actor.advance_by(sub);
         self.succ_ctr.advance_by(sub);
 
@@ -1501,17 +1398,9 @@ impl<'a> ManifoldOps<'a> {
         debug_assert!(n > 0 && self.pos + n <= self.len);
         let last_actor = self.id_actor.nth(n - 1).flatten().expect("id actor");
         let last_ctr = self.id_ctr.nth(n - 1).flatten().expect("id ctr");
-        self.obj_actor.advance_by(n);
-        self.obj_ctr.advance_by(n);
-        self.key_actor.advance_by(n);
-        self.key_ctr.advance_by(n);
-        self.key_str.advance_by(n);
-        self.insert.advance_by(n);
-        self.action.advance_by(n);
         // all counts are zero, so the pred/succ sub-columns stay put
-        self.pred_count.advance_by(n);
+        self.advance_row_cols(n);
         self.succ_count.advance_by(n);
-        self.hint.advance_by(n);
         let val_bytes = self.skip_value_meta(n);
         self.pos += n;
         CleanRun {
@@ -1520,21 +1409,37 @@ impl<'a> ManifoldOps<'a> {
         }
     }
 
+    fn advance_row_cols(&mut self, n: usize) {
+        self.obj_actor.advance_by(n);
+        self.obj_ctr.advance_by(n);
+        self.key_actor.advance_by(n);
+        self.key_ctr.advance_by(n);
+        self.key_str.advance_by(n);
+        self.insert.advance_by(n);
+        self.action.advance_by(n);
+        self.pred_count.advance_by(n);
+        self.hint.advance_by(n);
+    }
+
     fn skip_value_meta(&mut self, n: usize) -> usize {
-        let mut bytes = 0usize;
-        let mut m = 0usize;
-        while m < n {
-            match self.value_meta.next_run_max(n - m) {
-                Some(run) => {
-                    bytes += run.value.map_or(0, |v| v.length()) * run.count;
-                    m += run.count;
-                }
-                None => break, // elided column: no bytes
-            }
-        }
+        let bytes = run_sum(&mut self.value_meta, n, |m| m.map_or(0, |v| v.length()));
         self.val_pos += bytes;
         bytes
     }
+}
+
+/// The sum of `f` over the next `n` items; an elided column sums to 0.
+fn run_sum<D: hexane::RunDecoder>(d: &mut D, n: usize, f: impl Fn(&D::Item) -> usize) -> usize {
+    let mut sum = 0;
+    let mut m = 0;
+    while m < n {
+        let Some(run) = d.next_run_max(n - m) else {
+            break;
+        };
+        sum += f(&run.value) * run.count;
+        m += run.count;
+    }
+    sum
 }
 
 #[rustfmt::skip]

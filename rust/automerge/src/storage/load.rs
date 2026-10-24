@@ -54,11 +54,11 @@ pub(crate) enum LoadedChunk {
 }
 
 pub(crate) enum LoadedChanges<'a> {
-    /// All the data was succesfully loaded
+    /// All the data was succesfully loaded into a list of changes
     Complete(Vec<LoadedChunk>),
-    /// We only managed to load _some_ of it.
+    /// We only managed to load _some_ changes.
     Partial {
-        /// The succesfully loaded chunks
+        /// The succesfully loaded changes
         loaded: Vec<LoadedChunk>,
         /// The data which we were unable to parse
         #[allow(dead_code)]

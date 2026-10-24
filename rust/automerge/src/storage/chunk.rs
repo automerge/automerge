@@ -14,7 +14,6 @@ use crate::{columnar::encoding::leb128::ulebsize, ChangeHash};
 pub(crate) enum Chunk<'a> {
     Document(Document<'a>),
     Change(Change<'a, Unverified>),
-    /// A BundleV0 (chunk type 3), a frozen format — see [`super::bundle_v0`].
     BundleV0(Box<BundleV0Storage<'a>>),
     BundleColumns(Box<crate::storage::Bundle>, Header),
     CompressedChange(Change<'static, Unverified>, Compressed<'a>),
@@ -32,7 +31,7 @@ pub(crate) mod error {
         Leb128(#[from] parse::leb128::Error),
         #[error("failed to parse BundleV0: {0}")]
         BundleV0(#[from] bundle::ParseError),
-        #[error("invalid bundle: {0}")]
+        #[error(transparent)]
         Bundle(#[from] crate::storage::bundle::InvalidBundle),
         #[error("failed to parse header: {0}")]
         Header(#[from] Header),
