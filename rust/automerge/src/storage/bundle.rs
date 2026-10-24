@@ -313,7 +313,11 @@ impl Bundle {
             BundleBuilder::from_written_ops(mapper, change_writer, ops, data)
         } else {
             let mut op_writer = BundleOpWriter::default();
-            op_set.write_all_bundle_ops(&mut op_writer, &mut mapper);
+            crate::op_set2::op_set::RowCopier::new(op_set).copy(
+                0..op_set.len(),
+                &mut op_writer,
+                &mut mapper,
+            );
             BundleBuilder::from_writers(mapper, change_writer, op_writer)
         };
         Ok(builder.finish_with_ranks(&std::collections::HashMap::new()))

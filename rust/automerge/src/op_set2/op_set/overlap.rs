@@ -82,29 +82,16 @@ struct NewDelete {
     key: (Option<ActorIdx>, Option<u32>, Option<String>),
 }
 
-struct Plan {
-    drops: Vec<DropRun>,
-    inserts: Vec<NewDelete>,
-    preds: PredCols,
-    /// false once inserts land at the last run's end: a run must not
-    /// span an insert
-    open_run: bool,
-}
-
 /// Ascending; an insert sorts before a drop at the same row, since it
 /// closes the register the dropped row has already left.
-enum RowOp<'a> {
-    Insert(&'a NewDelete),
-    Drop(&'a DropRun),
+enum Edit {
+    Insert(NewDelete),
+    Drop(DropRun),
 }
 
-impl RowOp<'_> {
-    fn row(&self) -> usize {
-        match self {
-            RowOp::Insert(n) => n.row,
-            RowOp::Drop(d) => d.row,
-        }
-    }
+struct Plan {
+    edits: Vec<Edit>,
+    preds: PredCols,
 }
 
 impl Plan {
@@ -123,10 +110,8 @@ impl Plan {
         let mut value_meta = cols.value_meta.values().iter();
 
         let mut plan = Plan {
-            drops: vec![],
-            inserts: vec![],
+            edits: vec![],
             preds: PredCols::default(),
-            open_run: true,
         };
         let mut succ_pos = 0;
         let mut value_pos = 0;
@@ -208,23 +193,20 @@ impl Plan {
     }
 
     fn push_drop(&mut self, row: usize, succ: Range<usize>, value: Range<usize>) {
-        if self.open_run {
-            if let Some(last) = self.drops.last_mut() {
-                if last.row + last.len == row {
-                    last.len += 1;
-                    last.succ.end = succ.end;
-                    last.value.end = value.end;
-                    return;
-                }
+        if let Some(Edit::Drop(last)) = self.edits.last_mut() {
+            if last.row + last.len == row {
+                last.len += 1;
+                last.succ.end = succ.end;
+                last.value.end = value.end;
+                return;
             }
         }
-        self.open_run = true;
-        self.drops.push(DropRun {
+        self.edits.push(Edit::Drop(DropRun {
             row,
             len: 1,
             succ,
             value,
-        });
+        }));
     }
 
     fn close_register(
@@ -245,7 +227,7 @@ impl Plan {
                 self.preds.push(*target);
             }
             self.preds.hint.append(None);
-            self.inserts.push(NewDelete {
+            self.edits.push(Edit::Insert(NewDelete {
                 row,
                 id: group[0].0,
                 obj: register.obj,
@@ -254,62 +236,51 @@ impl Plan {
                     register.key.1,
                     register.key.2.map(str::to_owned),
                 ),
-            });
-            self.open_run = false;
+            }));
         }
         orphans.clear();
     }
 
     fn apply(self, cols: &mut Columns) -> PredCols {
-        let ops = self.row_ops();
-
+        let edits = &self.edits;
         let null = ValueMeta::from(&ScalarValue::Null);
 
-        macro_rules! edit_rows {
-            ($col:expr, $insert:expr) => {{
-                let value = $insert;
-                let mut e = $col.edit();
-                for op in &ops {
-                    match op {
-                        RowOp::Insert(n) => {
-                            e.seek(n.row).insert(value(*n));
-                        }
-                        RowOp::Drop(d) => {
-                            e.seek(d.row).delete(d.len);
-                        }
-                    }
-                }
-                e.finish();
-            }};
-        }
+        edit_rows(cols.id_actor.identity_mut().edit(), edits, |n| n.id.actor);
+        edit_delta_rows(cols.id_ctr.edit(), edits, |n| n.id.ctr as u32);
+        edit_rows(cols.obj_actor.identity_mut().edit(), edits, |n| n.obj.0);
+        edit_rows(cols.obj_ctr.edit(), edits, |n| n.obj.1);
+        edit_rows(cols.key_actor.identity_mut().edit(), edits, |n| n.key.0);
+        edit_delta_rows(cols.key_ctr.edit(), edits, |n| n.key.1);
+        edit_rows(cols.key_str.edit(), edits, |n| n.key.2.as_deref());
+        edit_rows(cols.insert.edit(), edits, |_| false);
+        edit_rows(cols.action.edit(), edits, |_| Action::Delete);
+        edit_rows(cols.value_meta.edit(), edits, |_| null);
+        edit_rows(cols.mark_name.edit(), edits, |_| None::<&str>);
+        edit_rows(cols.expand.edit(), edits, |_| false);
+        edit_rows(cols.succ_count.edit(), edits, |_| 0);
 
-        edit_rows!(cols.id_actor.identity_mut(), |n: &NewDelete| n.id.actor);
-        edit_rows!(cols.id_ctr, |n: &NewDelete| n.id.ctr as u32);
-        edit_rows!(cols.obj_actor.identity_mut(), |n: &NewDelete| n.obj.0);
-        edit_rows!(cols.obj_ctr, |n: &NewDelete| n.obj.1);
-        edit_rows!(cols.key_actor.identity_mut(), |n: &NewDelete| n.key.0);
-        edit_rows!(cols.key_ctr, |n: &NewDelete| n.key.1);
-        edit_rows!(cols.key_str, key_str);
-        edit_rows!(cols.insert, |_: &NewDelete| false);
-        edit_rows!(cols.action, |_: &NewDelete| Action::Delete);
-        edit_rows!(cols.value_meta, |_: &NewDelete| null);
-        edit_rows!(cols.mark_name, |_: &NewDelete| None::<&str>);
-        edit_rows!(cols.expand, |_: &NewDelete| false);
-        edit_rows!(cols.succ_count, |_: &NewDelete| 0);
-
-        macro_rules! delete_subs {
-            ($col:expr) => {{
-                let mut e = $col.edit();
-                for d in &self.drops {
-                    e.seek(d.succ.start).delete(d.succ.len());
-                }
-                e.finish();
-            }};
+        let drops = || {
+            edits.iter().filter_map(|e| match e {
+                Edit::Drop(d) => Some(d),
+                Edit::Insert(_) => None,
+            })
+        };
+        {
+            let mut e = cols.succ_actor.identity_mut().edit();
+            for d in drops() {
+                e.seek(d.succ.start).delete(d.succ.len());
+            }
+            e.finish();
         }
-        delete_subs!(cols.succ_actor.identity_mut());
-        delete_subs!(cols.succ_ctr);
+        {
+            let mut e = cols.succ_ctr.edit();
+            for d in drops() {
+                e.seek(d.succ.start).delete(d.succ.len());
+            }
+            e.finish();
+        }
         // back to front, so the spans still to cut keep their coordinates
-        for d in self.drops.iter().rev() {
+        for d in drops().rev() {
             if !d.value.is_empty() {
                 cols.value.splice_slice(d.value.start, d.value.len(), &[]);
             }
@@ -318,25 +289,45 @@ impl Plan {
         debug_assert!(cols.check_lengths().is_ok());
         self.preds
     }
-
-    fn row_ops(&self) -> Vec<RowOp<'_>> {
-        let mut ops = Vec::with_capacity(self.drops.len() + self.inserts.len());
-        let mut inserts = self.inserts.iter().peekable();
-        for d in &self.drops {
-            while inserts.peek().is_some_and(|n| n.row <= d.row) {
-                ops.push(RowOp::Insert(inserts.next().unwrap()));
-            }
-            ops.push(RowOp::Drop(d));
-        }
-        ops.extend(inserts.map(RowOp::Insert));
-        debug_assert!(ops.windows(2).all(|w| w[0].row() <= w[1].row()));
-        ops
-    }
 }
 
-/// Not a closure: elision ties the borrow to the row.
-fn key_str(n: &NewDelete) -> Option<&str> {
-    n.key.2.as_deref()
+fn edit_rows<'e, T, WF, Idx, V>(
+    mut e: hexane::edit::Edit<'_, T, hexane::Leb128, WF, Idx>,
+    edits: &'e [Edit],
+    value: impl Fn(&'e NewDelete) -> V,
+) where
+    T: hexane::ColumnValueRef,
+    T::Encoding<hexane::Leb128>: hexane::edit::SlabEdit,
+    WF: hexane::column::WeightFn<T>,
+    Idx: hexane::index::ColumnIndex<WF::Weight>,
+    V: hexane::AsColumnRef<T>,
+{
+    for edit in edits {
+        match edit {
+            Edit::Insert(n) => e.seek(n.row).insert(value(n)),
+            Edit::Drop(d) => e.seek(d.row).delete(d.len),
+        };
+    }
+    e.finish();
+}
+
+fn edit_delta_rows<'e, T>(
+    mut e: hexane::delta::DeltaEdit<'_, T>,
+    edits: &'e [Edit],
+    value: impl Fn(&'e NewDelete) -> T,
+) where
+    T: hexane::DeltaValue,
+    T::Inner: hexane::ColumnValueRef<
+        Encoding<hexane::Leb128> = hexane::RleEncoding<T::Inner, hexane::Leb128>,
+    >,
+{
+    for edit in edits {
+        match edit {
+            Edit::Insert(n) => e.seek(n.row).insert(value(n)),
+            Edit::Drop(d) => e.seek(d.row).delete(d.len),
+        };
+    }
+    e.finish();
 }
 
 fn take_orphans(orphans: &mut Vec<(RawId, RawId)>, id: RawId) -> Vec<RawId> {
@@ -361,23 +352,13 @@ struct PredSrc<'a> {
 
 impl<'a> PredSrc<'a> {
     fn new(columns: &RawColumns<Uncompressed>, data: &'a [u8]) -> Self {
-        let mut s = PredSrc {
-            count: hexane::decoder::<Option<u64>>(&[]),
-            actor: hexane::decoder::<Option<ActorIdx>>(&[]),
-            ctr: hexane::DeltaDecoder::new(&[]),
-            hint: hexane::DeltaDecoder::new(&[]),
-        };
-        for col in columns.iter() {
-            let d = &data[col.data()];
-            match col.spec() {
-                spec::PRED_COUNT => s.count = hexane::decoder::<Option<u64>>(d),
-                spec::PRED_ACTOR => s.actor = hexane::decoder::<Option<ActorIdx>>(d),
-                spec::PRED_CTR => s.ctr = hexane::DeltaDecoder::new(d),
-                spec::HINT => s.hint = hexane::DeltaDecoder::new(d),
-                _ => {}
-            }
+        let col = |spec| super::column_bytes(columns, data, spec);
+        PredSrc {
+            count: hexane::decoder::<Option<u64>>(col(spec::PRED_COUNT)),
+            actor: hexane::decoder::<Option<ActorIdx>>(col(spec::PRED_ACTOR)),
+            ctr: hexane::DeltaDecoder::new(col(spec::PRED_CTR)),
+            hint: hexane::DeltaDecoder::new(col(spec::HINT)),
         }
-        s
     }
 
     /// An absent column decodes as empty: no preds.

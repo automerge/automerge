@@ -34,7 +34,7 @@ use std::ops::{Range, RangeBounds};
 use std::sync::Arc;
 
 mod bundle_copy;
-pub(crate) use bundle_copy::{RowCopier, RowRun, RowRuns, Steps, SuccRuns};
+pub(crate) use bundle_copy::{IdRuns, RowCopier, RowRun, RowRuns, Steps};
 mod found_op;
 pub(crate) mod index;
 mod insert;
@@ -118,32 +118,7 @@ impl OpSet {
         let mut builder = IndexBuilder::new(self.text_encoding);
         builder.process_op_set(self).unwrap();
         let (fresh, _) = builder.finish();
-        assert!(
-            self.cols
-                .index
-                .text
-                .values()
-                .iter()
-                .eq(fresh.text.values().iter()),
-            "text index diverges from rebuild"
-        );
-        assert!(
-            self.cols
-                .index
-                .top
-                .values()
-                .iter()
-                .eq(fresh.top.values().iter()),
-            "top index diverges from rebuild"
-        );
-        assert!(
-            self.cols.index.visible.iter().eq(fresh.visible.iter()),
-            "visible index diverges from rebuild"
-        );
-        assert!(
-            self.cols.index.inc.iter().eq(fresh.inc.iter()),
-            "inc index diverges from rebuild"
-        );
+        self.assert_indexes_eq(&fresh);
         assert!(
             self.cols.index.mark.iter().eq(fresh.mark.iter()),
             "mark index diverges from rebuild"
@@ -151,6 +126,26 @@ impl OpSet {
         assert_eq!(
             self.obj_info, fresh.obj_info,
             "obj info diverges from rebuild"
+        );
+    }
+
+    fn assert_indexes_eq(&self, fresh: &Indexes) {
+        let index = &self.cols.index;
+        assert!(
+            index.text.values().iter().eq(fresh.text.values().iter()),
+            "text index diverges from rebuild"
+        );
+        assert!(
+            index.top.values().iter().eq(fresh.top.values().iter()),
+            "top index diverges from rebuild"
+        );
+        assert!(
+            index.visible.iter().eq(fresh.visible.iter()),
+            "visible index diverges from rebuild"
+        );
+        assert!(
+            index.inc.iter().eq(fresh.inc.iter()),
+            "inc index diverges from rebuild"
         );
     }
 
@@ -1673,18 +1668,12 @@ impl OpSet {
         has_deps: bool,
     ) -> Result<(), ReadOpError> {
         self.validate_keys(has_deps)?;
-        let column = |spec| {
-            raw.iter()
-                .find(|c| c.spec() == spec)
-                .map(|c| &data[c.data()])
-        };
-        self.validate_values(column(super::columns::VALUE_COL_SPEC).unwrap_or_default())?;
-        if let Some(hint) = column(crate::storage::bundle::ops::HINT) {
-            use hexane::ColumnEncoding;
-            <Option<i64> as hexane::ColumnValueRef>::Encoding::<hexane::Leb128>::validate_encoding(
-                hint,
-            )?;
-        }
+        self.validate_values(column_bytes(raw, data, super::columns::VALUE_COL_SPEC))?;
+        let hint = column_bytes(raw, data, crate::storage::bundle::ops::HINT);
+        use hexane::ColumnEncoding;
+        <Option<i64> as hexane::ColumnValueRef>::Encoding::<hexane::Leb128>::validate_encoding(
+            hint,
+        )?;
         Ok(())
     }
 
@@ -1970,23 +1959,7 @@ impl OpSet {
     #[cfg(debug_assertions)]
     pub(crate) fn assert_indexes_under(&self, clock: &Clock) {
         let (fresh, _) = self.indexes_under(clock, |_| false);
-        let index = &self.cols.index;
-        assert!(
-            index.visible.iter().eq(fresh.visible.iter()),
-            "masked visible index diverges"
-        );
-        assert!(
-            index.top.values().iter().eq(fresh.top.values().iter()),
-            "masked top index diverges"
-        );
-        assert!(
-            index.text.values().iter().eq(fresh.text.values().iter()),
-            "masked text index diverges"
-        );
-        assert!(
-            index.inc.iter().eq(fresh.inc.iter()),
-            "masked inc index diverges"
-        );
+        self.assert_indexes_eq(&fresh);
     }
 
     pub(crate) fn succ_iter_range(&self, range: &Range<usize>) -> SuccIterIter<'_> {
@@ -2326,22 +2299,10 @@ fn validate_pred_columns(
     num_rows: usize,
     num_actors: usize,
 ) -> Result<(), ColumnValidationError> {
-    use crate::storage::columns::ColumnType;
-    let mut count_bytes: &[u8] = &[];
-    let mut actor_bytes: &[u8] = &[];
-    let mut ctr_bytes: &[u8] = &[];
-    for col in raw.iter() {
-        if col.spec().id() != PRED_COL_ID {
-            continue;
-        }
-        let d = &data[col.data()];
-        match col.spec().col_type() {
-            ColumnType::Group => count_bytes = d,
-            ColumnType::Actor => actor_bytes = d,
-            ColumnType::DeltaInteger => ctr_bytes = d,
-            _ => {}
-        }
-    }
+    use crate::storage::bundle::ops::{PRED_ACTOR, PRED_COUNT, PRED_CTR};
+    let count_bytes = column_bytes(raw, data, PRED_COUNT);
+    let actor_bytes = column_bytes(raw, data, PRED_ACTOR);
+    let ctr_bytes = column_bytes(raw, data, PRED_CTR);
     // an elided pred column means no preds anywhere
     if count_bytes.is_empty() {
         if !actor_bytes.is_empty() || !ctr_bytes.is_empty() {
@@ -2389,7 +2350,18 @@ fn validate_pred_columns(
     Ok(())
 }
 
-const PRED_COL_ID: crate::storage::columns::ColumnId = crate::storage::columns::ColumnId::new(7);
+/// The bytes of `raw`'s last column with `spec`; empty if it has none.
+fn column_bytes<'a>(
+    raw: &RawColumns<Uncompressed>,
+    data: &'a [u8],
+    spec: crate::storage::ColumnSpec,
+) -> &'a [u8] {
+    raw.0
+        .iter()
+        .rev()
+        .find(|c| c.spec() == spec)
+        .map_or(&[], |c| &data[c.data()])
+}
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum ColumnValidationError {

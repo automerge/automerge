@@ -63,6 +63,16 @@ impl ActorMap {
         }
     }
 
+    #[inline]
+    pub(crate) fn to_logical<T: MapActor>(&self, v: T) -> T {
+        v.map_actor(|a| self.logical(a))
+    }
+
+    #[inline]
+    pub(crate) fn to_stored<T: MapActor>(&self, v: T) -> T {
+        v.map_actor(|a| self.stored(a))
+    }
+
     /// The map after inserting a new actor at sorted position `logical`,
     /// with `len` actors existing before the insert. O(actors).
     pub(crate) fn insert(&self, logical: usize, len: usize) -> Arc<Self> {
@@ -191,29 +201,14 @@ where
         let col = if map.is_identity() {
             hexane::Column::from_values(vals)
         } else {
-            let m = map.clone();
-            hexane::Column::from_values(
-                vals.into_iter()
-                    .map(|v| v.map_actor(|a| m.stored(a)))
-                    .collect::<Vec<_>>(),
-            )
+            hexane::Column::from_values(vals.into_iter().map(|v| map.to_stored(v)).collect())
         };
         MappedColumn { col, map }
     }
 
     #[inline]
     pub(crate) fn get(&self, pos: usize) -> Option<T> {
-        self.col.get(pos).map(|v| self.log_val(v))
-    }
-
-    #[inline]
-    pub(crate) fn log_val(&self, v: T) -> T {
-        if self.map.is_identity() {
-            v
-        } else {
-            let map = &self.map;
-            v.map_actor(|a| map.logical(a))
-        }
+        self.col.get(pos).map(|v| self.map.to_logical(v))
     }
 
     #[inline]
@@ -222,11 +217,6 @@ where
             iter: self.col.iter(),
             map: &self.map,
         }
-    }
-
-    /// Yields stored values: map them through [`Self::log_val`].
-    pub(crate) fn stored_iter(&self) -> hexane::Iter<'_, T> {
-        self.col.iter()
     }
 
     #[inline]
@@ -254,9 +244,7 @@ where
             self.col.splice(
                 index,
                 del,
-                values
-                    .into_iter()
-                    .map(move |v| v.map_actor(|a| map.stored(a))),
+                values.into_iter().map(move |v| map.to_stored(v)),
             );
         }
     }
@@ -276,13 +264,7 @@ where
                 let at = (sp.pos as isize + shift) as usize;
                 let vals: Vec<T> = src
                     .iter_range(sp.range.clone())
-                    .map(|v| {
-                        if self.map.is_identity() {
-                            v
-                        } else {
-                            v.map_actor(|a| self.map.stored(a))
-                        }
-                    })
+                    .map(|v| self.map.to_stored(v))
                     .collect();
                 shift += vals.len() as isize - sp.delete as isize;
                 self.col.splice(at, sp.delete, vals);
@@ -314,7 +296,7 @@ where
         let mut c = self.col.clone();
         if !self.map.is_identity() {
             let map = self.map.clone();
-            c.remap(move |v: T| v.map_actor(|a| map.logical(a)));
+            c.remap(move |v: T| map.to_logical(v));
         }
         c
     }
@@ -324,7 +306,7 @@ where
     pub(crate) fn flush(&mut self) {
         if !self.map.is_identity() {
             let map = self.map.clone();
-            self.col.remap(move |v: T| v.map_actor(|a| map.logical(a)));
+            self.col.remap(move |v: T| map.to_logical(v));
         }
         self.map = ActorMap::identity();
     }
@@ -359,37 +341,40 @@ where
     pub(crate) fn scope_to_value(
         &self,
         value: T,
-        range: impl std::ops::RangeBounds<usize>,
+        range: std::ops::Range<usize>,
     ) -> std::ops::Range<usize> {
         if self.map.is_identity() {
             return self.col.scope_to_value(value, range);
         }
-        let start = match range.start_bound() {
-            std::ops::Bound::Unbounded => 0,
-            std::ops::Bound::Included(&s) => s,
-            std::ops::Bound::Excluded(&s) => s + 1,
-        };
-        let end = match range.end_bound() {
-            std::ops::Bound::Unbounded => self.col.len(),
-            std::ops::Bound::Included(&e) => e + 1,
-            std::ops::Bound::Excluded(&e) => e,
-        };
-        let mut it = self.col.iter_range(start..end);
-        let mut pos = start;
-        let mut found: Option<std::ops::Range<usize>> = None;
-        while let Some(run) = it.next_run() {
-            match run.value.map_actor(|a| self.map.logical(a)).cmp(&value) {
-                std::cmp::Ordering::Less => pos += run.count,
-                std::cmp::Ordering::Equal => {
-                    let f = found.get_or_insert(pos..pos);
-                    pos += run.count;
-                    f.end = pos;
-                }
-                std::cmp::Ordering::Greater => break,
-            }
-        }
-        found.unwrap_or(pos..pos)
+        scan_to_value(self.col.iter_range(range), &self.map, value)
     }
+}
+
+/// The rows of `it`'s window, sorted by logical value, that hold `target`,
+/// or an empty range at the insertion point.
+fn scan_to_value<T>(
+    mut it: hexane::Iter<'_, T>,
+    map: &ActorMap,
+    target: T,
+) -> std::ops::Range<usize>
+where
+    T: MapActor + Ord,
+    T: for<'x> hexane::ColumnValueRef<Get<'x> = T>,
+{
+    let mut pos = it.pos();
+    let mut found: Option<std::ops::Range<usize>> = None;
+    while let Some(run) = it.next_run() {
+        match map.to_logical(run.value).cmp(&target) {
+            std::cmp::Ordering::Less => pos += run.count,
+            std::cmp::Ordering::Equal => {
+                let f = found.get_or_insert(pos..pos);
+                pos += run.count;
+                f.end = pos;
+            }
+            std::cmp::Ordering::Greater => break,
+        }
+    }
+    found.unwrap_or(pos..pos)
 }
 
 #[derive(Debug, Clone)]
@@ -407,16 +392,6 @@ where
     T: for<'x> hexane::ColumnValueRef<Get<'x> = T>,
     T: hexane::AsColumnRef<T>,
 {
-    #[inline]
-    pub(crate) fn log_val(&self, v: T) -> T {
-        if self.map.is_identity() {
-            v
-        } else {
-            let map = &self.map;
-            v.map_actor(|a| map.logical(a))
-        }
-    }
-
     #[inline]
     pub(crate) fn pos(&self) -> usize {
         self.iter.pos()
@@ -443,6 +418,11 @@ where
     }
 
     #[inline]
+    pub(crate) fn shift(&mut self, range: std::ops::Range<usize>) {
+        self.iter.shift(range)
+    }
+
+    #[inline]
     pub(crate) fn shift_next(&mut self, range: std::ops::Range<usize>) -> Option<T> {
         self.iter.set_max(range.end);
         let n = range.start - self.iter.pos();
@@ -460,7 +440,7 @@ where
         let run = self.iter.next_run()?;
         Some(hexane::Run {
             count: run.count,
-            value: self.log_val(run.value),
+            value: self.map.to_logical(run.value),
         })
     }
 
@@ -470,40 +450,17 @@ where
     pub(crate) fn seek_to_value(
         &mut self,
         target: T,
-        range: impl std::ops::RangeBounds<usize>,
+        range: std::ops::Range<usize>,
     ) -> std::ops::Range<usize> {
         if self.map.is_identity() {
             return self.iter.seek_to_value(target, range);
         }
-        let start = match range.start_bound() {
-            std::ops::Bound::Unbounded => 0,
-            std::ops::Bound::Included(&s) => s,
-            std::ops::Bound::Excluded(&s) => s + 1,
-        };
-        let end = match range.end_bound() {
-            std::ops::Bound::Unbounded => self.iter.end_pos(),
-            std::ops::Bound::Included(&e) => e + 1,
-            std::ops::Bound::Excluded(&e) => e,
-        };
-        if start > self.iter.pos() {
-            self.iter.advance_to(start);
+        if range.start > self.iter.pos() {
+            self.iter.advance_to(range.start);
         }
-        let mut checkpoint = self.iter.clone();
-        checkpoint.set_max(end);
-        let mut pos = checkpoint.pos();
-        let mut found: Option<std::ops::Range<usize>> = None;
-        while let Some(run) = checkpoint.next_run() {
-            match run.value.map_actor(|a| self.map.logical(a)).cmp(&target) {
-                std::cmp::Ordering::Less => pos += run.count,
-                std::cmp::Ordering::Equal => {
-                    let f = found.get_or_insert(pos..pos);
-                    pos += run.count;
-                    f.end = pos;
-                }
-                std::cmp::Ordering::Greater => break,
-            }
-        }
-        let range = found.unwrap_or(pos..pos);
+        let mut window = self.iter.clone();
+        window.set_max(range.end);
+        let range = scan_to_value(window, self.map, target);
         self.iter.advance_to(range.start);
         range
     }
@@ -559,13 +516,13 @@ where
     #[inline]
     fn next(&mut self) -> Option<T> {
         let v = self.iter.next()?;
-        Some(self.log_val(v))
+        Some(self.map.to_logical(v))
     }
 
     #[inline]
     fn nth(&mut self, n: usize) -> Option<T> {
         let v = self.iter.nth(n)?;
-        Some(self.log_val(v))
+        Some(self.map.to_logical(v))
     }
 }
 
