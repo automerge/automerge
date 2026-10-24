@@ -1,6 +1,5 @@
 use super::SampledBenchmark;
-use benchmark_battery::automerge::Automerge;
-use benchmark_battery::rand;
+use benchmark_battery::{load_masked, rand};
 use std::hint::black_box;
 
 pub fn benchmarks() -> Vec<SampledBenchmark> {
@@ -9,7 +8,7 @@ pub fn benchmarks() -> Vec<SampledBenchmark> {
 
 fn diff() -> Box<dyn FnMut()> {
     let data = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/data/essay.amrg")).unwrap();
-    let doc = Automerge::load(&data).unwrap();
+    let doc = load_masked(&data);
     let history = doc
         .get_changes(&[])
         .iter()

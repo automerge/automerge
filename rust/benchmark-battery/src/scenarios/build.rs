@@ -6,6 +6,12 @@ use std::hint::black_box;
 
 const N: u64 = 100_000;
 
+// Deliberately unmasked. The measured operation builds the document from
+// empty, so there are no heads to pin a frontier at; a frontier set on the
+// empty document would bound every author but the local user at nothing and
+// send three quarters of the build through the masked-transaction path, which
+// is a different benchmark. Local writes under a frontier are measured by
+// `list/list_update_now`, `list/list_splice_index_now` and `marks/add_mark`.
 pub fn benchmarks() -> Vec<SampledBenchmark> {
     vec![
         SampledBenchmark::no_setup("build", "build/build_typing", build_typing),
