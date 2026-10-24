@@ -177,9 +177,6 @@ impl<'a> Iterator for ListDiff<'a> {
             let item = if let Some(mut last) = last_visible {
                 let newly_visible = last.diff == Diff::Same;
                 last.state.expose |= state.expose || newly_visible;
-                if last.state.expose && last.diff == Diff::Same {
-                    last.diff = Diff::Add;
-                }
                 // Deleting the winning value exposes `last`, so its put
                 // patch must carry the remaining register's conflict state.
                 last.state.conflict = state.num_new > 1;
@@ -195,7 +192,6 @@ impl<'a> Iterator for ListDiff<'a> {
                 if diff == Diff::Same && pending.state.num_old > 1 && pending.state.num_new == 1 {
                     // the survivor is unchanged but loses its conflict flag
                     pending.state.expose = true;
-                    pending.diff = Diff::Add;
                 }
                 self.materialize(op_set, pending)
             };

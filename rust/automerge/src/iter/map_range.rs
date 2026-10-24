@@ -154,15 +154,6 @@ struct PendingMapDiffItem<'a> {
     expose: bool,
 }
 
-impl PendingMapDiffItem<'_> {
-    fn update(&mut self, expose: bool) {
-        self.expose |= expose;
-        if self.expose && self.diff == Diff::Same {
-            self.diff = Diff::Add;
-        }
-    }
-}
-
 impl<'a> Iterator for MapIter<'a> {
     type Item = MapEntry<'a>;
 
@@ -251,7 +242,7 @@ impl<'a> Iterator for MapDiff<'a> {
             if diff.is_del() {
                 if let Some(mut last) = last_visible.take() {
                     let newly_visible = last.diff == Diff::Same;
-                    last.update(expose || newly_visible);
+                    last.expose |= expose || newly_visible;
                     // Deleting the winning value exposes `last`, so its put
                     // patch must describe the conflict state after deletion,
                     // not merely whether the conflict is newly created.
@@ -269,7 +260,7 @@ impl<'a> Iterator for MapDiff<'a> {
                 // The surviving value is unchanged, but removing the other
                 // visible values clears its conflict flag. Emit a Put so a
                 // hydrated-state consumer can observe that metadata change.
-                item.update(true);
+                item.expose = true;
             }
             return Some(self.materialize(op_set, item));
         }
