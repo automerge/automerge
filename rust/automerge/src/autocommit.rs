@@ -424,7 +424,7 @@ impl<H: HashRetention> AutoCommit<H> {
     pub fn isolate(&mut self, heads: &[ChangeId]) -> Result<(), AutomergeError> {
         self.ensure_transaction_closed();
         // changes committed in isolation record these heads' hashes as deps
-        self.doc.resolve_heads(heads)?;
+        self.doc.change_ids_to_hashes(heads)?;
         self.patch_to(heads);
         self.isolation = Some(heads.to_vec());
         Ok(())
@@ -730,15 +730,6 @@ impl<H: HashRetention> AutoCommit<H> {
         self.doc.get_head_hashes()
     }
 
-    /// Get the [`ChangeId`] of the change that contains the given `opid`.
-    ///
-    /// Returns [`None`] if the `opid` is the root object id, does not
-    /// exist in this document, or is for an operation in the open
-    /// transaction.
-    pub fn change_id_for_opid(&self, opid: &ExId) -> Option<ChangeId> {
-        self.doc.change_id_for_opid(opid)
-    }
-
     /// Whether this document contains the change identified by `id`.
     pub fn has_change_id(&self, id: &ChangeId) -> bool {
         self.doc.has_change_id(id)
@@ -961,7 +952,7 @@ impl<H: HashRetention> TxDoc for AutoCommit<H> {
     fn tx_base_heads(&self) -> Vec<ChangeHash> {
         if let Some(i) = &self.isolation {
             self.doc
-                .resolve_heads(i)
+                .change_ids_to_hashes(i)
                 .expect("isolation ids were validated when isolating")
         } else {
             self.doc.get_head_hashes()

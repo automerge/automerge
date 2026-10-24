@@ -38,7 +38,7 @@ impl<H: crate::hash_retention::HashRetention> OwnedTransaction<H> {
     ) -> Result<Self, AutomergeError> {
         if let Some(h) = heads {
             // fail fast: committing records these heads' hashes as deps
-            doc.resolve_heads(h)?;
+            doc.change_ids_to_hashes(h)?;
         }
         let args = doc.transaction_args(heads);
         Ok(Self {
