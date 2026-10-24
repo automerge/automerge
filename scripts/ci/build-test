@@ -5,6 +5,7 @@ pushd rust
 # `deep_fuzz` re-enables the expensive fuzzers that a plain `cargo test`
 # skips; CI is the place that can afford them.
 RUST_LOG=error cargo test -p automerge --features slow_path_assertions,deep_fuzz
+RUST_LOG=error cargo test -p automerge --features utf16-indexing
 RUST_LOG=error cargo test -p hexane --features slow_path_assertions,deep_fuzz
 RUST_LOG=error cargo test -p automerge-test
 RUST_LOG=error cargo test -p automerge-c

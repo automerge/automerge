@@ -1,8 +1,8 @@
 use automerge::{
     marks::{ExpandMark, Mark},
     transaction::Transactable,
-    ActorId, Author, AutoCommit, Automerge, ObjType, PatchAction, ReadDoc, ScalarValue,
-    TextEncoding, ROOT,
+    ActorId, Author, AutoCommit, Automerge, LoadOptions, ObjType, PatchAction, ReadDoc,
+    ScalarValue, TextEncoding, ROOT,
 };
 
 #[path = "support/rich_model.rs"]
@@ -516,7 +516,11 @@ fn regression_masked_mark_does_not_attract_inserts() {
     assert_eq!(main.text(&text).unwrap(), "\u{fffc}a");
     // The insert's recorded predecessor is a real element, not a mark op:
     // the history round-trips and reads back identically.
-    let reload = Automerge::load(&main.save()).expect("saved document reloads");
+    let reload = Automerge::load_with_options(
+        &main.save(),
+        LoadOptions::new().text_encoding(TextEncoding::UnicodeCodePoint),
+    )
+    .expect("saved document reloads");
     assert_eq!(
         main.document().hydrate(None),
         reload
