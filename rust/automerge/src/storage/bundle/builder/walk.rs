@@ -1,4 +1,4 @@
-use crate::op_set2::op_set::{OpIter, RowRun, RowRuns, Steps, SuccRuns};
+use crate::op_set2::op_set::{IdRuns, OpIter, RowRun, RowRuns, Steps};
 use crate::op_set2::types::KeyRef;
 use crate::op_set2::{OpSet, ReadOpError};
 use crate::types::{ElemId, OpId};
@@ -149,7 +149,7 @@ impl<'a> BundleBuilder<'a> {
         run: &RowRun,
         n: usize,
         row: usize,
-        mut succ_runs: SuccRuns<'_>,
+        mut succ_runs: IdRuns<'_>,
         succ: &mut Vec<OpId>,
     ) -> Result<(), ReadOpError> {
         let per_row = run.succ as usize;

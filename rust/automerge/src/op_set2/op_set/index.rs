@@ -219,7 +219,7 @@ where
         }
     }
 
-    fn try_next_obj(&mut self) -> Result<Option<(ObjId, usize)>, ReadOpError> {
+    pub(crate) fn try_next_obj(&mut self) -> Result<Option<(ObjId, usize)>, ReadOpError> {
         let (Some(actor), Some(ctr)) = (self.actor.peek()?, self.ctr.peek()?) else {
             return Ok(None);
         };
@@ -421,14 +421,8 @@ impl IndexBuilder {
     }
 
     fn push_mark(&mut self, mark_index: Option<MarkIndexBuilder>) {
-        self.group_marks.push(match mark_index {
-            Some(MarkIndexBuilder::Start(id, mark)) => {
-                self.mark_cache.insert(id, mark);
-                Some(MarkIdx::Start(id))
-            }
-            Some(MarkIndexBuilder::End(id)) => Some(MarkIdx::End(id)),
-            None => None,
-        });
+        let cache = &mut self.mark_cache;
+        self.group_marks.push(mark_index.map(|m| m.into_idx(cache)));
     }
 
     fn apply_increment(&mut self, id: OpId, inc_value: Option<i64>, visible: bool) {
@@ -561,35 +555,29 @@ impl IndexBuilder {
             bounds.start_obj(seq, obj_len, split)?;
 
             while let Some((group_len, repeat)) = bounds.next_batch()? {
-                if group_len == 1 && repeat > 1 {
-                    let mut remaining = repeat;
+                let singletons = group_len == 1 && repeat > 1;
+                let (spans, span_len) = if singletons {
+                    (1, repeat)
+                } else {
+                    (repeat, group_len)
+                };
+                for _ in 0..spans {
+                    let mut remaining = span_len;
                     while remaining > 0 {
                         let run = iter
                             .next_run(remaining)?
                             .ok_or(ReadOpError::MissingValue("index columns"))?;
                         remaining -= run.count;
                         if self.is_rare(&run) {
-                            self.rare_run(&run, pos, obj, objrep, &mut rare, true)?;
-                        } else {
+                            self.rare_run(&run, pos, obj, objrep, &mut rare, singletons)?;
+                        } else if singletons {
                             self.stream_singletons(&run, objrep, &mut rare)?;
+                        } else {
+                            self.buffer_run(&run, objrep, &mut rare)?;
                         }
                         pos += run.count;
                     }
-                } else {
-                    for _ in 0..repeat {
-                        let mut remaining = group_len;
-                        while remaining > 0 {
-                            let run = iter
-                                .next_run(remaining)?
-                                .ok_or(ReadOpError::MissingValue("index columns"))?;
-                            remaining -= run.count;
-                            if self.is_rare(&run) {
-                                self.rare_run(&run, pos, obj, objrep, &mut rare, false)?;
-                            } else {
-                                self.buffer_run(&run, objrep, &mut rare)?;
-                            }
-                            pos += run.count;
-                        }
+                    if !singletons {
                         self.flush();
                     }
                 }
@@ -1130,7 +1118,6 @@ fn vis_num(op: &Op<'_>, clock: Option<&Clock>) -> u32 {
 #[cfg(test)]
 mod tests {
     use crate::automerge::Automerge;
-    use crate::op_set2::change::IndexedChangeCollector;
     use crate::tx::Transactable;
     use crate::{ObjType, ROOT};
 
@@ -1140,8 +1127,15 @@ mod tests {
         let op_set = reloaded.ops();
 
         let mut by_ops = op_set.index_builder();
-        let mut icc = IndexedChangeCollector::index_only(&mut by_ops);
-        icc.process_ops(op_set).unwrap();
+        let mut last = None;
+        for op in op_set.iter() {
+            let next = Some((op.obj, op.elemid_or_key()));
+            if last != next {
+                by_ops.flush();
+                last = next;
+            }
+            by_ops.process_op(&op, None);
+        }
         let (ops_indexes, _) = by_ops.finish();
 
         let mut by_cols = op_set.index_builder();

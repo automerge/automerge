@@ -31,63 +31,6 @@ use crate::{
 #[error("out of memory")]
 pub(crate) struct OutOfMemory;
 
-/// Op-at-a-time reference for [`IndexBuilder::process_columns`].
-#[cfg(test)]
-pub(crate) struct IndexedChangeCollector<'a> {
-    pub(crate) index: &'a mut IndexBuilder,
-    collector: Option<ChangeCollector<'a>>,
-    last: Option<(ObjId, KeyRef<'a>)>,
-}
-
-#[cfg(test)]
-impl<'a> IndexedChangeCollector<'a> {
-    /// [`Self::collect`] may not be called on the result.
-    #[cfg(test)]
-    pub(crate) fn index_only(index: &'a mut IndexBuilder) -> Self {
-        IndexedChangeCollector {
-            index,
-            collector: None,
-            last: None,
-        }
-    }
-
-    pub(crate) fn process_ops(&mut self, op_set: &'a OpSet) -> Result<(), ReadOpError> {
-        let mut iter = op_set.iter();
-
-        while let Some(op) = iter.try_next()? {
-            let op_id = op.id;
-            let op_succ = op.succ();
-
-            self.process_op(op);
-
-            for id in op_succ {
-                if let Some(collector) = &mut self.collector {
-                    collector.process_succ(op_id, id);
-                }
-            }
-        }
-        Ok(())
-    }
-
-    pub(crate) fn process_op(&mut self, op: Op<'a>) {
-        let next = Some((op.obj, op.elemid_or_key()));
-        let flush = self.last != next;
-        if flush {
-            self.index.flush();
-        }
-        self.index.process_op(&op, None);
-        if let Some(collector) = &mut self.collector {
-            collector.process_op_internal(op, flush);
-            if flush {
-                collector.last = next.clone();
-            }
-        }
-        if flush {
-            self.last = next;
-        }
-    }
-}
-
 // TODO: the most memory efficient version of the ChangeCollector
 // would consume a change_meta_iter and an op_iter and itself be an iterator
 // that emits Change's.  This iterator could then be fed into a
@@ -883,6 +826,28 @@ impl<'a> ChangeCollector<'a> {
         have_deps: &[ChangeHash],
     ) -> Result<Vec<ChangeMetadata<'a>>, AutomergeError> {
         let changes = change_graph.get_build_metadata_clock(have_deps)?;
+        Self::metadata(op_set, change_graph, authors, changes)
+    }
+
+    pub(crate) fn meta_for_hashes<I, H: crate::hash_retention::HashRetention>(
+        op_set: &'a OpSet,
+        change_graph: &'a ChangeGraph<H>,
+        authors: &'a Authors,
+        hashes: I,
+    ) -> Result<Vec<ChangeMetadata<'a>>, AutomergeError>
+    where
+        I: IntoIterator<Item = ChangeHash>,
+    {
+        let changes = change_graph.get_build_metadata(hashes)?;
+        Self::metadata(op_set, change_graph, authors, changes)
+    }
+
+    fn metadata<H: crate::hash_retention::HashRetention>(
+        op_set: &'a OpSet,
+        change_graph: &'a ChangeGraph<H>,
+        authors: &'a Authors,
+        changes: Vec<BuildChangeMetadata<'a>>,
+    ) -> Result<Vec<ChangeMetadata<'a>>, AutomergeError> {
         changes
             .into_iter()
             .map(|c| {
@@ -910,45 +875,6 @@ impl<'a> ChangeCollector<'a> {
                 })
             })
             .collect()
-    }
-
-    pub(crate) fn meta_for_hashes<I, H: crate::hash_retention::HashRetention>(
-        op_set: &'a OpSet,
-        change_graph: &'a ChangeGraph<H>,
-        authors: &'a Authors,
-        hashes: I,
-    ) -> Result<Vec<ChangeMetadata<'a>>, AutomergeError>
-    where
-        I: IntoIterator<Item = ChangeHash>,
-    {
-        let changes = change_graph.get_build_metadata(hashes)?;
-        changes
-            .into_iter()
-            .map(|c| -> Result<_, AutomergeError> {
-                Ok(ChangeMetadata {
-                    actor: Cow::Borrowed(&op_set.actors[c.actor]),
-                    author: authors.get_author_for_actor(c.actor),
-                    seq: c.seq,
-                    start_op: c.start_op,
-                    max_op: c.max_op,
-                    timestamp: c.timestamp,
-                    message: c.message,
-                    deps: c
-                        .deps
-                        .iter()
-                        .map(|n| {
-                            change_graph
-                                .index_to_hash(*n as usize)
-                                .ok_or(AutomergeError::AuditModeRequired)
-                        })
-                        .collect::<Result<_, _>>()?,
-                    hash: change_graph
-                        .try_index_to_hash(c.builder)
-                        .map_err(AutomergeError::from)?,
-                    extra: c.extra,
-                })
-            })
-            .collect::<Result<_, _>>()
     }
 
     pub(crate) fn for_hashes<I, H: crate::hash_retention::HashRetention>(
@@ -1273,16 +1199,13 @@ impl<'a> ChangeCollector<'a> {
     }
 
     /// Like [`Self::collect`], but holds only each change's hash and op
-    /// count. Call [`Self::hashing`] before adding ops to hash changes as
-    /// they complete rather than all at the end.
+    /// count. Panics unless [`Self::hashing`] or [`Self::hashing_bundle`]
+    /// came before the ops were added.
     pub(crate) fn collect_hashes(mut self) -> Result<CollectedHashes, Error> {
-        if self.hashing.is_none() {
-            self = self.hashing();
-        }
         self.flush_deletes();
         self.advance(true);
         self.take_error()?;
-        let cursor = self.hashing.expect("hashing was set above");
+        let cursor = self.hashing.expect("collect_hashes without hashing");
         Ok(CollectedHashes {
             hashes: cursor.hashes,
             num_ops: cursor.num_ops,

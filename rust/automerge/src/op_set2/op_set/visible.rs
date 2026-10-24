@@ -1,7 +1,6 @@
 use crate::{marks::MarkSet, types::Clock};
 
 use super::{ActionIter, Op, OpId, OpIdIter, OpQueryTerm, SuccIterIter};
-use crate::op_set2::op::SuccCursors;
 use crate::op_set2::types::{Action, ScalarValue};
 use crate::op_set2::OpSet;
 
@@ -71,15 +70,8 @@ impl Shiftable for ScanVisIter<'_> {
     }
 
     fn shift_next(&mut self, range: Range<usize>) -> Option<usize> {
-        let id = self.id.shift_next(range.clone())?;
-        let action = self.action.shift_next(range.clone())?;
-        let vis = if Self::hidden_whatever_succ(id, action, &self.clock) {
-            self.succ.shift_skip_next(range)?;
-            false
-        } else {
-            let succ = self.succ.shift_next(range)?;
-            Self::is_visible_with_succ(succ, &self.clock)
-        };
+        self.shift(range);
+        let vis = self.next_visible()?;
         if vis {
             Some(0)
         } else {
@@ -193,15 +185,6 @@ impl<'a> ScanVisIter<'a> {
 
     fn hidden_whatever_succ(id: OpId, action: Action, clock: &Clock) -> bool {
         action == Action::Increment || !clock.covers(&id)
-    }
-
-    fn is_visible_with_succ(succ: SuccCursors<'_>, clock: &Clock) -> bool {
-        for (id, inc) in succ.with_inc() {
-            if inc.is_none() && clock.covers(&id) {
-                return false;
-            }
-        }
-        true
     }
 
     fn next_visible(&mut self) -> Option<bool> {

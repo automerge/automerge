@@ -1053,7 +1053,7 @@ impl<'a> Op<'a> {
     }
 
     pub(crate) fn is_counter(&self) -> bool {
-        self.value.is_counter()
+        matches!(&self.value, ScalarValue::Counter(_))
     }
 
     pub(crate) fn is_mark(&self) -> bool {

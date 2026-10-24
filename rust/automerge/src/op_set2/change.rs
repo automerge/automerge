@@ -17,8 +17,6 @@ pub(crate) mod batch;
 pub(crate) mod bundle;
 pub(crate) mod collector;
 
-#[cfg(test)]
-pub(crate) use collector::IndexedChangeCollector;
 pub(crate) use collector::{BuildChangeMetadata, ChangeCollector, CollectedHashes, OutOfMemory};
 
 pub(crate) trait GetHash {

@@ -34,7 +34,7 @@ use std::ops::{Range, RangeBounds};
 use std::sync::Arc;
 
 mod bundle_copy;
-pub(crate) use bundle_copy::{RowCopier, RowRun, RowRuns, Steps, SuccRuns};
+pub(crate) use bundle_copy::{IdRuns, RowCopier, RowRun, RowRuns, Steps};
 mod found_op;
 pub(crate) mod index;
 mod insert;
@@ -118,32 +118,7 @@ impl OpSet {
         let mut builder = IndexBuilder::new(self.text_encoding);
         builder.process_op_set(self).unwrap();
         let (fresh, _) = builder.finish();
-        assert!(
-            self.cols
-                .index
-                .text
-                .values()
-                .iter()
-                .eq(fresh.text.values().iter()),
-            "text index diverges from rebuild"
-        );
-        assert!(
-            self.cols
-                .index
-                .top
-                .values()
-                .iter()
-                .eq(fresh.top.values().iter()),
-            "top index diverges from rebuild"
-        );
-        assert!(
-            self.cols.index.visible.iter().eq(fresh.visible.iter()),
-            "visible index diverges from rebuild"
-        );
-        assert!(
-            self.cols.index.inc.iter().eq(fresh.inc.iter()),
-            "inc index diverges from rebuild"
-        );
+        self.assert_indexes_eq(&fresh);
         assert!(
             self.cols.index.mark.iter().eq(fresh.mark.iter()),
             "mark index diverges from rebuild"
@@ -151,6 +126,26 @@ impl OpSet {
         assert_eq!(
             self.obj_info, fresh.obj_info,
             "obj info diverges from rebuild"
+        );
+    }
+
+    fn assert_indexes_eq(&self, fresh: &Indexes) {
+        let index = &self.cols.index;
+        assert!(
+            index.text.values().iter().eq(fresh.text.values().iter()),
+            "text index diverges from rebuild"
+        );
+        assert!(
+            index.top.values().iter().eq(fresh.top.values().iter()),
+            "top index diverges from rebuild"
+        );
+        assert!(
+            index.visible.iter().eq(fresh.visible.iter()),
+            "visible index diverges from rebuild"
+        );
+        assert!(
+            index.inc.iter().eq(fresh.inc.iter()),
+            "inc index diverges from rebuild"
         );
     }
 
@@ -188,8 +183,8 @@ impl OpSet {
     }
 
     /// The batched form of [`expose`](Self::expose) /
-    /// [`conflict`](Self::conflict): one forward pass per index column.
-    /// `dirty` also marks the written rows dirty.
+    /// [`conflict`](Self::conflict). `dirty` also marks the written rows
+    /// dirty.
     ///
     /// Panics (debug) if positions are not strictly ascending, or if a row
     /// is given `top` without being visible.
@@ -413,21 +408,7 @@ impl OpSet {
         range: &Range<usize>,
         obj_range: Range<usize>,
     ) -> bool {
-        if range.is_empty() {
-            return true;
-        }
-        if self
-            .map_key_register_at_pos(range.start, obj_range.clone())
-            .start
-            != range.start
-        {
-            return false;
-        }
-        if range.end < obj_range.end {
-            self.map_key_register_at_pos(range.end, obj_range).start == range.end
-        } else {
-            true
-        }
+        self.is_on_register_boundaries(range, obj_range, Self::map_key_register_at_pos)
     }
 
     pub(crate) fn list_range_is_on_register_boundaries(
@@ -435,21 +416,22 @@ impl OpSet {
         range: &Range<usize>,
         obj_range: Range<usize>,
     ) -> bool {
+        self.is_on_register_boundaries(range, obj_range, Self::list_register_at_pos)
+    }
+
+    fn is_on_register_boundaries(
+        &self,
+        range: &Range<usize>,
+        obj_range: Range<usize>,
+        register_at: fn(&Self, usize, Range<usize>) -> Range<usize>,
+    ) -> bool {
         if range.is_empty() {
             return true;
         }
-        if self
-            .list_register_at_pos(range.start, obj_range.clone())
-            .start
-            != range.start
-        {
+        if register_at(self, range.start, obj_range.clone()).start != range.start {
             return false;
         }
-        if range.end < obj_range.end {
-            self.list_register_at_pos(range.end, obj_range).start == range.end
-        } else {
-            true
-        }
+        range.end >= obj_range.end || register_at(self, range.end, obj_range).start == range.end
     }
 
     /// A cursor whose running total is the count of visible elements
@@ -518,7 +500,6 @@ impl OpSet {
         }
     }
 
-    /// Write a batch of succ additions in one pass per column.
     pub(crate) fn add_succ(&mut self, s: DocSucc) {
         if s.is_empty() {
             return;
@@ -1400,76 +1381,35 @@ impl OpSet {
 
     /// Checks the cross-column invariants that per-op decoding would
     /// otherwise catch: consistent column lengths, actor indexes in range,
-    /// and object ids that are whole and strictly increasing. Runs at
-    /// run/length granularity, without decoding ops.
-    pub(crate) fn column_validation(&self) -> Result<(), ColumnValidationError> {
+    /// and object ids that are whole and strictly increasing. O(runs).
+    pub(crate) fn column_validation(&self) -> Result<(), ReadOpError> {
         self.column_validation_with(self.actors.len())
     }
 
     /// [`Self::column_validation`] against an explicit actor count, for
     /// columns still in another actor space.
-    pub(crate) fn column_validation_with(
-        &self,
-        num_actors: usize,
-    ) -> Result<(), ColumnValidationError> {
-        use ColumnValidationError::*;
+    pub(crate) fn column_validation_with(&self, num_actors: usize) -> Result<(), ReadOpError> {
+        use ColumnValidationError::ActorOutOfRange;
         let cols = &self.cols;
-        let n = cols.id_actor.len();
-
-        let check = |name, len| {
-            if len == n {
-                Ok(())
-            } else {
-                Err(ColumnLength(name, len, n))
-            }
-        };
-        check("id_ctr", cols.id_ctr.len())?;
-        check("obj_actor", cols.obj_actor.len())?;
-        check("obj_ctr", cols.obj_ctr.len())?;
-        check("key_actor", cols.key_actor.len())?;
-        check("key_ctr", cols.key_ctr.len())?;
-        check("key_str", cols.key_str.len())?;
-        check("insert", cols.insert.len())?;
-        check("action", cols.action.len())?;
-        check("value_meta", cols.value_meta.len())?;
-        check("mark_name", cols.mark_name.len())?;
-        check("expand", cols.expand.len())?;
-        check("succ_count", cols.succ_count.len())?;
-
-        let succ_total = cols.succ_count.get_prefix(n) as usize;
-        if cols.succ_actor.len() != succ_total {
-            return Err(ColumnLength(
-                "succ_actor",
-                cols.succ_actor.len(),
-                succ_total,
-            ));
-        }
-        if cols.succ_ctr.len() != succ_total {
-            return Err(ColumnLength("succ_ctr", cols.succ_ctr.len(), succ_total));
-        }
-
-        let raw_total = cols.value_meta.get_prefix(n);
-        if cols.value.len() as u64 != raw_total {
-            return Err(RawValueLength(cols.value.len(), raw_total));
-        }
+        cols.check_lengths()?;
 
         let mut it = cols.id_actor.iter();
         while let Some(run) = it.next_run() {
             if run.value.0 as usize >= num_actors {
-                return Err(ActorOutOfRange("id_actor", run.value.0, num_actors));
+                return Err(ActorOutOfRange("id_actor", run.value.0, num_actors).into());
             }
         }
         let mut it = cols.succ_actor.iter();
         while let Some(run) = it.next_run() {
             if run.value.0 as usize >= num_actors {
-                return Err(ActorOutOfRange("succ_actor", run.value.0, num_actors));
+                return Err(ActorOutOfRange("succ_actor", run.value.0, num_actors).into());
             }
         }
         let mut it = cols.obj_actor.iter();
         while let Some(run) = it.next_run() {
             if let Some(a) = run.value {
                 if a.0 as usize >= num_actors {
-                    return Err(ActorOutOfRange("obj_actor", a.0, num_actors));
+                    return Err(ActorOutOfRange("obj_actor", a.0, num_actors).into());
                 }
             }
         }
@@ -1477,39 +1417,13 @@ impl OpSet {
         while let Some(run) = it.next_run() {
             if let Some(a) = run.value {
                 if a.0 as usize >= num_actors {
-                    return Err(ActorOutOfRange("key_actor", a.0, num_actors));
+                    return Err(ActorOutOfRange("key_actor", a.0, num_actors).into());
                 }
             }
         }
 
-        let mut ctr = cols.obj_ctr.iter();
-        let mut actor = cols.obj_actor.iter();
-        let mut next_ctr = ctr.next_run();
-        let mut next_actor = actor.next_run();
-        let mut pos = 0;
-        let mut prev: Option<ObjId> = None;
-        while let (Some(mut rc), Some(mut ra)) = (next_ctr, next_actor) {
-            let obj = ObjId::load(rc.value.map(|c| c as u64), ra.value).ok_or(InvalidObjId(pos))?;
-            if prev.is_some_and(|p| obj <= p) {
-                return Err(ObjOutOfOrder(pos));
-            }
-            prev = Some(obj);
-            let count = rc.count.min(ra.count);
-            pos += count;
-            rc.count -= count;
-            ra.count -= count;
-            next_ctr = if rc.count == 0 {
-                ctr.next_run()
-            } else {
-                Some(rc)
-            };
-            next_actor = if ra.count == 0 {
-                actor.next_run()
-            } else {
-                Some(ra)
-            };
-        }
-
+        let mut objs = index::ObjRunWalk::new(cols.obj_actor.iter(), cols.obj_ctr.iter());
+        while objs.try_next_obj()?.is_some() {}
         Ok(())
     }
 
@@ -1678,20 +1592,6 @@ impl OpSet {
         Ok((op_set, index))
     }
 
-    /// Load a fragment's op columns as an op set indexed in `doc`'s actor
-    /// space. The indexes are final only for groups entirely inside the
-    /// fragment; groups shared with the document need the manifold's
-    /// conflict/expose corrections.
-    pub(crate) fn load_bundle(
-        raw: &RawColumns<Uncompressed>,
-        data: &[u8],
-        actor_map: &[usize],
-        doc: &OpSet,
-        mask: Option<&Clock>,
-    ) -> Result<Self, ReadOpError> {
-        Self::load_bundle_cols(raw, data, actor_map.len())?.index_bundle(actor_map, doc, true, mask)
-    }
-
     /// Succ entries the op set holds, over every row.
     pub(crate) fn succ_entries(&self) -> usize {
         self.cols.succ_actor.len()
@@ -1708,8 +1608,7 @@ impl OpSet {
         self.cols.value.len()
     }
 
-    /// The document-independent half of [`Self::load_bundle`]: decode
-    /// and validate a fragment's op columns. Actor indexes stay in the
+    /// Decode and validate a fragment's op columns. Actor indexes stay in the
     /// sender's space (`num_actors` actors) until
     /// [`Self::index_bundle`] rebases them.
     pub(crate) fn load_bundle_cols(
@@ -1739,22 +1638,15 @@ impl OpSet {
         has_deps: bool,
     ) -> Result<(), ReadOpError> {
         self.validate_keys(has_deps)?;
-        let column = |spec| {
-            raw.iter()
-                .find(|c| c.spec() == spec)
-                .map(|c| &data[c.data()])
-        };
-        self.validate_values(column(super::columns::VALUE_COL_SPEC).unwrap_or_default())?;
-        if let Some(hint) = column(crate::storage::bundle::ops::HINT) {
-            use hexane::ColumnEncoding;
-            <Option<i64> as hexane::ColumnValueRef>::Encoding::<hexane::Leb128>::validate_encoding(
-                hint,
-            )?;
-        }
+        self.validate_values(column_bytes(raw, data, super::columns::VALUE_COL_SPEC))?;
+        let hint = column_bytes(raw, data, crate::storage::bundle::ops::HINT);
+        use hexane::ColumnEncoding;
+        <Option<i64> as hexane::ColumnValueRef>::Encoding::<hexane::Leb128>::validate_encoding(
+            hint,
+        )?;
         Ok(())
     }
 
-    /// Every row's value decodes, and the values fill `value` exactly.
     fn validate_values(&self, value: &[u8]) -> Result<(), ReadOpError> {
         let mut at = 0;
         for meta in self.cols.value_meta.iter() {
@@ -1771,10 +1663,9 @@ impl OpSet {
         Ok(())
     }
 
-    /// Every row has exactly one key, of its object's kind. A bundle
-    /// without deps is copied as is, so its rows must be in document order;
-    /// the merge places a dependent bundle's rows, which need only their
-    /// objects and map keys in order.
+    /// A bundle without deps is copied as is, so its rows must be in
+    /// document order; the merge places a dependent bundle's rows, which
+    /// need only their objects and map keys in order.
     fn validate_keys(&self, has_deps: bool) -> Result<(), ReadOpError> {
         let rows = self
             .obj_id_iter()
@@ -1807,10 +1698,12 @@ impl OpSet {
         Ok(())
     }
 
-    /// The document-dependent half of [`Self::load_bundle`]: rebase the
-    /// fragment's actor indexes into `doc`'s actor space and build its
-    /// indexes there. Pass `has_deps` when the fragment depends on changes
-    /// outside itself; passing `true` is always safe.
+    /// Rebase the fragment's actor indexes into `doc`'s actor space and
+    /// build its indexes there. The indexes are final only for groups
+    /// entirely inside the fragment; groups shared with the document need
+    /// the manifold's conflict/expose corrections. Pass `has_deps` when the
+    /// fragment depends on changes outside itself; passing `true` is always
+    /// safe.
     /// Ops `mask` does not cover are indexed as hidden; pass it only when it
     /// hides some, since the masked build goes op by op.
     pub(crate) fn index_bundle(
@@ -2036,23 +1929,7 @@ impl OpSet {
     #[cfg(debug_assertions)]
     pub(crate) fn assert_indexes_under(&self, clock: &Clock) {
         let (fresh, _) = self.indexes_under(clock, |_| false);
-        let index = &self.cols.index;
-        assert!(
-            index.visible.iter().eq(fresh.visible.iter()),
-            "masked visible index diverges"
-        );
-        assert!(
-            index.top.values().iter().eq(fresh.top.values().iter()),
-            "masked top index diverges"
-        );
-        assert!(
-            index.text.values().iter().eq(fresh.text.values().iter()),
-            "masked text index diverges"
-        );
-        assert!(
-            index.inc.iter().eq(fresh.inc.iter()),
-            "masked inc index diverges"
-        );
+        self.assert_indexes_eq(&fresh);
     }
 
     pub(crate) fn succ_iter_range(&self, range: &Range<usize>) -> SuccIterIter<'_> {
@@ -2392,22 +2269,10 @@ fn validate_pred_columns(
     num_rows: usize,
     num_actors: usize,
 ) -> Result<(), ColumnValidationError> {
-    use crate::storage::columns::ColumnType;
-    let mut count_bytes: &[u8] = &[];
-    let mut actor_bytes: &[u8] = &[];
-    let mut ctr_bytes: &[u8] = &[];
-    for col in raw.iter() {
-        if col.spec().id() != PRED_COL_ID {
-            continue;
-        }
-        let d = &data[col.data()];
-        match col.spec().col_type() {
-            ColumnType::Group => count_bytes = d,
-            ColumnType::Actor => actor_bytes = d,
-            ColumnType::DeltaInteger => ctr_bytes = d,
-            _ => {}
-        }
-    }
+    use crate::storage::bundle::ops::{PRED_ACTOR, PRED_COUNT, PRED_CTR};
+    let count_bytes = column_bytes(raw, data, PRED_COUNT);
+    let actor_bytes = column_bytes(raw, data, PRED_ACTOR);
+    let ctr_bytes = column_bytes(raw, data, PRED_CTR);
     // an elided pred column means no preds anywhere
     if count_bytes.is_empty() {
         if !actor_bytes.is_empty() || !ctr_bytes.is_empty() {
@@ -2455,7 +2320,18 @@ fn validate_pred_columns(
     Ok(())
 }
 
-const PRED_COL_ID: crate::storage::columns::ColumnId = crate::storage::columns::ColumnId::new(7);
+/// The bytes of `raw`'s last column with `spec`; empty if it has none.
+fn column_bytes<'a>(
+    raw: &RawColumns<Uncompressed>,
+    data: &'a [u8],
+    spec: crate::storage::ColumnSpec,
+) -> &'a [u8] {
+    raw.0
+        .iter()
+        .rev()
+        .find(|c| c.spec() == spec)
+        .map_or(&[], |c| &data[c.data()])
+}
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum ColumnValidationError {
@@ -2465,10 +2341,6 @@ pub(crate) enum ColumnValidationError {
     RawValueLength(usize, u64),
     #[error("column {0} references actor index {1} but the document has {2} actors")]
     ActorOutOfRange(&'static str, u32, usize),
-    #[error("op {0} has a partially null object id")]
-    InvalidObjId(usize),
-    #[error("ops out of order: the object id at op {0} does not increase")]
-    ObjOutOfOrder(usize),
 }
 
 pub(crate) struct IterObjIds<'a> {
@@ -2858,7 +2730,9 @@ pub(crate) mod tests {
         op_set.cols.rewrite_with_new_actor(0);
         assert!(matches!(
             op_set.column_validation(),
-            Err(ColumnValidationError::ActorOutOfRange("id_actor", _, _))
+            Err(ReadOpError::ColumnValidation(
+                ColumnValidationError::ActorOutOfRange("id_actor", _, _)
+            ))
         ));
     }
 
@@ -2882,14 +2756,14 @@ pub(crate) mod tests {
         op_set.cols.obj_actor.splice(n - 1, 1, [Some(ActorIdx(0))]);
         assert!(matches!(
             op_set.column_validation(),
-            Err(ColumnValidationError::ObjOutOfOrder(_))
+            Err(ReadOpError::ObjOutOfOrder(_))
         ));
 
         let mut op_set = reloaded.ops().clone();
         op_set.cols.obj_actor.splice(n - 1, 1, [None::<ActorIdx>]);
         assert!(matches!(
             op_set.column_validation(),
-            Err(ColumnValidationError::InvalidObjId(_))
+            Err(ReadOpError::InvalidObjId(_))
         ));
     }
 }

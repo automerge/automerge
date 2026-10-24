@@ -12,8 +12,8 @@ use crate::storage::bundle::{BundleOpWriter, BundleOpsColumns};
 use crate::types::{ObjId, OpId};
 
 impl OpSet {
-    /// Every op as bundle op columns, written straight from the document's
-    /// columns. The bundle's actor table must be the document's.
+    /// Every op as bundle op columns. The bundle's actor table must be the
+    /// document's.
     pub(crate) fn write_bundle_op_columns(&self, data: &mut Vec<u8>) -> BundleOpsColumns {
         let c = &self.cols;
         let empty = data.len()..data.len();
@@ -40,32 +40,23 @@ impl OpSet {
             id_ctr: c.id_ctr.save_to(data),
         }
     }
-
-    pub(crate) fn write_all_bundle_ops<'a>(
-        &'a self,
-        writer: &mut BundleOpWriter<'a>,
-        mapper: &mut ActorMapper<'_>,
-    ) {
-        RowCopier::new(self).copy(0..self.len(), writer, mapper);
-    }
 }
 
-/// Copies ascending row ranges into a bundle, run by run, with one
-/// forward cursor per column.
+/// Copies ascending row ranges into a bundle.
 pub(crate) struct RowCopier<'a> {
     cols: &'a Columns,
-    id_actor: hexane::Iter<'a, ActorIdx>,
+    id_actor: MappedIter<'a, ActorIdx>,
     id_ctr: hexane::DeltaIter<'a, u32>,
-    obj_actor: hexane::Iter<'a, Option<ActorIdx>>,
+    obj_actor: MappedIter<'a, Option<ActorIdx>>,
     obj_ctr: hexane::Iter<'a, Option<u32>>,
-    key_actor: hexane::Iter<'a, Option<ActorIdx>>,
+    key_actor: MappedIter<'a, Option<ActorIdx>>,
     key_ctr: hexane::DeltaIter<'a, Option<u32>>,
     key_str: hexane::Iter<'a, Option<String>>,
     insert: hexane::PrefixIter<'a, bool>,
     action: hexane::Iter<'a, Action>,
     value_meta: hexane::PrefixIter<'a, ValueMeta>,
     succ_count: hexane::PrefixIter<'a, u32>,
-    succ_actor: hexane::Iter<'a, ActorIdx>,
+    succ_actor: MappedIter<'a, ActorIdx>,
     succ_ctr: hexane::DeltaIter<'a, u32>,
     expand: hexane::Iter<'a, bool>,
     mark_name: hexane::Iter<'a, Option<String>>,
@@ -76,18 +67,18 @@ impl<'a> RowCopier<'a> {
         let c = &op_set.cols;
         RowCopier {
             cols: c,
-            id_actor: c.id_actor.stored_iter(),
+            id_actor: c.id_actor.iter(),
             id_ctr: c.id_ctr.iter(),
-            obj_actor: c.obj_actor.stored_iter(),
+            obj_actor: c.obj_actor.iter(),
             obj_ctr: c.obj_ctr.iter(),
-            key_actor: c.key_actor.stored_iter(),
+            key_actor: c.key_actor.iter(),
             key_ctr: c.key_ctr.iter(),
             key_str: c.key_str.iter(),
             insert: c.insert.iter(),
             action: c.action.iter(),
             value_meta: c.value_meta.iter(),
             succ_count: c.succ_count.iter(),
-            succ_actor: c.succ_actor.stored_iter(),
+            succ_actor: c.succ_actor.iter(),
             succ_ctr: c.succ_ctr.iter(),
             expand: c.expand.iter(),
             mark_name: c.mark_name.iter(),
@@ -131,11 +122,10 @@ impl<'a> RowCopier<'a> {
 
         self.obj_actor.shift(rows.clone());
         while let Some(run) = self.obj_actor.next_run() {
-            let v = c.obj_actor.log_val(run.value);
-            if let Some(a) = v {
+            if let Some(a) = run.value {
                 mapper.process_actor(usize::from(a));
             }
-            w.obj_actor.append_n(v, run.count);
+            w.obj_actor.append_n(run.value, run.count);
         }
         self.obj_ctr.shift(rows.clone());
         while let Some(run) = self.obj_ctr.next_run() {
@@ -143,11 +133,10 @@ impl<'a> RowCopier<'a> {
         }
         self.key_actor.shift(rows.clone());
         while let Some(run) = self.key_actor.next_run() {
-            let v = c.key_actor.log_val(run.value);
-            if let Some(a) = v {
+            if let Some(a) = run.value {
                 mapper.process_actor(usize::from(a));
             }
-            w.key_actor.append_n(v, run.count);
+            w.key_actor.append_n(run.value, run.count);
         }
         self.key_ctr.shift(rows.clone());
         while let Some(run) = self.key_ctr.next_run() {
@@ -159,8 +148,7 @@ impl<'a> RowCopier<'a> {
         }
         self.id_actor.shift(rows.clone());
         while let Some(run) = self.id_actor.next_run() {
-            w.id_actor
-                .append_n(c.id_actor.log_val(run.value), run.count);
+            w.id_actor.append_n(run.value, run.count);
         }
         self.insert.shift(rows.clone());
         while let Some(run) = self.insert.next_run() {
@@ -188,8 +176,7 @@ impl<'a> RowCopier<'a> {
                 let succ = start..self.succ_count.prefix() as usize;
                 self.succ_actor.shift(succ.clone());
                 while let Some(run) = self.succ_actor.next_run() {
-                    w.succ_actor
-                        .append_n(c.succ_actor.log_val(run.value), run.count);
+                    w.succ_actor.append_n(run.value, run.count);
                 }
                 self.succ_ctr.shift(succ);
                 while let Some(run) = self.succ_ctr.next_run() {
@@ -204,7 +191,7 @@ impl<'a> RowCopier<'a> {
                     for _ in 0..run.count {
                         let mut kept = 0;
                         for _ in 0..run.value.value {
-                            let actor = c.succ_actor.log_val(self.succ_actor.next().unwrap());
+                            let actor = self.succ_actor.next().unwrap();
                             let ctr = self.succ_ctr.next().unwrap();
                             let id = OpId::new(ctr as u64, usize::from(actor));
                             if keep(id) {
@@ -264,8 +251,7 @@ pub(crate) struct RowRun {
 
 type ActorHead<'a, T> = RunHead<Rle<'a, T, MappedIter<'a, T>>>;
 
-/// [`RowRun`]s from a starting row. Reads only the object, insert, id, key
-/// element and successor columns.
+/// [`RowRun`]s from a starting row.
 pub(crate) struct RowRuns<'a> {
     obj_actor: ActorHead<'a, Option<ActorIdx>>,
     obj_ctr: RunHead<Rle<'a, Option<u32>, hexane::Iter<'a, Option<u32>>>>,
@@ -275,13 +261,13 @@ pub(crate) struct RowRuns<'a> {
     key_actor: ActorHead<'a, Option<ActorIdx>>,
     key_ctr: RunHead<hexane::DeltaIter<'a, Option<u32>>>,
     succ_count: RunHead<Rle<'a, u32, hexane::Iter<'a, u32>>>,
-    succ: SuccRuns<'a>,
+    succ: IdRuns<'a>,
 }
 
-/// The successor ids from some row on, a run of one actor and evenly
-/// stepping counters at a time.
+/// Op ids from some row on, a run of one actor and evenly stepping
+/// counters at a time.
 #[derive(Clone)]
-pub(crate) struct SuccRuns<'a> {
+pub(crate) struct IdRuns<'a> {
     actor: ActorHead<'a, ActorIdx>,
     ctr: RunHead<hexane::DeltaIter<'a, u32>>,
 }
@@ -300,7 +286,7 @@ impl OpSet {
             key_actor: RunHead::rle(c.key_actor.iter_range(rows.clone()), "key_actor"),
             key_ctr: RunHead::new(c.key_ctr.iter_range(rows.clone()), "key_ctr"),
             succ_count: RunHead::rle(c.succ_count.values().iter_range(rows), "succ_count"),
-            succ: SuccRuns {
+            succ: IdRuns {
                 actor: RunHead::rle(c.succ_actor.iter_range(entries.clone()), "succ_actor"),
                 ctr: RunHead::new(c.succ_ctr.iter_range(entries), "succ_ctr"),
             },
@@ -308,13 +294,21 @@ impl OpSet {
     }
 }
 
-fn first_of(run: &hexane::DeltaRun, name: &'static str) -> Result<(u64, i64), ReadOpError> {
+fn first_of(
+    actor: ActorIdx,
+    run: &hexane::DeltaRun,
+    name: &'static str,
+) -> Result<Steps, ReadOpError> {
     let step = run.delta.ok_or(ReadOpError::MissingValue(name))?;
     let first = run.prefix + step;
     if first < 0 {
         return Err(ReadOpError::InvalidOpId("negative counter".to_string()));
     }
-    Ok((first as u64, step))
+    Ok(Steps {
+        actor: usize::from(actor),
+        first: first as u64,
+        step,
+    })
 }
 
 impl<'a> RowRuns<'a> {
@@ -341,21 +335,9 @@ impl<'a> RowRuns<'a> {
             .min(key_actor.count)
             .min(key_ctr.count)
             .min(succ.count);
-        let (first, step) = first_of(&id_ctr, "id_ctr")?;
-        let id = Steps {
-            actor: usize::from(id_actor.value),
-            first,
-            step,
-        };
+        let id = first_of(id_actor.value, &id_ctr, "id_ctr")?;
         let key = match key_actor.value {
-            Some(actor) => {
-                let (first, step) = first_of(&key_ctr, "key_ctr")?;
-                Some(Steps {
-                    actor: usize::from(actor),
-                    first,
-                    step,
-                })
-            }
+            Some(actor) => Some(first_of(actor, &key_ctr, "key_ctr")?),
             None => None,
         };
         Ok(Some(RowRun {
@@ -382,25 +364,20 @@ impl<'a> RowRuns<'a> {
     }
 
     /// The successors of the rows from the current one on.
-    pub(crate) fn succ(&self) -> SuccRuns<'a> {
+    pub(crate) fn succ(&self) -> IdRuns<'a> {
         self.succ.clone()
     }
 }
 
-impl SuccRuns<'_> {
-    /// The next run, at most `max` successors long.
+impl IdRuns<'_> {
+    /// The next run, at most `max` ids long.
     pub(crate) fn next_run(&mut self, max: usize) -> Result<(Steps, usize), ReadOpError> {
         let actor = self.actor.peek_some()?;
         let ctr = self.ctr.peek_some()?;
         let count = max.min(actor.count).min(ctr.count);
-        let (first, step) = first_of(&ctr, "succ_ctr")?;
+        let steps = first_of(actor.value, &ctr, self.ctr.name)?;
         self.actor.consume(count);
         self.ctr.consume(count);
-        let steps = Steps {
-            actor: usize::from(actor.value),
-            first,
-            step,
-        };
         Ok((steps, count))
     }
 
@@ -431,28 +408,16 @@ impl IdRun {
 }
 
 impl OpSet {
-    /// The id runs of `rows`.
     pub(crate) fn id_runs(&self, rows: Range<usize>) -> Result<Vec<IdRun>, ReadOpError> {
-        let mut actor = RunHead::rle(self.cols.id_actor.iter_range(rows.clone()), "id_actor");
-        let mut ctr = RunHead::new(self.cols.id_ctr.iter_range(rows.clone()), "id_ctr");
+        let mut ids = IdRuns {
+            actor: RunHead::rle(self.cols.id_actor.iter_range(rows.clone()), "id_actor"),
+            ctr: RunHead::new(self.cols.id_ctr.iter_range(rows.clone()), "id_ctr"),
+        };
         let mut runs = Vec::new();
         let mut row = rows.start;
         while row < rows.end {
-            let a = actor.peek_some()?;
-            let c = ctr.peek_some()?;
-            let count = (rows.end - row).min(a.count).min(c.count);
-            let (first, step) = first_of(&c, "id_ctr")?;
-            runs.push(IdRun {
-                row,
-                count,
-                id: Steps {
-                    actor: usize::from(a.value),
-                    first,
-                    step,
-                },
-            });
-            actor.consume(count);
-            ctr.consume(count);
+            let (id, count) = ids.next_run(rows.end - row)?;
+            runs.push(IdRun { row, count, id });
             row += count;
         }
         Ok(runs)
