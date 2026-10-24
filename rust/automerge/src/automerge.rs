@@ -246,7 +246,7 @@ impl std::default::Default for LoadOptions {
 ///
 /// ## Reading values
 ///
-/// [`Self`] implements [`ReadDoc`], which provides methods for reading values from the document.
+/// [`Self`] implements [`ReadDoc`](crate::ReadDoc), which provides methods for reading values from the document.
 ///
 /// ## Modifying a document (Transactions)
 ///
@@ -3628,7 +3628,7 @@ impl<H: HashRetention> Automerge<H> {
 
     /// The hashes reachable from `from` which this document is missing.
     ///
-    /// Unlike [`ReadDoc::get_missing_deps`] the starting points need not
+    /// Unlike [`ReadDoc::get_missing_deps`](crate::ReadDoc::get_missing_deps) the starting points need not
     /// be present here — they are typically another peer's heads.
     pub fn missing_deps(&self, from: &[ChangeHash]) -> Result<Vec<ChangeHash>, AutomergeError> {
         self.missing_deps_from(from.iter().copied())
