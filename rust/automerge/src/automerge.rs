@@ -1764,15 +1764,22 @@ impl<H: HashRetention> Automerge<H> {
 
     /// Records the hash of each of `nodes` that lacks one, rebuilt from
     /// the document's ops. Whether a GC is owed.
-    fn rebuild_hashes(&mut self, nodes: Vec<crate::change_graph::NodeIdx>) -> bool {
+    fn rebuild_hashes(&mut self, mut nodes: Vec<crate::change_graph::NodeIdx>) -> bool {
+        nodes.retain(|n| self.change_graph.hash_for_node(*n).is_none());
+        if nodes.is_empty() {
+            return false;
+        }
+        // one rehash back to the retained hashes for all of them
+        let span = self.change_graph.nodes_back_to_retained(nodes.iter().copied());
+        let hashes = self
+            .rehash(span.clone())
+            .expect("rebuilding the hashes of changes this document has");
         let mut owes_gc = false;
         for node in nodes {
-            if self.change_graph.hash_for_node(node).is_none() {
-                let hash = self
-                    .rebuild_hash(node)
-                    .expect("rebuilding the hash of a change this document has");
-                owes_gc |= self.change_graph.record_node_hash(node, hash);
-            }
+            let pos = span
+                .binary_search(&node)
+                .expect("a node is in its own ancestry");
+            owes_gc |= self.change_graph.record_node_hash(node, hashes[pos]);
         }
         owes_gc
     }

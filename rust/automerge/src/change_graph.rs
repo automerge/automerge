@@ -1905,7 +1905,12 @@ impl<H: HashRetention> ChangeGraph<H> {
     /// sat in a concurrent one, interior to both until a fragment covering
     /// them both put it on its boundary. Only the document can rebuild them.
     pub(crate) fn take_unhashed_fragment_pins(&mut self) -> Vec<NodeIdx> {
-        std::mem::take(&mut self.pins.unhashed)
+        let mut pins = std::mem::take(&mut self.pins.unhashed);
+        // a fragment a later one superseded in the same bundle released its pins
+        pins.retain(|p| self.pins.is_pinned(*p) && self.hashes.get(*p).is_none());
+        pins.sort_unstable();
+        pins.dedup();
+        pins
     }
 
     fn tracks_pins() -> bool {
