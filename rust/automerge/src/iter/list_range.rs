@@ -390,12 +390,10 @@ fn normalize_range<R: RangeBounds<usize>>(range: R) -> (usize, usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::automerge::Automerge;
     use crate::marks::{ExpandMark, Mark};
-    use crate::read::ReadDoc;
-    use crate::tx::Transactable;
+    use crate::transaction::Transactable;
     use crate::types;
-    use crate::{ObjType, ROOT};
+    use crate::{Automerge, ObjType, ReadDoc, ROOT};
 
     #[test]
     fn list_range_bounds() {
@@ -425,7 +423,6 @@ mod tests {
 
     #[test]
     fn list_range_conflict() {
-        // pinned time: a fragment-head commit would free hashes `merge` needs
         let actor1 = "aaaaaaaa".try_into().unwrap();
         let actor2 = "bbbbbbbb".try_into().unwrap();
         let mut doc1 = Automerge::new().with_actor(actor1);
@@ -436,17 +433,17 @@ mod tests {
             .map(types::ScalarValue::Int)
             .collect::<Vec<_>>();
         tx1.splice(&list, 0, 0, values.clone()).unwrap();
-        tx1.commit_with(crate::tx::CommitOptions::default().with_time(0));
+        tx1.commit();
 
         let mut doc2 = doc1.fork().with_actor(actor2);
 
         let mut tx2 = doc2.transaction();
         tx2.put(&list, 3, 11).unwrap();
-        tx2.commit_with(crate::tx::CommitOptions::default().with_time(0));
+        tx2.commit();
 
         let mut tx1 = doc1.transaction();
         tx1.put(&list, 3, 10).unwrap();
-        tx1.commit_with(crate::tx::CommitOptions::default().with_time(0));
+        tx1.commit();
 
         doc2.merge(&mut doc1).unwrap();
 

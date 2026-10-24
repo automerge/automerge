@@ -587,10 +587,8 @@ impl<'a> DocItem<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::automerge::Automerge;
-    use crate::read::ReadDoc;
-    use crate::tx::Transactable;
-    use crate::{ObjType, ROOT};
+    use crate::transaction::Transactable;
+    use crate::{Automerge, ObjType, ReadDoc, ROOT};
 
     #[test]
     fn doc_iter() {

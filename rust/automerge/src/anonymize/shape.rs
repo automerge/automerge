@@ -1,8 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-use crate::automerge::Automerge;
 use crate::legacy::{ElementId, Key, MarkData, ObjectId, OpId, OpType};
-use crate::{ActorId, Change, ChangeHash, ObjType, ScalarValue, TextEncoding};
+use crate::{ActorId, Automerge, Change, ChangeHash, ObjType, ScalarValue, TextEncoding};
 
 /// A canonical description of the parts of a document which anonymization promises to retain.
 ///
@@ -17,7 +16,7 @@ pub(super) struct ShapeSignature {
 }
 
 impl ShapeSignature {
-    pub(super) fn new<H: crate::hash_retention::HashRetention>(document: &Automerge<H>) -> Self {
+    pub(super) fn new(document: &Automerge) -> Self {
         ShapeBuilder::new(document).build(document)
     }
 }
@@ -127,8 +126,8 @@ struct ShapeBuilder {
 }
 
 impl ShapeBuilder {
-    fn new<H: crate::hash_retention::HashRetention>(document: &Automerge<H>) -> Self {
-        let changes = document.get_changes(&[]).unwrap();
+    fn new(document: &Automerge) -> Self {
+        let changes = document.get_changes(&[]);
         let actors = actor_ranks(&changes);
         let change_ids = changes
             .iter()
@@ -149,16 +148,13 @@ impl ShapeBuilder {
         }
     }
 
-    fn build<H: crate::hash_retention::HashRetention>(
-        mut self,
-        document: &Automerge<H>,
-    ) -> ShapeSignature {
-        let mut changes = document.get_changes(&[]).unwrap();
+    fn build(mut self, document: &Automerge) -> ShapeSignature {
+        let mut changes = document.get_changes(&[]);
         changes.sort_unstable_by_key(|change| self.changes[&change.hash()]);
 
         let changes = changes.iter().map(|change| self.change(change)).collect();
         let mut heads = document
-            .get_head_hashes()
+            .get_heads()
             .iter()
             .map(|hash| self.changes[hash])
             .collect::<Vec<_>>();
@@ -327,10 +323,7 @@ fn actor_ranks(changes: &[Change]) -> HashMap<ActorId, usize> {
 }
 
 /// Check data-bearing fields separately from [`ShapeSignature`], which deliberately erases them.
-pub(super) fn assert_private_data_changed<H: crate::hash_retention::HashRetention>(
-    source: &Automerge<H>,
-    anonymized: &Automerge<H>,
-) {
+pub(super) fn assert_private_data_changed(source: &Automerge, anonymized: &Automerge) {
     let source_changes = canonical_changes(source);
     let anonymized_changes = canonical_changes(anonymized);
     assert_eq!(source_changes.len(), anonymized_changes.len());
@@ -392,10 +385,8 @@ pub(super) fn assert_private_data_changed<H: crate::hash_retention::HashRetentio
     }
 }
 
-fn canonical_changes<H: crate::hash_retention::HashRetention>(
-    document: &Automerge<H>,
-) -> BTreeMap<ChangeId, Change> {
-    let changes = document.get_changes(&[]).unwrap();
+fn canonical_changes(document: &Automerge) -> BTreeMap<ChangeId, Change> {
+    let changes = document.get_changes(&[]);
     let actors = actor_ranks(&changes);
     changes
         .into_iter()
