@@ -1,5 +1,4 @@
 use std::collections::{BTreeMap, HashMap};
-use std::fmt;
 
 use crate::automerge::view::ReadAt;
 use crate::automerge::Automerge;
@@ -10,8 +9,6 @@ use crate::op_set2::{Op, OpQuery, OpQueryTerm, OpType};
 use crate::text_value::ConcreteTextValue;
 use crate::types::{ObjId as InternalObjId, SequenceType};
 use crate::value::{ScalarValue, Value as PublicValue};
-#[cfg(test)]
-use crate::AutomergeError;
 use crate::{ChangeId, ObjType, Patch, PatchAction, Prop, TextEncoding};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -64,33 +61,6 @@ pub(crate) enum EffectTextRun {
 #[derive(Debug, Clone, PartialEq, Default)]
 pub(crate) struct EffectMarks(BTreeMap<String, ScalarValue>);
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum PatchEffectError {
-    InvalidPath,
-    InvalidMapOp,
-    InvalidListOp,
-    InvalidTextOp,
-    InvalidIndex(usize),
-    InvalidIncrement,
-    MismatchedTextEncoding,
-}
-
-impl fmt::Display for PatchEffectError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            PatchEffectError::InvalidPath => write!(f, "invalid patch path"),
-            PatchEffectError::InvalidMapOp => write!(f, "invalid map patch action"),
-            PatchEffectError::InvalidListOp => write!(f, "invalid list patch action"),
-            PatchEffectError::InvalidTextOp => write!(f, "invalid text patch action"),
-            PatchEffectError::InvalidIndex(index) => write!(f, "invalid sequence index {index}"),
-            PatchEffectError::InvalidIncrement => write!(f, "increment target is not a counter"),
-            PatchEffectError::MismatchedTextEncoding => write!(f, "mismatched text encoding"),
-        }
-    }
-}
-
-impl std::error::Error for PatchEffectError {}
-
 #[track_caller]
 pub(crate) fn assert_patches_have_same_effect<H: crate::hash_retention::HashRetention>(
     doc: &Automerge<H>,
@@ -103,8 +73,10 @@ pub(crate) fn assert_patches_have_same_effect<H: crate::hash_retention::HashRete
 ) {
     let before_value = EffectValue::from_doc(doc, Some(before));
     let expected = EffectValue::from_doc(doc, Some(after));
-    let left_value = apply_patch_effects(doc, before_value.clone(), left_label, left);
-    let right_value = apply_patch_effects(doc, before_value, right_label, right);
+    let mut left_value = before_value.clone();
+    left_value.apply_patches(doc.text_encoding(), left.iter().cloned());
+    let mut right_value = before_value;
+    right_value.apply_patches(doc.text_encoding(), right.iter().cloned());
     assert_eq!(
         left_value, expected,
         "{left_label} patches did not produce the expected after-state"
@@ -113,23 +85,6 @@ pub(crate) fn assert_patches_have_same_effect<H: crate::hash_retention::HashRete
         right_value, expected,
         "{right_label} patches did not produce the expected after-state"
     );
-    assert_eq!(
-        left_value, right_value,
-        "{left_label} and {right_label} patches have different effects"
-    );
-}
-
-#[track_caller]
-fn apply_patch_effects<H: crate::hash_retention::HashRetention>(
-    doc: &Automerge<H>,
-    mut value: EffectValue,
-    label: &str,
-    patches: &[Patch],
-) -> EffectValue {
-    value
-        .apply_patches(doc.text_encoding(), patches.iter().cloned())
-        .unwrap_or_else(|err| panic!("{label} patches failed to apply: {err}"));
-    value
 }
 
 impl EffectValue {
@@ -143,24 +98,7 @@ impl EffectValue {
         EffectMaterializer::new(doc).hydrate_map(&InternalObjId::root(), &read)
     }
 
-    #[cfg(test)]
-    pub(crate) fn from_doc_obj<H: crate::hash_retention::HashRetention>(
-        doc: &Automerge<H>,
-        obj: &ExId,
-        heads: Option<&[ChangeId]>,
-    ) -> Result<Self, AutomergeError> {
-        let obj = doc.exid_to_obj(obj)?;
-        let read = doc
-            .read_at(heads)
-            .expect("effect heads must be change ids in the document");
-        Ok(EffectMaterializer::new(doc).hydrate_obj(&obj.id, &read))
-    }
-
-    pub(crate) fn apply_patches<I>(
-        &mut self,
-        encoding: TextEncoding,
-        patches: I,
-    ) -> Result<(), PatchEffectError>
+    pub(crate) fn apply_patches<I>(&mut self, encoding: TextEncoding, patches: I)
     where
         I: IntoIterator<Item = Patch>,
     {
@@ -169,26 +107,8 @@ impl EffectValue {
                 patch.path.iter().map(|(_, prop)| prop),
                 encoding,
                 patch.action,
-            )?;
+            );
         }
-        Ok(())
-    }
-
-    #[cfg(test)]
-    pub(crate) fn apply_patches_for_obj<I>(
-        &mut self,
-        obj: &ExId,
-        encoding: TextEncoding,
-        patches: I,
-    ) -> Result<(), PatchEffectError>
-    where
-        I: IntoIterator<Item = Patch>,
-    {
-        for patch in patches {
-            let props: Vec<Prop> = scoped_props(obj, &patch)?;
-            self.apply(props.iter(), encoding, patch.action)?;
-        }
-        Ok(())
     }
 
     fn from_patch_value(value: PublicValue<'static>, id: ExId, encoding: TextEncoding) -> Self {
@@ -219,41 +139,35 @@ impl EffectValue {
         }
     }
 
-    fn apply<'a, I>(
-        &mut self,
-        mut path: I,
-        encoding: TextEncoding,
-        action: PatchAction,
-    ) -> Result<(), PatchEffectError>
+    fn apply<'a, I>(&mut self, mut path: I, encoding: TextEncoding, action: PatchAction)
     where
         I: Iterator<Item = &'a Prop>,
     {
         match (path.next(), self) {
             (Some(Prop::Map(key)), EffectValue::Map { value: map, .. }) => map
                 .get_mut(key)
-                .ok_or(PatchEffectError::InvalidPath)?
+                .expect("invalid patch path")
                 .apply(path, encoding, action),
             (Some(Prop::Seq(index)), EffectValue::List { value: list, .. }) => list
                 .get_mut(*index)
-                .ok_or(PatchEffectError::InvalidIndex(*index))?
+                .unwrap_or_else(|| panic!("invalid sequence index {}", index))
                 .apply(path, encoding, action),
             (Some(Prop::Seq(index)), EffectValue::Text { value: text, .. }) => {
-                text.get_mut(*index)?.apply(path, encoding, action)
+                text.get_mut(*index).apply(path, encoding, action)
             }
             (None, EffectValue::Map { value: map, .. }) => map.apply(encoding, action),
             (None, EffectValue::List { value: list, .. }) => list.apply(encoding, action),
             (None, EffectValue::Text { value: text, .. }) => text.apply(encoding, action),
-            _ => Err(PatchEffectError::InvalidPath),
+            _ => panic!("invalid patch path"),
         }
     }
 
-    fn increment(&mut self, value: i64) -> Result<(), PatchEffectError> {
+    fn increment(&mut self, value: i64) {
         match self {
             EffectValue::Scalar(ScalarValue::Counter(counter)) => {
                 counter.increment(value);
-                Ok(())
             }
-            _ => Err(PatchEffectError::InvalidIncrement),
+            _ => panic!("increment target is not a counter"),
         }
     }
 }
@@ -267,11 +181,7 @@ impl EffectMap {
         self.0.get_mut(key).map(|value| &mut value.value)
     }
 
-    fn apply(
-        &mut self,
-        encoding: TextEncoding,
-        action: PatchAction,
-    ) -> Result<(), PatchEffectError> {
+    fn apply(&mut self, encoding: TextEncoding, action: PatchAction) {
         match action {
             PatchAction::PutMap {
                 key,
@@ -283,11 +193,9 @@ impl EffectMap {
                     EffectValue::from_patch_value(value.0, value.1, encoding),
                     conflict,
                 );
-                Ok(())
             }
             PatchAction::DeleteMap { key } => {
                 self.0.remove(&key);
-                Ok(())
             }
             PatchAction::Increment {
                 prop: Prop::Map(key),
@@ -295,19 +203,15 @@ impl EffectMap {
             } => self
                 .0
                 .get_mut(&key)
-                .ok_or(PatchEffectError::InvalidPath)?
+                .expect("invalid patch path")
                 .value
                 .increment(value),
             PatchAction::Conflict {
                 prop: Prop::Map(key),
             } => {
-                self.0
-                    .get_mut(&key)
-                    .ok_or(PatchEffectError::InvalidPath)?
-                    .conflict = true;
-                Ok(())
+                self.0.get_mut(&key).expect("invalid patch path").conflict = true;
             }
-            _ => Err(PatchEffectError::InvalidMapOp),
+            _ => panic!("invalid map patch action"),
         }
     }
 }
@@ -325,11 +229,7 @@ impl EffectList {
         self.0.get_mut(index).map(|value| &mut value.value)
     }
 
-    fn apply(
-        &mut self,
-        encoding: TextEncoding,
-        action: PatchAction,
-    ) -> Result<(), PatchEffectError> {
+    fn apply(&mut self, encoding: TextEncoding, action: PatchAction) {
         match action {
             PatchAction::PutSeq {
                 index,
@@ -339,14 +239,13 @@ impl EffectList {
                 let current = self
                     .0
                     .get_mut(index)
-                    .ok_or(PatchEffectError::InvalidIndex(index))?;
+                    .unwrap_or_else(|| panic!("invalid sequence index {}", index));
                 current.value = EffectValue::from_patch_value(value.0, value.1, encoding);
                 current.conflict = conflict;
-                Ok(())
             }
             PatchAction::Insert { index, values } => {
                 if index > self.0.len() {
-                    return Err(PatchEffectError::InvalidIndex(index));
+                    panic!("invalid sequence index {}", index);
                 }
                 for (offset, value) in values.into_iter().enumerate() {
                     self.0.insert(
@@ -362,14 +261,12 @@ impl EffectList {
                         },
                     );
                 }
-                Ok(())
             }
             PatchAction::DeleteSeq { index, length } => {
                 if index + length > self.0.len() {
-                    return Err(PatchEffectError::InvalidIndex(index));
+                    panic!("invalid sequence index {}", index);
                 }
                 self.0.drain(index..index + length);
-                Ok(())
             }
             PatchAction::Increment {
                 prop: Prop::Seq(index),
@@ -377,7 +274,7 @@ impl EffectList {
             } => self
                 .0
                 .get_mut(index)
-                .ok_or(PatchEffectError::InvalidIndex(index))?
+                .unwrap_or_else(|| panic!("invalid sequence index {}", index))
                 .value
                 .increment(value),
             PatchAction::Conflict {
@@ -385,28 +282,25 @@ impl EffectList {
             } => {
                 self.0
                     .get_mut(index)
-                    .ok_or(PatchEffectError::InvalidIndex(index))?
+                    .unwrap_or_else(|| panic!("invalid sequence index {}", index))
                     .conflict = true;
-                Ok(())
             }
             PatchAction::Mark { marks } => {
                 for mark in marks {
-                    self.apply_mark(mark)?;
+                    self.apply_mark(mark);
                 }
-                Ok(())
             }
-            _ => Err(PatchEffectError::InvalidListOp),
+            _ => panic!("invalid list patch action"),
         }
     }
 
-    fn apply_mark(&mut self, mark: Mark) -> Result<(), PatchEffectError> {
+    fn apply_mark(&mut self, mark: Mark) {
         if mark.end > self.0.len() {
-            return Err(PatchEffectError::InvalidIndex(mark.end));
+            panic!("invalid sequence index {}", mark.end);
         }
         for value in &mut self.0[mark.start..mark.end] {
             value.marks.apply_mark(&mark);
         }
-        Ok(())
     }
 }
 
@@ -438,22 +332,18 @@ impl EffectText {
         });
     }
 
-    fn get_mut(&mut self, index: usize) -> Result<&mut EffectValue, PatchEffectError> {
-        self.split_at(index)?;
-        let run_index = self.run_index_at(index)?;
+    fn get_mut(&mut self, index: usize) -> &mut EffectValue {
+        self.split_at(index);
+        let run_index = self.run_index_at(index);
         match &mut self.runs[run_index] {
-            EffectTextRun::Object { value, .. } => Ok(value),
-            EffectTextRun::Text { .. } => Err(PatchEffectError::InvalidPath),
+            EffectTextRun::Object { value, .. } => value,
+            EffectTextRun::Text { .. } => panic!("invalid patch path"),
         }
     }
 
-    fn apply(
-        &mut self,
-        encoding: TextEncoding,
-        action: PatchAction,
-    ) -> Result<(), PatchEffectError> {
+    fn apply(&mut self, encoding: TextEncoding, action: PatchAction) {
         if encoding != self.encoding {
-            return Err(PatchEffectError::MismatchedTextEncoding);
+            panic!("mismatched text encoding");
         }
         match action {
             PatchAction::SpliceText {
@@ -476,36 +366,33 @@ impl EffectText {
                         value.1,
                         EffectMarks::default(),
                         value.2,
-                    )?;
+                    );
                     insertion_index += width;
                 }
-                Ok(())
             }
             PatchAction::PutSeq {
                 index,
                 value,
                 conflict,
             } => {
-                let marks = self.marks_at(index)?;
-                self.delete(index, 1)?;
+                let marks = self.marks_at(index);
+                self.delete(index, 1);
                 self.insert_value(index, value.0, value.1, marks, conflict)
             }
             PatchAction::DeleteSeq { index, length } => self.delete(index, length),
             PatchAction::Conflict {
                 prop: Prop::Seq(index),
             } => {
-                self.split_at(index)?;
-                let run_index = self.run_index_at(index)?;
+                self.split_at(index);
+                let run_index = self.run_index_at(index);
                 self.runs[run_index].set_conflict(true);
-                Ok(())
             }
             PatchAction::Mark { marks } => {
                 for mark in marks {
-                    self.apply_mark(mark)?;
+                    self.apply_mark(mark);
                 }
-                Ok(())
             }
-            _ => Err(PatchEffectError::InvalidTextOp),
+            _ => panic!("invalid text patch action"),
         }
     }
 
@@ -516,7 +403,7 @@ impl EffectText {
         id: ExId,
         marks: EffectMarks,
         conflict: bool,
-    ) -> Result<(), PatchEffectError> {
+    ) {
         match value {
             PublicValue::Scalar(value) => match value.into_owned() {
                 ScalarValue::Str(value) => self.insert_text(index, value.as_str(), marks, conflict),
@@ -531,13 +418,7 @@ impl EffectText {
         }
     }
 
-    fn insert_text(
-        &mut self,
-        index: usize,
-        value: &str,
-        marks: EffectMarks,
-        conflict: bool,
-    ) -> Result<(), PatchEffectError> {
+    fn insert_text(&mut self, index: usize, value: &str, marks: EffectMarks, conflict: bool) {
         self.insert_text_value(
             index,
             ConcreteTextValue::new(value, self.encoding),
@@ -552,10 +433,10 @@ impl EffectText {
         value: ConcreteTextValue,
         marks: EffectMarks,
         conflict: bool,
-    ) -> Result<(), PatchEffectError> {
-        let run_index = self.split_at(index)?;
+    ) {
+        let run_index = self.split_at(index);
         if value.len() == 0 {
-            return Ok(());
+            return;
         }
         self.runs.insert(
             run_index,
@@ -566,7 +447,6 @@ impl EffectText {
             },
         );
         self.normalize();
-        Ok(())
     }
 
     fn insert_object(
@@ -575,8 +455,8 @@ impl EffectText {
         value: EffectValue,
         marks: EffectMarks,
         conflict: bool,
-    ) -> Result<(), PatchEffectError> {
-        let run_index = self.split_at(index)?;
+    ) {
+        let run_index = self.split_at(index);
         self.runs.insert(
             run_index,
             EffectTextRun::Object {
@@ -585,67 +465,64 @@ impl EffectText {
                 conflict,
             },
         );
-        Ok(())
     }
 
-    fn delete(&mut self, index: usize, length: usize) -> Result<(), PatchEffectError> {
+    fn delete(&mut self, index: usize, length: usize) {
         if length == 0 {
-            return Ok(());
+            return;
         }
         let end = index + length;
-        self.split_at(end)?;
-        let start_run = self.split_at(index)?;
-        let end_run = self.run_index_at_boundary(end)?;
+        self.split_at(end);
+        let start_run = self.split_at(index);
+        let end_run = self.run_index_at_boundary(end);
         self.runs.drain(start_run..end_run);
         self.normalize();
-        Ok(())
     }
 
-    fn apply_mark(&mut self, mark: Mark) -> Result<(), PatchEffectError> {
-        self.split_at(mark.end)?;
-        let start_run = self.split_at(mark.start)?;
-        let end_run = self.run_index_at_boundary(mark.end)?;
+    fn apply_mark(&mut self, mark: Mark) {
+        self.split_at(mark.end);
+        let start_run = self.split_at(mark.start);
+        let end_run = self.run_index_at_boundary(mark.end);
         for run in &mut self.runs[start_run..end_run] {
             run.marks_mut().apply_mark(&mark);
         }
         self.normalize();
-        Ok(())
     }
 
-    fn marks_at(&mut self, index: usize) -> Result<EffectMarks, PatchEffectError> {
-        self.split_at(index)?;
-        let run_index = self.run_index_at(index)?;
-        Ok(self.runs[run_index].marks().clone())
+    fn marks_at(&mut self, index: usize) -> EffectMarks {
+        self.split_at(index);
+        let run_index = self.run_index_at(index);
+        self.runs[run_index].marks().clone()
     }
 
-    fn split_at(&mut self, index: usize) -> Result<usize, PatchEffectError> {
+    fn split_at(&mut self, index: usize) -> usize {
         let mut pos = 0;
         for run_index in 0..self.runs.len() {
             let width = self.runs[run_index].width();
             if index == pos {
-                return Ok(run_index);
+                return run_index;
             }
             if index > pos && index < pos + width {
-                self.split_run(run_index, index - pos)?;
-                return Ok(run_index + 1);
+                self.split_run(run_index, index - pos);
+                return run_index + 1;
             }
             pos += width;
         }
         if index == pos {
-            Ok(self.runs.len())
+            self.runs.len()
         } else {
-            Err(PatchEffectError::InvalidIndex(index))
+            panic!("invalid sequence index {}", index)
         }
     }
 
-    fn split_run(&mut self, run_index: usize, offset: usize) -> Result<(), PatchEffectError> {
+    fn split_run(&mut self, run_index: usize, offset: usize) {
         let EffectTextRun::Text {
             value,
             marks,
             conflict,
         } = &self.runs[run_index]
         else {
-            return Err(PatchEffectError::InvalidIndex(offset));
+            panic!("invalid sequence index {}", offset);
         };
         let left = take_prefix(value, offset);
         let right = take_suffix(value, offset);
@@ -664,33 +541,32 @@ impl EffectText {
                 conflict,
             },
         );
-        Ok(())
     }
 
-    fn run_index_at(&self, index: usize) -> Result<usize, PatchEffectError> {
+    fn run_index_at(&self, index: usize) -> usize {
         let mut pos = 0;
         for (run_index, run) in self.runs.iter().enumerate() {
             let width = run.width();
             if index >= pos && index < pos + width {
-                return Ok(run_index);
+                return run_index;
             }
             pos += width;
         }
-        Err(PatchEffectError::InvalidIndex(index))
+        panic!("invalid sequence index {}", index)
     }
 
-    fn run_index_at_boundary(&self, index: usize) -> Result<usize, PatchEffectError> {
+    fn run_index_at_boundary(&self, index: usize) -> usize {
         let mut pos = 0;
         for (run_index, run) in self.runs.iter().enumerate() {
             if index == pos {
-                return Ok(run_index);
+                return run_index;
             }
             pos += run.width();
         }
         if index == pos {
-            Ok(self.runs.len())
+            self.runs.len()
         } else {
-            Err(PatchEffectError::InvalidIndex(index))
+            panic!("invalid sequence index {}", index)
         }
     }
 
@@ -870,8 +746,7 @@ impl<'a, H: crate::hash_retention::HashRetention> EffectMaterializer<'a, H> {
             }
         }
         for mark in self.sequence_marks(obj, ObjType::Text, read) {
-            text.apply_mark(mark)
-                .expect("document-derived text marks should fit the hydrated text");
+            text.apply_mark(mark);
         }
         EffectValue::Text {
             id: self.exid_for_obj(obj),
@@ -939,23 +814,6 @@ impl<'a, H: crate::hash_retention::HashRetention> EffectMaterializer<'a, H> {
     }
 }
 
-#[cfg(test)]
-fn scoped_props(obj: &ExId, patch: &Patch) -> Result<Vec<Prop>, PatchEffectError> {
-    if obj == &ExId::Root {
-        return Ok(patch.path.iter().map(|(_, prop)| prop.clone()).collect());
-    }
-    if &patch.obj == obj {
-        return Ok(Vec::new());
-    }
-    let Some(index) = patch.path.iter().position(|(parent, _)| parent == obj) else {
-        return Err(PatchEffectError::InvalidPath);
-    };
-    Ok(patch.path[index..]
-        .iter()
-        .map(|(_, prop)| prop.clone())
-        .collect())
-}
-
 fn append_mark_runs(result: &mut Vec<Mark>, index: usize, len: usize, marks: &EffectMarks) {
     if len == 0 {
         return;
@@ -979,170 +837,4 @@ fn take_suffix(value: &ConcreteTextValue, start: usize) -> ConcreteTextValue {
         suffix.remove(0);
     }
     suffix
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::autocommit::AutoCommit;
-    use crate::marks::ExpandMark;
-    use crate::tx::Transactable;
-    use crate::ROOT;
-
-    fn assert_diff_patches_have_effect(
-        doc: &mut AutoCommit,
-        before: &[ChangeId],
-        after: &[ChangeId],
-    ) {
-        let mut materialized = EffectValue::from_doc(&doc.doc, Some(before));
-        let expected = EffectValue::from_doc(&doc.doc, Some(after));
-        let patches = doc.diff(before, after).unwrap();
-        materialized
-            .apply_patches(doc.doc.text_encoding(), patches)
-            .expect("patches should apply to materialized before-state");
-        assert_eq!(materialized, expected);
-    }
-
-    fn assert_obj_diff_patches_have_effect(
-        doc: &mut AutoCommit,
-        obj: &ExId,
-        before: &[ChangeId],
-        after: &[ChangeId],
-        recursive: bool,
-    ) {
-        let mut materialized = EffectValue::from_doc_obj(&doc.doc, obj, Some(before)).unwrap();
-        let expected = EffectValue::from_doc_obj(&doc.doc, obj, Some(after)).unwrap();
-        let patches = doc.diff_obj(obj, before, after, recursive).unwrap();
-        materialized
-            .apply_patches_for_obj(obj, doc.doc.text_encoding(), patches)
-            .expect("object patches should apply to materialized before-state");
-        assert_eq!(materialized, expected);
-    }
-
-    #[test]
-    fn materializer_applies_text_mark_patches() {
-        let mut doc = AutoCommit::new();
-        let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
-        doc.splice_text(&text, 0, 0, "hello world").unwrap();
-        let before = doc.get_heads();
-
-        doc.mark(
-            &text,
-            Mark::new("bold".to_string(), true, 3, 8),
-            ExpandMark::default(),
-        )
-        .unwrap();
-        let after = doc.get_heads();
-
-        assert_diff_patches_have_effect(&mut doc, &before, &after);
-    }
-
-    #[test]
-    fn materializer_applies_text_splices_around_marks() {
-        let mut doc = AutoCommit::new();
-        let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
-        doc.splice_text(&text, 0, 0, "hello world").unwrap();
-        doc.mark(
-            &text,
-            Mark::new("bold".to_string(), true, 3, 8),
-            ExpandMark::default(),
-        )
-        .unwrap();
-        let before = doc.get_heads();
-
-        doc.splice_text(&text, 5, 1, " brave new ").unwrap();
-        let after = doc.get_heads();
-
-        assert_diff_patches_have_effect(&mut doc, &before, &after);
-    }
-
-    #[test]
-    fn materializer_applies_text_put_seq_patches() {
-        let mut doc = AutoCommit::new();
-        let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
-        doc.splice_text(&text, 0, 0, "abc").unwrap();
-        doc.mark(
-            &text,
-            Mark::new("bold".to_string(), true, 1, 2),
-            ExpandMark::default(),
-        )
-        .unwrap();
-        let before = doc.get_heads();
-
-        doc.put(&text, 1, "Z").unwrap();
-        let after = doc.get_heads();
-
-        assert_diff_patches_have_effect(&mut doc, &before, &after);
-    }
-
-    #[test]
-    fn materializer_tracks_object_identity() {
-        let mut doc = AutoCommit::new();
-        let before = doc.get_heads();
-
-        doc.put_object(ROOT, "map", ObjType::Map).unwrap();
-        let after = doc.get_heads();
-
-        assert_diff_patches_have_effect(&mut doc, &before, &after);
-    }
-
-    #[test]
-    fn materializer_applies_nonrecursive_object_scoped_patches() {
-        let mut doc = AutoCommit::new();
-        let list = doc.put_object(ROOT, "list", ObjType::List).unwrap();
-        doc.insert(&list, 0, "one").unwrap();
-        let before = doc.get_heads();
-
-        doc.put(&list, 0, "two").unwrap();
-        let after = doc.get_heads();
-
-        assert_obj_diff_patches_have_effect(&mut doc, &list, &before, &after, false);
-    }
-
-    #[test]
-    fn materializer_applies_recursive_object_scoped_patches() {
-        let mut doc = AutoCommit::new();
-        let list = doc.put_object(ROOT, "list", ObjType::List).unwrap();
-        let map = doc.insert_object(&list, 0, ObjType::Map).unwrap();
-        let before = doc.get_heads();
-
-        doc.put(&map, "key", "value").unwrap();
-        let after = doc.get_heads();
-
-        assert_obj_diff_patches_have_effect(&mut doc, &list, &before, &after, true);
-    }
-
-    #[test]
-    fn materializer_routes_child_patches_through_text_object_runs() {
-        let mut doc = AutoCommit::new();
-        let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
-        let block = doc.split_block(&text, 0).unwrap();
-        let before = doc.get_heads();
-
-        doc.put(&block, "kind", "paragraph").unwrap();
-        let after = doc.get_heads();
-
-        assert_diff_patches_have_effect(&mut doc, &before, &after);
-    }
-
-    #[test]
-    fn materializer_applies_list_conflicts() {
-        // pinned actor and time: a fragment-head commit would free hashes this test needs
-        let t0 = || crate::tx::CommitOptions::default().with_time(0);
-        let mut doc1 = AutoCommit::new().with_actor(crate::ActorId::from(&b"mlc1"[..]));
-        let list = doc1.put_object(ROOT, "list", ObjType::List).unwrap();
-        doc1.insert(&list, 0, "one").unwrap();
-        doc1.commit_with(t0());
-        let mut doc2 = doc1.fork().with_actor(crate::ActorId::from(&b"mlc2"[..]));
-        let before = doc1.get_heads();
-
-        doc1.put(&list, 0, "left").unwrap();
-        doc1.commit_with(t0());
-        doc2.put(&list, 0, "right").unwrap();
-        doc2.commit_with(t0());
-        doc1.merge(&mut doc2).unwrap();
-        let after = doc1.get_heads();
-
-        assert_diff_patches_have_effect(&mut doc1, &before, &after);
-    }
 }

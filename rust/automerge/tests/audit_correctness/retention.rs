@@ -1,22 +1,11 @@
-//! Hash retention lifecycle audit of `next` documents. Each test's name
-//! states the expected behaviour; a failing test is a finding.
+//! Hash retention lifecycle of `next` documents.
 
-use automerge::next::transaction::{CommitOptions, Transactable};
-use automerge::next::AutoCommit;
-use automerge::{ActorId, AutomergeError, ChangeId, ROOT};
+use automerge::next::transaction::Transactable;
+use automerge::next::{AutoCommit, Automerge, ReadDoc};
+use automerge::{ActorId, AutomergeError, ChangeId, Value, ROOT};
 use std::num::NonZeroU64;
 
-fn actor(n: u8) -> ActorId {
-    ActorId::from(&[n, n, n, n][..])
-}
-
-fn t0() -> CommitOptions {
-    CommitOptions::default().with_time(0)
-}
-
-fn id(a: u8, seq: u64) -> ChangeId {
-    ChangeId::from_parts(actor(a), NonZeroU64::new(seq).unwrap())
-}
+use crate::common::{actor, id, pair_mut, panic_msg, t0};
 
 fn freed(doc: &AutoCommit, id: &ChangeId) -> bool {
     matches!(
@@ -48,6 +37,10 @@ fn editing_in_isolation_after_a_save_does_not_panic() {
     assert!(!freed(&doc, &at), "an isolation head keeps its hash");
     doc.put(ROOT, "iso", 1).unwrap();
     doc.commit_with(t0());
+    assert_eq!(
+        doc.get(ROOT, "iso").unwrap().map(|v| v.0),
+        Some(Value::from(1))
+    );
     doc.integrate();
 }
 
@@ -151,14 +144,6 @@ fn get_last_local_change_works_when_it_is_a_fragment_head() {
     );
 }
 
-// ───────────────────────────────────────────────────────────────────────
-// A randomized cluster of plain `next::Automerge` peers (GC runs inside
-// commits and applies), each switching between two actors of its own,
-// syncing by every route, converting through audit mode and back.
-// ───────────────────────────────────────────────────────────────────────
-
-use automerge::next::Automerge;
-
 struct Rng(u64);
 impl Rng {
     fn next(&mut self) -> u64 {
@@ -186,13 +171,7 @@ fn commit(doc: &mut Automerge, rng: &mut Rng) -> ChangeId {
 }
 
 fn sync(peers: &mut [Automerge], a: usize, b: usize, how: usize, log: &[String]) {
-    let (from, to) = if a < b {
-        let (l, r) = peers.split_at_mut(b);
-        (&mut r[0], &mut l[a])
-    } else {
-        let (l, r) = peers.split_at_mut(a);
-        (&mut l[b], &mut r[0])
-    };
+    let (to, from) = pair_mut(peers, a, b);
     let res: Result<(), AutomergeError> = match how {
         0 => to.merge(from).map(|_| ()),
         1 => from
@@ -266,6 +245,9 @@ fn no(what: &str) -> bool {
     std::env::var(format!("C2_NO_{what}")).is_ok()
 }
 
+/// A randomized cluster of plain `next::Automerge` peers (GC runs inside
+/// commits and applies), each switching between two actors of its own,
+/// syncing by every route, converting through audit mode and back.
 fn cluster_fuzz(seed: u64, rounds: usize) {
     const N: usize = 3;
     let mut rng = Rng(seed.wrapping_mul(0x9e3779b97f4a7c15) | 1);
@@ -392,35 +374,8 @@ enum Step {
     },
 }
 
-fn gen_steps(seed: u64, rounds: usize, hows: &[usize]) -> Vec<Step> {
-    let mut rng = Rng(seed.wrapping_mul(0x9e3779b97f4a7c15) | 1);
-    (0..rounds)
-        .map(|_| {
-            let p = rng.below(3);
-            if rng.below(20) < 12 {
-                let actor = (rng.below(4) == 0).then(|| rng.below(2));
-                Step::Commit {
-                    p,
-                    actor,
-                    seed: rng.next(),
-                }
-            } else {
-                let from = (p + 1 + rng.below(2)) % 3;
-                Step::Sync {
-                    to: p,
-                    from,
-                    how: hows[rng.below(hows.len())],
-                }
-            }
-        })
-        .collect()
-}
-
+#[cfg(feature = "small_fragments")]
 fn replay(steps: &[Step]) -> Result<(), String> {
-    replay_peers(steps).map(|_| ())
-}
-
-fn replay_peers(steps: &[Step]) -> Result<Vec<Automerge>, String> {
     let mut peers: Vec<Automerge> = (0..3)
         .map(|p| Automerge::new().with_actor(peer_actor(p, 0)))
         .collect();
@@ -437,66 +392,17 @@ fn replay_peers(steps: &[Step]) -> Result<Vec<Automerge>, String> {
                     sync(&mut peers, to, from, how, &[])
                 }));
                 if let Err(e) = r {
-                    let msg = e.downcast_ref::<String>().cloned().unwrap_or_default();
-                    return Err(format!("step {i}: {msg}"));
+                    return Err(format!("step {i}: {}", panic_msg(&e)));
                 }
             }
         }
     }
-    Ok(peers)
-}
-
-fn ddmin(mut steps: Vec<Step>) -> Vec<Step> {
-    let mut n = 2;
-    while steps.len() >= 2 {
-        let chunk = steps.len().div_ceil(n);
-        let mut reduced = false;
-        for start in (0..steps.len()).step_by(chunk) {
-            let mut cand = steps[..start].to_vec();
-            cand.extend_from_slice(&steps[(start + chunk).min(steps.len())..]);
-            if replay(&cand).is_err() {
-                steps = cand;
-                n = (n - 1).max(2);
-                reduced = true;
-                break;
-            }
-        }
-        if !reduced {
-            if n >= steps.len() {
-                break;
-            }
-            n = (n * 2).min(steps.len());
-        }
-    }
-    steps
-}
-
-#[test]
-#[ignore]
-fn minimize_cluster_failure() {
-    let seed: u64 = std::env::var("C2_FIRST").map_or(0, |v| v.parse().unwrap());
-    let hows: Vec<usize> = std::env::var("C2_HOWS")
-        .map_or(vec![0, 1], |v| v.chars().map(|c| c as usize - 48).collect());
-    for seed in seed..seed + 50 {
-        let rounds: usize = std::env::var("C2_ROUNDS").map_or(3000, |v| v.parse().unwrap());
-        let steps = gen_steps(seed, rounds, &hows);
-        if let Err(e) = replay(&steps) {
-            eprintln!("seed {seed} fails at {e}");
-            let i: usize = e[5..e.find(':').unwrap()].parse().unwrap();
-            let min = ddmin(steps[..=i].to_vec());
-            eprintln!("minimal ({}):", min.len());
-            for s in &min {
-                eprintln!("  {s:?}");
-            }
-            return;
-        }
-    }
-    eprintln!("no failure");
+    Ok(())
 }
 
 /// Three peers, each committing as one of two actors of its own, syncing
-/// by `merge` and `save_after`: found by `minimize_cluster_failure`
-/// (seed 7) and reduced to these steps. Needs `small_fragments` for the
+/// by `merge` and `save_after`: found by a randomized cluster (seed 7)
+/// and reduced to these steps. Needs `small_fragments` for the
 /// fragments to form.
 #[cfg(feature = "small_fragments")]
 #[test]
@@ -539,8 +445,7 @@ fn replay_mined(steps: &[Step], heads: &[ChangeId]) -> Result<(), String> {
                     sync(&mut peers, to, from, how, &[])
                 }));
                 if let Err(e) = r {
-                    let msg = e.downcast_ref::<String>().cloned().unwrap_or_default();
-                    return Err(format!("step {i}: {msg}"));
+                    return Err(format!("step {i}: {}", panic_msg(&e)));
                 }
             }
         }
@@ -550,7 +455,7 @@ fn replay_mined(steps: &[Step], heads: &[ChangeId]) -> Result<(), String> {
 
 /// Three peers, each committing as one of two actors of its own, syncing
 /// by `merge` and `save_after`; fragment heads are mined so the history has
-/// the shape `minimize_cluster_failure` found. The last `merge` (and a
+/// the shape the seed-7 reduction found. The last `merge` (and a
 /// `save_after` at the same point) must succeed.
 #[test]
 fn merging_peers_that_switch_between_their_own_actors_succeeds() {

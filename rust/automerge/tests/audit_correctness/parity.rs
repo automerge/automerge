@@ -1,18 +1,12 @@
-//! Audit vs next parity and fragment determinism (second audit).
+//! Audit vs next parity and fragment determinism.
 
 use automerge::marks::{ExpandMark, Mark};
-use automerge::next::transaction::{CommitOptions, Transactable};
+use automerge::next::transaction::Transactable;
 use automerge::next::{AuditedAutoCommit, AutoCommit, Automerge, ReadDoc};
-use automerge::{ActorId, ObjType, ScalarValue, Value, ROOT};
+use automerge::{ObjType, ScalarValue, Value, ROOT};
 use rand::prelude::*;
 
-fn actor(n: u8) -> ActorId {
-    ActorId::from(&[n, n, n, n][..])
-}
-
-fn t0() -> CommitOptions {
-    CommitOptions::default().with_time(0)
-}
+use crate::common::{actor, id, normalized, pair_mut, t0};
 
 fn obj<T: ReadDoc>(doc: &T, key: &str) -> automerge::ObjId {
     match doc.get(ROOT, key).unwrap() {
@@ -118,42 +112,15 @@ fn history(seed: u64, rounds: usize) -> Vec<AuditedAutoCommit> {
             peers[i].commit_with(t0());
         } else {
             let j = (i + 1 + rng.random_range(0..2)) % 3;
-            let (a, b) = if i < j {
-                let (l, r) = peers.split_at_mut(j);
-                (&mut l[i], &mut r[0])
-            } else {
-                let (l, r) = peers.split_at_mut(i);
-                (&mut r[0], &mut l[j])
-            };
+            let (a, b) = pair_mut(&mut peers, i, j);
             a.merge(b).unwrap();
         }
     }
     for i in 1..3 {
-        let (l, r) = peers.split_at_mut(i);
-        l[0].merge(&mut r[0]).unwrap();
+        let (first, other) = pair_mut(&mut peers, 0, i);
+        first.merge(other).unwrap();
     }
     peers
-}
-
-fn normalized(fragments: Vec<automerge::next::Fragment>) -> Vec<automerge::next::Fragment> {
-    let mut fragments: Vec<_> = fragments
-        .into_iter()
-        .map(|mut f| {
-            f.members.sort();
-            f.checkpoints.sort();
-            f.boundary.sort();
-            f
-        })
-        .collect();
-    fragments.sort_by_key(|f| f.head);
-    fragments
-}
-
-fn stack<T>(
-    fragments: Vec<automerge::next::Fragment>,
-    f: impl Fn(Vec<automerge::next::Fragment>) -> T,
-) -> T {
-    f(fragments)
 }
 
 /// Legacy changes, applied one at a time in a random topological order
@@ -212,21 +179,7 @@ fn one_legacy_change_at_a_time_in_any_order_matches_the_audited_document() {
             next.save() == reference_save,
             "order {order_seed}: save byte-identical"
         );
-        let _ = stack(vec![], |v| v);
     }
-}
-
-macro_rules! pair {
-    ($a:expr, $i:expr, $j:expr) => {{
-        let (i, j) = ($i, $j);
-        if i < j {
-            let (l, r) = $a.split_at_mut(j);
-            (&mut l[i], &mut r[0])
-        } else {
-            let (l, r) = $a.split_at_mut(i);
-            (&mut r[0], &mut l[j])
-        }
-    }};
 }
 
 /// One step on a peer set, the same for audited and next peers.
@@ -238,11 +191,11 @@ macro_rules! step {
                 $peers[$i].commit_with(t0());
             }
             6 => {
-                let (a, b) = pair!($peers, $i, $j);
+                let (a, b) = pair_mut(&mut $peers, $i, $j);
                 a.merge(b).unwrap();
             }
             7 => {
-                let (a, b) = pair!($peers, $i, $j);
+                let (a, b) = pair_mut(&mut $peers, $i, $j);
                 let heads: Vec<_> = a
                     .get_heads()
                     .into_iter()
@@ -252,7 +205,7 @@ macro_rules! step {
                 a.load_incremental(&bytes).unwrap();
             }
             8 => {
-                let (a, b) = pair!($peers, $i, $j);
+                let (a, b) = pair_mut(&mut $peers, $i, $j);
                 let heads: Vec<_> = a
                     .get_heads()
                     .into_iter()
@@ -263,7 +216,7 @@ macro_rules! step {
                 }
             }
             _ => {
-                let (a, b) = pair!($peers, $i, $j);
+                let (a, b) = pair_mut(&mut $peers, $i, $j);
                 let bytes = b.save();
                 a.load_incremental(&bytes).unwrap();
             }
@@ -286,7 +239,7 @@ fn cluster_parity(seed: u64, steps: usize) {
         .iter()
         .map(|d| d.clone().enable_audit_mode().unwrap())
         .collect();
-    for p in next.iter_mut().chain([].iter_mut()) {
+    for p in next.iter_mut() {
         p.update_diff_cursor();
     }
     for p in audit.iter_mut() {
@@ -330,33 +283,6 @@ fn audited_and_next_clusters_agree_on_patches_values_and_saves_seed_2() {
     cluster_parity(2, 2500);
 }
 
-fn cid(a: u8, seq: u64) -> automerge::ChangeId {
-    automerge::ChangeId::from_parts(actor(a), std::num::NonZeroU64::new(seq).unwrap())
-}
-
-/// An isolated `next` AutoCommit keeps working after a save collects
-/// garbage: committing in isolation must not panic.
-#[test]
-fn committing_in_isolation_after_a_save_does_not_panic() {
-    let mut doc = AutoCommit::new().with_actor(actor(1));
-    for i in 0..1500 {
-        doc.put(ROOT, "k", i as i64).unwrap();
-        doc.commit_with(t0());
-    }
-    assert!(!doc.fragments(1..).is_empty(), "fixture needs a fragment");
-    doc.isolate(&[cid(1, 700)])
-        .expect("hash still held before any save");
-    let _ = doc.save();
-    let freed = doc.change_id_to_hash(&cid(1, 700));
-    eprintln!("after save: {freed:?}");
-    doc.put(ROOT, "isolated", 1).unwrap();
-    doc.commit_with(t0());
-    assert_eq!(
-        doc.get(ROOT, "isolated").unwrap().map(|v| v.0),
-        Some(Value::from(1))
-    );
-}
-
 /// Every history query on a `next` document, at heads whose hashes were
 /// freed, returns a result or an error; none panics.
 #[test]
@@ -371,7 +297,7 @@ fn history_queries_at_freed_heads_never_panic() {
         doc.commit_with(t0());
     }
     let _ = doc.save();
-    let old = [cid(1, 700)];
+    let old = [id(1, 700)];
     let cur = doc.get_heads();
     let mut panics = Vec::new();
     macro_rules! probe {
@@ -720,8 +646,7 @@ fn bundle_after_applies_one_at_a_time_and_matches_audit_mode() {
     }
 }
 
-fn held<T: ReadDoc>(doc: &AutoCommit, all: &[automerge::ChangeId]) -> usize {
-    let _ = std::marker::PhantomData::<T>;
+fn held(doc: &AutoCommit, all: &[automerge::ChangeId]) -> usize {
     all.iter()
         .filter(|id| matches!(doc.change_id_to_hash(id), Ok(Some(_))))
         .count()
@@ -765,17 +690,14 @@ fn a_long_lived_next_document_holds_what_a_fresh_load_holds() {
     let mut ids = Vec::new();
     for a in 1..=3u8 {
         for s in 1.. {
-            if !doc.has_change_id(&cid(a, s)) {
+            if !doc.has_change_id(&id(a, s)) {
                 break;
             }
-            ids.push(cid(a, s));
+            ids.push(id(a, s));
         }
     }
     let fresh = AutoCommit::load(&doc.save()).unwrap();
-    let (h, f) = (
-        held::<AutoCommit>(&doc, &ids),
-        held::<AutoCommit>(&fresh, &ids),
-    );
+    let (h, f) = (held(&doc, &ids), held(&fresh, &ids));
     eprintln!(
         "{} changes, live holds {h}, fresh load holds {f}",
         ids.len()

@@ -1,21 +1,8 @@
-//! Second correctness audit of the `hashless` branch. Each test's name
-//! states the expected behaviour; a failing test is a finding.
-
-use automerge::next::transaction::{CommitOptions, Transactable};
+use automerge::next::transaction::Transactable;
 use automerge::next::{AutoCommit, Automerge};
-use automerge::{ActorId, Bundle, ChangeId, ROOT};
+use automerge::{Bundle, ROOT};
 
-fn actor(n: u8) -> ActorId {
-    ActorId::from(&[n, n, n, n][..])
-}
-
-fn t0() -> CommitOptions {
-    CommitOptions::default().with_time(0)
-}
-
-fn id(a: u8, seq: u64) -> ChangeId {
-    ChangeId::from_parts(actor(a), std::num::NonZeroU64::new(seq).unwrap())
-}
+use crate::common::{actor, id, panic_msg, t0, Prefix};
 
 fn linear(a: u8, n: usize) -> Automerge {
     let mut doc = Automerge::new().with_actor(actor(a));
@@ -27,164 +14,17 @@ fn linear(a: u8, n: usize) -> Automerge {
     doc
 }
 
-/// `make_bundle` given a head that another head depends on must not
-/// produce a bundle that makes its receiver's heads non-minimal.
+/// `make_bundle` given a head that another head depends on makes a bundle
+/// that leaves its receiver with the writer's heads.
 #[test]
 fn make_bundle_with_a_redundant_head_keeps_the_receivers_heads_minimal() {
     let doc = linear(1, 3);
-    let res = doc.make_bundle(&[id(1, 2), id(1, 3)], &[id(1, 1)]);
-    eprintln!(
-        "make_bundle: {:?}",
-        res.as_ref().map(|b| b.heads().collect::<Vec<_>>())
-    );
-    let Ok(bundle) = res else { return };
+    let bundle = doc.make_bundle(&[id(1, 2), id(1, 3)], &[id(1, 1)]).unwrap();
     let mut r = Automerge::new();
     r.apply_bundle(doc.make_bundle(&[id(1, 1)], &[]).unwrap())
         .unwrap();
-    let res = r.apply_bundle(bundle);
-    eprintln!("apply: {:?}", res);
-    if res.is_ok() {
-        assert_eq!(r.get_heads(), doc.get_heads(), "heads are minimal");
-    }
-}
-
-// ───────────────────────────────────────────────────────────────────────
-// A bundle prefix editor, for hostile bundles that still parse.
-// ───────────────────────────────────────────────────────────────────────
-
-fn read_uleb(b: &[u8], at: &mut usize) -> u64 {
-    let mut out = 0u64;
-    let mut shift = 0;
-    loop {
-        let byte = b[*at];
-        *at += 1;
-        out |= ((byte & 0x7f) as u64) << shift;
-        if byte & 0x80 == 0 {
-            return out;
-        }
-        shift += 7;
-    }
-}
-
-fn write_uleb(out: &mut Vec<u8>, v: u64) {
-    leb128::write::unsigned(out, v).unwrap();
-}
-
-fn read_hash(b: &[u8], at: &mut usize) -> [u8; 32] {
-    let h: [u8; 32] = b[*at..*at + 32].try_into().unwrap();
-    *at += 32;
-    h
-}
-
-#[derive(Debug, Clone)]
-struct Prefix {
-    actors: Vec<Vec<u8>>,
-    heads: Vec<([u8; 32], u64)>,
-    checkpoints: Vec<(u64, [u8; 32])>,
-    retained: Vec<(u64, [u8; 32])>,
-    boundary: Vec<([u8; 32], u64, u64)>,
-    deps: Vec<(u64, u64)>,
-    columns: Vec<u8>,
-}
-
-impl Prefix {
-    fn parse(chunk: &[u8]) -> Prefix {
-        let mut at = 8;
-        assert_eq!(chunk[at], 4, "bundle chunk type");
-        at += 1;
-        let len = read_uleb(chunk, &mut at) as usize;
-        let data = &chunk[at..at + len];
-        let mut at = 0;
-        let n = read_uleb(data, &mut at);
-        let mut actors = Vec::new();
-        for _ in 0..n {
-            let l = read_uleb(data, &mut at) as usize;
-            actors.push(data[at..at + l].to_vec());
-            at += l;
-        }
-        let mut heads = Vec::new();
-        for _ in 0..read_uleb(data, &mut at) {
-            let h = read_hash(data, &mut at);
-            heads.push((h, read_uleb(data, &mut at)));
-        }
-        let indexed = |at: &mut usize| {
-            let mut v = Vec::new();
-            for _ in 0..read_uleb(data, at) {
-                let i = read_uleb(data, at);
-                v.push((i, read_hash(data, at)));
-            }
-            v
-        };
-        let checkpoints = indexed(&mut at);
-        let retained = indexed(&mut at);
-        let mut boundary = Vec::new();
-        for _ in 0..read_uleb(data, &mut at) {
-            let h = read_hash(data, &mut at);
-            let a = read_uleb(data, &mut at);
-            boundary.push((h, a, read_uleb(data, &mut at)));
-        }
-        let mut deps = Vec::new();
-        for _ in 0..read_uleb(data, &mut at) {
-            let a = read_uleb(data, &mut at);
-            deps.push((a, read_uleb(data, &mut at)));
-        }
-        Prefix {
-            actors,
-            heads,
-            checkpoints,
-            retained,
-            boundary,
-            deps,
-            columns: data[at..].to_vec(),
-        }
-    }
-
-    fn bytes(&self) -> Vec<u8> {
-        use sha2::{Digest, Sha256};
-        let mut d = Vec::new();
-        write_uleb(&mut d, self.actors.len() as u64);
-        for a in &self.actors {
-            write_uleb(&mut d, a.len() as u64);
-            d.extend(a);
-        }
-        write_uleb(&mut d, self.heads.len() as u64);
-        for (h, i) in &self.heads {
-            d.extend(h);
-            write_uleb(&mut d, *i);
-        }
-        for list in [&self.checkpoints, &self.retained] {
-            write_uleb(&mut d, list.len() as u64);
-            for (i, h) in list {
-                write_uleb(&mut d, *i);
-                d.extend(h);
-            }
-        }
-        write_uleb(&mut d, self.boundary.len() as u64);
-        for (h, a, s) in &self.boundary {
-            d.extend(h);
-            write_uleb(&mut d, *a);
-            write_uleb(&mut d, *s);
-        }
-        write_uleb(&mut d, self.deps.len() as u64);
-        for (a, s) in &self.deps {
-            write_uleb(&mut d, *a);
-            write_uleb(&mut d, *s);
-        }
-        d.extend(&self.columns);
-        let mut len = Vec::new();
-        write_uleb(&mut len, d.len() as u64);
-        let mut hasher = Sha256::new();
-        hasher.update([4u8]);
-        hasher.update(&len);
-        hasher.update(&d);
-        let sum = hasher.finalize();
-        let mut out = vec![0x85, 0x6f, 0x4a, 0x83];
-        out.extend(&sum[..4]);
-        out.push(4);
-        out.extend(len);
-        out.extend(d);
-        out
-    }
+    r.apply_bundle(bundle).unwrap();
+    assert_eq!(r.get_heads(), doc.get_heads(), "heads are minimal");
 }
 
 #[test]
@@ -252,10 +92,6 @@ fn a_bundle_leaving_out_a_receiver_tip_is_handled_in_release() {
     let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| r.apply_bundle(hostile)));
     assert!(res.is_ok(), "applying a hostile bundle panicked");
 }
-
-// ───────────────────────────────────────────────────────────────────────
-// Hostile legacy changes.
-// ───────────────────────────────────────────────────────────────────────
 
 /// A change whose op inserts into the root map with a sequence key.
 fn change_inserting_into_the_root_map(base: &automerge::Automerge) -> automerge::Change {
@@ -328,10 +164,6 @@ fn a_change_inserting_into_a_map_is_rejected_next() {
     }
 }
 
-// ───────────────────────────────────────────────────────────────────────
-// GC mode across load_incremental into an empty document.
-// ───────────────────────────────────────────────────────────────────────
-
 #[test]
 fn load_incremental_into_an_empty_autocommit_keeps_manual_gc() {
     let mut src = AutoCommit::new().with_actor(actor(1));
@@ -391,10 +223,6 @@ fn fork_at_of_an_autocommit_keeps_manual_gc() {
     );
 }
 
-// ───────────────────────────────────────────────────────────────────────
-// `load` into an empty document takes chunks in any order.
-// ───────────────────────────────────────────────────────────────────────
-
 fn two_bundles_reversed() -> (Automerge, Vec<u8>) {
     let doc = linear(1, 3);
     let first = doc.make_bundle(&[id(1, 1)], &[]).unwrap().bytes();
@@ -428,11 +256,6 @@ fn load_incremental_into_an_empty_document_takes_a_bundle_stack_in_any_order() {
     assert_eq!(loaded.get_heads(), doc.get_heads());
 }
 
-// ───────────────────────────────────────────────────────────────────────
-// Malformed legacy chunks (document, BundleV0) found by mutation fuzzing
-// (`tests/audit_c2_legacy.rs`). Each must load to an error, promptly.
-// ───────────────────────────────────────────────────────────────────────
-
 /// Loads `bytes` as a `next` and as an audited document on a thread with a
 /// deadline; returns a description of any panic or hang.
 fn load_outcome(bytes: &'static [u8]) -> Option<String> {
@@ -444,12 +267,7 @@ fn load_outcome(bytes: &'static [u8]) -> Option<String> {
             let mut d = Automerge::new();
             let _ = d.load_incremental(bytes);
         });
-        let _ = tx.send(r.err().map(|e| {
-            e.downcast_ref::<String>()
-                .cloned()
-                .or_else(|| e.downcast_ref::<&str>().map(|s| s.to_string()))
-                .unwrap_or_default()
-        }));
+        let _ = tx.send(r.err().map(|e| panic_msg(&e)));
     });
     match rx.recv_timeout(std::time::Duration::from_secs(20)) {
         Ok(None) => None,
@@ -458,62 +276,62 @@ fn load_outcome(bytes: &'static [u8]) -> Option<String> {
     }
 }
 
-macro_rules! malformed_legacy_chunk_test {
-    ($name:ident, $file:literal) => {
-        #[test]
-        fn $name() {
-            let bytes: &'static [u8] = include_bytes!(concat!("fixtures/audit_c2_hostile/", $file));
-            if let Some(failure) = load_outcome(bytes) {
-                panic!("loading {} {failure}", $file);
-            }
-        }
-    };
-}
+/// Malformed legacy chunks (document, BundleV0) found by mutation fuzzing.
+const MALFORMED_LEGACY_CHUNKS: &[(&str, &[u8])] = &[
+    (
+        "a document chunk with a bad change column varint is an error",
+        include_bytes!("../fixtures/audit_c2_hostile/legacy_c0_i202.bin"),
+    ),
+    (
+        "a document chunk whose value column is short is an error",
+        include_bytes!("../fixtures/audit_c2_hostile/legacy_c1_i59.bin"),
+    ),
+    (
+        "a document chunk whose value lengths cross a slab is an error",
+        include_bytes!("../fixtures/audit_c2_hostile/legacy_c1_i107.bin"),
+    ),
+    (
+        "a bundle v0 with an invalid action is an error",
+        include_bytes!("../fixtures/audit_c2_hostile/legacy_c3_i0.bin"),
+    ),
+    (
+        "a bundle v0 with a truncated column is an error",
+        include_bytes!("../fixtures/audit_c2_hostile/legacy_c3_i74.bin"),
+    ),
+    (
+        "a bundle v0 with an overlong run is an error",
+        include_bytes!("../fixtures/audit_c2_hostile/legacy_c3_i131.bin"),
+    ),
+    (
+        "a bundle v0 with short value bytes is an error",
+        include_bytes!("../fixtures/audit_c2_hostile/legacy_c3_i39.bin"),
+    ),
+    (
+        "a bundle v0 with short extra bytes is an error",
+        include_bytes!("../fixtures/audit_c2_hostile/legacy_c3_i181.bin"),
+    ),
+    (
+        "a bundle v0 with an undecodable op is an error",
+        include_bytes!("../fixtures/audit_c2_hostile/legacy_c3_i135.bin"),
+    ),
+    (
+        "a bundle v0 with unordered ops is an error",
+        include_bytes!("../fixtures/audit_c2_hostile/legacy_c3_i163.bin"),
+    ),
+    (
+        "a bundle v0 with a truncated bool run is an error not a hang",
+        include_bytes!("../fixtures/audit_c2_hostile/legacy_c3_i1389_hang.bin"),
+    ),
+];
 
-malformed_legacy_chunk_test!(
-    a_document_chunk_with_a_bad_change_column_varint_is_an_error,
-    "legacy_c0_i202.bin"
-);
-malformed_legacy_chunk_test!(
-    a_document_chunk_whose_value_column_is_short_is_an_error,
-    "legacy_c1_i59.bin"
-);
-malformed_legacy_chunk_test!(
-    a_document_chunk_whose_value_lengths_cross_a_slab_is_an_error,
-    "legacy_c1_i107.bin"
-);
-malformed_legacy_chunk_test!(
-    a_bundle_v0_with_an_invalid_action_is_an_error,
-    "legacy_c3_i0.bin"
-);
-malformed_legacy_chunk_test!(
-    a_bundle_v0_with_a_truncated_column_is_an_error,
-    "legacy_c3_i74.bin"
-);
-malformed_legacy_chunk_test!(
-    a_bundle_v0_with_an_overlong_run_is_an_error,
-    "legacy_c3_i131.bin"
-);
-malformed_legacy_chunk_test!(
-    a_bundle_v0_with_short_value_bytes_is_an_error,
-    "legacy_c3_i39.bin"
-);
-malformed_legacy_chunk_test!(
-    a_bundle_v0_with_short_extra_bytes_is_an_error,
-    "legacy_c3_i181.bin"
-);
-malformed_legacy_chunk_test!(
-    a_bundle_v0_with_an_undecodable_op_is_an_error,
-    "legacy_c3_i135.bin"
-);
-malformed_legacy_chunk_test!(
-    a_bundle_v0_with_unordered_ops_is_an_error,
-    "legacy_c3_i163.bin"
-);
-malformed_legacy_chunk_test!(
-    a_bundle_v0_with_a_truncated_bool_run_is_an_error_not_a_hang,
-    "legacy_c3_i1389_hang.bin"
-);
+#[test]
+fn malformed_legacy_chunks_load_to_an_error_promptly() {
+    let failures: Vec<String> = MALFORMED_LEGACY_CHUNKS
+        .iter()
+        .filter_map(|(name, bytes)| load_outcome(bytes).map(|f| format!("{name}: {f}")))
+        .collect();
+    assert!(failures.is_empty(), "{failures:#?}");
+}
 
 /// The primitive behind the hang: a boolean column ending in an
 /// unterminated run length.
@@ -528,13 +346,3 @@ fn a_bool_decoder_over_a_truncated_run_length_terminates() {
     let res = rx.recv_timeout(std::time::Duration::from_secs(5));
     assert!(res.is_ok(), "BoolDecoder::next loops forever on [0x80]");
 }
-
-// Areas explored with larger fixtures and fuzzers, one module each.
-#[path = "audit_correctness2/hostile.rs"]
-mod hostile;
-#[path = "audit_correctness2/legacy.rs"]
-mod legacy;
-#[path = "audit_correctness2/parity.rs"]
-mod parity;
-#[path = "audit_correctness2/retention.rs"]
-mod retention;
