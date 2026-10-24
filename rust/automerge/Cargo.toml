@@ -47,6 +47,7 @@ optional = true
 
 [dev-dependencies]
 automerge-test = { path = "../automerge-test" }
+hexane = { version = "1.0.0-alpha.5", path = "../hexane", features = ["raw-counters"] }
 maplit = { version = "^1.0" }
 pretty_assertions = "1.0.0"
 prettytable = "0.10.0"
