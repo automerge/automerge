@@ -1494,7 +1494,7 @@ mod tests {
             .do_insert_op(&mut doc, &a, SequenceType::Text, 0, begin)
             .unwrap();
         inner
-            .do_insert_op(&mut doc, &b, SequenceType::Text, 1, OpType::MarkEnd(false))
+            .do_insert_op(&mut doc, &b, SequenceType::Text, 0, OpType::MarkEnd(false))
             .unwrap();
         inner.commit(&mut doc, None, None);
 
