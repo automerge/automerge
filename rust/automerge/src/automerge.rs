@@ -329,7 +329,6 @@ pub struct Automerge<H: HashRetention = Retained> {
     visibility: visibility::FrontierVisibility,
     visibility_epoch: u64,
     actor_generation: view::ActorGeneration,
-    /// Current dependencies of this document (heads hashes).
     /// The set of operations that form this document.
     pub(crate) ops: OpSet,
     /// The current actor.
@@ -933,9 +932,6 @@ impl<H: HashRetention> Automerge<H> {
         }
     }
 
-    /// Run a transaction on this document in a closure, collecting patches, automatically handling commit or rollback
-    /// afterwards.
-    ///
     /// Generate an empty change
     ///
     /// The main reason to do this is if you want to create a "merge commit", which is a change
@@ -1324,7 +1320,7 @@ impl<H: HashRetention> Automerge<H> {
     }
 
     /// Whether `bundle` names only changes this document has, and extends
-    /// each actor's sequence without a gap. O(members), decoding nothing.
+    /// each actor's sequence without a gap. O(members).
     fn has_bundle_deps(&self, bundle: &Bundle) -> bool {
         let known = |id: &ChangeId| self.node_for_change_id(id).is_some();
         if !bundle.dep_ids.iter().all(known) || !bundle.boundary.iter().all(|(_, id)| known(id)) {
@@ -1752,7 +1748,6 @@ impl<H: HashRetention> Automerge<H> {
         }
     }
 
-    /// Whether a GC is owed.
     fn rebuild_unhashed_fragment_pins(&mut self) -> bool {
         let pins = self.change_graph.take_unhashed_fragment_pins();
         self.rebuild_hashes(pins)
@@ -2292,7 +2287,6 @@ impl<H: HashRetention> Automerge<H> {
     /// fails with [`AutomergeError::MissingDeps`] and changes nothing, and
     /// must be applied again once its dependencies have been.
     pub fn apply_bundle(&mut self, bundle: Bundle) -> Result<(), AutomergeError> {
-        // a failed apply can leave unused actors; the legacy save sweeps them
         let result = self.apply_bundle_inner(bundle);
         if result.is_ok() {
             self.assert_no_unused_actors(cfg!(debug_assertions));
@@ -2341,8 +2335,8 @@ impl<H: HashRetention> Automerge<H> {
             return Ok(());
         };
 
-        // ── commit: failures below must undo the actor table; the graph is
-        // only touched once nothing can fail ──
+        // failures below must undo the actor table; the graph is only
+        // touched once nothing can fail
         let hashed = plan.kept_hashes.is_some();
         let (added, actor_map) = self.add_bundle_actors(bundle);
         let staged = (|| -> Result<_, AutomergeError> {
@@ -2410,8 +2404,6 @@ impl<H: HashRetention> Automerge<H> {
         let num_members = member_seqs.len();
 
         // parsing validated the bundle's shape, so its indexes are in bounds
-
-        // ── resolve: nothing in this phase writes to the document ──────
         let member_id = |i: usize| -> ChangeId {
             ChangeId::new(
                 member_seqs[i],
@@ -2497,7 +2489,6 @@ impl<H: HashRetention> Automerge<H> {
             }
         };
 
-        // recorded after the commit
         let mut hash_pairs: Vec<(crate::change_graph::NodeIdx, ChangeHash)> = freed;
         hash_pairs.reserve(bundle.boundary.len() + bundle.dep_ids.len());
         for (hash, id) in &bundle.boundary {
@@ -2520,7 +2511,6 @@ impl<H: HashRetention> Automerge<H> {
             ext_nodes.push(node);
         }
 
-        // `add_bundle_members*` and `record_fragment_head` maintain the graph's heads
         let mut graph_members: Vec<BundleMember<'_>> = Vec::new();
         if overlap {
             let members = bundle.changes()?;
@@ -2696,7 +2686,6 @@ impl<H: HashRetention> Automerge<H> {
             retained_nodes,
         } = plan;
         if overlap {
-            // bundle actor indexes to document actor indexes
             for m in &mut graph_members {
                 m.actor = actor_map[m.actor];
             }
@@ -2723,9 +2712,8 @@ impl<H: HashRetention> Automerge<H> {
         for (node, hash) in hash_pairs {
             owes_gc |= self.change_graph.record_node_hash(node, hash);
         }
-        // in node order, so fragments are cached in graph order and the
-        // fragment index matches one built from the whole graph
-        // an overlapping bundle's head may already have children here
+        // in node order, so the fragment index matches one built from the
+        // whole graph
         let mut members: Vec<_> = head_nodes
             .into_iter()
             .map(|(n, h)| (n, h, n.0 >= base))
@@ -2990,8 +2978,7 @@ impl<H: HashRetention> Automerge<H> {
     /// The change identified by `id`, or `None` if this document does not
     /// contain it.
     ///
-    /// Outside audit mode this rebuilds every ancestor whose hash is not
-    /// retained back to the nearest retained hashes, which can be slow.
+    /// Outside audit mode this can be slow.
     pub fn get_change_by_id(&self, id: &ChangeId) -> Result<Option<Change>, AutomergeError> {
         let Some(node) = self.node_for_change_id(id) else {
             return Ok(None);
@@ -3595,8 +3582,6 @@ impl<H: HashRetention> Automerge<H> {
 
         Ok(())
     }
-
-    // ── Replication: hash-keyed, since a peer names changes this document lacks ──
 
     /// Whether the document contains `hash`.
     pub fn has_change(&self, hash: &ChangeHash) -> Result<bool, AutomergeError> {
