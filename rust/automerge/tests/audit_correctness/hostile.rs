@@ -3,167 +3,18 @@
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
-use automerge::next::transaction::{CommitOptions, Transactable};
+use automerge::next::transaction::Transactable;
 use automerge::next::Automerge;
-use automerge::{ActorId, Bundle, ChangeId, ROOT};
+use automerge::{Bundle, ROOT};
 use rand::prelude::*;
 
-fn actor(n: u8) -> ActorId {
-    ActorId::from(&[n, n, n, n][..])
-}
-
-fn t0() -> CommitOptions {
-    CommitOptions::default().with_time(0)
-}
-
-fn id(a: u8, seq: u64) -> ChangeId {
-    ChangeId::from_parts(actor(a), std::num::NonZeroU64::new(seq).unwrap())
-}
+use crate::common::{actor, id, panic_msg, t0, Prefix};
 
 fn commit(doc: &mut Automerge, key: &str, v: i64) {
     let mut tx = doc.transaction();
     tx.put(ROOT, key, v).unwrap();
     tx.commit_with(t0());
 }
-
-fn read_uleb(b: &[u8], at: &mut usize) -> u64 {
-    let mut out = 0u64;
-    let mut shift = 0;
-    loop {
-        let byte = b[*at];
-        *at += 1;
-        out |= ((byte & 0x7f) as u64) << shift;
-        if byte & 0x80 == 0 {
-            return out;
-        }
-        shift += 7;
-    }
-}
-
-fn write_uleb(out: &mut Vec<u8>, v: u64) {
-    leb128::write::unsigned(out, v).unwrap();
-}
-
-fn read_hash(b: &[u8], at: &mut usize) -> [u8; 32] {
-    let h: [u8; 32] = b[*at..*at + 32].try_into().unwrap();
-    *at += 32;
-    h
-}
-
-#[derive(Debug, Clone)]
-struct Prefix {
-    actors: Vec<Vec<u8>>,
-    heads: Vec<([u8; 32], u64)>,
-    checkpoints: Vec<(u64, [u8; 32])>,
-    retained: Vec<(u64, [u8; 32])>,
-    boundary: Vec<([u8; 32], u64, u64)>,
-    deps: Vec<(u64, u64)>,
-    columns: Vec<u8>,
-}
-
-impl Prefix {
-    fn parse(chunk: &[u8]) -> Prefix {
-        let mut at = 8;
-        assert_eq!(chunk[at], 4, "bundle chunk type");
-        at += 1;
-        let len = read_uleb(chunk, &mut at) as usize;
-        let data = &chunk[at..at + len];
-        let mut at = 0;
-        let n = read_uleb(data, &mut at);
-        let mut actors = Vec::new();
-        for _ in 0..n {
-            let l = read_uleb(data, &mut at) as usize;
-            actors.push(data[at..at + l].to_vec());
-            at += l;
-        }
-        let mut heads = Vec::new();
-        for _ in 0..read_uleb(data, &mut at) {
-            let h = read_hash(data, &mut at);
-            heads.push((h, read_uleb(data, &mut at)));
-        }
-        let indexed = |at: &mut usize| {
-            let mut v = Vec::new();
-            for _ in 0..read_uleb(data, at) {
-                let i = read_uleb(data, at);
-                v.push((i, read_hash(data, at)));
-            }
-            v
-        };
-        let checkpoints = indexed(&mut at);
-        let retained = indexed(&mut at);
-        let mut boundary = Vec::new();
-        for _ in 0..read_uleb(data, &mut at) {
-            let h = read_hash(data, &mut at);
-            let a = read_uleb(data, &mut at);
-            boundary.push((h, a, read_uleb(data, &mut at)));
-        }
-        let mut deps = Vec::new();
-        for _ in 0..read_uleb(data, &mut at) {
-            let a = read_uleb(data, &mut at);
-            deps.push((a, read_uleb(data, &mut at)));
-        }
-        Prefix {
-            actors,
-            heads,
-            checkpoints,
-            retained,
-            boundary,
-            deps,
-            columns: data[at..].to_vec(),
-        }
-    }
-
-    fn bytes(&self) -> Vec<u8> {
-        use sha2::{Digest, Sha256};
-        let mut d = Vec::new();
-        write_uleb(&mut d, self.actors.len() as u64);
-        for a in &self.actors {
-            write_uleb(&mut d, a.len() as u64);
-            d.extend(a);
-        }
-        write_uleb(&mut d, self.heads.len() as u64);
-        for (h, i) in &self.heads {
-            d.extend(h);
-            write_uleb(&mut d, *i);
-        }
-        for list in [&self.checkpoints, &self.retained] {
-            write_uleb(&mut d, list.len() as u64);
-            for (i, h) in list {
-                write_uleb(&mut d, *i);
-                d.extend(h);
-            }
-        }
-        write_uleb(&mut d, self.boundary.len() as u64);
-        for (h, a, s) in &self.boundary {
-            d.extend(h);
-            write_uleb(&mut d, *a);
-            write_uleb(&mut d, *s);
-        }
-        write_uleb(&mut d, self.deps.len() as u64);
-        for (a, s) in &self.deps {
-            write_uleb(&mut d, *a);
-            write_uleb(&mut d, *s);
-        }
-        d.extend(&self.columns);
-        let mut len = Vec::new();
-        write_uleb(&mut len, d.len() as u64);
-        let mut hasher = Sha256::new();
-        hasher.update([4u8]);
-        hasher.update(&len);
-        hasher.update(&d);
-        let sum = hasher.finalize();
-        let mut out = vec![0x85, 0x6f, 0x4a, 0x83];
-        out.extend(&sum[..4]);
-        out.push(4);
-        out.extend(len);
-        out.extend(d);
-        out
-    }
-}
-
-// ───────────────────────────────────────────────────────────────────────
-// Structured fuzzer
-// ───────────────────────────────────────────────────────────────────────
 
 /// `(receiver, honest bundle bytes)` pairs.
 fn cases() -> Vec<(String, Automerge, Vec<u8>)> {
@@ -365,13 +216,6 @@ fn apply_mutation(p: &mut Prefix, m: &Mutation) {
     }
 }
 
-fn panic_msg(e: &Box<dyn std::any::Any + Send>) -> String {
-    e.downcast_ref::<String>()
-        .cloned()
-        .or_else(|| e.downcast_ref::<&str>().map(|s| s.to_string()))
-        .unwrap_or_default()
-}
-
 /// What's wrong with `doc` after it accepted a hostile bundle, compared
 /// to `honest` (the receiver after the honest bundle).
 fn postconditions(doc: &mut Automerge, honest: &Automerge) -> Vec<String> {
@@ -501,10 +345,6 @@ fn structured_hostile_bundles_are_rejected_or_harmless() {
     }
     assert!(f.is_empty(), "{} findings", f.len());
 }
-
-// ───────────────────────────────────────────────────────────────────────
-// Findings
-// ───────────────────────────────────────────────────────────────────────
 
 /// `(writer, receiver)`: one actor, 1700 changes; the receiver loaded
 /// the first 1600 from a save, so its interior hashes are freed.

@@ -3,202 +3,122 @@
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
-use automerge::next::transaction::{CommitOptions, Transactable};
+use automerge::next::transaction::Transactable;
 use automerge::next::{AutoCommit, Automerge, ReadDoc};
-use automerge::{ActorId, Bundle, ChangeHash, ROOT};
+use automerge::{Bundle, ChangeHash, ROOT};
 use rand::prelude::*;
-use sha2::{Digest, Sha256};
 
-fn actor(n: u8) -> ActorId {
-    ActorId::from(&[n, n, n, n][..])
+mod common;
+mod hostile;
+mod legacy;
+mod parity;
+mod retention;
+mod second;
+
+use common::{
+    actor, assert_no_panics, fix_checksum, mutate, mutation_fuzz, normalized, pair_mut, read_uleb,
+    t0,
+};
+
+/// The writer has heads {A1, C1}, and `first` is its save holding only A1.
+/// A receiver that loaded `first` and committed B1 must end up with heads
+/// {B1, C1} after receiving the writer's document.
+struct SharedHead {
+    writer: AutoCommit,
+    first: Vec<u8>,
+    first_legacy: Vec<u8>,
+    c1: ChangeHash,
 }
 
-fn t0() -> CommitOptions {
-    CommitOptions::default().with_time(0)
-}
-
-/// Rewrites the chunk checksum so a mutated body still parses.
-fn fix_checksum(bytes: &[u8]) -> Vec<u8> {
-    const MAGIC: usize = 4;
-    if bytes.len() < MAGIC + 4 + 1 + 1 {
-        return bytes.to_vec();
-    }
-    let mut at = MAGIC + 4;
-    let typ = bytes[at];
-    at += 1;
-    // the uleb length
-    let len_start = at;
-    loop {
-        if at >= bytes.len() {
-            return bytes.to_vec();
-        }
-        let b = bytes[at];
-        at += 1;
-        if b & 0x80 == 0 {
-            break;
-        }
-    }
-    let data = &bytes[at..];
-    let mut hasher = Sha256::new();
-    hasher.update([typ]);
-    hasher.update(&bytes[len_start..at]);
-    hasher.update(data);
-    let hash = hasher.finalize();
-    let mut out = bytes.to_vec();
-    out[MAGIC..MAGIC + 4].copy_from_slice(&hash[..4]);
-    // the length byte(s) must describe `data`, so rewrite it when it fits
-    let mut len_bytes = Vec::new();
-    leb128::write::unsigned(&mut len_bytes, data.len() as u64).unwrap();
-    if len_bytes.len() == at - len_start {
-        out[len_start..at].copy_from_slice(&len_bytes);
-        // recompute with the fixed length
-        let mut hasher = Sha256::new();
-        hasher.update([typ]);
-        hasher.update(&len_bytes);
-        hasher.update(data);
-        let hash = hasher.finalize();
-        out[MAGIC..MAGIC + 4].copy_from_slice(&hash[..4]);
-    }
-    out
-}
-
-// ───────────────────────────────────────────────────────────────────────
-// Finding: a bundle whose head the receiver already has (with a child)
-// re-adds that head to the receiver's head set.
-// ───────────────────────────────────────────────────────────────────────
-
-/// Writer W has heads {A1, C1}; receiver R has A1 and its child B1.
-/// After `R.load_incremental(W.save())` R's heads must be {B1, C1}.
-fn stale_head_scenario_next() -> (Vec<ChangeHash>, Vec<ChangeHash>) {
-    let mut w = AutoCommit::new().with_actor(actor(1));
-    w.put(ROOT, "a", 1).unwrap();
-    w.commit_with(t0());
-    let a1 = w.get_head_hashes()[0];
-
-    let mut r = AutoCommit::load(&w.save()).unwrap().with_actor(actor(2));
-    r.put(ROOT, "b", 1).unwrap();
-    r.commit_with(t0());
-    let b1 = r.get_head_hashes()[0];
-    assert_ne!(a1, b1);
-
+fn writer_sharing_a_head() -> SharedHead {
+    let mut writer = AutoCommit::new().with_actor(actor(1));
+    writer.put(ROOT, "a", 1).unwrap();
+    writer.commit_with(t0());
+    let first = writer.save();
+    let first_legacy = writer.save_with_options(legacy_format());
     let mut c = AutoCommit::new().with_actor(actor(3));
     c.put(ROOT, "c", 1).unwrap();
     c.commit_with(t0());
     let c1 = c.get_head_hashes()[0];
-    w.merge(&mut c).unwrap();
-    assert_eq!(w.get_head_hashes().len(), 2, "writer has two heads");
+    writer.merge(&mut c).unwrap();
+    assert_eq!(writer.get_head_hashes().len(), 2, "writer has two heads");
+    SharedHead {
+        writer,
+        first,
+        first_legacy,
+        c1,
+    }
+}
 
-    r.load_incremental(&w.save()).unwrap();
-    let mut expected = vec![b1, c1];
-    expected.sort();
-    (r.get_head_hashes(), expected)
+fn sorted(mut hashes: Vec<ChangeHash>) -> Vec<ChangeHash> {
+    hashes.sort();
+    hashes
+}
+
+fn legacy_format() -> automerge::next::SaveOptions {
+    automerge::next::SaveOptions {
+        format: automerge::next::SaveFormat::Legacy,
+        ..Default::default()
+    }
 }
 
 #[test]
 fn load_incremental_of_a_save_sharing_a_head_keeps_heads_minimal_next() {
-    let (got, expected) = stale_head_scenario_next();
-    assert_eq!(got, expected, "a non-head change was re-added as a head");
+    let mut s = writer_sharing_a_head();
+    let mut r = AutoCommit::load(&s.first).unwrap().with_actor(actor(2));
+    r.put(ROOT, "b", 1).unwrap();
+    r.commit_with(t0());
+    let b1 = r.get_head_hashes()[0];
+    r.load_incremental(&s.writer.save()).unwrap();
+    assert_eq!(
+        r.get_head_hashes(),
+        sorted(vec![b1, s.c1]),
+        "a non-head change was re-added as a head"
+    );
 }
 
+/// An audited receiver, given the writer's bundle-format and legacy saves.
 #[test]
 fn load_incremental_of_a_save_sharing_a_head_keeps_heads_minimal_audit() {
     use automerge::transaction::Transactable as _;
-    let mut w = automerge::AutoCommit::new().with_actor(actor(1));
-    w.put(ROOT, "a", 1).unwrap();
-    w.commit();
-    let a1 = w.get_heads()[0];
-
-    let mut r = automerge::AutoCommit::load(&w.save())
-        .unwrap()
-        .with_actor(actor(2));
-    r.put(ROOT, "b", 1).unwrap();
-    r.commit();
-    let b1 = r.get_heads()[0];
-    assert_ne!(a1, b1);
-
-    let mut c = automerge::AutoCommit::new().with_actor(actor(3));
-    c.put(ROOT, "c", 1).unwrap();
-    c.commit();
-    let c1 = c.get_heads()[0];
-    w.merge(&mut c).unwrap();
-    assert_eq!(w.get_heads().len(), 2, "writer has two heads");
-
-    r.load_incremental(&w.save()).unwrap();
-    let mut expected = vec![b1, c1];
-    expected.sort();
-    assert_eq!(
-        r.get_heads(),
-        expected,
-        "a non-head change was re-added as a head"
-    );
-    // and the document must still round-trip
-    let mut reloaded = automerge::AutoCommit::load(&r.save()).unwrap();
-    assert_eq!(reloaded.get_heads(), expected);
+    let mut s = writer_sharing_a_head();
+    let saves = [
+        (s.first.clone(), s.writer.save()),
+        (
+            s.first_legacy.clone(),
+            s.writer.save_with_options(legacy_format()),
+        ),
+    ];
+    for (first, whole) in saves {
+        let mut r = automerge::AutoCommit::load(&first)
+            .unwrap()
+            .with_actor(actor(2));
+        r.put(ROOT, "b", 1).unwrap();
+        r.commit();
+        let expected = sorted(vec![r.get_heads()[0], s.c1]);
+        r.load_incremental(&whole).unwrap();
+        assert_eq!(
+            r.get_heads(),
+            expected,
+            "a non-head change was re-added as a head"
+        );
+        let mut reloaded = automerge::AutoCommit::load(&r.save()).unwrap();
+        assert_eq!(reloaded.get_heads(), expected);
+    }
 }
 
-/// An audited receiver loading a `next` writer's (bundle-format) save.
-#[test]
-fn audit_load_incremental_of_a_next_save_sharing_a_head_keeps_heads_minimal() {
-    use automerge::transaction::Transactable as _;
-    let mut w = AutoCommit::new().with_actor(actor(1));
-    w.put(ROOT, "a", 1).unwrap();
-    w.commit_with(t0());
-    let mut r = automerge::AutoCommit::load(&w.save())
-        .unwrap()
-        .with_actor(actor(2));
-    r.put(ROOT, "b", 1).unwrap();
-    r.commit();
-    let b1 = r.get_heads()[0];
-    let mut c = AutoCommit::new().with_actor(actor(3));
-    c.put(ROOT, "c", 1).unwrap();
-    c.commit_with(t0());
-    let c1 = c.get_head_hashes()[0];
-    w.merge(&mut c).unwrap();
-    r.load_incremental(&w.save()).unwrap();
-    let mut expected = vec![b1, c1];
-    expected.sort();
-    assert_eq!(
-        r.get_heads(),
-        expected,
-        "a non-head change was re-added as a head"
-    );
-}
-
-/// The same scenario with `apply_bundle` of the writer's whole-document
-/// bundle rather than `load_incremental`.
 #[test]
 fn apply_bundle_of_a_document_sharing_a_head_keeps_heads_minimal() {
-    let mut w = Automerge::new().with_actor(actor(1));
-    {
-        let mut tx = w.transaction();
-        tx.put(ROOT, "a", 1).unwrap();
-        tx.commit_with(t0());
-    }
-    let mut r = Automerge::load(&w.save()).unwrap().with_actor(actor(2));
-    {
-        let mut tx = r.transaction();
-        tx.put(ROOT, "b", 1).unwrap();
-        tx.commit_with(t0());
-    }
+    let mut s = writer_sharing_a_head();
+    let mut r = Automerge::load(&s.first).unwrap().with_actor(actor(2));
+    let mut tx = r.transaction();
+    tx.put(ROOT, "b", 1).unwrap();
+    tx.commit_with(t0());
     let b1 = r.get_head_hashes()[0];
-    let mut c = Automerge::new().with_actor(actor(3));
-    {
-        let mut tx = c.transaction();
-        tx.put(ROOT, "c", 1).unwrap();
-        tx.commit_with(t0());
-    }
-    let c1 = c.get_head_hashes()[0];
-    w.merge(&mut c).unwrap();
-
-    r.apply_bundle(w.bundle_document().unwrap()).unwrap();
-    let mut expected = vec![b1, c1];
-    expected.sort();
-    assert_eq!(r.get_head_hashes(), expected);
+    r.apply_bundle(s.writer.document().bundle_document().unwrap())
+        .unwrap();
+    assert_eq!(r.get_head_hashes(), sorted(vec![b1, s.c1]));
 }
-
-// ───────────────────────────────────────────────────────────────────────
-// Hostile bundles: byte mutations of valid bundles must never panic.
-// ───────────────────────────────────────────────────────────────────────
 
 /// A few documents with varied content, plus a dependent bundle for each.
 fn corpus() -> Vec<(Vec<u8>, Automerge)> {
@@ -293,230 +213,127 @@ fn exercise(bytes: &[u8], base: &Automerge) -> Result<(), String> {
     Ok(())
 }
 
-fn mutate(rng: &mut SmallRng, bytes: &[u8]) -> Vec<u8> {
-    let mut b = bytes.to_vec();
-    let header = 9 + 2; // leave the header alone, mutate the body
-    if b.len() <= header + 1 {
-        return b;
-    }
-    let n = rng.random_range(1..=3);
-    for _ in 0..n {
-        let at = rng.random_range(header..b.len());
-        match rng.random_range(0..6) {
-            0 => b[at] = rng.random(),
-            1 => b[at] ^= 1 << rng.random_range(0..8),
-            2 => b[at] = 0xff,
-            3 => b[at] = 0,
-            4 => {
-                b.insert(at, rng.random());
-            }
-            _ => {
-                b.remove(at);
-            }
-        }
-    }
-    fix_checksum(&b)
-}
-
 #[test]
 fn mutated_bundles_never_panic() {
-    let corpus = corpus();
-    static LOC: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
-    let prev = std::panic::take_hook();
-    std::panic::set_hook(Box::new(|info| {
-        let loc = info
-            .location()
-            .map(|l| format!("{}:{}", l.file(), l.line()))
-            .unwrap_or_default();
-        *LOC.lock().unwrap() = Some(loc);
-    }));
-    let dump_dir = std::env::var("AUDIT_FUZZ_DUMP").ok();
-    let mut panics: Vec<String> = Vec::new();
-    let iterations: usize = std::env::var("AUDIT_FUZZ_ITERS")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(400);
-    for (ci, (bytes, base)) in corpus.iter().enumerate() {
-        let mut rng = SmallRng::seed_from_u64(ci as u64 + 1);
-        for it in 0..iterations {
-            let mutated = mutate(&mut rng, bytes);
-            let r = catch_unwind(AssertUnwindSafe(|| exercise(&mutated, base)));
-            match r {
-                Ok(_) => {}
-                Err(e) => {
-                    let msg = e
-                        .downcast_ref::<String>()
-                        .cloned()
-                        .or_else(|| e.downcast_ref::<&str>().map(|s| s.to_string()))
-                        .unwrap_or_else(|| "non-string panic".to_string());
-                    let loc = LOC.lock().unwrap().take().unwrap_or_default();
-                    if let Some(dir) = &dump_dir {
-                        let name = format!("{dir}/c{ci}_i{it}.bundle");
-                        std::fs::write(&name, &mutated).unwrap();
-                    }
-                    panics.push(format!("corpus {ci} iter {it}: {msg} @ {loc}"));
-                }
-            }
-        }
-    }
-    std::panic::set_hook(prev);
-    let mut distinct: Vec<&String> = Vec::new();
-    for p in &panics {
-        let key = p.rsplit_once(" @ ").map(|x| x.1).unwrap_or(p);
-        if !distinct
-            .iter()
-            .any(|d| d.rsplit_once(" @ ").map(|x| x.1).unwrap_or(d) == key)
-        {
-            distinct.push(p);
-        }
-    }
-    assert!(
-        panics.is_empty(),
-        "{} mutated bundles panicked; {} distinct messages:\n{}",
-        panics.len(),
-        distinct.len(),
-        distinct
-            .iter()
-            .take(40)
-            .map(|s| s.as_str())
-            .collect::<Vec<_>>()
-            .join("\n")
-    );
+    let outcome = mutation_fuzz(&corpus(), 1, 400, "", exercise);
+    assert_no_panics(&outcome.panics);
 }
-
-// ───────────────────────────────────────────────────────────────────────
-// Fixed hostile bundles found by the mutation fuzzer, one per panic site.
-// Corpus index 1 and 3 apply to a base document; 0 and 2 to a fresh one.
-// ───────────────────────────────────────────────────────────────────────
 
 fn fixture_base(ci: usize) -> Automerge {
     corpus().swap_remove(ci).1
 }
 
-macro_rules! hostile_fixture {
-    ($name:ident, $file:literal, $ci:expr) => {
-        #[test]
-        fn $name() {
-            let bytes = include_bytes!(concat!("fixtures/audit_hostile/", $file));
-            let base = fixture_base($ci);
-            // a rejected bundle is fine; a panic is the finding
-            let _ = exercise(bytes, &base);
-        }
-    };
-}
+/// Bundles the mutation fuzzer found, one per panic site, with the corpus
+/// entry each applies to.
+const HOSTILE_BUNDLES: &[(&str, &[u8], usize)] = &[
+    (
+        "c0_i19",
+        include_bytes!("../fixtures/audit_hostile/c0_i19.bundle"),
+        0,
+    ),
+    (
+        "c0_i39",
+        include_bytes!("../fixtures/audit_hostile/c0_i39.bundle"),
+        0,
+    ),
+    (
+        "c0_i52",
+        include_bytes!("../fixtures/audit_hostile/c0_i52.bundle"),
+        0,
+    ),
+    (
+        "c0_i127",
+        include_bytes!("../fixtures/audit_hostile/c0_i127.bundle"),
+        0,
+    ),
+    (
+        "c0_i432",
+        include_bytes!("../fixtures/audit_hostile/c0_i432.bundle"),
+        0,
+    ),
+    (
+        "c0_i615",
+        include_bytes!("../fixtures/audit_hostile/c0_i615.bundle"),
+        0,
+    ),
+    (
+        "c0_i645",
+        include_bytes!("../fixtures/audit_hostile/c0_i645.bundle"),
+        0,
+    ),
+    (
+        "c0_i1300",
+        include_bytes!("../fixtures/audit_hostile/c0_i1300.bundle"),
+        0,
+    ),
+    (
+        "c1_i209",
+        include_bytes!("../fixtures/audit_hostile/c1_i209.bundle"),
+        1,
+    ),
+    (
+        "c1_i817",
+        include_bytes!("../fixtures/audit_hostile/c1_i817.bundle"),
+        1,
+    ),
+    (
+        "c1_i846",
+        include_bytes!("../fixtures/audit_hostile/c1_i846.bundle"),
+        1,
+    ),
+    (
+        "c2_i33",
+        include_bytes!("../fixtures/audit_hostile/c2_i33.bundle"),
+        2,
+    ),
+    (
+        "c2_i978",
+        include_bytes!("../fixtures/audit_hostile/c2_i978.bundle"),
+        2,
+    ),
+    (
+        "c3_i682",
+        include_bytes!("../fixtures/audit_hostile/c3_i682.bundle"),
+        3,
+    ),
+    (
+        "c1_i51",
+        include_bytes!("../fixtures/audit_hostile/c1_i51.bundle"),
+        1,
+    ),
+    (
+        "c3_i161",
+        include_bytes!("../fixtures/audit_hostile/c3_i161.bundle"),
+        3,
+    ),
+    (
+        "c3_i2239",
+        include_bytes!("../fixtures/audit_hostile/c3_i2239.bundle"),
+        3,
+    ),
+    (
+        "c3_i3724",
+        include_bytes!("../fixtures/audit_hostile/c3_i3724.bundle"),
+        3,
+    ),
+    (
+        "c3_i5157",
+        include_bytes!("../fixtures/audit_hostile/c3_i5157.bundle"),
+        3,
+    ),
+];
 
-hostile_fixture!(
-    hostile_bundle_c0_i19_is_rejected_not_panicking,
-    "c0_i19.bundle",
-    0
-);
-hostile_fixture!(
-    hostile_bundle_c0_i39_is_rejected_not_panicking,
-    "c0_i39.bundle",
-    0
-);
-hostile_fixture!(
-    hostile_bundle_c0_i52_is_rejected_not_panicking,
-    "c0_i52.bundle",
-    0
-);
-hostile_fixture!(
-    hostile_bundle_c0_i127_is_rejected_not_panicking,
-    "c0_i127.bundle",
-    0
-);
-hostile_fixture!(
-    hostile_bundle_c0_i432_is_rejected_not_panicking,
-    "c0_i432.bundle",
-    0
-);
-hostile_fixture!(
-    hostile_bundle_c0_i615_is_rejected_not_panicking,
-    "c0_i615.bundle",
-    0
-);
-hostile_fixture!(
-    hostile_bundle_c0_i645_is_rejected_not_panicking,
-    "c0_i645.bundle",
-    0
-);
-hostile_fixture!(
-    hostile_bundle_c0_i1300_is_rejected_not_panicking,
-    "c0_i1300.bundle",
-    0
-);
-hostile_fixture!(
-    hostile_bundle_c1_i209_is_rejected_not_panicking,
-    "c1_i209.bundle",
-    1
-);
-hostile_fixture!(
-    hostile_bundle_c1_i817_is_rejected_not_panicking,
-    "c1_i817.bundle",
-    1
-);
-hostile_fixture!(
-    hostile_bundle_c1_i846_is_rejected_not_panicking,
-    "c1_i846.bundle",
-    1
-);
-hostile_fixture!(
-    hostile_bundle_c2_i33_is_rejected_not_panicking,
-    "c2_i33.bundle",
-    2
-);
-hostile_fixture!(
-    hostile_bundle_c2_i978_is_rejected_not_panicking,
-    "c2_i978.bundle",
-    2
-);
-hostile_fixture!(
-    hostile_bundle_c3_i682_is_rejected_not_panicking,
-    "c3_i682.bundle",
-    3
-);
-hostile_fixture!(
-    hostile_bundle_c1_i51_is_rejected_not_panicking,
-    "c1_i51.bundle",
-    1
-);
-hostile_fixture!(
-    hostile_bundle_c3_i161_is_rejected_not_panicking,
-    "c3_i161.bundle",
-    3
-);
-hostile_fixture!(
-    hostile_bundle_c3_i2239_is_rejected_not_panicking,
-    "c3_i2239.bundle",
-    3
-);
-hostile_fixture!(
-    hostile_bundle_c3_i3724_is_rejected_not_panicking,
-    "c3_i3724.bundle",
-    3
-);
-hostile_fixture!(
-    hostile_bundle_c3_i5157_is_rejected_not_panicking,
-    "c3_i5157.bundle",
-    3
-);
-
-// ───────────────────────────────────────────────────────────────────────
-// Bundle wire-format surgery helpers.
-// ───────────────────────────────────────────────────────────────────────
-
-fn read_uleb(b: &[u8], at: &mut usize) -> u64 {
-    let mut r = 0u64;
-    let mut shift = 0;
-    loop {
-        let x = b[*at];
-        *at += 1;
-        r |= u64::from(x & 0x7f) << shift;
-        if x & 0x80 == 0 {
-            return r;
-        }
-        shift += 7;
-    }
+#[test]
+fn hostile_bundles_are_rejected_not_panicking() {
+    let corpus = corpus();
+    let panicked: Vec<&str> = HOSTILE_BUNDLES
+        .iter()
+        .filter(|(_, bytes, ci)| {
+            catch_unwind(AssertUnwindSafe(|| exercise(bytes, &corpus[*ci].1))).is_err()
+        })
+        .map(|(name, ..)| *name)
+        .collect();
+    assert!(panicked.is_empty(), "panicked: {panicked:?}");
 }
 
 /// Byte range of the change-metadata column with `spec` in an
@@ -615,7 +432,7 @@ fn undecodable_change_metadata_is_rejected_when_parsed() {
 /// actors were added.
 #[test]
 fn a_bundle_rejected_after_its_actors_are_added_leaves_no_stray_actor() {
-    let bytes = include_bytes!("fixtures/audit_hostile/c3_i682.bundle");
+    let bytes = include_bytes!("../fixtures/audit_hostile/c3_i682.bundle");
     let bundle = Bundle::try_from(&bytes[..]).unwrap();
     let mut r = fixture_base(3).with_actor(actor(1));
     let heads = r.get_heads();
@@ -626,11 +443,6 @@ fn a_bundle_rejected_after_its_actors_are_added_leaves_no_stray_actor() {
     assert_eq!(r.get_heads(), heads);
     assert_no_stray_actor(&r);
 }
-
-// ───────────────────────────────────────────────────────────────────────
-// Finding (lead 1): errors the multi-bundle intake records are dropped,
-// so a stack that one-bundle-at-a-time loading rejects loads "fine".
-// ───────────────────────────────────────────────────────────────────────
 
 /// Two bundles: a whole-document save and a dependent delta that inserts
 /// into a list and text.
@@ -733,10 +545,6 @@ fn a_bundle_stack_loads_exactly_when_its_bundles_load_one_at_a_time() {
     );
 }
 
-// ───────────────────────────────────────────────────────────────────────
-// Hash retention under randomized multi-peer exchange.
-// ───────────────────────────────────────────────────────────────────────
-
 struct Peer {
     doc: AutoCommit,
     /// every commit of this peer as a one-change bundle, in order
@@ -810,64 +618,20 @@ fn check_peer(p: &mut Peer, what: &str) {
     );
 }
 
-fn exchange(peers: &mut [Peer], a: usize, b: usize, mode: usize, log: &mut Vec<String>) {
-    let (pa, pb) = if a < b {
-        let (l, r) = peers.split_at_mut(b);
-        (&mut l[a], &mut r[0])
-    } else {
-        let (l, r) = peers.split_at_mut(a);
-        (&mut r[0], &mut l[b])
-    };
-    eprintln!("exchange {a} <- {b} mode {mode}");
+fn exchange(peers: &mut [Peer], a: usize, b: usize, mode: usize) {
+    let (pa, pb) = pair_mut(peers, a, b);
     match mode {
         0 => {
-            if let Err(e) = pa.doc.merge(&mut pb.doc) {
-                eprintln!(
-                    "merge {a} <- {b} failed: {e}; b has {} fragments (levels {:?}), {} loose; a heads {:?}; b heads {:?}",
-                    pb.doc.fragments(1..).len(),
-                    pb.doc.fragments(1..).iter().map(|f| f.level).collect::<Vec<_>>(),
-                    pb.doc.fragments(0..=0).len(),
-                    pa.doc.get_heads(),
-                    pb.doc.get_heads(),
-                );
-                if let Ok(dir) = std::env::var("AUDIT_FUZZ_DUMP") {
-                    std::fs::write(format!("{dir}/merge_a.save"), pa.doc.save()).unwrap();
-                    std::fs::write(format!("{dir}/merge_b.save"), pb.doc.save()).unwrap();
-                    // does a reload reproduce it?
-                    let mut ra = AutoCommit::load(&pa.doc.save()).unwrap();
-                    let mut rb = AutoCommit::load(&pb.doc.save()).unwrap();
-                    eprintln!("reloaded merge: {:?}", ra.merge(&mut rb).err());
-                }
-                panic!("merge failed: {e}");
-            }
+            pa.doc.merge(&mut pb.doc).unwrap();
         }
         1 => {
             pa.doc.load_incremental(&pb.doc.save()).unwrap();
         }
         2 => {
-            let frags = pb.doc.fragments(..);
-            let bundles = match pb.doc.bundles_for_fragments(frags.clone()) {
-                Ok(b) => b,
-                Err(e) => {
-                    for f in &frags {
-                        if let Err(fe) = pb.doc.bundles_for_fragments(vec![f.clone()]) {
-                            eprintln!(
-                                "fragment head {} level {} members {} boundary {} checkpoints {}: {fe}",
-                                f.head,
-                                f.level,
-                                f.members.len(),
-                                f.boundary.len(),
-                                f.checkpoints.len()
-                            );
-                            for m in &f.members {
-                                let h = pb.doc.change_id_to_hash(m);
-                                eprintln!("   member {m:?} hash {:?}", h.ok().flatten());
-                            }
-                        }
-                    }
-                    panic!("bundles_for_fragments on peer {b}: {e}");
-                }
-            };
+            let bundles = pb
+                .doc
+                .bundles_for_fragments(pb.doc.fragments(..))
+                .unwrap_or_else(|e| panic!("bundles_for_fragments on peer {b}: {e}"));
             for bytes in bundles {
                 pa.doc.load_incremental(&bytes).unwrap();
             }
@@ -876,8 +640,7 @@ fn exchange(peers: &mut [Peer], a: usize, b: usize, mode: usize, log: &mut Vec<S
             Ok(bytes) => {
                 pa.doc.load_incremental(&bytes).unwrap();
             }
-            Err(e) => {
-                log.push(format!("save_after failed: {e}"));
+            Err(_) => {
                 pa.doc.merge(&mut pb.doc).unwrap();
             }
         },
@@ -899,22 +662,7 @@ fn exchange(peers: &mut [Peer], a: usize, b: usize, mode: usize, log: &mut Vec<S
     }
 }
 
-/// Arrival order may reorder a fragment's lists, never change them.
-fn normalized(fragments: Vec<automerge::next::Fragment>) -> Vec<automerge::next::Fragment> {
-    let mut fragments: Vec<_> = fragments
-        .into_iter()
-        .map(|mut f| {
-            f.members.sort();
-            f.checkpoints.sort();
-            f.boundary.sort();
-            f
-        })
-        .collect();
-    fragments.sort_by_key(|f| f.head);
-    fragments
-}
-
-fn retention_fuzz(seed: u64, n_peers: usize, rounds: usize, burst: usize) -> Vec<String> {
+fn retention_fuzz(seed: u64, n_peers: usize, rounds: usize, burst: usize) {
     let mut rng = SmallRng::seed_from_u64(seed);
     let mut peers: Vec<Peer> = (0..n_peers)
         .map(|i| Peer {
@@ -923,7 +671,6 @@ fn retention_fuzz(seed: u64, n_peers: usize, rounds: usize, burst: usize) -> Vec
         })
         .collect();
     let mut n = 0u64;
-    let mut log = Vec::new();
     for round in 0..rounds {
         for p in peers.iter_mut() {
             for _ in 0..burst {
@@ -938,7 +685,7 @@ fn retention_fuzz(seed: u64, n_peers: usize, rounds: usize, burst: usize) -> Vec
                 continue;
             }
             let mode = rng.random_range(0..6);
-            exchange(&mut peers, a, b, mode, &mut log);
+            exchange(&mut peers, a, b, mode);
             check_peer(
                 &mut peers[a],
                 &format!("seed {seed} round {round} mode {mode}"),
@@ -950,7 +697,7 @@ fn retention_fuzz(seed: u64, n_peers: usize, rounds: usize, burst: usize) -> Vec
         for a in 0..n_peers {
             for b in 0..n_peers {
                 if a != b {
-                    exchange(&mut peers, a, b, 0, &mut log);
+                    exchange(&mut peers, a, b, 0);
                 }
             }
         }
@@ -985,69 +732,36 @@ fn retention_fuzz(seed: u64, n_peers: usize, rounds: usize, burst: usize) -> Vec
             "peer {i}: next fragments equal the audited fragments"
         );
     }
-    log
 }
 
 #[test]
 fn retention_survives_random_multi_peer_exchange_seed_1() {
-    let log = retention_fuzz(1, 4, 40, 6);
-    eprintln!(
-        "{} notes: {:?}",
-        log.len(),
-        log.iter().take(5).collect::<Vec<_>>()
-    );
+    retention_fuzz(1, 4, 40, 6);
 }
 
 #[test]
 fn retention_survives_random_multi_peer_exchange_seed_2() {
-    let log = retention_fuzz(2, 3, 60, 8);
-    eprintln!(
-        "{} notes: {:?}",
-        log.len(),
-        log.iter().take(5).collect::<Vec<_>>()
-    );
+    retention_fuzz(2, 3, 60, 8);
 }
 
 #[test]
 fn retention_survives_random_multi_peer_exchange_seed_3() {
-    let log = retention_fuzz(3, 5, 30, 10);
-    eprintln!(
-        "{} notes: {:?}",
-        log.len(),
-        log.iter().take(5).collect::<Vec<_>>()
-    );
+    retention_fuzz(3, 5, 30, 10);
 }
-
-// ───────────────────────────────────────────────────────────────────────
-// `save_nocompress` must produce a loadable bundle.
-// ───────────────────────────────────────────────────────────────────────
 
 #[test]
 fn save_nocompress_output_parses_as_a_bundle() {
-    let mut w = AutoCommit::new().with_actor(actor(9));
-    w.put(ROOT, "a", 1).unwrap();
-    w.commit_with(t0());
-    let deflated = w.save();
-    let plain = w.save_nocompress();
-    Bundle::try_from(&deflated[..]).expect("deflated save parses");
-    Bundle::try_from(&plain[..]).expect("uncompressed save parses");
-    AutoCommit::load(&plain).expect("uncompressed save loads");
-}
-
-#[test]
-fn save_nocompress_of_a_larger_document_parses_as_a_bundle() {
-    let mut w = AutoCommit::new().with_actor(actor(9));
-    for i in 0..50 {
-        w.put(ROOT, format!("k{i}"), i as i64).unwrap();
-        w.commit_with(t0());
+    for n in [1, 50] {
+        let mut w = AutoCommit::new().with_actor(actor(9));
+        for i in 0..n {
+            w.put(ROOT, format!("k{i}"), i as i64).unwrap();
+            w.commit_with(t0());
+        }
+        let plain = w.save_nocompress();
+        Bundle::try_from(&w.save()[..]).expect("deflated save parses");
+        Bundle::try_from(&plain[..]).expect("uncompressed save parses");
+        AutoCommit::load(&plain).expect("uncompressed save loads");
     }
-    let plain = w.save_nocompress();
-    let err = Bundle::try_from(&plain[..]).err();
-    let loaded = AutoCommit::load(&plain).err();
-    assert!(
-        err.is_none() && loaded.is_none(),
-        "parse: {err:?}; load: {loaded:?}"
-    );
 }
 
 #[test]
@@ -1076,11 +790,6 @@ fn bytes_uncompressed_of_a_bundle_parses() {
     Bundle::try_from(&reparsed.bytes_uncompressed()[..])
         .expect("reparsed bytes_uncompressed parses");
 }
-
-// ───────────────────────────────────────────────────────────────────────
-// Finding: a whole-document save applied to a peer that already holds
-// part of it, with a freed interior hash a new member depends on, panics.
-// ───────────────────────────────────────────────────────────────────────
 
 /// Returns `(receiver, writer)`: the receiver holds actor a's long
 /// history with fragments (interior hashes freed); the writer forked at
@@ -1148,12 +857,6 @@ fn compressed_and_uncompressed_bytes_of_a_tiny_bundle_differ_only_in_compression
     assert_eq!(c, u, "nothing in a tiny bundle is large enough to deflate");
 }
 
-// ───────────────────────────────────────────────────────────────────────
-// Finding: `merge` between two `next` documents fails when the receiver's
-// frontier cuts through the sender's fragment and they share a loose
-// change above it, so the sender cannot widen to a fragment boundary.
-// ───────────────────────────────────────────────────────────────────────
-
 /// `(a, b)`: b has a long history with fragments; a holds b's first five
 /// changes plus a concurrent change c2 that b holds loose.
 fn peers_sharing_a_loose_change_above_a_fragment() -> (AutoCommit, AutoCommit) {
@@ -1213,10 +916,6 @@ fn save_after_from_a_next_document_whose_fragment_the_receivers_frontier_cuts() 
     assert_eq!(a.get_heads(), b.get_heads());
 }
 
-// ───────────────────────────────────────────────────────────────────────
-// Other next-document behaviours.
-// ───────────────────────────────────────────────────────────────────────
-
 /// A next document that queued an orphan change (deps not yet seen) must
 /// be able to reload its own save.
 #[test]
@@ -1239,20 +938,6 @@ fn a_next_document_with_a_queued_orphan_reloads_its_own_save() {
     let saved = next.save();
     let mut reloaded = AutoCommit::load(&saved).expect("a document reloads its own save");
     assert_eq!(reloaded.get_heads(), next.get_heads());
-}
-
-/// `fork_at` the current heads needs no freed hash.
-#[test]
-fn fork_at_current_heads_works_on_a_next_document_with_fragments() {
-    let mut doc = AutoCommit::new().with_actor(actor(1));
-    for i in 0..1500 {
-        doc.put(ROOT, "k", i as i64).unwrap();
-        doc.commit_with(t0());
-    }
-    assert!(!doc.fragments(1..).is_empty());
-    let heads = doc.get_heads();
-    let mut forked = doc.fork_at(&heads).expect("fork_at current heads");
-    assert_eq!(forked.get_heads(), heads);
 }
 
 /// Loading two whole-document saves that overlap, in one `load`, must give
