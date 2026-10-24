@@ -7,6 +7,7 @@ use crate::op_set2::ChangeMetadata;
 use crate::patches::Patch;
 use crate::storage::VerificationMode;
 use crate::tx::CommitOptions;
+use crate::write_frontier::Boundary;
 use crate::{hydrate, ActorId, Author, AutomergeError, Change, ChangeHash, ObjType, TextEncoding};
 use crate::{OnPartialLoad, StringMigration};
 
@@ -339,10 +340,7 @@ impl Automerge {
     ///
     /// Rebuilds the document's indexes when the visible set changes.
     pub fn mask_author(&mut self, author: Author<'static>, heads: &[ChangeHash]) {
-        let heads = heads
-            .iter()
-            .map(|h| crate::write_frontier::Boundary::Hash(*h))
-            .collect();
+        let heads = heads.iter().map(|h| Boundary::Hash(*h)).collect();
         self.0.mask_author_boundaries(author, heads);
     }
 
@@ -384,7 +382,20 @@ impl Automerge {
     pub fn get_write_frontier(
         &self,
     ) -> std::collections::HashMap<Author<'static>, Vec<ChangeHash>> {
-        super::frontier_hashes(&self.0)
+        let doc = &self.0;
+        doc.write_frontier()
+            .iter()
+            .map(|(author, heads)| {
+                let hashes = heads
+                    .iter()
+                    .filter_map(|boundary| match boundary {
+                        Boundary::Hash(hash) => Some(*hash),
+                        Boundary::Id(id) => doc.change_id_to_hash(id).ok().flatten(),
+                    })
+                    .collect();
+                (author.clone(), hashes)
+            })
+            .collect()
     }
 
     /// Test oracle: the current view read through the filtered, non-indexed

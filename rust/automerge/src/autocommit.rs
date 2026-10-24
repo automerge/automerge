@@ -14,7 +14,6 @@ use crate::op_set2::ChangeMetadata;
 use crate::patches::PatchAccumulator;
 use crate::tx::{CommitOptions, ScopedRead, TxDoc};
 use crate::types::{ObjId, ObjMeta};
-use crate::write_frontier::{Boundary, WriteFrontier};
 use crate::VerificationMode;
 use crate::{tx::TransactionInner, ActorId, AutomergeError, Change, ChangeHash, ChangeId};
 use crate::{AnonymizeError, Bundle, OnPartialLoad, TextEncoding};
@@ -193,16 +192,6 @@ impl<H: HashRetention> AutoCommit<H> {
         self.doc.set_write_frontier(write_frontier);
     }
 
-    pub(crate) fn set_write_frontier_boundaries(&mut self, write_frontier: WriteFrontier) {
-        self.ensure_transaction_closed();
-        self.doc.set_write_frontier_boundaries(write_frontier);
-    }
-
-    pub(crate) fn mask_author_boundaries(&mut self, author: Author<'static>, heads: Vec<Boundary>) {
-        self.ensure_transaction_closed();
-        self.doc.mask_author_boundaries(author, heads);
-    }
-
     pub fn get_write_frontier(&self) -> HashMap<Author<'static>, Vec<ChangeId>> {
         self.doc.get_write_frontier()
     }
@@ -293,9 +282,7 @@ impl<H: HashRetention> AutoCommit<H> {
                 .expect("dirty diff should support AutoCommit cursor intervals")
         } else if range.before().is_empty() && self.doc.is_current(&after) {
             let mut patch_accumulator = PatchAccumulator::event_log();
-            // This if statement is only active if the current heads are the same as `after`
-            // so we don't need to tell the patch log to target a specific heads and consequently
-            // it wll be able to generate patches very fast as it doesn't need to make any clocks
+            // `after` is current, so patches need no heads clock, which is much faster
             patch_accumulator.heads_clock = None;
             self.doc
                 .log_current_state(obj, &mut patch_accumulator, recursive);
@@ -658,8 +645,7 @@ impl<H: HashRetention> AutoCommit<H> {
         self.doc.get_change_meta_by_hash(hash)
     }
 
-    /// Get changes in `other` that are not in `self`
-    /// [`Self::get_changes_added`] as change chunks
+    /// [`Self::get_changes_added`] as changes rather than a bundle.
     pub fn get_changes_added_legacy<H2: HashRetention>(
         &mut self,
         other: &mut AutoCommit<H2>,
