@@ -179,7 +179,7 @@ where
         &mut self.col
     }
 
-    /// O(1): stored codes are unchanged, only their interpretation shifts.
+    /// O(1).
     pub(crate) fn set_map(&mut self, map: Arc<ActorMap>) {
         self.map = map;
     }

@@ -12,8 +12,8 @@ use crate::storage::bundle::{BundleOpWriter, BundleOpsColumns};
 use crate::types::{ObjId, OpId};
 
 impl OpSet {
-    /// Every op as bundle op columns, written straight from the document's
-    /// columns. The bundle's actor table must be the document's.
+    /// Every op as bundle op columns. The bundle's actor table must be the
+    /// document's.
     pub(crate) fn write_bundle_op_columns(&self, data: &mut Vec<u8>) -> BundleOpsColumns {
         let c = &self.cols;
         let empty = data.len()..data.len();
@@ -42,8 +42,7 @@ impl OpSet {
     }
 }
 
-/// Copies ascending row ranges into a bundle, run by run, with one
-/// forward cursor per column.
+/// Copies ascending row ranges into a bundle.
 pub(crate) struct RowCopier<'a> {
     cols: &'a Columns,
     id_actor: MappedIter<'a, ActorIdx>,
@@ -252,8 +251,7 @@ pub(crate) struct RowRun {
 
 type ActorHead<'a, T> = RunHead<Rle<'a, T, MappedIter<'a, T>>>;
 
-/// [`RowRun`]s from a starting row. Reads only the object, insert, id, key
-/// element and successor columns.
+/// [`RowRun`]s from a starting row.
 pub(crate) struct RowRuns<'a> {
     obj_actor: ActorHead<'a, Option<ActorIdx>>,
     obj_ctr: RunHead<Rle<'a, Option<u32>, hexane::Iter<'a, Option<u32>>>>,
@@ -405,7 +403,6 @@ impl IdRun {
 }
 
 impl OpSet {
-    /// The id runs of `rows`.
     pub(crate) fn id_runs(&self, rows: Range<usize>) -> Result<Vec<IdRun>, ReadOpError> {
         let mut ids = IdRuns {
             actor: RunHead::rle(self.cols.id_actor.iter_range(rows.clone()), "id_actor"),

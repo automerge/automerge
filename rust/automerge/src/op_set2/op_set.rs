@@ -183,8 +183,8 @@ impl OpSet {
     }
 
     /// The batched form of [`expose`](Self::expose) /
-    /// [`conflict`](Self::conflict): one forward pass per index column.
-    /// `dirty` also marks the written rows dirty.
+    /// [`conflict`](Self::conflict). `dirty` also marks the written rows
+    /// dirty.
     ///
     /// Panics (debug) if positions are not strictly ascending, or if a row
     /// is given `top` without being visible.
@@ -500,7 +500,6 @@ impl OpSet {
         }
     }
 
-    /// Write a batch of succ additions in one pass per column.
     pub(crate) fn add_succ(&mut self, s: DocSucc) {
         if s.is_empty() {
             return;
@@ -1382,8 +1381,7 @@ impl OpSet {
 
     /// Checks the cross-column invariants that per-op decoding would
     /// otherwise catch: consistent column lengths, actor indexes in range,
-    /// and object ids that are whole and strictly increasing. Runs at
-    /// run/length granularity, without decoding ops.
+    /// and object ids that are whole and strictly increasing. O(runs).
     pub(crate) fn column_validation(&self) -> Result<(), ReadOpError> {
         self.column_validation_with(self.actors.len())
     }
@@ -1649,7 +1647,6 @@ impl OpSet {
         Ok(())
     }
 
-    /// Every row's value decodes, and the values fill `value` exactly.
     fn validate_values(&self, value: &[u8]) -> Result<(), ReadOpError> {
         let mut at = 0;
         for meta in self.cols.value_meta.iter() {
@@ -1666,10 +1663,9 @@ impl OpSet {
         Ok(())
     }
 
-    /// Every row has exactly one key, of its object's kind. A bundle
-    /// without deps is copied as is, so its rows must be in document order;
-    /// the merge places a dependent bundle's rows, which need only their
-    /// objects and map keys in order.
+    /// A bundle without deps is copied as is, so its rows must be in
+    /// document order; the merge places a dependent bundle's rows, which
+    /// need only their objects and map keys in order.
     fn validate_keys(&self, has_deps: bool) -> Result<(), ReadOpError> {
         let rows = self
             .obj_id_iter()
