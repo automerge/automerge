@@ -1,6 +1,3 @@
-//! Second correctness audit of the `hashless` branch. Each test's name
-//! states the expected behaviour; a failing test is a finding.
-
 use automerge::next::transaction::Transactable;
 use automerge::next::{AutoCommit, Automerge};
 use automerge::{Bundle, ROOT};

@@ -1,5 +1,4 @@
-//! Hash retention lifecycle audit of `next` documents. Each test's name
-//! states the expected behaviour; a failing test is a finding.
+//! Hash retention lifecycle of `next` documents.
 
 use automerge::next::transaction::Transactable;
 use automerge::next::{AutoCommit, Automerge, ReadDoc};

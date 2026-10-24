@@ -1,4 +1,4 @@
-//! Audit vs next parity and fragment determinism (second audit).
+//! Audit vs next parity and fragment determinism.
 
 use automerge::marks::{ExpandMark, Mark};
 use automerge::next::transaction::Transactable;

@@ -1,5 +1,4 @@
-//! Hostile-bundle audit of the `hashless` branch. Each test's name states
-//! the expected behaviour; a failing test is a finding.
+//! Hostile bundles.
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
