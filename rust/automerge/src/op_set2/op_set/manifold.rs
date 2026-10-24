@@ -3,7 +3,7 @@
 //! walking the whole document.
 
 use crate::op_set2::op::DocSucc;
-use crate::op_set2::types::Action;
+use crate::op_set2::types::{Action, ScalarValue};
 use crate::storage::bundle::{ManifoldOp, ManifoldOps};
 use crate::types::{Clock, ElemId, ObjId, ObjType, OpId};
 use crate::{AutomergeError, MalformedBundle};
@@ -38,18 +38,6 @@ pub(crate) struct CopyRange {
     pub(crate) range: Range<usize>,
     pub(crate) sub_range: Range<usize>,
     pub(crate) val_range: Range<usize>,
-}
-
-impl OpSet {
-    /// `clock` is the document clock before the batch: preds it covers
-    /// are document rows. Batch ops `mask` does not cover are hidden.
-    pub(crate) fn apply_manifold<'a>(
-        &'a self,
-        clock: Clock,
-        mask: Option<&'a Clock>,
-    ) -> ApplyManifold<'a> {
-        ApplyManifold::new(self, clock, mask)
-    }
 }
 
 /// Streaming state of a batch apply.
@@ -104,6 +92,8 @@ pub(crate) struct ApplyManifold<'a> {
 }
 
 impl<'a> ApplyManifold<'a> {
+    /// `clock` is the document clock before the batch: preds it covers
+    /// are document rows. Batch ops `mask` does not cover are hidden.
     pub(crate) fn new(op_set: &'a OpSet, clock: Clock, mask: Option<&'a Clock>) -> Self {
         let mut obj_id_iter = op_set.obj_id_iter();
         let mut id_iter = op_set.id_iter();
@@ -120,8 +110,6 @@ impl<'a> ApplyManifold<'a> {
         key_iter.shift(obj_scope.clone());
         id_iter.shift(obj_scope.clone());
         pred_iter.shift(obj_scope.clone());
-
-        let succ_cache = SuccCache::new();
 
         ApplyManifold {
             op_set,
@@ -145,14 +133,14 @@ impl<'a> ApplyManifold<'a> {
             op_index: 0,
             sub_consumed: 0,
             val_consumed: 0,
-            succ_cache,
+            succ_cache: SuccCache::default(),
             memo: None,
             appending: false,
             elem: None,
             last_insert: None,
             consumed: rustc_hash::FxHashSet::default(),
             elem_scope: 0..0,
-            top: TopCalc::new(),
+            top: TopCalc::default(),
             malformed: None,
         }
     }
@@ -177,10 +165,6 @@ impl<'a> ApplyManifold<'a> {
                 val_range: val0..self.val_consumed,
             }),
         }
-    }
-
-    fn push_pos(&mut self, pos: usize, sub: usize, val: usize) {
-        self.push_run(pos, 1, sub, val);
     }
 
     fn close_scope(&mut self) {
@@ -221,7 +205,7 @@ impl<'a> ApplyManifold<'a> {
     }
 
     fn push_slot(&mut self, pos: usize, sub: usize, val: usize) {
-        self.push_pos(pos, sub, val);
+        self.push_run(pos, 1, sub, val);
         self.appending = pos == self.obj_scope.end && self.memo.is_none();
     }
 
@@ -313,7 +297,7 @@ impl<'a> ApplyManifold<'a> {
             if op.insert {
                 self.last_insert = Some(op.id);
             }
-            self.push_pos(end, op.sub_len, op.val_len);
+            self.push_run(end, 1, op.sub_len, op.val_len);
             self.top.candidate(&op, end, self.op_index);
             self.op_index += 1;
             rem -= 1;
@@ -324,8 +308,7 @@ impl<'a> ApplyManifold<'a> {
         if straddling {
             self.close_scope();
         } else {
-            self.top
-                .finalize_blank(self.succ_cache.doc_succ.clears.len());
+            self.top.clear_scope(self.succ_cache.doc_succ.clears.len());
         }
         self.top.open(end..end);
         self.elem = None;
@@ -368,7 +351,7 @@ impl<'a> ApplyManifold<'a> {
             if op.insert {
                 self.last_insert = Some(op.id);
             }
-            self.push_pos(end, op.sub_len, op.val_len);
+            self.push_run(end, 1, op.sub_len, op.val_len);
             self.op_index += 1;
             rem -= 1;
         }
@@ -632,6 +615,7 @@ impl<'a> ApplyManifold<'a> {
 ///
 /// Registers with no document rows are not decided here: the fragment's
 /// own index build already elected them over exactly their own rows.
+#[derive(Default)]
 struct TopCalc {
     doc_scope: Range<usize>,
     batch: Vec<BatchTop>,
@@ -650,16 +634,6 @@ struct BatchTop {
 }
 
 impl TopCalc {
-    fn new() -> Self {
-        TopCalc {
-            doc_scope: 0..0,
-            batch: vec![],
-            deleted_from: 0,
-            doc_tops: vec![],
-            batch_tops: vec![],
-        }
-    }
-
     fn open(&mut self, doc_scope: Range<usize>) {
         debug_assert!(self.batch.is_empty());
         self.doc_scope = doc_scope;
@@ -682,10 +656,6 @@ impl TopCalc {
         });
     }
 
-    fn finalize_blank(&mut self, clears: usize) {
-        self.clear_scope(clears);
-    }
-
     fn clear_scope(&mut self, clears: usize) {
         self.batch.clear();
         self.deleted_from = clears;
@@ -694,7 +664,7 @@ impl TopCalc {
 
     fn finalize(&mut self, op_set: &OpSet, clears: &[usize]) {
         if self.doc_scope.is_empty() {
-            self.finalize_blank(clears.len());
+            self.clear_scope(clears.len());
             return;
         }
         // slots ascend (document order), so the last alive op is the latest
@@ -759,19 +729,13 @@ impl TopCalc {
     }
 }
 
+#[derive(Default)]
 struct SuccCache {
     preds: Vec<(OpId, OpId, Option<i64>, bool)>,
     doc_succ: DocSucc,
 }
 
 impl SuccCache {
-    fn new() -> Self {
-        SuccCache {
-            preds: vec![],
-            doc_succ: DocSucc::default(),
-        }
-    }
-
     fn push(&mut self, pred: OpId, succ: OpId, inc: Option<i64>, masked: bool) {
         self.preds.push((pred, succ, inc, masked));
     }
@@ -796,7 +760,10 @@ impl SuccCache {
                 let is_counter = match counter_memo {
                     Some((p, ic)) if p == pred => ic,
                     _ => {
-                        let ic = value_iter.shift_next(r.clone()).unwrap().is_counter();
+                        let ic = matches!(
+                            value_iter.shift_next(r.clone()).unwrap(),
+                            ScalarValue::Counter(_)
+                        );
                         counter_memo = Some((pred, ic));
                         ic
                     }

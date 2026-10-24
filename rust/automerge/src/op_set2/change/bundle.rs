@@ -1,6 +1,7 @@
 use crate::automerge::Automerge;
 use crate::clock::Clock;
-use crate::op_set2::op_set::manifold::ManifoldResult;
+use crate::op_set2::op_set::manifold::{ApplyManifold, ManifoldResult};
+use crate::op_set2::op_set::OpSet;
 use crate::storage::Bundle;
 use crate::{AutomergeError, MalformedBundle};
 
@@ -37,7 +38,7 @@ pub(crate) struct BundleApply<'a> {
     actor_map: Vec<usize>,
     src: BundleSrc<'a>,
     /// excludes the pred columns: they feed the manifold, not the op set
-    frag: crate::op_set2::op_set::OpSet,
+    frag: OpSet,
     /// the write-frontier mask, when it hides some of the incoming ops
     mask: Option<Clock>,
 }
@@ -47,17 +48,12 @@ impl<'a> BundleApply<'a> {
         clock: Clock,
         actor_map: Vec<usize>,
         src: BundleSrc<'a>,
-        doc_ops: &crate::op_set2::op_set::OpSet,
+        doc_ops: &OpSet,
         mask: Option<Clock>,
     ) -> Result<Self, AutomergeError> {
-        let frag = load_bundle(&src, &actor_map, doc_ops, mask.as_ref())?;
-        Ok(Self {
-            clock_before: clock,
-            actor_map,
-            src,
-            frag,
-            mask,
-        })
+        let (raw, data) = src.parts();
+        let ops = OpSet::load_bundle_cols(raw, data, actor_map.len()).map_err(invalid)?;
+        Self::indexed(clock, actor_map, src, ops, true, doc_ops, mask)
     }
 
     /// Fails on malformed op columns. Every bundle actor must be in
@@ -67,38 +63,42 @@ impl<'a> BundleApply<'a> {
         actor_map: Vec<usize>,
         clock: &Clock,
         overlap: bool,
-        doc_ops: &crate::op_set2::op_set::OpSet,
-        bundle_ops: crate::op_set2::op_set::OpSet,
+        doc_ops: &OpSet,
+        mut bundle_ops: OpSet,
         mask: Option<Clock>,
     ) -> Result<Self, AutomergeError> {
-        let (src, frag) = if overlap {
+        let (src, has_deps) = if overlap {
             // covered rows are dropped, so the manifold must read re-encoded columns
-            let mut ops = bundle_ops;
-            let preds = ops.drop_covered(
+            let preds = bundle_ops.drop_covered(
                 &bundle.storage.ops_meta,
                 &bundle.storage.bytes[bundle.storage.ops_data.clone()],
                 clock,
                 &actor_map,
             );
-            let (raw, data) = ops.export_bundle(preds);
+            let (raw, data) = bundle_ops.export_bundle(preds);
             // a filtered bundle may name elements it no longer contains
-            let frag = ops
-                .index_bundle(&actor_map, doc_ops, true, mask.as_ref())
-                .map_err(|_| MalformedBundle::Invalid("invalid bundle op columns"))?;
-            (BundleSrc::Owned { raw, data }, frag)
+            (BundleSrc::Owned { raw, data }, true)
         } else {
-            let frag = bundle_ops
-                .index_bundle(
-                    &actor_map,
-                    doc_ops,
-                    !bundle.storage.deps.is_empty(),
-                    mask.as_ref(),
-                )
-                .map_err(|_| MalformedBundle::Invalid("invalid bundle op columns"))?;
-            (BundleSrc::Bundle(bundle), frag)
+            (BundleSrc::Bundle(bundle), !bundle.storage.deps.is_empty())
         };
+        let clock = clock.clone();
+        Self::indexed(clock, actor_map, src, bundle_ops, has_deps, doc_ops, mask)
+    }
+
+    fn indexed(
+        clock_before: Clock,
+        actor_map: Vec<usize>,
+        src: BundleSrc<'a>,
+        ops: OpSet,
+        has_deps: bool,
+        doc_ops: &OpSet,
+        mask: Option<Clock>,
+    ) -> Result<Self, AutomergeError> {
+        let frag = ops
+            .index_bundle(&actor_map, doc_ops, has_deps, mask.as_ref())
+            .map_err(invalid)?;
         Ok(Self {
-            clock_before: clock.clone(),
+            clock_before,
             actor_map,
             src,
             frag,
@@ -107,15 +107,8 @@ impl<'a> BundleApply<'a> {
     }
 }
 
-fn load_bundle(
-    src: &BundleSrc<'_>,
-    actor_map: &[usize],
-    doc_ops: &crate::op_set2::op_set::OpSet,
-    mask: Option<&Clock>,
-) -> Result<crate::op_set2::op_set::OpSet, AutomergeError> {
-    let (raw, data) = src.parts();
-    crate::op_set2::op_set::OpSet::load_bundle(raw, data, actor_map, doc_ops, mask)
-        .map_err(|_| MalformedBundle::Invalid("invalid bundle op columns").into())
+fn invalid(_: crate::op_set2::ReadOpError) -> AutomergeError {
+    MalformedBundle::Invalid("invalid bundle op columns").into()
 }
 
 impl<'a> BundleApply<'a> {
@@ -138,7 +131,7 @@ impl<'a> BundleApply<'a> {
             self.frag.inc_index(),
         )
         .with_mask(mask);
-        let m = doc.ops().apply_manifold(self.clock_before.clone(), mask);
+        let m = ApplyManifold::new(doc.ops(), self.clock_before.clone(), mask);
         m.apply_bundle_ops(&mut fs)
     }
 
@@ -159,22 +152,7 @@ impl<'a> BundleApply<'a> {
 
         doc.ops.merge(frag, &r.insert_runs);
 
-        #[cfg(debug_assertions)]
-        if !doc.ops.validate_op_order() {
-            eprintln!("== insert runs {:?} ==", r.insert_runs);
-            eprintln!("== doc rows ==");
-            for op in doc.ops().iter() {
-                eprintln!(
-                    "  row {:>3} id {:?} obj {:?} key {:?} ins {}",
-                    op.pos,
-                    op.id,
-                    op.obj,
-                    op.elemid_or_key(),
-                    op.insert
-                );
-            }
-            panic!("op order violated");
-        }
+        debug_assert!(doc.ops.validate_op_order());
     }
 }
 

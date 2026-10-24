@@ -33,6 +33,19 @@ pub(crate) enum MarkIndexBuilder {
     End(OpId),
 }
 
+impl MarkIndexBuilder {
+    /// The index entry; a start's data moves into `cache`.
+    pub(crate) fn into_idx(self, cache: &mut HashMap<OpId, MarkData<'static>>) -> MarkIdx {
+        match self {
+            MarkIndexBuilder::Start(id, mark) => {
+                cache.insert(id, mark);
+                MarkIdx::Start(id)
+            }
+            MarkIndexBuilder::End(id) => MarkIdx::End(id),
+        }
+    }
+}
+
 impl MarkIdx {
     pub(super) fn as_i64(&self) -> i64 {
         match self {
@@ -431,14 +444,8 @@ impl MarkIndexColumn {
     }
 
     pub(crate) fn extend(&mut self, index: usize, values: Vec<Option<MarkIndexBuilder>>) {
-        let cache = &mut self.cache;
-        let mark_values = values.into_iter().map(|v| match v? {
-            MarkIndexBuilder::Start(id, mark) => {
-                cache.insert(id, mark);
-                Some(MarkIdx::Start(id))
-            }
-            MarkIndexBuilder::End(id) => Some(MarkIdx::End(id)),
-        });
+        let cache = &mut self.cache.0;
+        let mark_values = values.into_iter().map(|v| Some(v?.into_idx(cache)));
         // marks are sparse: encode runs, not rows
         self.data
             .splice_runs(index, 0, super::index::runs(mark_values));

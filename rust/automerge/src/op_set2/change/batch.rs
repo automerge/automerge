@@ -4,7 +4,7 @@ use crate::change_queue::ChangeBatch;
 use crate::op_set2::types::{KeyRef, ScalarValue as OpScalarValue};
 use crate::types::{ActorId, Clock, ElemId, ObjId, OpId, SmallHashMap};
 use crate::AutomergeError;
-use crate::{Change, ChangeHash};
+use crate::Change;
 
 use super::super::op::{ChangeOp, OpBuilder};
 use super::super::op_set::{ObjIdIter, OpSet};
@@ -14,18 +14,16 @@ use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 
-pub(crate) type PredCache = SmallHashMap<OpId, Vec<(OpId, Option<i64>)>>;
+type PredCache = SmallHashMap<OpId, Vec<(OpId, Option<i64>)>>;
 
 #[derive(Debug, Clone, Default)]
-pub(crate) struct BatchApply {
-    pub(crate) ops: Vec<ChangeOp>,
-    pub(crate) changes: Vec<Change>,
-    actor_seq: HashMap<ActorId, HashSet<u64>>,
-    hashes: HashSet<ChangeHash>,
+struct BatchApply {
+    ops: Vec<ChangeOp>,
+    changes: Vec<Change>,
 }
 
 /// Document order for map ops; sequence ops still need untangling.
-pub(super) fn doc_order_cmp(a: &ChangeOp, b: &ChangeOp) -> Ordering {
+fn doc_order_cmp(a: &ChangeOp, b: &ChangeOp) -> Ordering {
     a.bld.obj.cmp(&b.bld.obj).then_with(|| {
         match a.elemid_or_key().partial_cmp(&b.elemid_or_key()) {
             Some(Ordering::Equal) | None => a.bld.id.cmp(&b.bld.id),
@@ -41,7 +39,7 @@ const SEEK_TARGETS: usize = 16;
 /// Orders `idxs`, the batch's ops in the sequence `obj_range` holds, and
 /// records in `hints` the rank in the object of each document element they
 /// insert after or update.
-pub(super) fn untangle_order_idx(
+fn untangle_order_idx(
     ops: &[ChangeOp],
     idxs: &mut [u32],
     op_set: &OpSet,
@@ -241,10 +239,7 @@ fn permute_in_place(items: &mut [u32], mut order: Vec<u32>) {
 }
 
 /// Increments on a non-counter target act as plain overwrites.
-pub(crate) fn normalize_increment_successors(
-    is_counter: bool,
-    successors: &mut [(OpId, Option<i64>)],
-) {
+fn normalize_increment_successors(is_counter: bool, successors: &mut [(OpId, Option<i64>)]) {
     if !is_counter {
         for (_, increment) in successors {
             if increment.is_some() {
@@ -255,34 +250,15 @@ pub(crate) fn normalize_increment_successors(
 }
 
 impl BatchApply {
-    pub(crate) fn push(&mut self, c: Change) {
-        assert!(!self.has_actor_seq(&c));
-        self.record_actor_seq(&c);
-
-        assert!(!self.hashes.contains(&c.hash()));
-        self.hashes.insert(c.hash());
-
-        self.changes.push(c);
-    }
-
-    fn record_actor_seq(&mut self, c: &Change) {
-        if let Some(set) = self.actor_seq.get_mut(c.actor_id()) {
-            set.insert(c.seq());
-        } else {
-            self.actor_seq
-                .insert(c.actor_id().clone(), HashSet::from([c.seq()]));
+    fn new(changes: Vec<Change>) -> Self {
+        Self {
+            ops: Vec::default(),
+            changes,
         }
     }
 
-    fn has_actor_seq(&self, c: &Change) -> bool {
-        self.actor_seq
-            .get(c.actor_id())
-            .map(|set| set.contains(&c.seq()))
-            .unwrap_or(false)
-    }
-
     /// Returns the actors that were new to the document.
-    pub(crate) fn insert_new_actors<H: crate::hash_retention::HashRetention>(
+    fn insert_new_actors<H: crate::hash_retention::HashRetention>(
         &mut self,
         doc: &mut Automerge<H>,
     ) -> Vec<crate::ActorId> {
@@ -446,24 +422,24 @@ impl BatchApply {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct ObjWalker<'a> {
+struct ObjWalker<'a> {
     iter: ObjIdIter<'a>,
 }
 
 impl<'a> ObjWalker<'a> {
-    pub(crate) fn new(ops: &'a OpSet) -> Self {
+    fn new(ops: &'a OpSet) -> Self {
         let iter = ops.obj_id_iter();
         Self { iter }
     }
 
-    pub(crate) fn seek_to_obj(&mut self, obj: ObjId) -> Range<usize> {
+    fn seek_to_obj(&mut self, obj: ObjId) -> Range<usize> {
         self.iter.seek_to_value(obj)
     }
 }
 
 /// Encode doc-ordered, succ-stamped ops as bundle op columns, keeping
 /// the document's actor indexes.
-pub(super) fn encode_bundle_ops<'x, I>(
+fn encode_bundle_ops<'x, I>(
     ops: I,
     op_set: &OpSet,
     hints: &HashMap<OpId, u64>,
@@ -542,10 +518,7 @@ impl<H: crate::hash_retention::HashRetention> Automerge<H> {
             return Ok(());
         }
 
-        let mut chap = BatchApply::default();
-        for c in self.queue.pop_topo_sorted_ready(&self.change_graph) {
-            chap.push(c);
-        }
+        let mut chap = BatchApply::new(self.queue.pop_topo_sorted_ready(&self.change_graph));
 
         // on failure the popped changes are not re-queued: one of them
         // would fail every later apply
@@ -566,7 +539,7 @@ impl<H: crate::hash_retention::HashRetention> Automerge<H> {
         Ok(())
     }
 
-    pub(crate) fn import_ops_to(
+    fn import_ops_to(
         &mut self,
         change: &Change,
         ops: &mut Vec<ChangeOp>,

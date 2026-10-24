@@ -1366,16 +1366,6 @@ impl Shiftable for SuccIterIter<'_> {
 }
 
 impl<'a> SuccIterIter<'a> {
-    /// [`Shiftable::shift_next`] without building the successor cursors.
-    pub(crate) fn shift_skip_next(&mut self, range: Range<usize>) -> Option<()> {
-        let pv = self.count.shift_next(range)?;
-        let sub_pos = pv.total() as usize;
-        self.actor.advance_to(sub_pos);
-        self.ctr.advance_to(sub_pos);
-        self.incs.advance_to(sub_pos);
-        Some(())
-    }
-
     pub(crate) fn new(
         count: hexane::PrefixIter<'a, u32>,
         actor: MappedIter<'a, ActorIdx>,

@@ -408,21 +408,7 @@ impl OpSet {
         range: &Range<usize>,
         obj_range: Range<usize>,
     ) -> bool {
-        if range.is_empty() {
-            return true;
-        }
-        if self
-            .map_key_register_at_pos(range.start, obj_range.clone())
-            .start
-            != range.start
-        {
-            return false;
-        }
-        if range.end < obj_range.end {
-            self.map_key_register_at_pos(range.end, obj_range).start == range.end
-        } else {
-            true
-        }
+        self.is_on_register_boundaries(range, obj_range, Self::map_key_register_at_pos)
     }
 
     pub(crate) fn list_range_is_on_register_boundaries(
@@ -430,21 +416,22 @@ impl OpSet {
         range: &Range<usize>,
         obj_range: Range<usize>,
     ) -> bool {
+        self.is_on_register_boundaries(range, obj_range, Self::list_register_at_pos)
+    }
+
+    fn is_on_register_boundaries(
+        &self,
+        range: &Range<usize>,
+        obj_range: Range<usize>,
+        register_at: fn(&Self, usize, Range<usize>) -> Range<usize>,
+    ) -> bool {
         if range.is_empty() {
             return true;
         }
-        if self
-            .list_register_at_pos(range.start, obj_range.clone())
-            .start
-            != range.start
-        {
+        if register_at(self, range.start, obj_range.clone()).start != range.start {
             return false;
         }
-        if range.end < obj_range.end {
-            self.list_register_at_pos(range.end, obj_range).start == range.end
-        } else {
-            true
-        }
+        range.end >= obj_range.end || register_at(self, range.end, obj_range).start == range.end
     }
 
     /// A cursor whose running total is the count of visible elements
@@ -1607,20 +1594,6 @@ impl OpSet {
         Ok((op_set, index))
     }
 
-    /// Load a fragment's op columns as an op set indexed in `doc`'s actor
-    /// space. The indexes are final only for groups entirely inside the
-    /// fragment; groups shared with the document need the manifold's
-    /// conflict/expose corrections.
-    pub(crate) fn load_bundle(
-        raw: &RawColumns<Uncompressed>,
-        data: &[u8],
-        actor_map: &[usize],
-        doc: &OpSet,
-        mask: Option<&Clock>,
-    ) -> Result<Self, ReadOpError> {
-        Self::load_bundle_cols(raw, data, actor_map.len())?.index_bundle(actor_map, doc, true, mask)
-    }
-
     /// Succ entries the op set holds, over every row.
     pub(crate) fn succ_entries(&self) -> usize {
         self.cols.succ_actor.len()
@@ -1637,8 +1610,7 @@ impl OpSet {
         self.cols.value.len()
     }
 
-    /// The document-independent half of [`Self::load_bundle`]: decode
-    /// and validate a fragment's op columns. Actor indexes stay in the
+    /// Decode and validate a fragment's op columns. Actor indexes stay in the
     /// sender's space (`num_actors` actors) until
     /// [`Self::index_bundle`] rebases them.
     pub(crate) fn load_bundle_cols(
@@ -1730,10 +1702,12 @@ impl OpSet {
         Ok(())
     }
 
-    /// The document-dependent half of [`Self::load_bundle`]: rebase the
-    /// fragment's actor indexes into `doc`'s actor space and build its
-    /// indexes there. Pass `has_deps` when the fragment depends on changes
-    /// outside itself; passing `true` is always safe.
+    /// Rebase the fragment's actor indexes into `doc`'s actor space and
+    /// build its indexes there. The indexes are final only for groups
+    /// entirely inside the fragment; groups shared with the document need
+    /// the manifold's conflict/expose corrections. Pass `has_deps` when the
+    /// fragment depends on changes outside itself; passing `true` is always
+    /// safe.
     /// Ops `mask` does not cover are indexed as hidden; pass it only when it
     /// hides some, since the masked build goes op by op.
     pub(crate) fn index_bundle(
