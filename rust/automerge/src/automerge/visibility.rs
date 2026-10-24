@@ -9,22 +9,20 @@ use crate::change_graph::{ChangeGraph, NodeIdx};
 use crate::clock::Clock;
 use crate::hash_retention::HashRetention;
 use crate::types::OpId;
-use crate::write_frontier::{Boundary, WriteFrontier};
+use crate::write_frontier::{FrontierHead, WriteFrontier};
 
 /// The visibility derived from a write-frontier policy.
 #[derive(Clone, Debug, Default)]
-pub(crate) struct FrontierVisibility {
+pub(super) struct FrontierVisibility {
     /// `None` when the write-frontier restricts no actor.
     pub(super) mask: Option<Mask>,
     /// Boundaries named by the policy that the graph does not hold yet.
-    pub(super) pending: Vec<Boundary>,
+    pub(super) pending: Vec<FrontierHead>,
 }
 
 impl FrontierVisibility {
-    /// For each masked author, the author's actors are bounded at their max op
-    /// in the history of the boundaries `graph` holds (`0` when they have
-    /// none, including when it holds none of them), and the boundaries it
-    /// does not hold are pending. Unmasked actors are unrestricted.
+    /// Bounds each masked author's actors at their max op in the history of
+    /// the boundaries `graph` holds; the boundaries it does not hold are pending.
     pub(super) fn new<H: HashRetention>(
         policy: &WriteFrontier,
         graph: &ChangeGraph<H>,
@@ -41,7 +39,7 @@ impl FrontierVisibility {
         graph: &ChangeGraph<H>,
         authors: &Authors,
         actors: &ActorTable,
-        resolved: impl Fn(&Boundary, NodeIdx) -> bool,
+        resolved: impl Fn(&FrontierHead, NodeIdx) -> bool,
     ) -> FrontierVisibility {
         if policy.is_empty() {
             return FrontierVisibility::default();
@@ -54,7 +52,7 @@ impl FrontierVisibility {
         for (author, heads) in policy.iter() {
             let mut nodes = Vec::with_capacity(heads.len());
             for boundary in heads {
-                match node_for_boundary(boundary, graph, actors)
+                match node_for_head(boundary, graph, actors)
                     .filter(|node| resolved(boundary, *node))
                 {
                     Some(node) => nodes.push(node),
@@ -67,7 +65,7 @@ impl FrontierVisibility {
                 .entry(nodes)
                 .or_insert_with_key(|nodes| graph.clock_for_nodes(nodes.clone()));
             for actor in authors.get_actors_for_author(author) {
-                bounds[actor] = clock.max_op(actor) as u32;
+                bounds[actor] = clock.max_op(actor);
             }
         }
         // a policy whose authors have no actors yet restricts nothing
@@ -103,14 +101,14 @@ impl FrontierVisibility {
     }
 }
 
-pub(super) fn node_for_boundary<H: HashRetention>(
-    boundary: &Boundary,
+fn node_for_head<H: HashRetention>(
+    boundary: &FrontierHead,
     graph: &ChangeGraph<H>,
     actors: &ActorTable,
 ) -> Option<NodeIdx> {
     match boundary {
-        Boundary::Id(id) => graph.node_for_change_id(id, actors),
-        Boundary::Hash(hash) => graph.node_for_hash(hash),
+        FrontierHead::Id(id) => graph.node_for_change_id(id, actors),
+        FrontierHead::Hash(hash) => graph.node_for_hash(hash),
     }
 }
 
@@ -127,7 +125,7 @@ mod tests {
     use crate::clock::Clock;
     use crate::next::transaction::Transactable;
     use crate::next::AuditedAutoCommit as AutoCommit;
-    use crate::write_frontier::{Boundary, WriteFrontier};
+    use crate::write_frontier::{FrontierHead, WriteFrontier};
     use crate::{Author, ChangeHash, ROOT};
     use proptest::prelude::*;
     use std::collections::{HashMap, HashSet};
@@ -137,8 +135,8 @@ mod tests {
             .pending
             .iter()
             .map(|b| match b {
-                Boundary::Hash(h) => *h,
-                Boundary::Id(_) => panic!("only hash boundaries in these policies"),
+                FrontierHead::Hash(h) => *h,
+                FrontierHead::Id(_) => panic!("only hash boundaries in these policies"),
             })
             .collect()
     }
@@ -206,7 +204,7 @@ mod tests {
     }
 
     fn policy(entries: Vec<(usize, Vec<ChangeHash>)>) -> WriteFrontier {
-        WriteFrontier::from_hashes(
+        WriteFrontier::from(
             entries
                 .into_iter()
                 .map(|(a, heads)| (author(a), heads))
@@ -370,7 +368,7 @@ mod tests {
             }
 
             let is_empty = map.is_empty();
-            let derived = built.frontier_visibility(&WriteFrontier::from_hashes(map));
+            let derived = built.frontier_visibility(&WriteFrontier::from(map));
             if is_empty {
                 prop_assert_eq!(derived.mask, None);
                 prop_assert!(derived.pending.is_empty());

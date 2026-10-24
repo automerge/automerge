@@ -22,15 +22,15 @@ use crate::{ChangeHash, ChangeId, Viewpoint};
 pub(crate) fn frontier_hashes(
     doc: &crate::automerge::Automerge<Full>,
 ) -> std::collections::HashMap<crate::Author<'static>, Vec<ChangeHash>> {
-    use crate::write_frontier::Boundary;
+    use crate::write_frontier::FrontierHead;
     doc.write_frontier()
         .iter()
         .map(|(author, heads)| {
             let hashes = heads
                 .iter()
                 .filter_map(|boundary| match boundary {
-                    Boundary::Hash(hash) => Some(*hash),
-                    Boundary::Id(id) => doc.change_id_to_hash(id).ok().flatten(),
+                    FrontierHead::Hash(hash) => Some(*hash),
+                    FrontierHead::Id(id) => doc.change_id_to_hash(id).ok().flatten(),
                 })
                 .collect();
             (author.clone(), hashes)

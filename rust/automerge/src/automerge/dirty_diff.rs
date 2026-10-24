@@ -11,49 +11,11 @@ use crate::types::{ObjId, ObjMeta, ObjType, OpId, TextEncoding};
 use super::view::{ClockRange, Viewpoint};
 use super::Automerge;
 
-#[derive(Debug, PartialEq)]
-pub(crate) enum DirtyDiffError {
-    MissingObject(usize),
-    UnknownObject(ObjId),
-    InvalidHeads(crate::AutomergeError),
-}
-
 #[derive(Debug, Clone)]
 struct DirtyObject {
     obj: ObjId,
     typ: ObjType,
     range: Range<usize>,
-}
-
-#[derive(Default, Debug, Clone)]
-struct CachedObjectLookup {
-    object: Option<DirtyObject>,
-}
-
-impl CachedObjectLookup {
-    fn object_containing<H: crate::hash_retention::HashRetention>(
-        &mut self,
-        doc: &Automerge<H>,
-        pos: usize,
-    ) -> Result<DirtyObject, DirtyDiffError> {
-        if let Some(object) = &self.object {
-            if object.range.contains(&pos) {
-                return Ok(object.clone());
-            }
-        }
-
-        let (obj, range) = doc
-            .ops()
-            .obj_range_containing(pos)
-            .ok_or(DirtyDiffError::MissingObject(pos))?;
-        let typ = doc
-            .ops()
-            .object_type(&obj)
-            .ok_or(DirtyDiffError::UnknownObject(obj))?;
-        let object = DirtyObject { obj, typ, range };
-        self.object = Some(object.clone());
-        Ok(object)
-    }
 }
 
 /// Dirty ranges arrive in document order, so every cursor here only moves
@@ -108,42 +70,25 @@ impl<H: crate::hash_retention::HashRetention> Automerge<H> {
     /// Patches from `before` to the current state, walking only what changed
     /// since the dirty bits were last cleared: `before` must be the view they
     /// were cleared at.
-    pub(crate) fn dirty_diff_patches(
-        &self,
-        before: &Viewpoint,
-    ) -> Result<Vec<Patch>, DirtyDiffError> {
+    ///
+    /// Panics if `before` names heads this document does not hold.
+    pub(crate) fn dirty_diff_patches(&self, before: &Viewpoint) -> Vec<Patch> {
+        let mut patch_accumulator = PatchAccumulator::new(None);
         if before.heads.is_empty() {
-            let mut patch_accumulator = PatchAccumulator::event_log();
-            patch_accumulator.heads_clock = None;
             self.log_current_state(ObjMeta::root(), &mut patch_accumulator, true);
-            return Ok(patch_accumulator.make_patches(self));
+        } else {
+            let before = self
+                .visible_for_viewpoint(before)
+                .expect("dirty diff starts at this document's own heads");
+            let clock = ClockRange::between_current(before, self.read_current());
+            self.log_dirty_diff(clock, &mut patch_accumulator);
         }
-        let before = self
-            .visible_for_viewpoint(before)
-            .map_err(DirtyDiffError::InvalidHeads)?;
-        let clock = ClockRange::between_current(before, self.read_current());
-        let mut patch_accumulator = PatchAccumulator::event_log();
-        patch_accumulator.heads_clock = None;
-        self.log_dirty_diff(clock, &mut patch_accumulator)?;
-        Ok(patch_accumulator.make_patches(self))
+        patch_accumulator.make_patches(self)
     }
 
-    pub(crate) fn dirty_diff_patches_and_clear(
-        &mut self,
-        before: &Viewpoint,
-    ) -> Result<Vec<Patch>, DirtyDiffError> {
-        let patches = self.dirty_diff_patches(before)?;
-        self.clear_dirty();
-        Ok(patches)
-    }
-
-    fn log_dirty_diff(
-        &self,
-        clock: ClockRange<'_>,
-        patch_accumulator: &mut PatchAccumulator,
-    ) -> Result<(), DirtyDiffError> {
+    fn log_dirty_diff(&self, clock: ClockRange<'_>, patch_accumulator: &mut PatchAccumulator) {
         let encoding = self.text_encoding();
-        let ranges = self.dirty_ranges_by_object()?;
+        let ranges = self.dirty_ranges_by_object();
         let mut iters = DirtyIters::new(self.ops(), clock, encoding);
         for (object, range) in ranges {
             iters.enter(&object);
@@ -182,7 +127,6 @@ impl<H: crate::hash_retention::HashRetention> Automerge<H> {
                 }
             }
         }
-        Ok(())
     }
 
     fn widen_to_registers(&self, object: &DirtyObject, range: Range<usize>) -> Range<usize> {
@@ -205,13 +149,16 @@ impl<H: crate::hash_retention::HashRetention> Automerge<H> {
         }
     }
 
-    fn dirty_ranges_by_object(&self) -> Result<Vec<(DirtyObject, Range<usize>)>, DirtyDiffError> {
-        let mut lookup = CachedObjectLookup::default();
+    fn dirty_ranges_by_object(&self) -> Vec<(DirtyObject, Range<usize>)> {
+        let mut object: Option<DirtyObject> = None;
         let mut ranges = Vec::new();
         for dirty in self.ops().dirty_runs() {
             let mut start = dirty.start;
             while start < dirty.end {
-                let object = lookup.object_containing(self, start)?;
+                let object = match &object {
+                    Some(o) if o.range.contains(&start) => o.clone(),
+                    _ => object.insert(self.dirty_object_at(start)).clone(),
+                };
                 let end = dirty.end.min(object.range.end);
                 let range = self.widen_to_registers(&object, start..end);
                 ranges.push((object, range));
@@ -219,7 +166,19 @@ impl<H: crate::hash_retention::HashRetention> Automerge<H> {
             }
         }
         self.widen_to_mark_extents(&mut ranges);
-        Ok(Self::normalize_dirty_object_ranges(ranges))
+        Self::normalize_dirty_object_ranges(ranges)
+    }
+
+    fn dirty_object_at(&self, pos: usize) -> DirtyObject {
+        let (obj, range) = self
+            .ops()
+            .obj_range_containing(pos)
+            .expect("a dirty row lies inside an object");
+        let typ = self
+            .ops()
+            .object_type(&obj)
+            .expect("an object in the op set has a type");
+        DirtyObject { obj, typ, range }
     }
 
     /// A dirty mark changes the formatting of its whole span, so the span

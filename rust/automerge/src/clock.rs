@@ -183,12 +183,12 @@ impl Clock {
     ///
     /// If the `actor` index is out of bounds of the internal vector.
     #[inline]
-    pub(crate) fn set_counter_of(&mut self, actor: usize, counter: u32) {
+    fn set_counter_of(&mut self, actor: usize, counter: u32) {
         self.0.as_mut_slice()[actor] = counter;
     }
 
-    pub(crate) fn max_op(&self, actor: usize) -> u64 {
-        self.0[actor] as u64
+    pub(crate) fn max_op(&self, actor: usize) -> u32 {
+        self.0[actor]
     }
 
     /// A clock from explicit per-actor counters, for tests which model the

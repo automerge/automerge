@@ -1,10 +1,11 @@
 use crate::automerge::view::ReadAt;
 use crate::automerge::Automerge;
 use crate::exid::ExId;
+use crate::hash_retention::HashRetention;
 use crate::hydrate::Value;
 use crate::iter::SpanInternal;
 use crate::marks::{MarkAccumulator, MarkSet};
-use crate::types::{Clock, ObjId, ObjType, OpId, Prop, TextEncoding};
+use crate::types::{Clock, ObjId, ObjType, OpId, Prop};
 use crate::Patch;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::sync::Arc;
@@ -13,13 +14,12 @@ use super::PatchBuilder;
 
 #[derive(Clone, Debug)]
 pub(crate) struct PatchAccumulator {
-    pub(crate) events: Vec<(ObjId, Event)>,
+    events: Vec<(ObjId, Event)>,
     expose: HashSet<OpId>,
-    record_events: bool,
     path_map: BTreeMap<ObjId, (Prop, ObjId)>,
     path_hint: usize,
     /// `None` means the current document.
-    pub(crate) heads_clock: Option<crate::clock::Clock>,
+    heads_clock: Option<Clock>,
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -76,72 +76,48 @@ pub(crate) enum Event {
 }
 
 impl PatchAccumulator {
-    pub(crate) fn inactive() -> Self {
+    pub(crate) fn new(heads_clock: Option<Clock>) -> Self {
         Self {
-            record_events: false,
             expose: HashSet::default(),
             events: vec![],
-            heads_clock: None,
+            heads_clock,
             path_map: Default::default(),
             path_hint: 0,
         }
     }
 
-    pub(crate) fn event_log() -> Self {
-        Self {
-            record_events: true,
-            ..Self::inactive()
-        }
-    }
-
-    pub(crate) fn should_record_events(&self) -> bool {
-        self.record_events
-    }
-
     pub(crate) fn delete_seq(&mut self, obj: ObjId, index: usize, num: usize) {
-        if self.should_record_events() {
-            self.events.push((obj, Event::DeleteSeq { index, num }))
-        }
+        self.events.push((obj, Event::DeleteSeq { index, num }))
     }
 
     pub(crate) fn delete_map(&mut self, obj: ObjId, key: &str) {
-        if self.should_record_events() {
-            self.events
-                .push((obj, Event::DeleteMap { key: key.into() }))
-        }
+        self.events
+            .push((obj, Event::DeleteMap { key: key.into() }))
     }
 
     pub(crate) fn increment_map(&mut self, obj: ObjId, key: &str, n: i64, id: OpId) {
-        if self.should_record_events() {
-            self.events.push((
-                obj,
-                Event::IncrementMap {
-                    key: key.into(),
-                    n,
-                    id,
-                },
-            ))
-        }
+        self.events.push((
+            obj,
+            Event::IncrementMap {
+                key: key.into(),
+                n,
+                id,
+            },
+        ))
     }
 
     pub(crate) fn increment_seq(&mut self, obj: ObjId, index: usize, n: i64, id: OpId) {
-        if self.should_record_events() {
-            self.events
-                .push((obj, Event::IncrementSeq { index, n, id }))
-        }
+        self.events
+            .push((obj, Event::IncrementSeq { index, n, id }))
     }
 
     pub(crate) fn flag_conflict_map(&mut self, obj: ObjId, key: &str) {
-        if self.should_record_events() {
-            self.events
-                .push((obj, Event::FlagConflictMap { key: key.into() }))
-        }
+        self.events
+            .push((obj, Event::FlagConflictMap { key: key.into() }))
     }
 
     pub(crate) fn flag_conflict_seq(&mut self, obj: ObjId, index: usize) {
-        if self.should_record_events() {
-            self.events.push((obj, Event::FlagConflictSeq { index }))
-        }
+        self.events.push((obj, Event::FlagConflictSeq { index }))
     }
 
     pub(crate) fn put_map(
@@ -153,9 +129,6 @@ impl PatchAccumulator {
         conflict: bool,
         expose: bool,
     ) {
-        if !self.should_record_events() {
-            return;
-        }
         if expose && value.is_object() {
             self.expose.insert(id);
         }
@@ -179,9 +152,6 @@ impl PatchAccumulator {
         conflict: bool,
         expose: bool,
     ) {
-        if !self.should_record_events() {
-            return;
-        }
         if expose && value.is_object() {
             self.expose.insert(id);
         }
@@ -203,22 +173,17 @@ impl PatchAccumulator {
         text: &str,
         marks: Option<Arc<MarkSet>>,
     ) {
-        if self.should_record_events() {
-            self.events.push((
-                obj,
-                Event::Splice {
-                    index,
-                    text: text.to_string(),
-                    marks,
-                },
-            ))
-        }
+        self.events.push((
+            obj,
+            Event::Splice {
+                index,
+                text: text.to_string(),
+                marks,
+            },
+        ))
     }
 
     pub(crate) fn mark(&mut self, obj: ObjId, index: usize, len: usize, marks: &Arc<MarkSet>) {
-        if !self.should_record_events() {
-            return;
-        }
         if let Some((_, Event::Mark { marks: tail_marks })) = self.events.last_mut() {
             tail_marks.add(index, len, marks);
             return;
@@ -237,9 +202,6 @@ impl PatchAccumulator {
         conflict: bool,
         expose: bool,
     ) {
-        if !self.should_record_events() {
-            return;
-        }
         if expose && value.is_object() {
             self.expose.insert(id);
         }
@@ -254,15 +216,13 @@ impl PatchAccumulator {
         id: OpId,
         conflict: bool,
     ) {
-        if self.should_record_events() {
-            let event = Event::Insert {
-                index,
-                value,
-                id,
-                conflict,
-            };
-            self.events.push((obj, event))
-        }
+        let event = Event::Insert {
+            index,
+            value,
+            id,
+            conflict,
+        };
+        self.events.push((obj, event))
     }
 
     fn get_path_map(&mut self) -> BTreeMap<ObjId, (Prop, ObjId)> {
@@ -273,29 +233,15 @@ impl PatchAccumulator {
         std::mem::take(&mut self.path_map)
     }
 
-    pub(crate) fn make_patches<H: crate::hash_retention::HashRetention>(
-        &mut self,
-        doc: &Automerge<H>,
-    ) -> Vec<Patch> {
+    pub(crate) fn make_patches<H: HashRetention>(&mut self, doc: &Automerge<H>) -> Vec<Patch> {
         self.events.sort_by(|(a, _), (b, _)| a.cmp(b));
-        let expose = ExposeQueue(self.expose.iter().map(|id| doc.id_to_exid(*id)).collect());
-        let clock = self.heads_clock.clone();
+        let mut expose_queue =
+            ExposeQueue(self.expose.iter().map(|id| doc.id_to_exid(*id)).collect());
         let path_map = self.get_path_map();
-        let text_encoding = doc.text_encoding();
-        Self::make_patches_inner(&self.events, expose, path_map, doc, clock, text_encoding)
-    }
-
-    fn make_patches_inner<H: crate::hash_retention::HashRetention>(
-        events: &[(ObjId, Event)],
-        mut expose_queue: ExposeQueue,
-        path_map: BTreeMap<ObjId, (Prop, ObjId)>,
-        doc: &Automerge<H>,
-        clock: Option<Clock>,
-        text_encoding: TextEncoding,
-    ) -> Vec<Patch> {
-        let read = doc.read_clock(clock);
-        let mut patch_builder = PatchBuilder::new(doc, path_map, read.clone(), text_encoding);
-        for (obj, event) in events {
+        let read = doc.read_clock(self.heads_clock.clone());
+        let mut patch_builder =
+            PatchBuilder::new(doc.ops(), path_map, read.clone(), doc.text_encoding());
+        for (obj, event) in &self.events {
             let exid = doc.id_to_exid(obj.0);
             // pump before the skip check to keep expose observations in event order
             expose_queue.pump_queue(&exid, &mut patch_builder, doc, &read);
@@ -303,7 +249,7 @@ impl PatchAccumulator {
             if expose_queue.should_skip(&exid) {
                 continue;
             }
-            patch_builder.log_event(doc, exid, event);
+            patch_builder.log_event(doc.ops(), exid, event);
         }
         expose_queue.flush_queue(&mut patch_builder, doc, &read);
 
@@ -311,10 +257,8 @@ impl PatchAccumulator {
     }
 
     pub(crate) fn path_hint(&mut self, hint: BTreeMap<ObjId, (Prop, ObjId)>) {
-        if self.should_record_events() {
-            self.path_map = hint;
-            self.path_hint = self.events.len();
-        }
+        self.path_map = hint;
+        self.path_hint = self.events.len();
     }
 }
 
@@ -336,10 +280,10 @@ impl ExposeQueue {
         }
     }
 
-    fn pump_queue<H: crate::hash_retention::HashRetention>(
+    fn pump_queue<H: HashRetention>(
         &mut self,
         obj: &ExId,
-        patch_builder: &mut PatchBuilder<'_, H>,
+        patch_builder: &mut PatchBuilder<'_>,
         doc: &Automerge<H>,
         read: &ReadAt<'_>,
     ) {
@@ -351,9 +295,9 @@ impl ExposeQueue {
         }
     }
 
-    fn flush_queue<H: crate::hash_retention::HashRetention>(
+    fn flush_queue<H: HashRetention>(
         &mut self,
-        patch_builder: &mut PatchBuilder<'_, H>,
+        patch_builder: &mut PatchBuilder<'_>,
         doc: &Automerge<H>,
         read: &ReadAt<'_>,
     ) {
@@ -370,10 +314,10 @@ impl ExposeQueue {
         self.0.remove(obj)
     }
 
-    fn flush_obj<H: crate::hash_retention::HashRetention>(
+    fn flush_obj<H: HashRetention>(
         &mut self,
         exid: ExId,
-        patch_builder: &mut PatchBuilder<'_, H>,
+        patch_builder: &mut PatchBuilder<'_>,
         doc: &Automerge<H>,
         read: &ReadAt<'_>,
     ) -> Option<()> {

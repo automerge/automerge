@@ -106,7 +106,7 @@ impl LoadOptions {
             .verification_mode(self.verification_mode)
             .migrate_strings(self.string_migration)
             .text_encoding(self.text_encoding)
-            .write_frontier_boundaries(crate::write_frontier::WriteFrontier::from_hashes(
+            .write_frontier_boundaries(crate::write_frontier::WriteFrontier::from(
                 self.write_frontier,
             ));
         match self.author {
@@ -341,7 +341,7 @@ impl Automerge {
     pub fn mask_author(&mut self, author: Author<'static>, heads: &[ChangeHash]) {
         let heads = heads
             .iter()
-            .map(|h| crate::write_frontier::Boundary::Hash(*h))
+            .map(|h| crate::write_frontier::FrontierHead::Hash(*h))
             .collect();
         self.0.mask_author_boundaries(author, heads);
     }
@@ -359,7 +359,7 @@ impl Automerge {
         write_frontier: std::collections::HashMap<Author<'static>, Vec<ChangeHash>>,
     ) {
         self.0
-            .set_write_frontier_boundaries(crate::write_frontier::WriteFrontier::from_hashes(
+            .set_write_frontier_boundaries(crate::write_frontier::WriteFrontier::from(
                 write_frontier,
             ));
     }

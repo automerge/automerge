@@ -421,7 +421,12 @@ pub(crate) struct IdRun {
 impl IdRun {
     /// How many of the first `n` ids `clock` covers.
     pub(crate) fn covered(&self, n: usize, clock: &Clock) -> usize {
-        at_most(self.id.first, self.id.step, n, clock.max_op(self.id.actor))
+        at_most(
+            self.id.first,
+            self.id.step,
+            n,
+            u64::from(clock.max_op(self.id.actor)),
+        )
     }
 }
 
