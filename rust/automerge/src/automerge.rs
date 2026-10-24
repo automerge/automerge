@@ -3961,7 +3961,6 @@ mod dirty_diff_tests {
         hash_retention::{Full, HashRetention},
         marks::{ExpandMark, Mark},
         op_set2::types::Action,
-        patches::effect::assert_patches_have_same_effect,
         tx::{Transactable, Transaction},
         types::ObjId,
         ActorId, ChangeId, ObjType, ScalarValue, ROOT,
@@ -4001,51 +4000,27 @@ mod dirty_diff_tests {
         let full = doc.diff(before, after).unwrap();
         assert_eq!(after, doc.get_heads().as_slice());
         let dirty = doc.dirty_diff_patches(&doc.viewpoint_at(before.to_vec()));
-        assert_patches_have_same_effect(
-            doc,
-            before,
-            after,
-            "dirty diff",
-            &dirty,
-            "full diff",
-            &full,
-        );
+        assert_eq!(dirty, full, "dirty diff differs from full diff");
     }
 
-    fn assert_incremental_effect_matches_full<H: HashRetention>(
+    fn assert_incremental_matches_full<H: HashRetention>(
         doc: &mut Automerge<H>,
         before: &[ChangeId],
         after: &[ChangeId],
     ) {
         let full = doc.diff(before, after).unwrap();
         let incremental = doc.diff_incremental();
-        assert_patches_have_same_effect(
-            doc,
-            before,
-            after,
-            "incremental diff",
-            &incremental,
-            "full diff",
-            &full,
-        );
+        assert_eq!(incremental, full, "incremental diff differs from full diff");
     }
 
-    fn assert_autocommit_incremental_effect_matches_full<H: HashRetention>(
+    fn assert_autocommit_incremental_matches_full<H: HashRetention>(
         doc: &mut AutoCommit<H>,
         before: &[ChangeId],
         after: &[ChangeId],
     ) {
         let full = doc.document().diff(before, after).unwrap();
         let incremental = doc.diff_incremental();
-        assert_patches_have_same_effect(
-            doc.document(),
-            before,
-            after,
-            "incremental diff",
-            &incremental,
-            "full diff",
-            &full,
-        );
+        assert_eq!(incremental, full, "incremental diff differs from full diff");
     }
 
     fn assert_local_edit_matches_full<T>(
@@ -4179,7 +4154,7 @@ mod dirty_diff_tests {
         tx.commit();
         let first_heads = doc.get_heads();
 
-        assert_incremental_effect_matches_full(&mut doc, &[], &first_heads);
+        assert_incremental_matches_full(&mut doc, &[], &first_heads);
         assert!(doc.ops().dirty_runs().next().is_none());
 
         let mut tx = doc.transaction();
@@ -4187,7 +4162,7 @@ mod dirty_diff_tests {
         tx.commit();
         let second_heads = doc.get_heads();
 
-        assert_incremental_effect_matches_full(&mut doc, &first_heads, &second_heads);
+        assert_incremental_matches_full(&mut doc, &first_heads, &second_heads);
         assert!(doc.ops().dirty_runs().next().is_none());
     }
 
@@ -4243,7 +4218,7 @@ mod dirty_diff_tests {
         let mut doc = Automerge::load(&data).unwrap();
         let heads = doc.get_heads();
 
-        assert_incremental_effect_matches_full(&mut doc, &[], &heads);
+        assert_incremental_matches_full(&mut doc, &[], &heads);
         assert!(doc.ops().dirty_runs().next().is_none());
         assert!(doc.diff_incremental().is_empty());
     }
@@ -4259,7 +4234,7 @@ mod dirty_diff_tests {
 
         let mut doc = audit_doc();
         doc.load_incremental(&base_data).unwrap();
-        assert_incremental_effect_matches_full(&mut doc, &[], &base_heads);
+        assert_incremental_matches_full(&mut doc, &[], &base_heads);
 
         let mut tx = source.transaction();
         tx.put(ROOT, "later", 2).unwrap();
@@ -4269,7 +4244,7 @@ mod dirty_diff_tests {
         let before = doc.get_heads();
         doc.load_incremental(&data).unwrap();
         let after = doc.get_heads();
-        assert_incremental_effect_matches_full(&mut doc, &before, &after);
+        assert_incremental_matches_full(&mut doc, &before, &after);
         assert!(doc.ops().dirty_runs().next().is_none());
     }
 
@@ -4284,7 +4259,7 @@ mod dirty_diff_tests {
         let before = doc.get_heads();
         doc.apply_changes(source.get_changes(&[]).unwrap()).unwrap();
         let after = doc.get_heads();
-        assert_incremental_effect_matches_full(&mut doc, &before, &after);
+        assert_incremental_matches_full(&mut doc, &before, &after);
         assert!(doc.ops().dirty_runs().next().is_none());
 
         let mut source = audit_doc();
@@ -4296,7 +4271,7 @@ mod dirty_diff_tests {
         let before = doc.get_heads();
         doc.merge(&mut source).unwrap();
         let after = doc.get_heads();
-        assert_incremental_effect_matches_full(&mut doc, &before, &after);
+        assert_incremental_matches_full(&mut doc, &before, &after);
         assert!(doc.ops().dirty_runs().next().is_none());
 
         let mut source = audit_doc();
@@ -4308,7 +4283,7 @@ mod dirty_diff_tests {
         let before = doc.get_heads();
         doc.load_incremental(&source.save()).unwrap();
         let after = doc.get_heads();
-        assert_incremental_effect_matches_full(&mut doc, &before, &after);
+        assert_incremental_matches_full(&mut doc, &before, &after);
         assert!(doc.ops().dirty_runs().next().is_none());
     }
 
@@ -4327,7 +4302,7 @@ mod dirty_diff_tests {
         tx.commit();
         let fork_heads = fork.get_heads();
 
-        assert_incremental_effect_matches_full(&mut fork, &base_heads, &fork_heads);
+        assert_incremental_matches_full(&mut fork, &base_heads, &fork_heads);
         assert!(fork.ops().dirty_runs().next().is_none());
     }
 
@@ -4344,7 +4319,7 @@ mod dirty_diff_tests {
 
         let heads = doc.get_heads();
         doc.reset_diff_cursor();
-        assert_autocommit_incremental_effect_matches_full(&mut doc, &[], &heads);
+        assert_autocommit_incremental_matches_full(&mut doc, &[], &heads);
         assert!(doc.document().ops().dirty_runs().next().is_none());
         assert!(doc.diff_incremental().is_empty());
 

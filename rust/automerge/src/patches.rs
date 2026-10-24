@@ -1,5 +1,3 @@
-#[cfg(test)]
-pub(crate) mod effect;
 mod patch;
 mod patch_accumulator;
 mod patch_builder;

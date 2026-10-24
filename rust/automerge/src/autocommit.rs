@@ -1460,14 +1460,9 @@ mod tests {
         let after = doc.get_heads();
         let expected = doc.diff(&before, &after).unwrap();
         let actual = doc.diff_incremental();
-        crate::patches::effect::assert_patches_have_same_effect(
-            doc.document(),
-            &before,
-            &after,
-            "incremental diff",
-            &actual,
-            "cursor diff",
-            &expected,
+        assert_eq!(
+            actual, expected,
+            "incremental diff differs from cursor diff"
         );
         assert!(doc.diff_incremental().is_empty());
     }
@@ -1510,14 +1505,9 @@ mod tests {
         assert!(!patches.is_empty());
         assert!(doc.document().ops().dirty_runs().next().is_some());
         let incremental = doc.diff_incremental();
-        crate::patches::effect::assert_patches_have_same_effect(
-            doc.document(),
-            &before,
-            &after,
-            "incremental diff",
-            &incremental,
-            "cursor diff",
-            &patches,
+        assert_eq!(
+            incremental, patches,
+            "incremental diff differs from cursor diff"
         );
         assert!(doc.document().ops().dirty_runs().next().is_none());
     }
@@ -1606,14 +1596,9 @@ mod tests {
         let expected = doc.diff(&[], &heads).unwrap();
         doc.reset_diff_cursor();
         let incremental = doc.diff_incremental();
-        crate::patches::effect::assert_patches_have_same_effect(
-            doc.document(),
-            &[],
-            &heads,
-            "incremental diff",
-            &incremental,
-            "full diff",
-            &expected,
+        assert_eq!(
+            incremental, expected,
+            "incremental diff differs from full diff"
         );
         assert!(doc.diff_incremental().is_empty());
 
