@@ -219,7 +219,7 @@ where
         }
     }
 
-    fn try_next_obj(&mut self) -> Result<Option<(ObjId, usize)>, ReadOpError> {
+    pub(crate) fn try_next_obj(&mut self) -> Result<Option<(ObjId, usize)>, ReadOpError> {
         let (Some(actor), Some(ctr)) = (self.actor.peek()?, self.ctr.peek()?) else {
             return Ok(None);
         };

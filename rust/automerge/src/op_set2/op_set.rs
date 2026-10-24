@@ -1402,74 +1402,34 @@ impl OpSet {
     /// otherwise catch: consistent column lengths, actor indexes in range,
     /// and object ids that are whole and strictly increasing. Runs at
     /// run/length granularity, without decoding ops.
-    pub(crate) fn column_validation(&self) -> Result<(), ColumnValidationError> {
+    pub(crate) fn column_validation(&self) -> Result<(), ReadOpError> {
         self.column_validation_with(self.actors.len())
     }
 
     /// [`Self::column_validation`] against an explicit actor count, for
     /// columns still in another actor space.
-    pub(crate) fn column_validation_with(
-        &self,
-        num_actors: usize,
-    ) -> Result<(), ColumnValidationError> {
-        use ColumnValidationError::*;
+    pub(crate) fn column_validation_with(&self, num_actors: usize) -> Result<(), ReadOpError> {
+        use ColumnValidationError::ActorOutOfRange;
         let cols = &self.cols;
-        let n = cols.id_actor.len();
-
-        let check = |name, len| {
-            if len == n {
-                Ok(())
-            } else {
-                Err(ColumnLength(name, len, n))
-            }
-        };
-        check("id_ctr", cols.id_ctr.len())?;
-        check("obj_actor", cols.obj_actor.len())?;
-        check("obj_ctr", cols.obj_ctr.len())?;
-        check("key_actor", cols.key_actor.len())?;
-        check("key_ctr", cols.key_ctr.len())?;
-        check("key_str", cols.key_str.len())?;
-        check("insert", cols.insert.len())?;
-        check("action", cols.action.len())?;
-        check("value_meta", cols.value_meta.len())?;
-        check("mark_name", cols.mark_name.len())?;
-        check("expand", cols.expand.len())?;
-        check("succ_count", cols.succ_count.len())?;
-
-        let succ_total = cols.succ_count.get_prefix(n) as usize;
-        if cols.succ_actor.len() != succ_total {
-            return Err(ColumnLength(
-                "succ_actor",
-                cols.succ_actor.len(),
-                succ_total,
-            ));
-        }
-        if cols.succ_ctr.len() != succ_total {
-            return Err(ColumnLength("succ_ctr", cols.succ_ctr.len(), succ_total));
-        }
-
-        let raw_total = cols.value_meta.get_prefix(n);
-        if cols.value.len() as u64 != raw_total {
-            return Err(RawValueLength(cols.value.len(), raw_total));
-        }
+        cols.check_lengths()?;
 
         let mut it = cols.id_actor.iter();
         while let Some(run) = it.next_run() {
             if run.value.0 as usize >= num_actors {
-                return Err(ActorOutOfRange("id_actor", run.value.0, num_actors));
+                return Err(ActorOutOfRange("id_actor", run.value.0, num_actors).into());
             }
         }
         let mut it = cols.succ_actor.iter();
         while let Some(run) = it.next_run() {
             if run.value.0 as usize >= num_actors {
-                return Err(ActorOutOfRange("succ_actor", run.value.0, num_actors));
+                return Err(ActorOutOfRange("succ_actor", run.value.0, num_actors).into());
             }
         }
         let mut it = cols.obj_actor.iter();
         while let Some(run) = it.next_run() {
             if let Some(a) = run.value {
                 if a.0 as usize >= num_actors {
-                    return Err(ActorOutOfRange("obj_actor", a.0, num_actors));
+                    return Err(ActorOutOfRange("obj_actor", a.0, num_actors).into());
                 }
             }
         }
@@ -1477,39 +1437,13 @@ impl OpSet {
         while let Some(run) = it.next_run() {
             if let Some(a) = run.value {
                 if a.0 as usize >= num_actors {
-                    return Err(ActorOutOfRange("key_actor", a.0, num_actors));
+                    return Err(ActorOutOfRange("key_actor", a.0, num_actors).into());
                 }
             }
         }
 
-        let mut ctr = cols.obj_ctr.iter();
-        let mut actor = cols.obj_actor.iter();
-        let mut next_ctr = ctr.next_run();
-        let mut next_actor = actor.next_run();
-        let mut pos = 0;
-        let mut prev: Option<ObjId> = None;
-        while let (Some(mut rc), Some(mut ra)) = (next_ctr, next_actor) {
-            let obj = ObjId::load(rc.value.map(|c| c as u64), ra.value).ok_or(InvalidObjId(pos))?;
-            if prev.is_some_and(|p| obj <= p) {
-                return Err(ObjOutOfOrder(pos));
-            }
-            prev = Some(obj);
-            let count = rc.count.min(ra.count);
-            pos += count;
-            rc.count -= count;
-            ra.count -= count;
-            next_ctr = if rc.count == 0 {
-                ctr.next_run()
-            } else {
-                Some(rc)
-            };
-            next_actor = if ra.count == 0 {
-                actor.next_run()
-            } else {
-                Some(ra)
-            };
-        }
-
+        let mut objs = index::ObjRunWalk::new(cols.obj_actor.iter(), cols.obj_ctr.iter());
+        while objs.try_next_obj()?.is_some() {}
         Ok(())
     }
 
@@ -2465,10 +2399,6 @@ pub(crate) enum ColumnValidationError {
     RawValueLength(usize, u64),
     #[error("column {0} references actor index {1} but the document has {2} actors")]
     ActorOutOfRange(&'static str, u32, usize),
-    #[error("op {0} has a partially null object id")]
-    InvalidObjId(usize),
-    #[error("ops out of order: the object id at op {0} does not increase")]
-    ObjOutOfOrder(usize),
 }
 
 pub(crate) struct IterObjIds<'a> {
@@ -2858,7 +2788,9 @@ pub(crate) mod tests {
         op_set.cols.rewrite_with_new_actor(0);
         assert!(matches!(
             op_set.column_validation(),
-            Err(ColumnValidationError::ActorOutOfRange("id_actor", _, _))
+            Err(ReadOpError::ColumnValidation(
+                ColumnValidationError::ActorOutOfRange("id_actor", _, _)
+            ))
         ));
     }
 
@@ -2882,14 +2814,14 @@ pub(crate) mod tests {
         op_set.cols.obj_actor.splice(n - 1, 1, [Some(ActorIdx(0))]);
         assert!(matches!(
             op_set.column_validation(),
-            Err(ColumnValidationError::ObjOutOfOrder(_))
+            Err(ReadOpError::ObjOutOfOrder(_))
         ));
 
         let mut op_set = reloaded.ops().clone();
         op_set.cols.obj_actor.splice(n - 1, 1, [None::<ActorIdx>]);
         assert!(matches!(
             op_set.column_validation(),
-            Err(ColumnValidationError::InvalidObjId(_))
+            Err(ReadOpError::InvalidObjId(_))
         ));
     }
 }

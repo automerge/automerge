@@ -232,43 +232,47 @@ impl Columns {
         data: &[u8],
         text_encoding: TextEncoding,
     ) -> Result<(Self, IndexBuilder), super::op_set::ReadOpError> {
-        use super::op_set::ReadOpError;
-        let _d = |spec| &data[cols.get(&spec).cloned().unwrap_or_default()];
+        let data_for = |spec| &data[cols.get(&spec).cloned().unwrap_or_default()];
 
-        let id_actor = MappedColumn::<ActorIdx>::load(_d(ID_ACTOR_COL_SPEC))?;
+        let id_actor = MappedColumn::<ActorIdx>::load(data_for(ID_ACTOR_COL_SPEC))?;
         let len = id_actor.len();
         let opts = hexane::LoadOpts::new().with_length(len);
 
-        let id_ctr = hexane::DeltaColumn::<u32>::load_with(_d(ID_COUNTER_COL_SPEC), opts)?;
+        let id_ctr = hexane::DeltaColumn::<u32>::load_with(data_for(ID_COUNTER_COL_SPEC), opts)?;
         let key_actor = MappedColumn::<Option<ActorIdx>>::load_with(
-            _d(KEY_ACTOR_COL_SPEC),
+            data_for(KEY_ACTOR_COL_SPEC),
             opts.with_fill(None),
         )?;
         let key_ctr = hexane::DeltaColumn::<Option<u32>>::load_with(
-            _d(KEY_COUNTER_COL_SPEC),
+            data_for(KEY_COUNTER_COL_SPEC),
             opts.with_fill(None),
         )?;
-        let mark_name = hexane::Column::load_with(_d(MARK_NAME_COL_SPEC), opts.with_fill(None))?;
-        let expand = hexane::Column::load_with(_d(EXPAND_COL_SPEC), opts.with_fill(false))?;
-        let succ_actor = MappedColumn::<ActorIdx>::load(_d(SUCC_ACTOR_COL_SPEC))?;
-        let succ_ctr = hexane::DeltaColumn::<u32>::load(_d(SUCC_COUNTER_COL_SPEC))?;
-        let value = hexane::RawColumn::load(_d(VALUE_COL_SPEC))?;
+        let mark_name =
+            hexane::Column::load_with(data_for(MARK_NAME_COL_SPEC), opts.with_fill(None))?;
+        let expand = hexane::Column::load_with(data_for(EXPAND_COL_SPEC), opts.with_fill(false))?;
+        let succ_actor = MappedColumn::<ActorIdx>::load(data_for(SUCC_ACTOR_COL_SPEC))?;
+        let succ_ctr = hexane::DeltaColumn::<u32>::load(data_for(SUCC_COUNTER_COL_SPEC))?;
+        let value = hexane::RawColumn::load(data_for(VALUE_COL_SPEC))?;
 
-        let mut action_src = hexane::Column::<Action>::load_iter(_d(ACTION_COL_SPEC), opts);
+        let mut action_src = hexane::Column::<Action>::load_iter(data_for(ACTION_COL_SPEC), opts);
         let mut meta_src =
-            hexane::PrefixColumn::<ValueMeta>::load_iter(_d(VALUE_META_COL_SPEC), opts);
-        let mut succ_src = hexane::PrefixColumn::<u32>::load_iter(_d(SUCC_COUNT_COL_SPEC), opts);
-        let mut key_str_src = hexane::Column::load_iter(_d(KEY_STR_COL_SPEC), opts.with_fill(None));
+            hexane::PrefixColumn::<ValueMeta>::load_iter(data_for(VALUE_META_COL_SPEC), opts);
+        let mut succ_src =
+            hexane::PrefixColumn::<u32>::load_iter(data_for(SUCC_COUNT_COL_SPEC), opts);
+        let mut key_str_src =
+            hexane::Column::load_iter(data_for(KEY_STR_COL_SPEC), opts.with_fill(None));
         let mut obj_actor_src = hexane::Column::<Option<ActorIdx>>::load_iter(
-            _d(OBJ_ID_ACTOR_COL_SPEC),
+            data_for(OBJ_ID_ACTOR_COL_SPEC),
             opts.with_fill(None),
         );
         let mut obj_ctr_src = hexane::Column::<Option<u32>>::load_iter(
-            _d(OBJ_ID_COUNTER_COL_SPEC),
+            data_for(OBJ_ID_COUNTER_COL_SPEC),
             opts.with_fill(None),
         );
-        let mut insert_src =
-            hexane::PrefixColumn::<bool>::load_iter(_d(INSERT_COL_SPEC), opts.with_fill(false));
+        let mut insert_src = hexane::PrefixColumn::<bool>::load_iter(
+            data_for(INSERT_COL_SPEC),
+            opts.with_fill(false),
+        );
 
         let mut index = IndexBuilder::new(text_encoding);
         {
@@ -304,18 +308,6 @@ impl Columns {
         let obj_ctr = obj_ctr_src.finalize()?;
         let insert = insert_src.finalize()?;
 
-        let succ_total = succ_count.get_prefix(len) as usize;
-        if succ_actor.len() != succ_total {
-            return Err(PackError::InvalidLength(succ_actor.len(), succ_total).into());
-        }
-        if succ_ctr.len() != succ_total {
-            return Err(PackError::InvalidLength(succ_ctr.len(), succ_total).into());
-        }
-        let raw_total = value_meta.get_prefix(len);
-        if value.len() as u64 != raw_total {
-            return Err(ReadOpError::MissingValue("raw value bytes"));
-        }
-
         let columns = Self {
             id_actor,
             id_ctr,
@@ -338,38 +330,62 @@ impl Columns {
         Ok((columns, index))
     }
 
-    /// Load op columns, from a document or a fragment.
     pub(crate) fn load(
         cols: BTreeMap<ColumnSpec, Range<usize>>,
         data: &[u8],
         _actors: &ActorTable,
     ) -> Result<Self, PackError> {
-        let _d = |spec| &data[cols.get(&spec).cloned().unwrap_or_default()];
+        let data_for = |spec| &data[cols.get(&spec).cloned().unwrap_or_default()];
 
-        let id_actor = MappedColumn::<ActorIdx>::load(_d(ID_ACTOR_COL_SPEC))?;
+        let id_actor = MappedColumn::<ActorIdx>::load(data_for(ID_ACTOR_COL_SPEC))?;
         let len = id_actor.len();
+
         let opts = hexane::LoadOpts::new().with_length(len);
 
-        let id_ctr = hexane::DeltaColumn::load_with(_d(ID_COUNTER_COL_SPEC), opts)?;
-        let obj_actor = MappedColumn::load_with(_d(OBJ_ID_ACTOR_COL_SPEC), opts.with_fill(None))?;
-        let obj_ctr = hexane::Column::load_with(_d(OBJ_ID_COUNTER_COL_SPEC), opts.with_fill(None))?;
-        let key_actor = MappedColumn::load_with(_d(KEY_ACTOR_COL_SPEC), opts.with_fill(None))?;
-        let key_ctr =
-            hexane::DeltaColumn::load_with(_d(KEY_COUNTER_COL_SPEC), opts.with_fill(None))?;
-        let key_str = hexane::Column::load_with(_d(KEY_STR_COL_SPEC), opts.with_fill(None))?;
-        let insert = hexane::PrefixColumn::load_with(_d(INSERT_COL_SPEC), opts.with_fill(false))?;
-        let action = hexane::Column::load_with(_d(ACTION_COL_SPEC), opts)?;
-        let value_meta = hexane::PrefixColumn::load_with(_d(VALUE_META_COL_SPEC), opts)?;
-        let value = hexane::RawColumn::load(_d(VALUE_COL_SPEC))?;
-        let mark_name = hexane::Column::load_with(_d(MARK_NAME_COL_SPEC), opts.with_fill(None))?;
-        let expand = hexane::Column::load_with(_d(EXPAND_COL_SPEC), opts.with_fill(false))?;
-        let succ_count = hexane::PrefixColumn::load_with(_d(SUCC_COUNT_COL_SPEC), opts)?;
+        let id_ctr = hexane::DeltaColumn::<u32>::load_with(data_for(ID_COUNTER_COL_SPEC), opts)?;
+
+        let obj_actor = MappedColumn::<Option<ActorIdx>>::load_with(
+            data_for(OBJ_ID_ACTOR_COL_SPEC),
+            opts.with_fill(None),
+        )?;
+
+        let obj_ctr = hexane::Column::<Option<u32>>::load_with(
+            data_for(OBJ_ID_COUNTER_COL_SPEC),
+            opts.with_fill(None),
+        )?;
+
+        let key_actor = MappedColumn::<Option<ActorIdx>>::load_with(
+            data_for(KEY_ACTOR_COL_SPEC),
+            opts.with_fill(None),
+        )?;
+
+        let key_ctr = hexane::DeltaColumn::<Option<u32>>::load_with(
+            data_for(KEY_COUNTER_COL_SPEC),
+            opts.with_fill(None),
+        )?;
+        let key_str = hexane::Column::load_with(data_for(KEY_STR_COL_SPEC), opts.with_fill(None))?;
+        let insert =
+            hexane::PrefixColumn::load_with(data_for(INSERT_COL_SPEC), opts.with_fill(false))?;
+        let action = hexane::Column::<Action>::load_with(data_for(ACTION_COL_SPEC), opts)?;
+        let mark_name =
+            hexane::Column::load_with(data_for(MARK_NAME_COL_SPEC), opts.with_fill(None))?;
+
+        let expand = hexane::Column::load_with(data_for(EXPAND_COL_SPEC), opts.with_fill(false))?;
+
+        let succ_count =
+            hexane::PrefixColumn::<u32>::load_with(data_for(SUCC_COUNT_COL_SPEC), opts)?;
 
         let succ_len = succ_count.get_prefix(succ_count.len()) as usize;
         let succ_opts = hexane::LoadOpts::new().with_length(succ_len);
+        let succ_actor =
+            MappedColumn::<ActorIdx>::load_with(data_for(SUCC_ACTOR_COL_SPEC), succ_opts)?;
 
-        let succ_actor = MappedColumn::load_with(_d(SUCC_ACTOR_COL_SPEC), succ_opts)?;
-        let succ_ctr = hexane::DeltaColumn::load_with(_d(SUCC_COUNTER_COL_SPEC), succ_opts)?;
+        let succ_ctr =
+            hexane::DeltaColumn::<u32>::load_with(data_for(SUCC_COUNTER_COL_SPEC), succ_opts)?;
+
+        let value_meta =
+            hexane::PrefixColumn::<ValueMeta>::load_with(data_for(VALUE_META_COL_SPEC), opts)?;
+        let value = hexane::RawColumn::load(data_for(VALUE_COL_SPEC))?;
 
         let index = Indexes::default();
 
@@ -673,26 +689,36 @@ impl Columns {
         self.succ_actor.len()
     }
 
-    /// Whether every op column has one entry per row and the succ sub
-    /// columns match the succ counts' total.
-    pub(super) fn columns_agree(&self) -> bool {
-        let len = self.len();
-        let sub = self.succ_count.get_prefix(len) as usize;
-        len == self.id_ctr.len()
-            && len == self.obj_actor.len()
-            && len == self.obj_ctr.len()
-            && len == self.key_actor.len()
-            && len == self.key_ctr.len()
-            && len == self.key_str.len()
-            && len == self.insert.len()
-            && len == self.action.len()
-            && len == self.value_meta.len()
-            && len == self.mark_name.len()
-            && len == self.expand.len()
-            && len == self.succ_count.len()
-            && sub == self.succ_actor.len()
-            && sub == self.succ_ctr.len()
-            && self.value_meta.get_prefix(len) as usize == self.value.len()
+    pub(super) fn check_lengths(&self) -> Result<(), super::op_set::ColumnValidationError> {
+        use super::op_set::ColumnValidationError::{ColumnLength, RawValueLength};
+        let n = self.len();
+        let check = |name, len, want| {
+            if len == want {
+                Ok(())
+            } else {
+                Err(ColumnLength(name, len, want))
+            }
+        };
+        check("id_ctr", self.id_ctr.len(), n)?;
+        check("obj_actor", self.obj_actor.len(), n)?;
+        check("obj_ctr", self.obj_ctr.len(), n)?;
+        check("key_actor", self.key_actor.len(), n)?;
+        check("key_ctr", self.key_ctr.len(), n)?;
+        check("key_str", self.key_str.len(), n)?;
+        check("insert", self.insert.len(), n)?;
+        check("action", self.action.len(), n)?;
+        check("value_meta", self.value_meta.len(), n)?;
+        check("mark_name", self.mark_name.len(), n)?;
+        check("expand", self.expand.len(), n)?;
+        check("succ_count", self.succ_count.len(), n)?;
+        let succ_total = self.succ_count.get_prefix(n) as usize;
+        check("succ_actor", self.succ_actor.len(), succ_total)?;
+        check("succ_ctr", self.succ_ctr.len(), succ_total)?;
+        let raw_total = self.value_meta.get_prefix(n);
+        if self.value.len() as u64 != raw_total {
+            return Err(RawValueLength(self.value.len(), raw_total));
+        }
+        Ok(())
     }
 
     pub(crate) fn dump(&self) {

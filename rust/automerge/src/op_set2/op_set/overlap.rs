@@ -315,7 +315,7 @@ impl Plan {
             }
         }
 
-        debug_assert!(cols.columns_agree());
+        debug_assert!(cols.check_lengths().is_ok());
         self.preds
     }
 
