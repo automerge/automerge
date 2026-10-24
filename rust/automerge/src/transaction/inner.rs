@@ -240,6 +240,10 @@ impl TransactionInner {
             doc.ops.undo_op(o);
         }
 
+        #[cfg(feature = "slow_path_assertions")]
+        doc.ops()
+            .assert_counter_index_matches(doc.mask().map(crate::automerge::view::Mask::clock));
+
         //doc.ops_mut().load_checkpoint(self.checkpoint);
 
         if self.seq == 1 {
@@ -353,6 +357,10 @@ impl TransactionInner {
         self.finalize_op(doc.text_encoding(), patch_log, &op, None, replaced.as_ref());
 
         self.pending.push(op);
+
+        #[cfg(feature = "slow_path_assertions")]
+        doc.ops()
+            .assert_counter_index_matches(doc.mask().map(crate::automerge::view::Mask::clock));
     }
 
     pub(crate) fn insert<V: Into<ScalarValue>>(

@@ -47,7 +47,7 @@ impl AsBuilder for &TxOp {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub(crate) struct SuccessorValue {
     id: OpId,
     increment: Option<i64>,
@@ -78,11 +78,6 @@ impl SuccessorValue {
     /// Returns `true` if the successor has no increment and is not masked.
     fn has_succ(&self) -> bool {
         self.increment.is_none() && !self.masked
-    }
-
-    /// Return the [`OpId`] of the successor.
-    pub(crate) fn get_id(&self) -> OpId {
-        self.id
     }
 
     /// Return the increment value of the successor, regardless of masking.
@@ -564,6 +559,7 @@ impl OpLike for &TxOp {
     fn id_actor(op: &Self) -> ActorIdx {
         op.as_builder().id.actoridx()
     }
+
     fn id_ctr(op: &Self) -> i64 {
         op.as_builder().id.icounter()
     }
@@ -577,12 +573,21 @@ impl OpLike for &TxOp {
         [].into_iter()
     }
 
+    fn counter_total(op: &Self) -> Option<i64> {
+        match op.bld.value {
+            ScalarValue::Counter(base) => Some(base),
+            _ => None,
+        }
+    }
+
     fn id(&self) -> OpId {
         self.as_builder().id
     }
+
     fn obj(&self) -> ObjId {
         self.as_builder().obj
     }
+
     fn action(o: &Self) -> Action {
         o.as_builder().action
     }
@@ -605,15 +610,19 @@ impl OpLike for &TxOp {
     fn raw_value(&self) -> Option<Cow<'_, [u8]>> {
         self.as_builder().value.as_raw()
     }
+
     fn meta_value(&self) -> ValueMeta {
         ValueMeta::from(&self.as_builder().value)
     }
+
     fn insert(o: &Self) -> bool {
         o.as_builder().insert
     }
+
     fn mark_name(o: &Self) -> Option<&str> {
         o.as_builder().mark_name.as_deref()
     }
+
     fn expand(o: &Self) -> bool {
         o.as_builder().expand
     }
@@ -661,12 +670,21 @@ impl OpLike for TxOp {
         [].into_iter()
     }
 
+    fn counter_total(op: &Self) -> Option<i64> {
+        match op.bld.value {
+            ScalarValue::Counter(base) => Some(base),
+            _ => None,
+        }
+    }
+
     fn id(&self) -> OpId {
         self.as_builder().id
     }
+
     fn obj(&self) -> ObjId {
         self.as_builder().obj
     }
+
     fn action(o: &Self) -> Action {
         o.as_builder().action
     }
@@ -689,15 +707,19 @@ impl OpLike for TxOp {
     fn raw_value(&self) -> Option<Cow<'_, [u8]>> {
         self.as_builder().value.as_raw()
     }
+
     fn meta_value(&self) -> ValueMeta {
         ValueMeta::from(&self.as_builder().value)
     }
+
     fn insert(o: &Self) -> bool {
         o.as_builder().insert
     }
+
     fn mark_name(o: &Self) -> Option<&str> {
         o.as_builder().mark_name.as_deref()
     }
+
     fn expand(o: &Self) -> bool {
         o.as_builder().expand
     }
@@ -739,6 +761,7 @@ impl OpLike for ChangeOp {
     fn id_actor(op: &Self) -> ActorIdx {
         op.as_builder().id.actoridx()
     }
+
     fn id_ctr(op: &Self) -> i64 {
         op.as_builder().id.icounter()
     }
@@ -755,12 +778,26 @@ impl OpLike for ChangeOp {
         Box::new(self.succ.iter().map(|SuccessorValue { id, .. }| *id))
     }
 
+    fn counter_total(op: &Self) -> Option<i64> {
+        match op.bld.value {
+            ScalarValue::Counter(base) => Some(
+                op.succ
+                    .iter()
+                    .filter_map(|s| s.increment())
+                    .fold(base, i64::wrapping_add),
+            ),
+            _ => None,
+        }
+    }
+
     fn id(&self) -> OpId {
         self.as_builder().id
     }
+
     fn obj(&self) -> ObjId {
         self.as_builder().obj
     }
+
     fn action(o: &Self) -> Action {
         o.as_builder().action
     }
@@ -783,15 +820,19 @@ impl OpLike for ChangeOp {
     fn raw_value(&self) -> Option<Cow<'_, [u8]>> {
         self.as_builder().value.as_raw()
     }
+
     fn meta_value(&self) -> ValueMeta {
         ValueMeta::from(&self.as_builder().value)
     }
+
     fn insert(o: &Self) -> bool {
         o.as_builder().insert
     }
+
     fn mark_name(o: &Self) -> Option<&str> {
         o.as_builder().mark_name.as_deref()
     }
+
     fn expand(o: &Self) -> bool {
         o.as_builder().expand
     }
@@ -888,6 +929,21 @@ impl<'a> OpLike for Op<'a> {
         self.succ()
     }
 
+    /// Sums every increment successor, masked or not: a stored doc op carries
+    /// no per-successor mask flag. Only `IndexBuilder` sees ops under a mask,
+    /// and it gates increments on the clock itself, so the one caller that
+    /// reaches here — `Columns::splice` — is never masked.
+    fn counter_total(op: &Self) -> Option<i64> {
+        match op.value {
+            ScalarValue::Counter(base) => Some(
+                op.succ_inc()
+                    .filter_map(|(_, inc)| inc)
+                    .fold(base, i64::wrapping_add),
+            ),
+            _ => None,
+        }
+    }
+
     fn insert(o: &Self) -> bool {
         o.insert
     }
@@ -928,8 +984,23 @@ impl<'a> SuccCursors<'a> {
     pub(crate) fn pos(&self) -> usize {
         self.succ_actor.pos()
     }
+
     pub(crate) fn with_inc(self) -> SuccIncCursors<'a> {
         SuccIncCursors(self)
+    }
+
+    /// Return the last successor id in this slice.
+    ///
+    /// Seeks to it via hexane's `nth`, which jumps by slab index and skips
+    /// whole runs, rather than decoding every preceding successor.
+    fn last_id(&self) -> Option<OpId> {
+        if self.len == 0 {
+            return None;
+        }
+        let n = self.len - 1;
+        let counter = self.succ_counter.clone().nth(n)?;
+        let actor = self.succ_actor.clone().nth(n)?;
+        Some(OpId::new(counter.into(), actor.into()))
     }
 }
 
@@ -1029,10 +1100,6 @@ impl<'a> Op<'a> {
         }
     }
 
-    pub(crate) fn add_succ(&self, id: OpId, inc: Option<i64>) -> SuccInsert {
-        self.add_succ_with_mask(id, inc, false)
-    }
-
     pub(crate) fn add_succ_with_mask(
         &self,
         id: OpId,
@@ -1041,10 +1108,27 @@ impl<'a> Op<'a> {
     ) -> SuccInsert {
         let pos = self.pos;
         let mut succ = self.succ_cursors.clone();
+        let len = succ.len();
+        let start = succ.pos();
         if inc.is_some() && !self.is_counter() {
             inc = None;
         }
-        let len = succ.len() as u64;
+
+        // The new successor is newer than every existing one. Peek the last
+        // existing id and append without performing the walk.
+        if let Some(last) = succ.last_id() {
+            if last < id {
+                return SuccInsert {
+                    id,
+                    pos,
+                    inc,
+                    len: len as u64,
+                    sub_pos: start + len,
+                    masked,
+                };
+            }
+        }
+
         let mut sub_pos = succ.pos();
         while let Some(i) = succ.next() {
             if i > id {
@@ -1056,9 +1140,88 @@ impl<'a> Op<'a> {
             id,
             pos,
             inc,
-            len,
+            len: len as u64,
             sub_pos,
             masked,
+        }
+    }
+
+    /// Computes where each of several new successors of this op should be
+    /// inserted into its successor list.
+    ///
+    /// An op's successors are stored sorted by [`OpId`]. To add a new
+    /// successor, the caller needs to know the position within that sorted list
+    /// where it belongs; this method yields one [`SuccInsert`] per incoming
+    /// successor, carrying that position (`sub_pos`) along with the data needed
+    /// to record it in the columns. The results are intended to be fed to
+    /// [`OpSet::add_succ`].
+    ///
+    /// `incoming` **must** be in strictly ascending `OpId` order. This is what
+    /// lets the method merge the two sorted sequences in a single pass, walking
+    /// the existing successor list only once.
+    pub(crate) fn add_succs<I>(
+        &self,
+        incoming: I,
+    ) -> impl Iterator<Item = SuccInsert> + use<'_, 'a, I>
+    where
+        I: IntoIterator<Item = SuccessorValue>,
+    {
+        let is_counter = self.is_counter();
+        let pos = self.pos;
+        let mut succ = self.succ_cursors.clone();
+        let len = succ.len() as u64;
+        let mut sub_pos = succ.pos();
+        let mut pending: Option<OpId> = None;
+        // Keep track of the last `OpId` to assert that the incoming values are
+        // in ascending order
+        let mut last: Option<OpId> = None;
+
+        incoming.into_iter().map(
+            move |SuccessorValue {
+                      id,
+                      increment,
+                      masked,
+                  }| {
+                debug_assert!(
+                    Some(id) > last,
+                    "incoming is not in ascending order: {id:?} <= {last:?}"
+                );
+                let inc = if is_counter { increment } else { None };
+                loop {
+                    let next = pending.take().or_else(|| succ.next());
+                    match next {
+                        Some(i) if i <= id => sub_pos = succ.pos(),
+                        Some(i) => {
+                            pending = Some(i);
+                            break;
+                        }
+                        None => break,
+                    }
+                }
+                last = Some(id);
+                SuccInsert {
+                    id,
+                    pos,
+                    inc,
+                    len,
+                    sub_pos,
+                    masked,
+                }
+            },
+        )
+    }
+
+    /// Replace this op's stored counter base with its current total, read
+    /// from [`OpSet`]'s counter index.
+    ///
+    /// The index is mask-aware, so this is correct for any **current** read,
+    /// masked or not. A historical read must use [`Op::fix_counter`] with
+    /// its clock instead. A non-counter op is left alone.
+    pub(crate) fn set_counter_from_index(&mut self, op_set: &OpSet) {
+        if let ScalarValue::Counter(ref mut n) = self.value {
+            if let Some(total) = op_set.counter_total_at(self.pos) {
+                *n = total;
+            }
         }
     }
 
@@ -1426,6 +1589,11 @@ pub(crate) trait OpLike: Debug {
     fn expand(op: &Self) -> bool;
     fn succ(&self) -> Self::SuccIter<'_>;
     fn succ_inc(op: &Self) -> Box<dyn Iterator<Item = Option<i64>> + '_>;
+    /// The counter's current total, i.e. base plus every unmasked increment
+    /// successor.
+    ///
+    /// Returns `None` if this `op` is not a counter.
+    fn counter_total(op: &Self) -> Option<i64>;
     fn mark_name(op: &Self) -> Option<&str>;
     fn mark_index(op: &Self) -> Option<MarkIndexBuilder>;
     fn width(op: &Self, seq_type: SequenceType, text_encoding: TextEncoding) -> u64;
@@ -1452,3 +1620,6 @@ impl Default for OpStepper<'_> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;
