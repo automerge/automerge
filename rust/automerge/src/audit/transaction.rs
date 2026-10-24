@@ -1,11 +1,14 @@
+//! Transactions: groups of operations committed as a single change.
+
 use crate::exid::ExId;
 use crate::hash_retention::Full;
-use crate::tx::{self, CommitOptions};
+use crate::tx;
 use crate::ChangeHash;
 
 use super::Automerge;
 
-pub use crate::tx::{BlockOrText, Failure};
+pub use super::Transactable;
+pub use crate::tx::{BlockOrText, CommitOptions, Failure};
 
 /// The result of a transaction run with [`Automerge::transact()`].
 pub type Result<O, E> = std::result::Result<Success<O>, Failure<E>>;

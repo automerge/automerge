@@ -19,7 +19,6 @@ use crate::patches::PatchAccumulator;
 use crate::read::ReadDoc;
 use crate::tx::{CommitOptions, Transactable};
 use crate::types::{ObjId, ObjMeta};
-use crate::write_frontier::{FrontierHead, WriteFrontier};
 use crate::VerificationMode;
 use crate::{hydrate, AnonymizeError, Bundle, OnPartialLoad, TextEncoding};
 use crate::{
@@ -201,20 +200,6 @@ impl<H: HashRetention> AutoCommit<H> {
         self.doc.set_write_frontier(write_frontier);
     }
 
-    pub(crate) fn set_write_frontier_boundaries(&mut self, write_frontier: WriteFrontier) {
-        self.ensure_transaction_closed();
-        self.doc.set_write_frontier_boundaries(write_frontier);
-    }
-
-    pub(crate) fn mask_author_boundaries(
-        &mut self,
-        author: Author<'static>,
-        heads: Vec<FrontierHead>,
-    ) {
-        self.ensure_transaction_closed();
-        self.doc.mask_author_boundaries(author, heads);
-    }
-
     pub fn get_write_frontier(&self) -> HashMap<Author<'static>, Vec<ChangeId>> {
         self.doc.get_write_frontier()
     }
@@ -302,9 +287,7 @@ impl<H: HashRetention> AutoCommit<H> {
         {
             self.doc.dirty_diff_patches(&self.diff_cursor)
         } else if range.before().is_empty() && self.doc.is_current(&after) {
-            // This if statement is only active if the current heads are the same as `after`
-            // so we don't need to tell the patch log to target a specific heads and consequently
-            // it wll be able to generate patches very fast as it doesn't need to make any clocks
+            // `after` is current, so patches need no heads clock, which is much faster
             let mut patch_accumulator = PatchAccumulator::new(None);
             self.doc
                 .log_current_state(obj, &mut patch_accumulator, recursive);
@@ -446,7 +429,7 @@ impl<H: HashRetention> AutoCommit<H> {
     pub fn isolate(&mut self, heads: &[ChangeId]) -> Result<(), AutomergeError> {
         self.ensure_transaction_closed();
         // changes committed in isolation record these heads' hashes as deps
-        self.doc.resolve_heads(heads)?;
+        self.doc.change_ids_to_hashes(heads)?;
         self.patch_to(heads);
         self.isolation = Some(heads.to_vec());
         Ok(())
@@ -677,7 +660,6 @@ impl<H: HashRetention> AutoCommit<H> {
     }
 
     /// Get changes in `other` that are not in `self`
-    /// [`Self::get_changes_added`] as change chunks
     pub fn get_changes_added_legacy<H2: HashRetention>(
         &mut self,
         other: &mut AutoCommit<H2>,
@@ -760,15 +742,6 @@ impl<H: HashRetention> AutoCommit<H> {
     pub fn get_head_hashes(&mut self) -> Vec<ChangeHash> {
         self.ensure_transaction_closed();
         self.doc.get_head_hashes()
-    }
-
-    /// Get the [`ChangeId`] of the change that contains the given `opid`.
-    ///
-    /// Returns [`None`] if the `opid` is the root object id, does not
-    /// exist in this document, or is for an operation in the open
-    /// transaction.
-    pub fn change_id_for_opid(&self, opid: &ExId) -> Option<ChangeId> {
-        self.doc.change_id_for_opid(opid)
     }
 
     /// Whether this document contains the change identified by `id`.
@@ -1389,7 +1362,7 @@ impl<H: HashRetention> Transactable for AutoCommit<H> {
     fn base_heads(&self) -> Vec<ChangeHash> {
         if let Some(i) = &self.isolation {
             self.doc
-                .resolve_heads(i)
+                .change_ids_to_hashes(i)
                 .expect("isolation ids were validated when isolating")
         } else {
             self.doc.get_head_hashes()

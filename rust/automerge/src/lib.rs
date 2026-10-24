@@ -286,6 +286,7 @@ pub mod hydrate;
 mod indexed_cache;
 pub mod iter;
 pub use iter::Span;
+mod audit;
 #[doc(hidden)]
 pub mod legacy;
 pub mod marks;
@@ -297,15 +298,7 @@ mod storage;
 mod text_diff;
 mod text_value;
 pub(crate) mod tx;
-/// Transactions: groups of operations committed as a single change.
-pub mod transaction {
-    pub use crate::audit::transaction::{
-        BlockOrText, Failure, OwnedTransaction, Result, Success, Transaction,
-    };
-    pub use crate::audit::Transactable;
-    pub use crate::tx::CommitOptions;
-}
-mod audit;
+pub use audit::transaction;
 pub mod next;
 mod types;
 mod value;

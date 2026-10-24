@@ -306,11 +306,7 @@ impl AutoCommit {
     ///
     /// Rebuilds the document's indexes when the visible set changes.
     pub fn mask_author(&mut self, author: Author<'static>, heads: &[ChangeHash]) {
-        let heads = heads
-            .iter()
-            .map(|h| crate::write_frontier::FrontierHead::Hash(*h))
-            .collect();
-        self.0.mask_author_boundaries(author, heads);
+        self.__document_mut().mask_author(author, heads);
     }
 
     /// Stop hiding `author`'s changes.
@@ -325,10 +321,7 @@ impl AutoCommit {
         &mut self,
         write_frontier: std::collections::HashMap<Author<'static>, Vec<ChangeHash>>,
     ) {
-        self.0
-            .set_write_frontier_boundaries(crate::write_frontier::WriteFrontier::from(
-                write_frontier,
-            ));
+        self.__document_mut().set_write_frontier(write_frontier);
     }
 
     /// Whether `author` is masked, e.g. so an application can disable editing
@@ -342,7 +335,7 @@ impl AutoCommit {
     pub fn get_write_frontier(
         &self,
     ) -> std::collections::HashMap<Author<'static>, Vec<ChangeHash>> {
-        super::frontier_hashes(&self.0.doc)
+        self.__document().get_write_frontier()
     }
 
     /// The document's current [`Viewpoint`](crate::Viewpoint).
@@ -446,10 +439,7 @@ impl AutoCommit {
 
     /// Save everything which is not a (transitive) dependency of `heads`
     pub fn save_after(&mut self, heads: &[ChangeHash]) -> Vec<u8> {
-        let ids = super::known_ids(self.0.document(), heads);
-        self.0
-            .save_after_with_options(&ids, SaveOptions::default().into_next())
-            .unwrap_or_default()
+        self.document().save_after(heads)
     }
 
     pub fn get_missing_deps(&mut self, heads: &[ChangeHash]) -> Vec<ChangeHash> {
@@ -465,13 +455,11 @@ impl AutoCommit {
     }
 
     pub fn get_changes(&mut self, have_deps: &[ChangeHash]) -> Vec<Change> {
-        let ids = super::known_ids(self.0.document(), have_deps);
-        self.0.get_changes(&ids).unwrap_or_default()
+        self.document().get_changes(have_deps)
     }
 
     pub fn get_changes_meta(&mut self, have_deps: &[ChangeHash]) -> Vec<ChangeMetadata<'_>> {
-        let ids = super::known_ids(self.0.document(), have_deps);
-        self.0.get_changes_meta(&ids).unwrap_or_default()
+        self.document().get_changes_meta(have_deps)
     }
 
     pub fn get_change_by_hash(&mut self, hash: &ChangeHash) -> Option<Change> {
@@ -495,7 +483,7 @@ impl AutoCommit {
     }
 
     pub fn get_change_meta_by_hash(&mut self, hash: &ChangeHash) -> Option<ChangeMetadata<'_>> {
-        self.0.get_change_meta_by_hash(hash).ok().flatten()
+        self.document().get_change_meta_by_hash(hash)
     }
 
     /// Get changes in `other` that are not in `self`
@@ -526,11 +514,7 @@ impl AutoCommit {
     /// warning.
     #[doc(hidden)]
     pub fn fragments<R: RangeBounds<usize>>(&self, levels: R) -> Vec<Fragment> {
-        self.0
-            .fragments(levels)
-            .into_iter()
-            .map(|f| Fragment::from_next(&self.0.doc, f))
-            .collect()
+        self.__document().fragments(levels)
     }
 
     /// EXPERIMENTAL: See [`crate::Automerge::fragments_after`].
@@ -539,12 +523,7 @@ impl AutoCommit {
     /// warning.
     #[doc(hidden)]
     pub fn fragments_after(&self, heads: &[ChangeHash]) -> Result<Vec<Fragment>, AutomergeError> {
-        let doc = &self.0.doc;
-        Ok(doc
-            .fragments_after(&super::known_ids(doc, heads))?
-            .into_iter()
-            .map(|f| Fragment::from_next(doc, f))
-            .collect())
+        self.__document().fragments_after(heads)
     }
 
     /// EXPERIMENTAL: Return the fragment with the given head hash, if any.
@@ -553,9 +532,7 @@ impl AutoCommit {
     /// warning.
     #[doc(hidden)]
     pub fn get_fragment(&self, head: ChangeHash) -> Option<Fragment> {
-        self.0
-            .get_fragment(head)
-            .map(|f| Fragment::from_next(&self.0.doc, f))
+        self.__document().get_fragment(head)
     }
 
     /// Get the current heads of the document.
@@ -628,7 +605,7 @@ impl AutoCommit {
     /// - Does not exist in this document
     /// - Is for an operation in a transaction
     pub fn hash_for_opid(&self, opid: &ExId) -> Option<ChangeHash> {
-        self.0.hash_for_opid(opid).ok().flatten()
+        self.__document().hash_for_opid(opid)
     }
 
     /// EXPERIMENTAL: Encode each fragment as a bundle.
@@ -640,7 +617,7 @@ impl AutoCommit {
         &self,
         fragments: I,
     ) -> Result<Vec<Vec<u8>>, AutomergeError> {
-        Automerge::from_next_ref(&self.0.doc).bundles_for_fragments(fragments)
+        self.__document().bundles_for_fragments(fragments)
     }
 
     /// Convert to the [`next`](crate::next) API, which keeps only the hashes a

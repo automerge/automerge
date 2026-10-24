@@ -5,7 +5,7 @@ mod autocommit;
 mod automerge;
 mod read;
 mod transactable;
-pub(crate) mod transaction;
+pub mod transaction;
 mod wrapper;
 
 pub use self::autocommit::AutoCommit;
@@ -17,28 +17,6 @@ pub(crate) use wrapper::AuditWrapper;
 use crate::hash_retention::Full;
 use crate::{ChangeHash, ChangeId, Viewpoint};
 
-/// Every boundary as a hash, including hashes this document has not received
-/// yet.
-pub(crate) fn frontier_hashes(
-    doc: &crate::automerge::Automerge<Full>,
-) -> std::collections::HashMap<crate::Author<'static>, Vec<ChangeHash>> {
-    use crate::write_frontier::FrontierHead;
-    doc.write_frontier()
-        .iter()
-        .map(|(author, heads)| {
-            let hashes = heads
-                .iter()
-                .filter_map(|boundary| match boundary {
-                    FrontierHead::Hash(hash) => Some(*hash),
-                    FrontierHead::Id(id) => doc.change_id_to_hash(id).ok().flatten(),
-                })
-                .collect();
-            (author.clone(), hashes)
-        })
-        .collect()
-}
-
-/// Drops unknown hashes: audited reads use the subset of `heads` the document knows.
 mod sealed {
     pub trait Sealed {}
 }
@@ -86,6 +64,7 @@ impl HeadsOrViewpoint for &Viewpoint {
     }
 }
 
+/// Drops unknown hashes: audited reads use the subset of `heads` the document knows.
 pub(crate) fn known_ids(
     doc: &crate::automerge::Automerge<Full>,
     heads: &[ChangeHash],

@@ -1,9 +1,21 @@
 use std::borrow::Cow;
 
 use crate::automerge::view::ReadAt;
-use crate::automerge::Automerge;
+use crate::automerge::{Automerge, Parents};
+use crate::cursor::{CursorPosition, MoveCursor};
+use crate::error::UpdateObjectError;
 use crate::exid::ExId;
 use crate::hash_retention::HashRetention;
+use crate::hydrate;
+use crate::iter::{DocIter, Keys, ListRange, MapRange, Span, Spans, Values};
+use crate::marks::{ExpandMark, Mark, MarkSet, UpdateSpansConfig};
+use crate::read::{ReadDoc, Stats};
+use crate::text_diff::{myers_block_diff, myers_diff};
+use crate::tx::Transactable;
+use crate::{
+    AutomergeError, Change, ChangeHash, ChangeId, Cursor, ObjType, Prop, ScalarValue, TextEncoding,
+    Value,
+};
 
 use super::TransactionInner;
 
@@ -24,10 +36,7 @@ pub trait TxDoc {
         f(tx, doc)
     }
 
-    fn get_scope(
-        &self,
-        heads: Option<&[crate::ChangeId]>,
-    ) -> std::result::Result<ReadAt<'_>, crate::AutomergeError> {
+    fn get_scope(&self, heads: Option<&[ChangeId]>) -> Result<ReadAt<'_>, AutomergeError> {
         let doc = self.doc();
         if let Some(h) = heads {
             // with a transaction in flight the current-heads shortcut is unsound
@@ -40,37 +49,57 @@ pub trait TxDoc {
     }
 }
 
-impl<T: TxDoc> crate::read::ReadDoc for T {
-    fn keys<O: AsRef<crate::exid::ExId>>(&self, obj: O) -> crate::iter::Keys<'_> {
+pub trait ScopedRead {
+    type Retention: HashRetention;
+
+    fn doc(&self) -> &Automerge<Self::Retention>;
+
+    fn get_scope(&self, heads: Option<&[ChangeId]>) -> Result<ReadAt<'_>, AutomergeError>;
+}
+
+impl<T: TxDoc> ScopedRead for T {
+    type Retention = T::Retention;
+
+    fn doc(&self) -> &Automerge<T::Retention> {
+        TxDoc::doc(self)
+    }
+
+    fn get_scope(&self, heads: Option<&[ChangeId]>) -> Result<ReadAt<'_>, AutomergeError> {
+        TxDoc::get_scope(self, heads)
+    }
+}
+
+impl<T: ScopedRead> ReadDoc for T {
+    fn keys<O: AsRef<ExId>>(&self, obj: O) -> Keys<'_> {
         self.doc().keys_for(
             obj.as_ref(),
             self.get_scope(None).expect("no heads to resolve"),
         )
     }
 
-    fn keys_at<O: AsRef<crate::exid::ExId>>(
+    fn keys_at<O: AsRef<ExId>>(
         &self,
         obj: O,
-        heads: &[crate::ChangeId],
-    ) -> Result<crate::iter::Keys<'_>, crate::AutomergeError> {
+        heads: &[ChangeId],
+    ) -> Result<Keys<'_>, AutomergeError> {
         Ok(self
             .doc()
             .keys_for(obj.as_ref(), self.get_scope(Some(heads))?))
     }
 
-    fn iter_at<O: AsRef<crate::exid::ExId>>(
+    fn iter_at<O: AsRef<ExId>>(
         &self,
         obj: O,
-        heads: Option<&[crate::ChangeId]>,
-    ) -> Result<crate::iter::DocIter<'_>, crate::AutomergeError> {
+        heads: Option<&[ChangeId]>,
+    ) -> Result<DocIter<'_>, AutomergeError> {
         Ok(self.doc().iter_for(obj.as_ref(), self.get_scope(heads)?))
     }
 
-    fn map_range<'b, O: AsRef<crate::exid::ExId>, R: std::ops::RangeBounds<String> + 'b>(
+    fn map_range<'b, O: AsRef<ExId>, R: std::ops::RangeBounds<String> + 'b>(
         &'b self,
         obj: O,
         range: R,
-    ) -> crate::iter::MapRange<'b> {
+    ) -> MapRange<'b> {
         self.doc().map_range_for(
             obj.as_ref(),
             range,
@@ -78,22 +107,22 @@ impl<T: TxDoc> crate::read::ReadDoc for T {
         )
     }
 
-    fn map_range_at<'b, O: AsRef<crate::exid::ExId>, R: std::ops::RangeBounds<String> + 'b>(
+    fn map_range_at<'b, O: AsRef<ExId>, R: std::ops::RangeBounds<String> + 'b>(
         &'b self,
         obj: O,
         range: R,
-        heads: &[crate::ChangeId],
-    ) -> Result<crate::iter::MapRange<'b>, crate::AutomergeError> {
+        heads: &[ChangeId],
+    ) -> Result<MapRange<'b>, AutomergeError> {
         Ok(self
             .doc()
             .map_range_for(obj.as_ref(), range, self.get_scope(Some(heads))?))
     }
 
-    fn list_range<O: AsRef<crate::exid::ExId>, R: std::ops::RangeBounds<usize>>(
+    fn list_range<O: AsRef<ExId>, R: std::ops::RangeBounds<usize>>(
         &self,
         obj: O,
         range: R,
-    ) -> crate::iter::ListRange<'_> {
+    ) -> ListRange<'_> {
         self.doc().list_range_for(
             obj.as_ref(),
             range,
@@ -101,114 +130,108 @@ impl<T: TxDoc> crate::read::ReadDoc for T {
         )
     }
 
-    fn list_range_at<O: AsRef<crate::exid::ExId>, R: std::ops::RangeBounds<usize>>(
+    fn list_range_at<O: AsRef<ExId>, R: std::ops::RangeBounds<usize>>(
         &self,
         obj: O,
         range: R,
-        heads: &[crate::ChangeId],
-    ) -> Result<crate::iter::ListRange<'_>, crate::AutomergeError> {
+        heads: &[ChangeId],
+    ) -> Result<ListRange<'_>, AutomergeError> {
         Ok(self
             .doc()
             .list_range_for(obj.as_ref(), range, self.get_scope(Some(heads))?))
     }
 
-    fn values<O: AsRef<crate::exid::ExId>>(&self, obj: O) -> crate::iter::Values<'_> {
+    fn values<O: AsRef<ExId>>(&self, obj: O) -> Values<'_> {
         self.doc().values_for(
             obj.as_ref(),
             self.get_scope(None).expect("no heads to resolve"),
         )
     }
 
-    fn values_at<O: AsRef<crate::exid::ExId>>(
+    fn values_at<O: AsRef<ExId>>(
         &self,
         obj: O,
-        heads: &[crate::ChangeId],
-    ) -> Result<crate::iter::Values<'_>, crate::AutomergeError> {
+        heads: &[ChangeId],
+    ) -> Result<Values<'_>, AutomergeError> {
         Ok(self
             .doc()
             .values_for(obj.as_ref(), self.get_scope(Some(heads))?))
     }
 
-    fn length<O: AsRef<crate::exid::ExId>>(&self, obj: O) -> usize {
+    fn length<O: AsRef<ExId>>(&self, obj: O) -> usize {
         self.doc().length_for(
             obj.as_ref(),
             self.get_scope(None).expect("no heads to resolve"),
         )
     }
 
-    fn length_at<O: AsRef<crate::exid::ExId>>(
+    fn length_at<O: AsRef<ExId>>(
         &self,
         obj: O,
-        heads: &[crate::ChangeId],
-    ) -> Result<usize, crate::AutomergeError> {
+        heads: &[ChangeId],
+    ) -> Result<usize, AutomergeError> {
         Ok(self
             .doc()
             .length_for(obj.as_ref(), self.get_scope(Some(heads))?))
     }
 
-    fn object_type<O: AsRef<crate::exid::ExId>>(
-        &self,
-        obj: O,
-    ) -> Result<crate::ObjType, crate::AutomergeError> {
+    fn object_type<O: AsRef<ExId>>(&self, obj: O) -> Result<ObjType, AutomergeError> {
         self.doc().object_type(obj)
     }
 
-    fn text<O: AsRef<crate::exid::ExId>>(&self, obj: O) -> Result<String, crate::AutomergeError> {
+    fn text<O: AsRef<ExId>>(&self, obj: O) -> Result<String, AutomergeError> {
         self.doc().text_for(
             obj.as_ref(),
             self.get_scope(None).expect("no heads to resolve"),
         )
     }
 
-    fn text_at<O: AsRef<crate::exid::ExId>>(
+    fn text_at<O: AsRef<ExId>>(
         &self,
         obj: O,
-        heads: &[crate::ChangeId],
-    ) -> Result<String, crate::AutomergeError> {
+        heads: &[ChangeId],
+    ) -> Result<String, AutomergeError> {
         self.doc()
             .text_for(obj.as_ref(), self.get_scope(Some(heads))?)
     }
 
-    fn spans<O: AsRef<crate::exid::ExId>>(
-        &self,
-        obj: O,
-    ) -> Result<crate::iter::Spans<'_>, crate::AutomergeError> {
+    fn spans<O: AsRef<ExId>>(&self, obj: O) -> Result<Spans<'_>, AutomergeError> {
         self.doc().spans_for(
             obj.as_ref(),
             self.get_scope(None).expect("no heads to resolve"),
         )
     }
 
-    fn spans_at<O: AsRef<crate::exid::ExId>>(
+    fn spans_at<O: AsRef<ExId>>(
         &self,
         obj: O,
-        heads: &[crate::ChangeId],
-    ) -> Result<crate::iter::Spans<'_>, crate::AutomergeError> {
+        heads: &[ChangeId],
+    ) -> Result<Spans<'_>, AutomergeError> {
         self.doc()
             .spans_for(obj.as_ref(), self.get_scope(Some(heads))?)
     }
 
-    fn get_cursor<O: AsRef<crate::exid::ExId>, I: Into<crate::cursor::CursorPosition>>(
+    fn get_cursor<O: AsRef<ExId>, I: Into<CursorPosition>>(
         &self,
         obj: O,
         position: I,
-        at: Option<&[crate::ChangeId]>,
-    ) -> Result<crate::Cursor, crate::AutomergeError> {
+        at: Option<&[ChangeId]>,
+    ) -> Result<Cursor, AutomergeError> {
         self.doc().get_cursor_for(
             obj.as_ref(),
             position.into(),
             self.get_scope(at)?,
-            crate::cursor::MoveCursor::After,
+            MoveCursor::After,
         )
     }
 
-    fn get_cursor_moving<O: AsRef<crate::exid::ExId>, I: Into<crate::cursor::CursorPosition>>(
+    fn get_cursor_moving<O: AsRef<ExId>, I: Into<CursorPosition>>(
         &self,
         obj: O,
         position: I,
-        at: Option<&[crate::ChangeId]>,
-        move_cursor: crate::cursor::MoveCursor,
-    ) -> Result<crate::Cursor, crate::AutomergeError> {
+        at: Option<&[ChangeId]>,
+        move_cursor: MoveCursor,
+    ) -> Result<Cursor, AutomergeError> {
         self.doc().get_cursor_for(
             obj.as_ref(),
             position.into(),
@@ -217,59 +240,56 @@ impl<T: TxDoc> crate::read::ReadDoc for T {
         )
     }
 
-    fn get_cursor_position<O: AsRef<crate::exid::ExId>>(
+    fn get_cursor_position<O: AsRef<ExId>>(
         &self,
         obj: O,
-        address: &crate::Cursor,
-        at: Option<&[crate::ChangeId]>,
-    ) -> Result<usize, crate::AutomergeError> {
+        address: &Cursor,
+        at: Option<&[ChangeId]>,
+    ) -> Result<usize, AutomergeError> {
         self.doc()
             .get_cursor_position_for(obj.as_ref(), address, self.get_scope(at)?)
     }
 
-    fn marks<O: AsRef<crate::exid::ExId>>(
-        &self,
-        obj: O,
-    ) -> Result<Vec<crate::marks::Mark>, crate::AutomergeError> {
+    fn marks<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<Mark>, AutomergeError> {
         self.doc().marks_for(
             obj.as_ref(),
             self.get_scope(None).expect("no heads to resolve"),
         )
     }
 
-    fn marks_at<O: AsRef<crate::exid::ExId>>(
+    fn marks_at<O: AsRef<ExId>>(
         &self,
         obj: O,
-        heads: &[crate::ChangeId],
-    ) -> Result<Vec<crate::marks::Mark>, crate::AutomergeError> {
+        heads: &[ChangeId],
+    ) -> Result<Vec<Mark>, AutomergeError> {
         self.doc()
             .marks_for(obj.as_ref(), self.get_scope(Some(heads))?)
     }
 
-    fn hydrate<O: AsRef<crate::exid::ExId>>(
+    fn hydrate<O: AsRef<ExId>>(
         &self,
         obj: O,
-        heads: Option<&[crate::ChangeId]>,
-    ) -> Result<crate::hydrate::Value, crate::AutomergeError> {
+        heads: Option<&[ChangeId]>,
+    ) -> Result<hydrate::Value, AutomergeError> {
         self.doc()
             .hydrate_obj_for(obj.as_ref(), self.get_scope(heads)?)
     }
 
-    fn get_marks<O: AsRef<crate::exid::ExId>>(
+    fn get_marks<O: AsRef<ExId>>(
         &self,
         obj: O,
         index: usize,
-        heads: Option<&[crate::ChangeId]>,
-    ) -> Result<crate::marks::MarkSet, crate::AutomergeError> {
+        heads: Option<&[ChangeId]>,
+    ) -> Result<MarkSet, AutomergeError> {
         self.doc()
             .get_marks_for(obj.as_ref(), index, self.get_scope(heads)?)
     }
 
-    fn get<O: AsRef<crate::exid::ExId>, P: Into<crate::Prop>>(
+    fn get<O: AsRef<ExId>, P: Into<Prop>>(
         &self,
         obj: O,
         prop: P,
-    ) -> Result<Option<(crate::Value<'_>, crate::exid::ExId)>, crate::AutomergeError> {
+    ) -> Result<Option<(Value<'_>, ExId)>, AutomergeError> {
         self.doc().get_for(
             obj.as_ref(),
             prop.into(),
@@ -277,21 +297,21 @@ impl<T: TxDoc> crate::read::ReadDoc for T {
         )
     }
 
-    fn get_at<O: AsRef<crate::exid::ExId>, P: Into<crate::Prop>>(
+    fn get_at<O: AsRef<ExId>, P: Into<Prop>>(
         &self,
         obj: O,
         prop: P,
-        heads: &[crate::ChangeId],
-    ) -> Result<Option<(crate::Value<'_>, crate::exid::ExId)>, crate::AutomergeError> {
+        heads: &[ChangeId],
+    ) -> Result<Option<(Value<'_>, ExId)>, AutomergeError> {
         self.doc()
             .get_for(obj.as_ref(), prop.into(), self.get_scope(Some(heads))?)
     }
 
-    fn get_all<O: AsRef<crate::exid::ExId>, P: Into<crate::Prop>>(
+    fn get_all<O: AsRef<ExId>, P: Into<Prop>>(
         &self,
         obj: O,
         prop: P,
-    ) -> Result<Vec<(crate::Value<'_>, crate::exid::ExId)>, crate::AutomergeError> {
+    ) -> Result<Vec<(Value<'_>, ExId)>, AutomergeError> {
         self.doc().get_all_for(
             obj.as_ref(),
             prop.into(),
@@ -299,233 +319,211 @@ impl<T: TxDoc> crate::read::ReadDoc for T {
         )
     }
 
-    fn get_all_at<O: AsRef<crate::exid::ExId>, P: Into<crate::Prop>>(
+    fn get_all_at<O: AsRef<ExId>, P: Into<Prop>>(
         &self,
         obj: O,
         prop: P,
-        heads: &[crate::ChangeId],
-    ) -> Result<Vec<(crate::Value<'_>, crate::exid::ExId)>, crate::AutomergeError> {
+        heads: &[ChangeId],
+    ) -> Result<Vec<(Value<'_>, ExId)>, AutomergeError> {
         self.doc()
             .get_all_for(obj.as_ref(), prop.into(), self.get_scope(Some(heads))?)
     }
 
-    fn parents<O: AsRef<crate::exid::ExId>>(
-        &self,
-        obj: O,
-    ) -> Result<crate::automerge::Parents<'_>, crate::AutomergeError> {
+    fn parents<O: AsRef<ExId>>(&self, obj: O) -> Result<Parents<'_>, AutomergeError> {
         self.doc().parents_for(
             obj.as_ref(),
             self.get_scope(None).expect("no heads to resolve"),
         )
     }
 
-    fn parents_at<O: AsRef<crate::exid::ExId>>(
+    fn parents_at<O: AsRef<ExId>>(
         &self,
         obj: O,
-        heads: &[crate::ChangeId],
-    ) -> Result<crate::automerge::Parents<'_>, crate::AutomergeError> {
+        heads: &[ChangeId],
+    ) -> Result<Parents<'_>, AutomergeError> {
         self.doc()
             .parents_for(obj.as_ref(), self.get_scope(Some(heads))?)
     }
 
-    fn get_missing_deps(
-        &self,
-        heads: &[crate::ChangeId],
-    ) -> Result<Vec<crate::ChangeHash>, crate::AutomergeError> {
+    fn get_missing_deps(&self, heads: &[ChangeId]) -> Result<Vec<ChangeHash>, AutomergeError> {
         self.doc().get_missing_deps(heads)
     }
 
-    fn get_change_by_hash(
-        &self,
-        hash: &crate::ChangeHash,
-    ) -> Result<Option<crate::Change>, crate::AutomergeError> {
+    fn get_change_by_hash(&self, hash: &ChangeHash) -> Result<Option<Change>, AutomergeError> {
         self.doc().get_change_by_hash(hash)
     }
 
-    fn stats(&self) -> crate::read::Stats {
+    fn stats(&self) -> Stats {
         self.doc().stats()
     }
 
-    fn text_encoding(&self) -> crate::TextEncoding {
+    fn text_encoding(&self) -> TextEncoding {
         self.doc().text_encoding()
     }
 }
 
-impl<T: TxDoc> crate::tx::Transactable for T {
+impl<T: TxDoc> Transactable for T {
     fn pending_ops(&self) -> usize {
         self.inner().expect("an open transaction").pending_ops()
     }
 
-    fn put<O: AsRef<crate::exid::ExId>, P: Into<crate::Prop>, V: Into<crate::ScalarValue>>(
+    fn put<O: AsRef<ExId>, P: Into<Prop>, V: Into<ScalarValue>>(
         &mut self,
         obj: O,
         prop: P,
         value: V,
-    ) -> Result<(), crate::AutomergeError> {
+    ) -> Result<(), AutomergeError> {
         self.do_tx(|tx, doc| tx.put(doc, obj.as_ref(), prop, value))
     }
 
-    fn put_object<O: AsRef<crate::exid::ExId>, P: Into<crate::Prop>>(
+    fn put_object<O: AsRef<ExId>, P: Into<Prop>>(
         &mut self,
         obj: O,
         prop: P,
-        value: crate::ObjType,
-    ) -> Result<crate::exid::ExId, crate::AutomergeError> {
+        value: ObjType,
+    ) -> Result<ExId, AutomergeError> {
         self.do_tx(|tx, doc| tx.put_object(doc, obj.as_ref(), prop, value))
     }
 
-    fn insert<O: AsRef<crate::exid::ExId>, V: Into<crate::ScalarValue>>(
+    fn insert<O: AsRef<ExId>, V: Into<ScalarValue>>(
         &mut self,
         obj: O,
         index: usize,
         value: V,
-    ) -> Result<(), crate::AutomergeError> {
+    ) -> Result<(), AutomergeError> {
         self.do_tx(|tx, doc| tx.insert(doc, obj.as_ref(), index, value))
     }
 
-    fn insert_object<O: AsRef<crate::exid::ExId>>(
+    fn insert_object<O: AsRef<ExId>>(
         &mut self,
         obj: O,
         index: usize,
-        value: crate::ObjType,
-    ) -> Result<crate::exid::ExId, crate::AutomergeError> {
+        value: ObjType,
+    ) -> Result<ExId, AutomergeError> {
         self.do_tx(|tx, doc| tx.insert_object(doc, obj.as_ref(), index, value))
     }
 
-    fn increment<O: AsRef<crate::exid::ExId>, P: Into<crate::Prop>>(
+    fn increment<O: AsRef<ExId>, P: Into<Prop>>(
         &mut self,
         obj: O,
         prop: P,
         value: i64,
-    ) -> Result<(), crate::AutomergeError> {
+    ) -> Result<(), AutomergeError> {
         self.do_tx(|tx, doc| tx.increment(doc, obj.as_ref(), prop, value))
     }
 
-    fn delete<O: AsRef<crate::exid::ExId>, P: Into<crate::Prop>>(
+    fn delete<O: AsRef<ExId>, P: Into<Prop>>(
         &mut self,
         obj: O,
         prop: P,
-    ) -> Result<(), crate::AutomergeError> {
+    ) -> Result<(), AutomergeError> {
         self.do_tx(|tx, doc| tx.delete(doc, obj.as_ref(), prop))
     }
 
-    fn splice<O: AsRef<ExId>, V: Into<crate::hydrate::Value>, I: IntoIterator<Item = V>>(
+    fn splice<O: AsRef<ExId>, V: Into<hydrate::Value>, I: IntoIterator<Item = V>>(
         &mut self,
         obj: O,
         pos: usize,
         del: isize,
         vals: I,
-    ) -> Result<(), crate::AutomergeError> {
+    ) -> Result<(), AutomergeError> {
         self.do_tx(|tx, doc| tx.splice(doc, obj.as_ref(), pos, del, vals))?;
         Ok(())
     }
 
-    fn splice_text<O: AsRef<crate::exid::ExId>>(
+    fn splice_text<O: AsRef<ExId>>(
         &mut self,
         obj: O,
         pos: usize,
         del: isize,
         text: &str,
-    ) -> Result<(), crate::AutomergeError> {
+    ) -> Result<(), AutomergeError> {
         self.do_tx(|tx, doc| tx.splice_text(doc, obj.as_ref(), pos, del, text))?;
         Ok(())
     }
 
-    fn mark<O: AsRef<crate::exid::ExId>>(
+    fn mark<O: AsRef<ExId>>(
         &mut self,
         obj: O,
-        mark: crate::marks::Mark,
-        expand: crate::marks::ExpandMark,
-    ) -> Result<(), crate::AutomergeError> {
+        mark: Mark,
+        expand: ExpandMark,
+    ) -> Result<(), AutomergeError> {
         self.do_tx(|tx, doc| tx.mark(doc, obj.as_ref(), mark, expand))
     }
 
-    fn unmark<O: AsRef<crate::exid::ExId>>(
+    fn unmark<O: AsRef<ExId>>(
         &mut self,
         obj: O,
         name: &str,
         start: usize,
         end: usize,
-        expand: crate::marks::ExpandMark,
-    ) -> Result<(), crate::AutomergeError> {
+        expand: ExpandMark,
+    ) -> Result<(), AutomergeError> {
         self.do_tx(|tx, doc| tx.unmark(doc, obj.as_ref(), name, start, end, expand))
     }
 
-    fn split_block<O>(
-        &mut self,
-        obj: O,
-        index: usize,
-    ) -> Result<crate::exid::ExId, crate::AutomergeError>
+    fn split_block<O>(&mut self, obj: O, index: usize) -> Result<ExId, AutomergeError>
     where
-        O: AsRef<crate::exid::ExId>,
+        O: AsRef<ExId>,
     {
         self.do_tx(|tx, doc| tx.split_block(doc, obj.as_ref(), index))
     }
 
-    fn join_block<O>(&mut self, text: O, index: usize) -> Result<(), crate::AutomergeError>
+    fn join_block<O>(&mut self, text: O, index: usize) -> Result<(), AutomergeError>
     where
-        O: AsRef<crate::exid::ExId>,
+        O: AsRef<ExId>,
     {
         self.do_tx(|tx, doc| tx.join_block(doc, text.as_ref(), index))
     }
 
-    fn replace_block<O>(
-        &mut self,
-        text: O,
-        index: usize,
-    ) -> Result<crate::exid::ExId, crate::AutomergeError>
+    fn replace_block<O>(&mut self, text: O, index: usize) -> Result<ExId, AutomergeError>
     where
-        O: AsRef<crate::exid::ExId>,
+        O: AsRef<ExId>,
     {
         self.do_tx(|tx, doc| tx.replace_block(doc, text.as_ref(), index))
     }
 
-    fn base_heads(&self) -> Vec<crate::ChangeHash> {
+    fn base_heads(&self) -> Vec<ChangeHash> {
         self.inner().map(|d| d.get_deps()).unwrap_or_default()
     }
 
     fn update_text<S: AsRef<str>>(
         &mut self,
-        obj: &crate::exid::ExId,
+        obj: &ExId,
         new_text: S,
-    ) -> Result<(), crate::AutomergeError> {
-        self.do_tx(|tx, doc| crate::text_diff::myers_diff(doc, tx, obj, new_text))
+    ) -> Result<(), AutomergeError> {
+        self.do_tx(|tx, doc| myers_diff(doc, tx, obj, new_text))
     }
 
-    fn update_spans<O: AsRef<crate::exid::ExId>, I: IntoIterator<Item = crate::iter::Span>>(
+    fn update_spans<O: AsRef<ExId>, I: IntoIterator<Item = Span>>(
         &mut self,
         text: O,
-        config: crate::marks::UpdateSpansConfig,
+        config: UpdateSpansConfig,
         new_text: I,
-    ) -> Result<(), crate::AutomergeError> {
-        self.do_tx(move |tx, doc| {
-            crate::text_diff::myers_block_diff(doc, tx, text.as_ref(), new_text, &config)
-        })
+    ) -> Result<(), AutomergeError> {
+        self.do_tx(move |tx, doc| myers_block_diff(doc, tx, text.as_ref(), new_text, &config))
     }
 
-    fn update_object<O: AsRef<crate::exid::ExId>>(
+    fn update_object<O: AsRef<ExId>>(
         &mut self,
         obj: O,
-        new_value: &crate::hydrate::Value,
-    ) -> Result<(), crate::error::UpdateObjectError> {
+        new_value: &hydrate::Value,
+    ) -> Result<(), UpdateObjectError> {
         self.do_tx(move |tx, doc| tx.update_object(doc, obj.as_ref(), new_value))
     }
 
-    fn batch_create_object<O: AsRef<ExId>, P: Into<crate::Prop>>(
+    fn batch_create_object<O: AsRef<ExId>, P: Into<Prop>>(
         &mut self,
         obj: O,
         prop: P,
-        value: &crate::hydrate::Value,
+        value: &hydrate::Value,
         insert: bool,
-    ) -> Result<ExId, crate::AutomergeError> {
+    ) -> Result<ExId, AutomergeError> {
         let prop = prop.into();
         self.do_tx(move |tx, doc| tx.batch_create_object(doc, obj.as_ref(), prop, value, insert))
     }
 
-    fn init_root_from_hydrate(
-        &mut self,
-        value: &crate::hydrate::Map,
-    ) -> Result<(), crate::AutomergeError> {
+    fn init_root_from_hydrate(&mut self, value: &hydrate::Map) -> Result<(), AutomergeError> {
         self.do_tx(move |tx, doc| tx.batch_init_root_map(doc, value))?;
         Ok(())
     }

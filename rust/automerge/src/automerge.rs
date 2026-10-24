@@ -13,7 +13,6 @@ pub(crate) use crate::op_set2::types::ScalarValue;
 pub(crate) use crate::op_set2::{
     ChangeMetadata, KeyRef, OpQuery, OpQueryTerm, OpSet, OpType, Parents,
 };
-pub(crate) use crate::read::ReadDoc;
 
 use crate::actor::{ActorInsert, ActorRemoval, ActorShift, HasActorIndices};
 use crate::change_graph::{BundleDep, BundleMember, ChangeGraph};
@@ -28,7 +27,7 @@ use crate::op_set2::change::bundle::BundleApply;
 use crate::patches::{Patch, PatchAccumulator};
 use crate::storage::{self, change, load, Bundle, CompressConfig, Document, VerificationMode};
 use crate::tx::{
-    self, CommitOptions, Failure, OwnedTransaction, Success, Transactable, Transaction,
+    self, CommitOptions, Failure, OwnedTransaction, ScopedRead, Success, Transactable, Transaction,
     TransactionArgs,
 };
 
@@ -330,7 +329,6 @@ pub struct Automerge<H: HashRetention = Retained> {
     visibility: visibility::FrontierVisibility,
     visibility_epoch: u64,
     actor_generation: view::ActorGeneration,
-    /// Current dependencies of this document (heads hashes).
     /// The set of operations that form this document.
     pub(crate) ops: OpSet,
     /// The current actor.
@@ -500,7 +498,7 @@ impl<H: HashRetention> Automerge<H> {
             return;
         }
         let id = self.change_id_at(actor_idx, seq);
-        let Some(node) = self.change_graph.node_for_change_id(&id, &self.ops.actors) else {
+        let Some(node) = self.node_for_change_id(&id) else {
             return;
         };
         if self.change_graph.hash_for_node(node).is_some() {
@@ -824,7 +822,7 @@ impl<H: HashRetention> Automerge<H> {
         &mut self,
         heads: &[ChangeId],
     ) -> Result<Transaction<'_, H>, AutomergeError> {
-        self.resolve_heads(heads)?;
+        self.change_ids_to_hashes(heads)?;
         let args = self.transaction_args(Some(heads));
         Ok(Transaction::new(self, args))
     }
@@ -845,7 +843,7 @@ impl<H: HashRetention> Automerge<H> {
         match heads {
             Some(heads) => {
                 deps = self
-                    .resolve_heads(heads)
+                    .change_ids_to_hashes(heads)
                     .expect("isolation ids were validated when isolating");
                 let isolation = self.isolate_actor(heads);
                 actor_index = isolation.actor_index;
@@ -942,9 +940,6 @@ impl<H: HashRetention> Automerge<H> {
         }
     }
 
-    /// Run a transaction on this document in a closure, collecting patches, automatically handling commit or rollback
-    /// afterwards.
-    ///
     /// Generate an empty change
     ///
     /// The main reason to do this is if you want to create a "merge commit", which is a change
@@ -983,22 +978,8 @@ impl<H: HashRetention> Automerge<H> {
         }
         let mut f = Self::empty(self.text_encoding());
         f.set_gc_mode(self.gc_mode());
-        if !nodes.is_empty() {
-            let clock = self.change_graph.calculate_clock(nodes);
-            let nodes = self.change_graph.nodes_covered_by(&clock);
-            let heads = self
-                .change_graph
-                .heads_of(&nodes)
-                .into_iter()
-                .map(|n| {
-                    self.change_graph
-                        .hash_for_node(n)
-                        .ok_or(AutomergeError::AuditModeRequired)
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            let members = self.change_graph.bundle_members(&nodes);
-            let storage = Bundle::storage_for_nodes(&self.ops, &self.change_graph, &members)?;
-            let bundle = self.assemble_bundle(&heads, &[], &members, storage, NameHashes::All)?;
+        let clock = self.change_graph.calculate_clock(nodes);
+        if let Some(bundle) = self.bundle_nodes(self.change_graph.nodes_covered_by(&clock), &[])? {
             f.apply_bundle(bundle)?;
         }
         f.set_write_frontier_boundaries(self.write_frontier.clone());
@@ -1197,32 +1178,28 @@ impl<H: HashRetention> Automerge<H> {
         am.change_graph.set_gc_mode(options.gc.unwrap_or_default());
         tracing::trace!("loading change chunks");
         // a partial load must still apply the chunks that parsed, the first included
-        let (rest, partial) = match load::load_changes(
+        let rest = match load::load_changes(
             remaining.reset(),
             options.text_encoding,
             &am.change_graph,
             mark_order,
         ) {
-            load::LoadedChanges::Complete(c) => (c, None),
-            load::LoadedChanges::Partial { loaded, error, .. } => (loaded, Some(error)),
-        };
-        if let Some(error) = partial {
-            if options.on_partial_load == OnPartialLoad::Error {
+            load::LoadedChanges::Complete(c) => c,
+            load::LoadedChanges::Partial { error, .. }
+                if options.on_partial_load == OnPartialLoad::Error =>
+            {
                 return Err(error.into());
             }
-            let all = changes.into_iter().chain(rest).collect();
-            am.apply_loaded(all)?;
-        } else {
-            let all = changes.into_iter().chain(rest).collect();
-            am.apply_loaded(all)?;
-            // Only allow missing deps if the first chunk was a document chunk
-            // See https://github.com/automerge/automerge/pull/599#issuecomment-1549667472
-            if !am.queue.is_empty()
-                && !first_chunk_was_doc
-                && options.on_partial_load == OnPartialLoad::Error
-            {
-                return Err(AutomergeError::MissingDeps);
-            }
+            load::LoadedChanges::Partial { loaded, .. } => loaded,
+        };
+        am.apply_loaded(changes.into_iter().chain(rest).collect())?;
+        // Only allow missing deps if the first chunk was a document chunk
+        // See https://github.com/automerge/automerge/pull/599#issuecomment-1549667472
+        if !am.queue.is_empty()
+            && !first_chunk_was_doc
+            && options.on_partial_load == OnPartialLoad::Error
+        {
+            return Err(AutomergeError::MissingDeps);
         }
         if let StringMigration::ConvertToText = options.string_migration {
             am.convert_scalar_strings_to_text()?;
@@ -1347,7 +1324,7 @@ impl<H: HashRetention> Automerge<H> {
     }
 
     /// Whether `bundle` names only changes this document has, and extends
-    /// each actor's sequence without a gap. O(members), decoding nothing.
+    /// each actor's sequence without a gap. O(members).
     fn has_bundle_deps(&self, bundle: &Bundle) -> bool {
         let known = |id: &ChangeId| self.node_for_change_id(id).is_some();
         if !bundle.dep_ids.iter().all(known) || !bundle.boundary.iter().all(|(_, id)| known(id)) {
@@ -1426,11 +1403,7 @@ impl<H: HashRetention> Automerge<H> {
             let bundle = self
                 .bundle_document_with(names)
                 .expect("a document's own changes can always be made into a bundle");
-            if options.deflate {
-                bundle.bytes()
-            } else {
-                bundle.bytes_uncompressed()
-            }
+            options.encode(&bundle)
         };
 
         // a bundle must be causally closed, so orphans follow as change chunks
@@ -1486,11 +1459,7 @@ impl<H: HashRetention> Automerge<H> {
     /// them as a stack that [`Self::load_incremental`] takes in order. Ids
     /// this document does not know are ignored.
     pub fn fragments_after(&self, heads: &[ChangeId]) -> Result<Vec<Fragment>, AutomergeError> {
-        let nodes: Vec<_> = heads
-            .iter()
-            .filter_map(|id| self.node_for_change_id(id))
-            .collect();
-        let covered = self.change_graph.calculate_clock(nodes);
+        let covered = self.seq_clock_for_ids_lossy(heads);
         Ok(self
             .change_graph
             .fragments_after(&self.get_head_hashes(), &covered, &self.ops.actors))
@@ -1509,21 +1478,16 @@ impl<H: HashRetention> Automerge<H> {
         &self,
         heads: &[ChangeId],
     ) -> Result<Option<Bundle>, AutomergeError> {
-        let nodes: Vec<_> = heads
-            .iter()
-            .filter_map(|id| self.node_for_change_id(id))
-            .collect();
-        let clock = self.change_graph.calculate_clock(nodes);
+        let clock = self.seq_clock_for_ids_lossy(heads);
         let fresh = self.change_graph.nodes_above(clock);
         let boundary = self.change_ids_to_hashes_lossy(heads);
-        self.bundle_nodes(fresh, &boundary, NameHashes::All)
+        self.bundle_nodes(fresh, &boundary)
     }
 
     fn bundle_nodes(
         &self,
         nodes: Vec<crate::change_graph::NodeIdx>,
         boundary: &[ChangeHash],
-        names: NameHashes,
     ) -> Result<Option<Bundle>, AutomergeError> {
         if nodes.is_empty() {
             return Ok(None);
@@ -1550,7 +1514,11 @@ impl<H: HashRetention> Automerge<H> {
             })
             .collect();
         Ok(Some(self.assemble_bundle(
-            &heads, &boundary, &members, storage, names,
+            &heads,
+            &boundary,
+            &members,
+            storage,
+            NameHashes::All,
         )?))
     }
 
@@ -1581,13 +1549,7 @@ impl<H: HashRetention> Automerge<H> {
         }
         Ok(self
             .single_bundle_after(heads)?
-            .map(|b| {
-                if options.deflate {
-                    b.bytes()
-                } else {
-                    b.bytes_uncompressed()
-                }
-            })
+            .map(|b| options.encode(&b))
             .unwrap_or_default())
     }
 
@@ -1614,14 +1576,9 @@ impl<H: HashRetention> Automerge<H> {
     ///
     /// May return [`AutomergeError::AuditModeRequired`] outside audit mode.
     pub fn get_last_local_change_legacy(&self) -> Result<Option<Change>, AutomergeError> {
-        let Some(actor) = self.get_actor_index() else {
+        let Some(id) = self.last_local_change_id() else {
             return Ok(None);
         };
-        let seq = self.change_graph.seq_for_actor(actor);
-        if seq == 0 {
-            return Ok(None);
-        }
-        let id = self.change_id_at(actor, seq);
         let hash = self
             .change_graph
             .get_hash_for_change_id(&id, &self.ops.actors)?;
@@ -1632,15 +1589,10 @@ impl<H: HashRetention> Automerge<H> {
     ///
     /// `None` when this actor has not committed anything.
     pub fn get_last_local_change(&self) -> Result<Option<Bundle>, AutomergeError> {
-        let Some(actor) = self.get_actor_index() else {
+        let Some(id) = self.last_local_change_id() else {
             return Ok(None);
         };
-        let seq = self.change_graph.seq_for_actor(actor);
-        if seq == 0 {
-            return Ok(None);
-        }
-        let id = self.change_id_at(actor, seq);
-        let Some(node) = self.change_graph.node_for_change_id(&id, &self.ops.actors) else {
+        let Some(node) = self.node_for_change_id(&id) else {
             return Ok(None);
         };
         // widened past parents whose hashes were freed, as `save_after` is
@@ -1649,7 +1601,13 @@ impl<H: HashRetention> Automerge<H> {
             .iter()
             .flat_map(|n| self.change_graph.parent_hashes(*n))
             .collect();
-        self.bundle_nodes(nodes, &deps, NameHashes::All)
+        self.bundle_nodes(nodes, &deps)
+    }
+
+    fn last_local_change_id(&self) -> Option<ChangeId> {
+        let actor = self.get_actor_index()?;
+        let seq = self.change_graph.seq_for_actor(actor);
+        (seq != 0).then(|| self.change_id_at(actor, seq))
     }
 
     /// The clock a read at `heads` observes: causal(heads) ∩ mask.
@@ -1794,7 +1752,6 @@ impl<H: HashRetention> Automerge<H> {
         }
     }
 
-    /// Whether a GC is owed.
     fn rebuild_unhashed_fragment_pins(&mut self) -> bool {
         let pins = self.change_graph.take_unhashed_fragment_pins();
         self.rebuild_hashes(pins)
@@ -2024,30 +1981,26 @@ impl<H: HashRetention> Automerge<H> {
         };
         let nodes = self.nodes_for_change_ids(&view.heads)?;
         let graph = &self.change_graph;
-        let visibility = match &view.pending {
-            Some(pending) => visibility::FrontierVisibility::resolving(
-                write_frontier,
-                graph,
-                &self.authors,
-                &self.ops.actors,
-                |boundary, _| !pending.contains(boundary),
-            ),
-            None => {
-                let history = graph.calculate_clock(nodes.clone());
-                visibility::FrontierVisibility::resolving(
-                    write_frontier,
-                    graph,
-                    &self.authors,
-                    &self.ops.actors,
-                    |_, node| {
-                        let (actor, seq) = graph.actor_seq(node);
-                        history
-                            .get_for_actor(&actor)
-                            .is_some_and(|s| s.get() >= seq)
-                    },
-                )
-            }
-        };
+        let history = view
+            .pending
+            .is_none()
+            .then(|| graph.calculate_clock(nodes.clone()));
+        let visibility = visibility::FrontierVisibility::resolving(
+            write_frontier,
+            graph,
+            &self.authors,
+            &self.ops.actors,
+            |boundary, node| match &view.pending {
+                Some(pending) => !pending.contains(boundary),
+                None => {
+                    let (actor, seq) = graph.actor_seq(node);
+                    history
+                        .as_ref()
+                        .and_then(|h| h.get_for_actor(&actor))
+                        .is_some_and(|s| s.get() >= seq)
+                }
+            },
+        );
         Ok(VisibleClock::new(
             self.change_graph.clock_for_nodes(nodes),
             visibility.mask(),
@@ -2099,7 +2052,7 @@ impl<H: HashRetention> Automerge<H> {
         let mut nodes = f
             .members
             .iter()
-            .map(|id| self.change_graph.node_for_change_id(id, &self.ops.actors))
+            .map(|id| self.node_for_change_id(id))
             .collect::<Option<Vec<_>>>()
             .ok_or(AutomergeError::InvalidFragment(
                 "fragment references an unknown change",
@@ -2117,11 +2070,7 @@ impl<H: HashRetention> Automerge<H> {
         boundary: &[ChangeId],
     ) -> Result<Bundle, AutomergeError> {
         let unknown = || AutomergeError::InvalidFragment("bundle names an unknown change");
-        let node_of = |id: &ChangeId| {
-            self.change_graph
-                .node_for_change_id(id, &self.ops.actors)
-                .ok_or_else(unknown)
-        };
+        let node_of = |id: &ChangeId| self.node_for_change_id(id).ok_or_else(unknown);
         let head_nodes = heads.iter().map(node_of).collect::<Result<Vec<_>, _>>()?;
         let boundary_nodes = boundary
             .iter()
@@ -2337,7 +2286,6 @@ impl<H: HashRetention> Automerge<H> {
     /// fails with [`AutomergeError::MissingDeps`] and changes nothing, and
     /// must be applied again once its dependencies have been.
     pub fn apply_bundle(&mut self, bundle: Bundle) -> Result<(), AutomergeError> {
-        // a failed apply can leave unused actors; the legacy save sweeps them
         let result = self.apply_bundle_inner(bundle);
         if result.is_ok() {
             self.assert_no_unused_actors(cfg!(debug_assertions));
@@ -2386,8 +2334,9 @@ impl<H: HashRetention> Automerge<H> {
             return Ok(());
         };
 
-        // ── commit: failures below must undo the actor table; the graph is
-        // only touched once nothing can fail ──
+        // failures below must undo the actor table; the graph is only
+        // touched once nothing can fail
+        let hashed = plan.kept_hashes.is_some();
         let (added, actor_map) = self.add_bundle_actors(bundle);
         let staged = (|| -> Result<_, AutomergeError> {
             let clock = self.change_graph.current_clock();
@@ -2406,12 +2355,20 @@ impl<H: HashRetention> Automerge<H> {
             let graph = self.commit_bundle_graph(bundle, plan, &actor_map)?;
             Ok((ops, resolved, graph))
         })();
-        let (ops, resolved, (owes_gc, hashed)) =
-            staged.inspect_err(|_| self.undo_actor_refs(&added))?;
+        let (ops, resolved, owes_gc) = staged.inspect_err(|_| self.undo_actor_refs(&added))?;
         ops.commit(self, resolved);
         self.debug_assert_mask_indexes();
         self.republish_if_pending();
-        let owes_gc = owes_gc | self.rehash_bundle(hashed);
+        let mut owes_gc = owes_gc | self.rebuild_unhashed_fragment_pins();
+        if !hashed {
+            let missing = self.change_graph.missing_retained_hashes();
+            debug_assert!(
+                missing.is_empty(),
+                "bundle left out {} change hashes this document must retain",
+                missing.len()
+            );
+            owes_gc |= self.rebuild_hashes(missing);
+        }
         if owes_gc {
             self.change_graph.gc_after_batch();
         }
@@ -2446,8 +2403,6 @@ impl<H: HashRetention> Automerge<H> {
         let num_members = member_seqs.len();
 
         // parsing validated the bundle's shape, so its indexes are in bounds
-
-        // ── resolve: nothing in this phase writes to the document ──────
         let member_id = |i: usize| -> ChangeId {
             ChangeId::new(
                 member_seqs[i],
@@ -2480,9 +2435,7 @@ impl<H: HashRetention> Automerge<H> {
             match seq.cmp(&next) {
                 Ordering::Less => {
                     // already have this change, unless the actor forked
-                    let node = self
-                        .change_graph
-                        .node_for_change_id(&member_id(i), &self.ops.actors);
+                    let node = self.node_for_change_id(&member_id(i));
                     if let (Some(hashes), Some(node)) = (&member_hashes, node) {
                         match self.change_graph.hash_for_node(node) {
                             Some(h) if h != hashes[i] => {
@@ -2531,35 +2484,34 @@ impl<H: HashRetention> Automerge<H> {
             if keep[i] {
                 Some(crate::change_graph::NodeIdx(base + kept_index[i] as u32))
             } else {
-                self.change_graph
-                    .node_for_change_id(&member_id(i), &self.ops.actors)
+                self.node_for_change_id(&member_id(i))
             }
         };
 
-        // recorded after the commit
         let mut hash_pairs: Vec<(crate::change_graph::NodeIdx, ChangeHash)> = freed;
         hash_pairs.reserve(bundle.boundary.len() + bundle.dep_ids.len());
         for (hash, id) in &bundle.boundary {
             let node = self
-                .change_graph
-                .node_for_change_id(id, &self.ops.actors)
+                .node_for_change_id(id)
                 .ok_or(AutomergeError::MissingDeps)?;
             check_external(&self.change_graph, node, *hash)?;
             hash_pairs.push((node, *hash));
         }
 
-        // `add_bundle_members*` and `record_fragment_head` maintain the graph's heads
+        // a declared dep the document lacks is `MissingDeps` even if no
+        // member references it
+        let mut ext_nodes = Vec::with_capacity(bundle.dep_ids.len());
+        for (i, dep_id) in bundle.dep_ids.iter().enumerate() {
+            let node = self
+                .node_for_change_id(dep_id)
+                .ok_or(AutomergeError::MissingDeps)?;
+            check_external(&self.change_graph, node, bundle.deps()[i])?;
+            hash_pairs.push((node, bundle.deps()[i]));
+            ext_nodes.push(node);
+        }
+
         let mut graph_members: Vec<BundleMember<'_>> = Vec::new();
-        let mut ext_nodes: Vec<crate::change_graph::NodeIdx> = Vec::new();
         if overlap {
-            for (i, dep_id) in bundle.dep_ids.iter().enumerate() {
-                let node = self
-                    .change_graph
-                    .node_for_change_id(dep_id, &self.ops.actors)
-                    .ok_or(AutomergeError::MissingDeps)?;
-                check_external(&self.change_graph, node, bundle.deps()[i])?;
-                hash_pairs.push((node, bundle.deps()[i]));
-            }
             let members = bundle.changes()?;
             graph_members.reserve(num_kept);
             for (i, m) in members.iter().enumerate() {
@@ -2569,29 +2521,16 @@ impl<H: HashRetention> Automerge<H> {
                 let mut deps = Vec::with_capacity(m.deps.len());
                 for d in &m.deps {
                     let d = *d as usize;
-                    if d < num_members {
-                        if keep[d] {
-                            deps.push(BundleDep::Member(kept_index[d]));
-                        } else {
-                            let node = self
-                                .change_graph
-                                .node_for_change_id(&member_id(d), &self.ops.actors);
-                            deps.push(BundleDep::Node(node.ok_or(AutomergeError::MissingDeps)?));
-                        }
-                    } else {
-                        let dep_id = bundle
-                            .dep_ids
+                    deps.push(if d >= num_members {
+                        let node = ext_nodes
                             .get(d - num_members)
                             .ok_or(MalformedBundle::Invalid("bad dep index"))?;
-                        let node = self
-                            .change_graph
-                            .node_for_change_id(dep_id, &self.ops.actors)
-                            .ok_or(AutomergeError::MissingDeps)?;
-                        let hash = bundle.deps()[d - num_members];
-                        check_external(&self.change_graph, node, hash)?;
-                        hash_pairs.push((node, hash));
-                        deps.push(BundleDep::Node(node));
-                    }
+                        BundleDep::Node(*node)
+                    } else if keep[d] {
+                        BundleDep::Member(kept_index[d])
+                    } else {
+                        BundleDep::Node(member_node(d).ok_or(AutomergeError::MissingDeps)?)
+                    });
                 }
                 graph_members.push(BundleMember {
                     actor: usize::from(member_actors[i]),
@@ -2603,19 +2542,6 @@ impl<H: HashRetention> Automerge<H> {
                     extra: Cow::Borrowed(m.extra.as_ref()),
                     deps,
                 });
-            }
-        } else {
-            // a declared dep the document lacks is `MissingDeps` even if no
-            // member references it
-            ext_nodes.reserve(bundle.dep_ids.len());
-            for (i, dep_id) in bundle.dep_ids.iter().enumerate() {
-                let node = self
-                    .change_graph
-                    .node_for_change_id(dep_id, &self.ops.actors)
-                    .ok_or(AutomergeError::MissingDeps)?;
-                check_external(&self.change_graph, node, bundle.deps()[i])?;
-                hash_pairs.push((node, bundle.deps()[i]));
-                ext_nodes.push(node);
             }
         }
 
@@ -2740,14 +2666,13 @@ impl<H: HashRetention> Automerge<H> {
     }
 
     /// Adds the planned members to the change graph and records the
-    /// hashes the bundle names. Returns whether a GC is owed and whether
-    /// every member's hash was verified.
+    /// hashes the bundle names. Returns whether a GC is owed.
     pub(crate) fn commit_bundle_graph(
         &mut self,
         bundle: &Bundle,
         plan: BundlePlan<'_>,
         actor_map: &[usize],
-    ) -> Result<(bool, bool), AutomergeError> {
+    ) -> Result<bool, AutomergeError> {
         let BundlePlan {
             base,
             overlap,
@@ -2760,7 +2685,6 @@ impl<H: HashRetention> Automerge<H> {
             retained_nodes,
         } = plan;
         if overlap {
-            // bundle actor indexes to document actor indexes
             for m in &mut graph_members {
                 m.actor = actor_map[m.actor];
             }
@@ -2787,9 +2711,8 @@ impl<H: HashRetention> Automerge<H> {
         for (node, hash) in hash_pairs {
             owes_gc |= self.change_graph.record_node_hash(node, hash);
         }
-        // in node order, so fragments are cached in graph order and the
-        // fragment index matches one built from the whole graph
-        // an overlapping bundle's head may already have children here
+        // in node order, so the fragment index matches one built from the
+        // whole graph
         let mut members: Vec<_> = head_nodes
             .into_iter()
             .map(|(n, h)| (n, h, n.0 >= base))
@@ -2805,27 +2728,7 @@ impl<H: HashRetention> Automerge<H> {
             };
         }
         self.change_graph.pin_deferred_loose();
-        Ok((owes_gc, kept_hashes.is_some()))
-    }
-
-    /// Rebuilds the hashes of earlier changes a new fragment pins, once
-    /// `bundle`'s ops are in, and any hash a bundle that wasn't hashed
-    /// left out. Whether a GC is owed.
-    ///
-    /// Panics in debug builds if a bundle left out a hash this document
-    /// must retain.
-    pub(crate) fn rehash_bundle(&mut self, hashed: bool) -> bool {
-        let mut owes_gc = self.rebuild_unhashed_fragment_pins();
-        if !hashed {
-            let missing = self.change_graph.missing_retained_hashes();
-            debug_assert!(
-                missing.is_empty(),
-                "bundle left out {} change hashes this document must retain",
-                missing.len()
-            );
-            owes_gc |= self.rebuild_hashes(missing);
-        }
-        owes_gc
+        Ok(owes_gc)
     }
 }
 
@@ -2996,20 +2899,6 @@ impl<H: HashRetention> Automerge<H> {
             .collect()
     }
 
-    /// Get the [`ChangeId`] of the change that contains the given `opid`.
-    ///
-    /// Returns [`None`] if the `opid` is the root object id or does not
-    /// exist in this document.
-    pub fn change_id_for_opid(&self, exid: &ExId) -> Option<ChangeId> {
-        match exid {
-            ExId::Root => None,
-            ExId::Id(..) => {
-                let opid = self.exid_to_opid(exid).ok()?;
-                self.change_graph.opid_to_change_id(opid, &self.ops.actors)
-            }
-        }
-    }
-
     /// Get the hash of the change identified by `id`.
     ///
     /// Returns `Ok(None)` if no change by that `(actor, seq)` is in this
@@ -3088,8 +2977,7 @@ impl<H: HashRetention> Automerge<H> {
     /// The change identified by `id`, or `None` if this document does not
     /// contain it.
     ///
-    /// Outside audit mode this rebuilds every ancestor whose hash is not
-    /// retained back to the nearest retained hashes, which can be slow.
+    /// Outside audit mode this can be slow.
     pub fn get_change_by_id(&self, id: &ChangeId) -> Result<Option<Change>, AutomergeError> {
         let Some(node) = self.node_for_change_id(id) else {
             return Ok(None);
@@ -3102,13 +2990,6 @@ impl<H: HashRetention> Automerge<H> {
         Ok(changes
             .into_iter()
             .find(|c| c.actor_id() == id.actor() && c.seq() == id.seq()))
-    }
-
-    pub(crate) fn resolve_heads(
-        &self,
-        heads: &[ChangeId],
-    ) -> Result<Vec<ChangeHash>, AutomergeError> {
-        self.change_ids_to_hashes(heads)
     }
 
     /// The changes not covered by `have_deps`. Ids this document does not
@@ -3215,7 +3096,7 @@ impl<H: HashRetention> Automerge<H> {
         }
         let nodes = other.change_graph.nodes_above(exclude);
         let boundary = self.get_head_hashes();
-        other.bundle_nodes(nodes, &boundary, NameHashes::All)
+        other.bundle_nodes(nodes, &boundary)
     }
 
     /// Get the hash of the change that contains the given `opid`.
@@ -3703,8 +3584,6 @@ impl<H: HashRetention> Automerge<H> {
         Ok(())
     }
 
-    // ── Replication: hash-keyed, since a peer names changes this document lacks ──
-
     /// Whether the document contains `hash`.
     pub fn has_change(&self, hash: &ChangeHash) -> Result<bool, AutomergeError> {
         Ok(self.change_graph.has_change(hash)?)
@@ -3919,242 +3798,25 @@ impl Automerge<Full> {
     }
 }
 
-impl<H: HashRetention> ReadDoc for Automerge<H> {
-    fn parents<O: AsRef<ExId>>(&self, obj: O) -> Result<Parents<'_>, AutomergeError> {
-        self.parents_for(obj.as_ref(), self.read_current())
-    }
-
-    fn parents_at<O: AsRef<ExId>>(
-        &self,
-        obj: O,
-        heads: &[ChangeId],
-    ) -> Result<Parents<'_>, AutomergeError> {
-        let read = self.read_at(Some(heads))?;
-        self.parents_for(obj.as_ref(), read)
-    }
-
-    fn keys<O: AsRef<ExId>>(&self, obj: O) -> Keys<'_> {
-        self.keys_for(obj.as_ref(), self.read_current())
-    }
-
-    fn keys_at<O: AsRef<ExId>>(
-        &self,
-        obj: O,
-        heads: &[ChangeId],
-    ) -> Result<Keys<'_>, AutomergeError> {
-        let read = self.read_at(Some(heads))?;
-        Ok(self.keys_for(obj.as_ref(), read))
-    }
-
-    fn iter_at<O: AsRef<ExId>>(
-        &self,
-        obj: O,
-        heads: Option<&[ChangeId]>,
-    ) -> Result<DocIter<'_>, AutomergeError> {
-        let read = self.read_at(heads)?;
-        Ok(self.iter_for(obj.as_ref(), read))
-    }
-
-    fn map_range<'a, O: AsRef<ExId>, R: RangeBounds<String> + 'a>(
-        &'a self,
-        obj: O,
-        range: R,
-    ) -> MapRange<'a> {
-        self.map_range_for(obj.as_ref(), range, self.read_current())
-    }
-
-    fn map_range_at<'a, O: AsRef<ExId>, R: RangeBounds<String> + 'a>(
-        &'a self,
-        obj: O,
-        range: R,
-        heads: &[ChangeId],
-    ) -> Result<MapRange<'a>, AutomergeError> {
-        let read = self.read_at(Some(heads))?;
-        Ok(self.map_range_for(obj.as_ref(), range, read))
-    }
-
-    fn list_range<O: AsRef<ExId>, R: RangeBounds<usize>>(&self, obj: O, range: R) -> ListRange<'_> {
-        self.list_range_for(obj.as_ref(), range, self.read_current())
-    }
-
-    fn list_range_at<O: AsRef<ExId>, R: RangeBounds<usize>>(
-        &self,
-        obj: O,
-        range: R,
-        heads: &[ChangeId],
-    ) -> Result<ListRange<'_>, AutomergeError> {
-        let read = self.read_at(Some(heads))?;
-        Ok(self.list_range_for(obj.as_ref(), range, read))
-    }
-
-    fn values<O: AsRef<ExId>>(&self, obj: O) -> Values<'_> {
-        self.values_for(obj.as_ref(), self.read_current())
-    }
-
-    fn values_at<O: AsRef<ExId>>(
-        &self,
-        obj: O,
-        heads: &[ChangeId],
-    ) -> Result<Values<'_>, AutomergeError> {
-        let read = self.read_at(Some(heads))?;
-        Ok(self.values_for(obj.as_ref(), read))
-    }
-
-    fn length<O: AsRef<ExId>>(&self, obj: O) -> usize {
-        self.length_for(obj.as_ref(), self.read_current())
-    }
-
-    fn length_at<O: AsRef<ExId>>(
-        &self,
-        obj: O,
-        heads: &[ChangeId],
-    ) -> Result<usize, AutomergeError> {
-        let read = self.read_at(Some(heads))?;
-        Ok(self.length_for(obj.as_ref(), read))
-    }
-
-    fn text<O: AsRef<ExId>>(&self, obj: O) -> Result<String, AutomergeError> {
-        self.text_for(obj.as_ref(), self.read_current())
-    }
-
-    fn spans<O: AsRef<ExId>>(&self, obj: O) -> Result<Spans<'_>, AutomergeError> {
-        self.spans_for(obj.as_ref(), self.read_current())
-    }
-
-    fn spans_at<O: AsRef<ExId>>(
-        &self,
-        obj: O,
-        heads: &[ChangeId],
-    ) -> Result<Spans<'_>, AutomergeError> {
-        let read = self.read_at(Some(heads))?;
-        self.spans_for(obj.as_ref(), read)
-    }
-
-    fn get_cursor<O: AsRef<ExId>, I: Into<CursorPosition>>(
-        &self,
-        obj: O,
-        position: I,
-        at: Option<&[ChangeId]>,
-    ) -> Result<Cursor, AutomergeError> {
-        let read = self.read_at(at)?;
-        self.get_cursor_for(obj.as_ref(), position.into(), read, MoveCursor::After)
-    }
-
-    fn get_cursor_moving<O: AsRef<ExId>, I: Into<CursorPosition>>(
-        &self,
-        obj: O,
-        position: I,
-        at: Option<&[ChangeId]>,
-        move_cursor: MoveCursor,
-    ) -> Result<Cursor, AutomergeError> {
-        let read = self.read_at(at)?;
-        self.get_cursor_for(obj.as_ref(), position.into(), read, move_cursor)
-    }
-
-    fn get_cursor_position<O: AsRef<ExId>>(
-        &self,
-        obj: O,
-        cursor: &Cursor,
-        at: Option<&[ChangeId]>,
-    ) -> Result<usize, AutomergeError> {
-        let read = self.read_at(at)?;
-        self.get_cursor_position_for(obj.as_ref(), cursor, read)
-    }
-
-    fn text_at<O: AsRef<ExId>>(
-        &self,
-        obj: O,
-        heads: &[ChangeId],
-    ) -> Result<String, AutomergeError> {
-        let read = self.read_at(Some(heads))?;
-        self.text_for(obj.as_ref(), read)
-    }
-
-    fn marks<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<Mark>, AutomergeError> {
-        self.marks_for(obj.as_ref(), self.read_current())
-    }
-
-    fn marks_at<O: AsRef<ExId>>(
-        &self,
-        obj: O,
-        heads: &[ChangeId],
-    ) -> Result<Vec<Mark>, AutomergeError> {
-        let read = self.read_at(Some(heads))?;
-        self.marks_for(obj.as_ref(), read)
-    }
-
-    fn hydrate<O: AsRef<ExId>>(
-        &self,
-        obj: O,
-        heads: Option<&[ChangeId]>,
-    ) -> Result<hydrate::Value, AutomergeError> {
-        let obj = self.exid_to_obj(obj.as_ref())?;
-        let read = self.read_at(heads)?;
-        Ok(match obj.typ {
-            ObjType::List => self.hydrate_list(&obj.id, &read),
-            ObjType::Text => self.hydrate_text(&obj.id, &read),
-            _ => self.hydrate_map(&obj.id, &read),
-        })
-    }
-
-    fn get_marks<O: AsRef<ExId>>(
-        &self,
-        obj: O,
-        index: usize,
-        heads: Option<&[ChangeId]>,
-    ) -> Result<MarkSet, AutomergeError> {
-        let read = self.read_at(heads)?;
-        self.get_marks_for(obj.as_ref(), index, read)
-    }
-
-    fn get<O: AsRef<ExId>, P: Into<Prop>>(
-        &self,
-        obj: O,
-        prop: P,
-    ) -> Result<Option<(Value<'_>, ExId)>, AutomergeError> {
-        self.get_for(obj.as_ref(), prop.into(), self.read_current())
-    }
-
-    fn get_at<O: AsRef<ExId>, P: Into<Prop>>(
-        &self,
-        obj: O,
-        prop: P,
-        heads: &[ChangeId],
-    ) -> Result<Option<(Value<'_>, ExId)>, AutomergeError> {
-        let read = self.read_at(Some(heads))?;
-        self.get_for(obj.as_ref(), prop.into(), read)
-    }
-
-    fn get_all<O: AsRef<ExId>, P: Into<Prop>>(
-        &self,
-        obj: O,
-        prop: P,
-    ) -> Result<Vec<(Value<'_>, ExId)>, AutomergeError> {
-        self.get_all_for(obj.as_ref(), prop.into(), self.read_current())
-    }
-
-    fn get_all_at<O: AsRef<ExId>, P: Into<Prop>>(
-        &self,
-        obj: O,
-        prop: P,
-        heads: &[ChangeId],
-    ) -> Result<Vec<(Value<'_>, ExId)>, AutomergeError> {
-        let read = self.read_at(Some(heads))?;
-        self.get_all_for(obj.as_ref(), prop.into(), read)
-    }
-
-    fn object_type<O: AsRef<ExId>>(&self, obj: O) -> Result<ObjType, AutomergeError> {
+impl<H: HashRetention> Automerge<H> {
+    pub(crate) fn object_type<O: AsRef<ExId>>(&self, obj: O) -> Result<ObjType, AutomergeError> {
         let obj = obj.as_ref();
         let opid = self.exid_to_opid(obj)?;
         let typ = self.ops.object_type(&ObjId(opid));
         typ.ok_or_else(|| AutomergeError::InvalidObjId(obj.to_string()))
     }
 
-    fn get_missing_deps(&self, heads: &[ChangeId]) -> Result<Vec<ChangeHash>, AutomergeError> {
-        self.missing_deps_with_queued(&self.resolve_heads(heads)?)
+    pub(crate) fn get_missing_deps(
+        &self,
+        heads: &[ChangeId],
+    ) -> Result<Vec<ChangeHash>, AutomergeError> {
+        self.missing_deps_with_queued(&self.change_ids_to_hashes(heads)?)
     }
 
-    fn get_change_by_hash(&self, hash: &ChangeHash) -> Result<Option<Change>, AutomergeError> {
+    pub(crate) fn get_change_by_hash(
+        &self,
+        hash: &ChangeHash,
+    ) -> Result<Option<Change>, AutomergeError> {
         match ChangeCollector::for_hashes(&self.ops, &self.change_graph, [*hash]) {
             Ok(mut changes) => Ok(changes.pop()),
             Err(AutomergeError::AuditModeRequired) => Err(AutomergeError::AuditModeRequired),
@@ -4162,7 +3824,7 @@ impl<H: HashRetention> ReadDoc for Automerge<H> {
         }
     }
 
-    fn stats(&self) -> crate::read::Stats {
+    pub(crate) fn stats(&self) -> crate::read::Stats {
         let num_changes = self.change_graph.len() as u64;
         let num_ops = self.ops.len() as u64;
         let num_actors = self.ops.actors.len() as u64;
@@ -4178,9 +3840,21 @@ impl<H: HashRetention> ReadDoc for Automerge<H> {
             rustc_version,
         }
     }
+}
 
-    fn text_encoding(&self) -> TextEncoding {
-        self.ops.text_encoding
+impl<H: HashRetention> ScopedRead for Automerge<H> {
+    type Retention = H;
+
+    fn doc(&self) -> &Automerge<H> {
+        self
+    }
+
+    #[inline]
+    fn get_scope(&self, heads: Option<&[ChangeId]>) -> Result<ReadAt<'_>, AutomergeError> {
+        match heads {
+            None => Ok(self.read_current()),
+            Some(_) => self.read_at(heads),
+        }
     }
 }
 
@@ -4248,6 +3922,14 @@ impl SaveOptions {
             CompressConfig::Threshold(change::DEFLATE_MIN_SIZE)
         } else {
             CompressConfig::None
+        }
+    }
+
+    fn encode(&self, bundle: &Bundle) -> Vec<u8> {
+        if self.deflate {
+            bundle.bytes()
+        } else {
+            bundle.bytes_uncompressed()
         }
     }
 }
