@@ -13,7 +13,6 @@ pub(crate) use crate::op_set2::types::ScalarValue;
 pub(crate) use crate::op_set2::{
     ChangeMetadata, KeyRef, OpQuery, OpQueryTerm, OpSet, OpType, Parents,
 };
-pub(crate) use crate::read::ReadDoc;
 
 use crate::actor::{ActorInsert, ActorRemoval, ActorShift, HasActorIndices};
 use crate::change_graph::{BundleDep, BundleMember, ChangeGraph};
@@ -28,7 +27,7 @@ use crate::op_set2::change::bundle::BundleApply;
 use crate::patches::{Patch, PatchAccumulator};
 use crate::storage::{self, change, load, Bundle, CompressConfig, Document, VerificationMode};
 use crate::tx::{
-    self, CommitOptions, Failure, OwnedTransaction, Success, Transactable, Transaction,
+    self, CommitOptions, Failure, OwnedTransaction, ScopedRead, Success, Transactable, Transaction,
     TransactionArgs,
 };
 
@@ -3918,242 +3917,25 @@ impl Automerge<Full> {
     }
 }
 
-impl<H: HashRetention> ReadDoc for Automerge<H> {
-    fn parents<O: AsRef<ExId>>(&self, obj: O) -> Result<Parents<'_>, AutomergeError> {
-        self.parents_for(obj.as_ref(), self.read_current())
-    }
-
-    fn parents_at<O: AsRef<ExId>>(
-        &self,
-        obj: O,
-        heads: &[ChangeId],
-    ) -> Result<Parents<'_>, AutomergeError> {
-        let read = self.read_at(Some(heads))?;
-        self.parents_for(obj.as_ref(), read)
-    }
-
-    fn keys<O: AsRef<ExId>>(&self, obj: O) -> Keys<'_> {
-        self.keys_for(obj.as_ref(), self.read_current())
-    }
-
-    fn keys_at<O: AsRef<ExId>>(
-        &self,
-        obj: O,
-        heads: &[ChangeId],
-    ) -> Result<Keys<'_>, AutomergeError> {
-        let read = self.read_at(Some(heads))?;
-        Ok(self.keys_for(obj.as_ref(), read))
-    }
-
-    fn iter_at<O: AsRef<ExId>>(
-        &self,
-        obj: O,
-        heads: Option<&[ChangeId]>,
-    ) -> Result<DocIter<'_>, AutomergeError> {
-        let read = self.read_at(heads)?;
-        Ok(self.iter_for(obj.as_ref(), read))
-    }
-
-    fn map_range<'a, O: AsRef<ExId>, R: RangeBounds<String> + 'a>(
-        &'a self,
-        obj: O,
-        range: R,
-    ) -> MapRange<'a> {
-        self.map_range_for(obj.as_ref(), range, self.read_current())
-    }
-
-    fn map_range_at<'a, O: AsRef<ExId>, R: RangeBounds<String> + 'a>(
-        &'a self,
-        obj: O,
-        range: R,
-        heads: &[ChangeId],
-    ) -> Result<MapRange<'a>, AutomergeError> {
-        let read = self.read_at(Some(heads))?;
-        Ok(self.map_range_for(obj.as_ref(), range, read))
-    }
-
-    fn list_range<O: AsRef<ExId>, R: RangeBounds<usize>>(&self, obj: O, range: R) -> ListRange<'_> {
-        self.list_range_for(obj.as_ref(), range, self.read_current())
-    }
-
-    fn list_range_at<O: AsRef<ExId>, R: RangeBounds<usize>>(
-        &self,
-        obj: O,
-        range: R,
-        heads: &[ChangeId],
-    ) -> Result<ListRange<'_>, AutomergeError> {
-        let read = self.read_at(Some(heads))?;
-        Ok(self.list_range_for(obj.as_ref(), range, read))
-    }
-
-    fn values<O: AsRef<ExId>>(&self, obj: O) -> Values<'_> {
-        self.values_for(obj.as_ref(), self.read_current())
-    }
-
-    fn values_at<O: AsRef<ExId>>(
-        &self,
-        obj: O,
-        heads: &[ChangeId],
-    ) -> Result<Values<'_>, AutomergeError> {
-        let read = self.read_at(Some(heads))?;
-        Ok(self.values_for(obj.as_ref(), read))
-    }
-
-    fn length<O: AsRef<ExId>>(&self, obj: O) -> usize {
-        self.length_for(obj.as_ref(), self.read_current())
-    }
-
-    fn length_at<O: AsRef<ExId>>(
-        &self,
-        obj: O,
-        heads: &[ChangeId],
-    ) -> Result<usize, AutomergeError> {
-        let read = self.read_at(Some(heads))?;
-        Ok(self.length_for(obj.as_ref(), read))
-    }
-
-    fn text<O: AsRef<ExId>>(&self, obj: O) -> Result<String, AutomergeError> {
-        self.text_for(obj.as_ref(), self.read_current())
-    }
-
-    fn spans<O: AsRef<ExId>>(&self, obj: O) -> Result<Spans<'_>, AutomergeError> {
-        self.spans_for(obj.as_ref(), self.read_current())
-    }
-
-    fn spans_at<O: AsRef<ExId>>(
-        &self,
-        obj: O,
-        heads: &[ChangeId],
-    ) -> Result<Spans<'_>, AutomergeError> {
-        let read = self.read_at(Some(heads))?;
-        self.spans_for(obj.as_ref(), read)
-    }
-
-    fn get_cursor<O: AsRef<ExId>, I: Into<CursorPosition>>(
-        &self,
-        obj: O,
-        position: I,
-        at: Option<&[ChangeId]>,
-    ) -> Result<Cursor, AutomergeError> {
-        let read = self.read_at(at)?;
-        self.get_cursor_for(obj.as_ref(), position.into(), read, MoveCursor::After)
-    }
-
-    fn get_cursor_moving<O: AsRef<ExId>, I: Into<CursorPosition>>(
-        &self,
-        obj: O,
-        position: I,
-        at: Option<&[ChangeId]>,
-        move_cursor: MoveCursor,
-    ) -> Result<Cursor, AutomergeError> {
-        let read = self.read_at(at)?;
-        self.get_cursor_for(obj.as_ref(), position.into(), read, move_cursor)
-    }
-
-    fn get_cursor_position<O: AsRef<ExId>>(
-        &self,
-        obj: O,
-        cursor: &Cursor,
-        at: Option<&[ChangeId]>,
-    ) -> Result<usize, AutomergeError> {
-        let read = self.read_at(at)?;
-        self.get_cursor_position_for(obj.as_ref(), cursor, read)
-    }
-
-    fn text_at<O: AsRef<ExId>>(
-        &self,
-        obj: O,
-        heads: &[ChangeId],
-    ) -> Result<String, AutomergeError> {
-        let read = self.read_at(Some(heads))?;
-        self.text_for(obj.as_ref(), read)
-    }
-
-    fn marks<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<Mark>, AutomergeError> {
-        self.marks_for(obj.as_ref(), self.read_current())
-    }
-
-    fn marks_at<O: AsRef<ExId>>(
-        &self,
-        obj: O,
-        heads: &[ChangeId],
-    ) -> Result<Vec<Mark>, AutomergeError> {
-        let read = self.read_at(Some(heads))?;
-        self.marks_for(obj.as_ref(), read)
-    }
-
-    fn hydrate<O: AsRef<ExId>>(
-        &self,
-        obj: O,
-        heads: Option<&[ChangeId]>,
-    ) -> Result<hydrate::Value, AutomergeError> {
-        let obj = self.exid_to_obj(obj.as_ref())?;
-        let read = self.read_at(heads)?;
-        Ok(match obj.typ {
-            ObjType::List => self.hydrate_list(&obj.id, &read),
-            ObjType::Text => self.hydrate_text(&obj.id, &read),
-            _ => self.hydrate_map(&obj.id, &read),
-        })
-    }
-
-    fn get_marks<O: AsRef<ExId>>(
-        &self,
-        obj: O,
-        index: usize,
-        heads: Option<&[ChangeId]>,
-    ) -> Result<MarkSet, AutomergeError> {
-        let read = self.read_at(heads)?;
-        self.get_marks_for(obj.as_ref(), index, read)
-    }
-
-    fn get<O: AsRef<ExId>, P: Into<Prop>>(
-        &self,
-        obj: O,
-        prop: P,
-    ) -> Result<Option<(Value<'_>, ExId)>, AutomergeError> {
-        self.get_for(obj.as_ref(), prop.into(), self.read_current())
-    }
-
-    fn get_at<O: AsRef<ExId>, P: Into<Prop>>(
-        &self,
-        obj: O,
-        prop: P,
-        heads: &[ChangeId],
-    ) -> Result<Option<(Value<'_>, ExId)>, AutomergeError> {
-        let read = self.read_at(Some(heads))?;
-        self.get_for(obj.as_ref(), prop.into(), read)
-    }
-
-    fn get_all<O: AsRef<ExId>, P: Into<Prop>>(
-        &self,
-        obj: O,
-        prop: P,
-    ) -> Result<Vec<(Value<'_>, ExId)>, AutomergeError> {
-        self.get_all_for(obj.as_ref(), prop.into(), self.read_current())
-    }
-
-    fn get_all_at<O: AsRef<ExId>, P: Into<Prop>>(
-        &self,
-        obj: O,
-        prop: P,
-        heads: &[ChangeId],
-    ) -> Result<Vec<(Value<'_>, ExId)>, AutomergeError> {
-        let read = self.read_at(Some(heads))?;
-        self.get_all_for(obj.as_ref(), prop.into(), read)
-    }
-
-    fn object_type<O: AsRef<ExId>>(&self, obj: O) -> Result<ObjType, AutomergeError> {
+impl<H: HashRetention> Automerge<H> {
+    pub(crate) fn object_type<O: AsRef<ExId>>(&self, obj: O) -> Result<ObjType, AutomergeError> {
         let obj = obj.as_ref();
         let opid = self.exid_to_opid(obj)?;
         let typ = self.ops.object_type(&ObjId(opid));
         typ.ok_or_else(|| AutomergeError::InvalidObjId(obj.to_string()))
     }
 
-    fn get_missing_deps(&self, heads: &[ChangeId]) -> Result<Vec<ChangeHash>, AutomergeError> {
+    pub(crate) fn get_missing_deps(
+        &self,
+        heads: &[ChangeId],
+    ) -> Result<Vec<ChangeHash>, AutomergeError> {
         self.missing_deps_with_queued(&self.resolve_heads(heads)?)
     }
 
-    fn get_change_by_hash(&self, hash: &ChangeHash) -> Result<Option<Change>, AutomergeError> {
+    pub(crate) fn get_change_by_hash(
+        &self,
+        hash: &ChangeHash,
+    ) -> Result<Option<Change>, AutomergeError> {
         match ChangeCollector::for_hashes(&self.ops, &self.change_graph, [*hash]) {
             Ok(mut changes) => Ok(changes.pop()),
             Err(AutomergeError::AuditModeRequired) => Err(AutomergeError::AuditModeRequired),
@@ -4161,7 +3943,7 @@ impl<H: HashRetention> ReadDoc for Automerge<H> {
         }
     }
 
-    fn stats(&self) -> crate::read::Stats {
+    pub(crate) fn stats(&self) -> crate::read::Stats {
         let num_changes = self.change_graph.len() as u64;
         let num_ops = self.ops.len() as u64;
         let num_actors = self.ops.actors.len() as u64;
@@ -4177,9 +3959,21 @@ impl<H: HashRetention> ReadDoc for Automerge<H> {
             rustc_version,
         }
     }
+}
 
-    fn text_encoding(&self) -> TextEncoding {
-        self.ops.text_encoding
+impl<H: HashRetention> ScopedRead for Automerge<H> {
+    type Retention = H;
+
+    fn doc(&self) -> &Automerge<H> {
+        self
+    }
+
+    #[inline]
+    fn get_scope(&self, heads: Option<&[ChangeId]>) -> Result<ReadAt<'_>, AutomergeError> {
+        match heads {
+            None => Ok(self.read_current()),
+            Some(_) => self.read_at(heads),
+        }
     }
 }
 

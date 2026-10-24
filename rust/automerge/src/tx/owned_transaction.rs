@@ -1,8 +1,9 @@
+use crate::automerge::view::ReadAt;
 use crate::automerge::Automerge;
 use crate::exid::ExId;
-use crate::{AutomergeError, ChangeHash};
+use crate::{AutomergeError, ChangeHash, ChangeId};
 
-use super::{CommitOptions, TransactionInner};
+use super::{CommitOptions, TransactionInner, TxDoc};
 
 /// A transaction that **owns** the `Automerge` document.
 ///
@@ -96,13 +97,19 @@ impl<H: crate::hash_retention::HashRetention> OwnedTransaction<H> {
     }
 }
 
-impl<H: crate::hash_retention::HashRetention> super::TxDoc for OwnedTransaction<H> {
+impl<H: crate::hash_retention::HashRetention> super::ScopedRead for OwnedTransaction<H> {
     type Retention = H;
 
     fn doc(&self) -> &Automerge<H> {
         &self.doc
     }
 
+    fn get_scope(&self, heads: Option<&[ChangeId]>) -> Result<ReadAt<'_>, AutomergeError> {
+        self.tx_scope(heads)
+    }
+}
+
+impl<H: crate::hash_retention::HashRetention> super::TxDoc for OwnedTransaction<H> {
     fn inner(&self) -> Option<&TransactionInner> {
         Some(&self.inner)
     }

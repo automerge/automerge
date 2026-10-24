@@ -8,25 +8,17 @@ use crate::automerge::LoadOptions;
 use crate::automerge::SaveOptions;
 use crate::automerge::{Automerge, EnableAuditModeError};
 use crate::change_graph::Fragment;
-use crate::cursor::{CursorPosition, MoveCursor};
 use crate::exid::ExId;
 use crate::hash_retention::{Full, HashRetention, Retained};
-use crate::iter::{DocIter, Keys, ListRange, MapRange, Span, Spans, Values};
-use crate::marks::UpdateSpansConfig;
-use crate::marks::{ExpandMark, Mark, MarkSet};
-use crate::op_set2::{ChangeMetadata, Parents};
+use crate::op_set2::ChangeMetadata;
 use crate::patches::PatchAccumulator;
-use crate::read::ReadDoc;
-use crate::tx::{CommitOptions, Transactable};
+use crate::tx::{CommitOptions, ScopedRead, TxDoc};
 use crate::types::{ObjId, ObjMeta};
 use crate::write_frontier::{Boundary, WriteFrontier};
 use crate::VerificationMode;
-use crate::{hydrate, AnonymizeError, Bundle, OnPartialLoad, TextEncoding};
-use crate::{
-    tx::TransactionInner, ActorId, AutomergeError, Change, ChangeHash, ChangeId, Cursor, Prop,
-    Value,
-};
-use crate::{ObjType, Patch, ScalarValue, ROOT};
+use crate::{tx::TransactionInner, ActorId, AutomergeError, Change, ChangeHash, ChangeId};
+use crate::{AnonymizeError, Bundle, OnPartialLoad, TextEncoding};
+use crate::{ObjType, Patch};
 use std::borrow::Cow;
 
 /// An automerge document that automatically manages transactions.
@@ -480,15 +472,6 @@ impl<H: HashRetention> AutoCommit<H> {
         }
     }
 
-    fn with_transaction<R>(
-        &mut self,
-        f: impl FnOnce(&mut TransactionInner, &mut Automerge<H>) -> R,
-    ) -> R {
-        self.ensure_transaction_open();
-        let tx = self.transaction.as_mut().unwrap();
-        f(tx, &mut self.doc)
-    }
-
     /// Load an incremental save of a document.
     ///
     /// Unlike [`Self::load()`] this imports changes into an existing document. It will work with both
@@ -876,29 +859,6 @@ impl<H: HashRetention> AutoCommit<H> {
         self.doc.hash_for_opid(opid)
     }
 
-    fn get_scope(&self, heads: Option<&[ChangeId]>) -> Result<ReadAt<'_>, AutomergeError> {
-        if let Some(h) = heads {
-            // pending ops are in the op set but not under the graph's heads, so
-            // with a transaction in flight current heads must not read unscoped
-            return if self.transaction.is_none() {
-                self.doc.read_at(Some(h))
-            } else {
-                Ok(self.doc.read_scoped(Cow::Owned(self.doc.visible(h)?)))
-            };
-        }
-        Ok(match (&self.isolation, &self.transaction) {
-            (Some(_), Some(t)) => match t.get_scope() {
-                Some(scope) => self.doc.read_scoped(Cow::Borrowed(scope)),
-                None => self.doc.read_current(),
-            },
-            (Some(i), None) => self
-                .doc
-                .read_at(Some(i))
-                .expect("isolation ids are always known"),
-            _ => self.doc.read_current(),
-        })
-    }
-
     fn patch_to(&mut self, after: &[ChangeId]) {
         let before = self.get_heads();
         if before.as_slice() != after {
@@ -971,421 +931,48 @@ impl AutoCommit<Full> {
     }
 }
 
-impl<H: HashRetention> ReadDoc for AutoCommit<H> {
-    fn parents<O: AsRef<ExId>>(&self, obj: O) -> Result<Parents<'_>, AutomergeError> {
-        self.doc.parents_for(
-            obj.as_ref(),
-            self.get_scope(None).expect("no heads to resolve"),
-        )
+impl<H: HashRetention> ScopedRead for AutoCommit<H> {
+    type Retention = H;
+
+    fn doc(&self) -> &Automerge<H> {
+        &self.doc
     }
 
-    fn parents_at<O: AsRef<ExId>>(
-        &self,
-        obj: O,
-        heads: &[ChangeId],
-    ) -> Result<Parents<'_>, AutomergeError> {
-        self.doc
-            .parents_for(obj.as_ref(), self.get_scope(Some(heads))?)
-    }
-
-    fn keys<O: AsRef<ExId>>(&self, obj: O) -> Keys<'_> {
-        self.doc.keys_for(
-            obj.as_ref(),
-            self.get_scope(None).expect("no heads to resolve"),
-        )
-    }
-
-    fn keys_at<O: AsRef<ExId>>(
-        &self,
-        obj: O,
-        heads: &[ChangeId],
-    ) -> Result<Keys<'_>, AutomergeError> {
-        Ok(self
-            .doc
-            .keys_for(obj.as_ref(), self.get_scope(Some(heads))?))
-    }
-
-    fn iter_at<O: AsRef<ExId>>(
-        &self,
-        obj: O,
-        heads: Option<&[ChangeId]>,
-    ) -> Result<DocIter<'_>, AutomergeError> {
-        Ok(self.doc.iter_for(obj.as_ref(), self.get_scope(heads)?))
-    }
-
-    fn iter(&self) -> DocIter<'_> {
-        self.doc
-            .iter_for(&ROOT, self.get_scope(None).expect("no heads to resolve"))
-    }
-
-    fn map_range<'a, O: AsRef<ExId>, R: RangeBounds<String> + 'a>(
-        &'a self,
-        obj: O,
-        range: R,
-    ) -> MapRange<'a> {
-        self.doc.map_range_for(
-            obj.as_ref(),
-            range,
-            self.get_scope(None).expect("no heads to resolve"),
-        )
-    }
-
-    fn map_range_at<'a, O: AsRef<ExId>, R: RangeBounds<String> + 'a>(
-        &'a self,
-        obj: O,
-        range: R,
-        heads: &[ChangeId],
-    ) -> Result<MapRange<'a>, AutomergeError> {
-        Ok(self
-            .doc
-            .map_range_for(obj.as_ref(), range, self.get_scope(Some(heads))?))
-    }
-
-    fn list_range<O: AsRef<ExId>, R: RangeBounds<usize>>(&self, obj: O, range: R) -> ListRange<'_> {
-        self.doc.list_range_for(
-            obj.as_ref(),
-            range,
-            self.get_scope(None).expect("no heads to resolve"),
-        )
-    }
-
-    fn list_range_at<O: AsRef<ExId>, R: RangeBounds<usize>>(
-        &self,
-        obj: O,
-        range: R,
-        heads: &[ChangeId],
-    ) -> Result<ListRange<'_>, AutomergeError> {
-        Ok(self
-            .doc
-            .list_range_for(obj.as_ref(), range, self.get_scope(Some(heads))?))
-    }
-
-    fn values<O: AsRef<ExId>>(&self, obj: O) -> Values<'_> {
-        self.doc.values_for(
-            obj.as_ref(),
-            self.get_scope(None).expect("no heads to resolve"),
-        )
-    }
-
-    fn values_at<O: AsRef<ExId>>(
-        &self,
-        obj: O,
-        heads: &[ChangeId],
-    ) -> Result<Values<'_>, AutomergeError> {
-        Ok(self
-            .doc
-            .values_for(obj.as_ref(), self.get_scope(Some(heads))?))
-    }
-
-    fn length<O: AsRef<ExId>>(&self, obj: O) -> usize {
-        self.doc.length_for(
-            obj.as_ref(),
-            self.get_scope(None).expect("no heads to resolve"),
-        )
-    }
-
-    fn length_at<O: AsRef<ExId>>(
-        &self,
-        obj: O,
-        heads: &[ChangeId],
-    ) -> Result<usize, AutomergeError> {
-        Ok(self
-            .doc
-            .length_for(obj.as_ref(), self.get_scope(Some(heads))?))
-    }
-
-    fn object_type<O: AsRef<ExId>>(&self, obj: O) -> Result<ObjType, AutomergeError> {
-        self.doc.object_type(obj)
-    }
-
-    fn marks<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<Mark>, AutomergeError> {
-        self.doc.marks_for(
-            obj.as_ref(),
-            self.get_scope(None).expect("no heads to resolve"),
-        )
-    }
-
-    fn marks_at<O: AsRef<ExId>>(
-        &self,
-        obj: O,
-        heads: &[ChangeId],
-    ) -> Result<Vec<Mark>, AutomergeError> {
-        self.doc
-            .marks_for(obj.as_ref(), self.get_scope(Some(heads))?)
-    }
-
-    fn get_marks<O: AsRef<ExId>>(
-        &self,
-        obj: O,
-        index: usize,
-        heads: Option<&[ChangeId]>,
-    ) -> Result<MarkSet, AutomergeError> {
-        self.doc
-            .get_marks_for(obj.as_ref(), index, self.get_scope(heads)?)
-    }
-
-    fn text<O: AsRef<ExId>>(&self, obj: O) -> Result<String, AutomergeError> {
-        self.doc.text_for(
-            obj.as_ref(),
-            self.get_scope(None).expect("no heads to resolve"),
-        )
-    }
-
-    fn text_at<O: AsRef<ExId>>(
-        &self,
-        obj: O,
-        heads: &[ChangeId],
-    ) -> Result<String, AutomergeError> {
-        self.doc
-            .text_for(obj.as_ref(), self.get_scope(Some(heads))?)
-    }
-
-    fn spans<O: AsRef<ExId>>(&self, obj: O) -> Result<Spans<'_>, AutomergeError> {
-        self.doc.spans_for(
-            obj.as_ref(),
-            self.get_scope(None).expect("no heads to resolve"),
-        )
-    }
-
-    fn spans_at<O: AsRef<ExId>>(
-        &self,
-        obj: O,
-        heads: &[ChangeId],
-    ) -> Result<Spans<'_>, AutomergeError> {
-        self.doc
-            .spans_for(obj.as_ref(), self.get_scope(Some(heads))?)
-    }
-
-    fn get_cursor<O: AsRef<ExId>, I: Into<CursorPosition>>(
-        &self,
-        obj: O,
-        position: I,
-        at: Option<&[ChangeId]>,
-    ) -> Result<Cursor, AutomergeError> {
-        self.doc.get_cursor_for(
-            obj.as_ref(),
-            position.into(),
-            self.get_scope(at)?,
-            MoveCursor::After,
-        )
-    }
-
-    fn get_cursor_moving<O: AsRef<ExId>, I: Into<CursorPosition>>(
-        &self,
-        obj: O,
-        position: I,
-        at: Option<&[ChangeId]>,
-        move_cursor: MoveCursor,
-    ) -> Result<Cursor, AutomergeError> {
-        self.doc.get_cursor_for(
-            obj.as_ref(),
-            position.into(),
-            self.get_scope(at)?,
-            move_cursor,
-        )
-    }
-
-    fn get_cursor_position<O: AsRef<ExId>>(
-        &self,
-        obj: O,
-        cursor: &Cursor,
-        at: Option<&[ChangeId]>,
-    ) -> Result<usize, AutomergeError> {
-        self.doc
-            .get_cursor_position_for(obj.as_ref(), cursor, self.get_scope(at)?)
-    }
-
-    fn hydrate<O: AsRef<ExId>>(
-        &self,
-        obj: O,
-        heads: Option<&[ChangeId]>,
-    ) -> Result<hydrate::Value, AutomergeError> {
-        self.doc
-            .hydrate_obj_for(obj.as_ref(), self.get_scope(heads)?)
-    }
-
-    fn get<O: AsRef<ExId>, P: Into<Prop>>(
-        &self,
-        obj: O,
-        prop: P,
-    ) -> Result<Option<(Value<'_>, ExId)>, AutomergeError> {
-        self.doc.get_for(
-            obj.as_ref(),
-            prop.into(),
-            self.get_scope(None).expect("no heads to resolve"),
-        )
-    }
-
-    fn get_at<O: AsRef<ExId>, P: Into<Prop>>(
-        &self,
-        obj: O,
-        prop: P,
-        heads: &[ChangeId],
-    ) -> Result<Option<(Value<'_>, ExId)>, AutomergeError> {
-        self.doc
-            .get_for(obj.as_ref(), prop.into(), self.get_scope(Some(heads))?)
-    }
-
-    fn get_all<O: AsRef<ExId>, P: Into<Prop>>(
-        &self,
-        obj: O,
-        prop: P,
-    ) -> Result<Vec<(Value<'_>, ExId)>, AutomergeError> {
-        self.doc.get_all_for(
-            obj.as_ref(),
-            prop.into(),
-            self.get_scope(None).expect("no heads to resolve"),
-        )
-    }
-
-    fn get_all_at<O: AsRef<ExId>, P: Into<Prop>>(
-        &self,
-        obj: O,
-        prop: P,
-        heads: &[ChangeId],
-    ) -> Result<Vec<(Value<'_>, ExId)>, AutomergeError> {
-        self.doc
-            .get_all_for(obj.as_ref(), prop.into(), self.get_scope(Some(heads))?)
-    }
-
-    fn get_missing_deps(&self, heads: &[ChangeId]) -> Result<Vec<ChangeHash>, AutomergeError> {
-        self.doc.get_missing_deps(heads)
-    }
-
-    fn get_change_by_hash(&self, hash: &ChangeHash) -> Result<Option<Change>, AutomergeError> {
-        self.doc.get_change_by_hash(hash)
-    }
-
-    fn stats(&self) -> crate::read::Stats {
-        self.doc.stats()
-    }
-
-    fn text_encoding(&self) -> crate::TextEncoding {
-        self.doc.text_encoding()
+    fn get_scope(&self, heads: Option<&[ChangeId]>) -> Result<ReadAt<'_>, AutomergeError> {
+        if let Some(h) = heads {
+            // pending ops are in the op set but not under the graph's heads, so
+            // with a transaction in flight current heads must not read unscoped
+            return if self.transaction.is_none() {
+                self.doc.read_at(Some(h))
+            } else {
+                Ok(self.doc.read_scoped(Cow::Owned(self.doc.visible(h)?)))
+            };
+        }
+        Ok(match (&self.isolation, &self.transaction) {
+            (Some(_), Some(t)) => match t.get_scope() {
+                Some(scope) => self.doc.read_scoped(Cow::Borrowed(scope)),
+                None => self.doc.read_current(),
+            },
+            (Some(i), None) => self
+                .doc
+                .read_at(Some(i))
+                .expect("isolation ids are always known"),
+            _ => self.doc.read_current(),
+        })
     }
 }
 
-impl<H: HashRetention> Transactable for AutoCommit<H> {
-    fn pending_ops(&self) -> usize {
-        self.transaction
-            .as_ref()
-            .map(|t| t.pending_ops())
-            .unwrap_or(0)
+impl<H: HashRetention> TxDoc for AutoCommit<H> {
+    fn inner(&self) -> Option<&TransactionInner> {
+        self.transaction.as_ref()
     }
 
-    fn put<O: AsRef<ExId>, P: Into<Prop>, V: Into<ScalarValue>>(
-        &mut self,
-        obj: O,
-        prop: P,
-        value: V,
-    ) -> Result<(), AutomergeError> {
-        self.with_transaction(|tx, doc| tx.put(doc, obj.as_ref(), prop, value))
+    fn parts_mut(&mut self) -> (&mut TransactionInner, &mut Automerge<H>) {
+        self.ensure_transaction_open();
+        (self.transaction.as_mut().unwrap(), &mut self.doc)
     }
 
-    fn put_object<O: AsRef<ExId>, P: Into<Prop>>(
-        &mut self,
-        obj: O,
-        prop: P,
-        value: ObjType,
-    ) -> Result<ExId, AutomergeError> {
-        self.with_transaction(|tx, doc| tx.put_object(doc, obj.as_ref(), prop, value))
-    }
-
-    fn insert<O: AsRef<ExId>, V: Into<ScalarValue>>(
-        &mut self,
-        obj: O,
-        index: usize,
-        value: V,
-    ) -> Result<(), AutomergeError> {
-        self.with_transaction(|tx, doc| tx.insert(doc, obj.as_ref(), index, value))
-    }
-
-    fn insert_object<O: AsRef<ExId>>(
-        &mut self,
-        obj: O,
-        index: usize,
-        value: ObjType,
-    ) -> Result<ExId, AutomergeError> {
-        self.with_transaction(|tx, doc| tx.insert_object(doc, obj.as_ref(), index, value))
-    }
-
-    fn increment<O: AsRef<ExId>, P: Into<Prop>>(
-        &mut self,
-        obj: O,
-        prop: P,
-        value: i64,
-    ) -> Result<(), AutomergeError> {
-        self.with_transaction(|tx, doc| tx.increment(doc, obj.as_ref(), prop, value))
-    }
-
-    fn delete<O: AsRef<ExId>, P: Into<Prop>>(
-        &mut self,
-        obj: O,
-        prop: P,
-    ) -> Result<(), AutomergeError> {
-        self.with_transaction(|tx, doc| tx.delete(doc, obj.as_ref(), prop))
-    }
-
-    /// Splice new elements into the given sequence
-    fn splice<O: AsRef<ExId>, V: Into<crate::hydrate::Value>, I: IntoIterator<Item = V>>(
-        &mut self,
-        obj: O,
-        pos: usize,
-        del: isize,
-        vals: I,
-    ) -> Result<(), AutomergeError> {
-        self.with_transaction(|tx, doc| tx.splice(doc, obj.as_ref(), pos, del, vals))
-    }
-
-    fn splice_text<O: AsRef<ExId>>(
-        &mut self,
-        obj: O,
-        pos: usize,
-        del: isize,
-        text: &str,
-    ) -> Result<(), AutomergeError> {
-        self.with_transaction(|tx, doc| tx.splice_text(doc, obj.as_ref(), pos, del, text))
-    }
-
-    fn mark<O: AsRef<ExId>>(
-        &mut self,
-        obj: O,
-        mark: Mark,
-        expand: ExpandMark,
-    ) -> Result<(), AutomergeError> {
-        self.with_transaction(|tx, doc| tx.mark(doc, obj.as_ref(), mark, expand))
-    }
-
-    fn unmark<O: AsRef<ExId>>(
-        &mut self,
-        obj: O,
-        key: &str,
-        start: usize,
-        end: usize,
-        expand: ExpandMark,
-    ) -> Result<(), AutomergeError> {
-        self.with_transaction(|tx, doc| tx.unmark(doc, obj.as_ref(), key, start, end, expand))
-    }
-
-    fn split_block<'p, O>(&mut self, obj: O, index: usize) -> Result<ExId, AutomergeError>
-    where
-        O: AsRef<ExId>,
-    {
-        self.with_transaction(|tx, doc| tx.split_block(doc, obj.as_ref(), index))
-    }
-
-    fn join_block<O: AsRef<ExId>>(&mut self, text: O, index: usize) -> Result<(), AutomergeError> {
-        self.with_transaction(|tx, doc| tx.join_block(doc, text.as_ref(), index))
-    }
-
-    fn replace_block<'p, O>(&mut self, text: O, index: usize) -> Result<ExId, AutomergeError>
-    where
-        O: AsRef<ExId>,
-    {
-        self.with_transaction(|tx, doc| tx.replace_block(doc, text.as_ref(), index))
-    }
-
-    fn base_heads(&self) -> Vec<ChangeHash> {
+    fn tx_base_heads(&self) -> Vec<ChangeHash> {
         if let Some(i) = &self.isolation {
             self.doc
                 .resolve_heads(i)
@@ -1393,52 +980,6 @@ impl<H: HashRetention> Transactable for AutoCommit<H> {
         } else {
             self.doc.get_head_hashes()
         }
-    }
-
-    fn update_text<S: AsRef<str>>(
-        &mut self,
-        obj: &ExId,
-        new_text: S,
-    ) -> Result<(), AutomergeError> {
-        self.with_transaction(|tx, doc| crate::text_diff::myers_diff(doc, tx, obj, new_text))
-    }
-
-    fn update_spans<O: AsRef<ExId>, I: IntoIterator<Item = Span>>(
-        &mut self,
-        text: O,
-        config: UpdateSpansConfig,
-        new_text: I,
-    ) -> Result<(), AutomergeError> {
-        self.with_transaction(|tx, doc| {
-            crate::text_diff::myers_block_diff(doc, tx, text.as_ref(), new_text, &config)
-        })
-    }
-
-    fn update_object<O: AsRef<ExId>>(
-        &mut self,
-        obj: O,
-        new_value: &crate::hydrate::Value,
-    ) -> Result<(), crate::error::UpdateObjectError> {
-        self.with_transaction(|tx, doc| tx.update_object(doc, obj.as_ref(), new_value))
-    }
-
-    fn batch_create_object<O: AsRef<ExId>, P: Into<Prop>>(
-        &mut self,
-        obj: O,
-        prop: P,
-        value: &crate::hydrate::Value,
-        insert: bool,
-    ) -> Result<ExId, AutomergeError> {
-        self.with_transaction(|tx, doc| {
-            tx.batch_create_object(doc, obj.as_ref(), prop.into(), value, insert)
-        })
-    }
-
-    fn init_root_from_hydrate(
-        &mut self,
-        value: &crate::hydrate::Map,
-    ) -> Result<(), AutomergeError> {
-        self.with_transaction(|tx, doc| tx.batch_init_root_map(doc, value))
     }
 }
 

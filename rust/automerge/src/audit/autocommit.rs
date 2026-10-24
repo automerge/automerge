@@ -674,10 +674,6 @@ impl super::AuditWrapper for AutoCommit {
     fn next_mut(&mut self) -> &mut Self::Next {
         &mut self.0
     }
-
-    fn doc(&self) -> &crate::automerge::Automerge<Full> {
-        &self.0.doc
-    }
 }
 
 impl crate::autocommit::AutoCommit<Full> {

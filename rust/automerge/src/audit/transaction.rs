@@ -93,10 +93,6 @@ impl<'a> super::AuditWrapper for Transaction<'a> {
     fn next_mut(&mut self) -> &mut Self::Next {
         &mut self.0
     }
-
-    fn doc(&self) -> &crate::automerge::Automerge<Full> {
-        self.0.doc_ref()
-    }
 }
 
 /// A transaction which owns the document it is editing.
@@ -151,9 +147,5 @@ impl super::AuditWrapper for OwnedTransaction {
 
     fn next_mut(&mut self) -> &mut Self::Next {
         &mut self.0
-    }
-
-    fn doc(&self) -> &crate::automerge::Automerge<Full> {
-        self.0.doc_ref()
     }
 }
