@@ -7,6 +7,8 @@
 * `ReadDoc::get_marks` uses the same units as `length`, `marks`, and `get`
   rather than disagreeing under some text encodings.
 * `ReadDoc::list_range` on a text no longer yields marks as elements.
+* `Automerge::apply_changes` rejecting a change for reusing an actor's
+  sequence number no longer drops queued changes that do not depend on it.
 
 ## 0.12.0
 

@@ -70,13 +70,20 @@ impl ChangeQueue {
     /// Remove queued changes at or after an incompatible actor sequence,
     /// together with changes which transitively depend on that branch.
     pub(crate) fn remove_actor_branch_from(&mut self, actor: &ActorId, seq: u64) {
-        let mut removed = self
+        let removed = self
             .changes
             .iter()
             .filter(|change| change.actor_id() == actor && change.seq() >= seq)
             .map(Change::hash)
             .collect::<HashSet<_>>();
+        self.remove_with_dependents(removed);
+    }
 
+    pub(crate) fn remove_dependents_of(&mut self, hash: ChangeHash) {
+        self.remove_with_dependents(HashSet::from([hash]));
+    }
+
+    fn remove_with_dependents(&mut self, mut removed: HashSet<ChangeHash>) {
         let mut dependents: HashMap<ChangeHash, Vec<ChangeHash>> = HashMap::new();
         for change in &self.changes {
             for dep in change.deps() {
