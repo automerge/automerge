@@ -244,6 +244,26 @@ impl ChangeGraph {
             .unwrap_or(0)
     }
 
+    /// Returns `true` if `actor_index` can safely advance its sequence under
+    /// the heads `seq_clock` was built from: either it has no changes, or its
+    /// latest change is covered.
+    ///
+    /// This checks change ancestry rather than operation visibility, since an
+    /// empty change advances an actor's sequence without introducing any
+    /// operations.
+    ///
+    /// Relies on an actor's sequence numbers being contiguous, so that
+    /// [`ChangeGraph::seq_for_actor`] names its latest change: [`ChangeGraph::add_change`]
+    /// asserts this, and non-contiguous sequences are rejected on load before
+    /// the graph is built.
+    pub(crate) fn is_actor_chain_within(&self, actor_index: usize, seq_clock: &SeqClock) -> bool {
+        let latest_seq = self.seq_for_actor(actor_index);
+        latest_seq == 0
+            || seq_clock
+                .get_for_actor(&actor_index)
+                .is_some_and(|covered| u64::from(covered.get()) >= latest_seq)
+    }
+
     fn deps_iter(&self) -> impl Iterator<Item = NodeIdx> + '_ {
         self.node_ids().flat_map(|n| self.parents(n))
     }
@@ -794,19 +814,23 @@ impl ChangeGraph {
 
     pub(crate) fn clock_at(&self, heads: &[ChangeHash]) -> Clock {
         let nodes = self.heads_to_nodes(heads);
-        self.calculate_clock(nodes.collect())
-            .map_to_clock(|actor, seq| {
-                self.seq_index
-                    .get(actor)
-                    .and_then(|v| v.get(seq.get() as usize - 1))
-                    .and_then(|i| self.max_ops.get(i.0 as usize))
-                    .copied()
-            })
+        self.clock_from_seq_clock(&self.calculate_clock(nodes.collect()))
     }
 
     pub(crate) fn seq_clock_for_heads(&self, heads: &[ChangeHash]) -> SeqClock {
         let nodes = self.heads_to_nodes(heads);
         self.calculate_clock(nodes.collect())
+    }
+
+    #[inline]
+    pub(crate) fn clock_from_seq_clock(&self, clock: &SeqClock) -> Clock {
+        clock.map_to_clock(|actor, seq| {
+            self.seq_index
+                .get(actor)
+                .and_then(|v| v.get(seq.get() as usize - 1))
+                .and_then(|i| self.max_ops.get(i.0 as usize))
+                .copied()
+        })
     }
 
     fn clock_data_for(&self, idx: NodeIdx) -> Option<u32> {
