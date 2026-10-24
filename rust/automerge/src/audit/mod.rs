@@ -5,7 +5,7 @@ mod autocommit;
 mod automerge;
 mod read;
 mod transactable;
-pub(crate) mod transaction;
+pub mod transaction;
 mod wrapper;
 
 pub use self::autocommit::AutoCommit;

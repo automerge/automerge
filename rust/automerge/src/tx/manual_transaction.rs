@@ -46,9 +46,7 @@ impl<'a, H: crate::hash_retention::HashRetention> Transaction<'a, H> {
     pub fn hash_for_opid(&self, opid: &ExId) -> Result<Option<ChangeHash>, AutomergeError> {
         self.doc.hash_for_opid(opid)
     }
-}
 
-impl<'a, H: crate::hash_retention::HashRetention> Transaction<'a, H> {
     pub(crate) fn empty(
         doc: &'a mut Automerge<H>,
         args: TransactionArgs,
@@ -56,9 +54,7 @@ impl<'a, H: crate::hash_retention::HashRetention> Transaction<'a, H> {
     ) -> ChangeHash {
         TransactionInner::empty(doc, args, opts.message, opts.time)
     }
-}
 
-impl<H: crate::hash_retention::HashRetention> Transaction<'_, H> {
     /// Get the heads of the document before this transaction was started.
     pub fn get_heads(&self) -> Vec<crate::ChangeId> {
         self.doc.get_heads()
@@ -66,11 +62,8 @@ impl<H: crate::hash_retention::HashRetention> Transaction<'_, H> {
 
     /// Commit the operations performed in this transaction, returning the
     /// [`crate::ChangeId`] of the change it created (if any).
-    pub fn commit(mut self) -> Option<crate::ChangeId> {
-        let hash = self.inner.take().unwrap().commit(self.doc, None, None)?;
-        self.doc
-            .hash_to_change_id(&hash)
-            .expect("hash of a newly committed change is always known")
+    pub fn commit(self) -> Option<crate::ChangeId> {
+        self.commit_with(CommitOptions::default())
     }
 
     /// Commit the operations in this transaction with some options.
