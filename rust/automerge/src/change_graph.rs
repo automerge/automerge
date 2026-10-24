@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 use std::cmp::Ordering;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashSet};
 use std::num::{NonZeroU32, NonZeroU64};
 use std::ops::Add;
 use std::ops::{Range, RangeBounds};
@@ -68,7 +68,6 @@ pub(crate) struct ChangeGraphCols {
 const CACHE_STEP: u32 = 16;
 
 /// Sorted, distinct nodes, and the order a bundle lists them in.
-/// `position` is O(1) when they are contiguous, otherwise a binary search.
 #[derive(Debug)]
 pub struct Members<'a> {
     nodes: &'a [NodeIdx],
@@ -133,19 +132,6 @@ pub(crate) enum ApplyLookup {
     Absent,
     /// A different change already occupies the change's `(actor, seq)`
     Equivocation,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum HashLookup {
-    Found(NodeIdx),
-    Absent,
-    /// The graph is unchecked, so it can't tell whether the hash is a change.
-    Unknown,
-}
-
-struct ResolvedHashes {
-    nodes: Vec<NodeIdx>,
-    missing: Vec<ChangeHash>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -401,10 +387,7 @@ impl<H: HashRetention> ChangeGraph<H> {
         frontier: &'a SeqClock,
     ) -> impl Iterator<Item = &'a [NodeIdx]> + 'a {
         self.seq_index.iter().enumerate().map(|(a, seqs)| {
-            let covered = frontier
-                .get_for_actor(&a)
-                .map_or(0, |s| s.get() as usize)
-                .min(seqs.len());
+            let covered = covered_seq(frontier, a).min(seqs.len());
             &seqs[covered..]
         })
     }
@@ -627,8 +610,6 @@ impl<H: HashRetention> ChangeGraph<H> {
             .unzip()
     }
 
-    /// Walks whichever is smaller, the members or the uncovered tails, so a
-    /// small bundle never walks the whole document.
     fn loose_members(&self, members: &Members<'_>, frontier: &SeqClock) -> Vec<NodeIdx> {
         let tails: Vec<&[NodeIdx]> = self.uncovered_tails(frontier).collect();
         if tails.iter().map(|t| t.len()).sum::<usize>() <= members.nodes().len() {
@@ -664,7 +645,9 @@ impl<H: HashRetention> ChangeGraph<H> {
 
     /// Appends `node` as `actor`'s tip, which must keep its hash; the old
     /// tip's hash may now be freed.
-    fn push_tip(&mut self, actor: usize, node: NodeIdx) {
+    fn push_tip(&mut self, actor: usize, seq: u64, node: NodeIdx) {
+        assert!(actor < self.seq_index.len());
+        assert_eq!(self.seq_index[actor].len() + 1, seq as usize);
         if Self::tracks_pins() {
             if let Some(old) = self.seq_index[actor].last() {
                 self.pins.candidates.push(*old);
@@ -709,17 +692,9 @@ impl<H: HashRetention> ChangeGraph<H> {
     /// naming the first wrong node.
     #[cfg(feature = "slow_path_assertions")]
     fn verify_pins(&self) {
-        let mut expect: HashMap<NodeIdx, u32> = HashMap::new();
-        for f in &self.fragments {
-            for p in self.fragment_pins(f) {
-                *expect.entry(p).or_default() += 1;
-            }
-        }
-        for n in self.uncovered_tails(&self.fragment_top).flatten() {
-            *expect.entry(*n).or_default() += 1;
-            for p in self.parents(*n) {
-                *expect.entry(p).or_default() += 1;
-            }
+        let mut expect: SmallHashMap<NodeIdx, u32> = SmallHashMap::default();
+        for p in self.pin_holders() {
+            *expect.entry(p).or_default() += 1;
         }
         for (n, c) in &expect {
             assert_eq!(
@@ -734,22 +709,24 @@ impl<H: HashRetention> ChangeGraph<H> {
     /// Every pin count from scratch, for a graph that wasn't tracking them.
     fn rebuild_pins(&mut self) {
         self.pins = Pins::default();
-        let pins: Vec<NodeIdx> = self
+        for p in self.pin_holders() {
+            self.pins.pin(p);
+        }
+    }
+
+    /// One entry per pin a holder takes: the fragments', then the loose
+    /// nodes'.
+    fn pin_holders(&self) -> Vec<NodeIdx> {
+        let mut pins: Vec<NodeIdx> = self
             .fragments
             .iter()
             .flat_map(|f| self.fragment_pins(f))
             .collect();
-        for p in pins {
-            self.pins.pin(p);
+        for n in self.uncovered_tails(&self.fragment_top).flatten() {
+            pins.push(*n);
+            pins.extend(self.parents(*n));
         }
-        let loose: Vec<NodeIdx> = self
-            .uncovered_tails(&self.fragment_top)
-            .flatten()
-            .copied()
-            .collect();
-        for n in loose {
-            self.pin_loose(n);
-        }
+        pins
     }
 
     pub(crate) fn encode(&self, out: &mut Vec<u8>) -> RawColumns<Uncompressed> {
@@ -837,31 +814,13 @@ impl<H: HashRetention> ChangeGraph<H> {
         Some(actor_indices[index])
     }
 
-    pub(crate) fn deps_for_hash(
-        &self,
-        hash: &ChangeHash,
-    ) -> impl Iterator<Item = Result<ChangeHash, UncheckedHashes>> + '_ {
-        let parents = self
-            .nodes_by_hash
-            .get(hash)
-            .map(|n| self.parent_slice(*n))
-            .unwrap_or(&[]);
-        parents.iter().map(move |p| self.hashes.try_get(*p))
-    }
-
-    /// `None` for a hash the graph does not hold, including a freed one.
-    pub(crate) fn node_for_hash(&self, hash: &ChangeHash) -> Option<NodeIdx> {
-        self.nodes_by_hash.get(hash).copied()
-    }
-
-    fn lookup_hash(&self, hash: &ChangeHash) -> HashLookup {
-        if let Some(n) = self.nodes_by_hash.get(hash) {
-            return HashLookup::Found(*n);
-        }
-        if self.hashes.has_every_hash() {
-            HashLookup::Absent
-        } else {
-            HashLookup::Unknown
+    /// `Err` when the graph is unchecked, so it can't tell whether the hash
+    /// is a change.
+    fn lookup_hash(&self, hash: &ChangeHash) -> Result<Option<NodeIdx>, UncheckedHashes> {
+        match self.nodes_by_hash.get(hash) {
+            Some(n) => Ok(Some(*n)),
+            None if self.hashes.has_every_hash() => Ok(None),
+            None => Err(UncheckedHashes),
         }
     }
 
@@ -886,28 +845,8 @@ impl<H: HashRetention> ChangeGraph<H> {
         }
     }
 
-    fn resolve_hashes<'b, I: IntoIterator<Item = &'b ChangeHash>>(
-        &self,
-        hashes: I,
-    ) -> Result<ResolvedHashes, UncheckedHashes> {
-        let mut nodes = Vec::new();
-        let mut missing = Vec::new();
-        for hash in hashes {
-            match self.lookup_hash(hash) {
-                HashLookup::Found(n) => nodes.push(n),
-                HashLookup::Absent => missing.push(*hash),
-                HashLookup::Unknown => return Err(UncheckedHashes),
-            }
-        }
-        Ok(ResolvedHashes { nodes, missing })
-    }
-
     pub(crate) fn has_change(&self, hash: &ChangeHash) -> Result<bool, UncheckedHashes> {
-        match self.lookup_hash(hash) {
-            HashLookup::Found(_) => Ok(true),
-            HashLookup::Absent => Ok(false),
-            HashLookup::Unknown => Err(UncheckedHashes),
-        }
+        Ok(self.lookup_hash(hash)?.is_some())
     }
 
     /// An author footer is only valid on an actor's first change: skipping a
@@ -978,7 +917,6 @@ impl<H: HashRetention> ChangeGraph<H> {
         writer: &mut crate::storage::BundleChangeWriter<'a>,
         mapper: &mut crate::op_set2::change::ActorMapper<'_>,
     ) -> Result<(), UnretainedHashes> {
-        let mut unnamed = 0;
         use crate::storage::DeltaRunGrouper;
         let (mut seq, mut max_op, mut deps) =
             <(DeltaRunGrouper, DeltaRunGrouper, DeltaRunGrouper)>::default();
@@ -989,8 +927,9 @@ impl<H: HashRetention> ChangeGraph<H> {
         };
         // a run's seeks cost about as much as decoding this many rows
         const SEEK_ROWS: usize = 32;
+        let mut unnamed = 0;
         if ranges.len() > 1 && ranges.len() * SEEK_ROWS >= span {
-            self.write_gathered(members, writer, mapper, [&mut seq, &mut max_op, &mut deps])?;
+            unnamed = self.write_gathered(members, writer, mapper);
             ranges.clear();
         }
         for range in ranges {
@@ -1060,14 +999,13 @@ impl<H: HashRetention> ChangeGraph<H> {
 
     /// Writes members whose bundle order breaks into many short runs of
     /// nodes: every column is decoded once over their span rather than
-    /// sought for each run.
+    /// sought for each run. Returns the number of deps it could not name.
     fn write_gathered<'a>(
         &'a self,
         members: &Members<'_>,
         writer: &mut crate::storage::BundleChangeWriter<'a>,
         mapper: &mut crate::op_set2::change::ActorMapper<'_>,
-        [seq, max_op, deps]: [&mut crate::storage::DeltaRunGrouper; 3],
-    ) -> Result<(), UnretainedHashes> {
+    ) -> usize {
         let nodes = members.nodes();
         let lo = nodes[0].0 as usize;
         let span = lo..nodes[nodes.len() - 1].0 as usize + 1;
@@ -1079,7 +1017,13 @@ impl<H: HashRetention> ChangeGraph<H> {
             .iter_range(span)
             .map(|m| (m.value, m.prefix() as usize..m.total() as usize))
             .collect();
-        let mut timestamp = crate::storage::DeltaRunGrouper::default();
+        use crate::storage::DeltaRunGrouper;
+        let (mut seq, mut max_op, mut deps, mut timestamp) = <(
+            DeltaRunGrouper,
+            DeltaRunGrouper,
+            DeltaRunGrouper,
+            DeltaRunGrouper,
+        )>::default();
         let mut actor = Run(None);
         let mut ops = Run(None);
         let mut message = Run(None);
@@ -1114,7 +1058,7 @@ impl<H: HashRetention> ChangeGraph<H> {
             if let Some((v, k)) = dep_count.push(self.parent_slice(*n).len() as u32) {
                 writer.dep_count.append_n(v, k);
             }
-            unnamed += self.write_member_deps(*n, members, writer, deps);
+            unnamed += self.write_member_deps(*n, members, writer, &mut deps);
         }
         if let Some((v, k)) = actor.0 {
             writer.actor.append_n(v, k);
@@ -1131,15 +1075,12 @@ impl<H: HashRetention> ChangeGraph<H> {
         if let Some((v, k)) = dep_count.0 {
             writer.dep_count.append_n(v, k);
         }
+        seq.flush(&mut writer.seq);
+        max_op.flush(&mut writer.max_op);
+        deps.flush(&mut writer.deps);
         timestamp.flush(&mut writer.timestamp);
         writer.len += nodes.len();
-        if unnamed > 0 {
-            return Err(UnretainedHashes {
-                count: unnamed,
-                what: "changes outside the bundle that its members depend on",
-            });
-        }
-        Ok(())
+        unnamed
     }
 
     /// The number of `n`'s parents it could not name.
@@ -1196,10 +1137,9 @@ impl<H: HashRetention> ChangeGraph<H> {
     {
         let indexes: Vec<_> = hashes
             .into_iter()
-            .map(|hash| match self.lookup_hash(&hash) {
-                HashLookup::Found(n) => Ok(n),
-                HashLookup::Absent => Err(crate::AutomergeError::from(MissingDep)),
-                HashLookup::Unknown => Err(crate::AutomergeError::AuditModeRequired),
+            .map(|hash| {
+                self.lookup_hash(&hash)?
+                    .ok_or(AutomergeError::from(MissingDep))
             })
             .collect::<Result<_, _>>()?;
 
@@ -1268,18 +1208,7 @@ impl<H: HashRetention> ChangeGraph<H> {
         &self,
         seeds: impl IntoIterator<Item = NodeIdx>,
     ) -> Vec<NodeIdx> {
-        let mut members: BTreeSet<NodeIdx> = seeds.into_iter().collect();
-        let mut pending: Vec<NodeIdx> = members.iter().copied().collect();
-        while let Some(n) = pending.pop() {
-            for p in self.parent_slice(n).to_vec() {
-                if members.contains(&p) || self.hashes.get(p).is_some() {
-                    continue;
-                }
-                members.insert(p);
-                pending.push(p);
-            }
-        }
-        members.into_iter().collect()
+        self.ancestors_while(seeds, |p| self.hashes.get(p).is_none())
     }
 
     /// The nodes `clock` doesn't cover, ascending, widened when the GC has
@@ -1330,10 +1259,7 @@ impl<H: HashRetention> ChangeGraph<H> {
             .seq_index
             .iter()
             .enumerate()
-            .flat_map(|(actor, changes)| {
-                let seq = clock.get_for_actor(&actor).map_or(0, |s| s.get() as usize);
-                &changes[..seq]
-            })
+            .flat_map(|(actor, changes)| &changes[..covered_seq(clock, actor)])
             .copied()
             .collect();
         nodes.sort_unstable();
@@ -1470,16 +1396,14 @@ impl<H: HashRetention> ChangeGraph<H> {
             self.nodes_by_hash.insert(hash, node_idx);
             self.update_heads(change);
 
-            assert!(actor < self.seq_index.len());
-            assert_eq!(self.seq_index[actor].len() + 1, change.seq() as usize);
-            self.push_tip(actor, node_idx);
+            self.push_tip(actor, change.seq(), node_idx);
 
-            let ResolvedHashes { nodes, missing } = self.resolve_hashes(change.deps().iter())?;
-            if !missing.is_empty() {
-                // callers check deps before calling us
-                return Err(MissingDep.into());
-            }
-            self.push_parents(node_idx, nodes);
+            let parents = change
+                .deps()
+                .iter()
+                .map(|h| self.lookup_hash(h)?.ok_or(MissingDep.into()))
+                .collect::<Result<Vec<_>, AddChangeError>>()?;
+            self.push_parents(node_idx, parents);
             if Self::tracks_pins() {
                 self.pins.candidates.push(node_idx);
                 self.pin_loose(node_idx);
@@ -1534,18 +1458,8 @@ impl<H: HashRetention> ChangeGraph<H> {
             .copied()
     }
 
-    /// The retained hash of the change named by `id`, if any.
-    pub(crate) fn hash_for_change_id(
-        &self,
-        id: &ChangeId,
-        actors: &ActorTable,
-    ) -> Option<ChangeHash> {
-        self.hashes.get(self.node_for_change_id(id, actors)?)
-    }
-
-    /// Like [`Self::hash_for_change_id`] but distinguishes "no such
-    /// change" ([`AutomergeError::InvalidSeq`]) from "the hash was
-    /// freed" ([`AutomergeError::AuditModeRequired`]).
+    /// [`AutomergeError::InvalidSeq`] when there is no such change,
+    /// [`AutomergeError::AuditModeRequired`] when its hash was freed.
     pub(crate) fn get_hash_for_change_id(
         &self,
         id: &ChangeId,
@@ -1569,16 +1483,7 @@ impl<H: HashRetention> ChangeGraph<H> {
         hash: &ChangeHash,
         actors: &ActorTable,
     ) -> Result<Option<ChangeId>, UncheckedHashes> {
-        let node = match self.lookup_hash(hash) {
-            HashLookup::Found(n) => n,
-            HashLookup::Absent => return Ok(None),
-            HashLookup::Unknown => return Err(UncheckedHashes),
-        };
-        Ok(Some(self.change_id(node, actors)))
-    }
-
-    pub(crate) fn seq_clock_for_nodes(&self, nodes: Vec<NodeIdx>) -> SeqClock {
-        self.calculate_clock(nodes)
+        Ok(self.lookup_hash(hash)?.map(|n| self.change_id(n, actors)))
     }
 
     /// Sorted, so documents with equal heads give identical lists.
@@ -1627,7 +1532,7 @@ impl<H: HashRetention> ChangeGraph<H> {
         // node order depends on arrival order
         boundary.sort_unstable();
         let clock = self.calculate_clock(f.deps.clone());
-        let nodes = self.fragment_nodes(f.head, &clock);
+        let nodes = self.members_between([f.head], &clock);
         self.export_fragment(head, f.level, boundary, &nodes, actors)
     }
 
@@ -1671,7 +1576,11 @@ impl<H: HashRetention> ChangeGraph<H> {
             .map(|f| self.cached_fragment(f, actors))
             .collect();
         if levels.contains(&0) {
-            out.extend(self.loose_commits(heads, actors));
+            out.extend(
+                self.loose_nodes(heads)
+                    .into_iter()
+                    .filter_map(|n| self.loose_commit(n, actors)),
+            );
         }
         debug_assert!(
             out.is_sorted_by_key(|f| (std::cmp::Reverse(f.level), self.node_by_hash(&f.head))),
@@ -1689,23 +1598,23 @@ impl<H: HashRetention> ChangeGraph<H> {
         actors: &ActorTable,
     ) -> Vec<Fragment> {
         let fresh = |n: &NodeIdx| !self.is_covered_by(*n, covered);
-        let fragments: Vec<&FragmentNode> =
-            self.fragments.iter().filter(|f| fresh(&f.head)).collect();
-        debug_assert!(
-            !fragments.iter().any(|f| self.inside_higher_fragment(f)),
+        #[cfg(feature = "slow_path_assertions")]
+        assert!(
+            !self
+                .fragments
+                .iter()
+                .any(|f| fresh(&f.head) && self.inside_higher_fragment(f)),
             "a fragment lies inside a larger one"
         );
-        let mut out: Vec<Fragment> = fragments
-            .into_iter()
+        let mut out: Vec<Fragment> = self
+            .fragments
+            .iter()
+            .filter(|f| fresh(&f.head))
             .map(|f| self.cached_fragment(f, actors))
             .collect();
-        // loose commits lie above every fragment
-        let tips = heads
-            .iter()
-            .filter(|h| h.fragment_level() == 0)
-            .filter_map(|h| self.nodes_by_hash.get(h).copied());
         out.extend(
-            self.ancestry_until_clock(tips, &self.fragment_top)
+            self.loose_nodes(heads)
+                .into_iter()
                 .filter(fresh)
                 .filter_map(|n| self.loose_commit(n, actors)),
         );
@@ -1714,6 +1623,7 @@ impl<H: HashRetention> ChangeGraph<H> {
 
     /// Levels nest, so `f` lies inside a higher-level fragment exactly
     /// when its head is one of that fragment's members.
+    #[cfg(feature = "slow_path_assertions")]
     fn inside_higher_fragment(&self, f: &FragmentNode) -> bool {
         self.fragments
             .iter()
@@ -1725,14 +1635,12 @@ impl<H: HashRetention> ChangeGraph<H> {
     }
 
     /// The loose commits above the fragment index, oldest first.
-    fn loose_commits(&self, heads: &[ChangeHash], actors: &ActorTable) -> Vec<Fragment> {
-        let nodes = heads
+    fn loose_nodes(&self, heads: &[ChangeHash]) -> Vec<NodeIdx> {
+        let tips = heads
             .iter()
             .filter(|h| h.fragment_level() == 0)
             .filter_map(|h| self.nodes_by_hash.get(h).copied());
-        self.ancestry_until_clock(nodes, &self.fragment_top)
-            .filter_map(|n| self.loose_commit(n, actors))
-            .collect()
+        self.members_between(tips, &self.fragment_top)
     }
 
     /// Everything reachable from `heads` that `dep_clock` does not
@@ -1742,53 +1650,29 @@ impl<H: HashRetention> ChangeGraph<H> {
         heads: impl IntoIterator<Item = NodeIdx>,
         dep_clock: &SeqClock,
     ) -> Vec<NodeIdx> {
-        self.ancestry_until_clock(heads, dep_clock).collect()
+        self.ancestors_while(heads, |p| !self.is_covered_by(p, dep_clock))
     }
 
-    fn fragment_nodes(&self, node: NodeIdx, clock: &SeqClock) -> Vec<NodeIdx> {
-        self.ancestry_until_clock([node], clock).collect()
-    }
-
-    fn ancestry_until_clock<'a, I>(
-        &'a self,
-        seed: I,
-        clock: &'a SeqClock,
-    ) -> impl Iterator<Item = NodeIdx> + 'a
-    where
-        I: IntoIterator<Item = NodeIdx>,
-    {
-        let mut nodes: Vec<_> = self.rev_ancestry_until_clock(seed, clock).collect();
+    /// `seeds` and the ancestors reached through parents `follow` accepts,
+    /// ascending.
+    fn ancestors_while(
+        &self,
+        seeds: impl IntoIterator<Item = NodeIdx>,
+        follow: impl Fn(NodeIdx) -> bool,
+    ) -> Vec<NodeIdx> {
+        // pops in descending node index and a parent's index is always
+        // lower than its child's, so the frontier alone dedupes
+        let mut to_visit: BTreeSet<NodeIdx> = seeds.into_iter().collect();
+        let mut nodes = Vec::new();
+        while let Some(n) = to_visit.pop_last() {
+            to_visit.extend(self.parents(n).filter(|p| follow(*p)));
+            nodes.push(n);
+        }
         nodes.reverse();
-        nodes.into_iter()
-    }
-
-    /// Pops in descending node index and a parent's index is always lower
-    /// than its child's, so the frontier alone dedupes.
-    fn rev_ancestry_until_clock<'a, I>(
-        &'a self,
-        seed: I,
-        clock: &'a SeqClock,
-    ) -> impl Iterator<Item = NodeIdx> + 'a
-    where
-        I: IntoIterator<Item = NodeIdx>,
-    {
-        let mut to_visit: BTreeSet<_> = seed.into_iter().collect();
-
-        std::iter::from_fn(move || {
-            let idx = to_visit.pop_last()?;
-            for p in self.parents(idx) {
-                let actor = self.actors[p.0 as usize].into();
-                let seq = self.seq[p.0 as usize];
-                if clock.get_for_actor(&actor) < NonZeroU32::new(seq) {
-                    to_visit.insert(p);
-                }
-            }
-            Some(idx)
-        })
+        nodes
     }
 
     pub(crate) fn cache_fragments(&mut self) {
-        // no hash GC: a fresh load already holds exactly the retained set
         self.fragments.clear();
         self.fragment_top = self.empty_clock();
         for leveled in self.leveled.as_mut_slice() {
@@ -1801,7 +1685,7 @@ impl<H: HashRetention> ChangeGraph<H> {
 
     /// Run once at the end of a batch: a GC mid-batch would free dep hashes
     /// that later changes in the batch still resolve by hash.
-    fn gc_retained_hashes(&mut self) {
+    pub(crate) fn gc_after_batch(&mut self) {
         if self.gc_mode == crate::automerge::GcMode::Manual {
             self.gc_owed = true;
             return;
@@ -1827,7 +1711,7 @@ impl<H: HashRetention> ChangeGraph<H> {
     }
 
     /// Whether a fragment was cached, in which case the caller owes a
-    /// [`Self::gc_retained_hashes`].
+    /// [`Self::gc_after_batch`].
     fn cache_fragment_inner(&mut self, head: NodeIdx) -> bool {
         let Some(hash) = self.hashes.get(head) else {
             return false;
@@ -1884,7 +1768,6 @@ impl<H: HashRetention> ChangeGraph<H> {
             }
             self.release_covered(&old_top);
         }
-        // keep apply order (see [`Self::fragments`])
         let pos = self
             .fragments
             .partition_point(|f| f.sort_key() < node.sort_key());
@@ -1969,8 +1852,8 @@ impl<H: HashRetention> ChangeGraph<H> {
         // members are each actor's seqs between the boundary and the clock,
         // so no ancestry walk
         for (a, seqs) in self.seq_index.iter().enumerate() {
-            let from = boundary.get_for_actor(&a).map_or(0, |s| s.get() as usize);
-            let to = f.clock.get_for_actor(&a).map_or(0, |s| s.get() as usize);
+            let from = covered_seq(boundary, a);
+            let to = covered_seq(&f.clock, a);
             if from >= to {
                 continue;
             }
@@ -2016,11 +1899,8 @@ impl<H: HashRetention> ChangeGraph<H> {
     /// pinned as loose.
     fn release_covered(&mut self, old_top: &SeqClock) {
         for a in 0..self.seq_index.len() {
-            let from = old_top.get_for_actor(&a).map_or(0, |s| s.get() as usize);
-            let to = self
-                .fragment_top
-                .get_for_actor(&a)
-                .map_or(0, |s| s.get() as usize);
+            let from = covered_seq(old_top, a);
+            let to = covered_seq(&self.fragment_top, a);
             for i in from..to {
                 let n = self.seq_index[a][i];
                 if self.pins.deferred_from.is_none_or(|d| n < d) {
@@ -2045,6 +1925,7 @@ impl<H: HashRetention> ChangeGraph<H> {
         self.pins.deferred_from = None;
     }
 
+    /// `None` for a hash the graph does not hold, including a freed one.
     pub(crate) fn node_by_hash(&self, hash: &ChangeHash) -> Option<NodeIdx> {
         self.nodes_by_hash.get(hash).copied()
     }
@@ -2054,8 +1935,7 @@ impl<H: HashRetention> ChangeGraph<H> {
     }
 
     /// Record a node's hash, returning whether that formed a new fragment,
-    /// in which case the caller owes a [`Self::gc_after_batch`]. Batch
-    /// these: each GC is O(graph).
+    /// in which case the caller owes a [`Self::gc_after_batch`].
     #[must_use = "the caller owes a gc_after_batch"]
     pub(crate) fn record_node_hash(&mut self, node: NodeIdx, hash: ChangeHash) -> bool {
         // a chain apply re-records fragment heads; re-caching one would cost
@@ -2064,7 +1944,6 @@ impl<H: HashRetention> ChangeGraph<H> {
             debug_assert_eq!(*known, node, "hash recorded for two nodes");
             return false;
         }
-        // audit mode already knows every hash
         if !self.hashes.learn(node, hash) {
             return false;
         }
@@ -2081,10 +1960,6 @@ impl<H: HashRetention> ChangeGraph<H> {
         let cached = self.record_node_hash(node, hash);
         self.heads.insert(hash);
         cached
-    }
-
-    pub(crate) fn gc_after_batch(&mut self) {
-        self.gc_retained_hashes();
     }
 
     /// Whether a new fragment owes a [`Self::gc_after_batch`].
@@ -2173,13 +2048,10 @@ impl<H: HashRetention> ChangeGraph<H> {
 
     /// Skips hashes that are definitely not in this document.
     fn heads_to_nodes(&self, heads: &[ChangeHash]) -> Result<Vec<NodeIdx>, UncheckedHashes> {
-        Ok(self.resolve_hashes(heads.iter())?.nodes)
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn clock_at(&self, heads: &[ChangeHash]) -> Result<Clock, UncheckedHashes> {
-        let nodes = self.heads_to_nodes(heads)?;
-        Ok(self.clock_for_nodes(nodes))
+        heads
+            .iter()
+            .filter_map(|h| self.lookup_hash(h).transpose())
+            .collect()
     }
 
     pub(crate) fn clock_for_nodes(&self, nodes: Vec<NodeIdx>) -> Clock {
@@ -2204,7 +2076,7 @@ impl<H: HashRetention> ChangeGraph<H> {
         Some(*self.seq.get(idx.0 as usize)?)
     }
 
-    fn calculate_clock(&self, nodes: Vec<NodeIdx>) -> SeqClock {
+    pub(crate) fn calculate_clock(&self, nodes: Vec<NodeIdx>) -> SeqClock {
         let mut clock = self.empty_clock();
         let mut to_visit = nodes.into_iter().collect::<BTreeSet<_>>();
 
@@ -2293,7 +2165,7 @@ impl<H: HashRetention> ChangeGraph<H> {
             .enumerate()
             .map(|(i, h)| (*h, NodeIdx(i as u32)))
             .collect();
-        let mut graph = self.with_hashes(Full::new(hashes));
+        let mut graph = self.with_hashes(Full(hashes));
         graph.nodes_by_hash = nodes_by_hash;
         graph.pins = Pins::default();
         graph.cache_fragments();
@@ -2360,14 +2232,9 @@ impl<H: HashRetention> ChangeGraph<H> {
         }
     }
 
-    /// Populate `clock_cache` with the clock of every `CACHE_STEP`th node.
-    /// Memory is bounded by the graph's width, not its size.
-    fn cache_clocks(&mut self) {
-        self.cache_clocks_from(0)
-    }
-
-    /// [`Self::cache_clocks`] for nodes `base..` appended onto an existing
-    /// graph. Costs one full clock walk per older node they depend on.
+    /// Populate `clock_cache` with the clock of every `CACHE_STEP`th node
+    /// from `base` on. Memory is bounded by the graph's width, not its size;
+    /// costs one full clock walk per node before `base` they depend on.
     fn cache_clocks_from(&mut self, base: usize) {
         let n = self.len();
         // a clock is cached at every `CACHE_STEP`th node only
@@ -2529,9 +2396,7 @@ impl<H: HashRetention> ChangeGraph<H> {
             }
         }
     }
-}
 
-impl<H: HashRetention> ChangeGraph<H> {
     /// Append a bundle's members, with their `hashes` if given. Members
     /// must be in topological order, each extending its actor's seq chain.
     /// Whether a new fragment owes a [`Self::gc_after_batch`].
@@ -2542,14 +2407,11 @@ impl<H: HashRetention> ChangeGraph<H> {
         authors: &mut Authors,
         actor_ids: &ActorTable,
     ) -> Result<bool, AutomergeError> {
-        let new_authors: Vec<_> = Self::member_authors(
+        let new_authors = Self::member_authors(
             members.iter().map(|m| (m.actor, m.seq, m.extra.as_ref())),
             authors,
             actor_ids,
-        )?
-        .into_iter()
-        .map(|(actor, author)| (actor, author.into_owned()))
-        .collect();
+        )?;
         let base = NodeIdx(self.len() as u32);
 
         self.hashes.extend(members.len(), hashes);
@@ -2573,9 +2435,7 @@ impl<H: HashRetention> ChangeGraph<H> {
             let node_idx = base + i;
             self.max_op = std::cmp::max(self.max_op, m.max_op as u32);
 
-            assert!(m.actor < self.seq_index.len());
-            assert_eq!(self.seq_index[m.actor].len() + 1, m.seq as usize);
-            self.push_tip(m.actor, node_idx);
+            self.push_tip(m.actor, m.seq, node_idx);
 
             parent_buf.clear();
             parent_buf.extend(m.deps.iter().map(|d| match d {
@@ -2592,14 +2452,20 @@ impl<H: HashRetention> ChangeGraph<H> {
             }
             self.push_parents(node_idx, parent_buf.iter().copied());
         }
+        Ok(self.finish_members(base, hashes, new_authors, authors))
+    }
+
+    fn finish_members(
+        &mut self,
+        base: NodeIdx,
+        hashes: Option<&[ChangeHash]>,
+        new_authors: Vec<(usize, crate::Author<'_>)>,
+        authors: &mut Authors,
+    ) -> bool {
         self.cache_clocks_from(base.0 as usize);
         for (actor, author) in new_authors {
             authors.assign_author(author.into_owned(), actor);
         }
-        Ok(self.index_member_hashes(base, hashes))
-    }
-
-    fn index_member_hashes(&mut self, base: NodeIdx, hashes: Option<&[ChangeHash]>) -> bool {
         if Self::tracks_pins() {
             // most of a bundle is covered by its own fragments, so pinning
             // it loose now would only be released below
@@ -2728,7 +2594,6 @@ impl<H: HashRetention> ChangeGraph<H> {
 
         debug_assert_eq!(self.dep_range.len(), base.0 as usize);
         for parent in &dep_target {
-            // appended members are not heads yet
             if *parent < base {
                 if let Some(h) = self.hashes.get(*parent) {
                     self.demote_head(*parent, &h);
@@ -2740,19 +2605,9 @@ impl<H: HashRetention> ChangeGraph<H> {
 
         for i in 0..n {
             let actor = actor_map[usize::from(member_actors[i])];
-            assert!(actor < self.seq_index.len());
-            assert_eq!(
-                self.seq_index[actor].len() + 1,
-                member_seqs[i].get() as usize
-            );
-            self.push_tip(actor, base + i);
+            self.push_tip(actor, member_seqs[i].get(), base + i);
         }
-
-        self.cache_clocks_from(base.0 as usize);
-        for (actor, author) in new_authors {
-            authors.assign_author(author.into_owned(), actor);
-        }
-        Ok(self.index_member_hashes(base, hashes))
+        Ok(self.finish_members(base, hashes, new_authors, authors))
     }
 }
 
@@ -2774,12 +2629,9 @@ impl ChangeGraph<Retained> {
             let Some(hash) = self.hashes.get(n) else {
                 continue;
             };
-            if self.pins.is_pinned(n) || hash.fragment_level() > 0 {
-                // re-queued if unpinned; level > 0 hashes stay for good
-                continue;
-            }
-            if self.is_actor_tip(n) || self.heads.contains(&hash) {
-                // re-queued by `push_tip` or `demote_head`
+            if self.must_keep(n, &hash) {
+                // re-queued by `unpin`, `push_tip` or `demote_head`; level > 0
+                // hashes stay for good
                 continue;
             }
             self.hashes.forget(n);
@@ -2799,7 +2651,7 @@ impl ChangeGraph<Full> {
             .iter()
             .filter(|(n, hash)| self.must_keep(*n, hash))
             .collect();
-        let mut graph = self.with_hashes(Retained::new(map, len));
+        let mut graph = self.with_hashes(Retained { map, len });
         let ChangeGraph {
             hashes,
             nodes_by_hash,
@@ -2810,10 +2662,6 @@ impl ChangeGraph<Full> {
         graph.pins.candidates.clear();
         graph.pins.fresh.clear();
         graph
-    }
-
-    pub(crate) fn hash_of(&self, node: NodeIdx) -> ChangeHash {
-        self.hashes.hash(node)
     }
 }
 
@@ -2833,7 +2681,7 @@ impl ChangeGraphCols {
         } = computed;
         let mut graph = self
             .graph
-            .with_hashes(Full::new(Vec::with_capacity(hashes.len())));
+            .with_hashes(Full(Vec::with_capacity(hashes.len())));
         graph.assign_authors(0..graph.len(), authors)?;
         debug_assert_eq!(hashes.len(), graph.len());
 
@@ -2856,7 +2704,7 @@ impl ChangeGraphCols {
             .filter_map(|n| graph.hashes.get(NodeIdx(n)))
             .collect();
 
-        graph.cache_clocks();
+        graph.cache_clocks_from(0);
 
         graph.cache_fragments();
 
@@ -2975,20 +2823,8 @@ impl ChangeGraphCols {
             return Err(LoadError::InvalidColumnLength(DEPS_COUNT_COL_SPEC));
         }
 
-        // blank - to be filled out later
-        let clock_cache = HashMap::default();
-        let hashes = Retained::default();
-        let nodes_by_hash = SmallHashMap::default();
-        let fragments = vec![];
-        let leveled = ActorIndexed::new(actor_table);
-        let fragment_top = SeqClock::new(actor_table);
-
         Ok(ChangeGraphCols {
             graph: ChangeGraph {
-                gc_mode: crate::automerge::GcMode::default(),
-                gc_owed: false,
-                pins: Pins::default(),
-                hashes,
                 actors,
                 dep_range,
                 dep_target,
@@ -3001,12 +2837,8 @@ impl ChangeGraphCols {
                 extra_bytes_meta,
                 extra_bytes_raw,
                 heads,
-                nodes_by_hash,
-                clock_cache,
                 seq_index,
-                leveled,
-                fragments,
-                fragment_top,
+                ..ChangeGraph::new(actor_table)
             },
         })
     }
@@ -3081,7 +2913,7 @@ mod tests {
 
         let mut swept = graph.clone();
         swept.clock_cache.clear();
-        swept.cache_clocks();
+        swept.cache_clocks_from(0);
 
         let mut bare = graph.clone();
         bare.clock_cache.clear();
@@ -4340,6 +4172,10 @@ impl<V: Copy + PartialEq> Run<V> {
             run => run.replace((value, 1)),
         }
     }
+}
+
+fn covered_seq(clock: &SeqClock, actor: usize) -> usize {
+    clock.get_for_actor(&actor).map_or(0, |s| s.get() as usize)
 }
 
 /// The maximal runs of consecutive indexes in `nodes`.

@@ -13,68 +13,44 @@ mod sealed {
 pub trait HashRetention:
     sealed::Sealed + std::fmt::Debug + Clone + Default + Send + Sync + 'static
 {
-    #[doc(hidden)]
     const AUDIT: AuditMode;
 
     /// Every node, hashed or not.
-    #[doc(hidden)]
     fn len(&self) -> usize;
 
-    #[doc(hidden)]
     fn get(&self, node: NodeIdx) -> Option<ChangeHash>;
 
-    #[doc(hidden)]
     fn try_get(&self, node: NodeIdx) -> Result<ChangeHash, UncheckedHashes> {
         self.get(node).ok_or(UncheckedHashes)
     }
 
-    #[doc(hidden)]
     fn iter(&self) -> impl Iterator<Item = (NodeIdx, ChangeHash)> + '_;
 
-    #[doc(hidden)]
     fn push(&mut self, hash: ChangeHash);
 
     /// Appends `n` nodes, with their hashes when given.
-    #[doc(hidden)]
     fn extend(&mut self, n: usize, hashes: Option<&[ChangeHash]>);
 
-    #[doc(hidden)]
     fn has_every_hash(&self) -> bool;
 
-    #[doc(hidden)]
     fn all(&self) -> Option<&[ChangeHash]>;
 
     /// In node order.
-    #[doc(hidden)]
     fn leveled_members(&self, members: &Members<'_>) -> Vec<(NodeIdx, ChangeHash)>;
 
     /// Whether the store kept the hash.
-    #[doc(hidden)]
     fn learn(&mut self, node: NodeIdx, hash: ChangeHash) -> bool;
 
-    #[doc(hidden)]
     fn collect_garbage(graph: &mut ChangeGraph<Self>);
 
-    #[doc(hidden)]
     fn from_full(doc: Automerge<Full>) -> Automerge<Self>;
 
-    #[doc(hidden)]
     fn apply_bundle(doc: &mut Automerge<Self>, bundle: Bundle) -> Result<(), AutomergeError>;
 }
 
 /// Every change hash is kept: audit mode.
 #[derive(Debug, Clone, Default)]
-pub struct Full(Vec<ChangeHash>);
-
-impl Full {
-    pub(crate) fn new(hashes: Vec<ChangeHash>) -> Self {
-        Full(hashes)
-    }
-
-    pub(crate) fn hash(&self, node: NodeIdx) -> ChangeHash {
-        self.0[node.0 as usize]
-    }
-}
+pub struct Full(pub(crate) Vec<ChangeHash>);
 
 impl HashRetention for Full {
     const AUDIT: AuditMode = AuditMode::Enabled;
@@ -139,15 +115,11 @@ impl HashRetention for Full {
 /// Only the retained set of hashes is kept.
 #[derive(Debug, Clone, Default)]
 pub struct Retained {
-    map: crate::types::SmallHashMap<NodeIdx, ChangeHash>,
-    len: usize,
+    pub(crate) map: crate::types::SmallHashMap<NodeIdx, ChangeHash>,
+    pub(crate) len: usize,
 }
 
 impl Retained {
-    pub(crate) fn new(map: crate::types::SmallHashMap<NodeIdx, ChangeHash>, len: usize) -> Self {
-        Retained { map, len }
-    }
-
     pub(crate) fn forget(&mut self, node: NodeIdx) {
         self.map.remove(&node);
     }

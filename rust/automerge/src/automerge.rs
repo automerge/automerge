@@ -635,7 +635,7 @@ impl<H: HashRetention> Automerge<H> {
     fn pin_resolved_boundaries(&mut self) {
         for boundary in self.write_frontier.boundaries_mut() {
             if let Boundary::Hash(hash) = boundary {
-                if let Some(node) = self.change_graph.node_for_hash(hash) {
+                if let Some(node) = self.change_graph.node_by_hash(hash) {
                     *boundary = Boundary::Id(self.change_graph.change_id(node, &self.ops.actors));
                 }
             }
@@ -976,7 +976,7 @@ impl<H: HashRetention> Automerge<H> {
         let mut f = Self::empty(self.text_encoding());
         f.set_gc_mode(self.gc_mode());
         if !nodes.is_empty() {
-            let clock = self.change_graph.seq_clock_for_nodes(nodes);
+            let clock = self.change_graph.calculate_clock(nodes);
             let nodes = self.change_graph.nodes_covered_by(&clock);
             let heads = self
                 .change_graph
@@ -1486,7 +1486,7 @@ impl<H: HashRetention> Automerge<H> {
             .iter()
             .filter_map(|id| self.node_for_change_id(id))
             .collect();
-        let covered = self.change_graph.seq_clock_for_nodes(nodes);
+        let covered = self.change_graph.calculate_clock(nodes);
         Ok(self
             .change_graph
             .fragments_after(&self.get_head_hashes(), &covered, &self.ops.actors))
@@ -1509,7 +1509,7 @@ impl<H: HashRetention> Automerge<H> {
             .iter()
             .filter_map(|id| self.node_for_change_id(id))
             .collect();
-        let clock = self.change_graph.seq_clock_for_nodes(nodes);
+        let clock = self.change_graph.calculate_clock(nodes);
         let fresh = self.change_graph.nodes_above(clock);
         let boundary = self.change_ids_to_hashes_lossy(heads);
         self.bundle_nodes(fresh, &boundary, NameHashes::All)
@@ -2031,7 +2031,7 @@ impl<H: HashRetention> Automerge<H> {
                 |boundary, _| !pending.contains(boundary),
             ),
             None => {
-                let history = graph.seq_clock_for_nodes(nodes.clone());
+                let history = graph.calculate_clock(nodes.clone());
                 visibility::FrontierVisibility::resolving(
                     write_frontier,
                     graph,
@@ -2127,9 +2127,7 @@ impl<H: HashRetention> Automerge<H> {
             .map(node_of)
             .collect::<Result<Vec<_>, _>>()?;
 
-        let clock = self
-            .change_graph
-            .seq_clock_for_nodes(boundary_nodes.clone());
+        let clock = self.change_graph.calculate_clock(boundary_nodes.clone());
         let members = self.change_graph.members_between(head_nodes, &clock);
 
         let hash_of = |n: &crate::change_graph::NodeIdx| {
@@ -3138,7 +3136,7 @@ impl<H: HashRetention> Automerge<H> {
             .iter()
             .filter_map(|id| self.node_for_change_id(id))
             .collect();
-        self.change_graph.seq_clock_for_nodes(nodes)
+        self.change_graph.calculate_clock(nodes)
     }
 
     pub fn get_change_meta_by_hash(
@@ -3192,10 +3190,12 @@ impl<H: HashRetention> Automerge<H> {
                     let id = self.change_id_at(actor_idx, seq);
                     Some((
                         self.change_graph
-                            .hash_for_change_id(&id, &self.ops.actors)?,
+                            .get_hash_for_change_id(&id, &self.ops.actors)
+                            .ok()?,
                         other
                             .change_graph
-                            .hash_for_change_id(&id, &other.ops.actors)?,
+                            .get_hash_for_change_id(&id, &other.ops.actors)
+                            .ok()?,
                     ))
                 };
                 if let Some((a, b)) = hash_at(shared as u64) {
@@ -3903,7 +3903,7 @@ impl Automerge<Full> {
             if !seen.contains(&hash) && !self.change_graph.has_change(&hash).unwrap_or(false) {
                 seen.insert(hash);
                 added.push(hash);
-                stack.extend(other.change_graph.deps_for_hash(&hash).flatten());
+                stack.extend(other.change_graph.deps(&hash).flatten());
             }
         }
         added.reverse();
@@ -3914,7 +3914,7 @@ impl Automerge<Full> {
 
     pub(crate) fn hash_of_id(&self, id: &ChangeId) -> Option<ChangeHash> {
         let node = self.node_for_change_id(id)?;
-        Some(self.change_graph.hash_of(node))
+        self.change_graph.hash_for_node(node)
     }
 }
 

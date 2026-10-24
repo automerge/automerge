@@ -110,7 +110,7 @@ pub(super) fn node_for_boundary<H: HashRetention>(
 ) -> Option<NodeIdx> {
     match boundary {
         Boundary::Id(id) => graph.node_for_change_id(id, actors),
-        Boundary::Hash(hash) => graph.node_for_hash(hash),
+        Boundary::Hash(hash) => graph.node_by_hash(hash),
     }
 }
 
