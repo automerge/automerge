@@ -849,6 +849,10 @@ impl super::AuditWrapper for Automerge {
     fn next_mut(&mut self) -> &mut Self::Next {
         &mut self.0
     }
+
+    fn doc(&self) -> &crate::automerge::Automerge<Full> {
+        &self.0
+    }
 }
 
 impl crate::automerge::Automerge<Full> {

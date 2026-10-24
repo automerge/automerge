@@ -19,15 +19,11 @@ use crate::{
 
 use super::TransactionInner;
 
-pub trait ScopedRead {
+pub trait TxDoc {
     type Retention: HashRetention;
 
     fn doc(&self) -> &Automerge<Self::Retention>;
 
-    fn get_scope(&self, heads: Option<&[ChangeId]>) -> Result<ReadAt<'_>, AutomergeError>;
-}
-
-pub trait TxDoc: ScopedRead {
     fn inner(&self) -> Option<&TransactionInner>;
 
     fn parts_mut(&mut self) -> (&mut TransactionInner, &mut Automerge<Self::Retention>);
@@ -40,7 +36,7 @@ pub trait TxDoc: ScopedRead {
         f(tx, doc)
     }
 
-    fn tx_scope(&self, heads: Option<&[ChangeId]>) -> Result<ReadAt<'_>, AutomergeError> {
+    fn get_scope(&self, heads: Option<&[ChangeId]>) -> Result<ReadAt<'_>, AutomergeError> {
         let doc = self.doc();
         if let Some(h) = heads {
             // with a transaction in flight the current-heads shortcut is unsound
@@ -51,9 +47,25 @@ pub trait TxDoc: ScopedRead {
             None => doc.read_current(),
         })
     }
+}
 
-    fn tx_base_heads(&self) -> Vec<ChangeHash> {
-        self.inner().map(|d| d.get_deps()).unwrap_or_default()
+pub trait ScopedRead {
+    type Retention: HashRetention;
+
+    fn doc(&self) -> &Automerge<Self::Retention>;
+
+    fn get_scope(&self, heads: Option<&[ChangeId]>) -> Result<ReadAt<'_>, AutomergeError>;
+}
+
+impl<T: TxDoc> ScopedRead for T {
+    type Retention = T::Retention;
+
+    fn doc(&self) -> &Automerge<T::Retention> {
+        TxDoc::doc(self)
+    }
+
+    fn get_scope(&self, heads: Option<&[ChangeId]>) -> Result<ReadAt<'_>, AutomergeError> {
+        TxDoc::get_scope(self, heads)
     }
 }
 
@@ -352,7 +364,7 @@ impl<T: ScopedRead> ReadDoc for T {
 
 impl<T: TxDoc> Transactable for T {
     fn pending_ops(&self) -> usize {
-        self.inner().map_or(0, |t| t.pending_ops())
+        self.inner().expect("an open transaction").pending_ops()
     }
 
     fn put<O: AsRef<ExId>, P: Into<Prop>, V: Into<ScalarValue>>(
@@ -472,7 +484,7 @@ impl<T: TxDoc> Transactable for T {
     }
 
     fn base_heads(&self) -> Vec<ChangeHash> {
-        self.tx_base_heads()
+        self.inner().map(|d| d.get_deps()).unwrap_or_default()
     }
 
     fn update_text<S: AsRef<str>>(

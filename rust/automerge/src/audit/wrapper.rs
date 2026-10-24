@@ -1,4 +1,5 @@
 use super::known_ids;
+use crate::automerge::Automerge;
 use crate::error::UpdateObjectError;
 use crate::exid::ExId;
 use crate::hash_retention::Full;
@@ -6,18 +7,20 @@ use crate::hydrate;
 use crate::iter::{DocIter, Keys, ListRange, MapRange, Span, Spans, Values};
 use crate::marks::{ExpandMark, Mark, MarkSet, UpdateSpansConfig};
 use crate::read::{ReadDoc, Stats};
-use crate::tx::{ScopedRead, Transactable};
+use crate::tx::Transactable;
 use crate::{
     AutomergeError, Change, ChangeHash, Cursor, CursorPosition, MoveCursor, ObjType, Parents, Prop,
     ScalarValue, TextEncoding, Value,
 };
 
 pub trait AuditWrapper {
-    type Next: ScopedRead<Retention = Full>;
+    type Next: ReadDoc;
 
     fn next(&self) -> &Self::Next;
 
     fn next_mut(&mut self) -> &mut Self::Next;
+
+    fn doc(&self) -> &Automerge<Full>;
 }
 
 /// Reads the audited API declares infallible return an empty result where
@@ -32,7 +35,7 @@ impl<T: AuditWrapper> super::ReadDoc for T {
         obj: O,
         heads: &[ChangeHash],
     ) -> Result<Parents<'_>, AutomergeError> {
-        let ids = known_ids(self.next().doc(), heads);
+        let ids = known_ids(self.doc(), heads);
         self.next().parents_at(obj, &ids)
     }
 
@@ -41,12 +44,12 @@ impl<T: AuditWrapper> super::ReadDoc for T {
     }
 
     fn keys_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> Keys<'_> {
-        let ids = known_ids(self.next().doc(), heads);
+        let ids = known_ids(self.doc(), heads);
         self.next().keys_at(obj, &ids).unwrap_or_default()
     }
 
     fn iter_at<O: AsRef<ExId>>(&self, obj: O, heads: Option<&[ChangeHash]>) -> DocIter<'_> {
-        let ids = heads.map(|h| known_ids(self.next().doc(), h));
+        let ids = heads.map(|h| known_ids(self.doc(), h));
         let encoding = self.next().text_encoding();
         self.next()
             .iter_at(obj, ids.as_deref())
@@ -67,7 +70,7 @@ impl<T: AuditWrapper> super::ReadDoc for T {
         range: R,
         heads: &[ChangeHash],
     ) -> MapRange<'a> {
-        let ids = known_ids(self.next().doc(), heads);
+        let ids = known_ids(self.doc(), heads);
         self.next()
             .map_range_at(obj, range, &ids)
             .unwrap_or_default()
@@ -87,7 +90,7 @@ impl<T: AuditWrapper> super::ReadDoc for T {
         range: R,
         heads: &[ChangeHash],
     ) -> ListRange<'_> {
-        let ids = known_ids(self.next().doc(), heads);
+        let ids = known_ids(self.doc(), heads);
         self.next()
             .list_range_at(obj, range, &ids)
             .unwrap_or_default()
@@ -98,7 +101,7 @@ impl<T: AuditWrapper> super::ReadDoc for T {
     }
 
     fn values_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> Values<'_> {
-        let ids = known_ids(self.next().doc(), heads);
+        let ids = known_ids(self.doc(), heads);
         self.next().values_at(obj, &ids).unwrap_or_default()
     }
 
@@ -107,7 +110,7 @@ impl<T: AuditWrapper> super::ReadDoc for T {
     }
 
     fn length_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> usize {
-        let ids = known_ids(self.next().doc(), heads);
+        let ids = known_ids(self.doc(), heads);
         self.next().length_at(obj, &ids).unwrap_or(0)
     }
 
@@ -124,7 +127,7 @@ impl<T: AuditWrapper> super::ReadDoc for T {
         obj: O,
         heads: &[ChangeHash],
     ) -> Result<Vec<Mark>, AutomergeError> {
-        let ids = known_ids(self.next().doc(), heads);
+        let ids = known_ids(self.doc(), heads);
         self.next().marks_at(obj, &ids)
     }
 
@@ -134,7 +137,7 @@ impl<T: AuditWrapper> super::ReadDoc for T {
         index: usize,
         heads: Option<&[ChangeHash]>,
     ) -> Result<MarkSet, AutomergeError> {
-        let ids = heads.map(|h| known_ids(self.next().doc(), h));
+        let ids = heads.map(|h| known_ids(self.doc(), h));
         self.next().get_marks(obj, index, ids.as_deref())
     }
 
@@ -147,7 +150,7 @@ impl<T: AuditWrapper> super::ReadDoc for T {
         obj: O,
         heads: &[ChangeHash],
     ) -> Result<String, AutomergeError> {
-        let ids = known_ids(self.next().doc(), heads);
+        let ids = known_ids(self.doc(), heads);
         self.next().text_at(obj, &ids)
     }
 
@@ -160,7 +163,7 @@ impl<T: AuditWrapper> super::ReadDoc for T {
         obj: O,
         heads: &[ChangeHash],
     ) -> Result<Spans<'_>, AutomergeError> {
-        let ids = known_ids(self.next().doc(), heads);
+        let ids = known_ids(self.doc(), heads);
         self.next().spans_at(obj, &ids)
     }
 
@@ -170,7 +173,7 @@ impl<T: AuditWrapper> super::ReadDoc for T {
         position: I,
         at: Option<&[ChangeHash]>,
     ) -> Result<Cursor, AutomergeError> {
-        let ids = at.map(|h| known_ids(self.next().doc(), h));
+        let ids = at.map(|h| known_ids(self.doc(), h));
         self.next().get_cursor(obj, position, ids.as_deref())
     }
 
@@ -181,7 +184,7 @@ impl<T: AuditWrapper> super::ReadDoc for T {
         at: Option<&[ChangeHash]>,
         move_cursor: MoveCursor,
     ) -> Result<Cursor, AutomergeError> {
-        let ids = at.map(|h| known_ids(self.next().doc(), h));
+        let ids = at.map(|h| known_ids(self.doc(), h));
         self.next()
             .get_cursor_moving(obj, position, ids.as_deref(), move_cursor)
     }
@@ -192,7 +195,7 @@ impl<T: AuditWrapper> super::ReadDoc for T {
         cursor: &Cursor,
         at: Option<&[ChangeHash]>,
     ) -> Result<usize, AutomergeError> {
-        let ids = at.map(|h| known_ids(self.next().doc(), h));
+        let ids = at.map(|h| known_ids(self.doc(), h));
         self.next().get_cursor_position(obj, cursor, ids.as_deref())
     }
 
@@ -210,7 +213,7 @@ impl<T: AuditWrapper> super::ReadDoc for T {
         prop: P,
         heads: &[ChangeHash],
     ) -> Result<Option<(Value<'_>, ExId)>, AutomergeError> {
-        let ids = known_ids(self.next().doc(), heads);
+        let ids = known_ids(self.doc(), heads);
         self.next().get_at(obj, prop, &ids)
     }
 
@@ -219,7 +222,7 @@ impl<T: AuditWrapper> super::ReadDoc for T {
         obj: O,
         heads: Option<&[ChangeHash]>,
     ) -> Result<hydrate::Value, AutomergeError> {
-        let ids = heads.map(|h| known_ids(self.next().doc(), h));
+        let ids = heads.map(|h| known_ids(self.doc(), h));
         self.next().hydrate(obj, ids.as_deref())
     }
 
@@ -237,13 +240,12 @@ impl<T: AuditWrapper> super::ReadDoc for T {
         prop: P,
         heads: &[ChangeHash],
     ) -> Result<Vec<(Value<'_>, ExId)>, AutomergeError> {
-        let ids = known_ids(self.next().doc(), heads);
+        let ids = known_ids(self.doc(), heads);
         self.next().get_all_at(obj, prop, &ids)
     }
 
     fn get_missing_deps(&self, heads: &[ChangeHash]) -> Vec<ChangeHash> {
-        self.next()
-            .doc()
+        self.doc()
             .missing_deps_with_queued(heads)
             .unwrap_or_default()
     }

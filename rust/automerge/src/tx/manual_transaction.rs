@@ -1,8 +1,7 @@
 use super::TxDoc;
-use crate::automerge::view::ReadAt;
 use crate::exid::ExId;
+use crate::ChangeHash;
 use crate::{automerge::Automerge, AutomergeError};
-use crate::{ChangeHash, ChangeId};
 
 use super::{CommitOptions, TransactionArgs, TransactionInner};
 
@@ -118,19 +117,13 @@ impl<'a, H: crate::hash_retention::HashRetention> Transaction<'a, H> {
     }
 }
 
-impl<H: crate::hash_retention::HashRetention> super::ScopedRead for Transaction<'_, H> {
+impl<H: crate::hash_retention::HashRetention> super::TxDoc for Transaction<'_, H> {
     type Retention = H;
 
     fn doc(&self) -> &Automerge<H> {
         self.doc
     }
 
-    fn get_scope(&self, heads: Option<&[ChangeId]>) -> Result<ReadAt<'_>, AutomergeError> {
-        self.tx_scope(heads)
-    }
-}
-
-impl<H: crate::hash_retention::HashRetention> super::TxDoc for Transaction<'_, H> {
     fn inner(&self) -> Option<&TransactionInner> {
         self.inner.as_ref()
     }
