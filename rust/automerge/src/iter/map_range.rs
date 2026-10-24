@@ -1,4 +1,4 @@
-use super::tools::{Diff, DiffIter, ExIdPromise, Shiftable, Unshift};
+use super::tools::{value_at, Diff, DiffIter, ExIdPromise, Shiftable, Unshift};
 use crate::automerge::view::{ClockRange, ReadAt};
 use crate::exid::ExId;
 use crate::op_set2::op_set::{ActionIter, OpIdIter, OpSet, ValueIter};
@@ -99,12 +99,6 @@ pub struct MapRange<'a> {
     iter: MapDiff<'a>,
 }
 
-impl MapRange<'_> {
-    pub(crate) fn empty() -> Self {
-        Self::default()
-    }
-}
-
 impl<'a> Iterator for MapRange<'a> {
     type Item = MapRangeItem<'a>;
 
@@ -160,15 +154,6 @@ struct PendingMapDiffItem<'a> {
     expose: bool,
 }
 
-impl PendingMapDiffItem<'_> {
-    fn update(&mut self, expose: bool) {
-        self.expose |= expose;
-        if self.expose && self.diff == Diff::Same {
-            self.diff = Diff::Add;
-        }
-    }
-}
-
 impl<'a> Iterator for MapIter<'a> {
     type Item = MapEntry<'a>;
 
@@ -211,7 +196,7 @@ impl<'a> Iterator for MapDiff<'a> {
     type Item = MapDiffItem<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.op_set?;
+        let op_set = self.op_set?;
         let mut last_is_same = false;
         let mut num_new = 0;
         let mut num_old = 0;
@@ -257,12 +242,12 @@ impl<'a> Iterator for MapDiff<'a> {
             if diff.is_del() {
                 if let Some(mut last) = last_visible.take() {
                     let newly_visible = last.diff == Diff::Same;
-                    last.update(expose || newly_visible);
+                    last.expose |= expose || newly_visible;
                     // Deleting the winning value exposes `last`, so its put
                     // patch must describe the conflict state after deletion,
                     // not merely whether the conflict is newly created.
                     last.conflict = num_new > 1;
-                    return Some(self.materialize(last));
+                    return Some(self.materialize(op_set, last));
                 }
             }
             let mut item = PendingMapDiffItem {
@@ -275,16 +260,20 @@ impl<'a> Iterator for MapDiff<'a> {
                 // The surviving value is unchanged, but removing the other
                 // visible values clears its conflict flag. Emit a Put so a
                 // hydrated-state consumer can observe that metadata change.
-                item.update(true);
+                item.expose = true;
             }
-            return Some(self.materialize(item));
+            return Some(self.materialize(op_set, item));
         }
         None
     }
 }
 
 impl<'a> MapDiff<'a> {
-    fn materialize(&mut self, pending: PendingMapDiffItem<'a>) -> MapDiffItem<'a> {
+    fn materialize(
+        &mut self,
+        op_set: &'a OpSet,
+        pending: PendingMapDiffItem<'a>,
+    ) -> MapDiffItem<'a> {
         let PendingMapDiffItem {
             mut diff,
             map,
@@ -299,7 +288,8 @@ impl<'a> MapDiff<'a> {
         if diff == Diff::Add && self.clock.predates(&id) {
             expose = true;
         }
-        let (value, inc) = self.value_at(pos, action);
+        let value = self.value.seek_to(pos).unwrap_or(ScalarValue::Null);
+        let (value, inc) = value_at(op_set, value, pos, action, &self.clock);
         MapDiffItem {
             diff,
             key,
@@ -309,30 +299,6 @@ impl<'a> MapDiff<'a> {
             expose,
             id,
             pos,
-        }
-    }
-
-    fn value_at(&mut self, pos: usize, action: Action) -> (ValueRef<'a>, i64) {
-        let Some(op_set) = self.op_set else {
-            return (ValueRef::Scalar(ScalarValue::Null), 0);
-        };
-        let value = self.value.seek_to(pos).unwrap_or(ScalarValue::Null);
-        match action {
-            Action::MakeMap | Action::MakeList | Action::MakeText | Action::MakeTable => {
-                (ValueRef::from_action_value(action, ScalarValue::Null), 0)
-            }
-            Action::Delete => (ValueRef::Scalar(ScalarValue::Null), 0),
-            _ => {
-                if let ScalarValue::Counter(c) = &value {
-                    let (inc1, inc2) = op_set.get_increment_diff_at_pos(pos, &self.clock);
-                    (
-                        ValueRef::from_action_value(action, ScalarValue::Counter(*c + inc2)),
-                        inc2 - inc1,
-                    )
-                } else {
-                    (ValueRef::from_action_value(action, value), 0)
-                }
-            }
         }
     }
 

@@ -29,7 +29,10 @@ impl OpSet {
         clock: &Clock,
         actor_map: &[usize],
     ) -> PredCols {
-        let covered: Vec<u64> = actor_map.iter().map(|&a| clock.max_op(a)).collect();
+        let covered: Vec<u64> = actor_map
+            .iter()
+            .map(|&a| u64::from(clock.max_op(a)))
+            .collect();
         let plan = Plan::build(&self.cols, PredSrc::new(raw, data), &covered);
         plan.apply(&mut self.cols)
     }

@@ -19,7 +19,7 @@ use crate::patches::PatchAccumulator;
 use crate::read::ReadDoc;
 use crate::tx::{CommitOptions, Transactable};
 use crate::types::{ObjId, ObjMeta};
-use crate::write_frontier::{Boundary, WriteFrontier};
+use crate::write_frontier::{FrontierHead, WriteFrontier};
 use crate::VerificationMode;
 use crate::{hydrate, AnonymizeError, Bundle, OnPartialLoad, TextEncoding};
 use crate::{
@@ -206,7 +206,11 @@ impl<H: HashRetention> AutoCommit<H> {
         self.doc.set_write_frontier_boundaries(write_frontier);
     }
 
-    pub(crate) fn mask_author_boundaries(&mut self, author: Author<'static>, heads: Vec<Boundary>) {
+    pub(crate) fn mask_author_boundaries(
+        &mut self,
+        author: Author<'static>,
+        heads: Vec<FrontierHead>,
+    ) {
         self.ensure_transaction_closed();
         self.doc.mask_author_boundaries(author, heads);
     }
@@ -296,15 +300,12 @@ impl<H: HashRetention> AutoCommit<H> {
             && self.diff_cursor.epoch == Some(epoch)
             && before_sees_today
         {
-            self.doc
-                .dirty_diff_patches(&self.diff_cursor)
-                .expect("dirty diff should support AutoCommit cursor intervals")
+            self.doc.dirty_diff_patches(&self.diff_cursor)
         } else if range.before().is_empty() && self.doc.is_current(&after) {
-            let mut patch_accumulator = PatchAccumulator::event_log();
             // This if statement is only active if the current heads are the same as `after`
             // so we don't need to tell the patch log to target a specific heads and consequently
             // it wll be able to generate patches very fast as it doesn't need to make any clocks
-            patch_accumulator.heads_clock = None;
+            let mut patch_accumulator = PatchAccumulator::new(None);
             self.doc
                 .log_current_state(obj, &mut patch_accumulator, recursive);
             patch_accumulator.make_patches(&self.doc)
@@ -350,9 +351,9 @@ impl<H: HashRetention> AutoCommit<H> {
                 .diff(&before, &after)
                 .expect("the diff cursor and heads are this document's own change ids")
         } else {
-            self.doc
-                .dirty_diff_patches_and_clear(&before)
-                .expect("dirty diff should support AutoCommit incremental intervals")
+            let patches = self.doc.dirty_diff_patches(&before);
+            self.doc.clear_dirty();
+            patches
         };
         self.diff_cursor = after;
         patches

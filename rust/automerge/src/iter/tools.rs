@@ -1,6 +1,7 @@
 use crate::automerge::view::{ClockRange, RangeView};
 use crate::exid::ExId;
 use crate::op_set2::op_set::{TopIter, VisIter};
+use crate::op_set2::types::{Action, ScalarValue, ValueRef};
 use crate::op_set2::OpSet;
 use crate::types::OpId;
 
@@ -10,6 +11,34 @@ use std::iter::Peekable;
 use std::ops::Range;
 
 pub(crate) use hexane::{Shiftable, Unshift};
+
+/// The value a diff item at `pos` reports, and for a counter its increment
+/// across `clock`.
+pub(crate) fn value_at<'a>(
+    op_set: &'a OpSet,
+    value: ScalarValue<'a>,
+    pos: usize,
+    action: Action,
+    clock: &ClockRange<'_>,
+) -> (ValueRef<'a>, i64) {
+    match action {
+        Action::MakeMap | Action::MakeList | Action::MakeText | Action::MakeTable => {
+            (ValueRef::from_action_value(action, ScalarValue::Null), 0)
+        }
+        Action::Delete => (ValueRef::Scalar(ScalarValue::Null), 0),
+        _ => {
+            if let ScalarValue::Counter(c) = &value {
+                let (inc1, inc2) = op_set.get_increment_diff_at_pos(pos, clock);
+                (
+                    ValueRef::from_action_value(action, ScalarValue::Counter(*c + inc2)),
+                    inc2 - inc1,
+                )
+            } else {
+                (ValueRef::from_action_value(action, value), 0)
+            }
+        }
+    }
+}
 
 pub(crate) trait Skipper: Iterator<Item = usize> {}
 
@@ -323,8 +352,11 @@ impl Shiftable for BoolColumnSkipper<'_> {
     }
 
     // a shift inside an already-consumed true-run only trims `pending`
-    // FIXME: forward only; shifting backwards silently keeps the current window
     fn shift(&mut self, range: Range<usize>) {
+        debug_assert!(
+            range.start >= self.cursor(),
+            "BoolColumnSkipper shifts forward only"
+        );
         self.pending = self
             .pending
             .saturating_sub(range.start.saturating_sub(self.cursor()));

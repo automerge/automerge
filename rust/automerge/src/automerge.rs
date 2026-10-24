@@ -35,7 +35,7 @@ use crate::tx::{
 use crate::change_graph::Fragment;
 use crate::hydrate;
 use crate::types::{ActorId, ChangeHash, ObjId, ObjMeta, OpId, SequenceType, TextEncoding, Value};
-use crate::write_frontier::{Boundary, WriteFrontier};
+use crate::write_frontier::{FrontierHead, WriteFrontier};
 use crate::{AutomergeError, Change, ChangeId, Cursor, MalformedBundle, ObjType, Prop};
 use std::borrow::Cow;
 use view::{ClockRange, Mask, ReadAt, Viewpoint, VisibleClock};
@@ -552,7 +552,7 @@ impl<H: HashRetention> Automerge<H> {
     ///
     /// Rebuilds the document's indexes when the visible set changes.
     pub fn mask_author(&mut self, author: Author<'static>, heads: &[ChangeId]) {
-        let heads = heads.iter().cloned().map(Boundary::Id).collect();
+        let heads = heads.iter().cloned().map(FrontierHead::Id).collect();
         self.republish_mask(|policy| policy.mask_author(author, heads));
     }
 
@@ -563,7 +563,11 @@ impl<H: HashRetention> Automerge<H> {
         self.republish_mask(|policy| policy.reveal_author(author));
     }
 
-    pub(crate) fn mask_author_boundaries(&mut self, author: Author<'static>, heads: Vec<Boundary>) {
+    pub(crate) fn mask_author_boundaries(
+        &mut self,
+        author: Author<'static>,
+        heads: Vec<FrontierHead>,
+    ) {
         self.republish_mask(|policy| policy.mask_author(author, heads));
     }
 
@@ -633,10 +637,11 @@ impl<H: HashRetention> Automerge<H> {
     }
 
     fn pin_resolved_boundaries(&mut self) {
-        for boundary in self.write_frontier.boundaries_mut() {
-            if let Boundary::Hash(hash) = boundary {
+        for boundary in self.write_frontier.heads_mut() {
+            if let FrontierHead::Hash(hash) = boundary {
                 if let Some(node) = self.change_graph.node_by_hash(hash) {
-                    *boundary = Boundary::Id(self.change_graph.change_id(node, &self.ops.actors));
+                    *boundary =
+                        FrontierHead::Id(self.change_graph.change_id(node, &self.ops.actors));
                 }
             }
         }
@@ -645,12 +650,15 @@ impl<H: HashRetention> Automerge<H> {
     /// Before `changes` reach the change graph, which may free their hashes.
     pub(crate) fn pin_incoming_boundaries(&mut self, changes: &[Change]) {
         let actors = &self.ops.actors;
-        for boundary in self.write_frontier.boundaries_mut() {
-            if let Boundary::Hash(hash) = boundary {
+        for boundary in self.write_frontier.heads_mut() {
+            if let FrontierHead::Hash(hash) = boundary {
                 if let Some(c) = changes.iter().find(|c| c.hash() == *hash) {
                     let idx = actors.lookup(c.actor_id()).unwrap_or(0);
-                    *boundary =
-                        Boundary::Id(ChangeId::from_doc_seq(c.seq(), c.actor_id().clone(), idx));
+                    *boundary = FrontierHead::Id(ChangeId::from_doc_seq(
+                        c.seq(),
+                        c.actor_id().clone(),
+                        idx,
+                    ));
                 }
             }
         }
@@ -1972,8 +1980,7 @@ impl<H: HashRetention> Automerge<H> {
         } else {
             ClockRange::between(before, self.visible_for_viewpoint(after)?)
         };
-        let mut patch_accumulator = PatchAccumulator::event_log();
-        patch_accumulator.heads_clock = clock.read_after().historical().cloned();
+        let mut patch_accumulator = PatchAccumulator::new(clock.read_after().historical().cloned());
         DiffIter::log(self, obj, clock, &mut patch_accumulator, recursive);
         Ok(patch_accumulator.make_patches(self))
     }
@@ -1998,9 +2005,8 @@ impl<H: HashRetention> Automerge<H> {
         Viewpoint {
             heads,
             write_frontier: Some(self.write_frontier.clone()),
-            cache: None,
-            epoch: None,
             pending: Some(self.visibility.pending.clone()),
+            ..Default::default()
         }
     }
 
@@ -2052,9 +2058,8 @@ impl<H: HashRetention> Automerge<H> {
     /// including write-frontier changes.
     pub fn diff_incremental(&mut self) -> Vec<Patch> {
         let before = self.diff_cursor.clone();
-        let patches = self
-            .dirty_diff_patches_and_clear(&before)
-            .expect("dirty diff should support Automerge incremental intervals");
+        let patches = self.dirty_diff_patches(&before);
+        self.clear_dirty();
         self.diff_cursor = self.viewpoint();
         patches
     }
@@ -3366,7 +3371,7 @@ impl<H: HashRetention> Automerge<H> {
         self.exid_to_obj(obj)
             .ok()
             .map(|obj| self.ops.map_range(&obj.id, range, read))
-            .unwrap_or_else(MapRange::empty)
+            .unwrap_or_default()
     }
 
     pub(crate) fn list_range_for<'a, R: RangeBounds<usize>>(
@@ -3378,7 +3383,7 @@ impl<H: HashRetention> Automerge<H> {
         self.exid_to_obj(obj)
             .ok()
             .map(|obj| self.ops.list_range(&obj.id, range, read))
-            .unwrap_or_else(ListRange::empty)
+            .unwrap_or_default()
     }
 
     pub(crate) fn values_for(&self, obj: &ExId, read: ReadAt<'_>) -> Values<'_> {
@@ -4312,9 +4317,7 @@ mod dirty_diff_tests {
     ) {
         let full = doc.diff(before, after).unwrap();
         assert_eq!(after, doc.get_heads().as_slice());
-        let dirty = doc
-            .dirty_diff_patches(&doc.viewpoint_at(before.to_vec()))
-            .unwrap();
+        let dirty = doc.dirty_diff_patches(&doc.viewpoint_at(before.to_vec()));
         assert_patches_have_same_effect(
             doc,
             before,
@@ -4521,11 +4524,8 @@ mod dirty_diff_tests {
         // one dirty row inside a multi-row register must widen to the register
         doc.ops_mut().clear_dirty();
         doc.ops_mut().mark_dirty(1);
-        let patches = {
-            let view = doc.viewpoint_at(before.clone());
-            doc.dirty_diff_patches_and_clear(&view)
-        }
-        .unwrap();
+        let patches = doc.dirty_diff_patches(&doc.viewpoint_at(before.clone()));
+        doc.clear_dirty();
         let expected = doc.diff(&before, &after).unwrap();
         assert_eq!(patches, expected);
         assert!(doc.ops().dirty_runs().next().is_none());
@@ -5517,11 +5517,8 @@ mod dirty_diff_tests {
         }
 
         assert_dirty_diff_matches_full(&doc, &before, &after);
-        {
-            let view = doc.viewpoint_at(before.clone());
-            doc.dirty_diff_patches_and_clear(&view)
-        }
-        .unwrap();
+        doc.dirty_diff_patches(&doc.viewpoint_at(before.clone()));
+        doc.clear_dirty();
         assert!(doc.ops().dirty_runs().next().is_none());
     }
 }

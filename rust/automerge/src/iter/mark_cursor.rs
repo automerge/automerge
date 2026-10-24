@@ -12,9 +12,9 @@ use crate::op_set2::types::MarkData;
 /// rows, and can start at any position without walking from the object start.
 ///
 /// Mark ops are never delete targets, so the clock alone decides visibility.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub(crate) struct MarkCursor<'a> {
-    marks: Option<&'a MarkIndexColumn>,
+    marks: &'a MarkIndexColumn,
     iter: PrefixIter<'a, Option<MarkIdx>>,
     clock: ClockRange<'a>,
     /// retained so [`MarkPrefix::same_set`] is an exact change probe
@@ -27,7 +27,7 @@ impl<'a> MarkCursor<'a> {
         let marks = op_set.mark_index();
         let mut cursor = Self {
             iter: marks.prefix_at(pos),
-            marks: Some(marks),
+            marks,
             clock,
             seen: MarkPrefix::default(),
             state: RichTextDiff::default(),
@@ -62,26 +62,24 @@ impl<'a> MarkCursor<'a> {
             "mark prefix has dangling closes — malformed mark column?"
         );
         self.state = RichTextDiff::default();
-        if let Some(marks) = self.marks {
-            for id in now.opens() {
-                let diff = match (
-                    self.clock.visible_before(&id),
-                    self.clock.visible_after(&id),
-                ) {
-                    (true, true) => Diff::Same,
-                    (true, false) => Diff::Del,
-                    (false, true) => Diff::Add,
-                    (false, false) => continue,
-                };
-                let Some(data) = marks.mark_data(&id) else {
-                    continue;
-                };
-                let data = MarkData {
-                    name: Cow::Borrowed(data.name.as_ref()),
-                    value: data.value.clone(),
-                };
-                self.state.mark_begin_diff(diff, id, data);
-            }
+        for id in now.opens() {
+            let diff = match (
+                self.clock.visible_before(&id),
+                self.clock.visible_after(&id),
+            ) {
+                (true, true) => Diff::Same,
+                (true, false) => Diff::Del,
+                (false, true) => Diff::Add,
+                (false, false) => continue,
+            };
+            let Some(data) = self.marks.mark_data(&id) else {
+                continue;
+            };
+            let data = MarkData {
+                name: Cow::Borrowed(data.name.as_ref()),
+                value: data.value.clone(),
+            };
+            self.state.mark_begin_diff(diff, id, data);
         }
         self.seen = now;
     }

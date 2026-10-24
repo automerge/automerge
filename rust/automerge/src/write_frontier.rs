@@ -7,7 +7,7 @@ use crate::{Author, ChangeHash, ChangeId};
 /// The audited API names changes by hash, and a hash the document has not
 /// seen yet cannot be turned into an id, so both forms are kept.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) enum Boundary {
+pub(crate) enum FrontierHead {
     Id(ChangeId),
     Hash(ChangeHash),
 }
@@ -16,7 +16,7 @@ pub(crate) enum Boundary {
 /// changes are hidden.
 #[derive(Debug, Default, Clone, PartialEq)]
 pub(crate) struct WriteFrontier {
-    author_frontier: HashMap<Author<'static>, Vec<Boundary>>,
+    author_frontier: HashMap<Author<'static>, Vec<FrontierHead>>,
 }
 
 impl WriteFrontier {
@@ -28,16 +28,7 @@ impl WriteFrontier {
         Self {
             author_frontier: frontier
                 .into_iter()
-                .map(|(author, ids)| (author, ids.into_iter().map(Boundary::Id).collect()))
-                .collect(),
-        }
-    }
-
-    pub(crate) fn from_hashes(frontier: HashMap<Author<'static>, Vec<ChangeHash>>) -> Self {
-        Self {
-            author_frontier: frontier
-                .into_iter()
-                .map(|(author, hashes)| (author, hashes.into_iter().map(Boundary::Hash).collect()))
+                .map(|(author, ids)| (author, ids.into_iter().map(FrontierHead::Id).collect()))
                 .collect(),
         }
     }
@@ -50,7 +41,7 @@ impl WriteFrontier {
         self.author_frontier.contains_key(author)
     }
 
-    pub(crate) fn iter(&self) -> impl Iterator<Item = (&Author<'static>, &[Boundary])> {
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (&Author<'static>, &[FrontierHead])> {
         self.author_frontier
             .iter()
             .map(|(author, heads)| (author, heads.as_slice()))
@@ -64,8 +55,8 @@ impl WriteFrontier {
                 let ids = heads
                     .iter()
                     .filter_map(|boundary| match boundary {
-                        Boundary::Id(id) => Some(id.clone()),
-                        Boundary::Hash(_) => None,
+                        FrontierHead::Id(id) => Some(id.clone()),
+                        FrontierHead::Hash(_) => None,
                     })
                     .collect();
                 (author.clone(), ids)
@@ -73,15 +64,28 @@ impl WriteFrontier {
             .collect()
     }
 
-    pub(crate) fn boundaries_mut(&mut self) -> impl Iterator<Item = &mut Boundary> {
+    pub(crate) fn heads_mut(&mut self) -> impl Iterator<Item = &mut FrontierHead> {
         self.author_frontier.values_mut().flatten()
     }
 
-    pub(crate) fn mask_author(&mut self, author: Author<'static>, heads: Vec<Boundary>) {
+    pub(crate) fn mask_author(&mut self, author: Author<'static>, heads: Vec<FrontierHead>) {
         self.author_frontier.insert(author, heads);
     }
 
     pub(crate) fn reveal_author(&mut self, author: &Author<'static>) {
         self.author_frontier.remove(author);
+    }
+}
+
+impl From<HashMap<Author<'static>, Vec<ChangeHash>>> for WriteFrontier {
+    fn from(write_frontier: HashMap<Author<'static>, Vec<ChangeHash>>) -> Self {
+        Self {
+            author_frontier: write_frontier
+                .into_iter()
+                .map(|(author, hashes)| {
+                    (author, hashes.into_iter().map(FrontierHead::Hash).collect())
+                })
+                .collect(),
+        }
     }
 }

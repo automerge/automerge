@@ -1,4 +1,5 @@
 use crate::automerge::Automerge;
+use crate::hash_retention::HashRetention;
 use crate::legacy::{ElementId, Key, MarkData, ObjectId, OpId, OpType};
 use crate::{ActorId, AutomergeError, Change, ChangeHash, ScalarValue};
 use rand::rngs::StdRng;
@@ -26,13 +27,13 @@ pub enum AnonymizeError {
 
 /// Return a new document anonymized with a fresh random seed.
 pub fn anonymize(document: &crate::Automerge) -> Result<crate::Automerge, AnonymizeError> {
-    document.anonymize()
+    Anonymization::new(rand::make_rng()).anonymize(document)
 }
 
-pub(crate) fn anonymize_doc<H: crate::hash_retention::HashRetention>(
+pub(crate) fn anonymize_doc<H: HashRetention>(
     document: &Automerge<H>,
 ) -> Result<Automerge<H>, AnonymizeError> {
-    Anonymization::new(rand::make_rng()).anonymize(document)
+    Anonymization::new(rand::make_rng()).anonymize_doc(document)
 }
 
 struct Anonymization {
@@ -64,7 +65,11 @@ impl Anonymization {
         Self::new(StdRng::from_seed(seed))
     }
 
-    fn anonymize<H: crate::hash_retention::HashRetention>(
+    fn anonymize(self, document: &crate::Automerge) -> Result<crate::Automerge, AnonymizeError> {
+        self.anonymize_doc(&document.0).map(crate::Automerge)
+    }
+
+    fn anonymize_doc<H: HashRetention>(
         mut self,
         document: &Automerge<H>,
     ) -> Result<Automerge<H>, AnonymizeError> {
@@ -399,11 +404,8 @@ mod shape;
 #[cfg(test)]
 mod tests {
     use super::{shape::ShapeSignature, Anonymization, Key, OpType};
-    use crate::autocommit::AutoCommit;
-    use crate::automerge::Automerge;
-    use crate::read::ReadDoc;
-    use crate::tx::{CommitOptions, Transactable};
-    use crate::{ObjType, ScalarValue, ROOT};
+    use crate::transaction::{CommitOptions, Transactable};
+    use crate::{AutoCommit, Automerge, ObjType, ReadDoc, ScalarValue, ROOT};
     use std::collections::{HashMap, HashSet};
 
     #[test]
@@ -475,11 +477,7 @@ mod tests {
         source.put(ROOT, "private-key", "another secret").unwrap();
         source.commit();
 
-        // reading the source's changes needs its full hash graph
-        let source = Automerge::load(&source.save())
-            .unwrap()
-            .enable_audit_mode()
-            .unwrap();
+        let source = Automerge::load(&source.save()).unwrap();
         let anonymized = Anonymization::from_seed([7; 32])
             .anonymize(&source)
             .unwrap();
@@ -499,8 +497,8 @@ mod tests {
             ShapeSignature::new(&anonymized)
         );
 
-        let source_changes = source.get_changes(&[]).unwrap();
-        let anonymized_changes = anonymized.get_changes(&[]).unwrap();
+        let source_changes = source.get_changes(&[]);
+        let anonymized_changes = anonymized.get_changes(&[]);
         assert_eq!(source_changes.len(), anonymized_changes.len());
         let source_indices = source_changes
             .iter()

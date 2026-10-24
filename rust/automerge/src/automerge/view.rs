@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use crate::actor::{ActorRemoval, ActorShift};
 use crate::clock::Clock;
 use crate::types::OpId;
-use crate::write_frontier::{Boundary, WriteFrontier};
+use crate::write_frontier::{FrontierHead, WriteFrontier};
 use crate::{Author, ChangeId};
 
 use std::borrow::Cow;
@@ -34,7 +34,7 @@ pub struct Viewpoint {
     pub(crate) epoch: Option<u64>,
     /// The boundaries still pending when a document made this viewpoint;
     /// `None` counts those outside the history of `heads`.
-    pub(crate) pending: Option<Vec<Boundary>>,
+    pub(crate) pending: Option<Vec<FrontierHead>>,
 }
 
 impl PartialEq for Viewpoint {
@@ -62,10 +62,7 @@ impl Viewpoint {
     pub(crate) fn at_heads(heads: Vec<ChangeId>) -> Self {
         Viewpoint {
             heads,
-            write_frontier: None,
-            cache: None,
-            epoch: None,
-            pending: None,
+            ..Default::default()
         }
     }
 
@@ -213,7 +210,7 @@ impl Mask {
 
     /// Whether the mask hides any of `actor`'s ops.
     pub(crate) fn restricts(&self, actor: usize) -> bool {
-        self.0.max_op(actor) < u64::from(u32::MAX)
+        self.0.max_op(actor) < u32::MAX
     }
 
     /// Add an unrestricted slot for an actor just inserted into the actor table.

@@ -5,6 +5,7 @@ use super::{
 use crate::automerge::view::{ClockRange, ReadAt};
 use crate::automerge::Automerge;
 use crate::exid::ExId;
+use crate::hash_retention::HashRetention;
 use crate::op_set2::op_set::{ObjIdIter, OpSet};
 use crate::op_set2::types::ValueRef;
 use crate::patches::PatchAccumulator;
@@ -45,7 +46,7 @@ impl<'a> DocIter<'a> {
         }
     }
 
-    pub(crate) fn new<H: crate::hash_retention::HashRetention>(
+    pub(crate) fn new<H: HashRetention>(
         doc: &'a Automerge<H>,
         obj: ObjMeta,
         read: ReadAt<'a>,
@@ -114,7 +115,7 @@ pub(crate) struct DiffIter<'a> {
 }
 
 impl<'a> DiffIter<'a> {
-    pub(crate) fn log<H: crate::hash_retention::HashRetention>(
+    pub(crate) fn log<H: HashRetention>(
         doc: &'a Automerge<H>,
         obj: ObjMeta,
         clock: ClockRange<'a>,
@@ -129,7 +130,7 @@ impl<'a> DiffIter<'a> {
         iter.path_map
     }
 
-    pub(crate) fn new<H: crate::hash_retention::HashRetention>(
+    pub(crate) fn new<H: HashRetention>(
         doc: &'a Automerge<H>,
         obj: ObjMeta,
         clock: ClockRange<'a>,
@@ -258,11 +259,7 @@ impl<'a> DiffIter<'a> {
 }
 
 impl<'a> DocIterInternal<'a> {
-    fn new<H: crate::hash_retention::HashRetention>(
-        doc: &'a Automerge<H>,
-        obj: ObjMeta,
-        read: ReadAt<'a>,
-    ) -> Self {
+    fn new<H: HashRetention>(doc: &'a Automerge<H>, obj: ObjMeta, read: ReadAt<'a>) -> Self {
         let op_set = doc.ops();
         let iter_type = IterType::new(obj.typ);
         let obj = obj.id;
@@ -590,10 +587,8 @@ impl<'a> DocItem<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::automerge::Automerge;
-    use crate::read::ReadDoc;
-    use crate::tx::Transactable;
-    use crate::{ObjType, ROOT};
+    use crate::transaction::Transactable;
+    use crate::{Automerge, ObjType, ReadDoc, ROOT};
 
     #[test]
     fn doc_iter() {

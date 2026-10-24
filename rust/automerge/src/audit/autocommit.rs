@@ -308,7 +308,7 @@ impl AutoCommit {
     pub fn mask_author(&mut self, author: Author<'static>, heads: &[ChangeHash]) {
         let heads = heads
             .iter()
-            .map(|h| crate::write_frontier::Boundary::Hash(*h))
+            .map(|h| crate::write_frontier::FrontierHead::Hash(*h))
             .collect();
         self.0.mask_author_boundaries(author, heads);
     }
@@ -326,7 +326,7 @@ impl AutoCommit {
         write_frontier: std::collections::HashMap<Author<'static>, Vec<ChangeHash>>,
     ) {
         self.0
-            .set_write_frontier_boundaries(crate::write_frontier::WriteFrontier::from_hashes(
+            .set_write_frontier_boundaries(crate::write_frontier::WriteFrontier::from(
                 write_frontier,
             ));
     }

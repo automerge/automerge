@@ -1,6 +1,7 @@
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::automerge::Automerge;
+use crate::hash_retention::HashRetention;
 use crate::iter::Span;
 use crate::read::ReadDoc;
 use crate::{
@@ -13,7 +14,7 @@ mod myers;
 mod replace;
 mod utils;
 
-pub(crate) fn myers_diff<'a, S: AsRef<str>, H: crate::hash_retention::HashRetention>(
+pub(crate) fn myers_diff<'a, S: AsRef<str>, H: HashRetention>(
     doc: &'a mut Automerge<H>,
     tx: &'a mut TransactionInner,
     text_obj: &ExId,
@@ -42,7 +43,7 @@ pub(crate) fn myers_diff<'a, S: AsRef<str>, H: crate::hash_retention::HashRetent
     )
 }
 
-struct TxHook<'a, H: crate::hash_retention::HashRetention = crate::hash_retention::Retained> {
+struct TxHook<'a, H: HashRetention> {
     doc: &'a mut Automerge<H>,
     tx: &'a mut TransactionInner,
     old: &'a [&'a str],
@@ -52,7 +53,7 @@ struct TxHook<'a, H: crate::hash_retention::HashRetention = crate::hash_retentio
     text_encoding: TextEncoding,
 }
 
-impl<H: crate::hash_retention::HashRetention> myers::DiffHook for TxHook<'_, H> {
+impl<H: HashRetention> myers::DiffHook for TxHook<'_, H> {
     type Error = crate::AutomergeError;
 
     fn equal(
@@ -119,11 +120,7 @@ impl<H: crate::hash_retention::HashRetention> myers::DiffHook for TxHook<'_, H> 
     }
 }
 
-pub(crate) fn myers_block_diff<
-    'a,
-    I: IntoIterator<Item = Span>,
-    H: crate::hash_retention::HashRetention,
->(
+pub(crate) fn myers_block_diff<'a, I: IntoIterator<Item = Span>, H: HashRetention>(
     doc: &'a mut Automerge<H>,
     tx: &'a mut TransactionInner,
     text_obj: &crate::ObjId,
@@ -150,7 +147,7 @@ pub(crate) fn myers_block_diff<
     apply_marks_diff(doc, tx, text_obj, &new_spans, config)
 }
 
-fn apply_marks_diff<H: crate::hash_retention::HashRetention>(
+fn apply_marks_diff<H: HashRetention>(
     doc: &mut Automerge<H>,
     tx: &mut TransactionInner,
     text_obj: &crate::ObjId,
@@ -235,8 +232,7 @@ fn apply_marks_diff<H: crate::hash_retention::HashRetention>(
     Ok(())
 }
 
-struct BlockDiffHook<'a, H: crate::hash_retention::HashRetention = crate::hash_retention::Retained>
-{
+struct BlockDiffHook<'a, H: HashRetention> {
     doc: &'a mut Automerge<H>,
     tx: &'a mut TransactionInner,
     old: &'a [BlockOrGrapheme],
@@ -260,7 +256,7 @@ impl BlockOrGrapheme {
     }
 }
 
-impl<H: crate::hash_retention::HashRetention> myers::DiffHook for BlockDiffHook<'_, H> {
+impl<H: HashRetention> myers::DiffHook for BlockDiffHook<'_, H> {
     type Error = crate::AutomergeError;
 
     fn equal(
@@ -413,7 +409,7 @@ impl<H: crate::hash_retention::HashRetention> myers::DiffHook for BlockDiffHook<
     }
 }
 
-fn spans_as_grapheme<H: crate::hash_retention::HashRetention>(
+fn spans_as_grapheme<H: HashRetention>(
     doc: &Automerge<H>,
     text: &crate::types::ObjId,
     read: ReadAt<'_>,
@@ -456,7 +452,7 @@ fn span_as_grapheme<I: Iterator<Item = Span>>(iter: I) -> Vec<BlockOrGrapheme> {
     result
 }
 
-fn split_block<H: crate::hash_retention::HashRetention>(
+fn split_block<H: HashRetention>(
     doc: &mut Automerge<H>,
     tx: &mut TransactionInner,
     obj: &crate::ObjId,
@@ -467,7 +463,7 @@ fn split_block<H: crate::hash_retention::HashRetention>(
     tx.update_map(doc, &new_block, block)
 }
 
-fn update_block<H: crate::hash_retention::HashRetention>(
+fn update_block<H: HashRetention>(
     doc: &mut Automerge<H>,
     tx: &mut TransactionInner,
     obj: &crate::ObjId,
