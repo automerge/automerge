@@ -538,16 +538,6 @@ impl<T: PrefixValue, C: Codec> PrefixColumn<T, C> {
         self.col.copy_ranges(src.col, splices);
     }
 
-    /// See [`Column::copy_many_ranges`](crate::Column::copy_many_ranges).
-    pub fn copy_many_ranges<I>(&mut self, srcs: Vec<Self>, splices: I)
-    where
-        I: IntoIterator<Item = (usize, crate::Splice)>,
-        for<'b> T::Get<'b>: crate::AsColumnRef<T>,
-    {
-        self.col
-            .copy_many_ranges(srcs.into_iter().map(|s| s.col).collect(), splices);
-    }
-
     // ── Prefix-sum queries — via Column's B-tree ───────────────────────
 
     /// **Exclusive** prefix sum at `index` — the sum of values at

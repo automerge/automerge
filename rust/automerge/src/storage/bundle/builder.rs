@@ -1002,7 +1002,6 @@ impl<'a> ExternalPreds<'a> {
 /// A bundle op with actors mapped to the document's, and no marks.
 #[derive(Debug)]
 pub(crate) struct ManifoldOp<'a> {
-    pub(crate) at: crate::op_set2::op_set::manifold::SrcPos,
     pub(crate) id: OpId,
     pub(crate) obj: ObjId,
     pub(crate) key: BundleKey<'a>,
@@ -1014,8 +1013,6 @@ pub(crate) struct ManifoldOp<'a> {
     pub(crate) alive: bool,
     /// increments only: the amount added
     pub(crate) inc: Option<i64>,
-    /// the value is a counter, so increments do not delete it
-    pub(crate) counter: bool,
     /// member succ entries this row carries
     pub(crate) sub_len: usize,
     pub(crate) val_len: usize,
@@ -1122,7 +1119,6 @@ pub(crate) struct TailRun {
 /// decoding only what the manifold reads.
 #[derive(Clone)]
 pub(crate) struct ManifoldOps<'a> {
-    src: u32,
     pub(crate) pos: usize,
     pub(crate) len: usize,
     /// column totals, validated against the per-row counts at parse time
@@ -1172,7 +1168,6 @@ impl<'a> ManifoldOps<'a> {
         inc: &'a hexane::Column<Option<i64>>,
     ) -> Self {
         let mut s = ManifoldOps {
-            src: 0,
             pos: 0,
             len,
             succ_entries,
@@ -1258,21 +1253,6 @@ impl<'a> ManifoldOps<'a> {
         s
     }
 
-    pub(crate) fn position(&self) -> crate::op_set2::op_set::manifold::SrcPos {
-        crate::op_set2::op_set::manifold::SrcPos {
-            src: self.src,
-            row: self.pos,
-            sub: self.sub_pos,
-            val: self.val_pos,
-        }
-    }
-
-    /// Which fragment this reads, as [`crate::op_set2::op_set::manifold::SrcPos::src`].
-    pub(crate) fn with_src(mut self, src: u32) -> Self {
-        self.src = src;
-        self
-    }
-
     /// Ops `mask` does not cover are hidden by the write-frontier.
     pub(crate) fn with_mask(mut self, mask: Option<&'a crate::clock::Clock>) -> Self {
         self.mask = mask;
@@ -1280,18 +1260,7 @@ impl<'a> ManifoldOps<'a> {
     }
 
     pub(crate) fn next_op(&mut self) -> ManifoldOp<'a> {
-        self.read_op(None)
-    }
-
-    /// [`Self::next_op`], also appending the row's member successors to
-    /// `succ`.
-    pub(crate) fn next_op_with_succ(&mut self, succ: &mut Vec<OpId>) -> ManifoldOp<'a> {
-        self.read_op(Some(succ))
-    }
-
-    fn read_op(&mut self, succ_out: Option<&mut Vec<OpId>>) -> ManifoldOp<'a> {
         debug_assert!(self.pos < self.len, "read past the end of the fragment");
-        let at = self.position();
         self.pos += 1;
 
         let actor = self.id_actor.next().flatten().expect("id actor");
@@ -1353,32 +1322,20 @@ impl<'a> ManifoldOps<'a> {
         let n_succ = self.succ_count.next().flatten().unwrap_or(0) as usize;
         let sub = self.sub_pos;
         self.sub_pos += n_succ;
-        let alive = match (self.mask, succ_out) {
-            (None, None) => {
+        let alive = match self.mask {
+            None => {
                 self.succ_actor.advance_by(n_succ);
                 self.succ_ctr.advance_by(n_succ);
                 n_succ == 0
                     || (is_counter && self.inc.iter_range(sub..sub + n_succ).all(|v| v.is_some()))
             }
-            (None, Some(out)) => {
-                for _ in 0..n_succ {
-                    let sa = self.succ_actor.next().flatten().expect("succ actor");
-                    let sc = self.succ_ctr.next().flatten().expect("succ ctr");
-                    out.push(OpId::new(sc as u64, self.actor_map[usize::from(sa)]));
-                }
-                n_succ == 0
-                    || (is_counter && self.inc.iter_range(sub..sub + n_succ).all(|v| v.is_some()))
-            }
             // only successors the mask lets through can delete
-            (Some(mask), mut out) => {
+            Some(mask) => {
                 let mut alive = mask.covers(&id);
                 for inc in self.inc.iter_range(sub..sub + n_succ) {
                     let sa = self.succ_actor.next().flatten().expect("succ actor");
                     let sc = self.succ_ctr.next().flatten().expect("succ ctr");
                     let succ = OpId::new(sc as u64, self.actor_map[usize::from(sa)]);
-                    if let Some(out) = out.as_deref_mut() {
-                        out.push(succ);
-                    }
                     if mask.covers(&succ) && !(is_counter && inc.is_some()) {
                         alive = false;
                     }
@@ -1390,7 +1347,6 @@ impl<'a> ManifoldOps<'a> {
         let hint = self.hint.next().flatten().map(|h| h as u64);
 
         ManifoldOp {
-            at,
             id,
             obj,
             key,
@@ -1399,7 +1355,6 @@ impl<'a> ManifoldOps<'a> {
             preds,
             alive,
             inc,
-            counter: is_counter,
             sub_len: n_succ,
             val_len,
             hint,
@@ -1648,108 +1603,4 @@ pub(crate) mod change {
     pub(super) const DEPS:        ColumnSpec = ColumnSpec::new_delta(DEPS_COL_ID);
     pub(super) const EXTRA_META:  ColumnSpec = ColumnSpec::new_value_metadata(EXTRA_COL_ID);
     pub(super) const EXTRA:       ColumnSpec = ColumnSpec::new_value(EXTRA_COL_ID);
-}
-
-/// Reads just the id, key element and insert flag of a fragment's rows.
-#[derive(Clone)]
-pub(crate) struct ElemCursor<'a> {
-    actor_map: &'a [usize],
-    id_actor: hexane::Decoder<'a, Option<ActorIdx>>,
-    id_ctr: hexane::DeltaDecoder<'a, Option<i64>>,
-    key_actor: hexane::Decoder<'a, Option<ActorIdx>>,
-    key_ctr: hexane::DeltaDecoder<'a, Option<i64>>,
-    insert: hexane::Decoder<'a, bool>,
-    hint: hexane::DeltaDecoder<'a, Option<i64>>,
-}
-
-/// A row as [`ElemCursor`] reads it.
-pub(crate) struct ElemRow {
-    pub(crate) id: OpId,
-    /// the key element: an insert's anchor, an update's target
-    pub(crate) key: OpId,
-    pub(crate) insert: bool,
-    /// see [`ops::HINT_COL_ID`]
-    pub(crate) hint: Option<u64>,
-}
-
-impl ElemCursor<'_> {
-    pub(crate) fn next_row(&mut self) -> ElemRow {
-        let a = self.id_actor.next().flatten().expect("id actor");
-        let c = self.id_ctr.next().flatten().expect("id ctr");
-        let id = OpId::new(c as u64, self.actor_map[usize::from(a)]);
-        let key = match (
-            self.key_actor.next().flatten(),
-            self.key_ctr.next().flatten(),
-        ) {
-            (Some(a), Some(c)) => OpId::new(c as u64, self.actor_map[usize::from(a)]),
-            _ => OpId::new(0, 0),
-        };
-        ElemRow {
-            id,
-            key,
-            insert: self.insert.next().unwrap_or_default(),
-            hint: self.hint.next().flatten().map(|h| h as u64),
-        }
-    }
-}
-
-impl<'a> ManifoldOps<'a> {
-    /// A cursor over the same rows, from the next one.
-    pub(crate) fn elem_cursor(&self) -> ElemCursor<'a> {
-        ElemCursor {
-            actor_map: self.actor_map,
-            id_actor: self.id_actor.clone(),
-            id_ctr: self.id_ctr.clone(),
-            key_actor: self.key_actor.clone(),
-            key_ctr: self.key_ctr.clone(),
-            insert: self.insert.clone(),
-            hint: self.hint.clone(),
-        }
-    }
-}
-
-impl<'a> crate::op_set2::op_set::manifold::Inlet<'a> for ManifoldOps<'a> {
-    fn is_empty(&self) -> bool {
-        self.pos >= self.len
-    }
-
-    fn remaining(&self) -> usize {
-        self.len - self.pos
-    }
-
-    fn position(&self) -> crate::op_set2::op_set::manifold::SrcPos {
-        ManifoldOps::position(self)
-    }
-
-    fn next_op(&mut self) -> ManifoldOp<'a> {
-        ManifoldOps::next_op(self)
-    }
-
-    fn same_obj_run(&self, max: usize) -> usize {
-        ManifoldOps::same_obj_run(self, max)
-    }
-
-    fn pred_free_run(&self) -> usize {
-        ManifoldOps::pred_free_run(self)
-    }
-
-    fn clean_insert_run(&self) -> usize {
-        ManifoldOps::clean_insert_run(self)
-    }
-
-    fn make_free_run(&self, max: usize) -> usize {
-        ManifoldOps::make_free_run(self, max)
-    }
-
-    fn skip_clean(&mut self, n: usize) -> CleanRun {
-        ManifoldOps::skip_clean(self, n)
-    }
-
-    fn skip_tail(&mut self, n: usize) -> TailRun {
-        ManifoldOps::skip_tail(self, n)
-    }
-
-    fn consume_rest(&mut self) -> (usize, usize) {
-        ManifoldOps::consume_rest(self)
-    }
 }

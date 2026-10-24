@@ -293,7 +293,6 @@ impl<'a, T: RleValue, C: Codec> RleDecoder<'a, T, C> {
 impl<'a, T: RleValue, C: Codec> Iterator for RleDecoder<'a, T, C> {
     type Item = <T as ColumnValueRef>::Get<'a>;
 
-    #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         loop {
             if self.remaining > 0 {

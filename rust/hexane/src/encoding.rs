@@ -120,7 +120,7 @@ pub trait ColumnEncoding: Default {
     fn state_advance(slab: &Slab<Self::Tail>, state: &mut Self::State, n: usize);
 
     /// Streaming encoder for building encoded bytes from a sequence of values.
-    type Encoder<'a>: EncoderApi<'a, Self::Value, Self::Codec, Tail = Self::Tail>;
+    type Encoder<'a>: EncoderApi<'a, Self::Value, Self::Codec>;
 
     /// Create a new empty encoder.
     fn encoder<'a>() -> Self::Encoder<'a>;
@@ -260,23 +260,6 @@ pub trait EncoderApi<'a, T: ColumnValueRef, C: crate::Codec = crate::Leb128>: Si
     fn save_to_unless(self, out: &mut Vec<u8>, value: T::Get<'a>) -> std::ops::Range<usize>;
     /// Flush and return a single [`Slab`] with correct len, segments, and tail.
     fn into_slab(self) -> Slab<Self::Tail>;
-
-    /// Slabs completed by rollover so far (see
-    /// [`max_segments`](Self::max_segments)).
-    fn slabs_cut(&self) -> usize {
-        0
-    }
-
-    /// Flush and return every slab: those rollover completed, then the
-    /// rest, if any.
-    fn into_slabs(self) -> Vec<Slab<Self::Tail>> {
-        let slab = self.into_slab();
-        if slab.len == 0 {
-            Vec::new()
-        } else {
-            vec![slab]
-        }
-    }
     /// The tail metadata type for this encoding.
     type Tail: Copy + Clone + std::fmt::Debug + Default;
 

@@ -341,22 +341,6 @@ impl<A: SlabAggregate> SlabBTree<A> {
         self.total_slabs == 0
     }
 
-    /// Every slab's aggregate, in slab order.
-    pub(crate) fn weights(&self) -> Vec<A> {
-        let mut out = Vec::with_capacity(self.total_slabs);
-        if self.nodes.is_empty() {
-            return out;
-        }
-        let mut stack = vec![self.root];
-        while let Some(id) = stack.pop() {
-            match self.node(id) {
-                Node::Leaf(l) => out.extend(l.aggs.iter().cloned()),
-                Node::Internal(n) => stack.extend(n.children.iter().rev().map(|c| c.id)),
-            }
-        }
-        out
-    }
-
     #[allow(dead_code)]
     pub(crate) fn root_agg(&self) -> A {
         if self.nodes.is_empty() {

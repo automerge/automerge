@@ -438,14 +438,6 @@ where
         }
     }
 
-    fn slabs_cut(&self) -> usize {
-        self.slabs.len()
-    }
-
-    fn into_slabs(mut self) -> Vec<Slab<Self::Tail>> {
-        self.take_slabs()
-    }
-
     fn into_slab(mut self) -> Slab<Self::Tail> {
         debug_assert!(
             self.slabs.is_empty(),
@@ -839,14 +831,6 @@ impl<'a, C: Codec> EncoderApi<'a, bool, C> for BoolEncoder<C> {
             Some(max) => Column::from_slabs(self.take_slabs(), max),
             None => Column::load(&self.save()).unwrap(),
         }
-    }
-
-    fn slabs_cut(&self) -> usize {
-        self.slabs.len()
-    }
-
-    fn into_slabs(mut self) -> Vec<Slab<Self::Tail>> {
-        self.take_slabs()
     }
 
     fn into_slab(mut self) -> Slab<Self::Tail> {

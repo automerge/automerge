@@ -40,11 +40,8 @@ use crate::{AutomergeError, Change, ChangeId, Cursor, MalformedBundle, ObjType, 
 use std::borrow::Cow;
 use view::{ClockRange, Mask, ReadAt, Viewpoint, VisibleClock};
 
-mod bundle_feeds;
 pub(crate) mod current_state;
 mod dirty_diff;
-#[cfg(test)]
-mod intake_stats_tests;
 #[cfg(test)]
 mod retention_fuzz_tests;
 #[cfg(test)]
@@ -1300,29 +1297,6 @@ impl<H: HashRetention> Automerge<H> {
     }
 
     fn apply_loaded(&mut self, chunks: Vec<load::LoadedChunk>) -> Result<(), AutomergeError> {
-        // many bundles into an empty document apply in one pass over their ops
-        if self.ops.len() == 0
-            && self.queue.is_empty()
-            && chunks.len() > 1
-            && chunks
-                .iter()
-                .all(|c| matches!(c, load::LoadedChunk::Bundle(_)))
-        {
-            let bundles = chunks
-                .into_iter()
-                .map(|c| {
-                    let load::LoadedChunk::Bundle(b) = c else {
-                        unreachable!()
-                    };
-                    let hashes = match H::AUDIT {
-                        AuditMode::Enabled => Some(b.audit::<ChangeHash>()?),
-                        AuditMode::Disabled => None,
-                    };
-                    Ok((*b, hashes))
-                })
-                .collect::<Result<Vec<_>, AutomergeError>>()?;
-            return self.apply_bundle_feeds(bundles);
-        }
         let mut pending: Vec<Change> = vec![];
         for chunk in chunks {
             match chunk {

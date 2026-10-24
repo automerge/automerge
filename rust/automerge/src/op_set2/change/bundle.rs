@@ -155,9 +155,7 @@ impl<'a> BundleApply<'a> {
         let mut frag = self.frag;
         doc.ops.write_tops(&r.doc_tops, true);
         // every merged row is marked dirty by the merge itself
-        let batch_tops: Vec<(usize, bool)> =
-            r.batch_tops.iter().map(|(b, t)| (b.row, *t)).collect();
-        frag.write_tops(&batch_tops, false);
+        frag.write_tops(&r.batch_tops, false);
 
         doc.ops.merge(frag, &r.insert_runs);
 

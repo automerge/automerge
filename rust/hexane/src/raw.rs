@@ -347,58 +347,6 @@ impl RawColumn {
         }
     }
 
-    /// [`copy_ranges`](Self::copy_ranges) from several sources at once:
-    /// each splice names its source by index into `srcs`. Splices must
-    /// ascend in this column without overlapping, and each source's byte
-    /// ranges must ascend without overlapping; ranges are clamped to their
-    /// source's length. Builds the result in one pass, moving the slabs a
-    /// range covers whole. The same boundary contract as `copy_ranges`
-    /// applies.
-    ///
-    /// # Panics
-    ///
-    /// If a splice names a source out of range, or the ordering above
-    /// does not hold.
-    pub fn copy_many_ranges<I>(&mut self, srcs: Vec<Self>, splices: I)
-    where
-        I: IntoIterator<Item = (usize, Splice)>,
-    {
-        let mut srcs = srcs;
-        if srcs.len() == 1 {
-            let src = srcs.pop().unwrap();
-            return self.copy_ranges(src, splices.into_iter().map(|(_, sp)| sp));
-        }
-        let max = self.max_segments;
-        let mut dest = std::mem::replace(self, Self::with_max_segments(max));
-        let mut asm = RawAssembly {
-            out: Vec::new(),
-            cur: Vec::new(),
-            max,
-        };
-        let mut at = 0;
-        let mut src_at = vec![0usize; srcs.len()];
-        for (s, sp) in splices {
-            assert!(
-                sp.pos >= at,
-                "destination regions must be ascending and non-overlapping"
-            );
-            assert!(sp.pos + sp.delete <= dest.total_len, "splice out of bounds");
-            assert!(
-                sp.range.start >= src_at[s],
-                "src ranges must be ascending and non-overlapping"
-            );
-            src_at[s] = src_at[s].max(sp.range.end);
-            asm.push(&mut dest, at..sp.pos);
-            at = sp.pos + sp.delete;
-            let src = &mut srcs[s];
-            let range = sp.range.start.min(src.total_len)..sp.range.end.min(src.total_len);
-            asm.push(src, range);
-        }
-        let end = dest.total_len;
-        asm.push(&mut dest, at..end);
-        *self = asm.finish();
-    }
-
     /// The byte slices covering `range`, one per slab the range touches.
     fn chunks_in(&self, range: Range<usize>) -> impl Iterator<Item = &[u8]> + '_ {
         let end = range.end.min(self.total_len);
@@ -745,74 +693,6 @@ impl<'a> RawColumnIter<'a> {
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────
-
-/// A [`RawColumn`] built front to back: slabs a range covers whole move
-/// in, partial ones are packed together up to the byte budget.
-struct RawAssembly {
-    out: Vec<RawSlab>,
-    cur: Vec<u8>,
-    max: usize,
-}
-
-impl RawAssembly {
-    /// Append bytes `range` of `col`, which must not be read there again.
-    fn push(&mut self, col: &mut RawColumn, range: Range<usize>) {
-        let mut pos = range.start;
-        while pos < range.end {
-            let (si, off) = col.find_slab(pos);
-            let slab_len = col.slabs[si].data.len();
-            let take = (slab_len - off).min(range.end - pos);
-            if off == 0 && take == slab_len && self.cur.len() + take > self.max {
-                self.flush();
-                self.out.push(std::mem::replace(
-                    &mut col.slabs[si],
-                    RawSlab { data: Vec::new() },
-                ));
-            } else {
-                // slab edges are value boundaries, so packing whole
-                // chunks never splits a value
-                if !self.cur.is_empty() && self.cur.len() + take > self.max {
-                    self.flush();
-                }
-                self.cur
-                    .extend_from_slice(&col.slabs[si].data[off..off + take]);
-            }
-            pos += take;
-        }
-    }
-
-    fn flush(&mut self) {
-        if !self.cur.is_empty() {
-            self.out.push(RawSlab {
-                data: std::mem::take(&mut self.cur),
-            });
-        }
-    }
-
-    fn finish(mut self) -> RawColumn {
-        self.flush();
-        let (max, min) = (self.max, self.max / 4);
-        let mut slabs = self.out;
-        let mut i = 0;
-        while i + 1 < slabs.len() {
-            let (a, b) = (slabs[i].data.len(), slabs[i + 1].data.len());
-            if (a < min || b < min) && a + b <= max {
-                let next = slabs.remove(i + 1);
-                slabs[i].data.extend_from_slice(&next.data);
-            } else {
-                i += 1;
-            }
-        }
-        let total_len = slabs.iter().map(|s| s.data.len()).sum();
-        let bit = rebuild_bit(&slabs, |s| s.data.len());
-        RawColumn {
-            slabs,
-            bit,
-            total_len,
-            max_segments: max,
-        }
-    }
-}
 
 #[cfg(test)]
 mod tests {

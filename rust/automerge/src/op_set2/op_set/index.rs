@@ -36,7 +36,6 @@ pub(crate) struct IndexBuilder {
     marks: RleEncoder<'static, Option<MarkIdx>>,
     mark_cache: HashMap<OpId, MarkData<'static>>,
     obj_info: ObjIndex,
-    record_objs: bool,
     text_encoding: TextEncoding,
     mark_order: MarkOrderValidator,
     split_by_elem: bool,
@@ -300,7 +299,6 @@ impl IndexBuilder {
             marks: RleEncoder::new().with_segments(),
             mark_cache: HashMap::new(),
             obj_info: ObjIndex::default(),
-            record_objs: true,
             text_encoding: encoding,
             mark_order: MarkOrderValidator::default(),
             split_by_elem: false,
@@ -312,12 +310,6 @@ impl IndexBuilder {
     /// insert column alone. Needed for a fragment with deps.
     pub(crate) fn split_by_elem(&mut self) {
         self.split_by_elem = true;
-    }
-
-    /// Leave the processed columns' objects out of the built index, for
-    /// a `known` index that already holds them.
-    pub(crate) fn skip_objs(&mut self) {
-        self.record_objs = false;
     }
 
     fn ops_flushed(&self) -> usize {
@@ -389,9 +381,7 @@ impl IndexBuilder {
         self.apply_increment(id, inc_value, true);
 
         if let Some(obj_info) = obj_info {
-            if self.record_objs {
-                self.obj_info.insert(id, obj_info);
-            }
+            self.obj_info.insert(id, obj_info);
             if self.split_by_elem {
                 self.own_objs.insert(ObjId(id));
             }
@@ -413,7 +403,7 @@ impl IndexBuilder {
         self.push_mark(mark_index);
         self.apply_increment(op.id, op.get_increment_value(), visible);
 
-        if let Some(obj_info) = op.obj_info().filter(|_| self.record_objs) {
+        if let Some(obj_info) = op.obj_info() {
             self.obj_info.insert(op.id, obj_info);
         }
 

@@ -290,37 +290,6 @@ where
         }
     }
 
-    /// [`Self::copy_ranges`] from several sources at once, with the
-    /// contract of [`hexane::Column::copy_many_ranges`]. Adopts slabs when
-    /// every source's map agrees with this one's.
-    pub(crate) fn copy_many_ranges<I>(&mut self, srcs: Vec<MappedColumn<T>>, splices: I)
-    where
-        I: IntoIterator<Item = (usize, hexane::Splice)>,
-        T::Encoding<hexane::Leb128>: hexane::edit::SlabEdit<Value = T>,
-    {
-        if srcs.iter().all(|s| self.map.same_mapping(&s.map)) {
-            self.col
-                .copy_many_ranges(srcs.into_iter().map(|s| s.col).collect(), splices);
-            return;
-        }
-        let mut shift = 0isize;
-        for (s, sp) in splices {
-            let at = (sp.pos as isize + shift) as usize;
-            let vals: Vec<T> = srcs[s]
-                .iter_range(sp.range.clone())
-                .map(|v| {
-                    if self.map.is_identity() {
-                        v
-                    } else {
-                        v.map_actor(|a| self.map.stored(a))
-                    }
-                })
-                .collect();
-            shift += vals.len() as isize - sp.delete as isize;
-            self.col.splice(at, sp.delete, vals);
-        }
-    }
-
     /// Map every logical value through `f` and adopt `target`'s map.
     pub(crate) fn remap_into<F>(&mut self, f: &F, target: Arc<ActorMap>)
     where

@@ -410,20 +410,6 @@ impl MarkIndexColumn {
         self.cache.extend(other.cache.0);
     }
 
-    /// [`Self::merge_from`] from several sources at once, with the
-    /// contract of [`hexane::Column::copy_many_ranges`].
-    pub(crate) fn merge_many_from<R>(&mut self, others: Vec<Self>, splices: R)
-    where
-        R: IntoIterator<Item = (usize, hexane::Splice)>,
-    {
-        let mut data = Vec::with_capacity(others.len());
-        for other in others {
-            data.push(other.data);
-            self.cache.extend(other.cache.0);
-        }
-        self.data.copy_many_ranges(data, splices);
-    }
-
     pub(crate) fn from_parts(
         data: PrefixColumn<Option<MarkIdx>>,
         cache: HashMap<OpId, MarkData<'static>>,

@@ -114,11 +114,11 @@ pub mod prefix;
 pub mod raw;
 pub mod rle;
 pub mod shift;
-pub use column::{Column, ColumnEncoder, ColumnLoadIter, Iter, IterState, Runs, Splice};
+pub use column::{Column, ColumnLoadIter, Iter, IterState, Runs, Splice};
 pub use delta::indexed::FindByRange;
 pub use delta::{
-    DeltaColumn, DeltaColumnEncoder, DeltaDecoder, DeltaEncoder, DeltaIter, DeltaIterState,
-    DeltaRun, DeltaRuns, DeltaValue,
+    DeltaColumn, DeltaDecoder, DeltaEncoder, DeltaIter, DeltaIterState, DeltaRun, DeltaRuns,
+    DeltaValue,
 };
 pub use shift::{Ranges, Shiftable, Unshift};
 /// Streaming encoder for column type `T`, resolved via `T::Encoding<C>`.
@@ -175,8 +175,6 @@ mod sealed {
     pub trait Sealed {}
 }
 
-#[cfg(test)]
-mod copy_many_tests;
 #[cfg(test)]
 mod splice_fuzz;
 #[cfg(test)]

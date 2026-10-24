@@ -16,8 +16,8 @@ mod storage;
 
 pub(crate) use builder::ops;
 pub(crate) use builder::{
-    BundleBuilder, BundleChangeCols, BundleChangeIterUnverified, BundleChangeWriter, BundleKey,
-    BundleOpWriter, BundleOpsColumns, CleanRun, DeltaRunGrouper, ManifoldOp, ManifoldOps, TailRun,
+    BundleBuilder, BundleChangeCols, BundleChangeIterUnverified, BundleChangeWriter,
+    BundleOpWriter, BundleOpsColumns, DeltaRunGrouper, ManifoldOp, ManifoldOps,
 };
 pub(crate) use error::ParseError;
 pub(crate) use storage::{BundleStorage, Compressed};
