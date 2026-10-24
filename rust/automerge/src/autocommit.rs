@@ -546,7 +546,7 @@ impl<H: HashRetention> AutoCommit<H> {
         if !bytes.is_empty() {
             self.save_cursor = self.doc.get_heads()
         }
-        self.doc.gc();
+        self.collect_garbage();
         bytes
     }
 
@@ -590,8 +590,15 @@ impl<H: HashRetention> AutoCommit<H> {
         if !bytes.is_empty() {
             self.save_cursor = self.doc.get_heads()
         }
-        self.doc.gc();
+        self.collect_garbage();
         bytes
+    }
+
+    fn collect_garbage(&mut self) {
+        // changes committed in isolation name the isolation heads' hashes as deps
+        if self.isolation.is_none() {
+            self.doc.gc();
+        }
     }
 
     pub fn is_empty(&self) -> bool {

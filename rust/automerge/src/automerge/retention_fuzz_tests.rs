@@ -412,8 +412,13 @@ fn deep_check(audit: &mut [AutoCommit<Full>], next: &mut [AutoCommit<Retained>],
         let a = &mut audit[i];
         let n = &mut next[i];
         let stack_a = stack(a);
+        // listed in node order, which arrival order may change
+        let sorted = |mut v: Vec<Vec<u8>>| {
+            v.sort();
+            v
+        };
         assert!(
-            stack_a == stack(n),
+            sorted(stack_a.clone()) == sorted(stack(n)),
             "{at}: actor {i} fragment stacks differ"
         );
         let save = n.document().save();

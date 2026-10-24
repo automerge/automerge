@@ -47,7 +47,7 @@ pub(super) fn untangle_order_idx(
     op_set: &OpSet,
     obj_range: Range<usize>,
     hints: &mut HashMap<OpId, u64>,
-) {
+) -> bool {
     let mut ut = UntangleLiteIdx::new(ops, idxs);
     let mut targets: Vec<OpId> = ut
         .entry
@@ -105,7 +105,7 @@ pub(super) fn untangle_order_idx(
             ut.untangle_inserts(id);
         }
     }
-    ut.finish();
+    ut.finish()
 }
 
 struct UntangleLiteIdx<'a> {
@@ -213,15 +213,20 @@ impl<'a> UntangleLiteIdx<'a> {
         Some(())
     }
 
-    fn finish(mut self) {
+    /// False if an op is anchored on an element neither the object nor
+    /// the batch has, leaving the order unchanged.
+    fn finish(mut self) -> bool {
         for i in std::mem::take(&mut self.updates_stack).into_iter().rev() {
             self.emit(i);
         }
         while !self.stack.is_empty() {
             self.untangle_inner();
         }
-        debug_assert!(self.order.iter().all(|&o| o != u32::MAX));
+        if self.order.contains(&u32::MAX) {
+            return false;
+        }
         permute_in_place(self.idxs, std::mem::take(&mut self.order));
+        true
     }
 }
 
@@ -338,7 +343,7 @@ impl BatchApply {
         let clock_before_batch = doc.change_graph.current_clock();
         self.move_in_batch_preds_to_succ(&clock_before_batch);
 
-        let (idxs, hints) = self.doc_ordered_indexes(doc);
+        let (idxs, hints) = self.doc_ordered_indexes(doc)?;
         let (raw, data) = encode_bundle_ops(
             idxs.iter().map(|&i| &self.ops[i as usize]),
             doc.ops(),
@@ -384,7 +389,7 @@ impl BatchApply {
     fn doc_ordered_indexes<H: crate::hash_retention::HashRetention>(
         &self,
         doc: &Automerge<H>,
-    ) -> (Vec<u32>, HashMap<OpId, u64>) {
+    ) -> Result<(Vec<u32>, HashMap<OpId, u64>), AutomergeError> {
         // sort indexes rather than the much larger ChangeOps
         let mut idxs: Vec<u32> = (0..self.ops.len() as u32)
             .filter(|&i| {
@@ -413,19 +418,30 @@ impl BatchApply {
             let obj_type = new_objs
                 .object_type(&obj)
                 .or_else(|| doc.ops().obj_info.object_type(&obj));
-            if matches!(obj_type, Some(t) if t.is_sequence()) {
+            let seq = matches!(obj_type, Some(t) if t.is_sequence());
+            let wrong_key = |i: &u32| {
+                let op = &self.ops[*i as usize].bld;
+                matches!(op.key, KeyRef::Seq(_)) != seq || (op.insert && !seq)
+            };
+            if let Some(t) = obj_type.filter(|_| idxs[start..end].iter().any(wrong_key)) {
+                return Err(AutomergeError::InvalidOp(t));
+            }
+            if let Some(t) = obj_type.filter(|_| seq) {
                 let obj_range = walker.seek_to_obj(obj);
-                untangle_order_idx(
+                let placed = untangle_order_idx(
                     &self.ops,
                     &mut idxs[start..end],
                     doc.ops(),
                     obj_range,
                     &mut hints,
                 );
+                if !placed {
+                    return Err(AutomergeError::InvalidOp(t));
+                }
             }
             start = end;
         }
-        (idxs, hints)
+        Ok((idxs, hints))
     }
 }
 

@@ -191,12 +191,7 @@ impl<'a> BundleV0Storage<'a, Unverified> {
         if let (Some(changes_meta), Some(ops_meta)) =
             (changes_meta_raw.uncompressed(), ops_meta_raw.uncompressed())
         {
-            V0ChangeIterUnverified::try_new(&changes_meta, changes.value)
-                .map_err(|e| parse::ParseError::Error(ParseError::InvalidColumns(Box::new(e))))?;
-            let id_ctr = extract_id_ctr_values(&changes_meta, changes.value, &ops_meta, ops.value)
-                .map_err(parse::ParseError::Error)?;
-            V0OpIterUnverified::try_new(&ops_meta, ops.value, &id_ctr)
-                .map_err(|e| parse::ParseError::Error(ParseError::InvalidColumns(Box::new(e))))?;
+            let id_ctr = check_columns(&changes_meta, changes.value, &ops_meta, ops.value)?;
             return Ok((
                 parse::Input::empty(),
                 BundleV0Storage {
@@ -246,17 +241,12 @@ impl<'a> BundleV0Storage<'a, Unverified> {
         out.extend_from_slice(&ops_data_buf);
         let new_ops_end = out.len();
 
-        V0ChangeIterUnverified::try_new(&changes_meta, &out[new_changes_start..new_changes_end])
-            .map_err(|e| parse::ParseError::Error(ParseError::InvalidColumns(Box::new(e))))?;
-        let id_ctr = extract_id_ctr_values(
+        let id_ctr = check_columns(
             &changes_meta,
             &out[new_changes_start..new_changes_end],
             &ops_meta,
             &out[new_ops_start..new_ops_end],
-        )
-        .map_err(parse::ParseError::Error)?;
-        V0OpIterUnverified::try_new(&ops_meta, &out[new_ops_start..new_ops_end], &id_ctr)
-            .map_err(|e| parse::ParseError::Error(ParseError::InvalidColumns(Box::new(e))))?;
+        )?;
 
         Ok((
             parse::Input::empty(),
@@ -336,6 +326,50 @@ impl BundleV0Storage<'_, Verified> {
     pub(crate) fn deps(&self) -> &[ChangeHash] {
         &self.deps
     }
+}
+
+/// Rejects column bytes the decoders would panic on, and returns the ops'
+/// id counters in document order.
+fn check_columns(
+    changes_meta: &RawColumns<compression::Uncompressed>,
+    changes: &[u8],
+    ops_meta: &RawColumns<compression::Uncompressed>,
+    ops: &[u8],
+) -> Result<Vec<i64>, parse::ParseError<ParseError>> {
+    let invalid = |e| parse::ParseError::Error(ParseError::InvalidColumns(Box::new(e)));
+    validate_columns(changes_meta, changes).map_err(invalid)?;
+    validate_columns(ops_meta, ops).map_err(invalid)?;
+    V0ChangeIterUnverified::try_new(changes_meta, changes).map_err(invalid)?;
+    let id_ctr = extract_id_ctr_values(changes_meta, changes, ops_meta, ops)
+        .map_err(parse::ParseError::Error)?;
+    V0OpIterUnverified::try_new(ops_meta, ops, &id_ctr).map_err(invalid)?;
+    Ok(id_ctr)
+}
+
+/// Rejects column bytes the decoders would panic on.
+fn validate_columns(
+    columns: &RawColumns<compression::Uncompressed>,
+    data: &[u8],
+) -> Result<(), ParseError> {
+    fn check<T: hexane::ColumnValueRef>(bytes: &[u8]) -> Result<(), ParseError> {
+        use hexane::ColumnEncoding;
+        T::Encoding::<hexane::Leb128>::validate_encoding(bytes)?;
+        Ok(())
+    }
+    for col in columns.iter() {
+        let d = &data[col.data()];
+        match (col.spec().id(), col.spec().col_type()) {
+            (ops::ACTION_COL_ID, ColumnType::Integer) => check::<Option<Action>>(d)?,
+            (_, ColumnType::Actor) => check::<Option<ActorIdx>>(d)?,
+            (_, ColumnType::DeltaInteger) => check::<Option<i64>>(d)?,
+            (_, ColumnType::Integer | ColumnType::Group) => check::<Option<u64>>(d)?,
+            (_, ColumnType::Boolean) => check::<bool>(d)?,
+            (_, ColumnType::String) => check::<Option<String>>(d)?,
+            (_, ColumnType::ValueMetadata) => check::<Option<ValueMeta>>(d)?,
+            (_, ColumnType::Value) => {}
+        }
+    }
+    Ok(())
 }
 
 pub(crate) struct V0ChangeIter<'a>(V0ChangeIterUnverified<'a>);
@@ -487,7 +521,10 @@ impl<'a> V0ChangeIterInner<'a> {
         }
 
         let extra_count = self.extra_count.next().flatten().unwrap_or(0) as usize;
-        let (extra, tail) = self.extra.split_at(extra_count);
+        let (extra, tail) = self
+            .extra
+            .split_at_checked(extra_count)
+            .ok_or(ReadOpError::MissingValue("extra"))?;
         let extra = Cow::Borrowed(extra);
         self.extra = tail;
 
@@ -619,7 +656,10 @@ impl<'a> V0OpIterInner<'a> {
             .next()
             .flatten()
             .ok_or(ReadOpError::MissingValue("value_meta"))?;
-        let (value_raw, tail) = self.value.split_at(value_meta.length());
+        let (value_raw, tail) = self
+            .value
+            .split_at_checked(value_meta.length())
+            .ok_or(ReadOpError::MissingValue("value"))?;
         self.value = tail;
         let value = ScalarValue::from_raw(value_meta, value_raw)
             .map_err(|_| ReadOpError::MissingValue("value"))?;

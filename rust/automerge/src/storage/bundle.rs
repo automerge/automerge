@@ -919,15 +919,15 @@ impl Bundle {
         if dep_ids.len() != storage.deps().len() {
             return Err(bad("dep ids do not match the carried changes' deps"));
         }
-        let (member_actors, member_seqs) = storage
+        let members = storage
             .member_ids()
             .map_err(|e| InvalidBundle(format!("invalid change metadata: {}", e)))?;
+        let (member_actors, member_seqs) = (members.actors, members.seqs);
         let num_members = member_seqs.len();
-        if prefix.heads.is_empty() {
-            return Err(bad("a bundle must deliver at least one head"));
-        }
-        if prefix.heads.iter().any(|(_, i)| *i >= num_members) {
-            return Err(bad("head index out of range"));
+        let mut declared_heads: Vec<usize> = prefix.heads.iter().map(|(_, i)| *i).collect();
+        declared_heads.sort_unstable();
+        if declared_heads != members.heads {
+            return Err(bad("heads are not the members nothing depends on"));
         }
         if prefix.checkpoints.iter().any(|(i, _)| *i >= num_members) {
             return Err(bad("checkpoint index out of range"));
@@ -1137,7 +1137,7 @@ mod tests {
         let mut b = Bundle::try_from(&good.bytes()[..]).unwrap();
         b.heads.clear();
         let err = Bundle::try_from(&b.bytes()[..]).expect_err("no heads must be rejected");
-        assert!(err.0.contains("at least one head"), "got {err}");
+        assert!(err.0.contains("heads"), "got {err}");
     }
 
     #[test]

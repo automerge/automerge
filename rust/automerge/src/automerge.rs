@@ -966,29 +966,33 @@ impl<H: HashRetention> Automerge<H> {
     ///
     /// Returns an error if any of `heads` is not a change in this document.
     pub fn fork_at(&self, heads: &[ChangeId]) -> Result<Self, AutomergeError> {
-        let heads = self.resolve_heads(heads)?;
-        let mut seen = HashSet::new();
-        let mut heads = heads
-            .iter()
-            .filter(|head| seen.insert(**head))
-            .copied()
-            .collect::<Vec<_>>();
-        let mut hashes = vec![];
-        while let Some(hash) = heads.pop() {
-            if !self.change_graph.has_change(&hash)? {
-                return Err(AutomergeError::InvalidHash(hash));
-            }
-            for dep in self.change_graph.deps_for_hash(&hash) {
-                let dep = dep?;
-                if seen.insert(dep) {
-                    heads.push(dep);
-                }
-            }
-            hashes.push(hash);
+        let mut nodes = Vec::with_capacity(heads.len());
+        for id in heads {
+            let node = self
+                .node_for_change_id(id)
+                .ok_or_else(|| AutomergeError::InvalidChangeId(id.to_string()))?;
+            nodes.push(node);
         }
         let mut f = Self::empty(self.text_encoding());
-        let changes = self.get_changes_by_hashes(hashes.into_iter().rev())?;
-        f.apply_changes(changes)?;
+        f.set_gc_mode(self.gc_mode());
+        if !nodes.is_empty() {
+            let clock = self.change_graph.seq_clock_for_nodes(nodes);
+            let nodes = self.change_graph.nodes_covered_by(&clock);
+            let heads = self
+                .change_graph
+                .heads_of(&nodes)
+                .into_iter()
+                .map(|n| {
+                    self.change_graph
+                        .hash_for_node(n)
+                        .ok_or(AutomergeError::AuditModeRequired)
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let members = self.change_graph.bundle_members(&nodes);
+            let storage = Bundle::storage_for_nodes(&self.ops, &self.change_graph, &members)?;
+            let bundle = self.assemble_bundle(&heads, &[], &members, storage, NameHashes::All)?;
+            f.apply_bundle(bundle)?;
+        }
         f.set_write_frontier_boundaries(self.write_frontier.clone());
         Ok(f)
     }
@@ -1259,8 +1263,9 @@ impl<H: HashRetention> Automerge<H> {
                     .verification_mode(VerificationMode::Check),
                 load::MarkOrderValidation::Validate,
             )?;
-            // Ensure that the author, actor, and write-frontier state are carried
-            // over for an empty document.
+            // Ensure that the author, actor, write-frontier and GC mode are
+            // carried over for an empty document.
+            doc.set_gc_mode(self.gc_mode());
             doc.set_author(self.get_author().cloned());
             doc = doc.with_actor(self.actor_id().clone());
             doc.set_write_frontier_boundaries(self.write_frontier.clone());
@@ -1297,6 +1302,9 @@ impl<H: HashRetention> Automerge<H> {
     }
 
     fn apply_loaded(&mut self, chunks: Vec<load::LoadedChunk>) -> Result<(), AutomergeError> {
+        // into an empty document a bundle may arrive before its deps
+        let any_order = self.change_graph.is_empty();
+        let mut waiting: Vec<Bundle> = vec![];
         let mut pending: Vec<Change> = vec![];
         for chunk in chunks {
             match chunk {
@@ -1305,14 +1313,60 @@ impl<H: HashRetention> Automerge<H> {
                     if !pending.is_empty() {
                         self.apply_changes(std::mem::take(&mut pending))?;
                     }
+                    if any_order && !self.has_bundle_deps(&b) {
+                        waiting.push(*b);
+                        continue;
+                    }
                     self.apply_bundle(*b)?;
+                    self.apply_waiting(&mut waiting)?;
                 }
             }
         }
         if !pending.is_empty() {
             self.apply_changes(pending)?;
         }
+        self.apply_waiting(&mut waiting)?;
+        // what still waits fails as it would have in order
+        for b in waiting {
+            self.apply_bundle(b)?;
+        }
         Ok(())
+    }
+
+    fn apply_waiting(&mut self, waiting: &mut Vec<Bundle>) -> Result<(), AutomergeError> {
+        // the latest to wait usually needed the one just applied
+        while let Some(i) = waiting.iter().rposition(|b| self.has_bundle_deps(b)) {
+            let b = waiting.remove(i);
+            self.apply_bundle(b)?;
+        }
+        Ok(())
+    }
+
+    /// Whether `bundle` names only changes this document has, and extends
+    /// each actor's sequence without a gap. O(members), decoding nothing.
+    fn has_bundle_deps(&self, bundle: &Bundle) -> bool {
+        let known = |id: &ChangeId| self.node_for_change_id(id).is_some();
+        if !bundle.dep_ids.iter().all(known) || !bundle.boundary.iter().all(|(_, id)| known(id)) {
+            return false;
+        }
+        let clock = self.change_graph.current_seq_clock();
+        let mut seen = vec![false; bundle.actors().len()];
+        bundle
+            .member_actors
+            .iter()
+            .zip(&bundle.member_seqs)
+            .all(|(actor, seq)| {
+                let actor = usize::from(*actor);
+                if std::mem::replace(&mut seen[actor], true) {
+                    return true;
+                }
+                let have = self
+                    .ops
+                    .lookup_actor(&bundle.actors()[actor])
+                    .and_then(|idx| clock.get_for_actor(&idx))
+                    .map_or(0, |s| s.get() as u64);
+                seq.get() <= have + 1
+            })
     }
 
     /// Apply changes to this document.
@@ -1472,15 +1526,16 @@ impl<H: HashRetention> Automerge<H> {
         }
         let members = self.change_graph.bundle_members(&nodes);
         let storage = Bundle::storage_for_nodes(&self.ops, &self.change_graph, &members)?;
-        let heads: Vec<ChangeHash> = self
-            .get_head_hashes()
+        let heads = self
+            .change_graph
+            .heads_of(&nodes)
             .into_iter()
-            .filter(|h| {
+            .map(|n| {
                 self.change_graph
-                    .node_by_hash(h)
-                    .is_some_and(|n| nodes.binary_search(&n).is_ok())
+                    .hash_for_node(n)
+                    .ok_or(AutomergeError::AuditModeRequired)
             })
-            .collect();
+            .collect::<Result<Vec<_>, _>>()?;
         let boundary: Vec<ChangeHash> = boundary
             .iter()
             .copied()
@@ -1584,8 +1639,13 @@ impl<H: HashRetention> Automerge<H> {
         let Some(node) = self.change_graph.node_for_change_id(&id, &self.ops.actors) else {
             return Ok(None);
         };
-        let deps = self.change_graph.parent_hashes(node);
-        self.bundle_nodes(vec![node], &deps, NameHashes::All)
+        // widened past parents whose hashes were freed, as `save_after` is
+        let nodes = self.change_graph.nodes_back_to_retained([node]);
+        let deps: Vec<ChangeHash> = nodes
+            .iter()
+            .flat_map(|n| self.change_graph.parent_hashes(*n))
+            .collect();
+        self.bundle_nodes(nodes, &deps, NameHashes::All)
     }
 
     /// The clock a read at `heads` observes: causal(heads) ∩ mask.
@@ -1744,7 +1804,9 @@ impl<H: HashRetention> Automerge<H> {
             return false;
         }
         // one rehash back to the retained hashes for all of them
-        let span = self.change_graph.nodes_back_to_retained(nodes.iter().copied());
+        let span = self
+            .change_graph
+            .nodes_back_to_retained(nodes.iter().copied());
         let hashes = self
             .rehash(span.clone())
             .expect("rebuilding the hashes of changes this document has");
@@ -2068,14 +2130,15 @@ impl<H: HashRetention> Automerge<H> {
         let clock = self
             .change_graph
             .seq_clock_for_nodes(boundary_nodes.clone());
-        let members = self
-            .change_graph
-            .members_between(head_nodes.clone(), &clock);
+        let members = self.change_graph.members_between(head_nodes, &clock);
 
         let hash_of = |n: &crate::change_graph::NodeIdx| {
             self.change_graph.hash_for_node(*n).ok_or_else(unknown)
         };
-        let head_hashes = head_nodes
+        // a head another head depends on is not one
+        let head_hashes = self
+            .change_graph
+            .heads_of(&members)
             .iter()
             .map(hash_of)
             .collect::<Result<Vec<_>, _>>()?;
@@ -2608,12 +2671,20 @@ impl<H: HashRetention> Automerge<H> {
         if claims.windows(2).any(|w| w[0].1 == w[1].1) {
             return Err(conflict());
         }
+        let graph = &self.change_graph;
         for (node, hash) in &claims {
-            let graph = &self.change_graph;
             if graph.node_by_hash(hash).is_some_and(|n| n != *node)
                 || graph.hash_for_node(*node).is_some_and(|h| h != *hash)
             {
                 return Err(conflict());
+            }
+            // fragment-level hashes are never freed
+            let freed = (node.0 as usize) < graph.len() && graph.hash_for_node(*node).is_none();
+            if freed && hash.fragment_level() > 0 {
+                return Err(MalformedBundle::Invalid(
+                    "a freed change claims a fragment-level hash",
+                )
+                .into());
             }
         }
         Ok(())

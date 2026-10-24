@@ -103,7 +103,9 @@ impl<O: OpReadState> BundleStorage<'_, O> {
 
     /// Each member's actor and sequence number, checking that actors are
     /// in range and sequence numbers non-zero. No other column is validated.
-    pub(crate) fn member_ids(&self) -> Result<(Vec<ActorIdx>, Vec<NonZeroU64>), ParseError> {
+    /// Each member's actor and seq, and the members no other member
+    /// depends on, ascending.
+    pub(crate) fn member_ids(&self) -> Result<MemberIds, ParseError> {
         let bad = ParseError::InvalidChangeMetadata;
         let cols = self.change_cols()?;
         let num_actors = self.actors.len();
@@ -123,7 +125,22 @@ impl<O: OpReadState> BundleStorage<'_, O> {
         if seqs.len() != len {
             return Err(bad("short member seq column"));
         }
-        Ok((actors, seqs))
+        let mut depended_on = vec![false; len];
+        let mut deps = cols.dep_values();
+        for count in cols.dep_counts().take(len) {
+            for _ in 0..count.unwrap_or(0) {
+                let d = deps.next().flatten().ok_or(bad("short deps column"))?;
+                if let Some(d) = usize::try_from(d).ok().and_then(|d| depended_on.get_mut(d)) {
+                    *d = true;
+                }
+            }
+        }
+        let heads = (0..len).filter(|i| !depended_on[*i]).collect();
+        Ok(MemberIds {
+            actors,
+            seqs,
+            heads,
+        })
     }
 
     /// Each member's metadata, decoded afresh rather than cached.
@@ -371,4 +388,10 @@ impl BundleStorage<'_, Verified> {
     pub(crate) fn deps(&self) -> &[ChangeHash] {
         &self.deps
     }
+}
+
+pub(crate) struct MemberIds {
+    pub(crate) actors: Vec<ActorIdx>,
+    pub(crate) seqs: Vec<NonZeroU64>,
+    pub(crate) heads: Vec<usize>,
 }

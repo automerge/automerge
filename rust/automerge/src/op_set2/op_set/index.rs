@@ -273,13 +273,17 @@ impl<'a> RareOps<'a> {
             .ok_or(ReadOpError::MissingValue("mark_name"))
     }
 
-    fn raw_at(&mut self, start: usize, len: usize) -> &'a [u8] {
-        self.raw.seek_to(start);
-        self.raw.take(len)
+    fn raw_at(&mut self, start: usize, len: usize) -> Result<&'a [u8], ReadOpError> {
+        let short = || ReadOpError::MissingValue("raw value bytes");
+        let skip = start.checked_sub(self.raw.pos()).ok_or_else(short)?;
+        if !self.raw.try_skip(skip) {
+            return Err(short());
+        }
+        self.raw.try_take(len).ok_or_else(short)
     }
 
     fn value_at(&mut self, meta: ValueMeta, start: usize) -> Result<ScalarValue<'a>, ReadOpError> {
-        let raw = self.raw_at(start, meta.length());
+        let raw = self.raw_at(start, meta.length())?;
         Ok(ScalarValue::from_raw(meta, raw)?)
     }
 }

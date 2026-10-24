@@ -1304,11 +1304,16 @@ impl<H: HashRetention> ChangeGraph<H> {
             let mut gone: HashSet<NodeIdx> =
                 self.nodes_back_to_retained(unnamed).into_iter().collect();
             let first = gone.iter().min().copied().expect("an unnamed dep");
+            let covered = clock.clone();
             for n in (first.0..self.len() as u32).map(NodeIdx) {
-                if !self.is_covered_by(n, &clock) {
+                if !self.is_covered_by(n, &covered) {
                     continue;
                 }
-                if gone.contains(&n) || self.parents(n).any(|p| gone.contains(&p)) {
+                // uncovering a change uncovers its actor's later ones too
+                if gone.contains(&n)
+                    || !self.is_covered_by(n, &clock)
+                    || self.parents(n).any(|p| gone.contains(&p))
+                {
                     gone.insert(n);
                     clock.uncover(
                         usize::from(self.actors[n.0 as usize]),
@@ -1317,6 +1322,40 @@ impl<H: HashRetention> ChangeGraph<H> {
                 }
             }
         }
+    }
+
+    /// The nodes `clock` covers, ascending.
+    pub(crate) fn nodes_covered_by(&self, clock: &SeqClock) -> Vec<NodeIdx> {
+        let mut nodes: Vec<NodeIdx> = self
+            .seq_index
+            .iter()
+            .enumerate()
+            .flat_map(|(actor, changes)| {
+                let seq = clock.get_for_actor(&actor).map_or(0, |s| s.get() as usize);
+                &changes[..seq]
+            })
+            .copied()
+            .collect();
+        nodes.sort_unstable();
+        nodes
+    }
+
+    /// The nodes of `nodes` (ascending) that none of the others depends on.
+    pub(crate) fn heads_of(&self, nodes: &[NodeIdx]) -> Vec<NodeIdx> {
+        let mut depended_on = vec![false; nodes.len()];
+        for n in nodes {
+            for p in self.parent_slice(*n) {
+                if let Ok(i) = nodes.binary_search(p) {
+                    depended_on[i] = true;
+                }
+            }
+        }
+        nodes
+            .iter()
+            .zip(depended_on)
+            .filter(|(_, d)| !d)
+            .map(|(n, _)| *n)
+            .collect()
     }
 
     /// The nodes `clock` does *not* cover, ascending.
@@ -2841,6 +2880,17 @@ impl ChangeGraphCols {
         let extra_meta_bytes = meta.bytes(EXTRA_META_COL_SPEC, bytes);
 
         let extra_bytes_raw = meta.bytes(EXTRA_VAL_COL_SPEC, bytes).to_vec();
+
+        // the decoders below panic on malformed bytes
+        fn check<T: hexane::ColumnValueRef>(bytes: &[u8]) -> Result<(), hexane::PackError> {
+            use hexane::ColumnEncoding;
+            T::Encoding::<hexane::Leb128>::validate_encoding(bytes).map(|_| ())
+        }
+        check::<ActorIdx>(actor_bytes)?;
+        check::<u32>(deps_count_bytes)?;
+        for delta in [max_op_bytes, seq_bytes, deps_val_bytes] {
+            check::<i64>(delta)?;
+        }
 
         let actors: ActorRefs<Vec<ActorIdx>> =
             ActorRefs(hexane::decoder::<ActorIdx>(actor_bytes).collect());
