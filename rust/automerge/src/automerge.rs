@@ -1292,7 +1292,7 @@ impl<H: HashRetention> Automerge<H> {
                 load::LoadedChunk::Change(c) => pending.push(*c),
                 load::LoadedChunk::Bundle(b) => {
                     if !pending.is_empty() {
-                        self.apply_changes(std::mem::take(&mut pending))?;
+                        self.apply_changes_batch_with(std::mem::take(&mut pending), true)?;
                     }
                     if any_order && !self.has_bundle_deps(&b) {
                         waiting.push(*b);
@@ -1304,7 +1304,7 @@ impl<H: HashRetention> Automerge<H> {
             }
         }
         if !pending.is_empty() {
-            self.apply_changes(pending)?;
+            self.apply_changes_batch_with(pending, true)?;
         }
         self.apply_waiting(&mut waiting)?;
         // what still waits fails as it would have in order
@@ -1355,12 +1355,12 @@ impl<H: HashRetention> Automerge<H> {
     /// This is idempotent in the sense that if a change has already been applied it will be
     /// ignored.
     ///
-    /// A change whose dependencies are missing is queued until they arrive. A change names its
-    /// dependencies only by hash, so once this document has freed the hash of a change some
-    /// incoming change depends on, it cannot tell that dependency from one it has never seen and
-    /// fails with [`AutomergeError::AuditModeRequired`] without applying it. Send such changes
-    /// as bundles, which also name their dependencies by [`ChangeId`], or use
-    /// [`AuditMode::Enabled`].
+    /// With [`AuditMode::Enabled`], a change whose dependencies are missing is queued until they
+    /// arrive. Otherwise the call applies every change or none: if a dependency is neither in the
+    /// document nor among `changes`, it fails with [`AutomergeError::MissingDeps`], or with
+    /// [`AutomergeError::AuditModeRequired`] when the dependency may be a change whose hash this
+    /// document has freed. Send such changes as bundles, which also name their dependencies by
+    /// [`ChangeId`].
     pub fn apply_changes(
         &mut self,
         changes: impl IntoIterator<Item = Change> + Clone,
@@ -3770,6 +3770,7 @@ impl Automerge<Full> {
     pub fn disable_audit_mode(mut self) -> Automerge<Retained> {
         // before interior hashes are freed
         self.pin_resolved_boundaries();
+        self.queue = ChangeQueue::new();
         self.map_graph(ChangeGraph::into_retained)
     }
 
@@ -5378,7 +5379,7 @@ mod actor_hygiene_tests {
                 let mut raw = base.clone();
                 raw[i] ^= 1 << bit;
                 let c = crate::Change::try_from(&raw[..]).ok()?;
-                let mut probe = Automerge::new();
+                let mut probe = Automerge::new().enable_audit_mode().unwrap();
                 probe
                     .apply_changes(vec![good[0].clone(), c.clone()])
                     .is_err()

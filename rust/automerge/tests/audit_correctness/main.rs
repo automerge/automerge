@@ -916,28 +916,34 @@ fn save_after_from_a_next_document_whose_fragment_the_receivers_frontier_cuts() 
     assert_eq!(a.get_heads(), b.get_heads());
 }
 
-/// A next document that queued an orphan change (deps not yet seen) must
-/// be able to reload its own save.
+/// Outside audit mode a change whose deps are missing is rejected, not
+/// queued, and the document is left as it was.
 #[test]
-fn a_next_document_with_a_queued_orphan_reloads_its_own_save() {
+fn a_next_document_rejects_a_change_whose_deps_are_missing() {
     use automerge::transaction::Transactable as _;
-    // a legacy peer produces changes
     let mut legacy = automerge::AutoCommit::new().with_actor(actor(5));
     legacy.put(ROOT, "x", 1).unwrap();
     legacy.commit();
     legacy.put(ROOT, "x", 2).unwrap();
     legacy.commit();
     let changes = legacy.get_changes(&[]);
-    let orphan = changes[1].clone();
 
     let mut next = AutoCommit::new().with_actor(actor(1));
     next.put(ROOT, "a", 1).unwrap();
     next.commit_with(t0());
-    // the second change arrives before the first: it is queued
-    next.apply_changes([orphan]).unwrap();
-    let saved = next.save();
-    let mut reloaded = AutoCommit::load(&saved).expect("a document reloads its own save");
-    assert_eq!(reloaded.get_heads(), next.get_heads());
+    let heads = next.get_heads();
+    assert_eq!(
+        next.apply_changes([changes[1].clone()]),
+        Err(automerge::AutomergeError::MissingDeps)
+    );
+    assert_eq!(next.get_heads(), heads);
+    let mut reloaded = AutoCommit::load(&next.save()).expect("a document reloads its own save");
+    assert_eq!(reloaded.get_heads(), heads);
+    next.apply_changes(changes).unwrap();
+    assert_eq!(
+        next.get(ROOT, "x").unwrap().unwrap().0,
+        automerge::Value::from(2)
+    );
 }
 
 /// Loading two whole-document saves that overlap, in one `load`, must give

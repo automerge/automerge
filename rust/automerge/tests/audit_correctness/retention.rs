@@ -56,13 +56,11 @@ fn fork_at_current_heads_works_after_a_save() {
     assert_eq!(forked.get_heads(), heads);
 }
 
-/// A legacy change queued because its dep hadn't arrived, whose dep then
-/// arrives as an interior member of a bundle: the bundle applies, and the
-/// call must either apply the queued change too or leave it queued, but
-/// never report failure for a bundle it applied.
+/// Outside audit mode a legacy change whose dep hasn't arrived is rejected
+/// rather than queued, so a bundle that later delivers the dep applies
+/// cleanly and the document keeps loading its own save.
 #[test]
-#[ignore = "open question for the owner"]
-fn a_bundle_delivering_a_queued_changes_dep_succeeds() {
+fn a_legacy_change_ahead_of_its_dep_is_rejected_and_the_dep_bundle_applies() {
     let mut base = AutoCommit::new().with_actor(actor(9));
     base.put(ROOT, "base", 1).unwrap();
     base.commit_with(t0());
@@ -84,26 +82,26 @@ fn a_bundle_delivering_a_queued_changes_dep_succeeds() {
         .with_actor(actor(3));
     c.put(ROOT, "c", 1).unwrap();
     c.commit_with(t0());
-    let queued = c.get_last_local_change_legacy().unwrap().unwrap();
+    let legacy = c.get_last_local_change_legacy().unwrap().unwrap();
 
     let mut r = AutoCommit::load(&base_bytes).unwrap().with_actor(actor(2));
-    r.apply_changes([queued]).unwrap();
-    assert_eq!(r.get_heads(), base_heads, "the change is queued");
-    let bundle = w.save_after(&base_heads).unwrap();
-    let res = r.load_incremental(&bundle);
-    let has_w = r.has_change_id(&id(1, 1500));
-    eprintln!(
-        "load_incremental: {res:?}; bundle applied: {has_w}; heads {:?}",
-        r.get_heads()
+    assert_eq!(
+        r.apply_changes([legacy.clone()]),
+        Err(AutomergeError::MissingDeps)
     );
-    let before = w.get_heads();
-    w.put(ROOT, "more", 1).unwrap();
-    w.commit_with(t0());
-    let next = r.load_incremental(&w.save_after(&before).unwrap());
-    eprintln!("a later, unrelated bundle: {next:?}");
-    let reload = AutoCommit::load(&r.save()).map(|_| ());
-    eprintln!("reloading the receiver's save: {reload:?}");
-    res.expect("loading the bundle succeeds");
+    assert_eq!(r.get_heads(), base_heads);
+    r.load_incremental(&w.save_after(&base_heads).unwrap())
+        .expect("the bundle applies");
+    assert_eq!(r.get_heads(), w.get_heads());
+    AutoCommit::load(&r.save()).expect("the receiver reloads its own save");
+    // its dep's hash was never computed here: only audit mode can match it
+    assert_eq!(
+        r.apply_changes([legacy.clone()]),
+        Err(AutomergeError::AuditModeRequired)
+    );
+    let mut audited = r.enable_audit_mode().unwrap();
+    audited.apply_changes([legacy]).unwrap();
+    assert!(audited.has_change_id(&id(3, 1)));
 }
 
 /// The last local change is always exportable as a bundle, including
@@ -187,8 +185,7 @@ fn sync(peers: &mut [Automerge], a: usize, b: usize, how: usize, log: &[String])
                 .try_for_each(|b| to.load_incremental(b).map(|_| ()))
         }
         _ => match from.get_last_local_change_legacy() {
-            // a queued orphan poisons the receiver: see
-            // a_bundle_delivering_a_queued_changes_dep_succeeds
+            // outside audit mode a change ahead of its deps is rejected
             Ok(Some(c)) if !c.deps().iter().all(|h| to.has_change(h).unwrap_or(false)) => Ok(()),
             Ok(Some(c)) => {
                 let has = to.has_change(&c.hash());

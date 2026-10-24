@@ -1254,9 +1254,9 @@ mod tests {
         assert_eq!(base.get_changes(&[]).unwrap().len(), 2);
     }
 
-    fn delivers_queued_changes<H: crate::hash_retention::HashRetention>(
-        mut doc: crate::automerge::Automerge<H>,
-    ) {
+    #[test]
+    fn a_bundle_delivers_queued_changes() {
+        let mut doc = audited(b"rcv");
         let mut src = audited(b"src");
         for i in 0..3 {
             put(&mut src, i);
@@ -1268,14 +1268,6 @@ mod tests {
         assert!(doc.queue.is_empty());
         doc.apply_changes(changes).unwrap();
         assert_eq!(doc.get_heads(), src.get_heads());
-    }
-
-    #[test]
-    fn a_bundle_delivers_queued_changes() {
-        delivers_queued_changes(audited(b"rcv"));
-        delivers_queued_changes(
-            crate::automerge::Automerge::<crate::hash_retention::Retained>::new(),
-        );
     }
 
     fn audit_fixture() -> crate::automerge::Automerge<crate::hash_retention::Full> {

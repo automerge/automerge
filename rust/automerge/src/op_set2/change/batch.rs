@@ -1,6 +1,7 @@
+use crate::automerge::AuditMode;
 use crate::automerge::Automerge;
 use crate::change_graph::ApplyLookup;
-use crate::change_queue::ChangeBatch;
+use crate::change_queue::{ChangeBatch, ChangeQueue};
 use crate::op_set2::types::{KeyRef, ScalarValue as OpScalarValue};
 use crate::types::{ActorId, Clock, ElemId, ObjId, OpId, SmallHashMap};
 use crate::AutomergeError;
@@ -474,6 +475,16 @@ impl<H: crate::hash_retention::HashRetention> Automerge<H> {
         &mut self,
         changes: I,
     ) -> Result<(), AutomergeError> {
+        self.apply_changes_batch_with(changes, false)
+    }
+
+    /// Outside audit mode nothing is queued: changes that are not ready
+    /// fail the whole batch, or with `drop_unready` are discarded.
+    pub(crate) fn apply_changes_batch_with<I: IntoIterator<Item = Change>>(
+        &mut self,
+        changes: I,
+        drop_unready: bool,
+    ) -> Result<(), AutomergeError> {
         let mut batch = ChangeBatch::new();
         let mut actors_with_author: HashSet<ActorId> = self
             .queue
@@ -518,25 +529,30 @@ impl<H: crate::hash_retention::HashRetention> Automerge<H> {
             return Ok(());
         }
 
-        let mut chap = BatchApply::new(self.queue.pop_topo_sorted_ready(&self.change_graph));
+        let ready = self.queue.pop_topo_sorted_ready(&self.change_graph);
+        if H::AUDIT == AuditMode::Disabled && !self.queue.is_empty() {
+            let unready = std::mem::replace(&mut self.queue, ChangeQueue::new());
+            if !drop_unready {
+                return Err(self.unready_error(&unready));
+            }
+        }
 
         // on failure the popped changes are not re-queued: one of them
         // would fail every later apply
-        chap.apply(self)?;
-
-        self.check_queued_deps_decidable()
+        BatchApply::new(ready).apply(self)
     }
 
-    /// A queued change whose dep hash may have been freed can never become ready.
-    fn check_queued_deps_decidable(&self) -> Result<(), AutomergeError> {
-        for queued in self.queue.iter() {
-            for dep in queued.deps() {
-                if !self.queue.has_hash(dep) && self.change_graph.has_change(dep).is_err() {
-                    return Err(AutomergeError::AuditModeRequired);
-                }
-            }
+    /// A dep hash this document may have freed cannot be told from a missing one.
+    fn unready_error(&self, unready: &ChangeQueue) -> AutomergeError {
+        let undecidable = unready
+            .iter()
+            .flat_map(|c| c.deps())
+            .any(|dep| !unready.has_hash(dep) && self.change_graph.has_change(dep).is_err());
+        if undecidable {
+            AutomergeError::AuditModeRequired
+        } else {
+            AutomergeError::MissingDeps
         }
-        Ok(())
     }
 
     fn import_ops_to(
