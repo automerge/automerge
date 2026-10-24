@@ -1607,9 +1607,7 @@ impl<H: HashRetention> ChangeGraph<H> {
             .filter(|h| *h != head && h.fragment_level() > 0)
             .collect();
         checkpoints.sort_unstable();
-        let mut by_id = nodes.to_vec();
-        by_id.sort_unstable_by_key(|n| (self.actors[n.0 as usize], self.seq[n.0 as usize]));
-        let members = by_id.iter().map(|n| self.change_id(*n, actors)).collect();
+        let members = nodes.iter().map(|n| self.change_id(*n, actors)).collect();
         Fragment {
             head,
             level,
@@ -1644,8 +1642,7 @@ impl<H: HashRetention> ChangeGraph<H> {
     }
 
     /// The fragments, loose commits included, holding a node `covered`
-    /// does not cover: by head in the order a bundle of every such node
-    /// lists them.
+    /// does not cover, in apply order: as [`Self::fragments`] lists them.
     pub(crate) fn fragments_after(
         &self,
         heads: &[ChangeHash],
@@ -1659,9 +1656,9 @@ impl<H: HashRetention> ChangeGraph<H> {
             !fragments.iter().any(|f| self.inside_higher_fragment(f)),
             "a fragment lies inside a larger one"
         );
-        let mut out: Vec<(NodeIdx, Fragment)> = fragments
+        let mut out: Vec<Fragment> = fragments
             .into_iter()
-            .map(|f| (f.head, self.cached_fragment(f, actors)))
+            .map(|f| self.cached_fragment(f, actors))
             .collect();
         // loose commits lie above every fragment
         let tips = heads
@@ -1671,14 +1668,9 @@ impl<H: HashRetention> ChangeGraph<H> {
         out.extend(
             self.ancestry_until_clock(tips, &self.fragment_top)
                 .filter(fresh)
-                .filter_map(|n| Some((n, self.loose_commit(n, actors)?))),
+                .filter_map(|n| self.loose_commit(n, actors)),
         );
-        if out.len() > 1 {
-            let fresh = self.get_build_indexes(covered.clone());
-            let members = self.bundle_members(&fresh);
-            out.sort_unstable_by_key(|(n, _)| members.position(*n));
-        }
-        out.into_iter().map(|(_, f)| f).collect()
+        out
     }
 
     /// Levels nest, so `f` lies inside a higher-level fragment exactly
@@ -3927,6 +3919,34 @@ mod tests {
         assert!(straddling > 0, "a fragment straddling heads is sent whole");
     }
 
+    /// A loose commit whose parent lies in a fragment whose head is not
+    /// its ancestor must still be listed after that fragment.
+    #[test]
+    fn fragments_after_applies_one_at_a_time() {
+        let mut b = AutoCommit::new().with_actor(crate::ActorId::from(&[1u8][..]));
+        b.put(ROOT, "p", 0).unwrap();
+        b.commit();
+        let mut a = b.fork().with_actor(crate::ActorId::from(&[2u8][..]));
+        let mut i = 0;
+        while a.document().get_head_hashes()[0].fragment_level() == 0 {
+            a.put(ROOT, "a", i).unwrap();
+            a.commit();
+            i += 1;
+        }
+        b.put(ROOT, "loose", 0).unwrap();
+        b.commit();
+        b.merge(&mut a).unwrap();
+        let doc = b.document();
+        let fragments = doc.fragments_after(&[]).unwrap();
+        assert!(fragments.iter().any(|f| f.level > 0));
+        let mut z = Automerge::new();
+        for (i, bundle) in doc.bundle_after(&[]).unwrap().iter().enumerate() {
+            z.load_incremental(bundle)
+                .unwrap_or_else(|e| panic!("bundle {i} applied out of order: {e}"));
+        }
+        assert_eq!(z.get_heads(), doc.get_heads());
+    }
+
     #[test]
     fn exports_do_not_depend_on_arrival_order() {
         let mut rng = make_rng();
@@ -3980,14 +4000,32 @@ mod tests {
             assert!(a == b, "fragment {i} differs");
         }
         assert!(x.save() == y.save(), "saves differ");
+        // list order follows node order, which arrival order may change
+        let sorted = |mut v: Vec<Vec<u8>>| {
+            v.sort();
+            v
+        };
         assert!(
-            x.bundle_after(&[]).unwrap() == y.bundle_after(&[]).unwrap(),
+            sorted(x.bundle_after(&[]).unwrap()) == sorted(y.bundle_after(&[]).unwrap()),
             "bundle_after differs"
         );
-        assert_eq!(
-            x.fragments_after(&[]).unwrap(),
-            y.fragments_after(&[]).unwrap()
-        );
+        let after = |doc: &Automerge| {
+            let mut f = doc.fragments_after(&[]).unwrap();
+            f.sort_by_key(|f| (f.head, f.level));
+            for f in &mut f {
+                f.members.sort_by_key(|m| (m.actor().clone(), m.seq()));
+            }
+            f
+        };
+        assert_eq!(after(x), after(y));
+        for doc in [x, y] {
+            let mut z = Automerge::new();
+            for (i, b) in doc.bundle_after(&[]).unwrap().iter().enumerate() {
+                z.load_incremental(b)
+                    .unwrap_or_else(|e| panic!("bundle {i} applied out of order: {e}"));
+            }
+            assert_eq!(z.get_heads(), doc.get_heads());
+        }
     }
 
     /// Apply the same fragments through the walk and the manifold
@@ -4228,8 +4266,8 @@ pub struct Fragment {
     pub boundary: Vec<ChangeHash>,
     /// Non-zero-level members of the fragment, excluding its head, sorted.
     pub checkpoints: Vec<ChangeHash>,
-    /// By [`ChangeId`], since interior change hashes may have been freed;
-    /// by actor, then seq.
+    /// By [`ChangeId`], since interior change hashes may have been freed.
+    /// A set: their order depends on the order the changes arrived in.
     pub members: Vec<ChangeId>,
 }
 
