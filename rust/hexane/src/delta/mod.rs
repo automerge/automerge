@@ -1927,7 +1927,30 @@ impl<'a, T: DeltaValue, C: Codec> DeltaIter<'a, T, C> {
         let mut probe = self.clone();
         if let Some(col) = probe.col {
             let (si, prefix, pos) = col.index.find_slab_at_prefix(t);
-            if pos > probe.pos() && pos < end {
+            let jump = if pos > start && pos < end {
+                Some((si, prefix, pos))
+            } else if T::NULLABLE {
+                // a null-led slab's prefix is garbage from before the window
+                None
+            } else {
+                // the descent missed the window (the column is sorted only
+                // inside it): binary search the window's own slab starts
+                let mut lo = col.index.find_slab_at_item(start).index + 1;
+                let mut hi = col.index.find_slab_at_item(end - 1).index + 1;
+                let mut found = None;
+                while lo < hi {
+                    let mid = lo + (hi - lo) / 2;
+                    let (prefix, pos) = col.index.slab_start(mid);
+                    if prefix < t {
+                        found = Some((mid, prefix, pos));
+                        lo = mid + 1;
+                    } else {
+                        hi = mid;
+                    }
+                }
+                found
+            };
+            if let Some((si, prefix, pos)) = jump {
                 probe.running = prefix;
                 if !probe.inner.advance_to_slab(si, pos) {
                     probe = self.clone();
@@ -3221,6 +3244,25 @@ mod tests {
         assert_eq!(got, 10..10);
         assert_eq!(iter.pos(), 10);
         assert_eq!(iter.next(), None);
+    }
+
+    #[test]
+    fn seek_to_value_window_after_unsorted_slabs() {
+        // slabs of larger values before the window send the prefix
+        // descent there, so the window's own slabs are searched
+        let mut values: Vec<i64> = (0..3000).map(|i| 10_000 + (i * 7919) % 5000).collect();
+        let window = values.len()..values.len() + 3000;
+        values.extend((0..3000).map(|i| i / 3 * 2));
+        values.extend([5, 1, 9_999]);
+        let col = DeltaColumn::<i64>::from_values(values.clone());
+
+        let mut iter = col.iter();
+        for target in (0..2100).step_by(7) {
+            let want = seek_reference(&values, target, window.clone());
+            let got = iter.seek_to_value(target, window.clone());
+            assert_eq!(got, want, "target {target}");
+            assert_eq!(iter.pos(), want.start);
+        }
     }
 
     #[test]

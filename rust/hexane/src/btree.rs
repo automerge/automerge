@@ -1761,6 +1761,45 @@ impl<A: PrefixAggregate> SlabBTree<A>
 where
     A::Prefix: Ord,
 {
+    /// `(prefix_before_slab, items_before_slab)` for slab `slab_idx`.
+    /// O(log n).
+    pub(crate) fn slab_start(&self, slab_idx: usize) -> (A::Prefix, usize) {
+        let mut prefix = A::Prefix::default();
+        let mut items = 0;
+        if self.nodes.is_empty() {
+            return (prefix, items);
+        }
+        let mut remaining = slab_idx;
+        let mut node = self.root;
+        loop {
+            match self.node(node) {
+                Node::Leaf(l) => {
+                    for a in l.aggs.iter().take(remaining) {
+                        prefix += a.prefix();
+                        items += a.len();
+                    }
+                    return (prefix, items);
+                }
+                Node::Internal(n) => {
+                    let mut descended = false;
+                    for c in &n.children {
+                        if remaining < c.slab_count {
+                            node = c.id;
+                            descended = true;
+                            break;
+                        }
+                        remaining -= c.slab_count;
+                        prefix += c.agg.prefix();
+                        items += c.agg.len();
+                    }
+                    if !descended {
+                        return (prefix, items);
+                    }
+                }
+            }
+        }
+    }
+
     /// Find the slab whose prefix sum first reaches or exceeds `target`.
     /// Returns `(slab_idx, prefix_before_slab, items_before_slab)`.  If
     /// `target` exceeds the total prefix, returns one-past-the-end.

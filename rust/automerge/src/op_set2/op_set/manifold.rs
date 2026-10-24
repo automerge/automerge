@@ -781,18 +781,17 @@ impl TopCalc {
         let scope = self.doc_scope.clone();
         let mut old_top = None;
         let mut last_doc = None;
-        for (i, visible) in op_set
-            .cols
-            .index
-            .visible
-            .iter_range(scope.clone())
-            .enumerate()
-        {
-            if visible {
-                let pos = scope.start + i;
-                old_top = Some(pos);
-                if !deleted.contains(&pos) {
-                    last_doc = Some(pos);
+        // by run: a contested register's scope is long and almost all
+        // invisible
+        let mut runs = op_set.cols.index.visible.iter_range(scope.clone());
+        let mut pos = scope.start;
+        while let Some(run) = runs.next_run() {
+            let rows = pos..pos + run.count;
+            pos = rows.end;
+            if run.value {
+                old_top = Some(rows.end - 1);
+                if let Some(p) = rows.rev().find(|p| !deleted.contains(p)) {
+                    last_doc = Some(p);
                 }
             }
         }
