@@ -112,7 +112,7 @@ pub(crate) struct SpansDiff<'a> {
     action_value: SpansActionValue<'a>,
     op_id: OpIdIter<'a>,
     marks: MarkCursor<'a>,
-    op_set: Option<&'a OpSet>,
+    op_set: &'a OpSet,
     clock: ClockRange<'a>,
     state: SpanState,
     pos: usize,
@@ -138,9 +138,9 @@ impl Iterator for SpansDiff<'_> {
 impl<'a> SpansDiff<'a> {
     /// Forward only; `index` is the character index at `range.start`.
     pub(crate) fn shift_with_index(&mut self, range: Range<usize>, index: usize) {
-        let Some(op_set) = self.op_set else { return };
         self.op_id.set_max(range.end);
-        self.action_value.shift(op_set, &self.clock, range.clone());
+        self.action_value
+            .shift(self.op_set, &self.clock, range.clone());
 
         self.marks.advance_to(range.start);
         self.state = SpanState::empty_at(self.state.encoding, index);
@@ -158,25 +158,14 @@ impl<'a> SpansDiff<'a> {
         clock: ClockRange<'a>,
         encoding: TextEncoding,
     ) -> Self {
-        Self::new_with_index(op_set, range, clock, encoding, 0)
-    }
-
-    pub(crate) fn new_with_index(
-        op_set: &'a OpSet,
-        range: Range<usize>,
-        clock: ClockRange<'a>,
-        encoding: TextEncoding,
-        index: usize,
-    ) -> Self {
         let pos = range.start;
         let op_id = op_set.id_iter_range(&range);
         // a tree descent, not a walk from the object start
         let marks = MarkCursor::new(op_set, clock.clone(), pos);
 
         let action_value = SpansActionValue::new(op_set, &clock, range.clone());
-        let mut state = SpanState::empty_at(encoding, index);
+        let mut state = SpanState::empty_at(encoding, 0);
         state.push_marks(marks.current());
-        let op_set = Some(op_set);
 
         Self {
             state,
@@ -603,7 +592,7 @@ impl Iterator for Spans<'_> {
     fn next(&mut self) -> Option<Self::Item> {
         let item = self.internal.next()?;
         let iter = &self.internal.iter;
-        Some(item.export(iter.op_set?, &iter.clock.read_after(), iter.state.encoding))
+        Some(item.export(iter.op_set, &iter.clock.read_after(), iter.state.encoding))
     }
 }
 

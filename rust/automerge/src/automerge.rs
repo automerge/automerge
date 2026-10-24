@@ -3375,7 +3375,7 @@ impl<H: HashRetention> Automerge<H> {
         self.exid_to_obj(obj)
             .ok()
             .map(|obj| self.ops.map_range(&obj.id, range, read))
-            .unwrap_or_else(MapRange::empty)
+            .unwrap_or_default()
     }
 
     pub(crate) fn list_range_for<'a, R: RangeBounds<usize>>(
@@ -3387,7 +3387,7 @@ impl<H: HashRetention> Automerge<H> {
         self.exid_to_obj(obj)
             .ok()
             .map(|obj| self.ops.list_range(&obj.id, range, read))
-            .unwrap_or_else(ListRange::empty)
+            .unwrap_or_default()
     }
 
     pub(crate) fn values_for(&self, obj: &ExId, read: ReadAt<'_>) -> Values<'_> {
