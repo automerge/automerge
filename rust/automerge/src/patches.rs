@@ -1,8 +1,5 @@
-/// Patch-effect model: materializes a document and replays patches over
-/// it, so two patch streams can be checked to land the same state. Only
-/// the tests use it now, so the `cfg` here matches the `cfg(test)` on
-/// every remaining call site; a wider gate leaves it dead in ordinary
-/// debug builds and trips `clippy -D warnings`.
+/// Replays patches over a materialized document, so tests can check that two
+/// patch streams land the same state.
 #[cfg(test)]
 pub(crate) mod effect;
 mod patch;
