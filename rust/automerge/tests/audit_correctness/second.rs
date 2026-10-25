@@ -187,8 +187,6 @@ fn load_incremental_into_an_empty_manual_gc_document_keeps_manual_gc() {
     assert_eq!(doc.gc_mode(), automerge::next::GcMode::Manual);
 }
 
-/// The consequence: an AutoCommit that started with `load_incremental`
-/// frees hashes outside `save`, while one that started with `load` does not.
 #[test]
 fn an_autocommit_started_by_load_incremental_frees_no_hash_before_saving() {
     let mut src = AutoCommit::new().with_actor(actor(1));

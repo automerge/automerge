@@ -138,11 +138,9 @@ fn one_legacy_change_at_a_time_in_any_order_matches_the_audited_document() {
     let reference_save = audited.save();
     let changes = audited.get_changes(&[]).unwrap();
     for order_seed in 0..3u64 {
-        // a random topological order: shuffle, then apply with queueing
+        // a random topological order
         let mut order = changes.clone();
         order.shuffle(&mut SmallRng::seed_from_u64(order_seed));
-        // next rejects out-of-order legacy changes only when hashes are freed;
-        // apply in topological order instead, chosen randomly among ready ones
         let mut done = std::collections::HashSet::new();
         let mut topo = Vec::new();
         while topo.len() < order.len() {

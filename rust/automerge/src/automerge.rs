@@ -1229,8 +1229,8 @@ impl<H: HashRetention> Automerge<H> {
     ///
     /// Into an empty document this is [`Self::load()`], which takes chunks in any order.
     /// Otherwise chunks apply in the order given: legacy changes whose dependencies are missing
-    /// are queued as by [`Self::apply_changes`], but a bundle is rejected as by
-    /// [`Self::apply_bundle`], failing the call with chunks before it applied and none after.
+    /// are queued with [`AuditMode::Enabled`] and dropped without it, and a bundle is rejected as
+    /// by [`Self::apply_bundle`], failing the call with chunks before it applied and none after.
     ///
     /// The return value is the number of ops which were applied, this is not useful and will
     /// change in future.

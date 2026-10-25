@@ -1038,26 +1038,13 @@ mod tests {
         assert_eq!(batched, singly, "batched bundling diverges");
     }
 
-    fn leb(mut n: u64, out: &mut Vec<u8>) {
-        loop {
-            let mut b = (n & 0x7f) as u8;
-            n >>= 7;
-            if n != 0 {
-                b |= 0x80;
-            }
-            out.push(b);
-            if n == 0 {
-                break;
-            }
-        }
+    fn leb(n: u64, out: &mut Vec<u8>) {
+        leb128::write::unsigned(out, n).unwrap();
     }
 
-    /// `Bundle::try_from` does not verify the checksum, so it is blank.
     fn chunk(data: Vec<u8>) -> Vec<u8> {
-        let mut out = MAGIC_BYTES.to_vec();
-        out.extend([0u8; 4]);
-        out.push(u8::from(ChunkType::Bundle));
-        leb(data.len() as u64, &mut out);
+        let mut out = Vec::new();
+        Header::new(ChunkType::Bundle, &data).write(&mut out);
         out.extend(data);
         out
     }
@@ -1073,8 +1060,13 @@ mod tests {
                     break;
                 }
             }
-            let err = Bundle::try_from(&chunk(data)[..]);
-            assert!(err.is_err(), "section {section} should not parse");
+            let Err(e) = Bundle::try_from(&chunk(data)[..]) else {
+                panic!("section {section} should not parse");
+            };
+            assert!(
+                !e.to_string().contains("checksum"),
+                "section {section}: {e}"
+            );
         }
     }
 
