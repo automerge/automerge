@@ -1,169 +1,215 @@
 use std::borrow::Cow;
 use std::marker::PhantomData;
+use std::num::NonZeroU64;
 use std::ops::Range;
+use std::sync::OnceLock;
 
-use crate::actor::ActorList;
+use crate::actor::ActorTable;
 use crate::op_set2::change::ChangeCollector;
-use crate::storage::change::{OpReadState, Unverified, Verified};
+use crate::op_set2::types::ActorIdx;
+use crate::op_set2::OpSet;
+use crate::storage::change::{OpReadState, Unverified, Verified, DEFLATE_MIN_SIZE};
 use crate::storage::columns::compression;
-use crate::storage::columns::{ColumnId, ColumnType};
-use crate::storage::{parse, Header, RawColumns};
-use crate::types::ChangeHash;
+
+use crate::storage::{parse, RawColumns};
+use crate::types::{ActorId, ChangeHash};
 use crate::Change;
 
-use super::{BundleChangeIter, BundleChangeIterUnverified, OpIter, OpIterUnverified, ParseError};
-
-/// `(actor, counter)` order index of the `ID_CTR_INVERSE` column. Must
-/// match the `ID_CTR_INVERSE_COL_ID` constant in `builder.rs`.
-const ID_CTR_INVERSE_COL_ID: ColumnId = ColumnId::new(11);
-
-/// Column id of the legacy doc-order `ID_CTR` column. Bundles produced
-/// before the inverse-encoding switch carry this directly; new bundles
-/// reconstruct it from `ID_CTR_INVERSE`.
-const ID_COL_ID: ColumnId = ColumnId::new(2);
+use super::builder::ExternalPreds;
+use super::{BundleChange, BundleChangeCols, BundleChangeIterUnverified, ParseError};
 
 #[derive(Clone, Debug)]
 pub(crate) struct BundleStorage<'a, OpReadState> {
     /// Uncompressed in-memory form. Iterators index into this.
     pub(crate) bytes: Cow<'a, [u8]>,
-    /// On-disk form, if columns were DEFLATE-compressed. `None` for
-    /// bundles that were written or received in fully-uncompressed form
-    /// (in which case `bytes` is also the on-disk form).
-    pub(crate) compressed_bytes: Option<Cow<'a, [u8]>>,
-    pub(crate) header: Header,
+    pub(crate) compressed: Compressed<'a>,
     pub(crate) deps: Vec<ChangeHash>,
-    pub(crate) actors: ActorList,
+    pub(crate) actors: Vec<ActorId>,
     pub(crate) ops_meta: RawColumns<compression::Uncompressed>,
     pub(crate) ops_data: Range<usize>,
     pub(crate) changes_meta: RawColumns<compression::Uncompressed>,
     pub(crate) changes_data: Range<usize>,
-    /// Op counters in doc order. Materialised at parse time from the
-    /// wire's `ID_CTR_INVERSE` column plus the change metadata, then
-    /// handed to `OpIter` as a plain slice — no columnar encoding round
-    /// trip.
-    pub(crate) id_ctr: Vec<i64>,
+    /// Decoded on demand; allocates per member, so the apply path reads
+    /// [`Self::change_cols`] instead.
+    pub(crate) changes: OnceLock<Vec<BundleChange<'static>>>,
+    /// The op columns in bundle actor space, loaded at parse time.
+    /// Empty once taken, or if built locally; reloaded from `bytes` then.
+    pub(crate) bundle_ops: OnceLock<OpSet>,
     pub(crate) _phantom: PhantomData<OpReadState>,
 }
 
+/// The column bytes a bundle is written with.
+#[derive(Clone, Debug)]
+pub(crate) enum Compressed<'a> {
+    /// As received, with some columns DEFLATE-compressed.
+    Stored(Cow<'a, [u8]>),
+    /// Received uncompressed: written as received.
+    AsIs,
+    /// Built here: large columns are compressed when written.
+    Lazy,
+}
+
 impl<O: OpReadState> BundleStorage<'_, O> {
+    /// The columns as written: large ones DEFLATE-compressed, unless they
+    /// arrived uncompressed.
+    pub(crate) fn wire_columns(&self) -> Cow<'_, [u8]> {
+        match &self.compressed {
+            Compressed::Stored(c) => Cow::Borrowed(c),
+            Compressed::AsIs => Cow::Borrowed(&self.bytes),
+            Compressed::Lazy => Cow::Owned(self.compress_columns()),
+        }
+    }
+
+    fn compress_columns(&self) -> Vec<u8> {
+        let meta_len = self.changes_meta.write(&mut Vec::new());
+        let prefix_end = self.changes_data.start - meta_len;
+        let mut out = self.bytes[..prefix_end].to_vec();
+        let mut cols = Vec::new();
+        for (meta, range) in [
+            (&self.changes_meta, &self.changes_data),
+            (&self.ops_meta, &self.ops_data),
+        ] {
+            cols.clear();
+            meta.compress(&self.bytes[range.clone()], &mut cols, DEFLATE_MIN_SIZE)
+                .write(&mut out);
+            out.extend_from_slice(&cols);
+        }
+        out
+    }
+
     pub(crate) fn into_owned(self) -> BundleStorage<'static, O> {
         BundleStorage {
             bytes: Cow::Owned(self.bytes.into_owned()),
-            compressed_bytes: self.compressed_bytes.map(|c| Cow::Owned(c.into_owned())),
-            header: self.header,
+            compressed: match self.compressed {
+                Compressed::Stored(c) => Compressed::Stored(Cow::Owned(c.into_owned())),
+                Compressed::AsIs => Compressed::AsIs,
+                Compressed::Lazy => Compressed::Lazy,
+            },
             deps: self.deps,
             actors: self.actors,
             ops_meta: self.ops_meta,
             ops_data: self.ops_data,
             changes_meta: self.changes_meta,
             changes_data: self.changes_data,
-            id_ctr: self.id_ctr,
+            changes: self.changes,
+            bundle_ops: self.bundle_ops,
             _phantom: self._phantom,
         }
     }
 
-    pub(crate) fn checksum_valid(&self) -> bool {
-        self.header.checksum_valid()
+    pub(crate) fn change_cols(&self) -> Result<BundleChangeCols<'_>, ParseError> {
+        BundleChangeCols::try_new(&self.changes_meta, &self.bytes[self.changes_data.clone()])
+    }
+
+    /// Each member's actor and seq, checking that actors are in range and
+    /// seqs non-zero, and the members no other member depends on, ascending.
+    pub(crate) fn member_ids(&self) -> Result<MemberIds, ParseError> {
+        let bad = ParseError::InvalidChangeMetadata;
+        let cols = self.change_cols()?;
+        let num_actors = self.actors.len();
+        let actors: Vec<ActorIdx> = cols.actors().map(|a| a.unwrap_or_default()).collect();
+        let len = actors.len();
+        if actors.iter().any(|a| usize::from(*a) >= num_actors) {
+            return Err(bad("bad member actor index"));
+        }
+        let mut seqs = Vec::with_capacity(len);
+        for s in cols.seqs().take(len) {
+            let s = s
+                .filter(|s| *s > 0)
+                .and_then(|s| NonZeroU64::new(s as u64))
+                .ok_or(bad("change sequence number is zero"))?;
+            seqs.push(s);
+        }
+        if seqs.len() != len {
+            return Err(bad("short member seq column"));
+        }
+        let mut depended_on = vec![false; len];
+        let mut deps = cols.dep_values();
+        for count in cols.dep_counts().take(len) {
+            for _ in 0..count.unwrap_or(0) {
+                let d = deps.next().flatten().ok_or(bad("short deps column"))?;
+                if let Some(d) = usize::try_from(d).ok().and_then(|d| depended_on.get_mut(d)) {
+                    *d = true;
+                }
+            }
+        }
+        let heads = (0..len).filter(|i| !depended_on[*i]).collect();
+        Ok(MemberIds {
+            actors,
+            seqs,
+            heads,
+        })
+    }
+
+    /// Each member's metadata, decoded afresh rather than cached.
+    pub(crate) fn iter_change_meta(&self) -> Result<BundleChangeIterUnverified<'_>, ParseError> {
+        BundleChangeIterUnverified::try_new(
+            &self.changes_meta,
+            &self.bytes[self.changes_data.clone()],
+        )
+    }
+
+    fn collector<'c>(&'c self, actors: &'c ActorTable) -> Result<ChangeCollector<'c>, ParseError> {
+        let meta = self
+            .iter_change_meta()?
+            .map(|c| c.map(Into::into))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(ChangeCollector::from_change_meta(meta, actors))
+    }
+
+    pub(crate) fn changes(&self) -> Result<&[BundleChange<'static>], ParseError> {
+        if self.changes.get().is_none() {
+            let decoded =
+                decode_change_meta(&self.changes_meta, &self.bytes[self.changes_data.clone()])?;
+            // a racing caller may have won; either vector is equivalent
+            let _ = self.changes.set(decoded);
+        }
+        Ok(self
+            .changes
+            .get()
+            .expect("change metadata was just decoded"))
+    }
+
+    /// Reloads from `bytes` if the op columns were already taken.
+    pub(crate) fn take_bundle_ops(&mut self) -> Result<OpSet, ParseError> {
+        if let Some(ops) = self.bundle_ops.take() {
+            return Ok(ops);
+        }
+        self.load_bundle_ops()
+    }
+
+    fn load_bundle_ops(&self) -> Result<OpSet, ParseError> {
+        OpSet::load_bundle_cols(
+            &self.ops_meta,
+            &self.bytes[self.ops_data.clone()],
+            self.actors.len(),
+        )
+        .map_err(|e| ParseError::InvalidColumns(Box::new(e)))
     }
 }
 
-/// Materialise the doc-order id_ctr values. Accepts bundles in either
-/// the current format (only `ID_CTR_INVERSE` on the wire — reconstructed
-/// here by walking change metadata in canonical `(actor, seq)` order and
-/// applying `inverse[k] = doc_pos`) or the legacy format (an explicit
-/// doc-order `ID_CTR` column — decoded directly). New format takes
-/// precedence if both are somehow present. Returns the counters as a
-/// plain `Vec<i64>` for `OpIter` to read directly — no columnar round
-/// trip.
-fn extract_id_ctr_values(
+fn decode_change_meta(
     changes_meta: &RawColumns<compression::Uncompressed>,
-    changes_data: &[u8],
-    ops_meta: &RawColumns<compression::Uncompressed>,
-    ops_data: &[u8],
-) -> Result<Vec<i64>, ParseError> {
-    let mut inverse_bytes: Option<&[u8]> = None;
-    let mut id_ctr_bytes: Option<&[u8]> = None;
-    for col in ops_meta.0.iter() {
-        let spec = col.spec();
-        if spec.col_type() != ColumnType::DeltaInteger {
-            continue;
-        }
-        match spec.id() {
-            id if id == ID_CTR_INVERSE_COL_ID => {
-                let d = col.data();
-                inverse_bytes = Some(&ops_data[d.start..d.end]);
-            }
-            id if id == ID_COL_ID => {
-                let d = col.data();
-                id_ctr_bytes = Some(&ops_data[d.start..d.end]);
-            }
-            _ => {}
-        }
-    }
-
-    // New format: reconstruct doc-order counters from the inverse
-    // permutation column.
-    if let Some(inverse_bytes) = inverse_bytes {
-        let inverse: Vec<i64> = decode_delta_int(inverse_bytes)?;
-
-        let mut change_meta: Vec<(usize, u64, u64, u64)> =
-            BundleChangeIterUnverified::try_new(changes_meta, changes_data)?
-                .map(|c| c.map(|c| (c.actor, c.seq, c.start_op, c.max_op)))
-                .collect::<Result<_, _>>()?;
-        change_meta.sort_unstable_by_key(|(actor, seq, _, _)| (*actor, *seq));
-
-        let mut counters = vec![0i64; inverse.len()];
-        let mut k = 0usize;
-        for (_actor, _seq, start_op, max_op) in &change_meta {
-            for ctr in *start_op..=*max_op {
-                if k >= inverse.len() {
-                    return Err(ParseError::InverseLengthMismatch);
-                }
-                let doc_pos = inverse[k] as usize;
-                if doc_pos >= counters.len() {
-                    return Err(ParseError::InverseDecode);
-                }
-                counters[doc_pos] = ctr as i64;
-                k += 1;
-            }
-        }
-        if k != inverse.len() {
-            return Err(ParseError::InverseLengthMismatch);
-        }
-        return Ok(counters);
-    }
-
-    // Legacy format: decode the explicit doc-order id_ctr column.
-    if let Some(id_ctr_bytes) = id_ctr_bytes {
-        return decode_delta_int(id_ctr_bytes);
-    }
-
-    // Empty bundle (no ops) — both columns absent.
-    Ok(Vec::new())
-}
-
-fn decode_delta_int(bytes: &[u8]) -> Result<Vec<i64>, ParseError> {
-    hexane::DeltaDecoder::<Option<i64>>::new(bytes)
-        .map(|item| item.ok_or(ParseError::InverseDecode))
+    data: &[u8],
+) -> Result<Vec<BundleChange<'static>>, ParseError> {
+    BundleChangeIterUnverified::try_new(changes_meta, data)?
+        .map(|c| c.map(BundleChange::into_owned))
         .collect()
 }
 
 impl<'a> BundleStorage<'a, Unverified> {
-    pub(crate) fn parse_following_header(
+    pub(crate) fn parse_columns(
         input: parse::Input<'a>,
-        header: Header,
     ) -> parse::ParseResult<'a, BundleStorage<'a, Unverified>, ParseError> {
-        // `input.bytes()` returns the full chunk (header + body); positions
-        // tracked by the parser are absolute offsets within that buffer.
         let full_bytes = input.bytes();
 
-        // Parse the prefix (deps + actors), capturing its byte range so we
+        // Parse the leading deps + actors, capturing the byte range so we
         // know where the change-column metadata begins.
         let (i, prefix_r) = parse::range_of(
             |i| -> parse::ParseResult<'_, _, ParseError> {
                 let (i, deps) = parse::length_prefixed(parse::change_hash)(i)?;
                 let (i, actors) = parse::length_prefixed(parse::actor_id)(i)?;
-                Ok((i, (deps, ActorList::from_stored(actors))))
+                Ok((i, (deps, actors)))
             },
             input,
         )?;
@@ -182,155 +228,158 @@ impl<'a> BundleStorage<'a, Unverified> {
         let ops_data_range = ops.range.clone();
 
         // Fast path: nothing is compressed — keep input bytes as-is.
-        if let (Some(changes_meta), Some(ops_meta)) =
-            (changes_meta_raw.uncompressed(), ops_meta_raw.uncompressed())
-        {
-            BundleChangeIterUnverified::try_new(&changes_meta, changes.value)
-                .map_err(|e| parse::ParseError::Error(ParseError::InvalidColumns(Box::new(e))))?;
-            let id_ctr = extract_id_ctr_values(&changes_meta, changes.value, &ops_meta, ops.value)
-                .map_err(parse::ParseError::Error)?;
-            OpIterUnverified::try_new(&ops_meta, ops.value, &id_ctr)
-                .map_err(|e| parse::ParseError::Error(ParseError::InvalidColumns(Box::new(e))))?;
-            return Ok((
-                parse::Input::empty(),
-                BundleStorage {
-                    bytes: full_bytes.into(),
-                    compressed_bytes: None,
-                    header,
-                    deps,
-                    actors,
-                    ops_meta,
-                    ops_data: ops_data_range,
+        let (bytes, compressed, changes_meta, changes_data, ops_meta, ops_data) =
+            if let (Some(changes_meta), Some(ops_meta)) =
+                (changes_meta_raw.uncompressed(), ops_meta_raw.uncompressed())
+            {
+                (
+                    Cow::Borrowed(full_bytes),
+                    Compressed::AsIs,
                     changes_meta,
-                    changes_data: changes_data_range,
-                    id_ctr,
-                    _phantom: PhantomData,
-                },
-            ));
-        }
+                    changes_data_range,
+                    ops_meta,
+                    ops_data_range,
+                )
+            } else {
+                // Slow path: at least one column is DEFLATE-encoded. Reconstruct a
+                // fully-uncompressed buffer with the same section layout:
+                //   deps | actors | change_meta' | change_data' | ops_meta' | ops_data'
+                // where the primed sections use uncompressed column specs and
+                // inflated data. We keep the compressed input around for
+                // re-emission.
+                let mut out = Vec::with_capacity(full_bytes.len());
+                out.extend_from_slice(&full_bytes[..prefix_end]);
 
-        // Slow path: at least one column is DEFLATE-encoded. Reconstruct a
-        // fully-uncompressed buffer with the same section layout:
-        //   header | deps | actors | change_meta' | change_data' | ops_meta' | ops_data'
-        // where the primed sections use uncompressed column specs and
-        // inflated data. The header bytes inside `out` are preserved
-        // verbatim — they only matter for re-emission, and we keep the
-        // compressed input around for that.
-        let mut out = Vec::with_capacity(full_bytes.len());
-        out.extend_from_slice(&full_bytes[..prefix_end]);
+                let mut changes_data_buf = Vec::new();
+                let changes_meta = changes_meta_raw
+                    .uncompress(
+                        &full_bytes[changes_data_range.clone()],
+                        &mut changes_data_buf,
+                    )
+                    .map_err(|_| parse::ParseError::Error(ParseError::CompressedChangeCols))?;
+                changes_meta.write(&mut out);
+                let new_changes_start = out.len();
+                out.extend_from_slice(&changes_data_buf);
+                let new_changes_end = out.len();
 
-        let mut changes_data_buf = Vec::new();
-        let changes_meta = changes_meta_raw
-            .uncompress(
-                &full_bytes[changes_data_range.clone()],
-                &mut changes_data_buf,
-            )
-            .map_err(|_| parse::ParseError::Error(ParseError::CompressedChangeCols))?;
-        changes_meta.write(&mut out);
-        let new_changes_start = out.len();
-        out.extend_from_slice(&changes_data_buf);
-        let new_changes_end = out.len();
+                let mut ops_data_buf = Vec::new();
+                let ops_meta = ops_meta_raw
+                    .uncompress(&full_bytes[ops_data_range.clone()], &mut ops_data_buf)
+                    .map_err(|_| parse::ParseError::Error(ParseError::CompressedOpCols))?;
+                ops_meta.write(&mut out);
+                let new_ops_start = out.len();
+                out.extend_from_slice(&ops_data_buf);
+                let new_ops_end = out.len();
 
-        let mut ops_data_buf = Vec::new();
-        let ops_meta = ops_meta_raw
-            .uncompress(&full_bytes[ops_data_range.clone()], &mut ops_data_buf)
-            .map_err(|_| parse::ParseError::Error(ParseError::CompressedOpCols))?;
-        ops_meta.write(&mut out);
-        let new_ops_start = out.len();
-        out.extend_from_slice(&ops_data_buf);
-        let new_ops_end = out.len();
+                (
+                    Cow::Owned(out),
+                    Compressed::Stored(full_bytes.into()),
+                    changes_meta,
+                    new_changes_start..new_changes_end,
+                    ops_meta,
+                    new_ops_start..new_ops_end,
+                )
+            };
 
-        BundleChangeIterUnverified::try_new(
-            &changes_meta,
-            &out[new_changes_start..new_changes_end],
-        )
-        .map_err(|e| parse::ParseError::Error(ParseError::InvalidColumns(Box::new(e))))?;
-        let id_ctr = extract_id_ctr_values(
-            &changes_meta,
-            &out[new_changes_start..new_changes_end],
-            &ops_meta,
-            &out[new_ops_start..new_ops_end],
-        )
-        .map_err(parse::ParseError::Error)?;
-        OpIterUnverified::try_new(&ops_meta, &out[new_ops_start..new_ops_end], &id_ctr)
+        let ops = &bytes[ops_data.clone()];
+        let bundle_ops = OpSet::load_bundle_cols(&ops_meta, ops, actors.len())
+            .and_then(|o| {
+                o.validate_foreign_bundle(&ops_meta, ops, !deps.is_empty())?;
+                Ok(o)
+            })
             .map_err(|e| parse::ParseError::Error(ParseError::InvalidColumns(Box::new(e))))?;
 
         Ok((
             parse::Input::empty(),
             BundleStorage {
-                bytes: Cow::Owned(out),
-                compressed_bytes: Some(full_bytes.into()),
-                header,
+                bytes,
+                compressed,
                 deps,
                 actors,
                 ops_meta,
-                ops_data: new_ops_start..new_ops_end,
+                ops_data,
                 changes_meta,
-                changes_data: new_changes_start..new_changes_end,
-                id_ctr,
+                changes_data,
+                changes: OnceLock::new(),
+                bundle_ops: OnceLock::from(bundle_ops),
                 _phantom: PhantomData,
             },
         ))
     }
 
+    /// `parse_columns` has already validated the op columns. Rows malformed
+    /// in ways a column decode cannot see (a map op with a null key, say)
+    /// are only caught by [`Self::to_changes`].
     pub(crate) fn verify(self) -> Result<BundleStorage<'a, Verified>, ParseError> {
-        for c in self.iter_change_meta() {
-            let _ = c?;
-        }
-        for o in self.iter_ops() {
-            let _ = o?;
+        self.change_cols()?.validate()?;
+        for change in self.iter_change_meta()? {
+            change?;
         }
         Ok(BundleStorage {
             bytes: self.bytes,
-            compressed_bytes: self.compressed_bytes,
-            header: self.header,
+            compressed: self.compressed,
             deps: self.deps,
             actors: self.actors,
             ops_meta: self.ops_meta,
             ops_data: self.ops_data,
             changes_meta: self.changes_meta,
             changes_data: self.changes_data,
-            id_ctr: self.id_ctr,
+            changes: self.changes,
+            bundle_ops: self.bundle_ops,
             _phantom: PhantomData,
         })
-    }
-
-    pub(crate) fn iter_ops(&self) -> OpIterUnverified<'_> {
-        let bytes = &self.bytes[self.ops_data.clone()];
-        OpIterUnverified::new(&self.ops_meta, bytes, &self.id_ctr)
-    }
-
-    fn iter_change_meta(&self) -> BundleChangeIterUnverified<'_> {
-        let change_data = &self.bytes[self.changes_data.clone()];
-        BundleChangeIterUnverified::new(&self.changes_meta, change_data)
     }
 }
 
 impl BundleStorage<'_, Verified> {
+    /// Rebuilds the member [`Change`]s, including the deletes that have no
+    /// row of their own.
     pub(crate) fn to_changes(&self) -> Result<Vec<Change>, ParseError> {
-        let actors = self.actors.clone().into_table()?;
-        let change_meta = self.iter_change_meta().collect();
-        let mut collector = ChangeCollector::from_bundle_changes(change_meta, &actors);
-        for op in self.iter_ops() {
-            collector.add(op);
+        let actors = ActorTable::from_sorted(self.actors.clone())?;
+        let ops = self.ops()?;
+        let mut collector = self.collector(&actors)?;
+        self.feed(&ops, &mut collector)?;
+        collector
+            .decode_bundle(&actors, &self.deps)
+            .map_err(|e| ParseError::DecodeBundle(Box::new(e)))
+    }
+
+    /// Every member's hash, hashing each as soon as its ops are in, as a
+    /// document load does.
+    pub(crate) fn hash_members(&self) -> Result<Vec<ChangeHash>, ParseError> {
+        let actors = ActorTable::from_sorted(self.actors.clone())?;
+        let ops = self.ops()?;
+        let mut collector = self.collector(&actors)?.hashing_bundle(&self.deps);
+        self.feed(&ops, &mut collector)?;
+        let collected = collector
+            .collect_hashes()
+            .map_err(|e| ParseError::DecodeBundle(Box::new(e)))?;
+        Ok(collected.hashes)
+    }
+
+    fn ops(&self) -> Result<Cow<'_, OpSet>, ParseError> {
+        match self.bundle_ops.get() {
+            Some(ops) => Ok(Cow::Borrowed(ops)),
+            None => self.load_bundle_ops().map(Cow::Owned),
         }
-        let bundle = collector
-            .unbundle(&actors, &self.deps)
-            .map_err(|e| ParseError::Unbundle(Box::new(e)))?;
-        Ok(bundle)
     }
 
-    pub(crate) fn iter_ops(&self) -> OpIter<'_> {
-        let bytes = &self.bytes[self.ops_data.clone()];
-        OpIter::new(&self.ops_meta, bytes, &self.id_ctr)
-    }
-
-    pub(crate) fn iter_change_meta(&self) -> BundleChangeIter<'_> {
-        let change_data = &self.bytes[self.changes_data.clone()];
-        BundleChangeIter::new_from_verified(&self.changes_meta, change_data)
+    fn feed<'c>(
+        &self,
+        ops: &'c OpSet,
+        collector: &mut ChangeCollector<'c>,
+    ) -> Result<(), ParseError> {
+        let mut preds = ExternalPreds::new(&self.ops_meta, &self.bytes[self.ops_data.clone()]);
+        collector.process_all_ops_with(ops, |out| preds.next_row(out))
     }
 
     pub(crate) fn deps(&self) -> &[ChangeHash] {
         &self.deps
     }
+}
+
+pub(crate) struct MemberIds {
+    pub(crate) actors: Vec<ActorIdx>,
+    pub(crate) seqs: Vec<NonZeroU64>,
+    pub(crate) heads: Vec<usize>,
 }

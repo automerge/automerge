@@ -3,6 +3,8 @@ use crate::actor::{ActorInsert, ActorRemoval, ActorShift, ActorTable};
 use crate::automerge::view::{ClockRange, ReadAt};
 use crate::clock::Clock;
 use crate::exid::ExId;
+#[cfg(debug_assertions)]
+use crate::iter::tools::Shiftable;
 use crate::iter::tools::{MergeIter, SkipIter, SkipWrap};
 use crate::marks::{MarkSet, RichTextQueryState};
 use crate::op_set2::op_set::index::Indexes;
@@ -16,7 +18,7 @@ use crate::types::{
 };
 use crate::AutomergeError;
 
-use super::op::{Op, OpLike, SuccCursors, SuccInsert, TxOp};
+use super::op::{DocSucc, Op, OpLike, OpStepper, SuccCursors, SuccInsert, TxOp};
 
 use super::columns::Columns;
 
@@ -31,13 +33,19 @@ use std::num::NonZeroUsize;
 use std::ops::{Range, RangeBounds};
 use std::sync::Arc;
 
+mod bundle_copy;
+pub(crate) use bundle_copy::{RowCopier, RowRun, RowRuns, Steps, SuccRuns};
 mod found_op;
-mod index;
+pub(crate) mod index;
 mod insert;
+pub(crate) mod manifold;
+pub(crate) mod mapped_column;
 mod mark_index;
 mod marks;
 mod op_iter;
 mod op_query;
+mod overlap;
+pub(crate) mod run_head;
 mod top_op;
 mod visible;
 
@@ -47,11 +55,12 @@ pub(crate) use crate::iter::{Keys, ListRange, MapRange, SpansInternal};
 
 pub(crate) use found_op::OpsFoundIter;
 pub(crate) use insert::InsertQuery;
-pub(crate) use mark_index::{MarkIdx, MarkIndexBuilder, MarkIndexColumn};
+pub(crate) use mapped_column::{ActorMap, MappedColumn, MappedIter};
+pub(crate) use mark_index::{MarkIdx, MarkIndexBuilder, MarkIndexColumn, MarkPrefix};
 pub(crate) use marks::{MarkIter, NoMarkIter};
 pub(crate) use op_iter::{
     ActionIter, ActionValueIter, CtrWalker, InsertIter, KeyIter, MarkInfoIter, ObjIdIter, OpIdIter,
-    OpIter, ReadOpError, SuccIterIter, SuccWalker, ValueIter,
+    OpIter, ReadOpError, SuccIterIter, SuccWalker, ValueIter, WidthIter,
 };
 pub(crate) use op_query::{FixCounters, OpQuery, OpQueryTerm};
 pub(crate) use top_op::{TopIter, TopOps};
@@ -71,11 +80,6 @@ impl OpSet {
     #[cfg(test)]
     pub(crate) fn debug_cmp(&self, other: &Self) {
         self.cols.debug_cmp(&other.cols)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn save_checkpoint(&self) -> std::collections::HashMap<&'static str, Vec<u8>> {
-        self.cols.save_checkpoint()
     }
 
     #[cfg(test)]
@@ -103,16 +107,51 @@ impl OpSet {
         }
     }
 
-    /// Whether the op at `pos` is visible under the current indexes.
-    ///
-    /// The indexes are built under the write-frontier mask, so this already
-    /// accounts for successors the mask hides.
-    pub(crate) fn indexed_visible(&self, pos: usize) -> bool {
-        self.cols.index.visible.get(pos).unwrap_or(false)
+    pub(crate) fn index_builder(&self) -> IndexBuilder {
+        IndexBuilder::new(self.text_encoding)
     }
 
-    pub(crate) fn index_builder(&self) -> IndexBuilder {
-        IndexBuilder::new(self, self.text_encoding)
+    /// Panics, naming the index, if any incrementally maintained index
+    /// differs from a from-scratch rebuild.
+    #[doc(hidden)]
+    pub(crate) fn validate_indexes(&self) {
+        let mut builder = IndexBuilder::new(self.text_encoding);
+        builder.process_op_set(self).unwrap();
+        let (fresh, _) = builder.finish();
+        assert!(
+            self.cols
+                .index
+                .text
+                .values()
+                .iter()
+                .eq(fresh.text.values().iter()),
+            "text index diverges from rebuild"
+        );
+        assert!(
+            self.cols
+                .index
+                .top
+                .values()
+                .iter()
+                .eq(fresh.top.values().iter()),
+            "top index diverges from rebuild"
+        );
+        assert!(
+            self.cols.index.visible.iter().eq(fresh.visible.iter()),
+            "visible index diverges from rebuild"
+        );
+        assert!(
+            self.cols.index.inc.iter().eq(fresh.inc.iter()),
+            "inc index diverges from rebuild"
+        );
+        assert!(
+            self.cols.index.mark.iter().eq(fresh.mark.iter()),
+            "mark index diverges from rebuild"
+        );
+        assert_eq!(
+            self.obj_info, fresh.obj_info,
+            "obj info diverges from rebuild"
+        );
     }
 
     pub(crate) fn reset_top(&mut self, range: Range<usize>) {
@@ -148,15 +187,61 @@ impl OpSet {
         }
     }
 
+    /// The batched form of [`expose`](Self::expose) /
+    /// [`conflict`](Self::conflict). `dirty` also marks the written rows
+    /// dirty.
+    ///
+    /// Panics (debug) if positions are not strictly ascending, or if a row
+    /// is given `top` without being visible.
+    pub(crate) fn write_tops(&mut self, writes: &[(usize, bool)], dirty: bool) {
+        if writes.is_empty() {
+            return;
+        }
+        debug_assert!(
+            writes.windows(2).all(|w| w[0].0 < w[1].0),
+            "write_tops wants strictly ascending positions"
+        );
+        let text_encoding = self.text_encoding;
+        let cols = &mut self.cols;
+
+        #[cfg(debug_assertions)]
+        let mut visible = cols.index.visible.iter();
+
+        let mut top = cols.index.top.edit();
+        for &(pos, t) in writes {
+            #[cfg(debug_assertions)]
+            debug_assert!(!t || visible.seek_to(pos) == Some(true));
+            top.seek(pos).replace(|_| t);
+        }
+        top.finish();
+
+        let mut width = WidthIter::new(&cols.action, &cols.value, &cols.value_meta, text_encoding);
+        let mut text = cols.index.text.edit();
+        for &(pos, t) in writes {
+            text.seek(pos).replace(|_| t.then(|| width.seek_to(pos)));
+        }
+        text.finish();
+
+        if dirty {
+            let mut marks = cols.index.dirty.edit();
+            for &(pos, _) in writes {
+                marks.seek(pos).replace(|_| true);
+            }
+            marks.finish();
+        }
+    }
+
     pub(crate) fn conflict(&mut self, pos: usize) {
         const NONE: Option<u32> = None;
         self.cols.index.top.splice(pos, 1, [false]);
         // Make sure losing ops are not contributing width to the text sequence length.
         self.cols.index.text.splice(pos, 1, [NONE]);
+        self.cols.index.dirty.splice(pos, 1, [true]);
     }
 
     pub(crate) fn expose(&mut self, pos: usize) {
         self.cols.index.top.splice(pos, 1, [true]);
+        self.cols.index.dirty.splice(pos, 1, [true]);
         // Note we alwasy set the exposed widht using the text type, as the text
         // index is only used for text width. Non-text ops are never measured
         // anyway. We could alternatively require the caller pass the object type
@@ -238,6 +323,159 @@ impl OpSet {
         self.cols.index.inc = indexes.inc;
         self.cols.index.mark = indexes.mark;
         self.obj_info = indexes.obj_info;
+        // a mid-life rebuild (lengths already match) keeps the live dirty bits
+        if self.cols.index.dirty.len() != self.cols.len() {
+            self.cols.index.dirty = hexane::Column::fill(self.cols.len(), false);
+        }
+    }
+
+    pub(crate) fn clear_dirty(&mut self) {
+        self.cols.index.dirty = hexane::Column::fill(self.cols.len(), false);
+    }
+
+    pub(crate) fn mark_all_dirty(&mut self) {
+        self.cols.index.dirty = hexane::Column::fill(self.cols.len(), true);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn mark_dirty(&mut self, pos: usize) {
+        self.cols.index.dirty.splice(pos, 1, [true]);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn dirty_positions(&self) -> impl Iterator<Item = usize> {
+        self.dirty_runs().flatten()
+    }
+
+    /// Maximal contiguous spans of dirty rows, in document order.
+    pub(crate) fn dirty_runs(&self) -> impl Iterator<Item = Range<usize>> {
+        let mut out: Vec<Range<usize>> = vec![];
+        let mut pos = 0;
+        let mut iter = self.cols.index.dirty.iter();
+        while let Some(run) = iter.next_run() {
+            let start = pos;
+            pos += run.count;
+            if run.value {
+                match out.last_mut() {
+                    Some(last) if last.end == start => last.end = pos,
+                    _ => out.push(start..pos),
+                }
+            }
+        }
+        out.into_iter()
+    }
+
+    pub(crate) fn obj_range_containing(&self, pos: usize) -> Option<(ObjId, Range<usize>)> {
+        if pos >= self.len() {
+            return None;
+        }
+        let ctr = self.cols.obj_ctr.get(pos)?;
+        let actor = self.cols.obj_actor.get(pos)?;
+        let obj = ObjId::load(ctr.map(u64::from), actor)?;
+        Some((obj, self.scope_to_obj(&obj)))
+    }
+
+    /// The contiguous run of ops sharing the map key of the op at `pos`,
+    /// clamped to `obj_range`. O(log n).
+    pub(crate) fn map_key_register_at_pos(
+        &self,
+        pos: usize,
+        obj_range: Range<usize>,
+    ) -> Range<usize> {
+        let Some(key) = self.cols.key_str.get(pos) else {
+            return pos..pos;
+        };
+        self.cols.key_str.scope_to_value(key, obj_range)
+    }
+
+    /// Expand `range` (within `obj_range`) outwards to sequence register
+    /// boundaries: the start of the register containing `range.start` and
+    /// the end of the register containing `range.end - 1`.
+    pub(crate) fn expand_to_seq_register_boundaries(
+        &self,
+        range: Range<usize>,
+        obj_range: Range<usize>,
+    ) -> Range<usize> {
+        if range.is_empty() {
+            return range;
+        }
+        let start = self
+            .list_register_at_pos(range.start, obj_range.clone())
+            .start;
+        let end = self.list_register_at_pos(range.end - 1, obj_range).end;
+        start..end.max(range.end)
+    }
+
+    /// Whether `range` starts and ends on key-register boundaries within
+    /// `obj_range`.
+    pub(crate) fn map_range_is_on_key_boundaries(
+        &self,
+        range: &Range<usize>,
+        obj_range: Range<usize>,
+    ) -> bool {
+        self.is_on_register_boundaries(range, obj_range, Self::map_key_register_at_pos)
+    }
+
+    pub(crate) fn list_range_is_on_register_boundaries(
+        &self,
+        range: &Range<usize>,
+        obj_range: Range<usize>,
+    ) -> bool {
+        self.is_on_register_boundaries(range, obj_range, Self::list_register_at_pos)
+    }
+
+    fn is_on_register_boundaries(
+        &self,
+        range: &Range<usize>,
+        obj_range: Range<usize>,
+        register_at: fn(&Self, usize, Range<usize>) -> Range<usize>,
+    ) -> bool {
+        if range.is_empty() {
+            return true;
+        }
+        if register_at(self, range.start, obj_range.clone()).start != range.start {
+            return false;
+        }
+        range.end >= obj_range.end || register_at(self, range.end, obj_range).start == range.end
+    }
+
+    /// A cursor whose running total is the count of visible elements
+    /// consumed so far.
+    pub(crate) fn top_prefix_iter(&self) -> hexane::PrefixIter<'_, bool> {
+        self.cols.index.top.iter()
+    }
+
+    /// A cursor whose running total is the text width consumed so far.
+    pub(crate) fn text_prefix_iter(&self) -> hexane::PrefixIter<'_, Option<u32>> {
+        self.cols.index.text.iter()
+    }
+
+    pub(crate) fn mark_index(&self) -> &MarkIndexColumn {
+        &self.cols.index.mark
+    }
+
+    /// Whether the document contains any marks at all. O(1).
+    pub(crate) fn has_marks(&self) -> bool {
+        self.cols.index.mark.has_any_marks()
+    }
+
+    /// The mark index entries inside `range` with their rows, in document
+    /// order. O(runs), not O(rows).
+    pub(crate) fn mark_index_entries(
+        &self,
+        range: Range<usize>,
+    ) -> impl Iterator<Item = (usize, MarkIdx)> + '_ {
+        let mut pos = range.start;
+        let mut iter = self.cols.index.mark.iter_range(range);
+        std::iter::from_fn(move || loop {
+            let run = iter.next_run()?;
+            let at = pos;
+            pos += run.count;
+            if let Some(idx) = run.value {
+                debug_assert_eq!(run.count, 1);
+                return Some((at, idx));
+            }
+        })
     }
 
     pub(crate) fn splice_objects<O: OpLike>(&mut self, ops: &[O]) {
@@ -267,29 +505,48 @@ impl OpSet {
         }
     }
 
-    pub(crate) fn add_succ(&mut self, op_pos: &[SuccInsert]) {
-        let mut succ_inc = 0;
-        let mut last_pos = None;
-        for i in op_pos.iter().rev() {
-            if last_pos == Some(i.pos) {
-                succ_inc += 1;
-            } else {
-                last_pos = Some(i.pos);
-                succ_inc = 1;
-            }
+    pub(crate) fn add_succ(&mut self, s: DocSucc) {
+        if s.is_empty() {
+            return;
+        }
+        let splices = || s.splices.iter().cloned();
+        self.cols.succ_actor.copy_ranges(
+            MappedColumn::from_logical_values(s.actors, self.cols.succ_actor.actor_map().clone()),
+            splices(),
+        );
+        self.cols
+            .succ_ctr
+            .copy_ranges(hexane::DeltaColumn::from_values(s.ctrs), splices());
+        self.cols
+            .index
+            .inc
+            .copy_ranges(hexane::Column::from_values(s.incs), splices());
+
+        let counts = hexane::Column::from_values(s.counts.iter().map(|(_, c)| *c).collect());
+        let changed_rows = || replace_each_row(s.counts.iter().map(|(pos, _)| *pos));
+        self.cols
+            .succ_count
+            .copy_ranges(hexane::PrefixColumn::from_column(counts), changed_rows());
+        self.cols
+            .index
+            .dirty
+            .copy_ranges(hexane::Column::fill(s.counts.len(), true), changed_rows());
+
+        if !s.clears.is_empty() {
+            let n = s.clears.len();
+            let clear_splices = || replace_each_row(s.clears.iter().copied());
             self.cols
-                .succ_count
-                .splice(i.pos, 1, [(i.len + succ_inc) as u32]);
-            self.cols.succ_actor.splice(i.sub_pos, 0, [i.id.actoridx()]);
-            self.cols
-                .succ_ctr
-                .splice(i.sub_pos, 0, [i.id.counter() as u32]);
-            self.cols.index.inc.splice(i.sub_pos, 0, [i.inc]);
-            if !i.masked && i.inc.is_none() {
-                self.cols.index.visible.splice(i.pos, 1, [false]);
-                self.cols.index.text.splice(i.pos, 1, [None::<u32>]);
-                self.cols.index.top.splice(i.pos, 1, [false]);
-            }
+                .index
+                .visible
+                .copy_ranges(hexane::Column::from_values(vec![false; n]), clear_splices());
+            self.cols.index.top.copy_ranges(
+                hexane::PrefixColumn::from_values(vec![false; n]),
+                clear_splices(),
+            );
+            self.cols.index.text.copy_ranges(
+                hexane::PrefixColumn::from_values(vec![None::<u32>; n]),
+                clear_splices(),
+            );
         }
     }
 
@@ -309,6 +566,7 @@ impl OpSet {
             self.cols
                 .succ_count
                 .splice(i.pos, 1, [(i.len + succ_inc) as u32]);
+            self.cols.index.dirty.splice(i.pos, 1, [true]);
             self.cols.succ_actor.splice(i.sub_pos, 0, [i.id.actoridx()]);
             self.cols
                 .succ_ctr
@@ -435,10 +693,6 @@ impl OpSet {
         self.cols.len()
     }
 
-    pub(crate) fn sub_len(&self) -> usize {
-        self.cols.sub_len()
-    }
-
     pub(crate) fn seq_length(
         &self,
         obj: &ObjId,
@@ -473,10 +727,13 @@ impl OpSet {
         }
     }
 
+    /// `mask` hides marks the write-frontier hides; the mark index holds
+    /// every mark.
     pub(crate) fn query_insert_at_text(
         &self,
         obj: &ObjId,
         index: NonZeroUsize,
+        mask: Option<&Clock>,
     ) -> Option<QueryNth> {
         let range = self.scope_to_obj(obj);
 
@@ -494,7 +751,7 @@ impl OpSet {
             elemid = self.elemid_at(pos, range.end)?.0;
         }
 
-        let marks = self.cols.index.mark.rich_text_at(pos, None);
+        let marks = self.cols.index.mark.rich_text_at(pos, mask);
 
         Some(QueryNth {
             marks: MarkSet::from_query_state(&marks),
@@ -560,6 +817,7 @@ impl OpSet {
         &self,
         obj: &ObjId,
         index: NonZeroUsize,
+        mask: Option<&Clock>,
     ) -> Option<QueryNth> {
         let range = self.scope_to_obj(obj);
 
@@ -567,7 +825,7 @@ impl OpSet {
         let tx = top_iter.advance_prefix(index.get() - 1)?;
 
         let iter = self.iter_range(&(tx.pos..range.end));
-        let marks = self.cols.index.mark.rich_text_at(tx.pos, None);
+        let marks = self.cols.index.mark.rich_text_at(tx.pos, mask);
         let mut query = InsertQuery::new(
             iter,
             index.get(),
@@ -588,10 +846,11 @@ impl OpSet {
     ) -> Result<QueryNth, AutomergeError> {
         if read.historical().is_none() && index > 0 {
             let index = NonZeroUsize::new(index).unwrap();
+            let mask = read.historical_slow();
             let query = if seq_type == SequenceType::List {
-                self.query_insert_at_list(obj, index)
+                self.query_insert_at_list(obj, index, mask)
             } else {
-                self.query_insert_at_text(obj, index)
+                self.query_insert_at_text(obj, index, mask)
             };
             if let Some(q) = query {
                 #[cfg(feature = "slow_path_assertions")]
@@ -822,7 +1081,7 @@ impl OpSet {
         }
     }
 
-    fn get(&self, pos: usize) -> Option<Op<'_>> {
+    pub(crate) fn get(&self, pos: usize) -> Option<Op<'_>> {
         self.iter_range(&(pos..(pos + 1))).next()
     }
 
@@ -866,7 +1125,7 @@ impl OpSet {
         Some((elemid, last_pos))
     }
 
-    fn get_op_id_pos(&self, id: OpId) -> Option<usize> {
+    pub(crate) fn get_op_id_pos(&self, id: OpId) -> Option<usize> {
         self.cols
             .id_ctr
             .find_by_value(id.counter() as u32)
@@ -947,6 +1206,10 @@ impl OpSet {
         self.cols.insert.iter_range(range.clone())
     }
 
+    pub(crate) fn insert(&self) -> &hexane::PrefixColumn<bool> {
+        &self.cols.insert
+    }
+
     pub(crate) fn insert_iter_range(&self, range: &Range<usize>) -> InsertIter<'_> {
         InsertIter::new(self.cols.insert.values().iter_range(range.clone()))
     }
@@ -966,6 +1229,10 @@ impl OpSet {
                 .top
                 .delta(range.start, range.end)
                 .is_some_and(|delta| delta.delta == range.len())
+    }
+
+    pub(crate) fn key_str_iter(&self) -> hexane::Iter<'_, Option<String>> {
+        self.cols.key_str.iter()
     }
 
     pub(crate) fn key_str_iter_range(
@@ -1002,7 +1269,13 @@ impl OpSet {
         SkipIter::new(iter, top)
     }
 
-    pub(crate) fn calculate_marks_fast(&self, obj: &ObjId) -> Vec<crate::marks::Mark> {
+    /// Present-time marks for a text object, without materializing ops.
+    /// `mask` hides marks the write-frontier hides.
+    pub(crate) fn calculate_marks_fast(
+        &self,
+        obj: &ObjId,
+        mask: Option<&Clock>,
+    ) -> Vec<crate::marks::Mark> {
         use super::op_set::mark_index::MarkIdx;
         use crate::marks::MarkAccumulator;
 
@@ -1025,7 +1298,10 @@ impl OpSet {
         let mut iter = self.cols.index.mark.iter_range(range.clone());
         let mut pos = range.start;
         while let Some(run) = iter.next_run() {
-            let Some(idx) = run.value else {
+            let Some(idx) = run
+                .value
+                .filter(|idx| mask.is_none_or(|m| m.covers(&idx.id())))
+            else {
                 pos += run.count;
                 continue;
             };
@@ -1067,7 +1343,12 @@ impl OpSet {
         acc.into_iter_no_unmark().collect()
     }
 
-    pub(crate) fn get_marks_fast(&self, obj: &ObjId, index: usize) -> MarkSet {
+    pub(crate) fn get_marks_fast(
+        &self,
+        obj: &ObjId,
+        index: usize,
+        mask: Option<&Clock>,
+    ) -> MarkSet {
         if !self.cols.index.mark.has_any_marks() {
             return MarkSet::default();
         }
@@ -1076,7 +1357,7 @@ impl OpSet {
         let Some(seek) = widths.advance_prefix(index as u64) else {
             return MarkSet::default();
         };
-        let state = self.cols.index.mark.rich_text_at(seek.pos, None);
+        let state = self.cols.index.mark.rich_text_at(seek.pos, mask);
         MarkSet::from_query_state(&state)
             .map(|set| set.as_ref().clone())
             .unwrap_or_default()
@@ -1103,15 +1384,63 @@ impl OpSet {
         }
     }
 
+    /// Checks the cross-column invariants that per-op decoding would
+    /// otherwise catch: consistent column lengths, actor indexes in range,
+    /// and object ids that are whole and strictly increasing. O(runs).
+    pub(crate) fn column_validation(&self) -> Result<(), ReadOpError> {
+        self.column_validation_with(self.actors.len())
+    }
+
+    /// [`Self::column_validation`] against an explicit actor count, for
+    /// columns still in another actor space.
+    pub(crate) fn column_validation_with(&self, num_actors: usize) -> Result<(), ReadOpError> {
+        use ColumnValidationError::ActorOutOfRange;
+        let cols = &self.cols;
+        cols.check_lengths()?;
+
+        let mut it = cols.id_actor.iter();
+        while let Some(run) = it.next_run() {
+            if run.value.0 as usize >= num_actors {
+                return Err(ActorOutOfRange("id_actor", run.value.0, num_actors).into());
+            }
+        }
+        let mut it = cols.succ_actor.iter();
+        while let Some(run) = it.next_run() {
+            if run.value.0 as usize >= num_actors {
+                return Err(ActorOutOfRange("succ_actor", run.value.0, num_actors).into());
+            }
+        }
+        let mut it = cols.obj_actor.iter();
+        while let Some(run) = it.next_run() {
+            if let Some(a) = run.value {
+                if a.0 as usize >= num_actors {
+                    return Err(ActorOutOfRange("obj_actor", a.0, num_actors).into());
+                }
+            }
+        }
+        let mut it = cols.key_actor.iter();
+        while let Some(run) = it.next_run() {
+            if let Some(a) = run.value {
+                if a.0 as usize >= num_actors {
+                    return Err(ActorOutOfRange("key_actor", a.0, num_actors).into());
+                }
+            }
+        }
+
+        let mut objs = index::ObjRunWalk::new(cols.obj_actor.iter(), cols.obj_ctr.iter());
+        while objs.try_next_obj()?.is_some() {}
+        Ok(())
+    }
+
     pub(crate) fn iter_obj_ids(&self) -> IterObjIds<'_> {
-        let mut v1_ctr = self.cols.obj_ctr.iter();
-        let mut v1_actor = self.cols.obj_actor.iter();
-        let next_ctr = v1_ctr.next_run();
-        let next_actor = v1_actor.next_run();
+        let mut ctr = self.cols.obj_ctr.iter();
+        let mut actor = self.cols.obj_actor.iter();
+        let next_ctr = ctr.next_run();
+        let next_actor = actor.next_run();
 
         IterObjIds {
-            v1_ctr,
-            v1_actor,
+            ctr,
+            actor,
             next_ctr,
             next_actor,
             pos: 0,
@@ -1249,15 +1578,191 @@ impl OpSet {
         }
     }
 
-    /// Adopt the ops of a document chunk directly.
-    ///
-    /// The op columns index actors by position in the document's stored actor
-    /// list, and a live op set relies on that order being sorted (for
-    /// `lookup_actor` and `OpId` ordering), so the list is checked as it is
-    /// promoted to an [`ActorTable`].
+    /// Load the op columns and build their indexes in the same decode
+    /// pass. The returned builder is not yet finished.
+    pub(crate) fn load_indexed(
+        doc: &Document<'_>,
+        text_encoding: TextEncoding,
+    ) -> Result<(Self, IndexBuilder), LoadError> {
+        let actors = doc.actors().clone().into_table()?;
+        let data = doc.op_raw_bytes();
+        let (cols, index) =
+            Columns::load_indexed(doc.op_metadata.clone().as_map(), data, text_encoding)?;
+        let op_set = OpSet {
+            actors,
+            cols,
+            obj_info: ObjIndex::default(),
+            text_encoding,
+        };
+        Ok((op_set, index))
+    }
+
+    /// Succ entries the op set holds, over every row.
+    pub(crate) fn succ_entries(&self) -> usize {
+        self.cols.succ_actor.len()
+    }
+
+    /// The `inc` index, keyed by succ position: an entry is `Some` when
+    /// that successor is an increment rather than a delete.
+    pub(crate) fn inc_index(&self) -> &hexane::Column<Option<i64>> {
+        &self.cols.index.inc
+    }
+
+    /// Value bytes the op set holds, over every row.
+    pub(crate) fn value_bytes(&self) -> usize {
+        self.cols.value.len()
+    }
+
+    /// Decode and validate a fragment's op columns. Actor indexes stay in the
+    /// sender's space (`num_actors` actors) until
+    /// [`Self::index_bundle`] rebases them.
+    pub(crate) fn load_bundle_cols(
+        raw: &RawColumns<Uncompressed>,
+        data: &[u8],
+        num_actors: usize,
+    ) -> Result<Self, ReadOpError> {
+        let cols = Columns::load(raw.as_map(), data, &ActorTable::new())?;
+        let num_rows = cols.len();
+        let op_set = OpSet {
+            actors: ActorTable::new(),
+            cols,
+            obj_info: ObjIndex::default(),
+            text_encoding: TextEncoding::platform_default(),
+        };
+        op_set.column_validation_with(num_actors)?;
+        validate_pred_columns(raw, data, num_rows, num_actors)?;
+        Ok(op_set)
+    }
+
+    /// The checks [`Self::load_bundle_cols`] leaves to bundles from
+    /// outside: what a bundle this crate built always gets right.
+    pub(crate) fn validate_foreign_bundle(
+        &self,
+        raw: &RawColumns<Uncompressed>,
+        data: &[u8],
+        has_deps: bool,
+    ) -> Result<(), ReadOpError> {
+        self.validate_keys(has_deps)?;
+        let column = |spec| {
+            raw.iter()
+                .find(|c| c.spec() == spec)
+                .map(|c| &data[c.data()])
+        };
+        self.validate_values(column(super::columns::VALUE_COL_SPEC).unwrap_or_default())?;
+        if let Some(hint) = column(crate::storage::bundle::ops::HINT) {
+            use hexane::ColumnEncoding;
+            <Option<i64> as hexane::ColumnValueRef>::Encoding::<hexane::Leb128>::validate_encoding(
+                hint,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn validate_values(&self, value: &[u8]) -> Result<(), ReadOpError> {
+        let mut at = 0;
+        for meta in self.cols.value_meta.iter() {
+            let meta = meta.value;
+            let raw = value
+                .get(at..at + meta.length())
+                .ok_or(ReadOpError::MissingValue("value"))?;
+            ScalarValue::from_raw(meta, raw)?;
+            at += meta.length();
+        }
+        if at != value.len() {
+            return Err(ReadOpError::MissingValue("value"));
+        }
+        Ok(())
+    }
+
+    /// A bundle without deps is copied as is, so its rows must be in
+    /// document order; the merge places a dependent bundle's rows, which
+    /// need only their objects and map keys in order.
+    fn validate_keys(&self, has_deps: bool) -> Result<(), ReadOpError> {
+        let rows = self
+            .obj_id_iter()
+            .zip(self.cols.key_str.iter())
+            .zip(self.cols.key_actor.iter())
+            .zip(self.cols.key_ctr.iter())
+            .zip(self.cols.insert.iter())
+            .zip(self.id_iter());
+        let mut stepper = OpStepper::default();
+        let mut prev: Option<(ObjId, Option<&str>)> = None;
+        for (pos, (((((obj, key_str), key_actor), key_ctr), insert), id)) in rows.enumerate() {
+            let key = KeyRef::try_load(key_str, key_actor, key_ctr.map(i64::from))?;
+            let in_order = if has_deps {
+                match prev {
+                    Some((p_obj, p_key)) if p_obj == obj => match (p_key, key_str) {
+                        (Some(p), Some(k)) => p <= k,
+                        (None, None) => true,
+                        _ => false,
+                    },
+                    _ => true,
+                }
+            } else {
+                stepper.step(obj, key, insert.value, id)
+            };
+            if !in_order {
+                return Err(ReadOpError::KeyOutOfOrder(pos));
+            }
+            prev = Some((obj, key_str));
+        }
+        Ok(())
+    }
+
+    /// Rebase the fragment's actor indexes into `doc`'s actor space and
+    /// build its indexes there. The indexes are final only for groups
+    /// entirely inside the fragment; groups shared with the document need
+    /// the manifold's conflict/expose corrections. Pass `has_deps` when the
+    /// fragment depends on changes outside itself; passing `true` is always
+    /// safe.
+    /// Ops `mask` does not cover are indexed as hidden; pass it only when it
+    /// hides some, since the masked build goes op by op.
+    pub(crate) fn index_bundle(
+        mut self,
+        actor_map: &[usize],
+        doc: &OpSet,
+        has_deps: bool,
+        mask: Option<&Clock>,
+    ) -> Result<Self, ReadOpError> {
+        let doc_actor_map = doc.actor_map();
+        let identity_f = actor_map.iter().enumerate().all(|(i, &m)| i == m);
+        if !identity_f || !doc_actor_map.is_identity() {
+            self.cols.rebase_actors(
+                &|a: ActorIdx| ActorIdx::from(actor_map[u64::from(a) as usize]),
+                &doc_actor_map,
+            );
+        }
+        let text_encoding = doc.text_encoding;
+        let mut op_set = OpSet {
+            actors: doc.actors.clone(),
+            cols: self.cols,
+            obj_info: ObjIndex::default(),
+            text_encoding,
+        };
+        if let Some(mask) = mask {
+            let (indexes, _) = op_set.indexes_under(mask, |_| false);
+            op_set.set_indexes(indexes);
+            return Ok(op_set);
+        }
+        let mut builder = IndexBuilder::new(text_encoding);
+        if has_deps {
+            builder.split_by_elem();
+        }
+        // without their types, sequences created by `doc` would register-split like maps
+        builder.process_op_set_with(&op_set, Some(&doc.obj_info))?;
+        let (indexes, _mark_order) = builder.finish();
+        op_set.set_indexes(indexes);
+        Ok(op_set)
+    }
+
+    /// Splice a loaded fragment op set into this one at `runs`.
+    pub(crate) fn merge(&mut self, frag: OpSet, runs: &[manifold::CopyRange]) {
+        self.obj_info.0.extend(frag.obj_info.0 .0);
+        self.cols.merge(frag.cols, runs);
+    }
+
     pub(crate) fn load(doc: &Document<'_>, text_encoding: TextEncoding) -> Result<Self, LoadError> {
         let actors = doc.actors().clone().into_table()?;
-        // FIXME - shouldn't need to clone bytes here (eventually)
         let data = doc.op_raw_bytes();
         Ok(Self::from_parts(
             doc.op_metadata.clone(),
@@ -1328,6 +1833,25 @@ impl OpSet {
         )
     }
 
+    /// Ranges holding the rows whose id counter, or one of whose
+    /// successors' counters, is in `counters`: ascending, and apart by at
+    /// least `gap` rows.
+    pub(crate) fn ctr_ranges(&self, counters: Range<usize>, gap: usize) -> Vec<Range<usize>> {
+        let mut ids = CtrWalker::new(&self.cols.id_ctr, counters.clone());
+        let mut succ = SuccWalker::new(self, counters);
+        let mut rows: Vec<_> = std::iter::from_fn(|| ids.next_range()).collect();
+        rows.extend(std::iter::from_fn(|| succ.next_range()));
+        rows.sort_unstable_by_key(|r| r.start);
+        let mut merged: Vec<Range<usize>> = Vec::with_capacity(rows.len());
+        for r in rows {
+            match merged.last_mut() {
+                Some(last) if r.start < last.end + gap => last.end = last.end.max(r.end),
+                _ => merged.push(r),
+            }
+        }
+        merged
+    }
+
     pub(crate) fn prop_range(&self, obj: &ObjId, prop: &str) -> Range<usize> {
         let range = self.scope_to_obj(obj);
         self.cols.key_str.scope_to_value(Some(prop), range)
@@ -1338,11 +1862,21 @@ impl OpSet {
         self.iter_range(&range)
     }
 
+    pub(crate) fn value_iter(&self) -> ValueIter<'_> {
+        let meta = self.cols.value_meta.iter();
+        let value_raw = self.cols.value.iter();
+        ValueIter::new(meta, value_raw)
+    }
+
     pub(crate) fn value_iter_range(&self, range: &Range<usize>) -> ValueIter<'_> {
         let meta = self.cols.value_meta.iter_range(range.clone());
         let value_advance = self.cols.value_meta.get_prefix(range.start) as usize;
         let value_raw = self.cols.value.iter_at(value_advance);
         ValueIter::new(meta, value_raw)
+    }
+
+    pub(crate) fn id_iter(&self) -> OpIdIter<'_> {
+        OpIdIter::new(self.cols.id_actor.iter(), self.cols.id_ctr.iter())
     }
 
     pub(crate) fn id_iter_range(&self, range: &Range<usize>) -> OpIdIter<'_> {
@@ -1359,11 +1893,32 @@ impl OpSet {
         )
     }
 
+    pub(crate) fn succ_iter(&self) -> SuccIterIter<'_> {
+        let succ_count = self.cols.succ_count.iter();
+        let succ_actor = self.cols.succ_actor.iter();
+        let succ_counter = self.cols.succ_ctr.iter();
+        let inc_values = self.cols.index.inc.iter();
+        SuccIterIter::new(succ_count, succ_actor, succ_counter, inc_values)
+    }
+
     /// Rebuild every op index with visibility computed under `clock`,
-    /// making the indexes authoritative for reads at that visibility.
-    pub(crate) fn recompute_indexes(&mut self, clock: &Clock) {
+    /// making the indexes authoritative for reads at that visibility. Marks
+    /// dirty every op whose id or a successor's id satisfies `dirty`: a delete
+    /// has no row of its own, only a successor link on its target.
+    pub(crate) fn recompute_indexes(&mut self, clock: &Clock, dirty: impl Fn(&OpId) -> bool) {
+        let (indexes, dirty_rows) = self.indexes_under(clock, dirty);
+        self.set_indexes(indexes);
+        let mut marks = self.cols.index.dirty.edit();
+        for pos in dirty_rows {
+            marks.seek(pos).replace(|_| true);
+        }
+        marks.finish();
+    }
+
+    fn indexes_under(&self, clock: &Clock, dirty: impl Fn(&OpId) -> bool) -> (Indexes, Vec<usize>) {
         let mut builder = self.index_builder();
         let mut last = None;
+        let mut dirty_rows = vec![];
         for op in self.iter() {
             let next = Some((op.obj, op.elemid_or_key()));
 
@@ -1372,10 +1927,36 @@ impl OpSet {
                 last = next;
             }
 
+            if dirty(&op.id) || op.succ().any(|id| dirty(&id)) {
+                dirty_rows.push(op.pos);
+            }
             builder.process_op(&op, Some(clock));
         }
         let (indexes, _) = builder.finish();
-        self.set_indexes(indexes);
+        (indexes, dirty_rows)
+    }
+
+    /// Debug check: panics unless the indexes equal a rebuild under `clock`.
+    #[cfg(debug_assertions)]
+    pub(crate) fn assert_indexes_under(&self, clock: &Clock) {
+        let (fresh, _) = self.indexes_under(clock, |_| false);
+        let index = &self.cols.index;
+        assert!(
+            index.visible.iter().eq(fresh.visible.iter()),
+            "masked visible index diverges"
+        );
+        assert!(
+            index.top.values().iter().eq(fresh.top.values().iter()),
+            "masked top index diverges"
+        );
+        assert!(
+            index.text.values().iter().eq(fresh.text.values().iter()),
+            "masked text index diverges"
+        );
+        assert!(
+            index.inc.iter().eq(fresh.inc.iter()),
+            "masked inc index diverges"
+        );
     }
 
     pub(crate) fn succ_iter_range(&self, range: &Range<usize>) -> SuccIterIter<'_> {
@@ -1479,34 +2060,104 @@ impl OpSet {
     // * maybe do something with types to make scan required to get
     //    validated bytes
 
-    /// Ensure `actor` is in the actor table, shifting op actor indices if it
-    /// had to be inserted before existing actors.
-    ///
-    /// The returned [`ActorInsert::Inserted`] token must be applied to every
-    /// other actor-indexed structure in the document.
+    pub(crate) fn actor_map(&self) -> std::sync::Arc<ActorMap> {
+        self.cols.actor_map()
+    }
+
+    /// An [`ActorInsert::Inserted`] shift must be applied to every other
+    /// actor-indexed structure in the document.
     pub(crate) fn insert_actor(&mut self, actor: ActorId) -> ActorInsert {
         let insert = self.actors.insert(actor);
         if let ActorInsert::Inserted(shift) = &insert {
             if shift.index() + 1 != self.actors.len() {
-                self.shift_actors(shift)
+                self.shift_index_sidecars(shift);
             }
+            let map = self
+                .cols
+                .actor_map()
+                .insert(shift.index(), self.actors.len() - 1);
+            self.cols.set_actor_map(map);
         }
         insert
     }
 
-    fn shift_actors(&mut self, shift: &ActorShift) {
-        self.cols.rewrite_with_new_actor(shift.index());
+    /// Remaps the mark and object indexes once rather than per actor. The
+    /// shifts must be applied in the order returned.
+    pub(crate) fn insert_actors(&mut self, actors: &[ActorId]) -> Vec<(ActorId, ActorShift)> {
+        let mut new: Vec<ActorId> = actors
+            .iter()
+            .filter(|a| self.actors.lookup(a).is_none())
+            .cloned()
+            .collect();
+        new.sort_unstable();
+        new.dedup();
+        if new.is_empty() {
+            return Vec::new();
+        }
+        let mut old_to_new_index: Vec<u32> = Vec::with_capacity(self.actors.len());
+        let mut j = 0;
+        for a in self.actors.iter() {
+            while j < new.len() && new[j] < *a {
+                j += 1;
+            }
+            old_to_new_index.push((old_to_new_index.len() + j) as u32);
+        }
+        if old_to_new_index
+            .iter()
+            .enumerate()
+            .any(|(i, &m)| m as usize != i)
+        {
+            self.remap_actor_indexes(&old_to_new_index);
+        }
+        let mut map = self.cols.actor_map();
+        let mut shifts = Vec::with_capacity(new.len());
+        for a in new {
+            let ActorInsert::Inserted(shift) = self.actors.insert(a.clone()) else {
+                unreachable!("filtered to actors not in the table")
+            };
+            map = map.insert(shift.index(), self.actors.len() - 1);
+            shifts.push((a, shift));
+        }
+        self.cols.set_actor_map(map);
+        shifts
+    }
+
+    /// The op columns are left alone; they remap through [`ActorMap`].
+    fn remap_actor_indexes(&mut self, map: &[u32]) {
+        self.cols.index.mark.remap_actor_indexes(map);
+        let remap_id = |id: &OpId| OpId::new(id.counter(), map[id.actor()] as usize);
+        let remapped = self
+            .obj_info
+            .0
+            .iter()
+            .map(|(id, info)| {
+                let parent = if info.parent.is_root() {
+                    info.parent
+                } else {
+                    ObjId(remap_id(&info.parent.0))
+                };
+                (
+                    remap_id(id),
+                    ObjInfo {
+                        parent,
+                        obj_type: info.obj_type,
+                    },
+                )
+            })
+            .collect();
+        self.obj_info = ObjIndex(crate::actor::ActorRefs(remapped));
+    }
+
+    fn shift_index_sidecars(&mut self, shift: &ActorShift) {
         self.cols.index.mark.shift(shift);
         self.obj_info.0.shift_actors(shift);
     }
 
-    /// Remove the actor at `idx` from the actor table. The actor must have
-    /// no ops in the document.
-    ///
-    /// The returned token must be applied to every other actor-indexed
-    /// structure in the document.
+    /// The actor must have no ops. The removal must be applied to every
+    /// other actor-indexed structure in the document.
     pub(crate) fn remove_actor(&mut self, idx: usize) -> (ActorId, ActorRemoval) {
         let (actor, removal) = self.actors.remove(idx);
+        self.cols.flush_actor_map();
         self.cols.rewrite_without_actor(idx);
         self.obj_info
             .0
@@ -1627,9 +2278,102 @@ impl ResolvedAction {
     }
 }
 
+fn replace_each_row(
+    positions: impl Iterator<Item = usize>,
+) -> impl Iterator<Item = hexane::Splice> {
+    positions.enumerate().map(|(k, pos)| hexane::Splice {
+        pos,
+        delete: 1,
+        range: k..k + 1,
+    })
+}
+
+/// Check a fragment's pred column lengths and actor indexes; individual
+/// preds are not checked for meaning.
+fn validate_pred_columns(
+    raw: &RawColumns<Uncompressed>,
+    data: &[u8],
+    num_rows: usize,
+    num_actors: usize,
+) -> Result<(), ColumnValidationError> {
+    use crate::storage::columns::ColumnType;
+    let mut count_bytes: &[u8] = &[];
+    let mut actor_bytes: &[u8] = &[];
+    let mut ctr_bytes: &[u8] = &[];
+    for col in raw.iter() {
+        if col.spec().id() != PRED_COL_ID {
+            continue;
+        }
+        let d = &data[col.data()];
+        match col.spec().col_type() {
+            ColumnType::Group => count_bytes = d,
+            ColumnType::Actor => actor_bytes = d,
+            ColumnType::DeltaInteger => ctr_bytes = d,
+            _ => {}
+        }
+    }
+    // an elided pred column means no preds anywhere
+    if count_bytes.is_empty() {
+        if !actor_bytes.is_empty() || !ctr_bytes.is_empty() {
+            return Err(ColumnValidationError::ColumnLength(
+                "pred_count",
+                0,
+                num_rows,
+            ));
+        }
+        return Ok(());
+    }
+    let opts = hexane::LoadOpts::new().with_length(num_rows).with_fill(0);
+    let count = hexane::PrefixColumn::<u32>::load_with(count_bytes, opts)
+        .map_err(|_| ColumnValidationError::ColumnLength("pred_count", 0, num_rows))?;
+    let total = count.get_prefix(num_rows) as usize;
+    let id_opts = hexane::LoadOpts::new().with_length(total);
+    let actor = MappedColumn::<ActorIdx>::load_with(actor_bytes, id_opts)
+        .map_err(|_| ColumnValidationError::ColumnLength("pred_actor", 0, total))?;
+    if actor.len() != total {
+        return Err(ColumnValidationError::ColumnLength(
+            "pred_actor",
+            actor.len(),
+            total,
+        ));
+    }
+    let ctr = hexane::DeltaColumn::<u32>::load_with(ctr_bytes, id_opts)
+        .map_err(|_| ColumnValidationError::ColumnLength("pred_ctr", 0, total))?;
+    if ctr.len() != total {
+        return Err(ColumnValidationError::ColumnLength(
+            "pred_ctr",
+            ctr.len(),
+            total,
+        ));
+    }
+    let mut it = actor.iter();
+    while let Some(run) = it.next_run() {
+        if run.value.0 as usize >= num_actors {
+            return Err(ColumnValidationError::ActorOutOfRange(
+                "pred_actor",
+                run.value.0,
+                num_actors,
+            ));
+        }
+    }
+    Ok(())
+}
+
+const PRED_COL_ID: crate::storage::columns::ColumnId = crate::storage::columns::ColumnId::new(7);
+
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum ColumnValidationError {
+    #[error("column {0} has length {1}, expected {2}")]
+    ColumnLength(&'static str, usize, usize),
+    #[error("raw value column has {0} bytes but the value meta column expects {1}")]
+    RawValueLength(usize, u64),
+    #[error("column {0} references actor index {1} but the document has {2} actors")]
+    ActorOutOfRange(&'static str, u32, usize),
+}
+
 pub(crate) struct IterObjIds<'a> {
-    v1_ctr: hexane::Iter<'a, Option<u32>>,
-    v1_actor: hexane::Iter<'a, Option<ActorIdx>>,
+    ctr: hexane::Iter<'a, Option<u32>>,
+    actor: MappedIter<'a, Option<ActorIdx>>,
     next_ctr: Option<hexane::Run<Option<u32>>>,
     next_actor: Option<hexane::Run<Option<ActorIdx>>>,
     pos: usize,
@@ -1647,18 +2391,18 @@ impl Iterator for IterObjIds<'_> {
                         run2.count -= run1.count;
                         self.next_actor = Some(run2);
                         self.pos += run1.count;
-                        self.next_ctr = self.v1_ctr.next_run();
+                        self.next_ctr = self.ctr.next_run();
                     }
                     Ordering::Greater => {
                         run1.count -= run2.count;
                         self.next_ctr = Some(run1);
                         self.pos += run2.count;
-                        self.next_actor = self.v1_actor.next_run();
+                        self.next_actor = self.actor.next_run();
                     }
                     Ordering::Equal => {
                         self.pos += run1.count;
-                        self.next_ctr = self.v1_ctr.next_run();
-                        self.next_actor = self.v1_actor.next_run();
+                        self.next_ctr = self.ctr.next_run();
+                        self.next_actor = self.actor.next_run();
                     }
                 }
                 let end = self.pos;
@@ -1706,10 +2450,12 @@ pub(crate) mod tests {
             KeyRef,
         },
         storage::Document,
-        transaction::Transactable,
+        tx::Transactable,
         types::{ObjId, OpId},
-        ActorId, AutoCommit, ObjType,
+        ActorId, ObjType,
     };
+
+    use crate::autocommit::AutoCommit;
 
     use super::OpSet;
 
@@ -1776,7 +2522,10 @@ pub(crate) mod tests {
         doc.put(crate::ROOT, "key", "value").unwrap();
         doc.put(crate::ROOT, "key2", "value2").unwrap();
         doc.delete(crate::ROOT, "key2").unwrap();
-        let saved = doc.save();
+        let saved = doc.save_with_options(crate::automerge::SaveOptions {
+            format: crate::automerge::SaveFormat::Legacy,
+            ..Default::default()
+        });
         let doc_chunk = load_document_chunk(&saved);
         let opset = super::OpSet::load(&doc_chunk, TextEncoding::platform_default()).unwrap();
         let ops = opset.iter().collect::<Vec<_>>();
@@ -1875,7 +2624,7 @@ pub(crate) mod tests {
                 succ_cursors: SuccCursors {
                     len: group_count as usize,
                     succ_counter: counter_iter.clone(),
-                    succ_actor: actor_iter.clone(),
+                    succ_actor: MappedIter::raw(actor_iter.clone()),
                     inc_values: inc_values.clone(),
                 },
             };
@@ -1972,5 +2721,77 @@ pub(crate) mod tests {
             let op = iter.next();
             assert!(op.is_none());
         });
+    }
+
+    #[test]
+    fn column_validation_accepts_valid_docs() {
+        use crate::tx::Transactable;
+        let mut doc = crate::automerge::Automerge::new();
+        let mut tx = doc.transaction();
+        let text = tx
+            .put_object(crate::ROOT, "text", crate::ObjType::Text)
+            .unwrap();
+        tx.splice_text(&text, 0, 0, "hello world").unwrap();
+        let list = tx
+            .put_object(crate::ROOT, "list", crate::ObjType::List)
+            .unwrap();
+        tx.insert(&list, 0, 1).unwrap();
+        tx.put(crate::ROOT, "c", crate::ScalarValue::Counter(1.into()))
+            .unwrap();
+        tx.increment(crate::ROOT, "c", 2).unwrap();
+        tx.commit();
+        let reloaded = crate::automerge::Automerge::load(&doc.save()).unwrap();
+        reloaded.ops().column_validation().unwrap();
+    }
+
+    #[test]
+    fn column_validation_rejects_out_of_range_actors() {
+        use crate::tx::Transactable;
+        let mut doc = crate::automerge::Automerge::new();
+        let mut tx = doc.transaction();
+        tx.put(crate::ROOT, "k", "v").unwrap();
+        tx.put(crate::ROOT, "k", "w").unwrap();
+        tx.commit();
+        let reloaded = crate::automerge::Automerge::load(&doc.save()).unwrap();
+        let mut op_set = reloaded.ops().clone();
+        // shift every actor index up by one without adding an actor
+        op_set.cols.rewrite_with_new_actor(0);
+        assert!(matches!(
+            op_set.column_validation(),
+            Err(ReadOpError::ColumnValidation(
+                ColumnValidationError::ActorOutOfRange("id_actor", _, _)
+            ))
+        ));
+    }
+
+    #[test]
+    fn column_validation_rejects_disordered_and_half_null_obj_ids() {
+        use crate::tx::Transactable;
+        let mut doc = crate::automerge::Automerge::new();
+        let mut tx = doc.transaction();
+        let list = tx
+            .put_object(crate::ROOT, "list", crate::ObjType::List)
+            .unwrap();
+        tx.insert(&list, 0, 1).unwrap();
+        tx.insert(&list, 1, 2).unwrap();
+        tx.commit();
+        let reloaded = crate::automerge::Automerge::load(&doc.save()).unwrap();
+
+        // the last op's object id drops below its predecessor's
+        let mut op_set = reloaded.ops().clone();
+        let n = op_set.len();
+        op_set.cols.obj_ctr.splice(n - 1, 1, [Some(0u32)]);
+        op_set.cols.obj_actor.splice(n - 1, 1, [Some(ActorIdx(0))]);
+        assert!(matches!(
+            op_set.column_validation(),
+            Err(ReadOpError::ObjOutOfOrder(_))
+        ));
+
+        let mut op_set = reloaded.ops().clone();
+        op_set.cols.obj_actor.splice(n - 1, 1, [None::<ActorIdx>]);
+        assert!(matches!(
+            op_set.column_validation(),
+            Err(ReadOpError::InvalidObjId(_))
+        ));
     }
 }

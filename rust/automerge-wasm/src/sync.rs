@@ -1,4 +1,3 @@
-use automerge as am;
 use automerge::ChangeHash;
 use js_sys::Uint8Array;
 use std::collections::{BTreeSet, HashMap};
@@ -9,7 +8,7 @@ use crate::interop::{self, to_js_err, AR, JS};
 
 #[wasm_bindgen]
 #[derive(Debug)]
-pub struct SyncState(pub(crate) am::sync::State);
+pub struct SyncState(pub(crate) automerge_sync::State);
 
 #[wasm_bindgen]
 impl SyncState {
@@ -67,14 +66,14 @@ impl SyncState {
 
     pub(crate) fn decode(data: Uint8Array) -> Result<SyncState, DecodeSyncStateErr> {
         let data = data.to_vec();
-        let s = am::sync::State::decode(&data)?;
+        let s = automerge_sync::State::decode(&data)?;
         Ok(SyncState(s))
     }
 }
 
 #[derive(Debug, thiserror::Error)]
 #[error(transparent)]
-pub struct DecodeSyncStateErr(#[from] automerge::sync::DecodeStateError);
+pub struct DecodeSyncStateErr(#[from] automerge_sync::DecodeStateError);
 
 impl From<DecodeSyncStateErr> for JsValue {
     fn from(e: DecodeSyncStateErr) -> Self {

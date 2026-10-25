@@ -10,9 +10,7 @@ use crate::sequence_tree::SequenceTree;
 
 /// A change to the current state of the document
 ///
-/// [`Patch`]es are obtained from a [`PatchLog`](super::PatchLog) which has been passed to any of
-/// the various methods which mutate a document and add incremental changes to the
-/// [`PatchLog`](super::PatchLog)
+/// [`Patch`]es are obtained from document diff APIs.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Patch {
     /// The object this patch modifies

@@ -1417,6 +1417,38 @@ fn copy_ranges_strategies_agree_nullable() {
     assert_eq!(direct.save(), invert.save());
 }
 
+#[test]
+fn copy_ranges_moves_a_small_source_into_an_empty_column() {
+    use crate::column::CopyStrategy;
+    let src: Column<u64> = (0..50u64).map(|i| i / 3).collect();
+    let whole = [crate::Splice {
+        pos: 0,
+        delete: 0,
+        range: 0..src.len(),
+    }];
+    let empty: Column<u64> = Column::new();
+    assert_eq!(empty.copy_strategy_for(&src, &whole), CopyStrategy::Take);
+    let part = [crate::Splice {
+        pos: 0,
+        delete: 0,
+        range: 1..src.len(),
+    }];
+    assert_eq!(empty.copy_strategy_for(&src, &part), CopyStrategy::Direct);
+
+    let mut dest = empty.clone();
+    dest.copy_ranges(src.clone(), whole.clone());
+    assert_eq!(dest.to_vec(), src.to_vec());
+    dest.splice(10, 2, [7u64]);
+    let mut expected = src.to_vec();
+    expected.splice(10..12, [7u64]);
+    assert_eq!(dest.to_vec(), expected);
+
+    let mut delta: DeltaColumn<u64> = DeltaColumn::new();
+    let dsrc = DeltaColumn::<u64>::from_values((0..50u64).map(|i| i * 3).collect::<Vec<_>>());
+    delta.copy_ranges(dsrc.clone(), whole);
+    assert_eq!(delta.to_vec(), dsrc.to_vec());
+}
+
 /// The heuristic inverts for the motivating case (tiny destination,
 /// ranges covering nearly all of a large source) and stays direct for
 /// small scattered copies and mismatched slab budgets.

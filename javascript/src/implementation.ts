@@ -61,6 +61,7 @@ import type {
   DecodedChange,
   DiffOptions,
   Heads,
+  ChangeId,
   MaterializeValue,
   JsSyncState,
   SyncMessage,
@@ -217,6 +218,14 @@ export type InitOptions<T> = {
   allowMissingChanges?: boolean
   /** @hidden */
   convertImmutableStringsToText?: boolean
+  /**
+   * Defaults to `true`. With `false` the document does not keep change
+   * hashes: its heads are change IDs (`"seq@actor"`) rather than hashes,
+   * {@link save} and {@link saveIncremental} write the bundle format,
+   * and the sync functions throw. With {@link clone} it sets the mode of the
+   * copy, which otherwise keeps the mode of the original.
+   */
+  auditMode?: boolean
 }
 
 /** @hidden */
@@ -275,7 +284,7 @@ export function init<T>(_opts?: ActorId | InitOptions<T>): Doc<T> {
   const freeze = !!opts.freeze
   const patchCallback = opts.patchCallback
   const actor = opts.actor
-  const handle = ApiHandler.create({ actor })
+  const handle = ApiHandler.create({ actor, auditMode: opts.auditMode })
   if (typeof opts.author == "string") {
     handle.setAuthor(opts.author)
   }
@@ -338,6 +347,9 @@ export function clone<T>(
   const heads = state.heads
   const opts = importOpts(_opts)
   const handle = state.handle.fork(opts.actor, heads)
+  if (opts.auditMode !== undefined) {
+    handle.enableAuditMode(opts.auditMode)
+  }
   if (typeof opts.author == "string") {
     handle.setAuthor(opts.author)
   }
@@ -770,6 +782,7 @@ export function load<T>(
     unchecked,
     allowMissingDeps,
     convertImmutableStringsToText,
+    auditMode: opts.auditMode,
   })
   handle.enableFreeze(!!opts.freeze)
   registerDatatypes(handle)
@@ -977,7 +990,10 @@ export function getAuthors<T>(doc: Doc<T>): Author[] {
   return state.handle.getAuthors()
 }
 
-export function getAuthorForActor<T>(doc: Doc<T>, actor: ActorId): Author | null {
+export function getAuthorForActor<T>(
+  doc: Doc<T>,
+  actor: ActorId,
+): Author | null {
   const state = _state(doc)
   return state.handle.getAuthorForActor(actor)
 }
@@ -1454,12 +1470,20 @@ export function saveSince(doc: Doc<unknown>, heads: Heads): Uint8Array {
 }
 
 /**
+ * Whether the document keeps change hashes, which decides whether its heads
+ * are hashes or change IDs. See {@link InitOptions.auditMode}.
+ */
+export function isAuditMode(doc: Doc<unknown>): boolean {
+  return _state(doc).handle.isAuditMode()
+}
+
+/**
  * Returns true if the document has all of the given heads somewhere in its history
  */
 export function hasHeads(doc: Doc<unknown>, heads: Heads): boolean {
   const state = _state(doc)
-  for (const hash of heads) {
-    if (!state.handle.getChangeByHash(hash)) {
+  for (const head of heads) {
+    if (!state.handle.hasChange(head)) {
       return false
     }
   }
@@ -1477,6 +1501,7 @@ export type {
   DecodedChange,
   DecodedSyncMessage,
   Heads,
+  ChangeId,
   MaterializeValue,
 }
 
@@ -1512,7 +1537,10 @@ export function topoHistoryTraversal(doc: Doc<unknown>): string[] {
 }
 
 /**
- * Decode a change hash into the details of this change
+ * Decode a change, named by hash or by change id, into its details
+ *
+ * Outside audit mode a change id may rebuild earlier changes to recover the
+ * hashes the change embeds, which can be slow.
  *
  * This should be considered a semi-stable API. We try not to change the
  * encoding in backwards incompatible ways but we won't bump a major version if
@@ -1523,7 +1551,7 @@ export function inspectChange(
   changeHash: string,
 ): DecodedChange | null {
   const state = _state(doc)
-  return state.handle.getDecodedChangeByHash(changeHash)
+  return state.handle.getDecodedChange(changeHash)
 }
 
 /**
@@ -1970,18 +1998,6 @@ export const isRawString = isImmutableString
 export const RawString = ImmutableString
 
 /**
- * EXPERIMENTAL: save a bundle of changes from a document to an encoded form
- * @experimental
- * @param doc - The document containing the changes to save
- * @param hashes - The hashes of the changes to save to a bundle
- * @returns
- */
-export function saveBundle(doc: Doc<unknown>, hashes: string[]): Uint8Array {
-  const state = _state(doc, false)
-  return state.handle.saveBundle(hashes)
-}
-
-/**
  * EXPERIMENTAL: Return the Automerge fragments currently covering the document
  * history.
  *
@@ -2014,6 +2030,41 @@ export function getFragmentMeta(
 ): FragmentMeta | null {
   const state = _state(doc, false)
   return state.handle.getFragmentMeta(head)
+}
+
+/**
+ * EXPERIMENTAL: Return the fragments, loose commits included, holding a change
+ * that `heads` does not cover, in causal order. A fragment that also holds
+ * older changes is included whole. Heads the document does not know are
+ * ignored, so an empty array returns every fragment.
+ *
+ * @experimental
+ * @hidden
+ */
+export function getFragmentMetadataAfter(
+  doc: Doc<unknown>,
+  heads: Heads,
+): FragmentMeta[] {
+  const state = _state(doc, false)
+  return state.handle.getFragmentMetadataAfter(heads)
+}
+
+/**
+ * EXPERIMENTAL: {@link getFragmentMetadataAfter} with each fragment's bytes,
+ * in the shape {@link addFragments} takes. Adding them in the order given
+ * brings a document at `heads` up to date with `doc`.
+ *
+ * @experimental
+ * @hidden
+ */
+export function getFragmentsAfter(doc: Doc<unknown>, heads: Heads): Fragment[] {
+  const state = _state(doc, false)
+  const fragmentMetadata = state.handle.getFragmentMetadataAfter(heads)
+  const bytes = state.handle.bundleFragmentMetadata(fragmentMetadata)
+  return fragmentMetadata.map((fragment, index) => ({
+    ...fragment,
+    bytes: bytes[index],
+  }))
 }
 
 /**

@@ -33,6 +33,10 @@ impl Change {
     ) -> Result<Self, ReadChangeOpError> {
         let mut len = 0;
         let stored = stored.verify_ops(|_| len += 1)?;
+        // `ChangeId` holds a `NonZeroU64`: a zero seq off the wire would panic later
+        if stored.seq() == 0 {
+            return Err(ReadChangeOpError::ZeroSeq);
+        }
         let compression = if let Some(c) = compressed {
             CompressionState::Compressed(c)
         } else {
@@ -89,6 +93,11 @@ impl Change {
 
     pub fn hash(&self) -> ChangeHash {
         self.stored.hash()
+    }
+
+    /// The `(actor, seq)` identity of this change.
+    pub fn id(&self) -> crate::ChangeId {
+        crate::ChangeId::from_doc_seq(self.seq(), self.actor_id().clone(), 0)
     }
 
     pub fn seq(&self) -> u64 {
@@ -392,7 +401,7 @@ pub(crate) fn encode_author_footer<'a>(author: &Option<Author<'_>>) -> Cow<'a, [
 /// Read the footer identifier, expected to be [`Footer::Author`], followed by
 /// the expected length of the author bytes. The resulting bytes are the
 /// [`Author`].
-fn decode_author_footer<'a>(mut buff: &'a [u8]) -> Option<Author<'a>> {
+pub(crate) fn decode_author_footer<'a>(mut buff: &'a [u8]) -> Option<Author<'a>> {
     let id = leb128::read::unsigned(&mut buff).ok()?;
     let len = leb128::read::unsigned(&mut buff).ok()? as usize;
     if id == Footer::Author as u64 && buff.len() >= len {

@@ -1,7 +1,7 @@
 use super::types::ScalarValue;
 use hexane::{lebsize, ulebsize, PackError};
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ValueType {
     Null,
     False,
@@ -39,6 +39,11 @@ impl ValueMeta {
 
     pub(crate) fn length(&self) -> usize {
         (self.0 >> 4) as usize
+    }
+
+    /// Metadata for `len` raw bytes.
+    pub(crate) const fn bytes(len: usize) -> Self {
+        Self(((len as u64) << 4) | 7)
     }
 }
 

@@ -1,11 +1,11 @@
 use automerge::iter::Span;
 use automerge::marks::{ExpandMark, Mark};
-use automerge::sync::{self, SyncDoc};
 use automerge::transaction::Transactable;
 use automerge::{
     hydrate, hydrate_map, hydrate_text, ActorId, AutoCommit, Automerge, ObjType, ReadDoc,
     ScalarValue, ROOT,
 };
+use automerge_sync::{self as sync, AutoCommitSync, SyncDoc};
 
 fn commit_as(doc: &mut AutoCommit, actor: &[u8]) {
     doc.set_actor(ActorId::from(actor.to_vec()));

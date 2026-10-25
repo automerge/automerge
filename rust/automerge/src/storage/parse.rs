@@ -446,18 +446,6 @@ where
     }
 }
 
-/// Parse a length prefixed array of bytes from the input
-///
-/// This first parses a LEB128 encoded `u64` from the input, then parses this many bytes from the
-/// underlying input.
-pub(crate) fn length_prefixed_bytes<E>(input: Input<'_>) -> ParseResult<'_, &[u8], E>
-where
-    E: From<leb128::Error>,
-{
-    let (i, len) = leb128_u64(input).map_err(|e| e.lift())?;
-    take_n(len as usize, i)
-}
-
 /// Apply two parsers, returning the result in a 2 tuple
 ///
 /// This first applies `f`, then `g` and returns the result as `(f, g)`.

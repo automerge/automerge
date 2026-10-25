@@ -3,23 +3,47 @@ use crate::op_set2::op_set::RichTextQueryState;
 use crate::op_set2::MarkData;
 use crate::types::{Clock, OpId};
 use hexane::PackError;
-use hexane::{ColumnValue, PrefixColumn, PrefixValue, RleEncoding, RleValue, Run};
+use hexane::{ColumnValue, PrefixColumn, PrefixIter, PrefixValue, RleEncoding, RleValue, Run};
 
 use rustc_hash::FxHashSet;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::ops::{Add, AddAssign, Sub, SubAssign};
+use std::sync::Arc;
 
+/// Both variants hold the *mark-begin* op's id (the end op's own id is
+/// one past it), so a `Start` cancels against its `End`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd)]
 pub(crate) enum MarkIdx {
     Start(OpId),
     End(OpId),
 }
 
+impl MarkIdx {
+    pub(crate) fn id(&self) -> OpId {
+        match self {
+            MarkIdx::Start(id) | MarkIdx::End(id) => *id,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum MarkIndexBuilder {
     Start(OpId, MarkData<'static>),
     End(OpId),
+}
+
+impl MarkIndexBuilder {
+    /// The index entry; a start's data moves into `cache`.
+    pub(crate) fn into_idx(self, cache: &mut HashMap<OpId, MarkData<'static>>) -> MarkIdx {
+        match self {
+            MarkIndexBuilder::Start(id, mark) => {
+                cache.insert(id, mark);
+                MarkIdx::Start(id)
+            }
+            MarkIndexBuilder::End(id) => MarkIdx::End(id),
+        }
+    }
 }
 
 impl MarkIdx {
@@ -113,6 +137,11 @@ pub(crate) struct MarkAcc {
 }
 
 impl MarkAcc {
+    #[inline]
+    fn is_empty(&self) -> bool {
+        self.opens.is_empty() && self.closes.is_empty()
+    }
+
     /// Flip a single `Start`/`End` delta into the accumulator.
     #[inline]
     fn apply_one(&mut self, val: MarkIdx) {
@@ -184,7 +213,87 @@ impl SubAssign for MarkAcc {
     }
 }
 
-impl Add for MarkAcc {
+/// Mark rows are sparse, so nearly every prefix is empty: `None` is the
+/// one representation of empty, which clones without an atomic and
+/// merges as a no-op. A drained accumulator must return to `None`.
+#[derive(Clone, Default, Debug, PartialEq)]
+pub(crate) struct MarkPrefix(Option<Arc<MarkAcc>>);
+
+impl MarkPrefix {
+    #[cfg(test)]
+    pub(crate) fn is_empty(&self) -> bool {
+        self.0.is_none()
+    }
+
+    /// O(1) identity check: exact for comparing against a retained clone
+    /// (true iff nothing was applied since), but distinct values may
+    /// still hold equal sets.
+    pub(crate) fn same_set(&self, other: &Self) -> bool {
+        match (&self.0, &other.0) {
+            (None, None) => true,
+            (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+            _ => false,
+        }
+    }
+
+    /// The mark-begin ids open at this position.
+    pub(crate) fn opens(&self) -> impl Iterator<Item = OpId> + '_ {
+        self.0.iter().flat_map(|acc| acc.opens.iter().copied())
+    }
+
+    /// [`Self::opens`] by value; copies only if the set is still shared.
+    pub(crate) fn into_opens(self) -> impl Iterator<Item = OpId> {
+        self.0
+            .map(|acc| {
+                Arc::try_unwrap(acc)
+                    .unwrap_or_else(|acc| (*acc).clone())
+                    .opens
+            })
+            .unwrap_or_default()
+            .into_iter()
+    }
+
+    /// Ends not yet matched by a start; never true for a running prefix
+    /// over a well-formed column.
+    pub(crate) fn has_dangling_closes(&self) -> bool {
+        self.0.as_ref().is_some_and(|acc| !acc.closes.is_empty())
+    }
+
+    #[inline]
+    fn update(&mut self, f: impl FnOnce(&mut MarkAcc)) {
+        let acc = self.0.get_or_insert_with(Default::default);
+        f(Arc::make_mut(acc));
+        if acc.is_empty() {
+            self.0 = None;
+        }
+    }
+}
+
+impl AddAssign for MarkPrefix {
+    fn add_assign(&mut self, rhs: Self) {
+        let Some(rhs) = rhs.0 else { return };
+        let rhs = Arc::try_unwrap(rhs).unwrap_or_else(|arc| (*arc).clone());
+        self.update(|acc| *acc += rhs);
+    }
+}
+
+/// Hot path of tree descent; a mark-free sibling is a no-op.
+impl AddAssign<&MarkPrefix> for MarkPrefix {
+    fn add_assign(&mut self, rhs: &MarkPrefix) {
+        let Some(rhs) = &rhs.0 else { return };
+        self.update(|acc| *acc += &**rhs);
+    }
+}
+
+impl SubAssign for MarkPrefix {
+    fn sub_assign(&mut self, rhs: Self) {
+        let Some(rhs) = rhs.0 else { return };
+        let rhs = Arc::try_unwrap(rhs).unwrap_or_else(|arc| (*arc).clone());
+        self.update(|acc| *acc -= rhs);
+    }
+}
+
+impl Add for MarkPrefix {
     type Output = Self;
     fn add(mut self, rhs: Self) -> Self {
         self += rhs;
@@ -192,7 +301,7 @@ impl Add for MarkAcc {
     }
 }
 
-impl Sub for MarkAcc {
+impl Sub for MarkPrefix {
     type Output = Self;
     fn sub(mut self, rhs: Self) -> Self {
         self -= rhs;
@@ -201,11 +310,11 @@ impl Sub for MarkAcc {
 }
 
 impl PrefixValue for MarkIdx {
-    type Prefix = MarkAcc;
+    type Prefix = MarkPrefix;
 
     #[inline]
-    fn accumulate(target: &mut MarkAcc, val: MarkIdx) {
-        target.apply_one(val);
+    fn accumulate(target: &mut MarkPrefix, val: MarkIdx) {
+        target.update(|acc| acc.apply_one(val));
     }
 
     /// `OpId`s are unique per `Start`/`End`, so a multi-row RLE run of
@@ -213,8 +322,8 @@ impl PrefixValue for MarkIdx {
     /// `run.count` is always 1.  Treat any count as 1; the column's
     /// uniqueness invariant makes this correct.
     #[inline]
-    fn accumulate_run(target: &mut MarkAcc, run: &Run<MarkIdx>) {
-        target.apply_one(run.value);
+    fn accumulate_run(target: &mut MarkPrefix, run: &Run<MarkIdx>) {
+        target.update(|acc| acc.apply_one(run.value));
     }
 }
 
@@ -242,6 +351,15 @@ impl MarkIndexColumn {
         self.data.values().iter()
     }
 
+    /// A prefix cursor whose running total covers rows `..=pos`, like
+    /// [`Self::marks_at`]. Forward steps cost one run each (a mark-free
+    /// stretch is one step); a jump out of the slab, one tree descent.
+    pub(crate) fn prefix_at(&self, pos: usize) -> PrefixIter<'_, Option<MarkIdx>> {
+        let mut iter = self.data.iter();
+        iter.advance_to(pos + 1);
+        iter
+    }
+
     pub(crate) fn iter_range(
         &self,
         range: std::ops::Range<usize>,
@@ -264,6 +382,22 @@ impl MarkIndexColumn {
         self.cache.shift_actors(shift);
     }
 
+    /// Map every actor index through `map`.
+    pub(crate) fn remap_actor_indexes(&mut self, map: &[u32]) {
+        let remap_id = |id: &OpId| OpId::new(id.counter(), map[id.actor()] as usize);
+        let remap_idx = |m: MarkIdx| match m {
+            MarkIdx::Start(id) => MarkIdx::Start(remap_id(&id)),
+            MarkIdx::End(id) => MarkIdx::End(remap_id(&id)),
+        };
+        self.remap_values(remap_idx);
+        self.cache = ActorRefs(
+            self.cache
+                .iter()
+                .map(|(key, val)| (remap_id(key), val.clone()))
+                .collect(),
+        );
+    }
+
     /// Rebuild the data column with `f` applied to every mark idx —
     /// run at a time, so an unmarked document (all-null runs) costs a
     /// handful of run headers rather than a per-row materialize.
@@ -280,18 +414,41 @@ impl MarkIndexColumn {
         self.data = new_data;
     }
 
+    /// Splice ranges of `other`'s rows in at the given insertion points.
+    pub(crate) fn merge_from<R>(&mut self, other: Self, splices: R)
+    where
+        R: IntoIterator<Item = hexane::Splice>,
+    {
+        self.data.copy_ranges(other.data, splices);
+        self.cache.extend(other.cache.0);
+    }
+
+    pub(crate) fn from_parts(
+        data: PrefixColumn<Option<MarkIdx>>,
+        cache: HashMap<OpId, MarkData<'static>>,
+    ) -> Self {
+        Self {
+            data,
+            cache: ActorRefs(cache),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn assert_same(&self, other: &Self) {
+        assert_eq!(
+            self.data.save(),
+            other.data.save(),
+            "index drift: mark column"
+        );
+        assert_eq!(self.cache, other.cache, "index drift: mark cache");
+    }
+
     pub(crate) fn extend(&mut self, index: usize, values: Vec<Option<MarkIndexBuilder>>) {
-        let mark_values: Vec<Option<MarkIdx>> = values
-            .into_iter()
-            .map(|v| match v? {
-                MarkIndexBuilder::Start(id, mark) => {
-                    self.cache.insert(id, mark);
-                    Some(MarkIdx::Start(id))
-                }
-                MarkIndexBuilder::End(id) => Some(MarkIdx::End(id)),
-            })
-            .collect();
-        self.data.splice(index, 0, mark_values);
+        let cache = &mut self.cache.0;
+        let mark_values = values.into_iter().map(|v| Some(v?.into_idx(cache)));
+        // marks are sparse: encode runs, not rows
+        self.data
+            .splice_runs(index, 0, super::index::runs(mark_values));
     }
 
     pub(crate) fn undo(&mut self, index: usize, values: Vec<Option<MarkIndexBuilder>>) {
@@ -328,18 +485,12 @@ impl MarkIndexColumn {
         // `Start`.  `opens` is the active mark set; iterate it directly.
         let acc = self.data.get_total(target);
         debug_assert!(
-            acc.closes.is_empty(),
+            !acc.has_dangling_closes(),
             "running prefix at marks_at({target}) has dangling closes — \
              malformed mark column?"
         );
-        acc.opens
-            .into_iter()
+        acc.into_opens()
             .filter(move |id| clock.map(|c| c.covers(id)).unwrap_or(true))
-    }
-
-    #[cfg(test)]
-    pub(crate) fn save(&self) -> Vec<u8> {
-        self.data.save()
     }
 }
 
@@ -406,6 +557,32 @@ pub(crate) mod tests {
         let col = MarkIndexColumn::new();
         let rt = col.rich_text_at(0, None);
         assert!(rt.map.is_empty());
+    }
+
+    /// Positions with no open mark, including after every mark has
+    /// closed, must canonicalize to `None`.
+    #[test]
+    fn empty_prefix_is_canonical() {
+        let unmarked = build_column(8, &[]);
+        for pos in 0..=8 {
+            assert!(
+                unmarked.data.get_total(pos).is_empty(),
+                "unmarked column has a non-empty prefix at {pos}",
+            );
+        }
+
+        // [_, _, S, _, E, _, S, _, _, E] — open over 2..5 and 6..10
+        let col = build_column(10, &[(2, 4, 0, 1, "bold"), (6, 9, 0, 3, "italic")]);
+        let open_at = |pos: usize| !col.data.get_total(pos).is_empty();
+        for pos in [0, 1, 2, 5, 6, 10] {
+            assert_eq!(
+                open_at(pos),
+                !active_mark_ids(&col, pos).is_empty(),
+                "prefix emptiness disagrees with the active set at {pos}",
+            );
+        }
+        assert!(!open_at(5), "prefix did not drain between marks");
+        assert!(!open_at(10), "prefix did not drain past the last mark");
     }
 
     #[test]

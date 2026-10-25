@@ -1,24 +1,54 @@
+use super::run_head::{Rle, RunHead};
 use crate::actor::{ActorRefs, ActorRemoval, ActorShift, HasActorIndices};
 use crate::clock::Clock;
-use crate::op_set2::op_set::{MarkIndexBuilder, MarkIndexColumn};
-use crate::op_set2::{ChangeOp, Op, OpBuilder, OpSet};
-use crate::types::{ObjId, ObjType, OpId, SequenceType, TextEncoding};
+use crate::iter::tools::Shiftable;
+use crate::op_set2::meta::ValueType;
+use crate::op_set2::op_set::OpIdIter;
+use crate::op_set2::op_set::{MarkIdx, MarkIndexBuilder, MarkIndexColumn};
+use crate::op_set2::types::{Action, ScalarValue};
+use crate::op_set2::MarkData;
+use crate::op_set2::OpSet;
+use crate::op_set2::ValueMeta;
+use crate::op_set2::{ChangeOp, Op, OpBuilder, ReadOpError};
+use crate::types::SequenceType;
+use crate::types::{ElemId, ObjId, ObjType, OpId, TextEncoding};
+use hexane::encoder::{BoolEncoder, RleEncoder};
+use hexane::{EncoderApi, RunSrc};
+use rustc_hash::FxHashMap;
+use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 
-// TODO : this could be faster and use less memory if
-// hexane::Encoder was used here instead of Vec<>
-
+/// Streaming index builder: ops are buffered one register at a time and
+/// flushed to run-length encoders at each register boundary.
 pub(crate) struct IndexBuilder {
-    counters: HashMap<OpId, Vec<(usize, usize)>>,
-    succ: Vec<u32>,
-    top: Vec<bool>,
-    widths: Vec<u64>,
-    incs: Vec<Option<i64>>,
-    marks: Vec<Option<MarkIndexBuilder>>,
+    /// counter succ id -> (absolute inc index, absolute op index)
+    counters: FxHashMap<OpId, (usize, usize)>,
+    /// further counters sharing a succ id, which only conflicting counters do
+    shared_counters: Vec<(OpId, (usize, usize))>,
+    /// the current, unflushed register
+    group: Vec<GroupOp>,
+    group_incs: Vec<Option<i64>>,
+    group_marks: Vec<Option<MarkIdx>>,
+    text: RleEncoder<'static, Option<u32>>,
+    top: BoolEncoder,
+    visible: BoolEncoder,
+    inc: RleEncoder<'static, Option<i64>>,
+    marks: RleEncoder<'static, Option<MarkIdx>>,
+    mark_cache: HashMap<OpId, MarkData<'static>>,
     obj_info: ObjIndex,
-    last_flush: usize,
     text_encoding: TextEncoding,
     mark_order: MarkOrderValidator,
+    split_by_elem: bool,
+    /// objects the input creates itself, whose registers are always
+    /// insert-bounded; a `Make` row always precedes its object's rows
+    own_objs: rustc_hash::FxHashSet<ObjId>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct GroupOp {
+    /// see [`vis_succ`]; decremented as a counter's increments apply
+    succ: u32,
+    width: u32,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -38,9 +68,6 @@ impl MarkOrderValidator {
         op: &Op<'_>,
         mark_index: &Option<MarkIndexBuilder>,
     ) {
-        if self.error.is_some() {
-            return;
-        }
         self.check_mark_op(op, mark_index);
     }
 
@@ -52,22 +79,29 @@ impl MarkOrderValidator {
     /// * Always start and end in the same object
     /// * Have the start op appear before the end op
     fn check_mark_op(&mut self, op: &Op<'_>, mark_index: &Option<MarkIndexBuilder>) {
+        self.check_mark(op.obj, op.id, mark_index)
+    }
+
+    fn check_mark(&mut self, obj: ObjId, op_id: OpId, mark_index: &Option<MarkIndexBuilder>) {
+        if self.error.is_some() {
+            return;
+        }
         match mark_index {
             Some(MarkIndexBuilder::Start(id, _)) => {
-                self.begins.insert(*id, op.obj);
+                self.begins.insert(*id, obj);
             }
             Some(MarkIndexBuilder::End(begin)) => match self.begins.get(begin) {
-                Some(obj) if *obj == op.obj => {}
+                Some(o) if *o == obj => {}
                 Some(_) => {
                     self.error = Some(format!(
                         "mark end {:?} references mark begin {:?} in a different object",
-                        op.id, begin
+                        op_id, begin
                     ));
                 }
                 None => {
                     self.error = Some(format!(
                         "mark end {:?} occurs before mark begin {:?}",
-                        op.id, begin
+                        op_id, begin
                     ));
                 }
             },
@@ -76,7 +110,7 @@ impl MarkOrderValidator {
     }
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, PartialEq)]
 pub(crate) struct ObjIndex(pub(crate) ActorRefs<HashMap<OpId, ObjInfo>>);
 
 impl ObjIndex {
@@ -105,7 +139,7 @@ impl ObjIndex {
     }
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ObjInfo {
     pub(crate) parent: ObjId,
     pub(crate) obj_type: ObjType,
@@ -158,110 +192,573 @@ pub(crate) struct Indexes {
     pub(crate) obj_info: ObjIndex,
 }
 
-impl IndexBuilder {
-    pub(crate) fn new(op_set: &OpSet, encoding: TextEncoding) -> Self {
+/// Object ranges from the obj_actor / obj_ctr run streams. Errors if an id
+/// is half null or the ids are not strictly increasing.
+pub(crate) struct ObjRunWalk<'a, A, C>
+where
+    A: RunSrc<'a, Option<crate::op_set2::ActorIdx>>,
+    C: RunSrc<'a, Option<u32>>,
+{
+    actor: RunHead<Rle<'a, Option<crate::op_set2::ActorIdx>, A>>,
+    ctr: RunHead<Rle<'a, Option<u32>, C>>,
+    pos: usize,
+    prev: Option<ObjId>,
+}
+
+impl<'a, A, C> ObjRunWalk<'a, A, C>
+where
+    A: RunSrc<'a, Option<crate::op_set2::ActorIdx>>,
+    C: RunSrc<'a, Option<u32>>,
+{
+    pub(crate) fn new(actor: A, ctr: C) -> Self {
         Self {
-            counters: HashMap::new(),
-            succ: Vec::with_capacity(op_set.len()),
-            top: Vec::with_capacity(op_set.len()),
-            widths: Vec::with_capacity(op_set.len()),
-            incs: Vec::with_capacity(op_set.sub_len()),
-            marks: Vec::with_capacity(op_set.len()),
+            actor: RunHead::rle(actor, "obj_actor"),
+            ctr: RunHead::rle(ctr, "obj_ctr"),
+            pos: 0,
+            prev: None,
+        }
+    }
+
+    pub(crate) fn try_next_obj(&mut self) -> Result<Option<(ObjId, usize)>, ReadOpError> {
+        let (Some(actor), Some(ctr)) = (self.actor.peek()?, self.ctr.peek()?) else {
+            return Ok(None);
+        };
+        let obj = ObjId::load(ctr.value.map(|c| c as u64), actor.value)
+            .ok_or(ReadOpError::InvalidObjId(self.pos))?;
+        if self.prev.is_some_and(|p| obj <= p) {
+            return Err(ReadOpError::ObjOutOfOrder(self.pos));
+        }
+        self.prev = Some(obj);
+        let count = actor.count.min(ctr.count);
+        self.pos += count;
+        self.actor.consume(count);
+        self.ctr.consume(count);
+        Ok(Some((obj, count)))
+    }
+}
+
+/// Forward-only access to the columns needed to materialize rare ops.
+pub(crate) struct RareOps<'a> {
+    ids: OpIdIter<'a>,
+    marks: super::MarkInfoIter<'a>,
+    succ_ids: OpIdIter<'a>,
+    raw: hexane::RawColumnIter<'a>,
+}
+
+impl<'a> RareOps<'a> {
+    pub(crate) fn new(
+        ids: OpIdIter<'a>,
+        marks: super::MarkInfoIter<'a>,
+        succ_ids: OpIdIter<'a>,
+        raw: hexane::RawColumnIter<'a>,
+    ) -> Self {
+        Self {
+            ids,
+            marks,
+            succ_ids,
+            raw,
+        }
+    }
+
+    fn id_at(&mut self, pos: usize) -> Result<OpId, ReadOpError> {
+        self.ids
+            .shift_next(pos..pos + 1)
+            .ok_or(ReadOpError::MissingValue("id"))
+    }
+
+    fn mark_at(&mut self, pos: usize) -> Result<Option<&'a str>, ReadOpError> {
+        self.marks
+            .shift_next(pos..pos + 1)
+            .map(|(name, _expand)| name)
+            .ok_or(ReadOpError::MissingValue("mark_name"))
+    }
+
+    fn raw_at(&mut self, start: usize, len: usize) -> Result<&'a [u8], ReadOpError> {
+        let short = || ReadOpError::MissingValue("raw value bytes");
+        let skip = start.checked_sub(self.raw.pos()).ok_or_else(short)?;
+        if !self.raw.try_skip(skip) {
+            return Err(short());
+        }
+        self.raw.try_take(len).ok_or_else(short)
+    }
+
+    fn value_at(&mut self, meta: ValueMeta, start: usize) -> Result<ScalarValue<'a>, ReadOpError> {
+        let raw = self.raw_at(start, meta.length())?;
+        Ok(ScalarValue::from_raw(meta, raw)?)
+    }
+}
+
+impl IndexBuilder {
+    pub(crate) fn new(encoding: TextEncoding) -> Self {
+        Self {
+            counters: FxHashMap::default(),
+            shared_counters: Vec::new(),
+            group: Vec::new(),
+            group_incs: Vec::new(),
+            group_marks: Vec::new(),
+            text: RleEncoder::new().with_segments(),
+            top: BoolEncoder::new().with_segments(),
+            visible: BoolEncoder::new().with_segments(),
+            inc: RleEncoder::new().with_segments(),
+            marks: RleEncoder::new().with_segments(),
+            mark_cache: HashMap::new(),
             obj_info: ObjIndex::default(),
-            last_flush: 0,
             text_encoding: encoding,
             mark_order: MarkOrderValidator::default(),
+            split_by_elem: false,
+            own_objs: rustc_hash::FxHashSet::default(),
         }
     }
 
+    /// Bound sequence registers by element identity rather than by the
+    /// insert column alone. Needed for a fragment with deps.
+    pub(crate) fn split_by_elem(&mut self) {
+        self.split_by_elem = true;
+    }
+
+    fn ops_flushed(&self) -> usize {
+        self.visible.len()
+    }
+
+    /// Ops processed so far, flushed or buffered.
+    pub(crate) fn ops_len(&self) -> usize {
+        self.ops_flushed() + self.group.len()
+    }
+
+    fn incs_flushed(&self) -> usize {
+        self.inc.len()
+    }
+
+    /// Close the current register.
     pub(crate) fn flush(&mut self) {
-        let len = self.succ.len();
-        for (delta, succ) in self.succ[self.last_flush..].iter().rev().enumerate() {
-            if *succ == 0 {
-                self.top[len - delta - 1] = true;
-                break;
+        if self.group.is_empty() {
+            debug_assert!(self.group_incs.is_empty());
+            return;
+        }
+        match self.group.iter().rposition(|g| g.succ == 0) {
+            Some(t) => {
+                self.top.append_n(false, t);
+                self.top.append(true);
+                self.top.append_n(false, self.group.len() - t - 1);
+                self.text.append_n(None, t);
+                self.text.append(Some(self.group[t].width));
+                self.text.append_n(None, self.group.len() - t - 1);
+            }
+            None => {
+                self.top.append_n(false, self.group.len());
+                self.text.append_n(None, self.group.len());
             }
         }
-        self.last_flush = len;
+        for g in &self.group {
+            self.visible.append(g.succ == 0);
+        }
+        for &v in &self.group_incs {
+            self.inc.append(v);
+        }
+        for &m in &self.group_marks {
+            self.marks.append(m);
+        }
+        self.group.clear();
+        self.group_incs.clear();
+        self.group_marks.clear();
+        // successors share their target's register, so leftovers can never match
+        self.counters.clear();
+        self.shared_counters.clear();
     }
 
-    /// Add `op` and its successors to the indexes being built.
-    ///
-    /// When `clock` is `None`, all operations are included. Otherwise, only
-    /// covered operations contribute to visibility: uncovered successors do
-    /// not hide values, and uncovered increments do not affect counter values.
-    ///
-    /// Mark ordering is validated and object and successor metadata are
-    /// recorded regardless of coverage. Marks outside the clock are omitted
-    /// from the mark index.
-    ///
-    /// Call [`Self::flush`] between registers. Successor indexing is handled
-    /// here, that is, callers must not also call [`Self::process_succ`] for
-    /// this op.
+    #[allow(clippy::too_many_arguments)]
+    fn process_op_parts(
+        &mut self,
+        obj: ObjId,
+        id: OpId,
+        mark_index: Option<MarkIndexBuilder>,
+        inc_value: Option<i64>,
+        obj_info: Option<ObjInfo>,
+        succ_vis: u32,
+        width: u32,
+    ) {
+        self.mark_order.check_mark(obj, id, &mark_index);
+        self.push_mark(mark_index);
+        self.apply_increment(id, inc_value, true);
+
+        if let Some(obj_info) = obj_info {
+            self.obj_info.insert(id, obj_info);
+            if self.split_by_elem {
+                self.own_objs.insert(ObjId(id));
+            }
+        }
+
+        self.group.push(GroupOp {
+            succ: succ_vis,
+            width,
+        });
+    }
+
+    /// Add `op` and its successors. With a `clock`, ops it does not cover are
+    /// invisible and neither hide values nor add increments; the mark index
+    /// lists every mark regardless. Call [`Self::flush`] between registers.
     pub(crate) fn process_op(&mut self, op: &Op<'_>, clock: Option<&Clock>) {
         let visible = clock.is_none_or(|clock| clock.covers(&op.id));
-
         let mark_index = op.mark_index();
         self.mark_order.process_mark_index(op, &mark_index);
-        self.marks.push(if visible { mark_index } else { None });
-
-        self.succ.push(vis_num(op, clock));
-        self.top.push(false);
-        self.widths
-            .push(op.width(SequenceType::Text, self.text_encoding) as u64);
-
-        let count = self.counters.remove(&op.id);
-
-        if let Some(i) = op.get_increment_value() {
-            for (succ_idx, op_idx) in count.into_iter().flatten() {
-                self.incs[succ_idx] = Some(i);
-                if visible {
-                    self.succ[op_idx] -= 1;
-                }
-            }
-        }
+        self.push_mark(mark_index);
+        self.apply_increment(op.id, op.get_increment_value(), visible);
 
         if let Some(obj_info) = op.obj_info() {
             self.obj_info.insert(op.id, obj_info);
         }
 
-        for succ_id in op.succ() {
-            self.process_succ(op.is_counter(), succ_id);
+        self.group.push(GroupOp {
+            succ: vis_num(op, clock),
+            width: op.width(SequenceType::Text, self.text_encoding) as u32,
+        });
+        for succ in op.succ() {
+            self.process_succ(op.is_counter(), succ);
+        }
+    }
+
+    fn push_mark(&mut self, mark_index: Option<MarkIndexBuilder>) {
+        let cache = &mut self.mark_cache;
+        self.group_marks.push(mark_index.map(|m| m.into_idx(cache)));
+    }
+
+    fn apply_increment(&mut self, id: OpId, inc_value: Option<i64>, visible: bool) {
+        let first = self.counters.remove(&id);
+        let Some(i) = inc_value else {
+            return;
+        };
+        let mut apply = |(inc_idx, op_idx): (usize, usize)| {
+            // a counter and its increments share a register
+            self.group_incs[inc_idx - self.inc.len()] = Some(i);
+            if visible {
+                self.group[op_idx - self.visible.len()].succ -= 1;
+            }
+        };
+        if let Some(entry) = first {
+            apply(entry);
+        }
+        let mut j = 0;
+        while j < self.shared_counters.len() {
+            if self.shared_counters[j].0 == id {
+                apply(self.shared_counters.swap_remove(j).1);
+            } else {
+                j += 1;
+            }
         }
     }
 
     pub(crate) fn process_succ(&mut self, op_is_counter: bool, id: OpId) {
         if op_is_counter {
-            self.counters
-                .entry(id)
-                .or_default()
-                .push((self.incs.len(), self.succ.len() - 1));
+            let entry = (
+                self.incs_flushed() + self.group_incs.len(),
+                self.ops_flushed() + self.group.len() - 1,
+            );
+            match self.counters.entry(id) {
+                Entry::Vacant(v) => {
+                    v.insert(entry);
+                }
+                Entry::Occupied(_) => self.shared_counters.push((id, entry)),
+            }
         }
-        self.incs.push(None); // will update later
+        self.group_incs.push(None);
+    }
+
+    /// True if this run needs its ops materialized one at a time.
+    fn is_rare(&self, run: &IndexRun) -> bool {
+        run.action == Action::Mark
+            || run.action == Action::Increment
+            || ObjType::try_from(run.action).is_ok()
+            || run.meta.type_code() == ValueType::Counter
+            || !self.counters.is_empty()
+    }
+
+    /// Build the index from a loaded op set's columns.
+    pub(crate) fn process_op_set(&mut self, op_set: &OpSet) -> Result<(), ReadOpError> {
+        self.process_op_set_with(op_set, None)
+    }
+
+    /// [`Self::process_op_set`] for columns whose ops may belong to
+    /// objects created outside them, in `known`.
+    pub(crate) fn process_op_set_with(
+        &mut self,
+        op_set: &OpSet,
+        known: Option<&ObjIndex>,
+    ) -> Result<(), ReadOpError> {
+        let rare = RareOps::new(
+            OpIdIter::new(op_set.cols.id_actor.iter(), op_set.cols.id_ctr.iter()),
+            super::MarkInfoIter::new(op_set.cols.mark_name.iter(), op_set.cols.expand.iter()),
+            OpIdIter::new(op_set.cols.succ_actor.iter(), op_set.cols.succ_ctr.iter()),
+            op_set.cols.value.iter(),
+        );
+        let elem = self.split_by_elem.then(|| ElemBounds {
+            elems: super::op_iter::ElemIdIter::new(
+                op_set.cols.key_actor.iter(),
+                op_set.cols.key_ctr.iter(),
+            ),
+            ids: OpIdIter::new(op_set.cols.id_actor.iter(), op_set.cols.id_ctr.iter()),
+            ids_pos: 0,
+            span: None,
+            peeked: None,
+        });
+        self.process_columns(
+            ObjRunWalk::new(op_set.cols.obj_actor.iter(), op_set.cols.obj_ctr.iter()),
+            op_set.cols.action.iter(),
+            op_set.cols.value_meta.values().iter(),
+            op_set.cols.succ_count.values().iter(),
+            op_set.cols.insert.values().iter(),
+            op_set.cols.key_str.iter(),
+            rare,
+            elem,
+            known,
+        )
+    }
+
+    /// Build the index by walking column run streams. Only rare ops
+    /// (marks, object creation, increments, counters) are materialized.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn process_columns<'a, OA, OC, A, M, S, I, K>(
+        &mut self,
+        mut objs: ObjRunWalk<'a, OA, OC>,
+        action: A,
+        meta: M,
+        succ: S,
+        inserts: I,
+        keys: K,
+        mut rare: RareOps<'_>,
+        elem: Option<ElemBounds<'_>>,
+        known: Option<&ObjIndex>,
+    ) -> Result<(), ReadOpError>
+    where
+        OA: RunSrc<'a, Option<crate::op_set2::ActorIdx>>,
+        OC: RunSrc<'a, Option<u32>>,
+        A: RunSrc<'a, Action>,
+        M: RunSrc<'a, ValueMeta>,
+        S: RunSrc<'a, u32>,
+        I: RunSrc<'a, bool>,
+        K: RunSrc<'a, Option<String>>,
+    {
+        let objrep = self.text_encoding.width("\u{fffc}") as u32;
+        let mut iter = IndexIter::new(action, meta, succ);
+        let mut bounds = BoundaryIter::new(inserts, keys, elem);
+        let mut pos = 0;
+
+        while let Some((obj, obj_len)) = objs.try_next_obj()? {
+            let obj_type = self
+                .obj_info
+                .object_type(&obj)
+                .or_else(|| known?.object_type(&obj));
+            let seq = matches!(obj_type, Some(ObjType::List) | Some(ObjType::Text));
+            let split = self.split_by_elem && !self.own_objs.contains(&obj);
+            bounds.start_obj(seq, obj_len, split)?;
+
+            while let Some((group_len, repeat)) = bounds.next_batch()? {
+                if group_len == 1 && repeat > 1 {
+                    let mut remaining = repeat;
+                    while remaining > 0 {
+                        let run = iter
+                            .next_run(remaining)?
+                            .ok_or(ReadOpError::MissingValue("index columns"))?;
+                        remaining -= run.count;
+                        if self.is_rare(&run) {
+                            self.rare_run(&run, pos, obj, objrep, &mut rare, true)?;
+                        } else {
+                            self.stream_singletons(&run, objrep, &mut rare)?;
+                        }
+                        pos += run.count;
+                    }
+                } else {
+                    for _ in 0..repeat {
+                        let mut remaining = group_len;
+                        while remaining > 0 {
+                            let run = iter
+                                .next_run(remaining)?
+                                .ok_or(ReadOpError::MissingValue("index columns"))?;
+                            remaining -= run.count;
+                            if self.is_rare(&run) {
+                                self.rare_run(&run, pos, obj, objrep, &mut rare, false)?;
+                            } else {
+                                self.buffer_run(&run, objrep, &mut rare)?;
+                            }
+                            pos += run.count;
+                        }
+                        self.flush();
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// The text width of the `i`th op of a non-mark run; mirrors `Op::width`.
+    fn str_width(
+        &mut self,
+        run: &IndexRun,
+        i: usize,
+        objrep: u32,
+        rare: &mut RareOps<'_>,
+    ) -> Result<u32, ReadOpError> {
+        if run.action != Action::Set {
+            return Ok(objrep);
+        }
+        let len = run.meta.length();
+        let value = rare.value_at(run.meta, run.raw_prefix as usize + i * len)?;
+        Ok(match &value {
+            ScalarValue::Str(s) => self.text_encoding.width(s) as u32,
+            _ => objrep,
+        })
+    }
+
+    fn stream_singletons(
+        &mut self,
+        run: &IndexRun,
+        objrep: u32,
+        rare: &mut RareOps<'_>,
+    ) -> Result<(), ReadOpError> {
+        debug_assert!(self.group.is_empty());
+        let vis = vis_succ(run) == 0;
+        self.visible.append_n(vis, run.count);
+        self.top.append_n(vis, run.count);
+        self.marks.append_n(None, run.count);
+        self.inc.append_n(None, run.count * run.succ as usize);
+        if !vis {
+            self.text.append_n(None, run.count);
+        } else if run.meta.type_code() != ValueType::String {
+            self.text.append_n(Some(objrep), run.count);
+        } else if run.meta.length() == 1 {
+            // a 1-byte utf8 string is ascii: width 1 in every encoding
+            self.text.append_n(Some(1), run.count);
+        } else {
+            for i in 0..run.count {
+                let w = self.str_width(run, i, objrep, rare)?;
+                self.text.append(Some(w));
+            }
+        }
+        Ok(())
+    }
+
+    fn buffer_run(
+        &mut self,
+        run: &IndexRun,
+        objrep: u32,
+        rare: &mut RareOps<'_>,
+    ) -> Result<(), ReadOpError> {
+        if run.meta.type_code() == ValueType::String && run.meta.length() > 1 {
+            for i in 0..run.count {
+                let width = self.str_width(run, i, objrep, rare)?;
+                self.group.push(GroupOp {
+                    succ: vis_succ(run),
+                    width,
+                });
+            }
+        } else {
+            let width = if run.meta.type_code() == ValueType::String {
+                1 // ascii, see above
+            } else {
+                objrep
+            };
+            self.group.extend(std::iter::repeat_n(
+                GroupOp {
+                    succ: vis_succ(run),
+                    width,
+                },
+                run.count,
+            ));
+        }
+        self.group_incs
+            .extend(std::iter::repeat_n(None, run.count * run.succ as usize));
+        self.group_marks
+            .extend(std::iter::repeat_n(None, run.count));
+        Ok(())
+    }
+
+    /// With `singletons`, each op is its own register.
+    fn rare_run(
+        &mut self,
+        run: &IndexRun,
+        pos: usize,
+        obj: ObjId,
+        objrep: u32,
+        rare: &mut RareOps<'_>,
+        singletons: bool,
+    ) -> Result<(), ReadOpError> {
+        let len = run.meta.length();
+        for i in 0..run.count {
+            let p = pos + i;
+            let id = rare.id_at(p)?;
+            let value = rare.value_at(run.meta, run.raw_prefix as usize + i * len)?;
+
+            // mirrors `Op::mark_index`
+            let mark_index = if run.action == Action::Mark {
+                match rare.mark_at(p)? {
+                    Some(name) => Some(MarkIndexBuilder::Start(
+                        id,
+                        MarkData {
+                            name: std::borrow::Cow::Owned(name.to_string()),
+                            value: value.clone().into_owned(),
+                        },
+                    )),
+                    None => Some(MarkIndexBuilder::End(id.prev())),
+                }
+            } else {
+                None
+            };
+
+            // mirrors `OpBuilder::get_increment_value`
+            let inc_value = match (run.action, &value) {
+                (Action::Increment, ScalarValue::Int(n)) => Some(*n),
+                (Action::Increment, ScalarValue::Uint(n)) => Some(*n as i64),
+                _ => None,
+            };
+
+            let obj_info = ObjType::try_from(run.action).ok().map(|obj_type| ObjInfo {
+                parent: obj,
+                obj_type,
+            });
+
+            // mirrors `OpBuilder::width` / `as_str`
+            let width = match (run.action, &value) {
+                (Action::Mark, _) => 0,
+                (Action::Set, ScalarValue::Str(s)) => self.text_encoding.width(s) as u32,
+                _ => objrep,
+            };
+
+            let is_counter = matches!(value, ScalarValue::Counter(_));
+            let succ_vis = vis_succ(run);
+
+            self.process_op_parts(obj, id, mark_index, inc_value, obj_info, succ_vis, width);
+
+            if run.succ > 0 {
+                if is_counter {
+                    let start = run.succ_prefix as usize + i * run.succ as usize;
+                    let end = start + run.succ as usize;
+                    self.counters.reserve(run.succ as usize);
+                    let mut next_id = rare.succ_ids.shift_next(start..end);
+                    while let Some(succ_id) = next_id {
+                        self.process_succ(true, succ_id);
+                        next_id = rare.succ_ids.next();
+                    }
+                } else {
+                    self.group_incs
+                        .extend(std::iter::repeat_n(None, run.succ as usize));
+                }
+            }
+            if singletons {
+                self.flush();
+            }
+        }
+        Ok(())
     }
 
     pub(crate) fn finish(mut self) -> (Indexes, MarkOrderValidator) {
         self.flush();
-
-        let text = self
-            .widths
-            .iter()
-            .zip(self.top.iter())
-            .map(|(w, t)| if *t { Some(*w as u32) } else { None })
-            .collect();
-
-        let visible: Vec<bool> = self.succ.iter().map(|&n| n == 0).collect();
-        let visible = hexane::Column::from_values(visible);
-
-        let top: Vec<bool> = self.top.to_vec();
-        let top = hexane::PrefixColumn::from_values(top);
-
-        let inc = hexane::Column::from_values(self.incs);
-
-        let mut mark = MarkIndexColumn::new();
-        mark.extend(0, self.marks);
-
-        let obj_info = self.obj_info;
+        let text = hexane::PrefixColumn::from_column(self.text.into_column());
+        let top = hexane::PrefixColumn::from_column(self.top.into_column());
+        let visible: hexane::Column<bool> = self.visible.into_column();
+        let inc: hexane::Column<Option<i64>> = self.inc.into_column();
+        let mark = MarkIndexColumn::from_parts(
+            hexane::PrefixColumn::from_column(self.marks.into_column()),
+            self.mark_cache,
+        );
 
         (
             Indexes {
@@ -270,21 +767,446 @@ impl IndexBuilder {
                 visible,
                 inc,
                 mark,
-                obj_info,
+                obj_info: self.obj_info,
             },
             self.mark_order,
         )
     }
 }
 
-fn vis_num(op: &Op<'_>, clock: Option<&Clock>) -> u32 {
-    if op.is_inc() {
-        return u32::MAX;
+impl Indexes {
+    #[cfg(test)]
+    pub(crate) fn assert_same(&self, other: &Self) {
+        assert_eq!(
+            self.visible.save(),
+            other.visible.save(),
+            "index drift: visible"
+        );
+        assert_eq!(self.top.save(), other.top.save(), "index drift: top");
+        assert_eq!(self.text.save(), other.text.save(), "index drift: text");
+        assert_eq!(self.inc.save(), other.inc.save(), "index drift: inc");
+        self.mark.assert_same(&other.mark);
+        assert_eq!(self.obj_info.0, other.obj_info.0, "index drift: obj_info");
+    }
+}
+
+/// Element identity and op id at a row, for splitting sequence registers
+/// in a fragment with deps: such a fragment can update an element it does
+/// not contain, which the insert column alone would attach to the
+/// register before it.
+pub(crate) struct ElemBounds<'a> {
+    elems: super::op_iter::ElemIdIter<'a>,
+    ids: OpIdIter<'a>,
+    /// row after the last one `ids` read
+    ids_pos: usize,
+    /// the span [`elem_run`](Self::elem_run) last measured, which the
+    /// next call may ask for again
+    span: Option<(usize, Option<ElemId>, usize)>,
+    /// the row that ended the last span
+    peeked: Option<(usize, Option<ElemId>)>,
+}
+
+impl ElemBounds<'_> {
+    fn id_at(&mut self, pos: usize) -> Result<OpId, ReadOpError> {
+        let skip = pos
+            .checked_sub(self.ids_pos)
+            .expect("ElemBounds::id_at went backwards");
+        self.ids_pos = pos + 1;
+        self.ids
+            .maybe_try_nth(skip)?
+            .ok_or(ReadOpError::MissingValue("id"))
     }
 
+    /// The run of rows from `start` sharing one element id, capped at
+    /// `max`: the id and the run's length.
+    fn elem_run(
+        &mut self,
+        start: usize,
+        max: usize,
+    ) -> Result<(Option<ElemId>, usize), ReadOpError> {
+        if let Some((s, elem, n)) = self.span {
+            if s == start {
+                return Ok((elem, n.min(max)));
+            }
+        }
+        let first = match self.peeked.take() {
+            Some((p, v)) if p == start => v,
+            _ => self.elems.at(start)?,
+        };
+        let mut n = 1;
+        while n < max {
+            let next = self.elems.at(start + n)?;
+            if next != first {
+                self.peeked = Some((start + n, next));
+                break;
+            }
+            n += 1;
+        }
+        self.span = Some((start, first, n));
+        Ok((first, n))
+    }
+}
+
+/// Yields the register lengths of the current object: key_str runs for
+/// maps (runs are canonical, so each is one key), insert-run structure for
+/// sequences, refined by [`ElemBounds`] when present.
+struct BoundaryIter<'e, 'a, I, K>
+where
+    I: RunSrc<'a, bool>,
+    K: RunSrc<'a, Option<String>>,
+{
+    inserts: RunHead<Rle<'a, bool, I>>,
+    keys: RunHead<Rle<'a, Option<String>, K>>,
+    /// items owed to each stream by objects that did not consult it
+    insert_owed: usize,
+    keys_owed: usize,
+    seq: bool,
+    /// ops left in the current object
+    remaining: usize,
+    /// pending trues from the current insert run; all but the last are
+    /// singleton registers, the last stays open for its trailing falses
+    ones: usize,
+    /// rows pulled from the insert stream so far
+    abs: usize,
+    elem: Option<ElemBounds<'e>>,
+    split: bool,
+    /// non-insert rows of the current run not yet assigned to a register
+    /// (split objects only)
+    falses: usize,
+    false_start: usize,
+}
+
+impl<'e, 'a, I, K> BoundaryIter<'e, 'a, I, K>
+where
+    I: RunSrc<'a, bool>,
+    K: RunSrc<'a, Option<String>>,
+{
+    fn new(inserts: I, keys: K, elem: Option<ElemBounds<'e>>) -> Self {
+        Self {
+            inserts: RunHead::rle(inserts, "insert"),
+            keys: RunHead::rle(keys, "key_str"),
+            insert_owed: 0,
+            keys_owed: 0,
+            seq: false,
+            remaining: 0,
+            ones: 0,
+            abs: 0,
+            elem,
+            split: false,
+            falses: 0,
+            false_start: 0,
+        }
+    }
+
+    fn start_obj(&mut self, seq: bool, len: usize, split: bool) -> Result<(), ReadOpError> {
+        debug_assert_eq!(self.remaining, 0);
+        debug_assert_eq!(self.ones, 0);
+        debug_assert_eq!(self.falses, 0);
+        self.seq = seq;
+        self.split = seq && split && self.elem.is_some();
+        self.remaining = len;
+        if seq {
+            self.keys_owed += len;
+        } else {
+            self.insert_owed += len;
+        }
+        Ok(())
+    }
+
+    /// The next insert run, clipped to the current object.
+    fn next_insert_run(&mut self) -> Result<Option<(bool, usize)>, ReadOpError> {
+        self.inserts.skip(self.insert_owed)?;
+        self.abs += self.insert_owed;
+        self.insert_owed = 0;
+        if self.remaining == 0 {
+            return Ok(None);
+        }
+        let run = self.inserts.peek_some()?;
+        let take = run.count.min(self.remaining);
+        self.inserts.consume(take);
+        self.remaining -= take;
+        self.abs += take;
+        Ok(Some((run.value, take)))
+    }
+
+    /// The next key run length, clipped to the current object.
+    fn next_key_run(&mut self) -> Result<Option<usize>, ReadOpError> {
+        self.keys.skip(self.keys_owed)?;
+        self.keys_owed = 0;
+        if self.remaining == 0 {
+            return Ok(None);
+        }
+        let take = self.keys.peek_some()?.count.min(self.remaining);
+        self.keys.consume(take);
+        self.remaining -= take;
+        Ok(Some(take))
+    }
+
+    /// The next batch of registers as `(len, repeat)`: `repeat` consecutive
+    /// registers of `len` ops each. `repeat > 1` only when `len == 1`.
+    fn next_batch(&mut self) -> Result<Option<(usize, usize)>, ReadOpError> {
+        if self.seq {
+            self.next_seq()
+        } else {
+            Ok(self.next_key_run()?.map(|count| (count, 1)))
+        }
+    }
+
+    fn next_seq(&mut self) -> Result<Option<(usize, usize)>, ReadOpError> {
+        loop {
+            if self.ones > 1 {
+                let repeat = self.ones - 1;
+                self.ones = 1;
+                return Ok(Some((1, repeat)));
+            }
+            if self.falses > 0 {
+                return self.next_elem_span().map(Some);
+            }
+            match self.next_insert_run()? {
+                Some((true, count)) => self.ones += count,
+                Some((false, count)) => {
+                    if self.split {
+                        self.false_start = self.abs - count;
+                        self.falses = count;
+                        continue;
+                    }
+                    // `ones` is 0 only for a headless run
+                    let result = self.ones + count;
+                    self.ones = 0;
+                    return Ok(Some((result, 1)));
+                }
+                None if self.ones > 0 => {
+                    self.ones = 0;
+                    return Ok(Some((1, 1)));
+                }
+                None => return Ok(None),
+            }
+        }
+    }
+
+    /// The next register out of the pending non-insert rows. Only the
+    /// run's first span can continue the insert before it, and only if it
+    /// names that insert.
+    fn next_elem_span(&mut self) -> Result<(usize, usize), ReadOpError> {
+        let start = self.false_start;
+        let bounds = self.elem.as_mut().expect("split object without elem ids");
+        let (elem, n) = bounds.elem_run(start, self.falses)?;
+        if self.ones == 1 {
+            let ins = bounds.id_at(start - 1)?;
+            self.ones = 0;
+            if elem != Some(ElemId(ins)) {
+                // the insert is alone; this span is asked for again next call
+                return Ok((1, 1));
+            }
+            self.falses -= n;
+            self.false_start += n;
+            return Ok((1 + n, 1));
+        }
+        self.falses -= n;
+        self.false_start += n;
+        Ok((n, 1))
+    }
+}
+
+/// The action, value meta and succ count streams, advanced run-at-a-time.
+struct IndexIter<'a, A, M, S>
+where
+    A: RunSrc<'a, Action>,
+    M: RunSrc<'a, ValueMeta>,
+    S: RunSrc<'a, u32>,
+{
+    action: RunHead<Rle<'a, Action, A>>,
+    meta: RunHead<Rle<'a, ValueMeta, M>>,
+    succ: RunHead<Rle<'a, u32, S>>,
+    /// absolute succ-column offset at the current position
+    succ_prefix: u64,
+    /// absolute raw value byte offset at the current position
+    raw_prefix: u64,
+}
+
+/// The successor count a row's visibility is judged by; `u32::MAX` means
+/// never visible. A fragment's delete rows are dropped by the merge, so
+/// they must never take `top`.
+fn vis_succ(run: &IndexRun) -> u32 {
+    match run.action {
+        Action::Increment | Action::Delete => u32::MAX,
+        _ => run.succ,
+    }
+}
+
+/// A block of consecutive ops sharing one action, one value meta and one
+/// succ count.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct IndexRun {
+    pub(crate) count: usize,
+    pub(crate) action: Action,
+    pub(crate) meta: ValueMeta,
+    pub(crate) succ: u32,
+    /// absolute succ-column offset of the first op's succ entries
+    pub(crate) succ_prefix: u64,
+    /// absolute raw value byte offset of the first op's value
+    pub(crate) raw_prefix: u64,
+}
+
+impl<'a, A, M, S> IndexIter<'a, A, M, S>
+where
+    A: RunSrc<'a, Action>,
+    M: RunSrc<'a, ValueMeta>,
+    S: RunSrc<'a, u32>,
+{
+    fn new(action: A, meta: M, succ: S) -> Self {
+        Self {
+            action: RunHead::rle(action, "action"),
+            meta: RunHead::rle(meta, "value_meta"),
+            succ: RunHead::rle(succ, "succ_count"),
+            succ_prefix: 0,
+            raw_prefix: 0,
+        }
+    }
+
+    /// The next run of at most `max` ops sharing action, meta and succ.
+    fn next_run(&mut self, max: usize) -> Result<Option<IndexRun>, ReadOpError> {
+        let (Some(action), Some(meta), Some(succ)) =
+            (self.action.peek()?, self.meta.peek()?, self.succ.peek()?)
+        else {
+            return Ok(None);
+        };
+        let count = max.min(action.count).min(meta.count).min(succ.count);
+        debug_assert!(count > 0);
+        self.action.consume(count);
+        self.meta.consume(count);
+        self.succ.consume(count);
+
+        let run = IndexRun {
+            count,
+            action: action.value,
+            meta: meta.value,
+            succ: succ.value,
+            succ_prefix: self.succ_prefix,
+            raw_prefix: self.raw_prefix,
+        };
+        self.succ_prefix += succ.value as u64 * count as u64;
+        self.raw_prefix += meta.value.length() as u64 * count as u64;
+        Ok(Some(run))
+    }
+}
+
+/// Compress an iterator into [`hexane::Run`]s.
+pub(crate) fn runs<T: PartialEq>(
+    iter: impl Iterator<Item = T>,
+) -> impl Iterator<Item = hexane::Run<T>> {
+    let mut iter = iter.peekable();
+    std::iter::from_fn(move || {
+        let value = iter.next()?;
+        let mut count = 1;
+        while iter.next_if(|v| *v == value).is_some() {
+            count += 1;
+        }
+        Some(hexane::Run { count, value })
+    })
+}
+
+/// As [`vis_succ`], op by op.
+fn vis_num(op: &Op<'_>, clock: Option<&Clock>) -> u32 {
+    if op.is_inc() || op.action == Action::Delete {
+        return u32::MAX;
+    }
     match clock {
         None => op.succ().len() as u32,
         Some(clock) if !clock.covers(&op.id) => u32::MAX,
         Some(clock) => op.succ().filter(|id| clock.covers(id)).count() as u32,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::automerge::Automerge;
+    use crate::tx::Transactable;
+    use crate::{ObjType, ROOT};
+
+    fn assert_builders_match<H: crate::hash_retention::HashRetention>(doc: &Automerge<H>) {
+        let bytes = doc.save();
+        let reloaded = Automerge::load(&bytes).unwrap();
+        let op_set = reloaded.ops();
+
+        let mut by_ops = op_set.index_builder();
+        let mut last = None;
+        for op in op_set.iter() {
+            let next = Some((op.obj, op.elemid_or_key()));
+            if last != next {
+                by_ops.flush();
+                last = next;
+            }
+            by_ops.process_op(&op, None);
+        }
+        let (ops_indexes, _) = by_ops.finish();
+
+        let mut by_cols = op_set.index_builder();
+        by_cols.process_op_set(op_set).unwrap();
+        let (cols_indexes, _) = by_cols.finish();
+
+        ops_indexes.assert_same(&cols_indexes);
+    }
+
+    #[test]
+    fn column_index_builder_matches_op_index_builder() {
+        use crate::marks::{ExpandMark, Mark};
+
+        let mut doc = Automerge::new();
+        let mut tx = doc.transaction();
+        let text = tx.put_object(ROOT, "text", ObjType::Text).unwrap();
+        tx.splice_text(&text, 0, 0, "hello wörld £5 <20").unwrap();
+        tx.mark(
+            &text,
+            Mark::new("bold".into(), true, 2, 9),
+            ExpandMark::After,
+        )
+        .unwrap();
+        tx.splice_text(&text, 4, 3, "XY").unwrap();
+        tx.unmark(&text, "bold", 3, 6, ExpandMark::After).unwrap();
+        tx.commit();
+        assert_builders_match(&doc);
+
+        let mut doc = Automerge::new();
+        let mut tx = doc.transaction();
+        tx.put(ROOT, "c", crate::ScalarValue::Counter(10.into()))
+            .unwrap();
+        tx.increment(ROOT, "c", 5).unwrap();
+        tx.increment(ROOT, "c", -3).unwrap();
+        tx.put(ROOT, "d", crate::ScalarValue::Counter(1.into()))
+            .unwrap();
+        tx.put(ROOT, "d", 99).unwrap(); // overwrite counter with non-increment
+        tx.commit();
+        assert_builders_match(&doc);
+
+        let mut doc1 = Automerge::new().with_actor("aaaaaa".try_into().unwrap());
+        let mut tx = doc1.transaction();
+        let list = tx.put_object(ROOT, "list", ObjType::List).unwrap();
+        tx.insert(&list, 0, 1).unwrap();
+        tx.insert(&list, 1, 2).unwrap();
+        tx.insert(&list, 2, 3).unwrap();
+        let map = tx.put_object(ROOT, "map", ObjType::Map).unwrap();
+        tx.put(&map, "k", "v").unwrap();
+        tx.commit();
+        let mut doc2 = doc1.fork().with_actor("bbbbbb".try_into().unwrap());
+        let mut tx = doc2.transaction();
+        tx.put(&map, "k", "w").unwrap();
+        tx.put(&list, 1, 20).unwrap();
+        tx.commit();
+        let mut tx = doc1.transaction();
+        tx.put(&map, "k", "x").unwrap();
+        tx.delete(&list, 0).unwrap();
+        tx.commit();
+        doc1.merge(&mut doc2).unwrap();
+        assert_builders_match(&doc1);
+
+        let mut doc = Automerge::new();
+        let mut tx = doc.transaction();
+        let l = tx.put_object(ROOT, "l", ObjType::List).unwrap();
+        tx.insert(&l, 0, crate::ScalarValue::Counter(0.into()))
+            .unwrap();
+        tx.increment(&l, 0, 7).unwrap();
+        tx.commit();
+        assert_builders_match(&doc);
     }
 }

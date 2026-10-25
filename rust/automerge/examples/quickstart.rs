@@ -1,8 +1,9 @@
-use automerge::transaction::CommitOptions;
-use automerge::transaction::Transactable;
+use automerge::next::transaction::CommitOptions;
+use automerge::next::transaction::Transactable;
+use automerge::next::{Automerge, ReadDoc};
 use automerge::AutomergeError;
 use automerge::ObjType;
-use automerge::{Automerge, ReadDoc, ROOT};
+use automerge::ROOT;
 
 // Based on https://automerge.org/docs/reference/documents/lists/
 fn main() {
@@ -50,8 +51,8 @@ fn main() {
 
     doc1.merge(&mut doc2).unwrap();
 
-    for change in doc1.get_changes(&[]) {
-        let length = doc1.length_at(&cards, &[change.hash()]);
+    for change in doc1.get_changes(&[]).unwrap() {
+        let length = doc1.length_at(&cards, &[change.id()]).unwrap();
         println!("{} {}", change.message().unwrap(), length);
     }
 }

@@ -10,6 +10,7 @@ memory = []
 
 [dependencies]
 automerge = { path = "../automerge" }
+automerge-sync = { path = "../automerge-sync" }
 anyhow = "1.0.98"
 clap = { version = "4.5.42", features = ["derive"] }
 getrandom = "0.4"

@@ -1,21 +1,19 @@
 use automerge::{
-    sync::{State, SyncDoc},
-    transaction::Transactable,
-    ActorId, Author, AutoCommit, Change, ChangeHash, ObjType, Patch, PatchAction, ReadDoc,
-    TextEncoding, ROOT,
+    transaction::Transactable, ActorId, Author, AutoCommit, Change, ChangeHash, ObjType, Patch,
+    PatchAction, ReadDoc, TextEncoding, ROOT,
 };
 
 const ENCODING: TextEncoding = TextEncoding::UnicodeCodePoint;
 
 // The distinct import implementations: the batch path (which apply_changes
-// and merge delegate to), change-chunk and document-chunk loads, and the
-// sync protocol's out-of-order queueing.
+// and merge delegate to), change-chunk and document-chunk loads, and
+// change-by-change delivery in reverse dependency order (out-of-order queueing).
 #[derive(Clone, Copy)]
 enum Import {
     Batch,
     Load,
     LoadDocument,
-    Sync,
+    OutOfOrder,
 }
 
 struct PendingMask {
@@ -78,7 +76,7 @@ impl PendingMask {
                 let bytes = self.source.save();
                 self.doc.load_incremental(&bytes).unwrap();
             }
-            Import::Sync => sync_docs(&mut self.source, &mut self.doc),
+            Import::OutOfOrder => deliver_out_of_order(&mut self.source, &mut self.doc),
         }
         assert_eq!(
             self.doc
@@ -91,30 +89,13 @@ impl PendingMask {
     }
 }
 
-fn sync_docs(source: &mut AutoCommit, target: &mut AutoCommit) {
-    let mut source_state = State::new();
-    let mut target_state = State::new();
-    for _ in 0..10 {
-        let mut exchanged = false;
-        if let Some(message) = source.sync().generate_sync_message(&mut source_state) {
-            target
-                .sync()
-                .receive_sync_message(&mut target_state, message)
-                .unwrap();
-            exchanged = true;
-        }
-        if let Some(message) = target.sync().generate_sync_message(&mut target_state) {
-            source
-                .sync()
-                .receive_sync_message(&mut source_state, message)
-                .unwrap();
-            exchanged = true;
-        }
-        if !exchanged {
-            return;
-        }
+fn deliver_out_of_order(source: &mut AutoCommit, target: &mut AutoCommit) {
+    let target_heads = target.document().get_heads();
+    let missing = source.get_changes(&target_heads);
+    for change in missing.into_iter().rev() {
+        target.apply_changes([change]).unwrap();
     }
-    panic!("sync did not settle");
+    assert_eq!(target.document().get_heads(), source.get_heads());
 }
 
 fn puts_x(patches: &[Patch]) -> bool {
@@ -255,7 +236,7 @@ macro_rules! pending_import_tests {
 pending_import_tests!(apply_changes_batch, Import::Batch);
 pending_import_tests!(load_incremental, Import::Load);
 pending_import_tests!(load_document, Import::LoadDocument);
-pending_import_tests!(sync, Import::Sync);
+pending_import_tests!(out_of_order, Import::OutOfOrder);
 
 #[test]
 fn pending_resolution_updates_current_state_indexes() {
@@ -623,7 +604,7 @@ fn partially_known_boundary_expands_per_actor_on_import() {
         Import::Batch,
         Import::Load,
         Import::LoadDocument,
-        Import::Sync,
+        Import::OutOfOrder,
     ] {
         let alice = Author::try_from("aaaa").unwrap();
         let bob = Author::try_from("bbbb").unwrap();
@@ -673,7 +654,11 @@ fn partially_known_boundary_expands_per_actor_on_import() {
             Import::LoadDocument => {
                 obs.load_incremental(&b.save()).unwrap();
             }
-            Import::Sync => sync_docs(&mut b, &mut obs),
+            Import::OutOfOrder => {
+                for change in b.get_changes(&before_boundary).into_iter().rev() {
+                    obs.apply_changes([change]).unwrap();
+                }
+            }
         }
 
         assert_eq!(obs.get(ROOT, "x").unwrap().unwrap().0, 1.into());

@@ -3,6 +3,7 @@ use rand::{rng, Rng, RngExt};
 use std::fmt::{Display, Error, Formatter};
 
 pub use automerge;
+pub use automerge_sync as sync;
 
 pub use automerge::{transaction::Transactable, Automerge, ObjType, ScalarValue, ROOT};
 

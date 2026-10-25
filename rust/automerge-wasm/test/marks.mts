@@ -278,6 +278,8 @@ describe('Automerge', () => {
 
       let patches = doc3.diffIncremental();
 
+      // marks arrive as the final non-overlapping segmentation in
+      // position order
       assert.deepEqual(patches, [
           { action: 'put', path: [ 'foo' ], value: 'bar' },
           {
@@ -285,8 +287,8 @@ describe('Automerge', () => {
             path: [ 'list' ],
             marks: [
               { name: 'x', value: 'a', start: 0, end: 5 },
-              { name: 'x', value: 'b', start: 8, end: 11 },
               { name: 'x', value: 'c', start: 5, end: 8 },
+              { name: 'x', value: 'b', start: 8, end: 11 },
               { name: 'x', value: 'c', start: 11, end: 13 },
             ]
           },
@@ -570,11 +572,14 @@ describe('Automerge', () => {
           { start: 20, end: 25, name: 'mark2', value: 'B' },
       ])
 
+      // marks arrive as the final non-overlapping segmentation in
+      // position order (matching marks() above)
       assert.deepEqual(patches1, [
         { action: 'mark', path: ['text'], marks: [
           { end: 25, name: 'mark1', start: 5, value: 'A' },
-          { end: 25, name: 'mark2', start: 10, value: 'B' },
+          { end: 15, name: 'mark2', start: 10, value: 'B' },
           { end: 20, name: 'mark2', start: 15, value: 'C' },
+          { end: 25, name: 'mark2', start: 20, value: 'B' },
         ]}
       ]);
 

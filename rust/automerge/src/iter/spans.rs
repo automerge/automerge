@@ -1,14 +1,14 @@
 use crate::automerge::view::{ClockRange, RangeView, ReadAt};
 use crate::hydrate::Value;
 use crate::iter::tools::{Diff, DiffIter, Unshift};
+use crate::iter::MarkCursor;
 use crate::marks::{MarkSet, MarkSetIter, MarkStateMachine};
-use crate::op_set2::op_set::{ActionValueIter, MarkInfoIter, OpIdIter, OpSet, TopIter};
+use crate::op_set2::op_set::{ActionValueIter, OpIdIter, OpSet, TopIter};
 use crate::op_set2::types::{Action, MarkData, ScalarValue};
-use crate::patches::Events;
+use crate::patches::PatchAccumulator;
 use crate::types::{ObjId, OpId, TextEncoding};
 use crate::value;
 
-use std::borrow::Cow;
 use std::ops::Range;
 use std::sync::Arc;
 
@@ -19,7 +19,7 @@ pub(crate) struct SpanDiff {
 }
 
 impl SpanDiff {
-    pub(crate) fn log(self, obj: ObjId, log: &mut Events<'_>, encoding: TextEncoding) {
+    pub(crate) fn log(self, obj: ObjId, log: &mut PatchAccumulator, encoding: TextEncoding) {
         match (self.diff, self.span) {
             (Diff::Add, SpanInternal::Text(text, index, marks)) => {
                 log.splice(obj, index, &text, marks.export());
@@ -51,8 +51,8 @@ impl SpanDiff {
 // case we avoid the overhead of TopIter and stream action/value columns
 // directly.
 #[derive(Debug, Clone)]
-// Boxing the variants leads to losing a few milliseconds on some iteration benchmarks
-#[expect(clippy::large_enum_variant)]
+// boxing measurably slows iteration; `allow` because wasm32 doesn't trigger it
+#[allow(clippy::large_enum_variant)]
 enum SpansActionValue<'a> {
     Current(Unshift<ActionValueIter<'a>>),
     Diff(Unshift<DiffIter<'a, ActionValueIter<'a>, TopIter<'a>>>),
@@ -110,9 +110,8 @@ impl<'a> Iterator for SpansActionValue<'a> {
 #[derive(Debug, Clone)]
 pub(crate) struct SpansDiff<'a> {
     action_value: SpansActionValue<'a>,
-    mark_info: MarkInfoIter<'a>,
     op_id: OpIdIter<'a>,
-    marks: RichTextDiff<'a>,
+    marks: MarkCursor<'a>,
     op_set: &'a OpSet,
     clock: ClockRange<'a>,
     state: SpanState,
@@ -137,6 +136,22 @@ impl Iterator for SpansDiff<'_> {
 }
 
 impl<'a> SpansDiff<'a> {
+    /// Forward only; `index` is the character index at `range.start`.
+    pub(crate) fn shift_with_index(&mut self, range: Range<usize>, index: usize) {
+        self.op_id.set_max(range.end);
+        self.action_value
+            .shift(self.op_set, &self.clock, range.clone());
+
+        self.marks.advance_to(range.start);
+        self.state = SpanState::empty_at(self.state.encoding, index);
+        self.state.push_marks(self.marks.current());
+    }
+
+    pub(crate) fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
+        self.shift_with_index(range, 0);
+        self.next()
+    }
+
     pub(crate) fn new(
         op_set: &'a OpSet,
         range: Range<usize>,
@@ -145,37 +160,22 @@ impl<'a> SpansDiff<'a> {
     ) -> Self {
         let pos = range.start;
         let op_id = op_set.id_iter_range(&range);
-        let mark_info = op_set.mark_info_iter_range(&range);
-        let action_value = SpansActionValue::new(op_set, &clock, range);
+        // a tree descent, not a walk from the object start
+        let marks = MarkCursor::new(op_set, clock.clone(), pos);
+
+        let action_value = SpansActionValue::new(op_set, &clock, range.clone());
+        let mut state = SpanState::empty_at(encoding, 0);
+        state.push_marks(marks.current());
 
         Self {
+            state,
             action_value,
-            mark_info,
             op_id,
-            marks: Default::default(),
             op_set,
             clock,
-            state: SpanState::empty(encoding),
+            marks,
             pos,
         }
-    }
-
-    pub(crate) fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
-        self.mark_info.set_max(range.end);
-        self.op_id.set_max(range.end);
-        self.action_value.shift(self.op_set, &self.clock, range);
-        self.marks = Default::default();
-        self.state = SpanState::empty(self.state.encoding);
-        self.next()
-    }
-
-    pub(crate) fn encoding(&self) -> TextEncoding {
-        self.state.encoding
-    }
-
-    /// The op set and read position exported items resolve against.
-    fn read_context(&self) -> (&'a OpSet, ReadAt<'_>) {
-        (self.op_set, self.clock.read_after())
     }
 
     fn push_block(&mut self, diff: Diff) -> Option<SpanDiff> {
@@ -189,24 +189,9 @@ impl<'a> SpansDiff<'a> {
         self.op_id.nth(self.pos - id_pos)
     }
 
-    fn next_mark_name(&mut self) -> Option<Cow<'a, str>> {
-        let mark_pos = self.mark_info.pos();
-        let (mark_name, _expand) = self.mark_info.nth(self.pos - mark_pos)?;
-        mark_name.map(Cow::Borrowed)
-    }
-
-    fn process_mark(&mut self, diff: Diff, value: ScalarValue<'a>) {
-        let Some(id) = self.next_opid() else {
-            return;
-        };
-        if let Some(name) = self.next_mark_name() {
-            let data = MarkData { name, value };
-            self.marks.mark_begin_diff(diff, id, data);
-        } else {
-            self.marks.mark_end_diff(diff, id);
-        }
-        let current = self.marks.current();
-        self.state.push_marks(current);
+    fn process_mark(&mut self) {
+        self.marks.advance_to(self.pos);
+        self.state.push_marks(self.marks.current());
     }
 
     #[inline(always)]
@@ -222,8 +207,8 @@ impl<'a> SpansDiff<'a> {
             }
             (Action::Set, ScalarValue::Str(s), _) => self.state.push_str(diff, &s),
             (Action::MakeMap, _, _) => self.push_block(diff),
-            (Action::Mark, value, _) => {
-                self.process_mark(diff, value);
+            (Action::Mark, _, _) => {
+                self.process_mark();
                 None
             }
             (Action::Delete, _, _) | (Action::Increment, _, _) => None,
@@ -287,10 +272,6 @@ impl PartialEq for MarkDiff {
 }
 
 impl MarkDiff {
-    /// Normalize this mark diff for a run of the given `diff` class.
-    ///
-    /// An added run carries its full after-marks, a retained run carries the
-    /// before/after delta, and other runs carry no marks.
     fn with(&self, diff: Diff) -> Self {
         match (diff, self) {
             (Diff::Add, MarkDiff::Diff(_, m)) => MarkDiff::After(m.clone()),
@@ -455,9 +436,9 @@ impl NextText {
 }
 
 impl SpanState {
-    fn empty(encoding: TextEncoding) -> Self {
+    fn empty_at(encoding: TextEncoding, index: usize) -> Self {
         Self {
-            index: 0,
+            index,
             next_text: None,
             next_diff: None,
             marks: MarkDiff::default(),
@@ -470,8 +451,7 @@ impl SpanState {
         debug_assert!(self.next_diff.is_none());
 
         let flush_needed = match &self.next_text {
-            // Normalize the active marks the same way `next.marks` was when
-            // its run started, so both sides compare like for like.
+            // `next.marks` was normalized for its run when the run started
             Some(next) => diff != next.diff || self.marks.with(diff) != next.marks,
             None => false,
         };
@@ -611,9 +591,8 @@ impl Iterator for Spans<'_> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let item = self.internal.next()?;
-        let encoding = self.internal.iter.encoding();
-        let (op_set, read) = self.internal.iter.read_context();
-        Some(item.export(op_set, &read, encoding))
+        let iter = &self.internal.iter;
+        Some(item.export(iter.op_set, &iter.clock.read_after(), iter.state.encoding))
     }
 }
 
@@ -633,24 +612,13 @@ impl<'a> RichTextDiff<'a> {
         }
     }
 
-    fn mark_begin_diff(&mut self, diff: Diff, id: OpId, data: MarkData<'a>) -> bool {
+    pub(crate) fn mark_begin_diff(&mut self, diff: Diff, id: OpId, data: MarkData<'a>) -> bool {
         match diff {
             Diff::Add => self.after.mark_begin(id, data),
             Diff::Del => self.before.mark_begin(id, data),
             Diff::Same => {
                 self.before.mark_begin(id, data.clone());
                 self.after.mark_begin(id, data)
-            }
-        }
-    }
-
-    fn mark_end_diff(&mut self, diff: Diff, id: OpId) -> bool {
-        match diff {
-            Diff::Add => self.after.mark_end(id),
-            Diff::Del => self.before.mark_end(id),
-            Diff::Same => {
-                self.before.mark_end(id);
-                self.after.mark_end(id)
             }
         }
     }

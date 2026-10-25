@@ -141,9 +141,16 @@ function buildWasm(outputDir, gitHead) {
     },
   )
 
+  // Ask cargo rather than assuming `rust/target`, so CARGO_TARGET_DIR and
+  // `build.target-dir` are honoured.
+  const { target_directory } = JSON.parse(
+    execSync(`${cargo} metadata --format-version 1 --no-deps`, {
+      cwd: automergeWasmPath,
+      encoding: "utf8",
+    }),
+  )
   const wasmBlobPath = path.join(
-    rustProjectDir,
-    "target",
+    target_directory,
     "wasm32-unknown-unknown",
     "release",
     //"debug",

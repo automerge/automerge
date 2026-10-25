@@ -14,9 +14,10 @@ use std::num::NonZero;
 use std::ops::Range;
 
 pub(crate) mod batch;
+pub(crate) mod bundle;
 pub(crate) mod collector;
 
-pub(crate) use collector::{BuildChangeMetadata, ChangeCollector, CollectedChanges, OutOfMemory};
+pub(crate) use collector::{BuildChangeMetadata, ChangeCollector, CollectedHashes, OutOfMemory};
 
 pub(crate) trait GetHash {
     fn get_hash(&self, index: usize) -> Option<ChangeHash>;
@@ -28,9 +29,15 @@ impl GetHash for Vec<crate::Change> {
     }
 }
 
-impl GetHash for ChangeGraph {
+impl GetHash for Vec<ChangeHash> {
     fn get_hash(&self, index: usize) -> Option<ChangeHash> {
-        self.index_to_hash(index).copied()
+        self.get(index).copied()
+    }
+}
+
+impl<H: crate::hash_retention::HashRetention> GetHash for ChangeGraph<H> {
+    fn get_hash(&self, index: usize) -> Option<ChangeHash> {
+        self.index_to_hash(index)
     }
 }
 
@@ -304,6 +311,12 @@ impl<'a> ActorMapper<'a> {
 
     pub(crate) fn process_actor(&mut self, actor: usize) {
         self.seen_actors[actor] = true;
+    }
+
+    /// Whether every actor has been seen, so the mapping will keep each
+    /// actor's index.
+    pub(crate) fn sees_every_actor(&self) -> bool {
+        self.seen_actors.iter().all(|s| *s)
     }
 
     pub(crate) fn process_op<C>(&mut self, op: &C)

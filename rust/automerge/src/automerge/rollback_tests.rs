@@ -1,5 +1,7 @@
-use crate::transaction::Transactable;
-use crate::{ActorId, Automerge, ObjType, PatchLog, ReadDoc, ScalarValue, ROOT};
+use crate::tx::Transactable;
+use crate::{ActorId, ObjType, ScalarValue, ROOT};
+use crate::automerge::Automerge;
+use crate::read::ReadDoc;
 
 fn assert_checkpoint_eq(
     a: &std::collections::HashMap<&'static str, Vec<u8>>,
@@ -256,6 +258,9 @@ fn rollback_delete_conflicted_field() {
 
 #[test]
 fn rollback_increment_counter_conflicted_by_non_counter() {
+    // Pinned timestamp as well as actor: hashes must not vary run to
+    // run, or a commit can land on a fragment-head hash (1/256) and
+    // free hashes this test still needs.
     // doc1 gets the higher actor so its counter wins over doc2's string.
     let mut doc1 = Automerge::new();
     doc1.set_actor(ActorId::from(b"zzzz"));
@@ -265,19 +270,19 @@ fn rollback_increment_counter_conflicted_by_non_counter() {
     {
         let mut tx = doc1.transaction();
         tx.put(ROOT, "val", ScalarValue::counter(0)).unwrap();
-        tx.commit();
+        tx.commit_with(crate::tx::CommitOptions::default().with_time(0));
     }
     doc2.merge(&mut doc1).unwrap();
 
     {
         let mut tx = doc1.transaction();
         tx.increment(ROOT, "val", 5).unwrap();
-        tx.commit();
+        tx.commit_with(crate::tx::CommitOptions::default().with_time(0));
     }
     {
         let mut tx = doc2.transaction();
         tx.put(ROOT, "val", "not a counter").unwrap();
-        tx.commit();
+        tx.commit_with(crate::tx::CommitOptions::default().with_time(0));
     }
     doc1.merge(&mut doc2).unwrap();
 
@@ -379,9 +384,7 @@ fn rollback_scoped_transaction_on_conflicted_register() {
     let before = doc1.save_checkpoint();
 
     {
-        let mut tx = doc1
-            .transaction_at(PatchLog::null(), &scoped_heads)
-            .unwrap();
+        let mut tx = doc1.transaction_at(&scoped_heads).unwrap();
         tx.put(ROOT, "field", "scoped_value").unwrap();
         tx.rollback();
     }

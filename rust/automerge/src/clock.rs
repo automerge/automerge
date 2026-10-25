@@ -18,6 +18,10 @@ pub(crate) struct Clock(ActorIndexed<u32>);
 pub(crate) struct SeqClock(ActorIndexed<Option<NonZeroU32>>);
 
 impl SeqClock {
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (usize, Option<NonZeroU32>)> + '_ {
+        self.0.iter().copied().enumerate()
+    }
+
     pub(crate) fn remove_actor(&mut self, removal: &ActorRemoval) {
         self.0.remove(removal);
     }
@@ -30,9 +34,28 @@ impl SeqClock {
         self.0.get(*actor_index).copied().flatten()
     }
 
+    /// Lowers the clock so it no longer covers `seq` of the actor.
+    pub(crate) fn uncover(&mut self, actor_index: usize, seq: u32) {
+        let slot = &mut self.0.as_mut_slice()[actor_index];
+        *slot = (*slot).min(NonZeroU32::new(seq - 1));
+    }
+
     /// An empty clock with a slot for every actor in `actors`.
     pub(crate) fn new(actors: &ActorTable) -> Self {
         Self(ActorIndexed::new(actors))
+    }
+
+    pub(crate) fn clear(&mut self) {
+        self.0.as_mut_slice().fill(None);
+    }
+
+    /// Panics unless `other` covers the same actors.
+    pub(crate) fn copy_from(&mut self, other: &SeqClock) {
+        self.0.as_mut_slice().copy_from_slice(&other.0);
+    }
+
+    pub(crate) fn clock_for_each_actor(&self, mut f: impl FnMut(usize) -> u32) -> Clock {
+        Clock(ActorIndexed::from_slots_of(&self.0, |actor, _| f(actor)))
     }
 
     /// An empty clock covering the same actors as `self`.
@@ -72,9 +95,7 @@ impl SeqClock {
 
     pub(crate) fn merge(a: &mut Self, b: &Self) {
         for (a, b) in std::iter::zip(a.0.as_mut_slice().iter_mut(), b.0.iter()) {
-            if *a < *b {
-                *a = *b;
-            }
+            *a = (*a).max(*b);
         }
     }
 
@@ -105,11 +126,6 @@ impl Clock {
     /// Counters in actor-table order.
     pub(crate) fn counters(&self) -> impl Iterator<Item = u32> + '_ {
         self.0.iter().copied()
-    }
-
-    /// Number of actors this clock covers.
-    pub(crate) fn len(&self) -> usize {
-        self.0.len()
     }
 
     /// An empty clock covering the same actors as `self`.
@@ -169,6 +185,10 @@ impl Clock {
     #[inline]
     fn set_counter_of(&mut self, actor: usize, counter: u32) {
         self.0.as_mut_slice()[actor] = counter;
+    }
+
+    pub(crate) fn max_op(&self, actor: usize) -> u32 {
+        self.0[actor]
     }
 
     /// A clock from explicit per-actor counters, for tests which model the

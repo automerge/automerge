@@ -1,6 +1,6 @@
 use automerge::{
-    hydrate, transaction::Transactable, ActorId, Automerge, Change, ObjId, ObjType, Patch,
-    PatchLog, Prop, ReadDoc, ScalarValue, ROOT,
+    hydrate, transaction::Transactable, ActorId, Automerge, Change, ObjId, ObjType, Patch, Prop,
+    ReadDoc, ScalarValue, ROOT,
 };
 
 pub(super) fn actor(n: u8) -> ActorId {
@@ -137,11 +137,9 @@ impl Replay {
     }
 
     pub(super) fn apply(&mut self, changes: Vec<Change>, label: &str) -> Vec<Patch> {
-        let mut log = PatchLog::active();
-        self.doc
-            .apply_changes_log_patches(changes, &mut log)
-            .unwrap();
-        let patches = self.doc.make_patches(&mut log);
+        let before = self.doc.get_heads();
+        self.doc.apply_changes(changes).unwrap();
+        let patches = self.doc.diff(&before, &self.doc.get_heads());
         let result = self
             .view
             .apply_patches(self.doc.text_encoding(), patches.clone());

@@ -1,6 +1,6 @@
 //! Values which contain actor indices, and collections of them.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::hash::Hash;
 use std::ops::{Deref, DerefMut};
 
@@ -64,7 +64,7 @@ impl<A: HasActorIndices, B: HasActorIndices> HasActorIndices for (A, B) {
 
 /// A collection whose elements contain actor indices.
 ///
-/// Wrapping a `Vec`, `HashMap` or `HashSet` of [`HasActorIndices`] values makes
+/// Wrapping a `Vec` or `HashMap` of [`HasActorIndices`] values makes
 /// the field announce that it has to react to actor table changes, and provides
 /// [`ActorRefs::shift_actors`] and [`ActorRefs::remove_actor`] to do so for
 /// every element at once. Everything else about the collection is reachable
@@ -133,30 +133,6 @@ where
             .iter()
             .map(|(k, v)| (*k, v.clone()).removed(removal).ok_or(StillReferenced))
             .collect::<Result<HashMap<_, _>, _>>()?;
-        self.0 = updated;
-        Ok(())
-    }
-}
-
-impl<T> ActorRefs<HashSet<T>>
-where
-    T: HasActorIndices + Copy + Eq + Hash,
-{
-    pub(crate) fn shift_actors(&mut self, shift: &ActorShift) {
-        self.0 = std::mem::take(&mut self.0)
-            .into_iter()
-            .map(|t| t.shifted(shift))
-            .collect();
-    }
-
-    /// Fails, leaving `self` untouched, if any element refers to the removed
-    /// actor.
-    pub(crate) fn remove_actor(&mut self, removal: &ActorRemoval) -> Result<(), StillReferenced> {
-        let updated = self
-            .0
-            .iter()
-            .map(|t| t.removed(removal).ok_or(StillReferenced))
-            .collect::<Result<HashSet<_>, _>>()?;
         self.0 = updated;
         Ok(())
     }
