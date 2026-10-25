@@ -1152,3 +1152,44 @@ fn get_marks_at_the_end_of_a_long_text() {
         vec![]
     );
 }
+
+#[test]
+fn cursor_on_a_deleted_last_character_points_at_the_end_of_the_text() {
+    let mut doc = AutoCommit::new();
+    let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+    doc.splice_text(&text, 0, 0, "ab").unwrap();
+    let cursor = doc.get_cursor(&text, 1, None).unwrap();
+    doc.splice_text(&text, 1, 1, "").unwrap();
+    let after_delete = doc.get_heads();
+    // an unrelated change, so that `after_delete` is in the past
+    doc.put(ROOT, "unrelated", 1).unwrap();
+
+    // Nothing visible follows the character the cursor points at, so the cursor
+    // moves to the end of the text.
+    assert_eq!(doc.get_cursor_position(&text, &cursor, None).unwrap(), 1);
+    assert_eq!(
+        doc.get_cursor_position(&text, &cursor, Some(&after_delete))
+            .unwrap(),
+        1
+    );
+}
+
+#[test]
+fn cursor_on_a_deleted_character_points_at_the_next_surviving_one() {
+    let mut doc = AutoCommit::new();
+    let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+    doc.splice_text(&text, 0, 0, "abc").unwrap();
+    let cursor = doc.get_cursor(&text, 1, None).unwrap();
+    doc.splice_text(&text, 1, 1, "").unwrap();
+    let after_delete = doc.get_heads();
+    // an unrelated change, so that `after_delete` is in the past
+    doc.put(ROOT, "unrelated", 1).unwrap();
+
+    // 'c' survives the deletion, so the cursor moves to it.
+    assert_eq!(doc.get_cursor_position(&text, &cursor, None).unwrap(), 1);
+    assert_eq!(
+        doc.get_cursor_position(&text, &cursor, Some(&after_delete))
+            .unwrap(),
+        1
+    );
+}
