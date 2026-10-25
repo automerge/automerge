@@ -76,7 +76,7 @@ use crate::ReadDoc;
 use crate::{
     patches::PatchLog,
     storage::{parse, ReadChangeOpError},
-    Automerge, AutomergeError, ChangeHash,
+    Automerge, AutomergeError, ChangeHash, OnPartialLoad,
 };
 
 mod bloom;
@@ -419,7 +419,7 @@ impl Automerge {
 
         let changes_is_empty = message_changes.is_empty();
         if !changes_is_empty && !sync_state.read_only {
-            self.load_incremental_log_patches(&message_changes.join(), patch_log)?;
+            self.load_incremental_with(&message_changes.join(), patch_log, OnPartialLoad::Error)?;
             sync_state.shared_heads = advance_heads(
                 &before_heads.iter().collect(),
                 &self.get_heads().into_iter().collect(),
@@ -1349,6 +1349,26 @@ mod tests {
             // At this point both documents should be equal
             assert_eq!(doc1.get_heads(), doc2.get_heads());
         }
+    }
+
+    #[test]
+    fn receiving_changes_that_do_not_parse_is_an_error() {
+        let mut doc1 = crate::AutoCommit::new();
+        let mut doc2 = crate::AutoCommit::new();
+        doc2.put(crate::ROOT, "x", 1).unwrap();
+
+        let mut message = doc1
+            .sync()
+            .generate_sync_message(&mut State::new())
+            .unwrap();
+        message.changes = vec![vec![0x85, 0x6f, 0x4a, 0x83, 1, 2, 3, 4, 5]].into();
+
+        let heads = doc2.get_heads();
+        assert!(doc2
+            .sync()
+            .receive_sync_message(&mut State::new(), message)
+            .is_err());
+        assert_eq!(doc2.get_heads(), heads);
     }
 
     fn sync(

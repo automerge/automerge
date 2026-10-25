@@ -1383,6 +1383,15 @@ impl Automerge {
         data: &[u8],
         patch_log: &mut PatchLog,
     ) -> Result<usize, AutomergeError> {
+        self.load_incremental_with(data, patch_log, OnPartialLoad::Ignore)
+    }
+
+    pub(crate) fn load_incremental_with(
+        &mut self,
+        data: &[u8],
+        patch_log: &mut PatchLog,
+        on_partial_load: OnPartialLoad,
+    ) -> Result<usize, AutomergeError> {
         if self.is_empty() {
             let mut doc = Self::load_with_options(
                 data,
@@ -1414,6 +1423,11 @@ impl Automerge {
             load::MarkOrderValidation::Validate,
         ) {
             load::LoadedChanges::Complete(c) => c,
+            load::LoadedChanges::Partial { error, .. }
+                if on_partial_load == OnPartialLoad::Error =>
+            {
+                return Err(error.into());
+            }
             load::LoadedChanges::Partial { error, loaded, .. } => {
                 tracing::warn!(successful_chunks=loaded.len(), err=?error, "partial load");
                 loaded
