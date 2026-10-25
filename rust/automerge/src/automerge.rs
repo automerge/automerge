@@ -2384,19 +2384,22 @@ impl<H: HashRetention> Automerge<H> {
         member_hashes: Option<Vec<ChangeHash>>,
     ) -> Result<Option<BundlePlan<'b>>, AutomergeError> {
         let untagged = member_hashes.is_none() && bundle.is_rehashable();
-        let plan = self.plan_bundle_with(bundle, member_hashes)?;
+        let plan = self.plan_bundle_with(bundle, member_hashes, untagged)?;
         if !untagged || plan.is_none() {
             return Ok(plan);
         }
         // a tiny whole document may leave out hashes for us to rebuild;
         // hashing it before anything is written also checks it
-        self.plan_bundle_with(bundle, Some(bundle.audit::<ChangeHash>()?))
+        self.plan_bundle_with(bundle, Some(bundle.audit::<ChangeHash>()?), false)
     }
 
+    /// `untagged`: the caller rehashes the members if this succeeds, so
+    /// hashes the bundle leaves out are not yet missing.
     fn plan_bundle_with<'b>(
         &self,
         bundle: &'b Bundle,
         member_hashes: Option<Vec<ChangeHash>>,
+        untagged: bool,
     ) -> Result<Option<BundlePlan<'b>>, AutomergeError> {
         let member_actors = &bundle.member_actors;
         let member_seqs = &bundle.member_seqs;
@@ -2420,6 +2423,7 @@ impl<H: HashRetention> Automerge<H> {
         let mut kept_index = vec![usize::MAX; num_members];
         let mut num_kept = 0;
         let mut next_seq: Vec<Option<u64>> = vec![None; bundle.actors().len()];
+        let mut last_kept: Vec<Option<usize>> = vec![None; bundle.actors().len()];
         // a kept member may pin a member this document freed the hash of
         let mut freed = Vec::new();
         for i in 0..num_members {
@@ -2452,6 +2456,7 @@ impl<H: HashRetention> Automerge<H> {
                 Ordering::Equal => {}
             }
             next_seq[actor] = Some(next + 1);
+            last_kept[actor] = Some(i);
             keep[i] = true;
             kept_index[i] = num_kept;
             num_kept += 1;
@@ -2565,6 +2570,29 @@ impl<H: HashRetention> Automerge<H> {
             .filter_map(|(i, hash)| member_node(*i).map(|n| (n, *hash)))
             .collect();
         self.check_hash_claims(&[&hash_pairs, &head_nodes, &checkpoint_nodes, &retained_nodes])?;
+        if kept_hashes.is_none() && !untagged {
+            // a tip must keep its hash, so a bundle that leaves one out
+            // cannot be applied without rehashing
+            let mut tips: Vec<_> = last_kept
+                .iter()
+                .flatten()
+                .filter_map(|&i| member_node(i))
+                .collect();
+            tips.sort_unstable();
+            let mut named = vec![false; tips.len()];
+            for (node, _) in head_nodes
+                .iter()
+                .chain(&checkpoint_nodes)
+                .chain(&retained_nodes)
+            {
+                if let Ok(pos) = tips.binary_search(node) {
+                    named[pos] = true;
+                }
+            }
+            if named.contains(&false) {
+                return Err(MalformedBundle::Invalid("an actor's last change has no hash").into());
+            }
+        }
 
         Ok(Some(BundlePlan {
             base,

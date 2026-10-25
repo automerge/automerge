@@ -119,7 +119,8 @@ fn a_small_bundle_missing_any_hash_is_rehashed() {
 
 fn big_bundle_missing_hashes() -> (Automerge<Retained>, crate::storage::Bundle) {
     let mut doc = build(&[1; REHASHABLE_CHANGES + 100]);
-    let doc = doc.document().clone();
+    let mut doc = doc.document().clone();
+    doc.gc();
     let mut bundle = doc.bundle_document_with(NameHashes::All).unwrap();
     assert!(!bundle.retained.is_empty());
     bundle.retained.clear();

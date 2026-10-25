@@ -63,14 +63,9 @@ fn a_bundle_declaring_an_interior_member_as_its_only_head_is_rejected() {
 
 /// Two actors: actor 1's last change is interior to the bundle, so the
 /// receiver must keep it (it is that actor's tip) and the bundle names it
-/// in `retained`. Debug builds assert on a bundle that leaves it out;
-/// release builds rebuild the hash and carry on.
+/// in `retained`. A bundle that leaves it out is rejected.
 #[test]
-#[cfg_attr(
-    debug_assertions,
-    ignore = "debug builds assert on a non-conforming bundle"
-)]
-fn a_bundle_leaving_out_a_receiver_tip_is_handled_in_release() {
+fn a_bundle_leaving_out_a_receiver_tip_is_rejected() {
     let mut a = linear(1, 2);
     let mut b = Automerge::new().with_actor(actor(2));
     b.merge(&mut a).unwrap();
@@ -81,7 +76,6 @@ fn a_bundle_leaving_out_a_receiver_tip_is_handled_in_release() {
     }
     let bundle = b.make_bundle(&[id(2, 1)], &[id(1, 1)]).unwrap();
     let mut p = Prefix::parse(&bundle.bytes());
-    eprintln!("retained: {:?}", p.retained.len());
     assert!(!p.retained.is_empty(), "fixture names actor 1's tip");
     p.retained.clear();
     let hostile = Bundle::try_from(&p.bytes()[..]).expect("parses");
@@ -89,8 +83,9 @@ fn a_bundle_leaving_out_a_receiver_tip_is_handled_in_release() {
     let mut r = Automerge::new();
     r.apply_bundle(a.make_bundle(&[id(1, 1)], &[]).unwrap())
         .unwrap();
-    let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| r.apply_bundle(hostile)));
-    assert!(res.is_ok(), "applying a hostile bundle panicked");
+    let before = r.save();
+    assert!(r.apply_bundle(hostile).is_err());
+    assert_eq!(r.save(), before, "a rejected bundle leaves no trace");
 }
 
 /// A change whose op inserts into the root map with a sequence key.
