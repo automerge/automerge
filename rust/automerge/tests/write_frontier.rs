@@ -680,6 +680,60 @@ fn write_frontier_mask_survives_actor_reordering() {
     );
 }
 
+// Each author in a batch is bound to its own actor, whatever order the
+// actors sort in.
+#[test]
+fn batch_with_two_new_actors_binds_each_author_to_its_own_actor() {
+    let hidden = Author::try_from("ffff").unwrap();
+    let shown = Author::try_from("aaaa").unwrap();
+
+    // `actor_late` sorts after `actor_early`, and the batch applies
+    // late-first, so inserting `actor_early` shifts `actor_late` up by one.
+    let actor_late = ActorId::try_from("ff").unwrap();
+    let actor_early = ActorId::try_from("00").unwrap();
+
+    // Sorts between the two, so a stale index can land on it.
+    let mut doc = AutoCommit::new();
+    doc.set_actor(ActorId::try_from("aa").unwrap());
+    doc.put(ROOT, "good_key", "good").unwrap();
+    doc.commit();
+    let epoch = doc.get_heads();
+
+    // `set_author` mints a fresh random actor, so pin the actor id after
+    // setting the author or the chosen sort order is lost.
+    let mut fork_late = doc.fork();
+    fork_late.set_author(Some(hidden.clone()));
+    fork_late.set_actor(actor_late);
+    fork_late.put(ROOT, "late_key", "from_late").unwrap();
+    fork_late.commit();
+
+    let mut fork_early = doc.fork();
+    fork_early.set_author(Some(shown.clone()));
+    fork_early.set_actor(actor_early);
+    fork_early.put(ROOT, "early_key", "from_early").unwrap();
+    fork_early.commit();
+
+    doc.mask_author(hidden.clone(), &epoch);
+
+    // One batch: separate merges would not interleave the insertions.
+    let mut changes = fork_late.get_changes(&epoch);
+    changes.extend(fork_early.get_changes(&epoch));
+    doc.apply_changes(changes).unwrap();
+
+    assert!(
+        doc.get(ROOT, "late_key").unwrap().is_none(),
+        "the masked author's op must be hidden"
+    );
+    assert!(
+        doc.get(ROOT, "early_key").unwrap().is_some(),
+        "the unmasked author's op must stay visible"
+    );
+    assert!(
+        doc.get(ROOT, "good_key").unwrap().is_some(),
+        "the document's own op must stay visible"
+    );
+}
+
 // TODO(finto): test mask at empty heads, i.e. document inception
 
 // Regression: hydration with no heads and with explicitly supplied current

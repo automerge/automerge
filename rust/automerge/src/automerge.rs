@@ -634,50 +634,34 @@ impl Automerge {
         self.write_frontier.is_author_masked(author)
     }
 
-    /// Record that `actor` belongs to `author` and re-derive the visibility.
+    /// If the given `author` is masked, then assign the `actor` to the
+    /// `author`, and zero out the `actor` in the visibility mask.
     ///
-    /// Must be called before `actor` records any ops. Because the actor has no
-    /// ops yet, the derived mask cannot change the visibility of anything in
-    /// the op set, so no index rebuild is needed.
+    /// # Panics
     ///
-    /// Used by [`Automerge::transaction_args`] so that a new actor of a masked
-    /// author is entered into the mask before the transaction opens.
+    /// If the `actor` is not a [`FreshActor`].
+    ///
+    /// [`FreshActor`]: crate::change_graph::FreshActor
     fn register_actor(&mut self, author: Author<'static>, actor: usize) {
-        debug_assert_eq!(self.change_graph.seq_for_actor(actor), 0);
-        self.authors.assign_author(author, actor);
-        self.rederive_visibility();
+        if self.is_author_masked(&author) {
+            let actor = self
+                .change_graph
+                .fresh_actor(actor)
+                .unwrap_or_else(|| panic!("masked author's actor {actor} should have no changes"));
+            self.authors.assign_author(author, actor.actor_index());
+            self.visibility.bound_masked_actor(&actor);
+        }
     }
 
-    /// Bulk form of [`Automerge::register_actor`] for the batch importer:
-    /// assign all authors, derive once. Registering nothing derives
-    /// nothing: the mask already equals its derivation (an actor inserted
-    /// without an author gets `u32::MAX` from the column shift, exactly
-    /// what `derive` gives an unmasked actor).
+    /// Call [`Automerge::register_actor`] on multiple pairs of [`Author`] and
+    /// actor indexes.
     pub(crate) fn register_actors(
         &mut self,
         pairs: impl IntoIterator<Item = (Author<'static>, usize)>,
     ) {
-        let mut pairs = pairs.into_iter().peekable();
-        let should_derive = pairs.peek().is_some();
         for (author, actor) in pairs {
-            debug_assert_eq!(self.change_graph.seq_for_actor(actor), 0);
-            self.authors.assign_author(author, actor);
+            self.register_actor(author, actor);
         }
-        if should_derive {
-            self.rederive_visibility();
-        }
-    }
-
-    /// Re-derive `visibility` from the unchanged policy, without an
-    /// index rebuild. Sound only when no op's visibility can have changed
-    /// (registration of zero-op actors).
-    fn rederive_visibility(&mut self) {
-        self.visibility = visibility::FrontierVisibility::new(
-            &self.write_frontier,
-            &self.change_graph,
-            &self.authors,
-            self.actors(),
-        );
     }
 
     /// Ensure that the current visibility mask is the same as the mask that
@@ -870,14 +854,8 @@ impl Automerge {
 
         let start_op = NonZeroU64::MIN.saturating_add(self.change_graph.max_op());
         let author = if seq == 1 { self.author.clone() } else { None };
-        // If the author is part of the write-frontier, assign the actor to the
-        // author now, entering the fresh actor into the mask at the author's
-        // boundary. Otherwise, no mask entry is needed, and the committed
-        // change still carries the author footer.
         if let Some(author) = &author {
-            if self.is_author_masked(author) {
-                self.register_actor(author.clone(), actor_index);
-            }
+            self.register_actor(author.clone(), actor_index);
         }
         let masked = self
             .visibility

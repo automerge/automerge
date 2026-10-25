@@ -4,6 +4,7 @@
 //! [`Automerge`]: super::Automerge
 
 use crate::actor::{ActorRemoval, ActorShift};
+use crate::change_graph::FreshActor;
 use crate::clock::Clock;
 use crate::types::OpId;
 
@@ -103,6 +104,19 @@ impl Mask {
     /// Drop the mask slot for an actor just removed from the actor table.
     pub(crate) fn remove_actor(&mut self, removal: &ActorRemoval) {
         self.0.remove_actor(removal);
+    }
+
+    /// If there is a [`Mask`], then set the `actor`'s underlying [`Clock`]
+    /// entry to `0`, hiding all operations for the actor.
+    ///
+    /// The use of [`FreshActor`] ensures that the actor has no existing
+    /// changes, and so it is safe to set the entry to `0`.
+    pub(crate) fn set_fresh_bound_masked(&mut self, actor: &FreshActor) {
+        debug_assert!(
+            self.0.len() > actor.actor_index(),
+            "Mask is missing actor {actor:?}"
+        );
+        self.0.zero_out_actor(actor.actor_index())
     }
 }
 
@@ -296,6 +310,20 @@ mod tests {
         assert_eq!(m.clock(), &Clock::from_counters([Some(u32::MAX), Some(3)]));
         assert!(m.hides(&OpId::new(4, 1)));
         assert!(!m.hides(&OpId::new(3, 1)));
+    }
+
+    /// Setting one actor's bound leaves every other actor's untouched.
+    #[test]
+    fn set_fresh_bound_leaves_other_actors_untouched() {
+        use crate::change_graph::FreshActor;
+
+        let counters = [Some(3), Some(u32::MAX), Some(0), Some(9)];
+        let mut m = Mask::new(Clock::from_counters(counters));
+        m.set_fresh_bound_masked(&FreshActor::for_test(1));
+        assert_eq!(
+            m.clock(),
+            &Clock::from_counters([Some(3), Some(0), Some(0), Some(9)])
+        );
     }
 
     #[test]
