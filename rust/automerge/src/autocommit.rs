@@ -653,6 +653,18 @@ impl AutoCommit {
         self.doc.get_changes(have_deps)
     }
 
+    /// Get the committed changes which are not transitive dependencies of `have_deps`
+    ///
+    /// Unlike [`Self::get_changes()`] this does not commit the open transaction, if one is in
+    /// progress. Its operations are not part of any change yet, so they are not in the result,
+    /// and they can still be committed together (with a message, say) or rolled back.
+    ///
+    /// Isolation (see [`Self::isolate()`]) does not apply: like [`Self::get_changes()`] this
+    /// returns changes from the whole document.
+    pub fn get_committed_changes(&self, have_deps: &[ChangeHash]) -> Vec<Change> {
+        self.doc.get_changes(have_deps)
+    }
+
     pub fn get_changes_meta(&mut self, have_deps: &[ChangeHash]) -> Vec<ChangeMetadata<'_>> {
         self.ensure_transaction_closed();
         self.doc.get_changes_meta(have_deps)

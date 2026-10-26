@@ -1,5 +1,10 @@
 ## Unreleased
 
+### Added
+
+* `AutoCommit::get_committed_changes` returns the committed changes without
+  committing the open transaction, unlike `AutoCommit::get_changes`.
+
 ### Fixed
 
 * `ReadDoc::get_marks` is now much faster (a benchmark on a 100,000 character
