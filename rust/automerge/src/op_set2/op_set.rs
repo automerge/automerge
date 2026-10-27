@@ -936,7 +936,14 @@ impl OpSet {
             }
             index += ops.width(seq_type, self.text_encoding);
         }
-        None
+        // No visible op group follows `op` at `clock`, so `op` is not visible
+        // there and `index` is the length of the sequence at `clock`. This
+        // matches `seek_list_opid_fast` for current reads.
+        Some(FoundOpId {
+            op,
+            index,
+            visible: false,
+        })
     }
 
     pub(crate) fn action_iter_range(&self, range: &Range<usize>) -> ActionIter<'_> {

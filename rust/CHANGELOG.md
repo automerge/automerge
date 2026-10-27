@@ -7,6 +7,12 @@
 * `ReadDoc::get_marks` uses the same units as `length`, `marks`, and `get`
   rather than disagreeing under some text encodings.
 * `ReadDoc::list_range` on a text no longer yields marks as elements.
+* `ReadDoc::get_cursor_position` with `heads` no longer returns
+  `InvalidCursor` for a cursor whose element is deleted at `heads` and has no
+  visible element after it there. It now returns the length of the sequence at
+  `heads` (`MoveCursor::After`) or the previous visible index
+  (`MoveCursor::Before`), as it already did for current reads. The same lookup
+  made `ReadDoc::parents_at` panic for an object in such a position.
 
 ## 0.12.0
 
