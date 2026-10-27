@@ -1813,36 +1813,56 @@ export function updateSpans<T>(
 }
 
 /**
- * Returns a cursor for the given position in a string.
+ * Returns a cursor for the given position in a string or a list.
  *
  * @remarks
- * A cursor represents a relative position, "before character X",
- * rather than an absolute position. As the document is edited, the
- * cursor remains stable relative to its context, just as you'd expect
- * from a cursor in a concurrent text editor.
+ * A cursor represents a relative position, "before character X" (or
+ * "before element X" in a list), rather than an absolute position. As the
+ * document is edited, the cursor remains stable relative to its context,
+ * just as you'd expect from a cursor in a concurrent text editor.
  *
  * The string representation is shareable, and so you can use this both
  * to edit the document yourself (using {@link splice}) or to share multiple
  * collaborator's current cursor positions over the network.
  *
- * The cursor's `position` can be an index in the string, `'start'` or `'end'`.
+ * Cursors work on text and on list objects (but not on maps). For text,
+ * indices are in the document's text encoding (JavaScript string indices by
+ * default); for lists, indices are element indices. In a list, a cursor to an
+ * index follows the element at that index, so it can be used to keep
+ * referring to "this element" while others insert and delete elements.
+ *
+ * The cursor's `position` can be an index in the string or list, `'start'` or `'end'`.
  * - `'start'` ensures this cursor always resolves to `0`
- * - `'end'` ensures this cursor always resolves to `string.length`
+ * - `'end'` ensures this cursor always resolves to `string.length` (or `list.length`)
  *
  * Start cursors can be created by passing any negative number in `position`.
  *
- * End cursors can be created by passing a number `>= string.length` in `position`.
+ * End cursors can be created by passing a number `>= string.length` (or
+ * `>= list.length`) in `position`.
  *
- * `move` determines the position the cursor resolves to if the character at
- * `index` is removed:
+ * `move` determines the position the cursor resolves to if the character
+ * (or list element) at `index` is removed:
  * - `'after'` causes the cursor to resolve towards `string.length`
  * - `'before'` causes the cursor to resolve towards `0`
  *
  * `move` is `'after'` by default.
  *
+ * Only text functions such as {@link splice} accept a cursor in place of an
+ * index. List operations ({@link insertAt}, {@link deleteAt}, and the
+ * methods and index access of a list inside a change) take numeric indices;
+ * resolve a list cursor with {@link getCursorPosition} first:
+ *
+ * ```ts
+ * const cursor = Automerge.getCursor(doc, ["todos"], 2)
+ * doc = Automerge.change(doc, d => {
+ *   const index = Automerge.getCursorPosition(d, ["todos"], cursor)
+ *   Automerge.insertAt(d.todos, index, "new")
+ * })
+ * ```
+ *
  * @typeParam T - The type of the value contained in the document
  * @param doc - The document
- * @param path - The path to the string
+ * @param path - The path to a text or list object
  * @param position - The position of the cursor, either an index, `'start'` or `'end'`
  * @param move - The direction the cursor should resolve to, defaults to 'after'
  */
@@ -1865,11 +1885,14 @@ export function getCursor<T>(
 /**
  * Returns the current index of the cursor.
  *
+ * For text this is an index in the document's text encoding (a JavaScript
+ * string index by default); for a list it is an element index.
+ *
  * @typeParam T - The type of the value contained in the document
  *
  * @param doc - The document
- * @param path - The path to the string
- * @param index - The cursor
+ * @param path - The path to the text or list object the cursor was created for
+ * @param cursor - The cursor
  */
 export function getCursorPosition<T>(
   doc: Doc<T>,

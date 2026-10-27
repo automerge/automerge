@@ -236,4 +236,163 @@ describe("cursors", () => {
     assert.equal(doc1.text, "Alex Good")
     assert.equal(doc2.text, "Alex Good")
   })
+
+  describe("on lists", () => {
+    it("should follow an element through inserts before it", () => {
+      let doc = Automerge.from({ list: ["a", "b", "c"] })
+      const cursor = Automerge.getCursor(doc, ["list"], 1)
+      assert.equal(Automerge.getCursorPosition(doc, ["list"], cursor), 1)
+
+      doc = Automerge.change(doc, d => {
+        Automerge.insertAt(d.list, 0, "x", "y")
+        d.list.push("z")
+      })
+      assert.deepEqual(doc.list, ["x", "y", "a", "b", "c", "z"])
+      const position = Automerge.getCursorPosition(doc, ["list"], cursor)
+      assert.equal(position, 3)
+      assert.equal(doc.list[position], "b")
+    })
+
+    it("should follow an element through concurrent inserts", () => {
+      let doc1 = Automerge.from({ list: ["a", "b", "c"] })
+      let doc2 = Automerge.clone(doc1)
+      const cursor = Automerge.getCursor(doc1, ["list"], 2)
+
+      doc1 = Automerge.change(doc1, d => {
+        Automerge.insertAt(d.list, 0, "x")
+      })
+      doc2 = Automerge.change(doc2, d => {
+        Automerge.insertAt(d.list, 1, "y")
+        Automerge.insertAt(d.list, 3, "z")
+      })
+      doc1 = Automerge.merge(doc1, doc2)
+      doc2 = Automerge.merge(doc2, doc1)
+
+      assert.deepEqual(doc1.list, ["x", "a", "y", "b", "z", "c"])
+      assert.equal(Automerge.getCursorPosition(doc1, ["list"], cursor), 5)
+      assert.equal(Automerge.getCursorPosition(doc2, ["list"], cursor), 5)
+    })
+
+    it("should resolve before/after cursors to a deleted element", () => {
+      let doc = Automerge.from({ list: [1, 2, 3, 4, 5] })
+      const before = Automerge.getCursor(doc, ["list"], 2, "before")
+      const after = Automerge.getCursor(doc, ["list"], 2, "after")
+      const deflt = Automerge.getCursor(doc, ["list"], 2)
+
+      doc = Automerge.change(doc, d => {
+        Automerge.deleteAt(d.list, 2)
+      })
+      assert.deepEqual(doc.list, [1, 2, 4, 5])
+      assert.equal(Automerge.getCursorPosition(doc, ["list"], before), 1)
+      assert.equal(Automerge.getCursorPosition(doc, ["list"], after), 2)
+      assert.equal(Automerge.getCursorPosition(doc, ["list"], deflt), 2)
+
+      doc = Automerge.change(doc, d => {
+        d.list.splice(0, 4)
+      })
+      assert.equal(Automerge.getCursorPosition(doc, ["list"], before), 0)
+      assert.equal(Automerge.getCursorPosition(doc, ["list"], after), 0)
+    })
+
+    it("should support start and end cursors", () => {
+      let doc = Automerge.from({ list: [1, 2, 3] })
+      const start = Automerge.getCursor(doc, ["list"], "start")
+      const end = Automerge.getCursor(doc, ["list"], "end")
+      const negative = Automerge.getCursor(doc, ["list"], -1)
+      const pastEnd = Automerge.getCursor(doc, ["list"], 3)
+
+      doc = Automerge.change(doc, d => {
+        d.list.unshift(0)
+        d.list.push(4)
+      })
+      for (const c of [start, negative]) {
+        assert.equal(Automerge.getCursorPosition(doc, ["list"], c), 0)
+      }
+      for (const c of [end, pastEnd]) {
+        assert.equal(Automerge.getCursorPosition(doc, ["list"], c), 5)
+      }
+    })
+
+    it("should work on nested lists", () => {
+      let doc = Automerge.from({
+        outer: [["a"], ["b", "c", "d"]],
+      })
+      const cursor = Automerge.getCursor(doc, ["outer", 1], 2)
+      const toList = Automerge.getCursor(doc, ["outer"], 1)
+
+      doc = Automerge.change(doc, d => {
+        Automerge.insertAt(d.outer[1], 0, "x")
+        Automerge.insertAt(d.outer, 0, ["y"])
+      })
+      assert.deepEqual(doc.outer, [["y"], ["a"], ["x", "b", "c", "d"]])
+      assert.equal(Automerge.getCursorPosition(doc, ["outer"], toList), 2)
+      assert.equal(Automerge.getCursorPosition(doc, ["outer", 2], cursor), 3)
+    })
+
+    it("should work with cursors to objects in a list", () => {
+      type Todo = { title: string }
+      let doc = Automerge.from<{ todos: Todo[] }>({
+        todos: [{ title: "one" }, { title: "two" }],
+      })
+      const cursor = Automerge.getCursor(doc, ["todos"], 1)
+
+      doc = Automerge.change(doc, d => {
+        d.todos.unshift({ title: "zero" })
+        // resolve the cursor inside a change and use it with a list method
+        const index = Automerge.getCursorPosition(d, ["todos"], cursor)
+        d.todos[index].title = "TWO"
+        Automerge.insertAt(d.todos, index, { title: "one and a half" })
+      })
+      assert.deepEqual(
+        doc.todos.map(t => t.title),
+        ["zero", "one", "one and a half", "TWO"],
+      )
+      assert.equal(Automerge.getCursorPosition(doc, ["todos"], cursor), 3)
+    })
+
+    it("should work with Automerge.view", () => {
+      let doc = Automerge.from({ list: ["a", "b", "c"] })
+      const heads = Automerge.getHeads(doc)
+      doc = Automerge.change(doc, d => {
+        Automerge.insertAt(d.list, 0, "x")
+        Automerge.deleteAt(d.list, 3)
+      })
+      const view = Automerge.view(doc, heads)
+      assert.deepEqual(view.list, ["a", "b", "c"])
+
+      // a cursor created at old heads
+      const cursor = Automerge.getCursor(view, ["list"], 1)
+      assert.equal(Automerge.getCursorPosition(view, ["list"], cursor), 1)
+      assert.equal(Automerge.getCursorPosition(doc, ["list"], cursor), 2)
+      assert.equal(cursor, Automerge.getCursor(doc, ["list"], 2))
+
+      // a cursor to an element deleted since
+      const before = Automerge.getCursor(view, ["list"], 2, "before")
+      const after = Automerge.getCursor(view, ["list"], 2, "after")
+      assert.equal(Automerge.getCursorPosition(doc, ["list"], before), 2)
+      assert.equal(Automerge.getCursorPosition(doc, ["list"], after), 3)
+      assert.equal(Automerge.getCursorPosition(view, ["list"], before), 2)
+
+      // a cursor to an element added since is invalid in the view
+      const x = Automerge.getCursor(doc, ["list"], 0)
+      assert.throws(() => Automerge.getCursorPosition(view, ["list"], x))
+    })
+
+    it("should reject maps", () => {
+      const doc = Automerge.from({ map: { a: 1 }, list: [1] })
+      const cursor = Automerge.getCursor(doc, ["list"], 0)
+      assert.throws(
+        () => Automerge.getCursor(doc, ["map"], 0),
+        /Cannot getCursor: RangeError: cursors are only valid on lists and text - obj type: map/,
+      )
+      assert.throws(
+        () => Automerge.getCursor(doc, [], 0),
+        /cursors are only valid on lists and text - obj type: map/,
+      )
+      assert.throws(
+        () => Automerge.getCursorPosition(doc, ["map"], cursor),
+        /Cannot getCursorPosition: RangeError: cursors are only valid on lists and text - obj type: map/,
+      )
+    })
+  })
 })
