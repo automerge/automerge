@@ -92,6 +92,10 @@ exceptions = [
     { allow = ["BSD-2-Clause"], name = "arrayref" },
     { allow = ["BSD-3-Clause"], name = "tiny-skia" },
     { allow = ["BSD-3-Clause"], name = "tiny-skia-path" },
+    # Transitive dependency of `ed25519-dalek`
+    { allow = ["BSD-3-Clause"], name = "subtle" },
+    { allow = ["BSD-3-Clause"], name = "ed25519-dalek" },
+    { allow = ["BSD-3-Clause"], name = "curve25519-dalek" },
 ]
 
 # Some crates don't have (easily) machine readable licensing information,

@@ -18,6 +18,7 @@ slow_path_assertions = ["hexane/slow_path_assertions"]
 
 [dependencies]
 cfg-if = "1.0"
+ed25519-dalek = { version = "3.0", default-features = false, features = ["alloc"] }
 # zlib-rs backend: pure Rust (works on wasm), ~25% faster inflate than the
 # default miniz_oxide backend natively and ~2x faster on wasm
 flate2 = { version = "^1.0.22", default-features = false, features = ["zlib-rs"] }
@@ -28,7 +29,7 @@ itertools = "0.15.0"
 leb128 = "^0.2.5"
 rustc-hash = "^2.1.1"
 serde = { version = "^1.0", features = ["derive"] }
-sha2 = "^0.11.0-rc.5"
+sha2 = "0.11.1"
 smol_str = { version = "0.3", features = ["serde"] }
 thiserror = "^2.0.12"
 tinyvec = { version = "^1.5.1", features = ["alloc"] }
