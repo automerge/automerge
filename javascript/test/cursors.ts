@@ -150,6 +150,27 @@ describe("cursors", () => {
       assert.equal(position, 2)
     })
 
+    it("getCursorPosition should resolve a cursor on a deleted last element", () => {
+      let doc = Automerge.from({ text: "xab" })
+      const after = Automerge.getCursor(doc, ["text"], 2)
+      const before = Automerge.getCursor(doc, ["text"], 2, "before")
+
+      doc = Automerge.change(doc, d => {
+        Automerge.splice(d, ["text"], 2, 1)
+      })
+      const heads = Automerge.getHeads(doc)
+
+      doc = Automerge.change(doc, d => {
+        Automerge.splice(d, ["text"], 0, 1)
+      })
+      const view = Automerge.view(doc, heads)
+
+      assert.equal(Automerge.getCursorPosition(view, ["text"], after), 2)
+      assert.equal(Automerge.getCursorPosition(view, ["text"], before), 1)
+      assert.equal(Automerge.getCursorPosition(doc, ["text"], after), 1)
+      assert.equal(Automerge.getCursorPosition(doc, ["text"], before), 0)
+    })
+
     it("getCursor should respect heads", () => {
       let doc = Automerge.from({ text: "aaa@bbb" })
       let heads = Automerge.getHeads(doc)
