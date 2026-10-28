@@ -1067,9 +1067,12 @@ impl Automerge {
     pub(crate) fn exid_to_opid(&self, id: &ExId) -> Result<OpId, AutomergeError> {
         match id {
             ExId::Root => Ok(OpId::new(0, 0)),
-            ExId::Id(ctr, actor, idx) => {
-                let opid = if self.ops.get_actor_safe(*idx) == Some(actor) {
-                    OpId::new(*ctr, *idx)
+            ExId::Id(ctr, actor, hint) => {
+                let opid = if let Some(idx) = hint
+                    .map(|idx| idx as usize)
+                    .filter(|idx| self.ops.get_actor_safe(*idx) == Some(actor))
+                {
+                    OpId::new(*ctr, idx)
                 } else if let Some(backup_idx) = self.ops.lookup_actor(actor) {
                     OpId::new(*ctr, backup_idx)
                 } else {
@@ -1794,7 +1797,11 @@ impl Automerge {
                 .ops
                 .lookup_actor(&actor)
                 .ok_or_else(|| AutomergeError::InvalidObjId(s.to_owned()))?;
-            let obj = ExId::Id(counter, self.ops.get_actor(actor).clone(), actor);
+            let obj = ExId::Id(
+                counter,
+                self.ops.get_actor(actor).clone(),
+                u32::try_from(actor).ok(),
+            );
             Ok(obj)
         }
     }
