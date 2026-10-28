@@ -4662,3 +4662,29 @@ fn cursor_from_another_object_is_invalid() {
         Err(AutomergeError::InvalidCursor(cursor))
     );
 }
+
+#[test]
+fn historical_cursor_on_trailing_deleted_element() {
+    // With no visible element after the cursor's element, the position is the
+    // sequence length, both at current and at historical heads.
+    let mut doc = AutoCommit::new();
+    let list = doc.put_object(ROOT, "items", ObjType::List).unwrap();
+    doc.insert(&list, 0, "a").unwrap();
+    doc.insert(&list, 1, "b").unwrap();
+    doc.commit();
+    let after = doc.get_cursor(&list, 1, None).unwrap();
+    let before = doc
+        .get_cursor_moving(&list, 1, None, automerge::MoveCursor::Before)
+        .unwrap();
+    doc.delete(&list, 1).unwrap();
+    doc.commit();
+    let heads = doc.get_heads();
+    // Make `heads` historical rather than current.
+    doc.put(ROOT, "unrelated", 1).unwrap();
+    doc.commit();
+
+    for at in [None, Some(heads.as_slice())] {
+        assert_eq!(doc.get_cursor_position(&list, &after, at), Ok(1));
+        assert_eq!(doc.get_cursor_position(&list, &before, at), Ok(0));
+    }
+}

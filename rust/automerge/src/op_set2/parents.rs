@@ -91,7 +91,89 @@ pub struct Parent {
 #[cfg(test)]
 mod tests {
     use super::Parent;
-    use crate::{transaction::Transactable, ObjType, Prop, ReadDoc};
+    use crate::{transaction::Transactable, AutoCommit, ObjId, ObjType, Prop, ReadDoc, ROOT};
+
+    /// A list whose only element is a map that has since been deleted.
+    fn deleted_only_child() -> (AutoCommit, ObjId, ObjId) {
+        let mut doc = AutoCommit::new();
+        let list = doc.put_object(ROOT, "items", ObjType::List).unwrap();
+        let child = doc.insert_object(&list, 0, ObjType::Map).unwrap();
+        doc.commit();
+        doc.delete(&list, 0).unwrap();
+        doc.commit();
+        (doc, list, child)
+    }
+
+    fn deleted_link(list: &ObjId) -> Vec<Parent> {
+        vec![
+            Parent {
+                obj: list.clone(),
+                typ: ObjType::List,
+                prop: Prop::Seq(0),
+                visible: false,
+            },
+            Parent {
+                obj: ROOT,
+                typ: ObjType::Map,
+                prop: Prop::Map("items".to_string()),
+                visible: true,
+            },
+        ]
+    }
+
+    #[test]
+    fn parents_of_deleted_only_child() {
+        // No visible element follows the deleted child, which previously made
+        // the slow sequence lookup disagree with the fast one.
+        let (doc, list, child) = deleted_only_child();
+        let parents = doc.parents(&child).unwrap().collect::<Vec<_>>();
+        assert_eq!(parents, deleted_link(&list));
+    }
+
+    #[test]
+    fn historical_parents_of_deleted_only_child() {
+        let (mut doc, list, child) = deleted_only_child();
+        let deleted_heads = doc.get_heads();
+        // Make `deleted_heads` historical rather than current.
+        doc.put(ROOT, "unrelated", 1).unwrap();
+        doc.commit();
+        let parents = doc
+            .parents_at(&child, &deleted_heads)
+            .unwrap()
+            .collect::<Vec<_>>();
+        assert_eq!(parents, deleted_link(&list));
+    }
+
+    #[test]
+    fn historical_parents_before_child_creation_are_invisible() {
+        let mut doc = AutoCommit::new();
+        let list = doc.put_object(ROOT, "items", ObjType::List).unwrap();
+        doc.commit();
+        let before = doc.get_heads();
+        let list_child = doc.insert_object(&list, 0, ObjType::Map).unwrap();
+        let map_child = doc.put_object(ROOT, "m", ObjType::Map).unwrap();
+        doc.commit();
+
+        let parents = doc
+            .parents_at(&list_child, &before)
+            .unwrap()
+            .collect::<Vec<_>>();
+        assert_eq!(parents, deleted_link(&list));
+
+        let parents = doc
+            .parents_at(&map_child, &before)
+            .unwrap()
+            .collect::<Vec<_>>();
+        assert_eq!(
+            parents,
+            vec![Parent {
+                obj: ROOT,
+                typ: ObjType::Map,
+                prop: Prop::Map("m".to_string()),
+                visible: false,
+            }]
+        );
+    }
 
     #[test]
     fn test_invisible_parents() {

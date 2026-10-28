@@ -936,7 +936,17 @@ impl OpSet {
             }
             index += ops.width(seq_type, self.text_encoding);
         }
-        None
+        // No visible element at or after `op` (`OpsFoundIter` skips invisible keys):
+        // - `op` is in `obj` (checked above)
+        // - it is deleted, overwritten, or not yet created at `clock`
+        // - all visible elements precede it, so `index` is the sequence length
+        // - matches the loop for an invisible `op` followed by a visible
+        //   element, and `seek_list_opid_fast` when `clock` is `None`
+        Some(FoundOpId {
+            op,
+            index,
+            visible: false,
+        })
     }
 
     pub(crate) fn action_iter_range(&self, range: &Range<usize>) -> ActionIter<'_> {
