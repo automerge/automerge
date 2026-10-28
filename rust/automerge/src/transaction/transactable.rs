@@ -5,6 +5,16 @@ use crate::iter::Span;
 use crate::marks::{ExpandMark, Mark, UpdateSpansConfig};
 use crate::{AutomergeError, ChangeHash, ObjType, Prop, ReadDoc, ScalarValue};
 
+/// One write of a [`Transactable::batch_write`]: to a map key, a scalar
+/// put or an increment of a counter.
+#[derive(Debug, Clone, PartialEq)]
+pub enum BatchWrite {
+    /// Set the key to the value, as [`Transactable::put`] does.
+    Put(ScalarValue),
+    /// Add to the counter at the key, as [`Transactable::increment`] does.
+    Increment(i64),
+}
+
 /// A way of mutating a document within a single change.
 pub trait Transactable: ReadDoc {
     /// Get the number of pending operations in this transaction.
@@ -169,6 +179,32 @@ pub trait Transactable: ReadDoc {
         obj: O,
         new_value: &crate::hydrate::Value,
     ) -> Result<(), crate::error::UpdateObjectError>;
+
+    /// Make many scalar puts and counter increments to map keys as one
+    /// batch.
+    ///
+    /// The result is exactly the ops the same calls to [`Self::put`] and
+    /// [`Self::increment`], in that order, would make: the same ids, the
+    /// same change, the same patches, in write order. What differs is
+    /// the cost: the ops land in the op set in one pass per column rather
+    /// than one splice per op, so writing thousands of keys into a large
+    /// document costs a fraction of the same calls made one at a time.
+    /// In a transaction isolated at earlier heads, or one whose ops a
+    /// masked author hides, the writes are made one at a time.
+    ///
+    /// The result has one entry per write: the id of the op it made, or
+    /// `None` for a put of the value already there, which makes no op.
+    ///
+    /// A write to a list or text index, or to an object that is not a
+    /// map, is refused with [`AutomergeError::InvalidOp`]; an increment
+    /// of a key holding no counter with [`AutomergeError::MissingCounter`].
+    /// On an error the writes before it stand, as the same calls one at
+    /// a time would have left them: they are landed before it returns,
+    /// so the transaction reads them back.
+    fn batch_write<O: AsRef<ExId>, P: Into<Prop>, I: IntoIterator<Item = (O, P, BatchWrite)>>(
+        &mut self,
+        writes: I,
+    ) -> Result<Vec<Option<ExId>>, AutomergeError>;
 
     /// Put or insert a nested `hydrate::Value` as a new object tree using
     /// batch operations.
