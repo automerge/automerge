@@ -2,9 +2,10 @@ use std::cmp::Ordering;
 
 use proptest::prelude::*;
 
+use crate::signature::{ed25519, Signature, SignatureBytes, SignatureTag};
 use crate::storage::parse::Input;
 use crate::storage::Chunk;
-use crate::{ChangeHash, Ed25519Signature, Signature, SignatureBytes, SignatureTag};
+use crate::ChangeHash;
 
 use super::{error, flattened_entries, frame_body, signature_error, HashEntries, SignatureEntry};
 
@@ -61,7 +62,7 @@ fn parsing_classifies_ed25519_without_verifying_and_preserves_opaque_entries() {
 #[test]
 fn wire_order_uses_bytes_not_typed_or_opaque_variant_order() {
     let opaque_before = wrapped(0, &[0]);
-    let typed = SignatureEntry(Signature::ed25519(Ed25519Signature::from_bytes([1; 64])));
+    let typed = SignatureEntry(Signature::ed25519(ed25519::Signature::from_bytes([1; 64])));
     let opaque_after = wrapped(0, &[2]);
 
     assert_eq!(opaque_before.cmp(&typed), Ordering::Less);
@@ -81,7 +82,7 @@ fn typed_and_generic_construction_are_the_same_entry_at_capacity() {
     for byte in 0..16 {
         entries.push_ordered(hash, wrapped(0, &[byte; 64])).unwrap();
     }
-    let typed = SignatureEntry(Signature::ed25519(Ed25519Signature::from_bytes([0; 64])));
+    let typed = SignatureEntry(Signature::ed25519(ed25519::Signature::from_bytes([0; 64])));
     assert_eq!(typed, wrapped(0, &[0; 64]));
     assert_eq!(typed.cmp(&wrapped(0, &[0; 64])), Ordering::Equal);
 

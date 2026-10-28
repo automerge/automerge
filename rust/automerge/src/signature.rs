@@ -6,59 +6,25 @@
 use std::hash::{Hash, Hasher};
 
 use crate::types;
-use crate::ChangeHash;
+use crate::{Author, ChangeHash};
 
-mod verifier;
-
-pub use error::SignatureBytes as SignatureBytesError;
-pub use verifier::{verify as verify_signature, Verification, Verifier};
+pub mod custom;
+pub mod ed25519;
+pub mod error;
+mod store;
 
 const SIGNING_MESSAGE_LEN: usize = SIGNING_MESSAGE_PREFIX.len() + types::HASH_SIZE;
 const SIGNING_MESSAGE_PREFIX: &[u8] = b"automerge-change-signature-v1";
 
-/// An owned, unverified Ed25519 signature representation.
-///
-/// Use [`Ed25519Signature::from_bytes`] with the 64 bytes returned by an external
-/// signer. Construction accepts every 64-byte array and does not verify it
-/// against a key or message. Wrap it with [`Signature::ed25519`] to use
-/// [`verify_signature`]. The cryptographic library used internally is not part
-/// of this interface.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Ed25519Signature {
-    inner: ed25519_dalek::Signature,
-}
-
-impl Ed25519Signature {
-    /// Construct from the standard 64-byte Ed25519 signature representation.
-    ///
-    /// This is infallible and does not allocate or establish cryptographic validity.
-    pub fn from_bytes(bytes: [u8; 64]) -> Self {
-        Self {
-            inner: ed25519_dalek::Signature::from_bytes(&bytes),
-        }
-    }
-
-    /// Return the exact 64 signature bytes without allocating.
-    pub fn to_bytes(&self) -> [u8; 64] {
-        self.inner.to_bytes()
-    }
-}
-
-impl Hash for Ed25519Signature {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.to_bytes().hash(state);
-    }
-}
-
 /// A signature scheme tag and its size-checked signature bytes.
 ///
 /// Construct with [`Signature::new`] using a [`SignatureTag`] and validated
-/// [`SignatureBytes`], or wrap an [`Ed25519Signature`] with [`Signature::ed25519`].
+/// [`SignatureBytes`], or wrap an [`ed25519::Signature`] with [`Signature::ed25519`].
 /// The associated change hash and author are supplied separately when verifying
 /// a signature.
 ///
 /// Ed25519-sized bytes with the Ed25519 tag are retained as a typed
-/// [`Ed25519Signature`]. Unknown schemes and malformed lengths remain opaque,
+/// [`ed25519::Signature`]. Unknown schemes and malformed lengths remain opaque,
 /// preserving their tag and bytes. Construction does not establish cryptographic
 /// validity.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -70,7 +36,7 @@ pub struct Signature {
 // values therefore have malformed lengths, not merely unverified contents.
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum SignatureRepr {
-    Ed25519(Ed25519Signature),
+    Ed25519(ed25519::Signature),
     Opaque {
         tag: SignatureTag,
         bytes: SignatureBytes,
@@ -84,7 +50,7 @@ impl Signature {
     pub fn new(tag: SignatureTag, bytes: SignatureBytes) -> Self {
         if tag == SignatureTag::ED25519 {
             if let Ok(bytes) = <[u8; 64]>::try_from(bytes.as_bytes()) {
-                return Self::ed25519(Ed25519Signature::from_bytes(bytes));
+                return Self::ed25519(ed25519::Signature::from_bytes(bytes));
             }
         }
         Self {
@@ -96,7 +62,7 @@ impl Signature {
     ///
     /// Preserves its 64-byte representation, which is within the signature size
     /// limit. This does not verify the signature against a key or message.
-    pub fn ed25519(signature: Ed25519Signature) -> Self {
+    pub fn ed25519(signature: ed25519::Signature) -> Self {
         const { assert!(64 <= SignatureBytes::MAX_SIZE) };
         Self {
             repr: SignatureRepr::Ed25519(signature),
@@ -115,7 +81,7 @@ impl Signature {
     ///
     /// Returns `None` for other schemes and malformed Ed25519 lengths. A `Some`
     /// result establishes representation only, not cryptographic validity.
-    pub fn as_ed25519(&self) -> Option<&Ed25519Signature> {
+    pub fn as_ed25519(&self) -> Option<&ed25519::Signature> {
         match &self.repr {
             SignatureRepr::Ed25519(signature) => Some(signature),
             SignatureRepr::Opaque { .. } => None,
@@ -179,7 +145,7 @@ impl SignatureBytes {
     /// # Errors
     ///
     /// Rejects inputs longer than 1024 bytes, reporting the actual length.
-    pub fn new(bytes: Vec<u8>) -> Result<Self, SignatureBytesError> {
+    pub fn new(bytes: Vec<u8>) -> Result<Self, error::SignatureBytes> {
         let size = bytes.len();
         if size > Self::MAX_SIZE {
             Err(error::SignatureBytes::ExceededSize {
@@ -230,10 +196,10 @@ impl SignatureTag {
 /// # Examples
 ///
 /// ```
-/// use automerge::{
-///     signing_message, verify_signature, Author, ChangeHash, Ed25519Signature,
-///     Signature, Verification,
+/// use automerge::signature::{
+///     ed25519, signing_message, verify_signature, Signature, Verification,
 /// };
+/// use automerge::{Author, ChangeHash};
 /// use ed25519_dalek::{Signer, SigningKey};
 ///
 /// // The application chooses its signer. Only its public-key and signature
@@ -242,7 +208,7 @@ impl SignatureTag {
 /// let author = Author::from(key.verifying_key().to_bytes().to_vec());
 /// let hash = ChangeHash([3; 32]);
 /// let signed_bytes = key.sign(&signing_message(&hash)).to_bytes();
-/// let signature = Signature::ed25519(Ed25519Signature::from_bytes(signed_bytes));
+/// let signature = Signature::ed25519(ed25519::Signature::from_bytes(signed_bytes));
 ///
 /// assert_eq!(
 ///     verify_signature(&author, &hash, &signature, None),
@@ -259,20 +225,54 @@ pub fn signing_message(hash: &ChangeHash) -> [u8; SIGNING_MESSAGE_LEN] {
     message
 }
 
-mod error {
-    /// A signature length exceeding the maximum of 1024 bytes.
-    #[derive(Debug, thiserror::Error)]
-    pub enum SignatureBytes {
-        #[error("the signature size, '{actual}' bytes, exceeds the maximum")]
-        ExceededSize {
-            /// Length of the rejected signature bytes.
-            actual: u64,
+/// The result of checking a signature against a supplied author and change hash.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Verification {
+    /// The signature verifies under the supplied key and signing-message contract.
+    Valid,
+    /// The scheme is supported, but the key or signature is malformed or fails verification.
+    Invalid,
+    /// This verifier does not support the signature's scheme.
+    Unsupported,
+}
+
+/// Check a signature over the domain-separated message for `hash`.
+///
+/// Typed Ed25519 signatures use built-in strict verification. Malformed Ed25519
+/// lengths return [`Verification::Invalid`], without delegation. Other tags are
+/// delegated to `custom`, if supplied, without Ed25519-specific validation. Its
+/// verdict is returned unchanged. Without a custom verifier these tags return
+/// [`Verification::Unsupported`].
+///
+/// For Ed25519, `author` must contain the 32-byte public key. Verification checks
+/// only the supplied key, hash, and signature. It does not validate a change's
+/// contents, establish its actor-to-author binding, or authorise a write.
+///
+/// The custom verifier is borrowed, not stored. Dispatch performs no I/O or
+/// mutation, and custom implementations must uphold the same purity contract.
+pub fn verify_signature(
+    author: &Author<'_>,
+    hash: &ChangeHash,
+    signature: &Signature,
+    custom: Option<&dyn custom::Verifier>,
+) -> Verification {
+    match &signature.repr {
+        SignatureRepr::Ed25519(signature) => match ed25519::verify(author, hash, signature) {
+            Ok(()) => Verification::Valid,
+            Err(_) => Verification::Invalid,
+        },
+        SignatureRepr::Opaque { tag, .. } if *tag == SignatureTag::ED25519 => Verification::Invalid,
+        SignatureRepr::Opaque { tag, bytes } => match custom {
+            Some(verifier) => verifier.verify(author, &signing_message(hash), *tag, bytes),
+            None => Verification::Unsupported,
         },
     }
 }
 
 #[cfg(test)]
 mod tests {
+    pub(super) mod verification;
+
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
 
@@ -280,9 +280,7 @@ mod tests {
 
     use crate::ChangeHash;
 
-    use super::{
-        error, signing_message, Ed25519Signature, Signature, SignatureBytes, SignatureTag,
-    };
+    use super::{ed25519, error, signing_message, Signature, SignatureBytes, SignatureTag};
 
     #[test]
     fn signature_tag_preserves_every_byte_value() {
@@ -335,7 +333,7 @@ mod tests {
     #[test]
     fn signature_ed25519_wraps_unverified_bytes() {
         let input = [0; 64];
-        let signature = Signature::ed25519(Ed25519Signature::from_bytes(input));
+        let signature = Signature::ed25519(ed25519::Signature::from_bytes(input));
 
         assert_eq!(signature.tag(), SignatureTag::ED25519);
         assert_eq!(signature.to_bytes().as_bytes(), input.as_slice());
@@ -379,7 +377,7 @@ mod tests {
     proptest! {
         #[test]
         fn ed25519_construction_paths_preserve_the_same_typed_value(input in any::<[u8; 64]>()) {
-            let ed25519 = Ed25519Signature::from_bytes(input);
+            let ed25519 = ed25519::Signature::from_bytes(input);
             let typed = Signature::ed25519(ed25519);
             let bytes = SignatureBytes::new(input.to_vec()).expect("64-byte input");
             let decoded = Signature::new(SignatureTag::ED25519, bytes.clone());
@@ -408,7 +406,7 @@ mod tests {
 
         #[test]
         fn signature_ed25519_preserves_wrapped_bytes(input in any::<[u8; 64]>()) {
-            let signature = Signature::ed25519(Ed25519Signature::from_bytes(input));
+            let signature = Signature::ed25519(ed25519::Signature::from_bytes(input));
 
             prop_assert_eq!(signature.tag(), SignatureTag::ED25519);
             let bytes = signature.to_bytes();
@@ -417,7 +415,7 @@ mod tests {
 
         #[test]
         fn byte_view_preserves_typed_and_opaque_bytes(input in any::<[u8; 64]>()) {
-            let typed = Signature::ed25519(Ed25519Signature::from_bytes(input));
+            let typed = Signature::ed25519(ed25519::Signature::from_bytes(input));
             let opaque = Signature::new(
                 SignatureTag::new(255),
                 SignatureBytes::new(input.to_vec()).expect("size-bounded input"),
