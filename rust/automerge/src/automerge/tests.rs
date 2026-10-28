@@ -849,15 +849,15 @@ fn map_range_back_and_forth_single() {
     let mut range_all = doc.map_range(ROOT, ..);
     assert_eq!(
         range_all.next(),
-        Some(("1", "a".into(), ExId::Id(1, actor.clone(), None)))
+        Some(("1", "a".into(), ExId::Id(1, actor.clone(), 0)))
     );
     assert_eq!(
         range_all.next_back(),
-        Some(("3", "c".into(), ExId::Id(3, actor.clone(), None)))
+        Some(("3", "c".into(), ExId::Id(3, actor.clone(), 0)))
     );
     assert_eq!(
         range_all.next_back(),
-        Some(("2", "b".into(), ExId::Id(2, actor.clone(), None)))
+        Some(("2", "b".into(), ExId::Id(2, actor.clone(), 0)))
     );
     assert_eq!(range_all.next_back(), None);
     assert_eq!(range_all.next(), None);
@@ -865,15 +865,15 @@ fn map_range_back_and_forth_single() {
     let mut range_all = doc.map_range(ROOT, ..);
     assert_eq!(
         range_all.next(),
-        Some(("1", "a".into(), ExId::Id(1, actor.clone(), None)))
+        Some(("1", "a".into(), ExId::Id(1, actor.clone(), 0)))
     );
     assert_eq!(
         range_all.next_back(),
-        Some(("3", "c".into(), ExId::Id(3, actor.clone(), None)))
+        Some(("3", "c".into(), ExId::Id(3, actor.clone(), 0)))
     );
     assert_eq!(
         range_all.next(),
-        Some(("2", Value::str("b"), ExId::Id(2, actor.clone(), None)))
+        Some(("2", Value::str("b"), ExId::Id(2, actor.clone(), 0)))
     );
     assert_eq!(range_all.next_back(), None);
     assert_eq!(range_all.next(), None);
@@ -881,15 +881,15 @@ fn map_range_back_and_forth_single() {
     let mut range_all = doc.map_range(ROOT, ..);
     assert_eq!(
         range_all.next(),
-        Some(("1", "a".into(), ExId::Id(1, actor.clone(), None)))
+        Some(("1", "a".into(), ExId::Id(1, actor.clone(), 0)))
     );
     assert_eq!(
         range_all.next(),
-        Some(("2", "b".into(), ExId::Id(2, actor.clone(), None)))
+        Some(("2", "b".into(), ExId::Id(2, actor.clone(), 0)))
     );
     assert_eq!(
         range_all.next(),
-        Some(("3", "c".into(), ExId::Id(3, actor.clone(), None)))
+        Some(("3", "c".into(), ExId::Id(3, actor.clone(), 0)))
     );
     assert_eq!(range_all.next_back(), None);
     assert_eq!(range_all.next(), None);
@@ -897,15 +897,15 @@ fn map_range_back_and_forth_single() {
     let mut range_all = doc.map_range(ROOT, ..);
     assert_eq!(
         range_all.next_back(),
-        Some(("3", "c".into(), ExId::Id(3, actor.clone(), None)))
+        Some(("3", "c".into(), ExId::Id(3, actor.clone(), 0)))
     );
     assert_eq!(
         range_all.next_back(),
-        Some(("2", "b".into(), ExId::Id(2, actor.clone(), None)))
+        Some(("2", "b".into(), ExId::Id(2, actor.clone(), 0)))
     );
     assert_eq!(
         range_all.next_back(),
-        Some(("1", "a".into(), ExId::Id(1, actor, None)))
+        Some(("1", "a".into(), ExId::Id(1, actor, 0)))
     );
     assert_eq!(range_all.next_back(), None);
     assert_eq!(range_all.next(), None);
@@ -935,15 +935,15 @@ fn map_range_back_and_forth_double() {
     let mut range_all = doc1.map_range(ROOT, ..);
     assert_eq!(
         range_all.next(),
-        Some(("1", "aa".into(), ExId::Id(1, actor2.clone(), None)))
+        Some(("1", "aa".into(), ExId::Id(1, actor2.clone(), 1)))
     );
     assert_eq!(
         range_all.next_back(),
-        Some(("3", "cc".into(), ExId::Id(3, actor2.clone(), None)))
+        Some(("3", "cc".into(), ExId::Id(3, actor2.clone(), 1)))
     );
     assert_eq!(
         range_all.next_back(),
-        Some(("2", "bb".into(), ExId::Id(2, actor2.clone(), None)))
+        Some(("2", "bb".into(), ExId::Id(2, actor2.clone(), 1)))
     );
     assert_eq!(range_all.next_back(), None);
     assert_eq!(range_all.next(), None);
@@ -951,15 +951,15 @@ fn map_range_back_and_forth_double() {
     let mut range_all = doc1.map_range(ROOT, ..);
     assert_eq!(
         range_all.next(),
-        Some(("1", "aa".into(), ExId::Id(1, actor2.clone(), None)))
+        Some(("1", "aa".into(), ExId::Id(1, actor2.clone(), 1)))
     );
     assert_eq!(
         range_all.next_back(),
-        Some(("3", "cc".into(), ExId::Id(3, actor2.clone(), None)))
+        Some(("3", "cc".into(), ExId::Id(3, actor2.clone(), 1)))
     );
     assert_eq!(
         range_all.next(),
-        Some(("2", "bb".into(), ExId::Id(2, actor2.clone(), None)))
+        Some(("2", "bb".into(), ExId::Id(2, actor2.clone(), 1)))
     );
     assert_eq!(range_all.next_back(), None);
     assert_eq!(range_all.next(), None);
@@ -967,15 +967,15 @@ fn map_range_back_and_forth_double() {
     let mut range_all = doc1.map_range(ROOT, ..);
     assert_eq!(
         range_all.next(),
-        Some(("1", "aa".into(), ExId::Id(1, actor2.clone(), None)))
+        Some(("1", "aa".into(), ExId::Id(1, actor2.clone(), 1)))
     );
     assert_eq!(
         range_all.next(),
-        Some(("2", "bb".into(), ExId::Id(2, actor2.clone(), None)))
+        Some(("2", "bb".into(), ExId::Id(2, actor2.clone(), 1)))
     );
     assert_eq!(
         range_all.next(),
-        Some(("3", "cc".into(), ExId::Id(3, actor2.clone(), None)))
+        Some(("3", "cc".into(), ExId::Id(3, actor2.clone(), 1)))
     );
     assert_eq!(range_all.next_back(), None);
     assert_eq!(range_all.next(), None);
@@ -983,15 +983,15 @@ fn map_range_back_and_forth_double() {
     let mut range_all = doc1.map_range(ROOT, ..);
     assert_eq!(
         range_all.next_back(),
-        Some(("3", "cc".into(), ExId::Id(3, actor2.clone(), None)))
+        Some(("3", "cc".into(), ExId::Id(3, actor2.clone(), 1)))
     );
     assert_eq!(
         range_all.next_back(),
-        Some(("2", "bb".into(), ExId::Id(2, actor2.clone(), None)))
+        Some(("2", "bb".into(), ExId::Id(2, actor2.clone(), 1)))
     );
     assert_eq!(
         range_all.next_back(),
-        Some(("1", "aa".into(), ExId::Id(1, actor2, None)))
+        Some(("1", "aa".into(), ExId::Id(1, actor2, 1)))
     );
     assert_eq!(range_all.next_back(), None);
     assert_eq!(range_all.next(), None);
@@ -1013,15 +1013,15 @@ fn map_range_at_back_and_forth_single() {
     let mut range_all = doc.map_range_at(ROOT, .., &heads);
     assert_eq!(
         range_all.next(),
-        Some(("1", "a".into(), ExId::Id(1, actor.clone(), None)))
+        Some(("1", "a".into(), ExId::Id(1, actor.clone(), 0)))
     );
     assert_eq!(
         range_all.next_back(),
-        Some(("3", "c".into(), ExId::Id(3, actor.clone(), None)))
+        Some(("3", "c".into(), ExId::Id(3, actor.clone(), 0)))
     );
     assert_eq!(
         range_all.next_back(),
-        Some(("2", "b".into(), ExId::Id(2, actor.clone(), None)))
+        Some(("2", "b".into(), ExId::Id(2, actor.clone(), 0)))
     );
     assert_eq!(range_all.next_back(), None);
     assert_eq!(range_all.next(), None);
@@ -1029,15 +1029,15 @@ fn map_range_at_back_and_forth_single() {
     let mut range_all = doc.map_range_at(ROOT, .., &heads);
     assert_eq!(
         range_all.next(),
-        Some(("1", "a".into(), ExId::Id(1, actor.clone(), None)))
+        Some(("1", "a".into(), ExId::Id(1, actor.clone(), 0)))
     );
     assert_eq!(
         range_all.next_back(),
-        Some(("3", "c".into(), ExId::Id(3, actor.clone(), None)))
+        Some(("3", "c".into(), ExId::Id(3, actor.clone(), 0)))
     );
     assert_eq!(
         range_all.next(),
-        Some(("2", Value::str("b"), ExId::Id(2, actor.clone(), None)))
+        Some(("2", Value::str("b"), ExId::Id(2, actor.clone(), 0)))
     );
     assert_eq!(range_all.next_back(), None);
     assert_eq!(range_all.next(), None);
@@ -1045,15 +1045,15 @@ fn map_range_at_back_and_forth_single() {
     let mut range_all = doc.map_range_at(ROOT, .., &heads);
     assert_eq!(
         range_all.next(),
-        Some(("1", "a".into(), ExId::Id(1, actor.clone(), None)))
+        Some(("1", "a".into(), ExId::Id(1, actor.clone(), 0)))
     );
     assert_eq!(
         range_all.next(),
-        Some(("2", "b".into(), ExId::Id(2, actor.clone(), None)))
+        Some(("2", "b".into(), ExId::Id(2, actor.clone(), 0)))
     );
     assert_eq!(
         range_all.next(),
-        Some(("3", "c".into(), ExId::Id(3, actor.clone(), None)))
+        Some(("3", "c".into(), ExId::Id(3, actor.clone(), 0)))
     );
     assert_eq!(range_all.next_back(), None);
     assert_eq!(range_all.next(), None);
@@ -1061,15 +1061,15 @@ fn map_range_at_back_and_forth_single() {
     let mut range_all = doc.map_range_at(ROOT, .., &heads);
     assert_eq!(
         range_all.next_back(),
-        Some(("3", "c".into(), ExId::Id(3, actor.clone(), None)))
+        Some(("3", "c".into(), ExId::Id(3, actor.clone(), 0)))
     );
     assert_eq!(
         range_all.next_back(),
-        Some(("2", "b".into(), ExId::Id(2, actor.clone(), None)))
+        Some(("2", "b".into(), ExId::Id(2, actor.clone(), 0)))
     );
     assert_eq!(
         range_all.next_back(),
-        Some(("1", "a".into(), ExId::Id(1, actor, None)))
+        Some(("1", "a".into(), ExId::Id(1, actor, 0)))
     );
     assert_eq!(range_all.next_back(), None);
     assert_eq!(range_all.next(), None);
@@ -1100,15 +1100,15 @@ fn map_range_at_back_and_forth_double() {
     let mut range_all = doc1.map_range_at(ROOT, .., &heads);
     assert_eq!(
         range_all.next(),
-        Some(("1", "aa".into(), ExId::Id(1, actor2.clone(), None)))
+        Some(("1", "aa".into(), ExId::Id(1, actor2.clone(), 1)))
     );
     assert_eq!(
         range_all.next_back(),
-        Some(("3", "cc".into(), ExId::Id(3, actor2.clone(), None)))
+        Some(("3", "cc".into(), ExId::Id(3, actor2.clone(), 1)))
     );
     assert_eq!(
         range_all.next_back(),
-        Some(("2", "bb".into(), ExId::Id(2, actor2.clone(), None)))
+        Some(("2", "bb".into(), ExId::Id(2, actor2.clone(), 1)))
     );
     assert_eq!(range_all.next_back(), None);
     assert_eq!(range_all.next(), None);
@@ -1116,15 +1116,15 @@ fn map_range_at_back_and_forth_double() {
     let mut range_all = doc1.map_range_at(ROOT, .., &heads);
     assert_eq!(
         range_all.next(),
-        Some(("1", "aa".into(), ExId::Id(1, actor2.clone(), None)))
+        Some(("1", "aa".into(), ExId::Id(1, actor2.clone(), 1)))
     );
     assert_eq!(
         range_all.next_back(),
-        Some(("3", "cc".into(), ExId::Id(3, actor2.clone(), None)))
+        Some(("3", "cc".into(), ExId::Id(3, actor2.clone(), 1)))
     );
     assert_eq!(
         range_all.next(),
-        Some(("2", "bb".into(), ExId::Id(2, actor2.clone(), None)))
+        Some(("2", "bb".into(), ExId::Id(2, actor2.clone(), 1)))
     );
     assert_eq!(range_all.next_back(), None);
     assert_eq!(range_all.next(), None);
@@ -1132,15 +1132,15 @@ fn map_range_at_back_and_forth_double() {
     let mut range_all = doc1.map_range_at(ROOT, .., &heads);
     assert_eq!(
         range_all.next(),
-        Some(("1", "aa".into(), ExId::Id(1, actor2.clone(), None)))
+        Some(("1", "aa".into(), ExId::Id(1, actor2.clone(), 1)))
     );
     assert_eq!(
         range_all.next(),
-        Some(("2", "bb".into(), ExId::Id(2, actor2.clone(), None)))
+        Some(("2", "bb".into(), ExId::Id(2, actor2.clone(), 1)))
     );
     assert_eq!(
         range_all.next(),
-        Some(("3", "cc".into(), ExId::Id(3, actor2.clone(), None)))
+        Some(("3", "cc".into(), ExId::Id(3, actor2.clone(), 1)))
     );
     assert_eq!(range_all.next_back(), None);
     assert_eq!(range_all.next(), None);
@@ -1148,15 +1148,15 @@ fn map_range_at_back_and_forth_double() {
     let mut range_all = doc1.map_range_at(ROOT, .., &heads);
     assert_eq!(
         range_all.next_back(),
-        Some(("3", "cc".into(), ExId::Id(3, actor2.clone(), None)))
+        Some(("3", "cc".into(), ExId::Id(3, actor2.clone(), 1)))
     );
     assert_eq!(
         range_all.next_back(),
-        Some(("2", "bb".into(), ExId::Id(2, actor2.clone(), None)))
+        Some(("2", "bb".into(), ExId::Id(2, actor2.clone(), 1)))
     );
     assert_eq!(
         range_all.next_back(),
-        Some(("1", "aa".into(), ExId::Id(1, actor2, None)))
+        Some(("1", "aa".into(), ExId::Id(1, actor2, 1)))
     );
     assert_eq!(range_all.next_back(), None);
     assert_eq!(range_all.next(), None);
