@@ -259,6 +259,14 @@ macro_rules! __log {
      }
  }
 
+/// Adds `$n` to the write counter `$field` where the counters are compiled in.
+macro_rules! count_write {
+    ($field:ident, $n:expr) => {
+        #[cfg(any(test, feature = "write-counters"))]
+        $crate::write_counters::add(|c| c.$field += $n as u64);
+    };
+}
+
 mod actor;
 pub mod anonymize;
 mod author;
@@ -292,6 +300,9 @@ mod text_value;
 pub mod transaction;
 mod types;
 mod value;
+#[cfg(any(test, feature = "write-counters"))]
+#[doc(hidden)]
+pub mod write_counters;
 mod write_frontier;
 
 pub use crate::anonymize::AnonymizeError;
