@@ -34,6 +34,8 @@ impl<'a> TopOps<'a> {
     /// are summed from successors at read time, so the clock from
     /// [`ReadAt::historical_slow`] is applied to them on either path.
     pub(crate) fn new(op_set: &'a OpSet, read: &ReadAt<'_>, range: Range<usize>) -> Self {
+        #[cfg(any(test, feature = "seek-counters"))]
+        crate::seek_counters::count_top_ops_seek();
         let scan = read.historical().cloned();
         let visible_pos = range.start;
         let visible = VisIter::new(op_set, scan.as_ref(), range.clone());
