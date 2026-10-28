@@ -4,19 +4,13 @@
 
 * The actor index hint in `ExId::Id` is now an `Option<u32>`. It's `Some`
   for IDs the document produced, and `None` for IDs read with
-  `TryFrom<&[u8]>`. Using a `u32` keeps `ExId` the same size. Code that
-  constructs or destructures `ExId::Id` must be updated.
+  `TryFrom<&[u8]>`. Code that constructs or destructures `ExId::Id` must be
+  updated.
 
 ### Fixed
 
 * `ExId::to_bytes` gives the same bytes for an object before and after a merge
-  that changes the order of the document's actors. It used to include the
-  actor index hint, which such a merge can change. The format is the same, but
-  the hint is now always written as `0`, so bytes stored by earlier versions
-  may differ from the bytes for the same object now. They still load.
-* `ObjIdFromBytesError::ParseCounter` and `ParseActorIdxHint` name the field
-  that failed to parse. They used to be the other way around.
-
+  that changes the order of the document's actors.
 * `ReadDoc::get_marks` is now much faster (a benchmark on a 100,000 character
   text went from 9ms to 1.6us).
 * `ReadDoc::get_marks` uses the same units as `length`, `marks`, and `get`

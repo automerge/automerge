@@ -16,8 +16,6 @@ use std::hash::{Hash, Hasher};
 /// actors. The hint is `Some` when the document produced this ID, and `None` when it was
 /// read from bytes or the index doesn't fit in a `u32`. Equality, ordering, hashing,
 /// formatting and serialization all ignore it.
-///
-/// The hint is a `u32` rather than a `usize` so that `Option` doesn't make `ExId` larger.
 #[derive(Debug, Clone)]
 pub enum ExId {
     Root,
