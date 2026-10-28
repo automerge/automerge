@@ -2,19 +2,16 @@ use ed25519_dalek::{Signer, SigningKey, Verifier, VerifyingKey};
 use proptest::prelude::*;
 
 use crate::signature::{
-    signing_message, Ed25519Signature, Signature, SignatureBytes, SignatureTag,
+    ed25519, signing_message, verify_signature as verify, Signature, SignatureBytes, SignatureTag,
+    Verification,
 };
 use crate::{Author, ChangeHash};
 
-use super::{verify, Verification};
-
-mod custom;
-
-fn fixture() -> (SigningKey, Author<'static>, ChangeHash, Signature) {
+pub(crate) fn fixture() -> (SigningKey, Author<'static>, ChangeHash, Signature) {
     let key = SigningKey::from_bytes(&[7; 32]);
     let author = Author::from(key.verifying_key().to_bytes().to_vec());
     let hash = ChangeHash([3; 32]);
-    let signature = Signature::ed25519(Ed25519Signature::from_bytes(
+    let signature = Signature::ed25519(ed25519::Signature::from_bytes(
         key.sign(&signing_message(&hash)).to_bytes(),
     ));
     (key, author, hash, signature)
@@ -46,7 +43,7 @@ fn correctly_sized_ed25519_bytes_are_not_necessarily_valid() {
         SignatureTag::ED25519,
         SignatureBytes::new(vec![0; 64]).expect("64-byte input"),
     );
-    let typed = Signature::ed25519(Ed25519Signature::from_bytes([0; 64]));
+    let typed = Signature::ed25519(ed25519::Signature::from_bytes([0; 64]));
 
     assert!(decoded.as_ed25519().is_some());
     assert_eq!(
@@ -173,7 +170,8 @@ fn unsupported_scheme_does_not_require_ed25519_key_or_signature_lengths() {
 #[test]
 fn signature_over_raw_hash_without_domain_prefix_is_invalid() {
     let (key, author, hash, _) = fixture();
-    let signature = Signature::ed25519(Ed25519Signature::from_bytes(key.sign(&hash.0).to_bytes()));
+    let signature =
+        Signature::ed25519(ed25519::Signature::from_bytes(key.sign(&hash.0).to_bytes()));
 
     assert_eq!(
         verify(&author, &hash, &signature, None),
@@ -186,7 +184,9 @@ fn signature_from_different_signing_domain_is_invalid() {
     let (key, author, hash, _) = fixture();
     let mut message = b"automerge-change-signature-v2".to_vec();
     message.extend_from_slice(&hash.0);
-    let signature = Signature::ed25519(Ed25519Signature::from_bytes(key.sign(&message).to_bytes()));
+    let signature = Signature::ed25519(ed25519::Signature::from_bytes(
+        key.sign(&message).to_bytes(),
+    ));
 
     assert_eq!(
         verify(&author, &hash, &signature, None),
@@ -217,7 +217,7 @@ fn weak_key_forgery_accepted_by_ordinary_verification_is_invalid() {
         verify(
             &author,
             &hash,
-            &Signature::ed25519(Ed25519Signature::from_bytes(dalek_signature.to_bytes())),
+            &Signature::ed25519(ed25519::Signature::from_bytes(dalek_signature.to_bytes())),
             None,
         ),
         Verification::Invalid
@@ -236,7 +236,7 @@ proptest! {
         let key = SigningKey::from_bytes(&seed);
         let author = Author::from(key.verifying_key().to_bytes().to_vec());
         let hash = ChangeHash(raw_hash);
-        let signature = Signature::ed25519(Ed25519Signature::from_bytes(
+        let signature = Signature::ed25519(ed25519::Signature::from_bytes(
             key.sign(&signing_message(&hash)).to_bytes(),
         ));
 

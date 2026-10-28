@@ -1,10 +1,12 @@
 use proptest::prelude::*;
 
-use crate::signature::verifier::{verify, Verification, Verifier};
+use crate::signature::{verify_signature as verify, Verification};
 use crate::signature::{Signature, SignatureBytes, SignatureTag};
 use crate::{Author, ChangeHash};
 
-use super::fixture;
+use crate::signature::tests::verification::fixture;
+
+use super::Verifier;
 
 // Any call fails the test, including a call whose result the dispatcher ignores.
 struct MustNotBeCalled;

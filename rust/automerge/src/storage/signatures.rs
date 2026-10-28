@@ -1,9 +1,10 @@
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::signature::{error as signature_error, Signature, SignatureBytes, SignatureTag};
 use crate::storage::parse::{Input, ParseResult};
 use crate::storage::ChunkType;
-use crate::{ChangeHash, Signature, SignatureBytes, SignatureBytesError, SignatureTag};
+use crate::ChangeHash;
 
 use super::{parse, Header};
 
@@ -38,7 +39,7 @@ impl SignatureEntry {
         // Validate the wire length before narrowing it or allocating a copy.
         if size > SignatureBytes::MAX_SIZE as u64 {
             return Err(parse::ParseError::Error(
-                SignatureBytesError::ExceededSize { actual: size }.into(),
+                signature_error::SignatureBytes::ExceededSize { actual: size }.into(),
             ));
         }
         let (i, bytes) = parse::take_n(size as usize, i)?;
@@ -336,8 +337,9 @@ impl<'a> SignaturesChunk<'a> {
 }
 
 pub(super) mod error {
+    use crate::signature::error as signature_error;
     use crate::storage::parse::leb128;
-    use crate::{ChangeHash, SignatureBytesError};
+    use crate::ChangeHash;
 
     /// A failure to parse or structurally validate a signatures chunk body.
     ///
@@ -348,7 +350,7 @@ pub(super) mod error {
         #[error(transparent)]
         Leb128(#[from] leb128::Error),
         #[error(transparent)]
-        Signature(#[from] SignatureBytesError),
+        Signature(#[from] signature_error::SignatureBytes),
         #[error(transparent)]
         Entries(#[from] HashEntries),
         #[error("signatures chunk body is truncated")]
@@ -373,10 +375,11 @@ mod tests {
     mod properties;
 
     use super::{error, HashEntries, SignatureEntry, SignaturesChunk};
+    use crate::signature::{error as signature_error, Signature, SignatureBytes, SignatureTag};
     use crate::storage::chunk::error::Chunk as ChunkError;
     use crate::storage::parse::{Input, ParseError};
     use crate::storage::{Chunk, ChunkType, Header};
-    use crate::{ChangeHash, Signature, SignatureBytes, SignatureBytesError, SignatureTag};
+    use crate::ChangeHash;
 
     fn flattened_entries(chunk: &SignaturesChunk<'_>) -> Vec<(ChangeHash, SignatureEntry)> {
         chunk
@@ -505,7 +508,9 @@ mod tests {
         let error = signature_error(&frame_body(&body));
         assert!(matches!(
             error,
-            error::Signatures::Signature(SignatureBytesError::ExceededSize { actual: 1025 })
+            error::Signatures::Signature(signature_error::SignatureBytes::ExceededSize {
+                actual: 1025
+            })
         ));
     }
 
@@ -518,7 +523,7 @@ mod tests {
             leb128::write::unsigned(&mut body, size).unwrap();
             let error = signature_error(&frame_body(&body));
             assert!(matches!(error,
-                error::Signatures::Signature(SignatureBytesError::ExceededSize { actual })
+                error::Signatures::Signature(signature_error::SignatureBytes::ExceededSize { actual })
                 if actual == size
             ));
         }
