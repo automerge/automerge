@@ -15,7 +15,7 @@ pub(crate) enum Chunk<'a> {
     Document(Document<'a>),
     Change(Change<'a, Unverified>),
     BundleV0(Box<BundleV0Storage<'a>>),
-    BundleColumns(Box<crate::storage::Bundle>, Header),
+    Bundle(Box<crate::storage::Bundle>, Header),
     CompressedChange(Change<'static, Unverified>, Compressed<'a>),
 }
 
@@ -114,7 +114,7 @@ impl<'a> Chunk<'a> {
             ChunkType::Bundle => {
                 let bundle = crate::storage::Bundle::parse_after_header(chunk_input)
                     .map_err(|e| parse::ParseError::Error(error::Chunk::Bundle(e)))?;
-                Chunk::BundleColumns(Box::new(bundle), header)
+                Chunk::Bundle(Box::new(bundle), header)
             }
         };
         Ok((remaining, chunk))
@@ -128,7 +128,7 @@ impl<'a> Chunk<'a> {
                 compressed.checksum() == change.checksum() && change.checksum_valid()
             }
             Self::BundleV0(b) => b.checksum_valid(),
-            Self::BundleColumns(_, header) => header.checksum_valid(),
+            Self::Bundle(_, header) => header.checksum_valid(),
         }
     }
 }

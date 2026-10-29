@@ -526,13 +526,10 @@ impl Automerge {
     /// * `options` - The options to use when loading
     #[tracing::instrument(skip(data), err)]
     pub fn load_with_options(data: &[u8], options: LoadOptions) -> Result<Self, AutomergeError> {
-        Ok(Self(
-            crate::automerge::Automerge::<Full>::load_with_options_and_mark_validation(
-                data,
-                options.into_next(),
-                crate::storage::load::MarkOrderValidation::Validate,
-            )?,
-        ))
+        Ok(Self(crate::automerge::Automerge::<Full>::load_as(
+            data,
+            options.into_next(),
+        )?))
     }
 
     /// Best-effort rescue for documents which fail strict loading.

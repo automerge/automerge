@@ -25,7 +25,13 @@ use crate::iter::{DiffIter, DocIter, Keys, ListRange, MapRange, Spans, Values};
 use crate::marks::{Mark, MarkAccumulator, MarkSet};
 use crate::op_set2::change::bundle::BundleApply;
 use crate::patches::{Patch, PatchAccumulator};
-use crate::storage::{self, change, load, Bundle, CompressConfig, Document, VerificationMode};
+use crate::storage::change::{self, Verified};
+use crate::storage::document::ReconstructError;
+use crate::storage::load::{
+    load_changes, Error as LoadError, LoadedChanges, LoadedChunk, MarkOrderValidation,
+};
+use crate::storage::parse::Input;
+use crate::storage::{Bundle, BundleStorage, Chunk, CompressConfig, Document, VerificationMode};
 use crate::tx::{
     self, CommitOptions, Failure, OwnedTransaction, ScopedRead, Success, Transactable, Transaction,
     TransactionArgs,
@@ -131,11 +137,21 @@ pub struct LoadOptions {
     gc: Option<GcMode>,
     author: Option<Author<'static>>,
     write_frontier: WriteFrontier,
+    mark_order: MarkOrderValidation,
 }
 
 impl LoadOptions {
     pub fn new() -> LoadOptions {
         LoadOptions::default()
+    }
+
+    /// Neither the head hashes nor the mark order are checked.
+    pub(crate) fn dont_verify() -> LoadOptions {
+        LoadOptions {
+            verification_mode: VerificationMode::DontCheck,
+            mark_order: MarkOrderValidation::AllowInvalid,
+            ..LoadOptions::default()
+        }
     }
 
     /// What to do when loading a document partially succeeds
@@ -226,6 +242,7 @@ impl std::default::Default for LoadOptions {
             gc: None,
             author: None,
             write_frontier: WriteFrontier::new(),
+            mark_order: MarkOrderValidation::Validate,
         }
     }
 }
@@ -567,6 +584,11 @@ impl<H: HashRetention> Automerge<H> {
         heads: Vec<FrontierHead>,
     ) {
         self.republish_mask(|policy| policy.mask_author(author, heads));
+    }
+
+    pub(crate) fn with_write_frontier_boundaries(mut self, write_frontier: WriteFrontier) -> Self {
+        self.set_write_frontier_boundaries(write_frontier);
+        self
     }
 
     pub(crate) fn set_write_frontier_boundaries(&mut self, write_frontier: WriteFrontier) {
@@ -1082,42 +1104,32 @@ impl<H: HashRetention> Automerge<H> {
         Ok(())
     }
 
-    pub(crate) fn load_with_options_and_mark_validation(
-        data: &[u8],
-        options: LoadOptions,
-        mark_order: load::MarkOrderValidation,
-    ) -> Result<Self, AutomergeError> {
+    pub(crate) fn load_as(data: &[u8], options: LoadOptions) -> Result<Self, AutomergeError> {
+        let mark_order = options.mark_order;
         if data.is_empty() {
             tracing::trace!("no data, initializing empty document");
-            let mut doc = Self::empty(options.text_encoding).with_author(options.author);
-            if !options.write_frontier.is_empty() {
-                doc.set_write_frontier_boundaries(options.write_frontier);
-            }
-            return Ok(doc);
+            return Ok(Self::empty(options.text_encoding)
+                .with_author(options.author)
+                .with_write_frontier_boundaries(options.write_frontier));
         }
         tracing::trace!("loading first chunk");
-        let (remaining, first_chunk) = storage::Chunk::parse(storage::parse::Input::new(data))
-            .map_err(|e| load::Error::Parse(Box::new(e)))?;
+        let (remaining, first_chunk) =
+            Chunk::parse(Input::new(data)).map_err(|e| LoadError::Parse(Box::new(e)))?;
         if !first_chunk.checksum_valid() {
-            return Err(load::Error::BadChecksum.into());
+            return Err(LoadError::BadChecksum.into());
         }
         // only a bundle names the hashes a document outside audit mode keeps
-        if H::AUDIT != AuditMode::Enabled
-            && !matches!(first_chunk, storage::Chunk::BundleColumns(..))
-        {
-            return Automerge::<Full>::load_with_options_and_mark_validation(
-                data, options, mark_order,
-            )
-            .map(H::from_full);
+        if H::AUDIT != AuditMode::Enabled && !matches!(first_chunk, Chunk::Bundle(..)) {
+            return Automerge::<Full>::load_as(data, options).map(H::from_full);
         }
 
-        let mut changes: Vec<load::LoadedChunk> = vec![];
+        let mut changes: Vec<LoadedChunk> = vec![];
         let mut first_chunk_was_doc = false;
         // a document chunk takes the write-frontier while reconstructing; any
         // other first chunk gets it once everything is applied
         let mut write_frontier = Some(options.write_frontier);
         let mut am = match first_chunk {
-            storage::Chunk::Document(d) => {
+            Chunk::Document(d) => {
                 tracing::trace!("first chunk is document chunk, inflating");
                 first_chunk_was_doc = true;
                 d.reconstruct(
@@ -1127,49 +1139,48 @@ impl<H: HashRetention> Automerge<H> {
                     write_frontier.take().unwrap_or_default(),
                 )
                 .map_err(|e| match e {
-                    crate::storage::document::ReconstructError::AuthorOnNonInitialSeq(
-                        seq,
-                        actor,
-                    ) => AutomergeError::AuthorOnNonInitialSeq(seq, actor),
-                    e => load::Error::InflateDocument(Box::new(e)).into(),
+                    ReconstructError::AuthorOnNonInitialSeq(seq, actor) => {
+                        AutomergeError::AuthorOnNonInitialSeq(seq, actor)
+                    }
+                    e => LoadError::InflateDocument(Box::new(e)).into(),
                 })
                 .map(H::from_full)?
             }
-            storage::Chunk::Change(stored_change) => {
+            Chunk::Change(stored_change) => {
                 tracing::trace!("first chunk is change chunk");
-                changes.push(load::LoadedChunk::Change(Box::new(
+                changes.push(LoadedChunk::Change(Box::new(
                     Change::new_from_unverified(stored_change.into_owned(), None)
-                        .map_err(|e| load::Error::InvalidChangeColumns(Box::new(e)))?,
+                        .map_err(|e| LoadError::InvalidChangeColumns(Box::new(e)))?,
                 )));
                 Self::empty(options.text_encoding)
             }
-            storage::Chunk::BundleV0(bundle) => {
+            Chunk::BundleV0(bundle) => {
                 tracing::trace!("first chunk is a BundleV0 chunk");
                 let bundle_changes = bundle
                     .to_changes()
-                    .map_err(|e| load::Error::InvalidBundleV0(Box::new(e)))?;
+                    .map_err(|e| LoadError::InvalidBundleV0(Box::new(e)))?;
                 changes.extend(
                     bundle_changes
                         .into_iter()
-                        .map(|c| load::LoadedChunk::Change(Box::new(c))),
+                        .map(|c| LoadedChunk::Change(Box::new(c))),
                 );
                 Self::empty(options.text_encoding)
             }
-            storage::Chunk::BundleColumns(bundle, _) => {
+            Chunk::Bundle(bundle, _) => {
                 tracing::trace!("first chunk is a bundle-columns chunk");
                 // a leading bundle is a document save, trailing orphans and all
                 first_chunk_was_doc = true;
-                changes.push(load::LoadedChunk::Bundle(bundle));
+                changes.push(LoadedChunk::Bundle(bundle));
                 Self::empty(options.text_encoding)
             }
-            storage::Chunk::CompressedChange(stored_change, compressed) => {
+            Chunk::CompressedChange(stored_change, compressed) => {
                 tracing::trace!("first chunk is compressed change");
-                changes.push(load::LoadedChunk::Change(Box::new(
+                changes.push(LoadedChunk::Change(Box::new(
                     Change::new_from_unverified(
                         stored_change.into_owned(),
                         Some(compressed.into_owned()),
                     )
-                    .map_err(|e| load::Error::InvalidChangeColumns(Box::new(e)))?,
+                    .map_err(|e| LoadError::InvalidChangeColumns(Box::new(e)))?,
                 )));
                 Self::empty(options.text_encoding)
             }
@@ -1178,19 +1189,19 @@ impl<H: HashRetention> Automerge<H> {
         am.change_graph.set_gc_mode(options.gc.unwrap_or_default());
         tracing::trace!("loading change chunks");
         // a partial load must still apply the chunks that parsed, the first included
-        let rest = match load::load_changes(
+        let rest = match load_changes(
             remaining.reset(),
             options.text_encoding,
             &am.change_graph,
             mark_order,
         ) {
-            load::LoadedChanges::Complete(c) => c,
-            load::LoadedChanges::Partial { error, .. }
+            LoadedChanges::Complete(c) => c,
+            LoadedChanges::Partial { error, .. }
                 if options.on_partial_load == OnPartialLoad::Error =>
             {
                 return Err(error.into());
             }
-            load::LoadedChanges::Partial { loaded, .. } => loaded,
+            LoadedChanges::Partial { loaded, .. } => loaded,
         };
         am.apply_loaded(changes.into_iter().chain(rest).collect())?;
         // Only allow missing deps if the first chunk was a document chunk
@@ -1236,13 +1247,12 @@ impl<H: HashRetention> Automerge<H> {
     /// change in future.
     pub fn load_incremental(&mut self, data: &[u8]) -> Result<usize, AutomergeError> {
         if self.is_empty() {
-            let mut doc = Self::load_with_options_and_mark_validation(
+            let mut doc = Self::load_as(
                 data,
                 LoadOptions::new()
                     .text_encoding(self.text_encoding())
                     .on_partial_load(OnPartialLoad::Ignore)
                     .verification_mode(VerificationMode::Check),
-                load::MarkOrderValidation::Validate,
             )?;
             // Ensure that the author, actor, write-frontier and GC mode are
             // carried over for an empty document.
@@ -1254,14 +1264,14 @@ impl<H: HashRetention> Automerge<H> {
             *self = doc;
             return Ok(self.ops.len());
         }
-        let changes = match load::load_changes(
-            storage::parse::Input::new(data),
+        let changes = match load_changes(
+            Input::new(data),
             self.text_encoding(),
             &self.change_graph,
-            load::MarkOrderValidation::Validate,
+            MarkOrderValidation::Validate,
         ) {
-            load::LoadedChanges::Complete(c) => c,
-            load::LoadedChanges::Partial { error, loaded, .. } => {
+            LoadedChanges::Complete(c) => c,
+            LoadedChanges::Partial { error, loaded, .. } => {
                 tracing::warn!(successful_chunks=loaded.len(), err=?error, "partial load");
                 loaded
             }
@@ -1282,15 +1292,15 @@ impl<H: HashRetention> Automerge<H> {
         patch_accumulator.path_hint(path_map);
     }
 
-    fn apply_loaded(&mut self, chunks: Vec<load::LoadedChunk>) -> Result<(), AutomergeError> {
+    fn apply_loaded(&mut self, chunks: Vec<LoadedChunk>) -> Result<(), AutomergeError> {
         // into an empty document a bundle may arrive before its deps
         let any_order = self.change_graph.is_empty();
         let mut waiting: Vec<Bundle> = vec![];
         let mut pending: Vec<Change> = vec![];
         for chunk in chunks {
             match chunk {
-                load::LoadedChunk::Change(c) => pending.push(*c),
-                load::LoadedChunk::Bundle(b) => {
+                LoadedChunk::Change(c) => pending.push(*c),
+                LoadedChunk::Bundle(b) => {
                     if !pending.is_empty() {
                         self.apply_changes_batch_with(std::mem::take(&mut pending), true)?;
                     }
@@ -1423,11 +1433,7 @@ impl<H: HashRetention> Automerge<H> {
     /// Save the document and attempt to load it before returning - slow!
     pub fn save_and_verify(&self) -> Result<Vec<u8>, AutomergeError> {
         let bytes = self.save();
-        Self::load_with_options_and_mark_validation(
-            &bytes,
-            Default::default(),
-            load::MarkOrderValidation::Validate,
-        )?;
+        Self::load_as(&bytes, Default::default())?;
         Ok(bytes)
     }
 
@@ -2177,7 +2183,7 @@ impl<H: HashRetention> Automerge<H> {
         heads: &[ChangeHash],
         boundary: &[ChangeHash],
         members: &crate::change_graph::Members<'_>,
-        storage: crate::storage::BundleStorage<'static, crate::storage::change::Verified>,
+        storage: BundleStorage<'static, Verified>,
         names: NameHashes,
     ) -> Result<Bundle, AutomergeError> {
         let crate::change_graph::ReceiverHashes { retained, outside } =
@@ -2795,7 +2801,7 @@ impl<H: HashRetention> Automerge<H> {
     /// Every change's hash, in node order.
     fn compute_hashes(&self) -> Result<Vec<ChangeHash>, AutomergeError> {
         let inflate = |e: Box<dyn std::error::Error + Send + Sync + 'static>| {
-            AutomergeError::Load(load::Error::InflateDocument(e))
+            AutomergeError::Load(LoadError::InflateDocument(e))
         };
         let mut collector = ChangeCollector::try_new(self.change_graph.iter(), &self.ops.actors)
             .map_err(|e| inflate(Box::new(e)))?
@@ -3744,23 +3750,14 @@ impl Automerge<Retained> {
     /// * `options` - The options to use when loading
     #[tracing::instrument(skip(data), err)]
     pub fn load_with_options(data: &[u8], options: LoadOptions) -> Result<Self, AutomergeError> {
-        Self::load_with_options_and_mark_validation(
-            data,
-            options,
-            load::MarkOrderValidation::Validate,
-        )
+        Self::load_as(data, options)
     }
 
     /// Best-effort rescue for documents which fail strict loading.
     ///
     /// This returns only the current hydrated value and does not preserve the original change graph.
     pub fn rescue(data: &[u8]) -> Result<hydrate::Value, AutomergeError> {
-        Self::load_with_options_and_mark_validation(
-            data,
-            Default::default(),
-            load::MarkOrderValidation::AllowInvalid,
-        )?
-        .hydrate(None)
+        Self::load_with_options(data, LoadOptions::dont_verify())?.hydrate(None)
     }
 
     /// Convert to a document that keeps every change hash.
@@ -5350,11 +5347,7 @@ mod actor_hygiene_tests {
             "a bundle names only the actors its ops use"
         );
 
-        let legacy = crate::storage::Document::new(
-            &doc.ops,
-            &doc.change_graph,
-            crate::storage::document::CompressConfig::None,
-        );
+        let legacy = Document::new(&doc.ops, &doc.change_graph, CompressConfig::None);
         assert_eq!(
             legacy.actors().len(),
             clean + 1,

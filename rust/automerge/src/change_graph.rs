@@ -455,14 +455,17 @@ impl<H: HashRetention> ChangeGraph<H> {
         required.extend(self.member_tips(nodes));
         // a receiver pins these when it caches the fragment, and may have
         // freed those outside the bundle: a concurrent fragment can cover
-        // them first
+        // them first. A bundle holding only part of the fragment leaves
+        // the rest, and the pins on it, to the receiver's own history.
         let mut outside = BTreeSet::new();
         for f in &self.fragments {
             if members.position(f.head).is_some() {
-                for p in self.fragment_pins(f) {
+                let boundary = self.calculate_clock(f.deps.clone());
+                let carried = self.carries_fragment(members, f, &boundary);
+                for p in self.fragment_pins_within(f, &boundary) {
                     if members.position(p).is_some() {
                         required.insert(p);
-                    } else {
+                    } else if carried {
                         outside.insert(p);
                     }
                 }
@@ -1841,6 +1844,23 @@ impl<H: HashRetention> ChangeGraph<H> {
     /// receiver's tip for that actor). Sorted, without duplicates.
     fn fragment_pins(&self, f: &FragmentNode) -> Vec<NodeIdx> {
         self.fragment_pins_within(f, &self.calculate_clock(f.deps.clone()))
+    }
+
+    fn carries_fragment(
+        &self,
+        members: &Members<'_>,
+        f: &FragmentNode,
+        boundary: &SeqClock,
+    ) -> bool {
+        self.seq_index.iter().enumerate().all(|(a, seqs)| {
+            let from = covered_seq(boundary, a);
+            let to = covered_seq(&f.clock, a);
+            from >= to
+                || seqs[from..to]
+                    .iter()
+                    .rev()
+                    .all(|m| members.position(*m).is_some())
+        })
     }
 
     /// [`Self::fragment_pins`], given the merged clock of `f.deps`.

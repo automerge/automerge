@@ -100,11 +100,7 @@ impl<H: HashRetention> AutoCommit<H> {
 
     pub(crate) fn load_as(data: &[u8], options: LoadOptions) -> Result<Self, AutomergeError> {
         let options = options.gc_or(crate::automerge::GcMode::Manual);
-        let doc = Automerge::<H>::load_with_options_and_mark_validation(
-            data,
-            options,
-            crate::storage::load::MarkOrderValidation::Validate,
-        )?;
+        let doc = Automerge::<H>::load_as(data, options)?;
         let save_cursor = if H::AUDIT == crate::automerge::AuditMode::Enabled {
             Vec::new()
         } else {

@@ -146,3 +146,33 @@ fn a_bundle_missing_retained_hashes_is_rebuilt_in_release() {
         doc.change_graph.held_hashes()
     );
 }
+
+#[test]
+fn a_lone_fragment_head_bundle_names_only_its_deps() {
+    let mut doc = AutoCommit::new().with_actor(ActorId::from(&b"save"[..]));
+    let mut other = AutoCommit::new().with_actor(ActorId::from(&b"other"[..]));
+    let mut i = 0i64;
+    let parents = loop {
+        i += 1;
+        other.put(&ROOT, "o", i).unwrap();
+        other.commit_with(CommitOptions::default().with_time(0));
+        doc.merge(&mut other).unwrap();
+        let parents = doc.get_heads();
+        doc.put(&ROOT, "k", i).unwrap();
+        let id = doc
+            .commit_with(CommitOptions::default().with_time(0))
+            .unwrap();
+        let hash = doc.document().change_id_to_hash(&id).unwrap().unwrap();
+        if hash.fragment_level() > 0 && id.seq() > 20 {
+            break parents;
+        }
+    };
+    let doc = doc.document();
+    let bundle = crate::Bundle::try_from(&doc.save_after(&parents).unwrap()[..]).unwrap();
+    assert_eq!(bundle.heads().count(), 1);
+    let mut boundary: Vec<_> = bundle.boundary.iter().map(|(h, _)| *h).collect();
+    let mut deps = bundle.deps().to_vec();
+    boundary.sort_unstable();
+    deps.sort_unstable();
+    assert_eq!(boundary, deps);
+}

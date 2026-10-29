@@ -160,7 +160,7 @@ fn load_next_change<'a, H: crate::hash_retention::HashRetention>(
                     .map(|c| LoadedChunk::Change(Box::new(c))),
             );
         }
-        storage::Chunk::BundleColumns(bundle, _) => {
+        storage::Chunk::Bundle(bundle, _) => {
             tracing::trace!("loading bundle columns chunk");
             changes.push(LoadedChunk::Bundle(bundle));
         }
