@@ -287,6 +287,7 @@ export function init<T>(_opts?: ActorId | InitOptions<T>): Doc<T> {
     freeze,
     patchCallback,
   }) as Doc<T>
+  handle.updateDiffCursor()
   return doc
 }
 
@@ -384,11 +385,13 @@ export function anonymize<T>(doc: Doc<T>): Doc<Record<string, unknown>> {
   }
 
   handle.enableFreeze(state.freeze)
-  return handle.materialize("/", undefined, {
+  const anonymized = handle.materialize("/", undefined, {
     handle,
     heads: undefined,
     freeze: state.freeze,
   }) as Doc<Record<string, unknown>>
+  handle.updateDiffCursor()
+  return anonymized
 }
 
 /** Explicity free the memory backing a document. Note that this is note
@@ -778,6 +781,7 @@ export function load<T>(
     heads: undefined,
     patchCallback,
   }) as Doc<T>
+  handle.updateDiffCursor()
   return doc
 }
 
