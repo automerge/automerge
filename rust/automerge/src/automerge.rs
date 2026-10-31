@@ -2254,27 +2254,29 @@ impl<H: HashRetention> Automerge<H> {
         &self,
         fragments: I,
     ) -> Result<Vec<Vec<u8>>, AutomergeError> {
+        // each bundle holds several KB until its batch is encoded
+        const BATCH: usize = 4096;
         let fragments: Vec<Fragment> = fragments.into_iter().collect();
-        let nodes = fragments
-            .iter()
-            .map(|f| self.fragment_nodes(f))
-            .collect::<Result<Vec<_>, _>>()?;
-        let members: Vec<_> = nodes
-            .iter()
-            .map(|n| self.change_graph.bundle_members(n))
-            .collect();
-        // one shared pass rather than a document walk per bundle
-        let storages = Bundle::storage_for_node_sets(&self.ops, &self.change_graph, &members)?;
-        fragments
-            .iter()
-            .zip(members.iter())
-            .zip(storages)
-            .map(|((f, n), storage)| {
-                Ok(self
-                    .assemble_bundle(&[f.head], &f.boundary, n, storage, NameHashes::All)?
-                    .bytes())
-            })
-            .collect()
+        let mut bundles = Vec::with_capacity(fragments.len());
+        for batch in fragments.chunks(BATCH) {
+            let nodes = batch
+                .iter()
+                .map(|f| self.fragment_nodes(f))
+                .collect::<Result<Vec<_>, _>>()?;
+            let members: Vec<_> = nodes
+                .iter()
+                .map(|n| self.change_graph.bundle_members(n))
+                .collect();
+            // one shared pass rather than a document walk per bundle
+            let storages = Bundle::storage_for_node_sets(&self.ops, &self.change_graph, &members)?;
+            for ((f, n), storage) in batch.iter().zip(members.iter()).zip(storages) {
+                bundles.push(
+                    self.assemble_bundle(&[f.head], &f.boundary, n, storage, NameHashes::All)?
+                        .bytes(),
+                );
+            }
+        }
+        Ok(bundles)
     }
 
     /// Apply a bundle's changes. To apply one bundle to several documents,
