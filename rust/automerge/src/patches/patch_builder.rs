@@ -6,9 +6,10 @@ use crate::automerge::view::ReadAt;
 use crate::exid::ExId;
 use crate::iter::SpanInternal;
 use crate::marks::MarkSet;
+use crate::op_set2::OpSet;
 use crate::text_value::ConcreteTextValue;
 use crate::types::{ObjId, ObjType};
-use crate::{Automerge, Prop, TextEncoding, Value};
+use crate::{Prop, TextEncoding, Value};
 
 use super::{Event, Patch, PatchAction};
 use crate::{marks::Mark, sequence_tree::SequenceTree};
@@ -21,12 +22,12 @@ pub(crate) struct PatchBuilder<'a> {
     seen: HashSet<ObjId>,
     text_encoding: TextEncoding,
     read: ReadAt<'a>,
-    doc: &'a Automerge,
+    doc: &'a OpSet,
 }
 
 impl<'a> PatchBuilder<'a> {
     pub(crate) fn new(
-        doc: &'a Automerge,
+        doc: &'a OpSet,
         path_map: BTreeMap<ObjId, (Prop, ObjId)>,
         read: ReadAt<'a>,
         text_encoding: TextEncoding,
@@ -47,7 +48,7 @@ impl<'a> PatchBuilder<'a> {
 }
 
 impl PatchBuilder<'_> {
-    pub(crate) fn log_event(&mut self, doc: &Automerge, exid: ExId, event: &Event) {
+    pub(crate) fn log_event(&mut self, doc: &OpSet, exid: ExId, event: &Event) {
         match event {
             Event::PutMap {
                 key,
@@ -113,7 +114,7 @@ impl PatchBuilder<'_> {
     fn update_path_map(&mut self, parent_id: ObjId, parent_type: ObjType) {
         match parent_type {
             ObjType::List => {
-                for item in self.doc.ops.list_range(&parent_id, .., self.read.borrow()) {
+                for item in self.doc.list_range(&parent_id, .., self.read.borrow()) {
                     if item.value.is_object() {
                         let prop = Prop::from(item.index);
                         self.path_map.insert(ObjId(item.op_id()), (prop, parent_id));
@@ -121,7 +122,7 @@ impl PatchBuilder<'_> {
                 }
             }
             ObjType::Text => {
-                for span in self.doc.ops.spans(&parent_id, self.read.borrow()) {
+                for span in self.doc.spans(&parent_id, self.read.borrow()) {
                     if let SpanInternal::Obj(id, index, _) = span {
                         let prop = Prop::from(index);
                         self.path_map.insert(ObjId(id), (prop, parent_id));
@@ -129,7 +130,7 @@ impl PatchBuilder<'_> {
                 }
             }
             _ => {
-                for item in self.doc.ops.map_range(&parent_id, .., self.read.borrow()) {
+                for item in self.doc.map_range(&parent_id, .., self.read.borrow()) {
                     if item.value.is_object() {
                         self.path_map.insert(
                             ObjId(item.op_id()),
@@ -148,8 +149,8 @@ impl PatchBuilder<'_> {
             let (p, o) = if let Some(r) = self.path_map.get(&obj).cloned() {
                 r
             } else {
-                let parent_id = self.doc.ops().object_parent(&obj)?;
-                let parent_type = self.doc.ops().object_type(&parent_id)?;
+                let parent_id = self.doc.object_parent(&obj)?;
+                let parent_type = self.doc.object_type(&parent_id)?;
                 if self.seen.contains(&obj) {
                     return None;
                 }
@@ -158,7 +159,7 @@ impl PatchBuilder<'_> {
                 self.path_map.get(&obj).cloned()?
             };
             obj = o;
-            let parent_obj = self.doc.ops().id_to_exid(obj.0);
+            let parent_obj = self.doc.id_to_exid(obj.0);
             path.push((parent_obj, p));
         }
         path.reverse();

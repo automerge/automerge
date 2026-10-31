@@ -1,6 +1,6 @@
 use super::SampledBenchmark;
 use benchmark_battery::automerge::transaction::Transactable;
-use benchmark_battery::automerge::{PatchLog, ReadDoc, ScalarValue, ROOT};
+use benchmark_battery::automerge::{ReadDoc, ScalarValue, ROOT};
 use benchmark_battery::{list_splice_100, rand};
 use std::hint::black_box;
 
@@ -10,10 +10,10 @@ pub fn benchmarks() -> Vec<SampledBenchmark> {
     vec![
         SampledBenchmark::no_setup("list", "list/list_cursor_now", list_cursor_now),
         SampledBenchmark::no_setup("list", "list/list_cursor_at", list_cursor_at),
-        SampledBenchmark::no_setup("list", "list/list_update_at", list_update_at),
-        SampledBenchmark::no_setup("list", "list/list_update_now", list_update_now),
-        SampledBenchmark::no_setup("list", "list/list_splice_index_now", list_splice_index_now),
-        SampledBenchmark::no_setup("list", "list/list_splice_index_at", list_splice_index_at),
+        SampledBenchmark::accumulating("list", "list/list_update_at", list_update_at),
+        SampledBenchmark::accumulating("list", "list/list_update_now", list_update_now),
+        SampledBenchmark::accumulating("list", "list/list_splice_index_now", list_splice_index_now),
+        SampledBenchmark::accumulating("list", "list/list_splice_index_at", list_splice_index_at),
     ]
 }
 
@@ -65,7 +65,7 @@ fn list_update_at() -> Box<dyn FnMut()> {
     Box::new(move || {
         let pos = rand() % len;
         let h = rand() % heads.len();
-        let mut tx = doc.transaction_at(PatchLog::null(), &heads[h]).unwrap();
+        let mut tx = doc.transaction_at(&heads[h]).unwrap();
         tx.put(&list, pos, "x").unwrap();
         tx.commit();
         heads.push(doc.get_heads());
@@ -116,7 +116,7 @@ fn list_splice_index_at() -> Box<dyn FnMut()> {
     tx.commit();
     Box::new(move || {
         let pos = rand() % len;
-        let mut tx = doc.transaction_at(PatchLog::null(), &heads).unwrap();
+        let mut tx = doc.transaction_at(&heads).unwrap();
         tx.insert(&list, pos, "x").unwrap();
         tx.commit();
     })

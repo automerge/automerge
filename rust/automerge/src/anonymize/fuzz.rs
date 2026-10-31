@@ -15,6 +15,7 @@ proptest! {
     #![proptest_config(ProptestConfig::with_cases(64))]
 
     #[test]
+    #[cfg_attr(not(feature = "deep_fuzz"), ignore = "deep fuzz: run with --features deep_fuzz")]
     fn randomized_documents_retain_their_shape(
         program in proptest::collection::vec(any::<u8>(), 0..192),
         seed in any::<[u8; 32]>(),

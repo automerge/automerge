@@ -1,9 +1,9 @@
+use crate::doc::Heads;
 use crate::interop::error;
 use crate::interop::{ExternalTypeConstructor, SAFE_INT, SAFE_UINT};
 use crate::value::Datatype;
 use crate::Automerge;
 use automerge as am;
-use automerge::ChangeHash;
 use js_sys::{Array, BigInt, JsString, Object, Reflect, Symbol, Uint8Array};
 use rustc_hash::FxBuildHasher;
 use std::borrow::{Borrow, Cow};
@@ -13,7 +13,7 @@ use std::sync::Arc;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
-use am::{ObjId, ObjType, ReadDoc};
+use am::{ObjId, ObjType};
 
 use am::iter::{DocItem, DocObjItem};
 
@@ -126,11 +126,11 @@ impl<'a> ExportCache<'a> {
         &mut self,
         obj: ObjId,
         datatype: Datatype,
-        heads: Option<&[ChangeHash]>,
+        heads: Option<&Heads>,
         meta: &JsValue,
     ) -> Result<JsValue, error::Export> {
         if datatype == Datatype::Text {
-            return Ok(self.doc.text_at(&obj, heads)?.into());
+            return Ok(self.doc.doc.text(&obj, heads)?.into());
         }
         let mut current_obj_id = Arc::new(obj.clone());
         let mut o = self
@@ -140,7 +140,7 @@ impl<'a> ExportCache<'a> {
         let mut buffer = String::new();
         let mut parent_prop = JsValue::null();
         let result = JsValue::from(&o);
-        let iter = self.doc.doc.iter_at(obj, heads);
+        let iter = self.doc.doc.iter(&obj, heads)?;
         for DocObjItem { obj, item } in iter {
             if obj != current_obj_id {
                 if !buffer.is_empty() {

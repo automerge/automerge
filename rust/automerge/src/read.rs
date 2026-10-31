@@ -5,7 +5,7 @@ use crate::{
     hydrate,
     marks::{Mark, MarkSet},
     op_set2::Parents,
-    Change, ChangeHash, Cursor, ObjType, Prop, TextEncoding, Value, ROOT,
+    Change, ChangeHash, ChangeId, Cursor, ObjType, Prop, TextEncoding, Value, ROOT,
 };
 
 use crate::iter::{DocIter, Keys, ListRange, MapRange, Spans, Values};
@@ -15,9 +15,13 @@ use std::ops::RangeBounds;
 /// Methods for reading values from an automerge document
 ///
 /// Many of the methods on this trait have an alternate `*_at` version which
-/// takes an additional argument of `&[ChangeHash]`. This allows you to retrieve
+/// takes an additional argument of `&[ChangeId]`. This allows you to retrieve
 /// the value at a particular point in the document history identified by the
-/// given change hashes.
+/// given change ids.
+///
+/// Change ids which are not present in the document cause the `*_at` methods
+/// to fail with [`AutomergeError::InvalidChangeId`], including heads taken from
+/// a document which has changes this one has not seen.
 pub trait ReadDoc {
     /// Get the parents of an object in the document tree.
     ///
@@ -40,7 +44,7 @@ pub trait ReadDoc {
     fn parents_at<O: AsRef<ExId>>(
         &self,
         obj: O,
-        heads: &[ChangeHash],
+        heads: &[ChangeId],
     ) -> Result<Parents<'_>, AutomergeError>;
 
     /// Get the keys of the object `obj`.
@@ -52,12 +56,20 @@ pub trait ReadDoc {
     /// Get the keys of the object `obj` as at `heads`
     ///
     /// See [`Self::keys()`]
-    fn keys_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> Keys<'_>;
+    fn keys_at<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: &[ChangeId],
+    ) -> Result<Keys<'_>, AutomergeError>;
 
     /// Iterate over the object `obj` as at `heads`
     ///
     /// See [`Self::iter()`]
-    fn iter_at<O: AsRef<ExId>>(&self, obj: O, heads: Option<&[ChangeHash]>) -> DocIter<'_>;
+    fn iter_at<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: Option<&[ChangeId]>,
+    ) -> Result<DocIter<'_>, AutomergeError>;
 
     /// Iterate over all the objects in the document
     ///
@@ -73,6 +85,7 @@ pub trait ReadDoc {
     /// children.
     fn iter(&self) -> DocIter<'_> {
         self.iter_at(&ROOT, None)
+            .expect("iterating with no heads cannot fail")
     }
 
     /// Iterate over the keys and values of the map `obj` in the given range.
@@ -100,8 +113,8 @@ pub trait ReadDoc {
         &'a self,
         obj: O,
         range: R,
-        heads: &[ChangeHash],
-    ) -> MapRange<'a>;
+        heads: &[ChangeId],
+    ) -> Result<MapRange<'a>, AutomergeError>;
 
     /// Iterate over the indexes and values of the list or text `obj` in the given range.
     ///
@@ -119,8 +132,8 @@ pub trait ReadDoc {
         &self,
         obj: O,
         range: R,
-        heads: &[ChangeHash],
-    ) -> ListRange<'_>;
+        heads: &[ChangeId],
+    ) -> Result<ListRange<'_>, AutomergeError>;
 
     /// Iterate over the values in a map, list, or text object
     ///
@@ -134,7 +147,11 @@ pub trait ReadDoc {
     /// is the ID of the operation which created the value.
     ///
     /// See [`Self::values()`]
-    fn values_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> Values<'_>;
+    fn values_at<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: &[ChangeId],
+    ) -> Result<Values<'_>, AutomergeError>;
 
     /// Get the length of the given object.
     ///
@@ -146,7 +163,11 @@ pub trait ReadDoc {
     /// If the given object is not in this document this method will return `0`
     ///
     /// See [`Self::length()`]
-    fn length_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> usize;
+    fn length_at<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: &[ChangeId],
+    ) -> Result<usize, AutomergeError>;
 
     /// Get the type of this object, if it is an object.
     fn object_type<O: AsRef<ExId>>(&self, obj: O) -> Result<ObjType, AutomergeError>;
@@ -158,7 +179,7 @@ pub trait ReadDoc {
     fn marks_at<O: AsRef<ExId>>(
         &self,
         obj: O,
-        heads: &[ChangeHash],
+        heads: &[ChangeId],
     ) -> Result<Vec<Mark>, AutomergeError>;
 
     /// Get the marks covering `index` of a sequence, as at `heads`
@@ -169,7 +190,7 @@ pub trait ReadDoc {
         &self,
         obj: O,
         index: usize,
-        heads: Option<&[ChangeHash]>,
+        heads: Option<&[ChangeId]>,
     ) -> Result<MarkSet, AutomergeError>;
 
     /// Get the string represented by the given text object.
@@ -177,11 +198,8 @@ pub trait ReadDoc {
 
     /// Get the string represented by the given text object as at `heads`, see
     /// [`Self::text()`]
-    fn text_at<O: AsRef<ExId>>(
-        &self,
-        obj: O,
-        heads: &[ChangeHash],
-    ) -> Result<String, AutomergeError>;
+    fn text_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeId])
+        -> Result<String, AutomergeError>;
 
     /// Return the sequence of text and block markers in the text object `obj`
     fn spans<O: AsRef<ExId>>(&self, obj: O) -> Result<Spans<'_>, AutomergeError>;
@@ -190,7 +208,7 @@ pub trait ReadDoc {
     fn spans_at<O: AsRef<ExId>>(
         &self,
         obj: O,
-        heads: &[ChangeHash],
+        heads: &[ChangeId],
     ) -> Result<Spans<'_>, AutomergeError>;
 
     /// Obtain the stable address (Cursor) for a [`usize`] position in a Sequence (either [`ObjType::List`] or [`ObjType::Text`]).
@@ -200,7 +218,7 @@ pub trait ReadDoc {
         &self,
         obj: O,
         position: I,
-        at: Option<&[ChangeHash]>,
+        at: Option<&[ChangeId]>,
     ) -> Result<Cursor, AutomergeError>;
 
     /// Obtain the stable address (Cursor) for a [`usize`] position in a Sequence (either [`ObjType::List`] or [`ObjType::Text`]).
@@ -225,7 +243,7 @@ pub trait ReadDoc {
         &self,
         obj: O,
         position: I,
-        at: Option<&[ChangeHash]>,
+        at: Option<&[ChangeId]>,
         move_cursor: MoveCursor,
     ) -> Result<Cursor, AutomergeError>;
 
@@ -238,7 +256,7 @@ pub trait ReadDoc {
         &self,
         obj: O,
         cursor: &Cursor,
-        at: Option<&[ChangeHash]>,
+        at: Option<&[ChangeId]>,
     ) -> Result<usize, AutomergeError>;
 
     /// Get a value out of the document.
@@ -267,13 +285,13 @@ pub trait ReadDoc {
         &self,
         obj: O,
         prop: P,
-        heads: &[ChangeHash],
+        heads: &[ChangeId],
     ) -> Result<Option<(Value<'_>, ExId)>, AutomergeError>;
 
     fn hydrate<O: AsRef<ExId>>(
         &self,
         obj: O,
-        heads: Option<&[ChangeHash]>,
+        heads: Option<&[ChangeId]>,
     ) -> Result<hydrate::Value, AutomergeError>;
 
     /// Get all conflicting values out of the document at this prop that conflict.
@@ -294,15 +312,15 @@ pub trait ReadDoc {
         &self,
         obj: O,
         prop: P,
-        heads: &[ChangeHash],
+        heads: &[ChangeId],
     ) -> Result<Vec<(Value<'_>, ExId)>, AutomergeError>;
 
     /// Get the hashes of the changes in this document that aren't transitive dependencies of the
     /// given `heads`.
-    fn get_missing_deps(&self, heads: &[ChangeHash]) -> Vec<ChangeHash>;
+    fn get_missing_deps(&self, heads: &[ChangeId]) -> Result<Vec<ChangeHash>, AutomergeError>;
 
     /// Get a change by its hash.
-    fn get_change_by_hash(&self, hash: &ChangeHash) -> Option<Change>;
+    fn get_change_by_hash(&self, hash: &ChangeHash) -> Result<Option<Change>, AutomergeError>;
 
     /// Return some statistics about the document
     fn stats(&self) -> Stats;

@@ -1,3 +1,4 @@
+use super::mapped_column::{MappedIter, MappedIterState};
 use super::Op;
 use crate::iter::tools::Shiftable;
 use crate::{
@@ -6,14 +7,14 @@ use crate::{
     op_set2::{
         op::SuccCursors,
         types::{Action, ActorIdx, KeyRef, ScalarValue},
-        OpSet,
+        OpSet, SuccInsert,
     },
-    types::{ElemId, ObjId, OpId},
+    types::{ElemId, ObjId, OpId, TextEncoding},
 };
 
+use crate::clock::Clock;
 use std::borrow::Cow;
 use std::fmt::Debug;
-use std::iter::Peekable;
 use std::ops::Range;
 
 #[derive(Clone, Debug)]
@@ -75,6 +76,16 @@ pub(crate) enum ReadOpError {
     MissingValue(&'static str),
     #[error("invalid value: {0}")]
     InvalidValue(#[from] op_set2::types::ReadScalarError),
+    #[error(transparent)]
+    PackErr(#[from] hexane::PackError),
+    #[error("op {0} has a partially null object id")]
+    InvalidObjId(usize),
+    #[error("ops out of order: the object id at op {0} does not increase")]
+    ObjOutOfOrder(usize),
+    #[error("ops out of order: the key or id at op {0} does not increase")]
+    KeyOutOfOrder(usize),
+    #[error(transparent)]
+    ColumnValidation(#[from] super::ColumnValidationError),
 }
 
 impl ExactSizeIterator for OpIter<'_> {
@@ -266,16 +277,17 @@ impl<'a> KeyRef<'a> {
 
 #[derive(Clone, Default, Debug)]
 pub(crate) struct OpIdIter<'a> {
-    pub(super) actor: hexane::Iter<'a, ActorIdx>,
+    pub(super) actor: MappedIter<'a, ActorIdx>,
     ctr: hexane::DeltaIter<'a, u32>,
 }
 
 impl OpIdIterState {
     fn try_resume<'a>(&self, op_set: &'a OpSet) -> Result<OpIdIter<'a>, AutomergeError> {
         Ok(OpIdIter {
-            actor: self
-                .actor_state
-                .try_resume(&op_set.cols.id_actor)
+            actor: op_set
+                .cols
+                .id_actor
+                .try_resume(&self.actor_state)
                 .map_err(AutomergeError::encoding)?,
             ctr: self
                 .ctr_state
@@ -286,7 +298,7 @@ impl OpIdIterState {
 }
 
 pub(crate) struct OpIdIterState {
-    actor_state: hexane::column::IterState,
+    actor_state: MappedIterState,
     ctr_state: hexane::DeltaIterState,
 }
 
@@ -301,6 +313,13 @@ impl<'a> CtrWalker<'a> {
     }
 }
 
+impl CtrWalker<'_> {
+    /// The next run of consecutive matching rows.
+    pub(crate) fn next_range(&mut self) -> Option<Range<usize>> {
+        self.ctr.next_range()
+    }
+}
+
 impl Iterator for CtrWalker<'_> {
     type Item = usize;
     fn next(&mut self) -> Option<usize> {
@@ -311,35 +330,106 @@ impl Iterator for CtrWalker<'_> {
     }
 }
 
+/// The rows owning a successor whose counter is in a range, ascending.
 pub(crate) struct SuccWalker<'a> {
-    acc: usize,
+    /// the successor entries in range
+    ctr: CtrWalker<'a>,
+    /// entries found but not yet mapped to rows
+    pending: Range<usize>,
     count: hexane::PrefixIter<'a, u32>,
-    ctr: Peekable<CtrWalker<'a>>,
+    /// the first row and entry of the unread part of the current run
+    row: usize,
+    entry: usize,
+    /// rows left in the current run, and the successors of each
+    left: usize,
+    per_row: usize,
 }
+
+/// Successor entries past which [`SuccWalker`] seeks the count column
+/// rather than reading its runs.
+const SUCC_SEEK: usize = 256;
 
 impl<'a> SuccWalker<'a> {
     pub(crate) fn new(op_set: &'a OpSet, range: Range<usize>) -> Self {
-        let ctr = CtrWalker::new(&op_set.cols.succ_ctr, range).peekable();
+        let ctr = CtrWalker::new(&op_set.cols.succ_ctr, range);
         let count = op_set.cols.succ_count.iter();
-        Self { acc: 0, count, ctr }
+        Self {
+            ctr,
+            pending: 0..0,
+            count,
+            row: 0,
+            entry: 0,
+            left: 0,
+            per_row: 0,
+        }
+    }
+
+    /// The next found entries not in a row already returned.
+    fn next_entries(&mut self) -> Option<Range<usize>> {
+        loop {
+            if self.pending.is_empty() {
+                self.pending = self.ctr.next_range()?;
+            }
+            self.pending.start = self.pending.start.max(self.entry);
+            if !self.pending.is_empty() {
+                return Some(std::mem::replace(&mut self.pending, 0..0));
+            }
+        }
+    }
+
+    /// The row owning entry `e`, which is past every row returned so far;
+    /// the walk moves past that row.
+    fn row_of(&mut self, e: usize) -> Option<usize> {
+        loop {
+            let run_end = self.entry + self.per_row * self.left;
+            if e < run_end {
+                let i = (e - self.entry) / self.per_row;
+                let row = self.row + i;
+                self.row += i + 1;
+                self.left -= i + 1;
+                self.entry += self.per_row * (i + 1);
+                return Some(row);
+            }
+            self.row += self.left;
+            self.entry = run_end;
+            self.left = 0;
+            if e - self.entry > SUCC_SEEK {
+                let found = self.count.advance_prefix((e - self.entry) as u64)?;
+                self.row = found.pos + 1;
+                self.entry = found.pv.total() as usize;
+                return Some(found.pos);
+            }
+            let run = self.count.next_run()?;
+            self.left = run.count;
+            self.per_row = run.value.value as usize;
+        }
+    }
+
+    /// The rows owning the next run of found entries.
+    pub(crate) fn next_range(&mut self) -> Option<Range<usize>> {
+        let entries = self.next_entries()?;
+        let first = self.row_of(entries.start)?;
+        let last = match entries.end - 1 {
+            e if e < self.entry => first,
+            e => self.row_of(e)?,
+        };
+        Some(first..last + 1)
     }
 }
 
 impl Iterator for SuccWalker<'_> {
     type Item = usize;
     fn next(&mut self) -> Option<usize> {
-        while self.ctr.peek()? < &self.acc {
-            self.ctr.next();
-        }
-        let delta = *self.ctr.peek()? - self.acc;
-        let c = self.count.advance_prefix(delta as u64)?;
-        self.acc = c.pv.total() as usize;
-        Some(c.pos)
+        let mut entries = self.next_entries()?;
+        let row = self.row_of(entries.start)?;
+        entries.start += 1;
+        self.pending = entries;
+        Some(row)
     }
 }
 
 impl<'a> OpIdIter<'a> {
-    pub(crate) fn new(actor: hexane::Iter<'a, ActorIdx>, ctr: hexane::DeltaIter<'a, u32>) -> Self {
+    pub(crate) fn new(actor: MappedIter<'a, ActorIdx>, ctr: hexane::DeltaIter<'a, u32>) -> Self {
         Self { actor, ctr }
     }
 
@@ -347,6 +437,7 @@ impl<'a> OpIdIter<'a> {
         self.actor.pos()
     }
 
+    #[inline]
     pub(crate) fn maybe_try_next(&mut self) -> Result<Option<OpId>, ReadOpError> {
         let actor = self.actor.next();
         let ctr = self.ctr.next();
@@ -386,7 +477,77 @@ impl<'a> OpIdIter<'a> {
     }
 }
 
+impl OpIdIter<'_> {
+    /// Only valid on a range of sorted op ids.
+    pub(crate) fn seek_to_value(&mut self, target: &OpId) -> Range<usize> {
+        let range = self.ctr.seek_to_value(target.counter() as u32, ..);
+        let range = self.actor.seek_to_value(target.actoridx(), range);
+        self.ctr.advance_to(range.start);
+        range
+    }
+
+    // the cursors must leave a miss in step: later advances move both by
+    // the same count
+    fn park_miss(&mut self) {
+        let max = self.actor.end_pos();
+        self.actor.advance_to(max);
+        self.ctr.advance_to(max);
+        debug_assert_eq!(self.ctr.pos(), self.actor.pos());
+        debug_assert_eq!(self.ctr.end_pos(), self.actor.end_pos());
+    }
+
+    /// Works on unsorted ids.
+    pub(crate) fn scan_to_value(&mut self, target: &OpId) -> Option<usize> {
+        loop {
+            let Some(pos) = self.ctr.scan_to_value(target.counter() as u32) else {
+                break;
+            };
+            let Some(actor) = self.actor.scan_to_pos(pos) else {
+                break;
+            };
+            if actor == target.actoridx() {
+                return Some(pos);
+            }
+        }
+        self.park_miss();
+        None
+    }
+
+    /// Scan forward for the first op id less than `target`, returning its
+    /// position and id; on a hit the cursor is just past it. Works on
+    /// unsorted ids.
+    pub(crate) fn scan_to_lesser(&mut self, target: OpId) -> Option<(usize, OpId)> {
+        loop {
+            let Some((pos, ctr)) = self.ctr.scan_to_range(..=target.counter() as u32) else {
+                break;
+            };
+            let Some(actor) = self.actor.scan_to_pos(pos) else {
+                break;
+            };
+            let found = OpId::new(ctr as u64, u64::from(actor) as usize);
+            if found < target {
+                return Some((pos, found));
+            }
+        }
+        self.park_miss();
+        None
+    }
+}
+
 impl Shiftable for OpIdIter<'_> {
+    fn get_pos(&self) -> usize {
+        self.actor.pos()
+    }
+
+    fn get_max(&self) -> usize {
+        self.actor.end_pos()
+    }
+
+    fn set_max(&mut self, pos: usize) {
+        self.actor.set_max(pos);
+        self.ctr.set_max(pos);
+    }
+
     fn shift_next(&mut self, range: Range<usize>) -> Option<OpId> {
         let actor_idx = self.actor.shift_next(range.clone())?;
         let counter = self.ctr.shift_next(range)?;
@@ -397,6 +558,7 @@ impl Shiftable for OpIdIter<'_> {
 impl Iterator for OpIdIter<'_> {
     type Item = OpId;
 
+    #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         self.maybe_try_next().ok().flatten()
     }
@@ -443,6 +605,18 @@ impl<'a> InsertIter<'a> {
 }
 
 impl Shiftable for InsertIter<'_> {
+    fn get_pos(&self) -> usize {
+        self.iter.pos()
+    }
+
+    fn get_max(&self) -> usize {
+        self.iter.end_pos()
+    }
+
+    fn set_max(&mut self, pos: usize) {
+        self.iter.set_max(pos);
+    }
+
     fn shift_next(&mut self, range: Range<usize>) -> Option<Self::Item> {
         self.iter.shift_next(range)
     }
@@ -460,16 +634,55 @@ impl Iterator for InsertIter<'_> {
     }
 }
 
+/// Forward-only element-id reads at scattered rows.
+#[derive(Clone, Debug)]
+pub(crate) struct ElemIdIter<'a> {
+    key_actor: MappedIter<'a, Option<ActorIdx>>,
+    key_ctr: hexane::DeltaIter<'a, Option<u32>>,
+    pos: usize,
+}
+
+impl<'a> ElemIdIter<'a> {
+    pub(crate) fn new(
+        key_actor: MappedIter<'a, Option<ActorIdx>>,
+        key_ctr: hexane::DeltaIter<'a, Option<u32>>,
+    ) -> Self {
+        Self {
+            key_actor,
+            key_ctr,
+            pos: 0,
+        }
+    }
+
+    /// The element id at `pos`, which must be at or after the last row
+    /// read. `None` is the head of a sequence.
+    pub(crate) fn at(&mut self, pos: usize) -> Result<Option<ElemId>, ReadOpError> {
+        let skip = pos
+            .checked_sub(self.pos)
+            .expect("ElemIdIter::at went backwards");
+        self.pos = pos + 1;
+        let actor = self
+            .key_actor
+            .nth(skip)
+            .ok_or(ReadOpError::MissingValue("key_actor"))?;
+        let ctr = self
+            .key_ctr
+            .nth(skip)
+            .ok_or(ReadOpError::MissingValue("key_ctr"))?;
+        ElemId::try_load(actor, ctr.map(i64::from))
+    }
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct KeyIter<'a> {
     key_str: hexane::Iter<'a, Option<String>>,
-    key_actor: hexane::Iter<'a, Option<ActorIdx>>,
+    key_actor: MappedIter<'a, Option<ActorIdx>>,
     key_ctr: hexane::DeltaIter<'a, Option<u32>>,
 }
 
 pub(crate) struct KeyIterState {
     key_str: hexane::IterState,
-    key_actor: hexane::column::IterState,
+    key_actor: MappedIterState,
     key_ctr: hexane::DeltaIterState,
 }
 
@@ -480,9 +693,10 @@ impl KeyIterState {
                 .key_str
                 .try_resume(&op_set.cols.key_str)
                 .map_err(AutomergeError::encoding)?,
-            key_actor: self
+            key_actor: op_set
+                .cols
                 .key_actor
-                .try_resume(&op_set.cols.key_actor)
+                .try_resume(&self.key_actor)
                 .map_err(AutomergeError::encoding)?,
             key_ctr: self
                 .key_ctr
@@ -495,7 +709,7 @@ impl KeyIterState {
 impl<'a> KeyIter<'a> {
     pub(crate) fn new(
         key_str: hexane::Iter<'a, Option<String>>,
-        key_actor: hexane::Iter<'a, Option<ActorIdx>>,
+        key_actor: MappedIter<'a, Option<ActorIdx>>,
         key_ctr: hexane::DeltaIter<'a, Option<u32>>,
     ) -> Self {
         Self {
@@ -547,6 +761,20 @@ impl<'a> KeyIter<'a> {
 }
 
 impl<'a> Shiftable for KeyIter<'a> {
+    fn get_pos(&self) -> usize {
+        self.key_str.pos()
+    }
+
+    fn get_max(&self) -> usize {
+        self.key_str.end_pos()
+    }
+
+    fn set_max(&mut self, pos: usize) {
+        self.key_str.set_max(pos);
+        self.key_actor.set_max(pos);
+        self.key_ctr.set_max(pos);
+    }
+
     fn shift_next(&mut self, range: Range<usize>) -> Option<Self::Item> {
         let key_str = self.key_str.shift_next(range.clone())?;
         let key_actor = self.key_actor.shift_next(range.clone())?;
@@ -569,21 +797,22 @@ impl<'a> Iterator for KeyIter<'a> {
 
 #[derive(Clone, Default, Debug)]
 pub(crate) struct ObjIdIter<'a> {
-    obj_actor: hexane::Iter<'a, Option<ActorIdx>>,
+    obj_actor: MappedIter<'a, Option<ActorIdx>>,
     obj_ctr: hexane::Iter<'a, Option<u32>>,
 }
 
 pub(crate) struct ObjIdIterState {
-    obj_actor: hexane::column::IterState,
+    obj_actor: MappedIterState,
     obj_ctr: hexane::column::IterState,
 }
 
 impl ObjIdIterState {
     fn try_resume<'a>(&self, op_set: &'a OpSet) -> Result<ObjIdIter<'a>, AutomergeError> {
         Ok(ObjIdIter {
-            obj_actor: self
+            obj_actor: op_set
+                .cols
                 .obj_actor
-                .try_resume(&op_set.cols.obj_actor)
+                .try_resume(&self.obj_actor)
                 .map_err(AutomergeError::encoding)?,
             obj_ctr: self
                 .obj_ctr
@@ -595,14 +824,14 @@ impl ObjIdIterState {
 
 impl<'a> ObjIdIter<'a> {
     pub(crate) fn new(
-        obj_actor: hexane::Iter<'a, Option<ActorIdx>>,
+        obj_actor: MappedIter<'a, Option<ActorIdx>>,
         obj_ctr: hexane::Iter<'a, Option<u32>>,
     ) -> Self {
         Self { obj_actor, obj_ctr }
     }
 
     pub(crate) fn new_range(
-        obj_actor: hexane::Iter<'a, Option<ActorIdx>>,
+        obj_actor: MappedIter<'a, Option<ActorIdx>>,
         obj_ctr: hexane::Iter<'a, Option<u32>>,
     ) -> Self {
         Self { obj_actor, obj_ctr }
@@ -655,6 +884,19 @@ impl<'a> ObjIdIter<'a> {
 }
 
 impl Shiftable for ObjIdIter<'_> {
+    fn get_pos(&self) -> usize {
+        self.obj_actor.pos()
+    }
+
+    fn get_max(&self) -> usize {
+        self.obj_actor.end_pos()
+    }
+
+    fn set_max(&mut self, pos: usize) {
+        self.obj_actor.set_max(pos);
+        self.obj_ctr.set_max(pos);
+    }
+
     fn shift_next(&mut self, range: Range<usize>) -> Option<Self::Item> {
         let actor = self.obj_actor.shift_next(range.clone())?;
         let ctr = self.obj_ctr.shift_next(range)?;
@@ -701,6 +943,19 @@ impl MarkInfoIterState {
 }
 
 impl Shiftable for MarkInfoIter<'_> {
+    fn get_pos(&self) -> usize {
+        self.name.pos()
+    }
+
+    fn get_max(&self) -> usize {
+        self.name.end_pos()
+    }
+
+    fn set_max(&mut self, pos: usize) {
+        self.name.set_max(pos);
+        self.expand.set_max(pos);
+    }
+
     fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
         let mark_name = self.name.shift_next(range.clone());
         let expand = self.expand.shift_next(range).unwrap_or(false);
@@ -714,15 +969,6 @@ impl<'a> MarkInfoIter<'a> {
         expand: hexane::Iter<'a, bool>,
     ) -> Self {
         Self { name, expand }
-    }
-
-    pub(crate) fn set_max(&mut self, pos: usize) {
-        self.name.set_max(pos);
-        self.expand.set_max(pos);
-    }
-
-    pub(crate) fn pos(&self) -> usize {
-        self.expand.pos()
     }
 
     pub(crate) fn try_next(&mut self) -> Result<(Option<&'a str>, bool), ReadOpError> {
@@ -796,11 +1042,66 @@ impl<'a> Iterator for ActionValueIter<'a> {
 }
 
 impl Shiftable for ActionValueIter<'_> {
+    fn get_pos(&self) -> usize {
+        self.action.get_pos()
+    }
+
+    fn get_max(&self) -> usize {
+        self.action.get_max()
+    }
+
+    fn set_max(&mut self, pos: usize) {
+        self.action.set_max(pos);
+        self.value.set_max(pos);
+    }
+
     fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
         let action = self.action.shift_next(range.clone());
         let value = self.value.shift_next(range);
         let pos = self.action.iter.pos();
         Some((action?, value?, pos - 1))
+    }
+}
+
+/// Forward-only text widths, read from the op columns alone (never the
+/// indexes) without materializing ops.
+#[derive(Clone, Debug)]
+pub(crate) struct WidthIter<'a> {
+    ops: ActionValueIter<'a>,
+    text_encoding: TextEncoding,
+}
+
+impl<'a> WidthIter<'a> {
+    pub(crate) fn new(
+        action: &'a hexane::Column<Action>,
+        value: &'a hexane::RawColumn,
+        value_meta: &'a hexane::PrefixColumn<op_set2::meta::ValueMeta>,
+        text_encoding: TextEncoding,
+    ) -> Self {
+        Self {
+            ops: ActionValueIter::new(
+                ActionIter::new(action.iter()),
+                ValueIter::new(value_meta.iter(), value.iter()),
+            ),
+            text_encoding,
+        }
+    }
+
+    /// The text width of the row at `pos`, which must be at or after the
+    /// last row read; mirrors `Op::width(SequenceType::Text, _)`.
+    ///
+    /// Panics if `pos` is past the end of the columns.
+    pub(crate) fn seek_to(&mut self, pos: usize) -> u32 {
+        let (action, value, _) = self
+            .ops
+            .seek_to(pos)
+            .expect("width of a row that is not there");
+        let s = match (action, &value) {
+            (Action::Mark, _) => return 0,
+            (Action::Set, ScalarValue::Str(s)) => s,
+            _ => "\u{fffc}",
+        };
+        self.text_encoding.width(s) as u32
     }
 }
 
@@ -825,6 +1126,18 @@ impl ActionIterState {
 }
 
 impl Shiftable for ActionIter<'_> {
+    fn get_pos(&self) -> usize {
+        self.iter.pos()
+    }
+
+    fn get_max(&self) -> usize {
+        self.iter.end_pos()
+    }
+
+    fn set_max(&mut self, pos: usize) {
+        self.iter.set_max(pos);
+    }
+
     fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
         self.iter.shift_next(range)
     }
@@ -833,6 +1146,10 @@ impl Shiftable for ActionIter<'_> {
 impl<'a> ActionIter<'a> {
     pub(crate) fn new(iter: hexane::Iter<'a, Action>) -> Self {
         Self { iter }
+    }
+
+    pub(crate) fn pos(&self) -> usize {
+        self.iter.pos()
     }
 
     fn try_next(&mut self) -> Result<Action, ReadOpError> {
@@ -886,6 +1203,19 @@ impl ValueIterState {
 }
 
 impl Shiftable for ValueIter<'_> {
+    fn get_pos(&self) -> usize {
+        self.meta.pos()
+    }
+
+    fn get_max(&self) -> usize {
+        self.meta.end_pos()
+    }
+
+    // `raw` repositions itself from the meta prefix on every jump
+    fn set_max(&mut self, pos: usize) {
+        self.meta.set_max(pos);
+    }
+
     fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
         let pv = self.meta.shift_next(range)?;
         let meta = pv.value;
@@ -953,14 +1283,14 @@ impl<'a> Iterator for ValueIter<'a> {
 #[derive(Clone, Debug)]
 pub(crate) struct SuccIterIter<'a> {
     count: hexane::PrefixIter<'a, u32>,
-    actor: hexane::Iter<'a, ActorIdx>,
+    actor: MappedIter<'a, ActorIdx>,
     ctr: hexane::DeltaIter<'a, u32>,
     incs: hexane::Iter<'a, Option<i64>>,
 }
 
 pub(crate) struct SuccIterIterState {
     count: hexane::PrefixIterState<u32>,
-    actor: hexane::column::IterState,
+    actor: MappedIterState,
     ctr: hexane::DeltaIterState,
     incs: hexane::column::IterState,
 }
@@ -972,9 +1302,10 @@ impl SuccIterIterState {
                 .count
                 .try_resume(&op_set.cols.succ_count)
                 .map_err(AutomergeError::encoding)?,
-            actor: self
-                .actor
-                .try_resume(&op_set.cols.succ_actor)
+            actor: op_set
+                .cols
+                .succ_actor
+                .try_resume(&self.actor)
                 .map_err(AutomergeError::encoding)?,
             ctr: self
                 .ctr
@@ -988,8 +1319,29 @@ impl SuccIterIterState {
     }
 }
 
-impl<'a> SuccIterIter<'a> {
-    pub(crate) fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
+impl Shiftable for SuccIterIter<'_> {
+    fn get_pos(&self) -> usize {
+        self.count.pos()
+    }
+
+    fn get_max(&self) -> usize {
+        self.count.end_pos()
+    }
+
+    // the sub-columns follow the count column's prefix
+    fn set_max(&mut self, pos: usize) {
+        self.count.set_max(pos);
+    }
+
+    fn shift(&mut self, range: Range<usize>) {
+        self.count.shift(range);
+        let sub_start = self.count.total() as usize;
+        self.actor.advance_to(sub_start);
+        self.ctr.advance_to(sub_start);
+        self.incs.advance_to(sub_start);
+    }
+
+    fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
         let pv = self.count.shift_next(range)?;
         let num_succ = pv.value as usize;
         let sub_start = pv.prefix() as usize;
@@ -1011,10 +1363,12 @@ impl<'a> SuccIterIter<'a> {
 
         Some(iter)
     }
+}
 
+impl<'a> SuccIterIter<'a> {
     pub(crate) fn new(
         count: hexane::PrefixIter<'a, u32>,
-        actor: hexane::Iter<'a, ActorIdx>,
+        actor: MappedIter<'a, ActorIdx>,
         ctr: hexane::DeltaIter<'a, u32>,
         incs: hexane::Iter<'a, Option<i64>>,
     ) -> Self {
@@ -1028,11 +1382,15 @@ impl<'a> SuccIterIter<'a> {
 
     #[inline(never)]
     pub(crate) fn try_next(&mut self) -> Result<SuccCursors<'a>, ReadOpError> {
-        let num_succ = self
-            .count
-            .next()
-            .ok_or(ReadOpError::MissingValue("succ_count"))?
-            .value as usize;
+        self.next_cursors()
+            .ok_or(ReadOpError::MissingValue("succ_count"))
+    }
+
+    // `Iterator::next` takes this directly: converting the `Result` from
+    // `try_next` copies the cursors through memory on every op.
+    #[inline]
+    fn next_cursors(&mut self) -> Option<SuccCursors<'a>> {
+        let num_succ = self.count.next()?.value as usize;
 
         let result = SuccCursors {
             len: num_succ,
@@ -1045,7 +1403,31 @@ impl<'a> SuccIterIter<'a> {
         self.ctr.advance_by(num_succ);
         self.incs.advance_by(num_succ);
 
-        Ok(result)
+        Some(result)
+    }
+
+    // Reads the successors in place: building `SuccCursors` for every op
+    // copies them through memory, which dominates a historical scan.
+    pub(crate) fn next_deleted_in(&mut self, clock: &Clock) -> Option<bool> {
+        let num_succ = self.count.next()?.value as usize;
+        let mut deleted = false;
+        for _ in 0..num_succ {
+            let counter = self.ctr.next()?;
+            let actor = self.actor.next()?;
+            let inc = self.incs.next()?;
+            let id = OpId::new(counter as u64, u64::from(actor) as usize);
+            deleted |= inc.is_none() && clock.covers(&id);
+        }
+        Some(deleted)
+    }
+
+    /// [`Iterator::next`] without building the successor cursors.
+    pub(crate) fn skip_next(&mut self) -> Option<()> {
+        let num_succ = self.count.next()?.value as usize;
+        self.actor.advance_by(num_succ);
+        self.ctr.advance_by(num_succ);
+        self.incs.advance_by(num_succ);
+        Some(())
     }
 
     pub(crate) fn try_nth(&mut self, n: usize) -> Result<SuccCursors<'a>, ReadOpError> {
@@ -1088,13 +1470,26 @@ impl<'a> SuccIterIter<'a> {
             incs: self.incs.suspend(),
         }
     }
+
+    pub(crate) fn add_succ_at(
+        &mut self,
+        pos: usize,
+        id: OpId,
+        inc: Option<i64>,
+        masked: bool,
+    ) -> Option<SuccInsert> {
+        if pos > self.count.pos() {
+            let _ = self.nth(pos - self.count.pos() - 1);
+        }
+        Some(self.clone().next()?.add_succ(pos, id, inc, masked))
+    }
 }
 
 impl<'a> Iterator for SuccIterIter<'a> {
     type Item = SuccCursors<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.try_next().ok()
+        self.next_cursors()
     }
 
     fn nth(&mut self, n: usize) -> Option<Self::Item> {
@@ -1105,10 +1500,59 @@ impl<'a> Iterator for SuccIterIter<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::automerge::Automerge;
     use crate::iter::tools::{SkipIter, SkipWrap};
-    use crate::transaction::Transactable;
+    use crate::tx::Transactable;
     use crate::types::{ActorId, OpId};
-    use crate::{Automerge, ROOT};
+    use crate::ROOT;
+
+    #[test]
+    fn scan_to_lesser_finds_first_smaller_id() {
+        // concurrent inserts give unsorted ids in document order
+        let a1 = ActorId::try_from("aaaaaaaa").unwrap();
+        let a2 = ActorId::try_from("bbbbbbbb").unwrap();
+        let a3 = ActorId::try_from("cccccccc").unwrap();
+
+        let mut doc = crate::autocommit::AutoCommit::new().with_actor(a1);
+        let list = doc.put_object(&ROOT, "list", crate::ObjType::List).unwrap();
+        for i in 0..8 {
+            doc.insert(&list, i, i as i64).unwrap();
+        }
+        let mut d2 = doc.fork().with_actor(a2);
+        let mut d3 = doc.fork().with_actor(a3);
+        for i in 0..5 {
+            d2.insert(&list, 2 + i, 100 + i as i64).unwrap();
+            d3.insert(&list, 6, 200 + i as i64).unwrap();
+        }
+        doc.merge(&mut d2).unwrap();
+        doc.merge(&mut d3).unwrap();
+
+        let op_set = doc.doc.ops();
+        let range = 0..op_set.len();
+        let ids: Vec<OpId> = op_set.id_iter_range(&range).collect();
+
+        // reference: first id after `from` that is less than `target`
+        let reference = |from: usize, target: OpId| {
+            ids[from..]
+                .iter()
+                .position(|id| *id < target)
+                .map(|i| from + i)
+        };
+
+        for from in [0usize, 3, 7, ids.len() / 2] {
+            for target in &ids {
+                let mut iter = op_set.id_iter_range(&range);
+                iter.shift(from..range.end);
+                let got = iter.scan_to_lesser(*target);
+                let want = reference(from, *target);
+                assert_eq!(got.map(|(p, _)| p), want, "from {from} target {target:?}");
+                if let Some((pos, id)) = got {
+                    assert_eq!(id, ids[pos], "the id found at the hit");
+                    assert_eq!(iter.get_pos(), pos + 1);
+                }
+            }
+        }
+    }
 
     #[test]
     fn skip_op_ids() {
@@ -1244,7 +1688,7 @@ mod tests {
         );
 
         // seek each element and read it
-        let mut iter = ObjIdIter::new(v1_actor.iter(), v1_ctr.iter());
+        let mut iter = ObjIdIter::new(MappedIter::raw(v1_actor.iter()), v1_ctr.iter());
         let range = iter.seek_to_value(r);
         assert_eq!(range, 0..4);
         assert_eq!(iter.pos(), 0);
@@ -1282,7 +1726,7 @@ mod tests {
         assert_eq!(iter.next(), Some(o32));
 
         // seek each element and DONT read it
-        let mut iter = ObjIdIter::new(v1_actor.iter(), v1_ctr.iter());
+        let mut iter = ObjIdIter::new(MappedIter::raw(v1_actor.iter()), v1_ctr.iter());
         let range = iter.seek_to_value(r);
         assert_eq!(range, 0..4);
         assert_eq!(iter.pos(), 0);
@@ -1306,7 +1750,7 @@ mod tests {
         assert_eq!(iter.pos(), 12);
 
         // seek only odd items
-        let mut iter = ObjIdIter::new(v1_actor.iter(), v1_ctr.iter());
+        let mut iter = ObjIdIter::new(MappedIter::raw(v1_actor.iter()), v1_ctr.iter());
         let range = iter.seek_to_value(o11);
         assert_eq!(range, 4..6);
         assert_eq!(iter.pos(), 4);
@@ -1318,7 +1762,7 @@ mod tests {
         assert_eq!(iter.pos(), 12);
 
         // seek only even items
-        let mut iter = ObjIdIter::new(v1_actor.iter(), v1_ctr.iter());
+        let mut iter = ObjIdIter::new(MappedIter::raw(v1_actor.iter()), v1_ctr.iter());
         let range = iter.seek_to_value(r);
         assert_eq!(range, 0..4);
         assert_eq!(iter.pos(), 0);

@@ -141,9 +141,10 @@ mod tests {
     //! tests on `TopOps` for the same invariant on the top-op iterator.
 
     use super::OpQuery;
+    use crate::next::transaction::Transactable;
+    use crate::next::AutoCommit;
     use crate::op_set2::op_set::VisIter;
-    use crate::transaction::Transactable;
-    use crate::{Author, AutoCommit, ROOT};
+    use crate::{Author, ChangeId, ROOT};
 
     fn author(n: u8) -> Author<'static> {
         Author::from(vec![n])
@@ -178,11 +179,15 @@ mod tests {
     #[test]
     fn historical_read_scans() {
         let mut doc = masked_doc();
-        let heads = vec![doc.get_changes(&[])[0].hash()];
+        let first = &doc.get_changes(&[]).unwrap()[0];
+        let heads = vec![ChangeId::from_parts(
+            first.actor_id().clone(),
+            std::num::NonZeroU64::new(first.seq()).unwrap(),
+        )];
         let am = doc.document();
         let obj = am.exid_to_obj(&ROOT).unwrap();
         let range = am.ops().prop_range(&obj.id, "k");
-        let read = am.read_at(Some(&heads));
+        let read = am.read_at(Some(&heads)).unwrap();
         let visible = am.ops().iter_range(&range).visible(am.ops(), &read);
         assert!(matches!(visible.inner().skipper(), VisIter::Scan(_)));
     }

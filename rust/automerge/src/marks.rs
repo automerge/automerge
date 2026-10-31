@@ -39,17 +39,6 @@ impl Mark {
             value: self.value.clone(),
         }
     }
-
-    #[expect(dead_code)]
-    pub(crate) fn len(&self) -> usize {
-        self.end - self.start
-    }
-
-    pub(crate) fn into_mark_set(self) -> Arc<MarkSet> {
-        let mut m = MarkSet::default();
-        m.insert(self.name, self.value);
-        Arc::new(m)
-    }
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -252,14 +241,6 @@ impl<'a> MarkStateMachine<'a> {
             None
         } else {
             Some(&self.current)
-        }
-    }
-
-    pub(crate) fn process(&mut self, opid: OpId, action: OpType<'a>) -> bool {
-        match action {
-            OpType::MarkBegin(_, data) => self.mark_begin(opid, data),
-            OpType::MarkEnd(_) => self.mark_end(opid),
-            _ => false,
         }
     }
 

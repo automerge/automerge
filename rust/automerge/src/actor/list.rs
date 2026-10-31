@@ -43,6 +43,7 @@ impl ActorList {
     }
 
     /// Return a reference to the underlying slice of actors.
+    #[cfg(test)]
     pub(crate) fn as_slice(&self) -> &[ActorId] {
         &self.list
     }

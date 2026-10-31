@@ -1,76 +1,79 @@
 //! The [`FrontierVisibility`] that is derived from a [`WriteFrontier`].
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use super::view::Mask;
 use crate::actor::{ActorRemoval, ActorShift, ActorTable};
 use crate::author::Authors;
-use crate::change_graph::ChangeGraph;
-use crate::clock::{Clock, SeqClock};
+use crate::change_graph::{ChangeGraph, NodeIdx};
+use crate::clock::Clock;
+use crate::hash_retention::HashRetention;
 use crate::types::OpId;
-use crate::write_frontier::WriteFrontier;
-use crate::ChangeHash;
+use crate::write_frontier::{FrontierHead, WriteFrontier};
 
 /// The visibility derived from a write-frontier policy.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub(super) struct FrontierVisibility {
-    /// When `mask` is `None`, this implies that there is no write-frontier.
+    /// `None` when the write-frontier restricts no actor.
     pub(super) mask: Option<Mask>,
-    /// Boundary hashes referenced by the policy and absent from the graph.
-    pub(super) pending: HashSet<ChangeHash>,
+    /// Boundaries named by the policy that the graph does not hold yet.
+    pub(super) pending: Vec<FrontierHead>,
 }
 
 impl FrontierVisibility {
-    /// Derive the visibility for `policy` over the document's graph and
-    /// authors. For each author and heads pair in the policy:
-    ///
-    /// - Derive a clock from the known heads. Missing heads are added to
-    ///   [`FrontierVisibility::pending`]; learning them can expand the clock,
-    ///   but cannot invalidate the history included by a known head.
-    /// - The bound is the max op of the actor's change at the known boundary
-    ///   sequence number, or `0` when the actor has no change at or before
-    ///   any known head, i.e. it has no visible ops.
-    /// - Actors of unmasked authors are unrestricted.
-    pub(super) fn new(
+    /// Bounds each masked author's actors at their max op in the history of
+    /// the boundaries `graph` holds; the boundaries it does not hold are pending.
+    pub(super) fn new<H: HashRetention>(
         policy: &WriteFrontier,
-        graph: &ChangeGraph,
+        graph: &ChangeGraph<H>,
         authors: &Authors,
         actors: &ActorTable,
     ) -> FrontierVisibility {
+        Self::resolving(policy, graph, authors, actors, |_, _| true)
+    }
+
+    /// As [`Self::new`], counting a boundary the graph holds as pending unless
+    /// `resolved` accepts it.
+    pub(super) fn resolving<H: HashRetention>(
+        policy: &WriteFrontier,
+        graph: &ChangeGraph<H>,
+        authors: &Authors,
+        actors: &ActorTable,
+        resolved: impl Fn(&FrontierHead, NodeIdx) -> bool,
+    ) -> FrontierVisibility {
         if policy.is_empty() {
-            return FrontierVisibility {
-                mask: None,
-                pending: HashSet::new(),
-            };
+            return FrontierVisibility::default();
         }
-        let mut pending = HashSet::new();
+        let mut pending = Vec::new();
         let mut bounds = vec![u32::MAX; actors.len()];
-        // Authors are commonly bounded at the same heads ("revoke these
-        // authors as of now"), and the clock at a set of heads is a graph
-        // traversal, so compute each distinct set once.
-        let mut clocks: HashMap<&[ChangeHash], SeqClock> = HashMap::new();
-        for (author, heads) in policy.get_write_frontier() {
-            pending.extend(graph.missing_hashes(heads));
-            // Unknown heads are ignored by the graph's clock traversal.
+        // authors are commonly bounded at the same heads, and each clock is a
+        // graph traversal
+        let mut clocks: HashMap<Vec<NodeIdx>, Clock> = HashMap::new();
+        for (author, heads) in policy.iter() {
+            let mut nodes = Vec::with_capacity(heads.len());
+            for boundary in heads {
+                match node_for_head(boundary, graph, actors)
+                    .filter(|node| resolved(boundary, *node))
+                {
+                    Some(node) => nodes.push(node),
+                    None => pending.push(boundary.clone()),
+                }
+            }
+            nodes.sort_unstable();
+            nodes.dedup();
             let clock = clocks
-                .entry(heads.as_slice())
-                .or_insert_with(|| graph.seq_clock_for_heads(heads));
+                .entry(nodes)
+                .or_insert_with_key(|nodes| graph.clock_for_nodes(nodes.clone()));
             for actor in authors.get_actors_for_author(author) {
-                bounds[actor] = match clock.get_for_actor(&actor) {
-                    // A seq the graph handed out always names a change, so
-                    // the translation cannot miss; 0 is unreachable here
-                    // but hides rather than reveals.
-                    Some(seq) => graph.max_op_for_seq(actor, seq).unwrap_or(0),
-                    // No change at or before a known head: nothing visible.
-                    None => 0,
-                };
+                bounds[actor] = clock.max_op(actor);
             }
         }
-        let mask = Mask::new(Clock::from_actor_fn(actors, |actor| bounds[actor]));
-        FrontierVisibility {
-            mask: Some(mask),
-            pending,
-        }
+        // a policy whose authors have no actors yet restricts nothing
+        let mask = bounds
+            .iter()
+            .any(|b| *b != u32::MAX)
+            .then(|| Mask::new(Clock::from_actor_fn(actors, |actor| bounds[actor])));
+        FrontierVisibility { mask, pending }
     }
 
     pub(super) fn mask(&self) -> Option<&Mask> {
@@ -79,6 +82,10 @@ impl FrontierVisibility {
 
     pub(super) fn hides(&self, id: &OpId) -> bool {
         self.mask.as_ref().is_some_and(|m| m.hides(id))
+    }
+
+    pub(super) fn has_pending(&self) -> bool {
+        !self.pending.is_empty()
     }
 
     pub(super) fn insert_actor(&mut self, shift: &ActorShift) {
@@ -92,9 +99,16 @@ impl FrontierVisibility {
             mask.remove_actor(removal);
         }
     }
+}
 
-    pub(super) fn is_pending(&self, hash: &ChangeHash) -> bool {
-        self.pending.contains(hash)
+fn node_for_head<H: HashRetention>(
+    boundary: &FrontierHead,
+    graph: &ChangeGraph<H>,
+    actors: &ActorTable,
+) -> Option<NodeIdx> {
+    match boundary {
+        FrontierHead::Id(id) => graph.node_for_change_id(id, actors),
+        FrontierHead::Hash(hash) => graph.node_by_hash(hash),
     }
 }
 
@@ -109,11 +123,23 @@ mod tests {
     use super::FrontierVisibility;
     use crate::automerge::view::Mask;
     use crate::clock::Clock;
-    use crate::transaction::Transactable;
-    use crate::write_frontier::WriteFrontier;
-    use crate::{Author, AutoCommit, ChangeHash, ROOT};
+    use crate::next::transaction::Transactable;
+    use crate::next::AuditedAutoCommit as AutoCommit;
+    use crate::write_frontier::{FrontierHead, WriteFrontier};
+    use crate::{Author, ChangeHash, ROOT};
     use proptest::prelude::*;
     use std::collections::{HashMap, HashSet};
+
+    fn pending_hashes(derived: &FrontierVisibility) -> HashSet<ChangeHash> {
+        derived
+            .pending
+            .iter()
+            .map(|b| match b {
+                FrontierHead::Hash(h) => *h,
+                FrontierHead::Id(_) => panic!("only hash boundaries in these policies"),
+            })
+            .collect()
+    }
 
     /// The [`Author`] for author number `n` (a one-byte identity).
     fn author(n: usize) -> Author<'static> {
@@ -135,7 +161,7 @@ mod tests {
 
     /// Commit `counts[a]` single-op changes for each author `a`, in order.
     fn build(counts: &[usize]) -> Built {
-        let mut doc = AutoCommit::new();
+        let mut doc = crate::next::AutoCommit::new().enable_audit_mode().unwrap();
         let mut commits = Vec::new();
         let mut value = 0i64;
         for (a, &n) in counts.iter().enumerate() {
@@ -144,7 +170,8 @@ mod tests {
                 value += 1;
                 doc.put(ROOT, "k", value).unwrap();
                 doc.commit();
-                let hash = doc.get_heads()[0];
+                let head = doc.get_heads()[0].clone();
+                let hash = doc.document().get_hash(&head).unwrap();
                 let max_op = doc.document().change_graph.max_op() as u32;
                 commits.push((a, hash, max_op));
             }
@@ -165,14 +192,14 @@ mod tests {
             actors[0]
         }
 
-        /// Run [`derive`] over the real graph with the given policy.
+        /// Run [`FrontierVisibility::new`] over the real graph with the given policy.
         fn frontier_visibility(&mut self, policy: &WriteFrontier) -> FrontierVisibility {
             let doc = self.doc.document();
-            FrontierVisibility::new(policy, &doc.change_graph, &doc.authors, doc.actors())
+            FrontierVisibility::new(policy, &doc.change_graph, &doc.authors, &doc.ops.actors)
         }
 
         fn num_actors(&mut self) -> usize {
-            self.doc.document().actors().len()
+            self.doc.document().ops.actors.len()
         }
     }
 
@@ -218,7 +245,7 @@ mod tests {
                 expected.into_iter().map(Some)
             )))
         );
-        assert_eq!(derived.pending, HashSet::from([unknown]));
+        assert_eq!(pending_hashes(&derived), HashSet::from([unknown]));
     }
 
     /// Partially known heads reveal only the author's known boundary history.
@@ -236,7 +263,7 @@ mod tests {
                 expected.into_iter().map(Some)
             )))
         );
-        assert_eq!(derived.pending, HashSet::from([unknown]));
+        assert_eq!(pending_hashes(&derived), HashSet::from([unknown]));
     }
 
     /// No write-frontier means no mask and nothing pending.
@@ -350,8 +377,8 @@ mod tests {
                 for (a, bound) in expected_bounds {
                     expected[built.actor_of(a)] = bound;
                 }
-                prop_assert_eq!(derived.mask, Some(Mask::new(Clock::from_counters(expected.into_iter().map(Some)))));
-                prop_assert_eq!(derived.pending, expected_pending);
+                prop_assert_eq!(derived.mask.clone(), Some(Mask::new(Clock::from_counters(expected.into_iter().map(Some)))));
+                prop_assert_eq!(pending_hashes(&derived), expected_pending);
             }
         }
     }

@@ -1,175 +1,190 @@
-use crate::automerge::view::Mask;
-use crate::automerge::HistoryUpdate;
-use crate::change_queue::ChangeBatch;
-use crate::hydrate::Value;
-use crate::iter::RichTextDiff;
-use crate::op_set2::op::SuccessorValue;
-use crate::op_set2::types::{Action, KeyRef, MarkData, PropRef, ScalarValue as OpScalarValue};
-use crate::op_set2::SuccInsert;
-use crate::patches::Events;
-use crate::types::{
-    ActorId, ElemId, ObjId, ObjType, OpId, ScalarValue, SequenceType, SmallHashMap,
-};
-use crate::{Automerge, Change, ChangeHash, PatchLog, PatchLogMismatch};
-use crate::{AutomergeError, TextEncoding};
+use crate::automerge::AuditMode;
+use crate::automerge::Automerge;
+use crate::change_graph::ApplyLookup;
+use crate::change_queue::{ChangeBatch, ChangeQueue};
+use crate::op_set2::types::{KeyRef, ScalarValue as OpScalarValue};
+use crate::types::{ActorId, Clock, ElemId, ObjId, OpId, SmallHashMap};
+use crate::AutomergeError;
+use crate::Change;
 
-use super::super::op::{ChangeOp, Op, OpBuilder};
-use super::super::op_set::{ObjIdIter, ObjIndex, OpIter, OpSet};
+use super::super::op::{ChangeOp, OpBuilder};
+use super::super::op_set::{ObjIdIter, OpSet};
 
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 
-mod transition;
-use transition::{CandidateSummary, ValueTransition};
-
-type PredCache = SmallHashMap<OpId, Vec<SuccessorValue>>;
+type PredCache = SmallHashMap<OpId, Vec<(OpId, Option<i64>)>>;
 
 #[derive(Debug, Clone, Default)]
 struct BatchApply {
     ops: Vec<ChangeOp>,
     changes: Vec<Change>,
-    pred: PredCache,
-    obj_spans: Vec<ObjSpan>,
 }
 
-struct Untangler<'a> {
-    // the tangle of change ops we need to navigate
-    change_ops: &'a mut [ChangeOp],
-    // these are entry points into the change_op tangle
-    // when we see a doc_op.id equal to key, put this vec onto the stack
-    // ops inserted after HEAD are put onto the stack immidately
+/// Document order for map ops; sequence ops still need untangling.
+fn doc_order_cmp(a: &ChangeOp, b: &ChangeOp) -> Ordering {
+    a.bld.obj.cmp(&b.bld.obj).then_with(|| {
+        match a.elemid_or_key().partial_cmp(&b.elemid_or_key()) {
+            Some(Ordering::Equal) | None => a.bld.id.cmp(&b.bld.id),
+            Some(order) => order,
+        }
+    })
+}
+
+/// Fewer targets than this are found by seeking to each one's row; more
+/// are found by scanning the object, since each seek costs a column search.
+const SEEK_TARGETS: usize = 16;
+
+/// Orders `idxs`, the batch's ops in the sequence `obj_range` holds, and
+/// records in `hints` the rank in the object of each document element they
+/// insert after or update.
+fn untangle_order_idx(
+    ops: &[ChangeOp],
+    idxs: &mut [u32],
+    op_set: &OpSet,
+    obj_range: Range<usize>,
+    hints: &mut HashMap<OpId, u64>,
+) -> bool {
+    let mut ut = UntangleLiteIdx::new(ops, idxs);
+    let mut targets: Vec<OpId> = ut
+        .entry
+        .keys()
+        .copied()
+        .chain(ut.updates.keys().map(|e| e.0))
+        .collect();
+    targets.sort_unstable();
+    targets.dedup();
+    let mut pending = targets.len();
+    let seek_rows = (pending <= SEEK_TARGETS).then(|| {
+        let mut rows: Vec<usize> = targets
+            .iter()
+            .filter_map(|id| op_set.get_op_id_pos(*id))
+            .filter(|row| obj_range.contains(row))
+            .collect();
+        rows.sort_unstable();
+        rows
+    });
+    let mut next_seek = 0;
+    let mut ids = op_set.id_iter_range(&obj_range);
+    let mut inserts = op_set.insert().values().iter_range(obj_range.clone());
+    let mut row = obj_range.start;
+    loop {
+        // with nothing stacked, a row that is no target changes nothing
+        if ut.stack.is_empty() && ut.updates_stack.is_empty() {
+            if pending == 0 {
+                break;
+            }
+            if let Some(rows) = &seek_rows {
+                while rows.get(next_seek).is_some_and(|r| *r < row) {
+                    next_seek += 1;
+                }
+                let Some(&target_row) = rows.get(next_seek) else {
+                    break;
+                };
+                if target_row > row {
+                    ids.nth(target_row - row - 1);
+                    inserts.nth(target_row - row - 1);
+                    row = target_row;
+                }
+            }
+        }
+        let Some(id) = ids.next() else {
+            break;
+        };
+        let insert = inserts.next().expect("insert column length matches ids");
+        if ut.entry.contains_key(&id) || ut.updates.contains_key(&ElemId(id)) {
+            hints.insert(id, (row - obj_range.start) as u64);
+            pending -= 1;
+        }
+        row += 1;
+        ut.element_update(insert, id);
+        if insert {
+            ut.untangle_inserts(id);
+        }
+    }
+    ut.finish()
+}
+
+struct UntangleLiteIdx<'a> {
+    ops: &'a [ChangeOp],
+    idxs: &'a mut [u32],
+    order: Vec<u32>,
+    count: u32,
     entry: SmallHashMap<OpId, Vec<usize>>,
-    // same concept as entry but internal to the change_ops array
-    gosub: SmallHashMap<usize, Vec<usize>>,
-    // stack of change ops ready to be processed
     stack: Vec<usize>,
-    // these are change ops updating a pre-existing doc op elemid's
-    // and are handled differently than inserts
+    gosub: SmallHashMap<usize, Vec<usize>>,
     updates: SmallHashMap<ElemId, Vec<usize>>,
     updates_stack: Vec<usize>,
-    pred: &'a mut PredCache,
-    // Top and Conflicts keep track of changes that need to
-    // be made to the index.top and index.visible columns
-    top: Top,
-    conflicts: &'a mut Vec<Adjust>,
-    value: ValueState<'a>,
-    seq_type: SequenceType,
-    text_encoding: TextEncoding,
-    count: usize,
-    index: usize,
-    max: usize,
-    width: usize,
 }
 
-impl<'a> Untangler<'a> {
-    fn flush(&mut self, log: &mut Events<'_>) {
-        self.value.list_flush(self.index, log);
-        self.top.reset(self.conflicts);
-        self.index += self.width;
-        self.width = 0;
+impl<'a> UntangleLiteIdx<'a> {
+    fn op(&self, pos: usize) -> &ChangeOp {
+        &self.ops[self.idxs[pos] as usize]
     }
 
-    fn handle_doc_op(&mut self, doc_op: &Op<'a>, succ: &mut Vec<SuccInsert>, log: &mut Events<'_>) {
-        let effect @ SuccessorEffect { deleted, .. } = process_pred(doc_op, self.pred, succ);
-
-        if doc_op.insert {
-            self.flush(log);
-            self.value.key = Some(PropRef::Seq(self.index));
-        }
-
-        // A doc op hidden by the mask snapshot is invisible: it occupies no
-        // width in the patch index and takes no part in top/conflict tracking.
-        // Mask-aware visibility is computed once here and shared by the
-        // width accounting, the candidate summaries and top/conflict
-        // tracking: an op whose only deleting successor is hidden by the
-        // mask is visible (restored), so raw `Op::visible()` must not be
-        // consulted for any of them.
-        let hidden = self.value.hides(&doc_op.id);
-        let visible = !hidden && self.value.masked_visible(doc_op);
-        if visible && !deleted {
-            self.width = doc_op.width(self.seq_type, self.text_encoding);
-        }
-        self.value.process_doc_op(doc_op, effect);
-        if !hidden {
-            self.top
-                .process_doc_op(self.change_ops, doc_op, deleted, visible);
-        }
-    }
-
-    fn element_update(&mut self, doc_op: &Op<'_>) {
-        while let Some(last) = self.updates_stack.last().copied() {
-            if doc_op.insert || doc_op.id > self.change_ops[last].id() {
-                self.updates_stack.pop();
-                self.change_ops[last].pos = Some(doc_op.pos);
-                self.change_ops[last].subsort = self.count;
-                if self.change_ops[last].visible() {
-                    self.width = self.change_ops[last].width(self.seq_type, self.text_encoding);
+    fn new(ops: &'a [ChangeOp], idxs: &'a mut [u32]) -> Self {
+        let mut e_to_i = SmallHashMap::default();
+        let mut gosub: SmallHashMap<usize, Vec<usize>> = HashMap::default();
+        let mut entry: SmallHashMap<OpId, Vec<usize>> = HashMap::default();
+        let mut stack: Vec<usize> = Vec::with_capacity(idxs.len());
+        let mut updates: SmallHashMap<ElemId, Vec<usize>> = HashMap::default();
+        let mut last_e = None;
+        for (i, &ix) in idxs.iter().enumerate() {
+            let op = &ops[ix as usize];
+            if let KeyRef::Seq(e) = op.key() {
+                if op.insert() {
+                    if let Some(j) = e_to_i.get(e) {
+                        gosub.entry(*j).or_default().push(i);
+                    } else if e.is_head() {
+                        stack.push(i);
+                    } else {
+                        entry.entry(e.0).or_default().push(i);
+                    }
+                    let this_e = ElemId(op.id());
+                    e_to_i.insert(this_e, i);
+                    last_e = Some(this_e);
+                } else if last_e != Some(*e) {
+                    updates.entry(*e).or_default().push(i);
                 }
-                self.value.process_change_op(&self.change_ops[last]);
-                self.count += 1;
-                self.top
-                    .process_change_op(self.conflicts, self.change_ops, last);
+            }
+        }
+        let order = vec![u32::MAX; idxs.len()];
+        Self {
+            ops,
+            idxs,
+            order,
+            count: 0,
+            entry,
+            stack,
+            gosub,
+            updates,
+            updates_stack: vec![],
+        }
+    }
+
+    fn emit(&mut self, i: usize) {
+        debug_assert_eq!(self.order[i], u32::MAX);
+        self.order[i] = self.count;
+        self.count += 1;
+    }
+
+    fn element_update(&mut self, doc_insert: bool, doc_id: OpId) {
+        while let Some(last) = self.updates_stack.last().copied() {
+            if doc_insert || doc_id > self.op(last).id() {
+                self.updates_stack.pop();
+                self.emit(last);
             } else {
                 break;
             }
         }
     }
 
-    fn finish_updates(&mut self) {
-        for i in self.updates_stack.iter().rev() {
-            self.change_ops[*i].pos = Some(self.max);
-            self.change_ops[*i].subsort = self.count;
-            self.width = 0;
-            if self.change_ops[*i].visible() {
-                self.width = self.change_ops[*i].width(self.seq_type, self.text_encoding);
-            }
-            self.value.process_change_op(&self.change_ops[*i]);
-
-            self.top
-                .process_change_op(self.conflicts, self.change_ops, *i);
-
-            self.count += 1;
-        }
-    }
-
-    fn finish_inserts(&mut self, log: &mut Events<'_>) {
-        while !self.stack.is_empty() {
-            self.untangle_inner(self.max, log);
-        }
-    }
-
-    fn finish(mut self, log: &mut Events<'_>) {
-        self.finish_updates();
-
-        self.flush(log);
-
-        assert!(self.entry.is_empty());
-
-        self.finish_inserts(log);
-
-        self.flush(log);
-
-        assert_eq!(self.top, Top::Nothing);
-
-        self.change_ops.sort_by(|a, b| {
-            a.pos
-                .unwrap()
-                .cmp(&b.pos.unwrap())
-                .then_with(|| a.subsort.cmp(&b.subsort))
-        });
-    }
-
-    fn untangle_inserts(&mut self, id: OpId, insert_pos: usize, log: &mut Events<'_>) {
-        self.flush(log);
-
-        if let Err(n) = self
-            .stack
-            .binary_search_by(|n| self.change_ops[*n].id().cmp(&id))
-        {
+    fn untangle_inserts(&mut self, id: OpId) {
+        if let Err(n) = self.stack.binary_search_by(|n| self.op(*n).id().cmp(&id)) {
             while self.stack.len() > n {
-                self.untangle_inner(insert_pos, log);
+                self.untangle_inner();
             }
         }
         if let Some(v) = self.entry.remove(&id) {
@@ -180,519 +195,59 @@ impl<'a> Untangler<'a> {
         }
     }
 
-    fn untangle_inner(&mut self, insert_pos: usize, log: &mut Events<'_>) -> Option<()> {
-        let mut pos = self.stack.pop()?;
-        let op = self.change_ops.get_mut(pos)?;
-
-        let mut conflict = false;
-        let mut vis = None;
-
-        let key = KeyRef::Seq(ElemId(op.id()));
-
-        assert!(op.pos.is_none());
-        op.pos = Some(insert_pos);
-        op.subsort = self.count;
-        self.count += 1;
-
-        if op.is_set_or_make() && !op.has_succ() && !op.masked {
-            vis = Some(pos);
-        } else if op.action() == Action::Mark && !op.masked {
-            self.value.process_mark(op.id(), op.mark_data());
-        }
-
-        if let Some(v) = self.gosub.get(&pos) {
+    fn untangle_inner(&mut self) -> Option<()> {
+        let pos = self.stack.pop()?;
+        let key = KeyRef::Seq(ElemId(self.op(pos).id()));
+        self.emit(pos);
+        if let Some(v) = self.gosub.remove(&pos) {
             self.stack.extend(v);
         }
-
-        for i in (pos + 1)..self.change_ops.len() {
-            let next_vis = {
-                let next_op = &mut self.change_ops[i];
-
-                pos += 1;
-
-                if next_op.insert() || next_op.key() != &key {
-                    break;
-                }
-
-                next_op.pos = Some(insert_pos);
-                next_op.subsort = self.count;
-                self.count += 1;
-
-                next_op.is_set_or_make() && !next_op.has_succ() && !next_op.masked
-            };
-
-            if next_vis {
-                // borrow checker stuff
-                if let Some(conflict_pos) = vis {
-                    self.change_ops[conflict_pos].conflicted = true;
-                    conflict = true;
-                }
-                vis = Some(pos);
+        // the op's own updates follow it contiguously in sorted order
+        for i in (pos + 1)..self.idxs.len() {
+            if self.op(i).insert() || self.op(i).key() != &key {
+                break;
             }
+            self.emit(i);
         }
-
-        if let Some(p) = vis {
-            let op = &mut self.change_ops[p];
-            if self.seq_type == SequenceType::List {
-                let value = op.hydrate_value_and_fix_counters(self.text_encoding);
-                log.insert(op.bld.obj, self.index, value, op.id(), conflict);
-                self.index += 1;
-            } else {
-                let marks = self.value.marks.after.current().cloned();
-                match op.bld.action {
-                    Action::MakeMap => {
-                        // Block markers
-                        log.insert(
-                            op.bld.obj,
-                            self.index,
-                            Value::map(),
-                            op.bld.id,
-                            op.conflicted,
-                        );
-                    }
-                    _ => {
-                        log.splice(op.bld.obj, self.index, op.bld.as_str(), marks);
-                    }
-                }
-                self.index += op.width(self.seq_type, self.text_encoding);
-            }
-        }
-
         Some(())
     }
 
-    fn new(
-        value: ValueState<'a>,
-        conflicts: &'a mut Vec<Adjust>,
-        change_ops: &'a mut [ChangeOp],
-        pred: &'a mut PredCache,
-        max: usize,
-    ) -> Self {
-        let mut e_to_i = SmallHashMap::default();
-        let mut gosub: SmallHashMap<usize, Vec<usize>> = HashMap::default();
-        let mut entry: SmallHashMap<OpId, Vec<usize>> = HashMap::default();
-        let mut stack: Vec<usize> = Vec::with_capacity(change_ops.len());
-        let mut updates: SmallHashMap<ElemId, Vec<usize>> = HashMap::default();
-        let mut last_e = None;
-        for (i, op) in change_ops.iter_mut().enumerate() {
-            if let Some(mut successors) = pred.remove(&op.id()) {
-                let is_counter = matches!(op.bld.value, OpScalarValue::Counter(_));
-                normalize_increment_successors(is_counter, &mut successors);
-                op.succ = successors;
-            }
-            if let KeyRef::Seq(e) = op.key() {
-                if op.insert() {
-                    if let Some(j) = e_to_i.get(e) {
-                        gosub.entry(*j).or_default().push(i);
-                    } else if e.is_head() {
-                        stack.push(i);
-                    } else {
-                        entry.entry(e.0).or_default().push(i);
-                    }
-                } else if last_e != Some(*e) {
-                    updates.entry(*e).or_default().push(i);
-                }
-                if op.insert() {
-                    let this_e = ElemId(op.id());
-                    e_to_i.insert(this_e, i);
-                    last_e = Some(this_e);
-                }
-            }
+    /// False if an op is anchored on an element neither the object nor
+    /// the batch has, leaving the order unchanged.
+    fn finish(mut self) -> bool {
+        for i in std::mem::take(&mut self.updates_stack).into_iter().rev() {
+            self.emit(i);
         }
-        let updates_stack = Vec::with_capacity(change_ops.len());
-        Self {
-            gosub,
-            entry,
-            stack,
-            pred,
-            change_ops,
-            updates,
-            seq_type: value.seq_type,
-            text_encoding: value.text_encoding,
-            conflicts,
-            updates_stack,
-            top: Top::Nothing,
-            count: 0,
-            index: 0,
-            width: 0,
-            value,
-            max,
+        while !self.stack.is_empty() {
+            self.untangle_inner();
+        }
+        if self.order.contains(&u32::MAX) {
+            return false;
+        }
+        permute_in_place(self.idxs, std::mem::take(&mut self.order));
+        true
+    }
+}
+
+fn permute_in_place(items: &mut [u32], mut order: Vec<u32>) {
+    for i in 0..order.len() {
+        while order[i] as usize != i {
+            let j = order[i] as usize;
+            items.swap(i, j);
+            order.swap(i, j);
         }
     }
 }
 
-fn walk_list<'a>(
-    mut ut: Untangler<'a>,
-    doc_ops: OpIter<'a>,
-    succ: &mut Vec<SuccInsert>,
-    log: &mut Events<'_>,
-) {
-    for op in doc_ops {
-        ut.element_update(&op);
-
-        if op.insert {
-            ut.untangle_inserts(op.id, op.pos, log);
-        }
-
-        ut.handle_doc_op(&op, succ, log);
-    }
-
-    ut.finish(log);
-}
-
-struct MapWalker<'a, 'b, 'c> {
-    ops: OpIter<'a>,
-    log: &'b mut Events<'c>,
-    pred: &'b mut PredCache,
-    succ: &'b mut Vec<SuccInsert>,
-    value: ValueState<'a>,
-    pos: usize,
-    doc_op: Option<Op<'a>>,
-    conflicts: &'b mut Vec<Adjust>,
-    top: Top,
-}
-
-#[derive(Debug, Clone)]
-enum Adjust {
-    Conflict(usize),
-    Expose(usize),
-}
-
-#[derive(PartialEq, Debug)]
-enum Top {
-    Nothing,
-    ChangeIndex(usize),
-    Doc(usize),
-    Expose(usize),
-}
-
-impl Top {
-    fn reset(&mut self, conflicts: &mut Vec<Adjust>) {
-        if let Top::Expose(i) = self {
-            conflicts.push(Adjust::Expose(*i));
-        }
-        *self = Top::Nothing;
-    }
-
-    fn process_doc_op(&mut self, ops: &mut [ChangeOp], d: &Op<'_>, deleted: bool, visible: bool) {
-        // `visible` is the caller's mask-aware visibility for `d`; the raw
-        // successor check would miss values restored by the mask.
-        if visible {
-            if deleted {
-                if let Top::Doc(i) = self {
-                    *self = Top::Expose(*i)
-                }
-            } else {
-                if let Top::ChangeIndex(i) = self {
-                    ops[*i].conflicted = true
-                }
-                *self = Top::Doc(d.pos);
-            }
-        }
-    }
-
-    fn process_change_op(&mut self, conflicts: &mut Vec<Adjust>, ops: &mut [ChangeOp], pos: usize) {
-        if ops[pos].visible() {
-            match self {
-                Top::ChangeIndex(i) => ops[*i].conflicted = true,
-                Top::Doc(i) => conflicts.push(Adjust::Conflict(*i)),
-                _ => {}
-            }
-            *self = Top::ChangeIndex(pos);
-        }
-    }
-}
-
-impl<'a, 'b, 'c> MapWalker<'a, 'b, 'c> {
-    fn new(
-        value: ValueState<'a>,
-        mut ops: OpIter<'a>,
-        pred: &'b mut PredCache,
-        succ: &'b mut Vec<SuccInsert>,
-        log: &'b mut Events<'c>,
-        conflicts: &'b mut Vec<Adjust>,
-    ) -> Self {
-        let pos = ops.pos();
-        let doc_op = ops.next();
-        let top = Top::Nothing;
-        MapWalker {
-            ops,
-            log,
-            pos,
-            doc_op,
-            pred,
-            succ,
-            value,
-            conflicts,
-            top,
-        }
-    }
-
-    fn next_doc_op(&mut self) {
-        self.pos = self.ops.pos();
-        self.doc_op = self.ops.next();
-    }
-
-    fn change_op(&mut self, ops: &mut [ChangeOp], pos: usize) {
-        if let Some(mut successors) = self.pred.remove(&ops[pos].id()) {
-            let is_counter = matches!(ops[pos].bld.value, OpScalarValue::Counter(_));
-            normalize_increment_successors(is_counter, &mut successors);
-            ops[pos].succ = successors
-        }
-
-        self.advance_doc_op(pos, ops);
-
-        if ops[pos].prop() != self.value.key {
-            self.value.map_flush(self.log);
-            self.value.key = ops[pos].prop_static();
-            self.top.reset(self.conflicts);
-        }
-        self.value.process_change_op(&ops[pos]);
-
-        ops[pos].pos = Some(self.pos);
-
-        self.top.process_change_op(self.conflicts, ops, pos);
-    }
-
-    fn advance_doc_op(&mut self, pos: usize, ops: &mut [ChangeOp]) {
-        while let Some(d) = self.doc_op.as_ref() {
-            // TODO - sometimes we can fast forward to the next property
-            match d.key.partial_cmp(ops[pos].key()) {
-                Some(Ordering::Greater) => break,
-                Some(Ordering::Equal) if d.id > ops[pos].id() => break,
-                _ => {
-                    let effect @ SuccessorEffect { deleted, .. } =
-                        process_pred(d, self.pred, self.succ);
-                    if d.prop() != self.value.key {
-                        self.value.map_flush(self.log);
-                        self.value.key = d.prop();
-                        self.top.reset(self.conflicts);
-                    }
-                    self.value.process_doc_op(d, effect);
-                    if !self.value.hides(&d.id) {
-                        let visible = self.value.masked_visible(d);
-                        self.top.process_doc_op(ops, d, deleted, visible);
-                    }
-                }
-            }
-            self.next_doc_op();
-        }
-    }
-
-    fn finish(&mut self, ops: &mut [ChangeOp]) {
-        while let Some(d) = self.doc_op.as_ref() {
-            let effect @ SuccessorEffect { deleted, .. } = process_pred(d, self.pred, self.succ);
-            if d.prop() == self.value.key {
-                if !self.value.hides(&d.id) {
-                    let visible = self.value.masked_visible(d);
-                    self.top.process_doc_op(ops, d, deleted, visible);
-                }
-                self.value.process_doc_op(d, effect);
-                self.next_doc_op();
-            } else {
-                break;
-            }
-        }
-        self.value.map_flush(self.log);
-        self.top.reset(self.conflicts);
-    }
-}
-
-/// For a non-counter predecessor, replace increment amounts with `None` so
-/// those successors are treated as overwrites. Counter predecessors retain
-/// their increment amounts.
-fn normalize_increment_successors(is_counter: bool, successors: &mut [SuccessorValue]) {
+/// Increments on a non-counter target act as plain overwrites.
+fn normalize_increment_successors(is_counter: bool, successors: &mut [(OpId, Option<i64>)]) {
     if !is_counter {
-        for value in successors {
-            value.reset_increment();
-        }
-    }
-}
-
-/// The combined effect of this batch’s successors on an existing operation:
-/// whether they suppress it, and their total counter increment.
-#[derive(Debug, Default, Clone, Copy)]
-struct SuccessorEffect {
-    deleted: bool,
-    increment: i64,
-}
-
-/// Collect the incoming successors of `d`, append their links to the deferred
-/// successor buffer, and return their combined effect on `d`.
-///
-/// After normalization, a `None` increment denotes a suppressing successor;
-/// `Some(n)` contributes a counter increment. A masked successor keeps its
-/// link in the index but contributes neither.
-fn process_pred(d: &Op<'_>, pred: &mut PredCache, succ: &mut Vec<SuccInsert>) -> SuccessorEffect {
-    let mut effect = SuccessorEffect::default();
-    if let Some(mut successors) = pred.remove(&d.id) {
-        normalize_increment_successors(d.is_counter(), &mut successors);
-        for value in successors {
-            let id = value.get_id();
-            let increment = value.get_increment();
-            if value.is_masked() {
-                succ.push(d.add_succ_with_mask(id, increment, true));
-                continue;
-            }
-            if let Some(n) = increment {
-                effect.increment += n;
-            } else {
-                effect.deleted = true;
-            }
-            succ.push(d.add_succ(id, increment));
-        }
-    }
-    effect
-}
-
-/// Tracks one map property or sequence element while a batch is walked: its
-/// visible candidates before and after the batch, and its formatting context.
-///
-/// Flushing hands the two summaries to the private `transition` module, which
-/// classifies and encodes the change into the patch log.
-#[derive(Debug, Clone)]
-struct ValueState<'a> {
-    obj: ObjId,
-    seq_type: SequenceType,
-    text_encoding: TextEncoding,
-    key: Option<PropRef<'a>>,
-    before: CandidateSummary,
-    after: CandidateSummary,
-    marks: RichTextDiff<'a>,
-    /// The mask snapshot the batch walks under; fixed for the whole walk.
-    /// A doc op it hides is not a candidate in either summary.
-    mask: Option<&'a Mask>,
-    /// The op set the batch walks over, for its visibility index. The walk
-    /// completes before the batch mutates the op set, so the index is the
-    /// one derived under `mask`.
-    op_set: &'a OpSet,
-}
-
-impl<'a> ValueState<'a> {
-    fn new(
-        obj: ObjId,
-        encoding: SequenceType,
-        text_encoding: TextEncoding,
-        mask: Option<&'a Mask>,
-        op_set: &'a OpSet,
-    ) -> Self {
-        Self {
-            obj,
-            seq_type: encoding,
-            text_encoding,
-            key: None,
-            before: CandidateSummary::default(),
-            after: CandidateSummary::default(),
-            marks: RichTextDiff::default(),
-            mask,
-            op_set,
-        }
-    }
-
-    /// Whether the mask snapshot hides this doc op.
-    fn hides(&self, id: &OpId) -> bool {
-        self.mask.is_some_and(|m| m.hides(id))
-    }
-
-    /// Whether this doc op is visible under the mask snapshot: a stored
-    /// successor only overwrites it if the mask does not hide that
-    /// successor too. The visibility index is built under the mask, so it
-    /// holds the answer.
-    fn masked_visible(&self, doc_op: &Op<'a>) -> bool {
-        self.op_set.indexed_visible(doc_op.pos)
-    }
-
-    fn process_doc_op(&mut self, doc_op: &Op<'a>, effect: SuccessorEffect) {
-        // A hidden doc op is invisible before and after the batch: it enters
-        // neither summary and its mark must not leak into the rich-text diff.
-        if self.hides(&doc_op.id) {
-            return;
-        }
-        match doc_op.action {
-            Action::Increment => {}
-            Action::Mark => {
-                self.marks.before.process(doc_op.id, doc_op.action());
-                self.marks.after.process(doc_op.id, doc_op.action());
-            }
-            _ => {
-                if self.masked_visible(doc_op) {
-                    // OpIter yields stored counter bases, not their current
-                    // totals. Under a mask only un-hidden increments count.
-                    let mut doc_op = doc_op.clone();
-                    doc_op.fix_counter(self.mask.map(Mask::clock));
-                    let mut value = doc_op.hydrate_value(self.text_encoding);
-                    // Before always includes this candidate, even if the batch
-                    // deletes it. Only after gets new counter contributions.
-                    self.before.add_existing(doc_op.id, value.clone());
-                    if !effect.deleted {
-                        if let Value::Scalar(ScalarValue::Counter(c)) = &mut value {
-                            c.increment(effect.increment);
-                        }
-                        self.after.add_existing(doc_op.id, value);
-                    }
-                }
+        for (_, increment) in successors {
+            if increment.is_some() {
+                *increment = None;
             }
         }
     }
-
-    fn process_mark(&mut self, id: OpId, data: Option<MarkData<'static>>) {
-        if let Some(data) = data {
-            self.marks.after.mark_begin(id, data);
-        } else {
-            self.marks.after.mark_end(id);
-        }
-    }
-
-    fn process_change_op(&mut self, op: &ChangeOp) {
-        // A masked incoming op is never a candidate and its mark is skipped.
-        if op.masked {
-            return;
-        }
-        match op.action() {
-            // Successor lists already supply the complete counter contribution.
-            Action::Delete | Action::Increment => {}
-            Action::Mark => self.process_mark(op.id(), op.mark_data()),
-            _ => {
-                if op.visible() {
-                    self.after.add_incoming(
-                        op.id(),
-                        op.hydrate_value_and_fix_counters(self.text_encoding),
-                    );
-                }
-            }
-        }
-    }
-
-    fn map_flush(&mut self, log: &mut Events<'_>) {
-        let before = std::mem::take(&mut self.before);
-        let after = std::mem::take(&mut self.after);
-        if let Some(PropRef::Map(key)) = self.key.take() {
-            ValueTransition::new(before, after).emit_map(self.obj, &key, log);
-        }
-    }
-
-    fn list_flush(&mut self, index: usize, log: &mut Events<'_>) {
-        if self.key.take().is_none() {
-            return;
-        }
-        let before = std::mem::take(&mut self.before);
-        let after = std::mem::take(&mut self.after);
-        ValueTransition::new(before, after).emit_sequence(
-            self.obj,
-            index,
-            self.seq_type,
-            self.text_encoding,
-            &self.marks,
-            log,
-        );
-    }
-}
-
-fn walk_map(mw: &mut MapWalker<'_, '_, '_>, change_ops: &mut [ChangeOp]) {
-    for pos in 0..change_ops.len() {
-        mw.change_op(change_ops, pos);
-    }
-    mw.finish(change_ops);
 }
 
 impl BatchApply {
@@ -700,242 +255,170 @@ impl BatchApply {
         Self {
             ops: Vec::default(),
             changes,
-            pred: PredCache::default(),
-            obj_spans: Vec::default(),
         }
     }
 
-    fn insert_new_actors(&self, doc: &mut Automerge) {
-        // Insert every new actor first: a later insertion would shift the
-        // indices collected for the earlier ones. The second pass is pure
-        // lookup. Registration is bulk: one visibility derivation per batch,
-        // not one per new actor.
-        for c in self.changes.iter().filter(|c| c.seq() == 1) {
-            doc.put_actor_ref(c.actor_id());
+    /// Returns the actors that were new to the document.
+    fn insert_new_actors<H: crate::hash_retention::HashRetention>(
+        &mut self,
+        doc: &mut Automerge<H>,
+    ) -> Vec<crate::ActorId> {
+        let actors: Vec<crate::ActorId> = self
+            .changes
+            .iter()
+            .filter(|c| c.seq() == 1) // only a first change can introduce an actor
+            .map(|c| c.actor_id().clone())
+            .collect();
+        doc.put_actor_refs(&actors)
+    }
+
+    /// Apply the batch, or nothing at all.
+    pub(crate) fn apply<H: crate::hash_retention::HashRetention>(
+        &mut self,
+        doc: &mut Automerge<H>,
+    ) -> Result<(), AutomergeError> {
+        let added = self.insert_new_actors(doc);
+        let result = self.apply_as_bundle(doc);
+        if result.is_err() {
+            doc.undo_actor_refs(&added);
         }
-        let pairs: Vec<_> = self
+        result
+    }
+
+    fn move_in_batch_preds_to_succ(&mut self, clock: &Clock) {
+        let mut succ_map = PredCache::default();
+        for op in self.ops.iter_mut() {
+            let id = op.id();
+            let inc = op.get_increment_value();
+            op.bld.pred.retain(|p| {
+                if clock.covers(p) {
+                    true
+                } else {
+                    succ_map.entry(*p).or_default().push((id, inc));
+                    false
+                }
+            });
+        }
+        for op in self.ops.iter_mut() {
+            if let Some(mut succ) = succ_map.remove(&op.id()) {
+                succ.sort_unstable_by_key(|(id, _)| *id);
+                let is_counter = matches!(op.bld.value, OpScalarValue::Counter(_));
+                normalize_increment_successors(is_counter, &mut succ);
+                op.succ = succ;
+            }
+        }
+        debug_assert!(succ_map.is_empty(), "succ target missing from batch");
+    }
+
+    fn apply_as_bundle<H: crate::hash_retention::HashRetention>(
+        &mut self,
+        doc: &mut Automerge<H>,
+    ) -> Result<(), AutomergeError> {
+        for c in &self.changes {
+            doc.import_ops_to(c, &mut self.ops)?;
+        }
+        let clock_before_batch = doc.change_graph.current_clock();
+        self.move_in_batch_preds_to_succ(&clock_before_batch);
+
+        let (idxs, hints) = self.doc_ordered_indexes(doc)?;
+        let (raw, data) = encode_bundle_ops(
+            idxs.iter().map(|&i| &self.ops[i as usize]),
+            doc.ops(),
+            &hints,
+        );
+
+        let first_authors: Vec<_> = self
             .changes
             .iter()
             .filter(|c| c.seq() == 1)
             .filter_map(|c| {
-                let author = c.author()?.into_owned();
-                Some((author, doc.put_actor_ref(c.actor_id())))
+                let actor = doc.ops().lookup_actor(c.actor_id())?;
+                Some((actor, c.author()?.into_owned()))
             })
             .collect();
-        doc.register_actors(pairs);
-    }
-
-    /// Flag every incoming op against the mask snapshot and import it. The
-    /// graph is already up to date; the mask has not moved.
-    fn import_ops(&mut self, doc: &mut Automerge, mask: Option<&Mask>) {
-        let actors_before = doc.ops().actors.len();
-        for c in &self.changes {
-            doc.import_ops_to(c, &mut self.ops, mask).unwrap();
-        }
-        doc.remove_unused_actors(true);
-        // The mask snapshot and the ops staged above are baked against the
-        // actor indices as of step 3; an actor removal here would silently
-        // invalidate both. Step 4 gave every inserted actor a seq entry, so
-        // this is unreachable — assert it stays that way.
-        debug_assert_eq!(
-            doc.ops().actors.len(),
-            actors_before,
-            "no actor renumbering between the mask snapshot and the walk"
+        doc.register_incoming_authors(first_authors);
+        let mask = doc.mask_hiding(
+            self.changes
+                .iter()
+                .filter_map(|c| Some((doc.ops().lookup_actor(c.actor_id())?, c.max_op()))),
         );
-    }
+        let actor_map: Vec<usize> = (0..doc.ops().actors.len()).collect();
+        let frag = super::bundle::BundleApply::from_parts(
+            clock_before_batch,
+            actor_map,
+            super::bundle::BundleSrc::Owned { raw, data },
+            doc.ops(),
+            mask,
+        )?;
+        // the last fallible step; nothing below can fail
+        let r = frag.resolve(doc)?;
 
-    pub(crate) fn apply(
-        &mut self,
-        doc: &mut Automerge,
-        log: &mut PatchLog,
-    ) -> Result<(), PatchLogMismatch> {
-        // Align the batch and log with the incoming doc, taking a snapshot of
-        // the mask before the op set mutation.
-        log.transition_to(doc, |d| d.visible_current())?;
-        self.insert_new_actors(doc);
-        doc.assert_mask_derived();
-        let mask0 = doc.mask().cloned();
-
-        // Mark whether a pending boundary has been resolved by any of the
-        // incoming changes. If resolved is true, the mask is published after
-        // the op set is consistent again.
-        let mut resolved = false;
-        for c in &self.changes {
-            resolved |= matches!(doc.update_history(c), HistoryUpdate::BoundaryResolved);
-        }
-
-        self.import_ops(doc, mask0.as_ref());
-
-        let mut obj_info = doc.ops().obj_info.clone();
-
-        self.order_ops_for_doc(&mut obj_info);
-
-        let mut succ = vec![];
-
-        let mut conflicts = vec![];
-
-        // The walk records the batch's events and moves the observed view past
-        // it in one operation. That view only depends on the change graph and
-        // the mask (`mask0`), so computing it here — before the deferred op-set
-        // mutations below — names the same view as after them. The transition
-        // above already aligned the log with the pre-insertion actors, so
-        // migrating onto the superset of actors cannot fail.
-        {
-            let ops = &mut self.ops;
-            let pred = &mut self.pred;
-            let obj_spans = &self.obj_spans;
-            let succ = &mut succ;
-            let conflicts = &mut conflicts;
-            log.record(
-                doc,
-                |log| {
-                    let mut walker = ObjWalker::new(doc.ops());
-                    for os in obj_spans {
-                        let obj_range = walker.seek_to_obj(os.obj);
-                        let doc_ops = doc.ops().iter_range(&obj_range);
-                        match obj_info.object_type(&os.obj) {
-                            Some(ObjType::Map) => {
-                                let value = ValueState::new(
-                                    os.obj,
-                                    SequenceType::List,
-                                    doc.text_encoding(),
-                                    mask0.as_ref(),
-                                    doc.ops(),
-                                );
-                                let mut walker =
-                                    MapWalker::new(value, doc_ops, pred, succ, log, conflicts);
-                                let change_ops = &mut ops[os.span.clone()];
-                                walk_map(&mut walker, change_ops);
-                            }
-                            Some(otype) if otype.is_sequence() => {
-                                let sequence_type = match otype {
-                                    ObjType::Text => SequenceType::Text,
-                                    ObjType::List => SequenceType::List,
-                                    _ => unreachable!(),
-                                };
-                                let value = ValueState::new(
-                                    os.obj,
-                                    sequence_type,
-                                    doc.text_encoding(),
-                                    mask0.as_ref(),
-                                    doc.ops(),
-                                );
-                                let ut = Untangler::new(
-                                    value,
-                                    conflicts,
-                                    &mut ops[os.span.clone()],
-                                    pred,
-                                    doc_ops.end_pos(),
-                                );
-                                walk_list(ut, doc_ops, succ, log);
-                            }
-                            _ => panic!("Obj {:?} Missing from Index", os.obj),
-                        }
-                    }
-                },
-                |d| d.visible_current(),
-            )?;
-        }
-
-        #[cfg(feature = "slow_path_assertions")]
-        {
-            // should always be ordered correctly - just double checking
-            let mut tmp_succ = succ.clone();
-            tmp_succ.sort_by(|a, b| {
-                a.pos
-                    .cmp(&b.pos)
-                    .then_with(|| a.sub_pos.cmp(&b.sub_pos))
-                    .then_with(|| a.id.counter().cmp(&b.id.counter()))
-                    .then_with(|| a.id.actor().cmp(&b.id.actor()))
-            });
-            debug_assert_eq!(succ, tmp_succ);
-        }
-
-        for a in conflicts {
-            match a {
-                Adjust::Conflict(index) => doc.ops.conflict(index),
-                Adjust::Expose(index) => doc.ops.expose(index),
-            }
-        }
-
-        doc.ops.add_succ(&succ);
-
-        self.insert_runs_of_ops(doc);
-
-        // If the batch witnessed a pending write-frontier boundary, publish the
-        // mask change once, as its own visibility transition between two
-        // internally consistent op-set states.
-        if resolved {
-            doc.republish_mask(log, |_| {})?;
-        }
-
-        debug_assert!(doc.ops.validate_op_order());
+        doc.pin_incoming_boundaries(&self.changes);
+        doc.update_history_batch(&self.changes);
+        frag.commit(doc, r);
+        doc.debug_assert_mask_indexes();
+        doc.republish_if_pending();
         Ok(())
     }
 
-    fn insert_runs_of_ops(&mut self, doc: &mut Automerge) {
-        let mut last_pos = None;
-        let mut start = 0;
-        let mut shift = 0;
-        for (i, op) in self.ops.iter().enumerate() {
-            if op.pos != last_pos {
-                if let Some(pos) = last_pos {
-                    let end = i;
-                    shift += self.insert_ops(doc, pos + shift, start..end);
-                    start = end;
-                }
-                last_pos = op.pos;
-            }
-        }
-        if let Some(pos) = last_pos {
-            self.insert_ops(doc, pos + shift, start..self.ops.len());
-        }
-    }
-
-    pub(crate) fn insert_ops(&self, doc: &mut Automerge, pos: usize, range: Range<usize>) -> usize {
-        let batch = &self.ops[range];
-        let start = doc.ops().len();
-        doc.ops_mut().splice(pos, batch);
-        doc.ops().len() - start
-    }
-
-    pub(crate) fn order_ops_for_doc(&mut self, obj_info: &mut ObjIndex) {
-        self.ops.sort_by(|a, b| {
-            a.bld.obj.cmp(&b.bld.obj).then_with(|| {
-                match a.elemid_or_key().partial_cmp(&b.elemid_or_key()) {
-                    Some(Ordering::Equal) | None => a.bld.id.cmp(&b.bld.id),
-                    Some(order) => order,
-                }
+    /// The batch's ops in document order, and the hints
+    /// [`untangle_order_idx`] found for them.
+    fn doc_ordered_indexes<H: crate::hash_retention::HashRetention>(
+        &self,
+        doc: &Automerge<H>,
+    ) -> Result<(Vec<u32>, HashMap<OpId, u64>), AutomergeError> {
+        // sort indexes rather than the much larger ChangeOps
+        let mut idxs: Vec<u32> = (0..self.ops.len() as u32)
+            .filter(|&i| {
+                let op = &self.ops[i as usize];
+                !(op.bld.is_delete() && op.bld.pred.is_empty())
             })
-        });
+            .collect();
+        idxs.sort_unstable_by(|&a, &b| doc_order_cmp(&self.ops[a as usize], &self.ops[b as usize]));
+
+        let mut new_objs = crate::op_set2::op_set::ObjIndex::default();
+        for &i in &idxs {
+            let op = &self.ops[i as usize];
+            if let Some(info) = op.obj_info() {
+                new_objs.insert(op.id(), info);
+            }
+        }
+        let mut walker = ObjWalker::new(doc.ops());
+        let mut hints = HashMap::new();
         let mut start = 0;
-        let mut last_obj = None;
-        for (i, o) in self.ops.iter().enumerate() {
-            for p in o.pred().iter() {
-                self.pred.entry(*p).or_default().push(SuccessorValue::new(
-                    o.id(),
-                    o.get_increment_value(),
-                    o.masked,
-                ))
+        while start < idxs.len() {
+            let obj = self.ops[idxs[start] as usize].bld.obj;
+            let mut end = start + 1;
+            while end < idxs.len() && self.ops[idxs[end] as usize].bld.obj == obj {
+                end += 1;
             }
-            if let Some(info) = o.obj_info() {
-                obj_info.insert(o.id(), info)
+            let obj_type = new_objs
+                .object_type(&obj)
+                .or_else(|| doc.ops().obj_info.object_type(&obj));
+            let seq = matches!(obj_type, Some(t) if t.is_sequence());
+            let wrong_key = |i: &u32| {
+                let op = &self.ops[*i as usize].bld;
+                matches!(op.key, KeyRef::Seq(_)) != seq || (op.insert && !seq)
+            };
+            if let Some(t) = obj_type.filter(|_| idxs[start..end].iter().any(wrong_key)) {
+                return Err(AutomergeError::InvalidOp(t));
             }
-            if Some(o.bld.obj) != last_obj {
-                if let Some(obj) = last_obj {
-                    self.obj_spans.push(ObjSpan {
-                        obj,
-                        span: start..i,
-                    });
+            if let Some(t) = obj_type.filter(|_| seq) {
+                let obj_range = walker.seek_to_obj(obj);
+                let placed = untangle_order_idx(
+                    &self.ops,
+                    &mut idxs[start..end],
+                    doc.ops(),
+                    obj_range,
+                    &mut hints,
+                );
+                if !placed {
+                    return Err(AutomergeError::InvalidOp(t));
                 }
-                start = i;
-                last_obj = Some(o.bld.obj);
             }
+            start = end;
         }
-        if let Some(obj) = last_obj {
-            let span = start..self.ops.len();
-            self.obj_spans.push(ObjSpan { obj, span });
-        }
+        Ok((idxs, hints))
     }
 }
 
@@ -955,111 +438,143 @@ impl<'a> ObjWalker<'a> {
     }
 }
 
-#[derive(Debug, Clone, Default)]
-struct ObjSpan {
-    obj: ObjId,
-    span: Range<usize>,
+/// Encode doc-ordered, succ-stamped ops as bundle op columns, keeping
+/// the document's actor indexes.
+fn encode_bundle_ops<'x, I>(
+    ops: I,
+    op_set: &OpSet,
+    hints: &HashMap<OpId, u64>,
+) -> (
+    crate::storage::RawColumns<crate::storage::columns::compression::Uncompressed>,
+    Vec<u8>,
+)
+where
+    I: Iterator<Item = &'x ChangeOp> + Clone,
+{
+    let actors_len = op_set.actors.len();
+    let mut mapper = crate::op_set2::change::ActorMapper::new(&op_set.actors);
+    let mut writer = crate::storage::bundle::BundleOpWriter::default();
+    for op in ops {
+        let succ_ids: Vec<OpId> = op.succ.iter().map(|s| s.0).collect();
+        let target = match &op.bld.key {
+            KeyRef::Seq(e) if hints.contains_key(&e.0) => Some(e.0),
+            _ => None,
+        };
+        writer.add(&op.bld, &succ_ids, &mut mapper, target);
+    }
+    mapper.mapping = (0..actors_len)
+        .map(|i| Some(crate::op_set2::types::ActorIdx::from(i)))
+        .collect();
+    let mut data = Vec::new();
+    let cols = writer.finish(&mapper, &mut data, hints);
+    (cols.raw_columns(), data)
 }
 
-impl Automerge {
-    pub fn apply_changes_batch(
-        &mut self,
-        changes: impl IntoIterator<Item = Change> + Clone,
-    ) -> Result<(), AutomergeError> {
-        self.apply_changes_batch_log_patches(changes, &mut PatchLog::inactive())
-    }
-
-    pub fn apply_changes_batch_log_patches<I: IntoIterator<Item = Change>>(
+impl<H: crate::hash_retention::HashRetention> Automerge<H> {
+    pub fn apply_changes_batch<I: IntoIterator<Item = Change>>(
         &mut self,
         changes: I,
-        log: &mut PatchLog,
     ) -> Result<(), AutomergeError> {
-        // Validate the observer before any change is taken from the queue: a
-        // rejected log must leave previously queued changes available for a
-        // retry with a compatible log. `validate` is read-only, and once it
-        // passes the migrations inside `BatchApply::apply` cannot fail:
-        // applying a batch only *adds* actors, and migrating onto a superset
-        // of the log's actors always succeeds.
-        log.validate(&self.ops.actors)?;
+        self.apply_changes_batch_with(changes, false)
+    }
 
-        let mut seen: HashSet<ChangeHash> = self.queue.iter().map(Change::hash).collect();
-        let mut actor_seqs: HashMap<ActorId, HashSet<u64>> = HashMap::new();
-        let mut actor_author: HashSet<ActorId> = HashSet::new();
-
-        for change in self.queue.iter() {
-            actor_seqs
-                .entry(change.actor_id().clone())
-                .or_default()
-                .insert(change.seq());
-            if change.author().is_some() {
-                actor_author.insert(change.actor_id().clone());
-            }
-        }
-
-        let mut incoming = ChangeBatch::new();
-        for change in changes {
-            let hash = change.hash();
-            if self.change_graph.has_change(&hash) || seen.contains(&hash) {
+    /// Outside audit mode nothing is queued: changes that are not ready
+    /// fail the whole batch, or with `drop_unready` are discarded.
+    pub(crate) fn apply_changes_batch_with<I: IntoIterator<Item = Change>>(
+        &mut self,
+        changes: I,
+        drop_unready: bool,
+    ) -> Result<(), AutomergeError> {
+        let mut batch = ChangeBatch::new();
+        let mut actors_with_author: HashSet<ActorId> = self
+            .queue
+            .iter()
+            .filter(|c| c.author().is_some())
+            .map(|c| c.actor_id().clone())
+            .collect();
+        for c in changes {
+            let hash = c.hash();
+            let lookup =
+                self.change_graph
+                    .lookup_change_for_apply(&hash, &c.id(), &self.ops.actors);
+            if lookup == ApplyLookup::Present {
                 continue;
             }
-            if self.has_actor_seq(&change) {
+            if self.queue.has_hash(&hash) || batch.has_hash(&hash) {
+                continue;
+            }
+            if lookup == ApplyLookup::Equivocation {
                 self.queue
-                    .remove_actor_branch_from(change.actor_id(), change.seq().saturating_add(1));
-                return Err(AutomergeError::duplicate_seq(&change));
+                    .remove_actor_branch_from(c.actor_id(), c.seq().saturating_add(1));
+                return Err(AutomergeError::duplicate_seq(&c));
             }
-            if actor_seqs
-                .get(change.actor_id())
-                .is_some_and(|seqs| seqs.contains(&change.seq()))
+            if self.queue.has_actor_seq(&c) {
+                return Err(AutomergeError::duplicate_seq(&c));
+            }
+            if c.author().is_some()
+                && (self.get_author_for_actor(c.actor_id()).is_some()
+                    || !actors_with_author.insert(c.actor_id().clone()))
             {
-                return Err(AutomergeError::duplicate_seq(&change));
+                return Err(AutomergeError::duplicate_author(&c));
             }
-            // TODO(finto): Refactor with BatchBuilder pattern
-            if change.author().is_some()
-                && (self.get_author_for_actor(change.actor_id()).is_some()
-                    || actor_author.contains(change.actor_id()))
-            {
-                return Err(AutomergeError::duplicate_author(&change));
+            if c.author().is_some() && c.seq() != 1 {
+                return Err(AutomergeError::author_on_non_initial_seq(&c));
             }
-            if change.author().is_some() && change.seq() != 1 {
-                return Err(AutomergeError::author_on_non_initial_seq(&change));
-            }
-
-            seen.insert(hash);
-            actor_seqs
-                .entry(change.actor_id().clone())
-                .or_default()
-                .insert(change.seq());
-            if change.author().is_some() {
-                actor_author.insert(change.actor_id().clone());
-            }
-            incoming.push(change)?;
+            batch.push(c)?;
         }
 
-        self.queue.extend(incoming);
-        let changes = self.queue.pop_topo_sorted_ready(&self.change_graph);
-        Ok(BatchApply::new(changes).apply(self, log)?)
+        self.queue.extend(batch);
+
+        if self.queue.is_empty() {
+            return Ok(());
+        }
+
+        let ready = self.queue.pop_topo_sorted_ready(&self.change_graph);
+        if H::AUDIT == AuditMode::Disabled && !self.queue.is_empty() {
+            let unready = std::mem::replace(&mut self.queue, ChangeQueue::new());
+            if !drop_unready {
+                return Err(self.unready_error(&unready));
+            }
+        }
+
+        // on failure the popped changes are not re-queued: one of them
+        // would fail every later apply
+        BatchApply::new(ready).apply(self)
+    }
+
+    /// A dep hash this document may have freed cannot be told from a missing one.
+    fn unready_error(&self, unready: &ChangeQueue) -> AutomergeError {
+        let undecidable = unready
+            .iter()
+            .flat_map(|c| c.deps())
+            .any(|dep| !unready.has_hash(dep) && self.change_graph.has_change(dep).is_err());
+        if undecidable {
+            AutomergeError::AuditModeRequired
+        } else {
+            AutomergeError::MissingDeps
+        }
     }
 
     fn import_ops_to(
         &mut self,
         change: &Change,
         ops: &mut Vec<ChangeOp>,
-        mask: Option<&Mask>,
     ) -> Result<(), AutomergeError> {
-        let new_ops = self.import_ops(change, mask)?;
+        let new_ops = self.import_ops(change)?;
         ops.extend(new_ops);
         Ok(())
     }
 
-    fn import_ops(
-        &mut self,
-        change: &Change,
-        mask: Option<&Mask>,
-    ) -> Result<Vec<ChangeOp>, AutomergeError> {
+    fn import_ops(&mut self, change: &Change) -> Result<Vec<ChangeOp>, AutomergeError> {
+        // a ready change naming an unknown actor is malformed, untrusted input
         let actors: Vec<_> = change
             .actors()
-            .map(|a| self.ops.lookup_actor(a).unwrap())
-            .collect();
+            .map(|a| {
+                self.ops
+                    .lookup_actor(a)
+                    .ok_or_else(|| AutomergeError::InvalidActorId(a.to_string()))
+            })
+            .collect::<Result<_, _>>()?;
 
         change
             .iter_ops()
@@ -1085,13 +600,8 @@ impl Automerge {
                     pred,
                 };
                 let change = ChangeOp {
-                    pos: None,
-                    subsort: 0,
                     conflicted: false,
                     succ: vec![],
-                    // The invariant fact for this batch: hidden by the mask
-                    // snapshot taken before the graph was updated.
-                    masked: mask.is_some_and(|m| m.hides(&id)),
                     bld,
                 };
                 Ok(change)
@@ -1103,11 +613,13 @@ impl Automerge {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::autocommit::AutoCommit;
     use crate::marks::{ExpandMark, Mark};
     use crate::read::ReadDoc;
-    use crate::transaction::Transactable;
+    use crate::tx::Transactable;
     use crate::types;
-    use crate::{make_rng, ActorId, AutoCommit, ROOT};
+    use crate::types::{ObjType, ScalarValue};
+    use crate::{make_rng, ActorId, ROOT};
     use rand::prelude::*;
 
     /// InsertQuery::resolve had a bug where an increment op before a trailing
@@ -1135,13 +647,13 @@ mod tests {
         );
         assert_eq!(doc.get(&list, 1).unwrap().map(|(v, _)| v), Some("x".into()));
 
-        let changes = doc.doc.get_changes(&heads);
+        let changes = doc.doc.get_changes(&heads).unwrap();
         let mut replayed = doc.fork_at(&heads).unwrap();
         replayed.apply_changes(changes).unwrap();
         replayed.doc.debug_cmp(&doc.doc);
     }
 
-    impl AutoCommit {
+    impl<H: crate::hash_retention::HashRetention> AutoCommit<H> {
         fn apply_changes_iter(
             &mut self,
             changes: impl IntoIterator<Item = Change> + Clone,
@@ -1156,12 +668,164 @@ mod tests {
     }
 
     #[test]
+    fn v1_increment_plus_child_insert_layout() {
+        // a same-batch increment and insert-after on one element must not interleave
+        let mut doc = AutoCommit::new()
+            .with_actor("aa".try_into().unwrap())
+            .enable_audit_mode()
+            .unwrap();
+        let list = doc.put_object(&ROOT, "list", ObjType::List).unwrap();
+        doc.insert(&list, 0, ScalarValue::counter(5)).unwrap();
+        let heads = doc.get_heads();
+
+        let mut f = doc.fork().with_actor("bb".try_into().unwrap());
+        f.increment(&list, 0, 1).unwrap();
+        f.insert(&list, 1, "x").unwrap();
+
+        doc.merge(&mut f).unwrap();
+        // must not panic re-walking the merged layout
+        let _ = doc.doc.get_changes(&heads).unwrap();
+    }
+
+    #[test]
+    fn batch_apply_per_merge_validates() {
+        let mut rng = make_rng();
+        for _ in 0..10 {
+            let mut base = AutoCommit::new()
+                .with_actor(rng.random())
+                .enable_audit_mode()
+                .unwrap();
+            let list = base.put_object(&ROOT, "list", ObjType::List).unwrap();
+            let map = base.put_object(&ROOT, "map", ObjType::Map).unwrap();
+            base.put(&map, "c", ScalarValue::counter(0)).unwrap();
+            for i in 0..5 {
+                base.insert(&list, i, i as i64).unwrap();
+            }
+            base.put(&list, 1, "u1").unwrap();
+
+            let heads = base.get_heads();
+            let mut src = base.fork().with_actor(rng.random());
+            for _ in 0..6 {
+                let mut f = base.fork().with_actor(rng.random());
+                for _ in 0..rng.random_range(1..8u32) {
+                    let len = f.length(&list);
+                    match rng.random_range(0..7u32) {
+                        0 => {
+                            let at = rng.random_range(0..=len as u32) as usize;
+                            f.insert(&list, at, rng.random_range(0..100i64)).unwrap();
+                        }
+                        1 => {
+                            let k = format!("k{}", rng.random_range(0..6u32));
+                            f.put(&map, k, rng.random_range(0..100i64)).unwrap();
+                        }
+                        2 => {
+                            let k = format!("k{}", rng.random_range(0..6u32));
+                            let _ = f.delete(&map, k);
+                        }
+                        3 => {
+                            f.increment(&map, "c", rng.random_range(1..10i64)).unwrap();
+                        }
+                        4 if len > 0 => {
+                            let at = rng.random_range(0..len as u32) as usize;
+                            f.put(&list, at, "x").unwrap();
+                        }
+                        5 if len > 1 => {
+                            let at = rng.random_range(0..len as u32) as usize;
+                            f.delete(&list, at).unwrap();
+                        }
+                        _ => {
+                            f.commit();
+                        }
+                    }
+                }
+                let changes = changes_since(&mut f, &heads);
+
+                src.doc.apply_changes_batch(changes).unwrap();
+                src.doc.validate_document();
+            }
+        }
+    }
+
+    #[test]
+    fn batch_apply_fuzz_validates() {
+        let mut rng = make_rng();
+        for _ in 0..20 {
+            let mut base = AutoCommit::new()
+                .with_actor(rng.random())
+                .enable_audit_mode()
+                .unwrap();
+            let list = base.put_object(&ROOT, "list", ObjType::List).unwrap();
+            let map = base.put_object(&ROOT, "map", ObjType::Map).unwrap();
+            base.put(&map, "c", ScalarValue::counter(0)).unwrap();
+            for i in 0..5 {
+                base.insert(&list, i, i as i64).unwrap();
+            }
+            base.put(&list, 1, "u1").unwrap();
+            let heads = base.get_heads();
+
+            let mut src = base.fork().with_actor(rng.random());
+            for _ in 0..6 {
+                let mut f = base.fork().with_actor(rng.random());
+                for _ in 0..rng.random_range(1..8u32) {
+                    let len = f.length(&list);
+                    match rng.random_range(0..7u32) {
+                        0 => {
+                            let at = rng.random_range(0..=len as u32) as usize;
+                            f.insert(&list, at, rng.random_range(0..100i64)).unwrap();
+                        }
+                        1 => {
+                            let k = format!("k{}", rng.random_range(0..6u32));
+                            f.put(&map, k, rng.random_range(0..100i64)).unwrap();
+                        }
+                        2 => {
+                            let k = format!("k{}", rng.random_range(0..6u32));
+                            let _ = f.delete(&map, k);
+                        }
+                        3 => {
+                            f.increment(&map, "c", rng.random_range(1..10i64)).unwrap();
+                        }
+                        4 if len > 0 => {
+                            let at = rng.random_range(0..len as u32) as usize;
+                            f.put(&list, at, "x").unwrap();
+                        }
+                        5 if len > 1 => {
+                            let at = rng.random_range(0..len as u32) as usize;
+                            f.delete(&list, at).unwrap();
+                        }
+                        _ => {
+                            f.commit();
+                            let at = rng.random_range(0..=len as u32) as usize;
+                            f.insert(&list, at, rng.random_range(0..100i64)).unwrap();
+                        }
+                    }
+                }
+                src.merge(&mut f).unwrap();
+            }
+            let changes = changes_since(&mut src, &heads);
+
+            let mut doc = base.fork();
+            doc.doc.apply_changes_batch(changes).unwrap();
+            doc.doc.validate_document();
+        }
+    }
+
+    fn changes_since<H: crate::hash_retention::HashRetention>(
+        src: &mut AutoCommit<H>,
+        heads: &[crate::ChangeId],
+    ) -> Vec<Change> {
+        src.get_changes(heads).unwrap()
+    }
+
+    #[test]
     fn map_batch_apply() {
         let actor3 = ActorId::try_from("aaaaaa").unwrap();
         let actor2 = ActorId::try_from("bbbbbb").unwrap();
         let actor1 = ActorId::try_from("cccccc").unwrap();
 
-        let mut doc1 = AutoCommit::new().with_actor(actor1);
+        let mut doc1 = AutoCommit::new()
+            .with_actor(actor1)
+            .enable_audit_mode()
+            .unwrap();
         let map1 = doc1.put_object(&ROOT, "map", ObjType::Map).unwrap();
         doc1.put(&map1, "key1", "val1").unwrap();
         doc1.put(&map1, "key2", "val2").unwrap();
@@ -1186,9 +850,9 @@ mod tests {
         doc3.put(&map1, "key3", "val4b").unwrap();
 
         let mut doc1_test = doc1.fork();
-        let mut changes2 = doc2.get_changes(&heads1);
+        let mut changes2 = doc2.get_changes(&heads1).unwrap();
 
-        let changes3 = doc3.get_changes(&heads1);
+        let changes3 = doc3.get_changes(&heads1).unwrap();
         changes2.extend(changes3);
 
         doc1.apply_changes_iter(changes2.clone()).unwrap();
@@ -1206,7 +870,10 @@ mod tests {
         let actor2 = ActorId::try_from("bbbbbb").unwrap();
         let actor1 = ActorId::try_from("cccccc").unwrap();
 
-        let mut doc1 = AutoCommit::new().with_actor(actor1);
+        let mut doc1 = AutoCommit::new()
+            .with_actor(actor1)
+            .enable_audit_mode()
+            .unwrap();
         let list = doc1.put_object(&ROOT, "list", ObjType::List).unwrap();
         doc1.insert(&list, 0, "val1").unwrap();
         doc1.insert(&list, 1, "val2").unwrap();
@@ -1233,8 +900,8 @@ mod tests {
         doc3.insert(&list, 0, "val5h").unwrap();
 
         let mut doc1_test = doc1.fork();
-        let mut changes2 = doc2.get_changes(&heads1);
-        let changes3 = doc3.get_changes(&heads1);
+        let mut changes2 = doc2.get_changes(&heads1).unwrap();
+        let changes3 = doc3.get_changes(&heads1).unwrap();
         changes2.extend(changes3);
 
         doc1.apply_changes_iter(changes2.clone()).unwrap();
@@ -1253,7 +920,10 @@ mod tests {
         let actor2 = ActorId::try_from("bbbbbb").unwrap();
         let actor1 = ActorId::try_from("cccccc").unwrap();
 
-        let mut doc1 = AutoCommit::new().with_actor(actor1);
+        let mut doc1 = AutoCommit::new()
+            .with_actor(actor1)
+            .enable_audit_mode()
+            .unwrap();
         let text = doc1.put_object(&ROOT, "text", ObjType::Text).unwrap();
         doc1.splice_text(&text, 0, 0, "the quick fox jumped over the lazy dog")
             .unwrap();
@@ -1267,8 +937,8 @@ mod tests {
         doc3.splice_text(&text, 3, 1, "aalks").unwrap();
 
         let mut doc1_test = doc1.fork();
-        let mut changes2 = doc2.get_changes(&heads1);
-        let changes3 = doc3.get_changes(&heads1);
+        let mut changes2 = doc2.get_changes(&heads1).unwrap();
+        let changes3 = doc3.get_changes(&heads1).unwrap();
         changes2.extend(changes3);
 
         doc1.apply_changes_iter(changes2.clone()).unwrap();
@@ -1285,7 +955,10 @@ mod tests {
     #[test]
     fn multi_put_batch_apply() {
         let mut rng = make_rng();
-        let mut doc1 = AutoCommit::new().with_actor(rng.random());
+        let mut doc1 = AutoCommit::new()
+            .with_actor(rng.random())
+            .enable_audit_mode()
+            .unwrap();
         let list = doc1.put_object(&ROOT, "list", ObjType::List).unwrap();
         doc1.insert(&list, 0, "a").unwrap();
         doc1.insert(&list, 1, "b").unwrap();
@@ -1298,7 +971,7 @@ mod tests {
             tmp.put(&list, 0, i).unwrap();
             doc2.merge(&mut tmp).unwrap();
         }
-        let changes = doc2.get_changes(&heads);
+        let changes = doc2.get_changes(&heads).unwrap();
         doc1.apply_changes_batch(changes).unwrap();
         doc1.validate_top_index();
         assert_eq!(doc1.save(), doc2.save());
@@ -1307,7 +980,10 @@ mod tests {
     #[test]
     fn multi_insert_batch_apply() {
         let mut rng = make_rng();
-        let mut doc1 = AutoCommit::new().with_actor(rng.random());
+        let mut doc1 = AutoCommit::new()
+            .with_actor(rng.random())
+            .enable_audit_mode()
+            .unwrap();
         let list = doc1.put_object(&ROOT, "list", ObjType::List).unwrap();
         doc1.insert(&list, 0, "a").unwrap();
         doc1.insert(&list, 1, "b").unwrap();
@@ -1319,11 +995,10 @@ mod tests {
         for i in 0..10 {
             let mut tmp = doc1.fork().with_actor(rng.random());
             tmp.insert(&list, 1, i).unwrap();
-            //let change = tmp.get_last_local_change().unwrap();
             doc2.merge(&mut tmp).unwrap();
         }
 
-        let changes = doc2.get_changes(&heads);
+        let changes = doc2.get_changes(&heads).unwrap();
         doc1.apply_changes_batch(changes).unwrap();
         doc1.validate_top_index();
         assert_eq!(doc1.save(), doc2.save());
@@ -1332,7 +1007,10 @@ mod tests {
     #[test]
     fn multi_update_batch_apply() {
         let mut rng = make_rng();
-        let mut doc1 = AutoCommit::new().with_actor(rng.random());
+        let mut doc1 = AutoCommit::new()
+            .with_actor(rng.random())
+            .enable_audit_mode()
+            .unwrap();
         let list = doc1.put_object(&ROOT, "list", ObjType::List).unwrap();
         doc1.insert(&list, 0, "a").unwrap();
         doc1.insert(&list, 1, "b").unwrap();
@@ -1347,16 +1025,23 @@ mod tests {
             doc2.merge(&mut tmp).unwrap();
         }
 
-        let changes = doc2.get_changes(&heads);
+        let changes = doc2.get_changes(&heads).unwrap();
         doc1.apply_changes_batch(changes).unwrap();
         doc1.validate_top_index();
         assert_eq!(doc1.save(), doc2.save());
     }
 
     #[test]
+    #[cfg_attr(
+        not(feature = "deep_fuzz"),
+        ignore = "deep fuzz: run with --features deep_fuzz"
+    )]
     fn fuzz_batch_list_apply() {
         let mut rng = make_rng();
-        let mut doc1 = AutoCommit::new().with_actor(rng.random());
+        let mut doc1 = AutoCommit::new()
+            .with_actor(rng.random())
+            .enable_audit_mode()
+            .unwrap();
         let list = doc1.put_object(&ROOT, "list", ObjType::List).unwrap();
         doc1.insert(&list, 0, "a").unwrap();
         doc1.insert(&list, 1, "b").unwrap();
@@ -1397,7 +1082,7 @@ mod tests {
             doc1_tmp.merge(&mut doc2).unwrap();
         }
 
-        let changes = doc2.get_changes(&heads);
+        let changes = doc2.get_changes(&heads).unwrap();
         doc1.apply_changes_batch(changes).unwrap();
         doc1.validate_top_index();
         assert_eq!(doc1.save(), doc2.save());
@@ -1406,7 +1091,10 @@ mod tests {
     #[test]
     fn fuzz_batch_map1_apply() {
         let mut rng = make_rng();
-        let mut doc1 = AutoCommit::new().with_actor(rng.random());
+        let mut doc1 = AutoCommit::new()
+            .with_actor(rng.random())
+            .enable_audit_mode()
+            .unwrap();
         let map1 = doc1.put_object(&ROOT, "map1", ObjType::Map).unwrap();
         let map2 = doc1.put_object(&map1, "map2", ObjType::Map).unwrap();
         let map3 = doc1.put_object(&map2, "map3", ObjType::Map).unwrap();
@@ -1441,7 +1129,7 @@ mod tests {
             doc1_tmp.merge(&mut doc2).unwrap();
         }
 
-        let changes = doc2.get_changes(&heads);
+        let changes = doc2.get_changes(&heads).unwrap();
         doc1.apply_changes_batch(changes).unwrap();
         doc1.validate_top_index();
         assert_eq!(doc1.save(), doc2.save());
@@ -1450,7 +1138,10 @@ mod tests {
     #[test]
     fn fuzz_batch_map2_apply() {
         let mut rng = make_rng();
-        let mut doc1 = AutoCommit::new().with_actor(rng.random());
+        let mut doc1 = AutoCommit::new()
+            .with_actor(rng.random())
+            .enable_audit_mode()
+            .unwrap();
         let map1 = doc1.put_object(&ROOT, "map1", ObjType::Map).unwrap();
         let map2 = doc1.put_object(&map1, "map2", ObjType::Map).unwrap();
         let map3 = doc1.put_object(&map2, "map3", ObjType::Map).unwrap();
@@ -1485,7 +1176,7 @@ mod tests {
             doc1_tmp.merge(&mut doc2).unwrap();
         }
 
-        let changes = doc2.get_changes(&heads);
+        let changes = doc2.get_changes(&heads).unwrap();
 
         let mut doc_a = doc1;
         let mut doc_b = doc_a.clone();
@@ -1500,7 +1191,7 @@ mod tests {
         assert_eq!(doc_a.save(), doc_b.save());
 
         let pa = doc_a.diff_incremental();
-        let pb = doc_b.diff(&heads, &final_heads);
+        let pb = doc_b.diff(&heads, &final_heads).unwrap();
 
         let len = std::cmp::max(pa.len(), pb.len());
 
@@ -1518,9 +1209,16 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        not(feature = "deep_fuzz"),
+        ignore = "deep fuzz: run with --features deep_fuzz"
+    )]
     fn fuzz_batch_map_counter_apply() {
         let mut rng = make_rng();
-        let mut doc1 = AutoCommit::new().with_actor(rng.random());
+        let mut doc1 = AutoCommit::new()
+            .with_actor(rng.random())
+            .enable_audit_mode()
+            .unwrap();
         let map1 = doc1.put_object(&ROOT, "map1", ObjType::Map).unwrap();
         doc1.put(&map1, "key1", ScalarValue::counter(10)).unwrap();
         doc1.increment(&map1, "key1", 15).unwrap();
@@ -1575,7 +1273,7 @@ mod tests {
             doc1_tmp.merge(&mut doc2).unwrap();
         }
 
-        let changes = doc2.get_changes(&heads);
+        let changes = doc2.get_changes(&heads).unwrap();
 
         let mut doc_a = doc1;
         let mut doc_b = doc_a.clone();
@@ -1591,7 +1289,7 @@ mod tests {
         assert_eq!(doc_a.save(), doc_b.save());
 
         let pa = doc_a.diff_incremental();
-        let pb = doc_b.diff(&heads, &final_heads);
+        let pb = doc_b.diff(&heads, &final_heads).unwrap();
 
         let len = std::cmp::max(pa.len(), pb.len());
 
@@ -1616,7 +1314,10 @@ mod tests {
             value += 1;
             value
         };
-        let mut doc1 = AutoCommit::new().with_actor(rng.random());
+        let mut doc1 = AutoCommit::new()
+            .with_actor(rng.random())
+            .enable_audit_mode()
+            .unwrap();
         let list1 = doc1.put_object(&ROOT, "list1", ObjType::List).unwrap();
         doc1.insert(&list1, 0, ScalarValue::counter(val())).unwrap();
         doc1.insert(&list1, 1, ScalarValue::counter(val())).unwrap();
@@ -1654,7 +1355,7 @@ mod tests {
                     let index = rng.random::<u32>() % (len as u32);
                     tmp.delete(&list1, index as usize).unwrap();
                 }
-                let change = tmp.get_last_local_change().unwrap();
+                let change = tmp.get_last_local_change_legacy().unwrap().unwrap();
                 changes.push(change);
             }
             merge_and_diff(&mut doc2, &mut doc2_copy, &changes);
@@ -1670,7 +1371,10 @@ mod tests {
             value += 1;
             value
         };
-        let mut doc1 = AutoCommit::new().with_actor(rng.random());
+        let mut doc1 = AutoCommit::new()
+            .with_actor(rng.random())
+            .enable_audit_mode()
+            .unwrap();
         let list1 = doc1.put_object(&ROOT, "list1", ObjType::List).unwrap();
         doc1.insert(&list1, 0, val()).unwrap();
         doc1.insert(&list1, 1, val()).unwrap();
@@ -1702,7 +1406,7 @@ mod tests {
                     let index = rng.random::<u32>() % (len as u32);
                     tmp.delete(&list1, index as usize).unwrap();
                 }
-                let change = tmp.get_last_local_change().unwrap();
+                let change = tmp.get_last_local_change_legacy().unwrap().unwrap();
                 changes.push(change);
             }
             merge_and_diff(&mut doc2, &mut doc2_copy, &changes);
@@ -1718,7 +1422,10 @@ mod tests {
             value += 1;
             value
         };
-        let mut doc1 = AutoCommit::new().with_actor(rng.random());
+        let mut doc1 = AutoCommit::new()
+            .with_actor(rng.random())
+            .enable_audit_mode()
+            .unwrap();
         let text1 = doc1.put_object(&ROOT, "text1", ObjType::Text).unwrap();
         doc1.splice_text(&text1, 0, 0, "--------").unwrap();
 
@@ -1743,7 +1450,7 @@ mod tests {
                     )
                     .unwrap();
                 }
-                let change = tmp.get_last_local_change().unwrap();
+                let change = tmp.get_last_local_change_legacy().unwrap().unwrap();
                 changes.push(change);
             }
             merge_and_diff(&mut doc2, &mut doc2_copy, &changes);
@@ -1759,7 +1466,10 @@ mod tests {
             value += 1;
             value
         };
-        let mut doc1 = AutoCommit::new().with_actor(rng.random());
+        let mut doc1 = AutoCommit::new()
+            .with_actor(rng.random())
+            .enable_audit_mode()
+            .unwrap();
         let text1 = doc1.put_object(&ROOT, "text1", ObjType::Text).unwrap();
         doc1.splice_text(&text1, 0, 0, "---------------------")
             .unwrap();
@@ -1805,7 +1515,7 @@ mod tests {
                     };
                     tmp.mark(&text1, mark, ExpandMark::After).unwrap();
                 }
-                let change = tmp.get_last_local_change().unwrap();
+                let change = tmp.get_last_local_change_legacy().unwrap().unwrap();
                 changes.push(change);
             }
             merge_and_diff(&mut doc2, &mut doc2_copy, &changes);
@@ -1813,7 +1523,11 @@ mod tests {
         merge_and_diff(&mut doc1, &mut doc1_copy, &changes);
     }
 
-    fn merge_and_diff(a: &mut AutoCommit, a_copy: &mut AutoCommit, changes: &[Change]) {
+    fn merge_and_diff<H: crate::hash_retention::HashRetention>(
+        a: &mut AutoCommit<H>,
+        a_copy: &mut AutoCommit<H>,
+        changes: &[Change],
+    ) {
         let heads = a.get_heads();
 
         a.update_diff_cursor();
@@ -1823,7 +1537,7 @@ mod tests {
         let final_heads = a.get_heads();
 
         a_copy.apply_changes_iter(changes.to_owned()).unwrap();
-        let pb = a_copy.diff(&heads, &final_heads);
+        let pb = a_copy.diff(&heads, &final_heads).unwrap();
 
         let len = std::cmp::max(pa.len(), pb.len());
 
@@ -1845,7 +1559,10 @@ mod tests {
     #[test]
     fn map_key_conflict() {
         let mut rng = make_rng();
-        let mut doc = AutoCommit::new().with_actor(rng.random());
+        let mut doc = AutoCommit::new()
+            .with_actor(rng.random())
+            .enable_audit_mode()
+            .unwrap();
 
         doc.put(&ROOT, "key1", "value1").unwrap();
 
@@ -1873,7 +1590,7 @@ mod tests {
 
             let changes: Vec<_> = docs
                 .iter_mut()
-                .map(|d| d.get_last_local_change().unwrap())
+                .map(|d| d.get_last_local_change_legacy().unwrap().unwrap())
                 .collect();
 
             doc.apply_changes(changes).unwrap();
@@ -1885,7 +1602,10 @@ mod tests {
     #[test]
     fn list_element_conflict() {
         let mut rng = make_rng();
-        let mut doc = AutoCommit::new().with_actor(rng.random());
+        let mut doc = AutoCommit::new()
+            .with_actor(rng.random())
+            .enable_audit_mode()
+            .unwrap();
 
         let list = doc.put_object(&ROOT, "list", ObjType::List).unwrap();
 
@@ -1914,7 +1634,7 @@ mod tests {
 
             let changes: Vec<_> = docs
                 .iter_mut()
-                .map(|d| d.get_last_local_change().unwrap())
+                .map(|d| d.get_last_local_change_legacy().unwrap().unwrap())
                 .collect();
 
             doc.apply_changes(changes).unwrap();
@@ -1925,7 +1645,10 @@ mod tests {
     #[test]
     fn conflicts_with_isolate() {
         let mut rng = make_rng();
-        let mut doc = AutoCommit::new().with_actor(rng.random());
+        let mut doc = AutoCommit::new()
+            .with_actor(rng.random())
+            .enable_audit_mode()
+            .unwrap();
 
         let list = doc.put_object(&ROOT, "list", ObjType::List).unwrap();
         let map = doc.put_object(&ROOT, "map", ObjType::Map).unwrap();
@@ -1944,8 +1667,10 @@ mod tests {
 
         for _ in 0..CYCLES {
             for d in &mut docs {
+                // isolating needs the central doc's historical heads
+                d.merge(&mut doc).unwrap();
                 let head = rng.random::<u32>() % (heads.len() as u32);
-                d.isolate(&heads[head as usize]);
+                d.isolate(&heads[head as usize]).unwrap();
                 for _ in 0..3 {
                     let del = rng.random::<u32>() % 5;
                     let val = rng.random::<u32>();
@@ -1971,7 +1696,7 @@ mod tests {
 
             let changes: Vec<_> = docs
                 .iter_mut()
-                .map(|d| d.get_last_local_change().unwrap())
+                .map(|d| d.get_last_local_change_legacy().unwrap().unwrap())
                 .collect();
 
             doc.apply_changes(changes).unwrap();
@@ -1980,22 +1705,5 @@ mod tests {
 
             doc.validate_top_index();
         }
-    }
-
-    #[test]
-    fn batch_multiple_changes_same_author() {
-        let author = crate::Author::try_from("aabbccdd").unwrap();
-        let mut doc1 = AutoCommit::new().with_author(Some(author.clone()));
-        doc1.put(&ROOT, "key1", "value1").unwrap();
-        doc1.commit();
-        doc1.put(&ROOT, "key2", "value2").unwrap();
-        doc1.commit();
-
-        let heads0 = [];
-        let changes = doc1.get_changes(&heads0);
-        assert_eq!(changes.len(), 2);
-
-        let mut doc2 = AutoCommit::new();
-        doc2.apply_changes_batch(changes).unwrap();
     }
 }

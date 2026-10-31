@@ -1,119 +1,14 @@
 use automerge::marks::{ExpandMark, Mark};
-use automerge::sync::{Message, MessageVersion, State};
+use automerge_sync::{AutoCommitSync, Message, MessageVersion, State, SyncDoc};
 //use automerge::op_tree::B;
 use automerge::transaction::{CommitOptions, Transactable};
 use automerge::{
-    sync::SyncDoc, ActorId, Author, AutoCommit, Automerge, AutomergeError, Change, ExpandedChange,
-    LoadOptions, ObjId, ObjType, Patch, PatchAction, PatchLog, Prop, ReadDoc, ScalarValue,
-    SequenceTree, TextEncoding, Value, ROOT,
+    ActorId, Author, AutoCommit, Automerge, AutomergeError, Change, ExpandedChange, LoadOptions,
+    ObjId, ObjType, Patch, PatchAction, Prop, ReadDoc, ScalarValue, SequenceTree, TextEncoding,
+    Value, ROOT,
 };
 
 const B: usize = 16;
-
-fn patch_log_from_actor(actor: &[u8]) -> PatchLog {
-    let mut source = AutoCommit::new();
-    source.set_actor(ActorId::from(actor));
-    source.put(ROOT, "source", "value").unwrap();
-    let source_changes = source.get_changes(&[]);
-
-    let mut patch_log = PatchLog::active();
-    let mut doc = Automerge::new();
-    doc.apply_changes_log_patches(source_changes, &mut patch_log)
-        .unwrap();
-    patch_log
-}
-
-fn doc_with_actor(actor: &[u8]) -> Automerge {
-    let mut source = AutoCommit::new();
-    source.set_actor(ActorId::from(actor));
-    source.put(ROOT, "key", "value").unwrap();
-    let changes = source.get_changes(&[]);
-
-    let mut doc = Automerge::new();
-    doc.apply_changes(changes).unwrap();
-    doc
-}
-
-#[test]
-fn make_patches_migrates_log_after_inactive_actor_insertion() {
-    // Bind an active log to a document whose only actor sorts high.
-    let mut doc = Automerge::new().with_actor(ActorId::from(&[0xffu8][..]));
-    let mut tx = doc.transaction_log_patches(PatchLog::active()).unwrap();
-    tx.put(ROOT, "x", 1).unwrap();
-    let (_, mut log) = tx.commit();
-
-    // Import a lexically earlier actor through an inactive log, shifting the
-    // bound actor to index 1 without updating the caller-held log.
-    let mut other = Automerge::new().with_actor(ActorId::from(&[0u8][..]));
-    let mut tx = other.transaction();
-    tx.put(ROOT, "y", 2).unwrap();
-    tx.commit();
-    doc.apply_changes(other.get_changes(&[])).unwrap();
-
-    // Materialization must align the held log with the grown actor list.
-    let patches = doc.make_patches(&mut log);
-    assert_eq!(
-        patches.len(),
-        1,
-        "expected only the logged put: {patches:?}"
-    );
-    match &patches[0].action {
-        PatchAction::PutMap { key, value, .. } => {
-            assert_eq!(key, "x");
-            assert_eq!(
-                value.1.to_string(),
-                "1@ff",
-                "the logged op must stay attributed to actor ff"
-            );
-        }
-        other => panic!("expected the logged put of x, got {other:?}"),
-    }
-}
-
-#[test]
-fn applying_changes_with_patch_log_from_another_document_returns_error_not_panic() {
-    let mut patch_log = patch_log_from_actor(b"bbbbbb");
-    let mut source = AutoCommit::new();
-    source.set_actor(ActorId::from(b"cccccc" as &[u8]));
-    source.put(ROOT, "source", "value").unwrap();
-    let changes = source.get_changes(&[]);
-
-    let mut doc = Automerge::new();
-    let result = doc.apply_changes_log_patches(changes, &mut patch_log);
-
-    assert!(matches!(result, Err(AutomergeError::PatchLogMismatch(_))));
-}
-
-#[test]
-fn transaction_with_patch_log_from_another_document_does_not_panic() {
-    let patch_log = patch_log_from_actor(b"bbbbbb");
-    let mut doc = doc_with_actor(b"cccccc");
-
-    let result = doc.transaction_log_patches(patch_log);
-
-    assert!(matches!(result, Err(automerge::PatchLogMismatch)));
-}
-
-#[test]
-fn transaction_at_with_patch_log_from_another_document_does_not_panic() {
-    let patch_log = patch_log_from_actor(b"bbbbbb");
-    let mut doc = doc_with_actor(b"cccccc");
-    let heads = doc.get_heads();
-
-    let result = doc.transaction_at(patch_log, &heads);
-
-    assert!(matches!(result, Err(automerge::PatchLogMismatch)));
-}
-
-#[test]
-fn owned_transaction_with_patch_log_from_another_document_does_not_panic() {
-    let patch_log = patch_log_from_actor(b"bbbbbb");
-    let doc = doc_with_actor(b"cccccc");
-
-    let result = doc.into_transaction(Some(patch_log), None);
-
-    assert!(matches!(result, Err(automerge::PatchLogMismatch)));
-}
 
 use std::fs;
 
@@ -155,36 +50,15 @@ fn merge_patches_clear_conflict_after_losing_list_value_is_deleted_from_fuzz_tra
     let mut doc = doc.document().clone();
     let mut right = right.document().clone();
     let mut actual = doc.hydrate(None);
-    let mut patch_log = PatchLog::active();
-    doc.merge_and_log_patches(&mut right, &mut patch_log)
-        .unwrap();
+    let patch_log_heads = doc.get_heads();
+    doc.merge(&mut right).unwrap();
     let expected = doc.hydrate(None);
-    let patches = doc.make_patches(&mut patch_log);
+    let patches = doc.diff(&patch_log_heads, &doc.get_heads());
     actual
         .apply_patches(TextEncoding::UnicodeCodePoint, patches)
         .unwrap();
 
     assert_eq!(actual, expected);
-}
-
-#[test]
-fn bundle_with_mark_columns_decodes_from_fuzz_trace() {
-    // Minimized from a fuzz crash. A mark populates both the expand and mark-name
-    // operation columns; the bundle must write their metadata in normalized order.
-    let mut doc = AutoCommit::new();
-    let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
-    doc.splice_text(&text, 0, 0, "a").unwrap();
-    doc.mark(
-        &text,
-        Mark::new("bold".to_string(), true, 0, 1),
-        ExpandMark::Both,
-    )
-    .unwrap();
-    doc.commit();
-
-    let hashes = doc.get_changes(&[]).into_iter().map(|change| change.hash());
-    let bundle = doc.bundle(hashes).unwrap();
-    automerge::Bundle::try_from(bundle.bytes()).unwrap();
 }
 
 #[test]
@@ -215,15 +89,13 @@ fn historical_owned_transaction_omits_patches_for_unreachable_object_from_fuzz_t
     let doc = source.document().clone();
     let mut actual = doc.hydrate(Some(&[]));
 
-    let mut tx = doc
-        .into_transaction(Some(PatchLog::active()), Some(&[]))
-        .unwrap();
+    let mut tx = doc.into_transaction(Some(&[])).unwrap();
     let result = tx.insert(&text, 0, ScalarValue::counter(-104));
     assert!(matches!(result, Err(AutomergeError::InvalidObjId(_))));
-    let (doc, hash, mut patch_log) = tx.commit();
+    let (doc, hash) = tx.commit();
     let branch_heads = hash.into_iter().collect::<Vec<_>>();
     let expected = doc.hydrate(Some(&branch_heads));
-    let patches = doc.make_patches(&mut patch_log);
+    let patches = doc.diff(&[], &branch_heads);
     actual
         .apply_patches(TextEncoding::UnicodeCodePoint, patches)
         .unwrap();
@@ -292,11 +164,12 @@ fn transaction_patches_replace_multi_character_string_in_text_from_fuzz_trace() 
     tx.commit();
 
     let mut actual = doc.hydrate(None);
-    let mut tx = doc.transaction_log_patches(PatchLog::active()).unwrap();
+    let patch_log_heads = doc.get_heads();
+    let mut tx = doc.transaction();
     tx.put(&text, 1, f64::MAX).unwrap();
-    let (_, mut patch_log) = tx.commit();
+    tx.commit();
     let expected = doc.hydrate(None);
-    let patches = doc.make_patches(&mut patch_log);
+    let patches = doc.diff(&patch_log_heads, &doc.get_heads());
     assert!(matches!(
         patches.as_slice(),
         [
@@ -336,11 +209,10 @@ fn merge_patches_replace_multi_character_string_in_text_from_fuzz_trace() {
     let mut doc = doc.document().clone();
     let mut branch = branch.document().clone();
     let mut actual = doc.hydrate(None);
-    let mut patch_log = PatchLog::active();
-    doc.merge_and_log_patches(&mut branch, &mut patch_log)
-        .unwrap();
+    let patch_log_heads = doc.get_heads();
+    doc.merge(&mut branch).unwrap();
     let expected = doc.hydrate(None);
-    let patches = doc.make_patches(&mut patch_log);
+    let patches = doc.diff(&patch_log_heads, &doc.get_heads());
     assert!(matches!(
         patches.as_slice(),
         [
@@ -380,11 +252,10 @@ fn merge_patches_include_text_element_update_from_fuzz_trace() {
     let mut doc = doc.document().clone();
     let mut branch = branch.document().clone();
     let mut actual = doc.hydrate(None);
-    let mut patch_log = PatchLog::active();
-    doc.merge_and_log_patches(&mut branch, &mut patch_log)
-        .unwrap();
+    let patch_log_heads = doc.get_heads();
+    doc.merge(&mut branch).unwrap();
     let expected = doc.hydrate(None);
-    let patches = doc.make_patches(&mut patch_log);
+    let patches = doc.diff(&patch_log_heads, &doc.get_heads());
     actual
         .apply_patches(TextEncoding::UnicodeCodePoint, patches)
         .unwrap();
@@ -2417,13 +2288,9 @@ fn regression_insert_opid() {
 
     let change2 = doc.get_last_local_change().unwrap().clone();
     let mut new_doc = Automerge::new();
-    let mut patch_log = PatchLog::active();
-    new_doc
-        .apply_changes_log_patches(vec![change1], &mut patch_log)
-        .unwrap();
-    new_doc
-        .apply_changes_log_patches(vec![change2], &mut patch_log)
-        .unwrap();
+    let patch_log_heads = new_doc.get_heads();
+    new_doc.apply_changes(vec![change1]).unwrap();
+    new_doc.apply_changes(vec![change2]).unwrap();
 
     for i in 0..=N {
         let (doc_val, _) = doc.get(&list_id, i).unwrap().unwrap();
@@ -2439,7 +2306,7 @@ fn regression_insert_opid() {
         );
     }
 
-    let patches = new_doc.make_patches(&mut patch_log);
+    let patches = new_doc.diff(&patch_log_heads, &new_doc.get_heads());
     let mut values = SequenceTree::new();
     for i in 0..=N {
         values.push((
@@ -2491,15 +2358,11 @@ fn big_list() {
 
     let change2 = doc.get_last_local_change().unwrap().clone();
     let mut new_doc = Automerge::new();
-    let mut patch_log = PatchLog::active();
-    new_doc
-        .apply_changes_log_patches(vec![change1], &mut patch_log)
-        .unwrap();
-    new_doc
-        .apply_changes_log_patches(vec![change2], &mut patch_log)
-        .unwrap();
+    let patch_log_heads = new_doc.get_heads();
+    new_doc.apply_changes(vec![change1]).unwrap();
+    new_doc.apply_changes(vec![change2]).unwrap();
 
-    let patches = new_doc.make_patches(&mut patch_log);
+    let patches = new_doc.diff(&patch_log_heads, &new_doc.get_heads());
     println!("PATCH = {:?}", patches.last());
     let matches = match &patches.last().unwrap().action {
         PatchAction::PutSeq { index: N, .. } => true,
@@ -2557,7 +2420,7 @@ fn can_transaction_at() -> Result<(), AutomergeError> {
     assert_eq!(tx.get(&ROOT, "size").unwrap().unwrap().0, Value::int(200));
     tx.commit();
 
-    let mut tx = doc1.transaction_at(PatchLog::null(), &heads1)?;
+    let mut tx = doc1.transaction_at(&heads1)?;
     assert_eq!(tx.text(&txt).unwrap(), "aaabbbccc");
     assert_eq!(tx.get(&ROOT, "size").unwrap().unwrap().0, Value::int(100));
     tx.splice_text(&txt, 3, 3, "ZZZ")?;
@@ -2568,7 +2431,7 @@ fn can_transaction_at() -> Result<(), AutomergeError> {
     assert_eq!(doc1.text(&txt).unwrap(), "aaaZZZQQQccc");
     assert_eq!(doc1.get(&ROOT, "size").unwrap().unwrap().0, Value::int(300));
 
-    let mut tx = doc1.transaction_at(PatchLog::null(), &heads1)?;
+    let mut tx = doc1.transaction_at(&heads1)?;
     assert_eq!(tx.text(&txt).unwrap(), "aaabbbccc");
     assert_eq!(tx.get(&ROOT, "size").unwrap().unwrap().0, Value::int(100));
     tx.splice_text(&txt, 3, 3, "TTT")?;
@@ -3115,8 +2978,8 @@ fn has_our_changes() {
     let mut right = AutoCommit::new();
     right.put(&automerge::ROOT, "b", 2).unwrap();
 
-    let mut left_to_right = automerge::sync::State::new();
-    let mut right_to_left = automerge::sync::State::new();
+    let mut left_to_right = automerge_sync::State::new();
+    let mut right_to_left = automerge_sync::State::new();
 
     assert!(!left.has_our_changes(&left_to_right));
     assert!(!right.has_our_changes(&right_to_left));
@@ -3944,11 +3807,12 @@ fn increment_patch_clears_resolved_map_conflict() {
     let mut plain = doc.document().clone();
     plain.set_actor(ActorId::try_from("03").unwrap());
     let before = plain.hydrate(None);
-    let mut tx = plain.transaction_log_patches(PatchLog::active()).unwrap();
+    let patch_log_heads = plain.get_heads();
+    let mut tx = plain.transaction();
     tx.increment(ROOT, "key", 28).unwrap();
-    let (_, mut patch_log) = tx.commit();
+    tx.commit();
     let expected = plain.hydrate(None);
-    let patches = plain.make_patches(&mut patch_log);
+    let patches = plain.diff(&patch_log_heads, &plain.get_heads());
     let mut actual = before;
     actual.apply_patches(encoding, patches).unwrap();
     assert_eq!(actual, expected);
@@ -4285,12 +4149,10 @@ fn incremental_load_preserves_text_encoding_for_all_change_chunk_types() {
     let uncompressed_change = change.raw_bytes().to_vec();
     let compressed_change = change.bytes().to_vec();
     assert_ne!(compressed_change, uncompressed_change);
-    let bundle = doc.bundle(expected_heads.clone()).unwrap().bytes().to_vec();
 
     for (chunk_type, bytes) in [
         ("change", uncompressed_change),
         ("compressed change", compressed_change),
-        ("bundle", bundle),
     ] {
         let mut reconstructed = AutoCommit::new_with_encoding(encoding);
         reconstructed.load_incremental(&bytes).unwrap();
@@ -4327,9 +4189,16 @@ fn incremental_list_conflict_survives_isolate_integrate_roundtrip() {
     doc.integrate();
 
     let patches = doc.diff_incremental();
-    assert!(patches
-        .iter()
-        .any(|patch| matches!(patch.action, PatchAction::Conflict { prop: Prop::Seq(0) })));
+    // either form describes the same conflict
+    assert!(patches.iter().any(|patch| matches!(
+        patch.action,
+        PatchAction::Conflict { prop: Prop::Seq(0) }
+            | PatchAction::PutSeq {
+                index: 0,
+                conflict: true,
+                ..
+            }
+    )));
     actual.apply_patches(encoding, patches).unwrap();
 
     assert_eq!(actual, doc.hydrate(&ROOT, None).unwrap());
@@ -4429,13 +4298,14 @@ fn transaction_patches_insert_hidden_scalar_into_utf8_text_from_fuzz_trace() {
 
     let mut plain = doc.document().clone();
     let mut actual = plain.hydrate(None);
-    let mut tx = plain.transaction_log_patches(PatchLog::active()).unwrap();
+    let patch_log_heads = plain.get_heads();
+    let mut tx = plain.transaction();
     let index = 195 % (tx.length(&text) + 1);
     tx.insert(&text, index, ScalarValue::Uint(150)).unwrap();
-    let (_, mut patch_log) = tx.commit();
+    tx.commit();
 
     let expected = plain.hydrate(None);
-    let patches = plain.make_patches(&mut patch_log);
+    let patches = plain.diff(&patch_log_heads, &plain.get_heads());
     actual.apply_patches(encoding, patches).unwrap();
 
     assert_eq!(actual, expected);
@@ -4451,12 +4321,13 @@ fn transaction_patches_split_block_at_normalized_utf8_index() {
     let mut doc = source.document().clone();
 
     let mut actual = doc.hydrate(None);
-    let mut tx = doc.transaction_log_patches(PatchLog::active()).unwrap();
+    let patch_log_heads = doc.get_heads();
+    let mut tx = doc.transaction();
     tx.split_block(&text, 3).unwrap();
-    let (_, mut patch_log) = tx.commit();
+    tx.commit();
     let expected = doc.hydrate(None);
     actual
-        .apply_patches(encoding, doc.make_patches(&mut patch_log))
+        .apply_patches(encoding, doc.diff(&patch_log_heads, &doc.get_heads()))
         .unwrap();
 
     assert_eq!(actual, expected);
@@ -4471,15 +4342,16 @@ fn transaction_patches_mark_at_normalized_utf8_indexes() {
     source.commit();
     let mut doc = source.document().clone();
 
-    let mut tx = doc.transaction_log_patches(PatchLog::active()).unwrap();
+    let patch_log_heads = doc.get_heads();
+    let mut tx = doc.transaction();
     tx.mark(
         &text,
         Mark::new("bold".into(), ScalarValue::Boolean(true), 3, 5),
         ExpandMark::None,
     )
     .unwrap();
-    let (_, mut patch_log) = tx.commit();
-    let patches = doc.make_patches(&mut patch_log);
+    tx.commit();
+    let patches = doc.diff(&patch_log_heads, &doc.get_heads());
     let PatchAction::Mark { marks } = &patches[0].action else {
         panic!("expected a mark patch, got {:?}", patches[0]);
     };
@@ -4566,13 +4438,14 @@ fn patches_expose_surviving_conflict_after_deleting_other_branch_from_fuzz_trace
     let mut logged_target = target.document().clone();
     let mut logged_right = right.document().clone();
     let mut actual = logged_target.hydrate(None);
-    let mut patch_log = PatchLog::active();
-    logged_target
-        .merge_and_log_patches(&mut logged_right, &mut patch_log)
-        .unwrap();
+    let patch_log_heads = logged_target.get_heads();
+    logged_target.merge(&mut logged_right).unwrap();
     let expected = logged_target.hydrate(None);
     actual
-        .apply_patches(encoding, logged_target.make_patches(&mut patch_log))
+        .apply_patches(
+            encoding,
+            logged_target.diff(&patch_log_heads, &logged_target.get_heads()),
+        )
         .unwrap();
     assert_eq!(actual, expected);
 }

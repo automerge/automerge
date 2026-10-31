@@ -3,12 +3,13 @@ use super::{
     Span, SpanDiff, SpanInternal, SpansDiff, SpansInternal,
 };
 use crate::automerge::view::{ClockRange, ReadAt};
+use crate::automerge::Automerge;
 use crate::exid::ExId;
+use crate::hash_retention::HashRetention;
 use crate::op_set2::op_set::{ObjIdIter, OpSet};
 use crate::op_set2::types::ValueRef;
-use crate::patches::Events;
+use crate::patches::PatchAccumulator;
 use crate::types::{ObjId, ObjMeta, ObjType, Prop};
-use crate::Automerge;
 use crate::TextEncoding;
 
 use std::collections::BTreeMap;
@@ -45,7 +46,11 @@ impl<'a> DocIter<'a> {
         }
     }
 
-    pub(crate) fn new(doc: &'a Automerge, obj: ObjMeta, read: ReadAt<'a>) -> Self {
+    pub(crate) fn new<H: HashRetention>(
+        doc: &'a Automerge<H>,
+        obj: ObjMeta,
+        read: ReadAt<'a>,
+    ) -> Self {
         let op_set = doc.ops();
         let obj_export = Arc::new(op_set.id_to_exid(obj.id.0));
         let walk = DocIterInternal::new(doc, obj, read.clone());
@@ -88,7 +93,8 @@ pub(crate) struct DocIterInternal<'a> {
 
 #[derive(Debug, Clone)]
 pub(crate) struct DiffIter<'a> {
-    doc: &'a Automerge,
+    op_set: &'a OpSet,
+    encoding: TextEncoding,
     next_objs: BTreeMap<ObjId, (IterType, Option<ClockRange<'a>>)>,
     path_map: BTreeMap<ObjId, (Prop, ObjId)>,
     obj_id_iter: ObjIdIter<'a>,
@@ -109,11 +115,11 @@ pub(crate) struct DiffIter<'a> {
 }
 
 impl<'a> DiffIter<'a> {
-    pub(crate) fn log(
-        doc: &'a Automerge,
+    pub(crate) fn log<H: HashRetention>(
+        doc: &'a Automerge<H>,
         obj: ObjMeta,
         clock: ClockRange<'a>,
-        log: &mut Events<'_>,
+        log: &mut PatchAccumulator,
         recursive: bool,
     ) -> BTreeMap<ObjId, (Prop, ObjId)> {
         let encoding = doc.text_encoding();
@@ -124,8 +130,8 @@ impl<'a> DiffIter<'a> {
         iter.path_map
     }
 
-    pub(crate) fn new(
-        doc: &'a Automerge,
+    pub(crate) fn new<H: HashRetention>(
+        doc: &'a Automerge<H>,
         obj: ObjMeta,
         clock: ClockRange<'a>,
         recursive: bool,
@@ -141,7 +147,8 @@ impl<'a> DiffIter<'a> {
         let path_map = BTreeMap::new();
         let next_objs = BTreeMap::new();
         DiffIter {
-            doc,
+            op_set,
+            encoding: doc.text_encoding(),
             map_iter,
             list_iter,
             span_iter,
@@ -189,10 +196,10 @@ impl<'a> DiffIter<'a> {
     /// Rebuild the sub-iterators over `range` under `clock`, which becomes
     /// the range future children are narrowed from.
     fn rebuild(&mut self, range: Range<usize>, clock: ClockRange<'a>) {
-        let op_set = self.doc.ops();
+        let op_set = self.op_set;
         self.map_iter = MapDiff::new(op_set, range.clone(), clock.clone());
         self.list_iter = ListDiff::new(op_set, range.clone(), clock.clone());
-        self.span_iter = SpansDiff::new(op_set, range, clock.clone(), self.doc.text_encoding());
+        self.span_iter = SpansDiff::new(op_set, range, clock.clone(), self.encoding);
         self.clock = clock;
     }
 
@@ -252,7 +259,7 @@ impl<'a> DiffIter<'a> {
 }
 
 impl<'a> DocIterInternal<'a> {
-    fn new(doc: &'a Automerge, obj: ObjMeta, read: ReadAt<'a>) -> Self {
+    fn new<H: HashRetention>(doc: &'a Automerge<H>, obj: ObjMeta, read: ReadAt<'a>) -> Self {
         let op_set = doc.ops();
         let iter_type = IterType::new(obj.typ);
         let obj = obj.id;
@@ -412,7 +419,7 @@ pub(crate) struct DocObjDiffItem<'a> {
 }
 
 impl DocObjDiffItem<'_> {
-    pub(crate) fn log(self, log: &mut Events<'_>, encoding: TextEncoding) {
+    pub(crate) fn log(self, log: &mut PatchAccumulator, encoding: TextEncoding) {
         match self.item {
             DocDiffItem::Map(m) => m.log(self.obj, log, encoding),
             DocDiffItem::List(l) => l.log(self.obj, log, encoding),

@@ -1,8 +1,7 @@
 use automerge::{
     marks::{ExpandMark, Mark},
     transaction::Transactable,
-    ActorId, Author, AutoCommit, Automerge, ObjType, PatchAction, PatchLog, ReadDoc, TextEncoding,
-    ROOT,
+    ActorId, Author, AutoCommit, Automerge, ObjType, PatchAction, ReadDoc, TextEncoding, ROOT,
 };
 
 const ENCODING: TextEncoding = TextEncoding::UnicodeCodePoint;
@@ -170,12 +169,11 @@ fn restored_nested_lists_include_unchanged_other_author_descendants() {
     tx.insert(&deeper, 0, true).unwrap();
     tx.commit();
 
-    doc.mask_author(author.clone(), &[], &mut PatchLog::inactive())
-        .unwrap();
+    doc.mask_author(author.clone(), &[]);
     let mut view = doc.hydrate(None);
-    let mut log = PatchLog::active();
-    doc.reveal_author(&author, &mut log).unwrap();
-    let patches = doc.make_patches(&mut log);
+    let before = doc.viewpoint();
+    doc.reveal_author(&author);
+    let patches = doc.diff(&before, doc.viewpoint());
     assert_eq!(patches, doc.diff(&[], &doc.get_heads()));
     view.apply_patches(ENCODING, patches).unwrap();
     assert_eq!(view, doc.hydrate(None));
@@ -204,11 +202,10 @@ fn restored_text_preserves_other_author_marks_and_block_children() {
     tx.put(&attrs, "level", 2).unwrap();
     tx.commit();
 
-    doc.mask_author(author.clone(), &[], &mut PatchLog::inactive())
-        .unwrap();
-    let mut log = PatchLog::active();
-    doc.reveal_author(&author, &mut log).unwrap();
-    let patches = doc.make_patches(&mut log);
+    doc.mask_author(author.clone(), &[]);
+    let before = doc.viewpoint();
+    doc.reveal_author(&author);
+    let patches = doc.diff(&before, doc.viewpoint());
     // Hydrated text currently does not model marks/block children, so verify
     // the actual rich-text patches, including their complete paths and IDs.
     assert_eq!(patches, doc.diff(&[], &doc.get_heads()));
@@ -346,8 +343,8 @@ fn pending_events_survive_load_incremental_into_empty_document() {
     };
 
     // An empty AutoCommit with an active diff cursor takes the empty-document
-    // fast path in `load_incremental`: the caller's log must end up with the
-    // loaded state exactly once, and keep tracking afterwards.
+    // fast path in `load_incremental`: the incremental diff must report the
+    // loaded state exactly once.
     let mut doc = AutoCommit::new_with_encoding(ENCODING);
     doc.update_diff_cursor();
     doc.load_incremental(&bytes).unwrap();
@@ -359,9 +356,8 @@ fn pending_events_survive_load_incremental_into_empty_document() {
     view.apply_patches(ENCODING, patches).unwrap();
     assert_eq!(view, expected);
 
-    // The same ordering rule with a caller-held `PatchLog` used across
-    // `Automerge::load_incremental_log_patches`: the fast path binds the
-    // log's observed view so later loads extend it without duplicates.
+    // The same rule for a caller-held view taken before an `Automerge`'s
+    // empty-document fast path and diffed after a later incremental load.
     let heads = other.get_heads();
     let mut third = other
         .fork()
@@ -371,10 +367,10 @@ fn pending_events_survive_load_incremental_into_empty_document() {
     let more = third.save_after(&heads);
 
     let mut doc = Automerge::new_with_encoding(ENCODING);
-    let mut log = PatchLog::active();
-    doc.load_incremental_log_patches(&bytes, &mut log).unwrap();
-    doc.load_incremental_log_patches(&more, &mut log).unwrap();
-    let patches = doc.make_patches(&mut log);
+    let before = doc.viewpoint();
+    doc.load_incremental(&bytes).unwrap();
+    doc.load_incremental(&more).unwrap();
+    let patches = doc.diff(&before, doc.viewpoint());
     assert_state_once(&patches);
     let mut view = AutoCommit::new_with_encoding(ENCODING)
         .hydrate(ROOT, None)

@@ -217,6 +217,34 @@ impl<'a, T: DeltaValue, C: Codec> FindByRange<'a, T, C> {
     }
 }
 
+impl<T: DeltaValue, C: Codec> FindByRange<'_, T, C> {
+    /// The next run of consecutive matching indices, ascending. Mixes
+    /// freely with [`Iterator::next`].
+    pub fn next_range(&mut self) -> Option<Range<usize>> {
+        loop {
+            if let Some(scan) = self.current.as_mut() {
+                if let Some(r) = scan.next_range() {
+                    return Some(r);
+                }
+                self.current = None;
+            }
+            self.open_next_slab()?;
+        }
+    }
+
+    fn open_next_slab(&mut self) -> Option<()> {
+        let (slab_idx, items_before, prefix_before) = self.outer.as_mut()?.next()?;
+        self.current = Some(SlabScan::new(
+            &self.slabs[slab_idx].data,
+            self.lo,
+            self.hi,
+            items_before,
+            prefix_before,
+        ));
+        Some(())
+    }
+}
+
 impl<T: DeltaValue, C: Codec> Iterator for FindByRange<'_, T, C> {
     type Item = usize;
     fn next(&mut self) -> Option<usize> {
@@ -227,14 +255,7 @@ impl<T: DeltaValue, C: Codec> Iterator for FindByRange<'_, T, C> {
                 }
                 self.current = None;
             }
-            let (slab_idx, items_before, prefix_before) = self.outer.as_mut()?.next()?;
-            self.current = Some(SlabScan::new(
-                &self.slabs[slab_idx].data,
-                self.lo,
-                self.hi,
-                items_before,
-                prefix_before,
-            ));
+            self.open_next_slab()?;
         }
     }
 }
@@ -277,14 +298,26 @@ impl<C: Codec> Iterator for SlabScan<'_, C> {
             if let Some(i) = self.pending.next() {
                 return Some(i);
             }
+            self.pending = self.next_range()?;
+        }
+    }
+}
+
+impl<C: Codec> SlabScan<'_, C> {
+    fn next_range(&mut self) -> Option<Range<usize>> {
+        if !self.pending.is_empty() {
+            return Some(std::mem::replace(&mut self.pending, 0..0));
+        }
+        loop {
             let run = self.decoder.next_run()?;
             let count = run.count;
+            let mut found = 0..0;
             if let Some(v) = run.value {
                 let a = self.prefix_before + self.partial; // f(k) = a + v*k for k in [1, count]
                 if v == 0 {
                     if a >= self.lo && a < self.hi {
                         let start = self.items_before + self.item_idx;
-                        self.pending = start..start + count;
+                        found = start..start + count;
                     }
                 } else {
                     // Half-open constraint: lo ≤ a + v·k < hi.  Translate
@@ -302,12 +335,15 @@ impl<C: Codec> Iterator for SlabScan<'_, C> {
                     if k_start <= k_end {
                         let start = self.items_before + self.item_idx + (k_start as usize - 1);
                         let len = (k_end - k_start + 1) as usize;
-                        self.pending = start..start + len;
+                        found = start..start + len;
                     }
                 }
                 self.partial += v * count as i64;
             }
             self.item_idx += count;
+            if !found.is_empty() {
+                return Some(found);
+            }
         }
     }
 }
@@ -364,6 +400,30 @@ mod tests {
             assert_eq!(col.find_first(v), Some(i), "v={v}");
         }
         assert_eq!(col.find_first(200), None);
+    }
+
+    #[test]
+    fn next_range_covers_exactly_the_matches() {
+        // interleaved counters: runs step up, repeat and step back down
+        let vals: Vec<u64> = (0..5000u64)
+            .map(|i| match i % 7 {
+                0..=3 => i,
+                4 => i / 2,
+                _ => 9000 - i,
+            })
+            .collect();
+        let col = DeltaColumn::<u64>::from_values(vals);
+        for range in [0..10, 100..2600, 4000..4500, 2400..9000, 7000..7001] {
+            let items: Vec<_> = col.find_by_range(range.clone()).collect();
+            let mut ranges = col.find_by_range(range.clone());
+            let mut flat = Vec::new();
+            while let Some(r) = ranges.next_range() {
+                assert!(!r.is_empty());
+                assert!(flat.last().is_none_or(|l| *l < r.start), "{range:?}");
+                flat.extend(r);
+            }
+            assert_eq!(flat, items, "{range:?}");
+        }
     }
 
     #[test]

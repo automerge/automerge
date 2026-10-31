@@ -114,15 +114,12 @@ mod u64_delete {
 
     #[divan::bench(args = [1, 10, 1000], max_time = Duration::from_secs(3))]
     fn v1(bencher: Bencher, n: usize) {
-        let mut col = build_v1(10_000);
-        bencher.bench_local(|| {
-            let len = col.len();
-            if len <= n {
-                return;
-            }
-            let pos = rand_usize() % (len - n);
-            col.splice(pos, n, std::iter::empty::<u64>());
-        });
+        bencher
+            .with_inputs(|| build_v1(10_000))
+            .bench_local_refs(|col| {
+                let pos = rand_usize() % (col.len() - n);
+                col.splice(pos, n, std::iter::empty::<u64>());
+            });
     }
 }
 
@@ -337,15 +334,12 @@ mod bool_delete {
 
     #[divan::bench(args = [1, 10, 1000], max_time = Duration::from_secs(3))]
     fn v1(bencher: Bencher, n: usize) {
-        let mut col = build_v1_bool(10_000);
-        bencher.bench_local(|| {
-            let len = col.len();
-            if len <= n {
-                return;
-            }
-            let pos = rand_usize() % (len - n);
-            col.splice(pos, n, std::iter::empty::<bool>());
-        });
+        bencher
+            .with_inputs(|| build_v1_bool(10_000))
+            .bench_local_refs(|col| {
+                let pos = rand_usize() % (col.len() - n);
+                col.splice(pos, n, std::iter::empty::<bool>());
+            });
     }
 }
 

@@ -1,9 +1,9 @@
-use super::tools::{Diff, DiffIter, ExIdPromise, Shiftable, Unshift};
+use super::tools::{value_at, Diff, DiffIter, ExIdPromise, Shiftable, Unshift};
 use crate::automerge::view::{ClockRange, ReadAt};
 use crate::exid::ExId;
 use crate::op_set2::op_set::{ActionIter, OpIdIter, OpSet, ValueIter};
 use crate::op_set2::types::{Action, ScalarValue, ValueRef};
-use crate::patches::Events;
+use crate::patches::PatchAccumulator;
 use crate::types::{ObjId, OpId, TextEncoding};
 
 use std::borrow::Cow;
@@ -62,14 +62,7 @@ impl<'a> MapDiffItem<'a> {
             maybe_exid,
         }
     }
-    fn update(&mut self, expose: bool) {
-        self.expose |= expose;
-        if self.expose && self.diff == Diff::Same {
-            self.diff = Diff::Add;
-        }
-    }
-
-    pub(crate) fn log(self, obj: ObjId, log: &mut Events<'_>, encoding: TextEncoding) {
+    pub(crate) fn log(self, obj: ObjId, log: &mut PatchAccumulator, encoding: TextEncoding) {
         match self.diff {
             Diff::Add => log.put_map(
                 obj,
@@ -78,6 +71,16 @@ impl<'a> MapDiffItem<'a> {
                 self.id,
                 self.conflict,
                 self.expose,
+            ),
+            // a counter both incremented and newly conflicted is put whole:
+            // the conflict flag only travels on a put
+            Diff::Same if self.inc != 0 && self.conflict => log.put_map(
+                obj,
+                self.key,
+                self.value.hydrate(encoding),
+                self.id,
+                true,
+                false,
             ),
             Diff::Same => {
                 if self.inc != 0 {
@@ -91,48 +94,46 @@ impl<'a> MapDiffItem<'a> {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct MapRange<'a> {
     iter: MapDiff<'a>,
-}
-
-impl<'a> MapRange<'a> {
-    #[inline]
-    pub(crate) const fn empty() -> Self {
-        Self {
-            iter: MapDiff::empty(),
-        }
-    }
 }
 
 impl<'a> Iterator for MapRange<'a> {
     type Item = MapRangeItem<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        Some(self.iter.next()?.export(self.iter.op_set()?))
+        Some(self.iter.next()?.export(self.iter.op_set?))
     }
 }
 
 #[derive(Clone, Default, Debug)]
 struct MapIter<'a> {
-    id: OpIdIter<'a>,
     key_str: hexane::Iter<'a, Option<String>>,
     action: ActionIter<'a>,
-    value: ValueIter<'a>,
 }
 
 impl Shiftable for MapIter<'_> {
+    fn get_pos(&self) -> usize {
+        self.action.get_pos()
+    }
+
+    fn get_max(&self) -> usize {
+        self.action.get_max()
+    }
+
+    fn set_max(&mut self, pos: usize) {
+        self.action.set_max(pos);
+        self.key_str.set_max(pos);
+    }
+
     fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
-        let id = self.id.shift_next(range.clone());
         let key = self.key_str.shift_next(range.clone());
-        let action = self.action.shift_next(range.clone());
-        let value = self.value.shift_next(range);
-        let pos = self.id.pos() - 1;
+        let action = self.action.shift_next(range);
+        let pos = self.action.pos() - 1;
         Some(MapEntry {
             key: key??,
             action: action?,
-            value: value?,
-            id: id?,
             pos,
         })
     }
@@ -140,72 +141,34 @@ impl Shiftable for MapIter<'_> {
 
 #[derive(Clone, Debug)]
 struct MapEntry<'a> {
-    id: OpId,
     pos: usize,
     key: &'a str,
     action: Action,
-    value: ScalarValue<'a>,
 }
 
-impl<'a> MapEntry<'a> {
-    fn diff_item(
-        self,
-        value: ValueRef<'a>,
-        inc: i64,
-        mut diff: Diff,
-        conflict: bool,
-        expose: bool,
-    ) -> MapDiffItem<'a> {
-        let key = self.key;
-        let pos = self.pos;
-        let id = self.id;
-        if expose && diff == Diff::Same {
-            diff = Diff::Add;
-        }
-        MapDiffItem {
-            diff,
-            key,
-            value,
-            inc,
-            conflict,
-            expose,
-            id,
-            pos,
-        }
-    }
+#[derive(Clone, Debug)]
+struct PendingMapDiffItem<'a> {
+    diff: Diff,
+    map: MapEntry<'a>,
+    conflict: bool,
+    expose: bool,
 }
 
 impl<'a> Iterator for MapIter<'a> {
     type Item = MapEntry<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let id = self.id.next()?;
         let key = self.key_str.next()??;
         let action = self.action.next()?;
-        let value = self.value.next()?;
-        let pos = self.id.pos() - 1;
-        Some(MapEntry {
-            id,
-            pos,
-            key,
-            action,
-            value,
-        })
+        let pos = self.action.pos() - 1;
+        Some(MapEntry { pos, key, action })
     }
 
     fn nth(&mut self, n: usize) -> Option<Self::Item> {
-        let id = self.id.nth(n)?;
         let key = self.key_str.nth(n)??;
         let action = self.action.nth(n)?;
-        let value = self.value.nth(n)?;
-        let pos = self.id.pos() - 1;
-        Some(MapEntry {
-            key,
-            action,
-            value,
-            id,
-            pos,
-        })
+        let pos = self.action.pos() - 1;
+        Some(MapEntry { key, action, pos })
     }
 }
 
@@ -216,43 +179,31 @@ impl<'a> MapRange<'a> {
     }
 
     pub(crate) fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
-        self.iter.shift(range);
-        self.next()
+        Some(self.iter.shift_next(range)?.export(self.iter.op_set?))
     }
 }
 
-#[derive(Debug, Clone)]
-pub(crate) struct MapDiff<'a>(MapDiffInner<'a>);
-
-#[derive(Debug, Clone)]
-enum MapDiffInner<'a> {
-    Empty,
-    Reading {
-        op_set: &'a OpSet,
-        iter: Box<Unshift<DiffIter<'a, MapIter<'a>>>>,
-        clock: ClockRange<'a>,
-    },
+#[derive(Debug, Clone, Default)]
+pub(crate) struct MapDiff<'a> {
+    op_set: Option<&'a OpSet>,
+    iter: Unshift<DiffIter<'a, MapIter<'a>>>,
+    id: OpIdIter<'a>,
+    value: ValueIter<'a>,
+    clock: ClockRange<'a>,
 }
 
 impl<'a> Iterator for MapDiff<'a> {
     type Item = MapDiffItem<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let Self(MapDiffInner::Reading {
-            op_set,
-            iter,
-            clock,
-        }) = self
-        else {
-            return None;
-        };
+        let op_set = self.op_set?;
         let mut last_is_same = false;
         let mut num_new = 0;
         let mut num_old = 0;
         let mut expose;
-        let mut last_visible: Option<Self::Item> = None;
+        let mut last_visible: Option<PendingMapDiffItem<'a>> = None;
 
-        while let Some((diff, map)) = iter.next() {
+        while let Some((diff, map)) = self.iter.next() {
             match diff {
                 Diff::Del => {
                     expose = last_is_same;
@@ -267,27 +218,22 @@ impl<'a> Iterator for MapDiff<'a> {
                 Diff::Add => {
                     last_is_same = false;
                     num_new += 1;
-                    expose = clock.predates(&map.id);
+                    expose = false;
                 }
-            }
-            let value;
-            let inc;
-            if let ScalarValue::Counter(c) = &map.value {
-                let (inc1, inc2) = op_set.get_increment_diff_at_pos(map.pos, clock);
-                inc = inc2 - inc1;
-                value = ValueRef::from_action_value(map.action, ScalarValue::Counter(*c + inc2));
-            } else {
-                value = ValueRef::from_action_value(map.action, map.value.clone());
-                inc = 0;
             }
 
             let old_conflict = diff == Diff::Same && num_old > 1;
             let conflict = num_new > 1 && !old_conflict;
 
-            if let Some((next_diff, next_map)) = iter.peek() {
+            if let Some((next_diff, next_map)) = self.iter.peek() {
                 if next_map.key == map.key {
                     if diff.is_visible() && next_diff.is_del() {
-                        last_visible = Some(map.diff_item(value, inc, diff, conflict, expose));
+                        last_visible = Some(PendingMapDiffItem {
+                            diff,
+                            map,
+                            conflict,
+                            expose,
+                        });
                     }
                     continue;
                 }
@@ -296,73 +242,93 @@ impl<'a> Iterator for MapDiff<'a> {
             if diff.is_del() {
                 if let Some(mut last) = last_visible.take() {
                     let newly_visible = last.diff == Diff::Same;
-                    last.update(expose || newly_visible);
+                    last.expose |= expose || newly_visible;
                     // Deleting the winning value exposes `last`, so its put
                     // patch must describe the conflict state after deletion,
                     // not merely whether the conflict is newly created.
                     last.conflict = num_new > 1;
-                    return Some(last);
+                    return Some(self.materialize(op_set, last));
                 }
             }
-            let mut item = map.diff_item(value, inc, diff, conflict, expose);
+            let mut item = PendingMapDiffItem {
+                diff,
+                map,
+                conflict,
+                expose,
+            };
             if diff == Diff::Same && num_old > 1 && num_new == 1 {
                 // The surviving value is unchanged, but removing the other
                 // visible values clears its conflict flag. Emit a Put so a
                 // hydrated-state consumer can observe that metadata change.
-                // If it is an object, its unchanged children will not produce
-                // events of their own, so expose its complete state.
-                item.update(true);
+                item.expose = true;
             }
-            return Some(item);
+            return Some(self.materialize(op_set, item));
         }
         None
     }
 }
 
 impl<'a> MapDiff<'a> {
+    fn materialize(
+        &mut self,
+        op_set: &'a OpSet,
+        pending: PendingMapDiffItem<'a>,
+    ) -> MapDiffItem<'a> {
+        let PendingMapDiffItem {
+            mut diff,
+            map,
+            conflict,
+            mut expose,
+        } = pending;
+        if expose && diff == Diff::Same {
+            diff = Diff::Add;
+        }
+        let MapEntry { pos, key, action } = map;
+        let id = self.id.seek_to(pos).unwrap();
+        if diff == Diff::Add && self.clock.predates(&id) {
+            expose = true;
+        }
+        let value = self.value.seek_to(pos).unwrap_or(ScalarValue::Null);
+        let (value, inc) = value_at(op_set, value, pos, action, &self.clock);
+        MapDiffItem {
+            diff,
+            key,
+            value,
+            inc,
+            conflict,
+            expose,
+            id,
+            pos,
+        }
+    }
+
     pub(crate) fn new(op_set: &'a OpSet, range: Range<usize>, clock: ClockRange<'a>) -> Self {
         let key_str = op_set.key_str_iter_range(&range);
         let action = op_set.action_iter_range(&range);
-        let value = op_set.value_iter_range(&range);
-        let id = op_set.id_iter_range(&range);
+        let id = op_set.id_iter();
+        let value = op_set.value_iter();
 
-        let map_iter = MapIter {
-            id,
-            key_str,
-            value,
-            action,
-        };
+        let map_iter = MapIter { key_str, action };
 
         let skip = DiffIter::new(op_set, map_iter, clock.clone(), range);
-        let iter = Box::new(Unshift::new(skip));
+        let iter = Unshift::new(skip);
 
-        Self(MapDiffInner::Reading {
-            op_set,
+        Self {
+            op_set: Some(op_set),
             iter,
+            id,
+            value,
             clock,
-        })
+        }
     }
 
-    #[inline]
-    const fn empty() -> Self {
-        Self(MapDiffInner::Empty)
+    /// Forward only.
+    pub(crate) fn shift(&mut self, range: Range<usize>) {
+        self.iter.shift(range);
     }
 
     pub(crate) fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
         self.shift(range);
         self.next()
-    }
-
-    fn shift(&mut self, range: Range<usize>) {
-        if let MapDiffInner::Reading { ref mut iter, .. } = self.0 {
-            iter.shift(range);
-        }
-    }
-
-    fn op_set(&self) -> Option<&'a OpSet> {
-        match self.0 {
-            MapDiffInner::Empty => None,
-            MapDiffInner::Reading { op_set, .. } => Some(op_set),
-        }
     }
 }

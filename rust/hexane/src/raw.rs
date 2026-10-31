@@ -457,6 +457,31 @@ impl RawColumn {
         start..out.len()
     }
 
+    /// Append the bytes in `range` to `out`, across slab boundaries.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `range` extends past the end of the column.
+    pub fn extend_range_to(&self, range: Range<usize>, out: &mut Vec<u8>) {
+        assert!(
+            range.end <= self.total_len,
+            "range past the end of the column"
+        );
+        let mut pos = 0;
+        for slab in &self.slabs {
+            let slab_range = pos..pos + slab.data.len();
+            pos = slab_range.end;
+            let start = range.start.max(slab_range.start);
+            let end = range.end.min(slab_range.end);
+            if start < end {
+                out.extend_from_slice(&slab.data[start - slab_range.start..end - slab_range.start]);
+            }
+            if pos >= range.end {
+                break;
+            }
+        }
+    }
+
     /// Deserialize from `data`.  Everything lands in a single slab — the
     /// caller knows where value boundaries are and can splice further if
     /// they want splits.
@@ -611,18 +636,21 @@ impl<'a> RawColumnIter<'a> {
     /// caller passed a length that doesn't correspond to a single value
     /// boundary.
     pub fn take(&mut self, n: usize) -> &'a [u8] {
+        self.try_take(n)
+            .expect("RawColumnIter::take past the end or would cross slab boundary")
+    }
+
+    /// [`Self::take`], or `None` without moving if the read would run past
+    /// the end of the column or cross a slab boundary.
+    pub fn try_take(&mut self, n: usize) -> Option<&'a [u8]> {
         if n == 0 {
-            return &[];
+            return Some(&[]);
         }
-        let slab = self
-            .slabs
-            .get(self.slab_idx)
-            .expect("RawColumnIter::take past end");
+        let slab = self.slabs.get(self.slab_idx)?;
         let available = slab.data.len() - self.offset_in_slab;
-        assert!(
-            n <= available,
-            "RawColumnIter::take would cross slab boundary: want {n}, have {available}",
-        );
+        if n > available {
+            return None;
+        }
         let out = &slab.data[self.offset_in_slab..self.offset_in_slab + n];
         self.offset_in_slab += n;
         self.pos += n;
@@ -630,28 +658,35 @@ impl<'a> RawColumnIter<'a> {
             self.slab_idx += 1;
             self.offset_in_slab = 0;
         }
-        out
+        Some(out)
     }
 
     /// Advance the cursor by `n` bytes, crossing slab boundaries as needed.
     /// Panics if `n` walks past the end of the column.
     pub fn skip(&mut self, n: usize) {
-        self.pos += n;
+        assert!(self.try_skip(n), "RawColumnIter::skip past end");
+    }
+
+    /// [`Self::skip`], or `false` if `n` walks past the end of the column,
+    /// leaving the cursor at the end.
+    pub fn try_skip(&mut self, n: usize) -> bool {
         let mut remaining = n;
         while remaining > 0 {
-            let slab = self
-                .slabs
-                .get(self.slab_idx)
-                .expect("RawColumnIter::skip past end");
+            let Some(slab) = self.slabs.get(self.slab_idx) else {
+                return false;
+            };
             let available = slab.data.len() - self.offset_in_slab;
             if remaining < available {
                 self.offset_in_slab += remaining;
-                return;
+                self.pos += remaining;
+                return true;
             }
             remaining -= available;
+            self.pos += available;
             self.slab_idx += 1;
             self.offset_in_slab = 0;
         }
+        true
     }
 
     /// Forward-only absolute seek.  `target` must be `>= pos()`; use

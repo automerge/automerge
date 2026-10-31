@@ -554,6 +554,8 @@ impl<'a, C: Codec> BoolDecoder<'a, C> {
             self.value = !self.value;
             self.remaining = count;
         } else {
+            // a truncated count ends the data, or `next` would spin on it
+            self.byte_pos = self.data.len();
             self.remaining = 0;
         }
     }

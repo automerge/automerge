@@ -1,7 +1,7 @@
 //! Deliberately small text-only patch consumer. Hydrate cannot replay Mark patches.
 use automerge::{
-    iter::Span, marks::MarkSet, Automerge, Change, ObjId, Patch, PatchAction, PatchLog, Prop,
-    ReadDoc, ScalarValue, TextEncoding,
+    iter::Span, marks::MarkSet, Automerge, Change, ObjId, Patch, PatchAction, Prop, ReadDoc,
+    ScalarValue, TextEncoding,
 };
 use std::collections::BTreeMap;
 
@@ -95,9 +95,9 @@ fn apply(view: &mut FormattedText, text: &ObjId, encoding: TextEncoding, patches
 
 pub(super) fn replay(mut doc: Automerge, text: &ObjId, changes: Vec<Change>) -> Automerge {
     let mut view = observe(&doc, text);
-    let mut log = PatchLog::active();
-    doc.apply_changes_log_patches(changes, &mut log).unwrap();
-    let patches = doc.make_patches(&mut log);
+    let before = doc.get_heads();
+    doc.apply_changes(changes).unwrap();
+    let patches = doc.diff(&before, &doc.get_heads());
     apply(&mut view, text, doc.text_encoding(), &patches);
     assert_eq!(
         view,

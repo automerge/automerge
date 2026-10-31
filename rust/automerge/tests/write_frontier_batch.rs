@@ -3,7 +3,7 @@ use automerge::{
     marks::{ExpandMark, Mark},
     transaction::Transactable,
     ActorId, Author, AutoCommit, Automerge, Change, ChangeHash, ObjType, Patch, PatchAction,
-    PatchLog, PatchLogMismatch, ReadDoc, TextEncoding, ROOT,
+    ReadDoc, TextEncoding, ROOT,
 };
 use itertools::Itertools;
 
@@ -376,94 +376,6 @@ fn boundary_in_batch_with_concurrent_winner_every_order() {
         view.apply_patches(ENCODING, patches).unwrap();
         assert_eq!(view, obs.hydrate(ROOT, None).unwrap(), "{order:?}");
     }
-}
-
-// ==================== error-path atomicity ====================
-
-fn patch_log_from_actor(actor: &[u8]) -> PatchLog {
-    let mut source = AutoCommit::new();
-    source.set_actor(ActorId::from(actor));
-    source.put(ROOT, "source", "value").unwrap();
-    let source_changes = source.get_changes(&[]);
-
-    let mut patch_log = PatchLog::active();
-    let mut doc = Automerge::new();
-    doc.apply_changes_log_patches(source_changes, &mut patch_log)
-        .unwrap();
-    patch_log
-}
-
-#[test]
-fn mismatched_write_frontier_logs_leave_visibility_and_log_unchanged() {
-    // Exercise missing actors on either side of the target's actor, as well as
-    // an empty target. A missing trailing actor must not be silently accepted.
-    for foreign_actor in [0x00, 0xff] {
-        for empty_target in [false, true] {
-            let mut source = Automerge::new().with_actor(ActorId::from(vec![foreign_actor]));
-            let mut tx = source.transaction_log_patches(PatchLog::active()).unwrap();
-            tx.put(ROOT, "foreign", true).unwrap();
-            let (_, mut log) = tx.commit();
-            let expected_patches = source.make_patches(&mut log);
-
-            let author = Author::try_from("aaaa").unwrap();
-            let mut target = Automerge::new()
-                .with_author(Some(author.clone()))
-                .with_actor(ActorId::from(vec![0x80]));
-            if !empty_target {
-                let mut tx = target.transaction();
-                tx.put(ROOT, "x", 1).unwrap();
-                tx.commit();
-            }
-            let heads = target.get_heads();
-            let visible = target.hydrate(None);
-            assert_eq!(
-                target.mask_author(author.clone(), &[], &mut log),
-                Err(PatchLogMismatch)
-            );
-            assert!(target.get_write_frontier().is_empty());
-            assert_eq!(target.hydrate(None), visible);
-            assert_eq!(target.get_heads(), heads);
-            assert_eq!(source.make_patches(&mut log), expected_patches);
-
-            target
-                .mask_author(author.clone(), &[], &mut PatchLog::inactive())
-                .unwrap();
-            let write_frontier = target.get_write_frontier();
-            let hidden = target.hydrate(None);
-            assert_eq!(
-                target.reveal_author(&author, &mut log),
-                Err(PatchLogMismatch)
-            );
-            assert_eq!(target.get_write_frontier(), write_frontier);
-            assert_eq!(target.hydrate(None), hidden);
-            assert_eq!(target.get_heads(), heads);
-            assert_eq!(source.make_patches(&mut log), expected_patches);
-        }
-    }
-}
-
-#[test]
-fn patch_log_mismatch_preserves_previously_queued_changes() {
-    let mut source = AutoCommit::new();
-    source.put(ROOT, "parent", 1).unwrap();
-    source.commit();
-    let parent = source.get_last_local_change().unwrap().clone();
-    source.put(ROOT, "child", 2).unwrap();
-    source.commit();
-    let child = source.get_last_local_change().unwrap().clone();
-
-    let mut foreign_log = patch_log_from_actor(b"bbbbbb");
-
-    let mut receiver = Automerge::new();
-    receiver.apply_changes_batch([child]).unwrap(); // Waiting for its parent.
-    assert!(receiver
-        .apply_changes_batch_log_patches([parent.clone()], &mut foreign_log)
-        .is_err());
-    receiver.apply_changes_batch([parent]).unwrap();
-    assert!(
-        receiver.get(ROOT, "child").unwrap().is_some(),
-        "log rejection must not discard a previously queued child"
-    );
 }
 
 /// Sequence width and top/conflict bookkeeping in the batch walk must use

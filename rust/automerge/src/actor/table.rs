@@ -76,11 +76,6 @@ impl ActorTable {
         self.table.len()
     }
 
-    /// Return `true` is the table is empty.
-    pub(crate) fn is_empty(&self) -> bool {
-        self.table.is_empty()
-    }
-
     /// Get the [`ActorId`] at the given index, returning `None` if the `index`
     /// was out of bounds.
     pub(crate) fn get(&self, index: usize) -> Option<&ActorId> {

@@ -198,10 +198,7 @@ impl<'a> TopIter<'a> {
                 op_set, clock, &range,
             ))))
         } else {
-            TopIterInner::Current(BoolColumnSkipper::new(
-                op_set.top_index_range(&range),
-                range.clone(),
-            ))
+            TopIterInner::Current(BoolColumnSkipper::new(op_set.top_index_range(&range)))
         };
         Self {
             range,
@@ -215,6 +212,35 @@ impl<'a> TopIter<'a> {
 impl Skipper for TopIter<'_> {}
 
 impl Shiftable for TopIter<'_> {
+    fn get_pos(&self) -> usize {
+        self.cursor
+    }
+
+    fn get_max(&self) -> usize {
+        self.range.end
+    }
+
+    fn set_max(&mut self, pos: usize) {
+        self.range.end = pos;
+        match &mut self.inner {
+            TopIterInner::Empty => {}
+            TopIterInner::Current(iter) => iter.set_max(pos),
+            TopIterInner::Scan(iter) => iter.set_max(pos),
+        }
+    }
+
+    // yields skip counts — reposition the state, don't consume
+    fn shift(&mut self, range: Range<usize>) {
+        self.cursor = range.start;
+        self.range = range.clone();
+        self.exhausted = false;
+        match &mut self.inner {
+            TopIterInner::Empty => {}
+            TopIterInner::Current(iter) => iter.shift(range),
+            TopIterInner::Scan(iter) => iter.shift(range),
+        }
+    }
+
     fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
         self.cursor = range.start;
         self.range = range.clone();
@@ -318,6 +344,31 @@ impl<'a> ScanTopIter<'a> {
 }
 
 impl<'a> Shiftable for ScanTopIter<'a> {
+    fn get_pos(&self) -> usize {
+        self.pos
+    }
+
+    fn get_max(&self) -> usize {
+        self.key_str.end_pos()
+    }
+
+    fn set_max(&mut self, pos: usize) {
+        self.key_str.set_max(pos);
+        self.id.set_max(pos);
+        self.insert.set_max(pos);
+        self.action.set_max(pos);
+        self.succ.set_max(pos);
+    }
+
+    fn shift(&mut self, range: Range<usize>) {
+        self.pos = range.start;
+        self.key_str.shift(range.clone());
+        self.id.shift(range.clone());
+        self.insert.shift(range.clone());
+        self.action.shift(range.clone());
+        self.succ.shift(range);
+    }
+
     fn shift_next(&mut self, range: Range<usize>) -> Option<ScanTopRow<'a>> {
         let pos = range.start;
         self.pos = pos + 1;
@@ -375,9 +426,10 @@ mod tests {
     //! dispatch, which is otherwise visible only as a 10–60× slowdown.
 
     use super::TopOps;
+    use crate::next::transaction::Transactable;
+    use crate::next::{AutoCommit, ReadDoc};
     use crate::op_set2::op_set::VisIter;
-    use crate::transaction::Transactable;
-    use crate::{Author, AutoCommit, ObjType, ReadDoc, ROOT};
+    use crate::{Author, ChangeId, ObjType, ROOT};
 
     fn author(n: u8) -> Author<'static> {
         Author::from(vec![n])
@@ -401,13 +453,17 @@ mod tests {
     fn top_ops_for(doc: &mut AutoCommit, historical: bool) -> TopOps<'_> {
         // The first change: strictly in the past, so `read_at` is historical
         // rather than collapsing to a current read at the heads.
-        let heads = vec![doc.get_changes(&[])[0].hash()];
+        let first = &doc.get_changes(&[]).unwrap()[0];
+        let heads = vec![ChangeId::from_parts(
+            first.actor_id().clone(),
+            std::num::NonZeroU64::new(first.seq()).unwrap(),
+        )];
         let (_, text) = doc.get(ROOT, "text").unwrap().unwrap();
         let am = doc.document();
         let obj = am.exid_to_obj(&text).unwrap();
         let range = am.ops().scope_to_obj(&obj.id);
         let read = if historical {
-            am.read_at(Some(&heads))
+            am.read_at(Some(&heads)).unwrap()
         } else {
             am.read_current()
         };

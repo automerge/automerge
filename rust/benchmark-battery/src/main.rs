@@ -46,9 +46,14 @@ enum Command {
         /// Number of warmup iterations per benchmark.
         #[arg(long, default_value_t = 3)]
         warmup_count: usize,
-        /// Iterations inside each measured sample.
+        /// Minimum iterations inside each measured sample.
         #[arg(long, default_value_t = 1)]
         iters_per_sample: u64,
+        /// Run enough iterations that each measured sample takes at least
+        /// this many milliseconds, timed from the fastest warmup iteration;
+        /// 0 turns this off.
+        #[arg(long, default_value_t = 10)]
+        min_sample_ms: u64,
         /// Directory for run artifacts. Defaults to a fresh directory under the system temp directory.
         #[arg(long)]
         report_dir: Option<PathBuf>,
@@ -145,6 +150,7 @@ fn main() -> anyhow::Result<()> {
             sample_count,
             warmup_count,
             iters_per_sample,
+            min_sample_ms,
             report_dir,
             report_format,
             fail_on_empty,
@@ -164,6 +170,7 @@ fn main() -> anyhow::Result<()> {
                 sample_count,
                 warmup_count,
                 iters_per_sample,
+                min_sample_ns: min_sample_ms.saturating_mul(1_000_000),
             };
             let additional = runner::run(&benchmarks, &selected, options)?;
             let run = if let Some(existing) = existing {

@@ -8,7 +8,7 @@
 use automerge::{
     marks::{ExpandMark, Mark},
     transaction::Transactable,
-    Author, AutoCommit, Automerge, ObjType, PatchLog, ReadDoc, ScalarValue, ROOT,
+    ActorId, Author, AutoCommit, Automerge, ObjType, PatchAction, ReadDoc, ScalarValue, ROOT,
 };
 
 /// The view is a function of `(history, policy)`: the same history under
@@ -39,9 +39,7 @@ fn masked_local_edits_do_not_change_the_view_for_any_peer() {
 
     // Same history loaded fresh under the same policy.
     let mut fresh = Automerge::load(&a.save()).unwrap();
-    fresh
-        .mask_author(alice.clone(), &epoch, &mut PatchLog::inactive())
-        .unwrap();
+    fresh.mask_author(alice.clone(), &epoch);
     assert_eq!(fresh.hydrate(None), before);
 
     // A peer holding the policy sees the same thing after merge.
@@ -66,8 +64,7 @@ fn masked_local_edits_roll_back_cleanly() {
         .unwrap()
         .result;
     let epoch = doc.get_heads();
-    doc.mask_author(alice, &epoch, &mut PatchLog::inactive())
-        .unwrap();
+    doc.mask_author(alice, &epoch);
     let before = doc.hydrate(None);
 
     let mut tx = doc.transaction();
@@ -321,11 +318,50 @@ fn hydrate_inside_isolated_transaction_sees_isolated_view() {
     assert_ne!(at_h1, current, "the two states must differ for this test");
 
     let tx = doc
-        .transaction_at(PatchLog::inactive(), &h1)
-        .expect("a fresh patch log belongs to any document");
+        .transaction_at(&h1)
+        .expect("h1 is a head of this document");
     let inside = tx.hydrate(ROOT, None).unwrap();
     assert_eq!(
         inside, at_h1,
         "hydrate inside an isolated transaction must see the isolated view"
     );
+}
+
+/// A masked increment over a conflicted list element must leave the visible
+/// winner as the element's only top op: list positions after it come from
+/// the top index.
+#[test]
+fn masked_increment_over_a_conflict_keeps_one_winner() {
+    let alice = Author::try_from("aaaa").unwrap();
+    let mut doc = AutoCommit::new().with_actor(ActorId::from(vec![0x01]));
+    let list = doc.put_object(ROOT, "list", ObjType::List).unwrap();
+    doc.insert(&list, 0, ScalarValue::counter(1)).unwrap();
+    doc.commit();
+    let mut other = doc.fork().with_actor(ActorId::from(vec![0x02]));
+    other.put(&list, 0, "v").unwrap();
+    other.commit();
+    doc.put(&list, 0, ScalarValue::counter(2)).unwrap();
+    doc.commit();
+    doc.merge(&mut other).unwrap();
+    let heads = doc.get_heads();
+
+    let mut masked = doc.fork().with_author(Some(alice.clone()));
+    masked.mask_author(alice, &heads);
+    masked.increment(&list, 0, 5).unwrap();
+    masked.commit();
+
+    masked.update_diff_cursor();
+    masked.set_author(None);
+    let len = masked.length(&list);
+    masked.insert(&list, len, "end").unwrap();
+    masked.commit();
+    let patches = masked.diff_incremental();
+    let inserted_at: Vec<_> = patches
+        .iter()
+        .filter_map(|p| match &p.action {
+            PatchAction::Insert { index, .. } => Some(*index),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(inserted_at, vec![len]);
 }

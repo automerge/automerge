@@ -10,7 +10,7 @@ const N: u64 = 100_000;
 
 pub fn benchmarks() -> Vec<SampledBenchmark> {
     vec![
-        SampledBenchmark::no_setup("marks", "marks/add_mark", add_mark),
+        SampledBenchmark::accumulating("marks", "marks/add_mark", add_mark),
         SampledBenchmark::no_setup("marks", "marks/get_marks_at_end", get_marks_at_end),
         splice_with_marks(),
         splice_without_marks(),

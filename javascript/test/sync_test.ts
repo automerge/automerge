@@ -1100,8 +1100,13 @@ describe("Data sync protocol", () => {
     let leftToRight = Automerge.initSyncState()
     let rightToLeft = Automerge.initSyncState()
 
+    assert.ok(!Automerge.hasOurChanges(left, leftToRight))
+    assert.ok(!Automerge.hasOurChanges(right, rightToLeft))
+
+    // A Bloom filter false positive can hold one side's change back a
+    // round, so the two sides need not learn they are done together.
     while (
-      !Automerge.hasOurChanges(left, leftToRight) &&
+      !Automerge.hasOurChanges(left, leftToRight) ||
       !Automerge.hasOurChanges(right, rightToLeft)
     ) {
       let quiet = true
@@ -1130,9 +1135,6 @@ describe("Data sync protocol", () => {
         )
       }
     }
-
-    assert.ok(Automerge.hasOurChanges(left, leftToRight))
-    assert.ok(Automerge.hasOurChanges(right, rightToLeft))
   })
 
   describe("read-only sync", () => {

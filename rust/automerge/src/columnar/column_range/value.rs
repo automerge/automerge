@@ -134,14 +134,12 @@ impl ValueRange {
                 let meta_val = &u64::from(ValueMeta::from(val.as_ref()));
                 meta_out.append(Some(meta_val));
             }
-            idx += 1;
         }
         // Copy any remaining input from the replacments to the output
         for val in meta_replace_with {
             let val = val.map_err(SpliceError::ReadReplace)?;
             let meta_val = &u64::from(ValueMeta::from(val.as_ref()));
             meta_out.append(Some(meta_val));
-            idx += 1;
         }
         // Now copy any remaining data we have to the output
         while !meta_copy.done() {
@@ -177,13 +175,11 @@ impl ValueRange {
                 let val = val.map_err(SpliceError::ReadReplace)?;
                 value_range_len += encode_val(&mut raw_encoder, val.as_ref());
             }
-            idx += 1;
         }
         // Copy any remaining input from the replacments to the output
         for val in replace_with {
             let val = val.map_err(SpliceError::ReadReplace)?;
             value_range_len += encode_val(&mut raw_encoder, val.as_ref());
-            idx += 1;
         }
         // Now copy any remaining data we have to the output
         while !iter.done() {

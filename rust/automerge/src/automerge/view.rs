@@ -3,29 +3,157 @@
 //!
 //! [`Automerge`]: super::Automerge
 
+use std::collections::HashMap;
+
 use crate::actor::{ActorRemoval, ActorShift};
 use crate::clock::Clock;
 use crate::types::OpId;
+use crate::write_frontier::{FrontierHead, WriteFrontier};
+use crate::{Author, ChangeId};
 
 use std::borrow::Cow;
+
+/// A point to diff from or to: some heads, read either under the document's
+/// current write-frontier or under one of their own.
+///
+/// Heads convert into a viewpoint under the current write-frontier. Take one
+/// with `viewpoint()` before a change and pass it to `diff` after to get
+/// patches that include write-frontier changes, which leave the heads alone.
+/// A boundary its document had not yet received hides its author entirely; for
+/// a viewpoint built with [`Viewpoint::new`] that is any boundary outside the
+/// history of `heads`.
+#[derive(Debug, Clone, Default)]
+pub struct Viewpoint {
+    pub(crate) heads: Vec<ChangeId>,
+    /// `None`: whatever write-frontier the document has when the viewpoint is
+    /// read.
+    pub(crate) write_frontier: Option<WriteFrontier>,
+    /// The visible clock, valid while the document's actor generation matches.
+    pub(crate) cache: Option<(u64, VisibleClock)>,
+    /// The visibility epoch, for a viewpoint of a document's current state.
+    pub(crate) epoch: Option<u64>,
+    /// The boundaries still pending when a document made this viewpoint;
+    /// `None` counts those outside the history of `heads`.
+    pub(crate) pending: Option<Vec<FrontierHead>>,
+}
+
+impl PartialEq for Viewpoint {
+    fn eq(&self, other: &Self) -> bool {
+        self.heads == other.heads && self.write_frontier == other.write_frontier
+    }
+}
+
+impl Eq for Viewpoint {}
+
+impl Viewpoint {
+    /// `heads` under `write_frontier`, as from `get_heads()` and
+    /// `get_write_frontier()`.
+    pub fn new(
+        heads: Vec<ChangeId>,
+        write_frontier: HashMap<Author<'static>, Vec<ChangeId>>,
+    ) -> Self {
+        Viewpoint {
+            write_frontier: Some(WriteFrontier::from_ids(write_frontier)),
+            ..Viewpoint::at_heads(heads)
+        }
+    }
+
+    /// `heads` under whatever write-frontier the document has when read.
+    pub(crate) fn at_heads(heads: Vec<ChangeId>) -> Self {
+        Viewpoint {
+            heads,
+            ..Default::default()
+        }
+    }
+
+    pub fn heads(&self) -> &[ChangeId] {
+        &self.heads
+    }
+
+    /// `None` for heads read under the document's current write-frontier.
+    /// Boundaries named by a hash the document never held are left out.
+    pub fn write_frontier(&self) -> Option<HashMap<Author<'static>, Vec<ChangeId>>> {
+        self.write_frontier.as_ref().map(WriteFrontier::ids)
+    }
+}
+
+impl From<&[ChangeId]> for Viewpoint {
+    fn from(heads: &[ChangeId]) -> Self {
+        Viewpoint::at_heads(heads.to_vec())
+    }
+}
+
+impl From<&Vec<ChangeId>> for Viewpoint {
+    fn from(heads: &Vec<ChangeId>) -> Self {
+        Viewpoint::at_heads(heads.clone())
+    }
+}
+
+impl<const N: usize> From<&[ChangeId; N]> for Viewpoint {
+    fn from(heads: &[ChangeId; N]) -> Self {
+        Viewpoint::at_heads(heads.to_vec())
+    }
+}
+
+impl From<&Viewpoint> for Viewpoint {
+    fn from(viewpoint: &Viewpoint) -> Self {
+        viewpoint.clone()
+    }
+}
+
+/// Changes whenever the actor table does, and on every clone, so a cached
+/// clock is only reused by the document instance that made it.
+#[derive(Debug)]
+pub(crate) struct ActorGeneration(u64);
+
+impl ActorGeneration {
+    pub(crate) fn new() -> Self {
+        let mut buf = [0u8; 8];
+        getrandom::fill(&mut buf).expect("random number generator failed");
+        ActorGeneration(u64::from_le_bytes(buf))
+    }
+
+    pub(crate) fn get(&self) -> u64 {
+        self.0
+    }
+
+    pub(crate) fn bump(&mut self) {
+        self.0 = self.0.wrapping_add(1);
+    }
+}
+
+impl Clone for ActorGeneration {
+    fn clone(&self) -> Self {
+        ActorGeneration::new()
+    }
+}
 
 /// A [`Clock`] that is used for reads.
 ///
 /// It consists of the causal clock, taken at some heads of the change graph,
 /// and can optionally be intersected with a visibility [`Mask`].
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct VisibleClock(Clock);
+pub(crate) struct VisibleClock(Clock, Option<Clock>);
 
 impl VisibleClock {
     /// Construct a new [`VisibleClock`] using the `causal` clock and the optional `mask`.
     ///
     /// If the mask is supplied then the two clocks are intersected to get the
     /// final [`Clock`].
-    pub(super) fn new(mut causal: Clock, mask: Option<&Mask>) -> Self {
-        if let Some(mask) = mask {
-            causal.intersect(&mask.0);
+    pub(super) fn new(causal: Clock, mask: Option<&Mask>) -> Self {
+        match mask {
+            Some(mask) => {
+                let mut visible = causal.clone();
+                visible.intersect(&mask.0);
+                Self(visible, Some(causal))
+            }
+            None => Self(causal, None),
         }
-        Self(causal)
+    }
+
+    /// Whether `id` is in the causal history, visible or not.
+    fn exists(&self, id: &OpId) -> bool {
+        self.1.as_ref().unwrap_or(&self.0).covers(id)
     }
 
     /// Return a reference to the underlying [`Clock`].
@@ -43,16 +171,6 @@ impl VisibleClock {
         self.0.isolate(actor)
     }
 
-    /// Add the clock slot for an actor just inserted into the actor table.
-    pub(crate) fn insert_actor(&mut self, shift: &ActorShift) {
-        self.0.insert_actor(shift, 0)
-    }
-
-    /// Drop the clock slot for an actor just removed from the actor table.
-    pub(crate) fn remove_actor(&mut self, removal: &ActorRemoval) {
-        self.0.remove_actor(removal);
-    }
-
     /// Create new, empty [`Clock`] which is the same size as this clock.
     pub(crate) fn empty_like(&self) -> Clock {
         self.0.empty_like()
@@ -61,11 +179,6 @@ impl VisibleClock {
     /// Returns `true` if any operation is covered.
     pub(crate) fn covers_something(&self) -> bool {
         self.0.covers_something()
-    }
-
-    /// Number of actor columns in this clock.
-    pub(crate) fn len(&self) -> usize {
-        self.0.len()
     }
 }
 
@@ -88,11 +201,16 @@ impl Mask {
         &self.0
     }
 
-    /// Returns `true` is the mask hides the given [`OpId`].
+    /// Returns `true` if the mask hides the given [`OpId`].
     ///
     /// This is the inverse of [`Clock::covers`].
     pub(crate) fn hides(&self, id: &OpId) -> bool {
         !self.0.covers(id)
+    }
+
+    /// Whether the mask hides any of `actor`'s ops.
+    pub(crate) fn restricts(&self, actor: usize) -> bool {
+        self.0.max_op(actor) < u32::MAX
     }
 
     /// Add an unrestricted slot for an actor just inserted into the actor table.
@@ -106,13 +224,10 @@ impl Mask {
     }
 }
 
-/// The snapshot of a clock for a given document, either current or historical.
-///
-/// A `Current` read is constructed only from `&Automerge` and borrows its
-/// mask, so it cannot outlive a mutation; it means "indexes authoritative".
-/// An `At` read never consults indexes, so its lifetime is unconstrained.
+/// A read position: the document's current state, where the indexes are
+/// authoritative, or its state at a clock, under the write-frontier.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct ReadAt<'a>(Inner<'a>);
+pub struct ReadAt<'a>(Inner<'a>);
 
 #[derive(Debug, Clone, PartialEq)]
 enum Inner<'a> {
@@ -156,9 +271,6 @@ impl<'a> ReadAt<'a> {
     }
 
     /// Wrap this read position into a single-endpoint [`ClockRange`].
-    ///
-    /// Stays `pub(crate)` for the same reason as [`ClockRange::between`]:
-    /// re-wrapping an already-legitimate read manufactures nothing.
     pub(crate) fn into_range(self) -> ClockRange<'a> {
         ClockRange(RangeInner::To(self))
     }
@@ -182,7 +294,8 @@ pub(crate) struct ClockRange<'a>(RangeInner<'a>);
 #[derive(Debug, Clone, PartialEq)]
 enum RangeInner<'a> {
     To(ReadAt<'a>),
-    Between(VisibleClock, VisibleClock),
+    /// `after` may be a current read, which diffs against the indexes.
+    Between(VisibleClock, ReadAt<'a>),
 }
 
 /// A borrowed view of a [`ClockRange`].
@@ -191,14 +304,26 @@ pub(crate) enum RangeView<'r, 'a> {
     To(&'r ReadAt<'a>),
     Between {
         before: &'r VisibleClock,
-        after: &'r VisibleClock,
+        after: &'r ReadAt<'a>,
     },
+}
+
+/// For iterators over no op set, which never consult their clock.
+impl Default for ClockRange<'_> {
+    fn default() -> Self {
+        Self(RangeInner::To(ReadAt(Inner::Current { mask: None })))
+    }
 }
 
 impl<'a> ClockRange<'a> {
     /// A range between two [`VisibleClock`] points.
     pub(crate) fn between(before: VisibleClock, after: VisibleClock) -> Self {
-        Self(RangeInner::Between(before, after))
+        Self(RangeInner::Between(before, ReadAt::at(Cow::Owned(after))))
+    }
+
+    /// A range from `before` to the document's current state.
+    pub(super) fn between_current(before: VisibleClock, current: ReadAt<'a>) -> Self {
+        Self(RangeInner::Between(before, current))
     }
 
     /// A range from the start of the document up to this point.
@@ -218,24 +343,30 @@ impl<'a> ClockRange<'a> {
     pub(crate) fn read_after(&self) -> ReadAt<'_> {
         match &self.0 {
             RangeInner::To(read) => read.borrow(),
-            RangeInner::Between(_, after) => ReadAt(Inner::At(Cow::Borrowed(after))),
+            RangeInner::Between(_, after) => after.borrow(),
         }
     }
 
     pub(crate) fn visible_after(&self, id: &OpId) -> bool {
         match &self.0 {
-            RangeInner::Between(_, after) => after.covers(id),
-            RangeInner::To(r) => r.historical_slow().is_none_or(|c| c.covers(id)),
+            RangeInner::Between(_, after) | RangeInner::To(after) => {
+                after.historical_slow().is_none_or(|c| c.covers(id))
+            }
         }
     }
 
     pub(crate) fn visible_before(&self, id: &OpId) -> bool {
-        self.predates(id)
-    }
-
-    pub(crate) fn predates(&self, id: &OpId) -> bool {
         match &self.0 {
             RangeInner::Between(before, _) => before.covers(id),
+            RangeInner::To(_) => false,
+        }
+    }
+
+    /// Whether `id` existed at `before`, even if hidden there: an op that
+    /// becomes visible without being new is exposed.
+    pub(crate) fn predates(&self, id: &OpId) -> bool {
+        match &self.0 {
+            RangeInner::Between(before, _) => before.exists(id),
             RangeInner::To(_) => false,
         }
     }
@@ -285,12 +416,7 @@ mod tests {
     use crate::types::{ElemId, ObjId};
 
     #[test]
-    fn visible_clock_actor_migration() {
-        let mut v = VisibleClock::new(Clock::from_counters([Some(5), Some(7)]), None);
-        v.insert_actor(&ActorShift::for_test(1));
-        assert_eq!(v.clock(), &Clock::from_counters([Some(5), None, Some(7)]));
-        v.remove_actor(&ActorRemoval::for_test(0));
-        assert_eq!(v.clock(), &Clock::from_counters([None, Some(7)]));
+    fn mask_actor_migration() {
         let mut m = Mask::new(Clock::from_counters([Some(3)]));
         m.insert_actor(&ActorShift::for_test(0));
         assert_eq!(m.clock(), &Clock::from_counters([Some(u32::MAX), Some(3)]));
@@ -317,7 +443,7 @@ mod tests {
             after,
         );
         assert!(empty.descend(&OpId::new(3, 0)).is_none());
-        // Current never narrows. A parent absent from `after` needs no case
+        // A single-endpoint range never narrows. A parent absent from `after` needs no case
         // of its own: DiffIter::process_item's make_obj never descends into
         // it (its diff item is a delete), so descend never sees one.
         let current = ClockRange::to(ReadAt::current(None));

@@ -353,6 +353,9 @@ impl<'a, T: RleValue, V: AsColumnRef<T>, C: Codec> RleState<'a, T, V, C> {
         self.append_n(buf, value, 1)
     }
 
+    // Out of line, the returned FlushState round-trips through memory and
+    // stalls every column append on a store-forwarding miss.
+    #[inline(always)]
     pub fn append_n(
         &mut self,
         buf: &mut Vec<u8>,
