@@ -1,5 +1,6 @@
-use std::cmp::Ordering;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::cmp::{Ordering, Reverse};
+use std::collections::binary_heap::PeekMut;
+use std::collections::{BTreeSet, BinaryHeap, HashMap, HashSet};
 use std::env;
 use std::fmt::Debug;
 use std::num::NonZeroU64;
@@ -28,10 +29,10 @@ use crate::patches::{Patch, PatchAccumulator};
 use crate::storage::change::{self, Verified};
 use crate::storage::document::ReconstructError;
 use crate::storage::load::{
-    load_changes, Error as LoadError, LoadedChanges, LoadedChunk, MarkOrderValidation,
+    load_changes, Error as LoadError, LoadData, LoadedChanges, LoadedChunk,
 };
 use crate::storage::parse::Input;
-use crate::storage::{Bundle, BundleStorage, Chunk, CompressConfig, Document, VerificationMode};
+use crate::storage::{Bundle, BundleStorage, CompressConfig, Document, VerificationMode};
 use crate::tx::{
     self, CommitOptions, Failure, OwnedTransaction, ScopedRead, Success, Transactable, Transaction,
     TransactionArgs,
@@ -137,21 +138,11 @@ pub struct LoadOptions {
     gc: Option<GcMode>,
     author: Option<Author<'static>>,
     write_frontier: WriteFrontier,
-    mark_order: MarkOrderValidation,
 }
 
 impl LoadOptions {
     pub fn new() -> LoadOptions {
         LoadOptions::default()
-    }
-
-    /// Neither the head hashes nor the mark order are checked.
-    pub(crate) fn dont_verify() -> LoadOptions {
-        LoadOptions {
-            verification_mode: VerificationMode::DontCheck,
-            mark_order: MarkOrderValidation::AllowInvalid,
-            ..LoadOptions::default()
-        }
     }
 
     /// What to do when loading a document partially succeeds
@@ -164,7 +155,11 @@ impl LoadOptions {
         }
     }
 
-    /// Whether to verify the head hashes after loading
+    pub(crate) fn partial_load_ok(&self) -> bool {
+        self.on_partial_load == OnPartialLoad::Ignore
+    }
+
+    /// Whether to check the document is well formed
     ///
     /// The default is [`VerificationMode::Check`]
     pub fn verification_mode(self, verification_mode: VerificationMode) -> Self {
@@ -242,7 +237,6 @@ impl std::default::Default for LoadOptions {
             gc: None,
             author: None,
             write_frontier: WriteFrontier::new(),
-            mark_order: MarkOrderValidation::Validate,
         }
     }
 }
@@ -1105,37 +1099,38 @@ impl<H: HashRetention> Automerge<H> {
     }
 
     pub(crate) fn load_as(data: &[u8], options: LoadOptions) -> Result<Self, AutomergeError> {
-        let mark_order = options.mark_order;
-        if data.is_empty() {
+        let parse = LoadData::parse(data, options.partial_load_ok())?;
+        if parse.is_empty() {
             tracing::trace!("no data, initializing empty document");
             return Ok(Self::empty(options.text_encoding)
                 .with_author(options.author)
                 .with_write_frontier_boundaries(options.write_frontier));
         }
-        tracing::trace!("loading first chunk");
-        let (remaining, first_chunk) =
-            Chunk::parse(Input::new(data)).map_err(|e| LoadError::Parse(Box::new(e)))?;
-        if !first_chunk.checksum_valid() {
-            return Err(LoadError::BadChecksum.into());
-        }
-        // only a bundle names the hashes a document outside audit mode keeps
-        if H::AUDIT != AuditMode::Enabled && !matches!(first_chunk, Chunk::Bundle(..)) {
-            return Automerge::<Full>::load_as(data, options).map(H::from_full);
-        }
+        H::load(parse, options)
+    }
 
-        let mut changes: Vec<LoadedChunk> = vec![];
-        let mut first_chunk_was_doc = false;
-        // a document chunk takes the write-frontier while reconstructing; any
-        // other first chunk gets it once everything is applied
+    pub(crate) fn load_parsed(
+        data: LoadData<'_>,
+        options: LoadOptions,
+    ) -> Result<Self, AutomergeError> {
+        let LoadData {
+            doc,
+            other_docs,
+            mut changes,
+            bundles,
+        } = data;
+        // a saved document may hold changes whose deps it lacks
+        // See https://github.com/automerge/automerge/pull/599#issuecomment-1549667472
+        let may_lack_deps = doc.is_some() || !bundles.is_empty();
+        let partial_load_ok = options.partial_load_ok();
+        // a document takes the write-frontier while reconstructing; without
+        // one it is set once everything is applied
         let mut write_frontier = Some(options.write_frontier);
-        let mut am = match first_chunk {
-            Chunk::Document(d) => {
-                tracing::trace!("first chunk is document chunk, inflating");
-                first_chunk_was_doc = true;
-                d.reconstruct(
+        let mut am = match doc {
+            Some(d) => d
+                .reconstruct(
                     options.verification_mode,
                     options.text_encoding,
-                    mark_order.allows_invalid(),
                     write_frontier.take().unwrap_or_default(),
                 )
                 .map_err(|e| match e {
@@ -1144,81 +1139,43 @@ impl<H: HashRetention> Automerge<H> {
                     }
                     e => LoadError::InflateDocument(Box::new(e)).into(),
                 })
-                .map(H::from_full)?
-            }
-            Chunk::Change(stored_change) => {
-                tracing::trace!("first chunk is change chunk");
-                changes.push(LoadedChunk::Change(Box::new(
-                    Change::new_from_unverified(stored_change.into_owned(), None)
-                        .map_err(|e| LoadError::InvalidChangeColumns(Box::new(e)))?,
-                )));
-                Self::empty(options.text_encoding)
-            }
-            Chunk::BundleV0(bundle) => {
-                tracing::trace!("first chunk is a BundleV0 chunk");
-                let bundle_changes = bundle
-                    .to_changes()
-                    .map_err(|e| LoadError::InvalidBundleV0(Box::new(e)))?;
-                changes.extend(
-                    bundle_changes
-                        .into_iter()
-                        .map(|c| LoadedChunk::Change(Box::new(c))),
-                );
-                Self::empty(options.text_encoding)
-            }
-            Chunk::Bundle(bundle, _) => {
-                tracing::trace!("first chunk is a bundle-columns chunk");
-                // a leading bundle is a document save, trailing orphans and all
-                first_chunk_was_doc = true;
-                changes.push(LoadedChunk::Bundle(bundle));
-                Self::empty(options.text_encoding)
-            }
-            Chunk::CompressedChange(stored_change, compressed) => {
-                tracing::trace!("first chunk is compressed change");
-                changes.push(LoadedChunk::Change(Box::new(
-                    Change::new_from_unverified(
-                        stored_change.into_owned(),
-                        Some(compressed.into_owned()),
-                    )
-                    .map_err(|e| LoadError::InvalidChangeColumns(Box::new(e)))?,
-                )));
-                Self::empty(options.text_encoding)
-            }
+                .map(H::from_full)?,
+            None => Self::empty(options.text_encoding),
         };
         // before applying, or fragments forming during the load would GC
         am.change_graph.set_gc_mode(options.gc.unwrap_or_default());
-        tracing::trace!("loading change chunks");
-        // a partial load must still apply the chunks that parsed, the first included
-        let rest = match load_changes(
-            remaining.reset(),
-            options.text_encoding,
-            &am.change_graph,
-            mark_order,
-        ) {
-            LoadedChanges::Complete(c) => c,
-            LoadedChanges::Partial { error, .. }
-                if options.on_partial_load == OnPartialLoad::Error =>
+        for d in other_docs {
+            // an unknown answer reconstructs; the apply path deduplicates
+            if d.heads()
+                .iter()
+                .all(|h| am.change_graph.has_change(h).unwrap_or(false))
             {
-                return Err(error.into());
+                continue;
             }
-            LoadedChanges::Partial { loaded, .. } => loaded,
-        };
-        am.apply_loaded(changes.into_iter().chain(rest).collect())?;
-        // Only allow missing deps if the first chunk was a document chunk
-        // See https://github.com/automerge/automerge/pull/599#issuecomment-1549667472
-        if !am.queue.is_empty()
-            && !first_chunk_was_doc
-            && options.on_partial_load == OnPartialLoad::Error
-        {
+            match d.reconstruct_changes(options.text_encoding) {
+                Ok(c) => changes.extend(c),
+                Err(ReconstructError::InvalidMarkOrderChanges { changes: c, .. })
+                    if options.verification_mode == VerificationMode::DontCheck =>
+                {
+                    changes.extend(c)
+                }
+                Err(_) if partial_load_ok => {}
+                Err(e) => return Err(LoadError::InflateDocument(Box::new(e)).into()),
+            }
+        }
+        // a change waiting on a bundle is queued until the bundle applies
+        if !changes.is_empty() {
+            am.apply_changes_batch_with(changes, true)?;
+        }
+        am.apply_bundles(bundles)?;
+        if !am.queue.is_empty() && !may_lack_deps && !partial_load_ok {
             return Err(AutomergeError::MissingDeps);
         }
         if let StringMigration::ConvertToText = options.string_migration {
             am.convert_scalar_strings_to_text()?;
         }
-        if let Some(write_frontier) = write_frontier.take() {
-            if !write_frontier.is_empty() {
-                am.set_write_frontier_boundaries(write_frontier);
-            }
+        if let Some(write_frontier) = write_frontier.filter(|w| !w.is_empty()) {
+            am.set_write_frontier_boundaries(write_frontier);
         }
         Ok(am.with_author(options.author))
     }
@@ -1268,7 +1225,7 @@ impl<H: HashRetention> Automerge<H> {
             Input::new(data),
             self.text_encoding(),
             &self.change_graph,
-            MarkOrderValidation::Validate,
+            VerificationMode::Check,
         ) {
             LoadedChanges::Complete(c) => c,
             LoadedChanges::Partial { error, loaded, .. } => {
@@ -1293,9 +1250,6 @@ impl<H: HashRetention> Automerge<H> {
     }
 
     fn apply_loaded(&mut self, chunks: Vec<LoadedChunk>) -> Result<(), AutomergeError> {
-        // into an empty document a bundle may arrive before its deps
-        let any_order = self.change_graph.is_empty();
-        let mut waiting: Vec<Bundle> = vec![];
         let mut pending: Vec<Change> = vec![];
         for chunk in chunks {
             match chunk {
@@ -1304,60 +1258,98 @@ impl<H: HashRetention> Automerge<H> {
                     if !pending.is_empty() {
                         self.apply_changes_batch_with(std::mem::take(&mut pending), true)?;
                     }
-                    if any_order && !self.has_bundle_deps(&b) {
-                        waiting.push(*b);
-                        continue;
-                    }
                     self.apply_bundle(*b)?;
-                    self.apply_waiting(&mut waiting)?;
                 }
             }
         }
         if !pending.is_empty() {
             self.apply_changes_batch_with(pending, true)?;
         }
-        self.apply_waiting(&mut waiting)?;
-        // what still waits fails as it would have in order
-        for b in waiting {
-            self.apply_bundle(b)?;
-        }
         Ok(())
     }
 
-    fn apply_waiting(&mut self, waiting: &mut Vec<Bundle>) -> Result<(), AutomergeError> {
-        // the latest to wait usually needed the one just applied
-        while let Some(i) = waiting.iter().rposition(|b| self.has_bundle_deps(b)) {
-            let b = waiting.remove(i);
-            self.apply_bundle(b)?;
-        }
-        Ok(())
-    }
-
-    /// Whether `bundle` names only changes this document has, and extends
-    /// each actor's sequence without a gap. O(members).
-    fn has_bundle_deps(&self, bundle: &Bundle) -> bool {
-        let known = |id: &ChangeId| self.node_for_change_id(id).is_some();
-        if !bundle.dep_ids.iter().all(known) || !bundle.boundary.iter().all(|(_, id)| known(id)) {
-            return false;
-        }
-        let clock = self.change_graph.current_seq_clock();
-        let mut seen = vec![false; bundle.actors().len()];
-        bundle
-            .member_actors
-            .iter()
-            .zip(&bundle.member_seqs)
-            .all(|(actor, seq)| {
-                let actor = usize::from(*actor);
-                if std::mem::replace(&mut seen[actor], true) {
-                    return true;
+    /// Applies bundles in whatever order they arrive.
+    #[allow(clippy::vec_box)]
+    fn apply_bundles(&mut self, bundles: Vec<Box<Bundle>>) -> Result<(), AutomergeError> {
+        // a bundle waits on one missing change, and is looked at again only
+        // once its actor reaches that seq: rescanning every waiting bundle
+        // after each apply is quadratic in a shuffled load
+        let mut waiting: HashMap<ActorId, BinaryHeap<Reverse<(u64, usize)>>> = HashMap::new();
+        let mut parked: Vec<Option<Box<Bundle>>> = vec![];
+        let mut ready: Vec<Box<Bundle>> = vec![];
+        for bundle in bundles {
+            ready.push(bundle);
+            while let Some(b) = ready.pop() {
+                if let Some((actor, seq)) = self.missing_bundle_dep(&b) {
+                    let heap = waiting.entry(actor).or_default();
+                    heap.push(Reverse((seq, parked.len())));
+                    parked.push(Some(b));
+                    continue;
                 }
-                let have = self
-                    .ops
-                    .lookup_actor(&bundle.actors()[actor])
-                    .and_then(|idx| clock.get_for_actor(&idx))
-                    .map_or(0, |s| s.get() as u64);
-                seq.get() <= have + 1
-            })
+                if waiting.is_empty() {
+                    self.apply_bundle(*b)?;
+                    continue;
+                }
+                // in audit mode the queued changes it lets apply may be any actor's
+                let advanced: Vec<ActorId> = if self.queue.is_empty() {
+                    b.actors().to_vec()
+                } else {
+                    waiting.keys().cloned().collect()
+                };
+                self.apply_bundle(*b)?;
+                for actor in advanced {
+                    let Some(heap) = waiting.get_mut(&actor) else {
+                        continue;
+                    };
+                    let have = self.seq_for_actor_id(&actor);
+                    while let Some(Reverse((_, i))) =
+                        heap.peek_mut().filter(|w| w.0 .0 <= have).map(PeekMut::pop)
+                    {
+                        ready.extend(parked[i].take());
+                    }
+                    if heap.is_empty() {
+                        waiting.remove(&actor);
+                    }
+                }
+            }
+        }
+        // what still waits fails as it would have in order
+        for b in parked.into_iter().flatten() {
+            self.apply_bundle(*b)?;
+        }
+        Ok(())
+    }
+
+    /// A change `bundle` names that this document lacks: a dep, or the
+    /// change before an actor's first member.
+    fn missing_bundle_dep(&self, bundle: &Bundle) -> Option<(ActorId, u64)> {
+        let ids = bundle
+            .dep_ids
+            .iter()
+            .chain(bundle.boundary.iter().map(|(_, id)| id));
+        for id in ids {
+            if id.seq() > self.seq_for_actor_id(id.actor()) {
+                return Some((id.actor().clone(), id.seq()));
+            }
+        }
+        let mut seen = vec![false; bundle.actors().len()];
+        for (actor, seq) in bundle.member_actors.iter().zip(&bundle.member_seqs) {
+            let actor = usize::from(*actor);
+            if std::mem::replace(&mut seen[actor], true) {
+                continue;
+            }
+            let actor = &bundle.actors()[actor];
+            if seq.get() > self.seq_for_actor_id(actor) + 1 {
+                return Some((actor.clone(), seq.get() - 1));
+            }
+        }
+        None
+    }
+
+    fn seq_for_actor_id(&self, actor: &ActorId) -> u64 {
+        self.ops
+            .lookup_actor(actor)
+            .map_or(0, |a| self.change_graph.seq_for_actor(a))
     }
 
     /// Apply changes to this document.
@@ -3730,7 +3722,8 @@ impl Automerge<Retained> {
         Self::load_with_options(data, Default::default())
     }
 
-    /// Load a document without verifying the head hashes
+    /// Load a document without checking it is well formed, as far as it
+    /// can be loaded: see [`VerificationMode::DontCheck`].
     ///
     /// This is useful for debugging as it allows you to examine a corrupted document.
     pub fn load_unverified_heads(data: &[u8]) -> Result<Self, AutomergeError> {
@@ -3757,7 +3750,7 @@ impl Automerge<Retained> {
     ///
     /// This returns only the current hydrated value and does not preserve the original change graph.
     pub fn rescue(data: &[u8]) -> Result<hydrate::Value, AutomergeError> {
-        Self::load_with_options(data, LoadOptions::dont_verify())?.hydrate(None)
+        Self::load_unverified_heads(data)?.hydrate(None)
     }
 
     /// Convert to a document that keeps every change hash.

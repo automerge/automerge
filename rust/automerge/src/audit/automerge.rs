@@ -39,7 +39,7 @@ impl LoadOptions {
         }
     }
 
-    /// Whether to verify the head hashes after loading
+    /// Whether to check the document is well formed
     ///
     /// The default is [`VerificationMode::Check`]
     pub fn verification_mode(self, verification_mode: VerificationMode) -> Self {
@@ -509,7 +509,8 @@ impl Automerge {
         Self::load_with_options(data, LoadOptions::default())
     }
 
-    /// Load a document without verifying the head hashes
+    /// Load a document without checking it is well formed, as far as it
+    /// can be loaded: see [`VerificationMode::DontCheck`].
     ///
     /// This is useful for debugging as it allows you to examine a corrupted document.
     pub fn load_unverified_heads(data: &[u8]) -> Result<Self, AutomergeError> {

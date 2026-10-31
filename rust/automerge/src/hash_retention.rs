@@ -1,6 +1,7 @@
-use crate::automerge::{AuditMode, Automerge};
+use crate::automerge::{AuditMode, Automerge, LoadOptions};
 use crate::change_graph::{ChangeGraph, Members, NodeIdx, UncheckedHashes};
 use crate::storage::bundle::Bundle;
+use crate::storage::load::LoadData;
 use crate::types::ChangeHash;
 use crate::AutomergeError;
 
@@ -46,6 +47,8 @@ pub trait HashRetention:
     fn from_full(doc: Automerge<Full>) -> Automerge<Self>;
 
     fn apply_bundle(doc: &mut Automerge<Self>, bundle: Bundle) -> Result<(), AutomergeError>;
+
+    fn load(data: LoadData<'_>, options: LoadOptions) -> Result<Automerge<Self>, AutomergeError>;
 }
 
 /// Every change hash is kept: audit mode.
@@ -100,6 +103,10 @@ impl HashRetention for Full {
 
     fn apply_bundle(doc: &mut Automerge<Self>, bundle: Bundle) -> Result<(), AutomergeError> {
         doc.apply_bundle_verified(bundle)
+    }
+
+    fn load(data: LoadData<'_>, options: LoadOptions) -> Result<Automerge<Self>, AutomergeError> {
+        Automerge::load_parsed(data, options)
     }
 
     fn leveled_members(&self, members: &Members<'_>) -> Vec<(NodeIdx, ChangeHash)> {
@@ -175,6 +182,15 @@ impl HashRetention for Retained {
 
     fn apply_bundle(doc: &mut Automerge<Self>, bundle: Bundle) -> Result<(), AutomergeError> {
         doc.apply_bundle_columns(bundle, None)
+    }
+
+    fn load(data: LoadData<'_>, options: LoadOptions) -> Result<Automerge<Self>, AutomergeError> {
+        // only a bundle names the hashes a document outside audit mode keeps
+        if data.doc.is_none() && data.changes.is_empty() {
+            Automerge::load_parsed(data, options)
+        } else {
+            Automerge::<Full>::load_parsed(data, options).map(Self::from_full)
+        }
     }
 
     fn leveled_members(&self, members: &Members<'_>) -> Vec<(NodeIdx, ChangeHash)> {

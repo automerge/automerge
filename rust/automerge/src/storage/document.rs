@@ -308,6 +308,10 @@ impl<'a> Document<'a> {
         &self.actors
     }
 
+    pub(crate) fn byte_len(&self) -> usize {
+        self.bytes.len()
+    }
+
     pub(crate) fn heads(&self) -> &[ChangeHash] {
         &self.heads
     }
@@ -334,7 +338,6 @@ impl<'a> Document<'a> {
         &self,
         mode: VerificationMode,
         text_encoding: TextEncoding,
-        allow_invalid_marks: bool,
         write_frontier: WriteFrontier,
     ) -> Result<Automerge<Full>, ReconstructError> {
         let (mut op_set, index) = OpSet::load_indexed(self, text_encoding)?;
@@ -365,7 +368,7 @@ impl<'a> Document<'a> {
         let doc = Automerge::from_parts(op_set, change_graph, authors, write_frontier);
 
         match mark_order_validator.take_error() {
-            Some(error_message) if !allow_invalid_marks => {
+            Some(error_message) if mode == VerificationMode::Check => {
                 Err(ReconstructError::InvalidMarkOrderDoc { error_message })
             }
             _ => Ok(doc),
