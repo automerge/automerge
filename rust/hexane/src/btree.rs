@@ -25,13 +25,24 @@
 //! Verification (Verus, `cargo verus verify -p hexane`): the tree stands
 //! for a sequence of slab aggregates (its `View`), and `wf` is the
 //! invariant tying the arena to it: every cached child slab count and
-//! aggregate is right, subtrees don't share nodes, and every grouping of
-//! slabs can be merged (`valid`).  `find_by_prefix`, `items_before_slab`,
-//! `root_agg` and `update_slab` are proved against that sequence;
-//! `splice`, `from_iter` and the value/prefix queries are not yet.
-//! `merge`'s laws are proved for `SlabAgg` and `usize`; for
-//! `PrefixSlabWeight<P>` they are assumed of the user's `P`
-//! (`axiom_prefix_add`).
+//! aggregate is right, subtrees don't share nodes, the free list names
+//! distinct empty slots, and every grouping of slabs can be merged
+//! (`valid`).  `splice`'s core (`splice_vec`), `update_slab`,
+//! `find_by_prefix`, `items_before_slab` and `root_agg` are proved against
+//! that sequence: a splice yields exactly `old[..start] + new + old[end..]`
+//! provided the caller keeps that result `valid`.  Not yet verified:
+//! `from_iter`, the prefix-sum and value-range queries, and the
+//! `IntoIterator` wrapper around `splice_vec`.  `merge`'s laws are proved
+//! for `SlabAgg` and `usize`; for `PrefixSlabWeight<P>` they are assumed of
+//! the user's `P` (`axiom_prefix_add`).
+
+// Verus has no specs for `Vec::is_empty` or `usize::is_multiple_of`, and
+// ghost arguments make some signatures long.
+#![allow(
+    clippy::len_zero,
+    clippy::manual_is_multiple_of,
+    clippy::too_many_arguments
+)]
 
 use crate::prefix::PrefixSlabWeight;
 use std::fmt::Debug;
@@ -415,6 +426,18 @@ pub proof fn lemma_sum_len_concat<A: SlabAggregate>(a: Seq<A>, b: Seq<A>)
     }
 }
 
+pub proof fn lemma_valid_empty<A: SlabAggregate>()
+    ensures valid(Seq::<A>::empty()),
+{
+    let e = Seq::<A>::empty();
+    assert forall|i: int, j: int, k: int| 0 <= i <= j <= k <= e.len()
+        implies #[trigger] A::merge_ok(fold(e.subrange(i, j)), fold(e.subrange(j, k))) by {
+        assert(e.subrange(i, j) =~= e);
+        assert(e.subrange(j, k) =~= e);
+        A::lemma_empty(A::spec_empty());
+    }
+}
+
 /// The aggregate of a sequence of slabs: `merge` from the left, starting
 /// from the empty aggregate.
 pub open spec fn fold<A: SlabAggregate>(s: Seq<A>) -> A
@@ -500,6 +523,93 @@ pub proof fn lemma_valid_subrange<A: SlabAggregate>(s: Seq<A>, a: int, b: int)
 /// `s` with `a..b` replaced by `n`.
 pub open spec fn spliced<T>(s: Seq<T>, a: int, b: int, n: Seq<T>) -> Seq<T> {
     s.subrange(0, a) + n + s.subrange(b, s.len() as int)
+}
+
+/// Splicing within one part of a concatenation.
+pub proof fn lemma_splice_in_part<T>(p: Seq<T>, c: Seq<T>, q: Seq<T>, start: int, end: int, n: Seq<T>)
+    requires p.len() <= start <= end <= p.len() + c.len(),
+    ensures
+        spliced(p + c + q, start, end, n)
+            == p + spliced(c, start - p.len(), end - p.len(), n) + q,
+{
+    let s = p + c + q;
+    assert(spliced(s, start, end, n) =~= p + spliced(c, start - p.len(), end - p.len(), n) + q);
+}
+
+/// Where the piece of a splice that falls to one of several parts lands
+/// in the result: the part at `pk..pk1` of `s` takes its overlap with
+/// `start..end` (`lo..hi`, local) and the stretch of `n` that covers it
+/// at the same length (`cut_k..cut_k1`), the last part whatever is left.
+pub proof fn lemma_splice_piece<T>(
+    s: Seq<T>, start: int, end: int, n: Seq<T>, pk: int, pk1: int, first: bool, last: bool,
+)
+    requires
+        0 <= pk <= pk1 <= s.len(), 0 <= start < end <= s.len(),
+        first ==> pk <= start < pk1 && !last,
+        !first ==> start < pk,
+        last ==> pk < end <= pk1,
+        !last ==> pk1 < end,
+    ensures ({
+        let m = n.len() as int;
+        let lo = if start > pk { start - pk } else { 0 };
+        let hi = if end < pk1 { end - pk } else { pk1 - pk };
+        let cut_k = if first { 0 } else if pk - start < m { pk - start } else { m };
+        let cut_k1 = if last { m } else if pk1 - start < m { pk1 - start } else { m };
+        let q_k = if first { pk } else { start + cut_k };
+        let q_k1 = if last { start + m + (pk1 - end) } else { start + cut_k1 };
+        &&& 0 <= cut_k <= cut_k1 <= m
+        &&& 0 <= lo <= hi <= pk1 - pk
+        &&& 0 <= q_k <= q_k1 <= spliced(s, start, end, n).len()
+        &&& spliced(s.subrange(pk, pk1), lo, hi, n.subrange(cut_k, cut_k1))
+            == spliced(s, start, end, n).subrange(q_k, q_k1)
+    }),
+{
+    let m = n.len() as int;
+    let f = spliced(s, start, end, n);
+    let lo = if start > pk { start - pk } else { 0 };
+    let hi = if end < pk1 { end - pk } else { pk1 - pk };
+    let cut_k = if first { 0 } else if pk - start < m { pk - start } else { m };
+    let cut_k1 = if last { m } else if pk1 - start < m { pk1 - start } else { m };
+    let q_k = if first { pk } else { start + cut_k };
+    let q_k1 = if last { start + m + (pk1 - end) } else { start + cut_k1 };
+    let c = s.subrange(pk, pk1);
+    let piece = spliced(c, lo, hi, n.subrange(cut_k, cut_k1));
+    lemma_spliced_index(s, start, end, n);
+    assert(piece.len() == q_k1 - q_k);
+    assert forall|i: int| 0 <= i < piece.len() implies #[trigger] piece[i] == f[q_k + i] by {
+        if i < lo {
+            assert(piece[i] == c[i]);
+            assert(c[i] == s[pk + i]);
+        } else if i < lo + (cut_k1 - cut_k) {
+            assert(piece[i] == n[cut_k + i - lo]);
+        } else {
+            assert(piece[i] == c[hi + i - lo - (cut_k1 - cut_k)]);
+            assert(c[hi + i - lo - (cut_k1 - cut_k)] == s[pk + hi + i - lo - (cut_k1 - cut_k)]);
+        }
+    }
+    assert(piece =~= f.subrange(q_k, q_k1));
+}
+
+/// Where each slab of a splice's result comes from.
+pub proof fn lemma_spliced_index<T>(s: Seq<T>, start: int, end: int, n: Seq<T>)
+    requires 0 <= start <= end <= s.len(),
+    ensures
+        spliced(s, start, end, n).len() == s.len() - (end - start) + n.len(),
+        forall|i: int| 0 <= i < start ==> #[trigger] spliced(s, start, end, n)[i] == s[i],
+        forall|j: int| 0 <= j < n.len() ==> #[trigger] spliced(s, start, end, n)[start + j] == n[j],
+        forall|j: int| 0 <= j < s.len() - end ==> #[trigger] spliced(s, start, end, n)[start + n.len() + j] == s[end + j],
+{
+}
+
+/// How much of `n` (length `m`) children `ks..j` take in a splice of
+/// `start..end` spanning children `ks..=ke` (child `j` starting at `pj`).
+pub open spec fn cut_at(j: int, ks: int, ke: int, m: int, start: int, pj: int) -> int {
+    if j == ke + 1 { m } else if j == ks { 0 } else if pj - start < m { pj - start } else { m }
+}
+
+/// Where child `j`'s share starts in the splice's result.
+pub open spec fn share_at(j: int, ks: int, ke: int, m: int, start: int, end: int, pj: int) -> int {
+    if j == ks { pj } else if j == ke + 1 { start + m + (pj - end) } else { start + cut_at(j, ks, ke, m, start, pj) }
 }
 
 /// The slab counts of the first `k` slots.
@@ -1141,23 +1251,49 @@ impl<A: SlabAggregate> SlabBTree<A> {
     /// descend while the range lies within one child; at a leaf, splice
     /// its slab list in place (overwriting when the lengths match,
     /// splitting it into leaves of at most B if it overflows, merging it
-    /// into a sibling if it drops below B/4); at the first node whose
-    /// range spans several children, overwrite them in place if the
-    /// lengths match and otherwise rebuild them at the same height.  On
-    /// the way back up each level refreshes its cached slot, splits past
-    /// B children and drops out when empty.  O(log n + k).
-    #[verifier::external_body]
-    fn splice_vec(&mut self, start: usize, end: usize, new: Vec<A>) {
+    /// into a sibling if it drops below B/4); at a node whose range spans
+    /// several children, give each its overlap and the matching piece of
+    /// `new`.  On the way back up each level refreshes its cached slot,
+    /// splits past B children and drops out when empty.  O(log n + k).
+    ///
+    /// The caller guarantees the result is [`valid`] (for delta columns,
+    /// the domain contract); every node goes straight to its final
+    /// contents, so nothing else need be.
+    fn splice_vec(&mut self, start: usize, end: usize, new: Vec<A>)
+        requires
+            old(self).wf(),
+            start <= end <= old(self)@.len(),
+            valid(spliced(old(self)@, start as int, end as int, new@)),
+            spliced(old(self)@, start as int, end as int, new@).len() <= usize::MAX,
+        ensures
+            final(self).wf(),
+            final(self)@ == spliced(old(self)@, start as int, end as int, new@),
+    {
         assert!(end <= self.total_slabs, "splice out of bounds");
         assert!(start <= end, "invalid range");
         if start == end && new.len() == 0 {
+            proof { assert(spliced(old(self)@, start as int, end as int, new@) =~= old(self)@); }
             return;
         }
+        let ghost h0 = self.height();
+        let ghost f = spliced(old(self)@, start as int, end as int, new@);
+        proof { assert(self.wf_node(self.root, h0)); }
         let added = new.len();
-        let h = self.subtree_height(self.root, Ghost(self.height()));
+        let h = self.subtree_height(self.root, Ghost(h0));
         let slots = self.splice_rec(self.root, h, start, end, new);
-        self.total_slabs = self.total_slabs + added - (end - start);
-        self.set_root(slots);
+        self.set_root(slots, Ghost(h0));
+        let ghost t2 = *self;
+        let ghost hh = choose|hh: nat| t2.wf_node(t2.root, hh) && t2.slabs(t2.root, hh) == f;
+        self.total_slabs = self.total_slabs - (end - start) + added;
+        proof {
+            assert(f.len() == old(self)@.len() - (end - start) + added);
+            assert forall|x: NodeId| t2.owned(t2.root, hh).contains(x) implies t2.node_spec(x) == self.node_spec(x) by {}
+            Self::lemma_frame(&t2, self, self.root, hh);
+            self.lemma_height_unique(self.root, hh, self.height());
+            lemma_fold_len(f, 0, f.len() as int);
+            assert(f.subrange(0, f.len() as int) =~= f);
+            A::lemma_len_bound(fold(f));
+        }
         // Large deletions can leave a single-child chain at the top;
         // promote so query depth tracks the live tree.
         self.collapse_root();
@@ -1183,45 +1319,280 @@ impl<A: SlabAggregate> SlabBTree<A> {
     /// Returns the child slots that replace the subtree's slot in its
     /// parent: none if it emptied (the caller frees `id`), one, or several
     /// if it split (the first keeps `id`).
-    #[verifier::external_body]
-    fn splice_rec(&mut self, id: NodeId, h: usize, start: usize, end: usize, new: Vec<A>) -> Vec<ChildSlot<A>> {
+    fn splice_rec(&mut self, id: NodeId, h: usize, start: usize, end: usize, new: Vec<A>) -> (r: Vec<ChildSlot<A>>)
+        requires
+            old(self).arena_ok(),
+            old(self).wf_node(id, h as nat),
+            start <= end <= old(self).slabs(id, h as nat).len(),
+            valid(spliced(old(self).slabs(id, h as nat), start as int, end as int, new@)),
+            spliced(old(self).slabs(id, h as nat), start as int, end as int, new@).len() <= usize::MAX,
+        ensures
+            final(self).arena_ok(),
+            final(self).slots_ok(r@, h as nat),
+            final(self).children_slabs(r@, h as nat)
+                == spliced(old(self).slabs(id, h as nat), start as int, end as int, new@),
+            forall|x: NodeId| #[trigger] final(self).children_owned(r@, h as nat).contains(x)
+                ==> old(self).owned(id, h as nat).contains(x) || old(self).node_spec(x) is None,
+            forall|x: NodeId| !old(self).owned(id, h as nat).contains(x) && old(self).node_spec(x) is Some
+                ==> #[trigger] final(self).node_spec(x) == old(self).node_spec(x),
+            r@.len() == 0 ==> final(self).node_spec(id) is Some,
+            final(self).root == old(self).root,
+            final(self).total_slabs == old(self).total_slabs,
+        decreases h, 2nat,
+    {
         if h == 0 {
-            return self.splice_leaf(id, start, end, new);
-        }
-        let (ks, ke, off_s, off_e) = self.locate_range(id, start, end, Ghost(arbitrary()));
-        if ks == ke {
-            self.splice_child(id, h, ks, start - off_s, end - off_s, new, true);
-        } else {
-            // The range spans children ks..=ke.  Each takes its overlap and
-            // the piece of `new` that would cover it at the same length (so
-            // most are overwritten in place), the last one whatever is
-            // left.  Splice them last to first, so each one's piece splits
-            // off the end of `new` and earlier indices stay put.
-            let m = new.len();
-            let mut new = new;
-            let mut k = ke;
-            let mut off = off_e;
-            loop {
-                let count = match self.node(id) {
-                    Node::Internal(n) => n.children[k].slab_count,
-                    Node::Leaf(_) => unreachable!(),
-                };
-                let lo = if start > off { start - off } else { 0 };
-                let hi = if end - off < count { end - off } else { count };
-                let cut = if k == ks { 0 } else if off - start < m { off - start } else { m };
-                let part = new.split_off(cut);
-                self.splice_child(id, h, k, lo, hi, part, false);
-                if k == ks {
-                    break;
+            proof {
+                if let Some(Node::Internal(n)) = old(self).node_spec(id) {
+                    old(self).lemma_wf_internal(id, 0, n);
                 }
-                k -= 1;
-                off -= match self.node(id) {
-                    Node::Internal(n) => n.children[k].slab_count,
-                    Node::Leaf(_) => unreachable!(),
-                };
+            }
+            let r = self.splice_leaf(id, start, end, new);
+            proof {
+                assert(old(self).owned(id, 0).contains(id));
+                assert(old(self).owned(id, 0) == set![id]);
+            }
+            return r;
+        }
+        let ghost hn = h as nat;
+        let ghost hc = (h - 1) as nat;
+        let ghost n0 = match old(self).node_spec(id) { Some(Node::Internal(n)) => n, _ => arbitrary() };
+        let ghost cs = n0.children@;
+        let ghost sl = old(self).slabs(id, hn);
+        let ghost new0 = new@;
+        let ghost m = new0.len() as int;
+        let ghost f = spliced(sl, start as int, end as int, new0);
+        proof {
+            if let Some(Node::Leaf(l)) = old(self).node_spec(id) {
+                old(self).lemma_wf_leaf(id, hn, l);
+            }
+            old(self).lemma_wf_internal(id, hn, n0);
+            old(self).lemma_not_in_children(cs, hc, id);
+            old(self).lemma_counts(cs, hc, cs.len() as int);
+            assert(cs.take(cs.len() as int) =~= cs);
+            Self::lemma_counts_mono(cs);
+        }
+        let (ks, ke, off_s, off_e) = self.locate_range(id, start, end, Ghost(cs));
+        if ks == ke {
+            proof {
+                old(self).lemma_slabs_at(cs, hc, ks as int);
+                let (pre, post) = (cs.subrange(0, ks as int), cs.subrange(ks + 1, cs.len() as int));
+                let c = old(self).slabs(cs[ks as int].id, hc);
+                old(self).lemma_children_slabs_split(cs, ks as int, hc);
+                assert(cs.take(ks as int) == pre && cs.skip(ks + 1) == post);
+                lemma_splice_in_part(old(self).children_slabs(pre, hc), c, old(self).children_slabs(post, hc),
+                    start as int, end as int, new0);
+                let piece = spliced(c, start - off_s, end - off_s, new0);
+                let p = old(self).children_slabs(pre, hc).len() as int;
+                assert(f.subrange(p, p + piece.len()) =~= piece);
+                lemma_valid_subrange(f, p, p + piece.len());
+            }
+            self.splice_child(id, h, ks, start - off_s, end - off_s, new, true);
+            proof {
+                old(self).lemma_slabs_at(cs, hc, ks as int);
+                old(self).lemma_children_owned_contains(cs, ks as int, hc);
+            }
+        } else {
+            self.splice_span(id, h, ks, ke, off_e, start, end, new, Ghost(cs));
+        }
+        let ghost t9 = *self;
+        proof {
+            // what the branches left: id's children stand for the result,
+            // using its old subtree and empty slots, with nothing else
+            // touched
+            assert forall|x: NodeId| x != id && old(self).node_spec(x) is Some
+                && !old(self).children_owned(cs, hc).contains(x)
+                implies #[trigger] t9.node_spec(x) == old(self).node_spec(x) by {
+                if ks == ke {
+                    old(self).lemma_children_owned_contains(cs, ks as int, hc);
+                }
             }
         }
-        self.finish_internal(id, Ghost(h as nat))
+        let r = self.finish_internal(id, Ghost(h as nat));
+        proof {
+            old(self).lemma_wf_internal(id, hn, n0);
+            assert forall|x: NodeId| #[trigger] self.children_owned(r@, hn).contains(x)
+                implies old(self).owned(id, hn).contains(x) || old(self).node_spec(x) is None by {
+                if x != id && !old(self).children_owned(cs, hc).contains(x) && old(self).node_spec(x) is Some {
+                    assert(t9.node_spec(x) == old(self).node_spec(x));
+                }
+            }
+            assert forall|x: NodeId| !old(self).owned(id, hn).contains(x) && old(self).node_spec(x) is Some
+                implies #[trigger] self.node_spec(x) == old(self).node_spec(x) by {
+                assert(t9.node_spec(x) == old(self).node_spec(x));
+            }
+        }
+        r
+    }
+
+    /// Splice `start..end` ↦ `new` across children `ks..=ke` of internal
+    /// node `id` (`ks < ke`; child `ke` starts at `off_e`).  Each takes its
+    /// overlap and the piece of `new` that would cover it at the same
+    /// length (so most are overwritten in place), the last one whatever is
+    /// left.  They are spliced last to first, so each one's piece splits
+    /// off the end of `new` and earlier indices stay put.
+    #[verifier::rlimit(30)]
+    fn splice_span(&mut self, id: NodeId, h: usize, ks: usize, ke: usize, off_e: usize,
+        start: usize, end: usize, new: Vec<A>, Ghost(cs): Ghost<Seq<ChildSlot<A>>>)
+        requires
+            h >= 1,
+            old(self).arena_ok(),
+            old(self).node_spec(id) matches Some(Node::Internal(n)) && n.children@ == cs,
+            old(self).slots_ok(cs, (h - 1) as nat),
+            !old(self).children_owned(cs, (h - 1) as nat).contains(id),
+            ks < ke < cs.len(), off_e == counts(cs, ke as int),
+            counts(cs, ks as int) <= start < counts(cs, ks + 1), off_e < end <= counts(cs, ke + 1),
+            counts(cs, cs.len() as int) == old(self).children_slabs(cs, (h - 1) as nat).len(),
+            valid(spliced(old(self).children_slabs(cs, (h - 1) as nat), start as int, end as int, new@)),
+            spliced(old(self).children_slabs(cs, (h - 1) as nat), start as int, end as int, new@).len() <= usize::MAX,
+            old(self).children_slabs(cs, (h - 1) as nat).len() <= usize::MAX,
+        ensures
+            final(self).arena_ok(),
+            final(self).node_spec(id) matches Some(Node::Internal(n2)) && {
+                let l = n2.children@;
+                let hc = (h - 1) as nat;
+                &&& final(self).slots_ok(l, hc)
+                &&& !final(self).children_owned(l, hc).contains(id)
+                &&& final(self).children_slabs(l, hc)
+                    == spliced(old(self).children_slabs(cs, hc), start as int, end as int, new@)
+                &&& forall|x: NodeId| #[trigger] final(self).children_owned(l, hc).contains(x)
+                    ==> old(self).children_owned(cs, hc).contains(x) || old(self).node_spec(x) is None
+            },
+            forall|x: NodeId| x != id && old(self).node_spec(x) is Some
+                && !old(self).children_owned(cs, (h - 1) as nat).contains(x)
+                ==> #[trigger] final(self).node_spec(x) == old(self).node_spec(x),
+            final(self).root == old(self).root,
+            final(self).total_slabs == old(self).total_slabs,
+        decreases h, 1nat,
+    {
+        let ghost hn = h as nat;
+        let ghost hc = (h - 1) as nat;
+        let ghost sl = old(self).children_slabs(cs, hc);
+        let ghost new0 = new@;
+        let ghost m = new0.len() as int;
+        let ghost f = spliced(sl, start as int, end as int, new0);
+        let ghost off_s = counts(cs, ks as int);
+        proof { Self::lemma_counts_mono(cs); }
+        // The range spans children ks..=ke.  Each takes its overlap and
+        // the piece of `new` that would cover it at the same length (so
+        // most are overwritten in place), the last one whatever is
+        // left.  Splice them last to first, so each one's piece splits
+        // off the end of `new` and earlier indices stay put.
+        let m_ = new.len();
+        let mut new = new;
+        let mut k = ke;
+        let mut off = off_e;
+        proof {
+            assert(cs.subrange(0, ke + 1) + cs.subrange(ke + 1, cs.len() as int) =~= cs);
+            old(self).lemma_slabs_at(cs, hc, ke as int);
+            old(self).lemma_slabs_tail(cs, hc, ke + 1);
+            lemma_spliced_index(sl, start as int, end as int, new0);
+            let q = share_at(ke + 1, ks as int, ke as int, m, start as int, end as int, counts(cs, ke + 1) as int);
+            assert(f.subrange(q, f.len() as int) =~= sl.subrange(counts(cs, ke + 1) as int, sl.len() as int));
+            assert(new@ =~= new0.subrange(0, cut_at(ke + 1, ks as int, ke as int, m, start as int, counts(cs, ke + 1) as int)));
+            old(self).lemma_slots_nil(hc);
+        }
+        loop
+            invariant_except_break
+                h >= 1, hn == h, hc == h - 1, m == m_, ks < ke < cs.len(),
+                ks <= k <= ke, off == counts(cs, k as int),
+                off_s == counts(cs, ks as int), off_e == counts(cs, ke as int),
+                off_s <= start < counts(cs, ks + 1), off_e < end <= counts(cs, ke + 1),
+                counts(cs, cs.len() as int) == sl.len(), sl.len() <= usize::MAX,
+                forall|i: int, j: int| 0 <= i <= j <= cs.len() ==> #[trigger] counts(cs, i) <= #[trigger] counts(cs, j),
+                old(self).slots_ok(cs, hc), sl == old(self).children_slabs(cs, hc),
+                f == spliced(sl, start as int, end as int, new0), valid(f), f.len() <= usize::MAX,
+                new0.len() == m,
+                new@ == new0.subrange(0, cut_at(k + 1, ks as int, ke as int, m, start as int, counts(cs, k + 1) as int)),
+                self.arena_ok(),
+                self.root == old(self).root, self.total_slabs == old(self).total_slabs,
+                self.node_spec(id) matches Some(Node::Internal(n)) && {
+                    let l = n.children@;
+                    &&& self.slots_ok(l, hc)
+                    &&& !self.children_owned(l, hc).contains(id)
+                    &&& k < l.len()
+                    &&& l.subrange(0, k + 1) == cs.subrange(0, k + 1)
+                    &&& self.children_slabs(l, hc) == old(self).children_slabs(cs.subrange(0, k + 1), hc)
+                        + f.subrange(share_at(k + 1, ks as int, ke as int, m, start as int, end as int, counts(cs, k + 1) as int), f.len() as int)
+                    &&& forall|x: NodeId| #[trigger] self.children_owned(l, hc).contains(x)
+                        ==> old(self).children_owned(cs, hc).contains(x) || old(self).node_spec(x) is None
+                },
+                forall|x: NodeId| x != id && old(self).node_spec(x) is Some
+                    && !old(self).children_owned(cs.subrange(k + 1, cs.len() as int), hc).contains(x)
+                    ==> #[trigger] self.node_spec(x) == old(self).node_spec(x),
+                !old(self).children_owned(cs, hc).contains(id),
+                old(self).node_spec(id) is Some,
+            ensures
+                self.arena_ok(),
+                self.root == old(self).root, self.total_slabs == old(self).total_slabs,
+                k == ks,
+                self.node_spec(id) matches Some(Node::Internal(n)) && {
+                    let l = n.children@;
+                    &&& self.slots_ok(l, hc)
+                    &&& !self.children_owned(l, hc).contains(id)
+                    &&& self.children_slabs(l, hc) == old(self).children_slabs(cs.subrange(0, ks as int), hc)
+                        + f.subrange(share_at(ks as int, ks as int, ke as int, m, start as int, end as int, counts(cs, ks as int) as int), f.len() as int)
+                    &&& forall|x: NodeId| #[trigger] self.children_owned(l, hc).contains(x)
+                        ==> old(self).children_owned(cs, hc).contains(x) || old(self).node_spec(x) is None
+                },
+                forall|x: NodeId| x != id && old(self).node_spec(x) is Some
+                    && !old(self).children_owned(cs.subrange(ks as int, cs.len() as int), hc).contains(x)
+                    ==> #[trigger] self.node_spec(x) == old(self).node_spec(x),
+            decreases k,
+        {
+            let ghost t0 = *self;
+            let ghost (pk, pk1) = (counts(cs, k as int) as int, counts(cs, k + 1) as int);
+            proof {
+                old(self).lemma_slabs_at(cs, hc, k as int);
+                old(self).lemma_slot(cs, hc, k as int);
+                Self::lemma_untouched_child(old(self), &t0, cs, hc, k as int, id);
+            }
+            let count = match self.node(id) {
+                Node::Internal(n) => n.children[k].slab_count,
+                Node::Leaf(_) => unreachable!(),
+            };
+            let lo = start.saturating_sub(off);
+            let hi = if end - off < count { end - off } else { count };
+            let cut = if k == ks { 0 } else if off - start < m_ { off - start } else { m_ };
+            let part = new.split_off(cut);
+            proof {
+                lemma_splice_piece(sl, start as int, end as int, new0, pk, pk1, k == ks, k == ke);
+                assert(sl.subrange(pk, pk1) == old(self).slabs(cs[k as int].id, hc));
+                assert(part@ =~= new0.subrange(cut as int, cut_at(k + 1, ks as int, ke as int, m, start as int, pk1)));
+                let qk = share_at(k as int, ks as int, ke as int, m, start as int, end as int, pk);
+                let qk1 = share_at(k + 1, ks as int, ke as int, m, start as int, end as int, pk1);
+                lemma_valid_subrange(f, qk, qk1);
+            }
+            let ghost l0 = match t0.node_spec(id) { Some(Node::Internal(n)) => n.children@, _ => arbitrary() };
+            let ghost piece = spliced(t0.slabs(cs[k as int].id, hc), lo as int, hi as int, part@);
+            self.splice_child(id, h, k, lo, hi, part, false);
+            proof {
+                let l2 = match self.node_spec(id) { Some(Node::Internal(n)) => n.children@, _ => arbitrary() };
+                assert(l0[k as int] == cs[k as int]) by {
+                    assert(l0.subrange(0, k + 1)[k as int] == cs.subrange(0, k + 1)[k as int]);
+                };
+                Self::lemma_multi_step(old(self), &t0, self, cs, l0, l2, hc, k as int, id, f,
+                    share_at(k as int, ks as int, ke as int, m, start as int, end as int, pk),
+                    share_at(k + 1, ks as int, ke as int, m, start as int, end as int, pk1), piece);
+            }
+            if k == ks {
+                break;
+            }
+            k -= 1;
+            off -= match self.node(id) {
+                Node::Internal(n) => n.children[k].slab_count,
+                Node::Leaf(_) => unreachable!(),
+            };
+            proof {
+                old(self).lemma_slabs_at(cs, hc, k as int);
+                assert(new@ =~= new0.subrange(0, cut_at(k + 1, ks as int, ke as int, m, start as int, counts(cs, k + 1) as int)));
+            }
+        }
+        proof {
+            old(self).lemma_slabs_at(cs, hc, ks as int);
+            lemma_spliced_index(sl, start as int, end as int, new0);
+            assert(f =~= sl.subrange(0, off_s as int) + f.subrange(off_s as int, f.len() as int));
+            old(self).lemma_slots_sub(cs, ks as int, cs.len() as int, hc);
+        }
     }
 
     /// Splice a leaf's slab list.
@@ -1421,26 +1792,129 @@ impl<A: SlabAggregate> SlabBTree<A> {
     /// replacing its slot with whatever slots come back (freeing it if
     /// none); with `merge`, then merge it into a sibling if it is a leaf
     /// that shrank below B/4.
-    #[verifier::external_body]
-    fn splice_child(&mut self, id: NodeId, h: usize, k: usize, lo: usize, hi: usize, part: Vec<A>, merge: bool) {
+    #[verifier::rlimit(30)]
+    fn splice_child(&mut self, id: NodeId, h: usize, k: usize, lo: usize, hi: usize, part: Vec<A>, merge: bool)
+        requires
+            h >= 1,
+            old(self).arena_ok(),
+            old(self).node_spec(id) matches Some(Node::Internal(n)) && {
+                let cs = n.children@;
+                let hc = (h - 1) as nat;
+                let c = old(self).slabs(cs[k as int].id, hc);
+                let piece = spliced(c, lo as int, hi as int, part@);
+                &&& k < cs.len()
+                &&& old(self).slots_ok(cs, hc)
+                &&& !old(self).children_owned(cs, hc).contains(id)
+                &&& lo <= hi <= c.len()
+                &&& valid(piece) && piece.len() <= usize::MAX
+                &&& merge ==> {
+                    let all = old(self).children_slabs(cs.subrange(0, k as int), hc) + piece
+                        + old(self).children_slabs(cs.subrange(k + 1, cs.len() as int), hc);
+                    valid(all) && all.len() <= usize::MAX
+                }
+            },
+        ensures
+            final(self).arena_ok(),
+            old(self).node_spec(id) matches Some(Node::Internal(n))
+                && final(self).node_spec(id) matches Some(Node::Internal(n2)) && {
+                let (cs, cs2, hc) = (n.children@, n2.children@, (h - 1) as nat);
+                let piece = spliced(old(self).slabs(cs[k as int].id, hc), lo as int, hi as int, part@);
+                &&& final(self).slots_ok(cs2, hc)
+                &&& !final(self).children_owned(cs2, hc).contains(id)
+                &&& final(self).children_slabs(cs2, hc) == old(self).children_slabs(cs.subrange(0, k as int), hc)
+                    + piece + old(self).children_slabs(cs.subrange(k + 1, cs.len() as int), hc)
+                &&& !merge ==> cs2.subrange(0, k as int) == cs.subrange(0, k as int) && cs2.len() >= k
+                &&& forall|x: NodeId| #[trigger] final(self).children_owned(cs2, hc).contains(x)
+                    ==> old(self).children_owned(cs, hc).contains(x) || old(self).node_spec(x) is None
+                &&& forall|x: NodeId| x != id && old(self).node_spec(x) is Some
+                    && !old(self).owned(cs[k as int].id, hc).contains(x)
+                    && (merge ==> !old(self).children_owned(cs, hc).contains(x))
+                    ==> #[trigger] final(self).node_spec(x) == old(self).node_spec(x)
+            },
+            final(self).root == old(self).root,
+            final(self).total_slabs == old(self).total_slabs,
+        decreases h, 0nat,
+    {
+        let ghost n0 = match old(self).node_spec(id) { Some(Node::Internal(n)) => n, _ => arbitrary() };
+        let ghost cs = n0.children@;
+        let ghost hc = (h - 1) as nat;
+        let ghost (pre, post) = (cs.subrange(0, k as int), cs.subrange(k + 1, cs.len() as int));
+        let ghost t0 = *self;
         let child_id = match self.node(id) {
             Node::Internal(n) => n.children[k].id,
             Node::Leaf(_) => unreachable!(),
         };
+        let ghost piece = spliced(t0.slabs(child_id, hc), lo as int, hi as int, part@);
+        proof {
+            t0.lemma_slot(cs, hc, k as int);
+            t0.lemma_children_owned_contains(cs, k as int, hc);
+            t0.lemma_slots_sub(cs, 0, k as int, hc);
+            t0.lemma_slots_sub(cs, k + 1, cs.len() as int, hc);
+            Self::lemma_child_apart(&t0, cs, k as int, hc);
+        }
         let shrink = part.len() < hi - lo;
         let mut slots = self.splice_rec(child_id, h - 1, lo, hi, part);
+        let ghost t1 = *self;
         let merge_leaf = merge && h == 1 && shrink && slots.len() == 1;
         if slots.len() == 0 {
             self.free(child_id);
         }
-        if let Node::Internal(n) = self.node_mut(id) {
+        let ghost t2 = *self;
+        let ghost rs = slots@;
+        let nn = self.node_mut(id);
+        if let Node::Internal(n) = nn {
+            let ghost len = n.children.len();
+            assert(k < len);
             let mut tail = n.children.split_off(k + 1);
             n.children.truncate(k);
             n.children.append(&mut slots);
             n.children.append(&mut tail);
         }
+        let ghost t3 = *self;
+        proof {
+            let r = t1.children_owned(rs, hc);
+            let cs3 = match t3.node_spec(id) { Some(Node::Internal(n)) => n.children@, _ => arbitrary() };
+            assert(cs3 =~= pre + rs + post);
+            // nothing outside the child's subtree changed but `id`
+            assert forall|x: NodeId| x != id && t0.node_spec(x) is Some && !t0.owned(child_id, hc).contains(x)
+                implies #[trigger] t3.node_spec(x) == t0.node_spec(x) by {
+                assert(t1.node_spec(x) == t0.node_spec(x));
+                assert(t2.node_spec(x) == t1.node_spec(x));
+            }
+            // the returned slots are still good
+            assert forall|x: NodeId| x != id && x != child_id implies #[trigger] t3.node_spec(x) == t1.node_spec(x) by {
+                assert(t2.node_spec(x) == t1.node_spec(x));
+            }
+            if rs.len() > 0 {
+                assert(t2 == t1);
+                assert forall|x: NodeId| x != id implies #[trigger] t3.node_spec(x) == t1.node_spec(x) by {}
+            }
+            Self::lemma_child_result_keep(&t1, &t3, rs, hc, id, child_id, &t0);
+            Self::lemma_slots_keep(&t0, &t3, pre, hc, t0.owned(child_id, hc).insert(id));
+            Self::lemma_slots_keep(&t0, &t3, post, hc, t0.owned(child_id, hc).insert(id));
+            assert forall|x: NodeId| #[trigger] t0.children_owned(pre, hc).contains(x) implies t0.node_spec(x) is Some by {
+                t0.lemma_slots_live(pre, hc, x);
+            }
+            assert forall|x: NodeId| #[trigger] t0.children_owned(post, hc).contains(x) implies t0.node_spec(x) is Some by {
+                t0.lemma_slots_live(post, hc, x);
+            }
+            Self::lemma_child_join(&t3, pre, rs, post, hc, id, &t0, child_id);
+            assert(cs3.subrange(0, k as int) =~= pre);
+            assert forall|i: int| 0 <= i < t3.free@.len() implies
+                (#[trigger] t3.free@[i] as int) < t3.nodes@.len() && t3.nodes@[t3.free@[i] as int] is None by {
+                assert(t2.free@[i] != id);
+            }
+        }
         if merge_leaf {
             self.maybe_merge_leaf(id, k);
+            proof {
+                assert forall|x: NodeId| x != id && t0.node_spec(x) is Some
+                    && !t0.children_owned(cs, hc).contains(x)
+                    implies #[trigger] self.node_spec(x) == t0.node_spec(x) by {
+                    t0.lemma_children_owned_contains(cs, k as int, hc);
+                    assert(t3.node_spec(x) == t0.node_spec(x));
+                }
+            }
         }
     }
 
@@ -1765,7 +2239,7 @@ impl<A: SlabAggregate> SlabBTree<A> {
     }
 
     /// Where chunk `c` of a chunking starts.
-    fn chunk_start(c: usize, num: usize, base: usize, rem: usize) -> (r: usize)
+    fn chunk_start(c: usize, Ghost(num): Ghost<usize>, base: usize, rem: usize) -> (r: usize)
         requires c <= num, rem < num, num * base + rem <= usize::MAX,
         ensures r == chunk_at(c as int, base as int, rem as int),
     {
@@ -1823,7 +2297,7 @@ impl<A: SlabAggregate> SlabBTree<A> {
             c -= 1;
             let ghost (lo, hi) = (chunk_at(c as int, b, r), chunk_at(c + 1, b, r));
             proof { lemma_chunk(num as int, b, r, c as int); }
-            let at = Self::chunk_start(c, num, base, rem);
+            let at = Self::chunk_start(c, Ghost(num), base, rem);
             let chunk = aggs.split_off(at);
             proof {
                 assert(chunk@ =~= all.subrange(lo, hi));
@@ -1949,7 +2423,7 @@ impl<A: SlabAggregate> SlabBTree<A> {
             c -= 1;
             let ghost (lo, hi) = (chunk_at(c as int, b, r), chunk_at(c + 1, b, r));
             proof { lemma_chunk(num as int, b, r, c as int); }
-            let at = Self::chunk_start(c, num, base, rem);
+            let at = Self::chunk_start(c, Ghost(num), base, rem);
             let chunk = children.split_off(at);
             let ghost t0 = *self;
             let ghost node = Internal { children: chunk };
@@ -2110,29 +2584,97 @@ impl<A: SlabAggregate> SlabBTree<A> {
         self.split_internal(first, slots, Ghost(h))
     }
 
-    /// Install the slots a splice returned for the root.
-    #[verifier::external_body]
-    fn set_root(&mut self, slots: Vec<ChildSlot<A>>) {
+    /// Install the slots a splice returned for the root (height `h`).
+    fn set_root(&mut self, slots: Vec<ChildSlot<A>>, Ghost(h): Ghost<nat>)
+        requires
+            old(self).arena_ok(),
+            old(self).slots_ok(slots@, h),
+            valid(old(self).children_slabs(slots@, h)),
+            old(self).children_slabs(slots@, h).len() <= usize::MAX,
+            slots@.len() == 0 ==> old(self).node_spec(old(self).root) is Some,
+        ensures
+            final(self).arena_ok(),
+            exists|hh: nat| final(self).wf_node(final(self).root, hh)
+                && final(self).slabs(final(self).root, hh) == old(self).children_slabs(slots@, h),
+            final(self).total_slabs == old(self).total_slabs,
+    {
         let mut slots = slots;
         if slots.len() == 0 {
             // The whole tree was deleted: reset to a fresh empty leaf,
             // reusing the root id.
-            self.nodes[self.root as usize] = Some(Node::Leaf(Leaf { aggs: Vec::new() }));
-            return;
-        }
-        // Grow new root levels while there are too many for one node.
-        while slots.len() > B {
-            slots = self.group(slots, Ghost(0));
-        }
-        if slots.len() == 1 {
-            let id = slots[0].id;
-            if id != self.root {
-                self.free(self.root);
-                self.root = id;
+            let ghost t0 = *self;
+            let root = self.root;
+            self.nodes[root as usize] = Some(Node::Leaf(Leaf { aggs: Vec::new() }));
+            proof {
+                let leaf = match self.node_spec(root) { Some(Node::Leaf(l)) => l, _ => arbitrary() };
+                assert(self.node_spec(root) == Some(Node::Leaf(leaf)));
+                self.lemma_slots_nil(h);
+                assert(slots@ =~= Seq::<ChildSlot<A>>::empty());
+                lemma_valid_empty::<A>();
+                self.lemma_wf_leaf(root, 0, leaf);
+                assert(leaf.aggs@ =~= Seq::<A>::empty());
+                assert forall|i: int| 0 <= i < self.free@.len() implies
+                    (#[trigger] self.free@[i] as int) < self.nodes@.len() && self.nodes@[self.free@[i] as int] is None by {
+                    assert(t0.free@[i] != root);
+                }
+                old(self).lemma_slots_nil(h);
+                assert(self.wf_node(self.root, 0) && self.slabs(self.root, 0) == old(self).children_slabs(slots@, h));
             }
             return;
         }
-        self.root = self.alloc(Node::Internal(Internal { children: slots }));
+        // Grow new root levels while there are too many for one node.
+        let ghost mut hh = h;
+        let ghost all = old(self).children_slabs(slots@, h);
+        while slots.len() > B
+            invariant
+                slots@.len() > 0,
+                self.arena_ok(),
+                self.slots_ok(slots@, hh),
+                self.children_slabs(slots@, hh) == all,
+                valid(all), all.len() <= usize::MAX,
+                self.total_slabs == old(self).total_slabs,
+            decreases slots@.len(),
+        {
+            slots = self.group(slots, Ghost(hh + 1));
+            proof { hh = hh + 1; }
+        }
+        if slots.len() == 1 {
+            let id = slots[0].id;
+            proof {
+                self.lemma_slot(slots@, hh, 0);
+                self.lemma_children_slabs_one(slots@[0], hh);
+                assert(slots@ =~= seq![slots@[0]]);
+            }
+            let ghost t1 = *self;
+            self.root = id;
+            proof {
+                assert forall|x: NodeId| t1.owned(id, hh).contains(x) implies t1.node_spec(x) == self.node_spec(x) by {}
+                Self::lemma_frame(&t1, self, id, hh);
+                assert(self.wf_node(self.root, hh) && self.slabs(self.root, hh) == all);
+            }
+            return;
+        }
+        let ghost t0 = *self;
+        let ghost node = Internal { children: slots };
+        let root = self.alloc(Node::Internal(Internal { children: slots }));
+        let ghost t1 = *self;
+        proof {
+            if t0.children_owned(node.children@, hh).contains(root) {
+                t0.lemma_slots_live(node.children@, hh, root);
+            }
+            Self::lemma_slots_keep(&t0, &t1, node.children@, hh, set![root]);
+            assert forall|i: int| 0 <= i < node.children@.len()
+                implies !t1.owned(#[trigger] node.children@[i].id, hh).contains(root) by {
+                t1.lemma_children_owned_contains(node.children@, i, hh);
+            }
+            t1.lemma_wf_internal(root, hh + 1, node);
+        }
+        self.root = root;
+        proof {
+            assert forall|x: NodeId| t1.owned(root, hh + 1).contains(x) implies t1.node_spec(x) == self.node_spec(x) by {}
+            Self::lemma_frame(&t1, self, root, hh + 1);
+            assert(self.wf_node(self.root, hh + 1) && self.slabs(self.root, hh + 1) == all);
+        }
     }
 
     /// While the root is an internal node with exactly one child, promote
@@ -2395,6 +2937,16 @@ impl<A: SlabAggregate> SlabBTree<A> {
         if t1.slots_ok(cs, h) != t2.slots_ok(cs, h) {
             assert forall|i: int, j: int| 0 <= i < j < cs.len() implies
                 t1.owned(cs[i].id, h) == t2.owned(cs[i].id, h) && t1.owned(cs[j].id, h) == t2.owned(cs[j].id, h) by {}
+        }
+    }
+
+    /// A node in none of the children's subtrees is in none of them all.
+    proof fn lemma_not_in_children(&self, cs: Seq<ChildSlot<A>>, h: nat, x: NodeId)
+        requires forall|i: int| 0 <= i < cs.len() ==> !self.owned(#[trigger] cs[i].id, h).contains(x),
+        ensures !self.children_owned(cs, h).contains(x),
+    {
+        if self.children_owned(cs, h).contains(x) {
+            let k = self.lemma_children_owned_find(cs, h, x);
         }
     }
 
@@ -2813,6 +3365,241 @@ impl<A: SlabAggregate> SlabBTree<A> {
             self.lemma_children_slabs_push(cs, k - 1, h);
         } else {
             assert(cs.take(0) =~= Seq::<ChildSlot<A>>::empty());
+        }
+    }
+
+    /// The slots before and after child `k` share no nodes with it, and
+    /// none of them with each other.
+    proof fn lemma_child_apart(t: &Self, cs: Seq<ChildSlot<A>>, k: int, h: nat)
+        requires t.slots_ok(cs, h), 0 <= k < cs.len(),
+        ensures
+            t.children_owned(cs.subrange(0, k), h).disjoint(t.owned(cs[k].id, h)),
+            t.children_owned(cs.subrange(k + 1, cs.len() as int), h).disjoint(t.owned(cs[k].id, h)),
+            t.children_owned(cs.subrange(0, k), h).disjoint(t.children_owned(cs.subrange(k + 1, cs.len() as int), h)),
+            t.children_owned(cs.subrange(0, k), h).subset_of(t.children_owned(cs, h)),
+            t.children_owned(cs.subrange(k + 1, cs.len() as int), h).subset_of(t.children_owned(cs, h)),
+    {
+        t.lemma_slots_apart(cs, 0, k, k + 1, h);
+        t.lemma_slots_apart(cs, k, k + 1, cs.len() as int, h);
+        t.lemma_slots_apart(cs, 0, k, cs.len() as int, h);
+        t.lemma_slots_sub(cs, 0, k, h);
+        t.lemma_slots_sub(cs, k + 1, cs.len() as int, h);
+        assert(cs.subrange(k, k + 1) =~= seq![cs[k]]);
+        t.lemma_children_slabs_one(cs[k], h);
+        let rest = cs.subrange(k, cs.len() as int);
+        assert(rest =~= cs.subrange(k, k + 1) + cs.subrange(k + 1, cs.len() as int));
+        t.lemma_children_owned_concat(cs.subrange(k, k + 1), cs.subrange(k + 1, cs.len() as int), h);
+    }
+
+    /// The slots a child's splice returned stay good once its parent is
+    /// rewritten (and, if none came back, the child freed).
+    proof fn lemma_child_result_keep(t1: &Self, t3: &Self, rs: Seq<ChildSlot<A>>, h: nat, id: NodeId, child: NodeId, t0: &Self)
+        requires
+            t1.slots_ok(rs, h),
+            t0.node_spec(id) is Some,
+            !t0.owned(child, h).contains(id),
+            forall|x: NodeId| #[trigger] t1.children_owned(rs, h).contains(x)
+                ==> t0.owned(child, h).contains(x) || t0.node_spec(x) is None,
+            forall|x: NodeId| x != id && x != child ==> #[trigger] t3.node_spec(x) == t1.node_spec(x),
+            rs.len() > 0 ==> forall|x: NodeId| x != id ==> #[trigger] t3.node_spec(x) == t1.node_spec(x),
+            t1.node_spec(id) == t0.node_spec(id),
+        ensures
+            t3.slots_ok(rs, h),
+            t3.children_slabs(rs, h) == t1.children_slabs(rs, h),
+            t3.children_owned(rs, h) == t1.children_owned(rs, h),
+            !t3.children_owned(rs, h).contains(id),
+    {
+        if rs.len() == 0 {
+            t1.lemma_slots_nil(h);
+            t3.lemma_slots_nil(h);
+            assert(rs =~= Seq::<ChildSlot<A>>::empty());
+        } else {
+            assert(!t1.children_owned(rs, h).contains(id));
+            Self::lemma_slots_keep(t1, t3, rs, h, set![id]);
+        }
+    }
+
+    /// The parent's new children: the slots before, the child's
+    /// replacement, the slots after.
+    proof fn lemma_child_join(t3: &Self, pre: Seq<ChildSlot<A>>, rs: Seq<ChildSlot<A>>, post: Seq<ChildSlot<A>>, h: nat, id: NodeId, t0: &Self, child: NodeId)
+        requires
+            t3.slots_ok(pre, h), t3.slots_ok(rs, h), t3.slots_ok(post, h),
+            t3.children_owned(pre, h) == t0.children_owned(pre, h),
+            t3.children_owned(post, h) == t0.children_owned(post, h),
+            t0.children_owned(pre, h).disjoint(t0.children_owned(post, h)),
+            t0.children_owned(pre, h).disjoint(t0.owned(child, h)),
+            t0.children_owned(post, h).disjoint(t0.owned(child, h)),
+            forall|x: NodeId| #[trigger] t0.children_owned(pre, h).contains(x) ==> t0.node_spec(x) is Some,
+            forall|x: NodeId| #[trigger] t0.children_owned(post, h).contains(x) ==> t0.node_spec(x) is Some,
+            forall|x: NodeId| #[trigger] t3.children_owned(rs, h).contains(x)
+                ==> t0.owned(child, h).contains(x) || t0.node_spec(x) is None,
+            !t3.children_owned(pre, h).contains(id),
+            !t3.children_owned(post, h).contains(id),
+            !t3.children_owned(rs, h).contains(id),
+        ensures
+            t3.slots_ok(pre + rs + post, h),
+            t3.children_slabs(pre + rs + post, h)
+                == t3.children_slabs(pre, h) + t3.children_slabs(rs, h) + t3.children_slabs(post, h),
+            t3.children_owned(pre + rs + post, h)
+                == t3.children_owned(pre, h) + t3.children_owned(rs, h) + t3.children_owned(post, h),
+            !t3.children_owned(pre + rs + post, h).contains(id),
+    {
+        assert(t3.children_owned(pre, h).disjoint(t3.children_owned(rs, h))) by {
+            assert forall|x: NodeId| t3.children_owned(pre, h).contains(x) implies !t3.children_owned(rs, h).contains(x) by {}
+        };
+        t3.lemma_slots_concat(pre, rs, h);
+        assert(t3.children_owned(pre + rs, h).disjoint(t3.children_owned(post, h))) by {
+            assert forall|x: NodeId| t3.children_owned(pre + rs, h).contains(x) implies !t3.children_owned(post, h).contains(x) by {}
+        };
+        t3.lemma_slots_concat(pre + rs, post, h);
+    }
+
+    /// Slot `k`'s place among a good slot list's slabs.
+    proof fn lemma_slabs_at(&self, cs: Seq<ChildSlot<A>>, h: nat, k: int)
+        requires self.slots_ok(cs, h), 0 <= k < cs.len(),
+        ensures
+            counts(cs, k + 1) == counts(cs, k) + cs[k].slab_count,
+            counts(cs, k + 1) <= self.children_slabs(cs, h).len(),
+            self.children_slabs(cs, h).subrange(0, counts(cs, k) as int) == self.children_slabs(cs.subrange(0, k), h),
+            self.children_slabs(cs, h).subrange(counts(cs, k) as int, counts(cs, k + 1) as int) == self.slabs(cs[k].id, h),
+            self.children_slabs(cs.subrange(0, k + 1), h) == self.children_slabs(cs.subrange(0, k), h) + self.slabs(cs[k].id, h),
+    {
+        self.lemma_counts(cs, h, k);
+        self.lemma_counts(cs, h, k + 1);
+        self.lemma_slot(cs, h, k);
+        self.lemma_children_slabs_split(cs, k, h);
+        self.lemma_children_slabs_push(cs, k, h);
+        let all = self.children_slabs(cs, h);
+        let a = self.children_slabs(cs.take(k), h);
+        let b = self.slabs(cs[k].id, h);
+        assert(all.subrange(0, a.len() as int) =~= a);
+        assert(all.subrange(a.len() as int, (a.len() + b.len()) as int) =~= b);
+    }
+
+    /// What a good slot list's slabs past slot `k` are.
+    proof fn lemma_slabs_tail(&self, cs: Seq<ChildSlot<A>>, h: nat, k: int)
+        requires self.slots_ok(cs, h), 0 <= k <= cs.len(),
+        ensures
+            self.children_slabs(cs, h) == self.children_slabs(cs.subrange(0, k), h) + self.children_slabs(cs.subrange(k, cs.len() as int), h),
+            self.children_slabs(cs.subrange(0, k), h).len() == counts(cs, k),
+    {
+        self.lemma_counts(cs, h, k);
+        assert(cs =~= cs.subrange(0, k) + cs.subrange(k, cs.len() as int));
+        self.lemma_children_slabs_concat(cs.subrange(0, k), cs.subrange(k, cs.len() as int), h);
+    }
+
+    /// In the middle of a multi-child splice, child `k` and the ones
+    /// before it are as they were.
+    proof fn lemma_untouched_child(t0: &Self, t: &Self, cs: Seq<ChildSlot<A>>, h: nat, k: int, id: NodeId)
+        requires
+            t0.slots_ok(cs, h), 0 <= k < cs.len(),
+            !t0.children_owned(cs, h).contains(id),
+            forall|x: NodeId| x != id && t0.node_spec(x) is Some
+                && !t0.children_owned(cs.subrange(k + 1, cs.len() as int), h).contains(x)
+                ==> #[trigger] t.node_spec(x) == t0.node_spec(x),
+        ensures
+            t.slabs(cs[k].id, h) == t0.slabs(cs[k].id, h),
+            t.owned(cs[k].id, h) == t0.owned(cs[k].id, h),
+            t.wf_node(cs[k].id, h),
+            t.slots_ok(cs.subrange(0, k + 1), h),
+            t.children_slabs(cs.subrange(0, k + 1), h) == t0.children_slabs(cs.subrange(0, k + 1), h),
+            t.children_owned(cs.subrange(0, k + 1), h) == t0.children_owned(cs.subrange(0, k + 1), h),
+    {
+        let pre = cs.subrange(0, k + 1);
+        let post = cs.subrange(k + 1, cs.len() as int);
+        t0.lemma_slots_sub(cs, 0, k + 1, h);
+        t0.lemma_slots_apart(cs, 0, k + 1, cs.len() as int, h);
+        Self::lemma_slots_keep(t0, t, pre, h, t0.children_owned(post, h).insert(id));
+        t0.lemma_children_owned_contains(pre, k, h);
+        assert(pre[k] == cs[k]);
+        assert forall|x: NodeId| t0.owned(cs[k].id, h).contains(x) implies t0.node_spec(x) == t.node_spec(x) by {
+            t0.lemma_slots_live(pre, h, x);
+        }
+        Self::lemma_frame(t0, t, cs[k].id, h);
+        t0.lemma_slot(cs, h, k);
+    }
+
+    /// One step of a multi-child splice: child `k` is done, so the
+    /// children from `k` on stand for the result's tail from child `k`'s
+    /// share.
+    proof fn lemma_multi_step(
+        o: &Self, t0: &Self, t: &Self, cs: Seq<ChildSlot<A>>, l0: Seq<ChildSlot<A>>, l2: Seq<ChildSlot<A>>,
+        h: nat, k: int, id: NodeId, f: Seq<A>, qk: int, qk1: int, piece: Seq<A>,
+    )
+        requires
+            o.slots_ok(cs, h), 0 <= k < cs.len(), k < l0.len(),
+            0 <= qk <= qk1 <= f.len(),
+            piece == f.subrange(qk, qk1),
+            !o.children_owned(cs, h).contains(id),
+            l0.subrange(0, k + 1) == cs.subrange(0, k + 1),
+            t0.slots_ok(l0, h),
+            t0.children_slabs(l0, h) == o.children_slabs(cs.subrange(0, k + 1), h) + f.subrange(qk1, f.len() as int),
+            forall|x: NodeId| #[trigger] t0.children_owned(l0, h).contains(x)
+                ==> o.children_owned(cs, h).contains(x) || o.node_spec(x) is None,
+            forall|x: NodeId| x != id && o.node_spec(x) is Some
+                && !o.children_owned(cs.subrange(k + 1, cs.len() as int), h).contains(x)
+                ==> #[trigger] t0.node_spec(x) == o.node_spec(x),
+            // what splicing child k did
+            t.children_slabs(l2, h) == t0.children_slabs(l0.subrange(0, k), h) + piece
+                + t0.children_slabs(l0.subrange(k + 1, l0.len() as int), h),
+            l2.subrange(0, k) == l0.subrange(0, k), l2.len() >= k,
+            forall|x: NodeId| #[trigger] t.children_owned(l2, h).contains(x)
+                ==> t0.children_owned(l0, h).contains(x) || t0.node_spec(x) is None,
+            forall|x: NodeId| x != id && t0.node_spec(x) is Some && !t0.owned(l0[k].id, h).contains(x)
+                ==> #[trigger] t.node_spec(x) == t0.node_spec(x),
+            t0.node_spec(id) is Some,
+        ensures
+            l2.subrange(0, k) == cs.subrange(0, k),
+            t.children_slabs(l2, h) == o.children_slabs(cs.subrange(0, k), h) + f.subrange(qk, f.len() as int),
+            forall|x: NodeId| #[trigger] t.children_owned(l2, h).contains(x)
+                ==> o.children_owned(cs, h).contains(x) || o.node_spec(x) is None,
+            forall|x: NodeId| x != id && o.node_spec(x) is Some
+                && !o.children_owned(cs.subrange(k, cs.len() as int), h).contains(x)
+                ==> #[trigger] t.node_spec(x) == o.node_spec(x),
+    {
+        assert(l0[k] == cs[k]) by { assert(l0.subrange(0, k + 1)[k] == cs.subrange(0, k + 1)[k]); }
+        assert(l2.subrange(0, k) =~= cs.subrange(0, k)) by {
+            assert(l0.subrange(0, k) =~= l0.subrange(0, k + 1).subrange(0, k));
+            assert(cs.subrange(0, k) =~= cs.subrange(0, k + 1).subrange(0, k));
+        };
+        // child k and those before it were as in `o` at t0
+        Self::lemma_untouched_child(o, t0, cs, h, k, id);
+        o.lemma_slabs_at(cs, h, k);
+        o.lemma_slots_sub(cs, 0, k, h);
+        assert(l0.subrange(0, k) == cs.subrange(0, k));
+        o.lemma_slots_apart(cs, 0, k, cs.len() as int, h);
+        assert(cs.subrange(k, cs.len() as int) =~= cs.subrange(k, k + 1) + cs.subrange(k + 1, cs.len() as int));
+        o.lemma_children_owned_concat(cs.subrange(k, k + 1), cs.subrange(k + 1, cs.len() as int), h);
+        o.lemma_slots_sub(cs, 0, k, h);
+        Self::lemma_slots_keep(o, t0, cs.subrange(0, k), h,
+            o.children_owned(cs.subrange(k + 1, cs.len() as int), h).insert(id));
+        // so what follows child k in l0 stands for the tail from k + 1's share
+        t0.lemma_children_slabs_split(l0, k, h);
+        assert(l0.take(k) == l0.subrange(0, k) && l0.skip(k + 1) == l0.subrange(k + 1, l0.len() as int));
+        let a = o.children_slabs(cs.subrange(0, k), h);
+        let b = o.slabs(cs[k].id, h);
+        let rest = t0.children_slabs(l0.subrange(k + 1, l0.len() as int), h);
+        let tail = f.subrange(qk1, f.len() as int);
+        assert(a + b + rest == a + b + tail);
+        assert(rest =~= (a + b + rest).subrange((a.len() + b.len()) as int, (a + b + rest).len() as int));
+        assert(tail =~= (a + b + tail).subrange((a.len() + b.len()) as int, (a + b + tail).len() as int));
+        assert(f.subrange(qk, f.len() as int) =~= piece + tail);
+        // nodes: whatever the step introduced was empty in t0, so in o
+        assert forall|x: NodeId| #[trigger] t.children_owned(l2, h).contains(x)
+            implies o.children_owned(cs, h).contains(x) || o.node_spec(x) is None by {
+            if !t0.children_owned(l0, h).contains(x) && o.node_spec(x) is Some && !o.children_owned(cs, h).contains(x) {
+                o.lemma_slots_sub(cs, k + 1, cs.len() as int, h);
+                assert(t0.node_spec(x) == o.node_spec(x));
+            }
+        }
+        assert forall|x: NodeId| x != id && o.node_spec(x) is Some
+            && !o.children_owned(cs.subrange(k, cs.len() as int), h).contains(x)
+            implies #[trigger] t.node_spec(x) == o.node_spec(x) by {
+            assert(cs.subrange(k, cs.len() as int) =~= cs.subrange(k, k + 1) + cs.subrange(k + 1, cs.len() as int));
+            o.lemma_children_owned_concat(cs.subrange(k, k + 1), cs.subrange(k + 1, cs.len() as int), h);
+            o.lemma_children_slabs_one(cs[k], h);
+            assert(cs.subrange(k, k + 1) =~= seq![cs[k]]);
+            assert(t0.node_spec(x) == o.node_spec(x));
         }
     }
 
@@ -3340,17 +4127,6 @@ impl<A: SlabAggregate> SlabBTree<A> {
 
 #[cfg(test)]
 impl<A: SlabAggregate> SlabBTree<A> {
-    /// Verify every structural invariant; panics with a description on the
-    /// first violation.  O(nodes) — test builds only.
-    ///
-    /// * arena consistency: reachable ⟺ live, dead ⟺ on the free list,
-    ///   no node reachable twice, no duplicate free-list entries
-    /// * all leaves at uniform depth
-    /// * no empty nodes (except the root leaf of an empty tree);
-    ///   an internal root has ≥ 2 children (else it must be collapsed)
-    /// * node sizes ≤ B
-    /// * every cached `slab_count` and `agg.len()` matches recomputation;
-    ///   `total_slabs` matches the real slab count
     /// The root's height (leaves are 0), following first children.
     pub(crate) fn root_height(&self) -> usize {
         let mut h = 0;
@@ -3362,6 +4138,17 @@ impl<A: SlabAggregate> SlabBTree<A> {
         h
     }
 
+    /// Verify every structural invariant; panics with a description on the
+    /// first violation.  O(nodes) — test builds only.
+    ///
+    /// * arena consistency: reachable ⟺ live, dead ⟺ on the free list,
+    ///   no node reachable twice, no duplicate free-list entries
+    /// * all leaves at uniform depth
+    /// * no empty nodes (except the root leaf of an empty tree);
+    ///   an internal root has ≥ 2 children (else it must be collapsed)
+    /// * node sizes ≤ B
+    /// * every cached `slab_count` and `agg.len()` matches recomputation;
+    ///   `total_slabs` matches the real slab count
     pub(crate) fn check_invariants(&self) {
         let mut reachable = vec![false; self.nodes.len()];
         let mut leaf_depth: Option<usize> = None;
@@ -3834,6 +4621,21 @@ mod tests {
         assert_eq!(t.find_by_prefix(5), Some((1, 5)));
         assert_eq!(t.find_by_prefix(49), Some((9, 45)));
         assert_eq!(t.find_by_prefix(50), None);
+    }
+
+    /// One splice into a lone leaf that splits it into more than B leaves:
+    /// the root has to grow two levels at once.
+    #[test]
+    fn splice_grows_root_by_levels() {
+        let mut t: SlabBTree<usize> = SlabBTree::new();
+        t.splice(0..0, vec![1usize; B * B + 1]);
+        t.check_invariants();
+        assert_eq!(t.len(), B * B + 1);
+        assert_eq!(t.root_agg(), B * B + 1);
+        assert_eq!(t.root_height(), 2);
+        t.splice(10..20, vec![2usize; 3]);
+        t.check_invariants();
+        assert_eq!(t.root_agg(), B * B + 1 - 10 + 6);
     }
 
     #[test]
