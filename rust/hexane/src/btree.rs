@@ -27,13 +27,14 @@
 //! invariant tying the arena to it: every cached child slab count and
 //! aggregate is right, subtrees don't share nodes, the free list names
 //! distinct empty slots, and every grouping of slabs can be merged
-//! (`valid`).  `splice`'s core (`splice_vec`), `update_slab`,
-//! `find_by_prefix`, `items_before_slab` and `root_agg` are proved against
-//! that sequence: a splice yields exactly `old[..start] + new + old[end..]`
-//! provided the caller keeps that result `valid`.  Not yet verified:
-//! `from_iter`, the prefix-sum and value-range queries, and the
-//! `IntoIterator` wrapper around `splice_vec`.  `merge`'s laws are proved
-//! for `SlabAgg` and `usize`; for `PrefixSlabWeight<P>` they are assumed of
+//! (`valid`).  `splice`'s core (`splice_vec`), `from_vec`, `update_slab`,
+//! `find_by_prefix`, `find_slab_at_item`, `items_before_slab` and
+//! `root_agg` are proved against that sequence: a splice yields exactly
+//! `old[..start] + new + old[end..]` provided the caller keeps that result
+//! `valid`.  Not yet verified: `find_slab_at_prefix`, the value-range
+//! iterators, and the `IntoIterator` wrappers around `splice_vec` and
+//! `from_vec`.  `merge`'s laws are proved for `SlabAgg` and `usize`; for
+//! `PrefixSlabWeight<P>` they, and the prefix arithmetic, are assumed of
 //! the user's `P` (`axiom_prefix_add`).
 
 // Verus has no specs for `Vec::is_empty` or `usize::is_multiple_of`, and
@@ -349,6 +350,185 @@ where
     }
 }
 
+/// Aggregate that additionally carries a prefix-sum value per slab,
+/// enabling [`find_slab_at_item`](SlabBTree::find_slab_at_item) and
+/// [`find_slab_at_prefix`](SlabBTree::find_slab_at_prefix) to work
+/// aggregate-agnostically.
+///
+/// Implemented by [`PrefixSlabWeight<P>`](crate::prefix::PrefixSlabWeight)
+/// (prefix lives in `.prefix`) and [`SlabAgg`] (prefix lives in `.total`).
+///
+/// For verification, prefix addition is given as mathematics
+/// ([`prefix_plus`](Self::prefix_plus)) with laws tying it to `merge`.
+pub trait PrefixAggregate: SlabAggregate {
+    /// `Ord` is not required here — only forward accumulation needs `Add`.
+    /// The "find slab whose prefix reaches target" search is provided in a
+    /// separate impl block bounded on `Self::Prefix: Ord`.
+    ///
+    /// `Clone` (not `Copy`) so non-scalar prefixes (e.g. a `HashMap`-backed
+    /// mark set) can serve as the per-slab aggregate.
+    ///
+    /// `for<'a> AddAssign<&'a Self::Prefix>` lets the B-tree descent
+    /// accumulate prefixes via `+=` against the stored aggregate by
+    /// reference — avoiding a per-level clone of large non-scalar
+    /// prefixes (the dominant cost for `MarkAcc`-style HashMap prefixes).
+    /// All scalar primitives (`u128`, `i128`, `u64`, etc.) impl this in
+    /// `core` already.
+    type Prefix: Clone
+        + Default
+        + Add<Output = Self::Prefix>
+        + Debug
+        + for<'a> AddAssign<&'a Self::Prefix>;
+
+    /// [`prefix`](Self::prefix), for specifications.
+    spec fn spec_prefix(&self) -> Self::Prefix;
+
+    /// Whether the prefix laws cover this aggregate (for `SlabAgg`: one
+    /// covering no items has a zero total, as every computed one does).
+    spec fn prefix_ok(&self) -> bool;
+
+    spec fn prefix_zero() -> Self::Prefix;
+
+    /// `+=` on prefixes.
+    spec fn prefix_plus(a: Self::Prefix, b: Self::Prefix) -> Self::Prefix;
+
+    /// Whether `a + b` is representable.
+    spec fn prefix_plus_ok(a: Self::Prefix, b: Self::Prefix) -> bool;
+
+    /// Borrow-typed accessor — the B-tree descent reads prefixes many
+    /// times per query and aggregates by reference, so cloning here would
+    /// be wasted work for non-scalar prefixes.
+    fn prefix(&self) -> (r: &Self::Prefix)
+        ensures *r == self.spec_prefix();
+
+    /// `Prefix::default()`.
+    fn zero_prefix() -> (r: Self::Prefix)
+        ensures r == Self::prefix_zero();
+
+    /// `*acc += x`.
+    fn add_prefix(acc: &mut Self::Prefix, x: &Self::Prefix)
+        requires Self::prefix_plus_ok(*old(acc), *x),
+        ensures *final(acc) == Self::prefix_plus(*old(acc), *x);
+
+    proof fn lemma_prefix_empty(x: Self::Prefix)
+        ensures
+            Self::spec_empty().prefix_ok(),
+            Self::spec_empty().spec_prefix() == Self::prefix_zero();
+
+    /// A merge's prefix is the sum of its parts'.
+    proof fn lemma_prefix_merge(a: Self, b: Self)
+        requires Self::merge_ok(a, b), a.prefix_ok(), b.prefix_ok(),
+        ensures
+            Self::spec_merge(a, b).prefix_ok(),
+            Self::prefix_plus_ok(a.spec_prefix(), b.spec_prefix()),
+            Self::spec_merge(a, b).spec_prefix() == Self::prefix_plus(a.spec_prefix(), b.spec_prefix());
+}
+
+impl PrefixAggregate for SlabAgg {
+    type Prefix = i64;
+
+    open spec fn spec_prefix(&self) -> i64 {
+        self.total
+    }
+
+    open spec fn prefix_ok(&self) -> bool {
+        self.len == 0 ==> self.total == 0
+    }
+
+    open spec fn prefix_zero() -> i64 {
+        0
+    }
+
+    open spec fn prefix_plus(a: i64, b: i64) -> i64 {
+        (a + b) as i64
+    }
+
+    open spec fn prefix_plus_ok(a: i64, b: i64) -> bool {
+        in_i64(a + b)
+    }
+
+    fn prefix(&self) -> &i64 {
+        &self.total
+    }
+
+    fn zero_prefix() -> i64 {
+        0
+    }
+
+    fn add_prefix(acc: &mut i64, x: &i64) {
+        *acc += *x;
+    }
+
+    proof fn lemma_prefix_empty(x: i64) {
+    }
+
+    proof fn lemma_prefix_merge(a: Self, b: Self) {
+    }
+}
+
+impl<P> PrefixAggregate for PrefixSlabWeight<P>
+where
+    P: Clone
+        + Default
+        + std::fmt::Debug
+        + AddAssign
+        + SubAssign
+        + Add<Output = P>
+        + for<'a> AddAssign<&'a P>,
+{
+    type Prefix = P;
+
+    closed spec fn spec_prefix(&self) -> P {
+        self.prefix
+    }
+
+    open spec fn prefix_ok(&self) -> bool {
+        true
+    }
+
+    open spec fn prefix_zero() -> P {
+        prefix_zero::<P>()
+    }
+
+    open spec fn prefix_plus(a: P, b: P) -> P {
+        prefix_add(a, b)
+    }
+
+    open spec fn prefix_plus_ok(a: P, b: P) -> bool {
+        true
+    }
+
+    fn prefix(&self) -> &P {
+        &self.prefix
+    }
+
+    // Trusted: `P::default()` is `prefix_zero` (see `prefix_add`).
+    #[verifier::external_body]
+    fn zero_prefix() -> P {
+        P::default()
+    }
+
+    // Trusted: `P`'s `+=` is `prefix_add`.
+    #[verifier::external_body]
+    fn add_prefix(acc: &mut P, x: &P) {
+        *acc += x;
+    }
+
+    proof fn lemma_prefix_empty(x: P) {
+    }
+
+    proof fn lemma_prefix_merge(a: Self, b: Self) {
+    }
+}
+
+#[derive(Clone, PartialEq, Debug)]
+#[verifier::allow(autoderive_clone_without_spec)]
+pub(crate) struct FoundSlab<A: PrefixAggregate> {
+    pub(crate) index: usize,
+    pub(crate) prefix: A::Prefix,
+    pub(crate) pos: usize,
+}
+
 // ── Nodes ───────────────────────────────────────────────────────────────────
 
 /// Panics: the arena has used every `NodeId`.  Trusted only in that a
@@ -503,6 +683,42 @@ pub proof fn lemma_fold_len<A: SlabAggregate>(s: Seq<A>, i: int, j: int)
         assert(A::merge_ok(fold(s.subrange(i, j - 1)), fold(s.subrange(j - 1, j))));
         A::lemma_merge_len(fold(s.subrange(i, j - 1)), s[j - 1]);
     }
+}
+
+/// A run of slabs the prefix laws cover has an aggregate they cover.
+pub proof fn lemma_fold_prefix_ok<A: PrefixAggregate>(s: Seq<A>, a: int, b: int)
+    requires
+        valid(s), 0 <= a <= b <= s.len(),
+        forall|i: int| 0 <= i < s.len() ==> #[trigger] s[i].prefix_ok(),
+    ensures fold(s.subrange(a, b)).prefix_ok(),
+    decreases b - a,
+{
+    if a == b {
+        A::lemma_prefix_empty(A::prefix_zero());
+    } else {
+        lemma_fold_prefix_ok(s, a, b - 1);
+        assert(s.subrange(a, b).drop_last() =~= s.subrange(a, b - 1));
+        lemma_fold_one(s, b - 1);
+        assert(A::merge_ok(fold(s.subrange(a, b - 1)), fold(s.subrange(b - 1, b))));
+        A::lemma_prefix_merge(fold(s.subrange(a, b - 1)), s[b - 1]);
+    }
+}
+
+/// The prefix of the first `k` slabs, split at `j`.
+pub proof fn lemma_fold_prefix<A: PrefixAggregate>(s: Seq<A>, j: int, k: int)
+    requires
+        valid(s), 0 <= j < k <= s.len(),
+        forall|i: int| 0 <= i < s.len() ==> #[trigger] s[i].prefix_ok(),
+    ensures
+        A::prefix_plus_ok(fold(s.subrange(0, j)).spec_prefix(), fold(s.subrange(j, k)).spec_prefix()),
+        fold(s.subrange(0, k)).spec_prefix()
+            == A::prefix_plus(fold(s.subrange(0, j)).spec_prefix(), fold(s.subrange(j, k)).spec_prefix()),
+{
+    lemma_fold_prefix_ok(s, 0, j);
+    lemma_fold_prefix_ok(s, j, k);
+    lemma_fold_split(s, 0, j, k);
+    assert(A::merge_ok(fold(s.subrange(0, j)), fold(s.subrange(j, k))));
+    A::lemma_prefix_merge(fold(s.subrange(0, j)), fold(s.subrange(j, k)));
 }
 
 /// Runs of a valid sequence are valid.
@@ -2790,6 +3006,196 @@ impl<A: SlabAggregate> SlabBTree<A> {
         t
     }
 
+    /// Find the landing slab for `item_idx`: returns
+    /// `(slab_idx, prefix_before_slab, items_before_slab)`.  The
+    /// landing slab is the one containing item `item_idx`; if
+    /// `item_idx >= total_items` returns the final position with the
+    /// full prefix/items totals.
+    ///
+    /// O(log n) — descends the tree by `len`, accumulating `prefix`
+    /// and `len` of children visited before the descent.
+    pub(crate) fn find_slab_at_item(&self, item_idx: usize) -> (r: FoundSlab<A>)
+        where A: PrefixAggregate
+        requires
+            self.wf(),
+            forall|i: int| 0 <= i < self@.len() ==> #[trigger] self@[i].prefix_ok(),
+        ensures
+            r.index <= self@.len(),
+            r.pos == sum_len(self@.subrange(0, r.index as int)),
+            r.prefix == fold(self@.subrange(0, r.index as int)).spec_prefix(),
+            r.index < self@.len() ==> r.pos <= item_idx < r.pos + self@[r.index as int].spec_len(),
+            r.index == self@.len() ==> item_idx >= sum_len(self@),
+    {
+        let ghost view = self@;
+        let ghost mut h = self.height();
+        let ghost mut left = Seq::<A>::empty();
+        let ghost mut right = Seq::<A>::empty();
+        let mut prefix = A::zero_prefix();
+        let mut pos = 0usize;
+        let mut slab_base = 0usize;
+        let mut remaining = item_idx;
+        let mut node = self.root;
+        proof {
+            assert(self.wf_node(self.root, h));
+            assert(self@ =~= left + self.slabs(node, h) + right);
+            assert(view.subrange(0, 0) =~= Seq::<A>::empty());
+            A::lemma_prefix_empty(A::prefix_zero());
+        }
+        loop
+            invariant
+                self.wf(), view == self@,
+                forall|i: int| 0 <= i < view.len() ==> #[trigger] view[i].prefix_ok(),
+                self.wf_node(node, h),
+                view == left + self.slabs(node, h) + right,
+                slab_base == left.len(),
+                pos == sum_len(left),
+                prefix == fold(view.subrange(0, slab_base as int)).spec_prefix(),
+                pos + remaining == item_idx,
+                remaining < sum_len(self.slabs(node, h)) || (left.len() == 0 && right.len() == 0),
+            decreases h,
+        {
+            proof {
+                lemma_sum_len_concat(left, self.slabs(node, h));
+                lemma_sum_len_concat(left + self.slabs(node, h), right);
+                assert(view.subrange(0, left.len() as int) =~= left);
+                lemma_valid_subrange(view, 0, view.len() as int);
+                assert(view.subrange(0, view.len() as int) =~= view);
+            }
+            match self.node(node) {
+                Node::Leaf(l) => {
+                    let ghost aggs = l.aggs@;
+                    assert(self.slabs(node, h) == aggs);
+                    let mut i: usize = 0;
+                    while i < l.aggs.len()
+                        invariant
+                            self.wf(), view == self@,
+                            forall|j: int| 0 <= j < view.len() ==> #[trigger] view[j].prefix_ok(),
+                            i <= aggs.len(), aggs == l.aggs@,
+                            view == left + aggs + right,
+                            slab_base == left.len(),
+                            pos == sum_len(left) + sum_len(aggs.take(i as int)),
+                            prefix == fold(view.subrange(0, left.len() + i)).spec_prefix(),
+                            pos + remaining == item_idx,
+                            remaining + sum_len(aggs.take(i as int)) < sum_len(aggs)
+                                || (left.len() == 0 && right.len() == 0),
+                        decreases aggs.len() - i,
+                    {
+                        let a = &l.aggs[i];
+                        let ghost j = left.len() + i;
+                        proof {
+                            assert(aggs.take(i + 1).drop_last() =~= aggs.take(i as int));
+                            assert(view.subrange(0, j) =~= left + aggs.take(i as int));
+                            assert(view[j] == aggs[i as int]);
+                            lemma_sum_len_concat(left, aggs.take(i as int));
+                        }
+                        let l_len = a.len();
+                        if remaining < l_len {
+                            return FoundSlab { index: slab_base + i, prefix, pos };
+                        }
+                        proof {
+                            lemma_valid_subrange(view, 0, view.len() as int);
+                            assert(view.subrange(0, view.len() as int) =~= view);
+                            lemma_fold_prefix(view, j, j + 1);
+                            lemma_fold_one(view, j);
+                        }
+                        A::add_prefix(&mut prefix, a.prefix());
+                        pos += l_len;
+                        remaining -= l_len;
+                        i += 1;
+                    }
+                    proof {
+                        assert(aggs.take(i as int) =~= aggs);
+                        assert(view =~= aggs);
+                        assert(view.subrange(0, view.len() as int) =~= view);
+                    }
+                    return FoundSlab { index: slab_base + l.aggs.len(), prefix, pos };
+                }
+                Node::Internal(n) => {
+                    let ghost cs = n.children@;
+                    let ghost hc = (h - 1) as nat;
+                    let ghost h0 = h;
+                    proof {
+                        self.lemma_child(node, h, *n, 0);
+                    }
+                    assert(self.slabs(node, h) == self.children_slabs(cs, hc));
+                    let mut k: usize = 0;
+                    loop
+                        invariant_except_break
+                            k <= cs.len(), h == h0,
+                            self.wf_node(node, h),
+                            self.node_spec(node) == Some(Node::Internal(*n)),
+                            view == left + self.children_slabs(cs, hc) + right,
+                            slab_base == left.len() + self.children_slabs(cs.take(k as int), hc).len(),
+                            pos == sum_len(left) + sum_len(self.children_slabs(cs.take(k as int), hc)),
+                            prefix == fold(view.subrange(0, slab_base as int)).spec_prefix(),
+                            pos + remaining == item_idx,
+                            remaining + sum_len(self.children_slabs(cs.take(k as int), hc))
+                                < sum_len(self.children_slabs(cs, hc))
+                                || (left.len() == 0 && right.len() == 0),
+                        invariant
+                            self.wf(), view == self@, cs == n.children@, h0 > 0, hc == h0 - 1,
+                            forall|j: int| 0 <= j < view.len() ==> #[trigger] view[j].prefix_ok(),
+                        ensures
+                            h < h0,
+                            self.wf_node(node, h),
+                            view == left + self.slabs(node, h) + right,
+                            slab_base == left.len(),
+                            pos == sum_len(left),
+                            prefix == fold(view.subrange(0, slab_base as int)).spec_prefix(),
+                            pos + remaining == item_idx,
+                            remaining < sum_len(self.slabs(node, h)),
+                        decreases cs.len() - k,
+                    {
+                        if k == n.children.len() {
+                            proof {
+                                assert(cs.take(k as int) =~= cs);
+                                assert(view =~= self.children_slabs(cs, hc));
+                                assert(view.subrange(0, view.len() as int) =~= view);
+                            }
+                            return FoundSlab { index: slab_base, prefix, pos };
+                        }
+                        let c = &n.children[k];
+                        let ghost before = self.children_slabs(cs.take(k as int), hc);
+                        let ghost mid = self.slabs(c.id, hc);
+                        let ghost after = self.children_slabs(cs.skip(k + 1), hc);
+                        proof {
+                            assert(c == cs[k as int]);
+                            self.lemma_child(node, h, *n, k as int);
+                            self.lemma_children_slabs_split(cs, k as int, hc);
+                            self.lemma_children_slabs_push(cs, k as int, hc);
+                            lemma_sum_len_concat(before, mid);
+                            lemma_sum_len_concat(before + mid, after);
+                        }
+                        let c_len = c.agg.len();
+                        if remaining < c_len {
+                            proof {
+                                lemma_sum_len_concat(left, before);
+                                left = left + before;
+                                right = after + right;
+                                h = hc;
+                                assert(view =~= left + self.slabs(c.id, h) + right);
+                            }
+                            node = c.id;
+                            break;
+                        }
+                        proof {
+                            let (p, q) = (slab_base as int, slab_base + mid.len());
+                            assert(view.subrange(p, q) =~= mid);
+                            lemma_valid_subrange(view, 0, view.len() as int);
+                            assert(view.subrange(0, view.len() as int) =~= view);
+                            lemma_fold_prefix(view, p, q);
+                        }
+                        A::add_prefix(&mut prefix, c.agg.prefix());
+                        pos += c_len;
+                        slab_base += c.slab_count;
+                        remaining -= c_len;
+                        k += 1;
+                    }
+                }
+            }
+        }
+    }
+
     /// Aggregate of all slabs in the tree.
     #[allow(dead_code)]
     pub(crate) fn root_agg(&self) -> (r: A)
@@ -4040,38 +4446,6 @@ impl<A: SlabAggregate> Default for SlabBTree<A> {
     }
 }
 
-/// Aggregate that additionally carries a prefix-sum value per slab,
-/// enabling [`find_slab_at_item`](SlabBTree::find_slab_at_item) and
-/// [`find_slab_at_prefix`](SlabBTree::find_slab_at_prefix) to work
-/// aggregate-agnostically.
-///
-/// Implemented by [`PrefixSlabWeight<P>`](crate::prefix::PrefixSlabWeight)
-/// (prefix lives in `.prefix`) and [`SlabAgg`] (prefix lives in `.total`).
-pub trait PrefixAggregate: SlabAggregate {
-    /// `Ord` is not required here — only forward accumulation needs `Add`.
-    /// The "find slab whose prefix reaches target" search is provided in a
-    /// separate impl block bounded on `Self::Prefix: Ord`.
-    ///
-    /// `Clone` (not `Copy`) so non-scalar prefixes (e.g. a `HashMap`-backed
-    /// mark set) can serve as the per-slab aggregate.
-    ///
-    /// `for<'a> AddAssign<&'a Self::Prefix>` lets the B-tree descent
-    /// accumulate prefixes via `+=` against the stored aggregate by
-    /// reference — avoiding a per-level clone of large non-scalar
-    /// prefixes (the dominant cost for `MarkAcc`-style HashMap prefixes).
-    /// All scalar primitives (`u128`, `i128`, `u64`, etc.) impl this in
-    /// `core` already.
-    type Prefix: Clone
-        + Default
-        + Add<Output = Self::Prefix>
-        + Debug
-        + for<'a> AddAssign<&'a Self::Prefix>;
-    /// Borrow-typed accessor — the B-tree descent reads prefixes many
-    /// times per query and aggregates by reference, so cloning here would
-    /// be wasted work for non-scalar prefixes.
-    fn prefix(&self) -> &Self::Prefix;
-}
-
 #[cfg(test)]
 fn merge_all<'a, A: SlabAggregate + 'a>(aggs: impl IntoIterator<Item = &'a A>) -> A {
     let mut acc = A::default();
@@ -4082,13 +4456,6 @@ fn merge_all<'a, A: SlabAggregate + 'a>(aggs: impl IntoIterator<Item = &'a A>) -
 }
 
 // ── SlabAgg (used by DeltaColumn) ───────────────────────────────────────────
-
-impl PrefixAggregate for SlabAgg {
-    type Prefix = i64;
-    fn prefix(&self) -> &i64 {
-        &self.total
-    }
-}
 
 impl SlabAgg {
     fn contains(&self, target: i64, prefix_before: i64) -> bool {
@@ -4101,22 +4468,6 @@ impl SlabAgg {
         self.len > 0
             && prefix_before + self.max_offset >= lo
             && prefix_before + self.min_offset <= hi
-    }
-}
-
-impl<P> PrefixAggregate for PrefixSlabWeight<P>
-where
-    P: Clone
-        + Default
-        + std::fmt::Debug
-        + AddAssign
-        + SubAssign
-        + Add<Output = P>
-        + for<'a> AddAssign<&'a P>,
-{
-    type Prefix = P;
-    fn prefix(&self) -> &P {
-        &self.prefix
     }
 }
 
@@ -4424,81 +4775,10 @@ impl Iterator for FindByValueRange<'_> {
 
 // ── Prefix-sum queries (generic over PrefixAggregate) ───────────────────────
 
-#[derive(Clone, PartialEq, Debug)]
-pub(crate) struct FoundSlab<A: PrefixAggregate> {
-    pub(crate) index: usize,
-    pub(crate) prefix: A::Prefix,
-    pub(crate) pos: usize,
-}
-
 impl<A: PrefixAggregate> FoundSlab<A> {
     #[cfg(test)]
     pub(crate) fn decompose(&self) -> (usize, A::Prefix, usize) {
         (self.index, self.prefix.clone(), self.pos)
-    }
-}
-
-impl<A: PrefixAggregate> SlabBTree<A> {
-    /// Find the landing slab for `item_idx`: returns
-    /// `(slab_idx, prefix_before_slab, items_before_slab)`.  The
-    /// landing slab is the one containing item `item_idx`; if
-    /// `item_idx >= total_items` returns the final position with the
-    /// full prefix/items totals.
-    ///
-    /// O(log n) — descends the tree by `len`, accumulating `prefix`
-    /// and `len` of children visited before the descent.
-    pub(crate) fn find_slab_at_item(&self, item_idx: usize) -> FoundSlab<A> {
-        let mut prefix = A::Prefix::default();
-        let mut pos = 0usize;
-        let mut slab_base = 0usize;
-        let mut remaining = item_idx;
-        let mut node = self.root;
-        loop {
-            match self.node(node) {
-                Node::Leaf(l) => {
-                    for (i, a) in l.aggs.iter().enumerate() {
-                        let l_len = a.len();
-                        if remaining < l_len {
-                            return FoundSlab {
-                                index: slab_base + i,
-                                prefix,
-                                pos,
-                            };
-                        }
-                        prefix += a.prefix();
-                        pos += l_len;
-                        remaining -= l_len;
-                    }
-                    return FoundSlab {
-                        index: slab_base + l.aggs.len(),
-                        prefix,
-                        pos,
-                    };
-                }
-                Node::Internal(n) => {
-                    let mut descended = false;
-                    for c in &n.children {
-                        let c_len = c.agg.len();
-                        if remaining < c_len {
-                            node = c.id;
-                            descended = true;
-                            break;
-                        }
-                        prefix += c.agg.prefix();
-                        pos += c_len;
-                        slab_base += c.slab_count;
-                        remaining -= c_len;
-                    }
-                    if !descended {
-                        return FoundSlab {
-                            index: slab_base,
-                            prefix,
-                            pos,
-                        };
-                    }
-                }
-            }
-        }
     }
 }
 
