@@ -99,6 +99,8 @@ pub mod bijou {
     }
 }
 
+#[cfg(feature = "bijou64")]
+mod bijou64;
 pub mod bool;
 pub(crate) mod btree;
 pub mod codec;

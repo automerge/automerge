@@ -333,8 +333,9 @@ fn leb_bytes(bits: u64) -> u64 {
 // ── Bijou64 ─────────────────────────────────────────────────────────────────
 
 /// The [bijou64](https://github.com/inkandswitch/bijou) tag-byte codec
-/// (feature `bijou64`) — a thin [`Codec`] adapter over the `bijoux`
-/// crate's `u64`/`i64` formats.
+/// (feature `bijou64`) — a thin [`Codec`] adapter over `crate::bijou64`,
+/// hexane's Verus-verified copy of the `bijoux` crate's `u64`/`i64`
+/// formats.
 ///
 /// Unsigned values 0–247 encode as a single byte equal to the value;
 /// larger values use a tag byte `0xF8`–`0xFF` followed by 1–8 big-endian
@@ -349,7 +350,7 @@ fn leb_bytes(bits: u64) -> u64 {
 ///   bytes cannot be scanned backwards, which [`Codec`] already forbids
 ///   relying on.
 ///
-/// Signed values use the bijou64s format ([`bijoux::i64`]): zigzag
+/// Signed values use the bijou64s format: zigzag
 /// (`(n << 1) ^ (n >> 63)`) composed with the unsigned encoding.  Zigzag
 /// is itself a bijection, so canonicality is preserved; the 1-byte
 /// signed range is −124..=123 (vs LEB128's −64..=63).
@@ -362,26 +363,27 @@ pub struct Bijou64;
 #[cfg(feature = "bijou64")]
 mod bijou64_impl {
     use super::{Bijou64, Codec, VarBuf};
+    use crate::bijou64;
     use crate::PackError;
 
     impl Codec for Bijou64 {
         #[inline]
         fn encode_unsigned(n: u64) -> VarBuf {
             let mut out = VarBuf::new();
-            out.extend_from_slice(&bijoux::u64::encoded_bytes(n));
+            out.extend_from_slice(bijou64::encoded_bytes(n).as_slice());
             out
         }
 
         #[inline]
         fn encode_signed(n: i64) -> VarBuf {
             let mut out = VarBuf::new();
-            out.extend_from_slice(&bijoux::i64::encoded_bytes(n));
+            out.extend_from_slice(bijou64::encoded_bytes_signed(n).as_slice());
             out
         }
 
         #[inline]
         fn read_unsigned(data: &[u8]) -> Option<(usize, u64)> {
-            match bijoux::u64::decode(data) {
+            match bijou64::decode(data) {
                 Ok((v, n)) => Some((n, v)),
                 Err(_) => None,
             }
@@ -389,38 +391,32 @@ mod bijou64_impl {
 
         #[inline]
         fn read_signed(data: &[u8]) -> Option<(usize, i64)> {
-            match bijoux::i64::decode(data) {
+            match bijou64::decode_signed(data) {
                 Ok((v, n)) => Some((n, v)),
                 Err(_) => None,
             }
         }
 
         fn try_read_unsigned(data: &[u8]) -> Result<(usize, u64), PackError> {
-            match bijoux::u64::decode(data) {
+            match bijou64::decode(data) {
                 Ok((v, n)) => Ok((n, v)),
                 Err(e) => Err(PackError::InvalidValue(format!("bijou64: {e}"))),
             }
         }
 
         fn try_read_signed(data: &[u8]) -> Result<(usize, i64), PackError> {
-            match bijoux::i64::decode(data) {
+            match bijou64::decode_signed(data) {
                 Ok((v, n)) => Ok((n, v)),
                 Err(e) => Err(PackError::InvalidValue(format!("bijou64s: {e}"))),
             }
         }
 
         /// Total length from the tag byte alone — no decode, no scan.
-        ///
-        /// `1 + (b − 0xF7)` saturating: tags below `0xF8` are single-byte
-        /// values, tag `0xF7 + k` carries `k` payload bytes.  Pure ALU on
-        /// the loaded byte — no table (a dependent second load) and no
-        /// branch — because this sits in the loop-carried dependency chain
-        /// of every skip (`value_len`/`nth`): pos → load byte → len → pos.
+        /// See [`bijou64::encoded_len_at`]: it sits in the loop-carried
+        /// dependency chain of every skip (`value_len`/`nth`).
         #[inline(always)]
         fn unsigned_len(data: &[u8]) -> Option<usize> {
-            let b = *data.first()?;
-            let len = 1 + b.saturating_sub(0xF7) as usize;
-            (data.len() >= len).then_some(len)
+            bijou64::encoded_len_at(data)
         }
 
         #[inline]
@@ -430,12 +426,12 @@ mod bijou64_impl {
 
         #[inline]
         fn unsigned_size(n: u64) -> u64 {
-            bijoux::u64::encoded_len(n) as u64
+            bijou64::encoded_len(n) as u64
         }
 
         #[inline]
         fn signed_size(n: i64) -> u64 {
-            bijoux::i64::encoded_len(n) as u64
+            bijou64::encoded_len_signed(n) as u64
         }
     }
 }
