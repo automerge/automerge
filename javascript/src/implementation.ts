@@ -5,7 +5,7 @@ import {
   validateForBatchInsert,
 } from "./proxies.js"
 export { isImmutableString, isCounter } from "./proxies.js"
-import { STATE } from "./constants.js"
+import { CHANGE_HEADS, STATE } from "./constants.js"
 
 import {
   type AutomergeValue,
@@ -224,6 +224,42 @@ export function getBackend<T>(doc: Doc<T>): Automerge {
   return _state(doc).handle
 }
 
+/**
+ * The heads the change in progress on a backend started from, while the
+ * callback of a {@link change} or {@link changeAt} runs, or `undefined`.
+ *
+ * The draft passed to the callback only knows its backend, so this is how
+ * functions called with the draft (or with any other document sharing that
+ * backend) tell that a change is in progress. Most backend functions which
+ * read the history or save the document commit the pending operations first,
+ * which would split the change. The heads are stored on the backend under a
+ * `Symbol.for` key, like the other metadata in `constants.ts`, so that a
+ * second copy of this library loaded in the same app sees them too.
+ */
+function changeHeads(handle: Automerge): Heads | undefined {
+  return Reflect.get(handle, CHANGE_HEADS) as Heads | undefined
+}
+
+function assertNotInChange<T>(state: InternalState<T>, name: string) {
+  if (changeHeads(state.handle) !== undefined) {
+    throw new RangeError(
+      `Calls to Automerge.${name} cannot be nested inside a change callback`,
+    )
+  }
+}
+
+/**
+ * Get the changes which are not dependencies of `heads`. Inside a change
+ * callback this reads the committed changes without committing the pending
+ * operations, which aren't part of any change yet.
+ */
+function changesSince(handle: Automerge, heads: Heads): Change[] {
+  if (changeHeads(handle) !== undefined) {
+    return handle.getCommittedChanges(heads)
+  }
+  return handle.getChanges(heads)
+}
+
 function importOpts<T>(_actor?: ActorId | InitOptions<T>): InitOptions<T> {
   if (typeof _actor === "object") {
     return _actor
@@ -234,7 +270,7 @@ function importOpts<T>(_actor?: ActorId | InitOptions<T>): InitOptions<T> {
 
 export function getChangesSince<T>(state: Doc<T>, heads: Heads): Change[] {
   const n = _state(state)
-  return n.handle.getChanges(heads)
+  return changesSince(n.handle, heads)
 }
 
 export function getChangesMetaSince<T>(
@@ -326,6 +362,9 @@ export function view<T>(doc: Doc<T>, heads: Heads): Doc<T> {
  * the actor ID which is generated you can pass the actor ID as the second
  * argument
  *
+ * This function throws a `RangeError` if it is called inside a {@link change}
+ * callback on the document being changed.
+ *
  * @typeParam T - The type of the value contained in the document
  * @param doc - The document to clone
  * @param _opts - Either an actor ID to use for the new doc or an {@link InitOptions}
@@ -335,6 +374,7 @@ export function clone<T>(
   _opts?: ActorId | InitOptions<T>,
 ): Doc<T> {
   const state = _state(doc)
+  assertNotInChange(state, "clone")
   const heads = state.heads
   const opts = importOpts(_opts)
   const handle = state.handle.fork(opts.actor, heads)
@@ -479,6 +519,20 @@ export function from<T extends Record<string, unknown>>(
  * })
  * assert.equal(patchedPath, ["key2"])
  * ```
+ *
+ * @remarks
+ * Inside the callback, {@link getHeads} returns the heads the change started
+ * from (the change has no hash until it is committed), and {@link
+ * getAllChanges}, {@link getChanges} and {@link getChangesSince} return the
+ * changes committed before it. {@link save}, {@link saveIncremental}, {@link
+ * saveSince}, {@link getLastLocalChange} and {@link clone} throw a
+ * `RangeError` instead, as they can't include the edits in progress.
+ *
+ * Functions of the backend returned by {@link getBackend} which commit (such
+ * as `getBackend(d).getHeads()`) still split the change when called inside the
+ * callback: the edits made before the call become a change of their own,
+ * without the message and time given here. The returned document contains
+ * every edit of the callback either way.
  */
 export function change<T>(
   doc: Doc<T>,
@@ -664,9 +718,22 @@ function _change<T>(
   }
   try {
     state.heads = heads
+    Reflect.set(state.handle, CHANGE_HEADS, heads)
     const root: T = rootProxy(state.handle)
-    callback(root)
-    if (state.handle.pendingOps() === 0) {
+    try {
+      callback(root)
+    } finally {
+      Reflect.deleteProperty(state.handle, CHANGE_HEADS)
+    }
+    if (state.handle.pendingOps() > 0) {
+      state.handle.commit(options.message, options.time)
+    }
+    // The callback may have committed some of its edits already, by calling a
+    // backend function which commits, so compare the heads rather than only
+    // checking for pending operations. While isolated these are the heads of
+    // the isolated branch.
+    const newHeads = state.handle.getHeads()
+    if (headsEqual(newHeads, heads)) {
       state.heads = undefined
       if (scope) {
         state.handle.integrate()
@@ -676,7 +743,6 @@ function _change<T>(
         newHeads: null,
       }
     } else {
-      const newHead = state.handle.commit(options.message, options.time)
       state.handle.integrate()
       return {
         newDoc: progressDocument(
@@ -685,7 +751,7 @@ function _change<T>(
           heads,
           options.patchCallback || state.patchCallback,
         ),
-        newHeads: newHead != null ? [newHead] : null,
+        newHeads,
       }
     }
   } catch (e) {
@@ -838,6 +904,7 @@ export function loadIncremental<T>(
  */
 export function saveIncremental<T>(doc: Doc<T>): Uint8Array {
   const state = _state(doc)
+  assertNotInChange(state, "saveIncremental")
   if (state.heads) {
     throw new RangeError(
       "Attempting to change an out of date document - set at: " + _trace(doc),
@@ -855,9 +922,14 @@ export function saveIncremental<T>(doc: Doc<T>): Uint8Array {
  * @param doc - The doc to save
  *
  * The returned bytes can be passed to {@link load} or {@link loadIncremental}
+ *
+ * This function throws a `RangeError` if it is called inside a {@link change}
+ * callback on the document being changed.
  */
 export function save<T>(doc: Doc<T>): Uint8Array {
-  return _state(doc).handle.save()
+  const state = _state(doc)
+  assertNotInChange(state, "save")
+  return state.handle.save()
 }
 
 export type WriteFrontierOptions<T> = { patchCallback?: PatchCallback<T> }
@@ -1063,9 +1135,14 @@ export function getConflicts<T>(
  * This is most useful when staying in sync with other peers, every time you
  * make a change locally via {@link change} you immediately call {@link
  * getLastLocalChange} and send the result over the network to other peers.
+ *
+ * This function throws a `RangeError` if it is called inside a {@link change}
+ * callback on the document being changed, as the change in progress has not
+ * been made yet.
  */
 export function getLastLocalChange<T>(doc: Doc<T>): Change | undefined {
   const state = _state(doc)
+  assertNotInChange(state, "getLastLocalChange")
   return state.handle.getLastLocalChange() || undefined
 }
 
@@ -1094,10 +1171,13 @@ export function getObjectId(doc: any, prop?: Prop): ObjID | null {
  * changes can be loaded in `oldState` via {@link applyChanges}.
  *
  * Note that this will crash if there are changes in `oldState` which are not in `newState`.
+ *
+ * Inside a {@link change} callback on `newState` this returns the changes
+ * committed before the change in progress.
  */
 export function getChanges<T>(oldState: Doc<T>, newState: Doc<T>): Change[] {
   const n = _state(newState)
-  return n.handle.getChanges(getHeads(oldState))
+  return changesSince(n.handle, getHeads(oldState))
 }
 
 /**
@@ -1106,10 +1186,12 @@ export function getChanges<T>(oldState: Doc<T>, newState: Doc<T>): Change[] {
  * This is different to {@link save} because the output is an array of changes
  * which can be individually applied via {@link applyChanges}`
  *
+ * Inside a {@link change} callback on `doc` this returns the changes committed
+ * before the change in progress.
  */
 export function getAllChanges<T>(doc: Doc<T>): Change[] {
   const state = _state(doc)
-  return state.handle.getChanges([])
+  return changesSince(state.handle, [])
 }
 
 /**
@@ -1414,10 +1496,13 @@ export function getMissingDeps<T>(doc: Doc<T>, heads: Heads): Heads {
 
 /**
  * Get the hashes of the heads of this document
+ *
+ * Inside a {@link change} or {@link changeAt} callback this returns the heads
+ * the change started from: the change has no hash until it is committed.
  */
 export function getHeads<T>(doc: Doc<T>): Heads {
   const state = _state(doc)
-  return state.heads || state.handle.getHeads()
+  return state.heads || changeHeads(state.handle) || state.handle.getHeads()
 }
 
 /** @hidden */
@@ -1449,6 +1534,7 @@ function isObject(obj: unknown): obj is Record<string, unknown> {
 
 export function saveSince(doc: Doc<unknown>, heads: Heads): Uint8Array {
   const state = _state(doc)
+  assertNotInChange(state, "saveSince")
   const result = state.handle.saveSince(heads)
   return result
 }

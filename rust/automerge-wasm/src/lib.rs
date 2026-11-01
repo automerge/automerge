@@ -1371,6 +1371,22 @@ impl Automerge {
         Ok(changes)
     }
 
+    /// Like `getChanges`, but does not commit pending operations: they are not
+    /// part of the result and can still be committed as one change.
+    #[wasm_bindgen(js_name = getCommittedChanges, unchecked_return_type="Change[]")]
+    pub fn get_committed_changes(
+        &self,
+        #[wasm_bindgen(unchecked_param_type = "Heads")] have_deps: JsValue,
+    ) -> Result<Array, error::Get> {
+        let deps: Vec<_> = JS(have_deps).try_into()?;
+        let changes = self.doc.get_committed_changes(&deps);
+        let changes: Array = changes
+            .iter()
+            .map(|c| Uint8Array::from(c.raw_bytes()))
+            .collect();
+        Ok(changes)
+    }
+
     #[wasm_bindgen(js_name = getChangesMeta, unchecked_return_type="ChangeMetadata[]")]
     pub fn get_changes_meta(
         &mut self,

@@ -162,6 +162,26 @@ describe("Automerge", () => {
       assert.deepEqual(result, ["uint", 6]);
     });
 
+    it("getCommittedChanges does not commit pending operations", () => {
+      const doc = create();
+      doc.put("_root", "a", 1);
+      doc.commit("first");
+      const heads = doc.getHeads();
+      const committed = doc.getChanges([]);
+
+      doc.put("_root", "b", 2);
+      doc.put("_root", "a", 3);
+      assert.deepEqual(doc.getCommittedChanges([]), committed);
+      assert.deepEqual(doc.getCommittedChanges(heads), []);
+      assert.strictEqual(doc.pendingOps(), 2);
+
+      doc.commit("second");
+      const changes = doc.getChanges(heads).map(decodeChange);
+      assert.strictEqual(changes.length, 1);
+      assert.strictEqual(changes[0].message, "second");
+      assert.strictEqual(changes[0].ops.length, 2);
+    });
+
     it("should be able to make lists", () => {
       const doc = create();
       const root = "_root";

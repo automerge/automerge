@@ -4662,3 +4662,111 @@ fn cursor_from_another_object_is_invalid() {
         Err(AutomergeError::InvalidCursor(cursor))
     );
 }
+
+#[test]
+fn get_committed_changes_does_not_commit() {
+    let mut doc = AutoCommit::new();
+    doc.put(ROOT, "a", 1).unwrap();
+    let list = doc.put_object(ROOT, "list", ObjType::List).unwrap();
+    doc.insert(&list, 0, "x").unwrap();
+    let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+    doc.splice_text(&text, 0, 0, "hello").unwrap();
+    doc.commit();
+    doc.put(ROOT, "b", 2).unwrap();
+    doc.commit();
+    let heads = doc.get_heads();
+    let committed: Vec<_> = doc.get_changes(&[]).iter().map(|c| c.hash()).collect();
+    let since_first: Vec<_> = doc
+        .get_changes(&[committed[0]])
+        .iter()
+        .map(|c| c.hash())
+        .collect();
+
+    // Overwrite, delete and create values in the open transaction
+    doc.put(ROOT, "a", 3).unwrap();
+    doc.delete(ROOT, "b").unwrap();
+    doc.put(ROOT, "c", 4).unwrap();
+    doc.insert(&list, 1, "y").unwrap();
+    doc.delete(&list, 0).unwrap();
+    doc.splice_text(&text, 5, 0, " world").unwrap();
+    let pending = doc.pending_ops();
+    assert!(pending > 0);
+
+    let changes = doc.get_committed_changes(&[]);
+    assert_eq!(
+        changes.iter().map(|c| c.hash()).collect::<Vec<_>>(),
+        committed
+    );
+    assert_eq!(
+        doc.get_committed_changes(&[committed[0]])
+            .iter()
+            .map(|c| c.hash())
+            .collect::<Vec<_>>(),
+        since_first
+    );
+    assert!(doc.get_committed_changes(&heads).is_empty());
+    assert_eq!(doc.pending_ops(), pending);
+
+    // The pending operations still form a single change
+    let hash = doc
+        .commit_with(CommitOptions::default().with_message("all of it"))
+        .unwrap();
+    assert_eq!(doc.get_heads(), vec![hash]);
+    let new_changes = doc.get_changes(&heads);
+    assert_eq!(new_changes.len(), 1);
+    assert_eq!(new_changes[0].message(), Some("all of it"));
+    assert_eq!(new_changes[0].len(), pending);
+
+    // The committed changes still load into the same document
+    let mut loaded = Automerge::new();
+    loaded.apply_changes(doc.get_changes(&[])).unwrap();
+    assert_eq!(loaded.get_heads(), vec![hash]);
+    assert_eq!(loaded.text(&text).unwrap(), "hello world".to_string());
+}
+
+#[test]
+fn get_committed_changes_can_be_rolled_back() {
+    let mut doc = AutoCommit::new();
+    doc.put(ROOT, "a", 1).unwrap();
+    doc.commit();
+    let committed = doc.get_changes(&[]);
+    doc.put(ROOT, "a", 2).unwrap();
+    assert_eq!(doc.get_committed_changes(&[]).len(), committed.len());
+    assert_eq!(doc.rollback(), 1);
+    assert_eq!(doc.get_changes(&[]).len(), committed.len());
+    assert_eq!(doc.get(ROOT, "a").unwrap().unwrap().0, Value::from(1));
+}
+
+#[test]
+fn get_committed_changes_does_not_commit_under_isolation() {
+    let mut doc = AutoCommit::new();
+    doc.put(ROOT, "a", 1).unwrap();
+    doc.commit();
+    let first = doc.get_heads();
+    doc.put(ROOT, "b", 2).unwrap();
+    doc.commit();
+    let all: Vec<_> = doc.get_changes(&[]).iter().map(|c| c.hash()).collect();
+
+    doc.isolate(&first);
+    doc.put(ROOT, "c", 3).unwrap();
+    doc.put(ROOT, "d", 4).unwrap();
+    assert_eq!(doc.pending_ops(), 2);
+
+    // Isolation does not narrow the result, like `get_changes`
+    let changes: Vec<_> = doc
+        .get_committed_changes(&[])
+        .iter()
+        .map(|c| c.hash())
+        .collect();
+    assert_eq!(changes, all);
+    assert_eq!(doc.pending_ops(), 2);
+
+    let hash = doc
+        .commit_with(CommitOptions::default().with_message("isolated"))
+        .unwrap();
+    let change = doc.get_change_by_hash(&hash).unwrap();
+    assert_eq!(change.deps(), first.as_slice());
+    assert_eq!(change.len(), 2);
+    doc.integrate();
+    assert_eq!(doc.get_changes(&[]).len(), all.len() + 1);
+}

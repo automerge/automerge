@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased
+
+### Breaking Changes
+
+* `save`, `saveSince`, `getLastLocalChange` and `clone` throw a `RangeError`
+  when called inside a `change` or `changeAt` callback, with the draft or with
+  the document being changed. They used to commit the edits made so far as a
+  change of their own, splitting the change (#1607). `saveIncremental` already
+  threw there and now says why.
+
+### Fixed
+
+* Reading the heads or the history inside a `change` or `changeAt` callback
+  no longer splits the change or drops the edits made before the call from the
+  returned document (#1607). `getHeads` returns the heads the change started
+  from, and `getAllChanges`, `getChanges` and `getChangesSince` return the
+  changes committed before it.
+* `change` and `changeAt` return a document with every edit of the callback
+  even if the callback commits some of them itself, through a function of
+  `getBackend` such as `getBackend(d).getHeads()`. Those edits still become a
+  change of their own, without the given message and time.
+
 ## 3.5.0
 
 Changes since 3.4.1.
