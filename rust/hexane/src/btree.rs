@@ -1625,308 +1625,286 @@ impl<A: SlabAggregate> SlabBTree<A> {
 
     // ── Splice ──────────────────────────────────────────────────────────
 
+    /// Replace slabs `range` with `new_aggs`.
     pub(crate) fn splice<I: IntoIterator<Item = A>>(&mut self, range: Range<usize>, new_aggs: I) {
-        assert!(range.end <= self.total_slabs, "splice out of bounds");
-        assert!(range.start <= range.end, "invalid range");
         let new: Vec<A> = new_aggs.into_iter().collect();
+        self.splice_vec(range.start, range.end, new);
+    }
 
-        if range.is_empty() && new.is_empty() {
+    /// Replace slabs `start..end` with `new`.
+    ///
+    /// Decomposed into an in-place overwrite of the common prefix (the
+    /// common case: replace-style mutations change no structure) and a
+    /// structural splice of the rest, done recursively from the root: it
+    /// descends while the range lies within one child, splices the
+    /// leaf's slab list in place (splitting it into ⌈len/B⌉ leaves if it
+    /// overflows, merging it into a sibling if it drops below B/4), and at
+    /// the first node whose range spans several children (the lowest
+    /// common ancestor) rebuilds those children at the same height.  On
+    /// the way back up each level refreshes its cached child slot, splits
+    /// if it has more than B children, and is removed if it has none.
+    /// O(log n + k).
+    fn splice_vec(&mut self, start: usize, end: usize, mut new: Vec<A>) {
+        assert!(end <= self.total_slabs, "splice out of bounds");
+        assert!(start <= end, "invalid range");
+        if start == end && new.is_empty() {
             return;
         }
-
-        // Decompose into overwrite + structural delta.  When the number
-        // of removed and inserted aggs match (the common case for
-        // replace-style mutations), the structural delta is empty and
-        // the overwrite is a pure in-place rewrite with zero allocation.
-        let common = range.len().min(new.len());
+        let common = if end - start < new.len() {
+            end - start
+        } else {
+            new.len()
+        };
+        let delta_new = new.split_off(common);
         if common > 0 {
-            self.overwrite_range(range.start, &new[..common]);
+            let h = self.subtree_height(self.root);
+            self.overwrite_rec(self.root, h, start, new);
         }
-
-        let delta_start = range.start + common;
-        let delta_range = delta_start..range.end;
-        let delta_new = &new[common..];
-        if delta_range.is_empty() && delta_new.is_empty() {
+        let delta_start = start + common;
+        if delta_start == end && delta_new.is_empty() {
             return;
         }
-
-        self.splice_structural(&delta_range, delta_new);
-    }
-
-    /// Overwrite existing agg values in-place without changing tree
-    /// structure.  Walks across leaf boundaries as needed.  O(k + log n).
-    fn overwrite_range(&mut self, start: usize, new: &[A]) {
-        let mut cursor = start;
-        let mut i = 0;
-        while i < new.len() {
-            let Some((path, leaf_id, leaf_start)) = self.locate_leaf_for_start(cursor) else {
-                return;
-            };
-            let leaf_len = match self.node(leaf_id) {
-                Node::Leaf(l) => l.aggs.len(),
-                _ => unreachable!(),
-            };
-            let local_start = cursor - leaf_start;
-            let count = (leaf_len - local_start).min(new.len() - i);
-            if count == 0 {
-                // Only possible if cached slab counts are inconsistent
-                // (cursor landed on a leaf boundary mid-overwrite) —
-                // bail rather than loop forever.
-                debug_assert!(false, "overwrite_range: zero-progress step");
-                return;
-            }
-            if let Node::Leaf(l) = self.node_mut(leaf_id) {
-                l.aggs[local_start..local_start + count].clone_from_slice(&new[i..i + count]);
-            }
-            self.update_ancestor_aggregates(&path, leaf_id);
-            cursor += count;
-            i += count;
-        }
-    }
-
-    /// Handle the structural part of a splice (the delta after the common
-    /// prefix has been overwritten).  Usually tiny (0-2 items).
-    fn splice_structural(&mut self, range: &Range<usize>, new: &[A]) {
-        if self.total_slabs == 0 {
-            self.splice_into_empty(new);
-        } else if !self.try_single_leaf_splice(range, new) {
-            self.splice_via_lca(range, new);
-        }
+        let added = delta_new.len();
+        let h = self.subtree_height(self.root);
+        let slots = self.splice_rec(self.root, h, delta_start, end, delta_new);
+        self.total_slabs = self.total_slabs + added - (end - delta_start);
+        self.set_root(slots);
         // Large deletions can leave a single-child chain at the top;
         // promote so query depth tracks the live tree.
         self.collapse_root();
     }
 
-    /// General multi-leaf splice via the lowest common ancestor (LCA).
-    ///
-    /// Locates the LCA of the start and end positions, collects
-    /// aggregates from the affected subtrees, applies the splice, builds
-    /// replacement subtrees at the correct height, and replaces the
-    /// LCA's child span.  O(log n + k) — no full-tree rebuild.
-    fn splice_via_lca(&mut self, range: &Range<usize>, new: &[A]) {
-        let Some((start_path, _start_leaf, _)) = self.locate_leaf_for_start(range.start) else {
-            return;
-        };
-        let end_query = if range.is_empty() {
-            range.start
-        } else {
-            range.end - 1
-        };
-        let Some((end_path, _end_leaf, _)) = self.locate_leaf_for_start(end_query) else {
-            return;
-        };
-
-        // Find the divergence point — where start and end paths go to
-        // different children of the same node.  That node is the LCA.
-        let diverge = start_path
-            .iter()
-            .zip(end_path.iter())
-            .position(|(a, b)| a.1 != b.1);
-        let Some(d) = diverge else {
-            // Paths identical — the range lies within a single leaf, which
-            // `try_single_leaf_splice` handles for every case (including
-            // whole-leaf deletion, via `remove_and_cascade`).  Defensive
-            // fallback: rebuild rather than corrupt, but flag in debug —
-            // reaching this is a routing bug.
-            debug_assert!(
-                false,
-                "splice_via_lca: single-leaf range should be handled by try_single_leaf_splice"
-            );
-            let mut all: Vec<A> = Vec::with_capacity(self.total_slabs + new.len() - range.len());
-            self.collect_into(self.root, &mut all);
-            all.splice(range.clone(), new.iter().cloned());
-            *self = Self::from_iter(all);
-            return;
-        };
-
-        debug_assert_eq!(start_path[d].0, end_path[d].0);
-        let lca_id = start_path[d].0;
-        let left_child_idx = start_path[d].1;
-        let right_child_idx = end_path[d].1;
-        let lca_path = &start_path[..d];
-
-        // Compute the absolute slab offset of LCA.children[left_child_idx].
-        let mut lca_abs_offset: usize = 0;
-        for &(ancestor_id, child_idx) in lca_path {
-            let n = match self.node(ancestor_id) {
-                Node::Internal(n) => n,
-                _ => unreachable!(),
-            };
-            lca_abs_offset += n.children[..child_idx]
-                .iter()
-                .map(|c| c.slab_count)
-                .sum::<usize>();
-        }
-        let left_child_offset: usize = {
-            let n = match self.node(lca_id) {
-                Node::Internal(n) => n,
-                _ => unreachable!(),
-            };
-            n.children[..left_child_idx]
-                .iter()
-                .map(|c| c.slab_count)
-                .sum()
-        };
-        let combined_abs_start = lca_abs_offset + left_child_offset;
-
-        // Determine height of the affected children.
-        let child_height = {
-            let n = match self.node(lca_id) {
-                Node::Internal(n) => n,
-                _ => unreachable!(),
-            };
-            self.subtree_height(n.children[left_child_idx].id)
-        };
-
-        // Collect aggregates from the affected subtrees + free them.
-        let child_ids: Vec<NodeId> = {
-            let n = match self.node(lca_id) {
-                Node::Internal(n) => n,
-                _ => unreachable!(),
-            };
-            n.children[left_child_idx..=right_child_idx]
-                .iter()
-                .map(|c| c.id)
-                .collect()
-        };
-        let mut combined: Vec<A> = Vec::new();
-        for &cid in &child_ids {
-            self.collect_into(cid, &mut combined);
-        }
-        for &cid in &child_ids {
-            self.free_subtree(cid);
-        }
-
-        // Apply the splice in local coordinates.
-        let local_start = range.start - combined_abs_start;
-        let local_end = range.end - combined_abs_start;
-        debug_assert!(local_end <= combined.len());
-        combined.splice(local_start..local_end, new.iter().cloned());
-
-        self.total_slabs = self.total_slabs + new.len() - range.len();
-
-        // Build fresh subtrees at the same height as the old ones.
-        let new_children = self.build_children_at_height(&combined, child_height);
-
-        // Replace child span in LCA.
-        let new_lca_len = {
-            let n = match self.node_mut(lca_id) {
-                Node::Internal(n) => n,
-                _ => unreachable!(),
-            };
-            n.children
-                .splice(left_child_idx..=right_child_idx, new_children);
-            n.children.len()
-        };
-
-        // Propagate up.
-        let lca_path_vec = lca_path.to_vec();
-        if new_lca_len == 0 {
-            // Every child of the LCA was deleted (`new` must be empty for
-            // the combined span to vanish).  An empty internal node is not
-            // allowed: remove the LCA from its parent and cascade.  A root
-            // LCA means the whole tree was deleted — reset to an empty
-            // leaf root.
-            debug_assert!(new.is_empty());
-            if lca_path_vec.is_empty() {
-                debug_assert_eq!(self.total_slabs, 0);
-                debug_assert_eq!(lca_id, self.root);
-                self.nodes[lca_id as usize] = Some(Node::Leaf(Leaf::default()));
-            } else {
-                self.remove_and_cascade(lca_path_vec);
-            }
-        } else if new_lca_len <= B {
-            let (agg, count) = self.internal_summary(lca_id);
-            let replacement = vec![ChildSlot {
-                id: lca_id,
-                agg,
-                slab_count: count,
-            }];
-            self.propagate_splits(lca_path_vec, replacement);
-        } else {
-            self.split_and_propagate(lca_id, lca_path_vec);
+    /// Height of the subtree at `id` (leaves are 0).
+    fn subtree_height(&self, id: NodeId) -> usize {
+        match self.node(id) {
+            Node::Leaf(_) => 0,
+            Node::Internal(n) => 1 + self.subtree_height(n.children[0].id),
         }
     }
 
-    fn free_subtree(&mut self, id: NodeId) {
-        let child_ids: Vec<NodeId> = match self.node(id) {
-            Node::Internal(n) => n.children.iter().map(|c| c.id).collect(),
-            Node::Leaf(_) => Vec::new(),
-        };
-        for cid in child_ids {
-            self.free_subtree(cid);
-        }
-        self.free(id);
-    }
-
-    // ── Underflow handling ──────────────────────────────────────────────
-
-    /// Remove the child slot at `path.last()` from its parent, freeing the
-    /// child's subtree.  If the parent becomes empty, cascade the removal
-    /// upward (empty non-root nodes are not allowed); surviving ancestors'
-    /// cached aggregates and slab counts are refreshed.  An emptied root is
-    /// reset to a fresh leaf so the tree returns to its empty state.
-    ///
-    /// `path` is an ancestor path as produced by `locate_leaf_for_start`:
-    /// `path[i] = (ancestor_id, child_idx_taken)`, ending with the parent
-    /// of the node being removed.
-    fn remove_and_cascade(&mut self, mut path: Vec<(NodeId, usize)>) {
-        while let Some((parent_id, child_idx)) = path.pop() {
-            let child_id = match self.node(parent_id) {
-                Node::Internal(n) => n.children[child_idx].id,
-                Node::Leaf(_) => unreachable!("leaf can't be a parent"),
-            };
-            self.free_subtree(child_id);
-            let remaining = match self.node_mut(parent_id) {
-                Node::Internal(p) => {
-                    p.children.remove(child_idx);
-                    p.children.len()
+    /// Overwrite the slabs from `start` in the subtree at `id` (height
+    /// `h`) with `vals`, refreshing cached child aggregates.
+    fn overwrite_rec(&mut self, id: NodeId, h: usize, start: usize, mut vals: Vec<A>) {
+        if h == 0 {
+            if let Node::Leaf(l) = self.node_mut(id) {
+                let mut i = vals.len();
+                while i > 0 {
+                    i -= 1;
+                    l.aggs[start + i] = vals.pop().unwrap();
                 }
+            }
+            return;
+        }
+        // The children overlapping start..start + vals.len(), last first
+        // so each child's values split off the end of `vals`.
+        let end = start + vals.len();
+        let (first, offsets) = {
+            let n = match self.node(id) {
+                Node::Internal(n) => n,
                 Node::Leaf(_) => unreachable!(),
             };
-            if remaining == 0 {
-                if path.is_empty() {
-                    // The root itself emptied — the whole tree was deleted.
-                    // Reset to a fresh empty leaf, reusing the root id.
-                    debug_assert_eq!(self.total_slabs, 0);
-                    self.nodes[parent_id as usize] = Some(Node::Leaf(Leaf::default()));
-                    return;
-                }
-                continue; // cascade: remove the now-empty parent too
+            let mut offsets: Vec<usize> = Vec::new();
+            let mut off = 0;
+            let mut k = 0;
+            while off + n.children[k].slab_count <= start {
+                off += n.children[k].slab_count;
+                k += 1;
             }
-            // Parent survives — refresh the ancestors above it and stop.
-            self.update_ancestor_aggregates(&path, parent_id);
-            return;
-        }
-    }
-
-    /// While the root is an internal node with exactly one child, promote
-    /// the child.  Keeps query depth proportional to the live tree after
-    /// large deletions.  Called once per structural mutation.
-    fn collapse_root(&mut self) {
-        loop {
-            let child = match self.node(self.root) {
-                Node::Internal(n) if n.children.len() == 1 => n.children[0].id,
-                _ => return,
+            let first = k;
+            while k < n.children.len() && off < end {
+                offsets.push(off);
+                off += n.children[k].slab_count;
+                k += 1;
+            }
+            (first, offsets)
+        };
+        let mut j = offsets.len();
+        while j > 0 {
+            j -= 1;
+            let off = offsets[j];
+            let local = start.saturating_sub(off);
+            let part = vals.split_off(off + local - start);
+            let child_id = match self.node(id) {
+                Node::Internal(n) => n.children[first + j].id,
+                Node::Leaf(_) => unreachable!(),
             };
-            self.free(self.root);
-            self.root = child;
+            self.overwrite_rec(child_id, h - 1, local, part);
+            let agg = self.agg_of(child_id);
+            if let Node::Internal(n) = self.node_mut(id) {
+                n.children[first + j].agg = agg;
+            }
         }
     }
 
-    /// After a leaf shrinks, merge it into an adjacent sibling when it is
-    /// under a quarter full and the pair fits in one node — mirrors
+    /// Splice `start..end` ↦ `new` into the subtree at `id` (height `h`).
+    /// Returns the child slots that replace the subtree's slot in its
+    /// parent: none if it emptied (the caller frees `id`), one, or
+    /// several if it split (the first keeps `id`).
+    #[allow(clippy::vec_init_then_push)] // Verus has no `vec!`
+    fn splice_rec(
+        &mut self,
+        id: NodeId,
+        h: usize,
+        start: usize,
+        end: usize,
+        mut new: Vec<A>,
+    ) -> Vec<ChildSlot<A>> {
+        if h == 0 {
+            let len = if let Node::Leaf(l) = self.node_mut(id) {
+                let mut tail = l.aggs.split_off(end);
+                l.aggs.truncate(start);
+                l.aggs.append(&mut new);
+                l.aggs.append(&mut tail);
+                l.aggs.len()
+            } else {
+                unreachable!()
+            };
+            if len == 0 {
+                return Vec::new();
+            }
+            if len <= B {
+                let agg = self.agg_of(id);
+                let mut out = Vec::new();
+                out.push(ChildSlot {
+                    id,
+                    agg,
+                    slab_count: len,
+                });
+                return out;
+            }
+            // Overflow: split into ⌈len/B⌉ leaves, the first keeping `id`.
+            let mut all = Vec::new();
+            if let Node::Leaf(l) = self.node_mut(id) {
+                std::mem::swap(&mut all, &mut l.aggs);
+            }
+            return self.split_leaf(id, all);
+        }
+
+        // Which children hold `start` (or, appending, the last child) and
+        // the last slab of the range.
+        let (ks, ke, off_s, off_e) = {
+            let n = match self.node(id) {
+                Node::Internal(n) => n,
+                Node::Leaf(_) => unreachable!(),
+            };
+            let last = n.children.len() - 1;
+            let mut off = 0;
+            let mut k = 0;
+            while !(start < off + n.children[k].slab_count || k == last) {
+                off += n.children[k].slab_count;
+                k += 1;
+            }
+            let (ks, off_s) = (k, off);
+            if end > start {
+                while !(end - 1 < off + n.children[k].slab_count || k == last) {
+                    off += n.children[k].slab_count;
+                    k += 1;
+                }
+            }
+            (ks, k, off_s, off)
+        };
+        let _ = off_e;
+
+        if ks == ke {
+            let (child_id, shrink) = match self.node(id) {
+                Node::Internal(n) => (n.children[ks].id, new.len() < end - start),
+                Node::Leaf(_) => unreachable!(),
+            };
+            let mut slots = self.splice_rec(child_id, h - 1, start - off_s, end - off_s, new);
+            let merged_leaf = h == 1 && shrink && slots.len() == 1 && slots[0].id == child_id;
+            if slots.is_empty() {
+                self.free(child_id);
+            }
+            if let Node::Internal(n) = self.node_mut(id) {
+                let mut tail = n.children.split_off(ks + 1);
+                n.children.truncate(ks);
+                n.children.append(&mut slots);
+                n.children.append(&mut tail);
+            }
+            if merged_leaf {
+                self.maybe_merge_leaf(id, ks);
+            }
+        } else {
+            // The range spans children ks..=ke: rebuild them at their
+            // height from their slabs, spliced.
+            let mut combined: Vec<A> = Vec::new();
+            let mut taken = if let Node::Internal(n) = self.node_mut(id) {
+                let mut tail = n.children.split_off(ke + 1);
+                let taken = n.children.split_off(ks);
+                n.children.append(&mut tail);
+                taken
+            } else {
+                unreachable!()
+            };
+            let mut i = 0;
+            while i < taken.len() {
+                self.take_subtree(taken[i].id, &mut combined);
+                i += 1;
+            }
+            taken.clear();
+            let mut tail = combined.split_off(end - off_s);
+            combined.truncate(start - off_s);
+            combined.append(&mut new);
+            combined.append(&mut tail);
+            let mut built = self.build_at_height(combined, h - 1);
+            if let Node::Internal(n) = self.node_mut(id) {
+                let mut tail = n.children.split_off(ks);
+                n.children.append(&mut built);
+                n.children.append(&mut tail);
+            }
+        }
+
+        let count = match self.node(id) {
+            Node::Internal(n) => n.children.len(),
+            Node::Leaf(_) => unreachable!(),
+        };
+        if count == 0 {
+            return Vec::new();
+        }
+        if count <= B {
+            let (agg, slab_count) = self.internal_summary(id);
+            let mut out = Vec::new();
+            out.push(ChildSlot {
+                id,
+                agg,
+                slab_count,
+            });
+            return out;
+        }
+        // Overflow: split into ⌈count/B⌉ internal nodes, the first
+        // keeping `id`.
+        let mut all = Vec::new();
+        if let Node::Internal(n) = self.node_mut(id) {
+            std::mem::swap(&mut all, &mut n.children);
+        }
+        self.split_internal(id, all)
+    }
+
+    /// Free the subtree at `id`, appending its slabs to `out` in order.
+    fn take_subtree(&mut self, id: NodeId, out: &mut Vec<A>) {
+        let node = self.nodes[id as usize].take();
+        self.free.push(id);
+        match node {
+            Some(Node::Leaf(mut l)) => out.append(&mut l.aggs),
+            Some(Node::Internal(n)) => {
+                let mut i = 0;
+                while i < n.children.len() {
+                    self.take_subtree(n.children[i].id, out);
+                    i += 1;
+                }
+            }
+            None => unreachable!("freed node id"),
+        }
+    }
+
+    /// After a leaf child shrank, merge it into an adjacent sibling when
+    /// it is under a quarter full and the pair fits in one node — mirrors
     /// `Column::try_merge`'s (min = max/4, combined ≤ max) policy.
     ///
     /// Leaf-level only: internal nodes thin ~B× slower than leaves (they
     /// lose a child only when an entire leaf dies), so leaf merging is
     /// where fill degradation actually shows up.
-    ///
-    /// `path` ends with `(parent_id, child_idx)` for the shrunken leaf.
-    fn maybe_merge_leaf(&mut self, path: &[(NodeId, usize)]) {
-        let Some(&(parent_id, child_idx)) = path.last() else {
-            return; // leaf is the root — nothing to merge with
-        };
+    fn maybe_merge_leaf(&mut self, parent_id: NodeId, child_idx: usize) {
         let (sibling_count, my_len) = match self.node(parent_id) {
             Node::Internal(p) => (p.children.len(), p.children[child_idx].slab_count),
             Node::Leaf(_) => unreachable!(),
@@ -1953,417 +1931,186 @@ impl<A: SlabAggregate> SlabBTree<A> {
         if combined > B {
             return;
         }
-        let src_aggs = match self.node_mut(src_id) {
-            Node::Leaf(l) => std::mem::take(&mut l.aggs),
-            Node::Internal(_) => unreachable!("uniform depth: leaf siblings are leaves"),
+        let mut src_aggs = match self.nodes[src_id as usize].take() {
+            Some(Node::Leaf(l)) => l.aggs,
+            _ => unreachable!("uniform depth: leaf siblings are leaves"),
         };
-        match self.node_mut(dst_id) {
-            Node::Leaf(l) => l.aggs.extend(src_aggs),
-            Node::Internal(_) => unreachable!(),
+        self.free.push(src_id);
+        if let Node::Leaf(l) = self.node_mut(dst_id) {
+            l.aggs.append(&mut src_aggs);
         }
-        self.free(src_id);
         let new_agg = self.agg_of(dst_id);
-        match self.node_mut(parent_id) {
-            Node::Internal(p) => {
-                p.children[dst_idx].agg = new_agg;
-                p.children[dst_idx].slab_count = combined;
-                p.children.remove(src_idx);
-            }
-            Node::Leaf(_) => unreachable!(),
-        }
-        self.update_ancestor_aggregates(&path[..path.len() - 1], parent_id);
-    }
-
-    fn subtree_height(&self, id: NodeId) -> usize {
-        match self.node(id) {
-            Node::Leaf(_) => 0,
-            Node::Internal(n) => {
-                if n.children.is_empty() {
-                    0
-                } else {
-                    1 + self.subtree_height(n.children[0].id)
-                }
-            }
+        if let Node::Internal(p) = self.node_mut(parent_id) {
+            p.children[dst_idx].agg = new_agg;
+            p.children[dst_idx].slab_count = combined;
+            p.children.remove(src_idx);
         }
     }
 
-    fn build_children_at_height(&mut self, aggs: &[A], height: usize) -> Vec<ChildSlot<A>> {
-        if aggs.is_empty() {
-            return Vec::new();
-        }
-        if height == 0 {
-            return self.make_fresh_leaves(aggs);
-        }
-        let below = self.build_children_at_height(aggs, height - 1);
-        if below.is_empty() {
-            return Vec::new();
-        }
-        let num = below.len().div_ceil(B);
-        let base = below.len() / num;
-        let rem = below.len() % num;
-        let mut result = Vec::with_capacity(num);
-        let mut i = 0;
-        for c in 0..num {
-            let size = base + if c < rem { 1 } else { 0 };
-            let children: Vec<ChildSlot<A>> = below[i..i + size].to_vec();
-            let agg = merge_all(children.iter().map(|c| &c.agg));
-            let count: usize = children.iter().map(|c| c.slab_count).sum();
-            let id = self.alloc(Node::Internal(Internal { children }));
-            result.push(ChildSlot {
-                id,
-                agg,
-                slab_count: count,
-            });
-            i += size;
-        }
-        result
+    /// The sizes of ⌈n/B⌉ chunks of `n` items, as even as possible:
+    /// chunk `c` has `base + (c < rem)` items.
+    fn chunking(n: usize) -> (usize, usize, usize) {
+        let num = n.div_ceil(B);
+        (num, n / num, n % num)
     }
 
-    fn make_fresh_leaves(&mut self, aggs: &[A]) -> Vec<ChildSlot<A>> {
-        if aggs.is_empty() {
-            return Vec::new();
-        }
-        let total = aggs.len();
-        let num = total.div_ceil(B);
-        let base = total / num;
-        let rem = total % num;
-        let mut result = Vec::with_capacity(num);
-        let mut i = 0;
-        for c in 0..num {
-            let size = base + if c < rem { 1 } else { 0 };
-            let chunk = &aggs[i..i + size];
-            let agg = merge_all(chunk);
-            let leaf = Leaf {
-                aggs: chunk.to_vec(),
-            };
-            let id = self.alloc(Node::Leaf(leaf));
-            result.push(ChildSlot {
-                id,
-                agg,
-                slab_count: size,
-            });
-            i += size;
-        }
-        result
-    }
-
-    fn split_and_propagate(&mut self, node_id: NodeId, path: Vec<(NodeId, usize)>) {
-        let total = match self.node(node_id) {
-            Node::Internal(n) => n.children.len(),
-            _ => unreachable!(),
-        };
-        let num_chunks = total.div_ceil(B);
-        let base = total / num_chunks;
-        let rem = total % num_chunks;
-        let first_size = base + if rem > 0 { 1 } else { 0 };
-
-        let drained: Vec<ChildSlot<A>> = {
-            let n = match self.node_mut(node_id) {
-                Node::Internal(n) => n,
-                _ => unreachable!(),
-            };
-            n.children.drain(first_size..).collect()
-        };
-
-        let mut replacement: Vec<ChildSlot<A>> = Vec::new();
-        let (first_agg, first_count) = self.internal_summary(node_id);
-        replacement.push(ChildSlot {
-            id: node_id,
-            agg: first_agg,
-            slab_count: first_count,
-        });
-
-        let mut iter = drained.into_iter();
-        for c in 1..num_chunks {
-            let size = base + if c < rem { 1 } else { 0 };
-            let children: Vec<ChildSlot<A>> = iter.by_ref().take(size).collect();
-            let agg = merge_all(children.iter().map(|c| &c.agg));
-            let count: usize = children.iter().map(|c| c.slab_count).sum();
-            let id = self.alloc(Node::Internal(Internal { children }));
-            replacement.push(ChildSlot {
-                id,
-                agg,
-                slab_count: count,
-            });
-        }
-
-        self.propagate_splits(path, replacement);
-    }
-
-    /// Splice into an empty tree.  If ≤ B new aggregates, fill the root
-    /// leaf; otherwise bulk-build.
-    fn splice_into_empty(&mut self, new: &[A]) {
-        if new.is_empty() {
-            return;
-        }
-        if new.len() <= B {
-            match self.node_mut(self.root) {
-                Node::Leaf(l) => l.aggs.extend_from_slice(new),
-                // An empty tree always has a leaf root: `remove_and_cascade`
-                // and the LCA wipe path both reset it.  Reaching this means
-                // the tree was corrupted — fail loudly rather than silently
-                // dropping the inserted aggregates.
-                Node::Internal(_) => unreachable!("empty tree must have a leaf root"),
-            }
-            self.total_slabs = new.len();
-            return;
-        }
-        *self = Self::from_iter(new.iter().cloned());
-    }
-
-    /// Try a single-leaf splice.  Returns `false` if `range` spans
-    /// multiple leaves (caller falls back to rebuild).
-    ///
-    /// Handles two sub-cases:
-    ///   * result ≤ B — in-place edit, O(log n) ancestor aggregate update.
-    ///   * result > B — split the leaf into ⌈len/B⌉ pieces, cascade
-    ///     splits up the parent chain, grow the root if it overflows.
-    fn try_single_leaf_splice(&mut self, range: &Range<usize>, new: &[A]) -> bool {
-        let Some((path, leaf_id, leaf_start)) = self.locate_leaf_for_start(range.start) else {
-            return false;
-        };
-
-        let leaf_aggs_len = match self.node(leaf_id) {
-            Node::Leaf(l) => l.aggs.len(),
-            _ => unreachable!(),
-        };
-        let leaf_end = leaf_start + leaf_aggs_len;
-
-        // Must fit entirely in this one leaf.
-        if range.start < leaf_start || range.end > leaf_end {
-            return false;
-        }
-
-        let local_start = range.start - leaf_start;
-        let local_end = range.end - leaf_start;
-        let new_leaf_len = leaf_aggs_len + new.len() - range.len();
-
-        self.total_slabs = self.total_slabs + new.len() - range.len();
-
-        // Fast path: result fits in one leaf.  Just splice in place and
-        // walk the path updating aggregates.
-        if new_leaf_len <= B {
-            if new_leaf_len == 0 && leaf_id != self.root {
-                // The splice deletes every agg in this leaf.  Empty
-                // non-root nodes are not allowed — remove the leaf from
-                // its parent, cascading if the parent empties too.
-                self.remove_and_cascade(path);
-                return true;
-            }
-            if let Node::Leaf(l) = self.node_mut(leaf_id) {
-                l.aggs.splice(local_start..local_end, new.iter().cloned());
-            }
-            self.update_ancestor_aggregates(&path, leaf_id);
-            if new.len() < range.len() {
-                // The leaf shrank — merge with a sibling if it dropped
-                // below a quarter full.
-                self.maybe_merge_leaf(&path);
-            }
-            return true;
-        }
-
-        // Overflow: build the combined vector, split it into ≤ B-sized
-        // chunks, reuse `leaf_id` for the first chunk and allocate new
-        // leaves for the rest.  Then propagate up.
-        let combined: Vec<A> = {
-            let l = match self.node(leaf_id) {
-                Node::Leaf(l) => l,
-                _ => unreachable!(),
-            };
-            let mut v = Vec::with_capacity(new_leaf_len);
-            v.extend_from_slice(&l.aggs[..local_start]);
-            v.extend_from_slice(new);
-            v.extend_from_slice(&l.aggs[local_end..]);
-            v
-        };
-
-        let new_children = self.make_leaves_from_aggs(leaf_id, &combined);
-        self.propagate_splits(path, new_children);
-        true
-    }
-
-    /// Walk from the root toward the leaf containing slab index `start`.
-    /// Returns the ancestor path (`(parent_id, child_idx)` stack), the
-    /// leaf id, and `leaf_start` (the slab index of the leaf's first
-    /// entry).  Handles the append case (`start == total_slabs`) by
-    /// landing in the last leaf.
-    #[allow(clippy::type_complexity)]
-    fn locate_leaf_for_start(&self, start: usize) -> Option<(Vec<(NodeId, usize)>, NodeId, usize)> {
-        let mut path: Vec<(NodeId, usize)> = Vec::with_capacity(8);
-        let mut remaining = start;
-        let mut leaf_start = 0usize;
-        let mut node_id = self.root;
-        loop {
-            match self.node(node_id) {
-                Node::Leaf(_) => return Some((path, node_id, leaf_start)),
-                Node::Internal(n) => {
-                    if n.children.is_empty() {
-                        return None;
-                    }
-                    let last_idx = n.children.len() - 1;
-                    let mut descended = false;
-                    for (i, c) in n.children.iter().enumerate() {
-                        // Descend into this child if `remaining` falls
-                        // strictly inside its range, or if we're at the
-                        // last child and hit its right boundary (append).
-                        if remaining < c.slab_count || (i == last_idx && remaining == c.slab_count)
-                        {
-                            path.push((node_id, i));
-                            node_id = c.id;
-                            descended = true;
-                            break;
-                        }
-                        remaining -= c.slab_count;
-                        leaf_start += c.slab_count;
-                    }
-                    if !descended {
-                        return None;
-                    }
-                }
-            }
-        }
-    }
-
-    /// After an in-place leaf edit, walk up `path` recomputing each
-    /// ancestor's `agg` + `slab_count` from scratch.  O(log n) nodes,
-    /// each summary is O(B) ops.
-    fn update_ancestor_aggregates(&mut self, path: &[(NodeId, usize)], leaf_id: NodeId) {
-        let mut current = leaf_id;
-        for &(parent_id, child_idx) in path.iter().rev() {
-            let new_agg = self.agg_of(current);
-            let new_count = self.slab_count_of(current);
-            if let Node::Internal(p) = self.node_mut(parent_id) {
-                p.children[child_idx].agg = new_agg;
-                p.children[child_idx].slab_count = new_count;
-            }
-            current = parent_id;
-        }
-    }
-
-    /// Split `aggs` into ⌈len/B⌉ chunks as evenly as possible, reusing
-    /// `first_leaf_id` for the first chunk and allocating new leaves for
-    /// the rest.  Returns the resulting child slots in slab order.
-    fn make_leaves_from_aggs(&mut self, first_leaf_id: NodeId, aggs: &[A]) -> Vec<ChildSlot<A>> {
-        debug_assert!(!aggs.is_empty());
-        let total = aggs.len();
-        let num_leaves = total.div_ceil(B);
-        let base = total / num_leaves;
-        let rem = total % num_leaves;
-
-        let mut result = Vec::with_capacity(num_leaves);
-        let mut i = 0;
-        for c in 0..num_leaves {
-            let size = base + if c < rem { 1 } else { 0 };
-            let chunk = &aggs[i..i + size];
-            let agg = merge_all(chunk);
-            let slab_count = size;
-            let id = if c == 0 {
-                if let Node::Leaf(l) = self.node_mut(first_leaf_id) {
-                    l.aggs.clear();
-                    l.aggs.extend_from_slice(chunk);
-                }
-                first_leaf_id
-            } else {
-                let leaf = Leaf {
-                    aggs: chunk.to_vec(),
-                };
-                self.alloc(Node::Leaf(leaf))
-            };
-            result.push(ChildSlot {
+    /// Split `aggs` (more than B) into leaves, the first being `first_id`.
+    fn split_leaf(&mut self, first_id: NodeId, mut aggs: Vec<A>) -> Vec<ChildSlot<A>> {
+        let (num, base, rem) = Self::chunking(aggs.len());
+        // Build the chunks last to first, splitting each off the end.
+        let mut rev: Vec<ChildSlot<A>> = Vec::new();
+        let mut c = num;
+        while c > 1 {
+            c -= 1;
+            let start = c * base + if c < rem { c } else { rem };
+            let chunk = aggs.split_off(start);
+            let slab_count = chunk.len();
+            let agg = Self::fold_leaf(&chunk);
+            let id = self.alloc(Node::Leaf(Leaf { aggs: chunk }));
+            rev.push(ChildSlot {
                 id,
                 agg,
                 slab_count,
             });
-            i += size;
         }
-        result
+        let slab_count = aggs.len();
+        let agg = Self::fold_leaf(&aggs);
+        if let Node::Leaf(l) = self.node_mut(first_id) {
+            l.aggs = aggs;
+        }
+        rev.push(ChildSlot {
+            id: first_id,
+            agg,
+            slab_count,
+        });
+        Self::reversed(rev)
     }
 
-    /// Cascade structural changes up the ancestor path.  At each level,
-    /// `replacement` is the set of child slots that should replace the
-    /// single child slot at `path[level]`.  If that overflows the
-    /// parent, split the parent and produce a new replacement set for
-    /// the next level up.  If we run out of path (reached the root) and
-    /// still have multiple replacements, grow a new root.
-    fn propagate_splits(&mut self, path: Vec<(NodeId, usize)>, mut replacement: Vec<ChildSlot<A>>) {
-        for (parent_id, child_idx) in path.into_iter().rev() {
-            let new_total = {
-                let p = match self.node_mut(parent_id) {
-                    Node::Internal(n) => n,
-                    _ => unreachable!(),
-                };
-                p.children
-                    .splice(child_idx..child_idx + 1, std::mem::take(&mut replacement));
-                p.children.len()
-            };
-
-            if new_total <= B {
-                let (agg, count) = self.internal_summary(parent_id);
-                replacement.push(ChildSlot {
-                    id: parent_id,
-                    agg,
-                    slab_count: count,
-                });
-                continue;
-            }
-
-            // Parent overflowed — split into ⌈new_total/B⌉ internals.
-            let num_chunks = new_total.div_ceil(B);
-            let base = new_total / num_chunks;
-            let rem = new_total % num_chunks;
-            let first_size = base + if rem > 0 { 1 } else { 0 };
-
-            // Drain the overflow tail out of parent.
-            let drained: Vec<ChildSlot<A>> = {
-                let p = match self.node_mut(parent_id) {
-                    Node::Internal(n) => n,
-                    _ => unreachable!(),
-                };
-                p.children.drain(first_size..).collect()
-            };
-
-            let (first_agg, first_count) = self.internal_summary(parent_id);
-            replacement.push(ChildSlot {
-                id: parent_id,
-                agg: first_agg,
-                slab_count: first_count,
+    /// Split `children` (more than B) into internal nodes, the first
+    /// being `first_id`.
+    fn split_internal(
+        &mut self,
+        first_id: NodeId,
+        mut children: Vec<ChildSlot<A>>,
+    ) -> Vec<ChildSlot<A>> {
+        let (num, base, rem) = Self::chunking(children.len());
+        let mut rev: Vec<ChildSlot<A>> = Vec::new();
+        let mut c = num;
+        while c > 1 {
+            c -= 1;
+            let start = c * base + if c < rem { c } else { rem };
+            let chunk = children.split_off(start);
+            let id = self.alloc(Node::Internal(Internal { children: chunk }));
+            let (agg, slab_count) = self.internal_summary(id);
+            rev.push(ChildSlot {
+                id,
+                agg,
+                slab_count,
             });
+        }
+        if let Node::Internal(n) = self.node_mut(first_id) {
+            n.children = children;
+        }
+        let (agg, slab_count) = self.internal_summary(first_id);
+        rev.push(ChildSlot {
+            id: first_id,
+            agg,
+            slab_count,
+        });
+        Self::reversed(rev)
+    }
 
-            let mut iter = drained.into_iter();
-            for c in 1..num_chunks {
-                let size = base + if c < rem { 1 } else { 0 };
-                let children: Vec<ChildSlot<A>> = iter.by_ref().take(size).collect();
-                debug_assert_eq!(children.len(), size);
-                let agg = merge_all(children.iter().map(|c| &c.agg));
-                let count: usize = children.iter().map(|c| c.slab_count).sum();
-                let id = self.alloc(Node::Internal(Internal { children }));
-                replacement.push(ChildSlot {
+    fn reversed(mut v: Vec<ChildSlot<A>>) -> Vec<ChildSlot<A>> {
+        let mut out = Vec::with_capacity(v.len());
+        while let Some(x) = v.pop() {
+            out.push(x);
+        }
+        out
+    }
+
+    /// Build subtrees of height `h` holding `aggs`, as ⌈n/B⌉-way even
+    /// splits at each level.
+    #[allow(clippy::vec_init_then_push)] // Verus has no `vec!`
+    fn build_at_height(&mut self, mut aggs: Vec<A>, h: usize) -> Vec<ChildSlot<A>> {
+        if aggs.is_empty() {
+            return Vec::new();
+        }
+        if h == 0 {
+            if aggs.len() <= B {
+                let slab_count = aggs.len();
+                let agg = Self::fold_leaf(&aggs);
+                let id = self.alloc(Node::Leaf(Leaf { aggs }));
+                let mut out = Vec::new();
+                out.push(ChildSlot {
                     id,
                     agg,
-                    slab_count: count,
+                    slab_count,
                 });
+                return out;
             }
-            debug_assert!(iter.next().is_none());
+            let first = self.alloc(Node::Leaf(Leaf { aggs: Vec::new() }));
+            let mut all = Vec::new();
+            std::mem::swap(&mut all, &mut aggs);
+            return self.split_leaf(first, all);
         }
+        let below = self.build_at_height(aggs, h - 1);
+        self.group(below)
+    }
 
-        // Path exhausted — decide what to do at the root.
-        match replacement.len() {
-            0 => {}
-            1 => {
-                let slot = replacement[0].clone();
-                if slot.id != self.root {
-                    self.free(self.root);
-                    self.root = slot.id;
-                }
+    /// Group sibling slots under new internal nodes, ⌈n/B⌉ of them.
+    #[allow(clippy::vec_init_then_push)] // Verus has no `vec!`
+    fn group(&mut self, slots: Vec<ChildSlot<A>>) -> Vec<ChildSlot<A>> {
+        if slots.len() <= B {
+            let id = self.alloc(Node::Internal(Internal { children: slots }));
+            let (agg, slab_count) = self.internal_summary(id);
+            let mut out = Vec::new();
+            out.push(ChildSlot {
+                id,
+                agg,
+                slab_count,
+            });
+            return out;
+        }
+        let first = self.alloc(Node::Internal(Internal {
+            children: Vec::new(),
+        }));
+        self.split_internal(first, slots)
+    }
+
+    /// Install the slots a splice returned for the root.
+    fn set_root(&mut self, mut slots: Vec<ChildSlot<A>>) {
+        if slots.is_empty() {
+            // The whole tree was deleted: reset to a fresh empty leaf,
+            // reusing the root id.
+            self.nodes[self.root as usize] = Some(Node::Leaf(Leaf { aggs: Vec::new() }));
+            return;
+        }
+        // Grow new root levels while there are too many for one node.
+        while slots.len() > B {
+            slots = self.group(slots);
+        }
+        if slots.len() == 1 {
+            let id = slots[0].id;
+            if id != self.root {
+                self.free(self.root);
+                self.root = id;
             }
-            _ => {
-                // Root overflowed — grow a new root one level up.
-                let new_root = Internal {
-                    children: replacement,
-                };
-                let new_root_id = self.alloc(Node::Internal(new_root));
-                self.root = new_root_id;
-            }
+            return;
+        }
+        self.root = self.alloc(Node::Internal(Internal { children: slots }));
+    }
+
+    /// While the root is an internal node with exactly one child, promote
+    /// the child.  Keeps query depth proportional to the live tree after
+    /// large deletions.  Called once per structural mutation.
+    fn collapse_root(&mut self) {
+        loop {
+            let child = match self.node(self.root) {
+                Node::Internal(n) if n.children.len() == 1 => n.children[0].id,
+                _ => return,
+            };
+            self.free(self.root);
+            self.root = child;
         }
     }
 
@@ -2375,24 +2122,6 @@ impl<A: SlabAggregate> SlabBTree<A> {
                 (agg, count)
             }
             _ => unreachable!(),
-        }
-    }
-
-    fn slab_count_of(&self, id: NodeId) -> usize {
-        match self.node(id) {
-            Node::Leaf(l) => l.aggs.len(),
-            Node::Internal(n) => n.children.iter().map(|c| c.slab_count).sum(),
-        }
-    }
-
-    fn collect_into(&self, id: NodeId, out: &mut Vec<A>) {
-        match self.node(id) {
-            Node::Leaf(l) => out.extend_from_slice(&l.aggs),
-            Node::Internal(n) => {
-                for c in &n.children {
-                    self.collect_into(c.id, out);
-                }
-            }
         }
     }
 }
