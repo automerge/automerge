@@ -27,6 +27,11 @@ thiserror = "^2.0.12"
 # normal build.
 vstd = "=0.0.0-2026-10-25-0158"
 
+# `cargo verus verify -p hexane` checks the proofs (src/leb128_codec.rs,
+# src/bijou64.rs with `--features bijou64`, src/btree.rs).
+[package.metadata.verus]
+verify = true
+
 [dev-dependencies]
 proptest = { version = "^1.7", default-features = false, features = ["std"] }
 rand = { version = "^0.10", optional = false }

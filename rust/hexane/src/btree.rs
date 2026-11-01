@@ -21,11 +21,20 @@
 //! thin ~B× slower than leaves (losing a child only when a whole leaf
 //! dies), so under realistic churn their fill follows the leaf count;
 //! worst case is extra memory, never incorrect queries.
+//!
+//! Verification (Verus, `cargo verus verify -p hexane`): the tree stands
+//! for a sequence of slab aggregates (its `View`), and `wf` is the
+//! invariant tying the arena to it — every cached child slab count and
+//! item count is right.  `find_by_prefix` and `items_before_slab` are
+//! proved against that sequence.  The mutators are not verified yet, so
+//! nothing yet proves that they preserve `wf`.
 
 use crate::prefix::PrefixSlabWeight;
 use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::ops::{Add, AddAssign, Range, SubAssign};
+#[allow(unused_imports)]
+use vstd::prelude::*;
 
 /// Branching factor.  Smaller = deeper tree + cheaper per-node rebalance;
 /// larger = fewer nodes + more per-node cost.  64 is empirically a good
@@ -34,6 +43,8 @@ use std::ops::{Add, AddAssign, Range, SubAssign};
 const B: usize = 64;
 
 // ── SlabAggregate trait ─────────────────────────────────────────────────────
+
+verus! {
 
 /// A per-slab value that aggregates associatively (in left-to-right
 /// order) into per-subtree values.  Used both as the leaf's per-slab
@@ -44,13 +55,647 @@ const B: usize = 64;
 /// is fine (e.g. delta-running-min semantics) as long as the tree
 /// always walks children left-to-right.
 #[allow(clippy::len_without_is_empty)]
-pub trait SlabAggregate: Clone + Default + std::fmt::Debug {
+pub trait SlabAggregate: Clone + Default + std::fmt::Debug + Sized {
+    /// [`len`](Self::len), for specifications.
+    spec fn spec_len(&self) -> nat;
+
     /// Combine two adjacent subtree aggregates into one.
     fn merge(l: &Self, r: &Self) -> Self;
+
     /// Number of items covered by this aggregate.  Used by generic
     /// tree-walking helpers (e.g. `find_by_prefix`); concrete impls
     /// typically access a `.len` field directly.
-    fn len(&self) -> usize;
+    fn len(&self) -> (n: usize)
+        ensures n == self.spec_len();
+}
+
+// ── SlabAgg (used by DeltaColumn) ───────────────────────────────────────────
+
+/// Running min/max of a delta column's prefix-sum range.  The specific
+/// aggregate used by `DeltaColumn`'s default `IndexedDeltaWeightFn` for
+/// value-range pruning.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
+pub struct SlabAgg {
+    pub len: usize,
+    pub total: i64,
+    pub min_offset: i64,
+    pub max_offset: i64,
+}
+
+impl SlabAggregate for SlabAgg {
+    open spec fn spec_len(&self) -> nat {
+        self.len as nat
+    }
+
+    // Not yet verified (nothing is claimed about it).
+    #[verifier::external_body]
+    fn merge(l: &Self, r: &Self) -> Self {
+        if l.len == 0 {
+            return *r;
+        }
+        if r.len == 0 {
+            return *l;
+        }
+        SlabAgg {
+            len: l.len + r.len,
+            total: l.total + r.total,
+            min_offset: l.min_offset.min(l.total + r.min_offset),
+            max_offset: l.max_offset.max(l.total + r.max_offset),
+        }
+    }
+
+    fn len(&self) -> usize {
+        self.len
+    }
+}
+
+// ── SlabAggregate for usize (LenWeight) ─────────────────────────────────────
+
+impl SlabAggregate for usize {
+    open spec fn spec_len(&self) -> nat {
+        *self as nat
+    }
+
+    // Not yet verified (nothing is claimed about it).
+    #[verifier::external_body]
+    fn merge(l: &Self, r: &Self) -> Self {
+        *l + *r
+    }
+
+    fn len(&self) -> usize {
+        *self
+    }
+}
+
+// ── SlabAggregate for PrefixSlabWeight ──────────────────────────────────────
+
+impl<P> SlabAggregate for PrefixSlabWeight<P>
+where
+    P: Clone + Default + std::fmt::Debug + AddAssign + SubAssign,
+{
+    closed spec fn spec_len(&self) -> nat {
+        self.len as nat
+    }
+
+    // Not yet verified (nothing is claimed about it).
+    #[verifier::external_body]
+    fn merge(l: &Self, r: &Self) -> Self {
+        let mut out = l.clone();
+        out += r.clone();
+        out
+    }
+
+    fn len(&self) -> usize {
+        self.len
+    }
+}
+
+// ── Nodes ───────────────────────────────────────────────────────────────────
+
+type NodeId = u32;
+
+#[derive(Debug, Clone)]
+#[verifier::allow(autoderive_clone_without_spec)]
+enum Node<A: SlabAggregate> {
+    Leaf(Leaf<A>),
+    Internal(Internal<A>),
+}
+
+#[derive(Debug, Clone)]
+#[verifier::allow(autoderive_clone_without_spec)]
+struct Leaf<A: SlabAggregate> {
+    aggs: Vec<A>,
+}
+
+#[derive(Debug, Clone)]
+#[verifier::allow(autoderive_clone_without_spec)]
+struct Internal<A: SlabAggregate> {
+    children: Vec<ChildSlot<A>>,
+}
+
+/// One entry in an internal node: pointer to a child subtree plus that
+/// subtree's aggregate and slab count (redundant with what the child
+/// root could recompute, but cached here so top-down walks are
+/// constant-time per node).
+#[derive(Debug, Clone)]
+#[verifier::allow(autoderive_clone_without_spec)]
+struct ChildSlot<A: SlabAggregate> {
+    id: NodeId,
+    agg: A,
+    slab_count: usize,
+}
+
+// ── Tree ────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+#[verifier::allow(autoderive_clone_without_spec)]
+pub struct SlabBTree<A: SlabAggregate> {
+    nodes: Vec<Option<Node<A>>>,
+    free: Vec<NodeId>,
+    root: NodeId,
+    total_slabs: usize,
+    _phantom: PhantomData<A>,
+}
+
+// ── The tree as a sequence of slab aggregates ───────────────────────────────
+
+/// The number of items in a sequence of slabs.
+pub open spec fn sum_len<A: SlabAggregate>(s: Seq<A>) -> nat
+    decreases s.len(),
+{
+    if s.len() == 0 { 0 } else { sum_len(s.drop_last()) + s.last().spec_len() }
+}
+
+pub proof fn lemma_sum_len_concat<A: SlabAggregate>(a: Seq<A>, b: Seq<A>)
+    ensures sum_len(a + b) == sum_len(a) + sum_len(b),
+    decreases b.len(),
+{
+    if b.len() == 0 {
+        assert(a + b =~= a);
+    } else {
+        assert((a + b).drop_last() =~= a + b.drop_last());
+        lemma_sum_len_concat(a, b.drop_last());
+    }
+}
+
+impl<A: SlabAggregate> SlabBTree<A> {
+    spec fn node_spec(&self, id: NodeId) -> Option<Node<A>> {
+        if (id as int) < self.nodes@.len() { self.nodes@[id as int] } else { None }
+    }
+
+    /// The slabs under node `id`, read as a subtree of height `h` (a
+    /// leaf has height 0), in order.
+    spec fn slabs(&self, id: NodeId, h: nat) -> Seq<A>
+        decreases h, 0nat,
+    {
+        match self.node_spec(id) {
+            Some(Node::Leaf(l)) => l.aggs@,
+            Some(Node::Internal(n)) => if h == 0 {
+                Seq::empty()
+            } else {
+                self.children_slabs(n.children@, (h - 1) as nat)
+            },
+            None => Seq::empty(),
+        }
+    }
+
+    /// The slabs under a run of sibling subtrees of height `h`.
+    spec fn children_slabs(&self, cs: Seq<ChildSlot<A>>, h: nat) -> Seq<A>
+        decreases h, cs.len(),
+    {
+        if cs.len() == 0 {
+            Seq::empty()
+        } else {
+            self.children_slabs(cs.drop_last(), h) + self.slabs(cs.last().id, h)
+        }
+    }
+
+    /// Node `id` is a tree of height `h` whose cached child slab counts
+    /// and item counts are right.
+    spec fn wf_node(&self, id: NodeId, h: nat) -> bool
+        decreases h,
+    {
+        match self.node_spec(id) {
+            Some(Node::Leaf(_)) => h == 0,
+            Some(Node::Internal(n)) => h > 0 && forall|i: int| 0 <= i < n.children@.len() ==> {
+                let c = #[trigger] n.children@[i];
+                &&& self.wf_node(c.id, (h - 1) as nat)
+                &&& c.slab_count == self.slabs(c.id, (h - 1) as nat).len()
+                &&& c.agg.spec_len() == sum_len(self.slabs(c.id, (h - 1) as nat))
+            },
+            None => false,
+        }
+    }
+
+    pub closed spec fn height(&self) -> nat {
+        choose|h: nat| self.wf_node(self.root, h)
+    }
+
+    /// The tree invariant.
+    pub closed spec fn wf(&self) -> bool {
+        &&& exists|h: nat| self.wf_node(self.root, h)
+        &&& self.total_slabs == self@.len()
+        &&& sum_len(self@) <= usize::MAX
+    }
+
+    proof fn lemma_children_slabs_push(&self, cs: Seq<ChildSlot<A>>, k: int, h: nat)
+        requires 0 <= k < cs.len(),
+        ensures
+            self.children_slabs(cs.take(k + 1), h)
+                == self.children_slabs(cs.take(k), h) + self.slabs(cs[k].id, h),
+    {
+        assert(cs.take(k + 1).drop_last() =~= cs.take(k));
+    }
+
+    proof fn lemma_children_slabs_concat(&self, a: Seq<ChildSlot<A>>, b: Seq<ChildSlot<A>>, h: nat)
+        ensures self.children_slabs(a + b, h) == self.children_slabs(a, h) + self.children_slabs(b, h),
+        decreases b.len(),
+    {
+        if b.len() == 0 {
+            assert(a + b =~= a);
+            assert(self.children_slabs(a, h) + Seq::<A>::empty() =~= self.children_slabs(a, h));
+        } else {
+            assert((a + b).drop_last() =~= a + b.drop_last());
+            self.lemma_children_slabs_concat(a, b.drop_last(), h);
+            assert(self.children_slabs(a + b, h) =~= self.children_slabs(a, h)
+                + (self.children_slabs(b.drop_last(), h) + self.slabs(b.last().id, h)));
+        }
+    }
+
+    /// Splitting a node's children at `k`: what lies before child `k`,
+    /// child `k`'s own slabs, and what lies after.
+    proof fn lemma_children_slabs_split(&self, cs: Seq<ChildSlot<A>>, k: int, h: nat)
+        requires 0 <= k < cs.len(),
+        ensures
+            self.children_slabs(cs, h) == self.children_slabs(cs.take(k), h)
+                + self.slabs(cs[k].id, h) + self.children_slabs(cs.skip(k + 1), h),
+    {
+        assert(cs =~= cs.take(k + 1) + cs.skip(k + 1));
+        self.lemma_children_slabs_concat(cs.take(k + 1), cs.skip(k + 1), h);
+        self.lemma_children_slabs_push(cs, k, h);
+    }
+
+    /// What a well-formed internal node says about its `k`-th child.
+    proof fn lemma_child(&self, id: NodeId, h: nat, n: Internal<A>, k: int)
+        requires
+            self.wf_node(id, h),
+            self.node_spec(id) == Some(Node::Internal(n)),
+            0 <= k < n.children@.len(),
+        ensures
+            h > 0,
+            self.slabs(id, h) == self.children_slabs(n.children@, (h - 1) as nat),
+            self.wf_node(n.children@[k].id, (h - 1) as nat),
+            n.children@[k].slab_count == self.slabs(n.children@[k].id, (h - 1) as nat).len(),
+            n.children@[k].agg.spec_len() == sum_len(self.slabs(n.children@[k].id, (h - 1) as nat)),
+    {
+        let c = n.children@[k];
+        assert(c == n.children@[k]);
+    }
+
+    fn node(&self, id: NodeId) -> (r: &Node<A>)
+        requires self.node_spec(id) is Some,
+        ensures Some(*r) == self.node_spec(id),
+    {
+        self.nodes[id as usize].as_ref().expect("freed node id")
+    }
+
+    pub(crate) fn new() -> (t: Self)
+        ensures t.wf(), t@ == Seq::<A>::empty(),
+    {
+        let mut nodes = Vec::with_capacity(8);
+        nodes.push(Some(Node::Leaf(Leaf { aggs: Vec::new() })));
+        let t = Self {
+            nodes,
+            free: Vec::new(),
+            root: 0,
+            total_slabs: 0,
+            _phantom: PhantomData,
+        };
+        assert(t.wf_node(t.root, 0));
+        assert(t@ =~= Seq::<A>::empty());
+        t
+    }
+
+    pub(crate) fn len(&self) -> (n: usize)
+        requires self.wf(),
+        ensures n == self@.len(),
+    {
+        self.total_slabs
+    }
+
+    /// Find the slab index containing the `pos`-th item and the
+    /// item-count of items strictly before that slab.  Returns `None`
+    /// if `pos >= total_items`.
+    ///
+    /// Out-of-range `pos` is detected during the descent (no child
+    /// covers the remainder), so no upfront root-aggregate merge is
+    /// needed — this runs on every positional lookup.
+    pub(crate) fn find_by_prefix(&self, pos: usize) -> (r: Option<(usize, usize)>)
+        requires self.wf(),
+        ensures
+            match r {
+                Some((i, before)) => i < self@.len()
+                    && before == sum_len(self@.take(i as int))
+                    && before <= pos < before + self@[i as int].spec_len(),
+                None => pos >= sum_len(self@),
+            },
+    {
+        // the items left to skip within `node`'s subtree
+        let ghost mut h = self.height();
+        // the slabs left and right of `node`'s subtree
+        let ghost mut left = Seq::<A>::empty();
+        let ghost mut right = Seq::<A>::empty();
+        let mut node = self.root;
+        let mut rest = pos;
+        let mut slab_idx_base: usize = 0;
+        let mut items_before: usize = 0;
+        proof {
+            assert(self.wf_node(self.root, h));
+            assert(self@ =~= left + self.slabs(node, h) + right);
+        }
+        loop
+            invariant
+                self.wf(),
+                self.wf_node(node, h),
+                self@ == left + self.slabs(node, h) + right,
+                slab_idx_base == left.len(),
+                items_before == sum_len(left),
+                items_before + rest == pos,
+                rest < sum_len(self.slabs(node, h)) || (left.len() == 0 && right.len() == 0),
+            decreases h,
+        {
+            proof {
+                lemma_sum_len_concat(left, self.slabs(node, h));
+                lemma_sum_len_concat(left + self.slabs(node, h), right);
+            }
+            match self.node(node) {
+                Node::Leaf(l) => {
+                    let ghost aggs = l.aggs@;
+                    assert(self.slabs(node, h) == aggs);
+                    let mut i: usize = 0;
+                    while i < l.aggs.len()
+                        invariant
+                            self.wf(),
+                            i <= aggs.len(), aggs == l.aggs@,
+                            self@ == left + aggs + right,
+                            slab_idx_base == left.len(),
+                            items_before == sum_len(left) + sum_len(aggs.take(i as int)),
+                            items_before + rest == pos,
+                            rest + sum_len(aggs.take(i as int)) < sum_len(aggs)
+                                || (left.len() == 0 && right.len() == 0),
+                        decreases aggs.len() - i,
+                    {
+                        let a = &l.aggs[i];
+                        proof {
+                            assert(aggs.take(i + 1).drop_last() =~= aggs.take(i as int));
+                            assert(self@.take(left.len() + i) =~= left + aggs.take(i as int));
+                            assert(self@[left.len() + i] == aggs[i as int]);
+                            lemma_sum_len_concat(left, aggs.take(i as int));
+                        }
+                        if rest < a.len() {
+                            return Some((slab_idx_base + i, items_before));
+                        }
+                        rest -= a.len();
+                        items_before += a.len();
+                        i += 1;
+                    }
+                    proof {
+                        assert(aggs.take(i as int) =~= aggs);
+                        assert(self@ =~= aggs);
+                    }
+                    return None;
+                }
+                Node::Internal(n) => {
+                    let ghost cs = n.children@;
+                    let ghost hc = (h - 1) as nat;
+                    let ghost h0 = h;
+                    proof {
+                        if cs.len() > 0 {
+                            self.lemma_child(node, h, *n, 0);
+                        } else {
+                            assert(self.wf_node(node, h));
+                        }
+                    }
+                    assert(self.slabs(node, h) == self.children_slabs(cs, hc));
+                    let mut k: usize = 0;
+                    loop
+                        invariant_except_break
+                            k <= cs.len(), h == h0,
+                            self.wf_node(node, h),
+                            self.node_spec(node) == Some(Node::Internal(*n)),
+                            self@ == left + self.children_slabs(cs, hc) + right,
+                            slab_idx_base == left.len() + self.children_slabs(cs.take(k as int), hc).len(),
+                            items_before == sum_len(left) + sum_len(self.children_slabs(cs.take(k as int), hc)),
+                            items_before + rest == pos,
+                            rest + sum_len(self.children_slabs(cs.take(k as int), hc))
+                                < sum_len(self.children_slabs(cs, hc))
+                                || (left.len() == 0 && right.len() == 0),
+                        invariant
+                            self.wf(), cs == n.children@, h0 > 0, hc == h0 - 1,
+                        ensures
+                            h < h0,
+                            self.wf_node(node, h),
+                            self@ == left + self.slabs(node, h) + right,
+                            slab_idx_base == left.len(),
+                            items_before == sum_len(left),
+                            items_before + rest == pos,
+                            rest < sum_len(self.slabs(node, h)),
+                        decreases cs.len() - k,
+                    {
+                        if k == n.children.len() {
+                            proof {
+                                assert(cs.take(k as int) =~= cs);
+                                assert(self@ =~= self.children_slabs(cs, hc));
+                            }
+                            return None;
+                        }
+                        let c = &n.children[k];
+                        let ghost before = self.children_slabs(cs.take(k as int), hc);
+                        let ghost mid = self.slabs(c.id, hc);
+                        let ghost after = self.children_slabs(cs.skip(k + 1), hc);
+                        proof {
+                            assert(c == cs[k as int]);
+                            self.lemma_child(node, h, *n, k as int);
+                            self.lemma_children_slabs_split(cs, k as int, hc);
+                            self.lemma_children_slabs_push(cs, k as int, hc);
+                            lemma_sum_len_concat(before, mid);
+                            lemma_sum_len_concat(before + mid, after);
+                        }
+                        if rest < c.agg.len() {
+                            proof {
+                                lemma_sum_len_concat(left, before);
+                                left = left + before;
+                                right = after + right;
+                                h = hc;
+                                assert(self@ =~= left + self.slabs(c.id, h) + right);
+                            }
+                            node = c.id;
+                            break;
+                        }
+                        rest -= c.agg.len();
+                        items_before += c.agg.len();
+                        slab_idx_base += c.slab_count;
+                        k += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    /// Number of items in slabs `0..slab_idx`.  O(log n) — descends by
+    /// slab count, accumulating the item lengths of skipped siblings.
+    /// `slab_idx` may equal the total slab count (returns total items).
+    pub(crate) fn items_before_slab(&self, slab_idx: usize) -> (r: usize)
+        requires self.wf(), slab_idx <= self@.len(),
+        ensures r == sum_len(self@.take(slab_idx as int)),
+    {
+        let ghost mut h = self.height();
+        // the slabs left and right of `node`'s subtree
+        let ghost mut left = Seq::<A>::empty();
+        let ghost mut right = Seq::<A>::empty();
+        let mut remaining = slab_idx;
+        let mut items = 0;
+        let mut node = self.root;
+        proof {
+            assert(self.wf_node(self.root, h));
+            assert(self@ =~= left + self.slabs(node, h) + right);
+        }
+        loop
+            invariant
+                self.wf(),
+                self.wf_node(node, h),
+                self@ == left + self.slabs(node, h) + right,
+                left.len() + remaining == slab_idx, slab_idx <= self@.len(),
+                items == sum_len(left),
+                remaining < self.slabs(node, h).len() || right.len() == 0,
+            decreases h,
+        {
+            proof {
+                lemma_sum_len_concat(left, self.slabs(node, h));
+                lemma_sum_len_concat(left + self.slabs(node, h), right);
+            }
+            match self.node(node) {
+                Node::Leaf(l) => {
+                    let ghost aggs = l.aggs@;
+                    assert(self.slabs(node, h) == aggs);
+                    let mut i: usize = 0;
+                    while i < l.aggs.len()
+                        invariant
+                            self.wf(),
+                            i <= aggs.len(), aggs == l.aggs@,
+                            self@ == left + aggs + right,
+                            left.len() + i + remaining == slab_idx, slab_idx <= self@.len(),
+                            items == sum_len(left) + sum_len(aggs.take(i as int)),
+                            i + remaining < aggs.len() || right.len() == 0,
+                        decreases aggs.len() - i,
+                    {
+                        proof {
+                            assert(aggs.take(i + 1).drop_last() =~= aggs.take(i as int));
+                            lemma_sum_len_concat(left, aggs.take(i as int));
+                        }
+                        if remaining == 0 {
+                            proof { assert(self@.take(slab_idx as int) =~= left + aggs.take(i as int)); }
+                            return items;
+                        }
+                        proof {
+                            assert(self@.take(left.len() + i + 1) =~= left + aggs.take(i + 1));
+                            lemma_sum_len_concat(left, aggs.take(i + 1));
+                            assert(self@ =~= self@.take(left.len() + i + 1) + self@.skip(left.len() + i + 1));
+                            lemma_sum_len_concat(self@.take(left.len() + i + 1), self@.skip(left.len() + i + 1));
+                        }
+                        remaining -= 1;
+                        items += l.aggs[i].len();
+                        i += 1;
+                    }
+                    proof {
+                        assert(aggs.take(i as int) =~= aggs);
+                        assert(self@.take(slab_idx as int) =~= left + aggs);
+                        lemma_sum_len_concat(left, aggs);
+                    }
+                    return items;
+                }
+                Node::Internal(n) => {
+                    let ghost cs = n.children@;
+                    let ghost hc = (h - 1) as nat;
+                    let ghost h0 = h;
+                    proof {
+                        if cs.len() > 0 {
+                            self.lemma_child(node, h, *n, 0);
+                        } else {
+                            assert(self.wf_node(node, h));
+                        }
+                    }
+                    assert(self.slabs(node, h) == self.children_slabs(cs, hc));
+                    let mut k: usize = 0;
+                    loop
+                        invariant_except_break
+                            k <= cs.len(), h == h0,
+                            self.wf_node(node, h),
+                            self.node_spec(node) == Some(Node::Internal(*n)),
+                            self@ == left + self.children_slabs(cs, hc) + right,
+                            left.len() + self.children_slabs(cs.take(k as int), hc).len() + remaining
+                                == slab_idx,
+                            slab_idx <= self@.len(),
+                            items == sum_len(left) + sum_len(self.children_slabs(cs.take(k as int), hc)),
+                            self.children_slabs(cs.take(k as int), hc).len() + remaining
+                                < self.children_slabs(cs, hc).len() || right.len() == 0,
+                        invariant
+                            self.wf(), cs == n.children@, h0 > 0, hc == h0 - 1,
+                        ensures
+                            h < h0,
+                            self.wf_node(node, h),
+                            self@ == left + self.slabs(node, h) + right,
+                            left.len() + remaining == slab_idx,
+                            items == sum_len(left),
+                            remaining < self.slabs(node, h).len(),
+                        decreases cs.len() - k,
+                    {
+                        if k == n.children.len() {
+                            proof {
+                                assert(cs.take(k as int) =~= cs);
+                                assert(self@.take(slab_idx as int) =~= left + self.children_slabs(cs, hc));
+                                lemma_sum_len_concat(left, self.children_slabs(cs, hc));
+                            }
+                            return items;
+                        }
+                        let c = &n.children[k];
+                        let ghost before = self.children_slabs(cs.take(k as int), hc);
+                        let ghost mid = self.slabs(c.id, hc);
+                        let ghost after = self.children_slabs(cs.skip(k + 1), hc);
+                        proof {
+                            assert(c == cs[k as int]);
+                            self.lemma_child(node, h, *n, k as int);
+                            self.lemma_children_slabs_split(cs, k as int, hc);
+                            self.lemma_children_slabs_push(cs, k as int, hc);
+                            lemma_sum_len_concat(before, mid);
+                            lemma_sum_len_concat(left, before);
+                            lemma_sum_len_concat(left, before + mid);
+                            assert(self@ =~= (left + (before + mid)) + (after + right));
+                            lemma_sum_len_concat(left + (before + mid), after + right);
+                        }
+                        if remaining < c.slab_count {
+                            proof {
+                                left = left + before;
+                                right = after + right;
+                                h = hc;
+                                assert(self@ =~= left + self.slabs(c.id, h) + right);
+                            }
+                            node = c.id;
+                            break;
+                        }
+                        remaining -= c.slab_count;
+                        items += c.agg.len();
+                        k += 1;
+                    }
+                }
+            }
+        }
+    }
+}
+
+impl<A: SlabAggregate> View for SlabBTree<A> {
+    type V = Seq<A>;
+
+    /// The slab aggregates, in order.
+    closed spec fn view(&self) -> Seq<A> {
+        self.slabs(self.root, self.height())
+    }
+}
+
+} // verus!
+
+impl<A: SlabAggregate> Default for Leaf<A> {
+    fn default() -> Self {
+        Self { aggs: Vec::new() }
+    }
+}
+
+impl<A: SlabAggregate + Copy> Copy for ChildSlot<A> {}
+
+impl<A: SlabAggregate> Default for SlabBTree<A> {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 /// Aggregate that additionally carries a prefix-sum value per slab,
@@ -95,38 +740,6 @@ fn merge_all<'a, A: SlabAggregate + 'a>(aggs: impl IntoIterator<Item = &'a A>) -
 
 // ── SlabAgg (used by DeltaColumn) ───────────────────────────────────────────
 
-/// Running min/max of a delta column's prefix-sum range.  The specific
-/// aggregate used by `DeltaColumn`'s default `IndexedDeltaWeightFn` for
-/// value-range pruning.
-#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
-pub struct SlabAgg {
-    pub len: usize,
-    pub total: i64,
-    pub min_offset: i64,
-    pub max_offset: i64,
-}
-
-impl SlabAggregate for SlabAgg {
-    fn merge(l: &Self, r: &Self) -> Self {
-        if l.len == 0 {
-            return *r;
-        }
-        if r.len == 0 {
-            return *l;
-        }
-        SlabAgg {
-            len: l.len + r.len,
-            total: l.total + r.total,
-            min_offset: l.min_offset.min(l.total + r.min_offset),
-            max_offset: l.max_offset.max(l.total + r.max_offset),
-        }
-    }
-
-    fn len(&self) -> usize {
-        self.len
-    }
-}
-
 impl PrefixAggregate for SlabAgg {
     type Prefix = i64;
     fn prefix(&self) -> &i64 {
@@ -148,34 +761,6 @@ impl SlabAgg {
     }
 }
 
-// ── SlabAggregate for usize (LenWeight) ─────────────────────────────────────
-
-impl SlabAggregate for usize {
-    fn merge(l: &Self, r: &Self) -> Self {
-        *l + *r
-    }
-    fn len(&self) -> usize {
-        *self
-    }
-}
-
-// ── SlabAggregate for PrefixSlabWeight ──────────────────────────────────────
-
-impl<P> SlabAggregate for PrefixSlabWeight<P>
-where
-    P: Clone + Default + std::fmt::Debug + AddAssign + SubAssign,
-{
-    fn merge(l: &Self, r: &Self) -> Self {
-        let mut out = l.clone();
-        out += r.clone();
-        out
-    }
-
-    fn len(&self) -> usize {
-        self.len
-    }
-}
-
 impl<P> PrefixAggregate for PrefixSlabWeight<P>
 where
     P: Clone
@@ -192,79 +777,7 @@ where
     }
 }
 
-// ── Nodes ───────────────────────────────────────────────────────────────────
-
-type NodeId = u32;
-
-#[derive(Debug, Clone)]
-enum Node<A: SlabAggregate> {
-    Leaf(Leaf<A>),
-    Internal(Internal<A>),
-}
-
-#[derive(Debug, Clone)]
-struct Leaf<A: SlabAggregate> {
-    aggs: Vec<A>,
-}
-
-impl<A: SlabAggregate> Default for Leaf<A> {
-    fn default() -> Self {
-        Self { aggs: Vec::new() }
-    }
-}
-
-#[derive(Debug, Clone)]
-struct Internal<A: SlabAggregate> {
-    children: Vec<ChildSlot<A>>,
-}
-
-/// One entry in an internal node: pointer to a child subtree plus that
-/// subtree's aggregate and slab count (redundant with what the child
-/// root could recompute, but cached here so top-down walks are
-/// constant-time per node).
-#[derive(Debug, Clone)]
-struct ChildSlot<A: SlabAggregate> {
-    id: NodeId,
-    agg: A,
-    slab_count: usize,
-}
-
-impl<A: SlabAggregate + Copy> Copy for ChildSlot<A> {}
-
-// ── Tree ────────────────────────────────────────────────────────────────────
-
-#[derive(Debug, Clone)]
-pub struct SlabBTree<A: SlabAggregate> {
-    nodes: Vec<Option<Node<A>>>,
-    free: Vec<NodeId>,
-    root: NodeId,
-    total_slabs: usize,
-    _phantom: PhantomData<A>,
-}
-
-impl<A: SlabAggregate> Default for SlabBTree<A> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl<A: SlabAggregate> SlabBTree<A> {
-    pub(crate) fn new() -> Self {
-        let mut nodes = Vec::with_capacity(8);
-        nodes.push(Some(Node::Leaf(Leaf::default())));
-        Self {
-            nodes,
-            free: Vec::new(),
-            root: 0,
-            total_slabs: 0,
-            _phantom: PhantomData,
-        }
-    }
-
-    pub(crate) fn len(&self) -> usize {
-        self.total_slabs
-    }
-
     #[cfg(test)]
     pub(crate) fn is_empty(&self) -> bool {
         self.total_slabs == 0
@@ -294,10 +807,6 @@ impl<A: SlabAggregate> SlabBTree<A> {
     fn free(&mut self, id: NodeId) {
         self.nodes[id as usize] = None;
         self.free.push(id);
-    }
-
-    fn node(&self, id: NodeId) -> &Node<A> {
-        self.nodes[id as usize].as_ref().expect("freed node id")
     }
 
     fn node_mut(&mut self, id: NodeId) -> &mut Node<A> {
@@ -1179,90 +1688,6 @@ impl<A: SlabAggregate> SlabBTree<A> {
             }
         }
     }
-
-    // ── Positional lookup ───────────────────────────────────────────────
-
-    /// Find the slab index containing the `pos`-th item and the
-    /// item-count of items strictly before that slab.  Returns `None`
-    /// if `pos >= total_items`.
-    ///
-    /// Out-of-range `pos` is detected during the descent (no child
-    /// covers the remainder), so no upfront root-aggregate merge is
-    /// needed — this runs on every positional lookup.
-    pub(crate) fn find_by_prefix(&self, pos: usize) -> Option<(usize, usize)> {
-        let mut node = self.root;
-        let mut pos = pos;
-        let mut slab_idx_base = 0;
-        let mut items_before = 0;
-        loop {
-            match self.node(node) {
-                Node::Leaf(l) => {
-                    for (i, a) in l.aggs.iter().enumerate() {
-                        if pos < a.len() {
-                            return Some((slab_idx_base + i, items_before));
-                        }
-                        pos -= a.len();
-                        items_before += a.len();
-                    }
-                    return None;
-                }
-                Node::Internal(n) => {
-                    let mut descended = false;
-                    for c in &n.children {
-                        if pos < c.agg.len() {
-                            node = c.id;
-                            descended = true;
-                            break;
-                        }
-                        pos -= c.agg.len();
-                        items_before += c.agg.len();
-                        slab_idx_base += c.slab_count;
-                    }
-                    if !descended {
-                        return None;
-                    }
-                }
-            }
-        }
-    }
-
-    /// Number of items in slabs `0..slab_idx`.  O(log n) — descends by
-    /// slab count, accumulating the item lengths of skipped siblings.
-    /// `slab_idx` may equal the total slab count (returns total items).
-    pub(crate) fn items_before_slab(&self, slab_idx: usize) -> usize {
-        let mut remaining = slab_idx;
-        let mut items = 0;
-        let mut node = self.root;
-        loop {
-            match self.node(node) {
-                Node::Leaf(l) => {
-                    for a in &l.aggs {
-                        if remaining == 0 {
-                            return items;
-                        }
-                        remaining -= 1;
-                        items += a.len();
-                    }
-                    return items;
-                }
-                Node::Internal(n) => {
-                    let mut descended = false;
-                    for c in &n.children {
-                        if remaining < c.slab_count {
-                            node = c.id;
-                            descended = true;
-                            break;
-                        }
-                        remaining -= c.slab_count;
-                        items += c.agg.len();
-                    }
-                    if !descended {
-                        return items;
-                    }
-                }
-            }
-        }
-    }
 }
 
 // ── Structural invariant checker (test builds only) ─────────────────────────
@@ -1950,7 +2375,7 @@ mod tests {
     // ── Fuzz: find_slab, find_slab_at_item, find_slab_at_prefix, root_agg ──
 
     fn reference_find_by_prefix(aggs: &[SlabAgg], pos: usize) -> Option<(usize, usize)> {
-        let mut items_before = 0;
+        let mut items_before: usize = 0;
         for (i, a) in aggs.iter().enumerate() {
             if pos < items_before + a.len {
                 return Some((i, items_before));
@@ -1962,7 +2387,7 @@ mod tests {
 
     fn reference_find_slab_at_item(aggs: &[SlabAgg], item_idx: usize) -> (usize, i64, usize) {
         let mut prefix: i64 = 0;
-        let mut items_before = 0;
+        let mut items_before: usize = 0;
         for (i, a) in aggs.iter().enumerate() {
             if item_idx < items_before + a.len {
                 return (i, prefix, items_before);
@@ -1975,7 +2400,7 @@ mod tests {
 
     fn reference_find_slab_at_prefix(aggs: &[SlabAgg], target: i64) -> (usize, i64, usize) {
         let mut prefix: i64 = 0;
-        let mut items_before = 0;
+        let mut items_before: usize = 0;
         for (i, a) in aggs.iter().enumerate() {
             if prefix + a.total >= target {
                 return (i, prefix, items_before);

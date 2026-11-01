@@ -151,16 +151,21 @@ where
 
 // ── Compound weight ──────────────────────────────────────────────────────────
 
+vstd::prelude::verus! {
+
 /// A BIT node value that carries both item count and prefix sum.
 ///
 /// This allows a single Fenwick tree to support both O(log S) position
 /// queries (via the `len` component) and O(log S) prefix-sum queries
 /// (via the `prefix` component).
 #[derive(Clone, Default, Debug)]
+#[verifier::allow(autoderive_clone_without_spec)]
 pub struct PrefixSlabWeight<P: Clone + Default + std::fmt::Debug + AddAssign + SubAssign> {
     pub(crate) len: usize,
     pub(crate) prefix: P,
 }
+
+} // verus!
 
 impl<P: Clone + Default + std::fmt::Debug + AddAssign + SubAssign> Copy for PrefixSlabWeight<P> where
     P: Copy
