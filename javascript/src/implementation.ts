@@ -5,7 +5,7 @@ import {
   validateForBatchInsert,
 } from "./proxies.js"
 export { isImmutableString, isCounter } from "./proxies.js"
-import { STATE } from "./constants.js"
+import { CHANGE_HEADS, STATE } from "./constants.js"
 
 import {
   type AutomergeValue,
@@ -225,19 +225,23 @@ export function getBackend<T>(doc: Doc<T>): Automerge {
 }
 
 /**
- * The heads each change started from, keyed by the backend it is applied to,
- * while the callback of a {@link change} or {@link changeAt} runs.
+ * The heads the change in progress on a backend started from, while the
+ * callback of a {@link change} or {@link changeAt} runs, or `undefined`.
  *
  * The draft passed to the callback only knows its backend, so this is how
  * functions called with the draft (or with any other document sharing that
  * backend) tell that a change is in progress. Most backend functions which
  * read the history or save the document commit the pending operations first,
- * which would split the change.
+ * which would split the change. The heads are stored on the backend under a
+ * `Symbol.for` key, like the other metadata in `constants.ts`, so that a
+ * second copy of this library loaded in the same app sees them too.
  */
-const changesInProgress: WeakMap<Automerge, Heads> = new WeakMap()
+function changeHeads(handle: Automerge): Heads | undefined {
+  return Reflect.get(handle, CHANGE_HEADS) as Heads | undefined
+}
 
 function assertNotInChange<T>(state: InternalState<T>, name: string) {
-  if (changesInProgress.has(state.handle)) {
+  if (changeHeads(state.handle) !== undefined) {
     throw new RangeError(
       `Calls to Automerge.${name} cannot be nested inside a change callback`,
     )
@@ -250,7 +254,7 @@ function assertNotInChange<T>(state: InternalState<T>, name: string) {
  * operations, which aren't part of any change yet.
  */
 function changesSince(handle: Automerge, heads: Heads): Change[] {
-  if (changesInProgress.has(handle)) {
+  if (changeHeads(handle) !== undefined) {
     return handle.getCommittedChanges(heads)
   }
   return handle.getChanges(heads)
@@ -714,12 +718,12 @@ function _change<T>(
   }
   try {
     state.heads = heads
-    changesInProgress.set(state.handle, heads)
+    Reflect.set(state.handle, CHANGE_HEADS, heads)
     const root: T = rootProxy(state.handle)
     try {
       callback(root)
     } finally {
-      changesInProgress.delete(state.handle)
+      Reflect.deleteProperty(state.handle, CHANGE_HEADS)
     }
     if (state.handle.pendingOps() > 0) {
       state.handle.commit(options.message, options.time)
@@ -1498,11 +1502,7 @@ export function getMissingDeps<T>(doc: Doc<T>, heads: Heads): Heads {
  */
 export function getHeads<T>(doc: Doc<T>): Heads {
   const state = _state(doc)
-  return (
-    state.heads ||
-    changesInProgress.get(state.handle) ||
-    state.handle.getHeads()
-  )
+  return state.heads || changeHeads(state.handle) || state.handle.getHeads()
 }
 
 /** @hidden */

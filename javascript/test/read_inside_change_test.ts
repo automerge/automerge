@@ -1,6 +1,8 @@
 import { default as assert } from "assert"
 import * as Automerge from "../src/entrypoints/fullfat_node.js"
 import type { Doc, Heads, Patch } from "../src/entrypoints/fullfat_node.js"
+import { existsSync } from "fs"
+import { createRequire } from "module"
 
 type TestDoc = { f: Record<string, number>; g?: number }
 
@@ -390,6 +392,31 @@ describe("reading inside a change callback", () => {
         c.ops.length,
       ]),
       [["empty", 0]],
+    )
+  })
+
+  it("recognises a change made by another copy of the library", function () {
+    // An app can load two copies of the library, e.g. the CommonJS and the ES
+    // module build. The tests use the sources, so the built CommonJS module is
+    // the other copy.
+    const require = createRequire(import.meta.url)
+    const cjsPath = "../dist/cjs/fullfat_node.cjs"
+    if (!existsSync(new URL(cjsPath, import.meta.url))) {
+      this.skip()
+    }
+    const Other: typeof Automerge = require(cjsPath)
+    let doc = Automerge.from<TestDoc>({ f: {} })
+    const heads = Automerge.getHeads(doc)
+    doc = Automerge.change(doc, "probe", d => {
+      d.f.a = 1
+      assert.deepStrictEqual(Other.getHeads(d), heads)
+      assert.throws(() => Other.save(d), NESTED)
+      d.f.b = 2
+    })
+    assert.deepStrictEqual(doc.f, { a: 1, b: 2 })
+    assert.deepStrictEqual(
+      changesSince(doc, heads).map(c => c.message),
+      ["probe"],
     )
   })
 })
