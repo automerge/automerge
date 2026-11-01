@@ -24,10 +24,14 @@
 //!
 //! Verification (Verus, `cargo verus verify -p hexane`): the tree stands
 //! for a sequence of slab aggregates (its `View`), and `wf` is the
-//! invariant tying the arena to it — every cached child slab count and
-//! item count is right.  `find_by_prefix` and `items_before_slab` are
-//! proved against that sequence.  The mutators are not verified yet, so
-//! nothing yet proves that they preserve `wf`.
+//! invariant tying the arena to it: every cached child slab count and
+//! aggregate is right, subtrees don't share nodes, and every grouping of
+//! slabs can be merged (`valid`).  `find_by_prefix`, `items_before_slab`,
+//! `root_agg` and `update_slab` are proved against that sequence;
+//! `splice`, `from_iter` and the value/prefix queries are not yet.
+//! `merge`'s laws are proved for `SlabAgg` and `usize`; for
+//! `PrefixSlabWeight<P>` they are assumed of the user's `P`
+//! (`axiom_prefix_add`).
 
 use crate::prefix::PrefixSlabWeight;
 use std::fmt::Debug;
@@ -54,19 +58,71 @@ verus! {
 /// associative and order-preserving.  Specifically, `merge(a, b) != merge(b, a)`
 /// is fine (e.g. delta-running-min semantics) as long as the tree
 /// always walks children left-to-right.
+///
+/// For verification, `merge` is also given as mathematics
+/// ([`spec_merge`](Self::spec_merge)), defined wherever
+/// [`merge_ok`](Self::merge_ok) holds (for fixed-width fields: no
+/// overflow), with [`spec_empty`](Self::spec_empty) as its identity.  The
+/// `lemma_*` proof functions are the laws the tree relies on; each impl
+/// proves them.
 #[allow(clippy::len_without_is_empty)]
 pub trait SlabAggregate: Clone + Default + std::fmt::Debug + Sized {
     /// [`len`](Self::len), for specifications.
     spec fn spec_len(&self) -> nat;
 
+    /// [`merge`](Self::merge), for specifications.
+    spec fn spec_merge(l: Self, r: Self) -> Self;
+
+    /// Whether `merge(l, r)` is representable (e.g. its sums don't
+    /// overflow).  The column keeps every aggregate the tree forms within
+    /// this; see [`valid`].
+    spec fn merge_ok(l: Self, r: Self) -> bool;
+
+    /// The aggregate of no slabs.
+    spec fn spec_empty() -> Self;
+
     /// Combine two adjacent subtree aggregates into one.
-    fn merge(l: &Self, r: &Self) -> Self;
+    fn merge(l: &Self, r: &Self) -> (m: Self)
+        requires Self::merge_ok(*l, *r),
+        ensures m == Self::spec_merge(*l, *r);
 
     /// Number of items covered by this aggregate.  Used by generic
     /// tree-walking helpers (e.g. `find_by_prefix`); concrete impls
     /// typically access a `.len` field directly.
     fn len(&self) -> (n: usize)
         ensures n == self.spec_len();
+
+    /// The aggregate of no slabs ([`Default`] for every impl here).
+    fn empty() -> (e: Self)
+        ensures e == Self::spec_empty();
+
+    /// The empty aggregate is a left identity, and covers no items.  (Not
+    /// a right identity: `SlabAgg`'s `merge` keeps the right operand when
+    /// the left covers no items.)
+    proof fn lemma_empty(a: Self)
+        ensures
+            Self::merge_ok(Self::spec_empty(), a),
+            Self::spec_merge(Self::spec_empty(), a) == a,
+            Self::spec_empty().spec_len() == 0;
+
+    /// Every aggregate's item count fits a `usize`.
+    proof fn lemma_len_bound(a: Self)
+        ensures a.spec_len() <= usize::MAX;
+
+    /// Item counts add up.
+    proof fn lemma_merge_len(a: Self, b: Self)
+        requires Self::merge_ok(a, b),
+        ensures Self::spec_merge(a, b).spec_len() == a.spec_len() + b.spec_len();
+
+    /// Associativity, where all four merges are representable.
+    proof fn lemma_assoc(a: Self, b: Self, c: Self)
+        requires
+            Self::merge_ok(a, b),
+            Self::merge_ok(b, c),
+            Self::merge_ok(Self::spec_merge(a, b), c),
+            Self::merge_ok(a, Self::spec_merge(b, c)),
+        ensures
+            Self::spec_merge(Self::spec_merge(a, b), c) == Self::spec_merge(a, Self::spec_merge(b, c));
 }
 
 // ── SlabAgg (used by DeltaColumn) ───────────────────────────────────────────
@@ -82,13 +138,53 @@ pub struct SlabAgg {
     pub max_offset: i64,
 }
 
+/// `x` fits an `i64`.
+pub open spec fn in_i64(x: int) -> bool {
+    i64::MIN <= x <= i64::MAX
+}
+
+pub open spec fn min_i(a: int, b: int) -> int {
+    if a <= b { a } else { b }
+}
+
+pub open spec fn max_i(a: int, b: int) -> int {
+    if a >= b { a } else { b }
+}
+
 impl SlabAggregate for SlabAgg {
     open spec fn spec_len(&self) -> nat {
         self.len as nat
     }
 
-    // Not yet verified (nothing is claimed about it).
-    #[verifier::external_body]
+    open spec fn spec_merge(l: Self, r: Self) -> Self {
+        if l.len == 0 {
+            r
+        } else if r.len == 0 {
+            l
+        } else {
+            SlabAgg {
+                len: (l.len + r.len) as usize,
+                total: (l.total + r.total) as i64,
+                min_offset: min_i(l.min_offset as int, l.total + r.min_offset) as i64,
+                max_offset: max_i(l.max_offset as int, l.total + r.max_offset) as i64,
+            }
+        }
+    }
+
+    /// The delta domain contract keeps every running sum within `i64`.
+    open spec fn merge_ok(l: Self, r: Self) -> bool {
+        l.len == 0 || r.len == 0 || {
+            &&& l.len + r.len <= usize::MAX
+            &&& in_i64(l.total + r.total)
+            &&& in_i64(l.total + r.min_offset)
+            &&& in_i64(l.total + r.max_offset)
+        }
+    }
+
+    open spec fn spec_empty() -> Self {
+        SlabAgg { len: 0, total: 0, min_offset: 0, max_offset: 0 }
+    }
+
     fn merge(l: &Self, r: &Self) -> Self {
         if l.len == 0 {
             return *r;
@@ -107,6 +203,22 @@ impl SlabAggregate for SlabAgg {
     fn len(&self) -> usize {
         self.len
     }
+
+    fn empty() -> Self {
+        SlabAgg { len: 0, total: 0, min_offset: 0, max_offset: 0 }
+    }
+
+    proof fn lemma_empty(a: Self) {
+    }
+
+    proof fn lemma_len_bound(a: Self) {
+    }
+
+    proof fn lemma_merge_len(a: Self, b: Self) {
+    }
+
+    proof fn lemma_assoc(a: Self, b: Self, c: Self) {
+    }
 }
 
 // ── SlabAggregate for usize (LenWeight) ─────────────────────────────────────
@@ -116,8 +228,18 @@ impl SlabAggregate for usize {
         *self as nat
     }
 
-    // Not yet verified (nothing is claimed about it).
-    #[verifier::external_body]
+    open spec fn spec_merge(l: Self, r: Self) -> Self {
+        (l + r) as usize
+    }
+
+    open spec fn merge_ok(l: Self, r: Self) -> bool {
+        l + r <= usize::MAX
+    }
+
+    open spec fn spec_empty() -> Self {
+        0
+    }
+
     fn merge(l: &Self, r: &Self) -> Self {
         *l + *r
     }
@@ -125,9 +247,43 @@ impl SlabAggregate for usize {
     fn len(&self) -> usize {
         *self
     }
+
+    fn empty() -> Self {
+        0
+    }
+
+    proof fn lemma_empty(a: Self) {
+    }
+
+    proof fn lemma_len_bound(a: Self) {
+    }
+
+    proof fn lemma_merge_len(a: Self, b: Self) {
+    }
+
+    proof fn lemma_assoc(a: Self, b: Self, c: Self) {
+    }
 }
 
 // ── SlabAggregate for PrefixSlabWeight ──────────────────────────────────────
+
+/// `+=` on a prefix type `P`.  `P` comes from the column's user (e.g.
+/// automerge's mark sets), so this is the one place the tree trusts code
+/// it doesn't verify: `P`'s `+=` must be associative, never overflow, and
+/// have `P::default()` as its identity — see the axioms below.
+pub uninterp spec fn prefix_add<P>(a: P, b: P) -> P;
+
+/// `P::default()`.
+pub uninterp spec fn prefix_zero<P>() -> P;
+
+#[verifier::external_body]
+pub proof fn axiom_prefix_add<P>(a: P, b: P, c: P)
+    ensures
+        prefix_add(prefix_add(a, b), c) == prefix_add(a, prefix_add(b, c)),
+        prefix_add(prefix_zero(), a) == a,
+        prefix_add(a, prefix_zero()) == a,
+{
+}
 
 impl<P> SlabAggregate for PrefixSlabWeight<P>
 where
@@ -137,7 +293,19 @@ where
         self.len as nat
     }
 
-    // Not yet verified (nothing is claimed about it).
+    closed spec fn spec_merge(l: Self, r: Self) -> Self {
+        PrefixSlabWeight { len: (l.len + r.len) as usize, prefix: prefix_add(l.prefix, r.prefix) }
+    }
+
+    closed spec fn merge_ok(l: Self, r: Self) -> bool {
+        l.len + r.len <= usize::MAX
+    }
+
+    closed spec fn spec_empty() -> Self {
+        PrefixSlabWeight { len: 0, prefix: prefix_zero() }
+    }
+
+    // Trusted: `clone` + `+=` compute `prefix_add` (see above).
     #[verifier::external_body]
     fn merge(l: &Self, r: &Self) -> Self {
         let mut out = l.clone();
@@ -147,6 +315,26 @@ where
 
     fn len(&self) -> usize {
         self.len
+    }
+
+    // Trusted: `P::default()` is `prefix_zero`.
+    #[verifier::external_body]
+    fn empty() -> Self {
+        Self::default()
+    }
+
+    proof fn lemma_empty(a: Self) {
+        axiom_prefix_add(a.prefix, a.prefix, a.prefix);
+    }
+
+    proof fn lemma_len_bound(a: Self) {
+    }
+
+    proof fn lemma_merge_len(a: Self, b: Self) {
+    }
+
+    proof fn lemma_assoc(a: Self, b: Self, c: Self) {
+        axiom_prefix_add(a.prefix, b.prefix, c.prefix);
     }
 }
 
@@ -218,6 +406,87 @@ pub proof fn lemma_sum_len_concat<A: SlabAggregate>(a: Seq<A>, b: Seq<A>)
     }
 }
 
+/// The aggregate of a sequence of slabs: `merge` from the left, starting
+/// from the empty aggregate.
+pub open spec fn fold<A: SlabAggregate>(s: Seq<A>) -> A
+    decreases s.len(),
+{
+    if s.len() == 0 { A::spec_empty() } else { A::spec_merge(fold(s.drop_last()), s.last()) }
+}
+
+/// Every merge of two adjacent runs of `s` is representable, so the tree
+/// may group slabs any way it likes.  For delta columns this is the
+/// domain contract (all running sums fit `i64`).
+pub open spec fn valid<A: SlabAggregate>(s: Seq<A>) -> bool {
+    forall|i: int, j: int, k: int| 0 <= i <= j <= k <= s.len()
+        ==> #[trigger] A::merge_ok(fold(s.subrange(i, j)), fold(s.subrange(j, k)))
+}
+
+pub proof fn lemma_fold_one<A: SlabAggregate>(s: Seq<A>, i: int)
+    requires 0 <= i < s.len(),
+    ensures fold(s.subrange(i, i + 1)) == s[i],
+{
+    let t = s.subrange(i, i + 1);
+    assert(t.drop_last() =~= Seq::<A>::empty());
+    assert(t.last() == s[i]);
+    reveal_with_fuel(fold, 2);
+    A::lemma_empty(s[i]);
+}
+
+/// Folding a run is merging the folds of its two halves (the second
+/// nonempty).
+pub proof fn lemma_fold_split<A: SlabAggregate>(s: Seq<A>, i: int, j: int, k: int)
+    requires valid(s), 0 <= i <= j < k <= s.len(),
+    ensures fold(s.subrange(i, k)) == A::spec_merge(fold(s.subrange(i, j)), fold(s.subrange(j, k))),
+    decreases k - j,
+{
+    assert(s.subrange(i, k).drop_last() =~= s.subrange(i, k - 1));
+    lemma_fold_one(s, k - 1);
+    if k == j + 1 {
+        assert(s.subrange(j, k) =~= s.subrange(k - 1, k));
+    } else {
+        lemma_fold_split(s, i, j, k - 1);
+        assert(s.subrange(j, k).drop_last() =~= s.subrange(j, k - 1));
+        let (a, b, c) = (fold(s.subrange(i, j)), fold(s.subrange(j, k - 1)), s[k - 1]);
+        assert(A::merge_ok(a, b));
+        assert(A::merge_ok(fold(s.subrange(j, k - 1)), fold(s.subrange(k - 1, k))));
+        assert(A::merge_ok(fold(s.subrange(i, k - 1)), fold(s.subrange(k - 1, k))));
+        assert(A::merge_ok(fold(s.subrange(i, j)), fold(s.subrange(j, k))));
+        A::lemma_assoc(a, b, c);
+    }
+}
+
+/// A run's aggregate covers the run's items.
+pub proof fn lemma_fold_len<A: SlabAggregate>(s: Seq<A>, i: int, j: int)
+    requires valid(s), 0 <= i <= j <= s.len(),
+    ensures fold(s.subrange(i, j)).spec_len() == sum_len(s.subrange(i, j)),
+    decreases j - i,
+{
+    if j == i {
+        A::lemma_empty(A::spec_empty());
+    } else {
+        lemma_fold_len(s, i, j - 1);
+        assert(s.subrange(i, j).drop_last() =~= s.subrange(i, j - 1));
+        lemma_fold_one(s, j - 1);
+        assert(A::merge_ok(fold(s.subrange(i, j - 1)), fold(s.subrange(j - 1, j))));
+        A::lemma_merge_len(fold(s.subrange(i, j - 1)), s[j - 1]);
+    }
+}
+
+/// Runs of a valid sequence are valid.
+pub proof fn lemma_valid_subrange<A: SlabAggregate>(s: Seq<A>, a: int, b: int)
+    requires valid(s), 0 <= a <= b <= s.len(),
+    ensures valid(s.subrange(a, b)),
+{
+    let t = s.subrange(a, b);
+    assert forall|i: int, j: int, k: int| 0 <= i <= j <= k <= t.len()
+        implies #[trigger] A::merge_ok(fold(t.subrange(i, j)), fold(t.subrange(j, k))) by {
+        assert(t.subrange(i, j) =~= s.subrange(a + i, a + j));
+        assert(t.subrange(j, k) =~= s.subrange(a + j, a + k));
+        assert(A::merge_ok(fold(s.subrange(a + i, a + j)), fold(s.subrange(a + j, a + k))));
+    }
+}
+
 impl<A: SlabAggregate> SlabBTree<A> {
     spec fn node_spec(&self, id: NodeId) -> Option<Node<A>> {
         if (id as int) < self.nodes@.len() { self.nodes@[id as int] } else { None }
@@ -250,17 +519,48 @@ impl<A: SlabAggregate> SlabBTree<A> {
         }
     }
 
+    /// The node ids in the subtree at `id`, read at height `h`.
+    spec fn owned(&self, id: NodeId, h: nat) -> Set<NodeId>
+        decreases h, 0nat,
+    {
+        match self.node_spec(id) {
+            Some(Node::Internal(n)) => if h == 0 {
+                set![id]
+            } else {
+                set![id] + self.children_owned(n.children@, (h - 1) as nat)
+            },
+            _ => set![id],
+        }
+    }
+
+    spec fn children_owned(&self, cs: Seq<ChildSlot<A>>, h: nat) -> Set<NodeId>
+        decreases h, cs.len(),
+    {
+        if cs.len() == 0 {
+            Set::empty()
+        } else {
+            self.children_owned(cs.drop_last(), h) + self.owned(cs.last().id, h)
+        }
+    }
+
     /// Node `id` is a tree of height `h` whose cached child slab counts
     /// and item counts are right.
     spec fn wf_node(&self, id: NodeId, h: nat) -> bool
         decreases h,
     {
-        match self.node_spec(id) {
+        &&& valid(self.slabs(id, h))
+        &&& match self.node_spec(id) {
             Some(Node::Leaf(_)) => h == 0,
-            Some(Node::Internal(n)) => h > 0 && forall|i: int| 0 <= i < n.children@.len() ==> {
+            Some(Node::Internal(n)) => h > 0 && n.children@.len() > 0 && (forall|i: int, j: int|
+                0 <= i < j < n.children@.len() ==> #[trigger] self.owned(n.children@[i].id, (h - 1) as nat)
+                    .disjoint(#[trigger] self.owned(n.children@[j].id, (h - 1) as nat)))
+            && forall|i: int| 0 <= i < n.children@.len() ==> {
                 let c = #[trigger] n.children@[i];
                 &&& self.wf_node(c.id, (h - 1) as nat)
+                &&& !self.owned(c.id, (h - 1) as nat).contains(id)
                 &&& c.slab_count == self.slabs(c.id, (h - 1) as nat).len()
+                &&& c.slab_count > 0
+                &&& c.agg == fold(self.slabs(c.id, (h - 1) as nat))
                 &&& c.agg.spec_len() == sum_len(self.slabs(c.id, (h - 1) as nat))
             },
             None => false,
@@ -322,14 +622,469 @@ impl<A: SlabAggregate> SlabBTree<A> {
             self.node_spec(id) == Some(Node::Internal(n)),
             0 <= k < n.children@.len(),
         ensures
-            h > 0,
+            h > 0, n.children@.len() > 0,
             self.slabs(id, h) == self.children_slabs(n.children@, (h - 1) as nat),
+            self.owned(id, h) == set![id] + self.children_owned(n.children@, (h - 1) as nat),
+            !self.owned(n.children@[k].id, (h - 1) as nat).contains(id),
+            forall|j: int| 0 <= j < n.children@.len() && j != k
+                ==> self.owned(n.children@[k].id, (h - 1) as nat).disjoint(self.owned(n.children@[j].id, (h - 1) as nat)),
             self.wf_node(n.children@[k].id, (h - 1) as nat),
             n.children@[k].slab_count == self.slabs(n.children@[k].id, (h - 1) as nat).len(),
+            n.children@[k].slab_count > 0,
+            n.children@[k].agg == fold(self.slabs(n.children@[k].id, (h - 1) as nat)),
             n.children@[k].agg.spec_len() == sum_len(self.slabs(n.children@[k].id, (h - 1) as nat)),
     {
         let c = n.children@[k];
         assert(c == n.children@[k]);
+        assert forall|j: int| 0 <= j < n.children@.len() && j != k
+            implies self.owned(n.children@[k].id, (h - 1) as nat).disjoint(self.owned(n.children@[j].id, (h - 1) as nat)) by {
+            if j < k {
+                assert(self.owned(n.children@[j].id, (h - 1) as nat).disjoint(self.owned(n.children@[k].id, (h - 1) as nat)));
+            } else {
+                assert(self.owned(n.children@[k].id, (h - 1) as nat).disjoint(self.owned(n.children@[j].id, (h - 1) as nat)));
+            }
+        }
+    }
+
+    /// A well-formed subtree has one height.
+    proof fn lemma_height_unique(&self, id: NodeId, h1: nat, h2: nat)
+        requires self.wf_node(id, h1), self.wf_node(id, h2),
+        ensures h1 == h2,
+        decreases h1,
+    {
+        if let Some(Node::Internal(n)) = self.node_spec(id) {
+            self.lemma_child(id, h1, n, 0);
+            self.lemma_child(id, h2, n, 0);
+            self.lemma_height_unique(n.children@[0].id, (h1 - 1) as nat, (h2 - 1) as nat);
+        }
+    }
+
+    /// Frame: a subtree means the same in any tree that agrees on its
+    /// nodes.
+    proof fn lemma_frame(t1: &Self, t2: &Self, id: NodeId, h: nat)
+        requires forall|x: NodeId| t1.owned(id, h).contains(x) ==> t1.node_spec(x) == t2.node_spec(x),
+        ensures
+            t1.slabs(id, h) == t2.slabs(id, h),
+            t1.owned(id, h) == t2.owned(id, h),
+            t1.wf_node(id, h) == t2.wf_node(id, h),
+        decreases h, 0nat,
+    {
+        assert(t1.owned(id, h).contains(id));
+        if let Some(Node::Internal(n)) = t1.node_spec(id) {
+            if h > 0 {
+                let hc = (h - 1) as nat;
+                Self::lemma_frame_children(t1, t2, n.children@, hc);
+                assert(t1.owned(id, h) =~= t2.owned(id, h));
+                if t1.wf_node(id, h) != t2.wf_node(id, h) {
+                    assert(t1.slabs(id, h) == t2.slabs(id, h));
+                    assert forall|i: int, j: int| 0 <= i < j < n.children@.len() implies
+                        t1.owned(n.children@[i].id, hc) == t2.owned(n.children@[i].id, hc)
+                        && t1.owned(n.children@[j].id, hc) == t2.owned(n.children@[j].id, hc) by {}
+                }
+            }
+        }
+    }
+
+    proof fn lemma_frame_children(t1: &Self, t2: &Self, cs: Seq<ChildSlot<A>>, h: nat)
+        requires forall|x: NodeId| t1.children_owned(cs, h).contains(x) ==> t1.node_spec(x) == t2.node_spec(x),
+        ensures
+            t1.children_slabs(cs, h) == t2.children_slabs(cs, h),
+            t1.children_owned(cs, h) == t2.children_owned(cs, h),
+            forall|i: int| 0 <= i < cs.len() ==> {
+                &&& t1.slabs(#[trigger] cs[i].id, h) == t2.slabs(cs[i].id, h)
+                &&& t1.owned(cs[i].id, h) == t2.owned(cs[i].id, h)
+                &&& t1.wf_node(cs[i].id, h) == t2.wf_node(cs[i].id, h)
+            },
+        decreases h, cs.len() + 1,
+    {
+        if cs.len() > 0 {
+            Self::lemma_frame_children(t1, t2, cs.drop_last(), h);
+            Self::lemma_frame(t1, t2, cs.last().id, h);
+            assert forall|i: int| 0 <= i < cs.len() implies {
+                &&& t1.slabs(#[trigger] cs[i].id, h) == t2.slabs(cs[i].id, h)
+                &&& t1.owned(cs[i].id, h) == t2.owned(cs[i].id, h)
+                &&& t1.wf_node(cs[i].id, h) == t2.wf_node(cs[i].id, h)
+            } by {
+                if i < cs.len() - 1 { assert(cs.drop_last()[i] == cs[i]); }
+            }
+        }
+    }
+
+    /// Congruence: two child lists naming subtrees with the same slabs
+    /// and nodes stand for the same slabs and nodes.
+    proof fn lemma_children_congr(t1: &Self, cs1: Seq<ChildSlot<A>>, t2: &Self, cs2: Seq<ChildSlot<A>>, h: nat)
+        requires
+            cs1.len() == cs2.len(),
+            forall|i: int| 0 <= i < cs1.len() ==> t1.slabs(#[trigger] cs1[i].id, h) == t2.slabs(cs2[i].id, h)
+                && t1.owned(cs1[i].id, h) == t2.owned(cs2[i].id, h),
+        ensures
+            t1.children_slabs(cs1, h) == t2.children_slabs(cs2, h),
+            t1.children_owned(cs1, h) == t2.children_owned(cs2, h),
+        decreases cs1.len(),
+    {
+        if cs1.len() > 0 {
+            assert forall|i: int| 0 <= i < cs1.drop_last().len() implies
+                t1.slabs(#[trigger] cs1.drop_last()[i].id, h) == t2.slabs(cs2.drop_last()[i].id, h)
+                && t1.owned(cs1.drop_last()[i].id, h) == t2.owned(cs2.drop_last()[i].id, h) by {
+                assert(cs1.drop_last()[i] == cs1[i]);
+            }
+            Self::lemma_children_congr(t1, cs1.drop_last(), t2, cs2.drop_last(), h);
+            assert(t1.slabs(cs1[cs1.len() - 1].id, h) == t2.slabs(cs2[cs1.len() - 1].id, h));
+        }
+    }
+
+    /// Merge a leaf's slab aggregates.
+    fn fold_leaf(aggs: &[A]) -> (r: A)
+        requires valid(aggs@),
+        ensures r == fold(aggs@),
+    {
+        let mut acc = A::empty();
+        let mut i: usize = 0;
+        while i < aggs.len()
+            invariant i <= aggs@.len(), valid(aggs@), acc == fold(aggs@.subrange(0, i as int)),
+            decreases aggs@.len() - i,
+        {
+            proof {
+                lemma_fold_one(aggs@, i as int);
+                assert(A::merge_ok(fold(aggs@.subrange(0, i as int)), fold(aggs@.subrange(i as int, i + 1))));
+                assert(aggs@.subrange(0, i + 1).drop_last() =~= aggs@.subrange(0, i as int));
+            }
+            acc = A::merge(&acc, &aggs[i]);
+            i += 1;
+        }
+        assert(aggs@.subrange(0, i as int) =~= aggs@);
+        acc
+    }
+
+    /// Merge an internal node's cached child aggregates.
+    fn fold_children(&self, Ghost(id): Ghost<NodeId>, n: &Internal<A>, Ghost(h): Ghost<nat>) -> (r: A)
+        requires self.wf_node(id, h), self.node_spec(id) == Some(Node::Internal(*n)),
+        ensures r == fold(self.slabs(id, h)),
+    {
+        let ghost cs = n.children@;
+        let ghost hc = (h - 1) as nat;
+        let ghost all = self.children_slabs(cs, hc);
+        proof {
+            if cs.len() > 0 { self.lemma_child(id, h, *n, 0); } else { assert(self.wf_node(id, h)); }
+        }
+        let mut acc = A::empty();
+        let mut k: usize = 0;
+        while k < n.children.len()
+            invariant
+                k <= cs.len(), cs == n.children@, h > 0, hc == h - 1,
+                self.wf_node(id, h), self.node_spec(id) == Some(Node::Internal(*n)),
+                all == self.slabs(id, h), valid(all),
+                acc == fold(self.children_slabs(cs.take(k as int), hc)),
+            decreases cs.len() - k,
+        {
+            let ghost before = self.children_slabs(cs.take(k as int), hc);
+            let ghost mid = self.slabs(cs[k as int].id, hc);
+            proof {
+                self.lemma_child(id, h, *n, k as int);
+                self.lemma_children_slabs_split(cs, k as int, hc);
+                self.lemma_children_slabs_push(cs, k as int, hc);
+                let (p, q) = (before.len() as int, (before.len() + mid.len()) as int);
+                assert(all.subrange(0, p) =~= before);
+                assert(all.subrange(p, q) =~= mid);
+                assert(all.subrange(0, q) =~= before + mid);
+                lemma_fold_split(all, 0, p, q);
+                assert(A::merge_ok(fold(all.subrange(0, p)), fold(all.subrange(p, q))));
+            }
+            acc = A::merge(&acc, &n.children[k].agg);
+            k += 1;
+        }
+        assert(cs.take(k as int) =~= cs);
+        acc
+    }
+
+    fn node_mut(&mut self, id: NodeId) -> (r: &mut Node<A>)
+        requires old(self).node_spec(id) is Some,
+        ensures
+            Some(*r) == old(self).node_spec(id),
+            final(self).nodes@ == old(self).nodes@.update(id as int, Some(*final(r))),
+            final(self).root == old(self).root,
+            final(self).total_slabs == old(self).total_slabs,
+            final(self).free == old(self).free,
+    {
+        self.nodes[id as usize].as_mut().expect("freed node id")
+    }
+
+    /// Aggregate of all slabs under node `id`.
+    fn subtree_agg(&self, id: NodeId, Ghost(h): Ghost<nat>) -> (r: A)
+        requires self.wf_node(id, h),
+        ensures r == fold(self.slabs(id, h)),
+    {
+        match self.node(id) {
+            Node::Leaf(l) => Self::fold_leaf(&l.aggs),
+            Node::Internal(n) => self.fold_children(Ghost(id), n, Ghost(h)),
+        }
+    }
+
+    /// Replace slab `slab_idx`'s aggregate.
+    pub(crate) fn update_slab(&mut self, slab_idx: usize, new_agg: A)
+        requires
+            old(self).wf(),
+            slab_idx < old(self)@.len(),
+            valid(old(self)@.update(slab_idx as int, new_agg)),
+        ensures
+            final(self).wf(),
+            final(self)@ == old(self)@.update(slab_idx as int, new_agg),
+    {
+        assert!(slab_idx < self.total_slabs, "update_slab out of bounds");
+        let ghost h = self.height();
+        proof { assert(self.wf_node(self.root, h)); }
+        self.update_rec(self.root, Ghost(h), slab_idx, new_agg);
+        proof {
+            assert(self.wf_node(self.root, h));
+            self.lemma_height_unique(self.root, h, self.height());
+            let v = self@;
+            lemma_fold_len(v, 0, v.len() as int);
+            assert(v.subrange(0, v.len() as int) =~= v);
+            A::lemma_len_bound(fold(v));
+        }
+    }
+
+    /// Replace slab `idx` of the subtree at `id` (height `h`), refreshing
+    /// the cached child aggregates on the way back up.  Only the subtree's
+    /// own nodes change.
+    fn update_rec(&mut self, id: NodeId, Ghost(h): Ghost<nat>, idx: usize, new_agg: A)
+        requires
+            old(self).wf_node(id, h),
+            idx < old(self).slabs(id, h).len(),
+            valid(old(self).slabs(id, h).update(idx as int, new_agg)),
+        ensures
+            final(self).wf_node(id, h),
+            final(self).slabs(id, h) == old(self).slabs(id, h).update(idx as int, new_agg),
+            final(self).owned(id, h) == old(self).owned(id, h),
+            final(self).nodes@.len() == old(self).nodes@.len(),
+            forall|x: NodeId| !old(self).owned(id, h).contains(x)
+                ==> #[trigger] final(self).node_spec(x) == old(self).node_spec(x),
+            final(self).root == old(self).root,
+            final(self).total_slabs == old(self).total_slabs,
+            final(self).free == old(self).free,
+        decreases h,
+    {
+        let ghost t0 = *self;
+        let (child_idx, child_id, remaining) = match self.node(id) {
+            Node::Leaf(_) => {
+                let r = self.node_mut(id);
+                if let Node::Leaf(l) = r {
+                    l.aggs[idx] = new_agg;
+                }
+                proof {
+                    assert forall|x: NodeId| !t0.owned(id, h).contains(x)
+                        implies #[trigger] self.node_spec(x) == t0.node_spec(x) by {
+                        assert(t0.owned(id, h).contains(id));
+                    }
+                    assert(self.owned(id, h) =~= t0.owned(id, h));
+                    assert(self.slabs(id, h) =~= t0.slabs(id, h).update(idx as int, new_agg));
+                }
+                return;
+            },
+            Node::Internal(n) => {
+                let ghost cs = n.children@;
+                let ghost hc = (h - 1) as nat;
+                proof { self.lemma_child(id, h, *n, 0); }
+                let mut remaining = idx;
+                let mut k: usize = 0;
+                let ghost len = n.children.len();
+                loop
+                    invariant
+                        k < cs.len(), cs == n.children@, h > 0, hc == h - 1, len == cs.len(),
+                        self.wf_node(id, h), self.node_spec(id) == Some(Node::Internal(*n)),
+                        self.slabs(id, h) == self.children_slabs(cs, hc),
+                        self.children_slabs(cs.take(k as int), hc).len() + remaining == idx,
+                        idx < self.slabs(id, h).len(),
+                    ensures
+                        k < cs.len(),
+                        self.children_slabs(cs.take(k as int), hc).len() + remaining == idx,
+                        remaining < cs[k as int].slab_count,
+                    decreases cs.len() - k,
+                {
+                    let c = &n.children[k];
+                    proof {
+                        self.lemma_child(id, h, *n, k as int);
+                        self.lemma_children_slabs_split(cs, k as int, hc);
+                        self.lemma_children_slabs_push(cs, k as int, hc);
+                    }
+                    if remaining < c.slab_count {
+                        break;
+                    }
+                    remaining -= c.slab_count;
+                    proof {
+                        if k + 1 == cs.len() {
+                            assert(cs.take(k + 1) =~= cs);
+                        }
+                    }
+                    k += 1;
+                }
+                (k, n.children[k].id, remaining)
+            },
+        };
+        let ghost n0 = match t0.node_spec(id) { Some(Node::Internal(n)) => n, _ => arbitrary() };
+        let ghost cs = n0.children@;
+        let ghost hc = (h - 1) as nat;
+        let ghost before = t0.children_slabs(cs.take(child_idx as int), hc);
+        let ghost mid = t0.slabs(child_id, hc);
+        let ghost after = t0.children_slabs(cs.skip(child_idx + 1), hc);
+        let ghost all = t0.slabs(id, h);
+        let ghost new_all = all.update(idx as int, new_agg);
+        proof {
+            assert(child_idx < cs.len());
+            assert(child_id == cs[child_idx as int].id);
+            assert(before.len() + remaining == idx);
+            t0.lemma_child(id, h, n0, child_idx as int);
+            t0.lemma_children_slabs_split(cs, child_idx as int, hc);
+            // the child's slabs, updated, are a run of the node's
+            let (p, q) = (before.len() as int, (before.len() + mid.len()) as int);
+            assert(new_all.subrange(p, q) =~= mid.update(remaining as int, new_agg));
+            lemma_valid_subrange(new_all, p, q);
+        }
+        self.update_rec(child_id, Ghost(hc), remaining, new_agg);
+        let ghost t1 = *self;
+        proof {
+            // siblings and this node are untouched
+            assert forall|j: int| 0 <= j < cs.len() && j != child_idx implies
+                t1.slabs(#[trigger] cs[j].id, hc) == t0.slabs(cs[j].id, hc)
+                && t1.owned(cs[j].id, hc) == t0.owned(cs[j].id, hc)
+                && t1.wf_node(cs[j].id, hc) == t0.wf_node(cs[j].id, hc) by {
+                t0.lemma_child(id, h, n0, j);
+                assert forall|x: NodeId| t0.owned(cs[j].id, hc).contains(x) implies
+                    t0.node_spec(x) == t1.node_spec(x) by {
+                    assert(!t0.owned(child_id, hc).contains(x));
+                }
+                Self::lemma_frame(&t0, &t1, cs[j].id, hc);
+            }
+            assert(t1.node_spec(id) == t0.node_spec(id));
+        }
+        let new_child_agg = self.subtree_agg(child_id, Ghost(hc));
+        let r = self.node_mut(id);
+        if let Node::Internal(p) = r {
+            p.children[child_idx].agg = new_child_agg;
+        }
+        proof {
+            let t2 = *self;
+            let n2 = match t2.node_spec(id) { Some(Node::Internal(n)) => n, _ => arbitrary() };
+            let cs2 = n2.children@;
+            assert(cs2 == cs.update(child_idx as int, ChildSlot { agg: new_child_agg, ..cs[child_idx as int] }));
+            // every child subtree is untouched by rewriting this node
+            assert forall|j: int| 0 <= j < cs.len() implies
+                t2.slabs(#[trigger] cs[j].id, hc) == t1.slabs(cs[j].id, hc)
+                && t2.owned(cs[j].id, hc) == t1.owned(cs[j].id, hc)
+                && t2.wf_node(cs[j].id, hc) == t1.wf_node(cs[j].id, hc) by {
+                t0.lemma_child(id, h, n0, j);
+                assert forall|x: NodeId| t1.owned(cs[j].id, hc).contains(x) implies
+                    t1.node_spec(x) == t2.node_spec(x) by {}
+                Self::lemma_frame(&t1, &t2, cs[j].id, hc);
+            }
+            assert(cs2.len() == cs.len());
+            assert forall|j: int| 0 <= j < cs.len() implies #[trigger] cs2[j].id == cs[j].id
+                && cs2[j].slab_count == cs[j].slab_count
+                && (j != child_idx ==> cs2[j].agg == cs[j].agg) by {}
+            // what each child stands for now
+            let new_mid = mid.update(remaining as int, new_agg);
+            assert forall|j: int| 0 <= j < cs.len() implies
+                t2.owned(#[trigger] cs2[j].id, hc) == t0.owned(cs[j].id, hc)
+                && t2.slabs(cs2[j].id, hc) == (if j == child_idx { new_mid } else { t0.slabs(cs[j].id, hc) })
+                && t2.wf_node(cs2[j].id, hc) by {
+                t0.lemma_child(id, h, n0, j);
+            }
+            // the node's slabs: before + the updated child + after
+            t2.lemma_children_slabs_split(cs2, child_idx as int, hc);
+            assert forall|i: int| 0 <= i < cs.take(child_idx as int).len() implies
+                t2.slabs(#[trigger] cs2.take(child_idx as int)[i].id, hc) == t0.slabs(cs.take(child_idx as int)[i].id, hc)
+                && t2.owned(cs2.take(child_idx as int)[i].id, hc) == t0.owned(cs.take(child_idx as int)[i].id, hc) by {
+                assert(cs2.take(child_idx as int)[i] == cs2[i]);
+                assert(cs.take(child_idx as int)[i] == cs[i]);
+            }
+            Self::lemma_children_congr(&t2, cs2.take(child_idx as int), &t0, cs.take(child_idx as int), hc);
+            assert forall|i: int| 0 <= i < cs.skip(child_idx + 1).len() implies
+                t2.slabs(#[trigger] cs2.skip(child_idx + 1)[i].id, hc) == t0.slabs(cs.skip(child_idx + 1)[i].id, hc)
+                && t2.owned(cs2.skip(child_idx + 1)[i].id, hc) == t0.owned(cs.skip(child_idx + 1)[i].id, hc) by {
+                assert(cs2.skip(child_idx + 1)[i] == cs2[child_idx + 1 + i]);
+                assert(cs.skip(child_idx + 1)[i] == cs[child_idx + 1 + i]);
+            }
+            Self::lemma_children_congr(&t2, cs2.skip(child_idx + 1), &t0, cs.skip(child_idx + 1), hc);
+            assert(t2.slabs(id, h) == t2.children_slabs(cs2, hc));
+            assert(t2.slabs(id, h) =~= new_all);
+            // its nodes
+            Self::lemma_children_congr_owned(&t2, cs2, &t0, cs, hc);
+            assert(t2.owned(id, h) =~= t0.owned(id, h));
+            // nothing outside the subtree changed
+            t0.lemma_children_owned_contains(cs, child_idx as int, hc);
+            // and it is well formed
+            assert forall|j: int| 0 <= j < cs2.len() implies {
+                let c = #[trigger] cs2[j];
+                &&& t2.wf_node(c.id, hc)
+                &&& !t2.owned(c.id, hc).contains(id)
+                &&& c.slab_count == t2.slabs(c.id, hc).len()
+                &&& c.slab_count > 0
+                &&& c.agg == fold(t2.slabs(c.id, hc))
+                &&& c.agg.spec_len() == sum_len(t2.slabs(c.id, hc))
+            } by {
+                t0.lemma_child(id, h, n0, j);
+                if j == child_idx {
+                    let cl = t2.slabs(cs2[j].id, hc);
+                    assert(valid(cl));
+                    lemma_fold_len(cl, 0, cl.len() as int);
+                    assert(cl.subrange(0, cl.len() as int) =~= cl);
+                }
+            }
+            assert forall|i: int, j: int| 0 <= i < j < cs2.len() implies
+                #[trigger] t2.owned(cs2[i].id, hc).disjoint(#[trigger] t2.owned(cs2[j].id, hc)) by {
+                t0.lemma_child(id, h, n0, i);
+                t0.lemma_child(id, h, n0, j);
+            }
+            assert(t2.wf_node(id, h));
+            assert forall|x: NodeId| !t0.owned(id, h).contains(x)
+                implies #[trigger] t2.node_spec(x) == t0.node_spec(x) by {
+                assert(t0.owned(id, h).contains(id));
+                assert(!t0.owned(child_id, hc).contains(x));
+                assert(t1.node_spec(x) == t0.node_spec(x));
+            }
+        }
+    }
+
+    /// Aggregate of all slabs in the tree.
+    #[allow(dead_code)]
+    pub(crate) fn root_agg(&self) -> (r: A)
+        requires self.wf(),
+        ensures r == fold(self@),
+    {
+        proof { assert(self.wf_node(self.root, self.height())); }
+        match self.node(self.root) {
+            Node::Leaf(l) => Self::fold_leaf(&l.aggs),
+            Node::Internal(n) => self.fold_children(Ghost(self.root), n, Ghost(self.height())),
+        }
+    }
+
+    proof fn lemma_children_congr_owned(t1: &Self, cs1: Seq<ChildSlot<A>>, t2: &Self, cs2: Seq<ChildSlot<A>>, h: nat)
+        requires
+            cs1.len() == cs2.len(),
+            forall|i: int| 0 <= i < cs1.len() ==> t1.owned(#[trigger] cs1[i].id, h) == t2.owned(cs2[i].id, h),
+        ensures t1.children_owned(cs1, h) == t2.children_owned(cs2, h),
+        decreases cs1.len(),
+    {
+        if cs1.len() > 0 {
+            assert forall|i: int| 0 <= i < cs1.drop_last().len() implies
+                t1.owned(#[trigger] cs1.drop_last()[i].id, h) == t2.owned(cs2.drop_last()[i].id, h) by {
+                assert(cs1.drop_last()[i] == cs1[i]);
+            }
+            Self::lemma_children_congr_owned(t1, cs1.drop_last(), t2, cs2.drop_last(), h);
+            assert(t1.owned(cs1[cs1.len() - 1].id, h) == t2.owned(cs2[cs1.len() - 1].id, h));
+        }
+    }
+
+    /// Each child's nodes are among its parent's.
+    proof fn lemma_children_owned_contains(&self, cs: Seq<ChildSlot<A>>, k: int, h: nat)
+        requires 0 <= k < cs.len(),
+        ensures self.owned(cs[k].id, h).subset_of(self.children_owned(cs, h)),
+        decreases cs.len(),
+    {
+        if k < cs.len() - 1 {
+            self.lemma_children_owned_contains(cs.drop_last(), k, h);
+            assert(cs.drop_last()[k] == cs[k]);
+        }
     }
 
     fn node(&self, id: NodeId) -> (r: &Node<A>)
@@ -351,6 +1106,16 @@ impl<A: SlabAggregate> SlabBTree<A> {
             total_slabs: 0,
             _phantom: PhantomData,
         };
+        proof {
+            let e = Seq::<A>::empty();
+            assert(t.slabs(t.root, 0) =~= e);
+            assert forall|i: int, j: int, k: int| 0 <= i <= j <= k <= e.len()
+                implies #[trigger] A::merge_ok(fold(e.subrange(i, j)), fold(e.subrange(j, k))) by {
+                assert(e.subrange(i, j) =~= e);
+                assert(e.subrange(j, k) =~= e);
+                A::lemma_empty(A::spec_empty());
+            }
+        }
         assert(t.wf_node(t.root, 0));
         assert(t@ =~= Seq::<A>::empty());
         t
@@ -783,14 +1548,6 @@ impl<A: SlabAggregate> SlabBTree<A> {
         self.total_slabs == 0
     }
 
-    #[allow(dead_code)]
-    pub(crate) fn root_agg(&self) -> A {
-        match self.node(self.root) {
-            Node::Leaf(l) => merge_all(&l.aggs),
-            Node::Internal(n) => merge_all(n.children.iter().map(|c| &c.agg)),
-        }
-    }
-
     // ── Arena helpers ───────────────────────────────────────────────────
 
     fn alloc(&mut self, node: Node<A>) -> NodeId {
@@ -807,10 +1564,6 @@ impl<A: SlabAggregate> SlabBTree<A> {
     fn free(&mut self, id: NodeId) {
         self.nodes[id as usize] = None;
         self.free.push(id);
-    }
-
-    fn node_mut(&mut self, id: NodeId) -> &mut Node<A> {
-        self.nodes[id as usize].as_mut().expect("freed node id")
     }
 
     /// Aggregate of all slabs under node `id`.
@@ -871,52 +1624,6 @@ impl<A: SlabAggregate> SlabBTree<A> {
     }
 
     // ── Splice ──────────────────────────────────────────────────────────
-
-    pub(crate) fn update_slab(&mut self, slab_idx: usize, new_agg: A) {
-        assert!(slab_idx < self.total_slabs, "update_slab out of bounds");
-        // Descend to the leaf, recording each (node, child_idx_taken).
-        let mut path: Vec<(NodeId, usize)> = Vec::with_capacity(8);
-        let mut remaining = slab_idx;
-        let mut node_id = self.root;
-        loop {
-            let next = match self.node(node_id) {
-                Node::Leaf(_) => break,
-                Node::Internal(n) => {
-                    let mut picked = None;
-                    for (i, c) in n.children.iter().enumerate() {
-                        if remaining < c.slab_count {
-                            picked = Some((i, c.id));
-                            break;
-                        }
-                        remaining -= c.slab_count;
-                    }
-                    picked.expect("slab_idx should have been bounds-checked")
-                }
-            };
-            let (child_idx, child_id) = next;
-            path.push((node_id, child_idx));
-            node_id = child_id;
-        }
-
-        // Update the leaf slot.
-        if let Node::Leaf(l) = self.node_mut(node_id) {
-            l.aggs[remaining] = new_agg;
-        }
-
-        // Walk back up, refreshing each internal node's cached child agg.
-        for (parent_id, child_idx) in path.into_iter().rev() {
-            // Find which child id this was in the parent (we only stored child_idx).
-            let child_id = match self.node(parent_id) {
-                Node::Internal(n) => n.children[child_idx].id,
-                Node::Leaf(_) => unreachable!("leaf can't be a parent"),
-            };
-            let new_child_agg = self.agg_of(child_id);
-            if let Node::Internal(p) = self.node_mut(parent_id) {
-                p.children[child_idx].agg = new_child_agg;
-                // slab_count unchanged — we don't add/remove slabs here.
-            }
-        }
-    }
 
     pub(crate) fn splice<I: IntoIterator<Item = A>>(&mut self, range: Range<usize>, new_aggs: I) {
         assert!(range.end <= self.total_slabs, "splice out of bounds");
