@@ -1825,23 +1825,17 @@ export function updateSpans<T>(
  * to edit the document yourself (using {@link splice}) or to share multiple
  * collaborator's current cursor positions over the network.
  *
- * Cursors work on text and on list objects (but not on maps). For text,
- * indices are in the document's text encoding (JavaScript string indices by
- * default); for lists, indices are element indices. In a list, a cursor to an
- * index follows the element at that index, so it can be used to keep
- * referring to "this element" while others insert and delete elements.
- *
  * The cursor's `position` can be an index in the string or list, `'start'` or `'end'`.
  * - `'start'` ensures this cursor always resolves to `0`
- * - `'end'` ensures this cursor always resolves to `string.length` (or `list.length`)
+ * - `'end'` ensures this cursor always resolves to `string.length`/`list.length`
  *
  * Start cursors can be created by passing any negative number in `position`.
  *
- * End cursors can be created by passing a number `>= string.length` (or
- * `>= list.length`) in `position`.
+ * End cursors can be created by passing a number `>= string.length`/
+ * `>= list.length` in `position`.
  *
  * `move` determines the position the cursor resolves to if the character
- * (or list element) at `index` is removed:
+ * or list element at `index` is removed:
  * - `'after'` causes the cursor to resolve towards `string.length`
  * - `'before'` causes the cursor to resolve towards `0`
  *
@@ -1886,7 +1880,7 @@ export function getCursor<T>(
  * Returns the current index of the cursor.
  *
  * For text this is an index in the document's text encoding (a JavaScript
- * string index by default); for a list it is an element index.
+ * string index by default), for a list it is an element index.
  *
  * @typeParam T - The type of the value contained in the document
  *

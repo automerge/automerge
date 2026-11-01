@@ -335,12 +335,6 @@ interface Automerge {
       datatype?: Datatype,
     ): void;
 
-    /**
-     * Get a cursor for a position in a text or list object. For a list the
-     * position is an element index; for text it is an index in the
-     * document's text encoding. Indices >= the length give an `"end"`
-     * cursor, negative indices a `"start"` cursor. Maps and tables throw.
-     */
     getCursor(
       obj: ObjID,
       position: CursorPosition,
@@ -365,10 +359,6 @@ interface Automerge {
 
     getMissingDeps(heads?: Heads): Heads;
 
-    /**
-     * Resolve a cursor obtained from `getCursor` to the current index (or the
-     * index at `heads`) in the same text or list object.
-     */
     getCursorPosition(obj: ObjID, cursor: Cursor, heads?: Heads): number;
 
     diffPath(path: Prop[] | string, before: Heads, after: Heads, options?: DiffOptions): Patch[];
