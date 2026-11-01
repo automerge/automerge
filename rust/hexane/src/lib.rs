@@ -110,6 +110,7 @@ pub mod encoder;
 pub mod encoding;
 #[doc(hidden)]
 pub mod index;
+mod leb128_codec;
 pub mod load_opts;
 pub mod prefix;
 pub mod raw;

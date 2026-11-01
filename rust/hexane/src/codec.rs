@@ -11,6 +11,7 @@
 //! backwards through encoded bytes, so codecs without LEB128's
 //! continuation-bit structure (e.g. tag-prefixed encodings) are supported.
 
+use crate::leb128_codec;
 use crate::PackError;
 use std::ops::Range;
 
@@ -60,6 +61,14 @@ impl VarBuf {
     pub fn extend_from_slice(&mut self, bytes: &[u8]) {
         self.buf[self.len as usize..self.len as usize + bytes.len()].copy_from_slice(bytes);
         self.len += bytes.len() as u8;
+    }
+}
+
+impl From<leb128_codec::Encoded> for VarBuf {
+    #[inline]
+    fn from(e: leb128_codec::Encoded) -> Self {
+        let (buf, len) = e.into_parts();
+        VarBuf { buf, len }
     }
 }
 
@@ -221,113 +230,82 @@ pub trait Codec: std::fmt::Debug + 'static {
 
 // ── LEB128 ──────────────────────────────────────────────────────────────────
 
-/// The default codec: LEB128, hexane's original wire format.
+/// The default codec: LEB128, hexane's original wire format — a thin
+/// [`Codec`] adapter over `crate::leb128_codec`, which is verified with
+/// Verus.
+///
+/// Decoding accepts only canonical encodings, the shortest one for each
+/// value: an overlong encoding (a redundant final `0x00`, or `0x7f` after a
+/// negative group, as in `0x80 0x00` for 0) is rejected with
+/// [`Leb128Error::Overlong`]. So each value has exactly one encoding, and
+/// a column that loads re-saves to the same bytes.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Leb128;
+
+/// Why bytes are not a canonical LEB128 value.
+pub use crate::leb128_codec::DecodeError as Leb128Error;
 
 impl Codec for Leb128 {
     #[inline]
     fn encode_unsigned(n: u64) -> VarBuf {
-        let mut out = VarBuf::new();
-        let mut val = n;
-        loop {
-            let mut byte = (val & 0x7f) as u8;
-            val >>= 7;
-            if val != 0 {
-                byte |= 0x80;
-            }
-            out.push(byte);
-            if val == 0 {
-                break;
-            }
-        }
-        out
+        leb128_codec::encode(n).into()
     }
 
     #[inline]
     fn encode_signed(n: i64) -> VarBuf {
-        let mut out = VarBuf::new();
-        let mut val = n;
-        loop {
-            let mut byte = (val & 0x7f) as u8;
-            val >>= 7;
-            let more = !((val == 0 && byte & 0x40 == 0) || (val == -1 && byte & 0x40 != 0));
-            if more {
-                byte |= 0x80;
-            }
-            out.push(byte);
-            if !more {
-                break;
-            }
-        }
-        out
+        leb128_codec::encode_signed(n).into()
     }
 
+    #[inline]
     fn read_unsigned(data: &[u8]) -> Option<(usize, u64)> {
-        let mut buf = data;
-        let start = buf.len();
-        let v = leb128::read::unsigned(&mut buf).ok()?;
-        Some((start - buf.len(), v))
+        match leb128_codec::decode(data) {
+            Ok((v, n)) => Some((n, v)),
+            Err(_) => None,
+        }
     }
 
+    #[inline]
     fn read_signed(data: &[u8]) -> Option<(usize, i64)> {
-        let mut buf = data;
-        let start = buf.len();
-        let v = leb128::read::signed(&mut buf).ok()?;
-        Some((start - buf.len(), v))
+        match leb128_codec::decode_signed(data) {
+            Ok((v, n)) => Some((n, v)),
+            Err(_) => None,
+        }
     }
 
+    #[inline]
     fn try_read_unsigned(data: &[u8]) -> Result<(usize, u64), PackError> {
-        let mut buf = data;
-        let start = buf.len();
-        let v = leb128::read::unsigned(&mut buf)?;
-        Ok((start - buf.len(), v))
+        let (v, n) = leb128_codec::decode(data)?;
+        Ok((n, v))
     }
 
+    #[inline]
     fn try_read_signed(data: &[u8]) -> Result<(usize, i64), PackError> {
-        let mut buf = data;
-        let start = buf.len();
-        let v = leb128::read::signed(&mut buf)?;
-        Ok((start - buf.len(), v))
+        let (v, n) = leb128_codec::decode_signed(data)?;
+        Ok((n, v))
     }
 
-    /// Fast path: count continuation bits without doing LEB128 arithmetic.
+    /// Fast path: find the first byte without a continuation bit, without
+    /// doing LEB128 arithmetic.
     #[inline]
     fn unsigned_len(data: &[u8]) -> Option<usize> {
-        for (i, &b) in data.iter().enumerate().take(10) {
-            if b & 0x80 == 0 {
-                return Some(i + 1);
-            }
-        }
-        None
+        leb128_codec::encoded_len_at(data)
     }
 
     /// Same byte structure as unsigned LEB128.
     #[inline]
     fn signed_len(data: &[u8]) -> Option<usize> {
-        Self::unsigned_len(data)
+        leb128_codec::encoded_len_at(data)
     }
 
     #[inline]
     fn unsigned_size(n: u64) -> u64 {
-        if n == 0 {
-            return 1;
-        }
-        leb_bytes(64 - n.leading_zeros() as u64)
+        leb128_codec::encoded_len(n) as u64
     }
 
     #[inline]
-    fn signed_size(mut n: i64) -> u64 {
-        if n < 0 {
-            n = !n
-        }
-        // 1 extra for the sign bit
-        leb_bytes(1 + 64 - n.leading_zeros() as u64)
+    fn signed_size(n: i64) -> u64 {
+        leb128_codec::encoded_len_signed(n) as u64
     }
-}
-
-fn leb_bytes(bits: u64) -> u64 {
-    bits.div_ceil(7)
 }
 
 // ── Bijou64 ─────────────────────────────────────────────────────────────────
@@ -344,7 +322,8 @@ fn leb_bytes(bits: u64) -> u64 {
 /// Properties that matter here:
 /// - **Canonical by construction** — each value has exactly one encoding
 ///   and vice versa, so there is no overlong-encoding malleability to
-///   validate away (LEB128 admits overlong forms).
+///   validate away (LEB128 admits overlong forms, which the [`Leb128`]
+///   decoder has to check for and reject).
 /// - **Length from the first byte** — skips ([`unsigned_len`]) are a
 ///   table lookup, no continuation-bit scan.  The flip side is that the
 ///   bytes cannot be scanned backwards, which [`Codec`] already forbids

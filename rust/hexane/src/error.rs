@@ -1,9 +1,10 @@
 /// Errors returned when decoding or validating column data.
 #[derive(thiserror::Error, Debug)]
 pub enum PackError {
-    /// A LEB128 varint in the encoded data was malformed.
+    /// A LEB128 varint in the encoded data was truncated, overlong (not
+    /// canonical), or did not fit in 64 bits.
     #[error(transparent)]
-    InvalidNumber(#[from] leb128::read::Error),
+    InvalidNumber(#[from] crate::codec::Leb128Error),
     /// A string column contained invalid UTF-8 bytes.
     #[error("invalid utf8")]
     InvalidUtf8,

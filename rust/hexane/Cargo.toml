@@ -17,15 +17,15 @@ wasm = ["web-sys"]
 slow_path_assertions = []
 # Deep/expensive fuzz tests, skipped by default so `cargo test` stays fast.
 deep_fuzz = []
-# The bijou64 codec (src/bijou64.rs) is verified with Verus; `vstd` supplies
-# the `verus!` macro, which erases all specs and proofs in a normal build.
-bijou64 = ["dep:vstd"]
+bijou64 = []
 
 
 [dependencies]
-leb128 = "^0.2.5"
 thiserror = "^2.0.12"
-vstd = { version = "=0.0.0-2026-10-25-0158", optional = true }
+# The codecs (src/leb128_codec.rs, src/bijou64.rs) are verified with Verus;
+# `vstd` supplies the `verus!` macro, which erases all specs and proofs in a
+# normal build.
+vstd = "=0.0.0-2026-10-25-0158"
 
 [dev-dependencies]
 proptest = { version = "^1.7", default-features = false, features = ["std"] }
