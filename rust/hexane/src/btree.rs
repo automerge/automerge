@@ -2223,6 +2223,22 @@ impl<A: SlabAggregate> SlabBTree<A> {
         }
     }
 
+    /// `n` throwaway slots, to be overwritten.
+    fn placeholders(n: usize) -> (r: Vec<ChildSlot<A>>)
+        ensures r@.len() == n,
+    {
+        let mut v = Vec::with_capacity(n);
+        let mut i = 0;
+        while i < n
+            invariant v@.len() == i, i <= n,
+            decreases n - i,
+        {
+            v.push(ChildSlot { id: 0, agg: A::empty(), slab_count: 0 });
+            i += 1;
+        }
+        v
+    }
+
     /// `n` items in ⌈n/B⌉ chunks, as even as possible: chunk `c` has
     /// `base + (c < rem)` items.  Returns `(chunks, base, rem)`.
     fn chunking(n: usize) -> (r: (usize, usize, usize))
@@ -2274,26 +2290,31 @@ impl<A: SlabAggregate> SlabBTree<A> {
         let ghost (b, r) = (base as int, rem as int);
         proof { lemma_chunk(num as int, b, r, 0); }
         // Build the chunks last to first, splitting each off the end.
-        let mut out: Vec<ChildSlot<A>> = Vec::new();
-        proof { self.lemma_slots_nil(0); }
+        let mut out: Vec<ChildSlot<A>> = Self::placeholders(num);
+        proof {
+            self.lemma_slots_nil(0);
+            assert(out@.subrange(num as int, num as int) =~= Seq::<ChildSlot<A>>::empty());
+        }
         let mut c = num;
         while c > 1
             invariant
+                out@.len() == num,
                 1 <= c <= num, rem < num, num * base + rem == n, n <= usize::MAX, b == base, r == rem,
                 base >= 1, chunk_at(num as int, b, r) == n, chunk_at(0, b, r) == 0,
                 valid(all), all.len() == n,
                 aggs@ == all.subrange(0, chunk_at(c as int, b, r)),
                 self.arena_ok(),
                 self.node_spec(first_id) matches Some(Node::Leaf(_)),
-                self.slots_ok(out@, 0),
-                self.children_slabs(out@, 0) == all.subrange(chunk_at(c as int, b, r), n),
-                forall|x: NodeId| #[trigger] self.children_owned(out@, 0).contains(x) ==> old(self).node_spec(x) is None,
+                self.slots_ok(out@.subrange(c as int, num as int), 0),
+                self.children_slabs(out@.subrange(c as int, num as int), 0) == all.subrange(chunk_at(c as int, b, r), n),
+                forall|x: NodeId| #[trigger] self.children_owned(out@.subrange(c as int, num as int), 0).contains(x) ==> old(self).node_spec(x) is None,
                 forall|x: NodeId| x != first_id && old(self).node_spec(x) is Some
                     ==> #[trigger] self.node_spec(x) == old(self).node_spec(x),
                 self.root == old(self).root,
                 self.total_slabs == old(self).total_slabs,
             decreases c,
         {
+            let ghost o = out@.subrange(c as int, num as int);
             c -= 1;
             let ghost (lo, hi) = (chunk_at(c as int, b, r), chunk_at(c + 1, b, r));
             proof { lemma_chunk(num as int, b, r, c as int); }
@@ -2310,15 +2331,17 @@ impl<A: SlabAggregate> SlabBTree<A> {
             let id = self.alloc(Node::Leaf(Leaf { aggs: chunk }));
             let slot = ChildSlot { id, agg, slab_count };
             proof {
-                if t0.children_owned(out@, 0).contains(id) { t0.lemma_slots_live(out@, 0, id); }
-                Self::lemma_slots_keep(&t0, self, out@, 0, set![id]);
+                if t0.children_owned(o, 0).contains(id) { t0.lemma_slots_live(o, 0, id); }
+                Self::lemma_slots_keep(&t0, self, o, 0, set![id]);
                 self.lemma_wf_leaf(id, 0, leaf);
                 self.lemma_slot_one(slot, 0);
-                self.lemma_slots_prepend(slot, out@, 0);
+                self.lemma_slots_prepend(slot, o, 0);
                 assert(all.subrange(lo, n) =~= all.subrange(lo, hi) + all.subrange(hi, n));
             }
-            out.insert(0, slot);
+            out.set(c, slot);
+            proof { assert(out@.subrange(c as int, num as int) =~= o.insert(0, slot)); }
         }
+        let ghost o = out@.subrange(1, num as int);
         let ghost t0 = *self;
         let ghost hi = chunk_at(1, b, r);
         proof { lemma_chunk(num as int, b, r, 0); }
@@ -2333,18 +2356,19 @@ impl<A: SlabAggregate> SlabBTree<A> {
         let slot = ChildSlot { id: first_id, agg, slab_count };
         proof {
             assert(self.node_spec(first_id) == Some(Node::Leaf(leaf)));
-            if t0.children_owned(out@, 0).contains(first_id) { t0.lemma_slots_live(out@, 0, first_id); }
-            Self::lemma_slots_keep(&t0, self, out@, 0, set![first_id]);
+            if t0.children_owned(o, 0).contains(first_id) { t0.lemma_slots_live(o, 0, first_id); }
+            Self::lemma_slots_keep(&t0, self, o, 0, set![first_id]);
             self.lemma_wf_leaf(first_id, 0, leaf);
             self.lemma_slot_one(slot, 0);
-            self.lemma_slots_prepend(slot, out@, 0);
+            self.lemma_slots_prepend(slot, o, 0);
             assert(all =~= all.subrange(0, hi) + all.subrange(hi, n));
             assert forall|x: NodeId| x != first_id && old(self).node_spec(x) is Some
                 implies #[trigger] self.node_spec(x) == old(self).node_spec(x) by {
                 assert(self.node_spec(x) == t0.node_spec(x));
             }
         }
-        out.insert(0, slot);
+        out.set(0, slot);
+        proof { assert(out@ =~= o.insert(0, slot)); }
         out
     }
 
@@ -2384,9 +2408,10 @@ impl<A: SlabAggregate> SlabBTree<A> {
         let (num, base, rem) = Self::chunking(children.len());
         let ghost (b, r) = (base as int, rem as int);
         proof { lemma_chunk(num as int, b, r, 0); }
-        let mut out: Vec<ChildSlot<A>> = Vec::new();
+        let mut out: Vec<ChildSlot<A>> = Self::placeholders(num);
         proof {
             self.lemma_slots_nil(h);
+            assert(out@.subrange(num as int, num as int) =~= Seq::<ChildSlot<A>>::empty());
             assert forall|x: NodeId| #[trigger] owned_all.contains(x) implies old(self).node_spec(x) is Some by {
                 old(self).lemma_slots_live(all, hc, x);
             }
@@ -2395,6 +2420,7 @@ impl<A: SlabAggregate> SlabBTree<A> {
         let mut c = num;
         while c > 1
             invariant
+                out@.len() == num,
                 h > 0, hc == h - 1,
                 1 <= c <= num, rem < num, num * base + rem == n, n <= usize::MAX, b == base, r == rem,
                 base >= 1, chunk_at(num as int, b, r) == n, chunk_at(0, b, r) == 0,
@@ -2408,10 +2434,10 @@ impl<A: SlabAggregate> SlabBTree<A> {
                 !owned_all.contains(first_id),
                 valid(slabs_all), slabs_all.len() <= usize::MAX,
                 forall|x: NodeId| #[trigger] owned_all.contains(x) ==> old(self).node_spec(x) is Some,
-                self.slots_ok(out@, h),
-                out@.len() == num - c,
-                self.children_slabs(out@, h) == self.children_slabs(all.subrange(chunk_at(c as int, b, r), n), hc),
-                forall|x: NodeId| #[trigger] self.children_owned(out@, h).contains(x)
+                self.slots_ok(out@.subrange(c as int, num as int), h),
+                out@.len() == num,
+                self.children_slabs(out@.subrange(c as int, num as int), h) == self.children_slabs(all.subrange(chunk_at(c as int, b, r), n), hc),
+                forall|x: NodeId| #[trigger] self.children_owned(out@.subrange(c as int, num as int), h).contains(x)
                     ==> old(self).node_spec(x) is None
                         || self.children_owned(all.subrange(chunk_at(c as int, b, r), n), hc).contains(x),
                 forall|x: NodeId| x != first_id && old(self).node_spec(x) is Some
@@ -2420,6 +2446,7 @@ impl<A: SlabAggregate> SlabBTree<A> {
                 self.total_slabs == old(self).total_slabs,
             decreases c,
         {
+            let ghost o = out@.subrange(c as int, num as int);
             c -= 1;
             let ghost (lo, hi) = (chunk_at(c as int, b, r), chunk_at(c + 1, b, r));
             proof { lemma_chunk(num as int, b, r, c as int); }
@@ -2446,11 +2473,11 @@ impl<A: SlabAggregate> SlabBTree<A> {
             let id = self.alloc(Node::Internal(Internal { children: chunk }));
             proof {
                 assert(!owned_all.contains(id));
-                if t0.children_owned(out@, h).contains(id) {
-                    t0.lemma_slots_live(out@, h, id);
+                if t0.children_owned(o, h).contains(id) {
+                    t0.lemma_slots_live(o, h, id);
                 }
                 Self::lemma_slots_keep(&t0, self, all, hc, set![id]);
-                Self::lemma_slots_keep(&t0, self, out@, h, set![id]);
+                Self::lemma_slots_keep(&t0, self, o, h, set![id]);
                 Self::lemma_slots_keep(&t0, self, chunk@, hc, set![id]);
                 assert forall|i: int| 0 <= i < chunk@.len() implies
                     !self.owned(#[trigger] chunk@[i].id, hc).contains(id) by {
@@ -2463,9 +2490,9 @@ impl<A: SlabAggregate> SlabBTree<A> {
             proof {
                 self.lemma_wf_internal(id, h, node);
                 self.lemma_slot_one(slot, h);
-                assert(self.owned(slot.id, h).disjoint(self.children_owned(out@, h))) by {
+                assert(self.owned(slot.id, h).disjoint(self.children_owned(o, h))) by {
                     assert forall|x: NodeId| self.owned(id, h).contains(x) implies
-                        !self.children_owned(out@, h).contains(x) by {
+                        !self.children_owned(o, h).contains(x) by {
                         if x == id {
                         } else {
                             assert(self.children_owned(chunk@, hc).contains(x));
@@ -2476,7 +2503,7 @@ impl<A: SlabAggregate> SlabBTree<A> {
                         }
                     }
                 };
-                self.lemma_slots_prepend(slot, out@, h);
+                self.lemma_slots_prepend(slot, o, h);
                 // what the list now stands for: this chunk and the rest
                 t0.lemma_slots_sub(all, hi, n, hc);
                 Self::lemma_slots_keep(&t0, self, rest, hc, set![id]);
@@ -2485,8 +2512,10 @@ impl<A: SlabAggregate> SlabBTree<A> {
                 assert(id != first_id);
                 assert(old(self).node_spec(id) is None);
             }
-            out.insert(0, slot);
+            out.set(c, slot);
+            proof { assert(out@.subrange(c as int, num as int) =~= o.insert(0, slot)); }
         }
+        let ghost o = out@.subrange(1, num as int);
         let ghost t0 = *self;
         let ghost hi = chunk_at(1, b, r);
         let ghost rest = all.subrange(hi, n);
@@ -2511,10 +2540,10 @@ impl<A: SlabAggregate> SlabBTree<A> {
         }
         proof {
             assert(self.node_spec(first_id) == Some(Node::Internal(node)));
-            if t0.children_owned(out@, h).contains(first_id) {
+            if t0.children_owned(o, h).contains(first_id) {
                 assert(old(self).node_spec(first_id) is Some);
             }
-            Self::lemma_slots_keep(&t0, self, out@, h, set![first_id]);
+            Self::lemma_slots_keep(&t0, self, o, h, set![first_id]);
             Self::lemma_slots_keep(&t0, self, first, hc, set![first_id]);
             Self::lemma_slots_keep(&t0, self, rest, hc, set![first_id]);
             assert forall|i: int| 0 <= i < first.len() implies
@@ -2528,16 +2557,16 @@ impl<A: SlabAggregate> SlabBTree<A> {
         proof {
             self.lemma_wf_internal(first_id, h, node);
             self.lemma_slot_one(slot, h);
-            assert(self.owned(first_id, h).disjoint(self.children_owned(out@, h))) by {
+            assert(self.owned(first_id, h).disjoint(self.children_owned(o, h))) by {
                 assert forall|x: NodeId| self.owned(first_id, h).contains(x) implies
-                    !self.children_owned(out@, h).contains(x) by {
+                    !self.children_owned(o, h).contains(x) by {
                     if x != first_id {
                         assert(self.children_owned(first, hc).contains(x));
                         assert(owned_all.contains(x));
                     }
                 }
             };
-            self.lemma_slots_prepend(slot, out@, h);
+            self.lemma_slots_prepend(slot, o, h);
             self.lemma_children_slabs_concat(first, rest, hc);
             self.lemma_children_owned_concat(first, rest, hc);
             assert forall|x: NodeId| x != first_id && old(self).node_spec(x) is Some
@@ -2545,7 +2574,8 @@ impl<A: SlabAggregate> SlabBTree<A> {
                 assert(self.node_spec(x) == t0.node_spec(x));
             }
         }
-        out.insert(0, slot);
+        out.set(0, slot);
+        proof { assert(out@ =~= o.insert(0, slot)); }
         out
     }
 
@@ -2728,6 +2758,36 @@ impl<A: SlabAggregate> SlabBTree<A> {
                     (#[trigger] self.free@[i] as int) < self.nodes@.len() && self.nodes@[self.free@[i] as int] is None by {}
             }
         }
+    }
+
+    /// A tree of the slabs `aggs`: leaves of at most B, grouped level by
+    /// level.
+    pub(crate) fn from_vec(aggs: Vec<A>) -> (t: Self)
+        requires valid(aggs@),
+        ensures t.wf(), t@ == aggs@,
+    {
+        let mut t = Self::new();
+        if aggs.len() == 0 {
+            proof { assert(aggs@ =~= t@); }
+            return t;
+        }
+        let ghost all = aggs@;
+        let n = aggs.len();
+        let root = t.root;
+        let slots = t.split_leaf(root, aggs);
+        t.set_root(slots, Ghost(0));
+        let ghost t2 = t;
+        let ghost hh = choose|hh: nat| t2.wf_node(t2.root, hh) && t2.slabs(t2.root, hh) == all;
+        t.total_slabs = n;
+        proof {
+            assert forall|x: NodeId| t2.owned(t2.root, hh).contains(x) implies t2.node_spec(x) == t.node_spec(x) by {}
+            Self::lemma_frame(&t2, &t, t.root, hh);
+            t.lemma_height_unique(t.root, hh, t.height());
+            lemma_fold_len(all, 0, all.len() as int);
+            assert(all.subrange(0, all.len() as int) =~= all);
+            A::lemma_len_bound(fold(all));
+        }
+        t
     }
 
     /// Aggregate of all slabs in the tree.
@@ -4012,6 +4072,7 @@ pub trait PrefixAggregate: SlabAggregate {
     fn prefix(&self) -> &Self::Prefix;
 }
 
+#[cfg(test)]
 fn merge_all<'a, A: SlabAggregate + 'a>(aggs: impl IntoIterator<Item = &'a A>) -> A {
     let mut acc = A::default();
     for a in aggs {
@@ -4076,50 +4137,7 @@ impl<A: SlabAggregate> SlabBTree<A> {
     // ── Bulk construction ───────────────────────────────────────────────
 
     pub(crate) fn from_iter<I: IntoIterator<Item = A>>(iter: I) -> Self {
-        let aggs: Vec<A> = iter.into_iter().collect();
-        let mut tree = Self::new();
-        if aggs.is_empty() {
-            return tree;
-        }
-        tree.total_slabs = aggs.len();
-
-        let mut level: Vec<(NodeId, A, usize)> = aggs
-            .chunks(B)
-            .map(|chunk| {
-                let agg = merge_all(chunk);
-                let slab_count = chunk.len();
-                let leaf = Leaf {
-                    aggs: chunk.to_vec(),
-                };
-                let id = tree.alloc(Node::Leaf(leaf));
-                (id, agg, slab_count)
-            })
-            .collect();
-
-        while level.len() > 1 {
-            level = level
-                .chunks(B)
-                .map(|chunk| {
-                    let children: Vec<ChildSlot<A>> = chunk
-                        .iter()
-                        .map(|(id, agg, slab_count)| ChildSlot {
-                            id: *id,
-                            agg: agg.clone(),
-                            slab_count: *slab_count,
-                        })
-                        .collect();
-                    let agg = merge_all(children.iter().map(|c| &c.agg));
-                    let slab_count = children.iter().map(|c| c.slab_count).sum();
-                    let id = tree.alloc(Node::Internal(Internal { children }));
-                    (id, agg, slab_count)
-                })
-                .collect();
-        }
-
-        let (root_id, _, _) = level[0];
-        tree.free(tree.root);
-        tree.root = root_id;
-        tree
+        Self::from_vec(iter.into_iter().collect())
     }
 }
 
