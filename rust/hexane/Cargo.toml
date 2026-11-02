@@ -44,3 +44,7 @@ debug = true
 version = "^0.3.55"
 features = ["console"]
 optional = true
+
+[lints.rust]
+# set by Verus when it compiles the crate (see src/rle/model.rs)
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(verus_keep_ghost)"] }

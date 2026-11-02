@@ -2,7 +2,6 @@
 
 use crate::encoding::RunDecoder;
 
-use crate::PackError;
 use crate::{Codec, ColumnValueRef, Leb128, RleValue, Run};
 use std::marker::PhantomData;
 
@@ -171,10 +170,6 @@ impl<'a, T: RleValue, C: Codec> RleDecoder<'a, T, C> {
         }
     }
 
-    pub(crate) fn pos(&self) -> usize {
-        self.byte_pos
-    }
-
     pub(crate) fn is_literal(&self) -> bool {
         matches!(self.state, RunState::Literal)
     }
@@ -217,54 +212,6 @@ impl<'a, T: RleValue, C: Codec> RleDecoder<'a, T, C> {
                 self.byte_pos += count_bytes + ncb;
                 self.remaining = null_count as usize;
                 self.state = RunState::Null;
-            }
-        }
-    }
-
-    // multiple monomorphized callers (pull path + drain path) — without
-    // the hint LLVM stops inlining this into the per-segment hot loops
-    #[inline(always)]
-    pub(crate) fn try_next_segment(&mut self) -> Result<Option<RleSegment<'a, T>>, PackError> {
-        if self.remaining > 0 && matches!(self.state, RunState::Literal) {
-            self.remaining -= 1;
-            let (bytes, value) = T::try_unpack::<C>(&self.data[self.byte_pos..])?;
-            self.byte_pos += bytes;
-            Ok(Some(RleSegment::Lit { value, bytes }))
-        } else if self.data[self.byte_pos..].is_empty() {
-            Ok(None)
-        } else {
-            match C::try_read_signed(&self.data[self.byte_pos..])? {
-                (count_bytes, n) if n > 0 => {
-                    let count = n as usize;
-                    let value_start = self.byte_pos + count_bytes;
-                    let (vlen, value) = T::try_unpack::<C>(&self.data[value_start..])?;
-                    let bytes = count_bytes + vlen;
-                    self.byte_pos += bytes;
-                    self.state = RunState::Idle;
-                    self.remaining = 0;
-                    Ok(Some(RleSegment::Run {
-                        count,
-                        value,
-                        bytes,
-                    }))
-                }
-                (bytes, n) if n < 0 => {
-                    let count = (-n) as usize;
-                    self.byte_pos += bytes;
-                    self.remaining = count;
-                    self.state = RunState::Literal;
-                    Ok(Some(RleSegment::LitHead { count, bytes }))
-                }
-                (count_bytes, _) => {
-                    let (ncb, count) =
-                        C::try_read_unsigned(&self.data[self.byte_pos + count_bytes..])?;
-                    let count = count as usize;
-                    let bytes = count_bytes + ncb;
-                    self.byte_pos += bytes;
-                    self.state = RunState::Idle;
-                    self.remaining = 0;
-                    Ok(Some(RleSegment::Null { count, bytes }))
-                }
             }
         }
     }
@@ -398,100 +345,6 @@ impl<'a, T: RleValue, C: Codec> Iterator for RleDecoder<'a, T, C> {
                 }
             }
         }
-    }
-}
-
-pub(crate) enum RleSegment<'a, T: RleValue> {
-    Run {
-        count: usize,
-        value: T::Get<'a>,
-        bytes: usize,
-    },
-    Null {
-        count: usize,
-        bytes: usize,
-    },
-    LitHead {
-        count: usize,
-        bytes: usize,
-    },
-    Lit {
-        value: T::Get<'a>,
-        bytes: usize,
-    },
-}
-
-// Hand-written (not derived) so the impls don't demand `T: Copy` —
-// `T::Get<'a>` is `Copy` by trait contract even when `T` (e.g. `String`)
-// is not.
-impl<T: RleValue> Copy for RleSegment<'_, T> {}
-impl<T: RleValue> Clone for RleSegment<'_, T> {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
-impl<'a, T: RleValue> RleSegment<'a, T> {
-    /// Check if this segment is valid after `prev` (the last value-bearing segment)
-    /// and `prev_lit` (the previous literal value within the current literal run).
-    /// Returns `Ok(())` or an error message.
-    pub(crate) fn validate_after(
-        &self,
-        prev: &Option<Self>,
-        prev_lit: Option<T::Get<'a>>,
-    ) -> Result<(), &'static str> {
-        match self {
-            Self::LitHead { count, .. } => {
-                if *count == 0 {
-                    return Err("empty literal run");
-                }
-                if matches!(prev, Some(Self::Lit { .. })) {
-                    return Err("adjacent literal runs");
-                }
-            }
-            Self::Lit { value, .. } => {
-                if prev_lit == Some(*value) {
-                    return Err("literal has consecutive equal values");
-                }
-                // Boundary check: first lit value in this run vs prev segment's value.
-                if prev_lit.is_none() {
-                    match prev {
-                        Some(Self::Run { value: v, .. }) | Some(Self::Lit { value: v, .. })
-                            if *v == *value =>
-                        {
-                            return Err("boundary values match (should be merged)");
-                        }
-                        _ => {}
-                    }
-                }
-            }
-            Self::Run { count, value, .. } => {
-                if *count < 2 {
-                    return Err("repeat run with count < 2");
-                }
-                match prev {
-                    Some(Self::Run { value: v, .. }) if *v == *value => {
-                        return Err("adjacent repeat runs with same value");
-                    }
-                    Some(Self::Lit { value: v, .. }) if *v == *value => {
-                        return Err("boundary values match (should be merged)");
-                    }
-                    _ => {}
-                }
-            }
-            Self::Null { count, .. } => {
-                if *count == 0 {
-                    return Err("null run with count 0");
-                }
-                if matches!(prev, Some(Self::Null { .. })) {
-                    return Err("adjacent null runs");
-                }
-                if !T::NULLABLE {
-                    return Err("null in non-nullable column");
-                }
-            }
-        }
-        Ok(())
     }
 }
 

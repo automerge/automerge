@@ -3,7 +3,8 @@
 use std::num::NonZeroU32;
 
 use crate::encoding::SlabInfo;
-use crate::rle::decoder::{RleDecoder, RleSegment};
+use crate::rle::model::Ops;
+use crate::rle::read::{self, Reader, Seg};
 use crate::rle::{RleTail, Slab};
 use crate::ColumnValueRef;
 use crate::PackError;
@@ -12,54 +13,19 @@ use crate::{Codec, Leb128};
 
 // ── validate_encoding ────────────────────────────────────────────────────────
 
+/// Check that `slab` is a canonical RLE encoding, and summarize it.
+/// The check itself ([`read::validate`]) is verified with Verus.
 pub(crate) fn rle_validate_encoding<T: RleValue, C: Codec>(
     slab: &[u8],
 ) -> Result<SlabInfo<RleTail>, PackError> {
-    let mut decoder = RleDecoder::<T, C>::new(slab);
-    let mut len = 0;
-    let mut segments = 0;
-    let mut tail = RleTail::default();
-    let mut prev: Option<RleSegment<'_, T>> = None;
-    let mut prev_lit: Option<T::Get<'_>> = None;
-
-    while let Some(segment) = decoder.try_next_segment()? {
-        segment
-            .validate_after(&prev, prev_lit)
-            .map_err(|e| PackError::InvalidValue(e.to_string()))?;
-
-        match segment {
-            RleSegment::LitHead { bytes, .. } => {
-                prev_lit = None;
-                tail.bytes = bytes as u32;
-            }
-            RleSegment::Lit { value, bytes } => {
-                prev_lit = Some(value);
-                prev = Some(segment);
-                len += 1;
-                segments += 1;
-                tail.lit_tail = NonZeroU32::new(bytes as u32);
-                tail.bytes += bytes as u32;
-            }
-            RleSegment::Run { count, bytes, .. } => {
-                prev = Some(segment);
-                len += count;
-                segments += 1;
-                tail.lit_tail = None;
-                tail.bytes = bytes as u32;
-            }
-            RleSegment::Null { count, bytes } => {
-                prev = Some(segment);
-                len += count;
-                segments += 1;
-                tail.lit_tail = None;
-                tail.bytes = bytes as u32;
-            }
-        }
-    }
+    let info = read::validate::<Ops<'_, T, C>>(slab)?;
     Ok(SlabInfo {
-        segments,
-        len,
-        tail,
+        segments: info.segments,
+        len: info.len,
+        tail: RleTail {
+            bytes: info.tail_bytes,
+            lit_tail: NonZeroU32::new(info.lit_tail),
+        },
     })
 }
 
@@ -80,14 +46,11 @@ pub(crate) fn rle_validate_encoding<T: RleValue, C: Codec>(
 /// [`finalize`](Self::finalize) drains whatever the consumer did not pull
 /// (validating it) and returns the finished slabs.
 pub struct RleLoadIter<'a, T: RleValue, C: Codec = Leb128> {
-    decoder: RleDecoder<'a, T, C>,
+    /// reads and checks the segments: non-canonical structure (mergeable
+    /// adjacent runs, count-0 runs, count-1 repeats), more values than
+    /// fit a `usize` and runs over 4 GiB are load errors
+    reader: Reader<'a, Ops<'a, T, C>>,
     input: &'a [u8],
-    /// canonical-form validation state: the last value-bearing segment
-    /// and the previous literal value within the current literal run —
-    /// non-canonical structure (mergeable adjacent runs, count-0 runs,
-    /// count-1 repeats) is a load error
-    prev: Option<RleSegment<'a, T>>,
-    prev_lit: Option<T::Get<'a>>,
     cut: CutState,
     target_segments: usize,
 }
@@ -109,17 +72,17 @@ struct CutState {
 impl CutState {
     /// Per-segment slab bookkeeping; yields the segment's run, if any.
     /// `#[inline(always)]` so a caller that discards the run compiles down
-    /// to the bare bookkeeping. Callers run `validate_after` (which
-    /// rejects nulls in non-nullable columns, among other things)
-    /// *before* tracking — keeping this infallible lets the discard
-    /// path fold completely.
+    /// to the bare bookkeeping. Segments come from the [`Reader`], which
+    /// has checked them (a run's count fits the column's length, and its
+    /// bytes a `u32`) — keeping this infallible lets the discard path
+    /// fold completely.
     #[inline(always)]
     fn track<'a, T: RleValue>(
         &mut self,
-        segment: RleSegment<'a, T>,
+        segment: Seg<T::Get<'a>>,
     ) -> Option<crate::Run<T::Get<'a>>> {
         match segment {
-            RleSegment::LitHead { count, bytes } => {
+            Seg::LitHead { count, bytes } => {
                 if self.last_lit_count < self.lit_count {
                     self.pending_header = self.lit_count;
                 }
@@ -128,7 +91,7 @@ impl CutState {
                 self.lit_count = 0;
                 None
             }
-            RleSegment::Lit { value, bytes } => {
+            Seg::Lit { value, bytes } => {
                 self.slab.len += 1;
                 self.slab.segments += 1;
                 self.slab.tail.lit_tail = NonZeroU32::new(bytes as u32);
@@ -136,7 +99,7 @@ impl CutState {
                 self.lit_count += 1;
                 Some(crate::Run { count: 1, value })
             }
-            RleSegment::Run {
+            Seg::Run {
                 count,
                 value,
                 bytes,
@@ -147,7 +110,7 @@ impl CutState {
                 self.slab.tail.bytes = bytes as u32;
                 (count > 0).then_some(crate::Run { count, value })
             }
-            RleSegment::Null { count, bytes } => {
+            Seg::Null { count, bytes } => {
                 self.slab.len += count;
                 self.slab.segments += 1;
                 self.slab.tail.lit_tail = None;
@@ -185,10 +148,8 @@ impl<'a, T: RleValue, C: Codec> RleLoadIter<'a, T, C> {
     pub fn new(data: &'a [u8], max_segments: usize) -> Self {
         assert!(max_segments >= 2, "max_segments must be at least 2");
         Self {
-            decoder: RleDecoder::new(data),
+            reader: Reader::new(data),
             input: data,
-            prev: None,
-            prev_lit: None,
             cut: CutState::default(),
             target_segments: max_segments / 2,
         }
@@ -196,29 +157,18 @@ impl<'a, T: RleValue, C: Codec> RleLoadIter<'a, T, C> {
 
     /// The next canonical run, or `None` at end of input. Non-canonical
     /// structure — anything a canonical encoder would have merged or
-    /// never emitted — is a load error (`validate_after`), so the run
+    /// never emitted — is a load error (the [`Reader`]'s), so the run
     /// stream keeps the "adjacent runs never carry equal values" contract
     /// by construction, and every run is exactly one wire segment.
     #[inline]
     pub fn try_next_run(&mut self) -> Result<Option<crate::Run<T::Get<'a>>>, PackError> {
         loop {
-            let Some(segment) = self.decoder.try_next_segment()? else {
+            let Some(segment) = self.reader.next()? else {
                 return Ok(None);
             };
-            segment
-                .validate_after(&self.prev, self.prev_lit)
-                .map_err(|e| PackError::InvalidValue(e.to_string()))?;
-            match segment {
-                RleSegment::LitHead { .. } => self.prev_lit = None,
-                RleSegment::Lit { value, .. } => {
-                    self.prev_lit = Some(value);
-                    self.prev = Some(segment);
-                }
-                _ => self.prev = Some(segment),
-            }
             let out = self.cut.track::<T>(segment);
             if self.cut.slab.segments == self.target_segments {
-                self.cut.cut_slab::<C>(self.input, self.decoder.pos());
+                self.cut.cut_slab::<C>(self.input, self.reader.pos());
             }
             if let Some(run) = out {
                 return Ok(Some(run));
@@ -235,29 +185,16 @@ impl<'a, T: RleValue, C: Codec> RleLoadIter<'a, T, C> {
         let mut cut = self.cut;
         let target_segments = self.target_segments;
         let input = self.input;
-        let mut decoder = self.decoder;
-        let mut prev = self.prev;
-        let mut prev_lit = self.prev_lit;
+        let mut reader = self.reader;
 
-        while let Some(segment) = decoder.try_next_segment()? {
-            segment
-                .validate_after(&prev, prev_lit)
-                .map_err(|e| PackError::InvalidValue(e.to_string()))?;
-            match segment {
-                RleSegment::LitHead { .. } => prev_lit = None,
-                RleSegment::Lit { value, .. } => {
-                    prev_lit = Some(value);
-                    prev = Some(segment);
-                }
-                _ => prev = Some(segment),
-            }
+        while let Some(segment) = reader.next()? {
             let _ = cut.track::<T>(segment);
             if cut.slab.segments == target_segments {
-                cut.cut_slab::<C>(input, decoder.pos());
+                cut.cut_slab::<C>(input, reader.pos());
             }
         }
         if cut.slab.segments > 0 {
-            cut.cut_slab::<C>(input, decoder.pos());
+            cut.cut_slab::<C>(input, reader.pos());
         }
         Ok(cut.slabs)
     }
