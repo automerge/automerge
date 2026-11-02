@@ -21,6 +21,8 @@ use super::postfix::*;
 // proof functions exist only when Verus compiles the crate
 #[cfg(verus_keep_ghost)]
 use super::read::{lemma_count, lemma_header, lemma_starts, lemma_value};
+#[cfg(verus_keep_ghost)]
+use super::read::{lit_tail_of, tail_bytes_of};
 use super::state::*;
 #[allow(unused_imports)]
 use vstd::prelude::*;
@@ -2091,6 +2093,209 @@ pub(crate) fn partition_at<'a, W: WriteOps<'a>>(data: &'a [u8], at: usize) -> (p
     }
 }
 
+// ── The end of a slab ───────────────────────────────────────────────────────
+
+/// Group `gi` of `data` is its last, at `pos`, and its header of `hb`
+/// bytes is read.
+pub(crate) open spec fn last_group_at<'a, O: RleOps<'a>>(data: Seq<u8>, gi: int, pos: int, hb: int) -> bool {
+    let gs = slab_groups::<O>(data);
+    &&& valid_slab::<O>(data) && data.len() < i64::MAX && data.len() <= usize::MAX
+    &&& gs.len() > 0 && gi == gs.len() - 1 && pos == gb::<O>(gs, gi)
+    &&& hb == O::enc_signed(header_of(gs[gi]) as i64).len() && pos + hb <= data.len()
+    &&& data.skip(pos + hb) == payload::<O>(gs[gi])
+    &&& gseg(gs, gi) + group_segments(gs[gi]) == groups_segments(gs)
+    &&& gb::<O>(gs, gi) + group_bytes::<O>(gs[gi]).len() == data.len()
+}
+
+/// The end of a slab whose last group is a repeat run.
+#[verifier::spinoff_prover]
+fn tail_run_state<'a, W: WriteOps<'a>>(data: &'a [u8], pos: usize, hb: usize, count: usize, Ghost(gi): Ghost<int>) -> (r: State<'a, W>)
+    requires
+        last_group_at::<W::R>(data@, gi, pos as int, hb as int),
+        slab_groups::<W::R>(data@)[gi] is Run, count as int == header_of(slab_groups::<W::R>(data@)[gi]),
+    ensures
+        landed::<W>(data@, slab_values::<W::R>(data@).len() as int, r, pos as int,
+            groups_segments(slab_groups::<W::R>(data@)) - 1),
+{
+    hide(canonical);
+    let ghost gs = slab_groups::<W::R>(data@);
+    let ghost g = gs[gi];
+    proof {
+        lemma_slab::<W::R>(data@);
+        lemma_slab_group::<W::R>(data@, gi);
+        lemma_starts(<W::R as RleOps<'a>>::enc(run_value(g)), Seq::empty());
+        assert(<W::R as RleOps<'a>>::enc(run_value(g)) + Seq::<u8>::empty() =~= payload::<W::R>(g));
+    }
+    let vrest = &data[pos + hb..];
+    assert(vrest@ == data@.skip(pos + hb));
+    let (_vlen, value) = <W::R as RleOps<'a>>::unpack(vrest);
+    proof {
+        lemma_value::<W::R>(data@.skip(pos + hb), run_value(g), Seq::empty(), _vlen as int, value);
+    }
+    let s = State::make_run(count, W::cow_ref(value));
+    proof {
+        lemma_land_run::<W>(data@, gi, count as int, s);
+        assert(gl(gs, gi) + count == slab_values::<W::R>(data@).len());
+    }
+    s
+}
+
+/// The end of a slab whose last group is a null run.
+#[verifier::spinoff_prover]
+fn tail_null_state<'a, W: WriteOps<'a>>(data: &'a [u8], pos: usize, hb: usize, Ghost(gi): Ghost<int>) -> (r: State<'a, W>)
+    requires
+        last_group_at::<W::R>(data@, gi, pos as int, hb as int),
+        slab_groups::<W::R>(data@)[gi] is Null,
+    ensures
+        landed::<W>(data@, slab_values::<W::R>(data@).len() as int, r, pos as int,
+            groups_segments(slab_groups::<W::R>(data@)) - 1),
+{
+    hide(canonical);
+    let ghost gs = slab_groups::<W::R>(data@);
+    let ghost g = gs[gi];
+    let ghost cb = <W::R as RleOps<'a>>::enc_unsigned(g->Null_count as u64);
+    proof {
+        lemma_slab::<W::R>(data@);
+        lemma_slab_group::<W::R>(data@, gi);
+        lemma_starts(cb, Seq::empty());
+        assert(cb + Seq::<u8>::empty() =~= payload::<W::R>(g));
+    }
+    let crest = &data[pos + hb..];
+    assert(crest@ == data@.skip(pos + hb));
+    let (_n, c) = <W::R as RleOps<'a>>::read_unsigned_opt(crest).unwrap();
+    proof {
+        lemma_count::<W::R>(data@.skip(pos + hb), g->Null_count as u64, Seq::empty(), _n as int, c);
+    }
+    let s = State::Null(c as usize);
+    proof {
+        lemma_land_null::<W>(data@, gi, c as int, s);
+        assert(gl(gs, gi) + c == slab_values::<W::R>(data@).len());
+    }
+    s
+}
+
+/// The end of a slab whose last group is a literal of `n` values, the
+/// last `tl` bytes wide: the state, and where its bytes start.
+#[verifier::spinoff_prover]
+#[verifier::rlimit(100)]
+fn tail_lit_state<'a, W: WriteOps<'a>>(data: &'a [u8], pos: usize, Ghost(hb): Ghost<int>, n: usize, tl: usize, Ghost(gi): Ghost<int>) -> (r: (State<'a, W>, usize))
+    requires
+        last_group_at::<W::R>(data@, gi, pos as int, hb),
+        slab_groups::<W::R>(data@)[gi] is Lit, n as int == -header_of(slab_groups::<W::R>(data@)[gi]),
+        tl == lit_tail_of::<W::R>(slab_groups::<W::R>(data@)),
+    ensures
+        r.1 <= data@.len(),
+        landed::<W>(data@, slab_values::<W::R>(data@).len() as int, r.0, r.1 as int,
+            groups_segments(slab_groups::<W::R>(data@)) - 1),
+{
+    hide(canonical);
+    hide(gseg);
+    let ghost gs = slab_groups::<W::R>(data@);
+    let ghost g = gs[gi];
+    let ghost vs = g->values;
+    proof {
+        lemma_slab::<W::R>(data@);
+        lemma_slab_group::<W::R>(data@, gi);
+        lemma_slab_lit::<W::R>(data@, gi, n - 1);
+        assert(gs.last() == g);
+        assert(vs.take(n as int) =~= vs);
+        assert(vs.skip(n as int) =~= Seq::<VOf<'a, W>>::empty());
+        assert(gs.skip(gi + 1) =~= Seq::<Group<VOf<'a, W>>>::empty());
+        assert(groups_bytes::<W::R>(gs.skip(gi + 1)) =~= Seq::<u8>::empty());
+        assert(encs::<W::R>(vs.skip(n as int)) =~= Seq::<u8>::empty());
+        lemma_starts(<W::R as RleOps<'a>>::enc(vs[n - 1]), Seq::empty());
+    }
+    let value_pos = data.len() - tl;
+    let vrest = &data[value_pos..];
+    assert(vrest@ == data@.skip(value_pos as int));
+    let (_vlen, value) = <W::R as RleOps<'a>>::unpack(vrest);
+    proof {
+        assert(encs::<W::R>(vs.skip(n as int)) + groups_bytes::<W::R>(gs.skip(gi + 1)) =~= Seq::<u8>::empty());
+        lemma_value::<W::R>(data@.skip(value_pos as int), vs[n - 1], Seq::empty(), _vlen as int, value);
+    }
+    let s = State::lit(n - 1, W::cow_ref(value), pos);
+    let bs = if n == 1 { pos } else { value_pos };
+    proof {
+        lemma_land_lit::<W>(data@, gi, n - 1, s, bs as int);
+        assert(gl(gs, gi) + n == slab_values::<W::R>(data@).len());
+        assert(gseg(gs, gi) + n - 1 == groups_segments(gs) - 1);
+    }
+    (s, bs)
+}
+
+/// The writer state at the end of the valid slab `data`, read from its
+/// tail record (`tb`, `tl`) rather than by walking: the state, where its
+/// bytes start, and the segments of its last group it stands for (1, or
+/// 0 for an empty slab).
+#[verifier::spinoff_prover]
+pub(crate) fn tail_state<'a, W: WriteOps<'a>>(data: &'a [u8], tb: usize, tl: usize) -> (r: (State<'a, W>, usize, usize))
+    requires
+        valid_slab::<W::R>(data@), data@.len() < i64::MAX,
+        tb == tail_bytes_of::<W::R>(slab_groups::<W::R>(data@)),
+        tl == lit_tail_of::<W::R>(slab_groups::<W::R>(data@)),
+    ensures
+        r.1 <= data@.len(), r.2 <= groups_segments(slab_groups::<W::R>(data@)),
+        landed::<W>(data@, slab_values::<W::R>(data@).len() as int, r.0, r.1 as int,
+            groups_segments(slab_groups::<W::R>(data@)) - r.2),
+{
+    hide(canonical);
+    let ghost gs = slab_groups::<W::R>(data@);
+    proof {
+        lemma_slab::<W::R>(data@);
+    }
+    let len = data.len();
+    if len == 0 {
+        proof {
+            if gs.len() > 0 {
+                lemma_slab_group::<W::R>(data@, 0);
+            }
+            let e = Seq::<Group<VOf<'a, W>>>::empty();
+            assert(gs =~= e);
+            assert(data@.take(0) =~= Seq::<u8>::empty());
+            reveal(canonical);
+            assert(rel(State::<'a, W>::Empty, data@.take(0), Seq::empty(), 0, e, Seq::empty(), 0));
+            assert(slab_values::<W::R>(data@).take(0) =~= values_of(State::<'a, W>::Empty, e, Seq::empty()));
+        }
+        return (State::Empty, 0, 0);
+    }
+    let ghost gi = gs.len() - 1;
+    proof {
+        if gs.len() == 0 {
+            assert(groups_bytes::<W::R>(gs).len() == 0);
+        }
+        lemma_slab_group::<W::R>(data@, gi);
+        assert(gs.take(gi + 1) =~= gs);
+        assert(gs.last() == gs[gi]);
+        lemma_gseg(gs, gi);
+        assert(gs.skip(gi + 1) =~= Seq::<Group<VOf<'a, W>>>::empty());
+        assert(groups_bytes::<W::R>(gs.skip(gi + 1)) =~= Seq::<u8>::empty());
+        super::read::lemma_segments_le::<W::R>(gs);
+        lemma_group_segments_pos::<W::R>(gs[gi]);
+    }
+    let pos = len - tb;
+    let (hb, hv) = group_header::<W::R>(data, pos, Ghost(gi));
+    proof {
+        assert(payload::<W::R>(gs[gi]) + Seq::<u8>::empty() =~= payload::<W::R>(gs[gi]));
+    }
+    if hv > 0 {
+        let s = tail_run_state::<W>(data, pos, hb, hv as usize, Ghost(gi));
+        (s, pos, 1)
+    } else if hv == 0 {
+        let s = tail_null_state::<W>(data, pos, hb, Ghost(gi));
+        (s, pos, 1)
+    } else {
+        let (s, bs) = tail_lit_state::<W>(data, pos, Ghost(hb as int), (-hv) as usize, tl, Ghost(gi));
+        (s, bs, 1)
+    }
+}
+
+/// A group has a segment at least.
+proof fn lemma_group_segments_pos<'a, O: RleOps<'a>>(g: Group<O::V>)
+    requires group_ok::<O>(g),
+    ensures group_segments(g) >= 1,
+{
+}
+
 // ── What follows a reader ───────────────────────────────────────────────────
 
 /// The header of group `gi`, which starts at `pos`.
@@ -2174,7 +2379,9 @@ fn first_lit<'a, O: RleOps<'a>>(data: &'a [u8], pos: usize, hb: usize, hv: i64, 
     lit_value_at::<O>(data, pos + hb, Ghost(gi), Ghost(0), total)
 }
 
-/// What follows group boundary `gi`, at byte `pos`.
+/// What follows group boundary `gi`, at byte `pos`: inlined, as
+/// merging slabs reads a slab's head with it.
+#[inline(always)]
 fn postfix_at_group<'a, O: RleOps<'a>>(data: &'a [u8], pos: usize, Ghost(gi): Ghost<int>) -> (r: (Option<Postfix<O::V>>, usize))
     requires
         valid_slab::<O>(data@), data@.len() <= usize::MAX, 0 <= gi <= slab_groups::<O>(data@).len(),
@@ -2320,6 +2527,23 @@ fn postfix_in_run<'a, O: RleOps<'a>>(data: &'a [u8], pos: usize, r: usize, vat: 
         lemma_gseg_split::<O>(data@, gi);
     }
     (Some(Postfix::Run { count: r, value }), pos)
+}
+
+/// The first run of the valid slab `data` (or its first literal value),
+/// and where its bytes after that start.
+pub(crate) fn head_postfix<'a, O: RleOps<'a>>(data: &'a [u8]) -> (r: (Option<Postfix<O::V>>, usize))
+    requires valid_slab::<O>(data@),
+    ensures
+        r.1 <= data@.len(), postfix_ok::<O>(data@, 0, r.0, r.1 as int),
+        ppend(r.0) + rest_segs::<O>(data@, 0, r.0, r.1 as int) == groups_segments(slab_groups::<O>(data@)),
+{
+    let _len = data.len();
+    proof {
+        let gs = slab_groups::<O>(data@);
+        assert(gs.take(0) =~= Seq::<Group<O::V>>::empty());
+        assert(gb::<O>(gs, 0) == 0 && gl(gs, 0) == 0 && gseg(gs, 0) == 0);
+    }
+    postfix_at_group::<O>(data, 0, Ghost(0))
 }
 
 /// What follows reader position `st` in `data`: its first run (or

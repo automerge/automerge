@@ -1366,7 +1366,7 @@ where
             let mut buf = Vec::new();
             for s in &self.slabs[1..] {
                 let (new_seg, new_tail) =
-                    T::Encoding::<C>::do_merge(out, tail, segments, s, &mut buf);
+                    T::Encoding::<C>::do_merge(out, start, tail, segments, s, &mut buf);
                 segments = new_seg;
                 tail = new_tail;
                 buf.clear();

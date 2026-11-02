@@ -250,6 +250,42 @@ pub(crate) open spec fn joined<'a, W: WriteOps<'a>>(s0: State<'a, W>, b0: Seq<u8
                 acc(s0, gs, ws) + seg + rest_segs::<W::R>(data, at, p, end))
 }
 
+/// A postfix of values borrowed from the slab, for the writer.
+pub(crate) fn cow_postfix<'a, W: WriteOps<'a>>(p: Option<Postfix<VOf<'a, W>>>) -> (r: Option<Postfix<W::Cow>>)
+    ensures pmap::<W>(r) == p,
+{
+    match p {
+        None => None,
+        Some(Postfix::Run { count, value }) => Some(Postfix::Run { count, value: W::cow_ref(value) }),
+        Some(Postfix::Lit { value, lit }) => Some(Postfix::Lit { value: W::cow_ref(value), lit }),
+        Some(Postfix::LonePlusLit { lone, value, lit }) =>
+            Some(Postfix::LonePlusLit { lone: W::cow_ref(lone), value: W::cow_ref(value), lit }),
+    }
+}
+
+/// A postfix of a valid slab holds a null only in a nullable column.
+pub(crate) proof fn lemma_postfix_nulls<'a, O: RleOps<'a>>(data: Seq<u8>, at: int, p: Option<Postfix<O::V>>, end: int)
+    requires postfix_ok::<O>(data, at, p, end),
+    ensures vnulls_ok::<O>(p),
+{
+    match p {
+        None => {},
+        Some(Postfix::Run { count, value }) => {
+            let i = choose|i: int| tail_run::<O>(data, at, count as nat, value, end, i);
+            lemma_slab_group::<O>(data, i);
+        },
+        Some(Postfix::Lit { value, lit }) => {
+            let (i, j) = choose|i: int, j: int| tail_lit::<O>(data, at, value, lit as nat, end, i, j);
+            lemma_slab_group::<O>(data, i);
+        },
+        Some(Postfix::LonePlusLit { lone, value, lit }) => {
+            let i = choose|i: int| tail_lone::<O>(data, at, lone, value, lit as nat, end, i);
+            lemma_slab_group::<O>(data, i);
+            lemma_slab_group::<O>(data, i + 1);
+        },
+    }
+}
+
 /// Building a [`postfix_ok`] from its witnesses.
 pub(crate) proof fn lemma_postfix_run<'a, O: RleOps<'a>>(data: Seq<u8>, at: int, count: usize, value: O::V, end: int, i: int)
     requires valid_slab::<O>(data), tail_run::<O>(data, at, count as nat, value, end, i),

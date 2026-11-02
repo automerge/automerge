@@ -295,7 +295,7 @@ impl<'a, T: RleValue, C: Codec> RleEncoder<'a, T, C> {
         let mut segments = first.segments;
         let mut buf = Vec::new();
         for s in iter {
-            let (new_seg, new_tail) = do_merge::<T, C>(out, tail, segments, &s, &mut buf);
+            let (new_seg, new_tail) = do_merge::<T, C>(out, start, tail, segments, &s, &mut buf);
             segments = new_seg;
             tail = new_tail;
             buf.clear();

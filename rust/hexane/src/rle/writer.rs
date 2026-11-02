@@ -91,7 +91,7 @@ fn tail_rec(bytes: usize, lit: usize) -> (t: RleTail)
 
 #[verifier::external_body]
 #[inline(always)]
-fn tail_run_len(t: &RleTail) -> (b: usize)
+pub(crate) fn tail_run_len(t: &RleTail) -> (b: usize)
     ensures b == tail_b(*t),
 {
     t.bytes as usize
@@ -99,7 +99,7 @@ fn tail_run_len(t: &RleTail) -> (b: usize)
 
 #[verifier::external_body]
 #[inline(always)]
-fn tail_lit_len(t: &RleTail) -> (b: usize)
+pub(crate) fn tail_lit_len(t: &RleTail) -> (b: usize)
     ensures b == tail_l(*t),
 {
     t.lit_tail.map_or(0, |l| l.get() as usize)
@@ -125,7 +125,7 @@ pub(crate) fn merge_tail(w: WPos, prefix: usize, middle: usize, postfix: usize, 
         let bytes = if local { middle.saturating_sub(pos) } else { prefix.saturating_add(middle).saturating_sub(pos) };
         tail_rec(bytes, lit)
     } else if tail_run_len(tail) <= postfix {
-        tail_rec(tail_run_len(tail), tail_lit_len(tail))
+        *tail
     } else {
         let bytes = if local { end.saturating_sub(pos) } else { prefix.saturating_add(end).saturating_sub(pos) };
         tail_rec(bytes, tail_lit_len(tail))
@@ -196,7 +196,7 @@ pub(crate) open spec fn rw_at<'a, W: WriteOps<'a>>(rw: Option<RewriteHeader>, pr
 }
 
 /// A rewrite from closing the slab's literal applies to its header.
-proof fn lemma_rw_at<'a, W: WriteOps<'a>>(s: State<'a, W>, pre: Seq<u8>, b: Seq<u8>, base: int, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>, h0: i64, rw: Option<RewriteHeader>)
+pub(crate) proof fn lemma_rw_at<'a, W: WriteOps<'a>>(s: State<'a, W>, pre: Seq<u8>, b: Seq<u8>, base: int, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>, h0: i64, rw: Option<RewriteHeader>)
     requires rel(s, pre, b, base, gs, ws, h0), rw_from(s, rw),
     ensures rw_at::<W>(rw, pre, h0),
 {

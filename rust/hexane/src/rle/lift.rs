@@ -15,6 +15,9 @@ use super::model::*;
 #[cfg(verus_keep_ghost)]
 use super::dec::*;
 use super::postfix::*;
+// spec functions exist only when Verus compiles the crate
+#[cfg(verus_keep_ghost)]
+use super::read::{lit_tail_of, tail_bytes_of};
 use super::state::*;
 #[allow(unused_imports)]
 use vstd::prelude::*;
@@ -471,6 +474,70 @@ pub proof fn lemma_unlift_slab<'s, L: Lift<'s>>(data: Seq<u8>)
     lemma_lift_groups::<L>(gl);
     lemma_unlift_canonical::<L>(gl);
     assert(parses::<L::R>(gl, data));
+}
+
+/// A slab's last group, read with owned values: the same tail record.
+pub proof fn lemma_lift_last<'s, L: Lift<'s>>(gs: Seq<Group<VOf<'s, L>>>)
+    requires canonical::<L::R>(gs),
+    ensures
+        tail_bytes_of::<WR<'s, L>>(lift_groups::<L>(gs)) == tail_bytes_of::<L::R>(gs),
+        lit_tail_of::<WR<'s, L>>(lift_groups::<L>(gs)) == lit_tail_of::<L::R>(gs),
+{
+    if gs.len() > 0 {
+        let k = gs.len() - 1;
+        lemma_lift_at::<L>(gs, k);
+        lemma_lift_group::<L>(gs[k]);
+        assert(gs.last() == gs[k]);
+        if gs[k] is Lit {
+            let vs = gs[k]->values;
+            assert(group_ok::<L::R>(gs[k]));
+            L::axiom_lift(vs.last());
+            assert(lift_seq::<L>(vs).last() == L::lift(vs.last()));
+        }
+    }
+}
+
+/// An encoding, read with owned values.
+pub proof fn lemma_lift_encodes<'s, L: Lift<'s>>(x: Seq<u8>, vals: Seq<VOf<'s, L>>, segs: int)
+    requires encodes::<L::R>(x, vals, segs),
+    ensures encodes::<WR<'s, L>>(x, lift_seq::<L>(vals), segs),
+{
+    let gs = choose|gs: Seq<Group<VOf<'s, L>>>| #[trigger] canonical::<L::R>(gs) && groups_bytes::<L::R>(gs) == x
+        && groups_values(gs, <L::R as RleOps<'s>>::null()) == vals && groups_segments(gs) == segs;
+    lemma_lift_groups::<L>(gs);
+    let lg = lift_groups::<L>(gs);
+    assert(canonical::<WR<'s, L>>(lg));
+}
+
+/// A tail record, read with owned values.
+pub proof fn lemma_lift_tail_ok<'s, L: Lift<'s>>(x: Seq<u8>, tb: int, tl: int)
+    requires tail_ok::<L::R>(x, tb, tl),
+    ensures tail_ok::<WR<'s, L>>(x, tb, tl),
+{
+    let gs = choose|gs: Seq<Group<VOf<'s, L>>>| #[trigger] canonical::<L::R>(gs) && groups_bytes::<L::R>(gs) == x
+        && tb == tail_bytes_of::<L::R>(gs) && tl == lit_tail_of::<L::R>(gs);
+    lemma_lift_groups::<L>(gs);
+    lemma_lift_last::<L>(gs);
+    let lg = lift_groups::<L>(gs);
+    assert(canonical::<WR<'s, L>>(lg));
+}
+
+/// A valid slab read with owned values: valid read with borrowed ones,
+/// with the same metadata.
+pub proof fn lemma_unlift_meta<'s, L: Lift<'s>>(data: Seq<u8>)
+    requires valid_slab::<WR<'s, L>>(data),
+    ensures
+        valid_slab::<L::R>(data),
+        slab_values::<WR<'s, L>>(data) == lift_seq::<L>(slab_values::<L::R>(data)),
+        groups_segments(slab_groups::<WR<'s, L>>(data)) == groups_segments(slab_groups::<L::R>(data)),
+        tail_bytes_of::<WR<'s, L>>(slab_groups::<WR<'s, L>>(data)) == tail_bytes_of::<L::R>(slab_groups::<L::R>(data)),
+        lit_tail_of::<WR<'s, L>>(slab_groups::<WR<'s, L>>(data)) == lit_tail_of::<L::R>(slab_groups::<L::R>(data)),
+{
+    lemma_unlift_slab::<L>(data);
+    lemma_lift_slab::<L>(data);
+    lemma_slab::<L::R>(data);
+    lemma_lift_groups::<L>(slab_groups::<L::R>(data));
+    lemma_lift_last::<L>(slab_groups::<L::R>(data));
 }
 
 } // verus!

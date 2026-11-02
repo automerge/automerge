@@ -7,6 +7,8 @@ use crate::encoding::RunDecoder;
 
 use crate::rle::postfix::Postfix;
 use crate::rle::state::{FlushState, RewriteHeader, RleCow, RleState, WPos};
+use crate::rle::merge::{merge_apply, merge_plan};
+use crate::rle::state::WOps;
 use crate::rle::{RleDecoder, RleTail, Slab};
 use crate::{AsColumnRef, Codec, RleValue};
 
@@ -829,78 +831,9 @@ pub(crate) fn splice_slab<T: RleValue, V: AsColumnRef<T>, C: Codec>(
     result.overflow
 }
 
-/// The postfix at the start of `slab`: its first run, the segments
-/// after it, and where the bytes after it start.
-fn head<T: RleValue, C: Codec>(slab: &Slab) -> (Postfix<T::Get<'_>>, usize, usize) {
-    debug_assert!(slab.segments > 0, "head() on empty slab");
-    let segments = slab.segments - 1;
-    match C::read_signed(&slab.data).unwrap() {
-        (tb, count) if count > 0 => {
-            let (vb, value) = T::unpack::<C>(&slab.data[tb..]);
-            let count = count as usize;
-            (Postfix::Run { count, value }, segments, tb + vb)
-        }
-        (tb, 0) => {
-            let (vb, nulls) = C::read_unsigned(&slab.data[tb..]).unwrap();
-            let count = nulls as usize;
-            let value = T::get_null();
-            (Postfix::Run { count, value }, segments, tb + vb)
-        }
-        (tb, count) => {
-            let (vb, value) = T::unpack::<C>(&slab.data[tb..]);
-            let count = -count as usize;
-            let lit = count - 1;
-            (Postfix::Lit { lit, value }, segments, tb + vb)
-        }
-    }
-}
-
-pub(crate) fn tail<T: RleValue, C: Codec>(
-    data: &[u8],
-    tail: RleTail,
-) -> (RleState<'_, T, T, C>, usize, usize) {
-    let len = data.len();
-    let bytes = tail.bytes as usize;
-    let header_pos = len - bytes;
-    match C::read_signed(&data[header_pos..]) {
-        None => (RleState::empty(), 0, 0),
-        Some((tb, count)) if count > 0 => {
-            let (_, value) = T::unpack::<C>(&data[header_pos + tb..]);
-            (
-                RleState::make_run(count as usize, RleCow::Ref(value)),
-                header_pos,
-                1,
-            )
-        }
-        Some((tb, 0)) => {
-            let (_, nulls) = C::read_unsigned(&data[header_pos + tb..]).unwrap();
-            (RleState::Null(nulls as usize), header_pos, 1)
-        }
-        Some((tb, -1)) => {
-            let (_, value) = T::unpack::<C>(&data[header_pos + tb..]);
-            (RleState::Lone(RleCow::Ref(value)), header_pos, 1)
-        }
-        Some((_tb, count)) => {
-            let bytes = tail.lit_tail.unwrap().get() as usize;
-            let value_pos = len - bytes;
-            let (_, value) = T::unpack::<C>(&data[value_pos..]);
-            let current = RleCow::Ref(value);
-            let count = -count as usize - 1;
-            let state = RleState::Lit {
-                count,
-                local: 0,
-                bytes: 0,
-                current,
-                header_pos,
-            };
-            (state, value_pos, 1)
-        }
-    }
-}
-
 pub(crate) fn rle_merge<T: RleValue, C: Codec>(a: &mut Slab, b: &Slab) {
     let mut buf = vec![];
-    let (seg, tail) = do_merge::<T, C>(&mut a.data, a.tail, a.segments, b, &mut buf);
+    let (seg, tail) = do_merge::<T, C>(&mut a.data, 0, a.tail, a.segments, b, &mut buf);
     a.segments = seg;
     a.tail = tail;
     a.len += b.len;
@@ -908,6 +841,7 @@ pub(crate) fn rle_merge<T: RleValue, C: Codec>(a: &mut Slab, b: &Slab) {
 
 pub(crate) fn do_merge<T: RleValue, C: Codec>(
     a: &mut Vec<u8>,
+    start: usize,
     a_tail: RleTail,
     a_segs: usize,
     b: &Slab,
@@ -916,26 +850,8 @@ pub(crate) fn do_merge<T: RleValue, C: Codec>(
     if b.len == 0 {
         return (a_segs, a_tail);
     }
-    let (tail_pos, b_bytes, seg, f) = {
-        let (mut a_state, tail_pos, delta_seg) = tail::<T, C>(a, a_tail);
-        let (b_head, b_segments, b_bytes) = head::<T, C>(b);
-        let f = a_state.flush_postfix_ref(buf, Some(b_head));
-        (
-            tail_pos,
-            b_bytes,
-            a_segs + f.segments + b_segments - delta_seg,
-            f,
-        )
-    };
-    a.truncate(tail_pos);
-    if let Some(rw) = f.rewrite {
-        C::rewrite_lit_header(a, rw.pos, rw.count); // a.len() could change here
-    }
-    let a_len = a.len();
-    a.extend_from_slice(buf);
-    a.extend_from_slice(&b.data[b_bytes..]);
-    let tail = f
-        .wpos
-        .merge(a_len, buf.len(), b.data.len() - b_bytes, b.tail);
-    (seg, tail)
+    // verified with Verus: the plan (both slabs borrowed), then writing it
+    let p = merge_plan::<WOps<'_, T, T, C>>(&a[start..], a_segs, &a_tail, &b.data, b.segments, &b.tail, buf);
+    let tail = merge_apply::<WOps<'static, T, T, C>>(a, start, &p, buf, &b.data, &b.tail);
+    (p.segments, tail)
 }

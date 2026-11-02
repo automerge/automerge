@@ -708,6 +708,7 @@ impl<C: Codec> ColumnEncoding for BoolEncoding<C> {
 
     fn do_merge(
         acc: &mut Vec<u8>,
+        _start: usize,
         a_tail: u8,
         a_segments: usize,
         b: &Slab,

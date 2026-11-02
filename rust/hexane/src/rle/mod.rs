@@ -3,6 +3,7 @@ mod decoder;
 pub mod edit;
 pub(crate) mod lift;
 mod load;
+pub(crate) mod merge;
 pub(crate) mod model;
 pub(crate) mod postfix;
 pub(crate) mod read;
@@ -199,12 +200,13 @@ where
 
     fn do_merge(
         acc: &mut Vec<u8>,
+        start: usize,
         a_tail: RleTail,
         a_segments: usize,
         b: &Slab,
         buf: &mut Vec<u8>,
     ) -> (usize, RleTail) {
-        do_merge::<T, C>(acc, a_tail, a_segments, b, buf)
+        do_merge::<T, C>(acc, start, a_tail, a_segments, b, buf)
     }
 
     fn splice_slab<V: AsColumnRef<T>>(
