@@ -27,6 +27,8 @@ use crate::rle::lift::*;
 use crate::rle::model::*;
 #[cfg(verus_keep_ghost)]
 use crate::rle::postfix::*;
+#[cfg(verus_keep_ghost)]
+use crate::rle::read::{lit_tail_of, tail_bytes_of};
 use crate::rle::state::*;
 #[cfg(verus_keep_ghost)]
 use crate::rle::writer::*;
@@ -308,6 +310,8 @@ impl<M: WriteOps<'static>> Edit<M> {
             old(self).inv(), data@ == old(self).data(), old(self).room_close(),
             slab_len == slab_values::<M::R>(data@).len(),
             slab_segments == groups_segments(slab_groups::<M::R>(data@)),
+            tail_b(slab_tail) == tail_bytes_of::<M::R>(slab_groups::<M::R>(data@)),
+            tail_l(slab_tail) == lit_tail_of::<M::R>(slab_groups::<M::R>(data@)),
         ensures
             old(self).pre() == data@.take(old(self).pre().len() as int),
             r.h0@ == old(self).h0(),

@@ -18,6 +18,8 @@
 #[cfg(verus_keep_ghost)]
 use super::dec::*;
 use super::model::*;
+#[cfg(verus_keep_ghost)]
+use super::read::{lit_tail_of, tail_bytes_of};
 use super::state::*;
 #[allow(unused_imports)]
 use vstd::prelude::*;
@@ -171,6 +173,47 @@ pub(crate) open spec fn vnulls_ok<'a, O: RleOps<'a>>(p: Option<Postfix<O::V>>) -
 pub open spec fn encodes<'a, O: RleOps<'a>>(bytes: Seq<u8>, vals: Seq<O::V>, segs: int) -> bool {
     exists|gs: Seq<Group<O::V>>| #[trigger] canonical::<O>(gs) && groups_bytes::<O>(gs) == bytes
         && groups_values(gs, O::null()) == vals && groups_segments(gs) == segs
+}
+
+/// `bytes` are a canonical encoding whose last group is `tb` bytes long,
+/// and `tl` the width of its last value if it is a literal (else 0): a
+/// slab's tail record.
+pub open spec fn tail_ok<'a, O: RleOps<'a>>(bytes: Seq<u8>, tb: int, tl: int) -> bool {
+    exists|gs: Seq<Group<O::V>>| #[trigger] canonical::<O>(gs) && groups_bytes::<O>(gs) == bytes
+        && tb == tail_bytes_of::<O>(gs) && tl == lit_tail_of::<O>(gs)
+}
+
+/// The tail record of a slab rebuilt from bytes before the edit (`plen`
+/// of them), the bytes written (`mid`, the writer's position `w` naming
+/// its last group, the buffer read from `base`) and the slab's bytes
+/// after the postfix (`q`), whose old tail record is `(tb, tl)`: the old
+/// one if its last run is among those carried bytes, else the writer's
+/// last group's, which may run on into them.
+pub(crate) open spec fn tail_after(w: WPos, plen: int, base: int, mid: int, q: int, tb: int, tl: int) -> (int, int) {
+    let start = wstart(w, plen, base);
+    let wl = match w {
+        WPos::Lit { bytes, .. } => bytes as int,
+        _ => 0int,
+    };
+    if q == 0 {
+        (plen + mid - start, wl)
+    } else if tb <= q {
+        (tb, tl)
+    } else {
+        (plen + mid + q - start, tl)
+    }
+}
+
+/// Flushing `(s0, b0)` with the postfix `p` (the buffer read from its
+/// start) left `w` such that merging gives the rebuilt slab's tail.
+pub(crate) open spec fn joined_tail<'a, W: WriteOps<'a>>(s0: State<'a, W>, b0: Seq<u8>, b1: Seq<u8>, rw: Option<RewriteHeader>, p: Option<Postfix<VOf<'a, W>>>, w: WPos) -> bool {
+    forall|pre: Seq<u8>, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>, h0: i64, data: Seq<u8>, at: int, end: int|
+        #[trigger] rel(s0, pre, b0, 0, gs, ws, h0) && #[trigger] postfix_ok::<W::R>(data, at, p, end)
+        ==> {
+            let t = tail_after(w, apply::<W>(rw, pre, h0).len() as int, 0, b1.len() as int, data.skip(end).len() as int,
+                tail_bytes_of::<W::R>(slab_groups::<W::R>(data)) as int, lit_tail_of::<W::R>(slab_groups::<W::R>(data)) as int);
+            tail_ok::<W::R>(apply::<W>(rw, pre, h0) + b1.skip(0) + data.skip(end), t.0, t.1)
+        }
 }
 
 /// The segments of the slab after the postfix `p` read at `at`: the rest
@@ -353,6 +396,9 @@ proof fn lemma_join_run<'a, O: RleOps<'a>>(a: Seq<Group<O::V>>, data: Seq<u8>, a
         encodes::<O>(groups_bytes::<O>(a) + data.skip(end),
             groups_values(a, O::null()) + groups_values(slab_groups::<O>(data).skip(i + 1), O::null()),
             (groups_segments(a) + groups_segments(slab_groups::<O>(data).skip(i + 1))) as int),
+        tail_ok::<O>(groups_bytes::<O>(a) + data.skip(end),
+            tail_bytes_of::<O>(a + slab_groups::<O>(data).skip(i + 1)) as int,
+            lit_tail_of::<O>(a + slab_groups::<O>(data).skip(i + 1)) as int),
 {
     let gs = slab_groups::<O>(data);
     let rest = gs.skip(i + 1);
@@ -374,6 +420,7 @@ proof fn lemma_join_run<'a, O: RleOps<'a>>(a: Seq<Group<O::V>>, data: Seq<u8>, a
     lemma_groups_bytes_concat::<O>(a, rest);
     lemma_groups_values_concat(a, rest, O::null());
     lemma_groups_len_concat(a, rest);
+    assert(canonical::<O>(a + rest));
 }
 
 /// Groups `rest` may follow a literal or repeat run ending in `last`.
@@ -489,6 +536,8 @@ proof fn lemma_join_rest<'a, O: RleOps<'a>>(a: Seq<Group<O::V>>, rest: Seq<Group
         encodes::<O>(groups_bytes::<O>(a) + groups_bytes::<O>(rest),
             groups_values(a, O::null()) + groups_values(rest, O::null()),
             (groups_segments(a) + groups_segments(rest)) as int),
+        tail_ok::<O>(groups_bytes::<O>(a) + groups_bytes::<O>(rest),
+            tail_bytes_of::<O>(a + rest) as int, lit_tail_of::<O>(a + rest) as int),
 {
     if rest.len() > 0 {
         assert(adjacent_ok(a.last(), rest[0]));
@@ -497,6 +546,7 @@ proof fn lemma_join_rest<'a, O: RleOps<'a>>(a: Seq<Group<O::V>>, rest: Seq<Group
     lemma_groups_bytes_concat::<O>(a, rest);
     lemma_groups_values_concat(a, rest, O::null());
     lemma_groups_len_concat(a, rest);
+    assert(canonical::<O>(a + rest));
 }
 
 /// A state ending in `v`, flushed onto the literal tail at `at`: the
@@ -516,6 +566,18 @@ proof fn lemma_join_lit<'a, W: WriteOps<'a>>(s1: State<'a, W>, pre1: Seq<u8>, b1
         encodes::<W::R>(apply::<W>(rw2, pre1, h0) + b2.skip(base) + data.skip(end),
             values_of(s1, gs1, ws1) + slab_values::<W::R>(data).skip(at + 1),
             acc(s1, gs1, ws1) + seg + lit + groups_segments(slab_groups::<W::R>(data).skip(i + 1))),
+        ({
+            let rest = slab_groups::<W::R>(data).skip(i + 1);
+            let a = all_groups(s1, gs1, ws1);
+            let bytes = apply::<W>(rw2, pre1, h0) + b2.skip(base) + data.skip(end);
+            let vs = slab_groups::<W::R>(data)[i]->values;
+            let lstart = if s1 is Lit || s1 is Lone { groups_bytes::<W::R>(gs1).len() } else { groups_bytes::<W::R>(a).len() };
+            tail_ok::<W::R>(bytes,
+                if rest.len() > 0 { tail_bytes_of::<W::R>(rest) as int }
+                    else if lit == 0 { tail_bytes_of::<W::R>(a) as int } else { bytes.len() - lstart },
+                if rest.len() > 0 { lit_tail_of::<W::R>(rest) as int }
+                    else if lit == 0 { lit_tail_of::<W::R>(a) as int } else { <W::R as RleOps<'a>>::enc(vs.last()).len() as int })
+        }),
 {
     hide(canonical);
     let gs = slab_groups::<W::R>(data);
@@ -534,6 +596,7 @@ proof fn lemma_join_lit<'a, W: WriteOps<'a>>(s1: State<'a, W>, pre1: Seq<u8>, b1
         assert(values_of(s1, gs1, ws1) + slab_values::<W::R>(data).skip(at + 1)
             =~= groups_values(a, nul) + groups_values(rest, nul));
         lemma_join_rest::<W::R>(a, rest, vs.last());
+        lemma_tail_concat::<W::R>(a, rest);
     } else if s1 is Run {
         let n = Group::<VOf<'a, W>>::Lit { values: l };
         lemma_canonical_join::<W::R>(a, n);
@@ -542,6 +605,10 @@ proof fn lemma_join_lit<'a, W: WriteOps<'a>>(s1: State<'a, W>, pre1: Seq<u8>, b1
         assert(values_of(s1, gs1, ws1) + slab_values::<W::R>(data).skip(at + 1)
             =~= groups_values(a.push(n), nul) + groups_values(rest, nul));
         lemma_join_rest::<W::R>(a.push(n), rest, vs.last());
+        lemma_tail_concat::<W::R>(a.push(n), rest);
+        assert(a.push(n).last() == n);
+        lemma_groups_bytes_concat::<W::R>(a.push(n), rest);
+        assert(l.last() == vs.last());
     } else {
         // the pending literal (or lone value) takes in the slab's
         let w = pend_group(s1, ws1)->Some_0->values;
@@ -561,6 +628,23 @@ proof fn lemma_join_lit<'a, W: WriteOps<'a>>(s1: State<'a, W>, pre1: Seq<u8>, b1
         assert(values_of(s1, gs1, ws1) + slab_values::<W::R>(data).skip(at + 1)
             =~= groups_values(gs1.push(n), nul) + groups_values(rest, nul));
         lemma_join_rest::<W::R>(gs1.push(n), rest, vs.last());
+        lemma_tail_concat::<W::R>(gs1.push(n), rest);
+        assert(gs1.push(n).last() == n);
+        lemma_groups_bytes_concat::<W::R>(gs1.push(n), rest);
+        assert((w + l).last() == l.last() && l.last() == vs.last());
+    }
+}
+
+/// The last group of groups joined.
+pub proof fn lemma_tail_concat<'a, O: RleOps<'a>>(a: Seq<Group<O::V>>, b: Seq<Group<O::V>>)
+    ensures
+        tail_bytes_of::<O>(a + b) == if b.len() > 0 { tail_bytes_of::<O>(b) } else { tail_bytes_of::<O>(a) },
+        lit_tail_of::<O>(a + b) == if b.len() > 0 { lit_tail_of::<O>(b) } else { lit_tail_of::<O>(a) },
+{
+    if b.len() > 0 {
+        assert((a + b).last() == b.last());
+    } else {
+        assert(a + b =~= a);
     }
 }
 
@@ -579,6 +663,7 @@ pub(crate) fn add_flush(a: &mut FlushState, b: FlushState)
     ensures
         final(a).rewrite == comb(old(a).rewrite, b.rewrite),
         final(a).segments == old(a).segments + b.segments,
+        final(a).wpos == b.wpos,
 {
     a.segments = a.segments + b.segments;
     a.wpos = b.wpos;
@@ -750,6 +835,7 @@ impl<'a, W: WriteOps<'a>> State<'a, W> {
             rw_from(*old(self), f.rewrite),
             joined(*old(self), old(buf)@, final(buf)@, f.rewrite, pmap::<W>(postfix), f.segments as int),
             f.segments <= old(self).pseg() + pcount(postfix),
+            joined_tail(*old(self), old(buf)@, final(buf)@, f.rewrite, pmap::<W>(postfix), f.wpos),
     {
         let ghost s0 = *self;
         let ghost b0 = buf@;
@@ -758,6 +844,7 @@ impl<'a, W: WriteOps<'a>> State<'a, W> {
                 let f = self.flush(buf);
                 proof {
                     lemma_joined_none::<W>(s0, b0, buf@, f.rewrite, f.segments as int);
+                    lemma_joined_none_tail::<W>(s0, b0, buf@, f.rewrite, f.segments as int, f.wpos);
                 }
                 f
             },
@@ -772,6 +859,7 @@ impl<'a, W: WriteOps<'a>> State<'a, W> {
                 add_flush(&mut f, f2);
                 proof {
                     lemma_joined_run::<W>(s0, b0, s1, b1, buf@, rw1, f2.rewrite, count, v, seg1, f2.segments as int);
+                    lemma_joined_run_tail::<W>(s0, b0, s1, b1, buf@, rw1, f2.rewrite, count, v, seg1, f2.segments as int, f2.wpos);
                 }
                 f
             },
@@ -786,6 +874,7 @@ impl<'a, W: WriteOps<'a>> State<'a, W> {
                 add_flush(&mut f, f2);
                 proof {
                     lemma_joined_lit::<W>(s0, b0, s1, b1, buf@, rw1, f2.rewrite, v, lit, seg1, f2.segments as int);
+                    lemma_joined_lit_tail::<W>(s0, b0, s1, b1, buf@, rw1, f2.rewrite, v, lit, seg1, f2.segments as int, f2.wpos);
                 }
                 f
             },
@@ -805,6 +894,7 @@ impl<'a, W: WriteOps<'a>> State<'a, W> {
                 add_flush(&mut f, f2);
                 proof {
                     lemma_joined_lone::<W>(s0, b0, s1, b1, s2, b2, buf@, rw1, f1.rewrite, f2.rewrite, l, v, lit, seg1, f1.segments as int, f2.segments as int);
+                    lemma_joined_lone_tail::<W>(s0, b0, s1, b1, s2, b2, buf@, rw1, f1.rewrite, f2.rewrite, l, v, lit, seg1, f1.segments as int, f2.segments as int, f2.wpos);
                 }
                 f
             },
@@ -1011,6 +1101,249 @@ pub(crate) proof fn lemma_rest_bound<'a, O: RleOps<'a>>(data: Seq<u8>, at: int, 
             lemma_gseg_split::<O>(data, i + 2);
             lemma_slab_group::<O>(data, i + 1);
         },
+    }
+}
+
+/// The slab's last group, when groups follow position `k`: theirs.
+proof fn lemma_tail_rest<'a, O: RleOps<'a>>(data: Seq<u8>, k: int)
+    requires valid_slab::<O>(data), 0 <= k <= slab_groups::<O>(data).len(),
+    ensures ({
+        let gs = slab_groups::<O>(data);
+        let rest = gs.skip(k);
+        &&& rest.len() > 0 ==> tail_bytes_of::<O>(gs) == tail_bytes_of::<O>(rest)
+            && lit_tail_of::<O>(gs) == lit_tail_of::<O>(rest)
+            && tail_bytes_of::<O>(rest) <= groups_bytes::<O>(rest).len()
+        &&& rest.len() == 0 ==> k == gs.len()
+    }),
+{
+    let gs = slab_groups::<O>(data);
+    let rest = gs.skip(k);
+    if rest.len() > 0 {
+        assert(rest.last() == gs.last());
+        assert(groups_bytes::<O>(rest) == groups_bytes::<O>(rest.drop_last()) + group_bytes::<O>(rest.last()));
+    }
+}
+
+/// No postfix: the slab's tail is the writer's last group's.
+proof fn lemma_joined_none_tail<'a, W: WriteOps<'a>>(s0: State<'a, W>, b0: Seq<u8>, b1: Seq<u8>, rw: Option<RewriteHeader>, seg: int, w: WPos)
+    requires
+        flushed(s0, b0, b1, rw, seg), flushed_tail(s0, b0, b1, rw, w),
+        s0 is Empty ==> b1 == b0 && w == (WPos::Run { pos: 0, local: true }),
+    ensures joined_tail(s0, b0, b1, rw, None, w),
+{
+    hide(canonical);
+    assert forall|pre: Seq<u8>, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>, h0: i64, data: Seq<u8>, at: int, end: int|
+        #[trigger] rel(s0, pre, b0, 0, gs, ws, h0) && #[trigger] postfix_ok::<W::R>(data, at, None, end)
+        implies ({
+            let t = tail_after(w, apply::<W>(rw, pre, h0).len() as int, 0, b1.len() as int, data.skip(end).len() as int,
+                tail_bytes_of::<W::R>(slab_groups::<W::R>(data)) as int, lit_tail_of::<W::R>(slab_groups::<W::R>(data)) as int);
+            tail_ok::<W::R>(apply::<W>(rw, pre, h0) + b1.skip(0) + data.skip(end), t.0, t.1)
+        }) by {
+        let a = all_groups(s0, gs, ws);
+        let out = apply::<W>(rw, pre, h0) + b1.skip(0) + data.skip(end);
+        assert(data.skip(end) =~= Seq::<u8>::empty());
+        assert(out =~= groups_bytes::<W::R>(a));
+        assert(b1.skip(0) =~= b1);
+        if !(s0 is Empty) {
+            lemma_push::<W::R>(gs, pend_group(s0, ws)->Some_0);
+        } else {
+            assert(gs.len() == 0);
+            assert(groups_bytes::<W::R>(gs) =~= Seq::<u8>::empty());
+        }
+        assert(canonical::<W::R>(a));
+    }
+}
+
+/// A run postfix: the remainder's last group, else the writer's.
+#[verifier::spinoff_prover]
+proof fn lemma_joined_run_tail<'a, W: WriteOps<'a>>(s0: State<'a, W>, b0: Seq<u8>, s1: State<'a, W>, b1: Seq<u8>, b2: Seq<u8>, rw1: Option<RewriteHeader>, rw2: Option<RewriteHeader>, count: usize, v: VOf<'a, W>, seg1: int, seg2: int, w: WPos)
+    requires
+        step(s0, b0, s1, b1, rw1, copies(count as nat, v), seg1), rw_ok(s0, s1, rw1),
+        count >= 1 ==> last_is(s1, v),
+        count >= 2 && !<W::R as RleOps<'a>>::is_null(v) ==> s1 is Run,
+        flushed(s1, b1, b2, rw2, seg2), rw2 is Some ==> pre_lit(s1), flushed_tail(s1, b1, b2, rw2, w),
+    ensures joined_tail(s0, b0, b2, comb(rw1, rw2), Some(Postfix::Run { count, value: v }), w),
+{
+    hide(canonical);
+    let p = Some(Postfix::Run { count, value: v });
+    assert forall|pre: Seq<u8>, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>, h0: i64, data: Seq<u8>, at: int, end: int|
+        #[trigger] rel(s0, pre, b0, 0, gs, ws, h0) && #[trigger] postfix_ok::<W::R>(data, at, p, end)
+        implies ({
+            let t = tail_after(w, apply::<W>(comb(rw1, rw2), pre, h0).len() as int, 0, b2.len() as int, data.skip(end).len() as int,
+                tail_bytes_of::<W::R>(slab_groups::<W::R>(data)) as int, lit_tail_of::<W::R>(slab_groups::<W::R>(data)) as int);
+            tail_ok::<W::R>(apply::<W>(comb(rw1, rw2), pre, h0) + b2.skip(0) + data.skip(end), t.0, t.1)
+        }) by {
+        let i = choose|i: int| tail_run::<W::R>(data, at, count as nat, v, end, i);
+        let pre1 = apply::<W>(rw1, pre, h0);
+        let (gs1, ws1) = choose|gs1: Seq<Group<VOf<'a, W>>>, ws1: Seq<VOf<'a, W>>| #[trigger] rel(s1, pre1, b1, 0, gs1, ws1, h0)
+            && values_of(s1, gs1, ws1) == values_of(s0, gs, ws) + copies(count as nat, v)
+            && acc(s1, gs1, ws1) == acc(s0, gs, ws) + seg1;
+        let a = all_groups(s1, gs1, ws1);
+        let dg = slab_groups::<W::R>(data);
+        lemma_apply_comb::<W>(rw1, rw2, pre, h0);
+        lemma_last_group::<W>(s1, gs1, ws1, v);
+        lemma_join_run::<W::R>(a, data, at, count as nat, v, end, i);
+        lemma_slab_after::<W::R>(data, i);
+        lemma_tail_rest::<W::R>(data, i + 1);
+        lemma_tail_concat::<W::R>(a, dg.skip(i + 1));
+        lemma_push::<W::R>(gs1, pend_group(s1, ws1)->Some_0);
+        assert(b2.skip(0) =~= b2);
+        assert(apply::<W>(rw2, pre1, h0) + b2.skip(0) == groups_bytes::<W::R>(a));
+    }
+}
+
+/// What a literal-tail flush leaves for the merge to read: the
+/// remainder's last group, else the writer's, else the literal joined.
+proof fn lemma_lit_tail_after<'a, W: WriteOps<'a>>(s1: State<'a, W>, pre1: Seq<u8>, b1: Seq<u8>, gs1: Seq<Group<VOf<'a, W>>>, ws1: Seq<VOf<'a, W>>, h0: i64, b2: Seq<u8>, rw2: Option<RewriteHeader>, data: Seq<u8>, at: int, v: VOf<'a, W>, lit: nat, end: int, i: int, j: int, seg: int, w: WPos)
+    requires
+        rel(s1, pre1, b1, 0, gs1, ws1, h0), last_is(s1, v),
+        lit == 0 ==> flushed(s1, b1, b2, rw2, seg) && flushed_tail(s1, b1, b2, rw2, w),
+        lit > 0 ==> flushed_lit(s1, b1, b2, rw2, lit, seg) && flushed_lit_tail(s1, b1, b2, rw2, w),
+        lit > 0 ==> lit_fits(s1, lit),
+        valid_slab::<W::R>(data), tail_lit::<W::R>(data, at, v, lit, end, i, j),
+    ensures ({
+        let t = tail_after(w, apply::<W>(rw2, pre1, h0).len() as int, 0, b2.len() as int, data.skip(end).len() as int,
+            tail_bytes_of::<W::R>(slab_groups::<W::R>(data)) as int, lit_tail_of::<W::R>(slab_groups::<W::R>(data)) as int);
+        tail_ok::<W::R>(apply::<W>(rw2, pre1, h0) + b2.skip(0) + data.skip(end), t.0, t.1)
+    }),
+{
+    hide(canonical);
+    let dg = slab_groups::<W::R>(data);
+    let vs = dg[i]->values;
+    let l = vs.skip(j + 1);
+    let rest = dg.skip(i + 1);
+    let a = all_groups(s1, gs1, ws1);
+    lemma_join_lit::<W>(s1, pre1, b1, 0, gs1, ws1, h0, b2, rw2, data, at, v, lit, end, i, j, seg);
+    lemma_lit_tail_facts::<W::R>(data, at, v, lit, end, i, j);
+    lemma_tail_rest::<W::R>(data, i + 1);
+    lemma_last_group::<W>(s1, gs1, ws1, v);
+    lemma_slab_group::<W::R>(data, i);
+    lemma_encs_concat::<W::R>(l, Seq::empty());
+    lemma_groups_bytes_concat::<W::R>(Seq::empty(), rest);
+    assert(b2.skip(0) =~= b2);
+    let q = data.skip(end).len() as int;
+    let tb = tail_bytes_of::<W::R>(dg) as int;
+    let tl = lit_tail_of::<W::R>(dg) as int;
+    let plen = apply::<W>(rw2, pre1, h0).len() as int;
+    let bytes = apply::<W>(rw2, pre1, h0) + b2.skip(0) + data.skip(end);
+    let t = tail_after(w, plen, 0, b2.len() as int, q, tb, tl);
+    if rest.len() > 0 {
+        lemma_group_bytes_nonempty::<W::R>(rest.last());
+        assert(groups_bytes::<W::R>(rest) == groups_bytes::<W::R>(rest.drop_last()) + group_bytes::<W::R>(rest.last()));
+        assert(q >= groups_bytes::<W::R>(rest).len());
+        assert(q > 0);
+        assert(tb <= q);
+        assert(t.0 == tail_bytes_of::<W::R>(rest) && t.1 == lit_tail_of::<W::R>(rest));
+    } else if lit == 0 {
+        assert(l =~= Seq::<VOf<'a, W>>::empty());
+        assert(encs::<W::R>(l) =~= Seq::<u8>::empty());
+        assert(groups_bytes::<W::R>(rest) =~= Seq::<u8>::empty());
+        lemma_push::<W::R>(gs1, pend_group(s1, ws1)->Some_0);
+        assert(q == 0);
+        assert(apply::<W>(rw2, pre1, h0) + b2.skip(0) == groups_bytes::<W::R>(a));
+        assert(t.0 == tail_bytes_of::<W::R>(a));
+        assert(t.1 == lit_tail_of::<W::R>(a));
+    } else {
+        // the slab's last group is the literal the postfix ends inside,
+        // longer than the values of it carried over
+        assert(dg.last() == dg[i]);
+        assert(groups_bytes::<W::R>(rest) =~= Seq::<u8>::empty());
+        assert(vs =~= vs.take(j + 1) + l);
+        lemma_encs_concat::<W::R>(vs.take(j + 1), l);
+        lemma_encs_at::<W::R>(vs, j);
+        <W::R as RleOps<'a>>::axiom_enc(vs[j], vs[j], Seq::empty(), Seq::empty());
+        <W::R as RleOps<'a>>::axiom_enc_signed(header_of(dg[i]) as i64, 0, Seq::empty(), Seq::empty());
+        assert(l.last() == vs.last());
+        assert(q == encs::<W::R>(l).len());
+        <W::R as RleOps<'a>>::axiom_enc(l.last(), l.last(), Seq::empty(), Seq::empty());
+        assert(encs::<W::R>(l) == encs::<W::R>(l.drop_last()) + <W::R as RleOps<'a>>::enc(l.last()));
+        assert(tb == group_bytes::<W::R>(dg[i]).len());
+        assert(tb > q);
+        assert(q > 0);
+        assert(t.0 == bytes.len() - wstart(w, plen, 0));
+        assert(t.1 == <W::R as RleOps<'a>>::enc(vs.last()).len());
+    }
+}
+
+/// A literal postfix: the tail the merge reads.
+#[verifier::spinoff_prover]
+proof fn lemma_joined_lit_tail<'a, W: WriteOps<'a>>(s0: State<'a, W>, b0: Seq<u8>, s1: State<'a, W>, b1: Seq<u8>, b2: Seq<u8>, rw1: Option<RewriteHeader>, rw2: Option<RewriteHeader>, v: VOf<'a, W>, lit: usize, seg1: int, seg2: int, w: WPos)
+    requires
+        step(s0, b0, s1, b1, rw1, copies(1, v), seg1), rw_ok(s0, s1, rw1), last_is(s1, v),
+        lit == 0 ==> flushed(s1, b1, b2, rw2, seg2) && flushed_tail(s1, b1, b2, rw2, w),
+        lit > 0 ==> flushed_lit(s1, b1, b2, rw2, lit as nat, seg2) && flushed_lit_tail(s1, b1, b2, rw2, w),
+        rw2 is Some ==> pre_lit(s1), lit > 0 ==> lit_fits(s1, lit as nat),
+    ensures joined_tail(s0, b0, b2, comb(rw1, rw2), Some(Postfix::Lit { value: v, lit }), w),
+{
+    hide(canonical);
+    let p = Some(Postfix::Lit { value: v, lit });
+    assert forall|pre: Seq<u8>, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>, h0: i64, data: Seq<u8>, at: int, end: int|
+        #[trigger] rel(s0, pre, b0, 0, gs, ws, h0) && #[trigger] postfix_ok::<W::R>(data, at, p, end)
+        implies ({
+            let t = tail_after(w, apply::<W>(comb(rw1, rw2), pre, h0).len() as int, 0, b2.len() as int, data.skip(end).len() as int,
+                tail_bytes_of::<W::R>(slab_groups::<W::R>(data)) as int, lit_tail_of::<W::R>(slab_groups::<W::R>(data)) as int);
+            tail_ok::<W::R>(apply::<W>(comb(rw1, rw2), pre, h0) + b2.skip(0) + data.skip(end), t.0, t.1)
+        }) by {
+        let (i, j) = choose|i: int, j: int| tail_lit::<W::R>(data, at, v, lit as nat, end, i, j);
+        let pre1 = apply::<W>(rw1, pre, h0);
+        let (gs1, ws1) = choose|gs1: Seq<Group<VOf<'a, W>>>, ws1: Seq<VOf<'a, W>>| #[trigger] rel(s1, pre1, b1, 0, gs1, ws1, h0)
+            && values_of(s1, gs1, ws1) == values_of(s0, gs, ws) + copies(1, v)
+            && acc(s1, gs1, ws1) == acc(s0, gs, ws) + seg1;
+        lemma_apply_comb::<W>(rw1, rw2, pre, h0);
+        lemma_lit_tail_after::<W>(s1, pre1, b1, gs1, ws1, h0, b2, rw2, data, at, v, lit as nat, end, i, j, seg2, w);
+    }
+}
+
+/// A lone value then a literal: the tail the merge reads.
+#[verifier::spinoff_prover]
+proof fn lemma_joined_lone_tail<'a, W: WriteOps<'a>>(s0: State<'a, W>, b0: Seq<u8>, s1: State<'a, W>, b1: Seq<u8>, s2: State<'a, W>, b2: Seq<u8>, b3: Seq<u8>, rw1: Option<RewriteHeader>, rw2: Option<RewriteHeader>, rw3: Option<RewriteHeader>, lone: VOf<'a, W>, v: VOf<'a, W>, lit: usize, seg1: int, seg2: int, seg3: int, w: WPos)
+    requires
+        step(s0, b0, s1, b1, rw1, copies(1, lone), seg1), rw_ok(s0, s1, rw1),
+        step(s1, b1, s2, b2, rw2, copies(1, v), seg2), rw_ok(s1, s2, rw2), last_is(s2, v),
+        lit == 0 ==> flushed(s2, b2, b3, rw3, seg3) && flushed_tail(s2, b2, b3, rw3, w),
+        lit > 0 ==> flushed_lit(s2, b2, b3, rw3, lit as nat, seg3) && flushed_lit_tail(s2, b2, b3, rw3, w),
+        rw3 is Some ==> pre_lit(s2), lit > 0 ==> lit_fits(s2, lit as nat),
+    ensures joined_tail(s0, b0, b3, comb(comb(rw1, rw2), rw3), Some(Postfix::LonePlusLit { lone, value: v, lit }), w),
+{
+    hide(canonical);
+    let p = Some(Postfix::LonePlusLit { lone, value: v, lit });
+    assert forall|pre: Seq<u8>, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>, h0: i64, data: Seq<u8>, at: int, end: int|
+        #[trigger] rel(s0, pre, b0, 0, gs, ws, h0) && #[trigger] postfix_ok::<W::R>(data, at, p, end)
+        implies ({
+            let t = tail_after(w, apply::<W>(comb(comb(rw1, rw2), rw3), pre, h0).len() as int, 0, b3.len() as int, data.skip(end).len() as int,
+                tail_bytes_of::<W::R>(slab_groups::<W::R>(data)) as int, lit_tail_of::<W::R>(slab_groups::<W::R>(data)) as int);
+            tail_ok::<W::R>(apply::<W>(comb(comb(rw1, rw2), rw3), pre, h0) + b3.skip(0) + data.skip(end), t.0, t.1)
+        }) by {
+        let i = choose|i: int| tail_lone::<W::R>(data, at, lone, v, lit as nat, end, i);
+        let pre1 = apply::<W>(rw1, pre, h0);
+        let (gs1, ws1) = choose|gs1: Seq<Group<VOf<'a, W>>>, ws1: Seq<VOf<'a, W>>| #[trigger] rel(s1, pre1, b1, 0, gs1, ws1, h0)
+            && values_of(s1, gs1, ws1) == values_of(s0, gs, ws) + copies(1, lone)
+            && acc(s1, gs1, ws1) == acc(s0, gs, ws) + seg1;
+        let pre2 = apply::<W>(rw2, pre1, h0);
+        let (gs2, ws2) = choose|gs2: Seq<Group<VOf<'a, W>>>, ws2: Seq<VOf<'a, W>>| #[trigger] rel(s2, pre2, b2, 0, gs2, ws2, h0)
+            && values_of(s2, gs2, ws2) == values_of(s1, gs1, ws1) + copies(1, v)
+            && acc(s2, gs2, ws2) == acc(s1, gs1, ws1) + seg2;
+        lemma_apply_comb::<W>(rw1, rw2, pre, h0);
+        lemma_apply_comb::<W>(comb(rw1, rw2), rw3, pre, h0);
+        lemma_lit_tail_after::<W>(s2, pre2, b2, gs2, ws2, h0, b3, rw3, data, at + 1, v, lit as nat, end, i + 1, 0, seg3, w);
+    }
+}
+
+/// A tail record names part of the slab: its last value inside its last
+/// run, inside the bytes.
+pub proof fn lemma_tail_ok_bounds<'a, O: RleOps<'a>>(bytes: Seq<u8>, tb: int, tl: int)
+    requires tail_ok::<O>(bytes, tb, tl),
+    ensures 0 <= tl <= tb <= bytes.len(),
+{
+    let gs = choose|gs: Seq<Group<O::V>>| #[trigger] canonical::<O>(gs) && groups_bytes::<O>(gs) == bytes
+        && tb == tail_bytes_of::<O>(gs) && tl == lit_tail_of::<O>(gs);
+    if gs.len() > 0 {
+        assert(groups_bytes::<O>(gs) == groups_bytes::<O>(gs.drop_last()) + group_bytes::<O>(gs.last()));
+        if gs.last() is Lit {
+            let vs = gs.last()->values;
+            assert(group_ok::<O>(gs[gs.len() - 1]));
+            assert(encs::<O>(vs) == encs::<O>(vs.drop_last()) + O::enc(vs.last()));
+        }
     }
 }
 

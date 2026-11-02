@@ -193,6 +193,7 @@ pub trait WriteOps<'a> {
             pos <= old(buf).len(), 1 <= total <= i64::MAX,
             exists|h: i64| (#[trigger] <Self::R as RleOps<'a>>::enc_signed(h)).is_prefix_of(old(buf)@.skip(pos as int)),
         ensures
+            final(buf).len() == old(buf).len() + d,
             forall|h: i64| (#[trigger] <Self::R as RleOps<'a>>::enc_signed(h)).is_prefix_of(old(buf)@.skip(pos as int))
                 ==> final(buf)@ == old(buf)@.take(pos as int)
                     + <Self::R as RleOps<'a>>::enc_signed(-(total as int) as i64)

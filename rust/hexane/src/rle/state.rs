@@ -237,7 +237,7 @@ impl WPos {
 impl FlushState {
     /// Nothing flushed.
     pub(crate) fn none() -> (f: Self)
-        ensures f.rewrite is None, f.segments == 0,
+        ensures f.rewrite is None, f.segments == 0, f.wpos == (WPos::Run { pos: 0, local: true }),
     {
         FlushState { segments: 0, rewrite: None, wpos: WPos::Run { pos: 0, local: true } }
     }
@@ -1262,6 +1262,7 @@ impl<'a, W: WriteOps<'a>> State<'a, W> {
         ensures
             flushed(state, old(buf)@, final(buf)@, f.rewrite, f.segments as int), rw_from(state, f.rewrite),
             f.segments == state.pseg(), flushed_tail(state, old(buf)@, final(buf)@, f.rewrite, f.wpos),
+            state is Empty ==> final(buf)@ == old(buf)@ && f.wpos == (WPos::Run { pos: 0, local: true }),
     {
         let ghost b0 = buf@;
         proof {
@@ -1754,6 +1755,7 @@ impl<'a, W: WriteOps<'a>> State<'a, W> {
             flushed(*old(self), old(buf)@, final(buf)@, f.rewrite, f.segments as int), (*final(self)) is Empty,
             rw_from(*old(self), f.rewrite), f.segments == old(self).pseg(),
             flushed_tail(*old(self), old(buf)@, final(buf)@, f.rewrite, f.wpos),
+            (*old(self)) is Empty ==> final(buf)@ == old(buf)@ && f.wpos == (WPos::Run { pos: 0, local: true }),
     {
         let mut old = State::Empty;
         core::mem::swap(self, &mut old);
@@ -1814,7 +1816,7 @@ impl WPos {
 ///
 /// If the run is 4 GiB or more: it has no tail record, so — like a run
 /// of more than `i64::MAX` values — it is not encodable.
-fn tail_bytes(n: usize) -> u32 {
+pub(crate) fn tail_bytes(n: usize) -> u32 {
     u32::try_from(n).unwrap_or_else(|_| {
         panic!("a run of {n} bytes is not encodable: a run must stay under 4 GiB")
     })
