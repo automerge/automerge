@@ -47,6 +47,9 @@ pub struct ExRleTail(RleTail);
 /// A slab's bytes.
 pub uninterp spec fn slab_bytes(s: Slab) -> Seq<u8>;
 
+/// A slab's recorded length.
+pub uninterp spec fn slab_len(s: Slab) -> usize;
+
 /// Slab metadata arithmetic (lengths, segment counts): unspecified, and
 /// computed exactly as before.
 #[verifier::external_body]
@@ -66,7 +69,7 @@ pub(crate) fn sub(a: usize, b: usize) -> usize {
 #[verifier::external_body]
 #[inline(always)]
 fn new_slab(data: Vec<u8>, len: usize, segments: usize, wpos: WPos) -> (s: Slab)
-    ensures slab_bytes(s) == data@,
+    ensures slab_bytes(s) == data@, slab_len(s) == len,
 {
     let tail = wpos.as_tail(0, data.len());
     Slab { data, len, segments, tail }
@@ -77,7 +80,7 @@ fn new_slab(data: Vec<u8>, len: usize, segments: usize, wpos: WPos) -> (s: Slab)
 #[verifier::external_body]
 #[inline(always)]
 fn last_slab(mut data: Vec<u8>, tail_bytes: &[u8], len: usize, segments: usize, wpos: WPos, slab_tail: RleTail) -> (s: Slab)
-    ensures slab_bytes(s) == data@ + tail_bytes@,
+    ensures slab_bytes(s) == data@ + tail_bytes@, slab_len(s) == len,
 {
     let tail = wpos.merge(0, data.len(), tail_bytes.len(), slab_tail);
     data.extend_from_slice(tail_bytes);
@@ -144,8 +147,9 @@ pub(crate) open spec fn rebuilt_ok<'a, W: WriteOps<'a>>(r: Rebuilt, pre: Seq<u8>
     &&& r.start == pre.len() && r.start <= r.end <= data.len()
     &&& rw_at::<W>(r.rewrite, pre, h0)
     &&& exists|cs: Seq<Seq<VOf<'a, W>>>| #[trigger] concat(cs) == vals && cs.len() == r.overflow@.len() + 1
-        && encodes::<W::R>(edited::<W>(r, pre, h0, data), cs[0])
+        && encodes::<W::R>(edited::<W>(r, pre, h0, data), cs[0]) && r.len == cs[0].len()
         && forall|k: int| 0 <= k < r.overflow@.len() ==> encodes::<W::R>(#[trigger] slab_bytes(r.overflow@[k]), cs[k + 1])
+            && slab_len(r.overflow@[k]) == cs[k + 1].len()
 }
 
 /// A slab region rebuilt: the bytes between `start` and `end` replaced
@@ -309,6 +313,8 @@ impl<'a, W: WriteOps<'a>> Splice<'a, W> {
         &&& rw_at::<W>(rw, self.cur_pre(), self.h0@)
         &&& rw is Some ==> !pre_lit(self.state)
         &&& self.out.start == self.pre@.len()
+        &&& self.inserted + (if self.overflowed { 0 } else { self.head_len as int }) == self.cur@.len()
+        &&& self.cur@.len() <= usize::MAX
         &&& if !self.overflowed {
             self.done@.len() == 0 && self.out.overflow@.len() == 0
         } else {
@@ -318,6 +324,8 @@ impl<'a, W: WriteOps<'a>> Splice<'a, W> {
             &&& rw_at::<W>(self.out.rewrite, self.pre@, self.h0@)
             &&& forall|k: int| 0 <= k < self.out.overflow@.len()
                 ==> encodes::<W::R>(#[trigger] slab_bytes(self.out.overflow@[k]), self.done@[k + 1])
+                    && slab_len(self.out.overflow@[k]) == self.done@[k + 1].len()
+            &&& self.out.len == self.done@[0].len()
         }
     }
 
@@ -345,7 +353,7 @@ impl<'a, W: WriteOps<'a>> Splice<'a, W> {
     /// whose bytes before the edit, at `start`, are `pre`.
     pub(crate) fn reset(&mut self, state: State<'a, W>, prefix_segments: usize, head_len: usize, start: usize, max_segments: usize, Ghost(pre): Ghost<Seq<u8>>, Ghost(h0): Ghost<i64>, Ghost(vals): Ghost<Seq<VOf<'a, W>>>)
         requires
-            pre.len() == start,
+            pre.len() == start, vals.len() == head_len,
             exists|gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>| #[trigger] rel(state, pre, Seq::empty(), 0, gs, ws, h0)
                 && values_of(state, gs, ws) == vals,
         ensures
@@ -421,7 +429,7 @@ impl<'a, W: WriteOps<'a>> Splice<'a, W> {
         add_flush(&mut self.f, f);
         // counted once appended, so a run that panics as too long leaves
         // the rebuild as it was for the cursor's drop to close
-        self.inserted = add(self.inserted, count);
+        self.inserted = self.inserted + count;
         proof {
             let added = copies(count as nat, W::val(value));
             self.cur = Ghost(cur0 + added);
@@ -469,7 +477,7 @@ impl<'a, W: WriteOps<'a>> Splice<'a, W> {
             self.target = self.max_segments / 2;
             self.out.wpos = self.f.wpos;
             self.out.bytes = taken;
-            self.out.len = add(self.head_len, self.inserted);
+            self.out.len = self.head_len + self.inserted;
             self.out.segments = add(self.prefix_segments, self.f.segments);
             self.out.rewrite = self.f.rewrite;
             proof {
@@ -485,6 +493,7 @@ impl<'a, W: WriteOps<'a>> Splice<'a, W> {
                 let d0 = self.done@;
                 self.done = Ghost(d0.push(self.cur@));
                 lemma_concat_push(d0, self.cur@);
+                assert(slab_len(s) == self.cur@.len());
                 assert(Seq::<u8>::empty() + bytes =~= bytes);
                 assert(slab_bytes(s) == bytes);
                 assert forall|k: int| 0 <= k < self.out.overflow@.len()
@@ -511,6 +520,14 @@ impl<'a, W: WriteOps<'a>> Splice<'a, W> {
             self.cur = Ghost(Seq::empty());
             assert(values_of(self.state, e, Seq::empty()) =~= self.cur@);
             assert(self.vals() =~= old(self).vals());
+            assert(self.out.len == self.done@[0].len());
+            assert forall|k: int| 0 <= k < self.out.overflow@.len()
+                implies slab_len(#[trigger] self.out.overflow@[k]) == self.done@[k + 1].len() by {
+                if k < self.out.overflow@.len() - 1 && old(self).overflowed {
+                    assert(self.out.overflow@[k] == old(self).out.overflow@[k]);
+                    assert(encodes::<W::R>(slab_bytes(old(self).out.overflow@[k]), old(self).done@[k + 1]));
+                }
+            }
             assert(wf(self.state, self.buf@));
             assert(rw_at::<W>(self.f.rewrite, self.cur_pre(), self.h0@));
             assert(self.out.start == self.pre@.len());
@@ -522,10 +539,11 @@ impl<'a, W: WriteOps<'a>> Splice<'a, W> {
 
     /// What a finish promises, for any slab `data` the postfix and
     /// `tail_bytes` came from.
-    pub(crate) open spec fn finished(&self, r: Rebuilt, postfix: Option<Postfix<W::Cow>>, tail_bytes: Seq<u8>, data_len: usize) -> bool {
+    pub(crate) open spec fn finished(&self, r: Rebuilt, postfix: Option<Postfix<W::Cow>>, tail_bytes: Seq<u8>, data_len: usize, tail_count: usize) -> bool {
         forall|data: Seq<u8>, at: int|
             #[trigger] postfix_ok::<W::R>(data, at, pmap::<W>(postfix), self.end() as int)
             && tail_bytes == data.skip(self.end() as int) && data_len == data.len()
+            && tail_count == slab_values::<W::R>(data).len() - at
             && self.pre().len() <= self.end() <= data.len()
             ==> rebuilt_ok::<W>(r, self.pre(), self.h0(), data, self.vals() + slab_values::<W::R>(data).skip(at))
     }
@@ -533,8 +551,10 @@ impl<'a, W: WriteOps<'a>> Splice<'a, W> {
     /// Close on the postfix (the run after the region, if any) and the
     /// slab's bytes after it, `tail_bytes`.
     pub(crate) fn finish(&mut self, postfix: Option<Postfix<W::Cow>>, postfix_segments: usize, tail_count: usize, tail_bytes: &[u8], data_len: usize, slab_tail: RleTail) -> (r: Rebuilt)
-        requires old(self).inv(), nulls_ok::<W>(postfix), old(self).room(plen_of(postfix)),
-        ensures old(self).finished(r, postfix, tail_bytes@, data_len), r.h0@ == old(self).h0(),
+        requires
+            old(self).inv(), nulls_ok::<W>(postfix), old(self).room(plen_of(postfix)),
+            old(self).room(tail_count as nat),
+        ensures old(self).finished(r, postfix, tail_bytes@, data_len, tail_count), r.h0@ == old(self).h0(),
     {
         let postfix_pending = match &postfix {
             Some(p) => p.pending(),
@@ -559,9 +579,11 @@ impl<'a, W: WriteOps<'a>> Splice<'a, W> {
 
     /// The postfix joins the edited slab.
     fn finish_in_place(&mut self, postfix: Option<Postfix<W::Cow>>, postfix_segments: usize, tail_count: usize) -> (r: Rebuilt)
-        requires old(self).inv(), !old(self).overflowed, nulls_ok::<W>(postfix), old(self).room(plen_of(postfix)),
+        requires
+            old(self).inv(), !old(self).overflowed, nulls_ok::<W>(postfix), old(self).room(plen_of(postfix)),
+            old(self).room(tail_count as nat),
         ensures
-            forall|tail_bytes: Seq<u8>, data_len: usize| #[trigger] old(self).finished(r, postfix, tail_bytes, data_len),
+            forall|tail_bytes: Seq<u8>, data_len: usize| #[trigger] old(self).finished(r, postfix, tail_bytes, data_len, tail_count),
             r.h0@ == old(self).h0(),
     {
         hide(canonical);
@@ -582,7 +604,7 @@ impl<'a, W: WriteOps<'a>> Splice<'a, W> {
         self.out.bytes = taken;
         self.out.wpos = self.f.wpos;
         self.out.rewrite = self.f.rewrite;
-        self.out.len = add(add(self.head_len, self.inserted), tail_count);
+        self.out.len = self.head_len + self.inserted + tail_count;
         self.out.segments = add(add(self.prefix_segments, self.f.segments), postfix_segments);
         self.out.h0 = Ghost(self.h0@);
         let mut r = Rebuilt::new(0, 0);
@@ -595,13 +617,15 @@ impl<'a, W: WriteOps<'a>> Splice<'a, W> {
             assert(concat(old(self).done@) =~= Seq::<VOf<'a, W>>::empty());
             assert(old(self).vals() =~= old(self).cur@);
             assert(b1.skip(0) =~= b1);
-            assert forall|tail_bytes: Seq<u8>, data_len: usize| #[trigger] old(self).finished(r, postfix, tail_bytes, data_len) by {
+            assert forall|tail_bytes: Seq<u8>, data_len: usize| #[trigger] old(self).finished(r, postfix, tail_bytes, data_len, tail_count) by {
                 assert forall|data: Seq<u8>, at: int|
                     #[trigger] postfix_ok::<W::R>(data, at, pmap::<W>(postfix), old(self).end() as int)
                     && tail_bytes == data.skip(old(self).end() as int) && data_len == data.len()
+                    && tail_count == slab_values::<W::R>(data).len() - at
                     && old(self).pre().len() <= old(self).end() <= data.len()
                     implies rebuilt_ok::<W>(r, pre, h0, data, old(self).vals() + slab_values::<W::R>(data).skip(at)) by {
                     let vals = old(self).vals() + slab_values::<W::R>(data).skip(at);
+                    lemma_plen_bound::<W::R>(data, at, pmap::<W>(postfix), old(self).end() as int);
                     let cs = seq![vals];
                     lemma_concat_push(Seq::<Seq<VOf<'a, W>>>::empty(), vals);
                     assert(Seq::<Seq<VOf<'a, W>>>::empty().push(vals) =~= cs);
@@ -615,8 +639,10 @@ impl<'a, W: WriteOps<'a>> Splice<'a, W> {
     /// The postfix goes on a slab the edit spilled into, with the edited
     /// slab's bytes after it: the edited slab ends at the edit.
     fn finish_spilled(&mut self, postfix: Option<Postfix<W::Cow>>, postfix_segments: usize, tail_count: usize, tail_bytes: &[u8], data_len: usize, slab_tail: RleTail) -> (r: Rebuilt)
-        requires old(self).inv(), old(self).overflowed, nulls_ok::<W>(postfix), old(self).room(plen_of(postfix)),
-        ensures old(self).finished(r, postfix, tail_bytes@, data_len), r.h0@ == old(self).h0(),
+        requires
+            old(self).inv(), old(self).overflowed, nulls_ok::<W>(postfix), old(self).room(plen_of(postfix)),
+            old(self).room(tail_count as nat),
+        ensures old(self).finished(r, postfix, tail_bytes@, data_len, tail_count), r.h0@ == old(self).h0(),
     {
         hide(canonical);
         let ghost s0 = self.state;
@@ -629,7 +655,7 @@ impl<'a, W: WriteOps<'a>> Splice<'a, W> {
         add_flush(&mut self.f, f);
         let ghost b1 = self.buf@;
         self.out.end = data_len;
-        let len = add(self.inserted, tail_count);
+        let len = self.inserted + tail_count;
         let segments = add(self.f.segments, postfix_segments);
         let mut taken = Vec::new();
         core::mem::swap(&mut self.buf, &mut taken);
@@ -651,9 +677,11 @@ impl<'a, W: WriteOps<'a>> Splice<'a, W> {
             assert forall|data: Seq<u8>, at: int|
                 #[trigger] postfix_ok::<W::R>(data, at, pmap::<W>(postfix), old(self).end() as int)
                 && tail_bytes@ == data.skip(old(self).end() as int) && data_len == data.len()
+                && tail_count == slab_values::<W::R>(data).len() - at
                 && old(self).pre().len() <= old(self).end() <= data.len()
                 implies rebuilt_ok::<W>(r, pre, h0, data, old(self).vals() + slab_values::<W::R>(data).skip(at)) by {
                 let rest = slab_values::<W::R>(data).skip(at);
+                lemma_plen_bound::<W::R>(data, at, pmap::<W>(postfix), old(self).end() as int);
                 let d0 = old(self).done@;
                 let cs = d0.push(old(self).cur@ + rest);
                 lemma_concat_push(d0, old(self).cur@ + rest);
@@ -666,6 +694,17 @@ impl<'a, W: WriteOps<'a>> Splice<'a, W> {
                     if k < n {
                         assert(r.overflow@[k] == old(self).out.overflow@[k]);
                         assert(cs[k + 1] == d0[k + 1]);
+                    }
+                }
+                assert(slab_len(s) == old(self).cur@.len() + rest.len());
+                assert forall|k: int| 0 <= k < r.overflow@.len() implies slab_len(#[trigger] r.overflow@[k]) == cs[k + 1].len() by {
+                    if k < n {
+                        assert(r.overflow@[k] == old(self).out.overflow@[k]);
+                        assert(cs[k + 1] == d0[k + 1]);
+                        assert(encodes::<W::R>(slab_bytes(old(self).out.overflow@[k]), d0[k + 1]));
+                    } else {
+                        assert(r.overflow@[k] == s);
+                        assert(cs[k + 1] == old(self).cur@ + rest);
                     }
                 }
             }

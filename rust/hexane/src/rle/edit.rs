@@ -295,7 +295,9 @@ impl<M: WriteOps<'static>> Edit<M> {
     /// first run after the cursor is read — a close never re-reads what
     /// it already walked.
     pub(crate) fn close_rebuild<'s, L: Lift<'s, W = M>>(&mut self, data: &'s [u8], slab_segments: usize, slab_len: usize, slab_tail: RleTail) -> (r: Rebuilt)
-        requires old(self).inv(), data@ == old(self).data(), old(self).room_close(),
+        requires
+            old(self).inv(), data@ == old(self).data(), old(self).room_close(),
+            slab_len == slab_values::<M::R>(data@).len(),
         ensures
             old(self).pre() == data@.take(old(self).pre().len() as int),
             r.h0@ == old(self).h0(),
@@ -313,12 +315,13 @@ impl<M: WriteOps<'static>> Edit<M> {
         };
         let ghost lp = p;
         let postfix = own_postfix::<L>(p);
-        let tail_count = sub(slab_len, self.read);
+        let tail_count = slab_len - self.read;
         proof {
             lemma_lift_postfix::<L>(data@, self.read as int, lp, end as int);
             lemma_plen_bound::<M::R>(data@, self.read as int, plift::<L>(lp), end as int);
             lemma_pmap::<M>(postfix);
             self.w.lemma_room_le(plen_of(postfix), (slab_values::<M::R>(data@).len() - self.read) as nat);
+            self.w.lemma_room_le(tail_count as nat, (slab_values::<M::R>(data@).len() - self.read) as nat);
         }
         self.w.set_range_end(end);
         let tail = &data[end..];
@@ -480,9 +483,9 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::rle::RleDecoder;
     use crate::codec::Leb128;
     use crate::encoding::EncoderApi;
+    use crate::rle::RleDecoder;
     use crate::Encoder;
 
     fn slab_of(vals: &[u64]) -> Slab {
