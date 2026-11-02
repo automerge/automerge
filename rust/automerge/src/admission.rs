@@ -18,6 +18,8 @@ use std::ops::ControlFlow;
 use crate::signature::SignatureStore;
 use crate::{ActorId, Change, ChangeHash, Fragment};
 
+mod accepted;
+
 /// History considered as a whole for admission.
 ///
 /// A novel loose change requires evidence on its own hash. A canonical

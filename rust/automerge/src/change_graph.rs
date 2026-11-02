@@ -249,6 +249,16 @@ impl ChangeGraph {
             .unwrap_or(0)
     }
 
+    /// Return the stored actor-table index and sequence for an exact change hash.
+    ///
+    /// Returns `None` if the hash is absent.
+    pub(crate) fn actor_seq_for_hash(&self, hash: &ChangeHash) -> Option<(usize, u32)> {
+        let index = self.hash_to_index(hash)?;
+        let actor = usize::from(self.actors[index]);
+        let seq = self.seq[index];
+        Some((actor, seq))
+    }
+
     /// Returns `true` if `actor_index` can safely advance its sequence under
     /// the heads `seq_clock` was built from: either it has no changes, or its
     /// latest change is covered.
@@ -1234,6 +1244,33 @@ mod tests {
             matches!(err, LoadError::AuthorOnNonInitialSeq(2, _)),
             "expected AuthorOnNonInitialSeq(2, _), got {err:?}"
         );
+    }
+
+    #[test]
+    fn actor_seq_for_hash_resolves_exact_changes_including_empty_changes() {
+        let mut builder = TestGraphBuilder::new();
+        let actor_a = builder.actor();
+        let actor_b = builder.actor();
+
+        let a1 = builder.change(&actor_a, 10, &[]);
+        let a2 = builder.change(&actor_a, 0, &[a1]);
+        let b1 = builder.change(&actor_b, 1, &[]);
+        let graph = builder.build();
+
+        assert_eq!(
+            graph.actor_seq_for_hash(&a1),
+            Some((builder.index(&actor_a), 1)),
+        );
+        // Empty changes advance the change sequence, not the operation counter.
+        assert_eq!(
+            graph.actor_seq_for_hash(&a2),
+            Some((builder.index(&actor_a), 2)),
+        );
+        assert_eq!(
+            graph.actor_seq_for_hash(&b1),
+            Some((builder.index(&actor_b), 1)),
+        );
+        assert_eq!(graph.actor_seq_for_hash(&ChangeHash([0xff; 32])), None,);
     }
 
     #[test]
