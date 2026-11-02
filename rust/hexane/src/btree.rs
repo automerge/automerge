@@ -28,10 +28,10 @@
 //! aggregate is right, subtrees don't share nodes, the free list names
 //! distinct empty slots, and every grouping of slabs can be merged
 //! (`valid`).  `splice`'s core (`splice_vec`), `from_vec`, `update_slab`,
-//! `find_by_prefix`, `find_slab_at_item`, `items_before_slab` and
-//! `root_agg` are proved against that sequence: a splice yields exactly
-//! `old[..start] + new + old[end..]` provided the caller keeps that result
-//! `valid`.  Not yet verified: `find_slab_at_prefix`, the value-range
+//! `find_by_prefix`, `find_slab_at_item`, `find_slab_at_prefix`,
+//! `items_before_slab` and `root_agg` are proved against that sequence: a
+//! splice yields exactly `old[..start] + new + old[end..]` provided the
+//! caller keeps that result `valid`.  Not yet verified: the value-range
 //! iterators, and the `IntoIterator` wrappers around `splice_vec` and
 //! `from_vec`.  `merge`'s laws are proved for `SlabAgg` and `usize`; for
 //! `PrefixSlabWeight<P>` they, and the prefix arithmetic, are assumed of
@@ -521,6 +521,70 @@ where
     }
 }
 
+/// A prefix aggregate whose prefixes can be compared, for
+/// [`find_slab_at_prefix`](SlabBTree::find_slab_at_prefix).  Nothing is
+/// assumed of the order: the search's contract is stated in terms of
+/// whatever `<=` answers.
+pub trait OrdPrefix: PrefixAggregate {
+    /// `a <= b`.
+    spec fn prefix_le(a: Self::Prefix, b: Self::Prefix) -> bool;
+
+    fn le_prefix(a: &Self::Prefix, b: &Self::Prefix) -> (r: bool)
+        ensures r == Self::prefix_le(*a, *b);
+
+    /// `a.clone() + b`.
+    fn plus_prefix(a: &Self::Prefix, b: &Self::Prefix) -> (r: Self::Prefix)
+        requires Self::prefix_plus_ok(*a, *b),
+        ensures r == Self::prefix_plus(*a, *b);
+}
+
+impl OrdPrefix for SlabAgg {
+    open spec fn prefix_le(a: i64, b: i64) -> bool {
+        a <= b
+    }
+
+    fn le_prefix(a: &i64, b: &i64) -> bool {
+        *a <= *b
+    }
+
+    fn plus_prefix(a: &i64, b: &i64) -> i64 {
+        *a + *b
+    }
+}
+
+/// `a <= b` on a prefix type `P` (its `Ord`).
+pub uninterp spec fn prefix_leq<P>(a: P, b: P) -> bool;
+
+impl<P> OrdPrefix for PrefixSlabWeight<P>
+where
+    P: Clone
+        + Default
+        + std::fmt::Debug
+        + AddAssign
+        + SubAssign
+        + Add<Output = P>
+        + for<'a> AddAssign<&'a P>
+        + Ord,
+{
+    open spec fn prefix_le(a: P, b: P) -> bool {
+        prefix_leq(a, b)
+    }
+
+    // Trusted only to name `P`'s `<=`.
+    #[verifier::external_body]
+    fn le_prefix(a: &P, b: &P) -> bool {
+        a <= b
+    }
+
+    // Trusted: `clone` + `+=` compute `prefix_add`.
+    #[verifier::external_body]
+    fn plus_prefix(a: &P, b: &P) -> P {
+        let mut r = a.clone();
+        r += b;
+        r
+    }
+}
+
 #[derive(Clone, PartialEq, Debug)]
 #[verifier::allow(autoderive_clone_without_spec)]
 pub(crate) struct FoundSlab<A: PrefixAggregate> {
@@ -719,6 +783,73 @@ pub proof fn lemma_fold_prefix<A: PrefixAggregate>(s: Seq<A>, j: int, k: int)
     lemma_fold_split(s, 0, j, k);
     assert(A::merge_ok(fold(s.subrange(0, j)), fold(s.subrange(j, k))));
     A::lemma_prefix_merge(fold(s.subrange(0, j)), fold(s.subrange(j, k)));
+}
+
+/// The prefix of the first `j` slabs.
+pub open spec fn pre_at<A: PrefixAggregate>(s: Seq<A>, j: int) -> A::Prefix {
+    fold(s.subrange(0, j)).spec_prefix()
+}
+
+/// The prefix at slab end `j` (the first `j` slabs) reaches `target`.
+pub open spec fn reached<A: OrdPrefix>(s: Seq<A>, target: A::Prefix, j: int) -> bool {
+    A::prefix_le(target, pre_at(s, j))
+}
+
+/// Every slab end up to `n` that reaches `target` is followed, by `n`,
+/// by one that doesn't.
+#[verifier::opaque]
+pub open spec fn passed<A: OrdPrefix>(s: Seq<A>, target: A::Prefix, n: int) -> bool {
+    forall|k: int| 0 < k <= n && #[trigger] reached(s, target, k)
+        ==> exists|j: int| k < j <= n && !(#[trigger] reached(s, target, j))
+}
+
+/// Once the running prefix reaches `target` it stays there, as for
+/// unsigned prefixes.
+#[verifier::opaque]
+pub open spec fn stays_reached<A: OrdPrefix>(s: Seq<A>, target: A::Prefix) -> bool {
+    forall|i: int, j: int| 0 <= i <= j <= s.len() && #[trigger] reached(s, target, i)
+        ==> #[trigger] reached(s, target, j)
+}
+
+pub proof fn lemma_passed_step<A: OrdPrefix>(s: Seq<A>, target: A::Prefix, n: int, e: int)
+    requires passed(s, target, n), n < e, !reached(s, target, e),
+    ensures passed(s, target, e),
+{
+    reveal(passed);
+    assert forall|k: int| 0 < k <= e && #[trigger] reached(s, target, k)
+        implies exists|j: int| k < j <= e && !(#[trigger] reached(s, target, j)) by {
+        if k <= n {
+            let j = choose|j: int| k < j <= n && !(#[trigger] reached(s, target, j));
+            assert(k < j <= e && !reached(s, target, j));
+        } else {
+            assert(k < e && !reached(s, target, e));
+        }
+    }
+}
+
+/// When the prefix stays reached, passing slab ends means none reached.
+pub proof fn lemma_passed_first<A: OrdPrefix>(s: Seq<A>, target: A::Prefix, n: int)
+    requires passed(s, target, n), stays_reached(s, target), n <= s.len(),
+    ensures forall|k: int| 0 < k <= n ==> !#[trigger] reached(s, target, k),
+{
+    reveal(passed);
+    reveal(stays_reached);
+    assert forall|k: int| 0 < k <= n implies !#[trigger] reached(s, target, k) by {
+        if reached(s, target, k) {
+            let j = choose|j: int| k < j <= n && !(#[trigger] reached(s, target, j));
+            assert(reached(s, target, j));
+        }
+    }
+}
+
+/// The middle part `b` of `a + b + c`, placed between `l` and `r`.
+pub proof fn lemma_seq_part<T>(l: Seq<T>, a: Seq<T>, b: Seq<T>, c: Seq<T>, r: Seq<T>)
+    ensures
+        (l + (a + b + c) + r).subrange((l.len() + a.len()) as int, (l.len() + a.len() + b.len()) as int) == b,
+        l + (a + b + c) + r == (l + a) + b + (c + r),
+{
+    assert((l + (a + b + c) + r).subrange((l.len() + a.len()) as int, (l.len() + a.len() + b.len()) as int) =~= b);
+    assert(l + (a + b + c) + r =~= (l + a) + b + (c + r));
 }
 
 /// Runs of a valid sequence are valid.
@@ -3196,6 +3327,218 @@ impl<A: SlabAggregate> SlabBTree<A> {
         }
     }
 
+    /// Find the slab whose prefix sum first reaches `target`: returns
+    /// `(slab_idx, prefix_before_slab, items_before_slab)`, or
+    /// one-past-the-end if none does.
+    ///
+    /// O(log n) — descends by comparing `target` against running prefix
+    /// sums of sibling subtrees.  If the running prefix can fall back
+    /// below `target` after reaching it (signed prefixes), the descent may
+    /// skip a crossing inside a subtree whose end is back below `target`;
+    /// every slab end it passes that reaches `target` is followed, before
+    /// the result, by one that doesn't.
+    pub(crate) fn find_slab_at_prefix(&self, target: A::Prefix) -> (r: (usize, A::Prefix, usize))
+        where A: OrdPrefix
+        requires
+            self.wf(),
+            forall|i: int| 0 <= i < self@.len() ==> #[trigger] self@[i].prefix_ok(),
+        ensures
+            r.0 <= self@.len(),
+            r.1 == pre_at(self@, r.0 as int),
+            r.2 == sum_len(self@.subrange(0, r.0 as int)),
+            r.0 < self@.len() ==> reached(self@, target, r.0 + 1),
+            passed(self@, target, r.0 as int),
+            stays_reached(self@, target)
+                ==> forall|k: int| 0 < k <= r.0 ==> !#[trigger] reached(self@, target, k),
+    {
+        let ghost view = self@;
+        let ghost mut h = self.height();
+        let ghost mut left = Seq::<A>::empty();
+        let ghost mut right = Seq::<A>::empty();
+        let mut acc_prefix = A::zero_prefix();
+        let mut acc_items = 0usize;
+        let mut slab_base = 0usize;
+        let mut node = self.root;
+        proof {
+            assert(self.wf_node(self.root, h));
+            assert(self@ =~= left + self.slabs(node, h) + right);
+            assert(view.subrange(0, 0) =~= Seq::<A>::empty());
+            A::lemma_prefix_empty(A::prefix_zero());
+            reveal(passed);
+            lemma_valid_subrange(view, 0, view.len() as int);
+            assert(view.subrange(0, view.len() as int) =~= view);
+        }
+        loop
+            invariant
+                self.wf(), view == self@, valid(view),
+                forall|i: int| 0 <= i < view.len() ==> #[trigger] view[i].prefix_ok(),
+                self.wf_node(node, h),
+                view == left + self.slabs(node, h) + right,
+                slab_base == left.len(),
+                acc_items == sum_len(left),
+                acc_prefix == pre_at(view, slab_base as int),
+                passed(view, target, slab_base as int),
+                (self.slabs(node, h).len() > 0 && reached(view, target, (left.len() + self.slabs(node, h).len()) as int))
+                    || (left.len() == 0 && right.len() == 0),
+            decreases h,
+        {
+            proof {
+                lemma_sum_len_concat(left, self.slabs(node, h));
+                lemma_sum_len_concat(left + self.slabs(node, h), right);
+                assert(view.subrange(0, left.len() as int) =~= left);
+            }
+            match self.node(node) {
+                Node::Leaf(l) => {
+                    let ghost aggs = l.aggs@;
+                    assert(self.slabs(node, h) == aggs);
+                    let mut i: usize = 0;
+                    while i < l.aggs.len()
+                        invariant
+                            self.wf(), view == self@, valid(view),
+                            forall|j: int| 0 <= j < view.len() ==> #[trigger] view[j].prefix_ok(),
+                            i <= aggs.len(), aggs == l.aggs@,
+                            view == left + aggs + right,
+                            slab_base == left.len(),
+                            acc_items == sum_len(left) + sum_len(aggs.take(i as int)),
+                            acc_prefix == pre_at(view, left.len() + i),
+                            passed(view, target, left.len() + i),
+                            (aggs.len() > 0 && reached(view, target, (left.len() + aggs.len()) as int))
+                                || (left.len() == 0 && right.len() == 0),
+                            i > 0 ==> !reached(view, target, left.len() + i),
+                        decreases aggs.len() - i,
+                    {
+                        let a = &l.aggs[i];
+                        let ghost j = left.len() + i;
+                        proof {
+                            assert(aggs.take(i + 1).drop_last() =~= aggs.take(i as int));
+                            assert(view.subrange(0, j) =~= left + aggs.take(i as int));
+                            assert(view[j] == aggs[i as int]);
+                            lemma_sum_len_concat(left, aggs.take(i as int));
+                            lemma_fold_prefix(view, j, j + 1);
+                            lemma_fold_one(view, j);
+                            assert(aggs =~= aggs.take(i + 1) + aggs.skip(i + 1));
+                            lemma_sum_len_concat(aggs.take(i + 1), aggs.skip(i + 1));
+                            lemma_sum_len_concat(left, aggs);
+                            lemma_sum_len_concat(left + aggs, right);
+                        }
+                        let after = A::plus_prefix(&acc_prefix, a.prefix());
+                        if A::le_prefix(&target, &after) {
+                            proof {
+                                if stays_reached(view, target) {
+                                    lemma_passed_first(view, target, j);
+                                }
+                            }
+                            return (slab_base + i, acc_prefix, acc_items);
+                        }
+                        proof {
+                            lemma_passed_step(view, target, j, j + 1);
+                        }
+                        acc_prefix = after;
+                        acc_items += a.len();
+                        i += 1;
+                    }
+                    proof {
+                        assert(aggs.take(i as int) =~= aggs);
+                        assert(view =~= aggs);
+                        assert(view.subrange(0, view.len() as int) =~= view);
+                        if stays_reached(view, target) {
+                            lemma_passed_first(view, target, view.len() as int);
+                        }
+                    }
+                    return (slab_base + l.aggs.len(), acc_prefix, acc_items);
+                }
+                Node::Internal(n) => {
+                    let ghost cs = n.children@;
+                    let ghost hc = (h - 1) as nat;
+                    let ghost h0 = h;
+                    proof {
+                        self.lemma_child(node, h, *n, 0);
+                    }
+                    assert(self.slabs(node, h) == self.children_slabs(cs, hc));
+                    let mut k: usize = 0;
+                    proof {
+                        assert(sum_len(left) + sum_len(self.children_slabs(cs, hc)) <= usize::MAX);
+                    }
+                    loop
+                        invariant_except_break
+                            k <= cs.len(), h == h0,
+                            self.wf_node(node, h),
+                            self.node_spec(node) == Some(Node::Internal(*n)),
+                            view == left + self.children_slabs(cs, hc) + right,
+                            slab_base == left.len() + self.children_slabs(cs.take(k as int), hc).len(),
+                            acc_items == sum_len(left) + sum_len(self.children_slabs(cs.take(k as int), hc)),
+                            acc_prefix == pre_at(view, slab_base as int),
+                            passed(view, target, slab_base as int),
+                            (self.children_slabs(cs, hc).len() > 0
+                                && reached(view, target, (left.len() + self.children_slabs(cs, hc).len()) as int))
+                                || (left.len() == 0 && right.len() == 0),
+                            k > 0 ==> !reached(view, target, slab_base as int),
+                            sum_len(left) + sum_len(self.children_slabs(cs, hc)) <= usize::MAX,
+                        invariant
+                            self.wf(), view == self@, valid(view), cs == n.children@, cs.len() > 0, h0 > 0, hc == h0 - 1,
+                            forall|j: int| 0 <= j < view.len() ==> #[trigger] view[j].prefix_ok(),
+                        ensures
+                            h < h0,
+                            self.wf_node(node, h),
+                            view == left + self.slabs(node, h) + right,
+                            slab_base == left.len(),
+                            acc_items == sum_len(left),
+                            acc_prefix == pre_at(view, slab_base as int),
+                            passed(view, target, slab_base as int),
+                            self.slabs(node, h).len() > 0
+                                && reached(view, target, (left.len() + self.slabs(node, h).len()) as int),
+                        decreases cs.len() - k,
+                    {
+                        if k == n.children.len() {
+                            proof {
+                                assert(cs.take(k as int) =~= cs);
+                                assert(view =~= self.children_slabs(cs, hc));
+                                assert(view.subrange(0, view.len() as int) =~= view);
+                                if stays_reached(view, target) {
+                                    lemma_passed_first(view, target, view.len() as int);
+                                }
+                            }
+                            return (slab_base, acc_prefix, acc_items);
+                        }
+                        let c = &n.children[k];
+                        let ghost before = self.children_slabs(cs.take(k as int), hc);
+                        let ghost mid = self.slabs(c.id, hc);
+                        let ghost rest = self.children_slabs(cs.skip(k + 1), hc);
+                        let ghost (p, q) = (slab_base as int, slab_base + mid.len());
+                        proof {
+                            assert(c == cs[k as int]);
+                            self.lemma_child(node, h, *n, k as int);
+                            self.lemma_children_slabs_split(cs, k as int, hc);
+                            self.lemma_children_slabs_push(cs, k as int, hc);
+                            lemma_sum_len_concat(before, mid);
+                            lemma_sum_len_concat(before + mid, rest);
+                            lemma_seq_part(left, before, mid, rest, right);
+                            lemma_fold_prefix(view, p, q);
+                        }
+                        let after = A::plus_prefix(&acc_prefix, c.agg.prefix());
+                        if A::le_prefix(&target, &after) {
+                            proof {
+                                lemma_sum_len_concat(left, before);
+                                left = left + before;
+                                right = rest + right;
+                                h = hc;
+                            }
+                            node = c.id;
+                            break;
+                        }
+                        proof {
+                            lemma_passed_step(view, target, p, q);
+                        }
+                        acc_prefix = after;
+                        acc_items += c.agg.len();
+                        slab_base += c.slab_count;
+                        k += 1;
+                    }
+                }
+            }
+        }
+    }
+
     /// Aggregate of all slabs in the tree.
     #[allow(dead_code)]
     pub(crate) fn root_agg(&self) -> (r: A)
@@ -4779,58 +5122,6 @@ impl<A: PrefixAggregate> FoundSlab<A> {
     #[cfg(test)]
     pub(crate) fn decompose(&self) -> (usize, A::Prefix, usize) {
         (self.index, self.prefix.clone(), self.pos)
-    }
-}
-
-impl<A: PrefixAggregate> SlabBTree<A>
-where
-    A::Prefix: Ord,
-{
-    /// Find the slab whose prefix sum first reaches or exceeds `target`.
-    /// Returns `(slab_idx, prefix_before_slab, items_before_slab)`.  If
-    /// `target` exceeds the total prefix, returns one-past-the-end.
-    ///
-    /// O(log n) — descends by comparing `target` against running prefix
-    /// sums of sibling subtrees.
-    pub(crate) fn find_slab_at_prefix(&self, target: A::Prefix) -> (usize, A::Prefix, usize) {
-        let mut acc_prefix = A::Prefix::default();
-        let mut acc_items = 0usize;
-        let mut slab_base = 0usize;
-        let mut node = self.root;
-        loop {
-            match self.node(node) {
-                Node::Leaf(l) => {
-                    for (i, a) in l.aggs.iter().enumerate() {
-                        let mut after = acc_prefix.clone();
-                        after += a.prefix();
-                        if target <= after {
-                            return (slab_base + i, acc_prefix, acc_items);
-                        }
-                        acc_prefix = after;
-                        acc_items += a.len();
-                    }
-                    return (slab_base + l.aggs.len(), acc_prefix, acc_items);
-                }
-                Node::Internal(n) => {
-                    let mut descended = false;
-                    for c in &n.children {
-                        let mut after = acc_prefix.clone();
-                        after += c.agg.prefix();
-                        if target <= after {
-                            node = c.id;
-                            descended = true;
-                            break;
-                        }
-                        acc_prefix = after;
-                        acc_items += c.agg.len();
-                        slab_base += c.slab_count;
-                    }
-                    if !descended {
-                        return (slab_base, acc_prefix, acc_items);
-                    }
-                }
-            }
-        }
     }
 }
 
