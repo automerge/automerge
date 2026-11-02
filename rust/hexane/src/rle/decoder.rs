@@ -235,7 +235,7 @@ impl<'a, T: RleValue, C: Codec> RleDecoder<'a, T, C> {
         } else {
             match C::try_read_signed(&self.data[self.byte_pos..])? {
                 (count_bytes, n) if n > 0 => {
-                    let count = n as usize;
+                    let count = usize::try_from(n).map_err(|_| count_too_large())?;
                     let value_start = self.byte_pos + count_bytes;
                     let (vlen, value) = T::try_unpack::<C>(&self.data[value_start..])?;
                     let bytes = count_bytes + vlen;
@@ -249,7 +249,8 @@ impl<'a, T: RleValue, C: Codec> RleDecoder<'a, T, C> {
                     }))
                 }
                 (bytes, n) if n < 0 => {
-                    let count = (-n) as usize;
+                    // `unsigned_abs`, not `-n`: `-i64::MIN` overflows
+                    let count = usize::try_from(n.unsigned_abs()).map_err(|_| count_too_large())?;
                     self.byte_pos += bytes;
                     self.remaining = count;
                     self.state = RunState::Literal;
@@ -258,7 +259,7 @@ impl<'a, T: RleValue, C: Codec> RleDecoder<'a, T, C> {
                 (count_bytes, _) => {
                     let (ncb, count) =
                         C::try_read_unsigned(&self.data[self.byte_pos + count_bytes..])?;
-                    let count = count as usize;
+                    let count = usize::try_from(count).map_err(|_| count_too_large())?;
                     let bytes = count_bytes + ncb;
                     self.byte_pos += bytes;
                     self.state = RunState::Idle;
@@ -268,6 +269,11 @@ impl<'a, T: RleValue, C: Codec> RleDecoder<'a, T, C> {
             }
         }
     }
+}
+
+/// A run header whose count does not fit a `usize`.
+fn count_too_large() -> PackError {
+    PackError::InvalidValue("run count does not fit a usize".to_string())
 }
 
 impl<'a, T: RleValue, C: Codec> RleDecoder<'a, T, C> {
