@@ -173,7 +173,7 @@ fn last_slab(mut data: Vec<u8>, tail_bytes: &[u8], len: usize, segments: usize, 
 /// `vec[index..index + del] = bytes`.
 #[verifier::external_body]
 #[inline(always)]
-fn splice_bytes(vec: &mut Vec<u8>, index: usize, del: usize, bytes: &[u8])
+pub(crate) fn splice_bytes(vec: &mut Vec<u8>, index: usize, del: usize, bytes: &[u8])
     requires index + del <= old(vec).len(),
     ensures final(vec)@ == old(vec)@.take(index as int) + bytes@ + old(vec)@.skip(index + del),
 {

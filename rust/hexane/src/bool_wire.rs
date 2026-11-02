@@ -1014,7 +1014,7 @@ pub(crate) open spec fn bstate_pos<K: CountOps>(data: Seq<u8>, st: BoolDecoderSt
 }
 
 /// Counts' prefixes have more bytes the longer they are.
-proof fn lemma_take_bytes_mono<K: CountOps>(cs: Seq<u64>, i: int, j: int)
+pub(crate) proof fn lemma_take_bytes_mono<K: CountOps>(cs: Seq<u64>, i: int, j: int)
     requires 0 <= i < j <= cs.len(),
     ensures counts_bytes::<K>(cs.take(i)).len() < counts_bytes::<K>(cs.take(j)).len(),
 {
@@ -1024,7 +1024,7 @@ proof fn lemma_take_bytes_mono<K: CountOps>(cs: Seq<u64>, i: int, j: int)
 }
 
 /// Where run `k` starts in a slab's bytes, its count's encoding.
-proof fn lemma_next_count<K: CountOps>(data: Seq<u8>, cs: Seq<u64>, k: int, bp: int)
+pub(crate) proof fn lemma_next_count<K: CountOps>(data: Seq<u8>, cs: Seq<u64>, k: int, bp: int)
     requires
         bool_parses::<K>(cs, data), 0 <= k <= cs.len(), bp == counts_bytes::<K>(cs.take(k)).len(), bp < data.len(),
     ensures
@@ -1051,7 +1051,7 @@ proof fn lemma_next_count<K: CountOps>(data: Seq<u8>, cs: Seq<u64>, k: int, bp: 
 }
 
 /// Counts' prefixes have no more bytes than they.
-proof fn lemma_take_bytes_le<K: CountOps>(cs: Seq<u64>, i: int)
+pub(crate) proof fn lemma_take_bytes_le<K: CountOps>(cs: Seq<u64>, i: int)
     requires 0 <= i <= cs.len(),
     ensures counts_bytes::<K>(cs.take(i)).len() <= counts_bytes::<K>(cs).len(),
 {
@@ -1062,7 +1062,7 @@ proof fn lemma_take_bytes_le<K: CountOps>(cs: Seq<u64>, i: int)
 }
 
 /// Two runs-started counts for one state are the same.
-proof fn lemma_k_unique<K: CountOps>(cs: Seq<u64>, st: BoolDecoderState, k1: int, k2: int)
+pub(crate) proof fn lemma_k_unique<K: CountOps>(cs: Seq<u64>, st: BoolDecoderState, k1: int, k2: int)
     requires dstate_at::<K>(cs, st, k1), dstate_at::<K>(cs, st, k2),
     ensures k1 == k2,
 {
@@ -1096,6 +1096,11 @@ impl<'a> BDec<'a> {
     /// The index of the next value.
     pub(crate) open spec fn pos<K: CountOps>(&self) -> int {
         bstate_pos::<K>(self.data(), self.state())
+    }
+
+    /// The runs started.
+    pub(crate) open spec fn k<K: CountOps>(&self) -> int {
+        bstate_k::<K>(self.data(), self.state())
     }
 
     /// A decoder at the start of the valid slab `data`.
@@ -1150,6 +1155,9 @@ impl<'a> BDec<'a> {
             final(self).pos::<K>() == old(self).pos::<K>(),
             final(self).state().byte_pos > old(self).state().byte_pos,
             final(self).state().byte_pos <= final(self).data().len(),
+            final(self).k::<K>() == old(self).k::<K>() + 1,
+            old(self).k::<K>() < bool_counts::<K>(old(self).data()).len(),
+            final(self).state().remaining == bool_counts::<K>(old(self).data())[old(self).k::<K>()],
     {
         let ghost data = self.data@;
         let ghost cs = bool_counts::<K>(data);
@@ -1317,7 +1325,12 @@ impl<'a> BDec<'a> {
                     && old(self).pos::<K>() + run.count <= bool_values::<K>(old(self).data()).len()
                     && bool_values::<K>(old(self).data()).subrange(old(self).pos::<K>(), old(self).pos::<K>() + run.count)
                         == Seq::new(run.count as nat, |_j: int| run.value)
-                    && final(self).pos::<K>() == old(self).pos::<K>() + run.count,
+                    && final(self).pos::<K>() == old(self).pos::<K>() + run.count
+                    && (old(self).state().remaining > 0 ==> final(self).k::<K>() == old(self).k::<K>()
+                        && final(self).state().remaining == old(self).state().remaining - run.count)
+                    && (old(self).state().remaining == 0 && old(self).k::<K>() >= 1 ==>
+                        final(self).k::<K>() == old(self).k::<K>() + 1
+                        && final(self).state().remaining == bool_counts::<K>(old(self).data())[old(self).k::<K>()] - run.count),
                 None => old(self).pos::<K>() == bool_values::<K>(old(self).data()).len()
                     && final(self).pos::<K>() == old(self).pos::<K>(),
             },
@@ -1329,6 +1342,10 @@ impl<'a> BDec<'a> {
             invariant
                 self.inv::<K>(), self.data() == old(self).data(), self.pos::<K>() == old(self).pos::<K>(),
                 self.st.byte_pos <= self.data@.len(), max >= 1,
+                self.k::<K>() == old(self).k::<K>() && self.st.remaining == old(self).st.remaining
+                    || old(self).st.remaining == 0 && self.k::<K>() == old(self).k::<K>() + 1 && self.k::<K>() >= 2
+                        && self.st.remaining == bool_counts::<K>(old(self).data())[old(self).k::<K>()]
+                    || old(self).st.remaining == 0 && old(self).k::<K>() == 0 && self.k::<K>() >= 1,
             decreases self.data@.len() - self.st.byte_pos,
         {
             if self.st.remaining > 0 {
