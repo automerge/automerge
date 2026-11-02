@@ -353,7 +353,7 @@ mod partition_tests {
         state: &RleState<'_, T, V, C>,
     ) -> usize {
         match state {
-            RleState::Empty(_) => 0,
+            RleState::Empty => 0,
             RleState::Lone(_) => 1,
             RleState::Run(n, _) => *n,
             RleState::Lit { count, .. } => count + 1,
@@ -1063,7 +1063,7 @@ pub(crate) fn tail<T: RleValue, C: Codec>(
             let state = RleState::Lit {
                 count,
                 local: 0,
-                bytes: None,
+                bytes: 0,
                 current,
                 header_pos,
             };

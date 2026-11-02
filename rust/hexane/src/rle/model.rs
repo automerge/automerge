@@ -69,6 +69,10 @@ pub trait RleOps<'a> {
             Self::enc(v).len() > 0,
             !Self::is_null(v) && !Self::is_null(w) && Self::enc(v) + s == Self::enc(w) + t ==> v == w;
 
+    /// In a nullable column, null is one value.
+    proof fn axiom_null(v: Self::V)
+        ensures Self::nullable() ==> (Self::is_null(v) == (v == Self::null()));
+
     /// The same, for the codec's signed integers.
     proof fn axiom_enc_signed(a: i64, b: i64, s: Seq<u8>, t: Seq<u8>)
         ensures
@@ -146,6 +150,51 @@ pub trait RleOps<'a> {
             };
 }
 
+/// What the RLE writer needs: [`RleOps`]'s value model, and operations on
+/// the values it is handed (`Cow`: borrowed from a slab, or owned), and
+/// on output buffers.
+pub trait WriteOps<'a> {
+    type R: RleOps<'a>;
+    type Cow;
+
+    /// The value a `Cow` stands for.
+    spec fn val(c: Self::Cow) -> <Self::R as RleOps<'a>>::V;
+
+    /// `a == b`.
+    fn cow_eq(a: &Self::Cow, b: &Self::Cow) -> (r: bool)
+        ensures r == (Self::val(*a) == Self::val(*b));
+
+    fn cow_is_null(c: &Self::Cow) -> (r: bool)
+        ensures r == <Self::R as RleOps<'a>>::is_null(Self::val(*c));
+
+    /// Append the value's encoding; return its length.
+    fn cow_pack(c: &Self::Cow, buf: &mut Vec<u8>) -> (n: usize)
+        requires !<Self::R as RleOps<'a>>::is_null(Self::val(*c)),
+        ensures
+            final(buf)@ == old(buf)@ + <Self::R as RleOps<'a>>::enc(Self::val(*c)),
+            n == <Self::R as RleOps<'a>>::enc(Self::val(*c)).len();
+
+    /// Append the codec's encoding of `n`.
+    fn put_signed(n: i64, buf: &mut Vec<u8>)
+        ensures final(buf)@ == old(buf)@ + <Self::R as RleOps<'a>>::enc_signed(n);
+
+    /// Append the codec's encoding of `n`.
+    fn put_unsigned(n: u64, buf: &mut Vec<u8>)
+        ensures final(buf)@ == old(buf)@ + <Self::R as RleOps<'a>>::enc_unsigned(n);
+
+    /// Replace the literal-run header at `pos` with one for `total`
+    /// values; return the change in length.
+    fn rewrite_lit_header(buf: &mut Vec<u8>, pos: usize, total: usize) -> (d: i64)
+        requires
+            pos <= old(buf).len(), 1 <= total <= i64::MAX,
+            exists|h: i64| (#[trigger] <Self::R as RleOps<'a>>::enc_signed(h)).is_prefix_of(old(buf)@.skip(pos as int)),
+        ensures
+            forall|h: i64| (#[trigger] <Self::R as RleOps<'a>>::enc_signed(h)).is_prefix_of(old(buf)@.skip(pos as int))
+                ==> final(buf)@ == old(buf)@.take(pos as int)
+                    + <Self::R as RleOps<'a>>::enc_signed(-(total as int) as i64)
+                    + old(buf)@.skip(pos + <Self::R as RleOps<'a>>::enc_signed(h).len());
+}
+
 } // verus!
 
 /// [`RleOps`] for column type `T` with codec `C`: the trusted bridge from
@@ -189,6 +238,9 @@ impl<'a, T: RleValue, C: Codec> RleOps<'a> for Ops<'a, T, C> {
 
     #[cfg(verus_keep_ghost)]
     fn axiom_enc(_v: Self::V, _w: Self::V, _s: Seq<u8>, _t: Seq<u8>) {}
+
+    #[cfg(verus_keep_ghost)]
+    fn axiom_null(_v: Self::V) {}
 
     #[cfg(verus_keep_ghost)]
     fn axiom_enc_signed(_a: i64, _b: i64, _s: Seq<u8>, _t: Seq<u8>) {}
@@ -485,6 +537,150 @@ pub proof fn lemma_same_start(x: Seq<u8>, s: Seq<u8>, y: Seq<u8>, t: Seq<u8>, re
     assert(y =~= (y + t).take(y.len() as int));
     assert(s =~= (x + s).skip(x.len() as int));
     assert(t =~= (y + t).skip(y.len() as int));
+}
+
+// ── Uniqueness: bytes determine groups ──────────────────────────────────────
+
+/// Groups each of which a writer may emit on its own.
+pub open spec fn all_ok<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>) -> bool {
+    forall|i: int| 0 <= i < gs.len() ==> group_ok::<O>(#[trigger] gs[i])
+}
+
+/// A sequence's bytes, split after its first group.
+pub proof fn lemma_groups_bytes_first<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>)
+    requires gs.len() > 0,
+    ensures groups_bytes::<O>(gs) == group_bytes::<O>(gs[0]) + groups_bytes::<O>(gs.skip(1)),
+{
+    assert(gs =~= seq![gs[0]] + gs.skip(1));
+    lemma_groups_bytes_concat::<O>(seq![gs[0]], gs.skip(1));
+    assert(seq![gs[0]].drop_last() =~= Seq::<Group<O::V>>::empty());
+    reveal_with_fuel(groups_bytes, 2);
+    assert(groups_bytes::<O>(seq![gs[0]]) =~= group_bytes::<O>(gs[0]));
+}
+
+/// Values' bytes, split after the first.
+pub proof fn lemma_encs_first<'a, O: RleOps<'a>>(vs: Seq<O::V>)
+    requires vs.len() > 0,
+    ensures encs::<O>(vs) == O::enc(vs[0]) + encs::<O>(vs.skip(1)),
+{
+    assert(vs =~= seq![vs[0]] + vs.skip(1));
+    lemma_encs_concat::<O>(seq![vs[0]], vs.skip(1));
+    assert(seq![vs[0]].drop_last() =~= Seq::<O::V>::empty());
+    reveal_with_fuel(encs, 2);
+    assert(encs::<O>(seq![vs[0]]) =~= O::enc(vs[0]));
+}
+
+/// Two equal strings that start with encodings of non-null values `a`
+/// and `b` start with the same one.
+proof fn lemma_values_unique<'a, O: RleOps<'a>>(a: Seq<O::V>, b: Seq<O::V>, s: Seq<u8>, t: Seq<u8>)
+    requires
+        a.len() == b.len(),
+        forall|i: int| 0 <= i < a.len() ==> !O::is_null(#[trigger] a[i]),
+        forall|i: int| 0 <= i < b.len() ==> !O::is_null(#[trigger] b[i]),
+        encs::<O>(a) + s == encs::<O>(b) + t,
+    ensures a == b, s == t,
+    decreases a.len(),
+{
+    if a.len() == 0 {
+        assert(a =~= b);
+        assert(encs::<O>(a) + s =~= s);
+        assert(encs::<O>(b) + t =~= t);
+    } else {
+        lemma_encs_first::<O>(a);
+        lemma_encs_first::<O>(b);
+        let (ra, rb) = (encs::<O>(a.skip(1)) + s, encs::<O>(b.skip(1)) + t);
+        assert(O::enc(a[0]) + ra =~= encs::<O>(a) + s);
+        assert(O::enc(b[0]) + rb =~= encs::<O>(b) + t);
+        O::axiom_enc(a[0], b[0], ra, rb);
+        lemma_same_start(O::enc(a[0]), ra, O::enc(b[0]), rb, Seq::empty());
+        lemma_values_unique::<O>(a.skip(1), b.skip(1), s, t);
+        assert(a =~= seq![a[0]] + a.skip(1));
+        assert(b =~= seq![b[0]] + b.skip(1));
+    }
+}
+
+/// Two equal strings that start with the bytes of writable groups `g`
+/// and `h` start with the same group.
+proof fn lemma_group_unique<'a, O: RleOps<'a>>(g: Group<O::V>, h: Group<O::V>, s: Seq<u8>, t: Seq<u8>)
+    requires group_ok::<O>(g), group_ok::<O>(h), group_bytes::<O>(g) + s == group_bytes::<O>(h) + t,
+    ensures g == h, s == t,
+{
+    let hg = header_of(g) as i64;
+    let hh = header_of(h) as i64;
+    let (pg, ph) = (payload::<O>(g) + s, payload::<O>(h) + t);
+    assert(group_bytes::<O>(g) + s =~= O::enc_signed(hg) + pg);
+    assert(group_bytes::<O>(h) + t =~= O::enc_signed(hh) + ph);
+    O::axiom_enc_signed(hg, hh, pg, ph);
+    lemma_same_start(O::enc_signed(hg), pg, O::enc_signed(hh), ph, Seq::empty());
+    match g {
+        Group::Run { count, value } => {
+            let v2 = run_value(h);
+            assert(h is Run);
+            O::axiom_enc(value, v2, s, t);
+            lemma_same_start(O::enc(value), s, O::enc(v2), t, Seq::empty());
+        },
+        Group::Lit { values } => {
+            assert(h is Lit);
+            lemma_values_unique::<O>(values, h->values, s, t);
+        },
+        Group::Null { count } => {
+            assert(h is Null);
+            O::axiom_enc_unsigned(count as u64, h->Null_count as u64, s, t);
+            lemma_same_start(O::enc_unsigned(count as u64), s, O::enc_unsigned(h->Null_count as u64), t, Seq::empty());
+        },
+    }
+}
+
+/// A group's bytes are nonempty.
+pub proof fn lemma_group_bytes_nonempty<'a, O: RleOps<'a>>(g: Group<O::V>)
+    ensures group_bytes::<O>(g).len() > 0,
+{
+    O::axiom_enc_signed(header_of(g) as i64, 0, Seq::empty(), Seq::empty());
+    match g {
+        Group::Run { count, value } => {
+            O::axiom_enc_signed(count as i64, 0, Seq::empty(), Seq::empty());
+        },
+        Group::Lit { values } => {
+            O::axiom_enc_signed(-(values.len() as int) as i64, 0, Seq::empty(), Seq::empty());
+        },
+        Group::Null { .. } => {
+            O::axiom_enc_signed(0, 0, Seq::empty(), Seq::empty());
+        },
+    }
+}
+
+/// Writable groups are determined by their bytes.
+pub proof fn lemma_groups_unique<'a, O: RleOps<'a>>(a: Seq<Group<O::V>>, b: Seq<Group<O::V>>)
+    requires all_ok::<O>(a), all_ok::<O>(b), groups_bytes::<O>(a) == groups_bytes::<O>(b),
+    ensures a == b,
+    decreases a.len() + b.len(),
+{
+    if a.len() == 0 || b.len() == 0 {
+        if a.len() > 0 {
+            lemma_groups_bytes_first::<O>(a);
+            lemma_group_bytes_nonempty::<O>(a[0]);
+            assert(groups_bytes::<O>(b).len() == 0);
+        } else if b.len() > 0 {
+            lemma_groups_bytes_first::<O>(b);
+            lemma_group_bytes_nonempty::<O>(b[0]);
+            assert(groups_bytes::<O>(a).len() == 0);
+        }
+        assert(a =~= b);
+    } else {
+        lemma_groups_bytes_first::<O>(a);
+        lemma_groups_bytes_first::<O>(b);
+        assert(group_ok::<O>(a[0]) && group_ok::<O>(b[0]));
+        lemma_group_unique::<O>(a[0], b[0], groups_bytes::<O>(a.skip(1)), groups_bytes::<O>(b.skip(1)));
+        assert forall|i: int| 0 <= i < a.skip(1).len() implies group_ok::<O>(#[trigger] a.skip(1)[i]) by {
+            assert(a.skip(1)[i] == a[i + 1]);
+        }
+        assert forall|i: int| 0 <= i < b.skip(1).len() implies group_ok::<O>(#[trigger] b.skip(1)[i]) by {
+            assert(b.skip(1)[i] == b[i + 1]);
+        }
+        lemma_groups_unique::<O>(a.skip(1), b.skip(1));
+        assert(a =~= seq![a[0]] + a.skip(1));
+        assert(b =~= seq![b[0]] + b.skip(1));
+    }
 }
 
 } // verus!
