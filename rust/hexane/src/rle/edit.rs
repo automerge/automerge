@@ -21,9 +21,11 @@ use crate::encoding::RunDecoder;
 use crate::rle::model::Ops;
 use crate::rle::postfix::Postfix;
 use crate::rle::splice::find_partition_at;
+use crate::rle::state::RleCow;
 use crate::rle::writer::SpliceWriter;
 use crate::rle::{RleDecoder, RleDecoderState, RleTail, Slab};
 use crate::{AsColumnRef, Codec, RleValue};
+use vstd::prelude::Ghost;
 
 /// A rebuild in progress within one slab.
 ///
@@ -149,8 +151,11 @@ impl<T: RleValue, C: Codec> EditSlab for RleEdit<T, C> {
             p.state.into_owned(),
             p.segments,
             at,
-            p.byte_start..p.byte_start,
+            p.byte_start,
             max_segments,
+            Ghost::assume_new(),
+            Ghost::assume_new(),
+            Ghost::assume_new(),
         );
         self.dec = p.read_state;
         self.read_segments = p.read_segments;
@@ -202,7 +207,7 @@ impl<T: RleValue, C: Codec> EditSlab for RleEdit<T, C> {
         // Only the tail's first run is read, from the point the cursor
         // stopped at — a close never re-reads what it already walked.
         let (tail, postfix_segments, byte_end) = Self::tail(&self.dec, self.read_segments, slab);
-        let postfix = tail.map(|p| p.map(T::to_owned));
+        let postfix = tail.map(|p| p.map(|v| RleCow::Owned(T::to_owned(v))));
         let tail_count = slab.len - self.read;
         let data_len = slab.data.len();
         let slab_tail = slab.tail;

@@ -396,8 +396,15 @@ pub(crate) open spec fn flushed_lit<'a, W: WriteOps<'a>>(s0: State<'a, W>, b0: S
 /// A step's rewrite closes the slab's literal, which no step reopens: of
 /// the rewrites a run of steps returns, at most one is `Some`.
 pub(crate) open spec fn rw_ok<'a, W: WriteOps<'a>>(s0: State<'a, W>, s1: State<'a, W>, rw: Option<RewriteHeader>) -> bool {
-    &&& rw is Some ==> pre_lit(s0) && !pre_lit(s1)
-    &&& pre_lit(s1) ==> pre_lit(s0)
+    &&& rw_from(s0, rw)
+    &&& rw is Some ==> !pre_lit(s1)
+    &&& pre_lit(s1) ==> pre_lit(s0) && s1->Lit_header_pos == s0->Lit_header_pos
+}
+
+/// A rewrite comes from closing the slab's literal: it is that
+/// literal's header, given a count a header can hold.
+pub(crate) open spec fn rw_from<'a, W: WriteOps<'a>>(s0: State<'a, W>, rw: Option<RewriteHeader>) -> bool {
+    rw is Some ==> pre_lit(s0) && rw->Some_0.pos == s0->Lit_header_pos && 1 <= rw->Some_0.count <= i64::MAX
 }
 
 /// The pending group ends with `v`: a null run if `v` is null, else a
@@ -678,6 +685,7 @@ pub(crate) proof fn lemma_lit_grow<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>, ws: 
 }
 
 /// A state that keeps the pending group's kind and grows it.
+#[verifier::spinoff_prover]
 pub(crate) proof fn lemma_step_grow<'a, W: WriteOps<'a>>(s0: State<'a, W>, b0: Seq<u8>, s1: State<'a, W>, added: Seq<VOf<'a, W>>)
     requires
         !(s0 is Lit), !(s1 is Lit), !(s0 is Empty), !(s1 is Empty),
@@ -1114,7 +1122,7 @@ impl<'a, W: WriteOps<'a>> State<'a, W> {
     /// Emit the pending group.
     pub(crate) fn do_flush(state: Self, buf: &mut Vec<u8>) -> (f: FlushState)
         requires wf(state, old(buf)@),
-        ensures flushed(state, old(buf)@, final(buf)@, f.rewrite), f.rewrite is Some ==> pre_lit(state),
+        ensures flushed(state, old(buf)@, final(buf)@, f.rewrite), rw_from(state, f.rewrite),
     {
         let ghost b0 = buf@;
         match state {
@@ -1439,7 +1447,7 @@ impl<'a, W: WriteOps<'a>> State<'a, W> {
             wf(*old(self), old(buf)@),
             old(self).plen() + lit <= i64::MAX, old(self).plen() + lit + 1 < usize::MAX,
         ensures
-            (*final(self)) is Empty, f.rewrite is Some ==> pre_lit(*old(self)),
+            (*final(self)) is Empty, rw_from(*old(self), f.rewrite),
             lit == 0 ==> flushed(*old(self), old(buf)@, final(buf)@, f.rewrite),
             lit > 0 ==> flushed_lit(*old(self), old(buf)@, final(buf)@, f.rewrite, lit as nat),
     {
@@ -1523,7 +1531,7 @@ impl<'a, W: WriteOps<'a>> State<'a, W> {
         requires wf(*old(self), old(buf)@),
         ensures
             flushed(*old(self), old(buf)@, final(buf)@, f.rewrite), (*final(self)) is Empty,
-            f.rewrite is Some ==> pre_lit(*old(self)),
+            rw_from(*old(self), f.rewrite),
     {
         let mut old = State::Empty;
         core::mem::swap(self, &mut old);
@@ -1695,16 +1703,6 @@ impl<'a, T: RleValue, V: AsColumnRef<T>, C: Codec> RleState<'a, T, V, C> {
         postfix: Option<Postfix<T::Get<'a>>>,
     ) -> FlushState {
         self.flush_postfix(buf, postfix.map(|p| p.map(RleCow::Ref)))
-    }
-
-    /// [`State::flush_postfix`] for a postfix detached from the slab —
-    /// the form a cursor closes with.
-    pub fn flush_postfix_owned(
-        &mut self,
-        buf: &mut Vec<u8>,
-        postfix: Option<Postfix<V>>,
-    ) -> FlushState {
-        self.flush_postfix(buf, postfix.map(|p| p.map(RleCow::Owned)))
     }
 }
 

@@ -523,7 +523,7 @@ pub(crate) fn add_flush(a: &mut FlushState, b: FlushState)
 
 /// Of two rewrites at most one applies, so applying both is applying
 /// the one returned.
-proof fn lemma_apply_comb<'a, W: WriteOps<'a>>(rw1: Option<RewriteHeader>, rw2: Option<RewriteHeader>, pre: Seq<u8>, h0: i64)
+pub(crate) proof fn lemma_apply_comb<'a, W: WriteOps<'a>>(rw1: Option<RewriteHeader>, rw2: Option<RewriteHeader>, pre: Seq<u8>, h0: i64)
     requires !(rw1 is Some && rw2 is Some),
     ensures apply::<W>(rw2, apply::<W>(rw1, pre, h0), h0) == apply::<W>(comb(rw1, rw2), pre, h0),
 {
@@ -673,7 +673,7 @@ impl<'a, W: WriteOps<'a>> State<'a, W> {
             old(self).plen() + plen_of(postfix) <= i64::MAX, old(self).plen() + plen_of(postfix) + 2 < usize::MAX,
         ensures
             (*final(self)) is Empty,
-            f.rewrite is Some ==> pre_lit(*old(self)),
+            rw_from(*old(self), f.rewrite),
             joined(*old(self), old(buf)@, final(buf)@, f.rewrite, pmap::<W>(postfix)),
     {
         let ghost s0 = *self;
