@@ -9,7 +9,7 @@
 #![allow(clippy::len_zero, clippy::assign_op_pattern)]
 
 use crate::rle::model::*;
-use crate::rle::splice::Postfix;
+use crate::rle::postfix::Postfix;
 use crate::rle::RleTail;
 use crate::{AsColumnRef, Codec, Leb128, RleValue};
 
@@ -355,10 +355,11 @@ pub(crate) open spec fn wf<'a, W: WriteOps<'a>>(s: State<'a, W>, buf: Seq<u8>) -
 }
 
 /// From `(s0, b0)` to `(s1, b1)` the writer appended `added`, returning
-/// the header rewrite `rw` for the slab.
+/// the header rewrite `rw` for the slab.  The slab's header count `h0`
+/// carries over, so steps compose.
 pub(crate) open spec fn step<'a, W: WriteOps<'a>>(s0: State<'a, W>, b0: Seq<u8>, s1: State<'a, W>, b1: Seq<u8>, rw: Option<RewriteHeader>, added: Seq<VOf<'a, W>>) -> bool {
     forall|pre: Seq<u8>, base: int, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>, h0: i64| #[trigger] rel(s0, pre, b0, base, gs, ws, h0)
-        ==> exists|gs2: Seq<Group<VOf<'a, W>>>, ws2: Seq<VOf<'a, W>>, h1: i64| #[trigger] rel(s1, apply::<W>(rw, pre, h0), b1, base, gs2, ws2, h1)
+        ==> exists|gs2: Seq<Group<VOf<'a, W>>>, ws2: Seq<VOf<'a, W>>| #[trigger] rel(s1, apply::<W>(rw, pre, h0), b1, base, gs2, ws2, h0)
             && values_of(s1, gs2, ws2) == values_of(s0, gs, ws) + added
 }
 
@@ -390,6 +391,25 @@ pub(crate) open spec fn lit_flush_bytes<'a, W: WriteOps<'a>>(s: State<'a, W>, gs
 pub(crate) open spec fn flushed_lit<'a, W: WriteOps<'a>>(s0: State<'a, W>, b0: Seq<u8>, b1: Seq<u8>, rw: Option<RewriteHeader>, lit: nat) -> bool {
     forall|pre: Seq<u8>, base: int, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>, h0: i64| #[trigger] rel(s0, pre, b0, base, gs, ws, h0)
         ==> 0 <= base <= b1.len() && apply::<W>(rw, pre, h0) + b1.skip(base) == lit_flush_bytes(s0, gs, ws, lit)
+}
+
+/// A step's rewrite closes the slab's literal, which no step reopens: of
+/// the rewrites a run of steps returns, at most one is `Some`.
+pub(crate) open spec fn rw_ok<'a, W: WriteOps<'a>>(s0: State<'a, W>, s1: State<'a, W>, rw: Option<RewriteHeader>) -> bool {
+    &&& rw is Some ==> pre_lit(s0) && !pre_lit(s1)
+    &&& pre_lit(s1) ==> pre_lit(s0)
+}
+
+/// The pending group ends with `v`: a null run if `v` is null, else a
+/// repeat run or literal of non-null `v`.
+pub(crate) open spec fn last_is<'a, W: WriteOps<'a>>(s: State<'a, W>, v: VOf<'a, W>) -> bool {
+    match s {
+        State::Empty => false,
+        State::Null(_) => <W::R as RleOps<'a>>::is_null(v),
+        State::Lone(c) => W::val(c) == v && !<W::R as RleOps<'a>>::is_null(v),
+        State::Run(_, c) => W::val(c) == v && !<W::R as RleOps<'a>>::is_null(v),
+        State::Lit { current, .. } => W::val(current) == v && !<W::R as RleOps<'a>>::is_null(v),
+    }
 }
 
 /// `n` copies of `v`.
@@ -671,7 +691,7 @@ pub(crate) proof fn lemma_step_grow<'a, W: WriteOps<'a>>(s0: State<'a, W>, b0: S
     ensures step(s0, b0, s1, b0, None, added),
 {
     assert forall|pre: Seq<u8>, base: int, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>, h0: i64| #[trigger] rel(s0, pre, b0, base, gs, ws, h0)
-        implies exists|gs2: Seq<Group<VOf<'a, W>>>, ws2: Seq<VOf<'a, W>>, h1: i64| #[trigger] rel(s1, apply::<W>(None, pre, h0), b0, base, gs2, ws2, h1)
+        implies exists|gs2: Seq<Group<VOf<'a, W>>>, ws2: Seq<VOf<'a, W>>| #[trigger] rel(s1, apply::<W>(None, pre, h0), b0, base, gs2, ws2, h0)
             && values_of(s1, gs2, ws2) == values_of(s0, gs, ws) + added by {
         let g0 = pend_group(s0, ws)->Some_0;
         let g1 = pend_group(s1, ws)->Some_0;
@@ -700,7 +720,7 @@ pub(crate) proof fn lemma_step_emit<'a, W: WriteOps<'a>>(s0: State<'a, W>, b0: S
     ensures step(s0, b0, s1, b1, None, added),
 {
     assert forall|pre: Seq<u8>, base: int, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>, h0: i64| #[trigger] rel(s0, pre, b0, base, gs, ws, h0)
-        implies exists|gs2: Seq<Group<VOf<'a, W>>>, ws2: Seq<VOf<'a, W>>, h1: i64| #[trigger] rel(s1, apply::<W>(None, pre, h0), b1, base, gs2, ws2, h1)
+        implies exists|gs2: Seq<Group<VOf<'a, W>>>, ws2: Seq<VOf<'a, W>>| #[trigger] rel(s1, apply::<W>(None, pre, h0), b1, base, gs2, ws2, h0)
             && values_of(s1, gs2, ws2) == values_of(s0, gs, ws) + added by {
         assert(ws =~= Seq::<VOf<'a, W>>::empty());
         let g1 = pend_group(s1, ws)->Some_0;
@@ -722,7 +742,7 @@ pub(crate) proof fn lemma_step_empty<'a, W: WriteOps<'a>>(s0: State<'a, W>, b0: 
     ensures step(s0, b0, s1, b0, None, added),
 {
     assert forall|pre: Seq<u8>, base: int, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>, h0: i64| #[trigger] rel(s0, pre, b0, base, gs, ws, h0)
-        implies exists|gs2: Seq<Group<VOf<'a, W>>>, ws2: Seq<VOf<'a, W>>, h1: i64| #[trigger] rel(s1, apply::<W>(None, pre, h0), b0, base, gs2, ws2, h1)
+        implies exists|gs2: Seq<Group<VOf<'a, W>>>, ws2: Seq<VOf<'a, W>>| #[trigger] rel(s1, apply::<W>(None, pre, h0), b0, base, gs2, ws2, h0)
             && values_of(s1, gs2, ws2) == values_of(s0, gs, ws) + added by {
         let g1 = pend_group(s1, ws)->Some_0;
         lemma_canonical_join::<W::R>(gs, g1);
@@ -749,7 +769,7 @@ pub(crate) proof fn lemma_step_lit_push<'a, W: WriteOps<'a>>(s0: State<'a, W>, b
     let c = W::val(s0->Lit_current);
     let hp = s0->Lit_header_pos as int;
     assert forall|pre: Seq<u8>, base: int, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>, h0: i64| #[trigger] rel(s0, pre, b0, base, gs, ws, h0)
-        implies exists|gs2: Seq<Group<VOf<'a, W>>>, ws2: Seq<VOf<'a, W>>, h1: i64| #[trigger] rel(s1, apply::<W>(None, pre, h0), b1, base, gs2, ws2, h1)
+        implies exists|gs2: Seq<Group<VOf<'a, W>>>, ws2: Seq<VOf<'a, W>>| #[trigger] rel(s1, apply::<W>(None, pre, h0), b1, base, gs2, ws2, h0)
             && values_of(s1, gs2, ws2) == values_of(s0, gs, ws) + copies(1, v) by {
         let ws2 = ws.push(c);
         assert(ws2.last() == c);
@@ -795,7 +815,7 @@ pub(crate) proof fn lemma_step_lone_lit<'a, W: WriteOps<'a>>(s0: State<'a, W>, b
     let h = ph::<W>();
     lemma_lone_bytes::<W::R>(p);
     assert forall|pre: Seq<u8>, base: int, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>, h0: i64| #[trigger] rel(s0, pre, b0, base, gs, ws, h0)
-        implies exists|gs2: Seq<Group<VOf<'a, W>>>, ws2: Seq<VOf<'a, W>>, h1: i64| #[trigger] rel(s1, apply::<W>(None, pre, h0), b1, base, gs2, ws2, h1)
+        implies exists|gs2: Seq<Group<VOf<'a, W>>>, ws2: Seq<VOf<'a, W>>| #[trigger] rel(s1, apply::<W>(None, pre, h0), b1, base, gs2, ws2, h0)
             && values_of(s1, gs2, ws2) == values_of(s0, gs, ws) + copies(1, v) by {
         let ws2 = seq![p];
         assert(ws2.last() == p);
@@ -889,7 +909,7 @@ pub(crate) proof fn lemma_step_lit_close<'a, W: WriteOps<'a>>(s0: State<'a, W>, 
     let c = W::val(s0->Lit_current);
     assert(b0 + Seq::<u8>::empty() =~= b0);
     assert forall|pre: Seq<u8>, base: int, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>, h0: i64| #[trigger] rel(s0, pre, b0, base, gs, ws, h0)
-        implies exists|gs2: Seq<Group<VOf<'a, W>>>, ws2: Seq<VOf<'a, W>>, h1: i64| #[trigger] rel(s1, apply::<W>(rw, pre, h0), b1, base, gs2, ws2, h1)
+        implies exists|gs2: Seq<Group<VOf<'a, W>>>, ws2: Seq<VOf<'a, W>>| #[trigger] rel(s1, apply::<W>(rw, pre, h0), b1, base, gs2, ws2, h0)
             && values_of(s1, gs2, ws2) == values_of(s0, gs, ws) + copies(n, c) by {
         let gl = Group::Lit { values: ws };
         let gs2 = gs.push(gl);
@@ -926,7 +946,7 @@ pub(crate) proof fn lemma_step_lit_close_new<'a, W: WriteOps<'a>>(s0: State<'a, 
 {
     let c = W::val(s0->Lit_current);
     assert forall|pre: Seq<u8>, base: int, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>, h0: i64| #[trigger] rel(s0, pre, b0, base, gs, ws, h0)
-        implies exists|gs2: Seq<Group<VOf<'a, W>>>, ws2: Seq<VOf<'a, W>>, h1: i64| #[trigger] rel(s1, apply::<W>(rw, pre, h0), b2, base, gs2, ws2, h1)
+        implies exists|gs2: Seq<Group<VOf<'a, W>>>, ws2: Seq<VOf<'a, W>>| #[trigger] rel(s1, apply::<W>(rw, pre, h0), b2, base, gs2, ws2, h0)
             && values_of(s1, gs2, ws2) == values_of(s0, gs, ws) + copies(n, v) by {
         let w2 = ws.push(c);
         let gl = Group::Lit { values: w2 };
@@ -960,7 +980,7 @@ pub(crate) proof fn lemma_step_flush_null<'a, W: WriteOps<'a>>(s0: State<'a, W>,
     let s1 = State::<'a, W>::Null(count);
     let g1 = Group::<VOf<'a, W>>::Null { count: count as nat };
     assert forall|pre: Seq<u8>, base: int, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>, h0: i64| #[trigger] rel(s0, pre, b0, base, gs, ws, h0)
-        implies exists|gs2: Seq<Group<VOf<'a, W>>>, ws2: Seq<VOf<'a, W>>, h1: i64| #[trigger] rel(s1, apply::<W>(rw, pre, h0), b1, base, gs2, ws2, h1)
+        implies exists|gs2: Seq<Group<VOf<'a, W>>>, ws2: Seq<VOf<'a, W>>| #[trigger] rel(s1, apply::<W>(rw, pre, h0), b1, base, gs2, ws2, h0)
             && values_of(s1, gs2, ws2) == values_of(s0, gs, ws) + copies(count as nat, <W::R as RleOps<'a>>::null()) by {
         let gs2 = all_groups(s0, gs, ws);
         assert(gs2.last() == pend_group(s0, ws)->Some_0);
@@ -1094,7 +1114,7 @@ impl<'a, W: WriteOps<'a>> State<'a, W> {
     /// Emit the pending group.
     pub(crate) fn do_flush(state: Self, buf: &mut Vec<u8>) -> (f: FlushState)
         requires wf(state, old(buf)@),
-        ensures flushed(state, old(buf)@, final(buf)@, f.rewrite),
+        ensures flushed(state, old(buf)@, final(buf)@, f.rewrite), f.rewrite is Some ==> pre_lit(state),
     {
         let ghost b0 = buf@;
         match state {
@@ -1197,6 +1217,9 @@ impl<'a, W: WriteOps<'a>> State<'a, W> {
             wf(*final(self), final(buf)@),
             final(self).plen() <= old(self).plen() + n,
             step(*old(self), old(buf)@, *final(self), final(buf)@, f.rewrite, copies(n as nat, W::val(value))),
+            rw_ok(*old(self), *final(self), f.rewrite),
+            n >= 1 ==> last_is(*final(self), W::val(value)),
+            n >= 2 && !<W::R as RleOps<'a>>::is_null(W::val(value)) ==> (*final(self)) is Run,
     {
         let ghost s0 = *self;
         let ghost b0 = buf@;
@@ -1205,7 +1228,7 @@ impl<'a, W: WriteOps<'a>> State<'a, W> {
         if n == 0 {
             proof {
                 assert forall|pre: Seq<u8>, base: int, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>, h0: i64| #[trigger] rel(s0, pre, b0, base, gs, ws, h0)
-                    implies exists|gs2: Seq<Group<VOf<'a, W>>>, ws2: Seq<VOf<'a, W>>, h1: i64| #[trigger] rel(s0, apply::<W>(None, pre, h0), b0, base, gs2, ws2, h1)
+                    implies exists|gs2: Seq<Group<VOf<'a, W>>>, ws2: Seq<VOf<'a, W>>| #[trigger] rel(s0, apply::<W>(None, pre, h0), b0, base, gs2, ws2, h0)
                         && values_of(s0, gs2, ws2) == values_of(s0, gs, ws) + added by {
                     assert(values_of(s0, gs, ws) + added =~= values_of(s0, gs, ws));
                     assert(rel(s0, apply::<W>(None, pre, h0), b0, base, gs, ws, h0));
@@ -1376,6 +1399,7 @@ impl<'a, W: WriteOps<'a>> State<'a, W> {
             wf(*final(self), final(buf)@),
             final(self).plen() <= old(self).plen() + count,
             step(*old(self), old(buf)@, *final(self), final(buf)@, f.rewrite, copies(count as nat, <W::R as RleOps<'a>>::null())),
+            rw_ok(*old(self), *final(self), f.rewrite), (*final(self)) is Null,
     {
         let ghost s0 = *self;
         let ghost b0 = buf@;
@@ -1415,7 +1439,7 @@ impl<'a, W: WriteOps<'a>> State<'a, W> {
             wf(*old(self), old(buf)@),
             old(self).plen() + lit <= i64::MAX, old(self).plen() + lit + 1 < usize::MAX,
         ensures
-            (*final(self)) is Empty,
+            (*final(self)) is Empty, f.rewrite is Some ==> pre_lit(*old(self)),
             lit == 0 ==> flushed(*old(self), old(buf)@, final(buf)@, f.rewrite),
             lit > 0 ==> flushed_lit(*old(self), old(buf)@, final(buf)@, f.rewrite, lit as nat),
     {
@@ -1497,7 +1521,9 @@ impl<'a, W: WriteOps<'a>> State<'a, W> {
 
     pub(crate) fn flush(&mut self, buf: &mut Vec<u8>) -> (f: FlushState)
         requires wf(*old(self), old(buf)@),
-        ensures flushed(*old(self), old(buf)@, final(buf)@, f.rewrite), (*final(self)) is Empty,
+        ensures
+            flushed(*old(self), old(buf)@, final(buf)@, f.rewrite), (*final(self)) is Empty,
+            f.rewrite is Some ==> pre_lit(*old(self)),
     {
         let mut old = State::Empty;
         core::mem::swap(self, &mut old);
@@ -1606,49 +1632,6 @@ where
     }
 }
 
-/// A postfix detached from the slab it was read from.
-///
-/// [`Postfix`] borrows the slab, which is
-/// what a one-shot splice wants; a cursor closes its rebuild while
-/// holding `&mut Column`, so it needs the owned form.
-#[derive(Debug)]
-pub(crate) enum OwnedPostfix<T> {
-    Run {
-        count: usize,
-        value: T,
-        segments: usize,
-    },
-    Lit {
-        value: T,
-        lit: usize,
-        segments: usize,
-    },
-    LonePlusLit {
-        lone: T,
-        value: T,
-        lit: usize,
-        segments: usize,
-    },
-}
-
-impl<T> OwnedPostfix<T> {
-    /// Segments from the postfix's own end to the end of the slab.
-    pub(crate) fn segments(&self) -> usize {
-        match self {
-            Self::Run { segments, .. } | Self::Lit { segments, .. } => *segments,
-            Self::LonePlusLit { segments, .. } => *segments,
-        }
-    }
-
-    /// Segments the postfix itself will contribute when flushed.
-    pub(crate) fn pending(&self) -> usize {
-        match self {
-            Self::Run { .. } | Self::Lit { .. } => 1,
-            Self::LonePlusLit { .. } => 2,
-        }
-    }
-}
-
 impl<'a, T: RleValue, V: AsColumnRef<T>, C: Codec> RleState<'a, T, V, C> {
     /// Detach from the slab the state was opened against, cloning the one
     /// or two values it is holding.
@@ -1705,96 +1688,23 @@ impl<'a, T: RleValue, V: AsColumnRef<T>, C: Codec> RleState<'a, T, V, C> {
         self.append_cow(buf, value.into(), n)
     }
 
-    /// Feed an optional postfix and flush. Returns (flush_state, postfix_segments).
-    /// The postfix values are wrapped in RleCow::Ref since they come from slab data.
-    pub fn flush_postfix(
+    /// [`State::flush_postfix`] for a postfix borrowed from the slab.
+    pub fn flush_postfix_ref(
         &mut self,
         buf: &mut Vec<u8>,
-        postfix: Option<Postfix<'a, T>>,
-    ) -> (FlushState, usize) {
-        let mut f = FlushState::default();
-        let postfix_segs = match postfix {
-            None => {
-                f += self.flush(buf);
-                0
-            }
-            Some(Postfix::Run {
-                count,
-                value,
-                segments,
-            }) => {
-                f += self.append_n(buf, RleCow::Ref(value), count);
-                f += self.flush(buf);
-                segments
-            }
-            Some(Postfix::Lit {
-                value,
-                lit,
-                segments,
-            }) => {
-                f += self.append(buf, RleCow::Ref(value));
-                f += self.flush_with_lit(buf, lit);
-                segments
-            }
-            Some(Postfix::LonePlusLit {
-                lone,
-                value,
-                lit,
-                segments,
-            }) => {
-                f += self.append(buf, RleCow::Ref(lone));
-                f += self.append(buf, RleCow::Ref(value));
-                f += self.flush_with_lit(buf, lit);
-                segments
-            }
-        };
-        (f, postfix_segs)
+        postfix: Option<Postfix<T::Get<'a>>>,
+    ) -> FlushState {
+        self.flush_postfix(buf, postfix.map(|p| p.map(RleCow::Ref)))
     }
 
-    /// [`Self::flush_postfix`] for a postfix that has been detached from
-    /// the slab — the form a cursor closes with.
+    /// [`State::flush_postfix`] for a postfix detached from the slab —
+    /// the form a cursor closes with.
     pub fn flush_postfix_owned(
         &mut self,
         buf: &mut Vec<u8>,
-        postfix: Option<OwnedPostfix<V>>,
-    ) -> (FlushState, usize) {
-        let mut f = FlushState::default();
-        let postfix_segs = match postfix {
-            None => {
-                f += self.flush(buf);
-                0
-            }
-            Some(OwnedPostfix::Run {
-                count,
-                value,
-                segments,
-            }) => {
-                f += self.append_n(buf, RleCow::Owned(value), count);
-                f += self.flush(buf);
-                segments
-            }
-            Some(OwnedPostfix::Lit {
-                value,
-                lit,
-                segments,
-            }) => {
-                f += self.append(buf, RleCow::Owned(value));
-                f += self.flush_with_lit(buf, lit);
-                segments
-            }
-            Some(OwnedPostfix::LonePlusLit {
-                lone,
-                value,
-                lit,
-                segments,
-            }) => {
-                f += self.append(buf, RleCow::Owned(lone));
-                f += self.append(buf, RleCow::Owned(value));
-                f += self.flush_with_lit(buf, lit);
-                segments
-            }
-        };
-        (f, postfix_segs)
+        postfix: Option<Postfix<V>>,
+    ) -> FlushState {
+        self.flush_postfix(buf, postfix.map(|p| p.map(RleCow::Owned)))
     }
 }
 

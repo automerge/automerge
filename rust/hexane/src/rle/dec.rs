@@ -14,6 +14,7 @@
 )]
 
 use super::model::*;
+use super::postfix::*;
 // proof functions exist only when Verus compiles the crate
 #[cfg(verus_keep_ghost)]
 use super::read::{lemma_count, lemma_header, lemma_starts, lemma_value};
@@ -1892,6 +1893,268 @@ pub(crate) fn partition_at<'a, W: WriteOps<'a>>(data: &'a [u8], at: usize) -> (p
                 }
             },
         }
+    }
+}
+
+// ── What follows a reader ───────────────────────────────────────────────────
+
+/// The header of group `gi`, which starts at `pos`.
+fn group_header<'a, O: RleOps<'a>>(data: &'a [u8], pos: usize, Ghost(gi): Ghost<int>) -> (r: (usize, i64))
+    requires
+        valid_slab::<O>(data@), 0 <= gi < slab_groups::<O>(data@).len(),
+        pos == gb::<O>(slab_groups::<O>(data@), gi),
+    ensures ({
+        let gs = slab_groups::<O>(data@);
+        let g = gs[gi];
+        &&& r.1 as int == header_of(g) && r.0 == O::enc_signed(header_of(g) as i64).len()
+        &&& pos + r.0 <= data@.len()
+        &&& data@.skip(pos + r.0) == payload::<O>(g) + groups_bytes::<O>(gs.skip(gi + 1))
+    }),
+{
+    proof {
+        let gs = slab_groups::<O>(data@);
+        let g = gs[gi];
+        lemma_slab_group::<O>(data@, gi);
+        lemma_starts(O::enc_signed(header_of(g) as i64), payload::<O>(g) + groups_bytes::<O>(gs.skip(gi + 1)));
+    }
+    let rest = &data[pos..];
+    assert(rest@ == data@.skip(pos as int));
+    let (hb, hv) = O::read_signed_opt(rest).unwrap();
+    proof {
+        lemma_walk_header::<O>(data@, gi, pos as int, hb as int, hv);
+    }
+    (hb, hv)
+}
+
+/// Value `j` of literal group `gi`, which starts at `pos`: the value,
+/// how many follow it, and where they start.
+fn lit_value_at<'a, O: RleOps<'a>>(data: &'a [u8], pos: usize, Ghost(gi): Ghost<int>, Ghost(j): Ghost<int>, left: usize) -> (r: (O::V, usize, usize))
+    requires
+        valid_slab::<O>(data@), data@.len() <= usize::MAX, 0 <= gi < slab_groups::<O>(data@).len(),
+        slab_groups::<O>(data@)[gi] is Lit,
+        0 <= j < slab_groups::<O>(data@)[gi]->values.len(),
+        left + j == slab_groups::<O>(data@)[gi]->values.len(),
+        pos == gb::<O>(slab_groups::<O>(data@), gi) + lit_head::<O>(slab_groups::<O>(data@)[gi]->values.len()).len()
+            + encs::<O>(slab_groups::<O>(data@)[gi]->values.take(j)).len(),
+    ensures
+        r.2 <= data@.len(),
+        tail_lit::<O>(data@, gl(slab_groups::<O>(data@), gi) + j, r.0, r.1 as nat, r.2 as int, gi, j),
+{
+    let ghost gs = slab_groups::<O>(data@);
+    let ghost vs = gs[gi]->values;
+    let ghost after = encs::<O>(vs.skip(j + 1)) + groups_bytes::<O>(gs.skip(gi + 1));
+    proof {
+        lemma_slab_lit::<O>(data@, gi, j);
+        lemma_starts(O::enc(vs[j]), after);
+    }
+    let rest = &data[pos..];
+    assert(rest@ == data@.skip(pos as int));
+    let (vlen, value) = O::unpack(rest);
+    proof {
+        lemma_value::<O>(data@.skip(pos as int), vs[j], after, vlen as int, value);
+    }
+    (value, left - 1, pos + vlen)
+}
+
+/// The first value of literal group `gi`, whose `hb`-byte header (of
+/// `hv`) starts at `pos`.
+fn first_lit<'a, O: RleOps<'a>>(data: &'a [u8], pos: usize, hb: usize, hv: i64, Ghost(gi): Ghost<int>) -> (r: (O::V, usize, usize))
+    requires
+        valid_slab::<O>(data@), data@.len() <= usize::MAX, 0 <= gi < slab_groups::<O>(data@).len(),
+        pos == gb::<O>(slab_groups::<O>(data@), gi),
+        slab_groups::<O>(data@)[gi] is Lit, hv as int == header_of(slab_groups::<O>(data@)[gi]),
+        hb == O::enc_signed(hv).len(), pos + hb <= data@.len(),
+    ensures
+        r.2 <= data@.len(),
+        tail_lit::<O>(data@, gl(slab_groups::<O>(data@), gi), r.0, r.1 as nat, r.2 as int, gi, 0),
+{
+    let ghost gs = slab_groups::<O>(data@);
+    let ghost vs = gs[gi]->values;
+    proof {
+        lemma_slab_group::<O>(data@, gi);
+        assert(vs.take(0) =~= Seq::<O::V>::empty());
+        assert(encs::<O>(vs.take(0)).len() == 0);
+    }
+    let total = (-hv) as usize;
+    lit_value_at::<O>(data, pos + hb, Ghost(gi), Ghost(0), total)
+}
+
+/// What follows group boundary `gi`, at byte `pos`.
+fn postfix_at_group<'a, O: RleOps<'a>>(data: &'a [u8], pos: usize, Ghost(gi): Ghost<int>) -> (r: (Option<Postfix<O::V>>, usize))
+    requires
+        valid_slab::<O>(data@), data@.len() <= usize::MAX, 0 <= gi <= slab_groups::<O>(data@).len(),
+        pos == gb::<O>(slab_groups::<O>(data@), gi),
+    ensures r.1 <= data@.len(), postfix_ok::<O>(data@, gl(slab_groups::<O>(data@), gi), r.0, r.1 as int),
+{
+    let ghost gs = slab_groups::<O>(data@);
+    proof {
+        lemma_slab::<O>(data@);
+        if gi < gs.len() {
+            lemma_slab_group::<O>(data@, gi);
+        } else {
+            assert(gs.take(gi) =~= gs);
+        }
+    }
+    if pos == data.len() {
+        return (None, pos);
+    }
+    let ghost g = gs[gi];
+    let ghost rest = groups_bytes::<O>(gs.skip(gi + 1));
+    let (hb, hv) = group_header::<O>(data, pos, Ghost(gi));
+    if hv < 0 {
+        let (value, lit, end) = first_lit::<O>(data, pos, hb, hv, Ghost(gi));
+        proof {
+            lemma_postfix_lit::<O>(data@, gl(gs, gi), value, lit, end as int, gi, 0);
+        }
+        return (Some(Postfix::Lit { value, lit }), end);
+    }
+    if hv > 0 {
+        proof {
+            lemma_starts(O::enc(run_value(g)), rest);
+        }
+        let vrest = &data[pos + hb..];
+        assert(vrest@ == data@.skip(pos + hb));
+        let (vlen, value) = O::unpack(vrest);
+        proof {
+            lemma_value::<O>(data@.skip(pos + hb), run_value(g), rest, vlen as int, value);
+        }
+        let count = hv as usize;
+        let end = pos + hb + vlen;
+        let p = Some(Postfix::Run { count, value });
+        proof {
+            assert(count as nat == group_len(g));
+            assert(tail_run::<O>(data@, gl(gs, gi), count as nat, value, end as int, gi));
+            lemma_postfix_run::<O>(data@, gl(gs, gi), count, value, end as int, gi);
+        }
+        return (p, end);
+    }
+    proof {
+        lemma_starts(O::enc_unsigned(g->Null_count as u64), rest);
+    }
+    let crest = &data[pos + hb..];
+    assert(crest@ == data@.skip(pos + hb));
+    let (cb, c) = O::read_unsigned_opt(crest).unwrap();
+    proof {
+        lemma_count::<O>(data@.skip(pos + hb), g->Null_count as u64, rest, cb as int, c);
+    }
+    let value = O::get_null();
+    let count = c as usize;
+    let end = pos + hb + cb;
+    proof {
+        assert(count as nat == group_len(g));
+        assert(tail_run::<O>(data@, gl(gs, gi), count as nat, value, end as int, gi));
+        lemma_postfix_run::<O>(data@, gl(gs, gi), count, value, end as int, gi);
+    }
+    (Some(Postfix::Run { count, value }), end)
+}
+
+/// Inside repeat run `gi - 1`, `r` values left, its value at `vat`, the
+/// next group at `pos`.
+fn postfix_in_run<'a, O: RleOps<'a>>(data: &'a [u8], pos: usize, r: usize, vat: usize, Ghost(gi): Ghost<int>) -> (p: (Option<Postfix<O::V>>, usize))
+    requires
+        valid_slab::<O>(data@), data@.len() <= usize::MAX, 1 <= gi <= slab_groups::<O>(data@).len(),
+        slab_groups::<O>(data@)[gi - 1] is Run,
+        1 <= r <= slab_groups::<O>(data@)[gi - 1]->Run_count,
+        pos == gb::<O>(slab_groups::<O>(data@), gi),
+        vat == gb::<O>(slab_groups::<O>(data@), gi - 1)
+            + O::enc_signed(slab_groups::<O>(data@)[gi - 1]->Run_count as i64).len(),
+    ensures p.1 <= data@.len(), postfix_ok::<O>(data@, gl(slab_groups::<O>(data@), gi) - r, p.0, p.1 as int),
+{
+    let ghost gs = slab_groups::<O>(data@);
+    let ghost g = gs[gi - 1];
+    let ghost c = g->Run_count;
+    let ghost rest = groups_bytes::<O>(gs.skip(gi));
+    let ghost at = gl(gs, gi) - r;
+    proof {
+        lemma_slab::<O>(data@);
+        lemma_slab_group::<O>(data@, gi - 1);
+        let h = O::enc_signed(c as i64);
+        lemma_skip_skip(data@, gb::<O>(gs, gi - 1), h.len() as int);
+        assert((h + (O::enc(run_value(g)) + rest)).skip(h.len() as int) =~= O::enc(run_value(g)) + rest);
+        lemma_starts(O::enc(run_value(g)), rest);
+        if gi < gs.len() {
+            lemma_slab_group::<O>(data@, gi);
+        } else {
+            assert(gs.take(gi) =~= gs);
+        }
+    }
+    let vrest = &data[vat..];
+    assert(vrest@ == data@.skip(vat as int));
+    let (_vlen, value) = O::unpack(vrest);
+    proof {
+        lemma_value::<O>(data@.skip(vat as int), run_value(g), rest, _vlen as int, value);
+    }
+    if r == 1 && pos < data.len() {
+        // one value left of the run: a literal after it takes it in
+        let (hb, hv) = group_header::<O>(data, pos, Ghost(gi));
+        if hv < 0 {
+            let (v2, lit, end) = first_lit::<O>(data, pos, hb, hv, Ghost(gi));
+            let p = Some(Postfix::LonePlusLit { lone: value, value: v2, lit });
+            proof {
+                assert(tail_lone::<O>(data@, at, value, v2, lit as nat, end as int, gi - 1));
+                lemma_postfix_lone::<O>(data@, at, value, v2, lit, end as int, gi - 1);
+            }
+            return (p, end);
+        }
+    }
+    proof {
+        assert(tail_run::<O>(data@, at, r as nat, value, pos as int, gi - 1));
+        lemma_postfix_run::<O>(data@, at, r, value, pos as int, gi - 1);
+    }
+    (Some(Postfix::Run { count: r, value }), pos)
+}
+
+/// What follows reader position `st` in `data`: its first run (or
+/// literal value) as values, and where the slab's bytes after it start.
+pub(crate) fn postfix_at<'a, O: RleOps<'a>>(data: &'a [u8], st: &RleDecoderState) -> (r: (Option<Postfix<O::V>>, usize))
+    requires state_ok::<O>(data@, *st),
+    ensures r.1 <= data@.len(), postfix_ok::<O>(data@, state_pos::<O>(data@, *st), r.0, r.1 as int),
+{
+    let ghost gs = slab_groups::<O>(data@);
+    let ghost gi = choose|g: int| state_at::<O>(data@, *st, g);
+    let ghost at = state_pos::<O>(data@, *st);
+    let r = st.remaining;
+    if r == 0 {
+        proof {
+            if st.run is Literal {
+                let vs = gs[gi - 1]->values;
+                lemma_slab_group::<O>(data@, gi - 1);
+                assert(vs.take(vs.len() as int) =~= vs);
+            }
+        }
+        return postfix_at_group::<O>(data, st.byte_pos, Ghost(gi));
+    }
+    match st.run {
+        SuspendedRun::Repeat { at: vat } => postfix_in_run::<O>(data, st.byte_pos, r, vat, Ghost(gi)),
+        SuspendedRun::Null => {
+            proof {
+                lemma_slab_group::<O>(data@, gi - 1);
+            }
+            let value = O::get_null();
+            proof {
+                assert(tail_run::<O>(data@, at, r as nat, value, st.byte_pos as int, gi - 1));
+                lemma_postfix_run::<O>(data@, at, r, value, st.byte_pos as int, gi - 1);
+            }
+            (Some(Postfix::Run { count: r, value }), st.byte_pos)
+        },
+        SuspendedRun::Literal => {
+            let ghost vs = gs[gi - 1]->values;
+            proof {
+                lemma_slab_group::<O>(data@, gi - 1);
+            }
+            let (value, lit, end) = lit_value_at::<O>(data, st.byte_pos, Ghost(gi - 1), Ghost(vs.len() - r), r);
+            proof {
+                assert(tail_lit::<O>(data@, at, value, lit as nat, end as int, gi - 1, vs.len() - r));
+                lemma_postfix_lit::<O>(data@, at, value, lit, end as int, gi - 1, vs.len() - r);
+            }
+            (Some(Postfix::Lit { value, lit }), end)
+        },
+        SuspendedRun::Idle => {
+            proof {
+                assert(false);
+            }
+            (None, 0)
+        },
     }
 }
 

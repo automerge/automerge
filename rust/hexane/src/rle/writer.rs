@@ -1,4 +1,5 @@
-use crate::rle::state::{FlushState, OwnedPostfix, RleState};
+use crate::rle::postfix::Postfix;
+use crate::rle::state::{FlushState, RleState};
 use crate::rle::{RleTail, Slab};
 use crate::{AsColumnRef, Codec, RleValue};
 use std::ops::Range;
@@ -116,13 +117,13 @@ impl<T: RleValue, C: Codec> SpliceWriter<T, C> {
 
     pub(crate) fn finish(
         &mut self,
-        postfix: Option<OwnedPostfix<T>>,
+        postfix: Option<Postfix<T>>,
+        postfix_segments: usize,
         tail_count: usize,
         tail_bytes: &[u8],
         data_len: usize,
         slab_tail: RleTail,
     ) -> Rebuilt {
-        let postfix_segments = postfix.as_ref().map(|p| p.segments()).unwrap_or(0);
         let postfix_pending = postfix.as_ref().map(|p| p.pending()).unwrap_or(0);
         let mut postfix = postfix;
 
@@ -134,8 +135,7 @@ impl<T: RleValue, C: Codec> SpliceWriter<T, C> {
                 // it all fits in the one slab
                 self.f += self
                     .state
-                    .flush_postfix_owned(&mut self.buf, postfix.take())
-                    .0;
+                    .flush_postfix_owned(&mut self.buf, postfix.take());
                 self.out.bytes = std::mem::take(&mut self.buf);
                 self.out.wpos = self.f.wpos;
                 self.out.rewrite = self.f.rewrite;
@@ -172,8 +172,7 @@ impl<T: RleValue, C: Codec> SpliceWriter<T, C> {
 
         self.f += self
             .state
-            .flush_postfix_owned(&mut self.buf, postfix.take())
-            .0;
+            .flush_postfix_owned(&mut self.buf, postfix.take());
 
         // the postfix moved onto the last new slab, so the whole tail of
         // the original is replaced

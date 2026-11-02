@@ -3,6 +3,7 @@ mod decoder;
 pub mod edit;
 mod load;
 pub(crate) mod model;
+pub(crate) mod postfix;
 pub(crate) mod read;
 pub(crate) mod writer;
 pub use load::RleLoadIter;

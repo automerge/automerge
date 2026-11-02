@@ -5,6 +5,7 @@ use std::ops::Range;
 
 use crate::encoding::RunDecoder;
 
+use crate::rle::postfix::Postfix;
 use crate::rle::state::{FlushState, RewriteHeader, RleCow, RleState, WOps, WPos};
 use crate::rle::{RleDecoder, RleTail, Slab};
 use crate::{AsColumnRef, Codec, RleValue};
@@ -13,50 +14,6 @@ use crate::{AsColumnRef, Codec, RleValue};
 use crate::rle::validate_rle_slab;
 
 // ── RLE fast splice ─────────────────────────────────────────────────────────
-
-///// Postfix: what comes after the deleted range in the same/adjacent run(s).
-/// `segments` = segment count from outer.end to the end of the slab.
-#[derive(Debug)]
-pub(crate) enum Postfix<'a, T: RleValue> {
-    /// Repeat or null run with count ≥ 1. No lit boundary concern.
-    Run {
-        count: usize,
-        value: T::Get<'a>,
-        segments: usize,
-    },
-    /// Literal item with `lit` more literal items following in the slab.
-    /// Use flush_with_lit(lit) to write a header that covers them.
-    Lit {
-        value: T::Get<'a>,
-        lit: usize,
-        segments: usize,
-    },
-    /// Split repeat leaving 1 item, followed immediately by a literal run.
-    /// Feed lone + value into state, then flush_with_lit(lit).
-    LonePlusLit {
-        lone: T::Get<'a>,
-        value: T::Get<'a>,
-        lit: usize,
-        segments: usize,
-    },
-}
-
-impl<T: RleValue> Postfix<'_, T> {
-    fn pending(&self) -> usize {
-        match self {
-            Self::Run { .. } => 1,
-            Self::Lit { .. } => 1,
-            Self::LonePlusLit { .. } => 2,
-        }
-    }
-    fn segments(&self) -> usize {
-        match self {
-            Self::Run { segments, .. } => *segments,
-            Self::Lit { segments, .. } => *segments,
-            Self::LonePlusLit { segments, .. } => *segments,
-        }
-    }
-}
 
 #[derive(Debug)]
 struct Prefix<'a, T: RleValue, V: AsColumnRef<T>, C: Codec> {
@@ -79,7 +36,9 @@ impl<'a, T: RleValue, V: AsColumnRef<T>, C: Codec> Prefix<'a, T, V, C> {
 struct RlePartition<'a, T: RleValue, V: AsColumnRef<T>, C: Codec> {
     outer: Range<usize>,
     prefix: Prefix<'a, T, V, C>,
-    postfix: Option<Postfix<'a, T>>,
+    postfix: Option<Postfix<T::Get<'a>>>,
+    /// segments of the slab after the postfix
+    postfix_segments: usize,
 }
 
 fn find_partition<'a, T: RleValue, V: AsColumnRef<T>, C: Codec>(
@@ -102,7 +61,8 @@ fn find_partition_inner<'a, T: RleValue, V: AsColumnRef<T>, C: Codec>(
     let mut outer = 0..slab.data.len();
     let mut prefix = Prefix::new();
     let mut prefix_done = range.start == 0;
-    let mut postfix: Option<Postfix<'a, T>> = None;
+    let mut postfix: Option<Postfix<T::Get<'a>>> = None;
+    let mut postfix_segments = 0;
 
     // Literal run tracking.
     let mut header_pos: usize = 0;
@@ -146,7 +106,7 @@ fn find_partition_inner<'a, T: RleValue, V: AsColumnRef<T>, C: Codec>(
 
         // ── Postfix ─────────────────────────────────────────────────────
         if prefix_done && range.end < run_end_item {
-            let (p, end) = postfix_from_run(
+            let (p, segs, end) = postfix_from_run(
                 slab,
                 &mut decoder,
                 base,
@@ -157,6 +117,7 @@ fn find_partition_inner<'a, T: RleValue, V: AsColumnRef<T>, C: Codec>(
             );
             outer.end = end;
             postfix = Some(p);
+            postfix_segments = segs;
             break;
         }
 
@@ -170,6 +131,7 @@ fn find_partition_inner<'a, T: RleValue, V: AsColumnRef<T>, C: Codec>(
         outer,
         prefix,
         postfix,
+        postfix_segments,
     }
 }
 
@@ -179,18 +141,10 @@ fn find_partition_inner<'a, T: RleValue, V: AsColumnRef<T>, C: Codec>(
 /// how many of its items lie after the split, `segments_before` the slab's
 /// segment count before `run`, and `dec` a decoder positioned just past
 /// `run` — the lone-plus-literal case consumes one more run from it.
-/// Returns the postfix and the byte offset where the slab's carried-through
-/// bytes resume.
-///
-/// Both callers stop reading somewhere in a slab and need to describe the
-/// tail: [`find_partition`] at the end of a splice range, and
-/// [`RleEdit`](crate::rle::edit::RleEdit)'s walk at wherever its cursor
-/// stands. Keeping it in one place is what lets the cursor close without
-/// re-reading anything: it captures the postfix as it passes, where a
-/// second walk would have to decode a whole literal group again to reach
-/// the same point.
+/// Returns the postfix, the slab's segments after it, and the byte offset
+/// where the slab's carried-through bytes resume.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn postfix_from_run<'a, T: RleValue, C: Codec>(
+fn postfix_from_run<'a, T: RleValue, C: Codec>(
     slab: &'a Slab,
     dec: &mut RleDecoder<'a, T, C>,
     base: usize,
@@ -198,16 +152,14 @@ pub(crate) fn postfix_from_run<'a, T: RleValue, C: Codec>(
     is_lit: bool,
     count: usize,
     segments_before: usize,
-) -> (Postfix<'a, T>, usize) {
+) -> (Postfix<T::Get<'a>>, usize, usize) {
     let value = run.value;
     let is_null = T::is_null(value);
-    let consumed = segments_before + 1; // runs before this one, plus it
     let mut byte_end = base + dec.byte_pos();
     let p = if is_lit {
         Postfix::Lit {
             value,
             lit: dec.remaining(),
-            segments: slab.segments - consumed,
         }
     } else {
         // A repeat run cannot be left holding a single item — that is not
@@ -221,20 +173,17 @@ pub(crate) fn postfix_from_run<'a, T: RleValue, C: Codec>(
                         lone: value,
                         value: post_run.value,
                         lit: dec.remaining(),
-                        segments: slab.segments - consumed - 1, // the peeked lit value
                     }
                 })
             })
         } else {
             None
         };
-        lone_plus_lit.unwrap_or(Postfix::Run {
-            count,
-            value,
-            segments: slab.segments - consumed,
-        })
+        lone_plus_lit.unwrap_or(Postfix::Run { count, value })
     };
-    (p, byte_end)
+    // the runs before this one, then the postfix's own
+    let segments = slab.segments - segments_before - p.pending();
+    (p, segments, byte_end)
 }
 
 /// [`find_partition`] at a single item position, repackaged for
@@ -267,44 +216,6 @@ pub(crate) fn find_partition_at<T: RleValue, C: Codec>(
         byte_start: p.byte_start,
         read_segments: p.read_segments,
         read_state: p.read_state,
-    }
-}
-
-impl<'a, T: RleValue> Postfix<'a, T> {
-    /// Detach from the slab, cloning the one or two values held.
-    pub(crate) fn into_owned(self) -> crate::rle::state::OwnedPostfix<T> {
-        use crate::rle::state::OwnedPostfix as O;
-        match self {
-            Postfix::Run {
-                count,
-                value,
-                segments,
-            } => O::Run {
-                count,
-                value: T::to_owned(value),
-                segments,
-            },
-            Postfix::Lit {
-                value,
-                lit,
-                segments,
-            } => O::Lit {
-                value: T::to_owned(value),
-                lit,
-                segments,
-            },
-            Postfix::LonePlusLit {
-                lone,
-                value,
-                lit,
-                segments,
-            } => O::LonePlusLit {
-                lone: T::to_owned(lone),
-                value: T::to_owned(value),
-                lit,
-                segments,
-            },
-        }
     }
 }
 
@@ -843,12 +754,12 @@ fn build_splice_buf<T: RleValue, V: AsColumnRef<T>, C: Codec>(
     }
 
     // 2. Feed postfix + flush.
-    let postfix_segments = p.postfix.as_ref().map(|p| p.segments()).unwrap_or(0);
+    let postfix_segments = p.postfix_segments;
     let postfix_pending = p.postfix.as_ref().map(|p| p.pending()).unwrap_or(0);
     if !overflowed {
         let pending = state.pending_segments() + postfix_pending;
         if p.prefix.segments + pending + f.segments + postfix_segments <= max_segments {
-            f += state.flush_postfix(&mut buf, p.postfix).0;
+            f += state.flush_postfix_ref(&mut buf, p.postfix);
             result.bytes = buf;
             result.wpos = f.wpos;
             result.rewrite = f.rewrite;
@@ -889,7 +800,7 @@ fn build_splice_buf<T: RleValue, V: AsColumnRef<T>, C: Codec>(
         inserted = 0;
     }
 
-    f += state.flush_postfix(&mut buf, p.postfix).0;
+    f += state.flush_postfix_ref(&mut buf, p.postfix);
 
     // the postfix goes on the final slab
     result.range.end = slab.data.len();
@@ -951,47 +862,28 @@ pub(crate) fn splice_slab<T: RleValue, V: AsColumnRef<T>, C: Codec>(
     result.overflow
 }
 
-fn head<T: RleValue, C: Codec>(slab: &Slab) -> (Postfix<'_, T>, usize) {
+/// The postfix at the start of `slab`: its first run, the segments
+/// after it, and where the bytes after it start.
+fn head<T: RleValue, C: Codec>(slab: &Slab) -> (Postfix<T::Get<'_>>, usize, usize) {
     debug_assert!(slab.segments > 0, "head() on empty slab");
     let segments = slab.segments - 1;
     match C::read_signed(&slab.data).unwrap() {
         (tb, count) if count > 0 => {
             let (vb, value) = T::unpack::<C>(&slab.data[tb..]);
             let count = count as usize;
-            (
-                Postfix::Run {
-                    count,
-                    value,
-                    segments,
-                },
-                tb + vb,
-            )
+            (Postfix::Run { count, value }, segments, tb + vb)
         }
         (tb, 0) => {
             let (vb, nulls) = C::read_unsigned(&slab.data[tb..]).unwrap();
             let count = nulls as usize;
             let value = T::get_null();
-            (
-                Postfix::Run {
-                    count,
-                    value,
-                    segments,
-                },
-                tb + vb,
-            )
+            (Postfix::Run { count, value }, segments, tb + vb)
         }
         (tb, count) => {
             let (vb, value) = T::unpack::<C>(&slab.data[tb..]);
             let count = -count as usize;
             let lit = count - 1;
-            (
-                Postfix::Lit {
-                    lit,
-                    value,
-                    segments,
-                },
-                tb + vb,
-            )
+            (Postfix::Lit { lit, value }, segments, tb + vb)
         }
     }
 }
@@ -1059,8 +951,8 @@ pub(crate) fn do_merge<T: RleValue, C: Codec>(
     }
     let (tail_pos, b_bytes, seg, f) = {
         let (mut a_state, tail_pos, delta_seg) = tail::<T, C>(a, a_tail);
-        let (b_head, b_bytes) = head::<T, C>(b);
-        let (f, b_segments) = a_state.flush_postfix(buf, Some(b_head));
+        let (b_head, b_segments, b_bytes) = head::<T, C>(b);
+        let f = a_state.flush_postfix_ref(buf, Some(b_head));
         (
             tail_pos,
             b_bytes,

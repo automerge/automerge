@@ -18,7 +18,9 @@
 
 use crate::edit::{EditSlab, SlabEdit};
 use crate::encoding::RunDecoder;
-use crate::rle::splice::{find_partition_at, postfix_from_run, Postfix};
+use crate::rle::model::Ops;
+use crate::rle::postfix::Postfix;
+use crate::rle::splice::find_partition_at;
 use crate::rle::writer::SpliceWriter;
 use crate::rle::{RleDecoder, RleDecoderState, RleTail, Slab};
 use crate::{AsColumnRef, Codec, RleValue};
@@ -114,25 +116,23 @@ impl<T: RleValue, C: Codec> RleEdit<T, C> {
         want
     }
 
-    /// The tail at the read cursor: what `close` carries through, and
-    /// where its bytes start. Reads one run — the one the tail begins
-    /// with, whose value the encoder may have to merge into what it just
-    /// wrote. Everything after it stays bytes.
+    /// The tail at the read cursor: what `close` carries through, the
+    /// slab's segments after it, and where its bytes start. Reads one run
+    /// — the one the tail begins with, whose value the encoder may have
+    /// to merge into what it just wrote. Everything after it stays bytes.
     fn tail<'s>(
         dec: &RleDecoderState,
         read_segments: usize,
         slab: &'s Slab,
-    ) -> (Option<Postfix<'s, T>>, usize) {
-        let mut dec = RleDecoder::<T, C>::resume(&slab.data, dec);
-        // the run in hand is what the reader left of it, so there is no
-        // consumed part to step over first
-        let Some(run) = dec.next_run() else {
-            // read to the end of the slab leaves no tail to carry
-            return (None, slab.data.len());
+    ) -> (Option<Postfix<T::Get<'s>>>, usize, usize) {
+        // verified with Verus (`dec::postfix_at`); read to the end of the
+        // slab, there is no tail to carry
+        let (p, end) = crate::rle::dec::postfix_at::<Ops<'s, T, C>>(&slab.data, dec);
+        let segments = match &p {
+            Some(p) => slab.segments - read_segments - p.pending(),
+            None => 0,
         };
-        let is_lit = dec.is_literal() && run.count == 1;
-        let (p, end) = postfix_from_run(slab, &mut dec, 0, run, is_lit, run.count, read_segments);
-        (Some(p), end)
+        (p, segments, end)
     }
 }
 
@@ -201,8 +201,8 @@ impl<T: RleValue, C: Codec> EditSlab for RleEdit<T, C> {
     fn close(&mut self, slab: &mut Slab) -> Vec<Slab> {
         // Only the tail's first run is read, from the point the cursor
         // stopped at — a close never re-reads what it already walked.
-        let (tail, byte_end) = Self::tail(&self.dec, self.read_segments, slab);
-        let postfix = tail.map(|p| p.into_owned());
+        let (tail, postfix_segments, byte_end) = Self::tail(&self.dec, self.read_segments, slab);
+        let postfix = tail.map(|p| p.map(T::to_owned));
         let tail_count = slab.len - self.read;
         let data_len = slab.data.len();
         let slab_tail = slab.tail;
@@ -212,6 +212,7 @@ impl<T: RleValue, C: Codec> EditSlab for RleEdit<T, C> {
         // takes the slab mutably — no copy of the carried region
         let mut rebuilt = w.finish(
             postfix,
+            postfix_segments,
             tail_count,
             &slab.data[byte_end..],
             data_len,
