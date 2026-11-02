@@ -406,6 +406,16 @@ impl<'a, W: WriteOps<'a>> Splice<'a, W> {
         self.cur@.len() + n + 2 < usize::MAX
     }
 
+    /// The values the slab in hand holds: what room is measured against.
+    pub(crate) closed spec fn used(&self) -> nat {
+        self.cur@.len()
+    }
+
+    pub(crate) proof fn lemma_used(&self, n: nat)
+        ensures self.room(n) == (self.used() + n + 2 < usize::MAX),
+    {
+    }
+
     /// Room for more is room for fewer.
     pub(crate) proof fn lemma_room_le(&self, a: nat, b: nat)
         requires self.room(b), a <= b,
@@ -547,7 +557,7 @@ impl<'a, W: WriteOps<'a>> Splice<'a, W> {
         ensures
             final(self).inv(), final(self).vals() == old(self).vals() + copies(count as nat, W::val(value)),
             final(self).pre() == old(self).pre(), final(self).h0() == old(self).h0(),
-            final(self).end() == old(self).end(),
+            final(self).end() == old(self).end(), final(self).used() <= old(self).used() + count,
     {
         hide(canonical);
         if add(add(self.starting_segments, self.f.segments), self.state.pending_segments()) >= self.target {
@@ -582,6 +592,8 @@ impl<'a, W: WriteOps<'a>> Splice<'a, W> {
             lemma_rw_at::<W>(s0, p0, b0, 0, gs, ws, self.h0@, f.rewrite);
             assert(rel(self.state, apply::<W>(self.f.rewrite, self.cur_pre(), self.h0@), self.buf@, 0, gs2, ws2, self.h0@));
             assert(self.vals() =~= old(self).vals() + added);
+            assert(cur0.len() <= old(self).cur@.len());
+            assert(self.inv());
         }
     }
 
@@ -591,7 +603,7 @@ impl<'a, W: WriteOps<'a>> Splice<'a, W> {
         ensures
             final(self).inv(), final(self).vals() == old(self).vals(), final(self).state is Empty, final(self).overflowed,
             final(self).pre() == old(self).pre(), final(self).h0() == old(self).h0(),
-            final(self).end() == old(self).end(),
+            final(self).end() == old(self).end(), final(self).cur@.len() == 0,
     {
         let ghost s0 = self.state;
         let ghost b0 = self.buf@;

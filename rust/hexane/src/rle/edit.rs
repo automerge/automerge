@@ -40,6 +40,20 @@ use vstd::prelude::*;
 
 verus! {
 
+/// A range of a sequence, split.
+proof fn lemma_subrange_concat<V>(s: Seq<V>, a: int, b: int, c: int)
+    requires 0 <= a <= b <= c <= s.len(),
+    ensures s.subrange(a, c) == s.subrange(a, b) + s.subrange(b, c),
+{
+    assert(s.subrange(a, c) =~= s.subrange(a, b) + s.subrange(b, c));
+}
+
+/// What a walk shows each run it moves over (a closure, outside Verus):
+/// anything goes, as far as the rebuild is concerned.
+pub(crate) trait Visit<V> {
+    fn visit(&mut self, v: V, n: usize);
+}
+
 /// A rebuild in progress within one slab, verified with Verus: the
 /// values written so far ([`vals`](Edit::vals)), and how far the slab
 /// has been read ([`read`](Edit::read)). Closing it leaves the slab, and
@@ -83,9 +97,25 @@ impl<M: WriteOps<'static>> Edit<M> {
         self.read as int
     }
 
+    pub(crate) proof fn lemma_read(&self)
+        ensures self.read() >= 0,
+    {
+    }
+
     /// Room for `n` more values.
     pub(crate) closed spec fn room(&self, n: nat) -> bool {
         self.w.room(n)
+    }
+
+    /// What room is measured against.
+    pub(crate) closed spec fn used(&self) -> nat {
+        self.w.used()
+    }
+
+    pub(crate) proof fn lemma_room(&self, n: nat)
+        ensures self.room(n) == (self.used() + n + 2 < usize::MAX),
+    {
+        self.w.lemma_used(n);
     }
 
     /// The slab's bytes before the edit, and the count in its literal
@@ -207,6 +237,7 @@ impl<M: WriteOps<'static>> Edit<M> {
                         == copies(run.count as nat, run.value)
                     &&& final(self).vals() == old(self).vals()
                         + if emit { copies(run.count as nat, L::lift(run.value)) } else { Seq::empty() }
+                    &&& final(self).used() <= old(self).used() + if emit { run.count as nat } else { 0 }
                 },
                 None => {
                     &&& final(self).read() == old(self).read() && final(self).vals() == old(self).vals()
@@ -264,12 +295,102 @@ impl<M: WriteOps<'static>> Edit<M> {
         Some(run)
     }
 
+    /// Move the reader `n` values on, carrying them through the rebuild
+    /// if `emit` (spending at most `budget` runs), else dropping them;
+    /// `f` sees every run either way. Returns how many it did not move:
+    /// only an emitting walk stops short, when its budget runs out.
+    ///
+    /// Reading starts where the last walk stopped, so nothing is decoded
+    /// twice.
+    pub(crate) fn walk<'s, L: Lift<'s, W = M>, G: Visit<VOf<'s, L>>>(&mut self, data: &'s [u8], n: usize, emit: bool, budget: usize, f: &mut G) -> (left: usize)
+        requires
+            old(self).inv(), data@ == old(self).data(),
+            old(self).read() + n <= slab_values::<M::R>(data@).len(),
+            emit ==> old(self).room(n as nat),
+        ensures
+            final(self).inv(), final(self).data() == old(self).data(),
+            final(self).pre() == old(self).pre(), final(self).h0() == old(self).h0(),
+            left <= n, !emit ==> left == 0,
+            final(self).read() == old(self).read() + (n - left),
+            final(self).vals() == old(self).vals() + if emit {
+                lift_seq::<L>(slab_values::<L::R>(data@).subrange(old(self).read(), final(self).read()))
+            } else {
+                Seq::empty()
+            },
+            emit ==> final(self).used() + left <= old(self).used() + n,
+            !emit ==> final(self).used() <= old(self).used(),
+    {
+        let ghost r0 = self.read();
+        let ghost v0 = self.vals();
+        let ghost u0 = self.used();
+        let ghost lv = slab_values::<L::R>(data@);
+        proof {
+            lemma_unlift_slab::<L>(data@);
+            lemma_lift_slab::<L>(data@);
+            self.lemma_room(n as nat);
+            self.lemma_read();
+            assert(lv.subrange(r0, r0) =~= Seq::<VOf<'s, L>>::empty());
+            assert(lift_seq::<L>(Seq::<VOf<'s, L>>::empty()) =~= Seq::<VOf<'static, M>>::empty());
+            assert(v0 + Seq::<VOf<'static, M>>::empty() =~= v0);
+        }
+        let mut d = self.walk_begin::<L>(data);
+        let mut want = n;
+        let mut pushes: usize = 0;
+        while want > 0
+            invariant
+                self.walking(d), self.data() == data@,
+                self.pre() == old(self).pre(), self.h0() == old(self).h0(),
+                want <= n, self.read() == r0 + (n - want), 0 <= r0, r0 + n <= lv.len(),
+                lv == slab_values::<L::R>(data@), lv.len() == slab_values::<M::R>(data@).len(),
+                self.vals() == v0 + if emit { lift_seq::<L>(lv.subrange(r0, self.read())) } else { Seq::empty() },
+                emit ==> self.used() + want <= u0 + n && u0 + n + 2 < usize::MAX,
+                !emit ==> self.used() <= u0,
+                emit ==> pushes <= budget,
+            ensures !emit ==> want == 0,
+            decreases want,
+        {
+            if emit && pushes == budget {
+                break;
+            }
+            proof {
+                if emit {
+                    self.lemma_room(want as nat);
+                }
+            }
+            let ghost read0 = self.read();
+            let ghost vals0 = self.vals();
+            let run = match self.walk_step::<L>(&mut d, want, emit) {
+                Some(run) => run,
+                None => break,
+            };
+            f.visit(run.value, run.count);
+            if emit {
+                pushes = pushes + 1;
+            }
+            want = want - run.count;
+            proof {
+                assert(r0 <= read0 <= self.read() <= lv.len());
+                let a = lv.subrange(r0, read0);
+                let b = lv.subrange(read0, self.read());
+                lemma_subrange_concat(lv, r0, read0, self.read());
+                if emit {
+                    assert(lift_seq::<L>(a + b) =~= lift_seq::<L>(a) + lift_seq::<L>(b));
+                    assert(lift_seq::<L>(b) =~= copies(run.count as nat, L::lift(run.value)));
+                    assert(self.vals() =~= v0 + lift_seq::<L>(lv.subrange(r0, self.read())));
+                }
+            }
+        }
+        self.walk_end::<L>(d);
+        want
+    }
+
     /// Stop walking: keep where reading stopped.
     pub(crate) fn walk_end<'s, L: Lift<'s, W = M>>(&mut self, d: Dec<'s, L::R>)
         requires old(self).walking(d),
         ensures
             final(self).inv(), final(self).data() == old(self).data(), final(self).read() == old(self).read(),
-            final(self).vals() == old(self).vals(),
+            final(self).vals() == old(self).vals(), final(self).used() == old(self).used(),
+            final(self).pre() == old(self).pre(), final(self).h0() == old(self).h0(),
     {
         self.dec = d.suspend();
         proof {
@@ -357,6 +478,14 @@ impl<M: WriteOps<'static>> Edit<M> {
 
 } // verus!
 
+// Outside `verus!`: a closure is a visitor that calls itself.
+impl<V, F: FnMut(V, usize)> Visit<V> for F {
+    #[inline(always)]
+    fn visit(&mut self, v: V, n: usize) {
+        self(v, n)
+    }
+}
+
 /// A rebuild in progress within one slab.
 ///
 /// Positions are item offsets into the slab as it was when the edit
@@ -397,28 +526,9 @@ impl<T: RleValue, C: Codec> RleEdit<T, C> {
     where
         F: FnMut(T::Get<'_>, usize),
     {
-        let mut d = self.e.walk_begin::<WOps<'_, T, T, C>>(&slab.data);
-        let mut want = n;
-        let mut pushes = 0usize;
-        while want > 0 {
-            if emit && pushes == budget {
-                break;
-            }
-            // bounded by what is still wanted, so the decoder keeps the
-            // rest of a run it only partly gave up — the position the
-            // suspend below records
-            let Some(run) = self.e.walk_step::<WOps<'_, T, T, C>>(&mut d, want, emit) else {
-                debug_assert!(false, "walk ran past the end of the slab");
-                break;
-            };
-            f(run.value, run.count);
-            if emit {
-                pushes += 1;
-            }
-            want -= run.count;
-        }
-        self.e.walk_end::<WOps<'_, T, T, C>>(d);
-        want
+        // verified with Verus (`Edit::walk`)
+        self.e
+            .walk::<WOps<'_, T, T, C>, F>(&slab.data, n, emit, budget, f)
     }
 }
 
