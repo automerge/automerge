@@ -453,13 +453,12 @@ pub open spec fn payload<'a, O: RleOps<'a>>(g: Group<O::V>) -> Seq<u8> {
     }
 }
 
-/// A canonical encoding of `data` whose groups fit the slab metadata: at
-/// most `usize::MAX` values, and no group over `u32::MAX` bytes.
+/// A canonical encoding of `data` of at most `usize::MAX` values, which
+/// a slab's length can count.
 #[verifier::opaque]
 pub open spec fn parses<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>, data: Seq<u8>) -> bool {
     &&& canonical::<O>(gs)
     &&& groups_len(gs) <= usize::MAX
-    &&& forall|i: int| 0 <= i < gs.len() ==> (#[trigger] group_bytes::<O>(gs[i])).len() <= u32::MAX
     &&& groups_bytes::<O>(gs) == data
 }
 

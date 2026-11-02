@@ -2,8 +2,8 @@
 //!
 //! [`Reader`] walks the wire segments of untrusted bytes and rejects
 //! anything that is not the canonical encoding of some values
-//! ([`model::canonical`](super::model::canonical)) with metadata that
-//! fits: at most `usize::MAX` values, and no run over `u32::MAX` bytes.
+//! ([`model::canonical`](super::model::canonical)) of at most
+//! `usize::MAX` values.
 //! It never panics or overflows.  Its contract is complete in both
 //! directions: what it accepts parses as canonical groups, and an error
 //! means no canonical parse exists (value and varint encodings are
@@ -339,7 +339,6 @@ proof fn lemma_lit_value<'a, O: RleOps<'a>>(data: Seq<u8>, gs: Seq<Group<O::V>>,
         &&& !O::is_null(vs[i])
         &&& data.skip(pos) == O::enc(vs[i]) + (encs::<O>(vs.skip(i + 1)) + groups_bytes::<O>(g2.skip(n + 1)))
         &&& group_ok::<O>(g2[n])
-        &&& group_bytes::<O>(g2[n]).len() <= u32::MAX
         &&& n > 0 ==> adjacent_ok(gs.last(), g2[n])
         &&& groups_len(g2) <= usize::MAX
     }),
@@ -373,7 +372,6 @@ proof fn lemma_run_at<'a, O: RleOps<'a>>(data: Seq<u8>, gs: Seq<Group<O::V>>, h:
         &&& 2 <= h && !O::is_null(run_value(g2[n]))
         &&& data.skip(p) == O::enc(run_value(g2[n])) + groups_bytes::<O>(g2.skip(n + 1))
         &&& groups_len(g2) >= groups_len(gs) + h
-        &&& group_bytes::<O>(g2[n]).len() <= u32::MAX
         &&& n > 0 ==> adjacent_ok(gs.last(), g2[n])
         &&& groups_len(g2) <= usize::MAX
     }),
@@ -399,7 +397,6 @@ proof fn lemma_null_at<'a, O: RleOps<'a>>(data: Seq<u8>, gs: Seq<Group<O::V>>, p
         &&& 1 <= g2[n]->Null_count <= u64::MAX && O::nullable()
         &&& data.skip(p) == O::enc_unsigned(g2[n]->Null_count as u64) + groups_bytes::<O>(g2.skip(n + 1))
         &&& groups_len(g2) >= groups_len(gs) + g2[n]->Null_count
-        &&& group_bytes::<O>(g2[n]).len() <= u32::MAX
         &&& n > 0 ==> adjacent_ok(gs.last(), g2[n])
         &&& groups_len(g2) <= usize::MAX
     }),
@@ -463,19 +460,11 @@ proof fn lemma_canonical_push<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>, g: Group<
 
 /// The bytes, count and metadata bound of groups with one more.
 proof fn lemma_groups_push<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>, g: Group<O::V>)
-    requires forall|i: int| 0 <= i < gs.len() ==> (#[trigger] group_bytes::<O>(gs[i])).len() <= u32::MAX,
-        group_bytes::<O>(g).len() <= u32::MAX,
     ensures
         groups_bytes::<O>(gs.push(g)) == groups_bytes::<O>(gs) + group_bytes::<O>(g),
         groups_len(gs.push(g)) == groups_len(gs) + group_len(g),
-        forall|i: int| 0 <= i < gs.push(g).len() ==> (#[trigger] group_bytes::<O>(gs.push(g)[i])).len() <= u32::MAX,
 {
     assert(gs.push(g).drop_last() =~= gs);
-    assert forall|i: int| 0 <= i < gs.push(g).len() implies (#[trigger] group_bytes::<O>(gs.push(g)[i])).len() <= u32::MAX by {
-        if i < gs.len() {
-            assert(gs.push(g)[i] == gs[i]);
-        }
-    }
 }
 
 /// Every acceptable parse continues with `g`: they begin with `gs + [g]`.
@@ -523,7 +512,6 @@ proof fn lemma_lit_close<'a, O: RleOps<'a>>(data: Seq<u8>, gs: Seq<Group<O::V>>,
         forall|g2: Seq<Group<O::V>>| #[trigger] parses::<O>(g2, data) ==> {
             &&& g2.len() > gs.len() && g2.take(gs.len() as int) == gs
             &&& g2[gs.len() as int] == Group::Lit { values: cur.push(value) }
-            &&& group_bytes::<O>(g2[gs.len() as int]).len() <= u32::MAX
             &&& gs.len() > 0 ==> adjacent_ok(gs.last(), g2[gs.len() as int])
         },
 {
@@ -532,7 +520,6 @@ proof fn lemma_lit_close<'a, O: RleOps<'a>>(data: Seq<u8>, gs: Seq<Group<O::V>>,
     assert forall|g2: Seq<Group<O::V>>| #[trigger] parses::<O>(g2, data) implies {
         &&& g2.len() > n && g2.take(n) == gs
         &&& g2[n] == Group::Lit { values: cur.push(value) }
-        &&& group_bytes::<O>(g2[n]).len() <= u32::MAX
         &&& n > 0 ==> adjacent_ok(gs.last(), g2[n])
     } by {
         lemma_lit_value::<O>(data, gs, k, cur, p, g2);
@@ -630,7 +617,6 @@ impl<'a, O: RleOps<'a>> Reader<'a, O> {
             self.spec_pos() <= self.data().len(),
             groups_len(self.groups()) + self.lit_values().len() <= usize::MAX,
             !self.in_lit() ==> self.lit_values().len() == 0,
-            forall|i: int| 0 <= i < self.groups().len() ==> (#[trigger] group_bytes::<O>(self.groups()[i])).len() <= u32::MAX,
     {
         assert(self.data@.take(self.pos as int).len() == self.pos);
     }
@@ -639,7 +625,6 @@ impl<'a, O: RleOps<'a>> Reader<'a, O> {
         &&& self.pos <= self.data.len()
         &&& self.data@.take(self.pos as int) == read_bytes::<O>(self.gs@, self.lit_k@, self.cur@)
         &&& canonical::<O>(self.gs@)
-        &&& forall|i: int| 0 <= i < self.gs@.len() ==> (#[trigger] group_bytes::<O>(self.gs@[i])).len() <= u32::MAX
         &&& self.len == groups_len(self.gs@) + self.cur@.len()
         &&& self.prev == prev_of(self.gs@, self.cur@)
         &&& if self.lit_k@ > 0 {
@@ -817,16 +802,6 @@ impl<'a, O: RleOps<'a>> Reader<'a, O> {
             _ => {},
         }
         let bytes = hn + vn;
-        if bytes > u32::MAX as usize {
-            proof {
-                assert forall|g2: Seq<Group<O::V>>| !parses::<O>(g2, data) by {
-                    if parses::<O>(g2, data) {
-                        lemma_run_at::<O>(data, gs, h as int, p, g2);
-                    }
-                }
-            }
-            return Err(invalid("run over 4 GiB"));
-        }
         proof {
             let rb = groups_bytes::<O>(gs) + O::enc_signed(h);
             assert(data.take(p + vn) =~= data.take(p) + rest@.take(vn as int));
@@ -964,8 +939,6 @@ impl<'a, O: RleOps<'a>> Reader<'a, O> {
             Some("adjacent null runs")
         } else if c > (usize::MAX - self.len) as u64 {
             Some("more values than fit a usize")
-        } else if hn + cn > u32::MAX as usize {
-            Some("run over 4 GiB")
         } else {
             None
         };
@@ -1133,8 +1106,7 @@ impl<'a, O: RleOps<'a>> Reader<'a, O> {
             &&& forall|g2: Seq<Group<O::V>>| #[trigger] parses::<O>(g2, s.data@) ==> {
                 &&& g2.len() > n && g2.take(n) == gs
                 &&& g2[n] == g
-                &&& group_bytes::<O>(g2[n]).len() <= u32::MAX
-                &&& n > 0 ==> adjacent_ok(gs.last(), g2[n])
+                        &&& n > 0 ==> adjacent_ok(gs.last(), g2[n])
             }
         }),
         ensures next_post(r0, *final(self), r),
@@ -1147,16 +1119,6 @@ impl<'a, O: RleOps<'a>> Reader<'a, O> {
         proof {
             assert(group_bytes::<O>(g) == lit_head::<O>(k) + encs::<O>(self.cur@));
             assert(self.data@.take(self.pos as int).len() == self.pos);
-        }
-        if self.pos - self.lit_start > u32::MAX as usize {
-            proof {
-                assert forall|g2: Seq<Group<O::V>>| !parses::<O>(g2, data) by {
-                    if parses::<O>(g2, data) {
-                        assert(g2[n] == g);
-                    }
-                }
-            }
-            return Err(invalid("literal run over 4 GiB"));
         }
         proof {
             assert(group_ok::<O>(g));
@@ -1221,19 +1183,24 @@ pub(crate) struct Summary {
     pub(crate) lit_tail: u32,
 }
 
-/// Check that `data` is a canonical encoding whose metadata fits, and
-/// summarize it.  An error means it is not.
+/// The last group fits a slab's tail record: under 4 GiB.
+pub open spec fn tail_fits<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>) -> bool {
+    gs.len() > 0 ==> group_bytes::<O>(gs.last()).len() <= u32::MAX
+}
+
+/// Check that `data` is a canonical encoding whose last run fits a
+/// slab's tail record, and summarize it.  An error means it is not.
 pub(crate) fn validate<'a, O: RleOps<'a>>(data: &'a [u8]) -> (r: Result<Summary, PackError>)
     ensures
         match r {
             Ok(s) => exists|gs: Seq<Group<O::V>>| {
-                &&& parses::<O>(gs, data@)
+                &&& parses::<O>(gs, data@) && tail_fits::<O>(gs)
                 &&& s.len == groups_len(gs)
                 &&& s.segments == groups_segments(gs)
                 &&& s.tail_bytes == tail_bytes_of::<O>(gs)
                 &&& s.lit_tail == lit_tail_of::<O>(gs)
             },
-            Err(_) => no_parse::<O>(data@),
+            Err(_) => forall|gs: Seq<Group<O::V>>| #[trigger] parses::<O>(gs, data@) ==> !tail_fits::<O>(gs),
         },
 {
     let mut rd = Reader::<O>::new(data);
@@ -1262,11 +1229,27 @@ pub(crate) fn validate<'a, O: RleOps<'a>>(data: &'a [u8]) -> (r: Result<Summary,
             Ok(None) => {
                 let len = rd.values_read();
                 let ghost gs = rd.groups();
+                if data.len() - start > u32::MAX as usize {
+                    proof {
+                        rd.lemma_inv();
+                        assert(parses::<O>(gs, data@));
+                        reveal(parses);
+                        assert(groups_bytes::<O>(gs) == data@);
+                        if gs.len() == 0 {
+                            assert(false);
+                        }
+                        assert(groups_bytes::<O>(gs) == groups_bytes::<O>(gs.drop_last()) + group_bytes::<O>(gs.last()));
+                        assert forall|g2: Seq<Group<O::V>>| #[trigger] parses::<O>(g2, data@) implies !tail_fits::<O>(g2) by {
+                            assert(all_ok::<O>(g2) && all_ok::<O>(gs));
+                            lemma_groups_unique::<O>(g2, gs);
+                        }
+                    }
+                    return Err(invalid("a run must stay under 4 GiB"));
+                }
                 proof {
                     rd.lemma_inv();
                     if gs.len() > 0 {
                         let last = gs.last();
-                        assert(group_bytes::<O>(gs[gs.len() - 1]).len() <= u32::MAX);
                         if last is Lit {
                             let vs = last->values;
                             assert(vs.len() > 0) by {
