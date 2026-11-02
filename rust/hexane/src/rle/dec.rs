@@ -299,6 +299,40 @@ impl<'a, O: RleOps<'a>> Dec<'a, O> {
         }
     }
 
+    /// The segments behind this reader: groups passed, the literal values
+    /// read, and a repeat or null run once all of it is read.
+    pub(crate) closed spec fn dsegs(&self) -> int {
+        let gs = slab_groups::<O>(self.data@);
+        let gi = self.gi@;
+        match self.state {
+            RunState::Idle => gseg(gs, gi),
+            RunState::Literal => gseg(gs, gi - 1) + (gs[gi - 1]->values.len() - self.remaining),
+            _ => gseg(gs, gi - 1) + (if self.remaining == 0 { 1int } else { 0int }),
+        }
+    }
+
+    /// Reading a literal.
+    pub(crate) closed spec fn lit_now(&self) -> bool {
+        self.state is Literal
+    }
+
+    /// Values left in the current run.
+    pub(crate) closed spec fn left_now(&self) -> int {
+        self.remaining as int
+    }
+
+    /// A reader at the end of a group is behind all of it.
+    proof fn lemma_dsegs_end(&self)
+        requires self.inv(), self.remaining == 0,
+        ensures self.dsegs() == gseg(slab_groups::<O>(self.data@), self.gi@),
+    {
+        let gs = slab_groups::<O>(self.data@);
+        let gi = self.gi@;
+        if !(self.state is Idle) {
+            lemma_gseg(gs, gi - 1);
+        }
+    }
+
     pub(crate) fn new(data: &'a [u8]) -> (r: Self)
         requires valid_slab::<O>(data@),
         ensures r.inv(), r.data() == data@, r.pos() == 0,
@@ -387,7 +421,11 @@ impl<'a, O: RleOps<'a>> Dec<'a, O> {
             final(self).inv(), final(self).data() == old(self).data(),
             final(self).pos() == old(self).pos(),
             final(self).remaining == 0 ==> final(self).pos() == final(self).values().len(),
+            final(self).dsegs() == old(self).dsegs(),
     {
+        proof {
+            old(self).lemma_dsegs_end();
+        }
         let ghost data = self.data@;
         let ghost gs = slab_groups::<O>(data);
         let ghost gi = self.gi@;
@@ -514,6 +552,8 @@ impl<'a, O: RleOps<'a>> Dec<'a, O> {
             r0.pos() < r0.values().len(),
             r == r0.values()[r0.pos()],
             final(self).pos() == r0.pos() + 1,
+            final(self).gi == old(self).gi, final(self).state == old(self).state,
+            final(self).remaining == old(self).remaining,
     {
         let ghost data = self.data@;
         let ghost gs = slab_groups::<O>(data);
@@ -576,6 +616,8 @@ impl<'a, O: RleOps<'a>> Dec<'a, O> {
             old(self).pos() < old(self).values().len(),
             r == old(self).values()[old(self).pos()],
             final(self).pos() == old(self).pos() + 1,
+            final(self).gi == old(self).gi, final(self).state is Literal,
+            final(self).remaining == old(self).remaining - 1,
     {
         let ghost r0 = *self;
         self.remaining = self.remaining - 1;
@@ -625,8 +667,10 @@ impl<'a, O: RleOps<'a>> Dec<'a, O> {
                     &&& 1 <= count <= max
                     &&& final(self).pos() == old(self).pos() + count <= old(self).values().len()
                     &&& forall|k: int| old(self).pos() <= k < final(self).pos() ==> old(self).values()[k] == value
+                    &&& final(self).dsegs() == old(self).dsegs()
+                        + (if final(self).lit_now() || final(self).left_now() == 0 { 1int } else { 0int })
                 },
-                None => final(self).pos() == old(self).pos()
+                None => final(self).pos() == old(self).pos() && final(self).dsegs() == old(self).dsegs()
                     && (max > 0 ==> old(self).pos() == old(self).values().len()),
             },
     {
@@ -639,7 +683,7 @@ impl<'a, O: RleOps<'a>> Dec<'a, O> {
         loop
             invariant
                 self.inv(), self.data() == old(self).data(), self.pos() == old(self).pos(),
-                old(self).values() == self.values(), max > 0,
+                old(self).values() == self.values(), max > 0, self.dsegs() == old(self).dsegs(),
                 0 <= self.pos() <= self.values().len(),
             decreases if self.remaining == 0 { 1int } else { 0int },
         {
@@ -668,6 +712,8 @@ impl<'a, O: RleOps<'a>> Dec<'a, O> {
                     &&& 1 <= count <= max
                     &&& final(self).pos() == old(self).pos() + count <= old(self).values().len()
                     &&& forall|k: int| old(self).pos() <= k < final(self).pos() ==> old(self).values()[k] == value
+                    &&& final(self).dsegs() == old(self).dsegs()
+                        + (if final(self).lit_now() || final(self).left_now() == 0 { 1int } else { 0int })
                 },
                 None => false,
             },
@@ -1053,11 +1099,15 @@ impl<'a, O: RleOps<'a>> Dec<'a, O> {
     /// Inside a literal run.
     /// Values left in the current run.
     #[inline(always)]
-    pub(crate) fn left(&self) -> usize {
+    pub(crate) fn left(&self) -> (r: usize)
+        ensures r == self.left_now(),
+    {
         self.remaining
     }
 
-    pub(crate) fn is_literal(&self) -> bool {
+    pub(crate) fn is_literal(&self) -> (r: bool)
+        ensures r == self.lit_now(),
+    {
         matches!(self.state, RunState::Literal)
     }
 }
@@ -1149,6 +1199,62 @@ pub closed spec fn state_ok<'a, O: RleOps<'a>>(data: Seq<u8>, st: RleDecoderStat
     &&& exists|gi: int| state_at::<O>(data, st, gi)
 }
 
+/// The segments behind `st`, standing in group `gi`.
+spec fn rsegs_at<'a, O: RleOps<'a>>(data: Seq<u8>, st: RleDecoderState, gi: int) -> int {
+    let gs = slab_groups::<O>(data);
+    match st.run {
+        SuspendedRun::Idle => gseg(gs, gi),
+        SuspendedRun::Literal => gseg(gs, gi - 1) + (gs[gi - 1]->values.len() - st.remaining),
+        _ => gseg(gs, gi - 1) + (if st.remaining == 0 { 1int } else { 0int }),
+    }
+}
+
+/// The segments wholly behind `st` in `data`: the groups passed, the
+/// literal values read, and a repeat or null run once all of it is read.
+pub closed spec fn rsegs<'a, O: RleOps<'a>>(data: Seq<u8>, st: RleDecoderState) -> int {
+    rsegs_at::<O>(data, st, choose|gi: int| state_at::<O>(data, st, gi))
+}
+
+/// The segments behind a position known to stand in group `gi`.
+proof fn lemma_rsegs_is<'a, O: RleOps<'a>>(data: Seq<u8>, st: RleDecoderState, gi: int)
+    requires valid_slab::<O>(data), state_at::<O>(data, st, gi),
+    ensures rsegs::<O>(data, st) == rsegs_at::<O>(data, st, gi),
+{
+    let g = choose|g: int| state_at::<O>(data, st, g);
+    lemma_state_unique::<O>(data, st, g, gi);
+}
+
+/// The segments behind a position are among the slab's, which a
+/// `usize` counts.
+pub(crate) proof fn lemma_rsegs_le<'a, O: RleOps<'a>>(data: Seq<u8>, st: RleDecoderState)
+    requires state_ok::<O>(data, st),
+    ensures 0 <= rsegs::<O>(data, st) <= groups_segments(slab_groups::<O>(data)) <= usize::MAX,
+{
+    let gs = slab_groups::<O>(data);
+    let gi = choose|g: int| state_at::<O>(data, st, g);
+    assert(state_at::<O>(data, st, gi));
+    lemma_slab::<O>(data);
+    super::read::lemma_segments_le::<O>(gs);
+    lemma_gseg_split::<O>(data, gi);
+    if gi >= 1 {
+        lemma_gseg_split::<O>(data, gi - 1);
+        lemma_gseg(gs, gi - 1);
+        lemma_slab_group::<O>(data, gi - 1);
+    }
+}
+
+/// A position at the end of its group is behind all of it.
+proof fn lemma_rsegs_end<'a, O: RleOps<'a>>(data: Seq<u8>, st: RleDecoderState, gi: int)
+    requires valid_slab::<O>(data), state_at::<O>(data, st, gi), st.remaining == 0,
+    ensures rsegs_at::<O>(data, st, gi) == gseg(slab_groups::<O>(data), gi),
+{
+    let gs = slab_groups::<O>(data);
+    if !(st.run is Idle) {
+        lemma_gseg(gs, gi - 1);
+        lemma_slab_group::<O>(data, gi - 1);
+    }
+}
+
 /// The byte position of `st`.
 pub closed spec fn sbyte(st: RleDecoderState) -> int {
     st.byte_pos as int
@@ -1160,7 +1266,7 @@ pub closed spec fn state_pos<'a, O: RleOps<'a>>(data: Seq<u8>, st: RleDecoderSta
 }
 
 /// Group offsets increase.
-proof fn lemma_gb_lt<'a, O: RleOps<'a>>(data: Seq<u8>, i: int, j: int)
+pub(crate) proof fn lemma_gb_lt<'a, O: RleOps<'a>>(data: Seq<u8>, i: int, j: int)
     requires valid_slab::<O>(data), 0 <= i < j <= slab_groups::<O>(data).len(),
     ensures gb::<O>(slab_groups::<O>(data), i) < gb::<O>(slab_groups::<O>(data), j),
     decreases j - i,
@@ -1218,7 +1324,9 @@ impl<'a, O: RleOps<'a>> Dec<'a, O> {
     /// The position a suspend would record is this reader's.
     pub(crate) proof fn lemma_dstate(&self)
         requires self.inv(),
-        ensures state_ok::<O>(self.data(), self.dstate()), state_pos::<O>(self.data(), self.dstate()) == self.pos(),
+        ensures
+            state_ok::<O>(self.data(), self.dstate()), state_pos::<O>(self.data(), self.dstate()) == self.pos(),
+            rsegs::<O>(self.data(), self.dstate()) == self.dsegs(),
     {
         let data = self.data@;
         let r = self.dstate();
@@ -1257,7 +1365,9 @@ impl<'a, O: RleOps<'a>> Dec<'a, O> {
     /// O(1): only a repeat run reads anything, and only its own value.
     pub(crate) fn resume(data: &'a [u8], st: &RleDecoderState) -> (r: Self)
         requires state_ok::<O>(data@, *st),
-        ensures r.inv(), r.data() == data@, r.pos() == state_pos::<O>(data@, *st), sbyte(r.dstate()) == sbyte(*st),
+        ensures
+            r.inv(), r.data() == data@, r.pos() == state_pos::<O>(data@, *st), sbyte(r.dstate()) == sbyte(*st),
+            r.dstate() == *st,
     {
         let ghost gi = choose|gi: int| state_at::<O>(data@, *st, gi);
         let ghost gs = slab_groups::<O>(data@);
@@ -1349,9 +1459,22 @@ proof fn lemma_encs_len<'a, O: RleOps<'a>>(vs: Seq<O::V>)
 
 /// The writer state `s`, with the slab's bytes before `bs` as its
 /// prefix, stands for the slab's first `at` values.
-pub(crate) open spec fn landed<'a, W: WriteOps<'a>>(data: Seq<u8>, at: int, s: State<'a, W>, bs: int) -> bool {
+pub(crate) open spec fn landed<'a, W: WriteOps<'a>>(data: Seq<u8>, at: int, s: State<'a, W>, bs: int, segs: int) -> bool {
     exists|gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>, h0: i64| #[trigger] rel(s, data.take(bs), Seq::empty(), 0, gs, ws, h0)
-        && values_of(s, gs, ws) == slab_values::<W::R>(data).take(at)
+        && values_of(s, gs, ws) == slab_values::<W::R>(data).take(at) && acc(s, gs, ws) == segs
+}
+
+/// The segments of groups `gs`'s first `i`.
+pub open spec fn gseg<V>(gs: Seq<Group<V>>, i: int) -> int {
+    groups_segments(gs.take(i)) as int
+}
+
+/// Group `i`'s segments follow the first `i`'s.
+pub proof fn lemma_gseg<V>(gs: Seq<Group<V>>, i: int)
+    requires 0 <= i < gs.len(),
+    ensures gseg(gs, i + 1) == gseg(gs, i) + group_segments(gs[i]),
+{
+    assert(gs.take(i + 1).drop_last() =~= gs.take(i));
 }
 
 /// The literal before group `gi`, if there is one: its header position
@@ -1386,7 +1509,8 @@ proof fn lemma_land_run_lit<'a, W: WriteOps<'a>>(data: Seq<u8>, gi: int, s: Stat
             && count == slab_groups::<W::R>(data)[gi - 1]->values.len() && local == 0
             && header_pos == gb::<W::R>(slab_groups::<W::R>(data), gi - 1)
             && W::val(current) == run_value(slab_groups::<W::R>(data)[gi]),
-    ensures landed::<W>(data, gl(slab_groups::<W::R>(data), gi) + 1, s, gb::<W::R>(slab_groups::<W::R>(data), gi)),
+    ensures landed::<W>(data, gl(slab_groups::<W::R>(data), gi) + 1, s, gb::<W::R>(slab_groups::<W::R>(data), gi),
+        gseg(slab_groups::<W::R>(data), gi)),
 {
     let gs = slab_groups::<W::R>(data);
     let g = gs[gi];
@@ -1419,6 +1543,7 @@ proof fn lemma_land_run_lit<'a, W: WriteOps<'a>>(data: Seq<u8>, gi: int, s: Stat
         assert(gb::<W::R>(gs, gi) <= data.len());
     }
     assert(rel(s, pre, Seq::empty(), 0, gs2, vp, h0));
+    lemma_gseg(gs, gi - 1);
     lemma_push::<W::R>(gs2, Group::Lit { values: vp.push(v) });
     lemma_vals_lit_run::<W::R>(data, gi);
     assert(values_of(s, gs2, vp) == x.take(a + 1));
@@ -1467,7 +1592,8 @@ proof fn lemma_land_run<'a, W: WriteOps<'a>>(data: Seq<u8>, gi: int, k: int, s: 
             State::Run(n, c) => k >= 2 && n == k && W::val(c) == run_value(slab_groups::<W::R>(data)[gi]),
             _ => false,
         },
-    ensures landed::<W>(data, gl(slab_groups::<W::R>(data), gi) + k, s, gb::<W::R>(slab_groups::<W::R>(data), gi)),
+    ensures landed::<W>(data, gl(slab_groups::<W::R>(data), gi) + k, s, gb::<W::R>(slab_groups::<W::R>(data), gi),
+        gseg(slab_groups::<W::R>(data), gi)),
 {
     let gs = slab_groups::<W::R>(data);
     let g = gs[gi];
@@ -1504,7 +1630,8 @@ proof fn lemma_land_null<'a, W: WriteOps<'a>>(data: Seq<u8>, gi: int, k: int, s:
         0 <= gi < slab_groups::<W::R>(data).len(), slab_groups::<W::R>(data)[gi] is Null,
         1 <= k <= slab_groups::<W::R>(data)[gi]->Null_count, k <= usize::MAX,
         s == State::<'a, W>::Null(k as usize),
-    ensures landed::<W>(data, gl(slab_groups::<W::R>(data), gi) + k, s, gb::<W::R>(slab_groups::<W::R>(data), gi)),
+    ensures landed::<W>(data, gl(slab_groups::<W::R>(data), gi) + k, s, gb::<W::R>(slab_groups::<W::R>(data), gi),
+        gseg(slab_groups::<W::R>(data), gi)),
 {
     let gs = slab_groups::<W::R>(data);
     let g = gs[gi];
@@ -1534,7 +1661,7 @@ proof fn lemma_land_null<'a, W: WriteOps<'a>>(data: Seq<u8>, gi: int, k: int, s:
 
 /// Landing in a literal at value `jj`: the values before it and it.
 #[verifier::spinoff_prover]
-#[verifier::rlimit(40)]
+#[verifier::rlimit(80)]
 proof fn lemma_land_lit<'a, W: WriteOps<'a>>(data: Seq<u8>, gi: int, jj: int, s: State<'a, W>, bs: int)
     requires
         valid_slab::<W::R>(data), data.len() <= usize::MAX,
@@ -1548,8 +1675,10 @@ proof fn lemma_land_lit<'a, W: WriteOps<'a>>(data: Seq<u8>, gi: int, jj: int, s:
         jj > 0 ==> (s matches State::Lit { count, local, header_pos, current, .. }
             && count == jj && local == 0 && header_pos == gb::<W::R>(slab_groups::<W::R>(data), gi)
             && W::val(current) == slab_groups::<W::R>(data)[gi]->values[jj]),
-    ensures landed::<W>(data, gl(slab_groups::<W::R>(data), gi) + jj + 1, s, bs),
+    ensures landed::<W>(data, gl(slab_groups::<W::R>(data), gi) + jj + 1, s, bs, gseg(slab_groups::<W::R>(data), gi) + jj),
 {
+    hide(canonical);
+    hide(gseg);
     let gs = slab_groups::<W::R>(data);
     let g = gs[gi];
     let vs = g->values;
@@ -1586,6 +1715,9 @@ proof fn lemma_land_lit<'a, W: WriteOps<'a>>(data: Seq<u8>, gi: int, jj: int, s:
         assert(pre + Seq::<u8>::empty().skip(0) =~= groups_bytes::<W::R>(gs2));
         assert(rel(s, pre, Seq::empty(), 0, gs2, Seq::empty(), 0));
         assert(values_of(s, gs2, Seq::empty()) == x.take(a + jj + 1));
+        assert(acc(s, gs2, Seq::empty()) == gseg(gs, gi) + jj) by {
+            reveal(gseg);
+        }
     } else {
         let ws = vs.take(jj);
         let h0 = -(vs.len() as int) as i64;
@@ -1603,6 +1735,9 @@ proof fn lemma_land_lit<'a, W: WriteOps<'a>>(data: Seq<u8>, gi: int, jj: int, s:
         lemma_encs_len::<W::R>(vs);
         assert(rel(s, pre, Seq::empty(), 0, gs2, ws, h0));
         assert(values_of(s, gs2, ws) == x.take(a + jj + 1));
+        assert(acc(s, gs2, ws) == gseg(gs, gi) + jj) by {
+            reveal(gseg);
+        }
     }
 }
 
@@ -1618,7 +1753,7 @@ pub(crate) open spec fn walk_at<'a, O: RleOps<'a>>(data: Seq<u8>, at: int, gi: i
     let gs = slab_groups::<O>(data);
     &&& valid_slab::<O>(data) && data.len() < i64::MAX && data.len() <= usize::MAX
     &&& 0 <= gi < gs.len() && pos == gb::<O>(gs, gi) && item == gl(gs, gi) && item < at
-    &&& 0 <= segments <= item
+    &&& 0 <= segments <= item && segments == gseg(gs, gi)
     &&& at <= slab_values::<O>(data).len() && groups_len(gs) <= usize::MAX
 }
 
@@ -1627,8 +1762,9 @@ pub(crate) open spec fn walk_at<'a, O: RleOps<'a>>(data: Seq<u8>, at: int, gi: i
 pub(crate) open spec fn walk_post<'a, W: WriteOps<'a>>(data: Seq<u8>, at: int, gi: int, r: Walk<'a, W>) -> bool {
     match r {
         Walk::Landed(p) => p.byte_start <= data.len() && p.byte_start <= sbyte(p.read_state)
+            && p.read_segments == rsegs::<W::R>(data, p.read_state)
             && state_ok::<W::R>(data, p.read_state) && state_pos::<W::R>(data, p.read_state) == at
-            && landed::<W>(data, at, p.state, p.byte_start as int),
+            && landed::<W>(data, at, p.state, p.byte_start as int, p.segments as int),
         Walk::Next { pos, item, segments, prev_lit } => {
             &&& walk_at::<W::R>(data, at, gi + 1, pos as int, item as int, segments as int)
             &&& prev_lit == prev_lit_of::<W::R>(data, gi + 1)
@@ -1714,6 +1850,7 @@ fn walk_run<'a, W: WriteOps<'a>>(data: &'a [u8], at: usize, Ghost(gi): Ghost<int
     }
     let vlen = <W::R as RleOps<'a>>::value_len(rest1).unwrap();
     proof {
+        lemma_gseg(gs, gi);
         assert(group_ok::<W::R>(g));
         assert(vlen == <W::R as RleOps<'a>>::enc(run_value(g)).len());
         assert(group_bytes::<W::R>(g) == <W::R as RleOps<'a>>::enc_signed(count as i64) + <W::R as RleOps<'a>>::enc(run_value(g)));
@@ -1728,6 +1865,8 @@ fn walk_run<'a, W: WriteOps<'a>>(data: &'a [u8], at: usize, Ghost(gi): Ghost<int
 }
 
 /// A null run: land in it, or step past it.
+#[verifier::spinoff_prover]
+#[verifier::rlimit(40)]
 fn walk_null<'a, W: WriteOps<'a>>(data: &'a [u8], at: usize, Ghost(gi): Ghost<int>, pos: usize, item: usize, segments: usize, hb: usize) -> (r: Walk<'a, W>)
     requires
         walk_at::<W::R>(data@, at as int, gi, pos as int, item as int, segments as int),
@@ -1766,6 +1905,7 @@ fn walk_null<'a, W: WriteOps<'a>>(data: &'a [u8], at: usize, Ghost(gi): Ghost<in
         return Walk::Landed(PartitionAt { state: State::Null(k), segments, byte_start: pos, read_segments, read_state: rs });
     }
     proof {
+        lemma_gseg(gs, gi);
         assert(group_ok::<W::R>(g));
         assert(group_bytes::<W::R>(g) == <W::R as RleOps<'a>>::enc_signed(0) + <W::R as RleOps<'a>>::enc_unsigned(c));
         assert(pos + hb + cb == gb::<W::R>(gs, gi + 1));
@@ -1780,7 +1920,7 @@ fn walk_null<'a, W: WriteOps<'a>>(data: &'a [u8], at: usize, Ghost(gi): Ghost<in
 
 /// A literal run: land in it, or step past it.
 #[verifier::spinoff_prover]
-#[verifier::rlimit(40)]
+#[verifier::rlimit(150)]
 fn walk_lit<'a, W: WriteOps<'a>>(data: &'a [u8], at: usize, Ghost(gi): Ghost<int>, pos: usize, item: usize, segments: usize, hb: usize, total: usize) -> (r: Walk<'a, W>)
     requires
         walk_at::<W::R>(data@, at as int, gi, pos as int, item as int, segments as int),
@@ -1789,6 +1929,8 @@ fn walk_lit<'a, W: WriteOps<'a>>(data: &'a [u8], at: usize, Ghost(gi): Ghost<int
         pos + hb <= data@.len(),
     ensures walk_post::<W>(data@, at as int, gi, r),
 {
+    hide(canonical);
+    hide(gseg);
     let ghost gs = slab_groups::<W::R>(data@);
     let ghost g = gs[gi];
     let ghost vs = g->values;
@@ -1836,6 +1978,14 @@ fn walk_lit<'a, W: WriteOps<'a>>(data: &'a [u8], at: usize, Ghost(gi): Ghost<int
         let byte_start = if jj == 0 { start } else { q };
         let rs = RleDecoderState { byte_pos: q + vlen, remaining: total - jj - 1, run: SuspendedRun::Literal };
         proof {
+            assert(state_at::<W::R>(data@, rs, gi + 1)) by {
+                reveal(gseg);
+                assert(vs.take(vs.len() - rs.remaining) =~= vs.take(jj + 1));
+            }
+            lemma_rsegs_is::<W::R>(data@, rs, gi + 1);
+            assert(rsegs_at::<W::R>(data@, rs, gi + 1) == segments + jj + 1) by {
+                reveal(gseg);
+            }
             lemma_land_lit::<W>(data@, gi, jj as int, state, byte_start as int);
             assert(vs.take(vs.len() - rs.remaining) =~= vs.take(jj + 1));
             assert(state_at::<W::R>(data@, rs, gi + 1));
@@ -1845,6 +1995,7 @@ fn walk_lit<'a, W: WriteOps<'a>>(data: &'a [u8], at: usize, Ghost(gi): Ghost<int
         return Walk::Landed(PartitionAt { state, segments: segments + jj, byte_start, read_segments: segments + jj + 1, read_state: rs });
     }
     proof {
+        lemma_gseg(gs, gi);
         assert(vs.take(total as int) =~= vs);
         assert(group_bytes::<W::R>(g) == lit_head::<W::R>(total as nat) + encs::<W::R>(vs));
         assert(q == gb::<W::R>(gs, gi + 1));
@@ -1864,8 +2015,9 @@ pub(crate) fn partition_at<'a, W: WriteOps<'a>>(data: &'a [u8], at: usize) -> (p
         at <= slab_values::<W::R>(data@).len(),
     ensures
         p.byte_start <= data@.len(), p.byte_start <= sbyte(p.read_state),
+        p.read_segments == rsegs::<W::R>(data@, p.read_state),
         state_ok::<W::R>(data@, p.read_state), state_pos::<W::R>(data@, p.read_state) == at,
-        landed::<W>(data@, at as int, p.state, p.byte_start as int),
+        landed::<W>(data@, at as int, p.state, p.byte_start as int, p.segments as int),
 {
     let ghost gs = slab_groups::<W::R>(data@);
     proof {
@@ -2027,7 +2179,10 @@ fn postfix_at_group<'a, O: RleOps<'a>>(data: &'a [u8], pos: usize, Ghost(gi): Gh
     requires
         valid_slab::<O>(data@), data@.len() <= usize::MAX, 0 <= gi <= slab_groups::<O>(data@).len(),
         pos == gb::<O>(slab_groups::<O>(data@), gi),
-    ensures r.1 <= data@.len(), pos <= r.1, postfix_ok::<O>(data@, gl(slab_groups::<O>(data@), gi), r.0, r.1 as int),
+    ensures
+        r.1 <= data@.len(), pos <= r.1, postfix_ok::<O>(data@, gl(slab_groups::<O>(data@), gi), r.0, r.1 as int),
+        gseg(slab_groups::<O>(data@), gi) + ppend(r.0) + rest_segs::<O>(data@, gl(slab_groups::<O>(data@), gi), r.0, r.1 as int)
+            == groups_segments(slab_groups::<O>(data@)),
 {
     let ghost gs = slab_groups::<O>(data@);
     proof {
@@ -2048,6 +2203,9 @@ fn postfix_at_group<'a, O: RleOps<'a>>(data: &'a [u8], pos: usize, Ghost(gi): Gh
         let (value, lit, end) = first_lit::<O>(data, pos, hb, hv, Ghost(gi));
         proof {
             lemma_postfix_lit::<O>(data@, gl(gs, gi), value, lit, end as int, gi, 0);
+            lemma_rest_lit::<O>(data@, gl(gs, gi), value, lit, end as int, gi, 0);
+            lemma_gseg(gs, gi);
+            lemma_gseg_split::<O>(data@, gi + 1);
         }
         return (Some(Postfix::Lit { value, lit }), end);
     }
@@ -2068,6 +2226,9 @@ fn postfix_at_group<'a, O: RleOps<'a>>(data: &'a [u8], pos: usize, Ghost(gi): Gh
             assert(count as nat == group_len(g));
             assert(tail_run::<O>(data@, gl(gs, gi), count as nat, value, end as int, gi));
             lemma_postfix_run::<O>(data@, gl(gs, gi), count, value, end as int, gi);
+            lemma_rest_run::<O>(data@, gl(gs, gi), count, value, end as int, gi);
+            lemma_gseg(gs, gi);
+            lemma_gseg_split::<O>(data@, gi + 1);
         }
         return (p, end);
     }
@@ -2087,6 +2248,9 @@ fn postfix_at_group<'a, O: RleOps<'a>>(data: &'a [u8], pos: usize, Ghost(gi): Gh
         assert(count as nat == group_len(g));
         assert(tail_run::<O>(data@, gl(gs, gi), count as nat, value, end as int, gi));
         lemma_postfix_run::<O>(data@, gl(gs, gi), count, value, end as int, gi);
+        lemma_rest_run::<O>(data@, gl(gs, gi), count, value, end as int, gi);
+        lemma_gseg(gs, gi);
+        lemma_gseg_split::<O>(data@, gi + 1);
     }
     (Some(Postfix::Run { count, value }), end)
 }
@@ -2101,7 +2265,10 @@ fn postfix_in_run<'a, O: RleOps<'a>>(data: &'a [u8], pos: usize, r: usize, vat: 
         pos == gb::<O>(slab_groups::<O>(data@), gi),
         vat == gb::<O>(slab_groups::<O>(data@), gi - 1)
             + O::enc_signed(slab_groups::<O>(data@)[gi - 1]->Run_count as i64).len(),
-    ensures p.1 <= data@.len(), pos <= p.1, postfix_ok::<O>(data@, gl(slab_groups::<O>(data@), gi) - r, p.0, p.1 as int),
+    ensures
+        p.1 <= data@.len(), pos <= p.1, postfix_ok::<O>(data@, gl(slab_groups::<O>(data@), gi) - r, p.0, p.1 as int),
+        gseg(slab_groups::<O>(data@), gi - 1) + ppend(p.0) + rest_segs::<O>(data@, gl(slab_groups::<O>(data@), gi) - r, p.0, p.1 as int)
+            == groups_segments(slab_groups::<O>(data@)),
 {
     let ghost gs = slab_groups::<O>(data@);
     let ghost g = gs[gi - 1];
@@ -2136,6 +2303,11 @@ fn postfix_in_run<'a, O: RleOps<'a>>(data: &'a [u8], pos: usize, r: usize, vat: 
             proof {
                 assert(tail_lone::<O>(data@, at, value, v2, lit as nat, end as int, gi - 1));
                 lemma_postfix_lone::<O>(data@, at, value, v2, lit, end as int, gi - 1);
+                lemma_rest_lone::<O>(data@, at, value, v2, lit, end as int, gi - 1);
+                lemma_gseg(gs, gi - 1);
+                lemma_gseg(gs, gi);
+                lemma_gseg_split::<O>(data@, gi + 1);
+                lemma_slab_group::<O>(data@, gi);
             }
             return (p, end);
         }
@@ -2143,6 +2315,9 @@ fn postfix_in_run<'a, O: RleOps<'a>>(data: &'a [u8], pos: usize, r: usize, vat: 
     proof {
         assert(tail_run::<O>(data@, at, r as nat, value, pos as int, gi - 1));
         lemma_postfix_run::<O>(data@, at, r, value, pos as int, gi - 1);
+        lemma_rest_run::<O>(data@, at, r, value, pos as int, gi - 1);
+        lemma_gseg(gs, gi - 1);
+        lemma_gseg_split::<O>(data@, gi);
     }
     (Some(Postfix::Run { count: r, value }), pos)
 }
@@ -2154,6 +2329,8 @@ pub(crate) fn postfix_at<'a, O: RleOps<'a>>(data: &'a [u8], st: &RleDecoderState
     ensures
         r.1 <= data@.len(), sbyte(*st) <= r.1,
         postfix_ok::<O>(data@, state_pos::<O>(data@, *st), r.0, r.1 as int),
+        rsegs::<O>(data@, *st) + ppend(r.0) + rest_segs::<O>(data@, state_pos::<O>(data@, *st), r.0, r.1 as int)
+            == groups_segments(slab_groups::<O>(data@)),
 {
     let ghost gs = slab_groups::<O>(data@);
     let ghost gi = choose|g: int| state_at::<O>(data@, *st, g);
@@ -2166,6 +2343,7 @@ pub(crate) fn postfix_at<'a, O: RleOps<'a>>(data: &'a [u8], st: &RleDecoderState
                 lemma_slab_group::<O>(data@, gi - 1);
                 assert(vs.take(vs.len() as int) =~= vs);
             }
+            lemma_rsegs_end::<O>(data@, *st, gi);
         }
         return postfix_at_group::<O>(data, st.byte_pos, Ghost(gi));
     }
@@ -2179,6 +2357,9 @@ pub(crate) fn postfix_at<'a, O: RleOps<'a>>(data: &'a [u8], st: &RleDecoderState
             proof {
                 assert(tail_run::<O>(data@, at, r as nat, value, st.byte_pos as int, gi - 1));
                 lemma_postfix_run::<O>(data@, at, r, value, st.byte_pos as int, gi - 1);
+                lemma_rest_run::<O>(data@, at, r, value, st.byte_pos as int, gi - 1);
+                lemma_gseg(gs, gi - 1);
+                lemma_gseg_split::<O>(data@, gi);
             }
             (Some(Postfix::Run { count: r, value }), st.byte_pos)
         },
@@ -2191,6 +2372,9 @@ pub(crate) fn postfix_at<'a, O: RleOps<'a>>(data: &'a [u8], st: &RleDecoderState
             proof {
                 assert(tail_lit::<O>(data@, at, value, lit as nat, end as int, gi - 1, vs.len() - r));
                 lemma_postfix_lit::<O>(data@, at, value, lit, end as int, gi - 1, vs.len() - r);
+                lemma_rest_lit::<O>(data@, at, value, lit, end as int, gi - 1, vs.len() - r);
+                lemma_gseg(gs, gi - 1);
+                lemma_gseg_split::<O>(data@, gi);
             }
             (Some(Postfix::Lit { value, lit }), end)
         },
@@ -2241,6 +2425,7 @@ pub(crate) proof fn lemma_lift_state<'s, L: Lift<'s>>(data: Seq<u8>, st: RleDeco
     ensures
         state_ok::<L::R>(data, st) == state_ok::<WR<'s, L>>(data, st),
         state_ok::<L::R>(data, st) ==> state_pos::<L::R>(data, st) == state_pos::<WR<'s, L>>(data, st),
+        state_ok::<L::R>(data, st) ==> rsegs::<L::R>(data, st) == rsegs::<WR<'s, L>>(data, st),
 {
     lemma_lift_slab::<L>(data);
     assert forall|gi: int| state_at::<L::R>(data, st, gi) == #[trigger] state_at::<WR<'s, L>>(data, st, gi) by {
@@ -2253,6 +2438,10 @@ pub(crate) proof fn lemma_lift_state<'s, L: Lift<'s>>(data: Seq<u8>, st: RleDeco
         assert(state_at::<WR<'s, L>>(data, st, g1));
         lemma_state_unique::<WR<'s, L>>(data, st, g1, g2);
         lemma_lift_at::<L>(slab_groups::<L::R>(data), g1);
+        if g1 >= 1 {
+            lemma_lift_at::<L>(slab_groups::<L::R>(data), g1 - 1);
+            lemma_lift_group::<L>(slab_groups::<L::R>(data)[g1 - 1]);
+        }
     }
 }
 
@@ -2339,7 +2528,7 @@ proof fn lemma_encs_prefix_le<'a, O: RleOps<'a>>(vs: Seq<O::V>, i: int, j: int)
 }
 
 /// Group value offsets do not decrease.
-proof fn lemma_gl_le<'a, O: RleOps<'a>>(data: Seq<u8>, i: int, j: int)
+pub(crate) proof fn lemma_gl_le<'a, O: RleOps<'a>>(data: Seq<u8>, i: int, j: int)
     requires valid_slab::<O>(data), 0 <= i <= j <= slab_groups::<O>(data).len(),
     ensures gl(slab_groups::<O>(data), i) <= gl(slab_groups::<O>(data), j),
     decreases j - i,
@@ -2351,6 +2540,7 @@ proof fn lemma_gl_le<'a, O: RleOps<'a>>(data: Seq<u8>, i: int, j: int)
 }
 
 /// A reader that has read every value stands at the end of the bytes.
+#[verifier::spinoff_prover]
 pub(crate) proof fn lemma_sbyte_end<'a, O: RleOps<'a>>(data: Seq<u8>, st: RleDecoderState)
     requires state_ok::<O>(data, st), state_pos::<O>(data, st) == slab_values::<O>(data).len(),
     ensures sbyte(st) == data.len(),

@@ -1153,7 +1153,7 @@ pub open spec fn lit_tail_of<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>) -> nat {
 }
 
 /// Canonical groups have no more segments than values.
-proof fn lemma_segments_le<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>)
+pub(crate) proof fn lemma_segments_le<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>)
     requires canonical::<O>(gs),
     ensures groups_segments(gs) <= groups_len(gs),
     decreases gs.len(),

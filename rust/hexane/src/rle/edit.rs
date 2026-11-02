@@ -30,7 +30,7 @@ use crate::rle::postfix::*;
 use crate::rle::state::*;
 #[cfg(verus_keep_ghost)]
 use crate::rle::writer::*;
-use crate::rle::writer::{add, sub, Rebuilt, Splice};
+use crate::rle::writer::{add, Rebuilt, Splice};
 use crate::rle::{RleTail, Slab};
 use crate::{AsColumnRef, Codec, RleValue};
 #[allow(unused_imports)]
@@ -109,6 +109,7 @@ impl<M: WriteOps<'static>> Edit<M> {
         &&& self.core()
         &&& state_ok::<M::R>(self.data@, self.dec) && state_pos::<M::R>(self.data@, self.dec) == self.read
         &&& self.w.pre().len() <= sbyte(self.dec)
+        &&& self.read_segments == rsegs::<M::R>(self.data@, self.dec)
     }
 
     /// Open, walking with the reader `d`.
@@ -116,6 +117,7 @@ impl<M: WriteOps<'static>> Edit<M> {
         &&& self.core()
         &&& d.inv() && d.data() == self.data@ && d.pos() == self.read
         &&& self.w.pre().len() <= sbyte(d.dstate())
+        &&& self.read_segments == d.dsegs()
     }
 
     pub(crate) fn new() -> (r: Self) {
@@ -150,7 +152,8 @@ impl<M: WriteOps<'static>> Edit<M> {
         let ghost pre = data@.take(bs);
         let ghost (gs, ws, h0) = choose|gs: Seq<Group<VOf<'s, L>>>, ws: Seq<VOf<'s, L>>, h0: i64|
             #[trigger] rel::<L>(p.state, pre, Seq::empty(), 0, gs, ws, h0)
-            && values_of::<L>(p.state, gs, ws) == slab_values::<L::R>(data@).take(at as int);
+            && values_of::<L>(p.state, gs, ws) == slab_values::<L::R>(data@).take(at as int)
+            && acc::<L>(p.state, gs, ws) == p.segments;
         let state = own_state::<L>(p.state);
         let ghost vals = slab_values::<M::R>(data@).take(at as int);
         proof {
@@ -179,7 +182,11 @@ impl<M: WriteOps<'static>> Edit<M> {
             lemma_unlift_slab::<L>(data@);
             lemma_lift_state::<L>(data@, self.dec);
         }
-        Dec::resume(data, &self.dec)
+        let d = Dec::resume(data, &self.dec);
+        proof {
+            d.lemma_dstate();
+        }
+        d
     }
 
     /// Read the next run, of at most `want` values, carrying it through
@@ -228,6 +235,7 @@ impl<M: WriteOps<'static>> Edit<M> {
             assert(lv.subrange(self.read as int, self.read + run.count) =~= copies(run.count as nat, run.value));
             d.lemma_dstate();
             lemma_sbyte_mono::<L::R>(data, d0.dstate(), d.dstate());
+            lemma_rsegs_le::<L::R>(data, d.dstate());
         }
         if emit {
             proof {
@@ -249,7 +257,7 @@ impl<M: WriteOps<'static>> Edit<M> {
         // one segment however many items it holds, so it counts only
         // once the decoder has given up the last of them
         if d.is_literal() || d.left() == 0 {
-            self.read_segments = add(self.read_segments, 1);
+            self.read_segments = self.read_segments + 1;
         }
         Some(run)
     }
@@ -263,6 +271,7 @@ impl<M: WriteOps<'static>> Edit<M> {
     {
         self.dec = d.suspend();
         proof {
+            d.lemma_dstate();
             lemma_unlift_slab::<L>(self.data@);
             lemma_lift_state::<L>(self.data@, self.dec);
         }
@@ -298,6 +307,7 @@ impl<M: WriteOps<'static>> Edit<M> {
         requires
             old(self).inv(), data@ == old(self).data(), old(self).room_close(),
             slab_len == slab_values::<M::R>(data@).len(),
+            slab_segments == groups_segments(slab_groups::<M::R>(data@)),
         ensures
             old(self).pre() == data@.take(old(self).pre().len() as int),
             r.h0@ == old(self).h0(),
@@ -309,8 +319,14 @@ impl<M: WriteOps<'static>> Edit<M> {
             lemma_lift_state::<L>(data@, self.dec);
         }
         let (p, end) = postfix_at::<L::R>(data, &self.dec);
+        proof {
+            lemma_lift_slab::<L>(data@);
+            lemma_lift_groups::<L>(slab_groups::<L::R>(data@));
+            lemma_lift_postfix::<L>(data@, self.read as int, p, end as int);
+            lemma_rest_bound::<M::R>(data@, self.read as int, plift::<L>(p), end as int);
+        }
         let postfix_segments = match &p {
-            Some(q) => sub(sub(slab_segments, self.read_segments), q.pending()),
+            Some(q) => slab_segments - self.read_segments - q.pending(),
             None => 0,
         };
         let ghost lp = p;

@@ -104,6 +104,7 @@ pub proof fn lemma_lift_group<'s, L: Lift<'s>>(g: Group<VOf<'s, L>>)
     ensures
         group_bytes::<WR<'s, L>>(lift_group::<L>(g)) == group_bytes::<L::R>(g),
         group_len(lift_group::<L>(g)) == group_len(g),
+        group_segments(lift_group::<L>(g)) == group_segments(g),
         group_values(lift_group::<L>(g), <WR<'s, L> as RleOps<'static>>::null())
             == lift_seq::<L>(group_values(g, <L::R as RleOps<'s>>::null())),
         group_ok::<L::R>(g) ==> group_ok::<WR<'s, L>>(lift_group::<L>(g)),
@@ -158,6 +159,7 @@ pub proof fn lemma_lift_groups<'s, L: Lift<'s>>(gs: Seq<Group<VOf<'s, L>>>)
     ensures
         groups_bytes::<WR<'s, L>>(lift_groups::<L>(gs)) == groups_bytes::<L::R>(gs),
         groups_len(lift_groups::<L>(gs)) == groups_len(gs),
+        groups_segments(lift_groups::<L>(gs)) == groups_segments(gs),
         groups_values(lift_groups::<L>(gs), <WR<'s, L> as RleOps<'static>>::null())
             == lift_seq::<L>(groups_values(gs, <L::R as RleOps<'s>>::null())),
         canonical::<L::R>(gs) ==> canonical::<WR<'s, L>>(lift_groups::<L>(gs)),
@@ -252,6 +254,7 @@ pub(crate) proof fn lemma_lift_rel<'s, L: Lift<'s>>(s: State<'s, L>, r: State<'s
     ensures
         rel::<L::W>(r, pre, buf, base, lift_groups::<L>(gs), lift_seq::<L>(ws), h0),
         values_of::<L::W>(r, lift_groups::<L>(gs), lift_seq::<L>(ws)) == lift_seq::<L>(values_of::<L>(s, gs, ws)),
+        acc::<L::W>(r, lift_groups::<L>(gs), lift_seq::<L>(ws)) == acc::<L>(s, gs, ws),
 {
     hide(canonical);
     hide(lift_groups);
@@ -293,10 +296,14 @@ pub proof fn lemma_lift_at<'s, L: Lift<'s>>(gs: Seq<Group<VOf<'s, L>>>, k: int)
     ensures
         gl(lift_groups::<L>(gs), k) == gl(gs, k),
         gb::<WR<'s, L>>(lift_groups::<L>(gs), k) == gb::<L::R>(gs, k),
+        gseg(lift_groups::<L>(gs), k) == gseg(gs, k),
+        groups_segments(lift_groups::<L>(gs).skip(k)) == groups_segments(gs.skip(k)),
         k < gs.len() ==> lift_groups::<L>(gs)[k] == lift_group::<L>(gs[k]),
 {
     assert(lift_groups::<L>(gs).take(k) =~= lift_groups::<L>(gs.take(k)));
     lemma_lift_groups::<L>(gs.take(k));
+    assert(lift_groups::<L>(gs).skip(k) =~= lift_groups::<L>(gs.skip(k)));
+    lemma_lift_groups::<L>(gs.skip(k));
 }
 
 /// A postfix's values, owned.
@@ -339,7 +346,9 @@ proof fn lemma_lift_tail_lit<'s, L: Lift<'s>>(data: Seq<u8>, at: int, v: VOf<'s,
 /// A postfix of the slab, read with owned values.
 pub(crate) proof fn lemma_lift_postfix<'s, L: Lift<'s>>(data: Seq<u8>, at: int, p: Option<Postfix<VOf<'s, L>>>, end: int)
     requires postfix_ok::<L::R>(data, at, p, end),
-    ensures postfix_ok::<WR<'s, L>>(data, at, plift::<L>(p), end), vnulls_ok::<WR<'s, L>>(plift::<L>(p)),
+    ensures
+        postfix_ok::<WR<'s, L>>(data, at, plift::<L>(p), end), vnulls_ok::<WR<'s, L>>(plift::<L>(p)),
+        rest_segs::<WR<'s, L>>(data, at, plift::<L>(p), end) == rest_segs::<L::R>(data, at, p, end),
 {
     let gs = slab_groups::<L::R>(data);
     lemma_lift_slab::<L>(data);
@@ -357,11 +366,17 @@ pub(crate) proof fn lemma_lift_postfix<'s, L: Lift<'s>>(data: Seq<u8>, at: int, 
             lemma_slab_group::<L::R>(data, i);
             assert(tail_run::<WR<'s, L>>(data, at, count as nat, L::lift(value), end, i));
             lemma_postfix_run::<WR<'s, L>>(data, at, count, L::lift(value), end, i);
+            lemma_rest_run::<WR<'s, L>>(data, at, count, L::lift(value), end, i);
+            lemma_rest_run::<L::R>(data, at, count, value, end, i);
+            lemma_lift_at::<L>(gs, i + 1);
         },
         Some(Postfix::Lit { value, lit }) => {
             let (i, j) = choose|i: int, j: int| tail_lit::<L::R>(data, at, value, lit as nat, end, i, j);
             lemma_lift_tail_lit::<L>(data, at, value, lit as nat, end, i, j);
             lemma_postfix_lit::<WR<'s, L>>(data, at, L::lift(value), lit, end, i, j);
+            lemma_rest_lit::<WR<'s, L>>(data, at, L::lift(value), lit, end, i, j);
+            lemma_rest_lit::<L::R>(data, at, value, lit, end, i, j);
+            lemma_lift_at::<L>(gs, i + 1);
             lemma_slab_lit::<L::R>(data, i, j);
             L::axiom_lift(value);
         },
@@ -372,6 +387,9 @@ pub(crate) proof fn lemma_lift_postfix<'s, L: Lift<'s>>(data: Seq<u8>, at: int, 
             lemma_lift_at::<L>(gs, i + 1);
             assert(tail_lone::<WR<'s, L>>(data, at, L::lift(lone), L::lift(value), lit as nat, end, i));
             lemma_postfix_lone::<WR<'s, L>>(data, at, L::lift(lone), L::lift(value), lit, end, i);
+            lemma_rest_lone::<WR<'s, L>>(data, at, L::lift(lone), L::lift(value), lit, end, i);
+            lemma_rest_lone::<L::R>(data, at, lone, value, lit, end, i);
+            lemma_lift_at::<L>(gs, i + 2);
             lemma_slab_group::<L::R>(data, i);
             lemma_slab_lit::<L::R>(data, i + 1, 0);
             L::axiom_lift(lone);
