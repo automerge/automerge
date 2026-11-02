@@ -13,6 +13,7 @@ use super::model::*;
 // proof functions exist only when Verus compiles the crate
 #[cfg(verus_keep_ghost)]
 use super::read::{lemma_count, lemma_header, lemma_starts, lemma_value};
+use super::state::*;
 #[allow(unused_imports)]
 use vstd::prelude::*;
 
@@ -1087,7 +1088,14 @@ pub struct RleDecoderState {
 
 impl RleDecoderState {
     /// The state of a decoder standing at the start of a slab.
-    pub(crate) fn start() -> Self {
+    /// The start of a slab.
+    pub(crate) closed spec fn is_start(&self) -> bool {
+        self.byte_pos == 0 && self.remaining == 0 && self.run is Idle
+    }
+
+    pub(crate) fn start() -> (r: Self)
+        ensures r.is_start(),
+    {
         RleDecoderState { byte_pos: 0, remaining: 0, run: SuspendedRun::Idle }
     }
 }
@@ -1229,6 +1237,657 @@ impl<'a, O: RleOps<'a>> Dec<'a, O> {
             SuspendedRun::Idle => (RunState::Idle, 0),
         };
         Dec { data, byte_pos: st.byte_pos, remaining: st.remaining, state, run_at, gi: Ghost(gi) }
+    }
+}
+
+// ── Opening a rebuild at an item ────────────────────────────────────────────
+
+/// Where an edit opening at an item finds the slab: the writer's state
+/// for the part of the run in hand before the cut (`state`, borrowing its
+/// value), the byte offset where its region starts, and a reader standing
+/// at the cut.
+pub(crate) struct PartitionAt<'a, W: WriteOps<'a>> {
+    pub(crate) state: State<'a, W>,
+    /// segments of the slab before `byte_start`
+    pub(crate) segments: usize,
+    pub(crate) byte_start: usize,
+    /// Complete runs behind this position, counted for a *reader*: a
+    /// position at a run's end is past it, where `segments` — the
+    /// writer's count, of runs before the region it opens — is not.
+    pub(crate) read_segments: usize,
+    /// A reader standing at this position, built from the same walk.
+    pub(crate) read_state: RleDecoderState,
+}
+
+/// The groups before `i` stand for the values before their end.
+proof fn lemma_take_groups<'a, O: RleOps<'a>>(data: Seq<u8>, i: int)
+    requires valid_slab::<O>(data), 0 <= i <= slab_groups::<O>(data).len(),
+    ensures ({
+        let gs = slab_groups::<O>(data);
+        &&& canonical::<O>(gs.take(i))
+        &&& groups_values(gs.take(i), O::null()) == slab_values::<O>(data).take(gl(gs, i))
+        &&& data.take(gb::<O>(gs, i)) == groups_bytes::<O>(gs.take(i))
+        &&& 0 <= gb::<O>(gs, i) <= data.len()
+        &&& 0 <= gl(gs, i) <= slab_values::<O>(data).len()
+    }),
+{
+    let gs = slab_groups::<O>(data);
+    lemma_slab::<O>(data);
+    assert forall|j: int| 0 <= j < gs.take(i).len() implies group_ok::<O>(#[trigger] gs.take(i)[j]) by {
+        assert(gs.take(i)[j] == gs[j]);
+    }
+    assert forall|j: int| 0 < j < gs.take(i).len() implies adjacent_ok(gs.take(i)[j - 1], #[trigger] gs.take(i)[j]) by {
+        assert(gs.take(i)[j] == gs[j] && gs.take(i)[j - 1] == gs[j - 1]);
+    }
+    assert(gs =~= gs.take(i) + gs.skip(i));
+    lemma_groups_values_concat(gs.take(i), gs.skip(i), O::null());
+    lemma_groups_values_concat(gs.skip(i), Seq::empty(), O::null());
+    lemma_groups_bytes_concat::<O>(gs.take(i), gs.skip(i));
+    lemma_groups_len_concat(gs.take(i), gs.skip(i));
+    assert(slab_values::<O>(data).take(gl(gs, i)) =~= groups_values(gs.take(i), O::null()));
+    assert(data.take(gb::<O>(gs, i)) =~= groups_bytes::<O>(gs.take(i)));
+}
+
+/// Values' encodings are at least a byte each.
+proof fn lemma_encs_len<'a, O: RleOps<'a>>(vs: Seq<O::V>)
+    ensures encs::<O>(vs).len() >= vs.len(),
+    decreases vs.len(),
+{
+    if vs.len() > 0 {
+        O::axiom_enc(vs.last(), vs.last(), Seq::empty(), Seq::empty());
+        lemma_encs_len::<O>(vs.drop_last());
+    }
+}
+
+/// The writer state `s`, with the slab's bytes before `bs` as its
+/// prefix, stands for the slab's first `at` values.
+pub(crate) open spec fn landed<'a, W: WriteOps<'a>>(data: Seq<u8>, at: int, s: State<'a, W>, bs: int) -> bool {
+    exists|gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>, h0: i64| #[trigger] rel(s, data.take(bs), Seq::empty(), 0, gs, ws, h0)
+        && values_of(s, gs, ws) == slab_values::<W::R>(data).take(at)
+}
+
+/// The literal before group `gi`, if there is one: its header position
+/// and length.
+pub(crate) open spec fn prev_lit_of<'a, O: RleOps<'a>>(data: Seq<u8>, gi: int) -> Option<(usize, usize)> {
+    let gs = slab_groups::<O>(data);
+    if gi > 0 && gs[gi - 1] is Lit {
+        Some((gb::<O>(gs, gi - 1) as usize, gs[gi - 1]->values.len() as usize))
+    } else {
+        None
+    }
+}
+
+/// Values `X.take(a)` then `k` more from a run of `v` there.
+proof fn lemma_take_run<V>(x: Seq<V>, a: int, k: int, c: int, v: V)
+    requires 0 <= a, 1 <= k <= c, a + c <= x.len(), forall|j: int| a <= j < a + c ==> x[j] == v,
+    ensures x.take(a + k) == x.take(a) + copies(k as nat, v),
+{
+    assert(x.take(a + k) =~= x.take(a) + copies(k as nat, v));
+}
+
+/// Landing in a repeat run just after its first value, after a literal:
+/// the value joins the literal.
+#[verifier::spinoff_prover]
+#[verifier::rlimit(40)]
+proof fn lemma_land_run_lit<'a, W: WriteOps<'a>>(data: Seq<u8>, gi: int, s: State<'a, W>)
+    requires
+        valid_slab::<W::R>(data), data.len() < i64::MAX, data.len() <= usize::MAX,
+        0 < gi < slab_groups::<W::R>(data).len(), slab_groups::<W::R>(data)[gi] is Run,
+        slab_groups::<W::R>(data)[gi - 1] is Lit,
+        s matches State::Lit { count, local, header_pos, current, .. }
+            && count == slab_groups::<W::R>(data)[gi - 1]->values.len() && local == 0
+            && header_pos == gb::<W::R>(slab_groups::<W::R>(data), gi - 1)
+            && W::val(current) == run_value(slab_groups::<W::R>(data)[gi]),
+    ensures landed::<W>(data, gl(slab_groups::<W::R>(data), gi) + 1, s, gb::<W::R>(slab_groups::<W::R>(data), gi)),
+{
+    let gs = slab_groups::<W::R>(data);
+    let g = gs[gi];
+    let v = run_value(g);
+    let x = slab_values::<W::R>(data);
+    let a = gl(gs, gi);
+    let gp = gs[gi - 1];
+    let vp = gp->values;
+    let gs2 = gs.take(gi - 1);
+    let h0 = -(vp.len() as int) as i64;
+    let pre = data.take(gb::<W::R>(gs, gi));
+    lemma_slab_group::<W::R>(data, gi);
+    lemma_slab_group::<W::R>(data, gi - 1);
+    lemma_take_groups::<W::R>(data, gi);
+    lemma_take_groups::<W::R>(data, gi - 1);
+    assert(gs.take(gi) =~= gs2.push(gp));
+    lemma_push::<W::R>(gs2, gp);
+    lemma_encs_len::<W::R>(vp);
+    assert(group_ok::<W::R>(gp));
+    assert(vp.last() != v);
+    assert(group_ok::<W::R>(g));
+    lemma_lit_grow::<W::R>(gs2, vp, v);
+    assert(vp.take(vp.len() as int) =~= vp);
+    assert(vp.skip(vp.len() as int) =~= Seq::<VOf<'a, W>>::empty());
+    assert(Seq::<u8>::empty().skip(0) =~= encs::<W::R>(vp.skip(vp.len() as int)));
+    assert(group_bytes::<W::R>(gp) == <W::R as RleOps<'a>>::enc_signed(h0) + encs::<W::R>(vp));
+    assert(pre =~= groups_bytes::<W::R>(gs2) + <W::R as RleOps<'a>>::enc_signed(h0) + encs::<W::R>(vp.take(vp.len() as int)));
+    assert(vp.len() < usize::MAX) by {
+        lemma_group_bytes_nonempty::<W::R>(gp);
+        assert(gb::<W::R>(gs, gi) <= data.len());
+    }
+    assert(rel(s, pre, Seq::empty(), 0, gs2, vp, h0));
+    lemma_push::<W::R>(gs2, Group::Lit { values: vp.push(v) });
+    lemma_vals_lit_run::<W::R>(data, gi);
+    assert(values_of(s, gs2, vp) == x.take(a + 1));
+}
+
+/// The values up to a repeat run's first, after a literal.
+proof fn lemma_vals_lit_run<'a, O: RleOps<'a>>(data: Seq<u8>, gi: int)
+    requires
+        valid_slab::<O>(data), 0 < gi < slab_groups::<O>(data).len(),
+        slab_groups::<O>(data)[gi] is Run, slab_groups::<O>(data)[gi - 1] is Lit,
+    ensures ({
+        let gs = slab_groups::<O>(data);
+        slab_values::<O>(data).take(gl(gs, gi) + 1)
+            == slab_values::<O>(data).take(gl(gs, gi - 1)) + gs[gi - 1]->values.push(run_value(gs[gi]))
+    }),
+{
+    let gs = slab_groups::<O>(data);
+    let x = slab_values::<O>(data);
+    let g = gs[gi];
+    let gp = gs[gi - 1];
+    let vp = gp->values;
+    let a0 = gl(gs, gi - 1);
+    let a = gl(gs, gi);
+    lemma_slab_group::<O>(data, gi);
+    lemma_slab_group::<O>(data, gi - 1);
+    assert forall|j: int| 0 <= j < vp.len() implies x[a0 + j] == vp[j] by {
+        assert(group_values(gp, O::null())[j] == vp[j]);
+    }
+    assert(x[a] == run_value(g)) by {
+        assert(group_values(g, O::null())[0] == run_value(g));
+    }
+    assert(x.take(a + 1) =~= x.take(a0) + vp.push(run_value(g)));
+}
+
+/// Landing in a repeat run otherwise: the part before the cut is a run
+/// (or a lone value) of its own.
+#[verifier::spinoff_prover]
+proof fn lemma_land_run<'a, W: WriteOps<'a>>(data: Seq<u8>, gi: int, k: int, s: State<'a, W>)
+    requires
+        valid_slab::<W::R>(data), data.len() < i64::MAX,
+        0 <= gi < slab_groups::<W::R>(data).len(), slab_groups::<W::R>(data)[gi] is Run,
+        1 <= k <= slab_groups::<W::R>(data)[gi]->Run_count,
+        k == 1 ==> !(gi > 0 && slab_groups::<W::R>(data)[gi - 1] is Lit),
+        match s {
+            State::Lone(c) => k == 1 && W::val(c) == run_value(slab_groups::<W::R>(data)[gi]),
+            State::Run(n, c) => k >= 2 && n == k && W::val(c) == run_value(slab_groups::<W::R>(data)[gi]),
+            _ => false,
+        },
+    ensures landed::<W>(data, gl(slab_groups::<W::R>(data), gi) + k, s, gb::<W::R>(slab_groups::<W::R>(data), gi)),
+{
+    let gs = slab_groups::<W::R>(data);
+    let g = gs[gi];
+    let v = run_value(g);
+    let x = slab_values::<W::R>(data);
+    let a = gl(gs, gi);
+    lemma_slab_group::<W::R>(data, gi);
+    lemma_take_groups::<W::R>(data, gi);
+    assert forall|j: int| a <= j < a + group_len(g) implies x[j] == v by {
+        assert(group_values(g, <W::R as RleOps<'a>>::null())[j - a] == v);
+    }
+    lemma_take_run(x, a, k, group_len(g) as int, v);
+    let pre = data.take(gb::<W::R>(gs, gi));
+    let g1 = pend_group(s, Seq::empty())->Some_0;
+    let gs2 = gs.take(gi);
+    assert(group_ok::<W::R>(g));
+    if gi > 0 {
+        assert(gs2.last() == gs[gi - 1]);
+        assert(adjacent_ok(gs[gi - 1], g));
+    }
+    lemma_canonical_join::<W::R>(gs2, g1);
+    lemma_push::<W::R>(gs2, g1);
+    assert(pre + Seq::<u8>::empty().skip(0) =~= groups_bytes::<W::R>(gs2));
+    assert(rel(s, pre, Seq::empty(), 0, gs2, Seq::empty(), 0));
+    lemma_run_group::<W::R>(k as nat, v);
+    assert(values_of(s, gs2, Seq::empty()) == x.take(a + k));
+}
+
+/// Landing in a null run.
+#[verifier::spinoff_prover]
+proof fn lemma_land_null<'a, W: WriteOps<'a>>(data: Seq<u8>, gi: int, k: int, s: State<'a, W>)
+    requires
+        valid_slab::<W::R>(data),
+        0 <= gi < slab_groups::<W::R>(data).len(), slab_groups::<W::R>(data)[gi] is Null,
+        1 <= k <= slab_groups::<W::R>(data)[gi]->Null_count, k <= usize::MAX,
+        s == State::<'a, W>::Null(k as usize),
+    ensures landed::<W>(data, gl(slab_groups::<W::R>(data), gi) + k, s, gb::<W::R>(slab_groups::<W::R>(data), gi)),
+{
+    let gs = slab_groups::<W::R>(data);
+    let g = gs[gi];
+    let nl = <W::R as RleOps<'a>>::null();
+    let x = slab_values::<W::R>(data);
+    let a = gl(gs, gi);
+    lemma_slab_group::<W::R>(data, gi);
+    lemma_take_groups::<W::R>(data, gi);
+    assert forall|j: int| a <= j < a + group_len(g) implies x[j] == nl by {
+        assert(group_values(g, nl)[j - a] == nl);
+    }
+    lemma_take_run(x, a, k, group_len(g) as int, nl);
+    let pre = data.take(gb::<W::R>(gs, gi));
+    let g1 = Group::<VOf<'a, W>>::Null { count: k as nat };
+    let gs2 = gs.take(gi);
+    assert(group_ok::<W::R>(g));
+    if gi > 0 {
+        assert(gs2.last() == gs[gi - 1]);
+        assert(adjacent_ok(gs[gi - 1], g));
+    }
+    lemma_canonical_join::<W::R>(gs2, g1);
+    lemma_push::<W::R>(gs2, g1);
+    assert(pre + Seq::<u8>::empty().skip(0) =~= groups_bytes::<W::R>(gs2));
+    assert(rel(s, pre, Seq::empty(), 0, gs2, Seq::empty(), 0));
+    assert(values_of(s, gs2, Seq::empty()) == x.take(a + k));
+}
+
+/// Landing in a literal at value `jj`: the values before it and it.
+#[verifier::spinoff_prover]
+#[verifier::rlimit(40)]
+proof fn lemma_land_lit<'a, W: WriteOps<'a>>(data: Seq<u8>, gi: int, jj: int, s: State<'a, W>, bs: int)
+    requires
+        valid_slab::<W::R>(data), data.len() <= usize::MAX,
+        0 <= gi < slab_groups::<W::R>(data).len(), slab_groups::<W::R>(data)[gi] is Lit,
+        0 <= jj < slab_groups::<W::R>(data)[gi]->values.len(),
+        jj == 0 ==> bs == gb::<W::R>(slab_groups::<W::R>(data), gi),
+        jj == 0 ==> (s matches State::Lone(c) && W::val(c) == slab_groups::<W::R>(data)[gi]->values[0]),
+        jj > 0 ==> bs == gb::<W::R>(slab_groups::<W::R>(data), gi)
+                + lit_head::<W::R>(slab_groups::<W::R>(data)[gi]->values.len()).len()
+                + encs::<W::R>(slab_groups::<W::R>(data)[gi]->values.take(jj)).len(),
+        jj > 0 ==> (s matches State::Lit { count, local, header_pos, current, .. }
+            && count == jj && local == 0 && header_pos == gb::<W::R>(slab_groups::<W::R>(data), gi)
+            && W::val(current) == slab_groups::<W::R>(data)[gi]->values[jj]),
+    ensures landed::<W>(data, gl(slab_groups::<W::R>(data), gi) + jj + 1, s, bs),
+{
+    let gs = slab_groups::<W::R>(data);
+    let g = gs[gi];
+    let vs = g->values;
+    let x = slab_values::<W::R>(data);
+    let a = gl(gs, gi);
+    let gs2 = gs.take(gi);
+    lemma_slab_group::<W::R>(data, gi);
+    lemma_take_groups::<W::R>(data, gi);
+    assert(group_ok::<W::R>(g));
+    let w = vs.take(jj + 1);
+    assert forall|j: int| 0 <= j < vs.len() implies x[a + j] == vs[j] by {
+        assert(group_values(g, <W::R as RleOps<'a>>::null())[j] == vs[j]);
+    }
+    assert(x.take(a + jj + 1) =~= x.take(a) + w);
+    // the literal's first values are a literal that may follow the same
+    assert forall|i: int| 0 <= i < w.len() implies !<W::R as RleOps<'a>>::is_null(#[trigger] w[i]) by {
+        assert(w[i] == vs[i]);
+    }
+    assert forall|i: int| 0 < i < w.len() implies w[i - 1] != #[trigger] w[i] by {
+        assert(w[i] == vs[i] && w[i - 1] == vs[i - 1]);
+    }
+    let gw = Group::Lit { values: w };
+    assert(group_ok::<W::R>(gw));
+    if gi > 0 {
+        assert(gs2.last() == gs[gi - 1]);
+        assert(adjacent_ok(gs[gi - 1], g));
+        assert(w[0] == vs[0]);
+    }
+    lemma_canonical_join::<W::R>(gs2, gw);
+    lemma_push::<W::R>(gs2, gw);
+    let pre = data.take(bs);
+    if jj == 0 {
+        assert(w =~= seq![vs[0]]);
+        assert(pre + Seq::<u8>::empty().skip(0) =~= groups_bytes::<W::R>(gs2));
+        assert(rel(s, pre, Seq::empty(), 0, gs2, Seq::empty(), 0));
+        assert(values_of(s, gs2, Seq::empty()) == x.take(a + jj + 1));
+    } else {
+        let ws = vs.take(jj);
+        let h0 = -(vs.len() as int) as i64;
+        let hd = <W::R as RleOps<'a>>::enc_signed(h0);
+        let rest = groups_bytes::<W::R>(gs.skip(gi + 1));
+        assert(vs =~= ws + vs.skip(jj));
+        lemma_encs_concat::<W::R>(ws, vs.skip(jj));
+        assert(data.skip(gb::<W::R>(gs, gi)) == hd + (encs::<W::R>(vs) + rest));
+        assert(data =~= data.take(gb::<W::R>(gs, gi)) + data.skip(gb::<W::R>(gs, gi)));
+        assert(pre =~= groups_bytes::<W::R>(gs2) + hd + encs::<W::R>(ws));
+        assert(ws.take(jj) =~= ws);
+        assert(ws.skip(jj) =~= Seq::<VOf<'a, W>>::empty());
+        assert(Seq::<u8>::empty().skip(0) =~= encs::<W::R>(ws.skip(jj)));
+        assert(ws.push(vs[jj]) =~= w);
+        lemma_encs_len::<W::R>(vs);
+        assert(rel(s, pre, Seq::empty(), 0, gs2, ws, h0));
+        assert(values_of(s, gs2, ws) == x.take(a + jj + 1));
+    }
+}
+
+/// Walking a slab to an item: landed, or the next group's position.
+pub(crate) enum Walk<'a, W: WriteOps<'a>> {
+    Landed(PartitionAt<'a, W>),
+    Next { pos: usize, item: usize, segments: usize, prev_lit: Option<(usize, usize)> },
+}
+
+/// Where a walk to `at` stands: at group `gi`, which `at` lies past the
+/// start of.
+pub(crate) open spec fn walk_at<'a, O: RleOps<'a>>(data: Seq<u8>, at: int, gi: int, pos: int, item: int, segments: int) -> bool {
+    let gs = slab_groups::<O>(data);
+    &&& valid_slab::<O>(data) && data.len() < i64::MAX && data.len() <= usize::MAX
+    &&& 0 <= gi < gs.len() && pos == gb::<O>(gs, gi) && item == gl(gs, gi) && item < at
+    &&& 0 <= segments <= item
+    &&& at <= slab_values::<O>(data).len() && groups_len(gs) <= usize::MAX
+}
+
+/// What a walk step promises: a landing reads `at`, or the next group is
+/// reached.
+pub(crate) open spec fn walk_post<'a, W: WriteOps<'a>>(data: Seq<u8>, at: int, gi: int, r: Walk<'a, W>) -> bool {
+    match r {
+        Walk::Landed(p) => p.byte_start <= data.len()
+            && state_ok::<W::R>(data, p.read_state) && state_pos::<W::R>(data, p.read_state) == at
+            && landed::<W>(data, at, p.state, p.byte_start as int),
+        Walk::Next { pos, item, segments, prev_lit } => {
+            &&& walk_at::<W::R>(data, at, gi + 1, pos as int, item as int, segments as int)
+            &&& prev_lit == prev_lit_of::<W::R>(data, gi + 1)
+        },
+    }
+}
+
+/// The header of group `gi` at `pos`: its value and length.
+proof fn lemma_walk_header<'a, O: RleOps<'a>>(data: Seq<u8>, gi: int, pos: int, hb: int, hv: i64)
+    requires
+        valid_slab::<O>(data), 0 <= gi < slab_groups::<O>(data).len(), pos == gb::<O>(slab_groups::<O>(data), gi),
+        0 <= hb <= data.len() - pos, data.skip(pos).take(hb) == O::enc_signed(hv),
+    ensures ({
+        let gs = slab_groups::<O>(data);
+        let g = gs[gi];
+        &&& hv as int == header_of(g) && hb == O::enc_signed(header_of(g) as i64).len()
+        &&& data.skip(pos + hb) == payload::<O>(g) + groups_bytes::<O>(gs.skip(gi + 1))
+    }),
+{
+    let gs = slab_groups::<O>(data);
+    let g = gs[gi];
+    let rest = groups_bytes::<O>(gs.skip(gi + 1));
+    lemma_slab_group::<O>(data, gi);
+    lemma_header::<O>(data.skip(pos), header_of(g) as i64, payload::<O>(g) + rest, hb, hv);
+    lemma_skip_skip(data, pos, hb);
+}
+
+/// A repeat run: land in it, or step past it.
+fn walk_run<'a, W: WriteOps<'a>>(data: &'a [u8], at: usize, Ghost(gi): Ghost<int>, pos: usize, item: usize, segments: usize, prev_lit: Option<(usize, usize)>, hb: usize, count: usize) -> (r: Walk<'a, W>)
+    requires
+        walk_at::<W::R>(data@, at as int, gi, pos as int, item as int, segments as int),
+        prev_lit == prev_lit_of::<W::R>(data@, gi),
+        slab_groups::<W::R>(data@)[gi] is Run, count == group_len(slab_groups::<W::R>(data@)[gi]),
+        hb == <W::R as RleOps<'a>>::enc_signed(count as i64).len(),
+        pos + hb <= data@.len(),
+        data@.skip(pos + hb) == payload::<W::R>(slab_groups::<W::R>(data@)[gi])
+            + groups_bytes::<W::R>(slab_groups::<W::R>(data@).skip(gi + 1)),
+    ensures walk_post::<W>(data@, at as int, gi, r),
+{
+    let ghost gs = slab_groups::<W::R>(data@);
+    let ghost g = gs[gi];
+    let ghost rest = groups_bytes::<W::R>(gs.skip(gi + 1));
+    let ghost p = pos + hb;
+    proof {
+        lemma_slab_group::<W::R>(data@, gi);
+        lemma_starts(<W::R as RleOps<'a>>::enc(run_value(g)), rest);
+    }
+    let value_start = pos + hb;
+    let rest1 = &data[value_start..];
+    assert(rest1@ == data@.skip(p));
+    if at - item <= count {
+        let k = at - item;
+        let (vlen, value) = <W::R as RleOps<'a>>::unpack(rest1);
+        proof {
+            lemma_value::<W::R>(data@.skip(p), run_value(g), rest, vlen as int, value);
+        }
+        let state = match prev_lit {
+            Some((hp, n)) => {
+                if k == 1 {
+                    State::lit(n, W::cow_ref(value), hp)
+                } else {
+                    State::make_run(k, W::cow_ref(value))
+                }
+            },
+            None => State::make_run(k, W::cow_ref(value)),
+        };
+        let rs = RleDecoderState { byte_pos: value_start + vlen, remaining: count - k, run: SuspendedRun::Repeat { at: value_start } };
+        proof {
+            if prev_lit is Some && k == 1 {
+                lemma_slab_group::<W::R>(data@, gi - 1);
+                lemma_encs_len::<W::R>(gs[gi - 1]->values);
+                assert(gs[gi - 1]->values.len() <= usize::MAX);
+                lemma_land_run_lit::<W>(data@, gi, state);
+            } else {
+                lemma_land_run::<W>(data@, gi, k as int, state);
+            }
+            assert(state_at::<W::R>(data@, rs, gi + 1));
+            let g2 = choose|g3: int| state_at::<W::R>(data@, rs, g3);
+            lemma_state_unique::<W::R>(data@, rs, g2, gi + 1);
+        }
+        let read_segments = if k == count { segments + 1 } else { segments };
+        return Walk::Landed(PartitionAt { state, segments, byte_start: pos, read_segments, read_state: rs });
+    }
+    let vlen = <W::R as RleOps<'a>>::value_len(rest1).unwrap();
+    proof {
+        assert(group_ok::<W::R>(g));
+        assert(vlen == <W::R as RleOps<'a>>::enc(run_value(g)).len());
+        assert(group_bytes::<W::R>(g) == <W::R as RleOps<'a>>::enc_signed(count as i64) + <W::R as RleOps<'a>>::enc(run_value(g)));
+        assert(value_start + vlen == gb::<W::R>(gs, gi + 1));
+        assert(item + count == gl(gs, gi + 1));
+        lemma_slab::<W::R>(data@);
+        if gi + 1 == gs.len() {
+            assert(gs.take(gi + 1) =~= gs);
+        }
+    }
+    Walk::Next { pos: value_start + vlen, item: item + count, segments: segments + 1, prev_lit: None }
+}
+
+/// A null run: land in it, or step past it.
+fn walk_null<'a, W: WriteOps<'a>>(data: &'a [u8], at: usize, Ghost(gi): Ghost<int>, pos: usize, item: usize, segments: usize, hb: usize) -> (r: Walk<'a, W>)
+    requires
+        walk_at::<W::R>(data@, at as int, gi, pos as int, item as int, segments as int),
+        slab_groups::<W::R>(data@)[gi] is Null,
+        hb == <W::R as RleOps<'a>>::enc_signed(0).len(),
+        pos + hb <= data@.len(),
+        data@.skip(pos + hb) == payload::<W::R>(slab_groups::<W::R>(data@)[gi])
+            + groups_bytes::<W::R>(slab_groups::<W::R>(data@).skip(gi + 1)),
+    ensures walk_post::<W>(data@, at as int, gi, r),
+{
+    let ghost gs = slab_groups::<W::R>(data@);
+    let ghost g = gs[gi];
+    let ghost rest = groups_bytes::<W::R>(gs.skip(gi + 1));
+    let ghost p = pos + hb;
+    proof {
+        lemma_slab_group::<W::R>(data@, gi);
+        lemma_starts(<W::R as RleOps<'a>>::enc_unsigned(g->Null_count as u64), rest);
+    }
+    let rest1 = &data[pos + hb..];
+    assert(rest1@ == data@.skip(p));
+    let (cb, c) = <W::R as RleOps<'a>>::read_unsigned_opt(rest1).unwrap();
+    proof {
+        lemma_count::<W::R>(data@.skip(p), g->Null_count as u64, rest, cb as int, c);
+    }
+    let count = c as usize;
+    if at - item <= count {
+        let k = at - item;
+        let rs = RleDecoderState { byte_pos: pos + hb + cb, remaining: count - k, run: SuspendedRun::Null };
+        proof {
+            lemma_land_null::<W>(data@, gi, k as int, State::Null(k));
+            assert(state_at::<W::R>(data@, rs, gi + 1));
+            let g2 = choose|g3: int| state_at::<W::R>(data@, rs, g3);
+            lemma_state_unique::<W::R>(data@, rs, g2, gi + 1);
+        }
+        let read_segments = if k == count { segments + 1 } else { segments };
+        return Walk::Landed(PartitionAt { state: State::Null(k), segments, byte_start: pos, read_segments, read_state: rs });
+    }
+    proof {
+        assert(group_ok::<W::R>(g));
+        assert(group_bytes::<W::R>(g) == <W::R as RleOps<'a>>::enc_signed(0) + <W::R as RleOps<'a>>::enc_unsigned(c));
+        assert(pos + hb + cb == gb::<W::R>(gs, gi + 1));
+        assert(item + count == gl(gs, gi + 1));
+        lemma_slab::<W::R>(data@);
+        if gi + 1 == gs.len() {
+            assert(gs.take(gi + 1) =~= gs);
+        }
+    }
+    Walk::Next { pos: pos + hb + cb, item: item + count, segments: segments + 1, prev_lit: None }
+}
+
+/// A literal run: land in it, or step past it.
+#[verifier::spinoff_prover]
+#[verifier::rlimit(40)]
+fn walk_lit<'a, W: WriteOps<'a>>(data: &'a [u8], at: usize, Ghost(gi): Ghost<int>, pos: usize, item: usize, segments: usize, hb: usize, total: usize) -> (r: Walk<'a, W>)
+    requires
+        walk_at::<W::R>(data@, at as int, gi, pos as int, item as int, segments as int),
+        slab_groups::<W::R>(data@)[gi] is Lit, total == group_len(slab_groups::<W::R>(data@)[gi]),
+        hb == lit_head::<W::R>(total as nat).len(),
+        pos + hb <= data@.len(),
+    ensures walk_post::<W>(data@, at as int, gi, r),
+{
+    let ghost gs = slab_groups::<W::R>(data@);
+    let ghost g = gs[gi];
+    let ghost vs = g->values;
+    proof {
+        lemma_slab_group::<W::R>(data@, gi);
+        assert(vs.take(0) =~= Seq::<VOf<'a, W>>::empty());
+    }
+    let start = pos;
+    let mut q = pos + hb;
+    let mut j: usize = 0;
+    let stop = if at - item <= total { at - item - 1 } else { total };
+    while j < stop
+        invariant
+            valid_slab::<W::R>(data@), gs == slab_groups::<W::R>(data@), data@.len() <= usize::MAX,
+            0 <= gi < gs.len(), g == gs[gi], g is Lit, vs == g->values, vs.len() == total,
+            j <= stop, stop <= total, start == gb::<W::R>(gs, gi),
+            q == gb::<W::R>(gs, gi) + lit_head::<W::R>(vs.len()).len() + encs::<W::R>(vs.take(j as int)).len(),
+        decreases stop - j,
+    {
+        let ghost after = encs::<W::R>(vs.skip(j + 1)) + groups_bytes::<W::R>(gs.skip(gi + 1));
+        proof {
+            lemma_slab_lit::<W::R>(data@, gi, j as int);
+            lemma_starts(<W::R as RleOps<'a>>::enc(vs[j as int]), after);
+        }
+        let rest2 = &data[q..];
+        assert(rest2@ == data@.skip(q as int));
+        let vl = <W::R as RleOps<'a>>::value_len(rest2).unwrap();
+        q = q + vl;
+        j = j + 1;
+    }
+    if at - item <= total {
+        let jj = stop;
+        let ghost after = encs::<W::R>(vs.skip(jj + 1)) + groups_bytes::<W::R>(gs.skip(gi + 1));
+        proof {
+            lemma_slab_lit::<W::R>(data@, gi, jj as int);
+            lemma_starts(<W::R as RleOps<'a>>::enc(vs[jj as int]), after);
+        }
+        let rest3 = &data[q..];
+        assert(rest3@ == data@.skip(q as int));
+        let (vlen, value) = <W::R as RleOps<'a>>::unpack(rest3);
+        proof {
+            lemma_value::<W::R>(data@.skip(q as int), vs[jj as int], after, vlen as int, value);
+        }
+        let state = State::lit(jj, W::cow_ref(value), start);
+        let byte_start = if jj == 0 { start } else { q };
+        let rs = RleDecoderState { byte_pos: q + vlen, remaining: total - jj - 1, run: SuspendedRun::Literal };
+        proof {
+            lemma_land_lit::<W>(data@, gi, jj as int, state, byte_start as int);
+            assert(vs.take(vs.len() - rs.remaining) =~= vs.take(jj + 1));
+            assert(state_at::<W::R>(data@, rs, gi + 1));
+            let g2 = choose|g3: int| state_at::<W::R>(data@, rs, g3);
+            lemma_state_unique::<W::R>(data@, rs, g2, gi + 1);
+        }
+        return Walk::Landed(PartitionAt { state, segments: segments + jj, byte_start, read_segments: segments + jj + 1, read_state: rs });
+    }
+    proof {
+        assert(vs.take(total as int) =~= vs);
+        assert(group_bytes::<W::R>(g) == lit_head::<W::R>(total as nat) + encs::<W::R>(vs));
+        assert(q == gb::<W::R>(gs, gi + 1));
+        assert(item + total == gl(gs, gi + 1));
+        lemma_slab::<W::R>(data@);
+        if gi + 1 == gs.len() {
+            assert(gs.take(gi + 1) =~= gs);
+        }
+    }
+    Walk::Next { pos: q, item: item + total, segments: segments + total, prev_lit: Some((start, total)) }
+}
+
+/// Open a rebuild of the valid slab `data` at item `at`.
+pub(crate) fn partition_at<'a, W: WriteOps<'a>>(data: &'a [u8], at: usize) -> (p: PartitionAt<'a, W>)
+    requires
+        valid_slab::<W::R>(data@), data@.len() < i64::MAX,
+        at <= slab_values::<W::R>(data@).len(),
+    ensures
+        p.byte_start <= data@.len(),
+        state_ok::<W::R>(data@, p.read_state), state_pos::<W::R>(data@, p.read_state) == at,
+        landed::<W>(data@, at as int, p.state, p.byte_start as int),
+{
+    let ghost gs = slab_groups::<W::R>(data@);
+    proof {
+        lemma_slab::<W::R>(data@);
+    }
+    let _len = data.len();
+    if at == 0 {
+        let rs = RleDecoderState::start();
+        proof {
+            assert(gs.take(0) =~= Seq::<Group<VOf<'a, W>>>::empty());
+            assert(gb::<W::R>(gs, 0) == 0);
+            assert(state_at::<W::R>(data@, rs, 0));
+            let g = choose|gi: int| state_at::<W::R>(data@, rs, gi);
+            lemma_state_unique::<W::R>(data@, rs, g, 0);
+            let e = Seq::<Group<VOf<'a, W>>>::empty();
+            assert(data@.take(0) =~= Seq::<u8>::empty());
+            assert(rel(State::<'a, W>::Empty, data@.take(0), Seq::empty(), 0, e, Seq::empty(), 0));
+            assert(slab_values::<W::R>(data@).take(0) =~= values_of(State::<'a, W>::Empty, e, Seq::empty()));
+        }
+        return PartitionAt { state: State::Empty, segments: 0, byte_start: 0, read_segments: 0, read_state: rs };
+    }
+    let mut pos: usize = 0;
+    let mut item: usize = 0;
+    let mut segments: usize = 0;
+    let mut prev_lit: Option<(usize, usize)> = None;
+    let ghost mut gi: int = 0;
+    proof {
+        assert(gs.take(0) =~= Seq::<Group<VOf<'a, W>>>::empty());
+        if gs.len() == 0 {
+            assert(gs.take(0) =~= gs);
+        }
+    }
+    loop
+        invariant
+            walk_at::<W::R>(data@, at as int, gi, pos as int, item as int, segments as int), gs == slab_groups::<W::R>(data@),
+            prev_lit == prev_lit_of::<W::R>(data@, gi),
+        decreases gs.len() - gi,
+    {
+        proof {
+            lemma_slab_group::<W::R>(data@, gi);
+        }
+        let rest0 = &data[pos..];
+        assert(rest0@ == data@.skip(pos as int));
+        proof {
+            let g = gs[gi];
+            lemma_starts(<W::R as RleOps<'a>>::enc_signed(header_of(g) as i64), payload::<W::R>(g) + groups_bytes::<W::R>(gs.skip(gi + 1)));
+        }
+        let (hb, hv) = <W::R as RleOps<'a>>::read_signed_opt(rest0).unwrap();
+        proof {
+            lemma_walk_header::<W::R>(data@, gi, pos as int, hb as int, hv);
+        }
+        let w = if hv > 0 {
+            walk_run::<W>(data, at, Ghost(gi), pos, item, segments, prev_lit, hb, hv as usize)
+        } else if hv < 0 {
+            walk_lit::<W>(data, at, Ghost(gi), pos, item, segments, hb, (-hv) as usize)
+        } else {
+            walk_null::<W>(data, at, Ghost(gi), pos, item, segments, hb)
+        };
+        match w {
+            Walk::Landed(p) => return p,
+            Walk::Next { pos: p2, item: i2, segments: s2, prev_lit: pl } => {
+                pos = p2;
+                item = i2;
+                segments = s2;
+                prev_lit = pl;
+                proof {
+                    gi = gi + 1;
+                }
+            },
+        }
     }
 }
 

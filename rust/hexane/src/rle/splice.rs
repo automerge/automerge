@@ -5,7 +5,7 @@ use std::ops::Range;
 
 use crate::encoding::RunDecoder;
 
-use crate::rle::state::{FlushState, RewriteHeader, RleCow, RleState, WPos};
+use crate::rle::state::{FlushState, RewriteHeader, RleCow, RleState, WOps, WPos};
 use crate::rle::{RleDecoder, RleTail, Slab};
 use crate::{AsColumnRef, Codec, RleValue};
 
@@ -293,11 +293,12 @@ pub(crate) fn find_partition_at<T: RleValue, C: Codec>(
     slab: &Slab,
     at: usize,
 ) -> PartitionAt<'_, T, C> {
-    let p = find_partition_inner::<T, T, C>(slab, at..at, false);
+    // the walk is verified with Verus (`dec::partition_at`)
+    let p = crate::rle::dec::partition_at::<WOps<'_, T, T, C>>(&slab.data, at);
     PartitionAt {
-        state: p.prefix.state,
-        segments: p.prefix.segments,
-        byte_start: p.outer.start,
+        state: p.state,
+        segments: p.segments,
+        byte_start: p.byte_start,
         read_segments: p.read_segments,
         read_state: p.read_state,
     }

@@ -101,6 +101,11 @@ impl<'a, T: RleValue, V: AsColumnRef<T>, C: Codec> WriteOps<'a> for WOps<'a, T, 
     }
 
     #[inline(always)]
+    fn cow_ref(v: <Self::R as RleOps<'a>>::V) -> Self::Cow {
+        RleCow::Ref(v)
+    }
+
+    #[inline(always)]
     fn cow_eq(a: &Self::Cow, b: &Self::Cow) -> bool {
         a == b
     }
@@ -368,7 +373,7 @@ pub(crate) open spec fn flushed<'a, W: WriteOps<'a>>(s0: State<'a, W>, b0: Seq<u
 /// The bytes a flush onto `lit` literal values that follow in the slab
 /// writes before them: the groups, then one literal header covering the
 /// pending values and those `lit`, then the pending values.
-pub(crate) open spec fn lit_head<'a, W: WriteOps<'a>>(s: State<'a, W>, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>, lit: nat) -> Seq<u8> {
+pub(crate) open spec fn lit_flush_bytes<'a, W: WriteOps<'a>>(s: State<'a, W>, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>, lit: nat) -> Seq<u8> {
     match s {
         State::Lit { current, .. } => groups_bytes::<W::R>(gs)
             + <W::R as RleOps<'a>>::enc_signed(-((ws.len() + 1 + lit) as int) as i64)
@@ -384,7 +389,7 @@ pub(crate) open spec fn lit_head<'a, W: WriteOps<'a>>(s: State<'a, W>, gs: Seq<G
 /// and returned the rewrite `rw`.
 pub(crate) open spec fn flushed_lit<'a, W: WriteOps<'a>>(s0: State<'a, W>, b0: Seq<u8>, b1: Seq<u8>, rw: Option<RewriteHeader>, lit: nat) -> bool {
     forall|pre: Seq<u8>, base: int, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>, h0: i64| #[trigger] rel(s0, pre, b0, base, gs, ws, h0)
-        ==> 0 <= base <= b1.len() && apply::<W>(rw, pre, h0) + b1.skip(base) == lit_head(s0, gs, ws, lit)
+        ==> 0 <= base <= b1.len() && apply::<W>(rw, pre, h0) + b1.skip(base) == lit_flush_bytes(s0, gs, ws, lit)
 }
 
 /// `n` copies of `v`.
@@ -1061,7 +1066,11 @@ impl<'a, W: WriteOps<'a>> State<'a, W> {
     }
 
     /// A literal run imported from a slab; nothing written locally yet.
-    pub(crate) fn lit(count: usize, current: W::Cow, header_pos: usize) -> Self {
+    pub(crate) fn lit(count: usize, current: W::Cow, header_pos: usize) -> (r: Self)
+        ensures
+            count == 0 ==> r == State::<'a, W>::Lone(current),
+            count > 0 ==> r == (State::<'a, W>::Lit { count, local: 0, current, header_pos, bytes: 0 }),
+    {
         if count == 0 {
             State::Lone(current)
         } else {
@@ -1358,6 +1367,7 @@ impl<'a, W: WriteOps<'a>> State<'a, W> {
     }
 
     /// Append `count` nulls.
+    #[inline]
     pub(crate) fn append_null_n(&mut self, buf: &mut Vec<u8>, count: usize) -> (f: FlushState)
         requires
             wf(*old(self), old(buf)@), <W::R as RleOps<'a>>::nullable(),
@@ -1432,7 +1442,7 @@ impl<'a, W: WriteOps<'a>> State<'a, W> {
                     let f = FlushState::new(local + 1, wpos);
                     proof {
                         assert forall|pre: Seq<u8>, base: int, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>, h0: i64| #[trigger] rel(s0, pre, b0, base, gs, ws, h0)
-                            implies 0 <= base <= buf@.len() && apply::<W>(f.rewrite, pre, h0) + buf@.skip(base) == lit_head(s0, gs, ws, lit as nat) by {
+                            implies 0 <= base <= buf@.len() && apply::<W>(f.rewrite, pre, h0) + buf@.skip(base) == lit_flush_bytes(s0, gs, ws, lit as nat) by {
                             assert(ws.push(c) != ws) by {
                                 assert(ws.push(c).len() != ws.len());
                             }
@@ -1444,7 +1454,7 @@ impl<'a, W: WriteOps<'a>> State<'a, W> {
                     let f = FlushState::rewrite(local + 1, RewriteHeader::new(total, header_pos), wpos);
                     proof {
                         assert forall|pre: Seq<u8>, base: int, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>, h0: i64| #[trigger] rel(s0, pre, b0, base, gs, ws, h0)
-                            implies 0 <= base <= buf@.len() && apply::<W>(f.rewrite, pre, h0) + buf@.skip(base) == lit_head(s0, gs, ws, lit as nat) by {
+                            implies 0 <= base <= buf@.len() && apply::<W>(f.rewrite, pre, h0) + buf@.skip(base) == lit_flush_bytes(s0, gs, ws, lit as nat) by {
                             assert(ws.push(c) != ws) by {
                                 assert(ws.push(c).len() != ws.len());
                             }
@@ -1461,7 +1471,7 @@ impl<'a, W: WriteOps<'a>> State<'a, W> {
                 let bytes = W::cow_pack(&value, buf);
                 proof {
                     assert forall|pre: Seq<u8>, base: int, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>, h0: i64| #[trigger] rel(s0, pre, b0, base, gs, ws, h0)
-                        implies 0 <= base <= buf@.len() && apply::<W>(None, pre, h0) + buf@.skip(base) == lit_head(s0, gs, ws, lit as nat) by {
+                        implies 0 <= base <= buf@.len() && apply::<W>(None, pre, h0) + buf@.skip(base) == lit_flush_bytes(s0, gs, ws, lit as nat) by {
                         assert(buf@.skip(base) =~= b0.skip(base) + <W::R as RleOps<'a>>::enc_signed(-(total as int) as i64)
                             + <W::R as RleOps<'a>>::enc(W::val(value)));
                     }
@@ -1476,7 +1486,7 @@ impl<'a, W: WriteOps<'a>> State<'a, W> {
                 flushed.wpos = WPos::lit(pos, 0, true);
                 proof {
                     assert forall|pre: Seq<u8>, base: int, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>, h0: i64| #[trigger] rel(s0, pre, b0, base, gs, ws, h0)
-                        implies 0 <= base <= buf@.len() && apply::<W>(flushed.rewrite, pre, h0) + buf@.skip(base) == lit_head(s0, gs, ws, lit as nat) by {
+                        implies 0 <= base <= buf@.len() && apply::<W>(flushed.rewrite, pre, h0) + buf@.skip(base) == lit_flush_bytes(s0, gs, ws, lit as nat) by {
                         assert(buf@.skip(base) =~= b1.skip(base) + <W::R as RleOps<'a>>::enc_signed(-(lit as int) as i64));
                     }
                 }

@@ -160,6 +160,10 @@ pub trait WriteOps<'a> {
     /// The value a `Cow` stands for.
     spec fn val(c: Self::Cow) -> <Self::R as RleOps<'a>>::V;
 
+    /// A value borrowed from the slab.
+    fn cow_ref(v: <Self::R as RleOps<'a>>::V) -> (c: Self::Cow)
+        ensures Self::val(c) == v;
+
     /// `a == b`.
     fn cow_eq(a: &Self::Cow, b: &Self::Cow) -> (r: bool)
         ensures r == (Self::val(*a) == Self::val(*b));
