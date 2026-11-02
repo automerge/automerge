@@ -951,6 +951,8 @@ pub struct BoolLoadIter<'a, C: Codec = Leb128> {
     slab_segs: usize,
     tail: u8,
     target_segments: usize,
+    /// items read so far, which bounds every slab's `len`
+    len: usize,
 }
 
 impl<'a, C: Codec> BoolLoadIter<'a, C> {
@@ -968,6 +970,7 @@ impl<'a, C: Codec> BoolLoadIter<'a, C> {
             // Target half-full slabs, rounded to even so each slab starts
             // on a false run.
             target_segments: ((max_segments / 2) & !1).max(2),
+            len: 0,
         }
     }
 
@@ -1004,7 +1007,8 @@ impl<'a, C: Codec> BoolLoadIter<'a, C> {
             let value = !self.run_index.is_multiple_of(2);
             self.pos = next_pos;
             self.run_index += 1;
-            // untrusted count
+            // untrusted count: the column's length must fit a usize
+            self.len = self.len.checked_add(count).ok_or(PackError::BadFormat)?;
             self.slab_items = self
                 .slab_items
                 .checked_add(count)
@@ -1034,6 +1038,7 @@ impl<'a, C: Codec> BoolLoadIter<'a, C> {
         let mut slab_segs = self.slab_segs;
         let mut tail = self.tail;
         let target_segments = self.target_segments;
+        let mut len = self.len;
 
         while pos < data.len() {
             let (cb, count) = C::read_count(&data[pos..]).ok_or(PackError::BadFormat)?;
@@ -1047,6 +1052,8 @@ impl<'a, C: Codec> BoolLoadIter<'a, C> {
             }
             pos = next_pos;
             run_index += 1;
+            // untrusted count: the column's length must fit a usize
+            len = len.checked_add(count).ok_or(PackError::BadFormat)?;
             slab_items += count;
             slab_segs += 1;
             if slab_segs >= target_segments {
