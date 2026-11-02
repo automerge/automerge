@@ -264,9 +264,24 @@ impl<'a, W: WriteOps<'a>> Splice<'a, W> {
         if self.overflowed { Seq::empty() } else { self.pre@ }
     }
 
-    /// Room for `n` more values in the pending group.
+    /// Room for `n` more values in the slab in hand.
     pub(crate) closed spec fn room(&self, n: nat) -> bool {
-        self.state.plen() + n <= i64::MAX && self.state.plen() + n + 2 < usize::MAX
+        self.cur@.len() + n + 2 < usize::MAX
+    }
+
+    /// The pending group is among the values written.
+    proof fn lemma_room(&self)
+        requires self.inv(),
+        ensures self.state.plen() <= self.cur@.len(),
+    {
+        let (gs, ws) = choose|gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>|
+            #[trigger] rel(self.state, apply::<W>(self.f.rewrite, self.cur_pre(), self.h0@), self.buf@, 0, gs, ws, self.h0@)
+            && values_of(self.state, gs, ws) == self.cur@;
+        if !(self.state is Empty) {
+            let g = pend_group(self.state, ws)->Some_0;
+            lemma_push::<W::R>(gs, g);
+            lemma_group_values_len(g, <W::R as RleOps<'a>>::null());
+        }
     }
 
     pub(crate) closed spec fn inv(&self) -> bool {
@@ -378,13 +393,18 @@ impl<'a, W: WriteOps<'a>> Splice<'a, W> {
         if add(add(self.starting_segments, self.f.segments), self.state.pending_segments()) >= self.target {
             self.cut();
         }
-        self.inserted = add(self.inserted, count);
+        proof {
+            self.lemma_room();
+        }
         let ghost s0 = self.state;
         let ghost b0 = self.buf@;
         let ghost rw0 = self.f.rewrite;
         let ghost cur0 = self.cur@;
         let f = self.state.append_cow(&mut self.buf, value, count);
         add_flush(&mut self.f, f);
+        // counted once appended, so a run that panics as too long leaves
+        // the rebuild as it was for the cursor's drop to close
+        self.inserted = add(self.inserted, count);
         proof {
             let added = copies(count as nat, W::val(value));
             self.cur = Ghost(cur0 + added);
@@ -532,6 +552,9 @@ impl<'a, W: WriteOps<'a>> Splice<'a, W> {
         let ghost pre = self.pre@;
         let ghost h0 = self.h0@;
         let ghost p0 = apply::<W>(rw0, pre, h0);
+        proof {
+            self.lemma_room();
+        }
         let f = self.state.flush_postfix(&mut self.buf, postfix);
         add_flush(&mut self.f, f);
         let ghost b1 = self.buf@;
@@ -579,6 +602,9 @@ impl<'a, W: WriteOps<'a>> Splice<'a, W> {
         let ghost s0 = self.state;
         let ghost b0 = self.buf@;
         let ghost h0 = self.h0@;
+        proof {
+            self.lemma_room();
+        }
         let f = self.state.flush_postfix(&mut self.buf, postfix);
         add_flush(&mut self.f, f);
         let ghost b1 = self.buf@;

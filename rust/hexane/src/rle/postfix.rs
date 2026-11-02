@@ -448,19 +448,20 @@ proof fn lemma_join_rest<'a, O: RleOps<'a>>(a: Seq<Group<O::V>>, rest: Seq<Group
 /// bytes written, then the slab's from `end`, are the canonical encoding
 /// of the values written, then the slab's after `at`.
 #[verifier::spinoff_prover]
-#[verifier::rlimit(30)]
+#[verifier::rlimit(60)]
 proof fn lemma_join_lit<'a, W: WriteOps<'a>>(s1: State<'a, W>, pre1: Seq<u8>, b1: Seq<u8>, base: int, gs1: Seq<Group<VOf<'a, W>>>, ws1: Seq<VOf<'a, W>>, h0: i64, b2: Seq<u8>, rw2: Option<RewriteHeader>, data: Seq<u8>, at: int, v: VOf<'a, W>, lit: nat, end: int, i: int, j: int)
     requires
         rel(s1, pre1, b1, base, gs1, ws1, h0), last_is(s1, v),
         lit == 0 ==> flushed(s1, b1, b2, rw2),
         lit > 0 ==> flushed_lit(s1, b1, b2, rw2, lit),
-        s1.plen() + lit <= i64::MAX,
+        lit > 0 ==> lit_fits(s1, lit),
         valid_slab::<W::R>(data), tail_lit::<W::R>(data, at, v, lit, end, i, j),
     ensures
         0 <= base <= b2.len(),
         encodes::<W::R>(apply::<W>(rw2, pre1, h0) + b2.skip(base) + data.skip(end),
             values_of(s1, gs1, ws1) + slab_values::<W::R>(data).skip(at + 1)),
 {
+    hide(canonical);
     let gs = slab_groups::<W::R>(data);
     let vs = gs[i]->values;
     let l = vs.skip(j + 1);
@@ -490,6 +491,7 @@ proof fn lemma_join_lit<'a, W: WriteOps<'a>>(s1: State<'a, W>, pre1: Seq<u8>, b1
         let w = pend_group(s1, ws1)->Some_0->values;
         assert(w.len() > 0 && w.last() == v);
         assert(w.len() == s1.plen());
+        assert(w.len() + l.len() <= i64::MAX);
         let n = Group::<VOf<'a, W>>::Lit { values: w + l };
         lemma_lit_extend::<W::R>(gs1, w, l);
         lemma_push::<W::R>(gs1, n);
@@ -596,7 +598,7 @@ proof fn lemma_joined_lit<'a, W: WriteOps<'a>>(s0: State<'a, W>, b0: Seq<u8>, s1
         step(s0, b0, s1, b1, rw1, copies(1, v)), rw_ok(s0, s1, rw1), last_is(s1, v),
         lit == 0 ==> flushed(s1, b1, b2, rw2),
         lit > 0 ==> flushed_lit(s1, b1, b2, rw2, lit as nat),
-        rw2 is Some ==> pre_lit(s1), s1.plen() + lit <= i64::MAX,
+        rw2 is Some ==> pre_lit(s1), lit > 0 ==> lit_fits(s1, lit as nat),
     ensures joined(s0, b0, b2, comb(rw1, rw2), Some(Postfix::Lit { value: v, lit })),
 {
     hide(canonical);
@@ -628,7 +630,7 @@ proof fn lemma_joined_lone<'a, W: WriteOps<'a>>(s0: State<'a, W>, b0: Seq<u8>, s
         step(s1, b1, s2, b2, rw2, copies(1, v)), rw_ok(s1, s2, rw2), last_is(s2, v),
         lit == 0 ==> flushed(s2, b2, b3, rw3),
         lit > 0 ==> flushed_lit(s2, b2, b3, rw3, lit as nat),
-        rw3 is Some ==> pre_lit(s2), s2.plen() + lit <= i64::MAX,
+        rw3 is Some ==> pre_lit(s2), lit > 0 ==> lit_fits(s2, lit as nat),
     ensures joined(s0, b0, b3, comb(comb(rw1, rw2), rw3), Some(Postfix::LonePlusLit { lone, value: v, lit })),
 {
     hide(canonical);
@@ -670,7 +672,7 @@ impl<'a, W: WriteOps<'a>> State<'a, W> {
     pub(crate) fn flush_postfix(&mut self, buf: &mut Vec<u8>, postfix: Option<Postfix<W::Cow>>) -> (f: FlushState)
         requires
             wf(*old(self), old(buf)@), nulls_ok::<W>(postfix),
-            old(self).plen() + plen_of(postfix) <= i64::MAX, old(self).plen() + plen_of(postfix) + 2 < usize::MAX,
+            old(self).plen() + plen_of(postfix) + 2 < usize::MAX,
         ensures
             (*final(self)) is Empty,
             rw_from(*old(self), f.rewrite),

@@ -146,10 +146,34 @@ verus! {
 /// Panics: a repeat run longer than `i64::MAX` has no encoding.  Trusted
 /// only in that a panic does not return.
 #[verifier::external_body]
+#[cold]
+#[inline(never)]
 fn run_too_long(count: usize)
     ensures false,
 {
     panic!("a run of {count} equal values is not encodable")
+}
+
+/// Panics: a literal run of more than `i64::MAX` values has no encoding
+/// (nor the memory to hold one).  Trusted only in that a panic does not
+/// return.
+#[verifier::external_body]
+#[cold]
+#[inline(never)]
+fn lit_too_long()
+    ensures false,
+{
+    panic!("a literal run of more than i64::MAX values is not encodable")
+}
+
+/// A new repeat run of `n` values: panics if it has no encoding.
+#[inline(always)]
+fn check_run(n: usize)
+    ensures n <= i64::MAX,
+{
+    if n as u64 > i64::MAX as u64 {
+        run_too_long(n);
+    }
 }
 
 /// Returned when flushing a Lit whose header is not in our buffer.
@@ -344,7 +368,7 @@ pub(crate) open spec fn wf<'a, W: WriteOps<'a>>(s: State<'a, W>, buf: Seq<u8>) -
     match s {
         State::Empty => true,
         State::Lone(c) => !<W::R as RleOps<'a>>::is_null(W::val(c)),
-        State::Run(n, c) => n >= 2 && !<W::R as RleOps<'a>>::is_null(W::val(c)),
+        State::Run(n, c) => 2 <= n <= i64::MAX && !<W::R as RleOps<'a>>::is_null(W::val(c)),
         State::Null(_) => true,
         State::Lit { count, local, header_pos, current, .. } => {
             &&& !<W::R as RleOps<'a>>::is_null(W::val(current))
@@ -417,6 +441,12 @@ pub(crate) open spec fn last_is<'a, W: WriteOps<'a>>(s: State<'a, W>, v: VOf<'a,
         State::Run(_, c) => W::val(c) == v && !<W::R as RleOps<'a>>::is_null(v),
         State::Lit { current, .. } => W::val(current) == v && !<W::R as RleOps<'a>>::is_null(v),
     }
+}
+
+/// A flush onto `lit` literal values that follow fits one header: the
+/// pending literal (or lone value) and those values.
+pub(crate) open spec fn lit_fits<'a, W: WriteOps<'a>>(s: State<'a, W>, lit: nat) -> bool {
+    (s is Lit || s is Lone) ==> s.plen() + lit <= i64::MAX
 }
 
 /// `n` copies of `v`.
@@ -906,7 +936,7 @@ pub(crate) proof fn lemma_step_lit_close<'a, W: WriteOps<'a>>(s0: State<'a, W>, 
     requires
         s0 is Lit, s1 == State::<'a, W>::Run((n + 1) as usize, s1->Run_1),
         W::val(s1->Run_1) == W::val(s0->Lit_current),
-        n >= 1, s0->Lit_count + 1 + n <= i64::MAX, n + 1 < usize::MAX,
+        n >= 1, s0->Lit_count + 1 <= i64::MAX, n + 1 <= i64::MAX, n + 1 < usize::MAX,
         s0->Lit_local == s0->Lit_count ==> rw is None && b1 == b0.take(s0->Lit_header_pos as int)
             + <W::R as RleOps<'a>>::enc_signed(-(s0->Lit_count as int) as i64)
             + b0.skip(s0->Lit_header_pos + ph::<W>().len()),
@@ -982,7 +1012,7 @@ pub(crate) proof fn lemma_step_lit_close_new<'a, W: WriteOps<'a>>(s0: State<'a, 
 pub(crate) proof fn lemma_step_flush_null<'a, W: WriteOps<'a>>(s0: State<'a, W>, b0: Seq<u8>, b1: Seq<u8>, rw: Option<RewriteHeader>, count: usize)
     requires
         flushed(s0, b0, b1, rw), !(s0 is Empty), !(s0 is Null),
-        1 <= count <= i64::MAX, <W::R as RleOps<'a>>::nullable(),
+        1 <= count, <W::R as RleOps<'a>>::nullable(),
     ensures step(s0, b0, State::<'a, W>::Null(count), b1, rw, copies(count as nat, <W::R as RleOps<'a>>::null())),
 {
     let s1 = State::<'a, W>::Null(count);
@@ -1058,10 +1088,8 @@ impl<'a, W: WriteOps<'a>> State<'a, W> {
     }
 
     fn emit_run(buf: &mut Vec<u8>, count: usize, value: &W::Cow) -> (r: WPos)
-        requires !<W::R as RleOps<'a>>::is_null(W::val(*value)), count >= 1,
-        ensures
-            final(buf)@ == old(buf)@ + group_bytes::<W::R>(run_group(count as nat, W::val(*value))),
-            count <= i64::MAX,
+        requires !<W::R as RleOps<'a>>::is_null(W::val(*value)), 1 <= count <= i64::MAX,
+        ensures final(buf)@ == old(buf)@ + group_bytes::<W::R>(run_group(count as nat, W::val(*value))),
     {
         let pos = buf.len();
         if count == 1 {
@@ -1072,12 +1100,6 @@ impl<'a, W: WriteOps<'a>> State<'a, W> {
             }
             WPos::lit(pos, bytes, true)
         } else {
-            // A repeat run's header is an `i64`, and a canonical encoding
-            // can't split the run in two, so a longer run has no encoding
-            // (like a `Column::fill` that long).
-            if count > i64::MAX as usize {
-                run_too_long(count);
-            }
             W::put_signed(count as i64, buf);
             W::cow_pack(value, buf);
             WPos::run(pos, true)
@@ -1107,10 +1129,11 @@ impl<'a, W: WriteOps<'a>> State<'a, W> {
     }
 
     pub(crate) fn make_run(n: usize, value: W::Cow) -> (r: Self)
+        requires n <= i64::MAX,
         ensures
             n == 0 ==> r is Empty,
             n == 1 ==> r == State::<'a, W>::Lone(value),
-            n >= 2 ==> r == State::<'a, W>::Run(n, value),
+            n >= 2 ==> r == State::<'a, W>::Run(n, value) && n <= i64::MAX,
     {
         match n {
             0 => State::Empty,
@@ -1218,8 +1241,7 @@ impl<'a, W: WriteOps<'a>> State<'a, W> {
     #[inline(always)]
     pub(crate) fn append_cow(&mut self, buf: &mut Vec<u8>, value: W::Cow, n: usize) -> (f: FlushState)
         requires
-            wf(*old(self), old(buf)@),
-            old(self).plen() + n <= i64::MAX, old(self).plen() + n + 1 < usize::MAX,
+            wf(*old(self), old(buf)@), old(self).plen() + n + 1 < usize::MAX,
             <W::R as RleOps<'a>>::is_null(W::val(value)) ==> <W::R as RleOps<'a>>::nullable(),
         ensures
             wf(*final(self), final(buf)@),
@@ -1250,6 +1272,11 @@ impl<'a, W: WriteOps<'a>> State<'a, W> {
             }
             return self.append_null_n(buf, n);
         }
+        // Checked before anything is written, so a panic leaves the state
+        // as it was. A repeat run's header is an `i64`, and a canonical
+        // encoding can't split the run in two, so a longer run has no
+        // encoding (like a `Column::fill` that long).
+        check_run(n);
         let mut flushed = FlushState::none();
         let ghost mut s1 = State::<'a, W>::Empty;
         let next_state = match self {
@@ -1257,6 +1284,9 @@ impl<'a, W: WriteOps<'a>> State<'a, W> {
                 let ghost pc = *prev;
                 if W::cow_eq(&value, prev) {
                     let ghost c0 = *count;
+                    if n as u64 > i64::MAX as u64 - *count as u64 {
+                        run_too_long(count.saturating_add(n));
+                    }
                     *count = *count + n;
                     proof {
                         s1 = State::Run(*count, pc);
@@ -1280,6 +1310,9 @@ impl<'a, W: WriteOps<'a>> State<'a, W> {
             State::Lit { count, local, header_pos, current, bytes } => {
                 let ghost cur = *current;
                 if W::cow_eq(&value, current) {
+                    if n as u64 >= i64::MAX as u64 {
+                        run_too_long(n.saturating_add(1));
+                    }
                     if *local == *count {
                         let ghost hp = *header_pos as int;
                         W::rewrite_lit_header(buf, *header_pos, *count);
@@ -1298,6 +1331,9 @@ impl<'a, W: WriteOps<'a>> State<'a, W> {
                     }
                     Some(r)
                 } else if n == 1 {
+                    if *count as u64 >= i64::MAX as u64 - 1 {
+                        lit_too_long();
+                    }
                     *bytes = W::cow_pack(current, buf);
                     *count = *count + 1;
                     *local = *local + 1;
@@ -1347,6 +1383,9 @@ impl<'a, W: WriteOps<'a>> State<'a, W> {
             State::Lone(prev) => {
                 let ghost p = W::val(*prev);
                 if W::cow_eq(&value, prev) {
+                    if n as u64 >= i64::MAX as u64 {
+                        run_too_long(n.saturating_add(1));
+                    }
                     let r = State::Run(n + 1, value);
                     proof {
                         s1 = r;
@@ -1402,7 +1441,7 @@ impl<'a, W: WriteOps<'a>> State<'a, W> {
     pub(crate) fn append_null_n(&mut self, buf: &mut Vec<u8>, count: usize) -> (f: FlushState)
         requires
             wf(*old(self), old(buf)@), <W::R as RleOps<'a>>::nullable(),
-            1 <= count, old(self).plen() + count <= i64::MAX, old(self).plen() + count + 1 < usize::MAX,
+            1 <= count, old(self).plen() + count + 1 < usize::MAX,
         ensures
             wf(*final(self), final(buf)@),
             final(self).plen() <= old(self).plen() + count,
@@ -1444,13 +1483,23 @@ impl<'a, W: WriteOps<'a>> State<'a, W> {
     /// pending values join them in one literal.
     pub(crate) fn flush_with_lit(&mut self, buf: &mut Vec<u8>, lit: usize) -> (f: FlushState)
         requires
-            wf(*old(self), old(buf)@),
-            old(self).plen() + lit <= i64::MAX, old(self).plen() + lit + 1 < usize::MAX,
+            wf(*old(self), old(buf)@), old(self).plen() + lit + 1 < usize::MAX,
         ensures
             (*final(self)) is Empty, rw_from(*old(self), f.rewrite),
+            lit > 0 ==> lit_fits(*old(self), lit as nat),
             lit == 0 ==> flushed(*old(self), old(buf)@, final(buf)@, f.rewrite),
             lit > 0 ==> flushed_lit(*old(self), old(buf)@, final(buf)@, f.rewrite, lit as nat),
     {
+        // Checked before anything is written, so a panic leaves the state
+        // as it was: the literal's header must hold its values and these.
+        let held: usize = match self {
+            State::Lit { count, .. } => *count + 1,
+            State::Lone(_) => 1,
+            _ => 0,
+        };
+        if lit as u64 > i64::MAX as u64 - held as u64 {
+            lit_too_long();
+        }
         let ghost s0 = *self;
         let ghost b0 = buf@;
         let mut old = State::Empty;
