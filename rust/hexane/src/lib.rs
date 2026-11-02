@@ -102,6 +102,7 @@ pub mod bijou {
 #[cfg(feature = "bijou64")]
 mod bijou64;
 pub mod bool;
+pub(crate) mod bool_wire;
 pub(crate) mod btree;
 pub mod codec;
 pub mod column;

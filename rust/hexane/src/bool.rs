@@ -783,53 +783,12 @@ fn bool_count_segments<C: Codec>(slab: &[u8]) -> usize {
 /// 4. No two adjacent runs can be merged (implied by alternating, but
 ///    a zero-count interior run would effectively merge its neighbors)
 fn bool_validate_encoding<C: Codec>(slab: &[u8]) -> Result<SlabInfo<u8>, PackError> {
-    if slab.is_empty() {
-        return Ok(SlabInfo {
-            segments: 0,
-            len: 0,
-            tail: 0,
-        });
-    }
-
-    let mut byte_pos = 0;
-    let mut run_index = 0;
-    let mut value = false;
-    let mut segments = 0;
-    let mut len: usize = 0;
-    let mut last_cb: u8 = 0;
-
-    while byte_pos < slab.len() {
-        let (cb, count) = C::read_count(&slab[byte_pos..]).ok_or(PackError::BadFormat)?;
-
-        if count == 0 && run_index > 0 {
-            return Err(PackError::InvalidValue(format!(
-                "run {run_index} (value={value}): zero count in non-first run"
-            )));
-        }
-
-        let next_pos = byte_pos + cb;
-        if next_pos >= slab.len() && count == 0 {
-            return Err(PackError::InvalidValue(format!(
-                "run {run_index} (value={value}): trailing zero-count run"
-            )));
-        }
-
-        segments += 1;
-        // untrusted count
-        len = len
-            .checked_add(count)
-            .ok_or(PackError::InvalidValue("length overflows usize".into()))?;
-        last_cb = cb as u8;
-
-        byte_pos = next_pos;
-        value = !value;
-        run_index += 1;
-    }
-
+    // verified with Verus: Ok exactly for the canonical encodings
+    let info = crate::bool_wire::validate::<crate::bool_wire::Counts<C>>(slab)?;
     Ok(SlabInfo {
-        segments,
-        len,
-        tail: last_cb,
+        segments: info.segments,
+        len: info.len,
+        tail: info.tail,
     })
 }
 
@@ -941,143 +900,35 @@ fn bool_merge_slabs<C: Codec>(
 /// starting with `false`; only the very first count may be zero (padding
 /// so the data can start with `true`). Yields the non-empty runs.
 pub struct BoolLoadIter<'a, C: Codec = Leb128> {
-    data: &'a [u8],
-    pos: usize,
-    run_index: usize,
+    /// the reading, checking and cutting, verified with Verus: a finished
+    /// load's slabs are canonical, with their recorded metadata, and
+    /// together hold the input's values
+    load: crate::bool_wire::BoolLoad<'a>,
     _codec: PhantomData<fn() -> C>,
-    // ── slab-cutting state, identical to the block loader ──
-    slabs: Vec<Slab>,
-    slab_start: usize,
-    slab_items: usize,
-    slab_segs: usize,
-    tail: u8,
-    target_segments: usize,
-    /// items read so far, which bounds every slab's `len`
-    len: usize,
 }
+
+type Counts<C> = crate::bool_wire::Counts<C>;
 
 impl<'a, C: Codec> BoolLoadIter<'a, C> {
     pub fn new(data: &'a [u8], max_segments: usize) -> Self {
         Self {
-            data,
-            pos: 0,
-            run_index: 0,
+            // half-full slabs, an even number of runs (at least 2) so each
+            // slab starts on a false run
+            load: crate::bool_wire::BoolLoad::new::<Counts<C>>(data, max_segments),
             _codec: PhantomData,
-            slabs: Vec::new(),
-            slab_start: 0,
-            slab_items: 0,
-            slab_segs: 0,
-            tail: 0,
-            // Target half-full slabs, rounded to even so each slab starts
-            // on a false run.
-            target_segments: ((max_segments / 2) & !1).max(2),
-            len: 0,
         }
-    }
-
-    fn cut_slab(&mut self) {
-        self.slabs.push(Slab {
-            data: self.data[self.slab_start..self.pos].to_vec(),
-            len: self.slab_items,
-            segments: self.slab_segs,
-            tail: self.tail,
-        });
-        self.slab_start = self.pos;
-        self.slab_items = 0;
-        self.slab_segs = 0;
     }
 
     /// The next run, or `None` at end of input.
     #[inline]
     pub fn try_next_run(&mut self) -> Result<Option<Run<bool>>, PackError> {
-        loop {
-            if self.pos >= self.data.len() {
-                return Ok(None);
-            }
-            let (cb, count) = C::read_count(&self.data[self.pos..]).ok_or(PackError::BadFormat)?;
-            self.tail = cb as u8;
-            // Only the very first run may have count 0 (structural padding).
-            if count == 0 && self.run_index > 0 {
-                return Err(PackError::BadFormat);
-            }
-            let next_pos = self.pos + cb;
-            // A trailing zero-count run is invalid.
-            if next_pos >= self.data.len() && count == 0 {
-                return Err(PackError::BadFormat);
-            }
-            let value = !self.run_index.is_multiple_of(2);
-            self.pos = next_pos;
-            self.run_index += 1;
-            // untrusted count: the column's length must fit a usize
-            self.len = self.len.checked_add(count).ok_or(PackError::BadFormat)?;
-            self.slab_items = self
-                .slab_items
-                .checked_add(count)
-                .ok_or(PackError::BadFormat)?;
-            self.slab_segs += 1;
-            // Cut after target_segments — always even, so the next slab
-            // starts on a false run and can be memcpy'd as-is.
-            if self.slab_segs >= self.target_segments {
-                self.cut_slab();
-            }
-            if count == 0 {
-                continue;
-            }
-            return Ok(Some(Run { count, value }));
-        }
+        self.load.try_next_run::<Counts<C>>()
     }
 
     /// Drain and validate whatever the consumer did not pull, flush the
     /// final slab, and return the finished slabs.
     pub fn finalize(mut self) -> Result<Vec<Slab>, PackError> {
-        let data = self.data;
-        let mut slabs = std::mem::take(&mut self.slabs);
-        let mut pos = self.pos;
-        let mut run_index = self.run_index;
-        let mut slab_start = self.slab_start;
-        let mut slab_items = self.slab_items;
-        let mut slab_segs = self.slab_segs;
-        let mut tail = self.tail;
-        let target_segments = self.target_segments;
-        let mut len = self.len;
-
-        while pos < data.len() {
-            let (cb, count) = C::read_count(&data[pos..]).ok_or(PackError::BadFormat)?;
-            tail = cb as u8;
-            if count == 0 && run_index > 0 {
-                return Err(PackError::BadFormat);
-            }
-            let next_pos = pos + cb;
-            if next_pos >= data.len() && count == 0 {
-                return Err(PackError::BadFormat);
-            }
-            pos = next_pos;
-            run_index += 1;
-            // untrusted count: the column's length must fit a usize
-            len = len.checked_add(count).ok_or(PackError::BadFormat)?;
-            slab_items += count;
-            slab_segs += 1;
-            if slab_segs >= target_segments {
-                slabs.push(Slab {
-                    data: data[slab_start..pos].to_vec(),
-                    len: slab_items,
-                    segments: slab_segs,
-                    tail,
-                });
-                slab_start = pos;
-                slab_items = 0;
-                slab_segs = 0;
-            }
-        }
-        if slab_segs > 0 {
-            slabs.push(Slab {
-                data: data[slab_start..pos].to_vec(),
-                len: slab_items,
-                segments: slab_segs,
-                tail,
-            });
-        }
-        Ok(slabs)
+        self.load.finalize::<Counts<C>>()
     }
 }
 
@@ -1089,11 +940,11 @@ impl<'a, C: Codec> crate::encoding::LoadIterApi<'a, bool> for BoolLoadIter<'a, C
     }
 
     fn slabs_completed(&self) -> usize {
-        self.slabs.len()
+        self.load.slabs_completed()
     }
 
     fn completed_slab_len(&self, i: usize) -> usize {
-        self.slabs[i].len
+        self.load.completed_slab_len(i)
     }
 
     fn finalize(self) -> Result<Vec<Slab>, PackError> {
