@@ -138,6 +138,15 @@ pub(crate) open spec fn nulls_ok<'a, W: WriteOps<'a>>(p: Option<Postfix<W::Cow>>
     }
 }
 
+/// The postfix holds a null only in a nullable column, by its values.
+pub(crate) open spec fn vnulls_ok<'a, O: RleOps<'a>>(p: Option<Postfix<O::V>>) -> bool {
+    match p {
+        None => true,
+        Some(Postfix::Run { value, .. }) | Some(Postfix::Lit { value, .. }) => O::is_null(value) ==> O::nullable(),
+        Some(Postfix::LonePlusLit { lone, value, .. }) => (O::is_null(lone) || O::is_null(value)) ==> O::nullable(),
+    }
+}
+
 /// `bytes` are the canonical encoding of `vals`.
 pub open spec fn encodes<'a, O: RleOps<'a>>(bytes: Seq<u8>, vals: Seq<O::V>) -> bool {
     exists|gs: Seq<Group<O::V>>| #[trigger] canonical::<O>(gs) && groups_bytes::<O>(gs) == bytes
@@ -734,6 +743,71 @@ impl<'a, W: WriteOps<'a>> State<'a, W> {
             },
         }
     }
+}
+
+/// A postfix holds no more values than the slab has from its position.
+pub(crate) proof fn lemma_plen_bound<'a, O: RleOps<'a>>(data: Seq<u8>, at: int, p: Option<Postfix<O::V>>, end: int)
+    requires postfix_ok::<O>(data, at, p, end),
+    ensures at + plen_of(p) <= slab_values::<O>(data).len(), 0 <= at,
+{
+    lemma_slab::<O>(data);
+    match p {
+        None => {},
+        Some(Postfix::Run { count, value }) => {
+            let i = choose|i: int| tail_run::<O>(data, at, count as nat, value, end, i);
+            lemma_slab_after::<O>(data, i);
+            lemma_group_values_len(slab_groups::<O>(data)[i], O::null());
+        },
+        Some(Postfix::Lit { value, lit }) => {
+            let (i, j) = choose|i: int, j: int| tail_lit::<O>(data, at, value, lit as nat, end, i, j);
+            lemma_slab_after::<O>(data, i);
+        },
+        Some(Postfix::LonePlusLit { lone, value, lit }) => {
+            let i = choose|i: int| tail_lone::<O>(data, at, lone, value, lit as nat, end, i);
+            lemma_slab_after::<O>(data, i);
+            lemma_slab_after::<O>(data, i + 1);
+            lemma_group_values_len(slab_groups::<O>(data)[i], O::null());
+        },
+    }
+}
+
+/// A null among canonical groups' values means the column is nullable.
+proof fn lemma_groups_null<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>, k: int)
+    requires
+        forall|i: int| 0 <= i < gs.len() ==> group_ok::<O>(#[trigger] gs[i]),
+        0 <= k < groups_values(gs, O::null()).len(), O::is_null(groups_values(gs, O::null())[k]),
+    ensures O::nullable(),
+    decreases gs.len(),
+{
+    let a = groups_values(gs.drop_last(), O::null());
+    let g = gs.last();
+    lemma_groups_values_concat(gs.drop_last(), Seq::empty(), O::null());
+    assert(gs.drop_last() + Seq::<Group<O::V>>::empty() =~= gs.drop_last());
+    assert(group_ok::<O>(gs[gs.len() - 1]));
+    if k < a.len() {
+        assert forall|i: int| 0 <= i < gs.drop_last().len() implies group_ok::<O>(#[trigger] gs.drop_last()[i]) by {
+            assert(gs.drop_last()[i] == gs[i]);
+        }
+        lemma_groups_null::<O>(gs.drop_last(), k);
+    } else {
+        let v = groups_values(gs, O::null())[k];
+        assert(v == group_values(g, O::null())[k - a.len()]);
+    }
+}
+
+/// A null among a valid slab's values means the column is nullable.
+pub(crate) proof fn lemma_slab_null<'a, O: RleOps<'a>>(data: Seq<u8>, k: int)
+    requires valid_slab::<O>(data), 0 <= k < slab_values::<O>(data).len(), O::is_null(slab_values::<O>(data)[k]),
+    ensures O::nullable(),
+{
+    lemma_slab::<O>(data);
+    lemma_groups_null::<O>(slab_groups::<O>(data), k);
+}
+
+/// A writer's postfix, by its values.
+pub(crate) proof fn lemma_pmap<'a, W: WriteOps<'a>>(p: Option<Postfix<W::Cow>>)
+    ensures nulls_ok::<W>(p) == vnulls_ok::<W::R>(pmap::<W>(p)), plen_of(pmap::<W>(p)) == plen_of(p),
+{
 }
 
 } // verus!

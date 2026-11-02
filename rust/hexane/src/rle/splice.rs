@@ -6,7 +6,7 @@ use std::ops::Range;
 use crate::encoding::RunDecoder;
 
 use crate::rle::postfix::Postfix;
-use crate::rle::state::{FlushState, RewriteHeader, RleCow, RleState, WOps, WPos};
+use crate::rle::state::{FlushState, RewriteHeader, RleCow, RleState, WPos};
 use crate::rle::{RleDecoder, RleTail, Slab};
 use crate::{AsColumnRef, Codec, RleValue};
 
@@ -184,39 +184,6 @@ fn postfix_from_run<'a, T: RleValue, C: Codec>(
     // the runs before this one, then the postfix's own
     let segments = slab.segments - segments_before - p.pending();
     (p, segments, byte_end)
-}
-
-/// [`find_partition`] at a single item position, repackaged for
-/// [`RleEdit`](crate::rle::edit::RleEdit): the encoder state and byte
-/// offset *at* `at`, plus the postfix describing everything after it.
-pub(crate) struct PartitionAt<'a, T: RleValue, C: Codec> {
-    pub(crate) state: RleState<'a, T, T, C>,
-    /// segments of the slab before `byte_start`
-    pub(crate) segments: usize,
-    pub(crate) byte_start: usize,
-    /// Complete runs behind this position, counted for a *reader*: a
-    /// position at a run's end is past it, where [`segments`](Self::segments)
-    /// — the writer's count, of runs before the region it opens — is not.
-    pub(crate) read_segments: usize,
-    /// A reader standing at this position, built from the same walk —
-    /// so opening a rebuild reads the slab once, not once for the writer
-    /// and again for the reader.
-    pub(crate) read_state: crate::rle::RleDecoderState,
-}
-
-pub(crate) fn find_partition_at<T: RleValue, C: Codec>(
-    slab: &Slab,
-    at: usize,
-) -> PartitionAt<'_, T, C> {
-    // the walk is verified with Verus (`dec::partition_at`)
-    let p = crate::rle::dec::partition_at::<WOps<'_, T, T, C>>(&slab.data, at);
-    PartitionAt {
-        state: p.state,
-        segments: p.segments,
-        byte_start: p.byte_start,
-        read_segments: p.read_segments,
-        read_state: p.read_state,
-    }
 }
 
 #[cfg(test)]

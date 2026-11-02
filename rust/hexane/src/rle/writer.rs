@@ -25,10 +25,9 @@
 use crate::rle::dec::*;
 use crate::rle::model::*;
 use crate::rle::postfix::*;
-use crate::rle::state::RleCow;
 use crate::rle::state::*;
 use crate::rle::{RleTail, Slab};
-use crate::{AsColumnRef, Codec, RleValue};
+use crate::{Codec, RleValue};
 #[allow(unused_imports)]
 use vstd::prelude::*;
 
@@ -52,8 +51,15 @@ pub uninterp spec fn slab_bytes(s: Slab) -> Seq<u8>;
 /// computed exactly as before.
 #[verifier::external_body]
 #[inline(always)]
-fn add(a: usize, b: usize) -> usize {
+pub(crate) fn add(a: usize, b: usize) -> usize {
     a + b
+}
+
+/// The same, for `a - b`.
+#[verifier::external_body]
+#[inline(always)]
+pub(crate) fn sub(a: usize, b: usize) -> usize {
+    a - b
 }
 
 /// A slab the rebuild spilled into.
@@ -145,7 +151,6 @@ pub(crate) open spec fn rebuilt_ok<'a, W: WriteOps<'a>>(r: Rebuilt, pre: Seq<u8>
 /// A slab region rebuilt: the bytes between `start` and `end` replaced
 /// by `bytes`, with the slab's literal header rewritten, and the slabs
 /// it spilled into.
-#[derive(Debug)]
 pub(crate) struct Rebuilt {
     pub(crate) bytes: Vec<u8>,
     pub(crate) start: usize,
@@ -155,6 +160,8 @@ pub(crate) struct Rebuilt {
     pub(crate) rewrite: Option<RewriteHeader>,
     pub(crate) overflow: Vec<Slab>,
     pub(crate) wpos: WPos,
+    /// the count in the literal header [`rewrite`](Self::rewrite) replaces
+    pub(crate) h0: Ghost<i64>,
 }
 
 impl Rebuilt {
@@ -170,19 +177,21 @@ impl Rebuilt {
             rewrite: None,
             overflow: Vec::new(),
             wpos: FlushState::none().wpos,
+            h0: Ghost(0),
         }
     }
 
     /// Write the rebuilt bytes into the slab's, `data`, and apply the
     /// header rewrite. Returns the rewrite's change in length.
-    pub(crate) fn apply_bytes<'a, W: WriteOps<'a>>(&self, data: &mut Vec<u8>, Ghost(h0): Ghost<i64>) -> (d: i64)
+    pub(crate) fn apply_bytes<'a, W: WriteOps<'a>>(&self, data: &mut Vec<u8>) -> (d: i64)
         requires
             self.start <= self.end <= old(data).len(),
-            rw_at::<W>(self.rewrite, old(data)@.take(self.start as int), h0),
+            rw_at::<W>(self.rewrite, old(data)@.take(self.start as int), self.h0@),
         ensures
-            final(data)@ == apply::<W>(self.rewrite, old(data)@.take(self.start as int), h0) + self.bytes@
+            final(data)@ == apply::<W>(self.rewrite, old(data)@.take(self.start as int), self.h0@) + self.bytes@
                 + old(data)@.skip(self.end as int),
     {
+        let ghost h0 = self.h0@;
         let ghost d0 = data@;
         let ghost pre = d0.take(self.start as int);
         splice_bytes(data, self.start, self.end - self.start, &self.bytes);
@@ -267,6 +276,13 @@ impl<'a, W: WriteOps<'a>> Splice<'a, W> {
     /// Room for `n` more values in the slab in hand.
     pub(crate) closed spec fn room(&self, n: nat) -> bool {
         self.cur@.len() + n + 2 < usize::MAX
+    }
+
+    /// Room for more is room for fewer.
+    pub(crate) proof fn lemma_room_le(&self, a: nat, b: nat)
+        requires self.room(b), a <= b,
+        ensures self.room(a),
+    {
     }
 
     /// The pending group is among the values written.
@@ -368,6 +384,7 @@ impl<'a, W: WriteOps<'a>> Splice<'a, W> {
         ensures
             final(self).inv(), final(self).vals() == old(self).vals(), final(self).pre() == old(self).pre(),
             final(self).h0() == old(self).h0(), final(self).end() == end,
+            forall|n: nat| #[trigger] final(self).room(n) == old(self).room(n),
     {
         let ghost rw = self.f.rewrite;
         let ghost p = apply::<W>(rw, self.cur_pre(), self.h0@);
@@ -517,7 +534,7 @@ impl<'a, W: WriteOps<'a>> Splice<'a, W> {
     /// slab's bytes after it, `tail_bytes`.
     pub(crate) fn finish(&mut self, postfix: Option<Postfix<W::Cow>>, postfix_segments: usize, tail_count: usize, tail_bytes: &[u8], data_len: usize, slab_tail: RleTail) -> (r: Rebuilt)
         requires old(self).inv(), nulls_ok::<W>(postfix), old(self).room(plen_of(postfix)),
-        ensures old(self).finished(r, postfix, tail_bytes@, data_len),
+        ensures old(self).finished(r, postfix, tail_bytes@, data_len), r.h0@ == old(self).h0(),
     {
         let postfix_pending = match &postfix {
             Some(p) => p.pending(),
@@ -543,7 +560,9 @@ impl<'a, W: WriteOps<'a>> Splice<'a, W> {
     /// The postfix joins the edited slab.
     fn finish_in_place(&mut self, postfix: Option<Postfix<W::Cow>>, postfix_segments: usize, tail_count: usize) -> (r: Rebuilt)
         requires old(self).inv(), !old(self).overflowed, nulls_ok::<W>(postfix), old(self).room(plen_of(postfix)),
-        ensures forall|tail_bytes: Seq<u8>, data_len: usize| #[trigger] old(self).finished(r, postfix, tail_bytes, data_len),
+        ensures
+            forall|tail_bytes: Seq<u8>, data_len: usize| #[trigger] old(self).finished(r, postfix, tail_bytes, data_len),
+            r.h0@ == old(self).h0(),
     {
         hide(canonical);
         let ghost s0 = self.state;
@@ -565,6 +584,7 @@ impl<'a, W: WriteOps<'a>> Splice<'a, W> {
         self.out.rewrite = self.f.rewrite;
         self.out.len = add(add(self.head_len, self.inserted), tail_count);
         self.out.segments = add(add(self.prefix_segments, self.f.segments), postfix_segments);
+        self.out.h0 = Ghost(self.h0@);
         let mut r = Rebuilt::new(0, 0);
         core::mem::swap(&mut self.out, &mut r);
         proof {
@@ -596,7 +616,7 @@ impl<'a, W: WriteOps<'a>> Splice<'a, W> {
     /// slab's bytes after it: the edited slab ends at the edit.
     fn finish_spilled(&mut self, postfix: Option<Postfix<W::Cow>>, postfix_segments: usize, tail_count: usize, tail_bytes: &[u8], data_len: usize, slab_tail: RleTail) -> (r: Rebuilt)
         requires old(self).inv(), old(self).overflowed, nulls_ok::<W>(postfix), old(self).room(plen_of(postfix)),
-        ensures old(self).finished(r, postfix, tail_bytes@, data_len),
+        ensures old(self).finished(r, postfix, tail_bytes@, data_len), r.h0@ == old(self).h0(),
     {
         hide(canonical);
         let ghost s0 = self.state;
@@ -615,6 +635,7 @@ impl<'a, W: WriteOps<'a>> Splice<'a, W> {
         core::mem::swap(&mut self.buf, &mut taken);
         let s = last_slab(taken, tail_bytes, len, segments, self.f.wpos, slab_tail);
         self.out.overflow.push(s);
+        self.out.h0 = Ghost(self.h0@);
         let mut r = Rebuilt::new(0, 0);
         core::mem::swap(&mut self.out, &mut r);
         proof {
@@ -655,6 +676,21 @@ impl<'a, W: WriteOps<'a>> Splice<'a, W> {
 
 } // verus!
 
+impl std::fmt::Debug for Rebuilt {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Rebuilt")
+            .field("bytes", &self.bytes)
+            .field("start", &self.start)
+            .field("end", &self.end)
+            .field("len", &self.len)
+            .field("segments", &self.segments)
+            .field("rewrite", &self.rewrite)
+            .field("overflow", &self.overflow)
+            .field("wpos", &self.wpos)
+            .finish()
+    }
+}
+
 impl Rebuilt {
     /// Write the rebuild back into `slab`; returns the slabs it spilled
     /// into (to go after it) and its byte buffer, for reuse.
@@ -666,7 +702,7 @@ impl Rebuilt {
         let postfix = slab.data.len() - self.end;
 
         // verified with Verus: the splice, then the header rewrite
-        prefix += self.apply_bytes::<WOps<'static, T, T, C>>(&mut slab.data, Ghost::assume_new());
+        prefix += self.apply_bytes::<WOps<'static, T, T, C>>(&mut slab.data);
 
         slab.tail = self.wpos.merge(prefix as usize, middle, postfix, slab.tail);
         slab.len = self.len;
@@ -692,12 +728,4 @@ impl<T: RleValue, C: Codec> Splice<'static, WOps<'static, T, T, C>> {
             self.buf = bytes;
         }
     }
-
-    pub(crate) fn push(&mut self, value: impl AsColumnRef<T>, count: usize) {
-        let value = T::to_owned(value.as_column_ref());
-        self.push_cow(RleCow::Owned(value), count)
-    }
 }
-
-/// The rebuild a cursor drives: values owned, not borrowed from the slab.
-pub(crate) type SpliceWriter<T, C> = Splice<'static, WOps<'static, T, T, C>>;

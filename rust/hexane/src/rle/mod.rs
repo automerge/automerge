@@ -1,6 +1,7 @@
 pub(crate) mod dec;
 mod decoder;
 pub mod edit;
+pub(crate) mod lift;
 mod load;
 pub(crate) mod model;
 pub(crate) mod postfix;

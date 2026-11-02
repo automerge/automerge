@@ -13,6 +13,9 @@
     clippy::too_many_arguments
 )]
 
+// proof functions exist only when Verus compiles the crate
+#[cfg(verus_keep_ghost)]
+use super::lift::*;
 use super::model::*;
 use super::postfix::*;
 // proof functions exist only when Verus compiles the crate
@@ -653,6 +656,7 @@ impl<'a, O: RleOps<'a>> Dec<'a, O> {
     /// Inside a run: up to `max` of its values, as `next_run_max`
     /// returns them.
     #[inline(always)]
+    #[verifier::spinoff_prover]
     fn take_run(&mut self, max: usize) -> (r: Option<crate::Run<O::V>>)
         requires old(self).inv(), old(self).remaining > 0, max > 0,
         ensures
@@ -1047,6 +1051,12 @@ impl<'a, O: RleOps<'a>> Dec<'a, O> {
     }
 
     /// Inside a literal run.
+    /// Values left in the current run.
+    #[inline(always)]
+    pub(crate) fn left(&self) -> usize {
+        self.remaining
+    }
+
     pub(crate) fn is_literal(&self) -> bool {
         matches!(self.state, RunState::Literal)
     }
@@ -1139,6 +1149,11 @@ pub closed spec fn state_ok<'a, O: RleOps<'a>>(data: Seq<u8>, st: RleDecoderStat
     &&& exists|gi: int| state_at::<O>(data, st, gi)
 }
 
+/// The byte position of `st`.
+pub closed spec fn sbyte(st: RleDecoderState) -> int {
+    st.byte_pos as int
+}
+
 /// The index of the value `st` stands before in `data`.
 pub closed spec fn state_pos<'a, O: RleOps<'a>>(data: Seq<u8>, st: RleDecoderState) -> int {
     gl(slab_groups::<O>(data), choose|gi: int| state_at::<O>(data, st, gi)) - st.remaining
@@ -1186,9 +1201,37 @@ proof fn lemma_state_unique<'a, O: RleOps<'a>>(data: Seq<u8>, st: RleDecoderStat
 impl<'a, O: RleOps<'a>> Dec<'a, O> {
     /// Capture the position so it can be restored against the same bytes
     /// later, without holding a borrow of them. Field copies only.
+    /// The position a suspend records.
+    pub(crate) closed spec fn dstate(&self) -> RleDecoderState {
+        RleDecoderState {
+            byte_pos: self.byte_pos,
+            remaining: self.remaining,
+            run: match self.state {
+                RunState::Repeat(_) => SuspendedRun::Repeat { at: self.run_at },
+                RunState::Literal => SuspendedRun::Literal,
+                RunState::Null => SuspendedRun::Null,
+                RunState::Idle => SuspendedRun::Idle,
+            },
+        }
+    }
+
+    /// The position a suspend would record is this reader's.
+    pub(crate) proof fn lemma_dstate(&self)
+        requires self.inv(),
+        ensures state_ok::<O>(self.data(), self.dstate()), state_pos::<O>(self.data(), self.dstate()) == self.pos(),
+    {
+        let data = self.data@;
+        let r = self.dstate();
+        assert(state_at::<O>(data, r, self.gi@));
+        let g = choose|gi: int| state_at::<O>(data, r, gi);
+        lemma_state_unique::<O>(data, r, g, self.gi@);
+    }
+
     pub(crate) fn suspend(&self) -> (r: RleDecoderState)
         requires self.inv(),
-        ensures state_ok::<O>(self.data(), r), state_pos::<O>(self.data(), r) == self.pos(),
+        ensures
+            state_ok::<O>(self.data(), r), state_pos::<O>(self.data(), r) == self.pos(),
+            r == self.dstate(),
     {
         let r = RleDecoderState {
             byte_pos: self.byte_pos,
@@ -1214,7 +1257,7 @@ impl<'a, O: RleOps<'a>> Dec<'a, O> {
     /// O(1): only a repeat run reads anything, and only its own value.
     pub(crate) fn resume(data: &'a [u8], st: &RleDecoderState) -> (r: Self)
         requires state_ok::<O>(data@, *st),
-        ensures r.inv(), r.data() == data@, r.pos() == state_pos::<O>(data@, *st),
+        ensures r.inv(), r.data() == data@, r.pos() == state_pos::<O>(data@, *st), sbyte(r.dstate()) == sbyte(*st),
     {
         let ghost gi = choose|gi: int| state_at::<O>(data@, *st, gi);
         let ghost gs = slab_groups::<O>(data@);
@@ -1583,7 +1626,7 @@ pub(crate) open spec fn walk_at<'a, O: RleOps<'a>>(data: Seq<u8>, at: int, gi: i
 /// reached.
 pub(crate) open spec fn walk_post<'a, W: WriteOps<'a>>(data: Seq<u8>, at: int, gi: int, r: Walk<'a, W>) -> bool {
     match r {
-        Walk::Landed(p) => p.byte_start <= data.len()
+        Walk::Landed(p) => p.byte_start <= data.len() && p.byte_start <= sbyte(p.read_state)
             && state_ok::<W::R>(data, p.read_state) && state_pos::<W::R>(data, p.read_state) == at
             && landed::<W>(data, at, p.state, p.byte_start as int),
         Walk::Next { pos, item, segments, prev_lit } => {
@@ -1820,7 +1863,7 @@ pub(crate) fn partition_at<'a, W: WriteOps<'a>>(data: &'a [u8], at: usize) -> (p
         valid_slab::<W::R>(data@), data@.len() < i64::MAX,
         at <= slab_values::<W::R>(data@).len(),
     ensures
-        p.byte_start <= data@.len(),
+        p.byte_start <= data@.len(), p.byte_start <= sbyte(p.read_state),
         state_ok::<W::R>(data@, p.read_state), state_pos::<W::R>(data@, p.read_state) == at,
         landed::<W>(data@, at as int, p.state, p.byte_start as int),
 {
@@ -1937,7 +1980,7 @@ fn lit_value_at<'a, O: RleOps<'a>>(data: &'a [u8], pos: usize, Ghost(gi): Ghost<
         pos == gb::<O>(slab_groups::<O>(data@), gi) + lit_head::<O>(slab_groups::<O>(data@)[gi]->values.len()).len()
             + encs::<O>(slab_groups::<O>(data@)[gi]->values.take(j)).len(),
     ensures
-        r.2 <= data@.len(),
+        pos <= r.2 <= data@.len(),
         tail_lit::<O>(data@, gl(slab_groups::<O>(data@), gi) + j, r.0, r.1 as nat, r.2 as int, gi, j),
 {
     let ghost gs = slab_groups::<O>(data@);
@@ -1965,7 +2008,7 @@ fn first_lit<'a, O: RleOps<'a>>(data: &'a [u8], pos: usize, hb: usize, hv: i64, 
         slab_groups::<O>(data@)[gi] is Lit, hv as int == header_of(slab_groups::<O>(data@)[gi]),
         hb == O::enc_signed(hv).len(), pos + hb <= data@.len(),
     ensures
-        r.2 <= data@.len(),
+        pos <= r.2 <= data@.len(),
         tail_lit::<O>(data@, gl(slab_groups::<O>(data@), gi), r.0, r.1 as nat, r.2 as int, gi, 0),
 {
     let ghost gs = slab_groups::<O>(data@);
@@ -1984,7 +2027,7 @@ fn postfix_at_group<'a, O: RleOps<'a>>(data: &'a [u8], pos: usize, Ghost(gi): Gh
     requires
         valid_slab::<O>(data@), data@.len() <= usize::MAX, 0 <= gi <= slab_groups::<O>(data@).len(),
         pos == gb::<O>(slab_groups::<O>(data@), gi),
-    ensures r.1 <= data@.len(), postfix_ok::<O>(data@, gl(slab_groups::<O>(data@), gi), r.0, r.1 as int),
+    ensures r.1 <= data@.len(), pos <= r.1, postfix_ok::<O>(data@, gl(slab_groups::<O>(data@), gi), r.0, r.1 as int),
 {
     let ghost gs = slab_groups::<O>(data@);
     proof {
@@ -2058,7 +2101,7 @@ fn postfix_in_run<'a, O: RleOps<'a>>(data: &'a [u8], pos: usize, r: usize, vat: 
         pos == gb::<O>(slab_groups::<O>(data@), gi),
         vat == gb::<O>(slab_groups::<O>(data@), gi - 1)
             + O::enc_signed(slab_groups::<O>(data@)[gi - 1]->Run_count as i64).len(),
-    ensures p.1 <= data@.len(), postfix_ok::<O>(data@, gl(slab_groups::<O>(data@), gi) - r, p.0, p.1 as int),
+    ensures p.1 <= data@.len(), pos <= p.1, postfix_ok::<O>(data@, gl(slab_groups::<O>(data@), gi) - r, p.0, p.1 as int),
 {
     let ghost gs = slab_groups::<O>(data@);
     let ghost g = gs[gi - 1];
@@ -2108,7 +2151,9 @@ fn postfix_in_run<'a, O: RleOps<'a>>(data: &'a [u8], pos: usize, r: usize, vat: 
 /// literal value) as values, and where the slab's bytes after it start.
 pub(crate) fn postfix_at<'a, O: RleOps<'a>>(data: &'a [u8], st: &RleDecoderState) -> (r: (Option<Postfix<O::V>>, usize))
     requires state_ok::<O>(data@, *st),
-    ensures r.1 <= data@.len(), postfix_ok::<O>(data@, state_pos::<O>(data@, *st), r.0, r.1 as int),
+    ensures
+        r.1 <= data@.len(), sbyte(*st) <= r.1,
+        postfix_ok::<O>(data@, state_pos::<O>(data@, *st), r.0, r.1 as int),
 {
     let ghost gs = slab_groups::<O>(data@);
     let ghost gi = choose|g: int| state_at::<O>(data@, *st, g);
@@ -2155,6 +2200,180 @@ pub(crate) fn postfix_at<'a, O: RleOps<'a>>(data: &'a [u8], st: &RleDecoderState
             }
             (None, 0)
         },
+    }
+}
+
+// ── Reader positions, read with owned values ───────────────────────────────
+
+/// Group `gi` of a slab is where `st` stands, read either way.
+proof fn lemma_lift_state_at<'s, L: Lift<'s>>(data: Seq<u8>, st: RleDecoderState, gi: int)
+    requires valid_slab::<L::R>(data),
+    ensures state_at::<L::R>(data, st, gi) == state_at::<WR<'s, L>>(data, st, gi),
+{
+    let gs = slab_groups::<L::R>(data);
+    lemma_lift_slab::<L>(data);
+    if 0 <= gi <= gs.len() {
+        lemma_lift_at::<L>(gs, gi);
+        if gi >= 1 {
+            lemma_lift_at::<L>(gs, gi - 1);
+            let g = gs[gi - 1];
+            match g {
+                Group::Run { count, .. } => {
+                    L::axiom_lift_codec(count as i64, 0);
+                },
+                Group::Lit { values } => {
+                    L::axiom_lift_codec(-(values.len() as int) as i64, 0);
+                    let k = values.len() - st.remaining;
+                    if 0 <= k <= values.len() {
+                        assert(lift_seq::<L>(values).take(k) =~= lift_seq::<L>(values.take(k)));
+                        lemma_lift_encs::<L>(values.take(k));
+                    }
+                },
+                _ => {},
+            }
+        }
+    }
+}
+
+/// A reader position, read with owned values: the same position.
+pub(crate) proof fn lemma_lift_state<'s, L: Lift<'s>>(data: Seq<u8>, st: RleDecoderState)
+    requires valid_slab::<L::R>(data),
+    ensures
+        state_ok::<L::R>(data, st) == state_ok::<WR<'s, L>>(data, st),
+        state_ok::<L::R>(data, st) ==> state_pos::<L::R>(data, st) == state_pos::<WR<'s, L>>(data, st),
+{
+    lemma_lift_slab::<L>(data);
+    assert forall|gi: int| state_at::<L::R>(data, st, gi) == #[trigger] state_at::<WR<'s, L>>(data, st, gi) by {
+        lemma_lift_state_at::<L>(data, st, gi);
+    }
+    if state_ok::<L::R>(data, st) {
+        let g1 = choose|gi: int| state_at::<L::R>(data, st, gi);
+        let g2 = choose|gi: int| state_at::<WR<'s, L>>(data, st, gi);
+        assert(state_at::<L::R>(data, st, g1));
+        assert(state_at::<WR<'s, L>>(data, st, g1));
+        lemma_state_unique::<WR<'s, L>>(data, st, g1, g2);
+        lemma_lift_at::<L>(slab_groups::<L::R>(data), g1);
+    }
+}
+
+/// Where a reader standing in group `gi` sits, in bytes and values.
+proof fn lemma_state_bounds<'a, O: RleOps<'a>>(data: Seq<u8>, st: RleDecoderState, gi: int)
+    requires valid_slab::<O>(data), state_at::<O>(data, st, gi),
+    ensures ({
+        let gs = slab_groups::<O>(data);
+        let pos = gl(gs, gi) - st.remaining;
+        &&& st.run is Idle ==> sbyte(st) == gb::<O>(gs, gi) && pos == gl(gs, gi)
+        &&& !(st.run is Idle) ==> 1 <= gi && gb::<O>(gs, gi - 1) <= sbyte(st) <= gb::<O>(gs, gi)
+            && gl(gs, gi - 1) <= pos <= gl(gs, gi)
+        &&& (st.run is Repeat || st.run is Null) ==> sbyte(st) == gb::<O>(gs, gi)
+        &&& st.run is Repeat ==> gs[gi - 1] is Run
+        &&& st.run is Null ==> gs[gi - 1] is Null
+        &&& st.run is Literal ==> gs[gi - 1] is Lit
+    }),
+{
+    let gs = slab_groups::<O>(data);
+    if !(st.run is Idle) {
+        lemma_slab_group::<O>(data, gi - 1);
+        lemma_group_values_len(gs[gi - 1], O::null());
+        if st.run is Literal {
+            let vs = gs[gi - 1]->values;
+            lemma_encs_prefix_len::<O>(vs, vs.len() - st.remaining);
+        }
+    }
+}
+
+/// Reading on never moves back in the bytes.
+#[verifier::spinoff_prover]
+pub(crate) proof fn lemma_sbyte_mono<'a, O: RleOps<'a>>(data: Seq<u8>, s1: RleDecoderState, s2: RleDecoderState)
+    requires
+        state_ok::<O>(data, s1), state_ok::<O>(data, s2),
+        state_pos::<O>(data, s1) < state_pos::<O>(data, s2),
+    ensures sbyte(s1) <= sbyte(s2),
+{
+    let gs = slab_groups::<O>(data);
+    let g1 = choose|gi: int| state_at::<O>(data, s1, gi);
+    let g2 = choose|gi: int| state_at::<O>(data, s2, gi);
+    assert(state_at::<O>(data, s1, g1));
+    assert(state_at::<O>(data, s2, g2));
+    lemma_state_bounds::<O>(data, s1, g1);
+    lemma_state_bounds::<O>(data, s2, g2);
+    assert(state_pos::<O>(data, s1) == gl(gs, g1) - s1.remaining);
+    assert(state_pos::<O>(data, s2) == gl(gs, g2) - s2.remaining);
+    if g1 < g2 {
+        lemma_gb_lt::<O>(data, g1, g2);
+        if g1 < g2 - 1 {
+            lemma_gb_lt::<O>(data, g1, g2 - 1);
+        }
+        assert(sbyte(s1) <= gb::<O>(gs, g1));
+        assert(sbyte(s1) <= sbyte(s2));
+    } else if g1 == g2 {
+        if s1.run is Literal && s2.run is Literal {
+            let vs = gs[g1 - 1]->values;
+            lemma_encs_prefix_le::<O>(vs, vs.len() - s1.remaining, vs.len() - s2.remaining);
+            assert(sbyte(s1) <= sbyte(s2));
+        } else {
+            assert(sbyte(s1) <= sbyte(s2));
+        }
+    } else {
+        lemma_gl_le::<O>(data, g2, g1 - 1);
+        lemma_gl_le::<O>(data, g1 - 1, g1);
+        assert(false);
+    }
+}
+
+/// The bytes of a literal's first `j` values, and no more than all.
+proof fn lemma_encs_prefix_len<'a, O: RleOps<'a>>(vs: Seq<O::V>, j: int)
+    requires 0 <= j <= vs.len(),
+    ensures encs::<O>(vs.take(j)).len() <= encs::<O>(vs).len(),
+{
+    assert(vs =~= vs.take(j) + vs.skip(j));
+    lemma_encs_concat::<O>(vs.take(j), vs.skip(j));
+}
+
+proof fn lemma_encs_prefix_le<'a, O: RleOps<'a>>(vs: Seq<O::V>, i: int, j: int)
+    requires 0 <= i <= j <= vs.len(),
+    ensures encs::<O>(vs.take(i)).len() <= encs::<O>(vs.take(j)).len(),
+{
+    assert(vs.take(j) =~= vs.take(i) + vs.take(j).skip(i));
+    lemma_encs_concat::<O>(vs.take(i), vs.take(j).skip(i));
+}
+
+/// Group value offsets do not decrease.
+proof fn lemma_gl_le<'a, O: RleOps<'a>>(data: Seq<u8>, i: int, j: int)
+    requires valid_slab::<O>(data), 0 <= i <= j <= slab_groups::<O>(data).len(),
+    ensures gl(slab_groups::<O>(data), i) <= gl(slab_groups::<O>(data), j),
+    decreases j - i,
+{
+    if i < j {
+        lemma_slab_group::<O>(data, i);
+        lemma_gl_le::<O>(data, i + 1, j);
+    }
+}
+
+/// A reader that has read every value stands at the end of the bytes.
+pub(crate) proof fn lemma_sbyte_end<'a, O: RleOps<'a>>(data: Seq<u8>, st: RleDecoderState)
+    requires state_ok::<O>(data, st), state_pos::<O>(data, st) == slab_values::<O>(data).len(),
+    ensures sbyte(st) == data.len(),
+{
+    let gs = slab_groups::<O>(data);
+    let g = choose|gi: int| state_at::<O>(data, st, gi);
+    assert(state_at::<O>(data, st, g));
+    lemma_state_bounds::<O>(data, st, g);
+    lemma_slab::<O>(data);
+    assert(gs.take(gs.len() as int) =~= gs);
+    if g < gs.len() {
+        // a group after it would hold values not read
+        lemma_slab_group::<O>(data, g);
+        lemma_gl_le::<O>(data, g + 1, gs.len() as int);
+        if !(st.run is Idle) {
+            lemma_gl_le::<O>(data, g, g + 1);
+        }
+        assert(false);
+    }
+    if st.run is Literal {
+        let vs = gs[g - 1]->values;
+        lemma_slab_group::<O>(data, g - 1);
+        assert(vs.take(vs.len() as int) =~= vs);
     }
 }
 

@@ -1703,42 +1703,6 @@ where
 }
 
 impl<'a, T: RleValue, V: AsColumnRef<T>, C: Codec> RleState<'a, T, V, C> {
-    /// Detach from the slab the state was opened against, cloning the one
-    /// or two values it is holding.
-    ///
-    /// A one-shot splice keeps its state on the stack for the length of a
-    /// borrow of the slab, so it can hold `Get` values by reference. A
-    /// [`RleEdit`](crate::rle::edit::RleEdit) keeps its state across calls,
-    /// alongside a `&mut Column`, so it cannot — this is what lets the
-    /// cursor own its state.
-    pub(crate) fn into_owned(self) -> RleState<'static, T, T, C> {
-        fn own<T: RleValue, V: AsColumnRef<T>>(c: RleCow<'_, T, V>) -> RleCow<'static, T, T> {
-            RleCow::Owned(match c {
-                RleCow::Owned(v) => T::to_owned(v.as_column_ref()),
-                RleCow::Ref(g) => T::to_owned(g),
-            })
-        }
-        match self {
-            RleState::Empty => RleState::Empty,
-            RleState::Lone(v) => RleState::Lone(own(v)),
-            RleState::Run(n, v) => RleState::Run(n, own(v)),
-            RleState::Lit {
-                count,
-                local,
-                header_pos,
-                bytes,
-                current,
-            } => RleState::Lit {
-                count,
-                local,
-                header_pos,
-                bytes,
-                current: own(current),
-            },
-            RleState::Null(n) => RleState::Null(n),
-        }
-    }
-
     pub(crate) fn is_single_run_of(&self, value: impl Into<Cow<'a, T, V>>) -> bool {
         self.single_run_of(&value.into())
     }
