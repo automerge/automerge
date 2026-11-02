@@ -14,6 +14,7 @@ use super::{Insert, InsertError, SignatureStore};
 
 mod capacity;
 mod ed25519_check;
+mod integration;
 mod lifecycle;
 mod unchecked;
 
