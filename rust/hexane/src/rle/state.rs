@@ -1786,7 +1786,6 @@ impl<'a, T: RleValue, V: AsColumnRef<T>, C: Codec> RleState<'a, T, V, C> {
         };
         (f, postfix_segs)
     }
-
 }
 
 #[cfg(test)]
