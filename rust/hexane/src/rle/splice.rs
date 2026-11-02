@@ -80,36 +80,22 @@ struct RlePartition<'a, T: RleValue, V: AsColumnRef<T>, C: Codec> {
     outer: Range<usize>,
     prefix: Prefix<'a, T, V, C>,
     postfix: Option<Postfix<'a, T>>,
-    /// complete runs behind `range.start` — see [`PartitionAt::read_segments`]
-    read_segments: usize,
-    /// a reader standing at `range.start`
-    read_state: crate::rle::RleDecoderState,
 }
 
 fn find_partition<'a, T: RleValue, V: AsColumnRef<T>, C: Codec>(
     slab: &'a Slab,
     range: Range<usize>,
 ) -> RlePartition<'a, T, V, C> {
-    find_partition_inner(slab, range, true)
+    find_partition_inner(slab, range)
 }
 
-/// `want_postfix` builds the tail description, which costs a run decode
-/// and sometimes a peek past it. A splice needs it; a cursor opening a
-/// rebuild does not — it describes the tail from wherever it stops
-/// reading, which is not where the rebuild opened.
 fn find_partition_inner<'a, T: RleValue, V: AsColumnRef<T>, C: Codec>(
     slab: &'a Slab,
     range: Range<usize>,
-    want_postfix: bool,
 ) -> RlePartition<'a, T, V, C> {
     let mut decoder = RleDecoder::<T, C>::new(&slab.data);
     let base = 0;
     let mut byte_before = base + decoder.byte_pos();
-    let mut read_segments = 0usize;
-    let mut read_state = crate::rle::RleDecoderState::start();
-    // the reader as of the run boundary in hand, kept only until the cut
-    // is found; field copies, no decode
-    let mut boundary = decoder.suspend();
     let mut item_pos: usize = 0;
     let mut segments: usize = 0;
 
@@ -140,16 +126,6 @@ fn find_partition_inner<'a, T: RleValue, V: AsColumnRef<T>, C: Codec>(
         // ── Prefix ──────────────────────────────────────────────────────
         if !prefix_done && range.start <= run_end_item {
             let k = range.start - item_pos;
-            // A cut landing on a run's end is *past* that run for a
-            // reader, though the writer's region still opens at its
-            // header — which is why the two counts differ by one there.
-            read_segments = segments + usize::from(k == run.count);
-            // the reader at the cut: the boundary before this run, plus
-            // the k items of it that are behind the cut. O(1) — the same
-            // run the writer's state below describes.
-            let mut d = RleDecoder::<T, C>::resume(&slab.data, &boundary);
-            d.advance_by(k);
-            read_state = d.suspend();
             outer.start = byte_before;
             prefix.segments = segments;
             prefix.bytes = byte_before;
@@ -170,9 +146,6 @@ fn find_partition_inner<'a, T: RleValue, V: AsColumnRef<T>, C: Codec>(
 
         // ── Postfix ─────────────────────────────────────────────────────
         if prefix_done && range.end < run_end_item {
-            if !want_postfix {
-                break;
-            }
             let (p, end) = postfix_from_run(
                 slab,
                 &mut decoder,
@@ -190,11 +163,6 @@ fn find_partition_inner<'a, T: RleValue, V: AsColumnRef<T>, C: Codec>(
         segments += 1;
         item_pos = run_end_item;
         byte_before = base + decoder.byte_pos();
-        if !prefix_done {
-            // only the run the cut lands in needs a boundary behind it;
-            // the walk carries on past it to describe the tail
-            boundary = decoder.suspend();
-        }
         was_lit = is_lit;
     }
 
@@ -202,8 +170,6 @@ fn find_partition_inner<'a, T: RleValue, V: AsColumnRef<T>, C: Codec>(
         outer,
         prefix,
         postfix,
-        read_segments,
-        read_state,
     }
 }
 

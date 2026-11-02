@@ -7,7 +7,11 @@
 //! yields is the model's value at its position.
 
 // Verus proofs read more plainly with `x = x + n`.
-#![allow(clippy::len_zero, clippy::assign_op_pattern)]
+#![allow(
+    clippy::len_zero,
+    clippy::assign_op_pattern,
+    clippy::too_many_arguments
+)]
 
 use super::model::*;
 // proof functions exist only when Verus compiles the crate
