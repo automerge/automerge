@@ -625,6 +625,7 @@ fn cut_slab<K: CountOps>(sc: &mut Scan, data: &[u8], slabs: &mut Vec<BSlab>)
 /// Read one run (and cut the slab if it reaches its target): its count
 /// and value, or `None` at the end of the input.
 #[inline(always)]
+#[verifier::spinoff_prover]
 fn read_seg<K: CountOps>(sc: &mut Scan, data: &[u8], slabs: &mut Vec<BSlab>, target: usize) -> (r: Result<Option<(usize, bool)>, PackError>)
     requires scan_ok::<K>(*old(sc), data@, old(slabs)@, target),
     ensures
@@ -917,6 +918,488 @@ proof fn lemma_cut<K: CountOps>(data: Seq<u8>, cs: Seq<u64>, a: int, pos: int)
     assert(sc.last() == cs.last());
     if sc.len() >= 2 {
         assert(cs[cs.len() - 1] > 0);
+    }
+}
+
+// ── Decoding ────────────────────────────────────────────────────────────────
+
+/// Counts' values start with the values of any prefix of them.
+pub proof fn lemma_values_prefix(a: Seq<u64>, b: Seq<u64>)
+    ensures
+        counts_values(a + b).len() >= counts_values(a).len(),
+        counts_values(a + b).take(counts_values(a).len() as int) == counts_values(a),
+    decreases b.len(),
+{
+    if b.len() == 0 {
+        assert(a + b =~= a);
+        assert(counts_values(a).take(counts_values(a).len() as int) =~= counts_values(a));
+    } else {
+        assert((a + b).drop_last() =~= a + b.drop_last());
+        lemma_values_prefix(a, b.drop_last());
+        let v = counts_values(a + b.drop_last());
+        let w = counts_values(a);
+        assert(counts_values(a + b).take(w.len() as int) =~= v.take(w.len() as int));
+    }
+}
+
+/// Run `k`'s values in a slab's: all its value.
+pub proof fn lemma_run_values(cs: Seq<u64>, k: int, j: int)
+    requires 0 <= k < cs.len(), 0 <= j < cs[k],
+    ensures
+        counts_len(cs.take(k)) + j < counts_values(cs).len(),
+        counts_values(cs)[counts_len(cs.take(k)) + j] == run_value(k),
+{
+    let t = cs.take(k + 1);
+    assert(t.drop_last() =~= cs.take(k));
+    assert(cs =~= t + cs.skip(k + 1));
+    lemma_values_prefix(t, cs.skip(k + 1));
+    lemma_values_len(cs.take(k));
+    lemma_values_len(t);
+    assert(counts_values(t)[counts_len(cs.take(k)) + j] == run_value(k));
+}
+
+/// A decoder's position: `byte_pos` past the counts it has started
+/// (`k` of them), `remaining` of the last one's values still to give,
+/// and that run's value (`true` before the first).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BoolDecoderState {
+    pub(crate) byte_pos: usize,
+    pub(crate) remaining: usize,
+    /// starts `true` so the first run's flip yields `false`, as the wire
+    /// format requires
+    pub(crate) value: bool,
+}
+
+impl BoolDecoderState {
+    /// The state of a decoder standing at the start of a slab.
+    pub(crate) fn start() -> (r: Self)
+        ensures r.byte_pos == 0 && r.remaining == 0 && r.value,
+    {
+        BoolDecoderState { byte_pos: 0, remaining: 0, value: true }
+    }
+}
+
+/// The state stands `k` runs into counts `cs`.
+pub(crate) open spec fn dstate_at<K: CountOps>(cs: Seq<u64>, st: BoolDecoderState, k: int) -> bool {
+    &&& 0 <= k <= cs.len()
+    &&& st.byte_pos == counts_bytes::<K>(cs.take(k)).len()
+    &&& if k == 0 { st.value && st.remaining == 0 } else { st.value == run_value(k - 1) && st.remaining <= cs[k - 1] }
+}
+
+/// The state is a position in the valid slab `data`.
+pub(crate) open spec fn bstate_ok<K: CountOps>(data: Seq<u8>, st: BoolDecoderState) -> bool {
+    &&& bool_valid::<K>(data) && data.len() <= usize::MAX
+    &&& exists|k: int| dstate_at::<K>(bool_counts::<K>(data), st, k)
+}
+
+/// The runs a state has started (one only, as counts' bytes grow).
+pub(crate) open spec fn bstate_k<K: CountOps>(data: Seq<u8>, st: BoolDecoderState) -> int {
+    choose|k: int| dstate_at::<K>(bool_counts::<K>(data), st, k)
+}
+
+/// The value index a state stands at.
+pub(crate) open spec fn bstate_pos<K: CountOps>(data: Seq<u8>, st: BoolDecoderState) -> int {
+    counts_len(bool_counts::<K>(data).take(bstate_k::<K>(data, st))) - st.remaining
+}
+
+/// Counts' prefixes have more bytes the longer they are.
+proof fn lemma_take_bytes_mono<K: CountOps>(cs: Seq<u64>, i: int, j: int)
+    requires 0 <= i < j <= cs.len(),
+    ensures counts_bytes::<K>(cs.take(i)).len() < counts_bytes::<K>(cs.take(j)).len(),
+{
+    assert(cs.take(j) =~= cs.take(i) + cs.take(j).skip(i));
+    lemma_concat::<K>(cs.take(i), cs.take(j).skip(i));
+    lemma_bytes_len::<K>(cs.take(j).skip(i));
+}
+
+/// Where run `k` starts in a slab's bytes, its count's encoding.
+proof fn lemma_next_count<K: CountOps>(data: Seq<u8>, cs: Seq<u64>, k: int, bp: int)
+    requires
+        bool_parses::<K>(cs, data), 0 <= k <= cs.len(), bp == counts_bytes::<K>(cs.take(k)).len(), bp < data.len(),
+    ensures
+        k < cs.len(), cs[k] <= usize::MAX,
+        data.skip(bp) == K::enc(cs[k]) + counts_bytes::<K>(cs.skip(k + 1)),
+        counts_bytes::<K>(cs.take(k + 1)) == counts_bytes::<K>(cs.take(k)) + K::enc(cs[k]),
+        cs.take(k + 1).drop_last() == cs.take(k),
+        K::enc(cs[k]).is_prefix_of(data.skip(bp)),
+{
+    if k == cs.len() {
+        assert(cs.take(k) =~= cs);
+    }
+    assert(cs =~= cs.take(k) + cs.skip(k));
+    lemma_concat::<K>(cs.take(k), cs.skip(k));
+    lemma_first::<K>(cs.skip(k));
+    assert(cs.skip(k).skip(1) =~= cs.skip(k + 1));
+    assert(cs.skip(k)[0] == cs[k]);
+    assert(data.skip(bp) =~= counts_bytes::<K>(cs.skip(k)));
+    lemma_count_le(cs, k);
+    lemma_bytes_push::<K>(cs.take(k), cs[k]);
+    assert(cs.take(k + 1) =~= cs.take(k).push(cs[k]));
+    assert(cs.take(k + 1).drop_last() =~= cs.take(k));
+    assert((K::enc(cs[k]) + counts_bytes::<K>(cs.skip(k + 1))).take(K::enc(cs[k]).len() as int) =~= K::enc(cs[k]));
+}
+
+/// Counts' prefixes have no more bytes than they.
+proof fn lemma_take_bytes_le<K: CountOps>(cs: Seq<u64>, i: int)
+    requires 0 <= i <= cs.len(),
+    ensures counts_bytes::<K>(cs.take(i)).len() <= counts_bytes::<K>(cs).len(),
+{
+    if i < cs.len() {
+        lemma_take_bytes_mono::<K>(cs, i, cs.len() as int);
+    }
+    assert(cs.take(cs.len() as int) =~= cs);
+}
+
+/// Two runs-started counts for one state are the same.
+proof fn lemma_k_unique<K: CountOps>(cs: Seq<u64>, st: BoolDecoderState, k1: int, k2: int)
+    requires dstate_at::<K>(cs, st, k1), dstate_at::<K>(cs, st, k2),
+    ensures k1 == k2,
+{
+    if k1 < k2 {
+        lemma_take_bytes_mono::<K>(cs, k1, k2);
+    } else if k2 < k1 {
+        lemma_take_bytes_mono::<K>(cs, k2, k1);
+    }
+}
+
+/// A decoder over a valid bool slab's values.
+#[derive(Clone, Copy)]
+pub(crate) struct BDec<'a> {
+    data: &'a [u8],
+    st: BoolDecoderState,
+}
+
+impl<'a> BDec<'a> {
+    pub(crate) closed spec fn data(&self) -> Seq<u8> {
+        self.data@
+    }
+
+    pub(crate) closed spec fn state(&self) -> BoolDecoderState {
+        self.st
+    }
+
+    pub(crate) open spec fn inv<K: CountOps>(&self) -> bool {
+        bstate_ok::<K>(self.data(), self.state())
+    }
+
+    /// The index of the next value.
+    pub(crate) open spec fn pos<K: CountOps>(&self) -> int {
+        bstate_pos::<K>(self.data(), self.state())
+    }
+
+    /// A decoder at the start of the valid slab `data`.
+    pub(crate) fn new<K: CountOps>(data: &'a [u8]) -> (d: Self)
+        requires bool_valid::<K>(data@),
+        ensures d.inv::<K>(), d.data() == data@, d.pos::<K>() == 0,
+    {
+        let d = BDec { data, st: BoolDecoderState::start() };
+        let _ = data.len();
+        proof {
+            let cs = bool_counts::<K>(data@);
+            assert(cs.take(0) =~= Seq::<u64>::empty());
+            assert(dstate_at::<K>(cs, d.st, 0));
+            lemma_k_unique::<K>(cs, d.st, bstate_k::<K>(data@, d.st), 0);
+        }
+        d
+    }
+
+    /// Resume a suspended position in `data`.
+    #[inline(always)]
+    pub(crate) fn resume<K: CountOps>(data: &'a [u8], st: &BoolDecoderState) -> (d: Self)
+        requires bstate_ok::<K>(data@, *st),
+        ensures d.inv::<K>(), d.data() == data@, d.state() == *st,
+    {
+        BDec { data, st: *st }
+    }
+
+    /// The position, without the slab.
+    #[inline(always)]
+    pub(crate) fn suspend(&self) -> (st: BoolDecoderState)
+        ensures st == self.state(),
+    {
+        self.st
+    }
+
+    /// The decoder's state, as fields.
+    #[inline(always)]
+    pub(crate) fn remaining(&self) -> (n: usize)
+        ensures n == self.state().remaining,
+    {
+        self.st.remaining
+    }
+
+    /// Start the next run (`remaining` is spent).
+    #[inline(always)]
+    #[verifier::spinoff_prover]
+    fn advance_run<K: CountOps>(&mut self)
+        requires old(self).inv::<K>(), old(self).state().remaining == 0,
+            old(self).state().byte_pos < old(self).data().len(),
+        ensures
+            final(self).inv::<K>(), final(self).data() == old(self).data(),
+            final(self).pos::<K>() == old(self).pos::<K>(),
+            final(self).state().byte_pos > old(self).state().byte_pos,
+            final(self).state().byte_pos <= final(self).data().len(),
+    {
+        let ghost data = self.data@;
+        let ghost cs = bool_counts::<K>(data);
+        let ghost k = bstate_k::<K>(data, self.st);
+        proof {
+            lemma_next_count::<K>(data, cs, k, self.st.byte_pos as int);
+        }
+        let rest = &self.data[self.st.byte_pos..];
+        assert(rest@ == data.skip(self.st.byte_pos as int));
+        if let Some((cb, count)) = K::read_count(rest) {
+            proof {
+                let after = counts_bytes::<K>(cs.skip(k + 1));
+                assert(rest@ =~= rest@.take(cb as int) + rest@.skip(cb as int));
+                K::axiom_enc(count as u64, cs[k], rest@.skip(cb as int), after);
+            }
+            self.st.byte_pos = self.st.byte_pos + cb;
+            self.st.value = !self.st.value;
+            self.st.remaining = count;
+            proof {
+                assert(dstate_at::<K>(cs, self.st, k + 1));
+                lemma_k_unique::<K>(cs, self.st, bstate_k::<K>(data, self.st), k + 1);
+                lemma_take_bytes_le::<K>(cs, k + 1);
+            }
+        } else {
+            // unreachable on a valid slab, but stating the state on this
+            // path keeps the decode loop as tight as the original's (a
+            // third slower without it)
+            self.st.remaining = 0;
+        }
+    }
+
+    /// The value at the end, a run at a time: at the end exactly when
+    /// the bytes are spent.
+    proof fn lemma_end<K: CountOps>(&self)
+        requires self.inv::<K>(), self.state().remaining == 0,
+        ensures (self.state().byte_pos >= self.data().len()) == (self.pos::<K>() == bool_values::<K>(self.data()).len()),
+            self.pos::<K>() <= bool_values::<K>(self.data()).len(),
+            self.state().byte_pos <= self.data().len(),
+    {
+        let data = self.data@;
+        let cs = bool_counts::<K>(data);
+        let k = bstate_k::<K>(data, self.st);
+        lemma_counts::<K>(cs, data);
+        lemma_values_len(cs);
+        assert(cs =~= cs.take(k) + cs.skip(k));
+        lemma_concat::<K>(cs.take(k), cs.skip(k));
+        if k == cs.len() {
+            assert(cs.take(k) =~= cs);
+            assert(cs.skip(k) =~= Seq::<u64>::empty());
+        } else {
+            lemma_bytes_len::<K>(cs.skip(k));
+            // a later run has values: only the first may be empty, and it
+            // is not the last
+            if k == 0 && cs[0] == 0 {
+                assert(cs.len() >= 2);
+                assert(cs[1] > 0);
+                lemma_count_le(cs.skip(k), 1);
+            } else {
+                lemma_count_le(cs.skip(k), 0);
+            }
+        }
+    }
+
+    /// The next value, or `None` at the end.
+    #[inline]
+    pub(crate) fn next<K: CountOps>(&mut self) -> (r: Option<bool>)
+        requires old(self).inv::<K>(),
+        ensures
+            final(self).inv::<K>(), final(self).data() == old(self).data(),
+            match r {
+                Some(v) => old(self).pos::<K>() < bool_values::<K>(old(self).data()).len()
+                    && v == bool_values::<K>(old(self).data())[old(self).pos::<K>()]
+                    && final(self).pos::<K>() == old(self).pos::<K>() + 1,
+                None => old(self).pos::<K>() == bool_values::<K>(old(self).data()).len()
+                    && final(self).pos::<K>() == old(self).pos::<K>(),
+            },
+    {
+        proof {
+            self.lemma_bytes_le::<K>();
+        }
+        loop
+            invariant
+                self.inv::<K>(), self.data() == old(self).data(), self.pos::<K>() == old(self).pos::<K>(),
+                self.st.byte_pos <= self.data@.len(),
+            decreases self.data@.len() - self.st.byte_pos,
+        {
+            if self.st.remaining > 0 {
+                proof {
+                    self.lemma_value::<K>();
+                }
+                let ghost st0 = self.st;
+                self.st.remaining = self.st.remaining - 1;
+                proof {
+                    self.lemma_same_k::<K>(st0);
+                }
+                return Some(self.st.value);
+            }
+            proof {
+                self.lemma_end::<K>();
+            }
+            if self.st.byte_pos >= self.data.len() {
+                return None;
+            }
+            self.advance_run::<K>();
+        }
+    }
+
+    /// Skip `n` values, then the next value, or `None` past the end.
+    pub(crate) fn nth<K: CountOps>(&mut self, n0: usize) -> (r: Option<bool>)
+        requires old(self).inv::<K>(),
+        ensures
+            final(self).inv::<K>(), final(self).data() == old(self).data(),
+            match r {
+                Some(v) => old(self).pos::<K>() + n0 < bool_values::<K>(old(self).data()).len()
+                    && v == bool_values::<K>(old(self).data())[old(self).pos::<K>() + n0]
+                    && final(self).pos::<K>() == old(self).pos::<K>() + n0 + 1,
+                None => old(self).pos::<K>() + n0 >= bool_values::<K>(old(self).data()).len()
+                    && final(self).pos::<K>() == bool_values::<K>(old(self).data()).len(),
+            },
+    {
+        let mut n = n0;
+        proof {
+            self.lemma_bytes_le::<K>();
+        }
+        loop
+            invariant
+                self.inv::<K>(), self.data() == old(self).data(),
+                self.pos::<K>() + n == old(self).pos::<K>() + n0,
+                self.st.byte_pos <= self.data@.len(),
+            decreases self.data@.len() - self.st.byte_pos, self.st.remaining,
+        {
+            if self.st.remaining > 0 {
+                let ghost st0 = self.st;
+                if n < self.st.remaining {
+                    self.st.remaining = self.st.remaining - n;
+                    proof {
+                        self.lemma_same_k::<K>(st0);
+                    }
+                    return self.next::<K>();
+                }
+                n = n - self.st.remaining;
+                self.st.remaining = 0;
+                proof {
+                    self.lemma_same_k::<K>(st0);
+                }
+            }
+            proof {
+                self.lemma_end::<K>();
+            }
+            if self.st.byte_pos >= self.data.len() {
+                return None;
+            }
+            self.advance_run::<K>();
+        }
+    }
+
+    /// The next run, of at most `max` values, or `None` at the end.
+    #[inline]
+    pub(crate) fn next_run_max<K: CountOps>(&mut self, max: usize) -> (r: Option<crate::Run<bool>>)
+        requires old(self).inv::<K>(), max >= 1,
+        ensures
+            final(self).inv::<K>(), final(self).data() == old(self).data(),
+            match r {
+                Some(run) => 1 <= run.count <= max
+                    && old(self).pos::<K>() + run.count <= bool_values::<K>(old(self).data()).len()
+                    && bool_values::<K>(old(self).data()).subrange(old(self).pos::<K>(), old(self).pos::<K>() + run.count)
+                        == Seq::new(run.count as nat, |_j: int| run.value)
+                    && final(self).pos::<K>() == old(self).pos::<K>() + run.count,
+                None => old(self).pos::<K>() == bool_values::<K>(old(self).data()).len()
+                    && final(self).pos::<K>() == old(self).pos::<K>(),
+            },
+    {
+        proof {
+            self.lemma_bytes_le::<K>();
+        }
+        loop
+            invariant
+                self.inv::<K>(), self.data() == old(self).data(), self.pos::<K>() == old(self).pos::<K>(),
+                self.st.byte_pos <= self.data@.len(), max >= 1,
+            decreases self.data@.len() - self.st.byte_pos,
+        {
+            if self.st.remaining > 0 {
+                proof {
+                    self.lemma_value::<K>();
+                }
+                let count = if self.st.remaining < max { self.st.remaining } else { max };
+                let value = self.st.value;
+                let ghost st0 = self.st;
+                let ghost p0 = self.pos::<K>();
+                let ghost vs = bool_values::<K>(self.data());
+                self.st.remaining = self.st.remaining - count;
+                proof {
+                    self.lemma_same_k::<K>(st0);
+                    assert forall|j: int| 0 <= j < count implies
+                        #[trigger] vs.subrange(p0, p0 + count)[j] == value by {
+                        assert(vs.subrange(p0, p0 + count)[j] == vs[p0 + j]);
+                    }
+                    assert(vs.subrange(p0, p0 + count) =~= Seq::new(count as nat, |_j: int| value));
+                }
+                return Some(crate::Run { count, value });
+            }
+            proof {
+                self.lemma_end::<K>();
+            }
+            if self.st.byte_pos >= self.data.len() {
+                return None;
+            }
+            self.advance_run::<K>();
+        }
+    }
+
+    /// The decoder's bytes are among the slab's.
+    proof fn lemma_bytes_le<K: CountOps>(&self)
+        requires self.inv::<K>(),
+        ensures self.state().byte_pos <= self.data().len(),
+    {
+        let data = self.data@;
+        let cs = bool_counts::<K>(data);
+        lemma_counts::<K>(cs, data);
+        lemma_take_bytes_le::<K>(cs, bstate_k::<K>(data, self.st));
+    }
+
+    /// The value the decoder stands at, while a run is in hand.
+    proof fn lemma_value<K: CountOps>(&self)
+        requires self.inv::<K>(), self.state().remaining > 0,
+        ensures
+            self.pos::<K>() < bool_values::<K>(self.data()).len(),
+            self.pos::<K>() + self.state().remaining <= bool_values::<K>(self.data()).len(),
+            bool_values::<K>(self.data())[self.pos::<K>()] == self.state().value,
+            forall|j: int| 0 <= j < self.state().remaining ==>
+                #[trigger] bool_values::<K>(self.data())[self.pos::<K>() + j] == self.state().value,
+    {
+        let data = self.data@;
+        let cs = bool_counts::<K>(data);
+        let k = bstate_k::<K>(data, self.st);
+        assert(cs.take(k).drop_last() =~= cs.take(k - 1));
+        assert forall|j: int| 0 <= j < self.state().remaining implies
+            #[trigger] bool_values::<K>(self.data())[self.pos::<K>() + j] == self.state().value by {
+            lemma_run_values(cs, k - 1, cs[k - 1] - self.st.remaining + j);
+        }
+        lemma_run_values(cs, k - 1, cs[k - 1] - self.st.remaining);
+        lemma_run_values(cs, k - 1, cs[k - 1] - 1);
+    }
+
+    /// Spending `n` of the run in hand keeps the runs started.
+    proof fn lemma_same_k<K: CountOps>(&self, old_st: BoolDecoderState)
+        requires
+            bool_valid::<K>(self.data()), self.data().len() <= usize::MAX,
+            bstate_ok::<K>(self.data(), old_st),
+            self.state().byte_pos == old_st.byte_pos, self.state().value == old_st.value,
+            self.state().remaining <= old_st.remaining,
+        ensures
+            self.inv::<K>(),
+            bstate_k::<K>(self.data(), self.state()) == bstate_k::<K>(self.data(), old_st),
+            self.pos::<K>() == bstate_pos::<K>(self.data(), old_st) + (old_st.remaining - self.state().remaining),
+    {
+        let data = self.data@;
+        let cs = bool_counts::<K>(data);
+        let k = bstate_k::<K>(data, old_st);
+        assert(dstate_at::<K>(cs, self.st, k));
+        lemma_k_unique::<K>(cs, self.st, bstate_k::<K>(data, self.st), k);
     }
 }
 

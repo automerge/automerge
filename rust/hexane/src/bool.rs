@@ -449,20 +449,21 @@ pub(crate) fn splice_slab<C: Codec>(
 ///
 /// Created by [`BoolEncoding::decoder`].  Each run yields the same value
 /// in O(1) per item; advancing between runs reads one LEB128 count.
+///
+/// The decoding is verified with Verus ([`BDec`](crate::bool_wire::BDec)):
+/// on a valid slab it yields the slab's values, a run at a time or one
+/// at a time.
 pub struct BoolDecoder<'a, C: Codec = Leb128> {
-    data: &'a [u8],
-    byte_pos: usize,
-    remaining: usize,
+    d: crate::bool_wire::BDec<'a>,
     _codec: PhantomData<fn() -> C>,
-    /// Current run's boolean value.  Initialized to `true` so the first
-    /// `advance_run` flip produces `false` (matching the wire format's
-    /// "first run is always false" invariant).
-    value: bool,
 }
 
 impl<C: Codec> Clone for BoolDecoder<'_, C> {
     fn clone(&self) -> Self {
-        Self { ..*self }
+        Self {
+            d: self.d,
+            _codec: PhantomData,
+        }
     }
 }
 
@@ -471,21 +472,7 @@ impl<C: Codec> Clone for BoolDecoder<'_, C> {
 /// Public only because [`ColumnEncoding::State`](crate::ColumnEncoding::State)
 /// names it; nothing outside the crate can do anything with one.
 #[doc(hidden)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct BoolDecoderState {
-    byte_pos: usize,
-    remaining: usize,
-    /// starts `true` so the first `advance_run` flip yields `false`, as
-    /// the wire format requires
-    value: bool,
-}
-
-impl BoolDecoderState {
-    /// The state of a decoder standing at the start of a slab.
-    pub(crate) fn start() -> Self {
-        Self::default()
-    }
-}
+pub use crate::bool_wire::BoolDecoderState;
 
 // hand-written rather than derived: a slab-start reader carries `value:
 // true`, so that the first run's flip yields the `false` the wire format
@@ -493,21 +480,14 @@ impl BoolDecoderState {
 // at the wrong parity.
 impl Default for BoolDecoderState {
     fn default() -> Self {
-        BoolDecoderState {
-            byte_pos: 0,
-            remaining: 0,
-            value: true,
-        }
+        BoolDecoderState::start()
     }
 }
 
 impl<'a, C: Codec> BoolDecoder<'a, C> {
     pub(crate) fn new(data: &'a [u8]) -> Self {
         BoolDecoder {
-            data,
-            byte_pos: 0,
-            remaining: 0,
-            value: true,
+            d: crate::bool_wire::BDec::new::<Counts<C>>(data),
             _codec: PhantomData,
         }
     }
@@ -518,44 +498,28 @@ impl<'a, C: Codec> BoolDecoder<'a, C> {
     // the unstable `Iterator::advance_by`
     pub fn advance_by(&mut self, n: usize) {
         if n > 0 {
-            self.nth(n - 1);
+            self.d.nth::<Counts<C>>(n - 1);
         }
     }
 
     /// Capture the position so it can be restored against the same bytes
     /// later, without holding a borrow of them.
     pub(crate) fn suspend(&self) -> BoolDecoderState {
-        BoolDecoderState {
-            byte_pos: self.byte_pos,
-            remaining: self.remaining,
-            value: self.value,
-        }
+        self.d.suspend()
     }
 
     /// Restore a suspended position against `data`, which must be the
     /// bytes it was suspended from.
     pub(crate) fn resume(data: &'a [u8], state: &BoolDecoderState) -> Self {
         BoolDecoder {
-            data,
-            byte_pos: state.byte_pos,
-            remaining: state.remaining,
-            value: state.value,
+            d: crate::bool_wire::BDec::resume::<Counts<C>>(data, state),
             _codec: PhantomData,
         }
     }
 
-    fn advance_run(&mut self) {
-        if self.byte_pos >= self.data.len() {
-            self.remaining = 0;
-            return;
-        }
-        if let Some((cb, count)) = C::read_count(&self.data[self.byte_pos..]) {
-            self.byte_pos += cb;
-            self.value = !self.value;
-            self.remaining = count;
-        } else {
-            self.remaining = 0;
-        }
+    /// Values left in the run in hand.
+    pub(crate) fn remaining(&self) -> usize {
+        self.d.remaining()
     }
 }
 
@@ -564,55 +528,22 @@ impl<'a, C: Codec> Iterator for BoolDecoder<'a, C> {
 
     #[inline]
     fn next(&mut self) -> Option<bool> {
-        loop {
-            if self.remaining > 0 {
-                self.remaining -= 1;
-                return Some(self.value);
-            }
-            if self.byte_pos >= self.data.len() {
-                return None;
-            }
-            self.advance_run();
-        }
+        self.d.next::<Counts<C>>()
     }
 
     /// O(runs_skipped) — each run is skipped in O(1) by decrementing the count.
-    fn nth(&mut self, mut n: usize) -> Option<bool> {
-        loop {
-            if self.remaining > 0 {
-                if n < self.remaining {
-                    self.remaining -= n;
-                    return self.next();
-                }
-                n -= self.remaining;
-                self.remaining = 0;
-            }
-            if self.byte_pos >= self.data.len() {
-                return None;
-            }
-            self.advance_run();
-        }
+    fn nth(&mut self, n: usize) -> Option<bool> {
+        self.d.nth::<Counts<C>>(n)
     }
 }
 
 impl<'a, C: Codec> RunDecoder for BoolDecoder<'a, C> {
     fn next_run(&mut self) -> Option<Run<bool>> {
-        self.next_run_max(usize::MAX)
+        self.d.next_run_max::<Counts<C>>(usize::MAX)
     }
 
     fn next_run_max(&mut self, max: usize) -> Option<Run<bool>> {
-        loop {
-            if self.remaining > 0 {
-                let count = self.remaining.min(max);
-                let value = self.value;
-                self.remaining -= count;
-                return Some(Run { count, value });
-            }
-            if self.byte_pos >= self.data.len() {
-                return None;
-            }
-            self.advance_run();
-        }
+        self.d.next_run_max::<Counts<C>>(max)
     }
 }
 
@@ -1266,7 +1197,7 @@ impl<C: Codec> BoolEdit<C> {
             }
             self.read += run.count;
             want -= run.count;
-            if dec.remaining == 0 {
+            if dec.remaining() == 0 {
                 self.read_segments += 1;
             }
         }
