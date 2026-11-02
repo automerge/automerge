@@ -9,7 +9,8 @@
 //! means no canonical parse exists (value and varint encodings are
 //! prefix-free, so the parse is unique).
 
-#![allow(clippy::len_zero)]
+// Verus proofs read more plainly with `x = x + n`.
+#![allow(clippy::len_zero, clippy::assign_op_pattern)]
 
 use super::model::*;
 use crate::PackError;
@@ -80,7 +81,7 @@ pub open spec fn starts<T>(s: Seq<T>, p: Seq<T>) -> bool {
     p.len() <= s.len() && s.take(p.len() as int) == p
 }
 
-proof fn lemma_starts<T>(p: Seq<T>, q: Seq<T>)
+pub(crate) proof fn lemma_starts<T>(p: Seq<T>, q: Seq<T>)
     ensures starts(p + q, p), p.is_prefix_of(p + q), (p + q).skip(p.len() as int) == q,
 {
     assert((p + q).take(p.len() as int) =~= p);
@@ -89,7 +90,7 @@ proof fn lemma_starts<T>(p: Seq<T>, q: Seq<T>)
 
 /// Reading `x` off the front of `s == p + q`: if `s` starts with `x` and
 /// `x` has `p`'s length, they agree and the rest is `q`.
-proof fn lemma_split<T>(s: Seq<T>, p: Seq<T>, q: Seq<T>, n: int)
+pub(crate) proof fn lemma_split<T>(s: Seq<T>, p: Seq<T>, q: Seq<T>, n: int)
     requires s == p + q, n == p.len(),
     ensures s.take(n) == p, s.skip(n) == q,
 {
@@ -98,7 +99,7 @@ proof fn lemma_split<T>(s: Seq<T>, p: Seq<T>, q: Seq<T>, n: int)
 }
 
 /// A signed header read off `p + q` where `p` encodes `h` is `h`.
-proof fn lemma_header<'a, O: RleOps<'a>>(s: Seq<u8>, h: i64, q: Seq<u8>, n: int, x: i64)
+pub(crate) proof fn lemma_header<'a, O: RleOps<'a>>(s: Seq<u8>, h: i64, q: Seq<u8>, n: int, x: i64)
     requires s == O::enc_signed(h) + q, 0 <= n <= s.len(), s.take(n) == O::enc_signed(x),
     ensures x == h, n == O::enc_signed(h).len(), s.skip(n) == q,
 {
@@ -108,7 +109,7 @@ proof fn lemma_header<'a, O: RleOps<'a>>(s: Seq<u8>, h: i64, q: Seq<u8>, n: int,
 }
 
 /// The same, for an unsigned count.
-proof fn lemma_count<'a, O: RleOps<'a>>(s: Seq<u8>, h: u64, q: Seq<u8>, n: int, x: u64)
+pub(crate) proof fn lemma_count<'a, O: RleOps<'a>>(s: Seq<u8>, h: u64, q: Seq<u8>, n: int, x: u64)
     requires s == O::enc_unsigned(h) + q, 0 <= n <= s.len(), s.take(n) == O::enc_unsigned(x),
     ensures x == h, n == O::enc_unsigned(h).len(), s.skip(n) == q,
 {
@@ -118,7 +119,7 @@ proof fn lemma_count<'a, O: RleOps<'a>>(s: Seq<u8>, h: u64, q: Seq<u8>, n: int, 
 }
 
 /// The same, for a non-null value.
-proof fn lemma_value<'a, O: RleOps<'a>>(s: Seq<u8>, h: O::V, q: Seq<u8>, n: int, x: O::V)
+pub(crate) proof fn lemma_value<'a, O: RleOps<'a>>(s: Seq<u8>, h: O::V, q: Seq<u8>, n: int, x: O::V)
     requires
         s == O::enc(h) + q, 0 <= n <= s.len(), s.take(n) == O::enc(x),
         !O::is_null(h), !O::is_null(x),
@@ -129,28 +130,8 @@ proof fn lemma_value<'a, O: RleOps<'a>>(s: Seq<u8>, h: O::V, q: Seq<u8>, n: int,
     lemma_split(s, O::enc(h), q, n);
 }
 
-/// A literal run's header, for `k` values.
-pub open spec fn lit_head<'a, O: RleOps<'a>>(k: nat) -> Seq<u8> {
-    O::enc_signed(-(k as int) as i64)
-}
 
-/// A group's header value.
-pub open spec fn header_of<V>(g: Group<V>) -> int {
-    match g {
-        Group::Run { count, .. } => count as int,
-        Group::Lit { values } => -(values.len() as int),
-        Group::Null { .. } => 0,
-    }
-}
 
-/// A group's bytes after its header.
-pub open spec fn payload<'a, O: RleOps<'a>>(g: Group<O::V>) -> Seq<u8> {
-    match g {
-        Group::Run { value, .. } => O::enc(value),
-        Group::Lit { values } => encs::<O>(values),
-        Group::Null { count } => O::enc_unsigned(count as u64),
-    }
-}
 
 /// The bytes of groups `gs`, then, if `k > 0`, the header of a literal
 /// of `k` values and its values `cur`.
@@ -380,13 +361,6 @@ proof fn lemma_lit_value<'a, O: RleOps<'a>>(data: Seq<u8>, gs: Seq<Group<O::V>>,
     assert(encs::<O>(seq![vs[i]]) =~= O::enc(vs[i]));
 }
 
-/// A repeat run's value.
-pub open spec fn run_value<V>(g: Group<V>) -> V {
-    match g {
-        Group::Run { value, .. } => value,
-        _ => arbitrary(),
-    }
-}
 
 /// A positive header: every acceptable parse has a repeat run of that
 /// many next.
@@ -1037,6 +1011,7 @@ impl<'a, O: RleOps<'a>> Reader<'a, O> {
         Ok(Some(Seg::Null { count, bytes }))
     }
 
+    #[verifier::spinoff_prover]
     fn next_lit_value(&mut self) -> (r: Result<Option<Seg<O::V>>, PackError>)
         requires old(self).inv(), old(self).in_lit(),
         ensures next_post(*old(self), *final(self), r),

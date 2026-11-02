@@ -1,3 +1,4 @@
+pub(crate) mod dec;
 mod decoder;
 pub mod edit;
 mod load;

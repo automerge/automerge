@@ -104,7 +104,7 @@ fn find_partition_inner<'a, T: RleValue, V: AsColumnRef<T>, C: Codec>(
 ) -> RlePartition<'a, T, V, C> {
     let mut decoder = RleDecoder::<T, C>::new(&slab.data);
     let base = 0;
-    let mut byte_before = base + decoder.byte_pos;
+    let mut byte_before = base + decoder.byte_pos();
     let mut read_segments = 0usize;
     let mut read_state = crate::rle::RleDecoderState::start();
     // the reader as of the run boundary in hand, kept only until the cut
@@ -189,7 +189,7 @@ fn find_partition_inner<'a, T: RleValue, V: AsColumnRef<T>, C: Codec>(
 
         segments += 1;
         item_pos = run_end_item;
-        byte_before = base + decoder.byte_pos;
+        byte_before = base + decoder.byte_pos();
         if !prefix_done {
             // only the run the cut lands in needs a boundary behind it;
             // the walk carries on past it to describe the tail
@@ -236,11 +236,11 @@ pub(crate) fn postfix_from_run<'a, T: RleValue, C: Codec>(
     let value = run.value;
     let is_null = T::is_null(value);
     let consumed = segments_before + 1; // runs before this one, plus it
-    let mut byte_end = base + dec.byte_pos;
+    let mut byte_end = base + dec.byte_pos();
     let p = if is_lit {
         Postfix::Lit {
             value,
-            lit: dec.remaining,
+            lit: dec.remaining(),
             segments: slab.segments - consumed,
         }
     } else {
@@ -250,11 +250,11 @@ pub(crate) fn postfix_from_run<'a, T: RleValue, C: Codec>(
         let lone_plus_lit = if count == 1 && !is_null {
             dec.next_run().and_then(|post_run| {
                 (dec.is_literal() && post_run.count == 1).then(|| {
-                    byte_end = base + dec.byte_pos; // past the first lit value
+                    byte_end = base + dec.byte_pos(); // past the first lit value
                     Postfix::LonePlusLit {
                         lone: value,
                         value: post_run.value,
-                        lit: dec.remaining,
+                        lit: dec.remaining(),
                         segments: slab.segments - consumed - 1, // the peeked lit value
                     }
                 })

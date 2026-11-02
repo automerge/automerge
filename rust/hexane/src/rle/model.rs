@@ -36,6 +36,10 @@ verus! {
 #[allow(dead_code)]
 pub struct ExPackError(PackError);
 
+#[verifier::external_type_specification]
+#[allow(dead_code)]
+pub struct ExRun<V>(crate::Run<V>);
+
 /// What the RLE layer needs of a column's value type `V` and its varint
 /// codec, for slabs borrowed for `'a`.
 pub trait RleOps<'a> {
@@ -48,6 +52,9 @@ pub trait RleOps<'a> {
 
     /// The encoding of a non-null value.
     spec fn enc(v: Self::V) -> Seq<u8>;
+
+    /// The column type's null value (meaningful if it is nullable).
+    spec fn null() -> Self::V;
 
     /// The codec's encoding of a signed integer.
     spec fn enc_signed(n: i64) -> Seq<u8>;
@@ -87,6 +94,39 @@ pub trait RleOps<'a> {
             match r {
                 Ok((n, v)) => !Self::is_null(v) && n <= data.len() && data@.take(n as int) == Self::enc(v),
                 Err(_) => forall|v: Self::V| !Self::is_null(v) ==> !Self::enc(v).is_prefix_of(data@),
+            };
+
+    /// Decode the non-null value known to start `data`.
+    fn unpack(data: &'a [u8]) -> (r: (usize, Self::V))
+        requires exists|v: Self::V| !Self::is_null(v) && Self::enc(v).is_prefix_of(data@),
+        ensures !Self::is_null(r.1), r.0 <= data.len(), data@.take(r.0 as int) == Self::enc(r.1);
+
+    /// The length of the non-null value starting `data`, without
+    /// decoding it.
+    fn value_len(data: &[u8]) -> (r: Option<usize>)
+        ensures
+            forall|v: Self::V| !Self::is_null(v) && Self::enc(v).is_prefix_of(data@)
+                ==> r == Some(Self::enc(v).len() as usize);
+
+    /// The null value.
+    fn get_null() -> (r: Self::V)
+        requires Self::nullable(),
+        ensures r == Self::null(), Self::is_null(r);
+
+    /// Decode the signed integer at the start of `data`, if any.
+    fn read_signed_opt(data: &[u8]) -> (r: Option<(usize, i64)>)
+        ensures
+            match r {
+                Some((n, x)) => n <= data.len() && data@.take(n as int) == Self::enc_signed(x),
+                None => forall|x: i64| !Self::enc_signed(x).is_prefix_of(data@),
+            };
+
+    /// Decode the unsigned integer at the start of `data`, if any.
+    fn read_unsigned_opt(data: &[u8]) -> (r: Option<(usize, u64)>)
+        ensures
+            match r {
+                Some((n, x)) => n <= data.len() && data@.take(n as int) == Self::enc_unsigned(x),
+                None => forall|x: u64| !Self::enc_unsigned(x).is_prefix_of(data@),
             };
 
     /// Decode the signed integer at the start of `data`.
@@ -133,6 +173,11 @@ impl<'a, T: RleValue, C: Codec> RleOps<'a> for Ops<'a, T, C> {
     }
 
     #[cfg(verus_keep_ghost)]
+    fn null() -> Self::V {
+        unimplemented!()
+    }
+
+    #[cfg(verus_keep_ghost)]
     fn enc_signed(_n: i64) -> Seq<u8> {
         unimplemented!()
     }
@@ -164,6 +209,31 @@ impl<'a, T: RleValue, C: Codec> RleOps<'a> for Ops<'a, T, C> {
     #[inline(always)]
     fn try_unpack(data: &'a [u8]) -> Result<(usize, Self::V), PackError> {
         T::try_unpack::<C>(data)
+    }
+
+    #[inline(always)]
+    fn unpack(data: &'a [u8]) -> (usize, Self::V) {
+        T::unpack::<C>(data)
+    }
+
+    #[inline(always)]
+    fn value_len(data: &[u8]) -> Option<usize> {
+        T::value_len::<C>(data)
+    }
+
+    #[inline(always)]
+    fn get_null() -> Self::V {
+        T::get_null()
+    }
+
+    #[inline(always)]
+    fn read_signed_opt(data: &[u8]) -> Option<(usize, i64)> {
+        C::read_signed(data)
+    }
+
+    #[inline(always)]
+    fn read_unsigned_opt(data: &[u8]) -> Option<(usize, u64)> {
+        C::read_unsigned(data)
     }
 
     #[inline(always)]
@@ -294,6 +364,37 @@ pub open spec fn adjacent_ok<V>(a: Group<V>, b: Group<V>) -> bool {
 pub open spec fn canonical<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>) -> bool {
     &&& forall|i: int| 0 <= i < gs.len() ==> group_ok::<O>(#[trigger] gs[i])
     &&& forall|i: int| 0 < i < gs.len() ==> adjacent_ok(gs[i - 1], #[trigger] gs[i])
+}
+
+/// A repeat run's value.
+pub open spec fn run_value<V>(g: Group<V>) -> V {
+    match g {
+        Group::Run { value, .. } => value,
+        _ => arbitrary(),
+    }
+}
+
+/// A literal run's header, for `k` values.
+pub open spec fn lit_head<'a, O: RleOps<'a>>(k: nat) -> Seq<u8> {
+    O::enc_signed(-(k as int) as i64)
+}
+
+/// A group's header value.
+pub open spec fn header_of<V>(g: Group<V>) -> int {
+    match g {
+        Group::Run { count, .. } => count as int,
+        Group::Lit { values } => -(values.len() as int),
+        Group::Null { .. } => 0,
+    }
+}
+
+/// A group's bytes after its header.
+pub open spec fn payload<'a, O: RleOps<'a>>(g: Group<O::V>) -> Seq<u8> {
+    match g {
+        Group::Run { value, .. } => O::enc(value),
+        Group::Lit { values } => encs::<O>(values),
+        Group::Null { count } => O::enc_unsigned(count as u64),
+    }
 }
 
 /// A canonical encoding of `data` whose groups fit the slab metadata: at

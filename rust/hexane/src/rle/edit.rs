@@ -106,7 +106,7 @@ impl<T: RleValue, C: Codec> RleEdit<T, C> {
             // a literal is one segment per value; a repeat or null run is
             // one segment however many items it holds, so it counts only
             // once the decoder has given up the last of them
-            if dec.is_literal() || dec.remaining == 0 {
+            if dec.is_literal() || dec.remaining() == 0 {
                 self.read_segments += 1;
             }
         }
