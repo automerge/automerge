@@ -1600,7 +1600,7 @@ impl WPos {
     ) -> RleTail {
         match postfix {
             0 => self.as_tail(prefix, middle),
-            len if tail.bytes <= len as u32 => tail,
+            len if tail.bytes as usize <= len => tail,
             len => self
                 .as_tail(prefix, middle + len)
                 .with_lit_tail(tail.lit_tail),
@@ -1615,23 +1615,36 @@ impl WPos {
                 bytes,
                 local: true,
             } => RleTail {
-                bytes: (local - *pos) as u32,
+                bytes: tail_bytes(local - *pos),
                 lit_tail: NonZeroU32::new(*bytes as u32),
             },
             WPos::Lit { pos, bytes, .. } => RleTail {
-                bytes: (len - *pos) as u32,
+                bytes: tail_bytes(len - *pos),
                 lit_tail: NonZeroU32::new(*bytes as u32),
             },
             WPos::Run { pos, local: true } => RleTail {
-                bytes: (local - *pos) as u32,
+                bytes: tail_bytes(local - *pos),
                 lit_tail: None,
             },
             WPos::Run { pos, .. } => RleTail {
-                bytes: (len - *pos) as u32,
+                bytes: tail_bytes(len - *pos),
                 lit_tail: None,
             },
         }
     }
+}
+
+/// The byte length of a slab's last run, which its [`RleTail`] records
+/// in a `u32`.
+///
+/// # Panics
+///
+/// If the run is 4 GiB or more: it has no tail record, so — like a run
+/// of more than `i64::MAX` values — it is not encodable.
+fn tail_bytes(n: usize) -> u32 {
+    u32::try_from(n).unwrap_or_else(|_| {
+        panic!("a run of {n} bytes is not encodable: a run must stay under 4 GiB")
+    })
 }
 
 impl Default for WPos {
@@ -1759,6 +1772,33 @@ impl<'a, T: RleValue, V: AsColumnRef<T>, C: Codec> RleState<'a, T, V, C> {
 mod tests {
     use super::*;
     use crate::rle::rle_validate_encoding;
+
+    #[cfg(target_pointer_width = "64")]
+    #[test]
+    #[should_panic(expected = "must stay under 4 GiB")]
+    fn a_last_run_of_4gib_has_no_tail() {
+        WPos::Run {
+            pos: 0,
+            local: true,
+        }
+        .as_tail(0, u32::MAX as usize + 1);
+    }
+
+    /// A postfix of 4 GiB or more keeps the slab's tail: the comparison
+    /// used to truncate its length to `u32` first.
+    #[cfg(target_pointer_width = "64")]
+    #[test]
+    fn merging_after_4gib_of_postfix_keeps_the_tail() {
+        let tail = RleTail {
+            bytes: 5,
+            lit_tail: None,
+        };
+        let pos = WPos::Run {
+            pos: 0,
+            local: true,
+        };
+        assert_eq!(pos.merge(0, 10, 1 << 32, tail), tail);
+    }
 
     fn encode_vals(vals: &[u64]) -> Vec<u8> {
         let mut buf = Vec::new();
