@@ -606,7 +606,7 @@ impl<C: Codec> ColumnEncoding for BoolEncoding<C> {
         if a.len == 0 {
             *a = b;
         } else if b.len > 0 {
-            let (new_segs, new_tail) = bool_merge_slabs::<C>(&mut a.data, a.tail, a.segments, &b);
+            let (new_segs, new_tail) = bool_merge_slabs::<C>(&mut a.data, 0, a.tail, a.segments, &b);
             a.len += b.len;
             a.segments = new_segs;
             a.tail = new_tail;
@@ -639,7 +639,7 @@ impl<C: Codec> ColumnEncoding for BoolEncoding<C> {
 
     fn do_merge(
         acc: &mut Vec<u8>,
-        _start: usize,
+        start: usize,
         a_tail: u8,
         a_segments: usize,
         b: &Slab,
@@ -648,7 +648,7 @@ impl<C: Codec> ColumnEncoding for BoolEncoding<C> {
         if b.len == 0 || b.data.is_empty() {
             (a_segments, a_tail)
         } else {
-            bool_merge_slabs::<C>(acc, a_tail, a_segments, b)
+            bool_merge_slabs::<C>(acc, start, a_tail, a_segments, b)
         }
     }
 
@@ -725,94 +725,20 @@ fn bool_validate_encoding<C: Codec>(slab: &[u8]) -> Result<SlabInfo<u8>, PackErr
 
 // ── merge_slab_bytes ─────────────────────────────────────────────────────────
 
-/// Merge two boolean slabs. Decodes only boundary runs and memcopies
-/// interiors.
-/// In-place merge of bool slab `b` into `a`. No extra allocation beyond
-/// extending `a`'s buffer. Both slabs must be non-empty.
+/// Merge bool slab `b` onto the end of the slab in `a_data` from `start`
+/// (the bytes before are others'): only the boundary runs are decoded,
+/// the rest is copied. Verified with Verus
+/// ([`merge`](crate::bool_wire::merge)): the result is the canonical
+/// encoding of one slab's values then the other's, with the run count and
+/// tail record returned.
 fn bool_merge_slabs<C: Codec>(
     a_data: &mut Vec<u8>,
+    start: usize,
     a_tail: u8,
     a_segments: usize,
     b: &Slab,
 ) -> (usize, u8) {
-    // a's last run — derived from tail (no scan).
-    if b.len == 0 {
-        return (a_segments, a_tail);
-    }
-
-    let a_last_start = a_data.len() - a_tail as usize;
-    let (a_last_cb, a_last_count) = C::read_count(&a_data[a_last_start..]).unwrap();
-    debug_assert_eq!(a_last_cb, a_tail as usize);
-    // Runs alternate false/true: seg 1=false, 2=true, 3=false...
-    // Even segments → last is true, odd → last is false.
-    let a_last_value = a_segments.is_multiple_of(2);
-
-    // b's first run (always starts with false).
-    let b_data: &[u8] = &b.data;
-    let (b_first_cb, b_first_count) = C::read_count(b_data).unwrap();
-    let b_rest = &b_data[b_first_cb..];
-
-    let b_segments = b.segments;
-
-    // Bool slabs alternate false/true. b always starts with false.
-    // Track whether we merged boundary runs.
-    let mut merged_boundary = 0;
-    let mut merge_bytes = 0;
-    let mut b_empty = b_rest.is_empty();
-
-    if !a_last_value {
-        // a ends false, b starts false.
-        if b_first_count > 0 {
-            // Same value — merge counts. Removes 1 segment (the two false runs become one).
-            a_data.truncate(a_last_start);
-            let count = C::encode_count(a_last_count + b_first_count);
-            merge_bytes = count.len() as u8;
-            a_data.extend(count);
-            a_data.extend_from_slice(b_rest);
-            merged_boundary = 1;
-        } else {
-            // b starts with 0-count padding → skip it.
-            // Dropping b's zero-count first segment.
-            a_data.extend_from_slice(b_rest);
-            merged_boundary = 1;
-        }
-    } else {
-        // a ends true.
-        if b_first_count > 0 {
-            // Proper alternation, just append all of b.
-            a_data.extend_from_slice(b_data);
-            b_empty = false;
-        } else {
-            // b starts with 0-count false padding.
-            // b's second run is true — merge with a's last true run.
-            // Removes 2 segments: b's zero-count false + b's first true merged into a's last true.
-            if !b_rest.is_empty() {
-                let (cb2, count2) = C::read_count(b_rest).unwrap();
-                a_data.truncate(a_last_start);
-                let count = C::encode_count(a_last_count + count2);
-                merge_bytes = count.len() as u8;
-                a_data.extend(count);
-                a_data.extend_from_slice(&b_rest[cb2..]);
-                b_empty = b_rest[cb2..].is_empty();
-                merged_boundary = 2;
-            } else {
-                // b is just a zero-count false padding with nothing after — drop it.
-                merged_boundary = 1;
-            }
-        }
-    }
-
-    let new_segments = a_segments + b_segments - merged_boundary;
-
-    let new_tail = if !b_empty {
-        b.tail
-    } else if merged_boundary == 0 {
-        a_tail
-    } else {
-        merge_bytes
-    };
-
-    (new_segments, new_tail)
+    crate::bool_wire::merge::<Counts<C>>(a_data, start, a_tail, a_segments, &b.data, b.segments, b.tail)
 }
 
 // ── Load & verify ─────────────────────────────────────────────────────────

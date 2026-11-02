@@ -11,7 +11,14 @@
 //! values.
 
 // Verus proofs read more plainly with `x = x + n`.
-#![allow(clippy::len_zero, clippy::assign_op_pattern)]
+#![allow(
+    clippy::len_zero,
+    clippy::assign_op_pattern,
+    clippy::too_many_arguments,
+    clippy::manual_unwrap_or_default,
+    clippy::manual_unwrap_or,
+    clippy::manual_is_multiple_of
+)]
 
 use crate::{PackError, Run};
 #[allow(unused_imports)]
@@ -32,6 +39,10 @@ pub trait CountOps {
         ensures
             0 < Self::enc(a).len() <= 10,
             Self::enc(a) + s == Self::enc(b) + t ==> a == b;
+
+    /// Append the encoding of `n`.
+    fn put_count(n: usize, buf: &mut Vec<u8>)
+        ensures final(buf)@ == old(buf)@ + Self::enc(n as u64);
 
     /// Decode the count at the start of `data`, if one that fits a
     /// `usize` is there.
@@ -1403,6 +1414,489 @@ impl<'a> BDec<'a> {
     }
 }
 
+// ── Merging ─────────────────────────────────────────────────────────────────
+
+/// The values of counts `cs` whose first run is run `p` (so its value
+/// is `run_value(p)`).
+pub open spec fn vals_at(cs: Seq<u64>, p: int) -> Seq<bool>
+    decreases cs.len(),
+{
+    if cs.len() == 0 {
+        Seq::empty()
+    } else {
+        vals_at(cs.drop_last(), p) + Seq::new(cs.last() as nat, |_j: int| run_value(p + cs.len() - 1))
+    }
+}
+
+pub proof fn lemma_vals_at_zero(cs: Seq<u64>)
+    ensures counts_values(cs) == vals_at(cs, 0),
+    decreases cs.len(),
+{
+    if cs.len() > 0 {
+        lemma_vals_at_zero(cs.drop_last());
+        assert(counts_values(cs) =~= vals_at(cs, 0));
+    }
+}
+
+pub proof fn lemma_vals_at_concat(a: Seq<u64>, b: Seq<u64>, p: int)
+    ensures vals_at(a + b, p) == vals_at(a, p) + vals_at(b, p + a.len()),
+    decreases b.len(),
+{
+    if b.len() == 0 {
+        assert(a + b =~= a);
+        assert(vals_at(a, p) + Seq::<bool>::empty() =~= vals_at(a, p));
+    } else {
+        assert((a + b).drop_last() =~= a + b.drop_last());
+        lemma_vals_at_concat(a, b.drop_last(), p);
+        assert(vals_at(a + b, p) =~= vals_at(a, p) + vals_at(b, p + a.len()));
+    }
+}
+
+pub proof fn lemma_vals_at_parity(cs: Seq<u64>, p: int, q: int)
+    requires 0 <= p, 0 <= q, p % 2 == q % 2,
+    ensures vals_at(cs, p) == vals_at(cs, q),
+    decreases cs.len(),
+{
+    if cs.len() > 0 {
+        lemma_vals_at_parity(cs.drop_last(), p, q);
+        assert(run_value(p + cs.len() - 1) == run_value(q + cs.len() - 1));
+        assert(vals_at(cs, p) =~= vals_at(cs, q));
+    }
+}
+
+pub proof fn lemma_vals_single(c: u64, p: int)
+    ensures vals_at(seq![c], p) == Seq::new(c as nat, |_j: int| run_value(p)),
+{
+    assert(seq![c].drop_last() =~= Seq::<u64>::empty());
+    reveal_with_fuel(vals_at, 2);
+    assert(vals_at(seq![c], p) =~= Seq::new(c as nat, |_j: int| run_value(p)));
+}
+
+/// A run of `x + y`, as runs of `x` then `y`.
+proof fn lemma_split_run(x: u64, y: u64, p: int)
+    requires x + y <= u64::MAX,
+    ensures vals_at(seq![(x + y) as u64], p) == vals_at(seq![x], p) + vals_at(seq![y], p),
+{
+    lemma_vals_single((x + y) as u64, p);
+    lemma_vals_single(x, p);
+    lemma_vals_single(y, p);
+    assert(vals_at(seq![(x + y) as u64], p) =~= vals_at(seq![x], p) + vals_at(seq![y], p));
+}
+
+/// Merging two runs of one value at the meeting point of `d + [x]` and
+/// `[y] + r` (so runs `|d|` and `0` of each share a value).
+proof fn lemma_merge_values(d: Seq<u64>, x: u64, y: u64, r: Seq<u64>, q: int)
+    requires x + y <= u64::MAX, 0 <= q, d.len() % 2 == q % 2,
+    ensures
+        vals_at(d + seq![(x + y) as u64] + r, 0)
+            == vals_at(d + seq![x], 0) + vals_at(seq![y] + r, q),
+{
+    let m = seq![(x + y) as u64];
+    lemma_vals_at_concat(d + m, r, 0);
+    lemma_vals_at_concat(d, m, 0);
+    lemma_vals_at_concat(d, seq![x], 0);
+    lemma_vals_at_concat(seq![y], r, q);
+    lemma_split_run(x, y, d.len() as int);
+    lemma_vals_single(y, d.len() as int);
+    lemma_vals_single(y, q);
+    assert(run_value(d.len() as int) == run_value(q));
+    lemma_vals_at_parity(r, d.len() + 1 as int, q + 1);
+    assert(vals_at(d + m + r, 0) =~= vals_at(d + seq![x], 0) + vals_at(seq![y] + r, q));
+}
+
+/// A merged slab's counts: canonical if both were, past the first.
+proof fn lemma_merged_ok(c: Seq<u64>, a: Seq<u64>, b: Seq<u64>)
+    requires
+        counts_ok(a), counts_ok(b), a.len() > 0,
+        c.len() >= a.len(), c.take(a.len() - 1) == a.take(a.len() - 1),
+        c[a.len() - 1] >= a[a.len() - 1],
+        forall|i: int| a.len() <= i < c.len() ==> #[trigger] c[i] > 0,
+        c.last() > 0,
+    ensures counts_ok(c),
+{
+    assert forall|i: int| 1 <= i < c.len() implies #[trigger] c[i] > 0 by {
+        if i < a.len() - 1 {
+            assert(c[i] == c.take(a.len() - 1)[i]);
+            assert(a[i] == a.take(a.len() - 1)[i]);
+        }
+    }
+}
+
+#[inline(always)]
+fn truncate(v: &mut Vec<u8>, n: usize)
+    requires n <= old(v)@.len(),
+    ensures final(v)@ == old(v)@.take(n as int),
+{
+    v.truncate(n);
+    assert(v@ =~= old(v)@.take(n as int));
+}
+
+#[inline(always)]
+fn extend(v: &mut Vec<u8>, s: &[u8])
+    ensures final(v)@ == old(v)@ + s@,
+{
+    let ghost v0 = v@;
+    v.extend_from_slice(s);
+    proof {
+        assert forall|i: int| 0 <= i < v@.len() implies #[trigger] v@[i] == (v0 + s@)[i] by {
+            if i >= v0.len() {
+                assert(cloned::<u8>(s@[i - v0.len()], v@[i]));
+            }
+        }
+        assert(v@ =~= v0 + s@);
+    }
+}
+
+/// `m` is `aa` merged with `bb`: a valid slab of the values of one then
+/// the other, with run count and tail `r`.
+pub(crate) open spec fn merged_ok<K: CountOps>(m: Seq<u8>, aa: Seq<u8>, bb: Seq<u8>, r: (usize, u8)) -> bool {
+    &&& bool_valid::<K>(m)
+    &&& bool_values::<K>(m) == bool_values::<K>(aa) + bool_values::<K>(bb)
+    &&& r.0 == bool_counts::<K>(m).len()
+    &&& r.1 == counts_tail::<K>(bool_counts::<K>(m))
+}
+
+/// Counts `cm` of `m`, whose values are `ca`'s then `cb`'s.
+proof fn lemma_merged<K: CountOps>(cm: Seq<u64>, m: Seq<u8>, ca: Seq<u64>, aa: Seq<u8>, cb: Seq<u64>, bb: Seq<u8>, r: (usize, u8))
+    requires
+        counts_ok(cm), counts_bytes::<K>(cm) == m,
+        bool_parses::<K>(ca, aa), bool_parses::<K>(cb, bb),
+        counts_len(ca) + counts_len(cb) <= usize::MAX,
+        vals_at(cm, 0) == vals_at(ca, 0) + vals_at(cb, 0),
+        r.0 == cm.len(), r.1 == counts_tail::<K>(cm),
+    ensures merged_ok::<K>(m, aa, bb, r),
+{
+    lemma_vals_at_zero(cm);
+    lemma_vals_at_zero(ca);
+    lemma_vals_at_zero(cb);
+    lemma_values_len(cm);
+    lemma_values_len(ca);
+    lemma_values_len(cb);
+    lemma_counts::<K>(ca, aa);
+    lemma_counts::<K>(cb, bb);
+    lemma_counts::<K>(cm, m);
+}
+
+/// The merge where `a`'s last run, `x` long from byte `a_last_start`,
+/// joins `b`'s run `y` (b's counts are `pre`, then `y`, then `rc`, whose
+/// bytes are `rest`).
+#[verifier::spinoff_prover]
+#[verifier::rlimit(40)]
+fn merge_join<K: CountOps>(
+    a: &mut Vec<u8>, Ghost(start): Ghost<usize>, a_last_start: usize, x: usize, y: usize, rest: &[u8], a_segs: usize, b_segs: usize, b_tail: u8, pre_len: usize,
+    Ghost(ca): Ghost<Seq<u64>>, Ghost(cb): Ghost<Seq<u64>>, Ghost(pre): Ghost<Seq<u64>>, Ghost(rc): Ghost<Seq<u64>>, Ghost(bb): Ghost<Seq<u8>>,
+) -> (r: (usize, u8))
+    requires
+        start <= a_last_start <= old(a)@.len(),
+        bool_parses::<K>(ca, old(a)@.skip(start as int)), ca.len() == a_segs, a_segs >= 1, ca.last() == x,
+        old(a)@.take(a_last_start as int) == old(a)@.take(start as int) + counts_bytes::<K>(ca.drop_last()),
+        bool_parses::<K>(cb, bb), cb == pre + seq![y as u64] + rc, rest@ == counts_bytes::<K>(rc),
+        pre.len() <= 1, pre.len() == 1 ==> pre[0] == 0, pre.len() == 0 ==> y > 0, pre_len == pre.len(),
+        (ca.len() - 1) % 2 == pre.len() % 2,
+        b_segs == cb.len(), b_tail == counts_tail::<K>(cb),
+        counts_len(ca) + counts_len(cb) <= usize::MAX,
+    ensures
+        final(a)@.take(start as int) == old(a)@.take(start as int),
+        merged_ok::<K>(final(a)@.skip(start as int), old(a)@.skip(start as int), bb, r),
+{
+    let ghost head = old(a)@.take(start as int);
+    let ghost d = ca.drop_last();
+    proof {
+        assert(ca =~= d + seq![x as u64]);
+        lemma_count_le(ca, ca.len() - 1);
+        lemma_count_le(cb, pre.len() as int);
+        assert(cb[pre.len() as int] == y);
+        lemma_values_len(ca);
+        lemma_values_len(cb);
+    }
+    truncate(a, a_last_start);
+    let n1 = a.len();
+    K::put_count(x + y, a);
+    let merge_bytes = a.len() - n1;
+    extend(a, rest);
+    let _total = a.len();
+    let ghost m = (x + y) as u64;
+    let ghost cm = d + seq![m] + rc;
+    proof {
+        K::axiom_enc(m, m, Seq::empty(), Seq::empty());
+        lemma_merge_values(d, x as u64, y as u64, rc, pre.len() as int);
+        if pre.len() == 1 {
+            assert(cb =~= seq![0u64] + (seq![y as u64] + rc));
+            lemma_vals_at_concat(seq![0u64], seq![y as u64] + rc, 0);
+            lemma_vals_single(0, 0);
+            assert(vals_at(seq![0u64], 0) =~= Seq::<bool>::empty());
+            assert(vals_at(cb, 0) =~= vals_at(seq![y as u64] + rc, 1));
+        } else {
+            assert(cb =~= seq![y as u64] + rc);
+        }
+        lemma_concat::<K>(d + seq![m], rc);
+        lemma_bytes_push::<K>(d, m);
+        assert(d.push(m) =~= d + seq![m]);
+        assert(a@.skip(start as int) =~= counts_bytes::<K>(cm));
+        assert(a@.take(start as int) =~= head);
+        assert(cm.take(ca.len() - 1) =~= ca.take(ca.len() - 1));
+        assert forall|i: int| ca.len() <= i < cm.len() implies #[trigger] cm[i] > 0 by {
+            assert(cm[i] == rc[i - ca.len()]);
+            assert(rc[i - ca.len()] == cb[i - ca.len() + pre.len() + 1]);
+        }
+        if rc.len() > 0 {
+            assert(cm.last() == cb.last());
+        }
+        lemma_merged_ok(cm, ca, cb);
+        lemma_bytes_len::<K>(cm);
+        lemma_bytes_len::<K>(rc);
+    }
+    let tail = if rest.len() == 0 { merge_bytes as u8 } else { b_tail };
+    let r = (a_segs - 1 + (b_segs - pre_len), tail);
+    proof {
+        if rest.len() > 0 {
+            assert(rc.len() > 0) by {
+                if rc.len() == 0 {
+                    assert(counts_bytes::<K>(rc) =~= Seq::<u8>::empty());
+                }
+            }
+        }
+        lemma_merged::<K>(cm, a@.skip(start as int), ca, old(a)@.skip(start as int), cb, bb, r);
+    }
+    r
+}
+
+/// Merge the bool slab `b` (its counts, segments and tail) onto the end
+/// of the one in `a` from `start` (the bytes before are others').
+/// Returns the merged slab's segments and tail.
+#[verifier::spinoff_prover]
+#[verifier::rlimit(60)]
+#[allow(unused_variables)] // `start` is for the spec: the tail record finds a's last run
+pub(crate) fn merge<K: CountOps>(a: &mut Vec<u8>, start: usize, a_tail: u8, a_segs: usize, b: &[u8], b_segs: usize, b_tail: u8) -> (r: (usize, u8))
+    requires
+        start <= old(a)@.len(),
+        bool_valid::<K>(old(a)@.skip(start as int)),
+        a_segs == bool_counts::<K>(old(a)@.skip(start as int)).len(),
+        a_tail == counts_tail::<K>(bool_counts::<K>(old(a)@.skip(start as int))),
+        bool_valid::<K>(b@),
+        b_segs == bool_counts::<K>(b@).len(),
+        b_tail == counts_tail::<K>(bool_counts::<K>(b@)),
+        counts_len(bool_counts::<K>(old(a)@.skip(start as int))) + counts_len(bool_counts::<K>(b@)) <= usize::MAX,
+    ensures
+        final(a)@.take(start as int) == old(a)@.take(start as int),
+        merged_ok::<K>(final(a)@.skip(start as int), old(a)@.skip(start as int), b@, r),
+{
+    let ghost a0 = a@;
+    let ghost aa = a0.skip(start as int);
+    let ghost ca = bool_counts::<K>(aa);
+    let ghost cb = bool_counts::<K>(b@);
+    let ghost head = a0.take(start as int);
+    proof {
+        lemma_counts::<K>(ca, aa);
+        lemma_counts::<K>(cb, b@);
+        assert(a0 =~= head + aa);
+    }
+    if b.len() == 0 {
+        proof {
+            assert(cb.len() == 0) by {
+                if cb.len() > 0 {
+                    lemma_bytes_len::<K>(cb);
+                }
+            }
+            lemma_merged::<K>(ca, aa, ca, aa, cb, b@, (a_segs, a_tail));
+            assert(vals_at(cb, 0) =~= Seq::<bool>::empty());
+            assert(vals_at(ca, 0) + vals_at(cb, 0) =~= vals_at(ca, 0));
+            lemma_merged::<K>(ca, aa, ca, aa, cb, b@, (a_segs, a_tail));
+        }
+        return (a_segs, a_tail);
+    }
+    proof {
+        if cb.len() == 0 {
+            assert(counts_bytes::<K>(cb) =~= Seq::<u8>::empty());
+        }
+        lemma_first::<K>(cb);
+        lemma_count_le(cb, 0);
+        lemma_values_len(ca);
+        lemma_values_len(cb);
+    }
+    if a_segs == 0 {
+        // nothing to merge with: the slab is `b`
+        extend(a, b);
+        proof {
+            assert(ca =~= Seq::<u64>::empty());
+            assert(counts_bytes::<K>(ca) =~= Seq::<u8>::empty());
+            assert(a@.skip(start as int) =~= b@);
+            assert(a@.take(start as int) =~= head);
+            assert(vals_at(ca, 0) =~= Seq::<bool>::empty());
+            assert(vals_at(ca, 0) + vals_at(cb, 0) =~= vals_at(cb, 0));
+            lemma_merged::<K>(cb, b@, ca, aa, cb, b@, (b_segs, b_tail));
+        }
+        return (b_segs, b_tail);
+    }
+    // a's last run, found by its tail record
+    let ghost d = ca.drop_last();
+    let ghost x = ca.last();
+    proof {
+        assert(ca =~= d.push(x));
+        lemma_bytes_push::<K>(d, x);
+        K::axiom_enc(x, x, Seq::empty(), Seq::empty());
+        lemma_count_le(ca, ca.len() - 1);
+        assert(a0.take(a0.len() - a_tail) =~= head + counts_bytes::<K>(d));
+    }
+    let a_last_start = a.len() - a_tail as usize;
+    let tail_slice = slice_from(a, a_last_start);
+    proof {
+        assert(tail_slice@ =~= K::enc(x));
+        assert(K::enc(x).is_prefix_of(tail_slice@));
+    }
+    let (_n, a_last_count) = match K::read_count(tail_slice) {
+        Some(v) => v,
+        None => (0, 0),
+    };
+    proof {
+        K::axiom_enc(a_last_count as u64, x, tail_slice@.skip(_n as int), Seq::empty());
+        assert(tail_slice@ =~= tail_slice@.take(_n as int) + tail_slice@.skip(_n as int));
+    }
+    // runs alternate false/true: an even run count ends on true
+    let a_last_value = a_segs % 2 == 0;
+    // b's first run (always false)
+    proof {
+        assert(K::enc(cb[0]).is_prefix_of(b@));
+    }
+    let (b_first_cb, b_first_count) = match K::read_count(b) {
+        Some(v) => v,
+        None => (0, 0),
+    };
+    proof {
+        K::axiom_enc(b_first_count as u64, cb[0], b@.skip(b_first_cb as int), counts_bytes::<K>(cb.skip(1)));
+        assert(b@ =~= b@.take(b_first_cb as int) + b@.skip(b_first_cb as int));
+    }
+    let b_rest = slice_from(b, b_first_cb);
+    proof {
+        assert(b_rest@ =~= counts_bytes::<K>(cb.skip(1)));
+        assert(seq![cb[0]] + cb.skip(1) =~= cb);
+    }
+    if !a_last_value {
+        if b_first_count > 0 {
+            // a ends false, b starts false: one run of the two
+            proof {
+                assert(Seq::<u64>::empty() + seq![cb[0]] + cb.skip(1) =~= cb);
+            }
+            let ghost pre0 = Seq::<u64>::empty();
+            let ghost rc1 = cb.skip(1);
+            let ghost bb = b@;
+            merge_join::<K>(a, Ghost(start), a_last_start, a_last_count, b_first_count, b_rest, a_segs, b_segs, b_tail, 0,
+                Ghost(ca), Ghost(cb), Ghost(pre0), Ghost(rc1), Ghost(bb))
+        } else {
+            // b's zero-count pad goes: its runs carry on a's alternation
+            let ghost rc1 = cb.skip(1);
+            let ghost bb = b@;
+            merge_append::<K>(a, Ghost(start), b_rest, a_segs, b_segs - 1, Ghost(b_segs), b_tail,
+                Ghost(ca), Ghost(cb), Ghost(rc1), Ghost(bb))
+        }
+    } else if b_first_count > 0 {
+        // a ends true, b starts false: b follows as is
+        proof {
+            assert(cb.skip(0) =~= cb);
+        }
+        let ghost bb = b@;
+        merge_append::<K>(a, Ghost(start), b, a_segs, b_segs, Ghost(b_segs), b_tail, Ghost(ca), Ghost(cb), Ghost(cb), Ghost(bb))
+    } else {
+        // b starts with its zero-count pad then true: that run joins a's
+        proof {
+            assert(cb.len() >= 2);
+            lemma_first::<K>(cb.skip(1));
+            assert(cb.skip(1)[0] == cb[1]);
+            assert(cb.skip(1).skip(1) =~= cb.skip(2));
+            lemma_count_le(cb, 1);
+            assert(K::enc(cb[1]).is_prefix_of(b_rest@));
+        }
+        let (cb2, count2) = match K::read_count(b_rest) {
+            Some(v) => v,
+            None => (0, 0),
+        };
+        proof {
+            K::axiom_enc(count2 as u64, cb[1], b_rest@.skip(cb2 as int), counts_bytes::<K>(cb.skip(2)));
+            assert(b_rest@ =~= b_rest@.take(cb2 as int) + b_rest@.skip(cb2 as int));
+            assert(seq![cb[0]] + seq![cb[1]] + cb.skip(2) =~= cb);
+        }
+        let b_rest2 = slice_from(b_rest, cb2);
+        proof {
+            assert(b_rest2@ =~= counts_bytes::<K>(cb.skip(2)));
+        }
+        let ghost pre1 = seq![cb[0]];
+        let ghost rc2 = cb.skip(2);
+        let ghost bb = b@;
+        merge_join::<K>(a, Ghost(start), a_last_start, a_last_count, count2, b_rest2, a_segs, b_segs, b_tail, 1,
+            Ghost(ca), Ghost(cb), Ghost(pre1), Ghost(rc2), Ghost(bb))
+    }
+}
+
+/// The merge where `b`'s counts from `rc` on (their bytes `rest`) follow
+/// `a`'s: `rc` is all of b's, or all but its zero-count pad.
+#[verifier::spinoff_prover]
+fn merge_append<K: CountOps>(
+    a: &mut Vec<u8>, Ghost(start): Ghost<usize>, rest: &[u8], a_segs: usize, rest_segs: usize, Ghost(b_segs): Ghost<usize>, b_tail: u8,
+    Ghost(ca): Ghost<Seq<u64>>, Ghost(cb): Ghost<Seq<u64>>, Ghost(rc): Ghost<Seq<u64>>, Ghost(bb): Ghost<Seq<u8>>,
+) -> (r: (usize, u8))
+    requires
+        start <= old(a)@.len(),
+        bool_parses::<K>(ca, old(a)@.skip(start as int)), ca.len() == a_segs, a_segs >= 1,
+        bool_parses::<K>(cb, bb), rest@ == counts_bytes::<K>(rc), rc.len() == rest_segs, rc.len() >= 1, cb.len() >= 1,
+        rc == cb && ca.len() % 2 == 0 && cb[0] > 0 || rc == cb.skip(1) && ca.len() % 2 == 1 && cb[0] == 0,
+        b_segs == cb.len(), b_tail == counts_tail::<K>(cb),
+        counts_len(ca) + counts_len(cb) <= usize::MAX,
+    ensures
+        final(a)@.take(start as int) == old(a)@.take(start as int),
+        merged_ok::<K>(final(a)@.skip(start as int), old(a)@.skip(start as int), bb, r),
+{
+    let ghost head = old(a)@.take(start as int);
+    let ghost aa = old(a)@.skip(start as int);
+    proof {
+        assert(old(a)@ =~= head + aa);
+    }
+    extend(a, rest);
+    let _total = a.len();
+    let ghost cm = ca + rc;
+    proof {
+        lemma_concat::<K>(ca, rc);
+        lemma_vals_at_concat(ca, rc, 0);
+        if rc == cb.skip(1) {
+            assert(seq![cb[0]] + cb.skip(1) =~= cb);
+            lemma_vals_at_concat(seq![cb[0]], cb.skip(1), 0);
+            lemma_vals_single(cb[0], 0);
+            assert(vals_at(seq![cb[0]], 0) =~= Seq::<bool>::empty());
+            lemma_vals_at_parity(rc, ca.len() as int, 1);
+            assert(vals_at(cb, 0) =~= vals_at(rc, 1));
+        } else {
+            lemma_vals_at_parity(rc, ca.len() as int, 0);
+        }
+        assert(a@.skip(start as int) =~= counts_bytes::<K>(cm));
+        assert(a@.take(start as int) =~= head);
+        assert(cm.take(ca.len() - 1) =~= ca.take(ca.len() - 1));
+        assert forall|i: int| ca.len() <= i < cm.len() implies #[trigger] cm[i] > 0 by {
+            assert(cm[i] == rc[i - ca.len()]);
+            if rc == cb.skip(1) {
+                assert(rc[i - ca.len()] == cb[i - ca.len() + 1]);
+            }
+        }
+        assert(cm.last() == rc.last());
+        assert(rc.last() == cb.last());
+        lemma_merged_ok(cm, ca, cb);
+        lemma_bytes_len::<K>(cm);
+    }
+    let r = (a_segs + rest_segs, b_tail);
+    proof {
+        lemma_merged::<K>(cm, a@.skip(start as int), ca, aa, cb, bb, r);
+    }
+    r
+}
+
+#[inline(always)]
+fn slice_from(v: &[u8], n: usize) -> (s: &[u8])
+    requires n <= v@.len(),
+    ensures s@ == v@.skip(n as int),
+{
+    let s = &v[n..];
+    assert(s@ == v@.skip(n as int));
+    s
+}
+
 } // verus!
 
 /// [`CountOps`] for codec `C`: the trusted bridge from the verified bool
@@ -1419,6 +1913,11 @@ impl<C: crate::Codec> CountOps for Counts<C> {
 
     #[cfg(verus_keep_ghost)]
     fn axiom_enc(_a: u64, _b: u64, _s: Seq<u8>, _t: Seq<u8>) {}
+
+    #[inline(always)]
+    fn put_count(n: usize, buf: &mut Vec<u8>) {
+        buf.extend(C::encode_count(n));
+    }
 
     #[inline(always)]
     fn read_count(data: &[u8]) -> Option<(usize, usize)> {
