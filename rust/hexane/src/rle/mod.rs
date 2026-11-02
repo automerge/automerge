@@ -1,3 +1,4 @@
+pub(crate) mod cut;
 pub(crate) mod dec;
 mod decoder;
 pub mod edit;

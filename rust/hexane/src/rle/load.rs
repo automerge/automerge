@@ -4,7 +4,9 @@ use std::num::NonZeroU32;
 
 use crate::encoding::SlabInfo;
 use crate::rle::model::Ops;
-use crate::rle::read::{self, Reader, Seg};
+use crate::rle::cut::Load;
+use crate::rle::read;
+use crate::rle::state::WOps;
 use crate::rle::{RleTail, Slab};
 use crate::ColumnValueRef;
 use crate::PackError;
@@ -12,16 +14,6 @@ use crate::RleValue;
 use crate::{Codec, Leb128};
 
 // ── validate_encoding ────────────────────────────────────────────────────────
-
-fn tail_bytes(bytes: usize) -> Result<u32, PackError> {
-    u32::try_from(bytes).map_err(|_| over_4gib())
-}
-
-#[cold]
-#[inline(never)]
-fn over_4gib() -> PackError {
-    PackError::InvalidValue("a run must stay under 4 GiB".to_string())
-}
 
 /// Check that `slab` is a canonical RLE encoding, and summarize it.
 /// The check itself ([`read::validate`]) is verified with Verus.
@@ -43,119 +35,25 @@ pub(crate) fn rle_validate_encoding<T: RleValue, C: Codec>(
 
 /// Streaming decode + validate over saved RLE bytes.
 ///
-/// Yields the runs of the input while building the output slabs with
-/// the same byte-copy mechanics as the block loader: byte ranges of the
-/// input are copied verbatim, with a literal-run header rewrite when a
-/// cut lands inside a literal run. The input must be **canonical** —
-/// non-canonical structure (mergeable adjacent runs, count-0 runs,
-/// count-1 repeats) is a load error, as are value decode errors and
-/// nulls in non-nullable columns — so consumers get the "adjacent runs
-/// never carry equal values" contract by construction. All methods
-/// return `Result` — the bytes are untrusted.
+/// Yields the runs of the input while building the output slabs: byte
+/// ranges of the input are copied verbatim, with a literal-run header
+/// rewrite when a cut lands inside a literal run. The input must be
+/// **canonical** — non-canonical structure (mergeable adjacent runs,
+/// count-0 runs, count-1 repeats) is a load error, as are value decode
+/// errors and nulls in non-nullable columns — so consumers get the
+/// "adjacent runs never carry equal values" contract by construction. All
+/// methods return `Result` — the bytes are untrusted.
+///
+/// The reading, checking and cutting ([`Load`]) are verified with Verus:
+/// a finished load's slabs are each a canonical encoding with their
+/// recorded length, segment count and tail, and together hold the
+/// input's values in order. After an error, the iterator must not be
+/// used again.
 ///
 /// [`finalize`](Self::finalize) drains whatever the consumer did not pull
 /// (validating it) and returns the finished slabs.
 pub struct RleLoadIter<'a, T: RleValue, C: Codec = Leb128> {
-    /// reads and checks the segments: non-canonical structure (mergeable
-    /// adjacent runs, count-0 runs, count-1 repeats), more values than
-    /// fit a `usize` and runs over 4 GiB are load errors
-    reader: Reader<'a, Ops<'a, T, C>>,
-    input: &'a [u8],
-    cut: CutState,
-    target_segments: usize,
-}
-
-/// The slab-cutting state of an in-progress load, identical to the block
-/// loader's. One copy of the (subtle) literal-split bookkeeping, shared by
-/// the resumable iterator (state in the struct) and `finalize`'s
-/// run-to-completion drain (state hoisted into a local).
-#[derive(Default)]
-struct CutState {
-    slabs: Vec<Slab>,
-    slab: Slab,
-    start: usize,
-    last_lit_count: usize,
-    lit_count: usize,
-    pending_header: usize,
-    /// the byte length of the slab's last run so far, recorded in its
-    /// `u32` tail when the slab is cut (an error if it is 4 GiB or more)
-    tail_len: usize,
-}
-
-impl CutState {
-    /// Per-segment slab bookkeeping; yields the segment's run, if any.
-    /// `#[inline(always)]` so a caller that discards the run compiles down
-    /// to the bare bookkeeping. Segments come from the [`Reader`], which
-    /// has checked them (a run's count fits the column's length, and its
-    /// bytes a `u32`) — keeping this infallible lets the discard path
-    /// fold completely.
-    #[inline(always)]
-    fn track<'a, T: RleValue>(
-        &mut self,
-        segment: Seg<T::Get<'a>>,
-    ) -> Option<crate::Run<T::Get<'a>>> {
-        match segment {
-            Seg::LitHead { count, bytes } => {
-                if self.last_lit_count < self.lit_count {
-                    self.pending_header = self.lit_count;
-                }
-                self.tail_len = bytes;
-                self.last_lit_count = count;
-                self.lit_count = 0;
-                None
-            }
-            Seg::Lit { value, bytes } => {
-                self.slab.len += 1;
-                self.slab.segments += 1;
-                self.slab.tail.lit_tail = NonZeroU32::new(bytes as u32);
-                self.tail_len += bytes;
-                self.lit_count += 1;
-                Some(crate::Run { count: 1, value })
-            }
-            Seg::Run {
-                count,
-                value,
-                bytes,
-            } => {
-                self.slab.len += count;
-                self.slab.segments += 1;
-                self.slab.tail.lit_tail = None;
-                self.tail_len = bytes;
-                (count > 0).then_some(crate::Run { count, value })
-            }
-            Seg::Null { count, bytes } => {
-                self.slab.len += count;
-                self.slab.segments += 1;
-                self.slab.tail.lit_tail = None;
-                self.tail_len = bytes;
-                (count > 0).then_some(crate::Run {
-                    count,
-                    value: T::get_null(),
-                })
-            }
-        }
-    }
-
-    /// Cut a slab at byte position `pos` (the block loader's split,
-    /// byte-for-byte).
-    fn cut_slab<C: Codec>(&mut self, input: &[u8], pos: usize) -> Result<(), PackError> {
-        self.slab.tail.bytes = tail_bytes(self.tail_len)?;
-        if !self.slab.copy_from::<C>(
-            &input[self.start..pos],
-            self.pending_header,
-            self.lit_count,
-            self.last_lit_count,
-        ) {
-            return Err(over_4gib());
-        }
-        self.slabs.push(std::mem::take(&mut self.slab));
-        self.tail_len = 0;
-        self.pending_header = 0;
-        self.last_lit_count = 0;
-        self.lit_count = 0;
-        self.start = pos;
-        Ok(())
-    }
+    load: Load<'a, WOps<'a, T, T, C>>,
 }
 
 impl<'a, T: RleValue, C: Codec> RleLoadIter<'a, T, C> {
@@ -166,55 +64,25 @@ impl<'a, T: RleValue, C: Codec> RleLoadIter<'a, T, C> {
     pub fn new(data: &'a [u8], max_segments: usize) -> Self {
         assert!(max_segments >= 2, "max_segments must be at least 2");
         Self {
-            reader: Reader::new(data),
-            input: data,
-            cut: CutState::default(),
-            target_segments: max_segments / 2,
+            load: Load::new(data, max_segments),
         }
     }
 
     /// The next canonical run, or `None` at end of input. Non-canonical
     /// structure — anything a canonical encoder would have merged or
-    /// never emitted — is a load error (the [`Reader`]'s), so the run
-    /// stream keeps the "adjacent runs never carry equal values" contract
-    /// by construction, and every run is exactly one wire segment.
+    /// never emitted — is a load error (the [`Reader`](read::Reader)'s),
+    /// so the run stream keeps the "adjacent runs never carry equal
+    /// values" contract by construction, and every run is exactly one
+    /// wire segment.
     #[inline]
     pub fn try_next_run(&mut self) -> Result<Option<crate::Run<T::Get<'a>>>, PackError> {
-        loop {
-            let Some(segment) = self.reader.next()? else {
-                return Ok(None);
-            };
-            let out = self.cut.track::<T>(segment);
-            if self.cut.slab.segments == self.target_segments {
-                self.cut.cut_slab::<C>(self.input, self.reader.pos())?;
-            }
-            if let Some(run) = out {
-                return Ok(Some(run));
-            }
-        }
+        self.load.try_next_run()
     }
 
     /// Drain and validate whatever the consumer did not pull, flush the
     /// final slab, and return the finished slabs.
     pub fn finalize(self) -> Result<Vec<Slab>, PackError> {
-        // hoist the cutting state into a local so the drain loop keeps it
-        // in registers; `track` inlines to bare bookkeeping when its run
-        // is discarded
-        let mut cut = self.cut;
-        let target_segments = self.target_segments;
-        let input = self.input;
-        let mut reader = self.reader;
-
-        while let Some(segment) = reader.next()? {
-            let _ = cut.track::<T>(segment);
-            if cut.slab.segments == target_segments {
-                cut.cut_slab::<C>(input, reader.pos())?;
-            }
-        }
-        if cut.slab.segments > 0 {
-            cut.cut_slab::<C>(input, reader.pos())?;
-        }
-        Ok(cut.slabs)
+        self.load.finalize()
     }
 }
 
@@ -230,11 +98,11 @@ where
     }
 
     fn slabs_completed(&self) -> usize {
-        self.cut.slabs.len()
+        self.load.slabs_completed()
     }
 
     fn completed_slab_len(&self, i: usize) -> usize {
-        self.cut.slabs[i].len
+        self.load.completed_slab_len(i)
     }
 
     fn finalize(self) -> Result<Vec<Slab>, PackError> {
@@ -242,59 +110,39 @@ where
     }
 }
 
-impl Slab {
-    /// Returns false if the slab's last run grows to 4 GiB or more,
-    /// which its tail record can't hold.
-    #[must_use]
-    fn copy_from<C: Codec>(
-        &mut self,
-        input: &[u8],
-        pending_header: usize,
-        lit_count: usize,
-        last_lit_count: usize,
-    ) -> bool {
-        if pending_header > 0 {
-            // we split a lit run but it terminated
-            let hdr = C::encode_signed(-(pending_header as i64));
-            self.data.extend_from_slice(hdr.as_bytes());
-        } else if lit_count > last_lit_count && last_lit_count == 0 {
-            // we split a lit run and its ongoing
-            let hdr = C::encode_signed(-(lit_count as i64));
-            if self.tail.lit_tail.is_some() {
-                // header and tail
-                match self.tail.bytes.checked_add(hdr.len() as u32) {
-                    Some(b) => self.tail.bytes = b,
-                    None => return false,
-                }
-            }
-            self.data.extend_from_slice(hdr.as_bytes());
-        }
-        self.data.extend_from_slice(input);
-        if lit_count < last_lit_count {
-            let header_pos = self.data.len() - self.tail.bytes as usize;
-            let delta = C::rewrite_lit_header(&mut self.data, header_pos, lit_count);
-            match u32::try_from(self.tail.bytes as i64 + delta) {
-                Ok(b) => self.tail.bytes = b,
-                Err(_) => return false,
-            }
-        }
-        true
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use crate::rle::cut::Cut;
+    use crate::rle::model::Ops;
+    use crate::rle::read::Seg;
+    use crate::rle::state::WOps;
+    use vstd::prelude::Ghost;
+
+    type O<'a, T> = Ops<'a, T, Leb128>;
+    type W<'a, T> = WOps<'a, T, T, Leb128>;
+
+    /// Count segments into a fresh cut (the reader they stand for is
+    /// ghost, so the counts need not be real).
+    fn cut_of<T: RleValue>(segs: Vec<Seg<T::Get<'_>>>) -> Cut {
+        let mut cut = Cut::new::<O<'_, T>>(Ghost::assume_new());
+        for seg in segs {
+            let _ = cut.track::<O<'_, T>>(seg, Ghost::assume_new(), Ghost::assume_new());
+        }
+        cut
+    }
+
     /// A run of 4 GiB or more has no tail record: loading it is an error,
     /// where its length used to be truncated to `u32`.
     #[cfg(target_pointer_width = "64")]
     #[test]
     fn a_run_of_4gib_is_not_loadable() {
-        let mut cut = super::CutState::default();
-        let _ = cut.track::<Option<u64>>(crate::rle::read::Seg::Null {
+        let mut cut = cut_of::<Option<u64>>(vec![Seg::Null {
             count: 1,
             bytes: 1 << 32,
-        });
-        assert!(cut.cut_slab::<Leb128>(&[], 0).is_err());
+        }]);
+        assert!(cut
+            .cut_slab::<W<'_, Option<u64>>>(&[], 0, Ghost::assume_new())
+            .is_err());
     }
 
     /// Only the slab's last run is recorded, so a run of 4 GiB that does
@@ -302,35 +150,39 @@ mod tests {
     #[cfg(target_pointer_width = "64")]
     #[test]
     fn a_run_of_4gib_before_the_last_loads() {
-        use crate::rle::read::Seg as RleSegment;
-        let mut cut = super::CutState::default();
-        let _ = cut.track::<Option<u64>>(RleSegment::Null {
-            count: 1,
-            bytes: 1 << 32,
-        });
-        let _ = cut.track::<Option<u64>>(RleSegment::Run {
-            count: 2,
-            value: Some(1),
-            bytes: 2,
-        });
-        assert!(cut.cut_slab::<Leb128>(&[], 0).is_ok());
-        assert_eq!(cut.slabs[0].tail.bytes, 2);
+        let mut cut = cut_of::<Option<u64>>(vec![
+            Seg::Null {
+                count: 1,
+                bytes: 1 << 32,
+            },
+            Seg::Run {
+                count: 2,
+                value: Some(1),
+                bytes: 2,
+            },
+        ]);
+        assert!(cut
+            .cut_slab::<W<'_, Option<u64>>>(&[], 0, Ghost::assume_new())
+            .is_ok());
+        assert_eq!(cut.into_slabs()[0].tail.bytes, 2);
     }
 
     /// The same for a literal run whose values add up to 4 GiB.
     #[test]
     fn a_literal_of_4gib_is_not_loadable() {
-        use crate::rle::read::Seg as RleSegment;
-        let mut cut = super::CutState::default();
-        let _ = cut.track::<u64>(RleSegment::LitHead { count: 2, bytes: 1 });
+        let mut segs = vec![Seg::LitHead { count: 2, bytes: 1 }];
         for _ in 0..2 {
-            let _ = cut.track::<u64>(RleSegment::Lit {
+            segs.push(Seg::Lit {
                 value: 1,
                 bytes: 1 << 31,
             });
         }
-        assert!(cut.cut_slab::<Leb128>(&[], 0).is_err());
+        let mut cut = cut_of::<u64>(segs);
+        assert!(cut
+            .cut_slab::<W<'_, u64>>(&[], 0, Ghost::assume_new())
+            .is_err());
     }
+
     use crate::rle::state::{RleCow, RleState};
     use crate::rle::*;
     use crate::rle::{RleDecoder, RleEncoding};

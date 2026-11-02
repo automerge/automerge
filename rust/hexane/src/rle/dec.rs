@@ -1933,6 +1933,7 @@ fn walk_lit<'a, W: WriteOps<'a>>(data: &'a [u8], at: usize, Ghost(gi): Ghost<int
 {
     hide(canonical);
     hide(gseg);
+    hide(group_ok);
     let ghost gs = slab_groups::<W::R>(data@);
     let ghost g = gs[gi];
     let ghost vs = g->values;

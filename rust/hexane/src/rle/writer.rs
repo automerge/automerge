@@ -80,7 +80,7 @@ pub uninterp spec fn tail_l(t: RleTail) -> nat;
 /// If the run is 4 GiB or more: no record holds it.
 #[verifier::external_body]
 #[inline(always)]
-fn tail_rec(bytes: usize, lit: usize) -> (t: RleTail)
+pub(crate) fn tail_rec(bytes: usize, lit: usize) -> (t: RleTail)
     ensures tail_b(t) == bytes, lit <= bytes ==> tail_l(t) == lit,
 {
     RleTail {
@@ -132,6 +132,15 @@ pub(crate) fn merge_tail(w: WPos, prefix: usize, middle: usize, postfix: usize, 
     }
 }
 
+/// A slab's recorded length.
+#[verifier::external_body]
+#[inline(always)]
+pub(crate) fn slab_len_of(s: &Slab) -> (n: usize)
+    ensures n == slab_len(*s),
+{
+    s.len
+}
+
 /// A tail record for a merge that ignores it.
 #[verifier::external_body]
 #[inline(always)]
@@ -142,7 +151,7 @@ fn no_tail() -> RleTail {
 /// A slab the rebuild spilled into.
 #[verifier::external_body]
 #[inline(always)]
-fn new_slab(data: Vec<u8>, len: usize, segments: usize, tail: RleTail) -> (s: Slab)
+pub(crate) fn new_slab(data: Vec<u8>, len: usize, segments: usize, tail: RleTail) -> (s: Slab)
     ensures slab_bytes(s) == data@, slab_len(s) == len, slab_segments(s) == segments, slab_tail_of(s) == tail,
 {
     Slab { data, len, segments, tail }

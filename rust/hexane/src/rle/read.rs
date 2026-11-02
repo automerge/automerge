@@ -550,7 +550,7 @@ pub(crate) open spec fn next_post<'a, O: RleOps<'a>>(r0: Reader<'a, O>, r1: Read
                 &&& !r0.in_lit() && r1.in_lit()
                 &&& r1.groups() == r0.groups()
                 &&& r1.lit_values() == Seq::<O::V>::empty()
-                &&& count >= 1
+                &&& count >= 1 && r1.lit_k() == count
                 &&& bytes == lit_head::<O>(count as nat).len()
                 &&& r1.spec_pos() == r0.spec_pos() + bytes
             },
@@ -559,7 +559,9 @@ pub(crate) open spec fn next_post<'a, O: RleOps<'a>>(r0: Reader<'a, O>, r1: Read
                 &&& bytes == O::enc(value).len()
                 &&& r1.spec_pos() == r0.spec_pos() + bytes
                 &&& r1.in_lit() ==> r1.groups() == r0.groups() && r1.lit_values() == r0.lit_values().push(value)
+                    && r1.lit_k() == r0.lit_k()
                 &&& !r1.in_lit() ==> r1.groups() == r0.groups().push(Group::Lit { values: r0.lit_values().push(value) })
+                    && r0.lit_values().len() + 1 == r0.lit_k()
             },
         },
     }
@@ -607,8 +609,13 @@ impl<'a, O: RleOps<'a>> Reader<'a, O> {
         self.cur@
     }
 
+    /// Inside a literal run: its header's count (else 0).
+    pub closed spec fn lit_k(&self) -> nat {
+        self.lit_k@
+    }
+
     /// What `inv` says of the groups and position.
-    pub proof fn lemma_inv(&self)
+    pub(crate) proof fn lemma_inv(&self)
         requires self.inv(),
         ensures
             canonical::<O>(self.groups()),
@@ -617,6 +624,10 @@ impl<'a, O: RleOps<'a>> Reader<'a, O> {
             self.spec_pos() <= self.data().len(),
             groups_len(self.groups()) + self.lit_values().len() <= usize::MAX,
             !self.in_lit() ==> self.lit_values().len() == 0,
+            self.data().take(self.spec_pos()) == read_bytes::<O>(self.groups(), self.lit_k(), self.lit_values()),
+            self.spec_pos() <= usize::MAX,
+            self.in_lit() == (self.lit_k() > 0), self.lit_k() <= i64::MAX,
+            self.in_lit() ==> self.lit_values().len() < self.lit_k() && lit_prefix_ok::<O>(self.groups(), self.lit_values()),
     {
         assert(self.data@.take(self.pos as int).len() == self.pos);
     }
@@ -893,6 +904,8 @@ impl<'a, O: RleOps<'a>> Reader<'a, O> {
         Ok(Some(Seg::LitHead { count, bytes: hn }))
     }
 
+    #[verifier::spinoff_prover]
+    #[verifier::rlimit(40)]
     fn next_null(&mut self, hn: usize) -> (r: Result<Option<Seg<O::V>>, PackError>)
         requires
             old(self).inv(), !old(self).in_lit(),
