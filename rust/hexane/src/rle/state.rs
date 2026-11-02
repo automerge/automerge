@@ -686,6 +686,13 @@ impl<'a, T: RleValue, V: AsColumnRef<T>, C: Codec> RleState<'a, T, V, C> {
             let bytes = value.pack::<C>(buf);
             WPos::lit(pos, bytes, true)
         } else {
+            // A repeat run's header is an `i64`, and a canonical encoding
+            // can't split the run in two, so a longer run has no encoding
+            // (like a `Column::fill` that long).
+            assert!(
+                count <= i64::MAX as usize,
+                "a run of {count} equal values is not encodable"
+            );
             buf.extend(C::encode_signed(count as i64));
             value.pack::<C>(buf);
             WPos::run(pos, true)
