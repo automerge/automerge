@@ -155,7 +155,9 @@ pub(crate) struct RewriteHeader {
 }
 
 impl RewriteHeader {
-    fn new(count: usize, pos: usize) -> Self {
+    fn new(count: usize, pos: usize) -> (r: Self)
+        ensures r == (RewriteHeader { count, pos }),
+    {
         Self { count, pos }
     }
 }
@@ -201,15 +203,21 @@ impl WPos {
 
 impl FlushState {
     /// Nothing flushed.
-    pub(crate) fn none() -> Self {
+    pub(crate) fn none() -> (f: Self)
+        ensures f.rewrite is None,
+    {
         FlushState { segments: 0, rewrite: None, wpos: WPos::Run { pos: 0, local: true } }
     }
 
-    fn new(segments: usize, wpos: WPos) -> Self {
+    fn new(segments: usize, wpos: WPos) -> (f: Self)
+        ensures f.rewrite is None,
+    {
         Self { segments, rewrite: None, wpos }
     }
 
-    fn rewrite(segments: usize, r: RewriteHeader, wpos: WPos) -> Self {
+    fn rewrite(segments: usize, r: RewriteHeader, wpos: WPos) -> (f: Self)
+        ensures f.rewrite == Some(r),
+    {
         Self { segments, rewrite: Some(r), wpos }
     }
 }
@@ -247,11 +255,15 @@ pub(crate) enum State<'a, W: WriteOps<'a>> {
 
 // ── The writer's contract ───────────────────────────────────────────────────
 //
-// A state stands for a pending group, and the bytes written since the
-// writer began (at `base` in the buffer) for the groups already emitted —
-// plus, for a literal in progress, a `-1` header and the values written
-// so far (`ws`).  `rel` ties them together; each step keeps it, appending
-// to the values.
+// A state stands for a pending group.  The bytes before it — `pre`, the
+// slab's bytes before the edit point, then the bytes written since
+// `base` in the buffer — are the groups already emitted, plus, for a
+// literal in progress, its header and the values written so far (`ws`).
+// A literal in progress either has its header in the buffer (a `-1`
+// placeholder, rewritten when it closes), or — opened from a slab —
+// in `pre`, with the slab's count `h0`; closing it then returns a
+// `RewriteHeader` for the caller to apply to the slab.  Each step keeps
+// this, appending to the values.
 
 /// The pending group, given the literal values already written.
 pub(crate) open spec fn pend_group<'a, W: WriteOps<'a>>(s: State<'a, W>, ws: Seq<VOf<'a, W>>) -> Option<Group<VOf<'a, W>>> {
@@ -277,27 +289,48 @@ pub(crate) open spec fn values_of<'a, W: WriteOps<'a>>(s: State<'a, W>, gs: Seq<
     groups_values(all_groups(s, gs, ws), <W::R as RleOps<'a>>::null())
 }
 
-/// The bytes written for the pending group.
-pub(crate) open spec fn pend_bytes<'a, W: WriteOps<'a>>(s: State<'a, W>, ws: Seq<VOf<'a, W>>) -> Seq<u8> {
-    match s {
-        State::Lit { .. } => <W::R as RleOps<'a>>::enc_signed(-1i64) + encs::<W::R>(ws),
-        _ => Seq::empty(),
+/// A literal in progress whose header is in the slab before the edit.
+pub(crate) open spec fn pre_lit<'a, W: WriteOps<'a>>(s: State<'a, W>) -> bool {
+    s is Lit && s->Lit_local < s->Lit_count
+}
+
+/// The `-1` placeholder header of a literal the writer opened.
+pub(crate) open spec fn ph<'a, W: WriteOps<'a>>() -> Seq<u8> {
+    <W::R as RleOps<'a>>::enc_signed(-1i64)
+}
+
+/// State `s`, with the slab's bytes `pre` before the edit point and the
+/// bytes `buf` written from `base`: emitted groups `gs`, then the
+/// pending group with literal values `ws` written.  `h0` is the slab's
+/// header count of a literal opened from it.
+pub(crate) open spec fn rel<'a, W: WriteOps<'a>>(s: State<'a, W>, pre: Seq<u8>, buf: Seq<u8>, base: int, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>, h0: i64) -> bool {
+    &&& 0 <= base <= buf.len()
+    &&& canonical::<W::R>(all_groups(s, gs, ws))
+    &&& match s {
+        State::Empty => gs.len() == 0 && ws.len() == 0 && pre.len() == 0 && buf.skip(base).len() == 0,
+        State::Lit { count, local, header_pos, .. } => {
+            &&& count == ws.len() && 1 <= count < usize::MAX && local <= count
+            &&& if local == count {
+                &&& pre + buf.skip(base) == groups_bytes::<W::R>(gs) + ph::<W>() + encs::<W::R>(ws)
+                &&& pre.len() <= groups_bytes::<W::R>(gs).len()
+                &&& header_pos == base + groups_bytes::<W::R>(gs).len() - pre.len()
+            } else {
+                &&& pre == groups_bytes::<W::R>(gs) + <W::R as RleOps<'a>>::enc_signed(h0)
+                    + encs::<W::R>(ws.take(count - local))
+                &&& buf.skip(base) == encs::<W::R>(ws.skip(count - local))
+                &&& header_pos == groups_bytes::<W::R>(gs).len()
+            }
+        },
+        _ => ws.len() == 0 && pre + buf.skip(base) == groups_bytes::<W::R>(gs),
     }
 }
 
-/// State `s` with the bytes `buf` written from `base`: emitted groups
-/// `gs`, then the pending group with literal values `ws` written.
-pub(crate) open spec fn rel<'a, W: WriteOps<'a>>(s: State<'a, W>, buf: Seq<u8>, base: int, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>) -> bool {
-    &&& 0 <= base <= buf.len()
-    &&& canonical::<W::R>(all_groups(s, gs, ws))
-    &&& buf.skip(base) == groups_bytes::<W::R>(gs) + pend_bytes(s, ws)
-    &&& match s {
-        State::Empty => gs.len() == 0 && ws.len() == 0,
-        State::Lit { count, local, header_pos, .. } => {
-            &&& count == local && count == ws.len() && ws.len() >= 1 && count < usize::MAX
-            &&& header_pos == base + groups_bytes::<W::R>(gs).len()
-        },
-        _ => ws.len() == 0,
+/// `pre` with a deferred header rewrite applied.
+pub(crate) open spec fn apply<'a, W: WriteOps<'a>>(rw: Option<RewriteHeader>, pre: Seq<u8>, h0: i64) -> Seq<u8> {
+    match rw {
+        None => pre,
+        Some(r) => pre.take(r.pos as int) + <W::R as RleOps<'a>>::enc_signed(-(r.count as int) as i64)
+            + pre.skip(r.pos + <W::R as RleOps<'a>>::enc_signed(h0).len()),
     }
 }
 
@@ -311,31 +344,53 @@ pub(crate) open spec fn wf<'a, W: WriteOps<'a>>(s: State<'a, W>, buf: Seq<u8>) -
         State::Lit { count, local, header_pos, current, .. } => {
             &&& !<W::R as RleOps<'a>>::is_null(W::val(current))
             &&& 1 <= count && local <= count && count + 1 <= i64::MAX && count < usize::MAX
-            &&& local == count ==> header_pos <= buf.len()
-                && <W::R as RleOps<'a>>::enc_signed(-1i64).is_prefix_of(buf.skip(header_pos as int))
+            &&& local == count ==> header_pos <= buf.len() && ph::<W>().is_prefix_of(buf.skip(header_pos as int))
         },
     }
 }
 
-/// From `(s0, b0)` to `(s1, b1)` the writer appended `added`.
-pub(crate) open spec fn step<'a, W: WriteOps<'a>>(s0: State<'a, W>, b0: Seq<u8>, s1: State<'a, W>, b1: Seq<u8>, added: Seq<VOf<'a, W>>) -> bool {
-    forall|base: int, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>| #[trigger] rel(s0, b0, base, gs, ws)
-        ==> exists|gs2: Seq<Group<VOf<'a, W>>>, ws2: Seq<VOf<'a, W>>| #[trigger] rel(s1, b1, base, gs2, ws2)
+/// From `(s0, b0)` to `(s1, b1)` the writer appended `added`, returning
+/// the header rewrite `rw` for the slab.
+pub(crate) open spec fn step<'a, W: WriteOps<'a>>(s0: State<'a, W>, b0: Seq<u8>, s1: State<'a, W>, b1: Seq<u8>, rw: Option<RewriteHeader>, added: Seq<VOf<'a, W>>) -> bool {
+    forall|pre: Seq<u8>, base: int, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>, h0: i64| #[trigger] rel(s0, pre, b0, base, gs, ws, h0)
+        ==> exists|gs2: Seq<Group<VOf<'a, W>>>, ws2: Seq<VOf<'a, W>>, h1: i64| #[trigger] rel(s1, apply::<W>(rw, pre, h0), b1, base, gs2, ws2, h1)
             && values_of(s1, gs2, ws2) == values_of(s0, gs, ws) + added
 }
 
-/// Flushing `(s0, b0)` wrote `b1`: canonical groups for its values.
-pub(crate) open spec fn flushed<'a, W: WriteOps<'a>>(s0: State<'a, W>, b0: Seq<u8>, b1: Seq<u8>) -> bool {
-    forall|base: int, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>| #[trigger] rel(s0, b0, base, gs, ws)
-        ==> 0 <= base <= b1.len() && b1.skip(base) == groups_bytes::<W::R>(all_groups(s0, gs, ws))
+/// Flushing `(s0, b0)` wrote `b1` and returned the rewrite `rw`: the
+/// canonical groups of its values.
+pub(crate) open spec fn flushed<'a, W: WriteOps<'a>>(s0: State<'a, W>, b0: Seq<u8>, b1: Seq<u8>, rw: Option<RewriteHeader>) -> bool {
+    forall|pre: Seq<u8>, base: int, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>, h0: i64| #[trigger] rel(s0, pre, b0, base, gs, ws, h0)
+        ==> 0 <= base <= b1.len() && apply::<W>(rw, pre, h0) + b1.skip(base) == groups_bytes::<W::R>(all_groups(s0, gs, ws))
             && canonical::<W::R>(all_groups(s0, gs, ws))
+}
+
+/// The bytes a flush onto `lit` literal values that follow in the slab
+/// writes before them: the groups, then one literal header covering the
+/// pending values and those `lit`, then the pending values.
+pub(crate) open spec fn lit_head<'a, W: WriteOps<'a>>(s: State<'a, W>, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>, lit: nat) -> Seq<u8> {
+    match s {
+        State::Lit { current, .. } => groups_bytes::<W::R>(gs)
+            + <W::R as RleOps<'a>>::enc_signed(-((ws.len() + 1 + lit) as int) as i64)
+            + encs::<W::R>(ws.push(W::val(current))),
+        State::Lone(c) => groups_bytes::<W::R>(gs)
+            + <W::R as RleOps<'a>>::enc_signed(-((1 + lit) as int) as i64)
+            + <W::R as RleOps<'a>>::enc(W::val(c)),
+        _ => groups_bytes::<W::R>(all_groups(s, gs, ws)) + <W::R as RleOps<'a>>::enc_signed(-(lit as int) as i64),
+    }
+}
+
+/// Flushing `(s0, b0)` onto `lit` following literal values wrote `b1`
+/// and returned the rewrite `rw`.
+pub(crate) open spec fn flushed_lit<'a, W: WriteOps<'a>>(s0: State<'a, W>, b0: Seq<u8>, b1: Seq<u8>, rw: Option<RewriteHeader>, lit: nat) -> bool {
+    forall|pre: Seq<u8>, base: int, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>, h0: i64| #[trigger] rel(s0, pre, b0, base, gs, ws, h0)
+        ==> 0 <= base <= b1.len() && apply::<W>(rw, pre, h0) + b1.skip(base) == lit_head(s0, gs, ws, lit)
 }
 
 /// `n` copies of `v`.
 pub open spec fn copies<V>(n: nat, v: V) -> Seq<V> {
     Seq::new(n, |_i| v)
 }
-
 
 // ── Lemmas ──────────────────────────────────────────────────────────────────
 
@@ -395,20 +450,37 @@ pub(crate) proof fn lemma_copies<V>(a: nat, b: nat, v: V)
     assert(copies(a, v) + copies(b, v) =~= copies(a + b, v));
 }
 
-/// A literal header rewritten in place.
-pub(crate) proof fn lemma_rewrite<'a, O: RleOps<'a>>(b0: Seq<u8>, base: int, gsb: Seq<u8>, mid: Seq<u8>, total: int, b1: Seq<u8>)
-    requires
-        0 <= base <= b0.len(), b0.skip(base) == gsb + O::enc_signed(-1i64) + mid,
-        b1 == b0.take(base + gsb.len()) + O::enc_signed(total as i64) + b0.skip(base + gsb.len() + O::enc_signed(-1i64).len()),
-    ensures b1.skip(base) == gsb + O::enc_signed(total as i64) + mid, base <= b1.len(),
+pub(crate) proof fn lemma_copies_push<V>(ws: Seq<V>, v: V, n: nat)
+    ensures ws.push(v) + copies(n, v) == ws + copies(n + 1, v),
 {
-    let hp = base + gsb.len();
+    assert(ws.push(v) + copies(n, v) =~= ws + copies(n + 1, v));
+}
+
+/// A placeholder header rewritten in place in the buffer.
+pub(crate) proof fn lemma_rewrite<'a, O: RleOps<'a>>(b0: Seq<u8>, base: int, a: Seq<u8>, mid: Seq<u8>, total: int, b1: Seq<u8>)
+    requires
+        0 <= base <= b0.len(), b0.skip(base) == a + O::enc_signed(-1i64) + mid,
+        b1 == b0.take(base + a.len()) + O::enc_signed(total as i64) + b0.skip(base + a.len() + O::enc_signed(-1i64).len()),
+    ensures b1.skip(base) == a + O::enc_signed(total as i64) + mid, base <= b1.len(),
+{
+    let hp = base + a.len();
     let h = O::enc_signed(-1i64);
     assert(b0 =~= b0.take(base) + b0.skip(base));
-    assert(b0.take(hp) =~= b0.take(base) + gsb);
+    assert(b0.take(hp) =~= b0.take(base) + a);
     assert(b0.skip(hp + h.len()) =~= mid);
-    assert(b1 =~= b0.take(base) + (gsb + O::enc_signed(total as i64) + mid));
-    assert(b1.skip(base) =~= gsb + O::enc_signed(total as i64) + mid);
+    assert(b1 =~= b0.take(base) + (a + O::enc_signed(total as i64) + mid));
+    assert(b1.skip(base) =~= a + O::enc_signed(total as i64) + mid);
+}
+
+/// The buffer's share of bytes that start with `pre`.
+pub(crate) proof fn lemma_local(pre: Seq<u8>, m: Seq<u8>, g: Seq<u8>, x: Seq<u8>)
+    requires pre + m == g + x, pre.len() <= g.len(),
+    ensures m == g.skip(pre.len() as int) + x, pre == g.take(pre.len() as int),
+{
+    assert(pre =~= (pre + m).take(pre.len() as int));
+    assert(m =~= (pre + m).skip(pre.len() as int));
+    assert((g + x).skip(pre.len() as int) =~= g.skip(pre.len() as int) + x);
+    assert((g + x).take(pre.len() as int) =~= g.take(pre.len() as int));
 }
 
 /// The group a run of `n` copies of `v` is written as.
@@ -420,6 +492,7 @@ pub(crate) proof fn lemma_lone_bytes<'a, O: RleOps<'a>>(v: O::V)
     ensures
         group_bytes::<O>(Group::Lit { values: seq![v] }) == O::enc_signed(-1i64) + O::enc(v),
         group_values(Group::Lit { values: seq![v] }, O::null()) == copies(1, v),
+        encs::<O>(seq![v]) == O::enc(v),
 {
     reveal_with_fuel(encs, 2);
     assert(seq![v].drop_last() =~= Seq::<O::V>::empty());
@@ -427,9 +500,15 @@ pub(crate) proof fn lemma_lone_bytes<'a, O: RleOps<'a>>(v: O::V)
     assert(seq![v] =~= copies(1, v));
 }
 
+pub(crate) proof fn lemma_encs_push<'a, O: RleOps<'a>>(ws: Seq<O::V>, c: O::V)
+    ensures encs::<O>(ws.push(c)) == encs::<O>(ws) + O::enc(c),
+{
+    assert(ws.push(c).drop_last() =~= ws);
+}
+
 /// A related state is well formed.
-pub(crate) proof fn lemma_rel_wf<'a, W: WriteOps<'a>>(s: State<'a, W>, buf: Seq<u8>, base: int, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>)
-    requires rel(s, buf, base, gs, ws),
+pub(crate) proof fn lemma_rel_wf<'a, W: WriteOps<'a>>(s: State<'a, W>, pre: Seq<u8>, buf: Seq<u8>, base: int, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>, h0: i64)
+    requires rel(s, pre, buf, base, gs, ws, h0),
     ensures wf(s, buf),
 {
     match s {
@@ -437,54 +516,73 @@ pub(crate) proof fn lemma_rel_wf<'a, W: WriteOps<'a>>(s: State<'a, W>, buf: Seq<
         _ => {
             let g = pend_group(s, ws)->Some_0;
             lemma_canonical_split::<W::R>(gs, g);
-            if let State::Lit { count, header_pos, current, .. } = s {
+            if let State::Lit { count, local, header_pos, current, .. } = s {
                 assert(group_ok::<W::R>(g));
                 let w = ws.push(W::val(current));
                 assert(w[ws.len() as int] == W::val(current));
-                let hp = header_pos as int;
-                let rest = encs::<W::R>(ws);
-                assert(buf.skip(hp) =~= <W::R as RleOps<'a>>::enc_signed(-1i64) + rest) by {
-                    assert(buf.skip(base) == groups_bytes::<W::R>(gs) + (<W::R as RleOps<'a>>::enc_signed(-1i64) + rest));
-                    assert(buf.skip(hp) =~= buf.skip(base).skip(groups_bytes::<W::R>(gs).len() as int));
+                if local == count {
+                    let gb = groups_bytes::<W::R>(gs);
+                    let m = buf.skip(base);
+                    let x = ph::<W>() + encs::<W::R>(ws);
+                    assert(gb + ph::<W>() + encs::<W::R>(ws) =~= gb + x);
+                    lemma_local(pre, m, gb, x);
+                    let q = gb.len() - pre.len();
+                    assert(buf.skip(header_pos as int) =~= m.skip(q));
+                    assert(m.skip(q) =~= x);
+                    assert(x.take(ph::<W>().len() as int) =~= ph::<W>());
                 }
-                assert((<W::R as RleOps<'a>>::enc_signed(-1i64) + rest).take(<W::R as RleOps<'a>>::enc_signed(-1i64).len() as int) =~= <W::R as RleOps<'a>>::enc_signed(-1i64));
             }
         },
     }
 }
 
-/// Flushing a literal in progress: its value, then the real header.
-pub(crate) proof fn lemma_flush_lit<'a, W: WriteOps<'a>>(b0: Seq<u8>, base: int, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>, cur: VOf<'a, W>, b1: Seq<u8>, b2: Seq<u8>)
-    requires
-        0 <= base <= b0.len(),
-        b0.skip(base) == groups_bytes::<W::R>(gs) + <W::R as RleOps<'a>>::enc_signed(-1i64) + encs::<W::R>(ws),
-        b1 == b0 + <W::R as RleOps<'a>>::enc(cur),
-        ws.len() + 1 <= i64::MAX,
-        b2 == b1.take(base + groups_bytes::<W::R>(gs).len())
-            + <W::R as RleOps<'a>>::enc_signed(-((ws.len() + 1) as int) as i64)
-            + b1.skip(base + groups_bytes::<W::R>(gs).len() + <W::R as RleOps<'a>>::enc_signed(-1i64).len()),
-    ensures
-        b2.skip(base) == groups_bytes::<W::R>(gs.push(Group::Lit { values: ws.push(cur) })),
-        base <= b2.len(),
-{
-    let w2 = ws.push(cur);
-    lemma_encs_concat::<W::R>(ws, seq![cur]);
-    reveal_with_fuel(encs, 2);
-    assert(encs::<W::R>(seq![cur]) =~= <W::R as RleOps<'a>>::enc(cur));
-    assert(ws + seq![cur] =~= w2);
-    assert(b1.skip(base) =~= b0.skip(base) + <W::R as RleOps<'a>>::enc(cur));
-    assert(b1.skip(base) =~= groups_bytes::<W::R>(gs) + <W::R as RleOps<'a>>::enc_signed(-1i64) + encs::<W::R>(w2));
-    lemma_rewrite::<W::R>(b1, base, groups_bytes::<W::R>(gs), encs::<W::R>(w2), -((ws.len() + 1) as int), b2);
-    lemma_push::<W::R>(gs, Group::Lit { values: w2 });
-}
-
-/// Emitting a whole group onto the bytes of the emitted ones.
-pub(crate) proof fn lemma_emit<'a, O: RleOps<'a>>(b0: Seq<u8>, base: int, gs: Seq<Group<O::V>>, g: Group<O::V>, b1: Seq<u8>)
-    requires 0 <= base <= b0.len(), b0.skip(base) == groups_bytes::<O>(gs), b1 == b0 + group_bytes::<O>(g),
-    ensures b1.skip(base) == groups_bytes::<O>(gs.push(g)), base <= b1.len(),
+/// Emitting a whole group.
+pub(crate) proof fn lemma_emit<'a, O: RleOps<'a>>(pre: Seq<u8>, b0: Seq<u8>, base: int, gs: Seq<Group<O::V>>, g: Group<O::V>, b1: Seq<u8>)
+    requires 0 <= base <= b0.len(), pre + b0.skip(base) == groups_bytes::<O>(gs), b1 == b0 + group_bytes::<O>(g),
+    ensures pre + b1.skip(base) == groups_bytes::<O>(gs.push(g)), base <= b1.len(),
 {
     lemma_push::<O>(gs, g);
     assert(b1.skip(base) =~= b0.skip(base) + group_bytes::<O>(g));
+    assert(pre + b1.skip(base) =~= (pre + b0.skip(base)) + group_bytes::<O>(g));
+}
+
+/// Flushing a buffered literal: its value, then the real header.
+pub(crate) proof fn lemma_flush_lit<'a, W: WriteOps<'a>>(b0: Seq<u8>, base: int, a: Seq<u8>, ws: Seq<VOf<'a, W>>, cur: VOf<'a, W>, b1: Seq<u8>, b2: Seq<u8>)
+    requires
+        0 <= base <= b0.len(),
+        b0.skip(base) == a + ph::<W>() + encs::<W::R>(ws),
+        b1 == b0 + <W::R as RleOps<'a>>::enc(cur),
+        b2 == b1.take(base + a.len())
+            + <W::R as RleOps<'a>>::enc_signed(-((ws.len() + 1) as int) as i64)
+            + b1.skip(base + a.len() + ph::<W>().len()),
+    ensures b2.skip(base) == a + group_bytes::<W::R>(Group::Lit { values: ws.push(cur) }), base <= b2.len(),
+{
+    let w2 = ws.push(cur);
+    lemma_encs_push::<W::R>(ws, cur);
+    assert(b1.skip(base) =~= b0.skip(base) + <W::R as RleOps<'a>>::enc(cur));
+    assert(b1.skip(base) =~= a + ph::<W>() + encs::<W::R>(w2));
+    lemma_rewrite::<W::R>(b1, base, a, encs::<W::R>(w2), -((ws.len() + 1) as int), b2);
+}
+
+/// Closing a literal opened from the slab: the slab's header rewritten.
+pub(crate) proof fn lemma_close_pre<'a, W: WriteOps<'a>>(pre: Seq<u8>, m: Seq<u8>, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>, k0: int, h0: i64, total: usize, hp: usize)
+    requires
+        0 <= k0 <= ws.len(), hp == groups_bytes::<W::R>(gs).len(),
+        pre == groups_bytes::<W::R>(gs) + <W::R as RleOps<'a>>::enc_signed(h0) + encs::<W::R>(ws.take(k0)),
+        m == encs::<W::R>(ws.skip(k0)),
+    ensures
+        apply::<W>(Some(RewriteHeader { count: total, pos: hp }), pre, h0) + m
+            == groups_bytes::<W::R>(gs) + <W::R as RleOps<'a>>::enc_signed(-(total as int) as i64) + encs::<W::R>(ws),
+        total == ws.len() ==> apply::<W>(Some(RewriteHeader { count: total, pos: hp }), pre, h0) + m
+            == groups_bytes::<W::R>(gs.push(Group::Lit { values: ws })),
+{
+    let g = groups_bytes::<W::R>(gs);
+    let h = <W::R as RleOps<'a>>::enc_signed(h0);
+    assert(pre.take(g.len() as int) =~= g);
+    assert(pre.skip((g.len() + h.len()) as int) =~= encs::<W::R>(ws.take(k0)));
+    assert(ws =~= ws.take(k0) + ws.skip(k0));
+    lemma_encs_concat::<W::R>(ws.take(k0), ws.skip(k0));
+    lemma_push::<W::R>(gs, Group::Lit { values: ws });
 }
 
 // ── The steps ───────────────────────────────────────────────────────────────
@@ -505,62 +603,6 @@ pub(crate) proof fn lemma_run_group<'a, O: RleOps<'a>>(n: nat, v: O::V)
 {
     if n == 1 {
         assert(seq![v] =~= copies(1, v));
-    }
-}
-
-/// A state that keeps the pending group's kind and grows it.
-pub(crate) proof fn lemma_step_grow<'a, W: WriteOps<'a>>(s0: State<'a, W>, b0: Seq<u8>, s1: State<'a, W>, added: Seq<VOf<'a, W>>)
-    requires
-        !(s0 is Lit), !(s1 is Lit), !(s0 is Empty), !(s1 is Empty),
-        forall|ws: Seq<VOf<'a, W>>| ws.len() == 0 ==> {
-            &&& #[trigger] pend_group(s1, ws) is Some
-            &&& group_ok::<W::R>(pend_group(s1, ws)->Some_0)
-            &&& group_values(pend_group(s1, ws)->Some_0, <W::R as RleOps<'a>>::null())
-                == group_values(pend_group(s0, ws)->Some_0, <W::R as RleOps<'a>>::null()) + added
-            &&& forall|g: Group<VOf<'a, W>>| adjacent_ok(g, pend_group(s0, ws)->Some_0) ==> #[trigger] adjacent_ok(g, pend_group(s1, ws)->Some_0)
-        },
-    ensures step(s0, b0, s1, b0, added),
-{
-    assert forall|base: int, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>| #[trigger] rel(s0, b0, base, gs, ws)
-        implies exists|gs2: Seq<Group<VOf<'a, W>>>, ws2: Seq<VOf<'a, W>>| #[trigger] rel(s1, b0, base, gs2, ws2)
-            && values_of(s1, gs2, ws2) == values_of(s0, gs, ws) + added by {
-        let g0 = pend_group(s0, ws)->Some_0;
-        let g1 = pend_group(s1, ws)->Some_0;
-        assert(pend_group(s1, ws) is Some);
-        lemma_canonical_split::<W::R>(gs, g0);
-        if gs.len() > 0 {
-            assert(adjacent_ok(gs.last(), g1));
-        }
-        lemma_canonical_join::<W::R>(gs, g1);
-        lemma_push::<W::R>(gs, g0);
-        lemma_push::<W::R>(gs, g1);
-        assert(rel(s1, b0, base, gs, ws));
-    }
-}
-
-/// Emitting the pending group (not a literal in progress) and starting
-/// another.
-pub(crate) proof fn lemma_step_emit<'a, W: WriteOps<'a>>(s0: State<'a, W>, b0: Seq<u8>, g0: Group<VOf<'a, W>>, s1: State<'a, W>, b1: Seq<u8>, added: Seq<VOf<'a, W>>)
-    requires
-        !(s0 is Lit), !(s0 is Empty), !(s1 is Lit), !(s1 is Empty),
-        pend_group(s0, Seq::empty()) == Some(g0),
-        b1 == b0 + group_bytes::<W::R>(g0),
-        group_ok::<W::R>(pend_group(s1, Seq::empty())->Some_0),
-        adjacent_ok(g0, pend_group(s1, Seq::empty())->Some_0),
-        group_values(pend_group(s1, Seq::empty())->Some_0, <W::R as RleOps<'a>>::null()) == added,
-    ensures step(s0, b0, s1, b1, added),
-{
-    assert forall|base: int, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>| #[trigger] rel(s0, b0, base, gs, ws)
-        implies exists|gs2: Seq<Group<VOf<'a, W>>>, ws2: Seq<VOf<'a, W>>| #[trigger] rel(s1, b1, base, gs2, ws2)
-            && values_of(s1, gs2, ws2) == values_of(s0, gs, ws) + added by {
-        assert(ws =~= Seq::<VOf<'a, W>>::empty());
-        let g1 = pend_group(s1, ws)->Some_0;
-        lemma_emit::<W::R>(b0, base, gs, g0, b1);
-        lemma_push::<W::R>(gs, g0);
-        lemma_canonical_join::<W::R>(gs.push(g0), g1);
-        lemma_vals2::<W::R>(gs, g0, g1);
-        assert(rel(s1, b1, base, gs.push(g0), ws));
-        assert(values_of(s1, gs.push(g0), ws) =~= values_of(s0, gs, ws) + added);
     }
 }
 
@@ -610,10 +652,60 @@ pub(crate) proof fn lemma_lit_grow<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>, ws: 
     lemma_canonical_join::<O>(gs, Group::Lit { values: w });
 }
 
-pub(crate) proof fn lemma_copies_push<V>(ws: Seq<V>, v: V, n: nat)
-    ensures ws.push(v) + copies(n, v) == ws + copies(n + 1, v),
+/// A state that keeps the pending group's kind and grows it.
+pub(crate) proof fn lemma_step_grow<'a, W: WriteOps<'a>>(s0: State<'a, W>, b0: Seq<u8>, s1: State<'a, W>, added: Seq<VOf<'a, W>>)
+    requires
+        !(s0 is Lit), !(s1 is Lit), !(s0 is Empty), !(s1 is Empty),
+        forall|ws: Seq<VOf<'a, W>>| ws.len() == 0 ==> {
+            &&& #[trigger] pend_group(s1, ws) is Some
+            &&& group_ok::<W::R>(pend_group(s1, ws)->Some_0)
+            &&& group_values(pend_group(s1, ws)->Some_0, <W::R as RleOps<'a>>::null())
+                == group_values(pend_group(s0, ws)->Some_0, <W::R as RleOps<'a>>::null()) + added
+            &&& forall|g: Group<VOf<'a, W>>| adjacent_ok(g, pend_group(s0, ws)->Some_0) ==> #[trigger] adjacent_ok(g, pend_group(s1, ws)->Some_0)
+        },
+    ensures step(s0, b0, s1, b0, None, added),
 {
-    assert(ws.push(v) + copies(n, v) =~= ws + copies(n + 1, v));
+    assert forall|pre: Seq<u8>, base: int, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>, h0: i64| #[trigger] rel(s0, pre, b0, base, gs, ws, h0)
+        implies exists|gs2: Seq<Group<VOf<'a, W>>>, ws2: Seq<VOf<'a, W>>, h1: i64| #[trigger] rel(s1, apply::<W>(None, pre, h0), b0, base, gs2, ws2, h1)
+            && values_of(s1, gs2, ws2) == values_of(s0, gs, ws) + added by {
+        let g0 = pend_group(s0, ws)->Some_0;
+        let g1 = pend_group(s1, ws)->Some_0;
+        assert(pend_group(s1, ws) is Some);
+        lemma_canonical_split::<W::R>(gs, g0);
+        if gs.len() > 0 {
+            assert(adjacent_ok(gs.last(), g1));
+        }
+        lemma_canonical_join::<W::R>(gs, g1);
+        lemma_push::<W::R>(gs, g0);
+        lemma_push::<W::R>(gs, g1);
+        assert(rel(s1, apply::<W>(None, pre, h0), b0, base, gs, ws, h0));
+    }
+}
+
+/// Emitting the pending group (not a literal in progress) and starting
+/// another.
+pub(crate) proof fn lemma_step_emit<'a, W: WriteOps<'a>>(s0: State<'a, W>, b0: Seq<u8>, g0: Group<VOf<'a, W>>, s1: State<'a, W>, b1: Seq<u8>, added: Seq<VOf<'a, W>>)
+    requires
+        !(s0 is Lit), !(s0 is Empty), !(s1 is Lit), !(s1 is Empty),
+        pend_group(s0, Seq::empty()) == Some(g0),
+        b1 == b0 + group_bytes::<W::R>(g0),
+        group_ok::<W::R>(pend_group(s1, Seq::empty())->Some_0),
+        adjacent_ok(g0, pend_group(s1, Seq::empty())->Some_0),
+        group_values(pend_group(s1, Seq::empty())->Some_0, <W::R as RleOps<'a>>::null()) == added,
+    ensures step(s0, b0, s1, b1, None, added),
+{
+    assert forall|pre: Seq<u8>, base: int, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>, h0: i64| #[trigger] rel(s0, pre, b0, base, gs, ws, h0)
+        implies exists|gs2: Seq<Group<VOf<'a, W>>>, ws2: Seq<VOf<'a, W>>, h1: i64| #[trigger] rel(s1, apply::<W>(None, pre, h0), b1, base, gs2, ws2, h1)
+            && values_of(s1, gs2, ws2) == values_of(s0, gs, ws) + added by {
+        assert(ws =~= Seq::<VOf<'a, W>>::empty());
+        let g1 = pend_group(s1, ws)->Some_0;
+        lemma_emit::<W::R>(pre, b0, base, gs, g0, b1);
+        lemma_push::<W::R>(gs, g0);
+        lemma_canonical_join::<W::R>(gs.push(g0), g1);
+        lemma_vals2::<W::R>(gs, g0, g1);
+        assert(rel(s1, apply::<W>(None, pre, h0), b1, base, gs.push(g0), ws, h0));
+        assert(values_of(s1, gs.push(g0), ws) =~= values_of(s0, gs, ws) + added);
+    }
 }
 
 /// From empty: the first run.
@@ -622,16 +714,17 @@ pub(crate) proof fn lemma_step_empty<'a, W: WriteOps<'a>>(s0: State<'a, W>, b0: 
         s0 is Empty, !(s1 is Lit), !(s1 is Empty),
         group_ok::<W::R>(pend_group(s1, Seq::empty())->Some_0),
         group_values(pend_group(s1, Seq::empty())->Some_0, <W::R as RleOps<'a>>::null()) == added,
-    ensures step(s0, b0, s1, b0, added),
+    ensures step(s0, b0, s1, b0, None, added),
 {
-    assert forall|base: int, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>| #[trigger] rel(s0, b0, base, gs, ws)
-        implies exists|gs2: Seq<Group<VOf<'a, W>>>, ws2: Seq<VOf<'a, W>>| #[trigger] rel(s1, b0, base, gs2, ws2)
+    assert forall|pre: Seq<u8>, base: int, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>, h0: i64| #[trigger] rel(s0, pre, b0, base, gs, ws, h0)
+        implies exists|gs2: Seq<Group<VOf<'a, W>>>, ws2: Seq<VOf<'a, W>>, h1: i64| #[trigger] rel(s1, apply::<W>(None, pre, h0), b0, base, gs2, ws2, h1)
             && values_of(s1, gs2, ws2) == values_of(s0, gs, ws) + added by {
         let g1 = pend_group(s1, ws)->Some_0;
         lemma_canonical_join::<W::R>(gs, g1);
         lemma_push::<W::R>(gs, g1);
         assert(groups_bytes::<W::R>(gs) =~= Seq::<u8>::empty());
-        assert(rel(s1, b0, base, gs, ws));
+        assert(pre + b0.skip(base) =~= Seq::<u8>::empty());
+        assert(rel(s1, apply::<W>(None, pre, h0), b0, base, gs, ws, h0));
         assert(values_of(s0, gs, ws) =~= Seq::<VOf<'a, W>>::empty());
         assert(values_of(s1, gs, ws) =~= values_of(s0, gs, ws) + added);
     }
@@ -646,77 +739,67 @@ pub(crate) proof fn lemma_step_lit_push<'a, W: WriteOps<'a>>(s0: State<'a, W>, b
         v != W::val(s0->Lit_current), !<W::R as RleOps<'a>>::is_null(v),
         s0->Lit_count + 2 <= i64::MAX, s0->Lit_count + 2 < usize::MAX,
         b1 == b0 + <W::R as RleOps<'a>>::enc(W::val(s0->Lit_current)),
-    ensures step(s0, b0, s1, b1, copies(1, v)), wf(s1, b1),
+    ensures step(s0, b0, s1, b1, None, copies(1, v)), wf(s1, b1),
 {
     let c = W::val(s0->Lit_current);
     let hp = s0->Lit_header_pos as int;
-    let h = <W::R as RleOps<'a>>::enc_signed(-1i64);
-    assert forall|base: int, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>| #[trigger] rel(s0, b0, base, gs, ws)
-        implies exists|gs2: Seq<Group<VOf<'a, W>>>, ws2: Seq<VOf<'a, W>>| #[trigger] rel(s1, b1, base, gs2, ws2)
+    assert forall|pre: Seq<u8>, base: int, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>, h0: i64| #[trigger] rel(s0, pre, b0, base, gs, ws, h0)
+        implies exists|gs2: Seq<Group<VOf<'a, W>>>, ws2: Seq<VOf<'a, W>>, h1: i64| #[trigger] rel(s1, apply::<W>(None, pre, h0), b1, base, gs2, ws2, h1)
             && values_of(s1, gs2, ws2) == values_of(s0, gs, ws) + copies(1, v) by {
         let ws2 = ws.push(c);
         assert(ws2.last() == c);
         lemma_lit_grow::<W::R>(gs, ws2, v);
-        lemma_encs_concat::<W::R>(ws, seq![c]);
-        reveal_with_fuel(encs, 2);
-        assert(encs::<W::R>(seq![c]) =~= <W::R as RleOps<'a>>::enc(c));
-        assert(ws + seq![c] =~= ws2);
-        assert(b0.skip(base) =~= groups_bytes::<W::R>(gs) + h + encs::<W::R>(ws));
+        lemma_encs_push::<W::R>(ws, c);
         assert(b1.skip(base) =~= b0.skip(base) + <W::R as RleOps<'a>>::enc(c));
-        assert(b1.skip(base) =~= groups_bytes::<W::R>(gs) + h + encs::<W::R>(ws2));
+        if s0->Lit_local == s0->Lit_count {
+            let gb = groups_bytes::<W::R>(gs);
+            assert(pre + b0.skip(base) == gb + ph::<W>() + encs::<W::R>(ws));
+            assert(pre + b1.skip(base) =~= (pre + b0.skip(base)) + <W::R as RleOps<'a>>::enc(c));
+            assert(encs::<W::R>(ws2) == encs::<W::R>(ws) + <W::R as RleOps<'a>>::enc(c));
+            assert(pre + b1.skip(base) =~= gb + ph::<W>() + encs::<W::R>(ws2));
+        } else {
+            let k0 = s0->Lit_count - s0->Lit_local;
+            assert(ws2.take(k0) =~= ws.take(k0));
+            assert(ws2.skip(k0) =~= ws.skip(k0).push(c));
+            lemma_encs_push::<W::R>(ws.skip(k0), c);
+        }
         assert(all_groups(s1, gs, ws2) == gs.push(Group::Lit { values: ws2.push(v) }));
-        assert(canonical::<W::R>(all_groups(s1, gs, ws2)));
-        assert(b1.skip(base) == groups_bytes::<W::R>(gs) + pend_bytes(s1, ws2));
-        assert(0 <= base <= b1.len());
-        assert(s1->Lit_count == s1->Lit_local);
-        assert(s1->Lit_count == ws2.len());
-        assert(s1->Lit_count < usize::MAX);
-        assert(s1->Lit_header_pos == base + groups_bytes::<W::R>(gs).len());
-        assert(rel(s1, b1, base, gs, ws2));
+        assert(rel(s1, apply::<W>(None, pre, h0), b1, base, gs, ws2, h0));
         lemma_push::<W::R>(gs, Group::Lit { values: ws2.push(v) });
         lemma_push::<W::R>(gs, Group::Lit { values: ws2 });
         assert(seq![v] =~= copies(1, v));
         assert(values_of(s1, gs, ws2) =~= values_of(s0, gs, ws) + copies(1, v));
     }
     if s1->Lit_local == s1->Lit_count {
+        let h = ph::<W>();
         assert(b1.skip(hp) =~= b0.skip(hp) + <W::R as RleOps<'a>>::enc(c));
         assert(b1.skip(hp).take(h.len() as int) =~= b0.skip(hp).take(h.len() as int));
     }
 }
 
-/// A lone value meets a different one: a literal begins.
+/// A lone value meets a different one: a literal begins in the buffer.
 pub(crate) proof fn lemma_step_lone_lit<'a, W: WriteOps<'a>>(s0: State<'a, W>, b0: Seq<u8>, s1: State<'a, W>, b1: Seq<u8>, v: VOf<'a, W>)
     requires
         s0 is Lone, s1 is Lit, wf(s0, b0),
         s1->Lit_count == 1, s1->Lit_local == 1, s1->Lit_header_pos == b0.len(), W::val(s1->Lit_current) == v,
         v != W::val(s0->Lone_0), !<W::R as RleOps<'a>>::is_null(v),
         b1 == b0 + group_bytes::<W::R>(Group::Lit { values: seq![W::val(s0->Lone_0)] }),
-    ensures step(s0, b0, s1, b1, copies(1, v)), wf(s1, b1),
+    ensures step(s0, b0, s1, b1, None, copies(1, v)), wf(s1, b1),
 {
     let p = W::val(s0->Lone_0);
-    let h = <W::R as RleOps<'a>>::enc_signed(-1i64);
+    let h = ph::<W>();
     lemma_lone_bytes::<W::R>(p);
-    reveal_with_fuel(encs, 2);
-    assert(seq![p].drop_last() =~= Seq::<VOf<'a, W>>::empty());
-    assert(encs::<W::R>(seq![p]) =~= <W::R as RleOps<'a>>::enc(p));
-    assert forall|base: int, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>| #[trigger] rel(s0, b0, base, gs, ws)
-        implies exists|gs2: Seq<Group<VOf<'a, W>>>, ws2: Seq<VOf<'a, W>>| #[trigger] rel(s1, b1, base, gs2, ws2)
+    assert forall|pre: Seq<u8>, base: int, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>, h0: i64| #[trigger] rel(s0, pre, b0, base, gs, ws, h0)
+        implies exists|gs2: Seq<Group<VOf<'a, W>>>, ws2: Seq<VOf<'a, W>>, h1: i64| #[trigger] rel(s1, apply::<W>(None, pre, h0), b1, base, gs2, ws2, h1)
             && values_of(s1, gs2, ws2) == values_of(s0, gs, ws) + copies(1, v) by {
         let ws2 = seq![p];
         assert(ws2.last() == p);
         lemma_lit_grow::<W::R>(gs, ws2, v);
-        assert(b0.skip(base) =~= groups_bytes::<W::R>(gs));
-        assert(b1.skip(base) =~= groups_bytes::<W::R>(gs) + h + encs::<W::R>(ws2));
-        assert(b0.skip(base).len() == b0.len() - base);
+        assert(b1.skip(base) =~= b0.skip(base) + h + <W::R as RleOps<'a>>::enc(p));
+        assert(pre + b1.skip(base) =~= groups_bytes::<W::R>(gs) + h + encs::<W::R>(ws2));
+        assert((pre + b0.skip(base)).len() == pre.len() + b0.len() - base);
         assert(all_groups(s1, gs, ws2) == gs.push(Group::Lit { values: ws2.push(v) }));
-        assert(canonical::<W::R>(all_groups(s1, gs, ws2)));
-        assert(b1.skip(base) == groups_bytes::<W::R>(gs) + pend_bytes(s1, ws2));
-        assert(0 <= base <= b1.len());
-        assert(s1->Lit_count == s1->Lit_local);
-        assert(s1->Lit_count == ws2.len());
-        assert(s1->Lit_count < usize::MAX);
-        assert(s1->Lit_header_pos == base + groups_bytes::<W::R>(gs).len());
-        assert(rel(s1, b1, base, gs, ws2));
+        assert(rel(s1, apply::<W>(None, pre, h0), b1, base, gs, ws2, h0));
         lemma_push::<W::R>(gs, Group::Lit { values: ws2.push(v) });
         lemma_push::<W::R>(gs, Group::Lit { values: ws2 });
         assert(seq![v] =~= copies(1, v));
@@ -726,36 +809,94 @@ pub(crate) proof fn lemma_step_lone_lit<'a, W: WriteOps<'a>>(s0: State<'a, W>, b
     assert((h + <W::R as RleOps<'a>>::enc(p)).take(h.len() as int) =~= h);
 }
 
+/// The bytes after closing a literal of values `lv` (its header in the
+/// buffer at `pre`'s end of `gs`'s bytes, or in `pre`): those of
+/// `gs.push(Lit(lv))`.
+#[verifier::spinoff_prover]
+#[verifier::rlimit(30)]
+pub(crate) proof fn lemma_close_bytes<'a, W: WriteOps<'a>>(s0: State<'a, W>, pre: Seq<u8>, base: int, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>, h0: i64, b0: Seq<u8>, mid: Seq<u8>, lv: Seq<VOf<'a, W>>, b2: Seq<u8>, rw: Option<RewriteHeader>, total: usize)
+    requires
+        total >= lv.len(), total <= i64::MAX,
+        rel(s0, pre, b0, base, gs, ws, h0), s0 is Lit,
+        lv == ws || lv == ws.push(W::val(s0->Lit_current)),
+        lv == ws ==> mid == Seq::<u8>::empty(),
+        lv != ws ==> mid == <W::R as RleOps<'a>>::enc(W::val(s0->Lit_current)),
+        s0->Lit_local == s0->Lit_count ==> rw is None && b2 == (b0 + mid).take(s0->Lit_header_pos as int)
+            + <W::R as RleOps<'a>>::enc_signed(-(total as int) as i64)
+            + (b0 + mid).skip(s0->Lit_header_pos + ph::<W>().len()),
+        s0->Lit_local < s0->Lit_count ==> b2 == b0 + mid
+            && rw == Some(RewriteHeader { count: total, pos: s0->Lit_header_pos }),
+    ensures
+        apply::<W>(rw, pre, h0) + b2.skip(base)
+            == groups_bytes::<W::R>(gs) + <W::R as RleOps<'a>>::enc_signed(-(total as int) as i64) + encs::<W::R>(lv),
+        total == lv.len() ==> apply::<W>(rw, pre, h0) + b2.skip(base) == groups_bytes::<W::R>(gs.push(Group::Lit { values: lv })),
+        base <= b2.len(),
+{
+    let c = W::val(s0->Lit_current);
+    let gb = groups_bytes::<W::R>(gs);
+    lemma_push::<W::R>(gs, Group::Lit { values: lv });
+    if lv != ws {
+        lemma_encs_push::<W::R>(ws, c);
+    } else {
+        assert(b0 + mid =~= b0);
+    }
+    if s0->Lit_local == s0->Lit_count {
+        let x = ph::<W>() + encs::<W::R>(ws);
+        assert(gb + ph::<W>() + encs::<W::R>(ws) =~= gb + x);
+        lemma_local(pre, b0.skip(base), gb, x);
+        let a = gb.skip(pre.len() as int);
+        let b1 = b0 + mid;
+        assert(b1.skip(base) =~= b0.skip(base) + mid);
+        if lv == ws {
+            assert(encs::<W::R>(lv) + Seq::<u8>::empty() =~= encs::<W::R>(lv));
+        }
+        assert(encs::<W::R>(lv) == encs::<W::R>(ws) + mid);
+        assert(b1.skip(base) =~= a + ph::<W>() + encs::<W::R>(lv));
+        lemma_rewrite::<W::R>(b1, base, a, encs::<W::R>(lv), -(total as int), b2);
+        assert(apply::<W>(rw, pre, h0) + b2.skip(base) =~= gb + <W::R as RleOps<'a>>::enc_signed(-(total as int) as i64) + encs::<W::R>(lv));
+    } else {
+        let k0 = s0->Lit_count - s0->Lit_local;
+        if lv != ws {
+            assert(lv.take(k0) =~= ws.take(k0));
+            assert(lv.skip(k0) =~= ws.skip(k0).push(c));
+            lemma_encs_push::<W::R>(ws.skip(k0), c);
+            assert(b2.skip(base) =~= b0.skip(base) + mid);
+        } else {
+            assert(b2.skip(base) =~= b0.skip(base));
+        }
+        lemma_close_pre::<W>(pre, b2.skip(base), gs, lv, k0, h0, total, s0->Lit_header_pos);
+    }
+}
+
 /// A literal in progress is closed by a run of its last value.
-pub(crate) proof fn lemma_step_lit_close<'a, W: WriteOps<'a>>(s0: State<'a, W>, b0: Seq<u8>, s1: State<'a, W>, b1: Seq<u8>, n: nat)
+pub(crate) proof fn lemma_step_lit_close<'a, W: WriteOps<'a>>(s0: State<'a, W>, b0: Seq<u8>, s1: State<'a, W>, b1: Seq<u8>, rw: Option<RewriteHeader>, n: nat)
     requires
         s0 is Lit, s1 == State::<'a, W>::Run((n + 1) as usize, s1->Run_1),
         W::val(s1->Run_1) == W::val(s0->Lit_current),
         n >= 1, s0->Lit_count + 1 + n <= i64::MAX, n + 1 < usize::MAX,
-        b1 == b0.take(s0->Lit_header_pos as int)
+        s0->Lit_local == s0->Lit_count ==> rw is None && b1 == b0.take(s0->Lit_header_pos as int)
             + <W::R as RleOps<'a>>::enc_signed(-(s0->Lit_count as int) as i64)
-            + b0.skip(s0->Lit_header_pos + <W::R as RleOps<'a>>::enc_signed(-1i64).len()),
-    ensures step(s0, b0, s1, b1, copies(n, W::val(s0->Lit_current))),
+            + b0.skip(s0->Lit_header_pos + ph::<W>().len()),
+        s0->Lit_local < s0->Lit_count ==> b1 == b0
+            && rw == Some(RewriteHeader { count: s0->Lit_count, pos: s0->Lit_header_pos }),
+    ensures step(s0, b0, s1, b1, rw, copies(n, W::val(s0->Lit_current))),
 {
     let c = W::val(s0->Lit_current);
-    let h = <W::R as RleOps<'a>>::enc_signed(-1i64);
-    assert forall|base: int, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>| #[trigger] rel(s0, b0, base, gs, ws)
-        implies exists|gs2: Seq<Group<VOf<'a, W>>>, ws2: Seq<VOf<'a, W>>| #[trigger] rel(s1, b1, base, gs2, ws2)
+    assert(b0 + Seq::<u8>::empty() =~= b0);
+    assert forall|pre: Seq<u8>, base: int, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>, h0: i64| #[trigger] rel(s0, pre, b0, base, gs, ws, h0)
+        implies exists|gs2: Seq<Group<VOf<'a, W>>>, ws2: Seq<VOf<'a, W>>, h1: i64| #[trigger] rel(s1, apply::<W>(rw, pre, h0), b1, base, gs2, ws2, h1)
             && values_of(s1, gs2, ws2) == values_of(s0, gs, ws) + copies(n, c) by {
         let gl = Group::Lit { values: ws };
         let gs2 = gs.push(gl);
         let g1 = Group::Run { count: n + 1, value: c };
+        lemma_close_bytes::<W>(s0, pre, base, gs, ws, h0, b0, Seq::empty(), ws, b1, rw, s0->Lit_count);
         lemma_lit_prefix::<W::R>(gs, ws, c);
-        lemma_canonical_split::<W::R>(gs, gl);
         assert(gl == gs2.last());
         lemma_canonical_join::<W::R>(gs2, g1);
-        assert(b0.skip(base) =~= groups_bytes::<W::R>(gs) + h + encs::<W::R>(ws));
-        lemma_rewrite::<W::R>(b0, base, groups_bytes::<W::R>(gs), encs::<W::R>(ws), -(ws.len() as int), b1);
-        lemma_push::<W::R>(gs, gl);
-        assert(groups_bytes::<W::R>(gs2) + Seq::<u8>::empty() =~= groups_bytes::<W::R>(gs2));
-        assert(b1.skip(base) =~= groups_bytes::<W::R>(gs2));
+        let pre2 = apply::<W>(rw, pre, h0);
+        assert(pre2 + b1.skip(base) =~= groups_bytes::<W::R>(gs2) + Seq::<u8>::empty());
         assert(all_groups(s1, gs2, Seq::empty()) == gs2.push(g1));
-        assert(rel(s1, b1, base, gs2, Seq::empty()));
+        assert(rel(s1, pre2, b1, base, gs2, Seq::empty(), h0));
         lemma_vals2::<W::R>(gs, gl, g1);
         lemma_push::<W::R>(gs, Group::Lit { values: ws.push(c) });
         lemma_copies_push(ws, c, n);
@@ -765,34 +906,39 @@ pub(crate) proof fn lemma_step_lit_close<'a, W: WriteOps<'a>>(s0: State<'a, W>, 
 
 /// A literal in progress takes its last value and is closed; a run of
 /// another value begins.
-pub(crate) proof fn lemma_step_lit_close_new<'a, W: WriteOps<'a>>(s0: State<'a, W>, b0: Seq<u8>, s1: State<'a, W>, b1: Seq<u8>, b2: Seq<u8>, n: nat, v: VOf<'a, W>)
+pub(crate) proof fn lemma_step_lit_close_new<'a, W: WriteOps<'a>>(s0: State<'a, W>, b0: Seq<u8>, s1: State<'a, W>, b1: Seq<u8>, b2: Seq<u8>, rw: Option<RewriteHeader>, n: nat, v: VOf<'a, W>)
     requires
         s0 is Lit, s1 == State::<'a, W>::Run(n as usize, s1->Run_1), W::val(s1->Run_1) == v,
         v != W::val(s0->Lit_current), !<W::R as RleOps<'a>>::is_null(v),
         n >= 2, n <= i64::MAX, n < usize::MAX,
         b1 == b0 + <W::R as RleOps<'a>>::enc(W::val(s0->Lit_current)),
-        b2 == b1.take(s0->Lit_header_pos as int)
+        s0->Lit_local == s0->Lit_count ==> rw is None && b2 == b1.take(s0->Lit_header_pos as int)
             + <W::R as RleOps<'a>>::enc_signed(-((s0->Lit_count + 1) as int) as i64)
-            + b1.skip(s0->Lit_header_pos + <W::R as RleOps<'a>>::enc_signed(-1i64).len()),
-    ensures step(s0, b0, s1, b2, copies(n, v)),
+            + b1.skip(s0->Lit_header_pos + ph::<W>().len()),
+        s0->Lit_local < s0->Lit_count ==> b2 == b1
+            && rw == Some(RewriteHeader { count: (s0->Lit_count + 1) as usize, pos: s0->Lit_header_pos }),
+    ensures step(s0, b0, s1, b2, rw, copies(n, v)),
 {
     let c = W::val(s0->Lit_current);
-    let h = <W::R as RleOps<'a>>::enc_signed(-1i64);
-    assert forall|base: int, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>| #[trigger] rel(s0, b0, base, gs, ws)
-        implies exists|gs2: Seq<Group<VOf<'a, W>>>, ws2: Seq<VOf<'a, W>>| #[trigger] rel(s1, b2, base, gs2, ws2)
+    assert forall|pre: Seq<u8>, base: int, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>, h0: i64| #[trigger] rel(s0, pre, b0, base, gs, ws, h0)
+        implies exists|gs2: Seq<Group<VOf<'a, W>>>, ws2: Seq<VOf<'a, W>>, h1: i64| #[trigger] rel(s1, apply::<W>(rw, pre, h0), b2, base, gs2, ws2, h1)
             && values_of(s1, gs2, ws2) == values_of(s0, gs, ws) + copies(n, v) by {
-        let gl = Group::Lit { values: ws.push(c) };
+        let w2 = ws.push(c);
+        let gl = Group::Lit { values: w2 };
         let gs2 = gs.push(gl);
         let g1 = Group::Run { count: n, value: v };
+        assert(w2 != ws) by {
+            assert(w2.len() != ws.len());
+        }
+        lemma_close_bytes::<W>(s0, pre, base, gs, ws, h0, b0, <W::R as RleOps<'a>>::enc(c), w2, b2, rw, (s0->Lit_count + 1) as usize);
         lemma_canonical_split::<W::R>(gs, gl);
         assert(gl->values.last() == c);
         assert(gl == gs2.last());
         lemma_canonical_join::<W::R>(gs2, g1);
-        assert(b0.skip(base) =~= groups_bytes::<W::R>(gs) + h + encs::<W::R>(ws));
-        lemma_flush_lit::<W>(b0, base, gs, ws, c, b1, b2);
-        assert(groups_bytes::<W::R>(gs2) + Seq::<u8>::empty() =~= groups_bytes::<W::R>(gs2));
+        let pre2 = apply::<W>(rw, pre, h0);
+        assert(pre2 + b2.skip(base) =~= groups_bytes::<W::R>(gs2) + Seq::<u8>::empty());
         assert(all_groups(s1, gs2, Seq::empty()) == gs2.push(g1));
-        assert(rel(s1, b2, base, gs2, Seq::empty()));
+        assert(rel(s1, pre2, b2, base, gs2, Seq::empty(), h0));
         lemma_vals2::<W::R>(gs, gl, g1);
         lemma_push::<W::R>(gs, gl);
         assert(values_of(s1, gs2, Seq::empty()) =~= values_of(s0, gs, ws) + copies(n, v));
@@ -800,23 +946,23 @@ pub(crate) proof fn lemma_step_lit_close_new<'a, W: WriteOps<'a>>(s0: State<'a, 
 }
 
 /// After a flush, a null run begins.
-pub(crate) proof fn lemma_step_flush_null<'a, W: WriteOps<'a>>(s0: State<'a, W>, b0: Seq<u8>, b1: Seq<u8>, count: usize)
+pub(crate) proof fn lemma_step_flush_null<'a, W: WriteOps<'a>>(s0: State<'a, W>, b0: Seq<u8>, b1: Seq<u8>, rw: Option<RewriteHeader>, count: usize)
     requires
-        flushed(s0, b0, b1), !(s0 is Empty), !(s0 is Null),
+        flushed(s0, b0, b1, rw), !(s0 is Empty), !(s0 is Null),
         1 <= count <= i64::MAX, <W::R as RleOps<'a>>::nullable(),
-    ensures step(s0, b0, State::<'a, W>::Null(count), b1, copies(count as nat, <W::R as RleOps<'a>>::null())),
+    ensures step(s0, b0, State::<'a, W>::Null(count), b1, rw, copies(count as nat, <W::R as RleOps<'a>>::null())),
 {
     let s1 = State::<'a, W>::Null(count);
     let g1 = Group::<VOf<'a, W>>::Null { count: count as nat };
-    assert forall|base: int, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>| #[trigger] rel(s0, b0, base, gs, ws)
-        implies exists|gs2: Seq<Group<VOf<'a, W>>>, ws2: Seq<VOf<'a, W>>| #[trigger] rel(s1, b1, base, gs2, ws2)
+    assert forall|pre: Seq<u8>, base: int, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>, h0: i64| #[trigger] rel(s0, pre, b0, base, gs, ws, h0)
+        implies exists|gs2: Seq<Group<VOf<'a, W>>>, ws2: Seq<VOf<'a, W>>, h1: i64| #[trigger] rel(s1, apply::<W>(rw, pre, h0), b1, base, gs2, ws2, h1)
             && values_of(s1, gs2, ws2) == values_of(s0, gs, ws) + copies(count as nat, <W::R as RleOps<'a>>::null()) by {
         let gs2 = all_groups(s0, gs, ws);
         assert(gs2.last() == pend_group(s0, ws)->Some_0);
         lemma_canonical_join::<W::R>(gs2, g1);
         lemma_push::<W::R>(gs2, g1);
-        assert(groups_bytes::<W::R>(gs2) + Seq::<u8>::empty() =~= groups_bytes::<W::R>(gs2));
-        assert(rel(s1, b1, base, gs2, Seq::empty()));
+        assert(apply::<W>(rw, pre, h0) + b1.skip(base) =~= groups_bytes::<W::R>(gs2) + Seq::<u8>::empty());
+        assert(rel(s1, apply::<W>(rw, pre, h0), b1, base, gs2, Seq::empty(), h0));
     }
 }
 
@@ -939,17 +1085,26 @@ impl<'a, W: WriteOps<'a>> State<'a, W> {
     /// Emit the pending group.
     pub(crate) fn do_flush(state: Self, buf: &mut Vec<u8>) -> (f: FlushState)
         requires wf(state, old(buf)@),
-        ensures flushed(state, old(buf)@, final(buf)@),
+        ensures flushed(state, old(buf)@, final(buf)@, f.rewrite),
     {
         let ghost b0 = buf@;
         match state {
-            State::Empty => FlushState::none(),
+            State::Empty => {
+                proof {
+                    assert forall|pre: Seq<u8>, base: int, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>, h0: i64| #[trigger] rel(state, pre, b0, base, gs, ws, h0)
+                        implies apply::<W>(None, pre, h0) + buf@.skip(base) == groups_bytes::<W::R>(all_groups(state, gs, ws)) by {
+                        assert(pre + buf@.skip(base) =~= Seq::<u8>::empty());
+                        assert(groups_bytes::<W::R>(gs) =~= Seq::<u8>::empty());
+                    }
+                }
+                FlushState::none()
+            },
             State::Lone(value) => {
                 let wpos = Self::emit_run(buf, 1, &value);
                 proof {
-                    assert forall|base: int, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>| #[trigger] rel(state, b0, base, gs, ws)
-                        implies 0 <= base <= buf@.len() && buf@.skip(base) == groups_bytes::<W::R>(all_groups(state, gs, ws)) by {
-                        lemma_emit::<W::R>(b0, base, gs, run_group(1, W::val(value)), buf@);
+                    assert forall|pre: Seq<u8>, base: int, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>, h0: i64| #[trigger] rel(state, pre, b0, base, gs, ws, h0)
+                        implies 0 <= base <= buf@.len() && apply::<W>(None, pre, h0) + buf@.skip(base) == groups_bytes::<W::R>(all_groups(state, gs, ws)) by {
+                        lemma_emit::<W::R>(pre, b0, base, gs, run_group(1, W::val(value)), buf@);
                     }
                 }
                 FlushState::new(1, wpos)
@@ -957,10 +1112,10 @@ impl<'a, W: WriteOps<'a>> State<'a, W> {
             State::Run(count, value) => {
                 let wpos = Self::emit_run(buf, count, &value);
                 proof {
-                    assert forall|base: int, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>| #[trigger] rel(state, b0, base, gs, ws)
-                        implies 0 <= base <= buf@.len() && buf@.skip(base) == groups_bytes::<W::R>(all_groups(state, gs, ws)) by {
+                    assert forall|pre: Seq<u8>, base: int, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>, h0: i64| #[trigger] rel(state, pre, b0, base, gs, ws, h0)
+                        implies 0 <= base <= buf@.len() && apply::<W>(None, pre, h0) + buf@.skip(base) == groups_bytes::<W::R>(all_groups(state, gs, ws)) by {
                         lemma_canonical_split::<W::R>(gs, pend_group(state, ws)->Some_0);
-                        lemma_emit::<W::R>(b0, base, gs, run_group(count as nat, W::val(value)), buf@);
+                        lemma_emit::<W::R>(pre, b0, base, gs, run_group(count as nat, W::val(value)), buf@);
                     }
                 }
                 FlushState::new(1, wpos)
@@ -969,33 +1124,52 @@ impl<'a, W: WriteOps<'a>> State<'a, W> {
                 assert(count + 1 <= i64::MAX);
                 let bytes = W::cow_pack(&current, buf);
                 let ghost b1 = buf@;
+                let ghost c = W::val(current);
                 let wpos = WPos::lit(header_pos, bytes, count == local);
                 let total = count + 1;
                 if local == count {
                     proof {
-                        assert(b1.skip(header_pos as int) =~= b0.skip(header_pos as int) + <W::R as RleOps<'a>>::enc(W::val(current)));
-                        assert(<W::R as RleOps<'a>>::enc_signed(-1i64).is_prefix_of(b1.skip(header_pos as int)));
+                        assert(b1.skip(header_pos as int) =~= b0.skip(header_pos as int) + <W::R as RleOps<'a>>::enc(c));
+                        assert(ph::<W>().is_prefix_of(b1.skip(header_pos as int)));
                     }
                     W::rewrite_lit_header(buf, header_pos, total);
                     proof {
-                        assert forall|base: int, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>| #[trigger] rel(state, b0, base, gs, ws)
-                            implies 0 <= base <= buf@.len() && buf@.skip(base) == groups_bytes::<W::R>(all_groups(state, gs, ws)) by {
-                            assert(b0.skip(base) =~= groups_bytes::<W::R>(gs) + <W::R as RleOps<'a>>::enc_signed(-1i64) + encs::<W::R>(ws));
-                            lemma_flush_lit::<W>(b0, base, gs, ws, W::val(current), b1, buf@);
+                        assert forall|pre: Seq<u8>, base: int, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>, h0: i64| #[trigger] rel(state, pre, b0, base, gs, ws, h0)
+                        implies 0 <= base <= buf@.len() && apply::<W>(None, pre, h0) + buf@.skip(base) == groups_bytes::<W::R>(all_groups(state, gs, ws)) by {
+                            let gb = groups_bytes::<W::R>(gs);
+                            assert(gb + ph::<W>() + encs::<W::R>(ws) =~= gb + (ph::<W>() + encs::<W::R>(ws)));
+                            lemma_local(pre, b0.skip(base), gb, ph::<W>() + encs::<W::R>(ws));
+                            let a = gb.skip(pre.len() as int);
+                            assert(b0.skip(base) =~= a + ph::<W>() + encs::<W::R>(ws));
+                            lemma_flush_lit::<W>(b0, base, a, ws, c, b1, buf@);
+                            lemma_push::<W::R>(gs, Group::Lit { values: ws.push(c) });
+                            assert(pre + buf@.skip(base) =~= gb + group_bytes::<W::R>(Group::Lit { values: ws.push(c) }));
                         }
                     }
                     FlushState::new(total, wpos)
                 } else {
                     let rewrite = RewriteHeader::new(total, header_pos);
+                    proof {
+                        assert forall|pre: Seq<u8>, base: int, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>, h0: i64| #[trigger] rel(state, pre, b0, base, gs, ws, h0)
+                        implies 0 <= base <= buf@.len() && apply::<W>(Some(rewrite), pre, h0) + buf@.skip(base) == groups_bytes::<W::R>(all_groups(state, gs, ws)) by {
+                            let k0 = count - local;
+                            let w2 = ws.push(c);
+                            assert(w2.take(k0) =~= ws.take(k0));
+                            assert(w2.skip(k0) =~= ws.skip(k0).push(c));
+                            lemma_encs_push::<W::R>(ws.skip(k0), c);
+                            assert(buf@.skip(base) =~= b0.skip(base) + <W::R as RleOps<'a>>::enc(c));
+                            lemma_close_pre::<W>(pre, buf@.skip(base), gs, w2, k0, h0, total, header_pos);
+                        }
+                    }
                     FlushState::rewrite(local + 1, rewrite, wpos)
                 }
             },
             State::Null(count) => {
                 let wpos = Self::emit_null(buf, count);
                 proof {
-                    assert forall|base: int, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>| #[trigger] rel(state, b0, base, gs, ws)
-                        implies 0 <= base <= buf@.len() && buf@.skip(base) == groups_bytes::<W::R>(all_groups(state, gs, ws)) by {
-                        lemma_emit::<W::R>(b0, base, gs, Group::Null { count: count as nat }, buf@);
+                    assert forall|pre: Seq<u8>, base: int, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>, h0: i64| #[trigger] rel(state, pre, b0, base, gs, ws, h0)
+                        implies 0 <= base <= buf@.len() && apply::<W>(None, pre, h0) + buf@.skip(base) == groups_bytes::<W::R>(all_groups(state, gs, ws)) by {
+                        lemma_emit::<W::R>(pre, b0, base, gs, Group::Null { count: count as nat }, buf@);
                     }
                 }
                 FlushState::new(1, wpos)
@@ -1013,7 +1187,7 @@ impl<'a, W: WriteOps<'a>> State<'a, W> {
         ensures
             wf(*final(self), final(buf)@),
             final(self).plen() <= old(self).plen() + n,
-            step(*old(self), old(buf)@, *final(self), final(buf)@, copies(n as nat, W::val(value))),
+            step(*old(self), old(buf)@, *final(self), final(buf)@, f.rewrite, copies(n as nat, W::val(value))),
     {
         let ghost s0 = *self;
         let ghost b0 = buf@;
@@ -1021,10 +1195,11 @@ impl<'a, W: WriteOps<'a>> State<'a, W> {
         let ghost added = copies(n as nat, v);
         if n == 0 {
             proof {
-                assert forall|base: int, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>| #[trigger] rel(s0, b0, base, gs, ws)
-                    implies exists|gs2: Seq<Group<VOf<'a, W>>>, ws2: Seq<VOf<'a, W>>| #[trigger] rel(s0, b0, base, gs2, ws2)
+                assert forall|pre: Seq<u8>, base: int, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>, h0: i64| #[trigger] rel(s0, pre, b0, base, gs, ws, h0)
+                    implies exists|gs2: Seq<Group<VOf<'a, W>>>, ws2: Seq<VOf<'a, W>>, h1: i64| #[trigger] rel(s0, apply::<W>(None, pre, h0), b0, base, gs2, ws2, h1)
                         && values_of(s0, gs2, ws2) == values_of(s0, gs, ws) + added by {
                     assert(values_of(s0, gs, ws) + added =~= values_of(s0, gs, ws));
+                    assert(rel(s0, apply::<W>(None, pre, h0), b0, base, gs, ws, h0));
                 }
             }
             return FlushState::none();
@@ -1079,14 +1254,7 @@ impl<'a, W: WriteOps<'a>> State<'a, W> {
                     let r = State::Run(n + 1, value);
                     proof {
                         s1 = r;
-                        if s0->Lit_local == s0->Lit_count {
-                            lemma_step_lit_close::<W>(s0, b0, s1, buf@, n as nat);
-                        } else {
-                            assert forall|base: int, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>| #[trigger] rel(s0, b0, base, gs, ws)
-                                implies exists|gs2: Seq<Group<VOf<'a, W>>>, ws2: Seq<VOf<'a, W>>| #[trigger] rel(s1, buf@, base, gs2, ws2)
-                                    && values_of(s1, gs2, ws2) == values_of(s0, gs, ws) + added by {
-                            }
-                        }
+                        lemma_step_lit_close::<W>(s0, b0, s1, buf@, flushed.rewrite, n as nat);
                     }
                     Some(r)
                 } else if n == 1 {
@@ -1117,14 +1285,7 @@ impl<'a, W: WriteOps<'a>> State<'a, W> {
                     let r = State::Run(n, value);
                     proof {
                         s1 = r;
-                        if s0->Lit_local == s0->Lit_count {
-                            lemma_step_lit_close_new::<W>(s0, b0, s1, b1, buf@, n as nat, v);
-                        } else {
-                            assert forall|base: int, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>| #[trigger] rel(s0, b0, base, gs, ws)
-                                implies exists|gs2: Seq<Group<VOf<'a, W>>>, ws2: Seq<VOf<'a, W>>| #[trigger] rel(s1, buf@, base, gs2, ws2)
-                                    && values_of(s1, gs2, ws2) == values_of(s0, gs, ws) + added by {
-                            }
-                        }
+                        lemma_step_lit_close_new::<W>(s0, b0, s1, b1, buf@, flushed.rewrite, n as nat, v);
                     }
                     Some(r)
                 }
@@ -1204,7 +1365,7 @@ impl<'a, W: WriteOps<'a>> State<'a, W> {
         ensures
             wf(*final(self), final(buf)@),
             final(self).plen() <= old(self).plen() + count,
-            step(*old(self), old(buf)@, *final(self), final(buf)@, copies(count as nat, <W::R as RleOps<'a>>::null())),
+            step(*old(self), old(buf)@, *final(self), final(buf)@, f.rewrite, copies(count as nat, <W::R as RleOps<'a>>::null())),
     {
         let ghost s0 = *self;
         let ghost b0 = buf@;
@@ -1229,7 +1390,7 @@ impl<'a, W: WriteOps<'a>> State<'a, W> {
             other => {
                 flushed = Self::do_flush(other, buf);
                 proof {
-                    lemma_step_flush_null::<W>(s0, b0, buf@, count);
+                    lemma_step_flush_null::<W>(s0, b0, buf@, flushed.rewrite, count);
                 }
                 State::Null(count)
             },
@@ -1237,9 +1398,96 @@ impl<'a, W: WriteOps<'a>> State<'a, W> {
         flushed
     }
 
+    /// Flush onto `lit` literal values that follow in the slab: the
+    /// pending values join them in one literal.
+    pub(crate) fn flush_with_lit(&mut self, buf: &mut Vec<u8>, lit: usize) -> (f: FlushState)
+        requires
+            wf(*old(self), old(buf)@),
+            old(self).plen() + lit <= i64::MAX, old(self).plen() + lit + 1 < usize::MAX,
+        ensures
+            (*final(self)) is Empty,
+            lit == 0 ==> flushed(*old(self), old(buf)@, final(buf)@, f.rewrite),
+            lit > 0 ==> flushed_lit(*old(self), old(buf)@, final(buf)@, f.rewrite, lit as nat),
+    {
+        let ghost s0 = *self;
+        let ghost b0 = buf@;
+        let mut old = State::Empty;
+        core::mem::swap(self, &mut old);
+        if lit == 0 {
+            return Self::do_flush(old, buf);
+        }
+        match old {
+            State::Lit { count, local, header_pos, current, .. } => {
+                let ghost c = W::val(current);
+                let bytes = W::cow_pack(&current, buf);
+                let ghost b1 = buf@;
+                let wpos = WPos::lit(header_pos, bytes, count == local);
+                let total = count + 1 + lit;
+                if local == count {
+                    proof {
+                        assert(b1.skip(header_pos as int) =~= b0.skip(header_pos as int) + <W::R as RleOps<'a>>::enc(c));
+                        assert(ph::<W>().is_prefix_of(b1.skip(header_pos as int)));
+                    }
+                    W::rewrite_lit_header(buf, header_pos, total);
+                    let f = FlushState::new(local + 1, wpos);
+                    proof {
+                        assert forall|pre: Seq<u8>, base: int, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>, h0: i64| #[trigger] rel(s0, pre, b0, base, gs, ws, h0)
+                            implies 0 <= base <= buf@.len() && apply::<W>(f.rewrite, pre, h0) + buf@.skip(base) == lit_head(s0, gs, ws, lit as nat) by {
+                            assert(ws.push(c) != ws) by {
+                                assert(ws.push(c).len() != ws.len());
+                            }
+                            lemma_close_bytes::<W>(s0, pre, base, gs, ws, h0, b0, <W::R as RleOps<'a>>::enc(c), ws.push(c), buf@, f.rewrite, total);
+                        }
+                    }
+                    f
+                } else {
+                    let f = FlushState::rewrite(local + 1, RewriteHeader::new(total, header_pos), wpos);
+                    proof {
+                        assert forall|pre: Seq<u8>, base: int, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>, h0: i64| #[trigger] rel(s0, pre, b0, base, gs, ws, h0)
+                            implies 0 <= base <= buf@.len() && apply::<W>(f.rewrite, pre, h0) + buf@.skip(base) == lit_head(s0, gs, ws, lit as nat) by {
+                            assert(ws.push(c) != ws) by {
+                                assert(ws.push(c).len() != ws.len());
+                            }
+                            lemma_close_bytes::<W>(s0, pre, base, gs, ws, h0, b0, <W::R as RleOps<'a>>::enc(c), ws.push(c), buf@, f.rewrite, total);
+                        }
+                    }
+                    f
+                }
+            },
+            State::Lone(value) => {
+                let total = 1 + lit;
+                let pos = buf.len();
+                W::put_signed(-(total as i64), buf);
+                let bytes = W::cow_pack(&value, buf);
+                proof {
+                    assert forall|pre: Seq<u8>, base: int, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>, h0: i64| #[trigger] rel(s0, pre, b0, base, gs, ws, h0)
+                        implies 0 <= base <= buf@.len() && apply::<W>(None, pre, h0) + buf@.skip(base) == lit_head(s0, gs, ws, lit as nat) by {
+                        assert(buf@.skip(base) =~= b0.skip(base) + <W::R as RleOps<'a>>::enc_signed(-(total as int) as i64)
+                            + <W::R as RleOps<'a>>::enc(W::val(value)));
+                    }
+                }
+                FlushState::new(1, WPos::lit(pos, bytes, true))
+            },
+            other => {
+                let mut flushed = Self::do_flush(other, buf);
+                let ghost b1 = buf@;
+                let pos = buf.len();
+                W::put_signed(-(lit as i64), buf);
+                flushed.wpos = WPos::lit(pos, 0, true);
+                proof {
+                    assert forall|pre: Seq<u8>, base: int, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>, h0: i64| #[trigger] rel(s0, pre, b0, base, gs, ws, h0)
+                        implies 0 <= base <= buf@.len() && apply::<W>(flushed.rewrite, pre, h0) + buf@.skip(base) == lit_head(s0, gs, ws, lit as nat) by {
+                        assert(buf@.skip(base) =~= b1.skip(base) + <W::R as RleOps<'a>>::enc_signed(-(lit as int) as i64));
+                    }
+                }
+                flushed
+            },
+        }
+    }
+
     pub(crate) fn flush(&mut self, buf: &mut Vec<u8>) -> (f: FlushState)
         requires wf(*old(self), old(buf)@),
-        ensures flushed(*old(self), old(buf)@, final(buf)@), (*final(self)) is Empty,
+        ensures flushed(*old(self), old(buf)@, final(buf)@, f.rewrite), (*final(self)) is Empty,
     {
         let mut old = State::Empty;
         core::mem::swap(self, &mut old);
@@ -1539,47 +1787,6 @@ impl<'a, T: RleValue, V: AsColumnRef<T>, C: Codec> RleState<'a, T, V, C> {
         (f, postfix_segs)
     }
 
-    fn flush_with_lit(&mut self, buf: &mut Vec<u8>, lit: usize) -> FlushState {
-        let old = std::mem::replace(self, Self::empty());
-        if lit == 0 {
-            return Self::do_flush(old, buf);
-        }
-
-        match old {
-            RleState::Lit {
-                count,
-                local,
-                header_pos,
-                current,
-                ..
-            } => {
-                let bytes = current.pack::<C>(buf);
-                let wpos = WPos::lit(header_pos, bytes, count == local);
-                let total = count + 1 + lit;
-                if local == count {
-                    C::rewrite_lit_header(buf, header_pos, total);
-                    FlushState::new(local + 1, wpos)
-                } else {
-                    FlushState::rewrite(local + 1, RewriteHeader::new(total, header_pos), wpos)
-                }
-            }
-            RleState::Lone(value) => {
-                let total = 1 + lit;
-                let pos = buf.len();
-                buf.extend(C::encode_signed(-(total as i64)));
-                let bytes = value.pack::<C>(buf);
-                FlushState::new(1, WPos::lit(pos, bytes, true))
-            }
-            other => {
-                let mut flushed = Self::do_flush(other, buf);
-                let pos = buf.len();
-                buf.extend(C::encode_signed(-(lit as i64)));
-                // fill in bytes later in merge() -> with_lit_tail()
-                flushed.wpos = WPos::lit(pos, 0, true);
-                flushed
-            }
-        }
-    }
 }
 
 #[cfg(test)]
