@@ -29,11 +29,14 @@
 //! distinct empty slots, and every grouping of slabs can be merged
 //! (`valid`).  `splice`'s core (`splice_vec`), `from_vec`, `update_slab`,
 //! `find_by_prefix`, `find_slab_at_item`, `find_slab_at_prefix`,
-//! `items_before_slab` and `root_agg` are proved against that sequence: a
-//! splice yields exactly `old[..start] + new + old[end..]` provided the
-//! caller keeps that result `valid`.  Not yet verified: the value-range
-//! iterators, and the `IntoIterator` wrappers around `splice_vec` and
-//! `from_vec`.  `merge`'s laws are proved for `SlabAgg` and `usize`; for
+//! `items_before_slab`, `root_agg` and the value-range search
+//! (`ValueSearch`, behind `find_by_value` and `find_by_value_range`) are
+//! proved against that sequence: a splice yields exactly
+//! `old[..start] + new + old[end..]` provided the caller keeps that result
+//! `valid`, and the value search yields, in order, exactly the slabs whose
+//! min/max running sums meet the range.  Only the `IntoIterator` wrappers
+//! around `splice_vec` and `from_vec` and the `Iterator` wrappers around
+//! `ValueSearch` are unverified.  `merge`'s laws are proved for `SlabAgg` and `usize`; for
 //! `PrefixSlabWeight<P>` they, and the prefix arithmetic, are assumed of
 //! the user's `P` (`axiom_prefix_add`).
 
@@ -4764,6 +4767,635 @@ impl<A: SlabAggregate> SlabBTree<A> {
     }
 }
 
+// ── Value-range search (SlabAgg-specific) ───────────────────────────────────
+
+impl SlabAgg {
+    /// Some running sum in this slab, starting from `prefix_before`, lies
+    /// in `lo..=hi`.
+    fn overlaps(&self, lo: i64, hi: i64, prefix_before: i64) -> (r: bool)
+        requires
+            self.len > 0 ==> in_i64(prefix_before + self.min_offset) && in_i64(prefix_before + self.max_offset),
+        ensures
+            r == (self.len > 0 && prefix_before + self.max_offset >= lo && prefix_before + self.min_offset <= hi),
+    {
+        self.len > 0
+            && prefix_before + self.max_offset >= lo
+            && prefix_before + self.min_offset <= hi
+    }
+}
+
+/// Slab `i` of `s` may hold a value in `lo..=hi`: the range of running
+/// sums its min/max offsets give meets it.
+pub open spec fn may_hold(s: Seq<SlabAgg>, lo: int, hi: int, i: int) -> bool {
+    s[i].len > 0 && pre_at(s, i) + s[i].max_offset >= lo && pre_at(s, i) + s[i].min_offset <= hi
+}
+
+/// A slab's range of running sums lies within its run's, shifted by the
+/// total of the slabs before it in the run.
+proof fn lemma_agg_covers(u: Seq<SlabAgg>, k: int)
+    requires
+        valid(u), 0 <= k < u.len(), u[k].len > 0,
+        forall|i: int| 0 <= i < u.len() ==> #[trigger] u[i].prefix_ok(),
+    ensures
+        fold(u).len > 0,
+        fold(u).min_offset <= fold(u.take(k)).total + u[k].min_offset,
+        fold(u.take(k)).total + u[k].max_offset <= fold(u).max_offset,
+    decreases u.len(),
+{
+    let n = u.len() as int;
+    let v = u.drop_last();
+    assert(u.subrange(0, n - 1) =~= v);
+    lemma_fold_one(u, n - 1);
+    assert(SlabAgg::merge_ok(fold(u.subrange(0, n - 1)), fold(u.subrange(n - 1, n))));
+    if k < n - 1 {
+        lemma_valid_subrange(u, 0, n - 1);
+        assert(v.take(k) =~= u.take(k));
+        lemma_agg_covers(v, k);
+    } else {
+        assert(u.take(k) =~= v);
+        lemma_fold_prefix_ok(u, 0, n - 1);
+    }
+}
+
+/// A run of slabs whose running sums miss `lo..=hi` holds no slab that
+/// may hold a value there.
+proof fn lemma_prune(s: Seq<SlabAgg>, lo: int, hi: int, a: int, b: int, k: int)
+    requires
+        valid(s), 0 <= a <= k < b <= s.len(), may_hold(s, lo, hi, k),
+        forall|i: int| 0 <= i < s.len() ==> #[trigger] s[i].prefix_ok(),
+    ensures
+        fold(s.subrange(a, b)).len > 0,
+        pre_at(s, a) + fold(s.subrange(a, b)).max_offset >= lo,
+        pre_at(s, a) + fold(s.subrange(a, b)).min_offset <= hi,
+{
+    let u = s.subrange(a, b);
+    lemma_valid_subrange(s, a, b);
+    assert forall|i: int| 0 <= i < u.len() implies #[trigger] u[i].prefix_ok() by {
+        assert(u[i] == s[a + i]);
+    }
+    lemma_agg_covers(u, k - a);
+    assert(u.take(k - a) =~= s.subrange(a, k));
+    if a < k {
+        lemma_fold_prefix(s, a, k);
+    } else {
+        assert(s.subrange(a, k) =~= Seq::<SlabAgg>::empty());
+    }
+}
+
+/// The running sums of a run fit an `i64`.
+proof fn lemma_agg_in_range(s: Seq<SlabAgg>, a: int, b: int)
+    requires
+        valid(s), 0 <= a <= b <= s.len(),
+        forall|i: int| 0 <= i < s.len() ==> #[trigger] s[i].prefix_ok(),
+    ensures
+        fold(s.subrange(a, b)).len > 0 ==> in_i64(pre_at(s, a) + fold(s.subrange(a, b)).min_offset)
+            && in_i64(pre_at(s, a) + fold(s.subrange(a, b)).max_offset),
+{
+    assert(SlabAgg::merge_ok(fold(s.subrange(0, a)), fold(s.subrange(a, b))));
+    lemma_fold_prefix_ok(s, 0, a);
+}
+
+/// The prefix and item count up to the end of a nonempty run, from
+/// those at its start.
+proof fn lemma_run_totals(s: Seq<SlabAgg>, a: int, b: int)
+    requires
+        valid(s), 0 <= a < b <= s.len(), sum_len(s) <= usize::MAX,
+        forall|i: int| 0 <= i < s.len() ==> #[trigger] s[i].prefix_ok(),
+    ensures
+        in_i64(pre_at(s, a) + fold(s.subrange(a, b)).total),
+        pre_at(s, b) == pre_at(s, a) + fold(s.subrange(a, b)).total,
+        sum_len(s.subrange(0, b)) == sum_len(s.subrange(0, a)) + fold(s.subrange(a, b)).len,
+        sum_len(s.subrange(0, b)) <= usize::MAX,
+{
+    lemma_fold_prefix(s, a, b);
+    lemma_fold_len(s, a, b);
+    assert(s.subrange(0, b) =~= s.subrange(0, a) + s.subrange(a, b));
+    lemma_sum_len_concat(s.subrange(0, a), s.subrange(a, b));
+    assert(s =~= s.subrange(0, b) + s.subrange(b, s.len() as int));
+    lemma_sum_len_concat(s.subrange(0, b), s.subrange(b, s.len() as int));
+}
+
+/// `s[start..end] == x + y + z` places `y` right after `x`.
+proof fn lemma_sub_part<T>(s: Seq<T>, start: int, end: int, x: Seq<T>, y: Seq<T>, z: Seq<T>)
+    requires 0 <= start <= end <= s.len(), s.subrange(start, end) == x + y + z,
+    ensures
+        start + x.len() + y.len() <= end,
+        s.subrange(start + x.len(), start + x.len() + y.len()) == y,
+{
+    assert((x + y + z).len() == end - start);
+    assert(s.subrange(start + x.len(), start + x.len() + y.len()) =~= y) by {
+        assert forall|i: int| 0 <= i < y.len() implies
+            s.subrange(start + x.len(), start + x.len() + y.len())[i] == y[i] by {
+            assert(s.subrange(start, end)[x.len() + i] == (x + y + z)[x.len() + i]);
+            assert((x + y + z)[x.len() + i] == y[i]);
+            assert(s.subrange(start, end)[x.len() + i] == s[start + x.len() + i]);
+        }
+    }
+}
+
+/// One level of a value search's descent: a node, the next child (or
+/// slab, in a leaf) to look at, and the running sum, slab index and item
+/// count where that child starts — for a leaf, `slab_base` stays at the
+/// leaf's first slab.
+#[derive(Copy, Clone)]
+#[verifier::allow(autoderive_clone_without_spec)]
+struct Frame {
+    node: NodeId,
+    next_child: usize,
+    prefix_before: i64,
+    slab_base: usize,
+    items_before: usize,
+}
+
+/// The slab a frame looks at next.
+spec fn frame_at(t: SlabBTree<SlabAgg>, f: Frame) -> int {
+    match t.node_spec(f.node) {
+        Some(Node::Leaf(_)) => f.slab_base + f.next_child,
+        _ => f.slab_base as int,
+    }
+}
+
+/// Frame `f` has looked at all its children.
+spec fn frame_done(t: SlabBTree<SlabAgg>, f: Frame) -> bool {
+    match t.node_spec(f.node) {
+        Some(Node::Leaf(l)) => f.next_child >= l.aggs.len(),
+        Some(Node::Internal(n)) => f.next_child >= n.children.len(),
+        None => true,
+    }
+}
+
+/// Frame `f` is for a node of height `h` whose slabs end at slab `end`,
+/// with right running totals.
+#[verifier::opaque]
+spec fn frame_ok(t: SlabBTree<SlabAgg>, f: Frame, end: int, h: int) -> bool {
+    let s = t.slabs(f.node, h as nat);
+    let start = end - s.len();
+    &&& 0 <= h && 0 <= start && end <= t@.len()
+    &&& t.wf_node(f.node, h as nat)
+    &&& t@.subrange(start, end) == s
+    &&& match t.node_spec(f.node) {
+        Some(Node::Leaf(l)) => f.slab_base == start && f.next_child <= l.aggs.len(),
+        Some(Node::Internal(n)) => f.next_child <= n.children.len() && f.slab_base == start
+            + t.children_slabs(n.children@.take(f.next_child as int), (h - 1) as nat).len(),
+        None => false,
+    }
+    &&& f.prefix_before == pre_at(t@, frame_at(t, f))
+    &&& f.items_before == sum_len(t@.subrange(0, frame_at(t, f)))
+}
+
+/// Where frame `j` of a stack ends: where its parent goes on, or the
+/// end of the tree.
+spec fn frame_end(t: SlabBTree<SlabAgg>, st: Seq<Frame>, j: int) -> int {
+    if j == 0 { t@.len() as int } else { st[j - 1].slab_base as int }
+}
+
+/// Every frame of the stack is right, frame `j` for a node `j` levels
+/// below the root.
+#[verifier::opaque]
+spec fn frames_ok(t: SlabBTree<SlabAgg>, st: Seq<Frame>) -> bool {
+    forall|j: int| 0 <= j < st.len() ==> frame_ok(t, #[trigger] st[j], frame_end(t, st, j), t.height() - j)
+}
+
+/// The slab a search with stack `st` looks at next.
+spec fn search_pos(t: SlabBTree<SlabAgg>, st: Seq<Frame>) -> int {
+    if st.len() == 0 { t@.len() as int } else { frame_at(t, st.last()) }
+}
+
+/// The number of finished frames on top of the stack.
+spec fn done_top(t: SlabBTree<SlabAgg>, st: Seq<Frame>) -> nat
+    decreases st.len(),
+{
+    if st.len() > 0 && frame_done(t, st.last()) { 1 + done_top(t, st.drop_last()) } else { 0 }
+}
+
+proof fn lemma_frame_basics(t: SlabBTree<SlabAgg>, f: Frame, end: int, h: int)
+    requires t.wf(), frame_ok(t, f, end, h),
+    ensures
+        0 <= h, 0 <= frame_at(t, f) <= end <= t@.len(),
+        t.wf_node(f.node, h as nat),
+        h > 0 ==> frame_at(t, f) == f.slab_base,
+        frame_done(t, f) ==> frame_at(t, f) == end,
+        f.prefix_before == pre_at(t@, frame_at(t, f)),
+        f.items_before == sum_len(t@.subrange(0, frame_at(t, f))),
+{
+    reveal(frame_ok);
+    match t.node_spec(f.node) {
+        Some(Node::Leaf(l)) => {}
+        Some(Node::Internal(n)) => {
+            let cs = n.children@;
+            let k = f.next_child as int;
+            t.lemma_child(f.node, h as nat, n, 0);
+            assert(cs =~= cs.take(k) + cs.skip(k));
+            t.lemma_children_slabs_concat(cs.take(k), cs.skip(k), (h - 1) as nat);
+        }
+        None => {}
+    }
+}
+
+proof fn lemma_frames_top(t: SlabBTree<SlabAgg>, st: Seq<Frame>)
+    requires frames_ok(t, st), 0 < st.len(),
+    ensures frame_ok(t, st.last(), frame_end(t, st, st.len() - 1), t.height() - (st.len() - 1)),
+{
+    reveal(frames_ok);
+    assert(st.last() == st[st.len() - 1]);
+}
+
+proof fn lemma_frames_pop(t: SlabBTree<SlabAgg>, st: Seq<Frame>)
+    requires t.wf(), frames_ok(t, st), 0 < st.len(), frame_done(t, st.last()),
+    ensures
+        frames_ok(t, st.drop_last()),
+        search_pos(t, st.drop_last()) == frame_at(t, st.last()),
+{
+    reveal(frames_ok);
+    let n = st.len() as int;
+    let u = st.drop_last();
+    let hh = t.height() as int;
+    assert forall|j: int| 0 <= j < u.len() implies
+        frame_ok(t, #[trigger] u[j], frame_end(t, u, j), t.height() - j) by {
+        assert(u[j] == st[j]);
+        assert(frame_end(t, u, j) == frame_end(t, st, j));
+    }
+    assert(st.last() == st[n - 1]);
+    lemma_frame_basics(t, st[n - 1], frame_end(t, st, n - 1), hh - (n - 1));
+    if n > 1 {
+        lemma_frame_basics(t, st[n - 2], frame_end(t, st, n - 2), hh - (n - 2));
+        assert(u.last() == st[n - 2]);
+    }
+}
+
+proof fn lemma_frames_set(t: SlabBTree<SlabAgg>, st: Seq<Frame>, f: Frame)
+    requires
+        frames_ok(t, st), 0 < st.len(),
+        frame_ok(t, f, frame_end(t, st, st.len() - 1), t.height() - (st.len() - 1)),
+    ensures frames_ok(t, st.update(st.len() - 1, f)),
+{
+    reveal(frames_ok);
+    let n = st.len() as int;
+    let u = st.update(n - 1, f);
+    assert forall|j: int| 0 <= j < u.len() implies
+        frame_ok(t, #[trigger] u[j], frame_end(t, u, j), t.height() - j) by {
+        assert(frame_end(t, u, j) == frame_end(t, st, j));
+        if j < n - 1 {
+            assert(u[j] == st[j]);
+        }
+    }
+}
+
+proof fn lemma_frames_push(t: SlabBTree<SlabAgg>, st: Seq<Frame>, f: Frame)
+    requires
+        frames_ok(t, st), 0 < st.len(),
+        frame_ok(t, f, st.last().slab_base as int, t.height() - st.len()),
+    ensures frames_ok(t, st.push(f)),
+{
+    reveal(frames_ok);
+    let n = st.len() as int;
+    let u = st.push(f);
+    assert forall|j: int| 0 <= j < u.len() implies
+        frame_ok(t, #[trigger] u[j], frame_end(t, u, j), t.height() - j) by {
+        if j < n {
+            assert(u[j] == st[j]);
+            assert(frame_end(t, u, j) == frame_end(t, st, j));
+        } else {
+            assert(st.last() == st[n - 1]);
+        }
+    }
+}
+
+/// A search starts at the root, on the first slab.
+proof fn lemma_frames_root(t: SlabBTree<SlabAgg>, f: Frame)
+    requires
+        t.wf(), f.node == t.root,
+        f.next_child == 0, f.prefix_before == 0, f.slab_base == 0, f.items_before == 0,
+        forall|i: int| 0 <= i < t@.len() ==> #[trigger] t@[i].prefix_ok(),
+    ensures frames_ok(t, seq![f]), search_pos(t, seq![f]) == 0,
+{
+    reveal(frames_ok);
+    reveal(frame_ok);
+    let h = t.height();
+    assert(t.wf_node(t.root, h));
+    assert(t@.subrange(0, t@.len() as int) =~= t@);
+    assert(t@.subrange(0, 0) =~= Seq::<SlabAgg>::empty());
+    SlabAgg::lemma_prefix_empty(0);
+    if let Some(Node::Internal(n)) = t.node_spec(t.root) {
+        assert(n.children@.take(0) =~= Seq::<ChildSlot<SlabAgg>>::empty());
+        t.lemma_child(t.root, h, n, 0);
+    }
+    assert(seq![f][0] == f);
+    assert(frame_ok(t, f, frame_end(t, seq![f], 0), h - 0));
+}
+
+/// Looking at the next slab of a leaf frame.
+proof fn lemma_leaf_step(t: SlabBTree<SlabAgg>, f: Frame, end: int, h: int, l: Leaf<SlabAgg>, lo: int, hi: int)
+    requires
+        t.wf(), valid(t@),
+        forall|i: int| 0 <= i < t@.len() ==> #[trigger] t@[i].prefix_ok(),
+        frame_ok(t, f, end, h), t.node_spec(f.node) == Some(Node::Leaf(l)), f.next_child < l.aggs.len(),
+    ensures ({
+        let g = f.slab_base + f.next_child;
+        let x = l.aggs@[f.next_child as int];
+        let f2 = Frame {
+            node: f.node,
+            next_child: (f.next_child + 1) as usize,
+            prefix_before: (f.prefix_before + x.total) as i64,
+            slab_base: f.slab_base,
+            items_before: (f.items_before + x.len) as usize,
+        };
+        &&& frame_at(t, f) == g && g < end && end <= t@.len() && end <= usize::MAX
+        &&& in_i64(f.prefix_before + x.total) && f.items_before + x.len <= usize::MAX
+        &&& x.len > 0 ==> in_i64(f.prefix_before + x.min_offset) && in_i64(f.prefix_before + x.max_offset)
+        &&& may_hold(t@, lo, hi, g)
+            == (x.len > 0 && f.prefix_before + x.max_offset >= lo && f.prefix_before + x.min_offset <= hi)
+        &&& f.prefix_before == pre_at(t@, g) && f.items_before == sum_len(t@.subrange(0, g))
+        &&& frame_ok(t, f2, end, h) && frame_at(t, f2) == g + 1
+    }),
+{
+    reveal(frame_ok);
+    let s = t@;
+    let aggs = l.aggs@;
+    let i = f.next_child as int;
+    let g = f.slab_base + i;
+    let start = end - aggs.len();
+    assert(t.slabs(f.node, h as nat) == aggs);
+    assert(s.subrange(start, end)[i] == s[g]);
+    lemma_fold_one(s, g);
+    lemma_agg_in_range(s, g, g + 1);
+    lemma_run_totals(s, g, g + 1);
+}
+
+/// Looking at the next child of an internal frame: stepping past it, or
+/// descending into it.
+proof fn lemma_internal_step(t: SlabBTree<SlabAgg>, f: Frame, end: int, h: int, n: Internal<SlabAgg>, lo: int, hi: int)
+    requires
+        t.wf(), valid(t@),
+        forall|i: int| 0 <= i < t@.len() ==> #[trigger] t@[i].prefix_ok(),
+        frame_ok(t, f, end, h), t.node_spec(f.node) == Some(Node::Internal(n)),
+        f.next_child < n.children.len(),
+    ensures ({
+        let c = n.children@[f.next_child as int];
+        let a = f.slab_base as int;
+        let b = a + c.slab_count;
+        let f2 = Frame {
+            node: f.node,
+            next_child: (f.next_child + 1) as usize,
+            prefix_before: (f.prefix_before + c.agg.total) as i64,
+            slab_base: b as usize,
+            items_before: (f.items_before + c.agg.len) as usize,
+        };
+        let fc = Frame {
+            node: c.id,
+            next_child: 0,
+            prefix_before: f.prefix_before,
+            slab_base: f.slab_base,
+            items_before: f.items_before,
+        };
+        &&& 0 < h && frame_at(t, f) == a && a < b <= end && end <= usize::MAX
+        &&& in_i64(f.prefix_before + c.agg.total) && f.items_before + c.agg.len <= usize::MAX
+        &&& c.agg.len > 0 ==> in_i64(f.prefix_before + c.agg.min_offset)
+            && in_i64(f.prefix_before + c.agg.max_offset)
+        &&& frame_ok(t, f2, end, h) && frame_at(t, f2) == b
+        &&& frame_ok(t, fc, b, h - 1) && frame_at(t, fc) == a && !frame_done(t, fc)
+        &&& !(c.agg.len > 0 && f.prefix_before + c.agg.max_offset >= lo && f.prefix_before + c.agg.min_offset <= hi)
+            ==> forall|k: int| a <= k < b ==> !may_hold(t@, lo, hi, k)
+    }),
+{
+    reveal(frame_ok);
+    let s = t@;
+    let cs = n.children@;
+    let k = f.next_child as int;
+    let hc = (h - 1) as nat;
+    let c = cs[k];
+    let before = t.children_slabs(cs.take(k), hc);
+    let mid = t.slabs(c.id, hc);
+    let rest = t.children_slabs(cs.skip(k + 1), hc);
+    let start = end - t.slabs(f.node, h as nat).len();
+    let a = f.slab_base as int;
+    let b = a + mid.len();
+    t.lemma_child(f.node, h as nat, n, k);
+    t.lemma_children_slabs_split(cs, k, hc);
+    t.lemma_children_slabs_push(cs, k, hc);
+    lemma_sub_part(s, start, end, before, mid, rest);
+    lemma_agg_in_range(s, a, b);
+    lemma_run_totals(s, a, b);
+    let fc = Frame { node: c.id, next_child: 0, prefix_before: f.prefix_before, slab_base: f.slab_base, items_before: f.items_before };
+    if let Some(Node::Internal(m)) = t.node_spec(c.id) {
+        assert(m.children@.take(0) =~= Seq::<ChildSlot<SlabAgg>>::empty());
+        t.lemma_child(c.id, hc, m, 0);
+    }
+    assert(frame_ok(t, fc, b, h - 1));
+    assert(s.subrange(a, b) == mid);
+    if !(c.agg.len > 0 && f.prefix_before + c.agg.max_offset >= lo && f.prefix_before + c.agg.min_offset <= hi) {
+        assert forall|kk: int| a <= kk < b implies !may_hold(s, lo, hi, kk) by {
+            if may_hold(s, lo, hi, kk) {
+                lemma_prune(s, lo, hi, a, b, kk);
+            }
+        }
+    }
+}
+
+/// A depth-first walk over the slabs whose running sums may meet
+/// `lo..=hi`, pruning subtrees whose sums can't.  Yields
+/// `(slab_idx, items_before_slab, prefix_before_slab)` in slab order.
+pub(crate) struct ValueSearch<'a> {
+    tree: &'a SlabBTree<SlabAgg>,
+    lo: i64,
+    hi: i64,
+    stack: Vec<Frame>,
+}
+
+impl<'a> ValueSearch<'a> {
+    pub(crate) closed spec fn view_tree(&self) -> Seq<SlabAgg> {
+        self.tree@
+    }
+
+    pub(crate) closed spec fn spec_lo(&self) -> int {
+        self.lo as int
+    }
+
+    pub(crate) closed spec fn spec_hi(&self) -> int {
+        self.hi as int
+    }
+
+    /// The next slab the search looks at.
+    pub(crate) closed spec fn pos(&self) -> int {
+        search_pos(*self.tree, self.stack@)
+    }
+
+    pub(crate) closed spec fn inv(&self) -> bool {
+        &&& self.tree.wf()
+        &&& valid(self.tree@)
+        &&& forall|i: int| 0 <= i < self.tree@.len() ==> #[trigger] self.tree@[i].prefix_ok()
+        &&& frames_ok(*self.tree, self.stack@)
+    }
+
+    pub(crate) fn new(tree: &'a SlabBTree<SlabAgg>, lo: i64, hi: i64) -> (s: Self)
+        requires
+            tree.wf(),
+            forall|i: int| 0 <= i < tree@.len() ==> #[trigger] tree@[i].prefix_ok(),
+        ensures
+            s.inv(), s.pos() == 0, s.view_tree() == tree@, s.spec_lo() == lo, s.spec_hi() == hi,
+    {
+        let mut stack = Vec::with_capacity(16);
+        let root = Frame { node: tree.root, next_child: 0, prefix_before: 0, slab_base: 0, items_before: 0 };
+        stack.push(root);
+        proof {
+            assert(stack@ =~= seq![root]);
+            lemma_frames_root(*tree, root);
+            assert(tree.wf_node(tree.root, tree.height()));
+            lemma_valid_subrange(tree@, 0, tree@.len() as int);
+            assert(tree@.subrange(0, tree@.len() as int) =~= tree@);
+        }
+        Self { tree, lo, hi, stack }
+    }
+
+    /// The next slab, at or after `pos`, that may hold a value in
+    /// `lo..=hi`.
+    pub(crate) fn next_hit(&mut self) -> (r: Option<(usize, usize, i64)>)
+        requires old(self).inv(),
+        ensures
+            final(self).inv(),
+            final(self).view_tree() == old(self).view_tree(),
+            final(self).spec_lo() == old(self).spec_lo(),
+            final(self).spec_hi() == old(self).spec_hi(),
+            match r {
+                Some((i, items, prefix)) => {
+                    &&& old(self).pos() <= i < old(self).view_tree().len()
+                    &&& may_hold(old(self).view_tree(), old(self).spec_lo(), old(self).spec_hi(), i as int)
+                    &&& forall|k: int| old(self).pos() <= k < i
+                        ==> !may_hold(old(self).view_tree(), old(self).spec_lo(), old(self).spec_hi(), k)
+                    &&& items == sum_len(old(self).view_tree().subrange(0, i as int))
+                    &&& prefix == pre_at(old(self).view_tree(), i as int)
+                    &&& final(self).pos() == i + 1
+                },
+                None => {
+                    &&& forall|k: int| old(self).pos() <= k < old(self).view_tree().len()
+                        ==> !may_hold(old(self).view_tree(), old(self).spec_lo(), old(self).spec_hi(), k)
+                    &&& final(self).pos() == old(self).view_tree().len()
+                },
+            },
+    {
+        let ghost t = *self.tree;
+        let ghost hh = t.height() as int;
+        let ghost p0 = self.pos();
+        let lo = self.lo;
+        let hi = self.hi;
+        proof {
+            if self.stack@.len() > 0 {
+                lemma_frames_top(t, self.stack@);
+                lemma_frame_basics(t, self.stack@.last(), frame_end(t, self.stack@, self.stack@.len() - 1),
+                    hh - (self.stack@.len() - 1));
+            }
+        }
+        loop
+            invariant
+                self.inv(), *self.tree == t, hh == t.height(), self.lo == lo, self.hi == hi,
+                old(self).pos() == p0, old(self).view_tree() == t@,
+                old(self).spec_lo() == lo, old(self).spec_hi() == hi,
+                p0 <= self.pos() <= t@.len(),
+                forall|k: int| p0 <= k < self.pos() ==> !may_hold(t@, lo as int, hi as int, k),
+            decreases t@.len() - self.pos(), done_top(t, self.stack@), hh + 1 - self.stack@.len(),
+        {
+            let d = self.stack.len();
+            if d == 0 {
+                return None;
+            }
+            let ghost st = self.stack@;
+            let ghost h = hh - (d - 1);
+            let ghost end = frame_end(t, st, d - 1);
+            let mut frame = self.stack[d - 1];
+            proof {
+                lemma_frames_top(t, st);
+                assert(frame == st.last());
+                lemma_frame_basics(t, frame, end, h);
+            }
+            match self.tree.node(frame.node) {
+                Node::Leaf(l) => {
+                    while frame.next_child < l.aggs.len()
+                        invariant
+                            self.inv(), *self.tree == t, hh == t.height(), self.lo == lo, self.hi == hi,
+                            old(self).pos() == p0, old(self).view_tree() == t@,
+                            old(self).spec_lo() == lo, old(self).spec_hi() == hi,
+                            self.stack@ == st, d == st.len(), d > 0, h == hh - (d - 1),
+                            end == frame_end(t, st, d - 1),
+                            t.node_spec(frame.node) == Some(Node::<SlabAgg>::Leaf(*l)),
+                            frame_ok(t, frame, end, h),
+                            frame == st.last() || frame_at(t, frame) > frame_at(t, st.last()),
+                            p0 <= frame_at(t, st.last()) <= frame_at(t, frame),
+                            forall|k: int| p0 <= k < frame_at(t, frame) ==> !may_hold(t@, lo as int, hi as int, k),
+                        decreases l.aggs.len() - frame.next_child,
+                    {
+                        let i = frame.next_child;
+                        let agg = &l.aggs[i];
+                        proof {
+                            lemma_leaf_step(t, frame, end, h, *l, lo as int, hi as int);
+                        }
+                        let prefix = frame.prefix_before;
+                        let slab_idx = frame.slab_base + i;
+                        let items_before = frame.items_before;
+                        frame.next_child += 1;
+                        frame.prefix_before += agg.total;
+                        frame.items_before += agg.len;
+                        if agg.overlaps(lo, hi, prefix) {
+                            self.stack.set(d - 1, frame);
+                            proof {
+                                lemma_frames_set(t, st, frame);
+                                assert(self.stack@ == st.update(d - 1, frame));
+                                assert(self.stack@.last() == frame);
+                            }
+                            return Some((slab_idx, items_before, prefix));
+                        }
+                    }
+                    proof {
+                        lemma_frame_basics(t, frame, end, h);
+                        lemma_frames_set(t, st, frame);
+                        lemma_frames_pop(t, st.update(d - 1, frame));
+                        assert(st.update(d - 1, frame).drop_last() =~= st.drop_last());
+                    }
+                    self.stack.pop();
+                    proof {
+                        assert(self.stack@ =~= st.drop_last());
+                    }
+                }
+                Node::Internal(n) => {
+                    if frame.next_child >= n.children.len() {
+                        self.stack.pop();
+                        proof {
+                            lemma_frames_pop(t, st);
+                            assert(self.stack@ =~= st.drop_last());
+                        }
+                        continue;
+                    }
+                    let k = frame.next_child;
+                    let c = &n.children[k];
+                    proof {
+                        lemma_internal_step(t, frame, end, h, *n, lo as int, hi as int);
+                    }
+                    let prefix = frame.prefix_before;
+                    let slab_base = frame.slab_base;
+                    let items_before = frame.items_before;
+                    frame.next_child += 1;
+                    frame.prefix_before += c.agg.total;
+                    frame.slab_base += c.slab_count;
+                    frame.items_before += c.agg.len;
+                    self.stack.set(d - 1, frame);
+                    let ghost st1 = self.stack@;
+                    proof {
+                        lemma_frames_set(t, st, frame);
+                        assert(st1 == st.update(d - 1, frame));
+                    }
+                    if c.agg.overlaps(lo, hi, prefix) {
+                        let child = Frame { node: c.id, next_child: 0, prefix_before: prefix, slab_base, items_before };
+                        self.stack.push(child);
+                        proof {
+                            assert(st1.last() == frame);
+                            lemma_frames_push(t, st1, child);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 impl<A: SlabAggregate> View for SlabBTree<A> {
     type V = Seq<A>;
 
@@ -4801,16 +5433,11 @@ fn merge_all<'a, A: SlabAggregate + 'a>(aggs: impl IntoIterator<Item = &'a A>) -
 // ── SlabAgg (used by DeltaColumn) ───────────────────────────────────────────
 
 impl SlabAgg {
+    #[cfg(test)]
     fn contains(&self, target: i64, prefix_before: i64) -> bool {
         self.len > 0
             && target >= prefix_before + self.min_offset
             && target <= prefix_before + self.max_offset
-    }
-
-    fn overlaps(&self, lo: i64, hi: i64, prefix_before: i64) -> bool {
-        self.len > 0
-            && prefix_before + self.max_offset >= lo
-            && prefix_before + self.min_offset <= hi
     }
 }
 
@@ -4945,178 +5572,39 @@ impl<A: SlabAggregate> SlabBTree<A> {
 
 impl SlabBTree<SlabAgg> {
     pub(crate) fn find_by_value(&self, target: i64) -> FindByValue<'_> {
-        FindByValue::new(self, target)
+        FindByValue(ValueSearch::new(self, target, target))
     }
 
     pub(crate) fn find_by_value_range(&self, lo: i64, hi: i64) -> FindByValueRange<'_> {
-        FindByValueRange::new(self, lo, hi)
+        FindByValueRange(ValueSearch::new(self, lo, hi))
     }
 }
 
-pub struct FindByValue<'a> {
-    tree: &'a SlabBTree<SlabAgg>,
-    target: i64,
-    stack: Vec<Frame>,
-}
-
-#[derive(Copy, Clone)]
-struct Frame {
-    node: NodeId,
-    next_child: usize,
-    prefix_before: i64,
-    slab_base: usize,
-    items_before: usize,
-}
-
-impl<'a> FindByValue<'a> {
-    fn new(tree: &'a SlabBTree<SlabAgg>, target: i64) -> Self {
-        let mut s = Self {
-            tree,
-            target,
-            stack: Vec::with_capacity(16),
-        };
-        s.stack.push(Frame {
-            node: tree.root,
-            next_child: 0,
-            prefix_before: 0,
-            slab_base: 0,
-            items_before: 0,
-        });
-        s
-    }
-}
+/// The slabs that may hold `target`: `(slab_idx, items_before_slab,
+/// prefix_before_slab)`, in order.
+pub struct FindByValue<'a>(ValueSearch<'a>);
 
 impl Iterator for FindByValue<'_> {
-    /// `(slab_idx, items_before_slab, prefix_before_slab)`.
     type Item = (usize, usize, i64);
 
     fn next(&mut self) -> Option<Self::Item> {
-        while let Some(frame) = self.stack.last_mut() {
-            match self.tree.node(frame.node) {
-                Node::Leaf(l) => {
-                    while frame.next_child < l.aggs.len() {
-                        let i = frame.next_child;
-                        let agg = &l.aggs[i];
-                        let prefix = frame.prefix_before;
-                        let slab_idx = frame.slab_base + i;
-                        let items_before = frame.items_before;
-                        frame.next_child += 1;
-                        frame.prefix_before += agg.total;
-                        frame.items_before += agg.len;
-                        if agg.contains(self.target, prefix) {
-                            return Some((slab_idx, items_before, prefix));
-                        }
-                    }
-                    self.stack.pop();
-                }
-                Node::Internal(n) => {
-                    if frame.next_child >= n.children.len() {
-                        self.stack.pop();
-                        continue;
-                    }
-                    let child = n.children[frame.next_child];
-                    let prefix = frame.prefix_before;
-                    let slab_base = frame.slab_base;
-                    let items_before = frame.items_before;
-                    frame.next_child += 1;
-                    frame.prefix_before += child.agg.total;
-                    frame.slab_base += child.slab_count;
-                    frame.items_before += child.agg.len;
-                    if child.agg.contains(self.target, prefix) {
-                        self.stack.push(Frame {
-                            node: child.id,
-                            next_child: 0,
-                            prefix_before: prefix,
-                            slab_base,
-                            items_before,
-                        });
-                    }
-                }
-            }
-        }
-        None
+        self.0.next_hit()
     }
 }
 
-pub struct FindByValueRange<'a> {
-    tree: &'a SlabBTree<SlabAgg>,
-    lo: i64,
-    hi: i64,
-    stack: Vec<Frame>,
-}
-
-impl<'a> FindByValueRange<'a> {
-    fn new(tree: &'a SlabBTree<SlabAgg>, lo: i64, hi: i64) -> Self {
-        let mut s = Self {
-            tree,
-            lo,
-            hi,
-            stack: Vec::with_capacity(16),
-        };
-        s.stack.push(Frame {
-            node: tree.root,
-            next_child: 0,
-            prefix_before: 0,
-            slab_base: 0,
-            items_before: 0,
-        });
-        s
-    }
-}
+/// The slabs that may hold a value in `lo..=hi`: `(slab_idx,
+/// items_before_slab, prefix_before_slab)`, in order.
+pub struct FindByValueRange<'a>(ValueSearch<'a>);
 
 impl Iterator for FindByValueRange<'_> {
-    /// `(slab_idx, items_before_slab, prefix_before_slab)`.
     type Item = (usize, usize, i64);
 
     fn next(&mut self) -> Option<Self::Item> {
-        while let Some(frame) = self.stack.last_mut() {
-            match self.tree.node(frame.node) {
-                Node::Leaf(l) => {
-                    while frame.next_child < l.aggs.len() {
-                        let i = frame.next_child;
-                        let agg = &l.aggs[i];
-                        let prefix = frame.prefix_before;
-                        let slab_idx = frame.slab_base + i;
-                        let items_before = frame.items_before;
-                        frame.next_child += 1;
-                        frame.prefix_before += agg.total;
-                        frame.items_before += agg.len;
-                        if agg.overlaps(self.lo, self.hi, prefix) {
-                            return Some((slab_idx, items_before, prefix));
-                        }
-                    }
-                    self.stack.pop();
-                }
-                Node::Internal(n) => {
-                    if frame.next_child >= n.children.len() {
-                        self.stack.pop();
-                        continue;
-                    }
-                    let child = n.children[frame.next_child];
-                    let prefix = frame.prefix_before;
-                    let slab_base = frame.slab_base;
-                    let items_before = frame.items_before;
-                    frame.next_child += 1;
-                    frame.prefix_before += child.agg.total;
-                    frame.slab_base += child.slab_count;
-                    frame.items_before += child.agg.len;
-                    if child.agg.overlaps(self.lo, self.hi, prefix) {
-                        self.stack.push(Frame {
-                            node: child.id,
-                            next_child: 0,
-                            prefix_before: prefix,
-                            slab_base,
-                            items_before,
-                        });
-                    }
-                }
-            }
-        }
-        None
+        self.0.next_hit()
     }
 }
 
-// ── Prefix-sum queries (generic over PrefixAggregate) ───────────────────────
+// ── Test helpers ────────────────────────────────────────────────────────────
 
 impl<A: PrefixAggregate> FoundSlab<A> {
     #[cfg(test)]
