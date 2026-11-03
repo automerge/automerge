@@ -219,7 +219,7 @@ pub(crate) proof fn lemma_rw_at<'a, W: WriteOps<'a>>(s: State<'a, W>, pre: Seq<u
 
 /// A flush's output, read alone: its tail record is the last group's
 /// the flush wrote, which its position names.
-proof fn lemma_flush_tail<'a, W: WriteOps<'a>>(s0: State<'a, W>, p0: Seq<u8>, b0: Seq<u8>, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>, h0: i64, b1: Seq<u8>, rw: Option<RewriteHeader>, seg: int, w: WPos)
+pub(crate) proof fn lemma_flush_tail<'a, W: WriteOps<'a>>(s0: State<'a, W>, p0: Seq<u8>, b0: Seq<u8>, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>, h0: i64, b1: Seq<u8>, rw: Option<RewriteHeader>, seg: int, w: WPos)
     requires
         rel(s0, p0, b0, 0, gs, ws, h0), flushed(s0, b0, b1, rw, seg), flushed_tail(s0, b0, b1, rw, w),
         s0 is Empty ==> b1 == b0 && w == (WPos::Run { pos: 0, local: true }),

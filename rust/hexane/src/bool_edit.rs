@@ -1884,6 +1884,73 @@ proof fn lemma_bslab_ok<K: CountOps>(s: BSlab)
     reveal(bslab_tail);
 }
 
+/// A slab of `len` copies of `value`: a count of `len`, after a zero
+/// count of `false`s if `value` is `true` (`ColumnEncoding::fill`).
+#[inline]
+pub(crate) fn fill<C: CountsOf>(len: usize, value: bool) -> (s: BSlab)
+    requires
+        len > 0,
+    ensures
+        BoolModel::<C>::ok(s),
+        BoolModel::<C>::vals(s) == Seq::new(len as nat, |_i: int| value),
+        s.len == len,
+{
+    let mut data = Vec::new();
+    let segments = if value {
+        C::K::put_count(0, &mut data);
+        2
+    } else {
+        1
+    };
+    let ghost d0 = data@;
+    let t = data.len();
+    C::K::put_count(len, &mut data);
+    proof {
+        C::K::axiom_enc(len as u64, len as u64, Seq::empty(), Seq::empty());
+    }
+    let tail = (data.len() - t) as u8;
+    let s = new_bslab_vec(data, len, segments, tail);
+    proof {
+        reveal(bslab_bytes);
+        reveal(bslab_len);
+        reveal(bslab_segments);
+        reveal(bslab_tail);
+        let cs = if value { seq![0u64, len as u64] } else { seq![len as u64] };
+        let e = Seq::<u64>::empty();
+        assert(counts_bytes::<C::K>(e) == Seq::<u8>::empty());
+        assert(counts_len(e) == 0);
+        if value {
+            let z = seq![0u64];
+            assert(cs.drop_last() =~= z);
+            assert(z.drop_last() =~= e);
+            assert(counts_bytes::<C::K>(z) == counts_bytes::<C::K>(e) + C::K::enc(0));
+            assert(counts_len(z) == counts_len(e) + 0);
+            assert(d0 =~= C::K::enc(0));
+            assert(counts_bytes::<C::K>(cs) == counts_bytes::<C::K>(z) + C::K::enc(len as u64));
+            assert(counts_len(cs) == counts_len(z) + len);
+        } else {
+            assert(cs.drop_last() =~= e);
+            assert(d0 =~= Seq::<u8>::empty());
+            assert(counts_bytes::<C::K>(cs) == counts_bytes::<C::K>(e) + C::K::enc(len as u64));
+            assert(counts_len(cs) == counts_len(e) + len);
+        }
+        assert(counts_bytes::<C::K>(cs) =~= s.data@);
+        assert(bool_parses::<C::K>(cs, s.data@));
+        lemma_unique::<C::K>(cs, bool_counts::<C::K>(s.data@));
+        lemma_bslab_ok::<C::K>(s);
+        assert(counts_values(e) =~= Seq::<bool>::empty());
+        if value {
+            let z = seq![0u64];
+            assert(counts_values(z) =~= Seq::<bool>::empty());
+            assert(counts_values(cs) == counts_values(z) + Seq::new(len as nat, |_j: int| run_value(1)));
+        } else {
+            assert(counts_values(cs) == counts_values(e) + Seq::new(len as nat, |_j: int| run_value(0)));
+        }
+        assert(counts_values(cs) =~= Seq::new(len as nat, |_i: int| value));
+    }
+    s
+}
+
 impl<C: CountsOf> Slabs for BoolModel<C> {
     type Tail = u8;
     type Rebuild = BoolEdit<C>;

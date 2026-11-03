@@ -285,6 +285,9 @@ compiles them away. To check them, run `cargo verus verify -p hexane
   formats: every read yields exactly the column's values in the window,
   and every edit leaves canonical slabs, with correct metadata, holding
   exactly the intended values.
+* Building a column: its index and length are computed from its slabs,
+  checking that each slab's weight counts its items, and `Column::fill`
+  makes a well-formed slab of the values asked for.
 * The value search of `Column` and its iterator (`scope_to_value`,
   `seek_to_value`): where the values in the window are sorted, it returns
   exactly the range of them equal to the target, or, if there are none,
@@ -296,8 +299,9 @@ compiles them away. To check them, run `cargo verus verify -p hexane
 decode, which the verified code reaches through traits; the thin glue that
 connects the generic column types to the verified cores, and the closures
 and slab weights passed through it; that each value type's `Ord` agrees
-with its `==`; and that a newly built column satisfies the invariant the
-cursor and iterator assume.
+with its `==`; and that the slabs a new column is built from are
+well-formed. Those come from the verified loaders and `fill`, through the
+glue, or from the RLE encoder, whose slab cutting is not verified.
 
 **Known limitations:**
 

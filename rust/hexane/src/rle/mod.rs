@@ -154,18 +154,8 @@ where
     }
 
     fn fill(len: usize, value: T::Get<'_>) -> Slab {
-        use state::{RleCow, RleState};
-        let mut buf = Vec::new();
-        let mut state = RleState::<T, T, C>::empty();
-        let mut f = state.append_n(&mut buf, RleCow::Ref(value), len);
-        f += state.flush(&mut buf);
-        let tail = f.wpos.as_tail(0, buf.len());
-        Slab {
-            data: buf,
-            len,
-            segments: f.segments,
-            tail,
-        }
+        // verified; `Column::fill` makes no slab for `len == 0`
+        edit::fill::<state::WOps<T, T, C>>(state::RleCow::Ref(value), len)
     }
 
     fn merge_slabs(a: &mut Slab, b: Slab) {

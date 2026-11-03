@@ -112,6 +112,28 @@ pub trait IndexOps<W>: Sized {
             n == self.ws().len(),
     ;
 
+    /// A weight's item count.
+    fn w_len(w: &W) -> (n: usize)
+        ensures
+            n == Self::wlen(*w),
+    ;
+
+    /// The index of no slabs.
+    fn ix_empty() -> (r: Self)
+        ensures
+            r.ok(),
+            r.ws() == Seq::<W>::empty(),
+    ;
+
+    /// The index of the weights `ws`.
+    fn ix_from(ws: Vec<W>) -> (r: Self)
+        requires
+            Self::fits(ws@),
+        ensures
+            r.ok(),
+            r.ws() == ws@,
+    ;
+
     /// The slab holding item `at` and the item's offset in it; past the
     /// end, the number of slabs.
     fn ix_find(&self, at: usize) -> (r: (usize, usize))
@@ -207,7 +229,7 @@ impl<W: SlabWeight> BitIndex<W> {
     fn empty() -> (r: Self)
         ensures
             r.wf(),
-            r.counts() == Seq::<nat>::empty(),
+            r.weights@ == Seq::<W>::empty(),
     {
         let mut bit = Vec::new();
         bit.push(W::zero());
@@ -222,7 +244,7 @@ impl<W: SlabWeight> BitIndex<W> {
             total(lens(weights@)) <= usize::MAX,
         ensures
             r.wf(),
-            r.counts() == lens(weights@),
+            r.weights@ == weights@,
     {
         let ghost wl = |x: W| x.weight_len();
         assert(weights@.map_values(wl) =~= lens(weights@));
@@ -329,6 +351,18 @@ impl<W: SlabWeight> IndexOps<W> for BitIndex<W> {
         assert(ws.map_values(|w: W| Self::wlen(w)) =~= lens(ws));
     }
 
+    fn w_len(w: &W) -> usize {
+        w.len()
+    }
+
+    fn ix_empty() -> Self {
+        Self::empty()
+    }
+
+    fn ix_from(ws: Vec<W>) -> Self {
+        Self::from_vec(ws)
+    }
+
     fn ix_len(&self) -> usize {
         self.weights.len()
     }
@@ -402,6 +436,18 @@ impl<A: SlabAggregate> IndexOps<A> for SlabBTree<A> {
             lemma_fold_plain(b);
             A::lemma_plain(fold(a), fold(b));
         }
+    }
+
+    fn w_len(w: &A) -> usize {
+        w.len()
+    }
+
+    fn ix_empty() -> Self {
+        Self::new()
+    }
+
+    fn ix_from(ws: Vec<A>) -> Self {
+        Self::from_vec(ws)
     }
 
     fn ix_len(&self) -> usize {

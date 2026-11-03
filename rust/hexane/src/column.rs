@@ -855,6 +855,21 @@ where
     }
 }
 
+/// A new column's index and item total (verified: `cursor::col_index`).
+/// Panics if a weight does not count its slab's items, which would be a
+/// bug in a weight function, or if the items do not fit a `usize`.
+#[inline]
+fn index_of<T, W, I>(slabs: &[Slab<T>], weights: Vec<W>) -> (I, usize)
+where
+    T: Copy + std::fmt::Debug + Default,
+    I: crate::index::IndexOps<W>,
+{
+    match crate::cursor::col_index(slabs, weights) {
+        Some(r) => r,
+        None => panic!("column weights do not match its slabs, or it has over usize::MAX items"),
+    }
+}
+
 /// Call `f` for each gap between `splices`, with the source range to read
 /// and the position in the retained column it belongs at.
 ///
@@ -898,7 +913,8 @@ where
         assert!(max_segments >= 2, "max_segments must be at least 2");
         Self {
             slabs: Vec::new(),
-            index: Idx::default(),
+            // verified (`IndexOps::ix_empty`): the index of no slabs
+            index: Idx::ix_empty(),
             total_len: 0,
             max_segments,
             counter: 0,
@@ -988,8 +1004,8 @@ where
             );
             debug_assert!(s.segments <= max_segments);
         }
-        let total_len: usize = slabs.iter().map(|s| s.len).sum();
-        let index = Idx::from_weights(slabs.iter().map(WF::compute));
+        let weights = slabs.iter().map(WF::compute).collect();
+        let (index, total_len) = index_of(&slabs, weights);
         Self {
             slabs,
             index,
@@ -1002,19 +1018,20 @@ where
 
     /// Create a column of `len` copies of `value`.
     pub fn fill(len: usize, value: T::Get<'_>) -> Self {
+        // (the second bound only matters where `usize` is narrower)
         assert!(
-            len <= i64::MAX as usize,
+            len <= i64::MAX as usize && len < usize::MAX - 1,
             "fill length {len} is not encodable"
         );
         if len == 0 {
             return Self::new();
         }
-        let slab = T::Encoding::<C>::fill(len, value);
-        let index = Idx::from_weights(std::iter::once(WF::compute(&slab)));
+        let slabs = vec![T::Encoding::<C>::fill(len, value)];
+        let (index, total_len) = index_of(&slabs, vec![WF::compute(&slabs[0])]);
         Self {
-            slabs: vec![slab],
+            slabs,
             index,
-            total_len: len,
+            total_len,
             max_segments: DEFAULT_MAX_SEG,
             counter: 0,
             _phantom: PhantomData,
@@ -1686,10 +1703,10 @@ where
             while self.try_next_run()?.is_some() {}
         }
         let slabs = self.iter.finalize()?;
-        let total_len: usize = slabs.iter().map(|s| s.len).sum();
         if let Some(expected) = self.length {
-            if total_len != expected {
-                return Err(PackError::InvalidLength(total_len, expected));
+            let len: usize = slabs.iter().map(|s| s.len).sum();
+            if len != expected {
+                return Err(PackError::InvalidLength(len, expected));
             }
         }
         let weights: Vec<WF::Weight> = if WF::ACCUMULATES {
@@ -1707,7 +1724,7 @@ where
         for w in &weights {
             check(w)?;
         }
-        let index = Idx::from_weights(weights);
+        let (index, total_len) = index_of(&slabs, weights);
         Ok(Column {
             slabs,
             index,

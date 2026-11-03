@@ -40,7 +40,7 @@ use crate::rle::read::{lit_tail_of, tail_bytes_of};
 use crate::rle::state::*;
 #[cfg(verus_keep_ghost)]
 use crate::rle::writer::*;
-use crate::rle::writer::{add, tail_rec, Rebuilt, Splice};
+use crate::rle::writer::{add, merge_tail, tail_rec, Rebuilt, Splice};
 use crate::rle::{RleTail, Slab};
 use crate::{AsColumnRef, Codec, RleValue};
 use std::marker::PhantomData;
@@ -547,6 +547,83 @@ proof fn lemma_slab_of<'a, O: RleOps<'a>>(s: Slab, vals: Seq<O::V>)
     assert(parses::<O>(gs, data));
     let gc = slab_groups::<O>(data);
     lemma_groups_unique::<O>(gs, gc);
+}
+
+/// A slab of `len` copies of `value` (`ColumnEncoding::fill`): what a
+/// fresh writer writes for them.
+#[inline]
+pub(crate) fn fill<'s, L>(value: <L as WriteOps<'s>>::Cow, len: usize) -> (s: Slab)
+    where L: for<'x> Lift<'x, W = L>,
+    requires
+        1 <= len <= i64::MAX,
+        len < usize::MAX - 1,
+    ensures
+        RleModel::<L>::ok(s),
+        RleModel::<L>::vals(s) == copies(len as nat, <L as Lift<'s>>::lift(<L as WriteOps<'s>>::val(value))),
+        s.len == len,
+{
+    if <L as WriteOps<'s>>::cow_is_null(&value) && !<<L as WriteOps<'s>>::R as RleOps<'s>>::nullable_exec() {
+        null_in_column(Ghost(true));
+    }
+    let ghost v = <L as WriteOps<'s>>::val(value);
+    let mut buf = Vec::new();
+    let mut state = State::<'s, L>::empty();
+    let f1 = state.append_cow(&mut buf, value, len);
+    let ghost s1 = state;
+    let ghost b1 = buf@;
+    let f2 = state.flush(&mut buf);
+    let tail0 = tail_rec(0, 0);
+    let tail = merge_tail(f2.wpos, 0, buf.len(), 0, &tail0);
+    let segments = f1.segments + f2.segments;
+    let s = Slab { data: buf, len, segments, tail };
+    proof {
+        let eg = Seq::<Group<VOf<'s, L>>>::empty();
+        let ev = Seq::<VOf<'s, L>>::empty();
+        let eb = Seq::<u8>::empty();
+        let h0 = 0i64;
+        let s0 = State::<'s, L>::Empty;
+        assert(eb.skip(0) =~= eb);
+        assert(groups_values(eg, <<L as WriteOps<'s>>::R as RleOps<'s>>::null()) =~= ev);
+        assert(rel(s0, eb, eb, 0, eg, ev, h0));
+        // starting empty, no header is pending, so nothing is rewritten
+        assert(f1.rewrite is None);
+        assert(f2.rewrite is None);
+        assert(apply::<L>(f1.rewrite, eb, h0) == eb);
+        let (gs, ws) = choose|gs: Seq<Group<VOf<'s, L>>>, ws: Seq<VOf<'s, L>>| #[trigger] rel(s1, eb, b1, 0, gs, ws, h0)
+            && values_of(s1, gs, ws) == values_of(s0, eg, ev) + copies(len as nat, v)
+            && acc(s1, gs, ws) == acc(s0, eg, ev) + f1.segments;
+        let a = all_groups(s1, gs, ws);
+        assert(s.data@.skip(0) =~= s.data@);
+        assert(eb + s.data@ =~= s.data@);
+        assert(values_of(s0, eg, ev) + copies(len as nat, v) =~= copies(len as nat, v));
+        assert(encodes::<<L as WriteOps<'s>>::R>(s.data@, copies(len as nat, v), segments as int));
+        lemma_flush_tail::<L>(s1, eb, b1, gs, ws, h0, s.data@, f2.rewrite, f2.segments as int, f2.wpos);
+        let t = tail_after(f2.wpos, 0, 0, s.data@.len() as int, 0, tail_b(tail0) as int, tail_l(tail0) as int);
+        assert(tail_ok::<<L as WriteOps<'s>>::R>(s.data@, t.0, t.1));
+        let gt = choose|gt: Seq<Group<VOf<'s, L>>>| #[trigger] canonical::<<L as WriteOps<'s>>::R>(gt)
+            && groups_bytes::<<L as WriteOps<'s>>::R>(gt) == s.data@
+            && t.0 == tail_bytes_of::<<L as WriteOps<'s>>::R>(gt) && t.1 == lit_tail_of::<<L as WriteOps<'s>>::R>(gt);
+        lemma_lit_tail_le::<<L as WriteOps<'s>>::R>(gt);
+        lemma_lift_encodes::<L>(s.data@, copies(len as nat, v), segments as int);
+        lemma_lift_tail_ok::<L>(s.data@, t.0, t.1);
+        assert(lift_seq::<L>(copies(len as nat, v)) =~= copies(len as nat, <L as Lift<'s>>::lift(v)));
+        lemma_slab_of::<<L as WriteOps<'static>>::R>(s, copies(len as nat, <L as Lift<'s>>::lift(v)));
+    }
+    s
+}
+
+/// A null value in a column that isn't nullable: none of the value types
+/// has one.  Trusted only in that a panic does not return.
+#[verifier::external_body]
+#[cold]
+#[inline(never)]
+fn null_in_column(Ghost(why): Ghost<bool>)
+    requires
+        why,
+    ensures
+        false,
+{
+    panic!("null value in a column that is not nullable")
 }
 
 /// A concatenation, split after its first part.

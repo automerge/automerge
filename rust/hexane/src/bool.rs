@@ -194,22 +194,8 @@ impl<C: Codec> ColumnEncoding for BoolEncoding<C> {
     }
 
     fn fill(len: usize, value: bool) -> Slab {
-        let mut data = Vec::new();
-        let segments = if value {
-            data.extend(C::encode_count(0));
-            2 // zero-count false + true
-        } else {
-            1
-        };
-        let t = data.len();
-        data.extend(C::encode_count(len));
-        let tail = (data.len() - t) as u8;
-        Slab {
-            data,
-            len,
-            segments,
-            tail,
-        }
+        // verified; `Column::fill` makes no slab for `len == 0`
+        crate::bool_edit::fill::<C>(len, value)
     }
 
     fn merge_slabs(a: &mut Slab, b: Slab) {

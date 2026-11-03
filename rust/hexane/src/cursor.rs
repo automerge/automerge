@@ -5,7 +5,10 @@
 //! at most one slab's rebuild open.  The column stands for its slabs'
 //! values one after another (`vals_of`); `col_ok` says every slab is
 //! well-formed, the index holds the slabs' item counts and `total_len`
-//! their sum.  The cursor keeps, as ghost state, the column's values when
+//! their sum.  A new column gets its index and total from `col_index`,
+//! which checks its slabs' weights against them; that the slabs are
+//! well-formed is up to what made them (the loaders, `fill`, the
+//! encoders).  The cursor keeps, as ghost state, the column's values when
 //! it opened (`o`) and the values it has produced (`p`), and its
 //! invariant (`wf`) says the column's values are always `p` followed by
 //! the original values not yet passed — with the open rebuild, if any,
@@ -279,6 +282,76 @@ pub(crate) open spec fn col_ok<E: Slabs, W, I: IndexOps<W>>(
     &&& total_len == total(slab_lens(s))
     &&& max_segments >= 2
     &&& I::plain()
+}
+
+/// A new column's index and item total, from its slabs and their
+/// weights; `None` if a weight does not count its slab's items or the
+/// items do not fit a `usize`.  With well-formed slabs and a budget of at
+/// least 2 segments, the result is a column (`col_ok`).  Every way of
+/// building a `Column` from slabs goes through here.
+#[inline]
+pub(crate) fn col_index<T: Copy + Clone + std::fmt::Debug + Default, W, I: IndexOps<W>>(
+    slabs: &[Slab<T>],
+    ws: Vec<W>,
+) -> (r: Option<(I, usize)>)
+    requires
+        // a delta index's sums are not bounded by its item counts (see the
+        // module docs); its loader checks them, which is not proved
+        !I::plain() ==> I::fits(ws@),
+    ensures
+        match r {
+            Some((ix, n)) => {
+                &&& ix.ok()
+                &&& wlens::<W, I>(ix.ws()) == slab_lens(slabs@)
+                &&& n == total(slab_lens(slabs@))
+            },
+            None => wlens::<W, I>(ws@) != slab_lens(slabs@) || total(slab_lens(slabs@)) > usize::MAX,
+        },
+{
+    let ghost lens = slab_lens(slabs@);
+    if ws.len() != slabs.len() {
+        return None;
+    }
+    let mut n: usize = 0;
+    let mut i: usize = 0;
+    while i < slabs.len()
+        invariant
+            ws@.len() == slabs@.len(),
+            lens == slab_lens(slabs@),
+            0 <= i <= slabs@.len(),
+            n == sum(lens, 0, i as int),
+            forall|j: int| 0 <= j < i ==> #[trigger] I::wlen(ws@[j]) == lens[j],
+        decreases slabs.len() - i,
+    {
+        let len = slabs[i].len;
+        if I::w_len(&ws[i]) != len {
+            proof {
+                assert(wlens::<W, I>(ws@)[i as int] != lens[i as int]);
+            }
+            return None;
+        }
+        proof {
+            lemma_sum_split(lens, 0, i as int, i + 1);
+            lemma_sum_one(lens, i as int);
+        }
+        n = match n.checked_add(len) {
+            Some(m) => m,
+            None => {
+                proof {
+                    lemma_sum_le(lens, 0, i + 1, 0, lens.len() as int);
+                }
+                return None;
+            },
+        };
+        i += 1;
+    }
+    proof {
+        assert(wlens::<W, I>(ws@) =~= lens);
+        if I::plain() {
+            I::lemma_fits(ws@);
+        }
+    }
+    Some((I::ix_from(ws), n))
 }
 
 pub(crate) proof fn lemma_concat_append<V>(a: Seq<Seq<V>>, b: Seq<Seq<V>>)
