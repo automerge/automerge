@@ -7,11 +7,13 @@
 //! and each operation is proved to give exactly the values left in the
 //! window (`out`), in order — past the end of the column there are none.
 //!
-//! The slab decoders are the encodings' own (`Decode`, `Decoders`: the
-//! verified RLE and bool decoders, behind trusted one-line bridges at the
-//! bottom of this file), and the index lookup a long seek uses is given as
-//! a closure whose answers are assumed right (`find_ok`; the index itself
-//! is verified, see [`crate::index::IndexOps`]).
+//! The slab decoders are the encodings' own, through each encoding's
+//! decoder model (`Decode`, `Decoders`, named by
+//! `ColumnEncoding::ReadModel`), which is verified against its format:
+//! RLE columns' (`rle::dec::RleReads`) and bool columns'
+//! (`bool_wire::BoolReads`).  The index lookup a long seek uses is given
+//! as a closure whose answers are assumed right (`find_ok`; the index
+//! itself is verified, see [`crate::index::IndexOps`]).
 //!
 //! The constructors also take it as given that there are fewer than
 //! `usize::MAX` slabs. A slab is not zero-sized, so no slice of them is
@@ -729,6 +731,7 @@ impl<D: Decode> ICore<D> {
     /// across slab boundaries.
     #[allow(clippy::question_mark)] // `?` puts the merge loop's proof over its rlimit
     #[verifier::rlimit(30)]
+    #[verifier::spinoff_prover]
     pub(crate) fn next_run_max<'a, X: Decoders<'a, D = D>>(&mut self, slabs: &'a [Slab<X::Tail>], max: usize) -> (r: Option<Run<D::Item>>)
         requires
             old(self).wf::<X>(slabs@),
@@ -871,80 +874,3 @@ impl<D: Decode> ICore<D> {
 }
 
 } // verus!
-
-// ── Trusted bridges ────────────────────────────────────────────────────────
-//
-// Outside `verus!`, so Verus takes them on trust; their spec items exist
-// only when Verus compiles the crate.  Each is a one-line forward to the
-// encoding's decoder — for RLE columns, the verified decoder
-// (`rle::dec::Dec`) — and what is trusted is that it meets the contracts
-// above.  (Bool columns' decoders are verified instead:
-// `bool_wire::BoolReads`.)
-
-use crate::encoding::{ColumnEncoding, RunDecoder};
-use crate::rle::RleDecoder;
-use crate::{Codec, ColumnValueRef, RleValue};
-use std::marker::PhantomData;
-
-impl<'a, T: RleValue, C: Codec> Decode for RleDecoder<'a, T, C> {
-    type Item = <T as ColumnValueRef>::Get<'a>;
-
-    #[cfg(verus_keep_ghost)]
-    fn inv(&self) -> bool {
-        unimplemented!()
-    }
-
-    #[cfg(verus_keep_ghost)]
-    fn rest(&self) -> Seq<Self::Item> {
-        unimplemented!()
-    }
-
-    #[inline(always)]
-    fn d_next(&mut self) -> Option<Self::Item> {
-        Iterator::next(self)
-    }
-
-    #[inline(always)]
-    fn d_nth(&mut self, n: usize) -> Option<Self::Item> {
-        Iterator::nth(self, n)
-    }
-
-    #[inline(always)]
-    fn d_run_max(&mut self, max: usize) -> Option<Run<Self::Item>> {
-        RunDecoder::next_run_max(self, max)
-    }
-
-    #[inline(always)]
-    fn d_eq(a: &Self::Item, b: &Self::Item) -> bool {
-        *a == *b
-    }
-}
-
-/// An encoding's decoders, as [`Decoders`], trusted to meet it: RLE's
-/// `ColumnEncoding::ReadModel`.
-pub struct DecodersOf<E>(PhantomData<fn() -> E>);
-
-impl<'a, E: ColumnEncoding> Decoders<'a> for DecodersOf<E> {
-    type Tail = E::Tail;
-    type D = E::Decoder<'a>;
-
-    #[cfg(verus_keep_ghost)]
-    fn ok(_s: Slab<Self::Tail>) -> bool {
-        unimplemented!()
-    }
-
-    #[cfg(verus_keep_ghost)]
-    fn vals(_s: Slab<Self::Tail>) -> Seq<<Self::D as Decode>::Item> {
-        unimplemented!()
-    }
-
-    #[inline(always)]
-    fn open(s: &'a Slab<Self::Tail>) -> Self::D {
-        E::decoder(&s.data)
-    }
-
-    #[inline(always)]
-    fn none() -> Self::D {
-        E::decoder(&[])
-    }
-}

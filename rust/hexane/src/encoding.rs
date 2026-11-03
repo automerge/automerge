@@ -104,10 +104,9 @@ pub trait ColumnEncoding: Default {
 
     /// The decoders as the verified column iterator sees them: what a slab
     /// holds, and the decoder operations specified against it. The
-    /// iterator is proved for any model; an encoding's model is either
-    /// proved against its format (bool) or trusted to forward to
-    /// `Decoder` (RLE). An associated type rather than a blanket impl so
-    /// that each encoding can have its own.
+    /// iterator is proved for any model, and each encoding's model is
+    /// proved against its format. An associated type rather than a
+    /// blanket impl so that each encoding can have its own.
     #[doc(hidden)]
     type ReadModel: for<'a> crate::iter_core::Decoders<'a, Tail = Self::Tail, D = Self::Decoder<'a>>;
 

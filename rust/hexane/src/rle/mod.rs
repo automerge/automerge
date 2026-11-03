@@ -226,7 +226,7 @@ where
     }
 
     type Decoder<'a> = RleDecoder<'a, T, C>;
-    type ReadModel = crate::iter_core::DecodersOf<Self>;
+    type ReadModel = crate::rle::dec::RleReads<crate::rle::model::Ops<T, C>>;
 
     fn decoder(slab: &[u8]) -> RleDecoder<'_, T, C> {
         RleDecoder::new(slab)

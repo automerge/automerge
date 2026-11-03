@@ -4,8 +4,8 @@
 //! valid slab it yields exactly the slab's values, and never panics.
 
 use crate::encoding::RunDecoder;
-use crate::rle::dec::Dec;
 pub use crate::rle::dec::RleDecoderState;
+use crate::rle::dec::{Dec, RDecoder};
 use crate::rle::model::Ops;
 
 use crate::{Codec, ColumnValueRef, Leb128, RleValue, Run};
@@ -15,13 +15,14 @@ use crate::{Codec, ColumnValueRef, Leb128, RleValue, Run};
 /// Created by the `ColumnEncoding::decoder` method.  Repeat runs yield the cached value
 /// in O(1) per item.  Literal runs decode each value.  Null runs yield
 /// the type's null value.
-pub struct RleDecoder<'a, T: RleValue, C: Codec = Leb128> {
-    inner: Dec<'a, Ops<'a, T, C>>,
-}
+///
+/// The decoding is verified with Verus (`Dec`), and so is what the column
+/// iterator does with it (`RDecoder`, `RleReads`).
+pub type RleDecoder<'a, T, C = Leb128> = RDecoder<'a, Ops<T, C>>;
 
 impl<T: RleValue, C: Codec> Clone for RleDecoder<'_, T, C> {
     fn clone(&self) -> Self {
-        Self {
+        RDecoder {
             inner: self.inner.clone(),
         }
     }

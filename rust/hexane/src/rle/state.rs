@@ -92,7 +92,7 @@ pub struct WOps<T, V, C>(PhantomData<(T, V, C)>);
 // Outside `verus!`, so Verus takes it on trust; its spec items exist only
 // when Verus compiles the crate.
 impl<'a, T: RleValue, V: AsColumnRef<T>, C: Codec> WriteOps<'a> for WOps<T, V, C> {
-    type R = Ops<'a, T, C>;
+    type R = Ops<T, C>;
     type Cow = RleCow<'a, T, V>;
 
     #[cfg(verus_keep_ghost)]

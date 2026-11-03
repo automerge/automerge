@@ -20,10 +20,17 @@ use super::model::*;
 use super::postfix::*;
 // proof functions exist only when Verus compiles the crate
 #[cfg(verus_keep_ghost)]
+use super::cut::slab_ok;
+#[cfg(verus_keep_ghost)]
 use super::read::{lemma_count, lemma_header, lemma_starts, lemma_value};
 #[cfg(verus_keep_ghost)]
 use super::read::{lit_tail_of, tail_bytes_of};
 use super::state::*;
+#[cfg(verus_keep_ghost)]
+use super::writer::slab_bytes;
+use crate::iter_core::{Decode, Decoders};
+use crate::rle::{RleTail, Slab};
+use std::marker::PhantomData;
 #[allow(unused_imports)]
 use vstd::prelude::*;
 
@@ -2789,6 +2796,142 @@ pub(crate) proof fn lemma_sbyte_end<'a, O: RleOps<'a>>(data: Seq<u8>, st: RleDec
         let vs = gs[g - 1]->values;
         lemma_slab_group::<O>(data, g - 1);
         assert(vs.take(vs.len() as int) =~= vs);
+    }
+}
+
+
+// ── The column iterator's decoder model ────────────────────────────────────
+
+/// An RLE slab decoder: RLE columns' `ColumnEncoding::Decoder`
+/// (`RleDecoder`), verified as the column iterator's `Decode`.
+pub struct RDecoder<'a, O: RleOps<'a>> {
+    pub(crate) inner: Dec<'a, O>,
+}
+
+/// RLE slabs' decoders as the column iterator sees them (`Decoders`),
+/// verified against the RLE format: a slab is well-formed when
+/// `slab_ok`, and holds the values its bytes encode. `O` is the column's
+/// value ops: one type for every lifetime a slab is borrowed for.
+///
+/// Public only because RLE columns' `ColumnEncoding::ReadModel` names it;
+/// this module is not.
+pub struct RleReads<O>(PhantomData<O>);
+
+impl<'a, O: RleOps<'a>> Decode for RDecoder<'a, O> {
+    type Item = O::V;
+
+    closed spec fn inv(&self) -> bool {
+        self.inner.inv()
+    }
+
+    closed spec fn rest(&self) -> Seq<O::V> {
+        self.inner.values().skip(self.inner.pos())
+    }
+
+    #[inline(always)]
+    fn d_next(&mut self) -> (r: Option<O::V>) {
+        let ghost v = self.inner.values();
+        let ghost p = self.inner.pos();
+        proof {
+            self.inner.lemma_pos();
+        }
+        let r = self.inner.next();
+        proof {
+            if r is Some {
+                assert(v.skip(p).skip(1) =~= v.skip(self.inner.pos()));
+            }
+        }
+        r
+    }
+
+    #[inline(always)]
+    fn d_nth(&mut self, n: usize) -> (r: Option<O::V>) {
+        let ghost v = self.inner.values();
+        let ghost p = self.inner.pos();
+        proof {
+            self.inner.lemma_pos();
+        }
+        let r = self.inner.nth(n);
+        proof {
+            if n < v.skip(p).len() {
+                assert(v.skip(p).skip(n + 1) =~= v.skip(self.inner.pos()));
+            }
+        }
+        r
+    }
+
+    #[inline(always)]
+    fn d_run_max(&mut self, max: usize) -> (r: Option<crate::Run<O::V>>) {
+        let ghost v = self.inner.values();
+        let ghost p = self.inner.pos();
+        proof {
+            self.inner.lemma_pos();
+        }
+        let r = self.inner.next_run_max(max);
+        proof {
+            if let Some(run) = r {
+                assert(v.skip(p).take(run.count as int) =~= Seq::new(run.count as nat, |_i: int| run.value)) by {
+                    assert forall|i: int| 0 <= i < run.count implies #[trigger] v.skip(p).take(run.count as int)[i]
+                        == run.value by {
+                        assert(v[p + i] == run.value);
+                    }
+                }
+                assert(v.skip(p).skip(run.count as int) =~= v.skip(self.inner.pos()));
+            }
+        }
+        r
+    }
+
+    #[inline(always)]
+    fn d_eq(a: &O::V, b: &O::V) -> (r: bool) {
+        O::same(a, b)
+    }
+}
+
+/// The empty slab is valid, with no values.
+proof fn lemma_empty_slab<'a, O: RleOps<'a>>()
+    ensures
+        valid_slab::<O>(Seq::<u8>::empty()),
+        slab_values::<O>(Seq::<u8>::empty()) == Seq::<O::V>::empty(),
+{
+    let e = Seq::<Group<O::V>>::empty();
+    assert(groups_bytes::<O>(e) =~= Seq::<u8>::empty());
+    reveal(parses);
+    assert(parses::<O>(e, Seq::<u8>::empty()));
+    let gs = slab_groups::<O>(Seq::<u8>::empty());
+    lemma_groups_unique::<O>(e, gs);
+    assert(groups_values(e, O::null()) =~= Seq::<O::V>::empty());
+}
+
+impl<'a, O> Decoders<'a> for RleReads<O> where O: for<'b> RleOps<'b> {
+    type Tail = RleTail;
+    type D = RDecoder<'a, O>;
+
+    closed spec fn ok(s: Slab) -> bool {
+        slab_ok::<O>(s)
+    }
+
+    closed spec fn vals(s: Slab) -> Seq<<O as RleOps<'a>>::V> {
+        slab_values::<O>(slab_bytes(s))
+    }
+
+    #[inline(always)]
+    fn open(s: &'a Slab) -> (d: RDecoder<'a, O>) {
+        let d = RDecoder { inner: Dec::new(s.data.as_slice()) };
+        proof {
+            assert(d.inner.values().skip(0) =~= d.inner.values());
+        }
+        d
+    }
+
+    #[inline(always)]
+    fn none() -> (d: RDecoder<'a, O>) {
+        let empty: &'a [u8] = &[];
+        proof {
+            lemma_empty_slab::<O>();
+            assert(empty@ =~= Seq::<u8>::empty());
+        }
+        RDecoder { inner: Dec::new(empty) }
     }
 }
 

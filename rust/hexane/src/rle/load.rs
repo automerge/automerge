@@ -20,7 +20,7 @@ use crate::{Codec, Leb128};
 pub(crate) fn rle_validate_encoding<T: RleValue, C: Codec>(
     slab: &[u8],
 ) -> Result<SlabInfo<RleTail>, PackError> {
-    let info = read::validate::<Ops<'_, T, C>>(slab)?;
+    let info = read::validate::<Ops<T, C>>(slab)?;
     Ok(SlabInfo {
         segments: info.segments,
         len: info.len,
@@ -118,7 +118,7 @@ mod tests {
     use crate::rle::state::WOps;
     use vstd::prelude::Ghost;
 
-    type O<'a, T> = Ops<'a, T, Leb128>;
+    type O<'a, T> = Ops<T, Leb128>;
     type W<'a, T> = WOps<T, T, Leb128>;
 
     /// Count segments into a fresh cut (the reader they stand for is
