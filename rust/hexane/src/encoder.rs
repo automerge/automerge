@@ -559,28 +559,28 @@ impl<C: Codec> BoolEncoderState<C> {
         }
     }
 
+    /// Write the pending run out and start the next, of the other value.
+    ///
+    /// The run is written even when empty: the format stores no values,
+    /// only alternating counts, so every run must be counted to keep the
+    /// parity of those after it. An empty one only happens first (the
+    /// zero-count false run a slab starting with `true` needs) or after
+    /// [`finish`](Self::finish) flushed the run before it.
     fn flush_run(&mut self, buf: &mut Vec<u8>) {
-        // `segments == 0` here replaces the original `buf.is_empty()` check:
-        // we want to emit the leading 0-count false run on the first
-        // transition (when the first appended value is `true`), but not on
-        // later transitions where `cur_count` would already be > 0.  The
-        // old code keyed off `self.buf.is_empty()` which worked when each
-        // encoder owned its own buf — in the State refactor `buf` is
-        // caller-owned and may already have prior content.
-        if self.cur_count > 0 || self.segments == 0 {
-            buf.extend(C::encode_count(self.cur_count));
-            self.segments += 1;
-            self.cur_count = 0;
-            self.cur_value = !self.cur_value;
-        }
+        buf.extend(C::encode_count(self.cur_count));
+        self.segments += 1;
+        self.cur_count = 0;
+        self.cur_value = !self.cur_value;
     }
 
-    /// Flush any pending run into `buf`.
+    /// Flush any pending run into `buf`. Appending afterwards goes on
+    /// from the run after it, which has the other value.
     pub fn finish(&mut self, buf: &mut Vec<u8>) {
         if self.cur_count > 0 {
             buf.extend(C::encode_count(self.cur_count));
             self.segments += 1;
             self.cur_count = 0;
+            self.cur_value = !self.cur_value;
         }
     }
 
