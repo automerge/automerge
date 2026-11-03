@@ -20,7 +20,9 @@
     clippy::manual_is_multiple_of
 )]
 
+use crate::iter_core::{Decode, Decoders};
 use crate::{PackError, Run};
+use std::marker::PhantomData;
 #[allow(unused_imports)]
 use vstd::prelude::*;
 
@@ -1409,6 +1411,26 @@ impl<'a> BDec<'a> {
         lemma_take_bytes_le::<K>(cs, bstate_k::<K>(data, self.st));
     }
 
+    /// The position is within the values.
+    pub(crate) proof fn lemma_pos<K: CountOps>(&self)
+        requires self.inv::<K>(),
+        ensures 0 <= self.pos::<K>() <= bool_values::<K>(self.data()).len(),
+    {
+        let data = self.data@;
+        let cs = bool_counts::<K>(data);
+        let k = bstate_k::<K>(data, self.st);
+        if k > 0 {
+            assert(cs.take(k).drop_last() =~= cs.take(k - 1));
+        } else {
+            assert(cs.take(0) =~= Seq::<u64>::empty());
+        }
+        if self.st.remaining > 0 {
+            self.lemma_value::<K>();
+        } else {
+            self.lemma_end::<K>();
+        }
+    }
+
     /// The value the decoder stands at, while a run is in hand.
     proof fn lemma_value<K: CountOps>(&self)
         requires self.inv::<K>(), self.state().remaining > 0,
@@ -1928,6 +1950,140 @@ fn merge_append<K: CountOps>(
 /// (`BoolEncoding<C>`) but is verified over [`CountOps`].
 pub trait CountsOf {
     type K: CountOps;
+}
+
+/// Forward iterator over all items in a single boolean-encoded slab.
+///
+/// Created by `BoolEncoding::decoder`.  Each run yields the same value
+/// in O(1) per item; advancing between runs reads one LEB128 count.
+///
+/// The decoding is verified with Verus (`BDec`): on a valid slab it
+/// yields the slab's values, a run at a time or one at a time; and so is
+/// what the column iterator does with it (`BoolReads`).
+pub struct BoolDecoder<'a, C = crate::Leb128> {
+    pub(crate) d: BDec<'a>,
+    pub(crate) _codec: PhantomData<C>,
+}
+
+/// Bool slabs' decoders as the column iterator sees them ([`Decoders`]),
+/// verified against the bool format: a slab is well-formed when
+/// `bslab_ok`, and holds the values its bytes encode.
+///
+/// Public only because `BoolEncoding<C>`'s `ColumnEncoding::ReadModel`
+/// names it; this module is not.
+pub struct BoolReads<C>(PhantomData<C>);
+
+impl<'a, C: CountsOf> Decode for BoolDecoder<'a, C> {
+    type Item = bool;
+
+    closed spec fn inv(&self) -> bool {
+        self.d.inv::<C::K>()
+    }
+
+    closed spec fn rest(&self) -> Seq<bool> {
+        bool_values::<C::K>(self.d.data()).skip(self.d.pos::<C::K>())
+    }
+
+    #[inline(always)]
+    fn d_next(&mut self) -> (r: Option<bool>) {
+        let ghost v = bool_values::<C::K>(self.d.data());
+        let ghost p = self.d.pos::<C::K>();
+        proof {
+            self.d.lemma_pos::<C::K>();
+        }
+        let r = self.d.next::<C::K>();
+        proof {
+            if r is Some {
+                assert(v.skip(p).skip(1) =~= v.skip(self.d.pos::<C::K>()));
+            }
+        }
+        r
+    }
+
+    #[inline(always)]
+    fn d_nth(&mut self, n: usize) -> (r: Option<bool>) {
+        let ghost v = bool_values::<C::K>(self.d.data());
+        let ghost p = self.d.pos::<C::K>();
+        proof {
+            self.d.lemma_pos::<C::K>();
+        }
+        let r = self.d.nth::<C::K>(n);
+        proof {
+            if n < v.skip(p).len() {
+                assert(v.skip(p).skip(n + 1) =~= v.skip(self.d.pos::<C::K>()));
+            }
+        }
+        r
+    }
+
+    #[inline(always)]
+    fn d_run_max(&mut self, max: usize) -> (r: Option<Run<bool>>) {
+        let ghost v = bool_values::<C::K>(self.d.data());
+        let ghost p = self.d.pos::<C::K>();
+        proof {
+            self.d.lemma_pos::<C::K>();
+        }
+        let r = self.d.next_run_max::<C::K>(max);
+        proof {
+            if let Some(run) = r {
+                assert(v.skip(p).take(run.count as int) =~= v.subrange(p, p + run.count));
+                assert(v.skip(p).skip(run.count as int) =~= v.skip(self.d.pos::<C::K>()));
+            }
+        }
+        r
+    }
+
+    #[inline(always)]
+    fn d_eq(a: &bool, b: &bool) -> (r: bool) {
+        *a == *b
+    }
+}
+
+/// The empty slab is valid, with no values.
+proof fn lemma_empty_valid<K: CountOps>()
+    ensures
+        bool_valid::<K>(Seq::<u8>::empty()),
+        bool_values::<K>(Seq::<u8>::empty()) == Seq::<bool>::empty(),
+{
+    let e = Seq::<u64>::empty();
+    assert(counts_bytes::<K>(e) =~= Seq::<u8>::empty());
+    lemma_counts::<K>(e, Seq::<u8>::empty());
+    assert(counts_values(e) =~= Seq::<bool>::empty());
+}
+
+impl<'a, C: CountsOf> Decoders<'a> for BoolReads<C> {
+    type Tail = u8;
+    type D = BoolDecoder<'a, C>;
+
+    closed spec fn ok(s: BSlab) -> bool {
+        bslab_ok::<C::K>(s)
+    }
+
+    closed spec fn vals(s: BSlab) -> Seq<bool> {
+        bool_values::<C::K>(s.data@)
+    }
+
+    #[inline(always)]
+    fn open(s: &'a BSlab) -> (d: BoolDecoder<'a, C>) {
+        proof {
+            reveal(bslab_bytes);
+        }
+        let d = BoolDecoder { d: BDec::new::<C::K>(s.data.as_slice()), _codec: PhantomData };
+        proof {
+            assert(bool_values::<C::K>(s.data@).skip(0) =~= bool_values::<C::K>(s.data@));
+        }
+        d
+    }
+
+    #[inline(always)]
+    fn none() -> (d: BoolDecoder<'a, C>) {
+        let empty: &'a [u8] = &[];
+        proof {
+            lemma_empty_valid::<C::K>();
+            assert(empty@ =~= Seq::<u8>::empty());
+        }
+        BoolDecoder { d: BDec::new::<C::K>(empty), _codec: PhantomData }
+    }
 }
 
 #[inline(always)]

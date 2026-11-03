@@ -38,11 +38,17 @@ verus! {
 pub(crate) trait Decode: Sized {
     type Item: Copy;
 
+    /// What the decoder keeps while reading.
+    spec fn inv(&self) -> bool;
+
     /// The values still to come.
     spec fn rest(&self) -> Seq<Self::Item>;
 
     fn d_next(&mut self) -> (r: Option<Self::Item>)
+        requires
+            old(self).inv(),
         ensures
+            final(self).inv(),
             match r {
                 Some(v) => old(self).rest().len() > 0 && v == old(self).rest()[0] && final(self).rest()
                     == old(self).rest().skip(1),
@@ -51,7 +57,10 @@ pub(crate) trait Decode: Sized {
     ;
 
     fn d_nth(&mut self, n: usize) -> (r: Option<Self::Item>)
+        requires
+            old(self).inv(),
         ensures
+            final(self).inv(),
             n < old(self).rest().len() ==> r == Some(old(self).rest()[n as int]) && final(self).rest()
                 == old(self).rest().skip(n + 1),
             n >= old(self).rest().len() ==> r is None && final(self).rest().len() == 0,
@@ -60,8 +69,10 @@ pub(crate) trait Decode: Sized {
     /// The next run of equal values, at most `max` of them.
     fn d_run_max(&mut self, max: usize) -> (r: Option<Run<Self::Item>>)
         requires
+            old(self).inv(),
             max >= 1,
         ensures
+            final(self).inv(),
             match r {
                 Some(run) => {
                     &&& 1 <= run.count <= max
@@ -88,17 +99,24 @@ pub(crate) trait Decoders<'a> {
 
     type D: Decode;
 
+    /// A slab is well-formed.
+    spec fn ok(s: Slab<Self::Tail>) -> bool;
+
     /// A slab's values.
     spec fn vals(s: Slab<Self::Tail>) -> Seq<<Self::D as Decode>::Item>;
 
     fn open(s: &'a Slab<Self::Tail>) -> (d: Self::D)
+        requires
+            Self::ok(*s),
         ensures
+            d.inv(),
             d.rest() == Self::vals(*s),
     ;
 
     /// A decoder with nothing to give.
     fn none() -> (d: Self::D)
         ensures
+            d.inv(),
             d.rest().len() == 0,
     ;
 }
@@ -119,9 +137,12 @@ pub(crate) open spec fn vals_of<'a, X: Decoders<'a>>(s: Seq<Slab<X::Tail>>) -> S
     concat(each::<X>(s))
 }
 
-/// Each slab holds as many values as it says.
+/// Each slab is well-formed and holds as many values as it says.
 pub(crate) open spec fn lens_ok<'a, X: Decoders<'a>>(s: Seq<Slab<X::Tail>>) -> bool {
-    forall|i: int| 0 <= i < s.len() ==> (#[trigger] X::vals(s[i])).len() == s[i].len
+    forall|i: int|
+        #![trigger X::vals(s[i])]
+        #![trigger X::ok(s[i])]
+        0 <= i < s.len() ==> X::ok(s[i]) && X::vals(s[i]).len() == s[i].len
 }
 
 /// The index's answer `r` for item `t`: the slab holding it and the
@@ -226,6 +247,7 @@ impl<D: Decode> ICore<D> {
         &&& total(slab_lens(s)) <= usize::MAX
         &&& s.len() < usize::MAX
         &&& self.pos + self.items_left <= usize::MAX
+        &&& self.decoder.inv()
         &&& si <= s.len()
         &&& si < s.len() ==> {
             &&& self.slab_remaining <= s[si].len
@@ -706,6 +728,7 @@ impl<D: Decode> ICore<D> {
     /// The next run of equal values in the window, at most `max`, merged
     /// across slab boundaries.
     #[allow(clippy::question_mark)] // `?` puts the merge loop's proof over its rlimit
+    #[verifier::rlimit(30)]
     pub(crate) fn next_run_max<'a, X: Decoders<'a, D = D>>(&mut self, slabs: &'a [Slab<X::Tail>], max: usize) -> (r: Option<Run<D::Item>>)
         requires
             old(self).wf::<X>(slabs@),
@@ -853,19 +876,23 @@ impl<D: Decode> ICore<D> {
 //
 // Outside `verus!`, so Verus takes them on trust; their spec items exist
 // only when Verus compiles the crate.  Each is a one-line forward to the
-// encoding's decoder — for RLE and bool columns, the verified decoders
-// (`rle::dec::Dec`, `bool_wire::BDec`) — and what is trusted is that those
-// meet the contracts above.
+// encoding's decoder — for RLE columns, the verified decoder
+// (`rle::dec::Dec`) — and what is trusted is that it meets the contracts
+// above.  (Bool columns' decoders are verified instead:
+// `bool_wire::BoolReads`.)
 
 use crate::encoding::{ColumnEncoding, RunDecoder};
+use crate::rle::RleDecoder;
+use crate::{Codec, ColumnValueRef, RleValue};
 use std::marker::PhantomData;
 
-impl<D> Decode for D
-where
-    D: RunDecoder,
-    D::Item: Copy + PartialEq,
-{
-    type Item = <D as Iterator>::Item;
+impl<'a, T: RleValue, C: Codec> Decode for RleDecoder<'a, T, C> {
+    type Item = <T as ColumnValueRef>::Get<'a>;
+
+    #[cfg(verus_keep_ghost)]
+    fn inv(&self) -> bool {
+        unimplemented!()
+    }
 
     #[cfg(verus_keep_ghost)]
     fn rest(&self) -> Seq<Self::Item> {
@@ -893,12 +920,18 @@ where
     }
 }
 
-/// An encoding's decoders, as [`Decoders`].
-pub(crate) struct DecodersOf<E>(PhantomData<fn() -> E>);
+/// An encoding's decoders, as [`Decoders`], trusted to meet it: RLE's
+/// `ColumnEncoding::ReadModel`.
+pub struct DecodersOf<E>(PhantomData<fn() -> E>);
 
 impl<'a, E: ColumnEncoding> Decoders<'a> for DecodersOf<E> {
     type Tail = E::Tail;
     type D = E::Decoder<'a>;
+
+    #[cfg(verus_keep_ghost)]
+    fn ok(_s: Slab<Self::Tail>) -> bool {
+        unimplemented!()
+    }
 
     #[cfg(verus_keep_ghost)]
     fn vals(_s: Slab<Self::Tail>) -> Seq<<Self::D as Decode>::Item> {

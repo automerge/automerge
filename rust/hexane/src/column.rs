@@ -10,7 +10,7 @@ use crate::btree::{FindByValue, FindByValueRange, SlabAgg, SlabBTree};
 use crate::edit::Edit;
 use crate::encoding::{ColumnEncoding, RunDecoder};
 use crate::index::ColumnIndex;
-use crate::iter_core::{DecodersOf, ICore};
+use crate::iter_core::ICore;
 use crate::PackError;
 use crate::{AsColumnRef, Codec, ColumnValueRef, Leb128, LoadOpts, MaybeFill, Run};
 
@@ -315,7 +315,7 @@ pub struct Iter<'a, T: ColumnValueRef, C: Codec = Leb128> {
 }
 
 /// The decoders an iterator over a `Column<T, C>` opens.
-type Dx<T, C> = DecodersOf<<T as ColumnValueRef>::Encoding<C>>;
+type Dx<T, C> = <<T as ColumnValueRef>::Encoding<C> as ColumnEncoding>::ReadModel;
 
 impl<T: ColumnValueRef, C: Codec> Default for Iter<'_, T, C> {
     fn default() -> Self {

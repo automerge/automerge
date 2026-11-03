@@ -12,6 +12,9 @@ use crate::{AsColumnRef, ColumnValueRef, Run};
 ///
 /// Both [`crate::rle::RleEncoding`] and [`crate::bool::BoolEncoding`]
 /// are zero-sized types — all state lives in the slab bytes.
+// `ReadModel`'s bound is the crate's own verified contract, which nothing
+// outside can name or implement — a seal
+#[allow(private_bounds)]
 pub trait ColumnEncoding: Default {
     /// The varint codec this encoding reads and writes with.
     type Codec: crate::Codec;
@@ -94,7 +97,19 @@ pub trait ColumnEncoding: Default {
     fn last_run(slab: &Slab<Self::Tail>) -> Option<Run<<Self::Value as ColumnValueRef>::Get<'_>>>;
 
     /// Decoder type for iterating over all items in a slab.
-    type Decoder<'a>: Iterator<Item = <Self::Value as ColumnValueRef>::Get<'a>> + RunDecoder + Clone;
+    type Decoder<'a>: Iterator<Item = <Self::Value as ColumnValueRef>::Get<'a>>
+        + RunDecoder
+        + Clone
+        + crate::iter_core::Decode<Item = <Self::Value as ColumnValueRef>::Get<'a>>;
+
+    /// The decoders as the verified column iterator sees them: what a slab
+    /// holds, and the decoder operations specified against it. The
+    /// iterator is proved for any model; an encoding's model is either
+    /// proved against its format (bool) or trusted to forward to
+    /// `Decoder` (RLE). An associated type rather than a blanket impl so
+    /// that each encoding can have its own.
+    #[doc(hidden)]
+    type ReadModel: for<'a> crate::iter_core::Decoders<'a, Tail = Self::Tail, D = Self::Decoder<'a>>;
 
     /// Create a decoder that yields all items in `slab` in order.
     fn decoder(slab: &[u8]) -> Self::Decoder<'_>;

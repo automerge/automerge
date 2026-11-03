@@ -71,18 +71,7 @@ pub(crate) fn splice_slab<C: Codec>(
 
 // ── BoolDecoder ──────────────────────────────────────────────────────────────
 
-/// Forward iterator over all items in a single boolean-encoded slab.
-///
-/// Created by [`BoolEncoding::decoder`].  Each run yields the same value
-/// in O(1) per item; advancing between runs reads one LEB128 count.
-///
-/// The decoding is verified with Verus (`BDec`):
-/// on a valid slab it yields the slab's values, a run at a time or one
-/// at a time.
-pub struct BoolDecoder<'a, C: Codec = Leb128> {
-    d: crate::bool_wire::BDec<'a>,
-    _codec: PhantomData<fn() -> C>,
-}
+pub use crate::bool_wire::BoolDecoder;
 
 impl<C: Codec> Clone for BoolDecoder<'_, C> {
     fn clone(&self) -> Self {
@@ -289,6 +278,7 @@ impl<C: Codec> ColumnEncoding for BoolEncoding<C> {
     }
 
     type Decoder<'a> = BoolDecoder<'a, C>;
+    type ReadModel = crate::bool_wire::BoolReads<C>;
 
     fn decoder(slab: &[u8]) -> BoolDecoder<'_, C> {
         BoolDecoder::new(slab)
