@@ -1,8 +1,8 @@
 //! Decoding a validated slab's values, verified with Verus.
 //!
-//! [`Dec`] walks the canonical encoding of a slab ([`valid_slab`]) and
-//! yields its values ([`slab_values`]) one at a time, a run at a time, or
-//! after skipping ahead; [`DecState`] is a position detached from the
+//! [`Dec`] walks the canonical encoding of a slab (`valid_slab`) and
+//! yields its values (`slab_values`) one at a time, a run at a time, or
+//! after skipping ahead; `DecState` is a position detached from the
 //! slab's bytes.  On a valid slab it never panics, and every value it
 //! yields is the model's value at its position.
 

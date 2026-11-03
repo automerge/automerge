@@ -76,7 +76,7 @@ pub(crate) fn splice_slab<C: Codec>(
 /// Created by [`BoolEncoding::decoder`].  Each run yields the same value
 /// in O(1) per item; advancing between runs reads one LEB128 count.
 ///
-/// The decoding is verified with Verus ([`BDec`](crate::bool_wire::BDec)):
+/// The decoding is verified with Verus (`BDec`):
 /// on a valid slab it yields the slab's values, a run at a time or one
 /// at a time.
 pub struct BoolDecoder<'a, C: Codec = Leb128> {

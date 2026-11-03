@@ -10,7 +10,7 @@
 //!   Null(n)     : signed(0)  unsigned(n)       n >= 1
 //! ```
 //!
-//! [`canonical`] picks out the one grouping of each value sequence a
+//! `canonical` picks out the one grouping of each value sequence a
 //! writer may produce: no two adjacent literals or null runs, no equal
 //! values side by side across a group boundary or inside a literal, and
 //! no repeat run shorter than two.  Load accepts exactly the canonical
@@ -18,7 +18,7 @@
 //!
 //! The value type and the varint codec come in through [`RleOps`].  Its
 //! implementation, [`Ops`], is trusted: it forwards to the column type's
-//! [`RleValue`](crate::RleValue) impl and the codec, and its contract is
+//! [`RleValue`] impl and the codec, and its contract is
 //! what those must satisfy — encodings are prefix-free and nonempty, and
 //! `==` on values is equality.
 

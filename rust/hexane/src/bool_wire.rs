@@ -1,8 +1,8 @@
 //! The boolean wire format, verified with Verus.
 //!
-//! A bool slab is a sequence of unsigned counts ([`counts_bytes`]), the
-//! lengths of alternating runs starting with `false` ([`counts_values`]).
-//! It is canonical ([`counts_ok`]) when only the first count is zero (so
+//! A bool slab is a sequence of unsigned counts (`counts_bytes`), the
+//! lengths of alternating runs starting with `false` (`counts_values`).
+//! It is canonical (`counts_ok`) when only the first count is zero (so
 //! that a slab can start with `true`) and the last is not.
 //!
 //! [`validate`] accepts exactly the canonical encodings of at most

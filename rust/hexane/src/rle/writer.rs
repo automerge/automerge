@@ -1,6 +1,6 @@
 //! The rebuild an edit drives, verified with Verus.
 //!
-//! A [`SpliceWriter`] re-encodes a region of one slab: it opens on the
+//! A `SpliceWriter` re-encodes a region of one slab: it opens on the
 //! writer state for the slab's values before the edit point, takes the
 //! values the edit carries through or inserts, and closes on the postfix
 //! (the run after the edit) and the slab's bytes after it. When the
@@ -8,7 +8,7 @@
 //! into new slabs. What [`finish`](Splice::finish) returns, written back
 //! by [`Rebuilt::apply`], leaves the edited slab and each new one the
 //! canonical encoding of its share of the values, which run on from one
-//! slab to the next ([`rebuilt_ok`]).
+//! slab to the next (`rebuilt_ok`).
 //!
 //! Only bytes and values are specified. The slabs' lengths, segment
 //! counts and tail records are computed as before, unspecified.
@@ -109,7 +109,7 @@ pub(crate) fn tail_lit_len(t: &RleTail) -> (b: usize)
 
 /// [`WPos::merge`], verified: the tail record of a slab of `prefix`
 /// bytes before the buffer, `middle` from it, and `postfix` carried
-/// after it whose old record is `tail` — [`tail_after`], whenever that
+/// after it whose old record is `tail` — `tail_after`, whenever that
 /// is a tail at all.
 #[inline]
 pub(crate) fn merge_tail(w: WPos, prefix: usize, middle: usize, postfix: usize, tail: &RleTail) -> (r: RleTail)

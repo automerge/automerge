@@ -75,9 +75,9 @@ const B: usize = 64;
 /// always walks children left-to-right.
 ///
 /// For verification, `merge` is also given as mathematics
-/// ([`spec_merge`](Self::spec_merge)), defined wherever
-/// [`merge_ok`](Self::merge_ok) holds (for fixed-width fields: no
-/// overflow), with [`spec_empty`](Self::spec_empty) as its identity.  The
+/// (`spec_merge`), defined wherever
+/// `merge_ok` holds (for fixed-width fields: no
+/// overflow), with `spec_empty` as its identity.  The
 /// `lemma_*` proof functions are the laws the tree relies on; each impl
 /// proves them.
 #[allow(clippy::len_without_is_empty)]
@@ -395,7 +395,7 @@ where
 /// (prefix lives in `.prefix`) and [`SlabAgg`] (prefix lives in `.total`).
 ///
 /// For verification, prefix addition is given as mathematics
-/// ([`prefix_plus`](Self::prefix_plus)) with laws tying it to `merge`.
+/// (`prefix_plus`) with laws tying it to `merge`.
 pub trait PrefixAggregate: SlabAggregate {
     /// `Ord` is not required here — only forward accumulation needs `Add`.
     /// The "find slab whose prefix reaches target" search is provided in a
@@ -1639,7 +1639,7 @@ impl<A: SlabAggregate> SlabBTree<A> {
     /// `new`.  On the way back up each level refreshes its cached slot,
     /// splits past B children and drops out when empty.  O(log n + k).
     ///
-    /// The caller guarantees the result is [`valid`] (for delta columns,
+    /// The caller guarantees the result is `valid` (for delta columns,
     /// the domain contract); every node goes straight to its final
     /// contents, so nothing else need be.
     pub(crate) fn splice_vec(&mut self, start: usize, end: usize, new: Vec<A>)

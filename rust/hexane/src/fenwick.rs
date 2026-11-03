@@ -3,8 +3,8 @@
 //!
 //! `bit[1..=n]` is the tree over the slab weights `w[0..n]`: node `i` holds
 //! the sum of `w[i - low(i) .. i]`, where `low(i)` is the lowest set bit of
-//! `i` ([`bit_ok`]).  `bit[0]` is unused.  Only the weights' item counts
-//! ([`SlabWeight::weight_len`]) are specified; the prefix-sum half of a
+//! `i` (`bit_ok`).  `bit[0]` is unused.  Only the weights' item counts
+//! (`SlabWeight::weight_len`) are specified; the prefix-sum half of a
 //! `PrefixSlabWeight` rides along unverified.
 //!
 //! [`build`] makes the tree, [`update`] changes one weight, [`prefix`] sums

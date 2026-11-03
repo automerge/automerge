@@ -2,7 +2,7 @@
 //!
 //! [`Reader`] walks the wire segments of untrusted bytes and rejects
 //! anything that is not the canonical encoding of some values
-//! ([`model::canonical`](super::model::canonical)) of at most
+//! (`model::canonical`) of at most
 //! `usize::MAX` values.
 //! It never panics or overflows.  Its contract is complete in both
 //! directions: what it accepts parses as canonical groups, and an error

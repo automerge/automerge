@@ -14,18 +14,18 @@
 //!
 //! The format is written as mathematics over unbounded integers:
 //!
-//! * [`spec_encode`] / [`spec_encode_signed`] — seven bits per byte, least
+//! * `spec_encode` / `spec_encode_signed` — seven bits per byte, least
 //!   significant first, high bit set on every byte but the last, stopping
 //!   as soon as the rest of the value fits in the final byte;
-//! * [`lemma_unique`] / [`lemma_unique_signed`]: two encodings that are
+//! * `lemma_unique` / `lemma_unique_signed`: two encodings that are
 //!   both prefixes of one byte string are the same value's, so a byte
 //!   string starts with at most one encoding.
 //!
 //! [`decode`] and [`decode_signed`] are proved to succeed exactly when the
 //! input starts with the encoding of some `u64` / `i64`, returning that
 //! value and length; every other input is an error. The encoders and
-//! length functions are proved to produce [`spec_encode`] /
-//! [`spec_encode_signed`] and their lengths.
+//! length functions are proved to produce `spec_encode` /
+//! `spec_encode_signed` and their lengths.
 //!
 //! Outside verification, `verus!` erases every spec and proof, leaving
 //! plain Rust. To re-check the proofs, run Verus on this file alone:

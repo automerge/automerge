@@ -9,7 +9,7 @@
 //! postfix in and flushes; the bytes it leaves, followed by the slab's
 //! bytes from the postfix's end, are the canonical encoding of the
 //! values written then the slab's values from the edit point on
-//! ([`joined`]).
+//! (`joined`).
 
 // Verus proofs read more plainly with `x = x + n`.
 #![allow(clippy::len_zero, clippy::assign_op_pattern)]
@@ -692,7 +692,7 @@ pub(crate) open spec fn comb(rw1: Option<RewriteHeader>, rw2: Option<RewriteHead
 }
 
 /// `a += b` on flush results: the segments add up, the rewrites combine
-/// as [`comb`], and the position is the later one's.
+/// as `comb`, and the position is the later one's.
 #[inline(always)]
 pub(crate) fn add_flush(a: &mut FlushState, b: FlushState)
     requires old(a).segments + b.segments <= usize::MAX,

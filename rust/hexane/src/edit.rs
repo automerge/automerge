@@ -118,7 +118,7 @@ pub(crate) const RUN_BUDGET: usize = 8;
 /// splices land in the slab the previous one just rebuilt.
 ///
 /// The cursor's state and every move it makes are verified with Verus
-/// ([`crate::cursor`]): each operation keeps the column well-formed and
+/// (`crate::cursor`): each operation keeps the column well-formed and
 /// does exactly what it says to its values, given the encodings' slab
 /// operations. This struct only pairs that state with the column.
 pub struct Edit<'a, T, C, WF, Idx>

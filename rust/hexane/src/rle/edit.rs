@@ -55,7 +55,7 @@ pub(crate) trait Visit<V> {
 }
 
 /// A rebuild in progress within one slab, verified with Verus: the
-/// values written so far ([`vals`](Edit::vals)), and how far the slab
+/// values written so far (`vals`), and how far the slab
 /// has been read ([`read`](Edit::read)). Closing it leaves the slab, and
 /// any it spills into, the canonical encoding of the values written then
 /// the slab's from where reading stopped.
@@ -489,7 +489,7 @@ impl<V, F: FnMut(V, usize)> Visit<V> for F {
 /// A rebuild in progress within one slab.
 ///
 /// Positions are item offsets into the slab as it was when the edit
-/// opened. The verified core is [`Edit`]; this drives it with the
+/// opened. The verified core is `Edit`; this drives it with the
 /// slab's bytes, and keeps the slab metadata.
 pub struct RleEdit<T: RleValue, C: Codec> {
     e: Edit<WOps<'static, T, T, C>>,

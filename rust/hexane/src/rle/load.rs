@@ -44,7 +44,7 @@ pub(crate) fn rle_validate_encoding<T: RleValue, C: Codec>(
 /// "adjacent runs never carry equal values" contract by construction. All
 /// methods return `Result` — the bytes are untrusted.
 ///
-/// The reading, checking and cutting ([`Load`]) are verified with Verus:
+/// The reading, checking and cutting (`Load`) are verified with Verus:
 /// a finished load's slabs are each a canonical encoding with their
 /// recorded length, segment count and tail, and together hold the
 /// input's values in order. After an error, the iterator must not be
@@ -70,7 +70,7 @@ impl<'a, T: RleValue, C: Codec> RleLoadIter<'a, T, C> {
 
     /// The next canonical run, or `None` at end of input. Non-canonical
     /// structure — anything a canonical encoder would have merged or
-    /// never emitted — is a load error (the [`Reader`](read::Reader)'s),
+    /// never emitted — is a load error (the `Reader`'s),
     /// so the run stream keeps the "adjacent runs never carry equal
     /// values" contract by construction, and every run is exactly one
     /// wire segment.

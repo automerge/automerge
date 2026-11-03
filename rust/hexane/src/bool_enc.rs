@@ -1,7 +1,7 @@
 //! The bool column encoder's state, verified with Verus.
 //!
 //! [`BEnc`] writes alternating run counts into a caller's buffer: every
-//! count it writes is in [`BEnc::written`], and the values appended are
+//! count it writes is in `BEnc::written`, and the values appended are
 //! the values those counts and the pending run stand for. Encoding
 //! without a `finish` in the middle ([`BEnc::clean`]) gives a canonical
 //! bool slab once finished.

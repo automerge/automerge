@@ -4,7 +4,7 @@
 //! kept as bytes, values are carried through or inserted, and the slab's
 //! tail after the reader is carried as bytes again. The writer's state is
 //! one pending run (`cur_value`, `cur_count`) after the counts of the
-//! chunk in hand ([`BEdit::chunk`]); a chunk that reaches its segment
+//! chunk in hand (`BEdit::chunk`); a chunk that reaches its segment
 //! target is cut into a slab of its own.
 
 // Verus proofs read more plainly with `x = x + n`.

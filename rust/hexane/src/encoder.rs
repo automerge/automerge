@@ -498,7 +498,7 @@ type Counts<C> = crate::bool_wire::Counts<C>;
 /// State half of [`BoolEncoder`] — owns the run bookkeeping but **not**
 /// the output buffer.  Every mutating method takes a `&mut Vec<u8>`.
 ///
-/// Verified with Verus ([`BEnc`](crate::bool_enc::BEnc)): the counts it
+/// Verified with Verus (`BEnc`): the counts it
 /// writes stand for the values appended, and finished without a
 /// `finish` in the middle they are a canonical bool slab.
 pub struct BoolEncoderState<C: Codec = Leb128> {
@@ -574,7 +574,7 @@ impl<C: Codec> BoolEncoderState<C> {
 /// [`into_column`](crate::encoding::EncoderApi::into_column) path.
 ///
 /// The encoding and the slab rollover are verified with Verus
-/// ([`BEncoder`](crate::bool_enc::BEncoder)): every slab is a canonical
+/// (`BEncoder`): every slab is a canonical
 /// bool slab with its metadata, and together they hold the values
 /// appended.
 pub struct BoolEncoder<C: Codec = Leb128> {

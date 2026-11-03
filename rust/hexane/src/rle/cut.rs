@@ -7,10 +7,10 @@
 //! gets a header of its own, and the piece before it has its header
 //! rewritten to its own count.
 //!
-//! [`Cut`] is that bookkeeping. Its invariant ([`Cut::ok`]) describes
-//! the slab being cut as groups ([`sgroups`]) of what the reader has
+//! [`Cut`] is that bookkeeping. Its invariant (`Cut::ok`) describes
+//! the slab being cut as groups (`sgroups`) of what the reader has
 //! read since the last cut: the rest of a literal the cut split
-//! ([`piece`]), the groups read whole ([`mid`]), and a literal still
+//! (`piece`), the groups read whole (`mid`), and a literal still
 //! being read. Each cut slab is then the canonical encoding of the
 //! values between two cuts, with its length, segment count and tail
 //! record.
