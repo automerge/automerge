@@ -1347,6 +1347,8 @@ impl<'a> BDec<'a> {
                     && old(self).pos::<K>() + run.count <= bool_values::<K>(old(self).data()).len()
                     && bool_values::<K>(old(self).data()).subrange(old(self).pos::<K>(), old(self).pos::<K>() + run.count)
                         == Seq::new(run.count as nat, |_j: int| run.value)
+                    && (run.count < max && old(self).pos::<K>() + run.count < bool_values::<K>(old(self).data()).len()
+                        ==> bool_values::<K>(old(self).data())[old(self).pos::<K>() + run.count] != run.value)
                     && final(self).pos::<K>() == old(self).pos::<K>() + run.count
                     && (old(self).state().remaining > 0 ==> final(self).k::<K>() == old(self).k::<K>()
                         && final(self).state().remaining == old(self).state().remaining - run.count)
@@ -1387,6 +1389,9 @@ impl<'a> BDec<'a> {
                         assert(vs.subrange(p0, p0 + count)[j] == vs[p0 + j]);
                     }
                     assert(vs.subrange(p0, p0 + count) =~= Seq::new(count as nat, |_j: int| value));
+                    if count < max && p0 + count < vs.len() {
+                        self.lemma_next_flips::<K>();
+                    }
                 }
                 return Some(crate::Run { count, value });
             }
@@ -1429,6 +1434,43 @@ impl<'a> BDec<'a> {
         } else {
             self.lemma_end::<K>();
         }
+    }
+
+    /// A run spent short of the slab's end: the next value is the other
+    /// one, as runs alternate and only the first may be empty.
+    proof fn lemma_next_flips<K: CountOps>(&self)
+        requires
+            self.inv::<K>(),
+            self.state().remaining == 0,
+            self.k::<K>() >= 1,
+            self.pos::<K>() < bool_values::<K>(self.data()).len(),
+        ensures
+            bool_values::<K>(self.data())[self.pos::<K>()] != self.state().value,
+    {
+        let data = self.data@;
+        let cs = bool_counts::<K>(data);
+        let k = bstate_k::<K>(data, self.st);
+        lemma_counts::<K>(cs, data);
+        self.lemma_end::<K>();
+        assert(k < cs.len()) by {
+            if k == cs.len() {
+                assert(cs.take(k) =~= cs);
+            }
+        }
+        lemma_take_bytes_le::<K>(cs, k + 1);
+        lemma_count_le(cs, k);
+        lemma_values_len(cs);
+        let st2 = BoolDecoderState {
+            byte_pos: counts_bytes::<K>(cs.take(k + 1)).len() as usize,
+            remaining: cs[k] as usize,
+            value: !self.st.value,
+        };
+        assert(dstate_at::<K>(cs, st2, k + 1));
+        let d2 = BDec { data: self.data, st: st2 };
+        assert(d2.inv::<K>());
+        lemma_k_unique::<K>(cs, st2, bstate_k::<K>(data, st2), k + 1);
+        assert(cs.take(k + 1).drop_last() =~= cs.take(k));
+        d2.lemma_value::<K>();
     }
 
     /// The value the decoder stands at, while a run is in hand.

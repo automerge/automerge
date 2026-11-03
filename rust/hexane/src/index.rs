@@ -124,6 +124,15 @@ pub trait IndexOps<W>: Sized {
             r.0 == self.ws().len() ==> at >= total(self.ws().map_values(|w: W| Self::wlen(w))),
     ;
 
+    /// The items in the slabs before slab `i`.
+    fn ix_before(&self, i: usize) -> (n: usize)
+        requires
+            self.ok(),
+            i <= self.ws().len(),
+        ensures
+            n == sum(self.ws().map_values(|w: W| Self::wlen(w)), 0, i as int),
+    ;
+
     /// Replace slab `i`'s weight.
     fn ix_set(&mut self, i: usize, w: W)
         requires
@@ -334,6 +343,13 @@ impl<W: SlabWeight> IndexOps<W> for BitIndex<W> {
         self.find(at)
     }
 
+    fn ix_before(&self, i: usize) -> usize {
+        proof {
+            assert(self.weights@.map_values(|w: W| Self::wlen(w)) =~= self.counts());
+        }
+        self.before(i)
+    }
+
     fn ix_set(&mut self, i: usize, w: W) {
         proof {
             assert(lens(self.weights@.update(i as int, w)) =~= self.counts().update(i as int, w.weight_len()));
@@ -411,6 +427,14 @@ impl<A: SlabAggregate> IndexOps<A> for SlabBTree<A> {
                 (self.len(), 0)
             },
         }
+    }
+
+    fn ix_before(&self, i: usize) -> usize {
+        proof {
+            lemma_sum_len_wlens(self@, i as int);
+            assert(self@.map_values(|w: A| Self::wlen(w)) =~= alens(self@));
+        }
+        self.items_before_slab(i)
     }
 
     fn ix_set(&mut self, i: usize, w: A) {

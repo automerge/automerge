@@ -84,6 +84,64 @@ pub(crate) proof fn lemma_groups_values_concat<V>(a: Seq<Group<V>>, b: Seq<Group
     }
 }
 
+/// Across a group boundary the value changes: canonical groups never put
+/// two equal values side by side there.
+pub(crate) proof fn lemma_boundary<'a, O: RleOps<'a>>(data: Seq<u8>, i: int)
+    requires
+        valid_slab::<O>(data),
+        0 < i < slab_groups::<O>(data).len(),
+    ensures ({
+        let vs = slab_values::<O>(data);
+        let gs = slab_groups::<O>(data);
+        &&& 0 < gl(gs, i) < vs.len()
+        &&& vs[gl(gs, i) - 1] != vs[gl(gs, i)]
+    }),
+{
+    let gs = slab_groups::<O>(data);
+    let vs = slab_values::<O>(data);
+    lemma_slab_group::<O>(data, i);
+    lemma_slab_group::<O>(data, i - 1);
+    lemma_group_at::<O>(gs, i);
+    lemma_group_at::<O>(gs, i - 1);
+    let a = gs[i - 1];
+    let b = gs[i];
+    lemma_group_values_len(a, O::null());
+    lemma_group_values_len(b, O::null());
+    let la = group_values(a, O::null());
+    let lb = group_values(b, O::null());
+    assert(vs[gl(gs, i)] == lb[0]);
+    assert(vs[gl(gs, i) - 1] == la[la.len() - 1]);
+    match a {
+        Group::Run { count: _, value: x } => {
+            match b {
+                Group::Null { count: _ } => {
+                    O::axiom_null(x);
+                },
+                _ => {},
+            }
+        },
+        Group::Lit { values } => {
+            match b {
+                Group::Null { count: _ } => {
+                    O::axiom_null(values.last());
+                },
+                _ => {},
+            }
+        },
+        Group::Null { count: _ } => {
+            match b {
+                Group::Run { count: _, value: y } => {
+                    O::axiom_null(y);
+                },
+                Group::Lit { values } => {
+                    O::axiom_null(values[0]);
+                },
+                _ => {},
+            }
+        },
+    }
+}
+
 /// Where group `i`'s values and bytes sit among all of them.
 pub(crate) proof fn lemma_group_at<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>, i: int)
     requires 0 <= i < gs.len(),
@@ -676,6 +734,8 @@ impl<'a, O: RleOps<'a>> Dec<'a, O> {
                     &&& 1 <= count <= max
                     &&& final(self).pos() == old(self).pos() + count <= old(self).values().len()
                     &&& forall|k: int| old(self).pos() <= k < final(self).pos() ==> old(self).values()[k] == value
+                    &&& count < max && final(self).pos() < old(self).values().len()
+                        ==> old(self).values()[final(self).pos()] != value
                     &&& final(self).dsegs() == old(self).dsegs()
                         + (if final(self).lit_now() || final(self).left_now() == 0 { 1int } else { 0int })
                 },
@@ -710,6 +770,82 @@ impl<'a, O: RleOps<'a>> Dec<'a, O> {
     /// returns them.
     #[inline(always)]
     #[verifier::spinoff_prover]
+    /// A repeat or null run taken to its end, short of `max`: the value
+    /// after it differs.
+    proof fn lemma_run_ends(&self, p0: int, count: usize, max: usize, value: O::V)
+        requires
+            self.inv(),
+            self.pos() == p0 + count,
+            p0 + count <= self.values().len(),
+            count >= 1,
+            forall|k: int| p0 <= k < p0 + count ==> self.values()[k] == value,
+            count < max ==> self.remaining == 0,
+            self.state is Repeat || self.state is Null,
+        ensures
+            count < max && self.pos() < self.values().len() ==> self.values()[self.pos()] != value,
+    {
+        let gs = slab_groups::<O>(self.data@);
+        let gi = self.gi@;
+        if count < max && self.pos() < self.values().len() {
+            lemma_slab::<O>(self.data@);
+            assert(gl(gs, gs.len() as int) == groups_len(gs)) by {
+                assert(gs.take(gs.len() as int) =~= gs);
+            }
+            lemma_groups_values_concat(gs, Seq::empty(), O::null());
+            assert(gi < gs.len()) by {
+                if gi == gs.len() {
+                    assert(self.pos() == gl(gs, gs.len() as int));
+                }
+            }
+            lemma_boundary::<O>(self.data@, gi);
+            assert(self.values()[self.pos() - 1] == value);
+        }
+    }
+
+    /// A literal value taken: the value after it differs.
+    proof fn lemma_lit_ends(&self, p0: int, r0: usize, max: usize, value: O::V)
+        requires
+            self.inv(),
+            self.state is Literal,
+            self.pos() == p0 + 1,
+            self.remaining == r0 - 1,
+            r0 >= 1,
+            r0 <= group_len(slab_groups::<O>(self.data@)[self.gi@ - 1]),
+            p0 < self.values().len(),
+            value == self.values()[p0],
+        ensures
+            1 < max && self.pos() < self.values().len() ==> self.values()[self.pos()] != value,
+    {
+        let data = self.data@;
+        let gs = slab_groups::<O>(data);
+        let gi = self.gi@;
+        if 1 < max && self.pos() < self.values().len() {
+            lemma_slab_group::<O>(data, gi - 1);
+            if self.remaining > 0 {
+                // both values are the literal's, and a literal's neighbours differ
+                lemma_group_at::<O>(gs, gi - 1);
+                let g = gs[gi - 1];
+                let lv = g->values;
+                let j = p0 - gl(gs, gi - 1);
+                assert(0 <= j && j + 1 < lv.len());
+                assert(self.values()[p0] == lv[j]);
+                assert(self.values()[p0 + 1] == lv[j + 1]);
+            } else {
+                lemma_slab::<O>(data);
+                assert(gl(gs, gs.len() as int) == groups_len(gs)) by {
+                    assert(gs.take(gs.len() as int) =~= gs);
+                }
+                lemma_groups_values_concat(gs, Seq::empty(), O::null());
+                assert(gi < gs.len()) by {
+                    if gi == gs.len() {
+                        assert(self.pos() == gl(gs, gs.len() as int));
+                    }
+                }
+                lemma_boundary::<O>(data, gi);
+            }
+        }
+    }
+
     fn take_run(&mut self, max: usize) -> (r: Option<crate::Run<O::V>>)
         requires old(self).inv(), old(self).remaining > 0, max > 0,
         ensures
@@ -721,6 +857,8 @@ impl<'a, O: RleOps<'a>> Dec<'a, O> {
                     &&& 1 <= count <= max
                     &&& final(self).pos() == old(self).pos() + count <= old(self).values().len()
                     &&& forall|k: int| old(self).pos() <= k < final(self).pos() ==> old(self).values()[k] == value
+                    &&& count < max && final(self).pos() < old(self).values().len()
+                        ==> old(self).values()[final(self).pos()] != value
                     &&& final(self).dsegs() == old(self).dsegs()
                         + (if final(self).lit_now() || final(self).left_now() == 0 { 1int } else { 0int })
                 },
@@ -747,10 +885,21 @@ impl<'a, O: RleOps<'a>> Dec<'a, O> {
                         assert(group_values(g, O::null())[j] == value);
                     }
                     self.lemma_pos();
+                    self.lemma_run_ends(p0, count, max, value);
                 }
                 Some(crate::Run { count, value })
             },
-            RunState::Literal => Some(crate::Run { count: 1, value: self.take_lit() }),
+            RunState::Literal => {
+                let ghost r0 = self.remaining;
+                proof {
+                    assert(r0 <= group_len(gs[gi - 1]));
+                }
+                let value = self.take_lit();
+                proof {
+                    self.lemma_lit_ends(p0, r0, max, value);
+                }
+                Some(crate::Run { count: 1, value })
+            },
             RunState::Null => {
                 let value = O::get_null();
                 let count = if self.remaining < max { self.remaining } else { max };
@@ -761,6 +910,7 @@ impl<'a, O: RleOps<'a>> Dec<'a, O> {
                         assert(group_values(g, O::null())[j] == value);
                     }
                     self.lemma_pos();
+                    self.lemma_run_ends(p0, count, max, value);
                 }
                 Some(crate::Run { count, value })
             },

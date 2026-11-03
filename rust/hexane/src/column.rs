@@ -1,6 +1,5 @@
 use crate::btree::SlabAggregate;
 use crate::sealed::Sealed;
-use std::cmp::Ordering;
 use std::marker::PhantomData;
 use std::ops::{AddAssign, Range, SubAssign};
 #[allow(unused_imports)]
@@ -10,7 +9,7 @@ use crate::btree::{FindByValue, FindByValueRange, SlabAgg, SlabBTree};
 use crate::edit::Edit;
 use crate::encoding::{ColumnEncoding, RunDecoder};
 use crate::index::ColumnIndex;
-use crate::iter_core::ICore;
+use crate::iter_core::{Cmp, ICore};
 use crate::PackError;
 use crate::{AsColumnRef, Codec, ColumnValueRef, Leb128, LoadOpts, MaybeFill, Run};
 
@@ -275,7 +274,6 @@ pub(crate) fn splice_bytes(vec: &mut Vec<u8>, index: usize, del: usize, bytes: &
 /// slab lookups, independent of the column's `WF` / `Idx` parameters.
 pub(crate) trait ColumnRef<T: ColumnValueRef> {
     fn find_slab(&self, index: usize) -> (usize, usize);
-    fn slab_data(&self, index: usize) -> &[u8];
     fn slab_start(&self, index: usize) -> usize;
 }
 
@@ -293,10 +291,6 @@ where
 
     fn slab_start(&self, index: usize) -> usize {
         self.slab_start(index)
-    }
-
-    fn slab_data(&self, index: usize) -> &[u8] {
-        &self.slabs[index].data
     }
 }
 
@@ -767,72 +761,17 @@ impl<'a, T: ColumnValueRef, C: Codec> Iter<'a, T, C> {
     where
         for<'x> T::Get<'x>: Ord,
     {
-        let col = self.col.unwrap();
-        let start = self.pos();
-        let end = self.end_pos();
-
-        let first_run = match self.next_run() {
-            Some(r) => r,
-            None => return start..start,
-        };
-        let si_start = self.get_slab();
-
+        let col = self.col;
         // the column's values and the caller's target have unrelated
         // borrow lifetimes; shorten both to compare
-        match T::shorten(&first_run.value).cmp(&T::shorten(&target)) {
-            Ordering::Equal => {
-                assert!(start + first_run.count <= end);
-                start..start + first_run.count
-            }
-            Ordering::Greater => start..start,
-            Ordering::Less => {
-                let (si_end, _) = col.find_slab(end - 1);
-                // a window running past the column's end lands one past
-                // the last slab; search only the slabs there are
-                let si_end = si_end.min(self.slabs.len() - 1);
-
-                // Binary search slabs si_start+1..=si_end by first element.
-                let mut lo = si_start + 1;
-                let mut hi = si_end + 1;
-                let mut candidate = None;
-
-                while lo < hi {
-                    let mid = lo + (hi - lo) / 2;
-                    let mut dec = T::Encoding::<C>::decoder(col.slab_data(mid));
-                    let head = dec.next_run().unwrap();
-                    match T::shorten(&head.value).cmp(&T::shorten(&target)) {
-                        Ordering::Less => {
-                            candidate = Some(mid);
-                            lo = mid + 1;
-                        }
-                        // there is a possible optimization here where
-                        // if equal we can call tail(previous_slab)
-                        // but is tricky bc if it has 1 segment we may need to
-                        // keep stepping back
-                        Ordering::Greater | Ordering::Equal => hi = mid,
-                    }
-                }
-
-                // `candidate` is the last slab whose first element < target.
-                // The target (if present) is at the end of this slab.
-                if let Some(i) = candidate {
-                    let pos = col.slab_start(i);
-                    self.advance_to(pos);
-                };
-
-                let mut pos = self.pos();
-                while let Some(run) = self.next_run() {
-                    match T::shorten(&run.value).cmp(&T::shorten(&target)) {
-                        Ordering::Less => {
-                            pos += run.count;
-                        }
-                        Ordering::Greater => return pos..pos,
-                        Ordering::Equal => return pos..pos + run.count,
-                    }
-                }
-                pos..pos
-            }
-        }
+        let probe = Cmp(|v: &T::Get<'a>| T::shorten(v).cmp(&T::shorten(&target)));
+        let (start, end) = self.core.seek_value::<Dx<T, C>, _, _, _>(
+            self.slabs,
+            &probe,
+            &|t: usize| col.unwrap().find_slab(t),
+            &|i: usize| col.unwrap().slab_start(i),
+        );
+        start..end
     }
 }
 
@@ -1306,7 +1245,8 @@ where
     /// Sum of slab lengths over `0..si`.  O(log S) via the index — used by
     /// `scope_to_value`'s slab binary search.
     fn slab_start(&self, si: usize) -> usize {
-        self.index.items_before(si)
+        // verified (`IndexOps::ix_before`); the value search relies on it
+        self.index.ix_before(si)
     }
 
     /// Narrow a range to the contiguous run of items matching `value`.

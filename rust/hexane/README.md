@@ -285,13 +285,19 @@ compiles them away. To check them, run `cargo verus verify -p hexane
   formats: every read yields exactly the column's values in the window,
   and every edit leaves canonical slabs, with correct metadata, holding
   exactly the intended values.
+* The value search of `Column` and its iterator (`scope_to_value`,
+  `seek_to_value`): where the values in the window are sorted, it returns
+  exactly the range of them equal to the target, or, if there are none,
+  the empty range where the target would go. Unsorted, it returns some
+  range inside the window.
 * `RawColumn`.
 
 **Trusted, not proved:** each value type's and codec's own encode and
 decode, which the verified code reaches through traits; the thin glue that
 connects the generic column types to the verified cores, and the closures
-and slab weights passed through it; and that a newly built column satisfies
-the invariant the cursor and iterator assume.
+and slab weights passed through it; that each value type's `Ord` agrees
+with its `==`; and that a newly built column satisfies the invariant the
+cursor and iterator assume.
 
 **Known limitations:**
 

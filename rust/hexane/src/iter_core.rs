@@ -7,6 +7,12 @@
 //! and each operation is proved to give exactly the values left in the
 //! window (`out`), in order — past the end of the column there are none.
 //!
+//! The value search (`seek_value`) is proved against the same model: if
+//! the window is sorted, as a comparison with the target sees it
+//! (`Probe`, `monotone`), the range it returns is exactly the values at
+//! the target (`found`).  The comparison is the value type's `Ord`
+//! (`Cmp`), trusted to agree with `==`.
+//!
 //! The slab decoders are the encodings' own, through each encoding's
 //! decoder model (`Decode`, `Decoders`, named by
 //! `ColumnEncoding::ReadModel`), which is verified against its format:
@@ -84,6 +90,9 @@ pub(crate) trait Decode: Sized {
                         |_i: int| run.value,
                     )
                     &&& final(self).rest() == old(self).rest().skip(run.count as int)
+                    // maximal, short of `max`: the next value differs
+                    &&& run.count < max && run.count < old(self).rest().len()
+                        ==> old(self).rest()[run.count as int] != run.value
                 },
                 None => old(self).rest().len() == 0 && final(self).rest() == old(self).rest(),
             },
@@ -121,6 +130,149 @@ pub(crate) trait Decoders<'a> {
             d.inv(),
             d.rest().len() == 0,
     ;
+}
+
+// ── Searching ──────────────────────────────────────────────────────────────
+
+/// Where a value lies against a search target.
+pub(crate) enum Side {
+    Below,
+    At,
+    Above,
+}
+
+/// A search target, as values compare to it (trusted: the value type's
+/// `Ord`, which agrees with `==`).
+pub(crate) trait Probe<V> {
+    /// Below the target (negative), at it (0), or above it (positive).
+    spec fn side(&self, v: V) -> int;
+
+    /// The values at the target are one value.
+    proof fn axiom_at(&self, a: V, b: V)
+        requires
+            self.side(a) == 0,
+            self.side(b) == 0,
+        ensures
+            a == b,
+    ;
+
+    fn side_of(&self, v: &V) -> (r: Side)
+        ensures
+            (r is Below) == (self.side(*v) < 0),
+            (r is At) == (self.side(*v) == 0),
+            (r is Above) == (self.side(*v) > 0),
+    ;
+}
+
+/// Sorted, as the probe sees them: the values' sides never go down.
+pub(crate) open spec fn monotone<V, P: Probe<V>>(p: P, w: Seq<V>) -> bool {
+    forall|i: int, j: int| 0 <= i <= j < w.len() ==> #[trigger] p.side(w[i]) <= #[trigger] p.side(w[j])
+}
+
+/// The probe a search runs with: a comparison of each value against the
+/// target (`v.cmp(&target)`).
+pub(crate) struct Cmp<F>(pub(crate) F);
+
+/// Where `c` puts `v` against its target: the comparison is pure, so this
+/// is a function.
+pub(crate) uninterp spec fn cmp_side<V, F>(c: Cmp<F>, v: V) -> int;
+
+impl<V, F: Fn(&V) -> core::cmp::Ordering> Probe<V> for Cmp<F> {
+    closed spec fn side(&self, v: V) -> int {
+        cmp_side(*self, v)
+    }
+
+    // trusted: the value type's `Ord` agrees with `==`
+    #[verifier::external_body]
+    proof fn axiom_at(&self, a: V, b: V) {
+    }
+
+    // trusted: the comparison is pure
+    #[verifier::external_body]
+    #[inline(always)]
+    fn side_of(&self, v: &V) -> Side {
+        match (self.0)(v) {
+            core::cmp::Ordering::Less => Side::Below,
+            core::cmp::Ordering::Equal => Side::At,
+            core::cmp::Ordering::Greater => Side::Above,
+        }
+    }
+}
+
+/// What a search finds: the values before `a` are below the target,
+/// those from `a` to `b` at it, and the rest above it.
+pub(crate) open spec fn found<V, P: Probe<V>>(p: P, w: Seq<V>, a: int, b: int) -> bool {
+    forall|k: int| #![trigger w[k]] 0 <= k < w.len() ==> {
+        &&& (k < a) == (p.side(w[k]) < 0)
+        &&& (k < b) == (p.side(w[k]) <= 0)
+    }
+}
+
+/// Below the target up to `a`, then a maximal run at it: found.
+proof fn lemma_found_at<V, P: Probe<V>>(p: P, w: Seq<V>, a: int, c: int)
+    requires
+        monotone(p, w),
+        0 <= a,
+        1 <= c,
+        a + c <= w.len(),
+        forall|k: int| 0 <= k < a ==> p.side(#[trigger] w[k]) < 0,
+        forall|k: int| a <= k < a + c ==> #[trigger] w[k] == w[a],
+        p.side(w[a]) == 0,
+        a + c < w.len() ==> w[a + c] != w[a],
+    ensures
+        found(p, w, a, a + c),
+{
+    if a + c < w.len() {
+        assert(p.side(w[a]) <= p.side(w[a + c]));
+        if p.side(w[a + c]) == 0 {
+            p.axiom_at(w[a + c], w[a]);
+        }
+    }
+    assert forall|k: int| #![trigger w[k]] 0 <= k < w.len() implies {
+        &&& (k < a) == (p.side(w[k]) < 0)
+        &&& (k < a + c) == (p.side(w[k]) <= 0)
+    } by {
+        if a + c <= k {
+            assert(p.side(w[a + c]) <= p.side(w[k]));
+        }
+    }
+}
+
+/// Below the target up to `a`, then above it: found, empty, at `a`.
+proof fn lemma_found_above<V, P: Probe<V>>(p: P, w: Seq<V>, a: int)
+    requires
+        monotone(p, w),
+        0 <= a <= w.len(),
+        forall|k: int| 0 <= k < a ==> p.side(#[trigger] w[k]) < 0,
+        a < w.len() ==> p.side(w[a]) > 0,
+    ensures
+        found(p, w, a, a),
+{
+    assert forall|k: int| #![trigger w[k]] 0 <= k < w.len() implies {
+        &&& (k < a) == (p.side(w[k]) < 0)
+        &&& (k < a) == (p.side(w[k]) <= 0)
+    } by {
+        if a <= k {
+            assert(p.side(w[a]) <= p.side(w[k]));
+        }
+    }
+}
+
+/// A slab's first value is the column's at the slab's start.
+proof fn lemma_head<'a, X: Decoders<'a>>(s: Seq<Slab<X::Tail>>, k: int)
+    requires
+        lens_ok::<X>(s),
+        0 <= k < s.len(),
+        s[k].len > 0,
+    ensures
+        sum(slab_lens(s), 0, k) < total(slab_lens(s)),
+        vals_of::<X>(s)[sum(slab_lens(s), 0, k) as int] == X::vals(s[k])[0],
+{
+    lemma_from::<X>(s, k, 0);
+    let v = vals_of::<X>(s);
+    let a = sum(slab_lens(s), 0, k) as int;
+    assert(X::vals(s[k]).skip(0) =~= X::vals(s[k]));
+    assert(v.skip(a)[0] == v[a]);
 }
 
 // ── The column model ───────────────────────────────────────────────────────
@@ -302,6 +454,31 @@ impl<D: Decode> ICore<D> {
                 assert(each::<X>(s) =~= Seq::<Seq<D::Item>>::empty());
                 assert(slab_lens(s) =~= Seq::<nat>::empty());
             }
+        }
+    }
+
+    /// With no items left in the window, nothing is left.
+    proof fn lemma_none_left<'a, X: Decoders<'a, D = D>>(&self, s: Seq<Slab<X::Tail>>)
+        requires
+            self.items_left == 0,
+        ensures
+            self.out::<X>(s).len() == 0,
+    {
+    }
+
+    /// At the end of the last slab: nothing is left.
+    proof fn lemma_end_out<'a, X: Decoders<'a, D = D>>(&self, s: Seq<Slab<X::Tail>>)
+        requires
+            self.wf::<X>(s),
+            self.slab_remaining == 0,
+            self.slab_idx + 1 >= s.len(),
+        ensures
+            self.out::<X>(s).len() == 0,
+    {
+        self.lemma_here::<X>(s);
+        if self.slab_idx < s.len() {
+            assert(s.skip(self.slab_idx + 1) =~= Seq::<Slab<X::Tail>>::empty());
+            assert(each::<X>(s.skip(self.slab_idx + 1)) =~= Seq::<Seq<D::Item>>::empty());
         }
     }
 
@@ -644,6 +821,9 @@ impl<D: Decode> ICore<D> {
                     &&& final(self).out::<X>(slabs@) == o.skip(run.count as int)
                     &&& final(self).pos == old(self).pos + run.count
                     &&& final(self).items_left == old(self).items_left - run.count
+                    // maximal, unless cut by `max` or the slab's end
+                    &&& run.count < max && run.count < o.len() && final(self).slab_remaining > 0
+                        ==> o[run.count as int] != run.value
                 },
                 None => old(self).out::<X>(slabs@).len() == 0 && final(self).out::<X>(slabs@).len() == 0,
             },
@@ -696,6 +876,10 @@ impl<D: Decode> ICore<D> {
                             }
                         }
                         assert(self.out::<X>(s) =~= o.skip(count as int));
+                        if count < max && count < o.len() && self.slab_remaining > 0 {
+                            assert(o[count as int] == vv[c0.pos + count]);
+                            assert(vv[c0.pos + count] == vv.skip(c0.pos as int)[count as int]);
+                        }
                     }
                     return Some(run);
                 }
@@ -727,58 +911,79 @@ impl<D: Decode> ICore<D> {
         }
     }
 
-    /// The next run of equal values in the window, at most `max`, merged
-    /// across slab boundaries.
-    #[allow(clippy::question_mark)] // `?` puts the merge loop's proof over its rlimit
-    #[verifier::rlimit(30)]
+    /// Merge into a run of `value`, `total` long, the runs of the same
+    /// value that follow in the slabs after this one, up to `left` more:
+    /// `next_run_max` after its first run.
+    #[inline(always)]
     #[verifier::spinoff_prover]
-    pub(crate) fn next_run_max<'a, X: Decoders<'a, D = D>>(&mut self, slabs: &'a [Slab<X::Tail>], max: usize) -> (r: Option<Run<D::Item>>)
+    #[verifier::rlimit(60)]
+    fn merge_on<'a, X: Decoders<'a, D = D>>(
+        &mut self,
+        slabs: &'a [Slab<X::Tail>],
+        value: D::Item,
+        total: usize,
+        left: usize,
+        Ghost(o0): Ghost<Seq<D::Item>>,
+    ) -> (t: usize)
         requires
             old(self).wf::<X>(slabs@),
+            1 <= total <= o0.len(),
+            o0.take(total as int) == Seq::new(total as nat, |_i: int| value),
+            old(self).out::<X>(slabs@) == o0.skip(total as int),
+            total + left <= usize::MAX,
+            old(self).slab_remaining > 0 && left > 0 && total < o0.len() ==> o0[total as int] != value,
         ensures
             final(self).wf::<X>(slabs@),
-            match r {
-                Some(run) => {
-                    let o = old(self).out::<X>(slabs@);
-                    &&& 1 <= run.count <= max
-                    &&& run.count <= o.len()
-                    &&& o.take(run.count as int) == Seq::new(run.count as nat, |_i: int| run.value)
-                    &&& final(self).out::<X>(slabs@) == o.skip(run.count as int)
-                    &&& final(self).pos == old(self).pos + run.count
-                },
-                None => max == 0 || old(self).out::<X>(slabs@).len() == 0,
-            },
+            total <= t <= total + left,
+            t <= o0.len(),
+            o0.take(t as int) == Seq::new(t as nat, |_i: int| value),
+            final(self).out::<X>(slabs@) == o0.skip(t as int),
+            final(self).pos == old(self).pos + (t - total),
+            t < total + left && t < o0.len() ==> o0[t as int] != value,
     {
-        let ghost c0 = *self;
         let ghost s = slabs@;
-        if max == 0 || self.items_left == 0 {
-            proof {
-                assert(self.out::<X>(s).len() <= self.items_left);
-            }
-            return None;
-        }
-        let first = match self.run_once::<X>(slabs, max) {
-            Some(r) => r,
-            None => return None,
-        };
-        let ghost max0 = max;
-        let value = first.value;
-        let mut total_count = first.count;
-        let mut max = max - first.count;
-        let ghost o0 = c0.out::<X>(s);
-        while self.slab_remaining == 0 && self.items_left > 0
+        let ghost p0 = self.pos;
+        let ghost total0 = total;
+        let ghost max0 = (total + left) as usize;
+        let mut total_count = total;
+        let mut max = left;
+        loop
             invariant
                 s == slabs@,
                 self.wf::<X>(s),
                 1 <= total_count <= o0.len(),
-                o0 == c0.out::<X>(s),
                 o0.take(total_count as int) == Seq::new(total_count as nat, |_i: int| value),
                 self.out::<X>(s) == o0.skip(total_count as int),
-                self.pos == c0.pos + total_count,
+                self.pos + total0 == p0 + total_count,
                 total_count + max == max0,
+                total0 <= total_count,
+                // not at a slab's end, the run is already maximal
+                self.slab_remaining > 0 && total_count < max0 && total_count < o0.len()
+                    ==> o0[total_count as int] != value,
+            ensures
+                self.wf::<X>(s),
+                1 <= total_count <= o0.len(),
+                o0.take(total_count as int) == Seq::new(total_count as nat, |_i: int| value),
+                self.out::<X>(s) == o0.skip(total_count as int),
+                self.pos + total0 == p0 + total_count,
+                total_count + max == max0,
+                total0 <= total_count,
+                total_count < max0 && total_count < o0.len() ==> o0[total_count as int] != value,
             decreases s.len() - self.slab_idx,
         {
+            if !(self.slab_remaining == 0 && self.items_left > 0) {
+                proof {
+                    if self.items_left == 0 {
+                        self.lemma_none_left::<X>(s);
+                    }
+                }
+                break;
+            }
             if self.slab_idx + 1 >= slabs.len() {
+                proof {
+                    self.lemma_end_out::<X>(s);
+                    assert(total_count < max0 && total_count < o0.len() ==> o0[total_count as int] != value);
+                }
                 break;
             }
             proof {
@@ -805,7 +1010,14 @@ impl<D: Decode> ICore<D> {
                 max
             };
             if cap == 0 {
-                break;
+                if max == 0 {
+                    proof {
+                        assert(total_count < max0 && total_count < o0.len() ==> o0[total_count as int] != value);
+                    }
+                    break;
+                }
+                // an empty slab: step over it
+                continue;
             }
             let ghost d0 = self.decoder;
             let ghost c1 = *self;
@@ -842,9 +1054,29 @@ impl<D: Decode> ICore<D> {
                             }
                         }
                         assert(self.out::<X>(s) =~= o0.skip(total_count as int));
+                        if self.slab_remaining > 0 && total_count < max0 && total_count < o0.len() {
+                            // short of the slab's end: cut by the decoder,
+                            // whose run is maximal, or by the window
+                            assert(o1.len() <= c1.items_left);
+                            assert(o0[total_count as int] == o1[c as int]);
+                            assert(o1[c as int] == vv[c1.pos + c]);
+                            assert(vv[c1.pos + c] == vv.skip(c1.pos as int)[c as int]);
+                        }
                     }
                     continue;
                 } else {
+                    proof {
+                        // the next value is this run's, and differs
+                        let si = self.slab_idx as int;
+                        let vv = vals_of::<X>(s);
+                        let o1 = c1.out::<X>(s);
+                        assert(vv.skip(c1.pos as int) == d0.rest() + vals_of::<X>(s.skip(si + 1)));
+                        assert(o1[0] == vv[c1.pos as int]);
+                        assert(vv[c1.pos as int] == vv.skip(c1.pos as int)[0]);
+                        assert(o0[total_count as int] == o1[0]);
+                        assert(d0.rest().take(next.count as int)[0] == next.value);
+                        assert(total_count < max0 && total_count < o0.len() ==> o0[total_count as int] != value);
+                    }
                     // value doesn't match — reset the decoder so the run
                     // it consumed can be re-read by later calls
                     self.decoder = X::open(&slabs[self.slab_idx]);
@@ -855,7 +1087,318 @@ impl<D: Decode> ICore<D> {
             }
             break;
         }
-        Some(Run { count: total_count, value })
+        total_count
+    }
+
+    /// The next run of equal values in the window, at most `max`, merged
+    /// across slab boundaries.
+    #[allow(clippy::question_mark)] // `?` puts the merge loop's proof over its rlimit
+    #[verifier::spinoff_prover]
+    pub(crate) fn next_run_max<'a, X: Decoders<'a, D = D>>(&mut self, slabs: &'a [Slab<X::Tail>], max: usize) -> (r: Option<Run<D::Item>>)
+        requires
+            old(self).wf::<X>(slabs@),
+        ensures
+            final(self).wf::<X>(slabs@),
+            match r {
+                Some(run) => {
+                    let o = old(self).out::<X>(slabs@);
+                    &&& 1 <= run.count <= max
+                    &&& run.count <= o.len()
+                    &&& o.take(run.count as int) == Seq::new(run.count as nat, |_i: int| run.value)
+                    &&& final(self).out::<X>(slabs@) == o.skip(run.count as int)
+                    &&& final(self).pos == old(self).pos + run.count
+                    // maximal, unless cut by `max`: the next value differs
+                    &&& run.count < max && run.count < o.len() ==> o[run.count as int] != run.value
+                },
+                None => max == 0 || old(self).out::<X>(slabs@).len() == 0,
+            },
+    {
+        let ghost c0 = *self;
+        let ghost s = slabs@;
+        if max == 0 || self.items_left == 0 {
+            proof {
+                assert(self.out::<X>(s).len() <= self.items_left);
+            }
+            return None;
+        }
+        let first = match self.run_once::<X>(slabs, max) {
+            Some(r) => r,
+            None => return None,
+        };
+        let ghost o0 = c0.out::<X>(s);
+        let total_count = self.merge_on::<X>(slabs, first.value, first.count, max - first.count, Ghost(o0));
+        Some(Run { count: total_count, value: first.value })
+    }
+
+    /// The value search ([`crate::Iter::seek_to_value`]).  With the window
+    /// sorted as `probe` sees it, returns the range `(a, b)` of the window
+    /// at the target: below it before `a`, above it from `b`.  If the
+    /// window is not sorted, some range within it.
+    ///
+    /// After the first run, a binary search over the slabs' first values
+    /// finds the last slab that starts below the target, and a scan of
+    /// runs goes on from there.  `find` is the index lookup, as for `nth`,
+    /// and `start_of(i)` the items before slab `i`.
+    #[verifier::spinoff_prover]
+    pub(crate) fn seek_value<'a, X: Decoders<'a, D = D>, P: Probe<D::Item>, F: Fn(usize) -> (usize, usize), G: Fn(usize) -> usize>(
+        &mut self,
+        slabs: &'a [Slab<X::Tail>],
+        probe: &P,
+        find: &F,
+        start_of: &G,
+    ) -> (r: (usize, usize))
+        requires
+            old(self).wf::<X>(slabs@),
+            forall|t: usize| #[trigger] find.requires((t,)),
+            forall|t: usize, x: (usize, usize)| #[trigger] find.ensures((t,), x) ==> find_ok(slabs@, t, x),
+            forall|i: usize| i <= slabs@.len() ==> #[trigger] start_of.requires((i,)),
+            forall|i: usize, n: usize|
+                #[trigger] start_of.ensures((i,), n) ==> i <= slabs@.len() ==> n == sum(
+                    slab_lens(slabs@),
+                    0,
+                    i as int,
+                ),
+        ensures
+            ({
+                let w = old(self).out::<X>(slabs@);
+                let p0 = old(self).pos;
+                &&& p0 <= r.0 <= r.1 <= p0 + w.len()
+                &&& monotone(*probe, w) ==> found(*probe, w, r.0 - p0, r.1 - p0)
+            }),
+    {
+        let ghost s = slabs@;
+        let ghost c0 = *self;
+        let ghost w = c0.out::<X>(s);
+        proof {
+            c0.lemma_here::<X>(s);
+            assert(w.len() <= c0.items_left);
+        }
+        let start = self.pos;
+        let end = self.pos + self.items_left;
+        let first = match self.next_run_max::<X>(slabs, self.items_left) {
+            Some(r) => r,
+            None => return (start, start),
+        };
+        let ghost count = first.count as int;
+        proof {
+            assert forall|k: int| 0 <= k < count implies #[trigger] w[k] == first.value by {
+                assert(w.take(count)[k] == w[k]);
+            }
+        }
+        let si_start = self.slab_idx;
+        match probe.side_of(&first.value) {
+            Side::At => {
+                proof {
+                    if monotone(*probe, w) {
+                        lemma_found_at(*probe, w, 0, count);
+                    }
+                }
+                return (start, start + first.count);
+            },
+            Side::Above => {
+                proof {
+                    if monotone(*probe, w) {
+                        lemma_found_above(*probe, w, 0);
+                    }
+                }
+                return (start, start);
+            },
+            Side::Below => {},
+        }
+        // the slab holding the window's last item, or the last slab if the
+        // window runs past the column's end
+        let f = find(end - 1);
+        let si_end = if f.0 < slabs.len() {
+            f.0
+        } else {
+            slabs.len() - 1
+        };
+        // the last slab after this one, up to `si_end`, whose first value
+        // is below the target
+        let mut lo = si_start + 1;
+        let mut hi = si_end + 1;
+        let mut candidate: Option<usize> = None;
+        while lo < hi
+            invariant
+                lens_ok::<X>(s),
+                s == slabs@,
+                si_end < s.len(),
+                si_start < lo,
+                hi <= si_end + 1,
+                match candidate {
+                    Some(i) => {
+                        &&& si_start < i <= si_end
+                        &&& s[i as int].len > 0
+                        &&& probe.side(X::vals(s[i as int])[0]) < 0
+                    },
+                    None => true,
+                },
+            decreases hi - lo,
+        {
+            let mid = lo + (hi - lo) / 2;
+            let mut dec = X::open(&slabs[mid]);
+            match dec.d_next() {
+                Some(head) => match probe.side_of(&head) {
+                    Side::Below => {
+                        candidate = Some(mid);
+                        lo = mid + 1;
+                    },
+                    // an equal first value may still have equal values
+                    // before it, at the end of the slab before
+                    Side::At | Side::Above => hi = mid,
+                },
+                // an empty slab: there are none in a column with values
+                None => hi = mid,
+            }
+        }
+        // the target, if anywhere, is at or after that slab's first value
+        if let Some(i) = candidate {
+            let at = start_of(i);
+            proof {
+                self.lemma_jump::<X, P>(s, c0, *probe, count, i as int, (end - 1) as usize, f);
+            }
+            self.advance_to_slab::<X>(slabs, i, at);
+            proof {
+                assert(self.out::<X>(s) =~= w.skip(at - c0.pos));
+            }
+        }
+        let mut pos = self.pos;
+        loop
+            invariant
+                self.wf::<X>(s),
+                s == slabs@,
+                c0 == *old(self),
+                w == c0.out::<X>(s),
+                pos == self.pos,
+                c0.pos <= pos <= c0.pos + w.len(),
+                self.out::<X>(s) == w.skip(pos - c0.pos),
+                monotone(*probe, w) ==> forall|k: int| 0 <= k < pos - c0.pos ==> probe.side(#[trigger] w[k]) < 0,
+            decreases c0.pos + w.len() - pos,
+        {
+            let ghost o = self.out::<X>(s);
+            proof {
+                assert(o.len() <= self.items_left);
+            }
+            match self.next_run_max::<X>(slabs, self.items_left) {
+                Some(run) => {
+                    let ghost a = pos - c0.pos;
+                    proof {
+                        assert forall|k: int| a <= k < a + run.count implies #[trigger] w[k] == run.value by {
+                            assert(o.take(run.count as int)[k - a] == o[k - a]);
+                        }
+                        assert(o[0] == w[a]);
+                    }
+                    match probe.side_of(&run.value) {
+                        Side::Below => {
+                            proof {
+                                assert(self.out::<X>(s) =~= w.skip(pos + run.count - c0.pos));
+                            }
+                            pos += run.count;
+                        },
+                        Side::Above => {
+                            proof {
+                                if monotone(*probe, w) {
+                                    lemma_found_above(*probe, w, a);
+                                }
+                            }
+                            return (pos, pos);
+                        },
+                        Side::At => {
+                            proof {
+                                if monotone(*probe, w) {
+                                    if a + run.count < w.len() {
+                                        assert(o[run.count as int] == w[a + run.count]);
+                                    }
+                                    lemma_found_at(*probe, w, a, run.count as int);
+                                }
+                            }
+                            return (pos, pos + run.count);
+                        },
+                    }
+                },
+                None => {
+                    proof {
+                        if monotone(*probe, w) {
+                            lemma_found_above(*probe, w, w.len() as int);
+                        }
+                    }
+                    return (pos, pos);
+                },
+            }
+        }
+    }
+
+    /// The jump to slab `i`, whose first value is below the target, from
+    /// here, after the window's first run of `count` values: slab `i`
+    /// starts inside what is left of the window, and if the window is
+    /// sorted, every value before it is below the target too.  `f` is the
+    /// index's answer for the window's last item, `last`.
+    proof fn lemma_jump<'a, X: Decoders<'a, D = D>, P: Probe<D::Item>>(
+        &self,
+        s: Seq<Slab<X::Tail>>,
+        c0: Self,
+        probe: P,
+        count: int,
+        i: int,
+        last: usize,
+        f: (usize, usize),
+    )
+        requires
+            c0.wf::<X>(s),
+            self.wf::<X>(s),
+            1 <= count <= c0.out::<X>(s).len(),
+            c0.out::<X>(s).len() <= c0.items_left,
+            self.pos == c0.pos + count,
+            self.out::<X>(s) == c0.out::<X>(s).skip(count),
+            self.slab_idx < i < s.len(),
+            s[i].len > 0,
+            probe.side(X::vals(s[i])[0]) < 0,
+            last == c0.pos + c0.items_left - 1,
+            find_ok(s, last, f),
+            f.0 < s.len() ==> i <= f.0,
+        ensures
+            ({
+                let w = c0.out::<X>(s);
+                let v = vals_of::<X>(s);
+                let at = sum(slab_lens(s), 0, i);
+                &&& self.pos <= at < c0.pos + w.len()
+                &&& at - self.pos < self.items_left
+                &&& c0.pos + w.len() <= v.len()
+                &&& w == v.subrange(c0.pos as int, c0.pos + w.len())
+                &&& c0.pos + w.len() == if self.pos + self.items_left < v.len() {
+                    self.pos + self.items_left
+                } else {
+                    v.len() as int
+                }
+                &&& monotone(probe, w) ==> forall|k: int|
+                    0 <= k < at - c0.pos ==> probe.side(#[trigger] w[k]) < 0
+            }),
+    {
+        let lens = slab_lens(s);
+        let w = c0.out::<X>(s);
+        let v = vals_of::<X>(s);
+        let at = sum(lens, 0, i) as int;
+        c0.lemma_here::<X>(s);
+        lemma_head::<X>(s, i);
+        // here, at most at the end of this slab, so at most at slab `i`
+        let si = self.slab_idx as int;
+        lemma_sum_split(lens, 0, si, si + 1);
+        lemma_sum_one(lens, si);
+        lemma_sum_le(lens, 0, si + 1, 0, i);
+        // slab `i` starts at or before the window's last item
+        if f.0 < s.len() {
+            lemma_sum_le(lens, 0, i, 0, f.0 as int);
+        }
+        let o = self.out::<X>(s);
+        assert(o.len() == w.len() - count);
+        assert(o.len() <= self.items_left);
+        assert(w =~= v.subrange(c0.pos as int, c0.pos + w.len()));
+        assert(w[at - c0.pos] == v[at]);
+        if monotone(probe, w) {
+            assert forall|k: int| 0 <= k < at - c0.pos implies probe.side(#[trigger] w[k]) < 0 by {
+                assert(probe.side(w[k]) <= probe.side(w[at - c0.pos]));
+            }
+        }
     }
 
     /// Set the window to end at `end`.
