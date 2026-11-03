@@ -3340,6 +3340,7 @@ impl<A: SlabAggregate> SlabBTree<A> {
     /// skip a crossing inside a subtree whose end is back below `target`;
     /// every slab end it passes that reaches `target` is followed, before
     /// the result, by one that doesn't.
+    #[verifier::spinoff_prover]
     pub(crate) fn find_slab_at_prefix(&self, target: A::Prefix) -> (r: (usize, A::Prefix, usize))
         where A: OrdPrefix
         requires

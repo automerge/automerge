@@ -3,6 +3,8 @@ use crate::sealed::Sealed;
 use std::cmp::Ordering;
 use std::marker::PhantomData;
 use std::ops::{AddAssign, Range, SubAssign};
+#[allow(unused_imports)]
+use vstd::prelude::*;
 
 use crate::btree::{FindByValue, FindByValueRange, SlabAgg, SlabBTree};
 use crate::edit::Edit;
@@ -44,30 +46,86 @@ impl<Tail: Copy + Clone + std::fmt::Debug + Default> Slab<Tail> {
 
 // ── SlabWeight ───────────────────────────────────────────────────────────────
 
+verus! {
+
 /// A value stored in a Fenwick tree (BIT) node.
 ///
 /// For plain `Column`, this is `usize` (just the slab item count).
 /// For columns that track prefix sums, this is a compound value carrying
 /// both the item count and the slab's contribution to the prefix sum.
+///
+/// The Fenwick tree ([`crate::fenwick`]) is verified against the item
+/// counts alone, so these methods are specified only by what they do to
+/// [`weight_len`](Self::weight_len).
 #[doc(hidden)]
 pub trait SlabWeight: Sealed + Clone + Default + std::fmt::Debug + AddAssign + SubAssign {
+    /// [`len`](Self::len), for specifications.
+    spec fn weight_len(&self) -> nat;
+
     /// The length (item count) component of this weight.
-    fn len(&self) -> usize;
+    fn len(&self) -> (n: usize)
+        ensures n == self.weight_len();
 
     /// Whether this weight represents zero items.
-    fn is_empty(&self) -> bool {
+    fn is_empty(&self) -> (b: bool)
+        ensures b == (self.weight_len() == 0),
+    {
         self.len() == 0
     }
+
+    /// The weight of no items ([`Default`]).
+    fn zero() -> (z: Self)
+        ensures z.weight_len() == 0;
+
+    /// A copy of this weight ([`Clone`]).
+    fn copy(&self) -> (c: Self)
+        ensures c.weight_len() == self.weight_len();
+
+    /// `*self += other`.
+    fn add_weight(&mut self, other: &Self)
+        requires old(self).weight_len() + other.weight_len() <= usize::MAX,
+        ensures final(self).weight_len() == old(self).weight_len() + other.weight_len();
+
+    /// `*self -= other`.
+    fn sub_weight(&mut self, other: &Self)
+        requires other.weight_len() <= old(self).weight_len(),
+        ensures final(self).weight_len() == old(self).weight_len() - other.weight_len();
 }
 
 impl Sealed for usize {}
 
 impl SlabWeight for usize {
+    open spec fn weight_len(&self) -> nat {
+        *self as nat
+    }
+
     #[inline]
     fn len(&self) -> usize {
         *self
     }
+
+    #[inline]
+    fn zero() -> usize {
+        0
+    }
+
+    #[inline]
+    fn copy(&self) -> usize {
+        *self
+    }
+
+    #[inline]
+    fn add_weight(&mut self, other: &usize) {
+        *self += *other;
+    }
+
+    #[inline]
+    fn sub_weight(&mut self, other: &usize) {
+        *self -= *other;
+    }
 }
+
+} // verus!
 
 // ── WeightFn ─────────────────────────────────────────────────────────────────
 
@@ -136,49 +194,14 @@ impl<T: ColumnValueRef, C: Codec> WeightFn<T, C> for LenWeight {
     }
 }
 
-// ── Fenwick tree helpers ─────────────────────────────────────────────────────
-
-/// Rebuild BIT from scratch. O(S).
-/// The BIT is 1-indexed: `bit\[0\]` is unused, `bit\[1..=n\]` holds the tree.
-///
-/// Generic over the slab type and weight: callers pass a closure that extracts
-/// the per-slab weight. `Column` passes `WF::compute`; other column types
-/// (e.g. the raw-byte arena) pass their own slab-length extractor.
-pub(crate) fn rebuild_bit<S, W: SlabWeight>(slabs: &[S], weight: impl Fn(&S) -> W) -> Vec<W> {
-    let n = slabs.len();
-    let mut bit = vec![W::default(); n + 1];
-    for i in 0..n {
-        bit[i + 1] = weight(&slabs[i]);
-    }
-    // Standard O(n) BIT construction: propagate to parent.
-    for i in 1..=n {
-        let parent = i + (i & i.wrapping_neg());
-        if parent <= n {
-            let child = bit[i].clone();
-            bit[parent] += child;
-        }
-    }
-    bit
-}
-
-/// Update the BIT at slab index `si` after a weight change. O(log S).
-///
-/// Subtracts the old weight and adds the new weight at every ancestor node.
-#[inline]
-pub(crate) fn bit_point_update<W: SlabWeight>(bit: &mut [W], si: usize, old: W, new: W) {
-    let mut i = si + 1; // BIT is 1-indexed
-    while i < bit.len() {
-        bit[i] -= old.clone();
-        bit[i] += new.clone();
-        i += i & i.wrapping_neg();
-    }
-}
+// ── Splice helpers ───────────────────────────────────────────────────────────
 
 /// Walk the four slab boundaries around a recently-modified range and attempt
 /// to merge undersized neighbours.  The decision of *whether* two adjacent
-/// slabs can merge is column-specific (encoding-aware for RLE, byte-count-only
-/// for a raw arena); the caller passes `try_merge_pair(a, b)` which returns
-/// `true` if it actually merged slabs `a` and `b` (removing slab `b`).
+/// slabs can merge is column-specific (encoding-aware); the caller passes
+/// `try_merge_pair(a, b)` which returns `true` if it actually merged slabs
+/// `a` and `b` (removing slab `b`).  The raw-byte arena walks the same
+/// boundaries in its own verified copy (`raw::merge_around`).
 ///
 /// Returns the adjusted range accounting for any merges that happened — the
 /// end shrinks by one for every merge that collapses two in-range slabs.
@@ -293,31 +316,6 @@ pub(crate) fn splice_bytes(vec: &mut Vec<u8>, index: usize, del: usize, bytes: &
         Ordering::Equal => {}
     }
     vec[index..index + insert].copy_from_slice(bytes);
-}
-
-// Find slab containing logical index. Returns (slab_index, offset_within_slab). O(log S).
-// Uses binary lifting on the BIT.
-#[inline]
-pub(crate) fn find_slab_bit<W: SlabWeight>(bit: &[W], index: usize, n: usize) -> (usize, usize) {
-    if n == 0 {
-        return (0, 0);
-    }
-    let mut pos = 0usize;
-    let mut idx = 0usize;
-    let mut bit_k = 1;
-    while bit_k <= n {
-        bit_k <<= 1;
-    }
-    bit_k >>= 1;
-    while bit_k > 0 {
-        let next = idx + bit_k;
-        if next <= n && pos + bit[next].len() <= index {
-            pos += bit[next].len();
-            idx = next;
-        }
-        bit_k >>= 1;
-    }
-    (idx, index - pos)
 }
 
 // ── Iter ─────────────────────────────────────────────────────────────────────

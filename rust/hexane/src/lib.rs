@@ -111,6 +111,7 @@ pub mod column;
 pub mod delta;
 pub mod encoder;
 pub mod encoding;
+pub(crate) mod fenwick;
 #[doc(hidden)]
 pub mod index;
 mod leb128_codec;
@@ -177,7 +178,9 @@ pub use rle::RleLoadIter;
 /// external crates from implementing them, so the index/weight machinery
 /// can change shape in any release without breakage.
 mod sealed {
+    vstd::prelude::verus! {
     pub trait Sealed {}
+    } // verus!
 }
 
 #[cfg(test)]

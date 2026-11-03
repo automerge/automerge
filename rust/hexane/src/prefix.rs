@@ -194,14 +194,71 @@ impl<P: Clone + Default + std::fmt::Debug + AddAssign + SubAssign> SubAssign
 
 impl<P: Clone + Default + std::fmt::Debug + AddAssign + SubAssign> Sealed for PrefixSlabWeight<P> {}
 
+vstd::prelude::verus! {
+
 impl<P: Clone + Default + std::fmt::Debug + AddAssign + SubAssign> SlabWeight
     for PrefixSlabWeight<P>
 {
+    closed spec fn weight_len(&self) -> vstd::prelude::nat {
+        self.len as vstd::prelude::nat
+    }
+
     #[inline]
     fn len(&self) -> usize {
         self.len
     }
+
+    #[inline]
+    fn zero() -> Self {
+        PrefixSlabWeight { len: 0, prefix: default_prefix() }
+    }
+
+    #[inline]
+    fn copy(&self) -> Self {
+        PrefixSlabWeight { len: self.len, prefix: clone_prefix(&self.prefix) }
+    }
+
+    #[inline]
+    fn add_weight(&mut self, other: &Self) {
+        self.len += other.len;
+        add_prefix(&mut self.prefix, &other.prefix);
+    }
+
+    #[inline]
+    fn sub_weight(&mut self, other: &Self) {
+        self.len -= other.len;
+        sub_prefix(&mut self.prefix, &other.prefix);
+    }
 }
+
+// `P`'s own operations.  The Fenwick tree is verified only for the item
+// counts, so these carry no specification.
+
+#[verifier::external_body]
+#[inline]
+fn default_prefix<P: Default>() -> P {
+    P::default()
+}
+
+#[verifier::external_body]
+#[inline]
+fn clone_prefix<P: Clone>(p: &P) -> P {
+    p.clone()
+}
+
+#[verifier::external_body]
+#[inline]
+fn add_prefix<P: Clone + AddAssign>(p: &mut P, q: &P) {
+    *p += q.clone();
+}
+
+#[verifier::external_body]
+#[inline]
+fn sub_prefix<P: Clone + SubAssign>(p: &mut P, q: &P) {
+    *p -= q.clone();
+}
+
+} // verus!
 
 /// Weight function for prefix-sum tracking.
 ///
