@@ -852,7 +852,12 @@ impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
     where
         T: Ord,
     {
-        self.iter().seek_to_value(value, range)
+        // clamped to the column, as `Column::scope_to_value` does, so an
+        // insertion point is never past the last row
+        let (start, end) = normalize_range_max(range, self.len());
+        let start = start.min(self.len());
+        let end = end.min(self.len()).max(start);
+        self.iter().seek_to_value(value, start..end)
     }
 
     pub fn insert(&mut self, index: usize, value: T) {
