@@ -24,7 +24,7 @@ use vstd::prelude::*;
 /// Derefs to `T::Get<'_>` via `as_ref()`, and implements `AsColumnRef<T>`
 /// so it can be used directly with `T::pack()`.
 #[derive(Debug)]
-pub(crate) enum RleCow<'a, T: RleValue, V: AsColumnRef<T>> {
+pub enum RleCow<'a, T: RleValue, V: AsColumnRef<T>> {
     Owned(V),
     Ref(T::Get<'a>),
 }
@@ -87,11 +87,11 @@ impl<'a, T: RleValue, V: AsColumnRef<T>> From<V> for RleCow<'a, T, V> {
 /// [`WriteOps`] for column type `T`, inserted values `V` and codec `C`:
 /// the trusted bridge from the verified writer to the value type's and
 /// codec's own code.
-pub(crate) struct WOps<'a, T, V, C>(PhantomData<(&'a T, V, C)>);
+pub struct WOps<T, V, C>(PhantomData<(T, V, C)>);
 
 // Outside `verus!`, so Verus takes it on trust; its spec items exist only
 // when Verus compiles the crate.
-impl<'a, T: RleValue, V: AsColumnRef<T>, C: Codec> WriteOps<'a> for WOps<'a, T, V, C> {
+impl<'a, T: RleValue, V: AsColumnRef<T>, C: Codec> WriteOps<'a> for WOps<T, V, C> {
     type R = Ops<'a, T, C>;
     type Cow = RleCow<'a, T, V>;
 
@@ -137,7 +137,7 @@ impl<'a, T: RleValue, V: AsColumnRef<T>, C: Codec> WriteOps<'a> for WOps<'a, T, 
 }
 
 /// The writer for column type `T`, inserted values `V` and codec `C`.
-pub(crate) type RleState<'a, T, V, C = Leb128> = State<'a, WOps<'a, T, V, C>>;
+pub(crate) type RleState<'a, T, V, C = Leb128> = State<'a, WOps<T, V, C>>;
 
 type Cow<'a, T, V> = RleCow<'a, T, V>;
 

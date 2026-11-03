@@ -6,7 +6,7 @@
 //! (the run after the edit) and the slab's bytes after it. When the
 //! region outgrows the slab's segment budget it cuts, and the rest goes
 //! into new slabs. What [`finish`](Splice::finish) returns, written back
-//! by [`Rebuilt::apply`], leaves the edited slab and each new one the
+//! by [`Rebuilt::apply_to`], leaves the edited slab and each new one the
 //! canonical encoding of its share of the values, which run on from one
 //! slab to the next (`rebuilt_ok`).
 //!
@@ -29,7 +29,6 @@ use crate::rle::postfix::*;
 use crate::rle::read::{lit_tail_of, tail_bytes_of};
 use crate::rle::state::*;
 use crate::rle::{RleTail, Slab};
-use crate::{Codec, RleValue};
 #[allow(unused_imports)]
 use vstd::prelude::*;
 
@@ -285,7 +284,50 @@ pub(crate) struct Rebuilt {
     pub(crate) h0: Ghost<i64>,
 }
 
+/// `mem::take` of a vector: what it held. (Nothing is claimed of what
+/// is left, an empty vector.)
+#[verifier::external_body]
+#[inline(always)]
+pub(crate) fn take_vec<T>(v: &mut Vec<T>) -> (r: Vec<T>)
+    ensures r == *old(v),
+{
+    std::mem::take(v)
+}
+
 impl Rebuilt {
+    /// Write the rebuild back into `slab`, whose bytes it was made from:
+    /// the rebuilt bytes, its length and segments, and the tail record
+    /// they leave. Returns the slabs it spilled into (to go after it) and
+    /// its byte buffer, for reuse.
+    pub(crate) fn apply_to<'a, W: WriteOps<'a>>(&mut self, slab: &mut Slab) -> (r: (Vec<Slab>, Vec<u8>))
+        requires
+            old(self).start <= old(self).end <= old(slab).data@.len(),
+            rw_at::<W>(old(self).rewrite, old(slab).data@.take(old(self).start as int), old(self).h0@),
+        ensures
+            ({
+                let pre = apply::<W>(old(self).rewrite, old(slab).data@.take(old(self).start as int), old(self).h0@);
+                let t = tail_after(old(self).wpos, pre.len() as int, 0, old(self).bytes@.len() as int,
+                    old(slab).data@.len() - old(self).end, tail_b(old(slab).tail) as int, tail_l(old(slab).tail) as int);
+                &&& final(slab).data@ == pre + old(self).bytes@ + old(slab).data@.skip(old(self).end as int)
+                &&& 0 <= t.1 <= t.0 ==> tail_b(final(slab).tail) == t.0 && tail_l(final(slab).tail) == t.1
+            }),
+            final(slab).len == old(self).len,
+            final(slab).segments == old(self).segments,
+            r.0 == old(self).overflow,
+    {
+        let middle = self.bytes.len();
+        let postfix = slab.data.len() - self.end;
+        // verified: the splice, then the header rewrite
+        self.apply_bytes::<W>(&mut slab.data);
+        let prefix = slab.data.len() - middle - postfix;
+        slab.tail = merge_tail(self.wpos, prefix, middle, postfix, &slab.tail);
+        slab.len = self.len;
+        slab.segments = self.segments;
+        let mut bytes = take_vec(&mut self.bytes);
+        bytes.clear();
+        (take_vec(&mut self.overflow), bytes)
+    }
+
     fn new(start: usize, end: usize) -> (r: Self)
         ensures r.start == start, r.end == end, r.rewrite is None, r.overflow@.len() == 0, r.bytes@.len() == 0,
     {
@@ -413,6 +455,22 @@ impl<'a, W: WriteOps<'a>> Splice<'a, W> {
 
     pub(crate) proof fn lemma_used(&self, n: nat)
         ensures self.room(n) == (self.used() + n + 2 < usize::MAX),
+    {
+    }
+
+    /// Keep `bytes` as the write buffer if it holds more. Nothing is
+    /// claimed: a rebuild reopens before it writes again.
+    #[verifier::external_body]
+    pub(crate) fn recycle(&mut self, mut bytes: Vec<u8>) {
+        if bytes.capacity() > self.buf.capacity() {
+            bytes.clear();
+            self.buf = bytes;
+        }
+    }
+
+    /// The slab in hand holds no more values than were written.
+    pub(crate) proof fn lemma_used_le(&self)
+        ensures self.used() <= self.vals().len(),
     {
     }
 
@@ -930,44 +988,5 @@ impl std::fmt::Debug for Rebuilt {
             .field("overflow", &self.overflow)
             .field("wpos", &self.wpos)
             .finish()
-    }
-}
-
-impl Rebuilt {
-    /// Write the rebuild back into `slab`; returns the slabs it spilled
-    /// into (to go after it) and its byte buffer, for reuse.
-    // T is only read by the debug-build slab validation below
-    #[cfg_attr(not(debug_assertions), allow(clippy::extra_unused_type_parameters))]
-    pub(crate) fn apply<T: RleValue, C: Codec>(&mut self, slab: &mut Slab) -> (Vec<Slab>, Vec<u8>) {
-        let mut prefix = self.start as i64;
-        let middle = self.bytes.len();
-        let postfix = slab.data.len() - self.end;
-
-        // verified with Verus: the splice, then the header rewrite
-        prefix += self.apply_bytes::<WOps<'static, T, T, C>>(&mut slab.data);
-
-        slab.tail = merge_tail(self.wpos, prefix as usize, middle, postfix, &slab.tail);
-        slab.len = self.len;
-        slab.segments = self.segments;
-
-        #[cfg(debug_assertions)]
-        crate::rle::validate_rle_slab::<T, C>(slab);
-        #[cfg(debug_assertions)]
-        for s in &self.overflow {
-            crate::rle::validate_rle_slab::<T, C>(s);
-        }
-
-        let mut bytes = std::mem::take(&mut self.bytes);
-        bytes.clear();
-        (std::mem::take(&mut self.overflow), bytes)
-    }
-}
-
-impl<T: RleValue, C: Codec> Splice<'static, WOps<'static, T, T, C>> {
-    pub(crate) fn recycle(&mut self, mut bytes: Vec<u8>) {
-        if bytes.capacity() > self.buf.capacity() {
-            bytes.clear();
-            self.buf = bytes;
-        }
     }
 }

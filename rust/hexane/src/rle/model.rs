@@ -204,7 +204,7 @@ pub trait WriteOps<'a> {
 
 /// [`RleOps`] for column type `T` with codec `C`: the trusted bridge from
 /// the verified RLE code to the value type's and codec's own code.
-pub(crate) struct Ops<'a, T, C>(PhantomData<(&'a T, C)>);
+pub struct Ops<'a, T, C>(PhantomData<(&'a T, C)>);
 
 // Outside `verus!`, so Verus takes it on trust; its spec items exist only
 // when Verus compiles the crate.

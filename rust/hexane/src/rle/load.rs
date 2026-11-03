@@ -53,7 +53,7 @@ pub(crate) fn rle_validate_encoding<T: RleValue, C: Codec>(
 /// [`finalize`](Self::finalize) drains whatever the consumer did not pull
 /// (validating it) and returns the finished slabs.
 pub struct RleLoadIter<'a, T: RleValue, C: Codec = Leb128> {
-    load: Load<'a, WOps<'a, T, T, C>>,
+    load: Load<'a, WOps<T, T, C>>,
 }
 
 impl<'a, T: RleValue, C: Codec> RleLoadIter<'a, T, C> {
@@ -119,7 +119,7 @@ mod tests {
     use vstd::prelude::Ghost;
 
     type O<'a, T> = Ops<'a, T, Leb128>;
-    type W<'a, T> = WOps<'a, T, T, Leb128>;
+    type W<'a, T> = WOps<T, T, Leb128>;
 
     /// Count segments into a fresh cut (the reader they stand for is
     /// ghost, so the counts need not be real).

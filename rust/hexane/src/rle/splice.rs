@@ -851,7 +851,7 @@ pub(crate) fn do_merge<T: RleValue, C: Codec>(
         return (a_segs, a_tail);
     }
     // verified with Verus: the plan (both slabs borrowed), then writing it
-    let p = merge_plan::<WOps<'_, T, T, C>>(
+    let p = merge_plan::<WOps<T, T, C>>(
         &a[start..],
         a_segs,
         &a_tail,
@@ -860,6 +860,6 @@ pub(crate) fn do_merge<T: RleValue, C: Codec>(
         &b.tail,
         buf,
     );
-    let tail = merge_apply::<WOps<'static, T, T, C>>(a, start, &p, buf, &b.data, &b.tail);
+    let tail = merge_apply::<WOps<T, T, C>>(a, start, &p, buf, &b.data, &b.tail);
     (p.segments, tail)
 }

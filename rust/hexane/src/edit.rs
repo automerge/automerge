@@ -18,17 +18,11 @@ pub trait SlabEdit: crate::encoding::ColumnEncoding {
 
     /// The slabs as the verified cursor sees them: what a slab holds, and
     /// the rebuild, merge and reader operations specified against it.
-    /// The cursor is proved for any model; an encoding's model is either
-    /// proved against its format (bool) or trusted to forward to `Edit`
-    /// (RLE, `Trusted<Self>`). An associated type rather than a blanket
-    /// impl so that each encoding can have its own.
+    /// The cursor is proved for any model, and each encoding's model is
+    /// proved against its format. An associated type rather than a
+    /// blanket impl so that each encoding can have its own.
     #[doc(hidden)]
-    type Model: crate::cursor::Slabs<
-        Tail = Self::Tail,
-        State = Self::State,
-        V = Self::Value,
-        Rebuild = Self::Edit,
-    >;
+    type Model: crate::cursor::Slabs<Tail = Self::Tail, State = Self::State, Rebuild = Self::Edit>;
 
     /// How many runs a cursor carries through an open rebuild before
     /// closing it instead — the trade between re-encoding what it carries

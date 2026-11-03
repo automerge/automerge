@@ -19,11 +19,19 @@
 // Verus proofs read more plainly with `x = x + n`.
 #![allow(clippy::len_zero, clippy::assign_op_pattern)]
 
+#[cfg(verus_keep_ghost)]
+use crate::cursor::lemma_concat_append;
+use crate::cursor::Slabs;
 use crate::edit::{EditSlab, SlabEdit};
+#[cfg(verus_keep_ghost)]
+use crate::rle::cut::{lemma_lit_tail_le, slab_ok};
 #[cfg(verus_keep_ghost)]
 use crate::rle::dec::*;
 use crate::rle::dec::{partition_at, postfix_at, Dec, RleDecoderState};
 use crate::rle::lift::*;
+use crate::rle::merge::{merge_apply, merge_plan};
+#[cfg(verus_keep_ghost)]
+use crate::rle::merge::{merge_bytes, slab_meta};
 use crate::rle::model::*;
 #[cfg(verus_keep_ghost)]
 use crate::rle::postfix::*;
@@ -32,9 +40,10 @@ use crate::rle::read::{lit_tail_of, tail_bytes_of};
 use crate::rle::state::*;
 #[cfg(verus_keep_ghost)]
 use crate::rle::writer::*;
-use crate::rle::writer::{add, Rebuilt, Splice};
+use crate::rle::writer::{add, tail_rec, Rebuilt, Splice};
 use crate::rle::{RleTail, Slab};
 use crate::{AsColumnRef, Codec, RleValue};
+use std::marker::PhantomData;
 #[allow(unused_imports)]
 use vstd::prelude::*;
 
@@ -164,8 +173,17 @@ impl<M: WriteOps<'static>> Edit<M> {
     }
 
     /// The reader's position.
-    pub(crate) fn dec(&self) -> &RleDecoderState {
+    pub(crate) fn dec(&self) -> (r: &RleDecoderState)
+        ensures self.inv() ==> state_ok::<M::R>(self.data(), *r) && state_pos::<M::R>(self.data(), *r) == self.read(),
+    {
         &self.dec
+    }
+
+    /// The slab in hand holds no more values than were written.
+    pub(crate) proof fn lemma_used_le(&self)
+        ensures self.used() <= self.vals().len(),
+    {
+        self.w.lemma_used_le();
     }
 
     /// Open a rebuild of the valid slab `data` at item `at`. One walk,
@@ -476,6 +494,385 @@ impl<M: WriteOps<'static>> Edit<M> {
     }
 }
 
+
+// ── The cursor's slab model ────────────────────────────────────────────────
+
+/// An RLE slab rebuild in progress: RLE columns' `SlabEdit::Edit`
+/// (`RleEdit`).
+pub struct RleRebuild<M: WriteOps<'static>> {
+    pub(crate) e: Edit<M>,
+}
+
+/// RLE slabs as the column cursor sees them (`Slabs`), verified against
+/// the RLE format: a slab is well-formed when `slab_ok` (its bytes a
+/// canonical encoding, with its metadata), and holds the values its
+/// bytes encode, owned. `L` is the column's writer ops: one type for
+/// every lifetime a slab is borrowed for, owning its values as itself.
+///
+/// Public only because RLE columns' `SlabEdit::Model` names it; this
+/// module is not.
+pub struct RleModel<L>(PhantomData<L>);
+
+/// A slab too long for the format's byte arithmetic: no slab is, as a
+/// slab's bytes are bounded by its segment budget, but the specifications
+/// do not say so.
+#[cold]
+#[inline(never)]
+#[verifier::external_body]
+fn slab_too_long()
+    ensures false,
+{
+    panic!("RLE slab too long")
+}
+
+/// A canonical encoding of `vals`, whose recorded length, segments and
+/// tail match it, is a well-formed slab holding them.
+proof fn lemma_slab_of<'a, O: RleOps<'a>>(s: Slab, vals: Seq<O::V>)
+    requires
+        encodes::<O>(slab_bytes(s), vals, slab_segments(s) as int),
+        tail_ok::<O>(slab_bytes(s), tail_b(slab_tail_of(s)) as int, tail_l(slab_tail_of(s)) as int),
+        slab_len(s) == vals.len(),
+    ensures
+        slab_ok::<O>(s),
+        slab_values::<O>(slab_bytes(s)) == vals,
+{
+    let data = slab_bytes(s);
+    let gs = choose|gs: Seq<Group<O::V>>| #[trigger] canonical::<O>(gs) && groups_bytes::<O>(gs) == data
+        && groups_values(gs, O::null()) == vals && groups_segments(gs) == slab_segments(s) as int;
+    let gt = choose|gs: Seq<Group<O::V>>| #[trigger] canonical::<O>(gs) && groups_bytes::<O>(gs) == data
+        && tail_b(slab_tail_of(s)) as int == tail_bytes_of::<O>(gs) && tail_l(slab_tail_of(s)) as int == lit_tail_of::<O>(gs);
+    lemma_groups_unique::<O>(gs, gt);
+    lemma_groups_values_concat(gs, Seq::empty(), O::null());
+    reveal(parses);
+    assert(parses::<O>(gs, data));
+    let gc = slab_groups::<O>(data);
+    lemma_groups_unique::<O>(gs, gc);
+}
+
+/// A concatenation, split after its first part.
+proof fn lemma_concat_first<V>(cs: Seq<Seq<V>>)
+    requires cs.len() > 0,
+    ensures concat(cs) == cs[0] + concat(cs.skip(1)),
+{
+    let one = seq![cs[0]];
+    lemma_concat_append(one, cs.skip(1));
+    assert(one + cs.skip(1) =~= cs);
+    assert(one.drop_last() =~= Seq::<Seq<V>>::empty());
+    assert(concat(one.drop_last()) =~= Seq::<V>::empty());
+    assert(concat(one) =~= cs[0]);
+}
+
+/// A close written back: the slab and those it spilled into are
+/// well-formed, and hold what the rebuild wrote, then the slab's values
+/// it had not read.
+proof fn lemma_close_ok<L>(r: Rebuilt, pre: Seq<u8>, h0: i64, data: Seq<u8>, out: Seq<VOf<'static, L>>, tail0: RleTail, s: Slab, spilled: Seq<Slab>)
+    where L: for<'s> Lift<'s, W = L>,
+    requires
+        slab_meta::<<L as WriteOps<'static>>::R>(data, groups_segments(slab_groups::<<L as WriteOps<'static>>::R>(data)) as int, tail0),
+        pre == data.take(pre.len() as int),
+        rebuilt_ok::<L>(r, pre, h0, data, out),
+        ({
+            let a = apply::<L>(r.rewrite, data.take(r.start as int), h0);
+            let t = tail_after(r.wpos, a.len() as int, 0, r.bytes@.len() as int, data.len() - r.end,
+                tail_b(tail0) as int, tail_l(tail0) as int);
+            &&& s.data@ == a + r.bytes@ + data.skip(r.end as int)
+            &&& 0 <= t.1 <= t.0 ==> tail_b(s.tail) == t.0 && tail_l(s.tail) == t.1
+        }),
+        s.len == r.len,
+        s.segments == r.segments,
+        spilled == r.overflow@,
+    ensures
+        slab_ok::<<L as WriteOps<'static>>::R>(s),
+        forall|i: int| 0 <= i < spilled.len() ==> #[trigger] slab_ok::<<L as WriteOps<'static>>::R>(spilled[i]),
+        slab_values::<<L as WriteOps<'static>>::R>(slab_bytes(s)) + concat(spilled.map_values(
+            |x: Slab| slab_values::<<L as WriteOps<'static>>::R>(slab_bytes(x)),
+        )) == out,
+{
+    let cs = choose|cs: Seq<Seq<VOf<'static, L>>>| #[trigger] concat(cs) == out && cs.len() == r.overflow@.len() + 1
+        && encodes::<<L as WriteOps<'static>>::R>(edited::<L>(r, pre, h0, data), cs[0], r.segments as int) && r.len == cs[0].len()
+        && forall|k: int| 0 <= k < r.overflow@.len()
+            ==> encodes::<<L as WriteOps<'static>>::R>(#[trigger] slab_bytes(r.overflow@[k]), cs[k + 1], slab_segments(r.overflow@[k]) as int)
+            && slab_len(r.overflow@[k]) == cs[k + 1].len();
+    let a = apply::<L>(r.rewrite, pre, h0);
+    let t = tail_after(r.wpos, a.len() as int, 0, r.bytes@.len() as int, data.len() - r.end,
+        tail_bytes_of::<<L as WriteOps<'static>>::R>(slab_groups::<<L as WriteOps<'static>>::R>(data)) as int,
+        lit_tail_of::<<L as WriteOps<'static>>::R>(slab_groups::<<L as WriteOps<'static>>::R>(data)) as int);
+    // the tail record the close leaves names the edited bytes' last run
+    let gt = choose|gs: Seq<Group<VOf<'static, L>>>| #[trigger] canonical::<<L as WriteOps<'static>>::R>(gs)
+        && groups_bytes::<<L as WriteOps<'static>>::R>(gs) == edited::<L>(r, pre, h0, data)
+        && t.0 == tail_bytes_of::<<L as WriteOps<'static>>::R>(gs) && t.1 == lit_tail_of::<<L as WriteOps<'static>>::R>(gs);
+    lemma_lit_tail_le::<<L as WriteOps<'static>>::R>(gt);
+    assert(slab_bytes(s) == edited::<L>(r, pre, h0, data));
+    lemma_slab_of::<<L as WriteOps<'static>>::R>(s, cs[0]);
+    assert forall|i: int| #![trigger spilled[i]] 0 <= i < spilled.len() implies slab_ok::<<L as WriteOps<'static>>::R>(spilled[i])
+        && slab_values::<<L as WriteOps<'static>>::R>(slab_bytes(spilled[i])) == cs[i + 1] by {
+        lemma_slab_of::<<L as WriteOps<'static>>::R>(spilled[i], cs[i + 1]);
+    }
+    assert(spilled.map_values(|x: Slab| slab_values::<<L as WriteOps<'static>>::R>(slab_bytes(x))) =~= cs.skip(1));
+    lemma_concat_first(cs);
+}
+
+/// The reader state at value `at` of a valid slab.
+#[inline(always)]
+fn state_in<'s, L: Lift<'s>>(data: &'s [u8], at: usize) -> (st: RleDecoderState)
+    requires
+        valid_slab::<L::R>(data@),
+        at <= slab_values::<L::R>(data@).len(),
+    ensures
+        state_ok::<L::R>(data@, st),
+        state_pos::<L::R>(data@, st) == at,
+{
+    let mut d = Dec::<'s, L::R>::new(data);
+    d.advance_by(at);
+    d.suspend()
+}
+
+/// A reader state `n` values on.
+#[inline(always)]
+fn state_on<'s, L: Lift<'s>>(data: &'s [u8], st: &mut RleDecoderState, n: usize)
+    requires
+        state_ok::<L::R>(data@, *old(st)),
+        state_pos::<L::R>(data@, *old(st)) + n <= slab_values::<L::R>(data@).len(),
+    ensures
+        state_ok::<L::R>(data@, *final(st)),
+        state_pos::<L::R>(data@, *final(st)) == state_pos::<L::R>(data@, *old(st)) + n,
+{
+    let mut d = Dec::<'s, L::R>::resume(data, st);
+    d.advance_by(n);
+    *st = d.suspend();
+}
+
+impl<L> Slabs for RleModel<L> where L: for<'s> Lift<'s, W = L> {
+    type Tail = RleTail;
+    type Rebuild = RleRebuild<L>;
+    type State = RleDecoderState;
+    type V = VOf<'static, L>;
+
+    closed spec fn ok(s: Slab) -> bool {
+        slab_ok::<<L as WriteOps<'static>>::R>(s)
+    }
+
+    closed spec fn vals(s: Slab) -> Seq<VOf<'static, L>> {
+        slab_values::<<L as WriteOps<'static>>::R>(slab_bytes(s))
+    }
+
+    proof fn lemma_len(s: Slab) {
+    }
+
+    closed spec fn rb_inv(e: RleRebuild<L>) -> bool {
+        e.e.inv()
+    }
+
+    closed spec fn rb_data(e: RleRebuild<L>) -> Seq<u8> {
+        e.e.data()
+    }
+
+    closed spec fn rb_vals(e: RleRebuild<L>) -> Seq<VOf<'static, L>> {
+        e.e.vals()
+    }
+
+    closed spec fn rb_read(e: RleRebuild<L>) -> nat {
+        e.e.read() as nat
+    }
+
+    closed spec fn st_at(data: Seq<u8>, st: RleDecoderState, pos: nat) -> bool {
+        state_ok::<<L as WriteOps<'static>>::R>(data, st) && state_pos::<<L as WriteOps<'static>>::R>(data, st) == pos
+    }
+
+    #[verifier::external_body]
+    #[inline(always)]
+    fn carry_budget() -> usize {
+        crate::edit::RUN_BUDGET
+    }
+
+    #[inline(always)]
+    fn idle() -> RleRebuild<L> {
+        RleRebuild { e: Edit::new() }
+    }
+
+    fn empty_slab() -> (s: Slab) {
+        let s = Slab { data: Vec::new(), len: 0, segments: 0, tail: tail_rec(0, 0) };
+        proof {
+            let e = Seq::<Group<VOf<'static, L>>>::empty();
+            assert(groups_bytes::<<L as WriteOps<'static>>::R>(e) =~= s.data@);
+            assert(canonical::<<L as WriteOps<'static>>::R>(e));
+            assert(groups_values(e, <<L as WriteOps<'static>>::R as RleOps<'static>>::null()) =~= Seq::<VOf<'static, L>>::empty());
+            lemma_slab_of::<<L as WriteOps<'static>>::R>(s, Seq::empty());
+        }
+        s
+    }
+
+    fn reset(e: &mut RleRebuild<L>, s: &Slab, at: usize, max_segments: usize) {
+        if s.data.len() >= i64::MAX as usize {
+            slab_too_long();
+        }
+        proof {
+            lemma_unlift_slab::<L>(s.data@);
+            lemma_unlift_meta::<L>(s.data@);
+        }
+        e.e.reset::<L>(s.data.as_slice(), at, max_segments);
+    }
+
+    fn close(e: &mut RleRebuild<L>, s: &mut Slab) -> (spilled: Vec<Slab>) {
+        let ghost data = s.data@;
+        let ghost e0 = e.e;
+        let ghost out = e0.vals() + slab_values::<<L as WriteOps<'static>>::R>(data).skip(e0.read());
+        proof {
+            e.e.lemma_used_le();
+            e.e.lemma_room((slab_values::<<L as WriteOps<'static>>::R>(data).len() - e0.read()) as nat);
+        }
+        let mut rebuilt = e.e.close_rebuild::<L>(s.data.as_slice(), s.segments, s.len, s.tail);
+        let ghost r0 = rebuilt;
+        let ghost pre = e0.pre();
+        let ghost h0 = e0.h0();
+        let (spilled, bytes) = rebuilt.apply_to::<L>(s);
+        e.e.w.recycle(bytes);
+        proof {
+            e0.lemma_read();
+            lemma_close_ok::<L>(r0, pre, h0, data, out, old(s).tail, *s, spilled@);
+            assert(spilled@.map_values(|x: Slab| Self::vals(x)) =~= spilled@.map_values(
+                |x: Slab| slab_values::<<L as WriteOps<'static>>::R>(slab_bytes(x)),
+            ));
+        }
+        spilled
+    }
+
+    fn merge(a: &mut Slab, b: Slab) {
+        if a.len == 0 {
+            proof {
+                assert(slab_values::<<L as WriteOps<'static>>::R>(slab_bytes(*a)) =~= Seq::<VOf<'static, L>>::empty());
+                assert(Seq::<VOf<'static, L>>::empty() + slab_values::<<L as WriteOps<'static>>::R>(slab_bytes(b))
+                    =~= slab_values::<<L as WriteOps<'static>>::R>(slab_bytes(b)));
+            }
+            *a = b;
+        } else if b.len > 0 {
+            // the merge's byte and count arithmetic: no slab comes near
+            if a.data.len() >= i64::MAX as usize || a.len + b.len > usize::MAX - 3 {
+                slab_too_long();
+            }
+            let ghost a0 = *a;
+            let ghost va = slab_values::<<L as WriteOps<'static>>::R>(slab_bytes(a0));
+            let ghost vb = slab_values::<<L as WriteOps<'static>>::R>(slab_bytes(b));
+            let mut buf = Vec::new();
+            let p = merge_plan::<L>(a.data.as_slice(), a.segments, &a.tail, b.data.as_slice(), b.segments, &b.tail, &mut buf);
+            proof {
+                assert(a0.data@.skip(0) =~= a0.data@);
+            }
+            let tail = merge_apply::<L>(&mut a.data, 0, &p, buf.as_slice(), b.data.as_slice(), &b.tail);
+            a.segments = p.segments;
+            a.tail = tail;
+            a.len = a.len + b.len;
+            proof {
+                assert(a0.data@.take(0) + merge_bytes::<L>(p, a0.data@, buf@, b.data@) =~= merge_bytes::<L>(
+                    p,
+                    a0.data@,
+                    buf@,
+                    b.data@,
+                ));
+                lemma_slab_of::<<L as WriteOps<'static>>::R>(*a, va + vb);
+            }
+        } else {
+            proof {
+                assert(slab_values::<<L as WriteOps<'static>>::R>(slab_bytes(b)) =~= Seq::<VOf<'static, L>>::empty());
+                assert(slab_values::<<L as WriteOps<'static>>::R>(slab_bytes(*a)) + Seq::<VOf<'static, L>>::empty()
+                    =~= slab_values::<<L as WriteOps<'static>>::R>(slab_bytes(*a)));
+            }
+        }
+    }
+
+    #[inline(always)]
+    fn read_state(e: &RleRebuild<L>) -> &RleDecoderState {
+        e.e.dec()
+    }
+
+    fn state_at(s: &Slab, at: usize) -> (st: RleDecoderState) {
+        proof {
+            lemma_unlift_meta::<L>(s.data@);
+        }
+        let st = state_in::<L>(s.data.as_slice(), at);
+        proof {
+            lemma_lift_state::<L>(s.data@, st);
+        }
+        st
+    }
+
+    #[allow(unused_variables)]
+    fn state_advance(s: &Slab, st: &mut RleDecoderState, n: usize, pos: Ghost<nat>) {
+        proof {
+            lemma_unlift_meta::<L>(s.data@);
+            lemma_lift_state::<L>(s.data@, *st);
+        }
+        state_on::<L>(s.data.as_slice(), st, n);
+        proof {
+            lemma_lift_state::<L>(s.data@, *st);
+        }
+    }
+}
+
+/// Carry `n` of the slab's values through the rebuild, at most `runs`
+/// pushes, telling `f` each run: `Visitor::pass` for RLE slabs, which the
+/// encoding's `EditSlab::pass` forwards to.
+#[inline(always)]
+pub(crate) fn pass<'s, L, G>(e: &mut RleRebuild<L>, s: &'s Slab, n: usize, runs: usize, f: &mut G) -> (left: usize)
+    where L: for<'t> Lift<'t, W = L>, G: Visit<VOf<'s, L>>,
+    requires
+        RleModel::<L>::rb_inv(*old(e)),
+        RleModel::<L>::ok(*s),
+        RleModel::<L>::rb_data(*old(e)) == s.data@,
+        RleModel::<L>::rb_read(*old(e)) + n <= s.len,
+        RleModel::<L>::rb_vals(*old(e)).len() + n + 3 <= usize::MAX,
+    ensures
+        RleModel::<L>::rb_inv(*final(e)),
+        RleModel::<L>::rb_data(*final(e)) == s.data@,
+        left <= n,
+        RleModel::<L>::rb_read(*final(e)) == RleModel::<L>::rb_read(*old(e)) + (n - left),
+        RleModel::<L>::rb_vals(*final(e)) == RleModel::<L>::rb_vals(*old(e)) + RleModel::<L>::vals(*s).subrange(
+            RleModel::<L>::rb_read(*old(e)) as int,
+            RleModel::<L>::rb_read(*old(e)) + (n - left),
+        ),
+{
+    let ghost e0 = e.e;
+    proof {
+        e.e.lemma_used_le();
+        e.e.lemma_room(n as nat);
+        e.e.lemma_read();
+        lemma_unlift_slab::<L>(s.data@);
+        lemma_lift_slab::<L>(s.data@);
+    }
+    let left = e.e.walk::<L, G>(s.data.as_slice(), n, true, runs, f);
+    proof {
+        let lv = slab_values::<<L as WriteOps<'s>>::R>(s.data@);
+        assert(lift_seq::<L>(lv.subrange(e0.read(), e.e.read())) =~= slab_values::<<L as WriteOps<'static>>::R>(
+            s.data@,
+        ).subrange(e0.read(), e.e.read()));
+    }
+    left
+}
+
+/// Drop `n` of the slab's values from the rebuild, telling `f` each run:
+/// `Visitor::discard` for RLE slabs.
+#[inline(always)]
+pub(crate) fn discard<'s, L, G>(e: &mut RleRebuild<L>, s: &'s Slab, n: usize, f: &mut G)
+    where L: for<'t> Lift<'t, W = L>, G: Visit<VOf<'s, L>>,
+    requires
+        RleModel::<L>::rb_inv(*old(e)),
+        RleModel::<L>::ok(*s),
+        RleModel::<L>::rb_data(*old(e)) == s.data@,
+        RleModel::<L>::rb_read(*old(e)) + n <= s.len,
+    ensures
+        RleModel::<L>::rb_inv(*final(e)),
+        RleModel::<L>::rb_data(*final(e)) == s.data@,
+        RleModel::<L>::rb_read(*final(e)) == RleModel::<L>::rb_read(*old(e)) + n,
+        RleModel::<L>::rb_vals(*final(e)) == RleModel::<L>::rb_vals(*old(e)),
+{
+    let ghost v0 = e.e.vals();
+    proof {
+        e.e.lemma_read();
+    }
+    e.e.walk::<L, G>(s.data.as_slice(), n, false, usize::MAX, f);
+    assert(e.e.vals() =~= v0);
+}
+
 } // verus!
 
 // Outside `verus!`: a closure is a visitor that calls itself.
@@ -486,18 +883,13 @@ impl<V, F: FnMut(V, usize)> Visit<V> for F {
     }
 }
 
-/// A rebuild in progress within one slab.
-///
-/// Positions are item offsets into the slab as it was when the edit
-/// opened. The verified core is `Edit`; this drives it with the
-/// slab's bytes, and keeps the slab metadata.
-pub struct RleEdit<T: RleValue, C: Codec> {
-    e: Edit<WOps<'static, T, T, C>>,
-}
+/// A rebuild in progress within one RLE slab, verified with Verus (`Edit`,
+/// and what the column cursor does with it: `RleModel`).
+pub type RleEdit<T, C> = RleRebuild<WOps<T, T, C>>;
 
-impl<T: RleValue, C: Codec> Default for RleEdit<T, C> {
+impl<M: WriteOps<'static>> Default for RleRebuild<M> {
     fn default() -> Self {
-        RleEdit { e: Edit::new() }
+        RleRebuild { e: Edit::new() }
     }
 }
 
@@ -512,34 +904,15 @@ impl<T: RleValue, C: Codec> RleEdit<T, C> {
     }
 }
 
-impl<T: RleValue, C: Codec> RleEdit<T, C> {
-    /// Move the read cursor `n` items forward, pushing them into the
-    /// rebuild when `emit` — the difference between carrying items and
-    /// dropping them. Returns what it did not take.
-    ///
-    /// Reading starts where the last walk stopped, so nothing is decoded
-    /// twice. `budget` caps the pushes an emitting walk makes; a dropping
-    /// one has to consume what it was asked for and passes none. `f` sees
-    /// every run either way, which is how a wrapper keeping an
-    /// accumulator — a delta column's running value — stays in step.
-    fn walk<F>(&mut self, slab: &Slab, n: usize, emit: bool, budget: usize, f: &mut F) -> usize
-    where
-        F: FnMut(T::Get<'_>, usize),
-    {
-        // verified with Verus (`Edit::walk`)
-        self.e
-            .walk::<WOps<'_, T, T, C>, F>(&slab.data, n, emit, budget, f)
-    }
-}
-
+// Forwards to the verified RLE slab model; the column cursor calls the
+// model directly, and reaches `pass`, `insert` and `delete` through here.
 impl<T: RleValue, C: Codec> EditSlab for RleEdit<T, C> {
     type Tail = RleTail;
     type Value = T;
     type State = RleDecoderState;
 
     fn reset(&mut self, slab: &Slab, at: usize, max_segments: usize) {
-        self.e
-            .reset::<WOps<'_, T, T, C>>(&slab.data, at, max_segments);
+        <RleModel<WOps<T, T, C>> as Slabs>::reset(self, slab, at, max_segments)
     }
 
     /// Carry `n` of the slab's items through the rebuild unchanged,
@@ -552,7 +925,7 @@ impl<T: RleValue, C: Codec> EditSlab for RleEdit<T, C> {
     where
         F: FnMut(T::Get<'_>, usize),
     {
-        self.walk(slab, n, true, runs, f)
+        pass::<WOps<T, T, C>, F>(self, slab, n, runs, f)
     }
 
     /// Insert `n` copies of `value` at the cursor.
@@ -564,15 +937,13 @@ impl<T: RleValue, C: Codec> EditSlab for RleEdit<T, C> {
         self.e.insert_cow(RleCow::Owned(value), n);
     }
 
-    /// Drop `n` of the slab's items at the cursor. Returns the count the
-    /// slab could not supply, for the caller to cascade into the ones
-    /// that follow.
+    /// Drop `n` of the slab's items at the cursor.
     fn delete<F>(&mut self, slab: &Slab, n: usize, f: &mut F)
     where
         F: FnMut(T::Get<'_>, usize),
     {
         debug_assert!(n <= slab.len, "delete past the end of the slab");
-        self.walk(slab, n, false, usize::MAX, f);
+        discard::<WOps<T, T, C>, F>(self, slab, n, f)
     }
 
     fn read_state(&self) -> &RleDecoderState {
@@ -583,18 +954,7 @@ impl<T: RleValue, C: Codec> EditSlab for RleEdit<T, C> {
     /// the rebuilt region back, and return any slabs the rebuild spilled
     /// into (to be inserted after this one).
     fn close(&mut self, slab: &mut Slab) -> Vec<Slab> {
-        // verified with Verus: the rebuild (`Edit::close_rebuild`) leaves
-        // `rebuilt_ok`, and writing it back (`Rebuilt::apply_bytes`) gives
-        // the slab those bytes
-        let mut rebuilt = self.e.close_rebuild::<WOps<'_, T, T, C>>(
-            &slab.data,
-            slab.segments,
-            slab.len,
-            slab.tail,
-        );
-        let (spilled, bytes) = rebuilt.apply::<T, C>(slab);
-        self.e.w.recycle(bytes);
-        spilled
+        <RleModel<WOps<T, T, C>> as Slabs>::close(self, slab)
     }
 }
 
@@ -608,7 +968,7 @@ where
     T: crate::ColumnValueRef<Encoding<C> = Self>,
 {
     type Edit = RleEdit<T, C>;
-    type Model = crate::cursor::Trusted<Self>;
+    type Model = RleModel<WOps<T, T, C>>;
 }
 
 #[cfg(test)]

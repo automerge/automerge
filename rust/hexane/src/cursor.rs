@@ -13,16 +13,13 @@
 //! `wf` and to do exactly what it says to `p` and the original position.
 //!
 //! The slab-level operations are the encodings' own, through each
-//! encoding's slab model ([`Slabs`], named by `SlabEdit::Model`).  Bool
-//! columns' model is verified against the bool format
-//! ([`BoolModel`](crate::bool_edit::BoolModel)).  RLE's ([`Trusted`])
-//! assumes the contract of the RLE rebuilds, merges and readers, each
-//! verified on its own: its bridge at the bottom of this file is one-line
-//! forwards, outside `verus!` because RLE columns are generic over value
-//! types with lifetimes Verus can't name.  So are the dispatch of
-//! closures and inserted values to an encoding's rebuild (`Visiting`,
-//! `Inserting`) and the weight functions (`Weigh`: a slab's weight counts
-//! its items).  The index is verified ([`IndexOps`]); for delta columns,
+//! encoding's slab model ([`Slabs`], named by `SlabEdit::Model`), which
+//! is verified against its format: bool columns'
+//! ([`BoolModel`](crate::bool_edit::BoolModel)) and RLE columns'
+//! ([`RleModel`](crate::rle::edit::RleModel)).  Trusted, in the bridges
+//! at the bottom of this file: the dispatch of closures and inserted
+//! values to an encoding's rebuild (`Visiting`, `Inserting`), and the
+//! weight functions (`Weigh`: a slab's weight counts its items).  The index is verified ([`IndexOps`]); for delta columns,
 //! whose index aggregates sums, that the sums fit is assumed (`plain`).
 
 // Verus has no specs for `Vec::is_empty`, slices from `&Vec` or `vec![x]`,
@@ -55,11 +52,8 @@ verus! {
 // ── The encodings' slab operations ─────────────────────────────────────────
 
 /// The slab operations a cursor drives, specified against each slab's
-/// values: an encoding's slab model, named by
-/// [`SlabEdit::Model`].  Bool columns'
-/// ([`BoolModel`](crate::bool_edit::BoolModel)) is verified against the
-/// bool format; RLE's ([`Trusted`]) forwards to the encoding's own
-/// operations on trust (below).
+/// values: an encoding's slab model, named by [`SlabEdit::Model`], and
+/// verified against its format.
 pub(crate) trait Slabs {
     type Tail: Copy + Clone + std::fmt::Debug + Default;
 
@@ -1724,110 +1718,15 @@ impl<E: Slabs> Cursor<E> {
 // ── Trusted bridges ────────────────────────────────────────────────────────
 //
 // Outside `verus!`, so Verus takes them on trust; their spec items exist
-// only when Verus compiles the crate.  Each is a one-line forward to the
-// encoding's own operation — for RLE columns, the verified rebuilds
-// (`rle::edit::Edit`), merges and readers — and what is trusted is that
-// those meet the contracts above.  (Bool columns' model is verified
-// instead; only the closure and value dispatch reaches it from here.)
+// only when Verus compiles the crate.  Each is a one-line forward: a
+// closure or a value to the encoding's rebuild (which forwards in turn to
+// verified functions with the contracts above), and a slab to its
+// weight.
 
 use crate::column::{TailOf, WeightFn};
 use crate::edit::{EditSlab, SlabEdit};
 use crate::encoding::ColumnEncoding;
 use crate::{AsColumnRef, Codec, ColumnValueRef};
-
-/// The slab model of an encoding whose slab operations are trusted to meet
-/// [`Slabs`]: each method forwards to the encoding's own.
-pub struct Trusted<E>(PhantomData<fn() -> E>);
-
-impl<E: SlabEdit> Slabs for Trusted<E> {
-    type Tail = <E as ColumnEncoding>::Tail;
-    type Rebuild = <E as SlabEdit>::Edit;
-    type State = <E as ColumnEncoding>::State;
-    type V = <E as ColumnEncoding>::Value;
-
-    #[cfg(verus_keep_ghost)]
-    fn ok(_s: Slab<Self::Tail>) -> bool {
-        unimplemented!()
-    }
-
-    #[cfg(verus_keep_ghost)]
-    fn vals(_s: Slab<Self::Tail>) -> Seq<Self::V> {
-        unimplemented!()
-    }
-
-    #[cfg(verus_keep_ghost)]
-    fn lemma_len(_s: Slab<Self::Tail>) {}
-
-    #[cfg(verus_keep_ghost)]
-    fn rb_inv(_e: Self::Rebuild) -> bool {
-        unimplemented!()
-    }
-
-    #[cfg(verus_keep_ghost)]
-    fn rb_data(_e: Self::Rebuild) -> Seq<u8> {
-        unimplemented!()
-    }
-
-    #[cfg(verus_keep_ghost)]
-    fn rb_vals(_e: Self::Rebuild) -> Seq<Self::V> {
-        unimplemented!()
-    }
-
-    #[cfg(verus_keep_ghost)]
-    fn rb_read(_e: Self::Rebuild) -> nat {
-        unimplemented!()
-    }
-
-    #[cfg(verus_keep_ghost)]
-    fn st_at(_data: Seq<u8>, _st: Self::State, _pos: nat) -> bool {
-        unimplemented!()
-    }
-
-    #[inline(always)]
-    fn carry_budget() -> usize {
-        <E as SlabEdit>::CARRY_BUDGET
-    }
-
-    #[inline(always)]
-    fn idle() -> Self::Rebuild {
-        Default::default()
-    }
-
-    #[inline(always)]
-    fn empty_slab() -> Slab<Self::Tail> {
-        <E as ColumnEncoding>::empty_slab()
-    }
-
-    #[inline(always)]
-    fn reset(e: &mut Self::Rebuild, s: &Slab<Self::Tail>, at: usize, max_segments: usize) {
-        EditSlab::reset(e, s, at, max_segments)
-    }
-
-    #[inline(always)]
-    fn close(e: &mut Self::Rebuild, s: &mut Slab<Self::Tail>) -> Vec<Slab<Self::Tail>> {
-        EditSlab::close(e, s)
-    }
-
-    #[inline(always)]
-    fn merge(a: &mut Slab<Self::Tail>, b: Slab<Self::Tail>) {
-        <E as ColumnEncoding>::merge_slabs(a, b)
-    }
-
-    #[inline(always)]
-    fn read_state(e: &Self::Rebuild) -> &Self::State {
-        EditSlab::read_state(e)
-    }
-
-    #[inline(always)]
-    fn state_at(s: &Slab<Self::Tail>, at: usize) -> Self::State {
-        <E as ColumnEncoding>::state_at(s, at)
-    }
-
-    #[inline(always)]
-    fn state_advance(s: &Slab<Self::Tail>, st: &mut Self::State, n: usize, _pos: Ghost<nat>) {
-        <E as ColumnEncoding>::state_advance(s, st, n)
-    }
-}
 
 /// A closure seeing each run a cursor carries or drops, as the
 /// [`Visitor`] of encoding `E`'s slab model: it hands the closure to the
@@ -1881,7 +1780,7 @@ impl<E: SlabEdit, X: AsColumnRef<<E as ColumnEncoding>::Value>> Insertable<<E as
     for Inserting<E, X>
 {
     #[cfg(verus_keep_ghost)]
-    fn val(&self) -> <E as ColumnEncoding>::Value {
+    fn val(&self) -> <<E as SlabEdit>::Model as Slabs>::V {
         unimplemented!()
     }
 

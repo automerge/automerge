@@ -544,10 +544,8 @@ pub(crate) proof fn lemma_unlift_meta<'s, L: Lift<'s>>(data: Seq<u8>)
 
 // Outside `verus!`, so Verus takes it on trust; its spec items exist only
 // when Verus compiles the crate.
-impl<'s, T: crate::RleValue, V: crate::AsColumnRef<T>, C: crate::Codec> Lift<'s>
-    for WOps<'s, T, V, C>
-{
-    type W = WOps<'static, T, T, C>;
+impl<'s, T: crate::RleValue, V: crate::AsColumnRef<T>, C: crate::Codec> Lift<'s> for WOps<T, V, C> {
+    type W = WOps<T, T, C>;
 
     #[cfg(verus_keep_ghost)]
     fn lift(_v: VOf<'s, Self>) -> VOf<'static, Self::W> {

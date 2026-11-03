@@ -668,7 +668,7 @@ proof fn lemma_cut_reset<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>, il: bool, k: n
 }
 
 /// A last literal value's bytes are among its group's.
-proof fn lemma_lit_tail_le<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>)
+pub(crate) proof fn lemma_lit_tail_le<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>)
     requires canonical::<O>(gs),
     ensures lit_tail_of::<O>(gs) <= tail_bytes_of::<O>(gs),
 {
