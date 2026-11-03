@@ -320,7 +320,7 @@ pub enum Group<V> {
 }
 
 /// The values a group stands for; `null` is the column type's null.
-pub open spec fn group_values<V>(g: Group<V>, null: V) -> Seq<V> {
+pub(crate) open spec fn group_values<V>(g: Group<V>, null: V) -> Seq<V> {
     match g {
         Group::Run { count, value } => Seq::new(count, |_i| value),
         Group::Lit { values } => values,
@@ -329,7 +329,7 @@ pub open spec fn group_values<V>(g: Group<V>, null: V) -> Seq<V> {
 }
 
 /// The number of values a group stands for.
-pub open spec fn group_len<V>(g: Group<V>) -> nat {
+pub(crate) open spec fn group_len<V>(g: Group<V>) -> nat {
     match g {
         Group::Run { count, .. } => count,
         Group::Lit { values } => values.len(),
@@ -338,7 +338,7 @@ pub open spec fn group_len<V>(g: Group<V>) -> nat {
 }
 
 /// The number of values a sequence of groups stands for.
-pub open spec fn groups_len<V>(gs: Seq<Group<V>>) -> nat
+pub(crate) open spec fn groups_len<V>(gs: Seq<Group<V>>) -> nat
     decreases gs.len(),
 {
     if gs.len() == 0 { 0 } else { groups_len(gs.drop_last()) + group_len(gs.last()) }
@@ -346,35 +346,35 @@ pub open spec fn groups_len<V>(gs: Seq<Group<V>>) -> nat
 
 /// A slab's segment count: one per repeat or null run, one per literal
 /// value.
-pub open spec fn group_segments<V>(g: Group<V>) -> nat {
+pub(crate) open spec fn group_segments<V>(g: Group<V>) -> nat {
     match g {
         Group::Lit { values } => values.len(),
         _ => 1,
     }
 }
 
-pub open spec fn groups_segments<V>(gs: Seq<Group<V>>) -> nat
+pub(crate) open spec fn groups_segments<V>(gs: Seq<Group<V>>) -> nat
     decreases gs.len(),
 {
     if gs.len() == 0 { 0 } else { groups_segments(gs.drop_last()) + group_segments(gs.last()) }
 }
 
 /// The values of a sequence of groups.
-pub open spec fn groups_values<V>(gs: Seq<Group<V>>, null: V) -> Seq<V>
+pub(crate) open spec fn groups_values<V>(gs: Seq<Group<V>>, null: V) -> Seq<V>
     decreases gs.len(),
 {
     if gs.len() == 0 { Seq::empty() } else { groups_values(gs.drop_last(), null) + group_values(gs.last(), null) }
 }
 
 /// The concatenated encodings of `vs`.
-pub open spec fn encs<'a, O: RleOps<'a>>(vs: Seq<O::V>) -> Seq<u8>
+pub(crate) open spec fn encs<'a, O: RleOps<'a>>(vs: Seq<O::V>) -> Seq<u8>
     decreases vs.len(),
 {
     if vs.len() == 0 { Seq::empty() } else { encs::<O>(vs.drop_last()) + O::enc(vs.last()) }
 }
 
 /// A group's bytes.
-pub open spec fn group_bytes<'a, O: RleOps<'a>>(g: Group<O::V>) -> Seq<u8> {
+pub(crate) open spec fn group_bytes<'a, O: RleOps<'a>>(g: Group<O::V>) -> Seq<u8> {
     match g {
         Group::Run { count, value } => O::enc_signed(count as i64) + O::enc(value),
         Group::Lit { values } => O::enc_signed(-(values.len() as int) as i64) + encs::<O>(values),
@@ -383,7 +383,7 @@ pub open spec fn group_bytes<'a, O: RleOps<'a>>(g: Group<O::V>) -> Seq<u8> {
 }
 
 /// A slab's bytes.
-pub open spec fn groups_bytes<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>) -> Seq<u8>
+pub(crate) open spec fn groups_bytes<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>) -> Seq<u8>
     decreases gs.len(),
 {
     if gs.len() == 0 { Seq::empty() } else { groups_bytes::<O>(gs.drop_last()) + group_bytes::<O>(gs.last()) }
@@ -393,7 +393,7 @@ pub open spec fn groups_bytes<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>) -> Seq<u8
 /// non-null values, a nonempty literal of non-null values with no two
 /// equal neighbours, or a nonempty null run in a nullable column — each
 /// with a count its header can hold.
-pub open spec fn group_ok<'a, O: RleOps<'a>>(g: Group<O::V>) -> bool {
+pub(crate) open spec fn group_ok<'a, O: RleOps<'a>>(g: Group<O::V>) -> bool {
     match g {
         Group::Run { count, value } => 2 <= count <= i64::MAX && !O::is_null(value),
         Group::Lit { values } => {
@@ -406,7 +406,7 @@ pub open spec fn group_ok<'a, O: RleOps<'a>>(g: Group<O::V>) -> bool {
 }
 
 /// `b` may follow `a`: the two could not be one group, or regrouped.
-pub open spec fn adjacent_ok<V>(a: Group<V>, b: Group<V>) -> bool {
+pub(crate) open spec fn adjacent_ok<V>(a: Group<V>, b: Group<V>) -> bool {
     match (a, b) {
         (Group::Lit { .. }, Group::Lit { .. }) => false,
         (Group::Null { .. }, Group::Null { .. }) => false,
@@ -418,13 +418,13 @@ pub open spec fn adjacent_ok<V>(a: Group<V>, b: Group<V>) -> bool {
 }
 
 /// The groups are the canonical encoding of their values.
-pub open spec fn canonical<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>) -> bool {
+pub(crate) open spec fn canonical<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>) -> bool {
     &&& forall|i: int| 0 <= i < gs.len() ==> group_ok::<O>(#[trigger] gs[i])
     &&& forall|i: int| 0 < i < gs.len() ==> adjacent_ok(gs[i - 1], #[trigger] gs[i])
 }
 
 /// A repeat run's value.
-pub open spec fn run_value<V>(g: Group<V>) -> V {
+pub(crate) open spec fn run_value<V>(g: Group<V>) -> V {
     match g {
         Group::Run { value, .. } => value,
         _ => arbitrary(),
@@ -432,12 +432,12 @@ pub open spec fn run_value<V>(g: Group<V>) -> V {
 }
 
 /// A literal run's header, for `k` values.
-pub open spec fn lit_head<'a, O: RleOps<'a>>(k: nat) -> Seq<u8> {
+pub(crate) open spec fn lit_head<'a, O: RleOps<'a>>(k: nat) -> Seq<u8> {
     O::enc_signed(-(k as int) as i64)
 }
 
 /// A group's header value.
-pub open spec fn header_of<V>(g: Group<V>) -> int {
+pub(crate) open spec fn header_of<V>(g: Group<V>) -> int {
     match g {
         Group::Run { count, .. } => count as int,
         Group::Lit { values } => -(values.len() as int),
@@ -446,7 +446,7 @@ pub open spec fn header_of<V>(g: Group<V>) -> int {
 }
 
 /// A group's bytes after its header.
-pub open spec fn payload<'a, O: RleOps<'a>>(g: Group<O::V>) -> Seq<u8> {
+pub(crate) open spec fn payload<'a, O: RleOps<'a>>(g: Group<O::V>) -> Seq<u8> {
     match g {
         Group::Run { value, .. } => O::enc(value),
         Group::Lit { values } => encs::<O>(values),
@@ -457,7 +457,7 @@ pub open spec fn payload<'a, O: RleOps<'a>>(g: Group<O::V>) -> Seq<u8> {
 /// A canonical encoding of `data` of at most `usize::MAX` values, which
 /// a slab's length can count.
 #[verifier::opaque]
-pub open spec fn parses<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>, data: Seq<u8>) -> bool {
+pub(crate) open spec fn parses<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>, data: Seq<u8>) -> bool {
     &&& canonical::<O>(gs)
     &&& groups_len(gs) <= usize::MAX
     &&& groups_bytes::<O>(gs) == data
@@ -465,7 +465,7 @@ pub open spec fn parses<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>, data: Seq<u8>) 
 
 // ── Lemmas ──────────────────────────────────────────────────────────────────
 
-pub proof fn lemma_groups_bytes_concat<'a, O: RleOps<'a>>(a: Seq<Group<O::V>>, b: Seq<Group<O::V>>)
+pub(crate) proof fn lemma_groups_bytes_concat<'a, O: RleOps<'a>>(a: Seq<Group<O::V>>, b: Seq<Group<O::V>>)
     ensures groups_bytes::<O>(a + b) == groups_bytes::<O>(a) + groups_bytes::<O>(b),
     decreases b.len(),
 {
@@ -477,7 +477,7 @@ pub proof fn lemma_groups_bytes_concat<'a, O: RleOps<'a>>(a: Seq<Group<O::V>>, b
     }
 }
 
-pub proof fn lemma_groups_len_concat<V>(a: Seq<Group<V>>, b: Seq<Group<V>>)
+pub(crate) proof fn lemma_groups_len_concat<V>(a: Seq<Group<V>>, b: Seq<Group<V>>)
     ensures
         groups_len(a + b) == groups_len(a) + groups_len(b),
         groups_segments(a + b) == groups_segments(a) + groups_segments(b),
@@ -491,7 +491,7 @@ pub proof fn lemma_groups_len_concat<V>(a: Seq<Group<V>>, b: Seq<Group<V>>)
     }
 }
 
-pub proof fn lemma_encs_concat<'a, O: RleOps<'a>>(a: Seq<O::V>, b: Seq<O::V>)
+pub(crate) proof fn lemma_encs_concat<'a, O: RleOps<'a>>(a: Seq<O::V>, b: Seq<O::V>)
     ensures encs::<O>(a + b) == encs::<O>(a) + encs::<O>(b),
     decreases b.len(),
 {
@@ -504,7 +504,7 @@ pub proof fn lemma_encs_concat<'a, O: RleOps<'a>>(a: Seq<O::V>, b: Seq<O::V>)
 }
 
 /// The bytes of the groups from `n` on, split off their first.
-pub proof fn lemma_groups_bytes_at<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>, n: int)
+pub(crate) proof fn lemma_groups_bytes_at<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>, n: int)
     requires 0 <= n < gs.len(),
     ensures
         groups_bytes::<O>(gs) == groups_bytes::<O>(gs.take(n)) + group_bytes::<O>(gs[n])
@@ -519,7 +519,7 @@ pub proof fn lemma_groups_bytes_at<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>, n: i
 }
 
 /// The bytes of values from `n` on, split off their first.
-pub proof fn lemma_encs_at<'a, O: RleOps<'a>>(vs: Seq<O::V>, n: int)
+pub(crate) proof fn lemma_encs_at<'a, O: RleOps<'a>>(vs: Seq<O::V>, n: int)
     requires 0 <= n < vs.len(),
     ensures encs::<O>(vs) == encs::<O>(vs.take(n)) + O::enc(vs[n]) + encs::<O>(vs.skip(n + 1)),
 {
@@ -533,7 +533,7 @@ pub proof fn lemma_encs_at<'a, O: RleOps<'a>>(vs: Seq<O::V>, n: int)
 
 /// Two strings that start with encodings of `a` and `b` and are equal
 /// start with the same one.
-pub proof fn lemma_same_start(x: Seq<u8>, s: Seq<u8>, y: Seq<u8>, t: Seq<u8>, rest: Seq<u8>)
+pub(crate) proof fn lemma_same_start(x: Seq<u8>, s: Seq<u8>, y: Seq<u8>, t: Seq<u8>, rest: Seq<u8>)
     requires x + s == y + t, x.len() == y.len(),
     ensures x == y, s == t,
 {
@@ -546,12 +546,12 @@ pub proof fn lemma_same_start(x: Seq<u8>, s: Seq<u8>, y: Seq<u8>, t: Seq<u8>, re
 // ── Uniqueness: bytes determine groups ──────────────────────────────────────
 
 /// Groups each of which a writer may emit on its own.
-pub open spec fn all_ok<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>) -> bool {
+pub(crate) open spec fn all_ok<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>) -> bool {
     forall|i: int| 0 <= i < gs.len() ==> group_ok::<O>(#[trigger] gs[i])
 }
 
 /// A sequence's bytes, split after its first group.
-pub proof fn lemma_groups_bytes_first<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>)
+pub(crate) proof fn lemma_groups_bytes_first<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>)
     requires gs.len() > 0,
     ensures groups_bytes::<O>(gs) == group_bytes::<O>(gs[0]) + groups_bytes::<O>(gs.skip(1)),
 {
@@ -563,7 +563,7 @@ pub proof fn lemma_groups_bytes_first<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>)
 }
 
 /// Values' bytes, split after the first.
-pub proof fn lemma_encs_first<'a, O: RleOps<'a>>(vs: Seq<O::V>)
+pub(crate) proof fn lemma_encs_first<'a, O: RleOps<'a>>(vs: Seq<O::V>)
     requires vs.len() > 0,
     ensures encs::<O>(vs) == O::enc(vs[0]) + encs::<O>(vs.skip(1)),
 {
@@ -636,7 +636,7 @@ proof fn lemma_group_unique<'a, O: RleOps<'a>>(g: Group<O::V>, h: Group<O::V>, s
 }
 
 /// A group's bytes are nonempty.
-pub proof fn lemma_group_bytes_nonempty<'a, O: RleOps<'a>>(g: Group<O::V>)
+pub(crate) proof fn lemma_group_bytes_nonempty<'a, O: RleOps<'a>>(g: Group<O::V>)
     ensures group_bytes::<O>(g).len() > 0,
 {
     O::axiom_enc_signed(header_of(g) as i64, 0, Seq::empty(), Seq::empty());
@@ -654,7 +654,7 @@ pub proof fn lemma_group_bytes_nonempty<'a, O: RleOps<'a>>(g: Group<O::V>)
 }
 
 /// Writable groups are determined by their bytes.
-pub proof fn lemma_groups_unique<'a, O: RleOps<'a>>(a: Seq<Group<O::V>>, b: Seq<Group<O::V>>)
+pub(crate) proof fn lemma_groups_unique<'a, O: RleOps<'a>>(a: Seq<Group<O::V>>, b: Seq<Group<O::V>>)
     requires all_ok::<O>(a), all_ok::<O>(b), groups_bytes::<O>(a) == groups_bytes::<O>(b),
     ensures a == b,
     decreases a.len() + b.len(),

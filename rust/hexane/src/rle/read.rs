@@ -77,7 +77,7 @@ pub(crate) open spec fn lit_prefix_ok<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>, c
 }
 
 /// `s` starts with `p`.
-pub open spec fn starts<T>(s: Seq<T>, p: Seq<T>) -> bool {
+pub(crate) open spec fn starts<T>(s: Seq<T>, p: Seq<T>) -> bool {
     p.len() <= s.len() && s.take(p.len() as int) == p
 }
 
@@ -135,7 +135,7 @@ pub(crate) proof fn lemma_value<'a, O: RleOps<'a>>(s: Seq<u8>, h: O::V, q: Seq<u
 
 /// The bytes of groups `gs`, then, if `k > 0`, the header of a literal
 /// of `k` values and its values `cur`.
-pub open spec fn read_bytes<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>, k: nat, cur: Seq<O::V>) -> Seq<u8> {
+pub(crate) open spec fn read_bytes<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>, k: nat, cur: Seq<O::V>) -> Seq<u8> {
     if k > 0 {
         groups_bytes::<O>(gs) + lit_head::<O>(k) + encs::<O>(cur)
     } else {
@@ -144,14 +144,14 @@ pub open spec fn read_bytes<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>, k: nat, cur
 }
 
 /// No acceptable parse of `data` exists.
-pub open spec fn no_parse<'a, O: RleOps<'a>>(data: Seq<u8>) -> bool {
+pub(crate) open spec fn no_parse<'a, O: RleOps<'a>>(data: Seq<u8>) -> bool {
     forall|g2: Seq<Group<O::V>>| !parses::<O>(g2, data)
 }
 
 /// Every acceptable parse of `data` begins with `gs` and, if `k > 0`, a
 /// literal of `k` values beginning with `cur`.
 #[verifier::opaque]
-pub open spec fn complete<'a, O: RleOps<'a>>(data: Seq<u8>, gs: Seq<Group<O::V>>, k: nat, cur: Seq<O::V>) -> bool {
+pub(crate) open spec fn complete<'a, O: RleOps<'a>>(data: Seq<u8>, gs: Seq<Group<O::V>>, k: nat, cur: Seq<O::V>) -> bool {
     forall|g2: Seq<Group<O::V>>| #[trigger] parses::<O>(g2, data) ==> {
         &&& g2.len() >= gs.len()
         &&& g2.take(gs.len() as int) == gs
@@ -164,7 +164,7 @@ pub open spec fn complete<'a, O: RleOps<'a>>(data: Seq<u8>, gs: Seq<Group<O::V>>
 /// Every acceptable parse of `data` continues `gs` with a group whose
 /// header is `h` and whose payload, then the rest, starts at byte `p`.
 #[verifier::opaque]
-pub open spec fn header_at<'a, O: RleOps<'a>>(data: Seq<u8>, gs: Seq<Group<O::V>>, h: int, p: int) -> bool {
+pub(crate) open spec fn header_at<'a, O: RleOps<'a>>(data: Seq<u8>, gs: Seq<Group<O::V>>, h: int, p: int) -> bool {
     forall|g2: Seq<Group<O::V>>| #[trigger] parses::<O>(g2, data) ==> {
         &&& g2.len() > gs.len()
         &&& g2.take(gs.len() as int) == gs
@@ -177,7 +177,7 @@ pub open spec fn header_at<'a, O: RleOps<'a>>(data: Seq<u8>, gs: Seq<Group<O::V>
 /// values beginning with `cur`, whose remaining values, then the rest,
 /// start at byte `p`.
 #[verifier::opaque]
-pub open spec fn lit_at<'a, O: RleOps<'a>>(data: Seq<u8>, gs: Seq<Group<O::V>>, k: nat, cur: Seq<O::V>, p: int) -> bool {
+pub(crate) open spec fn lit_at<'a, O: RleOps<'a>>(data: Seq<u8>, gs: Seq<Group<O::V>>, k: nat, cur: Seq<O::V>, p: int) -> bool {
     forall|g2: Seq<Group<O::V>>| #[trigger] parses::<O>(g2, data) ==> {
         &&& g2.len() > gs.len()
         &&& g2.take(gs.len() as int) == gs
@@ -482,7 +482,7 @@ proof fn lemma_complete_push<'a, O: RleOps<'a>>(data: Seq<u8>, gs: Seq<Group<O::
 }
 
 /// Every acceptable parse has `value` next in the literal.
-pub open spec fn value_next<'a, O: RleOps<'a>>(data: Seq<u8>, gs: Seq<Group<O::V>>, cur: Seq<O::V>, value: O::V) -> bool {
+pub(crate) open spec fn value_next<'a, O: RleOps<'a>>(data: Seq<u8>, gs: Seq<Group<O::V>>, cur: Seq<O::V>, value: O::V) -> bool {
     forall|g2: Seq<Group<O::V>>| #[trigger] parses::<O>(g2, data) ==> g2[gs.len() as int]->values[cur.len() as int] == value
 }
 
@@ -586,31 +586,31 @@ pub(crate) struct Reader<'a, O: RleOps<'a>> {
 }
 
 impl<'a, O: RleOps<'a>> Reader<'a, O> {
-    pub closed spec fn data(&self) -> Seq<u8> {
+    pub(crate) closed spec fn data(&self) -> Seq<u8> {
         self.data@
     }
 
     /// The complete groups read.
-    pub closed spec fn groups(&self) -> Seq<Group<O::V>> {
+    pub(crate) closed spec fn groups(&self) -> Seq<Group<O::V>> {
         self.gs@
     }
 
-    pub closed spec fn spec_pos(&self) -> int {
+    pub(crate) closed spec fn spec_pos(&self) -> int {
         self.pos as int
     }
 
     /// Inside a literal run.
-    pub closed spec fn in_lit(&self) -> bool {
+    pub(crate) closed spec fn in_lit(&self) -> bool {
         self.lit_k@ > 0
     }
 
     /// Inside a literal run: the values read so far.
-    pub closed spec fn lit_values(&self) -> Seq<O::V> {
+    pub(crate) closed spec fn lit_values(&self) -> Seq<O::V> {
         self.cur@
     }
 
     /// Inside a literal run: its header's count (else 0).
-    pub closed spec fn lit_k(&self) -> nat {
+    pub(crate) closed spec fn lit_k(&self) -> nat {
         self.lit_k@
     }
 
@@ -632,7 +632,7 @@ impl<'a, O: RleOps<'a>> Reader<'a, O> {
         assert(self.data@.take(self.pos as int).len() == self.pos);
     }
 
-    pub closed spec fn inv(&self) -> bool {
+    pub(crate) closed spec fn inv(&self) -> bool {
         &&& self.pos <= self.data.len()
         &&& self.data@.take(self.pos as int) == read_bytes::<O>(self.gs@, self.lit_k@, self.cur@)
         &&& canonical::<O>(self.gs@)
@@ -1156,12 +1156,12 @@ impl<'a, O: RleOps<'a>> Reader<'a, O> {
 // ── Validating a whole slab ─────────────────────────────────────────────────
 
 /// The byte length of the last group: the slab's tail.
-pub open spec fn tail_bytes_of<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>) -> nat {
+pub(crate) open spec fn tail_bytes_of<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>) -> nat {
     if gs.len() == 0 { 0 } else { group_bytes::<O>(gs.last()).len() }
 }
 
 /// If the last group is a literal, the byte length of its last value.
-pub open spec fn lit_tail_of<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>) -> nat {
+pub(crate) open spec fn lit_tail_of<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>) -> nat {
     if gs.len() > 0 && gs.last() is Lit { O::enc(gs.last()->values.last()).len() } else { 0 }
 }
 
@@ -1197,7 +1197,7 @@ pub(crate) struct Summary {
 }
 
 /// The last group fits a slab's tail record: under 4 GiB.
-pub open spec fn tail_fits<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>) -> bool {
+pub(crate) open spec fn tail_fits<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>) -> bool {
     gs.len() > 0 ==> group_bytes::<O>(gs.last()).len() <= u32::MAX
 }
 

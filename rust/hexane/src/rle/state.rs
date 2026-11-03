@@ -516,7 +516,7 @@ pub(crate) open spec fn flushed_lit_tail<'a, W: WriteOps<'a>>(s0: State<'a, W>, 
 }
 
 /// `n` copies of `v`.
-pub open spec fn copies<V>(n: nat, v: V) -> Seq<V> {
+pub(crate) open spec fn copies<V>(n: nat, v: V) -> Seq<V> {
     Seq::new(n, |_i| v)
 }
 
@@ -613,7 +613,7 @@ pub(crate) proof fn lemma_local(pre: Seq<u8>, m: Seq<u8>, g: Seq<u8>, x: Seq<u8>
 }
 
 /// The group a run of `n` copies of `v` is written as.
-pub open spec fn run_group<V>(n: nat, v: V) -> Group<V> {
+pub(crate) open spec fn run_group<V>(n: nat, v: V) -> Group<V> {
     if n == 1 { Group::Lit { values: seq![v] } } else { Group::Run { count: n, value: v } }
 }
 

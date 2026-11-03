@@ -31,36 +31,36 @@ verus! {
 
 /// `data` is the canonical encoding of some values, with metadata that
 /// fits — what load accepts and what the writer produces.
-pub open spec fn valid_slab<'a, O: RleOps<'a>>(data: Seq<u8>) -> bool {
+pub(crate) open spec fn valid_slab<'a, O: RleOps<'a>>(data: Seq<u8>) -> bool {
     exists|gs: Seq<Group<O::V>>| parses::<O>(gs, data)
 }
 
 /// The groups of a valid slab.
-pub open spec fn slab_groups<'a, O: RleOps<'a>>(data: Seq<u8>) -> Seq<Group<O::V>> {
+pub(crate) open spec fn slab_groups<'a, O: RleOps<'a>>(data: Seq<u8>) -> Seq<Group<O::V>> {
     choose|gs: Seq<Group<O::V>>| parses::<O>(gs, data)
 }
 
 /// The values of a valid slab.
-pub open spec fn slab_values<'a, O: RleOps<'a>>(data: Seq<u8>) -> Seq<O::V> {
+pub(crate) open spec fn slab_values<'a, O: RleOps<'a>>(data: Seq<u8>) -> Seq<O::V> {
     groups_values(slab_groups::<O>(data), O::null())
 }
 
 /// The byte offset of group `i`.
-pub open spec fn gb<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>, i: int) -> int {
+pub(crate) open spec fn gb<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>, i: int) -> int {
     groups_bytes::<O>(gs.take(i)).len() as int
 }
 
 /// The value offset of group `i`.
-pub open spec fn gl<V>(gs: Seq<Group<V>>, i: int) -> int {
+pub(crate) open spec fn gl<V>(gs: Seq<Group<V>>, i: int) -> int {
     groups_len(gs.take(i)) as int
 }
 
-pub proof fn lemma_group_values_len<V>(g: Group<V>, null: V)
+pub(crate) proof fn lemma_group_values_len<V>(g: Group<V>, null: V)
     ensures group_values(g, null).len() == group_len(g),
 {
 }
 
-pub proof fn lemma_groups_values_concat<V>(a: Seq<Group<V>>, b: Seq<Group<V>>, null: V)
+pub(crate) proof fn lemma_groups_values_concat<V>(a: Seq<Group<V>>, b: Seq<Group<V>>, null: V)
     ensures
         groups_values(a + b, null) == groups_values(a, null) + groups_values(b, null),
         groups_values(a, null).len() == groups_len(a),
@@ -78,7 +78,7 @@ pub proof fn lemma_groups_values_concat<V>(a: Seq<Group<V>>, b: Seq<Group<V>>, n
 }
 
 /// Where group `i`'s values and bytes sit among all of them.
-pub proof fn lemma_group_at<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>, i: int)
+pub(crate) proof fn lemma_group_at<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>, i: int)
     requires 0 <= i < gs.len(),
     ensures
         groups_values(gs, O::null()) == groups_values(gs.take(i), O::null()) + group_values(gs[i], O::null())
@@ -109,7 +109,7 @@ pub proof fn lemma_group_at<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>, i: int)
 }
 
 /// The slab's groups parse its bytes, and are canonical.
-pub proof fn lemma_slab<'a, O: RleOps<'a>>(data: Seq<u8>)
+pub(crate) proof fn lemma_slab<'a, O: RleOps<'a>>(data: Seq<u8>)
     requires valid_slab::<O>(data),
     ensures ({
         let gs = slab_groups::<O>(data);
@@ -134,7 +134,7 @@ proof fn lemma_prefix_at(s: Seq<u8>, p: int, x: Seq<u8>, rest: Seq<u8>)
     assert((x + rest).skip(x.len() as int) =~= rest);
 }
 
-pub proof fn lemma_skip_skip<T>(s: Seq<T>, a: int, b: int)
+pub(crate) proof fn lemma_skip_skip<T>(s: Seq<T>, a: int, b: int)
     requires 0 <= a, 0 <= b, a + b <= s.len(),
     ensures s.skip(a).skip(b) == s.skip(a + b),
 {
@@ -142,7 +142,7 @@ pub proof fn lemma_skip_skip<T>(s: Seq<T>, a: int, b: int)
 }
 
 /// Group `i` of a valid slab: where its bytes and values sit.
-pub proof fn lemma_slab_group<'a, O: RleOps<'a>>(data: Seq<u8>, i: int)
+pub(crate) proof fn lemma_slab_group<'a, O: RleOps<'a>>(data: Seq<u8>, i: int)
     requires valid_slab::<O>(data), 0 <= i < slab_groups::<O>(data).len(),
     ensures ({
         let gs = slab_groups::<O>(data);
@@ -182,7 +182,7 @@ pub proof fn lemma_slab_group<'a, O: RleOps<'a>>(data: Seq<u8>, i: int)
 }
 
 /// Literal value `j` of group `i` of a valid slab: where its bytes sit.
-pub proof fn lemma_slab_lit<'a, O: RleOps<'a>>(data: Seq<u8>, i: int, j: int)
+pub(crate) proof fn lemma_slab_lit<'a, O: RleOps<'a>>(data: Seq<u8>, i: int, j: int)
     requires
         valid_slab::<O>(data), 0 <= i < slab_groups::<O>(data).len(),
         slab_groups::<O>(data)[i] is Lit,
@@ -216,7 +216,7 @@ pub proof fn lemma_slab_lit<'a, O: RleOps<'a>>(data: Seq<u8>, i: int, j: int)
 
 /// Group `gi` of `data` starts at byte `b`, and its header is `hb` bytes
 /// long and has been read.
-pub open spec fn at_header<'a, O: RleOps<'a>>(data: Seq<u8>, gi: int, b: int, hb: int) -> bool {
+pub(crate) open spec fn at_header<'a, O: RleOps<'a>>(data: Seq<u8>, gi: int, b: int, hb: int) -> bool {
     let gs = slab_groups::<O>(data);
     &&& 0 <= gi < gs.len()
     &&& b == gb::<O>(gs, gi)
@@ -257,21 +257,21 @@ pub(crate) struct Dec<'a, O: RleOps<'a>> {
 }
 
 impl<'a, O: RleOps<'a>> Dec<'a, O> {
-    pub closed spec fn data(&self) -> Seq<u8> {
+    pub(crate) closed spec fn data(&self) -> Seq<u8> {
         self.data@
     }
 
     /// The slab's values.
-    pub open spec fn values(&self) -> Seq<O::V> {
+    pub(crate) open spec fn values(&self) -> Seq<O::V> {
         slab_values::<O>(self.data())
     }
 
     /// The index of the next value.
-    pub closed spec fn pos(&self) -> int {
+    pub(crate) closed spec fn pos(&self) -> int {
         gl(slab_groups::<O>(self.data@), self.gi@) - self.remaining
     }
 
-    pub closed spec fn inv(&self) -> bool {
+    pub(crate) closed spec fn inv(&self) -> bool {
         let gs = slab_groups::<O>(self.data@);
         let gi = self.gi@;
         &&& valid_slab::<O>(self.data@)
@@ -370,7 +370,7 @@ impl<'a, O: RleOps<'a>> Dec<'a, O> {
     }
 
     /// What `skip_group` promises.
-    pub closed spec fn skip_post(r0: Self, r1: Self, n: usize, r: Result<O::V, usize>) -> bool {
+    pub(crate) closed spec fn skip_post(r0: Self, r1: Self, n: usize, r: Result<O::V, usize>) -> bool {
         &&& r1.inv() && r1.data() == r0.data()
         &&& match r {
             Ok(v) => r0.pos() + n < r0.values().len() && v == r0.values()[r0.pos() + n]
@@ -1195,7 +1195,7 @@ spec fn state_at<'a, O: RleOps<'a>>(data: Seq<u8>, st: RleDecoderState, gi: int)
 }
 
 /// `st` is a position in the valid slab `data`.
-pub closed spec fn state_ok<'a, O: RleOps<'a>>(data: Seq<u8>, st: RleDecoderState) -> bool {
+pub(crate) closed spec fn state_ok<'a, O: RleOps<'a>>(data: Seq<u8>, st: RleDecoderState) -> bool {
     &&& valid_slab::<O>(data)
     &&& data.len() <= usize::MAX
     &&& exists|gi: int| state_at::<O>(data, st, gi)
@@ -1213,7 +1213,7 @@ spec fn rsegs_at<'a, O: RleOps<'a>>(data: Seq<u8>, st: RleDecoderState, gi: int)
 
 /// The segments wholly behind `st` in `data`: the groups passed, the
 /// literal values read, and a repeat or null run once all of it is read.
-pub closed spec fn rsegs<'a, O: RleOps<'a>>(data: Seq<u8>, st: RleDecoderState) -> int {
+pub(crate) closed spec fn rsegs<'a, O: RleOps<'a>>(data: Seq<u8>, st: RleDecoderState) -> int {
     rsegs_at::<O>(data, st, choose|gi: int| state_at::<O>(data, st, gi))
 }
 
@@ -1258,12 +1258,12 @@ proof fn lemma_rsegs_end<'a, O: RleOps<'a>>(data: Seq<u8>, st: RleDecoderState, 
 }
 
 /// The byte position of `st`.
-pub closed spec fn sbyte(st: RleDecoderState) -> int {
+pub(crate) closed spec fn sbyte(st: RleDecoderState) -> int {
     st.byte_pos as int
 }
 
 /// The index of the value `st` stands before in `data`.
-pub closed spec fn state_pos<'a, O: RleOps<'a>>(data: Seq<u8>, st: RleDecoderState) -> int {
+pub(crate) closed spec fn state_pos<'a, O: RleOps<'a>>(data: Seq<u8>, st: RleDecoderState) -> int {
     gl(slab_groups::<O>(data), choose|gi: int| state_at::<O>(data, st, gi)) - st.remaining
 }
 
@@ -1467,12 +1467,12 @@ pub(crate) open spec fn landed<'a, W: WriteOps<'a>>(data: Seq<u8>, at: int, s: S
 }
 
 /// The segments of groups `gs`'s first `i`.
-pub open spec fn gseg<V>(gs: Seq<Group<V>>, i: int) -> int {
+pub(crate) open spec fn gseg<V>(gs: Seq<Group<V>>, i: int) -> int {
     groups_segments(gs.take(i)) as int
 }
 
 /// Group `i`'s segments follow the first `i`'s.
-pub proof fn lemma_gseg<V>(gs: Seq<Group<V>>, i: int)
+pub(crate) proof fn lemma_gseg<V>(gs: Seq<Group<V>>, i: int)
     requires 0 <= i < gs.len(),
     ensures gseg(gs, i + 1) == gseg(gs, i) + group_segments(gs[i]),
 {

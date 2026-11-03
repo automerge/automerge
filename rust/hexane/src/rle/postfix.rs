@@ -170,7 +170,7 @@ pub(crate) open spec fn vnulls_ok<'a, O: RleOps<'a>>(p: Option<Postfix<O::V>>) -
 }
 
 /// `bytes` are the canonical encoding of `vals`.
-pub open spec fn encodes<'a, O: RleOps<'a>>(bytes: Seq<u8>, vals: Seq<O::V>, segs: int) -> bool {
+pub(crate) open spec fn encodes<'a, O: RleOps<'a>>(bytes: Seq<u8>, vals: Seq<O::V>, segs: int) -> bool {
     exists|gs: Seq<Group<O::V>>| #[trigger] canonical::<O>(gs) && groups_bytes::<O>(gs) == bytes
         && groups_values(gs, O::null()) == vals && groups_segments(gs) == segs
 }
@@ -178,7 +178,7 @@ pub open spec fn encodes<'a, O: RleOps<'a>>(bytes: Seq<u8>, vals: Seq<O::V>, seg
 /// `bytes` are a canonical encoding whose last group is `tb` bytes long,
 /// and `tl` the width of its last value if it is a literal (else 0): a
 /// slab's tail record.
-pub open spec fn tail_ok<'a, O: RleOps<'a>>(bytes: Seq<u8>, tb: int, tl: int) -> bool {
+pub(crate) open spec fn tail_ok<'a, O: RleOps<'a>>(bytes: Seq<u8>, tb: int, tl: int) -> bool {
     exists|gs: Seq<Group<O::V>>| #[trigger] canonical::<O>(gs) && groups_bytes::<O>(gs) == bytes
         && tb == tail_bytes_of::<O>(gs) && tl == lit_tail_of::<O>(gs)
 }
@@ -317,7 +317,7 @@ pub(crate) proof fn lemma_postfix_lone<'a, O: RleOps<'a>>(data: Seq<u8>, at: int
 // ── Lemmas ──────────────────────────────────────────────────────────────────
 
 /// Canonical groups joined where they may meet stay canonical.
-pub proof fn lemma_canonical_concat<'a, O: RleOps<'a>>(a: Seq<Group<O::V>>, b: Seq<Group<O::V>>)
+pub(crate) proof fn lemma_canonical_concat<'a, O: RleOps<'a>>(a: Seq<Group<O::V>>, b: Seq<Group<O::V>>)
     requires
         canonical::<O>(a), canonical::<O>(b),
         a.len() > 0 && b.len() > 0 ==> adjacent_ok(a.last(), b[0]),
@@ -344,7 +344,7 @@ pub proof fn lemma_canonical_concat<'a, O: RleOps<'a>>(a: Seq<Group<O::V>>, b: S
 
 /// The groups after group `i` of a valid slab: their bytes start at
 /// `gb(i + 1)`, and their values follow the first `gl(i + 1)`.
-pub proof fn lemma_slab_after<'a, O: RleOps<'a>>(data: Seq<u8>, i: int)
+pub(crate) proof fn lemma_slab_after<'a, O: RleOps<'a>>(data: Seq<u8>, i: int)
     requires valid_slab::<O>(data), 0 <= i < slab_groups::<O>(data).len(),
     ensures ({
         let gs = slab_groups::<O>(data);
@@ -672,7 +672,7 @@ proof fn lemma_join_lit<'a, W: WriteOps<'a>>(s1: State<'a, W>, pre1: Seq<u8>, b1
 }
 
 /// The last group of groups joined.
-pub proof fn lemma_tail_concat<'a, O: RleOps<'a>>(a: Seq<Group<O::V>>, b: Seq<Group<O::V>>)
+pub(crate) proof fn lemma_tail_concat<'a, O: RleOps<'a>>(a: Seq<Group<O::V>>, b: Seq<Group<O::V>>)
     ensures
         tail_bytes_of::<O>(a + b) == if b.len() > 0 { tail_bytes_of::<O>(b) } else { tail_bytes_of::<O>(a) },
         lit_tail_of::<O>(a + b) == if b.len() > 0 { lit_tail_of::<O>(b) } else { lit_tail_of::<O>(a) },
@@ -1367,7 +1367,7 @@ proof fn lemma_joined_lone_tail<'a, W: WriteOps<'a>>(s0: State<'a, W>, b0: Seq<u
 
 /// A tail record names part of the slab: its last value inside its last
 /// run, inside the bytes.
-pub proof fn lemma_tail_ok_bounds<'a, O: RleOps<'a>>(bytes: Seq<u8>, tb: int, tl: int)
+pub(crate) proof fn lemma_tail_ok_bounds<'a, O: RleOps<'a>>(bytes: Seq<u8>, tb: int, tl: int)
     requires tail_ok::<O>(bytes, tb, tl),
     ensures 0 <= tl <= tb <= bytes.len(),
 {

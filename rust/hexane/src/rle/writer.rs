@@ -37,23 +37,23 @@ verus! {
 
 #[verifier::external_type_specification]
 #[verifier::external_body]
-#[verifier::reject_recursive_types(T)]
-#[allow(dead_code)]
-pub struct ExSlab<T: Copy + Clone + core::fmt::Debug + Default>(crate::column::Slab<T>);
-
-#[verifier::external_type_specification]
-#[verifier::external_body]
 #[allow(dead_code)]
 pub struct ExRleTail(RleTail);
 
 /// A slab's bytes.
-pub uninterp spec fn slab_bytes(s: Slab) -> Seq<u8>;
+pub(crate) open spec fn slab_bytes(s: Slab) -> Seq<u8> {
+    s.data@
+}
 
 /// A slab's recorded length.
-pub uninterp spec fn slab_len(s: Slab) -> usize;
+pub(crate) open spec fn slab_len(s: Slab) -> usize {
+    s.len
+}
 
 /// A slab's recorded segment count.
-pub uninterp spec fn slab_segments(s: Slab) -> usize;
+pub(crate) open spec fn slab_segments(s: Slab) -> usize {
+    s.segments
+}
 
 /// Slab metadata arithmetic (lengths, segment counts): unspecified, and
 /// computed exactly as before.
@@ -64,13 +64,15 @@ pub(crate) fn add(a: usize, b: usize) -> usize {
 }
 
 /// A slab's tail record.
-pub uninterp spec fn slab_tail_of(s: Slab) -> RleTail;
+pub(crate) open spec fn slab_tail_of(s: Slab) -> RleTail {
+    s.tail
+}
 
 /// A tail record's last run length, and its last literal value's width
 /// (0 if the run is not a literal).
-pub uninterp spec fn tail_b(t: RleTail) -> nat;
+pub(crate) uninterp spec fn tail_b(t: RleTail) -> nat;
 
-pub uninterp spec fn tail_l(t: RleTail) -> nat;
+pub(crate) uninterp spec fn tail_l(t: RleTail) -> nat;
 
 /// The tail record of a last run `bytes` long whose last literal value
 /// is `lit` wide.
@@ -133,7 +135,6 @@ pub(crate) fn merge_tail(w: WPos, prefix: usize, middle: usize, postfix: usize, 
 }
 
 /// A slab's recorded length.
-#[verifier::external_body]
 #[inline(always)]
 pub(crate) fn slab_len_of(s: &Slab) -> (n: usize)
     ensures n == slab_len(*s),
@@ -149,7 +150,6 @@ fn no_tail() -> RleTail {
 }
 
 /// A slab the rebuild spilled into.
-#[verifier::external_body]
 #[inline(always)]
 pub(crate) fn new_slab(data: Vec<u8>, len: usize, segments: usize, tail: RleTail) -> (s: Slab)
     ensures slab_bytes(s) == data@, slab_len(s) == len, slab_segments(s) == segments, slab_tail_of(s) == tail,
@@ -159,7 +159,6 @@ pub(crate) fn new_slab(data: Vec<u8>, len: usize, segments: usize, tail: RleTail
 
 /// The last slab the rebuild spilled into, which carries the edited
 /// slab's bytes after the postfix.
-#[verifier::external_body]
 #[inline(always)]
 fn last_slab(mut data: Vec<u8>, tail_bytes: &[u8], len: usize, segments: usize, tail: RleTail) -> (s: Slab)
     ensures
@@ -167,6 +166,7 @@ fn last_slab(mut data: Vec<u8>, tail_bytes: &[u8], len: usize, segments: usize, 
         slab_tail_of(s) == tail, data@.len() + tail_bytes@.len() <= usize::MAX,
 {
     data.extend_from_slice(tail_bytes);
+    let _ = data.len();
     Slab { data, len, segments, tail }
 }
 
@@ -181,7 +181,7 @@ pub(crate) fn splice_bytes(vec: &mut Vec<u8>, index: usize, del: usize, bytes: &
 }
 
 /// The values of slabs one after another.
-pub open spec fn concat<V>(cs: Seq<Seq<V>>) -> Seq<V>
+pub(crate) open spec fn concat<V>(cs: Seq<Seq<V>>) -> Seq<V>
     decreases cs.len(),
 {
     if cs.len() == 0 { Seq::empty() } else { concat(cs.drop_last()) + cs.last() }

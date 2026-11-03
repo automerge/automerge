@@ -24,14 +24,19 @@ pub const DEFAULT_MAX_SEG: usize = 64;
 
 // ── Slab ─────────────────────────────────────────────────────────────────────
 
+verus! {
+
 #[doc(hidden)]
 #[derive(Clone, Debug, Default, PartialEq)]
+#[verifier::allow(autoderive_clone_without_spec)]
 pub struct Slab<Tail: Copy + Clone + std::fmt::Debug + Default = ()> {
     pub(crate) data: Vec<u8>,
     pub(crate) len: usize,
     pub(crate) segments: usize,
     pub(crate) tail: Tail,
 }
+
+} // verus!
 
 impl<Tail: Copy + Clone + std::fmt::Debug + Default> Slab<Tail> {
     pub(crate) fn new(data: Vec<u8>, len: usize, segments: usize) -> Self {

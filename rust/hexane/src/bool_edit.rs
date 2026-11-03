@@ -26,25 +26,25 @@ use vstd::prelude::*;
 verus! {
 
 /// The values of chunks of counts, in order.
-pub open spec fn chunks_values(cs: Seq<Seq<u64>>) -> Seq<bool>
+pub(crate) open spec fn chunks_values(cs: Seq<Seq<u64>>) -> Seq<bool>
     decreases cs.len(),
 {
     if cs.len() == 0 { Seq::empty() } else { chunks_values(cs.drop_last()) + vals_at(cs.last(), 0) }
 }
 
 /// A run's values.
-pub open spec fn run_of(n: nat, v: bool) -> Seq<bool> {
+pub(crate) open spec fn run_of(n: nat, v: bool) -> Seq<bool> {
     Seq::new(n, |_j: int| v)
 }
 
 /// Counts that may make a slab once a last run is added: only the first
 /// may be zero.
-pub open spec fn counts_pre(cs: Seq<u64>) -> bool {
+pub(crate) open spec fn counts_pre(cs: Seq<u64>) -> bool {
     forall|i: int| 1 <= i < cs.len() ==> #[trigger] cs[i] > 0
 }
 
 /// Values from counts number their counts' total.
-pub proof fn lemma_vals_len(cs: Seq<u64>, p: int)
+pub(crate) proof fn lemma_vals_len(cs: Seq<u64>, p: int)
     ensures vals_at(cs, p).len() == counts_len(cs),
     decreases cs.len(),
 {
@@ -56,7 +56,7 @@ pub proof fn lemma_vals_len(cs: Seq<u64>, p: int)
 /// The chunks cut, once the first is: the first (with the head's counts)
 /// as bytes after the head and metadata, the rest as slabs.
 #[verifier::opaque]
-pub open spec fn out_ok<K: CountOps>(overflowed: bool, base: Seq<u64>, done: Seq<Seq<u64>>, out_cb: Seq<u64>, out_bytes: Seq<u8>,
+pub(crate) open spec fn out_ok<K: CountOps>(overflowed: bool, base: Seq<u64>, done: Seq<Seq<u64>>, out_cb: Seq<u64>, out_bytes: Seq<u8>,
     out_emitted: usize, out_segments: usize, out_tail: u8, overflow: Seq<BSlab>) -> bool {
     &&& !overflowed ==> done.len() == 0 && overflow.len() == 0
     &&& overflowed ==> {
@@ -79,7 +79,7 @@ pub open spec fn out_ok<K: CountOps>(overflowed: bool, base: Seq<u64>, done: Seq
 }
 
 /// A run appended to counts.
-pub proof fn lemma_vals_push(cs: Seq<u64>, c: u64)
+pub(crate) proof fn lemma_vals_push(cs: Seq<u64>, c: u64)
     ensures vals_at(cs.push(c), 0) == vals_at(cs, 0) + run_of(c as nat, run_value(cs.len() as int)),
 {
     assert(cs.push(c).drop_last() =~= cs);
@@ -438,7 +438,7 @@ impl BWriter {
 
 /// Counts where only the first may be zero number at most one more than
 /// their total.
-pub proof fn lemma_pre_len(cs: Seq<u64>)
+pub(crate) proof fn lemma_pre_len(cs: Seq<u64>)
     requires counts_pre(cs),
     ensures cs.len() <= counts_len(cs) + 1,
     decreases cs.len(),
@@ -463,7 +463,7 @@ proof fn lemma_chunk_len(c: Seq<u64>, n: nat, vals_len: nat, done_len: nat)
 }
 
 /// A count is no more than counts' total.
-pub proof fn lemma_counts_len_le(cs: Seq<u64>)
+pub(crate) proof fn lemma_counts_len_le(cs: Seq<u64>)
     ensures forall|i: int| 0 <= i < cs.len() ==> #[trigger] cs[i] <= counts_len(cs),
 {
     assert forall|i: int| 0 <= i < cs.len() implies #[trigger] cs[i] <= counts_len(cs) by {
@@ -489,18 +489,23 @@ fn extend_vec(v: &mut Vec<u8>, s: &[u8])
 }
 
 /// A slab of `data`.
-#[verifier::external_body]
 #[inline(always)]
 pub(crate) fn new_bslab_vec(data: Vec<u8>, len: usize, segments: usize, tail: u8) -> (s: BSlab)
     ensures bslab_bytes(s) == data@, bslab_len(s) == len, bslab_segments(s) == segments, bslab_tail(s) == tail,
 {
+    proof {
+        reveal(bslab_bytes);
+        reveal(bslab_len);
+        reveal(bslab_segments);
+        reveal(bslab_tail);
+    }
     crate::column::Slab { data, len, segments, tail }
 }
 
 // ── The rebuild ─────────────────────────────────────────────────────────────
 
 /// Values up to the end of run `i`: the first `i` counts' values.
-pub proof fn lemma_values_take(cs: Seq<u64>, i: int)
+pub(crate) proof fn lemma_values_take(cs: Seq<u64>, i: int)
     requires 0 <= i <= cs.len(),
     ensures
         counts_len(cs.take(i)) <= counts_values(cs).len(),
@@ -513,7 +518,7 @@ pub proof fn lemma_values_take(cs: Seq<u64>, i: int)
 }
 
 /// Run `i` in values, `off` into it.
-pub proof fn lemma_values_run_take(cs: Seq<u64>, i: int, off: int)
+pub(crate) proof fn lemma_values_run_take(cs: Seq<u64>, i: int, off: int)
     requires 0 <= i < cs.len(), 0 <= off <= cs[i],
     ensures
         counts_len(cs.take(i)) + off <= counts_values(cs).len(),
@@ -532,7 +537,7 @@ pub proof fn lemma_values_run_take(cs: Seq<u64>, i: int, off: int)
 }
 
 /// A slab's values, split after `k` runs.
-pub proof fn lemma_values_split(cs: Seq<u64>, k: int)
+pub(crate) proof fn lemma_values_split(cs: Seq<u64>, k: int)
     requires 0 <= k <= cs.len(),
     ensures counts_values(cs) == vals_at(cs.take(k), 0) + vals_at(cs.skip(k), k),
 {
@@ -542,7 +547,7 @@ pub proof fn lemma_values_split(cs: Seq<u64>, k: int)
 }
 
 /// Counts' values, split after their first run.
-pub proof fn lemma_vals_first(cs: Seq<u64>, p: int)
+pub(crate) proof fn lemma_vals_first(cs: Seq<u64>, p: int)
     requires cs.len() > 0,
     ensures vals_at(cs, p) == run_of(cs[0] as nat, run_value(p)) + vals_at(cs.skip(1), p + 1),
 {
@@ -578,7 +583,7 @@ pub(crate) open spec fn tail_ok<K: CountOps>(data: Seq<u8>, read: int, t: BTail,
 }
 
 /// Chunks' values: the first's, then the rest's.
-pub proof fn lemma_chunks_first(d: Seq<Seq<u64>>)
+pub(crate) proof fn lemma_chunks_first(d: Seq<Seq<u64>>)
     requires d.len() > 0,
     ensures chunks_values(d) == vals_at(d[0], 0) + chunks_values(d.skip(1)),
     decreases d.len(),
@@ -597,7 +602,7 @@ pub proof fn lemma_chunks_first(d: Seq<Seq<u64>>)
 }
 
 /// A chunk's values are among all of the chunks'.
-pub proof fn lemma_chunk_le(d: Seq<Seq<u64>>, i: int)
+pub(crate) proof fn lemma_chunk_le(d: Seq<Seq<u64>>, i: int)
     requires 0 <= i < d.len(),
     ensures vals_at(d[i], 0).len() <= chunks_values(d).len(),
     decreases d.len(),
@@ -609,7 +614,7 @@ pub proof fn lemma_chunk_le(d: Seq<Seq<u64>>, i: int)
 }
 
 /// Slabs whose bytes encode chunks hold the chunks' values.
-pub proof fn lemma_slabs_chunks<K: CountOps>(s: Seq<BSlab>, d: Seq<Seq<u64>>)
+pub(crate) proof fn lemma_slabs_chunks<K: CountOps>(s: Seq<BSlab>, d: Seq<Seq<u64>>)
     requires
         s.len() == d.len(),
         forall|i: int| 0 <= i < s.len() ==> bslab_bytes(#[trigger] s[i]) == counts_bytes::<K>(d[i])
@@ -651,7 +656,7 @@ pub(crate) open spec fn closed_ok<K: CountOps>(r: BClosed, data: Seq<u8>, out: S
 }
 
 /// Counts all above zero number no more than their total.
-pub proof fn lemma_rc_len(rc: Seq<u64>)
+pub(crate) proof fn lemma_rc_len(rc: Seq<u64>)
     requires forall|i: int| 0 <= i < rc.len() ==> #[trigger] rc[i] > 0,
     ensures rc.len() <= counts_len(rc),
     decreases rc.len(),
@@ -801,7 +806,7 @@ fn into_slab<K: CountOps>(t: &BTail, data: &[u8], old_tail: u8, Ghost(read): Gho
 }
 
 /// The writer's values number the chunks' and the pending run's.
-pub proof fn lemma_chunks_len(d: Seq<Seq<u64>>, c: Seq<u64>, n: nat, v: bool)
+pub(crate) proof fn lemma_chunks_len(d: Seq<Seq<u64>>, c: Seq<u64>, n: nat, v: bool)
     ensures (chunks_values(d) + vals_at(c, 0) + run_of(n, v)).len() == chunks_values(d).len() + counts_len(c) + n,
 {
     lemma_vals_len(c, 0);
@@ -959,6 +964,9 @@ impl BEdit {
             tail_ok::<K>(data@, self.read as int, r.0, r.1@),
             self.w.base@.len() <= r.1@,
     {
+        // the writer's invariant isn't needed here, and its slab vector
+        // gives Z3 terms to loop on
+        hide(BWriter::inv);
         let ghost cs = bool_counts::<K>(data@);
         let ghost vs = bool_values::<K>(data@);
         let ghost k = bstate_k::<K>(data@, self.dec);

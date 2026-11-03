@@ -61,12 +61,12 @@ pub trait Lift<'s>: WriteOps<'s> {
 pub type WR<'s, L> = <<L as Lift<'s>>::W as WriteOps<'static>>::R;
 
 /// Owned copies of values.
-pub open spec fn lift_seq<'s, L: Lift<'s>>(vs: Seq<VOf<'s, L>>) -> Seq<VOf<'static, L::W>> {
+pub(crate) open spec fn lift_seq<'s, L: Lift<'s>>(vs: Seq<VOf<'s, L>>) -> Seq<VOf<'static, L::W>> {
     vs.map_values(|v: VOf<'s, L>| L::lift(v))
 }
 
 /// A group of owned copies.
-pub open spec fn lift_group<'s, L: Lift<'s>>(g: Group<VOf<'s, L>>) -> Group<VOf<'static, L::W>> {
+pub(crate) open spec fn lift_group<'s, L: Lift<'s>>(g: Group<VOf<'s, L>>) -> Group<VOf<'static, L::W>> {
     match g {
         Group::Run { count, value } => Group::Run { count, value: L::lift(value) },
         Group::Lit { values } => Group::Lit { values: lift_seq::<L>(values) },
@@ -75,12 +75,12 @@ pub open spec fn lift_group<'s, L: Lift<'s>>(g: Group<VOf<'s, L>>) -> Group<VOf<
 }
 
 /// Groups of owned copies.
-pub open spec fn lift_groups<'s, L: Lift<'s>>(gs: Seq<Group<VOf<'s, L>>>) -> Seq<Group<VOf<'static, L::W>>> {
+pub(crate) open spec fn lift_groups<'s, L: Lift<'s>>(gs: Seq<Group<VOf<'s, L>>>) -> Seq<Group<VOf<'static, L::W>>> {
     gs.map_values(|g: Group<VOf<'s, L>>| lift_group::<L>(g))
 }
 
 /// Owning keeps distinct non-null values distinct.
-pub proof fn lemma_lift_eq<'s, L: Lift<'s>>(a: VOf<'s, L>, b: VOf<'s, L>)
+pub(crate) proof fn lemma_lift_eq<'s, L: Lift<'s>>(a: VOf<'s, L>, b: VOf<'s, L>)
     requires !<L::R as RleOps<'s>>::is_null(a), !<L::R as RleOps<'s>>::is_null(b),
     ensures (L::lift(a) == L::lift(b)) == (a == b),
 {
@@ -92,7 +92,7 @@ pub proof fn lemma_lift_eq<'s, L: Lift<'s>>(a: VOf<'s, L>, b: VOf<'s, L>)
     }
 }
 
-pub proof fn lemma_lift_encs<'s, L: Lift<'s>>(vs: Seq<VOf<'s, L>>)
+pub(crate) proof fn lemma_lift_encs<'s, L: Lift<'s>>(vs: Seq<VOf<'s, L>>)
     ensures encs::<WR<'s, L>>(lift_seq::<L>(vs)) == encs::<L::R>(vs),
     decreases vs.len(),
 {
@@ -103,7 +103,7 @@ pub proof fn lemma_lift_encs<'s, L: Lift<'s>>(vs: Seq<VOf<'s, L>>)
     }
 }
 
-pub proof fn lemma_lift_group<'s, L: Lift<'s>>(g: Group<VOf<'s, L>>)
+pub(crate) proof fn lemma_lift_group<'s, L: Lift<'s>>(g: Group<VOf<'s, L>>)
     ensures
         group_bytes::<WR<'s, L>>(lift_group::<L>(g)) == group_bytes::<L::R>(g),
         group_len(lift_group::<L>(g)) == group_len(g),
@@ -158,7 +158,7 @@ proof fn lemma_lift_adjacent<'s, L: Lift<'s>>(a: Group<VOf<'s, L>>, b: Group<VOf
     }
 }
 
-pub proof fn lemma_lift_groups<'s, L: Lift<'s>>(gs: Seq<Group<VOf<'s, L>>>)
+pub(crate) proof fn lemma_lift_groups<'s, L: Lift<'s>>(gs: Seq<Group<VOf<'s, L>>>)
     ensures
         groups_bytes::<WR<'s, L>>(lift_groups::<L>(gs)) == groups_bytes::<L::R>(gs),
         groups_len(lift_groups::<L>(gs)) == groups_len(gs),
@@ -190,7 +190,7 @@ pub proof fn lemma_lift_groups<'s, L: Lift<'s>>(gs: Seq<Group<VOf<'s, L>>>)
 }
 
 /// A valid slab, read with owned values: the same parse, owned.
-pub proof fn lemma_lift_slab<'s, L: Lift<'s>>(data: Seq<u8>)
+pub(crate) proof fn lemma_lift_slab<'s, L: Lift<'s>>(data: Seq<u8>)
     requires valid_slab::<L::R>(data),
     ensures
         valid_slab::<WR<'s, L>>(data),
@@ -294,7 +294,7 @@ pub(crate) proof fn lemma_lift_rel<'s, L: Lift<'s>>(s: State<'s, L>, r: State<'s
 }
 
 /// Where group `k` sits, read with owned values: the same.
-pub proof fn lemma_lift_at<'s, L: Lift<'s>>(gs: Seq<Group<VOf<'s, L>>>, k: int)
+pub(crate) proof fn lemma_lift_at<'s, L: Lift<'s>>(gs: Seq<Group<VOf<'s, L>>>, k: int)
     requires 0 <= k <= gs.len(),
     ensures
         gl(lift_groups::<L>(gs), k) == gl(gs, k),
@@ -402,12 +402,12 @@ pub(crate) proof fn lemma_lift_postfix<'s, L: Lift<'s>>(data: Seq<u8>, at: int, 
 }
 
 /// A borrowed value whose owned copy is `w`.
-pub open spec fn unlift<'s, L: Lift<'s>>(w: VOf<'static, L::W>) -> VOf<'s, L> {
+pub(crate) open spec fn unlift<'s, L: Lift<'s>>(w: VOf<'static, L::W>) -> VOf<'s, L> {
     choose|v: VOf<'s, L>| L::lift(v) == w
 }
 
 /// Groups of borrowed values whose owned copies are `gs`.
-pub open spec fn unlift_groups<'s, L: Lift<'s>>(gs: Seq<Group<VOf<'static, L::W>>>) -> Seq<Group<VOf<'s, L>>> {
+pub(crate) open spec fn unlift_groups<'s, L: Lift<'s>>(gs: Seq<Group<VOf<'static, L::W>>>) -> Seq<Group<VOf<'s, L>>> {
     gs.map_values(|g: Group<VOf<'static, L::W>>| match g {
         Group::Run { count, value } => Group::Run { count, value: unlift::<L>(value) },
         Group::Lit { values } => Group::Lit { values: values.map_values(|w: VOf<'static, L::W>| unlift::<L>(w)) },
@@ -451,7 +451,7 @@ proof fn lemma_unlift_canonical<'s, L: Lift<'s>>(gs: Seq<Group<VOf<'s, L>>>)
 }
 
 /// A slab valid read with owned values is valid read with borrowed ones.
-pub proof fn lemma_unlift_slab<'s, L: Lift<'s>>(data: Seq<u8>)
+pub(crate) proof fn lemma_unlift_slab<'s, L: Lift<'s>>(data: Seq<u8>)
     requires valid_slab::<WR<'s, L>>(data),
     ensures valid_slab::<L::R>(data),
 {
@@ -477,7 +477,7 @@ pub proof fn lemma_unlift_slab<'s, L: Lift<'s>>(data: Seq<u8>)
 }
 
 /// A slab's last group, read with owned values: the same tail record.
-pub proof fn lemma_lift_last<'s, L: Lift<'s>>(gs: Seq<Group<VOf<'s, L>>>)
+pub(crate) proof fn lemma_lift_last<'s, L: Lift<'s>>(gs: Seq<Group<VOf<'s, L>>>)
     requires canonical::<L::R>(gs),
     ensures
         tail_bytes_of::<WR<'s, L>>(lift_groups::<L>(gs)) == tail_bytes_of::<L::R>(gs),
@@ -498,7 +498,7 @@ pub proof fn lemma_lift_last<'s, L: Lift<'s>>(gs: Seq<Group<VOf<'s, L>>>)
 }
 
 /// An encoding, read with owned values.
-pub proof fn lemma_lift_encodes<'s, L: Lift<'s>>(x: Seq<u8>, vals: Seq<VOf<'s, L>>, segs: int)
+pub(crate) proof fn lemma_lift_encodes<'s, L: Lift<'s>>(x: Seq<u8>, vals: Seq<VOf<'s, L>>, segs: int)
     requires encodes::<L::R>(x, vals, segs),
     ensures encodes::<WR<'s, L>>(x, lift_seq::<L>(vals), segs),
 {
@@ -510,7 +510,7 @@ pub proof fn lemma_lift_encodes<'s, L: Lift<'s>>(x: Seq<u8>, vals: Seq<VOf<'s, L
 }
 
 /// A tail record, read with owned values.
-pub proof fn lemma_lift_tail_ok<'s, L: Lift<'s>>(x: Seq<u8>, tb: int, tl: int)
+pub(crate) proof fn lemma_lift_tail_ok<'s, L: Lift<'s>>(x: Seq<u8>, tb: int, tl: int)
     requires tail_ok::<L::R>(x, tb, tl),
     ensures tail_ok::<WR<'s, L>>(x, tb, tl),
 {
@@ -524,7 +524,7 @@ pub proof fn lemma_lift_tail_ok<'s, L: Lift<'s>>(x: Seq<u8>, tb: int, tl: int)
 
 /// A valid slab read with owned values: valid read with borrowed ones,
 /// with the same metadata.
-pub proof fn lemma_unlift_meta<'s, L: Lift<'s>>(data: Seq<u8>)
+pub(crate) proof fn lemma_unlift_meta<'s, L: Lift<'s>>(data: Seq<u8>)
     requires valid_slab::<WR<'s, L>>(data),
     ensures
         valid_slab::<L::R>(data),

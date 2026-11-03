@@ -57,26 +57,26 @@ pub trait CountOps {
 // ── The model ───────────────────────────────────────────────────────────────
 
 /// The bytes of counts `cs`.
-pub open spec fn counts_bytes<K: CountOps>(cs: Seq<u64>) -> Seq<u8>
+pub(crate) open spec fn counts_bytes<K: CountOps>(cs: Seq<u64>) -> Seq<u8>
     decreases cs.len(),
 {
     if cs.len() == 0 { Seq::empty() } else { counts_bytes::<K>(cs.drop_last()) + K::enc(cs.last()) }
 }
 
 /// How many values counts `cs` stand for.
-pub open spec fn counts_len(cs: Seq<u64>) -> nat
+pub(crate) open spec fn counts_len(cs: Seq<u64>) -> nat
     decreases cs.len(),
 {
     if cs.len() == 0 { 0 } else { counts_len(cs.drop_last()) + cs.last() as nat }
 }
 
 /// Run `i`'s value: runs alternate, starting with `false`.
-pub open spec fn run_value(i: int) -> bool {
+pub(crate) open spec fn run_value(i: int) -> bool {
     i % 2 == 1
 }
 
 /// The values counts `cs` stand for.
-pub open spec fn counts_values(cs: Seq<u64>) -> Seq<bool>
+pub(crate) open spec fn counts_values(cs: Seq<u64>) -> Seq<bool>
     decreases cs.len(),
 {
     if cs.len() == 0 {
@@ -88,41 +88,41 @@ pub open spec fn counts_values(cs: Seq<u64>) -> Seq<bool>
 
 /// Canonical counts: only the first may be zero, and not if it is the
 /// last.
-pub open spec fn counts_ok(cs: Seq<u64>) -> bool {
+pub(crate) open spec fn counts_ok(cs: Seq<u64>) -> bool {
     &&& forall|i: int| 1 <= i < cs.len() ==> #[trigger] cs[i] > 0
     &&& cs.len() > 0 ==> cs.last() > 0
 }
 
 /// `cs` is the canonical parse of `data`, of at most `usize::MAX` values.
-pub open spec fn bool_parses<K: CountOps>(cs: Seq<u64>, data: Seq<u8>) -> bool {
+pub(crate) open spec fn bool_parses<K: CountOps>(cs: Seq<u64>, data: Seq<u8>) -> bool {
     &&& counts_ok(cs)
     &&& counts_len(cs) <= usize::MAX
     &&& counts_bytes::<K>(cs) == data
 }
 
 /// `data` is a valid bool slab.
-pub open spec fn bool_valid<K: CountOps>(data: Seq<u8>) -> bool {
+pub(crate) open spec fn bool_valid<K: CountOps>(data: Seq<u8>) -> bool {
     exists|cs: Seq<u64>| bool_parses::<K>(cs, data)
 }
 
 /// A valid bool slab's counts.
-pub open spec fn bool_counts<K: CountOps>(data: Seq<u8>) -> Seq<u64> {
+pub(crate) open spec fn bool_counts<K: CountOps>(data: Seq<u8>) -> Seq<u64> {
     choose|cs: Seq<u64>| bool_parses::<K>(cs, data)
 }
 
 /// A valid bool slab's values.
-pub open spec fn bool_values<K: CountOps>(data: Seq<u8>) -> Seq<bool> {
+pub(crate) open spec fn bool_values<K: CountOps>(data: Seq<u8>) -> Seq<bool> {
     counts_values(bool_counts::<K>(data))
 }
 
 /// The byte length of the last count: a bool slab's tail record.
-pub open spec fn counts_tail<K: CountOps>(cs: Seq<u64>) -> nat {
+pub(crate) open spec fn counts_tail<K: CountOps>(cs: Seq<u64>) -> nat {
     if cs.len() == 0 { 0 } else { K::enc(cs.last()).len() }
 }
 
 // ── Lemmas ──────────────────────────────────────────────────────────────────
 
-pub proof fn lemma_bytes_push<K: CountOps>(cs: Seq<u64>, x: u64)
+pub(crate) proof fn lemma_bytes_push<K: CountOps>(cs: Seq<u64>, x: u64)
     ensures counts_bytes::<K>(cs.push(x)) == counts_bytes::<K>(cs) + K::enc(x),
         counts_len(cs.push(x)) == counts_len(cs) + x,
 {
@@ -130,7 +130,7 @@ pub proof fn lemma_bytes_push<K: CountOps>(cs: Seq<u64>, x: u64)
 }
 
 /// Counts' bytes and lengths, split.
-pub proof fn lemma_concat<K: CountOps>(a: Seq<u64>, b: Seq<u64>)
+pub(crate) proof fn lemma_concat<K: CountOps>(a: Seq<u64>, b: Seq<u64>)
     ensures
         counts_bytes::<K>(a + b) == counts_bytes::<K>(a) + counts_bytes::<K>(b),
         counts_len(a + b) == counts_len(a) + counts_len(b),
@@ -147,7 +147,7 @@ pub proof fn lemma_concat<K: CountOps>(a: Seq<u64>, b: Seq<u64>)
 }
 
 /// Counts' values, split after an even number of runs.
-pub proof fn lemma_values_concat(a: Seq<u64>, b: Seq<u64>)
+pub(crate) proof fn lemma_values_concat(a: Seq<u64>, b: Seq<u64>)
     requires a.len() % 2 == 0,
     ensures counts_values(a + b) == counts_values(a) + counts_values(b),
     decreases b.len(),
@@ -163,7 +163,7 @@ pub proof fn lemma_values_concat(a: Seq<u64>, b: Seq<u64>)
     }
 }
 
-pub proof fn lemma_values_len(cs: Seq<u64>)
+pub(crate) proof fn lemma_values_len(cs: Seq<u64>)
     ensures counts_values(cs).len() == counts_len(cs),
     decreases cs.len(),
 {
@@ -173,7 +173,7 @@ pub proof fn lemma_values_len(cs: Seq<u64>)
 }
 
 /// Counts' bytes are at least a byte each.
-pub proof fn lemma_bytes_len<K: CountOps>(cs: Seq<u64>)
+pub(crate) proof fn lemma_bytes_len<K: CountOps>(cs: Seq<u64>)
     ensures counts_bytes::<K>(cs).len() >= cs.len(),
     decreases cs.len(),
 {
@@ -184,7 +184,7 @@ pub proof fn lemma_bytes_len<K: CountOps>(cs: Seq<u64>)
 }
 
 /// Two parses whose bytes agree are the same.
-pub proof fn lemma_unique<K: CountOps>(a: Seq<u64>, b: Seq<u64>)
+pub(crate) proof fn lemma_unique<K: CountOps>(a: Seq<u64>, b: Seq<u64>)
     requires counts_bytes::<K>(a) == counts_bytes::<K>(b),
     ensures a == b,
     decreases a.len() + b.len(),
@@ -211,7 +211,7 @@ pub proof fn lemma_unique<K: CountOps>(a: Seq<u64>, b: Seq<u64>)
 }
 
 /// Counts' bytes, split after the first.
-pub proof fn lemma_first<K: CountOps>(cs: Seq<u64>)
+pub(crate) proof fn lemma_first<K: CountOps>(cs: Seq<u64>)
     requires cs.len() > 0,
     ensures counts_bytes::<K>(cs) == K::enc(cs[0]) + counts_bytes::<K>(cs.skip(1)),
 {
@@ -223,7 +223,7 @@ pub proof fn lemma_first<K: CountOps>(cs: Seq<u64>)
 }
 
 /// A valid slab's parse is its counts.
-pub proof fn lemma_counts<K: CountOps>(cs: Seq<u64>, data: Seq<u8>)
+pub(crate) proof fn lemma_counts<K: CountOps>(cs: Seq<u64>, data: Seq<u8>)
     requires bool_parses::<K>(cs, data),
     ensures bool_valid::<K>(data), bool_counts::<K>(data) == cs,
 {
@@ -232,7 +232,7 @@ pub proof fn lemma_counts<K: CountOps>(cs: Seq<u64>, data: Seq<u8>)
 }
 
 /// Each count is among the values.
-pub proof fn lemma_count_le(cs: Seq<u64>, i: int)
+pub(crate) proof fn lemma_count_le(cs: Seq<u64>, i: int)
     requires 0 <= i < cs.len(),
     ensures cs[i] <= counts_len(cs),
     decreases cs.len(),
@@ -245,7 +245,7 @@ pub proof fn lemma_count_le(cs: Seq<u64>, i: int)
 // ── Validating ──────────────────────────────────────────────────────────────
 
 /// Every parse of `data` begins with the counts `cs`.
-pub open spec fn complete<K: CountOps>(data: Seq<u8>, cs: Seq<u64>) -> bool {
+pub(crate) open spec fn complete<K: CountOps>(data: Seq<u8>, cs: Seq<u64>) -> bool {
     forall|c2: Seq<u64>| #[trigger] bool_parses::<K>(c2, data) ==> c2.len() >= cs.len() && c2.take(cs.len() as int) == cs
 }
 
@@ -382,7 +382,7 @@ fn too_long() -> PackError {
 
 /// Check that `data` is a canonical bool slab of at most `usize::MAX`
 /// values, and summarize it. An error means it is not one.
-pub fn validate<K: CountOps>(data: &[u8]) -> (r: Result<BoolInfo, PackError>)
+pub(crate) fn validate<K: CountOps>(data: &[u8]) -> (r: Result<BoolInfo, PackError>)
     ensures
         match r {
             Ok(i) => {
@@ -495,34 +495,54 @@ pub fn validate<K: CountOps>(data: &[u8]) -> (r: Result<BoolInfo, PackError>)
 /// A bool slab.
 pub type BSlab = crate::column::Slab<u8>;
 
-/// A bool slab's bytes and recorded metadata.
-pub uninterp spec fn bslab_bytes(s: BSlab) -> Seq<u8>;
+/// A bool slab's bytes and recorded metadata.  Opaque, so proofs that
+/// only pass slabs along see them as they did when `Slab` was external.
+#[verifier::opaque]
+pub(crate) open spec fn bslab_bytes(s: BSlab) -> Seq<u8> {
+    s.data@
+}
 
-pub uninterp spec fn bslab_len(s: BSlab) -> usize;
+#[verifier::opaque]
+pub(crate) open spec fn bslab_len(s: BSlab) -> usize {
+    s.len
+}
 
-pub uninterp spec fn bslab_segments(s: BSlab) -> usize;
+#[verifier::opaque]
+pub(crate) open spec fn bslab_segments(s: BSlab) -> usize {
+    s.segments
+}
 
-pub uninterp spec fn bslab_tail(s: BSlab) -> u8;
+#[verifier::opaque]
+pub(crate) open spec fn bslab_tail(s: BSlab) -> u8 {
+    s.tail
+}
 
 /// A slab of a copy of `data`.
-#[verifier::external_body]
 #[inline(always)]
 fn new_bslab(data: &[u8], len: usize, segments: usize, tail: u8) -> (s: BSlab)
     ensures bslab_bytes(s) == data@, bslab_len(s) == len, bslab_segments(s) == segments, bslab_tail(s) == tail,
 {
-    crate::column::Slab { data: data.to_vec(), len, segments, tail }
+    proof {
+        reveal(bslab_bytes);
+        reveal(bslab_len);
+        reveal(bslab_segments);
+        reveal(bslab_tail);
+    }
+    crate::column::Slab { data: vstd::slice::slice_to_vec(data), len, segments, tail }
 }
 
-#[verifier::external_body]
 #[inline(always)]
 fn bslab_len_of(s: &BSlab) -> (n: usize)
     ensures n == bslab_len(*s),
 {
+    proof {
+        reveal(bslab_len);
+    }
     s.len
 }
 
 /// A valid bool slab with its metadata.
-pub open spec fn bslab_ok<K: CountOps>(s: BSlab) -> bool {
+pub(crate) open spec fn bslab_ok<K: CountOps>(s: BSlab) -> bool {
     let cs = bool_counts::<K>(bslab_bytes(s));
     &&& bool_valid::<K>(bslab_bytes(s))
     &&& bslab_len(s) == counts_len(cs)
@@ -531,7 +551,7 @@ pub open spec fn bslab_ok<K: CountOps>(s: BSlab) -> bool {
 }
 
 /// The values of bool slabs, in order.
-pub open spec fn bslabs_values<K: CountOps>(s: Seq<BSlab>) -> Seq<bool>
+pub(crate) open spec fn bslabs_values<K: CountOps>(s: Seq<BSlab>) -> Seq<bool>
     decreases s.len(),
 {
     if s.len() == 0 { Seq::empty() } else { bslabs_values::<K>(s.drop_last()) + bool_values::<K>(bslab_bytes(s.last())) }
@@ -935,7 +955,7 @@ proof fn lemma_cut<K: CountOps>(data: Seq<u8>, cs: Seq<u64>, a: int, pos: int)
 // ── Decoding ────────────────────────────────────────────────────────────────
 
 /// Counts' values start with the values of any prefix of them.
-pub proof fn lemma_values_prefix(a: Seq<u64>, b: Seq<u64>)
+pub(crate) proof fn lemma_values_prefix(a: Seq<u64>, b: Seq<u64>)
     ensures
         counts_values(a + b).len() >= counts_values(a).len(),
         counts_values(a + b).take(counts_values(a).len() as int) == counts_values(a),
@@ -954,7 +974,7 @@ pub proof fn lemma_values_prefix(a: Seq<u64>, b: Seq<u64>)
 }
 
 /// Run `k`'s values in a slab's: all its value.
-pub proof fn lemma_run_values(cs: Seq<u64>, k: int, j: int)
+pub(crate) proof fn lemma_run_values(cs: Seq<u64>, k: int, j: int)
     requires 0 <= k < cs.len(), 0 <= j < cs[k],
     ensures
         counts_len(cs.take(k)) + j < counts_values(cs).len(),
@@ -1435,7 +1455,7 @@ impl<'a> BDec<'a> {
 
 /// The values of counts `cs` whose first run is run `p` (so its value
 /// is `run_value(p)`).
-pub open spec fn vals_at(cs: Seq<u64>, p: int) -> Seq<bool>
+pub(crate) open spec fn vals_at(cs: Seq<u64>, p: int) -> Seq<bool>
     decreases cs.len(),
 {
     if cs.len() == 0 {
@@ -1445,7 +1465,7 @@ pub open spec fn vals_at(cs: Seq<u64>, p: int) -> Seq<bool>
     }
 }
 
-pub proof fn lemma_vals_at_zero(cs: Seq<u64>)
+pub(crate) proof fn lemma_vals_at_zero(cs: Seq<u64>)
     ensures counts_values(cs) == vals_at(cs, 0),
     decreases cs.len(),
 {
@@ -1455,7 +1475,7 @@ pub proof fn lemma_vals_at_zero(cs: Seq<u64>)
     }
 }
 
-pub proof fn lemma_vals_at_concat(a: Seq<u64>, b: Seq<u64>, p: int)
+pub(crate) proof fn lemma_vals_at_concat(a: Seq<u64>, b: Seq<u64>, p: int)
     ensures vals_at(a + b, p) == vals_at(a, p) + vals_at(b, p + a.len()),
     decreases b.len(),
 {
@@ -1469,7 +1489,7 @@ pub proof fn lemma_vals_at_concat(a: Seq<u64>, b: Seq<u64>, p: int)
     }
 }
 
-pub proof fn lemma_vals_at_parity(cs: Seq<u64>, p: int, q: int)
+pub(crate) proof fn lemma_vals_at_parity(cs: Seq<u64>, p: int, q: int)
     requires 0 <= p, 0 <= q, p % 2 == q % 2,
     ensures vals_at(cs, p) == vals_at(cs, q),
     decreases cs.len(),
@@ -1481,7 +1501,7 @@ pub proof fn lemma_vals_at_parity(cs: Seq<u64>, p: int, q: int)
     }
 }
 
-pub proof fn lemma_vals_single(c: u64, p: int)
+pub(crate) proof fn lemma_vals_single(c: u64, p: int)
     ensures vals_at(seq![c], p) == Seq::new(c as nat, |_j: int| run_value(p)),
 {
     assert(seq![c].drop_last() =~= Seq::<u64>::empty());
