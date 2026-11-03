@@ -9,7 +9,8 @@ use hexane::encoder::BoolEncoderState;
 use hexane::{Column, ColumnEncoding, Leb128};
 
 fn decode(bytes: &[u8]) -> Vec<bool> {
-    let d: BoolDecoder<'_, Leb128> = <hexane::BoolEncoding<Leb128> as ColumnEncoding>::decoder(bytes);
+    let d: BoolDecoder<'_, Leb128> =
+        <hexane::BoolEncoding<Leb128> as ColumnEncoding>::decoder(bytes);
     d.collect()
 }
 
@@ -51,5 +52,8 @@ fn any_split_keeps_the_values() {
 #[test]
 fn appending_the_other_value_after_finish_still_loads() {
     let bytes = encode_in_two(&[true], &[false, false]);
-    assert_eq!(Column::<bool>::load(&bytes).unwrap().to_vec(), [true, false, false]);
+    assert_eq!(
+        Column::<bool>::load(&bytes).unwrap().to_vec(),
+        [true, false, false]
+    );
 }

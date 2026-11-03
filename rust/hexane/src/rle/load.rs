@@ -3,8 +3,8 @@
 use std::num::NonZeroU32;
 
 use crate::encoding::SlabInfo;
-use crate::rle::model::Ops;
 use crate::rle::cut::Load;
+use crate::rle::model::Ops;
 use crate::rle::read;
 use crate::rle::state::WOps;
 use crate::rle::{RleTail, Slab};

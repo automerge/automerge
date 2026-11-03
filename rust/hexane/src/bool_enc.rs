@@ -12,9 +12,9 @@
 use crate::bool_edit::new_bslab_vec;
 // spec and proof functions exist only when Verus compiles the crate
 #[cfg(verus_keep_ghost)]
-use crate::bool_edit::{lemma_pre_len, lemma_vals_len, lemma_vals_push, run_of};
-#[cfg(verus_keep_ghost)]
 use crate::bool_edit::counts_pre;
+#[cfg(verus_keep_ghost)]
+use crate::bool_edit::{lemma_pre_len, lemma_vals_len, lemma_vals_push, run_of};
 use crate::bool_wire::*;
 #[allow(unused_imports)]
 use vstd::prelude::*;

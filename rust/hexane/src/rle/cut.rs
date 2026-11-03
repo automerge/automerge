@@ -29,9 +29,9 @@ use super::postfix::lemma_canonical_concat;
 #[cfg(verus_keep_ghost)]
 use super::read::{lit_prefix_ok, lit_tail_of, next_post, read_bytes, tail_bytes_of};
 use super::read::{Reader, Seg};
-use super::state::VOf;
 #[cfg(verus_keep_ghost)]
 use super::state::lemma_push;
+use super::state::VOf;
 use super::writer::*;
 use super::Slab;
 use crate::PackError;

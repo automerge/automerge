@@ -48,7 +48,8 @@ pub(crate) fn splice_slab<C: Codec>(
 ) -> Vec<Slab> {
     let end_index = index + del;
     assert!(end_index <= slab.len, "del extends beyond slab");
-    let mut e = crate::bool_edit::BEdit::open::<Counts<C>>(&slab.data, index, max_segments, Vec::new());
+    let mut e =
+        crate::bool_edit::BEdit::open::<Counts<C>>(&slab.data, index, max_segments, Vec::new());
     e.walk::<Counts<C>, _>(&slab.data, del, false, &mut |_: bool, _: usize| {});
     for (value, count) in values {
         e.insert::<Counts<C>>(value, count);
@@ -226,7 +227,8 @@ impl<C: Codec> ColumnEncoding for BoolEncoding<C> {
         if a.len == 0 {
             *a = b;
         } else if b.len > 0 {
-            let (new_segs, new_tail) = bool_merge_slabs::<C>(&mut a.data, 0, a.tail, a.segments, &b);
+            let (new_segs, new_tail) =
+                bool_merge_slabs::<C>(&mut a.data, 0, a.tail, a.segments, &b);
             a.len += b.len;
             a.segments = new_segs;
             a.tail = new_tail;
@@ -340,7 +342,9 @@ fn bool_merge_slabs<C: Codec>(
     a_segments: usize,
     b: &Slab,
 ) -> (usize, u8) {
-    crate::bool_wire::merge::<Counts<C>>(a_data, start, a_tail, a_segments, &b.data, b.segments, b.tail)
+    crate::bool_wire::merge::<Counts<C>>(
+        a_data, start, a_tail, a_segments, &b.data, b.segments, b.tail,
+    )
 }
 
 // ── Load & verify ─────────────────────────────────────────────────────────
@@ -491,7 +495,10 @@ impl<C: Codec> crate::edit::EditSlab for BoolEdit<C> {
     where
         F: FnMut(bool, usize),
     {
-        debug_assert!(self.e.read + n <= slab.len, "delete past the end of the slab");
+        debug_assert!(
+            self.e.read + n <= slab.len,
+            "delete past the end of the slab"
+        );
         self.e.walk::<Counts<C>, F>(&slab.data, n, false, f);
     }
 

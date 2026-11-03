@@ -5,10 +5,10 @@ use std::ops::Range;
 
 use crate::encoding::RunDecoder;
 
-use crate::rle::postfix::Postfix;
-use crate::rle::state::{FlushState, RewriteHeader, RleCow, RleState, WPos};
 use crate::rle::merge::{merge_apply, merge_plan};
+use crate::rle::postfix::Postfix;
 use crate::rle::state::WOps;
+use crate::rle::state::{FlushState, RewriteHeader, RleCow, RleState, WPos};
 use crate::rle::{RleDecoder, RleTail, Slab};
 use crate::{AsColumnRef, Codec, RleValue};
 
@@ -851,7 +851,15 @@ pub(crate) fn do_merge<T: RleValue, C: Codec>(
         return (a_segs, a_tail);
     }
     // verified with Verus: the plan (both slabs borrowed), then writing it
-    let p = merge_plan::<WOps<'_, T, T, C>>(&a[start..], a_segs, &a_tail, &b.data, b.segments, &b.tail, buf);
+    let p = merge_plan::<WOps<'_, T, T, C>>(
+        &a[start..],
+        a_segs,
+        &a_tail,
+        &b.data,
+        b.segments,
+        &b.tail,
+        buf,
+    );
     let tail = merge_apply::<WOps<'static, T, T, C>>(a, start, &p, buf, &b.data, &b.tail);
     (p.segments, tail)
 }
