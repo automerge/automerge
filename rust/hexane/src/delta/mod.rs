@@ -1504,14 +1504,14 @@ impl<T: DeltaValue, C: Codec> Iterator for DeltaIter<'_, T, C> {
         if n == 0 {
             return self.next();
         }
-        if n >= self.inner.items_left {
-            if self.inner.items_left > 0 {
-                self.nth(self.inner.items_left - 1);
+        if n >= self.inner.core.items_left {
+            if self.inner.core.items_left > 0 {
+                self.nth(self.inner.core.items_left - 1);
             }
             return None;
         }
 
-        if self.inner.slab_remaining <= n {
+        if self.inner.core.slab_remaining <= n {
             let pos = self.pos();
             let col = self.col?;
             let found = col.index.find_slab_at_item(pos + n);
@@ -1597,9 +1597,9 @@ impl<'a, T: DeltaValue, C: Codec> DeltaIter<'a, T, C> {
     }
 
     pub fn shift_next(&mut self, range: Range<usize>) -> Option<T> {
-        assert!(range.start >= self.inner.pos);
+        assert!(range.start >= self.inner.core.pos);
         self.inner.set_max(range.end);
-        self.nth(range.start - self.inner.pos)
+        self.nth(range.start - self.inner.core.pos)
     }
 
     pub fn suspend(&self) -> DeltaIterState {
@@ -1875,7 +1875,7 @@ impl<'a, T: DeltaValue, C: Codec> DeltaIter<'a, T, C> {
             let mut pos = self.pos();
             let mut running = self.running;
             let mut hit = None;
-            while self.inner.slab_remaining > 0 && pos < end {
+            while self.inner.core.slab_remaining > 0 && pos < end {
                 let Some(run) = self.inner.next_run() else {
                     break;
                 };

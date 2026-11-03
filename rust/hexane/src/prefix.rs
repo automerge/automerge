@@ -851,7 +851,7 @@ impl<T: PrefixValue, C: Codec> std::fmt::Debug for PrefixIter<'_, T, C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PrefixIter")
             .field("total", &self.total)
-            .field("pos", &self.inner.pos)
+            .field("pos", &self.inner.core.pos)
             .finish()
     }
 }
@@ -870,19 +870,19 @@ impl<'a, T: PrefixValue, C: Codec> Iterator for PrefixIter<'a, T, C> {
     }
 
     fn nth(&mut self, n: usize) -> Option<Self::Item> {
-        if n >= self.inner.items_left {
-            if self.inner.items_left > 0 {
-                self.nth(self.inner.items_left - 1);
+        if n >= self.inner.core.items_left {
+            if self.inner.core.items_left > 0 {
+                self.nth(self.inner.core.items_left - 1);
             }
             return None;
         }
 
         // Fast path: within current slab — accumulate via next_run.
-        if n < self.inner.slab_remaining {
+        if n < self.inner.core.slab_remaining {
             return Some(self.same_slab_nth(n));
         }
 
-        let target_pos = self.inner.pos + n;
+        let target_pos = self.inner.core.pos + n;
 
         let found = self.col.unwrap().col.index.find_slab_at_item(target_pos);
 
@@ -922,7 +922,7 @@ impl<'a, T: PrefixValue, C: Codec> PrefixIter<'a, T, C> {
 
     #[inline]
     pub fn pos(&self) -> usize {
-        self.inner.pos
+        self.inner.core.pos
     }
 
     /// The running sum of everything consumed so far — equivalently, the
@@ -950,12 +950,12 @@ impl<'a, T: PrefixValue, C: Codec> PrefixIter<'a, T, C> {
 
     #[inline]
     pub fn items_left(&self) -> usize {
-        self.inner.items_left
+        self.inner.core.items_left
     }
 
     #[inline]
     pub fn end_pos(&self) -> usize {
-        self.inner.pos + self.inner.items_left
+        self.inner.core.pos + self.inner.core.items_left
     }
 
     pub fn set_max(&mut self, pos: usize) {
@@ -1070,14 +1070,16 @@ where
         let seek_target = target + one;
         let target_pos = col.get_index_for_total(seek_target);
 
-        if target_pos < self.inner.pos || target_pos >= self.inner.pos + self.inner.items_left {
-            if self.inner.items_left > 0 {
-                self.nth(self.inner.items_left - 1);
+        if target_pos < self.inner.core.pos
+            || target_pos >= self.inner.core.pos + self.inner.core.items_left
+        {
+            if self.inner.core.items_left > 0 {
+                self.nth(self.inner.core.items_left - 1);
             }
             return None;
         }
 
-        self.delta_nth(target_pos - self.inner.pos)
+        self.delta_nth(target_pos - self.inner.core.pos)
     }
 }
 

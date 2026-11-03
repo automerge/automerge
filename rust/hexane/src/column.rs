@@ -10,6 +10,7 @@ use crate::btree::{FindByValue, FindByValueRange, SlabAgg, SlabBTree};
 use crate::edit::Edit;
 use crate::encoding::{ColumnEncoding, RunDecoder};
 use crate::index::ColumnIndex;
+use crate::iter_core::{DecodersOf, ICore};
 use crate::PackError;
 use crate::{AsColumnRef, Codec, ColumnValueRef, Leb128, LoadOpts, MaybeFill, Run};
 
@@ -286,7 +287,8 @@ where
     Idx: ColumnIndex<WF::Weight>,
 {
     fn find_slab(&self, index: usize) -> (usize, usize) {
-        self.index.find_slab(index)
+        // verified (`IndexOps::ix_find`); the iterator's seeks rely on it
+        self.index.ix_find(index)
     }
 
     fn slab_start(&self, index: usize) -> usize {
@@ -307,24 +309,26 @@ where
 pub struct Iter<'a, T: ColumnValueRef, C: Codec = Leb128> {
     pub(crate) slabs: &'a [Slab<TailOf<T, C>>],
     pub(crate) col: Option<&'a dyn ColumnRef<T>>,
-    pub(crate) slab_idx: usize,
-    pub(crate) decoder: <T::Encoding<C> as ColumnEncoding>::Decoder<'a>,
-    pub(crate) items_left: usize,
-    pub(crate) slab_remaining: usize,
-    pub(crate) pos: usize,
+    /// The position and decoder, verified ([`crate::iter_core`]).
+    pub(crate) core: ICore<<T::Encoding<C> as ColumnEncoding>::Decoder<'a>>,
     pub(crate) counter: usize,
 }
+
+/// The decoders an iterator over a `Column<T, C>` opens.
+type Dx<T, C> = DecodersOf<<T as ColumnValueRef>::Encoding<C>>;
 
 impl<T: ColumnValueRef, C: Codec> Default for Iter<'_, T, C> {
     fn default() -> Self {
         Self {
             slabs: &[],
             col: None,
-            slab_idx: 0,
-            decoder: T::Encoding::<C>::decoder(&[]),
-            items_left: 0,
-            slab_remaining: 0,
-            pos: 0,
+            core: ICore {
+                slab_idx: 0,
+                decoder: T::Encoding::<C>::decoder(&[]),
+                items_left: 0,
+                slab_remaining: 0,
+                pos: 0,
+            },
             counter: 0,
         }
     }
@@ -333,62 +337,21 @@ impl<T: ColumnValueRef, C: Codec> Default for Iter<'_, T, C> {
 impl<'a, T: ColumnValueRef, C: Codec> Iterator for Iter<'a, T, C> {
     type Item = T::Get<'a>;
 
-    #[inline]
+    #[inline(always)]
     fn next(&mut self) -> Option<T::Get<'a>> {
-        if self.items_left == 0 {
-            return None;
-        }
-        loop {
-            if let Some(v) = self.decoder.next() {
-                self.items_left -= 1;
-                self.slab_remaining -= 1;
-                self.pos += 1;
-                return Some(v);
-            }
-            self.slab_idx += 1;
-            if self.slab_idx >= self.slabs.len() {
-                self.items_left = 0;
-                return None;
-            }
-            self.slab_remaining = self.slabs[self.slab_idx].len;
-            self.decoder = T::Encoding::<C>::decoder(&self.slabs[self.slab_idx].data);
-        }
+        self.core.next::<Dx<T, C>>(self.slabs)
     }
 
     /// O(log S + runs_skipped) — uses the column's index for slab lookup.
     fn nth(&mut self, n: usize) -> Option<T::Get<'a>> {
-        if n >= self.items_left {
-            if self.items_left > 0 {
-                self.nth(self.items_left - 1);
-            }
-            return None;
-        }
-
-        // Fast path: target is within the current slab.
-        if n < self.slab_remaining {
-            self.items_left -= n + 1;
-            self.slab_remaining -= n + 1;
-            self.pos += n + 1;
-            return self.decoder.nth(n);
-        }
-
-        // Use the column's index for O(log S) slab lookup.
-        let target_pos = self.pos + n;
-        let col = self.col.unwrap();
-        let (si, offset) = col.find_slab(target_pos);
-        if !self.advance_to_slab(si, target_pos - offset) {
-            return None;
-        }
-        self.slab_remaining -= offset + 1;
-        self.items_left -= offset + 1;
-        self.pos += offset + 1;
-        debug_assert_eq!(self.pos, target_pos + 1);
-        self.decoder.nth(offset)
+        let col = self.col;
+        self.core
+            .nth::<Dx<T, C>, _>(self.slabs, n, &|t: usize| col.unwrap().find_slab(t))
     }
 
     #[inline]
     fn size_hint(&self) -> (usize, Option<usize>) {
-        (self.items_left, Some(self.items_left))
+        (self.core.items_left, Some(self.core.items_left))
     }
 
     fn fold<B, F>(mut self, init: B, mut f: F) -> B
@@ -396,21 +359,15 @@ impl<'a, T: ColumnValueRef, C: Codec> Iterator for Iter<'a, T, C> {
         F: FnMut(B, Self::Item) -> B,
     {
         let mut acc = init;
-        while self.items_left > 0 {
-            if let Some(run) = self.decoder.next_run() {
-                let count = run.count.min(self.items_left);
-                for _ in 0..count {
-                    acc = f(acc, run.value);
+        while self.core.items_left > 0 {
+            let max = self.core.items_left;
+            match self.core.run_once::<Dx<T, C>>(self.slabs, max) {
+                Some(run) => {
+                    for _ in 0..run.count {
+                        acc = f(acc, run.value);
+                    }
                 }
-                self.items_left -= count;
-                self.slab_remaining = self.slab_remaining.saturating_sub(count);
-            } else {
-                self.slab_idx += 1;
-                if self.slab_idx >= self.slabs.len() {
-                    break;
-                }
-                self.decoder = T::Encoding::<C>::decoder(&self.slabs[self.slab_idx].data);
-                self.slab_remaining = self.slabs[self.slab_idx].len;
+                None => break,
             }
         }
         acc
@@ -428,8 +385,8 @@ impl<'a, T: ColumnValueRef, C: Codec> crate::encoding::RunSrc<'a, T> for Iter<'a
 impl<T: ColumnValueRef, C: Codec> std::fmt::Debug for Iter<'_, T, C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Iter")
-            .field("pos", &self.pos)
-            .field("items_left", &self.items_left)
+            .field("pos", &self.core.pos)
+            .field("items_left", &self.core.items_left)
             .finish()
     }
 }
@@ -439,11 +396,13 @@ impl<T: ColumnValueRef, C: Codec> Clone for Iter<'_, T, C> {
         Self {
             slabs: self.slabs,
             col: self.col,
-            slab_idx: self.slab_idx,
-            decoder: self.decoder.clone(),
-            items_left: self.items_left,
-            slab_remaining: self.slab_remaining,
-            pos: self.pos,
+            core: ICore {
+                slab_idx: self.core.slab_idx,
+                decoder: self.core.decoder.clone(),
+                items_left: self.core.items_left,
+                slab_remaining: self.core.slab_remaining,
+                pos: self.core.pos,
+            },
             counter: self.counter,
         }
     }
@@ -456,29 +415,30 @@ impl<'a, T: ColumnValueRef, C: Codec> Iter<'a, T, C> {
     /// beyond the column length, the iterator will cleanly return `None`
     /// when it reaches the end of the data.
     pub fn set_max(&mut self, pos: usize) {
-        self.items_left = pos.saturating_sub(self.pos);
+        self.core
+            .set_max::<Dx<T, C>>(vstd::prelude::Ghost::assume_new(), pos);
     }
 
     /// Returns the index of the current slab.
     #[inline]
     pub fn get_slab(&self) -> usize {
-        self.slab_idx
+        self.core.slab_idx
     }
 
     /// Returns the index of the next item to be yielded.
     #[inline]
     pub fn pos(&self) -> usize {
-        self.pos
+        self.core.pos
     }
 
     #[inline]
     pub fn end_pos(&self) -> usize {
-        self.pos + self.items_left
+        self.core.pos + self.core.items_left
     }
 
     pub fn advance_to(&mut self, target: usize) {
-        if target > self.pos {
-            self.nth(target - self.pos - 1);
+        if target > self.core.pos {
+            self.nth(target - self.core.pos - 1);
         }
     }
 
@@ -493,7 +453,7 @@ impl<'a, T: ColumnValueRef, C: Codec> Iter<'a, T, C> {
     }
 
     pub fn advance_by(&mut self, amount: usize) {
-        self.advance_to(self.pos.saturating_add(amount))
+        self.advance_to(self.core.pos.saturating_add(amount))
     }
 
     /// Returns the next run of identical values, merging across slab boundaries.
@@ -501,7 +461,7 @@ impl<'a, T: ColumnValueRef, C: Codec> Iter<'a, T, C> {
     /// For repeat runs, returns the full count. For literal runs, returns
     /// count=1 per value. Null runs return the null value with the full count.
     pub fn next_run(&mut self) -> Option<crate::Run<T::Get<'a>>> {
-        self.next_run_max(self.items_left)
+        self.next_run_max(self.core.items_left)
     }
 
     /// Adapt into an iterator of [`Run`]s — the item shape
@@ -510,63 +470,8 @@ impl<'a, T: ColumnValueRef, C: Codec> Iter<'a, T, C> {
         Runs(self)
     }
 
-    pub(crate) fn next_run_max(&mut self, mut max: usize) -> Option<crate::Run<T::Get<'a>>> {
-        if max == 0 {
-            return None;
-        }
-        let run = loop {
-            let _max = self.items_left.min(self.slab_remaining).min(max);
-            if let Some(run) = self.decoder.next_run_max(_max) {
-                break run;
-            }
-            self.slab_idx += 1;
-            if self.slab_idx >= self.slabs.len() {
-                self.items_left = 0;
-                return None;
-            }
-            self.slab_remaining = self.slabs[self.slab_idx].len;
-            self.decoder = T::Encoding::<C>::decoder(&self.slabs[self.slab_idx].data);
-        };
-
-        let value = run.value;
-        let count = run.count;
-        max -= count;
-        self.items_left -= count;
-        self.slab_remaining -= count;
-        self.pos += count;
-        let mut total_count = count;
-
-        while self.slab_remaining == 0 && self.items_left > 0 {
-            self.slab_idx += 1;
-            if self.slab_idx >= self.slabs.len() {
-                break;
-            }
-            self.slab_remaining = self.slabs[self.slab_idx].len;
-            self.decoder = T::Encoding::<C>::decoder(&self.slabs[self.slab_idx].data);
-
-            let _max = self.items_left.min(self.slab_remaining).min(max);
-            if let Some(next_run) = self.decoder.next_run_max(_max) {
-                if next_run.value == value {
-                    let c = next_run.count;
-                    total_count += c;
-                    max -= c;
-                    self.items_left -= c;
-                    self.slab_remaining -= c;
-                    self.pos += c;
-                    continue;
-                } else {
-                    // Value doesn't match — reset decoder so the consumed
-                    // run can be re-read by subsequent calls.
-                    self.decoder = T::Encoding::<C>::decoder(&self.slabs[self.slab_idx].data);
-                }
-            }
-            break;
-        }
-
-        Some(crate::Run {
-            count: total_count,
-            value,
-        })
+    pub(crate) fn next_run_max(&mut self, max: usize) -> Option<crate::Run<T::Get<'a>>> {
+        self.core.next_run_max::<Dx<T, C>>(self.slabs, max)
     }
 
     /// Moves the iterator window to `range` and returns the item at `range.start`.
@@ -575,33 +480,17 @@ impl<'a, T: ColumnValueRef, C: Codec> Iter<'a, T, C> {
     ///
     /// Panics if `range.start < self.pos()`.
     pub fn shift_next(&mut self, range: Range<usize>) -> Option<T::Get<'a>> {
-        assert!(range.start >= self.pos);
+        assert!(range.start >= self.core.pos);
         self.set_max(range.end);
-        self.nth(range.start - self.pos)
+        self.nth(range.start - self.core.pos)
     }
 
     // Invariant: `pos >= self.pos`. This holds because iterators are
     // always positioned at construction (see `iter_range` — even empty
     // ranges seek), and every advance moves forward.
     pub(crate) fn advance_to_slab(&mut self, si: usize, pos: usize) -> bool {
-        if si >= self.slabs.len() {
-            self.slab_idx = si;
-            self.pos = pos;
-            self.items_left = 0;
-            // else a later re-extend decodes items already passed
-            self.slab_remaining = 0;
-            self.decoder = T::Encoding::<C>::decoder(&[]);
-            false
-        } else {
-            debug_assert!(pos >= self.pos);
-            let skipped = pos - self.pos;
-            self.pos = pos;
-            self.slab_idx = si;
-            self.slab_remaining = self.slabs[si].len;
-            self.decoder = T::Encoding::<C>::decoder(&self.slabs[si].data);
-            self.items_left -= skipped;
-            true
-        }
+        debug_assert!(si >= self.slabs.len() || pos >= self.core.pos);
+        self.core.advance_to_slab::<Dx<T, C>>(self.slabs, si, pos)
     }
 }
 
@@ -773,28 +662,20 @@ impl IterState {
             return Ok(Iter {
                 slabs,
                 col: Some(column),
-                slab_idx: slabs.len(),
-                decoder: T::Encoding::<C>::decoder(&[]),
-                items_left: 0,
-                slab_remaining: 0,
-                pos: self.pos,
+                core: ICore::idle::<Dx<T, C>>(slabs, self.pos),
                 counter: self.counter,
             });
         }
-        let slab = &slabs[self.slab_idx];
-        let mut decoder = T::Encoding::<C>::decoder(&slab.data);
-        if self.slab_consumed > 0 {
-            decoder.nth(self.slab_consumed - 1);
-        }
-        let slab_remaining = slab.len - self.slab_consumed;
         Ok(Iter {
             slabs,
             col: Some(column),
-            slab_idx: self.slab_idx,
-            decoder,
-            items_left: self.items_left,
-            slab_remaining,
-            pos: self.pos,
+            core: ICore::at::<Dx<T, C>>(
+                slabs,
+                self.slab_idx,
+                self.slab_consumed,
+                self.pos,
+                self.items_left,
+            ),
             counter: self.counter,
         })
     }
@@ -803,18 +684,19 @@ impl IterState {
 impl<'a, T: ColumnValueRef, C: Codec> Iter<'a, T, C> {
     /// Captures the current iterator position so it can be restored later.
     pub fn suspend(&self) -> IterState {
-        let slab_len = if self.slab_idx < self.slabs.len() {
-            self.slabs[self.slab_idx].len
+        let c = &self.core;
+        let slab_len = if c.slab_idx < self.slabs.len() {
+            self.slabs[c.slab_idx].len
         } else {
             0
         };
         IterState {
             counter: self.counter,
             num_slabs: self.slabs.len(),
-            slab_idx: self.slab_idx,
-            pos: self.pos,
-            items_left: self.items_left,
-            slab_consumed: slab_len - self.slab_remaining,
+            slab_idx: c.slab_idx,
+            pos: c.pos,
+            items_left: c.items_left,
+            slab_consumed: slab_len - c.slab_remaining,
         }
     }
 }
@@ -868,7 +750,7 @@ impl<'a, T: ColumnValueRef, C: Codec> Iter<'a, T, C> {
     {
         let (start, end) = normalize_range_max(range, self.end_pos());
 
-        if start > self.pos {
+        if start > self.core.pos {
             self.advance_to(start);
         }
 
@@ -1346,27 +1228,15 @@ where
             return Iter {
                 slabs: &self.slabs,
                 col: Some(self),
-                slab_idx: self.slabs.len(),
-                decoder: T::Encoding::<C>::decoder(&[]),
-                items_left: 0,
-                slab_remaining: 0,
-                pos: start,
+                core: ICore::idle::<Dx<T, C>>(&self.slabs, start),
                 counter: self.counter,
             };
         }
-        let (si, offset) = self.index.find_slab(start);
-        let mut decoder = T::Encoding::<C>::decoder(&self.slabs[si].data);
-        if offset > 0 {
-            decoder.nth(offset - 1);
-        }
+        let (si, offset) = self.index.ix_find(start);
         Iter {
             slabs: &self.slabs,
             col: Some(self),
-            slab_idx: si,
-            decoder,
-            items_left: end - start,
-            slab_remaining: self.slabs[si].len - offset,
-            pos: start,
+            core: ICore::at::<Dx<T, C>>(&self.slabs, si, offset, start, end - start),
             counter: self.counter,
         }
     }

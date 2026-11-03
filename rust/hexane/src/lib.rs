@@ -115,6 +115,7 @@ pub mod encoding;
 pub(crate) mod fenwick;
 #[doc(hidden)]
 pub mod index;
+pub(crate) mod iter_core;
 mod leb128_codec;
 pub mod load_opts;
 pub(crate) mod merge_walk;
