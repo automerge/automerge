@@ -493,13 +493,16 @@ where
 
 // ── Bool Encoder ────────────────────────────────────────────────────────────
 
+type Counts<C> = crate::bool_wire::Counts<C>;
+
 /// State half of [`BoolEncoder`] — owns the run bookkeeping but **not**
 /// the output buffer.  Every mutating method takes a `&mut Vec<u8>`.
+///
+/// Verified with Verus ([`BEnc`](crate::bool_enc::BEnc)): the counts it
+/// writes stand for the values appended, and finished without a
+/// `finish` in the middle they are a canonical bool slab.
 pub struct BoolEncoderState<C: Codec = Leb128> {
-    cur_value: bool,
-    cur_count: usize,
-    segments: usize,
-    len: usize,
+    s: crate::bool_enc::BEnc,
     _codec: std::marker::PhantomData<fn() -> C>,
 }
 
@@ -512,45 +515,27 @@ impl<C: Codec> Default for BoolEncoderState<C> {
 impl<C: Codec> BoolEncoderState<C> {
     pub fn new() -> Self {
         Self {
-            cur_value: false,
-            cur_count: 0,
-            segments: 0,
-            len: 0,
+            s: crate::bool_enc::BEnc::new(),
             _codec: std::marker::PhantomData,
         }
     }
 
     pub fn len(&self) -> usize {
-        self.len
+        self.s.len
     }
 
     pub fn is_empty(&self) -> bool {
-        self.len == 0
+        self.s.len == 0
     }
 
+    #[inline(always)]
     pub fn append(&mut self, buf: &mut Vec<u8>, value: bool) {
-        if value == self.cur_value {
-            self.cur_count += 1;
-        } else {
-            self.flush_run(buf);
-            self.cur_value = value;
-            self.cur_count = 1;
-        }
-        self.len += 1;
+        self.s.append::<Counts<C>>(buf, value, 1);
     }
 
+    #[inline(always)]
     pub fn append_n(&mut self, buf: &mut Vec<u8>, value: bool, n: usize) {
-        if n == 0 {
-            return;
-        }
-        if value == self.cur_value {
-            self.cur_count += n;
-        } else {
-            self.flush_run(buf);
-            self.cur_value = value;
-            self.cur_count = n;
-        }
-        self.len += n;
+        self.s.append::<Counts<C>>(buf, value, n);
     }
 
     pub fn extend(&mut self, buf: &mut Vec<u8>, iter: impl IntoIterator<Item = bool>) {
@@ -559,29 +544,10 @@ impl<C: Codec> BoolEncoderState<C> {
         }
     }
 
-    /// Write the pending run out and start the next, of the other value.
-    ///
-    /// The run is written even when empty: the format stores no values,
-    /// only alternating counts, so every run must be counted to keep the
-    /// parity of those after it. An empty one only happens first (the
-    /// zero-count false run a slab starting with `true` needs) or after
-    /// [`finish`](Self::finish) flushed the run before it.
-    fn flush_run(&mut self, buf: &mut Vec<u8>) {
-        buf.extend(C::encode_count(self.cur_count));
-        self.segments += 1;
-        self.cur_count = 0;
-        self.cur_value = !self.cur_value;
-    }
-
     /// Flush any pending run into `buf`. Appending afterwards goes on
     /// from the run after it, which has the other value.
     pub fn finish(&mut self, buf: &mut Vec<u8>) {
-        if self.cur_count > 0 {
-            buf.extend(C::encode_count(self.cur_count));
-            self.segments += 1;
-            self.cur_count = 0;
-            self.cur_value = !self.cur_value;
-        }
+        self.s.finish::<Counts<C>>(buf);
     }
 
     /// True if every appended value equals `value` (or nothing has been
@@ -594,7 +560,7 @@ impl<C: Codec> BoolEncoderState<C> {
     /// first true is *encoding-level* padding — semantically the data is
     /// still a single run of `cur_value`.
     pub fn all_equal_pre_finish(&self, value: bool) -> bool {
-        self.len == 0 || (self.cur_count == self.len && self.cur_value == value)
+        self.s.all_equal_pre_finish(value)
     }
 }
 
@@ -606,15 +572,14 @@ impl<C: Codec> BoolEncoderState<C> {
 /// [`EncoderApi::max_segments`]
 /// before appending enables slab rollover for a direct
 /// [`into_column`](crate::encoding::EncoderApi::into_column) path.
+///
+/// The encoding and the slab rollover are verified with Verus
+/// ([`BEncoder`](crate::bool_enc::BEncoder)): every slab is a canonical
+/// bool slab with its metadata, and together they hold the values
+/// appended.
 pub struct BoolEncoder<C: Codec = Leb128> {
-    data: Vec<u8>,
-    state: BoolEncoderState<C>,
-    /// Completed slabs, populated only when `max_segments` is set.
-    slabs: Vec<Slab<u8>>,
-    /// Slab rollover budget.  `None` = single contiguous buffer (default).
-    max_segments: Option<usize>,
-    /// Items already rolled into `slabs` (`state.len` is cumulative).
-    len_flushed: usize,
+    e: crate::bool_enc::BEncoder,
+    _codec: std::marker::PhantomData<fn() -> C>,
 }
 
 impl<C: Codec> Default for BoolEncoder<C> {
@@ -626,8 +591,8 @@ impl<C: Codec> Default for BoolEncoder<C> {
 impl<C: Codec> std::fmt::Debug for BoolEncoder<C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("BoolEncoder")
-            .field("len", &self.state.len)
-            .field("buf_len", &self.data.len())
+            .field("len", &self.e.state.len)
+            .field("buf_len", &self.e.data.len())
             .finish()
     }
 }
@@ -636,121 +601,65 @@ impl<C: Codec> BoolEncoder<C> {
     /// Create a new empty encoder.
     pub fn new() -> Self {
         Self {
-            data: Vec::new(),
-            state: BoolEncoderState::new(),
-            slabs: Vec::new(),
-            max_segments: None,
-            len_flushed: 0,
+            e: crate::bool_enc::BEncoder::new::<Counts<C>>(None),
+            _codec: std::marker::PhantomData,
         }
     }
 
     /// Number of items appended so far.
     pub fn len(&self) -> usize {
-        self.state.len()
+        self.e.state.len
     }
 
     /// Returns `true` if no items have been appended.
     pub fn is_empty(&self) -> bool {
-        self.state.is_empty()
-    }
-
-    /// Roll the pending buffer into a completed slab once the segment
-    /// budget is reached.  No-op unless `max_segments` is set.  Only cuts
-    /// when `incoming` closes the current run, so the pending run always
-    /// lands whole in the finished slab.  The fresh state restarts on a
-    /// false run; `flush_run`'s zero-count pad handles a true `incoming`.
-    #[inline]
-    fn maybe_cut(&mut self, incoming: bool) {
-        let Some(max) = self.max_segments else { return };
-        let target = max / 2;
-        if target == 0
-            || incoming == self.state.cur_value
-            || self.state.cur_count == 0
-            || self.state.segments + 1 < target
-        {
-            return;
-        }
-        // Tail = byte length of the last count written (the pending run
-        // that `finish` is about to flush).
-        let tail = C::encode_count(self.state.cur_count).len() as u8;
-        self.state.finish(&mut self.data);
-        let len = self.state.len - self.len_flushed;
-        self.slabs.push(Slab {
-            data: std::mem::take(&mut self.data),
-            len,
-            segments: self.state.segments,
-            tail,
-        });
-        self.len_flushed = self.state.len;
-        self.state.segments = 0;
-        self.state.cur_value = false;
-        self.state.cur_count = 0;
+        self.e.state.len == 0
     }
 
     /// Flush pending state and return all slabs (rollover slabs + final).
     fn take_slabs(&mut self) -> Vec<Slab<u8>> {
-        let tail = if self.state.cur_count > 0 {
-            C::encode_count(self.state.cur_count).len() as u8
-        } else {
-            0
-        };
-        self.state.finish(&mut self.data);
-        let len = self.state.len - self.len_flushed;
-        if len > 0 {
-            self.slabs.push(Slab {
-                data: std::mem::take(&mut self.data),
-                len,
-                segments: self.state.segments,
-                tail,
-            });
-            self.len_flushed = self.state.len;
-        }
-        std::mem::take(&mut self.slabs)
+        self.e.take_slabs::<Counts<C>>()
     }
 
     /// Append a single boolean value.
+    #[inline]
     pub fn append(&mut self, value: bool) {
-        self.maybe_cut(value);
-        self.state.append(&mut self.data, value);
+        self.e.append::<Counts<C>>(value, 1);
     }
 
     /// Append `n` copies of `value`.
     pub fn append_n(&mut self, value: bool, n: usize) {
-        if n == 0 {
-            return;
-        }
-        self.maybe_cut(value);
-        self.state.append_n(&mut self.data, value, n);
+        self.e.append::<Counts<C>>(value, n);
     }
 
     fn finish(&mut self) {
-        self.state.finish(&mut self.data);
+        self.e.state.finish::<Counts<C>>(&mut self.e.data);
     }
 
     /// Flush and return the encoded bytes. Consumes the encoder.
     pub fn save(mut self) -> Vec<u8> {
-        if !self.slabs.is_empty() {
+        if !self.e.slabs.is_empty() {
             let mut out = Vec::new();
             self.save_to(&mut out);
             return out;
         }
         self.finish();
-        self.data
+        self.e.data
     }
 
     /// Flush and append the encoded bytes to `out`. Consumes the encoder.
     /// Returns the byte range written.
     pub fn save_to(mut self, out: &mut Vec<u8>) -> Range<usize> {
-        if !self.slabs.is_empty() {
+        if !self.e.slabs.is_empty() {
             // Slab rollover happened — merge boundary runs back into
             // canonical bytes via the column save path.
-            let max = self.max_segments.unwrap_or(DEFAULT_MAX_SEG);
+            let max = self.e.max_segments.unwrap_or(DEFAULT_MAX_SEG);
             let col: Column<bool, C> = Column::from_slabs(self.take_slabs(), max);
             return col.save_to(out);
         }
         self.finish();
         let start = out.len();
-        out.extend_from_slice(&self.data);
+        out.extend_from_slice(&self.e.data);
         start..out.len()
     }
 
@@ -762,7 +671,7 @@ impl<C: Codec> BoolEncoder<C> {
     /// handle `[true]` + sentinel=true correctly (the leading 0-count
     /// false run is part of the encoding, not part of the logical content).
     pub fn save_to_unless(self, out: &mut Vec<u8>, value: bool) -> Range<usize> {
-        if self.slabs.is_empty() && self.state.all_equal_pre_finish(value) {
+        if self.e.slabs.is_empty() && self.e.state.all_equal_pre_finish(value) {
             return out.len()..out.len();
         }
         self.save_to(out)
@@ -795,7 +704,7 @@ impl<'a, C: Codec> EncoderApi<'a, bool, C> for BoolEncoder<C> {
         self.extend(iter);
     }
     fn len(&self) -> usize {
-        self.state.len()
+        self.e.state.len
     }
     fn save(self) -> Vec<u8> {
         self.save()
@@ -812,10 +721,10 @@ impl<'a, C: Codec> EncoderApi<'a, bool, C> for BoolEncoder<C> {
     /// Must be called before appending.
     fn max_segments(&mut self, max: usize) {
         debug_assert!(
-            self.state.is_empty(),
+            self.e.state.len == 0,
             "max_segments must be set before appending"
         );
-        self.max_segments = Some(max);
+        self.e.max_segments = Some(max);
     }
 
     /// Direct path: hand the rollover slabs to the column, skipping the
@@ -827,7 +736,7 @@ impl<'a, C: Codec> EncoderApi<'a, bool, C> for BoolEncoder<C> {
         WF::Weight: SlabAggregate,
         Idx: ColumnIndex<WF::Weight>,
     {
-        match self.max_segments {
+        match self.e.max_segments {
             Some(max) => Column::from_slabs(self.take_slabs(), max),
             None => Column::load(&self.save()).unwrap(),
         }
@@ -835,24 +744,17 @@ impl<'a, C: Codec> EncoderApi<'a, bool, C> for BoolEncoder<C> {
 
     fn into_slab(mut self) -> Slab<Self::Tail> {
         debug_assert!(
-            self.slabs.is_empty(),
+            self.e.slabs.is_empty(),
             "into_slab is single-slab only — don't combine with max_segments"
         );
-        // Compute the tail *before* finish, from the pending run — the
-        // codec's bytes can't be scanned backwards (only LEB128's
-        // continuation bits made that possible).  Any append leaves
-        // `cur_count >= 1`, so a non-empty encoder always has a pending
-        // run here and the last count written by `finish` is its.
-        let tail = if self.state.cur_count > 0 {
-            C::encode_count(self.state.cur_count).len() as u8
-        } else {
-            0
-        };
-        self.finish();
+        // verified with Verus: a canonical slab of the values, with its
+        // metadata (the tail is the last count's width, measured as
+        // `finish` writes it)
+        let (data, len, segments, tail) = self.e.take_slab::<Counts<C>>();
         Slab {
-            data: self.data,
-            len: self.state.len(),
-            segments: self.state.segments,
+            data,
+            len,
+            segments,
             tail,
         }
     }
