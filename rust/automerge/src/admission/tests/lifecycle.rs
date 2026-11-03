@@ -6,7 +6,8 @@ use crate::signature::{ed25519, signing_message, SignatureStore};
 use crate::{ActorId, Author, AutoCommit, Change, Signature};
 
 use super::{append_at_level, retain_signature};
-use crate::admission::{select, AcceptedHistory, CandidateHistory};
+use crate::admission::tests::AcceptedHistoryArray;
+use crate::admission::{select, CandidateHistory};
 
 // a1 is incorporated into the fragment headed by a2. A retained signature
 // on a2 supports the admitted prefix even though sig(a1) is no longer held.
@@ -52,7 +53,7 @@ fn admitted_prefix() -> AdmittedPrefix {
 #[test]
 fn accepted_history_supplies_a_signed_loose_changes_dependency() {
     let fixture = admitted_prefix();
-    let accepted = AcceptedHistory::from_admitted(&fixture.changes[..2]);
+    let accepted = AcceptedHistoryArray::from_admitted(&fixture.changes[..2]);
     let candidates = [CandidateHistory::Loose(&fixture.changes[2])];
 
     let selection = select(&accepted, &candidates, &fixture.signatures);
@@ -63,7 +64,7 @@ fn accepted_history_supplies_a_signed_loose_changes_dependency() {
 
     // The same signed change cannot be admitted without its admitted prefix.
     let selection = select(
-        &AcceptedHistory::default(),
+        &AcceptedHistoryArray::default(),
         &candidates,
         &fixture.signatures,
     );
@@ -74,7 +75,7 @@ fn accepted_history_supplies_a_signed_loose_changes_dependency() {
 #[test]
 fn receiving_an_accepted_change_again_does_not_require_its_pruned_signature() {
     let fixture = admitted_prefix();
-    let accepted = AcceptedHistory::from_admitted(&fixture.changes[..2]);
+    let accepted = AcceptedHistoryArray::from_admitted(&fixture.changes[..2]);
     // The incoming level-0 change is already incorporated in accepted history.
     // Its direct signature need not be restored just to process this delivery.
     let candidates = [CandidateHistory::Loose(&fixture.changes[0])];
@@ -94,7 +95,7 @@ fn receiving_an_accepted_change_again_does_not_require_its_pruned_signature() {
 
     // Without prior admission it is a novel loose change and needs sig(a1).
     let selection = select(
-        &AcceptedHistory::default(),
+        &AcceptedHistoryArray::default(),
         &candidates,
         &fixture.signatures,
     );
@@ -106,8 +107,8 @@ fn receiving_an_accepted_change_again_does_not_require_its_pruned_signature() {
 fn empty_candidates_return_empty_partitions_with_or_without_accepted_history() {
     let fixture = admitted_prefix();
     for accepted in [
-        AcceptedHistory::default(),
-        AcceptedHistory::from_admitted(&fixture.changes[..2]),
+        AcceptedHistoryArray::default(),
+        AcceptedHistoryArray::from_admitted(&fixture.changes[..2]),
     ] {
         let selection = select(&accepted, &[], &fixture.signatures);
         assert!(selection.selected().is_empty());
@@ -133,7 +134,7 @@ fn a_signature_does_not_supply_an_absent_dependency() {
         retain_signature(&mut signatures, change, &key);
     }
     let candidates = [CandidateHistory::Loose(&changes[1])];
-    let accepted = AcceptedHistory::default();
+    let accepted = AcceptedHistoryArray::default();
 
     let selection = select(&accepted, &candidates, &signatures);
 
@@ -167,7 +168,7 @@ fn unchecked_signature_bytes_do_not_count_until_evidence_is_established() {
     assert_eq!(signatures.unchecked_entries(&hash).count(), 1);
     assert_eq!(signatures.ed25519_entries(&hash).count(), 0);
     let candidates = [CandidateHistory::Loose(&changes[0])];
-    let accepted = AcceptedHistory::default();
+    let accepted = AcceptedHistoryArray::default();
 
     let selection = select(&accepted, &candidates, &signatures);
 
@@ -230,17 +231,17 @@ fn mutually_supporting_fragments_are_selected_together_but_not_individually() {
     retain_signature(&mut signatures, &changes[1], &b_key);
     retain_signature(&mut signatures, &changes[2], &a_key);
     assert_eq!(signatures.ed25519_entries(&a).count(), 0);
-    let accepted = AcceptedHistory::default();
+    let accepted = AcceptedHistoryArray::default();
 
     for reverse in [false, true] {
         let mut candidates = [
             CandidateHistory::CanonicalFragment {
                 fragment: &f,
-                members: &changes[..2],
+                members: changes[..2].iter().collect(),
             },
             CandidateHistory::CanonicalFragment {
                 fragment: &g,
-                members: &changes[2..],
+                members: changes[2..].iter().collect(),
             },
         ];
         if reverse {

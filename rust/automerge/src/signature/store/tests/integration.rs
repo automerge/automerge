@@ -18,6 +18,14 @@ use crate::{ActorId, Author, AutoCommit, Change, ChangeHash, Fragment, Signature
 
 use super::{sign, Insert, SignatureStore};
 
+struct NoAcceptedHistory;
+
+impl AcceptedHistory for NoAcceptedHistory {
+    fn contains(&self, _: &ChangeHash) -> bool {
+        false
+    }
+}
+
 struct Fixture {
     changes: Vec<Change>,
     fragment: Fragment,
@@ -101,14 +109,14 @@ fn ingest(store: &mut SignatureStore, bytes: &[u8]) -> Vec<Insert> {
 }
 
 fn assert_pending(candidates: &[CandidateHistory<'_>], store: &SignatureStore) {
-    let result = select(&AcceptedHistory::default(), candidates, store);
+    let result = select(&NoAcceptedHistory, candidates, store);
     assert!(result.selected().is_empty());
     assert_eq!(result.pending().len(), 1);
     assert!(std::ptr::eq(result.pending()[0], &candidates[0]));
 }
 
 fn assert_selected(candidates: &[CandidateHistory<'_>], store: &SignatureStore) {
-    let result = select(&AcceptedHistory::default(), candidates, store);
+    let result = select(&NoAcceptedHistory, candidates, store);
     assert_eq!(result.selected().len(), 1);
     assert!(std::ptr::eq(result.selected()[0], &candidates[0]));
     assert!(result.pending().is_empty());
@@ -122,7 +130,7 @@ fn delayed_signature_chunk_makes_the_same_fragment_selectable_only_after_verific
     let authors = authors_from_history(&fixture.changes);
     let candidates = [CandidateHistory::CanonicalFragment {
         fragment: &fixture.fragment,
-        members: &fixture.changes,
+        members: fixture.changes.iter().collect(),
     }];
     let mut store = SignatureStore::default();
 
@@ -208,7 +216,7 @@ fn selected_signature_round_trip_requires_receiver_authorship_and_verification()
     }
     let sender_candidates = [CandidateHistory::CanonicalFragment {
         fragment: &fixture.fragment,
-        members: &fixture.changes,
+        members: fixture.changes.iter().collect(),
     }];
     assert_selected(&sender_candidates, &sender);
 
@@ -231,7 +239,7 @@ fn selected_signature_round_trip_requires_receiver_authorship_and_verification()
         .collect();
     let receiver_candidates = [CandidateHistory::CanonicalFragment {
         fragment: &fixture.fragment,
-        members: &receiver_changes,
+        members: receiver_changes.iter().collect(),
     }];
     let mut receiver = SignatureStore::default();
     assert_eq!(ingest(&mut receiver, &exported), [Insert::Stored]);

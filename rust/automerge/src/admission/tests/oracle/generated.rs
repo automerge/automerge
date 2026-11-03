@@ -8,7 +8,8 @@ use std::num::NonZeroU64;
 use ed25519_dalek::SigningKey;
 use proptest::prelude::*;
 
-use crate::admission::{select, AcceptedHistory, CandidateHistory};
+use crate::admission::tests::AcceptedHistoryArray;
+use crate::admission::{select, CandidateHistory};
 use crate::change::encode_author_footer;
 use crate::signature::SignatureStore;
 use crate::{ActorId, Author, Automerge, Change, ChangeHash, ExpandedChange, Fragment};
@@ -40,7 +41,10 @@ impl Materialized {
         self.groups
             .iter()
             .map(|(fragment, members)| match fragment {
-                Some(fragment) => CandidateHistory::CanonicalFragment { fragment, members },
+                Some(fragment) => CandidateHistory::CanonicalFragment {
+                    fragment,
+                    members: members.iter().collect(),
+                },
                 None => CandidateHistory::Loose(&members[0]),
             })
             .collect()
@@ -242,7 +246,7 @@ fn check_recipe(recipe: &Recipe) {
     let candidates = data.candidates();
     let context = format!("{recipe:?}");
     assert_matches(accepted, &candidates, &data.store, &data.signed, &context);
-    let accepted_view = AcceptedHistory::from_admitted(accepted);
+    let accepted_view = AcceptedHistoryArray::from_admitted(accepted);
     let result = select(&accepted_view, &candidates, &data.store);
     let baseline = selected_heads(result.selected());
 
@@ -254,7 +258,7 @@ fn check_recipe(recipe: &Recipe) {
     }
     let more = materialize(&more_evidence);
     let more_candidates = more.candidates();
-    let more_accepted = AcceptedHistory::from_admitted(&more.changes[..more.accepted_len]);
+    let more_accepted = AcceptedHistoryArray::from_admitted(&more.changes[..more.accepted_len]);
     assert_matches(
         more_accepted.changes(),
         &more_candidates,
@@ -275,7 +279,7 @@ fn check_recipe(recipe: &Recipe) {
     }
     let more = materialize(&more_history);
     let more_candidates = more.candidates();
-    let more_accepted = AcceptedHistory::from_admitted(&more.changes[..more.accepted_len]);
+    let more_accepted = AcceptedHistoryArray::from_admitted(&more.changes[..more.accepted_len]);
     assert_matches(
         more_accepted.changes(),
         &more_candidates,
@@ -296,7 +300,10 @@ fn check_recipe(recipe: &Recipe) {
         .map(|candidate| match candidate {
             CandidateHistory::Loose(change) => CandidateHistory::Loose(change),
             CandidateHistory::CanonicalFragment { fragment, members } => {
-                CandidateHistory::CanonicalFragment { fragment, members }
+                CandidateHistory::CanonicalFragment {
+                    fragment,
+                    members: members.clone(),
+                }
             }
         })
         .collect();
@@ -319,7 +326,10 @@ fn check_recipe(recipe: &Recipe) {
         .iter()
         .zip(&reordered_members)
         .map(|((fragment, _), members)| match fragment {
-            Some(fragment) => CandidateHistory::CanonicalFragment { fragment, members },
+            Some(fragment) => CandidateHistory::CanonicalFragment {
+                fragment,
+                members: members.iter().collect(),
+            },
             None => CandidateHistory::Loose(&members[0]),
         })
         .collect();
@@ -372,7 +382,10 @@ fn check_recipe(recipe: &Recipe) {
         duplicate.push(match first {
             CandidateHistory::Loose(change) => CandidateHistory::Loose(change),
             CandidateHistory::CanonicalFragment { fragment, members } => {
-                CandidateHistory::CanonicalFragment { fragment, members }
+                CandidateHistory::CanonicalFragment {
+                    fragment,
+                    members: members.clone(),
+                }
             }
         });
         assert_matches(
@@ -502,7 +515,7 @@ fn three_round_fragment_exclusion_cascade() {
         &data.signed,
         "three-round cascade",
     );
-    let accepted = AcceptedHistory::default();
+    let accepted = AcceptedHistoryArray::default();
     let selection = select(&accepted, &candidates, &data.store);
     assert!(selection.selected().is_empty());
     assert_eq!(selection.pending().len(), 3);
@@ -579,7 +592,7 @@ fn generalized_chains_and_exclusion_cascades() {
                     &data.signed,
                     &format!("chain {recipe:?}"),
                 );
-                let accepted = AcceptedHistory::default();
+                let accepted = AcceptedHistoryArray::default();
                 let selection = select(&accepted, &candidates, &data.store);
                 // Independent known answers for these families.
                 let expected = if fragment_tip {

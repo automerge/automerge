@@ -8,7 +8,8 @@ use std::sync::OnceLock;
 
 use ed25519_dalek::SigningKey;
 
-use crate::admission::{select, AcceptedHistory, CandidateHistory};
+use crate::admission::tests::AcceptedHistoryArray;
+use crate::admission::{select, CandidateHistory};
 use crate::change::encode_author_footer;
 use crate::signature::SignatureStore;
 use crate::{ActorId, Author, Automerge, Change, ChangeHash, ExpandedChange, Fragment};
@@ -132,13 +133,13 @@ fn nested_level_two_fragment_matches_oracle_for_all_signature_sets() {
                 if supplied & 1 != 0 {
                     candidates.push(CandidateHistory::CanonicalFragment {
                         fragment: &data.f,
-                        members: &data.changes[..2],
+                        members: data.changes[..2].iter().collect(),
                     });
                 }
                 if supplied & 2 != 0 {
                     candidates.push(CandidateHistory::CanonicalFragment {
                         fragment: &data.g,
-                        members: &data.changes,
+                        members: data.changes.iter().collect(),
                     });
                 }
                 if reverse {
@@ -163,11 +164,11 @@ fn blocked_container_does_not_hide_an_independently_attested_inner_fragment() {
     let candidates = [
         CandidateHistory::CanonicalFragment {
             fragment: &data.f,
-            members: &data.changes[..2],
+            members: data.changes[..2].iter().collect(),
         },
         CandidateHistory::CanonicalFragment {
             fragment: &data.g,
-            members: &data.changes,
+            members: data.changes.iter().collect(),
         },
     ];
     assert_matches(
@@ -177,7 +178,7 @@ fn blocked_container_does_not_hide_an_independently_attested_inner_fragment() {
         &signed,
         "blocked container with sig(f)",
     );
-    let accepted = AcceptedHistory::default();
+    let accepted = AcceptedHistoryArray::default();
     let result = select(&accepted, &candidates, &store);
     assert_eq!(result.selected().len(), 1);
     assert!(std::ptr::eq(result.selected()[0], &candidates[0]));
@@ -191,14 +192,14 @@ fn nested_descendant_evidence_requires_its_container_history() {
     let candidates = [
         CandidateHistory::CanonicalFragment {
             fragment: &data.f,
-            members: &data.changes[..2],
+            members: data.changes[..2].iter().collect(),
         },
         CandidateHistory::CanonicalFragment {
             fragment: &data.g,
-            members: &data.changes,
+            members: data.changes.iter().collect(),
         },
     ];
-    let accepted = AcceptedHistory::default();
+    let accepted = AcceptedHistoryArray::default();
     let (store, signed) = evidence(&data.changes, &[3]);
     assert_matches(&[], &candidates, &store, &signed, "container blocked on x");
     let result = select(&accepted, &candidates, &store);

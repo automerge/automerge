@@ -7,7 +7,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{Change, ChangeHash};
 
-use crate::admission::{select, AcceptedHistory, CandidateHistory};
+use crate::admission::tests::AcceptedHistoryArray;
+use crate::admission::{select, CandidateHistory};
 use crate::signature::SignatureStore;
 
 use super::retain_signature;
@@ -17,10 +18,10 @@ mod fixtures;
 mod generated;
 
 // Pattern-match the input directly rather than sharing CandidateHistory::changes.
-fn members<'a>(candidate: &'a CandidateHistory<'_>) -> &'a [Change] {
+fn members<'a>(candidate: &CandidateHistory<'a>) -> Vec<&'a Change> {
     match candidate {
-        CandidateHistory::Loose(change) => std::slice::from_ref(*change),
-        CandidateHistory::CanonicalFragment { members, .. } => members,
+        CandidateHistory::Loose(change) => vec![*change],
+        CandidateHistory::CanonicalFragment { members, .. } => members.clone(),
     }
 }
 
@@ -177,7 +178,7 @@ fn assert_matches(
     context: &str,
 ) {
     let expected = expected_selection(accepted, candidates, signed);
-    let accepted = AcceptedHistory::from_admitted(accepted);
+    let accepted = AcceptedHistoryArray::from_admitted(accepted);
     let result = select(&accepted, candidates, store);
     let mut seen = vec![false; candidates.len()];
     let mut actual = 0;
@@ -265,7 +266,10 @@ fn check_variations(name: &str, fixture: fixtures::Fixture) -> usize {
                 .map(|(_, candidate)| match candidate {
                     CandidateHistory::Loose(change) => CandidateHistory::Loose(change),
                     CandidateHistory::CanonicalFragment { fragment, members } => {
-                        CandidateHistory::CanonicalFragment { fragment, members }
+                        CandidateHistory::CanonicalFragment {
+                            fragment,
+                            members: members.clone(),
+                        }
                     }
                 })
                 .collect();

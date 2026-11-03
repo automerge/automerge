@@ -29,44 +29,43 @@ pub(crate) enum CandidateHistory<'a> {
     CanonicalFragment {
         /// The caller supplies a canonical descriptor, not a sender assertion.
         fragment: &'a Fragment,
-        /// Actual changes matching the descriptor's member hashes.
-        members: &'a [Change],
+        /// Borrowed changes matching the descriptor's complete membership.
+        ///
+        /// Members need not be contiguous, and overlapping candidates can share
+        /// the same change. This vector owns references, not change contents.
+        members: Vec<&'a Change>,
     },
 }
 
 impl<'a> CandidateHistory<'a> {
-    fn changes(&self) -> &[Change] {
-        match self {
+    /// Iterate borrowed members in their supplied order without consuming the candidate.
+    fn changes(&self) -> impl ExactSizeIterator<Item = &'a Change> + '_ {
+        let members = match self {
             CandidateHistory::Loose(change) => std::slice::from_ref(change),
-            CandidateHistory::CanonicalFragment { members, .. } => members,
-        }
+            CandidateHistory::CanonicalFragment { members, .. } => members.as_slice(),
+        };
+        members.iter().copied()
     }
 }
 
-/// Borrow history whose admission has already completed.
+/// Query membership in fixed, dependency-closed accepted history.
 ///
-/// This view neither owns history nor establishes its admission status.
-/// The default is empty accepted history. Use [`Self::from_admitted`] only
-/// for changes whose structural, causal, and attestation requirements have
-/// been satisfied and whose supporting evidence has been retained.
-#[derive(Debug, Default)]
-pub(crate) struct AcceptedHistory<'a> {
-    changes: &'a [Change],
-}
-
-impl<'a> AcceptedHistory<'a> {
-    /// Borrow already-admitted, dependency-closed history without revalidating it.
-    ///
-    /// The caller must not include pending changes or assume that ordinary
-    /// unsigned document application establishes this admission status.
-    pub(crate) fn from_admitted(changes: &'a [Change]) -> Self {
-        Self { changes }
-    }
-
-    /// Read the admitted changes without copying their contents.
-    pub(crate) fn changes(&self) -> &'a [Change] {
-        self.changes
-    }
+/// Dependency-closed means that whenever a change is accepted, every change it
+/// depends on is also accepted. This applies recursively to all ancestors,
+/// including dependencies from other actors.
+///
+/// For example, if `c` depends on `b` and `b` depends on `a`, reporting `c` as
+/// accepted requires both `b` and `a` to be accepted too. Accepting `a` alone
+/// does not require accepting its descendants `b` or `c`.
+///
+/// This guarantee lets selection stop walking dependencies at an accepted change:
+/// everything behind it is already accepted and needs no fresh attestation.
+/// Implementations must uphold this guarantee, not merely report whether a change
+/// is applied or has a signature. Answers must remain unchanged throughout a
+/// selection calculation.
+pub(crate) trait AcceptedHistory {
+    /// Whether this exact change hash belongs to accepted history.
+    fn contains(&self, hash: &ChangeHash) -> bool;
 }
 
 /// The result of deciding which candidates can be admitted together.
@@ -121,7 +120,7 @@ impl<'candidate, 'change> Selection<'candidate, 'change> {
 /// each pass, never across passes. The calculation stops when no candidates
 /// are excluded and returns the greatest admissible subset under the input contract.
 pub(crate) fn select<'candidate, 'change>(
-    accepted: &AcceptedHistory<'_>,
+    accepted: &impl AcceptedHistory,
     candidates: &'candidate [CandidateHistory<'change>],
     signatures: &SignatureStore,
 ) -> Selection<'candidate, 'change> {
@@ -140,8 +139,6 @@ struct Selector<'candidate, 'change> {
     /// Original input, retained so candidate indices stay stable.
     candidates: &'candidate [CandidateHistory<'change>],
 
-    /// Accepted changes remain available throughout the calculation.
-    accepted_hashes: HashSet<ChangeHash>,
     /// Number of not-yet-excluded candidate occurrences supplying each hash.
     ///
     /// Zero-count entries remain present. A zero count makes a change
@@ -185,10 +182,9 @@ impl<'candidate, 'change> Selector<'candidate, 'change> {
     /// The caller establishes the input preconditions described by [`select`].
     /// Construction does not validate fragments or establish admission status.
     fn new(
-        accepted: &AcceptedHistory<'_>,
+        accepted: &impl AcceptedHistory,
         candidates: &'candidate [CandidateHistory<'change>],
     ) -> Self {
-        let accepted_hashes: HashSet<_> = accepted.changes().iter().map(Change::hash).collect();
         // Count input occurrences, including duplicate candidates. Valid canonical
         // membership has no duplicate hashes within one candidate.
         let candidate_counts: HashMap<ChangeHash, usize> = {
@@ -207,14 +203,13 @@ impl<'candidate, 'change> Selector<'candidate, 'change> {
 
             for (index, candidate) in candidates.iter().enumerate() {
                 let member_hashes: HashSet<ChangeHash> =
-                    candidate.changes().iter().map(Change::hash).collect();
+                    candidate.changes().map(Change::hash).collect();
 
                 let dependencies: HashSet<ChangeHash> = candidate
                     .changes()
-                    .iter()
                     .flat_map(|change| change.deps().iter().copied())
                     .filter(|dependency| {
-                        !member_hashes.contains(dependency) && !accepted_hashes.contains(dependency)
+                        !member_hashes.contains(dependency) && !accepted.contains(dependency)
                     })
                     .collect();
 
@@ -230,7 +225,6 @@ impl<'candidate, 'change> Selector<'candidate, 'change> {
         };
         Self {
             candidates,
-            accepted_hashes,
             candidate_counts,
             dependents,
             excluded: vec![false; candidates.len()],
@@ -246,7 +240,7 @@ impl<'candidate, 'change> Selector<'candidate, 'change> {
     /// history and signature evidence remain fixed throughout the calculation.
     fn run(
         mut self,
-        accepted: &AcceptedHistory<'_>,
+        accepted: &impl AcceptedHistory,
         signatures: &SignatureStore,
     ) -> Selection<'candidate, 'change> {
         loop {
@@ -259,8 +253,9 @@ impl<'candidate, 'change> Selector<'candidate, 'change> {
 
     /// Evaluate one round and process all resulting exclusions.
     ///
-    /// Builds a [`Round`] from accepted history and the remaining candidates,
-    /// checks their requirements, and calls [`Selector::exclude_and_propagate`].
+    /// Builds a [`Round`] from the remaining candidate changes, using accepted
+    /// membership to stop ancestry traversal. Checks candidate requirements and
+    /// calls [`Selector::exclude_and_propagate`].
     ///
     /// Returns [`ControlFlow::Continue`] with updated state when at least one
     /// candidate was excluded. Another round is needed because the removed history
@@ -273,27 +268,25 @@ impl<'candidate, 'change> Selector<'candidate, 'change> {
     /// Use the same accepted history and signature evidence for every step.
     fn step(
         mut self,
-        accepted: &AcceptedHistory<'_>,
+        accepted: &impl AcceptedHistory,
         signatures: &SignatureStore,
     ) -> ControlFlow<Selection<'candidate, 'change>, Self> {
         let mut selected = Vec::new();
         let round = Round::new(
-            accepted
-                .changes()
-                .iter()
-                .chain(self.remaining.iter().flat_map(|(_, c)| c.changes())),
+            self.remaining.iter().flat_map(|(_, c)| c.changes()),
+            accepted,
             signatures,
         );
 
         for (index, candidate) in self.remaining.iter().copied() {
-            if round.meets_requirements(candidate, &self.accepted_hashes, signatures) {
+            if round.meets_requirements(candidate, accepted, signatures) {
                 selected.push((index, candidate));
             } else {
                 self.to_exclude.push(index);
             }
         }
 
-        self.exclude_and_propagate();
+        self.exclude_and_propagate(accepted);
 
         selected.retain(|(index, _)| !self.excluded[*index]);
 
@@ -316,7 +309,7 @@ impl<'candidate, 'change> Selector<'candidate, 'change> {
     ///
     /// This updates causal availability only. The next [`Round`] recalculates
     /// attestation from the surviving history.
-    fn exclude_and_propagate(&mut self) {
+    fn exclude_and_propagate(&mut self, accepted: &impl AcceptedHistory) {
         while let Some(index) = self.to_exclude.pop() {
             // Multiple missing dependencies may queue the same occurrence.
             // Record it and subtract its contributions exactly once.
@@ -335,7 +328,7 @@ impl<'candidate, 'change> Selector<'candidate, 'change> {
 
                 *count -= 1;
 
-                if *count == 0 && !self.accepted_hashes.contains(&hash) {
+                if *count == 0 && !accepted.contains(&hash) {
                     if let Some(affected) = self.dependents.get(&hash) {
                         self.to_exclude.extend(affected.iter().copied());
                     }
@@ -370,7 +363,7 @@ impl<'candidate, 'change> Selector<'candidate, 'change> {
 ///
 /// This snapshot does not establish that all dependencies are available.
 struct Round<'a> {
-    /// Accepted changes and members of the candidates considered in this round.
+    /// Candidate members not already covered by accepted history.
     available: HashMap<ChangeHash, &'a Change>,
     /// Changes covered by direct evidence or a signed same-actor descendant
     /// within this round's available history.
@@ -378,21 +371,27 @@ struct Round<'a> {
 }
 
 impl<'a> Round<'a> {
-    /// Gather the supplied history and determine which changes it can attest.
+    /// Gather unaccepted candidate history and determine which changes it can attest.
     ///
-    /// Deduplicates changes by hash and reads established Ed25519 evidence from
-    /// [`SignatureStore`]. A stored signature counts only when its signed change
-    /// is present in the supplied history.
+    /// Omits accepted members, deduplicates the rest by hash, and reads established
+    /// Ed25519 evidence from [`SignatureStore`].
     ///
     /// Signed changes attest themselves and reachable ancestors of the same actor.
     /// Traversal can pass through other actors' changes without attesting them.
     /// Actor–author bindings are assumed consistent.
     ///
-    /// Missing dependencies are not traversed. Their absence is checked separately
-    /// by [`Round::meets_requirements`].
-    fn new(changes: impl IntoIterator<Item = &'a Change>, signatures: &SignatureStore) -> Self {
-        let (available, directly_signed): (HashMap<ChangeHash, &Change>, Vec<&Change>) =
-            changes.into_iter().fold(
+    /// Walks stop at hashes absent from the candidate map. Accepted dependencies
+    /// need no traversal because all their ancestors are already accepted. Truly
+    /// unavailable dependencies fail the separate [`Round::meets_requirements`] check.
+    fn new(
+        changes: impl IntoIterator<Item = &'a Change>,
+        accepted: &impl AcceptedHistory,
+        signatures: &SignatureStore,
+    ) -> Self {
+        let (available, directly_signed): (HashMap<ChangeHash, &Change>, Vec<&Change>) = changes
+            .into_iter()
+            .filter(|change| !accepted.contains(&change.hash()))
+            .fold(
                 (HashMap::new(), Vec::new()),
                 |(mut available, mut directly_signed), change| {
                     let hash = change.hash();
@@ -448,20 +447,20 @@ impl<'a> Round<'a> {
     fn meets_requirements(
         &self,
         candidate: &CandidateHistory<'_>,
-        accepted_hashes: &HashSet<ChangeHash>,
+        accepted: &impl AcceptedHistory,
         signatures: &SignatureStore,
     ) -> bool {
-        let dependencies_available = candidate.changes().iter().all(|change| {
-            change
-                .deps()
-                .iter()
-                .all(|dependency| self.available.contains_key(dependency))
+        let dependencies_available = candidate.changes().all(|change| {
+            accepted.contains(&change.hash())
+                || change.deps().iter().all(|dependency| {
+                    accepted.contains(dependency) || self.available.contains_key(dependency)
+                })
         });
 
-        let attestation_satisfied = candidate.changes().iter().all(|change| {
+        let attestation_satisfied = candidate.changes().all(|change| {
             let hash = change.hash();
 
-            if accepted_hashes.contains(&hash) {
+            if accepted.contains(&hash) {
                 return true;
             }
 

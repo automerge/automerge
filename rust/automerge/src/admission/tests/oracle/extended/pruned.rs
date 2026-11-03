@@ -1,6 +1,7 @@
 use std::collections::BTreeSet;
 
-use crate::admission::{select, AcceptedHistory, CandidateHistory};
+use crate::admission::tests::AcceptedHistoryArray;
+use crate::admission::{select, CandidateHistory};
 use crate::{Change, Fragment};
 
 use super::super::assert_matches;
@@ -40,7 +41,7 @@ fn accepted_fragment(rounds: usize) -> (Vec<Change>, Fragment, [usize; 2]) {
 fn pruned_accepted_fragment_supports_new_loose_and_overlapping_candidates() {
     for rounds in 2..=5 {
         let (accepted_changes, accepted_fragment, frontiers) = accepted_fragment(rounds);
-        let accepted = AcceptedHistory::from_admitted(&accepted_changes);
+        let accepted = AcceptedHistoryArray::from_admitted(&accepted_changes);
         let root = accepted_changes[0].hash();
         let tip = accepted_changes.last().unwrap().hash();
         let new = at_level(
@@ -63,11 +64,11 @@ fn pruned_accepted_fragment_supports_new_loose_and_overlapping_candidates() {
             CandidateHistory::Loose(&all[accepted_changes.len()]),
             CandidateHistory::CanonicalFragment {
                 fragment: &branch_fragment,
-                members: &branch_changes,
+                members: branch_changes.iter().collect(),
             },
             CandidateHistory::CanonicalFragment {
                 fragment: &accepted_fragment,
-                members: &accepted_changes,
+                members: accepted_changes.iter().collect(),
             },
         ];
         for mask in 0..4 {
@@ -114,11 +115,11 @@ fn pruned_accepted_fragment_supports_new_loose_and_overlapping_candidates() {
                 let supporting = [
                     CandidateHistory::CanonicalFragment {
                         fragment: &branch_fragment,
-                        members: &branch_changes,
+                        members: branch_changes.iter().collect(),
                     },
                     CandidateHistory::CanonicalFragment {
                         fragment: &accepted_fragment,
-                        members: &accepted_changes,
+                        members: accepted_changes.iter().collect(),
                     },
                 ];
                 assert_matches(
@@ -129,13 +130,13 @@ fn pruned_accepted_fragment_supports_new_loose_and_overlapping_candidates() {
                     "pruned history supplied alongside branch",
                 );
                 assert_eq!(
-                    select(&AcceptedHistory::default(), &supporting, &store)
+                    select(&AcceptedHistoryArray::default(), &supporting, &store)
                         .selected()
                         .len(),
                     2
                 );
                 // Stored signatures on missing old tips cannot help the branch alone.
-                let result = select(&AcceptedHistory::default(), &supporting[..1], &store);
+                let result = select(&AcceptedHistoryArray::default(), &supporting[..1], &store);
                 assert!(result.selected().is_empty());
             }
         }

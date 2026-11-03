@@ -3,7 +3,8 @@
 
 use std::collections::BTreeSet;
 
-use crate::admission::{select, AcceptedHistory, CandidateHistory};
+use crate::admission::tests::AcceptedHistoryArray;
+use crate::admission::{select, CandidateHistory};
 use crate::{Change, ChangeHash};
 
 use super::super::assert_matches;
@@ -35,7 +36,10 @@ fn partitions_for_orders(
             .map(|i| match &candidates[*i] {
                 CandidateHistory::Loose(change) => CandidateHistory::Loose(change),
                 CandidateHistory::CanonicalFragment { fragment, members } => {
-                    CandidateHistory::CanonicalFragment { fragment, members }
+                    CandidateHistory::CanonicalFragment {
+                        fragment,
+                        members: members.clone(),
+                    }
                 }
             })
             .collect();
@@ -46,7 +50,7 @@ fn partitions_for_orders(
             signed,
             &format!("propagation order={order:?}"),
         );
-        let accepted = AcceptedHistory::from_admitted(accepted);
+        let accepted = AcceptedHistoryArray::from_admitted(accepted);
         let result = select(&accepted, &ordered, store);
         assert_eq!(result.selected().len(), selected_indices.len());
         assert_eq!(
@@ -89,11 +93,11 @@ fn shared_change_disappears_only_after_its_last_candidate_is_excluded() {
     let candidates = [
         CandidateHistory::CanonicalFragment {
             fragment: &f_fragment,
-            members: &f_members,
+            members: f_members.iter().collect(),
         },
         CandidateHistory::CanonicalFragment {
             fragment: &g_fragment,
-            members: &g_members,
+            members: g_members.iter().collect(),
         },
         CandidateHistory::Loose(&all[3]),
     ];
@@ -118,7 +122,7 @@ fn accepted_change_survives_removal_of_its_only_pending_supplier() {
     let candidates = [
         CandidateHistory::CanonicalFragment {
             fragment: &fragment,
-            members: &all[..2],
+            members: all[..2].iter().collect(),
         },
         CandidateHistory::Loose(&all[2]),
     ];
@@ -143,7 +147,7 @@ fn multiple_missing_dependencies_exclude_each_candidate_occurrence_once() {
     let candidates = [
         CandidateHistory::CanonicalFragment {
             fragment: &fragment,
-            members: &all[..3],
+            members: all[..3].iter().collect(),
         },
         CandidateHistory::Loose(&all[3]),
         CandidateHistory::Loose(&all[3]),

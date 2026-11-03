@@ -34,7 +34,7 @@ impl Fixture {
                     members,
                 } => CandidateHistory::CanonicalFragment {
                     fragment: descriptor,
-                    members,
+                    members: members.iter().collect(),
                 },
             })
             .collect()

@@ -8,7 +8,32 @@ use crate::{ActorId, Author, AutoCommit, Change, ChangeHash, Fragment, ROOT};
 
 use super::{select, AcceptedHistory, CandidateHistory};
 
+/// Slice-backed fixture adapter. Production uses membership queries only.
+/// The fixture must provide dependency-closed, already-admitted history.
+#[derive(Debug, Default)]
+struct AcceptedHistoryArray<'a> {
+    changes: &'a [Change],
+}
+
+impl<'a> AcceptedHistoryArray<'a> {
+    fn from_admitted(changes: &'a [Change]) -> Self {
+        Self { changes }
+    }
+
+    // The independent oracle uses the original full fixture history.
+    fn changes(&self) -> &'a [Change] {
+        self.changes
+    }
+}
+
+impl AcceptedHistory for AcceptedHistoryArray<'_> {
+    fn contains(&self, hash: &ChangeHash) -> bool {
+        self.changes.iter().any(|change| change.hash() == *hash)
+    }
+}
+
 mod lifecycle;
+mod membership;
 mod oracle;
 
 // Vary commit metadata rather than fabricating hashes. Levels 0, 0, 1 give
@@ -65,10 +90,10 @@ fn signed_descendant_attests_other_members_of_the_same_fragment() {
     assert_eq!(signatures.ed25519_entries(&a2).count(), 0);
     assert_eq!(signatures.ed25519_entries(&a3).count(), 1);
 
-    let accepted = AcceptedHistory::default();
+    let accepted = AcceptedHistoryArray::default();
     let candidates = [CandidateHistory::CanonicalFragment {
         fragment: &fragment,
-        members: &changes,
+        members: changes.iter().collect(),
     }];
 
     let selection = select(&accepted, &candidates, &signatures);
@@ -107,7 +132,7 @@ fn signed_loose_change_waits_when_its_dependency_cannot_be_admitted() {
     assert_eq!(signatures.ed25519_entries(&a1).count(), 0);
     assert_eq!(signatures.ed25519_entries(&a2).count(), 1);
 
-    let accepted = AcceptedHistory::default();
+    let accepted = AcceptedHistoryArray::default();
     let candidates = [
         CandidateHistory::Loose(&changes[0]),
         CandidateHistory::Loose(&changes[1]),
@@ -159,10 +184,10 @@ fn signature_on_earlier_member_does_not_attest_later_member() {
     retain_signature(&mut signatures, &changes[1], &key);
     assert_eq!(signatures.ed25519_entries(&a2).count(), 1);
     assert_eq!(signatures.ed25519_entries(&a3).count(), 0);
-    let accepted = AcceptedHistory::default();
+    let accepted = AcceptedHistoryArray::default();
     let candidates = [CandidateHistory::CanonicalFragment {
         fragment: &fragment,
-        members: &changes,
+        members: changes.iter().collect(),
     }];
 
     let selection = select(&accepted, &candidates, &signatures);
@@ -277,17 +302,17 @@ fn shared_signature_remains_usable_when_another_fragment_stays_pending() {
     );
     let a = fixture.f_changes[0].hash();
     assert_eq!(fixture.signatures.ed25519_entries(&a).count(), 1);
-    let accepted = AcceptedHistory::default();
+    let accepted = AcceptedHistoryArray::default();
 
     for reverse in [false, true] {
         let mut candidates = [
             CandidateHistory::CanonicalFragment {
                 fragment: &fixture.f,
-                members: &fixture.f_changes,
+                members: fixture.f_changes.iter().collect(),
             },
             CandidateHistory::CanonicalFragment {
                 fragment: &fixture.g,
-                members: &fixture.g_changes,
+                members: fixture.g_changes.iter().collect(),
             },
         ];
         if reverse {
@@ -308,7 +333,7 @@ fn shared_signature_remains_usable_when_another_fragment_stays_pending() {
     // G need not even be a candidate: sig(a) is reusable for F's copy of a.
     let candidates = [CandidateHistory::CanonicalFragment {
         fragment: &fixture.f,
-        members: &fixture.f_changes,
+        members: fixture.f_changes.iter().collect(),
     }];
     let selection = select(&accepted, &candidates, &fixture.signatures);
     assert_eq!(selection.selected().len(), 1);
@@ -320,15 +345,15 @@ fn shared_signature_remains_usable_when_another_fragment_stays_pending() {
 #[test]
 fn excluded_signed_history_cannot_attest_another_fragment() {
     let mut fixture = overlapping_fragments();
-    let accepted = AcceptedHistory::default();
+    let accepted = AcceptedHistoryArray::default();
     let candidates = [
         CandidateHistory::CanonicalFragment {
             fragment: &fixture.f,
-            members: &fixture.f_changes,
+            members: fixture.f_changes.iter().collect(),
         },
         CandidateHistory::CanonicalFragment {
             fragment: &fixture.g,
-            members: &fixture.g_changes,
+            members: fixture.g_changes.iter().collect(),
         },
     ];
 

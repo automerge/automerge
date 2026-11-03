@@ -1,7 +1,8 @@
 use std::hint::black_box;
 use std::time::{Duration, Instant};
 
-use crate::admission::{select, AcceptedHistory, CandidateHistory};
+use crate::admission::tests::AcceptedHistoryArray;
+use crate::admission::{select, CandidateHistory};
 use crate::{Change, Fragment};
 
 use super::super::assert_matches;
@@ -40,11 +41,11 @@ fn larger_histories_with_two_candidates_match_subset_oracle() {
         let candidates = [
             CandidateHistory::CanonicalFragment {
                 fragment: &first,
-                members: &changes[..split],
+                members: changes[..split].iter().collect(),
             },
             CandidateHistory::CanonicalFragment {
                 fragment: &second,
-                members: &changes[split..],
+                members: changes[split..].iter().collect(),
             },
         ];
         let (store, signed) = evidence(&changes, &[length - 1]);
@@ -55,7 +56,7 @@ fn larger_histories_with_two_candidates_match_subset_oracle() {
             &signed,
             &format!("two fragments, {length} changes"),
         );
-        let accepted = AcceptedHistory::default();
+        let accepted = AcceptedHistoryArray::default();
         let result = select(&accepted, &candidates, &store);
         assert_eq!(result.selected().len(), 2);
         assert!(result.pending().is_empty());
@@ -76,7 +77,7 @@ fn larger_loose_cascades_match_known_signed_prefixes() {
         for gap in [0, length / 2, length - 1, length] {
             let signed_indices: Vec<_> = (0..length).filter(|i| *i != gap).collect();
             let (store, _) = evidence(&changes, &signed_indices);
-            let accepted = AcceptedHistory::default();
+            let accepted = AcceptedHistoryArray::default();
             for reverse in [false, true] {
                 let mut ordered: Vec<_> = changes.iter().map(CandidateHistory::Loose).collect();
                 if reverse {
@@ -129,9 +130,9 @@ fn selector_scaling() {
         let fragment = complete_fragment(&changes);
         let candidates = [CandidateHistory::CanonicalFragment {
             fragment: &fragment,
-            members: &changes,
+            members: changes.iter().collect(),
         }];
-        let accepted = AcceptedHistory::default();
+        let accepted = AcceptedHistoryArray::default();
         for dense in [false, true] {
             let indices: Vec<_> = if dense {
                 (0..length).collect()
@@ -161,7 +162,7 @@ fn selector_scaling() {
         let mut extended = changes.clone();
         extended.push(at_level(0, length as u64 + 1, &[fragment.head], 0));
         let candidates = [CandidateHistory::Loose(&extended[length])];
-        let accepted = AcceptedHistory::from_admitted(&extended[..length]);
+        let accepted = AcceptedHistoryArray::from_admitted(&extended[..length]);
         let (store, _) = evidence(&extended, &[length - 1, length]);
         assert_eq!(select(&accepted, &candidates, &store).selected().len(), 1);
         let time = median_select_time(|| {
@@ -179,7 +180,7 @@ fn selector_scaling() {
 
         let loose = chain(length, &[]);
         let candidates: Vec<_> = loose.iter().map(CandidateHistory::Loose).collect();
-        let accepted = AcceptedHistory::default();
+        let accepted = AcceptedHistoryArray::default();
         let indices: Vec<_> = (1..length).collect();
         let (store, _) = evidence(&loose, &indices);
         let result = select(&accepted, &candidates, &store);
