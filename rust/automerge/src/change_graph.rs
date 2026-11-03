@@ -22,6 +22,9 @@ use crate::{
     Change, ChangeHash,
 };
 
+mod boundary_memo;
+use boundary_memo::BoundaryMemo;
+
 /// The graph of changes
 ///
 /// This is a sort of adjacency list based representation, except that instead of using linked
@@ -51,6 +54,7 @@ pub(crate) struct ChangeGraph {
     seq_index: ActorIndexed<Vec<NodeIdx>>,
     fragment_top: SeqClock,
     fragments: Vec<FragmentNode>,
+    boundary_memo: BoundaryMemo,
 }
 
 pub(crate) struct ChangeGraphCols(ChangeGraph);
@@ -110,6 +114,7 @@ impl ChangeGraph {
             seq_index: ActorIndexed::new(actors),
             fragments: vec![],
             fragment_top: SeqClock::new(actors),
+            boundary_memo: BoundaryMemo::default(),
         }
     }
 
@@ -652,22 +657,54 @@ impl ChangeGraph {
         }
     }
 
+    /// Find the first equal-or-higher-level ancestors on each path. This must
+    /// consult the change DAG, not the covering cache: a concurrent, higher-level
+    /// fragment may have removed an ancestor's standalone cache entry.
+    fn fragment_boundary(&mut self, head: NodeIdx, level: usize) -> Vec<NodeIdx> {
+        let graph = boundary_memo::Graph {
+            hashes: &self.hashes,
+            parents: &self.parents,
+            edges: &self.edges,
+        };
+        let boundary = self.boundary_memo.boundary(&graph, head, level);
+        #[cfg(feature = "slow_path_assertions")]
+        assert_eq!(boundary, self.fragment_boundary_slow(head, level));
+        boundary
+    }
+
+    /// Reference walk for checking the memo.
+    #[cfg(any(test, feature = "slow_path_assertions"))]
+    fn fragment_boundary_slow(&self, head: NodeIdx, level: usize) -> Vec<NodeIdx> {
+        let mut pending: Vec<_> = self.parents(head).collect();
+        let mut seen = HashSet::new();
+        let mut boundary = Vec::new();
+        while let Some(node) = pending.pop() {
+            if !seen.insert(node) {
+                continue;
+            }
+            if self.hashes[node.0 as usize].fragment_level() >= level {
+                boundary.push(node);
+            } else {
+                pending.extend(self.parents(node));
+            }
+        }
+        boundary.sort_unstable_by_key(|n| self.hashes[n.0 as usize]);
+        boundary
+    }
+
     fn cache_fragment(&mut self, head: NodeIdx) {
         let hash = &self.hashes[head.0 as usize];
         let level = hash.fragment_level();
         if level == 0 {
             return;
         }
-        let mut deps = vec![];
+        let deps = self.fragment_boundary(head, level);
         let mut supercede = vec![];
         let clock = self.calculate_clock([head].into());
+        // Compact the covering cache independently of boundary discovery.
         for (i, f) in self.fragments.iter().enumerate().rev() {
-            if clock.covers(&f.clock) {
-                if self.hashes[f.head.0 as usize].fragment_level() >= level {
-                    deps.push(f.head);
-                } else {
-                    supercede.push(i);
-                }
+            if clock.covers(&f.clock) && self.hashes[f.head.0 as usize].fragment_level() < level {
+                supercede.push(i);
             }
         }
         for i in supercede {
@@ -1062,6 +1099,7 @@ impl ChangeGraphCols {
             seq_index,
             fragments,
             fragment_top,
+            boundary_memo: BoundaryMemo::default(),
         }))
     }
 }
@@ -1084,6 +1122,47 @@ mod tests {
     use rand::RngExt;
 
     use super::*;
+
+    /// Real-data check of the boundary memo against the reference DFS.
+    /// Run with `cargo test --release -p automerge --lib real_history_boundaries -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn real_history_boundaries() {
+        for file in ["S1.am", "A2.am", "C1.am", "C2.am"] {
+            let Ok(bytes) = std::fs::read(format!("../benchmark-battery/egwalker-paper/{file}"))
+            else {
+                continue;
+            };
+            let doc = Automerge::load(&bytes).unwrap();
+            let mut graph = doc.change_graph.clone();
+            graph.boundary_memo = BoundaryMemo::default();
+            let heads: Vec<_> = graph
+                .node_ids()
+                .filter(|n| graph.hashes[n.0 as usize].fragment_level() > 0)
+                .collect();
+            let start = std::time::Instant::now();
+            let memo: Vec<_> = heads
+                .iter()
+                .map(|&h| graph.fragment_boundary(h, graph.hashes[h.0 as usize].fragment_level()))
+                .collect();
+            let memo_time = start.elapsed();
+            let start = std::time::Instant::now();
+            let slow: Vec<_> = heads
+                .iter()
+                .map(|&h| {
+                    graph.fragment_boundary_slow(h, graph.hashes[h.0 as usize].fragment_level())
+                })
+                .collect();
+            let slow_time = start.elapsed();
+            assert_eq!(memo, slow);
+            let (sets, bytes) = graph.boundary_memo.footprint();
+            println!(
+                "{file}: nodes={} heads={} memo={memo_time:?} dfs={slow_time:?} distinct_sets={sets} memo_bytes={bytes}",
+                graph.len(),
+                heads.len(),
+            );
+        }
+    }
 
     #[test]
     fn clock_by_heads() {
@@ -1321,6 +1400,275 @@ mod tests {
         }
     }
 
+    fn fragment_fork_changes() -> [Change; 3] {
+        // These are hardcoded changes that reproduce a structure like this:
+        //
+        //           F  (level 1)
+        //          / \
+        //         H   K
+        //  (level 1) (level 2)
+        //
+        // They can be produced by the following (using the JS API):
+        //
+        // F = emptyChange(init({ actor: "aa" }), { time: 304 })
+        // H = emptyChange(clone(F, { actor: "cc" }), { time: 381 })
+        // K = emptyChange(clone(F, { actor: "bb" }), { time: 17758 })
+        //
+        // The distinct actor IDs make H and K independent writers. Timestamps
+        // are mined hash nonces giving F/H level 1 and K level 2, not an ordering:
+        // H and K are concurrent because they both depend only on F.
+        // Each hex string is that document's own change (not its ancestors).
+        // Keeping the mined bytes avoids searching for a level-2 hash at runtime.
+        [
+            "856f4a8300779194010a0001aa0101b002000000",
+            "856f4a8300619aad012a01007791944ed174f20cb0268401fab1528d20835916d604b0a0fe591eb690ad2201cc0101fd02000000",
+            "856f4a8300001334012b01007791944ed174f20cb0268401fab1528d20835916d604b0a0fe591eb690ad2201bb0101de8a01000000",
+        ]
+        .map(|bytes| Change::from_bytes(hex::decode(bytes).unwrap()).unwrap())
+    }
+
+    fn fragment_snapshot(doc: &Automerge) -> (Vec<Fragment>, Vec<Vec<u8>>) {
+        // Compare sets of fragments, independently of their enumeration order.
+        let mut fragments = doc.fragments(..);
+        fragments.sort_by_key(|f| f.head);
+        assert_fragment_invariants(&fragments);
+        let bundles = doc.bundle_fragments(fragments.clone());
+        (fragments, bundles)
+    }
+
+    #[test]
+    fn fragment_boundaries_ignore_concurrent_coalescing() {
+        let [f, h, k] = fragment_fork_changes();
+        assert_eq!(f.hash().fragment_level(), 1);
+        assert_eq!(h.hash().fragment_level(), 1);
+        assert_eq!(k.hash().fragment_level(), 2);
+
+        let mut expected = Automerge::new();
+        expected
+            .apply_changes([f.clone(), h.clone(), k.clone()])
+            .unwrap();
+        let expected_h = Fragment {
+            head: h.hash(),
+            level: 1,
+            boundary: vec![f.hash()],
+            checkpoints: vec![],
+            members: vec![h.hash()],
+        };
+        assert_eq!(expected.get_fragment(h.hash()), Some(expected_h.clone()));
+        let snapshot = fragment_snapshot(&expected);
+
+        // Include out-of-order delivery to exercise queued changes as well.
+        for order in [
+            [0, 1, 2],
+            [0, 2, 1],
+            [1, 0, 2],
+            [1, 2, 0],
+            [2, 0, 1],
+            [2, 1, 0],
+        ] {
+            let changes = [&f, &h, &k];
+            let mut doc = Automerge::new();
+            for i in order {
+                doc.apply_changes([changes[i].clone()]).unwrap();
+            }
+            assert_eq!(doc.get_fragment(h.hash()), Some(expected_h.clone()));
+            assert_eq!(fragment_snapshot(&doc), snapshot);
+            assert_eq!(
+                fragment_snapshot(&Automerge::load(&doc.save()).unwrap()),
+                snapshot
+            );
+
+            let bundle = doc.bundle([h.hash()]).unwrap();
+            assert_eq!(bundle.deps(), &[f.hash()]);
+            assert_eq!(
+                bundle
+                    .to_changes()
+                    .unwrap()
+                    .iter()
+                    .map(Change::hash)
+                    .collect::<Vec<_>>(),
+                vec![h.hash()]
+            );
+
+            let mut loaded = Automerge::new();
+            for bytes in &snapshot.1 {
+                loaded.load_incremental(bytes).unwrap();
+            }
+            assert_eq!(loaded.get_heads(), doc.get_heads());
+            assert_eq!(fragment_snapshot(&loaded), snapshot);
+        }
+
+        let mut left = Automerge::new();
+        left.apply_changes([f.clone(), h]).unwrap();
+        let before = fragment_snapshot(&left);
+        let mut right = Automerge::new();
+        right.apply_changes([f, k]).unwrap();
+        let right_before = fragment_snapshot(&right);
+        let mut merged = left.clone();
+        merged.merge(&mut right).unwrap();
+        assert_eq!(fragment_snapshot(&merged), snapshot);
+        assert_eq!(
+            fragment_snapshot(&left),
+            before,
+            "merging a clone changed its source"
+        );
+        assert_eq!(fragment_snapshot(&right), right_before);
+        right.merge(&mut left).unwrap();
+        assert_eq!(fragment_snapshot(&right), snapshot);
+    }
+
+    fn change_at_level(mut change: crate::ExpandedChange, level: usize) -> Change {
+        for time in 0..1_000_000 {
+            change.time = time;
+            let candidate = Change::from(change.clone());
+            if candidate.hash().fragment_level() == level {
+                return candidate;
+            }
+        }
+        panic!("could not find a change at level {level}");
+    }
+
+    #[test]
+    fn fragment_merge_bundles_ignore_arrival_order() {
+        let [f, _, _] = fragment_fork_changes();
+        let mut base = Automerge::new();
+        base.apply_changes([f.clone()]).unwrap();
+        let branches: Vec<_> = [1u8, 2]
+            .into_iter()
+            .map(|actor| {
+                let mut branch = base.clone();
+                branch.set_actor(ActorId::from(&[actor][..]));
+                let mut tx = branch.transaction();
+                tx.put(ROOT, "value", actor as i64).unwrap();
+                tx.put(ROOT, format!("branch{actor}"), true).unwrap();
+                tx.commit();
+                let change = branch.get_changes(&[f.hash()]).pop().unwrap();
+                change_at_level((&change).into(), 0)
+            })
+            .collect();
+        let mut merge: crate::ExpandedChange = (&f).into();
+        merge.actor_id = ActorId::from(&[3][..]);
+        merge.start_op = std::num::NonZeroU64::new(3).unwrap();
+        merge.deps = branches.iter().map(Change::hash).collect();
+        merge.deps.sort();
+        let merge = change_at_level(merge, 1);
+
+        let mut expected = None;
+        for order in [[0, 1], [1, 0]] {
+            let mut doc = base.clone();
+            for i in order {
+                doc.apply_changes([branches[i].clone()]).unwrap();
+            }
+            doc.apply_changes([merge.clone()]).unwrap();
+            let fragment = doc.get_fragment(merge.hash()).unwrap();
+            assert_eq!(fragment.boundary, vec![f.hash()]);
+            assert!(fragment.checkpoints.is_empty());
+            assert_eq!(fragment.members.len(), 3);
+            let snapshot = fragment_snapshot(&doc);
+            if let Some(expected) = &expected {
+                assert_eq!(&snapshot, expected);
+            } else {
+                expected = Some(snapshot.clone());
+            }
+            assert_eq!(
+                fragment_snapshot(&Automerge::load(&doc.save()).unwrap()),
+                snapshot
+            );
+            let mut loaded = Automerge::new();
+            for bytes in &snapshot.1 {
+                loaded.load_incremental(bytes).unwrap();
+            }
+            assert_eq!(loaded.get_heads(), doc.get_heads());
+            assert_eq!(loaded.hydrate(None), doc.hydrate(None));
+            assert_eq!(fragment_snapshot(&loaded), snapshot);
+        }
+    }
+
+    #[test]
+    fn fragment_boundary_stops_at_nearest_ancestor() {
+        let [f, h, _] = fragment_fork_changes();
+        let mut child: crate::ExpandedChange = (&f).into();
+        child.actor_id = ActorId::from(&[5][..]);
+        child.deps = vec![h.hash()];
+        let child = change_at_level(child, 1);
+        let mut doc = Automerge::new();
+        doc.apply_changes([f, h.clone(), child.clone()]).unwrap();
+        let fragment = doc.get_fragment(child.hash()).unwrap();
+        assert_eq!(fragment.boundary, vec![h.hash()]);
+        assert_eq!(fragment.members, vec![child.hash()]);
+        assert!(fragment.checkpoints.is_empty());
+    }
+
+    #[test]
+    fn fragment_merge_boundary_is_a_causal_cut() {
+        let [f, h, k] = fragment_fork_changes();
+        let mut merge: crate::ExpandedChange = (&f).into();
+        merge.actor_id = ActorId::from(&[4][..]);
+        merge.deps = vec![h.hash(), k.hash()];
+        merge.deps.sort();
+        let merge = change_at_level(merge, 2);
+        let mut expected = None;
+        for branches in [[h.clone(), k.clone()], [k.clone(), h.clone()]] {
+            let mut doc = Automerge::new();
+            doc.apply_changes([f.clone()]).unwrap();
+            doc.apply_changes(branches).unwrap();
+            doc.apply_changes([merge.clone()]).unwrap();
+            let fragment = doc.get_fragment(merge.hash()).unwrap();
+            assert_eq!(fragment.boundary, vec![k.hash()]);
+            assert_eq!(fragment.checkpoints, vec![h.hash()]);
+            // F is reachable through H, but is already in K's causal history.
+            assert_eq!(fragment.members, vec![merge.hash(), h.hash()]);
+            let bundle = doc.bundle(fragment.members).unwrap();
+            assert_eq!(
+                bundle.deps().iter().copied().collect::<BTreeSet<_>>(),
+                BTreeSet::from([f.hash(), k.hash()])
+            );
+            let mut loaded = Automerge::new();
+            loaded.apply_changes([f.clone(), k.clone()]).unwrap();
+            loaded.load_incremental(bundle.bytes()).unwrap();
+            assert_eq!(loaded.get_heads(), doc.get_heads());
+            let snapshot = fragment_snapshot(&doc);
+            assert_eq!(fragment_snapshot(&loaded), snapshot);
+            if let Some(expected) = &expected {
+                assert_eq!(&snapshot, expected);
+            } else {
+                expected = Some(snapshot);
+            }
+        }
+    }
+
+    #[test]
+    fn fragments_converge_after_shuffled_delivery() {
+        use rand::{seq::SliceRandom, SeedableRng};
+
+        let mut builder = TestGraphBuilder::new();
+        builder.rng = rand::rngs::SmallRng::seed_from_u64(42);
+        let a = builder.actor();
+        let b = builder.actor();
+        let root = builder.change(&a, 1, &[]);
+        let (mut left, mut right) = (root, root);
+        for i in 0..600 {
+            left = builder.change(&a, 1, &[left]);
+            right = builder.change(&b, 1, &[right]);
+            if i % 50 == 49 {
+                left = builder.change(&a, 1, &[left, right]);
+                right = left;
+            }
+        }
+        let mut doc = Automerge::new();
+        doc.apply_changes(builder.changes.clone()).unwrap();
+        assert!(!doc.fragments(1..).is_empty());
+        let expected = fragment_snapshot(&doc);
+        for _ in 0..5 {
+            builder.changes.shuffle(&mut builder.rng);
+            let mut replica = Automerge::new();
+            replica.apply_changes(builder.changes.clone()).unwrap();
+            assert_eq!(fragment_snapshot(&replica), expected);
+            let loaded = Automerge::load(&replica.save()).unwrap();
+            assert_eq!(fragment_snapshot(&loaded), expected);
+        }
+    }
+
     #[test]
     fn fragments_cover_all_changes() {
         // Create a long linear chain — with ~1000 changes, we expect several
@@ -1381,6 +1729,7 @@ mod tests {
             for checkpoint in &f.checkpoints {
                 assert!(f.members.contains(checkpoint));
                 assert!(checkpoint.fragment_level() > 0);
+                assert!(checkpoint.fragment_level() < f.level);
             }
 
             // deps must be equal or higher level than the fragment
@@ -1514,7 +1863,10 @@ mod tests {
         let all_hashes: BTreeSet<_> = builder.all_hashes().into_iter().collect();
         let heads: Vec<_> = graph.heads().collect();
         let fragments: Vec<_> = graph.fragments(&heads, ..).collect();
-        let fragment_ids: BTreeSet<_> = fragments.iter().map(|f| f.head).collect();
+        let covered: BTreeSet<_> = fragments
+            .iter()
+            .flat_map(|f| f.members.iter().copied())
+            .collect();
 
         for f in &fragments {
             for dep in &f.boundary {
@@ -1524,16 +1876,9 @@ mod tests {
                     f.head,
                     dep
                 );
-                // Deps of cached fragments (level > 0) should point to other fragment ids
-                // Deps of loose fragments (level == 0) point to change-level parents
-                if f.level > 0 {
-                    assert!(
-                        fragment_ids.contains(dep) || dep.fragment_level() == 0,
-                        "cached fragment {:?} has dep {:?} that is not a fragment id",
-                        f.head,
-                        dep
-                    );
-                }
+                // A boundary need not remain a standalone fragment head: it
+                // can be covered by a higher-level fragment on another branch.
+                assert!(covered.contains(dep));
             }
         }
     }
@@ -1863,8 +2208,10 @@ impl FragmentNode {
 pub struct Fragment {
     pub head: ChangeHash,
     pub level: usize,
+    /// The first ancestors at or above this fragment's level on each path.
+    /// They need not remain standalone heads in the covering fragment cache.
     pub boundary: Vec<ChangeHash>,
-    /// Non-zero-level members of the fragment, excluding its head.
+    /// Non-zero-level members strictly below this fragment's level.
     pub checkpoints: Vec<ChangeHash>,
     pub members: Vec<ChangeHash>,
 }

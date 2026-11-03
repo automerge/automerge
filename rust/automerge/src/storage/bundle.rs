@@ -173,7 +173,52 @@ pub struct InvalidBundle(String);
 #[cfg(test)]
 mod test {
     use crate::transaction::Transactable;
-    use crate::{Automerge, ROOT};
+    use crate::{ActorId, Automerge, Change, ROOT};
+
+    /// Regression for wire-byte determinism, not just document convergence.
+    /// Two actors concurrently delete the same prior write. The bundle builder
+    /// reconstructs those delete operations from successor links and buffers
+    /// them in a HashMap. Before `flush_deletes` sorted their IDs, randomized
+    /// map iteration could encode the same changes in a different byte order.
+    #[test]
+    fn bundle_concurrent_deletions_are_deterministic() {
+        let mut doc = Automerge::new();
+        doc.set_actor(ActorId::from(&[0][..]));
+        let mut tx = doc.transaction();
+        tx.put(ROOT, "value", 1).unwrap();
+        tx.commit();
+        let mut left = doc.clone();
+        left.set_actor(ActorId::from(&[1][..]));
+        let mut right = doc.clone();
+        right.set_actor(ActorId::from(&[2][..]));
+        for branch in [&mut left, &mut right] {
+            let mut tx = branch.transaction();
+            tx.delete(ROOT, "value").unwrap();
+            tx.commit();
+        }
+        left.merge(&mut right).unwrap();
+        let hashes: Vec<_> = left.get_changes(&[]).iter().map(Change::hash).collect();
+        let expected = left
+            .bundle(hashes.iter().copied())
+            .unwrap()
+            .bytes()
+            .to_vec();
+        // Each call creates a new builder with a freshly seeded HashMap.
+        // Repetition exercises different map iteration orders; reversing the
+        // input also checks that callers' hash order cannot affect the bytes.
+        for _ in 0..20 {
+            assert_eq!(
+                left.bundle(hashes.iter().rev().copied()).unwrap().bytes(),
+                expected
+            );
+        }
+        // Stable encoding must still retain both deletion changes, not merely
+        // reconstruct their shared visible result (an absent "value" key).
+        let mut loaded = Automerge::new();
+        loaded.load_incremental(&expected).unwrap();
+        assert_eq!(loaded.get_heads(), left.get_heads());
+        assert_eq!(loaded.hydrate(None), left.hydrate(None));
+    }
 
     #[test]
     fn make_bundle() {
