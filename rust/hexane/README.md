@@ -266,6 +266,49 @@ reference models for every column type, a structural invariant checker that
 re-verifies every cached B-tree aggregate inside the fuzz loops, and
 validate-on-load backing the one `unsafe` block in the crate.
 
+## Formal verification
+
+Most of the crate's core is verified with [Verus](https://github.com/verus-lang/verus):
+the proofs live beside the code in `verus!` blocks, and a normal build
+compiles them away. To check them, run `cargo verus verify -p hexane
+--features bijou64` with Verus installed.
+
+**Proved:**
+
+* The LEB128 and bijou64 codecs: each value has exactly one encoding.
+* Loading: the RLE and bool loaders accept exactly the canonical encodings
+  and build slabs with correct metadata holding the input's values.
+* The slab-level code: decoders, encoders, the edit rebuilds and slab
+  merges, for both RLE and bool slabs.
+* The slab indexes (the B-tree and the Fenwick tree).
+* The column iterator and the column edit cursor, against the RLE and bool
+  formats: every read yields exactly the column's values in the window,
+  and every edit leaves canonical slabs, with correct metadata, holding
+  exactly the intended values.
+* `RawColumn`.
+
+**Trusted, not proved:** each value type's and codec's own encode and
+decode, which the verified code reaches through traits; the thin glue that
+connects the generic column types to the verified cores, and the closures
+and slab weights passed through it; and that a newly built column satisfies
+the invariant the cursor and iterator assume.
+
+**Known limitations:**
+
+* **Edits of delta columns are outside the cursor's proof.** A
+  `DeltaColumn`'s index sums its deltas in `i64`. While an edit is under
+  way those sums can legitimately exceed `i64`: a delete that drops a whole
+  slab joins its neighbours in the index before the delta that bridges them
+  is written. So "the sums fit" cannot be part of the cursor's invariant.
+  Reading a delta column's deltas is covered. Widening the sums to `i128`
+  would close the gap, but costs 2–17% on delta columns' index operations
+  (`find_by_value`, insert, remove, load), so performance was preferred.
+* The prefix and delta columns' own logic (running sums, realizing values,
+  value search over them) is not verified.
+* Where a precondition of the verified code cannot be shown from the
+  specifications (a slab of `i64::MAX` bytes or more, or a column of nearly
+  `usize::MAX` items), the code checks it and panics rather than assume it.
+
 ## Development
 
 ```bash

@@ -644,6 +644,16 @@ impl<'a, T: DeltaValue, C: Codec> DeltaEncoder<'a, T, C> {
 /// values lie within a 2^63-wide range (for unsigned types, `< 2^63`).
 /// Writes outside the domain panic; [`load`](DeltaColumn::load) rejects
 /// out-of-domain data with an error.
+///
+/// # Verification
+///
+/// Unlike [`Column`]'s, a delta column's edits are outside
+/// the formal proof of the column cursor: its index sums the deltas in
+/// `i64`, and while an edit is under way those sums can exceed `i64` (a
+/// delete that drops a whole slab joins its neighbours before the delta
+/// that bridges them is written), so they cannot be part of the cursor's
+/// invariant. Reading the deltas is covered; realizing values from them is
+/// not. See the crate README's "Formal verification".
 pub struct DeltaColumn<T: DeltaValue, C: Codec = Leb128> {
     pub(crate) col: Column<T::Inner, C, IndexedDeltaWeightFn>,
     _phantom: PhantomData<T>,
