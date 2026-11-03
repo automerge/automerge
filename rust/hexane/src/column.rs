@@ -1926,7 +1926,11 @@ where
             if len == 0 {
                 return Ok(Column::with_max_segments(self.max_segments));
             }
-            return Ok(Column::fill(len, value));
+            let mut col = Column::fill(len, value);
+            // `fill` makes one slab of at most two segments, within any
+            // budget `load_iter` accepts
+            col.max_segments = self.max_segments;
+            return Ok(col);
         }
         if WF::ACCUMULATES {
             // `iter.finalize()` below drains and validates whatever is
