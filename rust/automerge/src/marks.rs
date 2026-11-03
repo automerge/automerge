@@ -255,6 +255,15 @@ impl<'a> MarkStateMachine<'a> {
         }
     }
 
+    pub(crate) fn current_without_unmarks(&self) -> Option<Arc<MarkSet>> {
+        let current = self.current()?;
+        if current.iter().all(|(_, value)| !value.is_null()) {
+            return Some(current.clone());
+        }
+        let marks = current.as_ref().clone().without_unmarks();
+        (!marks.is_empty()).then(|| Arc::new(marks))
+    }
+
     pub(crate) fn process(&mut self, opid: OpId, action: OpType<'a>) -> bool {
         match action {
             OpType::MarkBegin(_, data) => self.mark_begin(opid, data),
