@@ -1665,7 +1665,7 @@ impl Automerge {
         move_cursor: JsValue,
     ) -> Result<String, error::Cursor> {
         let (obj, obj_type) = self.import(obj).unwrap_or((ROOT, am::ObjType::Map));
-        if obj_type != am::ObjType::Text {
+        if !obj_type.is_sequence() {
             return Err(error::Cursor::InvalidObjType(obj_type));
         }
 
@@ -1677,7 +1677,8 @@ impl Automerge {
 
         // TODO do we want this?
 
-        // convert positions >= string.length into `CursorPosition::End`
+        // convert positions >= the length of the text or list into
+        // `CursorPosition::End`
         // note: negative indices are converted to `CursorPosition::Start` in
         // `impl TryFrom<JS> for CursorPosition`
         let len = match heads {
@@ -1713,7 +1714,7 @@ impl Automerge {
         heads: JsValue,
     ) -> Result<f64, error::Cursor> {
         let (obj, obj_type) = self.import(obj).unwrap_or((ROOT, am::ObjType::Map));
-        if obj_type != am::ObjType::Text {
+        if !obj_type.is_sequence() {
             return Err(error::Cursor::InvalidObjType(obj_type));
         }
         let cursor = cursor.as_string().ok_or(error::Cursor::InvalidCursor)?;
@@ -2857,7 +2858,7 @@ pub mod error {
         InvalidCursorPosition,
         #[error("invalid move - must be 'before' or 'after'")]
         InvalidMoveCursor,
-        #[error("cursors only valid on text - obj type: {0}")]
+        #[error("cursors are only valid on lists and text - obj type: {0}")]
         InvalidObjType(ObjType),
         #[error("bad heads: {0}")]
         Heads(#[from] interop::error::BadChangeHashes),
