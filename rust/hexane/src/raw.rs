@@ -32,6 +32,9 @@ use crate::fenwick;
 #[cfg(verus_keep_ghost)]
 use crate::fenwick::{bit_ok, lemma_sum_le, lemma_sum_one, lemma_sum_split, lens, sum, total};
 #[cfg(verus_keep_ghost)]
+use crate::merge_walk::framed;
+use crate::merge_walk::{merge_around, Merger};
+#[cfg(verus_keep_ghost)]
 use crate::rle::writer::concat;
 use crate::rle::writer::splice_bytes;
 use crate::PackError;
@@ -438,12 +441,21 @@ impl RawColumn {
         proof {
             lemma_flat_len(old_slabs, si as int);
         }
-        let (end, mut changed) = splice_in(&mut self.slabs, self.max_segments, si, offset, del, bytes);
+        let (end_spliced, mut changed) = splice_in(&mut self.slabs, self.max_segments, si, offset, del, bytes);
         proof {
             lemma_flat_total(self.slabs@);
         }
         self.total_len = self.total_len - del + bytes.len();
-        let (start, end, merged) = merge_around(&mut self.slabs, self.max_segments, si, end);
+        let ghost s1 = self.slabs@;
+        let (start, end, merged) = merge_around(
+            &RawMerge { max_segments: self.max_segments },
+            &mut self.slabs,
+            si,
+            end_spliced,
+        );
+        proof {
+            lemma_merged_full(self.slabs@, s1, start as int, end as int, si as int, end_spliced as int);
+        }
         changed = changed || merged;
         let removed = drop_empty(&mut self.slabs, start, end);
         changed = changed || removed;
@@ -1109,126 +1121,75 @@ fn pick_split(offset_before_insert: usize, inserted_len: usize, total_len: usize
 
 // ── Merging ─────────────────────────────────────────────────────────────────
 
-/// Walk the four slab boundaries around the spliced slabs `[start, end)`
-/// and merge undersized neighbours, exactly as
-/// [`try_merge_range_skeleton`](crate::column::try_merge_range_skeleton)
-/// does for `Column`.  Returns the merged range, and whether anything
-/// merged.  Any slab left empty stays within the range.
-fn merge_around(slabs: &mut Vec<RawSlab>, max_segments: usize, start: usize, end: usize) -> (r: (
-    usize,
-    usize,
-    bool,
-))
-    requires
-        start < end <= old(slabs)@.len(),
-        flat(old(slabs)@).len() <= usize::MAX,
-        full_outside(old(slabs)@, start as int, end as int),
-    ensures
-        flat(final(slabs)@) == flat(old(slabs)@),
-        r.0 <= r.1 <= final(slabs)@.len(),
-        full_outside(final(slabs)@, r.0 as int, r.1 as int),
-        !r.2 ==> final(slabs)@ == old(slabs)@,
-{
-    let ghost s0 = slabs@;
-    let mut start = start;
-    let mut end = end;
-    let mut merged = false;
-    // Only three slabs of a rebuilt range can be undersized, so only the
-    // pairs around them are worth testing (see the skeleton).  Right end
-    // first: merging there shortens the range, and the left end's indices
-    // do not move.
-    if end - start >= 3 && try_merge_pair(slabs, max_segments, end - 3) {
-        end -= 1;
-        merged = true;
-    }
-    if end - start >= 2 && try_merge_pair(slabs, max_segments, end - 2) {
-        end -= 1;
-        merged = true;
-    }
-    // external right — keep merging outward
-    loop
-        invariant
-            start < end <= slabs@.len(),
-            flat(slabs@) == flat(s0),
-            flat(s0).len() <= usize::MAX,
-            full_outside(slabs@, start as int, end as int),
-            !merged ==> slabs@ == s0,
-        decreases slabs@.len(),
-    {
-        if !try_merge_pair(slabs, max_segments, end - 1) {
-            break;
-        }
-        merged = true;
-    }
-    // the edited slab against the first slab that follows it
-    if end - start >= 2 && try_merge_pair(slabs, max_segments, start) {
-        end -= 1;
-        merged = true;
-    }
-    // external left — keep merging outward
-    while start > 0
-        invariant
-            start < end <= slabs@.len(),
-            flat(slabs@) == flat(s0),
-            flat(s0).len() <= usize::MAX,
-            full_outside(slabs@, start as int, end as int),
-            !merged ==> slabs@ == s0,
-        decreases start,
-    {
-        if !try_merge_pair(slabs, max_segments, start - 1) {
-            break;
-        }
-        start -= 1;
-        end -= 1;
-        merged = true;
-    }
-    (start, end, merged)
+/// Merges two adjacent slabs when either is under a quarter of the budget
+/// and together they fit it; the walk around a splice is the shared
+/// [`merge_around`].
+struct RawMerge {
+    max_segments: usize,
 }
 
-/// Merge slab `a + 1` into slab `a` if either is under a quarter of the
-/// budget and together they fit it.  Returns whether it merged.
-fn try_merge_pair(slabs: &mut Vec<RawSlab>, max_segments: usize, a: usize) -> (r: bool)
-    requires
-        flat(old(slabs)@).len() <= usize::MAX,
-    ensures
-        flat(final(slabs)@) == flat(old(slabs)@),
-        !r ==> final(slabs)@ == old(slabs)@,
-        r ==> {
-            &&& a + 1 < old(slabs)@.len()
-            &&& final(slabs)@.len() == old(slabs)@.len() - 1
-            &&& forall|i: int| 0 <= i < a ==> #[trigger] final(slabs)@[i] == old(slabs)@[i]
-            &&& final(slabs)@[a as int].data@ == old(slabs)@[a as int].data@ + old(slabs)@[a + 1].data@
-            &&& forall|i: int| a < i < final(slabs)@.len() ==> #[trigger] final(slabs)@[i] == old(slabs)@[i + 1]
-        },
-{
-    if a >= slabs.len() || slabs.len() - a < 2 {
-        return false;
+impl Merger<RawSlab> for RawMerge {
+    type X = u8;
+
+    closed spec fn content(s: Seq<RawSlab>) -> Seq<u8> {
+        flat(s)
     }
-    let ghost s0 = slabs@;
-    let max = max_segments;
-    let min = max_segments / 4;
-    let a_len = slabs[a].data.len();
-    let b_len = slabs[a + 1].data.len();
-    proof {
-        lemma_flat_at(s0, a as int);
-        lemma_flat_at(s0.skip(a + 1), 0);
-        assert(s0.skip(a + 1).take(0) =~= Seq::<RawSlab>::empty());
-        assert(s0.skip(a + 1).skip(1) =~= s0.skip(a + 2));
-        lemma_flat_unit(s0[0]);
+
+    closed spec fn inv(&self, s: Seq<RawSlab>) -> bool {
+        flat(s).len() <= usize::MAX
     }
-    if (a_len < min || b_len < min) && a_len + b_len <= max {
-        let slab_b = slabs.remove(a + 1);
-        slabs[a].data.extend_from_slice(slab_b.data.as_slice());
-        proof {
-            let s1 = slabs@;
-            assert(s1.take(a as int) =~= s0.take(a as int));
-            assert(s1.skip(a + 1) =~= s0.skip(a + 2));
-            lemma_flat_at(s1, a as int);
-            assert(flat(s1) =~= flat(s0));
+
+    #[verifier::spinoff_prover]
+    fn try_pair(&self, slabs: &mut Vec<RawSlab>, a: usize) -> bool {
+        if a >= slabs.len() || slabs.len() - a < 2 {
+            return false;
         }
-        true
-    } else {
-        false
+        let ghost s0 = slabs@;
+        let max = self.max_segments;
+        let min = self.max_segments / 4;
+        let a_len = slabs[a].data.len();
+        let b_len = slabs[a + 1].data.len();
+        proof {
+            lemma_flat_at(s0, a as int);
+            lemma_flat_at(s0.skip(a + 1), 0);
+            assert(s0.skip(a + 1).take(0) =~= Seq::<RawSlab>::empty());
+            assert(s0.skip(a + 1).skip(1) =~= s0.skip(a + 2));
+            lemma_flat_unit(s0[0]);
+        }
+        if (a_len < min || b_len < min) && a_len + b_len <= max {
+            let slab_b = slabs.remove(a + 1);
+            slabs[a].data.extend_from_slice(slab_b.data.as_slice());
+            proof {
+                let s1 = slabs@;
+                assert(s1.take(a as int) =~= s0.take(a as int));
+                assert(s1.skip(a + 1) =~= s0.skip(a + 2));
+                lemma_flat_at(s1, a as int);
+                assert(s1[a as int].data@ =~= s0[a as int].data@ + s0[a + 1].data@);
+                assert(flat(s1) =~= flat(s0));
+            }
+            true
+        } else {
+            false
+        }
+    }
+}
+
+/// The slabs outside the merged range are old ones outside the old range.
+proof fn lemma_merged_full(v: Seq<RawSlab>, v0: Seq<RawSlab>, start: int, end: int, s0: int, e0: int)
+    requires
+        framed(v, v0, start, end, e0),
+        start <= s0,
+        full_outside(v0, s0, e0),
+    ensures
+        full_outside(v, start, end),
+{
+    let drop = v0.len() - v.len();
+    assert forall|i: int| 0 <= i < v.len() && !(start <= i < end) implies #[trigger] v[i].data@.len() > 0 by {
+        if i < start {
+            assert(v.take(start)[i] == v0.take(start)[i]);
+        } else {
+            assert(v.skip(end)[i - end] == v0.skip(end + drop)[i - end]);
+        }
     }
 }
 

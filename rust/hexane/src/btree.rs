@@ -138,6 +138,18 @@ pub trait SlabAggregate: Clone + Default + std::fmt::Debug + Sized {
             Self::merge_ok(a, Self::spec_merge(b, c)),
         ensures
             Self::spec_merge(Self::spec_merge(a, b), c) == Self::spec_merge(a, Self::spec_merge(b, c));
+
+    /// Whether every merge whose item counts fit a `usize` is
+    /// representable: true for item counts (and prefix sums, whose
+    /// arithmetic is the user's), false for delta sums.
+    spec fn plain() -> bool;
+
+    proof fn lemma_plain(a: Self, b: Self)
+        requires
+            Self::plain(),
+            a.spec_len() + b.spec_len() <= usize::MAX,
+        ensures
+            Self::merge_ok(a, b);
 }
 
 // ── SlabAgg (used by DeltaColumn) ───────────────────────────────────────────
@@ -234,6 +246,13 @@ impl SlabAggregate for SlabAgg {
 
     proof fn lemma_assoc(a: Self, b: Self, c: Self) {
     }
+
+    open spec fn plain() -> bool {
+        false
+    }
+
+    proof fn lemma_plain(a: Self, b: Self) {
+    }
 }
 
 // ── SlabAggregate for usize (LenWeight) ─────────────────────────────────────
@@ -277,6 +296,13 @@ impl SlabAggregate for usize {
     }
 
     proof fn lemma_assoc(a: Self, b: Self, c: Self) {
+    }
+
+    open spec fn plain() -> bool {
+        true
+    }
+
+    proof fn lemma_plain(a: Self, b: Self) {
     }
 }
 
@@ -350,6 +376,13 @@ where
 
     proof fn lemma_assoc(a: Self, b: Self, c: Self) {
         axiom_prefix_add(a.prefix, b.prefix, c.prefix);
+    }
+
+    open spec fn plain() -> bool {
+        true
+    }
+
+    proof fn lemma_plain(a: Self, b: Self) {
     }
 }
 
@@ -1609,7 +1642,7 @@ impl<A: SlabAggregate> SlabBTree<A> {
     /// The caller guarantees the result is [`valid`] (for delta columns,
     /// the domain contract); every node goes straight to its final
     /// contents, so nothing else need be.
-    fn splice_vec(&mut self, start: usize, end: usize, new: Vec<A>)
+    pub(crate) fn splice_vec(&mut self, start: usize, end: usize, new: Vec<A>)
         requires
             old(self).wf(),
             start <= end <= old(self)@.len(),

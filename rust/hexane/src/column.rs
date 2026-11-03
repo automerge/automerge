@@ -201,61 +201,6 @@ impl<T: ColumnValueRef, C: Codec> WeightFn<T, C> for LenWeight {
 
 // ── Splice helpers ───────────────────────────────────────────────────────────
 
-/// Walk the four slab boundaries around a recently-modified range and attempt
-/// to merge undersized neighbours.  The decision of *whether* two adjacent
-/// slabs can merge is column-specific (encoding-aware); the caller passes
-/// `try_merge_pair(a, b)` which returns `true` if it actually merged slabs
-/// `a` and `b` (removing slab `b`).  The raw-byte arena walks the same
-/// boundaries in its own verified copy (`raw::merge_around`).
-///
-/// Returns the adjusted range accounting for any merges that happened — the
-/// end shrinks by one for every merge that collapses two in-range slabs.
-pub(crate) fn try_merge_range_skeleton(
-    range: Range<usize>,
-    mut try_merge_pair: impl FnMut(usize, usize) -> bool,
-) -> Range<usize> {
-    let mut start = range.start;
-    let mut end = range.end;
-
-    if !range.is_empty() {
-        // Only three slabs of a rebuilt range can be undersized, so only
-        // the pairs around them are worth testing — a splice that spills
-        // a thousand slabs should not walk them.
-        //
-        //   [ edited | spill | spill | … | spill | partial ]
-        //
-        // The spills in the middle were cut at the segment budget, so
-        // they are full by construction. What can be short is the *first*
-        // slab (a delete shrank the one being edited), the *last spill*
-        // (it holds whatever was left over), and the *last* slab (one a
-        // cascading delete only partly consumed). `check_invariants`
-        // asserts the result globally, so a violation of that reasoning
-        // fails the fuzz rather than passing silently.
-        //
-        // Right end first: merging there shortens the range, and the left
-        // end's indices do not move.
-        if end >= start + 3 && try_merge_pair(end - 3, end - 2) {
-            end -= 1;
-        }
-        if end >= start + 2 && try_merge_pair(end - 2, end - 1) {
-            end -= 1;
-        }
-        // external right — keep merging outward
-        while try_merge_pair(end - 1, end) {}
-        // the edited slab against the first slab that follows it
-        if end >= start + 2 && try_merge_pair(start, start + 1) {
-            end -= 1;
-        }
-        // external left — keep merging outward
-        while start > 0 && try_merge_pair(start - 1, start) {
-            start -= 1;
-            end -= 1;
-        }
-    }
-
-    start..end
-}
-
 /// Normalize any `RangeBounds` into a concrete `(start, end)` pair, with
 /// `max` standing in for an unbounded end.  Moved verbatim from the v0
 /// `columndata` module — callers (`iter_range`, `set_max`, `advance_to`)
@@ -1781,27 +1726,6 @@ where
         }
         e.finish();
     }
-
-    fn try_merge(&mut self, index_a: usize, index_b: usize) -> bool {
-        let max = self.max_segments;
-        // clamped so that even at tiny max_segments a slab emptied by a
-        // deletion (0 segments) always merges away
-        let min = (self.max_segments / 4).max(1);
-        if let Some(a) = self.slabs.get(index_a).map(|s| s.segments) {
-            if let Some(b) = self.slabs.get(index_b).map(|s| s.segments) {
-                if (a < min || b < min) && a + b <= max {
-                    let slab_b = self.slabs.remove(index_b);
-                    T::Encoding::<C>::merge_slabs(&mut self.slabs[index_a], slab_b);
-                    return true;
-                }
-            }
-        }
-        false
-    }
-
-    pub(crate) fn try_merge_range(&mut self, range: Range<usize>) -> Range<usize> {
-        try_merge_range_skeleton(range, |a, b| self.try_merge(a, b))
-    }
 }
 
 // ── Value-range queries (B-tree + SlabAgg weight only) ─────────────────────
@@ -2468,71 +2392,6 @@ mod edit_fuzz {
                 );
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod merge_skeleton {
-    use super::try_merge_range_skeleton;
-
-    /// Merge the pair when either side is under `min` and the two fit —
-    /// `Column::try_merge`'s rule, over a list of segment counts.
-    fn walk(segs: &mut Vec<usize>, range: std::ops::Range<usize>, min: usize, max: usize) {
-        try_merge_range_skeleton(range, |a, b| {
-            if b >= segs.len() {
-                return false;
-            }
-            if (segs[a] < min || segs[b] < min) && segs[a] + segs[b] <= max {
-                segs[a] += segs[b];
-                segs.remove(b);
-                return true;
-            }
-            false
-        });
-    }
-
-    /// The undersized slab is in the middle of the range, which is where
-    /// a rebuild that spills and then cascades a delete puts it.
-    #[test]
-    fn merges_an_interior_pair() {
-        let mut segs = vec![8, 4, 1, 8];
-        walk(&mut segs, 0..4, 2, 8);
-        assert_eq!(segs, vec![8, 5, 8]);
-    }
-
-    /// The last spill and the partly-consumed slab both short: the merge
-    /// walks from the right end, so the second pair sees the first's
-    /// result.
-    #[test]
-    fn merges_both_short_slabs_at_the_right_end() {
-        let mut segs = vec![8, 4, 1, 1];
-        walk(&mut segs, 0..4, 2, 8);
-        assert_eq!(segs, vec![8, 6]);
-    }
-
-    /// Merging outward, past the right end of the range.
-    #[test]
-    fn merges_past_the_right_end() {
-        let mut segs = vec![3, 1, 3];
-        walk(&mut segs, 1..2, 2, 8);
-        assert_eq!(segs, vec![3, 4]);
-    }
-
-    /// And past the left end.
-    #[test]
-    fn merges_past_the_left_end() {
-        let mut segs = vec![1, 3, 5];
-        walk(&mut segs, 1..2, 2, 8);
-        assert_eq!(segs, vec![4, 5]);
-    }
-
-    /// Neighbours too big to absorb an undersized slab are left alone —
-    /// merging is bounded by the budget, not obligatory.
-    #[test]
-    fn leaves_a_pair_that_would_overflow() {
-        let mut segs = vec![8, 1, 8];
-        walk(&mut segs, 1..2, 2, 8);
-        assert_eq!(segs, vec![8, 1, 8]);
     }
 }
 

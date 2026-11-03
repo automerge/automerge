@@ -552,6 +552,7 @@ proof fn lemma_sign_extend(r: u64, k: u64)
 /// Decodes a canonical unsigned LEB128 value from the front of `buf`,
 /// returning `(value, bytes_consumed)`.
 #[inline]
+#[verifier::spinoff_prover]
 pub fn decode(buf: &[u8]) -> (r: Result<(u64, usize), DecodeError>)
     ensures decode_ok(buf@, r),
 {

@@ -803,7 +803,7 @@ mod repro {
     }
 }
 
-/// `try_merge_range` is shared with the one-shot splice path, so an
+/// The merge walk (`merge_walk::merge_around`) is shared with the one-shot splice path, so an
 /// interior pair it never inspects is not a cursor bug — this drives the
 /// same shape (a spill of several slabs, then a delete cascading into a
 /// partial one) through `splice` alone.
