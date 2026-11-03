@@ -905,6 +905,9 @@ impl<'a, T: ColumnValueRef, C: Codec> Iter<'a, T, C> {
             Ordering::Greater => start..start,
             Ordering::Less => {
                 let (si_end, _) = col.find_slab(end - 1);
+                // a window running past the column's end lands one past
+                // the last slab; search only the slabs there are
+                let si_end = si_end.min(self.slabs.len() - 1);
 
                 // Binary search slabs si_start+1..=si_end by first element.
                 let mut lo = si_start + 1;
