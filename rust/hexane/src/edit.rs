@@ -3,15 +3,32 @@
 //! its slabs can be rebuilt in place.
 
 use crate::column::{Column, WeightFn};
-use crate::cursor::{Cursor, Slabs, WeightOf};
+use crate::cursor::{Cursor, Inserting, Slabs, Visiting, WeightOf};
 use crate::encoding::ColumnEncoding;
 use crate::index::ColumnIndex;
 use crate::{AsColumnRef, Codec, ColumnValueRef, Run};
 use vstd::prelude::Ghost;
 
 /// An encoding whose slabs a [`Column`] cursor can edit.
+// `Model`'s bound is the crate's own verified contract, which nothing
+// outside can name or implement — a seal, like `ColumnValueRef`'s
+#[allow(private_bounds)]
 pub trait SlabEdit: crate::encoding::ColumnEncoding {
     type Edit: EditSlab<Tail = Self::Tail, Value = Self::Value, State = Self::State>;
+
+    /// The slabs as the verified cursor sees them: what a slab holds, and
+    /// the rebuild, merge and reader operations specified against it.
+    /// The cursor is proved for any model; an encoding's model is either
+    /// proved against its format (bool) or trusted to forward to `Edit`
+    /// (RLE, `Trusted<Self>`). An associated type rather than a blanket
+    /// impl so that each encoding can have its own.
+    #[doc(hidden)]
+    type Model: crate::cursor::Slabs<
+        Tail = Self::Tail,
+        State = Self::State,
+        V = Self::Value,
+        Rebuild = Self::Edit,
+    >;
 
     /// How many runs a cursor carries through an open rebuild before
     /// closing it instead — the trade between re-encoding what it carries
@@ -68,6 +85,9 @@ pub trait EditSlab: Default {
 /// The encoding a cursor drives.
 type Enc<T, C> = <T as ColumnValueRef>::Encoding<C>;
 
+/// The encoding's slabs, as the cursor sees them.
+type Model<T, C> = <Enc<T, C> as SlabEdit>::Model;
+
 /// The column's weight function, for the cursor.
 type G<T, C, WF> = WeightOf<T, C, WF>;
 
@@ -110,7 +130,7 @@ where
     Idx: ColumnIndex<WF::Weight>,
 {
     col: &'a mut Column<T, C, WF, Idx>,
-    cur: Cursor<Enc<T, C>>,
+    cur: Cursor<Model<T, C>>,
 }
 
 impl<'a, T, C, WF, Idx> Edit<'a, T, C, WF, Idx>
@@ -186,14 +206,14 @@ where
     where
         F: FnMut(T::Get<'_>, usize),
     {
-        self.cur.advance_with::<WF::Weight, Idx, G<T, C, WF>, F>(
+        self.cur.advance_with::<WF::Weight, Idx, G<T, C, WF>, _>(
             &mut self.col.slabs,
             &mut self.col.index,
             &mut self.col.total_len,
             self.col.max_segments,
             &mut self.col.counter,
             n,
-            &mut f,
+            &mut Visiting::<Enc<T, C>, F>::new(&mut f),
         )
     }
 
@@ -204,8 +224,12 @@ where
 
     /// Insert `n` copies of `value` at the cursor.
     pub fn insert_run(&mut self, value: impl AsColumnRef<T>, n: usize) -> &mut Self {
-        self.cur
-            .insert(&self.col.slabs, self.col.max_segments, value, n);
+        self.cur.insert(
+            &self.col.slabs,
+            self.col.max_segments,
+            Inserting::<Enc<T, C>, _>::new(value),
+            n,
+        );
         self
     }
 
@@ -231,7 +255,10 @@ where
         }
         if self.cur.dirty {
             let slab = &self.col.slabs[self.cur.slab];
-            return Enc::<T, C>::state_peek(slab, <Enc<T, C> as Slabs>::read_state(&self.cur.edit));
+            return Enc::<T, C>::state_peek(
+                slab,
+                <Model<T, C> as Slabs>::read_state(&self.cur.edit),
+            );
         }
         // verified: the reader is then at the cursor (`Cursor::load_reader`)
         self.cur.load_reader(&self.col.slabs);
@@ -275,14 +302,14 @@ where
         F: FnMut(T::Get<'_>, usize),
         H: FnMut(&WF::Weight),
     {
-        self.cur.delete_with::<WF::Weight, Idx, G<T, C, WF>, F, H>(
+        self.cur.delete_with::<WF::Weight, Idx, G<T, C, WF>, _, H>(
             &mut self.col.slabs,
             &mut self.col.index,
             &mut self.col.total_len,
             self.col.max_segments,
             &mut self.col.counter,
             n,
-            &mut f,
+            &mut Visiting::<Enc<T, C>, F>::new(&mut f),
             &mut g,
         );
         self

@@ -19,7 +19,11 @@
 )]
 
 use crate::bool_wire::*;
+use crate::cursor::Slabs;
 use crate::rle::edit::Visit;
+#[cfg(verus_keep_ghost)]
+use crate::rle::writer::concat;
+use std::marker::PhantomData;
 #[allow(unused_imports)]
 use vstd::prelude::*;
 
@@ -1790,6 +1794,299 @@ impl BEdit {
             data: Ghost(Seq::empty()),
         }
     }
+}
+
+
+// ── The cursor's slab model ────────────────────────────────────────────────
+
+/// A rebuild in progress within one boolean slab.
+///
+/// Same contract as the RLE cursor: the head before the edit and the tail
+/// after it are carried as raw bytes and never re-encoded, no byte is
+/// decoded twice, and N edits landing in one slab cost one partition, one
+/// byte splice and one index update.
+///
+/// The rebuild is verified with Verus (`BEdit`), and so is what the
+/// column cursor does with it (`BoolModel`): opening, walking,
+/// inserting and closing leave the slab, and any it spills into, the
+/// canonical encoding of the values written then the slab's from where
+/// reading stopped, with their metadata.
+pub struct BoolEdit<C = crate::Leb128> {
+    pub(crate) e: BEdit,
+    pub(crate) _phantom: PhantomData<C>,
+}
+
+/// Bool slabs as the column cursor sees them ([`Slabs`]), verified
+/// against the bool format: a slab is well-formed when `bslab_ok`, and
+/// holds the values its bytes encode.
+///
+/// Public only because `BoolEncoding<C>`'s `SlabEdit::Model` names it;
+/// this module is not.
+pub struct BoolModel<C>(PhantomData<C>);
+
+/// The rebuild's write buffer, to reuse: nothing is claimed of it, as
+/// opening a rebuild takes any buffer. (`mem::take` is what the
+/// original did; a swap with a new `Vec` compiles to a slower open.)
+#[verifier::external_body]
+#[inline(always)]
+fn take_buf(v: &mut Vec<u8>) -> Vec<u8> {
+    std::mem::take(v)
+}
+
+/// Slabs' values one after another are their values in order.
+proof fn lemma_concat_bslabs<C: CountsOf>(s: Seq<BSlab>)
+    ensures
+        concat(s.map_values(|x: BSlab| BoolModel::<C>::vals(x))) == bslabs_values::<C::K>(s),
+    decreases s.len(),
+{
+    reveal(bslab_bytes);
+    if s.len() > 0 {
+        lemma_concat_bslabs::<C>(s.drop_last());
+        assert(s.drop_last().map_values(|x: BSlab| BoolModel::<C>::vals(x)) =~= s.map_values(
+            |x: BSlab| BoolModel::<C>::vals(x),
+        ).drop_last());
+    } else {
+        assert(s.map_values(|x: BSlab| BoolModel::<C>::vals(x)) =~= Seq::<Seq<bool>>::empty());
+    }
+}
+
+/// A well-formed slab's facts, unwrapped from the opaque views.
+proof fn lemma_bslab<K: CountOps>(s: BSlab)
+    requires
+        bslab_ok::<K>(s),
+    ensures
+        bool_valid::<K>(s.data@),
+        bool_values::<K>(s.data@).len() == s.len,
+        s.segments == bool_counts::<K>(s.data@).len(),
+        s.tail == counts_tail::<K>(bool_counts::<K>(s.data@)),
+        counts_len(bool_counts::<K>(s.data@)) == s.len,
+{
+    reveal(bslab_bytes);
+    reveal(bslab_len);
+    reveal(bslab_segments);
+    reveal(bslab_tail);
+    lemma_values_len(bool_counts::<K>(s.data@));
+}
+
+/// Metadata that matches valid bytes make a well-formed slab.
+proof fn lemma_bslab_ok<K: CountOps>(s: BSlab)
+    requires
+        bool_valid::<K>(s.data@),
+        s.len == counts_len(bool_counts::<K>(s.data@)),
+        s.segments == bool_counts::<K>(s.data@).len(),
+        s.tail == counts_tail::<K>(bool_counts::<K>(s.data@)),
+    ensures
+        bslab_ok::<K>(s),
+{
+    reveal(bslab_bytes);
+    reveal(bslab_len);
+    reveal(bslab_segments);
+    reveal(bslab_tail);
+}
+
+impl<C: CountsOf> Slabs for BoolModel<C> {
+    type Tail = u8;
+    type Rebuild = BoolEdit<C>;
+    type State = BoolDecoderState;
+    type V = bool;
+
+    closed spec fn ok(s: BSlab) -> bool {
+        bslab_ok::<C::K>(s)
+    }
+
+    closed spec fn vals(s: BSlab) -> Seq<bool> {
+        bool_values::<C::K>(s.data@)
+    }
+
+    proof fn lemma_len(s: BSlab) {
+        lemma_bslab::<C::K>(s);
+    }
+
+    closed spec fn rb_inv(e: BoolEdit<C>) -> bool {
+        e.e.inv::<C::K>()
+    }
+
+    closed spec fn rb_data(e: BoolEdit<C>) -> Seq<u8> {
+        e.e.data@
+    }
+
+    closed spec fn rb_vals(e: BoolEdit<C>) -> Seq<bool> {
+        e.e.vals()
+    }
+
+    closed spec fn rb_read(e: BoolEdit<C>) -> nat {
+        e.e.read as nat
+    }
+
+    closed spec fn st_at(data: Seq<u8>, st: BoolDecoderState, pos: nat) -> bool {
+        bstate_ok::<C::K>(data, st) && bstate_pos::<C::K>(data, st) == pos
+    }
+
+    #[verifier::external_body]
+    #[inline(always)]
+    fn carry_budget() -> usize {
+        crate::edit::RUN_BUDGET
+    }
+
+    #[inline(always)]
+    fn idle() -> BoolEdit<C> {
+        BoolEdit { e: BEdit::idle(), _phantom: PhantomData }
+    }
+
+    fn empty_slab() -> (s: BSlab) {
+        let s = new_bslab_vec(Vec::new(), 0, 0, 0);
+        proof {
+            reveal(bslab_bytes);
+            reveal(bslab_len);
+            reveal(bslab_segments);
+            reveal(bslab_tail);
+            let e = Seq::<u64>::empty();
+            assert(counts_bytes::<C::K>(e) =~= s.data@);
+            lemma_counts::<C::K>(e, s.data@);
+            assert(counts_values(e) =~= Seq::<bool>::empty());
+            lemma_bslab_ok::<C::K>(s);
+        }
+        s
+    }
+
+    #[inline(always)]
+    fn reset(e: &mut BoolEdit<C>, s: &BSlab, at: usize, max_segments: usize) {
+        proof {
+            lemma_bslab::<C::K>(*s);
+        }
+        e.e = BEdit::open::<C::K>(s.data.as_slice(), at, max_segments, take_buf(&mut e.e.w.buf));
+    }
+
+    fn close(e: &mut BoolEdit<C>, s: &mut BSlab) -> (spilled: Vec<BSlab>) {
+        proof {
+            lemma_bslab::<C::K>(*s);
+        }
+        let ghost data = s.data@;
+        let ghost out = e.e.vals() + bool_values::<C::K>(data).skip(e.e.read as int);
+        let r = e.e.close::<C::K>(s.data.as_slice(), s.len, s.segments, s.tail);
+        r.apply_bytes(&mut s.data);
+        s.len = r.len;
+        s.segments = r.segments;
+        s.tail = r.tail;
+        proof {
+            lemma_bslab_ok::<C::K>(*s);
+            lemma_concat_bslabs::<C>(r.overflow@);
+        }
+        // hand the buffer back for the next slab this cursor edits
+        e.e.w.buf = r.bytes;
+        r.overflow
+    }
+
+    fn merge(a: &mut BSlab, b: BSlab) {
+        proof {
+            lemma_bslab::<C::K>(*a);
+            lemma_bslab::<C::K>(b);
+        }
+        if a.len == 0 {
+            proof {
+                assert(bool_values::<C::K>(a.data@) =~= Seq::<bool>::empty());
+                assert(Seq::<bool>::empty() + bool_values::<C::K>(b.data@) =~= bool_values::<C::K>(b.data@));
+            }
+            *a = b;
+        } else if b.len > 0 {
+            let ghost a0 = a.data@;
+            proof {
+                assert(a0.skip(0) =~= a0);
+            }
+            let (segments, tail) = merge::<C::K>(&mut a.data, 0, a.tail, a.segments, b.data.as_slice(), b.segments, b.tail);
+            a.len = a.len + b.len;
+            a.segments = segments;
+            a.tail = tail;
+            proof {
+                assert(a.data@.skip(0) =~= a.data@);
+                lemma_values_len(bool_counts::<C::K>(a.data@));
+                lemma_bslab_ok::<C::K>(*a);
+            }
+        } else {
+            proof {
+                assert(bool_values::<C::K>(b.data@) =~= Seq::<bool>::empty());
+                assert(bool_values::<C::K>(a.data@) + Seq::<bool>::empty() =~= bool_values::<C::K>(a.data@));
+            }
+        }
+    }
+
+    #[inline(always)]
+    fn read_state(e: &BoolEdit<C>) -> &BoolDecoderState {
+        &e.e.dec
+    }
+
+    fn state_at(s: &BSlab, at: usize) -> (st: BoolDecoderState) {
+        proof {
+            lemma_bslab::<C::K>(*s);
+        }
+        let mut d = BDec::new::<C::K>(s.data.as_slice());
+        if at > 0 {
+            d.nth::<C::K>(at - 1);
+        }
+        d.suspend()
+    }
+
+    #[allow(unused_variables)]
+    fn state_advance(s: &BSlab, st: &mut BoolDecoderState, n: usize, pos: Ghost<nat>) {
+        proof {
+            lemma_bslab::<C::K>(*s);
+        }
+        let mut d = BDec::resume::<C::K>(s.data.as_slice(), st);
+        if n > 0 {
+            d.nth::<C::K>(n - 1);
+        }
+        *st = d.suspend();
+    }
+}
+
+/// Carry `n` of the slab's values through the rebuild, telling `f` each
+/// run: [`Visitor::pass`](crate::cursor::Visitor::pass) for bool slabs,
+/// which the encoding's `EditSlab::pass` forwards to.
+#[inline(always)]
+pub(crate) fn pass<C: CountsOf, G: Visit<bool>>(e: &mut BoolEdit<C>, s: &BSlab, n: usize, f: &mut G) -> (left: usize)
+    requires
+        BoolModel::<C>::rb_inv(*old(e)),
+        BoolModel::<C>::ok(*s),
+        BoolModel::<C>::rb_data(*old(e)) == s.data@,
+        BoolModel::<C>::rb_read(*old(e)) + n <= s.len,
+        BoolModel::<C>::rb_vals(*old(e)).len() + n + 3 <= usize::MAX,
+    ensures
+        BoolModel::<C>::rb_inv(*final(e)),
+        BoolModel::<C>::rb_data(*final(e)) == s.data@,
+        left <= n,
+        BoolModel::<C>::rb_read(*final(e)) == BoolModel::<C>::rb_read(*old(e)) + (n - left),
+        BoolModel::<C>::rb_vals(*final(e)) == BoolModel::<C>::rb_vals(*old(e)) + BoolModel::<C>::vals(*s).subrange(
+            BoolModel::<C>::rb_read(*old(e)) as int,
+            BoolModel::<C>::rb_read(*old(e)) + (n - left),
+        ),
+{
+    proof {
+        lemma_bslab::<C::K>(*s);
+    }
+    e.e.walk::<C::K, G>(s.data.as_slice(), n, true, f)
+}
+
+/// Drop `n` of the slab's values from the rebuild, telling `f` each run:
+/// [`Visitor::discard`](crate::cursor::Visitor::discard) for bool slabs.
+#[inline(always)]
+pub(crate) fn discard<C: CountsOf, G: Visit<bool>>(e: &mut BoolEdit<C>, s: &BSlab, n: usize, f: &mut G)
+    requires
+        BoolModel::<C>::rb_inv(*old(e)),
+        BoolModel::<C>::ok(*s),
+        BoolModel::<C>::rb_data(*old(e)) == s.data@,
+        BoolModel::<C>::rb_read(*old(e)) + n <= s.len,
+    ensures
+        BoolModel::<C>::rb_inv(*final(e)),
+        BoolModel::<C>::rb_data(*final(e)) == s.data@,
+        BoolModel::<C>::rb_read(*final(e)) == BoolModel::<C>::rb_read(*old(e)) + n,
+        BoolModel::<C>::rb_vals(*final(e)) == BoolModel::<C>::rb_vals(*old(e)),
+{
+    proof {
+        lemma_bslab::<C::K>(*s);
+    }
+    let ghost v0 = e.e.vals();
+    e.e.walk::<C::K, G>(s.data.as_slice(), n, false, f);
+    assert(e.e.vals() =~= v0);
 }
 
 } // verus!

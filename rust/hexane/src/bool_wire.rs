@@ -1924,6 +1924,12 @@ fn merge_append<K: CountOps>(
     r
 }
 
+/// The counts a codec writes, for code that names columns by their codec
+/// (`BoolEncoding<C>`) but is verified over [`CountOps`].
+pub trait CountsOf {
+    type K: CountOps;
+}
+
 #[inline(always)]
 fn slice_from(v: &[u8], n: usize) -> (s: &[u8])
     requires n <= v@.len(),
@@ -1938,7 +1944,14 @@ fn slice_from(v: &[u8], n: usize) -> (s: &[u8])
 
 /// [`CountOps`] for codec `C`: the trusted bridge from the verified bool
 /// code to the codec's own.
-pub(crate) struct Counts<C>(std::marker::PhantomData<C>);
+///
+/// Public only because `BoolEncoding<C>`'s slab model names it; this
+/// module is not.
+pub struct Counts<C>(std::marker::PhantomData<C>);
+
+impl<C: crate::Codec> CountsOf for C {
+    type K = Counts<C>;
+}
 
 // Outside `verus!`, so Verus takes it on trust; its spec items exist only
 // when Verus compiles the crate.

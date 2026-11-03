@@ -417,23 +417,9 @@ impl<'a, C: Codec> crate::encoding::LoadIterApi<'a, bool> for BoolLoadIter<'a, C
 
 // ── Cursor ──────────────────────────────────────────────────────────────────
 
-/// A rebuild in progress within one boolean slab.
-///
-/// Same contract as the RLE cursor: the head before the edit and the tail
-/// after it are carried as raw bytes and never re-encoded, no byte is
-/// decoded twice, and N edits landing in one slab cost one partition, one
-/// byte splice and one index update.
-///
-/// The rebuild is verified with Verus ([`BEdit`](crate::bool_edit::BEdit)):
-/// opening, walking, inserting and closing leave the slab, and any it
-/// spills into, the canonical encoding of the values written then the
-/// slab's from where reading stopped, with their metadata.
-pub struct BoolEdit<C: Codec = Leb128> {
-    e: crate::bool_edit::BEdit,
-    _phantom: PhantomData<fn() -> C>,
-}
+pub use crate::bool_edit::BoolEdit;
 
-impl<C: Codec> Default for BoolEdit<C> {
+impl<C> Default for BoolEdit<C> {
     fn default() -> Self {
         BoolEdit {
             e: crate::bool_edit::BEdit::idle(),
@@ -442,49 +428,32 @@ impl<C: Codec> Default for BoolEdit<C> {
     }
 }
 
-impl<C: Codec> BoolEdit<C> {
-    /// Write the rebuild back into `slab`, returning the slabs it spilled
-    /// into.
-    fn write_back(&mut self, slab: &mut Slab) -> Vec<Slab> {
-        let r = self
-            .e
-            .close::<Counts<C>>(&slab.data, slab.len, slab.segments, slab.tail);
-        r.apply_bytes(&mut slab.data);
-        slab.len = r.len;
-        slab.segments = r.segments;
-        slab.tail = r.tail;
-        #[cfg(debug_assertions)]
-        {
-            validate_slab::<C>(slab);
-            for s in &r.overflow {
-                validate_slab::<C>(s);
-            }
-        }
-        // hand the buffer back for the next slab this cursor edits
-        self.e.w.buf = r.bytes;
-        r.overflow
-    }
-}
-
 impl<C: Codec> crate::edit::SlabEdit for BoolEncoding<C> {
     type Edit = BoolEdit<C>;
+    type Model = crate::bool_edit::BoolModel<C>;
 }
 
+// Forwards to the verified bool slab model; the column cursor calls the
+// model directly, and reaches `pass`, `insert` and `delete` through here.
 impl<C: Codec> crate::edit::EditSlab for BoolEdit<C> {
     type Tail = u8;
     type Value = bool;
     type State = BoolDecoderState;
 
     fn reset(&mut self, slab: &Slab, at: usize, max_segments: usize) {
-        let buf = std::mem::take(&mut self.e.w.buf);
-        self.e = crate::bool_edit::BEdit::open::<Counts<C>>(&slab.data, at, max_segments, buf);
+        <crate::bool_edit::BoolModel<C> as crate::cursor::Slabs>::reset(
+            self,
+            slab,
+            at,
+            max_segments,
+        )
     }
 
     fn pass<F>(&mut self, slab: &Slab, n: usize, _runs: usize, f: &mut F) -> usize
     where
         F: FnMut(bool, usize),
     {
-        self.e.walk::<Counts<C>, F>(&slab.data, n, true, f)
+        crate::bool_edit::pass::<C, F>(self, slab, n, f)
     }
 
     fn insert<V: AsColumnRef<bool>>(&mut self, value: V, n: usize) {
@@ -499,7 +468,7 @@ impl<C: Codec> crate::edit::EditSlab for BoolEdit<C> {
             self.e.read + n <= slab.len,
             "delete past the end of the slab"
         );
-        self.e.walk::<Counts<C>, F>(&slab.data, n, false, f);
+        crate::bool_edit::discard::<C, F>(self, slab, n, f)
     }
 
     fn read_state(&self) -> &BoolDecoderState {
@@ -507,7 +476,7 @@ impl<C: Codec> crate::edit::EditSlab for BoolEdit<C> {
     }
 
     fn close(&mut self, slab: &mut Slab) -> Vec<Slab> {
-        self.write_back(slab)
+        <crate::bool_edit::BoolModel<C> as crate::cursor::Slabs>::close(self, slab)
     }
 }
 

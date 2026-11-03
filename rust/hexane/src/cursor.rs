@@ -12,12 +12,16 @@
 //! holding the end of `p`.  Each operation is proved to keep `col_ok` and
 //! `wf` and to do exactly what it says to `p` and the original position.
 //!
-//! The slab-level operations are the encodings' own ([`Slabs`]: the RLE
-//! and bool rebuilds, merges and readers, each verified on its own), and
-//! their contracts are assumed of them here: the bridges at the bottom of
-//! this file are one-line forwards, outside `verus!` because the
-//! encodings are generic over value types with lifetimes Verus can't
-//! name.  So are the weight functions' (`Weigh`: a slab's weight counts
+//! The slab-level operations are the encodings' own, through each
+//! encoding's slab model ([`Slabs`], named by `SlabEdit::Model`).  Bool
+//! columns' model is verified against the bool format
+//! ([`BoolModel`](crate::bool_edit::BoolModel)).  RLE's ([`Trusted`])
+//! assumes the contract of the RLE rebuilds, merges and readers, each
+//! verified on its own: its bridge at the bottom of this file is one-line
+//! forwards, outside `verus!` because RLE columns are generic over value
+//! types with lifetimes Verus can't name.  So are the dispatch of
+//! closures and inserted values to an encoding's rebuild (`Visiting`,
+//! `Inserting`) and the weight functions (`Weigh`: a slab's weight counts
 //! its items).  The index is verified ([`IndexOps`]); for delta columns,
 //! whose index aggregates sums, that the sums fit is assumed (`plain`).
 
@@ -51,8 +55,11 @@ verus! {
 // ── The encodings' slab operations ─────────────────────────────────────────
 
 /// The slab operations a cursor drives, specified against each slab's
-/// values.  Implemented for every [`SlabEdit`](crate::edit::SlabEdit)
-/// encoding by a trusted bridge (below).
+/// values: an encoding's slab model, named by
+/// [`SlabEdit::Model`].  Bool columns'
+/// ([`BoolModel`](crate::bool_edit::BoolModel)) is verified against the
+/// bool format; RLE's ([`Trusted`]) forwards to the encoding's own
+/// operations on trust (below).
 pub(crate) trait Slabs {
     type Tail: Copy + Clone + std::fmt::Debug + Default;
 
@@ -1718,16 +1725,21 @@ impl<E: Slabs> Cursor<E> {
 //
 // Outside `verus!`, so Verus takes them on trust; their spec items exist
 // only when Verus compiles the crate.  Each is a one-line forward to the
-// encoding's own operation — for RLE and bool columns, the verified
-// rebuilds (`rle::edit::Edit`, `bool_edit::BEdit`), merges and readers —
-// and what is trusted is that those meet the contracts above.
+// encoding's own operation — for RLE columns, the verified rebuilds
+// (`rle::edit::Edit`), merges and readers — and what is trusted is that
+// those meet the contracts above.  (Bool columns' model is verified
+// instead; only the closure and value dispatch reaches it from here.)
 
 use crate::column::{TailOf, WeightFn};
 use crate::edit::{EditSlab, SlabEdit};
 use crate::encoding::ColumnEncoding;
 use crate::{AsColumnRef, Codec, ColumnValueRef};
 
-impl<E: SlabEdit> Slabs for E {
+/// The slab model of an encoding whose slab operations are trusted to meet
+/// [`Slabs`]: each method forwards to the encoding's own.
+pub struct Trusted<E>(PhantomData<fn() -> E>);
+
+impl<E: SlabEdit> Slabs for Trusted<E> {
     type Tail = <E as ColumnEncoding>::Tail;
     type Rebuild = <E as SlabEdit>::Edit;
     type State = <E as ColumnEncoding>::State;
@@ -1817,36 +1829,65 @@ impl<E: SlabEdit> Slabs for E {
     }
 }
 
-impl<E: SlabEdit, F> Visitor<E> for F
+/// A closure seeing each run a cursor carries or drops, as the
+/// [`Visitor`] of encoding `E`'s slab model: it hands the closure to the
+/// encoding's rebuild.
+pub(crate) struct Visiting<'f, E, F>(&'f mut F, PhantomData<fn() -> E>);
+
+impl<'f, E, F> Visiting<'f, E, F> {
+    #[inline(always)]
+    pub(crate) fn new(f: &'f mut F) -> Self {
+        Visiting(f, PhantomData)
+    }
+}
+
+impl<E: SlabEdit, F> Visitor<<E as SlabEdit>::Model> for Visiting<'_, E, F>
 where
     F: FnMut(<<E as ColumnEncoding>::Value as ColumnValueRef>::Get<'_>, usize),
 {
     #[inline(always)]
     fn pass(
         &mut self,
-        e: &mut <E as Slabs>::Rebuild,
-        s: &Slab<<E as Slabs>::Tail>,
+        e: &mut <E as SlabEdit>::Edit,
+        s: &Slab<<E as ColumnEncoding>::Tail>,
         n: usize,
         runs: usize,
     ) -> usize {
-        e.pass(s, n, runs, self)
+        e.pass(s, n, runs, self.0)
     }
 
     #[inline(always)]
-    fn discard(&mut self, e: &mut <E as Slabs>::Rebuild, s: &Slab<<E as Slabs>::Tail>, n: usize) {
-        e.delete(s, n, self)
+    fn discard(
+        &mut self,
+        e: &mut <E as SlabEdit>::Edit,
+        s: &Slab<<E as ColumnEncoding>::Tail>,
+        n: usize,
+    ) {
+        e.delete(s, n, self.0)
     }
 }
 
-impl<E: SlabEdit, X: AsColumnRef<<E as ColumnEncoding>::Value>> Insertable<E> for X {
+/// A value to insert, as the [`Insertable`] of encoding `E`'s slab model.
+pub(crate) struct Inserting<E, X>(X, PhantomData<fn() -> E>);
+
+impl<E, X> Inserting<E, X> {
+    #[inline(always)]
+    pub(crate) fn new(x: X) -> Self {
+        Inserting(x, PhantomData)
+    }
+}
+
+impl<E: SlabEdit, X: AsColumnRef<<E as ColumnEncoding>::Value>> Insertable<<E as SlabEdit>::Model>
+    for Inserting<E, X>
+{
     #[cfg(verus_keep_ghost)]
-    fn val(&self) -> <E as Slabs>::V {
+    fn val(&self) -> <E as ColumnEncoding>::Value {
         unimplemented!()
     }
 
     #[inline(always)]
-    fn insert_into(self, e: &mut <E as Slabs>::Rebuild, n: usize) {
-        e.insert(self, n)
+    fn insert_into(self, e: &mut <E as SlabEdit>::Edit, n: usize) {
+        e.insert(self.0, n)
     }
 }
 

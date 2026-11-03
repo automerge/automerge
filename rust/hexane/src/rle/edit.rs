@@ -608,6 +608,7 @@ where
     T: crate::ColumnValueRef<Encoding<C> = Self>,
 {
     type Edit = RleEdit<T, C>;
+    type Model = crate::cursor::Trusted<Self>;
 }
 
 #[cfg(test)]
