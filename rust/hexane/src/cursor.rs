@@ -19,8 +19,18 @@
 //! ([`RleModel`](crate::rle::edit::RleModel)).  Trusted, in the bridges
 //! at the bottom of this file: the dispatch of closures and inserted
 //! values to an encoding's rebuild (`Visiting`, `Inserting`), and the
-//! weight functions (`Weigh`: a slab's weight counts its items).  The index is verified ([`IndexOps`]); for delta columns,
-//! whose index aggregates sums, that the sums fit is assumed (`plain`).
+//! weight functions (`Weigh`: a slab's weight counts its items).  The
+//! index is verified ([`IndexOps`]).
+//!
+//! Not covered: delta columns.  `col_ok` asks for a `plain` index, whose
+//! aggregates fit whenever its item counts do, and a delta column's index
+//! sums its deltas, which fit only while the values are consistent.  They
+//! are not while an edit is under way: a delete that drops a whole slab
+//! joins its neighbours in the index before the delta that bridges them
+//! is written, and their merged sums can exceed `i64` until it is.  So
+//! that the sums fit cannot be part of the invariant, and the cursor's
+//! guarantees do not extend to delta columns.  (`i128` aggregates would
+//! always fit, but cost 2-17% on delta columns' index operations.)
 
 // Verus has no specs for `Vec::is_empty`, slices from `&Vec` or `vec![x]`,
 // and the cursor's operations take the column's fields one by one.
