@@ -295,6 +295,10 @@ compiles them away. To check them, run `cargo verus verify -p hexane
   budget, every slab they cut is well-formed, and together the slabs hold
   the values appended, in order. `save_to_unless` writes nothing only if
   every value equals the one given.
+* Encoding into a caller's buffer (`encode_to`, `encode_to_unless`,
+  `RleEncoderState`): the buffer's earlier bytes are left as they were,
+  and followed by the canonical encoding of the values; the `_unless`
+  variants write nothing only if every value equals the one given.
 * The value search of `Column` and its iterator (`scope_to_value`,
   `seek_to_value`): where the values in the window are sorted, it returns
   exactly the range of them equal to the target, or, if there are none,
@@ -321,11 +325,10 @@ that each value type's `Ord` agrees with its `==`.
   (`find_by_value`, insert, remove, load), so performance was preferred.
 * The prefix and delta columns' own logic (running sums, realizing values,
   value search over them) is not verified.
-* The RLE encoder's one-shot `encode_to` paths, which write into a
-  caller's buffer, and `RleEncoderState` are not verified.
 * Where a precondition of the verified code cannot be shown from the
-  specifications (a slab of `i64::MAX` bytes or more, or a column of nearly
-  `usize::MAX` items), the code checks it and panics rather than assume it.
+  specifications (a slab of `i64::MAX` bytes or more, or a column or
+  encoder of nearly `usize::MAX` items), the code checks it and panics
+  rather than assume it.
 
 ## Development
 

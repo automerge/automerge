@@ -515,6 +515,22 @@ pub(crate) open spec fn flushed_lit_tail<'a, W: WriteOps<'a>>(s0: State<'a, W>, 
         }
 }
 
+/// Where the bytes a state may still change start: its literal's
+/// header, if the writer put it in the buffer; else the buffer's end.
+pub(crate) open spec fn wlo<'a, W: WriteOps<'a>>(s: State<'a, W>, buf: Seq<u8>) -> int {
+    match s {
+        State::Lit { count, local, header_pos, .. } => if local == count { header_pos as int } else { buf.len() as int },
+        _ => buf.len() as int,
+    }
+}
+
+/// `b1` keeps `b0`'s bytes before `lo`: a writer leaves alone what it
+/// did not write.
+pub(crate) open spec fn keeps(b0: Seq<u8>, b1: Seq<u8>, lo: int) -> bool {
+    &&& lo <= b1.len()
+    &&& forall|i: int| 0 <= i < lo ==> #[trigger] b1[i] == b0[i]
+}
+
 /// `n` copies of `v`.
 pub(crate) open spec fn copies<V>(n: nat, v: V) -> Seq<V> {
     Seq::new(n, |_i| v)
@@ -1270,6 +1286,7 @@ impl<'a, W: WriteOps<'a>> State<'a, W> {
     pub(crate) fn do_flush(state: Self, buf: &mut Vec<u8>) -> (f: FlushState)
         requires wf(state, old(buf)@),
         ensures
+            keeps(old(buf)@, final(buf)@, wlo(state, old(buf)@)),
             flushed(state, old(buf)@, final(buf)@, f.rewrite, f.segments as int), rw_from(state, f.rewrite),
             f.segments == state.pseg(), flushed_tail(state, old(buf)@, final(buf)@, f.rewrite, f.wpos),
             state is Empty ==> final(buf)@ == old(buf)@ && f.wpos == (WPos::Run { pos: 0, local: true }),
@@ -1420,6 +1437,7 @@ impl<'a, W: WriteOps<'a>> State<'a, W> {
             wf(*old(self), old(buf)@), old(self).plen() + n + 1 < usize::MAX,
             <W::R as RleOps<'a>>::is_null(W::val(value)) ==> <W::R as RleOps<'a>>::nullable(),
         ensures
+            keeps(old(buf)@, final(buf)@, wlo(*old(self), old(buf)@)),
             wf(*final(self), final(buf)@),
             final(self).plen() <= old(self).plen() + n,
             f.segments + final(self).pseg() <= old(self).pseg() + n,
@@ -1621,6 +1639,7 @@ impl<'a, W: WriteOps<'a>> State<'a, W> {
             wf(*old(self), old(buf)@), <W::R as RleOps<'a>>::nullable(),
             1 <= count, old(self).plen() + count + 1 < usize::MAX,
         ensures
+            keeps(old(buf)@, final(buf)@, wlo(*old(self), old(buf)@)),
             wf(*final(self), final(buf)@),
             final(self).plen() <= old(self).plen() + count,
             f.segments + final(self).pseg() <= old(self).pseg() + count,
@@ -1666,6 +1685,7 @@ impl<'a, W: WriteOps<'a>> State<'a, W> {
         requires
             wf(*old(self), old(buf)@), old(self).plen() + lit + 1 < usize::MAX,
         ensures
+            keeps(old(buf)@, final(buf)@, wlo(*old(self), old(buf)@)),
             (*final(self)) is Empty, rw_from(*old(self), f.rewrite),
             lit > 0 ==> lit_fits(*old(self), lit as nat), f.segments == old(self).pseg(),
             lit == 0 ==> flushed_tail(*old(self), old(buf)@, final(buf)@, f.rewrite, f.wpos),
@@ -1762,6 +1782,7 @@ impl<'a, W: WriteOps<'a>> State<'a, W> {
     pub(crate) fn flush(&mut self, buf: &mut Vec<u8>) -> (f: FlushState)
         requires wf(*old(self), old(buf)@),
         ensures
+            keeps(old(buf)@, final(buf)@, wlo(*old(self), old(buf)@)),
             flushed(*old(self), old(buf)@, final(buf)@, f.rewrite, f.segments as int), (*final(self)) is Empty,
             rw_from(*old(self), f.rewrite), f.segments == old(self).pseg(),
             flushed_tail(*old(self), old(buf)@, final(buf)@, f.rewrite, f.wpos),
@@ -1888,11 +1909,7 @@ where
 }
 
 impl<'a, T: RleValue, V: AsColumnRef<T>, C: Codec> RleState<'a, T, V, C> {
-    pub(crate) fn is_single_run_of(&self, value: impl Into<Cow<'a, T, V>>) -> bool {
-        self.single_run_of(&value.into())
-    }
-
-    #[inline(always)]
+    #[cfg(test)]
     pub fn append(&mut self, buf: &mut Vec<u8>, value: impl Into<Cow<'a, T, V>>) -> FlushState {
         self.append_n(buf, value, 1)
     }

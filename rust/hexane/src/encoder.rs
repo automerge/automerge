@@ -18,8 +18,8 @@ use crate::column::WeightFn;
 use crate::column::{Column, Slab, DEFAULT_MAX_SEG};
 use crate::encoding::EncoderApi;
 use crate::index::ColumnIndex;
-use crate::rle::enc::REncoder;
-use crate::rle::state::{FlushState, RleCow, RleState, WOps};
+use crate::rle::enc::{REncoder, RStream};
+use crate::rle::state::{RleCow, WOps};
 use crate::rle::RleEncoding;
 use crate::rle::RleTail;
 use crate::RleValue;
@@ -37,10 +37,12 @@ use std::ops::Range;
 /// buffer.  Use this directly (via the `encode_to_unless` static path on
 /// [`crate::encoding::EncoderApi`]) when you want to write through to a
 /// caller-owned buffer with no per-call heap allocation.
+///
+/// Verified with Verus (`RStream`): appending always to the same buffer,
+/// then finishing, leaves the buffer's earlier bytes as they were and
+/// follows them with the canonical encoding of the values appended.
 pub struct RleEncoderState<'a, T: RleValue, C: Codec = Leb128> {
-    state: RleState<'a, T, T, C>,
-    flush: FlushState,
-    len: usize,
+    s: RStream<'a, WOps<T, T, C>>,
 }
 
 impl<T: RleValue, C: Codec> Default for RleEncoderState<'_, T, C> {
@@ -51,39 +53,31 @@ impl<T: RleValue, C: Codec> Default for RleEncoderState<'_, T, C> {
 
 impl<'a, T: RleValue, C: Codec> RleEncoderState<'a, T, C> {
     pub fn new() -> Self {
-        Self {
-            state: RleState::empty(),
-            flush: FlushState::default(),
-            len: 0,
-        }
+        Self { s: RStream::new() }
     }
 
     pub fn len(&self) -> usize {
-        self.len
+        self.s.len
     }
 
     pub fn is_empty(&self) -> bool {
-        self.len == 0
+        self.s.len == 0
     }
 
     pub fn append(&mut self, buf: &mut Vec<u8>, value: T::Get<'a>) {
-        self.flush += self.state.append(buf, RleCow::Ref(value));
-        self.len += 1;
+        self.s.append(buf, RleCow::Ref(value), 1);
     }
 
     pub fn append_owned(&mut self, buf: &mut Vec<u8>, value: T) {
-        self.flush += self.state.append(buf, value);
-        self.len += 1;
+        self.s.append(buf, RleCow::Owned(value), 1);
     }
 
     pub fn append_n(&mut self, buf: &mut Vec<u8>, value: T::Get<'a>, n: usize) {
-        self.flush += self.state.append_n(buf, RleCow::Ref(value), n);
-        self.len += n;
+        self.s.append(buf, RleCow::Ref(value), n);
     }
 
     pub fn append_n_owned(&mut self, buf: &mut Vec<u8>, value: T, n: usize) {
-        self.flush += self.state.append_n(buf, value, n);
-        self.len += n;
+        self.s.append(buf, RleCow::Owned(value), n);
     }
 
     pub fn extend(&mut self, buf: &mut Vec<u8>, iter: impl IntoIterator<Item = T::Get<'a>>) {
@@ -94,18 +88,20 @@ impl<'a, T: RleValue, C: Codec> RleEncoderState<'a, T, C> {
 
     /// Flush any pending run into `buf`.
     pub fn finish(&mut self, buf: &mut Vec<u8>) {
-        self.flush += self.state.flush(buf);
+        self.s.finish(buf);
     }
 
     /// True if the entire encoded sequence so far represents a single run
     /// of `value` (or is empty).  Both clauses must hold:
-    ///   1. `flush.segments == 0` — no run has been flushed to `buf` yet.
-    ///      `segments` counts only flushed runs, *not* the in-progress one.
-    ///   2. The in-progress state is empty or a single run of `value`.
-    ///      Call before `finish`; once you flush, the in-progress run is folded
-    ///      into `segments` and this check stops being useful.
+    ///   1. no run has been flushed to `buf` yet (only the in-progress one
+    ///      is pending);
+    ///   2. the in-progress state is empty or a single run of `value`.
+    ///      Call before `finish`; once you flush, the in-progress run is
+    ///      flushed too and this check stops being useful.
+    ///
+    /// Verified with Verus: true only if every value appended is `value`.
     pub fn is_single_run_of(&self, value: T::Get<'a>) -> bool {
-        self.flush.segments == 0 && self.state.is_single_run_of(RleCow::Ref(value))
+        self.s.single_run_of(&RleCow::Ref(value))
     }
 }
 
@@ -365,16 +361,18 @@ where
     /// We only need raw byte output, so just drive RleState directly.
     fn encode_to(buf: &mut Vec<u8>, iter: impl IntoIterator<Item = T::Get<'a>>) -> Range<usize> {
         let start = buf.len();
-        let mut state: RleState<'a, T, T, C> = RleState::empty();
+        // verified with Verus: the bytes after `start` are the canonical
+        // encoding of the values
+        let mut s = RStream::<'a, WOps<T, T, C>>::new();
         for v in iter {
-            let _ = state.append(buf, RleCow::Ref(v));
+            s.append(buf, RleCow::Ref(v), 1);
         }
-        let _ = state.flush(buf);
+        s.finish(buf);
         start..buf.len()
     }
 
-    /// Fast-path: drive RleState directly and only track `segments`
-    /// (the single field needed for the elision check).  When the entire
+    /// Fast-path: drive the writer directly into `buf`, tracking only
+    /// what the elision check needs.  When the entire
     /// input is a single run of `value` we truncate `buf` back to `start`
     /// to undo any in-progress writes.
     fn encode_to_unless(
@@ -383,16 +381,16 @@ where
         value: T::Get<'a>,
     ) -> Range<usize> {
         let start = buf.len();
-        let mut state: RleState<'a, T, T, C> = RleState::empty();
-        let mut segments_flushed: usize = 0;
+        let mut s = RStream::<'a, WOps<T, T, C>>::new();
         for v in iter {
-            segments_flushed += state.append(buf, RleCow::Ref(v)).segments;
+            s.append(buf, RleCow::Ref(v), 1);
         }
-        if segments_flushed == 0 && state.is_single_run_of(RleCow::Ref(value)) {
+        // verified with Verus: true only if every value is `value`
+        if s.single_run_of(&RleCow::Ref(value)) {
             buf.truncate(start);
             return start..start;
         }
-        let _ = state.flush(buf);
+        s.finish(buf);
         start..buf.len()
     }
 }
