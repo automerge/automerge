@@ -120,6 +120,7 @@ mod leb128_codec;
 pub mod load_opts;
 pub(crate) mod merge_walk;
 pub mod prefix;
+pub(crate) mod prefix_core;
 pub mod raw;
 pub mod rle;
 pub mod shift;

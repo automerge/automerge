@@ -309,7 +309,7 @@ pub struct Iter<'a, T: ColumnValueRef, C: Codec = Leb128> {
 }
 
 /// The decoders an iterator over a `Column<T, C>` opens.
-type Dx<T, C> = <<T as ColumnValueRef>::Encoding<C> as ColumnEncoding>::ReadModel;
+pub(crate) type Dx<T, C> = <<T as ColumnValueRef>::Encoding<C> as ColumnEncoding>::ReadModel;
 
 impl<T: ColumnValueRef, C: Codec> Default for Iter<'_, T, C> {
     fn default() -> Self {

@@ -314,6 +314,10 @@ compiles them away. To check them, run `cargo verus verify -p hexane
   the empty range where the target would go. Unsorted, it returns some
   range inside the window.
 * `RawColumn`.
+* The prefix iterator's running sums (`PrefixIter`'s `next`, `nth`,
+  `next_run` and `reset_prefix`): with its offset, the total it reports is
+  always the sum of the values before it, including after `nth` jumps to a
+  far slab with the sum the index holds for the slabs before it.
 
 **Trusted, not proved:** each value type's and codec's own encode and
 decode, which the verified code reaches through traits; the thin glue that
@@ -321,8 +325,12 @@ connects the generic column types to the verified cores, and the closures
 passed through it (including the slabs a new column is built from, which
 come from the verified loaders, fills and encoders); the weight functions
 that compute a slab's index weight (the edit cursor is proved to keep
-every slab's weight in the index the one they compute); and that each
-value type's `Ord` agrees with its `==`.
+every slab's weight in the index the one they compute), and so that a
+prefix column's index holds each slab's sum; each prefix value type's
+`accumulate` and `accumulate_run` (that they add its values, a run as
+its value repeated), and that its prefix type's `+` is associative with
+`default` its identity and `b + (a - b) == a`, as for wrapping integers;
+and that each value type's `Ord` agrees with its `==`.
 
 **Known limitations:**
 
@@ -334,9 +342,11 @@ value type's `Ord` agrees with its `==`.
   Reading a delta column's deltas is covered. Widening the sums to `i128`
   would close the gap, but costs 2–17% on delta columns' index operations
   (`find_by_value`, insert, remove, load), so performance was preferred.
-* The prefix and delta columns' other logic is not verified: prefix sums,
-  realizing values from deltas, and the bridging deltas a delta edit
-  writes.
+* The prefix and delta columns' other logic is not verified: the prefix
+  queries on the column (`get_prefix`, `get_index_for_total`,
+  `get_index_for_prefix`) and `PrefixIter::advance_prefix`, which seeks
+  with them; realizing values from deltas; and the bridging deltas a delta
+  edit writes.
 * Where a precondition of the verified code cannot be shown from the
   specifications (a slab of `i64::MAX` bytes or more, or a column or
   encoder of nearly `usize::MAX` items), the code checks it and panics

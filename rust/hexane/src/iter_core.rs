@@ -343,9 +343,30 @@ proof fn lemma_concat_len<V>(cs: Seq<Seq<V>>, k: int)
     }
 }
 
+/// The column's values before slab `k` are the slabs' before it.
+pub(crate) proof fn lemma_upto<'a, X: Decoders<'a>>(s: Seq<Slab<X::Tail>>, k: int)
+    requires
+        lens_ok::<X>(s),
+        0 <= k <= s.len(),
+    ensures
+        vals_of::<X>(s).take(sum(slab_lens(s), 0, k) as int) == vals_of::<X>(s.take(k)),
+{
+    let cs = each::<X>(s);
+    assert(cs.map_values(|c: Seq<<X::D as Decode>::Item>| c.len()) =~= slab_lens(s));
+    lemma_concat_len(cs, k);
+    assert(cs.take(k) =~= each::<X>(s.take(k)));
+    if k < s.len() {
+        lemma_concat_at(cs, k);
+        assert(vals_of::<X>(s).take(sum(slab_lens(s), 0, k) as int) =~= concat(cs.take(k)));
+    } else {
+        assert(cs.take(k) =~= cs);
+        assert(vals_of::<X>(s).take(sum(slab_lens(s), 0, k) as int) =~= vals_of::<X>(s));
+    }
+}
+
 /// From slab `k` at offset `j` on, the column holds the rest of slab `k`
 /// and the slabs after it, and the values before number the items before.
-proof fn lemma_from<'a, X: Decoders<'a>>(s: Seq<Slab<X::Tail>>, k: int, j: int)
+pub(crate) proof fn lemma_from<'a, X: Decoders<'a>>(s: Seq<Slab<X::Tail>>, k: int, j: int)
     requires
         lens_ok::<X>(s),
         0 <= k < s.len(),
@@ -431,7 +452,7 @@ impl<D: Decode> ICore<D> {
 
     /// Standing in a slab, the column from `pos` on is the decoder's
     /// values, then the slabs after.
-    proof fn lemma_here<'a, X: Decoders<'a, D = D>>(&self, s: Seq<Slab<X::Tail>>)
+    pub(crate) proof fn lemma_here<'a, X: Decoders<'a, D = D>>(&self, s: Seq<Slab<X::Tail>>)
         requires
             self.wf::<X>(s),
         ensures
@@ -554,7 +575,8 @@ impl<D: Decode> ICore<D> {
                     &&& final(self).out::<X>(slabs@) == old(self).out::<X>(slabs@).skip(1)
                     &&& final(self).pos == old(self).pos + 1
                 },
-                None => old(self).out::<X>(slabs@).len() == 0 && final(self).out::<X>(slabs@).len() == 0,
+                None => old(self).out::<X>(slabs@).len() == 0 && final(self).out::<X>(slabs@).len() == 0
+                    && final(self).pos == old(self).pos,
             },
     {
         let ghost c0 = *self;
@@ -825,7 +847,8 @@ impl<D: Decode> ICore<D> {
                     &&& run.count < max && run.count < o.len() && final(self).slab_remaining > 0
                         ==> o[run.count as int] != run.value
                 },
-                None => old(self).out::<X>(slabs@).len() == 0 && final(self).out::<X>(slabs@).len() == 0,
+                None => old(self).out::<X>(slabs@).len() == 0 && final(self).out::<X>(slabs@).len() == 0
+                    && final(self).pos == old(self).pos,
             },
     {
         let ghost c0 = *self;
@@ -1110,7 +1133,7 @@ impl<D: Decode> ICore<D> {
                     // maximal, unless cut by `max`: the next value differs
                     &&& run.count < max && run.count < o.len() ==> o[run.count as int] != run.value
                 },
-                None => max == 0 || old(self).out::<X>(slabs@).len() == 0,
+                None => (max == 0 || old(self).out::<X>(slabs@).len() == 0) && final(self).pos == old(self).pos,
             },
     {
         let ghost c0 = *self;

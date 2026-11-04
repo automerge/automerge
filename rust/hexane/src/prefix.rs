@@ -3,11 +3,13 @@ use crate::sealed::Sealed;
 use std::marker::PhantomData;
 use std::ops::{Add, AddAssign, Div, Sub, SubAssign};
 
-use crate::column::{Column, Iter, Slab, SlabWeight, TailOf, WeightFn};
+use crate::column::{Column, Dx, Iter, Slab, SlabWeight, TailOf, WeightFn};
 use crate::encoding::{ColumnEncoding, RunDecoder};
+use crate::prefix_core::{p_next, p_next_run, p_nth, p_reset, PrefixOps};
 use crate::PackError;
 use crate::{Codec, Leb128};
 use crate::{ColumnValueRef, RleValue, Run};
+use vstd::prelude::Ghost;
 
 // ── UnsignedPrefix marker ────────────────────────────────────────────────────
 
@@ -879,6 +881,46 @@ where
     }
 }
 
+/// A prefix column's arithmetic, for the verified iterator
+/// (`prefix_core`). Trusted: `accumulate` adds a value's contribution and
+/// `accumulate_run` a run's (user code), and `T::Prefix`'s `+`, `-` and
+/// `default` keep the laws of `prefix_add` and `prefix_sub`.
+pub(crate) struct PB<T>(PhantomData<fn() -> T>);
+
+impl<'a, T: PrefixValue> PrefixOps<T::Get<'a>> for PB<T> {
+    type P = T::Prefix;
+
+    #[cfg(verus_keep_ghost)]
+    fn contrib(_v: T::Get<'a>) -> T::Prefix {
+        unimplemented!()
+    }
+
+    #[inline(always)]
+    fn acc(t: &mut T::Prefix, v: T::Get<'a>) {
+        T::accumulate(t, v)
+    }
+
+    #[inline(always)]
+    fn acc_run(t: &mut T::Prefix, run: &Run<T::Get<'a>>) {
+        T::accumulate_run(t, run)
+    }
+
+    #[inline(always)]
+    fn zero() -> T::Prefix {
+        T::Prefix::default()
+    }
+
+    #[inline(always)]
+    fn sub(a: T::Prefix, b: &T::Prefix) -> T::Prefix {
+        a - b.clone()
+    }
+
+    #[inline(always)]
+    fn add_to(a: &mut T::Prefix, b: &T::Prefix) {
+        *a += b
+    }
+}
+
 /// Forward iterator over a [`PrefixColumn`], yielding a [`PrefixedValue`]
 /// per item.
 ///
@@ -928,50 +970,36 @@ impl<T: PrefixValue, C: Codec> std::fmt::Debug for PrefixIter<'_, T, C> {
 impl<'a, T: PrefixValue, C: Codec> Iterator for PrefixIter<'a, T, C> {
     type Item = PrefixedValue<'a, T>;
 
+    // verified (`prefix_core`): the running total stays the sum of the
+    // values before the iterator, given the column's invariant
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        let value = self.inner.next()?;
-        T::accumulate(&mut self.total, value);
+        let value = p_next::<Dx<T, C>, PB<T>>(
+            &mut self.inner.core,
+            self.inner.slabs,
+            &mut self.total,
+            Ghost::assume_new(),
+        )?;
         Some(PrefixedValue {
             value,
             total: self.total.clone(),
         })
     }
 
+    /// O(log S) — a far slab's prefix comes from the column's index.
     fn nth(&mut self, n: usize) -> Option<Self::Item> {
-        if n >= self.inner.core.items_left {
-            if self.inner.core.items_left > 0 {
-                self.nth(self.inner.core.items_left - 1);
-            }
-            return None;
-        }
-
-        // Fast path: within current slab — accumulate via next_run.
-        if n < self.inner.core.slab_remaining {
-            return Some(self.same_slab_nth(n));
-        }
-
-        let target_pos = self.inner.core.pos + n;
-
-        let Some(col) = self.col else {
-            // a default iterator: no column, no values
-            self.inner.nth(n);
-            return None;
-        };
-        let found = col.col.index.find_slab_at_item(target_pos);
-
-        let in_slab = self.inner.advance_to_slab(found.index, found.pos);
-
-        // the tree hands back the absolute prefix at the slab start (past
-        // the last slab, the column's total); carry any reset_prefix
-        // offset across the jump
-        self.total = found.prefix - self.base.clone();
-
-        if !in_slab {
-            return None;
-        }
-
-        Some(self.same_slab_nth(target_pos - found.pos))
+        let value = p_nth::<Dx<T, C>, PB<T>>(
+            &mut self.inner.core,
+            self.inner.slabs,
+            self.col.map(|c| &c.col.index),
+            n,
+            &mut self.total,
+            &self.base,
+        )?;
+        Some(PrefixedValue {
+            value,
+            total: self.total.clone(),
+        })
     }
 
     #[inline]
@@ -983,20 +1011,6 @@ impl<'a, T: PrefixValue, C: Codec> Iterator for PrefixIter<'a, T, C> {
 impl<T: PrefixValue, C: Codec> ExactSizeIterator for PrefixIter<'_, T, C> {}
 
 impl<'a, T: PrefixValue, C: Codec> PrefixIter<'a, T, C> {
-    fn same_slab_nth(&mut self, mut n: usize) -> PrefixedValue<'a, T> {
-        while let Some(run) = self.inner.next_run_max(n + 1) {
-            T::accumulate_run(&mut self.total, &run);
-            if run.count > n {
-                return PrefixedValue {
-                    value: run.value,
-                    total: self.total.clone(),
-                };
-            }
-            n -= run.count;
-        }
-        panic!("same_slab_nth called with n > slab len");
-    }
-
     #[inline]
     pub fn pos(&self) -> usize {
         self.inner.core.pos
@@ -1021,8 +1035,12 @@ impl<'a, T: PrefixValue, C: Codec> PrefixIter<'a, T, C> {
     /// still interprets its argument as units past the current
     /// position, and slab jumps in `nth` carry the offset).
     pub fn reset_prefix(&mut self) {
-        self.base += &self.total;
-        self.total = T::Prefix::default();
+        p_reset::<Dx<T, C>, PB<T>>(
+            Ghost::assume_new(),
+            Ghost::assume_new(),
+            &mut self.total,
+            &mut self.base,
+        );
     }
 
     #[inline]
@@ -1074,8 +1092,14 @@ impl<'a, T: PrefixValue, C: Codec> PrefixIter<'a, T, C> {
     /// Next run of identical values as a [`PrefixedValue`] describing the
     /// run's final item: `total()` is the sum through the end of the run.
     pub fn next_run(&mut self) -> Option<Run<PrefixedValue<'a, T>>> {
-        let run = self.inner.next_run()?;
-        T::accumulate_run(&mut self.total, &run);
+        let max = self.inner.core.items_left;
+        let run = p_next_run::<Dx<T, C>, PB<T>>(
+            &mut self.inner.core,
+            self.inner.slabs,
+            max,
+            &mut self.total,
+            Ghost::assume_new(),
+        )?;
         Some(Run {
             count: run.count,
             value: PrefixedValue {

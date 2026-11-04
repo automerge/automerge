@@ -481,6 +481,22 @@ impl<'a, O: RleOps<'a>> Dec<'a, O> {
         }
     }
 
+    /// `advance_run`, out of line: for `next_run_max`, which calls it
+    /// once per run. Inlined there (as LLVM does when nothing else calls
+    /// it), the run loop runs a fifth slower on aarch64; `next`, a value
+    /// at a time, keeps `advance_run` for LLVM to place.
+    #[inline(never)]
+    fn advance_run_outlined(&mut self)
+        requires old(self).inv(), old(self).remaining == 0,
+        ensures
+            final(self).inv(), final(self).data() == old(self).data(),
+            final(self).pos() == old(self).pos(),
+            final(self).remaining == 0 ==> final(self).pos() == final(self).values().len(),
+            final(self).dsegs() == old(self).dsegs(),
+    {
+        self.advance_run()
+    }
+
     /// At a run boundary: begin the next run, if there is one.
     fn advance_run(&mut self)
         requires old(self).inv(), old(self).remaining == 0,
@@ -759,7 +775,7 @@ impl<'a, O: RleOps<'a>> Dec<'a, O> {
             if self.remaining > 0 {
                 return self.take_run(max);
             }
-            self.advance_run();
+            self.advance_run_outlined();
             if self.remaining == 0 {
                 return None;
             }
