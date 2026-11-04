@@ -309,6 +309,13 @@ compiles them away. To check them, run `cargo verus verify -p hexane
   all lie in the value domain, and whose values span less than 2^63.
   Merging two aggregates gives the aggregate of their deltas, as the
   B-tree's value search assumes.
+* Reading a delta column (`DeltaIter`'s `next`, `nth` and `next_run`,
+  and so `get`, `iter`, `iter_range` and `to_vec`): each value is the
+  running sum of the deltas before it, or null, including after `nth`
+  jumps to a far slab by the index's sums, given that the index holds
+  each slab's aggregate and that the sums at slab boundaries fit `i64`.
+  The running sum wraps as release arithmetic does, and is proved to be
+  the deltas' sum modulo 2^64: the sum itself, wherever it fits.
 * The value search of `Column` and its iterator (`scope_to_value`,
   `seek_to_value`): where the values in the window are sorted, it returns
   exactly the range of them equal to the target, or, if there are none,
@@ -357,14 +364,15 @@ value types' `to_opt`; and that each value type's `Ord` agrees with its
   way those sums can legitimately exceed `i64`: a delete that drops a whole
   slab joins its neighbours in the index before the delta that bridges them
   is written. So "the sums fit" cannot be part of the cursor's invariant.
-  Reading a delta column's deltas is covered. Widening the sums to `i128`
+  Reading a delta column (its deltas, and the values they realize) is
+  covered, given the index that edits leave. Widening the sums to `i128`
   would close the gap, but costs 2–17% on delta columns' index operations
   (`find_by_value`, insert, remove, load), so performance was preferred.
 * The prefix and delta columns' other logic is not verified: that a
   column's sum fits its prefix type, which the searches' results depend on
   (loads reject sums that would not, and edits panic, but those checks are
   not part of the proof); `sum_range` and `delta`, which are glue over
-  the verified iterator; realizing values from deltas; and the bridging
+  the verified iterator; `DeltaIter::seek_to_value`; and the bridging
   deltas a delta edit writes.
 * Where a precondition of the verified code cannot be shown from the
   specifications (a slab of `i64::MAX` bytes or more, or a column or

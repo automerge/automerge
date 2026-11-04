@@ -692,6 +692,7 @@ impl<D: Decode> ICore<D> {
     }
 
     /// `nth`, for `n` inside the window.
+    #[verifier::spinoff_prover]
     fn nth_in<'a, X: Decoders<'a, D = D>, F: Fn(usize) -> (usize, usize)>(
         &mut self,
         slabs: &'a [Slab<X::Tail>],

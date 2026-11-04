@@ -1,14 +1,17 @@
 pub(crate) mod agg;
 mod decoder;
+pub(crate) mod diter;
 pub mod indexed;
 pub(crate) mod stream;
 
 pub use decoder::DeltaDecoder;
 use vstd::prelude::Ghost;
 
-use crate::column::{normalize_range_max, Iter, IterState};
+use crate::column::{normalize_range_max, Dx, Iter, IterState};
 use crate::rle::state::WOps;
 use crate::{Codec, Leb128};
+use diter::{d_next, d_next_run, d_nth};
+use indexed::DB;
 use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::ops::Range;
@@ -1519,52 +1522,36 @@ impl<T: DeltaValue, C: Codec> Default for DeltaIter<'_, T, C> {
 impl<T: DeltaValue, C: Codec> Iterator for DeltaIter<'_, T, C> {
     type Item = T;
 
+    // verified (`diter`): the running sum of the deltas, given the index's
+    // slab aggregates
     #[inline]
     fn next(&mut self) -> Option<T> {
-        match T::Inner::to_opt(self.inner.next()?) {
-            None => Some(T::null_value()),
-            Some(d) => {
-                self.running += d;
-                Some(T::from_i64(self.running))
-            }
-        }
+        let v = d_next::<Dx<T::Inner, C>, DB<T::Inner>>(
+            &mut self.inner.core,
+            self.inner.slabs,
+            &mut self.running,
+        )?;
+        Some(match v {
+            None => T::null_value(),
+            Some(v) => T::from_i64(v),
+        })
     }
 
-    fn nth(&mut self, mut n: usize) -> Option<T> {
+    fn nth(&mut self, n: usize) -> Option<T> {
         if n == 0 {
             return self.next();
         }
-        if n >= self.inner.core.items_left {
-            if self.inner.core.items_left > 0 {
-                self.nth(self.inner.core.items_left - 1);
-            }
-            return None;
-        }
-
-        if self.inner.core.slab_remaining <= n {
-            let pos = self.pos();
-            let col = self.col?;
-            let found = col.index.find_slab_at_item(pos + n);
-            self.running = found.prefix;
-            if !self.inner.advance_to_slab(found.index, found.pos) {
-                return None;
-            }
-            n -= self.pos() - pos;
-        }
-        while let Some(run) = self.inner.next_run_max(n + 1) {
-            let delta = T::Inner::to_opt(run.value);
-            if let Some(d) = delta {
-                self.running += d * run.count as i64;
-            }
-            if run.count > n {
-                return Some(match delta {
-                    None => T::null_value(),
-                    Some(_) => T::from_i64(self.running),
-                });
-            }
-            n -= run.count
-        }
-        None
+        let v = d_nth::<Dx<T::Inner, C>, DB<T::Inner>>(
+            &mut self.inner.core,
+            self.inner.slabs,
+            self.col.map(|c| &c.index),
+            n,
+            &mut self.running,
+        )?;
+        Some(match v {
+            None => T::null_value(),
+            Some(v) => T::from_i64(v),
+        })
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -1643,15 +1630,17 @@ impl<'a, T: DeltaValue, C: Codec> DeltaIter<'a, T, C> {
     /// value.  Respects the iterator window; a clipped run's remainder
     /// is still a valid self-describing `DeltaRun`.
     pub fn next_run(&mut self) -> Option<DeltaRun> {
-        let run = self.inner.next_run()?;
         let prefix = self.running;
-        let delta = T::Inner::to_opt(run.value);
-        if let Some(d) = delta {
-            self.running += d * run.count as i64;
-        }
+        let max = self.inner.core.items_left;
+        let run = d_next_run::<Dx<T::Inner, C>, DB<T::Inner>>(
+            &mut self.inner.core,
+            self.inner.slabs,
+            max,
+            &mut self.running,
+        )?;
         Some(DeltaRun {
             prefix,
-            delta,
+            delta: T::Inner::to_opt(run.value),
             count: run.count,
         })
     }

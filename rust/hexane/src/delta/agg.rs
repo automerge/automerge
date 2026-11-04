@@ -65,7 +65,7 @@ pub open spec fn reps(n: nat, d: Option<i64>) -> Seq<Option<i64>> {
     Seq::new(n, |_i: int| d)
 }
 
-proof fn lemma_push(ds: Seq<Option<i64>>, d: Option<i64>)
+pub(crate) proof fn lemma_push(ds: Seq<Option<i64>>, d: Option<i64>)
     ensures
         psum(ds.push(d)) == psum(ds) + dval(d),
         ds.len() == 0 ==> pmin(ds.push(d)) == dval(d) && pmax(ds.push(d)) == dval(d),
@@ -521,7 +521,7 @@ proof fn lemma_vbounds(ds: Seq<Option<i64>>)
 }
 
 /// The running sum after a run.
-proof fn lemma_run_sum(ds: Seq<Option<i64>>, n: nat, d: Option<i64>)
+pub(crate) proof fn lemma_run_sum(ds: Seq<Option<i64>>, n: nat, d: Option<i64>)
     ensures psum(ds + reps(n, d)) == psum(ds) + n * dval(d),
     decreases n,
 {
@@ -646,7 +646,7 @@ fn sum_overflows(Ghost(why): Ghost<bool>)
 
 /// Values `v` from `k` on starting with `c` copies of `x`: their deltas
 /// through `k + c` are those through `k`, then `c` copies of `x`'s.
-proof fn lemma_take_run<V: Copy, B: DeltaOps<V>>(v: Seq<V>, k: int, c: int, x: V)
+pub(crate) proof fn lemma_take_run<V: Copy, B: DeltaOps<V>>(v: Seq<V>, k: int, c: int, x: V)
     requires
         0 <= k,
         0 <= c,
