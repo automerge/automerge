@@ -62,20 +62,6 @@ impl<'a, T: RleValue, C: Codec> RleDecoder<'a, T, C> {
         }
     }
 
-    pub(crate) fn is_literal(&self) -> bool {
-        self.inner.is_literal()
-    }
-
-    /// Values left in the current run.
-    pub(crate) fn remaining(&self) -> usize {
-        self.inner.remaining
-    }
-
-    /// Where the next value's bytes, or the next run's header, start.
-    pub(crate) fn byte_pos(&self) -> usize {
-        self.inner.byte_pos
-    }
-
     /// Advance past `n` items in O(runs skipped), decoding no values.
     /// Stops at the end of the column.
     // inherent, so a call on a concrete decoder is never ambiguous with

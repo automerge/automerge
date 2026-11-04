@@ -1386,25 +1386,3 @@ pub(crate) proof fn lemma_tail_ok_bounds<'a, O: RleOps<'a>>(bytes: Seq<u8>, tb: 
 }
 
 } // verus!
-
-impl<V> Postfix<V> {
-    /// The same postfix, its values mapped by `f`.
-    #[inline]
-    pub(crate) fn map<U>(self, mut f: impl FnMut(V) -> U) -> Postfix<U> {
-        match self {
-            Postfix::Run { count, value } => Postfix::Run {
-                count,
-                value: f(value),
-            },
-            Postfix::Lit { value, lit } => Postfix::Lit {
-                value: f(value),
-                lit,
-            },
-            Postfix::LonePlusLit { lone, value, lit } => Postfix::LonePlusLit {
-                lone: f(lone),
-                value: f(value),
-                lit,
-            },
-        }
-    }
-}

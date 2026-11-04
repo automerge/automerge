@@ -9,12 +9,11 @@
 #![allow(clippy::len_zero, clippy::assign_op_pattern)]
 
 use crate::rle::model::*;
-use crate::rle::postfix::Postfix;
-use crate::rle::RleTail;
-use crate::{AsColumnRef, Codec, Leb128, RleValue};
+#[cfg(test)]
+use crate::Leb128;
+use crate::{AsColumnRef, Codec, RleValue};
 
 use std::marker::PhantomData;
-use std::num::NonZeroU32;
 #[allow(unused_imports)]
 use vstd::prelude::*;
 
@@ -137,9 +136,8 @@ impl<'a, T: RleValue, V: AsColumnRef<T>, C: Codec> WriteOps<'a> for WOps<T, V, C
 }
 
 /// The writer for column type `T`, inserted values `V` and codec `C`.
+#[cfg(test)]
 pub(crate) type RleState<'a, T, V, C = Leb128> = State<'a, WOps<T, V, C>>;
-
-type Cow<'a, T, V> = RleCow<'a, T, V>;
 
 verus! {
 
@@ -266,8 +264,8 @@ pub type VOf<'a, W> = <<W as WriteOps<'a>>::R as RleOps<'a>>::V;
 /// must be written to the output buffer before the state is dropped and
 /// the slab is mutated.
 ///
-/// `W` supplies the values (`W::Cow`) and the codec.  Use it through
-/// [`RleState`].
+/// `W` supplies the values (`W::Cow`) and the codec (`WOps<T, V, C>` for
+/// column type `T`, inserted values `V` and codec `C`).
 pub(crate) enum State<'a, W: WriteOps<'a>> {
     Empty,
     Lone(W::Cow),
@@ -1796,51 +1794,7 @@ impl<'a, W: WriteOps<'a>> State<'a, W> {
 
 } // verus!
 
-impl WPos {
-    pub(crate) fn merge(
-        &self,
-        prefix: usize,
-        middle: usize,
-        postfix: usize,
-        tail: RleTail,
-    ) -> RleTail {
-        match postfix {
-            0 => self.as_tail(prefix, middle),
-            len if tail.bytes as usize <= len => tail,
-            len => self
-                .as_tail(prefix, middle + len)
-                .with_lit_tail(tail.lit_tail),
-        }
-    }
-
-    pub(crate) fn as_tail(&self, prefix: usize, local: usize) -> RleTail {
-        let len = prefix + local;
-        match self {
-            WPos::Lit {
-                pos,
-                bytes,
-                local: true,
-            } => RleTail {
-                bytes: tail_bytes(local - *pos),
-                lit_tail: NonZeroU32::new(*bytes as u32),
-            },
-            WPos::Lit { pos, bytes, .. } => RleTail {
-                bytes: tail_bytes(len - *pos),
-                lit_tail: NonZeroU32::new(*bytes as u32),
-            },
-            WPos::Run { pos, local: true } => RleTail {
-                bytes: tail_bytes(local - *pos),
-                lit_tail: None,
-            },
-            WPos::Run { pos, .. } => RleTail {
-                bytes: tail_bytes(len - *pos),
-                lit_tail: None,
-            },
-        }
-    }
-}
-
-/// The byte length of a slab's last run, which its [`RleTail`] records
+/// The byte length of a slab's last run, which its [`RleTail`](crate::rle::RleTail) records
 /// in a `u32`.
 ///
 /// # Panics
@@ -1908,29 +1862,10 @@ where
     }
 }
 
+#[cfg(test)]
 impl<'a, T: RleValue, V: AsColumnRef<T>, C: Codec> RleState<'a, T, V, C> {
-    #[cfg(test)]
-    pub fn append(&mut self, buf: &mut Vec<u8>, value: impl Into<Cow<'a, T, V>>) -> FlushState {
-        self.append_n(buf, value, 1)
-    }
-
-    #[inline(always)]
-    pub fn append_n(
-        &mut self,
-        buf: &mut Vec<u8>,
-        value: impl Into<Cow<'a, T, V>>,
-        n: usize,
-    ) -> FlushState {
-        self.append_cow(buf, value.into(), n)
-    }
-
-    /// [`State::flush_postfix`] for a postfix borrowed from the slab.
-    pub fn flush_postfix_ref(
-        &mut self,
-        buf: &mut Vec<u8>,
-        postfix: Option<Postfix<T::Get<'a>>>,
-    ) -> FlushState {
-        self.flush_postfix(buf, postfix.map(|p| p.map(RleCow::Ref)))
+    pub fn append(&mut self, buf: &mut Vec<u8>, value: impl Into<RleCow<'a, T, V>>) -> FlushState {
+        self.append_cow(buf, value.into(), 1)
     }
 }
 
@@ -1938,33 +1873,6 @@ impl<'a, T: RleValue, V: AsColumnRef<T>, C: Codec> RleState<'a, T, V, C> {
 mod tests {
     use super::*;
     use crate::rle::rle_validate_encoding;
-
-    #[cfg(target_pointer_width = "64")]
-    #[test]
-    #[should_panic(expected = "must stay under 4 GiB")]
-    fn a_last_run_of_4gib_has_no_tail() {
-        WPos::Run {
-            pos: 0,
-            local: true,
-        }
-        .as_tail(0, u32::MAX as usize + 1);
-    }
-
-    /// A postfix of 4 GiB or more keeps the slab's tail: the comparison
-    /// used to truncate its length to `u32` first.
-    #[cfg(target_pointer_width = "64")]
-    #[test]
-    fn merging_after_4gib_of_postfix_keeps_the_tail() {
-        let tail = RleTail {
-            bytes: 5,
-            lit_tail: None,
-        };
-        let pos = WPos::Run {
-            pos: 0,
-            local: true,
-        };
-        assert_eq!(pos.merge(0, 10, 1 << 32, tail), tail);
-    }
 
     fn encode_vals(vals: &[u64]) -> Vec<u8> {
         let mut buf = Vec::new();

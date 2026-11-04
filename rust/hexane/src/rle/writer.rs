@@ -106,7 +106,7 @@ pub(crate) fn tail_lit_len(t: &RleTail) -> (b: usize)
     t.lit_tail.map_or(0, |l| l.get() as usize)
 }
 
-/// [`WPos::merge`], verified: the tail record of a slab of `prefix`
+/// The tail record of a slab of `prefix`
 /// bytes before the buffer, `middle` from it, and `postfix` carried
 /// after it whose old record is `tail` — `tail_after`, whenever that
 /// is a tail at all.

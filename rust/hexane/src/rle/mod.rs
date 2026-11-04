@@ -111,13 +111,6 @@ pub struct RleTail {
     pub(crate) lit_tail: Option<NonZeroU32>,
 }
 
-impl RleTail {
-    pub(crate) fn with_lit_tail(mut self, lit_tail: Option<NonZeroU32>) -> Self {
-        self.lit_tail = lit_tail;
-        self
-    }
-}
-
 /// Validate an RLE slab's len, segments, and tail. Panics on mismatch.
 #[cfg(debug_assertions)]
 fn validate_rle_slab<T: RleValue, C: Codec>(slab: &Slab) {

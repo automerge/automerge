@@ -1329,12 +1329,10 @@ mod tests {
         );
     }
 
-    /// Every single edit must land byte-identically to the splice that
-    /// expresses the same thing — that is the oracle for the whole
-    /// design, since `splice_slab` is what the column uses today.
+    /// Every single edit must land on the canonical encoding of the values
+    /// it leaves: bytes, length and segments, as encoding them afresh would.
     #[test]
-    fn matches_splice_slab() {
-        use crate::rle::splice::splice_slab;
+    fn matches_the_canonical_encoding() {
         let input: Vec<u64> = vec![1, 1, 1, 2, 3, 3, 4, 5, 5, 5, 6, 7, 8, 8];
         for at in 0..=input.len() {
             for del in 0..=(input.len() - at).min(3) {
@@ -1348,20 +1346,10 @@ mod tests {
                     }
                     e.close(&mut a);
 
-                    let mut b = slab_of(&input);
-                    let overflow = splice_slab::<u64, u64, Leb128>(
-                        &mut b,
-                        at,
-                        del,
-                        ins.iter().map(|v| (*v, 1)),
-                        usize::MAX,
-                    );
-                    assert!(overflow.is_empty());
-                    assert_eq!(
-                        values(&a),
-                        values(&b),
-                        "values at={at} del={del} ins={ins:?}"
-                    );
+                    let mut want = input.clone();
+                    want.splice(at..at + del, ins.iter().copied());
+                    let b = slab_of(&want);
+                    assert_eq!(values(&a), want, "values at={at} del={del} ins={ins:?}");
                     assert_eq!(a.data, b.data, "bytes at={at} del={del} ins={ins:?}");
                     assert_eq!(a.len, b.len, "len at={at} del={del} ins={ins:?}");
                     assert_eq!(
