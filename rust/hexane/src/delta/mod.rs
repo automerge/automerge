@@ -1,6 +1,9 @@
+pub(crate) mod agg;
 mod decoder;
 pub mod indexed;
+
 pub use decoder::DeltaDecoder;
+use vstd::prelude::Ghost;
 
 use crate::column::{normalize_range_max, Iter, IterState};
 use crate::encoder::RleEncoderState;
@@ -678,8 +681,10 @@ impl<'a, T: DeltaValue, C: Codec> DeltaEncoder<'a, T, C> {
 /// `i64`, and while an edit is under way those sums can exceed `i64` (a
 /// delete that drops a whole slab joins its neighbours before the delta
 /// that bridges them is written), so they cannot be part of the cursor's
-/// invariant. Reading the deltas is covered; realizing values from them is
-/// not. See the crate README's "Formal verification".
+/// invariant. Reading the deltas is covered, as are each slab's aggregate
+/// (exact as loaded or recomputed) and `load`'s check of the value
+/// domain; realizing values from the deltas is not. See the crate
+/// README's "Formal verification".
 pub struct DeltaColumn<T: DeltaValue, C: Codec = Leb128> {
     pub(crate) col: Column<T::Inner, C, IndexedDeltaWeightFn>,
     _phantom: PhantomData<T>,
@@ -755,32 +760,22 @@ impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
         // out-of-domain values and cross-slab overflow, before any
         // aggregate reaches the index's merge arithmetic. On valid data
         // `running` never leaves the domain; i128 keeps the comparisons
-        // exact when a hostile slab would wrap them.
-        let (lo, hi) = (T::MIN_I64 as i128, T::MAX_I64 as i128);
-        let mut running: i128 = 0;
-        // the range the values could span: nulls hold the running value,
-        // so it can include a 0 that is no value
-        let (mut low, mut high) = (i128::MAX, i128::MIN);
+        // exact when a hostile slab would wrap them. Verified
+        // (`DomainWalk`): every running sum is within the domain.
+        let mut walk = agg::DomainWalk::new();
         let col = iter.finalize_with(|w| {
-            if w.len == 0 {
-                return Ok(());
+            if walk.slab(w, T::MIN_I64, T::MAX_I64, Ghost::assume_new()) {
+                Ok(())
+            } else {
+                Err(PackError::InvalidValue("delta value out of domain".into()))
             }
-            let (min, max) = (
-                running + w.min_offset as i128,
-                running + w.max_offset as i128,
-            );
-            if min < lo || max > hi {
-                return Err(PackError::InvalidValue("delta value out of domain".into()));
-            }
-            (low, high) = (low.min(min), high.max(max));
-            running += w.total as i128;
-            Ok(())
         })?;
         // The values must also lie within a 2^63-wide range, so that a
         // delete can store the difference of any two (see `DeltaValue`).
-        // Only `i64`'s domain is wider than that. Where the slabs' bound
-        // on the range is too wide, measure the range itself.
-        if low <= high && high - low > i64::MAX as i128 && !within_2_63::<T, C>(data) {
+        // Only `i64`'s domain is wider than that. Where the running sums
+        // span too much (nulls hold the running sum, so they can include
+        // a 0 that is no value), measure the values themselves.
+        if walk.too_wide(Ghost::assume_new(), Ghost::assume_new()) && !within_2_63::<T, C>(data) {
             return Err(PackError::InvalidValue(
                 "delta values out of domain: they span 2^63 or more".into(),
             ));

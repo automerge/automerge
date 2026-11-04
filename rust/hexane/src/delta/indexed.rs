@@ -15,10 +15,12 @@ use std::ops::Range;
 
 use crate::btree::{FindByValueRange, SlabAgg};
 use crate::column::{Slab, TailOf, WeightFn};
+use crate::delta::agg::{agg_more, agg_run};
 use crate::delta::{DeltaColumn, DeltaInner, DeltaValue};
 use crate::encoding::{ColumnEncoding, RunDecoder};
 use crate::ColumnValueRef;
 use crate::{Codec, Leb128};
+use vstd::prelude::Ghost;
 
 // Type aliases to keep the decoder / slab types readable in struct fields.
 type OptI64Encoding<C> = <Option<i64> as ColumnValueRef>::Encoding<C>;
@@ -44,9 +46,8 @@ impl<I: DeltaInner, C: Codec> WeightFn<I, C> for IndexedDeltaWeightFn {
     // weights as the runs go past instead.
     const ACCUMULATES: bool = true;
 
-    /// Incremental twin of [`compute_slab_agg`] — same endpoint math, with
-    /// `len == 0` standing in for the "no runs yet" min/max sentinels (an
-    /// empty weight stays `SlabAgg::default()`, matching `compute`).
+    /// Incremental twin of [`compute_slab_agg`]: both fold each run with
+    /// the same verified step (`agg_run`), so they agree by construction.
     ///
     /// Checked arithmetic: this runs on untrusted bytes during load, and
     /// a within-slab partial overflowing `i64` is provably invalid — the
@@ -58,36 +59,14 @@ impl<I: DeltaInner, C: Codec> WeightFn<I, C> for IndexedDeltaWeightFn {
     /// *slab* rather than per run.
     #[inline]
     fn accumulate_run(w: &mut SlabAgg, count: usize, value: I::Get<'_>) -> Result<(), PackError> {
-        let Some(v) = I::to_opt(value) else {
-            // a null run holds the partial where it is
-            if w.len == 0 {
-                w.min_offset = 0;
-                w.max_offset = 0;
-            } else {
-                w.min_offset = w.min_offset.min(w.total);
-                w.max_offset = w.max_offset.max(w.total);
-            }
-            w.len += count;
-            return Ok(());
-        };
-        let overflow = || PackError::InvalidValue("delta running sum overflows i64".into());
-        let step = i64::try_from(count)
-            .ok()
-            .and_then(|c| v.checked_mul(c))
-            .ok_or_else(overflow)?;
-        let first = w.total.checked_add(v).ok_or_else(overflow)?;
-        let last = w.total.checked_add(step).ok_or_else(overflow)?;
-        let (lo, hi) = (first.min(last), first.max(last));
-        if w.len == 0 {
-            w.min_offset = lo;
-            w.max_offset = hi;
+        // verified: the aggregate stays exact, or a sum leaves `i64`
+        if agg_run(w, count, I::to_opt(value), Ghost::assume_new()) {
+            Ok(())
         } else {
-            w.min_offset = w.min_offset.min(lo);
-            w.max_offset = w.max_offset.max(hi);
+            Err(PackError::InvalidValue(
+                "delta running sum overflows i64".into(),
+            ))
         }
-        w.len += count;
-        w.total = last;
-        Ok(())
     }
 }
 
@@ -96,47 +75,28 @@ impl<I: DeltaInner, C: Codec> WeightFn<I, C> for IndexedDeltaWeightFn {
 /// For a run of `count` items with delta `v`, the realized-prefix
 /// progression is monotonic: `partial + v`, `partial + 2v`, …,
 /// `partial + count·v`.  Min/max are at the endpoints — no need to
-/// visit each intermediate item.
+/// visit each intermediate item (`agg_run`, verified).
 fn compute_slab_agg<I: DeltaInner, C: Codec>(data: &[u8]) -> SlabAgg {
     let mut decoder = <I as ColumnValueRef>::Encoding::<C>::decoder(data);
-    let mut partial = 0i64;
-    let mut min_off = i64::MAX;
-    let mut max_off = i64::MIN;
-    let mut len = 0usize;
-
-    while let Some(run) = decoder.next_run() {
-        len += run.count;
-        match I::to_opt(run.value) {
-            None => {
-                min_off = min_off.min(partial);
-                max_off = max_off.max(partial);
-            }
-            Some(v) => {
-                // the loader rejects these
-                let span = v
-                    .checked_mul(run.count as i64)
-                    .expect("delta run overflows i64");
-                let first = partial.checked_add(v).expect("delta value overflows i64");
-                let last = partial
-                    .checked_add(span)
-                    .expect("delta value overflows i64");
-                min_off = min_off.min(first.min(last));
-                max_off = max_off.max(first.max(last));
-                partial = last;
+    let mut w = SlabAgg::default();
+    // a loaded or edited slab's sums fit (the loader rejects others)
+    if let Some(run) = decoder.next_run() {
+        if !agg_run(&mut w, run.count, I::to_opt(run.value), Ghost::assume_new()) {
+            sum_overflows();
+        }
+        while let Some(run) = decoder.next_run() {
+            if !agg_more(&mut w, run.count, I::to_opt(run.value), Ghost::assume_new()) {
+                sum_overflows();
             }
         }
     }
+    w
+}
 
-    if len == 0 {
-        SlabAgg::default()
-    } else {
-        SlabAgg {
-            len,
-            total: partial,
-            min_offset: min_off,
-            max_offset: max_off,
-        }
-    }
+#[cold]
+#[inline(never)]
+fn sum_overflows() -> ! {
+    panic!("delta value overflows i64")
 }
 
 // ── Value-query methods ────────────────────────────────────────────────────

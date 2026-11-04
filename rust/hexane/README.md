@@ -299,6 +299,11 @@ compiles them away. To check them, run `cargo verus verify -p hexane
   `RleEncoderState`): the buffer's earlier bytes are left as they were,
   and followed by the canonical encoding of the values; the `_unless`
   variants write nothing only if every value equals the one given.
+* Delta columns' slab aggregates: a slab's sum of deltas and its least and
+  greatest running sum are exact, both as `load` accumulates them and as
+  an edit recomputes them, and `load` accepts only data whose running sums
+  all lie in the value domain. Merging two aggregates gives the aggregate
+  of their deltas, as the B-tree's value search assumes.
 * The value search of `Column` and its iterator (`scope_to_value`,
   `seek_to_value`): where the values in the window are sorted, it returns
   exactly the range of them equal to the target, or, if there are none,
@@ -323,8 +328,9 @@ that each value type's `Ord` agrees with its `==`.
   Reading a delta column's deltas is covered. Widening the sums to `i128`
   would close the gap, but costs 2–17% on delta columns' index operations
   (`find_by_value`, insert, remove, load), so performance was preferred.
-* The prefix and delta columns' own logic (running sums, realizing values,
-  value search over them) is not verified.
+* The prefix and delta columns' other logic is not verified: prefix sums,
+  realizing values from deltas, the bridging deltas a delta edit writes,
+  and the delta encoders' transformation of values into deltas.
 * Where a precondition of the verified code cannot be shown from the
   specifications (a slab of `i64::MAX` bytes or more, or a column or
   encoder of nearly `usize::MAX` items), the code checks it and panics
