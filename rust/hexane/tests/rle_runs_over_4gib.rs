@@ -3,6 +3,9 @@
 //! a panic, as for a run of more than `i64::MAX` values, rather than a
 //! slab whose tail record is silently truncated. Large blobs belong in a
 //! `RawColumn`.
+//!
+//! Only on 64-bit targets: a 32-bit `usize` can't hold the value's length.
+#![cfg(target_pointer_width = "64")]
 
 #[test]
 #[ignore = "needs well over 8 GiB of memory"]
