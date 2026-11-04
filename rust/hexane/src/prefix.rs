@@ -166,11 +166,13 @@ where
         T::accumulate_run(&mut peek, &run);
         if peek >= target {
             // Target is within this run — ceiling division by the
-            // single-value contribution `p`.
+            // single-value contribution `p`. `remaining` is at least one
+            // (`acc` is below `target`), and `remaining + p - 1` could
+            // overflow when the sums come near the prefix type's limit.
             let mut p = T::Prefix::default();
             T::accumulate(&mut p, run.value);
             let remaining = target - acc;
-            let needed: T::Prefix = (remaining + p - one_p) / p;
+            let needed: T::Prefix = (remaining - one_p) / p + one_p;
             let needed_usize: usize = needed.try_into().unwrap_or(run.count);
             assert!(needed_usize <= run.count);
             items += needed_usize;
