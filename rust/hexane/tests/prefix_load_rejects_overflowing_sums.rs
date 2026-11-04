@@ -9,7 +9,8 @@
 #![cfg(target_pointer_width = "64")]
 
 use hexane::encoder::RleEncoder;
-use hexane::{Column, LoadOpts, PrefixColumn};
+use hexane::prefix::PrefixWeightFn;
+use hexane::{Column, Leb128, LoadOpts, PrefixColumn};
 use std::num::NonZeroU32;
 
 /// One run whose sum overflows `u64`: `u32::MAX` 2^40 times.
@@ -37,6 +38,27 @@ fn slabs_overflowing_the_prefix_together_are_rejected() {
     // one run per slab: each slab's sum fits, their total doesn't
     let opts = LoadOpts::new().with_max_segments(2);
     assert!(PrefixColumn::<u32>::load_with(&bytes, opts).is_err());
+}
+
+/// 128 runs of 2^26 values near `u32::MAX`: a default load cuts them
+/// into two slabs of 64 runs, whose sums each fit (just under 2^64) but
+/// not together.
+fn many_runs() -> Vec<u8> {
+    let mut e = RleEncoder::<u32>::new();
+    for i in 0..128 {
+        e.append_n(u32::MAX - (i % 2), 1 << 26);
+    }
+    e.save()
+}
+
+#[test]
+fn every_load_checks_the_total() {
+    let bytes = many_runs();
+    assert!(PrefixColumn::<u32>::load(&bytes).is_err());
+    assert!(PrefixColumn::<u32>::load_with(&bytes, LoadOpts::new()).is_err());
+    assert!(Column::<u32, Leb128, PrefixWeightFn<u32>>::load(&bytes).is_err());
+    let iter = PrefixColumn::<u32>::load_iter(&bytes, LoadOpts::new());
+    assert!(iter.finalize().is_err());
 }
 
 #[test]

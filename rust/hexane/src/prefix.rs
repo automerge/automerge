@@ -82,12 +82,22 @@ pub trait PrefixValue: ColumnValueRef {
     /// > 1 are rare in practice but still cheap).
     fn accumulate_run(target: &mut Self::Prefix, run: &Run<Self::Get<'_>>);
 
+    /// The most values whose sum always fits `Prefix`. A column longer
+    /// than this has its sums checked, with
+    /// [`try_accumulate_run`](Self::try_accumulate_run) and
+    /// [`try_add_prefix`](Self::try_add_prefix), so that a sum the prefix
+    /// can't hold is rejected rather than wrapped. An implementation that
+    /// lowers it overrides both, and its values add nonnegative amounts,
+    /// so that the column's total bounds every prefix sum. The default
+    /// says no column's sums overflow: right for prefix types wide
+    /// enough (`u64`'s `u128`, `i64`'s `i128`, `bool`'s `usize`).
+    const MAX_UNCHECKED_LEN: usize = usize::MAX;
+
     /// [`accumulate_run`](Self::accumulate_run), unless the sum would not
     /// fit `Prefix`: then `false`, with `target` as it was. Loading uses
     /// it, so that data whose sums the prefix can't hold is rejected
-    /// rather than wrapped. The default never fails: right for prefix
-    /// types wide enough for any column's sums (`u64`'s `u128`, `i64`'s
-    /// `i128`, `bool`'s `usize`).
+    /// rather than wrapped. The default never fails, as befits the
+    /// default [`MAX_UNCHECKED_LEN`](Self::MAX_UNCHECKED_LEN).
     fn try_accumulate_run(target: &mut Self::Prefix, run: &Run<Self::Get<'_>>) -> bool {
         Self::accumulate_run(target, run);
         true
@@ -317,6 +327,24 @@ impl<T: PrefixValue, C: Codec> WeightFn<T, C> for PrefixWeightFn<T> {
         }
         Ok(())
     }
+
+    // each slab's sum fits its prefix type (`try_accumulate_run`); so
+    // must their total, which the index keeps
+    const CHECKS_TOTAL: bool = T::MAX_UNCHECKED_LEN < usize::MAX;
+
+    #[inline]
+    fn check_total(ws: &[Self::Weight], len: usize) -> Result<(), crate::PackError> {
+        if len <= T::MAX_UNCHECKED_LEN {
+            return Ok(());
+        }
+        let mut total = T::Prefix::default();
+        for w in ws {
+            if !T::try_add_prefix(&mut total, &w.prefix) {
+                return Err(prefix_overflows());
+            }
+        }
+        Ok(())
+    }
 }
 
 // ── PrefixValue impls using decoders ─────────────────────────────────────────
@@ -349,6 +377,7 @@ impl PrefixValue for u32 {
     fn accumulate_run(target: &mut u64, run: &Run<u32>) {
         *target += run.value as u64 * run.count as u64;
     }
+    const MAX_UNCHECKED_LEN: usize = U32_SUMS_FIT;
     fn try_accumulate_run(target: &mut u64, run: &Run<u32>) -> bool {
         try_add_u64(target, run.value as u64, run.count)
     }
@@ -365,6 +394,7 @@ impl PrefixValue for std::num::NonZeroU32 {
     fn accumulate_run(target: &mut u64, run: &Run<std::num::NonZeroU32>) {
         *target += run.value.get() as u64 * run.count as u64;
     }
+    const MAX_UNCHECKED_LEN: usize = U32_SUMS_FIT;
     fn try_accumulate_run(target: &mut u64, run: &Run<std::num::NonZeroU32>) -> bool {
         try_add_u64(target, run.value.get() as u64, run.count)
     }
@@ -372,6 +402,10 @@ impl PrefixValue for std::num::NonZeroU32 {
         try_add_u64(total, *part, 1)
     }
 }
+
+/// `u32::MAX * (2^32 + 1) == u64::MAX`: that many `u32`s always sum to a
+/// `u64` (and on 32-bit targets any column's do).
+const U32_SUMS_FIT: usize = (u32::MAX as usize).saturating_add(2);
 
 /// `*target += value * count`, unless that overflows a `u64`. (`value`
 /// is a `u32`'s, so the product fits a `u128`.)
@@ -422,6 +456,8 @@ where
             );
         }
     }
+
+    const MAX_UNCHECKED_LEN: usize = T::MAX_UNCHECKED_LEN;
 
     #[inline]
     fn try_accumulate_run(target: &mut T::Prefix, run: &Run<Option<T::Get<'_>>>) -> bool {
@@ -481,7 +517,8 @@ impl<T: PrefixValue, C: Codec> PrefixColumn<T, C> {
     where
         F: crate::MaybeFill<T::Get<'a>>,
     {
-        PrefixColumnLoadIter::<'a, T, C>(Column::load_iter(data, opts)).finalize()
+        let col = Column::<T, C, PrefixWeightFn<T>>::load_with(data, opts)?;
+        Ok(Self { col })
     }
 
     /// Serialize unless all values equal `value`.
@@ -1286,17 +1323,7 @@ impl<'a, T: PrefixValue, C: Codec> PrefixColumnLoadIter<'a, T, C> {
     /// Drain and validate whatever was not pulled, apply the length check
     /// from the load options, and return the finished column.
     pub fn finalize(self) -> Result<PrefixColumn<T, C>, crate::PackError> {
-        // each slab's sum fits its prefix type (`try_accumulate_run`); so
-        // must their total, which the index keeps
-        let mut total = T::Prefix::default();
-        let col = self.0.finalize_with(|w| {
-            if T::try_add_prefix(&mut total, &w.prefix) {
-                Ok(())
-            } else {
-                Err(prefix_overflows())
-            }
-        })?;
-        Ok(PrefixColumn::from_column(col))
+        Ok(PrefixColumn::from_column(self.0.finalize()?))
     }
 }
 

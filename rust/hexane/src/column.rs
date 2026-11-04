@@ -170,6 +170,19 @@ pub trait WeightFn<T: ColumnValueRef, C: Codec = Leb128>: Sealed {
         count: usize,
         value: T::Get<'_>,
     ) -> Result<(), PackError>;
+
+    /// `true` when the weights of a column's slabs can overflow together
+    /// where none of them does on its own (prefix sums), so that every
+    /// load checks [`check_total`](Self::check_total) before the weights
+    /// reach the index.
+    const CHECKS_TOTAL: bool = false;
+
+    /// Check that one column of `len` items can hold slabs of weights
+    /// `ws`. The default accepts any.
+    #[inline(always)]
+    fn check_total(_ws: &[Self::Weight], _len: usize) -> Result<(), PackError> {
+        Ok(())
+    }
 }
 
 /// Default weight strategy: BIT stores only slab lengths.
@@ -1716,6 +1729,12 @@ where
         };
         for w in &weights {
             check(w)?;
+        }
+        if WF::CHECKS_TOTAL {
+            // saturating: a column too long to count, which `index_of`
+            // rejects, is checked too
+            let len = slabs.iter().fold(0usize, |n, s| n.saturating_add(s.len));
+            WF::check_total(&weights, len)?;
         }
         let (index, total_len) = index_of(&slabs, weights);
         Ok(Column {
