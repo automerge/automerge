@@ -270,7 +270,6 @@ impl<A: SlabAggregate> SlabBTree<A> {
         self.total_slabs == 0
     }
 
-    #[allow(dead_code)]
     pub(crate) fn root_agg(&self) -> A {
         match self.node(self.root) {
             Node::Leaf(l) => merge_all(&l.aggs),
@@ -359,6 +358,18 @@ impl<A: SlabAggregate> SlabBTree<A> {
         tree.free(tree.root);
         tree.root = root_id;
         tree
+    }
+
+    /// Slab `slab_idx`'s aggregate.
+    pub(crate) fn slab_agg(&self, slab_idx: usize) -> A {
+        assert!(slab_idx < self.total_slabs, "slab_agg out of bounds");
+        let (_, leaf_id, leaf_start) = self
+            .locate_leaf_for_start(slab_idx)
+            .expect("slab_idx should have been bounds-checked");
+        match self.node(leaf_id) {
+            Node::Leaf(l) => l.aggs[slab_idx - leaf_start].clone(),
+            Node::Internal(_) => unreachable!("located a leaf"),
+        }
     }
 
     // ── Splice ──────────────────────────────────────────────────────────

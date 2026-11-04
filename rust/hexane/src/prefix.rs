@@ -1,10 +1,11 @@
 use crate::column::IterState;
 use crate::sealed::Sealed;
 use std::marker::PhantomData;
-use std::ops::{Add, AddAssign, Div, Sub, SubAssign};
+use std::ops::{Add, AddAssign, Div, Range, Sub, SubAssign};
 
 use crate::column::{Column, Iter, Slab, SlabWeight, TailOf, WeightFn};
 use crate::encoding::{ColumnEncoding, RunDecoder};
+use crate::index::ColumnIndex;
 use crate::PackError;
 use crate::{Codec, Leb128};
 use crate::{ColumnValueRef, RleValue, Run};
@@ -240,9 +241,14 @@ impl<T: PrefixValue, C: Codec> WeightFn<T, C> for PrefixWeightFn<T> {
 
     #[inline]
     fn compute(slab: &Slab<TailOf<T, C>>) -> PrefixSlabWeight<T::Prefix> {
+        let prefix = if slab.len <= T::MAX_UNCHECKED_LEN {
+            T::slab_sum::<C>(slab)
+        } else {
+            checked_slab_sum::<T, C>(slab)
+        };
         PrefixSlabWeight {
             len: slab.len,
-            prefix: T::slab_sum::<C>(slab),
+            prefix,
         }
     }
 
@@ -279,6 +285,55 @@ impl<T: PrefixValue, C: Codec> WeightFn<T, C> for PrefixWeightFn<T> {
             }
         }
         Ok(())
+    }
+
+    #[inline]
+    fn check_splice<Idx: ColumnIndex<Self::Weight>>(
+        index: &Idx,
+        old: Range<usize>,
+        new: &[Self::Weight],
+        len: usize,
+    ) {
+        if len > T::MAX_UNCHECKED_LEN {
+            check_spliced_total::<T, Idx>(index, old, new);
+        }
+    }
+}
+
+/// [`PrefixValue::slab_sum`], but panicking rather than letting the sum
+/// wrap.
+#[cold]
+#[inline(never)]
+fn checked_slab_sum<T: PrefixValue, C: Codec>(slab: &Slab<TailOf<T, C>>) -> T::Prefix {
+    let mut decoder = T::Encoding::<C>::decoder(&slab.data);
+    let mut acc = T::Prefix::default();
+    while let Some(run) = decoder.next_run() {
+        if !T::try_accumulate_run(&mut acc, &run) {
+            panic!("prefix sum overflows its type");
+        }
+    }
+    acc
+}
+
+/// Panic unless the column `index` indexes, with `new` in place of the
+/// weights of slabs `old`, sums within `T::Prefix`. Its values add
+/// nonnegative amounts, so the total bounds every prefix sum.
+#[cold]
+#[inline(never)]
+fn check_spliced_total<T, Idx>(index: &Idx, old: Range<usize>, new: &[PrefixSlabWeight<T::Prefix>])
+where
+    T: PrefixValue,
+    Idx: ColumnIndex<PrefixSlabWeight<T::Prefix>>,
+{
+    // the other slabs' total: it fits, as the column's did
+    let mut total = index.total().prefix;
+    for i in old {
+        total -= index.weight(i).prefix;
+    }
+    for w in new {
+        if !T::try_add_prefix(&mut total, &w.prefix) {
+            panic!("prefix sum overflows its type");
+        }
     }
 }
 
