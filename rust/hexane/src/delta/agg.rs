@@ -379,4 +379,210 @@ impl DomainWalk {
     }
 }
 
+/// The least running sum at a value (a non-null delta) of `ds`; above any
+/// sum if there is none.
+pub open spec fn vmin(ds: Seq<Option<i64>>) -> int
+    decreases ds.len(),
+{
+    if ds.len() == 0 {
+        i128::MAX as int
+    } else {
+        match ds.last() {
+            Some(_) => min_i(vmin(ds.drop_last()), psum(ds)),
+            None => vmin(ds.drop_last()),
+        }
+    }
+}
+
+/// The greatest running sum at a value of `ds`; below any if there is none.
+pub open spec fn vmax(ds: Seq<Option<i64>>) -> int
+    decreases ds.len(),
+{
+    if ds.len() == 0 {
+        i128::MIN as int
+    } else {
+        match ds.last() {
+            Some(_) => max_i(vmax(ds.drop_last()), psum(ds)),
+            None => vmax(ds.drop_last()),
+        }
+    }
+}
+
+/// Every running sum of `ds` fits an `i64`.
+pub open spec fn sums_fit(ds: Seq<Option<i64>>) -> bool {
+    ds.len() == 0 || (i64::MIN <= pmin(ds) && pmax(ds) <= i64::MAX)
+}
+
+/// A run after `ds`: its values' sums move one way, so its ends bound
+/// them; a null run adds no value.
+proof fn lemma_vrun(ds: Seq<Option<i64>>, n: nat, d: Option<i64>)
+    requires n >= 1,
+    ensures ({
+        let r = ds + reps(n, d);
+        let p = psum(ds);
+        match d {
+            Some(v) => {
+                let (first, last) = (p + v, p + n * v);
+                &&& vmin(r) == min_i(vmin(ds), min_i(first, last))
+                &&& vmax(r) == max_i(vmax(ds), max_i(first, last))
+            },
+            None => vmin(r) == vmin(ds) && vmax(r) == vmax(ds),
+        }
+    }),
+    decreases n,
+{
+    let r = ds + reps(n, d);
+    let m = (n - 1) as nat;
+    let r0 = ds + reps(m, d);
+    assert(r =~= r0.push(d));
+    assert(r.drop_last() =~= r0);
+    if m > 0 {
+        lemma_vrun(ds, m, d);
+        lemma_run_sum(ds, m, d);
+    } else {
+        assert(r0 =~= ds);
+    }
+    lemma_push(r0, d);
+    if let Some(v) = d {
+        let p = psum(ds);
+        if m == 0 {
+            assert(n * v == v) by (nonlinear_arith)
+                requires n == 1;
+        } else {
+            assert(p + m * v + v == p + n * v) by (nonlinear_arith)
+                requires n == m + 1;
+            assert(min_i(min_i(p + v, p + m * v), p + n * v) == min_i(p + v, p + n * v)
+                && max_i(max_i(p + v, p + m * v), p + n * v) == max_i(p + v, p + n * v)) by (nonlinear_arith)
+                requires m >= 1, n == m + 1;
+        }
+    }
+}
+
+/// The sums at values are among all the running sums.
+proof fn lemma_vbounds(ds: Seq<Option<i64>>)
+    requires sums_fit(ds),
+    ensures
+        vmin(ds) <= vmax(ds) ==> ds.len() > 0 && pmin(ds) <= vmin(ds) && vmax(ds) <= pmax(ds),
+        vmin(ds) > vmax(ds) ==> vmin(ds) == i128::MAX && vmax(ds) == i128::MIN,
+    decreases ds.len(),
+{
+    if ds.len() > 0 {
+        let d0 = ds.drop_last();
+        let x = ds.last();
+        assert(d0.push(x) =~= ds);
+        lemma_push(d0, x);
+        lemma_bounds(ds);
+        if d0.len() > 0 {
+            lemma_bounds(d0);
+        }
+        assert(sums_fit(d0));
+        lemma_vbounds(d0);
+        if d0.len() == 0 {
+            assert(vmin(d0) == i128::MAX && vmax(d0) == i128::MIN);
+        }
+        match x {
+            Some(_) => {
+                assert(vmin(ds) == min_i(vmin(d0), psum(ds)));
+                assert(vmax(ds) == max_i(vmax(d0), psum(ds)));
+            },
+            None => {
+                assert(vmin(ds) == vmin(d0) && vmax(ds) == vmax(d0));
+            },
+        }
+    }
+}
+
+/// The running sum after a run.
+proof fn lemma_run_sum(ds: Seq<Option<i64>>, n: nat, d: Option<i64>)
+    ensures psum(ds + reps(n, d)) == psum(ds) + n * dval(d),
+    decreases n,
+{
+    if n == 0 {
+        assert(ds + reps(0, d) =~= ds);
+    } else {
+        let m = (n - 1) as nat;
+        lemma_run_sum(ds, m, d);
+        assert(ds + reps(n, d) =~= (ds + reps(m, d)).push(d));
+        lemma_push(ds + reps(m, d), d);
+        assert(m * dval(d) + dval(d) == n * dval(d)) by (nonlinear_arith)
+            requires n == m + 1;
+    }
+}
+
+/// The span of a delta column's values, as `within_2_63` measures it:
+/// the running sum, and the least and greatest sums at a value so far.
+pub(crate) struct ValueSpan {
+    pub(crate) running: i128,
+    pub(crate) low: i128,
+    pub(crate) high: i128,
+    #[allow(dead_code)]
+    pub(crate) ds: Ghost<Seq<Option<i64>>>,
+}
+
+impl ValueSpan {
+    pub(crate) open spec fn inv(&self) -> bool {
+        &&& self.running == psum(self.ds@)
+        &&& self.low == vmin(self.ds@)
+        &&& self.high == vmax(self.ds@)
+        &&& sums_fit(self.ds@)
+    }
+
+    pub(crate) fn new() -> (r: Self)
+        ensures r.inv(), r.ds@.len() == 0,
+    {
+        ValueSpan { running: 0, low: i128::MAX, high: i128::MIN, ds: Ghost(Seq::empty()) }
+    }
+
+    /// Take a run of `count` copies of delta `d`, after which every
+    /// running sum still fits an `i64` (as `load`'s walk has checked).
+    #[inline]
+    pub(crate) fn run(&mut self, count: usize, d: Option<i64>)
+        requires
+            old(self).inv(), count >= 1,
+            sums_fit(old(self).ds@ + reps(count as nat, d)),
+        ensures
+            final(self).inv(), final(self).ds@ == old(self).ds@ + reps(count as nat, d),
+    {
+        let ghost ds = self.ds@;
+        proof {
+            lemma_vrun(ds, count as nat, d);
+            lemma_run_sum(ds, count as nat, d);
+            if ds.len() > 0 {
+                lemma_bounds(ds);
+            }
+        }
+        if let Some(v) = d {
+            proof {
+                // the run's ends are running sums, which fit
+                let r = ds + reps(count as nat, d);
+                lemma_run(ds, count as nat, v);
+                lemma_bounds(r);
+                assert(v as int * count as int == count as nat * v as int) by (nonlinear_arith);
+            }
+            let first = self.running + v as i128;
+            let last = self.running + v as i128 * count as i128;
+            let lo = if first <= last { first } else { last };
+            let hi = if first >= last { first } else { last };
+            self.low = if self.low <= lo { self.low } else { lo };
+            self.high = if self.high >= hi { self.high } else { hi };
+            self.running = last;
+        }
+        proof {
+            self.ds = Ghost(ds + reps(count as nat, d));
+        }
+    }
+
+    /// The values lie within a 2^63-wide range (true if there are none).
+    #[inline]
+    pub(crate) fn within_2_63(&self) -> (r: bool)
+        requires self.inv(),
+        ensures r == (vmin(self.ds@) > vmax(self.ds@) || vmax(self.ds@) - vmin(self.ds@) <= i64::MAX),
+    {
+        proof {
+            lemma_vbounds(self.ds@);
+        }
+        self.low > self.high || self.high - self.low <= i64::MAX as i128
+    }
+}
+
 } // verus!

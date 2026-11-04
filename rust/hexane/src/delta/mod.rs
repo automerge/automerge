@@ -1515,18 +1515,14 @@ pub struct DeltaRun {
 fn within_2_63<T: DeltaValue, C: Codec>(data: &[u8]) -> bool {
     use crate::encoding::RunDecoder;
     let mut decoder = crate::decoder_in::<T::Inner, C>(data);
-    let mut running: i128 = 0;
-    let (mut low, mut high) = (i128::MAX, i128::MIN);
+    // verified (`ValueSpan`): the least and greatest running sum at a
+    // value, given that every running sum fits an `i64`, as `load`'s walk
+    // has checked
+    let mut span = agg::ValueSpan::new();
     while let Some(run) = decoder.next_run() {
-        if let Some(d) = T::Inner::to_opt(run.value) {
-            // a run's values move one way, so its ends bound them
-            let first = running + d as i128;
-            let last = running + d as i128 * run.count as i128;
-            (low, high) = (low.min(first.min(last)), high.max(first.max(last)));
-            running = last;
-        }
+        span.run(run.count, T::Inner::to_opt(run.value));
     }
-    low > high || high - low <= i64::MAX as i128
+    span.within_2_63()
 }
 
 type InnerColumn<T, C = Leb128> = Column<<T as DeltaValue>::Inner, C, IndexedDeltaWeightFn>;

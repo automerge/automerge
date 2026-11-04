@@ -302,8 +302,9 @@ compiles them away. To check them, run `cargo verus verify -p hexane
 * Delta columns' slab aggregates: a slab's sum of deltas and its least and
   greatest running sum are exact, both as `load` accumulates them and as
   an edit recomputes them, and `load` accepts only data whose running sums
-  all lie in the value domain. Merging two aggregates gives the aggregate
-  of their deltas, as the B-tree's value search assumes.
+  all lie in the value domain, and whose values span less than 2^63.
+  Merging two aggregates gives the aggregate of their deltas, as the
+  B-tree's value search assumes.
 * The value search of `Column` and its iterator (`scope_to_value`,
   `seek_to_value`): where the values in the window are sorted, it returns
   exactly the range of them equal to the target, or, if there are none,
