@@ -247,12 +247,12 @@ pub struct Leb128;
 pub use crate::leb128_codec::DecodeError as Leb128Error;
 
 impl Codec for Leb128 {
-    #[inline]
+    #[inline(always)]
     fn encode_unsigned(n: u64) -> VarBuf {
         leb128_codec::encode(n).into()
     }
 
-    #[inline]
+    #[inline(always)]
     fn encode_signed(n: i64) -> VarBuf {
         leb128_codec::encode_signed(n).into()
     }
