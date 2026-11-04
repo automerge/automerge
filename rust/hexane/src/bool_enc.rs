@@ -21,6 +21,21 @@ use vstd::prelude::*;
 
 verus! {
 
+/// Appending would take an encoder past `usize::MAX - 3` values, or
+/// `usize::MAX` runs, which it can't count.  Trusted only in that a panic does not
+/// return.
+#[verifier::external_body]
+#[cold]
+#[inline(never)]
+fn too_many_values(Ghost(why): Ghost<bool>)
+    requires
+        why,
+    ensures
+        false,
+{
+    panic!("encoder too long to append to")
+}
+
 /// The bool encoder's run bookkeeping; the output buffer is the caller's.
 pub(crate) struct BEnc {
     pub(crate) cur_value: bool,
@@ -46,7 +61,7 @@ impl BEnc {
     pub(crate) open spec fn inv(&self) -> bool {
         let cs = self.cs@;
         &&& self.segments == cs.len()
-        &&& self.len == self.before@ + self.vals@.len() && self.len <= usize::MAX
+        &&& self.len == self.before@ + self.vals@.len() && self.len + 3 <= usize::MAX
         &&& self.vals@ == vals_at(cs, 0) + run_of(self.cur_count as nat, self.cur_value)
         &&& self.cur_value == run_value(cs.len() as int)
         &&& self.clean@ ==> counts_pre(cs)
@@ -87,7 +102,7 @@ impl BEnc {
     /// of the other value.
     #[inline(always)]
     fn flush_run<K: CountOps>(&mut self, buf: &mut Vec<u8>)
-        requires old(self).inv(), old(self).segments + 1 < usize::MAX,
+        requires old(self).inv(),
         ensures
             final(self).cs@ == old(self).cs@.push(old(self).cur_count as u64),
             final(buf)@ == old(buf)@ + K::enc(old(self).cur_count as u64),
@@ -96,6 +111,9 @@ impl BEnc {
             final(self).vals@ == old(self).vals@, final(self).before@ == old(self).before@,
             final(self).clean@ == (old(self).clean@ && (old(self).cur_count > 0 || old(self).segments == 0)),
     {
+        if self.segments == usize::MAX {
+            too_many_values(Ghost(true));
+        }
         let ghost c0 = self.cs@;
         K::put_count(self.cur_count, buf);
         self.segments = self.segments + 1;
@@ -111,7 +129,7 @@ impl BEnc {
     #[inline(always)]
     pub(crate) fn append<K: CountOps>(&mut self, buf: &mut Vec<u8>, value: bool, n: usize)
         requires
-            old(self).inv(), old(self).len + n <= usize::MAX, old(self).segments + 2 < usize::MAX,
+            old(self).inv(),
         ensures
             final(self).inv(), final(self).before@ == old(self).before@,
             final(self).vals@ == old(self).vals@ + run_of(n as nat, value),
@@ -132,6 +150,9 @@ impl BEnc {
         if n == 0 {
             assert(old(self).vals@ + run_of(0, value) =~= old(self).vals@);
             return;
+        }
+        if n > usize::MAX - 3 - self.len {
+            too_many_values(Ghost(true));
         }
         if value == self.cur_value {
             self.cur_count = self.cur_count + n;
@@ -177,7 +198,7 @@ impl BEnc {
     /// after it, which has the other value.
     #[inline(always)]
     pub(crate) fn finish<K: CountOps>(&mut self, buf: &mut Vec<u8>)
-        requires old(self).inv(), old(self).segments + 1 < usize::MAX,
+        requires old(self).inv(),
         ensures
             final(self).inv(), final(self).finished(), final(self).before@ == old(self).before@,
             final(self).vals@ == old(self).vals@, final(self).clean@ == old(self).clean@,
@@ -377,7 +398,7 @@ impl BEncoder {
     /// lands whole in the finished slab.
     #[inline]
     fn maybe_cut<K: CountOps>(&mut self, incoming: bool)
-        requires old(self).inv::<K>(), old(self).state.len + 3 <= usize::MAX,
+        requires old(self).inv::<K>(),
         ensures
             final(self).inv::<K>(), final(self).values::<K>() == old(self).values::<K>(),
             final(self).state.len == old(self).state.len,
@@ -444,7 +465,7 @@ impl BEncoder {
     /// Append `n` copies of `value`.
     #[inline]
     pub(crate) fn append<K: CountOps>(&mut self, value: bool, n: usize)
-        requires old(self).inv::<K>(), old(self).state.len + n + 3 <= usize::MAX,
+        requires old(self).inv::<K>(),
         ensures
             final(self).inv::<K>(), final(self).values::<K>() == old(self).values::<K>() + run_of(n as nat, value),
             final(self).state.len == old(self).state.len + n,
@@ -469,7 +490,7 @@ impl BEncoder {
 
     /// Flush the pending run and return all slabs (those cut and the last).
     pub(crate) fn take_slabs<K: CountOps>(&mut self) -> (v: Vec<BSlab>)
-        requires old(self).inv::<K>(), old(self).state.len + 3 <= usize::MAX,
+        requires old(self).inv::<K>(),
         ensures
             forall|i: int| 0 <= i < v@.len() ==> bslab_ok::<K>(#[trigger] v@[i]),
             bslabs_values::<K>(v@) == old(self).values::<K>(),
@@ -528,7 +549,7 @@ impl BEncoder {
     /// Flush, and take the encoding as one slab: its bytes, len, run count
     /// and tail.
     pub(crate) fn take_slab<K: CountOps>(&mut self) -> (r: (Vec<u8>, usize, usize, u8))
-        requires old(self).inv::<K>(), old(self).slabs@.len() == 0, old(self).state.len + 3 <= usize::MAX,
+        requires old(self).inv::<K>(), old(self).slabs@.len() == 0,
         ensures ({
             let cs = bool_counts::<K>(r.0@);
             &&& bool_valid::<K>(r.0@) && bool_values::<K>(r.0@) == old(self).values::<K>()

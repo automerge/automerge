@@ -191,7 +191,7 @@ pub trait Codec: std::fmt::Debug + 'static {
     }
 
     /// Encode `n` as an unsigned count (bool runs, lengths).
-    #[inline]
+    #[inline(always)]
     fn encode_count(n: usize) -> VarBuf {
         Self::encode_unsigned(n as u64)
     }
