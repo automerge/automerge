@@ -340,7 +340,11 @@ impl<'a, T: ColumnValueRef, C: Codec> Iterator for Iter<'a, T, C> {
     fn nth(&mut self, n: usize) -> Option<T::Get<'a>> {
         let col = self.col;
         self.core
-            .nth::<Dx<T, C>, _>(self.slabs, n, &|t: usize| col.unwrap().find_slab(t))
+            .nth::<Dx<T, C>, _>(self.slabs, n, &|t: usize| match col {
+                Some(col) => col.find_slab(t),
+                // a default iterator: no column, no slabs
+                None => (0, t),
+            })
     }
 
     #[inline]
