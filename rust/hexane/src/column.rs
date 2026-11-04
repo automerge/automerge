@@ -173,8 +173,9 @@ pub trait WeightFn<T: ColumnValueRef, C: Codec = Leb128>: Sealed {
 
     /// `true` when the weights of a column's slabs can overflow together
     /// where none of them does on its own (prefix sums), so that every
-    /// load checks [`check_total`](Self::check_total) before the weights
-    /// reach the index.
+    /// load checks [`check_total`](Self::check_total), and every edit
+    /// [`check_splice`](Self::check_splice), before the weights reach the
+    /// index.
     const CHECKS_TOTAL: bool = false;
 
     /// Check that one column of `len` items can hold slabs of weights
@@ -182,6 +183,18 @@ pub trait WeightFn<T: ColumnValueRef, C: Codec = Leb128>: Sealed {
     #[inline(always)]
     fn check_total(_ws: &[Self::Weight], _len: usize) -> Result<(), PackError> {
         Ok(())
+    }
+
+    /// Check that `index` can take `new` in place of the weights of slabs
+    /// `old`, leaving a column of `len` items; panic if not. The default
+    /// accepts any.
+    #[inline(always)]
+    fn check_splice<Idx: crate::index::IndexOps<Self::Weight>>(
+        _index: &Idx,
+        _old: Range<usize>,
+        _new: &[Self::Weight],
+        _len: usize,
+    ) {
     }
 }
 
@@ -1021,7 +1034,13 @@ where
             );
             debug_assert!(s.segments <= max_segments);
         }
-        let weights = slabs.iter().map(WF::compute).collect();
+        let weights: Vec<WF::Weight> = slabs.iter().map(WF::compute).collect();
+        if WF::CHECKS_TOTAL {
+            let len = slabs.iter().fold(0usize, |n, s| n.saturating_add(s.len));
+            if let Err(e) = WF::check_total(&weights, len) {
+                panic!("from_slabs: {e}");
+            }
+        }
         let (index, total_len) = index_of(&slabs, weights);
         Self {
             slabs,

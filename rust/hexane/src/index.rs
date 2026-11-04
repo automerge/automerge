@@ -155,6 +155,20 @@ pub trait IndexOps<W>: Sized {
             n == sum(self.ws().map_values(|w: W| Self::wlen(w)), 0, i as int),
     ;
 
+    /// Slab `i`'s weight. Unspecified: only overflow checks read it, and
+    /// they can only panic.
+    fn ix_weight(&self, i: usize) -> W
+        requires
+            self.ok(),
+            i < self.ws().len(),
+    ;
+
+    /// Every slab's weight, merged (likewise unspecified).
+    fn ix_total(&self) -> W
+        requires
+            self.ok(),
+    ;
+
     /// Replace slab `i`'s weight.
     fn ix_set(&mut self, i: usize, w: W)
         requires
@@ -395,6 +409,23 @@ impl<W: SlabWeight> IndexOps<W> for BitIndex<W> {
         splice_vec(&mut self.weights, start, end, new);
         self.rebuild();
     }
+
+    #[verifier::external_body]
+    fn ix_weight(&self, i: usize) -> W {
+        self.weights[i].clone()
+    }
+
+    #[verifier::external_body]
+    fn ix_total(&self) -> W {
+        // BIT prefix query over every weight
+        let mut acc = W::default();
+        let mut i = self.weights.len();
+        while i > 0 {
+            acc += self.bit[i].clone();
+            i -= i & i.wrapping_neg();
+        }
+        acc
+    }
 }
 
 impl<A: SlabAggregate> IndexOps<A> for SlabBTree<A> {
@@ -493,6 +524,14 @@ impl<A: SlabAggregate> IndexOps<A> for SlabBTree<A> {
                 + self@.skip(end as int));
         }
         self.splice_vec(start, end, new);
+    }
+
+    fn ix_weight(&self, i: usize) -> A {
+        self.slab_agg(i)
+    }
+
+    fn ix_total(&self) -> A {
+        self.root_agg()
     }
 }
 

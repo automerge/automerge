@@ -255,6 +255,23 @@ pub(crate) trait Weigh<Tail: Copy + Clone + std::fmt::Debug + Default, W> {
             I::wlen(w) == s.len,
             Self::wrel(w, *s),
     ;
+
+    /// Panic unless `index` can take `w` as slab `i`'s weight, leaving a
+    /// column of `len` items: weights can overflow together where none
+    /// does alone (prefix sums). It specifies nothing, as it can only
+    /// panic.
+    fn check_set<I: IndexOps<W>>(index: &I, i: usize, w: &W, len: usize)
+        requires
+            index.ok(),
+            i < index.ws().len(),
+    ;
+
+    /// Likewise for `new` in place of slabs `start..end`'s weights.
+    fn check_splice<I: IndexOps<W>>(index: &I, start: usize, end: usize, new: &Vec<W>, len: usize)
+        requires
+            index.ok(),
+            start <= end <= index.ws().len(),
+    ;
 }
 
 // ── The column model ───────────────────────────────────────────────────────
@@ -1229,6 +1246,7 @@ impl<E: Slabs> Cursor<E> {
         index: &mut I,
         start: usize,
         end: usize,
+        len: usize,
         Ghost(s_old): Ghost<Seq<Slab<E::Tail>>>,
     )
         requires
@@ -1280,6 +1298,7 @@ impl<E: Slabs> Cursor<E> {
                 }
                 I::lemma_fits(n);
             }
+            G::check_set::<I>(index, start, &w, len);
             index.ix_set(start, w);
         } else {
             let mut new: Vec<W> = Vec::with_capacity(end - start);
@@ -1332,6 +1351,7 @@ impl<E: Slabs> Cursor<E> {
                 }
                 I::lemma_fits(n);
             }
+            G::check_splice::<I>(index, start, oe, &new, len);
             index.ix_splice(start, oe, new);
         }
     }
@@ -1434,7 +1454,7 @@ impl<E: Slabs> Cursor<E> {
             }
             lemma_vals_total::<E>(s2);
         }
-        Self::reconcile::<W, I, G>(slabs, index, start, end, Ghost(s0));
+        Self::reconcile::<W, I, G>(slabs, index, start, end, *total_len, Ghost(s0));
         // the write-back can merge, split or drop slabs, so `slab` and
         // `in_slab` mean nothing until they are looked up again
         self.locate_out::<W, I, G>(slabs, index, *total_len, Ghost(max_segments));
@@ -1699,7 +1719,7 @@ impl<E: Slabs> Cursor<E> {
             proof {
                 lemma_vals_total::<E>(slabs@);
             }
-            Self::reconcile::<W, I, G>(slabs, index, start, end, Ghost(s0));
+            Self::reconcile::<W, I, G>(slabs, index, start, end, *total_len, Ghost(s0));
             self.locate_out::<W, I, G>(slabs, index, *total_len, Ghost(max_segments));
             *counter = counter.wrapping_add(1);
         }
@@ -1932,5 +1952,25 @@ impl<T: ColumnValueRef, C: Codec, WF: WeightFn<T, C>> Weigh<TailOf<T, C>, WF::We
     #[inline(always)]
     fn compute<I: IndexOps<WF::Weight>>(s: &Slab<TailOf<T, C>>) -> WF::Weight {
         WF::compute(s)
+    }
+
+    #[inline(always)]
+    fn check_set<I: IndexOps<WF::Weight>>(index: &I, i: usize, w: &WF::Weight, len: usize) {
+        if WF::CHECKS_TOTAL {
+            WF::check_splice(index, i..i + 1, std::slice::from_ref(w), len);
+        }
+    }
+
+    #[inline(always)]
+    fn check_splice<I: IndexOps<WF::Weight>>(
+        index: &I,
+        start: usize,
+        end: usize,
+        new: &Vec<WF::Weight>,
+        len: usize,
+    ) {
+        if WF::CHECKS_TOTAL {
+            WF::check_splice(index, start..end, new, len);
+        }
     }
 }

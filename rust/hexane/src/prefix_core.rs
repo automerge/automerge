@@ -79,6 +79,10 @@ pub(crate) trait PrefixOps<V: Copy> {
     fn acc_run(t: &mut Self::P, run: &Run<V>)
         ensures *final(t) == prefix_add(*old(t), reps(run.count as nat, Self::contrib(run.value)));
 
+    /// `T::try_accumulate_run`: `acc_run`, unless the sum would not fit.
+    fn try_acc_run(t: &mut Self::P, run: &Run<V>) -> (ok: bool)
+        ensures ok ==> *final(t) == prefix_add(*old(t), reps(run.count as nat, Self::contrib(run.value)));
+
     /// `P::default()`.
     fn zero() -> (r: Self::P)
         ensures r == prefix_zero::<Self::P>();
@@ -674,6 +678,66 @@ pub(crate) fn p_slab_sum<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Ite
         }
     }
     t
+}
+
+/// [`p_slab_sum`], unless a sum overflows: then `None`.
+#[inline(never)]
+pub(crate) fn p_slab_sum_checked<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>(
+    slab: &'a Slab<X::Tail>,
+) -> (r: Option<B::P>)
+    requires
+        X::ok(*slab),
+    ensures
+        r matches Some(t) ==> t == vsum::<_, B>(X::vals(*slab)),
+{
+    let ghost v = X::vals(*slab);
+    let mut d = X::open(slab);
+    let mut t = B::zero();
+    let ghost mut k: int = 0;
+    proof {
+        assert(v.take(0) =~= Seq::<<X::D as Decode>::Item>::empty());
+        assert(v.skip(0) =~= v);
+    }
+    loop
+        invariant
+            v == X::vals(*slab),
+            d.inv(),
+            0 <= k <= v.len(),
+            d.rest() == v.skip(k),
+            t == vsum::<_, B>(v.take(k)),
+        ensures
+            t == vsum::<_, B>(v),
+        decreases d.rest().len(),
+    {
+        let ghost t0 = t;
+        match d.d_run_max(usize::MAX) {
+            Some(run) => {
+                if !B::try_acc_run(&mut t, &run) {
+                    return None;
+                }
+                proof {
+                    let c = run.count as int;
+                    let r = Seq::new(run.count as nat, |_i: int| run.value);
+                    assert(v.take(k + c) =~= v.take(k) + r) by {
+                        assert forall|i: int| 0 <= i < c implies #[trigger] v[k + i] == run.value by {
+                            assert(v.skip(k).take(c)[i] == run.value);
+                        }
+                    }
+                    lemma_vsum_cat::<_, B>(v.take(k), r);
+                    lemma_vsum_run::<_, B>(run.count as nat, run.value);
+                    assert(v.skip(k).skip(c) =~= v.skip(k + c));
+                    k = k + c;
+                }
+            },
+            None => {
+                proof {
+                    assert(v.take(k) =~= v);
+                }
+                break;
+            },
+        }
+    }
+    Some(t)
 }
 
 } // verus!

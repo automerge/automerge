@@ -333,7 +333,8 @@ computes for the slab (the edit cursor is proved to keep them so), and,
 for weights `load` accumulates as runs stream past, that it attributes
 each run to its slab; each prefix value type's `accumulate` and
 `accumulate_run` (that they add its values, a run as its value
-repeated), and that its prefix type's `+` is associative with `default`
+repeated) and `try_accumulate_run` (that when it succeeds it adds what
+`accumulate_run` does), and that its prefix type's `+` is associative with `default`
 its identity and `b + (a - b) == a`, as for wrapping integers; the delta
 value types' `to_opt`; and that each value type's `Ord` agrees with its
 `==`.
@@ -352,7 +353,8 @@ value types' `to_opt`; and that each value type's `Ord` agrees with its
   searches (`get_index_for_total`, `get_index_for_prefix`) and
   `PrefixIter::advance_prefix`, which seeks with them (they compare and
   divide sums, which needs a model of the prefix type's order, true only
-  while the sums don't wrap); `sum_range` and `delta`, which are glue over
+  while the sums don't wrap: loads reject sums that would, and edits
+  panic, but those checks are not yet part of the proof); `sum_range` and `delta`, which are glue over
   the verified iterator; realizing values from deltas; and the bridging
   deltas a delta edit writes.
 * Where a precondition of the verified code cannot be shown from the

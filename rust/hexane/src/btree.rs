@@ -3583,8 +3583,35 @@ impl<A: SlabAggregate> SlabBTree<A> {
         }
     }
 
+    /// Slab `slab_idx`'s aggregate. Unspecified: only overflow checks read
+    /// it (`IndexOps::ix_weight`), and they can only panic.
+    #[verifier::external_body]
+    pub(crate) fn slab_agg(&self, slab_idx: usize) -> A
+        requires
+            self.wf(),
+            slab_idx < self@.len(),
+    {
+        let mut remaining = slab_idx;
+        let mut id = self.root;
+        loop {
+            match self.nodes[id as usize].as_ref().expect("freed node id") {
+                Node::Leaf(l) => return l.aggs[remaining].clone(),
+                Node::Internal(n) => {
+                    let mut next = None;
+                    for c in &n.children {
+                        if remaining < c.slab_count {
+                            next = Some(c.id);
+                            break;
+                        }
+                        remaining -= c.slab_count;
+                    }
+                    id = next.expect("slab_idx should have been bounds-checked");
+                }
+            }
+        }
+    }
+
     /// Aggregate of all slabs in the tree.
-    #[allow(dead_code)]
     pub(crate) fn root_agg(&self) -> (r: A)
         requires self.wf(),
         ensures r == fold(self@),
