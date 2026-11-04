@@ -299,6 +299,9 @@ compiles them away. To check them, run `cargo verus verify -p hexane
   `RleEncoderState`): the buffer's earlier bytes are left as they were,
   and followed by the canonical encoding of the values; the `_unless`
   variants write nothing only if every value equals the one given.
+* The delta encoders (`DeltaEncoder`, `DeltaEncoderState`): the deltas
+  they write realize exactly the values appended, or they panic on values
+  spanning 2^63 or more.
 * Delta columns' slab aggregates: a slab's sum of deltas and its least and
   greatest running sum are exact, both as `load` accumulates them and as
   an edit recomputes them, and `load` accepts only data whose running sums
@@ -330,8 +333,8 @@ that each value type's `Ord` agrees with its `==`.
   would close the gap, but costs 2–17% on delta columns' index operations
   (`find_by_value`, insert, remove, load), so performance was preferred.
 * The prefix and delta columns' other logic is not verified: prefix sums,
-  realizing values from deltas, the bridging deltas a delta edit writes,
-  and the delta encoders' transformation of values into deltas.
+  realizing values from deltas, and the bridging deltas a delta edit
+  writes.
 * Where a precondition of the verified code cannot be shown from the
   specifications (a slab of `i64::MAX` bytes or more, or a column or
   encoder of nearly `usize::MAX` items), the code checks it and panics

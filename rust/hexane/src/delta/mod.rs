@@ -1,12 +1,13 @@
 pub(crate) mod agg;
 mod decoder;
 pub mod indexed;
+pub(crate) mod stream;
 
 pub use decoder::DeltaDecoder;
 use vstd::prelude::Ghost;
 
 use crate::column::{normalize_range_max, Iter, IterState};
-use crate::encoder::RleEncoderState;
+use crate::rle::state::WOps;
 use crate::{Codec, Leb128};
 use std::fmt::Debug;
 use std::marker::PhantomData;
@@ -374,8 +375,9 @@ impl DeltaValue for Option<usize> {
 /// fast-path `encode_to_unless` static path to avoid a per-call heap
 /// allocation in the change-encoding loop.
 pub struct DeltaEncoderState<'a, T: DeltaValue, C: Codec = Leb128> {
-    inner: RleEncoderState<'a, Option<i64>, C>,
-    abs: i64,
+    /// Verified with Verus: the deltas it writes realize exactly the
+    /// values appended, and are their canonical encoding.
+    d: stream::DStream<'a, WOps<Option<i64>, Option<i64>, C>>,
     /// Tracks whether every appended value has been equal so far.
     ///
     /// - `None` — either nothing has been appended yet, or the appended
@@ -387,10 +389,6 @@ pub struct DeltaEncoderState<'a, T: DeltaValue, C: Codec = Leb128> {
     /// `v == null`) and to provide RleEncoder-style single-run-of-value
     /// elision for non-nullable columns.
     uniform: Option<T>,
-    /// The least and greatest values appended (`low > high` before any):
-    /// they must span less than 2^63 (see [`DeltaValue`]).
-    low: i64,
-    high: i64,
     _phantom: PhantomData<T>,
 }
 
@@ -403,21 +401,18 @@ impl<T: DeltaValue, C: Codec> Default for DeltaEncoderState<'_, T, C> {
 impl<'a, T: DeltaValue, C: Codec> DeltaEncoderState<'a, T, C> {
     pub fn new() -> Self {
         Self {
-            inner: RleEncoderState::new(),
-            abs: 0,
+            d: stream::DStream::new(),
             uniform: None,
-            low: i64::MAX,
-            high: i64::MIN,
             _phantom: PhantomData,
         }
     }
 
     pub fn len(&self) -> usize {
-        self.inner.len()
+        self.d.s.len
     }
 
     pub fn is_empty(&self) -> bool {
-        self.inner.is_empty()
+        self.d.s.len == 0
     }
 
     pub fn append(&mut self, buf: &mut Vec<u8>, value: T) {
@@ -429,32 +424,14 @@ impl<'a, T: DeltaValue, C: Codec> DeltaEncoderState<'a, T, C> {
             return;
         }
         // Update the uniform tracker.
-        if self.inner.is_empty() {
+        if self.is_empty() {
             self.uniform = Some(value);
         } else if self.uniform != Some(value) {
             self.uniform = None;
         }
-        match value.to_i64() {
-            Some(v) => {
-                // Only a domain as wide as `i64`'s can span 2^63; for
-                // the others this is compiled out.
-                if T::MAX_I64 as i128 - T::MIN_I64 as i128 > i64::MAX as i128 {
-                    self.low = self.low.min(v);
-                    self.high = self.high.max(v);
-                }
-                // wraps only if the values span 2^63 or more, which
-                // `finish` rejects
-                let first_delta = v.wrapping_sub(self.abs);
-                self.abs = v;
-                self.inner.append_n_owned(buf, Some(first_delta), 1);
-                if n > 1 {
-                    self.inner.append_n_owned(buf, Some(0), n - 1);
-                }
-            }
-            None => {
-                self.inner.append_n_owned(buf, None, n);
-            }
-        }
+        // verified (`DStream`); `to_i64` keeps values in the type's domain
+        self.d
+            .append(buf, value.to_i64(), n, T::MIN_I64, T::MAX_I64);
     }
 
     pub fn extend<I: IntoIterator<Item = T>>(&mut self, buf: &mut Vec<u8>, iter: I) {
@@ -465,27 +442,15 @@ impl<'a, T: DeltaValue, C: Codec> DeltaEncoderState<'a, T, C> {
 
     /// Flush any pending run into `buf`.
     pub fn finish(&mut self, buf: &mut Vec<u8>) {
-        if self.low <= self.high && self.high.checked_sub(self.low).is_none() {
-            values_too_wide();
-        }
-        self.inner.finish(buf);
+        self.d.finish(buf, T::MIN_I64, T::MAX_I64);
     }
 
     /// True if every appended value equals `value` (or no values have been
     /// appended at all).  Caller is responsible for not having flushed yet
     /// when this is used to drive elision.
     pub fn is_uniform(&self, value: T) -> bool {
-        self.inner.is_empty() || self.uniform == Some(value)
+        self.is_empty() || self.uniform == Some(value)
     }
-}
-
-/// Values spanning 2^63 or more, outside the [`DeltaValue`] domain: a
-/// precondition violation on the writer's own data, which `load` would
-/// reject.
-#[cold]
-#[inline(never)]
-fn values_too_wide() -> ! {
-    panic!("delta values out of domain: they span 2^63 or more")
 }
 
 /// Streaming encoder for delta-encoded columns.
@@ -522,8 +487,8 @@ impl<T: DeltaValue, C: Codec> Default for DeltaEncoder<'_, T, C> {
 impl<T: DeltaValue, C: Codec> Debug for DeltaEncoder<'_, T, C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DeltaEncoder")
-            .field("len", &self.state.inner.len())
-            .field("abs", &self.state.abs)
+            .field("len", &self.state.len())
+            .field("abs", &self.state.d.abs)
             .finish()
     }
 }
