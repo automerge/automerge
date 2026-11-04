@@ -1753,12 +1753,16 @@ impl<'a, T: DeltaValue, C: Codec> DeltaIter<'a, T, C> {
                     // (1-based) realizes running + j*d
                     // d <= 0 happens at the window boundary (the run
                     // bridges pre-window data) or on all-equal runs: the
-                    // first item is the only candidate either way
-                    let steps = if d <= 0 {
+                    // first item is the only candidate either way, as it
+                    // is when the run starts at or past the target
+                    let steps = if d <= 0 || t <= running {
                         1
                     } else {
-                        ((t - running + d - 1).div_euclid(d)).max(1)
-                    } as usize;
+                        // the least j with running + j*d >= t; `t -
+                        // running` is at most the run's `d * count`, but
+                        // `t - running + d - 1` can overflow
+                        ((t - running - 1) / d + 1) as usize
+                    };
                     run_start = pos + steps - 1;
                     let found = running + d * steps as i64 == t;
                     run_end = run_start;
