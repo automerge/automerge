@@ -1160,7 +1160,6 @@ impl<'a, T: PrefixValue, C: Codec> PrefixIter<'a, T, C> {
     pub fn suspend(&self) -> PrefixIterState<T> {
         PrefixIterState {
             inner: self.inner.suspend(),
-            total: self.total.clone(),
             base: self.base.clone(),
         }
     }
@@ -1285,7 +1284,6 @@ where
 
 pub struct PrefixIterState<T: PrefixValue> {
     inner: IterState,
-    total: T::Prefix,
     base: T::Prefix,
 }
 
@@ -1295,10 +1293,13 @@ impl<T: PrefixValue> PrefixIterState<T> {
         column: &'a PrefixColumn<T, C>,
     ) -> Result<PrefixIter<'a, T, C>, crate::PackError> {
         let inner = self.inner.try_resume(column.values())?;
+        // the running total is this column's, from the offset the state
+        // keeps (a state from another column has another's)
+        let total = column.get_prefix(inner.pos()) - self.base.clone();
         Ok(PrefixIter {
             col: Some(column),
             inner,
-            total: self.total.clone(),
+            total,
             base: self.base.clone(),
         })
     }
