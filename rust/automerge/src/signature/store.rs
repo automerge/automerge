@@ -109,7 +109,7 @@ impl<'a> ResolvedChangeAuthor<'a> {
 ///
 /// Both variants identify an author. A prepared key allows repeated
 /// verification without decoding the author bytes again.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 enum AuthorContext<'a> {
     /// Author identity without a retained Ed25519 key.
     ///
@@ -153,7 +153,7 @@ impl<'a> AuthorContext<'a> {
 /// Each hash holds at most 16 distinct signatures across unchecked entries
 /// and evidence. Resolved author associations remain even when no entries
 /// remain.
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub(crate) struct SignatureStore {
     by_hash: BTreeMap<ChangeHash, ChangeSignatures>,
 }
@@ -162,7 +162,7 @@ pub(crate) struct SignatureStore {
 ///
 /// Use [`ChangeSignatures::associate`] to establish the expected author
 /// while preserving the stored entries.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 enum ChangeSignatures {
     /// Entries whose expected author has not yet been established.
     Unresolved { unchecked: Vec<Signature> },
@@ -179,7 +179,7 @@ enum ChangeSignatures {
 ///
 /// The author and any prepared key remain associated with the record
 /// even when no signatures remain.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct ResolvedChangeSignatures {
     author: AuthorContext<'static>,
     unchecked: Vec<Signature>,

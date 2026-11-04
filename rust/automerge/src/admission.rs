@@ -18,8 +18,6 @@ use std::ops::ControlFlow;
 use crate::signature::SignatureStore;
 use crate::{ActorId, Change, ChangeHash, Fragment};
 
-mod accepted;
-
 /// History considered as a whole for admission.
 ///
 /// A novel loose change requires evidence on its own hash. A canonical
@@ -41,7 +39,7 @@ pub(crate) enum CandidateHistory<'a> {
 
 impl<'a> CandidateHistory<'a> {
     /// Iterate borrowed members in their supplied order without consuming the candidate.
-    fn changes(&self) -> impl ExactSizeIterator<Item = &'a Change> + '_ {
+    pub(crate) fn changes(&self) -> impl ExactSizeIterator<Item = &'a Change> + '_ {
         let members = match self {
             CandidateHistory::Loose(change) => std::slice::from_ref(change),
             CandidateHistory::CanonicalFragment { members, .. } => members.as_slice(),

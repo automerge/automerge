@@ -13,7 +13,7 @@ pub mod ed25519;
 pub mod error;
 mod store;
 
-pub(crate) use store::SignatureStore;
+pub(crate) use store::{Insert, InsertError, SignatureStore};
 
 const SIGNING_MESSAGE_LEN: usize = SIGNING_MESSAGE_PREFIX.len() + types::HASH_SIZE;
 const SIGNING_MESSAGE_PREFIX: &[u8] = b"automerge-change-signature-v1";

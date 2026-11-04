@@ -38,6 +38,7 @@ use crate::{AutomergeError, Change, Cursor, Fragment, ObjType, Prop};
 use actor::ActorMaintenance;
 use author::AuthorRegistration;
 use history::History;
+use signing::SigningState;
 use std::borrow::Cow;
 use view::{ClockRange, Mask, ReadAt, VisibleClock};
 
@@ -46,6 +47,7 @@ mod apply;
 mod author;
 pub(crate) mod current_state;
 mod history;
+mod signing;
 pub(crate) mod view;
 mod visibility;
 
@@ -312,6 +314,8 @@ pub struct Automerge {
     pub(crate) staged: StagedChanges,
     /// Graph of changes
     pub(crate) change_graph: ChangeGraph,
+    /// Mode and retained signing state. Required-mode enforcement is not wired yet.
+    signing: SigningState,
     authors: Authors,
     /// Authors whose changes are hidden past a heads boundary.
     ///
@@ -380,6 +384,7 @@ impl Automerge {
         Automerge {
             staged: StagedChanges::new(),
             change_graph,
+            signing: SigningState::Unsigned,
             authors,
             write_frontier,
             visibility,
@@ -409,6 +414,7 @@ impl Automerge {
         let mut doc = Automerge {
             staged: StagedChanges::new(),
             change_graph,
+            signing: SigningState::Unsigned,
             authors,
             write_frontier,
             visibility,
@@ -727,6 +733,7 @@ impl Automerge {
             &mut self.actor,
             &mut self.authors,
             &mut self.visibility,
+            &mut self.signing,
         )
         .remove(actor);
     }
@@ -753,6 +760,7 @@ impl Automerge {
             &mut self.actor,
             &mut self.authors,
             &mut self.visibility,
+            &mut self.signing,
         )
         .remove_unused();
     }
@@ -1757,6 +1765,7 @@ impl Automerge {
             &mut self.actor,
             &mut self.authors,
             &mut self.visibility,
+            &mut self.signing,
         )
         .insert(actor)
     }
