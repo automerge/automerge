@@ -316,6 +316,12 @@ compiles them away. To check them, run `cargo verus verify -p hexane
   each slab's aggregate and that the sums at slab boundaries fit `i64`.
   The running sum wraps as release arithmetic does, and is proved to be
   the deltas' sum modulo 2^64: the sum itself, wherever it fits.
+* A delta column's value search (`find_by_value`, `find_by_range`,
+  `find_first`): it yields exactly the items whose values lie in the
+  range, in order, given the index's aggregates (as for reading). Slabs
+  the index rules out hold none, and within a slab the items of a run of
+  equal deltas are found by division, without overflow at the ends of
+  `i64`.
 * The value search of `Column` and its iterator (`scope_to_value`,
   `seek_to_value`): where the values in the window are sorted, it returns
   exactly the range of them equal to the target, or, if there are none,

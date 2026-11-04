@@ -143,7 +143,7 @@ fn count_i64(n: usize) -> (r: i64)
 
 /// The running sum after a run: `running + d * n`, wrapping.
 #[inline(always)]
-fn add_run(running: i64, d: i64, n: usize, Ghost(p): Ghost<int>) -> (r: i64)
+pub(crate) fn add_run(running: i64, d: i64, n: usize, Ghost(p): Ghost<int>) -> (r: i64)
     requires
         running == crop(p),
     ensures
@@ -398,6 +398,32 @@ pub(crate) fn d_next_run<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item
     r
 }
 
+/// The target is the last of a run of `m + 1` copies of `x` from window
+/// offset `k`: the deltas before it are those before the run and `m` of
+/// the run's.
+proof fn lemma_target_in_run<V: Copy, B: DeltaOps<V>>(o0: Seq<V>, k: int, m: int, x: V)
+    requires
+        0 <= k,
+        0 <= m,
+        k + m + 1 <= o0.len(),
+        o0.skip(k).take(m + 1) == Seq::new((m + 1) as nat, |_i: int| x),
+    ensures
+        o0[k + m] == x,
+        psum(deltas_of::<V, B>(o0.take(k + m))) == psum(deltas_of::<V, B>(o0.take(k))) + m * dval(B::dv(x)),
+        (m + 1) * dval(B::dv(x)) == m * dval(B::dv(x)) + dval(B::dv(x)),
+{
+    assert(o0.skip(k).take(m + 1)[m] == x);
+    assert(o0.skip(k).take(m) =~= Seq::new(m as nat, |_i: int| x)) by {
+        assert forall|i: int| 0 <= i < m implies #[trigger] o0.skip(k).take(m)[i] == x by {
+            assert(o0.skip(k).take(m + 1)[i] == x);
+        }
+    }
+    lemma_take_run::<_, B>(o0, k, m, x);
+    lemma_run_sum(deltas_of::<_, B>(o0.take(k)), m as nat, B::dv(x));
+    let d = dval(B::dv(x));
+    assert((m + 1) * d == m * d + d) by (nonlinear_arith);
+}
+
 /// Panics: `d_take_nth` ran out of values. Never: `n` is within the
 /// window.
 #[verifier::external_body]
@@ -412,6 +438,7 @@ fn past_window()
 /// it and those before it run by run: for `n` within the slab the
 /// iterator stands in, or the one it jumped to.
 #[allow(clippy::manual_map)]
+#[verifier::spinoff_prover]
 fn d_take_nth<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
     core: &mut ICore<X::D>,
     slabs: &'a [Slab<X::Tail>],
@@ -479,24 +506,10 @@ fn d_take_nth<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
                 if run.count > m {
                     proof {
                         // the target is the run's last value
-                        assert(c == m + 1);
                         assert(o.take(c)[m as int] == run.value);
                         assert(o[m as int] == o0[n as int]);
                         assert(o.skip(c) =~= o0.skip(n + 1));
-                        // the deltas before it: those before the run, and
-                        // `m` of the run's
-                        assert(o0.skip(k).take(m as int) =~= Seq::new(m as nat, |_i: int| run.value)) by {
-                            assert forall|i: int| 0 <= i < m implies #[trigger] o0.skip(k).take(m as int)[i]
-                                == run.value by {
-                                assert(o0.skip(k).take(c)[i] == run.value);
-                            }
-                        }
-                        lemma_take_run::<_, B>(o0, k, m as int, run.value);
-                        lemma_run_sum(deltas_of::<_, B>(o0.take(k)), m as nat, B::dv(run.value));
-                        if let Some(d) = B::dv(run.value) {
-                            assert((m + 1) * d == m * d + d) by (nonlinear_arith);
-                            assert(c * d == (m + 1) * d);
-                        }
+                        lemma_target_in_run::<_, B>(o0, k, m as int, run.value);
                     }
                     return match delta {
                         None => None,
@@ -549,7 +562,7 @@ proof fn lemma_rejoin<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
 }
 
 /// The index's prefix before slab `k` is the running sum there, an `i64`.
-proof fn lemma_found<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
+pub(crate) proof fn lemma_found<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
     ws: Seq<SlabAgg>,
     s: Seq<Slab<X::Tail>>,
     k: int,

@@ -1,5 +1,6 @@
 pub(crate) mod agg;
 mod decoder;
+pub(crate) mod dfind;
 pub(crate) mod diter;
 pub mod indexed;
 pub(crate) mod stream;

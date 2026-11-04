@@ -13,19 +13,16 @@ use crate::sealed::Sealed;
 use crate::PackError;
 use std::ops::Range;
 
-use crate::btree::{FindByValueRange, SlabAgg};
+use crate::btree::SlabAgg;
 use crate::column::{Dx, Slab, TailOf, WeightFn};
 use crate::delta::agg::{agg_run, slab_agg, DeltaOps};
+use crate::delta::dfind::{d_find_new, d_find_next, DFind};
 use crate::delta::{DeltaColumn, DeltaInner, DeltaValue};
-use crate::encoding::{ColumnEncoding, RunDecoder};
+use crate::encoding::ColumnEncoding;
 use crate::ColumnValueRef;
 use crate::{Codec, Leb128};
 use std::marker::PhantomData;
 use vstd::prelude::Ghost;
-
-// Type aliases to keep the decoder / slab types readable in struct fields.
-type OptI64Encoding<C> = <Option<i64> as ColumnValueRef>::Encoding<C>;
-type OptI64Decoder<'a, C> = <OptI64Encoding<C> as ColumnEncoding>::Decoder<'a>;
 
 // ── Weight function ─────────────────────────────────────────────────────────
 
@@ -127,26 +124,21 @@ impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
 }
 
 /// Iterator returned by [`DeltaColumn::find_by_range`] and
-/// [`DeltaColumn::find_by_value`].  Walks the B-tree's pruned slab
-/// iterator and, for each candidate slab, runs a slab scan over its
-/// RLE-encoded data.
+/// [`DeltaColumn::find_by_value`].  Walks the B-tree's pruned slabs and,
+/// for each candidate, scans its runs (verified: `delta::dfind`).
 pub struct FindByRange<'a, T: DeltaValue, C: Codec = Leb128> {
-    lo: i64,
-    /// inclusive
-    hi: i64,
     slabs: &'a [Slab<TailOf<T::Inner, C>>],
-    outer: Option<FindByValueRange<'a>>,
-    current: Option<SlabScan<'a, C>>,
+    find: Option<DFind<'a, InnerDecoder<'a, T, C>>>,
 }
+
+type InnerDecoder<'a, T, C> =
+    <<<T as DeltaValue>::Inner as ColumnValueRef>::Encoding<C> as ColumnEncoding>::Decoder<'a>;
 
 impl<T: DeltaValue, C: Codec> Default for FindByRange<'_, T, C> {
     fn default() -> Self {
         Self {
-            lo: 0,
-            hi: 0,
             slabs: &[],
-            outer: None,
-            current: None,
+            find: None,
         }
     }
 }
@@ -165,142 +157,24 @@ impl<'a, T: DeltaValue, C: Codec> FindByRange<'a, T, C> {
     /// The values in `[lo, hi]`, inclusive; `lo <= hi`.
     fn between(lo: i64, hi: i64, col: &'a DeltaColumn<T, C>) -> Self {
         Self {
-            lo,
-            hi,
             slabs: &col.col.slabs,
-            outer: Some(col.col.find_by_value_range(lo, hi)),
-            current: None,
+            find: Some(d_find_new::<Dx<T::Inner, C>, DB<T::Inner>>(
+                &col.col.index,
+                lo,
+                hi,
+                Ghost::assume_new(),
+            )),
         }
     }
 }
 
 impl<T: DeltaValue, C: Codec> Iterator for FindByRange<'_, T, C> {
     type Item = usize;
+    // verified (`delta::dfind`): the next item whose value is in range,
+    // given the index's slab aggregates
     fn next(&mut self) -> Option<usize> {
-        loop {
-            if let Some(scan) = self.current.as_mut() {
-                if let Some(i) = scan.next() {
-                    return Some(i);
-                }
-                self.current = None;
-            }
-            let (slab_idx, items_before, prefix_before) = self.outer.as_mut()?.next()?;
-            self.current = Some(SlabScan::new(
-                &self.slabs[slab_idx].data,
-                self.lo,
-                self.hi,
-                items_before,
-                prefix_before,
-            ));
-        }
-    }
-}
-
-/// Scan of a single slab's RLE-encoded data for items whose realized
-/// value lies in `[lo, hi]`.  Uses the encoding's run decoder + O(1)
-/// arithmetic per repeat run (no per-item iteration).
-struct SlabScan<'a, C: Codec> {
-    decoder: OptI64Decoder<'a, C>,
-    lo: i64,
-    /// inclusive
-    hi: i64,
-    items_before: usize,
-    prefix_before: i64,
-    partial: i64,
-    item_idx: usize,
-    /// Pending index range produced by the current matching run.  Drained
-    /// first on each `next` call before advancing to the next run.
-    pending: Range<usize>,
-}
-
-impl<'a, C: Codec> SlabScan<'a, C> {
-    fn new(data: &'a [u8], lo: i64, hi: i64, items_before: usize, prefix_before: i64) -> Self {
-        Self {
-            decoder: OptI64Encoding::<C>::decoder(data),
-            lo,
-            hi,
-            items_before,
-            prefix_before,
-            partial: 0,
-            item_idx: 0,
-            pending: 0..0,
-        }
-    }
-}
-
-impl<C: Codec> Iterator for SlabScan<'_, C> {
-    type Item = usize;
-    fn next(&mut self) -> Option<usize> {
-        loop {
-            if let Some(i) = self.pending.next() {
-                return Some(i);
-            }
-            let run = self.decoder.next_run()?;
-            let count = run.count;
-            if let Some(v) = run.value {
-                let a = self.prefix_before + self.partial; // f(k) = a + v*k for k in [1, count]
-                let step = v * count as i64;
-                if v == 0 {
-                    if a >= self.lo && a <= self.hi {
-                        let start = self.items_before + self.item_idx;
-                        self.pending = start..start + count;
-                    }
-                } else {
-                    // Constraint: lo ≤ a + v·k ≤ hi, for bounds on k
-                    // (handling v's sign). The run's values `a + v` and
-                    // `a + v·count` are realized values, so they fit, and
-                    // so does the difference of `a` and any value between
-                    // them; `lo - a` itself can overflow. So clamp the
-                    // bounds to the run's values first.
-                    let (first, last) = (a + v, a + step);
-                    let (run_lo, run_hi) = if v > 0 { (first, last) } else { (last, first) };
-                    if run_lo <= self.hi && self.lo <= run_hi {
-                        let lo_diff = self.lo.max(run_lo) - a;
-                        let hi_diff = self.hi.min(run_hi) - a;
-                        let (k_min, k_max) = if v > 0 {
-                            (div_ceil_i64(lo_diff, v), div_floor_i64(hi_diff, v))
-                        } else {
-                            (div_ceil_i64(hi_diff, v), div_floor_i64(lo_diff, v))
-                        };
-                        let k_start = k_min.max(1);
-                        let k_end = k_max.min(count as i64);
-                        if k_start <= k_end {
-                            let start = self.items_before + self.item_idx + (k_start as usize - 1);
-                            let len = (k_end - k_start + 1) as usize;
-                            self.pending = start..start + len;
-                        }
-                    }
-                }
-                self.partial += step;
-            }
-            self.item_idx += count;
-        }
-    }
-}
-
-/// Integer floor division for `i64` that handles mixed signs correctly
-/// (unlike Rust's `/` which truncates toward zero).  Rust's `i64::div_floor`
-/// and `i64::div_ceil` are both still nightly-only under `int_roundings`
-/// (tracking issue #88581), so we keep our own here.
-#[inline]
-fn div_floor_i64(a: i64, b: i64) -> i64 {
-    let q = a / b;
-    let r = a % b;
-    if r != 0 && (r ^ b) < 0 {
-        q - 1
-    } else {
-        q
-    }
-}
-
-#[inline]
-fn div_ceil_i64(a: i64, b: i64) -> i64 {
-    let q = a / b;
-    let r = a % b;
-    if r != 0 && (r ^ b) >= 0 {
-        q + 1
-    } else {
-        q
+        let find = self.find.as_mut()?;
+        d_find_next::<Dx<T::Inner, C>, DB<T::Inner>>(find, self.slabs, Ghost::assume_new())
     }
 }
 
