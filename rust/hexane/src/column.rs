@@ -1710,6 +1710,13 @@ where
     ) -> Result<Column<T, C, WF, Idx>, PackError> {
         use crate::encoding::LoadIterApi;
         if let Some((value, len)) = self.fill {
+            // the fill's one slab is `len` copies of `value`: its weight
+            // gets the checks a loaded slab's does
+            if WF::ACCUMULATES && len > 0 {
+                let mut w = WF::Weight::default();
+                WF::accumulate_run(&mut w, len, value)?;
+                check(&w)?;
+            }
             if len == 0 {
                 return Ok(Column::with_max_segments(self.max_segments));
             }
