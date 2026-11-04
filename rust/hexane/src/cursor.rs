@@ -4,7 +4,8 @@
 //! cursor walks it forward, carrying, inserting and deleting values, with
 //! at most one slab's rebuild open.  The column stands for its slabs'
 //! values one after another (`vals_of`); `col_ok` says every slab is
-//! well-formed, the index holds the slabs' item counts and `total_len`
+//! well-formed, the index holds each slab's weight (`ws_ok`: as the
+//! weight function computes it, so its item count too) and `total_len`
 //! their sum.  A new column gets its index and total from `col_index`,
 //! which checks its slabs' weights against them; that the slabs are
 //! well-formed is up to what made them (the loaders, `fill`, the
@@ -22,8 +23,8 @@
 //! ([`RleModel`](crate::rle::edit::RleModel)).  Trusted, in the bridges
 //! at the bottom of this file: the dispatch of closures and inserted
 //! values to an encoding's rebuild (`Visiting`, `Inserting`), and the
-//! weight functions (`Weigh`: a slab's weight counts its items).  The
-//! index is verified ([`IndexOps`]).
+//! weight functions (`Weigh`: what a slab's weight is, `wrel`, and that
+//! it counts its items).  The index is verified ([`IndexOps`]).
 //!
 //! Not covered: delta columns.  `col_ok` asks for a `plain` index, whose
 //! aggregates fit whenever its item counts do, and a delta column's index
@@ -246,9 +247,13 @@ pub(crate) trait WeightSink<W> {
 
 /// A slab's weight in the index: one that counts its items.
 pub(crate) trait Weigh<Tail: Copy + Clone + std::fmt::Debug + Default, W> {
+    /// `w` is slab `s`'s weight: what the column's index records for it.
+    spec fn wrel(w: W, s: Slab<Tail>) -> bool;
+
     fn compute<I: IndexOps<W>>(s: &Slab<Tail>) -> (w: W)
         ensures
             I::wlen(w) == s.len,
+            Self::wrel(w, *s),
     ;
 }
 
@@ -270,7 +275,13 @@ pub(crate) open spec fn all_ok<E: Slabs>(s: Seq<Slab<E::Tail>>) -> bool {
 
 /// A column: well-formed slabs, an index of their item counts, and their
 /// total.
-pub(crate) open spec fn col_ok<E: Slabs, W, I: IndexOps<W>>(
+/// Each slab's weight in the index is its own (`G::wrel`).
+pub(crate) open spec fn ws_ok<T: Copy + Clone + std::fmt::Debug + Default, W, G: Weigh<T, W>>(ws: Seq<W>, s: Seq<Slab<T>>) -> bool {
+    &&& ws.len() == s.len()
+    &&& forall|i: int| 0 <= i < s.len() ==> #[trigger] G::wrel(ws[i], s[i])
+}
+
+pub(crate) open spec fn col_ok<E: Slabs, W, I: IndexOps<W>, G: Weigh<E::Tail, W>>(
     s: Seq<Slab<E::Tail>>,
     ix: I,
     total_len: usize,
@@ -279,6 +290,7 @@ pub(crate) open spec fn col_ok<E: Slabs, W, I: IndexOps<W>>(
     &&& all_ok::<E>(s)
     &&& ix.ok()
     &&& wlens::<W, I>(ix.ws()) == slab_lens(s)
+    &&& ws_ok::<E::Tail, W, G>(ix.ws(), s)
     &&& total_len == total(slab_lens(s))
     &&& max_segments >= 2
     &&& I::plain()
@@ -781,14 +793,14 @@ impl<E: Slabs> Cursor<E> {
     }
 
     /// The cursor and the column it stands in.
-    pub(crate) open spec fn ok<W, I: IndexOps<W>>(
+    pub(crate) open spec fn ok<W, I: IndexOps<W>, G: Weigh<E::Tail, W>>(
         &self,
         s: Seq<Slab<E::Tail>>,
         ix: I,
         total_len: usize,
         max_segments: usize,
     ) -> bool {
-        col_ok::<E, W, I>(s, ix, total_len, max_segments) && self.wf(s)
+        col_ok::<E, W, I, G>(s, ix, total_len, max_segments) && self.wf(s)
     }
 
     /// The same edit, the cursor elsewhere in the same column.
@@ -822,11 +834,11 @@ impl<E: Slabs> Cursor<E> {
         at: usize,
     ) -> (c: Self)
         requires
-            col_ok::<E, W, I>(old(slabs)@, *old(index), total_len, max_segments),
+            col_ok::<E, W, I, G>(old(slabs)@, *old(index), total_len, max_segments),
             at <= total_len,
             total_len + 3 <= usize::MAX,
         ensures
-            c.ok::<W, I>(final(slabs)@, *final(index), total_len, max_segments),
+            c.ok::<W, I, G>(final(slabs)@, *final(index), total_len, max_segments),
             vals_of::<E>(final(slabs)@) == vals_of::<E>(old(slabs)@),
             total(slab_lens(final(slabs)@)) == total(slab_lens(old(slabs)@)),
             c.o@ == vals_of::<E>(old(slabs)@),
@@ -916,7 +928,7 @@ impl<E: Slabs> Cursor<E> {
     /// Point `slab`/`in_slab` at `out`, looked up through the index.  Only
     /// valid with no rebuild open: `out` is a position in the column as it
     /// stands.
-    pub(crate) fn locate_out<W, I: IndexOps<W>>(
+    pub(crate) fn locate_out<W, I: IndexOps<W>, G: Weigh<E::Tail, W>>(
         &mut self,
         slabs: &Vec<Slab<E::Tail>>,
         index: &I,
@@ -924,7 +936,7 @@ impl<E: Slabs> Cursor<E> {
         Ghost(max_segments): Ghost<usize>,
     )
         requires
-            col_ok::<E, W, I>(slabs@, *index, total_len, max_segments),
+            col_ok::<E, W, I, G>(slabs@, *index, total_len, max_segments),
             slabs@.len() >= 1,
             !old(self).dirty,
             vals_of::<E>(slabs@) == old(self).now(),
@@ -933,7 +945,7 @@ impl<E: Slabs> Cursor<E> {
             old(self).out == old(self).p@.len(),
             old(self).out + old(self).remaining + 3 <= usize::MAX,
         ensures
-            final(self).ok::<W, I>(slabs@, *index, total_len, max_segments),
+            final(self).ok::<W, I, G>(slabs@, *index, total_len, max_segments),
             final(self).same(*old(self)),
             final(self).out == old(self).out,
             !final(self).dirty,
@@ -989,7 +1001,7 @@ impl<E: Slabs> Cursor<E> {
     ///
     /// A move that stays inside the current slab skips the lookup and
     /// carries the reader along instead.
-    pub(crate) fn jump<W, I: IndexOps<W>>(
+    pub(crate) fn jump<W, I: IndexOps<W>, G: Weigh<E::Tail, W>>(
         &mut self,
         slabs: &Vec<Slab<E::Tail>>,
         index: &I,
@@ -998,10 +1010,10 @@ impl<E: Slabs> Cursor<E> {
         n: usize,
     ) -> (step: usize)
         requires
-            old(self).ok::<W, I>(slabs@, *index, total_len, max_segments),
+            old(self).ok::<W, I, G>(slabs@, *index, total_len, max_segments),
             !old(self).dirty,
         ensures
-            final(self).ok::<W, I>(slabs@, *index, total_len, max_segments),
+            final(self).ok::<W, I, G>(slabs@, *index, total_len, max_segments),
             !final(self).dirty,
             step == if n <= old(self).remaining {
                 n
@@ -1068,7 +1080,7 @@ impl<E: Slabs> Cursor<E> {
         proof {
             assert(self.now() =~= c0.now());
         }
-        self.locate_out::<W, I>(slabs, index, total_len, Ghost(max_segments));
+        self.locate_out::<W, I, G>(slabs, index, total_len, Ghost(max_segments));
         step
     }
 
@@ -1223,6 +1235,7 @@ impl<E: Slabs> Cursor<E> {
             old(index).ok(),
             I::plain(),
             wlens::<W, I>(old(index).ws()) == slab_lens(s_old),
+            ws_ok::<E::Tail, W, G>(old(index).ws(), s_old),
             start < end <= slabs@.len(),
             end + s_old.len() - slabs@.len() <= s_old.len(),
             start < end + s_old.len() - slabs@.len(),
@@ -1232,6 +1245,7 @@ impl<E: Slabs> Cursor<E> {
         ensures
             final(index).ok(),
             wlens::<W, I>(final(index).ws()) == slab_lens(slabs@),
+            ws_ok::<E::Tail, W, G>(final(index).ws(), slabs@),
     {
         let ghost s = slabs@;
         let ghost ws = index.ws();
@@ -1257,6 +1271,13 @@ impl<E: Slabs> Cursor<E> {
                     }
                 }
                 assert(wlens::<W, I>(n) =~= slab_lens(s));
+                assert forall|i: int| 0 <= i < s.len() implies #[trigger] G::wrel(n[i], s[i]) by {
+                    if i < start {
+                        assert(s.take(start as int)[i] == s_old.take(start as int)[i]);
+                    } else if i > start {
+                        assert(s.skip(end as int)[i - end] == s_old.skip(end as int)[i - end]);
+                    }
+                }
                 I::lemma_fits(n);
             }
             index.ix_set(start, w);
@@ -1269,6 +1290,7 @@ impl<E: Slabs> Cursor<E> {
                     s == slabs@,
                     new@.len() == k - start,
                     forall|i: int| 0 <= i < new@.len() ==> #[trigger] I::wlen(new@[i]) == s[start + i].len,
+                    forall|i: int| 0 <= i < new@.len() ==> #[trigger] G::wrel(new@[i], s[start + i]),
                 decreases end - k,
             {
                 new.push(G::compute::<I>(&slabs[k]));
@@ -1292,6 +1314,22 @@ impl<E: Slabs> Cursor<E> {
                     }
                 }
                 assert(wlens::<W, I>(n) =~= slab_lens(s));
+                assert forall|i: int| 0 <= i < s.len() implies #[trigger] G::wrel(n[i], s[i]) by {
+                    if i < start {
+                        assert(n[i] == ws[i]);
+                        assert(s.take(start as int)[i] == s_old.take(start as int)[i]);
+                        assert(G::wrel(ws[i], s_old[i]));
+                    } else if i >= end {
+                        let j = oe + (i - end);
+                        assert(n[i] == ws[j]);
+                        assert(s.skip(end as int)[i - end] == s_old.skip(oe as int)[i - end]);
+                        assert(G::wrel(ws[j], s_old[j]));
+                    } else {
+                        let k = i - start;
+                        assert(n[i] == new@[k]);
+                        assert(G::wrel(new@[k], s[start + k]));
+                    }
+                }
                 I::lemma_fits(n);
             }
             index.ix_splice(start, oe, new);
@@ -1311,9 +1349,9 @@ impl<E: Slabs> Cursor<E> {
         counter: &mut usize,
     )
         requires
-            old(self).ok::<W, I>(old(slabs)@, *old(index), *old(total_len), max_segments),
+            old(self).ok::<W, I, G>(old(slabs)@, *old(index), *old(total_len), max_segments),
         ensures
-            final(self).ok::<W, I>(final(slabs)@, *final(index), *final(total_len), max_segments),
+            final(self).ok::<W, I, G>(final(slabs)@, *final(index), *final(total_len), max_segments),
             !final(self).dirty,
             final(self).same(*old(self)),
             final(self).out == old(self).out,
@@ -1399,7 +1437,7 @@ impl<E: Slabs> Cursor<E> {
         Self::reconcile::<W, I, G>(slabs, index, start, end, Ghost(s0));
         // the write-back can merge, split or drop slabs, so `slab` and
         // `in_slab` mean nothing until they are looked up again
-        self.locate_out::<W, I>(slabs, index, *total_len, Ghost(max_segments));
+        self.locate_out::<W, I, G>(slabs, index, *total_len, Ghost(max_segments));
         *counter = counter.wrapping_add(1);
     }
 
@@ -1485,10 +1523,10 @@ impl<E: Slabs> Cursor<E> {
         f: &mut F,
     ) -> (jumped: usize)
         requires
-            old(self).ok::<W, I>(old(slabs)@, *old(index), *old(total_len), max_segments),
+            old(self).ok::<W, I, G>(old(slabs)@, *old(index), *old(total_len), max_segments),
             old(self).on_value(old(slabs)@),
         ensures
-            final(self).ok::<W, I>(final(slabs)@, *final(index), *final(total_len), max_segments),
+            final(self).ok::<W, I, G>(final(slabs)@, *final(index), *final(total_len), max_segments),
             final(self).on_value(final(slabs)@),
             ({
                 let k = if n <= old(self).remaining { n } else { old(self).remaining };
@@ -1512,7 +1550,7 @@ impl<E: Slabs> Cursor<E> {
             invariant_except_break
                 self.orig + want == c0.orig + n,
             invariant
-                self.ok::<W, I>(slabs@, *index, *total_len, max_segments),
+                self.ok::<W, I, G>(slabs@, *index, *total_len, max_segments),
                 self.on_value(slabs@),
                 self.o == c0.o,
                 c0.orig <= self.orig,
@@ -1526,7 +1564,7 @@ impl<E: Slabs> Cursor<E> {
         {
             if !self.dirty {
                 let ghost c1 = *self;
-                let step = self.jump::<W, I>(slabs, index, *total_len, Ghost(max_segments), want);
+                let step = self.jump::<W, I, G>(slabs, index, *total_len, Ghost(max_segments), want);
                 jumped += step;
                 proof {
                     assert(c0.o@.subrange(c0.orig as int, self.orig as int) =~= c0.o@.subrange(
@@ -1585,10 +1623,10 @@ impl<E: Slabs> Cursor<E> {
         g: &mut S,
     )
         requires
-            old(self).ok::<W, I>(old(slabs)@, *old(index), *old(total_len), max_segments),
+            old(self).ok::<W, I, G>(old(slabs)@, *old(index), *old(total_len), max_segments),
             old(self).on_value(old(slabs)@),
         ensures
-            final(self).ok::<W, I>(final(slabs)@, *final(index), *final(total_len), max_segments),
+            final(self).ok::<W, I, G>(final(slabs)@, *final(index), *final(total_len), max_segments),
             final(self).on_value(final(slabs)@),
             final(self).o == old(self).o,
             final(self).p == old(self).p,
@@ -1604,7 +1642,7 @@ impl<E: Slabs> Cursor<E> {
         let mut dropped = false;
         while left > 0
             invariant
-                self.ok::<W, I>(slabs@, *index, *total_len, max_segments),
+                self.ok::<W, I, G>(slabs@, *index, *total_len, max_segments),
                 self.on_value(slabs@),
                 self.o == c0.o,
                 self.p == c0.p,
@@ -1631,7 +1669,7 @@ impl<E: Slabs> Cursor<E> {
             if self.in_slab == 0 && !self.dirty && slabs.len() > 1 {
                 let w = G::compute::<I>(&slabs[self.slab]);
                 g.dropped(&w);
-                self.drop_slab::<W, I>(slabs, index, total_len, Ghost(max_segments));
+                self.drop_slab::<W, I, G>(slabs, index, total_len, Ghost(max_segments));
                 left -= avail;
                 dropped = true;
                 *counter = counter.wrapping_add(1);
@@ -1662,14 +1700,14 @@ impl<E: Slabs> Cursor<E> {
                 lemma_vals_total::<E>(slabs@);
             }
             Self::reconcile::<W, I, G>(slabs, index, start, end, Ghost(s0));
-            self.locate_out::<W, I>(slabs, index, *total_len, Ghost(max_segments));
+            self.locate_out::<W, I, G>(slabs, index, *total_len, Ghost(max_segments));
             *counter = counter.wrapping_add(1);
         }
     }
 
     /// Drop the current slab whole: the cursor stands at its start with no
     /// rebuild open, and it is not the column's only slab.
-    fn drop_slab<W, I: IndexOps<W>>(
+    fn drop_slab<W, I: IndexOps<W>, G: Weigh<E::Tail, W>>(
         &mut self,
         slabs: &mut Vec<Slab<E::Tail>>,
         index: &mut I,
@@ -1677,12 +1715,12 @@ impl<E: Slabs> Cursor<E> {
         Ghost(max_segments): Ghost<usize>,
     )
         requires
-            old(self).ok::<W, I>(old(slabs)@, *old(index), *old(total_len), max_segments),
+            old(self).ok::<W, I, G>(old(slabs)@, *old(index), *old(total_len), max_segments),
             !old(self).dirty,
             old(self).in_slab == 0,
             old(slabs)@.len() > 1,
         ensures
-            final(self).ok::<W, I>(final(slabs)@, *final(index), *final(total_len), max_segments),
+            final(self).ok::<W, I, G>(final(slabs)@, *final(index), *final(total_len), max_segments),
             !final(self).dirty,
             final(self).o == old(self).o,
             final(self).p == old(self).p,
@@ -1745,7 +1783,7 @@ impl<E: Slabs> Cursor<E> {
             assert(self.p@ =~= vals_of::<E>(s0.take(si as int)));
             assert(self.now() =~= vals_of::<E>(slabs@));
         }
-        self.locate_out::<W, I>(slabs, index, *total_len, Ghost(max_segments));
+        self.locate_out::<W, I, G>(slabs, index, *total_len, Ghost(max_segments));
     }
 
     /// Account for `n` items the open rebuild has dropped.
@@ -1886,6 +1924,11 @@ pub(crate) struct WeightOf<T, C, WF>(PhantomData<fn() -> (T, C, WF)>);
 impl<T: ColumnValueRef, C: Codec, WF: WeightFn<T, C>> Weigh<TailOf<T, C>, WF::Weight>
     for WeightOf<T, C, WF>
 {
+    #[cfg(verus_keep_ghost)]
+    fn wrel(_w: WF::Weight, _s: Slab<TailOf<T, C>>) -> bool {
+        unimplemented!()
+    }
+
     #[inline(always)]
     fn compute<I: IndexOps<WF::Weight>>(s: &Slab<TailOf<T, C>>) -> WF::Weight {
         WF::compute(s)

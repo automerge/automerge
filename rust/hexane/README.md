@@ -318,9 +318,11 @@ compiles them away. To check them, run `cargo verus verify -p hexane
 **Trusted, not proved:** each value type's and codec's own encode and
 decode, which the verified code reaches through traits; the thin glue that
 connects the generic column types to the verified cores, and the closures
-and slab weights passed through it (including the slabs a new column is
-built from, which come from the verified loaders, fills and encoders); and
-that each value type's `Ord` agrees with its `==`.
+passed through it (including the slabs a new column is built from, which
+come from the verified loaders, fills and encoders); the weight functions
+that compute a slab's index weight (the edit cursor is proved to keep
+every slab's weight in the index the one they compute); and that each
+value type's `Ord` agrees with its `==`.
 
 **Known limitations:**
 
