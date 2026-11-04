@@ -566,4 +566,114 @@ pub(crate) fn p_reset<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>
     }
 }
 
+/// The sum of the values before item `index` (of all of them, at or past
+/// the end): the index's sum for the slabs before the one holding it,
+/// then that slab's values before it, run by run.
+pub(crate) fn p_prefix<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>(
+    slabs: &'a [Slab<X::Tail>],
+    ix: &SlabBTree<PrefixSlabWeight<B::P>>,
+    index: usize,
+) -> (r: B::P)
+    requires
+        ix.wf(),
+        ix_ok::<X, B>(ix@, slabs@),
+        lens_ok::<X>(slabs@),
+        total(slab_lens(slabs@)) <= usize::MAX,
+        slabs@.len() < usize::MAX,
+    ensures
+        r == vsum::<_, B>(before::<X>(slabs@, index as int)),
+{
+    let ghost s = slabs@;
+    let found = ix.find_slab_at_item(index);
+    let ghost k = found.index as int;
+    proof {
+        lemma_fold::<X, B>(ix@, s, k);
+        lemma_upto::<X>(s, k);
+        lemma_fold::<X, B>(ix@, s, s.len() as int);
+        assert(ix@.subrange(0, s.len() as int) =~= ix@);
+        assert(s.take(s.len() as int) =~= s);
+        axiom_prefix_add(found.prefix, found.prefix, found.prefix);
+    }
+    if found.index >= slabs.len() {
+        // `index` is at or past the column's end
+        return found.prefix;
+    }
+    proof {
+        lemma_from::<X>(s, k, 0);
+    }
+    let mut t = found.prefix;
+    let n = index - found.pos;
+    if n == 0 {
+        return t;
+    }
+    let ghost zero = prefix_zero::<B::P>();
+    let mut core = ICore::at::<X>(slabs, found.index, 0, found.pos, n);
+    proof {
+        assert(core.out::<X>(s).len() == n);
+    }
+    take_nth::<X, B>(&mut core, slabs, n - 1, &mut t, Ghost(zero));
+    proof {
+        axiom_prefix_add(t, t, t);
+    }
+    t
+}
+
+/// The sum of a slab's values, run by run: the prefix of its weight in
+/// the index.
+pub(crate) fn p_slab_sum<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>(
+    slab: &'a Slab<X::Tail>,
+) -> (r: B::P)
+    requires
+        X::ok(*slab),
+    ensures
+        r == vsum::<_, B>(X::vals(*slab)),
+{
+    let ghost v = X::vals(*slab);
+    let mut d = X::open(slab);
+    let mut t = B::zero();
+    let ghost mut k: int = 0;
+    proof {
+        assert(v.take(0) =~= Seq::<<X::D as Decode>::Item>::empty());
+        assert(v.skip(0) =~= v);
+    }
+    loop
+        invariant
+            v == X::vals(*slab),
+            d.inv(),
+            0 <= k <= v.len(),
+            d.rest() == v.skip(k),
+            t == vsum::<_, B>(v.take(k)),
+        ensures
+            t == vsum::<_, B>(v),
+        decreases d.rest().len(),
+    {
+        let ghost t0 = t;
+        match d.d_run_max(usize::MAX) {
+            Some(run) => {
+                B::acc_run(&mut t, &run);
+                proof {
+                    let c = run.count as int;
+                    let r = Seq::new(run.count as nat, |_i: int| run.value);
+                    assert(v.take(k + c) =~= v.take(k) + r) by {
+                        assert forall|i: int| 0 <= i < c implies #[trigger] v[k + i] == run.value by {
+                            assert(v.skip(k).take(c)[i] == run.value);
+                        }
+                    }
+                    lemma_vsum_cat::<_, B>(v.take(k), r);
+                    lemma_vsum_run::<_, B>(run.count as nat, run.value);
+                    assert(v.skip(k).skip(c) =~= v.skip(k + c));
+                    k = k + c;
+                }
+            },
+            None => {
+                proof {
+                    assert(v.take(k) =~= v);
+                }
+                break;
+            },
+        }
+    }
+    t
+}
+
 } // verus!

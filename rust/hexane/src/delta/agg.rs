@@ -15,7 +15,9 @@
 
 use crate::btree::SlabAgg;
 #[cfg(verus_keep_ghost)]
-use crate::btree::{max_i, min_i, SlabAggregate};
+use crate::btree::{in_i64, max_i, min_i, SlabAggregate};
+use crate::column::Slab;
+use crate::iter_core::{Decode, Decoders};
 #[allow(unused_imports)]
 use vstd::prelude::*;
 
@@ -134,6 +136,20 @@ proof fn lemma_nulls(ds: Seq<Option<i64>>, n: nat)
     }
 }
 
+/// A run of `count` copies of delta `v` after deltas `ds` keeps its
+/// running sums, and its step `count * v`, in `i64`.
+pub open spec fn run_fits(ds: Seq<Option<i64>>, count: nat, v: Option<i64>) -> bool {
+    match v {
+        Some(v) => {
+            &&& count <= i64::MAX
+            &&& in_i64(count * v)
+            &&& in_i64(psum(ds) + v)
+            &&& in_i64(psum(ds) + count * v)
+        },
+        None => true,
+    }
+}
+
 /// Fold a run of `count` copies of delta `v` into `w`, the aggregate of
 /// `ds`. False, leaving `w` as it was, if a running sum (or the run's
 /// span) leaves `i64`: the delta value domain rules those out.
@@ -145,7 +161,7 @@ pub(crate) fn agg_run(w: &mut SlabAgg, count: usize, v: Option<i64>, Ghost(ds): 
         ds.len() + count <= usize::MAX,
     ensures
         ok ==> agg_of(*final(w), ds + reps(count as nat, v)),
-        !ok ==> *final(w) == *old(w),
+        !ok ==> *final(w) == *old(w) && !run_fits(ds, count as nat, v),
 {
     match v {
         None => {
@@ -164,12 +180,18 @@ pub(crate) fn agg_run(w: &mut SlabAgg, count: usize, v: Option<i64>, Ghost(ds): 
             true
         },
         Some(v) => {
-            if count > i64::MAX as usize {
+            if count as u64 > i64::MAX as u64 {
                 return false;
             }
             let step = match v.checked_mul(count as i64) {
                 Some(s) => s,
-                None => return false,
+                None => {
+                    proof {
+                        assert(!in_i64((count as nat) * (v as int))) by (nonlinear_arith)
+                            requires !in_i64((v as int) * ((count as i64) as int)), (count as i64) as int == count as int;
+                    }
+                    return false;
+                },
             };
             let first = match w.total.checked_add(v) {
                 Some(f) => f,
@@ -210,7 +232,7 @@ pub(crate) fn agg_more(w: &mut SlabAgg, count: usize, v: Option<i64>, Ghost(ds):
         ds.len() + count <= usize::MAX,
     ensures
         ok ==> agg_of(*final(w), ds + reps(count as nat, v)),
-        !ok ==> *final(w) == *old(w),
+        !ok ==> *final(w) == *old(w) && !run_fits(ds, count as nat, v),
 {
     match v {
         None => {
@@ -224,12 +246,18 @@ pub(crate) fn agg_more(w: &mut SlabAgg, count: usize, v: Option<i64>, Ghost(ds):
             true
         },
         Some(v) => {
-            if count > i64::MAX as usize {
+            if count as u64 > i64::MAX as u64 {
                 return false;
             }
             let step = match v.checked_mul(count as i64) {
                 Some(s) => s,
-                None => return false,
+                None => {
+                    proof {
+                        assert(!in_i64((count as nat) * (v as int))) by (nonlinear_arith)
+                            requires !in_i64((v as int) * ((count as i64) as int)), (count as i64) as int == count as int;
+                    }
+                    return false;
+                },
             };
             let first = match w.total.checked_add(v) {
                 Some(f) => f,
@@ -583,6 +611,129 @@ impl ValueSpan {
         }
         self.low > self.high || self.high - self.low <= i64::MAX as i128
     }
+}
+
+/// A delta column's values as deltas: the trusted bridge to
+/// `DeltaInner::to_opt` (user code: an `i64` is its own delta, an
+/// `Option<i64>` too, a null holding the running sum).
+pub(crate) trait DeltaOps<V: Copy> {
+    spec fn dv(v: V) -> Option<i64>;
+
+    fn to_opt(v: V) -> (r: Option<i64>)
+        ensures
+            r == Self::dv(v),
+    ;
+}
+
+/// The deltas of values `vs`.
+pub(crate) open spec fn deltas_of<V: Copy, B: DeltaOps<V>>(vs: Seq<V>) -> Seq<Option<i64>> {
+    vs.map_values(|v: V| B::dv(v))
+}
+
+/// Panics: a slab's run leaves `i64` (`run_fits`): its values span
+/// 2^63 or more, outside the delta value domain, which `load` rejects.
+#[verifier::external_body]
+#[cold]
+#[inline(never)]
+fn sum_overflows(Ghost(why): Ghost<bool>)
+    requires
+        why,
+    ensures
+        false,
+{
+    panic!("delta value overflows i64")
+}
+
+/// Values `v` from `k` on starting with `c` copies of `x`: their deltas
+/// through `k + c` are those through `k`, then `c` copies of `x`'s.
+proof fn lemma_take_run<V: Copy, B: DeltaOps<V>>(v: Seq<V>, k: int, c: int, x: V)
+    requires
+        0 <= k,
+        0 <= c,
+        k + c <= v.len(),
+        v.skip(k).take(c) == Seq::new(c as nat, |_i: int| x),
+    ensures
+        deltas_of::<_, B>(v.take(k + c)) == deltas_of::<_, B>(v.take(k)) + reps(c as nat, B::dv(x)),
+        v.skip(k).skip(c) == v.skip(k + c),
+{
+    assert(v.take(k + c) =~= v.take(k) + Seq::new(c as nat, |_i: int| x)) by {
+        assert forall|i: int| 0 <= i < c implies #[trigger] v[k + i] == x by {
+            assert(v.skip(k).take(c)[i] == x);
+        }
+    }
+    assert(deltas_of::<_, B>(v.take(k + c)) =~= deltas_of::<_, B>(v.take(k)) + reps(c as nat, B::dv(x)));
+    assert(v.skip(k).skip(c) =~= v.skip(k + c));
+}
+
+/// A slab's aggregate, its runs folded in order (`agg_run`, then
+/// `agg_more`): its weight in the index.
+pub(crate) fn slab_agg<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
+    slab: &'a Slab<X::Tail>,
+) -> (w: SlabAgg)
+    requires
+        X::ok(*slab),
+        X::vals(*slab).len() <= usize::MAX,
+    ensures
+        agg_of(w, deltas_of::<_, B>(X::vals(*slab))),
+{
+    let ghost v = X::vals(*slab);
+    let mut d = X::open(slab);
+    let mut w = SlabAgg { len: 0, total: 0, min_offset: 0, max_offset: 0 };
+    proof {
+        assert(deltas_of::<_, B>(v.take(0)) =~= Seq::<Option<i64>>::empty());
+        assert(v.skip(0) =~= v);
+    }
+    let first = match d.d_run_max(usize::MAX) {
+        Some(run) => run,
+        None => {
+            proof {
+                assert(v =~= Seq::<<X::D as Decode>::Item>::empty());
+            }
+            return w;
+        },
+    };
+    let ghost e = Seq::<Option<i64>>::empty();
+    let dv = B::to_opt(first.value);
+    if !agg_run(&mut w, first.count, dv, Ghost(e)) {
+        sum_overflows(Ghost(!run_fits(e, first.count as nat, dv)));
+    }
+    let ghost mut k: int = first.count as int;
+    proof {
+        lemma_take_run::<_, B>(v, 0, first.count as int, first.value);
+    }
+    loop
+        invariant
+            v == X::vals(*slab),
+            v.len() <= usize::MAX,
+            d.inv(),
+            0 < k <= v.len(),
+            d.rest() == v.skip(k),
+            agg_of(w, deltas_of::<_, B>(v.take(k))),
+        ensures
+            agg_of(w, deltas_of::<_, B>(v)),
+        decreases d.rest().len(),
+    {
+        let ghost ds = deltas_of::<_, B>(v.take(k));
+        match d.d_run_max(usize::MAX) {
+            Some(run) => {
+                let dv = B::to_opt(run.value);
+                if !agg_more(&mut w, run.count, dv, Ghost(ds)) {
+                    sum_overflows(Ghost(!run_fits(ds, run.count as nat, dv)));
+                }
+                proof {
+                    lemma_take_run::<_, B>(v, k, run.count as int, run.value);
+                    k = k + run.count;
+                }
+            },
+            None => {
+                proof {
+                    assert(v.take(k) =~= v);
+                }
+                break;
+            },
+        }
+    }
+    w
 }
 
 } // verus!

@@ -303,8 +303,9 @@ compiles them away. To check them, run `cargo verus verify -p hexane
   they write realize exactly the values appended, or they panic on values
   spanning 2^63 or more.
 * Delta columns' slab aggregates: a slab's sum of deltas and its least and
-  greatest running sum are exact, both as `load` accumulates them and as
-  an edit recomputes them, and `load` accepts only data whose running sums
+  greatest running sum are exact, both as `load` accumulates them run by
+  run and as an edit or a build computes them from the slab (or it panics
+  on a run whose sums leave `i64`), and `load` accepts only data whose running sums
   all lie in the value domain, and whose values span less than 2^63.
   Merging two aggregates gives the aggregate of their deltas, as the
   B-tree's value search assumes.
@@ -314,23 +315,28 @@ compiles them away. To check them, run `cargo verus verify -p hexane
   the empty range where the target would go. Unsorted, it returns some
   range inside the window.
 * `RawColumn`.
-* The prefix iterator's running sums (`PrefixIter`'s `next`, `nth`,
-  `next_run` and `reset_prefix`): with its offset, the total it reports is
-  always the sum of the values before it, including after `nth` jumps to a
-  far slab with the sum the index holds for the slabs before it.
+* Prefix sums: a prefix column's slab weights hold each slab's sum, as an
+  edit or a build computes them; `get_prefix` and `get_total` return the
+  sum of the values before (through) the item, from the index's sum for
+  the slabs before it; and the prefix iterator's running total
+  (`PrefixIter`'s `next`, `nth`, `next_run` and `reset_prefix`), with its
+  offset, is always the sum of the values before it, including after
+  `nth` jumps to a far slab.
 
 **Trusted, not proved:** each value type's and codec's own encode and
 decode, which the verified code reaches through traits; the thin glue that
 connects the generic column types to the verified cores, and the closures
 passed through it (including the slabs a new column is built from, which
-come from the verified loaders, fills and encoders); the weight functions
-that compute a slab's index weight (the edit cursor is proved to keep
-every slab's weight in the index the one they compute), and so that a
-prefix column's index holds each slab's sum; each prefix value type's
-`accumulate` and `accumulate_run` (that they add its values, a run as
-its value repeated), and that its prefix type's `+` is associative with
-`default` its identity and `b + (a - b) == a`, as for wrapping integers;
-and that each value type's `Ord` agrees with its `==`.
+come from the verified loaders, fills and encoders); that the weight a
+column's index holds for each slab is the one its weight function
+computes for the slab (the edit cursor is proved to keep them so), and,
+for weights `load` accumulates as runs stream past, that it attributes
+each run to its slab; each prefix value type's `accumulate` and
+`accumulate_run` (that they add its values, a run as its value
+repeated), and that its prefix type's `+` is associative with `default`
+its identity and `b + (a - b) == a`, as for wrapping integers; the delta
+value types' `to_opt`; and that each value type's `Ord` agrees with its
+`==`.
 
 **Known limitations:**
 
@@ -343,10 +349,12 @@ and that each value type's `Ord` agrees with its `==`.
   would close the gap, but costs 2–17% on delta columns' index operations
   (`find_by_value`, insert, remove, load), so performance was preferred.
 * The prefix and delta columns' other logic is not verified: the prefix
-  queries on the column (`get_prefix`, `get_index_for_total`,
-  `get_index_for_prefix`) and `PrefixIter::advance_prefix`, which seeks
-  with them; realizing values from deltas; and the bridging deltas a delta
-  edit writes.
+  searches (`get_index_for_total`, `get_index_for_prefix`) and
+  `PrefixIter::advance_prefix`, which seeks with them (they compare and
+  divide sums, which needs a model of the prefix type's order, true only
+  while the sums don't wrap); `sum_range` and `delta`, which are glue over
+  the verified iterator; realizing values from deltas; and the bridging
+  deltas a delta edit writes.
 * Where a precondition of the verified code cannot be shown from the
   specifications (a slab of `i64::MAX` bytes or more, or a column or
   encoder of nearly `usize::MAX` items), the code checks it and panics

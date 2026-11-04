@@ -14,12 +14,13 @@ use crate::PackError;
 use std::ops::Range;
 
 use crate::btree::{FindByValueRange, SlabAgg};
-use crate::column::{Slab, TailOf, WeightFn};
-use crate::delta::agg::{agg_more, agg_run};
+use crate::column::{Dx, Slab, TailOf, WeightFn};
+use crate::delta::agg::{agg_run, slab_agg, DeltaOps};
 use crate::delta::{DeltaColumn, DeltaInner, DeltaValue};
 use crate::encoding::{ColumnEncoding, RunDecoder};
 use crate::ColumnValueRef;
 use crate::{Codec, Leb128};
+use std::marker::PhantomData;
 use vstd::prelude::Ghost;
 
 // Type aliases to keep the decoder / slab types readable in struct fields.
@@ -38,16 +39,18 @@ impl Sealed for IndexedDeltaWeightFn {}
 impl<I: DeltaInner, C: Codec> WeightFn<I, C> for IndexedDeltaWeightFn {
     type Weight = SlabAgg;
 
+    // verified (`agg::slab_agg`), given a well-formed slab
     fn compute(slab: &Slab<TailOf<I, C>>) -> SlabAgg {
-        compute_slab_agg::<I, C>(&slab.data)
+        slab_agg::<Dx<I, C>, DB<I>>(slab)
     }
 
     // `compute` re-decodes the slab; let the streaming loader accumulate
     // weights as the runs go past instead.
     const ACCUMULATES: bool = true;
 
-    /// Incremental twin of [`compute_slab_agg`]: both fold each run with
-    /// the same verified step (`agg_run`), so they agree by construction.
+    /// Incremental twin of `compute` (`agg::slab_agg`): both fold each
+    /// run with the same verified step (`agg_run`), so they agree by
+    /// construction.
     ///
     /// Checked arithmetic: this runs on untrusted bytes during load, and
     /// a within-slab partial overflowing `i64` is provably invalid — the
@@ -70,33 +73,20 @@ impl<I: DeltaInner, C: Codec> WeightFn<I, C> for IndexedDeltaWeightFn {
     }
 }
 
-/// Compute a `SlabAgg` by walking the encoding's run decoder.
-///
-/// For a run of `count` items with delta `v`, the realized-prefix
-/// progression is monotonic: `partial + v`, `partial + 2v`, …,
-/// `partial + count·v`.  Min/max are at the endpoints — no need to
-/// visit each intermediate item (`agg_run`, verified).
-fn compute_slab_agg<I: DeltaInner, C: Codec>(data: &[u8]) -> SlabAgg {
-    let mut decoder = <I as ColumnValueRef>::Encoding::<C>::decoder(data);
-    let mut w = SlabAgg::default();
-    // a loaded or edited slab's sums fit (the loader rejects others)
-    if let Some(run) = decoder.next_run() {
-        if !agg_run(&mut w, run.count, I::to_opt(run.value), Ghost::assume_new()) {
-            sum_overflows();
-        }
-        while let Some(run) = decoder.next_run() {
-            if !agg_more(&mut w, run.count, I::to_opt(run.value), Ghost::assume_new()) {
-                sum_overflows();
-            }
-        }
-    }
-    w
-}
+/// A delta column's values as deltas, for the verified aggregate
+/// (`agg::slab_agg`). Trusted: `DeltaInner::to_opt`.
+pub(crate) struct DB<I>(PhantomData<fn() -> I>);
 
-#[cold]
-#[inline(never)]
-fn sum_overflows() -> ! {
-    panic!("delta value overflows i64")
+impl<'a, I: DeltaInner> DeltaOps<I::Get<'a>> for DB<I> {
+    #[cfg(verus_keep_ghost)]
+    fn dv(_v: I::Get<'a>) -> Option<i64> {
+        unimplemented!()
+    }
+
+    #[inline(always)]
+    fn to_opt(v: I::Get<'a>) -> Option<i64> {
+        I::to_opt(v)
+    }
 }
 
 // ── Value-query methods ────────────────────────────────────────────────────

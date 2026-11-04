@@ -5,7 +5,7 @@ use std::ops::{Add, AddAssign, Div, Sub, SubAssign};
 
 use crate::column::{Column, Dx, Iter, Slab, SlabWeight, TailOf, WeightFn};
 use crate::encoding::{ColumnEncoding, RunDecoder};
-use crate::prefix_core::{p_next, p_next_run, p_nth, p_reset, PrefixOps};
+use crate::prefix_core::{p_next, p_next_run, p_nth, p_prefix, p_reset, p_slab_sum, PrefixOps};
 use crate::PackError;
 use crate::{Codec, Leb128};
 use crate::{ColumnValueRef, RleValue, Run};
@@ -292,11 +292,12 @@ impl<T> Sealed for PrefixWeightFn<T> {}
 impl<T: PrefixValue, C: Codec> WeightFn<T, C> for PrefixWeightFn<T> {
     type Weight = PrefixSlabWeight<T::Prefix>;
 
+    // the sum is verified (`prefix_core`), given a well-formed slab
     #[inline]
     fn compute(slab: &Slab<TailOf<T, C>>) -> PrefixSlabWeight<T::Prefix> {
         PrefixSlabWeight {
             len: slab.len,
-            prefix: T::slab_sum::<C>(slab),
+            prefix: p_slab_sum::<Dx<T, C>, PB<T>>(slab),
         }
     }
 
@@ -677,7 +678,8 @@ impl<T: PrefixValue, C: Codec> PrefixColumn<T, C> {
     /// indices `0..index`: what [`PrefixedValue::prefix`] shows for the
     /// item at `index`.
     pub fn get_prefix(&self, index: usize) -> T::Prefix {
-        self.iter_range(index..self.len()).total
+        // verified (`prefix_core`), given the column's invariant
+        p_prefix::<Dx<T, C>, PB<T>>(&self.col.slabs, &self.col.index, index)
     }
 
     /// **Inclusive** prefix sum through `index`: what
