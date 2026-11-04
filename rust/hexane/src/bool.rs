@@ -234,19 +234,9 @@ impl<C: Codec> ColumnEncoding for BoolEncoding<C> {
         bool_validate_encoding::<C>(slab)
     }
 
-    fn do_merge(
-        acc: &mut Vec<u8>,
-        start: usize,
-        a_tail: u8,
-        a_segments: usize,
-        b: &Slab,
-        _buf: &mut Vec<u8>,
-    ) -> (usize, u8) {
-        if b.len == 0 || b.data.is_empty() {
-            (a_segments, a_tail)
-        } else {
-            bool_merge_slabs::<C>(acc, start, a_tail, a_segments, b)
-        }
+    fn save_slabs(slabs: &[Slab], total: usize, out: &mut Vec<u8>) {
+        // verified
+        crate::bool_edit::save_slabs::<C>(slabs, total, out)
     }
 
     fn splice_slab<V: AsColumnRef<bool>>(

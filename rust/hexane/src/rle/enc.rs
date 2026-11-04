@@ -85,13 +85,19 @@ proof fn lemma_written_room<'a, W: WriteOps<'a>>(s: State<'a, W>, buf: Seq<u8>, 
     }
 }
 
+/// Owned copies, as many as the values.
+proof fn lemma_lift_len<'s, L: Lift<'s>>(vs: Seq<VOf<'s, L>>)
+    ensures lift_seq::<L>(vs).len() == vs.len(),
+{
+}
+
 /// The writer's state and output buffer, and the slabs cut from it.
 pub(crate) struct REncoder<'a, L: WriteOps<'a>> {
     pub(crate) data: Vec<u8>,
     pub(crate) state: State<'a, L>,
     /// segments accounted since the last cut
     pub(crate) segments: usize,
-    /// values appended since the encoder was made
+    /// values the encoder holds: in `slabs`, and since the last cut
     pub(crate) len: usize,
     /// slabs cut; only with a segment budget
     pub(crate) slabs: Vec<Slab>,
@@ -104,11 +110,17 @@ pub(crate) struct REncoder<'a, L: WriteOps<'a>> {
 }
 
 impl<'a, L> REncoder<'a, L> where L: for<'x> Lift<'x, W = L> {
-    pub(crate) open spec fn inv(&self) -> bool {
+    /// All of [`inv`](Self::inv) but the count of values appended.
+    pub(crate) open spec fn inv_parts(&self) -> bool {
         &&& written(self.state, self.data@, self.cur@, self.segments as int)
         &&& all_ok::<RleModel<L>>(self.slabs@)
-        &&& self.len == self.len_flushed + self.cur@.len()
+        &&& vals_of::<RleModel<L>>(self.slabs@).len() == self.len_flushed
         &&& self.len + 2 <= usize::MAX
+    }
+
+    pub(crate) open spec fn inv(&self) -> bool {
+        &&& self.inv_parts()
+        &&& self.len == self.len_flushed + self.cur@.len()
     }
 
     /// The values the encoder holds, owned: the slabs', then those since
@@ -139,14 +151,16 @@ impl<'a, L> REncoder<'a, L> where L: for<'x> Lift<'x, W = L> {
         e
     }
 
-    /// Flush, and take what was written since the last cut as a slab.
+    /// Flush, and take what was written since the last cut as a slab,
+    /// whose values the caller accounts for.
     /// `presize`: give the next buffer the capacity of this one.
     #[inline]
     fn seal(&mut self, presize: bool) -> (s: Slab)
         requires old(self).inv(),
         ensures
-            final(self).inv(), final(self).cur@.len() == 0, final(self).slabs@ == old(self).slabs@,
-            final(self).len == old(self).len, final(self).max_segments == old(self).max_segments,
+            final(self).inv_parts(), final(self).cur@.len() == 0, final(self).slabs@ == old(self).slabs@,
+            final(self).len == old(self).len, final(self).len_flushed == old(self).len_flushed,
+            final(self).max_segments == old(self).max_segments,
             RleModel::<L>::ok(s), RleModel::<L>::vals(s) == lift_seq::<L>(old(self).cur@),
             encodes::<<L as WriteOps<'a>>::R>(slab_bytes(s), old(self).cur@, slab_segments(s) as int),
     {
@@ -170,7 +184,6 @@ impl<'a, L> REncoder<'a, L> where L: for<'x> Lift<'x, W = L> {
         core::mem::swap(&mut self.data, &mut data);
         let s = new_slab(data, len, segments, tail);
         self.segments = 0;
-        self.len_flushed = self.len;
         proof {
             let eb = Seq::<u8>::empty();
             let b1 = slab_bytes(s);
@@ -209,6 +222,7 @@ impl<'a, L> REncoder<'a, L> where L: for<'x> Lift<'x, W = L> {
         let ghost v0 = old(self).values();
         let s = self.seal(presize);
         self.slabs.push(s);
+        self.len_flushed = self.len;
         proof {
             assert forall|i: int| 0 <= i < self.slabs@.len() implies #[trigger] RleModel::<L>::ok(self.slabs@[i]) by {
                 if i < s0.len() {
@@ -218,6 +232,7 @@ impl<'a, L> REncoder<'a, L> where L: for<'x> Lift<'x, W = L> {
             lemma_vals_cat::<RleModel<L>>(s0, seq![s]);
             lemma_vals_unit::<RleModel<L>>(s);
             assert(s0 + seq![s] =~= self.slabs@);
+            lemma_lift_len::<L>(old(self).cur@);
             assert(lift_seq::<L>(self.cur@) =~= Seq::<VOf<'static, L>>::empty());
             assert(self.values() =~= v0);
         }
@@ -307,6 +322,7 @@ impl<'a, L> REncoder<'a, L> where L: for<'x> Lift<'x, W = L> {
             assert(Seq::<VOf<'static, L>>::empty() + lift_seq::<L>(old(self).cur@) =~= lift_seq::<L>(old(self).cur@));
         }
         let s = self.seal(false);
+        self.len = self.len_flushed;
         s.data
     }
 
@@ -323,15 +339,19 @@ impl<'a, L> REncoder<'a, L> where L: for<'x> Lift<'x, W = L> {
             lemma_vals_unit::<RleModel<L>>(arbitrary());
             assert(Seq::<VOf<'static, L>>::empty() + lift_seq::<L>(old(self).cur@) =~= lift_seq::<L>(old(self).cur@));
         }
-        self.seal(false)
+        let s = self.seal(false);
+        self.len = self.len_flushed;
+        s
     }
 
-    /// Flush, and take every slab: those cut, then the last.
+    /// Flush, and take every slab: those cut, then the last. Their item
+    /// count is the encoder's `len`.
     pub(crate) fn take_slabs(&mut self) -> (v: Vec<Slab>)
         requires old(self).inv(),
         ensures
             final(self).inv(),
             all_ok::<RleModel<L>>(v@), vals_of::<RleModel<L>>(v@) == old(self).values(),
+            crate::fenwick::total(crate::cursor::slab_lens(v@)) == old(self).len,
     {
         self.cut(false);
         let mut v = Vec::new();
@@ -339,7 +359,11 @@ impl<'a, L> REncoder<'a, L> where L: for<'x> Lift<'x, W = L> {
         proof {
             assert(vals_of::<RleModel<L>>(v@) + Seq::<VOf<'static, L>>::empty() =~= vals_of::<RleModel<L>>(v@));
             assert(lift_seq::<L>(self.cur@) =~= Seq::<VOf<'static, L>>::empty());
+            crate::cursor::lemma_vals_total::<RleModel<L>>(v@);
+            lemma_vals_unit::<RleModel<L>>(arbitrary());
         }
+        self.len_flushed = 0;
+        self.len = 0;
         v
     }
 

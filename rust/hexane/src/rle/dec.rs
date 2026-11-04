@@ -803,6 +803,7 @@ impl<'a, O: RleOps<'a>> Dec<'a, O> {
     }
 
     /// A literal value taken: the value after it differs.
+    #[verifier::spinoff_prover]
     proof fn lemma_lit_ends(&self, p0: int, r0: usize, max: usize, value: O::V)
         requires
             self.inv(),
@@ -1952,6 +1953,7 @@ proof fn lemma_walk_header<'a, O: RleOps<'a>>(data: Seq<u8>, gi: int, pos: int, 
 }
 
 /// A repeat run: land in it, or step past it.
+#[verifier::spinoff_prover]
 fn walk_run<'a, W: WriteOps<'a>>(data: &'a [u8], at: usize, Ghost(gi): Ghost<int>, pos: usize, item: usize, segments: usize, prev_lit: Option<(usize, usize)>, hb: usize, count: usize) -> (r: Walk<'a, W>)
     requires
         walk_at::<W::R>(data@, at as int, gi, pos as int, item as int, segments as int),

@@ -20,7 +20,7 @@ use crate::encoder::RleEncoder;
 pub use decoder::RleDecoder;
 pub(crate) use decoder::RleDecoderState;
 pub(crate) use load::rle_validate_encoding;
-use splice::{do_merge, rle_merge, splice_slab};
+use splice::{rle_merge, splice_slab};
 
 use std::marker::PhantomData;
 use std::num::NonZeroU32;
@@ -190,15 +190,9 @@ where
         rle_validate_encoding::<T, C>(slab)
     }
 
-    fn do_merge(
-        acc: &mut Vec<u8>,
-        start: usize,
-        a_tail: RleTail,
-        a_segments: usize,
-        b: &Slab,
-        buf: &mut Vec<u8>,
-    ) -> (usize, RleTail) {
-        do_merge::<T, C>(acc, start, a_tail, a_segments, b, buf)
+    fn save_slabs(slabs: &[Slab], total: usize, out: &mut Vec<u8>) {
+        // verified
+        edit::save_slabs::<state::WOps<T, T, C>>(slabs, total, out)
     }
 
     fn splice_slab<V: AsColumnRef<T>>(

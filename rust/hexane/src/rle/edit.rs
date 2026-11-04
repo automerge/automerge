@@ -19,9 +19,9 @@
 // Verus proofs read more plainly with `x = x + n`.
 #![allow(clippy::len_zero, clippy::assign_op_pattern)]
 
-#[cfg(verus_keep_ghost)]
-use crate::cursor::lemma_concat_append;
 use crate::cursor::Slabs;
+#[cfg(verus_keep_ghost)]
+use crate::cursor::{lemma_concat_append, lemma_vals_cat, lemma_vals_unit, vals_of};
 use crate::edit::{EditSlab, SlabEdit};
 #[cfg(verus_keep_ghost)]
 use crate::rle::cut::{lemma_lit_tail_le, slab_ok};
@@ -46,6 +46,7 @@ use crate::{AsColumnRef, Codec, RleValue};
 use std::marker::PhantomData;
 #[allow(unused_imports)]
 use vstd::prelude::*;
+use vstd::slice::slice_subrange;
 
 verus! {
 
@@ -536,17 +537,7 @@ proof fn lemma_slab_of<'a, O: RleOps<'a>>(s: Slab, vals: Seq<O::V>)
         slab_ok::<O>(s),
         slab_values::<O>(slab_bytes(s)) == vals,
 {
-    let data = slab_bytes(s);
-    let gs = choose|gs: Seq<Group<O::V>>| #[trigger] canonical::<O>(gs) && groups_bytes::<O>(gs) == data
-        && groups_values(gs, O::null()) == vals && groups_segments(gs) == slab_segments(s) as int;
-    let gt = choose|gs: Seq<Group<O::V>>| #[trigger] canonical::<O>(gs) && groups_bytes::<O>(gs) == data
-        && tail_b(slab_tail_of(s)) as int == tail_bytes_of::<O>(gs) && tail_l(slab_tail_of(s)) as int == lit_tail_of::<O>(gs);
-    lemma_groups_unique::<O>(gs, gt);
-    lemma_groups_values_concat(gs, Seq::empty(), O::null());
-    reveal(parses);
-    assert(parses::<O>(gs, data));
-    let gc = slab_groups::<O>(data);
-    lemma_groups_unique::<O>(gs, gc);
+    lemma_meta_of::<O>(slab_bytes(s), vals, slab_segments(s) as int, slab_tail_of(s));
 }
 
 /// A slab of `len` copies of `value` (`ColumnEncoding::fill`): what a
@@ -632,6 +623,159 @@ pub(crate) proof fn lemma_written<'s, L>(s: Slab, vals: Seq<VOf<'s, L>>, w: WPos
     lemma_lift_encodes::<L>(data, vals, slab_segments(s) as int);
     lemma_lift_tail_ok::<L>(data, t.0, t.1);
     lemma_slab_of::<<L as WriteOps<'static>>::R>(s, lift_seq::<L>(vals));
+}
+
+/// Bytes that are the canonical encoding of `vals` with `segs` segments
+/// are a valid slab of them.
+proof fn lemma_valid_of<'a, O: RleOps<'a>>(data: Seq<u8>, vals: Seq<O::V>, segs: int)
+    requires
+        encodes::<O>(data, vals, segs),
+        vals.len() <= usize::MAX,
+    ensures
+        valid_slab::<O>(data),
+        slab_values::<O>(data) == vals,
+        groups_segments(slab_groups::<O>(data)) == segs,
+{
+    let gs = choose|gs: Seq<Group<O::V>>| #[trigger] canonical::<O>(gs) && groups_bytes::<O>(gs) == data
+        && groups_values(gs, O::null()) == vals && groups_segments(gs) == segs;
+    lemma_groups_values_concat(gs, Seq::empty(), O::null());
+    reveal(parses);
+    assert(parses::<O>(gs, data));
+    let gc = slab_groups::<O>(data);
+    lemma_groups_unique::<O>(gs, gc);
+}
+
+/// ... and with the tail record that encoding has, a well-formed slab's
+/// bytes and metadata.
+proof fn lemma_meta_of<'a, O: RleOps<'a>>(data: Seq<u8>, vals: Seq<O::V>, segs: int, t: RleTail)
+    requires
+        encodes::<O>(data, vals, segs),
+        tail_ok::<O>(data, tail_b(t) as int, tail_l(t) as int),
+        vals.len() <= usize::MAX,
+    ensures
+        slab_meta::<O>(data, segs, t),
+        slab_values::<O>(data) == vals,
+{
+    lemma_valid_of::<O>(data, vals, segs);
+    let gt = choose|gs: Seq<Group<O::V>>| #[trigger] canonical::<O>(gs) && groups_bytes::<O>(gs) == data
+        && tail_b(t) as int == tail_bytes_of::<O>(gs) && tail_l(t) as int == lit_tail_of::<O>(gs);
+    reveal(parses);
+    lemma_groups_unique::<O>(gt, slab_groups::<O>(data));
+}
+
+/// No bytes: the valid slab of no values.
+proof fn lemma_valid_empty<'a, O: RleOps<'a>>()
+    ensures
+        valid_slab::<O>(Seq::empty()),
+        slab_values::<O>(Seq::empty()) == Seq::<O::V>::empty(),
+{
+    let eg = Seq::<Group<O::V>>::empty();
+    assert(groups_bytes::<O>(eg) =~= Seq::<u8>::empty());
+    assert(groups_values(eg, O::null()) =~= Seq::<O::V>::empty());
+    assert(canonical::<O>(eg));
+    lemma_valid_of::<O>(Seq::empty(), Seq::empty(), 0);
+}
+
+/// The canonical encoding of the slabs' values, appended to `out`
+/// (`Column::save_to`): the first slab's bytes, then each of the others
+/// merged on. `total` is their item count, as a column records it.
+#[inline]
+pub(crate) fn save_slabs<L>(slabs: &[Slab], total: usize, out: &mut Vec<u8>)
+    where L: for<'x> Lift<'x, W = L>,
+    requires
+        crate::cursor::all_ok::<RleModel<L>>(slabs@),
+        total == crate::fenwick::total(crate::cursor::slab_lens(slabs@)),
+    ensures
+        final(out)@.take(old(out)@.len() as int) == old(out)@,
+        ({
+            let x = final(out)@.skip(old(out)@.len() as int);
+            &&& valid_slab::<<L as WriteOps<'static>>::R>(x)
+            &&& slab_values::<<L as WriteOps<'static>>::R>(x) == vals_of::<RleModel<L>>(slabs@)
+        }),
+{
+    let start = out.len();
+    let ghost s = slabs@;
+    let ghost o0 = out@;
+    if slabs.len() == 0 {
+        proof {
+            assert(out@.take(start as int) =~= o0);
+            assert(out@.skip(start as int) =~= Seq::<u8>::empty());
+            lemma_vals_unit::<RleModel<L>>(arbitrary());
+            lemma_valid_empty::<<L as WriteOps<'static>>::R>();
+        }
+        return;
+    }
+    // the merges' value counts: no column comes near
+    if total > usize::MAX - 3 {
+        slab_too_long();
+    }
+    out.extend_from_slice(slabs[0].data.as_slice());
+    let mut tail = slabs[0].tail;
+    let mut segments = slabs[0].segments;
+    let ghost mut n = slabs[0].len as int;
+    let mut buf = Vec::new();
+    proof {
+        assert(out@.take(start as int) =~= o0);
+        assert(out@.skip(start as int) =~= slabs[0].data@);
+        assert(s.take(1) =~= seq![s[0]]);
+        lemma_vals_unit::<RleModel<L>>(s[0]);
+        assert(RleModel::<L>::ok(s[0]));
+        crate::cursor::lemma_vals_total::<RleModel<L>>(s);
+    }
+    let mut i = 1;
+    while i < slabs.len()
+        invariant
+            s == slabs@, crate::cursor::all_ok::<RleModel<L>>(s),
+            total == vals_of::<RleModel<L>>(s).len(), total <= usize::MAX - 3,
+            1 <= i <= s.len(),
+            start == o0.len(), start <= out@.len(),
+            out@.take(start as int) == o0,
+            slab_meta::<<L as WriteOps<'static>>::R>(out@.skip(start as int), segments as int, tail),
+            slab_values::<<L as WriteOps<'static>>::R>(out@.skip(start as int)) == vals_of::<RleModel<L>>(s.take(i as int)),
+            n == slab_values::<<L as WriteOps<'static>>::R>(out@.skip(start as int)).len(),
+        decreases s.len() - i,
+    {
+        let ghost x0 = out@.skip(start as int);
+        let ghost va = slab_values::<<L as WriteOps<'static>>::R>(x0);
+        let ghost vb = slab_values::<<L as WriteOps<'static>>::R>(slabs[i as int].data@);
+        proof {
+            assert(RleModel::<L>::ok(s[i as int]));
+            assert(s.take(i + 1) =~= s.take(i as int) + seq![s[i as int]]);
+            lemma_vals_cat::<RleModel<L>>(s.take(i as int), seq![s[i as int]]);
+            lemma_vals_unit::<RleModel<L>>(s[i as int]);
+            // the values so far are among all of them
+            crate::cursor::lemma_vals_split::<RleModel<L>>(s, i + 1);
+        }
+        let b = &slabs[i];
+        if b.len > 0 {
+            // the merge's byte arithmetic: no slab comes near
+            if out.len() - start >= i64::MAX as usize {
+                slab_too_long();
+            }
+            let a = slice_subrange(out.as_slice(), start, out.len());
+            let p = merge_plan::<L>(a, segments, &tail, b.data.as_slice(), b.segments, &b.tail, &mut buf);
+            let ghost o1 = out@;
+            tail = merge_apply::<L>(out, start, &p, buf.as_slice(), b.data.as_slice(), &b.tail);
+            segments = p.segments;
+            proof {
+                n = n + b.len;
+                assert(o1.skip(start as int) =~= x0);
+                let m = merge_bytes::<L>(p, x0, buf@, b.data@);
+                assert(out@.take(start as int) =~= o0);
+                assert(out@.skip(start as int) =~= m);
+                lemma_meta_of::<<L as WriteOps<'static>>::R>(m, va + vb, segments as int, tail);
+            }
+        } else {
+            proof {
+                assert(vb =~= Seq::<VOf<'static, L>>::empty());
+                assert(va + vb =~= va);
+            }
+        }
+        i = i + 1;
+    }
+    proof {
+        assert(s.take(s.len() as int) =~= s);
+    }
 }
 
 /// A null value in a column that isn't nullable: none of the value types

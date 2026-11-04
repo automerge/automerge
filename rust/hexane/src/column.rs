@@ -1153,19 +1153,8 @@ where
 
     pub fn save_to(&self, out: &mut Vec<u8>) -> Range<usize> {
         let start = out.len();
-        if let Some(first) = self.slabs.first() {
-            out.extend_from_slice(&first.data);
-            let mut tail = first.tail;
-            let mut segments = first.segments;
-            let mut buf = Vec::new();
-            for s in &self.slabs[1..] {
-                let (new_seg, new_tail) =
-                    T::Encoding::<C>::do_merge(out, start, tail, segments, s, &mut buf);
-                segments = new_seg;
-                tail = new_tail;
-                buf.clear();
-            }
-        }
+        // verified with Verus: the canonical encoding of the slabs' values
+        T::Encoding::<C>::save_slabs(&self.slabs, self.total_len, out);
         start..out.len()
     }
 

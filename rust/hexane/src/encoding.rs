@@ -42,18 +42,11 @@ pub trait ColumnEncoding: Default {
     /// any invariant is violated.  This is intended for testing and debugging.
     fn validate_encoding(slab: &[u8]) -> Result<SlabInfo<Self::Tail>, PackError>;
 
-    /// Merge slab `b`'s data into accumulator `acc`, whose slab starts
-    /// at `start` (the bytes before belong to others).
-    /// `a_tail` and `a_segments` describe the current state of `acc`.
-    /// Returns `(segment_delta, new_tail)`, or `None` if `b` is empty.
-    fn do_merge(
-        acc: &mut Vec<u8>,
-        start: usize,
-        a_tail: Self::Tail,
-        a_segments: usize,
-        b: &Slab<Self::Tail>,
-        buf: &mut Vec<u8>,
-    ) -> (usize, Self::Tail);
+    /// Append the canonical encoding of the slabs' values to `out`: the
+    /// first slab's bytes, then each of the others merged on, joining
+    /// the runs that meet at each boundary. `total` is their item count.
+    /// Verified with Verus for each encoding, given well-formed slabs.
+    fn save_slabs(slabs: &[Slab<Self::Tail>], total: usize, out: &mut Vec<u8>);
 
     /// Splice a single slab: delete `del` items at `index`, insert values.
     /// Each iterator item is `(value, count)` — pass `count = 1` for a single

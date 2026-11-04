@@ -1697,6 +1697,7 @@ fn merge_join<K: CountOps>(
         b_segs == cb.len(), b_tail == counts_tail::<K>(cb),
         counts_len(ca) + counts_len(cb) <= usize::MAX,
     ensures
+        start <= final(a)@.len(),
         final(a)@.take(start as int) == old(a)@.take(start as int),
         merged_ok::<K>(final(a)@.skip(start as int), old(a)@.skip(start as int), bb, r),
 {
@@ -1779,6 +1780,7 @@ pub(crate) fn merge<K: CountOps>(a: &mut Vec<u8>, start: usize, a_tail: u8, a_se
         b_tail == counts_tail::<K>(bool_counts::<K>(b@)),
         counts_len(bool_counts::<K>(old(a)@.skip(start as int))) + counts_len(bool_counts::<K>(b@)) <= usize::MAX,
     ensures
+        start <= final(a)@.len(),
         final(a)@.take(start as int) == old(a)@.take(start as int),
         merged_ok::<K>(final(a)@.skip(start as int), old(a)@.skip(start as int), b@, r),
 {
@@ -1943,6 +1945,7 @@ fn merge_append<K: CountOps>(
         b_segs == cb.len(), b_tail == counts_tail::<K>(cb),
         counts_len(ca) + counts_len(cb) <= usize::MAX,
     ensures
+        start <= final(a)@.len(),
         final(a)@.take(start as int) == old(a)@.take(start as int),
         merged_ok::<K>(final(a)@.skip(start as int), old(a)@.skip(start as int), bb, r),
 {

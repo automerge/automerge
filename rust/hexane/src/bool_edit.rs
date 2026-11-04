@@ -20,6 +20,8 @@
 
 use crate::bool_wire::*;
 use crate::cursor::Slabs;
+#[cfg(verus_keep_ghost)]
+use crate::cursor::{lemma_vals_cat, lemma_vals_unit, vals_of};
 use crate::rle::edit::Visit;
 #[cfg(verus_keep_ghost)]
 use crate::rle::writer::concat;
@@ -1882,6 +1884,113 @@ proof fn lemma_bslab_ok<K: CountOps>(s: BSlab)
     reveal(bslab_len);
     reveal(bslab_segments);
     reveal(bslab_tail);
+}
+
+/// The canonical encoding of the slabs' values, appended to `out`
+/// (`Column::save_to`): the first slab's bytes, then each of the others
+/// merged on. `total` is their item count, as a column records it.
+#[inline]
+#[allow(unused_variables)] // `total` is for the spec: it bounds the merges' counts
+pub(crate) fn save_slabs<C: CountsOf>(slabs: &[BSlab], total: usize, out: &mut Vec<u8>)
+    requires
+        crate::cursor::all_ok::<BoolModel<C>>(slabs@),
+        total == crate::fenwick::total(crate::cursor::slab_lens(slabs@)),
+    ensures
+        final(out)@.take(old(out)@.len() as int) == old(out)@,
+        ({
+            let x = final(out)@.skip(old(out)@.len() as int);
+            &&& bool_valid::<C::K>(x)
+            &&& bool_values::<C::K>(x) == vals_of::<BoolModel<C>>(slabs@)
+        }),
+{
+    let start = out.len();
+    let ghost s = slabs@;
+    let ghost o0 = out@;
+    if slabs.len() == 0 {
+        proof {
+            assert(out@.take(start as int) =~= o0);
+            assert(out@.skip(start as int) =~= Seq::<u8>::empty());
+            lemma_vals_unit::<BoolModel<C>>(arbitrary());
+            let e = Seq::<u64>::empty();
+            assert(counts_bytes::<C::K>(e) =~= Seq::<u8>::empty());
+            lemma_counts::<C::K>(e, Seq::empty());
+            assert(counts_values(e) =~= Seq::<bool>::empty());
+        }
+        return;
+    }
+    out.extend_from_slice(slabs[0].data.as_slice());
+    let mut tail = slabs[0].tail;
+    let mut segments = slabs[0].segments;
+    let ghost mut n = slabs[0].len as int;
+    proof {
+        assert(out@.take(start as int) =~= o0);
+        assert(out@.skip(start as int) =~= slabs[0].data@);
+        assert(s.take(1) =~= seq![s[0]]);
+        lemma_vals_unit::<BoolModel<C>>(s[0]);
+        assert(BoolModel::<C>::ok(s[0]));
+        lemma_bslab::<C::K>(s[0]);
+        crate::cursor::lemma_vals_total::<BoolModel<C>>(s);
+    }
+    let mut i = 1;
+    while i < slabs.len()
+        invariant
+            s == slabs@, crate::cursor::all_ok::<BoolModel<C>>(s),
+            total == vals_of::<BoolModel<C>>(s).len(),
+            1 <= i <= s.len(),
+            start == o0.len(), start <= out@.len(),
+            out@.take(start as int) == o0,
+            bool_valid::<C::K>(out@.skip(start as int)),
+            segments == bool_counts::<C::K>(out@.skip(start as int)).len(),
+            tail == counts_tail::<C::K>(bool_counts::<C::K>(out@.skip(start as int))),
+            bool_values::<C::K>(out@.skip(start as int)) == vals_of::<BoolModel<C>>(s.take(i as int)),
+            n == counts_len(bool_counts::<C::K>(out@.skip(start as int))),
+        decreases s.len() - i,
+    {
+        let ghost x0 = out@.skip(start as int);
+        let ghost va = bool_values::<C::K>(x0);
+        let ghost vb = bool_values::<C::K>(slabs[i as int].data@);
+        proof {
+            assert(BoolModel::<C>::ok(s[i as int]));
+            lemma_bslab::<C::K>(s[i as int]);
+            assert(s.take(i + 1) =~= s.take(i as int) + seq![s[i as int]]);
+            lemma_vals_cat::<BoolModel<C>>(s.take(i as int), seq![s[i as int]]);
+            lemma_vals_unit::<BoolModel<C>>(s[i as int]);
+            // the values so far are among all of them
+            crate::cursor::lemma_vals_split::<BoolModel<C>>(s, i + 1);
+            lemma_values_len(bool_counts::<C::K>(x0));
+        }
+        let b = &slabs[i];
+        if b.len == 0 || b.data.len() == 0 {
+            proof {
+                if b.data@.len() == 0 {
+                    assert(b.data@ =~= Seq::<u8>::empty());
+                    let e = Seq::<u64>::empty();
+                    assert(counts_bytes::<C::K>(e) =~= Seq::<u8>::empty());
+                    lemma_counts::<C::K>(e, b.data@);
+                }
+                lemma_values_len(bool_counts::<C::K>(b.data@));
+                assert(vb =~= Seq::<bool>::empty());
+                assert(va + vb =~= va);
+            }
+        } else {
+            let ghost o1 = out@;
+            let r = merge::<C::K>(out, start, tail, segments, b.data.as_slice(), b.segments, b.tail);
+            segments = r.0;
+            tail = r.1;
+            proof {
+                n = n + b.len;
+                assert(o1.skip(start as int) =~= x0);
+                let m = out@.skip(start as int);
+                lemma_values_len(bool_counts::<C::K>(x0));
+                lemma_values_len(bool_counts::<C::K>(b.data@));
+                lemma_values_len(bool_counts::<C::K>(m));
+            }
+        }
+        i = i + 1;
+    }
+    proof {
+        assert(s.take(s.len() as int) =~= s);
+    }
 }
 
 /// A slab of `len` copies of `value`: a count of `len`, after a zero

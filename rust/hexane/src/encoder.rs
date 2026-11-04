@@ -19,7 +19,6 @@ use crate::column::{Column, Slab, DEFAULT_MAX_SEG};
 use crate::encoding::EncoderApi;
 use crate::index::ColumnIndex;
 use crate::rle::enc::REncoder;
-use crate::rle::splice::do_merge;
 use crate::rle::state::{FlushState, RleCow, RleState, WOps};
 use crate::rle::RleEncoding;
 use crate::rle::RleTail;
@@ -216,20 +215,10 @@ impl<'a, T: RleValue, C: Codec> RleEncoder<'a, T, C> {
             return start..out.len();
         }
         // Slab rollover happened — fold the slabs back into canonical
-        // bytes, merging boundary runs (same walk as `Column::save_to`).
-        let slabs = self.take_slabs();
-        let mut iter = slabs.into_iter();
-        let first = iter.next().expect("take_slabs: slabs are non-empty");
-        out.extend_from_slice(&first.data);
-        let mut tail = first.tail;
-        let mut segments = first.segments;
-        let mut buf = Vec::new();
-        for s in iter {
-            let (new_seg, new_tail) = do_merge::<T, C>(out, start, tail, segments, &s, &mut buf);
-            segments = new_seg;
-            tail = new_tail;
-            buf.clear();
-        }
+        // bytes, merging boundary runs (as `Column::save_to` does; verified
+        // with Verus).
+        let total = self.e.len;
+        crate::rle::edit::save_slabs::<WOps<T, T, C>>(&self.take_slabs(), total, out);
         start..out.len()
     }
 
