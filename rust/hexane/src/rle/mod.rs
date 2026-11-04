@@ -2,6 +2,7 @@ pub(crate) mod cut;
 pub(crate) mod dec;
 mod decoder;
 pub mod edit;
+pub(crate) mod enc;
 pub(crate) mod lift;
 mod load;
 pub(crate) mod merge;

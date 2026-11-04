@@ -592,7 +592,6 @@ pub(crate) fn fill<'s, L>(value: <L as WriteOps<'s>>::Cow, len: usize) -> (s: Sl
         let (gs, ws) = choose|gs: Seq<Group<VOf<'s, L>>>, ws: Seq<VOf<'s, L>>| #[trigger] rel(s1, eb, b1, 0, gs, ws, h0)
             && values_of(s1, gs, ws) == values_of(s0, eg, ev) + copies(len as nat, v)
             && acc(s1, gs, ws) == acc(s0, eg, ev) + f1.segments;
-        let a = all_groups(s1, gs, ws);
         assert(s.data@.skip(0) =~= s.data@);
         assert(eb + s.data@ =~= s.data@);
         assert(values_of(s0, eg, ev) + copies(len as nat, v) =~= copies(len as nat, v));
@@ -600,16 +599,39 @@ pub(crate) fn fill<'s, L>(value: <L as WriteOps<'s>>::Cow, len: usize) -> (s: Sl
         lemma_flush_tail::<L>(s1, eb, b1, gs, ws, h0, s.data@, f2.rewrite, f2.segments as int, f2.wpos);
         let t = tail_after(f2.wpos, 0, 0, s.data@.len() as int, 0, tail_b(tail0) as int, tail_l(tail0) as int);
         assert(tail_ok::<<L as WriteOps<'s>>::R>(s.data@, t.0, t.1));
-        let gt = choose|gt: Seq<Group<VOf<'s, L>>>| #[trigger] canonical::<<L as WriteOps<'s>>::R>(gt)
-            && groups_bytes::<<L as WriteOps<'s>>::R>(gt) == s.data@
-            && t.0 == tail_bytes_of::<<L as WriteOps<'s>>::R>(gt) && t.1 == lit_tail_of::<<L as WriteOps<'s>>::R>(gt);
-        lemma_lit_tail_le::<<L as WriteOps<'s>>::R>(gt);
-        lemma_lift_encodes::<L>(s.data@, copies(len as nat, v), segments as int);
-        lemma_lift_tail_ok::<L>(s.data@, t.0, t.1);
+        lemma_written::<L>(s, copies(len as nat, v), f2.wpos, tail_b(tail0) as int, tail_l(tail0) as int);
         assert(lift_seq::<L>(copies(len as nat, v)) =~= copies(len as nat, <L as Lift<'s>>::lift(v)));
-        lemma_slab_of::<<L as WriteOps<'static>>::R>(s, copies(len as nat, <L as Lift<'s>>::lift(v)));
     }
     s
+}
+
+/// A slab a writer wrote from empty and flushed — the canonical encoding
+/// of `vals`, its segments counted, and the tail record `merge_tail`
+/// makes of the flush's position `w` — is well-formed, and holds their
+/// owned copies.
+pub(crate) proof fn lemma_written<'s, L>(s: Slab, vals: Seq<VOf<'s, L>>, w: WPos, tb: int, tl: int)
+    where L: for<'x> Lift<'x, W = L>,
+    requires
+        encodes::<<L as WriteOps<'s>>::R>(slab_bytes(s), vals, slab_segments(s) as int),
+        ({
+            let t = tail_after(w, 0, 0, slab_bytes(s).len() as int, 0, tb, tl);
+            &&& tail_ok::<<L as WriteOps<'s>>::R>(slab_bytes(s), t.0, t.1)
+            &&& 0 <= t.1 <= t.0 ==> tail_b(slab_tail_of(s)) == t.0 && tail_l(slab_tail_of(s)) == t.1
+        }),
+        slab_len(s) == vals.len(),
+    ensures
+        RleModel::<L>::ok(s),
+        RleModel::<L>::vals(s) == lift_seq::<L>(vals),
+{
+    let data = slab_bytes(s);
+    let t = tail_after(w, 0, 0, data.len() as int, 0, tb, tl);
+    let gt = choose|gt: Seq<Group<VOf<'s, L>>>| #[trigger] canonical::<<L as WriteOps<'s>>::R>(gt)
+        && groups_bytes::<<L as WriteOps<'s>>::R>(gt) == data
+        && t.0 == tail_bytes_of::<<L as WriteOps<'s>>::R>(gt) && t.1 == lit_tail_of::<<L as WriteOps<'s>>::R>(gt);
+    lemma_lit_tail_le::<<L as WriteOps<'s>>::R>(gt);
+    lemma_lift_encodes::<L>(data, vals, slab_segments(s) as int);
+    lemma_lift_tail_ok::<L>(data, t.0, t.1);
+    lemma_slab_of::<<L as WriteOps<'static>>::R>(s, lift_seq::<L>(vals));
 }
 
 /// A null value in a column that isn't nullable: none of the value types
@@ -617,7 +639,7 @@ pub(crate) fn fill<'s, L>(value: <L as WriteOps<'s>>::Cow, len: usize) -> (s: Sl
 #[verifier::external_body]
 #[cold]
 #[inline(never)]
-fn null_in_column(Ghost(why): Ghost<bool>)
+pub(crate) fn null_in_column(Ghost(why): Ghost<bool>)
     requires
         why,
     ensures

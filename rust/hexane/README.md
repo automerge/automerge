@@ -288,6 +288,11 @@ compiles them away. To check them, run `cargo verus verify -p hexane
 * Building a column: its index and length are computed from its slabs,
   checking that each slab's weight counts its items, and `Column::fill`
   makes a well-formed slab of the values asked for.
+* The streaming encoders (`RleEncoder`, `BoolEncoder`): without a segment
+  budget, the bytes `save` returns are the canonical encoding of the values
+  appended. With one, every slab they cut is well-formed, and together the
+  slabs hold the values appended, in order. `save_to_unless` writes nothing
+  only if every value equals the one given.
 * The value search of `Column` and its iterator (`scope_to_value`,
   `seek_to_value`): where the values in the window are sorted, it returns
   exactly the range of them equal to the target, or, if there are none,
@@ -298,10 +303,9 @@ compiles them away. To check them, run `cargo verus verify -p hexane
 **Trusted, not proved:** each value type's and codec's own encode and
 decode, which the verified code reaches through traits; the thin glue that
 connects the generic column types to the verified cores, and the closures
-and slab weights passed through it; that each value type's `Ord` agrees
-with its `==`; and that the slabs a new column is built from are
-well-formed. Those come from the verified loaders and `fill`, through the
-glue, or from the RLE encoder, whose slab cutting is not verified.
+and slab weights passed through it (including the slabs a new column is
+built from, which come from the verified loaders, fills and encoders); and
+that each value type's `Ord` agrees with its `==`.
 
 **Known limitations:**
 
@@ -315,6 +319,9 @@ glue, or from the RLE encoder, whose slab cutting is not verified.
   (`find_by_value`, insert, remove, load), so performance was preferred.
 * The prefix and delta columns' own logic (running sums, realizing values,
   value search over them) is not verified.
+* Saving a column of several slabs joins them with the verified slab
+  merge, but the loop over the slabs is not verified; nor are the RLE
+  encoder's one-shot `encode_to` paths or `RleEncoderState`.
 * Where a precondition of the verified code cannot be shown from the
   specifications (a slab of `i64::MAX` bytes or more, or a column of nearly
   `usize::MAX` items), the code checks it and panics rather than assume it.

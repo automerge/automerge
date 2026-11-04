@@ -502,6 +502,8 @@ proof fn lemma_lit_tail_facts<'a, O: RleOps<'a>>(data: Seq<u8>, at: int, v: O::V
         &&& lit > 0 ==> group_ok::<O>(Group::Lit { values: l }) && v != l[0] && l.last() == vs.last()
     }),
 {
+    // group_ok's quantifiers can loop; nothing here needs its body
+    hide(group_ok);
     let gs = slab_groups::<O>(data);
     let vs = gs[i]->values;
     let l = vs.skip(j + 1);

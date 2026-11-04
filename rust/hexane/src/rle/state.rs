@@ -1167,7 +1167,17 @@ impl<'a, W: WriteOps<'a>> State<'a, W> {
         }
     }
 
-    pub(crate) fn single_run_of(&self, value: &W::Cow) -> bool {
+    /// The state holds nothing, or one run of `value` pending.
+    pub(crate) fn single_run_of(&self, value: &W::Cow) -> (r: bool)
+        ensures
+            r == match *self {
+                State::Empty => true,
+                State::Lone(v) => W::val(v) == W::val(*value),
+                State::Run(_, v) => W::val(v) == W::val(*value),
+                State::Null(_) => <W::R as RleOps<'a>>::is_null(W::val(*value)),
+                State::Lit { .. } => false,
+            },
+    {
         match self {
             State::Empty => true,
             State::Lone(v) => W::cow_eq(v, value),
