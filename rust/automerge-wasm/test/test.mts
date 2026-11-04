@@ -541,6 +541,18 @@ describe("Automerge", () => {
       assert.deepEqual(C.getWithType("_root", "text"), ["text", "1@aabbcc"]);
       assert.deepEqual(C.text(At), "hell! world");
     });
+
+    it("should round floats to an int if they're exactly that integer", () => {
+      const doc: Automerge = create({ actor: "aabbcc" });
+      // Highest double that isn't 1.0
+      doc.put("_root", "almostOne", 0.9999999999999999);
+      doc.put("_root", "one", 1.0);
+      doc.put("_root", "twentysix", 26.0);
+
+      assert.deepEqual(doc.getWithType("_root", "almostOne"), ["f64", 0.9999999999999999]);
+      assert.deepEqual(doc.getWithType("_root", "one"), ["int", 1]);
+      assert.deepEqual(doc.getWithType("_root", "twentysix"), ["int", 26]);
+    });
   });
 
   describe("loadIncremental", () => {
