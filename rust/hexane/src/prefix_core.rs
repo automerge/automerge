@@ -110,7 +110,7 @@ proof fn lemma_vsum_push<V: Copy, B: PrefixOps<V>>(vs: Seq<V>, v: V)
 }
 
 /// Sums add over concatenation.
-proof fn lemma_vsum_cat<V: Copy, B: PrefixOps<V>>(a: Seq<V>, b: Seq<V>)
+pub(crate) proof fn lemma_vsum_cat<V: Copy, B: PrefixOps<V>>(a: Seq<V>, b: Seq<V>)
     ensures vsum::<V, B>(a + b) == prefix_add(vsum::<V, B>(a), vsum::<V, B>(b)),
     decreases b.len(),
 {
@@ -127,7 +127,7 @@ proof fn lemma_vsum_cat<V: Copy, B: PrefixOps<V>>(a: Seq<V>, b: Seq<V>)
 }
 
 /// A run's sum.
-proof fn lemma_vsum_run<V: Copy, B: PrefixOps<V>>(n: nat, v: V)
+pub(crate) proof fn lemma_vsum_run<V: Copy, B: PrefixOps<V>>(n: nat, v: V)
     ensures vsum::<V, B>(Seq::new(n, |_i: int| v)) == reps(n, B::contrib(v)),
     decreases n,
 {
@@ -169,7 +169,7 @@ pub(crate) open spec fn ix_ok<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>
 }
 
 /// The index's sums before slab `k` are those of the values before it.
-proof fn lemma_fold<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>(
+pub(crate) proof fn lemma_fold<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>(
     ws: Seq<PrefixSlabWeight<B::P>>,
     s: Seq<Slab<X::Tail>>,
     k: int,

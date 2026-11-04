@@ -1731,7 +1731,7 @@ impl<'a, T: DeltaValue, C: Codec> DeltaIter<'a, T, C> {
         // the window start keeps this correct — just slower.
         let mut probe = self.clone();
         if let Some(col) = probe.col {
-            let (si, prefix, pos) = col.index.find_slab_at_prefix(t);
+            let (si, prefix, pos) = col.index.find_slab_at_prefix(&t);
             if pos > probe.pos() && pos < end {
                 probe.running = prefix;
                 if !probe.inner.advance_to_slab(si, pos) {

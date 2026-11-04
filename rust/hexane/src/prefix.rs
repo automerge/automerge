@@ -9,6 +9,7 @@ use crate::index::IndexOps;
 use crate::prefix_core::{
     p_next, p_next_run, p_nth, p_prefix, p_reset, p_slab_sum, p_slab_sum_checked, PrefixOps,
 };
+use crate::prefix_search::{p_index_for_prefix, PrefixOrd};
 use crate::PackError;
 use crate::{Codec, Leb128};
 use crate::{ColumnValueRef, RleValue, Run};
@@ -18,8 +19,8 @@ use vstd::prelude::Ghost;
 
 /// Marker trait for unsigned prefix types.
 ///
-/// `get_index_for_prefix`, `get_index_for_total`, `find_prefix_in_slab`,
-/// and `advance_prefix` rely on monotonically increasing prefix sums.
+/// `get_index_for_prefix`, `get_index_for_total` and `advance_prefix`
+/// rely on monotonically increasing prefix sums.
 /// Signed prefix types (e.g. `i128`) can decrease, making these operations
 /// incorrect. This trait gates those methods at compile time.
 ///
@@ -150,49 +151,6 @@ pub trait PrefixValue: ColumnValueRef {
         }
         acc
     }
-}
-
-/// Find the first index within a slab where the running sum reaches or
-/// exceeds `target`.  Returns items consumed.
-///
-/// Only correct for unsigned prefix types where sums are monotonically
-/// increasing.  Callers are gated by `T::Prefix: UnsignedPrefix`.
-fn find_prefix_in_slab<T: PrefixValue, C: Codec>(
-    slab: &Slab<TailOf<T, C>>,
-    target: T::Prefix,
-) -> usize
-where
-    T::Prefix: UnsignedPrefix + Div<Output = T::Prefix> + TryInto<usize> + TryFrom<usize> + Ord,
-{
-    let zero = T::Prefix::default();
-    let one_p = T::Prefix::try_from(1).unwrap_or_default();
-    let mut decoder = T::Encoding::<C>::decoder(&slab.data);
-    let mut acc = zero;
-    let mut items = 0;
-    while let Some(run) = decoder.next_run() {
-        // Peek at the run's contribution without losing `acc`.  This
-        // function is bounded on `UnsignedPrefix` which implies `Copy`,
-        // so the assignment is a memcpy rather than a clone.
-        let mut peek = acc;
-        T::accumulate_run(&mut peek, &run);
-        if peek >= target {
-            // Target is within this run — ceiling division by the
-            // single-value contribution `p`. `remaining` is at least one
-            // (`acc` is below `target`), and `remaining + p - 1` could
-            // overflow when the sums come near the prefix type's limit.
-            let mut p = T::Prefix::default();
-            T::accumulate(&mut p, run.value);
-            let remaining = target - acc;
-            let needed: T::Prefix = (remaining - one_p) / p + one_p;
-            let needed_usize: usize = needed.try_into().unwrap_or(run.count);
-            assert!(needed_usize <= run.count);
-            items += needed_usize;
-            break;
-        }
-        acc = peek;
-        items += run.count;
-    }
-    items
 }
 
 // ── Compound weight ──────────────────────────────────────────────────────────
@@ -841,23 +799,9 @@ where
     /// Returns `0` when `target` is zero (or non-positive) and
     /// `len() + 1` when `target` exceeds the grand total.
     pub fn get_index_for_prefix(&self, target: T::Prefix) -> usize {
-        if target <= T::Prefix::default() {
-            return 0;
-        }
-        if self.col.is_empty() {
-            return self.col.len() + 1;
-        }
-
-        let (si, prefix_before, items_before) = self.col.index.find_slab_at_prefix(target);
-
-        if si >= self.col.slab_count() {
-            return self.col.len() + 1;
-        }
-
-        let remaining = target - prefix_before;
-        let slab = &self.col.slabs[si];
-        let idx_in_slab = find_prefix_in_slab::<T, C>(slab, remaining);
-        items_before + idx_in_slab
+        // verified (`prefix_search`), where the column's sum fits its
+        // prefix type
+        p_index_for_prefix::<Dx<T, C>, PB<T>>(&self.col.slabs, &self.col.index, target)
     }
 }
 
@@ -1028,6 +972,31 @@ impl<'a, T: PrefixValue> PrefixOps<T::Get<'a>> for PB<T> {
     #[inline(always)]
     fn add_to(a: &mut T::Prefix, b: &T::Prefix) {
         *a += b
+    }
+}
+
+// The order model of an unsigned prefix type (`prefix_search`).
+impl<'a, T: PrefixValue> PrefixOrd<T::Get<'a>> for PB<T>
+where
+    T::Prefix: UnsignedPrefix + Div<Output = T::Prefix> + TryInto<usize> + TryFrom<usize> + Ord,
+{
+    #[cfg(verus_keep_ghost)]
+    fn axiom_pnum(_a: T::Prefix, _b: T::Prefix) {}
+
+    #[inline(always)]
+    fn le(a: &T::Prefix, b: &T::Prefix) -> bool {
+        *a <= *b
+    }
+
+    #[inline(always)]
+    fn div_ceil(a: &T::Prefix, b: &T::Prefix) -> T::Prefix {
+        let one = T::Prefix::try_from(1).unwrap_or_default();
+        (*a - one) / *b + one
+    }
+
+    #[inline(always)]
+    fn to_usize(p: &T::Prefix) -> Option<usize> {
+        (*p).try_into().ok()
     }
 }
 

@@ -3381,7 +3381,7 @@ impl<A: SlabAggregate> SlabBTree<A> {
     /// every slab end it passes that reaches `target` is followed, before
     /// the result, by one that doesn't.
     #[verifier::spinoff_prover]
-    pub(crate) fn find_slab_at_prefix(&self, target: A::Prefix) -> (r: (usize, A::Prefix, usize))
+    pub(crate) fn find_slab_at_prefix(&self, target: &A::Prefix) -> (r: (usize, A::Prefix, usize))
         where A: OrdPrefix
         requires
             self.wf(),
@@ -3390,10 +3390,10 @@ impl<A: SlabAggregate> SlabBTree<A> {
             r.0 <= self@.len(),
             r.1 == pre_at(self@, r.0 as int),
             r.2 == sum_len(self@.subrange(0, r.0 as int)),
-            r.0 < self@.len() ==> reached(self@, target, r.0 + 1),
-            passed(self@, target, r.0 as int),
-            stays_reached(self@, target)
-                ==> forall|k: int| 0 < k <= r.0 ==> !#[trigger] reached(self@, target, k),
+            r.0 < self@.len() ==> reached(self@, *target, r.0 + 1),
+            passed(self@, *target, r.0 as int),
+            stays_reached(self@, *target)
+                ==> forall|k: int| 0 < k <= r.0 ==> !#[trigger] reached(self@, *target, k),
     {
         let ghost view = self@;
         let ghost mut h = self.height();
@@ -3421,8 +3421,8 @@ impl<A: SlabAggregate> SlabBTree<A> {
                 slab_base == left.len(),
                 acc_items == sum_len(left),
                 acc_prefix == pre_at(view, slab_base as int),
-                passed(view, target, slab_base as int),
-                (self.slabs(node, h).len() > 0 && reached(view, target, (left.len() + self.slabs(node, h).len()) as int))
+                passed(view, *target, slab_base as int),
+                (self.slabs(node, h).len() > 0 && reached(view, *target, (left.len() + self.slabs(node, h).len()) as int))
                     || (left.len() == 0 && right.len() == 0),
             decreases h,
         {
@@ -3445,10 +3445,10 @@ impl<A: SlabAggregate> SlabBTree<A> {
                             slab_base == left.len(),
                             acc_items == sum_len(left) + sum_len(aggs.take(i as int)),
                             acc_prefix == pre_at(view, left.len() + i),
-                            passed(view, target, left.len() + i),
-                            (aggs.len() > 0 && reached(view, target, (left.len() + aggs.len()) as int))
+                            passed(view, *target, left.len() + i),
+                            (aggs.len() > 0 && reached(view, *target, (left.len() + aggs.len()) as int))
                                 || (left.len() == 0 && right.len() == 0),
-                            i > 0 ==> !reached(view, target, left.len() + i),
+                            i > 0 ==> !reached(view, *target, left.len() + i),
                         decreases aggs.len() - i,
                     {
                         let a = &l.aggs[i];
@@ -3466,16 +3466,16 @@ impl<A: SlabAggregate> SlabBTree<A> {
                             lemma_sum_len_concat(left + aggs, right);
                         }
                         let after = A::plus_prefix(&acc_prefix, a.prefix());
-                        if A::le_prefix(&target, &after) {
+                        if A::le_prefix(target, &after) {
                             proof {
-                                if stays_reached(view, target) {
-                                    lemma_passed_first(view, target, j);
+                                if stays_reached(view, *target) {
+                                    lemma_passed_first(view, *target, j);
                                 }
                             }
                             return (slab_base + i, acc_prefix, acc_items);
                         }
                         proof {
-                            lemma_passed_step(view, target, j, j + 1);
+                            lemma_passed_step(view, *target, j, j + 1);
                         }
                         acc_prefix = after;
                         acc_items += a.len();
@@ -3485,8 +3485,8 @@ impl<A: SlabAggregate> SlabBTree<A> {
                         assert(aggs.take(i as int) =~= aggs);
                         assert(view =~= aggs);
                         assert(view.subrange(0, view.len() as int) =~= view);
-                        if stays_reached(view, target) {
-                            lemma_passed_first(view, target, view.len() as int);
+                        if stays_reached(view, *target) {
+                            lemma_passed_first(view, *target, view.len() as int);
                         }
                     }
                     return (slab_base + l.aggs.len(), acc_prefix, acc_items);
@@ -3512,11 +3512,11 @@ impl<A: SlabAggregate> SlabBTree<A> {
                             slab_base == left.len() + self.children_slabs(cs.take(k as int), hc).len(),
                             acc_items == sum_len(left) + sum_len(self.children_slabs(cs.take(k as int), hc)),
                             acc_prefix == pre_at(view, slab_base as int),
-                            passed(view, target, slab_base as int),
+                            passed(view, *target, slab_base as int),
                             (self.children_slabs(cs, hc).len() > 0
-                                && reached(view, target, (left.len() + self.children_slabs(cs, hc).len()) as int))
+                                && reached(view, *target, (left.len() + self.children_slabs(cs, hc).len()) as int))
                                 || (left.len() == 0 && right.len() == 0),
-                            k > 0 ==> !reached(view, target, slab_base as int),
+                            k > 0 ==> !reached(view, *target, slab_base as int),
                             sum_len(left) + sum_len(self.children_slabs(cs, hc)) <= usize::MAX,
                         invariant
                             self.wf(), view == self@, valid(view), cs == n.children@, cs.len() > 0, h0 > 0, hc == h0 - 1,
@@ -3528,9 +3528,9 @@ impl<A: SlabAggregate> SlabBTree<A> {
                             slab_base == left.len(),
                             acc_items == sum_len(left),
                             acc_prefix == pre_at(view, slab_base as int),
-                            passed(view, target, slab_base as int),
+                            passed(view, *target, slab_base as int),
                             self.slabs(node, h).len() > 0
-                                && reached(view, target, (left.len() + self.slabs(node, h).len()) as int),
+                                && reached(view, *target, (left.len() + self.slabs(node, h).len()) as int),
                         decreases cs.len() - k,
                     {
                         if k == n.children.len() {
@@ -3538,8 +3538,8 @@ impl<A: SlabAggregate> SlabBTree<A> {
                                 assert(cs.take(k as int) =~= cs);
                                 assert(view =~= self.children_slabs(cs, hc));
                                 assert(view.subrange(0, view.len() as int) =~= view);
-                                if stays_reached(view, target) {
-                                    lemma_passed_first(view, target, view.len() as int);
+                                if stays_reached(view, *target) {
+                                    lemma_passed_first(view, *target, view.len() as int);
                                 }
                             }
                             return (slab_base, acc_prefix, acc_items);
@@ -3560,7 +3560,7 @@ impl<A: SlabAggregate> SlabBTree<A> {
                             lemma_fold_prefix(view, p, q);
                         }
                         let after = A::plus_prefix(&acc_prefix, c.agg.prefix());
-                        if A::le_prefix(&target, &after) {
+                        if A::le_prefix(target, &after) {
                             proof {
                                 lemma_sum_len_concat(left, before);
                                 left = left + before;
@@ -3571,7 +3571,7 @@ impl<A: SlabAggregate> SlabBTree<A> {
                             break;
                         }
                         proof {
-                            lemma_passed_step(view, target, p, q);
+                            lemma_passed_step(view, *target, p, q);
                         }
                         acc_prefix = after;
                         acc_items += c.agg.len();
@@ -5967,13 +5967,13 @@ mod tests {
         let weights: Vec<_> = (0..10).map(|i| psw(5, (i + 1) as i64 * 10)).collect();
         let tree = SlabBTree::from_iter(weights);
         // Prefix sum of slab 0 is 10; target=10 lands in slab 0 (≤ 10).
-        assert_eq!(tree.find_slab_at_prefix(10), (0, 0, 0));
+        assert_eq!(tree.find_slab_at_prefix(&10), (0, 0, 0));
         // Target 15: crosses into slab 1 (0+10 < 15 <= 0+10+20=30).
-        assert_eq!(tree.find_slab_at_prefix(15), (1, 10, 5));
+        assert_eq!(tree.find_slab_at_prefix(&15), (1, 10, 5));
         // Target 100: prefix_before slab 3 = 60; slab 3 ends at 100; target=100 ≤ 100 → slab 3.
-        assert_eq!(tree.find_slab_at_prefix(100), (3, 60, 15));
+        assert_eq!(tree.find_slab_at_prefix(&100), (3, 60, 15));
         // Target past total (sum = 550): one-past-end.
-        assert_eq!(tree.find_slab_at_prefix(9999), (10, 550, 50));
+        assert_eq!(tree.find_slab_at_prefix(&9999), (10, 550, 50));
     }
 
     // ── Fuzz: find_slab, find_slab_at_item, find_slab_at_prefix, root_agg ──
@@ -6112,7 +6112,7 @@ mod tests {
                 if total_prefix > 0 && reference.iter().all(|a| a.total >= 0) {
                     for _ in 0..3 {
                         let target = rng.random_range(1..=total_prefix);
-                        let got = tree.find_slab_at_prefix(target);
+                        let got = tree.find_slab_at_prefix(&target);
                         let want = reference_find_slab_at_prefix(&reference, target);
                         assert_eq!(
                             got, want,
@@ -6266,7 +6266,7 @@ mod tests {
                 // find_slab_at_prefix
                 if total_prefix > 0 {
                     let target = rng.random_range(1..=total_prefix);
-                    let (si, prefix_before, items_before) = tree.find_slab_at_prefix(target);
+                    let (si, prefix_before, items_before) = tree.find_slab_at_prefix(&target);
                     let mut exp_prefix = 0u64;
                     let mut exp_items = 0;
                     let mut exp_si = reference.len();

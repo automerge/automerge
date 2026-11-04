@@ -121,6 +121,7 @@ pub mod load_opts;
 pub(crate) mod merge_walk;
 pub mod prefix;
 pub(crate) mod prefix_core;
+pub(crate) mod prefix_search;
 pub mod raw;
 pub mod rle;
 pub mod shift;
