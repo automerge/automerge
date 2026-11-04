@@ -324,8 +324,11 @@ compiles them away. To check them, run `cargo verus verify -p hexane
   `nth` jumps to a far slab.
 * Prefix searches: `get_index_for_prefix` returns exactly the first index
   whose prefix sum reaches the target, or one past the end if none does
-  (`get_index_for_total` is that less one), whenever the column's sum fits
-  its prefix type, which loads and edits check.
+  (`get_index_for_total` is that less one); and `PrefixIter::advance_prefix(n)`
+  lands on the first item in the iterator's window whose running sum,
+  from the iterator's position, exceeds `n`, or else runs to the window's
+  end and returns `None`. Both whenever the column's sum fits its prefix
+  type, which loads and edits check.
 
 **Trusted, not proved:** each value type's and codec's own encode and
 decode, which the verified code reaches through traits; the thin glue that
@@ -341,8 +344,9 @@ repeated) and `try_accumulate_run` (that when it succeeds it adds what
 `accumulate_run` does), and that its prefix type's `+` is associative with `default`
 its identity and `b + (a - b) == a`, as for wrapping integers; for the
 prefix searches, that an unsigned prefix type's values are numbers, whose
-sums (where they fit) and differences are its `+` and `-`, whose order is
-its `<=`, and which its `/` and `try_into` divide and convert; the delta
+sums (where they fit) and differences are its `+` and `-`, which its
+`checked_add` adds when the sum fits, whose order is its `<=`, and which
+its `/` and `try_into` divide and convert; the delta
 value types' `to_opt`; and that each value type's `Ord` agrees with its
 `==`.
 
@@ -356,11 +360,10 @@ value types' `to_opt`; and that each value type's `Ord` agrees with its
   Reading a delta column's deltas is covered. Widening the sums to `i128`
   would close the gap, but costs 2–17% on delta columns' index operations
   (`find_by_value`, insert, remove, load), so performance was preferred.
-* The prefix and delta columns' other logic is not verified:
-  `PrefixIter::advance_prefix`, which is glue over the verified search and
-  iterator; that a column's sum fits its prefix type, which the searches'
-  results depend on (loads reject sums that would not, and edits panic,
-  but those checks are not part of the proof); `sum_range` and `delta`, which are glue over
+* The prefix and delta columns' other logic is not verified: that a
+  column's sum fits its prefix type, which the searches' results depend on
+  (loads reject sums that would not, and edits panic, but those checks are
+  not part of the proof); `sum_range` and `delta`, which are glue over
   the verified iterator; realizing values from deltas; and the bridging
   deltas a delta edit writes.
 * Where a precondition of the verified code cannot be shown from the

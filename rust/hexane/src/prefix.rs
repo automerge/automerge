@@ -9,7 +9,7 @@ use crate::index::IndexOps;
 use crate::prefix_core::{
     p_next, p_next_run, p_nth, p_prefix, p_reset, p_slab_sum, p_slab_sum_checked, PrefixOps,
 };
-use crate::prefix_search::{p_index_for_prefix, PrefixOrd};
+use crate::prefix_search::{p_advance, p_index_for_prefix, PrefixOrd};
 use crate::PackError;
 use crate::{Codec, Leb128};
 use crate::{ColumnValueRef, RleValue, Run};
@@ -998,6 +998,21 @@ where
     fn to_usize(p: &T::Prefix) -> Option<usize> {
         (*p).try_into().ok()
     }
+
+    #[inline(always)]
+    fn add(a: &T::Prefix, b: &T::Prefix) -> T::Prefix {
+        *a + *b
+    }
+
+    #[inline(always)]
+    fn checked_add(a: &T::Prefix, b: &T::Prefix) -> Option<T::Prefix> {
+        UnsignedPrefix::checked_add(*a, *b)
+    }
+
+    #[inline(always)]
+    fn one() -> T::Prefix {
+        T::Prefix::try_from(1).unwrap_or_default()
+    }
 }
 
 /// Forward iterator over a [`PrefixColumn`], yielding a [`PrefixedValue`]
@@ -1243,27 +1258,26 @@ where
         // unless we had an Iterator<Item=(slab,prefix)> instead of doing a slab_index +=1
         // currently this isnt a bottleneck anywhere so not a big deal
         let col = self.col.expect("advance_prefix on default PrefixIter");
-        // get_index_for_total works in absolute prefixes: undo any
-        // reset_prefix offset before seeking the tree. A target past the
-        // prefix type's limit is past every item.
-        let one = T::Prefix::try_from(1).unwrap_or_default();
-        let seek_target = UnsignedPrefix::checked_add(self.total + self.base, n)
-            .and_then(|target| UnsignedPrefix::checked_add(target, one));
-        let target_pos = match seek_target {
-            Some(seek_target) => col.get_index_for_total(seek_target),
-            None => col.len(),
+        let before = self.total;
+        // verified (`prefix_search`), where the column's sum fits its
+        // prefix type
+        let value = p_advance::<Dx<T, C>, PB<T>>(
+            &mut self.inner.core,
+            self.inner.slabs,
+            &col.col.index,
+            &n,
+            &mut self.total,
+            &self.base,
+        )?;
+        let pv = PrefixedValue {
+            value,
+            total: self.total,
         };
-
-        if target_pos < self.inner.core.pos
-            || target_pos >= self.inner.core.pos + self.inner.core.items_left
-        {
-            if self.inner.core.items_left > 0 {
-                self.nth(self.inner.core.items_left - 1);
-            }
-            return None;
-        }
-
-        self.delta_nth(target_pos - self.inner.core.pos)
+        Some(PrefixSeek {
+            pos: self.pos() - 1,
+            delta: pv.prefix() - before, // prefix consumed before the item
+            pv,
+        })
     }
 }
 

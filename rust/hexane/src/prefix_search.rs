@@ -31,13 +31,13 @@ use crate::cursor::slab_lens;
 use crate::fenwick::{lemma_sum_le, lemma_sum_one, lemma_sum_split, sum, total};
 #[cfg(verus_keep_ghost)]
 use crate::iter_core::{lemma_from, lemma_upto, lens_ok, vals_of};
-use crate::iter_core::{Decode, Decoders};
+use crate::iter_core::{Decode, Decoders, ICore};
 use crate::prefix::PrefixSlabWeight;
-use crate::prefix_core::PrefixOps;
 #[cfg(verus_keep_ghost)]
 use crate::prefix_core::{
-    ix_ok, lemma_fold, lemma_vsum_cat, lemma_vsum_run, prefix_sub, reps, vsum,
+    at_sum, before, ix_ok, lemma_fold, lemma_vsum_cat, lemma_vsum_run, prefix_sub, reps, vsum,
 };
+use crate::prefix_core::{p_nth, PrefixOps};
 #[allow(unused_imports)]
 use vstd::prelude::*;
 
@@ -81,6 +81,25 @@ pub(crate) trait PrefixOrd<V: Copy>: PrefixOps<V> {
     fn to_usize(p: &Self::P) -> (r: Option<usize>)
         ensures
             pnum(*p) <= usize::MAX ==> r == Some(pnum(*p) as usize),
+    ;
+
+    /// `*a + *b`.
+    fn add(a: &Self::P, b: &Self::P) -> (r: Self::P)
+        ensures
+            r == prefix_add(*a, *b),
+    ;
+
+    /// `a.checked_add(b)` (`UnsignedPrefix`).
+    fn checked_add(a: &Self::P, b: &Self::P) -> (r: Option<Self::P>)
+        ensures
+            r is Some <==> pnum(*a) + pnum(*b) <= pmax::<Self::P>(),
+            r matches Some(c) ==> c == prefix_add(*a, *b),
+    ;
+
+    /// `1`.
+    fn one() -> (r: Self::P)
+        ensures
+            pnum(r) == 1,
     ;
 }
 
@@ -520,6 +539,245 @@ pub(crate) fn p_index_for_prefix<'a, X: Decoders<'a>, B: PrefixOrd<<X::D as Deco
         }
     }
     items_before + j
+}
+
+/// `advance_prefix(n)` from a window of values `o`: it lands on the first
+/// whose running sum, from the window's start, exceeds `n` (returning it,
+/// and leaving the window after it), or, if none does, runs to the end.
+/// Given that the column's sum fits its prefix type.
+pub(crate) open spec fn advanced<V: Copy, B: PrefixOps<V>>(
+    o: Seq<V>,
+    n: B::P,
+    r: Option<V>,
+    k: int,
+    o2: Seq<V>,
+) -> bool {
+    match r {
+        Some(v) => {
+            &&& 0 <= k < o.len()
+            &&& v == o[k]
+            &&& o2 == o.skip(k + 1)
+            &&& pnum(n) < nsum::<V, B>(o.take(k + 1))
+            &&& forall|j: int| 0 <= j < k ==> nsum::<V, B>(#[trigger] o.take(j + 1)) <= pnum(n)
+        },
+        None => nsum::<V, B>(o) <= pnum(n) && o2.len() == 0,
+    }
+}
+
+/// The window's running sums are the column's, past its start.
+proof fn lemma_window<'a, X: Decoders<'a>, B: PrefixOrd<<X::D as Decode>::Item>>(
+    core: ICore<X::D>,
+    s: Seq<Slab<X::Tail>>,
+    k: int,
+)
+    requires
+        core.wf::<X>(s),
+        core.pos <= vals_of::<X>(s).len(),
+        0 <= k <= core.out::<X>(s).len(),
+    ensures
+        before::<X>(s, core.pos + k) =~= before::<X>(s, core.pos as int) + core.out::<X>(s).take(k),
+        nsum::<_, B>(before::<X>(s, core.pos + k)) == nsum::<_, B>(before::<X>(s, core.pos as int))
+            + nsum::<_, B>(core.out::<X>(s).take(k)),
+        core.pos + core.out::<X>(s).len() <= vals_of::<X>(s).len(),
+{
+    let v = vals_of::<X>(s);
+    let o = core.out::<X>(s);
+    assert(v.take(core.pos + k) =~= v.take(core.pos as int) + o.take(k));
+    lemma_nsum_cat::<_, B>(v.take(core.pos as int), o.take(k));
+}
+
+/// `r` is the last index whose running sum (of the values before it) is
+/// at most `m`; `None` if every one is.
+pub(crate) open spec fn target_ok<V: Copy, B: PrefixOps<V>>(v: Seq<V>, m: nat, r: Option<usize>) -> bool {
+    match r {
+        None => nsum::<V, B>(v) <= m,
+        Some(tp) => {
+            &&& tp <= v.len()
+            &&& forall|j: int| 0 <= j <= tp && j <= v.len() ==> nsum::<V, B>(#[trigger] v.take(j)) <= m
+            &&& tp < v.len() ==> m < nsum::<V, B>(v.take(tp + 1))
+        },
+    }
+}
+
+/// From the target position, where `advance_prefix` lands in the window:
+/// on the item there, if the window holds it, else past its end.
+proof fn lemma_advance<'a, X: Decoders<'a>, B: PrefixOrd<<X::D as Decode>::Item>>(
+    c0: ICore<X::D>,
+    s: Seq<Slab<X::Tail>>,
+    pn: nat,
+    target: Option<usize>,
+)
+    requires
+        c0.wf::<X>(s),
+        nsum::<_, B>(vals_of::<X>(s)) <= pmax::<B::P>(),
+        target_ok::<_, B>(vals_of::<X>(s), nsum::<_, B>(before::<X>(s, c0.pos as int)) + pn, target),
+    ensures
+        ({
+            let o = c0.out::<X>(s);
+            match target {
+                Some(tp) if c0.pos <= tp < c0.pos + c0.items_left => {
+                    let k = tp - c0.pos;
+                    &&& k < o.len() ==> pn < nsum::<_, B>(o.take(k + 1)) && forall|j: int|
+                        0 <= j < k ==> nsum::<_, B>(#[trigger] o.take(j + 1)) <= pn
+                    &&& k >= o.len() ==> nsum::<_, B>(o) <= pn
+                },
+                _ => nsum::<_, B>(o) <= pn,
+            }
+        }),
+{
+    let v = vals_of::<X>(s);
+    let o = c0.out::<X>(s);
+    let p0 = c0.pos as int;
+    c0.lemma_here::<X>(s);
+    if p0 > v.len() {
+        assert(o.len() == 0);
+        assert(o =~= Seq::<<X::D as Decode>::Item>::empty());
+        return;
+    }
+    lemma_window::<X, B>(c0, s, o.len() as int);
+    assert(o.take(o.len() as int) =~= o);
+    let e = p0 + o.len();
+    match target {
+        None => {
+            lemma_nsum_mono::<_, B>(v, e, v.len() as int);
+            assert(v.take(v.len() as int) =~= v);
+        },
+        Some(tp) => {
+            if tp < p0 {
+                lemma_nsum_mono::<_, B>(v, tp + 1, p0);
+            } else if tp < p0 + c0.items_left {
+                let k = tp - p0;
+                if k < o.len() {
+                    lemma_window::<X, B>(c0, s, k + 1);
+                    assert forall|j: int| 0 <= j < k implies nsum::<_, B>(#[trigger] o.take(j + 1)) <= pn by {
+                        lemma_window::<X, B>(c0, s, j + 1);
+                    }
+                }
+            }
+        },
+    }
+}
+
+/// The position of the item holding unit `n + 1` past the sum `abs`: the
+/// last index whose running sum (of the values before it) is at most
+/// `abs + n`, or `None` if `abs + n` passes the prefix type's limit (and
+/// so every running sum).
+fn p_target<'a, X: Decoders<'a>, B: PrefixOrd<<X::D as Decode>::Item>>(
+    slabs: &'a [Slab<X::Tail>],
+    ix: &SlabBTree<PrefixSlabWeight<B::P>>,
+    abs: &B::P,
+    n: &B::P,
+) -> (r: Option<usize>)
+    where B::P: Ord
+    requires
+        ix.wf(),
+        ix_ok::<X, B>(ix@, slabs@),
+        lens_ok::<X>(slabs@),
+        total(slab_lens(slabs@)) <= usize::MAX,
+    ensures
+        nsum::<_, B>(vals_of::<X>(slabs@)) <= pmax::<B::P>() ==> target_ok::<_, B>(
+            vals_of::<X>(slabs@),
+            pnum(*abs) + pnum(*n),
+            r,
+        ),
+{
+    let ghost v = vals_of::<X>(slabs@);
+    let one = B::one();
+    let t = B::checked_add(abs, n)?;
+    let t1 = match B::checked_add(&t, &one) {
+        Some(t1) => t1,
+        None => {
+            proof {
+                B::axiom_pnum(*abs, *n);
+            }
+            return None;
+        },
+    };
+    let i = p_index_for_prefix::<X, B>(slabs, ix, t1);
+    proof {
+        B::axiom_pnum(*abs, *n);
+        B::axiom_pnum(t, one);
+        assert(v.take(0) =~= Seq::<<X::D as Decode>::Item>::empty());
+    }
+    if i == 0 {
+        Some(0)
+    } else {
+        Some(i - 1)
+    }
+}
+
+/// [`PrefixIter::advance_prefix`](crate::prefix::PrefixIter::advance_prefix):
+/// past `n` units of the running sum, the item holding the next one.
+#[verifier::spinoff_prover]
+pub(crate) fn p_advance<'a, X: Decoders<'a>, B: PrefixOrd<<X::D as Decode>::Item>>(
+    core: &mut ICore<X::D>,
+    slabs: &'a [Slab<X::Tail>],
+    ix: &SlabBTree<PrefixSlabWeight<B::P>>,
+    n: &B::P,
+    total: &mut B::P,
+    base: &B::P,
+) -> (r: Option<<X::D as Decode>::Item>)
+    where B::P: Ord
+    requires
+        at_sum::<X, B>(*old(core), *old(total), *base, slabs@),
+        ix.wf(),
+        ix_ok::<X, B>(ix@, slabs@),
+    ensures
+        at_sum::<X, B>(*final(core), *final(total), *base, slabs@),
+        nsum::<_, B>(vals_of::<X>(slabs@)) <= pmax::<B::P>() ==> advanced::<_, B>(
+            old(core).out::<X>(slabs@),
+            *n,
+            r,
+            final(core).pos - old(core).pos - 1,
+            final(core).out::<X>(slabs@),
+        ),
+{
+    let ghost s = slabs@;
+    let ghost v = vals_of::<X>(s);
+    let ghost fits = nsum::<_, B>(v) <= pmax::<B::P>();
+    let ghost c0 = *core;
+    let ghost o = c0.out::<X>(s);
+    let ghost p0 = c0.pos as int;
+    let ghost a = nsum::<_, B>(before::<X>(s, p0));
+    // the sum of the values before the iterator
+    let abs = B::add(base, total);
+    proof {
+        c0.lemma_here::<X>(s);
+        if fits {
+            if p0 <= v.len() {
+                lemma_nsum_mono::<_, B>(v, p0, v.len() as int);
+                assert(v.take(v.len() as int) =~= v);
+            }
+            lemma_nsum_vsum::<_, B>(before::<X>(s, p0));
+        }
+    }
+    let target = p_target::<X, B>(slabs, ix, &abs, n);
+    proof {
+        if fits {
+            lemma_advance::<X, B>(c0, s, pnum(*n), target);
+        }
+    }
+    // the item, if the window holds it; else run to the window's end
+    let mut landed = false;
+    let mut k = 0;
+    if let Some(tp) = target {
+        if tp >= core.pos && tp < core.pos + core.items_left {
+            landed = true;
+            k = tp - core.pos;
+        }
+    }
+    if !landed {
+        if core.items_left == 0 {
+            return None;
+        }
+        k = core.items_left - 1;
+    }
+    let r = p_nth::<X, B>(core, slabs, Some(ix), k, total, base);
+    if landed {
+        r
+    } else {
+        None
+    }
 }
 
 } // verus!
