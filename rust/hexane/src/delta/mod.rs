@@ -699,6 +699,7 @@ impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
         let inner: Vec<Option<i64>> = values.into_iter().map(|t| t.to_i64()).collect();
         let mut col = Column::new();
         col.splice_inner(0, 0, deltas_from::<T::Inner>(&inner, 0).map(|v| (v, 1)));
+        check_span::<T, C>(&col);
         Self {
             col,
             _phantom: PhantomData,
@@ -1094,6 +1095,8 @@ impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
             return;
         }
 
+        // a deletion alone can't widen the values' span
+        let inserts = items.peek().is_some();
         let (prev, skip, next_val) = self.find_boundaries(index, del);
         // When a boundary non-null follows the splice, replace `del` original
         // items + `skip` preserved nulls + 1 boundary, and inline the bulk
@@ -1101,7 +1104,10 @@ impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
         // of `next_val` intact.
         let total_del = del + if next_val.is_some() { skip + 1 } else { 0 };
         let iter = SpliceDeltaIter::<_, T::Inner>::new(items, prev, skip, next_val);
-        self.col.splice_inner(index, total_del, iter)
+        self.col.splice_inner(index, total_del, iter);
+        if inserts {
+            check_span::<T, C>(&self.col);
+        }
     }
 
     /// Find the boundary data needed to fix up a splice at `[index, index + del)`.
@@ -1377,6 +1383,7 @@ where
     pub fn finish(&mut self) {
         self.settle();
         self.inner.finish();
+        check_span::<T, C>(self.inner.column());
     }
 
     // ── internals ───────────────────────────────────────────────────
@@ -1433,6 +1440,10 @@ where
     fn drop(&mut self) {
         // a dropped cursor still owes the boundary
         self.settle();
+        self.inner.finish();
+        if !std::thread::panicking() {
+            check_span::<T, C>(self.inner.column());
+        }
     }
 }
 
@@ -1477,20 +1488,48 @@ pub struct DeltaRun {
 /// bound `DeltaColumn::load_with` keeps; they are rare near the limit, so
 /// this walk is too.
 fn within_2_63<T: DeltaValue, C: Codec>(data: &[u8]) -> bool {
+    runs_within_2_63::<T, C>([data])
+}
+
+/// [`within_2_63`] for a column's slabs, one after another.
+fn runs_within_2_63<'a, T: DeltaValue, C: Codec>(
+    slabs: impl IntoIterator<Item = &'a [u8]>,
+) -> bool {
     use crate::encoding::RunDecoder;
-    let mut decoder = crate::decoder_in::<T::Inner, C>(data);
     let mut running: i128 = 0;
     let (mut low, mut high) = (i128::MAX, i128::MIN);
-    while let Some(run) = decoder.next_run() {
-        if let Some(d) = T::Inner::to_opt(run.value) {
-            // a run's values move one way, so its ends bound them
-            let first = running + d as i128;
-            let last = running + d as i128 * run.count as i128;
-            (low, high) = (low.min(first.min(last)), high.max(first.max(last)));
-            running = last;
+    for data in slabs {
+        let mut decoder = crate::decoder_in::<T::Inner, C>(data);
+        while let Some(run) = decoder.next_run() {
+            if let Some(d) = T::Inner::to_opt(run.value) {
+                // a run's values move one way, so its ends bound them
+                let first = running + d as i128;
+                let last = running + d as i128 * run.count as i128;
+                (low, high) = (low.min(first.min(last)), high.max(first.max(last)));
+                running = last;
+            }
         }
     }
     low > high || high - low <= i64::MAX as i128
+}
+
+/// Panic unless the column's values lie within a 2^63-wide range, the
+/// [`DeltaValue`] domain contract (which `load` holds data to). Only
+/// `i64`'s domain is wider than that. The index's aggregate bounds the
+/// range; only where the bound is too wide (a null holds the running
+/// value, which before the first value is a 0 the column doesn't hold)
+/// are the values walked.
+fn check_span<T: DeltaValue, C: Codec>(col: &InnerColumn<T, C>) {
+    if (T::MAX_I64 as i128) - (T::MIN_I64 as i128) <= i64::MAX as i128 {
+        return;
+    }
+    let agg = col.index.root_agg();
+    if agg.len == 0 || (agg.max_offset as i128) - (agg.min_offset as i128) <= i64::MAX as i128 {
+        return;
+    }
+    if !runs_within_2_63::<T, C>(col.slabs.iter().map(|s| &s.data[..])) {
+        panic!("delta values out of domain: they would span 2^63 or more");
+    }
 }
 
 type InnerColumn<T, C = Leb128> = Column<<T as DeltaValue>::Inner, C, IndexedDeltaWeightFn>;
