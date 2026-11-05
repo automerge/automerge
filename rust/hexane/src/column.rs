@@ -1269,7 +1269,11 @@ where
     where
         F: Fn(T) -> T,
     {
+        let counter = self.counter;
         *self = T::Encoding::<C>::remap(self.iter(), self.max_segments, f);
+        // a write like any other: iterators suspended before it can't
+        // resume (the rebuilt column's count starts again at 0)
+        self.counter = counter.wrapping_add(1);
     }
 
     /// Check the *structural* invariants of the slab vector and index —
