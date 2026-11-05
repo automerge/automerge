@@ -712,8 +712,22 @@ impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
     pub fn from_values(values: Vec<T>) -> Self {
         let inner: Vec<Option<i64>> = values.into_iter().map(|t| t.to_i64()).collect();
         let mut col = Column::new();
-        col.splice_inner(0, 0, deltas_from::<T::Inner>(&inner, 0).map(|v| (v, 1)));
-        check_span::<T, C>(&col);
+        // the values' bound, taken as they go past
+        let (mut lo, mut hi) = (i64::MAX, i64::MIN);
+        let values = inner.iter().map(|v| {
+            if let (true, Some(v)) = (SpanBound::needed::<T>(), *v) {
+                lo = lo.min(v);
+                hi = hi.max(v);
+            }
+            *v
+        });
+        col.splice_inner(0, 0, deltas_from::<T::Inner>(values, 0).map(|v| (v, 1)));
+        let mut bound = SpanBound::none();
+        if lo <= hi {
+            bound.add(lo as i128);
+            bound.add(hi as i128);
+        }
+        check_span::<T, C>(&col, &bound);
         Self {
             col,
             _phantom: PhantomData,
@@ -1114,6 +1128,16 @@ impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
 
         // a deletion alone can't widen the values' span
         let inserts = items.peek().is_some();
+        let mut bound = if inserts {
+            SpanBound::of::<T, C>(&self.col)
+        } else {
+            SpanBound::none()
+        };
+        let items = items.inspect(|item| {
+            if SpanBound::needed::<T>() {
+                bound.add_item(item)
+            }
+        });
         let (prev, skip, next_val) = self.find_boundaries(index, del);
         // When a boundary non-null follows the splice, replace `del` original
         // items + `skip` preserved nulls + 1 boundary, and inline the bulk
@@ -1123,7 +1147,7 @@ impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
         let iter = SpliceDeltaIter::<_, T::Inner>::new(items, prev, skip, next_val);
         self.col.splice_inner(index, total_del, iter);
         if inserts {
-            check_span::<T, C>(&self.col);
+            check_span::<T, C>(&self.col, &bound);
         }
     }
 
@@ -1201,6 +1225,8 @@ where
     /// what the next non-null original delta owes: the original running
     /// value minus the one being written
     adjust: i64,
+    /// the values the column can hold once the edit is done
+    bound: SpanBound,
     _phantom: PhantomData<T>,
 }
 
@@ -1212,10 +1238,12 @@ where
         // before the cursor borrows the column: the realized value it
         // starts from, which position 0 gets for nothing
         let running = Self::prefix_at(col, at);
+        let bound = SpanBound::of::<T, C>(col);
         DeltaEdit {
             inner: col.edit_at(at),
             running,
             adjust: 0,
+            bound,
             _phantom: PhantomData,
         }
     }
@@ -1308,6 +1336,9 @@ where
                 self.inner.insert_run(T::Inner::from_opt(None), n);
             }
             Some(v) => {
+                if SpanBound::needed::<T>() {
+                    self.bound.add(v as i128);
+                }
                 let r = self.running;
                 self.inner.insert(T::Inner::from_opt(Some(v - r)));
                 if n > 1 {
@@ -1341,6 +1372,9 @@ where
                 self.inner.insert_run(T::Inner::from_opt(None), run.count);
                 continue;
             };
+            if SpanBound::needed::<T>() {
+                self.bound.add_run(run.prefix, d, run.count);
+            }
             let r = self.running;
             let first = run.prefix + d;
             if first - r == d {
@@ -1400,7 +1434,7 @@ where
     pub fn finish(&mut self) {
         self.settle();
         self.inner.finish();
-        check_span::<T, C>(self.inner.column());
+        check_span::<T, C>(self.inner.column(), &self.bound);
     }
 
     // ── internals ───────────────────────────────────────────────────
@@ -1459,7 +1493,7 @@ where
         self.settle();
         self.inner.finish();
         if !std::thread::panicking() {
-            check_span::<T, C>(self.inner.column());
+            check_span::<T, C>(self.inner.column(), &self.bound);
         }
     }
 }
@@ -1526,22 +1560,125 @@ fn runs_within_2_63<'a, T: DeltaValue, C: Codec>(
     span.within_2_63()
 }
 
-/// Panic unless the column's values lie within a 2^63-wide range, the
-/// [`DeltaValue`] domain contract (which `load` holds data to). Only
-/// `i64`'s domain is wider than that. The index's aggregate bounds the
-/// range; only where the bound is too wide (a null holds the running
-/// value, which before the first value is a 0 the column doesn't hold)
-/// are the values walked.
-fn check_span<T: DeltaValue, C: Codec>(col: &InnerColumn<T, C>) {
-    if (T::MAX_I64 as i128) - (T::MIN_I64 as i128) <= i64::MAX as i128 {
+/// The least and greatest running sums of the deltas in `slabs`, exactly
+/// (`low > high` if there are none). Unlike `ValueSpan`, for any deltas:
+/// an edit's may wrap.
+fn runs_range<'a, T: DeltaValue, C: Codec>(
+    slabs: impl IntoIterator<Item = &'a [u8]>,
+) -> (i128, i128) {
+    use crate::encoding::RunDecoder;
+    let mut running: i128 = 0;
+    let (mut low, mut high) = (i128::MAX, i128::MIN);
+    for data in slabs {
+        let mut decoder = crate::decoder_in::<T::Inner, C>(data);
+        while let Some(run) = decoder.next_run() {
+            if let Some(d) = T::Inner::to_opt(run.value) {
+                // a run's values move one way, so its ends bound them
+                let first = running + d as i128;
+                let last = running + d as i128 * run.count as i128;
+                (low, high) = (low.min(first.min(last)), high.max(first.max(last)));
+                running = last;
+            }
+        }
+    }
+    (low, high)
+}
+
+/// Panic unless the column's values lie in the domain, within a
+/// 2^63-wide range, the [`DeltaValue`] domain contract (which `load`
+/// holds data to). Only `i64`'s domain is wider than that. `bound`
+/// bounds the values; only where it is too wide (a null holds the
+/// running value, which before the first value is a 0 the column
+/// doesn't hold) are the values walked.
+fn check_span<T: DeltaValue, C: Codec>(col: &InnerColumn<T, C>, bound: &SpanBound) {
+    if !SpanBound::needed::<T>() {
         return;
     }
-    let agg = col.index.root_agg();
-    if agg.len == 0 || (agg.max_offset as i128) - (agg.min_offset as i128) <= i64::MAX as i128 {
+    if bound.fits::<T>() {
         return;
     }
-    if !runs_within_2_63::<T, C>(col.slabs.iter().map(|s| &s.data[..])) {
+    // where the values span 2^63 or more, a delta between them wraps, and
+    // the running sum then leaves the domain
+    let (low, high) = runs_range::<T, C>(col.slabs.iter().map(|s| &s.data[..]));
+    let fits = SpanBound { lo: low, hi: high }.fits::<T>();
+    if !fits {
         panic!("delta values out of domain: they would span 2^63 or more");
+    }
+}
+
+/// A bound on the values of a delta column being edited: those it held
+/// before (its index's root aggregate, exact while they span less than
+/// 2^63, as they did), and those the edit inserts. Every value after the
+/// edit is one or the other. The root aggregate after an edit is no
+/// bound: the index merges with wrapping arithmetic, so where values that
+/// span 2^63 or more meet, its sums wrap.
+#[derive(Clone, Copy)]
+struct SpanBound {
+    lo: i128,
+    hi: i128,
+}
+
+impl SpanBound {
+    fn none() -> Self {
+        SpanBound {
+            lo: i128::MAX,
+            hi: i128::MIN,
+        }
+    }
+
+    /// Whether `T`'s values can span 2^63 or more at all (only `i64`'s
+    /// can): if not, there is nothing to bound.
+    #[inline(always)]
+    fn needed<T: DeltaValue>() -> bool {
+        (T::MAX_I64 as i128) - (T::MIN_I64 as i128) > i64::MAX as i128
+    }
+
+    fn of<T: DeltaValue, C: Codec>(col: &InnerColumn<T, C>) -> Self {
+        if !Self::needed::<T>() {
+            return Self::none();
+        }
+        let agg = col.index.root_agg();
+        if agg.len == 0 {
+            return Self::none();
+        }
+        SpanBound {
+            lo: agg.min_offset as i128,
+            hi: agg.max_offset as i128,
+        }
+    }
+
+    fn add(&mut self, v: i128) {
+        self.lo = self.lo.min(v);
+        self.hi = self.hi.max(v);
+    }
+
+    /// A run of `count` deltas `d` after `prefix`: its values lie between
+    /// its first and last.
+    fn add_run(&mut self, prefix: i64, d: i64, count: usize) {
+        let p = prefix as i128;
+        self.add(p + d as i128);
+        self.add(p.saturating_add((d as i128).saturating_mul(count as i128)));
+    }
+
+    fn add_item(&mut self, item: &SpliceItem) {
+        match *item {
+            SpliceItem::Value(Some(v)) => self.add(v as i128),
+            SpliceItem::Run(DeltaRun {
+                prefix,
+                delta: Some(d),
+                count,
+            }) if count > 0 => self.add_run(prefix, d, count),
+            _ => {}
+        }
+    }
+
+    /// The values lie in `T`'s domain, within a range less than 2^63
+    /// wide.
+    fn fits<T: DeltaValue>(&self) -> bool {
+        self.lo > self.hi
+            || (self.hi - self.lo <= i64::MAX as i128
+                && self.lo >= T::MIN_I64 as i128
+                && self.hi <= T::MAX_I64 as i128)
     }
 }
 
@@ -1914,15 +2051,15 @@ impl<'a, T: DeltaValue, C: Codec> Clone for DeltaIter<'a, T, C> {
 /// Iterator that maps realized values to their delta encoding relative to
 /// a running `prev_realized`.  Null values pass through as `None` and leave
 /// `prev_realized` untouched.  No allocation.
-pub(crate) fn deltas_from<'a, I: DeltaInner>(
-    values: &'a [Option<i64>],
+pub(crate) fn deltas_from<I: DeltaInner>(
+    values: impl Iterator<Item = Option<i64>>,
     mut prev_realized: i64,
-) -> impl Iterator<Item = I> + 'a {
-    values.iter().map(move |v| match v {
+) -> impl Iterator<Item = I> {
+    values.map(move |v| match v {
         None => I::from_opt(None),
         Some(r) => {
-            let d = *r - prev_realized;
-            prev_realized = *r;
+            let d = r - prev_realized;
+            prev_realized = r;
             I::from_opt(Some(d))
         }
     })

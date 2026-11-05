@@ -74,3 +74,44 @@ fn the_widest_span_is_still_allowed() {
     let bytes = col.save();
     assert!(DeltaColumn::<Option<i64>>::load_with(&bytes, LoadOpts::new()).is_ok());
 }
+
+// The index merges its slabs' aggregates with wrapping arithmetic, so
+// after an edit its root can't bound the values. Here the slabs hold
+// `MAX - 5` and `MAX - 5, MIN + 4`: the step between them wraps to +10,
+// and the root's least and greatest running sums both come out as
+// `MAX - 5`. (A debug build panics before that, on the subtraction.)
+
+#[test]
+#[should_panic]
+fn a_span_the_index_wraps_around() {
+    let mut col = DeltaColumn::<i64>::with_max_segments(2);
+    col.splice(0, 0, [i64::MAX - 5]);
+    col.splice(1, 0, [i64::MAX - 5, i64::MIN + 4]);
+}
+
+#[test]
+#[should_panic]
+fn a_cursor_span_the_index_wraps_around() {
+    let mut col = DeltaColumn::<i64>::with_max_segments(2);
+    col.splice(0, 0, [i64::MAX - 5]);
+    let mut e = col.edit();
+    e.seek(1);
+    e.insert(i64::MAX - 5);
+    e.insert(i64::MIN + 4);
+    e.finish();
+}
+
+#[test]
+fn values_near_both_ends_of_i64_that_span_less_than_2_63() {
+    let mut col = DeltaColumn::<i64>::with_max_segments(2);
+    col.splice(0, 0, [i64::MAX - 5]);
+    col.splice(1, 0, [i64::MAX - 5, 1]);
+    {
+        let mut e = col.edit();
+        e.seek(3);
+        e.insert(2);
+        e.finish();
+    }
+    assert_eq!(col.to_vec(), vec![i64::MAX - 5, i64::MAX - 5, 1, 2]);
+    assert!(DeltaColumn::<i64>::load(&col.save()).is_ok());
+}
