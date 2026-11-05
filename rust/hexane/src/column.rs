@@ -756,25 +756,16 @@ impl<'a, T: ColumnValueRef, C: Codec> Iter<'a, T, C> {
 }
 
 impl<'a, T: ColumnValueRef, C: Codec> Iter<'a, T, C> {
-    /// Narrow the iterator window to the contiguous run of `value` within a
-    /// sorted range, returning that range.
-    ///
-    /// If the value is not found, returns an empty range at the insertion
-    /// point and the iterator is positioned past the search area.
-    ///
-    /// Assumes values within `range` are sorted.  If they aren't, the
-    /// result is unspecified — a wrong or empty range may be returned —
-    /// but never a panic, memory unsafety, or column corruption.
     /// Scan forward for the next occurrence of `target`.
     ///
     /// Unlike [`Self::seek_to_value`] the values need not be sorted —
     /// this is a find, walked run-at-a-time (for RLE data that is one
-    /// step per run, not per item). On a hit, returns `Some((pos,
-    /// value))` with the value consumed: iteration continues with the
-    /// item after it — so repeated calls walk successive occurrences,
-    /// including consecutive items inside one run, with no caller-side
-    /// run state. On a miss, returns `None` with the iterator at the
-    /// end of its window.
+    /// step per run, not per item). On a hit, returns `Some(pos)` with
+    /// the value consumed: iteration continues with the item after it —
+    /// so repeated calls walk successive occurrences, including
+    /// consecutive items inside one run, with no caller-side run state.
+    /// On a miss, returns `None` with the iterator at the end of its
+    /// window.
     pub fn scan_to_value<'t>(&mut self, target: T::Get<'t>) -> Option<usize> {
         let end = self.end_pos();
         let mut probe = self.clone();
@@ -794,6 +785,25 @@ impl<'a, T: ColumnValueRef, C: Codec> Iter<'a, T, C> {
         None
     }
 
+    /// Find the items equal to `target` within `range` of the window,
+    /// whose values are sorted, and move the iterator to the first of
+    /// them: returns their range, or, if there are none, the empty range
+    /// where `target` would go, with the iterator there. The window keeps
+    /// its end.
+    ///
+    /// Assumes values within `range` are sorted.  If they aren't, the
+    /// result is unspecified — a wrong or empty range may be returned —
+    /// but never a panic, memory unsafety, or column corruption.
+    ///
+    /// ```
+    /// let col = hexane::Column::<u64>::from_values(vec![1, 2, 4, 4, 5]);
+    /// let mut it = col.iter();
+    /// assert_eq!(it.seek_to_value(4, ..), 2..4);
+    /// assert_eq!(it.next(), Some(4));
+    /// let mut it = col.iter();
+    /// assert_eq!(it.seek_to_value(3, ..), 2..2);
+    /// assert_eq!((it.pos(), it.next()), (2, Some(4)));
+    /// ```
     pub fn seek_to_value<'t>(
         &mut self,
         target: T::Get<'t>,
