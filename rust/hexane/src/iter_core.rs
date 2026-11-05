@@ -721,17 +721,25 @@ impl<D: Decode> ICore<D> {
 
     /// `nth`, for `n` inside the window.
     #[verifier::spinoff_prover]
-    fn nth_in<'a, X: Decoders<'a, D = D>, F: Fn(usize) -> (usize, usize)>(
+    fn nth_in<'a, X: Decoders<'a, D = D>, F: Fn(usize) -> (usize, usize), G: Fn(usize) -> usize>(
         &mut self,
         slabs: &'a [Slab<X::Tail>],
         n: usize,
         find: &F,
+        start_of: &G,
     ) -> (r: Option<D::Item>)
         requires
             old(self).wf::<X>(slabs@),
             n < old(self).items_left,
             forall|t: usize| #[trigger] find.requires((t,)),
             forall|t: usize, x: (usize, usize)| #[trigger] find.ensures((t,), x) ==> find_ok(slabs@, t, x),
+            forall|i: usize| i <= slabs@.len() ==> #[trigger] start_of.requires((i,)),
+            forall|i: usize, n: usize|
+                #[trigger] start_of.ensures((i,), n) ==> i <= slabs@.len() ==> n == sum(
+                    slab_lens(slabs@),
+                    0,
+                    i as int,
+                ),
         ensures
             final(self).wf::<X>(slabs@),
             n < old(self).out::<X>(slabs@).len() ==> {
@@ -740,6 +748,8 @@ impl<D: Decode> ICore<D> {
                 &&& final(self).pos == old(self).pos + n + 1
             },
             n >= old(self).out::<X>(slabs@).len() ==> r is None && final(self).out::<X>(slabs@).len() == 0,
+            // past the data, it stops at the end
+            old(self).pos <= total(slab_lens(slabs@)) ==> final(self).pos <= total(slab_lens(slabs@)),
     {
         let ghost c0 = *self;
         let ghost s = slabs@;
@@ -785,7 +795,13 @@ impl<D: Decode> ICore<D> {
                 }
             }
         }
-        if !self.advance_to_slab::<X>(slabs, si, target - off) {
+        // past the data (the window can run past it), stop at its end
+        let start = if si < slabs.len() {
+            target - off
+        } else {
+            start_of(slabs.len())
+        };
+        if !self.advance_to_slab::<X>(slabs, si, start) {
             proof {
                 assert(c0.out::<X>(s).len() <= n) by {
                     assert(target >= total(slab_lens(s)));
@@ -814,17 +830,27 @@ impl<D: Decode> ICore<D> {
     }
 
     /// The `n`th value left in the window (0-based), consuming it and those
-    /// before it; past the window, consume the window.
-    pub(crate) fn nth<'a, X: Decoders<'a, D = D>, F: Fn(usize) -> (usize, usize)>(
+    /// before it; past the window, consume the window. Past the data (the
+    /// window can run past it), stop at its end. `find` is the index lookup,
+    /// and `start_of(i)` the items before slab `i`.
+    pub(crate) fn nth<'a, X: Decoders<'a, D = D>, F: Fn(usize) -> (usize, usize), G: Fn(usize) -> usize>(
         &mut self,
         slabs: &'a [Slab<X::Tail>],
         n: usize,
         find: &F,
+        start_of: &G,
     ) -> (r: Option<D::Item>)
         requires
             old(self).wf::<X>(slabs@),
             forall|t: usize| #[trigger] find.requires((t,)),
             forall|t: usize, x: (usize, usize)| #[trigger] find.ensures((t,), x) ==> find_ok(slabs@, t, x),
+            forall|i: usize| i <= slabs@.len() ==> #[trigger] start_of.requires((i,)),
+            forall|i: usize, n: usize|
+                #[trigger] start_of.ensures((i,), n) ==> i <= slabs@.len() ==> n == sum(
+                    slab_lens(slabs@),
+                    0,
+                    i as int,
+                ),
         ensures
             final(self).wf::<X>(slabs@),
             n < old(self).out::<X>(slabs@).len() ==> {
@@ -833,6 +859,8 @@ impl<D: Decode> ICore<D> {
                 &&& final(self).pos == old(self).pos + n + 1
             },
             n >= old(self).out::<X>(slabs@).len() ==> r is None && final(self).out::<X>(slabs@).len() == 0,
+            // past the data (the window can run past it), it stops at the end
+            old(self).pos <= total(slab_lens(slabs@)) ==> final(self).pos <= total(slab_lens(slabs@)),
     {
         if n >= self.items_left {
             proof {
@@ -841,7 +869,7 @@ impl<D: Decode> ICore<D> {
             if self.items_left > 0 {
                 let k = self.items_left - 1;
                 let ghost c0 = *self;
-                self.nth_in::<X, F>(slabs, k, find);
+                self.nth_in::<X, F, G>(slabs, k, find, start_of);
                 proof {
                     if k < c0.out::<X>(slabs@).len() {
                         assert(c0.out::<X>(slabs@).skip(k + 1).len() == 0);
@@ -850,7 +878,7 @@ impl<D: Decode> ICore<D> {
             }
             return None;
         }
-        self.nth_in::<X, F>(slabs, n, find)
+        self.nth_in::<X, F, G>(slabs, n, find, start_of)
     }
 
     /// The next run of equal values in the window, at most `max`, within

@@ -371,12 +371,16 @@ impl<'a, T: ColumnValueRef, C: Codec> Iterator for Iter<'a, T, C> {
     /// O(log S + runs_skipped) — uses the column's index for slab lookup.
     fn nth(&mut self, n: usize) -> Option<T::Get<'a>> {
         let col = self.col;
-        self.core
-            .nth::<Dx<T, C>, _>(self.slabs, n, &|t: usize| match col {
+        self.core.nth::<Dx<T, C>, _, _>(
+            self.slabs,
+            n,
+            &|t: usize| match col {
                 Some(col) => col.find_slab(t),
                 // a default iterator: no column, no slabs
                 None => (0, t),
-            })
+            },
+            &|i: usize| col.map_or(0, |col| col.slab_start(i)),
+        )
     }
 
     #[inline]
