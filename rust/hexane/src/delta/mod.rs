@@ -736,6 +736,17 @@ impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
         }
     }
 
+    /// Deserialize with options; see [`LoadOpts`]. A fill is a delta,
+    /// stored as is: on empty data, `length` copies of the delta `d` read
+    /// as the values `d, 2d, 3d, …`.
+    ///
+    /// ```
+    /// use hexane::{DeltaColumn, LoadOpts};
+    ///
+    /// let opts = LoadOpts::new().with_length(3).with_fill(2i64);
+    /// let col = DeltaColumn::<u64>::load_with(&[], opts).unwrap();
+    /// assert_eq!(col.to_vec(), vec![2, 4, 6]);
+    /// ```
     pub fn load_with<'a, F>(data: &'a [u8], opts: LoadOpts<F>) -> Result<Self, PackError>
     where
         F: crate::MaybeFill<<T::Inner as crate::ColumnValueRef>::Get<'a>>,
