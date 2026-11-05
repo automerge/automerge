@@ -22,7 +22,7 @@ fn shift_to_a_range_starting_at_the_lookahead() {
 }
 
 #[test]
-fn an_empty_range_there_drops_it() {
+fn an_empty_range_there_hides_it() {
     let col = Column::<u64>::from_values(vec![1, 2, 3, 4, 5]);
     let mut u = col.iter().unshift();
     u.next();
@@ -54,4 +54,26 @@ fn delta_and_prefix_iterators_too() {
     u.next();
     u.shift(1..3);
     assert_eq!(u.map(|v| v.value).collect::<Vec<_>>(), vec![2, 3]);
+}
+
+/// An empty range at the lookahead hides it rather than dropping it, so a
+/// later range starting there still has it (it panicked, the inner
+/// iterator having moved past it).
+#[test]
+fn a_range_after_an_empty_one_there_starts_at_it() {
+    let col = Column::<u64>::from_values(vec![1, 2, 3, 4, 5]);
+    let mut u = col.iter().unshift();
+    u.shift(0..0);
+    assert_eq!(u.peek(), None);
+    assert_eq!(u.next(), None);
+    u.shift(0..3);
+    assert_eq!(u.collect::<Vec<_>>(), vec![1, 2, 3]);
+
+    let mut u = col.iter().unshift();
+    u.next();
+    u.shift(1..1);
+    u.shift(1..1);
+    assert_eq!(u.nth(2), None);
+    u.shift(1..3);
+    assert_eq!(u.collect::<Vec<_>>(), vec![2, 3]);
 }
