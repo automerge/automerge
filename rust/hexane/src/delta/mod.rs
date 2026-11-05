@@ -1449,10 +1449,8 @@ where
     /// e.finish();
     /// e.insert(17); // the cursor is gone
     /// ```
-    pub fn finish(mut self) {
-        self.settle();
-        self.inner.finish();
-        check_span::<T, C>(self.inner.column(), &self.bound);
+    pub fn finish(self) {
+        // dropping it pays, writes back and checks the span
     }
 
     // ── internals ───────────────────────────────────────────────────
