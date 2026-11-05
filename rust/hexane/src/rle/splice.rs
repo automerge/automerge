@@ -24,7 +24,10 @@ pub(crate) fn splice_slab<T: RleValue, V: AsColumnRef<T>, C: Codec>(
     values: impl Iterator<Item = (V, usize)>,
     max_segments: usize,
 ) -> Vec<Slab> {
-    assert!(index + del <= slab.len, "del extends beyond slab");
+    assert!(
+        index <= slab.len && del <= slab.len - index,
+        "del extends beyond slab"
+    );
     assert!(slab.segments <= max_segments);
     let mut e = RleEdit::<T, C>::default();
     e.reset(slab, index, max_segments);

@@ -602,7 +602,11 @@ pub(crate) fn normalize_splices(
             sp.pos >= dst_pos,
             "destination regions must be ascending and non-overlapping"
         );
-        assert!(sp.pos + sp.delete <= dst_len, "splice out of bounds");
+        // `pos + delete` could overflow
+        assert!(
+            sp.pos <= dst_len && sp.delete <= dst_len - sp.pos,
+            "splice out of bounds"
+        );
         assert!(
             sp.range.start >= src_pos,
             "src ranges must be ascending and non-overlapping"
@@ -1531,7 +1535,11 @@ where
     ) where
         for<'b> T::Get<'b>: AsColumnRef<T>,
     {
-        assert!(index + del <= self.len(), "splice range out of bounds");
+        // `index + del` could overflow
+        assert!(
+            index <= self.len() && del <= self.len() - index,
+            "splice range out of bounds"
+        );
         match strategy {
             CopyStrategy::Direct => {
                 use crate::shift::Shiftable;
@@ -1592,7 +1600,11 @@ where
         V: AsColumnRef<T>,
         I: IntoIterator<Item = (V, usize)>,
     {
-        assert!(index + del <= self.total_len, "splice range out of bounds");
+        // `index + del` could overflow
+        assert!(
+            index <= self.total_len && del <= self.total_len - index,
+            "splice range out of bounds"
+        );
         let mut e = self.edit_at(index);
         e.delete(del);
         for (v, n) in values {
