@@ -1206,8 +1206,11 @@ impl<'a> BDec<'a> {
         } else {
             // unreachable on a valid slab, but stating the state on this
             // path keeps the decode loop as tight as the original's (a
-            // third slower without it)
+            // third slower without it). On bytes that aren't a valid slab
+            // (`decoder` takes any), a count that doesn't decode ends the
+            // values, rather than being read again forever.
             self.st.remaining = 0;
+            self.st.byte_pos = self.data.len();
         }
     }
 
