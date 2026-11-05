@@ -1435,8 +1435,21 @@ where
         self.insert(next)
     }
 
-    /// Close the cursor: pay the boundary and write back.
-    pub fn finish(&mut self) {
+    /// Close the cursor: pay the boundary and write back (as dropping it
+    /// does).
+    ///
+    /// This takes the cursor: paying the boundary moves it past the next
+    /// value, so it is no longer where the edits left it, and an edit after
+    /// `finish` would land past that value.
+    ///
+    /// ```compile_fail
+    /// let mut col = hexane::DeltaColumn::<i64>::from_values(vec![10, 20, 30]);
+    /// let mut e = col.edit();
+    /// e.seek(1).insert(15);
+    /// e.finish();
+    /// e.insert(17); // the cursor is gone
+    /// ```
+    pub fn finish(mut self) {
         self.settle();
         self.inner.finish();
         check_span::<T, C>(self.inner.column(), &self.bound);
