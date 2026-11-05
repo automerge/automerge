@@ -59,9 +59,18 @@ pub mod leb128 {
     pub type DeltaEncoder<'a, T> = crate::DeltaEncoder<'a, T, Leb128>;
     pub type DeltaDecoder<'a, T> = crate::DeltaDecoder<'a, T, Leb128>;
 
-    /// Construct a streaming [`Decoder`] over raw column bytes.
+    /// Construct a streaming [`Decoder`] over raw column bytes, which
+    /// must be a valid encoding (see [`crate::decoder`]).
     pub fn decoder<T: crate::ColumnValueRef>(data: &[u8]) -> Decoder<'_, T> {
         crate::decoder_in::<T, Leb128>(data)
+    }
+
+    /// Construct a streaming [`Decoder`] over raw column bytes, checking
+    /// them first (see [`crate::try_decoder`]).
+    pub fn try_decoder<T: crate::ColumnValueRef>(
+        data: &[u8],
+    ) -> Result<Decoder<'_, T>, crate::PackError> {
+        crate::try_decoder_in::<T, Leb128>(data)
     }
 }
 
@@ -93,9 +102,18 @@ pub mod bijou {
     pub type DeltaEncoder<'a, T> = crate::DeltaEncoder<'a, T, Bijou64>;
     pub type DeltaDecoder<'a, T> = crate::DeltaDecoder<'a, T, Bijou64>;
 
-    /// Construct a streaming [`Decoder`] over raw column bytes.
+    /// Construct a streaming [`Decoder`] over raw column bytes, which
+    /// must be a valid encoding (see [`crate::decoder`]).
     pub fn decoder<T: crate::ColumnValueRef>(data: &[u8]) -> Decoder<'_, T> {
         crate::decoder_in::<T, Bijou64>(data)
+    }
+
+    /// Construct a streaming [`Decoder`] over raw column bytes, checking
+    /// them first (see [`crate::try_decoder`]).
+    pub fn try_decoder<T: crate::ColumnValueRef>(
+        data: &[u8],
+    ) -> Result<Decoder<'_, T>, crate::PackError> {
+        crate::try_decoder_in::<T, Bijou64>(data)
     }
 }
 
@@ -149,6 +167,11 @@ pub type Decoder<'a, T, C = Leb128> =
 
 /// Construct a streaming [`Decoder`] over raw column bytes ([`Leb128`]).
 ///
+/// The bytes must be a valid encoding of `T` values, as an encoder or
+/// [`Column::save`] writes: on other bytes the decoder may panic or yield
+/// nonsense. For bytes from outside the program, use [`try_decoder`],
+/// which checks them first.
+///
 /// ```no_run
 /// # let bytes: Vec<u8> = vec![0];
 /// for v in hexane::decoder::<Option<u64>>(&bytes) {
@@ -159,9 +182,33 @@ pub fn decoder<'a, T: ColumnValueRef>(data: &'a [u8]) -> Decoder<'a, T> {
     <T::Encoding<Leb128> as ColumnEncoding>::decoder(data)
 }
 
-/// Construct a streaming [`Decoder`] over raw column bytes in codec `C`.
+/// Construct a streaming [`Decoder`] over raw column bytes in codec `C`,
+/// which must be a valid encoding (see [`decoder`]).
 pub fn decoder_in<'a, T: ColumnValueRef, C: Codec>(data: &'a [u8]) -> Decoder<'a, T, C> {
     <T::Encoding<C> as ColumnEncoding>::decoder(data)
+}
+
+/// Construct a streaming [`Decoder`] over raw column bytes ([`Leb128`]),
+/// first checking that they are a valid encoding of `T` values, as
+/// [`Column::load`] does: on any other bytes, the error, rather than a
+/// decoder that could panic on them.
+///
+/// ```
+/// let bytes = hexane::Column::<u64>::from_values(vec![1, 2, 2]).save();
+/// let values: Vec<u64> = hexane::try_decoder::<u64>(&bytes).unwrap().collect();
+/// assert_eq!(values, vec![1, 2, 2]);
+/// assert!(hexane::try_decoder::<u64>(&[0x02]).is_err());
+/// ```
+pub fn try_decoder<'a, T: ColumnValueRef>(data: &'a [u8]) -> Result<Decoder<'a, T>, PackError> {
+    try_decoder_in::<T, Leb128>(data)
+}
+
+/// [`try_decoder`] in codec `C`.
+pub fn try_decoder_in<'a, T: ColumnValueRef, C: Codec>(
+    data: &'a [u8],
+) -> Result<Decoder<'a, T, C>, PackError> {
+    <T::Encoding<C> as ColumnEncoding>::validate_encoding(data)?;
+    Ok(decoder_in::<T, C>(data))
 }
 pub use bool::BoolLoadIter;
 pub use btree::SlabAggregate;
