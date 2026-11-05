@@ -109,17 +109,31 @@ impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
 
     /// Iterator over indices whose realized value lies in the half-open
     /// range `[range.start, range.end)` — matching Rust's `Range<T>`
-    /// and v0's `find_by_range` semantics.  Generic over any `X` that
-    /// can be converted to `i64` so callers can pass `u32`, `i64`, or the
-    /// delta's native `T` interchangeably.
+    /// and v0's `find_by_range` semantics.  Generic over any integer
+    /// type `X` so callers can pass `u32`, `i64`, or the delta's native
+    /// `T` interchangeably. Bounds needn't fit an `i64`:
+    /// `5u64..u64::MAX` finds every value from 5 up.
     pub fn find_by_range<X>(&self, range: Range<X>) -> FindByRange<'_, T, C>
     where
-        X: TryInto<i64>,
+        X: TryInto<i64> + PartialOrd + Default,
     {
-        match (range.start.try_into(), range.end.try_into()) {
-            (Ok(lo), Ok(hi)) => FindByRange::new(lo, hi, self),
-            _ => FindByRange::default(),
-        }
+        // a bound that doesn't fit an `i64` lies above every value if it
+        // is positive, below every value if negative
+        let start_above = range.start > X::default();
+        let end_above = range.end > X::default();
+        let lo = match range.start.try_into() {
+            Ok(lo) => lo,
+            Err(_) if start_above => return FindByRange::default(),
+            Err(_) => i64::MIN,
+        };
+        let hi = match range.end.try_into() {
+            // the last value in the range is `hi - 1`
+            Ok(hi) if hi > lo => hi - 1,
+            Ok(_) => return FindByRange::default(),
+            Err(_) if end_above => i64::MAX,
+            Err(_) => return FindByRange::default(),
+        };
+        FindByRange::between(lo, hi, self)
     }
 }
 
