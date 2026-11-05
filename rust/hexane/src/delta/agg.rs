@@ -630,18 +630,108 @@ pub(crate) open spec fn deltas_of<V: Copy, B: DeltaOps<V>>(vs: Seq<V>) -> Seq<Op
     vs.map_values(|v: V| B::dv(v))
 }
 
-/// Panics: a slab's run leaves `i64` (`run_fits`): its values span
-/// 2^63 or more, outside the delta value domain, which `load` rejects.
-#[verifier::external_body]
-#[cold]
-#[inline(never)]
-fn sum_overflows(Ghost(why): Ghost<bool>)
+/// The running sum after deltas `j` less that after deltas `i`.
+pub open spec fn pdiff(ds: Seq<Option<i64>>, i: int, j: int) -> int {
+    psum(ds.take(j)) - psum(ds.take(i))
+}
+
+/// Every running sum of deltas `ds`, and every difference of two (a
+/// run's step among them), fits `i64`: true of a slab of a column whose
+/// values lie in the domain, within a range less than 2^63 wide.
+pub open spec fn steps_fit(ds: Seq<Option<i64>>) -> bool {
+    &&& ds.len() <= i64::MAX
+    &&& forall|i: int, j: int| 0 <= i <= j <= ds.len() ==> in_i64(#[trigger] pdiff(ds, i, j))
+}
+
+/// Where a slab's steps fit, so does each of its runs (`agg_run`'s test).
+proof fn lemma_run_in_steps(ds: Seq<Option<i64>>, k: int, c: nat, x: Option<i64>)
     requires
-        why,
+        steps_fit(ds),
+        0 <= k,
+        k + c <= ds.len(),
+        c >= 1,
+        ds.take(k + c) == ds.take(k) + reps(c, x),
     ensures
-        false,
+        run_fits(ds.take(k), c, x),
 {
-    panic!("delta value overflows i64")
+    lemma_run_sum(ds.take(k), c, x);
+    lemma_run_sum(ds.take(k), 1, x);
+    assert(ds.take(k + 1) =~= ds.take(k) + reps(1, x)) by {
+        assert(ds.take(k + 1) =~= ds.take(k + c).take(k + 1));
+        assert((ds.take(k) + reps(c, x)).take(k + 1) =~= ds.take(k) + reps(1, x));
+    }
+    assert(ds.take(0) =~= Seq::<Option<i64>>::empty());
+    assert(in_i64(pdiff(ds, k, k + c)));
+    assert(in_i64(pdiff(ds, 0, k + 1)));
+    assert(in_i64(pdiff(ds, 0, k + c)));
+    if let Some(v) = x {
+        assert(1 * dval(x) == v);
+    }
+}
+
+/// The item count of a slab whose sums leave `i64` (which only an edit
+/// still under way weighs, as the next one weighs it again): its
+/// aggregate's other fields then mean nothing, and are taken wrapping.
+// a Verus loop with an invariant: `loop` + `match`
+#[allow(clippy::while_let_loop)]
+#[inline(never)]
+#[cold]
+fn slab_agg_wrapping<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
+    slab: &'a Slab<X::Tail>,
+) -> (w: SlabAgg)
+    requires
+        X::ok(*slab),
+        X::vals(*slab).len() <= usize::MAX,
+    ensures
+        w.len == X::vals(*slab).len(),
+{
+    let ghost v = X::vals(*slab);
+    let mut d = X::open(slab);
+    let mut w = SlabAgg { len: 0, total: 0, min_offset: 0, max_offset: 0 };
+    proof {
+        assert(v.skip(0) =~= v);
+    }
+    loop
+        invariant
+            v == X::vals(*slab),
+            v.len() <= usize::MAX,
+            d.inv(),
+            w.len <= v.len(),
+            d.rest() == v.skip(w.len as int),
+        ensures
+            w.len == v.len(),
+        decreases d.rest().len(),
+    {
+        let ghost k = w.len as int;
+        match d.d_run_max(usize::MAX) {
+            Some(run) => {
+                let c = run.count as i64;
+                if let Some(x) = B::to_opt(run.value) {
+                    let first = w.total.wrapping_add(x);
+                    let last = w.total.wrapping_add(x.wrapping_mul(c));
+                    let lo = if first <= last { first } else { last };
+                    let hi = if first >= last { first } else { last };
+                    if w.len == 0 {
+                        w.min_offset = lo;
+                        w.max_offset = hi;
+                    } else {
+                        w.min_offset = if w.min_offset <= lo { w.min_offset } else { lo };
+                        w.max_offset = if w.max_offset >= hi { w.max_offset } else { hi };
+                    }
+                    w.total = last;
+                } else if w.len == 0 {
+                    w.min_offset = 0;
+                    w.max_offset = 0;
+                }
+                w.len = w.len + run.count;
+                proof {
+                    assert(v.skip(k).skip(run.count as int) =~= v.skip(k + run.count));
+                }
+            },
+            None => break,
+        }
+    }
+    w
 }
 
 /// Values `v` from `k` on starting with `c` copies of `x`: their deltas
@@ -674,9 +764,11 @@ pub(crate) fn slab_agg<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>
         X::ok(*slab),
         X::vals(*slab).len() <= usize::MAX,
     ensures
-        agg_of(w, deltas_of::<_, B>(X::vals(*slab))),
+        w.len == X::vals(*slab).len(),
+        steps_fit(deltas_of::<_, B>(X::vals(*slab))) ==> agg_of(w, deltas_of::<_, B>(X::vals(*slab))),
 {
     let ghost v = X::vals(*slab);
+    let ghost all = deltas_of::<_, B>(v);
     let mut d = X::open(slab);
     let mut w = SlabAgg { len: 0, total: 0, min_offset: 0, max_offset: 0 };
     proof {
@@ -694,21 +786,29 @@ pub(crate) fn slab_agg<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>
     };
     let ghost e = Seq::<Option<i64>>::empty();
     let dv = B::to_opt(first.value);
-    if !agg_run(&mut w, first.count, dv, Ghost(e)) {
-        sum_overflows(Ghost(!run_fits(e, first.count as nat, dv)));
-    }
-    let ghost mut k: int = first.count as int;
     proof {
         lemma_take_run::<_, B>(v, 0, first.count as int, first.value);
+        assert(all.take(first.count as int) =~= deltas_of::<_, B>(v.take(first.count as int)));
+        assert(all.take(0) =~= e);
+        if steps_fit(all) {
+            lemma_run_in_steps(all, 0, first.count as nat, dv);
+        }
     }
+    if !agg_run(&mut w, first.count, dv, Ghost(e)) {
+        // sums that leave `i64`: an edit's slab, for a moment
+        return slab_agg_wrapping::<X, B>(slab);
+    }
+    let ghost mut k: int = first.count as int;
     loop
         invariant
             v == X::vals(*slab),
             v.len() <= usize::MAX,
             d.inv(),
+            X::ok(*slab),
             0 < k <= v.len(),
             d.rest() == v.skip(k),
             agg_of(w, deltas_of::<_, B>(v.take(k))),
+            all == deltas_of::<_, B>(v),
         ensures
             agg_of(w, deltas_of::<_, B>(v)),
         decreases d.rest().len(),
@@ -717,11 +817,19 @@ pub(crate) fn slab_agg<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>
         match d.d_run_max(usize::MAX) {
             Some(run) => {
                 let dv = B::to_opt(run.value);
-                if !agg_more(&mut w, run.count, dv, Ghost(ds)) {
-                    sum_overflows(Ghost(!run_fits(ds, run.count as nat, dv)));
-                }
                 proof {
                     lemma_take_run::<_, B>(v, k, run.count as int, run.value);
+                    assert(all.take(k + run.count) =~= deltas_of::<_, B>(v.take(k + run.count)));
+                    assert(all.take(k) =~= ds);
+                    if steps_fit(all) {
+                        lemma_run_in_steps(all, k, run.count as nat, dv);
+                    }
+                }
+                if !agg_more(&mut w, run.count, dv, Ghost(ds)) {
+                    // sums that leave `i64`: an edit's slab, for a moment
+                    return slab_agg_wrapping::<X, B>(slab);
+                }
+                proof {
                     k = k + run.count;
                 }
             },

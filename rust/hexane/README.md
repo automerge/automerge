@@ -310,9 +310,11 @@ compiles them away. To check them, run `cargo verus verify -p hexane
   spanning 2^63 or more.
 * Delta columns' slab aggregates: a slab's sum of deltas and its least and
   greatest running sum are exact, both as `load` accumulates them run by
-  run and as an edit or a build computes them from the slab (or it panics
-  on a run whose sums leave `i64`), and `load` accepts only data whose running sums
-  all lie in the value domain, and whose values span less than 2^63.
+  run and as an edit or a build computes them from the slab, wherever the
+  slab's sums fit `i64` (an edit can weigh a slab whose sums don't for a
+  moment, and weighs it again once they do); and `load` accepts only data
+  whose running sums all lie in the value domain, and whose values span
+  less than 2^63.
   Merging two aggregates gives the aggregate of their deltas, as the
   B-tree's value search assumes.
 * Reading a delta column (`DeltaIter`'s `next`, `nth` and `next_run`,
