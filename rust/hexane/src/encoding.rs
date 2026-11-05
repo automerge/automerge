@@ -230,7 +230,9 @@ pub trait EncoderApi<'a, T: ColumnValueRef, C: crate::Codec = crate::Leb128>: Si
     /// Encoders that support slab rollover (`RleEncoder`, `BoolEncoder`)
     /// use this to cut completed output into slabs as values arrive, so
     /// `into_column` can build the column directly without re-decoding.
-    /// Must be called before appending.  The default is a no-op.
+    /// Must be called before appending, and panics if `max < 2`, like
+    /// [`Column::with_max_segments`](crate::Column::with_max_segments).
+    /// The default is a no-op.
     fn max_segments(&mut self, _max: usize) {}
 
     /// Create an encoder with an explicit slab segment budget already set,

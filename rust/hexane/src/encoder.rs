@@ -326,6 +326,7 @@ where
     /// [`into_column`](crate::encoding::EncoderApi::into_column) can build
     /// the column directly.  Must be called before appending.
     fn max_segments(&mut self, max: usize) {
+        assert!(max >= 2, "max_segments must be at least 2");
         debug_assert!(self.e.len == 0, "max_segments must be set before appending");
         self.e.max_segments = Some(max);
     }
@@ -624,6 +625,7 @@ impl<'a, C: Codec> EncoderApi<'a, bool, C> for BoolEncoder<C> {
     /// [`max_segments`](crate::encoding::EncoderApi::max_segments).
     /// Must be called before appending.
     fn max_segments(&mut self, max: usize) {
+        assert!(max >= 2, "max_segments must be at least 2");
         debug_assert!(
             self.e.state.len == 0,
             "max_segments must be set before appending"
