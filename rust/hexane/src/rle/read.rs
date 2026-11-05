@@ -694,6 +694,7 @@ impl<'a, O: RleOps<'a>> Reader<'a, O> {
 
     /// The next segment, `None` at the end of the data, or an error if no
     /// acceptable parse of the data exists.
+    #[inline(always)]
     pub(crate) fn next(&mut self) -> (r: Result<Option<Seg<O::V>>, PackError>)
         requires old(self).inv(),
         ensures next_post(*old(self), *final(self), r),
