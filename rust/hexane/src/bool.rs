@@ -727,6 +727,7 @@ impl<C: Codec> ColumnEncoding for BoolEncoding<C> {
         values: impl Iterator<Item = (V, usize)>,
         max_segments: usize,
     ) -> (Vec<Slab>, usize) {
+        assert!(index <= slab.len, "splice index beyond the slab");
         let slab_del = del.min(slab.len - index);
         let overflow_del = del - slab_del;
         let bools = values.map(|(v, count)| (v.as_column_ref(), count));

@@ -1023,7 +1023,11 @@ impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
         strategy: crate::column::CopyStrategy,
     ) {
         use crate::column::CopyStrategy;
-        assert!(index + del <= self.len(), "splice range out of bounds");
+        // `index + del` could overflow
+        assert!(
+            index <= self.len() && del <= self.len() - index,
+            "splice range out of bounds"
+        );
         match strategy {
             CopyStrategy::Direct => {
                 use crate::Shiftable;
@@ -1070,7 +1074,11 @@ impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
         items: impl Iterator<Item = SpliceItem>,
     ) {
         let len = self.col.len();
-        assert!(index + del <= len, "splice range out of bounds");
+        // `index + del` could overflow
+        assert!(
+            index <= len && del <= len - index,
+            "splice range out of bounds"
+        );
 
         let mut items = items.peekable();
         if del == 0 && items.peek().is_none() {
