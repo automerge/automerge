@@ -392,7 +392,7 @@ mod bijou64_impl {
         }
 
         /// Total length from the tag byte alone — no decode, no scan.
-        /// See [`bijou64::encoded_len_at`]: it sits in the loop-carried
+        /// See `bijou64::encoded_len_at`: it sits in the loop-carried
         /// dependency chain of every skip (`value_len`/`nth`).
         #[inline(always)]
         fn unsigned_len(data: &[u8]) -> Option<usize> {
