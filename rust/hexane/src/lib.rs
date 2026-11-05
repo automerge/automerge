@@ -117,6 +117,7 @@ pub mod bijou {
     }
 }
 
+pub(crate) mod attrib;
 #[cfg(feature = "bijou64")]
 mod bijou64;
 pub mod bool;

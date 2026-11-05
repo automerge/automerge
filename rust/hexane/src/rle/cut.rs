@@ -855,6 +855,60 @@ proof fn lemma_build_bytes<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>, il: bool, k:
     }
 }
 
+/// Groups of no segments hold no values.
+proof fn lemma_no_segments<V>(gs: Seq<Group<V>>, null: V)
+    requires groups_segments(gs) == 0,
+    ensures groups_values(gs, null).len() == 0,
+    decreases gs.len(),
+{
+    if gs.len() > 0 {
+        lemma_no_segments(gs.drop_last(), null);
+        match gs.last() {
+            Group::Lit { values } => {},
+            _ => {},
+        }
+    }
+}
+
+/// The values a segment adds to those read: a run's or nulls' (at least
+/// one), a literal value, or none for a literal's header.
+proof fn lemma_read_seg<'a, O: RleOps<'a>>(r0: Reader<'a, O>, r1: Reader<'a, O>, seg: Seg<O::V>)
+    requires r0.inv(), next_post(r0, r1, Ok(Some(seg))),
+    ensures ({
+        let p0 = groups_values(r0.groups(), O::null()) + r0.lit_values();
+        let p1 = groups_values(r1.groups(), O::null()) + r1.lit_values();
+        match seg {
+            Seg::Run { count, value, .. } => count >= 1 && p1 == p0 + Seq::new(count as nat, |_j: int| value),
+            Seg::Null { count, .. } => count >= 1 && p1 == p0 + Seq::new(count as nat, |_j: int| O::null()),
+            Seg::LitHead { .. } => p1 == p0,
+            Seg::Lit { value, .. } => p1 == p0.push(value),
+        }
+    }),
+{
+    r0.lemma_inv();
+    r1.lemma_inv();
+    let gs = r0.groups();
+    match seg {
+        Seg::Run { count, value, .. } => {
+            let g = Group::Run { count: count as nat, value };
+            reveal(canonical);
+            assert(group_ok::<O>(r1.groups()[r1.groups().len() - 1]));
+            assert(r1.groups().drop_last() =~= gs);
+        },
+        Seg::Null { count, .. } => {
+            reveal(canonical);
+            assert(group_ok::<O>(r1.groups()[r1.groups().len() - 1]));
+            assert(r1.groups().drop_last() =~= gs);
+        },
+        Seg::LitHead { .. } => {},
+        Seg::Lit { value, .. } => {
+            if !r1.in_lit() {
+                assert(r1.groups().drop_last() =~= gs);
+            }
+        },
+    }
+}
+
 impl Cut {
     /// What holds between segments, but for the segment target.
     pub(crate) closed spec fn ok_at<'a, O: RleOps<'a>>(&self, r: Reader<'a, O>) -> bool {
@@ -929,6 +983,32 @@ impl Cut {
         assert(done(gs, cur, self.g0@, self.c0@, O::null()) + Seq::<O::V>::empty() =~= done(gs, cur, self.g0@, self.c0@, O::null()));
     }
 
+    /// The slabs cut so far hold the first of the values read; just after
+    /// a cut (no segment in the slab being cut), all of them.
+    pub(crate) proof fn lemma_done_prefix<'a, O: RleOps<'a>>(&self, r: Reader<'a, O>)
+        requires self.ok_at(r),
+        ensures ({
+            let read = groups_values(r.groups(), O::null()) + r.lit_values();
+            let d = slabs_values::<O>(self.done_slabs());
+            &&& d.len() <= read.len()
+            &&& read.take(d.len() as int) == d
+            &&& self.seg_count() == 0 ==> d == read
+        }),
+    {
+        let gs = r.groups();
+        let cur = r.lit_values();
+        let sg = sgroups(gs, r.in_lit(), cur, self.g0@, self.c0@);
+        r.lemma_inv();
+        lemma_vals(gs, r.in_lit(), r.lit_k(), cur, self.g0@, self.c0@, self.k0@, O::null());
+        let d = done(gs, cur, self.g0@, self.c0@, O::null());
+        let read = groups_values(gs, O::null()) + cur;
+        assert(read.take(d.len() as int) =~= d);
+        if self.seg_count() == 0 {
+            lemma_no_segments(sg, O::null());
+            assert(read =~= d);
+        }
+    }
+
     /// The slabs cut so far.
     pub(crate) closed spec fn done_slabs(&self) -> Seq<Slab> {
         self.slabs@
@@ -957,6 +1037,12 @@ impl Cut {
             final(self).ok_at(r1), final(self).done_slabs() == old(self).done_slabs(),
             final(self).seg_count() <= old(self).seg_count() + 1,
             final(self).seg_count() == old(self).seg_count() || !(r1.in_lit() && r1.lit_values().len() == 0),
+            out == match seg {
+                Seg::LitHead { .. } => None,
+                Seg::Lit { value, .. } => Some(crate::Run { count: 1, value }),
+                Seg::Run { count, value, .. } => if count > 0 { Some(crate::Run { count, value }) } else { None },
+                Seg::Null { count, .. } => if count > 0 { Some(crate::Run { count, value: O::null() }) } else { None },
+            },
     {
         let ghost gs = r0.groups();
         let ghost k = r0.lit_k();
@@ -1114,7 +1200,8 @@ impl Cut {
             !(r.in_lit() && r.lit_values().len() == 0),
         ensures
             res is Ok ==> final(self).ok_at(r) && final(self).seg_count() == 0
-                && final(self).done_slabs().len() == old(self).done_slabs().len() + 1,
+                && final(self).done_slabs().len() == old(self).done_slabs().len() + 1
+                && final(self).done_slabs().drop_last() == old(self).done_slabs(),
     {
         hide(canonical);
         let ghost gs = r.groups();
@@ -1320,6 +1407,27 @@ impl<'a, W: WriteOps<'a>> Load<'a, W> {
         self.cut.done_slabs()
     }
 
+    /// The input is read to its end: `try_next_run` returned `None`.
+    pub(crate) closed spec fn at_end(&self) -> bool {
+        self.reader.spec_pos() == self.reader.data().len() && !self.reader.in_lit()
+    }
+
+    /// The values of the runs read so far, which `try_next_run` returned.
+    pub(crate) closed spec fn pulled(&self) -> Seq<VOf<'a, W>> {
+        groups_values(self.reader.groups(), <W::R as RleOps<'a>>::null()) + self.reader.lit_values()
+    }
+
+    /// The slabs cut so far hold the first of the values pulled.
+    pub(crate) proof fn lemma_done_prefix(&self)
+        requires self.inv(),
+        ensures
+            slabs_values::<W::R>(self.done_slabs()).len() <= self.pulled().len(),
+            self.pulled().take(slabs_values::<W::R>(self.done_slabs()).len() as int)
+                == slabs_values::<W::R>(self.done_slabs()),
+    {
+        self.cut.lemma_done_prefix(self.reader);
+    }
+
     /// Start loading `data`, into slabs of `max_segments / 2` segments.
     pub(crate) fn new(data: &'a [u8], max_segments: usize) -> (l: Self)
         requires max_segments >= 2,
@@ -1350,12 +1458,28 @@ impl<'a, W: WriteOps<'a>> Load<'a, W> {
     /// If the input is not a canonical encoding, or a slab's last run is
     /// 4 GiB or more.
     #[inline]
+    #[verifier::spinoff_prover]
     pub(crate) fn try_next_run(&mut self) -> (r: Result<Option<crate::Run<VOf<'a, W>>>, PackError>)
         requires old(self).inv(),
-        ensures r is Ok ==> final(self).inv() && final(self).data() == old(self).data(),
+        ensures
+            r is Ok ==> final(self).inv() && final(self).data() == old(self).data(),
+            r matches Ok(Some(run)) ==> run.count > 0
+                && final(self).pulled() == old(self).pulled() + Seq::new(run.count as nat, |_j: int| run.value),
+            r matches Ok(None) ==> final(self).pulled() == old(self).pulled()
+                && final(self).done_slabs() == old(self).done_slabs() && final(self).at_end(),
+            // a slab is cut only at the end of a run: then it holds what
+            // that run left unattributed
+            r matches Ok(Some(_)) ==> final(self).done_slabs() == old(self).done_slabs() || {
+                &&& final(self).done_slabs().len() == old(self).done_slabs().len() + 1
+                &&& final(self).done_slabs().drop_last() == old(self).done_slabs()
+                &&& slabs_values::<W::R>(final(self).done_slabs()) == final(self).pulled()
+            },
     {
         loop
-            invariant self.inv(), self.data() == old(self).data(),
+            invariant
+                self.inv(), self.data() == old(self).data(),
+                self.pulled() == old(self).pulled(),
+                self.done_slabs() == old(self).done_slabs(),
             decreases self.reader.data().len() - self.reader.spec_pos(),
         {
             let ghost r0 = self.reader;
@@ -1364,24 +1488,85 @@ impl<'a, W: WriteOps<'a>> Load<'a, W> {
             }
             let segment = match self.reader.next() {
                 Ok(Some(s)) => s,
-                Ok(None) => return Ok(None),
+                Ok(None) => {
+                    proof {
+                        self.reader.lemma_inv();
+                    }
+                    return Ok(None);
+                },
                 Err(e) => return Err(e),
             };
-            proof {
-                self.reader.lemma_inv();
-            }
-            let out = self.cut.track::<W::R>(segment, Ghost(r0), Ghost(self.reader));
-            if self.cut.seg() == self.target {
-                let pos = self.reader.pos();
-                match self.cut.cut_slab::<W>(self.input, pos, Ghost(self.reader)) {
-                    Ok(()) => {},
-                    Err(e) => return Err(e),
-                }
-            }
-            if let Some(run) = out {
-                return Ok(Some(run));
+            match self.take_seg(segment, Ghost(r0)) {
+                Ok(Some(run)) => return Ok(Some(run)),
+                Ok(None) => {
+                    proof {
+                        self.reader.lemma_inv();
+                    }
+                },
+                Err(e) => return Err(e),
             }
         }
+    }
+
+    /// Count the segment the reader just read (from `r0`) into the slab,
+    /// cutting it if it is full; the segment's run, if it has values.
+    #[inline(always)]
+    #[verifier::spinoff_prover]
+    fn take_seg(&mut self, segment: Seg<VOf<'a, W>>, Ghost(r0): Ghost<Reader<'a, W::R>>)
+        -> (r: Result<Option<crate::Run<VOf<'a, W>>>, PackError>)
+        requires
+            old(self).cut.ok(r0, old(self).target),
+            old(self).input@ == r0.data(),
+            r0.inv(),
+            next_post(r0, old(self).reader, Ok(Some(segment))),
+        ensures
+            r is Ok ==> final(self).inv(),
+            final(self).data() == old(self).data(),
+            final(self).reader == old(self).reader,
+            final(self).target == old(self).target,
+            ({
+                let p0 = groups_values(r0.groups(), <W::R as RleOps<'a>>::null()) + r0.lit_values();
+                let d0 = old(self).cut.done_slabs();
+                match r {
+                    Ok(Some(run)) => {
+                        &&& run.count > 0
+                        &&& final(self).pulled() == p0 + Seq::new(run.count as nat, |_j: int| run.value)
+                        &&& final(self).done_slabs() == d0 || {
+                            &&& final(self).done_slabs().len() == d0.len() + 1
+                            &&& final(self).done_slabs().drop_last() == d0
+                            &&& slabs_values::<W::R>(final(self).done_slabs()) == final(self).pulled()
+                        }
+                    },
+                    Ok(None) => final(self).pulled() == p0 && final(self).done_slabs() == d0,
+                    Err(_) => true,
+                }
+            }),
+    {
+        proof {
+            self.reader.lemma_inv();
+            lemma_read_seg::<W::R>(r0, self.reader, segment);
+        }
+        let ghost n0 = self.cut.seg_count();
+        let out = self.cut.track::<W::R>(segment, Ghost(r0), Ghost(self.reader));
+        proof {
+            // a segment that yields no run (a literal's header) adds no
+            // segment, so cuts no slab
+            match segment {
+                Seg::LitHead { .. } => assert(self.cut.seg_count() == n0),
+                _ => {},
+            }
+        }
+        if self.cut.seg() == self.target {
+            let pos = self.reader.pos();
+            match self.cut.cut_slab::<W>(self.input, pos, Ghost(self.reader)) {
+                Ok(()) => {},
+                Err(e) => return Err(e),
+            }
+            proof {
+                self.cut.lemma_done_prefix(self.reader);
+            }
+        }
+        Ok(out)
     }
 
     /// Read and check the rest of the input, and cut the last slab.
@@ -1390,6 +1575,7 @@ impl<'a, W: WriteOps<'a>> Load<'a, W> {
     ///
     /// If the input is not a canonical encoding, or a slab's last run is
     /// 4 GiB or more.
+    #[verifier::spinoff_prover]
     pub(crate) fn finalize(self) -> (r: Result<Vec<Slab>, PackError>)
         requires self.inv(),
         ensures
@@ -1397,6 +1583,12 @@ impl<'a, W: WriteOps<'a>> Load<'a, W> {
                 &&& valid_slab::<W::R>(self.data())
                 &&& forall|i: int| 0 <= i < slabs@.len() ==> slab_ok::<W::R>(#[trigger] slabs@[i])
                 &&& slabs_values::<W::R>(slabs@) == slab_values::<W::R>(self.data())
+                // the slabs already cut come first; read to the end, at
+                // most one more holds the values pulled since
+                &&& slabs@.len() >= self.done_slabs().len()
+                &&& slabs@.take(self.done_slabs().len() as int) == self.done_slabs()
+                &&& self.at_end() ==> slabs@.len() <= self.done_slabs().len() + 1
+                    && slabs_values::<W::R>(slabs@) == self.pulled()
             },
     {
         let mut cut = self.cut;
@@ -1404,11 +1596,21 @@ impl<'a, W: WriteOps<'a>> Load<'a, W> {
         let input = self.input;
         let mut reader = self.reader;
         let ghost data = input@;
+        let ghost d0 = self.cut.done_slabs();
+        let ghost end0 = self.at_end();
+        let ghost rd0 = self.reader;
         loop
-            invariant cut.ok(reader, target), input@ == reader.data(), data == input@,
+            invariant_except_break
+                end0 ==> reader == rd0 && cut.done_slabs() == d0,
+            invariant
+                cut.ok(reader, target), input@ == reader.data(), data == input@,
+                cut.done_slabs().len() >= d0.len(), cut.done_slabs().take(d0.len() as int) == d0,
+                end0 ==> rd0.spec_pos() == rd0.data().len() && rd0.data() == data,
             ensures
                 cut.ok(reader, target), input@ == reader.data(), data == input@,
                 parses::<W::R>(reader.groups(), data), !reader.in_lit(),
+                cut.done_slabs().len() >= d0.len(), cut.done_slabs().take(d0.len() as int) == d0,
+                end0 ==> reader.groups() == rd0.groups() && cut.done_slabs() == d0,
             decreases reader.data().len() - reader.spec_pos(),
         {
             let ghost r0 = reader;
@@ -1428,7 +1630,12 @@ impl<'a, W: WriteOps<'a>> Load<'a, W> {
             };
             proof {
                 reader.lemma_inv();
+                // at the end there is no segment left to read
+                if end0 {
+                    assert(reader.spec_pos() > rd0.spec_pos());
+                }
             }
+            let ghost s1 = cut.done_slabs();
             let _ = cut.track::<W::R>(segment, Ghost(r0), Ghost(reader));
             if cut.seg() == target {
                 let pos = reader.pos();
@@ -1436,16 +1643,32 @@ impl<'a, W: WriteOps<'a>> Load<'a, W> {
                     Ok(()) => {},
                     Err(e) => return Err(e),
                 }
+                proof {
+                    assert(cut.done_slabs().take(d0.len() as int) =~= s1.take(d0.len() as int));
+                }
             }
         }
+        let ghost s2 = cut.done_slabs();
         if cut.seg() > 0 {
             let pos = reader.pos();
             match cut.cut_slab::<W>(input, pos, Ghost(reader)) {
                 Ok(()) => {},
                 Err(e) => return Err(e),
             }
+            proof {
+                assert(cut.done_slabs().take(d0.len() as int) =~= s2.take(d0.len() as int));
+            }
         }
         proof {
+            cut.lemma_done_prefix(reader);
+            reader.lemma_inv();
+            rd0.lemma_inv();
+            assert(cut.seg_count() == 0);
+            if end0 {
+                assert(reader.groups() == rd0.groups());
+                assert(cut.done_slabs().len() <= d0.len() + 1);
+                assert(slabs_values::<W::R>(cut.done_slabs()) == self.pulled());
+            }
             cut.lemma_finished(reader);
             reveal(parses);
             lemma_slab::<W::R>(data);

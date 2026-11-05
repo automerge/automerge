@@ -625,6 +625,7 @@ fn cut_slab<K: CountOps>(sc: &mut Scan, data: &[u8], slabs: &mut Vec<BSlab>)
         forall|i: int| 0 <= i < final(slabs)@.len() ==> bslab_ok::<K>(#[trigger] final(slabs)@[i]),
         bslabs_values::<K>(final(slabs)@) == counts_values(old(sc).cs@),
         final(slabs)@.len() == old(slabs)@.len() + 1,
+        final(slabs)@.drop_last() == old(slabs)@,
 {
     let ghost cs = sc.cs@;
     let ghost a = sc.a@;
@@ -668,6 +669,13 @@ fn read_seg<K: CountOps>(sc: &mut Scan, data: &[u8], slabs: &mut Vec<BSlab>, tar
         r matches Ok(None) ==> final(sc).pos == data@.len() && *final(sc) == *old(sc) && final(slabs)@ == old(slabs)@,
         r matches Ok(Some((c, v))) ==> final(sc).cs@ == old(sc).cs@.push(c as u64)
             && v == run_value(old(sc).cs@.len() as int),
+        // a slab is cut only after a run, and then holds every value read
+        r matches Ok(Some((c, _))) ==> final(slabs)@ == old(slabs)@ || {
+            &&& c > 0
+            &&& final(slabs)@.len() == old(slabs)@.len() + 1
+            &&& final(slabs)@.drop_last() == old(slabs)@
+            &&& final(sc).a@ == final(sc).cs@.len()
+        },
         r is Err ==> !bool_valid::<K>(data@),
 {
     if sc.pos >= data.len() {
@@ -744,6 +752,12 @@ fn read_seg<K: CountOps>(sc: &mut Scan, data: &[u8], slabs: &mut Vec<BSlab>, tar
     // cut after target runs — always even, so the next slab starts on a
     // false run and is a copy of the input's bytes
     if sc.slab_segs >= target {
+        proof {
+            // the padding run (count 0) comes first, and alone cuts nothing
+            if count == 0 {
+                assert(cs.len() == 0);
+            }
+        }
         cut_slab::<K>(sc, data, slabs);
         proof {
             assert(c1.take(c1.len() as int) =~= c1);
@@ -777,6 +791,27 @@ impl<'a> BoolLoad<'a> {
     /// The values read so far.
     pub(crate) closed spec fn values_read(&self) -> Seq<bool> {
         counts_values(self.sc.cs@)
+    }
+
+    /// The input is read to its end: `try_next_run` returned `None`.
+    pub(crate) closed spec fn at_end(&self) -> bool {
+        self.sc.pos == self.data@.len()
+    }
+
+    /// The slabs cut so far hold the first of the values read.
+    pub(crate) proof fn lemma_done_prefix<K: CountOps>(&self)
+        requires self.inv::<K>(),
+        ensures
+            bslabs_values::<K>(self.done_slabs()).len() <= self.values_read().len(),
+            self.values_read().take(bslabs_values::<K>(self.done_slabs()).len() as int)
+                == bslabs_values::<K>(self.done_slabs()),
+    {
+        let cs = self.sc.cs@;
+        let a = self.sc.a@;
+        assert(cs =~= cs.take(a) + cs.skip(a));
+        lemma_values_concat(cs.take(a), cs.skip(a));
+        let d = counts_values(cs.take(a));
+        assert(counts_values(cs).take(d.len() as int) =~= d);
     }
 
     /// Start loading `data`, into slabs of about `max_segments / 2` runs.
@@ -842,13 +877,22 @@ impl<'a> BoolLoad<'a> {
             r is Ok ==> final(self).inv::<K>(),
             r matches Ok(Some(run)) ==> run.count > 0
                 && final(self).values_read() == old(self).values_read() + Seq::new(run.count as nat, |_j: int| run.value),
-            r matches Ok(None) ==> final(self).values_read() == old(self).values_read(),
+            r matches Ok(None) ==> final(self).values_read() == old(self).values_read()
+                && final(self).done_slabs() == old(self).done_slabs() && final(self).at_end(),
+            // a slab is cut only at the end of a run: then it holds what
+            // that run left unattributed
+            r matches Ok(Some(_)) ==> final(self).done_slabs() == old(self).done_slabs() || {
+                &&& final(self).done_slabs().len() == old(self).done_slabs().len() + 1
+                &&& final(self).done_slabs().drop_last() == old(self).done_slabs()
+                &&& bslabs_values::<K>(final(self).done_slabs()) == final(self).values_read()
+            },
             r is Err ==> !bool_valid::<K>(old(self).data()),
     {
         loop
             invariant
                 self.inv::<K>(), self.data() == old(self).data(),
                 self.values_read() == old(self).values_read(),
+                self.done_slabs() == old(self).done_slabs(),
             decreases self.data@.len() - self.sc.pos,
         {
             let ghost c0 = self.sc.cs@;
@@ -857,6 +901,8 @@ impl<'a> BoolLoad<'a> {
                 Ok(Some((count, value))) => {
                     proof {
                         assert(self.sc.cs@.drop_last() =~= c0);
+                        let cs = self.sc.cs@;
+                        assert(cs.take(cs.len() as int) =~= cs);
                     }
                     if count > 0 {
                         return Ok(Some(Run { count, value }));
@@ -882,6 +928,12 @@ impl<'a> BoolLoad<'a> {
                 &&& bool_valid::<K>(old(self).data())
                 &&& forall|i: int| 0 <= i < slabs@.len() ==> bslab_ok::<K>(#[trigger] slabs@[i])
                 &&& bslabs_values::<K>(slabs@) == bool_values::<K>(old(self).data())
+                // the slabs already cut come first; read to the end, at
+                // most one more holds the values read since
+                &&& slabs@.len() >= old(self).done_slabs().len()
+                &&& slabs@.take(old(self).done_slabs().len() as int) == old(self).done_slabs()
+                &&& old(self).at_end() ==> slabs@.len() <= old(self).done_slabs().len() + 1
+                    && bslabs_values::<K>(slabs@) == old(self).values_read()
             },
             r is Err ==> !bool_valid::<K>(old(self).data()),
     {
@@ -891,14 +943,35 @@ impl<'a> BoolLoad<'a> {
         let mut sc = self.sc;
         let mut slabs = Vec::new();
         core::mem::swap(&mut self.slabs, &mut slabs);
+        let ghost d0 = old(self).slabs@;
+        let ghost sc0 = old(self).sc;
+        let ghost end0 = old(self).at_end();
         loop
-            invariant scan_ok::<K>(sc, data@, slabs@, target), data@ == old(self).data@,
-            ensures scan_ok::<K>(sc, data@, slabs@, target), data@ == old(self).data@, sc.pos == data@.len(),
+            invariant
+                scan_ok::<K>(sc, data@, slabs@, target), data@ == old(self).data@,
+                slabs@.len() >= d0.len(), slabs@.take(d0.len() as int) == d0,
+                end0 ==> sc == sc0 && slabs@ == d0,
+                end0 == (sc0.pos == data@.len()),
+            ensures
+                scan_ok::<K>(sc, data@, slabs@, target), data@ == old(self).data@, sc.pos == data@.len(),
+                slabs@.len() >= d0.len(), slabs@.take(d0.len() as int) == d0,
+                end0 ==> sc == sc0 && slabs@ == d0,
             decreases data@.len() - sc.pos,
         {
+            let ghost s1 = slabs@;
+            let ghost sc1 = sc;
             match read_seg::<K>(&mut sc, data, &mut slabs, target) {
                 Ok(None) => break,
-                Ok(Some(_)) => {},
+                Ok(Some(_)) => {
+                    proof {
+                        // at the end there is no run left to read
+                        if end0 {
+                            assert(sc1.pos == data@.len());
+                            assert(sc.pos > sc1.pos);
+                        }
+                        assert(slabs@.take(d0.len() as int) =~= s1.take(d0.len() as int));
+                    }
+                },
                 Err(e) => return Err(e),
             }
         }
@@ -908,8 +981,12 @@ impl<'a> BoolLoad<'a> {
             assert(bool_parses::<K>(cs, data@));
             lemma_counts::<K>(cs, data@);
         }
+        let ghost s2 = slabs@;
         if sc.slab_segs > 0 {
             cut_slab::<K>(&mut sc, data, &mut slabs);
+            proof {
+                assert(slabs@.take(d0.len() as int) =~= s2.take(d0.len() as int));
+            }
         } else {
             proof {
                 assert(cs.take(sc.a@) =~= cs);

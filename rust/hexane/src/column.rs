@@ -1,4 +1,6 @@
+use crate::attrib::{Accumulate, Attribution};
 use crate::btree::SlabAggregate;
+use crate::cursor::WeightOf;
 use crate::sealed::Sealed;
 use std::marker::PhantomData;
 use std::ops::{AddAssign, Range, SubAssign};
@@ -1036,9 +1038,7 @@ where
             fill_emitted: false,
             length: opts.length,
             max_segments: opts.max_segments,
-            weights: Vec::new(),
-            cur_weight: WF::Weight::default(),
-            cur_emitted: 0,
+            attr: Attribution::new::<WeightOf<T, C, WF>>(),
             failed: false,
             _phantom: PhantomData,
         }
@@ -1684,11 +1684,8 @@ pub struct ColumnLoadIter<
     max_segments: usize,
     /// per-slab weights accumulated as runs stream past — only when
     /// `WF::ACCUMULATES`, sparing `finalize` the `WF::compute` re-decode
-    weights: Vec<WF::Weight>,
-    /// weight of the slab currently being cut
-    cur_weight: WF::Weight,
-    /// items already attributed to the slab currently being cut
-    cur_emitted: usize,
+    /// (verified: `attrib`)
+    attr: Attribution<T::Get<'a>, WF::Weight>,
     /// an error ended the load: the runs after it don't make a column
     failed: bool,
     _phantom: PhantomData<(WF, Idx)>,
@@ -1738,17 +1735,11 @@ where
     /// run's end and the weight closes with it.
     fn attribute(&mut self, count: usize, value: T::Get<'a>) -> Result<(), PackError> {
         use crate::encoding::LoadIterApi;
-        WF::accumulate_run(&mut self.cur_weight, count, value)?;
-        self.cur_emitted += count;
-        if self.weights.len() < self.iter.slabs_completed() {
-            debug_assert_eq!(
-                self.cur_emitted,
-                self.iter.completed_slab_len(self.weights.len())
-            );
-            self.weights.push(std::mem::take(&mut self.cur_weight));
-            self.cur_emitted = 0;
-        }
-        Ok(())
+        // the loader cuts only at a run's end (verified), so this run
+        // completed the slab being cut if any slab was cut since the last
+        let cut = self.attr.weights.len() < self.iter.slabs_completed();
+        self.attr
+            .run::<WeightOf<T, C, WF>>(count, value, cut, Ghost::assume_new())
     }
 
     /// Drain and validate whatever was not pulled, apply the length check
@@ -1802,12 +1793,13 @@ where
             }
         }
         let weights: Vec<WF::Weight> = if WF::ACCUMULATES {
-            let mut weights = self.weights;
             // the final slab is only cut by `finalize` itself; whatever is
-            // not yet attributed to a closed slab belongs to it
-            if weights.len() < slabs.len() {
-                weights.push(self.cur_weight);
-            }
+            // not yet attributed to a closed slab belongs to it (verified:
+            // it adds at most one)
+            let last = self.attr.weights.len() < slabs.len();
+            let weights = self
+                .attr
+                .finish::<WeightOf<T, C, WF>>(last, Ghost::assume_new());
             debug_assert_eq!(weights.len(), slabs.len());
             weights
         } else {
@@ -1843,6 +1835,33 @@ where
 {
     fn try_next_run(&mut self) -> Result<Option<Run<T::Get<'a>>>, PackError> {
         ColumnLoadIter::try_next_run(self)
+    }
+}
+
+/// A column's weight function, as [`Accumulate`] for the verified
+/// attribution of a load's runs. Trusted: that `accumulate_run` folds a
+/// run in as `acc` says.
+impl<'a, T: ColumnValueRef, C: Codec, WF: WeightFn<T, C>> Accumulate<T::Get<'a>, WF::Weight>
+    for WeightOf<T, C, WF>
+{
+    #[cfg(verus_keep_ghost)]
+    fn zero() -> WF::Weight {
+        unimplemented!()
+    }
+
+    #[cfg(verus_keep_ghost)]
+    fn acc(_w: WF::Weight, _n: nat, _v: T::Get<'a>) -> WF::Weight {
+        unimplemented!()
+    }
+
+    #[inline(always)]
+    fn new_zero() -> WF::Weight {
+        WF::Weight::default()
+    }
+
+    #[inline(always)]
+    fn accumulate_run(w: &mut WF::Weight, n: usize, v: T::Get<'a>) -> Result<(), PackError> {
+        WF::accumulate_run(w, n, v)
     }
 }
 

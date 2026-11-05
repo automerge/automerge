@@ -293,7 +293,9 @@ compiles them away. To check them, run `cargo verus verify -p hexane
 
 * The LEB128 and bijou64 codecs: each value has exactly one encoding.
 * Loading: the RLE and bool loaders accept exactly the canonical encodings
-  and build slabs with correct metadata holding the input's values.
+  and build slabs with correct metadata holding the input's values. As the
+  runs stream past, a slab is cut only at the end of a run, and a load's
+  slab weights are accumulated from exactly the runs of each slab.
 * The slab-level code: decoders, encoders, the edit rebuilds and slab
   merges, for both RLE and bool slabs.
 * The slab indexes (the B-tree and the Fenwick tree).
@@ -402,9 +404,11 @@ connects the generic column types to the verified cores, and the closures
 passed through it (including the slabs a new column is built from, which
 come from the verified loaders, fills and encoders); that the weight a
 column's index holds for each slab is the one its weight function
-computes for the slab (the edit cursor is proved to keep them so), and,
-for weights `load` accumulates as runs stream past, that it attributes
-each run to its slab; each prefix value type's `accumulate` and
+computes for the slab (the edit cursor is proved to keep them so, and a
+load, which accumulates each slab's weight from the runs as they stream
+past, is proved to give each slab exactly the runs that hold its values,
+in order), so that accumulating a slab's runs gives what computing its
+weight does; each prefix value type's `accumulate` and
 `accumulate_run` (that they add its values, a run as its value
 repeated) and `try_accumulate_run` (that when it succeeds it adds what
 `accumulate_run` does), and that its prefix type's `+` is associative with `default`
