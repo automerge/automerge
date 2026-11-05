@@ -14,7 +14,7 @@ use vstd::prelude::Ghost;
 use crate::column::{normalize_range_max, Dx, Iter, IterState};
 use crate::rle::state::WOps;
 use crate::{Codec, Leb128};
-use dedit::{anchor_run, d_boundaries, delta_to, run_sum, Ledger};
+use dedit::{d_boundaries, delta_to, run_sum, Ledger, SplicePhase, SplicePlan};
 use diter::{d_next, d_next_run, d_nth};
 use dscan::{d_scan, d_scan_null};
 use dseek::{d_seek, d_seek_null};
@@ -2118,31 +2118,18 @@ enum SpliceItem {
 /// recomputed boundary delta.
 struct SpliceDeltaIter<It, Out> {
     iter: It,
-    running: i64,
-    /// Remainder of a peeled run: `(delta, count)` still to emit.
-    pending: Option<(i64, usize)>,
-    skip: usize,
-    next_val: Option<i64>,
-    phase: SplicePhase,
+    /// verified (`dedit::SplicePlan`): the deltas realize the items'
+    /// values, then the nulls after the deleted items and the value after
+    /// them
+    plan: SplicePlan,
     _out: PhantomData<Out>,
-}
-
-enum SplicePhase {
-    Values,
-    NullRun,
-    Boundary,
-    Done,
 }
 
 impl<It: Iterator<Item = SpliceItem>, Out: DeltaInner> SpliceDeltaIter<It, Out> {
     fn new(iter: It, prev: i64, skip: usize, next_val: Option<i64>) -> Self {
         Self {
             iter,
-            running: prev,
-            pending: None,
-            skip,
-            next_val,
-            phase: SplicePhase::Values,
+            plan: SplicePlan::new(prev, skip, next_val),
             _out: PhantomData,
         }
     }
@@ -2152,66 +2139,32 @@ impl<It: Iterator<Item = SpliceItem>, Out: DeltaInner> Iterator for SpliceDeltaI
     type Item = (Out, usize);
 
     fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            match self.phase {
+        let (d, n) = loop {
+            match self.plan.phase {
                 SplicePhase::Values => {
-                    if let Some((d, count)) = self.pending.take() {
-                        return Some((Out::from_opt(Some(d)), count));
+                    if let Some(out) = self.plan.take_pending() {
+                        break out;
                     }
                     match self.iter.next() {
-                        Some(SpliceItem::Value(None)) => return Some((Out::from_opt(None), 1)),
-                        Some(SpliceItem::Value(Some(r))) => {
-                            let d = delta_to(self.running, r);
-                            self.running = r;
-                            return Some((Out::from_opt(Some(d)), 1));
-                        }
-                        Some(SpliceItem::Run(DeltaRun {
-                            delta: None, count, ..
-                        })) => return Some((Out::from_opt(None), count)),
+                        Some(SpliceItem::Value(v)) => break self.plan.value(v),
                         Some(SpliceItem::Run(DeltaRun {
                             prefix,
-                            delta: Some(d),
+                            delta,
                             count,
-                        })) => {
-                            // (`splice_runs` drops empty runs)
-                            let (first, end) = anchor_run(self.running, prefix, d, count);
-                            self.running = end;
-                            if first == d {
-                                // anchored where the run expects: verbatim
-                                return Some((Out::from_opt(Some(d)), count));
-                            }
-                            // Peel: fix-up delta for the first item, then
-                            // the rest of the run verbatim.
-                            if count > 1 {
-                                self.pending = Some((d, count - 1));
-                            }
-                            return Some((Out::from_opt(Some(first)), 1));
-                        }
-                        None => {
-                            self.phase = if self.next_val.is_some() {
-                                SplicePhase::NullRun
-                            } else {
-                                SplicePhase::Done
-                            };
-                        }
+                        })) => break self.plan.run(prefix, delta, count),
+                        None => self.plan.end_values(),
                     }
                 }
                 SplicePhase::NullRun => {
-                    self.phase = SplicePhase::Boundary;
-                    // don't construct a null for a zero-length run — the
-                    // non-nullable inner type can't represent one
-                    if self.skip > 0 {
-                        return Some((Out::from_opt(None), self.skip));
+                    if let Some(out) = self.plan.nulls() {
+                        break out;
                     }
                 }
-                SplicePhase::Boundary => {
-                    self.phase = SplicePhase::Done;
-                    let next = self.next_val.expect("boundary phase requires next_val");
-                    return Some((Out::from_opt(Some(delta_to(self.running, next))), 1));
-                }
+                SplicePhase::Boundary => break self.plan.boundary(),
                 SplicePhase::Done => return None,
             }
-        }
+        };
+        Some((Out::from_opt(d), n))
     }
 }
 

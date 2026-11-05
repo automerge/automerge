@@ -428,9 +428,10 @@ first and values outside the domain last.
   column's sum fits its prefix type, which the searches' results depend on
   (loads reject sums that would not, and edits panic, but those checks are
   not part of the proof); `delta`, which is glue over the verified
-  iterator; the glue that drives a delta edit's verified arithmetic (the
-  order in which `splice` emits the deltas, and that what the cursor
-  reports carrying, deleting or jumping over is what it did); and that a
+  iterator; the glue that drives a delta edit's verified arithmetic (that
+  `splice` feeds its items to the verified plan in order, and that what
+  the cursor reports carrying, deleting or jumping over is what it did);
+  and that a
   delta edit leaves the values in the domain, so that the index's sums
   fit again, which `check_span` checks at run time. Its walk over the column is proved: it
   passes exactly when the values lie in the domain within a range less

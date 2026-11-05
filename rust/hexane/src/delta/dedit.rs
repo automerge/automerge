@@ -26,8 +26,10 @@
 //! with the verified iterator, the running sum before the edit, the nulls
 //! after it and the value of the item after those; and
 //! `lemma_splice_keeps_rest`: the boundary delta reaching that value
-//! leaves every value after it as it was. Trusted: the glue that drives
-//! these (the order in which `splice` emits its deltas), that what the
+//! leaves every value after it as it was; and [`SplicePlan`] emits, a run
+//! at a time, deltas realizing exactly the items' values, then the nulls
+//! after the deleted items and the value after them. Trusted: the glue
+//! that drives these (that `splice` feeds the plan its items), that what the
 //! cursor reports carrying, deleting and jumping over is what it did, the
 //! running sum `prefix_at` reads from the index, and (as for reading,
 //! `diter`) that the index holds each slab's aggregate.
@@ -777,6 +779,399 @@ pub(crate) proof fn lemma_splice_keeps_rest(
     lemma_crop_add(q + b, 0);
     lemma_rz_crop(p + bd, q + b, rest);
     assert(rz(0, a + e + new_tail) =~= rz(0, a) + rz(psum(a), e) + rz(q, tail));
+}
+
+/// Where a splice's emission of deltas stands: the inserted items, then
+/// the nulls after the deleted ones, then the rewritten boundary delta.
+pub(crate) enum SplicePhase {
+    Values,
+    NullRun,
+    Boundary,
+    Done,
+}
+
+/// The deltas a splice writes, emitted a run at a time (`splice`'s
+/// iterator drives it): for each inserted item the deltas realizing its
+/// values; then the nulls that followed the deleted items, carried over;
+/// then a boundary delta reaching the value of the item after them again.
+pub(crate) struct SplicePlan {
+    pub(crate) running: i64,
+    /// the rest of a run whose first item was re-anchored
+    pub(crate) pending: Option<(i64, usize)>,
+    pub(crate) skip: usize,
+    pub(crate) next_val: Option<i64>,
+    pub(crate) phase: SplicePhase,
+    /// the running sum before the splice
+    #[allow(dead_code)]
+    pub(crate) prev: Ghost<int>,
+    /// the deltas emitted so far
+    #[allow(dead_code)]
+    pub(crate) emitted: Ghost<Seq<Option<i64>>>,
+    /// the values of the items taken so far
+    #[allow(dead_code)]
+    pub(crate) wanted: Ghost<Seq<Option<i64>>>,
+}
+
+/// The deltas a plan has yet to emit of a run it re-anchored.
+pub(crate) open spec fn pend_seq(pending: Option<(i64, usize)>) -> Seq<Option<i64>> {
+    match pending {
+        Some((d, n)) => reps(n as nat, Some(d)),
+        None => Seq::empty(),
+    }
+}
+
+/// What a splice's deltas realize once done: the items' values, then (if
+/// an item followed the deleted ones) the nulls before it and its value.
+pub(crate) open spec fn splice_vals(wanted: Seq<Option<i64>>, skip: nat, next_val: Option<i64>) -> Seq<Option<i64>> {
+    match next_val {
+        Some(v) => wanted + reps(skip, None) + seq![Some(v)],
+        None => wanted,
+    }
+}
+
+impl SplicePlan {
+    pub(crate) open spec fn inv(&self) -> bool {
+        let p = self.prev@;
+        let e = self.emitted@;
+        match self.phase {
+            SplicePhase::Values => {
+                &&& rz(p, e + pend_seq(self.pending)) == self.wanted@
+                &&& self.running == crop(p + psum(e + pend_seq(self.pending)))
+            },
+            SplicePhase::NullRun => {
+                &&& self.pending is None && self.next_val is Some
+                &&& rz(p, e) == self.wanted@
+                &&& self.running == crop(p + psum(e))
+            },
+            SplicePhase::Boundary => {
+                &&& self.pending is None && self.next_val is Some
+                &&& rz(p, e) == self.wanted@ + reps(self.skip as nat, None)
+                &&& self.running == crop(p + psum(e))
+            },
+            SplicePhase::Done => rz(p, e) == splice_vals(self.wanted@, self.skip as nat, self.next_val),
+        }
+    }
+
+    /// A plan for a splice after the running sum `prev`, followed by `skip`
+    /// nulls and then (if any) an item of value `next_val`.
+    #[inline(always)]
+    pub(crate) fn new(prev: i64, skip: usize, next_val: Option<i64>) -> (r: Self)
+        ensures
+            r.inv(),
+            r.phase is Values,
+            r.prev@ == prev as int,
+            r.emitted@.len() == 0,
+            r.wanted@.len() == 0,
+            r.skip == skip,
+            r.next_val == next_val,
+    {
+        proof {
+            assert(Seq::<Option<i64>>::empty() + Seq::<Option<i64>>::empty() =~= Seq::<Option<i64>>::empty());
+            assert(rz(prev as int, Seq::<Option<i64>>::empty()) =~= Seq::<Option<i64>>::empty());
+            lemma_crop(prev as int);
+        }
+        SplicePlan {
+            running: prev,
+            pending: None,
+            skip,
+            next_val,
+            phase: SplicePhase::Values,
+            prev: Ghost(prev as int),
+            emitted: Ghost(Seq::empty()),
+            wanted: Ghost(Seq::empty()),
+        }
+    }
+
+    /// Emit the rest of a re-anchored run, if there is one.
+    #[inline(always)]
+    pub(crate) fn take_pending(&mut self) -> (r: Option<(Option<i64>, usize)>)
+        requires
+            old(self).inv(),
+            old(self).phase is Values,
+        ensures
+            final(self).inv(),
+            final(self).phase is Values,
+            final(self).pending is None,
+            final(self).wanted == old(self).wanted,
+            final(self).prev == old(self).prev,
+            final(self).skip == old(self).skip,
+            final(self).next_val == old(self).next_val,
+            final(self).emitted@ == old(self).emitted@ + match r {
+                Some((x, n)) => reps(n as nat, x),
+                None => Seq::empty(),
+            },
+    {
+        match self.pending {
+            Some((d, n)) => {
+                self.pending = None;
+                proof {
+                    let e = self.emitted@ + reps(n as nat, Some(d));
+                    assert(e + Seq::<Option<i64>>::empty() =~= e);
+                    self.emitted = Ghost(e);
+                }
+                Some((Some(d), n))
+            },
+            None => {
+                proof {
+                    assert(self.emitted@ + Seq::<Option<i64>>::empty() =~= self.emitted@);
+                }
+                None
+            },
+        }
+    }
+
+    /// Emit the delta of an inserted value `v` (or a null).
+    #[inline(always)]
+    pub(crate) fn value(&mut self, v: Option<i64>) -> (r: (Option<i64>, usize))
+        requires
+            old(self).inv(),
+            old(self).phase is Values,
+            old(self).pending is None,
+        ensures
+            final(self).inv(),
+            final(self).phase is Values,
+            final(self).pending is None,
+            final(self).wanted@ == old(self).wanted@.push(v),
+            final(self).emitted@ == old(self).emitted@ + reps(r.1 as nat, r.0),
+            final(self).prev == old(self).prev,
+            final(self).skip == old(self).skip,
+            final(self).next_val == old(self).next_val,
+    {
+        let ghost p = self.prev@;
+        let ghost e = self.emitted@;
+        let ghost w = self.wanted@;
+        proof {
+            assert(e + Seq::<Option<i64>>::empty() =~= e);
+        }
+        match v {
+            None => {
+                proof {
+                    let x = reps(1, None);
+                    lemma_rz_cat(p, e, x);
+                    lemma_rz_nulls(p + psum(e), 1);
+                    lemma_psum_cat(e, x);
+                    assert(x =~= seq![None]);
+                    let e1 = e + x;
+                    assert(e1 + Seq::<Option<i64>>::empty() =~= e1);
+                    assert(w.push(v) =~= w + x);
+                    self.emitted = Ghost(e1);
+                    self.wanted = Ghost(w.push(v));
+                }
+                (None, 1)
+            },
+            Some(x) => {
+                let d = delta_to(self.running, x);
+                proof {
+                    let one = seq![Some(d)];
+                    lemma_rz_cat(p, e, one);
+                    lemma_psum_cat(e, one);
+                    lemma_rz_one(p + psum(e), d);
+                    lemma_psum_one(d);
+                    lemma_crop_add(p + psum(e), d as int);
+                    lemma_crop(x as int);
+                    assert(reps(1, Some(d)) =~= one);
+                    let e1 = e + one;
+                    assert(e1 + Seq::<Option<i64>>::empty() =~= e1);
+                    assert(w.push(v) =~= w + seq![Some(x)]);
+                    self.emitted = Ghost(e1);
+                    self.wanted = Ghost(w.push(v));
+                }
+                self.running = x;
+                (Some(d), 1)
+            },
+        }
+    }
+
+    /// Emit a run of `count` deltas `d` whose values follow the running sum
+    /// `prefix` (or `count` nulls): verbatim where the run is anchored
+    /// already, else its first item re-anchored, with the rest left
+    /// pending.
+    #[inline(always)]
+    pub(crate) fn run(&mut self, prefix: i64, d: Option<i64>, count: usize) -> (r: (Option<i64>, usize))
+        requires
+            old(self).inv(),
+            old(self).phase is Values,
+            old(self).pending is None,
+            count >= 1,
+        ensures
+            final(self).inv(),
+            final(self).phase is Values,
+            final(self).wanted@ == old(self).wanted@ + match d {
+                Some(x) => run_vals(prefix as int, x, count as nat),
+                None => reps(count as nat, None),
+            },
+            final(self).emitted@ == old(self).emitted@ + reps(r.1 as nat, r.0),
+            final(self).prev == old(self).prev,
+            final(self).skip == old(self).skip,
+            final(self).next_val == old(self).next_val,
+    {
+        let ghost p = self.prev@;
+        let ghost e = self.emitted@;
+        proof {
+            assert(e + Seq::<Option<i64>>::empty() =~= e);
+        }
+        match d {
+            None => {
+                proof {
+                    let x = reps(count as nat, None);
+                    lemma_rz_cat(p, e, x);
+                    lemma_rz_nulls(p + psum(e), count as nat);
+                    lemma_psum_cat(e, x);
+                    let e1 = e + x;
+                    assert(e1 + Seq::<Option<i64>>::empty() =~= e1);
+                    self.emitted = Ghost(e1);
+                    self.wanted = Ghost(self.wanted@ + x);
+                }
+                (None, count)
+            },
+            Some(x) => {
+                let (first, end) = anchor_run(self.running, prefix, x, count);
+                let ghost whole = seq![Some(first)] + reps((count - 1) as nat, Some(x));
+                proof {
+                    lemma_rz_cat(p, e, whole);
+                    lemma_psum_cat(e, whole);
+                    // the run realizes after where the emitted deltas leave off
+                    lemma_crop_add(p + psum(e), first as int);
+                    lemma_rz_anchored(self.running as int, prefix as int, first, x, count as nat);
+                    lemma_crop_add(p + psum(e), 0);
+                    lemma_crop(p + psum(e));
+                    lemma_rz_crop(p + psum(e), self.running as int, whole);
+                    lemma_crop_add(p + psum(e), psum(whole));
+                    lemma_crop_add(self.running as int, psum(whole));
+                    self.wanted = Ghost(self.wanted@ + run_vals(prefix as int, x, count as nat));
+                }
+                self.running = end;
+                if first == x {
+                    proof {
+                        assert(whole =~= reps(count as nat, Some(x)));
+                        let e1 = e + reps(count as nat, Some(x));
+                        assert(e1 + Seq::<Option<i64>>::empty() =~= e1);
+                        assert(e + whole =~= e1);
+                        self.emitted = Ghost(e1);
+                    }
+                    (Some(x), count)
+                } else {
+                    if count > 1 {
+                        self.pending = Some((x, count - 1));
+                    }
+                    proof {
+                        let e1 = e + reps(1, Some(first));
+                        assert(reps(1, Some(first)) =~= seq![Some(first)]);
+                        assert(e1 + pend_seq(self.pending) =~= e + whole);
+                        self.emitted = Ghost(e1);
+                    }
+                    (Some(first), 1)
+                }
+            },
+        }
+    }
+
+    /// The inserted items are done: on to the nulls and boundary, if an
+    /// item followed the deleted ones, else finished.
+    #[inline(always)]
+    pub(crate) fn end_values(&mut self)
+        requires
+            old(self).inv(),
+            old(self).phase is Values,
+            old(self).pending is None,
+        ensures
+            final(self).inv(),
+            final(self).next_val is Some ==> final(self).phase is NullRun,
+            final(self).next_val is None ==> final(self).phase is Done,
+            final(self).emitted == old(self).emitted,
+            final(self).wanted == old(self).wanted,
+            final(self).prev == old(self).prev,
+            final(self).skip == old(self).skip,
+            final(self).next_val == old(self).next_val,
+    {
+        proof {
+            assert(self.emitted@ + Seq::<Option<i64>>::empty() =~= self.emitted@);
+        }
+        self.phase = if self.next_val.is_some() { SplicePhase::NullRun } else { SplicePhase::Done };
+    }
+
+    /// Emit the nulls that followed the deleted items, if any.
+    #[inline(always)]
+    pub(crate) fn nulls(&mut self) -> (r: Option<(Option<i64>, usize)>)
+        requires
+            old(self).inv(),
+            old(self).phase is NullRun,
+        ensures
+            final(self).inv(),
+            final(self).phase is Boundary,
+            final(self).emitted@ == old(self).emitted@ + match r {
+                Some((x, n)) => reps(n as nat, x),
+                None => Seq::empty(),
+            },
+            final(self).wanted == old(self).wanted,
+            final(self).prev == old(self).prev,
+            final(self).skip == old(self).skip,
+            final(self).next_val == old(self).next_val,
+    {
+        let ghost p = self.prev@;
+        let ghost e = self.emitted@;
+        let ghost x = reps(self.skip as nat, None);
+        proof {
+            lemma_rz_cat(p, e, x);
+            lemma_rz_nulls(p + psum(e), self.skip as nat);
+            lemma_psum_cat(e, x);
+        }
+        self.phase = SplicePhase::Boundary;
+        // a zero-length run of nulls can't be written (a non-nullable
+        // column has no null to write)
+        if self.skip > 0 {
+            proof {
+                self.emitted = Ghost(e + x);
+            }
+            Some((None, self.skip))
+        } else {
+            proof {
+                assert(x =~= Seq::<Option<i64>>::empty());
+                assert(self.wanted@ + x =~= self.wanted@);
+                assert(e + Seq::<Option<i64>>::empty() =~= e);
+            }
+            None
+        }
+    }
+
+    /// Emit the boundary delta: from where the plan has left the running
+    /// sum to the value of the item after the deleted ones.
+    #[inline(always)]
+    pub(crate) fn boundary(&mut self) -> (r: (Option<i64>, usize))
+        requires
+            old(self).inv(),
+            old(self).phase is Boundary,
+        ensures
+            final(self).inv(),
+            final(self).phase is Done,
+            final(self).emitted@ == old(self).emitted@ + reps(r.1 as nat, r.0),
+            final(self).wanted == old(self).wanted,
+            final(self).prev == old(self).prev,
+            final(self).skip == old(self).skip,
+            final(self).next_val == old(self).next_val,
+    {
+        let ghost p = self.prev@;
+        let ghost e = self.emitted@;
+        let next = match self.next_val {
+            Some(v) => v,
+            None => {
+                proof {
+                    assert(false);
+                }
+                0
+            },
+        };
+        let bd = delta_to(self.running, next);
+        proof {
+            lemma_rz_cat(p, e, seq![Some(bd)]);
+            lemma_rz_one(p + psum(e), bd);
+            lemma_crop_add(p + psum(e), bd as int);
+            assert(reps(1, Some(bd)) =~= seq![Some(bd)]);
+            self.emitted = Ghost(e + seq![Some(bd)]);
+        }
+        self.phase = SplicePhase::Done;
+        (Some(bd), 1)
+    }
 }
 
 /// The deltas before the iterator's position `k` items further on: those
