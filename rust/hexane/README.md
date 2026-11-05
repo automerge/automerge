@@ -322,6 +322,15 @@ compiles them away. To check them, run `cargo verus verify -p hexane
   the index rules out hold none, and within a slab the items of a run of
   equal deltas are found by division, without overflow at the ends of
   `i64`.
+* A delta column's sorted search (`DeltaColumn::scope_to_value`,
+  `DeltaIter::seek_to_value`): where the values in the window are sorted
+  (nulls first), it returns exactly the range of them equal to the
+  target, or, if there are none, the empty range where the target would
+  go, and leaves the iterator at its start; unsorted, it returns some
+  range inside the window. It jumps by the index's prefix sums to the slab
+  where the running sum first reaches the target, which skips no match
+  when the window is sorted, whatever lies outside it. Given the index's
+  aggregates, as for reading.
 * The value search of `Column` and its iterator (`scope_to_value`,
   `seek_to_value`): where the values in the window are sorted, it returns
   exactly the range of them equal to the target, or, if there are none,
@@ -361,8 +370,10 @@ prefix searches, that an unsigned prefix type's values are numbers, whose
 sums (where they fit) and differences are its `+` and `-`, which its
 `checked_add` adds when the sum fits, whose order is its `<=`, and which
 its `/` and `try_into` divide and convert; the delta
-value types' `to_opt`; and that each value type's `Ord` agrees with its
-`==`.
+value types' `to_opt`; that each value type's `Ord` agrees with its
+`==`; and, for the delta columns' sorted search, that a delta value
+type's `Ord` orders values as the `i64`s they are stored as, with nulls
+first and values outside the domain last.
 
 **Known limitations:**
 
@@ -379,8 +390,8 @@ value types' `to_opt`; and that each value type's `Ord` agrees with its
   column's sum fits its prefix type, which the searches' results depend on
   (loads reject sums that would not, and edits panic, but those checks are
   not part of the proof); `delta`, which is glue over the verified
-  iterator; `DeltaIter::seek_to_value` and `scan_to_range`; and the bridging
-  deltas a delta edit writes.
+  iterator; `DeltaIter::scan_to_range`; and the bridging deltas a delta
+  edit writes.
 * Where a precondition of the verified code cannot be shown from the
   specifications (a slab of `i64::MAX` bytes or more, or a column or
   encoder of nearly `usize::MAX` items), the code checks it and panics

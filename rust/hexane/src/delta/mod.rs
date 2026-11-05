@@ -2,6 +2,7 @@ pub(crate) mod agg;
 mod decoder;
 pub(crate) mod dfind;
 pub(crate) mod diter;
+pub(crate) mod dseek;
 pub mod indexed;
 pub(crate) mod stream;
 
@@ -12,6 +13,7 @@ use crate::column::{normalize_range_max, Dx, Iter, IterState};
 use crate::rle::state::WOps;
 use crate::{Codec, Leb128};
 use diter::{d_next, d_next_run, d_nth};
+use dseek::{d_seek, d_seek_null};
 use indexed::DB;
 use std::fmt::Debug;
 use std::marker::PhantomData;
@@ -1739,20 +1741,11 @@ impl<'a, T: DeltaValue, C: Codec> DeltaIter<'a, T, C> {
         }
 
         // null targets sort first: the run, if any, is the window's
-        // leading null rows
+        // leading null rows (verified, `dseek`)
         if T::NULLABLE && target == T::null_value() {
-            let mut probe = self.clone();
-            let mut run_end = start;
-            while run_end < end {
-                let Some(run) = probe.inner.next_run() else {
-                    break;
-                };
-                if T::Inner::to_opt(run.value).is_some() {
-                    break;
-                }
-                run_end += run.count;
-            }
-            return start..run_end.min(end);
+            let run_end =
+                d_seek_null::<Dx<T::Inner, C>, DB<T::Inner>>(&self.inner.core, self.inner.slabs);
+            return start..run_end;
         }
 
         let Some(t) = target.try_to_i64() else {
@@ -1764,89 +1757,15 @@ impl<'a, T: DeltaValue, C: Codec> DeltaIter<'a, T, C> {
             return at..at;
         };
 
-        // jump the probe to the slab where the running prefix first
-        // reaches the target. With garbage outside the (sorted) window
-        // the descent can only land early, never late, so clamping to
-        // the window start keeps this correct — just slower.
-        let mut probe = self.clone();
-        if let Some(col) = probe.col {
-            let (si, prefix, pos) = col.index.find_slab_at_prefix(&t);
-            if pos > probe.pos() && pos < end {
-                probe.running = prefix;
-                if !probe.inner.advance_to_slab(si, pos) {
-                    probe = self.clone();
-                }
-            }
-        }
-
-        // decode from the slab start: find the first value >= target
-        let mut pos = probe.pos();
-        let mut running = probe.running;
-        let mut run_start = end;
-        let mut run_end = end;
-        while pos < end {
-            let Some(run) = probe.inner.next_run() else {
-                break;
-            };
-            let count = run.count.min(end - pos);
-            match T::Inner::to_opt(run.value) {
-                // null rows sort before every value
-                None => pos += count,
-                Some(d) => {
-                    let run_final = running + d * count as i64;
-                    if run_final < t {
-                        running = run_final;
-                        pos += count;
-                        continue;
-                    }
-                    // the crossing is inside this run: the j-th item
-                    // (1-based) realizes running + j*d
-                    // d <= 0 happens at the window boundary (the run
-                    // bridges pre-window data) or on all-equal runs: the
-                    // first item is the only candidate either way, as it
-                    // is when the run starts at or past the target
-                    let steps = if d <= 0 || t <= running {
-                        1
-                    } else {
-                        // the least j with running + j*d >= t; `t -
-                        // running` is at most the run's `d * count`, but
-                        // `t - running + d - 1` can overflow
-                        ((t - running - 1) / d + 1) as usize
-                    };
-                    run_start = pos + steps - 1;
-                    let found = running + d * steps as i64 == t;
-                    run_end = run_start;
-                    if found {
-                        run_end += 1;
-                        if d == 0 {
-                            // the rest of this run repeats the target
-                            run_end = pos + count;
-                        }
-                        if run_end == pos + count {
-                            // ended at a run boundary: adjacent runs of
-                            // zero deltas keep repeating the target
-                            while run_end < end {
-                                let Some(run) = probe.inner.next_run() else {
-                                    break;
-                                };
-                                if T::Inner::to_opt(run.value) != Some(0) {
-                                    break;
-                                }
-                                run_end += run.count;
-                            }
-                            run_end = run_end.min(end);
-                        }
-                    }
-                    break;
-                }
-            }
-        }
-        self.advance_to(run_start);
-        if run_start == end {
-            // above every value: where the items end
-            let at = self.pos();
-            return at..at;
-        }
+        // verified (`dseek`): where the window is sorted, exactly the items
+        // equal to `t`, or the empty range where it would go
+        let (run_start, run_end) = d_seek::<Dx<T::Inner, C>, DB<T::Inner>>(
+            &mut self.inner.core,
+            self.inner.slabs,
+            self.col.map(|c| &c.index),
+            &mut self.running,
+            t,
+        );
         run_start..run_end
     }
 

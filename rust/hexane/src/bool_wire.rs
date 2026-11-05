@@ -2082,6 +2082,11 @@ impl<'a, C: CountsOf> Decode for BoolDecoder<'a, C> {
     fn d_eq(a: &bool, b: &bool) -> (r: bool) {
         *a == *b
     }
+
+    #[inline(always)]
+    fn dup(&self) -> (r: Self) {
+        BoolDecoder { d: self.d, _codec: PhantomData }
+    }
 }
 
 /// The empty slab is valid, with no values.

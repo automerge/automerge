@@ -102,6 +102,13 @@ pub(crate) trait Decode: Sized {
         ensures
             r == (*a == *b),
     ;
+
+    /// A copy, to read ahead with.
+    fn dup(&self) -> (r: Self)
+        ensures
+            r.inv() == self.inv(),
+            r.rest() == self.rest(),
+    ;
 }
 
 /// Decoders on a column's slabs, which live for `'a`.
@@ -433,6 +440,27 @@ impl<D: Decode> ICore<D> {
             &&& self.slab_remaining == 0
             &&& self.decoder.rest().len() == 0
             &&& self.pos >= total(slab_lens(s))
+        }
+    }
+
+    /// A copy of the iterator, to read ahead with: the same in every
+    /// way the specifications see.
+    #[inline(always)]
+    pub(crate) fn dup(&self) -> (r: Self)
+        ensures
+            r.items_left == self.items_left,
+            r.slab_remaining == self.slab_remaining,
+            r.slab_idx == self.slab_idx,
+            r.pos == self.pos,
+            r.decoder.inv() == self.decoder.inv(),
+            r.decoder.rest() == self.decoder.rest(),
+    {
+        ICore {
+            items_left: self.items_left,
+            slab_remaining: self.slab_remaining,
+            decoder: self.decoder.dup(),
+            slab_idx: self.slab_idx,
+            pos: self.pos,
         }
     }
 

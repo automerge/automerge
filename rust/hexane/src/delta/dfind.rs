@@ -41,7 +41,7 @@ verus! {
 /// fits one. (Two's complement makes it `x - a` wrapping; Verus leaves a
 /// negative `i64`'s cast unspecified, so the cases are spelled out.)
 #[inline(always)]
-fn udiff(x: i64, a: i64) -> (r: u64)
+pub(crate) fn udiff(x: i64, a: i64) -> (r: u64)
     requires
         x >= a,
     ensures
@@ -215,7 +215,7 @@ pub(crate) open spec fn s1_running<V: Copy, B: DeltaOps<V>>(base: int, vs: Seq<V
 
 /// Item `k + kk - 1` of a run of `c` copies of `x` starting at item `k`:
 /// it is `x`, and the running sum after it is `kk` steps on.
-proof fn lemma_run_item<V: Copy, B: DeltaOps<V>>(vs: Seq<V>, k: int, c: int, x: V, kk: int)
+pub(crate) proof fn lemma_run_item<V: Copy, B: DeltaOps<V>>(vs: Seq<V>, k: int, c: int, x: V, kk: int)
     requires
         0 <= k,
         k + c <= vs.len(),
@@ -433,7 +433,7 @@ pub(crate) fn d_scan_next<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Ite
 
 /// The running sums after each of the first `m` deltas lie within the
 /// least and greatest after any of them.
-proof fn lemma_take_in_bounds(ds: Seq<Option<i64>>, m: int)
+pub(crate) proof fn lemma_take_in_bounds(ds: Seq<Option<i64>>, m: int)
     requires
         1 <= m <= ds.len(),
     ensures
@@ -465,7 +465,7 @@ pub(crate) open spec fn col_hit<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode
 /// Slab `k` of the column, scanned after the running sum before it: its
 /// running sums fit, its matches are the column's, and a slab the index
 /// rules out holds none.
-proof fn lemma_slab_hits<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
+pub(crate) proof fn lemma_slab_hits<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
     ws: Seq<SlabAgg>,
     s: Seq<Slab<X::Tail>>,
     lo: int,
@@ -552,7 +552,7 @@ pub(crate) open spec fn slab_at(lens: Seq<nat>, j: int) -> int {
     choose|k: int| #![trigger sum(lens, 0, k)] 0 <= k < lens.len() && sum(lens, 0, k) <= j < sum(lens, 0, k + 1)
 }
 
-proof fn lemma_slab_exists(lens: Seq<nat>, j: int, n: int)
+pub(crate) proof fn lemma_slab_exists(lens: Seq<nat>, j: int, n: int)
     requires
         0 <= j < sum(lens, 0, n),
         0 <= n <= lens.len(),
@@ -574,7 +574,7 @@ proof fn lemma_slab_exists(lens: Seq<nat>, j: int, n: int)
 }
 
 /// Item `j` of the column is item `j - sum(0, k)` of slab `slab_at(j)`.
-proof fn lemma_slab_of<'a, X: Decoders<'a>>(s: Seq<Slab<X::Tail>>, j: int)
+pub(crate) proof fn lemma_slab_of<'a, X: Decoders<'a>>(s: Seq<Slab<X::Tail>>, j: int)
     requires
         0 <= j < total(slab_lens(s)),
         lens_ok::<X>(s),
@@ -592,7 +592,7 @@ proof fn lemma_slab_of<'a, X: Decoders<'a>>(s: Seq<Slab<X::Tail>>, j: int)
 }
 
 /// A slab's first item is at or after a slab before it ends.
-proof fn lemma_slab_order(lens: Seq<nat>, j: int, p: int, q: int)
+pub(crate) proof fn lemma_slab_order(lens: Seq<nat>, j: int, p: int, q: int)
     requires
         0 <= p <= lens.len(),
         0 <= q <= lens.len(),

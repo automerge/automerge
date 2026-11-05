@@ -326,6 +326,30 @@ impl<'a, O: RleOps<'a>> Dec<'a, O> {
         self.data@
     }
 
+    /// A copy.
+    // `RunState` is not `Copy`: the match copies its value out
+    #[allow(clippy::needless_match)]
+    #[inline(always)]
+    pub(crate) fn dup(&self) -> (r: Self)
+        ensures
+            r == *self,
+    {
+        let state = match self.state {
+            RunState::Repeat(v) => RunState::Repeat(v),
+            RunState::Literal => RunState::Literal,
+            RunState::Null => RunState::Null,
+            RunState::Idle => RunState::Idle,
+        };
+        Dec {
+            data: self.data,
+            byte_pos: self.byte_pos,
+            remaining: self.remaining,
+            state,
+            run_at: self.run_at,
+            gi: self.gi,
+        }
+    }
+
     /// The slab's values.
     pub(crate) open spec fn values(&self) -> Seq<O::V> {
         slab_values::<O>(self.data())
@@ -3053,6 +3077,11 @@ impl<'a, O: RleOps<'a>> Decode for RDecoder<'a, O> {
     #[inline(always)]
     fn d_eq(a: &O::V, b: &O::V) -> (r: bool) {
         O::same(a, b)
+    }
+
+    #[inline(always)]
+    fn dup(&self) -> (r: Self) {
+        RDecoder { inner: self.inner.dup() }
     }
 }
 
