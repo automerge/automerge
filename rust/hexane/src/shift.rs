@@ -268,7 +268,19 @@ impl<T: Iterator> Unshift<T> {
 }
 
 impl<T: Shiftable + Iterator> Unshift<T> {
+    /// Reposition to `range`: the lookahead becomes the item at
+    /// `range.start`, and iteration stops at `range.end`. The range may
+    /// start at the lookahead's own item, which is then kept (an empty
+    /// range there drops it), or after it.
     pub fn shift(&mut self, range: Range<usize>) {
+        // the lookahead is the item just before the inner's position
+        if self.next.is_some() && range.start.checked_add(1) == Some(self.inner.get_pos()) {
+            self.inner.set_max(range.end);
+            if range.is_empty() {
+                self.next = None;
+            }
+            return;
+        }
         self.next = self.inner.shift_next(range);
     }
 }
