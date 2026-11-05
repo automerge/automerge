@@ -15,6 +15,10 @@ utf16-indexing = []
 # Whether to enable "slow path" assertions which check that various invariants hold
 # should only be enabled when running tests
 slow_path_assertions = ["hexane/slow_path_assertions"]
+# Count how often local writes walk the op set's columns to place ops and
+# successor marks (see the `splice_counters` module); for tests and
+# measurement only
+splice-counters = []
 
 [dependencies]
 cfg-if = "1.0"

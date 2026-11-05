@@ -11,7 +11,7 @@ use crate::marks::{ExpandMark, Mark, MarkSet};
 use crate::op_set2::{ChangeMetadata, Parents};
 use crate::patches::PatchLog;
 use crate::sync::SyncDoc;
-use crate::transaction::{CommitOptions, Transactable};
+use crate::transaction::{BatchWrite, CommitOptions, Transactable};
 use crate::types::ObjMeta;
 use crate::{hydrate, AnonymizeError, Bundle, Fragment, OnPartialLoad, TextEncoding};
 use crate::{sync, ObjType, Patch, ReadDoc, ScalarValue, ROOT};
@@ -1366,6 +1366,23 @@ impl Transactable for AutoCommit {
             obj.as_ref(),
             new_value,
         )
+    }
+
+    fn batch_write<O: AsRef<ExId>, P: Into<Prop>, I: IntoIterator<Item = (O, P, BatchWrite)>>(
+        &mut self,
+        writes: I,
+    ) -> Result<Vec<Option<ExId>>, AutomergeError> {
+        let writes: Vec<_> = writes
+            .into_iter()
+            .map(|(obj, prop, write)| (obj.as_ref().clone(), prop.into(), write))
+            .collect();
+        self.ensure_transaction_open();
+        let (patch_log, tx) = self.transaction.as_mut().unwrap();
+        let ids = tx.batch_write(&mut self.doc, &mut patch_log.events(), writes)?;
+        Ok(ids
+            .into_iter()
+            .map(|id| id.map(|id| self.doc.id_to_exid(id)))
+            .collect())
     }
 
     fn batch_create_object<O: AsRef<ExId>, P: Into<Prop>>(
