@@ -369,9 +369,11 @@ compiles them away. To check them, run `cargo verus verify -p hexane
   values inserted, the original values of the items it carries past or
   re-anchors, or nothing (a delete), and once it has paid what it owes,
   every original value after it is realized as it was; a splice's
-  rewritten boundary delta does the same for the values after it. Over a
-  model of the column as its sequence of deltas, with sums wrapping as
-  the iterators read them.
+  rewritten boundary delta does the same for the values after it, and
+  the values it is computed from (the running sum before the edit, the
+  nulls after it, and the value of the item after those) are what the
+  column holds there. Over a model of the column as its sequence of
+  deltas, with sums wrapping as the iterators read them.
 * The value search of `Column` and its iterator (`scope_to_value`,
   `seek_to_value`): where the values in the window are sorted, it returns
   exactly the range of them equal to the target, or, if there are none,
@@ -422,12 +424,11 @@ first and values outside the domain last.
   column's sum fits its prefix type, which the searches' results depend on
   (loads reject sums that would not, and edits panic, but those checks are
   not part of the proof); `delta`, which is glue over the verified
-  iterator; the glue that drives a delta edit's verified arithmetic
-  (`splice`'s lookup of the values around the edit, the order in which it
-  emits the deltas, and that what the cursor reports carrying, deleting
-  or jumping over is what it did); and that a delta edit leaves the
-  values in the domain, so that the index's sums fit again, which
-  `check_span` checks at run time. Its walk over the column is proved: it
+  iterator; the glue that drives a delta edit's verified arithmetic (the
+  order in which `splice` emits the deltas, and that what the cursor
+  reports carrying, deleting or jumping over is what it did); and that a
+  delta edit leaves the values in the domain, so that the index's sums
+  fit again, which `check_span` checks at run time. Its walk over the column is proved: it
   passes exactly when the values lie in the domain within a range less
   than 2^63 wide, and then every running sum fits `i64`. Its shortcut,
   which skips the walk where the values the column held and those the

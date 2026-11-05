@@ -14,7 +14,7 @@ use vstd::prelude::Ghost;
 use crate::column::{normalize_range_max, Dx, Iter, IterState};
 use crate::rle::state::WOps;
 use crate::{Codec, Leb128};
-use dedit::{anchor_run, delta_to, run_sum, Ledger};
+use dedit::{anchor_run, d_boundaries, delta_to, run_sum, Ledger};
 use diter::{d_next, d_next_run, d_nth};
 use dscan::{d_scan, d_scan_null};
 use dseek::{d_seek, d_seek_null};
@@ -1177,24 +1177,17 @@ impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
     ///   there isn't one).  Subsequent deltas decode against this value, so
     ///   fix-ups must re-establish it to preserve the column's realized values.
     fn find_boundaries(&self, index: usize, del: usize) -> (i64, usize, Option<i64>) {
+        // verified (`dedit::d_boundaries`), over an iterator on the whole
+        // column
         let mut iter = self.iter();
-        iter.advance_by(index);
-        let prev = iter.running;
-        iter.advance_by(del);
-
-        // RLE merges consecutive null runs, so at most one null run sits
-        // between `index + del` and the next non-null — no loop needed.
-        match iter.inner.next_run() {
-            None => (prev, 0, None),
-            Some(run) if T::Inner::to_opt(run.value).is_none() => {
-                (prev, run.count, iter.next().map(|_| iter.running))
-            }
-            Some(run) => (
-                prev,
-                0,
-                Some(iter.running + T::Inner::to_opt(run.value).unwrap()),
-            ),
-        }
+        d_boundaries::<Dx<T::Inner, C>, DB<T::Inner>>(
+            &mut iter.inner.core,
+            iter.inner.slabs,
+            iter.col.map(|c| &c.index),
+            &mut iter.running,
+            index,
+            del,
+        )
     }
 }
 

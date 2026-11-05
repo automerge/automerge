@@ -22,22 +22,37 @@
 //! delete), and keeps `running` the running sum of what was written and
 //! `running + adjust` that of the original deltas passed; so once the
 //! debt is paid, every original value after the cursor is realized as it
-//! was (`lemma_rest_unchanged`). For `splice`,
-//! `lemma_splice_keeps_rest`: the boundary delta leaves every value
-//! after it as it was. Trusted: the glue that drives these, that what the
-//! cursor reports carrying, deleting and jumping over is what it did, and
-//! the running sum `prefix_at` reads from the index.
+//! was (`lemma_rest_unchanged`). For `splice`: [`d_boundaries`] finds,
+//! with the verified iterator, the running sum before the edit, the nulls
+//! after it and the value of the item after those; and
+//! `lemma_splice_keeps_rest`: the boundary delta reaching that value
+//! leaves every value after it as it was. Trusted: the glue that drives
+//! these (the order in which `splice` emits its deltas), that what the
+//! cursor reports carrying, deleting and jumping over is what it did, the
+//! running sum `prefix_at` reads from the index, and (as for reading,
+//! `diter`) that the index holds each slab's aggregate.
 
 // Verus proofs read more plainly with `x = x + n`.
 #![allow(clippy::assign_op_pattern)]
 
+use crate::btree::{SlabAgg, SlabBTree};
+use crate::column::Slab;
 #[cfg(verus_keep_ghost)]
-use crate::delta::agg::{dval, lemma_run_sum, psum, reps};
+use crate::delta::agg::deltas_of;
+use crate::delta::agg::DeltaOps;
+#[cfg(verus_keep_ghost)]
+use crate::delta::agg::{dval, lemma_push, lemma_run_sum, psum, reps};
 use crate::delta::diter::add_run;
+#[cfg(verus_keep_ghost)]
+use crate::delta::diter::{at_run, dbefore, dindex_ok};
 #[cfg(verus_keep_ghost)]
 use crate::delta::diter::{
     crop, lemma_crop, lemma_crop_add, lemma_psum_cat, lemma_wrapping_add, realize,
 };
+use crate::delta::diter::{d_next_run, d_nth};
+#[cfg(verus_keep_ghost)]
+use crate::iter_core::vals_of;
+use crate::iter_core::{Decode, Decoders, ICore};
 use vstd::prelude::*;
 
 verus! {
@@ -762,6 +777,249 @@ pub(crate) proof fn lemma_splice_keeps_rest(
     lemma_crop_add(q + b, 0);
     lemma_rz_crop(p + bd, q + b, rest);
     assert(rz(0, a + e + new_tail) =~= rz(0, a) + rz(psum(a), e) + rz(q, tail));
+}
+
+/// The deltas before the iterator's position `k` items further on: those
+/// before it, then those of the first `k` items of its window.
+pub(crate) proof fn lemma_dbefore_window<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
+    c: ICore<X::D>,
+    s: Seq<Slab<X::Tail>>,
+    k: int,
+)
+    requires
+        c.wf::<X>(s),
+        0 <= k <= c.out::<X>(s).len(),
+    ensures
+        dbefore::<X, B>(s, c.pos + k) == dbefore::<X, B>(s, c.pos as int) + deltas_of::<_, B>(c.out::<X>(s).take(k)),
+{
+    let vv = vals_of::<X>(s);
+    let o = c.out::<X>(s);
+    if k > 0 {
+        assert(c.pos + k <= vv.len());
+        assert(o.take(k) =~= vv.subrange(c.pos as int, c.pos + k));
+        assert(vv.take(c.pos + k) =~= vv.take(c.pos as int) + vv.subrange(c.pos as int, c.pos + k));
+    } else {
+        assert(o.take(k) =~= Seq::<<X::D as Decode>::Item>::empty());
+        if c.pos <= vv.len() {
+            assert(vv.take(c.pos as int) + Seq::<<X::D as Decode>::Item>::empty() =~= vv.take(c.pos as int));
+        } else {
+            assert(vv + Seq::<<X::D as Decode>::Item>::empty() =~= vv);
+        }
+    }
+    assert(deltas_of::<_, B>(vv.take(c.pos as int) + o.take(k)) =~= deltas_of::<_, B>(vv.take(c.pos as int))
+        + deltas_of::<_, B>(o.take(k)));
+    assert(deltas_of::<_, B>(Seq::<<X::D as Decode>::Item>::empty()) =~= Seq::<Option<i64>>::empty());
+}
+
+/// Where a splice at window offset `index` that deletes `del` items meets
+/// the column, from an iterator at the start of the window: the running
+/// sum before `index` (`prev`), the number of nulls straight after the
+/// deleted items (`skip`), and the value of the item after those, if
+/// there is one: the deltas after it decode against that value, so the
+/// splice has to reach it again.
+pub(crate) fn d_boundaries<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
+    core: &mut ICore<X::D>,
+    slabs: &'a [Slab<X::Tail>],
+    ix: Option<&SlabBTree<SlabAgg>>,
+    running: &mut i64,
+    index: usize,
+    del: usize,
+) -> (r: (i64, usize, Option<i64>))
+    requires
+        at_run::<X, B>(*old(core), *old(running), slabs@),
+        dindex_ok::<X, B>(ix, slabs@),
+        index + del <= old(core).out::<X>(slabs@).len(),
+    ensures
+        ({
+            let dw = deltas_of::<_, B>(old(core).out::<X>(slabs@));
+            let p0 = psum(dbefore::<X, B>(slabs@, old(core).pos as int));
+            let e = index + del + r.1;
+            &&& r.0 == crop(p0 + psum(dw.take(index as int)))
+            &&& e <= dw.len()
+            &&& forall|j: int| index + del <= j < e ==> #[trigger] dw[j] is None
+            &&& e < dw.len() ==> dw[e] is Some && r.2 == Some(crop(p0 + psum(dw.take(e + 1))))
+            &&& e == dw.len() ==> r.2 is None
+        }),
+{
+    let ghost s = slabs@;
+    let ghost c0 = *core;
+    let ghost w = c0.out::<X>(s);
+    let ghost dw = deltas_of::<_, B>(w);
+    let ghost p0 = psum(dbefore::<X, B>(s, c0.pos as int));
+    if index > 0 {
+        d_nth::<X, B>(core, slabs, ix, index - 1, running);
+    }
+    proof {
+        if index == 0 {
+            assert(w.skip(0) =~= w);
+        }
+        lemma_dbefore_window::<X, B>(c0, s, index as int);
+        assert(deltas_of::<_, B>(w.take(index as int)) =~= dw.take(index as int));
+        lemma_psum_cat(dbefore::<X, B>(s, c0.pos as int), dw.take(index as int));
+    }
+    let prev = *running;
+    if del > 0 {
+        d_nth::<X, B>(core, slabs, ix, del - 1, running);
+    }
+    proof {
+        if del == 0 {
+            assert(w.skip(index as int).skip(0) =~= w.skip(index as int));
+        }
+        assert(w.skip(index as int).skip(del as int) =~= w.skip(index + del));
+    }
+    let mut skip: usize = 0;
+    loop
+        invariant
+            s == slabs@,
+            c0 == *old(core),
+            w == c0.out::<X>(s),
+            dw == deltas_of::<_, B>(w),
+            p0 == psum(dbefore::<X, B>(s, c0.pos as int)),
+            c0.wf::<X>(s),
+            at_run::<X, B>(*core, *running, s),
+            index + del + skip <= w.len(),
+            core.out::<X>(s) == w.skip(index + del + skip),
+            core.pos == c0.pos + index + del + skip,
+            prev == crop(p0 + psum(dw.take(index as int))),
+            forall|j: int| index + del <= j < index + del + skip ==> #[trigger] dw[j] is None,
+        decreases w.len() - (index + del + skip),
+    {
+        let ghost e = index + del + skip;
+        proof {
+            lemma_window_sum::<X, B>(c0, s, e);
+        }
+        match d_boundary_run::<X, B>(core, slabs, running) {
+            None => {
+                proof {
+                    assert(w.skip(e).len() == 0);
+                    assert(e == w.len());
+                    assert(dw.len() == w.len());
+                }
+                return (prev, skip, None);
+            },
+            Some((n, None)) => {
+                proof {
+                    assert(w.skip(e).len() == w.len() - e);
+                    lemma_nulls_in_window::<_, B>(w, e, n as int);
+                }
+                skip = skip + n;
+            },
+            Some((_, Some(v))) => {
+                proof {
+                    assert(w.skip(e).len() == w.len() - e);
+                    assert(dw.len() == w.len());
+                    lemma_value_in_window::<_, B>(w, e, p0, psum(dbefore::<X, B>(s, c0.pos + e)), v);
+                }
+                return (prev, skip, Some(v));
+            },
+        }
+    }
+}
+
+/// The deltas before window offset `e`: those before the window and the
+/// window's first `e`.
+proof fn lemma_window_sum<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
+    c: ICore<X::D>,
+    s: Seq<Slab<X::Tail>>,
+    e: int,
+)
+    requires
+        c.wf::<X>(s),
+        0 <= e <= c.out::<X>(s).len(),
+    ensures
+        psum(dbefore::<X, B>(s, c.pos + e)) == psum(dbefore::<X, B>(s, c.pos as int)) + psum(
+            deltas_of::<_, B>(c.out::<X>(s)).take(e),
+        ),
+{
+    let w = c.out::<X>(s);
+    lemma_dbefore_window::<X, B>(c, s, e);
+    assert(deltas_of::<_, B>(w.take(e)) =~= deltas_of::<_, B>(w).take(e));
+    lemma_psum_cat(dbefore::<X, B>(s, c.pos as int), deltas_of::<_, B>(w).take(e));
+}
+
+/// A run of `n` nulls at window offset `e`.
+proof fn lemma_nulls_in_window<V: Copy, B: DeltaOps<V>>(w: Seq<V>, e: int, n: int)
+    requires
+        0 <= e,
+        1 <= n,
+        e + n <= w.len(),
+        forall|j: int| 0 <= j < n ==> #[trigger] B::dv(w.skip(e)[j]) is None,
+    ensures
+        forall|j: int| e <= j < e + n ==> #[trigger] deltas_of::<_, B>(w)[j] is None,
+        w.skip(e).skip(n) == w.skip(e + n),
+{
+    assert forall|j: int| e <= j < e + n implies #[trigger] deltas_of::<_, B>(w)[j] is None by {
+        assert(w[j] == w.skip(e)[j - e]);
+        assert(B::dv(w.skip(e)[j - e]) is None);
+    }
+    assert(w.skip(e).skip(n) =~= w.skip(e + n));
+}
+
+/// A non-null item at window offset `e`, after the running sum `p0 + q`
+/// with `q` the sum of the window's first `e` deltas.
+proof fn lemma_value_in_window<V: Copy, B: DeltaOps<V>>(w: Seq<V>, e: int, p0: int, pe: int, v: i64)
+    requires
+        0 <= e < w.len(),
+        pe == p0 + psum(deltas_of::<_, B>(w).take(e)),
+        B::dv(w.skip(e)[0]) is Some,
+        v == crop(pe + dval(B::dv(w.skip(e)[0]))),
+    ensures
+        deltas_of::<_, B>(w)[e] is Some,
+        v == crop(p0 + psum(deltas_of::<_, B>(w).take(e + 1))),
+{
+    let dw = deltas_of::<_, B>(w);
+    assert(w.skip(e)[0] == w[e]);
+    assert(dw.take(e + 1) =~= dw.take(e).push(dw[e]));
+    lemma_push(dw.take(e), dw[e]);
+}
+
+/// The next run of the window, past a splice's deleted items: `None` at
+/// the end of the window; else its length, and, unless it is nulls, the
+/// value its first item realizes.
+#[inline(always)]
+fn d_boundary_run<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
+    core: &mut ICore<X::D>,
+    slabs: &'a [Slab<X::Tail>],
+    running: &mut i64,
+) -> (r: Option<(usize, Option<i64>)>)
+    requires
+        at_run::<X, B>(*old(core), *old(running), slabs@),
+    ensures
+        at_run::<X, B>(*final(core), *final(running), slabs@),
+        ({
+            let o = old(core).out::<X>(slabs@);
+            let p = psum(dbefore::<X, B>(slabs@, old(core).pos as int));
+            match r {
+                None => o.len() == 0,
+                Some((n, x)) => {
+                    &&& 1 <= n <= o.len()
+                    &&& final(core).out::<X>(slabs@) == o.skip(n as int)
+                    &&& final(core).pos == old(core).pos + n
+                    &&& x is None ==> forall|j: int| 0 <= j < n ==> #[trigger] B::dv(o[j]) is None
+                    &&& x matches Some(v) ==> B::dv(o[0]) is Some && v == crop(p + dval(B::dv(o[0])))
+                },
+            }
+        }),
+{
+    let ghost o = old(core).out::<X>(slabs@);
+    let r0 = *running;
+    let run = d_next_run::<X, B>(core, slabs, usize::MAX, running)?;
+    proof {
+        assert(o.take(run.count as int)[0] == run.value);
+        assert forall|j: int| 0 <= j < run.count implies o[j] == run.value by {
+            assert(o.take(run.count as int)[j] == run.value);
+        }
+    }
+    match B::to_opt(run.value) {
+        None => Some((run.count, None)),
+        Some(d) => {
+            proof {
+                lemma_wrapping_add(r0, d);
+                lemma_crop_add(psum(dbefore::<X, B>(slabs@, old(core).pos as int)), d as int);
+            }
+            Some((run.count, Some(r0.wrapping_add(d))))
+        },
+    }
 }
 
 } // verus!
