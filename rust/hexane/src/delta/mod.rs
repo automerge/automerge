@@ -601,7 +601,7 @@ impl<'a, T: DeltaValue, C: Codec> DeltaEncoder<'a, T, C> {
         iter: I,
     ) -> std::ops::Range<usize> {
         let start = out.len();
-        let mut state = DeltaEncoderState::<'a, T>::new();
+        let mut state = DeltaEncoderState::<'a, T, C>::new();
         state.extend(out, iter);
         state.finish(out);
         start..out.len()
@@ -620,7 +620,7 @@ impl<'a, T: DeltaValue, C: Codec> DeltaEncoder<'a, T, C> {
         value: T,
     ) -> std::ops::Range<usize> {
         let start = out.len();
-        let mut state = DeltaEncoderState::<'a, T>::new();
+        let mut state = DeltaEncoderState::<'a, T, C>::new();
         state.extend(out, iter);
         if state.is_uniform(value) {
             out.truncate(start);
