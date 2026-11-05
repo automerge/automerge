@@ -334,7 +334,8 @@ compiles them away. To check them, run `cargo verus verify -p hexane
   the slabs before it; and the prefix iterator's running total
   (`PrefixIter`'s `next`, `nth`, `next_run` and `reset_prefix`), with its
   offset, is always the sum of the values before it, including after
-  `nth` jumps to a far slab.
+  `nth` jumps to a far slab; and `sum_range(start..end)` is what added
+  to the sum before `start` gives the sum before `end`.
 * Prefix searches: `get_index_for_prefix` returns exactly the first index
   whose prefix sum reaches the target, or one past the end if none does
   (`get_index_for_total` is that less one); and `PrefixIter::advance_prefix(n)`
@@ -377,8 +378,8 @@ value types' `to_opt`; and that each value type's `Ord` agrees with its
 * The prefix and delta columns' other logic is not verified: that a
   column's sum fits its prefix type, which the searches' results depend on
   (loads reject sums that would not, and edits panic, but those checks are
-  not part of the proof); `sum_range` and `delta`, which are glue over
-  the verified iterator; `DeltaIter::seek_to_value`; and the bridging
+  not part of the proof); `delta`, which is glue over the verified
+  iterator; `DeltaIter::seek_to_value` and `scan_to_range`; and the bridging
   deltas a delta edit writes.
 * Where a precondition of the verified code cannot be shown from the
   specifications (a slab of `i64::MAX` bytes or more, or a column or

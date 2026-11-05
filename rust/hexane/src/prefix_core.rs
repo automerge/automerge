@@ -548,6 +548,69 @@ pub(crate) fn p_nth<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>(
     p_nth_in::<X, B>(core, slabs, ix, n, total, base)
 }
 
+/// `sum_range`: from an iterator over the whole column, at its start with
+/// nothing summed, advance to `start`, move the running total into `base`
+/// (as `reset_prefix` does), and advance to `end`. Then `base` is the sum
+/// before `start` and the running total the sum of `start..end`: what
+/// added to the one gives the sum before `end`.
+pub(crate) fn p_sum_range<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>(
+    core: &mut ICore<X::D>,
+    slabs: &'a [Slab<X::Tail>],
+    ix: Option<&SlabBTree<PrefixSlabWeight<B::P>>>,
+    start: usize,
+    end: usize,
+    total: &mut B::P,
+    base: &mut B::P,
+)
+    requires
+        at_sum::<X, B>(*old(core), *old(total), *old(base), slabs@),
+        index_ok::<X, B>(ix, slabs@),
+        old(core).pos == 0,
+        old(core).items_left == vals_of::<X>(slabs@).len(),
+        *old(base) == prefix_zero::<B::P>(),
+        start < end,
+    ensures
+        *final(base) == vsum::<_, B>(before::<X>(slabs@, start as int)),
+        prefix_add(*final(base), *final(total)) == vsum::<_, B>(before::<X>(slabs@, end as int)),
+{
+    let ghost s = slabs@;
+    let ghost vv = vals_of::<X>(s);
+    let ghost c0 = *core;
+    proof {
+        core.lemma_here::<X>(s);
+        assert(c0.out::<X>(s) =~= vv);
+    }
+    // the whole column is the window: clamp the targets to its end
+    let len = core.items_left;
+    let s0 = if start < len { start } else { len };
+    let e0 = if end < len { end } else { len };
+    if s0 > 0 {
+        p_nth::<X, B>(core, slabs, ix, s0 - 1, total, base);
+    }
+    proof {
+        assert(before::<X>(s, s0 as int) == before::<X>(s, start as int));
+        axiom_prefix_add(*base, *base, *base);
+        if s0 > 0 {
+            assert(core.out::<X>(s) == vv.skip(s0 as int));
+        } else {
+            assert(vv.skip(0) =~= vv);
+        }
+    }
+    let ghost c1 = *core;
+    p_reset::<X, B>(Ghost(*core), Ghost(s), total, base);
+    proof {
+        axiom_prefix_add(*base, *base, *base);
+        assert(*base == vsum::<_, B>(before::<X>(s, c1.pos as int)));
+        assert(c1.pos == s0);
+    }
+    if s0 < e0 {
+        p_nth::<X, B>(core, slabs, ix, e0 - 1 - s0, total, base);
+    }
+    proof {
+        assert(before::<X>(s, e0 as int) == before::<X>(s, end as int));
+    }
+}
+
 /// `reset_prefix`: count totals from here on, moving the running total
 /// into `base`.
 #[inline(always)]
