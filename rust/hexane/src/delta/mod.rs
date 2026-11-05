@@ -1884,20 +1884,33 @@ impl<'a, T: DeltaValue, C: Codec> DeltaIter<'a, T, C> {
         }
 
         // resolve the bounds to an inclusive i64 interval, clamped to
-        // the storable domain
-        let lo = match range.start_bound() {
-            Bound::Unbounded => T::MIN_I64,
-            Bound::Included(v) => v.try_to_i64()?,
-            Bound::Excluded(v) => v.try_to_i64()?.checked_add(1)?,
-        };
-        let hi = match range.end_bound() {
-            Bound::Unbounded => T::MAX_I64,
-            Bound::Included(v) => v.try_to_i64()?,
-            Bound::Excluded(v) => v.try_to_i64()?.checked_sub(1)?,
-        };
-        if lo > hi {
-            return None;
+        // the storable domain: a null sorts below every value, and a
+        // value the domain can't hold (unsigned, past `i64::MAX`) above
+        // every value. `None` when nothing can be in range.
+        fn bounds<T: DeltaValue>(range: &impl std::ops::RangeBounds<T>) -> Option<(i64, i64)> {
+            let null = |v: &T| T::NULLABLE && *v == T::null_value();
+            let lo = match range.start_bound() {
+                Bound::Unbounded => T::MIN_I64,
+                Bound::Included(v) | Bound::Excluded(v) if null(v) => T::MIN_I64,
+                Bound::Included(v) => v.try_to_i64()?,
+                Bound::Excluded(v) => v.try_to_i64()?.checked_add(1)?,
+            };
+            let hi = match range.end_bound() {
+                Bound::Unbounded => T::MAX_I64,
+                Bound::Included(v) | Bound::Excluded(v) if null(v) => return None,
+                Bound::Included(v) => v.try_to_i64().unwrap_or(T::MAX_I64),
+                Bound::Excluded(v) => match v.try_to_i64() {
+                    Some(v) => v.checked_sub(1)?,
+                    None => T::MAX_I64,
+                },
+            };
+            (lo <= hi).then_some((lo, hi))
         }
+        let Some((lo, hi)) = bounds(&range) else {
+            // a miss leaves the iterator at the end of its window
+            self.advance_to(end);
+            return None;
+        };
 
         // the first item of a delta run hitting `[lo, hi]`, if any:
         // values are `running + d*j` for `j` in `1..=count`
