@@ -427,7 +427,11 @@ first and values outside the domain last.
   emits the deltas, and that what the cursor reports carrying, deleting
   or jumping over is what it did); and that a delta edit leaves the
   values in the domain, so that the index's sums fit again, which
-  `check_span` checks at run time.
+  `check_span` checks at run time. Its walk over the column is proved: it
+  passes exactly when the values lie in the domain within a range less
+  than 2^63 wide, and then every running sum fits `i64`. Its shortcut,
+  which skips the walk where the values the column held and those the
+  edit inserted already fit, is not.
 * Where a precondition of the verified code cannot be shown from the
   specifications (a slab of `i64::MAX` bytes or more, or a column or
   encoder of nearly `usize::MAX` items), the code checks it and panics

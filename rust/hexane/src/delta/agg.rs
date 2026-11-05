@@ -613,6 +613,152 @@ impl ValueSpan {
     }
 }
 
+/// Every running sum lies between the least value (or 0) and the
+/// greatest (or 0): a null holds the running sum before it, which is a
+/// value or, before any, 0.
+pub(crate) proof fn lemma_sums_within_values(ds: Seq<Option<i64>>)
+    ensures
+        min_i(vmin(ds), 0) <= psum(ds) <= max_i(vmax(ds), 0),
+        ds.len() > 0 ==> min_i(vmin(ds), 0) <= pmin(ds) && pmax(ds) <= max_i(vmax(ds), 0),
+    decreases ds.len(),
+{
+    if ds.len() > 0 {
+        let d0 = ds.drop_last();
+        let x = ds.last();
+        assert(d0.push(x) =~= ds);
+        lemma_push(d0, x);
+        lemma_sums_within_values(d0);
+    }
+}
+
+/// The least value is at most the greatest, unless there are none.
+proof fn lemma_vmin_vmax(ds: Seq<Option<i64>>)
+    requires ds.len() <= usize::MAX,
+    ensures
+        vmin(ds) <= vmax(ds) || (vmin(ds) == i128::MAX && vmax(ds) == i128::MIN),
+    decreases ds.len(),
+{
+    if ds.len() > 0 {
+        let d0 = ds.drop_last();
+        assert(d0.push(ds.last()) =~= ds);
+        lemma_vmin_vmax(d0);
+        lemma_psum_size(ds);
+        assert(0x8000_0000_0000_0000 * ds.len() <= 0x8000_0000_0000_0000 * 0xffff_ffff_ffff_ffffint)
+            by (nonlinear_arith) requires ds.len() <= 0xffff_ffff_ffff_ffff;
+    }
+}
+
+/// A running sum after `ds` is at most `2^63` per delta from 0.
+proof fn lemma_psum_size(ds: Seq<Option<i64>>)
+    ensures
+        -0x8000_0000_0000_0000 * ds.len() <= psum(ds) <= 0x8000_0000_0000_0000 * ds.len(),
+    decreases ds.len(),
+{
+    if ds.len() > 0 {
+        let d0 = ds.drop_last();
+        assert(d0.push(ds.last()) =~= ds);
+        lemma_push(d0, ds.last());
+        lemma_psum_size(d0);
+        assert(-0x8000_0000_0000_0000 * d0.len() - 0x8000_0000_0000_0000 == -0x8000_0000_0000_0000 * ds.len()
+            && 0x8000_0000_0000_0000 * d0.len() + 0x8000_0000_0000_0000 == 0x8000_0000_0000_0000 * ds.len())
+            by (nonlinear_arith)
+            requires ds.len() == d0.len() + 1;
+    }
+}
+
+/// The least and greatest running sums at the values of any deltas
+/// (`check_span`'s walk over a column after an edit, whose deltas may
+/// wrap): in `i128`, which holds any running sum of a column's deltas.
+pub(crate) struct AnySpan {
+    pub(crate) running: i128,
+    pub(crate) low: i128,
+    pub(crate) high: i128,
+    /// the deltas walked
+    #[allow(dead_code)]
+    pub(crate) ds: Ghost<Seq<Option<i64>>>,
+}
+
+impl AnySpan {
+    pub(crate) open spec fn inv(&self) -> bool {
+        &&& self.running == psum(self.ds@)
+        &&& self.low == vmin(self.ds@)
+        &&& self.high == vmax(self.ds@)
+        &&& self.ds@.len() <= usize::MAX
+    }
+
+    pub(crate) fn new() -> (r: Self)
+        ensures r.inv(), r.ds@.len() == 0,
+    {
+        AnySpan { running: 0, low: i128::MAX, high: i128::MIN, ds: Ghost(Seq::empty()) }
+    }
+
+    /// Take a run of `count` copies of delta `d`; the deltas walked are a
+    /// column's, so there are fewer than `usize::MAX`.
+    #[inline]
+    pub(crate) fn run(&mut self, count: usize, d: Option<i64>)
+        requires
+            old(self).inv(), count >= 1,
+            old(self).ds@.len() + count <= usize::MAX,
+        ensures
+            final(self).inv(), final(self).ds@ == old(self).ds@ + reps(count as nat, d),
+    {
+        let ghost ds = self.ds@;
+        proof {
+            lemma_vrun(ds, count as nat, d);
+            lemma_run_sum(ds, count as nat, d);
+            lemma_psum_size(ds);
+        }
+        if let Some(v) = d {
+            proof {
+                // |running| <= 2^63·len and |v·count| <= 2^63·count, and
+                // len + count < 2^64: the sums fit `i128`
+                let b = 0x8000_0000_0000_0000int;
+                let n = ds.len() as int;
+                let c = count as int;
+                assert(-b * c <= v * c <= b * c) by (nonlinear_arith)
+                    requires -b <= v < b, c >= 1;
+                assert(b * n + b * c <= b * 0xffff_ffff_ffff_ffff) by (nonlinear_arith)
+                    requires n + c <= 0xffff_ffff_ffff_ffff, b > 0, n >= 0, c >= 0;
+                assert(b * n + b <= b * n + b * c) by (nonlinear_arith)
+                    requires c >= 1, b > 0;
+                assert(v as int * count as int == count as nat * v as int) by (nonlinear_arith);
+            }
+            let first = self.running + v as i128;
+            let last = self.running + v as i128 * count as i128;
+            let lo = if first <= last { first } else { last };
+            let hi = if first >= last { first } else { last };
+            self.low = if self.low <= lo { self.low } else { lo };
+            self.high = if self.high >= hi { self.high } else { hi };
+            self.running = last;
+        }
+        proof {
+            self.ds = Ghost(ds + reps(count as nat, d));
+        }
+    }
+
+    /// Whether the values lie in the domain `min..=max` (within `i64`),
+    /// within a range less than 2^63 wide; and then every running sum
+    /// fits `i64` too, as the index's sums need.
+    #[inline]
+    pub(crate) fn fits(&self, min: i64, max: i64) -> (r: bool)
+        requires self.inv(),
+        ensures
+            r == (vmin(self.ds@) > vmax(self.ds@) || (vmax(self.ds@) - vmin(self.ds@) <= i64::MAX
+                && min <= vmin(self.ds@) && vmax(self.ds@) <= max)),
+            r ==> sums_fit(self.ds@),
+    {
+        proof {
+            lemma_sums_within_values(self.ds@);
+            lemma_vmin_vmax(self.ds@);
+        }
+        // the domain first: the difference of values that lie in it fits
+        self.low > self.high
+            || (self.low >= min as i128
+                && self.high <= max as i128
+                && self.high - self.low <= i64::MAX as i128)
+    }
+}
+
 /// A delta column's values as deltas: the trusted bridge to
 /// `DeltaInner::to_opt` (user code: an `i64` is its own delta, an
 /// `Option<i64>` too, a null holding the running sum).

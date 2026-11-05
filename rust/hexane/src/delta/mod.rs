@@ -1570,28 +1570,21 @@ fn runs_within_2_63<'a, T: DeltaValue, C: Codec>(
     span.within_2_63()
 }
 
-/// The least and greatest running sums of the deltas in `slabs`, exactly
-/// (`low > high` if there are none). Unlike `ValueSpan`, for any deltas:
-/// an edit's may wrap.
+/// The least and greatest running sums at the values of the deltas in
+/// `slabs`, exactly (verified, `AnySpan`). Unlike `ValueSpan`, for any
+/// deltas: an edit's may wrap.
 fn runs_range<'a, T: DeltaValue, C: Codec>(
     slabs: impl IntoIterator<Item = &'a [u8]>,
-) -> (i128, i128) {
+) -> agg::AnySpan {
     use crate::encoding::RunDecoder;
-    let mut running: i128 = 0;
-    let (mut low, mut high) = (i128::MAX, i128::MIN);
+    let mut span = agg::AnySpan::new();
     for data in slabs {
         let mut decoder = crate::decoder_in::<T::Inner, C>(data);
         while let Some(run) = decoder.next_run() {
-            if let Some(d) = T::Inner::to_opt(run.value) {
-                // a run's values move one way, so its ends bound them
-                let first = running + d as i128;
-                let last = running + d as i128 * run.count as i128;
-                (low, high) = (low.min(first.min(last)), high.max(first.max(last)));
-                running = last;
-            }
+            span.run(run.count, T::Inner::to_opt(run.value));
         }
     }
-    (low, high)
+    span
 }
 
 /// Panic unless the column's values lie in the domain, within a
@@ -1608,10 +1601,10 @@ fn check_span<T: DeltaValue, C: Codec>(col: &InnerColumn<T, C>, bound: &SpanBoun
         return;
     }
     // where the values span 2^63 or more, a delta between them wraps, and
-    // the running sum then leaves the domain
-    let (low, high) = runs_range::<T, C>(col.slabs.iter().map(|s| &s.data[..]));
-    let fits = SpanBound { lo: low, hi: high }.fits::<T>();
-    if !fits {
+    // the running sum then leaves the domain; where they don't, every
+    // running sum fits `i64` (verified, `AnySpan::fits`)
+    let span = runs_range::<T, C>(col.slabs.iter().map(|s| &s.data[..]));
+    if !span.fits(T::MIN_I64, T::MAX_I64) {
         panic!("delta values out of domain: they would span 2^63 or more");
     }
 }
@@ -1685,10 +1678,11 @@ impl SpanBound {
     /// The values lie in `T`'s domain, within a range less than 2^63
     /// wide.
     fn fits<T: DeltaValue>(&self) -> bool {
+        // the domain first: the difference of bounds in it can't overflow
         self.lo > self.hi
-            || (self.hi - self.lo <= i64::MAX as i128
-                && self.lo >= T::MIN_I64 as i128
-                && self.hi <= T::MAX_I64 as i128)
+            || (self.lo >= T::MIN_I64 as i128
+                && self.hi <= T::MAX_I64 as i128
+                && self.hi - self.lo <= i64::MAX as i128)
     }
 }
 
