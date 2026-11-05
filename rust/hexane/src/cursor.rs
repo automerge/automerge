@@ -26,15 +26,15 @@
 //! weight functions (`Weigh`: what a slab's weight is, `wrel`, and that
 //! it counts its items).  The index is verified ([`IndexOps`]).
 //!
-//! Not covered: delta columns.  `col_ok` asks for a `plain` index, whose
-//! aggregates fit whenever its item counts do, and a delta column's index
-//! sums its deltas, which fit only while the values are consistent.  They
-//! are not while an edit is under way: a delete that drops a whole slab
-//! joins its neighbours in the index before the delta that bridges them
-//! is written, and their merged sums can exceed `i64` until it is.  So
-//! that the sums fit cannot be part of the invariant, and the cursor's
-//! guarantees do not extend to delta columns.  (`i128` aggregates would
-//! always fit, but cost 2-17% on delta columns' index operations.)
+//! This covers delta columns too.  `col_ok` asks for a `plain` index,
+//! one whose shape needs only its item counts to fit, and the B-tree is
+//! one for every aggregate: its aggregates are exact wherever they are
+//! representable (`valid`), and only its queries need them to be.  A
+//! delta column's index sums its deltas, which need not fit `i64` while
+//! an edit is under way (a delete that drops a whole slab joins its
+//! neighbours in the index before the delta that bridges them is
+//! written); they fit again once the edit has written the column's
+//! values, and the column's readers ask for that (`dix_ok`).
 
 // Verus has no specs for `Vec::is_empty`, slices from `&Vec` or `vec![x]`,
 // and the cursor's operations take the column's fields one by one.

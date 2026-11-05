@@ -41,6 +41,9 @@ use std::ops::{Add, AddAssign, SubAssign};
 #[allow(unused_imports)]
 use vstd::prelude::*;
 
+#[cfg(verus_keep_ghost)]
+use crate::index::lemma_plain_valid;
+
 verus! {
 
 /// `a - b` on a prefix type.
@@ -456,6 +459,10 @@ fn p_nth_in<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>(
         },
     };
     // Use the column's index for an O(log S) slab lookup.
+    proof {
+        ix.lemma_wf_len();
+        lemma_plain_valid(ix@);
+    }
     let found = ix.find_slab_at_item(target);
     let ghost k = found.index as int;
     proof {
@@ -651,6 +658,10 @@ pub(crate) fn p_prefix<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>
         r == vsum::<_, B>(before::<X>(slabs@, index as int)),
 {
     let ghost s = slabs@;
+    proof {
+        ix.lemma_wf_len();
+        lemma_plain_valid(ix@);
+    }
     let found = ix.find_slab_at_item(index);
     let ghost k = found.index as int;
     proof {

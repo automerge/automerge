@@ -41,6 +41,9 @@ use crate::prefix_core::{p_nth, PrefixOps};
 #[allow(unused_imports)]
 use vstd::prelude::*;
 
+#[cfg(verus_keep_ghost)]
+use crate::index::lemma_plain_valid;
+
 verus! {
 
 /// The number a prefix value stands for.
@@ -440,6 +443,10 @@ pub(crate) fn p_index_for_prefix<'a, X: Decoders<'a>, B: PrefixOrd<<X::D as Deco
             assert(v.take(0) =~= Seq::<<X::D as Decode>::Item>::empty());
         }
         return 0;
+    }
+    proof {
+        ix.lemma_wf_len();
+        lemma_plain_valid(ix@);
     }
     let (si, prefix_before, items_before) = ix.find_slab_at_prefix(&target);
     let ghost k = si as int;

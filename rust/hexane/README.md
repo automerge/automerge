@@ -284,7 +284,13 @@ compiles them away. To check them, run `cargo verus verify -p hexane
 * The column iterator and the column edit cursor, against the RLE and bool
   formats: every read yields exactly the column's values in the window,
   and every edit leaves canonical slabs, with correct metadata, holding
-  exactly the intended values.
+  exactly the intended values. This includes delta columns, which store
+  their deltas as an RLE column. Their index sums the deltas in `i64`, and
+  while an edit is under way those sums can exceed `i64` (a delete that
+  drops a whole slab joins its neighbours in the index before the delta
+  that bridges them is written). The B-tree's invariant asks only that
+  its item counts add up; its aggregates are exact wherever they are
+  representable, which is all its queries need.
 * Building a column: its index and length are computed from its slabs,
   checking that each slab's weight counts its items, and `Column::fill`
   makes a well-formed slab of the values asked for.
@@ -383,20 +389,14 @@ first and values outside the domain last.
 
 **Known limitations:**
 
-* **Edits of delta columns are outside the cursor's proof.** A
-  `DeltaColumn`'s index sums its deltas in `i64`. While an edit is under
-  way those sums can legitimately exceed `i64`: a delete that drops a whole
-  slab joins its neighbours in the index before the delta that bridges them
-  is written. So "the sums fit" cannot be part of the cursor's invariant.
-  Reading a delta column (its deltas, and the values they realize) is
-  covered, given the index that edits leave. Widening the sums to `i128`
-  would close the gap, but costs 2–17% on delta columns' index operations
-  (`find_by_value`, insert, remove, load), so performance was preferred.
 * The prefix and delta columns' other logic is not verified: that a
   column's sum fits its prefix type, which the searches' results depend on
   (loads reject sums that would not, and edits panic, but those checks are
   not part of the proof); `delta`, which is glue over the verified
-  iterator; and the bridging deltas a delta edit writes.
+  iterator; the deltas a delta edit computes to bridge what it changes
+  (the cursor writes them as given); and that a delta edit leaves the
+  values in the domain, so that the index's sums fit again, which
+  `check_span` checks at run time.
 * Where a precondition of the verified code cannot be shown from the
   specifications (a slab of `i64::MAX` bytes or more, or a column or
   encoder of nearly `usize::MAX` items), the code checks it and panics

@@ -428,6 +428,32 @@ impl<W: SlabWeight> IndexOps<W> for BitIndex<W> {
     }
 }
 
+/// Where every merge whose item counts fit is representable
+/// (`A::plain()`: item counts, prefix sums), weights whose counts fit are
+/// valid.
+pub proof fn lemma_plain_valid<A: SlabAggregate>(ws: Seq<A>)
+    requires
+        A::plain(),
+        sum_len(ws) <= usize::MAX,
+    ensures
+        valid(ws),
+{
+    assert forall|i: int, j: int, k: int| 0 <= i <= j <= k <= ws.len() implies #[trigger] A::merge_ok(
+        fold(ws.subrange(i, j)),
+        fold(ws.subrange(j, k)),
+    ) by {
+        let a = ws.subrange(i, j);
+        let b = ws.subrange(j, k);
+        assert(ws =~= ws.subrange(0, i) + (a + b) + ws.subrange(k, ws.len() as int));
+        lemma_sum_len_concat(ws.subrange(0, i) + (a + b), ws.subrange(k, ws.len() as int));
+        lemma_sum_len_concat(ws.subrange(0, i), a + b);
+        lemma_sum_len_concat(a, b);
+        lemma_fold_plain(a);
+        lemma_fold_plain(b);
+        A::lemma_plain(fold(a), fold(b));
+    }
+}
+
 impl<A: SlabAggregate> IndexOps<A> for SlabBTree<A> {
     open spec fn wlen(w: A) -> nat {
         w.spec_len()
@@ -441,32 +467,23 @@ impl<A: SlabAggregate> IndexOps<A> for SlabBTree<A> {
         self.wf()
     }
 
+    /// The tree keeps its shape on item counts alone; its aggregates are
+    /// exact wherever they are representable (`valid`), which only its
+    /// queries need. So any weights whose counts fit will do, even a
+    /// delta column's in the middle of an edit, when the sums at a seam
+    /// can overflow for a moment.
     open spec fn fits(ws: Seq<A>) -> bool {
-        valid(ws) && ws.len() <= usize::MAX
+        ws.len() <= usize::MAX && sum_len(ws) <= usize::MAX
     }
 
     open spec fn plain() -> bool {
-        A::plain()
+        true
     }
 
     proof fn lemma_fits(ws: Seq<A>) {
         assert(ws.map_values(|w: A| Self::wlen(w)) =~= alens(ws));
         lemma_sum_len_wlens(ws, ws.len() as int);
         assert(ws.take(ws.len() as int) =~= ws);
-        assert forall|i: int, j: int, k: int| 0 <= i <= j <= k <= ws.len() implies #[trigger] A::merge_ok(
-            fold(ws.subrange(i, j)),
-            fold(ws.subrange(j, k)),
-        ) by {
-            let a = ws.subrange(i, j);
-            let b = ws.subrange(j, k);
-            assert(ws =~= ws.subrange(0, i) + (a + b) + ws.subrange(k, ws.len() as int));
-            lemma_sum_len_concat(ws.subrange(0, i) + (a + b), ws.subrange(k, ws.len() as int));
-            lemma_sum_len_concat(ws.subrange(0, i), a + b);
-            lemma_sum_len_concat(a, b);
-            lemma_fold_plain(a);
-            lemma_fold_plain(b);
-            A::lemma_plain(fold(a), fold(b));
-        }
     }
 
     fn w_len(w: &A) -> usize {

@@ -649,15 +649,17 @@ impl<'a, T: DeltaValue, C: Codec> DeltaEncoder<'a, T, C> {
 ///
 /// # Verification
 ///
-/// Unlike [`Column`]'s, a delta column's edits are outside
-/// the formal proof of the column cursor: its index sums the deltas in
-/// `i64`, and while an edit is under way those sums can exceed `i64` (a
-/// delete that drops a whole slab joins its neighbours before the delta
-/// that bridges them is written), so they cannot be part of the cursor's
-/// invariant. Reading the deltas is covered, as are each slab's aggregate
-/// (exact as loaded or recomputed) and `load`'s check of the value
-/// domain; realizing values from the deltas is not. See the crate
-/// README's "Formal verification".
+/// The deltas are an ordinary column, and its edits are covered by the
+/// formal proof of the column cursor: every edit leaves canonical slabs
+/// holding exactly the deltas it writes, and the index each slab's
+/// aggregate. The index's sums are exact wherever they fit `i64`; while
+/// an edit is under way they need not (a delete that drops a whole slab
+/// joins its neighbours before the delta that bridges them is written),
+/// and the index's invariant asks only that its item counts add up.
+/// Reading, seeking and searching, which realize values from the deltas,
+/// are covered given that the sums fit, which `load` checks and edits
+/// panic without. The deltas an edit computes to bridge what it changes
+/// are not verified. See the crate README's "Formal verification".
 pub struct DeltaColumn<T: DeltaValue, C: Codec = Leb128> {
     pub(crate) col: Column<T::Inner, C, IndexedDeltaWeightFn>,
     _phantom: PhantomData<T>,

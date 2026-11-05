@@ -96,10 +96,15 @@ pub trait SlabAggregate: Clone + Default + std::fmt::Debug + Sized {
     /// The aggregate of no slabs.
     spec fn spec_empty() -> Self;
 
-    /// Combine two adjacent subtree aggregates into one.
+    /// Combine two adjacent subtree aggregates into one: exactly, where
+    /// that is representable; in any case counting both's items. (A
+    /// column edit can merge unrepresentable sums for a moment: see
+    /// `SlabAgg::merge`.)
     fn merge(l: &Self, r: &Self) -> (m: Self)
-        requires Self::merge_ok(*l, *r),
-        ensures m == Self::spec_merge(*l, *r);
+        requires l.spec_len() + r.spec_len() <= usize::MAX,
+        ensures
+            m.spec_len() == l.spec_len() + r.spec_len(),
+            Self::merge_ok(*l, *r) ==> m == Self::spec_merge(*l, *r);
 
     /// Number of items covered by this aggregate.  Used by generic
     /// tree-walking helpers (e.g. `find_by_prefix`); concrete impls
@@ -220,8 +225,9 @@ impl SlabAggregate for SlabAgg {
             return *l;
         }
         // Wrapping, as a release build's `+` is: exact whenever the merge
-        // is representable (`merge_ok`), which is all the tree's proofs
-        // ask. A column edit can merge unrepresentable sums for a moment
+        // is representable (`merge_ok`), the only place the tree's proofs
+        // need the sums (the item counts they need always). A column edit
+        // can merge unrepresentable sums for a moment
         // — a delete that drops a whole slab makes its neighbours
         // adjacent before the delta that joins them is written — and
         // those nodes are recomputed when it is; a debug build's checked
@@ -713,6 +719,26 @@ pub proof fn lemma_sum_len_concat<A: SlabAggregate>(a: Seq<A>, b: Seq<A>)
     }
 }
 
+/// A run of `s` counts no more items than `s`.
+pub proof fn lemma_sum_len_sub<A: SlabAggregate>(s: Seq<A>, a: int, b: int)
+    requires 0 <= a <= b <= s.len(),
+    ensures sum_len(s.subrange(a, b)) <= sum_len(s),
+{
+    assert(s =~= s.subrange(0, a) + s.subrange(a, b) + s.subrange(b, s.len() as int));
+    lemma_sum_len_concat(s.subrange(0, a), s.subrange(a, b));
+    lemma_sum_len_concat(s.subrange(0, a) + s.subrange(a, b), s.subrange(b, s.len() as int));
+}
+
+/// The middle of a valid sequence is valid.
+pub proof fn lemma_valid_mid<A: SlabAggregate>(l: Seq<A>, m: Seq<A>, r: Seq<A>)
+    requires valid(l + m + r),
+    ensures valid(m),
+{
+    let s = l + m + r;
+    assert(s.subrange(l.len() as int, (l.len() + m.len()) as int) =~= m);
+    lemma_valid_subrange(s, l.len() as int, (l.len() + m.len()) as int);
+}
+
 pub proof fn lemma_valid_empty<A: SlabAggregate>()
     ensures valid(Seq::<A>::empty()),
 {
@@ -1089,8 +1115,8 @@ impl<A: SlabAggregate> SlabBTree<A> {
     spec fn wf_node(&self, id: NodeId, h: nat) -> bool
         decreases h, 1nat,
     {
-        &&& valid(self.slabs(id, h))
         &&& self.slabs(id, h).len() <= usize::MAX
+        &&& sum_len(self.slabs(id, h)) <= usize::MAX
         &&& match self.node_spec(id) {
             Some(Node::Leaf(_)) => h == 0,
             Some(Node::Internal(n)) => h > 0 && n.children@.len() > 0 && self.wf_children(id, n, h),
@@ -1113,7 +1139,7 @@ impl<A: SlabAggregate> SlabBTree<A> {
             &&& !self.owned(c.id, (h - 1) as nat).contains(id)
             &&& c.slab_count == self.slabs(c.id, (h - 1) as nat).len()
             &&& c.slab_count > 0
-            &&& c.agg == fold(self.slabs(c.id, (h - 1) as nat))
+            &&& valid(self.slabs(c.id, (h - 1) as nat)) ==> c.agg == fold(self.slabs(c.id, (h - 1) as nat))
             &&& c.agg.spec_len() == sum_len(self.slabs(c.id, (h - 1) as nat))
         }
     }
@@ -1129,9 +1155,16 @@ impl<A: SlabAggregate> SlabBTree<A> {
             &&& self.wf_node(c.id, h)
             &&& c.slab_count == self.slabs(c.id, h).len()
             &&& c.slab_count > 0
-            &&& c.agg == fold(self.slabs(c.id, h))
+            &&& valid(self.slabs(c.id, h)) ==> c.agg == fold(self.slabs(c.id, h))
             &&& c.agg.spec_len() == sum_len(self.slabs(c.id, h))
         }
+    }
+
+    /// A well-formed tree's slabs hold fewer than `usize::MAX` items.
+    pub proof fn lemma_wf_len(&self)
+        requires self.wf(),
+        ensures sum_len(self@) <= usize::MAX,
+    {
     }
 
     pub closed spec fn height(&self) -> nat {
@@ -1208,7 +1241,8 @@ impl<A: SlabAggregate> SlabBTree<A> {
             self.wf_node(n.children@[k].id, (h - 1) as nat),
             n.children@[k].slab_count == self.slabs(n.children@[k].id, (h - 1) as nat).len(),
             n.children@[k].slab_count > 0,
-            n.children@[k].agg == fold(self.slabs(n.children@[k].id, (h - 1) as nat)),
+            valid(self.slabs(n.children@[k].id, (h - 1) as nat))
+                ==> n.children@[k].agg == fold(self.slabs(n.children@[k].id, (h - 1) as nat)),
             n.children@[k].agg.spec_len() == sum_len(self.slabs(n.children@[k].id, (h - 1) as nat)),
     {
         reveal(SlabBTree::wf_children);
@@ -1313,21 +1347,36 @@ impl<A: SlabAggregate> SlabBTree<A> {
         }
     }
 
-    /// Merge a leaf's slab aggregates.
+    /// Merge a leaf's slab aggregates: their fold, where that is
+    /// representable, and in any case their item count.
     fn fold_leaf(aggs: &[A]) -> (r: A)
-        requires valid(aggs@),
-        ensures r == fold(aggs@),
+        requires sum_len(aggs@) <= usize::MAX,
+        ensures
+            r.spec_len() == sum_len(aggs@),
+            valid(aggs@) ==> r == fold(aggs@),
     {
         let mut acc = A::empty();
+        proof {
+            A::lemma_empty(acc);
+            assert(aggs@.subrange(0, 0) =~= Seq::<A>::empty());
+        }
         let mut i: usize = 0;
         while i < aggs.len()
-            invariant i <= aggs@.len(), valid(aggs@), acc == fold(aggs@.subrange(0, i as int)),
+            invariant
+                i <= aggs@.len(),
+                sum_len(aggs@) <= usize::MAX,
+                acc.spec_len() == sum_len(aggs@.subrange(0, i as int)),
+                valid(aggs@) ==> acc == fold(aggs@.subrange(0, i as int)),
             decreases aggs@.len() - i,
         {
             proof {
-                lemma_fold_one(aggs@, i as int);
-                assert(A::merge_ok(fold(aggs@.subrange(0, i as int)), fold(aggs@.subrange(i as int, i + 1))));
                 assert(aggs@.subrange(0, i + 1).drop_last() =~= aggs@.subrange(0, i as int));
+                assert(aggs@ =~= aggs@.subrange(0, i + 1) + aggs@.subrange(i + 1, aggs@.len() as int));
+                lemma_sum_len_concat(aggs@.subrange(0, i + 1), aggs@.subrange(i + 1, aggs@.len() as int));
+                if valid(aggs@) {
+                    lemma_fold_one(aggs@, i as int);
+                    assert(A::merge_ok(fold(aggs@.subrange(0, i as int)), fold(aggs@.subrange(i as int, i + 1))));
+                }
             }
             acc = A::merge(&acc, &aggs[i]);
             i += 1;
@@ -1336,10 +1385,14 @@ impl<A: SlabAggregate> SlabBTree<A> {
         acc
     }
 
-    /// Merge an internal node's cached child aggregates.
+    /// Merge an internal node's cached child aggregates: the fold of its
+    /// slabs', where that is representable, and in any case their item
+    /// count.
     fn fold_children(&self, Ghost(id): Ghost<NodeId>, n: &Internal<A>, Ghost(h): Ghost<nat>) -> (r: A)
         requires self.wf_node(id, h), self.node_spec(id) == Some(Node::Internal(*n)),
-        ensures r == fold(self.slabs(id, h)),
+        ensures
+            r.spec_len() == sum_len(self.slabs(id, h)),
+            valid(self.slabs(id, h)) ==> r == fold(self.slabs(id, h)),
     {
         let ghost cs = n.children@;
         let ghost hc = (h - 1) as nat;
@@ -1348,13 +1401,20 @@ impl<A: SlabAggregate> SlabBTree<A> {
             if cs.len() > 0 { self.lemma_child(id, h, *n, 0); } else { assert(self.wf_node(id, h)); }
         }
         let mut acc = A::empty();
+        proof {
+            A::lemma_empty(acc);
+            assert(cs.take(0) =~= Seq::<ChildSlot<A>>::empty());
+            self.lemma_children_slabs_split(cs, 0, hc);
+        }
         let mut k: usize = 0;
         while k < n.children.len()
             invariant
                 k <= cs.len(), cs == n.children@, h > 0, hc == h - 1,
                 self.wf_node(id, h), self.node_spec(id) == Some(Node::Internal(*n)),
-                all == self.slabs(id, h), valid(all),
-                acc == fold(self.children_slabs(cs.take(k as int), hc)),
+                all == self.slabs(id, h),
+                sum_len(all) <= usize::MAX,
+                acc.spec_len() == sum_len(self.children_slabs(cs.take(k as int), hc)),
+                valid(all) ==> acc == fold(self.children_slabs(cs.take(k as int), hc)),
             decreases cs.len() - k,
         {
             let ghost before = self.children_slabs(cs.take(k as int), hc);
@@ -1367,8 +1427,14 @@ impl<A: SlabAggregate> SlabBTree<A> {
                 assert(all.subrange(0, p) =~= before);
                 assert(all.subrange(p, q) =~= mid);
                 assert(all.subrange(0, q) =~= before + mid);
-                lemma_fold_split(all, 0, p, q);
-                assert(A::merge_ok(fold(all.subrange(0, p)), fold(all.subrange(p, q))));
+                assert(all =~= all.subrange(0, q) + all.subrange(q, all.len() as int));
+                lemma_sum_len_concat(before, mid);
+                lemma_sum_len_concat(all.subrange(0, q), all.subrange(q, all.len() as int));
+                if valid(all) {
+                    lemma_valid_subrange(all, p, q);
+                    lemma_fold_split(all, 0, p, q);
+                    assert(A::merge_ok(fold(all.subrange(0, p)), fold(all.subrange(p, q))));
+                }
             }
             acc = A::merge(&acc, &n.children[k].agg);
             k += 1;
@@ -1389,10 +1455,13 @@ impl<A: SlabAggregate> SlabBTree<A> {
         self.nodes[id as usize].as_mut().expect("freed node id")
     }
 
-    /// Aggregate of all slabs under node `id`.
+    /// Aggregate of all slabs under node `id`: their fold, where that is
+    /// representable, and in any case their item count.
     fn subtree_agg(&self, id: NodeId, Ghost(h): Ghost<nat>) -> (r: A)
         requires self.wf_node(id, h),
-        ensures r == fold(self.slabs(id, h)),
+        ensures
+            r.spec_len() == sum_len(self.slabs(id, h)),
+            valid(self.slabs(id, h)) ==> r == fold(self.slabs(id, h)),
     {
         match self.node(id) {
             Node::Leaf(l) => Self::fold_leaf(&l.aggs),
@@ -1405,7 +1474,7 @@ impl<A: SlabAggregate> SlabBTree<A> {
         requires
             old(self).wf(),
             slab_idx < old(self)@.len(),
-            valid(old(self)@.update(slab_idx as int, new_agg)),
+            sum_len(old(self)@.update(slab_idx as int, new_agg)) <= usize::MAX,
         ensures
             final(self).wf(),
             final(self)@ == old(self)@.update(slab_idx as int, new_agg),
@@ -1427,10 +1496,6 @@ impl<A: SlabAggregate> SlabBTree<A> {
                 assert(self.node_spec(x) == old(self).node_spec(x));
             }
             self.lemma_height_unique(self.root, h, self.height());
-            let v = self@;
-            lemma_fold_len(v, 0, v.len() as int);
-            assert(v.subrange(0, v.len() as int) =~= v);
-            A::lemma_len_bound(fold(v));
         }
     }
 
@@ -1441,7 +1506,7 @@ impl<A: SlabAggregate> SlabBTree<A> {
         requires
             old(self).wf_node(id, h),
             idx < old(self).slabs(id, h).len(),
-            valid(old(self).slabs(id, h).update(idx as int, new_agg)),
+            sum_len(old(self).slabs(id, h).update(idx as int, new_agg)) <= usize::MAX,
         ensures
             final(self).wf_node(id, h),
             final(self).slabs(id, h) == old(self).slabs(id, h).update(idx as int, new_agg),
@@ -1528,7 +1593,7 @@ impl<A: SlabAggregate> SlabBTree<A> {
             // the child's slabs, updated, are a run of the node's
             let (p, q) = (before.len() as int, (before.len() + mid.len()) as int);
             assert(new_all.subrange(p, q) =~= mid.update(remaining as int, new_agg));
-            lemma_valid_subrange(new_all, p, q);
+            lemma_sum_len_sub(new_all, p, q);
         }
         self.update_rec(child_id, Ghost(hc), remaining, new_agg);
         let ghost t1 = *self;
@@ -1609,16 +1674,10 @@ impl<A: SlabAggregate> SlabBTree<A> {
                 &&& !t2.owned(c.id, hc).contains(id)
                 &&& c.slab_count == t2.slabs(c.id, hc).len()
                 &&& c.slab_count > 0
-                &&& c.agg == fold(t2.slabs(c.id, hc))
+                &&& valid(t2.slabs(c.id, hc)) ==> c.agg == fold(t2.slabs(c.id, hc))
                 &&& c.agg.spec_len() == sum_len(t2.slabs(c.id, hc))
             } by {
                 t0.lemma_child(id, h, n0, j);
-                if j == child_idx {
-                    let cl = t2.slabs(cs2[j].id, hc);
-                    assert(valid(cl));
-                    lemma_fold_len(cl, 0, cl.len() as int);
-                    assert(cl.subrange(0, cl.len() as int) =~= cl);
-                }
             }
             assert forall|i: int, j: int| 0 <= i < j < cs2.len() implies
                 #[trigger] t2.owned(cs2[i].id, hc).disjoint(#[trigger] t2.owned(cs2[j].id, hc)) by {
@@ -1653,7 +1712,7 @@ impl<A: SlabAggregate> SlabBTree<A> {
         requires
             old(self).wf(),
             start <= end <= old(self)@.len(),
-            valid(spliced(old(self)@, start as int, end as int, new@)),
+            sum_len(spliced(old(self)@, start as int, end as int, new@)) <= usize::MAX,
             spliced(old(self)@, start as int, end as int, new@).len() <= usize::MAX,
         ensures
             final(self).wf(),
@@ -1680,9 +1739,6 @@ impl<A: SlabAggregate> SlabBTree<A> {
             assert forall|x: NodeId| t2.owned(t2.root, hh).contains(x) implies t2.node_spec(x) == self.node_spec(x) by {}
             Self::lemma_frame(&t2, self, self.root, hh);
             self.lemma_height_unique(self.root, hh, self.height());
-            lemma_fold_len(f, 0, f.len() as int);
-            assert(f.subrange(0, f.len() as int) =~= f);
-            A::lemma_len_bound(fold(f));
         }
         // Large deletions can leave a single-child chain at the top;
         // promote so query depth tracks the live tree.
@@ -1714,7 +1770,7 @@ impl<A: SlabAggregate> SlabBTree<A> {
             old(self).arena_ok(),
             old(self).wf_node(id, h as nat),
             start <= end <= old(self).slabs(id, h as nat).len(),
-            valid(spliced(old(self).slabs(id, h as nat), start as int, end as int, new@)),
+            sum_len(spliced(old(self).slabs(id, h as nat), start as int, end as int, new@)) <= usize::MAX,
             spliced(old(self).slabs(id, h as nat), start as int, end as int, new@).len() <= usize::MAX,
         ensures
             final(self).arena_ok(),
@@ -1774,7 +1830,7 @@ impl<A: SlabAggregate> SlabBTree<A> {
                 let piece = spliced(c, start - off_s, end - off_s, new0);
                 let p = old(self).children_slabs(pre, hc).len() as int;
                 assert(f.subrange(p, p + piece.len()) =~= piece);
-                lemma_valid_subrange(f, p, p + piece.len());
+                lemma_sum_len_sub(f, p, p + piece.len());
             }
             self.splice_child(id, h, ks, start - off_s, end - off_s, new, true);
             proof {
@@ -1832,7 +1888,7 @@ impl<A: SlabAggregate> SlabBTree<A> {
             ks < ke < cs.len(), off_e == counts(cs, ke as int),
             counts(cs, ks as int) <= start < counts(cs, ks + 1), off_e < end <= counts(cs, ke + 1),
             counts(cs, cs.len() as int) == old(self).children_slabs(cs, (h - 1) as nat).len(),
-            valid(spliced(old(self).children_slabs(cs, (h - 1) as nat), start as int, end as int, new@)),
+            sum_len(spliced(old(self).children_slabs(cs, (h - 1) as nat), start as int, end as int, new@)) <= usize::MAX,
             spliced(old(self).children_slabs(cs, (h - 1) as nat), start as int, end as int, new@).len() <= usize::MAX,
             old(self).children_slabs(cs, (h - 1) as nat).len() <= usize::MAX,
         ensures
@@ -1890,7 +1946,7 @@ impl<A: SlabAggregate> SlabBTree<A> {
                 counts(cs, cs.len() as int) == sl.len(), sl.len() <= usize::MAX,
                 forall|i: int, j: int| 0 <= i <= j <= cs.len() ==> #[trigger] counts(cs, i) <= #[trigger] counts(cs, j),
                 old(self).slots_ok(cs, hc), sl == old(self).children_slabs(cs, hc),
-                f == spliced(sl, start as int, end as int, new0), valid(f), f.len() <= usize::MAX,
+                f == spliced(sl, start as int, end as int, new0), sum_len(f) <= usize::MAX, f.len() <= usize::MAX,
                 new0.len() == m,
                 new@ == new0.subrange(0, cut_at(k + 1, ks as int, ke as int, m, start as int, counts(cs, k + 1) as int)),
                 self.arena_ok(),
@@ -1950,7 +2006,7 @@ impl<A: SlabAggregate> SlabBTree<A> {
                 assert(part@ =~= new0.subrange(cut as int, cut_at(k + 1, ks as int, ke as int, m, start as int, pk1)));
                 let qk = share_at(k as int, ks as int, ke as int, m, start as int, end as int, pk);
                 let qk1 = share_at(k + 1, ks as int, ke as int, m, start as int, end as int, pk1);
-                lemma_valid_subrange(f, qk, qk1);
+                lemma_sum_len_sub(f, qk, qk1);
             }
             let ghost l0 = match t0.node_spec(id) { Some(Node::Internal(n)) => n.children@, _ => arbitrary() };
             let ghost piece = spliced(t0.slabs(cs[k as int].id, hc), lo as int, hi as int, part@);
@@ -1992,7 +2048,7 @@ impl<A: SlabAggregate> SlabBTree<A> {
             old(self).arena_ok(),
             old(self).wf_node(id, 0),
             start <= end <= old(self).slabs(id, 0).len(),
-            valid(spliced(old(self).slabs(id, 0), start as int, end as int, new@)),
+            sum_len(spliced(old(self).slabs(id, 0), start as int, end as int, new@)) <= usize::MAX,
             spliced(old(self).slabs(id, 0), start as int, end as int, new@).len() <= usize::MAX,
         ensures
             final(self).arena_ok(),
@@ -2196,11 +2252,11 @@ impl<A: SlabAggregate> SlabBTree<A> {
                 &&& old(self).slots_ok(cs, hc)
                 &&& !old(self).children_owned(cs, hc).contains(id)
                 &&& lo <= hi <= c.len()
-                &&& valid(piece) && piece.len() <= usize::MAX
+                &&& sum_len(piece) <= usize::MAX && piece.len() <= usize::MAX
                 &&& merge ==> {
                     let all = old(self).children_slabs(cs.subrange(0, k as int), hc) + piece
                         + old(self).children_slabs(cs.subrange(k + 1, cs.len() as int), hc);
-                    valid(all) && all.len() <= usize::MAX
+                    sum_len(all) <= usize::MAX && all.len() <= usize::MAX
                 }
             },
         ensures
@@ -2319,7 +2375,7 @@ impl<A: SlabAggregate> SlabBTree<A> {
             old(self).node_spec(id) matches Some(Node::Internal(n)) && {
                 &&& old(self).slots_ok(n.children@, (h - 1) as nat)
                 &&& !old(self).children_owned(n.children@, (h - 1) as nat).contains(id)
-                &&& valid(old(self).children_slabs(n.children@, (h - 1) as nat))
+                &&& sum_len(old(self).children_slabs(n.children@, (h - 1) as nat)) <= usize::MAX
                 &&& old(self).children_slabs(n.children@, (h - 1) as nat).len() <= usize::MAX
             },
         ensures
@@ -2424,7 +2480,7 @@ impl<A: SlabAggregate> SlabBTree<A> {
                 &&& child_idx < n.children@.len()
                 &&& old(self).slots_ok(n.children@, 0)
                 &&& !old(self).children_owned(n.children@, 0).contains(parent_id)
-                &&& valid(old(self).children_slabs(n.children@, 0))
+                &&& sum_len(old(self).children_slabs(n.children@, 0)) <= usize::MAX
                 &&& old(self).children_slabs(n.children@, 0).len() <= usize::MAX
             },
         ensures
@@ -2515,7 +2571,7 @@ impl<A: SlabAggregate> SlabBTree<A> {
         proof {
             assert(src_aggs@.len() == 0);
             assert(dl2.aggs@ =~= dl.aggs@ + sl.aggs@);
-            t0.lemma_pair_valid(cs, d, 0);
+            t0.lemma_pair_sum_len(cs, d, 0);
             t1.lemma_wf_leaf(dst_id, 0, dl2);
         }
         let new_agg = self.leaf_agg(dst_id, Ghost(0));
@@ -2569,7 +2625,9 @@ impl<A: SlabAggregate> SlabBTree<A> {
     /// Merge a leaf's slab aggregates.
     fn leaf_agg(&self, id: NodeId, Ghost(h): Ghost<nat>) -> (r: A)
         requires self.wf_node(id, h), self.node_spec(id) matches Some(Node::Leaf(_)),
-        ensures r == fold(self.slabs(id, h)),
+        ensures
+            r.spec_len() == sum_len(self.slabs(id, h)),
+            valid(self.slabs(id, h)) ==> r == fold(self.slabs(id, h)),
     {
         match self.node(id) {
             Node::Leaf(l) => Self::fold_leaf(&l.aggs),
@@ -2580,7 +2638,10 @@ impl<A: SlabAggregate> SlabBTree<A> {
     /// An internal node's merged aggregate and slab count.
     fn internal_summary(&self, id: NodeId, Ghost(h): Ghost<nat>) -> (r: (A, usize))
         requires self.wf_node(id, h), self.node_spec(id) matches Some(Node::Internal(_)),
-        ensures r.0 == fold(self.slabs(id, h)), r.1 == self.slabs(id, h).len(),
+        ensures
+            r.0.spec_len() == sum_len(self.slabs(id, h)),
+            valid(self.slabs(id, h)) ==> r.0 == fold(self.slabs(id, h)),
+            r.1 == self.slabs(id, h).len(),
     {
         match self.node(id) {
             Node::Internal(n) => {
@@ -2660,7 +2721,7 @@ impl<A: SlabAggregate> SlabBTree<A> {
         requires
             old(self).arena_ok(),
             old(self).node_spec(first_id) matches Some(Node::Leaf(_)),
-            aggs@.len() > 0, valid(aggs@),
+            aggs@.len() > 0, sum_len(aggs@) <= usize::MAX,
         ensures
             final(self).arena_ok(),
             final(self).slots_ok(r@, 0),
@@ -2691,7 +2752,7 @@ impl<A: SlabAggregate> SlabBTree<A> {
                 out@.len() == num,
                 1 <= c <= num, rem < num, num * base + rem == n, n <= usize::MAX, b == base, r == rem,
                 base >= 1, chunk_at(num as int, b, r) == n, chunk_at(0, b, r) == 0,
-                valid(all), all.len() == n,
+                sum_len(all) <= usize::MAX, all.len() == n,
                 aggs@ == all.subrange(0, chunk_at(c as int, b, r)),
                 self.arena_ok(),
                 self.node_spec(first_id) matches Some(Node::Leaf(_)),
@@ -2712,7 +2773,7 @@ impl<A: SlabAggregate> SlabBTree<A> {
             let chunk = aggs.split_off(at);
             proof {
                 assert(chunk@ =~= all.subrange(lo, hi));
-                lemma_valid_subrange(all, lo, hi);
+                lemma_sum_len_sub(all, lo, hi);
             }
             let slab_count = chunk.len();
             let agg = Self::fold_leaf(&chunk);
@@ -2736,7 +2797,7 @@ impl<A: SlabAggregate> SlabBTree<A> {
         let ghost hi = chunk_at(1, b, r);
         proof { lemma_chunk(num as int, b, r, 0); }
         let slab_count = aggs.len();
-        proof { lemma_valid_subrange(all, 0, hi); }
+        proof { lemma_sum_len_sub(all, 0, hi); }
         let agg = Self::fold_leaf(&aggs);
         let ghost leaf = Leaf { aggs: aggs };
         let node = self.node_mut(first_id);
@@ -2764,7 +2825,8 @@ impl<A: SlabAggregate> SlabBTree<A> {
 
     /// Split `children` (slots one level down) into internal nodes (one
     /// per chunk), the first being `first_id`.
-    #[verifier::rlimit(30)]
+    #[verifier::rlimit(60)]
+    #[verifier::spinoff_prover]
     fn split_internal(&mut self, first_id: NodeId, children: Vec<ChildSlot<A>>, Ghost(h): Ghost<nat>) -> (r: Vec<ChildSlot<A>>)
         requires
             h > 0,
@@ -2773,7 +2835,7 @@ impl<A: SlabAggregate> SlabBTree<A> {
             children@.len() > 0,
             old(self).slots_ok(children@, (h - 1) as nat),
             !old(self).children_owned(children@, (h - 1) as nat).contains(first_id),
-            valid(old(self).children_slabs(children@, (h - 1) as nat)),
+            sum_len(old(self).children_slabs(children@, (h - 1) as nat)) <= usize::MAX,
             old(self).children_slabs(children@, (h - 1) as nat).len() <= usize::MAX,
         ensures
             final(self).arena_ok(),
@@ -2822,7 +2884,7 @@ impl<A: SlabAggregate> SlabBTree<A> {
                 self.children_slabs(all, hc) == slabs_all,
                 self.children_owned(all, hc) == owned_all,
                 !owned_all.contains(first_id),
-                valid(slabs_all), slabs_all.len() <= usize::MAX,
+                sum_len(slabs_all) <= usize::MAX, slabs_all.len() <= usize::MAX,
                 forall|x: NodeId| #[trigger] owned_all.contains(x) ==> old(self).node_spec(x) is Some,
                 self.slots_ok(out@.subrange(c as int, num as int), h),
                 out@.len() == num,
@@ -2858,7 +2920,7 @@ impl<A: SlabAggregate> SlabBTree<A> {
                 let p = t0.children_slabs(all.subrange(0, lo), hc).len() as int;
                 let q = p + t0.children_slabs(chunk@, hc).len();
                 assert(slabs_all.subrange(p, q) =~= t0.children_slabs(chunk@, hc));
-                lemma_valid_subrange(slabs_all, p, q);
+                lemma_sum_len_sub(slabs_all, p, q);
             }
             let id = self.alloc(Node::Internal(Internal { children: chunk }));
             proof {
@@ -2879,6 +2941,9 @@ impl<A: SlabAggregate> SlabBTree<A> {
             let slot = ChildSlot { id, agg, slab_count };
             proof {
                 self.lemma_wf_internal(id, h, node);
+                // the chunk's first child has a slab
+                self.lemma_slot(chunk@, hc, 0);
+                self.lemma_children_slabs_split(chunk@, 0, hc);
                 self.lemma_slot_one(slot, h);
                 assert(self.owned(slot.id, h).disjoint(self.children_owned(o, h))) by {
                     assert forall|x: NodeId| self.owned(id, h).contains(x) implies
@@ -2921,7 +2986,7 @@ impl<A: SlabAggregate> SlabBTree<A> {
             t0.lemma_children_owned_concat(first, rest, hc);
             let p = t0.children_slabs(first, hc).len() as int;
             assert(slabs_all.subrange(0, p) =~= t0.children_slabs(first, hc));
-            lemma_valid_subrange(slabs_all, 0, p);
+            lemma_sum_len_sub(slabs_all, 0, p);
         }
         let ghost node = Internal { children: children };
         let nd = self.node_mut(first_id);
@@ -2946,6 +3011,9 @@ impl<A: SlabAggregate> SlabBTree<A> {
         let slot = ChildSlot { id: first_id, agg, slab_count };
         proof {
             self.lemma_wf_internal(first_id, h, node);
+            // the first chunk's first child has a slab
+            self.lemma_slot(first, hc, 0);
+            self.lemma_children_slabs_split(first, 0, hc);
             self.lemma_slot_one(slot, h);
             assert(self.owned(first_id, h).disjoint(self.children_owned(o, h))) by {
                 assert forall|x: NodeId| self.owned(first_id, h).contains(x) implies
@@ -2977,7 +3045,7 @@ impl<A: SlabAggregate> SlabBTree<A> {
             old(self).arena_ok(),
             slots@.len() > 0,
             old(self).slots_ok(slots@, (h - 1) as nat),
-            valid(old(self).children_slabs(slots@, (h - 1) as nat)),
+            sum_len(old(self).children_slabs(slots@, (h - 1) as nat)) <= usize::MAX,
             old(self).children_slabs(slots@, (h - 1) as nat).len() <= usize::MAX,
         ensures
             final(self).arena_ok(),
@@ -3009,7 +3077,7 @@ impl<A: SlabAggregate> SlabBTree<A> {
         requires
             old(self).arena_ok(),
             old(self).slots_ok(slots@, h),
-            valid(old(self).children_slabs(slots@, h)),
+            sum_len(old(self).children_slabs(slots@, h)) <= usize::MAX,
             old(self).children_slabs(slots@, h).len() <= usize::MAX,
             slots@.len() == 0 ==> old(self).node_spec(old(self).root) is Some,
         ensures
@@ -3051,7 +3119,7 @@ impl<A: SlabAggregate> SlabBTree<A> {
                 self.arena_ok(),
                 self.slots_ok(slots@, hh),
                 self.children_slabs(slots@, hh) == all,
-                valid(all), all.len() <= usize::MAX,
+                sum_len(all) <= usize::MAX, all.len() <= usize::MAX,
                 self.total_slabs == old(self).total_slabs,
             decreases slots@.len(),
         {
@@ -3153,7 +3221,7 @@ impl<A: SlabAggregate> SlabBTree<A> {
     /// A tree of the slabs `aggs`: leaves of at most B, grouped level by
     /// level.
     pub(crate) fn from_vec(aggs: Vec<A>) -> (t: Self)
-        requires valid(aggs@),
+        requires sum_len(aggs@) <= usize::MAX,
         ensures t.wf(), t@ == aggs@,
     {
         let mut t = Self::new();
@@ -3173,9 +3241,6 @@ impl<A: SlabAggregate> SlabBTree<A> {
             assert forall|x: NodeId| t2.owned(t2.root, hh).contains(x) implies t2.node_spec(x) == t.node_spec(x) by {}
             Self::lemma_frame(&t2, &t, t.root, hh);
             t.lemma_height_unique(t.root, hh, t.height());
-            lemma_fold_len(all, 0, all.len() as int);
-            assert(all.subrange(0, all.len() as int) =~= all);
-            A::lemma_len_bound(fold(all));
         }
         t
     }
@@ -3188,10 +3253,12 @@ impl<A: SlabAggregate> SlabBTree<A> {
     ///
     /// O(log n) — descends the tree by `len`, accumulating `prefix`
     /// and `len` of children visited before the descent.
+    #[verifier::rlimit(40)]
     pub(crate) fn find_slab_at_item(&self, item_idx: usize) -> (r: FoundSlab<A>)
         where A: PrefixAggregate
         requires
             self.wf(),
+            valid(self@),
             forall|i: int| 0 <= i < self@.len() ==> #[trigger] self@[i].prefix_ok(),
         ensures
             r.index <= self@.len(),
@@ -3217,7 +3284,7 @@ impl<A: SlabAggregate> SlabBTree<A> {
         }
         loop
             invariant
-                self.wf(), view == self@,
+                self.wf(), view == self@, valid(view),
                 forall|i: int| 0 <= i < view.len() ==> #[trigger] view[i].prefix_ok(),
                 self.wf_node(node, h),
                 view == left + self.slabs(node, h) + right,
@@ -3242,7 +3309,7 @@ impl<A: SlabAggregate> SlabBTree<A> {
                     let mut i: usize = 0;
                     while i < l.aggs.len()
                         invariant
-                            self.wf(), view == self@,
+                            self.wf(), view == self@, valid(view),
                             forall|j: int| 0 <= j < view.len() ==> #[trigger] view[j].prefix_ok(),
                             i <= aggs.len(), aggs == l.aggs@,
                             view == left + aggs + right,
@@ -3307,7 +3374,7 @@ impl<A: SlabAggregate> SlabBTree<A> {
                                 < sum_len(self.children_slabs(cs, hc))
                                 || (left.len() == 0 && right.len() == 0),
                         invariant
-                            self.wf(), view == self@, cs == n.children@, h0 > 0, hc == h0 - 1,
+                            self.wf(), view == self@, valid(view), cs == n.children@, h0 > 0, hc == h0 - 1,
                             forall|j: int| 0 <= j < view.len() ==> #[trigger] view[j].prefix_ok(),
                         ensures
                             h < h0,
@@ -3355,6 +3422,7 @@ impl<A: SlabAggregate> SlabBTree<A> {
                         proof {
                             let (p, q) = (slab_base as int, slab_base + mid.len());
                             assert(view.subrange(p, q) =~= mid);
+                            lemma_valid_subrange(view, p, q);
                             lemma_valid_subrange(view, 0, view.len() as int);
                             assert(view.subrange(0, view.len() as int) =~= view);
                             lemma_fold_prefix(view, p, q);
@@ -3381,10 +3449,12 @@ impl<A: SlabAggregate> SlabBTree<A> {
     /// every slab end it passes that reaches `target` is followed, before
     /// the result, by one that doesn't.
     #[verifier::spinoff_prover]
+    #[verifier::rlimit(40)]
     pub(crate) fn find_slab_at_prefix(&self, target: &A::Prefix) -> (r: (usize, A::Prefix, usize))
         where A: OrdPrefix
         requires
             self.wf(),
+            valid(self@),
             forall|i: int| 0 <= i < self@.len() ==> #[trigger] self@[i].prefix_ok(),
         ensures
             r.0 <= self@.len(),
@@ -3557,6 +3627,7 @@ impl<A: SlabAggregate> SlabBTree<A> {
                             lemma_sum_len_concat(before, mid);
                             lemma_sum_len_concat(before + mid, rest);
                             lemma_seq_part(left, before, mid, rest, right);
+                            lemma_valid_subrange(view, p, q);
                             lemma_fold_prefix(view, p, q);
                         }
                         let after = A::plus_prefix(&acc_prefix, c.agg.prefix());
@@ -3614,7 +3685,9 @@ impl<A: SlabAggregate> SlabBTree<A> {
     /// Aggregate of all slabs in the tree.
     pub(crate) fn root_agg(&self) -> (r: A)
         requires self.wf(),
-        ensures r == fold(self@),
+        ensures
+            r.spec_len() == sum_len(self@),
+            valid(self@) ==> r == fold(self@),
     {
         proof { assert(self.wf_node(self.root, self.height())); }
         match self.node(self.root) {
@@ -3766,8 +3839,8 @@ impl<A: SlabAggregate> SlabBTree<A> {
                 &&& self.slots_ok(n.children@, (h - 1) as nat)
                 &&& forall|i: int| 0 <= i < n.children@.len()
                     ==> !self.owned(#[trigger] n.children@[i].id, (h - 1) as nat).contains(id)
-                &&& valid(self.children_slabs(n.children@, (h - 1) as nat))
                 &&& self.children_slabs(n.children@, (h - 1) as nat).len() <= usize::MAX
+                &&& sum_len(self.children_slabs(n.children@, (h - 1) as nat)) <= usize::MAX
             },
             h > 0 ==> self.slabs(id, h) == self.children_slabs(n.children@, (h - 1) as nat),
             h > 0 ==> self.owned(id, h) == set![id] + self.children_owned(n.children@, (h - 1) as nat),
@@ -3783,7 +3856,7 @@ impl<A: SlabAggregate> SlabBTree<A> {
                     &&& self.wf_node(c.id, hc)
                     &&& c.slab_count == self.slabs(c.id, hc).len()
                     &&& c.slab_count > 0
-                    &&& c.agg == fold(self.slabs(c.id, hc))
+                    &&& valid(self.slabs(c.id, hc)) ==> c.agg == fold(self.slabs(c.id, hc))
                     &&& c.agg.spec_len() == sum_len(self.slabs(c.id, hc))
                 } by {
                     self.lemma_child(id, h, n, i);
@@ -3795,7 +3868,7 @@ impl<A: SlabAggregate> SlabBTree<A> {
     proof fn lemma_wf_leaf(&self, id: NodeId, h: nat, l: Leaf<A>)
         requires self.node_spec(id) == Some(Node::Leaf(l)),
         ensures
-            self.wf_node(id, h) == (h == 0 && valid(l.aggs@) && l.aggs@.len() <= usize::MAX),
+            self.wf_node(id, h) == (h == 0 && l.aggs@.len() <= usize::MAX && sum_len(l.aggs@) <= usize::MAX),
             self.slabs(id, h) == l.aggs@,
             self.owned(id, h) == set![id],
     {
@@ -3888,7 +3961,7 @@ impl<A: SlabAggregate> SlabBTree<A> {
             &&& self.wf_node(c.id, h)
             &&& c.slab_count == self.slabs(c.id, h).len()
             &&& c.slab_count > 0
-            &&& c.agg == fold(self.slabs(c.id, h))
+            &&& valid(self.slabs(c.id, h)) ==> c.agg == fold(self.slabs(c.id, h))
             &&& c.agg.spec_len() == sum_len(self.slabs(c.id, h))
         } by {
             if i < a.len() { assert(ab[i] == a[i]); } else { assert(ab[i] == b[i - a.len()]); }
@@ -3921,7 +3994,7 @@ impl<A: SlabAggregate> SlabBTree<A> {
             &&& self.wf_node(c.id, h)
             &&& c.slab_count == self.slabs(c.id, h).len()
             &&& c.slab_count > 0
-            &&& c.agg == fold(self.slabs(c.id, h))
+            &&& valid(self.slabs(c.id, h)) ==> c.agg == fold(self.slabs(c.id, h))
             &&& c.agg.spec_len() == sum_len(self.slabs(c.id, h))
         } by {
             assert(t[a] == cs[i + a]);
@@ -3968,7 +4041,7 @@ impl<A: SlabAggregate> SlabBTree<A> {
             self.wf_node(cs[i].id, h),
             cs[i].slab_count == self.slabs(cs[i].id, h).len(),
             cs[i].slab_count > 0,
-            cs[i].agg == fold(self.slabs(cs[i].id, h)),
+            valid(self.slabs(cs[i].id, h)) ==> cs[i].agg == fold(self.slabs(cs[i].id, h)),
             cs[i].agg.spec_len() == sum_len(self.slabs(cs[i].id, h)),
     {
         reveal(SlabBTree::slots_ok);
@@ -3981,7 +4054,8 @@ impl<A: SlabAggregate> SlabBTree<A> {
             self.wf_node(slot.id, h),
             slot.slab_count == self.slabs(slot.id, h).len(),
             slot.slab_count > 0,
-            slot.agg == fold(self.slabs(slot.id, h)),
+            valid(self.slabs(slot.id, h)) ==> slot.agg == fold(self.slabs(slot.id, h)),
+            slot.agg.spec_len() == sum_len(self.slabs(slot.id, h)),
         ensures
             self.slots_ok(seq![slot], h),
             self.children_slabs(seq![slot], h) == self.slabs(slot.id, h),
@@ -3989,8 +4063,6 @@ impl<A: SlabAggregate> SlabBTree<A> {
     {
         reveal(SlabBTree::slots_ok);
         let s = self.slabs(slot.id, h);
-        lemma_fold_len(s, 0, s.len() as int);
-        assert(s.subrange(0, s.len() as int) =~= s);
         self.lemma_children_slabs_one(slot, h);
         assert forall|i: int| 0 <= i < 1 implies #[trigger] seq![slot][i] == slot by {}
     }
@@ -4137,16 +4209,16 @@ impl<A: SlabAggregate> SlabBTree<A> {
     }
 
     /// The two adjacent children's slabs are a valid run of the node's.
-    proof fn lemma_pair_valid(&self, cs: Seq<ChildSlot<A>>, d: int, h: nat)
-        requires 0 <= d, d + 1 < cs.len(), valid(self.children_slabs(cs, h)),
-        ensures valid(self.slabs(cs[d].id, h) + self.slabs(cs[d + 1].id, h)),
+    proof fn lemma_pair_sum_len(&self, cs: Seq<ChildSlot<A>>, d: int, h: nat)
+        requires 0 <= d, d + 1 < cs.len(), sum_len(self.children_slabs(cs, h)) <= usize::MAX,
+        ensures sum_len(self.slabs(cs[d].id, h) + self.slabs(cs[d + 1].id, h)) <= usize::MAX,
     {
         self.lemma_pair_slabs(cs, d, h);
         let all = self.children_slabs(cs, h);
         let pre = self.children_slabs(cs.subrange(0, d), h);
         let pair = self.slabs(cs[d].id, h) + self.slabs(cs[d + 1].id, h);
         assert(all.subrange(pre.len() as int, (pre.len() + pair.len()) as int) =~= pair);
-        lemma_valid_subrange(all, pre.len() as int, (pre.len() + pair.len()) as int);
+        lemma_sum_len_sub(all, pre.len() as int, (pre.len() + pair.len()) as int);
     }
 
     /// Replacing leaf slots `d` and `d + 1` by one leaf slot holding both
@@ -4162,7 +4234,8 @@ impl<A: SlabAggregate> SlabBTree<A> {
             t.wf_node(slot.id, 0),
             t.slabs(slot.id, 0) == t0.slabs(cs[d].id, 0) + t0.slabs(cs[d + 1].id, 0),
             slot.slab_count == t.slabs(slot.id, 0).len(),
-            slot.agg == fold(t.slabs(slot.id, 0)),
+            valid(t.slabs(slot.id, 0)) ==> slot.agg == fold(t.slabs(slot.id, 0)),
+            slot.agg.spec_len() == sum_len(t.slabs(slot.id, 0)),
         ensures ({
             let n2 = cs.subrange(0, d) + seq![slot] + cs.subrange(d + 2, cs.len() as int);
             &&& t.slots_ok(n2, 0)
@@ -5242,6 +5315,7 @@ proof fn lemma_internal_step(t: SlabBTree<SlabAgg>, f: Frame, end: int, h: int, 
     t.lemma_children_slabs_split(cs, k, hc);
     t.lemma_children_slabs_push(cs, k, hc);
     lemma_sub_part(s, start, end, before, mid, rest);
+    lemma_valid_subrange(s, a, b);
     lemma_agg_in_range(s, a, b);
     lemma_run_totals(s, a, b);
     let fc = Frame { node: c.id, next_child: 0, prefix_before: f.prefix_before, slab_base: f.slab_base, items_before: f.items_before };
@@ -5298,6 +5372,7 @@ impl<'a> ValueSearch<'a> {
     pub(crate) fn new(tree: &'a SlabBTree<SlabAgg>, lo: i64, hi: i64) -> (s: Self)
         requires
             tree.wf(),
+            valid(tree@),
             forall|i: int| 0 <= i < tree@.len() ==> #[trigger] tree@[i].prefix_ok(),
         ensures
             s.inv(), s.pos() == 0, s.view_tree() == tree@, s.spec_lo() == lo, s.spec_hi() == hi,
