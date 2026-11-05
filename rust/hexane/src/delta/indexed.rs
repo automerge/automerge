@@ -112,14 +112,17 @@ fn compute_slab_agg<I: DeltaInner, C: Codec>(data: &[u8]) -> SlabAgg {
                 max_off = max_off.max(partial);
             }
             Some(v) => {
-                // the loader rejects these
-                let span = v
-                    .checked_mul(run.count as i64)
-                    .expect("delta run overflows i64");
-                let first = partial.checked_add(v).expect("delta value overflows i64");
-                let last = partial
-                    .checked_add(span)
-                    .expect("delta value overflows i64");
+                // Wrapping, as the index's merges are: exact wherever the
+                // sums fit `i64`, as a column's values keep them. An edit
+                // can weigh a slab whose sums don't, for a moment: a
+                // delete that empties a slab's tail can merge it with the
+                // next slab before the delta that bridges them is
+                // written. The slab is weighed again once it is, and an
+                // edit that leaves values out of the domain panics
+                // (`check_span`); the loader rejects such data.
+                let span = v.wrapping_mul(run.count as i64);
+                let first = partial.wrapping_add(v);
+                let last = partial.wrapping_add(span);
                 min_off = min_off.min(first.min(last));
                 max_off = max_off.max(first.max(last));
                 partial = last;
