@@ -188,6 +188,22 @@ let col = iter.finalize().unwrap();      // the fully-validated column
 assert_eq!((col.len(), total), (5, 8));
 ```
 
+The streaming decoders (`decoder`, `DeltaDecoder::new`) trust their
+bytes, as they come from an encoder or `save` in the same program. For
+bytes from outside, `try_decoder` and `DeltaDecoder::try_new` check them
+first, as `load` does:
+
+```rust
+use hexane::{DeltaDecoder, PackError};
+
+let bytes = hexane::DeltaEncoder::<u32>::encode(vec![5, 6, 7]);
+let vals: Vec<u32> = DeltaDecoder::<u32>::try_new(&bytes)?.collect();
+assert_eq!(vals, vec![5, 6, 7]);
+assert!(hexane::try_decoder::<u64>(&[0x05]).is_err()); // a run with no value
+assert!(DeltaDecoder::<u32>::try_new(&[0x7f, 0x7f]).is_err()); // -1 isn't a u32
+# Ok::<(), PackError>(())
+```
+
 The failure-mode policy is uniform across the crate:
 
 | Situation | Behavior |
@@ -282,8 +298,8 @@ compiles them away. To check them, run `cargo verus verify -p hexane
   merges, for both RLE and bool slabs.
 * The slab indexes (the B-tree and the Fenwick tree).
 * The column iterator and the column edit cursor, against the RLE and bool
-  formats: every read yields exactly the column's values in the window,
-  and every edit leaves canonical slabs, with correct metadata, holding
+  formats: every read yields exactly the column's values in the window
+  (and an `nth` past the data stops at its end), and every edit leaves canonical slabs, with correct metadata, holding
   exactly the intended values. This includes delta columns, which store
   their deltas as an RLE column. Their index sums the deltas in `i64`, and
   while an edit is under way those sums can exceed `i64` (a delete that
