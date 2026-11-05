@@ -331,6 +331,12 @@ compiles them away. To check them, run `cargo verus verify -p hexane
   where the running sum first reaches the target, which skips no match
   when the window is sorted, whatever lies outside it. Given the index's
   aggregates, as for reading.
+* A delta column's scans (`DeltaIter::scan_to_range` and
+  `scan_to_value`): each returns the first item of the iterator's window,
+  from its position, whose value lies in the range (or is null, for
+  `scan_to_value(None)`), with the iterator just past it; or none, with
+  the window used up. Slabs the index rules out hold no match. Given the
+  index's aggregates, as for reading.
 * The value search of `Column` and its iterator (`scope_to_value`,
   `seek_to_value`): where the values in the window are sorted, it returns
   exactly the range of them equal to the target, or, if there are none,
@@ -390,8 +396,7 @@ first and values outside the domain last.
   column's sum fits its prefix type, which the searches' results depend on
   (loads reject sums that would not, and edits panic, but those checks are
   not part of the proof); `delta`, which is glue over the verified
-  iterator; `DeltaIter::scan_to_range`; and the bridging deltas a delta
-  edit writes.
+  iterator; and the bridging deltas a delta edit writes.
 * Where a precondition of the verified code cannot be shown from the
   specifications (a slab of `i64::MAX` bytes or more, or a column or
   encoder of nearly `usize::MAX` items), the code checks it and panics

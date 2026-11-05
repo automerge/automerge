@@ -167,7 +167,7 @@ pub(crate) proof fn lemma_vals_len<'a, X: Decoders<'a>>(s: Seq<Slab<X::Tail>>)
 
 /// The items of a run of `c` copies of `x` from item `pos`: each realizes
 /// the running sum `kk` steps on, or null.
-proof fn lemma_run_rv<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
+pub(crate) proof fn lemma_run_rv<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
     s: Seq<Slab<X::Tail>>,
     pos: int,
     c: int,
@@ -192,7 +192,7 @@ proof fn lemma_run_rv<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
 
 /// The window's values come in runs: after `count` of them, the iterator's
 /// next run starts `count` further on, with the values the window's next.
-proof fn lemma_out_vals<'a, D: Decode, X: Decoders<'a, D = D>>(
+pub(crate) proof fn lemma_out_vals<'a, D: Decode, X: Decoders<'a, D = D>>(
     c: ICore<D>,
     s: Seq<Slab<X::Tail>>,
     count: int,
@@ -211,7 +211,7 @@ proof fn lemma_out_vals<'a, D: Decode, X: Decoders<'a, D = D>>(
 }
 
 /// The window from `p` holds `out.len()` items, all of the column's.
-proof fn lemma_window<'a, D: Decode, X: Decoders<'a, D = D>>(c: ICore<D>, s: Seq<Slab<X::Tail>>)
+pub(crate) proof fn lemma_window<'a, D: Decode, X: Decoders<'a, D = D>>(c: ICore<D>, s: Seq<Slab<X::Tail>>)
     requires
         c.wf::<X>(s),
     ensures
@@ -370,7 +370,7 @@ pub(crate) fn d_seek_null<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Ite
 
 
 /// Moving `n` items into the window leaves the rest of it.
-proof fn lemma_out_skip<'a, D: Decode, X: Decoders<'a, D = D>>(c0: ICore<D>, c1: ICore<D>, s: Seq<Slab<X::Tail>>, n: int)
+pub(crate) proof fn lemma_out_skip<'a, D: Decode, X: Decoders<'a, D = D>>(c0: ICore<D>, c1: ICore<D>, s: Seq<Slab<X::Tail>>, n: int)
     requires
         c0.wf::<X>(s),
         0 <= n <= c0.out::<X>(s).len(),
@@ -483,7 +483,7 @@ pub(crate) open spec fn all_fit<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode
 
 /// Read one run from the probe, at item `q`, keeping its running sum:
 /// the run's items are the window's next, `x` repeated.
-fn d_step<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
+pub(crate) fn d_step<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
     probe: &mut ICore<X::D>,
     slabs: &'a [Slab<X::Tail>],
     prun: &mut i64,

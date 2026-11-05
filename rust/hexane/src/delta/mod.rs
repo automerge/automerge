@@ -2,6 +2,7 @@ pub(crate) mod agg;
 mod decoder;
 pub(crate) mod dfind;
 pub(crate) mod diter;
+pub(crate) mod dscan;
 pub(crate) mod dseek;
 pub mod indexed;
 pub(crate) mod stream;
@@ -13,6 +14,7 @@ use crate::column::{normalize_range_max, Dx, Iter, IterState};
 use crate::rle::state::WOps;
 use crate::{Codec, Leb128};
 use diter::{d_next, d_next_run, d_nth};
+use dscan::{d_scan, d_scan_null};
 use dseek::{d_seek, d_seek_null};
 use indexed::DB;
 use std::fmt::Debug;
@@ -1780,8 +1782,7 @@ impl<'a, T: DeltaValue, C: Codec> DeltaIter<'a, T, C> {
     pub fn scan_to_value(&mut self, target: T) -> Option<usize> {
         if target.try_to_i64().is_none() && T::NULLABLE && target == T::null_value() {
             // nulls are invisible to the value aggregates — plain run scan
-            let end = self.end_pos();
-            return self.scan_to_null(end);
+            return self.scan_to_null();
         }
         self.scan_to_range(target..=target).map(|(pos, _)| pos)
     }
@@ -1835,143 +1836,28 @@ impl<'a, T: DeltaValue, C: Codec> DeltaIter<'a, T, C> {
             return None;
         };
 
-        // the first item of a delta run hitting `[lo, hi]`, if any:
-        // values are `running + d*j` for `j` in `1..=count`
-        fn run_hit(running: i64, d: i64, count: usize, lo: i64, hi: i64) -> Option<usize> {
-            let j = if d == 0 {
-                1
-            } else if d > 0 {
-                // increasing: first j at or above lo
-                match lo.checked_sub(running) {
-                    // overflow means further than `count` steps, not one
-                    Some(gap) => gap
-                        .checked_add(d - 1)
-                        .map_or(count as i64, |n| n.div_euclid(d))
-                        .max(1),
-                    None if lo > running => return None,
-                    None => 1,
-                }
-            } else {
-                // decreasing: first j at or below hi. `-i64::MIN` has no
-                // negation, and admits only `j == 1` anyway.
-                match d.checked_neg() {
-                    None => 1,
-                    Some(d) => match running.checked_sub(hi) {
-                        Some(gap) => gap
-                            .checked_add(d - 1)
-                            .map_or(count as i64, |n| n.div_euclid(d))
-                            .max(1),
-                        None if hi > running => 1,
-                        None => return None,
-                    },
-                }
-            };
-            if j as usize > count {
-                return None;
-            }
-            let v = d.checked_mul(j).and_then(|o| running.checked_add(o))?;
-            (lo <= v && v <= hi).then_some(j as usize)
-        }
-
-        let mut candidates = self.col.map(|c| c.find_by_value_range(lo, hi));
-        loop {
-            // scan the rest of the current slab; on a hit, rewind to
-            // the mark and step precisely onto it
-            let mark = self.clone();
-            let mut pos = self.pos();
-            let mut running = self.running;
-            let mut hit = None;
-            while self.inner.core.slab_remaining > 0 && pos < end {
-                let Some(run) = self.inner.next_run() else {
-                    break;
-                };
-                let count = run.count.min(end - pos);
-                match T::Inner::to_opt(run.value) {
-                    None => pos += count,
-                    Some(d) => {
-                        if let Some(j) = run_hit(running, d, count, lo, hi) {
-                            hit = Some(pos + j - 1);
-                            break;
-                        }
-                        running += d * count as i64;
-                        pos += count;
-                    }
-                }
-            }
-            if let Some(h) = hit {
-                *self = mark;
-                let v = self.nth(h - self.pos())?;
-                return Some((h, v));
-            }
-
-            // No hit in this slab: park or jump. The probe above
-            // consumed runs from `self.inner` while tracking pos and
-            // running in locals, so any exit that does not fully
-            // reposition (the candidate jump resets both) must first
-            // rewind to `mark` — otherwise `running` is stale and
-            // every value realized after a later window extension is
-            // wrong by the unfolded deltas.
-            let Some(cands) = candidates.as_mut() else {
-                *self = mark;
-                self.advance_to(end);
-                return None;
-            };
-            loop {
-                let Some((si, items_before, prefix)) = cands.next() else {
-                    *self = mark;
-                    self.advance_to(end);
-                    return None;
-                };
-                if items_before >= end {
-                    *self = mark;
-                    self.advance_to(end);
-                    return None;
-                }
-                // candidates arrive in slab order; skip any starting
-                // inside the region the probe already cleared
-                if items_before < self.pos() {
-                    continue;
-                }
-                self.running = prefix;
-                if !self.inner.advance_to_slab(si, items_before) {
-                    *self = mark;
-                    self.advance_to(end);
-                    return None;
-                }
-                break;
-            }
-        }
+        // verified (`dscan`): the first item in the window from here
+        // whose value lies in `[lo, hi]`, with the iterator just past it
+        let (pos, v) = d_scan::<Dx<T::Inner, C>, DB<T::Inner>>(
+            &mut self.inner.core,
+            self.inner.slabs,
+            self.col.map(|c| &c.index),
+            &mut self.running,
+            lo,
+            hi,
+        )?;
+        Some((pos, T::from_i64(v)))
     }
 
-    fn scan_to_null(&mut self, end: usize) -> Option<usize> {
-        let mark = self.clone();
-        let mut pos = self.pos();
-        let mut hit = None;
-        while pos < end {
-            let Some(run) = self.inner.next_run() else {
-                break;
-            };
-            if T::Inner::to_opt(run.value).is_none() {
-                hit = Some(pos);
-                break;
-            }
-            pos += run.count;
-        }
-        match hit {
-            Some(h) if h < end => {
-                *self = mark;
-                self.nth(h - self.pos())?;
-                Some(h)
-            }
-            _ => {
-                // the probe consumed runs without folding them into the
-                // iterator state — rewind before parking (see
-                // `scan_to_range`)
-                *self = mark;
-                self.advance_to(end);
-                None
-            }
-        }
+    fn scan_to_null(&mut self) -> Option<usize> {
+        // verified (`dscan`): the first null in the window from here, with
+        // the iterator just past it
+        d_scan_null::<Dx<T::Inner, C>, DB<T::Inner>>(
+            &mut self.inner.core,
+            self.inner.slabs,
+            self.col.map(|c| &c.index),
+            &mut self.running,
+        )
     }
 }
 

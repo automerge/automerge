@@ -691,7 +691,7 @@ proof fn lemma_slab_done<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item
 }
 
 /// Slabs `p..q` the index ruled out hold no matches.
-proof fn lemma_skipped<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
+pub(crate) proof fn lemma_skipped<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
     ws: Seq<SlabAgg>,
     s: Seq<Slab<X::Tail>>,
     lo: int,

@@ -509,14 +509,6 @@ impl<'a, T: ColumnValueRef, C: Codec> Iter<'a, T, C> {
         self.set_max(range.end);
         self.nth(range.start - self.core.pos)
     }
-
-    // Invariant: `pos >= self.pos`. This holds because iterators are
-    // always positioned at construction (see `iter_range` — even empty
-    // ranges seek), and every advance moves forward.
-    pub(crate) fn advance_to_slab(&mut self, si: usize, pos: usize) -> bool {
-        debug_assert!(si >= self.slabs.len() || pos >= self.core.pos);
-        self.core.advance_to_slab::<Dx<T, C>>(self.slabs, si, pos)
-    }
 }
 
 // ── copy_ranges support ─────────────────────────────────────────────────────
