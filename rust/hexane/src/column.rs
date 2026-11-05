@@ -1029,6 +1029,7 @@ where
             weights: Vec::new(),
             cur_weight: WF::Weight::default(),
             cur_emitted: 0,
+            failed: false,
             _phantom: PhantomData,
         }
     }
@@ -1670,6 +1671,8 @@ pub struct ColumnLoadIter<
     cur_weight: WF::Weight,
     /// items already attributed to the slab currently being cut
     cur_emitted: usize,
+    /// an error ended the load: the runs after it don't make a column
+    failed: bool,
     _phantom: PhantomData<(WF, Idx)>,
 }
 
@@ -1681,8 +1684,18 @@ where
     Idx: ColumnIndex<WF::Weight>,
 {
     /// The next canonical run, or `None` at end of input. A fill emits
-    /// its entire contents as one run.
+    /// its entire contents as one run. An error ends the load: later calls,
+    /// and [`finalize`](Self::finalize), return [`PackError::BadFormat`].
     pub fn try_next_run(&mut self) -> Result<Option<Run<T::Get<'a>>>, PackError> {
+        if self.failed {
+            return Err(PackError::BadFormat);
+        }
+        let r = self.next_run_inner();
+        self.failed = r.is_err();
+        r
+    }
+
+    fn next_run_inner(&mut self) -> Result<Option<Run<T::Get<'a>>>, PackError> {
         use crate::encoding::LoadIterApi;
         if let Some((value, len)) = self.fill {
             if self.fill_emitted || len == 0 {
@@ -1735,6 +1748,9 @@ where
         mut check: impl FnMut(&WF::Weight) -> Result<(), PackError>,
     ) -> Result<Column<T, C, WF, Idx>, PackError> {
         use crate::encoding::LoadIterApi;
+        if self.failed {
+            return Err(PackError::BadFormat);
+        }
         if let Some((value, len)) = self.fill {
             // the fill's one slab is `len` copies of `value`: its weight
             // gets the checks a loaded slab's does
