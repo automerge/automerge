@@ -300,6 +300,7 @@ pub(crate) fn splice_bytes(vec: &mut Vec<u8>, index: usize, del: usize, bytes: &
 /// Object-safe view of a `Column` used by [`Iter`] for index-assisted
 /// slab lookups, independent of the column's `WF` / `Idx` parameters.
 pub(crate) trait ColumnRef<T: ColumnValueRef> {
+    fn len(&self) -> usize;
     fn find_slab(&self, index: usize) -> (usize, usize);
     fn slab_start(&self, index: usize) -> usize;
 }
@@ -311,6 +312,10 @@ where
     WF: WeightFn<T, C>,
     Idx: ColumnIndex<WF::Weight>,
 {
+    fn len(&self) -> usize {
+        self.total_len
+    }
+
     fn find_slab(&self, index: usize) -> (usize, usize) {
         // verified (`IndexOps::ix_find`); the iterator's seeks rely on it
         self.index.ix_find(index)
@@ -376,7 +381,15 @@ impl<'a, T: ColumnValueRef, C: Codec> Iterator for Iter<'a, T, C> {
 
     #[inline]
     fn size_hint(&self) -> (usize, Option<usize>) {
-        (self.core.items_left, Some(self.core.items_left))
+        // the window (`set_max`) can run past the column's end
+        let left = match self.col {
+            Some(col) => self
+                .core
+                .items_left
+                .min(col.len().saturating_sub(self.core.pos)),
+            None => 0,
+        };
+        (left, Some(left))
     }
 
     fn fold<B, F>(mut self, init: B, mut f: F) -> B
