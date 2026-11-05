@@ -4,8 +4,8 @@ use automerge::sync::{Message, MessageVersion, State};
 use automerge::transaction::{CommitOptions, Transactable};
 use automerge::{
     sync::SyncDoc, ActorId, Author, AutoCommit, Automerge, AutomergeError, Change, ExpandedChange,
-    LoadOptions, ObjId, ObjType, Patch, PatchAction, PatchLog, Prop, ReadDoc, ScalarValue,
-    SequenceTree, TextEncoding, Value, ROOT,
+    LoadOptions, ObjId, ObjType, OnPartialLoad, Patch, PatchAction, PatchLog, Prop, ReadDoc,
+    ScalarValue, SequenceTree, TextEncoding, Value, ROOT,
 };
 
 const B: usize = 16;
@@ -2165,6 +2165,82 @@ fn load_incremental_with_corrupted_tail() {
         &loaded,
         map! {
             "key" => { "value" },
+        }
+    );
+}
+
+#[test]
+fn load_incremental_into_empty_doc_keeps_chunks_before_a_bad_one() {
+    // A snapshot followed by change chunks, the last of which is truncated or
+    // corrupt. Loading this into an empty document should keep every chunk
+    // before the bad one, just as loading it into a non-empty document does.
+    let mut doc = AutoCommit::new();
+    doc.put(ROOT, "c1", 1).unwrap();
+    let snapshot = doc.save();
+    let heads = doc.get_heads();
+    doc.put(ROOT, "c2", 2).unwrap();
+    let c2 = doc.save_after(&heads);
+    let heads = doc.get_heads();
+    doc.put(ROOT, "c3", 3).unwrap();
+    let c3 = doc.save_after(&heads);
+    let heads = doc.get_heads();
+    doc.put(ROOT, "c4", 4).unwrap();
+    let c4 = doc.save_after(&heads);
+
+    let truncated = c4[..c4.len() - 3].to_vec();
+    let mut corrupt = c4.clone();
+    *corrupt.last_mut().unwrap() ^= 0xff;
+
+    for bad in [&truncated[..], &corrupt[..]] {
+        let data = [&snapshot[..], &c2, &c3, bad].concat();
+
+        let mut loaded = Automerge::new();
+        loaded.load_incremental(&data).unwrap();
+        assert_doc!(
+            &loaded,
+            map! {
+                "c1" => { 1 },
+                "c2" => { 2 },
+                "c3" => { 3 },
+            }
+        );
+
+        // The same chunks loaded into a non-empty document
+        let mut base = Automerge::load(&snapshot).unwrap();
+        base.load_incremental(&[&c2[..], &c3, bad].concat())
+            .unwrap();
+        assert_eq!(base.get_heads(), loaded.get_heads());
+
+        // load_with_options with OnPartialLoad::Ignore takes the same path
+        let loaded = Automerge::load_with_options(
+            &data,
+            LoadOptions::new().on_partial_load(OnPartialLoad::Ignore),
+        )
+        .unwrap();
+        assert_doc!(
+            &loaded,
+            map! {
+                "c1" => { 1 },
+                "c2" => { 2 },
+                "c3" => { 3 },
+            }
+        );
+
+        // OnPartialLoad::Error (the default) still fails
+        assert!(Automerge::load(&data).is_err());
+    }
+
+    // The first chunk is a change chunk rather than a document chunk
+    let c1 = AutoCommit::load(&snapshot).unwrap().save_after(&[]);
+    let mut loaded = Automerge::new();
+    loaded
+        .load_incremental(&[&c1[..], &c2, &truncated].concat())
+        .unwrap();
+    assert_doc!(
+        &loaded,
+        map! {
+            "c1" => { 1 },
+            "c2" => { 2 },
         }
     );
 }

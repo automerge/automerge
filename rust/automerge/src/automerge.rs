@@ -1322,10 +1322,12 @@ impl Automerge {
                     return Err(AutomergeError::MissingDeps);
                 }
             }
-            load::LoadedChanges::Partial { error, .. } => {
+            load::LoadedChanges::Partial { error, loaded, .. } => {
                 if options.on_partial_load == OnPartialLoad::Error {
                     return Err(error.into());
                 }
+                tracing::warn!(successful_chunks=loaded.len(), err=?error, "partial load");
+                am.apply_changes(changes.into_iter().chain(loaded))?;
             }
         }
         if let StringMigration::ConvertToText = options.string_migration {
