@@ -1,5 +1,6 @@
 pub(crate) mod agg;
 mod decoder;
+pub(crate) mod dedit;
 pub(crate) mod dfind;
 pub(crate) mod diter;
 pub(crate) mod dscan;
@@ -13,6 +14,7 @@ use vstd::prelude::Ghost;
 use crate::column::{normalize_range_max, Dx, Iter, IterState};
 use crate::rle::state::WOps;
 use crate::{Codec, Leb128};
+use dedit::{anchor_run, delta_to, run_sum, Ledger};
 use diter::{d_next, d_next_run, d_nth};
 use dscan::{d_scan, d_scan_null};
 use dseek::{d_seek, d_seek_null};
@@ -1233,12 +1235,10 @@ where
     T::Inner: crate::ColumnValueRef<Encoding<C> = crate::RleEncoding<T::Inner, C>>,
 {
     inner: InnerEdit<'a, T, C>,
-    /// realized value of the last item before the cursor, in the column
-    /// being written
-    running: i64,
-    /// what the next non-null original delta owes: the original running
-    /// value minus the one being written
-    adjust: i64,
+    /// the realized value before the cursor in the column being written,
+    /// and what the next non-null original delta owes: the original
+    /// running value minus that one (verified: `dedit::Ledger`)
+    ledger: Ledger,
     /// the values the column can hold once the edit is done
     bound: SpanBound,
     _phantom: PhantomData<T>,
@@ -1255,8 +1255,7 @@ where
         let bound = SpanBound::of::<T, C>(col);
         DeltaEdit {
             inner: col.edit_at(at),
-            running,
-            adjust: 0,
+            ledger: Ledger::new(running, Ghost::assume_new()),
             bound,
             _phantom: PhantomData,
         }
@@ -1296,25 +1295,25 @@ where
         // The fix-up lands on the first non-null item carried across, so
         // it is paid *out of* this move, not before it: settling first
         // and then moving `n` would carry one item too many.
-        while want > 0 && self.adjust != 0 && self.pay_step() {
+        while want > 0 && self.ledger.adjust != 0 && self.pay_step() {
             want -= 1;
         }
         if want == 0 {
             return self;
         }
-        let mut sum = 0i64;
-        let jumped = self.inner.advance_with(want, |v, count| {
-            sum += T::Inner::to_opt(v).unwrap_or(0) * count as i64
-        });
+        // with the debt paid, the items carried keep their values
+        let ledger = &mut self.ledger;
+        let jumped = self
+            .inner
+            .advance_with(want, |v, count| ledger.carry(T::Inner::to_opt(v), count));
         if jumped > 0 {
             // The cursor jumped whole slabs without reading them, so the
             // accumulator lost track. A jump closes any open rebuild, so
             // the column is consistent right here and can be asked — and
             // it has to be asked *now*: the next op may open a rebuild,
             // after which the index no longer describes the column.
-            self.running = Self::prefix_at(self.inner.column(), self.inner.out_pos());
-        } else {
-            self.running += sum;
+            let running = Self::prefix_at(self.inner.column(), self.inner.out_pos());
+            self.ledger.jump(running, Ghost::assume_new());
         }
         self
     }
@@ -1327,8 +1326,8 @@ where
             Some(d) => {
                 // the original delta is relative to the original running
                 // value, which is what the fix-up has yet to close
-                let orig = self.running + self.adjust;
-                Some(T::try_from_i64(orig + d).expect("a stored value is in the domain"))
+                let orig = self.ledger.next_value(d);
+                Some(T::try_from_i64(orig).expect("a stored value is in the domain"))
             }
         }
     }
@@ -1347,21 +1346,20 @@ where
         match value.to_i64() {
             None => {
                 // nulls hold no delta and leave the running value alone
+                self.ledger.insert_nulls(n);
                 self.inner.insert_run(T::Inner::from_opt(None), n);
             }
             Some(v) => {
                 if SpanBound::needed::<T>() {
                     self.bound.add(v as i128);
                 }
-                let r = self.running;
-                self.inner.insert(T::Inner::from_opt(Some(v - r)));
+                // the original values after the cursor are still relative
+                // to where they were; the ledger owes the difference
+                let d = self.ledger.insert_value(v, n);
+                self.inner.insert(T::Inner::from_opt(Some(d)));
                 if n > 1 {
                     self.inner.insert_run(T::Inner::from_opt(Some(0)), n - 1);
                 }
-                // the original values after the cursor are still relative
-                // to where they were; the difference is now owed
-                self.adjust += r - v;
-                self.running = v;
             }
         }
         self
@@ -1383,29 +1381,27 @@ where
             let Some(d) = run.delta else {
                 // a null run holds no delta and leaves the running value
                 // where it is
+                self.ledger.insert_nulls(run.count);
                 self.inner.insert_run(T::Inner::from_opt(None), run.count);
                 continue;
             };
             if SpanBound::needed::<T>() {
                 self.bound.add_run(run.prefix, d, run.count);
             }
-            let r = self.running;
-            let first = run.prefix + d;
-            if first - r == d {
+            // the original values after the cursor are still relative to
+            // where they were; the ledger owes the difference
+            let first = self.ledger.insert_run(run.prefix, d, run.count);
+            if first == d {
                 // already anchored where this run expects: copy verbatim
                 self.inner
                     .insert_run(T::Inner::from_opt(Some(d)), run.count);
             } else {
-                self.inner.insert(T::Inner::from_opt(Some(first - r)));
+                self.inner.insert(T::Inner::from_opt(Some(first)));
                 if run.count > 1 {
                     self.inner
                         .insert_run(T::Inner::from_opt(Some(d)), run.count - 1);
                 }
             }
-            self.running = run.prefix + d * run.count as i64;
-            // the original values after the cursor are still relative to
-            // where they were; the difference is now owed
-            self.adjust += r - self.running;
         }
         self
     }
@@ -1420,14 +1416,14 @@ where
         let sum = std::cell::Cell::new(0i64);
         self.inner.delete_with(
             n,
-            |v, count| sum.set(sum.get() + T::Inner::to_opt(v).unwrap_or(0) * count as i64),
+            |v, count| sum.set(sum.get().wrapping_add(run_sum(T::Inner::to_opt(v), count))),
             // a slab dropped whole is never decoded; its aggregate holds
             // the sum of every delta in it
-            |w| sum.set(sum.get() + w.total),
+            |w| sum.set(sum.get().wrapping_add(w.total)),
         );
         // the deleted items are gone from the output but the ones after
         // them still decode against their sum
-        self.adjust += sum.get();
+        self.ledger.delete(sum.get(), Ghost::assume_new());
         self
     }
 
@@ -1462,8 +1458,8 @@ where
         let d = std::cell::Cell::new(0i64);
         self.inner.delete_with(
             1,
-            |v, _| d.set(d.get() + T::Inner::to_opt(v).unwrap_or(0)),
-            |w| d.set(d.get() + w.total),
+            |v, _| d.set(d.get().wrapping_add(T::Inner::to_opt(v).unwrap_or(0))),
+            |w| d.set(d.get().wrapping_add(w.total)),
         );
         d.get()
     }
@@ -1473,18 +1469,18 @@ where
     fn pay_step(&mut self) -> bool {
         if self.inner.remaining() == 0 {
             // nothing follows, so nothing decodes against the cursor
-            self.adjust = 0;
+            self.ledger.close();
             return false;
         }
         // a null holds no delta: carry it and keep looking
         if T::NULLABLE && self.inner.peek().map(T::Inner::to_opt) == Some(None) {
             self.inner.advance(1);
+            self.ledger.carry(None, 1);
             return true;
         }
-        let d = self.take_delta() + self.adjust;
-        self.running += d;
-        self.adjust = 0;
-        self.inner.insert(T::Inner::from_opt(Some(d)));
+        let d = self.take_delta();
+        let paid = self.ledger.pay(d);
+        self.inner.insert(T::Inner::from_opt(Some(paid)));
         true
     }
 
@@ -1492,7 +1488,7 @@ where
     /// what the edits before it owe, so every realized value after the
     /// cursor is what it was. Unbounded, for a cursor that is closing.
     fn settle(&mut self) {
-        while self.adjust != 0 {
+        while self.ledger.adjust != 0 {
             self.pay_step();
         }
     }
@@ -2072,7 +2068,7 @@ pub(crate) fn deltas_from<I: DeltaInner>(
     values.map(move |v| match v {
         None => I::from_opt(None),
         Some(r) => {
-            let d = r - prev_realized;
+            let d = delta_to(prev_realized, r);
             prev_realized = r;
             I::from_opt(Some(d))
         }
@@ -2137,7 +2133,7 @@ impl<It: Iterator<Item = SpliceItem>, Out: DeltaInner> Iterator for SpliceDeltaI
                     match self.iter.next() {
                         Some(SpliceItem::Value(None)) => return Some((Out::from_opt(None), 1)),
                         Some(SpliceItem::Value(Some(r))) => {
-                            let d = r - self.running;
+                            let d = delta_to(self.running, r);
                             self.running = r;
                             return Some((Out::from_opt(Some(d)), 1));
                         }
@@ -2149,10 +2145,11 @@ impl<It: Iterator<Item = SpliceItem>, Out: DeltaInner> Iterator for SpliceDeltaI
                             delta: Some(d),
                             count,
                         })) => {
-                            let aligned = prefix == self.running;
-                            let first = prefix + d - self.running;
-                            self.running = prefix + d * count as i64;
-                            if aligned {
+                            // (`splice_runs` drops empty runs)
+                            let (first, end) = anchor_run(self.running, prefix, d, count);
+                            self.running = end;
+                            if first == d {
+                                // anchored where the run expects: verbatim
                                 return Some((Out::from_opt(Some(d)), count));
                             }
                             // Peel: fix-up delta for the first item, then
@@ -2182,7 +2179,7 @@ impl<It: Iterator<Item = SpliceItem>, Out: DeltaInner> Iterator for SpliceDeltaI
                 SplicePhase::Boundary => {
                     self.phase = SplicePhase::Done;
                     let next = self.next_val.expect("boundary phase requires next_val");
-                    return Some((Out::from_opt(Some(next - self.running)), 1));
+                    return Some((Out::from_opt(Some(delta_to(self.running, next))), 1));
                 }
                 SplicePhase::Done => return None,
             }

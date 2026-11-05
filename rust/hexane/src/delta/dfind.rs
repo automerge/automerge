@@ -300,6 +300,7 @@ pub(crate) fn d_scan_new<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item
 
 /// The next match in the slab, at or after `f`: the least index there
 /// whose item realizes a value in `[lo, hi]`, or `None` if none does.
+#[verifier::spinoff_prover]
 pub(crate) fn d_scan_next<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
     sc: &mut DScan<X::D>,
     lo: i64,
