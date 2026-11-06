@@ -19,15 +19,22 @@
 //! does the column (`SpanLedger::fits`). Trusted: that the bound it
 //! starts from (the index's root aggregate) holds the column's values,
 //! and, as for the [`Ledger`], that what the cursor reports carrying,
-//! deleting and jumping over is what it did.
+//! deleting and jumping over is what it did. Likewise a [`SpanPlan`] is a
+//! splice's [`SplicePlan`] that keeps the bound, widened by the items it
+//! inserts: where it fits, so does the column the splice leaves, given
+//! what `find_boundaries` reports around it (`bounds_of`). And
+//! [`ToDeltas`] gives `from_values` the deltas realizing its values and a
+//! bound on them, with no trust needed.
 
 #[cfg(verus_keep_ghost)]
-use crate::delta::agg::{psum, reps, vmax, vmin};
-use crate::delta::dedit::Ledger;
+use crate::delta::agg::{lemma_push, psum, reps, vmax, vmin};
+use crate::delta::dedit::{delta_to, Ledger, SplicePhase, SplicePlan};
 #[cfg(verus_keep_ghost)]
-use crate::delta::dedit::{lemma_rest_unchanged, lemma_rz_cat, run_vals, rz};
+use crate::delta::dedit::{
+    lemma_rest_unchanged, lemma_rz_cat, lemma_rz_crop, lemma_rz_one, run_vals, rz, splice_vals,
+};
 #[cfg(verus_keep_ghost)]
-use crate::delta::diter::{lemma_crop, realize};
+use crate::delta::diter::{crop, lemma_crop, lemma_crop_add, realize};
 use vstd::prelude::*;
 
 verus! {
@@ -183,6 +190,7 @@ proof fn lemma_take(orig: Seq<Option<i64>>, k: int, lo: int, hi: int)
     ensures
         in_bound(rz(0, orig.take(k)), lo, hi),
         in_bound(rz(0, orig).skip(k), lo, hi),
+        rz(0, orig).skip(k) == rz(psum(orig.take(k)), orig.skip(k)),
 {
     assert(orig.take(k) + orig.skip(k) =~= orig);
     lemma_rz_cat(0, orig.take(k), orig.skip(k));
@@ -536,6 +544,512 @@ impl SpanLedger {
                 lemma_take(orig, read.len() as int, lo, hi);
                 lemma_cat(rz(0, written), rz(0, read + rest).skip(read.len() as int), lo, hi);
                 lemma_span_ok(written + rest, lo, hi, min, max);
+            }
+        }
+        r
+    }
+}
+
+/// The column a splice leaves: the original deltas before it (`a`), the
+/// deltas the plan emitted (`e`), then the original deltas after the
+/// deleted ones (`tail`), less the nulls and the item the plan wrote
+/// again if one followed them.
+pub(crate) open spec fn spliced(
+    a: Seq<Option<i64>>,
+    e: Seq<Option<i64>>,
+    tail: Seq<Option<i64>>,
+    skip: nat,
+    next_val: Option<i64>,
+) -> Seq<Option<i64>> {
+    a + e + if next_val is Some { tail.skip(skip + 1int) } else { tail }
+}
+
+/// What `find_boundaries` reports of the original deltas `a + x + tail`
+/// around a splice deleting `x` after `a`: the running sum before it
+/// (`prev`), the nulls after the deleted items (`skip`), and the value of
+/// the item after those (`next_val`), or none if only nulls follow.
+pub(crate) open spec fn bounds_of(
+    a: Seq<Option<i64>>,
+    x: Seq<Option<i64>>,
+    tail: Seq<Option<i64>>,
+    prev: int,
+    skip: nat,
+    next_val: Option<i64>,
+) -> bool {
+    &&& crop(psum(a)) == prev
+    &&& match next_val {
+        Some(v) => {
+            &&& tail.len() > skip
+            &&& tail.take(skip as int) == reps(skip, None)
+            &&& tail[skip as int] is Some
+            &&& v == crop(psum(a + x + tail.take(skip + 1int)))
+        },
+        None => forall|i: int| 0 <= i < tail.len() ==> (#[trigger] tail[i]) is None,
+    }
+}
+
+/// Nulls realize no values.
+proof fn lemma_no_values(p: int, ds: Seq<Option<i64>>, lo: int, hi: int)
+    requires
+        forall|i: int| 0 <= i < ds.len() ==> (#[trigger] ds[i]) is None,
+    ensures
+        in_bound(rz(p, ds), lo, hi),
+{
+    assert forall|i: int| 0 <= i < rz(p, ds).len() && (#[trigger] rz(p, ds)[i]) is Some implies lo <= rz(p, ds)[i]->0
+        <= hi by {
+        assert(ds[i] is None);
+    }
+}
+
+/// The deltas a splice ends with land on the value of the item after it.
+proof fn lemma_lands(prev: int, e: Seq<Option<i64>>, wanted: Seq<Option<i64>>, skip: nat, v: i64)
+    requires
+        rz(prev, e) == splice_vals(wanted, skip, Some(v)),
+    ensures
+        crop(prev + psum(e)) == v,
+{
+    let n = e.len() - 1;
+    let vals = splice_vals(wanted, skip, Some(v));
+    assert(vals[vals.len() - 1] == Some(v));
+    assert(rz(prev, e)[n] == realize(prev + psum(e.take(n)), e[n]));
+    assert(e.take(n) =~= e.drop_last());
+    assert(e[n] == e.last());
+}
+
+/// Where the original values, and the values a splice inserted, lie in a
+/// bound, so do those of the column it leaves.
+proof fn lemma_spliced(
+    orig: Seq<Option<i64>>,
+    a: Seq<Option<i64>>,
+    x: Seq<Option<i64>>,
+    tail: Seq<Option<i64>>,
+    e: Seq<Option<i64>>,
+    wanted: Seq<Option<i64>>,
+    prev: i64,
+    skip: nat,
+    next_val: Option<i64>,
+    lo: int,
+    hi: int,
+)
+    requires
+        orig == a + x + tail,
+        bounds_of(a, x, tail, prev as int, skip, next_val),
+        rz(prev as int, e) == splice_vals(wanted, skip, next_val),
+        in_bound(rz(0, orig), lo, hi),
+        in_bound(wanted, lo, hi),
+    ensures
+        in_bound(rz(0, spliced(a, e, tail, skip, next_val)), lo, hi),
+{
+    let r = if next_val is Some { tail.skip(skip + 1int) } else { tail };
+    assert(spliced(a, e, tail, skip, next_val) =~= a + (e + r));
+    // before the splice: the original values
+    assert(orig.take(a.len() as int) =~= a);
+    lemma_take(orig, a.len() as int, lo, hi);
+    lemma_rz_cat(0, a, e + r);
+    lemma_rz_cat(psum(a), e, r);
+    // what the plan emitted: the items' values, then the nulls and the
+    // value after them
+    lemma_crop(prev as int);
+    lemma_rz_crop(psum(a), prev as int, e);
+    lemma_crop_add(psum(a), psum(e));
+    match next_val {
+        Some(v) => {
+            let k = (a.len() + x.len() + skip + 1) as int;
+            assert(a + x + tail.take(skip + 1int) =~= orig.take(k));
+            // the value after them is an original one
+            assert(orig.take(k).drop_last() =~= orig.take(k - 1));
+            assert(orig[k - 1] == tail[skip as int]);
+            assert(rz(0, orig)[k - 1] == realize(psum(orig.take(k - 1)), orig[k - 1]));
+            assert(rz(0, orig)[k - 1] == Some(v));
+            assert(in_bound(seq![Some(v)], lo, hi));
+            crate::delta::dedit::lemma_rz_nulls(0, skip);
+            lemma_no_values(0, reps(skip, None), lo, hi);
+            lemma_cat(wanted, reps(skip, None), lo, hi);
+            lemma_cat(wanted + reps(skip, None), seq![Some(v)], lo, hi);
+            // and after it, the original values, the running sums agreeing
+            lemma_lands(prev as int, e, wanted, skip, v);
+            assert(tail.skip(skip + 1int) =~= orig.skip(k));
+            lemma_take(orig, k, lo, hi);
+            lemma_rz_crop(psum(a) + psum(e), psum(orig.take(k)), r);
+        },
+        None => {
+            lemma_no_values(psum(a) + psum(e), r, lo, hi);
+        },
+    }
+    lemma_cat(rz(psum(a), e), rz(psum(a) + psum(e), r), lo, hi);
+    lemma_cat(rz(0, a), rz(psum(a), e + r), lo, hi);
+}
+
+/// A splice's [`SplicePlan`], and a bound on the values of the column it
+/// writes, as for [`SpanLedger`].
+pub(crate) struct SpanPlan {
+    pub(crate) p: SplicePlan,
+    pub(crate) lo: i128,
+    pub(crate) hi: i128,
+    /// the column's original deltas, all of them
+    #[allow(dead_code)]
+    pub(crate) orig: Ghost<Seq<Option<i64>>>,
+    #[allow(dead_code)]
+    pub(crate) tracking: Ghost<bool>,
+}
+
+impl SpanPlan {
+    pub(crate) open spec fn inv(&self) -> bool {
+        &&& self.p.inv()
+        &&& self.tracking@ && narrow(self.lo as int, self.hi as int) ==> {
+            &&& in_bound(self.p.wanted@, self.lo as int, self.hi as int)
+            &&& in_bound(rz(0, self.orig@), self.lo as int, self.hi as int)
+        }
+    }
+
+    /// A plan (see [`SplicePlan::new`]) for a column of original deltas
+    /// `orig`, whose values `lo..=hi` holds (if `track`).
+    #[allow(unused_variables)] // `track` is for the spec
+    #[inline(always)]
+    pub(crate) fn new(
+        prev: i64,
+        skip: usize,
+        next_val: Option<i64>,
+        lo: i128,
+        hi: i128,
+        track: bool,
+        Ghost(orig): Ghost<Seq<Option<i64>>>,
+    ) -> (s: Self)
+        requires
+            track && narrow(lo as int, hi as int) ==> in_bound(rz(0, orig), lo as int, hi as int),
+        ensures
+            s.inv(),
+            s.p.phase is Values,
+            s.tracking@ == track,
+    {
+        SpanPlan {
+            p: SplicePlan::new(prev, skip, next_val),
+            lo,
+            hi,
+            orig: Ghost(orig),
+            tracking: Ghost(track),
+        }
+    }
+
+    /// See [`SplicePlan::take_pending`].
+    #[inline(always)]
+    pub(crate) fn take_pending(&mut self) -> (r: Option<(Option<i64>, usize)>)
+        requires
+            old(self).inv(),
+            old(self).p.phase is Values,
+        ensures
+            final(self).inv(),
+            final(self).tracking == old(self).tracking,
+    {
+        self.p.take_pending()
+    }
+
+    /// The next item is the value `v` (see [`SplicePlan::value`]); it
+    /// widens the bound.
+    #[inline(always)]
+    pub(crate) fn value(&mut self, v: Option<i64>, track: bool) -> (r: (Option<i64>, usize))
+        requires
+            old(self).inv(),
+            old(self).p.phase is Values,
+            old(self).p.pending is None,
+            track == old(self).tracking@,
+        ensures
+            final(self).inv(),
+            final(self).tracking == old(self).tracking,
+    {
+        let ghost (w0, lo0, hi0) = (self.p.wanted@, self.lo as int, self.hi as int);
+        let r = self.p.value(v);
+        if track {
+            if let Some(x) = v {
+                if (x as i128) < self.lo {
+                    self.lo = x as i128;
+                }
+                if (x as i128) > self.hi {
+                    self.hi = x as i128;
+                }
+            }
+            proof {
+                let (lo, hi) = (self.lo as int, self.hi as int);
+                if narrow(lo, hi) {
+                    assert(narrow(lo0, hi0));
+                    lemma_widen(w0, lo0, hi0, lo, hi);
+                    lemma_widen(rz(0, self.orig@), lo0, hi0, lo, hi);
+                    assert(w0.push(v) =~= w0 + seq![v]);
+                    lemma_cat(w0, seq![v], lo, hi);
+                }
+            }
+        }
+        r
+    }
+
+    /// The next item is a run (see [`SplicePlan::run`]); its first and
+    /// last values widen the bound.
+    #[inline(always)]
+    pub(crate) fn run(&mut self, prefix: i64, d: Option<i64>, count: usize, track: bool) -> (r: (Option<i64>, usize))
+        requires
+            old(self).inv(),
+            old(self).p.phase is Values,
+            old(self).p.pending is None,
+            count >= 1,
+            track == old(self).tracking@,
+        ensures
+            final(self).inv(),
+            final(self).tracking == old(self).tracking,
+    {
+        let ghost (w0, lo0, hi0) = (self.p.wanted@, self.lo as int, self.hi as int);
+        let r = self.p.run(prefix, d, count);
+        if track {
+            if let Some(x) = d {
+                let p = prefix as i128;
+                let a = p + x as i128;
+                proof {
+                    assert(-0x8000_0000_0000_0000int * 0xffff_ffff_ffff_ffffint <= (x as int) * (count as int)
+                        <= 0x7fff_ffff_ffff_ffffint * 0xffff_ffff_ffff_ffffint) by (nonlinear_arith)
+                        requires
+                            i64::MIN <= x <= i64::MAX,
+                            0 <= count <= 0xffff_ffff_ffff_ffffint,
+                    ;
+                }
+                let b = p + (x as i128) * (count as i128);
+                if a < self.lo {
+                    self.lo = a;
+                }
+                if a > self.hi {
+                    self.hi = a;
+                }
+                if b < self.lo {
+                    self.lo = b;
+                }
+                if b > self.hi {
+                    self.hi = b;
+                }
+                proof {
+                    let (lo, hi) = (self.lo as int, self.hi as int);
+                    if narrow(lo, hi) {
+                        assert(narrow(lo0, hi0));
+                        lemma_widen(w0, lo0, hi0, lo, hi);
+                        lemma_widen(rz(0, self.orig@), lo0, hi0, lo, hi);
+                        lemma_run(prefix as int, x, count as nat, lo, hi);
+                        lemma_cat(w0, run_vals(prefix as int, x, count as nat), lo, hi);
+                    }
+                }
+            } else {
+                proof {
+                    let (lo, hi) = (self.lo as int, self.hi as int);
+                    if narrow(lo, hi) {
+                        crate::delta::dedit::lemma_rz_nulls(0, count as nat);
+                        lemma_no_values(0, reps(count as nat, None), lo, hi);
+                        lemma_cat(w0, reps(count as nat, None), lo, hi);
+                    }
+                }
+            }
+        }
+        r
+    }
+
+    /// See [`SplicePlan::end_values`].
+    #[inline(always)]
+    pub(crate) fn end_values(&mut self)
+        requires
+            old(self).inv(),
+            old(self).p.phase is Values,
+            old(self).p.pending is None,
+        ensures
+            final(self).inv(),
+            final(self).tracking == old(self).tracking,
+    {
+        self.p.end_values()
+    }
+
+    /// See [`SplicePlan::nulls`].
+    #[inline(always)]
+    pub(crate) fn nulls(&mut self) -> (r: Option<(Option<i64>, usize)>)
+        requires
+            old(self).inv(),
+            old(self).p.phase is NullRun,
+        ensures
+            final(self).inv(),
+            final(self).tracking == old(self).tracking,
+    {
+        self.p.nulls()
+    }
+
+    /// See [`SplicePlan::boundary`].
+    #[inline(always)]
+    pub(crate) fn boundary(&mut self) -> (r: (Option<i64>, usize))
+        requires
+            old(self).inv(),
+            old(self).p.phase is Boundary,
+        ensures
+            final(self).inv(),
+            final(self).tracking == old(self).tracking,
+    {
+        self.p.boundary()
+    }
+
+    /// Whether the bound shows the values lie in `min..=max`, within a
+    /// range less than 2^63 wide, once the plan is done; where it does, so
+    /// do those of the column the splice leaves.
+    #[inline(always)]
+    pub(crate) fn fits(&self, min: i64, max: i64) -> (r: bool)
+        requires
+            self.inv(),
+            self.tracking@,
+        ensures
+            r ==> forall|a: Seq<Option<i64>>, x: Seq<Option<i64>>, tail: Seq<Option<i64>>|
+                #![trigger bounds_of(a, x, tail, self.p.prev@, self.p.skip as nat, self.p.next_val)]
+                self.orig@ == a + x + tail && bounds_of(a, x, tail, self.p.prev@, self.p.skip as nat, self.p.next_val)
+                    ==> span_ok(
+                    spliced(a, self.p.emitted@, tail, self.p.skip as nat, self.p.next_val),
+                    min as int,
+                    max as int,
+                ),
+    {
+        // a plan cut short has written only some of the deltas
+        match self.p.phase {
+            SplicePhase::Done => {},
+            _ => return false,
+        }
+        let r = self.lo > self.hi || (self.lo >= min as i128 && self.hi <= max as i128 && self.hi - self.lo
+            <= i64::MAX as i128);
+        proof {
+            if r {
+                let (lo, hi) = (self.lo as int, self.hi as int);
+                let (e, wanted, skip, next_val) = (self.p.emitted@, self.p.wanted@, self.p.skip as nat, self.p.next_val);
+                assert forall|a: Seq<Option<i64>>, x: Seq<Option<i64>>, tail: Seq<Option<i64>>|
+                    #![trigger bounds_of(a, x, tail, self.p.prev@, skip, next_val)]
+                    self.orig@ == a + x + tail && bounds_of(a, x, tail, self.p.prev@, skip, next_val)
+                    implies span_ok(spliced(a, e, tail, skip, next_val), min as int, max as int) by {
+                    let prev = crop(self.p.prev@);
+                    lemma_crop(self.p.prev@);
+                    lemma_spliced(self.orig@, a, x, tail, e, wanted, prev, skip, next_val, lo, hi);
+                    lemma_span_ok(spliced(a, e, tail, skip, next_val), lo, hi, min, max);
+                }
+            }
+        }
+        r
+    }
+}
+
+/// Values turned into the deltas that realize them, one at a time
+/// (`from_values`), with a bound on the values, as for [`SpanLedger`]
+/// (`i64`: it holds only values).
+pub(crate) struct ToDeltas {
+    pub(crate) running: i64,
+    pub(crate) lo: i64,
+    pub(crate) hi: i64,
+    /// the values taken, and the deltas given for them
+    #[allow(dead_code)]
+    pub(crate) vals: Ghost<Seq<Option<i64>>>,
+    #[allow(dead_code)]
+    pub(crate) ds: Ghost<Seq<Option<i64>>>,
+    #[allow(dead_code)]
+    pub(crate) tracking: Ghost<bool>,
+}
+
+impl ToDeltas {
+    pub(crate) open spec fn inv(&self) -> bool {
+        &&& self.running == crop(psum(self.ds@))
+        &&& rz(0, self.ds@) == self.vals@
+        &&& self.tracking@ ==> in_bound(self.vals@, self.lo as int, self.hi as int)
+    }
+
+    /// No values yet; keep the bound if `track`.
+    #[allow(unused_variables)] // `track` is for the spec
+    #[inline(always)]
+    pub(crate) fn new(track: bool) -> (t: Self)
+        ensures
+            t.inv(),
+            t.tracking@ == track,
+            t.vals@.len() == 0,
+    {
+        proof {
+            lemma_crop(0);
+            assert(rz(0, Seq::<Option<i64>>::empty()) =~= Seq::<Option<i64>>::empty());
+        }
+        ToDeltas {
+            running: 0,
+            lo: i64::MAX,
+            hi: i64::MIN,
+            vals: Ghost(Seq::empty()),
+            ds: Ghost(Seq::empty()),
+            tracking: Ghost(track),
+        }
+    }
+
+    /// The delta for the next value, `v` (a null for a null).
+    #[inline(always)]
+    pub(crate) fn next(&mut self, v: Option<i64>, track: bool) -> (d: Option<i64>)
+        requires
+            old(self).inv(),
+            track == old(self).tracking@,
+        ensures
+            final(self).inv(),
+            final(self).tracking == old(self).tracking,
+            final(self).vals@ == old(self).vals@.push(v),
+            final(self).ds@ == old(self).ds@.push(d),
+    {
+        let ghost (ds, vals, lo0, hi0) = (self.ds@, self.vals@, self.lo as int, self.hi as int);
+        let d = match v {
+            None => None,
+            Some(x) => {
+                let d = delta_to(self.running, x);
+                self.running = x;
+                if track {
+                    if x < self.lo {
+                        self.lo = x;
+                    }
+                    if x > self.hi {
+                        self.hi = x;
+                    }
+                }
+                Some(d)
+            },
+        };
+        proof {
+            let one = seq![d];
+            assert(ds.push(d) =~= ds + one);
+            lemma_rz_cat(0, ds, one);
+            lemma_push(ds, d);
+            match d {
+                Some(x) => {
+                    lemma_rz_one(psum(ds), x);
+                    lemma_crop_add(psum(ds), x as int);
+                },
+                None => {
+                    crate::delta::dedit::lemma_rz_nulls(psum(ds), 1);
+                    assert(one =~= reps(1, None));
+                },
+            }
+            assert(rz(0, ds.push(d)) =~= vals.push(v));
+            self.ds = Ghost(ds.push(d));
+            self.vals = Ghost(vals.push(v));
+            if track {
+                let (lo, hi) = (self.lo as int, self.hi as int);
+                lemma_widen(vals, lo0, hi0, lo, hi);
+                assert(vals.push(v) =~= vals + seq![v]);
+                lemma_cat(vals, seq![v], lo, hi);
+            }
+        }
+        d
+    }
+
+    /// Whether the bound shows the values lie in `min..=max`, within a
+    /// range less than 2^63 wide; where it does, so do those the deltas
+    /// given realize.
+    #[inline(always)]
+    pub(crate) fn fits(&self, min: i64, max: i64) -> (r: bool)
+        requires
+            self.inv(),
+            self.tracking@,
+        ensures
+            r ==> span_ok(self.ds@, min as int, max as int),
+    {
+        let r = self.lo > self.hi || (self.lo >= min && self.hi <= max && (self.hi as i128) - (self.lo as i128)
+            <= i64::MAX as i128);
+        proof {
+            if r {
+                lemma_span_ok(self.ds@, self.lo as int, self.hi as int, min, max);
             }
         }
         r

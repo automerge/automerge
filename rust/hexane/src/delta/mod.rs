@@ -15,8 +15,8 @@ use vstd::prelude::Ghost;
 use crate::column::{normalize_range_max, Dx, Iter, IterState};
 use crate::rle::state::WOps;
 use crate::{Codec, Leb128};
-use dbound::SpanLedger;
-use dedit::{d_boundaries, delta_to, run_sum, SplicePhase, SplicePlan};
+use dbound::{SpanLedger, SpanPlan, ToDeltas};
+use dedit::{d_boundaries, run_sum, SplicePhase};
 use diter::{d_next, d_next_run, d_nth};
 use dscan::{d_scan, d_scan_null};
 use dseek::{d_seek, d_seek_null};
@@ -718,22 +718,18 @@ impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
     pub fn from_values(values: Vec<T>) -> Self {
         let inner: Vec<Option<i64>> = values.into_iter().map(|t| t.to_i64()).collect();
         let mut col = Column::new();
-        // the values' bound, taken as they go past
-        let (mut lo, mut hi) = (i64::MAX, i64::MIN);
-        let values = inner.iter().map(|v| {
-            if let (true, Some(v)) = (SpanBound::needed::<T>(), *v) {
-                lo = lo.min(v);
-                hi = hi.max(v);
-            }
-            *v
-        });
-        col.splice_inner(0, 0, deltas_from::<T::Inner>(values, 0).map(|v| (v, 1)));
-        let mut bound = SpanBound::none();
-        if lo <= hi {
-            bound.add(lo as i128);
-            bound.add(hi as i128);
-        }
-        check_span::<T, C>(&col, || bound.fits::<T>());
+        // verified (`dbound::ToDeltas`): the deltas realize the values, and
+        // the bound taken as they go past holds them
+        let track = SpanBound::needed::<T>();
+        let mut deltas = ToDeltas::new(track);
+        col.splice_inner(
+            0,
+            0,
+            inner
+                .iter()
+                .map(|&v| (T::Inner::from_opt(deltas.next(v, track)), 1)),
+        );
+        check_span::<T, C>(&col, || deltas.fits(T::MIN_I64, T::MAX_I64));
         Self {
             col,
             _phantom: PhantomData,
@@ -1136,26 +1132,34 @@ impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
 
         // a deletion alone can't widen the values' span
         let inserts = items.peek().is_some();
-        let mut bound = if inserts {
+        let bound = if inserts {
             SpanBound::of::<T, C>(&self.col)
         } else {
             SpanBound::none()
         };
-        let items = items.inspect(|item| {
-            if SpanBound::needed::<T>() {
-                bound.add_item(item)
-            }
-        });
         let (prev, skip, next_val) = self.find_boundaries(index, del);
         // When a boundary non-null follows the splice, replace `del` original
         // items + `skip` preserved nulls + 1 boundary, and inline the bulk
         // null run + a recomputed boundary delta to keep the realized value
         // of `next_val` intact.
         let total_del = del + if next_val.is_some() { skip + 1 } else { 0 };
-        let iter = SpliceDeltaIter::<_, T::Inner>::new(items, prev, skip, next_val);
-        self.col.splice_inner(index, total_del, iter);
+        let mut iter = SpliceDeltaIter::<_, T>::new(
+            items,
+            SpanPlan::new(
+                prev,
+                skip,
+                next_val,
+                bound.lo,
+                bound.hi,
+                SpanBound::needed::<T>(),
+                Ghost::assume_new(),
+            ),
+        );
+        self.col.splice_inner(index, total_del, &mut iter);
         if inserts {
-            check_span::<T, C>(&self.col, || bound.fits::<T>());
+            // verified (`SpanPlan::fits`): where the bound, widened by the
+            // items, fits, so do the column's values
+            check_span::<T, C>(&self.col, || iter.plan.fits(T::MIN_I64, T::MAX_I64));
         }
     }
 
@@ -1640,12 +1644,12 @@ fn check_span<T: DeltaValue, C: Codec>(col: &InnerColumn<T, C>, fits: impl FnOnc
     }
 }
 
-/// A bound on the values of a delta column being edited: those it held
-/// before (its index's root aggregate, exact while they span less than
-/// 2^63, as they did), and those the edit inserts. Every value after the
-/// edit is one or the other. The root aggregate after an edit is no
-/// bound: the index merges with wrapping arithmetic, so where values that
-/// span 2^63 or more meet, its sums wrap.
+/// A bound on a delta column's values: where an edit starts, those it
+/// holds (its index's root aggregate, exact while they span less than
+/// 2^63, as they do). The edit's verified plan widens it by each value it
+/// writes (`dbound::SpanLedger`, `dbound::SpanPlan`). The root aggregate
+/// after an edit is no bound: the index merges with wrapping arithmetic,
+/// so where values that span 2^63 or more meet, its sums wrap.
 #[derive(Clone, Copy)]
 struct SpanBound {
     lo: i128,
@@ -1679,41 +1683,6 @@ impl SpanBound {
             lo: agg.min_offset as i128,
             hi: agg.max_offset as i128,
         }
-    }
-
-    fn add(&mut self, v: i128) {
-        self.lo = self.lo.min(v);
-        self.hi = self.hi.max(v);
-    }
-
-    /// A run of `count` deltas `d` after `prefix`: its values lie between
-    /// its first and last.
-    fn add_run(&mut self, prefix: i64, d: i64, count: usize) {
-        let p = prefix as i128;
-        self.add(p + d as i128);
-        self.add(p.saturating_add((d as i128).saturating_mul(count as i128)));
-    }
-
-    fn add_item(&mut self, item: &SpliceItem) {
-        match *item {
-            SpliceItem::Value(Some(v)) => self.add(v as i128),
-            SpliceItem::Run(DeltaRun {
-                prefix,
-                delta: Some(d),
-                count,
-            }) if count > 0 => self.add_run(prefix, d, count),
-            _ => {}
-        }
-    }
-
-    /// The values lie in `T`'s domain, within a range less than 2^63
-    /// wide.
-    fn fits<T: DeltaValue>(&self) -> bool {
-        // the domain first: the difference of bounds in it can't overflow
-        self.lo > self.hi
-            || (self.lo >= T::MIN_I64 as i128
-                && self.hi <= T::MAX_I64 as i128
-                && self.hi - self.lo <= i64::MAX as i128)
     }
 }
 
@@ -2083,23 +2052,6 @@ impl<'a, T: DeltaValue, C: Codec> Clone for DeltaIter<'a, T, C> {
 
 // ── Free helpers ────────────────────────────────────────────────────────────
 
-/// Iterator that maps realized values to their delta encoding relative to
-/// a running `prev_realized`.  Null values pass through as `None` and leave
-/// `prev_realized` untouched.  No allocation.
-pub(crate) fn deltas_from<I: DeltaInner>(
-    values: impl Iterator<Item = Option<i64>>,
-    mut prev_realized: i64,
-) -> impl Iterator<Item = I> {
-    values.map(move |v| match v {
-        None => I::from_opt(None),
-        Some(r) => {
-            let d = delta_to(prev_realized, r);
-            prev_realized = r;
-            I::from_opt(Some(d))
-        }
-    })
-}
-
 /// One inserted element of a delta splice: a lone realized value
 /// (from `splice`) or a whole [`DeltaRun`] (from `splice_runs`).
 enum SpliceItem {
@@ -2113,42 +2065,45 @@ enum SpliceItem {
 /// pair; a mismatched prefix peels the run's first item into a fix-up
 /// delta.  After the input, emits the preserved null run and a
 /// recomputed boundary delta.
-struct SpliceDeltaIter<It, Out> {
+struct SpliceDeltaIter<It, T> {
     iter: It,
     /// verified (`dedit::SplicePlan`): the deltas realize the items'
     /// values, then the nulls after the deleted items and the value after
-    /// them
-    plan: SplicePlan,
-    _out: PhantomData<Out>,
+    /// them; and (`dbound::SpanPlan`) the items widen a bound on the
+    /// column's values
+    plan: SpanPlan,
+    _out: PhantomData<T>,
 }
 
-impl<It: Iterator<Item = SpliceItem>, Out: DeltaInner> SpliceDeltaIter<It, Out> {
-    fn new(iter: It, prev: i64, skip: usize, next_val: Option<i64>) -> Self {
+impl<It: Iterator<Item = SpliceItem>, T: DeltaValue> SpliceDeltaIter<It, T> {
+    fn new(iter: It, plan: SpanPlan) -> Self {
         Self {
             iter,
-            plan: SplicePlan::new(prev, skip, next_val),
+            plan,
             _out: PhantomData,
         }
     }
 }
 
-impl<It: Iterator<Item = SpliceItem>, Out: DeltaInner> Iterator for SpliceDeltaIter<It, Out> {
-    type Item = (Out, usize);
+impl<It: Iterator<Item = SpliceItem>, T: DeltaValue> Iterator for SpliceDeltaIter<It, T> {
+    type Item = (T::Inner, usize);
 
     fn next(&mut self) -> Option<Self::Item> {
+        // the bound matters only where the values could span 2^63
+        let track = SpanBound::needed::<T>();
         let (d, n) = loop {
-            match self.plan.phase {
+            match self.plan.p.phase {
                 SplicePhase::Values => {
                     if let Some(out) = self.plan.take_pending() {
                         break out;
                     }
                     match self.iter.next() {
-                        Some(SpliceItem::Value(v)) => break self.plan.value(v),
+                        Some(SpliceItem::Value(v)) => break self.plan.value(v, track),
                         Some(SpliceItem::Run(DeltaRun {
                             prefix,
                             delta,
                             count,
-                        })) => break self.plan.run(prefix, delta, count),
+                        })) => break self.plan.run(prefix, delta, count, track),
                         None => self.plan.end_values(),
                     }
                 }
@@ -2161,7 +2116,7 @@ impl<It: Iterator<Item = SpliceItem>, Out: DeltaInner> Iterator for SpliceDeltaI
                 SplicePhase::Done => return None,
             }
         };
-        Some((Out::from_opt(d), n))
+        Some((T::Inner::from_opt(d), n))
     }
 }
 

@@ -452,12 +452,11 @@ first and values outside the domain last.
   than 2^63 wide, and then every running sum fits `i64`. Its shortcut
   skips the walk where a bound on the values already fits: the values
   the column held (the index's root aggregate), widened by each value
-  the edit writes. For the edit cursor that is proved too: the cursor
-  keeps the bound with its verified arithmetic (`SpanLedger`), and every
-  value the column holds after the edit lies in it, so where it fits the
-  walk would pass, given that the root aggregate bounds the values the
-  column held. For `splice` and `from_values`, which keep a bound of
-  their own, it is not.
+  the edit writes. That is proved too: the edit cursor, `splice` and
+  `from_values` keep the bound with their verified arithmetic
+  (`SpanLedger`, `SpanPlan`, `ToDeltas`), and every value the column
+  holds afterwards lies in it, so where it fits the walk would pass,
+  given that the root aggregate bounds the values the column held.
 * Where a precondition of the verified code cannot be shown from the
   specifications (a slab of `i64::MAX` bytes or more, or a column or
   encoder of nearly `usize::MAX` items), the code checks it and panics
