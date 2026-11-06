@@ -672,6 +672,90 @@ fn update_spans_diffs_marks() {
     );
 }
 
+/// Alternating bold and link runs; `href` picks each link's destination.
+fn marked_runs(runs: usize, href: impl Fn(usize) -> String) -> Vec<Span> {
+    (0..runs)
+        .map(|i| Span::Text {
+            text: format!("run {i} "),
+            marks: if i % 3 == 2 {
+                None
+            } else if i % 3 == 0 {
+                markset(vec![("bold", true.into())])
+            } else {
+                Some(Arc::new(
+                    [("link".to_string(), ScalarValue::from(href(i)))]
+                        .into_iter()
+                        .collect(),
+                ))
+            },
+        })
+        .collect()
+}
+
+#[test]
+fn update_spans_with_many_marks_keeps_removes_and_changes_each_one() {
+    let mut doc = automerge::AutoCommit::new();
+    let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+    let runs = 300;
+    doc.update_spans(
+        &text,
+        UpdateSpansConfig::default(),
+        marked_runs(runs, |i| format!("https://example.org/{i}")),
+    )
+    .unwrap();
+
+    // Every fourth link changes its value over the same range; every fifth
+    // bold run loses its mark; the rest are unchanged.
+    let mut next = marked_runs(runs, |i| {
+        if i % 4 == 1 {
+            format!("https://example.com/{i}")
+        } else {
+            format!("https://example.org/{i}")
+        }
+    });
+    for (i, span) in next.iter_mut().enumerate() {
+        if i % 3 == 0 && i % 5 == 0 {
+            if let Span::Text { marks, .. } = span {
+                *marks = None;
+            }
+        }
+    }
+    doc.update_spans(&text, UpdateSpansConfig::default(), next.clone())
+        .unwrap();
+
+    // Adjacent unmarked runs come back as one span.
+    let mut expected: Vec<Span> = Vec::new();
+    for span in next {
+        match (expected.last_mut(), span) {
+            (
+                Some(Span::Text {
+                    text: previous,
+                    marks: None,
+                }),
+                Span::Text { text, marks: None },
+            ) => previous.push_str(&text),
+            (_, span) => expected.push(span),
+        }
+    }
+    assert_eq!(doc.spans(&text).unwrap().collect::<Vec<_>>(), expected);
+}
+
+#[test]
+fn update_spans_with_unchanged_marks_writes_nothing() {
+    let mut doc = automerge::AutoCommit::new();
+    let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+    let spans = marked_runs(60, |i| format!("https://example.org/{i}"));
+    doc.update_spans(&text, UpdateSpansConfig::default(), spans.clone())
+        .unwrap();
+    doc.commit();
+    let heads = doc.get_heads();
+
+    doc.update_spans(&text, UpdateSpansConfig::default(), spans)
+        .unwrap();
+    doc.commit();
+    assert_eq!(doc.get_heads(), heads);
+}
+
 #[test]
 fn update_spans_uses_expand_config() {
     let mut doc = automerge::AutoCommit::new();
