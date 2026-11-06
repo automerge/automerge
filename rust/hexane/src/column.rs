@@ -107,6 +107,32 @@ pub trait WeightFn<T: ColumnValueRef, C: Codec = Leb128>: Sealed {
         count: usize,
         value: T::Get<'_>,
     ) -> Result<(), PackError>;
+
+    /// `true` when the weights of a column's slabs can overflow together
+    /// where none of them does on its own (prefix sums), so that every
+    /// load checks [`check_total`](Self::check_total), and every edit
+    /// [`check_splice`](Self::check_splice), before the weights reach the
+    /// index.
+    const CHECKS_TOTAL: bool = false;
+
+    /// Check that one column of `len` items can hold slabs of weights
+    /// `ws`. The default accepts any.
+    #[inline(always)]
+    fn check_total(_ws: &[Self::Weight], _len: usize) -> Result<(), PackError> {
+        Ok(())
+    }
+
+    /// Check that `index` can take `new` in place of the weights of slabs
+    /// `old`, leaving a column of `len` items; panic if not. The default
+    /// accepts any.
+    #[inline(always)]
+    fn check_splice<Idx: ColumnIndex<Self::Weight>>(
+        _index: &Idx,
+        _old: Range<usize>,
+        _new: &[Self::Weight],
+        _len: usize,
+    ) {
+    }
 }
 
 /// Default weight strategy: BIT stores only slab lengths.
@@ -1212,7 +1238,15 @@ where
             debug_assert!(s.segments <= max_segments);
         }
         let total_len: usize = slabs.iter().map(|s| s.len).sum();
-        let index = Idx::from_weights(slabs.iter().map(WF::compute));
+        let index = if WF::CHECKS_TOTAL {
+            let weights: Vec<WF::Weight> = slabs.iter().map(WF::compute).collect();
+            if let Err(e) = WF::check_total(&weights, total_len) {
+                panic!("from_slabs: {e}");
+            }
+            Idx::from_weights(weights)
+        } else {
+            Idx::from_weights(slabs.iter().map(WF::compute))
+        };
         Self {
             slabs,
             index,
@@ -1957,6 +1991,9 @@ where
         };
         for w in &weights {
             check(w)?;
+        }
+        if WF::CHECKS_TOTAL {
+            WF::check_total(&weights, total_len)?;
         }
         let index = Idx::from_weights(weights);
         Ok(Column {

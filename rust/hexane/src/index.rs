@@ -56,6 +56,12 @@ pub trait ColumnIndex<W>: Sealed + Default {
     /// insert `new_weights` in their place.  Used for structural
     /// changes (overflow, cross-slab drain, merges).
     fn splice<I: IntoIterator<Item = W>>(&mut self, range: Range<usize>, new_weights: I);
+
+    /// Slab `slab_idx`'s weight.
+    fn weight(&self, slab_idx: usize) -> W;
+
+    /// Every slab's weight, merged.
+    fn total(&self) -> W;
 }
 
 // ── BitIndex: Fenwick-backed ───────────────────────────────────────────────
@@ -117,6 +123,21 @@ impl<W: SlabWeight> ColumnIndex<W> for BitIndex<W> {
         self.weights.splice(range, new_weights);
         self.bit = rebuild_bit(&self.weights, |w| w.clone());
     }
+
+    fn weight(&self, slab_idx: usize) -> W {
+        self.weights[slab_idx].clone()
+    }
+
+    fn total(&self) -> W {
+        // BIT prefix query over every weight
+        let mut acc = W::default();
+        let mut i = self.weights.len();
+        while i > 0 {
+            acc += self.bit[i].clone();
+            i -= i & i.wrapping_neg();
+        }
+        acc
+    }
 }
 
 // ── SlabBTree: B-tree-backed ───────────────────────────────────────────────
@@ -149,5 +170,13 @@ impl<A: SlabAggregate> ColumnIndex<A> for SlabBTree<A> {
 
     fn splice<I: IntoIterator<Item = A>>(&mut self, range: Range<usize>, new_weights: I) {
         SlabBTree::splice(self, range, new_weights);
+    }
+
+    fn weight(&self, slab_idx: usize) -> A {
+        self.slab_agg(slab_idx)
+    }
+
+    fn total(&self) -> A {
+        self.root_agg()
     }
 }
