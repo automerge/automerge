@@ -554,6 +554,8 @@ impl<'a, C: Codec> BoolDecoder<'a, C> {
             self.value = !self.value;
             self.remaining = count;
         } else {
+            // a count that doesn't decode (malformed bytes) ends the values
+            self.byte_pos = self.data.len();
             self.remaining = 0;
         }
     }
