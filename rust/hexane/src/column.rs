@@ -1667,6 +1667,10 @@ where
         // Segments the direct path would decode + re-encode.
         let mut retained_segs = 0usize;
         for r in ranges {
+            // a splice that only deletes copies nothing
+            if r.is_empty() {
+                continue;
+            }
             let sa = slab_of(r.start);
             let sb = slab_of(r.end - 1);
             if sa == sb {
