@@ -353,7 +353,7 @@ impl<T: ColumnValueRef, C: Codec> Default for Iter<'_, T, C> {
             col: None,
             core: ICore {
                 slab_idx: 0,
-                decoder: T::Encoding::<C>::decoder(&[]),
+                decoder: T::Encoding::<C>::slab_decoder(&[], crate::sealed::Trusted(())),
                 items_left: 0,
                 slab_remaining: 0,
                 pos: 0,
@@ -1273,7 +1273,7 @@ where
                 if s.len == 0 {
                     return true;
                 }
-                let mut dec = T::Encoding::<C>::decoder(&s.data);
+                let mut dec = T::Encoding::<C>::slab_decoder(&s.data, crate::sealed::Trusted(()));
                 match dec.next_run() {
                     Some(run) => {
                         run.count == s.len && T::eq(run.value, value) && dec.next_run().is_none()
@@ -1304,7 +1304,7 @@ where
     pub fn dump_slabs(&self) {
         let mut offset = 0;
         for (i, s) in self.slabs.iter().enumerate() {
-            let mut dec = T::Encoding::<C>::decoder(&s.data);
+            let mut dec = T::Encoding::<C>::slab_decoder(&s.data, crate::sealed::Trusted(()));
             let first = dec.next_run();
             let last = T::Encoding::<C>::last_run(s);
             log!(

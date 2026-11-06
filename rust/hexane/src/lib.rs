@@ -172,7 +172,10 @@ pub type Decoder<'a, T, C = Leb128> =
 /// The bytes must be a valid encoding of `T` values, as an encoder or
 /// [`Column::save`] writes: on other bytes the decoder may panic or yield
 /// nonsense. For bytes from outside the program, use [`try_decoder`],
-/// which checks them first.
+/// which checks them first. For a string column (`String` or
+/// `Option<String>`), `decoder` checks them too, since a string handed out
+/// must be UTF-8, and panics on bytes that are not a valid column of
+/// strings.
 ///
 /// ```no_run
 /// # let bytes: Vec<u8> = vec![0];
@@ -185,7 +188,8 @@ pub fn decoder<'a, T: ColumnValueRef>(data: &'a [u8]) -> Decoder<'a, T> {
 }
 
 /// Construct a streaming [`Decoder`] over raw column bytes in codec `C`,
-/// which must be a valid encoding (see [`decoder`]).
+/// which must be a valid encoding (see [`decoder`]). A string column's
+/// bytes are checked first, as for [`decoder`].
 pub fn decoder_in<'a, T: ColumnValueRef, C: Codec>(data: &'a [u8]) -> Decoder<'a, T, C> {
     <T::Encoding<C> as ColumnEncoding>::decoder(data)
 }
@@ -210,7 +214,11 @@ pub fn try_decoder_in<'a, T: ColumnValueRef, C: Codec>(
     data: &'a [u8],
 ) -> Result<Decoder<'a, T, C>, PackError> {
     <T::Encoding<C> as ColumnEncoding>::validate_encoding(data)?;
-    Ok(decoder_in::<T, C>(data))
+    // checked: no need for `decoder`'s own check of strings
+    Ok(<T::Encoding<C> as ColumnEncoding>::slab_decoder(
+        data,
+        crate::sealed::Trusted(()),
+    ))
 }
 pub use bool::BoolLoadIter;
 pub use btree::SlabAggregate;
@@ -235,6 +243,12 @@ mod sealed {
     vstd::prelude::verus! {
     pub trait Sealed {}
     } // verus!
+
+    /// Proof that the caller is this crate, decoding a slab of its own
+    /// (see `ColumnEncoding::slab_decoder`). Other crates can't name or
+    /// make one.
+    #[derive(Clone, Copy)]
+    pub struct Trusted(pub(crate) ());
 }
 
 #[cfg(test)]
@@ -443,6 +457,13 @@ pub trait RleValue: ColumnValueRef {
         Self::try_unpack::<C>(data).unwrap()
     }
 
+    /// Whether [`unpack`](Self::unpack) relies on its bytes having been
+    /// checked for memory safety, as `String`'s does (it skips the UTF-8
+    /// check). A decoder over bytes from outside a column then checks
+    /// them first.
+    #[doc(hidden)]
+    const UNPACK_TRUSTS_INPUT: bool = false;
+
     /// Construct the `Get` value for a null entry.
     ///
     /// # Panics
@@ -506,6 +527,7 @@ impl<T: RleValue> AsColumnRef<Option<T>> for Option<T> {
 /// ```
 impl<T: RleValue> RleValue for Option<T> {
     const NULLABLE: bool = true;
+    const UNPACK_TRUSTS_INPUT: bool = T::UNPACK_TRUSTS_INPUT;
 
     fn value_len<C: Codec>(data: &[u8]) -> Option<usize> {
         not_nested::<T>();
@@ -811,6 +833,8 @@ impl ColumnValueRef for String {
 }
 
 impl RleValue for String {
+    const UNPACK_TRUSTS_INPUT: bool = true;
+
     fn value_len<C: Codec>(data: &[u8]) -> Option<usize> {
         Vec::<u8>::value_len::<C>(data)
     }

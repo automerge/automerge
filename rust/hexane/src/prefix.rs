@@ -130,7 +130,7 @@ pub trait PrefixValue: ColumnValueRef {
     /// Sum all values in a slab.  Walks the encoded runs directly for
     /// efficiency — O(segments) rather than O(items).
     fn slab_sum<C: Codec>(slab: &Slab<TailOf<Self, C>>) -> Self::Prefix {
-        let mut decoder = Self::Encoding::<C>::decoder(&slab.data);
+        let mut decoder = Self::Encoding::<C>::slab_decoder(&slab.data, crate::sealed::Trusted(()));
         let mut acc = Self::Prefix::default();
         while let Some(run) = decoder.next_run() {
             Self::accumulate_run(&mut acc, &run);
@@ -140,7 +140,7 @@ pub trait PrefixValue: ColumnValueRef {
 
     /// Compute the partial prefix sum of the first `count` items in a slab.
     fn partial_sum<C: Codec>(slab: &Slab<TailOf<Self, C>>, count: usize) -> Self::Prefix {
-        let mut decoder = Self::Encoding::<C>::decoder(&slab.data);
+        let mut decoder = Self::Encoding::<C>::slab_decoder(&slab.data, crate::sealed::Trusted(()));
         let mut acc = Self::Prefix::default();
         let mut items = 0;
         while let Some(mut run) = decoder.next_run() {
