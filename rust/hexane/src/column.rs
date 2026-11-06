@@ -750,9 +750,17 @@ pub(crate) fn normalize_splices(
         src_pos = src_pos.max(sp.range.end);
         let start = sp.range.start.min(src_len);
         let end = sp.range.end.min(src_len);
-        if end == start && sp.delete == 0 {
+        // an empty range (a reversed one too, as a `Range`) copies
+        // nothing, and stays where the copying is: at the end of the last
+        // range kept, so the ranges kept still ascend
+        let (start, end) = if start < end {
+            (start, end)
+        } else if sp.delete == 0 {
             continue;
-        }
+        } else {
+            let at = out.last().map_or(0, |last| last.range.end);
+            (at, at)
+        };
         match out.last_mut() {
             Some(last) if last.pos + last.delete == sp.pos && last.range.end == start => {
                 last.delete += sp.delete;
