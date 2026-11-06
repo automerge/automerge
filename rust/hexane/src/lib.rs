@@ -699,7 +699,9 @@ impl RleValue for String {
     }
     fn try_unpack<C: Codec>(data: &[u8]) -> Result<(usize, &str), PackError> {
         let (hdr, len) = C::try_read_unsigned(data)?;
-        let len = len as usize;
+        // a length past `usize::MAX` (on 32-bit targets) is past the data's
+        // end too: reject it rather than truncate it
+        let len = usize::try_from(len).map_err(|_| PackError::BadFormat)?;
         let rest = &data[hdr..];
         if rest.len() < len {
             return Err(PackError::BadFormat);
@@ -747,7 +749,7 @@ impl ColumnValueRef for Vec<u8> {
 impl RleValue for Vec<u8> {
     fn value_len<C: Codec>(data: &[u8]) -> Option<usize> {
         let (hdr, len) = C::read_unsigned(data)?;
-        let len = len as usize;
+        let len = usize::try_from(len).ok()?;
         if data.len() - hdr < len {
             return None;
         }
@@ -755,7 +757,9 @@ impl RleValue for Vec<u8> {
     }
     fn try_unpack<C: Codec>(data: &[u8]) -> Result<(usize, &[u8]), PackError> {
         let (hdr, len) = C::try_read_unsigned(data)?;
-        let len = len as usize;
+        // a length past `usize::MAX` (on 32-bit targets) is past the data's
+        // end too: reject it rather than truncate it
+        let len = usize::try_from(len).map_err(|_| PackError::BadFormat)?;
         let rest = &data[hdr..];
         if rest.len() < len {
             return Err(PackError::BadFormat);
