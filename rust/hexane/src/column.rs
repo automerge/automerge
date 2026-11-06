@@ -919,6 +919,8 @@ impl<'a, T: ColumnValueRef, C: Codec> Iter<'a, T, C> {
         for<'x> T::Get<'x>: Ord + crate::AsColumnRef<T>,
     {
         let (start, end) = normalize_range_max(range, self.end_pos());
+        // the iterator cannot leave its window, so neither can the search
+        let end = end.min(self.end_pos());
 
         if start > self.pos {
             self.advance_to(start);
