@@ -385,8 +385,15 @@ compiles them away. To check them, run `cargo verus verify -p hexane
 * The splices `copy_ranges` takes: normalizing them checks their order
   and bounds, and gives a list in order in both columns, with every range
   inside the source and none doing nothing, which applied gives what the
-  splices give one by one (over a model of the columns as sequences; how
-  either strategy then carries the list out is glue).
+  splices give one by one. Of the two ways to carry the list out, the
+  direct one applies it to the destination with the edit cursor; the
+  inverted one keeps the source, cuts out the gaps between its ranges and
+  puts the destination's gaps back. For that one, the cuts leave exactly
+  the ranges' items, and the gaps, as splices, are a normalized list that
+  applied to those gives what the splices give. So both come down to the
+  edit cursor applying a normalized list (over a model of the columns as
+  sequences; that its seeks, deletes and run inserts, and `remove_n`, do
+  that is glue).
 * Prefix sums: a prefix column's slab weights hold each slab's sum, as an
   edit or a build computes them; `get_prefix` and `get_total` return the
   sum of the values before (through) the item, from the index's sum for

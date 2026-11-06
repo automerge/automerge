@@ -1054,9 +1054,7 @@ impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
             CopyStrategy::Invert => {
                 let old_len = self.len();
                 self.col.swap_contents(&mut src.col);
-                let ranges: Vec<std::ops::Range<usize>> =
-                    splices.iter().map(|sp| sp.range.clone()).collect();
-                self.retain_ranges(&ranges);
+                self.retain_ranges(splices);
                 let mut runs = src.iter().runs();
                 let mut e = self.edit();
                 crate::column::for_each_gap(splices, old_len, |at, gap| {
@@ -1094,7 +1092,7 @@ impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
             CopyStrategy::Invert => {
                 let old_len = self.len();
                 self.col.swap_contents(&mut src.col);
-                self.retain_ranges(&ranges);
+                self.retain_ranges(&crate::column::ranges_as_splices(&ranges));
                 let retained = self.len();
                 if index > 0 {
                     self.splice_runs(0, 0, src.iter_range(0..index).runs());
@@ -1110,19 +1108,10 @@ impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
         }
     }
 
-    /// Keep only the rows in `ranges` (normalized), deleting the gaps
-    /// back-to-front.
-    fn retain_ranges(&mut self, ranges: &[Range<usize>]) {
-        let mut end = self.len();
-        for r in ranges.iter().rev() {
-            if r.end < end {
-                self.remove_n(r.end, end - r.end);
-            }
-            end = r.start;
-        }
-        if end > 0 {
-            self.remove_n(0, end);
-        }
+    /// Keep only the rows in `splices`' ranges (normalized), deleting the
+    /// gaps back-to-front.
+    fn retain_ranges(&mut self, splices: &[crate::Splice]) {
+        crate::column::for_each_cut(splices, self.len(), |at, n| self.remove_n(at, n));
     }
 
     fn splice_items_inner(

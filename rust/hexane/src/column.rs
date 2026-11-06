@@ -2,7 +2,7 @@ use crate::attrib::{Accumulate, Attribution};
 use crate::btree::SlabAggregate;
 use crate::cursor::WeightOf;
 use crate::sealed::Sealed;
-use crate::splices::Normalize;
+use crate::splices::{Cuts, Gaps, Normalize};
 use std::marker::PhantomData;
 use std::ops::{AddAssign, Range, SubAssign};
 #[allow(unused_imports)]
@@ -911,28 +911,48 @@ where
     }
 }
 
-/// Call `f` for each gap between `splices`, with the source range to read
-/// and the position in the retained column it belongs at.
+/// Call `f` for each gap between `splices` (normalized) in a destination
+/// of `dst_len` rows, with the destination's range to read and the
+/// position in the retained column it belongs at.
 ///
 /// Positions are the copied ranges' running length: the rows a gap brings
 /// back land before the next copied range and do not move it.
 pub(crate) fn for_each_gap(
     splices: &[Splice],
-    src_len: usize,
+    dst_len: usize,
     mut f: impl FnMut(usize, Range<usize>),
 ) {
-    let mut end = 0;
-    let mut at = 0;
-    for sp in splices {
-        if sp.pos > end {
-            f(at, end..sp.pos);
-        }
-        end = sp.pos + sp.delete;
-        at += sp.range.len();
+    // verified (`splices::Gaps`): the gaps, as splices inserting them into
+    // the ranges retained, are normalized and give what `splices` give
+    let mut gaps = Gaps::new(splices, dst_len, Ghost::assume_new(), Ghost::assume_new());
+    while let Some((at, gap)) = gaps.next(splices) {
+        f(at, gap);
     }
-    if src_len > end {
-        f(at, end..src_len);
+}
+
+/// Call `f(at, n)` for each run of rows to remove, back to front, from a
+/// column of `len` rows to keep only those in `splices`' ranges
+/// (normalized).
+pub(crate) fn for_each_cut(splices: &[Splice], len: usize, mut f: impl FnMut(usize, usize)) {
+    // verified (`splices::Cuts`): the cuts, made in turn, leave exactly the
+    // ranges' rows
+    let mut cuts = Cuts::new(splices, len, Ghost::assume_new());
+    while let Some((at, n)) = cuts.next(splices) {
+        f(at, n);
     }
+}
+
+/// Splices copying `ranges`, for `retain_ranges`.
+#[cfg(test)]
+pub(crate) fn ranges_as_splices(ranges: &[Range<usize>]) -> Vec<Splice> {
+    ranges
+        .iter()
+        .map(|r| Splice {
+            pos: 0,
+            delete: 0,
+            range: r.clone(),
+        })
+        .collect()
 }
 
 impl<T, C, WF, Idx> Column<T, C, WF, Idx>
@@ -1448,8 +1468,7 @@ where
                 // rows simply never come back)
                 let old_len = self.len();
                 self.swap_contents(&mut src);
-                let ranges: Vec<Range<usize>> = splices.iter().map(|sp| sp.range.clone()).collect();
-                self.retain_ranges(&ranges);
+                self.retain_ranges(splices);
                 let mut runs = src.iter().runs();
                 let mut e = self.edit();
                 for_each_gap(splices, old_len, |at, gap| {
@@ -1548,7 +1567,7 @@ where
             CopyStrategy::Invert => {
                 let old_len = self.len();
                 self.swap_contents(&mut src);
-                self.retain_ranges(&ranges);
+                self.retain_ranges(&ranges_as_splices(&ranges));
                 let retained = self.len();
                 if index > 0 {
                     self.splice_runs(0, 0, src.iter_range(0..index).runs());
@@ -1564,19 +1583,10 @@ where
         }
     }
 
-    /// Keep only the rows in `ranges` (normalized), deleting the gaps
-    /// back-to-front; interior slabs of a gap drop without decoding.
-    pub(crate) fn retain_ranges(&mut self, ranges: &[Range<usize>]) {
-        let mut end = self.len();
-        for r in ranges.iter().rev() {
-            if r.end < end {
-                self.remove_n(r.end, end - r.end);
-            }
-            end = r.start;
-        }
-        if end > 0 {
-            self.remove_n(0, end);
-        }
+    /// Keep only the rows in `splices`' ranges (normalized), deleting the
+    /// gaps back-to-front; interior slabs of a gap drop without decoding.
+    pub(crate) fn retain_ranges(&mut self, splices: &[Splice]) {
+        for_each_cut(splices, self.len(), |at, n| self.remove_n(at, n));
     }
 
     /// Swap contents with `other`, keeping this column's segment budget
