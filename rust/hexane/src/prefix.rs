@@ -38,9 +38,10 @@ impl UnsignedPrefix for u128 {}
 /// |------------------|----------|
 /// | `u64`            | `u128`   |
 /// | `i64`            | `i128`   |
-/// | `bool`           | `u32`    |
-/// | `Option<u64>`    | `u128`   |
-/// | `Option<i64>`    | `i128`   |
+/// | `u32`            | `u64`    |
+/// | `NonZeroU32`     | `u64`    |
+/// | `bool`           | `usize`  |
+/// | `Option<T>`      | `T`'s    |
 pub trait PrefixValue: ColumnValueRef {
     /// The accumulator type for prefix sums.
     ///
@@ -569,7 +570,9 @@ impl<T: PrefixValue, C: Codec> PrefixColumn<T, C> {
     }
 
     /// Sum of the values in `range` — `get_prefix(range.end)` minus
-    /// `get_prefix(range.start)`, computed in one pass.
+    /// `get_prefix(range.start)`, computed in one pass. An empty range sums
+    /// to zero, and so does a reversed one, which a `Range` holds no items
+    /// of.
     pub fn sum_range(&self, range: std::ops::Range<usize>) -> T::Prefix {
         if range.start >= range.end || self.col.is_empty() {
             T::Prefix::default()
@@ -665,7 +668,9 @@ impl<T: PrefixValue, C: Codec> PrefixColumn<T, C> {
         }
     }
 
-    /// Iterator over `range` yielding `(inclusive_prefix, value)`.
+    /// Iterator over the items in `range` (clamped to the column), yielding
+    /// a [`PrefixedValue`] per item: its value, and the running sum of the
+    /// column through it.
     pub fn iter_range(&self, range: std::ops::Range<usize>) -> PrefixIter<'_, T, C> {
         let start = range.start.min(self.col.len());
         let end = range.end.min(self.col.len());
@@ -946,8 +951,9 @@ impl<'a, T: PrefixValue, C: Codec> PrefixIter<'a, T, C> {
         })
     }
 
-    /// Advance to position `pos` (must be ≥ current pos and < end) and
-    /// return the item there with absolute prefix + delta since base.
+    /// Advance so that the next item returned is the one at `target`
+    /// (a no-op if the iterator is already at or past it): the running
+    /// total is then the sum of the items before it.
     pub fn advance_to(&mut self, target: usize) {
         if target > self.pos() {
             self.nth(target - self.pos() - 1);
