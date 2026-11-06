@@ -462,7 +462,9 @@ first and values outside the domain last.
 * Where a precondition of the verified code cannot be shown from the
   specifications (a slab of `i64::MAX` bytes or more, or a column or
   encoder of nearly `usize::MAX` items), the code checks it and panics
-  rather than assume it.
+  rather than assume it. A load returns an error instead: a column of
+  more than `usize::MAX - 3` items, which its edits and `save` would
+  panic on, fails to load.
 
 ## Development
 

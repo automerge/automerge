@@ -45,21 +45,20 @@ fn bool_length_over_usize_is_an_error() {
     assert!(Column::<bool>::load(&b).is_err());
 }
 
+/// Up to the most items a column holds, `usize::MAX - 3` (its edits and
+/// `save` count with room for three more).
 #[cfg(target_pointer_width = "64")]
 #[test]
 fn lengths_that_fit_still_load() {
-    let mut b = rle_runs();
-    b.truncate(b.len() / 3 * 2);
-    assert_eq!(
-        Column::<u64>::load(&b).unwrap().len(),
-        2 * i64::MAX as usize
-    );
     let mut b = vec![];
-    for _ in 0..2 {
-        unsigned(i64::MAX as u64, &mut b);
+    for (n, v) in [(i64::MAX, 1u8), (i64::MAX - 2, 2)] {
+        signed(n, &mut b);
+        b.push(v);
     }
-    assert_eq!(
-        Column::<bool>::load(&b).unwrap().len(),
-        2 * i64::MAX as usize
-    );
+    assert_eq!(Column::<u64>::load(&b).unwrap().len(), usize::MAX - 3);
+    let mut b = vec![];
+    for n in [i64::MAX, i64::MAX - 2] {
+        unsigned(n as u64, &mut b);
+    }
+    assert_eq!(Column::<bool>::load(&b).unwrap().len(), usize::MAX - 3);
 }

@@ -1806,6 +1806,11 @@ where
             WF::check_total(&weights, len)?;
         }
         let (index, total_len) = index_of(&slabs, weights);
+        // edits and `save` count a column's items with room for three more:
+        // a longer column is an error here, not one they would panic on
+        if total_len > usize::MAX - 3 {
+            return Err(PackError::InvalidLength(total_len, usize::MAX - 3));
+        }
         Ok(Column {
             slabs,
             index,

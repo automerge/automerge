@@ -50,12 +50,13 @@ fn a_fill_of_i64_max_items_loads() {
 }
 
 /// The way automerge meets it: a 22-byte column whose length is past
-/// `i64::MAX`, then a filled load of a missing column with that length.
+/// `i64::MAX` (here the longest a column loads, `usize::MAX - 3`), then a
+/// filled load of a missing column with that length.
 #[test]
 fn a_filled_load_with_a_loaded_length() {
     let mut b = vec![];
-    for v in [1u8, 2] {
-        b.extend_from_slice(Leb128::encode_signed(i64::MAX).as_bytes());
+    for (n, v) in [(i64::MAX, 1u8), (i64::MAX - 2, 2)] {
+        b.extend_from_slice(Leb128::encode_signed(n).as_bytes());
         b.push(v);
     }
     let len = Column::<u64>::load(&b).unwrap().len();
