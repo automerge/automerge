@@ -83,7 +83,7 @@ pub trait PrefixValue: ColumnValueRef {
     /// Sum all values in a slab.  Walks the encoded runs directly for
     /// efficiency — O(segments) rather than O(items).
     fn slab_sum<C: Codec>(slab: &Slab<TailOf<Self, C>>) -> Self::Prefix {
-        let mut decoder = Self::Encoding::<C>::decoder(&slab.data);
+        let mut decoder = Self::Encoding::<C>::slab_decoder(&slab.data, crate::sealed::Trusted(()));
         let mut acc = Self::Prefix::default();
         while let Some(run) = decoder.next_run() {
             Self::accumulate_run(&mut acc, &run);
@@ -93,7 +93,7 @@ pub trait PrefixValue: ColumnValueRef {
 
     /// Compute the partial prefix sum of the first `count` items in a slab.
     fn partial_sum<C: Codec>(slab: &Slab<TailOf<Self, C>>, count: usize) -> Self::Prefix {
-        let mut decoder = Self::Encoding::<C>::decoder(&slab.data);
+        let mut decoder = Self::Encoding::<C>::slab_decoder(&slab.data, crate::sealed::Trusted(()));
         let mut acc = Self::Prefix::default();
         let mut items = 0;
         while let Some(mut run) = decoder.next_run() {
@@ -122,7 +122,7 @@ where
 {
     let zero = T::Prefix::default();
     let one_p = T::Prefix::try_from(1).unwrap_or_default();
-    let mut decoder = T::Encoding::<C>::decoder(&slab.data);
+    let mut decoder = T::Encoding::<C>::slab_decoder(&slab.data, crate::sealed::Trusted(()));
     let mut acc = zero;
     let mut items = 0;
     while let Some(run) = decoder.next_run() {
@@ -662,6 +662,7 @@ impl<T: PrefixValue, C: Codec> PrefixColumn<T, C> {
             inner: self.col.iter(),
             total: T::Prefix::default(),
             base: T::Prefix::default(),
+            base_at: 0,
         }
     }
 
@@ -761,6 +762,9 @@ pub struct PrefixIter<'a, T: PrefixValue, C: Codec = Leb128> {
     /// [`reset_prefix`](Self::reset_prefix). Invariant:
     /// `total == absolute_prefix_at_pos - base`.
     base: T::Prefix,
+    /// Where `base` was taken: the position the running total counts
+    /// from (0 until a reset).
+    base_at: usize,
 }
 
 impl<T: PrefixValue, C: Codec> Default for PrefixIter<'_, T, C> {
@@ -770,6 +774,7 @@ impl<T: PrefixValue, C: Codec> Default for PrefixIter<'_, T, C> {
             inner: Iter::default(),
             total: T::Prefix::default(),
             base: T::Prefix::default(),
+            base_at: 0,
         }
     }
 }
@@ -781,6 +786,7 @@ impl<T: PrefixValue, C: Codec> Clone for PrefixIter<'_, T, C> {
             inner: self.inner.clone(),
             total: self.total.clone(),
             base: self.base.clone(),
+            base_at: self.base_at,
         }
     }
 }
@@ -884,6 +890,7 @@ impl<'a, T: PrefixValue, C: Codec> PrefixIter<'a, T, C> {
     pub fn reset_prefix(&mut self) {
         self.base += &self.total;
         self.total = T::Prefix::default();
+        self.base_at = self.inner.pos;
     }
 
     #[inline]
@@ -909,8 +916,8 @@ impl<'a, T: PrefixValue, C: Codec> PrefixIter<'a, T, C> {
     pub fn suspend(&self) -> PrefixIterState<T> {
         PrefixIterState {
             inner: self.inner.suspend(),
-            total: self.total.clone(),
-            base: self.base.clone(),
+            base_at: self.base_at,
+            _phantom: std::marker::PhantomData,
         }
     }
 
@@ -1023,8 +1030,9 @@ where
 
 pub struct PrefixIterState<T: PrefixValue> {
     inner: IterState,
-    total: T::Prefix,
-    base: T::Prefix,
+    /// where the running total counts from (see `PrefixIter::reset_prefix`)
+    base_at: usize,
+    _phantom: std::marker::PhantomData<T>,
 }
 
 impl<T: PrefixValue> PrefixIterState<T> {
@@ -1033,11 +1041,16 @@ impl<T: PrefixValue> PrefixIterState<T> {
         column: &'a PrefixColumn<T, C>,
     ) -> Result<PrefixIter<'a, T, C>, crate::PackError> {
         let inner = self.inner.try_resume(column.values())?;
+        // the running total is this column's, from the position it counts
+        // from (a state from another column has another's sums)
+        let base = column.get_prefix(self.base_at);
+        let total = column.get_prefix(inner.pos()) - base.clone();
         Ok(PrefixIter {
             col: Some(column),
             inner,
-            total: self.total.clone(),
-            base: self.base.clone(),
+            total,
+            base,
+            base_at: self.base_at,
         })
     }
 }

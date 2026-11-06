@@ -1600,7 +1600,6 @@ impl<'a, T: DeltaValue, C: Codec> DeltaIter<'a, T, C> {
     pub fn suspend(&self) -> DeltaIterState {
         DeltaIterState {
             inner: self.inner.suspend(),
-            running: self.running,
         }
     }
 
@@ -1980,7 +1979,6 @@ impl<T: DeltaValue, C: Codec> Iterator for DeltaRuns<'_, T, C> {
 
 pub struct DeltaIterState {
     inner: IterState,
-    running: i64,
 }
 
 impl DeltaIterState {
@@ -1989,9 +1987,13 @@ impl DeltaIterState {
         column: &'a DeltaColumn<T, C>,
     ) -> Result<DeltaIter<'a, T, C>, crate::PackError> {
         let inner = self.inner.try_resume(&column.col)?;
+        // the running value is this column's (a state from another column
+        // has another's)
+        let mut before = column.iter();
+        before.advance_by(inner.pos());
         Ok(DeltaIter {
             inner,
-            running: self.running,
+            running: before.running,
             col: Some(&column.col),
             _phantom: PhantomData,
         })
