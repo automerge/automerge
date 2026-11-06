@@ -167,7 +167,9 @@ mod tests {
         assert_eq!(cut.into_slabs()[0].tail.bytes, 2);
     }
 
-    /// The same for a literal run whose values add up to 4 GiB.
+    /// The same for a literal run whose values add up to 4 GiB (which a
+    /// 32-bit target can't hold, so there the segments can't arise).
+    #[cfg(target_pointer_width = "64")]
     #[test]
     fn a_literal_of_4gib_is_not_loadable() {
         let mut segs = vec![Seg::LitHead { count: 2, bytes: 1 }];
