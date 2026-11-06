@@ -114,11 +114,17 @@ impl SlabAggregate for SlabAgg {
         if r.len == 0 {
             return *l;
         }
+        // Wrapping, as a release build's `+` is: exact whenever the sums
+        // fit, as a column's values keep them. A delta edit can merge
+        // sums that don't for a moment (a delete that drops or empties a
+        // slab makes its neighbours adjacent before the delta that joins
+        // them is written), and those nodes are recomputed when it is; a
+        // debug build's checked `+` panicked on them instead.
         SlabAgg {
             len: l.len + r.len,
-            total: l.total + r.total,
-            min_offset: l.min_offset.min(l.total + r.min_offset),
-            max_offset: l.max_offset.max(l.total + r.max_offset),
+            total: l.total.wrapping_add(r.total),
+            min_offset: l.min_offset.min(l.total.wrapping_add(r.min_offset)),
+            max_offset: l.max_offset.max(l.total.wrapping_add(r.max_offset)),
         }
     }
 
