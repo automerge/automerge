@@ -149,6 +149,94 @@ fn a_saved_document_loads_whatever_the_op_count() {
     );
 }
 
+/// The unsigned LEB128 number at `*pos`, moving `*pos` past it.
+fn read_leb(bytes: &[u8], pos: &mut usize) -> u64 {
+    let mut v = 0;
+    for shift in (0..64).step_by(7) {
+        let b = bytes[*pos];
+        *pos += 1;
+        v |= u64::from(b & 0x7f) << shift;
+        if b & 0x80 == 0 {
+            break;
+        }
+    }
+    v
+}
+
+/// Column metadata: a count, then each column's spec and length.
+fn read_columns(bytes: &[u8], pos: &mut usize) -> Vec<(u64, u64)> {
+    let n = read_leb(bytes, pos);
+    (0..n)
+        .map(|_| (read_leb(bytes, pos), read_leb(bytes, pos)))
+        .collect()
+}
+
+/// Actor columns hold indexes into the document's actors, which the load
+/// reads as a u64 and casts to a u32 (`RleValue for ActorIdx`,
+/// op_set2/types.rs), so an index of 2^32 + k loads as actor k. Here the op
+/// ID actor column of a document with one actor is rewritten from actor 0
+/// to actor 2^32, which names no actor. It loads as the original document,
+/// with the same heads, and `save` writes the 2^32 back out. So two byte
+/// strings load as the same document. The load should fail.
+#[test]
+#[ignore = "known bug: an actor index past u32::MAX loads as a smaller one"]
+fn an_actor_index_past_u32_loads_as_another_actor() {
+    let mut doc = AutoCommit::new().with_actor(ActorId::from(vec![1u8; 16]));
+    for k in ["a", "b", "c"] {
+        doc.put(&ROOT, k, 1).unwrap();
+    }
+    let saved = doc.save();
+    // magic bytes, checksum, chunk type (a document), length, data
+    assert_eq!(saved[8], 0x00);
+    let mut pos = 9;
+    let len = read_leb(&saved, &mut pos);
+    let data = &saved[pos..];
+    assert_eq!(data.len() as u64, len);
+    // actors, heads, change column metadata, op column metadata, then the
+    // change columns and the op columns
+    let mut pos = 0;
+    for _ in 0..read_leb(data, &mut pos) {
+        pos += read_leb(data, &mut pos) as usize; // an actor ID
+    }
+    pos += 32 * read_leb(data, &mut pos) as usize; // the heads
+    let change_cols = read_columns(data, &mut pos);
+    let op_meta = pos;
+    let mut op_cols = read_columns(data, &mut pos);
+    let cols = pos;
+    let mut start = cols + change_cols.iter().map(|c| c.1 as usize).sum::<usize>();
+    // the op ID actor column (column 2, an uncompressed actor column)
+    let i = op_cols.iter().position(|c| c.0 == 0x21).unwrap();
+    start += op_cols[..i].iter().map(|c| c.1 as usize).sum::<usize>();
+    let end = start + op_cols[i].1 as usize;
+    assert_eq!(&data[start..end], &[0x03, 0x00]); // a run of three actor 0s
+    let col = [0x03, 0x80, 0x80, 0x80, 0x80, 0x10]; // three actor 2^32s
+    op_cols[i].1 = col.len() as u64;
+
+    let mut new = data[..op_meta].to_vec();
+    leb(op_cols.len() as u64, &mut new);
+    for (spec, len) in op_cols {
+        leb(spec, &mut new);
+        leb(len, &mut new);
+    }
+    new.extend_from_slice(&data[cols..start]);
+    new.extend_from_slice(&col);
+    new.extend_from_slice(&data[end..]);
+    let mut body = vec![0x00]; // a document chunk
+    leb(new.len() as u64, &mut body);
+    body.extend_from_slice(&new);
+    let hash = Sha256::digest(&body);
+    let mut bytes = vec![0x85, 0x6f, 0x4a, 0x83];
+    bytes.extend_from_slice(&hash[..4]);
+    bytes.extend_from_slice(&body);
+
+    let loaded = AutoCommit::load(&bytes).map(|d| d.get(&ROOT, "a").unwrap().unwrap().1);
+    assert!(
+        loaded.is_err(),
+        "loaded, with key \"a\" set by op {}",
+        loaded.unwrap()
+    );
+}
+
 fn sync(x: &mut AutoCommit, y: &mut AutoCommit) {
     let (mut sx, mut sy) = (State::new(), State::new());
     loop {
