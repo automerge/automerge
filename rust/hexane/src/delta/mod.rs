@@ -1,4 +1,5 @@
 pub(crate) mod agg;
+pub(crate) mod dbound;
 mod decoder;
 pub(crate) mod dedit;
 pub(crate) mod dfind;
@@ -14,7 +15,8 @@ use vstd::prelude::Ghost;
 use crate::column::{normalize_range_max, Dx, Iter, IterState};
 use crate::rle::state::WOps;
 use crate::{Codec, Leb128};
-use dedit::{d_boundaries, delta_to, run_sum, Ledger, SplicePhase, SplicePlan};
+use dbound::SpanLedger;
+use dedit::{d_boundaries, delta_to, run_sum, SplicePhase, SplicePlan};
 use diter::{d_next, d_next_run, d_nth};
 use dscan::{d_scan, d_scan_null};
 use dseek::{d_seek, d_seek_null};
@@ -731,7 +733,7 @@ impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
             bound.add(lo as i128);
             bound.add(hi as i128);
         }
-        check_span::<T, C>(&col, &bound);
+        check_span::<T, C>(&col, || bound.fits::<T>());
         Self {
             col,
             _phantom: PhantomData,
@@ -1153,7 +1155,7 @@ impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
         let iter = SpliceDeltaIter::<_, T::Inner>::new(items, prev, skip, next_val);
         self.col.splice_inner(index, total_del, iter);
         if inserts {
-            check_span::<T, C>(&self.col, &bound);
+            check_span::<T, C>(&self.col, || bound.fits::<T>());
         }
     }
 
@@ -1220,10 +1222,10 @@ where
     inner: InnerEdit<'a, T, C>,
     /// the realized value before the cursor in the column being written,
     /// and what the next non-null original delta owes: the original
-    /// running value minus that one (verified: `dedit::Ledger`)
-    ledger: Ledger,
-    /// the values the column can hold once the edit is done
-    bound: SpanBound,
+    /// running value minus that one (verified: `dedit::Ledger`); and a
+    /// bound on the values the column holds once the edit is done
+    /// (verified: `dbound::SpanLedger`)
+    ledger: SpanLedger,
     _phantom: PhantomData<T>,
 }
 
@@ -1238,8 +1240,14 @@ where
         let bound = SpanBound::of::<T, C>(col);
         DeltaEdit {
             inner: col.edit_at(at),
-            ledger: Ledger::new(running, Ghost::assume_new()),
-            bound,
+            ledger: SpanLedger::new(
+                running,
+                bound.lo,
+                bound.hi,
+                SpanBound::needed::<T>(),
+                Ghost::assume_new(),
+                Ghost::assume_new(),
+            ),
             _phantom: PhantomData,
         }
     }
@@ -1278,7 +1286,7 @@ where
         // The fix-up lands on the first non-null item carried across, so
         // it is paid *out of* this move, not before it: settling first
         // and then moving `n` would carry one item too many.
-        while want > 0 && self.ledger.adjust != 0 && self.pay_step() {
+        while want > 0 && self.ledger.l.adjust != 0 && self.pay_step() {
             want -= 1;
         }
         if want == 0 {
@@ -1333,12 +1341,10 @@ where
                 self.inner.insert_run(T::Inner::from_opt(None), n);
             }
             Some(v) => {
-                if SpanBound::needed::<T>() {
-                    self.bound.add(v as i128);
-                }
                 // the original values after the cursor are still relative
-                // to where they were; the ledger owes the difference
-                let d = self.ledger.insert_value(v, n);
+                // to where they were; the ledger owes the difference (and
+                // the value widens its bound)
+                let d = self.ledger.insert_value(v, n, SpanBound::needed::<T>());
                 self.inner.insert(T::Inner::from_opt(Some(d)));
                 if n > 1 {
                     self.inner.insert_run(T::Inner::from_opt(Some(0)), n - 1);
@@ -1369,12 +1375,12 @@ where
                 self.inner.insert_run(T::Inner::from_opt(None), run.count);
                 continue;
             };
-            if SpanBound::needed::<T>() {
-                self.bound.add_run(run.prefix, d, run.count);
-            }
             // the original values after the cursor are still relative to
-            // where they were; the ledger owes the difference
-            let first = self.ledger.insert_run(run.prefix, d, run.count);
+            // where they were; the ledger owes the difference (and the
+            // run's ends widen its bound)
+            let first = self
+                .ledger
+                .insert_run(run.prefix, d, run.count, SpanBound::needed::<T>());
             if first == d {
                 // already anchored where this run expects: copy verbatim
                 self.inner
@@ -1483,7 +1489,7 @@ where
     /// what the edits before it owe, so every realized value after the
     /// cursor is what it was. Unbounded, for a cursor that is closing.
     fn settle(&mut self) {
-        while self.ledger.adjust != 0 {
+        while self.ledger.l.adjust != 0 {
             self.pay_step();
         }
     }
@@ -1498,7 +1504,10 @@ where
         self.settle();
         self.inner.finish();
         if !std::thread::panicking() {
-            check_span::<T, C>(self.inner.column(), &self.bound);
+            // verified (`SpanLedger::fits`): where the bound fits, so do
+            // the column's values
+            let ledger = &self.ledger;
+            check_span::<T, C>(self.inner.column(), || ledger.fits(T::MIN_I64, T::MAX_I64));
         }
     }
 }
@@ -1612,15 +1621,14 @@ fn runs_range<'a, T: DeltaValue, C: Codec>(
 
 /// Panic unless the column's values lie in the domain, within a
 /// 2^63-wide range, the [`DeltaValue`] domain contract (which `load`
-/// holds data to). Only `i64`'s domain is wider than that. `bound`
-/// bounds the values; only where it is too wide (a null holds the
-/// running value, which before the first value is a 0 the column
-/// doesn't hold) are the values walked.
-fn check_span<T: DeltaValue, C: Codec>(col: &InnerColumn<T, C>, bound: &SpanBound) {
+/// holds data to). Only `i64`'s domain is wider than that. `fits` says
+/// whether a bound on the values shows they do; only where it doesn't (a
+/// bound too wide) are the values walked.
+fn check_span<T: DeltaValue, C: Codec>(col: &InnerColumn<T, C>, fits: impl FnOnce() -> bool) {
     if !SpanBound::needed::<T>() {
         return;
     }
-    if bound.fits::<T>() {
+    if fits() {
         return;
     }
     // where the values span 2^63 or more, a delta between them wraps, and

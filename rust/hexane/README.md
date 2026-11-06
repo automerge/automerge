@@ -449,9 +449,15 @@ first and values outside the domain last.
   delta edit leaves the values in the domain, so that the index's sums
   fit again, which `check_span` checks at run time. Its walk over the column is proved: it
   passes exactly when the values lie in the domain within a range less
-  than 2^63 wide, and then every running sum fits `i64`. Its shortcut,
-  which skips the walk where the values the column held and those the
-  edit inserted already fit, is not.
+  than 2^63 wide, and then every running sum fits `i64`. Its shortcut
+  skips the walk where a bound on the values already fits: the values
+  the column held (the index's root aggregate), widened by each value
+  the edit writes. For the edit cursor that is proved too: the cursor
+  keeps the bound with its verified arithmetic (`SpanLedger`), and every
+  value the column holds after the edit lies in it, so where it fits the
+  walk would pass, given that the root aggregate bounds the values the
+  column held. For `splice` and `from_values`, which keep a bound of
+  their own, it is not.
 * Where a precondition of the verified code cannot be shown from the
   specifications (a slab of `i64::MAX` bytes or more, or a column or
   encoder of nearly `usize::MAX` items), the code checks it and panics
