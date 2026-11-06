@@ -107,6 +107,19 @@ pub trait WeightFn<T: ColumnValueRef, C: Codec = Leb128>: Sealed {
         count: usize,
         value: T::Get<'_>,
     ) -> Result<(), PackError>;
+
+    /// `true` when the weights of a column's slabs can overflow together
+    /// where none of them does on its own (prefix sums), so that every
+    /// load checks [`check_total`](Self::check_total) before the weights
+    /// reach the index.
+    const CHECKS_TOTAL: bool = false;
+
+    /// Check that one column of `len` items can hold slabs of weights
+    /// `ws`. The default accepts any.
+    #[inline(always)]
+    fn check_total(_ws: &[Self::Weight], _len: usize) -> Result<(), PackError> {
+        Ok(())
+    }
 }
 
 /// Default weight strategy: BIT stores only slab lengths.
@@ -1923,6 +1936,13 @@ where
     ) -> Result<Column<T, C, WF, Idx>, PackError> {
         use crate::encoding::LoadIterApi;
         if let Some((value, len)) = self.fill {
+            // the fill's one slab is `len` copies of `value`: its weight
+            // gets the checks a loaded slab's does
+            if WF::ACCUMULATES && len > 0 {
+                let mut w = WF::Weight::default();
+                WF::accumulate_run(&mut w, len, value)?;
+                check(&w)?;
+            }
             if len == 0 {
                 return Ok(Column::with_max_segments(self.max_segments));
             }
@@ -1957,6 +1977,9 @@ where
         };
         for w in &weights {
             check(w)?;
+        }
+        if WF::CHECKS_TOTAL {
+            WF::check_total(&weights, total_len)?;
         }
         let index = Idx::from_weights(weights);
         Ok(Column {
