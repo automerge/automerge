@@ -663,7 +663,9 @@ impl<'a, T: DeltaValue, C: Codec> DeltaEncoder<'a, T, C> {
 /// Reading, seeking and searching, which realize values from the deltas,
 /// are covered given that the sums fit, which `load` checks and edits
 /// panic without. The deltas an edit computes to bridge what it changes
-/// are not verified. See the crate README's "Formal verification".
+/// are verified too (`delta::dedit`), and so is the check that an edit
+/// leaves the values in the domain (`delta::dbound`); the glue that drives
+/// them is not. See the crate README's "Formal verification".
 pub struct DeltaColumn<T: DeltaValue, C: Codec = Leb128> {
     pub(crate) col: Column<T::Inner, C, IndexedDeltaWeightFn>,
     _phantom: PhantomData<T>,

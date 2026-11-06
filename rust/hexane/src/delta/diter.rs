@@ -18,7 +18,8 @@
 //! holds each slab's aggregate, with the sums at slab boundaries fitting
 //! `i64` (`dix_ok`): the column's invariant. Loads check it. Edits keep
 //! each slab's aggregate (the cursor), and panic on values out of the
-//! domain, without which the sums fit (`check_span`, not verified).
+//! domain, without which the sums fit (`check_span`, verified in
+//! `agg::AnySpan` and `dbound`).
 
 // Verus proofs read more plainly with `x = x + n`.
 #![allow(clippy::assign_op_pattern)]

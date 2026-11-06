@@ -293,8 +293,9 @@ compiles them away. To check them, run `cargo verus verify -p hexane
 **Proved:**
 
 * The LEB128 and bijou64 codecs: each value has exactly one encoding.
-* Loading: the RLE and bool loaders accept exactly the canonical encodings
-  and build slabs with correct metadata holding the input's values. As the
+* Loading: validation accepts exactly the canonical encodings (for RLE,
+  a slab's last group must also be under 4 GiB), and a load that succeeds
+  builds slabs with correct metadata holding the input's values. As the
   runs stream past, a slab is cut only at the end of a run, and a load's
   slab weights are accumulated from exactly the runs of each slab.
 * The slab-level code: decoders, encoders, the edit rebuilds and slab
@@ -459,6 +460,11 @@ first and values outside the domain last.
   deleting or jumping over is what it did, and that the column's deltas
   the plans are given (as ghosts, for the span check's bound) are its
   own.
+* That each sequence of values has only one canonical encoding, which is
+  what makes a column that loads save back to the same bytes, follows
+  from the definitions (`canonical`, `counts_ok`) and is tested, but is
+  not proved: the proofs show that a load accepts only canonical bytes
+  and that `save` writes a canonical encoding of the values.
 * Where a precondition of the verified code cannot be shown from the
   specifications (a slab of `i64::MAX` bytes or more, or a column or
   encoder of nearly `usize::MAX` items), the code checks it and panics
