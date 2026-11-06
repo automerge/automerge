@@ -278,6 +278,8 @@ pub trait EncoderApi<'a, T: ColumnValueRef, C: crate::Codec = crate::Leb128>: Si
     /// or consists entirely of a single run of `value`.
     fn save_to_unless(self, out: &mut Vec<u8>, value: T::Get<'a>) -> std::ops::Range<usize>;
     /// Flush and return a single [`Slab`] with correct len, segments, and tail.
+    /// Panics if [`max_segments`](Self::max_segments) has cut the values
+    /// into more than one slab.
     fn into_slab(self) -> Slab<Self::Tail>;
     /// The tail metadata type for this encoding.
     type Tail: Copy + Clone + std::fmt::Debug + Default;

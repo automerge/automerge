@@ -348,7 +348,8 @@ where
     }
 
     fn into_slab(mut self) -> Slab<Self::Tail> {
-        debug_assert!(
+        // after a cut, the slab would hold only the values since
+        assert!(
             self.e.slabs.is_empty(),
             "into_slab is single-slab only — don't combine with max_segments"
         );
@@ -649,7 +650,8 @@ impl<'a, C: Codec> EncoderApi<'a, bool, C> for BoolEncoder<C> {
     }
 
     fn into_slab(mut self) -> Slab<Self::Tail> {
-        debug_assert!(
+        // the verified `take_slab` requires that nothing was cut
+        assert!(
             self.e.slabs.is_empty(),
             "into_slab is single-slab only — don't combine with max_segments"
         );
