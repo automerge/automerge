@@ -384,6 +384,10 @@ pub struct DeltaEncoderState<'a, T: DeltaValue, C: Codec = Leb128> {
     /// `v == null`) and to provide RleEncoder-style single-run-of-value
     /// elision for non-nullable columns.
     uniform: Option<T>,
+    /// The least and greatest values appended (`low > high` before any):
+    /// they must span less than 2^63 (see [`DeltaValue`]).
+    low: i64,
+    high: i64,
     _phantom: PhantomData<T>,
 }
 
@@ -399,6 +403,8 @@ impl<'a, T: DeltaValue, C: Codec> DeltaEncoderState<'a, T, C> {
             inner: RleEncoderState::new(),
             abs: 0,
             uniform: None,
+            low: i64::MAX,
+            high: i64::MIN,
             _phantom: PhantomData,
         }
     }
@@ -427,7 +433,15 @@ impl<'a, T: DeltaValue, C: Codec> DeltaEncoderState<'a, T, C> {
         }
         match value.to_i64() {
             Some(v) => {
-                let first_delta = v - self.abs;
+                // Only a domain as wide as `i64`'s can span 2^63; for
+                // the others this is compiled out.
+                if T::MAX_I64 as i128 - T::MIN_I64 as i128 > i64::MAX as i128 {
+                    self.low = self.low.min(v);
+                    self.high = self.high.max(v);
+                }
+                // wraps only if the values span 2^63 or more, which
+                // `finish` rejects
+                let first_delta = v.wrapping_sub(self.abs);
                 self.abs = v;
                 self.inner.append_n_owned(buf, Some(first_delta), 1);
                 if n > 1 {
@@ -448,6 +462,9 @@ impl<'a, T: DeltaValue, C: Codec> DeltaEncoderState<'a, T, C> {
 
     /// Flush any pending run into `buf`.
     pub fn finish(&mut self, buf: &mut Vec<u8>) {
+        if self.low <= self.high && self.high.checked_sub(self.low).is_none() {
+            values_too_wide();
+        }
         self.inner.finish(buf);
     }
 
@@ -457,6 +474,15 @@ impl<'a, T: DeltaValue, C: Codec> DeltaEncoderState<'a, T, C> {
     pub fn is_uniform(&self, value: T) -> bool {
         self.inner.is_empty() || self.uniform == Some(value)
     }
+}
+
+/// Values spanning 2^63 or more, outside the [`DeltaValue`] domain: a
+/// precondition violation on the writer's own data, which `load` would
+/// reject.
+#[cold]
+#[inline(never)]
+fn values_too_wide() -> ! {
+    panic!("delta values out of domain: they span 2^63 or more")
 }
 
 /// Streaming encoder for delta-encoded columns.
