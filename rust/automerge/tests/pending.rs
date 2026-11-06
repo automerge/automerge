@@ -316,18 +316,6 @@ fn incrementing_a_counter_past_i64_max() {
     let _ = doc.get(&ROOT, "c");
 }
 
-/// `parents_at` an object at heads from before it existed unwraps a
-/// `None` (op_set2/parents.rs) rather than returning an error.
-#[test]
-#[ignore = "known bug: parents_at panics on an object that doesn't exist yet"]
-fn parents_at_heads_before_the_object_existed() {
-    let mut doc = AutoCommit::new().with_actor(ActorId::from(vec![1u8; 16]));
-    let list = doc.put_object(&ROOT, "l", ObjType::List).unwrap();
-    let inner = doc.insert_object(&list, 0, ObjType::List).unwrap();
-    doc.commit();
-    let _ = doc.parents_at(&inner, &[]).map(|p| p.count());
-}
-
 /// Isolating at older heads and committing there (here, empty changes
 /// between edits) forks the actor's own history: two changes get the same
 /// seq. The document then can't be saved and loaded, merged into another,
