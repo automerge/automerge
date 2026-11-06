@@ -377,6 +377,17 @@ compiles them away. To check them, run `cargo verus verify -p hexane
   nulls after it, and the value of the item after those) are what the
   column holds there. Over a model of the column as its sequence of
   deltas, with sums wrapping as the iterators read them.
+* A delta edit's check that it leaves the values in the domain, so that
+  the index's sums fit again (`check_span`): its walk over the column
+  passes exactly when the values lie in the domain within a range less
+  than 2^63 wide, and then every running sum fits `i64`; and its
+  shortcut, which skips the walk where a bound on the values already
+  fits, passes only where the walk would. The bound starts from the
+  least and greatest running sum in the index's root aggregate, which
+  holds the column's values, and the edit cursor, `splice` and
+  `from_values` widen it by each value they write; every value the
+  column holds after the edit lies in it. Given the column's invariant,
+  as for reading.
 * The value search of `Column` and its iterator (`scope_to_value`,
   `seek_to_value`): where the values in the window are sorted, it returns
   exactly the range of them equal to the target, or, if there are none,
@@ -442,21 +453,12 @@ first and values outside the domain last.
   column's sum fits its prefix type, which the searches' results depend on
   (loads reject sums that would not, and edits panic, but those checks are
   not part of the proof); `delta`, which is glue over the verified
-  iterator; the glue that drives a delta edit's verified arithmetic (that
-  `splice` feeds its items to the verified plan in order, and that what
-  the cursor reports carrying, deleting or jumping over is what it did);
-  and that a
-  delta edit leaves the values in the domain, so that the index's sums
-  fit again, which `check_span` checks at run time. Its walk over the column is proved: it
-  passes exactly when the values lie in the domain within a range less
-  than 2^63 wide, and then every running sum fits `i64`. Its shortcut
-  skips the walk where a bound on the values already fits: the values
-  the column held (the index's root aggregate), widened by each value
-  the edit writes. That is proved too: the edit cursor, `splice` and
-  `from_values` keep the bound with their verified arithmetic
-  (`SpanLedger`, `SpanPlan`, `ToDeltas`), and every value the column
-  holds afterwards lies in it, so where it fits the walk would pass,
-  given that the root aggregate bounds the values the column held.
+  iterator; and the glue that drives a delta edit's verified arithmetic:
+  that `splice` feeds its items, and the boundaries it finds, to the
+  verified plan in order, that what the cursor reports carrying,
+  deleting or jumping over is what it did, and that the column's deltas
+  the plans are given (as ghosts, for the span check's bound) are its
+  own.
 * Where a precondition of the verified code cannot be shown from the
   specifications (a slab of `i64::MAX` bytes or more, or a column or
   encoder of nearly `usize::MAX` items), the code checks it and panics

@@ -12,29 +12,46 @@
 //! iterators read them, `rz`) lies within a bound inside `i64` and less
 //! than 2^63 wide, no running sum wraps, so the sums at the values are
 //! the values themselves (`lemma_exact`), and the walk's test passes
-//! (`lemma_span_ok`). A [`SpanLedger`] is a cursor's [`Ledger`] that also
-//! keeps the bound: given that the bound it starts from holds the
-//! column's values, every value the column holds after the edit lies in
-//! the bound it ends with, so where that bound passes the walk's test, so
-//! does the column (`SpanLedger::fits`). Trusted: that the bound it
-//! starts from (the index's root aggregate) holds the column's values,
-//! and, as for the [`Ledger`], that what the cursor reports carrying,
-//! deleting and jumping over is what it did. Likewise a [`SpanPlan`] is a
-//! splice's [`SplicePlan`] that keeps the bound, widened by the items it
-//! inserts: where it fits, so does the column the splice leaves, given
-//! what `find_boundaries` reports around it (`bounds_of`). And
-//! [`ToDeltas`] gives `from_values` the deltas realizing its values and a
-//! bound on them, with no trust needed.
+//! (`lemma_span_ok`). The bound an edit starts from, the least and
+//! greatest running sum in the index's root aggregate, holds the
+//! column's values ([`root_bound`]). A [`SpanLedger`] is a cursor's
+//! [`Ledger`] that also keeps the bound: every value the column holds
+//! after the edit lies in the bound it ends with, so where that bound
+//! passes the walk's test, so does the column (`SpanLedger::fits`).
+//! Likewise a [`SpanPlan`] is a splice's [`SplicePlan`] that keeps the
+//! bound, widened by the items it inserts: where it fits, so does the
+//! column the splice leaves, given what `find_boundaries` reports around
+//! it (`bounds_of`). And [`ToDeltas`] gives `from_values` the deltas
+//! realizing its values and a bound on them.
+//!
+//! Trusted: the column's invariant (each slab's weight its aggregate, the
+//! index valid), as the readers assume it; and the glue: that the ghost
+//! original deltas each plan is given are the column's, that `splice`
+//! feeds its plan the items and `find_boundaries`' report, and, as for
+//! the [`Ledger`], that what the cursor reports carrying, deleting and
+//! jumping over is what it did.
 
 #[cfg(verus_keep_ghost)]
-use crate::delta::agg::{lemma_push, psum, reps, vmax, vmin};
+use crate::btree::{max_i, min_i};
+use crate::btree::{SlabAgg, SlabBTree};
+use crate::column::Slab;
+#[cfg(verus_keep_ghost)]
+use crate::cursor::slab_lens;
+use crate::delta::agg::DeltaOps;
+#[cfg(verus_keep_ghost)]
+use crate::delta::agg::{deltas_of, lemma_push, pmax, pmin, psum, reps, vmax, vmin};
 use crate::delta::dedit::{delta_to, Ledger, SplicePhase, SplicePlan};
 #[cfg(verus_keep_ghost)]
 use crate::delta::dedit::{
     lemma_rest_unchanged, lemma_rz_cat, lemma_rz_crop, lemma_rz_one, run_vals, rz, splice_vals,
 };
 #[cfg(verus_keep_ghost)]
-use crate::delta::diter::{crop, lemma_crop, lemma_crop_add, realize};
+use crate::delta::diter::{crop, dindex_ok, lemma_crop, lemma_crop_add, lemma_dfold, realize};
+#[cfg(verus_keep_ghost)]
+use crate::fenwick::total;
+#[cfg(verus_keep_ghost)]
+use crate::iter_core::{lens_ok, vals_of};
+use crate::iter_core::{Decode, Decoders};
 use vstd::prelude::*;
 
 verus! {
@@ -400,6 +417,7 @@ impl SpanLedger {
 
     /// Insert a run of `n` deltas `d` after the running sum `prefix` (see
     /// [`Ledger::insert_run`]); its first and last values widen the bound.
+    #[verifier::spinoff_prover]
     #[inline(always)]
     pub(crate) fn insert_run(&mut self, prefix: i64, d: i64, n: usize, track: bool) -> (first: i64)
         requires
@@ -445,6 +463,8 @@ impl SpanLedger {
                     assert(narrow(lo0, hi0));
                     lemma_widen(rz(0, w0), lo0, hi0, lo, hi);
                     lemma_widen(rz(0, self.orig@), lo0, hi0, lo, hi);
+                    assert((d as int) * (n as int) == (n as int) * (d as int)) by (nonlinear_arith);
+                    assert(b as int == prefix as int + (n as nat) * d);
                     lemma_run(prefix as int, d, n as nat, lo, hi);
                     lemma_cat(rz(0, w0), run_vals(prefix as int, d, n as nat), lo, hi);
                 }
@@ -784,6 +804,7 @@ impl SpanPlan {
 
     /// The next item is a run (see [`SplicePlan::run`]); its first and
     /// last values widen the bound.
+    #[verifier::spinoff_prover]
     #[inline(always)]
     pub(crate) fn run(&mut self, prefix: i64, d: Option<i64>, count: usize, track: bool) -> (r: (Option<i64>, usize))
         requires
@@ -829,6 +850,8 @@ impl SpanPlan {
                         assert(narrow(lo0, hi0));
                         lemma_widen(w0, lo0, hi0, lo, hi);
                         lemma_widen(rz(0, self.orig@), lo0, hi0, lo, hi);
+                        assert((x as int) * (count as int) == (count as int) * (x as int)) by (nonlinear_arith);
+                        assert(b as int == prefix as int + (count as nat) * x);
                         lemma_run(prefix as int, x, count as nat, lo, hi);
                         lemma_cat(w0, run_vals(prefix as int, x, count as nat), lo, hi);
                     }
@@ -1054,6 +1077,92 @@ impl ToDeltas {
         }
         r
     }
+}
+
+/// Every running sum through at least one of deltas `ds` lies between
+/// their least and greatest.
+proof fn lemma_psum_within(ds: Seq<Option<i64>>, k: int)
+    requires
+        1 <= k <= ds.len(),
+    ensures
+        pmin(ds) <= psum(ds.take(k)) <= pmax(ds),
+    decreases ds.len(),
+{
+    if k == ds.len() {
+        assert(ds.take(k) =~= ds);
+        if ds.len() > 1 {
+            assert(pmin(ds) == min_i(pmin(ds.drop_last()), psum(ds)));
+            assert(pmax(ds) == max_i(pmax(ds.drop_last()), psum(ds)));
+        }
+    } else {
+        let d0 = ds.drop_last();
+        assert(d0.take(k) =~= ds.take(k));
+        lemma_psum_within(d0, k);
+        assert(pmin(ds) == min_i(pmin(d0), psum(ds)));
+        assert(pmax(ds) == max_i(pmax(d0), psum(ds)));
+    }
+}
+
+/// Where the running sums of deltas `ds` fit `i64`, their least and
+/// greatest bound the values they realize.
+proof fn lemma_sums_bound(ds: Seq<Option<i64>>)
+    requires
+        ds.len() > 0,
+        i64::MIN <= pmin(ds),
+        pmax(ds) <= i64::MAX,
+    ensures
+        in_bound(rz(0, ds), pmin(ds), pmax(ds)),
+{
+    assert forall|i: int| 0 <= i < rz(0, ds).len() && (#[trigger] rz(0, ds)[i]) is Some implies pmin(ds) <= rz(
+        0,
+        ds,
+    )[i]->0 <= pmax(ds) by {
+        let x = ds[i]->0;
+        assert(ds.take(i + 1).drop_last() =~= ds.take(i));
+        assert(ds.take(i + 1).last() == ds[i]);
+        assert(psum(ds.take(i + 1)) == psum(ds.take(i)) + x);
+        lemma_psum_within(ds, i + 1);
+        lemma_crop(psum(ds.take(i)) + x);
+    }
+}
+
+/// The bound an edit starts from: the least and greatest running sum of
+/// the column's deltas, from the index's root aggregate. It holds the
+/// column's values (and the 0 before the first, where nulls come first),
+/// wherever it says anything: given the column's invariant (each slab's
+/// weight its aggregate, the index valid), as the readers assume.
+#[allow(unused_variables)] // `slabs` is for the spec
+pub(crate) fn root_bound<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
+    slabs: &'a [Slab<X::Tail>],
+    ix: &SlabBTree<SlabAgg>,
+) -> (r: (i128, i128))
+    requires
+        dindex_ok::<X, B>(Some(ix), slabs@),
+        lens_ok::<X>(slabs@),
+        total(slab_lens(slabs@)) <= usize::MAX,
+    ensures
+        narrow(r.0 as int, r.1 as int) ==> in_bound(rz(0, deltas_of::<_, B>(vals_of::<X>(slabs@))), r.0 as int, r.1 as int),
+{
+    let agg = ix.root_agg();
+    let ghost (s, ws) = (slabs@, ix@);
+    let ghost ds = deltas_of::<_, B>(vals_of::<X>(s));
+    proof {
+        lemma_dfold::<X, B>(ws, s, s.len() as int);
+        assert(ws.subrange(0, s.len() as int) =~= ws);
+        assert(s.take(s.len() as int) =~= s);
+    }
+    if agg.len == 0 {
+        proof {
+            assert(rz(0, ds).len() == 0);
+        }
+        return (i128::MAX, i128::MIN);
+    }
+    proof {
+        if narrow(agg.min_offset as int, agg.max_offset as int) {
+            lemma_sums_bound(ds);
+        }
+    }
+    (agg.min_offset as i128, agg.max_offset as i128)
 }
 
 } // verus!

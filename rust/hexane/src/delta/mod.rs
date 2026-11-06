@@ -15,7 +15,7 @@ use vstd::prelude::Ghost;
 use crate::column::{normalize_range_max, Dx, Iter, IterState};
 use crate::rle::state::WOps;
 use crate::{Codec, Leb128};
-use dbound::{SpanLedger, SpanPlan, ToDeltas};
+use dbound::{root_bound, SpanLedger, SpanPlan, ToDeltas};
 use dedit::{d_boundaries, run_sum, SplicePhase};
 use diter::{d_next, d_next_run, d_nth};
 use dscan::{d_scan, d_scan_null};
@@ -720,7 +720,7 @@ impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
         let mut col = Column::new();
         // verified (`dbound::ToDeltas`): the deltas realize the values, and
         // the bound taken as they go past holds them
-        let track = SpanBound::needed::<T>();
+        let track = bound_needed::<T>();
         let mut deltas = ToDeltas::new(track);
         col.splice_inner(
             0,
@@ -1132,10 +1132,10 @@ impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
 
         // a deletion alone can't widen the values' span
         let inserts = items.peek().is_some();
-        let bound = if inserts {
-            SpanBound::of::<T, C>(&self.col)
+        let (lo, hi) = if inserts {
+            start_bound::<T, C>(&self.col)
         } else {
-            SpanBound::none()
+            (i128::MAX, i128::MIN)
         };
         let (prev, skip, next_val) = self.find_boundaries(index, del);
         // When a boundary non-null follows the splice, replace `del` original
@@ -1149,9 +1149,9 @@ impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
                 prev,
                 skip,
                 next_val,
-                bound.lo,
-                bound.hi,
-                SpanBound::needed::<T>(),
+                lo,
+                hi,
+                bound_needed::<T>(),
                 Ghost::assume_new(),
             ),
         );
@@ -1241,14 +1241,14 @@ where
         // before the cursor borrows the column: the realized value it
         // starts from, which position 0 gets for nothing
         let running = Self::prefix_at(col, at);
-        let bound = SpanBound::of::<T, C>(col);
+        let (lo, hi) = start_bound::<T, C>(col);
         DeltaEdit {
             inner: col.edit_at(at),
             ledger: SpanLedger::new(
                 running,
-                bound.lo,
-                bound.hi,
-                SpanBound::needed::<T>(),
+                lo,
+                hi,
+                bound_needed::<T>(),
                 Ghost::assume_new(),
                 Ghost::assume_new(),
             ),
@@ -1348,7 +1348,7 @@ where
                 // the original values after the cursor are still relative
                 // to where they were; the ledger owes the difference (and
                 // the value widens its bound)
-                let d = self.ledger.insert_value(v, n, SpanBound::needed::<T>());
+                let d = self.ledger.insert_value(v, n, bound_needed::<T>());
                 self.inner.insert(T::Inner::from_opt(Some(d)));
                 if n > 1 {
                     self.inner.insert_run(T::Inner::from_opt(Some(0)), n - 1);
@@ -1384,7 +1384,7 @@ where
             // run's ends widen its bound)
             let first = self
                 .ledger
-                .insert_run(run.prefix, d, run.count, SpanBound::needed::<T>());
+                .insert_run(run.prefix, d, run.count, bound_needed::<T>());
             if first == d {
                 // already anchored where this run expects: copy verbatim
                 self.inner
@@ -1629,7 +1629,7 @@ fn runs_range<'a, T: DeltaValue, C: Codec>(
 /// whether a bound on the values shows they do; only where it doesn't (a
 /// bound too wide) are the values walked.
 fn check_span<T: DeltaValue, C: Codec>(col: &InnerColumn<T, C>, fits: impl FnOnce() -> bool) {
-    if !SpanBound::needed::<T>() {
+    if !bound_needed::<T>() {
         return;
     }
     if fits() {
@@ -1644,46 +1644,25 @@ fn check_span<T: DeltaValue, C: Codec>(col: &InnerColumn<T, C>, fits: impl FnOnc
     }
 }
 
-/// A bound on a delta column's values: where an edit starts, those it
-/// holds (its index's root aggregate, exact while they span less than
-/// 2^63, as they do). The edit's verified plan widens it by each value it
-/// writes (`dbound::SpanLedger`, `dbound::SpanPlan`). The root aggregate
-/// after an edit is no bound: the index merges with wrapping arithmetic,
-/// so where values that span 2^63 or more meet, its sums wrap.
-#[derive(Clone, Copy)]
-struct SpanBound {
-    lo: i128,
-    hi: i128,
+/// Whether `T`'s values can span 2^63 or more at all (only `i64`'s can):
+/// if not, an edit needn't bound them.
+#[inline(always)]
+fn bound_needed<T: DeltaValue>() -> bool {
+    (T::MAX_I64 as i128) - (T::MIN_I64 as i128) > i64::MAX as i128
 }
 
-impl SpanBound {
-    fn none() -> Self {
-        SpanBound {
-            lo: i128::MAX,
-            hi: i128::MIN,
-        }
+/// The bound on `col`'s values an edit starts from, which its verified
+/// plan widens by each value it writes (`dbound::SpanLedger`,
+/// `dbound::SpanPlan`): the least and greatest running sum, from the
+/// index's root aggregate (verified, `dbound::root_bound`, given the
+/// column's invariant). The root aggregate after an edit is no bound: the
+/// index merges with wrapping arithmetic, so where values that span 2^63
+/// or more meet, its sums wrap.
+fn start_bound<T: DeltaValue, C: Codec>(col: &InnerColumn<T, C>) -> (i128, i128) {
+    if !bound_needed::<T>() {
+        return (i128::MAX, i128::MIN);
     }
-
-    /// Whether `T`'s values can span 2^63 or more at all (only `i64`'s
-    /// can): if not, there is nothing to bound.
-    #[inline(always)]
-    fn needed<T: DeltaValue>() -> bool {
-        (T::MAX_I64 as i128) - (T::MIN_I64 as i128) > i64::MAX as i128
-    }
-
-    fn of<T: DeltaValue, C: Codec>(col: &InnerColumn<T, C>) -> Self {
-        if !Self::needed::<T>() {
-            return Self::none();
-        }
-        let agg = col.index.root_agg();
-        if agg.len == 0 {
-            return Self::none();
-        }
-        SpanBound {
-            lo: agg.min_offset as i128,
-            hi: agg.max_offset as i128,
-        }
-    }
+    root_bound::<Dx<T::Inner, C>, DB<T::Inner>>(&col.slabs, &col.index)
 }
 
 type InnerColumn<T, C = Leb128> = Column<<T as DeltaValue>::Inner, C, IndexedDeltaWeightFn>;
@@ -2090,7 +2069,7 @@ impl<It: Iterator<Item = SpliceItem>, T: DeltaValue> Iterator for SpliceDeltaIte
 
     fn next(&mut self) -> Option<Self::Item> {
         // the bound matters only where the values could span 2^63
-        let track = SpanBound::needed::<T>();
+        let track = bound_needed::<T>();
         let (d, n) = loop {
             match self.plan.p.phase {
                 SplicePhase::Values => {
