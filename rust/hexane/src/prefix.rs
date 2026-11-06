@@ -551,7 +551,8 @@ impl<T: PrefixValue, C: Codec> PrefixColumn<T, C> {
     /// [`PrefixedValue::total`] shows for the item at `index`.  Equals
     /// `get_prefix(index + 1)`.
     pub fn get_total(&self, index: usize) -> T::Prefix {
-        self.get_prefix(index + 1)
+        // past `usize::MAX` is past the end too
+        self.get_prefix(index.saturating_add(1))
     }
 
     /// Seek to position `to`, returning the item there together with the
