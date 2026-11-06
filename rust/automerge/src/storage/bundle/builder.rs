@@ -552,7 +552,9 @@ impl<'a> BundleChangeIter<'a> {
         columns: &RawColumns<compression::Uncompressed>,
         data: &'a [u8],
     ) -> Self {
-        Self(BundleChangeIterUnverified::try_new(columns, data).unwrap())
+        Self(BundleChangeIterUnverified {
+            inner: Some(BundleChangeIterInner::try_new(columns, data, false).unwrap()),
+        })
     }
 }
 
@@ -598,7 +600,7 @@ impl<'a> Iterator for BundleChangeIterUnverified<'a> {
 impl<'a> BundleChangeIterUnverified<'a> {
     pub(crate) fn new(columns: &RawColumns<compression::Uncompressed>, data: &'a [u8]) -> Self {
         Self {
-            inner: BundleChangeIterInner::try_new(columns, data).ok(),
+            inner: BundleChangeIterInner::try_new(columns, data, false).ok(),
         }
     }
 
@@ -607,15 +609,43 @@ impl<'a> BundleChangeIterUnverified<'a> {
         data: &'a [u8],
     ) -> Result<Self, ParseError> {
         Ok(Self {
-            inner: Some(BundleChangeIterInner::try_new(columns, data)?),
+            inner: Some(BundleChangeIterInner::try_new(columns, data, true)?),
         })
     }
 }
 
+/// A streaming decoder over column bytes `d`, which are checked first if
+/// `check` is set: the decoders may panic on bytes not yet checked.
+fn rle_col<T: hexane::ColumnValueRef>(
+    d: &[u8],
+    check: bool,
+) -> Result<hexane::Decoder<'_, T>, hexane::PackError> {
+    if check {
+        hexane::try_decoder::<T>(d)
+    } else {
+        Ok(hexane::decoder::<T>(d))
+    }
+}
+
+/// [`rle_col`] for delta-encoded columns.
+fn delta_col(
+    d: &[u8],
+    check: bool,
+) -> Result<hexane::DeltaDecoder<'_, Option<i64>>, hexane::PackError> {
+    if check {
+        hexane::DeltaDecoder::try_new(d)
+    } else {
+        Ok(hexane::DeltaDecoder::new(d))
+    }
+}
+
 impl<'a> BundleChangeIterInner<'a> {
+    /// Decoders over the change columns, checked first if `check` is set
+    /// (see [`rle_col`]).
     fn try_new(
         columns: &RawColumns<compression::Uncompressed>,
         data: &'a [u8],
+        check: bool,
     ) -> Result<Self, ParseError> {
         let mut actor = hexane::decoder::<Option<ActorIdx>>(&[]);
         let mut seq = hexane::DeltaDecoder::<Option<i64>>::new(&[]);
@@ -631,15 +661,15 @@ impl<'a> BundleChangeIterInner<'a> {
         for col in columns.iter() {
             let d = &data[col.data()];
             match col.spec() {
-                change::ACTOR => actor = hexane::decoder::<Option<ActorIdx>>(d),
-                change::SEQ => seq = hexane::DeltaDecoder::<Option<i64>>::new(d),
-                change::START_OP => start_op = hexane::DeltaDecoder::<Option<i64>>::new(d),
-                change::MAX_OP => max_op = hexane::DeltaDecoder::<Option<i64>>::new(d),
-                change::TIMESTAMP => timestamp = hexane::DeltaDecoder::<Option<i64>>::new(d),
-                change::MESSAGE => message = hexane::decoder::<Option<String>>(d),
-                change::DEP_COUNT => dep_count = hexane::decoder::<Option<u64>>(d),
-                change::DEPS => deps = hexane::DeltaDecoder::<Option<i64>>::new(d),
-                change::EXTRA_COUNT => extra_count = hexane::decoder::<Option<u64>>(d),
+                change::ACTOR => actor = rle_col::<Option<ActorIdx>>(d, check)?,
+                change::SEQ => seq = delta_col(d, check)?,
+                change::START_OP => start_op = delta_col(d, check)?,
+                change::MAX_OP => max_op = delta_col(d, check)?,
+                change::TIMESTAMP => timestamp = delta_col(d, check)?,
+                change::MESSAGE => message = rle_col::<Option<String>>(d, check)?,
+                change::DEP_COUNT => dep_count = rle_col::<Option<u64>>(d, check)?,
+                change::DEPS => deps = delta_col(d, check)?,
+                change::EXTRA_COUNT => extra_count = rle_col::<Option<u64>>(d, check)?,
                 change::EXTRA => extra = d,
                 spec => return Err(ParseError::InvalidChangeColumn(u32::from(spec))),
             }
@@ -722,7 +752,7 @@ impl<'a> OpIterUnverified<'a> {
         id_ctr_values: &'a [i64],
     ) -> Self {
         Self {
-            inner: OpIterInner::try_new(columns, data, id_ctr_values).ok(),
+            inner: OpIterInner::try_new(columns, data, id_ctr_values, false).ok(),
         }
     }
 
@@ -732,7 +762,7 @@ impl<'a> OpIterUnverified<'a> {
         id_ctr_values: &'a [i64],
     ) -> Result<Self, ParseError> {
         Ok(Self {
-            inner: Some(OpIterInner::try_new(columns, data, id_ctr_values)?),
+            inner: Some(OpIterInner::try_new(columns, data, id_ctr_values, true)?),
         })
     }
 }
@@ -851,10 +881,13 @@ impl<'a> OpIterInner<'a> {
         }))
     }
 
+    /// Decoders over the op columns, checked first if `check` is set (see
+    /// [`rle_col`]).
     fn try_new(
         columns: &RawColumns<compression::Uncompressed>,
         data: &'a [u8],
         id_ctr_values: &'a [i64],
+        check: bool,
     ) -> Result<Self, ParseError> {
         let mut obj_actor = hexane::decoder::<Option<ActorIdx>>(&[]);
         let mut obj_ctr = hexane::DeltaDecoder::<Option<i64>>::new(&[]);
@@ -877,33 +910,27 @@ impl<'a> OpIterInner<'a> {
             let d = &data[col.data()];
             type C = ColumnType;
             match (col.spec().id(), col.spec().col_type()) {
-                (ops::OBJ_COL_ID, C::Actor) => obj_actor = hexane::decoder::<Option<ActorIdx>>(d),
-                (ops::OBJ_COL_ID, C::DeltaInteger) => {
-                    obj_ctr = hexane::DeltaDecoder::<Option<i64>>::new(d)
-                }
-                (ops::KEY_COL_ID, C::Actor) => key_actor = hexane::decoder::<Option<ActorIdx>>(d),
-                (ops::KEY_COL_ID, C::DeltaInteger) => {
-                    key_ctr = hexane::DeltaDecoder::<Option<i64>>::new(d)
-                }
-                (ops::KEY_COL_ID, C::String) => key_str = hexane::decoder::<Option<String>>(d),
-                (ops::ID_COL_ID, C::Actor) => id_actor = hexane::decoder::<Option<ActorIdx>>(d),
+                (ops::OBJ_COL_ID, C::Actor) => obj_actor = rle_col::<Option<ActorIdx>>(d, check)?,
+                (ops::OBJ_COL_ID, C::DeltaInteger) => obj_ctr = delta_col(d, check)?,
+                (ops::KEY_COL_ID, C::Actor) => key_actor = rle_col::<Option<ActorIdx>>(d, check)?,
+                (ops::KEY_COL_ID, C::DeltaInteger) => key_ctr = delta_col(d, check)?,
+                (ops::KEY_COL_ID, C::String) => key_str = rle_col::<Option<String>>(d, check)?,
+                (ops::ID_COL_ID, C::Actor) => id_actor = rle_col::<Option<ActorIdx>>(d, check)?,
                 // Both counter encodings are handled at the storage layer.
                 (ops::ID_CTR_INVERSE_COL_ID, C::DeltaInteger) => {}
                 (ops::ID_COL_ID, C::DeltaInteger) => {}
-                (ops::INSERT_COL_ID, C::Boolean) => insert = hexane::decoder::<bool>(d),
-                (ops::ACTION_COL_ID, C::Integer) => action = hexane::decoder::<Option<Action>>(d),
+                (ops::INSERT_COL_ID, C::Boolean) => insert = rle_col::<bool>(d, check)?,
+                (ops::ACTION_COL_ID, C::Integer) => action = rle_col::<Option<Action>>(d, check)?,
                 (ops::VAL_COL_ID, C::ValueMetadata) => {
-                    meta = hexane::decoder::<Option<ValueMeta>>(d)
+                    meta = rle_col::<Option<ValueMeta>>(d, check)?
                 }
                 (ops::VAL_COL_ID, C::Value) => value = d,
-                (ops::PRED_COL_ID, C::Group) => pred_count = hexane::decoder::<Option<u64>>(d),
-                (ops::PRED_COL_ID, C::Actor) => pred_actor = hexane::decoder::<Option<ActorIdx>>(d),
-                (ops::PRED_COL_ID, C::DeltaInteger) => {
-                    pred_ctr = hexane::DeltaDecoder::<Option<i64>>::new(d)
-                }
-                (ops::EXPAND_COL_ID, C::Boolean) => expand = hexane::decoder::<bool>(d),
+                (ops::PRED_COL_ID, C::Group) => pred_count = rle_col::<Option<u64>>(d, check)?,
+                (ops::PRED_COL_ID, C::Actor) => pred_actor = rle_col::<Option<ActorIdx>>(d, check)?,
+                (ops::PRED_COL_ID, C::DeltaInteger) => pred_ctr = delta_col(d, check)?,
+                (ops::EXPAND_COL_ID, C::Boolean) => expand = rle_col::<bool>(d, check)?,
                 (ops::MARK_NAME_COL_ID, C::String) => {
-                    mark_name = hexane::decoder::<Option<String>>(d)
+                    mark_name = rle_col::<Option<String>>(d, check)?
                 }
                 _ => return Err(ParseError::InvalidOpColumn(u32::from(col.spec()))),
             }

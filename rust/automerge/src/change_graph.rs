@@ -957,10 +957,10 @@ impl ChangeGraphCols {
         let extra_bytes_raw = meta.bytes(EXTRA_VAL_COL_SPEC, bytes).to_vec();
 
         let actors: ActorRefs<Vec<ActorIdx>> =
-            ActorRefs(hexane::decoder::<ActorIdx>(actor_bytes).collect());
-        let max_ops: Vec<u32> = hexane::DeltaDecoder::<u32>::new(max_op_bytes).collect();
+            ActorRefs(hexane::try_decoder::<ActorIdx>(actor_bytes)?.collect());
+        let max_ops: Vec<u32> = hexane::DeltaDecoder::<u32>::try_new(max_op_bytes)?.collect();
         let max_op = max_ops.iter().copied().max().unwrap_or(0);
-        let seq: Vec<u32> = hexane::DeltaDecoder::<u32>::new(seq_bytes).collect();
+        let seq: Vec<u32> = hexane::DeltaDecoder::<u32>::try_new(seq_bytes)?.collect();
 
         if let Some(a) = actors.iter().copied().map(usize::from).max() {
             if a >= num_actors {
@@ -999,8 +999,8 @@ impl ChangeGraphCols {
         let mut parents = Vec::with_capacity(len);
         let mut edges = vec![];
 
-        let deps_count: Vec<u32> = hexane::decoder::<u32>(deps_count_bytes).collect();
-        let mut deps_val_iter = hexane::DeltaDecoder::<u32>::new(deps_val_bytes);
+        let deps_count: Vec<u32> = hexane::try_decoder::<u32>(deps_count_bytes)?.collect();
+        let mut deps_val_iter = hexane::DeltaDecoder::<u32>::try_new(deps_val_bytes)?;
 
         let mut num_ops_vec = Vec::with_capacity(len);
         for (i, d) in deps_count.iter().enumerate() {
