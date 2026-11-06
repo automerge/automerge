@@ -601,6 +601,10 @@ impl<'a, C: Codec> RunDecoder for BoolDecoder<'a, C> {
     }
 
     fn next_run_max(&mut self, max: usize) -> Option<Run<bool>> {
+        // no run of no items, as for the RLE decoder
+        if max == 0 {
+            return None;
+        }
         loop {
             if self.remaining > 0 {
                 let count = self.remaining.min(max);
