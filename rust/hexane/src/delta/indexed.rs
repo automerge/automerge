@@ -150,8 +150,9 @@ impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
     /// behaviour for unrepresentable bounds.
     pub fn find_by_value(&self, target: T) -> FindByRange<'_, T, C> {
         match target.try_to_i64() {
-            Some(v) => self.find_by_range(v..v + 1),
-            None => self.find_by_range(0i64..0i64),
+            // inclusive: `v..v + 1` would overflow at `i64::MAX`
+            Some(v) => FindByRange::between(v, v, self),
+            None => FindByRange::default(),
         }
     }
 
@@ -181,6 +182,7 @@ impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
 /// RLE-encoded data.
 pub struct FindByRange<'a, T: DeltaValue, C: Codec = Leb128> {
     lo: i64,
+    /// inclusive
     hi: i64,
     slabs: &'a [Slab<TailOf<T::Inner, C>>],
     outer: Option<FindByValueRange<'a>>,
@@ -204,15 +206,20 @@ impl<'a, T: DeltaValue, C: Codec> FindByRange<'a, T, C> {
     /// If `hi <= lo` the returned iterator is empty.
     pub fn new(lo: i64, hi: i64, col: &'a DeltaColumn<T, C>) -> Self {
         if hi > lo {
-            Self {
-                lo,
-                hi,
-                slabs: &col.col.slabs,
-                outer: Some(col.col.find_by_value_range(lo, hi - 1)),
-                current: None,
-            }
+            Self::between(lo, hi - 1, col)
         } else {
             Self::default()
+        }
+    }
+
+    /// The values in `[lo, hi]`, inclusive; `lo <= hi`.
+    fn between(lo: i64, hi: i64, col: &'a DeltaColumn<T, C>) -> Self {
+        Self {
+            lo,
+            hi,
+            slabs: &col.col.slabs,
+            outer: Some(col.col.find_by_value_range(lo, hi)),
+            current: None,
         }
     }
 }
@@ -240,11 +247,12 @@ impl<T: DeltaValue, C: Codec> Iterator for FindByRange<'_, T, C> {
 }
 
 /// Scan of a single slab's RLE-encoded data for items whose realized
-/// value lies in `[lo, hi)`.  Uses the encoding's run decoder + O(1)
+/// value lies in `[lo, hi]`.  Uses the encoding's run decoder + O(1)
 /// arithmetic per repeat run (no per-item iteration).
 struct SlabScan<'a, C: Codec> {
     decoder: OptI64Decoder<'a, C>,
     lo: i64,
+    /// inclusive
     hi: i64,
     items_before: usize,
     prefix_before: i64,
@@ -281,31 +289,39 @@ impl<C: Codec> Iterator for SlabScan<'_, C> {
             let count = run.count;
             if let Some(v) = run.value {
                 let a = self.prefix_before + self.partial; // f(k) = a + v*k for k in [1, count]
+                let step = v * count as i64;
                 if v == 0 {
-                    if a >= self.lo && a < self.hi {
+                    if a >= self.lo && a <= self.hi {
                         let start = self.items_before + self.item_idx;
                         self.pending = start..start + count;
                     }
                 } else {
-                    // Half-open constraint: lo ≤ a + v·k < hi.  Translate
-                    // to bounds on k (handling v sign).  i64 throughout —
-                    // realized values fit by construction.
-                    let lo_diff = self.lo - a;
-                    let hi_diff = self.hi - a;
-                    let (k_min, k_max) = if v > 0 {
-                        (div_ceil_i64(lo_diff, v), div_ceil_i64(hi_diff, v) - 1)
-                    } else {
-                        (div_floor_i64(hi_diff, v) + 1, div_floor_i64(lo_diff, v))
-                    };
-                    let k_start = k_min.max(1);
-                    let k_end = k_max.min(count as i64);
-                    if k_start <= k_end {
-                        let start = self.items_before + self.item_idx + (k_start as usize - 1);
-                        let len = (k_end - k_start + 1) as usize;
-                        self.pending = start..start + len;
+                    // Constraint: lo ≤ a + v·k ≤ hi, for bounds on k
+                    // (handling v's sign). The run's values `a + v` and
+                    // `a + v·count` are realized values, so they fit, and
+                    // so does the difference of `a` and any value between
+                    // them; `lo - a` itself can overflow. So clamp the
+                    // bounds to the run's values first.
+                    let (first, last) = (a + v, a + step);
+                    let (run_lo, run_hi) = if v > 0 { (first, last) } else { (last, first) };
+                    if run_lo <= self.hi && self.lo <= run_hi {
+                        let lo_diff = self.lo.max(run_lo) - a;
+                        let hi_diff = self.hi.min(run_hi) - a;
+                        let (k_min, k_max) = if v > 0 {
+                            (div_ceil_i64(lo_diff, v), div_floor_i64(hi_diff, v))
+                        } else {
+                            (div_ceil_i64(hi_diff, v), div_floor_i64(lo_diff, v))
+                        };
+                        let k_start = k_min.max(1);
+                        let k_end = k_max.min(count as i64);
+                        if k_start <= k_end {
+                            let start = self.items_before + self.item_idx + (k_start as usize - 1);
+                            let len = (k_end - k_start + 1) as usize;
+                            self.pending = start..start + len;
+                        }
                     }
                 }
-                self.partial += v * count as i64;
+                self.partial += step;
             }
             self.item_idx += count;
         }
