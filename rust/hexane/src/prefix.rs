@@ -332,7 +332,10 @@ impl<T: PrefixValue, C: Codec> PrefixColumn<T, C> {
     /// pull the canonical runs during the decode pass, then
     /// [`finalize`](PrefixColumnLoadIter::finalize) into the finished
     /// `PrefixColumn` (per-slab prefix weights included).
-    pub fn load_iter<'a, F>(data: &'a [u8], opts: crate::LoadOpts<F>) -> PrefixColumnLoadIter<'a, T>
+    pub fn load_iter<'a, F>(
+        data: &'a [u8],
+        opts: crate::LoadOpts<F>,
+    ) -> PrefixColumnLoadIter<'a, T, C>
     where
         F: crate::MaybeFill<T::Get<'a>>,
     {
