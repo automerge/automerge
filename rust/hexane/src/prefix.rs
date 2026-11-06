@@ -21,11 +21,22 @@ use crate::{ColumnValueRef, RleValue, Run};
 /// `Copy` is a supertrait — the inverse-prefix search uses scalar
 /// arithmetic (`Add`/`Sub`/`Div`) by-value many times per iteration, and
 /// every concrete `UnsignedPrefix` type (u32/u64/u128/usize) is `Copy`.
-pub trait UnsignedPrefix: Copy {}
-impl UnsignedPrefix for u32 {}
-impl UnsignedPrefix for u64 {}
-impl UnsignedPrefix for usize {}
-impl UnsignedPrefix for u128 {}
+pub trait UnsignedPrefix: Copy {
+    /// `self + rhs`, or `None` if that overflows.
+    fn checked_add(self, rhs: Self) -> Option<Self>;
+}
+
+macro_rules! unsigned_prefix {
+    ($($t:ty),*) => {$(
+        impl UnsignedPrefix for $t {
+            #[inline]
+            fn checked_add(self, rhs: Self) -> Option<Self> {
+                <$t>::checked_add(self, rhs)
+            }
+        }
+    )*};
+}
+unsigned_prefix!(u32, u64, usize, u128);
 
 // ── PrefixValue trait ────────────────────────────────────────────────────────
 
@@ -1002,11 +1013,15 @@ where
         // currently this isnt a bottleneck anywhere so not a big deal
         let col = self.col.expect("advance_prefix on default PrefixIter");
         // get_index_for_total works in absolute prefixes: undo any
-        // reset_prefix offset before seeking the tree
-        let target = self.total + self.base + n;
+        // reset_prefix offset before seeking the tree. A target past the
+        // prefix type's limit is past every item.
         let one = T::Prefix::try_from(1).unwrap_or_default();
-        let seek_target = target + one;
-        let target_pos = col.get_index_for_total(seek_target);
+        let seek_target = UnsignedPrefix::checked_add(self.total + self.base, n)
+            .and_then(|target| UnsignedPrefix::checked_add(target, one));
+        let target_pos = match seek_target {
+            Some(seek_target) => col.get_index_for_total(seek_target),
+            None => col.len(),
+        };
 
         if target_pos < self.inner.pos || target_pos >= self.inner.pos + self.inner.items_left {
             if self.inner.items_left > 0 {
