@@ -538,7 +538,20 @@ impl<'a, T: ColumnValueRef, C: Codec> Iter<'a, T, C> {
     ///
     /// After this call the iterator yields the items in `range` and then
     /// returns `None`. Equivalent to `set_max(range.end)` followed by
-    /// `advance_to(range.start)`.
+    /// `advance_to(range.start)`. It moves only forwards: if `range`
+    /// starts before [`pos`](Self::pos), it yields the items from `pos()`
+    /// to `range.end`.
+    ///
+    /// ```
+    /// let col = hexane::Column::<u64>::from_values(vec![10, 20, 30, 40, 50]);
+    /// let mut it = col.iter();
+    /// it.shift(1..3);
+    /// assert_eq!(it.collect::<Vec<_>>(), vec![20, 30]);
+    /// let mut it = col.iter();
+    /// it.nth(2);
+    /// it.shift(1..4); // already at 3
+    /// assert_eq!(it.collect::<Vec<_>>(), vec![40]);
+    /// ```
     pub fn shift(&mut self, range: Range<usize>) {
         self.set_max(range.end);
         self.advance_to(range.start);
