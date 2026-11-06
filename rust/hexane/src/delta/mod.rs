@@ -1132,13 +1132,7 @@ impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
             return;
         }
 
-        // a deletion alone can't widen the values' span
-        let inserts = items.peek().is_some();
-        let (lo, hi) = if inserts {
-            start_bound::<T, C>(&self.col)
-        } else {
-            (i128::MAX, i128::MIN)
-        };
+        let (lo, hi) = start_bound::<T, C>(&self.col);
         let (prev, skip, next_val) = self.find_boundaries(index, del);
         // When a boundary non-null follows the splice, replace `del` original
         // items + `skip` preserved nulls + 1 boundary, and inline the bulk
@@ -1158,11 +1152,10 @@ impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
             ),
         );
         self.col.splice_inner(index, total_del, &mut iter);
-        if inserts {
-            // verified (`SpanPlan::fits`): where the bound, widened by the
-            // items, fits, so do the column's values
-            check_span::<T, C>(&self.col, || iter.plan.fits(T::MIN_I64, T::MAX_I64));
-        }
+        // verified (`SpanPlan::fits`): where the bound, widened by the
+        // values written, fits, so do the column's values; a deletion
+        // writes only values the column held, so its bound fits
+        check_span::<T, C>(&self.col, || iter.plan.fits(T::MIN_I64, T::MAX_I64));
     }
 
     /// Find the boundary data needed to fix up a splice at `[index, index + del)`.
