@@ -121,7 +121,10 @@ impl<'a> Untangler<'a> {
         for i in self.updates_stack.iter().rev() {
             self.change_ops[*i].pos = Some(self.max);
             self.change_ops[*i].subsort = self.count;
-            self.width = 0;
+            // as in `element_update`: the doc op's walk already counted the
+            // element, unless a successor in this batch deletes it; an
+            // update that isn't visible (an increment, or one the mask
+            // hides) leaves it as it is
             if self.change_ops[*i].visible() {
                 self.width = self.change_ops[*i].width(self.seq_type, self.text_encoding);
             }
