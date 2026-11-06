@@ -749,7 +749,8 @@ pub(crate) fn normalize_splices(
         dst_pos = sp.pos + sp.delete;
         src_pos = src_pos.max(sp.range.end);
         let start = sp.range.start.min(src_len);
-        let end = sp.range.end.min(src_len);
+        // a reversed range is empty, as a `Range` is
+        let end = sp.range.end.min(src_len).max(start);
         if end == start && sp.delete == 0 {
             continue;
         }
