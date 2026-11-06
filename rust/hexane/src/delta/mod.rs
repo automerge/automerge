@@ -1685,9 +1685,12 @@ impl<'a, T: DeltaValue, C: Codec> DeltaIter<'a, T, C> {
         }
 
         let Some(t) = target.try_to_i64() else {
-            // outside the storable domain: greater than anything here
+            // outside the storable domain: greater than anything here,
+            // so it goes where the items end (the window's end, or the
+            // column's if that comes first)
             self.advance_to(end);
-            return end..end;
+            let at = self.pos();
+            return at..at;
         };
 
         // jump the probe to the slab where the running prefix first
@@ -1763,11 +1766,12 @@ impl<'a, T: DeltaValue, C: Codec> DeltaIter<'a, T, C> {
                 }
             }
         }
-        if run_start == end {
-            run_end = end;
-        }
-
         self.advance_to(run_start);
+        if run_start == end {
+            // above every value: where the items end
+            let at = self.pos();
+            return at..at;
+        }
         run_start..run_end
     }
 
