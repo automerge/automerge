@@ -946,6 +946,7 @@ impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
             del,
             runs.into_iter()
                 .filter(|r| r.count > 0)
+                .inspect(DeltaRun::check_domain::<T>)
                 .map(SpliceItem::Run),
         );
     }
@@ -1295,6 +1296,7 @@ where
             if run.count == 0 {
                 continue;
             }
+            run.check_domain::<T>();
             let Some(d) = run.delta else {
                 // a null run holds no delta and leaves the running value
                 // where it is
@@ -1451,6 +1453,34 @@ pub struct DeltaRun {
     /// The per-item delta; `None` is a run of nulls.
     pub delta: Option<i64>,
     pub count: usize,
+}
+
+impl DeltaRun {
+    /// Panic unless the run's values lie in `T`'s domain: a run carries
+    /// no type, so one from a wider column (an `i64` one, say) can hold
+    /// values a `T` column can't. A run's values move one way, so its
+    /// ends bound them.
+    #[inline(always)]
+    fn check_domain<T: DeltaValue>(&self) {
+        // a domain of all of `i64` holds any run an `i64` can describe
+        if T::MIN_I64 == i64::MIN && T::MAX_I64 == i64::MAX {
+            return;
+        }
+        let Some(d) = self.delta else {
+            return;
+        };
+        if self.count == 0 {
+            return;
+        }
+        let p = self.prefix as i128;
+        let first = p + d as i128;
+        let last = p + d as i128 * self.count as i128;
+        let (lo, hi) = (T::MIN_I64 as i128, T::MAX_I64 as i128);
+        assert!(
+            lo <= first.min(last) && first.max(last) <= hi,
+            "delta run out of domain: its values run from {first} to {last}"
+        );
+    }
 }
 
 // ── DeltaIter ──────────────────────────────────────────────────────────────
