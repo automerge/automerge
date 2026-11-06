@@ -1239,7 +1239,9 @@ impl<'a, T: PrefixValue, C: Codec> PrefixIter<'a, T, C> {
     ///
     /// After this call the iterator yields the items in `range` and then
     /// returns `None`. Equivalent to `set_max(range.end)` followed by
-    /// `advance_to(range.start)`.
+    /// `advance_to(range.start)`. It moves only forwards: if `range`
+    /// starts before [`pos`](Self::pos), it yields the items from `pos()`
+    /// to `range.end`.
     pub fn shift(&mut self, range: std::ops::Range<usize>) {
         self.set_max(range.end);
         self.advance_to(range.start);
