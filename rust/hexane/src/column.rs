@@ -803,7 +803,8 @@ impl IterState {
     /// Restores the iterator position in any column.
     ///
     /// Returns [`PackError::InvalidResume`] if `column` was mutated since
-    /// [`Iter::suspend`].
+    /// [`Iter::suspend`], or if the position doesn't fit it (a state taken
+    /// from another column).
     pub fn try_resume<'a, T, C, WF, Idx>(
         &self,
         column: &'a Column<T, C, WF, Idx>,
@@ -822,6 +823,10 @@ impl IterState {
         }
         let slabs = &column.slabs[..];
         if self.slab_idx >= slabs.len() {
+            // past the last slab: at or past the column's end
+            if self.pos < column.len() {
+                return Err(PackError::InvalidResume);
+            }
             return Ok(Iter {
                 slabs,
                 col: Some(column),
@@ -834,6 +839,15 @@ impl IterState {
             });
         }
         let slab = &slabs[self.slab_idx];
+        // the slab and the offset in it must put the iterator where the
+        // state says, in this column
+        let slab_start = column.index.items_before(self.slab_idx);
+        if self.slab_consumed > slab.len
+            || slab_start.checked_add(self.slab_consumed) != Some(self.pos)
+            || self.pos.checked_add(self.items_left).is_none()
+        {
+            return Err(PackError::InvalidResume);
+        }
         let mut decoder = T::Encoding::<C>::decoder(&slab.data);
         if self.slab_consumed > 0 {
             decoder.nth(self.slab_consumed - 1);
