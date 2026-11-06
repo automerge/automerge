@@ -377,6 +377,32 @@ impl<T: ColumnValue> ColumnValueRef for T {
 ///
 /// This is implemented by all value types that use [`RleEncoding`] — i.e.,
 /// everything except `bool` (which uses [`BoolEncoding`]).
+///
+/// # Contract
+///
+/// Loading accepts exactly the canonical encodings of a column, and a
+/// column that loads saves back to the same bytes, as long as each value
+/// type's own encoding is a code:
+///
+/// * [`pack`](Self::pack) writes a non-null value as a nonempty string of
+///   bytes and returns `true`, and no value's bytes begin another's: they
+///   are its alone, and they tell where it ends. A null it doesn't write
+///   (it returns `false`).
+/// * [`try_unpack`](Self::try_unpack) succeeds exactly on data that starts
+///   with a value's bytes, returning that value and their length, and
+///   fails on any other data; [`unpack`](Self::unpack) and
+///   [`value_len`](Self::value_len) agree with it where it succeeds.
+/// * `==` on [`Get`](ColumnValueRef::Get) values is equality: equal values
+///   have the same bytes.
+/// * A nullable type ([`NULLABLE`](Self::NULLABLE)) has one null,
+///   [`get_null`](Self::get_null), which [`is_null`](Self::is_null) picks
+///   out. So `Option<T>` needs a `T` that isn't nullable.
+///
+/// The crate's own impls keep to this, and it is what the verified RLE code
+/// assumes of every value type. In particular, convert a length or a
+/// number read from the data with a checked conversion: `as` drops the high
+/// bits (of a `u64` length, on a 32-bit target), and the value would then
+/// load from bytes that aren't its own.
 pub trait RleValue: ColumnValueRef {
     /// Whether this column type allows null entries.
     ///

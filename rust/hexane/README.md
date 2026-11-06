@@ -267,7 +267,8 @@ Two small trait impls teach a `Copy` type the wire format, and both
 `Column<T>` and `Column<Option<T>>` fall out — see the worked `ValueMeta`
 example on [`ColumnValue`]. Implement [`PrefixValue`] too and
 `PrefixColumn<T>` works as well; automerge's op metadata columns are built
-exactly this way.
+exactly this way. The encoding must be a code, so that each value's bytes
+are its alone: [`RleValue`] spells out what that asks of an impl.
 
 ## Format stability
 
@@ -411,7 +412,8 @@ compiles them away. To check them, run `cargo verus verify -p hexane
   type, which loads and edits check.
 
 **Trusted, not proved:** each value type's and codec's own encode and
-decode, which the verified code reaches through traits; the thin glue that
+decode, which the verified code reaches through traits (the contract on
+`RleValue`); the thin glue that
 connects the generic column types to the verified cores, and the closures
 passed through it (including the slabs a new column is built from, which
 come from the verified loaders, fills and encoders); that the weight a
@@ -472,4 +474,5 @@ License: MIT.
 [`RawColumn`]: https://docs.rs/hexane/latest/hexane/struct.RawColumn.html
 [`ColumnValue`]: https://docs.rs/hexane/latest/hexane/trait.ColumnValue.html
 [`PrefixValue`]: https://docs.rs/hexane/latest/hexane/trait.PrefixValue.html
+[`RleValue`]: https://docs.rs/hexane/latest/hexane/trait.RleValue.html
 [`load`]: https://docs.rs/hexane/latest/hexane/struct.DeltaColumn.html#method.load
