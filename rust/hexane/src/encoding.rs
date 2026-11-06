@@ -97,6 +97,14 @@ pub trait ColumnEncoding: Default {
     /// Create a decoder that yields all items in `slab` in order.
     fn decoder(slab: &[u8]) -> Self::Decoder<'_>;
 
+    /// [`decoder`](Self::decoder) for a slab of this crate's own, whose
+    /// bytes were checked when they were loaded or written, without the
+    /// checks `decoder` makes of bytes from outside.
+    #[doc(hidden)]
+    fn slab_decoder(slab: &[u8], _: crate::sealed::Trusted) -> Self::Decoder<'_> {
+        Self::decoder(slab)
+    }
+
     /// A [`Decoder`](Self::Decoder)'s position, detached from the bytes
     /// it was reading.
     ///

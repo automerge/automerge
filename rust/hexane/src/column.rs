@@ -373,7 +373,7 @@ impl<T: ColumnValueRef, C: Codec> Default for Iter<'_, T, C> {
             slabs: &[],
             col: None,
             slab_idx: 0,
-            decoder: T::Encoding::<C>::decoder(&[]),
+            decoder: T::Encoding::<C>::slab_decoder(&[], crate::sealed::Trusted(())),
             items_left: 0,
             slab_remaining: 0,
             pos: 0,
@@ -403,7 +403,10 @@ impl<'a, T: ColumnValueRef, C: Codec> Iterator for Iter<'a, T, C> {
                 return None;
             }
             self.slab_remaining = self.slabs[self.slab_idx].len;
-            self.decoder = T::Encoding::<C>::decoder(&self.slabs[self.slab_idx].data);
+            self.decoder = T::Encoding::<C>::slab_decoder(
+                &self.slabs[self.slab_idx].data,
+                crate::sealed::Trusted(()),
+            );
         }
     }
 
@@ -461,7 +464,10 @@ impl<'a, T: ColumnValueRef, C: Codec> Iterator for Iter<'a, T, C> {
                 if self.slab_idx >= self.slabs.len() {
                     break;
                 }
-                self.decoder = T::Encoding::<C>::decoder(&self.slabs[self.slab_idx].data);
+                self.decoder = T::Encoding::<C>::slab_decoder(
+                    &self.slabs[self.slab_idx].data,
+                    crate::sealed::Trusted(()),
+                );
                 self.slab_remaining = self.slabs[self.slab_idx].len;
             }
         }
@@ -577,7 +583,10 @@ impl<'a, T: ColumnValueRef, C: Codec> Iter<'a, T, C> {
                 return None;
             }
             self.slab_remaining = self.slabs[self.slab_idx].len;
-            self.decoder = T::Encoding::<C>::decoder(&self.slabs[self.slab_idx].data);
+            self.decoder = T::Encoding::<C>::slab_decoder(
+                &self.slabs[self.slab_idx].data,
+                crate::sealed::Trusted(()),
+            );
         };
 
         let value = run.value;
@@ -594,7 +603,10 @@ impl<'a, T: ColumnValueRef, C: Codec> Iter<'a, T, C> {
                 break;
             }
             self.slab_remaining = self.slabs[self.slab_idx].len;
-            self.decoder = T::Encoding::<C>::decoder(&self.slabs[self.slab_idx].data);
+            self.decoder = T::Encoding::<C>::slab_decoder(
+                &self.slabs[self.slab_idx].data,
+                crate::sealed::Trusted(()),
+            );
 
             let _max = self.items_left.min(self.slab_remaining).min(max);
             if let Some(next_run) = self.decoder.next_run_max(_max) {
@@ -609,7 +621,10 @@ impl<'a, T: ColumnValueRef, C: Codec> Iter<'a, T, C> {
                 } else {
                     // Value doesn't match — reset decoder so the consumed
                     // run can be re-read by subsequent calls.
-                    self.decoder = T::Encoding::<C>::decoder(&self.slabs[self.slab_idx].data);
+                    self.decoder = T::Encoding::<C>::slab_decoder(
+                        &self.slabs[self.slab_idx].data,
+                        crate::sealed::Trusted(()),
+                    );
                 }
             }
             break;
@@ -642,7 +657,7 @@ impl<'a, T: ColumnValueRef, C: Codec> Iter<'a, T, C> {
             self.items_left = 0;
             // else a later re-extend decodes items already passed
             self.slab_remaining = 0;
-            self.decoder = T::Encoding::<C>::decoder(&[]);
+            self.decoder = T::Encoding::<C>::slab_decoder(&[], crate::sealed::Trusted(()));
             false
         } else {
             debug_assert!(pos >= self.pos);
@@ -650,7 +665,8 @@ impl<'a, T: ColumnValueRef, C: Codec> Iter<'a, T, C> {
             self.pos = pos;
             self.slab_idx = si;
             self.slab_remaining = self.slabs[si].len;
-            self.decoder = T::Encoding::<C>::decoder(&self.slabs[si].data);
+            self.decoder =
+                T::Encoding::<C>::slab_decoder(&self.slabs[si].data, crate::sealed::Trusted(()));
             self.items_left -= skipped;
             true
         }
@@ -831,7 +847,7 @@ impl IterState {
                 slabs,
                 col: Some(column),
                 slab_idx: slabs.len(),
-                decoder: T::Encoding::<C>::decoder(&[]),
+                decoder: T::Encoding::<C>::slab_decoder(&[], crate::sealed::Trusted(())),
                 items_left: 0,
                 slab_remaining: 0,
                 pos: self.pos,
@@ -848,7 +864,7 @@ impl IterState {
         {
             return Err(PackError::InvalidResume);
         }
-        let mut decoder = T::Encoding::<C>::decoder(&slab.data);
+        let mut decoder = T::Encoding::<C>::slab_decoder(&slab.data, crate::sealed::Trusted(()));
         if self.slab_consumed > 0 {
             decoder.nth(self.slab_consumed - 1);
         }
@@ -979,7 +995,10 @@ impl<'a, T: ColumnValueRef, C: Codec> Iter<'a, T, C> {
 
                 while lo < hi {
                     let mid = lo + (hi - lo) / 2;
-                    let mut dec = T::Encoding::<C>::decoder(col.slab_data(mid));
+                    let mut dec = T::Encoding::<C>::slab_decoder(
+                        col.slab_data(mid),
+                        crate::sealed::Trusted(()),
+                    );
                     let head = dec.next_run().unwrap();
                     match T::shorten(&head.value).cmp(&T::shorten(&target)) {
                         Ordering::Less => {
@@ -1410,7 +1429,7 @@ where
                 slabs: &self.slabs,
                 col: Some(self),
                 slab_idx: self.slabs.len(),
-                decoder: T::Encoding::<C>::decoder(&[]),
+                decoder: T::Encoding::<C>::slab_decoder(&[], crate::sealed::Trusted(())),
                 items_left: 0,
                 slab_remaining: 0,
                 pos: start,
@@ -1418,7 +1437,8 @@ where
             };
         }
         let (si, offset) = self.index.find_slab(start);
-        let mut decoder = T::Encoding::<C>::decoder(&self.slabs[si].data);
+        let mut decoder =
+            T::Encoding::<C>::slab_decoder(&self.slabs[si].data, crate::sealed::Trusted(()));
         if offset > 0 {
             decoder.nth(offset - 1);
         }
@@ -1446,7 +1466,7 @@ where
                 if s.len == 0 {
                     return true;
                 }
-                let mut dec = T::Encoding::<C>::decoder(&s.data);
+                let mut dec = T::Encoding::<C>::slab_decoder(&s.data, crate::sealed::Trusted(()));
                 match dec.next_run() {
                     Some(run) => {
                         run.count == s.len && T::eq(run.value, value) && dec.next_run().is_none()
@@ -1477,7 +1497,7 @@ where
     pub fn dump_slabs(&self) {
         let mut offset = 0;
         for (i, s) in self.slabs.iter().enumerate() {
-            let mut dec = T::Encoding::<C>::decoder(&s.data);
+            let mut dec = T::Encoding::<C>::slab_decoder(&s.data, crate::sealed::Trusted(()));
             let first = dec.next_run();
             let last = T::Encoding::<C>::last_run(s);
             log!(
