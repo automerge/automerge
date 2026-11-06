@@ -2,6 +2,7 @@ use crate::attrib::{Accumulate, Attribution};
 use crate::btree::SlabAggregate;
 use crate::cursor::WeightOf;
 use crate::sealed::Sealed;
+use crate::splices::Normalize;
 use std::marker::PhantomData;
 use std::ops::{AddAssign, Range, SubAssign};
 #[allow(unused_imports)]
@@ -606,51 +607,13 @@ pub(crate) fn normalize_splices(
     src_len: usize,
     dst_len: usize,
 ) -> Vec<Splice> {
-    let mut out: Vec<Splice> = Vec::new();
-    let mut src_pos = 0usize;
-    let mut dst_pos = 0usize;
+    // verified (`splices::Normalize`): the list is normalized, and applied
+    // gives what the splices give one by one
+    let mut n = Normalize::new(src_len, dst_len, Ghost::assume_new(), Ghost::assume_new());
     for sp in splices {
-        assert!(
-            sp.pos >= dst_pos,
-            "destination regions must be ascending and non-overlapping"
-        );
-        // `pos + delete` could overflow
-        assert!(
-            sp.pos <= dst_len && sp.delete <= dst_len - sp.pos,
-            "splice out of bounds"
-        );
-        assert!(
-            sp.range.start >= src_pos,
-            "src ranges must be ascending and non-overlapping"
-        );
-        dst_pos = sp.pos + sp.delete;
-        src_pos = src_pos.max(sp.range.end);
-        let start = sp.range.start.min(src_len);
-        let end = sp.range.end.min(src_len);
-        // an empty range (a reversed one too, as a `Range`) copies
-        // nothing, and stays where the copying is: at the end of the last
-        // range kept, so the ranges kept still ascend
-        let (start, end) = if start < end {
-            (start, end)
-        } else if sp.delete == 0 {
-            continue;
-        } else {
-            let at = out.last().map_or(0, |last| last.range.end);
-            (at, at)
-        };
-        match out.last_mut() {
-            Some(last) if last.pos + last.delete == sp.pos && last.range.end == start => {
-                last.delete += sp.delete;
-                last.range.end = end;
-            }
-            _ => out.push(Splice {
-                pos: sp.pos,
-                delete: sp.delete,
-                range: start..end,
-            }),
-        }
+        n.push(sp);
     }
-    out
+    n.finish()
 }
 
 // ── Runs ────────────────────────────────────────────────────────────────────

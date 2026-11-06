@@ -382,6 +382,11 @@ compiles them away. To check them, run `cargo verus verify -p hexane
   the empty range where the target would go. Unsorted, it returns some
   range inside the window.
 * `RawColumn`.
+* The splices `copy_ranges` takes: normalizing them checks their order
+  and bounds, and gives a list in order in both columns, with every range
+  inside the source and none doing nothing, which applied gives what the
+  splices give one by one (over a model of the columns as sequences; how
+  either strategy then carries the list out is glue).
 * Prefix sums: a prefix column's slab weights hold each slab's sum, as an
   edit or a build computes them; `get_prefix` and `get_total` return the
   sum of the values before (through) the item, from the index's sum for
