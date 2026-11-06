@@ -198,6 +198,9 @@ impl<'a, T: ColumnValueRef, C: crate::Codec + Debug> Shiftable for crate::column
     }
 
     fn seek_to(&mut self, pos: usize) -> Option<crate::Run<T::Get<'a>>> {
+        if pos < self.0.pos() {
+            return None;
+        }
         self.0.advance_to(pos);
         self.next()
     }
@@ -230,6 +233,9 @@ impl<T: DeltaValue, C: crate::Codec + Debug> Shiftable for crate::delta::DeltaRu
     }
 
     fn seek_to(&mut self, pos: usize) -> Option<crate::delta::DeltaRun> {
+        if pos < self.0.pos() {
+            return None;
+        }
         self.0.advance_to(pos);
         self.next()
     }
