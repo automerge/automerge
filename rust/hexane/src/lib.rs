@@ -123,6 +123,7 @@ mod bijou64;
 pub mod bool;
 pub(crate) mod bool_edit;
 pub(crate) mod bool_enc;
+pub(crate) mod bool_unique;
 pub(crate) mod bool_wire;
 pub(crate) mod btree;
 pub mod codec;

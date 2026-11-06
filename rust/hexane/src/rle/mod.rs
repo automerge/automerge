@@ -15,6 +15,7 @@ pub(crate) mod splice;
 pub(crate) mod state;
 #[cfg(test)]
 mod tests;
+pub(crate) mod unique;
 
 use crate::encoder::RleEncoder;
 pub use decoder::RleDecoder;

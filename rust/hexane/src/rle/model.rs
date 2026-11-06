@@ -14,9 +14,8 @@
 //! writer may produce: no two adjacent literals or null runs, no equal
 //! values side by side across a group boundary or inside a literal, and
 //! no repeat run shorter than two.  Load accepts exactly the canonical
-//! encodings, so a column that loads saves back to the same bytes. (That
-//! last step needs each value sequence to have only one canonical
-//! grouping, which follows from the definition but is not proved.)
+//! encodings, so a column that loads saves back to the same bytes: each
+//! value sequence has only one canonical grouping (`unique`).
 //!
 //! The value type and the varint codec come in through [`RleOps`].  Its
 //! implementation, [`Ops`], is trusted: it forwards to the column type's
