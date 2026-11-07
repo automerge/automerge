@@ -3,7 +3,7 @@
 //! its slabs can be rebuilt in place.
 
 use crate::column::{Column, WeightFn};
-use crate::cursor::{Cursor, Inserting, Slabs, Visiting, WeightOf};
+use crate::cursor::{splice_feed, Cursor, Feeding, Inserting, Slabs, Visiting, WeightOf};
 use crate::encoding::ColumnEncoding;
 use crate::index::ColumnIndex;
 use crate::{AsColumnRef, Codec, ColumnValueRef, Run};
@@ -326,6 +326,41 @@ where
             &mut self.col.total_len,
             self.col.max_segments,
             &mut self.col.counter,
+        );
+    }
+}
+
+impl<T, C, WF, Idx> Column<T, C, WF, Idx>
+where
+    T: ColumnValueRef,
+    C: Codec,
+    WF: WeightFn<T, C>,
+    Idx: ColumnIndex<WF::Weight>,
+{
+    /// Delete `del` items at `at` and insert `runs` there: one cursor
+    /// opened, deleting, inserting and closed, the whole chain verified
+    /// (`cursor::splice_feed`). The caller checks the range.
+    pub(crate) fn splice_feed<V: AsColumnRef<T>>(
+        &mut self,
+        at: usize,
+        del: usize,
+        runs: impl Iterator<Item = (V, usize)>,
+    ) {
+        // the rebuilds count values in a `usize`, with room for three more
+        assert!(self.total_len <= usize::MAX - 3, "column too long to edit");
+        let mut f = |_: T::Get<'_>, _: usize| {};
+        let mut g = |_: &WF::Weight| {};
+        splice_feed::<Model<T, C>, WF::Weight, Idx, G<T, C, WF>, _, _, _>(
+            &mut self.slabs,
+            &mut self.index,
+            &mut self.total_len,
+            self.max_segments,
+            &mut self.counter,
+            at,
+            del,
+            &mut Visiting::<Enc<T, C>, _>::new(&mut f),
+            &mut g,
+            &mut Feeding::<Enc<T, C>, _>::new(runs),
         );
     }
 }

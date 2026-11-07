@@ -15,6 +15,9 @@
 //! the original values not yet passed — with the open rebuild, if any,
 //! holding the end of `p`.  Each operation is proved to keep `col_ok` and
 //! `wf` and to do exactly what it says to `p` and the original position.
+//! A whole splice, the chain behind `Column::splice` and the mutators
+//! built on it, is one verified function ([`splice_feed`]): open,
+//! delete, insert every run a feed gives until it ends, close.
 //!
 //! The slab-level operations are the encodings' own, through each
 //! encoding's slab model ([`Slabs`], named by `SlabEdit::Model`), which
@@ -22,9 +25,10 @@
 //! ([`BoolModel`](crate::bool_edit::BoolModel)) and RLE columns'
 //! ([`RleModel`](crate::rle::edit::RleModel)).  Trusted, in the bridges
 //! at the bottom of this file: the dispatch of closures and inserted
-//! values to an encoding's rebuild (`Visiting`, `Inserting`), and the
-//! weight functions (`Weigh`: what a slab's weight is, `wrel`, and that
-//! it counts its items).  The index is verified ([`IndexOps`]).
+//! values to an encoding's rebuild (`Visiting`, `Inserting`), that a
+//! caller's iterator keeps the count a [`RunFeed`] promises (`Feeding`),
+//! and the weight functions (`Weigh`: what a slab's weight is, `wrel`,
+//! and that it counts its items).  The index is verified ([`IndexOps`]).
 //!
 //! This covers delta columns too.  `col_ok` asks for a `plain` index,
 //! one whose shape needs only its item counts to fit, and the B-tree is
@@ -1854,6 +1858,101 @@ impl<E: Slabs> Cursor<E> {
     }
 }
 
+/// Runs to insert, from outside: the values a splice writes. Nothing is
+/// assumed of the values, only that the feed keeps count of them.
+pub(crate) trait RunFeed<E: Slabs> {
+    type X: Insertable<E>;
+
+    /// The values given so far, each run as its value repeated.
+    spec fn given(&self) -> Seq<E::V>;
+
+    /// The feed has said it has no more.
+    spec fn ended(&self) -> bool;
+
+    fn next_run(&mut self) -> (r: Option<(Self::X, usize)>)
+        ensures
+            match r {
+                Some((x, n)) => final(self).given() == old(self).given() + Seq::new(n as nat, |_i: int| x.val()),
+                None => final(self).given() == old(self).given() && final(self).ended(),
+            },
+    ;
+}
+
+/// One splice, as a cursor's steps: open at `at`, delete `del` items,
+/// insert the runs `feed` gives until it runs out, and close. The column
+/// stays a column, and its values become the original ones before `at`,
+/// every value `feed` gives until it ends, then the originals from
+/// `at + del`. Ends when `feed` does.
+#[verifier::exec_allows_no_decreases_clause]
+#[inline(always)]
+pub(crate) fn splice_feed<E: Slabs, W, I: IndexOps<W>, G: Weigh<E::Tail, W>, F: Visitor<E>, S: WeightSink<W>, R: RunFeed<E>>(
+    slabs: &mut Vec<Slab<E::Tail>>,
+    index: &mut I,
+    total_len: &mut usize,
+    max_segments: usize,
+    counter: &mut usize,
+    at: usize,
+    del: usize,
+    f: &mut F,
+    g: &mut S,
+    feed: &mut R,
+) -> (ins: Ghost<Seq<E::V>>)
+    requires
+        col_ok::<E, W, I, G>(old(slabs)@, *old(index), *old(total_len), max_segments),
+        at <= *old(total_len),
+        del <= *old(total_len) - at,
+        *old(total_len) + 3 <= usize::MAX,
+    ensures
+        col_ok::<E, W, I, G>(final(slabs)@, *final(index), *final(total_len), max_segments),
+        vals_of::<E>(final(slabs)@) == vals_of::<E>(old(slabs)@).take(at as int) + ins@
+            + vals_of::<E>(old(slabs)@).skip(at + del),
+        final(feed).given() == old(feed).given() + ins@,
+        final(feed).ended(),
+{
+    let ghost o = vals_of::<E>(slabs@);
+    proof {
+        lemma_vals_total::<E>(slabs@);
+    }
+    let mut cur = Cursor::<E>::new::<W, I, G>(slabs, index, *total_len, Ghost(max_segments), at);
+    cur.delete_with::<W, I, G, F, S>(slabs, index, total_len, max_segments, counter, del, f, g);
+    let ghost mut ins: Seq<E::V> = Seq::empty();
+    let ghost g0 = feed.given();
+    loop
+        invariant
+            cur.ok::<W, I, G>(slabs@, *index, *total_len, max_segments),
+            cur.o@ == o,
+            cur.orig == at + del,
+            cur.p@ == o.take(at as int) + ins,
+            feed.given() == g0 + ins,
+        ensures
+            cur.ok::<W, I, G>(slabs@, *index, *total_len, max_segments),
+            cur.o@ == o,
+            cur.orig == at + del,
+            cur.p@ == o.take(at as int) + ins,
+            feed.given() == g0 + ins,
+            feed.ended(),
+    {
+        match feed.next_run() {
+            None => break,
+            Some((x, n)) => {
+                let ghost xv = x.val();
+                cur.insert(slabs, max_segments, x, n);
+                proof {
+                    let run = Seq::new(n as nat, |_i: int| xv);
+                    assert(g0 + (ins + run) =~= (g0 + ins) + run);
+                    ins = ins + run;
+                    assert(cur.p@ =~= o.take(at as int) + ins);
+                }
+            },
+        }
+    }
+    cur.close::<W, I, G>(slabs, index, total_len, max_segments, counter);
+    proof {
+        cur.lemma_clean(slabs@);
+    }
+    Ghost(ins)
+}
+
 } // verus!
 
 // ── Trusted bridges ────────────────────────────────────────────────────────
@@ -1928,6 +2027,41 @@ impl<E: SlabEdit, X: AsColumnRef<<E as ColumnEncoding>::Value>> Insertable<<E as
     #[inline(always)]
     fn insert_into(self, e: &mut <E as SlabEdit>::Edit, n: usize) {
         e.insert(self.0, n)
+    }
+}
+
+/// The runs a splice inserts, from the caller's iterator, as the
+/// [`RunFeed`] of encoding `E`'s slab model.
+pub(crate) struct Feeding<E, It>(It, PhantomData<fn() -> E>);
+
+impl<E, It> Feeding<E, It> {
+    #[inline(always)]
+    pub(crate) fn new(it: It) -> Self {
+        Feeding(it, PhantomData)
+    }
+}
+
+impl<
+        E: SlabEdit,
+        V: AsColumnRef<<E as ColumnEncoding>::Value>,
+        It: Iterator<Item = (V, usize)>,
+    > RunFeed<<E as SlabEdit>::Model> for Feeding<E, It>
+{
+    type X = Inserting<E, V>;
+
+    #[cfg(verus_keep_ghost)]
+    fn given(&self) -> Seq<<<E as SlabEdit>::Model as Slabs>::V> {
+        unimplemented!()
+    }
+
+    #[cfg(verus_keep_ghost)]
+    fn ended(&self) -> bool {
+        unimplemented!()
+    }
+
+    #[inline(always)]
+    fn next_run(&mut self) -> Option<(Inserting<E, V>, usize)> {
+        self.0.next().map(|(v, n)| (Inserting::new(v), n))
     }
 }
 

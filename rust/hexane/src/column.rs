@@ -1630,12 +1630,9 @@ where
             index <= self.total_len && del <= self.total_len - index,
             "splice range out of bounds"
         );
-        let mut e = self.edit_at(index);
-        e.delete(del);
-        for (v, n) in values {
-            e.insert_run(v, n);
-        }
-        e.finish();
+        // verified (`cursor::splice_feed`): the column's values become
+        // those before `index`, the runs, then those from `index + del`
+        self.splice_feed(index, del, values.into_iter());
     }
 }
 

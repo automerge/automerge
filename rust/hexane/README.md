@@ -315,6 +315,13 @@ compiles them away. To check them, run `cargo verus verify -p hexane
   that bridges them is written). The B-tree's invariant asks only that
   its item counts add up; its aggregates are exact wherever they are
   representable, which is all its queries need.
+* `Column::splice`, and with it `insert`, `remove`, `remove_n`, `push`,
+  `clear`, `truncate`, `splice_runs` and the prefix and delta columns'
+  splices: the chain of cursor steps (open, delete, insert each run,
+  close) is one verified function (`cursor::splice_feed`). Given the
+  column's invariant, the column stays well-formed and its values become
+  those before the splice, the runs inserted, then those after the ones
+  deleted. Nothing is assumed of the runs, which come from the caller.
 * Building a column: its index and length are computed from its slabs,
   checking that each slab's weight counts its items, and `Column::fill`
   makes a well-formed slab of the values asked for.
@@ -464,6 +471,10 @@ first and values outside the domain last.
   deleting or jumping over is what it did, and that the column's deltas
   the plans are given (as ghosts, for the span check's bound) are its
   own.
+* `RleEncoderState` and `DeltaEncoderState`, which write into a buffer
+  the caller passes to each call, are proved only if every call gets the
+  same buffer, with the bytes they wrote unchanged in between. Their
+  docs say so; nothing checks it.
 * Where a precondition of the verified code cannot be shown from the
   specifications (a slab of `i64::MAX` bytes or more, or a column or
   encoder of nearly `usize::MAX` items), the code checks it and panics
