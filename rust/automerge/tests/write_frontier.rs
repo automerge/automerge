@@ -200,7 +200,8 @@ fn current_slow_paths_honour_mask() {
     assert_eq!(spans, "bob hello");
     assert_eq!(doc.length(&text), 9);
     assert_eq!(doc.keys(ROOT).count(), 2);
-    // counter slow path: alice's post-epoch increment is masked out
+    // counter: alice's post-epoch increment is masked out. The counter index
+    // is built under the mask, so this current read takes the indexed path.
     assert_eq!(doc.get(ROOT, "c").unwrap().unwrap().0.as_i64(), Some(11));
     // values() must agree with keys(): alice's post-epoch put is filtered
     let values: Vec<_> = doc

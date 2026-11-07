@@ -1,9 +1,11 @@
 use crate::actor::{ActorRefs, ActorRemoval, ActorShift, HasActorIndices};
 use crate::clock::Clock;
 use crate::op_set2::op_set::{MarkIndexBuilder, MarkIndexColumn};
-use crate::op_set2::{ChangeOp, Op, OpBuilder, OpSet};
+use crate::op_set2::{ChangeOp, Op, OpBuilder, OpSet, ScalarValue};
 use crate::types::{ObjId, ObjType, OpId, SequenceType, TextEncoding};
 use std::collections::HashMap;
+
+use super::CounterIndex;
 
 // TODO : this could be faster and use less memory if
 // hexane::Encoder was used here instead of Vec<>
@@ -15,6 +17,7 @@ pub(crate) struct IndexBuilder {
     widths: Vec<u64>,
     incs: Vec<Option<i64>>,
     marks: Vec<Option<MarkIndexBuilder>>,
+    totals: Vec<Option<i64>>,
     obj_info: ObjIndex,
     last_flush: usize,
     text_encoding: TextEncoding,
@@ -155,6 +158,7 @@ pub(crate) struct Indexes {
     pub(crate) visible: hexane::Column<bool>,
     pub(crate) inc: hexane::Column<Option<i64>>,
     pub(crate) mark: MarkIndexColumn,
+    pub(crate) counter: CounterIndex,
     pub(crate) obj_info: ObjIndex,
 }
 
@@ -167,6 +171,7 @@ impl IndexBuilder {
             widths: Vec::with_capacity(op_set.len()),
             incs: Vec::with_capacity(op_set.sub_len()),
             marks: Vec::with_capacity(op_set.len()),
+            totals: Vec::with_capacity(op_set.len()),
             obj_info: ObjIndex::default(),
             last_flush: 0,
             text_encoding: encoding,
@@ -209,6 +214,10 @@ impl IndexBuilder {
         self.top.push(false);
         self.widths
             .push(op.width(SequenceType::Text, self.text_encoding) as u64);
+        self.totals.push(match op.value {
+            ScalarValue::Counter(n) => Some(n),
+            _ => None,
+        });
 
         let count = self.counters.remove(&op.id);
 
@@ -217,6 +226,9 @@ impl IndexBuilder {
                 self.incs[succ_idx] = Some(i);
                 if visible {
                     self.succ[op_idx] -= 1;
+                    if let Some(total) = &mut self.totals[op_idx] {
+                        *total = total.wrapping_add(i);
+                    }
                 }
             }
         }
@@ -257,6 +269,7 @@ impl IndexBuilder {
         let top = hexane::PrefixColumn::from_values(top);
 
         let inc = hexane::Column::from_values(self.incs);
+        let counter = CounterIndex::from_values(self.totals);
 
         let mut mark = MarkIndexColumn::new();
         mark.extend(0, self.marks);
@@ -270,6 +283,7 @@ impl IndexBuilder {
                 visible,
                 inc,
                 mark,
+                counter,
                 obj_info,
             },
             self.mark_order,

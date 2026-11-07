@@ -39,16 +39,15 @@ pub(crate) trait OpQuery<'a>: OpQueryTerm<'a> + Clone {
     /// Restrict this query to the ops visible under `read`, with counter
     /// values summed accordingly.
     ///
-    /// As in [`super::TopOps::new`], a current read uses the visibility index
-    /// whether or not a mask is present, a historical read scans, and counter
-    /// values are fixed up against [`ReadAt::historical_slow`] on either path.
+    /// A current read uses the op set's indexes whether or not a mask is
+    /// present, while historical reads will use the supplied clock.
     fn visible(
         self,
         op_set: &'a OpSet,
         read: &ReadAt<'_>,
     ) -> FixCounters<'a, SkipIter<Self, VisIter<'a>>> {
         let vis = VisIter::new(op_set, read.historical(), self.range());
-        FixCounters::new(SkipIter::new(self, vis), read.historical_slow().cloned())
+        FixCounters::new(SkipIter::new(self, vis), read.historical().cloned(), op_set)
     }
 }
 
@@ -82,22 +81,16 @@ impl<'a, I: OpQueryTerm<'a> + Clone> OpQuery<'a> for I {}
 pub(crate) struct FixCounters<'a, I> {
     iter: I,
     clock: Option<Clock>,
-    _phantom: std::marker::PhantomData<&'a ()>,
+    op_set: &'a OpSet,
 }
 
 impl<'a, I> FixCounters<'a, I> {
-    pub(crate) fn new(iter: I, clock: Option<Clock>) -> Self {
+    pub(crate) fn new(iter: I, clock: Option<Clock>, op_set: &'a OpSet) -> Self {
         Self {
             iter,
             clock,
-            _phantom: Default::default(),
+            op_set,
         }
-    }
-}
-
-impl<I: Default> Default for FixCounters<'_, I> {
-    fn default() -> Self {
-        Self::new(I::default(), None)
     }
 }
 
@@ -109,7 +102,11 @@ where
 
     fn next(&mut self) -> Option<Self::Item> {
         let mut op = self.iter.next()?;
-        op.fix_counter(self.clock.as_ref());
+        if self.clock.is_none() {
+            op.set_counter_from_index(self.op_set);
+        } else {
+            op.fix_counter(self.clock.as_ref());
+        }
         Some(op)
     }
 }
