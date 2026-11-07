@@ -1,18 +1,27 @@
+pub(crate) mod cut;
+pub(crate) mod dec;
 mod decoder;
 pub mod edit;
+pub(crate) mod enc;
+pub(crate) mod lift;
 mod load;
+pub(crate) mod merge;
+pub(crate) mod model;
+pub(crate) mod postfix;
+pub(crate) mod read;
 pub(crate) mod writer;
 pub use load::RleLoadIter;
 pub(crate) mod splice;
 pub(crate) mod state;
 #[cfg(test)]
 mod tests;
+pub(crate) mod unique;
 
 use crate::encoder::RleEncoder;
 pub use decoder::RleDecoder;
 pub(crate) use decoder::RleDecoderState;
 pub(crate) use load::rle_validate_encoding;
-use splice::{do_merge, rle_merge, splice_slab};
+use splice::{rle_merge, splice_slab};
 
 use std::marker::PhantomData;
 use std::num::NonZeroU32;
@@ -103,13 +112,6 @@ pub struct RleTail {
     pub(crate) lit_tail: Option<NonZeroU32>,
 }
 
-impl RleTail {
-    pub(crate) fn with_lit_tail(mut self, lit_tail: Option<NonZeroU32>) -> Self {
-        self.lit_tail = lit_tail;
-        self
-    }
-}
-
 /// Validate an RLE slab's len, segments, and tail. Panics on mismatch.
 #[cfg(debug_assertions)]
 fn validate_rle_slab<T: RleValue, C: Codec>(slab: &Slab) {
@@ -147,18 +149,8 @@ where
     }
 
     fn fill(len: usize, value: T::Get<'_>) -> Slab {
-        use state::{RleCow, RleState};
-        let mut buf = Vec::new();
-        let mut state = RleState::<T, T, C>::empty();
-        let mut f = state.append_n(&mut buf, RleCow::Ref(value), len);
-        f += state.flush(&mut buf);
-        let tail = f.wpos.as_tail(0, buf.len());
-        Slab {
-            data: buf,
-            len,
-            segments: f.segments,
-            tail,
-        }
+        // verified; `Column::fill` makes no slab for `len == 0`
+        edit::fill::<state::WOps<T, T, C>>(state::RleCow::Ref(value), len)
     }
 
     fn merge_slabs(a: &mut Slab, b: Slab) {
@@ -175,7 +167,7 @@ where
         }
         // Decode just the last segment using the tail metadata.
         // The tail gives us the byte offset of the last segment.
-        let mut dec = Self::decoder(&slab.data);
+        let mut dec = Self::slab_decoder(&slab.data, crate::sealed::Trusted(()));
         let mut last_val = None;
         let mut last_count = 0;
         while let Some(run) = dec.next_run() {
@@ -192,14 +184,9 @@ where
         rle_validate_encoding::<T, C>(slab)
     }
 
-    fn do_merge(
-        acc: &mut Vec<u8>,
-        a_tail: RleTail,
-        a_segments: usize,
-        b: &Slab,
-        buf: &mut Vec<u8>,
-    ) -> (usize, RleTail) {
-        do_merge::<T, C>(acc, a_tail, a_segments, b, buf)
+    fn save_slabs(slabs: &[Slab], total: usize, out: &mut Vec<u8>) {
+        // verified
+        edit::save_slabs::<state::WOps<T, T, C>>(slabs, total, out)
     }
 
     fn splice_slab<V: AsColumnRef<T>>(
@@ -209,6 +196,7 @@ where
         values: impl Iterator<Item = (V, usize)>,
         max_segments: usize,
     ) -> (Vec<Slab>, usize) {
+        assert!(index <= slab.len, "splice index beyond the slab");
         let slab_del = del.min(slab.len - index);
         let overflow_del = del - slab_del;
         (
@@ -218,8 +206,20 @@ where
     }
 
     type Decoder<'a> = RleDecoder<'a, T, C>;
+    type ReadModel = crate::rle::dec::RleReads<crate::rle::model::Ops<T, C>>;
 
     fn decoder(slab: &[u8]) -> RleDecoder<'_, T, C> {
+        // bytes from outside a column: where decoding them unchecked could
+        // break memory safety (a `str` that isn't UTF-8), check them first
+        if T::UNPACK_TRUSTS_INPUT {
+            if let Err(e) = rle_validate_encoding::<T, C>(slab) {
+                panic!("decoder: the bytes are not a valid column: {e}");
+            }
+        }
+        RleDecoder::new(slab)
+    }
+
+    fn slab_decoder(slab: &[u8], _: crate::sealed::Trusted) -> RleDecoder<'_, T, C> {
         RleDecoder::new(slab)
     }
 

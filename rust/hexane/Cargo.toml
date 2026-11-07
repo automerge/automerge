@@ -17,13 +17,20 @@ wasm = ["web-sys"]
 slow_path_assertions = []
 # Deep/expensive fuzz tests, skipped by default so `cargo test` stays fast.
 deep_fuzz = []
-bijou64 = ["dep:bijoux"]
+bijou64 = []
 
 
 [dependencies]
-leb128 = "^0.2.5"
 thiserror = "^2.0.12"
-bijoux = { version = "^0.3.1", optional = true, default-features = false, features = ["u64", "i64"] }
+# The codecs (src/leb128_codec.rs, src/bijou64.rs) are verified with Verus;
+# `vstd` supplies the `verus!` macro, which erases all specs and proofs in a
+# normal build.
+vstd = "=0.0.0-2026-10-25-0158"
+
+# `cargo verus verify -p hexane` checks the proofs (src/leb128_codec.rs,
+# src/bijou64.rs with `--features bijou64`, src/btree.rs).
+[package.metadata.verus]
+verify = true
 
 [dev-dependencies]
 proptest = { version = "^1.7", default-features = false, features = ["std"] }
@@ -37,3 +44,7 @@ debug = true
 version = "^0.3.55"
 features = ["console"]
 optional = true
+
+[lints.rust]
+# set by Verus when it compiles the crate (see src/rle/model.rs)
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(verus_keep_ghost)"] }

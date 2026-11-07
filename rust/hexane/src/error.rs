@@ -1,9 +1,10 @@
 /// Errors returned when decoding or validating column data.
 #[derive(thiserror::Error, Debug)]
 pub enum PackError {
-    /// A LEB128 varint in the encoded data was malformed.
+    /// A LEB128 varint in the encoded data was truncated, overlong (not
+    /// canonical), or did not fit in 64 bits.
     #[error(transparent)]
-    InvalidNumber(#[from] leb128::read::Error),
+    InvalidNumber(#[from] crate::codec::Leb128Error),
     /// A string column contained invalid UTF-8 bytes.
     #[error("invalid utf8")]
     InvalidUtf8,
@@ -11,7 +12,9 @@ pub enum PackError {
     #[error("invalid value: {0}")]
     InvalidValue(String),
     /// The decoded column length did not match the expected length passed
-    /// via [`LoadOpts::with_length`](crate::LoadOpts::with_length).
+    /// via [`LoadOpts::with_length`](crate::LoadOpts::with_length), or is
+    /// longer than a column can be (`usize::MAX - 3` items, the most its
+    /// edits and `save` can count; the second number is then that limit).
     #[error("invalid load length len={0}, expected={1}")]
     InvalidLength(usize, usize),
     /// The encoded data did not follow the expected format.

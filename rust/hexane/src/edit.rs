@@ -2,15 +2,27 @@
 //! [`Column`], and the contract an encoding implements so
 //! its slabs can be rebuilt in place.
 
-use crate::column::{Column, ColumnRef, WeightFn};
+use crate::column::{Column, WeightFn};
+use crate::cursor::{splice_feed, Cursor, Feeding, Inserting, Slabs, Visiting, WeightOf};
 use crate::encoding::ColumnEncoding;
 use crate::index::ColumnIndex;
 use crate::{AsColumnRef, Codec, ColumnValueRef, Run};
-use std::ops::Range;
+use vstd::prelude::Ghost;
 
 /// An encoding whose slabs a [`Column`] cursor can edit.
+// `Model`'s bound is the crate's own verified contract, which nothing
+// outside can name or implement — a seal, like `ColumnValueRef`'s
+#[allow(private_bounds)]
 pub trait SlabEdit: crate::encoding::ColumnEncoding {
     type Edit: EditSlab<Tail = Self::Tail, Value = Self::Value, State = Self::State>;
+
+    /// The slabs as the verified cursor sees them: what a slab holds, and
+    /// the rebuild, merge and reader operations specified against it.
+    /// The cursor is proved for any model, and each encoding's model is
+    /// proved against its format. An associated type rather than a
+    /// blanket impl so that each encoding can have its own.
+    #[doc(hidden)]
+    type Model: crate::cursor::Slabs<Tail = Self::Tail, State = Self::State, Rebuild = Self::Edit>;
 
     /// How many runs a cursor carries through an open rebuild before
     /// closing it instead — the trade between re-encoding what it carries
@@ -64,15 +76,14 @@ pub trait EditSlab: Default {
 
 // ── Progressive editing ─────────────────────────────────────────────────────
 
-/// The encoding a cursor drives, and the rebuild it owns.
+/// The encoding a cursor drives.
 type Enc<T, C> = <T as ColumnValueRef>::Encoding<C>;
-type EditOf<T, C> = <Enc<T, C> as SlabEdit>::Edit;
-type StateOf<T, C> = <Enc<T, C> as crate::encoding::ColumnEncoding>::State;
 
-struct Reader<S> {
-    state: S,
-    at: usize,
-}
+/// The encoding's slabs, as the cursor sees them.
+type Model<T, C> = <Enc<T, C> as SlabEdit>::Model;
+
+/// The column's weight function, for the cursor.
+type G<T, C, WF> = WeightOf<T, C, WF>;
 
 /// The default carry budget, in runs — an encoding states its own as
 /// [`SlabEdit::CARRY_BUDGET`].
@@ -99,6 +110,11 @@ pub(crate) const RUN_BUDGET: usize = 8;
 /// buffer, no second byte splice, no second index update. That is the
 /// shape real workloads have: in an automerge fragment chain 94% of
 /// splices land in the slab the previous one just rebuilt.
+///
+/// The cursor's state and every move it makes are verified with Verus
+/// (`crate::cursor`): each operation keeps the column well-formed and
+/// does exactly what it says to its values, given the encodings' slab
+/// operations. This struct only pairs that state with the column.
 pub struct Edit<'a, T, C, WF, Idx>
 where
     T: ColumnValueRef,
@@ -108,51 +124,7 @@ where
     Idx: ColumnIndex<WF::Weight>,
 {
     col: &'a mut Column<T, C, WF, Idx>,
-    /// index of the slab the cursor is standing in
-    slab: usize,
-    /// item offset of the cursor within that slab, in the slab's
-    /// *original* (pre-edit) coordinates
-    in_slab: usize,
-    /// absolute cursor position in the column's *original* coordinates —
-    /// how many of its own items the cursor has consumed. This is what
-    /// callers seek in: every caller (splice lists, merges, succ writes)
-    /// holds pre-edit positions, so making them convert would just move
-    /// the drift bookkeeping outside.
-    orig: usize,
-    /// the matching position in the column as edited so far, needed to
-    /// re-find the cursor's slab after a write-back
-    out: usize,
-    /// the rebuild, reset onto each slab this cursor edits — one of
-    /// these lives for the whole cursor, holding the encode buffer, so a
-    /// slab session costs a few field writes rather than building a few
-    /// hundred bytes of encoder
-    edit: EditOf<T, C>,
-    /// whether `edit` is pointed at the current slab
-    dirty: bool,
-    /// Original items after the cursor, maintained as it moves.
-    ///
-    /// The tail beyond the cursor is untouched, so this is both how many
-    /// original items are left and how many current ones — which is why
-    /// it can answer "is this the end of the column?" while a rebuild is
-    /// open and `col.total_len` is stale.
-    remaining: usize,
-    /// slabs this cursor has rebuilt — what the batching is meant to
-    /// keep down, and what a no-op `replace` must not increment
-    rebuilds: usize,
-    /// the reader for the current slab, at `in_slab` in that slab's
-    /// original bytes — valid clean *and* dirty, since a rebuild leaves
-    /// the slab's bytes alone until it closes.
-    ///
-    /// The reader trails `in_slab` and only catches up when something
-    /// reads, so a caller that just moves — a merge copying ranges —
-    /// never decodes at all.
-    ///
-    /// `None` until a read asks for one, and again after every jump
-    /// through the index. Constructing it eagerly would be free work for
-    /// the `edit()`-then-`seek()` chain, which is most of them, and no
-    /// saving for the rest: `state_at(slab, k)` is `state_advance` from
-    /// the slab's start, which is where an eager reader would stand.
-    dec: Option<Reader<StateOf<T, C>>>,
+    cur: Cursor<Model<T, C>>,
 }
 
 impl<'a, T, C, WF, Idx> Edit<'a, T, C, WF, Idx>
@@ -164,49 +136,32 @@ where
 {
     pub(crate) fn new(col: &'a mut Column<T, C, WF, Idx>, at: usize) -> Self {
         assert!(at <= col.len(), "edit_at out of bounds");
-        if col.slabs.is_empty() {
-            let empty = <T::Encoding<C> as crate::encoding::ColumnEncoding>::empty_slab();
-            col.index.splice(0..0, [WF::compute(&empty)]);
-            col.slabs.push(empty);
-        }
-        // the front of the column needs no lookup — and `col.edit()`
-        // followed by a seek is the common chain, which would otherwise
-        // pay for positioning twice
-        let (slab, in_slab) = if at == 0 { (0, 0) } else { col.find_slab(at) };
-        let (slab, in_slab) = if slab >= col.slabs.len() {
-            (col.slabs.len() - 1, col.slabs[col.slabs.len() - 1].len)
-        } else {
-            (slab, in_slab)
-        };
-        let remaining = col.total_len - at.min(col.total_len);
-        Edit {
-            col,
-            slab,
-            in_slab,
-            orig: at,
-            out: at,
-            remaining,
-            edit: EditOf::<T, C>::default(),
-            dirty: false,
-            rebuilds: 0,
-            dec: None,
-        }
+        // the rebuilds count values in a `usize`, with room for three more
+        assert!(col.total_len <= usize::MAX - 3, "column too long to edit");
+        let cur = Cursor::new::<WF::Weight, Idx, G<T, C, WF>>(
+            &mut col.slabs,
+            &mut col.index,
+            col.total_len,
+            Ghost::assume_new(),
+            at,
+        );
+        Edit { col, cur }
     }
 
     /// The cursor's position in the column's original coordinates — the
     /// coordinate system [`seek`](Self::seek) takes.
     pub fn pos(&self) -> usize {
-        self.orig
+        self.cur.orig
     }
 
     /// The cursor's position in the column as edited so far.
     pub fn out_pos(&self) -> usize {
-        self.out
+        self.cur.out
     }
 
     /// Original items still ahead of the cursor.
     pub(crate) fn remaining(&self) -> usize {
-        self.remaining
+        self.cur.remaining
     }
 
     /// The column under the cursor. Only meaningful while no rebuild is
@@ -219,7 +174,7 @@ where
     /// however many edits landed in it — which is the whole point.
     #[doc(hidden)]
     pub fn rebuilds(&self) -> usize {
-        self.rebuilds
+        self.cur.rebuilds
     }
 
     /// Move forward to original position `to`, carrying everything in
@@ -228,8 +183,8 @@ where
     /// Forward-only: every caller is already ascending, and it is what
     /// lets the cursor keep one slab open.
     pub fn seek(&mut self, to: usize) -> &mut Self {
-        assert!(to >= self.orig, "Edit::seek is forward-only");
-        let n = to - self.orig;
+        assert!(to >= self.cur.orig, "Edit::seek is forward-only");
+        let n = to - self.cur.orig;
         self.advance(n)
     }
 
@@ -239,60 +194,21 @@ where
         self
     }
 
-    /// itself.
+    /// [`advance`](Self::advance), reporting every run it carries to `f`;
+    /// returns how many items it jumped through the index without reading.
     pub(crate) fn advance_with<F>(&mut self, n: usize, mut f: F) -> usize
     where
         F: FnMut(T::Get<'_>, usize),
     {
-        if self.dirty && self.est_runs(n) >= Enc::<T, C>::CARRY_BUDGET {
-            self.close();
-        }
-        let mut want = n;
-        let mut jumped = 0;
-        while want > 0 {
-            if !self.dirty {
-                jumped += self.jump(want);
-                break;
-            }
-            let avail = self.orig_len() - self.in_slab;
-            let take = want.min(avail);
-            let left = self.step(take, &mut f);
-            want -= take - left;
-            if left > 0 {
-                // the carry budget ran out; the loop jumps the rest
-                self.close();
-            } else if take == avail && !self.next_slab() {
-                break;
-            }
-        }
-        jumped
-    }
-
-    /// Move `n` items with no rebuild open. The slabs in between are
-    /// never visited — stepping through them would make a long seek
-    /// O(slabs) — so the new position is looked up once.
-    ///
-    /// A move that stays inside the current slab skips the lookup and
-    /// carries the reader along instead: the index answers in items and
-    /// would leave the reader stranded, which is what makes a
-    /// peek/advance/peek caller re-decode the slab on every read.
-    fn jump(&mut self, n: usize) -> usize {
-        let step = n.min(self.remaining);
-        // strictly inside: landing exactly on the slab's end would rest
-        // the cursor where no value can be read, which `locate_out`
-        // resolves by moving on to the next slab
-        if step < self.orig_len() - self.in_slab {
-            self.in_slab += step;
-            self.orig += step;
-            self.out += step;
-            self.remaining -= step;
-            return step;
-        }
-        self.orig += step;
-        self.out += step;
-        self.remaining -= step;
-        self.locate_out();
-        step
+        self.cur.advance_with::<WF::Weight, Idx, G<T, C, WF>, _>(
+            &mut self.col.slabs,
+            &mut self.col.index,
+            &mut self.col.total_len,
+            self.col.max_segments,
+            &mut self.col.counter,
+            n,
+            &mut Visiting::<Enc<T, C>, F>::new(&mut f),
+        )
     }
 
     /// Insert one `value` at the cursor.
@@ -302,12 +218,12 @@ where
 
     /// Insert `n` copies of `value` at the cursor.
     pub fn insert_run(&mut self, value: impl AsColumnRef<T>, n: usize) -> &mut Self {
-        if n == 0 {
-            return self;
-        }
-        self.open();
-        self.edit.insert(value, n);
-        self.out += n;
+        self.cur.insert(
+            &self.col.slabs,
+            self.col.max_segments,
+            Inserting::<Enc<T, C>, _>::new(value),
+            n,
+        );
         self
     }
 
@@ -328,16 +244,20 @@ where
     /// changes nothing: it writes into its own buffer and leaves the
     /// slab's bytes alone until it closes.
     pub fn peek(&mut self) -> Option<T::Get<'_>> {
-        if self.remaining == 0 {
+        if self.cur.remaining == 0 {
             return None;
         }
-        if self.dirty {
-            let slab = &self.col.slabs[self.slab];
-            return Enc::<T, C>::state_peek(slab, self.edit.read_state());
+        if self.cur.dirty {
+            let slab = &self.col.slabs[self.cur.slab];
+            return Enc::<T, C>::state_peek(
+                slab,
+                <Model<T, C> as Slabs>::read_state(&self.cur.edit),
+            );
         }
-        self.load_reader();
-        let slab = &self.col.slabs[self.slab];
-        let r = self.dec.as_ref().expect("reader loaded");
+        // verified: the reader is then at the cursor (`Cursor::load_reader`)
+        self.cur.load_reader(&self.col.slabs);
+        let slab = &self.col.slabs[self.cur.slab];
+        let r = self.cur.dec.as_ref().expect("reader loaded");
         Enc::<T, C>::state_peek(slab, &r.state)
     }
 
@@ -369,242 +289,79 @@ where
 
     /// [`delete`](Self::delete), reporting every run it drops to `f` —
     /// the values are gone from the column but a delta column's running
-    /// value still moves over them.
-    pub(crate) fn delete_with<F, G>(&mut self, n: usize, mut f: F, mut g: G) -> &mut Self
+    /// value still moves over them — and the weight of every slab it
+    /// drops whole, unread, to `g`.
+    pub(crate) fn delete_with<F, H>(&mut self, n: usize, mut f: F, mut g: H) -> &mut Self
     where
         F: FnMut(T::Get<'_>, usize),
-        G: FnMut(&WF::Weight),
+        H: FnMut(&WF::Weight),
     {
-        // a delete off the end of the column takes what is there;
-        // counting the rest would move the cursor past items that never
-        // existed, and a later `seek` would look like it went backwards
-        let mut left = n.min(self.remaining);
-        let mut dropped = false;
-        while left > 0 {
-            let avail = self.orig_len() - self.in_slab;
-            if left < avail {
-                self.open();
-                self.edit.delete(&self.col.slabs[self.slab], left, &mut f);
-                self.took(left);
-                return self;
-            }
-            // a whole slab, and no rebuild reading it: drop it outright.
-            // The column always keeps one slab, so the last one is
-            // emptied through the rebuild below instead.
-            if self.in_slab == 0 && !self.dirty && self.col.slabs.len() > 1 {
-                g(&WF::compute(&self.col.slabs[self.slab]));
-                self.col.slabs.remove(self.slab);
-                self.col.index.splice(self.slab..self.slab + 1, []);
-                self.col.total_len -= avail;
-                self.orig += avail;
-                self.remaining -= avail;
-                left -= avail;
-                dropped = true;
-                self.locate_out();
-                self.stamp();
-                continue;
-            }
-            // the delete reaches this slab's end: finish it here and go on
-            self.open();
-            self.edit.delete(&self.col.slabs[self.slab], avail, &mut f);
-            self.took(avail);
-            left -= avail;
-            // `close` re-locates, which is what carries the cursor into
-            // the next slab
-            self.close();
-        }
-        if dropped {
-            // dropping slabs can leave undersized neighbours meeting
-            let range = self.col.try_merge_range(self.slab..self.slab + 1);
-            self.reconcile(range);
-            self.locate_out();
-            self.stamp();
-        }
+        self.cur.delete_with::<WF::Weight, Idx, G<T, C, WF>, _, H>(
+            &mut self.col.slabs,
+            &mut self.col.index,
+            &mut self.col.total_len,
+            self.col.max_segments,
+            &mut self.col.counter,
+            n,
+            &mut Visiting::<Enc<T, C>, F>::new(&mut f),
+            &mut g,
+        );
         self
-    }
-
-    /// Account for `n` items the cursor has consumed.
-    fn took(&mut self, n: usize) {
-        self.in_slab += n;
-        self.orig += n;
-        self.remaining -= n;
-    }
-
-    /// Bring the reader to `in_slab`: forward from where it stands, or
-    /// from the slab's start if the cursor arrived through the index.
-    /// Paid per read, over the ground since the last one.
-    fn load_reader(&mut self) {
-        let slab = &self.col.slabs[self.slab];
-        match self.dec.as_mut() {
-            Some(r) => {
-                debug_assert!(r.at <= self.in_slab, "the reader ran past the cursor");
-                if r.at < self.in_slab {
-                    Enc::<T, C>::state_advance(slab, &mut r.state, self.in_slab - r.at);
-                    r.at = self.in_slab;
-                }
-            }
-            None => {
-                self.dec = Some(Reader {
-                    state: Enc::<T, C>::state_at(slab, self.in_slab),
-                    at: self.in_slab,
-                })
-            }
-        }
     }
 
     /// Close the open slab, if any, and reconcile the column. Ends a
     /// chain; also runs on drop.
     pub fn finish(&mut self) {
-        self.close();
-    }
-
-    // ── internals ───────────────────────────────────────────────────
-
-    /// The current slab's item count in its original coordinates —
-    /// `slab.len` is only updated when the rebuild closes.
-    fn orig_len(&self) -> usize {
-        self.col.slabs[self.slab].len
-    }
-
-    /// Move `n` items forward inside the current slab, returning the ones
-    /// the open rebuild declined to carry (see [`RUN_BUDGET`]).
-    fn step<F>(&mut self, n: usize, f: &mut F) -> usize
-    where
-        F: FnMut(T::Get<'_>, usize),
-    {
-        if n == 0 {
-            return 0;
-        }
-        let mut left = 0;
-        if self.dirty {
-            // dirty: the items have to be carried through the rebuild
-            let budget = Enc::<T, C>::CARRY_BUDGET;
-            left = self.edit.pass(&self.col.slabs[self.slab], n, budget, f);
-        }
-        // clean: nothing to do but move — no decode, no write
-        let done = n - left;
-        self.in_slab += done;
-        self.orig += done;
-        self.out += done;
-        self.remaining -= done;
-        left
-    }
-
-    fn est_runs(&self, n: usize) -> usize {
-        let s = &self.col.slabs[self.slab];
-        if s.len == 0 {
-            return 0;
-        }
-        n.saturating_mul(s.segments) / s.len
-    }
-
-    /// Point `slab`/`in_slab` at the cursor's position, looked up through
-    /// the index. Only valid with no rebuild open: `out` is a position in
-    /// the column as it stands, which is only true once the slab it
-    /// touched has been written back.
-    /// Record a write. Suspended iterators resume against this token, so
-    /// every path that moves slabs must bump it — a write-back that
-    /// leaves the slab count alone is otherwise undetectable.
-    fn stamp(&mut self) {
-        self.col.counter += 1;
-    }
-
-    fn locate_out(&mut self) {
-        let at_end = self.out >= self.col.total_len;
-        let (si, off) = if at_end {
-            let last = self.col.slabs.len() - 1;
-            (last, self.col.slabs[last].len)
-        } else {
-            self.col.find_slab(self.out)
-        };
-        self.slab = si.min(self.col.slabs.len() - 1);
-        self.in_slab = off;
-        // the write-back moved bytes and the index answered in items:
-        // whatever the reader was pointing at is gone
-        self.dec = None;
-    }
-
-    /// Close the current slab and step to the next. Returns false at the
-    /// end of the column.
-    fn next_slab(&mut self) -> bool {
-        if self.dirty {
-            // `close` re-locates: the write-back can merge, split or drop
-            // slabs, so the absolute cursor is the only way back — and it
-            // has to happen even when this was the last slab, or a
-            // following insert would land through a stale offset
+        if self.cur.dirty {
             self.close();
-            return self.remaining > 0;
         }
-        if self.slab + 1 >= self.col.slabs.len() {
-            return false;
-        }
-        self.slab += 1;
-        self.in_slab = 0;
-        self.dec = Some(Reader {
-            state: Enc::<T, C>::state_at(&self.col.slabs[self.slab], 0),
-            at: 0,
-        });
-        true
-    }
-
-    /// Begin a rebuild of the current slab if one is not already open.
-    fn open(&mut self) {
-        if self.dirty {
-            return;
-        }
-        let slab = &self.col.slabs[self.slab];
-        let max = self.col.max_segments;
-        // the rebuild derives its own reader from the partition it has to
-        // walk anyway, so opening costs one pass over the slab
-        self.edit.reset(slab, self.in_slab, max);
-        self.dirty = true;
     }
 
     /// Finish the open rebuild: write it back, coalesce neighbours and
     /// update the index — each once, however many edits the slab took.
     fn close(&mut self) {
-        if !self.dirty {
-            return;
-        }
-        self.dirty = false;
-        self.rebuilds += 1;
-        let si = self.slab;
-        let removed = self.col.slabs[si].len;
-        // `edit` and `col` are separate fields, so the rebuild closes in
-        // place against the slab it belongs to — nothing is moved
-        let spilled = self.edit.close(&mut self.col.slabs[si]);
-        let spill = spilled.len();
-        if spill > 0 {
-            self.col.slabs.splice(si + 1..si + 1, spilled);
-        }
-        let range = si..si + 1 + spill;
-        let kept: usize = self.col.slabs[range.clone()].iter().map(|s| s.len).sum();
-        self.col.total_len = self.col.total_len + kept - removed;
-        let range = self.col.try_merge_range(range);
-        self.reconcile(range);
-        // the write-back can merge, split or drop slabs, so `slab` and
-        // `in_slab` mean nothing until they are looked up again. Doing it
-        // here rather than at each call site is what lets everything
-        // downstream trust them — a caller that skipped it would read
-        // through a stale offset.
-        self.locate_out();
-        self.stamp();
+        self.cur.close::<WF::Weight, Idx, G<T, C, WF>>(
+            &mut self.col.slabs,
+            &mut self.col.index,
+            &mut self.col.total_len,
+            self.col.max_segments,
+            &mut self.col.counter,
+        );
     }
+}
 
-    /// Bring the slab index back in step with `slabs` over `range`.
-    fn reconcile(&mut self, range: Range<usize>) {
-        if self.col.index.len() == self.col.slabs.len() && range.len() == 1 {
-            let w = WF::compute(&self.col.slabs[range.start]);
-            self.col.index.update_slab(range.start, w);
-        } else {
-            let new: Vec<WF::Weight> = self.col.slabs[range.clone()]
-                .iter()
-                .map(WF::compute)
-                .collect();
-            let old_end = range.end + self.col.index.len() - self.col.slabs.len();
-            self.col.index.splice(range.start..old_end, new);
-            debug_assert_eq!(self.col.index.len(), self.col.slabs.len());
-        }
+impl<T, C, WF, Idx> Column<T, C, WF, Idx>
+where
+    T: ColumnValueRef,
+    C: Codec,
+    WF: WeightFn<T, C>,
+    Idx: ColumnIndex<WF::Weight>,
+{
+    /// Delete `del` items at `at` and insert `runs` there: one cursor
+    /// opened, deleting, inserting and closed, the whole chain verified
+    /// (`cursor::splice_feed`). The caller checks the range.
+    pub(crate) fn splice_feed<V: AsColumnRef<T>>(
+        &mut self,
+        at: usize,
+        del: usize,
+        runs: impl Iterator<Item = (V, usize)>,
+    ) {
+        // the rebuilds count values in a `usize`, with room for three more
+        assert!(self.total_len <= usize::MAX - 3, "column too long to edit");
+        let mut f = |_: T::Get<'_>, _: usize| {};
+        let mut g = |_: &WF::Weight| {};
+        splice_feed::<Model<T, C>, WF::Weight, Idx, G<T, C, WF>, _, _, _>(
+            &mut self.slabs,
+            &mut self.index,
+            &mut self.total_len,
+            self.max_segments,
+            &mut self.counter,
+            at,
+            del,
+            &mut Visiting::<Enc<T, C>, _>::new(&mut f),
+            &mut g,
+            &mut Feeding::<Enc<T, C>, _>::new(runs),
+        );
     }
 }
 
@@ -619,7 +376,7 @@ where
     fn drop(&mut self) {
         // finishing on drop keeps chains honest: the last call in a
         // chain does not have to be `finish()`
-        if self.dirty {
+        if self.cur.dirty {
             self.close();
         }
     }

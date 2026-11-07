@@ -82,7 +82,6 @@ fn splice_runs_enforces_the_domain_like_insert_runs() {
 /// bytes that are not there. `load` must reject rather than panic (debug)
 /// or hand back a nonsense length (release).
 #[test]
-#[ignore = "known bug: the RLE loader sums untrusted counts unchecked"]
 fn rle_load_rejects_a_wrapped_length() {
     fn sleb(mut v: i64, out: &mut Vec<u8>) {
         loop {
