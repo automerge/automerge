@@ -386,6 +386,13 @@ impl DeltaValue for Option<usize> {
 /// `&mut Vec<u8>` so the caller decides where bytes land.  Used by the
 /// fast-path `encode_to_unless` static path to avoid a per-call heap
 /// allocation in the change-encoding loop.
+///
+/// Verified with Verus: appending always to the same buffer, with the
+/// bytes this state wrote left as they are in between, then finishing,
+/// leaves the buffer's earlier bytes as they were and follows them with
+/// the canonical encoding of the values appended. Nothing checks that
+/// the buffer is the same: given another, the bytes are unspecified,
+/// and it may panic.
 pub struct DeltaEncoderState<'a, T: DeltaValue, C: Codec = Leb128> {
     /// Verified with Verus: the deltas it writes realize exactly the
     /// values appended, and are their canonical encoding.

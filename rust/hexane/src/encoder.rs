@@ -39,8 +39,11 @@ use std::ops::Range;
 /// caller-owned buffer with no per-call heap allocation.
 ///
 /// Verified with Verus (`RStream`): appending always to the same buffer,
-/// then finishing, leaves the buffer's earlier bytes as they were and
-/// follows them with the canonical encoding of the values appended.
+/// with the bytes this state wrote left as they are in between, then
+/// finishing, leaves the buffer's earlier bytes as they were and follows
+/// them with the canonical encoding of the values appended. Nothing
+/// checks that the buffer is the same: given another, the bytes are
+/// unspecified, and it may panic.
 pub struct RleEncoderState<'a, T: RleValue, C: Codec = Leb128> {
     s: RStream<'a, WOps<T, T, C>>,
 }
