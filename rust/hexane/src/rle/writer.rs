@@ -292,12 +292,13 @@ pub(crate) struct Rebuilt {
 
 /// `mem::take` of a vector: what it held. (Nothing is claimed of what
 /// is left, an empty vector.)
-#[verifier::external_body]
 #[inline(always)]
 pub(crate) fn take_vec<T>(v: &mut Vec<T>) -> (r: Vec<T>)
     ensures r == *old(v),
 {
-    std::mem::take(v)
+    let mut r = Vec::new();
+    std::mem::swap(v, &mut r);
+    r
 }
 
 impl Rebuilt {
