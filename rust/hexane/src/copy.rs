@@ -250,7 +250,7 @@ pub(crate) fn copy_direct<E: Slabs, W, I: IndexOps<W>, G: Weigh<E::Tail, W>, F: 
             assert(copied(src, sp) =~= src.subrange(start as int, end as int));
             assert(cur.p@ =~= produced(dst, src, sps@.take(k + 1)));
         }
-        k = k + 1;
+        k += 1;
     }
     cur.close::<W, I, G>(slabs, index, total_len, max_segments, counter);
     proof {
