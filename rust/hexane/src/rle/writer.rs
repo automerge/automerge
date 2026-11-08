@@ -34,11 +34,6 @@ use vstd::prelude::*;
 
 verus! {
 
-#[verifier::external_type_specification]
-#[verifier::external_body]
-#[allow(dead_code)]
-pub struct ExRleTail(RleTail);
-
 /// A slab's bytes.
 pub(crate) open spec fn slab_bytes(s: Slab) -> Seq<u8> {
     s.data@
@@ -69,9 +64,24 @@ pub(crate) open spec fn slab_tail_of(s: Slab) -> RleTail {
 
 /// A tail record's last run length, and its last literal value's width
 /// (0 if the run is not a literal).
-pub(crate) uninterp spec fn tail_b(t: RleTail) -> nat;
+pub(crate) open spec fn tail_b(t: RleTail) -> nat {
+    t.bytes as nat
+}
 
-pub(crate) uninterp spec fn tail_l(t: RleTail) -> nat;
+pub(crate) open spec fn tail_l(t: RleTail) -> nat {
+    t.lit_tail as nat
+}
+
+/// Panics: a run of `n` bytes, 4 GiB or more, which no tail record holds.
+#[verifier::external_body]
+#[cold]
+#[inline(never)]
+fn run_too_long(n: usize)
+    ensures
+        false,
+{
+    panic!("a run of {n} bytes is not encodable: a run must stay under 4 GiB")
+}
 
 /// The tail record of a last run `bytes` long whose last literal value
 /// is `lit` wide.
@@ -79,18 +89,16 @@ pub(crate) uninterp spec fn tail_l(t: RleTail) -> nat;
 /// # Panics
 ///
 /// If the run is 4 GiB or more: no record holds it.
-#[verifier::external_body]
 #[inline(always)]
 pub(crate) fn tail_rec(bytes: usize, lit: usize) -> (t: RleTail)
     ensures tail_b(t) == bytes, lit <= bytes ==> tail_l(t) == lit,
 {
-    RleTail {
-        bytes: crate::rle::state::tail_bytes(bytes),
-        lit_tail: std::num::NonZeroU32::new(lit as u32),
+    if bytes > u32::MAX as usize {
+        run_too_long(bytes);
     }
+    RleTail { bytes: bytes as u32, lit_tail: lit as u32 }
 }
 
-#[verifier::external_body]
 #[inline(always)]
 pub(crate) fn tail_run_len(t: &RleTail) -> (b: usize)
     ensures b == tail_b(*t),
@@ -98,12 +106,11 @@ pub(crate) fn tail_run_len(t: &RleTail) -> (b: usize)
     t.bytes as usize
 }
 
-#[verifier::external_body]
 #[inline(always)]
 pub(crate) fn tail_lit_len(t: &RleTail) -> (b: usize)
     ensures b == tail_l(*t),
 {
-    t.lit_tail.map_or(0, |l| l.get() as usize)
+    t.lit_tail as usize
 }
 
 /// The tail record of a slab of `prefix`
@@ -142,10 +149,9 @@ pub(crate) fn slab_len_of(s: &Slab) -> (n: usize)
 }
 
 /// A tail record for a merge that ignores it.
-#[verifier::external_body]
 #[inline(always)]
 fn no_tail() -> RleTail {
-    RleTail::default()
+    RleTail { bytes: 0, lit_tail: 0 }
 }
 
 /// A slab the rebuild spilled into.
@@ -299,6 +305,7 @@ impl Rebuilt {
     /// the rebuilt bytes, its length and segments, and the tail record
     /// they leave. Returns the slabs it spilled into (to go after it) and
     /// its byte buffer, for reuse.
+    #[inline(always)]
     pub(crate) fn apply_to<'a, W: WriteOps<'a>>(&mut self, slab: &mut Slab) -> (r: (Vec<Slab>, Vec<u8>))
         requires
             old(self).start <= old(self).end <= old(slab).data@.len(),

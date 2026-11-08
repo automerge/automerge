@@ -887,6 +887,7 @@ impl<'a, O: RleOps<'a>> Dec<'a, O> {
         }
     }
 
+    #[verifier::spinoff_prover]
     fn take_run(&mut self, max: usize) -> (r: Option<crate::Run<O::V>>)
         requires old(self).inv(), old(self).remaining > 0, max > 0,
         ensures
@@ -1146,6 +1147,7 @@ impl<'a, O: RleOps<'a>> Dec<'a, O> {
     /// At a run boundary before the end: return value `n` if it is in the
     /// next run, else skip the run and return how many values are left to
     /// skip.
+    #[verifier::spinoff_prover]
     #[inline(always)]
     fn skip_group(&mut self, n: usize) -> (r: Result<O::V, usize>)
         requires

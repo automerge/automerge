@@ -1,7 +1,5 @@
 //! RLE validation and load (deserialize + verify).
 
-use std::num::NonZeroU32;
-
 use crate::encoding::SlabInfo;
 use crate::rle::cut::Load;
 use crate::rle::model::Ops;
@@ -26,7 +24,7 @@ pub(crate) fn rle_validate_encoding<T: RleValue, C: Codec>(
         len: info.len,
         tail: RleTail {
             bytes: info.tail_bytes,
-            lit_tail: NonZeroU32::new(info.lit_tail),
+            lit_tail: info.lit_tail,
         },
     })
 }

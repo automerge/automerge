@@ -1794,19 +1794,6 @@ impl<'a, W: WriteOps<'a>> State<'a, W> {
 
 } // verus!
 
-/// The byte length of a slab's last run, which its [`RleTail`](crate::rle::RleTail) records
-/// in a `u32`.
-///
-/// # Panics
-///
-/// If the run is 4 GiB or more: it has no tail record, so — like a run
-/// of more than `i64::MAX` values — it is not encodable.
-pub(crate) fn tail_bytes(n: usize) -> u32 {
-    u32::try_from(n).unwrap_or_else(|_| {
-        panic!("a run of {n} bytes is not encodable: a run must stay under 4 GiB")
-    })
-}
-
 impl Default for WPos {
     fn default() -> Self {
         WPos::Run {

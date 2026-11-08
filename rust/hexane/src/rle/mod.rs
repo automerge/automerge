@@ -24,7 +24,7 @@ pub(crate) use load::rle_validate_encoding;
 use splice::{rle_merge, splice_slab};
 
 use std::marker::PhantomData;
-use std::num::NonZeroU32;
+use vstd::prelude::*;
 
 use crate::PackError;
 
@@ -63,14 +63,14 @@ pub(crate) fn compute_rle_tail<T: RleValue, C: Codec>(data: &[u8]) -> RleTail {
     }
     let mut pos = 0;
     let mut last_start = 0;
-    let mut lit_tail: Option<NonZeroU32> = None;
+    let mut lit_tail: u32 = 0;
     while pos < data.len() {
         last_start = pos;
         let (cb, raw) = C::read_signed(&data[pos..]).unwrap();
         match raw {
             n if n > 0 => {
                 let vl = T::value_len::<C>(&data[pos + cb..]).unwrap();
-                lit_tail = None;
+                lit_tail = 0;
                 pos += cb + vl;
             }
             n if n < 0 => {
@@ -81,12 +81,12 @@ pub(crate) fn compute_rle_tail<T: RleValue, C: Codec>(data: &[u8]) -> RleTail {
                     last_vl = T::value_len::<C>(&data[sb..]).unwrap();
                     sb += last_vl;
                 }
-                lit_tail = NonZeroU32::new(last_vl as u32);
+                lit_tail = last_vl as u32;
                 pos = sb;
             }
             _ => {
                 let (ncb, _) = C::read_unsigned(&data[pos + cb..]).unwrap();
-                lit_tail = None;
+                lit_tail = 0;
                 pos += cb + ncb;
             }
         }
@@ -97,8 +97,11 @@ pub(crate) fn compute_rle_tail<T: RleValue, C: Codec>(data: &[u8]) -> RleTail {
     }
 }
 
+verus! {
+
 #[doc(hidden)]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[verifier::allow(autoderive_clone_without_spec)]
 pub struct RleTail {
     /// Total byte length of the last segment (header + values).
     /// Same meaning for repeat, literal, and null runs.
@@ -108,9 +111,11 @@ pub struct RleTail {
     /// not an RLE column.
     pub(crate) bytes: u32,
     /// For literal runs: byte length of the last value only.
-    /// `None` for repeat/null runs.
-    pub(crate) lit_tail: Option<NonZeroU32>,
+    /// 0 for repeat/null runs.
+    pub(crate) lit_tail: u32,
 }
+
+} // verus!
 
 /// Validate an RLE slab's len, segments, and tail. Panics on mismatch.
 #[cfg(debug_assertions)]
