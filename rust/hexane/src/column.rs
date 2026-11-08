@@ -622,7 +622,7 @@ pub(crate) fn normalize_splices(
 ) -> Vec<Splice> {
     // verified (`splices::Normalize`): the list is normalized, and applied
     // gives what the splices give one by one
-    let mut n = Normalize::new(src_len, dst_len, Ghost::assume_new(), Ghost::assume_new());
+    let mut n = Normalize::<()>::new(src_len, dst_len, Ghost::assume_new(), Ghost::assume_new());
     for sp in splices {
         n.push(sp);
     }
@@ -939,7 +939,7 @@ pub(crate) fn for_each_gap(
 ) {
     // verified (`splices::Gaps`): the gaps, as splices inserting them into
     // the ranges retained, are normalized and give what `splices` give
-    let mut gaps = Gaps::new(splices, dst_len, Ghost::assume_new(), Ghost::assume_new());
+    let mut gaps = Gaps::<()>::new(splices, dst_len, Ghost::assume_new(), Ghost::assume_new());
     while let Some((at, gap)) = gaps.next(splices) {
         f(at, gap);
     }
@@ -951,7 +951,7 @@ pub(crate) fn for_each_gap(
 pub(crate) fn for_each_cut(splices: &[Splice], len: usize, mut f: impl FnMut(usize, usize)) {
     // verified (`splices::Cuts`): the cuts, made in turn, leave exactly the
     // ranges' rows
-    let mut cuts = Cuts::new(splices, len, Ghost::assume_new());
+    let mut cuts = Cuts::<()>::new(splices, len, Ghost::assume_new());
     while let Some((at, n)) = cuts.next(splices) {
         f(at, n);
     }
@@ -1460,7 +1460,6 @@ where
     ) where
         for<'b> T::Get<'b>: AsColumnRef<T>,
     {
-        use crate::shift::Shiftable;
         match strategy {
             CopyStrategy::Direct => {
                 // Two forward passes that never restart. The source
@@ -1468,29 +1467,18 @@ where
                 // them; the splice positions ascend in the original
                 // coordinates a cursor seeks in, so one cursor covers
                 // those, and the ones landing in a slab share its rebuild.
-                let mut runs = src.iter().runs();
-                let mut e = self.edit();
-                for sp in splices {
-                    runs.shift(sp.range.clone());
-                    e.seek(sp.pos).delete(sp.delete).insert_runs(&mut runs);
-                }
-                e.finish();
+                // Verified (`copy::copy_direct`): the column becomes
+                // `applied(dst, src, splices)`.
+                self.copy_direct_from(&src, splices);
             }
             CopyStrategy::Invert => {
                 // keep src's slabs: swap, drop the gaps (interior slabs
                 // undecoded), then splice the old column's kept
                 // segments in between the retained groups (deleted old
-                // rows simply never come back)
-                let old_len = self.len();
+                // rows simply never come back). Verified
+                // (`copy::copy_invert`): the same result.
                 self.swap_contents(&mut src);
-                self.retain_ranges(splices);
-                let mut runs = src.iter().runs();
-                let mut e = self.edit();
-                for_each_gap(splices, old_len, |at, gap| {
-                    runs.shift(gap);
-                    e.seek(at).insert_runs(&mut runs);
-                });
-                e.finish();
+                self.copy_invert_from(&src, splices);
             }
         }
     }
@@ -1600,6 +1588,7 @@ where
 
     /// Keep only the rows in `splices`' ranges (normalized), deleting the
     /// gaps back-to-front; interior slabs of a gap drop without decoding.
+    #[cfg(test)]
     pub(crate) fn retain_ranges(&mut self, splices: &[Splice]) {
         for_each_cut(splices, self.len(), |at, n| self.remove_n(at, n));
     }

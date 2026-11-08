@@ -23,10 +23,10 @@
 //! the ranges' items (`kept`), and the gaps [`Gaps`] gives, as splices
 //! inserting them, are a normalized list that, applied to those with the
 //! destination as its source, gives what the splices give. So both ways
-//! come down to the edit cursor applying a normalized list. Trusted: the
-//! glue that feeds these, and that the edit cursor loop (its seeks,
-//! deletes and run inserts) and `remove_n` do what `applied` and `cut`
-//! say.
+//! come down to the edit cursor applying a normalized list, which
+//! `crate::copy` proves of both. The ghost columns are of any item type:
+//! nothing here depends on the items. Trusted: the glue that feeds
+//! `Normalize` the caller's splices.
 
 use crate::Splice;
 use std::ops::Range;
@@ -100,7 +100,7 @@ pub(crate) open spec fn normal(sps: Seq<Splice>, src_len: int, dst_len: int) -> 
 }
 
 /// Normalizing a list of splices, one at a time (`normalize_splices`).
-pub(crate) struct Normalize {
+pub(crate) struct Normalize<V> {
     pub(crate) out: Vec<Splice>,
     /// where the splices so far end, in the source (the furthest) and the
     /// destination
@@ -113,9 +113,9 @@ pub(crate) struct Normalize {
     #[allow(dead_code)]
     pub(crate) seen: Ghost<Seq<Splice>>,
     #[allow(dead_code)]
-    pub(crate) dst: Ghost<Seq<int>>,
+    pub(crate) dst: Ghost<Seq<V>>,
     #[allow(dead_code)]
-    pub(crate) src: Ghost<Seq<int>>,
+    pub(crate) src: Ghost<Seq<V>>,
 }
 
 /// What a splice copies, clamped: the same as the splice's own range.
@@ -150,7 +150,7 @@ proof fn lemma_in_order_push(seen: Seq<Splice>, sp: Splice, dst_len: int)
 }
 
 /// A splice that does nothing: the destination runs on to its position.
-proof fn lemma_skip(dst: Seq<int>, src: Seq<int>, out: Seq<Splice>, seen: Seq<Splice>, sp: Splice)
+proof fn lemma_skip<V>(dst: Seq<V>, src: Seq<V>, out: Seq<Splice>, seen: Seq<Splice>, sp: Splice)
     requires
         produced(dst, src, seen) == produced(dst, src, out) + dst.subrange(end_of(out), end_of(seen)),
         0 <= end_of(out) <= end_of(seen) <= sp.pos <= dst.len(),
@@ -161,14 +161,14 @@ proof fn lemma_skip(dst: Seq<int>, src: Seq<int>, out: Seq<Splice>, seen: Seq<Sp
 {
     let s1 = seen.push(sp);
     assert(s1.drop_last() =~= seen);
-    assert(copied(src, sp) =~= Seq::<int>::empty());
+    assert(copied(src, sp) =~= Seq::<V>::empty());
     assert(dst.subrange(end_of(out), end_of(seen)) + dst.subrange(end_of(seen), sp.pos as int)
         =~= dst.subrange(end_of(out), sp.pos as int));
     assert(produced(dst, src, s1) =~= produced(dst, src, out) + dst.subrange(end_of(out), end_of(s1)));
 }
 
 /// Adding a splice, clamped.
-proof fn lemma_add(dst: Seq<int>, src: Seq<int>, out: Seq<Splice>, seen: Seq<Splice>, sp: Splice, c: Splice, src_len: int, dst_len: int, src_pos: int)
+proof fn lemma_add<V>(dst: Seq<V>, src: Seq<V>, out: Seq<Splice>, seen: Seq<Splice>, sp: Splice, c: Splice, src_len: int, dst_len: int, src_pos: int)
     requires
         produced(dst, src, seen) == produced(dst, src, out) + dst.subrange(end_of(out), end_of(seen)),
         0 <= end_of(out) <= end_of(seen) <= sp.pos,
@@ -190,7 +190,7 @@ proof fn lemma_add(dst: Seq<int>, src: Seq<int>, out: Seq<Splice>, seen: Seq<Spl
     lemma_add_normal(out, c, src_len, dst_len);
 }
 
-proof fn lemma_add_produced(dst: Seq<int>, src: Seq<int>, out: Seq<Splice>, seen: Seq<Splice>, sp: Splice, c: Splice)
+proof fn lemma_add_produced<V>(dst: Seq<V>, src: Seq<V>, out: Seq<Splice>, seen: Seq<Splice>, sp: Splice, c: Splice)
     requires
         produced(dst, src, seen) == produced(dst, src, out) + dst.subrange(end_of(out), end_of(seen)),
         0 <= end_of(out) <= end_of(seen) <= sp.pos,
@@ -207,7 +207,7 @@ proof fn lemma_add_produced(dst: Seq<int>, src: Seq<int>, out: Seq<Splice>, seen
     assert(o1.drop_last() =~= out);
     assert(dst.subrange(end_of(out), end_of(seen)) + dst.subrange(end_of(seen), sp.pos as int)
         =~= dst.subrange(end_of(out), sp.pos as int));
-    assert(dst.subrange(end_of(o1), end_of(s1)) =~= Seq::<int>::empty());
+    assert(dst.subrange(end_of(o1), end_of(s1)) =~= Seq::<V>::empty());
     assert(produced(dst, src, s1) =~= produced(dst, src, o1) + dst.subrange(end_of(o1), end_of(s1)));
 }
 
@@ -236,7 +236,7 @@ proof fn lemma_add_normal(out: Seq<Splice>, c: Splice, src_len: int, dst_len: in
 }
 
 /// Merging a splice into the last one, which it touches in both columns.
-proof fn lemma_merge(dst: Seq<int>, src: Seq<int>, o: Seq<Splice>, last: Splice, seen: Seq<Splice>, sp: Splice, c: Splice, m: Splice, src_len: int, dst_len: int)
+proof fn lemma_merge<V>(dst: Seq<V>, src: Seq<V>, o: Seq<Splice>, last: Splice, seen: Seq<Splice>, sp: Splice, c: Splice, m: Splice, src_len: int, dst_len: int)
     requires
         produced(dst, src, seen) == produced(dst, src, o.push(last)) + dst.subrange(end_of(o.push(last)), end_of(seen)),
         end_of(o.push(last)) <= end_of(seen) <= sp.pos,
@@ -268,17 +268,17 @@ proof fn lemma_merge(dst: Seq<int>, src: Seq<int>, o: Seq<Splice>, last: Splice,
         if last.range.start < last.range.end {
             assert(copied(src, last) == src.subrange(last.range.start as int, last.range.end as int));
         } else {
-            assert(copied(src, last) =~= Seq::<int>::empty());
+            assert(copied(src, last) =~= Seq::<V>::empty());
         }
         if last.range.end < m.range.end {
             assert(copied(src, c) == src.subrange(last.range.end as int, m.range.end as int));
         } else {
-            assert(copied(src, c) =~= Seq::<int>::empty());
+            assert(copied(src, c) =~= Seq::<V>::empty());
         }
     }
     assert(end_of(seen) == sp.pos);
-    assert(dst.subrange(sp.pos as int, sp.pos as int) =~= Seq::<int>::empty());
-    assert(dst.subrange(end_of(om), end_of(s1)) =~= Seq::<int>::empty());
+    assert(dst.subrange(sp.pos as int, sp.pos as int) =~= Seq::<V>::empty());
+    assert(dst.subrange(end_of(om), end_of(s1)) =~= Seq::<V>::empty());
     assert(produced(dst, src, s1) =~= produced(dst, src, om) + dst.subrange(end_of(om), end_of(s1)));
     assert forall|i: int| 0 < i < om.len() implies om[i - 1].range.end <= #[trigger] om[i].range.start by {
         if i == om.len() - 1 {
@@ -307,7 +307,7 @@ proof fn lemma_merge(dst: Seq<int>, src: Seq<int>, o: Seq<Splice>, last: Splice,
     }
 }
 
-impl Normalize {
+impl<V> Normalize<V> {
     pub(crate) open spec fn inv(&self) -> bool {
         let out = self.out@;
         let seen = self.seen@;
@@ -324,7 +324,7 @@ impl Normalize {
     /// Start normalizing splices from a source of `src_len` items into a
     /// destination of `dst_len`; `dst` and `src` are any such columns.
     #[inline(always)]
-    pub(crate) fn new(src_len: usize, dst_len: usize, Ghost(dst): Ghost<Seq<int>>, Ghost(src): Ghost<Seq<int>>) -> (n: Self)
+    pub(crate) fn new(src_len: usize, dst_len: usize, Ghost(dst): Ghost<Seq<V>>, Ghost(src): Ghost<Seq<V>>) -> (n: Self)
         requires
             dst.len() == dst_len,
             src.len() == src_len,
@@ -337,8 +337,8 @@ impl Normalize {
             n.src@ == src,
     {
         proof {
-            assert(dst.subrange(0, 0) =~= Seq::<int>::empty());
-            assert(Seq::<int>::empty() + Seq::<int>::empty() =~= Seq::<int>::empty());
+            assert(dst.subrange(0, 0) =~= Seq::<V>::empty());
+            assert(Seq::<V>::empty() + Seq::<V>::empty() =~= Seq::<V>::empty());
         }
         Normalize {
             out: Vec::new(),
@@ -411,7 +411,7 @@ impl Normalize {
         proof {
             assert(copied(src, Splice { pos: sp.pos, delete: sp.delete, range: start..end }) == copied(src, sp)) by {
                 if s0 >= e0 {
-                    assert(copied(src, sp) =~= Seq::<int>::empty());
+                    assert(copied(src, sp) =~= Seq::<V>::empty());
                 }
             }
             if n > 0 {
@@ -562,7 +562,7 @@ proof fn lemma_kept_at<V>(src: Seq<V>, sps: Seq<Splice>, i: int)
 
 /// Cutting the gaps out of the source, back to front
 /// (`retain_ranges`), leaving what the splices keep.
-pub(crate) struct Cuts {
+pub(crate) struct Cuts<V> {
     /// the ranges not yet passed (those before `i`), and where the
     /// source runs uncut to
     pub(crate) i: usize,
@@ -573,10 +573,15 @@ pub(crate) struct Cuts {
     #[allow(dead_code)]
     pub(crate) sps: Ghost<Seq<Splice>>,
     #[allow(dead_code)]
-    pub(crate) src: Ghost<Seq<int>>,
+    pub(crate) src: Ghost<Seq<V>>,
 }
 
-impl Cuts {
+impl<V> Cuts<V> {
+    /// Cuts can still come: each one given lowers this.
+    pub(crate) open spec fn left(&self) -> nat {
+        2 * self.i as nat + if self.end > 0 { 1nat } else { 0nat }
+    }
+
     pub(crate) open spec fn inv(&self) -> bool {
         let (sps, src) = (self.sps@, self.src@);
         &&& ranges_in(sps, src.len() as int)
@@ -589,7 +594,7 @@ impl Cuts {
     /// Start cutting a source of `src_len` items (any such `src`) down to
     /// what `sps` keep.
     #[inline(always)]
-    pub(crate) fn new(sps: &[Splice], src_len: usize, Ghost(src): Ghost<Seq<int>>) -> (c: Self)
+    pub(crate) fn new(sps: &[Splice], src_len: usize, Ghost(src): Ghost<Seq<V>>) -> (c: Self)
         requires
             ranges_in(sps@, src_len as int),
             src.len() == src_len,
@@ -601,7 +606,7 @@ impl Cuts {
     {
         proof {
             assert(sps@.skip(sps@.len() as int) =~= Seq::<Splice>::empty());
-            assert(src.subrange(0, src_len as int) + Seq::<int>::empty() =~= src);
+            assert(src.subrange(0, src_len as int) + Seq::<V>::empty() =~= src);
             if sps@.len() > 0 {
                 assert(sps@[sps@.len() - 1].range.start <= sps@[sps@.len() - 1].range.end <= src_len);
             }
@@ -620,12 +625,15 @@ impl Cuts {
             final(self).inv(),
             final(self).sps == old(self).sps,
             final(self).src == old(self).src,
-            r matches Some(c) ==> final(self).cuts@ == old(self).cuts@.push(c),
+            r matches Some(c) ==> final(self).cuts@ == old(self).cuts@.push(c)
+                && c.0 + c.1 <= removed(old(self).src@, old(self).cuts@).len()
+                && final(self).left() < old(self).left(),
             r is None ==> final(self).cuts@ == old(self).cuts@
                 && removed(final(self).src@, final(self).cuts@) == kept(final(self).src@, final(self).sps@),
     {
         let ghost src = self.src@;
         let ghost cuts0 = self.cuts@;
+        let ghost left0 = self.left();
         while self.i > 0
             invariant
                 self.inv(),
@@ -635,6 +643,8 @@ impl Cuts {
                 self.cuts@ == cuts0,
                 cuts0 == old(self).cuts@,
                 src == self.src@,
+                left0 == old(self).left(),
+                self.left() <= left0,
             decreases self.i,
         {
             let i = self.i - 1;
@@ -657,6 +667,7 @@ impl Cuts {
                     let cur = removed(src, cuts0);
                     let k = kept(src, sps@.skip(i + 1));
                     assert(cur == src.subrange(0, to as int) + k);
+                    assert(cur.len() >= to);
                     assert(cur.subrange(0, end as int) =~= src.subrange(0, end as int));
                     assert(cur.subrange(to as int, cur.len() as int) =~= k);
                     let c = (end, (to - end) as usize);
@@ -677,6 +688,8 @@ impl Cuts {
             proof {
                 let cur = removed(src, cuts0);
                 let k = kept(src, sps@.skip(0));
+                assert(sps@.skip(0) =~= sps@.skip(self.i as int));
+                assert(cur.len() >= to);
                 assert(cur.subrange(0, 0) + cur.subrange(to as int, cur.len() as int) =~= k);
                 self.cuts = Ghost(cuts0.push((0usize, to)));
                 assert(self.cuts@.drop_last() =~= cuts0);
@@ -695,7 +708,7 @@ impl Cuts {
 /// The gaps between the splices, in the destination, put back between
 /// the ranges kept (`for_each_gap`): each, as a splice inserting it, is
 /// at the length of the ranges before it.
-pub(crate) struct Gaps {
+pub(crate) struct Gaps<V> {
     /// the splices passed, where the last ends in the destination, and the
     /// length of their ranges
     pub(crate) i: usize,
@@ -712,12 +725,17 @@ pub(crate) struct Gaps {
     #[allow(dead_code)]
     pub(crate) sps: Ghost<Seq<Splice>>,
     #[allow(dead_code)]
-    pub(crate) dst: Ghost<Seq<int>>,
+    pub(crate) dst: Ghost<Seq<V>>,
     #[allow(dead_code)]
-    pub(crate) src: Ghost<Seq<int>>,
+    pub(crate) src: Ghost<Seq<V>>,
 }
 
-impl Gaps {
+impl<V> Gaps<V> {
+    /// Gaps can still come: each one given lowers this.
+    pub(crate) open spec fn left(&self) -> nat {
+        2 * (self.sps@.len() - self.i) as nat + if self.last@ { 0nat } else { 1nat }
+    }
+
     pub(crate) open spec fn inv(&self) -> bool {
         let (sps, dst, src, gaps) = (self.sps@, self.dst@, self.src@, self.gaps@);
         let k = kept(src, sps);
@@ -743,7 +761,7 @@ impl Gaps {
     /// and into a destination (any such) of the given lengths.
     #[allow(unused_variables)]
     #[inline(always)]
-    pub(crate) fn new(sps: &[Splice], dst_len: usize, Ghost(dst): Ghost<Seq<int>>, Ghost(src): Ghost<Seq<int>>) -> (g: Self)
+    pub(crate) fn new(sps: &[Splice], dst_len: usize, Ghost(dst): Ghost<Seq<V>>, Ghost(src): Ghost<Seq<V>>) -> (g: Self)
         requires
             normal(sps@, src.len() as int, dst_len as int),
             dst.len() == dst_len,
@@ -757,8 +775,8 @@ impl Gaps {
         proof {
             let k = kept(src, sps@);
             assert(sps@.take(0) =~= Seq::<Splice>::empty());
-            assert(k.subrange(0, 0) =~= Seq::<int>::empty());
-            assert(Seq::<int>::empty() + Seq::<int>::empty() =~= Seq::<int>::empty());
+            assert(k.subrange(0, 0) =~= Seq::<V>::empty());
+            assert(Seq::<V>::empty() + Seq::<V>::empty() =~= Seq::<V>::empty());
             lemma_kept_split(src, sps@, 0);
         }
         Gaps {
@@ -790,7 +808,8 @@ impl Gaps {
             final(self).src == old(self).src,
             r matches Some(g) ==> final(self).gaps@ == old(self).gaps@.push(
                 Splice { pos: g.0, delete: 0, range: g.1 },
-            ),
+            ) && final(self).left() < old(self).left()
+                && normal(final(self).gaps@, final(self).dst@.len() as int, kept(final(self).src@, final(self).sps@).len() as int),
             r is None ==> final(self).gaps@ == old(self).gaps@
                 && applied(kept(final(self).src@, final(self).sps@), final(self).dst@, final(self).gaps@)
                 == applied(final(self).dst@, final(self).src@, final(self).sps@),
@@ -811,6 +830,7 @@ impl Gaps {
                 dst == self.dst@,
                 src == self.src@,
                 k == kept(src, sps@),
+                self.left() <= old(self).left(),
             decreases n - self.i,
         {
             let i = self.i;
@@ -860,7 +880,7 @@ impl Gaps {
             if !self.last@ {
                 assert(sps@.take(n as int) =~= sps@);
                 assert(k.subrange(end_of(gaps0), k.len() as int) == k.subrange(end_of(gaps0), self.at as int));
-                assert(dst.subrange(end_of(sps@), dst.len() as int) =~= Seq::<int>::empty());
+                assert(dst.subrange(end_of(sps@), dst.len() as int) =~= Seq::<V>::empty());
                 assert(applied(dst, src, sps@) =~= produced(dst, src, sps@));
             }
         }
@@ -870,7 +890,7 @@ impl Gaps {
 
 /// Splice `i`, in the destination: where it ends, after those before it,
 /// and what it adds to what they produce.
-proof fn lemma_dst_step(dst: Seq<int>, src: Seq<int>, sps: Seq<Splice>, i: int)
+proof fn lemma_dst_step<V>(dst: Seq<V>, src: Seq<V>, sps: Seq<Splice>, i: int)
     requires
         0 <= i < sps.len(),
         normal(sps, src.len() as int, dst.len() as int),
@@ -892,7 +912,7 @@ proof fn lemma_dst_step(dst: Seq<int>, src: Seq<int>, sps: Seq<Splice>, i: int)
 }
 
 /// A gap before splice `i`, given as a splice into what the splices keep.
-proof fn lemma_gap(k: Seq<int>, dst: Seq<int>, src: Seq<int>, gaps: Seq<Splice>, g: Splice, sps: Seq<Splice>, i: int)
+proof fn lemma_gap<V>(k: Seq<V>, dst: Seq<V>, src: Seq<V>, gaps: Seq<Splice>, g: Splice, sps: Seq<Splice>, i: int)
     requires
         0 <= i < sps.len(),
         normal(sps, src.len() as int, dst.len() as int),
@@ -948,7 +968,7 @@ proof fn lemma_gap(k: Seq<int>, dst: Seq<int>, src: Seq<int>, gaps: Seq<Splice>,
 }
 
 /// No gap before splice `i`: its range follows on in what is kept.
-proof fn lemma_no_gap(k: Seq<int>, dst: Seq<int>, src: Seq<int>, gaps: Seq<Splice>, sps: Seq<Splice>, i: int, at: int)
+proof fn lemma_no_gap<V>(k: Seq<V>, dst: Seq<V>, src: Seq<V>, gaps: Seq<Splice>, sps: Seq<Splice>, i: int, at: int)
     requires
         0 <= i < sps.len(),
         sps[i].pos <= dst.len(),
@@ -971,12 +991,12 @@ proof fn lemma_no_gap(k: Seq<int>, dst: Seq<int>, src: Seq<int>, gaps: Seq<Splic
     let b = at + r.len();
     assert(k.subrange(at, b) =~= r);
     assert(k.subrange(end_of(gaps), b) =~= k.subrange(end_of(gaps), at) + k.subrange(at, b));
-    assert(dst.subrange(sps[i].pos as int, sps[i].pos as int) =~= Seq::<int>::empty());
+    assert(dst.subrange(sps[i].pos as int, sps[i].pos as int) =~= Seq::<V>::empty());
     assert(produced(k, dst, gaps) + k.subrange(end_of(gaps), b) =~= produced(dst, src, sps.take(i + 1)));
 }
 
 /// The gap after the last splice.
-proof fn lemma_last_gap(k: Seq<int>, dst: Seq<int>, src: Seq<int>, gaps: Seq<Splice>, g: Splice, sps: Seq<Splice>)
+proof fn lemma_last_gap<V>(k: Seq<V>, dst: Seq<V>, src: Seq<V>, gaps: Seq<Splice>, g: Splice, sps: Seq<Splice>)
     requires
         k == kept(src, sps),
         g.pos == k.len(),
@@ -995,7 +1015,7 @@ proof fn lemma_last_gap(k: Seq<int>, dst: Seq<int>, src: Seq<int>, gaps: Seq<Spl
     assert(gs.drop_last() =~= gaps);
     assert(gs.last() == g);
     assert(copied(dst, g) =~= dst.subrange(g.range.start as int, g.range.end as int));
-    assert(k.subrange(k.len() as int, k.len() as int) =~= Seq::<int>::empty());
+    assert(k.subrange(k.len() as int, k.len() as int) =~= Seq::<V>::empty());
     assert(applied(k, dst, gs) =~= applied(dst, src, sps));
     assert forall|j: int| 0 < j < gs.len() implies gs[j - 1].pos + gs[j - 1].delete <= #[trigger] gs[j].pos by {
         if j == gs.len() - 1 {

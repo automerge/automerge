@@ -3,6 +3,7 @@
 //! its slabs can be rebuilt in place.
 
 use crate::column::{Column, WeightFn};
+use crate::copy::{copy_direct, copy_invert, Ranged};
 use crate::cursor::{splice_feed, Cursor, Feeding, Inserting, Slabs, Visiting, WeightOf};
 use crate::encoding::ColumnEncoding;
 use crate::index::ColumnIndex;
@@ -361,6 +362,53 @@ where
             &mut Visiting::<Enc<T, C>, _>::new(&mut f),
             &mut g,
             &mut Feeding::<Enc<T, C>, _>::new(runs),
+        );
+    }
+
+    /// `copy_ranges` directly: apply the normalized `splices` to this
+    /// column, copying from `src`, with one cursor (verified,
+    /// `copy::copy_direct`).
+    pub(crate) fn copy_direct_from(&mut self, src: &Self, splices: &[crate::Splice])
+    where
+        for<'b> T::Get<'b>: AsColumnRef<T>,
+    {
+        assert!(self.total_len <= usize::MAX - 3, "column too long to edit");
+        let mut f = |_: T::Get<'_>, _: usize| {};
+        let mut g = |_: &WF::Weight| {};
+        copy_direct::<Model<T, C>, WF::Weight, Idx, G<T, C, WF>, _, _, _>(
+            &mut self.slabs,
+            &mut self.index,
+            &mut self.total_len,
+            self.max_segments,
+            &mut self.counter,
+            splices,
+            &mut Visiting::<Enc<T, C>, _>::new(&mut f),
+            &mut g,
+            &mut Ranged::<Enc<T, C>, _>::new(src.iter().runs()),
+        );
+    }
+
+    /// `copy_ranges` inverted: this column holds the source; keep the
+    /// normalized `splices`' ranges of it and put `dst`'s items back
+    /// between them (verified, `copy::copy_invert`).
+    pub(crate) fn copy_invert_from(&mut self, dst: &Self, splices: &[crate::Splice])
+    where
+        for<'b> T::Get<'b>: AsColumnRef<T>,
+    {
+        assert!(self.total_len <= usize::MAX - 3, "column too long to edit");
+        let mut f = |_: T::Get<'_>, _: usize| {};
+        let mut g = |_: &WF::Weight| {};
+        copy_invert::<Model<T, C>, WF::Weight, Idx, G<T, C, WF>, _, _, _>(
+            &mut self.slabs,
+            &mut self.index,
+            &mut self.total_len,
+            self.max_segments,
+            &mut self.counter,
+            splices,
+            dst.len(),
+            &mut Visiting::<Enc<T, C>, _>::new(&mut f),
+            &mut g,
+            &mut Ranged::<Enc<T, C>, _>::new(dst.iter().runs()),
         );
     }
 }
