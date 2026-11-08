@@ -15,6 +15,9 @@ utf16-indexing = []
 # Whether to enable "slow path" assertions which check that various invariants hold
 # should only be enabled when running tests
 slow_path_assertions = ["hexane/slow_path_assertions"]
+# Counters of the changes a load rebuilds from a document's ops, for tests
+# that check which operations do that work. Not for production use.
+change-rebuild-counters = []
 
 [dependencies]
 cfg-if = "1.0"
@@ -46,6 +49,8 @@ features = ["console"]
 optional = true
 
 [dev-dependencies]
+# The integration tests read the rebuild counters.
+automerge = { path = ".", features = ["change-rebuild-counters"] }
 automerge-test = { path = "../automerge-test" }
 maplit = { version = "^1.0" }
 pretty_assertions = "1.0.0"

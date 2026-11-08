@@ -3,6 +3,7 @@ use std::env;
 use std::fmt::Debug;
 use std::num::NonZeroU64;
 use std::ops::RangeBounds;
+use std::sync::Arc;
 
 use itertools::Itertools;
 
@@ -114,6 +115,7 @@ pub struct LoadOptions<'a> {
     text_encoding: TextEncoding,
     author: Option<Author<'static>>,
     write_frontier: HashMap<Author<'static>, Vec<ChangeHash>>,
+    defer_hashes: bool,
 }
 
 impl<'a> LoadOptions<'a> {
@@ -198,6 +200,62 @@ impl<'a> LoadOptions<'a> {
             ..self
         }
     }
+
+    /// Whether to put off computing the hashes of the changes in a document
+    /// chunk until they are needed.
+    ///
+    /// A document chunk stores the document's ops and the hashes of its
+    /// heads, but not the hashes of its other changes. A full load rebuilds
+    /// every change from the ops to learn its hash and to check the stored
+    /// heads, which for a large document is a large part of the load. With
+    /// this option, a document chunk with a single head is loaded without
+    /// rebuilding its changes: the stored head is trusted, and the other
+    /// hashes are computed, and the head checked, the first time anything
+    /// needs them. Reading the document, making local changes, diffing
+    /// between the loaded heads and later ones, and saving need none of the
+    /// loaded changes' hashes; getting changes, syncing, merging and applying
+    /// changes from elsewhere do. [`Automerge::verify_hashes`] computes them
+    /// at a time of the caller's choosing.
+    ///
+    /// Until the hashes are computed, reads trust the chunk's ops as well as
+    /// its head: a chunk whose ops a full load would reject as not making
+    /// valid changes still loads and reads, and the error comes when the
+    /// hashes are computed. The stored head is checked then whatever the
+    /// [`VerificationMode`]. If the changes cannot be rebuilt, or the stored
+    /// head is not what they rebuild into, [`Automerge::verify_hashes`]
+    /// returns the error a full load would have; so call it before relying
+    /// on a document from a source you do not trust. Changes made on top of
+    /// the loaded document before then depend on the stored head.
+    ///
+    /// The document chunk is kept, as stored, until the hashes are computed.
+    /// A clone or fork of the document made before then computes them again,
+    /// separately, when it needs them. Any other chunk, or a document chunk
+    /// with more than one head, is loaded in full as usual. The default is
+    /// `false`.
+    ///
+    /// # Panics
+    ///
+    /// Loading does not panic, but if the changes cannot be rebuilt, or the
+    /// stored head is not what they rebuild into, every later operation on
+    /// the document which needs the hashes panics, including those which
+    /// return a `Result`; call [`Automerge::verify_hashes`] first to get the
+    /// error instead. Those are the operations that deal in changes: [`Automerge::get_changes`], [`Automerge::get_changes_meta`],
+    /// [`Automerge::get_change_by_hash`], [`Automerge::get_change_meta_by_hash`],
+    /// [`Automerge::get_changes_added`], [`ReadDoc::get_missing_deps`],
+    /// [`Automerge::hash_for_opid`], [`Automerge::save_after`],
+    /// [`crate::AutoCommit::save_incremental`], [`Automerge::bundle`],
+    /// [`Automerge::fragments`], [`Automerge::get_fragment`],
+    /// [`Automerge::fork_at`],
+    /// [`Automerge::merge`] (in either direction),
+    /// [`Automerge::apply_changes`], [`Automerge::load_incremental`], and
+    /// generating and receiving sync messages. Reading, diffing, saving in
+    /// full, [`Automerge::fork`] and local changes do not.
+    pub fn defer_hashes(self, defer_hashes: bool) -> Self {
+        Self {
+            defer_hashes,
+            ..self
+        }
+    }
 }
 
 impl std::default::Default for LoadOptions<'static> {
@@ -210,6 +268,7 @@ impl std::default::Default for LoadOptions<'static> {
             text_encoding: TextEncoding::platform_default(),
             author: None,
             write_frontier: HashMap::new(),
+            defer_hashes: false,
         }
     }
 }
@@ -1257,10 +1316,15 @@ impl Automerge {
             storage::Chunk::Document(d) => {
                 tracing::trace!("first chunk is document chunk, inflating");
                 first_chunk_was_doc = true;
+                let deferred_hashes = options.defer_hashes.then(|| {
+                    let chunk_len = data.len() - remaining.unconsumed_bytes().len();
+                    Arc::from(&data[..chunk_len])
+                });
                 match d.reconstruct(
                     options.verification_mode,
                     options.text_encoding,
                     write_frontier.take().unwrap_or_default(),
+                    deferred_hashes,
                 ) {
                     Ok(doc) => doc,
                     Err(ReconstructError::InvalidMarkOrderDoc {
@@ -1952,6 +2016,40 @@ impl Automerge {
                 }
             })
             .collect()
+    }
+
+    /// Compute the hashes of the changes a load with
+    /// [`LoadOptions::defer_hashes`] left uncomputed, if they have not been
+    /// computed already, and check the stored head against them.
+    ///
+    /// This does nothing to a document whose hashes are all known. Once it
+    /// has succeeded, the document is as if it had been loaded in full.
+    /// Until then, reads trust the chunk's ops as well as its stored head: a
+    /// chunk a full load would reject because its ops do not make valid
+    /// changes still reads, and this returns that error.
+    ///
+    /// # Errors
+    ///
+    /// The error a full load of the document chunk would have returned, if
+    /// its changes cannot be rebuilt from its ops or its stored head is not
+    /// what they rebuild into. The hashes then stay unknown.
+    ///
+    /// # Panics
+    ///
+    /// Never itself; but after it has returned an error, as before it has
+    /// been called on such a document, every operation which needs the
+    /// hashes panics: the operations that deal in changes, such as
+    /// [`Automerge::get_changes`], [`Automerge::merge`],
+    /// [`Automerge::apply_changes`], [`Automerge::fork_at`] and generating
+    /// or receiving sync messages. [`LoadOptions::defer_hashes`] lists them.
+    ///
+    /// A clone or fork of a document whose hashes are still deferred
+    /// computes them separately, so verify a document before copying it to
+    /// verify only once.
+    pub fn verify_hashes(&mut self) -> Result<(), AutomergeError> {
+        self.change_graph
+            .verify_hashes()
+            .map_err(|e| load::Error::InflateDocument(Box::new(e)).into())
     }
 
     /// Get the heads of this document.

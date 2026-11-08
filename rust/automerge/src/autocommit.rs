@@ -720,6 +720,11 @@ impl AutoCommit {
         self.doc.bundle_fragments(fragments)
     }
 
+    /// See [`Automerge::verify_hashes`].
+    pub fn verify_hashes(&mut self) -> Result<(), AutomergeError> {
+        self.doc.verify_hashes()
+    }
+
     /// Get the current heads of the document.
     ///
     /// This closes the transaction first, if one is in progress.

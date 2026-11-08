@@ -284,6 +284,9 @@ pub mod marks;
 pub mod op_set2;
 pub mod patches;
 mod read;
+#[cfg(any(test, feature = "change-rebuild-counters"))]
+#[doc(hidden)]
+pub mod rebuild_counters;
 mod sequence_tree;
 mod storage;
 pub mod sync;
