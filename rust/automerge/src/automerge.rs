@@ -34,11 +34,13 @@ use crate::types::{ActorId, ChangeHash, ObjId, ObjMeta, OpId, SequenceType, Text
 use crate::write_frontier::WriteFrontier;
 use crate::{AutomergeError, Change, Cursor, Fragment, ObjType, Prop};
 use actor::ActorMaintenance;
+use author::AuthorRegistration;
 use history::History;
 use std::borrow::Cow;
 use view::{ClockRange, Mask, ReadAt, VisibleClock};
 
 mod actor;
+mod author;
 pub(crate) mod current_state;
 mod history;
 pub(crate) mod view;
@@ -647,9 +649,7 @@ impl Automerge {
     /// Used by [`Automerge::transaction_args`] so that a new actor of a masked
     /// author is entered into the mask before the transaction opens.
     fn register_actor(&mut self, author: Author<'static>, actor: usize) {
-        debug_assert_eq!(self.change_graph.seq_for_actor(actor), 0);
-        self.authors.assign_author(author, actor);
-        self.rederive_visibility();
+        self.register_actors([(author, actor)]);
     }
 
     /// Bulk form of [`Automerge::register_actor`] for the batch importer:
@@ -661,27 +661,14 @@ impl Automerge {
         &mut self,
         pairs: impl IntoIterator<Item = (Author<'static>, usize)>,
     ) {
-        let mut pairs = pairs.into_iter().peekable();
-        let should_derive = pairs.peek().is_some();
-        for (author, actor) in pairs {
-            debug_assert_eq!(self.change_graph.seq_for_actor(actor), 0);
-            self.authors.assign_author(author, actor);
-        }
-        if should_derive {
-            self.rederive_visibility();
-        }
-    }
-
-    /// Re-derive `visibility` from the unchanged policy, without an
-    /// index rebuild. Sound only when no op's visibility can have changed
-    /// (registration of zero-op actors).
-    fn rederive_visibility(&mut self) {
-        self.visibility = visibility::FrontierVisibility::new(
-            &self.write_frontier,
+        AuthorRegistration::new(
+            &mut self.authors,
+            &mut self.visibility,
             &self.change_graph,
-            &self.authors,
-            self.actors(),
-        );
+            &self.ops.actors,
+            &self.write_frontier,
+        )
+        .register(pairs);
     }
 
     /// Ensure that the current visibility mask is the same as the mask that
