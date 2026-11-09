@@ -311,7 +311,7 @@ pub use crate::audit::{
 pub use crate::automerge::view::Viewpoint;
 pub use crate::automerge::{OnPartialLoad, StringMigration};
 #[doc(hidden)]
-pub use audit::Fragment;
+pub use audit::{Fragment, FragmentMeta};
 pub use author::Author;
 pub use autoserde::AutoSerde;
 pub use change::{Change, LoadError as LoadChangeError};

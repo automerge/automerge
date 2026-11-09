@@ -408,7 +408,7 @@ fn usurped_fragment_hashes_are_freed_on_live_docs() {
     );
     let head = plain.get_head_hashes()[0];
     assert!(plain.get_change_by_hash(&head).unwrap().is_some());
-    assert_eq!(plain.fragments(..), audit.fragments(..));
+    assert_eq!(plain.fragments_meta(..), audit.fragments_meta(..));
 }
 
 /// Disabling frees interior hashes; re-enabling recomputes and verifies them.
@@ -587,12 +587,17 @@ fn disabled_lifecycle_all_fallible_functions() {
             .unwrap()
     );
 
-    let mid_fragments = doc.fragments(..);
+    let mid_fragments = doc.fragments_meta(..);
     assert!(!mid_fragments.is_empty());
-    assert!(!doc
-        .bundles_for_fragments(mid_fragments.clone())
-        .unwrap()
-        .is_empty());
+    let encoded = doc.fragments_from_meta(mid_fragments.clone()).unwrap();
+    assert_eq!(
+        encoded.iter().map(|f| f.len()).sum::<usize>(),
+        doc.document().num_changes()
+    );
+    assert!(encoded
+        .iter()
+        .zip(&mid_fragments)
+        .all(|(f, meta)| !f.is_empty() && !meta.is_empty() && f.len() == meta.len()));
 
     let mut doc = doc.enable_audit_mode().unwrap();
     assert_eq!(doc.audit_mode(), AuditMode::Enabled);
@@ -613,11 +618,11 @@ fn disabled_lifecycle_all_fallible_functions() {
     let (v, _) = doc.get(ROOT, "x").unwrap().unwrap();
     assert_eq!(v.as_i64(), Some(1));
 
-    let fragments = doc.fragments(..);
+    let fragments = doc.fragments_meta(..);
     let audit = load_audited(&doc.save()).unwrap();
     // apply order depends on each document's own node indexes
     let mut a = fragments.clone();
-    let mut b = audit.fragments(..);
+    let mut b = audit.fragments_meta(..);
     a.sort_by_key(|f| f.head);
     b.sort_by_key(|f| f.head);
     assert_eq!(a, b);
@@ -634,16 +639,20 @@ fn fragments_work_without_hash_columns() {
 
     let mut doc = AutoCommit::load(&bytes).unwrap();
     assert_eq!(doc.audit_mode(), AuditMode::Disabled);
-    assert_eq!(doc.fragments(..).len(), 1);
+    assert_eq!(doc.fragments_meta(..).len(), 1);
     let head = doc.get_head_hashes()[0];
-    assert!(doc.get_fragment(head).is_some());
+    assert!(doc.get_fragment_meta(head).is_some());
     assert!(!doc
-        .bundles_for_fragments(doc.fragments(..))
+        .fragments_from_meta(doc.fragments_meta(..))
         .unwrap()
         .is_empty());
 
-    let doc = doc.enable_audit_mode().unwrap();
-    assert_eq!(doc.fragments(..).len(), 1);
+    let mut doc = doc.enable_audit_mode().unwrap();
+    assert_eq!(doc.fragments_meta(..).len(), 1);
+    assert_eq!(
+        doc.fragments(..).iter().map(|f| f.len()).sum::<usize>(),
+        doc.get_changes(&[]).unwrap().len()
+    );
 }
 
 /// A tiny whole document is hashed before it is applied, so even a
@@ -677,13 +686,13 @@ fn disabled_state_round_trips() {
     let (bytes, _unknown) = saved_big_doc_with_unknown_hash();
     let mut mid1 = AutoCommit::load(&bytes).unwrap();
     assert_eq!(mid1.audit_mode(), AuditMode::Disabled);
-    let frags1 = mid1.fragments(..);
+    let frags1 = mid1.fragments_meta(..);
 
     let resaved = mid1.save();
     let mid2 = AutoCommit::load(&resaved).unwrap();
     assert_eq!(mid2.audit_mode(), AuditMode::Disabled);
     // apply order is per document: compare as sets
-    let mut a = mid2.fragments(..);
+    let mut a = mid2.fragments_meta(..);
     let mut b = frags1.clone();
     a.sort_by_key(|f| f.head);
     b.sort_by_key(|f| f.head);
@@ -701,7 +710,7 @@ fn default_load_computes_then_retains_without_columns() {
     let small_bytes = small.save();
     let mut doc = AutoCommit::load(&small_bytes).unwrap();
     assert_eq!(doc.audit_mode(), AuditMode::Disabled);
-    assert_eq!(doc.fragments(..).len(), 1);
+    assert_eq!(doc.fragments_meta(..).len(), 1);
     let head = doc.get_head_hashes()[0];
     assert!(doc.get_change_by_hash(&head).unwrap().is_some());
 }
@@ -711,7 +720,7 @@ fn default_load_computes_then_retains_without_columns() {
 fn audit_and_manifold_fragment_apply_agree() {
     let mut src = big_doc_in_audit_mode();
 
-    let fragments = src.fragments(..);
+    let fragments = src.fragments_meta(..);
     let bundles: Vec<_> = fragments
         .into_iter()
         .map(|f| src.document().bundle_for_fragment(&f).unwrap())
@@ -742,7 +751,7 @@ fn audit_and_manifold_fragment_apply_agree() {
 fn audit_fragment_apply_missing_deps() {
     let mut src = big_doc_in_audit_mode();
 
-    let fragments = src.fragments(..);
+    let fragments = src.fragments_meta(..);
     let bundles: Vec<_> = fragments
         .into_iter()
         .map(|f| src.document().bundle_for_fragment(&f).unwrap())
@@ -850,4 +859,25 @@ fn merge_outside_audit_mode_survives_a_freed_boundary() {
             "left".len() + "right".len()
         );
     }
+}
+
+/// Fragments partition the history, so their lengths sum to its changes.
+#[test]
+fn audited_fragment_lengths_sum_to_the_history() {
+    use automerge::transaction::Transactable as _;
+    let mut doc = automerge::AutoCommit::new();
+    for i in 0..2_000 {
+        doc.put(automerge::ROOT, format!("k{}", i % 32), i as i64)
+            .unwrap();
+        doc.commit();
+    }
+    let fragments = doc.fragments(..);
+    assert!(fragments.iter().any(|f| f.meta.level > 0));
+    assert!(fragments
+        .iter()
+        .all(|f| !f.is_empty() && !f.meta.is_empty() && f.len() == f.meta.len()));
+    assert_eq!(
+        fragments.iter().map(|f| f.len()).sum::<usize>(),
+        doc.get_changes(&[]).len()
+    );
 }

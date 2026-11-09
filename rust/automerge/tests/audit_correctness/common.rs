@@ -1,7 +1,7 @@
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
 use automerge::next::transaction::CommitOptions;
-use automerge::next::{Automerge, Fragment};
+use automerge::next::{Automerge, FragmentMeta};
 use automerge::{ActorId, ChangeId};
 use rand::prelude::*;
 use sha2::{Digest, Sha256};
@@ -37,7 +37,7 @@ pub(crate) fn panic_msg(e: &Box<dyn std::any::Any + Send>) -> String {
 }
 
 /// Arrival order may reorder a fragment's lists, never change them.
-pub(crate) fn normalized(fragments: Vec<Fragment>) -> Vec<Fragment> {
+pub(crate) fn normalized(fragments: Vec<FragmentMeta>) -> Vec<FragmentMeta> {
     let mut fragments: Vec<_> = fragments
         .into_iter()
         .map(|mut f| {

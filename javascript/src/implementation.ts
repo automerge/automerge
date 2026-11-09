@@ -2033,10 +2033,11 @@ export function getFragmentMeta(
 }
 
 /**
- * EXPERIMENTAL: Return the fragments, loose commits included, holding a change
- * that `heads` does not cover, in causal order. A fragment that also holds
- * older changes is included whole. Heads the document does not know are
- * ignored, so an empty array returns every fragment.
+ * EXPERIMENTAL: Return the changes `heads` does not cover, each exactly once,
+ * as fragments and loose commits in apply order. A fragment `heads` partly
+ * covers is sent as the smaller fragments it superseded, down to loose
+ * commits. Heads the document does not know are ignored, so an empty array
+ * returns every fragment.
  *
  * @experimental
  * @hidden

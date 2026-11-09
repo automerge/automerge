@@ -194,7 +194,10 @@ fn an_autocommit_started_by_load_incremental_frees_no_hash_before_saving() {
         doc.put(ROOT, "k", i as i64).unwrap();
         doc.commit_with(t0());
     }
-    assert!(!doc.fragments(1..).is_empty(), "fixture needs a fragment");
+    assert!(
+        !doc.fragments_meta(1..).is_empty(),
+        "fixture needs a fragment"
+    );
     let res = doc.change_id_to_hash(&id(2, 10));
     assert!(
         matches!(res, Ok(Some(_))),

@@ -7,7 +7,7 @@ use crate::automerge::view::Viewpoint;
 use crate::automerge::LoadOptions;
 use crate::automerge::SaveOptions;
 use crate::automerge::{Automerge, EnableAuditModeError};
-use crate::change_graph::Fragment;
+use crate::change_graph::{Fragment, FragmentMeta};
 use crate::cursor::{CursorPosition, MoveCursor};
 use crate::exid::ExId;
 use crate::hash_retention::{Full, HashRetention, Retained};
@@ -77,6 +77,7 @@ pub struct AutoCommit<H: crate::hash_retention::HashRetention = crate::hash_rete
     /// the same heads show
     diff_cache: Option<(OpRange, ObjId, bool, u64, Vec<Patch>)>,
     save_cursor: Vec<ChangeId>,
+    sync_heads: Vec<ChangeId>,
     pub(crate) isolation: Option<Vec<ChangeId>>,
 }
 
@@ -93,6 +94,7 @@ impl<H: HashRetention> AutoCommit<H> {
             transaction: None,
             diff_cursor: Viewpoint::default(),
             diff_cache: None,
+            sync_heads: save_cursor.clone(),
             save_cursor,
             isolation: None,
         }
@@ -120,6 +122,7 @@ impl<H: HashRetention> AutoCommit<H> {
             diff_cursor,
             diff_cache,
             save_cursor,
+            sync_heads,
             isolation,
         } = self;
         AutoCommit {
@@ -128,6 +131,7 @@ impl<H: HashRetention> AutoCommit<H> {
             diff_cursor,
             diff_cache,
             save_cursor,
+            sync_heads,
             isolation,
         }
     }
@@ -165,6 +169,24 @@ impl<H: HashRetention> AutoCommit<H> {
     /// Returns the cursor set by [`Self::update_diff_cursor()`]
     pub fn diff_cursor(&self) -> Vec<ChangeId> {
         self.diff_cursor.heads().to_vec()
+    }
+
+    /// Resets the save cursor to the empty document: the next
+    /// [`Self::save_incremental()`] saves the whole document.
+    pub fn reset_save_cursor(&mut self) {
+        self.save_cursor = vec![];
+    }
+
+    /// Sets the save cursor to the current heads, so the next
+    /// [`Self::save_incremental()`] saves only what changes after this call.
+    pub fn update_save_cursor(&mut self) {
+        self.ensure_transaction_closed();
+        self.save_cursor = self.doc.get_heads();
+    }
+
+    /// The heads [`Self::save_incremental()`] saves after.
+    pub fn save_cursor(&self) -> Vec<ChangeId> {
+        self.save_cursor.clone()
     }
 
     /// The document's current [`Viewpoint`], at the isolated heads when isolated.
@@ -340,8 +362,10 @@ impl<H: HashRetention> AutoCommit<H> {
 
     pub fn fork(&mut self) -> Self {
         self.ensure_transaction_closed();
+        let doc = self.doc.fork();
         Self {
-            doc: self.doc.fork(),
+            sync_heads: doc.get_heads(),
+            doc,
             transaction: self.transaction.clone(),
             diff_cursor: Viewpoint::default(),
             diff_cache: None,
@@ -352,8 +376,10 @@ impl<H: HashRetention> AutoCommit<H> {
 
     pub fn fork_at(&mut self, heads: &[ChangeId]) -> Result<Self, AutomergeError> {
         self.ensure_transaction_closed();
+        let doc = self.doc.fork_at(heads)?;
         Ok(Self {
-            doc: self.doc.fork_at(heads)?,
+            sync_heads: doc.get_heads(),
+            doc,
             transaction: self.transaction.clone(),
             diff_cursor: Viewpoint::default(),
             diff_cache: None,
@@ -484,6 +510,16 @@ impl<H: HashRetention> AutoCommit<H> {
         self.doc.load_incremental(data)
     }
 
+    /// EXPERIMENTAL: See [`Automerge::apply_fragments`].
+    ///
+    /// This is an experimental API, it may change or be removed without
+    /// warning.
+    #[doc(hidden)]
+    pub fn apply_fragments(&mut self, fragments: &[Fragment]) -> Result<(), AutomergeError> {
+        self.ensure_transaction_closed();
+        self.doc.apply_fragments(fragments)
+    }
+
     /// See [`Automerge::apply_changes`].
     pub fn apply_changes(
         &mut self,
@@ -572,6 +608,24 @@ impl<H: HashRetention> AutoCommit<H> {
         }
         self.collect_garbage();
         bytes
+    }
+
+    /// EXPERIMENTAL: [`Automerge::sync_fragments`] from the heads the last
+    /// call, load or fork left this document at, moving them to the
+    /// current heads.
+    ///
+    /// This is an experimental API, it may change or be removed without
+    /// warning.
+    #[doc(hidden)]
+    pub fn sync_fragments(
+        &mut self,
+        fragments: &[Fragment],
+    ) -> Result<Vec<Fragment>, AutomergeError> {
+        self.ensure_transaction_closed();
+        let out = self.doc.sync_fragments(fragments, &self.sync_heads)?;
+        self.sync_heads = self.doc.get_heads();
+        self.collect_garbage();
+        Ok(out)
     }
 
     fn collect_garbage(&mut self) {
@@ -696,12 +750,21 @@ impl<H: HashRetention> AutoCommit<H> {
         self.doc.audit_mode()
     }
 
+    /// See [`Automerge::fragments`].
     pub fn fragments<R: RangeBounds<usize>>(&self, levels: R) -> Vec<Fragment> {
         self.doc.fragments(levels)
     }
 
+    pub fn fragments_meta<R: RangeBounds<usize>>(&self, levels: R) -> Vec<FragmentMeta> {
+        self.doc.fragments_meta(levels)
+    }
+
     pub fn get_fragment(&self, head: ChangeHash) -> Option<Fragment> {
         self.doc.get_fragment(head)
+    }
+
+    pub fn get_fragment_meta(&self, head: ChangeHash) -> Option<FragmentMeta> {
+        self.doc.get_fragment_meta(head)
     }
 
     /// See [`Automerge::fragments_after`].
@@ -709,16 +772,28 @@ impl<H: HashRetention> AutoCommit<H> {
         self.doc.fragments_after(heads)
     }
 
-    /// See [`Automerge::bundle_after`].
-    pub fn bundle_after(&self, heads: &[ChangeId]) -> Result<Vec<Vec<u8>>, AutomergeError> {
-        self.doc.bundle_after(heads)
+    /// See [`Automerge::fragments_after_full`].
+    pub fn fragments_after_full(
+        &self,
+        heads: &[ChangeId],
+    ) -> Result<Vec<Fragment>, AutomergeError> {
+        self.doc.fragments_after_full(heads)
     }
 
-    pub fn bundles_for_fragments<I: IntoIterator<Item = Fragment>>(
+    /// See [`Automerge::fragments_after_meta`].
+    pub fn fragments_after_meta(
         &self,
-        fragments: I,
-    ) -> Result<Vec<Vec<u8>>, AutomergeError> {
-        self.doc.bundles_for_fragments(fragments)
+        heads: &[ChangeId],
+    ) -> Result<Vec<FragmentMeta>, AutomergeError> {
+        self.doc.fragments_after_meta(heads)
+    }
+
+    /// See [`Automerge::fragments_from_meta`].
+    pub fn fragments_from_meta<I: IntoIterator<Item = FragmentMeta>>(
+        &self,
+        metas: I,
+    ) -> Result<Vec<Fragment>, AutomergeError> {
+        self.doc.fragments_from_meta(metas)
     }
 
     /// Get the current heads of the document.

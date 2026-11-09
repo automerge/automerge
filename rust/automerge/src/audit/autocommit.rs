@@ -12,7 +12,7 @@ use crate::{
 };
 use crate::{OnPartialLoad, TextEncoding};
 
-use super::automerge::{Automerge, Fragment, LoadOptions, SaveOptions};
+use super::automerge::{Automerge, Fragment, FragmentMeta, LoadOptions, SaveOptions};
 
 /// An automerge document that automatically manages transactions.
 ///
@@ -373,6 +373,16 @@ impl AutoCommit {
         self.0.load_incremental(data)
     }
 
+    /// EXPERIMENTAL: See [`crate::Automerge::apply_fragments`].
+    ///
+    /// This is an experimental API, it may change or be removed without
+    /// warning.
+    #[doc(hidden)]
+    pub fn apply_fragments(&mut self, fragments: &[Fragment]) -> Result<(), AutomergeError> {
+        self.0.ensure_transaction_closed();
+        self.__document_mut().apply_fragments(fragments)
+    }
+
     pub fn apply_changes(
         &mut self,
         changes: impl IntoIterator<Item = Change> + Clone,
@@ -507,14 +517,22 @@ impl AutoCommit {
         self.0.dump()
     }
 
-    /// EXPERIMENTAL: Return the fragments covering the document history at
-    /// the given levels, ordered oldest to newest.
+    /// EXPERIMENTAL: See [`crate::Automerge::fragments`].
     ///
     /// This is an experimental API, it may change or be removed without
     /// warning.
     #[doc(hidden)]
     pub fn fragments<R: RangeBounds<usize>>(&self, levels: R) -> Vec<Fragment> {
         self.__document().fragments(levels)
+    }
+
+    /// EXPERIMENTAL: See [`crate::Automerge::fragments_meta`].
+    ///
+    /// This is an experimental API, it may change or be removed without
+    /// warning.
+    #[doc(hidden)]
+    pub fn fragments_meta<R: RangeBounds<usize>>(&self, levels: R) -> Vec<FragmentMeta> {
+        self.__document().fragments_meta(levels)
     }
 
     /// EXPERIMENTAL: See [`crate::Automerge::fragments_after`].
@@ -526,6 +544,30 @@ impl AutoCommit {
         self.__document().fragments_after(heads)
     }
 
+    /// EXPERIMENTAL: See [`crate::Automerge::fragments_after_full`].
+    ///
+    /// This is an experimental API, it may change or be removed without
+    /// warning.
+    #[doc(hidden)]
+    pub fn fragments_after_full(
+        &self,
+        heads: &[ChangeHash],
+    ) -> Result<Vec<Fragment>, AutomergeError> {
+        self.__document().fragments_after_full(heads)
+    }
+
+    /// EXPERIMENTAL: See [`crate::Automerge::fragments_after_meta`].
+    ///
+    /// This is an experimental API, it may change or be removed without
+    /// warning.
+    #[doc(hidden)]
+    pub fn fragments_after_meta(
+        &self,
+        heads: &[ChangeHash],
+    ) -> Result<Vec<FragmentMeta>, AutomergeError> {
+        self.__document().fragments_after_meta(heads)
+    }
+
     /// EXPERIMENTAL: Return the fragment with the given head hash, if any.
     ///
     /// This is an experimental API, it may change or be removed without
@@ -533,6 +575,15 @@ impl AutoCommit {
     #[doc(hidden)]
     pub fn get_fragment(&self, head: ChangeHash) -> Option<Fragment> {
         self.__document().get_fragment(head)
+    }
+
+    /// EXPERIMENTAL: See [`crate::Automerge::get_fragment_meta`].
+    ///
+    /// This is an experimental API, it may change or be removed without
+    /// warning.
+    #[doc(hidden)]
+    pub fn get_fragment_meta(&self, head: ChangeHash) -> Option<FragmentMeta> {
+        self.__document().get_fragment_meta(head)
     }
 
     /// Get the current heads of the document.
@@ -608,16 +659,16 @@ impl AutoCommit {
         self.__document().hash_for_opid(opid)
     }
 
-    /// EXPERIMENTAL: Encode each fragment as a bundle.
+    /// EXPERIMENTAL: See [`crate::Automerge::fragments_from_meta`].
     ///
     /// This is an experimental API, it may change or be removed without
     /// warning.
     #[doc(hidden)]
-    pub fn bundles_for_fragments<I: IntoIterator<Item = Fragment>>(
+    pub fn fragments_from_meta<I: IntoIterator<Item = FragmentMeta>>(
         &self,
-        fragments: I,
-    ) -> Result<Vec<Vec<u8>>, AutomergeError> {
-        self.__document().bundles_for_fragments(fragments)
+        metas: I,
+    ) -> Result<Vec<Fragment>, AutomergeError> {
+        self.__document().fragments_from_meta(metas)
     }
 
     /// Convert to the [`next`](crate::next) API, which keeps only the hashes a

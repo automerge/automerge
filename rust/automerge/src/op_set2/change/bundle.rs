@@ -166,14 +166,14 @@ mod tests {
     use crate::tx::Transactable;
     use crate::types::ChangeHash;
     use crate::{
-        change_graph::Fragment, make_rng, AutomergeError, Bundle, Change, ChangeId, ObjType,
+        change_graph::FragmentMeta, make_rng, AutomergeError, Bundle, Change, ChangeId, ObjType,
         ScalarValue, ROOT,
     };
     use rand::prelude::*;
     use std::collections::HashSet;
 
     /// `changes` must be causally closed, topologically ordered, with one head.
-    fn fragment_for(changes: &[Change]) -> Fragment {
+    fn fragment_for(changes: &[Change]) -> FragmentMeta {
         let in_set: HashSet<ChangeHash> = changes.iter().map(|c| c.hash()).collect();
         let mut has_child: HashSet<ChangeHash> = HashSet::new();
         for c in changes {
@@ -197,7 +197,7 @@ mod tests {
             .filter(|d| !in_set.contains(*d))
             .copied()
             .collect();
-        Fragment {
+        FragmentMeta {
             head: head.hash(),
             level: head.hash().fragment_level(),
             boundary,

@@ -64,7 +64,7 @@ fn corpus() -> Vec<(Vec<u8>, Automerge)> {
 fn exercise(bytes: &[u8], base: &Automerge) -> Result<(), String> {
     if let Ok(mut doc) = Automerge::load(bytes) {
         let _ = doc.get_heads();
-        let _ = doc.fragments(..);
+        let _ = doc.fragments_meta(..);
         let saved = doc.save();
         Automerge::load(&saved).map_err(|e| format!("next reload: {e}"))?;
         let _ = doc.save_with_options(legacy(true));

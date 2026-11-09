@@ -1464,10 +1464,14 @@ impl Automerge {
     ) -> Result<Array, error::Fragments> {
         let levels = JsFragmentLevelRange::try_from(levels)?;
         Ok(match &mut self.doc {
-            Doc::Audit(d) => d.fragments(levels).iter().map(fragment_to_js).collect(),
+            Doc::Audit(d) => d
+                .fragments_meta(levels)
+                .iter()
+                .map(fragment_to_js)
+                .collect(),
             Doc::Next(d) => d
                 .document()
-                .fragments(levels)
+                .fragments_meta(levels)
                 .iter()
                 .map(next_fragment_to_js)
                 .collect(),
@@ -1481,22 +1485,23 @@ impl Automerge {
     ) -> Result<JsValue, interop::error::BadChangeHash> {
         let head = JS(head).try_into()?;
         let fragment = match &self.doc {
-            Doc::Audit(d) => d.get_fragment(head).map(|f| fragment_to_js(&f)),
-            Doc::Next(d) => d.get_fragment(head).map(|f| next_fragment_to_js(&f)),
+            Doc::Audit(d) => d.get_fragment_meta(head).map(|f| fragment_to_js(&f)),
+            Doc::Next(d) => d.get_fragment_meta(head).map(|f| next_fragment_to_js(&f)),
         };
         Ok(fragment.unwrap_or(JsValue::null()))
     }
 
-    /// The fragments, loose commits included, holding a change `heads` does
-    /// not cover, in causal order; a fragment that also holds older changes is
-    /// included whole. Heads this document does not know are ignored.
+    /// The changes `heads` does not cover, each exactly once, as fragments and
+    /// loose commits in apply order; a fragment `heads` partly covers is sent
+    /// as the smaller fragments it superseded, down to loose commits. Heads
+    /// this document does not know are ignored.
     #[wasm_bindgen(js_name = getFragmentMetadataAfter, unchecked_return_type = "FragmentMeta[]")]
     pub fn get_fragment_metadata_after(
         &mut self,
         #[wasm_bindgen(unchecked_param_type = "Heads")] heads: JsValue,
     ) -> Result<Array, error::Get> {
         let heads = self.doc.parse_heads(heads)?;
-        Ok(self.doc.fragments_after(heads.as_ref())?)
+        Ok(self.doc.fragments_after_meta(heads.as_ref())?)
     }
 
     #[wasm_bindgen(js_name = bundleFragmentMetadata, unchecked_return_type = "Uint8Array[]")]
@@ -1504,13 +1509,18 @@ impl Automerge {
         &mut self,
         #[wasm_bindgen(unchecked_param_type = "FragmentMeta[]")] fragments: JsValue,
     ) -> Result<Array, error::BadJSFragments> {
-        let bundles = match &mut self.doc {
-            Doc::Audit(d) => {
-                d.bundles_for_fragments(Vec::<am::Fragment>::try_from(JS(fragments))?)?
-            }
+        let bundles: Vec<Vec<u8>> = match &mut self.doc {
+            Doc::Audit(d) => d
+                .fragments_from_meta(Vec::<am::FragmentMeta>::try_from(JS(fragments))?)?
+                .into_iter()
+                .map(|f| f.bytes)
+                .collect(),
             Doc::Next(d) => d
                 .document()
-                .bundles_for_fragments(Vec::<am::next::Fragment>::try_from(JS(fragments))?)?,
+                .fragments_from_meta(Vec::<am::next::FragmentMeta>::try_from(JS(fragments))?)?
+                .into_iter()
+                .map(|f| f.bytes)
+                .collect(),
         };
         Ok(bundles
             .iter()
@@ -1545,11 +1555,16 @@ impl Automerge {
         #[wasm_bindgen(unchecked_param_type = "Fragment[]")] fragments: JsValue,
     ) -> Result<(), error::AddFragments> {
         // the metadata is only validated: the bytes are authoritative
-        let bytes = match &self.doc {
-            Doc::Audit(_) => fragment_bytes::<am::Fragment>(fragments)?,
-            Doc::Next(_) => fragment_bytes::<am::next::Fragment>(fragments)?,
-        };
-        self.doc.load_incremental(&bytes)?;
+        match &mut self.doc {
+            Doc::Audit(d) => d
+                .apply_fragments(&fragments_from_js::<am::FragmentMeta, am::Fragment>(
+                    fragments,
+                )?)?,
+            Doc::Next(d) => d.apply_fragments(&fragments_from_js::<
+                am::next::FragmentMeta,
+                am::next::Fragment,
+            >(fragments)?)?,
+        }
         Ok(())
     }
 
@@ -2185,7 +2200,7 @@ fn js_usize(n: f64) -> Option<usize> {
 }
 
 /// Members are named by change id: their hashes may not be retained.
-fn next_fragment_to_js(fragment: &am::next::Fragment) -> JsValue {
+fn next_fragment_to_js(fragment: &am::next::FragmentMeta) -> JsValue {
     let obj: JsValue = Object::new().into();
     js_set(&obj, "head", fragment.head.to_string()).unwrap();
     js_set(&obj, "level", fragment.level as f64).unwrap();
@@ -2205,7 +2220,7 @@ fn next_fragment_to_js(fragment: &am::next::Fragment) -> JsValue {
     obj
 }
 
-fn fragment_to_js(fragment: &am::Fragment) -> JsValue {
+fn fragment_to_js(fragment: &am::FragmentMeta) -> JsValue {
     let obj: JsValue = Object::new().into();
     js_set(&obj, "head", fragment.head.to_string()).unwrap();
     js_set(&obj, "level", fragment.level as f64).unwrap();
@@ -2316,11 +2331,29 @@ impl TryFrom<JS> for Vec<Commit> {
 }
 
 /// A fragment's bytes, its metadata checked to have the shape the document's
-/// mode gives fragments: `F` is [`am::Fragment`] in audit mode and
-/// [`am::next::Fragment`] outside it.
+/// mode gives fragments: `F` is [`am::FragmentMeta`] in audit mode and
+/// [`am::next::FragmentMeta`] outside it.
 struct FragmentInput<F> {
-    _fragment: F,
+    meta: F,
     bytes: Vec<u8>,
+}
+
+impl From<FragmentInput<am::FragmentMeta>> for am::Fragment {
+    fn from(f: FragmentInput<am::FragmentMeta>) -> Self {
+        Self {
+            meta: f.meta,
+            bytes: f.bytes,
+        }
+    }
+}
+
+impl From<FragmentInput<am::next::FragmentMeta>> for am::next::Fragment {
+    fn from(f: FragmentInput<am::next::FragmentMeta>) -> Self {
+        Self {
+            meta: f.meta,
+            bytes: f.bytes,
+        }
+    }
 }
 
 impl<F: TryFrom<JS, Error = error::BadJSFragmentInput>> TryFrom<JS> for FragmentInput<F> {
@@ -2332,7 +2365,7 @@ impl<F: TryFrom<JS, Error = error::BadJSFragmentInput>> TryFrom<JS> for Fragment
             .try_into()
             .map_err(error::BadJSFragmentInput::BadBytes)?;
         Ok(Self {
-            _fragment: fragment,
+            meta: fragment,
             bytes,
         })
     }
@@ -2357,17 +2390,20 @@ impl<F: TryFrom<JS, Error = error::BadJSFragmentInput>> TryFrom<JS> for Vec<Frag
     }
 }
 
-/// The bytes of `fragments` in order.
-fn fragment_bytes<F: TryFrom<JS, Error = error::BadJSFragmentInput>>(
-    fragments: JsValue,
-) -> Result<Vec<u8>, error::BadJSFragmentInputs> {
-    Ok(Vec::<FragmentInput<F>>::try_from(JS(fragments))?
+/// `fragments`, their metadata checked to have the shape `M` the
+/// document's mode gives it.
+fn fragments_from_js<M, F>(fragments: JsValue) -> Result<Vec<F>, error::BadJSFragmentInputs>
+where
+    M: TryFrom<JS, Error = error::BadJSFragmentInput>,
+    F: From<FragmentInput<M>>,
+{
+    Ok(Vec::<FragmentInput<M>>::try_from(JS(fragments))?
         .into_iter()
-        .flat_map(|f| f.bytes)
+        .map(F::from)
         .collect())
 }
 
-impl TryFrom<JS> for am::Fragment {
+impl TryFrom<JS> for am::FragmentMeta {
     type Error = error::BadJSFragmentInput;
 
     fn try_from(value: JS) -> Result<Self, Self::Error> {
@@ -2410,7 +2446,7 @@ fn fragment_parts(value: &JS) -> Result<FragmentParts, error::BadJSFragmentInput
     Ok((head, level, boundary, checkpoints))
 }
 
-impl TryFrom<JS> for am::next::Fragment {
+impl TryFrom<JS> for am::next::FragmentMeta {
     type Error = error::BadJSFragmentInput;
 
     fn try_from(value: JS) -> Result<Self, Self::Error> {
@@ -2433,7 +2469,7 @@ impl TryFrom<JS> for am::next::Fragment {
     }
 }
 
-impl TryFrom<JS> for Vec<am::next::Fragment> {
+impl TryFrom<JS> for Vec<am::next::FragmentMeta> {
     type Error = error::BadJSFragments;
 
     fn try_from(value: JS) -> Result<Self, Self::Error> {
@@ -2445,14 +2481,14 @@ impl TryFrom<JS> for Vec<am::next::Fragment> {
             .iter()
             .enumerate()
             .map(|(i, v)| {
-                am::next::Fragment::try_from(JS(v))
+                am::next::FragmentMeta::try_from(JS(v))
                     .map_err(|e| error::BadJSFragments::BadElem(i, e))
             })
             .collect()
     }
 }
 
-impl TryFrom<JS> for Vec<am::Fragment> {
+impl TryFrom<JS> for Vec<am::FragmentMeta> {
     type Error = error::BadJSFragments;
 
     fn try_from(value: JS) -> Result<Self, Self::Error> {
@@ -2464,7 +2500,7 @@ impl TryFrom<JS> for Vec<am::Fragment> {
             .iter()
             .enumerate()
             .map(|(i, v)| {
-                am::Fragment::try_from(JS(v)).map_err(|e| error::BadJSFragments::BadElem(i, e))
+                am::FragmentMeta::try_from(JS(v)).map_err(|e| error::BadJSFragments::BadElem(i, e))
             })
             .collect()
     }

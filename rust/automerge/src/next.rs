@@ -19,7 +19,7 @@ pub use crate::automerge::{
 pub use crate::read::ReadDoc;
 
 #[doc(hidden)]
-pub use crate::change_graph::Fragment;
+pub use crate::change_graph::{Fragment, FragmentMeta};
 
 /// Testing hook; use `into_audit` / `into_next` instead.
 #[doc(hidden)]

@@ -1014,7 +1014,7 @@ mod tests {
         doc.put(ROOT, "done", true).unwrap();
         doc.commit();
 
-        let fragments = doc.document().fragments(..);
+        let fragments = doc.document().fragments_meta(..);
         assert!(!fragments.is_empty());
         for f in &fragments {
             let first = doc.document().bundle_for_fragment(f).unwrap().bytes();
@@ -1029,8 +1029,11 @@ mod tests {
 
         let batched = doc
             .document()
-            .bundles_for_fragments(fragments.clone())
-            .unwrap();
+            .fragments_from_meta(fragments.clone())
+            .unwrap()
+            .into_iter()
+            .map(|f| f.bytes)
+            .collect::<Vec<_>>();
         let singly: Vec<Vec<u8>> = fragments
             .iter()
             .map(|f| doc.document().bundle_for_fragment(f).unwrap().bytes())
@@ -1081,7 +1084,7 @@ mod tests {
             tx.put(crate::ROOT, "k", 1).unwrap();
             tx.commit();
         }
-        let f = &doc.fragments(..)[0];
+        let f = &doc.fragments_meta(..)[0];
         let good = doc.bundle_for_fragment(f).unwrap();
         assert_eq!(good.heads().len(), 1);
 
@@ -1117,7 +1120,7 @@ mod tests {
             tx.put(ROOT, "k", i).unwrap();
             tx.commit_with(crate::tx::CommitOptions::default().with_time(0));
         }
-        let frags = src.fragments(0..=0);
+        let frags = src.fragments_meta(0..=0);
         // the second fragment has a boundary entry (its dep on the first)
         let mut bytes = src.bundle_for_fragment(&frags[1]).unwrap().bytes();
         assert!(Bundle::try_from(&bytes[..]).is_ok(), "baseline parses");
@@ -1192,7 +1195,7 @@ mod tests {
     fn an_audited_apply_skips_members_it_has() {
         let src = audit_fixture();
         let mut doc = audited(b"rcv");
-        let first = src.bundle_for_fragment(&src.fragments(..)[0]).unwrap();
+        let first = src.bundle_for_fragment(&src.fragments_meta(..)[0]).unwrap();
         doc.apply_bundle(first).unwrap();
         doc.apply_bundle(src.bundle_document().unwrap()).unwrap();
         assert_eq!(doc.get_heads(), src.get_heads());
@@ -1310,7 +1313,7 @@ mod tests {
     #[test]
     fn bundles_from_every_builder_pass_audit() {
         let doc = audit_fixture();
-        let frags = doc.fragments(..);
+        let frags = doc.fragments_meta(..);
         assert!(frags.len() > 1, "fixture needs several fragments");
 
         assert_audits(&doc.bundle_document().unwrap());
@@ -1318,14 +1321,14 @@ mod tests {
             assert_audits(&doc.bundle_for_fragment(f).unwrap());
             assert_audits(&doc.make_bundle_from_fragment(f).unwrap());
         }
-        for cs in doc.bundles_for_fragments(frags.clone()).unwrap() {
-            assert_audits(&Bundle::try_from(&cs[..]).unwrap());
+        for f in doc.fragments_from_meta(frags.clone()).unwrap() {
+            assert_audits(&Bundle::try_from(&f.bytes[..]).unwrap());
         }
         assert_audits(&doc.single_bundle_after(&[first_change()]).unwrap().unwrap());
 
         let retained = crate::automerge::Automerge::load(&doc.save()).unwrap();
         assert_audits(&retained.bundle_document().unwrap());
-        for f in &retained.fragments(..) {
+        for f in &retained.fragments_meta(..) {
             assert_audits(&retained.make_bundle_from_fragment(f).unwrap());
         }
     }

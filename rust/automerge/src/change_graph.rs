@@ -1420,7 +1420,11 @@ impl<H: HashRetention> ChangeGraph<H> {
         Ok(new_fragment)
     }
 
-    pub(crate) fn get_fragment(&self, head: ChangeHash, actors: &ActorTable) -> Option<Fragment> {
+    pub(crate) fn get_fragment_meta(
+        &self,
+        head: ChangeHash,
+        actors: &ActorTable,
+    ) -> Option<FragmentMeta> {
         let n = self.nodes_by_hash.get(&head).copied()?;
         if head.fragment_level() == 0 {
             self.loose_commit(n, actors)
@@ -1511,7 +1515,7 @@ impl<H: HashRetention> ChangeGraph<H> {
     }
 
     /// A loose commit as its own single-member fragment.
-    fn loose_commit(&self, n: NodeIdx, actors: &ActorTable) -> Option<Fragment> {
+    fn loose_commit(&self, n: NodeIdx, actors: &ActorTable) -> Option<FragmentMeta> {
         let head = self.hashes.get(n)?;
         assert_eq!(head.fragment_level(), 0);
         let boundary = self
@@ -1521,7 +1525,7 @@ impl<H: HashRetention> ChangeGraph<H> {
         Some(self.export_fragment(head, 0, boundary, &[n], actors))
     }
 
-    fn cached_fragment(&self, f: &FragmentNode, actors: &ActorTable) -> Fragment {
+    fn cached_fragment(&self, f: &FragmentNode, actors: &ActorTable) -> FragmentMeta {
         let expect = "fragment index requires the fragment-hashes state";
         let head = self.hashes.get(f.head).expect(expect);
         let mut boundary: Vec<ChangeHash> = f
@@ -1543,7 +1547,7 @@ impl<H: HashRetention> ChangeGraph<H> {
         boundary: Vec<ChangeHash>,
         nodes: &[NodeIdx],
         actors: &ActorTable,
-    ) -> Fragment {
+    ) -> FragmentMeta {
         // interior hashes may be freed; checkpoint hashes never are
         let mut checkpoints: Vec<ChangeHash> = nodes
             .iter()
@@ -1552,7 +1556,7 @@ impl<H: HashRetention> ChangeGraph<H> {
             .collect();
         checkpoints.sort_unstable();
         let members = nodes.iter().map(|n| self.change_id(*n, actors)).collect();
-        Fragment {
+        FragmentMeta {
             head,
             level,
             boundary,
@@ -1563,13 +1567,13 @@ impl<H: HashRetention> ChangeGraph<H> {
 
     /// The fragments covering `heads` at `levels`, in apply order: coarsest
     /// first, oldest first within a level.
-    pub(crate) fn fragments<R: RangeBounds<usize>>(
+    pub(crate) fn fragments_meta<R: RangeBounds<usize>>(
         &self,
         heads: &[ChangeHash],
         levels: R,
         actors: &ActorTable,
-    ) -> Vec<Fragment> {
-        let mut out: Vec<Fragment> = self
+    ) -> Vec<FragmentMeta> {
+        let mut out: Vec<FragmentMeta> = self
             .fragments
             .iter()
             .filter(|f| levels.contains(&f.level))
@@ -1590,13 +1594,13 @@ impl<H: HashRetention> ChangeGraph<H> {
     }
 
     /// The fragments, loose commits included, holding a node `covered`
-    /// does not cover, in apply order: as [`Self::fragments`] lists them.
-    pub(crate) fn fragments_after(
+    /// does not cover, in apply order: as [`Self::fragments_meta`] lists them.
+    pub(crate) fn fragments_after_full(
         &self,
         heads: &[ChangeHash],
         covered: &SeqClock,
         actors: &ActorTable,
-    ) -> Vec<Fragment> {
+    ) -> Vec<FragmentMeta> {
         let fresh = |n: &NodeIdx| !self.is_covered_by(*n, covered);
         #[cfg(feature = "slow_path_assertions")]
         assert!(
@@ -1606,7 +1610,7 @@ impl<H: HashRetention> ChangeGraph<H> {
                 .any(|f| fresh(&f.head) && self.inside_higher_fragment(f)),
             "a fragment lies inside a larger one"
         );
-        let mut out: Vec<Fragment> = self
+        let mut out: Vec<FragmentMeta> = self
             .fragments
             .iter()
             .filter(|f| fresh(&f.head))
@@ -1619,6 +1623,137 @@ impl<H: HashRetention> ChangeGraph<H> {
                 .filter_map(|n| self.loose_commit(n, actors)),
         );
         out
+    }
+
+    /// The fragments and loose commits holding a node `covered` does not
+    /// cover, in apply order. A fragment that also holds a covered node is
+    /// replaced by its sub-fragments one level down, recursively, and a
+    /// level-1 fragment by its uncovered members as loose commits.
+    pub(crate) fn pieces_after(&self, heads: &[ChangeHash], covered: &SeqClock) -> Vec<Piece> {
+        let mut pieces = vec![];
+        let mut sent = HashSet::new();
+        for f in &self.fragments {
+            if !self.is_covered_by(f.head, covered) {
+                let nodes = self.members_between([f.head], &self.calculate_clock(f.deps.clone()));
+                let piece = Piece::Fragment {
+                    head: f.head,
+                    level: f.level,
+                    deps: f.deps.clone(),
+                    nodes,
+                };
+                self.split_covered(piece, covered, &mut sent, &mut pieces);
+            }
+        }
+        for n in self.loose_nodes(heads) {
+            if !self.is_covered_by(n, covered) && sent.insert(n) {
+                pieces.push(Piece::Loose(n));
+            }
+        }
+        pieces
+    }
+
+    /// The fragment `head`'s own hash makes it the head of, as it was
+    /// when it formed; a loose commit when that hash is level 0.
+    pub(crate) fn fragment_piece(&self, head: NodeIdx) -> Piece {
+        match self.fragment_level(head) {
+            0 => Piece::Loose(head),
+            level => self.piece_at(head, level),
+        }
+    }
+
+    /// The level-`level` fragment headed by `head`, bounded as it was when
+    /// it formed.
+    fn piece_at(&self, head: NodeIdx, level: usize) -> Piece {
+        let (deps, _) = self.fragment_boundary(head, &self.calculate_clock(vec![head]), level);
+        let nodes = self.members_between([head], &self.calculate_clock(deps.clone()));
+        Piece::Fragment {
+            head,
+            level,
+            deps,
+            nodes,
+        }
+    }
+
+    fn split_covered(
+        &self,
+        piece: Piece,
+        covered: &SeqClock,
+        sent: &mut HashSet<NodeIdx>,
+        out: &mut Vec<Piece>,
+    ) {
+        let Piece::Fragment { level, nodes, .. } = &piece else {
+            unreachable!("only fragments split")
+        };
+        if !nodes.iter().any(|n| self.is_covered_by(*n, covered)) {
+            sent.extend(nodes.iter().copied());
+            out.push(piece);
+            return;
+        }
+        let fresh = |n: &NodeIdx| !self.is_covered_by(*n, covered);
+        if *level == 1 {
+            for n in nodes.iter().copied().filter(fresh) {
+                if sent.insert(n) {
+                    out.push(Piece::Loose(n));
+                }
+            }
+            return;
+        }
+        // the fragments this one superseded are headed by its members of
+        // the level below or higher
+        let level = level - 1;
+        for head in nodes
+            .iter()
+            .copied()
+            .filter(|n| fresh(n) && self.fragment_level(*n) >= level)
+        {
+            self.split_covered(self.piece_at(head, level), covered, sent, out);
+        }
+    }
+
+    /// The nodes whose hashes `pieces` name that this graph has freed.
+    pub(crate) fn unhashed_in(&self, pieces: &[Piece]) -> Vec<NodeIdx> {
+        // a fragment's head and deps are level > 0, which are never freed,
+        // but a member may depend on a level-0 change outside it
+        let mut unhashed = vec![];
+        for p in pieces {
+            match p {
+                Piece::Loose(n) => unhashed.extend(std::iter::once(*n).chain(self.parents(*n))),
+                Piece::Fragment { nodes, .. } => unhashed.extend(
+                    nodes
+                        .iter()
+                        .flat_map(|n| self.parents(*n))
+                        .filter(|p| nodes.binary_search(p).is_err()),
+                ),
+            }
+        }
+        unhashed.retain(|n| self.hashes.get(*n).is_none());
+        unhashed.sort_unstable();
+        unhashed.dedup();
+        unhashed
+    }
+
+    /// Each piece's metadata, and its nodes ascending.
+    pub(crate) fn piece_meta(
+        &self,
+        piece: &Piece,
+        actors: &ActorTable,
+    ) -> (FragmentMeta, Vec<NodeIdx>) {
+        let hash = |n: NodeIdx| self.hashes.get(n).expect("a piece's hashes are held");
+        let (head, level, boundary, nodes) = match piece {
+            Piece::Fragment {
+                head,
+                level,
+                deps,
+                nodes,
+            } => {
+                let mut boundary: Vec<ChangeHash> = deps.iter().map(|d| hash(*d)).collect();
+                boundary.sort_unstable();
+                (*head, *level, boundary, nodes.clone())
+            }
+            Piece::Loose(n) => (*n, 0, self.parents(*n).map(hash).collect(), vec![*n]),
+        };
+        let meta = self.export_fragment(hash(head), level, boundary, &nodes, actors);
+        (meta, nodes)
     }
 
     /// Levels nest, so `f` lies inside a higher-level fragment exactly
@@ -3217,7 +3352,7 @@ mod tests {
             .collect();
         let heads: Vec<_> = graph.heads().collect();
 
-        let fragments: Vec<_> = graph.fragments(&heads, .., &builder.actors);
+        let fragments: Vec<_> = graph.fragments_meta(&heads, .., &builder.actors);
 
         let mut covered: BTreeSet<(ActorId, u64)> = BTreeSet::new();
         for f in &fragments {
@@ -3236,7 +3371,7 @@ mod tests {
     }
 
     fn assert_fragment_invariants(
-        fragments: &[Fragment],
+        fragments: &[FragmentMeta],
         hash_of: &BTreeMap<(ActorId, u64), ChangeHash>,
     ) {
         for f in fragments {
@@ -3306,7 +3441,7 @@ mod tests {
         }
         let graph = builder.build();
         let heads: Vec<_> = graph.heads().collect();
-        let fragments: Vec<_> = graph.fragments(&heads, .., &builder.actors);
+        let fragments: Vec<_> = graph.fragments_meta(&heads, .., &builder.actors);
 
         assert_fragment_invariants(&fragments, &builder.hash_of());
     }
@@ -3320,7 +3455,7 @@ mod tests {
             doc.commit();
         }
 
-        let fragments = doc.fragments(1..);
+        let fragments = doc.fragments_meta(1..);
         assert!(!fragments.is_empty(), "expected bundled fragments");
         assert!(
             fragments.iter().any(|f| !f.boundary.is_empty()),
@@ -3342,7 +3477,7 @@ mod tests {
                     boundary,
                 );
             }
-            assert_eq!(doc.get_fragment(fragment.head), Some(fragment));
+            assert_eq!(doc.get_fragment_meta(fragment.head), Some(fragment));
         }
     }
 
@@ -3373,7 +3508,7 @@ mod tests {
             .map(|id| (id.actor().clone(), id.seq()))
             .collect();
         let heads: Vec<_> = graph.heads().collect();
-        let fragments: Vec<_> = graph.fragments(&heads, .., &builder.actors);
+        let fragments: Vec<_> = graph.fragments_meta(&heads, .., &builder.actors);
 
         let mut covered: BTreeSet<(ActorId, u64)> = BTreeSet::new();
         for f in &fragments {
@@ -3414,7 +3549,7 @@ mod tests {
         }
         let graph = builder.build();
         let heads: Vec<_> = graph.heads().collect();
-        let fragments = graph.fragments(&heads, .., &builder.actors);
+        let fragments = graph.fragments_meta(&heads, .., &builder.actors);
         let hash_of = builder.hash_of();
 
         let mut applied: BTreeSet<ChangeHash> = BTreeSet::new();
@@ -3462,7 +3597,7 @@ mod tests {
         let graph = builder.build();
         let all_hashes: BTreeSet<_> = builder.all_hashes().into_iter().collect();
         let heads: Vec<_> = graph.heads().collect();
-        let fragments: Vec<_> = graph.fragments(&heads, .., &builder.actors);
+        let fragments: Vec<_> = graph.fragments_meta(&heads, .., &builder.actors);
         let fragment_ids: BTreeSet<_> = fragments.iter().map(|f| f.head).collect();
 
         for f in &fragments {
@@ -3501,9 +3636,9 @@ mod tests {
         let graph = builder.build();
         let heads: Vec<_> = graph.heads().collect();
 
-        let all: Vec<_> = graph.fragments(&heads, .., &builder.actors);
-        let loose: Vec<_> = graph.fragments(&heads, 0..=0, &builder.actors);
-        let cached: Vec<_> = graph.fragments(&heads, 1.., &builder.actors);
+        let all: Vec<_> = graph.fragments_meta(&heads, .., &builder.actors);
+        let loose: Vec<_> = graph.fragments_meta(&heads, 0..=0, &builder.actors);
+        let cached: Vec<_> = graph.fragments_meta(&heads, 1.., &builder.actors);
 
         // loose + cached partition the full range
         assert_eq!(loose.len() + cached.len(), all.len());
@@ -3528,7 +3663,7 @@ mod tests {
         }
 
         // empty range yields nothing
-        assert_eq!(graph.fragments(&heads, 0..0, &builder.actors).len(), 0);
+        assert_eq!(graph.fragments_meta(&heads, 0..0, &builder.actors).len(), 0);
     }
 
     #[test]
@@ -3551,10 +3686,10 @@ mod tests {
             let graph = builder.build();
             let heads: Vec<_> = graph.heads().collect();
 
-            let loose: Vec<_> = graph.fragments(&heads, 0..=0, &builder.actors);
+            let loose: Vec<_> = graph.fragments_meta(&heads, 0..=0, &builder.actors);
             assert!(loose.is_empty(), "cached head must cover everything");
 
-            let cached: Vec<_> = graph.fragments(&heads, 1.., &builder.actors);
+            let cached: Vec<_> = graph.fragments_meta(&heads, 1.., &builder.actors);
             let hash_of = builder.hash_of();
             let covered: BTreeSet<ChangeHash> = cached
                 .iter()
@@ -3579,33 +3714,33 @@ mod tests {
         let graph = builder.build();
         let heads: Vec<_> = graph.heads().collect();
 
-        let loose: Vec<_> = graph.fragments(&heads, 0..=0, &builder.actors);
-        let cached: Vec<_> = graph.fragments(&heads, 1.., &builder.actors);
+        let loose: Vec<_> = graph.fragments_meta(&heads, 0..=0, &builder.actors);
+        let cached: Vec<_> = graph.fragments_meta(&heads, 1.., &builder.actors);
         assert!(!cached.is_empty(), "expected at least one cached fragment");
 
         // get_fragment on a loose (level 0) commit hash returns an
-        // equivalent Fragment. Loose can be legitimately empty (~1 run
+        // equivalent FragmentMeta. Loose can be legitimately empty (~1 run
         // in 256) when the head hash itself is a fragment head
         if let Some(l) = loose.first() {
-            let got = graph.get_fragment(l.head, &builder.actors).unwrap();
+            let got = graph.get_fragment_meta(l.head, &builder.actors).unwrap();
             assert_eq!(got, *l);
         } else {
             assert!(heads.iter().all(|h| h.fragment_level() > 0));
         }
 
-        // get_fragment on a cached (level >= 1) fragment id returns an equivalent Fragment
+        // get_fragment on a cached (level >= 1) fragment id returns an equivalent FragmentMeta
         let c = &cached[0];
-        let got = graph.get_fragment(c.head, &builder.actors).unwrap();
+        let got = graph.get_fragment_meta(c.head, &builder.actors).unwrap();
         assert_eq!(got, *c);
 
         // unknown hash returns None
         assert!(graph
-            .get_fragment(ChangeHash([0xff; 32]), &builder.actors)
+            .get_fragment_meta(ChangeHash([0xff; 32]), &builder.actors)
             .is_none());
     }
 
     #[test]
-    fn bundles_for_fragments_roundtrips_through_load_incremental() {
+    fn fragments_from_meta_roundtrips_through_load_incremental() {
         let mut rng = make_rng();
         let mut doc = Automerge::new();
 
@@ -3617,9 +3752,14 @@ mod tests {
             tx.commit();
         }
 
-        let fragments = doc.fragments(..);
+        let fragments = doc.fragments_meta(..);
 
-        let bundles = doc.bundles_for_fragments(fragments).unwrap();
+        let bundles = doc
+            .fragments_from_meta(fragments)
+            .unwrap()
+            .into_iter()
+            .map(|f| f.bytes)
+            .collect::<Vec<_>>();
 
         let joined: Vec<u8> = bundles.into_iter().flatten().collect();
 
@@ -3633,41 +3773,40 @@ mod tests {
         assert_eq!(a, b);
     }
 
-    /// `doc.bundle_after(heads)` applied one bundle at a time to `at`, a
-    /// save of `doc` at `heads`: each must apply as it arrives, no
-    /// fragment may lie inside another, and the result must hold `doc`'s
-    /// changes, as an audit-mode load confirms.
-    /// Returns how many fragments straddle `heads`.
-    fn assert_bundle_after_rebuilds(doc: &Automerge, heads: &[ChangeId], at: &[u8]) -> usize {
-        let fragments = doc.fragments_after(heads).unwrap();
-        let bundles = doc.bundle_after(heads).unwrap();
+    /// Applies `fragments_after(heads)` one bundle at a time to the
+    /// document `at` holds, checking it sends each missing change exactly
+    /// once. Returns whether it rebuilt a hash, and how many of the
+    /// document's fragments straddle `heads`.
+    fn assert_fragments_after(doc: &Automerge, heads: &[ChangeId], at: &[u8]) -> (bool, usize) {
+        let (fragments, rebuilt) = doc.fragments_after_rebuilding(heads).unwrap();
+        assert_eq!(fragments, doc.fragments_after(heads).unwrap());
         assert_eq!(
-            bundles,
-            doc.bundles_for_fragments(fragments.clone()).unwrap()
-        );
-        for f in &fragments {
-            let inside = fragments
+            fragments.iter().map(|f| &f.meta).collect::<Vec<_>>(),
+            doc.fragments_after_meta(heads)
+                .unwrap()
                 .iter()
-                .any(|g| g.head != f.head && f.members.iter().all(|m| g.members.contains(m)));
-            assert!(!inside, "{f:?} lies inside another fragment");
-        }
+                .collect::<Vec<_>>()
+        );
         let mut fork = Automerge::load(at).unwrap();
-        let straddling = fragments
+        let straddling = doc
+            .fragments_meta(1..)
             .iter()
-            .filter(|f| f.members.iter().any(|m| fork.has_change_id(m)))
+            .filter(|f| {
+                f.members.iter().any(|m| fork.has_change_id(m))
+                    && !f.members.iter().all(|m| fork.has_change_id(m))
+            })
             .count();
-        assert_eq!(fork.get_heads(), {
-            let mut h = heads.to_vec();
-            h.sort();
-            h
-        });
-        for (f, bundle) in fragments.iter().zip(&bundles) {
-            fork.load_incremental(bundle).unwrap();
-            assert!(
-                fork.has_change(&f.head).unwrap(),
-                "{f:?} waits on a later one"
-            );
+        let missing = doc.num_changes() - fork.num_changes();
+        let mut sent = 0;
+        for (i, f) in fragments.iter().enumerate() {
+            let bundle = crate::storage::Bundle::try_from(&f.bytes[..]).unwrap();
+            assert_eq!(bundle.heads().collect::<Vec<_>>(), vec![f.meta.head]);
+            assert_eq!(bundle.member_seqs.len(), f.len());
+            sent += f.len();
+            fork.apply_fragments(std::slice::from_ref(f))
+                .unwrap_or_else(|e| panic!("fragment {i} applied out of order: {e}"));
         }
+        assert_eq!(sent, missing, "each change heads lacks is sent once");
         assert_eq!(fork.get_heads(), doc.get_heads());
         assert_eq!(fork.hydrate(None).unwrap(), doc.hydrate(None).unwrap());
         let audited = Automerge::load(&fork.save())
@@ -3675,16 +3814,17 @@ mod tests {
             .enable_audit_mode()
             .unwrap();
         assert_eq!(audited.get_heads(), doc.get_heads());
-        straddling
+        (rebuilt, straddling)
     }
 
-    #[test]
-    fn bundle_after_rebuilds_the_document_from_any_heads() {
+    /// Heads, and the document saved at them.
+    type Snapshot = (Vec<ChangeId>, Vec<u8>);
+
+    fn single_actor_history(changes: usize, cuts: &[usize]) -> (Automerge, Vec<Snapshot>) {
         let mut rng = <rand::rngs::SmallRng as rand::SeedableRng>::seed_from_u64(7);
         let mut doc = Automerge::new().with_actor(crate::ActorId::from(&[7u8][..]));
-        let cuts = [1, 300, 999, 1_500, 1_999];
         let mut snapshots = vec![(vec![], vec![])];
-        for i in 1..=2_000 {
+        for i in 1..=changes {
             let key = format!("k{}", rng.random::<u32>() % 32);
             let mut tx = doc.transaction();
             tx.put(ROOT, key, rng.random::<u32>() as i64).unwrap();
@@ -3693,21 +3833,94 @@ mod tests {
                 snapshots.push((doc.get_heads(), doc.save()));
             }
         }
-        assert!(
-            doc.fragments(1..).len() > 2,
-            "the history spans several fragments"
-        );
-        let straddling: usize = snapshots
-            .iter()
-            .map(|(heads, at)| assert_bundle_after_rebuilds(&doc, heads, at))
-            .sum();
-        assert!(straddling > 0, "a fragment straddling heads is sent whole");
-        assert!(doc.fragments_after(&doc.get_heads()).unwrap().is_empty());
-        assert!(doc.bundle_after(&doc.get_heads()).unwrap().is_empty());
+        (doc, snapshots)
     }
 
     #[test]
-    fn bundle_after_brings_in_a_concurrent_branch() {
+    fn fragments_after_sends_only_what_heads_lacks() {
+        let (doc, snapshots) = single_actor_history(2_000, &[1, 300, 999, 1_500, 1_999]);
+        let results: Vec<_> = snapshots
+            .iter()
+            .map(|(heads, at)| assert_fragments_after(&doc, heads, at))
+            .collect();
+        assert!(
+            results.iter().any(|r| r.1 > 0),
+            "some fragment straddles heads"
+        );
+        assert!(results.iter().any(|r| r.0), "some freed hash is rebuilt");
+        assert!(doc.fragments_after(&doc.get_heads()).unwrap().is_empty());
+        assert!(doc
+            .fragments_after_meta(&doc.get_heads())
+            .unwrap()
+            .is_empty());
+    }
+
+    /// With small fragments, cuts land inside level-2 fragments, so those
+    /// split down through level 1 to loose commits.
+    #[cfg(feature = "small_fragments")]
+    #[test]
+    fn fragments_after_splits_through_every_level() {
+        let cuts: Vec<usize> = (1..2_000).step_by(149).collect();
+        let (doc, snapshots) = single_actor_history(2_000, &cuts);
+        assert!(
+            doc.fragments_meta(2..).len() > 2,
+            "the history has level-2 fragments"
+        );
+        for (heads, at) in &snapshots {
+            assert_fragments_after(&doc, heads, at);
+        }
+    }
+
+    /// Fragments sorted as a set: their apply order among one level may
+    /// follow arrival order.
+    fn as_set(mut fragments: Vec<Fragment>) -> Vec<Fragment> {
+        for f in &mut fragments {
+            f.meta.members.sort();
+        }
+        fragments.sort_by_key(|f| (std::cmp::Reverse(f.meta.level), f.meta.head));
+        fragments
+    }
+
+    /// A document broken into loose commits and applied, shuffled, to a
+    /// blank one in a single call rebuilds the original's index.
+    #[test]
+    fn apply_fragments_rebuilds_the_index_from_loose_commits() {
+        use rand::seq::SliceRandom;
+        let mut rng = <rand::rngs::SmallRng as rand::SeedableRng>::seed_from_u64(5);
+        let mut docs: Vec<Automerge> = (0..3u8)
+            .map(|a| Automerge::new().with_actor(crate::ActorId::from(&[a][..])))
+            .collect();
+        let mut loose = vec![];
+        for _ in 0..3_000 {
+            let i = rng.random_range(0..3);
+            if rng.random_range(0..20) == 0 {
+                let j = (i + 1) % 3;
+                let bytes = docs[j].save_after(&docs[i].get_heads()).unwrap();
+                docs[i].load_incremental(&bytes).unwrap();
+            }
+            let before = docs[i].get_heads();
+            let key = format!("k{}", rng.random::<u32>() % 32);
+            let mut tx = docs[i].transaction();
+            tx.put(ROOT, key, rng.random::<u32>() as i64).unwrap();
+            tx.commit_with(crate::transaction::CommitOptions::default().with_time(0));
+            loose.push(docs[i].save_after(&before).unwrap());
+        }
+        let mut doc = docs.pop().unwrap();
+        for other in &docs {
+            doc.load_incremental(&other.save_after(&doc.get_heads()).unwrap())
+                .unwrap();
+        }
+        let expected = as_set(doc.fragments(1..));
+        assert!(!expected.is_empty());
+
+        loose.shuffle(&mut rng);
+        let mut blank = Automerge::new();
+        blank.load_incremental(&loose.concat()).unwrap();
+        assert_eq!(as_set(blank.fragments(1..)), expected);
+    }
+
+    #[test]
+    fn fragments_after_brings_in_a_concurrent_branch() {
         let mut rng = make_rng();
         let mut doc = Automerge::new();
         for i in 0..600 {
@@ -3727,9 +3940,88 @@ mod tests {
         let (ours, ours_at) = (doc.get_heads(), doc.save());
         let (theirs, theirs_at) = (other.get_heads(), other.save());
         doc.merge(&mut other).unwrap();
-        let straddling = assert_bundle_after_rebuilds(&doc, &ours, &ours_at)
-            + assert_bundle_after_rebuilds(&doc, &theirs, &theirs_at);
-        assert!(straddling > 0, "a fragment straddling heads is sent whole");
+        assert_fragments_after(&doc, &ours, &ours_at);
+        assert_fragments_after(&doc, &theirs, &theirs_at);
+    }
+
+    /// A peer sends every change as a level-0 fragment; the reply holds
+    /// the whole fragment for each partial one whose hash is level 1 or
+    /// above, and a later call returns only what changed since.
+    #[test]
+    fn sync_fragments_completes_partial_fragments() {
+        let mut rng = <rand::rngs::SmallRng as rand::SeedableRng>::seed_from_u64(7);
+        let mut peer = Automerge::new().with_actor(crate::ActorId::from(&[7u8][..]));
+        let mut sent = vec![];
+        for _ in 0..2_000 {
+            let before = peer.get_heads();
+            let key = format!("k{}", rng.random::<u32>() % 32);
+            let mut tx = peer.transaction();
+            tx.put(ROOT, key, rng.random::<u32>() as i64).unwrap();
+            tx.commit_with(crate::transaction::CommitOptions::default().with_time(0));
+            sent.push(Fragment {
+                meta: FragmentMeta {
+                    head: peer.get_head_hashes()[0],
+                    level: 0,
+                    boundary: vec![],
+                    checkpoints: vec![],
+                    members: vec![],
+                },
+                bytes: peer.save_after(&before).unwrap(),
+            });
+        }
+        let mut doc = AutoCommit::new().with_actor(crate::ActorId::from(&[1u8][..]));
+        let reply = doc.sync_fragments(&sent).unwrap();
+        assert_eq!(doc.get_heads(), peer.get_heads());
+
+        let completed: Vec<_> = sent
+            .iter()
+            .filter(|f| f.meta.head.fragment_level() > 0)
+            .map(|f| peer.fragment_at(f.meta.head).unwrap().unwrap())
+            .collect();
+        assert!(completed.len() > 1, "some change heads a fragment");
+        let mut bare = Automerge::new();
+        let bare_reply = bare.sync_fragments(&sent, &[]).unwrap();
+        assert_eq!(as_set(bare_reply), as_set(completed.clone()));
+        assert_eq!(as_set(reply), as_set(completed.clone()));
+        let indexed = as_set(peer.fragments(1..));
+        assert!(!indexed.is_empty());
+        for f in &indexed {
+            assert!(as_set(completed.clone()).contains(f), "{:?}", f.meta.head);
+        }
+
+        assert!(doc.sync_fragments(&[]).unwrap().is_empty());
+        doc.put(ROOT, "local", 1).unwrap();
+        let local = doc.sync_fragments(&[]).unwrap();
+        assert_eq!(local.len(), 1);
+        assert_eq!(local[0].meta.head.fragment_level(), local[0].meta.level);
+        assert!(doc.sync_fragments(&[]).unwrap().is_empty());
+
+        doc.put(ROOT, "unsynced", 1).unwrap();
+        assert!(doc.fork().sync_fragments(&[]).unwrap().is_empty());
+        let loaded = AutoCommit::load(&doc.save()).unwrap().sync_fragments(&[]);
+        assert!(
+            loaded.unwrap().is_empty(),
+            "a load starts at the loaded heads"
+        );
+    }
+
+    #[test]
+    fn save_cursor_accessors_steer_save_incremental() {
+        let mut doc = AutoCommit::new();
+        doc.put(ROOT, "a", 1).unwrap();
+        assert!(!doc.save_incremental().is_empty());
+        assert_eq!(doc.save_cursor(), doc.get_heads());
+
+        doc.put(ROOT, "b", 2).unwrap();
+        doc.update_save_cursor();
+        assert_eq!(doc.save_cursor(), doc.get_heads());
+        assert!(doc.save_incremental().is_empty());
+
+        doc.reset_save_cursor();
+        assert!(doc.save_cursor().is_empty());
+        let mut copy = AutoCommit::new();
+        copy.load_incremental(&doc.save_incremental()).unwrap();
+        assert_eq!(copy.get_heads(), doc.get_heads());
     }
 
     /// A loose commit whose parent lies in a fragment whose head is not
@@ -3750,10 +4042,18 @@ mod tests {
         b.commit();
         b.merge(&mut a).unwrap();
         let doc = b.document();
-        let fragments = doc.fragments_after(&[]).unwrap();
+        let fragments = doc.fragments_after_meta(&[]).unwrap();
         assert!(fragments.iter().any(|f| f.level > 0));
         let mut z = Automerge::new();
-        for (i, bundle) in doc.bundle_after(&[]).unwrap().iter().enumerate() {
+        for (i, bundle) in doc
+            .fragments_after(&[])
+            .unwrap()
+            .into_iter()
+            .map(|f| f.bytes)
+            .collect::<Vec<_>>()
+            .iter()
+            .enumerate()
+        {
             z.load_incremental(bundle)
                 .unwrap_or_else(|e| panic!("bundle {i} applied out of order: {e}"));
         }
@@ -3800,15 +4100,25 @@ mod tests {
         let (x, y) = (x.document(), y.document());
         assert_eq!(x.get_heads(), y.get_heads());
         let by_head = |doc: &Automerge| {
-            let mut f = doc.fragments(..);
+            let mut f = doc.fragments_meta(..);
             f.sort_by_key(|f| (f.head, f.level));
             f
         };
         let (fx, fy) = (by_head(x), by_head(y));
         assert_eq!(fx.len(), fy.len());
         assert!(fx.len() > 1);
-        let bx = x.bundles_for_fragments(fx).unwrap();
-        let by = y.bundles_for_fragments(fy).unwrap();
+        let bx = x
+            .fragments_from_meta(fx)
+            .unwrap()
+            .into_iter()
+            .map(|f| f.bytes)
+            .collect::<Vec<_>>();
+        let by = y
+            .fragments_from_meta(fy)
+            .unwrap()
+            .into_iter()
+            .map(|f| f.bytes)
+            .collect::<Vec<_>>();
         for (i, (a, b)) in bx.iter().zip(&by).enumerate() {
             assert!(a == b, "fragment {i} differs");
         }
@@ -3819,11 +4129,23 @@ mod tests {
             v
         };
         assert!(
-            sorted(x.bundle_after(&[]).unwrap()) == sorted(y.bundle_after(&[]).unwrap()),
+            sorted(
+                x.fragments_after(&[])
+                    .unwrap()
+                    .into_iter()
+                    .map(|f| f.bytes)
+                    .collect::<Vec<_>>()
+            ) == sorted(
+                y.fragments_after(&[])
+                    .unwrap()
+                    .into_iter()
+                    .map(|f| f.bytes)
+                    .collect::<Vec<_>>()
+            ),
             "bundle_after differs"
         );
         let after = |doc: &Automerge| {
-            let mut f = doc.fragments_after(&[]).unwrap();
+            let mut f = doc.fragments_after_meta(&[]).unwrap();
             f.sort_by_key(|f| (f.head, f.level));
             for f in &mut f {
                 f.members.sort_by_key(|m| (m.actor().clone(), m.seq()));
@@ -3833,7 +4155,15 @@ mod tests {
         assert_eq!(after(x), after(y));
         for doc in [x, y] {
             let mut z = Automerge::new();
-            for (i, b) in doc.bundle_after(&[]).unwrap().iter().enumerate() {
+            for (i, b) in doc
+                .fragments_after(&[])
+                .unwrap()
+                .into_iter()
+                .map(|f| f.bytes)
+                .collect::<Vec<_>>()
+                .iter()
+                .enumerate()
+            {
                 z.load_incremental(b)
                     .unwrap_or_else(|e| panic!("bundle {i} applied out of order: {e}"));
             }
@@ -3949,6 +4279,19 @@ struct FragmentNode {
     clock: SeqClock,
 }
 
+/// A part of the history after some heads, as
+/// [`ChangeGraph::pieces_after`] lists it.
+#[derive(Debug)]
+pub(crate) enum Piece {
+    Fragment {
+        head: NodeIdx,
+        level: usize,
+        deps: Vec<NodeIdx>,
+        nodes: Vec<NodeIdx>,
+    },
+    Loose(NodeIdx),
+}
+
 /// Outside audit mode, how many holders need each node's hash. Level > 0
 /// hashes, heads and actor tips are kept without pins.
 #[derive(Debug, Clone, Default)]
@@ -4017,7 +4360,7 @@ impl FragmentNode {
 /// This is an experimental API, it may change or be removed without warning.
 #[doc(hidden)]
 #[derive(Debug, PartialEq, Clone)]
-pub struct Fragment {
+pub struct FragmentMeta {
     pub head: ChangeHash,
     pub level: usize,
     pub boundary: Vec<ChangeHash>,
@@ -4026,6 +4369,42 @@ pub struct Fragment {
     /// By [`ChangeId`], since interior change hashes may have been freed.
     /// A set: their order depends on the order the changes arrived in.
     pub members: Vec<ChangeId>,
+}
+
+impl FragmentMeta {
+    /// The number of changes in the fragment.
+    pub fn len(&self) -> usize {
+        self.members.len()
+    }
+
+    /// Never true of a fragment a document lists, which holds at least its
+    /// head.
+    pub fn is_empty(&self) -> bool {
+        self.members.is_empty()
+    }
+}
+
+/// EXPERIMENTAL: A [`FragmentMeta`] and its changes, encoded as a bundle.
+///
+/// This is an experimental API, it may change or be removed without warning.
+#[doc(hidden)]
+#[derive(Debug, PartialEq, Clone)]
+pub struct Fragment {
+    pub meta: FragmentMeta,
+    pub bytes: Vec<u8>,
+}
+
+impl Fragment {
+    /// The number of changes in the fragment.
+    pub fn len(&self) -> usize {
+        self.meta.len()
+    }
+
+    /// Never true of a fragment a document lists, which holds at least its
+    /// head.
+    pub fn is_empty(&self) -> bool {
+        self.meta.is_empty()
+    }
 }
 
 /// Equal values gathered into runs, so an encoder takes a run at a time.

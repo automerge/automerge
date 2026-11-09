@@ -79,7 +79,7 @@ pub enum AutomergeError {
     EncodingError(String),
     #[error("failed to decode bundle: {0}")]
     DecodeBundle(Box<dyn std::error::Error + Send + Sync + 'static>),
-    /// A caller-supplied [`crate::Fragment`] names history this document
+    /// A caller-supplied [`crate::FragmentMeta`] names history this document
     /// cannot resolve.
     #[error("invalid fragment: {0}")]
     InvalidFragment(&'static str),

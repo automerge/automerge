@@ -21,7 +21,10 @@ fn unsaved_history(n: u64) -> AutoCommit {
         doc.put(ROOT, "k", i as i64).unwrap();
         doc.commit_with(t0());
     }
-    assert!(!doc.fragments(1..).is_empty(), "fixture needs a fragment");
+    assert!(
+        !doc.fragments_meta(1..).is_empty(),
+        "fixture needs a fragment"
+    );
     doc
 }
 
@@ -76,7 +79,10 @@ fn a_legacy_change_ahead_of_its_dep_is_rejected_and_the_dep_bundle_applies() {
             prefix = Some(w.save());
         }
     }
-    assert!(!w.fragments(1..).is_empty(), "fixture needs a fragment");
+    assert!(
+        !w.fragments_meta(1..).is_empty(),
+        "fixture needs a fragment"
+    );
     let mut c = AutoCommit::load(&prefix.unwrap())
         .unwrap()
         .with_actor(actor(3));
@@ -177,9 +183,14 @@ fn sync(peers: &mut [Automerge], a: usize, b: usize, how: usize, log: &[String])
             .and_then(|bytes| to.load_incremental(&bytes).map(|_| ())),
         2 => to.load_incremental(&from.save()).map(|_| ()),
         3 => {
-            let stack = from.bundle_after(&to.get_heads()).unwrap_or_else(|e| {
-                panic!("bundle_after export failed: {e:?} (log len {})", log.len())
-            });
+            let stack = from
+                .fragments_after(&to.get_heads())
+                .unwrap_or_else(|e| {
+                    panic!("bundle_after export failed: {e:?} (log len {})", log.len())
+                })
+                .into_iter()
+                .map(|f| f.bytes)
+                .collect::<Vec<_>>();
             stack
                 .iter()
                 .try_for_each(|b| to.load_incremental(b).map(|_| ()))
@@ -215,7 +226,7 @@ fn check(doc: &mut Automerge, p: usize, log: &[String]) {
     let bytes = doc.save();
     let reloaded = Automerge::load(&bytes).unwrap_or_else(|e| panic!("reload {e:?} {}", what()));
     assert_eq!(reloaded.get_heads(), doc.get_heads(), "{}", what());
-    doc.bundles_for_fragments(doc.fragments(..))
+    doc.fragments_from_meta(doc.fragments_meta(..))
         .unwrap_or_else(|e| panic!("re-export {e:?} {}", what()));
 }
 
@@ -309,7 +320,7 @@ fn cluster_fuzz(seed: u64, rounds: usize) {
     let save0 = peers[0].save();
     let frags0 = {
         let mut f: Vec<_> = peers[0]
-            .fragments(..)
+            .fragments_meta(..)
             .into_iter()
             .map(|f| (f.head, f.level, f.boundary, f.checkpoints))
             .collect();
@@ -320,7 +331,7 @@ fn cluster_fuzz(seed: u64, rounds: usize) {
         assert_eq!(peer.get_heads(), heads);
         check(peer, p, &log);
         let mut f: Vec<_> = peer
-            .fragments(..)
+            .fragments_meta(..)
             .into_iter()
             .map(|f| (f.head, f.level, f.boundary, f.checkpoints))
             .collect();

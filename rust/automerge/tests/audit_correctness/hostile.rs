@@ -69,12 +69,17 @@ fn cases() -> Vec<(String, Automerge, Vec<u8>)> {
     }
     commit(&mut g, "g", -1);
     f.merge(&mut g).unwrap();
-    let frags = f.fragments(..);
-    let stack = f.bundles_for_fragments(frags.clone()).unwrap();
+    let frags = f.fragments_meta(..);
+    let stack = f
+        .fragments_from_meta(frags.clone())
+        .unwrap()
+        .into_iter()
+        .map(|f| f.bytes)
+        .collect::<Vec<_>>();
     eprintln!(
         "fragments: {} ({} level>0)",
         frags.len(),
-        f.fragments(1..).len()
+        f.fragments_meta(1..).len()
     );
     let mut r = Automerge::new();
     for (k, bytes) in stack.iter().enumerate() {
@@ -369,7 +374,7 @@ fn long_history() -> (Automerge, Automerge) {
     for i in 1600..1700 {
         commit(&mut w, "k", i);
     }
-    assert!(!r.fragments(1..).is_empty(), "fixture needs fragments");
+    assert!(!r.fragments_meta(1..).is_empty(), "fixture needs fragments");
     assert!(
         matches!(
             r.change_id_to_hash(&id(1, 2)),
@@ -402,8 +407,8 @@ fn a_bundle_claiming_a_fragment_level_hash_for_an_old_change_is_rejected_without
     };
     if let Ok(r) = res {
         assert_eq!(
-            r.fragments(1..).len(),
-            w.fragments(1..).len(),
+            r.fragments_meta(1..).len(),
+            w.fragments_meta(1..).len(),
             "the forged level hash made a fragment"
         );
     }

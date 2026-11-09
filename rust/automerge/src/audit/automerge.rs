@@ -163,7 +163,7 @@ impl std::default::Default for SaveOptions {
 /// This is an experimental API, it may change or be removed without warning.
 #[doc(hidden)]
 #[derive(Debug, PartialEq, Clone)]
-pub struct Fragment {
+pub struct FragmentMeta {
     pub head: ChangeHash,
     pub level: usize,
     pub boundary: Vec<ChangeHash>,
@@ -171,12 +171,23 @@ pub struct Fragment {
     pub members: Vec<ChangeHash>,
 }
 
-impl Fragment {
+impl FragmentMeta {
+    /// The number of changes in the fragment.
+    pub fn len(&self) -> usize {
+        self.members.len()
+    }
+
+    /// Never true of a fragment a document lists, which holds at least its
+    /// head.
+    pub fn is_empty(&self) -> bool {
+        self.members.is_empty()
+    }
+
     pub(crate) fn into_next(
         self,
         doc: &crate::automerge::Automerge<Full>,
-    ) -> crate::change_graph::Fragment {
-        crate::change_graph::Fragment {
+    ) -> crate::change_graph::FragmentMeta {
+        crate::change_graph::FragmentMeta {
             head: self.head,
             level: self.level,
             boundary: self.boundary,
@@ -187,7 +198,7 @@ impl Fragment {
 
     pub(crate) fn from_next(
         doc: &crate::automerge::Automerge<Full>,
-        f: crate::change_graph::Fragment,
+        f: crate::change_graph::FragmentMeta,
     ) -> Self {
         Self {
             head: f.head,
@@ -195,6 +206,39 @@ impl Fragment {
             boundary: f.boundary,
             checkpoints: f.checkpoints,
             members: super::hashes_of(doc, &f.members),
+        }
+    }
+}
+
+/// EXPERIMENTAL: A [`FragmentMeta`] and its changes, encoded as a bundle.
+///
+/// This is an experimental API, it may change or be removed without warning.
+#[doc(hidden)]
+#[derive(Debug, PartialEq, Clone)]
+pub struct Fragment {
+    pub meta: FragmentMeta,
+    pub bytes: Vec<u8>,
+}
+
+impl Fragment {
+    /// The number of changes in the fragment.
+    pub fn len(&self) -> usize {
+        self.meta.len()
+    }
+
+    /// Never true of a fragment a document lists, which holds at least its
+    /// head.
+    pub fn is_empty(&self) -> bool {
+        self.meta.is_empty()
+    }
+
+    fn from_next(
+        doc: &crate::automerge::Automerge<Full>,
+        f: crate::change_graph::Fragment,
+    ) -> Self {
+        Self {
+            meta: FragmentMeta::from_next(doc, f.meta),
+            bytes: f.bytes,
         }
     }
 }
@@ -560,6 +604,18 @@ impl Automerge {
         self.0.load_incremental(data)
     }
 
+    /// EXPERIMENTAL: [`Self::load_incremental`] of the fragments' bytes.
+    /// The metadata is not checked against the bytes.
+    ///
+    /// This is an experimental API, it may change or be removed without
+    /// warning.
+    #[doc(hidden)]
+    pub fn apply_fragments(&mut self, fragments: &[Fragment]) -> Result<(), AutomergeError> {
+        let bytes: Vec<u8> = fragments.iter().flat_map(|f| &f.bytes).copied().collect();
+        self.load_incremental(&bytes)?;
+        Ok(())
+    }
+
     /// Apply changes to this document.
     ///
     /// This is idempotent in the sense that if a change has already been applied it will be
@@ -667,35 +723,82 @@ impl Automerge {
         self.0.diff_obj(obj, before, after, recursive)
     }
 
-    /// EXPERIMENTAL: Return the fragments covering the document history at
-    /// the given levels, ordered oldest to newest.
+    /// EXPERIMENTAL: The fragments covering the document history at the
+    /// given levels, in apply order. Encodes every fragment listed, so costs
+    /// about as much as saving the history they cover.
     ///
     /// This is an experimental API, it may change or be removed without
     /// warning.
     #[doc(hidden)]
     pub fn fragments<R: RangeBounds<usize>>(&self, levels: R) -> Vec<Fragment> {
-        self.0
-            .fragments(levels)
+        self.audited_fragments(self.0.fragments(levels))
+    }
+
+    fn audited_fragments(&self, fragments: Vec<crate::change_graph::Fragment>) -> Vec<Fragment> {
+        fragments
             .into_iter()
             .map(|f| Fragment::from_next(&self.0, f))
             .collect()
     }
 
-    /// EXPERIMENTAL: The fragments, loose commits included, holding a change
-    /// `heads` does not cover, in causal order. A fragment that also holds
-    /// older changes is included whole. Hashes this document does not know
-    /// are ignored.
+    /// EXPERIMENTAL: [`Self::fragments`] without encoding them.
+    ///
+    /// This is an experimental API, it may change or be removed without
+    /// warning.
+    #[doc(hidden)]
+    pub fn fragments_meta<R: RangeBounds<usize>>(&self, levels: R) -> Vec<FragmentMeta> {
+        self.0
+            .fragments_meta(levels)
+            .into_iter()
+            .map(|f| FragmentMeta::from_next(&self.0, f))
+            .collect()
+    }
+
+    /// EXPERIMENTAL: The changes `heads` does not cover, each exactly once,
+    /// as fragments and loose commits in apply order. A fragment `heads`
+    /// partly covers is sent as the smaller fragments it superseded, down
+    /// to loose commits. Hashes this document does not know are ignored.
     ///
     /// This is an experimental API, it may change or be removed without
     /// warning.
     #[doc(hidden)]
     pub fn fragments_after(&self, heads: &[ChangeHash]) -> Result<Vec<Fragment>, AutomergeError> {
         let ids = super::known_ids(&self.0, heads);
+        Ok(self.audited_fragments(self.0.fragments_after(&ids)?))
+    }
+
+    /// EXPERIMENTAL: The fragments, loose commits included, holding a
+    /// change `heads` does not cover, in apply order. Unlike
+    /// [`Self::fragments_after`], a fragment that also holds changes
+    /// `heads` covers is sent whole. Hashes this document does not know
+    /// are ignored.
+    ///
+    /// This is an experimental API, it may change or be removed without
+    /// warning.
+    #[doc(hidden)]
+    pub fn fragments_after_full(
+        &self,
+        heads: &[ChangeHash],
+    ) -> Result<Vec<Fragment>, AutomergeError> {
+        let ids = super::known_ids(&self.0, heads);
+        Ok(self.audited_fragments(self.0.fragments_after_full(&ids)?))
+    }
+
+    /// EXPERIMENTAL: [`Self::fragments_after`] without encoding them.
+    ///
+    /// This is an experimental API, it may change or be removed without
+    /// warning.
+    #[doc(hidden)]
+    pub fn fragments_after_meta(
+        &self,
+        heads: &[ChangeHash],
+    ) -> Result<Vec<FragmentMeta>, AutomergeError> {
+        let ids = super::known_ids(&self.0, heads);
         Ok(self
             .0
-            .fragments_after(&ids)?
+            .fragments_after_meta(&ids)?
             .into_iter()
-            .map(|f| Fragment::from_next(&self.0, f))
+            .map(|f| FragmentMeta::from_next(&self.0, f))
             .collect())
     }
 
@@ -705,9 +808,19 @@ impl Automerge {
     /// warning.
     #[doc(hidden)]
     pub fn get_fragment(&self, head: ChangeHash) -> Option<Fragment> {
+        let f = self.0.get_fragment(head)?;
+        Some(Fragment::from_next(&self.0, f))
+    }
+
+    /// EXPERIMENTAL: [`Self::get_fragment`] without encoding it.
+    ///
+    /// This is an experimental API, it may change or be removed without
+    /// warning.
+    #[doc(hidden)]
+    pub fn get_fragment_meta(&self, head: ChangeHash) -> Option<FragmentMeta> {
         self.0
-            .get_fragment(head)
-            .map(|f| Fragment::from_next(&self.0, f))
+            .get_fragment_meta(head)
+            .map(|f| FragmentMeta::from_next(&self.0, f))
     }
 
     /// Get the heads of this document.
@@ -754,20 +867,18 @@ impl Automerge {
         self.0.text_encoding()
     }
 
-    /// EXPERIMENTAL: Encode each fragment as a bundle.
+    /// EXPERIMENTAL: Encodes each fragment's changes as a bundle. Fails if
+    /// one names a change this document does not have.
     ///
     /// This is an experimental API, it may change or be removed without
     /// warning.
     #[doc(hidden)]
-    pub fn bundles_for_fragments<I: IntoIterator<Item = Fragment>>(
+    pub fn fragments_from_meta<I: IntoIterator<Item = FragmentMeta>>(
         &self,
-        fragments: I,
-    ) -> Result<Vec<Vec<u8>>, AutomergeError> {
-        let fragments: Vec<_> = fragments
-            .into_iter()
-            .map(|f| f.into_next(&self.0))
-            .collect();
-        self.0.bundles_for_fragments(fragments)
+        metas: I,
+    ) -> Result<Vec<Fragment>, AutomergeError> {
+        let metas: Vec<_> = metas.into_iter().map(|f| f.into_next(&self.0)).collect();
+        Ok(self.audited_fragments(self.0.fragments_from_meta(metas)?))
     }
 
     /// Apply a batch of changes to this document. See [`Self::apply_changes()`].

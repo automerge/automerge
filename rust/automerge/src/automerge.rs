@@ -38,7 +38,7 @@ use crate::tx::{
     TransactionArgs,
 };
 
-use crate::change_graph::Fragment;
+use crate::change_graph::{Fragment, FragmentMeta};
 use crate::hydrate;
 use crate::types::{ActorId, ChangeHash, ObjId, ObjMeta, OpId, SequenceType, TextEncoding, Value};
 use crate::write_frontier::{FrontierHead, WriteFrontier};
@@ -1238,6 +1238,18 @@ impl<H: HashRetention> Automerge<H> {
         Ok(self.ops.len() - start)
     }
 
+    /// EXPERIMENTAL: [`Self::load_incremental`] of the fragments' bytes.
+    /// The metadata is not checked against the bytes.
+    ///
+    /// This is an experimental API, it may change or be removed without
+    /// warning.
+    #[doc(hidden)]
+    pub fn apply_fragments(&mut self, fragments: &[Fragment]) -> Result<(), AutomergeError> {
+        let bytes: Vec<u8> = fragments.iter().flat_map(|f| &f.bytes).copied().collect();
+        self.load_incremental(&bytes)?;
+        Ok(())
+    }
+
     pub(crate) fn log_current_state(
         &self,
         obj: ObjMeta,
@@ -1448,26 +1460,137 @@ impl<H: HashRetention> Automerge<H> {
         let storage = Bundle::storage_for_document(&self.ops, &self.change_graph, &members)?;
         let heads = self.get_head_hashes();
         let external_deps: [ChangeHash; 0] = [];
-        self.assemble_bundle(&heads, &external_deps, &members, storage, names)
+        self.assemble_bundle(
+            &self.change_graph,
+            &heads,
+            &external_deps,
+            &members,
+            storage,
+            names,
+        )
+    }
+
+    /// The changes `heads` does not cover, each exactly once, as fragments
+    /// and loose commits in apply order. A fragment `heads` partly covers
+    /// is sent as the fragments one level down that it superseded,
+    /// recursively, and a partly covered level-1 fragment as its uncovered
+    /// changes, each a loose commit. Ids this document does not know are
+    /// ignored. Hashes the document has freed are rebuilt, which is slow.
+    pub fn fragments_after(&self, heads: &[ChangeId]) -> Result<Vec<Fragment>, AutomergeError> {
+        Ok(self.fragments_after_rebuilding(heads)?.0)
+    }
+
+    /// [`Self::fragments_after`] without encoding them.
+    pub fn fragments_after_meta(
+        &self,
+        heads: &[ChangeId],
+    ) -> Result<Vec<FragmentMeta>, AutomergeError> {
+        let (_, parts) = self.pieces_after(heads);
+        Ok(parts.into_iter().map(|(meta, _)| meta).collect())
     }
 
     /// The fragments, loose commits included, holding a change `heads`
-    /// does not cover, in causal order. A fragment that also holds older
-    /// changes is included whole. [`Self::bundles_for_fragments`] encodes
-    /// them as a stack that [`Self::load_incremental`] takes in order. Ids
+    /// does not cover, in apply order. Unlike [`Self::fragments_after`], a
+    /// fragment that also holds changes `heads` covers is sent whole, so
+    /// some of them may be sent again, and no hash is ever rebuilt. Ids
     /// this document does not know are ignored.
-    pub fn fragments_after(&self, heads: &[ChangeId]) -> Result<Vec<Fragment>, AutomergeError> {
+    pub fn fragments_after_full(
+        &self,
+        heads: &[ChangeId],
+    ) -> Result<Vec<Fragment>, AutomergeError> {
         let covered = self.seq_clock_for_ids_lossy(heads);
-        Ok(self
-            .change_graph
-            .fragments_after(&self.get_head_hashes(), &covered, &self.ops.actors))
+        Ok(self.own_fragments(self.change_graph.fragments_after_full(
+            &self.get_head_hashes(),
+            &covered,
+            &self.ops.actors,
+        )))
     }
 
-    /// [`Self::fragments_after`] as encoded bundles; empty when `heads`
-    /// covers the document. [`Self::save_after`] gives just the new
-    /// changes as one bundle.
-    pub fn bundle_after(&self, heads: &[ChangeId]) -> Result<Vec<Vec<u8>>, AutomergeError> {
-        self.bundles_for_fragments(self.fragments_after(heads)?)
+    /// The fragment at the level `head`'s hash gives it, encoded, whether or
+    /// not a larger fragment has since superseded it. `None` if this
+    /// document lacks `head`.
+    pub(crate) fn fragment_at(&self, head: ChangeHash) -> Result<Option<Fragment>, AutomergeError> {
+        let Some(node) = self.change_graph.node_by_hash(&head) else {
+            return Ok(None);
+        };
+        let piece = self.change_graph.fragment_piece(node);
+        let part = self.change_graph.piece_meta(&piece, &self.ops.actors);
+        Ok(self.encode_fragments(&self.change_graph, vec![part])?.pop())
+    }
+
+    /// EXPERIMENTAL: Exchanges fragments with a peer that holds `heads`.
+    /// Applies `fragments` and returns [`Self::fragments_after`]`(heads)`
+    /// as it was before them, followed by the whole fragment for each of
+    /// `fragments` that is only part of one: whose stated level is below
+    /// the one its head's hash gives it. Encodes each whole fragment it
+    /// returns, so one over a long history costs about as much as saving it.
+    ///
+    /// This is an experimental API, it may change or be removed without
+    /// warning.
+    #[doc(hidden)]
+    pub fn sync_fragments(
+        &mut self,
+        fragments: &[Fragment],
+        heads: &[ChangeId],
+    ) -> Result<Vec<Fragment>, AutomergeError> {
+        let mut out = self.fragments_after(heads)?;
+        self.apply_fragments(fragments)?;
+        for f in fragments {
+            let head = f.meta.head;
+            let whole = |o: &Fragment| o.meta.head == head && o.meta.level == head.fragment_level();
+            if f.meta.level < head.fragment_level() && !out.iter().any(whole) {
+                out.extend(self.fragment_at(head)?);
+            }
+        }
+        Ok(out)
+    }
+
+    /// [`Self::fragments_after`], and whether it rebuilt a freed hash.
+    pub(crate) fn fragments_after_rebuilding(
+        &self,
+        heads: &[ChangeId],
+    ) -> Result<(Vec<Fragment>, bool), AutomergeError> {
+        let (graph, parts) = self.pieces_after(heads);
+        let rebuilt = matches!(graph, std::borrow::Cow::Owned(_));
+        Ok((self.encode_fragments(&graph, parts)?, rebuilt))
+    }
+
+    /// The graph is a copy holding rebuilt hashes when GC freed any the
+    /// pieces need, so the document keeps what GC left it.
+    #[allow(clippy::type_complexity)]
+    fn pieces_after(
+        &self,
+        heads: &[ChangeId],
+    ) -> (
+        std::borrow::Cow<'_, crate::change_graph::ChangeGraph<H>>,
+        Vec<(FragmentMeta, Vec<crate::change_graph::NodeIdx>)>,
+    ) {
+        let covered = self.seq_clock_for_ids_lossy(heads);
+        let pieces = self
+            .change_graph
+            .pieces_after(&self.get_head_hashes(), &covered);
+        let unhashed = self.change_graph.unhashed_in(&pieces);
+        let graph = if unhashed.is_empty() {
+            std::borrow::Cow::Borrowed(&self.change_graph)
+        } else {
+            let span = self
+                .change_graph
+                .nodes_back_to_retained(unhashed.iter().copied());
+            let hashes = self
+                .rehash(span.clone())
+                .expect("rebuilding the hashes of changes this document has");
+            let mut graph = self.change_graph.clone();
+            for (node, hash) in span.into_iter().zip(hashes) {
+                // level 0, so no fragment forms and no GC is owed
+                let _ = graph.record_node_hash(node, hash);
+            }
+            std::borrow::Cow::Owned(graph)
+        };
+        let parts = pieces
+            .iter()
+            .map(|p| graph.piece_meta(p, &self.ops.actors))
+            .collect();
+        (graph, parts)
     }
 
     /// The changes `heads` does not already cover, as one bundle; `None`
@@ -1512,6 +1635,7 @@ impl<H: HashRetention> Automerge<H> {
             })
             .collect();
         Ok(Some(self.assemble_bundle(
+            &self.change_graph,
             &heads,
             &boundary,
             &members,
@@ -2034,18 +2158,36 @@ impl<H: HashRetention> Automerge<H> {
         H::AUDIT
     }
 
+    /// The fragments covering this document's history at `levels`, in
+    /// apply order. Encodes every fragment listed, so costs about as much
+    /// as saving the history they cover.
     pub fn fragments<R: RangeBounds<usize>>(&self, levels: R) -> Vec<Fragment> {
+        self.own_fragments(self.fragments_meta(levels))
+    }
+
+    /// [`Self::fragments`] without encoding them.
+    pub fn fragments_meta<R: RangeBounds<usize>>(&self, levels: R) -> Vec<FragmentMeta> {
         self.change_graph
-            .fragments(&self.get_head_hashes(), levels, &self.ops.actors)
+            .fragments_meta(&self.get_head_hashes(), levels, &self.ops.actors)
     }
 
     pub fn get_fragment(&self, head: ChangeHash) -> Option<Fragment> {
-        self.change_graph.get_fragment(head, &self.ops.actors)
+        let meta = self.get_fragment_meta(head)?;
+        self.own_fragments(vec![meta]).pop()
+    }
+
+    pub fn get_fragment_meta(&self, head: ChangeHash) -> Option<FragmentMeta> {
+        self.change_graph.get_fragment_meta(head, &self.ops.actors)
+    }
+
+    fn own_fragments(&self, metas: Vec<FragmentMeta>) -> Vec<Fragment> {
+        self.fragments_from_meta(metas)
+            .expect("encoding the fragments this document lists")
     }
 
     fn fragment_nodes(
         &self,
-        f: &Fragment,
+        f: &FragmentMeta,
     ) -> Result<Vec<crate::change_graph::NodeIdx>, AutomergeError> {
         let mut nodes = f
             .members
@@ -2096,6 +2238,7 @@ impl<H: HashRetention> Automerge<H> {
         let members = self.change_graph.bundle_members(&members);
         let storage = Bundle::storage_for_nodes(&self.ops, &self.change_graph, &members)?;
         self.assemble_bundle(
+            &self.change_graph,
             &head_hashes,
             &boundary_hashes,
             &members,
@@ -2104,8 +2247,8 @@ impl<H: HashRetention> Automerge<H> {
         )
     }
 
-    /// [`Self::make_bundle`] for a [`Fragment`].
-    pub fn make_bundle_from_fragment(&self, f: &Fragment) -> Result<Bundle, AutomergeError> {
+    /// [`Self::make_bundle`] for a [`FragmentMeta`].
+    pub fn make_bundle_from_fragment(&self, f: &FragmentMeta) -> Result<Bundle, AutomergeError> {
         let unknown = || AutomergeError::InvalidFragment("fragment names an unknown change");
         let id_of = |h: &ChangeHash| {
             self.change_graph
@@ -2163,15 +2306,23 @@ impl<H: HashRetention> Automerge<H> {
     }
 
     #[doc(hidden)]
-    pub fn bundle_for_fragment(&self, f: &Fragment) -> Result<Bundle, AutomergeError> {
+    pub fn bundle_for_fragment(&self, f: &FragmentMeta) -> Result<Bundle, AutomergeError> {
         let nodes = self.fragment_nodes(f)?;
         let members = self.change_graph.bundle_members(&nodes);
         let storage = Bundle::storage_for_nodes(&self.ops, &self.change_graph, &members)?;
-        self.assemble_bundle(&[f.head], &f.boundary, &members, storage, NameHashes::All)
+        self.assemble_bundle(
+            &self.change_graph,
+            &[f.head],
+            &f.boundary,
+            &members,
+            storage,
+            NameHashes::All,
+        )
     }
 
     fn assemble_bundle(
         &self,
+        graph: &crate::change_graph::ChangeGraph<H>,
         heads: &[ChangeHash],
         boundary: &[ChangeHash],
         members: &crate::change_graph::Members<'_>,
@@ -2179,15 +2330,14 @@ impl<H: HashRetention> Automerge<H> {
         names: NameHashes,
     ) -> Result<Bundle, AutomergeError> {
         let crate::change_graph::ReceiverHashes { retained, outside } =
-            self.change_graph.hashes_to_retain(members, names)?;
+            graph.hashes_to_retain(members, names)?;
         let retained: Vec<(usize, ChangeHash)> = retained
             .into_iter()
             .filter(|(_, h)| h.fragment_level() == 0 && !heads.contains(h))
             .collect();
         let unknown = || AutomergeError::InvalidFragment("fragment references an unknown change");
-        let member_index = |h: &ChangeHash| -> Option<usize> {
-            members.position(self.change_graph.node_by_hash(h)?)
-        };
+        let member_index =
+            |h: &ChangeHash| -> Option<usize> { members.position(graph.node_by_hash(h)?) };
         let heads = heads
             .iter()
             .map(|h| member_index(h).map(|i| (*h, i)))
@@ -2202,8 +2352,8 @@ impl<H: HashRetention> Automerge<H> {
             .ok_or_else(unknown)?;
         checkpoints.sort_unstable_by_key(|(_, h)| *h);
         let change_id = |h: &ChangeHash| -> Option<ChangeId> {
-            let n = self.change_graph.node_by_hash(h)?;
-            Some(self.change_graph.change_id(n, &self.ops.actors))
+            let n = graph.node_by_hash(h)?;
+            Some(graph.change_id(n, &self.ops.actors))
         };
         // an entry no member depends on is behind another entry, and a
         // fragment's boundary lists every earlier fragment it covers; but
@@ -2236,7 +2386,7 @@ impl<H: HashRetention> Automerge<H> {
             let doc_index = self.ops.actors.lookup(actor).ok_or_else(unknown)?;
             actor_index[doc_index] = crate::op_set2::types::ActorIdx::from(i);
         }
-        let (member_actors, member_seqs) = self.change_graph.actors_and_seqs(members, &actor_index);
+        let (member_actors, member_seqs) = graph.actors_and_seqs(members, &actor_index);
 
         Ok(Bundle {
             heads,
@@ -2250,33 +2400,53 @@ impl<H: HashRetention> Automerge<H> {
         })
     }
 
-    pub fn bundles_for_fragments<I: IntoIterator<Item = Fragment>>(
+    /// Encodes each fragment's changes as a bundle. Fails if one names a
+    /// change this document does not have.
+    pub fn fragments_from_meta<I: IntoIterator<Item = FragmentMeta>>(
         &self,
-        fragments: I,
-    ) -> Result<Vec<Vec<u8>>, AutomergeError> {
+        metas: I,
+    ) -> Result<Vec<Fragment>, AutomergeError> {
+        let parts = metas
+            .into_iter()
+            .map(|f| {
+                let nodes = self.fragment_nodes(&f)?;
+                Ok((f, nodes))
+            })
+            .collect::<Result<Vec<_>, AutomergeError>>()?;
+        self.encode_fragments(&self.change_graph, parts)
+    }
+
+    /// `nodes` ascending.
+    fn encode_fragments(
+        &self,
+        graph: &crate::change_graph::ChangeGraph<H>,
+        parts: Vec<(FragmentMeta, Vec<crate::change_graph::NodeIdx>)>,
+    ) -> Result<Vec<Fragment>, AutomergeError> {
         // each bundle holds several KB until its batch is encoded
         const BATCH: usize = 4096;
-        let fragments: Vec<Fragment> = fragments.into_iter().collect();
-        let mut bundles = Vec::with_capacity(fragments.len());
-        for batch in fragments.chunks(BATCH) {
-            let nodes = batch
-                .iter()
-                .map(|f| self.fragment_nodes(f))
-                .collect::<Result<Vec<_>, _>>()?;
-            let members: Vec<_> = nodes
-                .iter()
-                .map(|n| self.change_graph.bundle_members(n))
-                .collect();
+        let mut fragments = Vec::with_capacity(parts.len());
+        let mut parts = parts.into_iter().peekable();
+        while parts.peek().is_some() {
+            let (metas, nodes): (Vec<_>, Vec<_>) = parts.by_ref().take(BATCH).unzip();
+            let members: Vec<_> = nodes.iter().map(|n| graph.bundle_members(n)).collect();
             // one shared pass rather than a document walk per bundle
-            let storages = Bundle::storage_for_node_sets(&self.ops, &self.change_graph, &members)?;
-            for ((f, n), storage) in batch.iter().zip(members.iter()).zip(storages) {
-                bundles.push(
-                    self.assemble_bundle(&[f.head], &f.boundary, n, storage, NameHashes::All)?
-                        .bytes(),
-                );
+            let storages = Bundle::storage_for_node_sets(&self.ops, graph, &members)?;
+            for ((meta, m), storage) in metas.into_iter().zip(&members).zip(storages) {
+                let bundle = self.assemble_bundle(
+                    graph,
+                    &[meta.head],
+                    &meta.boundary,
+                    m,
+                    storage,
+                    NameHashes::All,
+                )?;
+                fragments.push(Fragment {
+                    meta,
+                    bytes: bundle.bytes(),
+                });
             }
         }
-        Ok(bundles)
+        Ok(fragments)
     }
 
     /// Apply a bundle's changes. To apply one bundle to several documents,
@@ -5293,14 +5463,14 @@ mod actor_hygiene_tests {
         let changes = src.get_changes(&[]).unwrap();
 
         let head = changes[1].hash();
-        let orphan = crate::change_graph::Fragment {
+        let orphan = crate::change_graph::FragmentMeta {
             head,
             level: head.fragment_level(),
             boundary: vec![changes[0].hash()],
             checkpoints: vec![],
             members: vec![changes[1].id()],
         };
-        let whole = crate::change_graph::Fragment {
+        let whole = crate::change_graph::FragmentMeta {
             head,
             level: head.fragment_level(),
             boundary: vec![],
@@ -5430,7 +5600,7 @@ mod retained_hash_tests {
         }
         let doc = doc.document();
         assert!(
-            !doc.fragments(1..).is_empty(),
+            !doc.fragments_meta(1..).is_empty(),
             "fixture needs both fragment bands"
         );
 

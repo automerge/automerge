@@ -170,8 +170,15 @@ fn sync<H: HashRetention>(docs: &mut [AutoCommit<H>], from: usize, to: usize, ho
 
 /// Every fragment's bundle, highest level first, then the loose commits.
 fn stack<H: HashRetention>(doc: &AutoCommit<H>) -> Vec<Vec<u8>> {
-    let fragments = doc.fragments(1..).into_iter().chain(doc.fragments(0..=0));
-    doc.bundles_for_fragments(fragments).unwrap()
+    let fragments = doc
+        .fragments_meta(1..)
+        .into_iter()
+        .chain(doc.fragments_meta(0..=0));
+    doc.fragments_from_meta(fragments)
+        .unwrap()
+        .into_iter()
+        .map(|f| f.bytes)
+        .collect::<Vec<_>>()
 }
 
 fn cluster<H: HashRetention>(make: impl Fn() -> AutoCommit<H>) -> Vec<AutoCommit<H>> {
@@ -238,7 +245,9 @@ fn apply<H: HashRetention>(docs: &mut [AutoCommit<H>], step: Step) {
 
 /// Fragments in a comparable form: their members' order follows the
 /// document's node order, which depends on arrival order.
-fn normalized(fragments: Vec<crate::change_graph::Fragment>) -> Vec<crate::change_graph::Fragment> {
+fn normalized(
+    fragments: Vec<crate::change_graph::FragmentMeta>,
+) -> Vec<crate::change_graph::FragmentMeta> {
     let mut fragments: Vec<_> = fragments
         .into_iter()
         .map(|mut f| {
@@ -253,31 +262,32 @@ fn normalized(fragments: Vec<crate::change_graph::Fragment>) -> Vec<crate::chang
 }
 
 fn assert_same_fragments(
-    a: Vec<crate::change_graph::Fragment>,
-    b: Vec<crate::change_graph::Fragment>,
+    a: Vec<crate::change_graph::FragmentMeta>,
+    b: Vec<crate::change_graph::FragmentMeta>,
     what: &str,
 ) {
     let (a, b) = (normalized(a), normalized(b));
-    let differ =
-        |x: &[crate::change_graph::Fragment], y: &[crate::change_graph::Fragment]| -> Vec<String> {
-            x.iter()
-                .filter(|f| !y.contains(f))
-                .map(|f| match y.iter().find(|g| g.head == f.head) {
-                    None => format!("{:?} level {} only here", f.head, f.level),
-                    Some(g) => format!(
-                        "{:?} level {}: boundary {:?}/{:?} checkpoints {}/{} members {}/{}",
-                        f.head,
-                        f.level,
-                        f.boundary,
-                        g.boundary,
-                        f.checkpoints.len(),
-                        g.checkpoints.len(),
-                        f.members.len(),
-                        g.members.len()
-                    ),
-                })
-                .collect()
-        };
+    let differ = |x: &[crate::change_graph::FragmentMeta],
+                  y: &[crate::change_graph::FragmentMeta]|
+     -> Vec<String> {
+        x.iter()
+            .filter(|f| !y.contains(f))
+            .map(|f| match y.iter().find(|g| g.head == f.head) {
+                None => format!("{:?} level {} only here", f.head, f.level),
+                Some(g) => format!(
+                    "{:?} level {}: boundary {:?}/{:?} checkpoints {}/{} members {}/{}",
+                    f.head,
+                    f.level,
+                    f.boundary,
+                    g.boundary,
+                    f.checkpoints.len(),
+                    g.checkpoints.len(),
+                    f.members.len(),
+                    g.members.len()
+                ),
+            })
+            .collect()
+    };
     let (only_a, only_b) = (differ(&a, &b), differ(&b, &a));
     assert!(
         only_a.is_empty() && only_b.is_empty(),
@@ -438,8 +448,8 @@ fn deep_check(audit: &mut [AutoCommit<Full>], next: &mut [AutoCommit<Retained>],
             "{at}: actor {i} stack reload heads"
         );
         assert_same_fragments(
-            reloaded.fragments(..),
-            n.fragments(..),
+            reloaded.fragments_meta(..),
+            n.fragments_meta(..),
             &format!("{at}: actor {i} stack reload fragments"),
         );
         assert_same_held(

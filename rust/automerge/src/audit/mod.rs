@@ -9,7 +9,7 @@ pub mod transaction;
 mod wrapper;
 
 pub use self::autocommit::AutoCommit;
-pub use self::automerge::{Automerge, Fragment, LoadOptions, SaveOptions};
+pub use self::automerge::{Automerge, Fragment, FragmentMeta, LoadOptions, SaveOptions};
 pub use read::ReadDoc;
 pub use transactable::Transactable;
 pub(crate) use wrapper::AuditWrapper;

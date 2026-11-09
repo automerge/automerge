@@ -525,15 +525,18 @@ impl Doc {
         }
     }
 
-    pub(crate) fn fragments_after(&self, heads: Option<&Heads>) -> Result<Array, AutomergeError> {
+    pub(crate) fn fragments_after_meta(
+        &self,
+        heads: Option<&Heads>,
+    ) -> Result<Array, AutomergeError> {
         Ok(match self {
             Doc::Audit(d) => d
-                .fragments_after(heads.map_or(&[], Heads::hashes))?
+                .fragments_after_meta(heads.map_or(&[], Heads::hashes))?
                 .iter()
                 .map(crate::fragment_to_js)
                 .collect(),
             Doc::Next(d) => d
-                .fragments_after(heads.map_or(&[], Heads::ids))?
+                .fragments_after_meta(heads.map_or(&[], Heads::ids))?
                 .iter()
                 .map(crate::next_fragment_to_js)
                 .collect(),

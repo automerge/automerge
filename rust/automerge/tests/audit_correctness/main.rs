@@ -189,7 +189,7 @@ fn exercise(bytes: &[u8], base: &Automerge) -> Result<(), String> {
     let mut next = base.clone();
     if next.apply_bundle(bundle.clone()).is_ok() {
         let _ = next.get_heads();
-        let _ = next.fragments(..);
+        let _ = next.fragments_meta(..);
         let saved = next.save();
         let _ = Automerge::load(&saved).map_err(|e| e.to_string())?;
         next.gc();
@@ -600,11 +600,14 @@ fn check_peer(p: &mut Peer, what: &str) {
         p.doc.get_heads(),
         "{what}: heads round-trip"
     );
-    let fragments = p.doc.fragments(..);
+    let fragments = p.doc.fragments_meta(..);
     let bundles = p
         .doc
-        .bundles_for_fragments(fragments.clone())
-        .unwrap_or_else(|e| panic!("{what}: bundles_for_fragments: {e}"));
+        .fragments_from_meta(fragments.clone())
+        .unwrap_or_else(|e| panic!("{what}: bundles_for_fragments: {e}"))
+        .into_iter()
+        .map(|f| f.bytes)
+        .collect::<Vec<_>>();
     let mut rebuilt = Automerge::new();
     for b in &bundles {
         rebuilt
@@ -630,8 +633,11 @@ fn exchange(peers: &mut [Peer], a: usize, b: usize, mode: usize) {
         2 => {
             let bundles = pb
                 .doc
-                .bundles_for_fragments(pb.doc.fragments(..))
-                .unwrap_or_else(|e| panic!("bundles_for_fragments on peer {b}: {e}"));
+                .fragments_from_meta(pb.doc.fragments_meta(..))
+                .unwrap_or_else(|e| panic!("bundles_for_fragments on peer {b}: {e}"))
+                .into_iter()
+                .map(|f| f.bytes)
+                .collect::<Vec<_>>();
             for bytes in bundles {
                 pa.doc.load_incremental(&bytes).unwrap();
             }
@@ -713,10 +719,10 @@ fn retention_fuzz(seed: u64, n_peers: usize, rounds: usize, burst: usize) {
         .map(|p| p.doc.clone().enable_audit_mode().unwrap())
         .collect();
     // a whole save lists changes in arrival order, so compare content
-    let reference = normalized(audited[0].fragments(..));
+    let reference = normalized(audited[0].fragments_meta(..));
     for (i, a) in audited.iter_mut().enumerate() {
         assert_eq!(
-            normalized(a.fragments(..)),
+            normalized(a.fragments_meta(..)),
             reference,
             "audited fragments of peer {i}"
         );
@@ -727,8 +733,8 @@ fn retention_fuzz(seed: u64, n_peers: usize, rounds: usize, burst: usize) {
             "audited save of peer {i}"
         );
         assert_eq!(
-            normalized(peers[i].doc.fragments(..)),
-            normalized(a.fragments(..)),
+            normalized(peers[i].doc.fragments_meta(..)),
+            normalized(a.fragments_meta(..)),
             "peer {i}: next fragments equal the audited fragments"
         );
     }
@@ -805,7 +811,10 @@ fn overlapping_peer_with_freed_parent() -> (AutoCommit, AutoCommit) {
         }
     }
     let prefix = prefix.unwrap();
-    assert!(!a.fragments(1..).is_empty(), "fixture needs a fragment");
+    assert!(
+        !a.fragments_meta(1..).is_empty(),
+        "fixture needs a fragment"
+    );
     let p = automerge::ChangeId::from_parts(actor(1), std::num::NonZeroU64::new(10).unwrap());
     a.document_mut().gc();
     assert!(
@@ -879,7 +888,7 @@ fn peers_sharing_a_loose_change_above_a_fragment() -> (AutoCommit, AutoCommit) {
         b.commit_with(t0());
     }
     assert!(
-        !b.fragments(1..).is_empty(),
+        !b.fragments_meta(1..).is_empty(),
         "fixture needs a fragment in b"
     );
     // c2 depends only on c1: concurrent with everything b did after c1
@@ -1015,8 +1024,18 @@ fn loading_a_mixed_fragment_stack_equals_loading_it_in_turn() {
             b.merge(&mut a).unwrap();
         }
     }
-    let frags_a = a.bundles_for_fragments(a.fragments(..)).unwrap();
-    let frags_b = b.bundles_for_fragments(b.fragments(..)).unwrap();
+    let frags_a = a
+        .fragments_from_meta(a.fragments_meta(..))
+        .unwrap()
+        .into_iter()
+        .map(|f| f.bytes)
+        .collect::<Vec<_>>();
+    let frags_b = b
+        .fragments_from_meta(b.fragments_meta(..))
+        .unwrap()
+        .into_iter()
+        .map(|f| f.bytes)
+        .collect::<Vec<_>>();
     let mut stack = Vec::new();
     let mut seq = Automerge::new();
     for bytes in frags_a.iter().chain(frags_b.iter()) {

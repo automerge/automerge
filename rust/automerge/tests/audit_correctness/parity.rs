@@ -130,11 +130,17 @@ fn history(seed: u64, rounds: usize) -> Vec<AuditedAutoCommit> {
 fn one_legacy_change_at_a_time_in_any_order_matches_the_audited_document() {
     let mut peers = history(7, 2500);
     let audited = &mut peers[0];
-    let reference_fragments = normalized(audited.fragments(..));
-    assert!(audited.fragments(1..).len() >= 2, "fixture needs fragments");
+    let reference_fragments = normalized(audited.fragments_meta(..));
+    assert!(
+        audited.fragments_meta(1..).len() >= 2,
+        "fixture needs fragments"
+    );
     let reference_bundles = audited
-        .bundles_for_fragments(audited.fragments(1..))
-        .unwrap();
+        .fragments_from_meta(audited.fragments_meta(1..))
+        .unwrap()
+        .into_iter()
+        .map(|f| f.bytes)
+        .collect::<Vec<_>>();
     let reference_save = audited.save();
     let changes = audited.get_changes(&[]).unwrap();
     for order_seed in 0..3u64 {
@@ -158,13 +164,16 @@ fn one_legacy_change_at_a_time_in_any_order_matches_the_audited_document() {
         }
         next.gc();
         assert_eq!(
-            normalized(next.fragments(..)),
+            normalized(next.fragments_meta(..)),
             reference_fragments,
             "order {order_seed}: fragments"
         );
         let bundles = next
-            .bundles_for_fragments(normalized(next.fragments(1..)))
-            .unwrap();
+            .fragments_from_meta(normalized(next.fragments_meta(1..)))
+            .unwrap()
+            .into_iter()
+            .map(|f| f.bytes)
+            .collect::<Vec<_>>();
         let mut rb = reference_bundles.clone();
         rb.sort();
         let mut nb = bundles.clone();
@@ -209,7 +218,13 @@ macro_rules! step {
                     .into_iter()
                     .filter(|h| b.has_change_id(h))
                     .collect();
-                for bytes in b.bundle_after(&heads).unwrap() {
+                for bytes in b
+                    .fragments_after(&heads)
+                    .unwrap()
+                    .into_iter()
+                    .map(|f| f.bytes)
+                    .collect::<Vec<_>>()
+                {
                     a.load_incremental(&bytes).unwrap();
                 }
             }
@@ -262,8 +277,8 @@ fn cluster_parity(seed: u64, steps: usize) {
                 "{what}: values"
             );
             assert_eq!(
-                normalized(audit[i].fragments(..)),
-                normalized(next[i].fragments(..)),
+                normalized(audit[i].fragments_meta(..)),
+                normalized(next[i].fragments_meta(..)),
                 "{what}: fragments"
             );
             assert!(audit[i].save() == next[i].save(), "{what}: save bytes");
@@ -325,10 +340,10 @@ fn history_queries_at_freed_heads_never_panic() {
         .save_after(&old)
         .map(|_| ()));
     probe!("bundle_after", |d: &mut AutoCommit| d
-        .bundle_after(&old)
+        .fragments_after(&old)
         .map(|_| ()));
     probe!("fragments_after", |d: &mut AutoCommit| d
-        .fragments_after(&old)
+        .fragments_after_meta(&old)
         .map(|_| ()));
     probe!("hydrate at", |d: &mut AutoCommit| d
         .hydrate(ROOT, Some(&old))
@@ -406,8 +421,8 @@ fn legacy_save_of_a_next_document_matches_audit_mode() {
     assert_eq!(root.get_heads(), audited.get_head_hashes());
     let reloaded = AutoCommit::load(&n).expect("legacy save loads in next");
     assert_eq!(
-        normalized(reloaded.fragments(..)),
-        normalized(audited.fragments(..))
+        normalized(reloaded.fragments_meta(..)),
+        normalized(audited.fragments_meta(..))
     );
     let mut un = AutoCommit::load_unverified_heads(&next.save()).unwrap();
     assert_eq!(un.get_heads(), next.get_heads());
@@ -535,8 +550,11 @@ fn mixed_mode_peers_agree_with_audited_peers() {
                     .filter(|h| a.has_change_id(h))
                     .collect();
                 for b in a
-                    .bundle_after(&heads)
+                    .fragments_after(&heads)
                     .unwrap_or_else(|e| panic!("{what}: {e}"))
+                    .into_iter()
+                    .map(|f| f.bytes)
+                    .collect::<Vec<_>>()
                 {
                     n.load_incremental(&b)
                         .unwrap_or_else(|e| panic!("{what}: {e}"));
@@ -574,13 +592,13 @@ fn mixed_mode_peers_agree_with_audited_peers() {
                 "{what}"
             );
             assert_eq!(
-                normalized(n.fragments(..)),
-                normalized(rn.fragments(..)),
+                normalized(n.fragments_meta(..)),
+                normalized(rn.fragments_meta(..)),
                 "{what}: n fragments"
             );
             assert_eq!(
-                normalized(a.fragments(..)),
-                normalized(ra.fragments(..)),
+                normalized(a.fragments_meta(..)),
+                normalized(ra.fragments_meta(..)),
                 "{what}: a fragments"
             );
         }
@@ -604,14 +622,38 @@ fn bundle_after_applies_one_at_a_time_and_matches_audit_mode() {
         let heads = r.get_heads();
         let mut r = r.disable_audit_mode();
         let _ = r.save();
-        let sent = sender.bundle_after(&heads).unwrap();
-        let reference = audited.bundle_after(&heads).unwrap();
+        let sent = sender
+            .fragments_after_full(&heads)
+            .unwrap()
+            .into_iter()
+            .map(|f| f.bytes)
+            .collect::<Vec<_>>();
+        let reference = audited
+            .fragments_after_full(&heads)
+            .unwrap()
+            .into_iter()
+            .map(|f| f.bytes)
+            .collect::<Vec<_>>();
         let (mut ss, mut rs) = (sent.clone(), reference.clone());
         ss.sort();
         rs.sort();
         if ss != rs {
-            let fs = normalized(sender.fragments_after(&heads).unwrap());
-            let fr = normalized(audited.fragments_after(&heads).unwrap());
+            let fs = normalized(
+                sender
+                    .fragments_after_full(&heads)
+                    .unwrap()
+                    .into_iter()
+                    .map(|f| f.meta)
+                    .collect(),
+            );
+            let fr = normalized(
+                audited
+                    .fragments_after_full(&heads)
+                    .unwrap()
+                    .into_iter()
+                    .map(|f| f.meta)
+                    .collect(),
+            );
             eprintln!(
                 "cut {cut}: {} vs {} bundles; fragments equal: {}",
                 sent.len(),
@@ -637,8 +679,8 @@ fn bundle_after_applies_one_at_a_time_and_matches_audit_mode() {
         }
         assert_eq!(r.get_heads(), sender.get_heads(), "cut {cut}");
         assert_eq!(
-            normalized(r.fragments(..)),
-            normalized(audited.fragments(..)),
+            normalized(r.fragments_meta(..)),
+            normalized(audited.fragments_meta(..)),
             "cut {cut}: fragments"
         );
     }
