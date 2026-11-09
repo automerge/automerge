@@ -325,7 +325,12 @@ compiles them away. To check them, run `cargo verus verify -p hexane
   edit counter's job, which is not proved.
 * The column invariant, as a type invariant: a `Column`'s state is a
   `column_core::ColumnCore`, whose fields only verified code changes, so
-  every column is well-formed and indexed between calls. The trusted
+  every column is well-formed and indexed between calls. Its view is the
+  column's values: a splice replaces exactly the range given, and an
+  iterator over a range (every column type's `iter`/`iter_range`, and a
+  resumed one) gives exactly the values there, through the read model,
+  which is proved to agree with the edit model (for RLE columns, up to
+  owning a borrowed value, `Lift`). The trusted
   exceptions are what a new column is built from (slabs and their
   weights, from the verified loaders, fills and encoders), a clone, and
   the parts the public `Edit` cursor hands back when dropped (each of its

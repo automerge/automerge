@@ -10,7 +10,11 @@
 //! holds a core has it without being given it (`use_type_invariant`).
 //! The core's view is the column's values, one after another, and the
 //! operations are specified against it: a splice replaces exactly the
-//! range given, `copy_ranges` applies its splices.
+//! range given, `copy_ranges` applies its splices, and an iterator over a
+//! range (`reader`, `resume`) gives exactly the values there. The readers
+//! see slabs through their own model of the encoding; that it agrees with
+//! the edit model (`cursor::ReadsAgree`) is proved for both encodings, so
+//! their preconditions come from the type invariant too.
 //!
 //! Trusted: what the constructors are given (well-formed slabs and their
 //! weights, from the loaders, fills and encoders); and the parts the
