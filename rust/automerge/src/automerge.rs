@@ -34,11 +34,13 @@ use crate::types::{ActorId, ChangeHash, ObjId, ObjMeta, OpId, SequenceType, Text
 use crate::write_frontier::WriteFrontier;
 use crate::{AutomergeError, Change, Cursor, Fragment, ObjType, Prop};
 use actor::ActorMaintenance;
+use history::History;
 use std::borrow::Cow;
 use view::{ClockRange, Mask, ReadAt, VisibleClock};
 
 mod actor;
 pub(crate) mod current_state;
+mod history;
 pub(crate) mod view;
 mod visibility;
 
@@ -1723,25 +1725,14 @@ impl Automerge {
     /// visibility [`Mask`] — publishing that is the caller's single
     /// [`Automerge::republish_mask`] step after the op set is consistent.
     pub(crate) fn update_history(&mut self, change: &Change) -> HistoryUpdate {
-        self.update_deps(change);
-
-        let actor_index = self
-            .ops
-            .lookup_actor(change.actor_id())
-            .expect("Change's actor not already in the document");
-
-        let hash = self
-            .change_graph
-            .add_change(change, actor_index, &mut self.authors)
-            .expect("Change's deps should already be in the document");
-
-        // This change was a pending boundary head. Report it so the caller
-        // republishes the visibility once the op set is consistent.
-        if self.visibility.is_pending(&hash) {
-            HistoryUpdate::BoundaryResolved
-        } else {
-            HistoryUpdate::Unchanged
-        }
+        History::new(
+            &mut self.change_graph,
+            &mut self.deps,
+            &mut self.authors,
+            &self.ops.actors,
+            &self.visibility,
+        )
+        .update(change)
     }
 
     pub(crate) fn put_actor_ref(&mut self, actor: &ActorId) -> usize {
@@ -1759,13 +1750,6 @@ impl Automerge {
             &mut self.visibility,
         )
         .insert(actor)
-    }
-
-    fn update_deps(&mut self, change: &Change) {
-        for d in change.deps() {
-            self.deps.remove(d);
-        }
-        self.deps.insert(change.hash());
     }
 
     #[doc(hidden)]
