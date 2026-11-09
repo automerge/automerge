@@ -683,37 +683,21 @@ impl IterState {
             return Err(PackError::InvalidResume);
         }
         let slabs = &column.slabs[..];
-        if self.slab_idx >= slabs.len() {
-            // past the last slab: at or past the column's end
-            if self.pos < column.len() {
-                return Err(PackError::InvalidResume);
-            }
-            return Ok(Iter {
-                slabs,
-                col: Some(column),
-                core: ICore::idle::<Dx<T, C>>(slabs, self.pos),
-                counter: self.counter,
-            });
-        }
-        // the slab and the offset in it must put the iterator where the
-        // state says, in this column (`ICore::at`'s precondition)
-        let slab_start = column.index.items_before(self.slab_idx);
-        if self.slab_consumed > slabs[self.slab_idx].len
-            || slab_start.checked_add(self.slab_consumed) != Some(self.pos)
-            || self.pos.checked_add(self.items_left).is_none()
-        {
-            return Err(PackError::InvalidResume);
-        }
+        // verified (`ICore::resume`): `Some` exactly when the state is a
+        // position of this column's slabs, the iterator then standing there
+        let core = ICore::resume::<Dx<T, C>, WF::Weight, Idx>(
+            slabs,
+            &column.index,
+            self.slab_idx,
+            self.slab_consumed,
+            self.pos,
+            self.items_left,
+        )
+        .ok_or(PackError::InvalidResume)?;
         Ok(Iter {
             slabs,
             col: Some(column),
-            core: ICore::at::<Dx<T, C>>(
-                slabs,
-                self.slab_idx,
-                self.slab_consumed,
-                self.pos,
-                self.items_left,
-            ),
+            core,
             counter: self.counter,
         })
     }
@@ -722,19 +706,18 @@ impl IterState {
 impl<'a, T: ColumnValueRef, C: Codec> Iter<'a, T, C> {
     /// Captures the current iterator position so it can be restored later.
     pub fn suspend(&self) -> IterState {
-        let c = &self.core;
-        let slab_len = if c.slab_idx < self.slabs.len() {
-            self.slabs[c.slab_idx].len
-        } else {
-            0
-        };
+        // verified (`ICore::suspended`): a state that resumes, over the
+        // same slabs, to an iterator with the same values left
+        // (`ICore::lemma_resumed`)
+        let (slab_idx, slab_consumed, pos, items_left) =
+            self.core.suspended::<Dx<T, C>>(self.slabs);
         IterState {
             counter: self.counter,
             num_slabs: self.slabs.len(),
-            slab_idx: c.slab_idx,
-            pos: c.pos,
-            items_left: c.items_left,
-            slab_consumed: slab_len - c.slab_remaining,
+            slab_idx,
+            pos,
+            items_left,
+            slab_consumed,
         }
     }
 }

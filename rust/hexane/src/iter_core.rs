@@ -21,6 +21,12 @@
 //! as a closure whose answers are assumed right (`find_ok`; the index
 //! itself is verified, see [`crate::index::IndexOps`]).
 //!
+//! Suspending keeps a position that always resumes (`suspended`,
+//! `resumes`); resuming takes the index itself and succeeds exactly when
+//! the position kept is one of the column's (`resume`), and then the
+//! iterator has the same values left as the one suspended, if the slabs
+//! are the same (`lemma_resumed`).
+//!
 //! The constructors also take it as given that there are fewer than
 //! `usize::MAX` slabs. A slab is not zero-sized, so no slice of them is
 //! that long, but Verus does not model that; it lets the step to the next
@@ -32,6 +38,9 @@ use crate::column::Slab;
 use crate::cursor::{lemma_concat_append, slab_lens};
 #[cfg(verus_keep_ghost)]
 use crate::fenwick::{lemma_sum_le, lemma_sum_one, lemma_sum_split, sum, total};
+#[cfg(verus_keep_ghost)]
+use crate::index::wlens;
+use crate::index::IndexOps;
 #[cfg(verus_keep_ghost)]
 use crate::rle::writer::concat;
 use crate::Run;
@@ -403,6 +412,20 @@ pub(crate) proof fn lemma_from<'a, X: Decoders<'a>>(s: Seq<Slab<X::Tail>>, k: in
 
 // ── The iterator ───────────────────────────────────────────────────────────
 
+/// A suspended position — slab `si`, `consumed` items into it, item
+/// `pos` of the column, `n` left in the window — that is a position of a
+/// column whose slabs hold `lens` items: inside a slab, or past the last
+/// at or past the column's end.
+pub(crate) open spec fn resumes(lens: Seq<nat>, si: usize, consumed: usize, pos: usize, n: usize) -> bool {
+    if si < lens.len() {
+        &&& consumed <= lens[si as int]
+        &&& pos == sum(lens, 0, si as int) + consumed
+        &&& pos + n <= usize::MAX
+    } else {
+        pos >= total(lens)
+    }
+}
+
 /// The iterator's state; [`crate::Iter`] pairs it with the slabs.
 ///
 /// The field order is fixed because it changes the code LLVM makes for
@@ -531,6 +554,97 @@ impl<D: Decode> ICore<D> {
         }
     }
 
+    /// The position an iterator keeps when suspended: its slab, how far
+    /// into it, its place in the column, and what is left of its window.
+    pub(crate) fn suspended<'a, X: Decoders<'a, D = D>>(&self, slabs: &'a [Slab<X::Tail>]) -> (r: (usize, usize, usize, usize))
+        requires
+            self.wf::<X>(slabs@),
+        ensures
+            r == (self.slab_idx, if self.slab_idx < slabs@.len() { (slabs@[self.slab_idx as int].len - self.slab_remaining) as usize } else { 0 }, self.pos, self.items_left),
+            resumes(slab_lens(slabs@), r.0, r.1, r.2, r.3),
+    {
+        let consumed = if self.slab_idx < slabs.len() {
+            slabs[self.slab_idx].len - self.slab_remaining
+        } else {
+            0
+        };
+        (self.slab_idx, consumed, self.pos, self.items_left)
+    }
+
+    /// Resume at a suspended position — slab `si`, `consumed` items into
+    /// it, item `pos` of the column, `n` left in the window — if it is a
+    /// position of these slabs (`resumes`); `None` if not. In a slab, the
+    /// iterator stands there with `n` to give; past the last slab, at or
+    /// past the column's end, it is idle there. The slabs' item counts
+    /// come from the index, which must count them (`wlens`).
+    pub(crate) fn resume<'a, X: Decoders<'a, D = D>, W, I: IndexOps<W>>(
+        slabs: &'a [Slab<X::Tail>],
+        ix: &I,
+        si: usize,
+        consumed: usize,
+        pos: usize,
+        n: usize,
+    ) -> (r: Option<Self>)
+        requires
+            lens_ok::<X>(slabs@),
+            slabs@.len() < usize::MAX,
+            total(slab_lens(slabs@)) <= usize::MAX,
+            ix.ok(),
+            wlens::<W, I>(ix.ws()) == slab_lens(slabs@),
+        ensures
+            r is Some <==> resumes(slab_lens(slabs@), si, consumed, pos, n),
+            r matches Some(it) ==> {
+                &&& it.wf::<X>(slabs@)
+                &&& it.pos == pos
+                &&& it.slab_idx == si || (si >= slabs@.len() && it.slab_idx == slabs@.len())
+                &&& si < slabs@.len() ==> it.items_left == n
+                &&& si >= slabs@.len() ==> it.out::<X>(slabs@).len() == 0
+            },
+    {
+        let ghost lens = slab_lens(slabs@);
+        if si >= slabs.len() {
+            // past the last slab: at or past the column's end
+            let end = ix.ix_before(ix.ix_len());
+            proof {
+                assert(lens.len() == slabs@.len());
+            }
+            if pos < end {
+                return None;
+            }
+            return Some(Self::idle::<X>(slabs, pos));
+        }
+        let start = ix.ix_before(si);
+        proof {
+            lemma_sum_split(lens, 0, si as int, lens.len() as int);
+            lemma_sum_split(lens, si as int, si + 1, lens.len() as int);
+            lemma_sum_one(lens, si as int);
+        }
+        if consumed > slabs[si].len || start + consumed != pos || pos > usize::MAX - n {
+            return None;
+        }
+        Some(Self::at::<X>(slabs, si, consumed, pos, n))
+    }
+
+    /// Suspend and resume round-trip: an iterator resumed, over the same
+    /// slabs, from what [`Self::suspended`] kept (which always resumes) has
+    /// the same values left to give.
+    pub(crate) proof fn lemma_resumed<'a, X: Decoders<'a, D = D>>(&self, it: Self, s: Seq<Slab<X::Tail>>)
+        requires
+            self.wf::<X>(s),
+            it.wf::<X>(s),
+            it.pos == self.pos,
+            self.slab_idx < s.len() ==> it.items_left == self.items_left,
+            self.slab_idx >= s.len() ==> it.out::<X>(s).len() == 0,
+        ensures
+            it.out::<X>(s) == self.out::<X>(s),
+    {
+        self.lemma_here::<X>(s);
+        if self.slab_idx >= s.len() {
+            assert(self.out::<X>(s) =~= Seq::<D::Item>::empty());
+            assert(it.out::<X>(s) =~= Seq::<D::Item>::empty());
+        }
+    }
+
     /// An iterator with nothing in hand, standing at `pos` at or past the
     /// end.
     pub(crate) fn idle<'a, X: Decoders<'a, D = D>>(slabs: &'a [Slab<X::Tail>], pos: usize) -> (it: Self)
@@ -543,6 +657,7 @@ impl<D: Decode> ICore<D> {
             it.wf::<X>(slabs@),
             it.out::<X>(slabs@) == Seq::<D::Item>::empty(),
             it.pos == pos,
+            it.slab_idx == slabs@.len(),
     {
         let it = ICore { slab_idx: slabs.len(), decoder: X::none(), items_left: 0, slab_remaining: 0, pos };
         proof {

@@ -315,6 +315,14 @@ compiles them away. To check them, run `cargo verus verify -p hexane
   that bridges them is written). The B-tree's invariant asks only that
   its item counts add up; its aggregates are exact wherever they are
   representable, which is all its queries need.
+* Suspending and resuming an iterator (`Iter::suspend`,
+  `IterState::try_resume`, and the prefix and delta iterators' versions,
+  which build on them): `suspend` keeps a position that always resumes;
+  `try_resume` succeeds exactly when the position kept is one of the
+  column's slabs (or at or past its end), finding the slab's start in the
+  index, and an iterator resumed over the same slabs has the same values
+  left to give as the one suspended. That the slabs are the same is the
+  edit counter's job, which is not proved.
 * `Column::splice`, and with it `insert`, `remove`, `remove_n`, `push`,
   `clear`, `truncate`, `splice_runs` and the prefix and delta columns'
   splices: the chain of cursor steps (open, delete, insert each run,
