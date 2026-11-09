@@ -24,9 +24,11 @@
 //! inserting them, are a normalized list that, applied to those with the
 //! destination as its source, gives what the splices give. So both ways
 //! come down to the edit cursor applying a normalized list, which
-//! `crate::copy` proves of both. The ghost columns are of any item type:
-//! nothing here depends on the items. Trusted: the glue that feeds
-//! `Normalize` the caller's splices.
+//! `crate::copy` proves of both. `Normalize` works on the columns of
+//! positions (`ids`, `negs`), and what splices in order make of a
+//! destination and source depends only on their lengths
+//! (`lemma_any_columns`), so its result holds for any columns. Trusted:
+//! the glue that feeds `Normalize` the caller's splices.
 
 use crate::Splice;
 use std::ops::Range;
@@ -99,8 +101,111 @@ pub(crate) open spec fn normal(sps: Seq<Splice>, src_len: int, dst_len: int) -> 
     &&& forall|i: int| 0 < i < sps.len() ==> sps[i - 1].range.end <= #[trigger] sps[i].range.start
 }
 
+/// The columns of positions: `ids(n)` numbers a destination's items
+/// `0..n`, `negs(m)` a source's `-1, -2, ..`, so no item of one is an
+/// item of the other.
+pub(crate) open spec fn ids(n: nat) -> Seq<int> {
+    Seq::new(n, |i: int| i)
+}
+
+pub(crate) open spec fn negs(n: nat) -> Seq<int> {
+    Seq::new(n, |j: int| -j - 1)
+}
+
+/// A splice copies the mapped items of the mapped source.
+proof fn lemma_copied_map<V, W>(s: Seq<V>, sp: Splice, f: spec_fn(V) -> W)
+    ensures
+        copied(s.map_values(f), sp) == copied(s, sp).map_values(f),
+{
+    let st = min_i(sp.range.start as int, s.len() as int);
+    let e = min_i(sp.range.end as int, s.len() as int);
+    if st < e {
+        assert(s.map_values(f).subrange(st, e) =~= s.subrange(st, e).map_values(f));
+    } else {
+        assert(Seq::<V>::empty().map_values(f) =~= Seq::<W>::empty());
+    }
+}
+
+/// Splices in order make of mapped columns the mapped result.
+proof fn lemma_produced_map<V, W>(d: Seq<V>, s: Seq<V>, sps: Seq<Splice>, f: spec_fn(V) -> W)
+    requires
+        in_order(sps, d.len() as int),
+    ensures
+        produced(d.map_values(f), s.map_values(f), sps) == produced(d, s, sps).map_values(f),
+    decreases sps.len(),
+{
+    if sps.len() == 0 {
+        assert(Seq::<V>::empty().map_values(f) =~= Seq::<W>::empty());
+    } else {
+        let p = sps.drop_last();
+        let l = sps.last();
+        assert(in_order(p, d.len() as int)) by {
+            assert forall|i: int| 0 <= i < p.len() implies #[trigger] p[i].pos + p[i].delete <= d.len() by {
+                assert(p[i] == sps[i]);
+            }
+            assert forall|i: int| 0 < i < p.len() implies p[i - 1].pos + p[i - 1].delete <= #[trigger] p[i].pos by {
+                assert(p[i] == sps[i] && p[i - 1] == sps[i - 1]);
+            }
+        }
+        lemma_produced_map(d, s, p, f);
+        lemma_copied_map(s, l, f);
+        let a = end_of(p);
+        let b = l.pos as int;
+        assert(sps[sps.len() - 1] == l);
+        assert(l.pos + l.delete <= d.len());
+        if p.len() > 0 {
+            assert(p.last() == sps[sps.len() - 2]);
+            assert(sps[sps.len() - 2].pos + sps[sps.len() - 2].delete <= sps[sps.len() - 1].pos);
+        }
+        assert(0 <= a <= b <= d.len());
+        assert(d.map_values(f).subrange(a, b) =~= d.subrange(a, b).map_values(f));
+        let x = produced(d, s, p);
+        let y = d.subrange(a, b);
+        let z = copied(s, l);
+        assert((x + y + z).map_values(f) =~= x.map_values(f) + y.map_values(f) + z.map_values(f));
+    }
+}
+
+/// Splices in order make of mapped columns the mapped result.
+proof fn lemma_applied_map<V, W>(d: Seq<V>, s: Seq<V>, sps: Seq<Splice>, f: spec_fn(V) -> W)
+    requires
+        in_order(sps, d.len() as int),
+    ensures
+        applied(d.map_values(f), s.map_values(f), sps) == applied(d, s, sps).map_values(f),
+{
+    lemma_produced_map(d, s, sps, f);
+    let e = end_of(sps);
+    if sps.len() > 0 {
+        assert(sps[sps.len() - 1] == sps.last());
+    }
+    assert(0 <= e <= d.len());
+    assert(d.map_values(f).subrange(e, d.len() as int) =~= d.subrange(e, d.len() as int).map_values(f));
+    let x = produced(d, s, sps);
+    let y = d.subrange(e, d.len() as int);
+    assert((x + y).map_values(f) =~= x.map_values(f) + y.map_values(f));
+}
+
+/// What splices in order make of a destination and a source depends only
+/// on the columns' lengths: two lists that agree on the columns of
+/// positions (`ids`, `negs`) agree on any columns of those lengths.
+pub(crate) proof fn lemma_any_columns<V>(dst: Seq<V>, src: Seq<V>, a: Seq<Splice>, b: Seq<Splice>)
+    requires
+        in_order(a, dst.len() as int),
+        in_order(b, dst.len() as int),
+        applied(ids(dst.len()), negs(src.len()), a) == applied(ids(dst.len()), negs(src.len()), b),
+    ensures
+        applied(dst, src, a) == applied(dst, src, b),
+{
+    let (di, si) = (ids(dst.len()), negs(src.len()));
+    let f = |x: int| if x >= 0 { dst[x] } else { src[-x - 1] };
+    assert(di.map_values(f) =~= dst);
+    assert(si.map_values(f) =~= src);
+    lemma_applied_map(di, si, a, f);
+    lemma_applied_map(di, si, b, f);
+}
+
 /// Normalizing a list of splices, one at a time (`normalize_splices`).
-pub(crate) struct Normalize<V> {
+pub(crate) struct Normalize {
     pub(crate) out: Vec<Splice>,
     /// where the splices so far end, in the source (the furthest) and the
     /// destination
@@ -108,14 +213,14 @@ pub(crate) struct Normalize<V> {
     pub(crate) dst_pos: usize,
     pub(crate) src_len: usize,
     pub(crate) dst_len: usize,
-    /// the splices taken so far, and a destination and source of the
-    /// lengths given (any: nothing depends on their items)
+    /// the splices taken so far, and the columns of positions of a
+    /// destination and source of the lengths given (`ids`, `negs`)
     #[allow(dead_code)]
     pub(crate) seen: Ghost<Seq<Splice>>,
     #[allow(dead_code)]
-    pub(crate) dst: Ghost<Seq<V>>,
+    pub(crate) dst: Ghost<Seq<int>>,
     #[allow(dead_code)]
-    pub(crate) src: Ghost<Seq<V>>,
+    pub(crate) src: Ghost<Seq<int>>,
 }
 
 /// What a splice copies, clamped: the same as the splice's own range.
@@ -307,11 +412,11 @@ proof fn lemma_merge<V>(dst: Seq<V>, src: Seq<V>, o: Seq<Splice>, last: Splice, 
     }
 }
 
-impl<V> Normalize<V> {
+impl Normalize {
     pub(crate) open spec fn inv(&self) -> bool {
         let out = self.out@;
         let seen = self.seen@;
-        &&& self.dst@.len() == self.dst_len && self.src@.len() == self.src_len
+        &&& self.dst@ == ids(self.dst_len as nat) && self.src@ == negs(self.src_len as nat)
         &&& in_order(seen, self.dst_len as int)
         &&& self.dst_pos == end_of(seen)
         &&& normal(out, self.src_len as int, self.dst_len as int)
@@ -322,23 +427,22 @@ impl<V> Normalize<V> {
     }
 
     /// Start normalizing splices from a source of `src_len` items into a
-    /// destination of `dst_len`; `dst` and `src` are any such columns.
+    /// destination of `dst_len`.
     #[inline(always)]
-    pub(crate) fn new(src_len: usize, dst_len: usize, Ghost(dst): Ghost<Seq<V>>, Ghost(src): Ghost<Seq<V>>) -> (n: Self)
-        requires
-            dst.len() == dst_len,
-            src.len() == src_len,
+    pub(crate) fn new(src_len: usize, dst_len: usize) -> (n: Self)
         ensures
             n.inv(),
             n.seen@.len() == 0,
             n.src_len == src_len,
             n.dst_len == dst_len,
-            n.dst@ == dst,
-            n.src@ == src,
+            n.dst@ == ids(dst_len as nat),
+            n.src@ == negs(src_len as nat),
     {
+        let ghost dst = ids(dst_len as nat);
+        let ghost src = negs(src_len as nat);
         proof {
-            assert(dst.subrange(0, 0) =~= Seq::<V>::empty());
-            assert(Seq::<V>::empty() + Seq::<V>::empty() =~= Seq::<V>::empty());
+            assert(dst.subrange(0, 0) =~= Seq::<int>::empty());
+            assert(Seq::<int>::empty() + Seq::<int>::empty() =~= Seq::<int>::empty());
         }
         Normalize {
             out: Vec::new(),
@@ -411,7 +515,7 @@ impl<V> Normalize<V> {
         proof {
             assert(copied(src, Splice { pos: sp.pos, delete: sp.delete, range: start..end }) == copied(src, sp)) by {
                 if s0 >= e0 {
-                    assert(copied(src, sp) =~= Seq::<V>::empty());
+                    assert(copied(src, sp) =~= Seq::<int>::empty());
                 }
             }
             if n > 0 {
@@ -447,6 +551,9 @@ impl<V> Normalize<V> {
             self.inv(),
         ensures
             normal(out@, self.src_len as int, self.dst_len as int),
+            in_order(self.seen@, self.dst_len as int),
+            self.dst@ == ids(self.dst_len as nat),
+            self.src@ == negs(self.src_len as nat),
             applied(self.dst@, self.src@, out@) == applied(self.dst@, self.src@, self.seen@),
     {
         proof {

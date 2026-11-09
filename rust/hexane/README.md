@@ -417,7 +417,8 @@ compiles them away. To check them, run `cargo verus verify -p hexane
 * The splices `copy_ranges` takes: normalizing them checks their order
   and bounds, and gives a list in order in both columns, with every range
   inside the source and none doing nothing, which applied gives what the
-  splices give one by one. Both ways of carrying the list out are
+  splices give one by one, to any destination and source (what splices
+  make of two columns depends only on their lengths). Both ways of carrying the list out are
   verified chains of the edit cursor's steps (`copy::copy_direct`,
   `copy::copy_invert`): the direct one applies it to the destination with
   one cursor; the inverted one keeps the source, cuts out the gaps

@@ -622,7 +622,7 @@ pub(crate) fn normalize_splices(
 ) -> Vec<Splice> {
     // verified (`splices::Normalize`): the list is normalized, and applied
     // gives what the splices give one by one
-    let mut n = Normalize::<()>::new(src_len, dst_len, Ghost::assume_new(), Ghost::assume_new());
+    let mut n = Normalize::new(src_len, dst_len);
     for sp in splices {
         n.push(sp);
     }
