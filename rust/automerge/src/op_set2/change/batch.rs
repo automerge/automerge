@@ -1,12 +1,12 @@
 use crate::automerge::view::Mask;
 use crate::automerge::HistoryUpdate;
-use crate::change_queue::ChangeBatch;
 use crate::hydrate::Value;
 use crate::iter::RichTextDiff;
 use crate::op_set2::op::SuccessorValue;
 use crate::op_set2::types::{Action, KeyRef, MarkData, PropRef, ScalarValue as OpScalarValue};
 use crate::op_set2::SuccInsert;
 use crate::patches::Events;
+use crate::staging::ChangeBatch;
 use crate::types::{
     ActorId, ElemId, ObjId, ObjType, OpId, ScalarValue, SequenceType, SmallHashMap,
 };
@@ -982,11 +982,11 @@ impl Automerge {
         // of the log's actors always succeeds.
         log.validate(&self.ops.actors)?;
 
-        let mut seen: HashSet<ChangeHash> = self.queue.iter().map(Change::hash).collect();
+        let mut seen: HashSet<ChangeHash> = self.staged.iter().map(Change::hash).collect();
         let mut actor_seqs: HashMap<ActorId, HashSet<u64>> = HashMap::new();
         let mut actor_author: HashSet<ActorId> = HashSet::new();
 
-        for change in self.queue.iter() {
+        for change in self.staged.iter() {
             actor_seqs
                 .entry(change.actor_id().clone())
                 .or_default()
@@ -1003,7 +1003,7 @@ impl Automerge {
                 continue;
             }
             if self.has_actor_seq(&change) {
-                self.queue
+                self.staged
                     .remove_actor_branch_from(change.actor_id(), change.seq().saturating_add(1));
                 return Err(AutomergeError::duplicate_seq(&change));
             }
@@ -1035,8 +1035,8 @@ impl Automerge {
             incoming.push(change)?;
         }
 
-        self.queue.extend(incoming);
-        let changes = self.queue.pop_topo_sorted_ready(&self.change_graph);
+        self.staged.extend(incoming);
+        let changes = self.staged.pop_topo_sorted_ready(&self.change_graph);
         Ok(BatchApply::new(changes).apply(self, log)?)
     }
 

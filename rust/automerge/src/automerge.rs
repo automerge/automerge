@@ -16,7 +16,6 @@ pub(crate) use crate::read::ReadDoc;
 
 use crate::actor::{ActorInsert, ActorRemoval, ActorShift, ActorTable, HasActorIndices};
 use crate::change_graph::ChangeGraph;
-use crate::change_queue::ChangeQueue;
 use crate::clock::Clock;
 use crate::cursor::{CursorPosition, MoveCursor, OpCursor};
 use crate::exid::ExId;
@@ -24,6 +23,7 @@ use crate::hydrate;
 use crate::iter::{DiffIter, DocIter, Keys, ListRange, MapRange, Spans, Values};
 use crate::marks::{Mark, MarkAccumulator, MarkSet};
 use crate::patches::{Patch, PatchLog};
+use crate::staging::StagedChanges;
 use crate::storage::document::ReconstructError;
 use crate::storage::{self, change, load, Bundle, CompressConfig, Document, VerificationMode};
 use crate::transaction::{
@@ -299,8 +299,8 @@ impl std::default::Default for LoadOptions<'static> {
 /// to an author ID you can use [`Automerge::get_author_for_actor`].
 #[derive(Debug, Clone)]
 pub struct Automerge {
-    /// The list of unapplied changes that are not causally ready.
-    pub(crate) queue: ChangeQueue,
+    /// Unapplied change contents held for possible application.
+    pub(crate) staged: StagedChanges,
     /// Graph of changes
     pub(crate) change_graph: ChangeGraph,
     authors: Authors,
@@ -369,7 +369,7 @@ impl Automerge {
             &ops.actors,
         );
         Automerge {
-            queue: ChangeQueue::new(),
+            staged: StagedChanges::new(),
             change_graph,
             authors,
             write_frontier,
@@ -398,7 +398,7 @@ impl Automerge {
             &ops.actors,
         );
         let mut doc = Automerge {
-            queue: ChangeQueue::new(),
+            staged: StagedChanges::new(),
             change_graph,
             authors,
             write_frontier,
@@ -450,7 +450,7 @@ impl Automerge {
 
     /// Whether this document has any operations
     pub fn is_empty(&self) -> bool {
-        self.change_graph.is_empty() && self.queue.is_empty()
+        self.change_graph.is_empty() && self.staged.is_empty()
     }
 
     pub(crate) fn actor_id(&self) -> &ActorId {
@@ -866,7 +866,7 @@ impl Automerge {
         // same or a later sequence belongs to an incompatible actor branch;
         // retaining it would allow save() to encode duplicate sequence numbers.
         let actor = self.ops.actors[actor_index].clone();
-        self.queue.remove_actor_branch_from(&actor, seq);
+        self.staged.remove_actor_branch_from(&actor, seq);
 
         let start_op = NonZeroU64::MIN.saturating_add(self.change_graph.max_op());
         let author = if seq == 1 { self.author.clone() } else { None };
@@ -1315,7 +1315,7 @@ impl Automerge {
                 am.apply_changes(changes.into_iter().chain(c))?;
                 // Only allow missing deps if the first chunk was a document chunk
                 // See https://github.com/automerge/automerge/pull/599#issuecomment-1549667472
-                if !am.queue.is_empty()
+                if !am.staged.is_empty()
                     && !first_chunk_was_doc
                     && options.on_partial_load == OnPartialLoad::Error
                 {
@@ -1518,7 +1518,7 @@ impl Automerge {
         let mut bytes = doc.into_bytes();
 
         if options.retain_orphans {
-            for orphaned in self.queue.iter() {
+            for orphaned in self.staged.iter() {
                 bytes.extend(orphaned.raw_bytes());
             }
         }
@@ -2489,7 +2489,7 @@ impl Automerge {
         start: impl Iterator<Item = ChangeHash>,
     ) -> Vec<ChangeHash> {
         let queued_changes = self
-            .queue
+            .staged
             .iter()
             .map(|change| (change.hash(), change))
             .collect::<HashMap<_, _>>();
@@ -2726,7 +2726,7 @@ impl ReadDoc for Automerge {
     }
 
     fn get_missing_deps(&self, heads: &[ChangeHash]) -> Vec<ChangeHash> {
-        let queued = self.queue.iter().map(|change| change.hash());
+        let queued = self.staged.iter().map(|change| change.hash());
         self.missing_deps_from(queued.chain(heads.iter().copied()))
     }
 

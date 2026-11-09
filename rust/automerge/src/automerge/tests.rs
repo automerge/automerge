@@ -1613,7 +1613,7 @@ fn load_broken_list() {
     let bytes2 = doc2.save();
     assert_eq!(doc.text(&list).unwrap(), doc2.text(&list).unwrap());
 
-    assert_eq!(doc.queue, doc2.queue);
+    assert_eq!(doc.staged, doc2.staged);
     assert_eq!(doc.history, doc2.history);
     assert_eq!(doc.history_index, doc2.history_index);
     assert_eq!(doc.states, doc2.states);
@@ -1665,7 +1665,7 @@ fn load_broken_list_short() {
     let bytes2 = doc2.save();
     assert_eq!(doc.text(&list).unwrap(), doc2.text(&list).unwrap());
 
-    assert_eq!(doc.queue, doc2.queue);
+    assert_eq!(doc.staged, doc2.staged);
     assert_eq!(doc.history, doc2.history);
     assert_eq!(doc.history_index, doc2.history_index);
     assert_eq!(doc.states, doc2.states);

@@ -1,4 +1,13 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+//! Hold unapplied changes and prepare causally ready history without consuming it.
+//!
+//! Missing dependencies leave changes staged for a later attempt. Preparation
+//! borrows ready contents in dependency order. The existing destructive drain
+//! remains in use until borrowed application and completion are wired.
+
+use std::{
+    collections::{HashMap, HashSet, VecDeque},
+    ops::ControlFlow,
+};
 
 use crate::{change_graph::ChangeGraph, ActorId, AutomergeError, Change, ChangeHash};
 
@@ -39,18 +48,31 @@ impl ChangeBatch {
     }
 }
 
-/// An indexed queue of unapplied changes that are not yet causally ready.
+/// Unapplied change contents held for possible application.
 ///
-/// Maintains a hash index so that lookups are O(1) instead of linear scans.
+/// Owns each staged change once, with indexes for its hash and actor/sequence.
+/// Staging alone does not establish causal readiness or signing requirements.
 #[derive(Debug, Clone)]
-pub(crate) struct ChangeQueue {
+pub(crate) struct StagedChanges {
     changes: Vec<Change>,
     /// Set of hashes of all changes in the queue — O(1) contains check.
     hashes: HashSet<ChangeHash>,
     incoming_actor_seqs: HashSet<(ActorId, u64)>,
 }
 
-impl ChangeQueue {
+impl StagedChanges {
+    /// Borrow all causally ready staged changes in dependency order.
+    ///
+    /// Dependencies may already be applied or become available earlier in this
+    /// batch. Missing dependencies keep a change and its dependents out of the
+    /// result, without preventing unrelated ready history from proceeding.
+    ///
+    /// Leaves staging unchanged, including the prepared changes. An empty result
+    /// is valid. The result borrows staged contents, not the applied graph.
+    pub(crate) fn prepare(&self, applied: &ChangeGraph) -> PreparedChanges<'_> {
+        Preparation::new(self, applied).run()
+    }
+
     pub(crate) fn new() -> Self {
         Self {
             changes: Vec::new(),
@@ -175,3 +197,105 @@ impl ChangeQueue {
         topo
     }
 }
+
+/// Causally ready staged changes in application order.
+///
+/// Construct through [`StagedChanges::prepare`]. Dropping the result has no effect.
+/// Keep preparation and application within one document operation. This value
+/// does not retain or establish the identity of the consulted graph.
+#[derive(Debug)]
+pub(crate) struct PreparedChanges<'staged> {
+    ordered: Vec<&'staged Change>,
+}
+
+impl<'staged> PreparedChanges<'staged> {
+    /// Borrow the ready changes in dependency order.
+    pub(crate) fn changes(&self) -> &[&'staged Change] {
+        &self.ordered
+    }
+}
+
+struct Preparation<'staged> {
+    /// All staged changes, kept in staging order.
+    changes: Vec<&'staged Change>,
+    /// Dependencies not already applied or emitted, including missing history.
+    waiting: Vec<usize>,
+    /// When this hash is emitted, which changes move closer to readiness?
+    dependents: HashMap<ChangeHash, Vec<usize>>,
+    /// Indices into `changes` whose waiting count is zero.
+    ready: VecDeque<usize>,
+    /// References appended in application order.
+    ordered: Vec<&'staged Change>,
+}
+
+impl<'staged> Preparation<'staged> {
+    fn new(staged: &'staged StagedChanges, applied: &ChangeGraph) -> Self {
+        let changes = staged.iter().collect::<Vec<_>>();
+
+        let mut waiting = vec![0; changes.len()];
+        let mut dependents: HashMap<ChangeHash, Vec<usize>> = HashMap::new();
+        let mut ready = VecDeque::with_capacity(changes.len());
+        for (index, change) in changes.iter().enumerate() {
+            for dep in change.deps() {
+                if !applied.has_change(dep) {
+                    // Missing hashes never emit a notification, so their
+                    // dependents remain blocked when the ready queue empties.
+                    waiting[index] += 1;
+                    dependents.entry(*dep).or_default().push(index);
+                }
+            }
+            if waiting[index] == 0 {
+                ready.push_back(index);
+            }
+        }
+
+        let ordered = Vec::with_capacity(changes.len());
+
+        Self {
+            changes,
+            waiting,
+            dependents,
+            ready,
+            ordered,
+        }
+    }
+
+    fn step(mut self) -> ControlFlow<PreparedChanges<'staged>, Self> {
+        let Some(index) = self.ready.pop_front() else {
+            return ControlFlow::Break(self.finish());
+        };
+
+        let change = self.changes[index];
+        self.ordered.push(change);
+
+        if let Some(dependents) = self.dependents.remove(&change.hash()) {
+            for dependent in dependents {
+                self.waiting[dependent] -= 1;
+
+                if self.waiting[dependent] == 0 {
+                    self.ready.push_back(dependent);
+                }
+            }
+        }
+
+        ControlFlow::Continue(self)
+    }
+
+    fn run(mut self) -> PreparedChanges<'staged> {
+        loop {
+            match self.step() {
+                ControlFlow::Continue(next) => self = next,
+                ControlFlow::Break(result) => return result,
+            }
+        }
+    }
+
+    fn finish(self) -> PreparedChanges<'staged> {
+        PreparedChanges {
+            ordered: self.ordered,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests;
