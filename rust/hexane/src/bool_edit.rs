@@ -2060,6 +2060,13 @@ pub(crate) fn fill<C: CountsOf>(len: usize, value: bool) -> (s: BSlab)
     s
 }
 
+impl<'a, C: CountsOf> crate::cursor::ReadsAgree<'a, crate::bool_wire::BoolReads<C>> for BoolModel<C> {
+    proof fn lemma_reads(s: BSlab) {
+        crate::bool_wire::lemma_reads_are::<C>(s);
+        lemma_bslab::<C::K>(s);
+    }
+}
+
 impl<C: CountsOf> Slabs for BoolModel<C> {
     type Tail = u8;
     type Rebuild = BoolEdit<C>;

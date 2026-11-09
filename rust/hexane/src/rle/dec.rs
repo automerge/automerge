@@ -3102,6 +3102,15 @@ proof fn lemma_empty_slab<'a, O: RleOps<'a>>()
     assert(groups_values(e, O::null()) =~= Seq::<O::V>::empty());
 }
 
+/// What the RLE read model says of a slab: valid as `slab_ok`, its
+/// values its bytes' (`slab_values`).
+pub(crate) proof fn lemma_reads_are<O: for<'b> RleOps<'b>>(s: Slab)
+    ensures
+        <RleReads<O> as Decoders<'static>>::ok(s) == slab_ok::<O>(s),
+        <RleReads<O> as Decoders<'static>>::vals(s) == slab_values::<O>(slab_bytes(s)),
+{
+}
+
 impl<'a, O> Decoders<'a> for RleReads<O> where O: for<'b> RleOps<'b> {
     type Tail = RleTail;
     type D = RDecoder<'a, O>;

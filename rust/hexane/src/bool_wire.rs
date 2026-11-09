@@ -2181,6 +2181,15 @@ proof fn lemma_empty_valid<K: CountOps>()
     assert(counts_values(e) =~= Seq::<bool>::empty());
 }
 
+/// What the bool read model says of a slab: valid as `bslab_ok`, its
+/// values its bytes' (`bool_values`).
+pub(crate) proof fn lemma_reads_are<C: CountsOf>(s: BSlab)
+    ensures
+        <BoolReads<C> as Decoders<'static>>::ok(s) == bslab_ok::<C::K>(s),
+        <BoolReads<C> as Decoders<'static>>::vals(s) == bool_values::<C::K>(s.data@),
+{
+}
+
 impl<'a, C: CountsOf> Decoders<'a> for BoolReads<C> {
     type Tail = u8;
     type D = BoolDecoder<'a, C>;

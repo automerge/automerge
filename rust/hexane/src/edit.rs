@@ -24,7 +24,8 @@ pub trait SlabEdit: crate::encoding::ColumnEncoding {
     /// proved against its format. An associated type rather than a
     /// blanket impl so that each encoding can have its own.
     #[doc(hidden)]
-    type Model: crate::cursor::Slabs<Tail = Self::Tail, State = Self::State, Rebuild = Self::Edit>;
+    type Model: crate::cursor::Slabs<Tail = Self::Tail, State = Self::State, Rebuild = Self::Edit>
+        + for<'a> crate::cursor::ReadsAgree<'a, <Self as ColumnEncoding>::ReadModel>;
 
     /// How many runs a cursor carries through an open rebuild before
     /// closing it instead — the trade between re-encoding what it carries

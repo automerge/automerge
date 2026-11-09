@@ -18,16 +18,26 @@
 //! ([`ColumnCore::restore`]), which its verified steps keep a column but
 //! its glue chains.
 
+// Verus has no spec for a slice's `is_empty`.
+#![allow(clippy::len_zero)]
+
 use crate::column::Slab;
 use crate::copy::{copy_direct, copy_invert, RangeFeed};
 #[cfg(verus_keep_ghost)]
+use crate::cursor::lemma_lens_ok;
+#[cfg(verus_keep_ghost)]
 use crate::cursor::{all_ok, col_ok, lemma_vals_total, slab_lens, vals_of, ws_ok};
-use crate::cursor::{col_index, splice_feed, RunFeed, Slabs, Visitor, Weigh, WeightSink};
+use crate::cursor::{
+    col_index, splice_feed, ReadsAgree, RunFeed, Slabs, Visitor, Weigh, WeightSink,
+};
 #[cfg(verus_keep_ghost)]
 use crate::fenwick::total;
 #[cfg(verus_keep_ghost)]
 use crate::index::wlens;
 use crate::index::IndexOps;
+#[cfg(verus_keep_ghost)]
+use crate::iter_core::Decode;
+use crate::iter_core::{Decoders, ICore};
 #[cfg(verus_keep_ghost)]
 use crate::splices::{applied, normal};
 use crate::Splice;
@@ -57,6 +67,18 @@ fn poisoned()
         false,
 {
     panic!("column used after a panic during an edit")
+}
+
+/// Panics: a column of `usize::MAX` slabs, which no memory holds (each
+/// slab takes some), but which Verus does not rule out.
+#[verifier::external_body]
+#[cold]
+#[inline(never)]
+fn too_many_slabs()
+    ensures
+        false,
+{
+    panic!("a column of usize::MAX slabs")
 }
 
 /// A column's parts: its slabs, the index over them, its item count and
@@ -259,6 +281,77 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E::Tail, W>> ColumnCore<E, W, I, G> {
             Some(p) => p.counter,
             None => 0,
         }
+    }
+
+    /// An iterator over items `start..end` of the column, through a read
+    /// model that agrees with the edit model: it stands at `start` with
+    /// `end - start` to give, exactly the column's values there. The
+    /// readers' preconditions come from the type invariant here.
+    #[inline(always)]
+    pub(crate) fn reader<'a, X: Decoders<'a, Tail = E::Tail>>(&'a self, start: usize, end: usize) -> (it: ICore<X::D>)
+        where E: ReadsAgree<'a, X>
+        requires
+            start <= end <= self@.len(),
+        ensures
+            it.wf::<X>(self.slabs_spec()),
+            it.pos == start,
+            it.out::<X>(self.slabs_spec()) == crate::iter_core::vals_of::<X>(self.slabs_spec()).subrange(start as int, end as int),
+    {
+        self.lemma_column();
+        let slabs = self.slabs();
+        proof {
+            lemma_lens_ok::<E, X>(slabs@);
+        }
+        if slabs.len() == usize::MAX {
+            too_many_slabs();
+        }
+        let len = self.len();
+        if start >= len || slabs.len() == 0 {
+            let it = ICore::idle::<X>(slabs, start);
+            proof {
+                it.lemma_here::<X>(slabs@);
+                let v = crate::iter_core::vals_of::<X>(slabs@);
+                assert(v.subrange(start as int, end as int) =~= Seq::<<X::D as Decode>::Item>::empty());
+            }
+            return it;
+        }
+        proof {
+            use_type_invariant(self);
+        }
+        let (si, offset) = self.index().ix_find(start);
+        let it = ICore::at::<X>(slabs, si, offset, start, end - start);
+        proof {
+            it.lemma_here::<X>(slabs@);
+        }
+        it
+    }
+
+    /// Resume an iterator at a suspended position (`ICore::resume`), the
+    /// readers' preconditions from the type invariant: `Some` exactly
+    /// when the position is one of the column's.
+    #[inline(always)]
+    pub(crate) fn resume<'a, X: Decoders<'a, Tail = E::Tail>>(
+        &'a self,
+        si: usize,
+        consumed: usize,
+        pos: usize,
+        n: usize,
+    ) -> (r: Option<ICore<X::D>>)
+        where E: ReadsAgree<'a, X>
+        ensures
+            r is Some <==> crate::iter_core::resumes(slab_lens(self.slabs_spec()), si, consumed, pos, n),
+            r matches Some(it) ==> it.wf::<X>(self.slabs_spec()) && it.pos == pos,
+    {
+        self.lemma_column();
+        let slabs = self.slabs();
+        proof {
+            lemma_lens_ok::<E, X>(slabs@);
+            use_type_invariant(self);
+        }
+        if slabs.len() == usize::MAX {
+            too_many_slabs();
+        }
+        ICore::resume::<X, W, I>(slabs, self.index(), si, consumed, pos, n)
     }
 
     /// Take the column's parts out, for an edit; the column has none until

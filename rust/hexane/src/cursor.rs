@@ -249,6 +249,33 @@ pub(crate) trait WeightSink<W> {
     fn dropped(&mut self, w: &W);
 }
 
+/// A read model `X` that sees each slab as this edit model does: valid
+/// when it is, and holding as many values. Each encoding's two models are
+/// the same parse of a slab's bytes, read borrowed and owned
+/// (`rle::lift`), so this is proved of both.
+pub(crate) trait ReadsAgree<'a, X: crate::iter_core::Decoders<'a, Tail = <Self as Slabs>::Tail>>: Slabs {
+    proof fn lemma_reads(s: Slab<Self::Tail>)
+        requires
+            Self::ok(s),
+        ensures
+            X::ok(s),
+            X::vals(s).len() == s.len,
+    ;
+}
+
+/// Slabs well-formed in an edit model are, in a read model that agrees
+/// with it, what the readers need (`lens_ok`).
+pub(crate) proof fn lemma_lens_ok<'a, E: ReadsAgree<'a, X>, X: crate::iter_core::Decoders<'a, Tail = E::Tail>>(s: Seq<Slab<E::Tail>>)
+    requires
+        all_ok::<E>(s),
+    ensures
+        crate::iter_core::lens_ok::<X>(s),
+{
+    assert forall|i: int| 0 <= i < s.len() implies X::ok(s[i]) && X::vals(s[i]).len() == s[i].len by {
+        E::lemma_reads(s[i]);
+    }
+}
+
 /// A slab's weight in the index: one that counts its items.
 pub(crate) trait Weigh<Tail: Copy + Clone + std::fmt::Debug + Default, W> {
     /// `w` is slab `s`'s weight: what the column's index records for it.

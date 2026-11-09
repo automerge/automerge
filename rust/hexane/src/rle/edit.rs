@@ -885,6 +885,15 @@ fn state_on<'s, L: Lift<'s>>(data: &'s [u8], st: &mut RleDecoderState, n: usize)
     *st = d.suspend();
 }
 
+impl<'a, L> crate::cursor::ReadsAgree<'a, crate::rle::dec::RleReads<<L as WriteOps<'static>>::R>> for RleModel<L>
+    where L: for<'s> Lift<'s, W = L>, <L as WriteOps<'static>>::R: for<'b> RleOps<'b>
+{
+    proof fn lemma_reads(s: Slab) {
+        crate::rle::dec::lemma_reads_are::<<L as WriteOps<'static>>::R>(s);
+        <RleModel<L> as Slabs>::lemma_len(s);
+    }
+}
+
 impl<L> Slabs for RleModel<L> where L: for<'s> Lift<'s, W = L> {
     type Tail = RleTail;
     type Rebuild = RleRebuild<L>;

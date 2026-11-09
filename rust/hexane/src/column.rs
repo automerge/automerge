@@ -684,17 +684,12 @@ impl IterState {
             return Err(PackError::InvalidResume);
         }
         let slabs = column.core.slabs();
-        // verified (`ICore::resume`): `Some` exactly when the state is a
+        // verified (`ColumnCore::resume`): `Some` exactly when the state is a
         // position of this column's slabs, the iterator then standing there
-        let core = ICore::resume::<Dx<T, C>, WF::Weight, Idx>(
-            slabs,
-            column.core.index(),
-            self.slab_idx,
-            self.slab_consumed,
-            self.pos,
-            self.items_left,
-        )
-        .ok_or(PackError::InvalidResume)?;
+        let core = column
+            .core
+            .resume::<Dx<T, C>>(self.slab_idx, self.slab_consumed, self.pos, self.items_left)
+            .ok_or(PackError::InvalidResume)?;
         Ok(Iter {
             slabs,
             col: Some(column),
@@ -1242,6 +1237,7 @@ where
 
     /// Iterator over items in `range`, clamped to the column's length.
     /// O(log S) seek via the index, O(1) per item after.
+    #[inline]
     pub fn iter_range(&self, range: Range<usize>) -> Iter<'_, T, C> {
         let start = range.start.min(self.core.len());
         let end = range.end.min(self.core.len()).max(start);
@@ -1252,19 +1248,14 @@ where
         // `advance_to_slab`'s forward invariant from `nth`. Only a
         // start at/past the end of the data — where there is nothing
         // to sit on — takes the unpositioned shortcut.
-        if start >= self.core.len() || self.core.slabs().is_empty() {
-            return Iter {
-                slabs: self.core.slabs(),
-                col: Some(self),
-                core: ICore::idle::<Dx<T, C>>(self.core.slabs(), start),
-                counter: self.core.counter(),
-            };
-        }
-        let (si, offset) = self.core.index().ix_find(start);
+        //
+        // verified (`ColumnCore::reader`): the iterator stands at `start`
+        // and gives exactly the column's values in `start..end`, from the
+        // column's type invariant
         Iter {
             slabs: self.core.slabs(),
             col: Some(self),
-            core: ICore::at::<Dx<T, C>>(self.core.slabs(), si, offset, start, end - start),
+            core: self.core.reader::<Dx<T, C>>(start, end),
             counter: self.core.counter(),
         }
     }
