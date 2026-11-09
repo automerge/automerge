@@ -2061,9 +2061,15 @@ pub(crate) fn fill<C: CountsOf>(len: usize, value: bool) -> (s: BSlab)
 }
 
 impl<'a, C: CountsOf> crate::cursor::ReadsAgree<'a, crate::bool_wire::BoolReads<C>> for BoolModel<C> {
+    open spec fn own(v: bool) -> bool {
+        v
+    }
+
     proof fn lemma_reads(s: BSlab) {
         crate::bool_wire::lemma_reads_are::<C>(s);
         lemma_bslab::<C::K>(s);
+        let x = bool_values::<C::K>(s.data@);
+        assert(x.map_values(|v: bool| v) =~= x);
     }
 }
 

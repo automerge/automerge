@@ -254,13 +254,46 @@ pub(crate) trait WeightSink<W> {
 /// the same parse of a slab's bytes, read borrowed and owned
 /// (`rle::lift`), so this is proved of both.
 pub(crate) trait ReadsAgree<'a, X: crate::iter_core::Decoders<'a, Tail = <Self as Slabs>::Tail>>: Slabs {
+    /// A value read, owned: as the edit model has it.
+    spec fn own(v: <X::D as crate::iter_core::Decode>::Item) -> Self::V;
+
     proof fn lemma_reads(s: Slab<Self::Tail>)
         requires
             Self::ok(s),
         ensures
             X::ok(s),
             X::vals(s).len() == s.len,
+            Self::vals(s) == X::vals(s).map_values(|v: <X::D as crate::iter_core::Decode>::Item| Self::own(v)),
     ;
+}
+
+/// A column's values, read and owned, are its values in the edit model.
+pub(crate) proof fn lemma_vals_own<'a, E: ReadsAgree<'a, X>, X: crate::iter_core::Decoders<'a, Tail = E::Tail>>(s: Seq<Slab<E::Tail>>)
+    requires
+        all_ok::<E>(s),
+    ensures
+        vals_of::<E>(s) == crate::iter_core::vals_of::<X>(s).map_values(|v: <X::D as crate::iter_core::Decode>::Item| E::own(v)),
+    decreases s.len(),
+{
+    if s.len() == 0 {
+        assert(s.map_values(|x: Slab<E::Tail>| E::vals(x)) =~= Seq::<Seq<E::V>>::empty());
+        assert(crate::iter_core::each::<X>(s) =~= Seq::<Seq<<X::D as crate::iter_core::Decode>::Item>>::empty());
+        assert(crate::iter_core::vals_of::<X>(s).map_values(|v: <X::D as crate::iter_core::Decode>::Item| E::own(v)) =~= Seq::<E::V>::empty());
+    } else {
+        let p = s.drop_last();
+        let x = s.last();
+        assert forall|i: int| 0 <= i < p.len() implies E::ok(#[trigger] p[i]) by {
+            assert(p[i] == s[i]);
+        }
+        lemma_vals_own::<E, X>(p);
+        E::lemma_reads(x);
+        assert(s.map_values(|y: Slab<E::Tail>| E::vals(y)).drop_last() =~= p.map_values(|y: Slab<E::Tail>| E::vals(y)));
+        assert(crate::iter_core::each::<X>(s).drop_last() =~= crate::iter_core::each::<X>(p));
+        let a = crate::iter_core::vals_of::<X>(p);
+        let b = X::vals(x);
+        assert((a + b).map_values(|v: <X::D as crate::iter_core::Decode>::Item| E::own(v))
+            =~= a.map_values(|v: <X::D as crate::iter_core::Decode>::Item| E::own(v)) + b.map_values(|v: <X::D as crate::iter_core::Decode>::Item| E::own(v)));
+    }
 }
 
 /// Slabs well-formed in an edit model are, in a read model that agrees

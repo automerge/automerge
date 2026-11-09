@@ -24,12 +24,12 @@
 use crate::column::Slab;
 use crate::copy::{copy_direct, copy_invert, RangeFeed};
 #[cfg(verus_keep_ghost)]
-use crate::cursor::lemma_lens_ok;
-#[cfg(verus_keep_ghost)]
 use crate::cursor::{all_ok, col_ok, lemma_vals_total, slab_lens, vals_of, ws_ok};
 use crate::cursor::{
     col_index, splice_feed, ReadsAgree, RunFeed, Slabs, Visitor, Weigh, WeightSink,
 };
+#[cfg(verus_keep_ghost)]
+use crate::cursor::{lemma_lens_ok, lemma_vals_own};
 #[cfg(verus_keep_ghost)]
 use crate::fenwick::total;
 #[cfg(verus_keep_ghost)]
@@ -296,11 +296,17 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E::Tail, W>> ColumnCore<E, W, I, G> {
             it.wf::<X>(self.slabs_spec()),
             it.pos == start,
             it.out::<X>(self.slabs_spec()) == crate::iter_core::vals_of::<X>(self.slabs_spec()).subrange(start as int, end as int),
+            it.out::<X>(self.slabs_spec()).map_values(|v: <X::D as Decode>::Item| E::own(v))
+                == self@.subrange(start as int, end as int),
     {
         self.lemma_column();
         let slabs = self.slabs();
         proof {
             lemma_lens_ok::<E, X>(slabs@);
+            lemma_vals_own::<E, X>(slabs@);
+            let r = crate::iter_core::vals_of::<X>(slabs@);
+            assert(r.subrange(start as int, end as int).map_values(|v: <X::D as Decode>::Item| E::own(v))
+                =~= r.map_values(|v: <X::D as Decode>::Item| E::own(v)).subrange(start as int, end as int));
         }
         if slabs.len() == usize::MAX {
             too_many_slabs();

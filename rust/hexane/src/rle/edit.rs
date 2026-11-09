@@ -885,12 +885,22 @@ fn state_on<'s, L: Lift<'s>>(data: &'s [u8], st: &mut RleDecoderState, n: usize)
     *st = d.suspend();
 }
 
-impl<'a, L> crate::cursor::ReadsAgree<'a, crate::rle::dec::RleReads<<L as WriteOps<'static>>::R>> for RleModel<L>
-    where L: for<'s> Lift<'s, W = L>, <L as WriteOps<'static>>::R: for<'b> RleOps<'b>
+impl<'a, L, O> crate::cursor::ReadsAgree<'a, crate::rle::dec::RleReads<O>> for RleModel<L>
+    where L: for<'s> Lift<'s, W = L> + for<'s> WriteOps<'s, R = O>, O: for<'b> RleOps<'b>
 {
+    /// A value read borrowed, owned (`Lift`, trusted to keep its
+    /// encoding).
+    open spec fn own(v: <O as RleOps<'a>>::V) -> <O as RleOps<'static>>::V {
+        <L as Lift<'a>>::lift(v)
+    }
+
     proof fn lemma_reads(s: Slab) {
-        crate::rle::dec::lemma_reads_are::<<L as WriteOps<'static>>::R>(s);
+        let data = slab_bytes(s);
+        crate::rle::dec::lemma_reads_are::<O>(s);
         <RleModel<L> as Slabs>::lemma_len(s);
+        lemma_unlift_meta::<L>(data);
+        let x = slab_values::<O>(data);
+        assert(lift_seq::<L>(x) =~= x.map_values(|v: <O as RleOps<'a>>::V| <L as Lift<'a>>::lift(v)));
     }
 }
 
