@@ -2801,16 +2801,17 @@ fn validate_column<T: crate::ColumnValueRef>(col: &Column<T>)
 where
     for<'a> T::Get<'a>: std::fmt::Debug,
 {
-    let max_segments = col.max_segments;
+    let max_segments = col.core.max_segments();
 
-    let sum_len: usize = col.slabs.iter().map(|s| s.len).sum();
+    let sum_len: usize = col.core.slabs().iter().map(|s| s.len).sum();
     assert_eq!(
-        col.total_len, sum_len,
+        col.core.len(),
+        sum_len,
         "total_len mismatch: stored={} sum={sum_len}",
-        col.total_len,
+        col.core.len(),
     );
 
-    for (i, slab) in col.slabs.iter().enumerate() {
+    for (i, slab) in col.core.slabs().iter().enumerate() {
         assert!(
             slab.segments <= max_segments,
             "slab {i}: segments={} exceeds max_segments={max_segments}",
@@ -2833,7 +2834,7 @@ where
     for<'a> T::Get<'a>: std::fmt::Debug,
 {
     validate_column(col);
-    for (i, slab) in col.slabs.iter().enumerate() {
+    for (i, slab) in col.core.slabs().iter().enumerate() {
         let expected = compute_rle_tail::<T, crate::Leb128>(&slab.data);
         assert_eq!(
             slab.tail.lit_tail, expected.lit_tail,
@@ -4650,21 +4651,25 @@ fn index_items_before_parity() {
     let mut expect = 0;
     for (i, len) in lens.iter().enumerate() {
         assert_eq!(
-            btree.index.items_before(i),
+            btree.core.index().items_before(i),
             expect,
             "btree items_before({i})"
         );
         expect += len;
     }
-    assert_eq!(btree.index.items_before(lens.len()), expect);
+    assert_eq!(btree.core.index().items_before(lens.len()), expect);
 
     let lens = bit.slab_lens();
     let mut expect = 0;
     for (i, len) in lens.iter().enumerate() {
-        assert_eq!(bit.index.items_before(i), expect, "bit items_before({i})");
+        assert_eq!(
+            bit.core.index().items_before(i),
+            expect,
+            "bit items_before({i})"
+        );
         expect += len;
     }
-    assert_eq!(bit.index.items_before(lens.len()), expect);
+    assert_eq!(bit.core.index().items_before(lens.len()), expect);
 }
 
 #[test]
@@ -5886,11 +5891,11 @@ fn splice_invalidates_a_suspended_iter() {
         "unmutated column should resume"
     );
 
-    let slabs_before = col.slabs.len();
+    let slabs_before = col.core.slabs().len();
     col.splice(50, 1, std::iter::once(999u64));
     assert_eq!(
         slabs_before,
-        col.slabs.len(),
+        col.core.slabs().len(),
         "test needs a slab-count-preserving splice"
     );
 

@@ -171,9 +171,9 @@ impl<'a, T: DeltaValue, C: Codec> FindByRange<'a, T, C> {
     /// The values in `[lo, hi]`, inclusive; `lo <= hi`.
     fn between(lo: i64, hi: i64, col: &'a DeltaColumn<T, C>) -> Self {
         Self {
-            slabs: &col.col.slabs,
+            slabs: col.col.core.slabs(),
             find: Some(d_find_new::<Dx<T::Inner, C>, DB<T::Inner>>(
-                &col.col.index,
+                col.col.core.index(),
                 lo,
                 hi,
                 Ghost::assume_new(),

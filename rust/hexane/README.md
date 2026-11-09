@@ -323,13 +323,21 @@ compiles them away. To check them, run `cargo verus verify -p hexane
   index, and an iterator resumed over the same slabs has the same values
   left to give as the one suspended. That the slabs are the same is the
   edit counter's job, which is not proved.
+* The column invariant, as a type invariant: a `Column`'s state is a
+  `column_core::ColumnCore`, whose fields only verified code changes, so
+  every column is well-formed and indexed between calls. The trusted
+  exceptions are what a new column is built from (slabs and their
+  weights, from the verified loaders, fills and encoders), a clone, and
+  the parts the public `Edit` cursor hands back when dropped (each of its
+  steps keeps them a column; their chaining is glue).
 * `Column::splice`, and with it `insert`, `remove`, `remove_n`, `push`,
   `clear`, `truncate`, `splice_runs` and the prefix and delta columns'
   splices: the chain of cursor steps (open, delete, insert each run,
-  close) is one verified function (`cursor::splice_feed`). Given the
-  column's invariant, the column stays well-formed and its values become
-  those before the splice, the runs inserted, then those after the ones
-  deleted. Nothing is assumed of the runs, which come from the caller.
+  close) is one verified function (`cursor::splice_feed`, behind
+  `ColumnCore::splice`). The column stays well-formed and its values
+  become those before the splice, the runs inserted, then those after
+  the ones deleted. Nothing is assumed of the runs, which come from the
+  caller.
 * Building a column: its index and length are computed from its slabs,
   checking that each slab's weight counts its items, and `Column::fill`
   makes a well-formed slab of the values asked for.
@@ -424,7 +432,7 @@ compiles them away. To check them, run `cargo verus verify -p hexane
   one cursor; the inverted one keeps the source, cuts out the gaps
   between its ranges (the cuts leave exactly the ranges' items) and puts
   the destination's gaps back (as splices, a normalized list that applied
-  to those gives what the splices give). Given the column's invariant,
+  to those gives what the splices give). From the column's invariant,
   each leaves the column holding the destination with the splices
   applied, provided the source's run iterator, shifted to each range,
   gives that range's items (the `RangeFeed` contract, trusted).
@@ -449,7 +457,8 @@ decode, which the verified code reaches through traits (the contract on
 `RleValue`); the thin glue that
 connects the generic column types to the verified cores, and the closures
 passed through it (including the slabs a new column is built from, which
-come from the verified loaders, fills and encoders); that the weight a
+come from the verified loaders, fills and encoders, and the read side's
+own view of the column invariant, which the readers assume); that the weight a
 column's index holds for each slab is the one its weight function
 computes for the slab (the edit cursor is proved to keep them so, and a
 load, which accumulates each slab's weight from the runs as they stream

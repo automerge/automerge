@@ -95,6 +95,12 @@ pub trait IndexOps<W>: Sized {
     /// Whether weights fit whenever their item counts and number do.
     spec fn plain() -> bool;
 
+    /// Every index type the columns use is plain.
+    proof fn lemma_plain()
+        ensures
+            Self::plain(),
+    ;
+
     proof fn lemma_fits(ws: Seq<W>)
         requires
             Self::plain(),
@@ -361,6 +367,9 @@ impl<W: SlabWeight> IndexOps<W> for BitIndex<W> {
         true
     }
 
+    proof fn lemma_plain() {
+    }
+
     proof fn lemma_fits(ws: Seq<W>) {
         assert(ws.map_values(|w: W| Self::wlen(w)) =~= lens(ws));
     }
@@ -478,6 +487,9 @@ impl<A: SlabAggregate> IndexOps<A> for SlabBTree<A> {
 
     open spec fn plain() -> bool {
         true
+    }
+
+    proof fn lemma_plain() {
     }
 
     proof fn lemma_fits(ws: Seq<A>) {

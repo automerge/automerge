@@ -128,6 +128,7 @@ pub(crate) mod bool_wire;
 pub(crate) mod btree;
 pub mod codec;
 pub mod column;
+pub(crate) mod column_core;
 pub(crate) mod copy;
 pub(crate) mod cursor;
 pub mod delta;

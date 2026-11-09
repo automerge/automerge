@@ -214,7 +214,7 @@ mod tests {
             vec![],              // empty
         ] {
             let col = Column::<u64>::from_values(vals.clone());
-            for slab in &col.slabs {
+            for slab in col.core.slabs() {
                 check_validate2::<u64>(&slab.data);
             }
         }
@@ -224,7 +224,7 @@ mod tests {
     fn validate_matches_nullable() {
         let vals: Vec<Option<u64>> = vec![Some(1), None, None, Some(2), Some(2), None];
         let col = Column::<Option<u64>>::from_values(vals);
-        for slab in &col.slabs {
+        for slab in col.core.slabs() {
             check_validate2::<Option<u64>>(&slab.data);
         }
     }

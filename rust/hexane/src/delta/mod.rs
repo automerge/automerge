@@ -738,7 +738,7 @@ impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
                 .iter()
                 .map(|&v| (T::Inner::from_opt(deltas.next(v, track)), 1)),
         );
-        check_span::<T, C>(&col, || deltas.fits(T::MIN_I64, T::MAX_I64));
+        check_span::<T, C>(col.core.slabs(), || deltas.fits(T::MIN_I64, T::MAX_I64));
         Self {
             col,
             _phantom: PhantomData,
@@ -924,7 +924,7 @@ impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
     }
 
     pub fn remove(&mut self, index: usize) {
-        if index < self.col.total_len {
+        if index < self.col.core.len() {
             self.splice(index, 1, std::iter::empty());
         }
     }
@@ -1162,7 +1162,9 @@ impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
         // verified (`SpanPlan::fits`): where the bound, widened by the
         // values written, fits, so do the column's values; a deletion
         // writes only values the column held, so its bound fits
-        check_span::<T, C>(&self.col, || iter.plan.fits(T::MIN_I64, T::MAX_I64));
+        check_span::<T, C>(self.col.core.slabs(), || {
+            iter.plan.fits(T::MIN_I64, T::MAX_I64)
+        });
     }
 
     /// Find the boundary data needed to fix up a splice at `[index, index + del)`.
@@ -1181,7 +1183,7 @@ impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
         d_boundaries::<Dx<T::Inner, C>, DB<T::Inner>>(
             &mut iter.inner.core,
             iter.inner.slabs,
-            iter.col.map(|c| &c.index),
+            iter.col.map(|c| c.core.index()),
             &mut iter.running,
             index,
             del,
@@ -1261,17 +1263,26 @@ where
     /// The realized value `at` items into `col` — an index jump, the same
     /// one [`DeltaColumn::splice`] makes on every call.
     fn prefix_at(col: &InnerColumn<T, C>, at: usize) -> i64 {
-        if at == 0 {
+        Self::prefix_in(col.core.slabs(), col.core.index(), col.len(), at)
+    }
+
+    /// The realized value before item `at` of the column of `slabs`,
+    /// indexed by `index`, `len` items long: an index jump (verified,
+    /// `dedit::d_nth`, given the column's invariant).
+    fn prefix_in(
+        slabs: &[crate::column::Slab<crate::column::TailOf<T::Inner, C>>],
+        index: &crate::btree::SlabBTree<crate::btree::SlabAgg>,
+        len: usize,
+        at: usize,
+    ) -> i64 {
+        if at == 0 || len == 0 || slabs.is_empty() {
             return 0;
         }
-        let mut iter: DeltaIter<'_, T, C> = DeltaIter {
-            inner: col.iter(),
-            running: 0,
-            col: Some(col),
-            _phantom: PhantomData,
-        };
-        iter.advance_by(at);
-        iter.running
+        let (si, offset) = crate::index::IndexOps::ix_find(index, 0);
+        let mut core = crate::iter_core::ICore::at::<Dx<T::Inner, C>>(slabs, si, offset, 0, len);
+        let mut running = 0;
+        d_nth::<Dx<T::Inner, C>, DB<T::Inner>>(&mut core, slabs, Some(index), at - 1, &mut running);
+        running
     }
 
     /// The cursor's position in the column's original coordinates.
@@ -1309,7 +1320,8 @@ where
             // the column is consistent right here and can be asked — and
             // it has to be asked *now*: the next op may open a rebuild,
             // after which the index no longer describes the column.
-            let running = Self::prefix_at(self.inner.column(), self.inner.out_pos());
+            let (slabs, index, len) = self.inner.parts();
+            let running = Self::prefix_in(slabs, index, len, self.inner.out_pos());
             self.ledger.jump(running, Ghost::assume_new());
         }
         self
@@ -1513,7 +1525,7 @@ where
             // verified (`SpanLedger::fits`): where the bound fits, so do
             // the column's values
             let ledger = &self.ledger;
-            check_span::<T, C>(self.inner.column(), || ledger.fits(T::MIN_I64, T::MAX_I64));
+            check_span::<T, C>(self.inner.slabs(), || ledger.fits(T::MIN_I64, T::MAX_I64));
         }
     }
 }
@@ -1630,7 +1642,10 @@ fn runs_range<'a, T: DeltaValue, C: Codec>(
 /// holds data to). Only `i64`'s domain is wider than that. `fits` says
 /// whether a bound on the values shows they do; only where it doesn't (a
 /// bound too wide) are the values walked.
-fn check_span<T: DeltaValue, C: Codec>(col: &InnerColumn<T, C>, fits: impl FnOnce() -> bool) {
+fn check_span<T: DeltaValue, C: Codec>(
+    slabs: &[crate::column::Slab<crate::column::TailOf<T::Inner, C>>],
+    fits: impl FnOnce() -> bool,
+) {
     if !bound_needed::<T>() {
         return;
     }
@@ -1640,7 +1655,7 @@ fn check_span<T: DeltaValue, C: Codec>(col: &InnerColumn<T, C>, fits: impl FnOnc
     // where the values span 2^63 or more, a delta between them wraps, and
     // the running sum then leaves the domain; where they don't, every
     // running sum fits `i64` (verified, `AnySpan::fits`)
-    let span = runs_range::<T, C>(col.slabs.iter().map(|s| &s.data[..]));
+    let span = runs_range::<T, C>(slabs.iter().map(|s| &s.data[..]));
     if !span.fits(T::MIN_I64, T::MAX_I64) {
         panic!("delta values out of domain: they would span 2^63 or more");
     }
@@ -1664,7 +1679,7 @@ fn start_bound<T: DeltaValue, C: Codec>(col: &InnerColumn<T, C>) -> (i128, i128)
     if !bound_needed::<T>() {
         return (i128::MAX, i128::MIN);
     }
-    root_bound::<Dx<T::Inner, C>, DB<T::Inner>>(&col.slabs, &col.index)
+    root_bound::<Dx<T::Inner, C>, DB<T::Inner>>(col.core.slabs(), col.core.index())
 }
 
 type InnerColumn<T, C = Leb128> = Column<<T as DeltaValue>::Inner, C, IndexedDeltaWeightFn>;
@@ -1718,7 +1733,7 @@ impl<T: DeltaValue, C: Codec> Iterator for DeltaIter<'_, T, C> {
         let v = d_nth::<Dx<T::Inner, C>, DB<T::Inner>>(
             &mut self.inner.core,
             self.inner.slabs,
-            self.col.map(|c| &c.index),
+            self.col.map(|c| c.core.index()),
             n,
             &mut self.running,
         )?;
@@ -1888,7 +1903,7 @@ impl<'a, T: DeltaValue, C: Codec> DeltaIter<'a, T, C> {
         let (run_start, run_end) = d_seek::<Dx<T::Inner, C>, DB<T::Inner>>(
             &mut self.inner.core,
             self.inner.slabs,
-            self.col.map(|c| &c.index),
+            self.col.map(|c| c.core.index()),
             &mut self.running,
             t,
         );
@@ -1965,7 +1980,7 @@ impl<'a, T: DeltaValue, C: Codec> DeltaIter<'a, T, C> {
         let (pos, v) = d_scan::<Dx<T::Inner, C>, DB<T::Inner>>(
             &mut self.inner.core,
             self.inner.slabs,
-            self.col.map(|c| &c.index),
+            self.col.map(|c| c.core.index()),
             &mut self.running,
             lo,
             hi,
@@ -1979,7 +1994,7 @@ impl<'a, T: DeltaValue, C: Codec> DeltaIter<'a, T, C> {
         d_scan_null::<Dx<T::Inner, C>, DB<T::Inner>>(
             &mut self.inner.core,
             self.inner.slabs,
-            self.col.map(|c| &c.index),
+            self.col.map(|c| c.core.index()),
             &mut self.running,
         )
     }

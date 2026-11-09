@@ -1,5 +1,6 @@
 use crate::attrib::{Accumulate, Attribution};
 use crate::btree::SlabAggregate;
+use crate::column_core::ColumnCore;
 use crate::cursor::WeightOf;
 use crate::sealed::Sealed;
 use crate::splices::{Cuts, Gaps, Normalize};
@@ -316,12 +317,12 @@ where
     Idx: ColumnIndex<WF::Weight>,
 {
     fn len(&self) -> usize {
-        self.total_len
+        self.core.len()
     }
 
     fn find_slab(&self, index: usize) -> (usize, usize) {
         // verified (`IndexOps::ix_find`); the iterator's seeks rely on it
-        self.index.ix_find(index)
+        self.core.index().ix_find(index)
     }
 
     fn slab_start(&self, index: usize) -> usize {
@@ -676,18 +677,18 @@ impl IterState {
         WF: WeightFn<T, C>,
         Idx: ColumnIndex<WF::Weight>,
     {
-        if self.counter != column.counter {
+        if self.counter != column.core.counter() {
             return Err(PackError::InvalidResume);
         }
-        if self.num_slabs != column.slabs.len() {
+        if self.num_slabs != column.core.slabs().len() {
             return Err(PackError::InvalidResume);
         }
-        let slabs = &column.slabs[..];
+        let slabs = column.core.slabs();
         // verified (`ICore::resume`): `Some` exactly when the state is a
         // position of this column's slabs, the iterator then standing there
         let core = ICore::resume::<Dx<T, C>, WF::Weight, Idx>(
             slabs,
-            &column.index,
+            column.core.index(),
             self.slab_idx,
             self.slab_consumed,
             self.pos,
@@ -838,15 +839,21 @@ pub struct Column<
 > where
     Idx: ColumnIndex<WF::Weight>,
 {
-    pub(crate) slabs: Vec<Slab<TailOf<T, C>>>,
-    /// Per-slab aggregate index (B-tree by default, Fenwick BIT optional).
-    pub(crate) index: Idx,
-    pub(crate) total_len: usize,
-    pub(crate) max_segments: usize,
-    pub(crate) counter: usize,
+    /// The slabs, the per-slab index over them (B-tree by default,
+    /// Fenwick BIT optional) and the counts: always a column (verified,
+    /// [`crate::column_core`]).
+    pub(crate) core: CoreOf<T, C, WF, Idx>,
     #[allow(clippy::type_complexity)]
     _phantom: PhantomData<fn() -> (T, C, WF)>,
 }
+
+/// A `Column<T, C, WF, Idx>`'s state, as the verified core sees it.
+pub(crate) type CoreOf<T, C, WF, Idx> = ColumnCore<
+    <<T as ColumnValueRef>::Encoding<C> as crate::edit::SlabEdit>::Model,
+    <WF as WeightFn<T, C>>::Weight,
+    Idx,
+    WeightOf<T, C, WF>,
+>;
 
 impl<T, C, WF, Idx> Clone for Column<T, C, WF, Idx>
 where
@@ -857,11 +864,7 @@ where
 {
     fn clone(&self) -> Self {
         Self {
-            slabs: self.slabs.clone(),
-            index: self.index.clone(),
-            total_len: self.total_len,
-            max_segments: self.max_segments,
-            counter: self.counter,
+            core: self.core.clone(),
             _phantom: PhantomData,
         }
     }
@@ -876,8 +879,8 @@ where
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Column")
-            .field("len", &self.total_len)
-            .field("slabs", &self.slabs.len())
+            .field("len", &self.core.len())
+            .field("slabs", &self.core.slabs().len())
             .finish()
     }
 }
@@ -891,21 +894,6 @@ where
 {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-/// A new column's index and item total (verified: `cursor::col_index`).
-/// Panics if a weight does not count its slab's items, which would be a
-/// bug in a weight function, or if the items do not fit a `usize`.
-#[inline]
-fn index_of<T, W, I>(slabs: &[Slab<T>], weights: Vec<W>) -> (I, usize)
-where
-    T: Copy + std::fmt::Debug + Default,
-    I: crate::index::IndexOps<W>,
-{
-    match crate::cursor::col_index(slabs, weights) {
-        Some(r) => r,
-        None => panic!("column weights do not match its slabs, or it has over usize::MAX items"),
     }
 }
 
@@ -969,14 +957,10 @@ where
         // `slab.segments <= max_segments`, so budgets below 2 produce
         // columns that panic on their next mutation.  Reject up front
         // (same policy as `RawColumn::with_max_segments`).
-        assert!(max_segments >= 2, "max_segments must be at least 2");
         Self {
-            slabs: Vec::new(),
-            // verified (`IndexOps::ix_empty`): the index of no slabs
-            index: Idx::ix_empty(),
-            total_len: 0,
-            max_segments,
-            counter: 0,
+            // verified (`ColumnCore::new`): no slabs, and panics on a
+            // budget below 2
+            core: ColumnCore::new(max_segments),
             _phantom: PhantomData,
         }
     }
@@ -1069,49 +1053,63 @@ where
                 panic!("from_slabs: {e}");
             }
         }
-        let (index, total_len) = index_of(&slabs, weights);
-        Self {
-            slabs,
-            index,
-            total_len,
-            max_segments,
-            counter: 0,
-            _phantom: PhantomData,
+        Self::of_slabs(slabs, weights, max_segments)
+    }
+
+    /// The column of `slabs`, weighed by `weights` (verified,
+    /// `ColumnCore::from_slabs`, which computes the index). Panics if a
+    /// weight does not count its slab's items, which would be a bug in a
+    /// weight function, or if the items are more than an edit can count.
+    pub(crate) fn of_slabs(
+        slabs: Vec<Slab<TailOf<T, C>>>,
+        weights: Vec<WF::Weight>,
+        max_segments: usize,
+    ) -> Self {
+        match ColumnCore::from_slabs(slabs, weights, max_segments) {
+            Some(core) => Self {
+                core,
+                _phantom: PhantomData,
+            },
+            None => {
+                panic!("column weights do not match its slabs, or it has over usize::MAX - 3 items")
+            }
         }
     }
 
     /// Create a column of `len` copies of `value`.
     pub fn fill(len: usize, value: T::Get<'_>) -> Self {
+        Self::fill_with_max_segments(len, value, DEFAULT_MAX_SEG)
+    }
+
+    /// [`fill`](Self::fill), with the segment budget given.
+    pub(crate) fn fill_with_max_segments(
+        len: usize,
+        value: T::Get<'_>,
+        max_segments: usize,
+    ) -> Self {
         // (the second bound only matters where `usize` is narrower)
         assert!(
             len <= i64::MAX as usize && len < usize::MAX - 1,
             "fill length {len} is not encodable"
         );
         if len == 0 {
-            return Self::new();
+            return Self::with_max_segments(max_segments);
         }
         let slabs = vec![T::Encoding::<C>::fill(len, value)];
-        let (index, total_len) = index_of(&slabs, vec![WF::compute(&slabs[0])]);
-        Self {
-            slabs,
-            index,
-            total_len,
-            max_segments: DEFAULT_MAX_SEG,
-            counter: 0,
-            _phantom: PhantomData,
-        }
+        let weights = vec![WF::compute(&slabs[0])];
+        Self::of_slabs(slabs, weights, max_segments)
     }
 
     pub fn len(&self) -> usize {
-        self.total_len
+        self.core.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.total_len == 0
+        self.core.len() == 0
     }
 
     pub fn slab_count(&self) -> usize {
-        self.slabs.len()
+        self.core.slabs().len()
     }
 
     pub fn get(&self, index: usize) -> Option<T::Get<'_>> {
@@ -1127,11 +1125,11 @@ where
     where
         F: Fn(T) -> T,
     {
-        let counter = self.counter;
-        *self = T::Encoding::<C>::remap(self.iter(), self.max_segments, f);
+        let counter = self.core.counter();
+        *self = T::Encoding::<C>::remap(self.iter(), self.core.max_segments(), f);
         // a write like any other: iterators suspended before it can't
         // resume (the rebuilt column's count starts again at 0)
-        self.counter = counter.wrapping_add(1);
+        self.core.set_counter(counter.wrapping_add(1));
     }
 
     /// Check the *structural* invariants of the slab vector and index —
@@ -1155,20 +1153,25 @@ where
     where
         WF::Weight: PartialEq + std::fmt::Debug,
     {
-        let max = self.max_segments;
+        let max = self.core.max_segments();
         let min = (max / 4).max(1);
-        if self.total_len == 0 {
+        if self.core.len() == 0 {
             // an empty column keeps one empty slab to land the next
             // splice in; more than that is a leak
             assert!(
-                self.slabs.len() <= 1,
+                self.core.slabs().len() <= 1,
                 "empty column holds {} slabs",
-                self.slabs.len()
+                self.core.slabs().len()
             );
             return;
         }
-        for (i, slab) in self.slabs.iter().enumerate() {
-            assert_ne!(slab.len, 0, "slab {i} of {} is empty", self.slabs.len());
+        for (i, slab) in self.core.slabs().iter().enumerate() {
+            assert_ne!(
+                slab.len,
+                0,
+                "slab {i} of {} is empty",
+                self.core.slabs().len()
+            );
             assert!(
                 slab.segments <= max || slab.segments == 1,
                 "slab {i} has {} segments, over the budget of {max} \
@@ -1180,8 +1183,11 @@ where
             assert_eq!(info.len, slab.len, "slab {i} cached len");
             assert_eq!(info.segments, slab.segments, "slab {i} cached segments");
         }
-        for i in 1..self.slabs.len() {
-            let (a, b) = (self.slabs[i - 1].segments, self.slabs[i].segments);
+        for i in 1..self.core.slabs().len() {
+            let (a, b) = (
+                self.core.slabs()[i - 1].segments,
+                self.core.slabs()[i].segments,
+            );
             assert!(
                 !((a < min || b < min) && a + b <= max),
                 "slabs {} and {i} ({a} and {b} segments) should have been merged \
@@ -1190,15 +1196,19 @@ where
             );
         }
         assert_eq!(
-            self.total_len,
-            self.slabs.iter().map(|s| s.len).sum::<usize>(),
+            self.core.len(),
+            self.core.slabs().iter().map(|s| s.len).sum::<usize>(),
             "total_len"
         );
-        assert_eq!(self.index.len(), self.slabs.len(), "index length");
+        assert_eq!(
+            self.core.index().len(),
+            self.core.slabs().len(),
+            "index length"
+        );
         let mut before = 0usize;
-        for (i, slab) in self.slabs.iter().enumerate() {
+        for (i, slab) in self.core.slabs().iter().enumerate() {
             assert_eq!(
-                self.index.items_before(i),
+                self.core.index().items_before(i),
                 before,
                 "index items_before({i})"
             );
@@ -1222,19 +1232,19 @@ where
     pub fn save_to(&self, out: &mut Vec<u8>) -> Range<usize> {
         let start = out.len();
         // verified with Verus: the canonical encoding of the slabs' values
-        T::Encoding::<C>::save_slabs(&self.slabs, self.total_len, out);
+        T::Encoding::<C>::save_slabs(self.core.slabs(), self.core.len(), out);
         start..out.len()
     }
 
     pub fn iter(&self) -> Iter<'_, T, C> {
-        self.iter_range(0..self.total_len)
+        self.iter_range(0..self.core.len())
     }
 
     /// Iterator over items in `range`, clamped to the column's length.
     /// O(log S) seek via the index, O(1) per item after.
     pub fn iter_range(&self, range: Range<usize>) -> Iter<'_, T, C> {
-        let start = range.start.min(self.total_len);
-        let end = range.end.min(self.total_len).max(start);
+        let start = range.start.min(self.core.len());
+        let end = range.end.min(self.core.len()).max(start);
         // Even an empty range must leave the iterator *positioned* at
         // `start` (decoder and slab state valid): windows are routinely
         // re-extended later via `set_max`/`shift`, and an unpositioned
@@ -1242,20 +1252,20 @@ where
         // `advance_to_slab`'s forward invariant from `nth`. Only a
         // start at/past the end of the data — where there is nothing
         // to sit on — takes the unpositioned shortcut.
-        if start >= self.total_len || self.slabs.is_empty() {
+        if start >= self.core.len() || self.core.slabs().is_empty() {
             return Iter {
-                slabs: &self.slabs,
+                slabs: self.core.slabs(),
                 col: Some(self),
-                core: ICore::idle::<Dx<T, C>>(&self.slabs, start),
-                counter: self.counter,
+                core: ICore::idle::<Dx<T, C>>(self.core.slabs(), start),
+                counter: self.core.counter(),
             };
         }
-        let (si, offset) = self.index.ix_find(start);
+        let (si, offset) = self.core.index().ix_find(start);
         Iter {
-            slabs: &self.slabs,
+            slabs: self.core.slabs(),
             col: Some(self),
-            core: ICore::at::<Dx<T, C>>(&self.slabs, si, offset, start, end - start),
-            counter: self.counter,
+            core: ICore::at::<Dx<T, C>>(self.core.slabs(), si, offset, start, end - start),
+            counter: self.core.counter(),
         }
     }
 
@@ -1266,8 +1276,8 @@ where
 
     /// Returns `true` if the column is empty or every item equals `value`.
     pub fn is_only(&self, value: T::Get<'_>) -> bool {
-        self.total_len == 0
-            || self.slabs.iter().all(|s| {
+        self.core.len() == 0
+            || self.core.slabs().iter().all(|s| {
                 if s.len == 0 {
                     return true;
                 }
@@ -1292,16 +1302,16 @@ where
     }
 
     pub fn slab_lens(&self) -> Vec<usize> {
-        self.slabs.iter().map(|s| s.len).collect()
+        self.core.slabs().iter().map(|s| s.len).collect()
     }
 
     pub fn slab_segments(&self) -> Vec<usize> {
-        self.slabs.iter().map(|s| s.segments).collect()
+        self.core.slabs().iter().map(|s| s.segments).collect()
     }
 
     pub fn dump_slabs(&self) {
         let mut offset = 0;
-        for (i, s) in self.slabs.iter().enumerate() {
+        for (i, s) in self.core.slabs().iter().enumerate() {
             let mut dec = T::Encoding::<C>::slab_decoder(&s.data, crate::sealed::Trusted(()));
             let first = dec.next_run();
             let last = T::Encoding::<C>::last_run(s);
@@ -1320,7 +1330,7 @@ where
     /// `scope_to_value`'s slab binary search.
     fn slab_start(&self, si: usize) -> usize {
         // verified (`IndexOps::ix_before`); the value search relies on it
-        self.index.ix_before(si)
+        self.core.index().ix_before(si)
     }
 
     /// Narrow a range to the contiguous run of items matching `value`.
@@ -1340,7 +1350,7 @@ where
     where
         for<'x> T::Get<'x>: Ord,
     {
-        let (start, end) = normalize_range_max(range, self.total_len);
+        let (start, end) = normalize_range_max(range, self.core.len());
         let target = value.as_column_ref();
         self.iter_range(start..end).sorted_scan_to_value(target)
     }
@@ -1352,7 +1362,7 @@ where
     }
 
     pub fn remove(&mut self, index: usize) {
-        if index < self.total_len {
+        if index < self.core.len() {
             self.splice_inner::<T, _>(index, 1, std::iter::empty());
         }
     }
@@ -1372,20 +1382,20 @@ where
     }
 
     pub fn push(&mut self, value: impl AsColumnRef<T>) {
-        let len = self.total_len;
+        let len = self.core.len();
         self.splice_inner(len, 0, [(value, 1)]);
     }
 
     pub fn clear(&mut self) {
-        let len = self.total_len;
+        let len = self.core.len();
         if len > 0 {
             self.splice_inner::<T, _>(0, len, std::iter::empty());
         }
     }
 
     pub fn truncate(&mut self, len: usize) {
-        if len < self.total_len {
-            self.splice_inner::<T, _>(len, self.total_len - len, std::iter::empty());
+        if len < self.core.len() {
+            self.splice_inner::<T, _>(len, self.core.len() - len, std::iter::empty());
         }
     }
 
@@ -1477,15 +1487,15 @@ where
     ) -> CopyStrategy {
         // Inverting keeps src's slabs, built under src's segment
         // budget — only sound when the budgets match.
-        if self.max_segments != src.max_segments || src.slabs.len() < 8 {
+        if self.core.max_segments() != src.core.max_segments() || src.core.slabs().len() < 8 {
             return CopyStrategy::Direct;
         }
 
-        let mut item_prefix = Vec::with_capacity(src.slabs.len() + 1);
-        let mut seg_prefix = Vec::with_capacity(src.slabs.len() + 1);
+        let mut item_prefix = Vec::with_capacity(src.core.slabs().len() + 1);
+        let mut seg_prefix = Vec::with_capacity(src.core.slabs().len() + 1);
         item_prefix.push(0usize);
         seg_prefix.push(0usize);
-        for s in &src.slabs {
+        for s in src.core.slabs() {
             item_prefix.push(item_prefix.last().unwrap() + s.len);
             seg_prefix.push(seg_prefix.last().unwrap() + s.segments);
         }
@@ -1501,23 +1511,23 @@ where
             let sa = slab_of(r.start);
             let sb = slab_of(r.end - 1);
             if sa == sb {
-                retained_segs += src.slabs[sa].segments;
+                retained_segs += src.core.slabs()[sa].segments;
             } else {
-                retained_segs += src.slabs[sa].segments
-                    + src.slabs[sb].segments
+                retained_segs += src.core.slabs()[sa].segments
+                    + src.core.slabs()[sb].segments
                     + (seg_prefix[sb] - seg_prefix[sa + 1]);
             }
         }
 
         // Direct-path work also cuts a seam in self per insertion
         // point.
-        let direct_cost = retained_segs + points * 2 * self.max_segments;
+        let direct_cost = retained_segs + points * 2 * self.core.max_segments();
 
         // Inverted-path work: re-encode all of self, boundary segments
         // per gap seam and per insertion point, O(slabs) bookkeeping.
-        let dest_segs: usize = self.slabs.iter().map(|s| s.segments).sum();
-        let seam_segs = (ranges.len() + points) * 2 * self.max_segments;
-        let invert_cost = dest_segs + seam_segs + src.slabs.len();
+        let dest_segs: usize = self.core.slabs().iter().map(|s| s.segments).sum();
+        let seam_segs = (ranges.len() + points) * 2 * self.core.max_segments();
+        let invert_cost = dest_segs + seam_segs + src.core.slabs().len();
 
         if direct_cost > COPY_INVERT_FACTOR * invert_cost {
             CopyStrategy::Invert
@@ -1580,10 +1590,11 @@ where
     /// and bumping the counter past both so suspended iterators of
     /// either column can't resume against the swapped data.
     pub(crate) fn swap_contents(&mut self, other: &mut Self) {
-        let counter = self.counter.max(other.counter) + 1;
+        let counter = self.core.counter().max(other.core.counter()) + 1;
         std::mem::swap(self, other);
-        std::mem::swap(&mut self.max_segments, &mut other.max_segments);
-        self.counter = counter;
+        // verified (`ColumnCore::swap_budgets`): each keeps its values
+        self.core.swap_budgets(&mut other.core);
+        self.core.set_counter(counter);
     }
 
     /// Returns the affected slab range (post-merge), mirroring
@@ -1599,7 +1610,7 @@ where
     {
         // `index + del` could overflow
         assert!(
-            index <= self.total_len && del <= self.total_len - index,
+            index <= self.core.len() && del <= self.core.len() - index,
             "splice range out of bounds"
         );
         // verified (`cursor::splice_feed`): the column's values become
@@ -1620,13 +1631,13 @@ where
     /// prefix-sum range covers `target`.  Passes through to
     /// `SlabBTree::find_by_value` on the inner index.
     pub fn find_by_value(&self, target: i64) -> FindByValue<'_> {
-        self.index.find_by_value(target)
+        self.core.index().find_by_value(target)
     }
 
     /// Iterator over `(slab_idx, items_before_slab)` for slabs whose
     /// prefix-sum range overlaps `[lo, hi]`.
     pub fn find_by_value_range(&self, lo: i64, hi: i64) -> FindByValueRange<'_> {
-        self.index.find_by_value_range(lo, hi)
+        self.core.index().find_by_value_range(lo, hi)
     }
 }
 
@@ -1746,11 +1757,13 @@ where
             if len == 0 {
                 return Ok(Column::with_max_segments(self.max_segments));
             }
-            let mut col = Column::fill(len, value);
             // `fill` makes one slab of at most two segments, within any
             // budget `load_iter` accepts
-            col.max_segments = self.max_segments;
-            return Ok(col);
+            return Ok(Column::fill_with_max_segments(
+                len,
+                value,
+                self.max_segments,
+            ));
         }
         if WF::ACCUMULATES {
             // `iter.finalize()` below drains and validates whatever is
@@ -1789,20 +1802,13 @@ where
             let len = slabs.iter().fold(0usize, |n, s| n.saturating_add(s.len));
             WF::check_total(&weights, len)?;
         }
-        let (index, total_len) = index_of(&slabs, weights);
         // edits and `save` count a column's items with room for three more:
         // a longer column is an error here, not one they would panic on
+        let total_len = slabs.iter().fold(0usize, |n, s| n.saturating_add(s.len));
         if total_len > usize::MAX - 3 {
             return Err(PackError::InvalidLength(total_len, usize::MAX - 3));
         }
-        Ok(Column {
-            slabs,
-            index,
-            total_len,
-            max_segments: self.max_segments,
-            counter: 0,
-            _phantom: PhantomData,
-        })
+        Ok(Column::of_slabs(slabs, weights, self.max_segments))
     }
 }
 
@@ -1862,7 +1868,7 @@ where
     Idx: ColumnIndex<WF::Weight>,
 {
     fn extend<I: IntoIterator<Item = V>>(&mut self, iter: I) {
-        let len = self.total_len;
+        let len = self.core.len();
         self.splice_inner(len, 0, iter.into_iter().map(|v| (v, 1)));
     }
 }

@@ -3,8 +3,9 @@
 //! its slabs can be rebuilt in place.
 
 use crate::column::{Column, WeightFn};
-use crate::copy::{copy_direct, copy_invert, Ranged};
-use crate::cursor::{splice_feed, Cursor, Feeding, Inserting, Slabs, Visiting, WeightOf};
+use crate::column_core::Parts;
+use crate::copy::Ranged;
+use crate::cursor::{Cursor, Feeding, Inserting, Slabs, Visiting, WeightOf};
 use crate::encoding::ColumnEncoding;
 use crate::index::ColumnIndex;
 use crate::{AsColumnRef, Codec, ColumnValueRef, Run};
@@ -115,7 +116,9 @@ pub(crate) const RUN_BUDGET: usize = 8;
 /// The cursor's state and every move it makes are verified with Verus
 /// (`crate::cursor`): each operation keeps the column well-formed and
 /// does exactly what it says to its values, given the encodings' slab
-/// operations. This struct only pairs that state with the column.
+/// operations. This struct holds the column's parts while it edits them
+/// (taken out of its verified core, and put back when it is dropped),
+/// and the cursor's state.
 pub struct Edit<'a, T, C, WF, Idx>
 where
     T: ColumnValueRef,
@@ -125,6 +128,10 @@ where
     Idx: ColumnIndex<WF::Weight>,
 {
     col: &'a mut Column<T, C, WF, Idx>,
+    /// the column's parts while the cursor has them (`None` once handed
+    /// back)
+    parts: Option<Parts<crate::column::TailOf<T, C>, Idx>>,
+    max_segments: usize,
     cur: Cursor<Model<T, C>>,
 }
 
@@ -137,16 +144,51 @@ where
 {
     pub(crate) fn new(col: &'a mut Column<T, C, WF, Idx>, at: usize) -> Self {
         assert!(at <= col.len(), "edit_at out of bounds");
-        // the rebuilds count values in a `usize`, with room for three more
-        assert!(col.total_len <= usize::MAX - 3, "column too long to edit");
+        // verified (`ColumnCore::take_parts`): a column, with room for
+        // three more items, as the rebuilds count; the core holds no items
+        // until they are put back
+        let max_segments = col.core.max_segments();
+        let mut p = col.core.take_parts();
         let cur = Cursor::new::<WF::Weight, Idx, G<T, C, WF>>(
-            &mut col.slabs,
-            &mut col.index,
-            col.total_len,
+            &mut p.slabs,
+            &mut p.index,
+            p.total_len,
             Ghost::assume_new(),
             at,
         );
-        Edit { col, cur }
+        Edit {
+            col,
+            parts: Some(p),
+            max_segments,
+            cur,
+        }
+    }
+
+    /// The column's parts, which the cursor holds until it is dropped.
+    #[inline(always)]
+    fn p_ref(&self) -> &Parts<crate::column::TailOf<T, C>, Idx> {
+        self.parts
+            .as_ref()
+            .expect("the edit cursor holds the parts")
+    }
+
+    /// The slabs as the cursor has left them: those of the column it
+    /// edits, with any open rebuild not yet written back.
+    pub(crate) fn slabs(&self) -> &[crate::column::Slab<crate::column::TailOf<T, C>>] {
+        &self.p_ref().slabs
+    }
+
+    /// The column's parts as the cursor has left them: its slabs, their
+    /// index and its item count (see [`Self::slabs`]).
+    pub(crate) fn parts(
+        &self,
+    ) -> (
+        &[crate::column::Slab<crate::column::TailOf<T, C>>],
+        &Idx,
+        usize,
+    ) {
+        let p = self.p_ref();
+        (&p.slabs, &p.index, p.total_len)
     }
 
     /// The cursor's position in the column's original coordinates — the
@@ -163,12 +205,6 @@ where
     /// Original items still ahead of the cursor.
     pub(crate) fn remaining(&self) -> usize {
         self.cur.remaining
-    }
-
-    /// The column under the cursor. Only meaningful while no rebuild is
-    /// open — the slab metadata is stale until one closes.
-    pub(crate) fn column(&self) -> &Column<T, C, WF, Idx> {
-        self.col
     }
 
     /// How many slabs this cursor has rebuilt. One per slab *touched*,
@@ -201,12 +237,17 @@ where
     where
         F: FnMut(T::Get<'_>, usize),
     {
+        let max_segments = self.max_segments;
+        let p = self
+            .parts
+            .as_mut()
+            .expect("the edit cursor holds the parts");
         self.cur.advance_with::<WF::Weight, Idx, G<T, C, WF>, _>(
-            &mut self.col.slabs,
-            &mut self.col.index,
-            &mut self.col.total_len,
-            self.col.max_segments,
-            &mut self.col.counter,
+            &mut p.slabs,
+            &mut p.index,
+            &mut p.total_len,
+            max_segments,
+            &mut p.counter,
             n,
             &mut Visiting::<Enc<T, C>, F>::new(&mut f),
         )
@@ -219,9 +260,13 @@ where
 
     /// Insert `n` copies of `value` at the cursor.
     pub fn insert_run(&mut self, value: impl AsColumnRef<T>, n: usize) -> &mut Self {
+        let p = self
+            .parts
+            .as_ref()
+            .expect("the edit cursor holds the parts");
         self.cur.insert(
-            &self.col.slabs,
-            self.col.max_segments,
+            &p.slabs,
+            self.max_segments,
             Inserting::<Enc<T, C>, _>::new(value),
             n,
         );
@@ -248,16 +293,20 @@ where
         if self.cur.remaining == 0 {
             return None;
         }
+        let p = self
+            .parts
+            .as_ref()
+            .expect("the edit cursor holds the parts");
         if self.cur.dirty {
-            let slab = &self.col.slabs[self.cur.slab];
+            let slab = &p.slabs[self.cur.slab];
             return Enc::<T, C>::state_peek(
                 slab,
                 <Model<T, C> as Slabs>::read_state(&self.cur.edit),
             );
         }
         // verified: the reader is then at the cursor (`Cursor::load_reader`)
-        self.cur.load_reader(&self.col.slabs);
-        let slab = &self.col.slabs[self.cur.slab];
+        self.cur.load_reader(&p.slabs);
+        let slab = &p.slabs[self.cur.slab];
         let r = self.cur.dec.as_ref().expect("reader loaded");
         Enc::<T, C>::state_peek(slab, &r.state)
     }
@@ -297,12 +346,17 @@ where
         F: FnMut(T::Get<'_>, usize),
         H: FnMut(&WF::Weight),
     {
+        let max_segments = self.max_segments;
+        let p = self
+            .parts
+            .as_mut()
+            .expect("the edit cursor holds the parts");
         self.cur.delete_with::<WF::Weight, Idx, G<T, C, WF>, _, H>(
-            &mut self.col.slabs,
-            &mut self.col.index,
-            &mut self.col.total_len,
-            self.col.max_segments,
-            &mut self.col.counter,
+            &mut p.slabs,
+            &mut p.index,
+            &mut p.total_len,
+            max_segments,
+            &mut p.counter,
             n,
             &mut Visiting::<Enc<T, C>, F>::new(&mut f),
             &mut g,
@@ -321,12 +375,17 @@ where
     /// Finish the open rebuild: write it back, coalesce neighbours and
     /// update the index — each once, however many edits the slab took.
     fn close(&mut self) {
+        let max_segments = self.max_segments;
+        let p = self
+            .parts
+            .as_mut()
+            .expect("the edit cursor holds the parts");
         self.cur.close::<WF::Weight, Idx, G<T, C, WF>>(
-            &mut self.col.slabs,
-            &mut self.col.index,
-            &mut self.col.total_len,
-            self.col.max_segments,
-            &mut self.col.counter,
+            &mut p.slabs,
+            &mut p.index,
+            &mut p.total_len,
+            max_segments,
+            &mut p.counter,
         );
     }
 }
@@ -340,23 +399,17 @@ where
 {
     /// Delete `del` items at `at` and insert `runs` there: one cursor
     /// opened, deleting, inserting and closed, the whole chain verified
-    /// (`cursor::splice_feed`). The caller checks the range.
+    /// (`ColumnCore::splice`, `cursor::splice_feed`). The caller checks
+    /// the range.
     pub(crate) fn splice_feed<V: AsColumnRef<T>>(
         &mut self,
         at: usize,
         del: usize,
         runs: impl Iterator<Item = (V, usize)>,
     ) {
-        // the rebuilds count values in a `usize`, with room for three more
-        assert!(self.total_len <= usize::MAX - 3, "column too long to edit");
         let mut f = |_: T::Get<'_>, _: usize| {};
         let mut g = |_: &WF::Weight| {};
-        splice_feed::<Model<T, C>, WF::Weight, Idx, G<T, C, WF>, _, _, _>(
-            &mut self.slabs,
-            &mut self.index,
-            &mut self.total_len,
-            self.max_segments,
-            &mut self.counter,
+        self.core.splice(
             at,
             del,
             &mut Visiting::<Enc<T, C>, _>::new(&mut f),
@@ -367,20 +420,14 @@ where
 
     /// `copy_ranges` directly: apply the normalized `splices` to this
     /// column, copying from `src`, with one cursor (verified,
-    /// `copy::copy_direct`).
+    /// `ColumnCore::copy_direct`).
     pub(crate) fn copy_direct_from(&mut self, src: &Self, splices: &[crate::Splice])
     where
         for<'b> T::Get<'b>: AsColumnRef<T>,
     {
-        assert!(self.total_len <= usize::MAX - 3, "column too long to edit");
         let mut f = |_: T::Get<'_>, _: usize| {};
         let mut g = |_: &WF::Weight| {};
-        copy_direct::<Model<T, C>, WF::Weight, Idx, G<T, C, WF>, _, _, _>(
-            &mut self.slabs,
-            &mut self.index,
-            &mut self.total_len,
-            self.max_segments,
-            &mut self.counter,
+        self.core.copy_direct(
             splices,
             &mut Visiting::<Enc<T, C>, _>::new(&mut f),
             &mut g,
@@ -390,20 +437,14 @@ where
 
     /// `copy_ranges` inverted: this column holds the source; keep the
     /// normalized `splices`' ranges of it and put `dst`'s items back
-    /// between them (verified, `copy::copy_invert`).
+    /// between them (verified, `ColumnCore::copy_invert`).
     pub(crate) fn copy_invert_from(&mut self, dst: &Self, splices: &[crate::Splice])
     where
         for<'b> T::Get<'b>: AsColumnRef<T>,
     {
-        assert!(self.total_len <= usize::MAX - 3, "column too long to edit");
         let mut f = |_: T::Get<'_>, _: usize| {};
         let mut g = |_: &WF::Weight| {};
-        copy_invert::<Model<T, C>, WF::Weight, Idx, G<T, C, WF>, _, _, _>(
-            &mut self.slabs,
-            &mut self.index,
-            &mut self.total_len,
-            self.max_segments,
-            &mut self.counter,
+        self.core.copy_invert(
             splices,
             dst.len(),
             &mut Visiting::<Enc<T, C>, _>::new(&mut f),
@@ -426,6 +467,12 @@ where
         // chain does not have to be `finish()`
         if self.cur.dirty {
             self.close();
+        }
+        // hand the column its parts back: the cursor's steps keep them a
+        // column (verified), the chain of them here is glue
+        // (`ColumnCore::restore`'s precondition)
+        if let Some(p) = self.parts.take() {
+            self.col.core.restore(p);
         }
     }
 }

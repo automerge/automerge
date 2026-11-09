@@ -742,7 +742,7 @@ impl<T: PrefixValue, C: Codec> PrefixColumn<T, C> {
     /// item at `index`.
     pub fn get_prefix(&self, index: usize) -> T::Prefix {
         // verified (`prefix_core`), given the column's invariant
-        p_prefix::<Dx<T, C>, PB<T>>(&self.col.slabs, &self.col.index, index)
+        p_prefix::<Dx<T, C>, PB<T>>(self.col.core.slabs(), self.col.core.index(), index)
     }
 
     /// **Inclusive** prefix sum through `index`: what
@@ -781,7 +781,7 @@ impl<T: PrefixValue, C: Codec> PrefixColumn<T, C> {
             p_sum_range::<Dx<T, C>, PB<T>>(
                 &mut iter.inner.core,
                 iter.inner.slabs,
-                Some(&self.col.index),
+                Some(self.col.core.index()),
                 range.start,
                 range.end,
                 &mut iter.total,
@@ -814,7 +814,7 @@ where
     pub fn get_index_for_prefix(&self, target: T::Prefix) -> usize {
         // verified (`prefix_search`), where the column's sum fits its
         // prefix type
-        p_index_for_prefix::<Dx<T, C>, PB<T>>(&self.col.slabs, &self.col.index, target)
+        p_index_for_prefix::<Dx<T, C>, PB<T>>(self.col.core.slabs(), self.col.core.index(), target)
     }
 }
 
@@ -1107,7 +1107,7 @@ impl<'a, T: PrefixValue, C: Codec> Iterator for PrefixIter<'a, T, C> {
         let value = p_nth::<Dx<T, C>, PB<T>>(
             &mut self.inner.core,
             self.inner.slabs,
-            self.col.map(|c| &c.col.index),
+            self.col.map(|c| c.col.core.index()),
             n,
             &mut self.total,
             &self.base,
@@ -1291,7 +1291,7 @@ where
         let value = p_advance::<Dx<T, C>, PB<T>>(
             &mut self.inner.core,
             self.inner.slabs,
-            &col.col.index,
+            col.col.core.index(),
             &n,
             &mut self.total,
             &self.base,

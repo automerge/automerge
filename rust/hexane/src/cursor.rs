@@ -335,6 +335,7 @@ pub(crate) fn col_index<T: Copy + Clone + std::fmt::Debug + Default, W, I: Index
         match r {
             Some((ix, n)) => {
                 &&& ix.ok()
+                &&& ix.ws() == ws@
                 &&& wlens::<W, I>(ix.ws()) == slab_lens(slabs@)
                 &&& n == total(slab_lens(slabs@))
             },
@@ -1904,6 +1905,7 @@ pub(crate) fn splice_feed<E: Slabs, W, I: IndexOps<W>, G: Weigh<E::Tail, W>, F: 
         *old(total_len) + 3 <= usize::MAX,
     ensures
         col_ok::<E, W, I, G>(final(slabs)@, *final(index), *final(total_len), max_segments),
+        *final(total_len) + 3 <= usize::MAX,
         vals_of::<E>(final(slabs)@) == vals_of::<E>(old(slabs)@).take(at as int) + ins@
             + vals_of::<E>(old(slabs)@).skip(at + del),
         final(feed).given() == old(feed).given() + ins@,
@@ -1949,6 +1951,7 @@ pub(crate) fn splice_feed<E: Slabs, W, I: IndexOps<W>, G: Weigh<E::Tail, W>, F: 
     cur.close::<W, I, G>(slabs, index, total_len, max_segments, counter);
     proof {
         cur.lemma_clean(slabs@);
+        lemma_vals_total::<E>(slabs@);
     }
     Ghost(ins)
 }

@@ -67,6 +67,7 @@ pub trait ColumnEncoding: Default {
         f: F,
     ) -> Column<Self::Value, Self::Codec, WF, Idx>
     where
+        Self: crate::edit::SlabEdit,
         WF: WeightFn<Self::Value, Self::Codec>,
         Idx: ColumnIndex<WF::Weight>,
         F: Fn(Self::Value) -> Self::Value,

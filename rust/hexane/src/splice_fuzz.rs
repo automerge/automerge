@@ -80,7 +80,8 @@ where
     Idx: crate::index::ColumnIndex<WF::Weight>,
 {
     let mut acc = 0;
-    col.slabs
+    col.core
+        .slabs()
         .iter()
         .map(|s| {
             acc += s.len;
@@ -99,18 +100,19 @@ where
     Idx: crate::index::ColumnIndex<WF::Weight>,
 {
     use crate::encoding::ColumnEncoding;
-    let sum: usize = col.slabs.iter().map(|s| s.len).sum();
+    let sum: usize = col.core.slabs().iter().map(|s| s.len).sum();
     assert_eq!(
-        col.total_len, sum,
+        col.core.len(),
+        sum,
         "total_len {} vs Σ slab.len {sum}",
-        col.total_len
+        col.core.len()
     );
-    for (i, slab) in col.slabs.iter().enumerate() {
+    for (i, slab) in col.core.slabs().iter().enumerate() {
         assert!(
-            !cap || slab.segments <= col.max_segments,
+            !cap || slab.segments <= col.core.max_segments(),
             "slab {i}: {} segments exceeds max {}",
             slab.segments,
-            col.max_segments
+            col.core.max_segments()
         );
         let info = T::Encoding::<C>::validate_encoding(&slab.data)
             .unwrap_or_else(|e| panic!("slab {i}: invalid encoding: {e}"));

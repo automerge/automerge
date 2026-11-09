@@ -199,6 +199,7 @@ pub(crate) fn copy_direct<E: Slabs, W, I: IndexOps<W>, G: Weigh<E::Tail, W>, F: 
         old(feed).at() == 0,
     ensures
         col_ok::<E, W, I, G>(final(slabs)@, *final(index), *final(total_len), max_segments),
+        *final(total_len) + 3 <= usize::MAX,
         vals_of::<E>(final(slabs)@) == applied(vals_of::<E>(old(slabs)@), old(feed).src(), sps@),
 {
     let ghost dst = vals_of::<E>(slabs@);
@@ -255,6 +256,7 @@ pub(crate) fn copy_direct<E: Slabs, W, I: IndexOps<W>, G: Weigh<E::Tail, W>, F: 
     cur.close::<W, I, G>(slabs, index, total_len, max_segments, counter);
     proof {
         cur.lemma_clean(slabs@);
+        lemma_vals_total::<E>(slabs@);
         assert(sps@.take(sps@.len() as int) =~= sps@);
         assert(dst.skip(cur.orig as int) =~= dst.subrange(end_of(sps@), dst.len() as int));
     }
@@ -363,6 +365,7 @@ fn put_gaps<E: Slabs, W, I: IndexOps<W>, G: Weigh<E::Tail, W>, F: Visitor<E>, R:
         old(feed).at() == 0,
     ensures
         col_ok::<E, W, I, G>(final(slabs)@, *final(index), *final(total_len), max_segments),
+        *final(total_len) + 3 <= usize::MAX,
         vals_of::<E>(final(slabs)@) == applied(old(feed).src(), src, sps@),
 {
     hide(Gaps::inv);
@@ -437,6 +440,7 @@ fn put_gaps<E: Slabs, W, I: IndexOps<W>, G: Weigh<E::Tail, W>, F: Visitor<E>, R:
     cur.close::<W, I, G>(slabs, index, total_len, max_segments, counter);
     proof {
         cur.lemma_clean(slabs@);
+        lemma_vals_total::<E>(slabs@);
         assert(k.skip(cur.orig as int) =~= k.subrange(end_of(gaps.gaps@), k.len() as int));
     }
 }
@@ -467,6 +471,7 @@ pub(crate) fn copy_invert<E: Slabs, W, I: IndexOps<W>, G: Weigh<E::Tail, W>, F: 
         old(feed).at() == 0,
     ensures
         col_ok::<E, W, I, G>(final(slabs)@, *final(index), *final(total_len), max_segments),
+        *final(total_len) + 3 <= usize::MAX,
         vals_of::<E>(final(slabs)@) == applied(old(feed).src(), vals_of::<E>(old(slabs)@), sps@),
 {
     let ghost src = vals_of::<E>(slabs@);
