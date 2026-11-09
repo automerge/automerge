@@ -14,7 +14,7 @@ pub(crate) use crate::op_set2::{
 };
 pub(crate) use crate::read::ReadDoc;
 
-use crate::actor::{ActorInsert, ActorRemoval, ActorShift, ActorTable, HasActorIndices};
+use crate::actor::{ActorRemoval, ActorShift, ActorTable, HasActorIndices};
 use crate::change_graph::ChangeGraph;
 use crate::clock::Clock;
 use crate::cursor::{CursorPosition, MoveCursor, OpCursor};
@@ -33,9 +33,11 @@ use crate::transaction::{
 use crate::types::{ActorId, ChangeHash, ObjId, ObjMeta, OpId, SequenceType, TextEncoding, Value};
 use crate::write_frontier::WriteFrontier;
 use crate::{AutomergeError, Change, Cursor, Fragment, ObjType, Prop};
+use actor::ActorMaintenance;
 use std::borrow::Cow;
 use view::{ClockRange, Mask, ReadAt, VisibleClock};
 
+mod actor;
 pub(crate) mod current_state;
 pub(crate) mod view;
 mod visibility;
@@ -729,11 +731,14 @@ impl Automerge {
     /// Remove the actor at index `actor`, which must have no changes in the
     /// document, from every actor-indexed structure.
     pub(crate) fn remove_actor(&mut self, actor: usize) {
-        let (removed, removal) = self.ops.remove_actor(actor);
-        self.actor.remove_actor(&removal, removed);
-        self.change_graph.remove_actor(&removal);
-        self.authors.remove_actor(&removal);
-        self.visibility.remove_actor(&removal);
+        ActorMaintenance::new(
+            &mut self.ops,
+            &mut self.change_graph,
+            &mut self.actor,
+            &mut self.authors,
+            &mut self.visibility,
+        )
+        .remove(actor);
     }
 
     pub(crate) fn assert_no_unused_actors(&self, panic: bool) {
@@ -1746,16 +1751,14 @@ impl Automerge {
     /// Ensure `actor` is in the actor table and return its index, shifting
     /// every actor-indexed structure if it had to be inserted.
     pub(crate) fn put_actor(&mut self, actor: ActorId) -> usize {
-        match self.ops.insert_actor(actor) {
-            ActorInsert::Existing(idx) => idx,
-            ActorInsert::Inserted(shift) => {
-                self.change_graph.insert_actor(&shift);
-                self.actor.shift(&shift);
-                self.authors.insert_actor(&shift);
-                self.visibility.insert_actor(&shift);
-                shift.index()
-            }
-        }
+        ActorMaintenance::new(
+            &mut self.ops,
+            &mut self.change_graph,
+            &mut self.actor,
+            &mut self.authors,
+            &mut self.visibility,
+        )
+        .insert(actor)
     }
 
     fn update_deps(&mut self, change: &Change) {
