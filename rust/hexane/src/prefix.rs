@@ -7,7 +7,7 @@ use crate::column::{Column, Dx, Iter, Slab, SlabWeight, TailOf, WeightFn};
 use crate::encoding::{ColumnEncoding, RunDecoder};
 use crate::index::IndexOps;
 use crate::prefix_core::{
-    p_next, p_next_run, p_nth, p_reset, p_slab_sum, p_slab_sum_checked, p_sum_range, PrefixOps,
+    p_next, p_next_run, p_nth, p_reset, p_slab_sum, p_slab_sum_checked, PrefixOps,
 };
 use crate::prefix_search::{p_advance, PrefixOrd};
 use crate::PackError;
@@ -782,19 +782,10 @@ impl<T: PrefixValue, C: Codec> PrefixColumn<T, C> {
         if range.start >= range.end || self.col.is_empty() {
             T::Prefix::default()
         } else {
-            // verified (`prefix_core`): advance to the start, move the
-            // running total into the base, advance to the end
-            let mut iter = self.iter();
-            p_sum_range::<Dx<T, C>, PB<T>>(
-                &mut iter.inner.core,
-                iter.inner.slabs,
-                Some(self.col.core.index()),
-                range.start,
-                range.end,
-                &mut iter.total,
-                &mut iter.base,
-            );
-            iter.total
+            // verified (`ColumnCore::sum_range`, `prefix_core::p_sum_range`),
+            // from the column's type invariant: advance to the start, move
+            // the running total into the base, advance to the end
+            self.col.core.sum_range(range.start, range.end)
         }
     }
 }

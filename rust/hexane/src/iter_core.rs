@@ -658,6 +658,7 @@ impl<D: Decode> ICore<D> {
             it.out::<X>(slabs@) == Seq::<D::Item>::empty(),
             it.pos == pos,
             it.slab_idx == slabs@.len(),
+            it.items_left == 0,
     {
         let it = ICore { slab_idx: slabs.len(), decoder: X::none(), items_left: 0, slab_remaining: 0, pos };
         proof {

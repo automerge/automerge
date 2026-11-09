@@ -27,7 +27,10 @@
 
 use crate::btree::SlabBTree;
 #[cfg(verus_keep_ghost)]
-use crate::btree::{lemma_prefix_len, lemma_prefix_sum, PrefixAggregate, SlabAggregate};
+use crate::btree::{
+    axiom_prefix_add, lemma_prefix_len, lemma_prefix_sum, prefix_add, prefix_zero, PrefixAggregate,
+    SlabAggregate,
+};
 use crate::column::Slab;
 use crate::copy::{copy_direct, copy_invert, RangeFeed};
 #[cfg(verus_keep_ghost)]
@@ -50,7 +53,7 @@ use crate::iter_core::{Decode, Decoders, ICore};
 use crate::prefix::PrefixSlabWeight;
 #[cfg(verus_keep_ghost)]
 use crate::prefix_core::{before, ix_ok, vsum};
-use crate::prefix_core::{p_prefix, PrefixOps};
+use crate::prefix_core::{p_prefix, p_sum_range, PrefixOps};
 #[cfg(verus_keep_ghost)]
 use crate::prefix_search::found_at;
 use crate::prefix_search::{p_index_for_prefix, PrefixOrd};
@@ -313,6 +316,7 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> ColumnCore<E, W, I, G> {
         ensures
             it.wf::<X>(self.slabs_spec()),
             it.pos == start,
+            it.items_left == end - start,
             it.out::<X>(self.slabs_spec()) == crate::iter_core::vals_of::<X>(self.slabs_spec()).subrange(start as int, end as int),
             it.out::<X>(self.slabs_spec()).map_values(|v: <X::D as Decode>::Item| E::own(v))
                 == self@.subrange(start as int, end as int),
@@ -619,6 +623,33 @@ impl<E, X, B, P> ColumnCore<E, PrefixSlabWeight<P>, SlabBTree<PrefixSlabWeight<P
     {
         let ix = self.prefix_index();
         p_prefix::<X, B>(self.slabs(), ix, index)
+    }
+
+    /// The sum of the values in `start..end` (`start < end`): what, added
+    /// to the sum before `start`, gives the sum before `end`. `p_sum_range`
+    /// over an iterator on the whole column, from the type invariant.
+    #[inline(always)]
+    pub(crate) fn sum_range(&self, start: usize, end: usize) -> (r: P)
+        requires
+            start < end,
+        ensures
+            prefix_add(vsum::<_, B>(before::<X>(self.slabs_spec(), start as int)), r)
+                == vsum::<_, B>(before::<X>(self.slabs_spec(), end as int)),
+    {
+        let ix = self.prefix_index();
+        let len = self.len();
+        let mut core = self.reader::<X>(0, len);
+        let mut total = <B as PrefixOps<<<X as Decoders<'static>>::D as Decode>::Item>>::zero();
+        let mut base = <B as PrefixOps<<<X as Decoders<'static>>::D as Decode>::Item>>::zero();
+        self.lemma_column();
+        proof {
+            core.lemma_here::<X>(self.slabs_spec());
+            let v = crate::iter_core::vals_of::<X>(self.slabs_spec());
+            assert(v.take(0) =~= Seq::<<X::D as Decode>::Item>::empty());
+            axiom_prefix_add(prefix_zero::<P>(), prefix_zero::<P>(), prefix_zero::<P>());
+        }
+        p_sum_range::<X, B>(&mut core, self.slabs(), Some(ix), start, end, &mut total, &mut base);
+        total
     }
 
     /// The first position whose sum before it reaches `target`:
