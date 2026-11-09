@@ -71,6 +71,13 @@ pub trait SlabWeight: Sealed + Clone + Default + std::fmt::Debug + AddAssign + S
     /// [`len`](Self::len), for specifications.
     spec fn weight_len(&self) -> nat;
 
+    /// A weight that is also an aggregate has the same length as both.
+    proof fn lemma_weight_len(&self)
+        where Self: crate::btree::SlabAggregate
+        ensures
+            self.weight_len() == self.spec_len(),
+    ;
+
     /// The length (item count) component of this weight.
     fn len(&self) -> (n: usize)
         ensures n == self.weight_len();
@@ -106,6 +113,11 @@ impl Sealed for usize {}
 impl SlabWeight for usize {
     open spec fn weight_len(&self) -> nat {
         *self as nat
+    }
+
+    proof fn lemma_weight_len(&self)
+        where Self: crate::btree::SlabAggregate
+    {
     }
 
     #[inline]
@@ -145,6 +157,9 @@ impl SlabWeight for usize {
 /// counts.  Prefix-aware columns use a compound weight that also tracks
 /// prefix sums in the same BIT.
 #[doc(hidden)]
+// `Model`'s bound is the crate's own verified contract, which nothing
+// outside can name or implement — a seal, like `SlabEdit::Model`'s
+#[allow(private_bounds)]
 pub trait WeightFn<T: ColumnValueRef, C: Codec = Leb128>: Sealed {
     /// The per-slab weight type.
     ///
@@ -154,6 +169,15 @@ pub trait WeightFn<T: ColumnValueRef, C: Codec = Leb128>: Sealed {
     /// [`SlabAggregate`](SlabAggregate), which permits
     /// non-invertible aggregates like min/max.
     type Weight: Clone + Default + std::fmt::Debug + SlabAggregate;
+
+    /// The weights as the verified cursor sees them: what a slab's weight
+    /// is, and its verified computation ([`crate::weights`]).
+    #[doc(hidden)]
+    type Model: crate::cursor::Weigh<
+        <<T as ColumnValueRef>::Encoding<C> as crate::edit::SlabEdit>::Model,
+        Self::Weight,
+    >;
+
     fn compute(slab: &Slab<TailOf<T, C>>) -> Self::Weight;
 
     /// `true` when `compute` has to re-decode the slab bytes (prefix sums,
@@ -211,6 +235,7 @@ impl Sealed for LenWeight {}
 
 impl<T: ColumnValueRef, C: Codec> WeightFn<T, C> for LenWeight {
     type Weight = usize;
+    type Model = crate::weights::LenModel;
     #[inline]
     fn compute(slab: &Slab<TailOf<T, C>>) -> usize {
         slab.len
@@ -847,7 +872,7 @@ pub(crate) type CoreOf<T, C, WF, Idx> = ColumnCore<
     <<T as ColumnValueRef>::Encoding<C> as crate::edit::SlabEdit>::Model,
     <WF as WeightFn<T, C>>::Weight,
     Idx,
-    WeightOf<T, C, WF>,
+    <WF as WeightFn<T, C>>::Model,
 >;
 
 impl<T, C, WF, Idx> Clone for Column<T, C, WF, Idx>

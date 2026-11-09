@@ -148,6 +148,7 @@ pub mod raw;
 pub mod rle;
 pub mod shift;
 pub(crate) mod splices;
+pub(crate) mod weights;
 pub use column::{Column, ColumnLoadIter, Iter, IterState, Runs, Splice};
 pub use delta::indexed::FindByRange;
 pub use delta::{

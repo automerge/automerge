@@ -181,7 +181,7 @@ fn insert_range<E: Slabs, R: RangeFeed<E>>(
 /// normalized splices `sps` in turn, each range's items from `feed`. The
 /// column becomes `applied(dst, src, sps)`.
 #[inline(always)]
-pub(crate) fn copy_direct<E: Slabs, W, I: IndexOps<W>, G: Weigh<E::Tail, W>, F: Visitor<E>, S: WeightSink<W>, R: RangeFeed<E>>(
+pub(crate) fn copy_direct<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>, F: Visitor<E>, S: WeightSink<W>, R: RangeFeed<E>>(
     slabs: &mut Vec<Slab<E::Tail>>,
     index: &mut I,
     total_len: &mut usize,
@@ -265,7 +265,7 @@ pub(crate) fn copy_direct<E: Slabs, W, I: IndexOps<W>, G: Weigh<E::Tail, W>, F: 
 /// Cut the gaps between `sps`' ranges out of the column, back to front:
 /// it keeps exactly the ranges' items.
 #[inline(always)]
-fn cut_gaps<E: Slabs, W, I: IndexOps<W>, G: Weigh<E::Tail, W>, F: Visitor<E>, S: WeightSink<W>, X: Insertable<E>>(
+fn cut_gaps<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>, F: Visitor<E>, S: WeightSink<W>, X: Insertable<E>>(
     slabs: &mut Vec<Slab<E::Tail>>,
     index: &mut I,
     total_len: &mut usize,
@@ -344,7 +344,7 @@ fn cut_gaps<E: Slabs, W, I: IndexOps<W>, G: Weigh<E::Tail, W>, F: Visitor<E>, S:
 #[verifier::spinoff_prover]
 #[verifier::rlimit(40)]
 #[inline(always)]
-fn put_gaps<E: Slabs, W, I: IndexOps<W>, G: Weigh<E::Tail, W>, F: Visitor<E>, R: RangeFeed<E>>(
+fn put_gaps<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>, F: Visitor<E>, R: RangeFeed<E>>(
     slabs: &mut Vec<Slab<E::Tail>>,
     index: &mut I,
     total_len: &mut usize,
@@ -451,7 +451,7 @@ fn put_gaps<E: Slabs, W, I: IndexOps<W>, G: Weigh<E::Tail, W>, F: Visitor<E>, R:
 /// `applied(dst, src, sps)`, as [`copy_direct`] makes it of the
 /// destination.
 #[inline(always)]
-pub(crate) fn copy_invert<E: Slabs, W, I: IndexOps<W>, G: Weigh<E::Tail, W>, F: Visitor<E>, S: WeightSink<W>, R: RangeFeed<E>>(
+pub(crate) fn copy_invert<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>, F: Visitor<E>, S: WeightSink<W>, R: RangeFeed<E>>(
     slabs: &mut Vec<Slab<E::Tail>>,
     index: &mut I,
     total_len: &mut usize,

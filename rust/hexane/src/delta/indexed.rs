@@ -35,6 +35,7 @@ impl Sealed for IndexedDeltaWeightFn {}
 
 impl<I: DeltaInner, C: Codec> WeightFn<I, C> for IndexedDeltaWeightFn {
     type Weight = SlabAgg;
+    type Model = crate::weights::DeltaModel<Dx<I, C>, DB<I>>;
 
     // verified (`agg::slab_agg`), given a well-formed slab
     fn compute(slab: &Slab<TailOf<I, C>>) -> SlabAgg {
@@ -72,7 +73,8 @@ impl<I: DeltaInner, C: Codec> WeightFn<I, C> for IndexedDeltaWeightFn {
 
 /// A delta column's values as deltas, for the verified aggregate
 /// (`agg::slab_agg`). Trusted: `DeltaInner::to_opt`.
-pub(crate) struct DB<I>(PhantomData<fn() -> I>);
+#[doc(hidden)]
+pub struct DB<I>(PhantomData<fn() -> I>);
 
 impl<'a, I: DeltaInner> DeltaOps<I::Get<'a>> for DB<I> {
     #[cfg(verus_keep_ghost)]

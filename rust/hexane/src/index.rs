@@ -101,6 +101,13 @@ pub trait IndexOps<W>: Sized {
             Self::plain(),
     ;
 
+    /// An index measures a weight that is an aggregate by its length.
+    proof fn lemma_wlen(w: W)
+        where W: crate::btree::SlabAggregate
+        ensures
+            Self::wlen(w) == w.spec_len(),
+    ;
+
     proof fn lemma_fits(ws: Seq<W>)
         requires
             Self::plain(),
@@ -370,6 +377,12 @@ impl<W: SlabWeight> IndexOps<W> for BitIndex<W> {
     proof fn lemma_plain() {
     }
 
+    proof fn lemma_wlen(w: W)
+        where W: crate::btree::SlabAggregate
+    {
+        w.lemma_weight_len();
+    }
+
     proof fn lemma_fits(ws: Seq<W>) {
         assert(ws.map_values(|w: W| Self::wlen(w)) =~= lens(ws));
     }
@@ -463,6 +476,15 @@ pub proof fn lemma_plain_valid<A: SlabAggregate>(ws: Seq<A>)
     }
 }
 
+/// The B-tree as an index: its weights are its view, and it is well-formed
+/// when it is `ok`.
+pub(crate) proof fn lemma_btree_index<A: SlabAggregate>(ix: SlabBTree<A>)
+    ensures
+        ix.ws() == ix@,
+        ix.ok() == ix.wf(),
+{
+}
+
 impl<A: SlabAggregate> IndexOps<A> for SlabBTree<A> {
     open spec fn wlen(w: A) -> nat {
         w.spec_len()
@@ -490,6 +512,11 @@ impl<A: SlabAggregate> IndexOps<A> for SlabBTree<A> {
     }
 
     proof fn lemma_plain() {
+    }
+
+    proof fn lemma_wlen(w: A)
+        where A: crate::btree::SlabAggregate
+    {
     }
 
     proof fn lemma_fits(ws: Seq<A>) {

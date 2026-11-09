@@ -7,10 +7,9 @@ use crate::column::{Column, Dx, Iter, Slab, SlabWeight, TailOf, WeightFn};
 use crate::encoding::{ColumnEncoding, RunDecoder};
 use crate::index::IndexOps;
 use crate::prefix_core::{
-    p_next, p_next_run, p_nth, p_prefix, p_reset, p_slab_sum, p_slab_sum_checked, p_sum_range,
-    PrefixOps,
+    p_next, p_next_run, p_nth, p_reset, p_slab_sum, p_slab_sum_checked, p_sum_range, PrefixOps,
 };
-use crate::prefix_search::{p_advance, p_index_for_prefix, PrefixOrd};
+use crate::prefix_search::{p_advance, PrefixOrd};
 use crate::PackError;
 use crate::{Codec, Leb128};
 use crate::{ColumnValueRef, RleValue, Run};
@@ -209,6 +208,12 @@ impl<P: Clone + Default + std::fmt::Debug + AddAssign + SubAssign> SlabWeight
         self.len as vstd::prelude::nat
     }
 
+    proof fn lemma_weight_len(&self)
+        where Self: crate::btree::SlabAggregate
+    {
+        crate::btree::lemma_prefix_len(*self);
+    }
+
     #[inline]
     fn len(&self) -> usize {
         self.len
@@ -277,6 +282,7 @@ impl<T> Sealed for PrefixWeightFn<T> {}
 
 impl<T: PrefixValue, C: Codec> WeightFn<T, C> for PrefixWeightFn<T> {
     type Weight = PrefixSlabWeight<T::Prefix>;
+    type Model = crate::weights::PrefixModel<Dx<T, C>, PB<T>>;
 
     // the sum is verified (`prefix_core`), given a well-formed slab
     #[inline]
@@ -741,8 +747,9 @@ impl<T: PrefixValue, C: Codec> PrefixColumn<T, C> {
     /// indices `0..index`: what [`PrefixedValue::prefix`] shows for the
     /// item at `index`.
     pub fn get_prefix(&self, index: usize) -> T::Prefix {
-        // verified (`prefix_core`), given the column's invariant
-        p_prefix::<Dx<T, C>, PB<T>>(self.col.core.slabs(), self.col.core.index(), index)
+        // verified (`ColumnCore::prefix_before`, `prefix_core::p_prefix`),
+        // from the column's type invariant
+        self.col.core.prefix_before(index)
     }
 
     /// **Inclusive** prefix sum through `index`: what
@@ -812,9 +819,10 @@ where
     /// Returns `0` when `target` is zero (or non-positive) and
     /// `len() + 1` when `target` exceeds the grand total.
     pub fn get_index_for_prefix(&self, target: T::Prefix) -> usize {
-        // verified (`prefix_search`), where the column's sum fits its
+        // verified (`ColumnCore::index_for_prefix`, `prefix_search`), from
+        // the column's type invariant, where the column's sum fits its
         // prefix type
-        p_index_for_prefix::<Dx<T, C>, PB<T>>(self.col.core.slabs(), self.col.core.index(), target)
+        self.col.core.index_for_prefix(target)
     }
 }
 
@@ -951,7 +959,8 @@ where
 /// (`prefix_core`). Trusted: `accumulate` adds a value's contribution and
 /// `accumulate_run` a run's (user code), and `T::Prefix`'s `+`, `-` and
 /// `default` keep the laws of `prefix_add` and `prefix_sub`.
-pub(crate) struct PB<T>(PhantomData<fn() -> T>);
+#[doc(hidden)]
+pub struct PB<T>(PhantomData<fn() -> T>);
 
 impl<'a, T: PrefixValue> PrefixOps<T::Get<'a>> for PB<T> {
     type P = T::Prefix;
@@ -989,6 +998,16 @@ impl<'a, T: PrefixValue> PrefixOps<T::Get<'a>> for PB<T> {
     #[inline(always)]
     fn add_to(a: &mut T::Prefix, b: &T::Prefix) {
         *a += b
+    }
+
+    #[inline(always)]
+    fn max_unchecked_len() -> usize {
+        T::MAX_UNCHECKED_LEN
+    }
+
+    #[inline(always)]
+    fn try_add(t: &mut T::Prefix, b: &T::Prefix) -> bool {
+        T::try_add_prefix(t, b)
     }
 }
 

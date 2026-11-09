@@ -441,8 +441,16 @@ compiles them away. To check them, run `cargo verus verify -p hexane
   each leaves the column holding the destination with the splices
   applied, provided the source's run iterator, shifted to each range,
   gives that range's items (the `RangeFeed` contract, trusted).
-* Prefix sums: a prefix column's slab weights hold each slab's sum, as an
-  edit or a build computes them; `get_prefix` and `get_total` return the
+* The weights a column's index keeps: each weight function names a
+  verified model (`weights`), whose relation the column invariant keeps
+  between each slab and its weight: a plain column's weight is the slab's
+  item count, a prefix column's the item count and the sum of its values,
+  a delta column's the item count and, where its running sums fit, the
+  aggregate of its deltas. The edit cursor computes them with the
+  verified computations.
+* Prefix sums: a prefix column's slab weights hold each slab's sum, so
+  the prefix readers' invariant follows from the column's type invariant;
+  `get_prefix` and `get_total` return the
   sum of the values before (through) the item, from the index's sum for
   the slabs before it; and the prefix iterator's running total
   (`PrefixIter`'s `next`, `nth`, `next_run` and `reset_prefix`), with its
@@ -462,14 +470,12 @@ decode, which the verified code reaches through traits (the contract on
 `RleValue`); the thin glue that
 connects the generic column types to the verified cores, and the closures
 passed through it (including the slabs a new column is built from, which
-come from the verified loaders, fills and encoders, and the read side's
-own view of the column invariant, which the readers assume); that the weight a
-column's index holds for each slab is the one its weight function
-computes for the slab (the edit cursor is proved to keep them so, and a
-load, which accumulates each slab's weight from the runs as they stream
-past, is proved to give each slab exactly the runs that hold its values,
-in order), so that accumulating a slab's runs gives what computing its
-weight does; each prefix value type's `accumulate` and
+come from the verified loaders, fills and encoders, and the iterators'
+state between calls, and the delta readers' invariant, which needs the
+delta domain contract); that a weight a load accumulates from the runs as
+they stream past is the slab's weight (a load is proved to give each
+slab exactly the runs that hold its values, in order, so that
+accumulating a slab's runs gives what computing its weight does); each prefix value type's `accumulate` and
 `accumulate_run` (that they add its values, a run as its value
 repeated) and `try_accumulate_run` (that when it succeeds it adds what
 `accumulate_run` does), and that its prefix type's `+` is associative with `default`

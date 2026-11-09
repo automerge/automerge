@@ -310,11 +310,13 @@ pub(crate) proof fn lemma_lens_ok<'a, E: ReadsAgree<'a, X>, X: crate::iter_core:
 }
 
 /// A slab's weight in the index: one that counts its items.
-pub(crate) trait Weigh<Tail: Copy + Clone + std::fmt::Debug + Default, W> {
+pub(crate) trait Weigh<E: Slabs, W> {
     /// `w` is slab `s`'s weight: what the column's index records for it.
-    spec fn wrel(w: W, s: Slab<Tail>) -> bool;
+    spec fn wrel(w: W, s: Slab<E::Tail>) -> bool;
 
-    fn compute<I: IndexOps<W>>(s: &Slab<Tail>) -> (w: W)
+    fn compute<I: IndexOps<W>>(s: &Slab<E::Tail>) -> (w: W)
+        requires
+            E::ok(*s),
         ensures
             I::wlen(w) == s.len,
             Self::wrel(w, *s),
@@ -357,12 +359,12 @@ pub(crate) open spec fn all_ok<E: Slabs>(s: Seq<Slab<E::Tail>>) -> bool {
 /// A column: well-formed slabs, an index of their item counts, and their
 /// total.
 /// Each slab's weight in the index is its own (`G::wrel`).
-pub(crate) open spec fn ws_ok<T: Copy + Clone + std::fmt::Debug + Default, W, G: Weigh<T, W>>(ws: Seq<W>, s: Seq<Slab<T>>) -> bool {
+pub(crate) open spec fn ws_ok<E: Slabs, W, G: Weigh<E, W>>(ws: Seq<W>, s: Seq<Slab<E::Tail>>) -> bool {
     &&& ws.len() == s.len()
     &&& forall|i: int| 0 <= i < s.len() ==> #[trigger] G::wrel(ws[i], s[i])
 }
 
-pub(crate) open spec fn col_ok<E: Slabs, W, I: IndexOps<W>, G: Weigh<E::Tail, W>>(
+pub(crate) open spec fn col_ok<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>>(
     s: Seq<Slab<E::Tail>>,
     ix: I,
     total_len: usize,
@@ -371,7 +373,7 @@ pub(crate) open spec fn col_ok<E: Slabs, W, I: IndexOps<W>, G: Weigh<E::Tail, W>
     &&& all_ok::<E>(s)
     &&& ix.ok()
     &&& wlens::<W, I>(ix.ws()) == slab_lens(s)
-    &&& ws_ok::<E::Tail, W, G>(ix.ws(), s)
+    &&& ws_ok::<E, W, G>(ix.ws(), s)
     &&& total_len == total(slab_lens(s))
     &&& max_segments >= 2
     &&& I::plain()
@@ -875,7 +877,7 @@ impl<E: Slabs> Cursor<E> {
     }
 
     /// The cursor and the column it stands in.
-    pub(crate) open spec fn ok<W, I: IndexOps<W>, G: Weigh<E::Tail, W>>(
+    pub(crate) open spec fn ok<W, I: IndexOps<W>, G: Weigh<E, W>>(
         &self,
         s: Seq<Slab<E::Tail>>,
         ix: I,
@@ -908,7 +910,7 @@ impl<E: Slabs> Cursor<E> {
     }
 
     /// Open a cursor at item `at` of the column.
-    pub(crate) fn new<W, I: IndexOps<W>, G: Weigh<E::Tail, W>>(
+    pub(crate) fn new<W, I: IndexOps<W>, G: Weigh<E, W>>(
         slabs: &mut Vec<Slab<E::Tail>>,
         index: &mut I,
         total_len: usize,
@@ -1010,7 +1012,7 @@ impl<E: Slabs> Cursor<E> {
     /// Point `slab`/`in_slab` at `out`, looked up through the index.  Only
     /// valid with no rebuild open: `out` is a position in the column as it
     /// stands.
-    pub(crate) fn locate_out<W, I: IndexOps<W>, G: Weigh<E::Tail, W>>(
+    pub(crate) fn locate_out<W, I: IndexOps<W>, G: Weigh<E, W>>(
         &mut self,
         slabs: &Vec<Slab<E::Tail>>,
         index: &I,
@@ -1083,7 +1085,7 @@ impl<E: Slabs> Cursor<E> {
     ///
     /// A move that stays inside the current slab skips the lookup and
     /// carries the reader along instead.
-    pub(crate) fn jump<W, I: IndexOps<W>, G: Weigh<E::Tail, W>>(
+    pub(crate) fn jump<W, I: IndexOps<W>, G: Weigh<E, W>>(
         &mut self,
         slabs: &Vec<Slab<E::Tail>>,
         index: &I,
@@ -1306,7 +1308,7 @@ impl<E: Slabs> Cursor<E> {
 
     /// Bring the index back in step with the slabs: they are the slabs
     /// `s_old` it indexes, but for `[start, end)`.
-    fn reconcile<W, I: IndexOps<W>, G: Weigh<E::Tail, W>>(
+    fn reconcile<W, I: IndexOps<W>, G: Weigh<E, W>>(
         slabs: &Vec<Slab<E::Tail>>,
         index: &mut I,
         start: usize,
@@ -1318,17 +1320,18 @@ impl<E: Slabs> Cursor<E> {
             old(index).ok(),
             I::plain(),
             wlens::<W, I>(old(index).ws()) == slab_lens(s_old),
-            ws_ok::<E::Tail, W, G>(old(index).ws(), s_old),
+            ws_ok::<E, W, G>(old(index).ws(), s_old),
             start < end <= slabs@.len(),
             end + s_old.len() - slabs@.len() <= s_old.len(),
             start < end + s_old.len() - slabs@.len(),
             slabs@.take(start as int) == s_old.take(start as int),
             slabs@.skip(end as int) == s_old.skip(end + s_old.len() - slabs@.len()),
             total(slab_lens(slabs@)) <= usize::MAX,
+            all_ok::<E>(slabs@),
         ensures
             final(index).ok(),
             wlens::<W, I>(final(index).ws()) == slab_lens(slabs@),
-            ws_ok::<E::Tail, W, G>(final(index).ws(), slabs@),
+            ws_ok::<E, W, G>(final(index).ws(), slabs@),
     {
         let ghost s = slabs@;
         let ghost ws = index.ws();
@@ -1372,6 +1375,7 @@ impl<E: Slabs> Cursor<E> {
                 invariant
                     start <= k <= end <= s.len(),
                     s == slabs@,
+                    all_ok::<E>(s),
                     new@.len() == k - start,
                     forall|i: int| 0 <= i < new@.len() ==> #[trigger] I::wlen(new@[i]) == s[start + i].len,
                     forall|i: int| 0 <= i < new@.len() ==> #[trigger] G::wrel(new@[i], s[start + i]),
@@ -1425,7 +1429,7 @@ impl<E: Slabs> Cursor<E> {
     /// update the index — each once, however many edits the slab took.
     #[verifier::spinoff_prover]
     #[verifier::rlimit(30)]
-    pub(crate) fn close<W, I: IndexOps<W>, G: Weigh<E::Tail, W>>(
+    pub(crate) fn close<W, I: IndexOps<W>, G: Weigh<E, W>>(
         &mut self,
         slabs: &mut Vec<Slab<E::Tail>>,
         index: &mut I,
@@ -1597,7 +1601,7 @@ impl<E: Slabs> Cursor<E> {
     /// Inlined into its one caller, `Edit::advance_with`, which then takes
     /// the column whole rather than field by field.
     #[inline(always)]
-    pub(crate) fn advance_with<W, I: IndexOps<W>, G: Weigh<E::Tail, W>, F: Visitor<E>>(
+    pub(crate) fn advance_with<W, I: IndexOps<W>, G: Weigh<E, W>, F: Visitor<E>>(
         &mut self,
         slabs: &mut Vec<Slab<E::Tail>>,
         index: &mut I,
@@ -1696,7 +1700,7 @@ impl<E: Slabs> Cursor<E> {
     /// A whole slab with no rebuild reading it is dropped outright, and
     /// `g` told its weight; `f` sees every run a rebuild drops.
     #[inline(always)]
-    pub(crate) fn delete_with<W, I: IndexOps<W>, G: Weigh<E::Tail, W>, F: Visitor<E>, S: WeightSink<W>>(
+    pub(crate) fn delete_with<W, I: IndexOps<W>, G: Weigh<E, W>, F: Visitor<E>, S: WeightSink<W>>(
         &mut self,
         slabs: &mut Vec<Slab<E::Tail>>,
         index: &mut I,
@@ -1792,7 +1796,7 @@ impl<E: Slabs> Cursor<E> {
 
     /// Drop the current slab whole: the cursor stands at its start with no
     /// rebuild open, and it is not the column's only slab.
-    fn drop_slab<W, I: IndexOps<W>, G: Weigh<E::Tail, W>>(
+    fn drop_slab<W, I: IndexOps<W>, G: Weigh<E, W>>(
         &mut self,
         slabs: &mut Vec<Slab<E::Tail>>,
         index: &mut I,
@@ -1946,7 +1950,7 @@ pub(crate) trait RunFeed<E: Slabs> {
 /// `at + del`. Ends when `feed` does.
 #[verifier::exec_allows_no_decreases_clause]
 #[inline(always)]
-pub(crate) fn splice_feed<E: Slabs, W, I: IndexOps<W>, G: Weigh<E::Tail, W>, F: Visitor<E>, S: WeightSink<W>, R: RunFeed<E>>(
+pub(crate) fn splice_feed<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>, F: Visitor<E>, S: WeightSink<W>, R: RunFeed<E>>(
     slabs: &mut Vec<Slab<E::Tail>>,
     index: &mut I,
     total_len: &mut usize,
@@ -2026,10 +2030,9 @@ pub(crate) fn splice_feed<E: Slabs, W, I: IndexOps<W>, G: Weigh<E::Tail, W>, F: 
 // verified functions with the contracts above), and a slab to its
 // weight.
 
-use crate::column::{TailOf, WeightFn};
 use crate::edit::{EditSlab, SlabEdit};
 use crate::encoding::ColumnEncoding;
-use crate::{AsColumnRef, Codec, ColumnValueRef};
+use crate::{AsColumnRef, ColumnValueRef};
 
 /// A closure seeing each run a cursor carries or drops, as the
 /// [`Visitor`] of encoding `E`'s slab model: it hands the closure to the
@@ -2137,37 +2140,3 @@ impl<W, G: FnMut(&W)> WeightSink<W> for G {
 
 /// A column's weight function, as [`Weigh`].
 pub(crate) struct WeightOf<T, C, WF>(PhantomData<fn() -> (T, C, WF)>);
-
-impl<T: ColumnValueRef, C: Codec, WF: WeightFn<T, C>> Weigh<TailOf<T, C>, WF::Weight>
-    for WeightOf<T, C, WF>
-{
-    #[cfg(verus_keep_ghost)]
-    fn wrel(_w: WF::Weight, _s: Slab<TailOf<T, C>>) -> bool {
-        unimplemented!()
-    }
-
-    #[inline(always)]
-    fn compute<I: IndexOps<WF::Weight>>(s: &Slab<TailOf<T, C>>) -> WF::Weight {
-        WF::compute(s)
-    }
-
-    #[inline(always)]
-    fn check_set<I: IndexOps<WF::Weight>>(index: &I, i: usize, w: &WF::Weight, len: usize) {
-        if WF::CHECKS_TOTAL {
-            WF::check_splice(index, i..i + 1, std::slice::from_ref(w), len);
-        }
-    }
-
-    #[inline(always)]
-    fn check_splice<I: IndexOps<WF::Weight>>(
-        index: &I,
-        start: usize,
-        end: usize,
-        new: &Vec<WF::Weight>,
-        len: usize,
-    ) {
-        if WF::CHECKS_TOTAL {
-            WF::check_splice(index, start..end, new, len);
-        }
-    }
-}

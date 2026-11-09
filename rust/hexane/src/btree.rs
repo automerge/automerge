@@ -339,6 +339,20 @@ pub proof fn axiom_prefix_add<P>(a: P, b: P, c: P)
 {
 }
 
+/// A prefix weight's length, as an aggregate: its item count.
+pub(crate) proof fn lemma_prefix_len<P: Clone + Default + std::fmt::Debug + AddAssign + SubAssign>(w: PrefixSlabWeight<P>)
+    ensures
+        w.spec_len() == w.len as nat,
+{
+}
+
+/// A prefix weight's sum, as an aggregate: its `prefix`.
+pub(crate) proof fn lemma_prefix_sum<P: Clone + Default + std::fmt::Debug + AddAssign + SubAssign + Add<Output = P> + for<'a> AddAssign<&'a P>>(w: PrefixSlabWeight<P>)
+    ensures
+        w.spec_prefix() == w.prefix,
+{
+}
+
 impl<P> SlabAggregate for PrefixSlabWeight<P>
 where
     P: Clone + Default + std::fmt::Debug + AddAssign + SubAssign,

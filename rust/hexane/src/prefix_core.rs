@@ -97,6 +97,14 @@ pub(crate) trait PrefixOps<V: Copy> {
     /// `*a += b`.
     fn add_to(a: &mut Self::P, b: &Self::P)
         ensures *final(a) == prefix_add(*old(a), *b);
+
+    /// `T::MAX_UNCHECKED_LEN`: a slab of at most this many items cannot
+    /// overflow its sum, so it is summed without checking.
+    fn max_unchecked_len() -> usize;
+
+    /// `T::try_add_prefix`: add `b`, unless the sum would not fit. Only
+    /// its run-time check matters, so it specifies nothing.
+    fn try_add(t: &mut Self::P, b: &Self::P) -> bool;
 }
 
 /// The sum of the contributions of values `vs`.

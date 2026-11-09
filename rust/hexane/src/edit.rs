@@ -5,7 +5,7 @@
 use crate::column::{Column, WeightFn};
 use crate::column_core::Parts;
 use crate::copy::Ranged;
-use crate::cursor::{Cursor, Feeding, Inserting, Slabs, Visiting, WeightOf};
+use crate::cursor::{Cursor, Feeding, Inserting, Slabs, Visiting};
 use crate::encoding::ColumnEncoding;
 use crate::index::ColumnIndex;
 use crate::{AsColumnRef, Codec, ColumnValueRef, Run};
@@ -86,7 +86,7 @@ type Enc<T, C> = <T as ColumnValueRef>::Encoding<C>;
 type Model<T, C> = <Enc<T, C> as SlabEdit>::Model;
 
 /// The column's weight function, for the cursor.
-type G<T, C, WF> = WeightOf<T, C, WF>;
+type G<T, C, WF> = <WF as WeightFn<T, C>>::Model;
 
 /// The default carry budget, in runs — an encoding states its own as
 /// [`SlabEdit::CARRY_BUDGET`].

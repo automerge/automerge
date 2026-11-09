@@ -25,6 +25,9 @@
 // Verus has no spec for a slice's `is_empty`.
 #![allow(clippy::len_zero)]
 
+use crate::btree::SlabBTree;
+#[cfg(verus_keep_ghost)]
+use crate::btree::{lemma_prefix_len, lemma_prefix_sum, PrefixAggregate, SlabAggregate};
 use crate::column::Slab;
 use crate::copy::{copy_direct, copy_invert, RangeFeed};
 #[cfg(verus_keep_ghost)]
@@ -37,15 +40,26 @@ use crate::cursor::{lemma_lens_ok, lemma_vals_own};
 #[cfg(verus_keep_ghost)]
 use crate::fenwick::total;
 #[cfg(verus_keep_ghost)]
+use crate::index::lemma_btree_index;
+#[cfg(verus_keep_ghost)]
 use crate::index::wlens;
 use crate::index::IndexOps;
 #[cfg(verus_keep_ghost)]
-use crate::iter_core::Decode;
-use crate::iter_core::{Decoders, ICore};
+use crate::iter_core::lens_ok;
+use crate::iter_core::{Decode, Decoders, ICore};
+use crate::prefix::PrefixSlabWeight;
+#[cfg(verus_keep_ghost)]
+use crate::prefix_core::{before, ix_ok, vsum};
+use crate::prefix_core::{p_prefix, PrefixOps};
+#[cfg(verus_keep_ghost)]
+use crate::prefix_search::found_at;
+use crate::prefix_search::{p_index_for_prefix, PrefixOrd};
 #[cfg(verus_keep_ghost)]
 use crate::splices::{applied, normal};
+use crate::weights::PrefixModel;
 use crate::Splice;
 use std::marker::PhantomData;
+use std::ops::{Add, AddAssign, SubAssign};
 use vstd::prelude::*;
 
 verus! {
@@ -97,7 +111,7 @@ pub(crate) struct Parts<T: Copy + Clone + std::fmt::Debug + Default, I> {
 /// A column's state: its parts and its segment budget, the parts always
 /// a column (`inv`). Only while an edit has them out are they missing,
 /// and a column left so by a panic panics when used again.
-pub(crate) struct ColumnCore<E: Slabs, W, I: IndexOps<W>, G: Weigh<E::Tail, W>> {
+pub(crate) struct ColumnCore<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> {
     state: Option<Parts<E::Tail, I>>,
     max_segments: usize,
     _p: PhantomData<(E, W, G)>,
@@ -105,7 +119,7 @@ pub(crate) struct ColumnCore<E: Slabs, W, I: IndexOps<W>, G: Weigh<E::Tail, W>> 
 
 /// The parts make a column with budget `max_segments`, with room for
 /// three more items, as the edit cursor counts.
-pub(crate) open spec fn parts_ok<E: Slabs, W, I: IndexOps<W>, G: Weigh<E::Tail, W>>(
+pub(crate) open spec fn parts_ok<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>>(
     p: Parts<E::Tail, I>,
     max_segments: usize,
 ) -> bool {
@@ -113,7 +127,7 @@ pub(crate) open spec fn parts_ok<E: Slabs, W, I: IndexOps<W>, G: Weigh<E::Tail, 
     &&& p.total_len + 3 <= usize::MAX
 }
 
-impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E::Tail, W>> ColumnCore<E, W, I, G> {
+impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> ColumnCore<E, W, I, G> {
     /// The column invariant.
     #[verifier::type_invariant]
     spec fn inv(&self) -> bool {
@@ -208,7 +222,7 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E::Tail, W>> ColumnCore<E, W, I, G> {
     pub(crate) fn from_slabs(slabs: Vec<Slab<E::Tail>>, ws: Vec<W>, max_segments: usize) -> (r: Option<Self>)
         requires
             all_ok::<E>(slabs@),
-            ws_ok::<E::Tail, W, G>(ws@, slabs@),
+            ws_ok::<E, W, G>(ws@, slabs@),
         ensures
             r matches Some(c) ==> c.ready() && c@ == vals_of::<E>(slabs@) && c.budget() == max_segments
                 && c.count() == 0,
@@ -554,6 +568,72 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E::Tail, W>> ColumnCore<E, W, I, G> {
     }
 }
 
+/// A prefix column's core: its weights hold each slab's item count and
+/// sum (`weights::PrefixModel`), so the prefix readers' invariant
+/// (`ix_ok`) follows from the type invariant.
+impl<E, X, B, P> ColumnCore<E, PrefixSlabWeight<P>, SlabBTree<PrefixSlabWeight<P>>, PrefixModel<X, B>> where
+    E: Slabs + for<'a> ReadsAgree<'a, X>,
+    X: for<'a> Decoders<'a, Tail = E::Tail>,
+    B: for<'a> PrefixOps<<<X as Decoders<'a>>::D as Decode>::Item, P = P>,
+    P: Clone + Default + std::fmt::Debug + AddAssign + SubAssign + Add<Output = P> + for<'b> AddAssign<&'b P>,
+ {
+    /// The prefix readers' view of the column invariant, from the type
+    /// invariant: the index is well-formed and each weight holds its
+    /// slab's item count and the sum of its values.
+    #[inline(always)]
+    fn prefix_index(&self) -> (ix: &SlabBTree<PrefixSlabWeight<P>>)
+        ensures
+            ix.wf(),
+            ix_ok::<X, B>(ix@, self.slabs_spec()),
+            lens_ok::<X>(self.slabs_spec()),
+            total(slab_lens(self.slabs_spec())) <= usize::MAX,
+            self.slabs_spec().len() < usize::MAX,
+    {
+        let ix = self.index();
+        if self.slabs().len() == usize::MAX {
+            too_many_slabs();
+        }
+        proof {
+            use_type_invariant(self);
+            let s = self.slabs_spec();
+            lemma_lens_ok::<E, X>(s);
+            lemma_btree_index(*ix);
+            assert forall|i: int| 0 <= i < s.len() implies {
+                &&& #[trigger] ix@[i].spec_len() == s[i].len
+                &&& ix@[i].spec_prefix() == vsum::<_, B>(<X as Decoders<'static>>::vals(s[i]))
+            } by {
+                lemma_prefix_len(ix@[i]);
+                lemma_prefix_sum(ix@[i]);
+                assert(<PrefixModel<X, B> as Weigh<E, PrefixSlabWeight<P>>>::wrel(ix.ws()[i], s[i]));
+            }
+        }
+        ix
+    }
+
+    /// The sum of the values before item `index` (all of them, past the
+    /// end): `p_prefix`, from the type invariant.
+    #[inline(always)]
+    pub(crate) fn prefix_before(&self, index: usize) -> (r: P)
+        ensures
+            r == vsum::<_, B>(before::<X>(self.slabs_spec(), index as int)),
+    {
+        let ix = self.prefix_index();
+        p_prefix::<X, B>(self.slabs(), ix, index)
+    }
+
+    /// The first position whose sum before it reaches `target`:
+    /// `p_index_for_prefix`, from the type invariant.
+    #[inline(always)]
+    pub(crate) fn index_for_prefix(&self, target: P) -> (r: usize)
+        where B: for<'a> PrefixOrd<<<X as Decoders<'a>>::D as Decode>::Item>, P: Ord
+        ensures
+            found_at::<_, B>(crate::iter_core::vals_of::<X>(self.slabs_spec()), target, r as int),
+    {
+        let ix = self.prefix_index();
+        p_index_for_prefix::<X, B>(self.slabs(), ix, target)
+    }
+}
+
 /// Never returns: after a call that does not.
 #[verifier::external_body]
 #[inline(always)]
@@ -579,7 +659,7 @@ impl<T: Copy + Clone + std::fmt::Debug + Default, I: Clone> Clone for Parts<T, I
     }
 }
 
-impl<E: Slabs, W, I: IndexOps<W> + Clone, G: Weigh<E::Tail, W>> Clone for ColumnCore<E, W, I, G> {
+impl<E: Slabs, W, I: IndexOps<W> + Clone, G: Weigh<E, W>> Clone for ColumnCore<E, W, I, G> {
     fn clone(&self) -> Self {
         ColumnCore {
             state: self.state.clone(),
