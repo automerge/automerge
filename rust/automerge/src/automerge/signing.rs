@@ -7,10 +7,12 @@
 //! These entry points remain crate-private while incoming admission and outgoing
 //! signing requirements are being integrated.
 
+use std::ops::RangeBounds;
+
 use crate::actor::{ActorRemoval, ActorShift, ActorTable};
 use crate::admission::{AcceptedHistory, CandidateHistory};
 use crate::author::Authors;
-use crate::change_graph::ChangeGraph;
+use crate::change_graph::{ChangeGraph, FragmentReadiness};
 use crate::op_set2::OpSet;
 use crate::signature::{ed25519, Insert, SignatureStore};
 use crate::{Change, ChangeHash, Fragment};
@@ -54,6 +56,25 @@ impl SigningState {
 pub(super) struct RequiredSigning {
     accepted: AcceptedClock,
     signatures: SignatureStore,
+    /// fragments which have enough signatures to form
+    fragment_readiness: FragmentReadiness,
+}
+
+fn has_signature(
+    graph: &ChangeGraph,
+    authors: &Authors,
+    signatures: &SignatureStore,
+    hash: &ChangeHash,
+) -> bool {
+    let Some((actor, _)) = graph.actor_seq_for_hash(hash) else {
+        return false;
+    };
+    let Some(author) = authors.get_author_for_actor(actor) else {
+        return false;
+    };
+    signatures
+        .ed25519_entries(hash)
+        .any(|(signed_author, _)| *signed_author == author)
 }
 
 impl RequiredSigning {
@@ -62,6 +83,7 @@ impl RequiredSigning {
         Self {
             accepted: AcceptedClock::new(actors),
             signatures: SignatureStore::default(),
+            fragment_readiness: FragmentReadiness::default(),
         }
     }
 
@@ -71,6 +93,61 @@ impl RequiredSigning {
 
     fn remove_actor(&mut self, actor: &ActorRemoval) {
         self.accepted.remove_actor(actor);
+    }
+}
+
+impl SigningState {
+    pub(super) fn history_changed(
+        &mut self,
+        graph: &ChangeGraph,
+        authors: &Authors,
+        hash: &ChangeHash,
+    ) {
+        if hash.fragment_level() == 0 {
+            return;
+        }
+        if let Self::Required(signing) = self {
+            signing.fragment_readiness.reconcile(graph, |hash| {
+                has_signature(graph, authors, &signing.signatures, hash)
+            });
+        }
+    }
+
+    pub(super) fn fragments<R: RangeBounds<usize>>(
+        &self,
+        graph: &ChangeGraph,
+        authors: &Authors,
+        levels: R,
+    ) -> Vec<Fragment> {
+        match self {
+            Self::Unsigned => graph.fragments(levels).collect(),
+            Self::Required(signing) => signing
+                .fragment_readiness
+                .fragments(graph, levels)
+                .filter(|f| {
+                    f.level > 0 || has_signature(graph, authors, &signing.signatures, &f.head)
+                })
+                .collect(),
+        }
+    }
+
+    pub(super) fn get_fragment(
+        &self,
+        graph: &ChangeGraph,
+        authors: &Authors,
+        head: ChangeHash,
+    ) -> Option<Fragment> {
+        match self {
+            Self::Unsigned => graph.get_fragment(head),
+            Self::Required(signing) => {
+                let eligible = if head.fragment_level() == 0 {
+                    has_signature(graph, authors, &signing.signatures, &head)
+                } else {
+                    signing.fragment_readiness.is_ready(&head)
+                };
+                eligible.then(|| graph.get_fragment(head)).flatten()
+            }
+        }
     }
 }
 
@@ -105,6 +182,8 @@ impl<'a> SigningDocument<'a> {
     /// Uses the change's recorded author, not the current local author. Returns
     /// the store's insertion outcome, including duplicates and capacity outcomes.
     /// Insertion does not change accepted history, document contents, or heads.
+    /// First eligible evidence updates readiness of the fixed fragments that
+    /// require this frontier. It never invalidates or rebuilds fragment contents.
     /// Use [`SigningDocument::accept_applied`] to evaluate acceptance separately.
     ///
     /// # Errors
@@ -142,13 +221,17 @@ impl<'a> SigningDocument<'a> {
                 source: e,
             }
         })?;
-        self.state
-            .signatures
-            .insert_ed25519(witness)
-            .map_err(|e| error::InsertSignature::Store {
+        let had_evidence = has_signature(self.graph, self.authors, &self.state.signatures, hash);
+        let inserted = self.state.signatures.insert_ed25519(witness).map_err(|e| {
+            error::InsertSignature::Store {
                 change: *hash,
                 source: e,
-            })
+            }
+        })?;
+        if !had_evidence && has_signature(self.graph, self.authors, &self.state.signatures, hash) {
+            self.state.fragment_readiness.signature_added(hash);
+        }
+        Ok(inserted)
     }
 
     /// Whether this exact applied change belongs to accepted history.
@@ -210,8 +293,7 @@ impl<'a> SigningDocument<'a> {
     /// Returns [`error::AcceptLocal::Reconstruction`] with the group head and
     /// underlying cause if member reconstruction fails. No partial result is returned.
     fn local_candidate_contents(&self) -> Result<Vec<(Fragment, Vec<Change>)>, error::AcceptLocal> {
-        let heads = self.graph.heads().collect::<Vec<_>>();
-        let fragments = self.graph.fragments(&heads, 0..);
+        let fragments = self.graph.fragments(0..);
         let unaccepted_fragments = fragments
             .filter(|fragment| fragment.members.iter().any(|hash| !self.is_accepted(hash)));
         unaccepted_fragments

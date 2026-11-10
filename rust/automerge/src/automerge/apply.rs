@@ -192,6 +192,7 @@ impl Automerge {
                 &mut self.authors,
                 &self.ops.actors,
                 &self.visibility,
+                &mut self.signing,
             );
             let mut resolved = false;
             for change in batch.changes() {

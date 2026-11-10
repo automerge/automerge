@@ -608,22 +608,21 @@ impl ChangeGraph {
         })
     }
 
+    /// Return fragments covering the graph's current history at the given levels.
     pub(crate) fn fragments<'a, R: RangeBounds<usize> + 'a>(
         &'a self,
-        heads: &'a [ChangeHash],
         levels: R,
     ) -> impl Iterator<Item = Fragment> + 'a {
-        self.fragment_cache.fragments(self, heads, levels)
+        self.fragment_cache.fragments(self, levels)
     }
 
     pub(crate) fn fragments_filtered<'a, R: RangeBounds<usize> + 'a>(
         &'a self,
-        heads: &'a [ChangeHash],
         levels: R,
         include_head: impl Fn(&ChangeHash) -> bool + Copy + 'a,
     ) -> impl Iterator<Item = Fragment> + 'a {
         self.fragment_cache
-            .fragments_matching(self, heads, levels, move |head| include_head(&head))
+            .fragments_matching(self, levels, move |head| include_head(&head))
     }
 
     fn fragment_content<'a>(
@@ -1800,17 +1799,17 @@ mod tests {
 
         let mut readiness = FragmentReadiness::new(&graph, |hash| *hash == a2);
         assert!(!readiness.is_ready(&a2));
-        assert_eq!(readiness.fragments(&graph, &[a2], ..).count(), 0);
+        assert_eq!(readiness.fragments(&graph, ..).count(), 0);
         // Missing B's frontier hides the fixed fragment; it does not undo
         // graph-derived supersession or reclassify members as loose changes.
         assert!(graph.get_fragment(a1).is_none());
         assert_eq!(graph.get_fragment(a2), Some(canonical.clone()));
-        assert_eq!(graph.fragments(&[a2], 0..=0).count(), 0);
+        assert_eq!(graph.fragments(0..=0).count(), 0);
 
         // a2 attests a1 inside the harder fragment, so no direct a1 evidence
         // is needed. B's signature makes exactly that same descriptor ready.
         readiness.signature_added(&b1);
-        let fragments: Vec<_> = readiness.fragments(&graph, &[a2], ..).collect();
+        let fragments: Vec<_> = readiness.fragments(&graph, ..).collect();
         assert_eq!(fragments, [canonical]);
         readiness.signature_added(&b1); // idempotent, no readiness underflow
         assert!(readiness.is_ready(&a2));
@@ -1829,9 +1828,8 @@ mod tests {
         }
         let graph = builder.build();
         let all_hashes: BTreeSet<_> = builder.all_hashes().into_iter().collect();
-        let heads: Vec<_> = graph.heads().collect();
 
-        let fragments: Vec<_> = graph.fragments(&heads, ..).collect();
+        let fragments: Vec<_> = graph.fragments(..).collect();
 
         // Collect all members hashes across all fragments
         // (hashes may appear in multiple fragments — this is expected)
@@ -1915,8 +1913,7 @@ mod tests {
             prev = vec![h];
         }
         let graph = builder.build();
-        let heads: Vec<_> = graph.heads().collect();
-        let fragments: Vec<_> = graph.fragments(&heads, ..).collect();
+        let fragments: Vec<_> = graph.fragments(..).collect();
 
         assert_fragment_invariants(&fragments);
     }
@@ -1977,8 +1974,7 @@ mod tests {
         }
         let graph = builder.build();
         let all_hashes: BTreeSet<_> = builder.all_hashes().into_iter().collect();
-        let heads: Vec<_> = graph.heads().collect();
-        let fragments: Vec<_> = graph.fragments(&heads, ..).collect();
+        let fragments: Vec<_> = graph.fragments(..).collect();
 
         let mut covered: BTreeSet<ChangeHash> = BTreeSet::new();
         for f in &fragments {
@@ -2008,8 +2004,7 @@ mod tests {
         }
         let graph = builder.build();
         let all_hashes: BTreeSet<_> = builder.all_hashes().into_iter().collect();
-        let heads: Vec<_> = graph.heads().collect();
-        let fragments: Vec<_> = graph.fragments(&heads, ..).collect();
+        let fragments: Vec<_> = graph.fragments(..).collect();
         let covered: BTreeSet<_> = fragments
             .iter()
             .flat_map(|f| f.members.iter().copied())
@@ -2044,9 +2039,9 @@ mod tests {
         let graph = builder.build();
         let heads: Vec<_> = graph.heads().collect();
 
-        let all: Vec<_> = graph.fragments(&heads, ..).collect();
-        let loose: Vec<_> = graph.fragments(&heads, 0..=0).collect();
-        let cached: Vec<_> = graph.fragments(&heads, 1..).collect();
+        let all: Vec<_> = graph.fragments(..).collect();
+        let loose: Vec<_> = graph.fragments(0..=0).collect();
+        let cached: Vec<_> = graph.fragments(1..).collect();
 
         // loose + cached partition the full range
         assert_eq!(loose.len() + cached.len(), all.len());
@@ -2071,7 +2066,7 @@ mod tests {
         }
 
         // empty range yields nothing
-        assert_eq!(graph.fragments(&heads, 0..0).count(), 0);
+        assert_eq!(graph.fragments(0..0).count(), 0);
     }
 
     #[test]
@@ -2092,12 +2087,11 @@ mod tests {
                 continue;
             }
             let graph = builder.build();
-            let heads: Vec<_> = graph.heads().collect();
 
-            let loose: Vec<_> = graph.fragments(&heads, 0..=0).collect();
+            let loose: Vec<_> = graph.fragments(0..=0).collect();
             assert!(loose.is_empty(), "cached head must cover everything");
 
-            let cached: Vec<_> = graph.fragments(&heads, 1..).collect();
+            let cached: Vec<_> = graph.fragments(1..).collect();
             let covered: BTreeSet<ChangeHash> = cached
                 .iter()
                 .flat_map(|f| f.members.iter().copied())
@@ -2121,8 +2115,8 @@ mod tests {
         let graph = builder.build();
         let heads: Vec<_> = graph.heads().collect();
 
-        let loose: Vec<_> = graph.fragments(&heads, 0..=0).collect();
-        let cached: Vec<_> = graph.fragments(&heads, 1..).collect();
+        let loose: Vec<_> = graph.fragments(0..=0).collect();
+        let cached: Vec<_> = graph.fragments(1..).collect();
         assert!(!cached.is_empty(), "expected at least one cached fragment");
 
         // get_fragment on a loose (level 0) commit hash returns an

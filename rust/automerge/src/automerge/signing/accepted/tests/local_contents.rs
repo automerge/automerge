@@ -39,10 +39,11 @@ fn empty_local_contents_are_empty_without_mutating_the_document() {
 #[test]
 fn fully_signed_local_contents_remain_unaccepted_until_explicit_completion() {
     let (mut document, changes, key) = fixture(&[0, 0, 1, 0]);
+    // Outgoing discovery is evidence-gated; assembly uses the structural cover.
+    assert!(document.fragments(..).is_empty());
     let expected: Vec<_> = document
+        .change_graph
         .fragments(..)
-        .into_iter()
-        .rev()
         .map(|fragment| {
             let members = fragment
                 .members
@@ -101,8 +102,10 @@ fn local_contents_skip_accepted_groups_but_keep_partly_accepted_groups_whole() {
     let middle = append_at_level(&mut document, 3, 0);
     let tip = append_at_level(&mut document, 4, 1);
     let suffix = append_at_level(&mut document, 5, 0);
-    let fragment = document.get_fragment(tip).unwrap();
-    let loose = document.get_fragment(suffix).unwrap();
+    assert!(document.get_fragment(tip).is_none());
+    assert!(document.get_fragment(suffix).is_none());
+    let fragment = document.change_graph.get_fragment(tip).unwrap();
+    let loose = document.change_graph.get_fragment(suffix).unwrap();
     assert_eq!(fragment.boundary, [changes[0].hash()]);
     assert!(fragment.members.contains(&changes[1].hash()));
     let expected: Vec<_> = [loose, fragment]

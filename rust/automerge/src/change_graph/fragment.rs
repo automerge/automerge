@@ -91,21 +91,22 @@ impl FragmentCache {
     pub(crate) fn fragments<'a, R: RangeBounds<usize> + 'a>(
         &'a self,
         graph: &'a ChangeGraph,
-        heads: &'a [ChangeHash],
         levels: R,
     ) -> impl Iterator<Item = Fragment> + 'a {
-        self.fragments_matching(graph, heads, levels, |_| true)
+        self.fragments_matching(graph, levels, |_| true)
     }
 
     pub(crate) fn fragments_matching<'a, R: RangeBounds<usize> + 'a>(
         &'a self,
         graph: &'a ChangeGraph,
-        heads: &'a [ChangeHash],
         levels: R,
         include: impl Fn(ChangeHash) -> bool + 'a,
     ) -> impl Iterator<Item = Fragment> + 'a {
-        let heads = if levels.contains(&0) { heads } else { &[] };
-        let mut loose = self.loose_fragments(graph, heads);
+        let mut loose = levels
+            .contains(&0)
+            .then(|| self.loose_fragments(graph))
+            .into_iter()
+            .flatten();
         let mut cached = self.fragments.iter().rev();
         std::iter::from_fn(move || {
             // Selection must not prune traversal to a rejected head's ancestors.
@@ -127,11 +128,10 @@ impl FragmentCache {
     fn loose_fragments<'a>(
         &'a self,
         graph: &'a ChangeGraph,
-        heads: &'a [ChangeHash],
     ) -> impl Iterator<Item = Fragment> + 'a {
-        let nodes = heads
-            .iter()
-            .filter_map(|h| graph.nodes_by_hash.get(h).copied())
+        let nodes = graph
+            .heads()
+            .filter_map(|h| graph.nodes_by_hash.get(&h).copied())
             .filter(|n| !self.covers(graph, *n));
         graph
             .bfs_until_clock(nodes, &self.top)
@@ -236,12 +236,11 @@ impl FragmentReadiness {
     pub(crate) fn fragments<'a, R: RangeBounds<usize> + 'a>(
         &'a self,
         graph: &'a ChangeGraph,
-        heads: &'a [ChangeHash],
         levels: R,
     ) -> impl Iterator<Item = Fragment> + 'a {
         graph
             .fragment_cache
-            .fragments_matching(graph, heads, levels, |head| {
+            .fragments_matching(graph, levels, |head| {
                 head.fragment_level() == 0 || self.is_ready(&head)
             })
     }
