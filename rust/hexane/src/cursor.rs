@@ -338,6 +338,32 @@ pub(crate) trait Weigh<E: Slabs, W> {
             index.ok(),
             start <= end <= index.ws().len(),
     ;
+
+    /// What the model asks of the column's values as a whole, beyond each
+    /// slab's weight. Only a delta column asks anything: that every step
+    /// between two of its running sums fits `i64`, as its readers need
+    /// (`weights::DeltaModel`).
+    spec fn dom_ok(s: Seq<Slab<E::Tail>>) -> bool;
+
+    /// Whether the column of `slabs`, `len` items, is in the domain
+    /// (`dom_ok`): exactly, reading every value where the model asks
+    /// anything.
+    fn dom_check(slabs: &Vec<Slab<E::Tail>>, len: usize) -> (r: bool)
+        requires
+            all_ok::<E>(slabs@),
+            len == total(slab_lens(slabs@)),
+        ensures
+            r ==> Self::dom_ok(slabs@),
+    ;
+
+    /// A column of no values is in the domain.
+    proof fn lemma_dom_empty(s: Seq<Slab<E::Tail>>)
+        requires
+            all_ok::<E>(s),
+            vals_of::<E>(s).len() == 0,
+        ensures
+            Self::dom_ok(s),
+    ;
 }
 
 // ── The column model ───────────────────────────────────────────────────────
@@ -1928,6 +1954,15 @@ impl<E: Slabs> Cursor<E> {
 pub(crate) trait RunFeed<E: Slabs> {
     type X: Insertable<E>;
 
+    /// What the feed keeps fixed as it runs.
+    type K;
+
+    /// The feed's own invariant, which it keeps from run to run.
+    spec fn inv(&self) -> bool;
+
+    /// What stays fixed.
+    spec fn key(&self) -> Self::K;
+
     /// The values given so far, each run as its value repeated.
     spec fn given(&self) -> Seq<E::V>;
 
@@ -1935,7 +1970,11 @@ pub(crate) trait RunFeed<E: Slabs> {
     spec fn ended(&self) -> bool;
 
     fn next_run(&mut self) -> (r: Option<(Self::X, usize)>)
+        requires
+            old(self).inv(),
         ensures
+            final(self).inv(),
+            final(self).key() == old(self).key(),
             match r {
                 Some((x, n)) => final(self).given() == old(self).given() + Seq::new(n as nat, |_i: int| x.val()),
                 None => final(self).given() == old(self).given() && final(self).ended(),
@@ -1967,6 +2006,7 @@ pub(crate) fn splice_feed<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>, F: Visito
         at <= *old(total_len),
         del <= *old(total_len) - at,
         *old(total_len) + 3 <= usize::MAX,
+        old(feed).inv(),
     ensures
         col_ok::<E, W, I, G>(final(slabs)@, *final(index), *final(total_len), max_segments),
         *final(total_len) + 3 <= usize::MAX,
@@ -1974,6 +2014,8 @@ pub(crate) fn splice_feed<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>, F: Visito
             + vals_of::<E>(old(slabs)@).skip(at + del),
         final(feed).given() == old(feed).given() + ins@,
         final(feed).ended(),
+        final(feed).inv(),
+        final(feed).key() == old(feed).key(),
 {
     let ghost o = vals_of::<E>(slabs@);
     proof {
@@ -1983,6 +2025,7 @@ pub(crate) fn splice_feed<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>, F: Visito
     cur.delete_with::<W, I, G, F, S>(slabs, index, total_len, max_segments, counter, del, f, g);
     let ghost mut ins: Seq<E::V> = Seq::empty();
     let ghost g0 = feed.given();
+    let ghost k0 = feed.key();
     loop
         invariant
             cur.ok::<W, I, G>(slabs@, *index, *total_len, max_segments),
@@ -1990,6 +2033,8 @@ pub(crate) fn splice_feed<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>, F: Visito
             cur.orig == at + del,
             cur.p@ == o.take(at as int) + ins,
             feed.given() == g0 + ins,
+            feed.inv(),
+            feed.key() == k0,
         ensures
             cur.ok::<W, I, G>(slabs@, *index, *total_len, max_segments),
             cur.o@ == o,
@@ -1997,6 +2042,8 @@ pub(crate) fn splice_feed<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>, F: Visito
             cur.p@ == o.take(at as int) + ins,
             feed.given() == g0 + ins,
             feed.ended(),
+            feed.inv(),
+            feed.key() == k0,
     {
         match feed.next_run() {
             None => break,
@@ -2114,6 +2161,18 @@ impl<
     > RunFeed<<E as SlabEdit>::Model> for Feeding<E, It>
 {
     type X = Inserting<E, V>;
+
+    type K = ();
+
+    #[cfg(verus_keep_ghost)]
+    fn inv(&self) -> bool {
+        unimplemented!()
+    }
+
+    #[cfg(verus_keep_ghost)]
+    fn key(&self) {
+        unimplemented!()
+    }
 
     #[cfg(verus_keep_ghost)]
     fn given(&self) -> Seq<<<E as SlabEdit>::Model as Slabs>::V> {

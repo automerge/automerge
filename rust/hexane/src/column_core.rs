@@ -16,21 +16,30 @@
 //! the edit model (`cursor::ReadsAgree`) is proved for both encodings, so
 //! their preconditions come from the type invariant too.
 //!
+//! A column's weight model can ask more of its values as a whole
+//! (`Weigh::dom_ok`): a delta column's, that every step between two of
+//! its running sums fits `i64`, which its readers need. That is in the
+//! invariant too: an edit checks it before it puts the parts back, a
+//! delta splice cheaply, from its plan's bound on the values
+//! ([`ColumnCore::splice_delta`]), and so the delta readers' invariant
+//! follows from the type invariant ([`ColumnCore::delta_parts`]).
+//!
 //! Trusted: what the constructors are given (well-formed slabs and their
-//! weights, from the loaders, fills and encoders); and the parts the
-//! public edit cursor ([`crate::edit::Edit`]) hands back
-//! ([`ColumnCore::restore`]), which its verified steps keep a column but
-//! its glue chains.
+//! weights, from the loaders, fills and encoders, and for a delta column
+//! in its domain, which its loader checks); and the parts the public edit
+//! cursor ([`crate::edit::Edit`]) hands back ([`ColumnCore::restore`]),
+//! which its verified steps keep a column but its glue chains (for a
+//! delta column, `DeltaEdit` checks the domain before).
 
 // Verus has no spec for a slice's `is_empty`.
 #![allow(clippy::len_zero)]
 
-use crate::btree::SlabBTree;
 #[cfg(verus_keep_ghost)]
 use crate::btree::{
     axiom_prefix_add, lemma_prefix_len, lemma_prefix_sum, prefix_add, prefix_zero, PrefixAggregate,
     SlabAggregate,
 };
+use crate::btree::{SlabAgg, SlabBTree};
 use crate::column::Slab;
 use crate::copy::{copy_direct, copy_invert, RangeFeed};
 #[cfg(verus_keep_ghost)]
@@ -40,6 +49,21 @@ use crate::cursor::{
 };
 #[cfg(verus_keep_ghost)]
 use crate::cursor::{lemma_lens_ok, lemma_vals_own};
+#[cfg(verus_keep_ghost)]
+use crate::delta::agg::{agg_of, deltas_of, reps, steps_fit};
+#[cfg(verus_keep_ghost)]
+use crate::delta::dbound::{bounds_of, span_ok, spliced};
+use crate::delta::dbound::{root_bound, SpanPlan, ToDeltas};
+#[cfg(verus_keep_ghost)]
+use crate::delta::ddomain::{
+    dslabs, lemma_dix_ok, lemma_dslabs_own, lemma_span_steps, lemma_splice_dom,
+};
+use crate::delta::ddomain::{
+    slabs_fit, DeltaFeed, DeltaWrite, SpliceItems, ValueItems, ValuesFeed,
+};
+use crate::delta::dedit::d_boundaries;
+#[cfg(verus_keep_ghost)]
+use crate::delta::diter::{crop, dindex_ok, lemma_crop};
 #[cfg(verus_keep_ghost)]
 use crate::fenwick::total;
 #[cfg(verus_keep_ghost)]
@@ -59,7 +83,7 @@ use crate::prefix_search::found_at;
 use crate::prefix_search::{p_index_for_prefix, PrefixOrd};
 #[cfg(verus_keep_ghost)]
 use crate::splices::{applied, normal};
-use crate::weights::PrefixModel;
+use crate::weights::{DeltaModel, PrefixModel};
 use crate::Splice;
 use std::marker::PhantomData;
 use std::ops::{Add, AddAssign, SubAssign};
@@ -102,6 +126,31 @@ fn too_many_slabs()
     panic!("a column of usize::MAX slabs")
 }
 
+/// Panics: an edit that left a column's values outside its domain (a
+/// delta column's spanning 2^63 or more), which no column can hold. The
+/// column is left without its parts.
+#[verifier::external_body]
+#[cold]
+#[inline(never)]
+fn out_of_domain()
+    ensures
+        false,
+{
+    panic!("delta values out of domain: they would span 2^63 or more")
+}
+
+/// Panics: a delta column of more than `i64::MAX` items, whose steps
+/// cannot all fit `i64`. The column is left without its parts.
+#[verifier::external_body]
+#[cold]
+#[inline(never)]
+fn too_many_deltas()
+    ensures
+        false,
+{
+    panic!("a delta column of more than i64::MAX items")
+}
+
 /// A column's parts: its slabs, the index over them, its item count and
 /// its edit counter.
 pub(crate) struct Parts<T: Copy + Clone + std::fmt::Debug + Default, I> {
@@ -121,13 +170,15 @@ pub(crate) struct ColumnCore<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> {
 }
 
 /// The parts make a column with budget `max_segments`, with room for
-/// three more items, as the edit cursor counts.
+/// three more items, as the edit cursor counts, in its weight model's
+/// domain (only a delta column's asks anything).
 pub(crate) open spec fn parts_ok<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>>(
     p: Parts<E::Tail, I>,
     max_segments: usize,
 ) -> bool {
     &&& col_ok::<E, W, I, G>(p.slabs@, p.index, p.total_len, max_segments)
     &&& p.total_len + 3 <= usize::MAX
+    &&& G::dom_ok(p.slabs@)
 }
 
 impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> ColumnCore<E, W, I, G> {
@@ -179,6 +230,7 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> ColumnCore<E, W, I, G> {
     pub(crate) fn lemma_column(&self)
         ensures
             self.ready() ==> col_ok::<E, W, I, G>(self.slabs_spec(), self.index_spec(), self@.len() as usize, self.budget()),
+            self.ready() ==> G::dom_ok(self.slabs_spec()),
             self@ == vals_of::<E>(self.slabs_spec()),
             self@.len() == total(slab_lens(self.slabs_spec())),
             self@.len() + 3 <= usize::MAX,
@@ -215,17 +267,20 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> ColumnCore<E, W, I, G> {
             assert(slab_lens(slabs@) =~= Seq::<nat>::empty());
             assert(wlens::<W, I>(index.ws()) =~= Seq::<nat>::empty());
             assert(vals_of::<E>(slabs@) =~= Seq::<E::V>::empty());
+            G::lemma_dom_empty(slabs@);
         }
         ColumnCore { state: Some(Parts { slabs, index, total_len: 0, counter: 0 }), max_segments, _p: PhantomData }
     }
 
-    /// The column of well-formed slabs `slabs`, each weighed by `ws`:
+    /// The column of well-formed slabs `slabs`, each weighed by `ws`, in
+    /// the weight model's domain (as a delta column's loader checks):
     /// `None` if a weight does not count its slab's items, or the items
     /// are more than an edit can count (`usize::MAX - 3`).
     pub(crate) fn from_slabs(slabs: Vec<Slab<E::Tail>>, ws: Vec<W>, max_segments: usize) -> (r: Option<Self>)
         requires
             all_ok::<E>(slabs@),
             ws_ok::<E, W, G>(ws@, slabs@),
+            G::dom_ok(slabs@),
         ensures
             r matches Some(c) ==> c.ready() && c@ == vals_of::<E>(slabs@) && c.budget() == max_segments
                 && c.count() == 0,
@@ -390,6 +445,8 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> ColumnCore<E, W, I, G> {
         ensures
             parts_ok::<E, W, I, G>(r, old(self).budget()),
             vals_of::<E>(r.slabs@) == old(self)@,
+            old(self).ready(),
+            r.slabs@ == old(self).slabs_spec(),
             r.counter == old(self).count(),
             !final(self).ready(),
             final(self).budget() == old(self).budget(),
@@ -475,10 +532,13 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> ColumnCore<E, W, I, G> {
         requires
             at <= old(self)@.len(),
             del <= old(self)@.len() - at,
+            old(feed).inv(),
         ensures
             final(self)@ == old(self)@.take(at as int) + ins@ + old(self)@.skip(at + del),
             final(feed).given() == old(feed).given() + ins@,
             final(feed).ended(),
+            final(feed).inv(),
+            final(feed).key() == old(feed).key(),
             final(self).budget() == old(self).budget(),
             final(self).ready(),
     {
@@ -499,6 +559,9 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> ColumnCore<E, W, I, G> {
             g,
             feed,
         );
+        if !G::dom_check(&p.slabs, p.total_len) {
+            out_of_domain();
+        }
         self.restore(p);
         ins
     }
@@ -527,6 +590,9 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> ColumnCore<E, W, I, G> {
             lemma_vals_total::<E>(p.slabs@);
         }
         copy_direct::<E, W, I, G, F, S, R>(&mut p.slabs, &mut p.index, &mut p.total_len, max_segments, &mut p.counter, sps, f, g, feed);
+        if !G::dom_check(&p.slabs, p.total_len) {
+            out_of_domain();
+        }
         self.restore(p);
     }
 
@@ -568,6 +634,9 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> ColumnCore<E, W, I, G> {
             g,
             feed,
         );
+        if !G::dom_check(&p.slabs, p.total_len) {
+            out_of_domain();
+        }
         self.restore(p);
     }
 }
@@ -662,6 +731,254 @@ impl<E, X, B, P> ColumnCore<E, PrefixSlabWeight<P>, SlabBTree<PrefixSlabWeight<P
     {
         let ix = self.prefix_index();
         p_index_for_prefix::<X, B>(self.slabs(), ix, target)
+    }
+}
+
+/// A delta column's core: its weights hold each slab's deltas' aggregate
+/// wherever their steps fit (`weights::DeltaModel`), and its domain, in
+/// the type invariant, is that every step fits, so the delta readers'
+/// invariant (`dix_ok`) follows from the type invariant; and its splice
+/// keeps that domain.
+impl<E, X, B> ColumnCore<E, SlabAgg, SlabBTree<SlabAgg>, DeltaModel<X, B>> where
+    E: Slabs + for<'a> ReadsAgree<'a, X>,
+    X: for<'a> Decoders<'a, Tail = E::Tail>,
+    B: for<'a> DeltaWrite<'a, E, X>,
+ {
+    /// The column's slabs and index as the delta readers take them, with
+    /// their invariant (`dindex_ok`), from the type invariant.
+    #[inline(always)]
+    pub(crate) fn delta_parts(&self) -> (r: (&[Slab<E::Tail>], &SlabBTree<SlabAgg>))
+        ensures
+            r.0@ == self.slabs_spec(),
+            dindex_ok::<X, B>(Some(r.1), r.0@),
+            lens_ok::<X>(r.0@),
+            total(slab_lens(r.0@)) == self@.len(),
+            self@.len() + 3 <= usize::MAX,
+            crate::iter_core::vals_of::<X>(r.0@).len() == self@.len(),
+    {
+        let ix = self.index();
+        let slabs = self.slabs();
+        self.lemma_column();
+        proof {
+            use_type_invariant(self);
+            let s = self.slabs_spec();
+            lemma_lens_ok::<E, X>(s);
+            lemma_vals_own::<E, X>(s);
+            lemma_btree_index(*ix);
+            assert forall|k: int| 0 <= k < s.len() implies (steps_fit(deltas_of::<_, B>(X::vals(s[k]))) ==> agg_of(
+                #[trigger] ix@[k],
+                deltas_of::<_, B>(X::vals(s[k])),
+            )) by {
+                assert(<DeltaModel<X, B> as Weigh<E, SlabAgg>>::wrel(ix.ws()[k], s[k]));
+            }
+            lemma_dix_ok::<X, B>(ix@, s);
+        }
+        (slabs, ix)
+    }
+
+    /// Delete `del` items at `at` and insert the values of `items` there,
+    /// the values after them kept (the delta after the deleted items, and
+    /// any nulls before it, re-written to reach the same value): panics
+    /// if the values would leave `min..=max` or span 2^63 or more, or the
+    /// column hold more than `i64::MAX` items. The splice's plan keeps a
+    /// bound on the values (`SpanPlan`), so the column is read again only
+    /// where that bound is too wide.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn splice_delta<F: Visitor<E>, G2: WeightSink<SlabAgg>, S: SpliceItems>(
+        &mut self,
+        at: usize,
+        del: usize,
+        items: S,
+        min: i64,
+        max: i64,
+        f: &mut F,
+        g: &mut G2,
+    )
+        requires
+            at <= old(self)@.len(),
+            del <= old(self)@.len() - at,
+        ensures
+            final(self).budget() == old(self).budget(),
+            final(self).ready(),
+    {
+        // the bound on the column's values, and the running sum, the nulls
+        // and the value around the splice
+        let len = self.len();
+        let ghost s0 = self.slabs_spec();
+        let ghost orig = dslabs::<X, B>(s0);
+        let (lo, hi, prev, skip, next_val) = {
+            let (slabs, ix) = self.delta_parts();
+            let (lo, hi) = root_bound::<X, B>(slabs, ix);
+            let mut core = self.reader::<X>(0, len);
+            let mut running: i64 = 0;
+            proof {
+                let v = crate::iter_core::vals_of::<X>(s0);
+                assert(v.subrange(0, len as int) =~= v);
+                assert(crate::prefix_core::before::<X>(s0, 0) =~= Seq::<<X::D as Decode>::Item>::empty());
+                assert(deltas_of::<_, B>(Seq::<<X::D as Decode>::Item>::empty()) =~= Seq::<Option<i64>>::empty());
+                lemma_crop(0);
+            }
+            let (prev, skip, next_val) = d_boundaries::<X, B>(&mut core, slabs, Some(ix), &mut running, at, del);
+            proof {
+                // what it found around the splice, of the column's deltas
+                let a = orig.take(at as int);
+                let x = orig.subrange(at as int, at + del);
+                let tail = orig.skip(at + del);
+                let e = at + del + skip;
+                assert(tail.take(skip as int) =~= reps(skip as nat, None)) by {
+                    assert forall|i: int| 0 <= i < skip implies tail.take(skip as int)[i] == reps(skip as nat, None)[i] by {
+                        assert(orig[at + del + i] is None);
+                    }
+                }
+                if next_val is Some {
+                    assert(a + x + tail.take(skip + 1int) =~= orig.take(e + 1));
+                    assert(tail[skip as int] == orig[e]);
+                } else {
+                    assert forall|i: int| 0 <= i < tail.len() implies (#[trigger] tail[i]) is None by {
+                        assert(orig[at + del + i] is None);
+                    }
+                }
+                assert(bounds_of(a, x, tail, prev as int, skip as nat, next_val));
+            }
+            (lo, hi, prev, skip, next_val)
+        };
+        let plan = SpanPlan::new(prev, skip, next_val, lo, hi, true, Ghost(orig));
+        let mut feed = DeltaFeed::<S, E, X, B> { items, plan, track: true, given: Ghost(Seq::empty()), _p: PhantomData };
+        proof {
+            assert(Seq::<E::V>::empty().map_values(|o: E::V| <B as DeltaWrite<'static, E, X>>::dvo(o)) =~= feed.plan.p.emitted@);
+        }
+        // with a value after the deleted items and their nulls, those are
+        // written again
+        let total_del = if next_val.is_some() { del + skip + 1 } else { del };
+        let max_segments = self.max_segments;
+        let mut p = self.take_parts();
+        proof {
+            lemma_vals_total::<E>(p.slabs@);
+        }
+        let _ins = splice_feed::<E, SlabAgg, SlabBTree<SlabAgg>, DeltaModel<X, B>, F, G2, DeltaFeed<S, E, X, B>>(
+            &mut p.slabs,
+            &mut p.index,
+            &mut p.total_len,
+            max_segments,
+            &mut p.counter,
+            at,
+            total_del,
+            f,
+            g,
+            &mut feed,
+        );
+        let fits = p.total_len as u64 <= i64::MAX as u64 && feed.plan.fits(min, max);
+        proof {
+            if fits {
+                // the plan's bound holds the values of the column it leaves
+                let a = orig.take(at as int);
+                let x = orig.subrange(at as int, at + del);
+                let tail = orig.skip(at + del);
+                assert(orig =~= a + x + tail);
+                assert(bounds_of(a, x, tail, feed.plan.p.prev@, feed.plan.p.skip as nat, feed.plan.p.next_val));
+                assert(_ins@ =~= feed.given@);
+                lemma_vals_total::<E>(p.slabs@);
+                lemma_splice_dom::<E, X, B>(
+                    s0,
+                    p.slabs@,
+                    at as int,
+                    del as int,
+                    total_del as int,
+                    _ins@,
+                    feed.plan.p.emitted@,
+                    skip as nat,
+                    next_val,
+                    min as int,
+                    max as int,
+                );
+            }
+        }
+        if !fits {
+            proof {
+                lemma_lens_ok::<E, X>(p.slabs@);
+            }
+            if p.total_len as u64 > i64::MAX as u64 {
+                too_many_deltas();
+            }
+            if !slabs_fit::<X, B>(p.slabs.as_slice(), p.total_len, min, max) {
+                out_of_domain();
+            }
+        }
+        self.restore(p);
+    }
+
+    /// Fill this empty column with the values `items` gives, each written
+    /// as the delta that realizes it after those before (`from_values`):
+    /// panics if the values would leave `min..=max` or span 2^63 or more,
+    /// or number more than `i64::MAX`. The deltas keep a bound on the
+    /// values (`ToDeltas`), so the column is read again only where that
+    /// bound is too wide.
+    pub(crate) fn fill_delta<F: Visitor<E>, G2: WeightSink<SlabAgg>, S: ValueItems>(
+        &mut self,
+        items: S,
+        min: i64,
+        max: i64,
+        f: &mut F,
+        g: &mut G2,
+    )
+        requires
+            old(self)@.len() == 0,
+        ensures
+            final(self).budget() == old(self).budget(),
+            final(self).ready(),
+    {
+        let mut feed = ValuesFeed::<S, E, X, B> {
+            items,
+            deltas: ToDeltas::new(true),
+            given: Ghost(Seq::empty()),
+            ended: Ghost(false),
+            _p: PhantomData,
+        };
+        proof {
+            assert(Seq::<E::V>::empty().map_values(|o: E::V| <B as DeltaWrite<'static, E, X>>::dvo(o))
+                =~= feed.deltas.ds@);
+        }
+        let max_segments = self.max_segments;
+        let mut p = self.take_parts();
+        proof {
+            lemma_vals_total::<E>(p.slabs@);
+        }
+        let _ins = splice_feed::<E, SlabAgg, SlabBTree<SlabAgg>, DeltaModel<X, B>, F, G2, ValuesFeed<S, E, X, B>>(
+            &mut p.slabs,
+            &mut p.index,
+            &mut p.total_len,
+            max_segments,
+            &mut p.counter,
+            0,
+            0,
+            f,
+            g,
+            &mut feed,
+        );
+        let fits = p.total_len as u64 <= i64::MAX as u64 && feed.deltas.fits(min, max);
+        proof {
+            if fits {
+                // the column holds just the values written, whose deltas
+                // the bound holds
+                let v = vals_of::<E>(p.slabs@);
+                assert(v =~= feed.given@);
+                lemma_dslabs_own::<E, X, B>(p.slabs@);
+                lemma_vals_total::<E>(p.slabs@);
+                lemma_span_steps(dslabs::<X, B>(p.slabs@), min as int, max as int);
+            }
+        }
+        if !fits {
+            proof {
+                lemma_lens_ok::<E, X>(p.slabs@);
+            }
+            if p.total_len as u64 > i64::MAX as u64 {
+                too_many_deltas();
+            }
+            if !slabs_fit::<X, B>(p.slabs.as_slice(), p.total_len, min, max) {
+                out_of_domain();
+            }
+        }
+        self.restore(p);
     }
 }
 

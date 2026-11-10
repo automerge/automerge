@@ -334,7 +334,21 @@ compiles them away. To check them, run `cargo verus verify -p hexane
   exceptions are what a new column is built from (slabs and their
   weights, from the verified loaders, fills and encoders), a clone, and
   the parts the public `Edit` cursor hands back when dropped (each of its
-  steps keeps them a column; their chaining is glue).
+  steps keeps them a column; their chaining is glue). An `Edit` dropped
+  by a panic hands nothing back, and the column panics when used again.
+* A delta column's domain, in its type invariant: every step between two
+  of its running sums fits `i64` (so it holds at most `i64::MAX` items,
+  and its values lie within a range less than 2^63 wide). So each slab's
+  weight is the aggregate of its deltas, and every merge of the index's
+  aggregates is representable, which is what the delta readers assume
+  (`delta::ddomain`, `ColumnCore::delta_parts`). A delta splice
+  (`splice`, `splice_runs`, `insert`, `remove`, `remove_n`, `push`,
+  `truncate`) is verified end to end (`ColumnCore::splice_delta`): it
+  finds the running sum, the nulls and the value around the splice,
+  feeds the items through the verified plan into the cursor, and checks
+  the plan's bound on the values, or where that is too wide reads the
+  column again, so the column it leaves is in the domain, or it panics.
+  `from_values` likewise (`ColumnCore::fill_delta`).
 * `Column::splice`, and with it `insert`, `remove`, `remove_n`, `push`,
   `clear`, `truncate`, `splice_runs` and the prefix and delta columns'
   splices: the chain of cursor steps (open, delete, insert each run,
@@ -373,7 +387,8 @@ compiles them away. To check them, run `cargo verus verify -p hexane
   and so `get`, `iter`, `iter_range` and `to_vec`): each value is the
   running sum of the deltas before it, or null, including after `nth`
   jumps to a far slab by the index's sums, given that the index holds
-  each slab's aggregate and that the sums at slab boundaries fit `i64`.
+  each slab's aggregate and that the sums at slab boundaries fit `i64`
+  (which the column's domain gives).
   The running sum wraps as release arithmetic does, and is proved to be
   the deltas' sum modulo 2^64: the sum itself, wherever it fits.
 * A delta column's value search (`find_by_value`, `find_by_range`,
@@ -418,9 +433,8 @@ compiles them away. To check them, run `cargo verus verify -p hexane
   fits, passes only where the walk would. The bound starts from the
   least and greatest running sum in the index's root aggregate, which
   holds the column's values, and the edit cursor, `splice` and
-  `from_values` widen it by each value they write; every value the
-  column holds after the edit lies in it. Given the column's invariant,
-  as for reading.
+  `from_values` widen it by each value they write; every value the column holds after the edit
+  lies in it. Given the column's invariant, as for reading.
 * The value search of `Column` and its iterator (`scope_to_value`,
   `seek_to_value`): where the values in the window are sorted, it returns
   exactly the range of them equal to the target, or, if there are none,
@@ -471,8 +485,9 @@ decode, which the verified code reaches through traits (the contract on
 connects the generic column types to the verified cores, and the closures
 passed through it (including the slabs a new column is built from, which
 come from the verified loaders, fills and encoders, and the iterators'
-state between calls, and the delta readers' invariant, which needs the
-delta domain contract); that a weight a load accumulates from the runs as
+state between calls; for a delta column, that its loader's domain checks
+and a `DeltaEdit`'s, which are verified, are of the column they build or
+leave); that a weight a load accumulates from the runs as
 they stream past is the slab's weight (a load is proved to give each
 slab exactly the runs that hold its values, in order, so that
 accumulating a slab's runs gives what computing its weight does); each prefix value type's `accumulate` and
@@ -484,7 +499,8 @@ prefix searches, that an unsigned prefix type's values are numbers, whose
 sums (where they fit) and differences are its `+` and `-`, which its
 `checked_add` adds when the sum fits, whose order is its `<=`, and which
 its `/` and `try_into` divide and convert; the delta
-value types' `to_opt`; that each value type's `Ord` agrees with its
+value types' `to_opt` and `from_opt` (a delta written reads back as
+itself); that each value type's `Ord` agrees with its
 `==`; and, for the delta columns' sorted search, that a delta value
 type's `Ord` orders values as the `i64`s they are stored as, with nulls
 first and values outside the domain last.
@@ -495,12 +511,11 @@ first and values outside the domain last.
   column's sum fits its prefix type, which the searches' results depend on
   (loads reject sums that would not, and edits panic, but those checks are
   not part of the proof); `delta`, which is glue over the verified
-  iterator; and the glue that drives a delta edit's verified arithmetic:
-  that `splice` feeds its items, and the boundaries it finds, to the
-  verified plan in order, that what the cursor reports carrying,
-  deleting or jumping over is what it did, and that the column's deltas
-  the plans are given (as ghosts, for the span check's bound) are its
-  own.
+  iterator; and the glue that drives the `DeltaEdit` cursor's verified
+  arithmetic (`copy_ranges` uses it too): that what the cursor reports
+  carrying, deleting or jumping over is what it did, and that the
+  column's deltas its ledger is given (as a ghost, for the span check's
+  bound) are its own.
 * `RleEncoderState` and `DeltaEncoderState`, which write into a buffer
   the caller passes to each call, are proved only if every call gets the
   same buffer, with the bytes they wrote unchanged in between. Their
@@ -510,7 +525,8 @@ first and values outside the domain last.
   encoder of nearly `usize::MAX` items), the code checks it and panics
   rather than assume it. A load returns an error instead: a column of
   more than `usize::MAX - 3` items, which its edits and `save` would
-  panic on, fails to load.
+  panic on, fails to load, and so does a delta column of more than
+  `i64::MAX`.
 
 ## Development
 

@@ -11,7 +11,10 @@
 //!   checked twin, which panics where the sum would overflow).
 //! - [`DeltaModel`], a delta column's: the item count and, where the
 //!   slab's running sums fit `i64`, the aggregate of its deltas
-//!   (`agg_of`), computed by `delta::agg::slab_agg`.
+//!   (`agg_of`), computed by `delta::agg::slab_agg`. Its domain
+//!   (`Weigh::dom_ok`), part of the column's invariant, is that every step
+//!   between two of the column's running sums fits, so every slab's
+//!   weight is its aggregate (`delta::ddomain`).
 //!
 //! The models read slabs through their encoding's read model, which
 //! agrees with the edit model (`cursor::ReadsAgree`). Trusted: the value
@@ -21,12 +24,17 @@
 
 use crate::btree::SlabAgg;
 #[cfg(verus_keep_ghost)]
-use crate::btree::{lemma_prefix_len, SlabAggregate};
+use crate::btree::{in_i64, lemma_prefix_len, SlabAggregate};
 use crate::column::Slab;
+#[cfg(verus_keep_ghost)]
+use crate::cursor::{lemma_lens_ok, lemma_vals_own};
 use crate::cursor::{ReadsAgree, Slabs, Weigh};
 #[cfg(verus_keep_ghost)]
-use crate::delta::agg::{agg_of, deltas_of, steps_fit};
+use crate::delta::agg::{agg_of, deltas_of, pdiff, steps_fit};
 use crate::delta::agg::{slab_agg, DeltaOps};
+#[cfg(verus_keep_ghost)]
+use crate::delta::ddomain::dslabs;
+use crate::delta::ddomain::slabs_fit;
 use crate::index::IndexOps;
 use crate::iter_core::{Decode, Decoders};
 use crate::prefix::PrefixSlabWeight;
@@ -72,6 +80,18 @@ impl<E: Slabs> Weigh<E, usize> for LenModel {
 
     #[inline(always)]
     fn check_splice<I: IndexOps<usize>>(_index: &I, _start: usize, _end: usize, _new: &Vec<usize>, _len: usize) {
+    }
+
+    open spec fn dom_ok(s: Seq<Slab<E::Tail>>) -> bool {
+        true
+    }
+
+    #[inline(always)]
+    fn dom_check(_slabs: &Vec<Slab<E::Tail>>, _len: usize) -> bool {
+        true
+    }
+
+    proof fn lemma_dom_empty(s: Seq<Slab<E::Tail>>) {
     }
 }
 
@@ -131,6 +151,18 @@ impl<E, X, B, P> Weigh<E, PrefixSlabWeight<P>> for PrefixModel<X, B> where
     ) {
         check_total::<I, B, P, <<X as Decoders<'static>>::D as Decode>::Item>(index, start, end, new, len)
     }
+
+    open spec fn dom_ok(s: Seq<Slab<E::Tail>>) -> bool {
+        true
+    }
+
+    #[inline(always)]
+    fn dom_check(_slabs: &Vec<Slab<E::Tail>>, _len: usize) -> bool {
+        true
+    }
+
+    proof fn lemma_dom_empty(s: Seq<Slab<E::Tail>>) {
+    }
 }
 
 /// A delta column's weights: each slab's item count and, where its
@@ -167,6 +199,29 @@ impl<E, X, B> Weigh<E, SlabAgg> for DeltaModel<X, B> where
 
     #[inline(always)]
     fn check_splice<I: IndexOps<SlabAgg>>(_index: &I, _start: usize, _end: usize, _new: &Vec<SlabAgg>, _len: usize) {
+    }
+
+    /// Every step between two of the column's running sums fits `i64`:
+    /// then each slab's weight is its deltas' aggregate, and the index
+    /// valid (`ddomain::lemma_dix_ok`), as the readers ask.
+    open spec fn dom_ok(s: Seq<Slab<E::Tail>>) -> bool {
+        steps_fit(dslabs::<X, B>(s))
+    }
+
+    fn dom_check(slabs: &Vec<Slab<E::Tail>>, len: usize) -> bool {
+        proof {
+            lemma_lens_ok::<E, X>(slabs@);
+        }
+        slabs_fit::<X, B>(slabs.as_slice(), len, i64::MIN, i64::MAX)
+    }
+
+    proof fn lemma_dom_empty(s: Seq<Slab<E::Tail>>) {
+        lemma_vals_own::<E, X>(s);
+        let d = dslabs::<X, B>(s);
+        assert(d =~= Seq::<Option<i64>>::empty());
+        assert forall|i: int, j: int| 0 <= i <= j <= d.len() implies in_i64(#[trigger] pdiff(d, i, j)) by {
+            assert(d.take(0) =~= Seq::<Option<i64>>::empty());
+        }
     }
 }
 

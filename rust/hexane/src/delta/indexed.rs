@@ -15,7 +15,9 @@ use std::ops::Range;
 
 use crate::btree::SlabAgg;
 use crate::column::{Dx, Slab, TailOf, WeightFn};
+use crate::cursor::Inserting;
 use crate::delta::agg::{agg_run, slab_agg, DeltaOps};
+use crate::delta::ddomain::DeltaWrite;
 use crate::delta::dfind::{d_find_new, d_find_next, DFind};
 use crate::delta::{DeltaColumn, DeltaInner, DeltaValue};
 use crate::encoding::ColumnEncoding;
@@ -35,11 +37,11 @@ impl Sealed for IndexedDeltaWeightFn {}
 
 impl<I: DeltaInner, C: Codec> WeightFn<I, C> for IndexedDeltaWeightFn {
     type Weight = SlabAgg;
-    type Model = crate::weights::DeltaModel<Dx<I, C>, DB<I>>;
+    type Model = crate::weights::DeltaModel<Dx<I, C>, DB<I, C>>;
 
     // verified (`agg::slab_agg`), given a well-formed slab
     fn compute(slab: &Slab<TailOf<I, C>>) -> SlabAgg {
-        slab_agg::<Dx<I, C>, DB<I>>(slab)
+        slab_agg::<Dx<I, C>, DB<I, C>>(slab)
     }
 
     // `compute` re-decodes the slab; let the streaming loader accumulate
@@ -74,9 +76,9 @@ impl<I: DeltaInner, C: Codec> WeightFn<I, C> for IndexedDeltaWeightFn {
 /// A delta column's values as deltas, for the verified aggregate
 /// (`agg::slab_agg`). Trusted: `DeltaInner::to_opt`.
 #[doc(hidden)]
-pub struct DB<I>(PhantomData<fn() -> I>);
+pub struct DB<I, C = Leb128>(PhantomData<fn() -> (I, C)>);
 
-impl<'a, I: DeltaInner> DeltaOps<I::Get<'a>> for DB<I> {
+impl<'a, I: DeltaInner, C: Codec> DeltaOps<I::Get<'a>> for DB<I, C> {
     #[cfg(verus_keep_ghost)]
     fn dv(_v: I::Get<'a>) -> Option<i64> {
         unimplemented!()
@@ -85,6 +87,32 @@ impl<'a, I: DeltaInner> DeltaOps<I::Get<'a>> for DB<I> {
     #[inline(always)]
     fn to_opt(v: I::Get<'a>) -> Option<i64> {
         I::to_opt(v)
+    }
+}
+
+/// The delta column's edit model.
+type DModel<I, C> = <<I as crate::ColumnValueRef>::Encoding<C> as crate::edit::SlabEdit>::Model;
+
+/// A delta column's values as written, for the verified splice
+/// (`ColumnCore::splice_delta`). Trusted: `DeltaInner::from_opt` writes
+/// the delta it is given (`to_opt` reads it back), and a value read holds
+/// the delta its owned form does.
+impl<'a, I: DeltaInner, C: Codec> DeltaWrite<'a, DModel<I, C>, Dx<I, C>> for DB<I, C> {
+    type Ins = Inserting<<I as crate::ColumnValueRef>::Encoding<C>, I>;
+
+    #[cfg(verus_keep_ghost)]
+    fn dvo(_o: <DModel<I, C> as crate::cursor::Slabs>::V) -> Option<i64> {
+        unimplemented!()
+    }
+
+    #[cfg(verus_keep_ghost)]
+    fn axiom_own(_v: I::Get<'a>) {
+        unimplemented!()
+    }
+
+    #[inline(always)]
+    fn ins(d: Option<i64>) -> Self::Ins {
+        Inserting::new(I::from_opt(d))
     }
 }
 
@@ -172,10 +200,13 @@ impl<'a, T: DeltaValue, C: Codec> FindByRange<'a, T, C> {
 
     /// The values in `[lo, hi]`, inclusive; `lo <= hi`.
     fn between(lo: i64, hi: i64, col: &'a DeltaColumn<T, C>) -> Self {
+        // the readers' invariant, from the column's (verified,
+        // `ColumnCore::delta_parts`)
+        let (slabs, index) = col.col.core.delta_parts();
         Self {
-            slabs: col.col.core.slabs(),
-            find: Some(d_find_new::<Dx<T::Inner, C>, DB<T::Inner>>(
-                col.col.core.index(),
+            slabs,
+            find: Some(d_find_new::<Dx<T::Inner, C>, DB<T::Inner, C>>(
+                index,
                 lo,
                 hi,
                 Ghost::assume_new(),
@@ -190,7 +221,7 @@ impl<T: DeltaValue, C: Codec> Iterator for FindByRange<'_, T, C> {
     // given the index's slab aggregates
     fn next(&mut self) -> Option<usize> {
         let find = self.find.as_mut()?;
-        d_find_next::<Dx<T::Inner, C>, DB<T::Inner>>(find, self.slabs, Ghost::assume_new())
+        d_find_next::<Dx<T::Inner, C>, DB<T::Inner, C>>(find, self.slabs, Ghost::assume_new())
     }
 }
 

@@ -90,6 +90,16 @@ pub(crate) struct NoRuns<X> {
 impl<E: Slabs, X: Insertable<E>> RunFeed<E> for NoRuns<X> {
     type X = X;
 
+    type K = ();
+
+    open spec fn inv(&self) -> bool {
+        true
+    }
+
+    open spec fn key(&self) -> () {
+        ()
+    }
+
     open spec fn given(&self) -> Seq<E::V> {
         Seq::empty()
     }

@@ -24,12 +24,15 @@
 //! it (`bounds_of`). And [`ToDeltas`] gives `from_values` the deltas
 //! realizing its values and a bound on them.
 //!
-//! Trusted: the column's invariant (each slab's weight its aggregate, the
-//! index valid), as the readers assume it; and the glue: that the ghost
-//! original deltas each plan is given are the column's, that `splice`
-//! feeds its plan the items and `find_boundaries`' report, and, as for
-//! the [`Ledger`], that what the cursor reports carrying, deleting and
-//! jumping over is what it did.
+//! A splice's wiring is verified too: `ColumnCore::splice_delta` gives
+//! its plan the column's deltas, a bound from the column's invariant and
+//! what `d_boundaries` finds, and the cursor writes what the plan emits
+//! (`ddomain::DeltaFeed`). Trusted, for an edit cursor ([`DeltaEdit`]'s
+//! glue): that the ghost original deltas its [`SpanLedger`] is given are
+//! the column's and, as for the [`Ledger`], that what the cursor reports
+//! carrying, deleting and jumping over is what it did.
+//!
+//! [`DeltaEdit`]: crate::delta::DeltaEdit
 
 #[cfg(verus_keep_ghost)]
 use crate::btree::{max_i, min_i};
@@ -638,6 +641,7 @@ proof fn lemma_lands(prev: int, e: Seq<Option<i64>>, wanted: Seq<Option<i64>>, s
 
 /// Where the original values, and the values a splice inserted, lie in a
 /// bound, so do those of the column it leaves.
+#[verifier::spinoff_prover]
 proof fn lemma_spliced(
     orig: Seq<Option<i64>>,
     a: Seq<Option<i64>>,
@@ -722,6 +726,15 @@ impl SpanPlan {
         }
     }
 
+    /// The same splice of the same column: what the plan was made with.
+    pub(crate) open spec fn fixed(&self, o: Self) -> bool {
+        &&& self.p.prev == o.p.prev
+        &&& self.p.skip == o.p.skip
+        &&& self.p.next_val == o.p.next_val
+        &&& self.orig == o.orig
+        &&& self.tracking == o.tracking
+    }
+
     /// A plan (see [`SplicePlan::new`]) for a column of original deltas
     /// `orig`, whose values `lo..=hi` holds (if `track`).
     #[allow(unused_variables)] // `track` is for the spec
@@ -741,6 +754,11 @@ impl SpanPlan {
             s.inv(),
             s.p.phase is Values,
             s.tracking@ == track,
+            s.p.prev@ == prev as int,
+            s.p.skip == skip,
+            s.p.next_val == next_val,
+            s.p.emitted@.len() == 0,
+            s.orig@ == orig,
     {
         SpanPlan {
             p: SplicePlan::new(prev, skip, next_val),
@@ -760,6 +778,13 @@ impl SpanPlan {
         ensures
             final(self).inv(),
             final(self).tracking == old(self).tracking,
+            final(self).fixed(*old(self)),
+            final(self).p.phase is Values,
+            final(self).p.pending is None,
+            final(self).p.emitted@ == old(self).p.emitted@ + match r {
+                Some((x, n)) => reps(n as nat, x),
+                None => Seq::empty(),
+            },
     {
         self.p.take_pending()
     }
@@ -776,6 +801,9 @@ impl SpanPlan {
         ensures
             final(self).inv(),
             final(self).tracking == old(self).tracking,
+            final(self).fixed(*old(self)),
+            final(self).p.phase is Values,
+            final(self).p.emitted@ == old(self).p.emitted@ + reps(r.1 as nat, r.0),
     {
         let ghost (w0, lo0, hi0) = (self.p.wanted@, self.lo as int, self.hi as int);
         let r = self.p.value(v);
@@ -816,6 +844,9 @@ impl SpanPlan {
         ensures
             final(self).inv(),
             final(self).tracking == old(self).tracking,
+            final(self).fixed(*old(self)),
+            final(self).p.phase is Values,
+            final(self).p.emitted@ == old(self).p.emitted@ + reps(r.1 as nat, r.0),
     {
         let ghost (w0, lo0, hi0) = (self.p.wanted@, self.lo as int, self.hi as int);
         let r = self.p.run(prefix, d, count);
@@ -880,6 +911,8 @@ impl SpanPlan {
         ensures
             final(self).inv(),
             final(self).tracking == old(self).tracking,
+            final(self).fixed(*old(self)),
+            final(self).p.emitted == old(self).p.emitted,
     {
         self.p.end_values()
     }
@@ -893,6 +926,11 @@ impl SpanPlan {
         ensures
             final(self).inv(),
             final(self).tracking == old(self).tracking,
+            final(self).fixed(*old(self)),
+            final(self).p.emitted@ == old(self).p.emitted@ + match r {
+                Some((x, n)) => reps(n as nat, x),
+                None => Seq::empty(),
+            },
     {
         self.p.nulls()
     }
@@ -906,6 +944,9 @@ impl SpanPlan {
         ensures
             final(self).inv(),
             final(self).tracking == old(self).tracking,
+            final(self).fixed(*old(self)),
+            final(self).p.phase is Done,
+            final(self).p.emitted@ == old(self).p.emitted@ + reps(r.1 as nat, r.0),
     {
         self.p.boundary()
     }
@@ -985,6 +1026,7 @@ impl ToDeltas {
             t.inv(),
             t.tracking@ == track,
             t.vals@.len() == 0,
+            t.ds@.len() == 0,
     {
         proof {
             lemma_crop(0);

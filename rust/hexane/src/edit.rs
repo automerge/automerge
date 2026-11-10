@@ -173,12 +173,6 @@ where
             .expect("the edit cursor holds the parts")
     }
 
-    /// The slabs as the cursor has left them: those of the column it
-    /// edits, with any open rebuild not yet written back.
-    pub(crate) fn slabs(&self) -> &[crate::column::Slab<crate::column::TailOf<T, C>>] {
-        &self.p_ref().slabs
-    }
-
     /// The column's parts as the cursor has left them: its slabs, their
     /// index and its item count (see [`Self::slabs`]).
     pub(crate) fn parts(
@@ -464,6 +458,11 @@ where
     Idx: ColumnIndex<WF::Weight>,
 {
     fn drop(&mut self) {
+        // a panic mid-edit leaves the column without its parts, so it
+        // panics when used again rather than hold what the panic left
+        if std::thread::panicking() {
+            return;
+        }
         // finishing on drop keeps chains honest: the last call in a
         // chain does not have to be `finish()`
         if self.cur.dirty {
