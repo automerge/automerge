@@ -40,6 +40,7 @@ use std::borrow::Cow;
 use view::{ClockRange, Mask, ReadAt, VisibleClock};
 
 mod actor;
+mod apply;
 mod author;
 pub(crate) mod current_state;
 mod history;
@@ -744,11 +745,14 @@ impl Automerge {
         if panic {
             self.assert_no_unused_actors(cfg!(debug_assertions));
         }
-
-        // remove the offending actors
-        while let Some(idx) = self.change_graph.unused_actors().last() {
-            self.remove_actor(idx);
-        }
+        ActorMaintenance::new(
+            &mut self.ops,
+            &mut self.change_graph,
+            &mut self.actor,
+            &mut self.authors,
+            &mut self.visibility,
+        )
+        .remove_unused();
     }
 
     fn get_or_create_actor_index(&mut self) -> usize {
@@ -1718,10 +1722,6 @@ impl Automerge {
             &self.visibility,
         )
         .update(change)
-    }
-
-    pub(crate) fn put_actor_ref(&mut self, actor: &ActorId) -> usize {
-        self.put_actor(actor.clone())
     }
 
     /// Ensure `actor` is in the actor table and return its index, shifting

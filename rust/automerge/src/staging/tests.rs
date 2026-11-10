@@ -4,6 +4,7 @@ use crate::{ActorId, Automerge, Change, ChangeHash, ReadDoc, ROOT};
 use super::{ChangeBatch, StagedChanges};
 
 mod branching;
+mod completion;
 mod properties;
 
 fn append(document: &mut Automerge, value: i64) -> Change {

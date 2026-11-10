@@ -65,4 +65,12 @@ impl<'a> ActorMaintenance<'a> {
         self.authors.remove_actor(&removal);
         self.visibility.remove_actor(&removal);
     }
+
+    /// Find all unused actors, according to the change graph, and remove them
+    /// from the document state.
+    pub(super) fn remove_unused(&mut self) {
+        while let Some(index) = self.graph.unused_actors().last() {
+            self.remove(index);
+        }
+    }
 }
