@@ -154,7 +154,7 @@ where
     }
 
     /// The column's parts as the cursor has left them: its slabs, their
-    /// index and its item count (see [`Self::slabs`]).
+    /// index and its item count.
     pub(crate) fn parts(
         &self,
     ) -> (
@@ -304,7 +304,7 @@ where
 
     /// End the edit, closed already and checked to have left the column
     /// in its weight model's domain, which spares the drop its check: a
-    /// [`DeltaEdit`](crate::DeltaEdit)'s end, which checks it more
+    /// [`DeltaEdit`](crate::delta::DeltaEdit)'s end, which checks it more
     /// cheaply.
     pub(crate) fn end_in_domain(&mut self) {
         self.core.end_in_domain(&mut self.col.core);
