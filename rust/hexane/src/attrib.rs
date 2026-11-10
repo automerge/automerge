@@ -42,6 +42,26 @@ pub(crate) trait Accumulate<V, W> {
     ;
 }
 
+/// The weight of `n` copies of `v`, accumulated as a load does (a filled
+/// load's one slab); or why they can't have one.
+pub(crate) fn weigh_run<V, W, A: Accumulate<V, W>>(n: usize, v: V) -> (r: Result<W, PackError>)
+    requires
+        n >= 1,
+    ensures
+        r matches Ok(w) ==> A::wvals(w, Seq::new(n as nat, |_i: int| v)),
+{
+    let mut w = A::new_zero();
+    match A::accumulate_run(&mut w, n, v, Ghost(Seq::empty())) {
+        Ok(()) => {
+            proof {
+                assert(Seq::<V>::empty() + Seq::new(n as nat, |_i: int| v) =~= Seq::new(n as nat, |_i: int| v));
+            }
+            Ok(w)
+        },
+        Err(e) => Err(e),
+    }
+}
+
 /// The weights of the slabs a load has cut, and of the one it is cutting.
 pub(crate) struct Attribution<V, W> {
     pub(crate) weights: Vec<W>,

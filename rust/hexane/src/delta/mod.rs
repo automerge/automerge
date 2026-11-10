@@ -1041,11 +1041,12 @@ impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
             }
             CopyStrategy::Invert => {
                 let old_len = self.len();
+                let src_len = src.len();
                 self.col.swap_contents(&mut src.col);
                 self.retain_ranges(splices);
                 let mut runs = src.iter().runs();
                 let mut e = self.edit();
-                crate::column::for_each_gap(splices, old_len, |at, gap| {
+                crate::column::for_each_gap(splices, src_len, old_len, |at, gap| {
                     runs.shift(gap);
                     e.seek(at).insert_runs(&mut runs);
                 });

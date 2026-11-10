@@ -799,6 +799,23 @@ impl<V> Cuts<V> {
     }
 }
 
+impl Cuts<()> {
+    /// [`new`](Self::new), for the glue, which counts rows rather than
+    /// holding values: the cuts' items are units.
+    #[inline(always)]
+    pub(crate) fn of_len(sps: &[Splice], src_len: usize) -> (c: Self)
+        requires
+            ranges_in(sps@, src_len as int),
+        ensures
+            c.inv(),
+            c.cuts@.len() == 0,
+            c.sps@ == sps@,
+            c.src@.len() == src_len,
+    {
+        Self::new(sps, src_len, Ghost(Seq::new(src_len as nat, |_i: int| ())))
+    }
+}
+
 /// The gaps between the splices, in the destination, put back between
 /// the ranges kept (`for_each_gap`): each, as a splice inserting it, is
 /// at the length of the ranges before it.
@@ -979,6 +996,25 @@ impl<V> Gaps<V> {
             }
         }
         None
+    }
+}
+
+impl Gaps<()> {
+    /// [`new`](Self::new), for the glue, which counts rows rather than
+    /// holding values: the gaps' items are units.
+    #[allow(unused_variables)] // `src_len` is for the spec
+    #[inline(always)]
+    pub(crate) fn of_lens(sps: &[Splice], src_len: usize, dst_len: usize) -> (g: Self)
+        requires
+            normal(sps@, src_len as int, dst_len as int),
+        ensures
+            g.inv(),
+            g.gaps@.len() == 0,
+            g.sps@ == sps@,
+            g.dst@.len() == dst_len,
+            g.src@.len() == src_len,
+    {
+        Self::new(sps, dst_len, Ghost(Seq::new(dst_len as nat, |_i: int| ())), Ghost(Seq::new(src_len as nat, |_i: int| ())))
     }
 }
 

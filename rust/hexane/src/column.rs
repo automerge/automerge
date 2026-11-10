@@ -1,4 +1,3 @@
-use crate::attrib::Accumulate;
 use crate::btree::SlabAggregate;
 use crate::column_core::ColumnCore;
 use crate::load_core::LoadCore;
@@ -933,20 +932,21 @@ where
     }
 }
 
-/// Call `f` for each gap between `splices` (normalized) in a destination
-/// of `dst_len` rows, with the destination's range to read and the
+/// Call `f` for each gap between `splices` (normalized against a source
+/// of `src_len` rows) in a destination of `dst_len` rows, with the destination's range to read and the
 /// position in the retained column it belongs at.
 ///
 /// Positions are the copied ranges' running length: the rows a gap brings
 /// back land before the next copied range and do not move it.
 pub(crate) fn for_each_gap(
     splices: &[Splice],
+    src_len: usize,
     dst_len: usize,
     mut f: impl FnMut(usize, Range<usize>),
 ) {
     // verified (`splices::Gaps`): the gaps, as splices inserting them into
     // the ranges retained, are normalized and give what `splices` give
-    let mut gaps = Gaps::<()>::new(splices, dst_len, Ghost::assume_new(), Ghost::assume_new());
+    let mut gaps = Gaps::of_lens(splices, src_len, dst_len);
     while let Some((at, gap)) = gaps.next(splices) {
         f(at, gap);
     }
@@ -958,7 +958,7 @@ pub(crate) fn for_each_gap(
 pub(crate) fn for_each_cut(splices: &[Splice], len: usize, mut f: impl FnMut(usize, usize)) {
     // verified (`splices::Cuts`): the cuts, made in turn, leave exactly the
     // ranges' rows
-    let mut cuts = Cuts::<()>::new(splices, len, Ghost::assume_new());
+    let mut cuts = Cuts::of_len(splices, len);
     while let Some((at, n)) = cuts.next(splices) {
         f(at, n);
     }
@@ -1749,14 +1749,8 @@ where
             // checks a loaded slab's does
             let slabs = vec![T::Encoding::<C>::fill(len, value)];
             let ws = if <WF::Model as LoadWeigh<'a, _, Dx<T, C>, _>>::accumulates_exec() {
-                let mut w = <WF::Model as Accumulate<T::Get<'a>, WF::Weight>>::new_zero();
-                <WF::Model as Accumulate<T::Get<'a>, WF::Weight>>::accumulate_run(
-                    &mut w,
-                    len,
-                    value,
-                    Ghost::assume_new(),
-                )?;
-                vec![w]
+                // verified: the weight of `len` copies of `value`
+                vec![crate::attrib::weigh_run::<_, _, WF::Model>(len, value)?]
             } else {
                 vec![WF::compute(&slabs[0])]
             };
