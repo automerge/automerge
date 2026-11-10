@@ -524,9 +524,10 @@ first and values outside the domain last.
   not part of the proof); `delta`, which is glue over the verified
   iterator; and the glue that drives the `DeltaEdit` cursor's verified
   arithmetic (`copy_ranges` uses it too): that what the cursor reports
-  carrying, deleting or jumping over is what it did, and that the
-  column's deltas its ledger is given (as a ghost, for the span check's
-  bound) are its own.
+  carrying, deleting or jumping over is what it did. Its ledger starts
+  in verified code (`ColumnCore::delta_ledger`: the value before the
+  cursor, the bound on the column's values, and the column's own deltas
+  as its ghost).
 * `RleEncoderState` and `DeltaEncoderState`, which write into a buffer
   the caller passes to each call, are proved only if every call gets the
   same buffer, with the bytes they wrote unchanged in between. Their

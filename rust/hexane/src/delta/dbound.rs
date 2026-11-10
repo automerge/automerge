@@ -291,6 +291,8 @@ impl SpanLedger {
             s.tracking@ == track,
             s.l.adjust == 0,
             !s.l.closed@,
+            s.orig@ == orig,
+            s.l.read@ == before,
     {
         proof {
             if track && narrow(lo as int, hi as int) {

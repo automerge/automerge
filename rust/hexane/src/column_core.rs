@@ -62,7 +62,7 @@ use crate::cursor::{lemma_lens_ok, lemma_vals_own};
 use crate::delta::agg::{agg_of, deltas_of, reps, steps_fit};
 #[cfg(verus_keep_ghost)]
 use crate::delta::dbound::{bounds_of, span_ok, spliced};
-use crate::delta::dbound::{root_bound, SpanPlan, ToDeltas};
+use crate::delta::dbound::{root_bound, SpanLedger, SpanPlan, ToDeltas};
 #[cfg(verus_keep_ghost)]
 use crate::delta::ddomain::{
     dslabs, lemma_dix_ok, lemma_dslabs_own, lemma_span_steps, lemma_splice_dom,
@@ -71,6 +71,7 @@ use crate::delta::ddomain::{
     slabs_fit, DeltaFeed, DeltaWrite, SpliceItems, ValueItems, ValuesFeed,
 };
 use crate::delta::dedit::d_boundaries;
+use crate::delta::diter::d_nth;
 #[cfg(verus_keep_ghost)]
 use crate::delta::diter::{crop, dindex_ok, lemma_crop};
 #[cfg(verus_keep_ghost)]
@@ -895,6 +896,51 @@ impl<E, X, B> ColumnCore<E, SlabAgg, SlabBTree<SlabAgg>, DeltaModel<X, B>> where
             lemma_dix_ok::<X, B>(ix@, s);
         }
         (slabs, ix)
+    }
+
+    /// The ledger of a delta edit cursor opening at item `at`: the
+    /// realized value before it (an index jump), the bound on the
+    /// column's values (from the index's root), and the column's deltas,
+    /// those before `at` read. The ledger widens the bound by each value
+    /// the edit writes: the root aggregate after an edit is no bound, as
+    /// the index merges with wrapping arithmetic.
+    pub(crate) fn delta_ledger(&self, at: usize) -> (l: SpanLedger)
+        requires
+            at <= self@.len(),
+        ensures
+            l.inv(),
+            l.orig@ == dslabs::<X, B>(self.slabs_spec()),
+            l.l.read@ == l.orig@.take(at as int),
+            l.tracking@,
+            l.l.adjust == 0,
+            !l.l.closed@,
+    {
+        let len = self.len();
+        let ghost s0 = self.slabs_spec();
+        let ghost orig = dslabs::<X, B>(s0);
+        let ghost v = crate::iter_core::vals_of::<X>(s0);
+        let (slabs, ix) = self.delta_parts();
+        let (lo, hi) = root_bound::<X, B>(slabs, ix);
+        let mut running: i64 = 0;
+        proof {
+            assert(before::<X>(s0, 0) =~= Seq::<<X::D as Decode>::Item>::empty());
+            assert(deltas_of::<_, B>(Seq::<<X::D as Decode>::Item>::empty()) =~= Seq::<Option<i64>>::empty());
+            lemma_crop(0);
+        }
+        if at > 0 {
+            let mut core = self.reader::<X>(0, len);
+            proof {
+                assert(v.subrange(0, len as int) =~= v);
+            }
+            d_nth::<X, B>(&mut core, slabs, Some(ix), at - 1, &mut running);
+        }
+        proof {
+            assert(deltas_of::<_, B>(v.take(at as int)) =~= orig.take(at as int));
+            if at == 0 {
+                assert(orig.take(0) =~= Seq::<Option<i64>>::empty());
+            }
+        }
+        SpanLedger::new(running, lo, hi, true, Ghost(orig.take(at as int)), Ghost(orig))
     }
 
     /// Delete `del` items at `at` and insert the values of `items` there,

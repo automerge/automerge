@@ -16,7 +16,7 @@ use vstd::prelude::Ghost;
 use crate::column::{normalize_range_max, Dx, Iter, IterState};
 use crate::rle::state::WOps;
 use crate::{Codec, Leb128};
-use dbound::{root_bound, SpanLedger};
+use dbound::SpanLedger;
 use ddomain::{slabs_fit, SpliceItem, SpliceItems, ValueItems};
 use dedit::run_sum;
 use diter::{d_next, d_next_run, d_nth};
@@ -1193,29 +1193,16 @@ where
     T::Inner: crate::ColumnValueRef<Encoding<C> = crate::RleEncoding<T::Inner, C>>,
 {
     fn new(col: &'a mut InnerColumn<T, C>, at: usize) -> Self {
+        assert!(at <= col.len(), "edit_at out of bounds");
         // before the cursor borrows the column: the realized value it
-        // starts from, which position 0 gets for nothing
-        let running = Self::prefix_at(col, at);
-        let (lo, hi) = start_bound::<T, C>(col);
+        // starts from, a bound on the column's values, and its deltas
+        // (verified, `ColumnCore::delta_ledger`)
+        let ledger = col.core.delta_ledger(at);
         DeltaEdit {
             inner: col.edit_at(at),
-            ledger: SpanLedger::new(
-                running,
-                lo,
-                hi,
-                true,
-                Ghost::assume_new(),
-                Ghost::assume_new(),
-            ),
+            ledger,
             _phantom: PhantomData,
         }
-    }
-
-    /// The realized value `at` items into `col` — an index jump, the same
-    /// one [`DeltaColumn::splice`] makes on every call.
-    fn prefix_at(col: &InnerColumn<T, C>, at: usize) -> i64 {
-        let (slabs, index) = col.core.delta_parts();
-        Self::prefix_in(slabs, index, col.len(), at)
     }
 
     /// The realized value before item `at` of the column of `slabs`,
@@ -1575,19 +1562,6 @@ fn check_span<T: DeltaValue, C: Codec>(
     if !slabs_fit::<Dx<T::Inner, C>, DB<T::Inner, C>>(slabs, len, T::MIN_I64, T::MAX_I64) {
         panic!("delta values out of domain: they would span 2^63 or more");
     }
-}
-
-/// The bound on `col`'s values an edit starts from, which its verified
-/// plan widens by each value it writes (`dbound::SpanLedger`): the least
-/// and greatest running sum, from the index's root aggregate (verified,
-/// `dbound::root_bound`, given the column's invariant, which
-/// `ColumnCore::delta_parts` derives). The root
-/// aggregate after an edit is no bound: the index merges with wrapping
-/// arithmetic, so where values that span 2^63 or more meet, its sums
-/// wrap.
-fn start_bound<T: DeltaValue, C: Codec>(col: &InnerColumn<T, C>) -> (i128, i128) {
-    let (slabs, index) = col.core.delta_parts();
-    root_bound::<Dx<T::Inner, C>, DB<T::Inner, C>>(slabs, index)
 }
 
 type InnerColumn<T, C = Leb128> = Column<<T as DeltaValue>::Inner, C, IndexedDeltaWeightFn>;
