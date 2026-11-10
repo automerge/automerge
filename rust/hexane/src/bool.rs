@@ -403,6 +403,7 @@ impl<C> Default for BoolEdit<C> {
 impl<C: Codec> crate::edit::SlabEdit for BoolEncoding<C> {
     type Edit = BoolEdit<C>;
     type Model = crate::bool_edit::BoolModel<C>;
+    type Loader<'a> = crate::bool_edit::BoolLoader<'a, C>;
 }
 
 // Forwards to the verified bool slab model; the column cursor calls the

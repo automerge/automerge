@@ -26,6 +26,12 @@ pub trait SlabEdit: crate::encoding::ColumnEncoding {
     type Model: crate::cursor::Slabs<Tail = Self::Tail, State = Self::State, Rebuild = Self::Edit>
         + for<'a> crate::cursor::ReadsAgree<'a, <Self as ColumnEncoding>::ReadModel>;
 
+    /// The encoding's verified loader, which reads its bytes run by run
+    /// and cuts them into slabs of [`Model`](Self::Model)
+    /// (`load_core::Loads`).
+    #[doc(hidden)]
+    type Loader<'a>: crate::load_core::Loads<'a, Self::Model, <Self as ColumnEncoding>::ReadModel>;
+
     /// How many runs a cursor carries through an open rebuild before
     /// closing it instead — the trade between re-encoding what it carries
     /// and paying for a write-back.

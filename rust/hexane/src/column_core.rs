@@ -24,12 +24,15 @@
 //! ([`ColumnCore::splice_delta`]), and so the delta readers' invariant
 //! follows from the type invariant ([`ColumnCore::delta_parts`]).
 //!
-//! Trusted: what the constructors are given (well-formed slabs and their
-//! weights, from the loaders, fills and encoders, and for a delta column
-//! in its domain, which its loader checks); and the parts the public edit
-//! cursor ([`crate::edit::Edit`]) hands back ([`ColumnCore::restore`]),
-//! which its verified steps keep a column but its glue chains (for a
-//! delta column, `DeltaEdit` checks the domain before).
+//! A load builds its core in verified code (`load_core::LoadCore::finish`),
+//! so a loaded column's invariant is proved from its bytes.
+//!
+//! Trusted: what the other constructors are given (well-formed slabs and
+//! their weights, from the fills and encoders, and for a delta column in
+//! its domain); and the parts the public edit cursor
+//! ([`crate::edit::Edit`]) hands back ([`ColumnCore::restore`]), which
+//! its verified steps keep a column but its glue chains (for a delta
+//! column, `DeltaEdit` checks the domain before).
 
 // Verus has no spec for a slice's `is_empty`.
 #![allow(clippy::len_zero)]

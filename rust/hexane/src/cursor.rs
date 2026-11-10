@@ -2205,6 +2205,3 @@ impl<W, G: FnMut(&W)> WeightSink<W> for G {
         self(w)
     }
 }
-
-/// A column's weight function, as [`Weigh`].
-pub(crate) struct WeightOf<T, C, WF>(PhantomData<fn() -> (T, C, WF)>);

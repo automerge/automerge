@@ -1123,7 +1123,7 @@ impl ToDeltas {
 
 /// Every running sum through at least one of deltas `ds` lies between
 /// their least and greatest.
-proof fn lemma_psum_within(ds: Seq<Option<i64>>, k: int)
+pub(crate) proof fn lemma_psum_within(ds: Seq<Option<i64>>, k: int)
     requires
         1 <= k <= ds.len(),
     ensures

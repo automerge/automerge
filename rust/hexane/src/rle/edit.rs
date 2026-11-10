@@ -911,6 +911,17 @@ impl<'a, L, O> crate::cursor::ReadsAgree<'a, crate::rle::dec::RleReads<O>> for R
     }
 }
 
+/// A slab that is a canonical encoding of the read ops' values, with its
+/// metadata, is one of the edit model's (`RleModel::ok`).
+pub(crate) proof fn lemma_model_ok<L, O>(s: Slab)
+    where L: for<'s> Lift<'s, W = L> + for<'s> WriteOps<'s, R = O>, O: for<'b> RleOps<'b>
+    requires
+        slab_ok::<O>(s),
+    ensures
+        <RleModel<L> as Slabs>::ok(s),
+{
+}
+
 /// A value read from a column, to insert into a rebuild of the same
 /// type: it writes the value's owned copy (`Lift::own`).
 pub struct ReadIns<'a, L: WriteOps<'a>> {
@@ -1269,6 +1280,7 @@ where
 {
     type Edit = RleEdit<T, C>;
     type Model = RleModel<WOps<T, T, C>>;
+    type Loader<'a> = crate::rle::cut::Load<'a, WOps<T, T, C>>;
 }
 
 #[cfg(test)]

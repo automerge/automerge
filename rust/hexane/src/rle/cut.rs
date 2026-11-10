@@ -21,6 +21,7 @@
 // spec functions exist only when Verus compiles the crate
 #[cfg(verus_keep_ghost)]
 use super::dec::*;
+use super::lift::Lift;
 #[cfg(verus_keep_ghost)]
 use super::merge::slab_meta;
 use super::model::*;
@@ -1384,7 +1385,8 @@ impl Cut {
 
 /// A load in progress: the reader over the input, and the cutting of
 /// what it has read into slabs of `target` segments.
-pub(crate) struct Load<'a, W: WriteOps<'a>> {
+#[doc(hidden)]
+pub struct Load<'a, W: WriteOps<'a>> {
     reader: Reader<'a, W::R>,
     input: &'a [u8],
     cut: Cut,
@@ -1431,11 +1433,15 @@ impl<'a, W: WriteOps<'a>> Load<'a, W> {
     /// Start loading `data`, into slabs of `max_segments / 2` segments.
     pub(crate) fn new(data: &'a [u8], max_segments: usize) -> (l: Self)
         requires max_segments >= 2,
-        ensures l.inv(), l.data() == data@,
+        ensures l.inv(), l.data() == data@, l.pulled().len() == 0, l.done_slabs().len() == 0,
     {
         let reader = Reader::new(data);
         let cut = Cut::new::<W::R>(Ghost(reader));
-        Load { reader, input: data, cut, target: max_segments / 2 }
+        let l = Load { reader, input: data, cut, target: max_segments / 2 };
+        proof {
+            l.lemma_done_prefix();
+        }
+        l
     }
 
     pub(crate) fn slabs_completed(&self) -> (n: usize)
@@ -1685,6 +1691,95 @@ proof fn lemma_slab_is_parse<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>, data: Seq<
 {
     reveal(parses);
     lemma_slab_is::<O>(gs, data);
+}
+
+
+/// The values of slabs as the read model sees them: the loader's.
+pub(crate) proof fn lemma_read_slabs<O: for<'b> RleOps<'b>>(ss: Seq<Slab>)
+    ensures
+        crate::iter_core::vals_of::<super::dec::RleReads<O>>(ss) == slabs_values::<O>(ss),
+    decreases ss.len(),
+{
+    let e = crate::iter_core::each::<super::dec::RleReads<O>>(ss);
+    if ss.len() == 0 {
+        assert(e =~= Seq::<Seq<<O as RleOps<'static>>::V>>::empty());
+    } else {
+        lemma_read_slabs::<O>(ss.drop_last());
+        lemma_reads_are::<O>(ss.last());
+        assert(e.drop_last() =~= crate::iter_core::each::<super::dec::RleReads<O>>(ss.drop_last()));
+        assert(e.last() == <super::dec::RleReads<O> as crate::iter_core::Decoders<'static>>::vals(ss.last()));
+    }
+}
+
+/// Slabs each a canonical encoding with its metadata are the edit model's.
+proof fn lemma_model_all<L, O>(ss: Seq<Slab>)
+    where L: for<'s> Lift<'s, W = L> + for<'s> WriteOps<'s, R = O>, O: for<'b> RleOps<'b>
+    requires
+        forall|i: int| 0 <= i < ss.len() ==> slab_ok::<O>(#[trigger] ss[i]),
+    ensures
+        crate::cursor::all_ok::<super::edit::RleModel<L>>(ss),
+{
+    assert forall|i: int| 0 <= i < ss.len() implies <super::edit::RleModel<L> as crate::cursor::Slabs>::ok(#[trigger] ss[i]) by {
+        super::edit::lemma_model_ok::<L, O>(ss[i]);
+    }
+}
+
+impl<'a, L, O> crate::load_core::Loads<'a, super::edit::RleModel<L>, super::dec::RleReads<O>> for Load<'a, L>
+    where L: for<'s> Lift<'s, W = L> + for<'s> WriteOps<'s, R = O>, O: for<'b> RleOps<'b>
+{
+    open spec fn inv(&self) -> bool {
+        Load::<'a, L>::inv(self)
+    }
+
+    #[inline(always)]
+    fn start(data: &'a [u8], max_segments: usize) -> (l: Self) {
+        Load::<'a, L>::new(data, max_segments)
+    }
+
+    open spec fn pulled(&self) -> Seq<<O as RleOps<'a>>::V> {
+        Load::<'a, L>::pulled(self)
+    }
+
+    open spec fn done_slabs(&self) -> Seq<Slab> {
+        Load::<'a, L>::done_slabs(self)
+    }
+
+    open spec fn at_end(&self) -> bool {
+        Load::<'a, L>::at_end(self)
+    }
+
+    proof fn lemma_done(&self) {
+        self.lemma_done_prefix();
+        lemma_read_slabs::<O>(self.done_slabs());
+        lemma_model_all::<L, O>(self.done_slabs());
+    }
+
+    #[inline(always)]
+    fn try_next_run(&mut self) -> (r: Result<Option<crate::Run<<O as RleOps<'a>>::V>>, PackError>) {
+        let r = Load::<'a, L>::try_next_run(self);
+        proof {
+            lemma_read_slabs::<O>(self.done_slabs());
+        }
+        r
+    }
+
+    #[inline(always)]
+    fn slabs_completed(&self) -> (n: usize) {
+        Load::<'a, L>::slabs_completed(self)
+    }
+
+    #[inline(always)]
+    fn finalize(self) -> (r: Result<Vec<Slab>, PackError>) {
+        let ghost (d, p, e) = (self.done_slabs(), self.pulled(), self.at_end());
+        let r = Load::<'a, L>::finalize(self);
+        proof {
+            if r is Ok {
+                lemma_read_slabs::<O>(r->Ok_0@);
+                lemma_model_all::<L, O>(r->Ok_0@);
+            }
+        }
+        r
+    }
 }
 
 } // verus!

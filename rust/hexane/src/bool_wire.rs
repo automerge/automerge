@@ -678,6 +678,9 @@ fn read_seg<K: CountOps>(sc: &mut Scan, data: &[u8], slabs: &mut Vec<BSlab>, tar
         },
         r is Err ==> !bool_valid::<K>(data@),
 {
+    // passed through unchanged, to the cut or back out
+    hide(bslabs_values);
+    hide(bslab_ok);
     if sc.pos >= data.len() {
         return Ok(None);
     }
@@ -814,9 +817,16 @@ impl<'a> BoolLoad<'a> {
         assert(counts_values(cs).take(d.len() as int) =~= d);
     }
 
+    /// The slabs cut so far are well-formed.
+    pub(crate) proof fn lemma_done_ok<K: CountOps>(&self)
+        requires self.inv::<K>(),
+        ensures forall|i: int| 0 <= i < self.done_slabs().len() ==> bslab_ok::<K>(#[trigger] self.done_slabs()[i]),
+    {
+    }
+
     /// Start loading `data`, into slabs of about `max_segments / 2` runs.
     pub(crate) fn new<K: CountOps>(data: &'a [u8], max_segments: usize) -> (l: Self)
-        ensures l.inv::<K>(), l.data() == data@,
+        ensures l.inv::<K>(), l.data() == data@, l.values_read().len() == 0, l.done_slabs().len() == 0,
     {
         let half = max_segments / 2;
         let even = half - half % 2;
@@ -2234,6 +2244,7 @@ fn slice_from(v: &[u8], n: usize) -> (s: &[u8])
     assert(s@ == v@.skip(n as int));
     s
 }
+
 
 } // verus!
 

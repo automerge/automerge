@@ -31,15 +31,15 @@
 //! Trusted: [`DeltaWrite`], the value types' bridge (a delta written
 //! reads back as itself, and a value read holds the delta its owned form
 //! does); and, for a delta column's other ways in, the glue: that a
-//! load's checks (the verified `agg::DomainWalk` and `agg::ValueSpan`)
-//! and a `DeltaEdit`'s (`dbound::SpanLedger`, then [`slabs_fit`]) are of
-//! the column they build or leave.
+//! `DeltaEdit`'s checks (`dbound::SpanLedger`, then [`slabs_fit`]) are of
+//! the column it leaves. A load's are verified with the load itself
+//! (`load_core`, `weights::DeltaModel`).
 
 #[cfg(verus_keep_ghost)]
 use crate::btree::{fold, in_i64, SlabAgg, SlabAggregate};
 use crate::column::Slab;
 #[cfg(verus_keep_ghost)]
-use crate::cursor::{all_ok, lemma_vals_own, vals_of as cvals_of};
+use crate::cursor::{all_ok, lemma_vals_own, lemma_vals_total, vals_of as cvals_of};
 #[cfg(verus_keep_ghost)]
 use crate::cursor::{lemma_concat_append, slab_lens};
 use crate::cursor::{Insertable, ReadsAgree, RunFeed, Slabs};
@@ -50,7 +50,7 @@ use crate::delta::agg::{
 };
 use crate::delta::agg::{AnySpan, DeltaOps};
 #[cfg(verus_keep_ghost)]
-use crate::delta::dbound::{span_ok, spliced};
+use crate::delta::dbound::{lemma_psum_within, span_ok, spliced};
 use crate::delta::dbound::{SpanPlan, ToDeltas};
 use crate::delta::dedit::SplicePhase;
 #[cfg(verus_keep_ghost)]
@@ -172,6 +172,31 @@ pub(crate) proof fn lemma_span_steps(ds: Seq<Option<i64>>, min: int, max: int)
         lemma_vrange_take(ds, j);
         assert(b.take(i) =~= a);
         lemma_vrange_take(b, i);
+    }
+}
+
+/// Running sums after one or more deltas within `lo..=hi`, a range less
+/// than 2^63 wide inside `i64` (what a load's walk over the slab
+/// aggregates checks): every step between two running sums fits, the 0
+/// before the first included.
+pub(crate) proof fn lemma_walk_steps(ds: Seq<Option<i64>>, lo: int, hi: int)
+    requires
+        ds.len() > 0 ==> lo <= pmin(ds) && pmax(ds) <= hi && pmax(ds) - pmin(ds) <= i64::MAX,
+        i64::MIN <= lo,
+        hi <= i64::MAX,
+        ds.len() <= i64::MAX,
+    ensures
+        steps_fit(ds),
+{
+    assert forall|i: int, j: int| 0 <= i <= j <= ds.len() implies in_i64(#[trigger] pdiff(ds, i, j)) by {
+        if i < j {
+            lemma_psum_within(ds, j);
+            if i == 0 {
+                assert(ds.take(0) =~= Seq::<Option<i64>>::empty());
+            } else {
+                lemma_psum_within(ds, i);
+            }
+        }
     }
 }
 
@@ -442,6 +467,21 @@ pub(crate) fn slabs_fit<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>
         }
     }
     r
+}
+
+/// A column's deltas, one per item.
+pub(crate) proof fn lemma_dslabs_len<E, X, B>(s: Seq<Slab<E::Tail>>)
+    where
+        E: Slabs + for<'a> ReadsAgree<'a, X>,
+        X: for<'a> Decoders<'a, Tail = E::Tail>,
+        B: for<'a> DeltaOps<<<X as Decoders<'a>>::D as Decode>::Item>,
+    requires
+        all_ok::<E>(s),
+    ensures
+        dslabs::<X, B>(s).len() == total(slab_lens(s)),
+{
+    lemma_vals_own::<E, X>(s);
+    lemma_vals_total::<E>(s);
 }
 
 /// A column's deltas, read, are its owned values' (`DeltaWrite::dvo`).

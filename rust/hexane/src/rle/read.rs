@@ -653,7 +653,7 @@ impl<'a, O: RleOps<'a>> Reader<'a, O> {
     pub(crate) fn new(data: &'a [u8]) -> (r: Self)
         ensures
             r.inv(), r.data() == data@, r.groups() == Seq::<Group<O::V>>::empty(),
-            !r.in_lit(), r.spec_pos() == 0,
+            !r.in_lit(), r.spec_pos() == 0, r.lit_values().len() == 0,
     {
         let r = Reader {
             data,

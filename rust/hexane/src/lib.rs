@@ -139,6 +139,7 @@ pub(crate) mod fenwick;
 pub mod index;
 pub(crate) mod iter_core;
 mod leb128_codec;
+pub(crate) mod load_core;
 pub mod load_opts;
 pub(crate) mod merge_walk;
 pub mod prefix;

@@ -763,39 +763,14 @@ impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
         // Non-nullable T stores `Column<i64>`, whose decoder rejects null
         // runs at the segment level — no run-level null scan needed.
         let iter = InnerColumn::<T, C>::load_iter(data, opts);
-        // Domain validation per slab: the aggregates accumulated during
-        // the load (exact — `accumulate_run` errors on any within-slab
-        // overflow) hold each slab's realized min/max as offsets from its
-        // start. Walking them with a widened running sum catches both
-        // out-of-domain values and cross-slab overflow, before any
-        // aggregate reaches the index's merge arithmetic. On valid data
-        // `running` never leaves the domain; i128 keeps the comparisons
-        // exact when a hostile slab would wrap them. Verified
-        // (`DomainWalk`): every running sum is within the domain.
-        let mut walk = agg::DomainWalk::new();
-        let col = iter.finalize_with(|w| {
-            if walk.slab(w, T::MIN_I64, T::MAX_I64, Ghost::assume_new()) {
-                Ok(())
-            } else {
-                Err(PackError::InvalidValue("delta value out of domain".into()))
-            }
-        })?;
-        // The values must also lie within a 2^63-wide range, so that a
-        // delete can store the difference of any two (see `DeltaValue`).
-        // Only `i64`'s domain is wider than that. Where the running sums
-        // span too much (nulls hold the running sum, so they can include
-        // a 0 that is no value), measure the values themselves.
-        if walk.too_wide(Ghost::assume_new(), Ghost::assume_new()) && !within_2_63::<T, C>(data) {
-            return Err(PackError::InvalidValue(
-                "delta values out of domain: they span 2^63 or more".into(),
-            ));
-        }
-        // and a delta column holds at most `i64::MAX` items: the steps
-        // between its running sums must fit `i64`, counts included (the
-        // column's invariant, which `ColumnCore::from_slabs` is given)
-        if col.len() as u64 > i64::MAX as u64 {
-            return Err(PackError::InvalidLength(col.len(), i64::MAX as usize));
-        }
+        // verified (`load_core::LoadCore::finish`, `weights::DeltaModel`'s
+        // load checks): walking the slabs' exact aggregates, accumulated
+        // as the runs stream past, every running sum lies in `T`'s domain
+        // (`DomainWalk`); where those sums span 2^63 or more (nulls hold
+        // the running sum, so they can include a 0 that is no value), the
+        // values themselves are read; and the column holds at most
+        // `i64::MAX` items. So the column is in its domain.
+        let col = iter.finalize_in(T::MIN_I64, T::MAX_I64)?;
         Ok(Self {
             col,
             _phantom: PhantomData,
@@ -1574,32 +1549,6 @@ impl DeltaRun {
 }
 
 // ── DeltaIter ──────────────────────────────────────────────────────────────
-
-/// Whether the delta column `data`, which has loaded, holds values that
-/// lie within a 2^63-wide range. Only nulls make this differ from the
-/// bound `DeltaColumn::load_with` keeps; they are rare near the limit, so
-/// this walk is too.
-fn within_2_63<T: DeltaValue, C: Codec>(data: &[u8]) -> bool {
-    runs_within_2_63::<T, C>([data])
-}
-
-/// [`within_2_63`] for a column's slabs, one after another.
-fn runs_within_2_63<'a, T: DeltaValue, C: Codec>(
-    slabs: impl IntoIterator<Item = &'a [u8]>,
-) -> bool {
-    use crate::encoding::RunDecoder;
-    // verified (`ValueSpan`): the least and greatest running sum at a
-    // value, given that every running sum fits an `i64`, as `load`'s walk
-    // has checked and an edit's slab aggregates do
-    let mut span = agg::ValueSpan::new();
-    for data in slabs {
-        let mut decoder = crate::decoder_in::<T::Inner, C>(data);
-        while let Some(run) = decoder.next_run() {
-            span.run(run.count, T::Inner::to_opt(run.value));
-        }
-    }
-    span.within_2_63()
-}
 
 /// Panic unless the column's values lie in `T`'s domain, within a range
 /// less than 2^63 wide (the [`DeltaValue`] domain contract, which `load`

@@ -301,7 +301,12 @@ compiles them away. To check them, run `cargo verus verify -p hexane
   column's values, gives back the bytes an unedited column was loaded
   from. As the runs stream past, a slab is cut only at the end of a run,
   and a load's slab weights are accumulated from exactly the runs of each
-  slab.
+  slab, by each weight model's verified accumulation (for a delta column,
+  exactly its slab's aggregate), so each is its slab's weight. The
+  column a load builds (`load_core::LoadCore`) is proved to satisfy the
+  column invariant, its delta domain included, from the bytes alone:
+  `load`, `load_with` and `load_iter(..).finalize()`, for every column
+  type.
 * The slab-level code: decoders, encoders, the edit rebuilds and slab
   merges, for both RLE and bool slabs.
 * The slab indexes (the B-tree and the Fenwick tree).
@@ -485,13 +490,9 @@ decode, which the verified code reaches through traits (the contract on
 `RleValue`); the thin glue that
 connects the generic column types to the verified cores, and the closures
 passed through it (including the slabs a new column is built from, which
-come from the verified loaders, fills and encoders, and the iterators'
-state between calls; for a delta column, that its loader's domain checks
-and a `DeltaEdit`'s, which are verified, are of the column they build or
-leave); that a weight a load accumulates from the runs as
-they stream past is the slab's weight (a load is proved to give each
-slab exactly the runs that hold its values, in order, so that
-accumulating a slab's runs gives what computing its weight does); each prefix value type's `accumulate` and
+come from the verified fills and encoders, and the iterators' state
+between calls; for a delta column, that a `DeltaEdit`'s domain check,
+which is verified, is of the column it leaves); each prefix value type's `accumulate` and
 `accumulate_run` (that they add its values, a run as its value
 repeated) and `try_accumulate_run` (that when it succeeds it adds what
 `accumulate_run` does), and that its prefix type's `+` is associative with `default`

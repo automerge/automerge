@@ -25,6 +25,7 @@ use crate::cursor::{lemma_vals_cat, lemma_vals_unit, vals_of};
 use crate::rle::edit::Visit;
 #[cfg(verus_keep_ghost)]
 use crate::rle::writer::concat;
+use crate::{PackError, Run};
 use std::marker::PhantomData;
 #[allow(unused_imports)]
 use vstd::prelude::*;
@@ -2080,6 +2081,15 @@ impl<'a, C: CountsOf> crate::cursor::ReadsAgree<'a, crate::bool_wire::BoolReads<
     }
 }
 
+/// A well-formed bool slab is one of the edit model's.
+pub(crate) proof fn lemma_model_ok<C: CountsOf>(s: BSlab)
+    requires
+        bslab_ok::<C::K>(s),
+    ensures
+        <BoolModel<C> as Slabs>::ok(s),
+{
+}
+
 /// A value read from a bool column, to insert into a rebuild.
 pub struct BoolIns(pub(crate) bool);
 
@@ -2297,6 +2307,101 @@ pub(crate) fn discard<C: CountsOf, G: Visit<bool>>(e: &mut BoolEdit<C>, s: &BSla
     let ghost v0 = e.e.vals();
     e.e.walk::<C::K, G>(s.data.as_slice(), n, false, f);
     assert(e.e.vals() =~= v0);
+}
+
+/// The values of slabs as the read model sees them: the loader's.
+pub(crate) proof fn lemma_read_bslabs<C: CountsOf>(ss: Seq<BSlab>)
+    ensures
+        crate::iter_core::vals_of::<BoolReads<C>>(ss) == bslabs_values::<C::K>(ss),
+    decreases ss.len(),
+{
+    let e = crate::iter_core::each::<BoolReads<C>>(ss);
+    if ss.len() == 0 {
+        assert(e =~= Seq::<Seq<bool>>::empty());
+    } else {
+        lemma_read_bslabs::<C>(ss.drop_last());
+        crate::bool_wire::lemma_reads_are::<C>(ss.last());
+        reveal(bslab_bytes);
+        assert(e.drop_last() =~= crate::iter_core::each::<BoolReads<C>>(ss.drop_last()));
+        assert(e.last() == <BoolReads<C> as crate::iter_core::Decoders<'static>>::vals(ss.last()));
+    }
+}
+
+/// Well-formed bool slabs are the edit model's.
+proof fn lemma_bmodel_all<C: CountsOf>(ss: Seq<BSlab>)
+    requires
+        forall|i: int| 0 <= i < ss.len() ==> bslab_ok::<C::K>(#[trigger] ss[i]),
+    ensures
+        crate::cursor::all_ok::<BoolModel<C>>(ss),
+{
+    assert forall|i: int| 0 <= i < ss.len() implies <BoolModel<C> as crate::cursor::Slabs>::ok(#[trigger] ss[i]) by {
+        lemma_model_ok::<C>(ss[i]);
+    }
+}
+
+
+
+/// A bool column's loader for codec `C` (`BoolLoad`), as [`crate::load_core::Loads`].
+pub struct BoolLoader<'a, C> {
+    pub(crate) l: BoolLoad<'a>,
+    pub(crate) _p: PhantomData<C>,
+}
+
+impl<'a, C: CountsOf> crate::load_core::Loads<'a, BoolModel<C>, BoolReads<C>> for BoolLoader<'a, C> {
+    open spec fn inv(&self) -> bool {
+        self.l.inv::<C::K>()
+    }
+
+    #[inline(always)]
+    fn start(data: &'a [u8], max_segments: usize) -> (l: Self) {
+        BoolLoader { l: BoolLoad::new::<C::K>(data, max_segments), _p: PhantomData }
+    }
+
+    open spec fn pulled(&self) -> Seq<bool> {
+        self.l.values_read()
+    }
+
+    open spec fn done_slabs(&self) -> Seq<BSlab> {
+        self.l.done_slabs()
+    }
+
+    open spec fn at_end(&self) -> bool {
+        self.l.at_end()
+    }
+
+    proof fn lemma_done(&self) {
+        self.l.lemma_done_prefix::<C::K>();
+        lemma_read_bslabs::<C>(self.l.done_slabs());
+        self.l.lemma_done_ok::<C::K>();
+        lemma_bmodel_all::<C>(self.l.done_slabs());
+    }
+
+    #[inline(always)]
+    fn try_next_run(&mut self) -> (r: Result<Option<Run<bool>>, PackError>) {
+        let r = self.l.try_next_run::<C::K>();
+        proof {
+            lemma_read_bslabs::<C>(self.l.done_slabs());
+        }
+        r
+    }
+
+    #[inline(always)]
+    fn slabs_completed(&self) -> (n: usize) {
+        self.l.slabs_completed()
+    }
+
+    #[inline(always)]
+    fn finalize(self) -> (r: Result<Vec<BSlab>, PackError>) {
+        let mut l = self.l;
+        let r = l.finalize::<C::K>();
+        proof {
+            if r is Ok {
+                lemma_read_bslabs::<C>(r->Ok_0@);
+                lemma_bmodel_all::<C>(r->Ok_0@);
+            }
+        }
+        r
+    }
 }
 
 } // verus!

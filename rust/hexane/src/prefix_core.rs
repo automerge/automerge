@@ -568,6 +568,7 @@ pub(crate) fn p_nth<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>(
 /// (as `reset_prefix` does), and advance to `end`. Then `base` is the sum
 /// before `start` and the running total the sum of `start..end`: what
 /// added to the one gives the sum before `end`.
+#[verifier::spinoff_prover]
 pub(crate) fn p_sum_range<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>(
     core: &mut ICore<X::D>,
     slabs: &'a [Slab<X::Tail>],
