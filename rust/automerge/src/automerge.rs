@@ -603,19 +603,17 @@ impl Automerge {
     ) -> Result<(), crate::PatchLogMismatch> {
         log.transition_to(self, |d| d.visible_current())?;
         update(&mut self.write_frontier);
-        let visibility = visibility::FrontierVisibility::new(
+        let changed = self.visibility.refresh(
             &self.write_frontier,
             &self.change_graph,
             &self.authors,
-            self.actors(),
+            &self.ops.actors,
         );
         // An update that leaves the mask as it was (e.g. setting an empty
         // policy on a document that had none, or re-witnessing a resolved
         // boundary) changes no visibility: the indexes are already correct
         // and the first transition already bound the log, so the expensive
         // reindex can be skipped.
-        let changed = visibility.mask() != self.visibility.mask();
-        self.visibility = visibility;
         if changed {
             let after = self.visible_current();
             self.ops.recompute_indexes(after.clock());
