@@ -150,24 +150,57 @@ pub open spec fn run_fits(ds: Seq<Option<i64>>, count: nat, v: Option<i64>) -> b
     }
 }
 
-/// Fold a run of `count` copies of delta `v` into `w`, the aggregate of
-/// `ds`. False, leaving `w` as it was, if a running sum (or the run's
-/// span) leaves `i64`: the delta value domain rules those out.
-#[inline]
-pub(crate) fn agg_run(w: &mut SlabAgg, count: usize, v: Option<i64>, Ghost(ds): Ghost<Seq<Option<i64>>>) -> (ok: bool)
+/// The aggregate `w` with a run of `n` copies of delta `v` after it, field
+/// by field: what [`agg_step`] computes where the run fits.
+pub open spec fn agg_next(w: SlabAgg, n: nat, v: Option<i64>) -> (int, int, int, int) {
+    match v {
+        None => (
+            w.len + n,
+            w.total as int,
+            if w.len == 0 { 0 } else { min_i(w.min_offset as int, w.total as int) },
+            if w.len == 0 { 0 } else { max_i(w.max_offset as int, w.total as int) },
+        ),
+        Some(d) => {
+            let (first, last) = (w.total + d, w.total + n * d);
+            (
+                w.len + n,
+                last,
+                if w.len == 0 { min_i(first, last) } else { min_i(w.min_offset as int, min_i(first, last)) },
+                if w.len == 0 { max_i(first, last) } else { max_i(w.max_offset as int, max_i(first, last)) },
+            )
+        },
+    }
+}
+
+/// A run of `n` copies of delta `v` after `w` keeps its sums, and its
+/// step, in `i64`.
+pub open spec fn agg_fits(w: SlabAgg, n: nat, v: Option<i64>) -> bool {
+    match v {
+        Some(d) => {
+            &&& n <= i64::MAX
+            &&& in_i64(n * d)
+            &&& in_i64(w.total + d)
+            &&& in_i64(w.total + n * d)
+        },
+        None => true,
+    }
+}
+
+/// Fold a run of `count` copies of delta `v` into `w`, on its fields
+/// alone (`agg_next`); false, leaving `w` as it was, if the run does not
+/// fit (`agg_fits`).
+#[inline(always)]
+fn agg_step(w: &mut SlabAgg, count: usize, v: Option<i64>) -> (ok: bool)
     requires
-        agg_of(*old(w), ds),
-        count >= 1,
-        ds.len() + count <= usize::MAX,
+        old(w).len + count <= usize::MAX,
     ensures
-        ok ==> agg_of(*final(w), ds + reps(count as nat, v)),
-        !ok ==> *final(w) == *old(w) && !run_fits(ds, count as nat, v),
+        ok == agg_fits(*old(w), count as nat, v),
+        ok ==> (final(w).len as int, final(w).total as int, final(w).min_offset as int, final(w).max_offset as int)
+            == agg_next(*old(w), count as nat, v),
+        !ok ==> *final(w) == *old(w),
 {
     match v {
         None => {
-            proof {
-                lemma_nulls(ds, count as nat);
-            }
             // a null run holds the running sum where it is
             if w.len == 0 {
                 w.min_offset = 0;
@@ -193,6 +226,10 @@ pub(crate) fn agg_run(w: &mut SlabAgg, count: usize, v: Option<i64>, Ghost(ds): 
                     return false;
                 },
             };
+            proof {
+                assert(step as int == (count as nat) * (v as int)) by (nonlinear_arith)
+                    requires step as int == (v as int) * ((count as i64) as int), (count as i64) as int == count as int;
+            }
             let first = match w.total.checked_add(v) {
                 Some(f) => f,
                 None => return false,
@@ -201,11 +238,6 @@ pub(crate) fn agg_run(w: &mut SlabAgg, count: usize, v: Option<i64>, Ghost(ds): 
                 Some(l) => l,
                 None => return false,
             };
-            proof {
-                lemma_run(ds, count as nat, v);
-                assert(step as int == (count as nat) * (v as int)) by (nonlinear_arith)
-                    requires step as int == (v as int) * ((count as i64) as int), (count as i64) as int == count as int;
-            }
             let lo = if first <= last { first } else { last };
             let hi = if first >= last { first } else { last };
             if w.len == 0 {
@@ -220,6 +252,81 @@ pub(crate) fn agg_run(w: &mut SlabAgg, count: usize, v: Option<i64>, Ghost(ds): 
             true
         },
     }
+}
+
+/// The aggregate of `ds`, and a run of `n` copies of `v` after them, is
+/// the aggregate's next (`agg_next`), where the run fits: it depends on
+/// `ds` only through their aggregate.
+proof fn lemma_next(w: SlabAgg, ds: Seq<Option<i64>>, n: nat, v: Option<i64>)
+    requires
+        agg_of(w, ds),
+        n >= 1,
+    ensures
+        agg_fits(w, n, v) == run_fits(ds, n, v),
+        ({
+            let r = ds + reps(n, v);
+            let (len, total, lo, hi) = agg_next(w, n, v);
+            &&& len == r.len()
+            &&& total == psum(r)
+            &&& lo == pmin(r)
+            &&& hi == pmax(r)
+        }),
+{
+    match v {
+        Some(d) => lemma_run(ds, n, d),
+        None => lemma_nulls(ds, n),
+    }
+}
+
+/// Fold a run of `count` copies of delta `v` into `w`, the aggregate of
+/// `ds`. False, leaving `w` as it was, if a running sum (or the run's
+/// span) leaves `i64`: the delta value domain rules those out.
+#[inline]
+pub(crate) fn agg_run(w: &mut SlabAgg, count: usize, v: Option<i64>, Ghost(ds): Ghost<Seq<Option<i64>>>) -> (ok: bool)
+    requires
+        agg_of(*old(w), ds),
+        count >= 1,
+        ds.len() + count <= usize::MAX,
+    ensures
+        ok ==> agg_of(*final(w), ds + reps(count as nat, v)),
+        !ok ==> *final(w) == *old(w) && !run_fits(ds, count as nat, v),
+{
+    proof {
+        lemma_next(*w, ds, count as nat, v);
+    }
+    agg_step(w, count, v)
+}
+
+/// [`agg_run`] for a weight of deltas no one keeps (the public
+/// `WeightFn::accumulate_run`): for whatever deltas `w` aggregates, the
+/// result aggregates them and the run; false, leaving `w` as it was, if
+/// the run does not fit or the count would overflow.
+pub(crate) fn agg_run_any(w: &mut SlabAgg, count: usize, v: Option<i64>) -> (ok: bool)
+    ensures
+        forall|ds: Seq<Option<i64>>|
+            #![trigger agg_of(*old(w), ds)]
+            agg_of(*old(w), ds) ==> (ok ==> agg_of(*final(w), ds + reps(count as nat, v))),
+        !ok ==> *final(w) == *old(w),
+{
+    if count == 0 {
+        proof {
+            assert forall|ds: Seq<Option<i64>>| agg_of(*old(w), ds) implies agg_of(*w, ds + reps(0, v)) by {
+                assert(ds + reps(0, v) =~= ds);
+            }
+        }
+        return true;
+    }
+    if w.len > usize::MAX - count {
+        return false;
+    }
+    let ghost w0 = *w;
+    let ok = agg_step(w, count, v);
+    proof {
+        assert forall|ds: Seq<Option<i64>>| agg_of(w0, ds) implies (ok ==> agg_of(*w, ds + reps(count as nat, v))) by {
+            lemma_next(w0, ds, count as nat, v);
+        }
+    }
+    ok
 }
 
 /// [`agg_run`] after the first run: `w` aggregates some deltas already.

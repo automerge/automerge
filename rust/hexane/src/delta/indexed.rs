@@ -16,7 +16,7 @@ use std::ops::Range;
 use crate::btree::SlabAgg;
 use crate::column::{Dx, Slab, TailOf, WeightFn};
 use crate::cursor::Inserting;
-use crate::delta::agg::{agg_run, slab_agg, DeltaOps};
+use crate::delta::agg::{agg_run_any, slab_agg, DeltaOps};
 use crate::delta::ddomain::DeltaWrite;
 use crate::delta::dfind::{d_find_new, d_find_next, DFind};
 use crate::delta::{DeltaColumn, DeltaInner, DeltaValue};
@@ -24,7 +24,6 @@ use crate::encoding::ColumnEncoding;
 use crate::ColumnValueRef;
 use crate::{Codec, Leb128};
 use std::marker::PhantomData;
-use vstd::prelude::Ghost;
 
 // ── Weight function ─────────────────────────────────────────────────────────
 
@@ -62,8 +61,9 @@ impl<I: DeltaInner, C: Codec> WeightFn<I, C> for IndexedDeltaWeightFn {
     /// *slab* rather than per run.
     #[inline]
     fn accumulate_run(w: &mut SlabAgg, count: usize, value: I::Get<'_>) -> Result<(), PackError> {
-        // verified: the aggregate stays exact, or a sum leaves `i64`
-        if agg_run(w, count, I::to_opt(value), Ghost::assume_new()) {
+        // verified: the aggregate stays exact, or a sum leaves `i64` (or
+        // the count overflows)
+        if agg_run_any(w, count, I::to_opt(value)) {
             Ok(())
         } else {
             Err(PackError::InvalidValue(
