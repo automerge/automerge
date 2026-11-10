@@ -9,6 +9,8 @@ use crate::{ActorId, Author, Automerge, Change, ChangeHash, ReadDoc, Value, ROOT
 use super::{error, AcceptedClock, SigningDocument};
 
 mod lifecycle;
+mod local;
+mod local_contents;
 
 fn append_at_level(doc: &mut Automerge, value: i64, level: usize) -> ChangeHash {
     for time in 0..10_000 {

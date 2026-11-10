@@ -46,6 +46,23 @@ impl<'a> CandidateHistory<'a> {
         };
         members.iter().copied()
     }
+
+    /// Build a [`CandidateHistory`] given a `fragment` and its `members`.
+    ///
+    /// If the [`Fragment`] is a 0-level fragment, then a loose-change is
+    /// returned, otherwise a canonical fragment is returned.
+    ///
+    /// The caller supplies a trusted descriptor and references to its complete
+    /// matching members. The referenced contents may have different owners.
+    /// This conversion does not validate canonicality or membership.
+    pub(crate) fn from_fragment(fragment: &'a Fragment, members: Vec<&'a Change>) -> Self {
+        if fragment.level == 0 {
+            debug_assert_eq!(members.len(), 1);
+            CandidateHistory::Loose(members[0])
+        } else {
+            Self::CanonicalFragment { fragment, members }
+        }
+    }
 }
 
 /// Query membership in fixed, dependency-closed accepted history.

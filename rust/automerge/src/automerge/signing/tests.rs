@@ -48,7 +48,7 @@ fn signing_constructor_starts_with_empty_history_acceptance_and_evidence() {
     let signing = document.try_signing().unwrap();
 
     assert!(signing.graph.is_empty());
-    assert_eq!(signing.actors.iter().len(), 0);
+    assert_eq!(signing.ops.actors.iter().len(), 0);
     assert!(signing.authors.get_authors().is_empty());
     assert!(!signing.state.accepted.is_accepted_actor_seq(0, 1));
     assert_eq!(

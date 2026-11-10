@@ -32,6 +32,7 @@ impl AcceptedHistory for AcceptedHistoryArray<'_> {
     }
 }
 
+mod borrowing;
 mod lifecycle;
 mod membership;
 mod oracle;

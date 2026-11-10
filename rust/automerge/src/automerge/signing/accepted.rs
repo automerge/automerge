@@ -102,7 +102,7 @@ impl<'a> AppliedAdmission<'a> {
             target,
             next,
             _graph: document.graph,
-            _actors: document.actors,
+            _actors: &document.ops.actors,
             _authors: document.authors,
             _signatures: &document.state.signatures,
         })

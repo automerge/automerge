@@ -48,7 +48,7 @@ fn inserting_an_earlier_actor_preserves_the_existing_accepted_prefix() {
     assert!(earlier_actor < *first.actor_id());
     {
         let mut signing = document.try_signing().unwrap();
-        assert_eq!(signing.actors.lookup(first.actor_id()), Some(0));
+        assert_eq!(signing.ops.actors.lookup(first.actor_id()), Some(0));
         retain_signature(&mut signing, first, &key);
         signing
             .accept_applied(&[CandidateHistory::Loose(first)])
@@ -64,8 +64,8 @@ fn inserting_an_earlier_actor_preserves_the_existing_accepted_prefix() {
     assert_eq!(second.seq(), 1);
     {
         let mut signing = document.try_signing().unwrap();
-        assert_eq!(signing.actors.lookup(&earlier_actor), Some(0));
-        assert_eq!(signing.actors.lookup(first.actor_id()), Some(1));
+        assert_eq!(signing.ops.actors.lookup(&earlier_actor), Some(0));
+        assert_eq!(signing.ops.actors.lookup(first.actor_id()), Some(1));
         assert!(signing.is_accepted(&first.hash()));
         assert!(!signing.is_accepted(&second.hash()));
 
@@ -104,9 +104,9 @@ fn rolling_back_an_unused_actor_preserves_the_existing_accepted_prefix() {
     assert_eq!(value(&document), value_before);
     {
         let signing = document.try_signing().unwrap();
-        assert_eq!(signing.actors.lookup(&temporary_actor), None);
-        assert_eq!(signing.actors.lookup(first.actor_id()), Some(0));
-        assert_eq!(signing.actors.iter().len(), 1);
+        assert_eq!(signing.ops.actors.lookup(&temporary_actor), None);
+        assert_eq!(signing.ops.actors.lookup(first.actor_id()), Some(0));
+        assert_eq!(signing.ops.actors.iter().len(), 1);
         assert!(signing.is_accepted(&first.hash()));
     }
 

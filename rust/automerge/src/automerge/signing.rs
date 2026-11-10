@@ -11,10 +11,11 @@ use crate::actor::{ActorRemoval, ActorShift, ActorTable};
 use crate::admission::{AcceptedHistory, CandidateHistory};
 use crate::author::Authors;
 use crate::change_graph::ChangeGraph;
+use crate::op_set2::OpSet;
 use crate::signature::{ed25519, Insert, SignatureStore};
-use crate::ChangeHash;
+use crate::{Change, ChangeHash, Fragment};
 
-use super::Automerge;
+use super::{Automerge, ChangeCollector};
 
 mod accepted;
 
@@ -86,14 +87,14 @@ impl SigningState {
 /// Access to a document already in required signing mode.
 ///
 /// Obtain through [`Automerge::try_signing`]. The handle borrows the document's
-/// graph, actor table, author associations, and required state together.
+/// graph, operation set, author associations, and required state together.
 ///
 /// Required mode does not imply that every local change is already signed or
 /// accepted. It also does not imply possession of a signing key.
 #[derive(Debug)]
 pub(crate) struct SigningDocument<'a> {
     graph: &'a ChangeGraph,
-    actors: &'a ActorTable,
+    ops: &'a OpSet,
     authors: &'a Authors,
     state: &'a mut RequiredSigning,
 }
@@ -121,7 +122,7 @@ impl<'a> SigningDocument<'a> {
             .graph
             .actor_seq_for_hash(hash)
             .ok_or(error::InsertSignature::UnknownChange { change: *hash })?;
-        let actor_id = &self.actors[actor];
+        let actor_id = &self.ops.actors[actor];
         let author = self.authors.get_author_for_actor(actor).ok_or_else(|| {
             error::InsertSignature::MissingAuthor {
                 change: *hash,
@@ -157,6 +158,76 @@ impl<'a> SigningDocument<'a> {
         self.graph
             .actor_seq_for_hash(hash)
             .is_some_and(|(actor, seq)| self.state.accepted.is_accepted_actor_seq(actor, seq))
+    }
+
+    /// Try to complete acceptance of outstanding applied local history.
+    ///
+    /// Uses the document's current fragments and retained signature evidence.
+    /// Fragments with no unaccepted members need no reconstructed contents.
+    /// Remaining fragments are considered whole, together with outstanding loose
+    /// changes. Insufficient evidence leaves history unaccepted and is not an error.
+    /// A successful result does not imply that all local history is accepted.
+    ///
+    /// Does not reapply operations, change heads, or insert signatures. Signature
+    /// insertion is separate. Acceptance uses the existing proof-gated
+    /// [`SigningDocument::accept_applied`] path.
+    ///
+    /// This private integration assumes applied-but-unaccepted history came from
+    /// local edits and uses existing fragment generation without revalidation.
+    /// It is not an admission path for untrusted imported history.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`error::AcceptLocal`] if member reconstruction or acceptance
+    /// preparation fails. Errors leave the accepted clock unchanged.
+    pub(crate) fn accept_local(&mut self) -> Result<(), error::AcceptLocal> {
+        let contents = self.local_candidate_contents()?;
+        self.accept_applied(
+            &contents
+                .iter()
+                .map(|(fragment, members)| {
+                    CandidateHistory::from_fragment(fragment, members.iter().collect())
+                })
+                .collect::<Vec<_>>(),
+        )?;
+        Ok(())
+    }
+
+    /// Assemble owned contents for outstanding applied local candidates.
+    ///
+    /// Uses the structural fragment cover, omitting wholly accepted groups before
+    /// reconstruction. Partly accepted groups retain their complete descriptors
+    /// and member contents. Missing signatures do not hide a candidate.
+    ///
+    /// The result owns its descriptors and changes, so it can be borrowed as
+    /// [`CandidateHistory`] values without retaining a borrow of this handle.
+    /// Assembly does not select history or change document contents, signatures,
+    /// or acceptance. As with [`Self::accept_local`], applied-but-unaccepted
+    /// history is assumed to have local provenance; this is not an import validator.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`error::AcceptLocal::Reconstruction`] with the group head and
+    /// underlying cause if member reconstruction fails. No partial result is returned.
+    fn local_candidate_contents(&self) -> Result<Vec<(Fragment, Vec<Change>)>, error::AcceptLocal> {
+        let heads = self.graph.heads().collect::<Vec<_>>();
+        let fragments = self.graph.fragments(&heads, 0..);
+        let unaccepted_fragments = fragments
+            .filter(|fragment| fragment.members.iter().any(|hash| !self.is_accepted(hash)));
+        unaccepted_fragments
+            .map(|fragment| {
+                let changes = ChangeCollector::for_hashes(
+                    self.ops,
+                    self.graph,
+                    fragment.members.iter().copied(),
+                )
+                .map_err(|e| error::AcceptLocal::Reconstruction {
+                    head: fragment.head,
+                    source: Box::new(e),
+                })?;
+                Ok((fragment, changes))
+            })
+            .collect()
     }
 
     /// Evaluate applied candidates and record acceptance of the selected history.
@@ -243,7 +314,7 @@ impl Automerge {
         let state = self.signing.required_mut()?;
         Ok(SigningDocument {
             graph: &self.change_graph,
-            actors: &self.ops.actors,
+            ops: &self.ops,
             authors: &self.authors,
             state,
         })
@@ -253,7 +324,20 @@ impl Automerge {
 pub(crate) mod error {
     use crate::signature;
     use crate::signature::ed25519;
-    use crate::{ActorId, ChangeHash};
+    use crate::{ActorId, AutomergeError, ChangeHash};
+
+    /// Failure to assemble or complete local acceptance.
+    #[derive(Debug, thiserror::Error)]
+    pub(crate) enum AcceptLocal {
+        #[error("failed to reconstruct members for fragment {head}: {source}")]
+        Reconstruction {
+            head: ChangeHash,
+            #[source]
+            source: Box<AutomergeError>,
+        },
+        #[error("failed to prepare local acceptance: {0}")]
+        Acceptance(#[from] AcceptApplied),
+    }
 
     /// Failure to verify and insert a signature for an already-applied change.
     #[derive(Debug, thiserror::Error)]
