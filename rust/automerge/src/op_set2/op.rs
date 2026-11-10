@@ -1131,6 +1131,7 @@ impl<'a> Op<'a> {
         }
     }
 
+    #[cfg(feature = "slow_path_assertions")]
     pub(crate) fn step(&self, stepper: &mut OpStepper<'a>) -> bool {
         if self.obj != stepper.obj {
             let ok = self.obj > stepper.obj;
@@ -1436,6 +1437,7 @@ pub(crate) trait OpLike: Debug {
     fn obj_info(&self) -> Option<ObjInfo>;
 }
 
+#[cfg(feature = "slow_path_assertions")]
 #[derive(Clone, Debug)]
 pub(crate) struct OpStepper<'a> {
     obj: ObjId,
@@ -1443,6 +1445,7 @@ pub(crate) struct OpStepper<'a> {
     id: OpId,
 }
 
+#[cfg(feature = "slow_path_assertions")]
 impl Default for OpStepper<'_> {
     fn default() -> Self {
         OpStepper {

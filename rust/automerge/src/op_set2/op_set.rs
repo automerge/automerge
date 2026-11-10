@@ -175,6 +175,7 @@ impl OpSet {
         Columns::validate(bytes, cols)
     }
 
+    #[cfg(feature = "slow_path_assertions")]
     pub(crate) fn validate_op_order(&self) -> bool {
         let mut stepper = Default::default();
         for op in self.iter() {

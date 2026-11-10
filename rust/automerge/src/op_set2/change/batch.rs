@@ -869,7 +869,8 @@ impl BatchApply {
             doc.republish_mask(log, |_| {})?;
         }
 
-        debug_assert!(doc.ops.validate_op_order());
+        #[cfg(feature = "slow_path_assertions")]
+        assert!(doc.ops.validate_op_order());
         Ok(())
     }
 
