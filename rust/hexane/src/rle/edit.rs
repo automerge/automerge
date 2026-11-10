@@ -58,10 +58,17 @@ proof fn lemma_subrange_concat<V>(s: Seq<V>, a: int, b: int, c: int)
     assert(s.subrange(a, c) =~= s.subrange(a, b) + s.subrange(b, c));
 }
 
-/// What a walk shows each run it moves over (a closure, outside Verus):
-/// anything goes, as far as the rebuild is concerned.
+/// What a walk shows each run it moves over: a closure (outside Verus),
+/// for which anything goes as far as the rebuild is concerned, or a
+/// visitor that keeps count.
 pub(crate) trait Visit<V> {
-    fn visit(&mut self, v: V, n: usize);
+    /// The values the visitor has been shown, in order.
+    spec fn seen(&self) -> Seq<V>;
+
+    fn visit(&mut self, v: V, n: usize)
+        ensures
+            final(self).seen() == old(self).seen() + copies(n as nat, v),
+    ;
 }
 
 /// A rebuild in progress within one slab, verified with Verus: the
@@ -338,6 +345,7 @@ impl<M: WriteOps<'static>> Edit<M> {
             },
             emit ==> final(self).used() + left <= old(self).used() + n,
             !emit ==> final(self).used() <= old(self).used(),
+            final(f).seen() == old(f).seen() + slab_values::<L::R>(data@).subrange(old(self).read(), final(self).read()),
     {
         let ghost r0 = self.read();
         let ghost v0 = self.vals();
@@ -351,6 +359,7 @@ impl<M: WriteOps<'static>> Edit<M> {
             assert(lv.subrange(r0, r0) =~= Seq::<VOf<'s, L>>::empty());
             assert(lift_seq::<L>(Seq::<VOf<'s, L>>::empty()) =~= Seq::<VOf<'static, M>>::empty());
             assert(v0 + Seq::<VOf<'static, M>>::empty() =~= v0);
+            assert(f.seen() + lv.subrange(r0, r0) =~= f.seen());
         }
         let mut d = self.walk_begin::<L>(data);
         let mut want = n;
@@ -365,6 +374,7 @@ impl<M: WriteOps<'static>> Edit<M> {
                 emit ==> self.used() + want <= u0 + n && u0 + n + 2 < usize::MAX,
                 !emit ==> self.used() <= u0,
                 emit ==> pushes <= budget,
+                f.seen() == old(f).seen() + lv.subrange(r0, self.read()),
             ensures !emit ==> want == 0,
             decreases want,
         {
@@ -392,6 +402,7 @@ impl<M: WriteOps<'static>> Edit<M> {
                 let a = lv.subrange(r0, read0);
                 let b = lv.subrange(read0, self.read());
                 lemma_subrange_concat(lv, r0, read0, self.read());
+                assert(f.seen() =~= old(f).seen() + lv.subrange(r0, self.read()));
                 if emit {
                     assert(lift_seq::<L>(a + b) =~= lift_seq::<L>(a) + lift_seq::<L>(b));
                     assert(lift_seq::<L>(b) =~= copies(run.count as nat, L::lift(run.value)));
@@ -1141,6 +1152,10 @@ pub(crate) fn pass<'s, L, G>(e: &mut RleRebuild<L>, s: &'s Slab, n: usize, runs:
             RleModel::<L>::rb_read(*old(e)) as int,
             RleModel::<L>::rb_read(*old(e)) + (n - left),
         ),
+        final(f).seen() == old(f).seen() + slab_values::<<L as WriteOps<'s>>::R>(s.data@).subrange(
+            RleModel::<L>::rb_read(*old(e)) as int,
+            RleModel::<L>::rb_read(*old(e)) + (n - left),
+        ),
 {
     let ghost e0 = e.e;
     proof {
@@ -1175,6 +1190,10 @@ pub(crate) fn discard<'s, L, G>(e: &mut RleRebuild<L>, s: &'s Slab, n: usize, f:
         RleModel::<L>::rb_data(*final(e)) == s.data@,
         RleModel::<L>::rb_read(*final(e)) == RleModel::<L>::rb_read(*old(e)) + n,
         RleModel::<L>::rb_vals(*final(e)) == RleModel::<L>::rb_vals(*old(e)),
+        final(f).seen() == old(f).seen() + slab_values::<<L as WriteOps<'s>>::R>(s.data@).subrange(
+            RleModel::<L>::rb_read(*old(e)) as int,
+            RleModel::<L>::rb_read(*old(e)) + n,
+        ),
 {
     let ghost v0 = e.e.vals();
     proof {
@@ -1188,6 +1207,11 @@ pub(crate) fn discard<'s, L, G>(e: &mut RleRebuild<L>, s: &'s Slab, n: usize, f:
 
 // Outside `verus!`: a closure is a visitor that calls itself.
 impl<V, F: FnMut(V, usize)> Visit<V> for F {
+    #[cfg(verus_keep_ghost)]
+    fn seen(&self) -> Seq<V> {
+        unimplemented!()
+    }
+
     #[inline(always)]
     fn visit(&mut self, v: V, n: usize) {
         self(v, n)

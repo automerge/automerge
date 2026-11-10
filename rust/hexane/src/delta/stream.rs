@@ -234,6 +234,8 @@ impl<'a, L> DStream<'a, L> where L: WriteOps<'a>, L::R: RleOps<'a, V = Option<i6
 
     /// Append `n` copies of `v`, a value in the domain `lo..=hi`.
     #[inline(always)]
+    #[verifier::spinoff_prover]
+    #[verifier::rlimit(40)]
     pub(crate) fn append(&mut self, buf: &mut Vec<u8>, v: Option<i64>, n: usize, lo: i64, hi: i64)
         requires
             old(self).inv(old(buf)@, lo, hi),

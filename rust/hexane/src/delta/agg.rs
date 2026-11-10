@@ -17,6 +17,9 @@ use crate::btree::SlabAgg;
 #[cfg(verus_keep_ghost)]
 use crate::btree::{in_i64, max_i, min_i, SlabAggregate};
 use crate::column::Slab;
+use crate::delta::diter::add_run;
+#[cfg(verus_keep_ghost)]
+use crate::delta::diter::{crop, lemma_crop};
 use crate::iter_core::{Decode, Decoders};
 #[allow(unused_imports)]
 use vstd::prelude::*;
@@ -322,7 +325,7 @@ pub(crate) fn agg_run_any(w: &mut SlabAgg, count: usize, v: Option<i64>) -> (ok:
     let ghost w0 = *w;
     let ok = agg_step(w, count, v);
     proof {
-        assert forall|ds: Seq<Option<i64>>| agg_of(w0, ds) implies (ok ==> agg_of(*w, ds + reps(count as nat, v))) by {
+        assert forall|ds: Seq<Option<i64>>| agg_of(w0, ds) && ok implies agg_of(*w, ds + reps(count as nat, v)) by {
             lemma_next(w0, ds, count as nat, v);
         }
     }
@@ -862,12 +865,15 @@ fn slab_agg_wrapping<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
         X::vals(*slab).len() <= usize::MAX,
     ensures
         w.len == X::vals(*slab).len(),
+        w.total == crop(psum(deltas_of::<_, B>(X::vals(*slab)))),
 {
     let ghost v = X::vals(*slab);
     let mut d = X::open(slab);
     let mut w = SlabAgg { len: 0, total: 0, min_offset: 0, max_offset: 0 };
     proof {
         assert(v.skip(0) =~= v);
+        assert(deltas_of::<_, B>(v.take(0)) =~= Seq::<Option<i64>>::empty());
+        lemma_crop(0);
     }
     loop
         invariant
@@ -876,17 +882,23 @@ fn slab_agg_wrapping<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
             d.inv(),
             w.len <= v.len(),
             d.rest() == v.skip(w.len as int),
+            w.total == crop(psum(deltas_of::<_, B>(v.take(w.len as int)))),
         ensures
             w.len == v.len(),
+            w.total == crop(psum(deltas_of::<_, B>(v.take(w.len as int)))),
         decreases d.rest().len(),
     {
         let ghost k = w.len as int;
         match d.d_run_max(usize::MAX) {
             Some(run) => {
-                let c = run.count as i64;
+                let ghost ds = deltas_of::<_, B>(v.take(k));
+                proof {
+                    lemma_take_run::<_, B>(v, k, run.count as int, run.value);
+                    lemma_run_sum(ds, run.count as nat, B::dv(run.value));
+                }
                 if let Some(x) = B::to_opt(run.value) {
                     let first = w.total.wrapping_add(x);
-                    let last = w.total.wrapping_add(x.wrapping_mul(c));
+                    let last = add_run(w.total, x, run.count, Ghost(psum(ds)));
                     let lo = if first <= last { first } else { last };
                     let hi = if first >= last { first } else { last };
                     if w.len == 0 {
@@ -900,6 +912,13 @@ fn slab_agg_wrapping<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
                 } else if w.len == 0 {
                     w.min_offset = 0;
                     w.max_offset = 0;
+                }
+                proof {
+                    assert(run.count as nat * dval(B::dv(run.value)) == run.count as int * dval(B::dv(run.value)));
+                    if B::dv(run.value) is None {
+                        assert(run.count as nat * dval(B::dv(run.value)) == 0) by (nonlinear_arith)
+                            requires dval(B::dv(run.value)) == 0;
+                    }
                 }
                 w.len = w.len + run.count;
                 proof {
@@ -944,6 +963,8 @@ pub(crate) fn slab_agg<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>
     ensures
         w.len == X::vals(*slab).len(),
         steps_fit(deltas_of::<_, B>(X::vals(*slab))) ==> agg_of(w, deltas_of::<_, B>(X::vals(*slab))),
+        // whatever the sums: the total wraps
+        w.total == crop(psum(deltas_of::<_, B>(X::vals(*slab)))),
 {
     let ghost v = X::vals(*slab);
     let ghost all = deltas_of::<_, B>(v);
@@ -958,6 +979,8 @@ pub(crate) fn slab_agg<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>
         None => {
             proof {
                 assert(v =~= Seq::<<X::D as Decode>::Item>::empty());
+                assert(all =~= Seq::<Option<i64>>::empty());
+                lemma_crop(0);
             }
             return w;
         },

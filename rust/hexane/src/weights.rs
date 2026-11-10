@@ -38,13 +38,15 @@ use crate::column::Slab;
 use crate::cursor::{all_ok, lemma_lens_ok, lemma_vals_own, slab_lens};
 use crate::cursor::{ReadsAgree, Slabs, Weigh};
 #[cfg(verus_keep_ghost)]
-use crate::delta::agg::{agg_of, deltas_of, pdiff, reps, steps_fit};
+use crate::delta::agg::{agg_of, deltas_of, pdiff, psum, reps, steps_fit};
 use crate::delta::agg::{agg_run, slab_agg, DeltaOps, DomainWalk};
 use crate::delta::ddomain::slabs_fit;
 #[cfg(verus_keep_ghost)]
 use crate::delta::ddomain::{
     dslabs, lemma_dslabs_cat, lemma_dslabs_len, lemma_dslabs_unit, lemma_walk_steps,
 };
+#[cfg(verus_keep_ghost)]
+use crate::delta::diter::{crop, lemma_crop};
 #[cfg(verus_keep_ghost)]
 use crate::fenwick::total;
 use crate::index::IndexOps;
@@ -382,9 +384,9 @@ impl<'a, E, X, B, P> LoadWeigh<'a, E, X, PrefixSlabWeight<P>> for PrefixModel<X,
     }
 }
 
-/// A delta column's weights: each slab's item count and, where its
-/// running sums fit `i64`, the aggregate of its deltas, through read model
-/// `X` and deltas `B`.
+/// A delta column's weights: each slab's item count, the sum of its deltas
+/// (wrapping), and, where its running sums fit `i64`, their aggregate,
+/// through read model `X` and deltas `B`.
 pub struct DeltaModel<X, B>(PhantomData<(X, B)>);
 
 impl<E, X, B> Weigh<E, SlabAgg> for DeltaModel<X, B> where
@@ -395,6 +397,7 @@ impl<E, X, B> Weigh<E, SlabAgg> for DeltaModel<X, B> where
     open spec fn wrel(w: SlabAgg, s: Slab<E::Tail>) -> bool {
         let ds = deltas_of::<_, B>(<X as Decoders<'static>>::vals(s));
         &&& w.len == s.len
+        &&& w.total == crop(psum(ds))
         &&& steps_fit(ds) ==> agg_of(w, ds)
     }
 
