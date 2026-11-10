@@ -801,6 +801,11 @@ impl<'a> BoolLoad<'a> {
         self.sc.pos == self.data@.len()
     }
 
+    /// The input's bytes not read yet: each run read reads some.
+    pub(crate) closed spec fn left(&self) -> int {
+        self.data@.len() - self.sc.pos
+    }
+
     /// The slabs cut so far hold the first of the values read.
     pub(crate) proof fn lemma_done_prefix<K: CountOps>(&self)
         requires self.inv::<K>(),
@@ -827,6 +832,7 @@ impl<'a> BoolLoad<'a> {
     /// Start loading `data`, into slabs of about `max_segments / 2` runs.
     pub(crate) fn new<K: CountOps>(data: &'a [u8], max_segments: usize) -> (l: Self)
         ensures l.inv::<K>(), l.data() == data@, l.values_read().len() == 0, l.done_slabs().len() == 0,
+            l.left() == data@.len(),
     {
         let half = max_segments / 2;
         let even = half - half % 2;
@@ -897,12 +903,17 @@ impl<'a> BoolLoad<'a> {
                 &&& bslabs_values::<K>(final(self).done_slabs()) == final(self).values_read()
             },
             r is Err ==> !bool_valid::<K>(old(self).data()),
+            r is Ok ==> 0 <= final(self).left(),
+            r matches Ok(Some(_)) ==> final(self).left() < old(self).left(),
     {
+        let ghost l0 = self.left();
         loop
             invariant
                 self.inv::<K>(), self.data() == old(self).data(),
                 self.values_read() == old(self).values_read(),
                 self.done_slabs() == old(self).done_slabs(),
+                self.left() <= l0,
+                l0 == old(self).left(),
             decreases self.data@.len() - self.sc.pos,
         {
             let ghost c0 = self.sc.cs@;

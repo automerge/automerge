@@ -1407,6 +1407,11 @@ impl<'a, W: WriteOps<'a>> Load<'a, W> {
         self.reader.spec_pos() == self.reader.data().len() && !self.reader.in_lit()
     }
 
+    /// The input's bytes not read yet: each run read reads some.
+    pub(crate) closed spec fn left(&self) -> int {
+        self.reader.data().len() - self.reader.spec_pos()
+    }
+
     /// The values of the runs read so far, which `try_next_run` returned.
     pub(crate) closed spec fn pulled(&self) -> Seq<VOf<'a, W>> {
         groups_values(self.reader.groups(), <W::R as RleOps<'a>>::null()) + self.reader.lit_values()
@@ -1426,7 +1431,7 @@ impl<'a, W: WriteOps<'a>> Load<'a, W> {
     /// Start loading `data`, into slabs of `max_segments / 2` segments.
     pub(crate) fn new(data: &'a [u8], max_segments: usize) -> (l: Self)
         requires max_segments >= 2,
-        ensures l.inv(), l.data() == data@, l.pulled().len() == 0, l.done_slabs().len() == 0,
+        ensures l.inv(), l.data() == data@, l.pulled().len() == 0, l.done_slabs().len() == 0, l.left() == data@.len(),
     {
         let reader = Reader::new(data);
         let cut = Cut::new::<W::R>(Ghost(reader));
@@ -1458,6 +1463,7 @@ impl<'a, W: WriteOps<'a>> Load<'a, W> {
     /// 4 GiB or more.
     #[inline]
     #[verifier::spinoff_prover]
+    #[verifier::rlimit(60)]
     pub(crate) fn try_next_run(&mut self) -> (r: Result<Option<crate::Run<VOf<'a, W>>>, PackError>)
         requires old(self).inv(),
         ensures
@@ -1473,12 +1479,17 @@ impl<'a, W: WriteOps<'a>> Load<'a, W> {
                 &&& final(self).done_slabs().drop_last() == old(self).done_slabs()
                 &&& slabs_values::<W::R>(final(self).done_slabs()) == final(self).pulled()
             },
+            r is Ok ==> 0 <= final(self).left(),
+            r matches Ok(Some(_)) ==> final(self).left() < old(self).left(),
     {
+        let ghost l0 = self.left();
         loop
             invariant
                 self.inv(), self.data() == old(self).data(),
                 self.pulled() == old(self).pulled(),
                 self.done_slabs() == old(self).done_slabs(),
+                self.left() <= l0,
+                l0 == old(self).left(),
             decreases self.reader.data().len() - self.reader.spec_pos(),
         {
             let ghost r0 = self.reader;
@@ -1486,7 +1497,12 @@ impl<'a, W: WriteOps<'a>> Load<'a, W> {
                 r0.lemma_inv();
             }
             let segment = match self.reader.next() {
-                Ok(Some(s)) => s,
+                Ok(Some(s)) => {
+                    proof {
+                        assert(self.left() < r0.data().len() - r0.spec_pos());
+                    }
+                    s
+                },
                 Ok(None) => {
                     proof {
                         self.reader.lemma_inv();
@@ -1496,7 +1512,12 @@ impl<'a, W: WriteOps<'a>> Load<'a, W> {
                 Err(e) => return Err(e),
             };
             match self.take_seg(segment, Ghost(r0)) {
-                Ok(Some(run)) => return Ok(Some(run)),
+                Ok(Some(run)) => {
+                    proof {
+                        self.reader.lemma_inv();
+                    }
+                    return Ok(Some(run));
+                },
                 Ok(None) => {
                     proof {
                         self.reader.lemma_inv();
@@ -1739,6 +1760,10 @@ impl<'a, L, O> crate::load_core::Loads<'a, super::edit::RleModel<L>, super::dec:
 
     open spec fn at_end(&self) -> bool {
         Load::<'a, L>::at_end(self)
+    }
+
+    open spec fn left(&self) -> int {
+        Load::<'a, L>::left(self)
     }
 
     proof fn lemma_done(&self) {

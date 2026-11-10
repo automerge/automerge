@@ -2369,6 +2369,10 @@ impl<'a, C: CountsOf> crate::load_core::Loads<'a, BoolModel<C>, BoolReads<C>> fo
         self.l.at_end()
     }
 
+    open spec fn left(&self) -> int {
+        self.l.left()
+    }
+
     proof fn lemma_done(&self) {
         self.l.lemma_done_prefix::<C::K>();
         lemma_read_bslabs::<C>(self.l.done_slabs());

@@ -52,6 +52,9 @@ pub(crate) trait Loads<'a, E: ReadsAgree<'a, X>, X: Decoders<'a, Tail = <E as Sl
     /// The input is read to its end.
     spec fn at_end(&self) -> bool;
 
+    /// How much input is left to read: each run read reads some.
+    spec fn left(&self) -> int;
+
     /// A load of `data`, into slabs of about `max_segments / 2` segments.
     fn start(data: &'a [u8], max_segments: usize) -> (l: Self)
         requires
@@ -60,6 +63,7 @@ pub(crate) trait Loads<'a, E: ReadsAgree<'a, X>, X: Decoders<'a, Tail = <E as Sl
             l.inv(),
             l.pulled().len() == 0,
             l.done_slabs().len() == 0,
+            0 <= l.left(),
     ;
 
     /// The slabs cut so far are well-formed, and hold the first of the
@@ -91,6 +95,8 @@ pub(crate) trait Loads<'a, E: ReadsAgree<'a, X>, X: Decoders<'a, Tail = <E as Sl
                 &&& final(self).done_slabs().drop_last() == old(self).done_slabs()
                 &&& vals_of::<X>(final(self).done_slabs()) == final(self).pulled()
             },
+            r is Ok ==> 0 <= final(self).left(),
+            r matches Ok(Some(_)) ==> final(self).left() < old(self).left(),
     ;
 
     fn slabs_completed(&self) -> (n: usize)
@@ -143,6 +149,7 @@ impl<'a, E, X, W, G, LD> LoadCore<'a, E, X, W, G, LD> where
     /// pulled, attributed to the slabs as the loader cut them.
     pub(crate) open spec fn inv(&self) -> bool {
         &&& self.ld.inv()
+        &&& 0 <= self.ld.left()
         &&& self.attr.inv::<G>()
         &&& G::accumulates() ==> {
             &&& self.attr.pulled() == self.ld.pulled()
@@ -176,6 +183,7 @@ impl<'a, E, X, W, G, LD> LoadCore<'a, E, X, W, G, LD> where
         ensures
             r is Ok ==> final(self).inv(),
             r matches Ok(None) ==> final(self).ld.at_end() && final(self).ld.pulled() == old(self).ld.pulled(),
+            r matches Ok(Some(_)) ==> final(self).ld.left() < old(self).ld.left(),
     {
         let ghost (d0, p0) = (self.ld.done_slabs(), self.ld.pulled());
         proof {
@@ -217,7 +225,6 @@ impl<'a, E, X, W, G, LD> LoadCore<'a, E, X, W, G, LD> where
     /// `max_segments`, if it holds `expected` items (where given) and
     /// passes the weight model's load checks (`lo..=hi`: a delta
     /// column's domain).
-    #[verifier::exec_allows_no_decreases_clause]
     pub(crate) fn finish<I: IndexOps<W>>(
         self,
         max_segments: usize,
@@ -241,6 +248,7 @@ impl<'a, E, X, W, G, LD> LoadCore<'a, E, X, W, G, LD> where
                 ensures
                     core.inv(),
                     core.ld.at_end(),
+                decreases core.ld.left(),
             {
                 match core.next_run() {
                     Ok(Some(_)) => {},
