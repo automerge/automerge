@@ -1161,7 +1161,7 @@ type InnerEdit<'a, T, C> = crate::edit::Edit<
 ///
 /// * an **accumulator** — the realized value standing before the cursor,
 ///   which every op needs and which `splice` looks up per call in
-///   `find_boundaries`. The cursor watches the runs the rebuild carries
+///   `dedit::d_boundaries`. The cursor watches the runs the rebuild carries
 ///   and keeps it in step for free; only a jump over untouched slabs
 ///   loses it, and that reads it back from the index there and then.
 ///

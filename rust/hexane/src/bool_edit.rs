@@ -2373,6 +2373,14 @@ impl<'a, C: CountsOf> crate::load_core::Loads<'a, BoolModel<C>, BoolReads<C>> fo
         self.l.left()
     }
 
+    open spec fn data(&self) -> Seq<u8> {
+        self.l.data()
+    }
+
+    open spec fn values_of(d: Seq<u8>) -> Seq<bool> {
+        crate::bool_wire::bool_values::<C::K>(d)
+    }
+
     proof fn lemma_done(&self) {
         self.l.lemma_done_prefix::<C::K>();
         lemma_read_bslabs::<C>(self.l.done_slabs());

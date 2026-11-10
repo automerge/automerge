@@ -22,7 +22,7 @@ use crate::column_core::ColumnCore;
 #[cfg(verus_keep_ghost)]
 use crate::cursor::Weigh;
 #[cfg(verus_keep_ghost)]
-use crate::cursor::{all_ok, lemma_concat_append, slab_lens, ws_ok};
+use crate::cursor::{all_ok, lemma_concat_append, lemma_vals_own, slab_lens, ws_ok};
 use crate::cursor::{ReadsAgree, Slabs};
 #[cfg(verus_keep_ghost)]
 use crate::fenwick::{lemma_sum_le, lemma_sum_one, lemma_sum_split, sum, total};
@@ -55,12 +55,19 @@ pub(crate) trait Loads<'a, E: ReadsAgree<'a, X>, X: Decoders<'a, Tail = <E as Sl
     /// How much input is left to read: each run read reads some.
     spec fn left(&self) -> int;
 
+    /// The input.
+    spec fn data(&self) -> Seq<u8>;
+
+    /// The values bytes `d` hold, as the format's model reads them.
+    spec fn values_of(d: Seq<u8>) -> Seq<<X::D as Decode>::Item>;
+
     /// A load of `data`, into slabs of about `max_segments / 2` segments.
     fn start(data: &'a [u8], max_segments: usize) -> (l: Self)
         requires
             max_segments >= 2,
         ensures
             l.inv(),
+            l.data() == data@,
             l.pulled().len() == 0,
             l.done_slabs().len() == 0,
             0 <= l.left(),
@@ -90,6 +97,7 @@ pub(crate) trait Loads<'a, E: ReadsAgree<'a, X>, X: Decoders<'a, Tail = <E as Sl
             ),
             r matches Ok(None) ==> final(self).pulled() == old(self).pulled() && final(self).done_slabs()
                 == old(self).done_slabs() && final(self).at_end(),
+            r is Ok ==> final(self).data() == old(self).data(),
             r matches Ok(Some(_)) ==> final(self).done_slabs() == old(self).done_slabs() || {
                 &&& final(self).done_slabs().len() == old(self).done_slabs().len() + 1
                 &&& final(self).done_slabs().drop_last() == old(self).done_slabs()
@@ -113,6 +121,7 @@ pub(crate) trait Loads<'a, E: ReadsAgree<'a, X>, X: Decoders<'a, Tail = <E as Sl
         ensures
             r matches Ok(slabs) ==> {
                 &&& all_ok::<E>(slabs@)
+                &&& vals_of::<X>(slabs@) == Self::values_of(self.data())
                 &&& slabs@.len() >= self.done_slabs().len()
                 &&& slabs@.take(self.done_slabs().len() as int) == self.done_slabs()
                 &&& self.at_end() ==> slabs@.len() <= self.done_slabs().len() + 1 && vals_of::<X>(slabs@)
@@ -184,6 +193,7 @@ impl<'a, E, X, W, G, LD> LoadCore<'a, E, X, W, G, LD> where
             r is Ok ==> final(self).inv(),
             r matches Ok(None) ==> final(self).ld.at_end() && final(self).ld.pulled() == old(self).ld.pulled(),
             r matches Ok(Some(_)) ==> final(self).ld.left() < old(self).ld.left(),
+            r is Ok ==> final(self).ld.data() == old(self).ld.data(),
     {
         let ghost (d0, p0) = (self.ld.done_slabs(), self.ld.pulled());
         proof {
@@ -235,8 +245,13 @@ impl<'a, E, X, W, G, LD> LoadCore<'a, E, X, W, G, LD> where
         requires
             self.inv(),
         ensures
-            r matches Ok(c) ==> c.ready() && c.budget() == max_segments,
+            r matches Ok(c) ==> {
+                &&& c.ready()
+                &&& c.budget() == max_segments
+                &&& c@ == LD::values_of(self.ld.data()).map_values(|v: <X::D as Decode>::Item| E::own(v))
+            },
     {
+        let ghost data = self.ld.data();
         let mut core = self;
         let acc = G::accumulates_exec();
         if acc {
@@ -245,9 +260,11 @@ impl<'a, E, X, W, G, LD> LoadCore<'a, E, X, W, G, LD> where
                 invariant
                     core.inv(),
                     acc == G::accumulates(),
+                    core.ld.data() == data,
                 ensures
                     core.inv(),
                     core.ld.at_end(),
+                    core.ld.data() == data,
                 decreases core.ld.left(),
             {
                 match core.next_run() {
@@ -349,6 +366,9 @@ impl<'a, E, X, W, G, LD> LoadCore<'a, E, X, W, G, LD> where
         match G::load_check(ws.as_slice(), slabs.as_slice(), len, lo, hi) {
             Ok(()) => {},
             Err(e) => return Err(e),
+        }
+        proof {
+            lemma_vals_own::<E, X>(s);
         }
         match ColumnCore::<E, W, I, G>::from_slabs(slabs, ws, max_segments) {
             Some(c) => Ok(c),

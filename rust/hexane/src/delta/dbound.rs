@@ -20,7 +20,7 @@
 //! passes the walk's test, so does the column (`SpanLedger::fits`).
 //! Likewise a [`SpanPlan`] is a splice's [`SplicePlan`] that keeps the
 //! bound, widened by the items it inserts: where it fits, so does the
-//! column the splice leaves, given what `find_boundaries` reports around
+//! column the splice leaves, given what `d_boundaries` reports around
 //! it (`bounds_of`). And [`ToDeltas`] gives `from_values` the deltas
 //! realizing its values and a bound on them.
 //!
@@ -589,7 +589,7 @@ pub(crate) open spec fn spliced(
     a + e + if next_val is Some { tail.skip(skip + 1int) } else { tail }
 }
 
-/// What `find_boundaries` reports of the original deltas `a + x + tail`
+/// What `d_boundaries` reports of the original deltas `a + x + tail`
 /// around a splice deleting `x` after `a`: the running sum before it
 /// (`prev`), the nulls after the deleted items (`skip`), and the value of
 /// the item after those (`next_val`), or none if only nulls follow.

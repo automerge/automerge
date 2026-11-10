@@ -1766,6 +1766,14 @@ impl<'a, L, O> crate::load_core::Loads<'a, super::edit::RleModel<L>, super::dec:
         Load::<'a, L>::left(self)
     }
 
+    open spec fn data(&self) -> Seq<u8> {
+        Load::<'a, L>::data(self)
+    }
+
+    open spec fn values_of(d: Seq<u8>) -> Seq<<O as RleOps<'a>>::V> {
+        slab_values::<O>(d)
+    }
+
     proof fn lemma_done(&self) {
         self.lemma_done_prefix();
         lemma_read_slabs::<O>(self.done_slabs());
