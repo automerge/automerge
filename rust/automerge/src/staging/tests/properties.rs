@@ -1,7 +1,7 @@
-//! Independent readiness checks over real content-addressed DAGs, plus a
-//! differential check of order against the existing destructive drain.
+//! Check readiness and completion against an independent availability model
+//! over real content-addressed DAGs.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet};
 use std::num::NonZeroU64;
 
 use proptest::prelude::*;
@@ -110,7 +110,7 @@ fn check(
         .map(|index| changes[*index].hash())
         .collect();
 
-    let staged = stage(
+    let mut staged = stage(
         &staged_indices
             .iter()
             .map(|index| &changes[*index])
@@ -149,21 +149,45 @@ fn check(
         actual
     );
 
-    // Compatibility check in addition to the independent membership oracle.
-    // Cloning is fixture setup only; production preparation must borrow contents.
-    let mut legacy = staged.clone();
-    let drained = legacy.pop_topo_sorted_ready(&applied.change_graph);
-    assert_eq!(drained.iter().map(Change::hash).collect::<Vec<_>>(), actual);
     let blocked: Vec<_> = before
         .iter()
         .filter(|change| !expected.contains(&change.hash()))
         .cloned()
         .collect();
-    assert_eq!(legacy.iter().cloned().collect::<Vec<_>>(), blocked);
 
     assert_eq!(staged.iter().cloned().collect::<Vec<_>>(), before);
     assert_eq!(applied.get_heads(), heads_before);
     assert_eq!(applied.save(), bytes_before);
+
+    // Exercise completion after successful fixture application. The expected
+    // survivors come from the independent readiness oracle above, not removal.
+    applied
+        .apply_changes(
+            prepared
+                .changes()
+                .iter()
+                .map(|c| (*c).clone())
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
+    let completed: HashSet<_> = actual.into_iter().collect();
+    for _ in 0..2 {
+        staged.remove_completed(&completed);
+        assert_eq!(staged.iter().cloned().collect::<Vec<_>>(), blocked);
+        assert_eq!(staged.is_empty(), blocked.is_empty());
+        assert_eq!(
+            staged.hashes,
+            blocked.iter().map(Change::hash).collect::<HashSet<_>>()
+        );
+        assert_eq!(
+            staged.incoming_actor_seqs,
+            blocked
+                .iter()
+                .map(|change| (change.actor_id().clone(), change.seq()))
+                .collect::<HashSet<_>>()
+        );
+        assert!(staged.prepare(&applied.change_graph).changes().is_empty());
+    }
 }
 
 fn exercise(recipe: Recipe) {
@@ -190,7 +214,7 @@ proptest! {
     #![proptest_config(ProptestConfig::with_cases(128))]
 
     #[test]
-    fn preparation_matches_ready_history_and_existing_drain(recipe in recipes()) {
+    fn preparation_and_completion_match_ready_history(recipe in recipes()) {
         exercise(recipe);
     }
 }

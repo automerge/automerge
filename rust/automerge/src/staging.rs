@@ -1,13 +1,11 @@
 //! Hold unapplied changes and prepare causally ready history without consuming it.
 //!
 //! Missing dependencies leave changes staged for a later attempt. Preparation
-//! borrows ready contents in dependency order. The existing destructive drain
-//! remains in use until borrowed application and completion are wired.
+//! borrows ready contents in dependency order. After application succeeds, use
+//! [`StagedChanges::remove_completed`] to remove the completed entries.
 
-use std::{
-    collections::{HashMap, HashSet, VecDeque},
-    ops::ControlFlow,
-};
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::ops::ControlFlow;
 
 use crate::{change_graph::ChangeGraph, ActorId, AutomergeError, Change, ChangeHash};
 
@@ -55,7 +53,7 @@ impl ChangeBatch {
 #[derive(Debug, Clone)]
 pub(crate) struct StagedChanges {
     changes: Vec<Change>,
-    /// Set of hashes of all changes in the queue — O(1) contains check.
+    /// Hash membership for staged changes.
     hashes: HashSet<ChangeHash>,
     incoming_actor_seqs: HashSet<(ActorId, u64)>,
 }
@@ -89,7 +87,7 @@ impl StagedChanges {
         self.changes.iter()
     }
 
-    /// Remove queued changes at or after an incompatible actor sequence,
+    /// Remove staged changes at or after an incompatible actor sequence,
     /// together with changes which transitively depend on that branch.
     pub(crate) fn remove_actor_branch_from(&mut self, actor: &ActorId, seq: u64) {
         let mut removed = self
@@ -140,61 +138,27 @@ impl StagedChanges {
         }
     }
 
-    /// Return the causally ready (according to ChangeGraph) changes in
-    /// topological order, removing them from the queue
-    pub(crate) fn pop_topo_sorted_ready(&mut self, change_graph: &ChangeGraph) -> Vec<Change> {
-        // Kahn's algorithm: topological sort of the pool.
-        let n = self.changes.len();
-        let mut unsatisfied = vec![0u32; n];
-        let mut waiting_on: HashMap<ChangeHash, Vec<usize>> = HashMap::new();
-
-        for (i, c) in self.changes.iter().enumerate() {
-            for dep in c.deps() {
-                if !change_graph.has_change(dep) {
-                    unsatisfied[i] += 1;
-                    waiting_on.entry(*dep).or_default().push(i);
-                }
-            }
+    /// Remove successfully applied changes from staging and its indexes.
+    ///
+    /// Preserves other entries and their order, including dependents of completed
+    /// changes. Hashes absent from staging are ignored. The caller establishes
+    /// successful application before calling this method.
+    pub(crate) fn remove_completed(&mut self, completed: &HashSet<ChangeHash>) {
+        if completed.is_empty() {
+            return;
         }
 
-        let mut ready: VecDeque<usize> = VecDeque::new();
-        for (i, &count) in unsatisfied.iter().enumerate() {
-            if count == 0 {
-                ready.push_back(i);
+        self.changes.retain(|change| {
+            let hash = change.hash();
+            if !completed.contains(&hash) {
+                return true;
             }
-        }
 
-        let mut topo_order: Vec<usize> = Vec::new();
-        while let Some(idx) = ready.pop_front() {
-            let hash = self.changes[idx].hash();
-            topo_order.push(idx);
-            if let Some(dependents) = waiting_on.remove(&hash) {
-                for dep_idx in dependents {
-                    unsatisfied[dep_idx] -= 1;
-                    if unsatisfied[dep_idx] == 0 {
-                        ready.push_back(dep_idx);
-                    }
-                }
-            }
-        }
-
-        let mut slots = std::mem::take(&mut self.changes)
-            .into_iter()
-            .map(Some)
-            .collect::<Vec<_>>();
-        let mut topo = Vec::new();
-        for idx in topo_order {
-            let change = slots[idx]
-                .take()
-                .expect("topo_order contains invalid index");
-            self.hashes.remove(&change.hash());
+            self.hashes.remove(&hash);
             self.incoming_actor_seqs
                 .remove(&(change.actor_id().clone(), change.seq()));
-            topo.push(change);
-        }
-        self.changes = slots.into_iter().flatten().collect::<Vec<_>>();
-
-        topo
+            false
+        });
     }
 }
 

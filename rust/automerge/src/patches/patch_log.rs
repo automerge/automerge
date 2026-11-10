@@ -786,9 +786,9 @@ impl PatchLog {
 
     /// Read-only compatibility check: every actor this log knows must still
     /// exist in `doc_actors`. Both lists are sorted, so this is a
-    /// subsequence test. The importer calls this before draining the change
-    /// queue, so a rejected log leaves previously queued changes available
-    /// for a retry with a compatible log.
+    /// subsequence test. The importer calls this before staging or applying
+    /// incoming changes, so a rejected log leaves existing staged history
+    /// available for a retry with a compatible log.
     pub(crate) fn validate(&self, doc_actors: &ActorTable) -> Result<(), crate::PatchLogMismatch> {
         let mut remaining = doc_actors.iter();
         if self
