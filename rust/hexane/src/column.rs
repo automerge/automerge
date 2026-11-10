@@ -1082,33 +1082,24 @@ where
             );
             debug_assert!(s.segments <= max_segments);
         }
-        let weights: Vec<WF::Weight> = slabs.iter().map(WF::compute).collect();
         if WF::CHECKS_TOTAL {
+            let weights: Vec<WF::Weight> = slabs.iter().map(WF::compute).collect();
             let len = slabs.iter().fold(0usize, |n, s| n.saturating_add(s.len));
             if let Err(e) = WF::check_total(&weights, len) {
                 panic!("from_slabs: {e}");
             }
         }
-        Self::of_slabs(slabs, weights, max_segments)
+        Self::of_cut(slabs, max_segments)
     }
 
-    /// The column of `slabs`, weighed by `weights` (verified,
-    /// `ColumnCore::from_slabs`, which computes the index). Panics if a
-    /// weight does not count its slab's items, which would be a bug in a
-    /// weight function, or if the items are more than an edit can count.
-    pub(crate) fn of_slabs(
-        slabs: Vec<Slab<TailOf<T, C>>>,
-        weights: Vec<WF::Weight>,
-        max_segments: usize,
-    ) -> Self {
-        match ColumnCore::from_slabs(slabs, weights, max_segments) {
-            Some(core) => Self {
-                core,
-                _phantom: PhantomData,
-            },
-            None => {
-                panic!("column weights do not match its slabs, or it has over usize::MAX - 3 items")
-            }
+    /// The column of the well-formed `slabs` a verified encoder or fill
+    /// cut (verified, `ColumnCore::from_cut`, which weighs them, checks
+    /// the weight model's domain and computes the index). Panics if the
+    /// items are more than an edit can count.
+    pub(crate) fn of_cut(slabs: Vec<Slab<TailOf<T, C>>>, max_segments: usize) -> Self {
+        Self {
+            core: ColumnCore::from_cut(slabs, max_segments),
+            _phantom: PhantomData,
         }
     }
 
@@ -1132,8 +1123,7 @@ where
             return Self::with_max_segments(max_segments);
         }
         let slabs = vec![T::Encoding::<C>::fill(len, value)];
-        let weights = vec![WF::compute(&slabs[0])];
-        Self::of_slabs(slabs, weights, max_segments)
+        Self::of_cut(slabs, max_segments)
     }
 
     pub fn len(&self) -> usize {
@@ -1774,7 +1764,7 @@ where
             <WF::Model as LoadWeigh<'a, _, Dx<T, C>, _>>::load_check(&ws, &slabs, len, lo, hi)?;
             // `fill` makes one slab of at most two segments, within any
             // budget `load_iter` accepts
-            return Ok(Column::of_slabs(slabs, ws, self.max_segments));
+            return Ok(Column::of_cut(slabs, self.max_segments));
         }
         let core = self
             .core

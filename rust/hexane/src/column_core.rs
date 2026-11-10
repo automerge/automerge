@@ -27,9 +27,10 @@
 //! A load builds its core in verified code (`load_core::LoadCore::finish`),
 //! so a loaded column's invariant is proved from its bytes.
 //!
-//! Trusted: what the other constructors are given (well-formed slabs and
-//! their weights, from the fills and encoders, and for a delta column in
-//! its domain); and the parts the public edit cursor
+//! Trusted: that the slabs a fill or an encoder hands
+//! [`ColumnCore::from_cut`] are well-formed, as those verified functions
+//! promise (it weighs them and checks the domain itself); and the parts
+//! the public edit cursor
 //! ([`crate::edit::Edit`]) hands back ([`ColumnCore::restore`]), which
 //! its verified steps keep a column but its glue chains (for a delta
 //! column, `DeltaEdit` checks the domain before).
@@ -154,6 +155,17 @@ fn too_many_deltas()
         false,
 {
     panic!("a delta column of more than i64::MAX items")
+}
+
+/// Panics: a column of more items than an edit can count.
+#[verifier::external_body]
+#[cold]
+#[inline(never)]
+fn too_many_items()
+    ensures
+        false,
+{
+    panic!("a column of more than usize::MAX - 3 items")
 }
 
 /// A column's parts: its slabs, the index over them, its item count and
@@ -301,6 +313,56 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> ColumnCore<E, W, I, G> {
             return None;
         }
         Some(ColumnCore { state: Some(Parts { slabs, index, total_len, counter: 0 }), max_segments, _p: PhantomData })
+    }
+
+    /// The column of well-formed slabs `slabs` (cut by a verified encoder
+    /// or fill), each weighed by its weight model, with segment budget
+    /// `max_segments`. Panics if the items are more than an edit can count
+    /// (`usize::MAX - 3`), or the values are outside the weight model's
+    /// domain (`Weigh::dom_check`).
+    pub(crate) fn from_cut(slabs: Vec<Slab<E::Tail>>, max_segments: usize) -> (r: Self)
+        requires
+            all_ok::<E>(slabs@),
+        ensures
+            r.ready(),
+            r@ == vals_of::<E>(slabs@),
+            r.budget() == max_segments,
+    {
+        let ghost s = slabs@;
+        let mut ws: Vec<W> = Vec::with_capacity(slabs.len());
+        let mut len: usize = 0;
+        let mut k: usize = 0;
+        while k < slabs.len()
+            invariant
+                s == slabs@,
+                all_ok::<E>(s),
+                0 <= k <= s.len(),
+                ws@.len() == k,
+                len == crate::fenwick::sum(slab_lens(s), 0, k as int),
+                forall|j: int| 0 <= j < k ==> G::wrel(#[trigger] ws@[j], s[j]),
+            decreases s.len() - k,
+        {
+            proof {
+                crate::fenwick::lemma_sum_split(slab_lens(s), 0, k as int, k + 1);
+                crate::fenwick::lemma_sum_one(slab_lens(s), k as int);
+            }
+            if slabs[k].len > usize::MAX - 3 || len > usize::MAX - 3 - slabs[k].len {
+                too_many_items();
+            }
+            len = len + slabs[k].len;
+            ws.push(G::compute::<I>(&slabs[k]));
+            k += 1;
+        }
+        if !G::dom_check(&slabs, len) {
+            out_of_domain();
+        }
+        match Self::from_slabs(slabs, ws, max_segments) {
+            Some(c) => c,
+            None => {
+                too_many_items();
+                unreached()
+            },
+        }
     }
 
     #[inline(always)]
