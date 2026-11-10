@@ -30,9 +30,7 @@
 use crate::column::Slab;
 #[cfg(verus_keep_ghost)]
 use crate::cursor::{all_ok, col_ok, lemma_vals_own, lemma_vals_total, slab_lens, vals_of};
-use crate::cursor::{
-    splice_feed, Cursor, Insertable, ReadsAgree, RunFeed, Slabs, Visitor, Weigh, WeightSink,
-};
+use crate::cursor::{splice_feed, Cursor, Insertable, ReadsAgree, RunFeed, Slabs, Visitor, Weigh};
 #[cfg(verus_keep_ghost)]
 use crate::fenwick::sum;
 #[cfg(verus_keep_ghost)]
@@ -218,7 +216,7 @@ fn insert_range<E: Slabs, R: RangeFeed<E>>(
 #[verifier::spinoff_prover]
 #[verifier::rlimit(30)]
 #[inline(always)]
-pub(crate) fn copy_direct<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>, F: Visitor<E>, S: WeightSink<W>, R: RangeFeed<E>>(
+pub(crate) fn copy_direct<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>, F: Visitor<E>, R: RangeFeed<E>>(
     slabs: &mut Vec<Slab<E::Tail>>,
     index: &mut I,
     total_len: &mut usize,
@@ -226,7 +224,6 @@ pub(crate) fn copy_direct<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>, F: Visito
     counter: &mut usize,
     sps: &[Splice],
     f: &mut F,
-    g: &mut S,
     feed: &mut R,
 )
     requires
@@ -283,7 +280,7 @@ pub(crate) fn copy_direct<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>, F: Visito
         }
         let to = pos - cur.orig;
         cur.advance_with::<W, I, G, F>(slabs, index, total_len, max_segments, counter, to, f);
-        cur.delete_with::<W, I, G, F, S>(slabs, index, total_len, max_segments, counter, del, f, g);
+        cur.delete_with::<W, I, G, F>(slabs, index, total_len, max_segments, counter, del, f);
         feed.shift(start..end);
         insert_range(&mut cur, slabs, max_segments, feed);
         proof {
@@ -304,7 +301,7 @@ pub(crate) fn copy_direct<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>, F: Visito
 /// Cut the gaps between `sps`' ranges out of the column, back to front:
 /// it keeps exactly the ranges' items.
 #[inline(always)]
-fn cut_gaps<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>, F: Visitor<E>, S: WeightSink<W>, X: Insertable<E>>(
+fn cut_gaps<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>, F: Visitor<E>, X: Insertable<E>>(
     slabs: &mut Vec<Slab<E::Tail>>,
     index: &mut I,
     total_len: &mut usize,
@@ -312,7 +309,6 @@ fn cut_gaps<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>, F: Visitor<E>, S: Weigh
     counter: &mut usize,
     sps: &[Splice],
     f: &mut F,
-    g: &mut S,
     Ghost(none): Ghost<Option<X>>,
 )
     requires
@@ -353,7 +349,7 @@ fn cut_gaps<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>, F: Visitor<E>, S: Weigh
                     lemma_vals_total::<E>(slabs@);
                 }
                 let mut none = NoRuns::<X> { none: None };
-                let _ins = splice_feed::<E, W, I, G, F, S, NoRuns<X>>(
+                let _ins = splice_feed::<E, W, I, G, F, NoRuns<X>>(
                     slabs,
                     index,
                     total_len,
@@ -362,7 +358,6 @@ fn cut_gaps<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>, F: Visitor<E>, S: Weigh
                     at,
                     n,
                     f,
-                    g,
                     &mut none,
                 );
                 proof {
@@ -492,7 +487,7 @@ fn put_gaps<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>, F: Visitor<E>, R: Range
 /// `applied(dst, src, sps)`, as [`copy_direct`] makes it of the
 /// destination.
 #[inline(always)]
-pub(crate) fn copy_invert<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>, F: Visitor<E>, S: WeightSink<W>, R: RangeFeed<E>>(
+pub(crate) fn copy_invert<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>, F: Visitor<E>, R: RangeFeed<E>>(
     slabs: &mut Vec<Slab<E::Tail>>,
     index: &mut I,
     total_len: &mut usize,
@@ -501,7 +496,6 @@ pub(crate) fn copy_invert<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>, F: Visito
     sps: &[Splice],
     dst_len: usize,
     f: &mut F,
-    g: &mut S,
     feed: &mut R,
 )
     requires
@@ -520,7 +514,7 @@ pub(crate) fn copy_invert<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>, F: Visito
     proof {
         lemma_vals_total::<E>(slabs@);
     }
-    cut_gaps::<E, W, I, G, F, S, R::X>(slabs, index, total_len, max_segments, counter, sps, f, g, Ghost(None));
+    cut_gaps::<E, W, I, G, F, R::X>(slabs, index, total_len, max_segments, counter, sps, f, Ghost(None));
     put_gaps::<E, W, I, G, F, R>(slabs, index, total_len, max_segments, counter, sps, dst_len, f, feed, Ghost(src));
 }
 

@@ -190,8 +190,12 @@ pub(crate) trait Slabs {
 }
 
 /// Carrying and dropping a slab's values through a rebuild, reporting
-/// each run to the visitor (a delta column keeps its running value so).
+/// each run to the visitor (a delta column keeps its running value so),
+/// and seeing each slab a delete drops whole.
 pub(crate) trait Visitor<E: Slabs> {
+    /// The values the visitor has seen carried or dropped, in order.
+    spec fn seen(&self) -> Seq<E::V>;
+
     /// Carry `n` of the slab's values, spending at most `runs` pushes;
     /// returns the ones left uncarried.
     fn pass(&mut self, e: &mut E::Rebuild, s: &Slab<E::Tail>, n: usize, runs: usize) -> (left: usize)
@@ -210,6 +214,10 @@ pub(crate) trait Visitor<E: Slabs> {
                 E::rb_read(*old(e)) as int,
                 E::rb_read(*old(e)) + (n - left),
             ),
+            final(self).seen() == old(self).seen() + E::vals(*s).subrange(
+                E::rb_read(*old(e)) as int,
+                E::rb_read(*old(e)) + (n - left),
+            ),
     ;
 
     /// Drop `n` of the slab's values.
@@ -224,6 +232,18 @@ pub(crate) trait Visitor<E: Slabs> {
             E::rb_data(*final(e)) == s.data@,
             E::rb_read(*final(e)) == E::rb_read(*old(e)) + n,
             E::rb_vals(*final(e)) == E::rb_vals(*old(e)),
+            final(self).seen() == old(self).seen() + E::vals(*s).subrange(
+                E::rb_read(*old(e)) as int,
+                E::rb_read(*old(e)) + n,
+            ),
+    ;
+
+    /// A delete drops slab `s` whole, unread.
+    fn dropped(&mut self, s: &Slab<E::Tail>)
+        requires
+            E::ok(*s),
+        ensures
+            final(self).seen() == old(self).seen() + E::vals(*s),
     ;
 }
 
@@ -244,10 +264,6 @@ pub(crate) trait Insertable<E: Slabs>: Sized {
     ;
 }
 
-/// Told the weight of each slab a delete drops whole.
-pub(crate) trait WeightSink<W> {
-    fn dropped(&mut self, w: &W);
-}
 
 /// A read model `X` that sees each slab as this edit model does: valid
 /// when it is, and holding as many values. Each encoding's two models are
@@ -927,6 +943,29 @@ impl<E: Slabs> Cursor<E> {
         self.o == c.o && self.p == c.p && self.orig == c.orig && self.remaining == c.remaining
     }
 
+    /// The next `n` original values are the slab's from the cursor on.
+    pub(crate) proof fn lemma_ahead(&self, s: Seq<Slab<E::Tail>>, n: int)
+        requires
+            self.wf(s),
+            all_ok::<E>(s),
+            0 <= n,
+            self.in_slab + n <= s[self.slab as int].len,
+        ensures
+            self.o@.subrange(self.orig as int, self.orig + n) == E::vals(s[self.slab as int]).subrange(
+                self.in_slab as int,
+                self.in_slab + n,
+            ),
+    {
+        let si = self.slab as int;
+        let v = E::vals(s[si]);
+        E::lemma_len(s[si]);
+        let rest = vals_of::<E>(s.skip(si + 1));
+        let tail = v.skip(self.in_slab as int);
+        assert(self.o@.skip(self.orig as int) == tail + rest);
+        assert(self.o@.subrange(self.orig as int, self.orig + n) =~= (tail + rest).take(n));
+        assert((tail + rest).take(n) =~= v.subrange(self.in_slab as int, self.in_slab + n));
+    }
+
     /// With no rebuild open, the slabs hold the column's values.
     pub(crate) proof fn lemma_clean(&self, s: Seq<Slab<E::Tail>>)
         requires
@@ -1308,10 +1347,15 @@ impl<E: Slabs> Cursor<E> {
             final(self).slab == old(self).slab,
             final(self).in_slab == old(self).in_slab + (n - left),
             final(self).rebuilds == old(self).rebuilds,
+            final(f).seen() == old(f).seen() + old(self).o@.subrange(
+                old(self).orig as int,
+                old(self).orig + (n - left),
+            ),
     {
         let ghost c0 = *self;
         if n == 0 {
             assert(self.p@ + self.o@.subrange(self.orig as int, self.orig as int) =~= self.p@);
+            assert(f.seen() + self.o@.subrange(self.orig as int, self.orig as int) =~= f.seen());
             return 0;
         }
         proof {
@@ -1658,9 +1702,17 @@ impl<E: Slabs> Cursor<E> {
                 &&& final(self).orig == old(self).orig + k
                 &&& final(self).p@ == old(self).p@ + old(self).o@.subrange(old(self).orig as int, old(self).orig + k)
                 &&& jumped <= k
+                // what the visitor saw: all but the jump, which is last
+                &&& final(f).seen() == old(f).seen() + old(self).o@.subrange(
+                    old(self).orig as int,
+                    old(self).orig + k - jumped,
+                )
             }),
     {
         let ghost c0 = *self;
+        proof {
+            assert(f.seen() + c0.o@.subrange(c0.orig as int, c0.orig as int) =~= f.seen());
+        }
         if self.dirty && self.est_runs(slabs, n) >= E::carry_budget() {
             self.close::<W, I, G>(slabs, index, total_len, max_segments, counter);
         }
@@ -1673,6 +1725,8 @@ impl<E: Slabs> Cursor<E> {
         while want > 0
             invariant_except_break
                 self.orig + want == c0.orig + n,
+                jumped == 0,
+                f.seen() == old(f).seen() + c0.o@.subrange(c0.orig as int, self.orig as int),
             invariant
                 self.ok::<W, I, G>(slabs@, *index, *total_len, max_segments),
                 self.on_value(slabs@),
@@ -1682,8 +1736,11 @@ impl<E: Slabs> Cursor<E> {
                 want <= n,
                 jumped <= self.orig - c0.orig,
                 self.p@ == c0.p@ + c0.o@.subrange(c0.orig as int, self.orig as int),
+                f.seen() == old(f).seen() + c0.o@.subrange(c0.orig as int, self.orig - jumped),
             ensures
                 self.orig == c0.orig + n || (self.remaining == 0 && self.orig <= c0.orig + n),
+                jumped <= self.orig - c0.orig,
+                f.seen() == old(f).seen() + c0.o@.subrange(c0.orig as int, self.orig - jumped),
             decreases want * 2 + if self.dirty { 1int } else { 0 },
         {
             if !self.dirty {
@@ -1706,6 +1763,7 @@ impl<E: Slabs> Cursor<E> {
                 avail
             };
             let ghost c1 = *self;
+            let ghost f1 = f.seen();
             let left = self.step(slabs, take, f);
             proof {
                 assert(c0.o@.subrange(c0.orig as int, self.orig as int) =~= c0.o@.subrange(
@@ -1713,6 +1771,7 @@ impl<E: Slabs> Cursor<E> {
                     c1.orig as int,
                 ) + c0.o@.subrange(c1.orig as int, self.orig as int));
                 assert(self.p@ =~= c0.p@ + c0.o@.subrange(c0.orig as int, self.orig as int));
+                assert(f.seen() =~= old(f).seen() + c0.o@.subrange(c0.orig as int, self.orig as int));
             }
             want -= take - left;
             if left > 0 {
@@ -1735,7 +1794,7 @@ impl<E: Slabs> Cursor<E> {
     /// A whole slab with no rebuild reading it is dropped outright, and
     /// `g` told its weight; `f` sees every run a rebuild drops.
     #[inline(always)]
-    pub(crate) fn delete_with<W, I: IndexOps<W>, G: Weigh<E, W>, F: Visitor<E>, S: WeightSink<W>>(
+    pub(crate) fn delete_with<W, I: IndexOps<W>, G: Weigh<E, W>, F: Visitor<E>>(
         &mut self,
         slabs: &mut Vec<Slab<E::Tail>>,
         index: &mut I,
@@ -1744,7 +1803,6 @@ impl<E: Slabs> Cursor<E> {
         counter: &mut usize,
         n: usize,
         f: &mut F,
-        g: &mut S,
     )
         requires
             old(self).ok::<W, I, G>(old(slabs)@, *old(index), *old(total_len), max_segments),
@@ -1755,8 +1813,12 @@ impl<E: Slabs> Cursor<E> {
             final(self).o == old(self).o,
             final(self).p == old(self).p,
             final(self).orig == old(self).orig + if n <= old(self).remaining { n } else { old(self).remaining },
+            final(f).seen() == old(f).seen() + old(self).o@.subrange(old(self).orig as int, final(self).orig as int),
     {
         let ghost c0 = *self;
+        proof {
+            assert(f.seen() + c0.o@.subrange(c0.orig as int, c0.orig as int) =~= f.seen());
+        }
         // a delete off the end of the column takes what is there
         let mut left = if n <= self.remaining {
             n
@@ -1774,6 +1836,8 @@ impl<E: Slabs> Cursor<E> {
                 self.orig + left == c0.orig + if n <= c0.remaining { n } else { c0.remaining },
                 dropped ==> !self.dirty,
                 c0 == *old(self),
+                c0.orig <= self.orig,
+                f.seen() == old(f).seen() + c0.o@.subrange(c0.orig as int, self.orig as int),
             decreases left * 2 + if self.in_slab == slabs@[self.slab as int].len { 1int } else { 0 },
         {
             let avail = slabs[self.slab].len - self.in_slab;
@@ -1783,17 +1847,33 @@ impl<E: Slabs> Cursor<E> {
             if left < avail {
                 self.open(slabs, max_segments);
                 let ghost c1 = *self;
+                proof {
+                    c1.lemma_ahead(slabs@, left as int);
+                }
                 f.discard(&mut self.edit, &slabs[self.slab], left);
                 self.took(Ghost(slabs), left, Ghost(c1));
+                proof {
+                    assert(c0.o@.subrange(c0.orig as int, self.orig as int) =~= c0.o@.subrange(c0.orig as int, c1.orig as int)
+                        + c0.o@.subrange(c1.orig as int, self.orig as int));
+                }
                 return;
             }
             // a whole slab, and no rebuild reading it: drop it outright.
             // The column always keeps one slab, so the last one is
             // emptied through the rebuild below instead.
             if self.in_slab == 0 && !self.dirty && slabs.len() > 1 {
-                let w = G::compute::<I>(&slabs[self.slab]);
-                g.dropped(&w);
+                let ghost c1 = *self;
+                proof {
+                    E::lemma_len(slabs@[c1.slab as int]);
+                    c1.lemma_ahead(slabs@, avail as int);
+                    assert(E::vals(slabs@[c1.slab as int]).subrange(0, avail as int) =~= E::vals(slabs@[c1.slab as int]));
+                }
+                f.dropped(&slabs[self.slab]);
                 self.drop_slab::<W, I, G>(slabs, index, total_len, Ghost(max_segments));
+                proof {
+                    assert(c0.o@.subrange(c0.orig as int, self.orig as int) =~= c0.o@.subrange(c0.orig as int, c1.orig as int)
+                        + c0.o@.subrange(c1.orig as int, self.orig as int));
+                }
                 left -= avail;
                 dropped = true;
                 *counter = counter.wrapping_add(1);
@@ -1802,8 +1882,15 @@ impl<E: Slabs> Cursor<E> {
             // the delete reaches this slab's end: finish it here and go on
             self.open(slabs, max_segments);
             let ghost c1 = *self;
+            proof {
+                c1.lemma_ahead(slabs@, avail as int);
+            }
             f.discard(&mut self.edit, &slabs[self.slab], avail);
             self.took(Ghost(slabs), avail, Ghost(c1));
+            proof {
+                assert(c0.o@.subrange(c0.orig as int, self.orig as int) =~= c0.o@.subrange(c0.orig as int, c1.orig as int)
+                    + c0.o@.subrange(c1.orig as int, self.orig as int));
+            }
             left -= avail;
             // `close` re-locates, which is what carries the cursor into
             // the next slab
@@ -1998,7 +2085,7 @@ pub(crate) trait RunFeed<E: Slabs> {
 /// `at + del`. Ends when `feed` does.
 #[verifier::exec_allows_no_decreases_clause]
 #[inline(always)]
-pub(crate) fn splice_feed<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>, F: Visitor<E>, S: WeightSink<W>, R: RunFeed<E>>(
+pub(crate) fn splice_feed<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>, F: Visitor<E>, R: RunFeed<E>>(
     slabs: &mut Vec<Slab<E::Tail>>,
     index: &mut I,
     total_len: &mut usize,
@@ -2007,7 +2094,6 @@ pub(crate) fn splice_feed<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>, F: Visito
     at: usize,
     del: usize,
     f: &mut F,
-    g: &mut S,
     feed: &mut R,
 ) -> (ins: Ghost<Seq<E::V>>)
     requires
@@ -2031,7 +2117,7 @@ pub(crate) fn splice_feed<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>, F: Visito
         lemma_vals_total::<E>(slabs@);
     }
     let mut cur = Cursor::<E>::new::<W, I, G>(slabs, index, *total_len, Ghost(max_segments), at);
-    cur.delete_with::<W, I, G, F, S>(slabs, index, total_len, max_segments, counter, del, f, g);
+    cur.delete_with::<W, I, G, F>(slabs, index, total_len, max_segments, counter, del, f);
     let ghost mut ins: Seq<E::V> = Seq::empty();
     let ghost g0 = feed.given();
     let ghost k0 = feed.key();
@@ -2092,20 +2178,54 @@ use crate::{AsColumnRef, ColumnValueRef};
 
 /// A closure seeing each run a cursor carries or drops, as the
 /// [`Visitor`] of encoding `E`'s slab model: it hands the closure to the
-/// encoding's rebuild.
-pub(crate) struct Visiting<'f, E, F>(&'f mut F, PhantomData<fn() -> E>);
+/// encoding's rebuild. A second one, `D`, sees each slab a delete drops
+/// whole.
+pub(crate) struct Visiting<'f, E, F, D = NoDrops>(&'f mut F, D, PhantomData<fn() -> E>);
+
+/// Slabs dropped whole, unseen.
+pub(crate) struct NoDrops;
+
+/// Seeing each slab a delete drops whole.
+pub(crate) trait Drops<T: Copy + Clone + std::fmt::Debug + Default> {
+    fn dropped(&mut self, s: &Slab<T>);
+}
+
+impl<T: Copy + Clone + std::fmt::Debug + Default> Drops<T> for NoDrops {
+    #[inline(always)]
+    fn dropped(&mut self, _s: &Slab<T>) {}
+}
+
+impl<T: Copy + Clone + std::fmt::Debug + Default, D: FnMut(&Slab<T>)> Drops<T> for D {
+    #[inline(always)]
+    fn dropped(&mut self, s: &Slab<T>) {
+        self(s)
+    }
+}
 
 impl<'f, E, F> Visiting<'f, E, F> {
     #[inline(always)]
     pub(crate) fn new(f: &'f mut F) -> Self {
-        Visiting(f, PhantomData)
+        Visiting(f, NoDrops, PhantomData)
     }
 }
 
-impl<E: SlabEdit, F> Visitor<<E as SlabEdit>::Model> for Visiting<'_, E, F>
+impl<'f, E, F, D> Visiting<'f, E, F, D> {
+    #[inline(always)]
+    pub(crate) fn with_drops(f: &'f mut F, d: D) -> Self {
+        Visiting(f, d, PhantomData)
+    }
+}
+
+impl<E: SlabEdit, F, D: Drops<<E as ColumnEncoding>::Tail>> Visitor<<E as SlabEdit>::Model>
+    for Visiting<'_, E, F, D>
 where
     F: FnMut(<<E as ColumnEncoding>::Value as ColumnValueRef>::Get<'_>, usize),
 {
+    #[cfg(verus_keep_ghost)]
+    fn seen(&self) -> Seq<<<E as SlabEdit>::Model as Slabs>::V> {
+        unimplemented!()
+    }
+
     #[inline(always)]
     fn pass(
         &mut self,
@@ -2125,6 +2245,11 @@ where
         n: usize,
     ) {
         e.delete(s, n, self.0)
+    }
+
+    #[inline(always)]
+    fn dropped(&mut self, s: &Slab<<E as ColumnEncoding>::Tail>) {
+        self.1.dropped(s)
     }
 }
 
@@ -2196,12 +2321,5 @@ impl<
     #[inline(always)]
     fn next_run(&mut self) -> Option<(Inserting<E, V>, usize)> {
         self.0.next().map(|(v, n)| (Inserting::new(v), n))
-    }
-}
-
-impl<W, G: FnMut(&W)> WeightSink<W> for G {
-    #[inline(always)]
-    fn dropped(&mut self, w: &W) {
-        self(w)
     }
 }

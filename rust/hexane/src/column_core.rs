@@ -53,9 +53,7 @@ use crate::copy::RangeFeed;
 use crate::copy::{copy_direct, copy_invert, SrcFeed};
 #[cfg(verus_keep_ghost)]
 use crate::cursor::{all_ok, col_ok, lemma_vals_total, slab_lens, vals_of, ws_ok};
-use crate::cursor::{
-    col_index, splice_feed, ReadsAgree, RunFeed, Slabs, Visitor, Weigh, WeightSink,
-};
+use crate::cursor::{col_index, splice_feed, ReadsAgree, RunFeed, Slabs, Visitor, Weigh};
 #[cfg(verus_keep_ghost)]
 use crate::cursor::{lemma_lens_ok, lemma_vals_own};
 #[cfg(verus_keep_ghost)]
@@ -608,12 +606,11 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> ColumnCore<E, W, I, G> {
     /// the column holds its values before `at`, the values inserted, then
     /// its values from `at + del`.
     #[inline(always)]
-    pub(crate) fn splice<F: Visitor<E>, S: WeightSink<W>, R: RunFeed<E>>(
+    pub(crate) fn splice<F: Visitor<E>, R: RunFeed<E>>(
         &mut self,
         at: usize,
         del: usize,
         f: &mut F,
-        g: &mut S,
         feed: &mut R,
     ) -> (ins: Ghost<Seq<E::V>>)
         requires
@@ -634,7 +631,7 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> ColumnCore<E, W, I, G> {
         proof {
             lemma_vals_total::<E>(p.slabs@);
         }
-        let ins = splice_feed::<E, W, I, G, F, S, R>(
+        let ins = splice_feed::<E, W, I, G, F, R>(
             &mut p.slabs,
             &mut p.index,
             &mut p.total_len,
@@ -643,7 +640,6 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> ColumnCore<E, W, I, G> {
             at,
             del,
             f,
-            g,
             feed,
         );
         if !G::dom_check(&p.slabs, p.total_len) {
@@ -680,12 +676,11 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> ColumnCore<E, W, I, G> {
     /// `copy_ranges`, directly: apply the normalized splices `sps` to this
     /// column, the items of column `src` (`copy::copy_direct`).
     #[inline(always)]
-    pub(crate) fn copy_direct<'a, X: Decoders<'a, Tail = E::Tail>, F: Visitor<E>, S: WeightSink<W>>(
+    pub(crate) fn copy_direct<'a, X: Decoders<'a, Tail = E::Tail>, F: Visitor<E>>(
         &mut self,
         sps: &[Splice],
         src: &'a Self,
         f: &mut F,
-        g: &mut S,
     )
         where E: ReadsAgree<'a, X>
         requires
@@ -701,7 +696,7 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> ColumnCore<E, W, I, G> {
         proof {
             lemma_vals_total::<E>(p.slabs@);
         }
-        copy_direct::<E, W, I, G, F, S, SrcFeed<'a, E, W, I, X>>(
+        copy_direct::<E, W, I, G, F, SrcFeed<'a, E, W, I, X>>(
             &mut p.slabs,
             &mut p.index,
             &mut p.total_len,
@@ -709,7 +704,6 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> ColumnCore<E, W, I, G> {
             &mut p.counter,
             sps,
             f,
-            g,
             &mut feed,
         );
         if !G::dom_check(&p.slabs, p.total_len) {
@@ -722,12 +716,11 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> ColumnCore<E, W, I, G> {
     /// normalized splices `sps`' ranges of it and put the items of column
     /// `dst` back between them (`copy::copy_invert`).
     #[inline(always)]
-    pub(crate) fn copy_invert<'a, X: Decoders<'a, Tail = E::Tail>, F: Visitor<E>, S: WeightSink<W>>(
+    pub(crate) fn copy_invert<'a, X: Decoders<'a, Tail = E::Tail>, F: Visitor<E>>(
         &mut self,
         sps: &[Splice],
         dst: &'a Self,
         f: &mut F,
-        g: &mut S,
     )
         where E: ReadsAgree<'a, X>
         requires
@@ -744,7 +737,7 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> ColumnCore<E, W, I, G> {
         proof {
             lemma_vals_total::<E>(p.slabs@);
         }
-        copy_invert::<E, W, I, G, F, S, SrcFeed<'a, E, W, I, X>>(
+        copy_invert::<E, W, I, G, F, SrcFeed<'a, E, W, I, X>>(
             &mut p.slabs,
             &mut p.index,
             &mut p.total_len,
@@ -753,7 +746,6 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> ColumnCore<E, W, I, G> {
             sps,
             dst_len,
             f,
-            g,
             &mut feed,
         );
         if !G::dom_check(&p.slabs, p.total_len) {
@@ -951,7 +943,7 @@ impl<E, X, B> ColumnCore<E, SlabAgg, SlabBTree<SlabAgg>, DeltaModel<X, B>> where
     /// bound on the values (`SpanPlan`), so the column is read again only
     /// where that bound is too wide.
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn splice_delta<F: Visitor<E>, G2: WeightSink<SlabAgg>, S: SpliceItems>(
+    pub(crate) fn splice_delta<F: Visitor<E>, S: SpliceItems>(
         &mut self,
         at: usize,
         del: usize,
@@ -959,7 +951,6 @@ impl<E, X, B> ColumnCore<E, SlabAgg, SlabBTree<SlabAgg>, DeltaModel<X, B>> where
         min: i64,
         max: i64,
         f: &mut F,
-        g: &mut G2,
     )
         requires
             at <= old(self)@.len(),
@@ -1022,7 +1013,7 @@ impl<E, X, B> ColumnCore<E, SlabAgg, SlabBTree<SlabAgg>, DeltaModel<X, B>> where
         proof {
             lemma_vals_total::<E>(p.slabs@);
         }
-        let _ins = splice_feed::<E, SlabAgg, SlabBTree<SlabAgg>, DeltaModel<X, B>, F, G2, DeltaFeed<S, E, X, B>>(
+        let _ins = splice_feed::<E, SlabAgg, SlabBTree<SlabAgg>, DeltaModel<X, B>, F, DeltaFeed<S, E, X, B>>(
             &mut p.slabs,
             &mut p.index,
             &mut p.total_len,
@@ -1031,7 +1022,6 @@ impl<E, X, B> ColumnCore<E, SlabAgg, SlabBTree<SlabAgg>, DeltaModel<X, B>> where
             at,
             total_del,
             f,
-            g,
             &mut feed,
         );
         let fits = p.total_len as u64 <= i64::MAX as u64 && feed.plan.fits(min, max);
@@ -1080,13 +1070,12 @@ impl<E, X, B> ColumnCore<E, SlabAgg, SlabBTree<SlabAgg>, DeltaModel<X, B>> where
     /// or number more than `i64::MAX`. The deltas keep a bound on the
     /// values (`ToDeltas`), so the column is read again only where that
     /// bound is too wide.
-    pub(crate) fn fill_delta<F: Visitor<E>, G2: WeightSink<SlabAgg>, S: ValueItems>(
+    pub(crate) fn fill_delta<F: Visitor<E>, S: ValueItems>(
         &mut self,
         items: S,
         min: i64,
         max: i64,
         f: &mut F,
-        g: &mut G2,
     )
         requires
             old(self)@.len() == 0,
@@ -1110,7 +1099,7 @@ impl<E, X, B> ColumnCore<E, SlabAgg, SlabBTree<SlabAgg>, DeltaModel<X, B>> where
         proof {
             lemma_vals_total::<E>(p.slabs@);
         }
-        let _ins = splice_feed::<E, SlabAgg, SlabBTree<SlabAgg>, DeltaModel<X, B>, F, G2, ValuesFeed<S, E, X, B>>(
+        let _ins = splice_feed::<E, SlabAgg, SlabBTree<SlabAgg>, DeltaModel<X, B>, F, ValuesFeed<S, E, X, B>>(
             &mut p.slabs,
             &mut p.index,
             &mut p.total_len,
@@ -1119,7 +1108,6 @@ impl<E, X, B> ColumnCore<E, SlabAgg, SlabBTree<SlabAgg>, DeltaModel<X, B>> where
             0,
             0,
             f,
-            g,
             &mut feed,
         );
         let fits = p.total_len as u64 <= i64::MAX as u64 && feed.deltas.fits(min, max);

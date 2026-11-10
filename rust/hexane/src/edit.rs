@@ -282,15 +282,15 @@ where
 
     /// [`delete`](Self::delete), reporting every run it drops to `f` —
     /// the values are gone from the column but a delta column's running
-    /// value still moves over them — and the weight of every slab it
-    /// drops whole, unread, to `g`.
-    pub(crate) fn delete_with<F, H>(&mut self, n: usize, mut f: F, mut g: H) -> &mut Self
+    /// value still moves over them — and every slab it drops whole,
+    /// unread, to `g`.
+    pub(crate) fn delete_with<F, H>(&mut self, n: usize, mut f: F, g: H) -> &mut Self
     where
         F: FnMut(T::Get<'_>, usize),
-        H: FnMut(&WF::Weight),
+        H: FnMut(&crate::column::Slab<crate::column::TailOf<T, C>>),
     {
         self.core
-            .delete_with(n, &mut Visiting::<Enc<T, C>, F>::new(&mut f), &mut g);
+            .delete_with(n, &mut Visiting::<Enc<T, C>, F, H>::with_drops(&mut f, g));
         self
     }
 
@@ -329,12 +329,10 @@ where
         runs: impl Iterator<Item = (V, usize)>,
     ) {
         let mut f = |_: T::Get<'_>, _: usize| {};
-        let mut g = |_: &WF::Weight| {};
         self.core.splice(
             at,
             del,
             &mut Visiting::<Enc<T, C>, _>::new(&mut f),
-            &mut g,
             &mut Feeding::<Enc<T, C>, _>::new(runs),
         );
     }
@@ -344,12 +342,10 @@ where
     /// `ColumnCore::copy_direct`, reading `src` with its own index).
     pub(crate) fn copy_direct_from(&mut self, src: &Self, splices: &[crate::Splice]) {
         let mut f = |_: T::Get<'_>, _: usize| {};
-        let mut g = |_: &WF::Weight| {};
-        self.core.copy_direct::<crate::column::Dx<T, C>, _, _>(
+        self.core.copy_direct::<crate::column::Dx<T, C>, _>(
             splices,
             &src.core,
             &mut Visiting::<Enc<T, C>, _>::new(&mut f),
-            &mut g,
         );
     }
 
@@ -358,12 +354,10 @@ where
     /// between them (verified, `ColumnCore::copy_invert`).
     pub(crate) fn copy_invert_from(&mut self, dst: &Self, splices: &[crate::Splice]) {
         let mut f = |_: T::Get<'_>, _: usize| {};
-        let mut g = |_: &WF::Weight| {};
-        self.core.copy_invert::<crate::column::Dx<T, C>, _, _>(
+        self.core.copy_invert::<crate::column::Dx<T, C>, _>(
             splices,
             &dst.core,
             &mut Visiting::<Enc<T, C>, _>::new(&mut f),
-            &mut g,
         );
     }
 }

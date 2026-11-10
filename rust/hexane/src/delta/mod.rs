@@ -732,7 +732,6 @@ impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
         // values, and the bound taken as they go past shows the column is
         // in the domain (or it is read again to see)
         let mut f = |_: <T::Inner as crate::ColumnValueRef>::Get<'_>, _: usize| {};
-        let mut g = |_: &crate::btree::SlabAgg| {};
         col.col.core.fill_delta(
             values.into_iter().map(|t| t.to_i64()),
             T::MIN_I64,
@@ -740,7 +739,6 @@ impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
             &mut crate::cursor::Visiting::<<T::Inner as crate::ColumnValueRef>::Encoding<C>, _>::new(
                 &mut f,
             ),
-            &mut g,
         );
         col
     }
@@ -1127,7 +1125,6 @@ impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
         // kept; and its plan's bound shows the column stays in the domain,
         // or the column is read again to see
         let mut f = |_: <T::Inner as crate::ColumnValueRef>::Get<'_>, _: usize| {};
-        let mut g = |_: &crate::btree::SlabAgg| {};
         self.col.core.splice_delta(
             index,
             del,
@@ -1137,7 +1134,6 @@ impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
             &mut crate::cursor::Visiting::<<T::Inner as crate::ColumnValueRef>::Encoding<C>, _>::new(
                 &mut f,
             ),
-            &mut g,
         );
     }
 }
@@ -1368,9 +1364,12 @@ where
         self.inner.delete_with(
             n,
             |v, count| sum.set(sum.get().wrapping_add(run_sum(T::Inner::to_opt(v), count))),
-            // a slab dropped whole is never decoded; its aggregate holds
-            // the sum of every delta in it
-            |w| sum.set(sum.get().wrapping_add(w.total)),
+            // a slab dropped whole: its aggregate holds the sum of every
+            // delta in it
+            |s| {
+                let w = <IndexedDeltaWeightFn as crate::column::WeightFn<T::Inner, C>>::compute(s);
+                sum.set(sum.get().wrapping_add(w.total))
+            },
         );
         // the deleted items are gone from the output but the ones after
         // them still decode against their sum
@@ -1414,14 +1413,17 @@ where
     /// Delete the item at the cursor and return the delta it held.
     ///
     /// A single item can still be a whole slab — a cursor resting at a
-    /// slab's end deletes into the next one — and a slab consumed whole
-    /// is never decoded, so its aggregate is what reports it.
+    /// slab's end deletes into the next one — and then its aggregate is
+    /// what reports it.
     fn take_delta(&mut self) -> i64 {
         let d = std::cell::Cell::new(0i64);
         self.inner.delete_with(
             1,
             |v, _| d.set(d.get().wrapping_add(T::Inner::to_opt(v).unwrap_or(0))),
-            |w| d.set(d.get().wrapping_add(w.total)),
+            |s| {
+                let w = <IndexedDeltaWeightFn as crate::column::WeightFn<T::Inner, C>>::compute(s);
+                d.set(d.get().wrapping_add(w.total))
+            },
         );
         d.get()
     }

@@ -23,7 +23,7 @@ use crate::column::Slab;
 use crate::column_core::{ColumnCore, Parts};
 #[cfg(verus_keep_ghost)]
 use crate::cursor::{lemma_vals_total, vals_of};
-use crate::cursor::{Cursor, Insertable, Slabs, Visitor, Weigh, WeightSink};
+use crate::cursor::{Cursor, Insertable, Slabs, Visitor, Weigh};
 use crate::index::IndexOps;
 use std::marker::PhantomData;
 use vstd::prelude::*;
@@ -193,7 +193,7 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> EditCore<E, W, I, G> {
     /// Move forward `n` items, carrying them, `f` told of each run;
     /// returns how many it jumped through the index without reading.
     #[inline(always)]
-    pub(crate) fn advance_with<F: Visitor<E>>(&mut self, n: usize, f: &mut F) -> usize
+    pub(crate) fn advance_with<F: Visitor<E>>(&mut self, n: usize, f: &mut F) -> (jumped: usize)
         requires
             old(self).inv(),
         ensures
@@ -202,6 +202,12 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> EditCore<E, W, I, G> {
             final(self).written() == old(self).written() + old(self).orig_vals().subrange(
                 old(self).at(),
                 old(self).at() + old(self).step_len(n),
+            ),
+            // `f` is shown all of them but the last `jumped`
+            jumped <= old(self).step_len(n),
+            final(f).seen() == old(f).seen() + old(self).orig_vals().subrange(
+                old(self).at(),
+                old(self).at() + old(self).step_len(n) - jumped,
             ),
     {
         let ms = self.max_segments;
@@ -231,20 +237,24 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> EditCore<E, W, I, G> {
         }
     }
 
-    /// Delete `n` items at the cursor, `f` told of each run a rebuild
-    /// drops and `g` of each slab dropped whole.
+    /// Delete `n` items at the cursor, `f` shown each run a rebuild drops
+    /// and each slab dropped whole: all the items deleted, in order.
     #[inline(always)]
-    pub(crate) fn delete_with<F: Visitor<E>, S: WeightSink<W>>(&mut self, n: usize, f: &mut F, g: &mut S)
+    pub(crate) fn delete_with<F: Visitor<E>>(&mut self, n: usize, f: &mut F)
         requires
             old(self).inv(),
         ensures
             final(self).kept(*old(self)),
             final(self).at() == old(self).at() + old(self).step_len(n),
             final(self).written() == old(self).written(),
+            final(f).seen() == old(f).seen() + old(self).orig_vals().subrange(
+                old(self).at(),
+                old(self).at() + old(self).step_len(n),
+            ),
     {
         let ms = self.max_segments;
         match &mut self.parts {
-            Some(p) => self.cur.delete_with::<W, I, G, F, S>(&mut p.slabs, &mut p.index, &mut p.total_len, ms, &mut p.counter, n, f, g),
+            Some(p) => self.cur.delete_with::<W, I, G, F>(&mut p.slabs, &mut p.index, &mut p.total_len, ms, &mut p.counter, n, f),
             None => lost(),
         }
     }
