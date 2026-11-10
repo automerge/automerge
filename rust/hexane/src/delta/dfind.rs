@@ -736,6 +736,8 @@ pub(crate) struct DFind<'a, D> {
     pub(crate) active: bool,
     pub(crate) lo: i64,
     pub(crate) hi: i64,
+    /// the item it has returned every match before
+    pub(crate) from: Ghost<int>,
 }
 
 /// The search has returned every match before `f`.
@@ -762,20 +764,23 @@ pub(crate) open spec fn find_ok<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode
 }
 
 /// A search from the column's start.
+#[allow(unused_variables)] // `slabs` is for the spec
 pub(crate) fn d_find_new<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
     ix: &'a crate::btree::SlabBTree<SlabAgg>,
     lo: i64,
     hi: i64,
-    Ghost(s): Ghost<Seq<Slab<X::Tail>>>,
+    slabs: &'a [Slab<X::Tail>],
 ) -> (fd: DFind<'a, X::D>)
     requires
         ix.wf(),
-        dix_ok::<X, B>(ix@, s),
-        lens_ok::<X>(s),
-        total(slab_lens(s)) <= usize::MAX,
+        dix_ok::<X, B>(ix@, slabs@),
+        lens_ok::<X>(slabs@),
+        total(slab_lens(slabs@)) <= usize::MAX,
     ensures
-        find_ok::<X, B>(fd, s, 0),
+        find_ok::<X, B>(fd, slabs@, fd.from@),
+        fd.from@ == 0,
 {
+    let ghost s = slabs@;
     proof {
         lemma_found::<X, B>(ix@, s, 0);
     }
@@ -784,7 +789,7 @@ pub(crate) fn d_find_new<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item
         assert(sum(slab_lens(s), 0, 0) == 0);
     }
     let cur = DScan { dec: X::none(), running: 0, item: 0, start: 0, pend: 0, pend_end: 0 };
-    DFind { search, cur, active: false, lo, hi }
+    DFind { search, cur, active: false, lo, hi, from: Ghost(0) }
 }
 
 /// The next item of the column, at or after `f`, whose value lies in
@@ -793,13 +798,14 @@ pub(crate) fn d_find_new<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item
 pub(crate) fn d_find_next<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
     fd: &mut DFind<'a, X::D>,
     slabs: &'a [Slab<X::Tail>],
-    Ghost(f0): Ghost<int>,
 ) -> (r: Option<usize>)
     requires
-        find_ok::<X, B>(*old(fd), slabs@, f0),
+        find_ok::<X, B>(*old(fd), slabs@, old(fd).from@),
     ensures
+        find_ok::<X, B>(*final(fd), slabs@, final(fd).from@),
         match r {
             Some(i) => {
+                let f0 = old(fd).from@;
                 &&& f0 <= i
                 &&& col_hit::<X, B>(slabs@, old(fd).lo as int, old(fd).hi as int, i as int)
                 &&& forall|j: int| f0 <= j < i ==> !#[trigger] col_hit::<X, B>(
@@ -808,16 +814,21 @@ pub(crate) fn d_find_next<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Ite
                     old(fd).hi as int,
                     j,
                 )
-                &&& find_ok::<X, B>(*final(fd), slabs@, i + 1)
+                &&& final(fd).from@ == i + 1
             },
-            None => forall|j: int| f0 <= j < total(slab_lens(slabs@)) ==> !#[trigger] col_hit::<X, B>(
-                slabs@,
-                old(fd).lo as int,
-                old(fd).hi as int,
-                j,
-            ),
+            None => {
+                &&& forall|j: int|
+                    old(fd).from@ <= j < total(slab_lens(slabs@)) ==> !#[trigger] col_hit::<X, B>(
+                        slabs@,
+                        old(fd).lo as int,
+                        old(fd).hi as int,
+                        j,
+                    )
+                &&& final(fd).from@ == total(slab_lens(slabs@))
+            },
         },
 {
+    let ghost f0 = fd.from@;
     let ghost s = slabs@;
     let ghost ws = fd.search.view_tree();
     let ghost lo = fd.lo as int;
@@ -830,6 +841,7 @@ pub(crate) fn d_find_next<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Ite
             lo == fd.lo as int,
             hi == fd.hi as int,
             find_ok::<X, B>(*fd, s, f),
+            f0 == old(fd).from@,
             f0 <= f,
             forall|j: int| f0 <= j < f ==> !#[trigger] col_hit::<X, B>(s, lo, hi, j),
         decreases 2 * (ws.len() - fd.search.pos()) + if fd.active { 1int } else { 0int },
@@ -843,6 +855,7 @@ pub(crate) fn d_find_next<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Ite
                 proof {
                     lemma_found_in_slab::<X, B>(ws, s, lo, hi, k, f0, f, i as int);
                 }
+                fd.from = Ghost(i + 1);
                 return Some(i);
             }
             fd.active = false;
@@ -857,6 +870,7 @@ pub(crate) fn d_find_next<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Ite
                 proof {
                     lemma_skipped::<X, B>(ws, s, lo, hi, pos0, s.len() as int, f0);
                 }
+                fd.from = Ghost(total(slab_lens(s)) as int);
                 return None;
             },
             Some((k, items, prefix)) => {

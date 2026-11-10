@@ -1601,7 +1601,8 @@ impl<D: Decode> ICore<D> {
 
     /// Set the window to end at `end`.
     #[inline]
-    pub(crate) fn set_max<'a, X: Decoders<'a, D = D>>(&mut self, Ghost(slabs): Ghost<&'a [Slab<X::Tail>]>, end: usize)
+    #[allow(unused_variables)] // `slabs` is for the spec
+    pub(crate) fn set_max<'a, X: Decoders<'a, D = D>>(&mut self, slabs: &'a [Slab<X::Tail>], end: usize)
         requires
             old(self).wf::<X>(slabs@),
         ensures

@@ -7,13 +7,12 @@ use crate::column::{Column, Dx, Iter, Slab, SlabWeight, TailOf, WeightFn};
 use crate::encoding::{ColumnEncoding, RunDecoder};
 use crate::index::IndexOps;
 use crate::prefix_core::{
-    p_next, p_next_run, p_nth, p_reset, p_slab_sum, p_slab_sum_checked, PrefixOps,
+    p_next, p_next_run_from, p_nth, p_reset, p_slab_sum, p_slab_sum_checked, PrefixOps,
 };
 use crate::prefix_search::{p_advance, PrefixOrd};
 use crate::PackError;
 use crate::{Codec, Leb128};
 use crate::{ColumnValueRef, RleValue, Run};
-use vstd::prelude::Ghost;
 
 // ── UnsignedPrefix marker ────────────────────────────────────────────────────
 
@@ -1104,7 +1103,7 @@ impl<'a, T: PrefixValue, C: Codec> Iterator for PrefixIter<'a, T, C> {
             &mut self.inner.core,
             self.inner.slabs,
             &mut self.total,
-            Ghost::assume_new(),
+            &self.base,
         )?;
         Some(PrefixedValue {
             value,
@@ -1162,8 +1161,8 @@ impl<'a, T: PrefixValue, C: Codec> PrefixIter<'a, T, C> {
     /// position, and slab jumps in `nth` carry the offset).
     pub fn reset_prefix(&mut self) {
         p_reset::<Dx<T, C>, PB<T>>(
-            Ghost::assume_new(),
-            Ghost::assume_new(),
+            &self.inner.core,
+            self.inner.slabs,
             &mut self.total,
             &mut self.base,
         );
@@ -1220,12 +1219,12 @@ impl<'a, T: PrefixValue, C: Codec> PrefixIter<'a, T, C> {
     /// run's final item: `total()` is the sum through the end of the run.
     pub fn next_run(&mut self) -> Option<Run<PrefixedValue<'a, T>>> {
         let max = self.inner.core.items_left;
-        let run = p_next_run::<Dx<T, C>, PB<T>>(
+        let run = p_next_run_from::<Dx<T, C>, PB<T>>(
             &mut self.inner.core,
             self.inner.slabs,
             max,
             &mut self.total,
-            Ghost::assume_new(),
+            &self.base,
         )?;
         Some(Run {
             count: run.count,

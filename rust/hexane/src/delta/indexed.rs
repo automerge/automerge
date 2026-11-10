@@ -206,10 +206,7 @@ impl<'a, T: DeltaValue, C: Codec> FindByRange<'a, T, C> {
         Self {
             slabs,
             find: Some(d_find_new::<Dx<T::Inner, C>, DB<T::Inner, C>>(
-                index,
-                lo,
-                hi,
-                Ghost::assume_new(),
+                index, lo, hi, slabs,
             )),
         }
     }
@@ -221,7 +218,7 @@ impl<T: DeltaValue, C: Codec> Iterator for FindByRange<'_, T, C> {
     // given the index's slab aggregates
     fn next(&mut self) -> Option<usize> {
         let find = self.find.as_mut()?;
-        d_find_next::<Dx<T::Inner, C>, DB<T::Inner, C>>(find, self.slabs, Ghost::assume_new())
+        d_find_next::<Dx<T::Inner, C>, DB<T::Inner, C>>(find, self.slabs)
     }
 }
 

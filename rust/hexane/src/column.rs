@@ -503,8 +503,7 @@ impl<'a, T: ColumnValueRef, C: Codec> Iter<'a, T, C> {
     /// beyond the column length, the iterator will cleanly return `None`
     /// when it reaches the end of the data.
     pub fn set_max(&mut self, pos: usize) {
-        self.core
-            .set_max::<Dx<T, C>>(vstd::prelude::Ghost::assume_new(), pos);
+        self.core.set_max::<Dx<T, C>>(self.slabs, pos);
     }
 
     /// Returns the index of the current slab.

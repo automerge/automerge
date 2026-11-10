@@ -573,7 +573,7 @@ impl<'a, E, W, I: IndexOps<W>, X> RangeFeed<E> for SrcFeed<'a, E, W, I, X> where
         proof {
             lemma_vals_own::<E, X>(s);
         }
-        self.core.set_max::<X>(Ghost(self.slabs), range.end);
+        self.core.set_max::<X>(self.slabs, range.end);
         proof {
             assert(self.core.out::<X>(s) =~= v.subrange(self.core.pos as int, range.end as int));
         }
@@ -645,7 +645,7 @@ impl<'a, E, W, I: IndexOps<W>, X> RangeFeed<E> for SrcFeed<'a, E, W, I, X> where
             },
             None => {
                 // nothing left in the range: the reader's window is empty
-                self.core.set_max::<X>(Ghost(self.slabs), self.end);
+                self.core.set_max::<X>(self.slabs, self.end);
                 proof {
                     assert(self.core.out::<X>(s) =~= v.subrange(p0, e));
                 }

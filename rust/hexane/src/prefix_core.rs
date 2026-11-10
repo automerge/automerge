@@ -273,16 +273,17 @@ pub(crate) open spec fn index_ok<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Deco
 
 /// `next`, adding the value to the running total.
 #[inline(always)]
+#[allow(unused_variables)] // `base` is for the spec
 pub(crate) fn p_next<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>(
     core: &mut ICore<X::D>,
     slabs: &'a [Slab<X::Tail>],
     total: &mut B::P,
-    Ghost(base): Ghost<B::P>,
+    base: &B::P,
 ) -> (r: Option<<X::D as Decode>::Item>)
     requires
-        at_sum::<X, B>(*old(core), *old(total), base, slabs@),
+        at_sum::<X, B>(*old(core), *old(total), *base, slabs@),
     ensures
-        at_sum::<X, B>(*final(core), *final(total), base, slabs@),
+        at_sum::<X, B>(*final(core), *final(total), *base, slabs@),
         match r {
             Some(v) => {
                 &&& old(core).out::<X>(slabs@).len() > 0
@@ -304,10 +305,41 @@ pub(crate) fn p_next<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>(
             assert(reps(1, B::contrib(v)) == prefix_add(reps(0, B::contrib(v)), B::contrib(v)));
             assert(reps(0, B::contrib(v)) == prefix_zero::<B::P>());
             axiom_prefix_add(B::contrib(v), B::contrib(v), B::contrib(v));
-            axiom_prefix_add(base, t0, B::contrib(v));
+            axiom_prefix_add(*base, t0, B::contrib(v));
         }
     }
     r
+}
+
+/// [`p_next_run`], for the iterator, which holds `base`.
+#[inline(always)]
+#[allow(unused_variables)] // `base` is for the spec
+pub(crate) fn p_next_run_from<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>(
+    core: &mut ICore<X::D>,
+    slabs: &'a [Slab<X::Tail>],
+    max: usize,
+    total: &mut B::P,
+    base: &B::P,
+) -> (r: Option<Run<<X::D as Decode>::Item>>)
+    requires
+        at_sum::<X, B>(*old(core), *old(total), *base, slabs@),
+    ensures
+        at_sum::<X, B>(*final(core), *final(total), *base, slabs@),
+        match r {
+            Some(run) => {
+                let o = old(core).out::<X>(slabs@);
+                &&& 1 <= run.count <= max
+                &&& run.count <= o.len()
+                &&& o.take(run.count as int) == Seq::new(run.count as nat, |_i: int| run.value)
+                &&& final(core).out::<X>(slabs@) == o.skip(run.count as int)
+                &&& final(core).pos == old(core).pos + run.count
+                &&& run.count < max && run.count < o.len() ==> o[run.count as int] != run.value
+                &&& *final(total) == prefix_add(*old(total), reps(run.count as nat, B::contrib(run.value)))
+            },
+            None => max == 0 || old(core).out::<X>(slabs@).len() == 0,
+        },
+{
+    p_next_run::<X, B>(core, slabs, max, total, Ghost(*base))
 }
 
 /// `next_run_max`, adding the run to the running total.
@@ -613,7 +645,7 @@ pub(crate) fn p_sum_range<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::It
         }
     }
     let ghost c1 = *core;
-    p_reset::<X, B>(Ghost(*core), Ghost(s), total, base);
+    p_reset::<X, B>(core, slabs, total, base);
     proof {
         axiom_prefix_add(*base, *base, *base);
         assert(*base == vsum::<_, B>(before::<X>(s, c1.pos as int)));
@@ -630,16 +662,17 @@ pub(crate) fn p_sum_range<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::It
 /// `reset_prefix`: count totals from here on, moving the running total
 /// into `base`.
 #[inline(always)]
+#[allow(unused_variables)] // `core` and `slabs` are for the spec
 pub(crate) fn p_reset<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>(
-    Ghost(core): Ghost<ICore<X::D>>,
-    Ghost(s): Ghost<Seq<Slab<X::Tail>>>,
+    core: &ICore<X::D>,
+    slabs: &'a [Slab<X::Tail>],
     total: &mut B::P,
     base: &mut B::P,
 )
     requires
-        at_sum::<X, B>(core, *old(total), *old(base), s),
+        at_sum::<X, B>(*core, *old(total), *old(base), slabs@),
     ensures
-        at_sum::<X, B>(core, *final(total), *final(base), s),
+        at_sum::<X, B>(*core, *final(total), *final(base), slabs@),
         *final(total) == prefix_zero::<B::P>(),
 {
     B::add_to(base, total);
