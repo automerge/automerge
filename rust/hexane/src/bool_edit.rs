@@ -2071,6 +2071,27 @@ impl<'a, C: CountsOf> crate::cursor::ReadsAgree<'a, crate::bool_wire::BoolReads<
         let x = bool_values::<C::K>(s.data@);
         assert(x.map_values(|v: bool| v) =~= x);
     }
+
+    type Ins = BoolIns;
+
+    #[inline(always)]
+    fn ins(v: bool) -> (x: BoolIns) {
+        BoolIns(v)
+    }
+}
+
+/// A value read from a bool column, to insert into a rebuild.
+pub struct BoolIns(pub(crate) bool);
+
+impl<C: CountsOf> crate::cursor::Insertable<BoolModel<C>> for BoolIns {
+    open spec fn val(&self) -> bool {
+        self.0
+    }
+
+    #[inline(always)]
+    fn insert_into(self, e: &mut BoolEdit<C>, n: usize) {
+        e.e.insert::<C::K>(self.0, n);
+    }
 }
 
 impl<C: CountsOf> Slabs for BoolModel<C> {

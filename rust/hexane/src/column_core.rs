@@ -41,7 +41,9 @@ use crate::btree::{
 };
 use crate::btree::{SlabAgg, SlabBTree};
 use crate::column::Slab;
-use crate::copy::{copy_direct, copy_invert, RangeFeed};
+#[cfg(verus_keep_ghost)]
+use crate::copy::RangeFeed;
+use crate::copy::{copy_direct, copy_invert, SrcFeed};
 #[cfg(verus_keep_ghost)]
 use crate::cursor::{all_ok, col_ok, lemma_vals_total, slab_lens, vals_of, ws_ok};
 use crate::cursor::{
@@ -566,30 +568,65 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> ColumnCore<E, W, I, G> {
         ins
     }
 
-    /// `copy_ranges`, directly: apply the normalized splices `sps` to this
-    /// column, the source's items from `feed` (`copy::copy_direct`).
+    /// The column's items, a range at a time, for `copy_ranges`: a reader
+    /// moved by the column's own index (`copy::SrcFeed`), at the start.
     #[inline(always)]
-    pub(crate) fn copy_direct<F: Visitor<E>, S: WeightSink<W>, R: RangeFeed<E>>(
+    fn src_feed<'a, X: Decoders<'a, Tail = E::Tail>>(&'a self) -> (r: SrcFeed<'a, E, W, I, X>)
+        where E: ReadsAgree<'a, X>
+        ensures
+            r.inv(),
+            r.src() == self@,
+            r.at() == 0,
+    {
+        let index = self.index();
+        let slabs = self.slabs();
+        let core = self.reader::<X>(0, 0);
+        self.lemma_column();
+        proof {
+            use_type_invariant(self);
+            let v = crate::iter_core::vals_of::<X>(slabs@);
+            lemma_lens_ok::<E, X>(slabs@);
+            lemma_vals_own::<E, X>(slabs@);
+            assert(v.subrange(0, 0) =~= Seq::<<X::D as Decode>::Item>::empty());
+        }
+        SrcFeed { slabs, index, core, end: 0, _p: PhantomData }
+    }
+
+    /// `copy_ranges`, directly: apply the normalized splices `sps` to this
+    /// column, the items of column `src` (`copy::copy_direct`).
+    #[inline(always)]
+    pub(crate) fn copy_direct<'a, X: Decoders<'a, Tail = E::Tail>, F: Visitor<E>, S: WeightSink<W>>(
         &mut self,
         sps: &[Splice],
+        src: &'a Self,
         f: &mut F,
         g: &mut S,
-        feed: &mut R,
     )
+        where E: ReadsAgree<'a, X>
         requires
-            normal(sps@, old(feed).src().len() as int, old(self)@.len() as int),
-            old(feed).at() == 0,
+            normal(sps@, src@.len() as int, old(self)@.len() as int),
         ensures
-            final(self)@ == applied(old(self)@, old(feed).src(), sps@),
+            final(self)@ == applied(old(self)@, src@, sps@),
             final(self).budget() == old(self).budget(),
             final(self).ready(),
     {
+        let mut feed = src.src_feed::<X>();
         let max_segments = self.max_segments;
         let mut p = self.take_parts();
         proof {
             lemma_vals_total::<E>(p.slabs@);
         }
-        copy_direct::<E, W, I, G, F, S, R>(&mut p.slabs, &mut p.index, &mut p.total_len, max_segments, &mut p.counter, sps, f, g, feed);
+        copy_direct::<E, W, I, G, F, S, SrcFeed<'a, E, W, I, X>>(
+            &mut p.slabs,
+            &mut p.index,
+            &mut p.total_len,
+            max_segments,
+            &mut p.counter,
+            sps,
+            f,
+            g,
+            &mut feed,
+        );
         if !G::dom_check(&p.slabs, p.total_len) {
             out_of_domain();
         }
@@ -597,32 +634,32 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> ColumnCore<E, W, I, G> {
     }
 
     /// `copy_ranges`, inverted: this column holds the source; keep the
-    /// normalized splices `sps`' ranges of it and put the destination's
-    /// items, from `feed`, back between them (`copy::copy_invert`).
+    /// normalized splices `sps`' ranges of it and put the items of column
+    /// `dst` back between them (`copy::copy_invert`).
     #[inline(always)]
-    pub(crate) fn copy_invert<F: Visitor<E>, S: WeightSink<W>, R: RangeFeed<E>>(
+    pub(crate) fn copy_invert<'a, X: Decoders<'a, Tail = E::Tail>, F: Visitor<E>, S: WeightSink<W>>(
         &mut self,
         sps: &[Splice],
-        dst_len: usize,
+        dst: &'a Self,
         f: &mut F,
         g: &mut S,
-        feed: &mut R,
     )
+        where E: ReadsAgree<'a, X>
         requires
-            normal(sps@, old(self)@.len() as int, dst_len as int),
-            old(feed).src().len() == dst_len,
-            old(feed).at() == 0,
+            normal(sps@, old(self)@.len() as int, dst@.len() as int),
         ensures
-            final(self)@ == applied(old(feed).src(), old(self)@, sps@),
+            final(self)@ == applied(dst@, old(self)@, sps@),
             final(self).budget() == old(self).budget(),
             final(self).ready(),
     {
+        let mut feed = dst.src_feed::<X>();
+        let dst_len = dst.len();
         let max_segments = self.max_segments;
         let mut p = self.take_parts();
         proof {
             lemma_vals_total::<E>(p.slabs@);
         }
-        copy_invert::<E, W, I, G, F, S, R>(
+        copy_invert::<E, W, I, G, F, S, SrcFeed<'a, E, W, I, X>>(
             &mut p.slabs,
             &mut p.index,
             &mut p.total_len,
@@ -632,7 +669,7 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> ColumnCore<E, W, I, G> {
             dst_len,
             f,
             g,
-            feed,
+            &mut feed,
         );
         if !G::dom_check(&p.slabs, p.total_len) {
             out_of_domain();

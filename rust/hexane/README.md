@@ -453,8 +453,9 @@ compiles them away. To check them, run `cargo verus verify -p hexane
   the destination's gaps back (as splices, a normalized list that applied
   to those gives what the splices give). From the column's invariant,
   each leaves the column holding the destination with the splices
-  applied, provided the source's run iterator, shifted to each range,
-  gives that range's items (the `RangeFeed` contract, trusted).
+  applied. The source's items come from a verified reader over the
+  source column, moved to each range with its own index (`copy::SrcFeed`),
+  each run's value written as its owned form.
 * The weights a column's index keeps: each weight function names a
   verified model (`weights`), whose relation the column invariant keeps
   between each slab and its weight: a plain column's weight is the slab's

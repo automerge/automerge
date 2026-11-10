@@ -19,22 +19,35 @@
 //! Both keep the column invariant, and both end: every loop has a
 //! measure, the feed's included.
 //!
-//! Trusted: the [`RangeFeed`] contract of the feed over a column's runs
-//! (`Ranged`, at the bottom of this file: that `Shiftable::shift` and the
-//! run iterator give exactly the source's items in the range), as well
-//! as what the cursor trusts.
+//! The source's feed is verified too ([`SrcFeed`]): a reader over the
+//! source column's slabs, moved to each range with its index, and each
+//! run's value written as its owned form (`ReadsAgree::ins`, verified for
+//! both encodings, through `rle::lift::Lift` for RLE). Trusted: what the
+//! cursor trusts.
 
 #![allow(clippy::too_many_arguments)]
 
 use crate::column::Slab;
 #[cfg(verus_keep_ghost)]
-use crate::cursor::{col_ok, lemma_vals_total, vals_of};
-use crate::cursor::{splice_feed, Cursor, Insertable, RunFeed, Slabs, Visitor, Weigh, WeightSink};
+use crate::cursor::{all_ok, col_ok, lemma_vals_own, lemma_vals_total, slab_lens, vals_of};
+use crate::cursor::{
+    splice_feed, Cursor, Insertable, ReadsAgree, RunFeed, Slabs, Visitor, Weigh, WeightSink,
+};
+#[cfg(verus_keep_ghost)]
+use crate::fenwick::sum;
+#[cfg(verus_keep_ghost)]
+use crate::index::wlens;
 use crate::index::IndexOps;
+#[cfg(verus_keep_ghost)]
+use crate::iter_core::Decode;
+#[cfg(verus_keep_ghost)]
+use crate::iter_core::{find_ok, vals_of as iter_vals_of};
+use crate::iter_core::{Decoders, ICore};
 #[cfg(verus_keep_ghost)]
 use crate::splices::{applied, copied, cut, end_of, kept, normal, produced, ranges_in, removed};
 use crate::splices::{Cuts, Gaps};
 use crate::Splice;
+use std::marker::PhantomData;
 use std::ops::Range;
 use vstd::prelude::*;
 
@@ -44,6 +57,9 @@ verus! {
 /// source's items in it, in runs, then `None`. It moves only forwards.
 pub(crate) trait RangeFeed<E: Slabs> {
     type X: Insertable<E>;
+
+    /// The feed's own invariant, which it keeps.
+    spec fn inv(&self) -> bool;
 
     /// The source's items.
     spec fn src(&self) -> Seq<E::V>;
@@ -55,15 +71,20 @@ pub(crate) trait RangeFeed<E: Slabs> {
 
     fn shift(&mut self, range: Range<usize>)
         requires
+            old(self).inv(),
             old(self).at() <= range.start <= range.end <= old(self).src().len(),
         ensures
+            final(self).inv(),
             final(self).src() == old(self).src(),
             final(self).at() == range.start,
             final(self).end() == range.end,
     ;
 
     fn next_run(&mut self) -> (r: Option<(Self::X, usize)>)
+        requires
+            old(self).inv(),
         ensures
+            final(self).inv(),
             final(self).src() == old(self).src(),
             final(self).end() == old(self).end(),
             match r {
@@ -126,8 +147,10 @@ fn insert_range<E: Slabs, R: RangeFeed<E>>(
         old(cur).wf(slabs@),
         crate::cursor::all_ok::<E>(slabs@),
         max_segments >= 2,
+        old(feed).inv(),
         0 <= old(feed).at() <= old(feed).end() <= old(feed).src().len(),
     ensures
+        final(feed).inv(),
         final(cur).wf(slabs@),
         final(cur).o == old(cur).o,
         final(cur).orig == old(cur).orig,
@@ -154,11 +177,13 @@ fn insert_range<E: Slabs, R: RangeFeed<E>>(
             cur.remaining == old(cur).remaining,
             cur.slab == old(cur).slab,
             cur.in_slab == old(cur).in_slab,
+            feed.inv(),
             feed.src() == src,
             feed.end() == e0,
             0 <= a0 <= feed.at() <= e0 <= src.len(),
             cur.p@ == p0 + src.subrange(a0, feed.at()),
         ensures
+            feed.inv(),
             cur.wf(slabs@),
             cur.o == old(cur).o,
             cur.orig == old(cur).orig,
@@ -190,6 +215,8 @@ fn insert_range<E: Slabs, R: RangeFeed<E>>(
 /// `copy_ranges`, directly: one cursor over the destination applies the
 /// normalized splices `sps` in turn, each range's items from `feed`. The
 /// column becomes `applied(dst, src, sps)`.
+#[verifier::spinoff_prover]
+#[verifier::rlimit(30)]
 #[inline(always)]
 pub(crate) fn copy_direct<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>, F: Visitor<E>, S: WeightSink<W>, R: RangeFeed<E>>(
     slabs: &mut Vec<Slab<E::Tail>>,
@@ -206,6 +233,7 @@ pub(crate) fn copy_direct<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>, F: Visito
         col_ok::<E, W, I, G>(old(slabs)@, *old(index), *old(total_len), max_segments),
         *old(total_len) + 3 <= usize::MAX,
         normal(sps@, old(feed).src().len() as int, *old(total_len) as int),
+        old(feed).inv(),
         old(feed).at() == 0,
     ensures
         col_ok::<E, W, I, G>(final(slabs)@, *final(index), *final(total_len), max_segments),
@@ -231,6 +259,7 @@ pub(crate) fn copy_direct<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>, F: Visito
             normal(sps@, src.len() as int, dst.len() as int),
             cur.orig == end_of(sps@.take(k as int)),
             cur.p@ == produced(dst, src, sps@.take(k as int)),
+            feed.inv(),
             feed.src() == src,
             k == 0 ==> feed.at() == 0,
             k > 0 ==> feed.at() == sps@[k - 1].range.end,
@@ -371,6 +400,7 @@ fn put_gaps<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>, F: Visitor<E>, R: Range
         *old(total_len) + 3 <= usize::MAX,
         normal(sps@, src.len() as int, dst_len as int),
         vals_of::<E>(old(slabs)@) == kept(src, sps@),
+        old(feed).inv(),
         old(feed).src().len() == dst_len,
         old(feed).at() == 0,
     ensures
@@ -403,6 +433,7 @@ fn put_gaps<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>, F: Visitor<E>, R: Range
             cur.orig == end_of(gaps.gaps@),
             cur.p@ == produced(k, dst, gaps.gaps@),
             normal(gaps.gaps@, dst.len() as int, k.len() as int),
+            feed.inv(),
             feed.src() == dst,
             gaps.gaps@.len() == 0 ==> feed.at() == 0,
             gaps.gaps@.len() > 0 ==> feed.at() == gaps.gaps@.last().range.end,
@@ -477,6 +508,7 @@ pub(crate) fn copy_invert<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>, F: Visito
         col_ok::<E, W, I, G>(old(slabs)@, *old(index), *old(total_len), max_segments),
         *old(total_len) + 3 <= usize::MAX,
         normal(sps@, *old(total_len) as int, dst_len as int),
+        old(feed).inv(),
         old(feed).src().len() == dst_len,
         old(feed).at() == 0,
     ensures
@@ -492,62 +524,135 @@ pub(crate) fn copy_invert<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>, F: Visito
     put_gaps::<E, W, I, G, F, R>(slabs, index, total_len, max_segments, counter, sps, dst_len, f, feed, Ghost(src));
 }
 
-} // verus!
-
-// ── The source feed ─────────────────────────────────────────────────────────
-//
-// Outside `verus!`, so Verus takes it on trust; its spec items exist only
-// when Verus compiles the crate. A column's run iterator, shifted to each
-// range in turn, hands each run to the rebuild as an `Inserting`.
-
-use crate::cursor::Inserting;
-use crate::edit::SlabEdit;
-use crate::encoding::ColumnEncoding;
-use crate::shift::Shiftable;
-use crate::{AsColumnRef, Run};
-use std::marker::PhantomData;
-
-/// A column's runs, a range at a time, as the [`RangeFeed`] of encoding
-/// `E`'s slab model: [`Shiftable::shift`] to the range, then its runs.
-pub(crate) struct Ranged<E, It>(It, PhantomData<fn() -> E>);
-
-impl<E, It> Ranged<E, It> {
-    #[inline(always)]
-    pub(crate) fn new(it: It) -> Self {
-        Ranged(it, PhantomData)
-    }
+/// A column's items, a range at a time, as the [`RangeFeed`] of its own
+/// edit model: an iterator core over its slabs, moved to each range with
+/// its index, each run's value written as its owned form
+/// (`ReadsAgree::ins`).
+pub(crate) struct SrcFeed<'a, E: Slabs, W, I: IndexOps<W>, X: Decoders<'a, Tail = E::Tail>> {
+    pub(crate) slabs: &'a [Slab<E::Tail>],
+    pub(crate) index: &'a I,
+    pub(crate) core: ICore<X::D>,
+    /// where the range shifted to ends
+    pub(crate) end: usize,
+    pub(crate) _p: PhantomData<(E, W)>,
 }
 
-impl<
-        E: SlabEdit,
-        V: AsColumnRef<<E as ColumnEncoding>::Value>,
-        It: Iterator<Item = Run<V>> + Shiftable,
-    > RangeFeed<<E as SlabEdit>::Model> for Ranged<E, It>
-{
-    type X = Inserting<E, V>;
+impl<'a, E, W, I: IndexOps<W>, X> RangeFeed<E> for SrcFeed<'a, E, W, I, X> where
+    E: ReadsAgree<'a, X>,
+    X: Decoders<'a, Tail = E::Tail>,
+ {
+    type X = <E as ReadsAgree<'a, X>>::Ins;
 
-    #[cfg(verus_keep_ghost)]
-    fn src(&self) -> Seq<<<E as SlabEdit>::Model as Slabs>::V> {
-        unimplemented!()
+    /// A reader over the column's slabs, its window inside them, and
+    /// their index.
+    open spec fn inv(&self) -> bool {
+        &&& self.core.wf::<X>(self.slabs@)
+        &&& self.core.pos <= self.end <= iter_vals_of::<X>(self.slabs@).len()
+        &&& self.core.out::<X>(self.slabs@) == iter_vals_of::<X>(self.slabs@).subrange(self.core.pos as int, self.end as int)
+        &&& all_ok::<E>(self.slabs@)
+        &&& self.index.ok()
+        &&& wlens::<W, I>(self.index.ws()) == slab_lens(self.slabs@)
     }
 
-    #[cfg(verus_keep_ghost)]
-    fn at(&self) -> int {
-        unimplemented!()
+    open spec fn src(&self) -> Seq<E::V> {
+        vals_of::<E>(self.slabs@)
     }
 
-    #[cfg(verus_keep_ghost)]
-    fn end(&self) -> int {
-        unimplemented!()
+    open spec fn at(&self) -> int {
+        self.core.pos as int
+    }
+
+    open spec fn end(&self) -> int {
+        self.end as int
     }
 
     #[inline(always)]
     fn shift(&mut self, range: Range<usize>) {
-        self.0.shift(range)
+        let ghost s = self.slabs@;
+        let ghost v = iter_vals_of::<X>(s);
+        proof {
+            lemma_vals_own::<E, X>(s);
+        }
+        self.core.set_max::<X>(Ghost(self.slabs), range.end);
+        proof {
+            assert(self.core.out::<X>(s) =~= v.subrange(self.core.pos as int, range.end as int));
+        }
+        if range.start > self.core.pos {
+            let index = self.index;
+            let slabs = self.slabs;
+            let find = |t: usize| -> (r: (usize, usize))
+                requires
+                    index.ok(),
+                    wlens::<W, I>(index.ws()) == slab_lens(slabs@),
+                ensures
+                    find_ok(slabs@, t, r),
+                {
+                    let r = index.ix_find(t);
+                    proof {
+                        assert(index.ws().map_values(|w: W| I::wlen(w)) =~= wlens::<W, I>(index.ws()));
+                    }
+                    // past the slabs, the whole position lies beyond them
+                    if r.0 >= slabs.len() {
+                        (slabs.len(), 0)
+                    } else {
+                        r
+                    }
+                };
+            let start_of = |i: usize| -> (n: usize)
+                requires
+                    index.ok(),
+                    wlens::<W, I>(index.ws()) == slab_lens(slabs@),
+                    i <= slabs@.len(),
+                ensures
+                    n == sum(slab_lens(slabs@), 0, i as int),
+                {
+                    let n = index.ix_before(i);
+                    proof {
+                        assert(index.ws().map_values(|w: W| I::wlen(w)) =~= wlens::<W, I>(index.ws()));
+                    }
+                    n
+                };
+            let ghost p0 = self.core.pos as int;
+            let n = range.start - self.core.pos - 1;
+            let _ = self.core.nth::<X, _, _>(slabs, n, &find, &start_of);
+            proof {
+                assert(v.subrange(p0, range.end as int).skip(n + 1) =~= v.subrange(range.start as int, range.end as int));
+            }
+        }
+        self.end = range.end;
     }
 
     #[inline(always)]
-    fn next_run(&mut self) -> Option<(Inserting<E, V>, usize)> {
-        self.0.next().map(|r| (Inserting::new(r.value), r.count))
+    fn next_run(&mut self) -> (r: Option<(Self::X, usize)>) {
+        let ghost s = self.slabs@;
+        let ghost v = iter_vals_of::<X>(s);
+        let ghost (p0, e) = (self.core.pos as int, self.end as int);
+        proof {
+            lemma_vals_own::<E, X>(s);
+        }
+        match self.core.next_run_max::<X>(self.slabs, usize::MAX) {
+            Some(run) => {
+                let x = <E as ReadsAgree<'a, X>>::ins(run.value);
+                proof {
+                    let n = run.count as int;
+                    let o = v.subrange(p0, e);
+                    assert(o.skip(n) =~= v.subrange(p0 + n, e));
+                    let f = |w: <X::D as Decode>::Item| E::own(w);
+                    assert(vals_of::<E>(s).subrange(p0, p0 + n) =~= o.take(n).map_values(f));
+                    assert(o.take(n).map_values(f) =~= Seq::new(n as nat, |_i: int| x.val()));
+                }
+                Some((x, run.count))
+            },
+            None => {
+                // nothing left in the range: the reader's window is empty
+                self.core.set_max::<X>(Ghost(self.slabs), self.end);
+                proof {
+                    assert(self.core.out::<X>(s) =~= v.subrange(p0, e));
+                }
+                None
+            },
+        }
     }
 }
+
+} // verus!

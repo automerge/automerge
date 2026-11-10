@@ -253,9 +253,18 @@ pub(crate) trait WeightSink<W> {
 /// when it is, and holding as many values. Each encoding's two models are
 /// the same parse of a slab's bytes, read borrowed and owned
 /// (`rle::lift`), so this is proved of both.
-pub(crate) trait ReadsAgree<'a, X: crate::iter_core::Decoders<'a, Tail = <Self as Slabs>::Tail>>: Slabs {
+pub(crate) trait ReadsAgree<'a, X: crate::iter_core::Decoders<'a, Tail = <Self as Slabs>::Tail>>: Slabs + Sized {
     /// A value read, owned: as the edit model has it.
     spec fn own(v: <X::D as crate::iter_core::Decode>::Item) -> Self::V;
+
+    /// A value read, to insert into a rebuild.
+    type Ins: Insertable<Self>;
+
+    /// What inserting `v` writes: its owned form.
+    fn ins(v: <X::D as crate::iter_core::Decode>::Item) -> (x: Self::Ins)
+        ensures
+            x.val() == Self::own(v),
+    ;
 
     proof fn lemma_reads(s: Slab<Self::Tail>)
         requires

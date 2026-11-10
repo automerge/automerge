@@ -902,6 +902,44 @@ impl<'a, L, O> crate::cursor::ReadsAgree<'a, crate::rle::dec::RleReads<O>> for R
         let x = slab_values::<O>(data);
         assert(lift_seq::<L>(x) =~= x.map_values(|v: <O as RleOps<'a>>::V| <L as Lift<'a>>::lift(v)));
     }
+
+    type Ins = ReadIns<'a, L>;
+
+    #[inline(always)]
+    fn ins(v: <O as RleOps<'a>>::V) -> (x: ReadIns<'a, L>) {
+        ReadIns { v }
+    }
+}
+
+/// A value read from a column, to insert into a rebuild of the same
+/// type: it writes the value's owned copy (`Lift::own`).
+pub struct ReadIns<'a, L: WriteOps<'a>> {
+    pub(crate) v: VOf<'a, L>,
+}
+
+impl<'a, L> crate::cursor::Insertable<RleModel<L>> for ReadIns<'a, L>
+    where L: for<'s> Lift<'s, W = L>
+{
+    open spec fn val(&self) -> VOf<'static, L> {
+        <L as Lift<'a>>::lift(self.v)
+    }
+
+    #[inline(always)]
+    fn insert_into(self, e: &mut RleRebuild<L>, n: usize) {
+        let c = <L as WriteOps<'a>>::cow_ref(self.v);
+        let o = <L as Lift<'a>>::own(c);
+        // a null only where the column can hold one: never, for a value
+        // read from a column of the same type
+        if <L as WriteOps<'static>>::cow_is_null(&o)
+            && !<<L as WriteOps<'static>>::R as RleOps<'static>>::nullable_exec() {
+            null_in_column(Ghost(true));
+        }
+        proof {
+            e.e.lemma_used_le();
+            e.e.lemma_room(n as nat);
+        }
+        e.e.insert_cow(o, n);
+    }
 }
 
 impl<L> Slabs for RleModel<L> where L: for<'s> Lift<'s, W = L> {
