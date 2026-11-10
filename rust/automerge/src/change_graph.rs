@@ -24,6 +24,8 @@ use crate::{
 
 mod boundary_memo;
 use boundary_memo::BoundaryMemo;
+mod fragment;
+pub(crate) use fragment::{FragmentCache, FragmentReadiness};
 
 /// The graph of changes
 ///
@@ -52,9 +54,8 @@ pub(crate) struct ChangeGraph {
     clock_cache: HashMap<NodeIdx, SeqClock>,
     /// Each actor's changes, in `seq` order.
     seq_index: ActorIndexed<Vec<NodeIdx>>,
-    fragment_top: SeqClock,
-    fragments: Vec<FragmentNode>,
     boundary_memo: BoundaryMemo,
+    fragment_cache: FragmentCache,
 }
 
 pub(crate) struct ChangeGraphCols(ChangeGraph);
@@ -112,9 +113,8 @@ impl ChangeGraph {
             heads: BTreeSet::new(),
             clock_cache: HashMap::new(),
             seq_index: ActorIndexed::new(actors),
-            fragments: vec![],
-            fragment_top: SeqClock::new(actors),
             boundary_memo: BoundaryMemo::default(),
+            fragment_cache: FragmentCache::new(actors),
         }
     }
 
@@ -187,10 +187,7 @@ impl ChangeGraph {
         for clock in self.clock_cache.values_mut() {
             clock.shift_actor(shift)
         }
-        for f in &mut self.fragments {
-            f.clock.shift_actor(shift)
-        }
-        self.fragment_top.shift_actor(shift);
+        self.fragment_cache.insert_actor(shift);
         self.seq_index.insert(shift, vec![]);
     }
 
@@ -208,10 +205,7 @@ impl ChangeGraph {
         for clock in &mut self.clock_cache.values_mut() {
             clock.remove_actor(removal)
         }
-        for fragment in &mut self.fragments {
-            fragment.clock.remove_actor(removal)
-        }
-        self.fragment_top.remove_actor(removal);
+        self.fragment_cache.remove_actor(removal);
     }
 
     pub(crate) fn len(&self) -> usize {
@@ -594,11 +588,7 @@ impl ChangeGraph {
         if head.fragment_level() == 0 {
             self.loose_commit(n)
         } else {
-            assert!(self.fragments.is_sorted_by(|a, b| a.head.0 < b.head.0));
-            self.fragments
-                .binary_search_by_key(&n.0, |f| f.head.0)
-                .ok()
-                .map(|i| self.fragments[i].export(self))
+            self.fragment_cache.get_fragment(self, head)
         }
     }
 
@@ -623,7 +613,7 @@ impl ChangeGraph {
         heads: &'a [ChangeHash],
         levels: R,
     ) -> impl Iterator<Item = Fragment> + 'a {
-        self.fragments_filtered(heads, levels, |_| true)
+        self.fragment_cache.fragments(self, heads, levels)
     }
 
     pub(crate) fn fragments_filtered<'a, R: RangeBounds<usize> + 'a>(
@@ -632,29 +622,8 @@ impl ChangeGraph {
         levels: R,
         include_head: impl Fn(&ChangeHash) -> bool + Copy + 'a,
     ) -> impl Iterator<Item = Fragment> + 'a {
-        let heads = if levels.contains(&0) { heads } else { &[] };
-        self.loose_fragments(heads, include_head).chain(
-            self.fragments
-                .iter()
-                .rev()
-                .filter(move |f| levels.contains(&self.hashes[f.head.0 as usize].fragment_level()))
-                .filter(move |f| include_head(&self.hashes[f.head.0 as usize]))
-                .map(|f| f.export(self)),
-        )
-    }
-
-    fn loose_fragments<'a>(
-        &'a self,
-        heads: &'a [ChangeHash],
-        include_head: impl Fn(&ChangeHash) -> bool + Copy + 'a,
-    ) -> impl Iterator<Item = Fragment> + 'a {
-        let nodes = heads
-            .iter()
-            .filter(|h| h.fragment_level() == 0)
-            .filter_map(|h| self.nodes_by_hash.get(h).copied());
-        self.bfs_until_clock(nodes, &self.fragment_top)
-            .filter(move |n| include_head(&self.hashes[n.0 as usize]))
-            .filter_map(|n| self.loose_commit(n))
+        self.fragment_cache
+            .fragments_matching(self, heads, levels, move |head| include_head(&head))
     }
 
     fn fragment_content<'a>(
@@ -741,19 +710,8 @@ impl ChangeGraph {
             return;
         }
         let deps = self.fragment_boundary(head, level);
-        let mut supercede = vec![];
-        let clock = self.calculate_clock([head].into());
-        // Compact the covering cache independently of boundary discovery.
-        for (i, f) in self.fragments.iter().enumerate().rev() {
-            if clock.covers(&f.clock) && self.hashes[f.head.0 as usize].fragment_level() < level {
-                supercede.push(i);
-            }
-        }
-        for i in supercede {
-            self.fragments.remove(i);
-        }
-        SeqClock::merge(&mut self.fragment_top, &clock);
-        self.fragments.push(FragmentNode { head, deps, clock });
+        let candidate = self.fragment_cache.candidate(self, head, deps);
+        self.fragment_cache.install(candidate);
     }
 
     pub(crate) fn add_change(
@@ -807,7 +765,7 @@ impl ChangeGraph {
     }
 
     fn cache_clock(&mut self, node_idx: NodeIdx) -> SeqClock {
-        let mut clock = self.fragment_top.empty_like();
+        let mut clock = self.fragment_cache.empty_clock();
         let mut to_visit = BTreeSet::from([node_idx]);
 
         self.calculate_clock_inner(&mut clock, &mut to_visit, CACHE_STEP as usize * 2);
@@ -897,7 +855,7 @@ impl ChangeGraph {
     }
 
     fn calculate_clock(&self, mut to_visit: BTreeSet<NodeIdx>) -> SeqClock {
-        let mut clock = self.fragment_top.empty_like();
+        let mut clock = self.fragment_cache.empty_clock();
 
         self.calculate_clock_inner(&mut clock, &mut to_visit, usize::MAX);
 
@@ -1123,8 +1081,7 @@ impl ChangeGraphCols {
         let clock_cache = HashMap::default();
         let hashes = vec![];
         let nodes_by_hash = HashMap::new();
-        let fragments = vec![];
-        let fragment_top = SeqClock::new(actor_table);
+        let fragment_cache = FragmentCache::new(actor_table);
 
         Ok(ChangeGraphCols(ChangeGraph {
             edges,
@@ -1143,9 +1100,8 @@ impl ChangeGraphCols {
             nodes_by_hash,
             clock_cache,
             seq_index,
-            fragments,
-            fragment_top,
             boundary_memo: BoundaryMemo::default(),
+            fragment_cache,
         }))
     }
 }
@@ -1703,6 +1659,163 @@ mod tests {
         }
     }
 
+    /// Fix hardness without mining hashes. These cache-level tests mock eligible
+    /// evidence; document-level signing tests cover authors and verification.
+    fn readiness_graph(builder: &TestGraphBuilder, levels: &[usize]) -> ChangeGraph {
+        let mut graph = builder.build();
+        assert_eq!(graph.hashes.len(), levels.len());
+        let heads: Vec<_> = graph
+            .heads()
+            .map(|hash| graph.nodes_by_hash[&hash])
+            .collect();
+        graph.hashes = levels
+            .iter()
+            .enumerate()
+            .map(|(i, level)| {
+                let mut hash = ChangeHash([i as u8 + 1; 32]);
+                hash.0[..*level].fill(0);
+                hash
+            })
+            .collect();
+        graph.heads = heads
+            .into_iter()
+            .map(|node| graph.hashes[node.0 as usize])
+            .collect();
+        graph.nodes_by_hash = graph
+            .hashes
+            .iter()
+            .enumerate()
+            .map(|(n, hash)| (*hash, NodeIdx(n as u32)))
+            .collect();
+        graph.fragment_cache = FragmentCache::new(&builder.actors);
+        graph
+    }
+
+    #[test]
+    fn readiness_reconciliation_computes_only_new_fragment_requirements() {
+        let mut builder = TestGraphBuilder::new();
+        let actor = builder.actor();
+        let first = builder.change(&actor, 1, &[]);
+        let loose = builder.change(&actor, 1, &[first]);
+        builder.change(&actor, 1, &[loose]);
+        let mut graph = readiness_graph(&builder, &[1, 0, 1]);
+        let first = graph.hashes[0];
+        let next = graph.hashes[2];
+        graph.cache_fragment(NodeIdx(0));
+        let mut readiness = FragmentReadiness::new(&graph, |_| false);
+
+        graph.cache_fragment(NodeIdx(1));
+        readiness.reconcile(&graph, |_| panic!("surviving fragment was recomputed"));
+        assert!(!readiness.is_ready(&first));
+        readiness.signature_added(&first);
+        assert!(readiness.is_ready(&first));
+
+        graph.cache_fragment(NodeIdx(2));
+        let mut checked = vec![];
+        readiness.reconcile(&graph, |hash| {
+            checked.push(*hash);
+            false
+        });
+        assert_eq!(checked, [next]);
+        assert!(readiness.is_ready(&first));
+        assert!(!readiness.is_ready(&next));
+        assert_eq!(
+            readiness,
+            FragmentReadiness::new(&graph, |hash| *hash == first)
+        );
+
+        readiness.signature_added(&next);
+        readiness.reconcile(&graph, |_| panic!("ready fragment was recomputed"));
+        assert_eq!(readiness, FragmentReadiness::new(&graph, |_| true));
+    }
+
+    #[test]
+    fn readiness_reconciliation_cleans_superseded_subscriptions_and_matches_rebuilds() {
+        let mut builder = TestGraphBuilder::new();
+        let a = builder.actor();
+        let b = builder.actor();
+        let c = builder.actor();
+        let d = builder.actor();
+        let root = builder.change(&a, 1, &[]);
+        let left = builder.change(&b, 1, &[root]);
+        let right = builder.change(&c, 1, &[root]);
+        let harder = builder.change(&b, 1, &[left]);
+        let joined = builder.change(&a, 1, &[harder, right]);
+        builder.change(&d, 1, &[joined]);
+        let empty = readiness_graph(&builder, &[0, 1, 1, 2, 2, 3]);
+
+        // Cover ready, partially attested, and entirely missing retired fragments.
+        // The branches share root subscriptions, then supersession makes the root
+        // unnecessary. Compare both directions of the index with a fresh rebuild.
+        for mask in 0..1 << empty.hashes.len() {
+            let mut graph = empty.clone();
+            let mut signed = HashSet::new();
+            let mut readiness = FragmentReadiness::new(&graph, |_| false);
+            for n in 0..graph.hashes.len() {
+                let hash = graph.hashes[n];
+                // Evidence can predate construction of a fragment's requirements.
+                if mask & (1 << n) != 0 {
+                    signed.insert(hash);
+                    readiness.signature_added(&hash);
+                }
+                graph.cache_fragment(NodeIdx(n as u32));
+                readiness.reconcile(&graph, |hash| signed.contains(hash));
+                assert_eq!(
+                    readiness,
+                    FragmentReadiness::new(&graph, |hash| signed.contains(hash)),
+                    "mask {mask}, node {n}",
+                );
+            }
+            // Obsolete subscriptions must be gone, not just ignored on delivery.
+            // Remaining signatures (and duplicates) still update the live index.
+            for hash in &graph.hashes {
+                signed.insert(*hash);
+                readiness.signature_added(hash);
+                readiness.signature_added(hash);
+                assert_eq!(
+                    readiness,
+                    FragmentReadiness::new(&graph, |hash| signed.contains(hash)),
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn attestation_readiness_does_not_change_harder_fragment_membership() {
+        let mut builder = TestGraphBuilder::new();
+        let a = builder.actor();
+        let b = builder.actor();
+        let a1 = builder.change(&a, 1, &[]);
+        let b1 = builder.change(&b, 1, &[a1]);
+        builder.change(&a, 1, &[b1]);
+        let mut graph = readiness_graph(&builder, &[1, 0, 2]);
+        let a1 = graph.hashes[0];
+        let b1 = graph.hashes[1];
+        let a2 = graph.hashes[2];
+        graph.cache_fragments();
+        let canonical = graph.get_fragment(a2).unwrap();
+        assert_eq!(canonical.level, 2);
+        assert_eq!(canonical.members.len(), 3);
+        assert_eq!(canonical.checkpoints, [a1]);
+
+        let mut readiness = FragmentReadiness::new(&graph, |hash| *hash == a2);
+        assert!(!readiness.is_ready(&a2));
+        assert_eq!(readiness.fragments(&graph, &[a2], ..).count(), 0);
+        // Missing B's frontier hides the fixed fragment; it does not undo
+        // graph-derived supersession or reclassify members as loose changes.
+        assert!(graph.get_fragment(a1).is_none());
+        assert_eq!(graph.get_fragment(a2), Some(canonical.clone()));
+        assert_eq!(graph.fragments(&[a2], 0..=0).count(), 0);
+
+        // a2 attests a1 inside the harder fragment, so no direct a1 evidence
+        // is needed. B's signature makes exactly that same descriptor ready.
+        readiness.signature_added(&b1);
+        let fragments: Vec<_> = readiness.fragments(&graph, &[a2], ..).collect();
+        assert_eq!(fragments, [canonical]);
+        readiness.signature_added(&b1); // idempotent, no readiness underflow
+        assert!(readiness.is_ready(&a2));
+    }
+
     #[test]
     fn fragments_cover_all_changes() {
         // Create a long linear chain — with ~1000 changes, we expect several
@@ -2201,39 +2314,6 @@ impl<'a> Iterator for ChangeIter<'a> {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
-struct FragmentNode {
-    head: NodeIdx,
-    deps: Vec<NodeIdx>,
-    clock: SeqClock,
-}
-
-impl FragmentNode {
-    fn export(&self, graph: &ChangeGraph) -> Fragment {
-        let head = graph.hashes[self.head.0 as usize];
-        let level = head.fragment_level();
-        let boundary = self
-            .deps
-            .iter()
-            .map(|d| graph.hashes[d.0 as usize])
-            .collect();
-        let clock = graph.calculate_clock(self.deps.clone().into_iter().collect());
-        let members: Vec<_> = graph.fragment_content(self.head, &clock).collect();
-        let checkpoints = members
-            .iter()
-            .copied()
-            .filter(|h| *h != head && h.fragment_level() > 0)
-            .collect();
-        Fragment {
-            head,
-            level,
-            boundary,
-            checkpoints,
-            members,
-        }
-    }
-}
-
 /// EXPERIMENTAL: A section of the change graph identified by its head hash.
 ///
 /// This is an experimental API, it may change or be removed without warning.
@@ -2241,6 +2321,7 @@ impl FragmentNode {
 #[derive(Debug, PartialEq, Clone)]
 pub struct Fragment {
     pub head: ChangeHash,
+    /// Hash-hardness level of the head; zero for loose changes.
     pub level: usize,
     /// The first ancestors at or above this fragment's level on each path.
     /// They need not remain standalone heads in the covering fragment cache.

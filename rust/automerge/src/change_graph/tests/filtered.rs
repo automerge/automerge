@@ -186,6 +186,29 @@ fn head_filter_is_not_invoked_for_candidates_outside_the_level_range() {
 }
 
 #[test]
+fn readiness_filters_cached_fragments_but_preserves_loose_changes() {
+    let mut doc = Automerge::new().with_actor(ActorId::from([1]));
+    let cached = at_level(&mut doc, 1, 1);
+    at_level(&mut doc, 2, 0);
+    let tip = at_level(&mut doc, 3, 0);
+    let heads = [tip];
+    let graph = &doc.change_graph;
+    let mut readiness = crate::change_graph::FragmentReadiness::new(graph, |_| false);
+
+    assert_eq!(
+        readiness.fragments(graph, &heads, ..).collect::<Vec<_>>(),
+        graph.fragments(&heads, ..1).collect::<Vec<_>>()
+    );
+    assert_eq!(readiness.fragments(graph, &heads, 1..).count(), 0);
+
+    readiness.signature_added(&cached);
+    assert_eq!(
+        readiness.fragments(graph, &heads, ..).collect::<Vec<_>>(),
+        graph.fragments(&heads, ..).collect::<Vec<_>>()
+    );
+}
+
+#[test]
 fn filtering_an_empty_graph_does_not_invoke_the_predicate() {
     let doc = Automerge::new();
     assert_eq!(
