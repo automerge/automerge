@@ -524,7 +524,14 @@ first and values outside the domain last.
   not part of the proof); `delta`, which is glue over the verified
   iterator; and the glue that drives the `DeltaEdit` cursor's verified
   arithmetic (`copy_ranges` uses it too): that what the cursor reports
-  carrying, deleting or jumping over is what it did. Its ledger starts
+  carrying, deleting or jumping over is what it did. More than that: an
+  advance can jump whole slabs and then carry more runs, and the ledger
+  hears of the jump only when the advance returns, so its ghost account
+  of the runs carried after a jump does not hold (`Ledger::carry`'s
+  precondition). At run time that is harmless: the running value is
+  read back from the index after the advance, and the stale one only
+  widens the span bound, which holds the original values anyway; the
+  delta edit fuzz exercises it. Its ledger starts
   in verified code (`ColumnCore::delta_ledger`: the value before the
   cursor, the bound on the column's values, and the column's own deltas
   as its ghost).
