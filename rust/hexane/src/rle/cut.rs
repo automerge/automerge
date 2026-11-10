@@ -573,13 +573,6 @@ proof fn lemma_opt_lit_bytes<'a, O: RleOps<'a>>(vs: Seq<O::V>)
     }
 }
 
-/// No literal among groups whose last literal has no values.
-proof fn lemma_no_last_lit<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>)
-    requires canonical::<O>(gs), last_lit_len(gs) == 0, gs.len() > 0,
-    ensures !(gs.last() is Lit),
-{
-    assert(group_ok::<O>(gs[gs.len() - 1]));
-}
 
 /// The slab being cut, as bytes: its input bytes with a header before
 /// the piece, and the open literal's header for the values read.

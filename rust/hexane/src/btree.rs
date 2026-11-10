@@ -125,9 +125,6 @@ pub trait SlabAggregate: Clone + Default + std::fmt::Debug + Sized {
             Self::spec_merge(Self::spec_empty(), a) == a,
             Self::spec_empty().spec_len() == 0;
 
-    /// Every aggregate's item count fits a `usize`.
-    proof fn lemma_len_bound(a: Self)
-        ensures a.spec_len() <= usize::MAX;
 
     /// Item counts add up.
     proof fn lemma_merge_len(a: Self, b: Self)
@@ -251,8 +248,6 @@ impl SlabAggregate for SlabAgg {
     proof fn lemma_empty(a: Self) {
     }
 
-    proof fn lemma_len_bound(a: Self) {
-    }
 
     proof fn lemma_merge_len(a: Self, b: Self) {
     }
@@ -302,8 +297,6 @@ impl SlabAggregate for usize {
     proof fn lemma_empty(a: Self) {
     }
 
-    proof fn lemma_len_bound(a: Self) {
-    }
 
     proof fn lemma_merge_len(a: Self, b: Self) {
     }
@@ -395,8 +388,6 @@ where
         axiom_prefix_add(a.prefix, a.prefix, a.prefix);
     }
 
-    proof fn lemma_len_bound(a: Self) {
-    }
 
     proof fn lemma_merge_len(a: Self, b: Self) {
     }
@@ -743,15 +734,6 @@ pub proof fn lemma_sum_len_sub<A: SlabAggregate>(s: Seq<A>, a: int, b: int)
     lemma_sum_len_concat(s.subrange(0, a) + s.subrange(a, b), s.subrange(b, s.len() as int));
 }
 
-/// The middle of a valid sequence is valid.
-pub proof fn lemma_valid_mid<A: SlabAggregate>(l: Seq<A>, m: Seq<A>, r: Seq<A>)
-    requires valid(l + m + r),
-    ensures valid(m),
-{
-    let s = l + m + r;
-    assert(s.subrange(l.len() as int, (l.len() + m.len()) as int) =~= m);
-    lemma_valid_subrange(s, l.len() as int, (l.len() + m.len()) as int);
-}
 
 pub proof fn lemma_valid_empty<A: SlabAggregate>()
     ensures valid(Seq::<A>::empty()),

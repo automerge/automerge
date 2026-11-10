@@ -223,20 +223,6 @@ pub(crate) struct Normalize {
     pub(crate) src: Ghost<Seq<int>>,
 }
 
-/// What a splice copies, clamped: the same as the splice's own range.
-proof fn lemma_clamp<V>(src: Seq<V>, sp: Splice, c: Splice)
-    requires
-        c.range.start == min_i(sp.range.start as int, src.len() as int),
-        c.range.end == if min_i(sp.range.end as int, src.len() as int) > c.range.start {
-            min_i(sp.range.end as int, src.len() as int)
-        } else {
-            c.range.start as int
-        },
-    ensures
-        copied(src, c) == copied(src, sp),
-        c.range.start <= c.range.end <= src.len(),
-{
-}
 
 proof fn lemma_in_order_push(seen: Seq<Splice>, sp: Splice, dst_len: int)
     requires
@@ -341,6 +327,7 @@ proof fn lemma_add_normal(out: Seq<Splice>, c: Splice, src_len: int, dst_len: in
 }
 
 /// Merging a splice into the last one, which it touches in both columns.
+#[verifier::spinoff_prover]
 proof fn lemma_merge<V>(dst: Seq<V>, src: Seq<V>, o: Seq<Splice>, last: Splice, seen: Seq<Splice>, sp: Splice, c: Splice, m: Splice, src_len: int, dst_len: int)
     requires
         produced(dst, src, seen) == produced(dst, src, o.push(last)) + dst.subrange(end_of(o.push(last)), end_of(seen)),

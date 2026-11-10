@@ -189,15 +189,6 @@ pub(crate) proof fn lemma_slab<'a, O: RleOps<'a>>(data: Seq<u8>)
     lemma_groups_values_concat(gs, Seq::empty(), O::null());
 }
 
-/// A string that starts with `x` at offset `p`.
-proof fn lemma_prefix_at(s: Seq<u8>, p: int, x: Seq<u8>, rest: Seq<u8>)
-    requires 0 <= p <= s.len(), s.skip(p) == x + rest,
-    ensures x.is_prefix_of(s.skip(p)), p + x.len() <= s.len(), s.skip(p + x.len()) == rest,
-{
-    assert((x + rest).take(x.len() as int) =~= x);
-    assert(s.skip(p).skip(x.len() as int) =~= s.skip(p + x.len()));
-    assert((x + rest).skip(x.len() as int) =~= rest);
-}
 
 pub(crate) proof fn lemma_skip_skip<T>(s: Seq<T>, a: int, b: int)
     requires 0 <= a, 0 <= b, a + b <= s.len(),
