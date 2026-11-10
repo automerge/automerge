@@ -1290,7 +1290,7 @@ impl<D: Decode> ICore<D> {
     /// across slab boundaries.
     #[allow(clippy::question_mark)] // `?` puts the merge loop's proof over its rlimit
     #[verifier::spinoff_prover]
-    #[inline]
+    #[inline(always)]
     pub(crate) fn next_run_max<'a, X: Decoders<'a, D = D>>(&mut self, slabs: &'a [Slab<X::Tail>], max: usize) -> (r: Option<Run<D::Item>>)
         requires
             old(self).wf::<X>(slabs@),
