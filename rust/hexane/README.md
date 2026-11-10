@@ -335,12 +335,21 @@ compiles them away. To check them, run `cargo verus verify -p hexane
   iterator over a range (every column type's `iter`/`iter_range`, and a
   resumed one) gives exactly the values there, through the read model,
   which is proved to agree with the edit model (for RLE columns, up to
-  owning a borrowed value, `Lift`). The trusted
-  exceptions are what a new column is built from (slabs and their
-  weights, from the verified loaders, fills and encoders), a clone, and
-  the parts the public `Edit` cursor hands back when dropped (each of its
-  steps keeps them a column; their chaining is glue). An `Edit` dropped
-  by a panic hands nothing back, and the column panics when used again.
+  owning a borrowed value, `Lift`). A load
+  builds its column in verified code, and the public `Edit` cursor
+  (`edit_core::EditCore`) takes the column's parts and, dropped, hands
+  them back checked to be in the domain (a `DeltaEdit` checks that more
+  cheaply first), in verified code too: each of its steps requires and
+  keeps the cursor's invariant and is specified by what it does to the
+  values (carrying, inserting or dropping them, or reading the next one),
+  and the column it hands back holds exactly the values its steps
+  describe. The trusted exceptions are that the
+  slabs a fill or an encoder hands a new column are well-formed (as
+  those verified functions promise; the column weighs them and checks a
+  delta column's domain itself), that the `Edit` glue chains its steps
+  (and uses none after one that panicked, if the panic is caught), and a
+  clone. An `Edit` dropped by a panic hands nothing back, and the column
+  panics when used again.
 * A delta column's domain, in its type invariant: every step between two
   of its running sums fits `i64` (so it holds at most `i64::MAX` items,
   and its values lie within a range less than 2^63 wide). So each slab's

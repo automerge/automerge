@@ -1482,6 +1482,9 @@ where
             let ledger = &self.ledger;
             let (slabs, _, len) = self.inner.parts();
             check_span::<T, C>(slabs, len, || ledger.fits(T::MIN_I64, T::MAX_I64));
+            // which puts the column in its domain, for the inner cursor's
+            // end (`EditCore::end_in_domain`'s precondition)
+            self.inner.end_in_domain();
         }
     }
 }
@@ -1554,7 +1557,7 @@ impl DeltaRun {
 /// less than 2^63 wide (the [`DeltaValue`] domain contract, which `load`
 /// holds data to), and it holds at most `i64::MAX` items: then every step
 /// between two of its running sums fits `i64`, the column's invariant
-/// (`ColumnCore::restore`'s precondition, for [`DeltaEdit`]). `fits` says
+/// (`EditCore::end_in_domain`'s precondition, for [`DeltaEdit`]). `fits` says
 /// whether a bound on the values shows they do; only where it doesn't
 /// are they read (verified, `ddomain::slabs_fit`).
 fn check_span<T: DeltaValue, C: Codec>(

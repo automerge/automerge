@@ -3,12 +3,11 @@
 //! its slabs can be rebuilt in place.
 
 use crate::column::{Column, WeightFn};
-use crate::column_core::Parts;
-use crate::cursor::{Cursor, Feeding, Inserting, Slabs, Visiting};
+use crate::cursor::{Feeding, Inserting, Visiting};
+use crate::edit_core::EditCore;
 use crate::encoding::ColumnEncoding;
 use crate::index::ColumnIndex;
 use crate::{AsColumnRef, Codec, ColumnValueRef, Run};
-use vstd::prelude::Ghost;
 
 /// An encoding whose slabs a [`Column`] cursor can edit.
 // `Model`'s bound is the crate's own verified contract, which nothing
@@ -93,6 +92,9 @@ type Model<T, C> = <Enc<T, C> as SlabEdit>::Model;
 /// The column's weight function, for the cursor.
 type G<T, C, WF> = <WF as WeightFn<T, C>>::Model;
 
+/// The cursor's verified state over a column's parts.
+type Core<T, C, WF, Idx> = EditCore<Model<T, C>, <WF as WeightFn<T, C>>::Weight, Idx, G<T, C, WF>>;
+
 /// The default carry budget, in runs — an encoding states its own as
 /// [`SlabEdit::CARRY_BUDGET`].
 ///
@@ -122,9 +124,10 @@ pub(crate) const RUN_BUDGET: usize = 8;
 /// The cursor's state and every move it makes are verified with Verus
 /// (`crate::cursor`): each operation keeps the column well-formed and
 /// does exactly what it says to its values, given the encodings' slab
-/// operations. This struct holds the column's parts while it edits them
-/// (taken out of its verified core, and put back when it is dropped),
-/// and the cursor's state.
+/// operations. This struct holds the column's parts while it edits them,
+/// with the cursor over them (`crate::edit_core::EditCore`), taken out of
+/// its verified core and handed back, in verified code too, when it is
+/// dropped.
 pub struct Edit<'a, T, C, WF, Idx>
 where
     T: ColumnValueRef,
@@ -134,11 +137,8 @@ where
     Idx: ColumnIndex<WF::Weight>,
 {
     col: &'a mut Column<T, C, WF, Idx>,
-    /// the column's parts while the cursor has them (`None` once handed
-    /// back)
-    parts: Option<Parts<crate::column::TailOf<T, C>, Idx>>,
-    max_segments: usize,
-    cur: Cursor<Model<T, C>>,
+    /// the column's parts while the cursor has them, and the cursor
+    core: Core<T, C, WF, Idx>,
 }
 
 impl<'a, T, C, WF, Idx> Edit<'a, T, C, WF, Idx>
@@ -149,33 +149,8 @@ where
     Idx: ColumnIndex<WF::Weight>,
 {
     pub(crate) fn new(col: &'a mut Column<T, C, WF, Idx>, at: usize) -> Self {
-        assert!(at <= col.len(), "edit_at out of bounds");
-        // verified (`ColumnCore::take_parts`): a column, with room for
-        // three more items, as the rebuilds count; the core holds no items
-        // until they are put back
-        let max_segments = col.core.max_segments();
-        let mut p = col.core.take_parts();
-        let cur = Cursor::new::<WF::Weight, Idx, G<T, C, WF>>(
-            &mut p.slabs,
-            &mut p.index,
-            p.total_len,
-            Ghost::assume_new(),
-            at,
-        );
-        Edit {
-            col,
-            parts: Some(p),
-            max_segments,
-            cur,
-        }
-    }
-
-    /// The column's parts, which the cursor holds until it is dropped.
-    #[inline(always)]
-    fn p_ref(&self) -> &Parts<crate::column::TailOf<T, C>, Idx> {
-        self.parts
-            .as_ref()
-            .expect("the edit cursor holds the parts")
+        let core = EditCore::begin(&mut col.core, at);
+        Edit { col, core }
     }
 
     /// The column's parts as the cursor has left them: its slabs, their
@@ -187,31 +162,30 @@ where
         &Idx,
         usize,
     ) {
-        let p = self.p_ref();
-        (&p.slabs, &p.index, p.total_len)
+        self.core.parts()
     }
 
     /// The cursor's position in the column's original coordinates — the
     /// coordinate system [`seek`](Self::seek) takes.
     pub fn pos(&self) -> usize {
-        self.cur.orig
+        self.core.pos()
     }
 
     /// The cursor's position in the column as edited so far.
     pub fn out_pos(&self) -> usize {
-        self.cur.out
+        self.core.out_pos()
     }
 
     /// Original items still ahead of the cursor.
     pub(crate) fn remaining(&self) -> usize {
-        self.cur.remaining
+        self.core.remaining()
     }
 
     /// How many slabs this cursor has rebuilt. One per slab *touched*,
     /// however many edits landed in it — which is the whole point.
     #[doc(hidden)]
     pub fn rebuilds(&self) -> usize {
-        self.cur.rebuilds
+        self.core.rebuilds()
     }
 
     /// Move forward to original position `to`, carrying everything in
@@ -220,8 +194,9 @@ where
     /// Forward-only: every caller is already ascending, and it is what
     /// lets the cursor keep one slab open.
     pub fn seek(&mut self, to: usize) -> &mut Self {
-        assert!(to >= self.cur.orig, "Edit::seek is forward-only");
-        let n = to - self.cur.orig;
+        let pos = self.core.pos();
+        assert!(to >= pos, "Edit::seek is forward-only");
+        let n = to - pos;
         self.advance(n)
     }
 
@@ -237,20 +212,8 @@ where
     where
         F: FnMut(T::Get<'_>, usize),
     {
-        let max_segments = self.max_segments;
-        let p = self
-            .parts
-            .as_mut()
-            .expect("the edit cursor holds the parts");
-        self.cur.advance_with::<WF::Weight, Idx, G<T, C, WF>, _>(
-            &mut p.slabs,
-            &mut p.index,
-            &mut p.total_len,
-            max_segments,
-            &mut p.counter,
-            n,
-            &mut Visiting::<Enc<T, C>, F>::new(&mut f),
-        )
+        self.core
+            .advance_with(n, &mut Visiting::<Enc<T, C>, F>::new(&mut f))
     }
 
     /// Insert one `value` at the cursor.
@@ -260,16 +223,7 @@ where
 
     /// Insert `n` copies of `value` at the cursor.
     pub fn insert_run(&mut self, value: impl AsColumnRef<T>, n: usize) -> &mut Self {
-        let p = self
-            .parts
-            .as_ref()
-            .expect("the edit cursor holds the parts");
-        self.cur.insert(
-            &p.slabs,
-            self.max_segments,
-            Inserting::<Enc<T, C>, _>::new(value),
-            n,
-        );
+        self.core.insert(Inserting::<Enc<T, C>, _>::new(value), n);
         self
     }
 
@@ -290,25 +244,14 @@ where
     /// changes nothing: it writes into its own buffer and leaves the
     /// slab's bytes alone until it closes.
     pub fn peek(&mut self) -> Option<T::Get<'_>> {
-        if self.cur.remaining == 0 {
-            return None;
+        // verified (`EditCore::rebuild_reader`, `EditCore::reader`): a
+        // reader at the cursor
+        if self.core.dirty() {
+            let (state, slab) = self.core.rebuild_reader()?;
+            return Enc::<T, C>::state_peek(slab, state);
         }
-        let p = self
-            .parts
-            .as_ref()
-            .expect("the edit cursor holds the parts");
-        if self.cur.dirty {
-            let slab = &p.slabs[self.cur.slab];
-            return Enc::<T, C>::state_peek(
-                slab,
-                <Model<T, C> as Slabs>::read_state(&self.cur.edit),
-            );
-        }
-        // verified: the reader is then at the cursor (`Cursor::load_reader`)
-        self.cur.load_reader(&p.slabs);
-        let slab = &p.slabs[self.cur.slab];
-        let r = self.cur.dec.as_ref().expect("reader loaded");
-        Enc::<T, C>::state_peek(slab, &r.state)
+        let (state, slab) = self.core.reader()?;
+        Enc::<T, C>::state_peek(slab, state)
     }
 
     /// Read the value at the cursor and replace it with what `f` returns:
@@ -346,47 +289,25 @@ where
         F: FnMut(T::Get<'_>, usize),
         H: FnMut(&WF::Weight),
     {
-        let max_segments = self.max_segments;
-        let p = self
-            .parts
-            .as_mut()
-            .expect("the edit cursor holds the parts");
-        self.cur.delete_with::<WF::Weight, Idx, G<T, C, WF>, _, H>(
-            &mut p.slabs,
-            &mut p.index,
-            &mut p.total_len,
-            max_segments,
-            &mut p.counter,
-            n,
-            &mut Visiting::<Enc<T, C>, F>::new(&mut f),
-            &mut g,
-        );
+        self.core
+            .delete_with(n, &mut Visiting::<Enc<T, C>, F>::new(&mut f), &mut g);
         self
     }
 
-    /// Close the open slab, if any, and reconcile the column. Ends a
-    /// chain; also runs on drop.
+    /// Close the open slab, if any, and reconcile the column: write the
+    /// rebuild back, coalesce neighbours and update the index — each
+    /// once, however many edits the slab took. Ends a chain; also runs on
+    /// drop.
     pub fn finish(&mut self) {
-        if self.cur.dirty {
-            self.close();
-        }
+        self.core.close();
     }
 
-    /// Finish the open rebuild: write it back, coalesce neighbours and
-    /// update the index — each once, however many edits the slab took.
-    fn close(&mut self) {
-        let max_segments = self.max_segments;
-        let p = self
-            .parts
-            .as_mut()
-            .expect("the edit cursor holds the parts");
-        self.cur.close::<WF::Weight, Idx, G<T, C, WF>>(
-            &mut p.slabs,
-            &mut p.index,
-            &mut p.total_len,
-            max_segments,
-            &mut p.counter,
-        );
+    /// End the edit, closed already and checked to have left the column
+    /// in its weight model's domain, which spares the drop its check: a
+    /// [`DeltaEdit`](crate::DeltaEdit)'s end, which checks it more
+    /// cheaply.
+    pub(crate) fn end_in_domain(&mut self) {
+        self.core.end_in_domain(&mut self.col.core);
     }
 }
 
@@ -462,15 +383,8 @@ where
             return;
         }
         // finishing on drop keeps chains honest: the last call in a
-        // chain does not have to be `finish()`
-        if self.cur.dirty {
-            self.close();
-        }
-        // hand the column its parts back: the cursor's steps keep them a
-        // column (verified), the chain of them here is glue
-        // (`ColumnCore::restore`'s precondition)
-        if let Some(p) = self.parts.take() {
-            self.col.core.restore(p);
-        }
+        // chain does not have to be `finish()`; and the parts go back to
+        // the column (verified, `EditCore::end`)
+        self.core.end(&mut self.col.core);
     }
 }

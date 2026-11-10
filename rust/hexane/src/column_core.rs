@@ -27,13 +27,16 @@
 //! A load builds its core in verified code (`load_core::LoadCore::finish`),
 //! so a loaded column's invariant is proved from its bytes.
 //!
+//! The public edit cursor takes a column's parts and hands them back
+//! checked to be in the domain in verified code too
+//! (`edit_core::EditCore`), each of its steps keeping them a column.
+//!
 //! Trusted: that the slabs a fill or an encoder hands
 //! [`ColumnCore::from_cut`] are well-formed, as those verified functions
-//! promise (it weighs them and checks the domain itself); and the parts
-//! the public edit cursor
-//! ([`crate::edit::Edit`]) hands back ([`ColumnCore::restore`]), which
-//! its verified steps keep a column but its glue chains (for a delta
-//! column, `DeltaEdit` checks the domain before).
+//! promise (it weighs them and checks the domain itself); that the edit
+//! cursor's glue chains its verified steps; for a delta column, that
+//! `DeltaEdit`'s domain check, which spares its cursor the one on handing
+//! back, is of the column it leaves; and a clone.
 
 // Verus has no spec for a slice's `is_empty`.
 #![allow(clippy::len_zero)]
@@ -349,7 +352,7 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> ColumnCore<E, W, I, G> {
             if slabs[k].len > usize::MAX - 3 || len > usize::MAX - 3 - slabs[k].len {
                 too_many_items();
             }
-            len = len + slabs[k].len;
+            len += slabs[k].len;
             ws.push(G::compute::<I>(&slabs[k]));
             k += 1;
         }
@@ -545,6 +548,22 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> ColumnCore<E, W, I, G> {
             use_type_invariant(&*self);
         }
         self.state = Some(p);
+    }
+
+    /// Put back parts, as an edit left them, with the edit's segment
+    /// budget.
+    #[inline(always)]
+    pub(crate) fn restore_budget(&mut self, p: Parts<E::Tail, I>, max_segments: usize)
+        requires
+            parts_ok::<E, W, I, G>(p, max_segments),
+            max_segments >= 2,
+        ensures
+            final(self).ready(),
+            final(self)@ == vals_of::<E>(p.slabs@),
+            final(self).budget() == max_segments,
+            final(self).count() == p.counter,
+    {
+        *self = ColumnCore { state: Some(p), max_segments, _p: PhantomData };
     }
 
     /// Set the edit counter.

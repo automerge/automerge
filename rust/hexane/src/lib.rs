@@ -30,6 +30,7 @@ macro_rules! __log {
  }
 
 pub mod edit;
+pub(crate) mod edit_core;
 
 #[cfg(test)]
 mod edit_fuzz;
