@@ -7,7 +7,11 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::ops::ControlFlow;
 
-use crate::{change_graph::ChangeGraph, ActorId, AutomergeError, Change, ChangeHash};
+use crate::{change_graph::ChangeGraph, ActorId, AutomergeError, Change, ChangeHash, Fragment};
+
+mod group;
+
+pub(crate) use group::StagedGroup;
 
 #[derive(Debug, Clone)]
 pub(crate) struct ChangeBatch {
@@ -56,6 +60,8 @@ pub(crate) struct StagedChanges {
     /// Hash membership for staged changes.
     hashes: HashSet<ChangeHash>,
     incoming_actor_seqs: HashSet<(ActorId, u64)>,
+    /// Known grouping, without owning another copy of member contents.
+    groups: Vec<StagedGroup>,
 }
 
 impl StagedChanges {
@@ -76,7 +82,16 @@ impl StagedChanges {
             changes: Vec::new(),
             hashes: HashSet::new(),
             incoming_actor_seqs: HashSet::new(),
+            groups: Vec::new(),
         }
+    }
+
+    /// Borrow known grouping without exposing mutable staging state.
+    ///
+    /// Contents without a corresponding group remain unclassified. This view
+    /// does not establish causal readiness or signature admission.
+    pub(crate) fn groups(&self) -> &[StagedGroup] {
+        &self.groups
     }
 
     pub(crate) fn is_empty(&self) -> bool {
@@ -125,6 +140,78 @@ impl StagedChanges {
                 true
             }
         });
+
+        self.groups
+            .retain(|group| !group.members().iter().any(|hash| removed.contains(hash)));
+    }
+
+    /// Insert validated contents with known grouping from an internal producer.
+    ///
+    /// Members may be applied already, held here, or supplied in `batch`. The
+    /// batch contains only new unapplied contents, as required by [`Self::extend`].
+    /// Level-zero descriptors identify loose changes. Nonzero descriptors keep
+    /// their complete fragment membership. Fully applied groups are not retained.
+    /// This does not validate canonicality or change causal-readiness policy.
+    ///
+    /// # Panics
+    ///
+    /// Asserts before modifying staging if an internally supplied descriptor is
+    /// malformed, disagrees with another descriptor for its head, or names a
+    /// member unavailable in the document, staging, and batch. Missing external
+    /// dependencies are permitted and leave the affected contents causally blocked.
+    pub(crate) fn extend_with_fragments(
+        &mut self,
+        batch: ChangeBatch,
+        fragments: impl IntoIterator<Item = Fragment>,
+        applied: &ChangeGraph,
+    ) {
+        let incoming_groups = fragments
+            .into_iter()
+            .map(StagedGroup::from_fragment)
+            .collect::<Vec<_>>();
+        {
+            let mut by_head: HashMap<ChangeHash, &StagedGroup> = self
+                .groups()
+                .iter()
+                .map(|group| (*group.head(), group))
+                .collect();
+
+            for group in &incoming_groups {
+                if let Some(existing) = by_head.get(group.head()) {
+                    assert!(
+                        existing.same_descriptor(group),
+                        "inconsistent fragment descriptor for {}",
+                        group.head()
+                    );
+                } else {
+                    by_head.insert(*group.head(), group);
+                }
+
+                for member in group.members() {
+                    assert!(
+                        applied.has_change(member)
+                            || self.hashes.contains(member)
+                            || batch.hashes.contains(member),
+                        "fragment {} has unavailable member {}",
+                        group.head(),
+                        member,
+                    )
+                }
+            }
+        }
+
+        self.extend(batch);
+
+        let mut seen = self
+            .groups
+            .iter()
+            .map(|group| *group.head())
+            .collect::<HashSet<_>>();
+        let waiting = incoming_groups
+            .into_iter()
+            .filter(|group| !group.is_fully_applied(applied))
+            .filter(|group| seen.insert(*group.head()));
+        self.groups.extend(waiting);
     }
 
     pub(crate) fn extend(&mut self, batch: ChangeBatch) {
@@ -138,27 +225,37 @@ impl StagedChanges {
         }
     }
 
-    /// Remove successfully applied changes from staging and its indexes.
+    /// Remove completed contents and retire fully applied groups.
     ///
-    /// Preserves other entries and their order, including dependents of completed
+    /// Preserves other contents and their order, including dependents of completed
     /// changes. Hashes absent from staging are ignored. The caller establishes
-    /// successful application before calling this method.
-    pub(crate) fn remove_completed(&mut self, completed: &HashSet<ChangeHash>) {
-        if completed.is_empty() {
-            return;
+    /// successful application before calling this method and supplies the matching
+    /// applied graph.
+    ///
+    /// Partly applied groups keep their full descriptors. Group retirement uses
+    /// the graph, not absence from staging, and also runs when `completed` is empty.
+    pub(crate) fn remove_completed(
+        &mut self,
+        completed: &HashSet<ChangeHash>,
+        applied: &ChangeGraph,
+    ) {
+        if !completed.is_empty() {
+            self.changes.retain(|change| {
+                let hash = change.hash();
+                if !completed.contains(&hash) {
+                    return true;
+                }
+
+                self.hashes.remove(&hash);
+                self.incoming_actor_seqs
+                    .remove(&(change.actor_id().clone(), change.seq()));
+                false
+            });
         }
 
-        self.changes.retain(|change| {
-            let hash = change.hash();
-            if !completed.contains(&hash) {
-                return true;
-            }
-
-            self.hashes.remove(&hash);
-            self.incoming_actor_seqs
-                .remove(&(change.actor_id().clone(), change.seq()));
-            false
-        });
+        if !self.groups.is_empty() {
+            self.groups.retain(|group| !group.is_fully_applied(applied));
+        }
     }
 }
 

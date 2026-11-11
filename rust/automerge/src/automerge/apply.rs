@@ -8,9 +8,21 @@ use std::collections::{HashMap, HashSet};
 
 use crate::op_set2::change::batch::BatchApply;
 use crate::staging::ChangeBatch;
-use crate::{ActorId, AutomergeError, Change, ChangeHash, PatchLog, PatchLogMismatch};
+use crate::{ActorId, AutomergeError, Change, ChangeHash, Fragment, PatchLog, PatchLogMismatch};
 
 use super::{ActorMaintenance, AuthorRegistration, Automerge, History, HistoryUpdate};
+
+#[cfg(test)]
+mod tests;
+
+/// Grouping knowledge supplied separately from the ordered change contents.
+///
+/// Known descriptors come from an internal producer and may cover only part of
+/// the input. Neither raw changes nor generic bundles establish this knowledge.
+enum Grouping {
+    Unclassified,
+    Known(Vec<Fragment>),
+}
 
 impl Automerge {
     pub fn apply_changes_batch(
@@ -23,6 +35,31 @@ impl Automerge {
     pub fn apply_changes_batch_log_patches<I: IntoIterator<Item = Change>>(
         &mut self,
         changes: I,
+        log: &mut PatchLog,
+    ) -> Result<(), AutomergeError> {
+        self.apply_changes_with_grouping(changes, Grouping::Unclassified, log)
+    }
+
+    /// Import ordered changes with grouping supplied by an internal producer.
+    ///
+    /// Descriptors keep their full membership, including already-applied or
+    /// staged members. Content validation and causal application are shared with
+    /// [`Self::apply_changes_batch_log_patches`]. Descriptor preconditions and
+    /// invariant assertions are those of
+    /// [`crate::staging::StagedChanges::extend_with_fragments`].
+    pub(super) fn apply_changes_with_fragments_log_patches(
+        &mut self,
+        changes: impl IntoIterator<Item = Change>,
+        fragments: Vec<Fragment>,
+        log: &mut PatchLog,
+    ) -> Result<(), AutomergeError> {
+        self.apply_changes_with_grouping(changes, Grouping::Known(fragments), log)
+    }
+
+    fn apply_changes_with_grouping(
+        &mut self,
+        changes: impl IntoIterator<Item = Change>,
+        grouping: Grouping,
         log: &mut PatchLog,
     ) -> Result<(), AutomergeError> {
         // Validate the observer before staging or applying incoming changes.
@@ -84,7 +121,13 @@ impl Automerge {
             incoming.push(change)?;
         }
 
-        self.staged.extend(incoming);
+        match grouping {
+            Grouping::Unclassified => self.staged.extend(incoming),
+            Grouping::Known(fragments) => {
+                self.staged
+                    .extend_with_fragments(incoming, fragments, &self.change_graph);
+            }
+        }
         self.apply_ready(log)?;
         Ok(())
     }
@@ -210,7 +253,7 @@ impl Automerge {
             .iter()
             .map(|change| change.hash())
             .collect::<HashSet<_>>();
-        self.staged.remove_completed(&completed);
+        self.staged.remove_completed(&completed, &self.change_graph);
         Ok(())
     }
 }

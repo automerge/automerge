@@ -5,6 +5,7 @@ use super::{ChangeBatch, StagedChanges};
 
 mod branching;
 mod completion;
+mod groups;
 mod properties;
 
 fn append(document: &mut Automerge, value: i64) -> Change {
@@ -39,6 +40,23 @@ fn stage(changes: &[&Change]) -> StagedChanges {
 
 fn hashes(changes: &[&Change]) -> Vec<ChangeHash> {
     changes.iter().map(|change| change.hash()).collect()
+}
+
+// Check stored order and both indexes without adding production accessors solely for tests.
+fn assert_contents(staged: &StagedChanges, expected: &[&Change]) {
+    assert_eq!(staged.iter().collect::<Vec<_>>(), expected);
+    assert_eq!(staged.is_empty(), expected.is_empty());
+    assert_eq!(
+        staged.hashes,
+        expected.iter().map(|change| change.hash()).collect()
+    );
+    assert_eq!(
+        staged.incoming_actor_seqs,
+        expected
+            .iter()
+            .map(|change| (change.actor_id().clone(), change.seq()))
+            .collect()
+    );
 }
 
 #[test]
