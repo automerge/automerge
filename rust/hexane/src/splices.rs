@@ -1177,7 +1177,101 @@ proof fn lemma_dst_step<V>(dst: Seq<V>, src: Seq<V>, sps: Seq<Splice>, i: int)
     assert(copied(src, sps[i]) =~= src.subrange(sps[i].range.start as int, sps[i].range.end as int));
 }
 
+/// What the splices produce up to splice `j` begins what they all
+/// produce.
+proof fn lemma_produced_prefix<V>(dst: Seq<V>, src: Seq<V>, sps: Seq<Splice>, j: int)
+    requires
+        0 <= j <= sps.len(),
+        normal(sps, src.len() as int, dst.len() as int),
+    ensures
+        produced(dst, src, sps.take(j)).len() <= produced(dst, src, sps).len(),
+        produced(dst, src, sps).take(produced(dst, src, sps.take(j)).len() as int) == produced(dst, src, sps.take(j)),
+    decreases sps.len() - j,
+{
+    if j == sps.len() {
+        assert(sps.take(j) =~= sps);
+    } else {
+        lemma_produced_prefix(dst, src, sps, j + 1);
+        lemma_dst_step(dst, src, sps, j);
+        let (p, q) = (produced(dst, src, sps.take(j)), produced(dst, src, sps.take(j + 1)));
+        assert(q.take(p.len() as int) =~= p);
+        assert(produced(dst, src, sps).take(q.len() as int).take(p.len() as int) =~= produced(dst, src, sps).take(
+            p.len() as int,
+        ));
+    }
+}
+
+/// The destination with the splices from `k` on applied, back to front
+/// (as `RawColumn::copy_ranges` applies them, so each lands above those
+/// still to come and their positions hold): the destination's items up to
+/// where splice `k - 1` ends, then what all the splices give from there.
+pub(crate) open spec fn applied_from<V>(dst: Seq<V>, src: Seq<V>, sps: Seq<Splice>, k: int) -> Seq<V> {
+    dst.subrange(0, end_of(sps.take(k))) + applied(dst, src, sps).skip(produced(dst, src, sps.take(k)).len() as int)
+}
+
+/// Back to front: before any splice, the destination; after them all,
+/// what they give.
+pub(crate) proof fn lemma_back_ends<V>(dst: Seq<V>, src: Seq<V>, sps: Seq<Splice>)
+    requires
+        normal(sps, src.len() as int, dst.len() as int),
+    ensures
+        applied_from(dst, src, sps, sps.len() as int) == dst,
+        applied_from(dst, src, sps, 0) == applied(dst, src, sps),
+{
+    assert(sps.take(sps.len() as int) =~= sps);
+    assert(sps.take(0) =~= Seq::<Splice>::empty());
+    if sps.len() > 0 {
+        lemma_dst_step(dst, src, sps, sps.len() - 1);
+        assert(sps.take(sps.len() as int) =~= sps);
+    }
+    let p = produced(dst, src, sps);
+    assert(applied(dst, src, sps).skip(p.len() as int) =~= dst.subrange(end_of(sps), dst.len() as int));
+    assert(dst.subrange(0, end_of(sps)) + dst.subrange(end_of(sps), dst.len() as int) =~= dst);
+    assert(dst.subrange(0, 0) + applied(dst, src, sps).skip(0) =~= applied(dst, src, sps));
+}
+
+/// Back to front, one more: splice `k` applied to what the splices
+/// after it give.
+#[verifier::spinoff_prover]
+pub(crate) proof fn lemma_back_step<V>(dst: Seq<V>, src: Seq<V>, sps: Seq<Splice>, k: int)
+    requires
+        0 <= k < sps.len(),
+        normal(sps, src.len() as int, dst.len() as int),
+    ensures
+        sps[k].pos + sps[k].delete <= applied_from(dst, src, sps, k + 1).len(),
+        sps[k].range.start <= sps[k].range.end <= src.len(),
+        applied_from(dst, src, sps, k) == applied_from(dst, src, sps, k + 1).take(sps[k].pos as int) + src.subrange(
+            sps[k].range.start as int,
+            sps[k].range.end as int,
+        ) + applied_from(dst, src, sps, k + 1).skip(sps[k].pos + sps[k].delete),
+{
+    let a = applied(dst, src, sps);
+    let (p, q) = (produced(dst, src, sps.take(k)), produced(dst, src, sps.take(k + 1)));
+    let (e, e1) = (end_of(sps.take(k)), end_of(sps.take(k + 1)));
+    let sp = sps[k];
+    let c = src.subrange(sp.range.start as int, sp.range.end as int);
+    lemma_dst_step(dst, src, sps, k);
+    lemma_produced_prefix(dst, src, sps, k + 1);
+    assert(sp.range.start <= sp.range.end <= src.len());
+    assert(sp.pos + sp.delete <= dst.len());
+    let f1 = applied_from(dst, src, sps, k + 1);
+    assert(f1.take(sp.pos as int) =~= dst.subrange(0, sp.pos as int));
+    assert(f1.skip(sp.pos + sp.delete) =~= a.skip(q.len() as int));
+    // what all the splices give from splice `k` on: the destination's
+    // items before it, its range, then the rest
+    assert(a.take(q.len() as int) == q);
+    assert(a.skip(p.len() as int) =~= dst.subrange(e, sp.pos as int) + c + a.skip(q.len() as int)) by {
+        assert(q =~= p + dst.subrange(e, sp.pos as int) + c);
+        assert(a =~= a.take(q.len() as int) + a.skip(q.len() as int));
+    }
+    assert(dst.subrange(0, e) + (dst.subrange(e, sp.pos as int) + c + a.skip(q.len() as int)) =~= dst.subrange(
+        0,
+        sp.pos as int,
+    ) + c + a.skip(q.len() as int));
+}
+
 /// A gap before splice `i`, given as a splice into what the splices keep.
+#[verifier::spinoff_prover]
 proof fn lemma_gap<V>(k: Seq<V>, dst: Seq<V>, src: Seq<V>, gaps: Seq<Splice>, g: Splice, sps: Seq<Splice>, i: int)
     requires
         0 <= i < sps.len(),

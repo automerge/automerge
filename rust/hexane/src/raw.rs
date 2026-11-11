@@ -27,7 +27,7 @@
 // Verus has no specs for `Vec::is_empty`, `usize::abs_diff` or `vec![x]`.
 #![allow(clippy::len_zero, clippy::manual_abs_diff, clippy::vec_init_then_push)]
 
-use crate::column::{normalize_splices, Splice};
+use crate::column::normalize_splices;
 use crate::fenwick;
 #[cfg(verus_keep_ghost)]
 use crate::fenwick::{bit_ok, lemma_sum_le, lemma_sum_one, lemma_sum_split, lens, sum, total};
@@ -37,6 +37,9 @@ use crate::merge_walk::{merge_around, Merger};
 #[cfg(verus_keep_ghost)]
 use crate::rle::writer::concat;
 use crate::rle::writer::splice_bytes;
+#[cfg(verus_keep_ghost)]
+use crate::splices::{applied, applied_from, lemma_back_ends, lemma_back_step, normal};
+use crate::splices::{wrong_columns, Normalized};
 use crate::PackError;
 use std::ops::Range;
 #[allow(unused_imports)]
@@ -266,6 +269,18 @@ fn splice_too_long(len: usize, del: usize, insert: usize) -> PackError {
     PackError::InvalidValue(format!(
         "raw splice too long: len={len} del={del} insert={insert} overflows usize"
     ))
+}
+
+/// Panics: a splice out of bounds, or one that would leave the column
+/// more than `usize::MAX` bytes long.
+#[verifier::external_body]
+#[cold]
+#[inline(never)]
+fn splice_failed(e: PackError)
+    ensures
+        false,
+{
+    panic!("splice range out of bounds: {e:?}")
 }
 
 #[verifier::external_body]
@@ -500,6 +515,177 @@ impl RawColumn {
                 { s.data.len() },
             Ghost(|s: RawSlab| size_of(s)),
         );
+    }
+
+    /// Insert / delete / replace bytes at `index` with a single byte slice.
+    /// Panics if `index + del` exceeds the column length.
+    #[inline(never)]
+    pub fn splice_slice(&mut self, index: usize, del: usize, bytes: &[u8])
+        requires
+            old(self).wf(),
+        ensures
+            final(self).wf(),
+            final(self)@ == old(self)@.take(index as int) + bytes@ + old(self)@.skip(index + del),
+    {
+        if let Err(e) = self.try_splice_slice(index, del, bytes) {
+            splice_failed(e);
+        }
+    }
+
+    /// Replace the `del` bytes at `at` with `src`'s bytes `start..end`,
+    /// spliced a chunk per slab of `src` they lie in (those slabs are cut at
+    /// value boundaries and within the budget): panics if the column would
+    /// hold more than `usize::MAX` bytes.
+    #[allow(unused_variables)] // `nslabs` is for the spec
+    fn splice_range(&mut self, at: usize, del: usize, src: &RawColumn, start: usize, end: usize)
+        requires
+            old(self).wf(),
+            src.wf(),
+            at + del <= old(self)@.len(),
+            start <= end <= src@.len(),
+        ensures
+            final(self).wf(),
+            final(self)@ == old(self)@.take(at as int) + src@.subrange(start as int, end as int) + old(self)@.skip(
+                at + del,
+            ),
+    {
+        let ghost (v0, s) = (self@, src@);
+        let ghost w = sizes(src.slabs@);
+        proof {
+            lemma_flat_total(src.slabs@);
+        }
+        if start < end {
+            proof {
+                if src.slabs@.len() == 0 {
+                    assert(w =~= Seq::<nat>::empty());
+                }
+            }
+            let (mut i, mut off) = src.find_slab(start);
+            let nslabs = src.slabs.len();
+            let mut pos = start;
+            let mut here = at;
+            let mut gone = del;
+            while pos < end
+                invariant
+                    self.wf(),
+                    src.wf(),
+                    s == src@,
+                    w == sizes(src.slabs@),
+                    nslabs == src.slabs@.len(),
+                    s.len() == total(w),
+                    start <= pos <= end <= s.len(),
+                    pos < end ==> i < src.slabs@.len() && sum(w, 0, i as int) + off == pos && off < src.slabs@[i as int].data@.len(),
+                    pos == start ==> self@ == v0 && here == at && gone == del,
+                    pos > start ==> gone == 0 && here == at + (pos - start) && self@ == v0.take(at as int)
+                        + s.subrange(start as int, pos as int) + v0.skip(at + del),
+                    at + del <= v0.len(),
+                decreases end - pos,
+            {
+                let data = &src.slabs[i].data;
+                let take = if data.len() - off < end - pos { data.len() - off } else { end - pos };
+                proof {
+                    lemma_flat_at(src.slabs@, i as int);
+                    lemma_flat_len(src.slabs@, i as int);
+                    lemma_sum_split(w, 0, i as int, i + 1);
+                    lemma_sum_one(w, i as int);
+                    assert(s.subrange(pos as int, pos + take) =~= data@.subrange(off as int, off + take));
+                }
+                let chunk = slice_subrange(data.as_slice(), off, off + take);
+                let ghost v1 = self@;
+                self.splice_slice(here, gone, chunk);
+                proof {
+                    lemma_flat_total(self.slabs@);
+                    assert(s.subrange(start as int, pos + take) =~= s.subrange(start as int, pos as int) + s.subrange(
+                        pos as int,
+                        pos + take,
+                    ));
+                    if pos > start {
+                        assert(v1.take(here as int) =~= v0.take(at as int) + s.subrange(start as int, pos as int));
+                        assert(v1.skip(here as int) =~= v0.skip(at + del));
+                    }
+                    if pos + take < end {
+                        // the range goes on into the next slab, from its start
+                        assert(off + take == data@.len());
+                        lemma_sum_split(w, 0, i as int, i + 1);
+                        lemma_sum_one(w, i as int);
+                        lemma_sum_split(w, 0, i + 1, src.slabs@.len() as int);
+                        if i + 1 >= src.slabs@.len() {
+                            assert(sum(w, 0, i + 1) == total(w));
+                        }
+                    }
+                }
+                pos += take;
+                here += take;
+                gone = 0;
+                i += 1;
+                off = 0;
+                proof {
+                    if pos < end {
+                        assert(src.slabs@[i as int].data@.len() > 0);
+                    }
+                }
+            }
+            proof {
+                assert(s.subrange(start as int, end as int) == s.subrange(start as int, pos as int));
+            }
+        } else if del > 0 {
+            // a pure delete, or one whose range copies nothing
+            self.splice_slice(at, del, &[]);
+            proof {
+                assert(src@.subrange(start as int, end as int) =~= Seq::<u8>::empty());
+            }
+        } else {
+            proof {
+                assert(src@.subrange(start as int, end as int) =~= Seq::<u8>::empty());
+                assert(v0 =~= v0.take(at as int) + Seq::<u8>::empty() + v0.skip(at + del));
+            }
+        }
+    }
+
+    /// `copy_ranges`: the normalized splices `list`, applied back to
+    /// front, so that each lands above those still to come and their
+    /// positions hold, each range's bytes from `src` (`splice_range`). The
+    /// column becomes what the splices `list` was made from give one by
+    /// one.
+    pub(crate) fn copy_from(&mut self, src: &RawColumn, list: &Normalized)
+        requires
+            old(self).wf(),
+            src.wf(),
+        ensures
+            final(self).wf(),
+            final(self)@ == applied(old(self)@, src@, list.seen()),
+    {
+        proof {
+            lemma_flat_total(self.slabs@);
+            lemma_flat_total(src.slabs@);
+        }
+        if list.src_len() != src.total_len || list.dst_len() != self.total_len {
+            wrong_columns();
+        }
+        let sps = list.splices();
+        let ghost (dst, s) = (self@, src@);
+        proof {
+            list.lemma_applied(dst, s);
+            lemma_back_ends(dst, s, sps@);
+        }
+        let mut k = sps.len();
+        while k > 0
+            invariant
+                self.wf(),
+                src.wf(),
+                s == src@,
+                k <= sps@.len(),
+                normal(sps@, s.len() as int, dst.len() as int),
+                self@ == applied_from(dst, s, sps@, k as int),
+            decreases k,
+        {
+            k -= 1;
+            let sp = &sps[k];
+            proof {
+                lemma_back_step(dst, s, sps@, k as int);
+            }
+            self.splice_range(sp.pos, sp.delete, src, sp.range.start, sp.range.end);
+        }
     }
 
     /// The slab holding byte `index` and the byte's offset in it; at the
@@ -1534,13 +1720,6 @@ impl RawColumn {
         }
     }
 
-    /// Insert / delete / replace bytes at `index` with a single byte slice.
-    /// Panics if `index + del` exceeds the column length.
-    pub fn splice_slice(&mut self, index: usize, del: usize, bytes: &[u8]) {
-        self.try_splice_slice(index, del, bytes)
-            .expect("splice range out of bounds")
-    }
-
     // ── Multi-point copy ────────────────────────────────────────────────────
 
     /// Splice byte ranges of `src` into this column at several points in
@@ -1571,50 +1750,13 @@ impl RawColumn {
     /// (see `pick_split`), so no value ends up spanning a slab.
     pub fn copy_ranges<I>(&mut self, src: Self, splices: I)
     where
-        I: IntoIterator<Item = Splice>,
+        I: IntoIterator<Item = crate::Splice>,
     {
         let splices = normalize_splices(splices, src.len(), self.total_len);
-        for sp in splices.splices().iter().rev() {
-            let mut at = sp.pos;
-            let mut del = sp.delete;
-            // Chunked by the source's own slabs. A payload spliced as one
-            // slice wider than the slab budget cannot be split anywhere
-            // the column knows to be a value boundary, so it would land as
-            // a single oversize slab that every later splice then has to
-            // memmove whole; the source's slabs are already budgeted and
-            // already cut at value boundaries.
-            for chunk in src.chunks_in(sp.range.clone()) {
-                self.splice_slice(at, del, chunk);
-                at += chunk.len();
-                del = 0;
-            }
-            if del > 0 {
-                // a pure delete, or one whose splice inserted nothing
-                self.splice_slice(at, del, &[]);
-            }
-        }
-    }
-
-    /// The byte slices covering `range`, one per slab the range touches.
-    fn chunks_in(&self, range: Range<usize>) -> impl Iterator<Item = &[u8]> + '_ {
-        let end = range.end.min(self.total_len);
-        let mut pos = range.start;
-        let mut at = if pos < end {
-            Some(self.find_slab(pos))
-        } else {
-            None
-        };
-        std::iter::from_fn(move || {
-            let (i, off) = at?;
-            if pos >= end {
-                return None;
-            }
-            let data = &self.slabs[i].data;
-            let take = (data.len() - off).min(end - pos);
-            pos += take;
-            at = Some((i + 1, 0));
-            Some(&data[off..off + take])
-        })
+        // verified (`RawColumn::copy_from`): applied back to front, each
+        // range spliced a chunk per source slab, the column becomes the
+        // splices applied one by one
+        self.copy_from(&src, &splices);
     }
 
     // ── Range read ──────────────────────────────────────────────────────────
@@ -1652,6 +1794,7 @@ impl RawColumn {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Splice;
 
     fn drive(col: &RawColumn, expected: &[u8]) {
         assert_eq!(col.len(), expected.len(), "len mismatch");

@@ -460,7 +460,12 @@ compiles them away. To check them, run `cargo verus verify -p hexane
   exactly the range of them equal to the target, or, if there are none,
   the empty range where the target would go. Unsorted, it returns some
   range inside the window.
-* `RawColumn`.
+* `RawColumn`: its splices, reads, iterator, save and load, and
+  `copy_ranges`, which applies the normalized splices back to front
+  (each lands above those still to come, so their positions hold), each
+  range spliced a chunk per source slab, and leaves the column holding
+  the caller's splices applied one by one. A `splice` of several chunks
+  concatenates them in glue first.
 * The splices `copy_ranges` takes: normalizing them checks their order
   and bounds, and gives a list in order in both columns, with every range
   inside the source and none doing nothing, which applied gives what the
