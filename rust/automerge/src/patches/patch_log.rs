@@ -859,34 +859,58 @@ impl Events<'_> {
     }
 
     pub(crate) fn delete_seq(&mut self, obj: ObjId, index: usize, num: usize) {
+        if !self.is_active() {
+            return;
+        }
         self.0.delete_seq(obj, index, num)
     }
 
     pub(crate) fn delete_map(&mut self, obj: ObjId, key: &str) {
+        if !self.is_active() {
+            return;
+        }
         self.0.delete_map(obj, key)
     }
 
     pub(crate) fn increment(&mut self, obj: ObjId, prop: PropRef<'_>, value: i64, id: OpId) {
+        if !self.is_active() {
+            return;
+        }
         self.0.increment(obj, prop, value, id)
     }
 
     pub(crate) fn increment_map(&mut self, obj: ObjId, key: &str, n: i64, id: OpId) {
+        if !self.is_active() {
+            return;
+        }
         self.0.increment_map(obj, key, n, id)
     }
 
     pub(crate) fn increment_seq(&mut self, obj: ObjId, index: usize, n: i64, id: OpId) {
+        if !self.is_active() {
+            return;
+        }
         self.0.increment_seq(obj, index, n, id)
     }
 
     pub(crate) fn flag_conflict(&mut self, obj: ObjId, prop: &Prop) {
+        if !self.is_active() {
+            return;
+        }
         self.0.flag_conflict(obj, prop)
     }
 
     pub(crate) fn flag_conflict_map(&mut self, obj: ObjId, key: &str) {
+        if !self.is_active() {
+            return;
+        }
         self.0.flag_conflict_map(obj, key)
     }
 
     pub(crate) fn flag_conflict_seq(&mut self, obj: ObjId, index: usize) {
+        if !self.is_active() {
+            return;
+        }
         self.0.flag_conflict_seq(obj, index)
     }
 
@@ -899,6 +923,9 @@ impl Events<'_> {
         conflict: bool,
         expose: bool,
     ) {
+        if !self.is_active() {
+            return;
+        }
         self.0.put(obj, prop, value, id, conflict, expose)
     }
 
@@ -911,6 +938,9 @@ impl Events<'_> {
         conflict: bool,
         expose: bool,
     ) {
+        if !self.is_active() {
+            return;
+        }
         self.0.put_map(obj, key, value, id, conflict, expose)
     }
 
@@ -923,6 +953,9 @@ impl Events<'_> {
         conflict: bool,
         expose: bool,
     ) {
+        if !self.is_active() {
+            return;
+        }
         self.0.put_seq(obj, index, value, id, conflict, expose)
     }
 
@@ -940,6 +973,9 @@ impl Events<'_> {
         text_encoding: TextEncoding,
         marks: Option<Arc<MarkSet>>,
     ) {
+        if !self.is_active() {
+            return;
+        }
         self.0.replace_seq(
             obj,
             index,
@@ -961,10 +997,16 @@ impl Events<'_> {
         text: &str,
         marks: Option<Arc<MarkSet>>,
     ) {
+        if !self.is_active() {
+            return;
+        }
         self.0.splice(obj, index, text, marks)
     }
 
     pub(crate) fn mark(&mut self, obj: ObjId, index: usize, len: usize, marks: &Arc<MarkSet>) {
+        if !self.is_active() {
+            return;
+        }
         self.0.mark(obj, index, len, marks)
     }
 
@@ -977,6 +1019,9 @@ impl Events<'_> {
         conflict: bool,
         expose: bool,
     ) {
+        if !self.is_active() {
+            return;
+        }
         self.0
             .insert_and_maybe_expose(obj, index, value, id, conflict, expose)
     }
@@ -989,6 +1034,9 @@ impl Events<'_> {
         id: OpId,
         conflict: bool,
     ) {
+        if !self.is_active() {
+            return;
+        }
         self.0.insert(obj, index, value, id, conflict)
     }
 }
