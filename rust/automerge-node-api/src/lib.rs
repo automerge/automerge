@@ -325,7 +325,7 @@ impl Automerge {
     pub(crate) fn new(
         actor: Option<String>,
     ) -> std::result::Result<Automerge, error::BadActorId> {
-        let mut doc = am::AutoCommit::default();
+        let mut doc = am::AutoCommit::new_with_encoding(am::TextEncoding::Utf16CodeUnit);
         if let Some(a) = actor {
             let a = automerge::ActorId::from(hex::decode(a)?.to_vec());
             doc.set_actor(a);

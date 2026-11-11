@@ -15,7 +15,7 @@ rust-version = "1.90.0"
 crate-type = ["cdylib"]
 
 [dependencies]
-automerge = { path = "../automerge", features = [] }
+automerge = { path = "../automerge", features = ["utf16-indexing"] }
 hex = "^0.4.3"
 napi = "3.0.0-beta.3"
 napi-derive = "3.0.0-beta.3"
