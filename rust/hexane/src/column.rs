@@ -1035,7 +1035,6 @@ where
             fill_emitted: false,
             length: opts.length,
             max_segments: opts.max_segments,
-            failed: false,
             _phantom: PhantomData,
         }
     }
@@ -1669,8 +1668,6 @@ pub struct ColumnLoadIter<
     fill_emitted: bool,
     length: Option<usize>,
     max_segments: usize,
-    /// an error ended the load: the runs after it don't make a column
-    failed: bool,
     _phantom: PhantomData<(WF, Idx)>,
 }
 
@@ -1685,15 +1682,6 @@ where
     /// its entire contents as one run. An error ends the load: later calls,
     /// and [`finalize`](Self::finalize), return [`PackError::BadFormat`].
     pub fn try_next_run(&mut self) -> Result<Option<Run<T::Get<'a>>>, PackError> {
-        if self.failed {
-            return Err(PackError::BadFormat);
-        }
-        let r = self.next_run_inner();
-        self.failed = r.is_err();
-        r
-    }
-
-    fn next_run_inner(&mut self) -> Result<Option<Run<T::Get<'a>>>, PackError> {
         if let Some((value, len)) = self.fill {
             if self.fill_emitted || len == 0 {
                 return Ok(None);
@@ -1701,7 +1689,8 @@ where
             self.fill_emitted = true;
             return Ok(Some(Run { count: len, value }));
         }
-        // verified: the run's items are attributed to the slab being cut
+        // verified: the run's items are attributed to the slab being cut,
+        // and an error ends the load
         self.core.next_run()
     }
 
@@ -1716,9 +1705,6 @@ where
     /// with the column built from the loader's slabs and their weights
     /// (`load_core::LoadCore::finish`).
     pub(crate) fn finalize_in(self, lo: i64, hi: i64) -> Result<Column<T, C, WF, Idx>, PackError> {
-        if self.failed {
-            return Err(PackError::BadFormat);
-        }
         if let Some((value, len)) = self.fill {
             if len == 0 {
                 return Ok(Column::with_max_segments(self.max_segments));

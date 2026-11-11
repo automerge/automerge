@@ -141,11 +141,20 @@ fn wrong_length(len: usize, expected: usize) -> PackError {
 
 /// A column's load in progress: the loader, and the weights of the slabs
 /// it cuts, accumulated as their runs stream past (where the weight model
-/// `G` accumulates them).
+/// `G` accumulates them); or, once a step failed, a load that fails.
 pub(crate) struct LoadCore<'a, E, X: Decoders<'a>, W, G, LD> {
     pub(crate) ld: LD,
     pub(crate) attr: Attribution<<X::D as Decode>::Item, W>,
+    /// an error ended the load: the runs after it don't make a column
+    pub(crate) failed: bool,
     pub(crate) _p: PhantomData<(E, G)>,
+}
+
+/// The error a load reports once an earlier step of it failed.
+#[verifier::external_body]
+#[cold]
+fn load_failed() -> PackError {
+    PackError::BadFormat
 }
 
 impl<'a, E, X, W, G, LD> LoadCore<'a, E, X, W, G, LD> where
@@ -154,15 +163,18 @@ impl<'a, E, X, W, G, LD> LoadCore<'a, E, X, W, G, LD> where
     G: LoadWeigh<'a, E, X, W>,
     LD: Loads<'a, E, X>,
  {
-    /// The loader's, and the weights so far are those of the values
-    /// pulled, attributed to the slabs as the loader cut them.
+    /// Unless a step failed: the loader's, and the weights so far are
+    /// those of the values pulled, attributed to the slabs as the loader
+    /// cut them.
     pub(crate) open spec fn inv(&self) -> bool {
-        &&& self.ld.inv()
-        &&& 0 <= self.ld.left()
-        &&& self.attr.inv::<G>()
-        &&& G::accumulates() ==> {
-            &&& self.attr.pulled() == self.ld.pulled()
-            &&& self.attr.done_vals@ == each::<X>(self.ld.done_slabs())
+        !self.failed ==> {
+            &&& self.ld.inv()
+            &&& 0 <= self.ld.left()
+            &&& self.attr.inv::<G>()
+            &&& G::accumulates() ==> {
+                &&& self.attr.pulled() == self.ld.pulled()
+                &&& self.attr.done_vals@ == each::<X>(self.ld.done_slabs())
+            }
         }
     }
 
@@ -173,6 +185,7 @@ impl<'a, E, X, W, G, LD> LoadCore<'a, E, X, W, G, LD> where
             max_segments >= 2,
         ensures
             c.inv(),
+            !c.failed,
     {
         let ld = LD::start(data, max_segments);
         let attr = Attribution::new::<G>();
@@ -180,17 +193,38 @@ impl<'a, E, X, W, G, LD> LoadCore<'a, E, X, W, G, LD> where
             assert(attr.pulled() =~= ld.pulled());
             assert(attr.done_vals@ =~= each::<X>(ld.done_slabs()));
         }
-        LoadCore { ld, attr, _p: PhantomData }
+        LoadCore { ld, attr, failed: false, _p: PhantomData }
     }
 
     /// The next run, or `None` at the end of the input; its items are
-    /// attributed to the slab being cut.
+    /// attributed to the slab being cut. An error ends the load: every
+    /// later step fails too.
     #[inline(always)]
     pub(crate) fn next_run(&mut self) -> (r: Result<Option<Run<<X::D as Decode>::Item>>, PackError>)
         requires
             old(self).inv(),
         ensures
-            r is Ok ==> final(self).inv(),
+            final(self).inv(),
+            r is Ok ==> !old(self).failed && !final(self).failed,
+            r matches Ok(None) ==> final(self).ld.at_end() && final(self).ld.pulled() == old(self).ld.pulled(),
+            r matches Ok(Some(_)) ==> final(self).ld.left() < old(self).ld.left(),
+            r is Ok ==> final(self).ld.data() == old(self).ld.data(),
+    {
+        if self.failed {
+            return Err(load_failed());
+        }
+        self.step()
+    }
+
+    /// [`next_run`](Self::next_run), on a load that has not failed.
+    #[inline(always)]
+    fn step(&mut self) -> (r: Result<Option<Run<<X::D as Decode>::Item>>, PackError>)
+        requires
+            old(self).inv(),
+            !old(self).failed,
+        ensures
+            final(self).inv(),
+            r is Ok ==> !final(self).failed,
             r matches Ok(None) ==> final(self).ld.at_end() && final(self).ld.pulled() == old(self).ld.pulled(),
             r matches Ok(Some(_)) ==> final(self).ld.left() < old(self).ld.left(),
             r is Ok ==> final(self).ld.data() == old(self).ld.data(),
@@ -215,7 +249,10 @@ impl<'a, E, X, W, G, LD> LoadCore<'a, E, X, W, G, LD> where
                     }
                     match self.attr.run::<G>(run.count, run.value, cut, Ghost(vals)) {
                         Ok(()) => {},
-                        Err(e) => return Err(e),
+                        Err(e) => {
+                            self.failed = true;
+                            return Err(e);
+                        },
                     }
                     proof {
                         if cut {
@@ -226,7 +263,10 @@ impl<'a, E, X, W, G, LD> LoadCore<'a, E, X, W, G, LD> where
                 Ok(Some(run))
             },
             Ok(None) => Ok(None),
-            Err(e) => Err(e),
+            Err(e) => {
+                self.failed = true;
+                Err(e)
+            },
         }
     }
 
@@ -251,6 +291,9 @@ impl<'a, E, X, W, G, LD> LoadCore<'a, E, X, W, G, LD> where
                 &&& c@ == LD::values_of(self.ld.data()).map_values(|v: <X::D as Decode>::Item| E::own(v))
             },
     {
+        if self.failed {
+            return Err(load_failed());
+        }
         let ghost data = self.ld.data();
         let mut core = self;
         let acc = G::accumulates_exec();
@@ -259,15 +302,17 @@ impl<'a, E, X, W, G, LD> LoadCore<'a, E, X, W, G, LD> where
             loop
                 invariant
                     core.inv(),
+                    !core.failed,
                     acc == G::accumulates(),
                     core.ld.data() == data,
                 ensures
                     core.inv(),
+                    !core.failed,
                     core.ld.at_end(),
                     core.ld.data() == data,
                 decreases core.ld.left(),
             {
-                match core.next_run() {
+                match core.step() {
                     Ok(Some(_)) => {},
                     Ok(None) => break,
                     Err(e) => return Err(e),
