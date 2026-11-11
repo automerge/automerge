@@ -282,7 +282,6 @@ pub(crate) fn get_heads(
 pub(crate) fn alloc<'a>(
     env: &'a Env,
     value: &am::Value<'_>,
-    text_rep: am::patches::TextRepresentation,
 ) -> Result<(Datatype, Unknown<'a>)> {
     match value {
         am::Value::Object(o) => match o {
@@ -290,11 +289,7 @@ pub(crate) fn alloc<'a>(
             am::ObjType::Table => Object::new(&env).into_unknown(&env).and_then(|u| Ok((Datatype::Table, u))),
             // TODO: Consider the use of `vec![] as Vec<Unknown>` here
             am::ObjType::List => Array::from_vec(&env, vec![] as Vec<Unknown>).into_unknown(&env).and_then(|u| Ok((Datatype::List, u))),
-            am::ObjType::Text => match text_rep {
-                am::patches::TextRepresentation::String => "".into_unknown(&env).and_then(|u| Ok((Datatype::Text, u))),
-                // TODO: Consider the use of `vec![] as Vec<Unknown>` here
-                am::patches::TextRepresentation::Array => Array::from_vec(env, vec![] as Vec<Unknown>).into_unknown(&env).and_then(|u| Ok((Datatype::Text, u))),
-            },
+            am::ObjType::Text => "".into_unknown(&env).and_then(|u| Ok((Datatype::Text, u))),
         },
         am::Value::Scalar(s) => alloc_scalar(&env, s.as_ref()),
     }
@@ -323,16 +318,14 @@ pub(crate) fn alloc_scalar<'a>(
 #[napi]
 pub struct Automerge {
     doc: am::AutoCommit,
-    text_rep: am::patches::TextRepresentation,
 }
 
 #[napi]
 impl Automerge {
     pub(crate) fn new(
         actor: Option<String>,
-        text_rep: am::patches::TextRepresentation,
     ) -> std::result::Result<Automerge, error::BadActorId> {
-        let mut doc = am::AutoCommit::default().with_text_rep(text_rep.into());
+        let mut doc = am::AutoCommit::default();
         if let Some(a) = actor {
             let a = automerge::ActorId::from(hex::decode(a)?.to_vec());
             doc.set_actor(a);
@@ -341,7 +334,6 @@ impl Automerge {
             doc,
             // freeze: false,
             // external_types: HashMap::default(),
-            text_rep,
         })
     }
 
@@ -522,7 +514,7 @@ impl Automerge {
             self.doc.get(&obj, prop).map_err(error::Get::Automerge)?
         };
         if let Some((value, id)) = value {
-            match alloc(&env, &value, self.text_rep) {
+            match alloc(&env, &value) {
                 Ok((datatype, js_value)) if datatype.is_scalar() => Ok(js_value),
                 _ => todo!("Implement conversion of object IDs to Unknown"), // Ok(id.to_string().into_unknown(&env)?)
             }
@@ -536,18 +528,10 @@ impl Automerge {
 #[napi(object)]
 pub struct InitOptions {
     pub actor: Option<Actor>,
-    #[napi(js_name = "text_v1")]
-    pub text_v1: Option<bool>,
 }
 
 #[napi(js_name = "create")]
 pub fn init(options: Option<InitOptions>) -> napi::Result<Automerge> {
     let options = options.unwrap_or_default();
-    let text_v1 = options.text_v1.unwrap_or(false);
-    let text_rep = if text_v1 {
-        am::patches::TextRepresentation::Array
-    } else {
-        am::patches::TextRepresentation::String
-    };
-    Automerge::new(options.actor, text_rep).map_err(|e| e.into())
+    Automerge::new(options.actor).map_err(|e| e.into())
 }

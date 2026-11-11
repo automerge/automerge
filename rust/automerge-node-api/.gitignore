@@ -2,3 +2,6 @@
 yarn.lock
 
 index.d.ts
+
+# Build output of `napi build`
+*.node
