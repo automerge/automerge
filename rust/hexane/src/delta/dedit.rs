@@ -372,64 +372,6 @@ impl Ledger {
         orig.wrapping_add(d)
     }
 
-    /// Carry `n` original items of delta `d` past the cursor, unchanged:
-    /// they keep their values, which needs no debt outstanding unless they
-    /// are nulls.
-    #[inline(always)]
-    pub(crate) fn carry(&mut self, d: Option<i64>, n: usize)
-        requires
-            old(self).inv(),
-            !old(self).closed@,
-            old(self).adjust == 0 || d is None,
-        ensures
-            final(self).inv(),
-            !final(self).closed@,
-            final(self).adjust == old(self).adjust,
-            final(self).written@ == old(self).written@ + reps(n as nat, d),
-            final(self).read@ == old(self).read@ + reps(n as nat, d),
-            rz(0, final(self).written@) == rz(0, old(self).written@) + rz(psum(old(self).read@), reps(n as nat, d)),
-    {
-        let ghost w0 = self.written@;
-        let ghost r0 = self.read@;
-        let ghost x = reps(n as nat, d);
-        proof {
-            lemma_rz_cat(0, w0, x);
-            lemma_run_sum(w0, n as nat, d);
-            lemma_run_sum(r0, n as nat, d);
-            if d is None {
-                lemma_rz_nulls(psum(w0), n as nat);
-                lemma_rz_nulls(psum(r0), n as nat);
-            } else {
-                // no debt: the two running sums agree, and so do the values
-                lemma_crop_add(psum(w0), 0);
-                lemma_crop_add(psum(r0), 0);
-                lemma_crop(psum(w0));
-                lemma_rz_crop(psum(w0), psum(r0), x);
-            }
-        }
-        if let Some(v) = d {
-            self.running = add_run(self.running, v, n, Ghost(psum(w0)));
-        }
-        self.written = Ghost(w0 + x);
-        self.read = Ghost(r0 + x);
-        proof {
-            let s = n * dval(d);
-            lemma_crop_add(psum(w0), s);
-            lemma_crop_add(self.running + self.adjust, 0);
-            if d is None {
-                assert(s == 0) by (nonlinear_arith) requires s == n * 0;
-            } else {
-                lemma_crop_add(psum(r0), s);
-                lemma_crop_add(psum(w0) + s, old(self).adjust as int);
-                lemma_crop_add(psum(w0) + old(self).adjust, s);
-            }
-            lemma_crop_add(psum(w0), old(self).adjust + s);
-            lemma_crop_add(psum(r0), s);
-            lemma_crop_add(old(self).running + old(self).adjust, s);
-            lemma_crop_add(psum(w0) + s, old(self).adjust as int);
-        }
-    }
-
     /// The cursor jumped over original deltas `x` without reading them,
     /// which the column carries unchanged; `running` is read back from the
     /// column (with no debt outstanding, the running sums agree).

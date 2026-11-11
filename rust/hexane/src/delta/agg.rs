@@ -931,6 +931,104 @@ fn slab_agg_wrapping<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
     w
 }
 
+/// Some delta of `ds` is null.
+pub open spec fn has_null(ds: Seq<Option<i64>>) -> bool {
+    exists|i: int| 0 <= i < ds.len() && #[trigger] ds[i] is None
+}
+
+/// A slab's deltas' sum, wrapping, and whether one of them is null: a
+/// slab a delete drops whole, for a delta edit's ledger.
+// a Verus loop with an invariant: `loop` + `match`
+#[allow(clippy::while_let_loop)]
+#[inline]
+pub(crate) fn slab_dsum<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
+    slab: &'a Slab<X::Tail>,
+) -> (r: (i64, bool))
+    requires
+        X::ok(*slab),
+        X::vals(*slab).len() <= usize::MAX,
+    ensures
+        r.0 == crop(psum(deltas_of::<_, B>(X::vals(*slab)))),
+        r.1 == has_null(deltas_of::<_, B>(X::vals(*slab))),
+{
+    let ghost v = X::vals(*slab);
+    let mut d = X::open(slab);
+    let mut sum: i64 = 0;
+    let mut null = false;
+    let ghost mut k: int = 0;
+    proof {
+        assert(v.skip(0) =~= v);
+        assert(deltas_of::<_, B>(v.take(0)) =~= Seq::<Option<i64>>::empty());
+        lemma_crop(0);
+    }
+    loop
+        invariant
+            v == X::vals(*slab),
+            v.len() <= usize::MAX,
+            d.inv(),
+            0 <= k <= v.len(),
+            d.rest() == v.skip(k),
+            sum == crop(psum(deltas_of::<_, B>(v.take(k)))),
+            null == has_null(deltas_of::<_, B>(v.take(k))),
+        ensures
+            k == v.len(),
+            sum == crop(psum(deltas_of::<_, B>(v.take(k)))),
+            null == has_null(deltas_of::<_, B>(v.take(k))),
+        decreases d.rest().len(),
+    {
+        match d.d_run_max(usize::MAX) {
+            Some(run) => {
+                let ghost ds = deltas_of::<_, B>(v.take(k));
+                let dv = B::to_opt(run.value);
+                proof {
+                    lemma_take_run::<_, B>(v, k, run.count as int, run.value);
+                    lemma_run_sum(ds, run.count as nat, dv);
+                }
+                if let Some(x) = dv {
+                    sum = add_run(sum, x, run.count, Ghost(psum(ds)));
+                } else {
+                    null = true;
+                    proof {
+                        assert(run.count as nat * dval(dv) == 0) by (nonlinear_arith)
+                            requires dval(dv) == 0;
+                    }
+                }
+                proof {
+                    let ds2 = ds + reps(run.count as nat, dv);
+                    if dv is None {
+                        assert(ds2[ds.len() as int] is None);
+                        assert(has_null(ds2));
+                    } else {
+                        if has_null(ds) {
+                            let i = choose|i: int| 0 <= i < ds.len() && #[trigger] ds[i] is None;
+                            assert(ds2[i] is None);
+                        }
+                        if has_null(ds2) {
+                            let i = choose|i: int| 0 <= i < ds2.len() && #[trigger] ds2[i] is None;
+                            if i >= ds.len() {
+                                assert(ds2[i] == dv);
+                            }
+                            assert(ds[i] is None);
+                        }
+                    }
+                    k = k + run.count;
+                    assert(v.skip(k - run.count).skip(run.count as int) =~= v.skip(k));
+                }
+            },
+            None => {
+                proof {
+                    assert(v.take(k) =~= v);
+                }
+                break;
+            },
+        }
+    }
+    proof {
+        assert(v.take(k) =~= v);
+    }
+    (sum, null)
+}
+
 /// Values `v` from `k` on starting with `c` copies of `x`: their deltas
 /// through `k + c` are those through `k`, then `c` copies of `x`'s.
 pub(crate) proof fn lemma_take_run<V: Copy, B: DeltaOps<V>>(v: Seq<V>, k: int, c: int, x: V)

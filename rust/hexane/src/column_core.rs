@@ -878,14 +878,7 @@ impl<E, X, B> ColumnCore<E, SlabAgg, SlabBTree<SlabAgg>, DeltaModel<X, B>> where
             let s = self.slabs_spec();
             lemma_lens_ok::<E, X>(s);
             lemma_vals_own::<E, X>(s);
-            lemma_btree_index(*ix);
-            assert forall|k: int| 0 <= k < s.len() implies (steps_fit(deltas_of::<_, B>(X::vals(s[k]))) ==> agg_of(
-                #[trigger] ix@[k],
-                deltas_of::<_, B>(X::vals(s[k])),
-            )) by {
-                assert(<DeltaModel<X, B> as Weigh<E, SlabAgg>>::wrel(ix.ws()[k], s[k]));
-            }
-            lemma_dix_ok::<X, B>(ix@, s);
+            lemma_ix_exact::<E, X, B>(*ix, s);
         }
         (slabs, ix)
     }
@@ -903,6 +896,7 @@ impl<E, X, B> ColumnCore<E, SlabAgg, SlabBTree<SlabAgg>, DeltaModel<X, B>> where
             l.inv(),
             l.orig@ == dslabs::<X, B>(self.slabs_spec()),
             l.l.read@ == l.orig@.take(at as int),
+            l.l.written@ == l.orig@.take(at as int),
             l.tracking@,
             l.l.adjust == 0,
             !l.l.closed@,
@@ -1145,6 +1139,158 @@ fn unreached<A>() -> A
         false,
 {
     unreachable!()
+}
+
+/// The delta readers' invariant for slabs `s` indexed by `ix`, whose
+/// weights are the slabs' (as a column's are) and whose running sums'
+/// steps fit `i64`.
+pub(crate) proof fn lemma_ix_exact<E, X, B>(ix: SlabBTree<SlabAgg>, s: Seq<Slab<E::Tail>>)
+    where
+        E: Slabs + for<'b> ReadsAgree<'b, X>,
+        X: for<'b> Decoders<'b, Tail = E::Tail>,
+        B: for<'b> DeltaWrite<'b, E, X>,
+    requires
+        all_ok::<E>(s),
+        ix.ok(),
+        ix.ws().len() == s.len(),
+        ws_ok::<E, SlabAgg, DeltaModel<X, B>>(ix.ws(), s),
+        steps_fit(dslabs::<X, B>(s)),
+        total(slab_lens(s)) <= usize::MAX,
+    ensures
+        dindex_ok::<X, B>(Some(&ix), s),
+{
+    crate::delta::ddomain::lemma_dslabs_len::<E, X, B>(s);
+    lemma_btree_index(ix);
+    assert forall|k: int| 0 <= k < s.len() implies (steps_fit(deltas_of::<_, B>(X::vals(s[k]))) ==> agg_of(
+        #[trigger] ix@[k],
+        deltas_of::<_, B>(X::vals(s[k])),
+    )) by {
+        assert(<DeltaModel<X, B> as Weigh<E, SlabAgg>>::wrel(ix.ws()[k], s[k]));
+    }
+    lemma_dix_ok::<X, B>(ix@, s);
+}
+
+/// The running value before item `pos` of the delta column of `slabs`
+/// indexed by `ix`, whose weights are its slabs' (as a column's are): an
+/// index jump where its running sums' steps fit `i64` (`exact`, so the
+/// index is), else a decode from the start. For an edit, which holds a
+/// column's parts.
+pub(crate) fn delta_running_at<'a, E, X, B>(
+    slabs: &'a [Slab<E::Tail>],
+    ix: &SlabBTree<SlabAgg>,
+    len: usize,
+    pos: usize,
+    exact: bool,
+) -> (r: i64)
+    where
+        E: Slabs + for<'b> ReadsAgree<'b, X>,
+        X: for<'b> Decoders<'b, Tail = E::Tail>,
+        B: for<'b> DeltaWrite<'b, E, X>,
+    requires
+        all_ok::<E>(slabs@),
+        ix.ok(),
+        ix.ws().len() == slabs@.len(),
+        ws_ok::<E, SlabAgg, DeltaModel<X, B>>(ix.ws(), slabs@),
+        exact ==> steps_fit(dslabs::<X, B>(slabs@)),
+        len == total(slab_lens(slabs@)),
+        0 < pos <= len,
+        slabs@.len() < usize::MAX,
+    ensures
+        r == crop(crate::delta::agg::psum(deltas_of::<_, B>(crate::iter_core::vals_of::<X>(slabs@).take(pos as int)))),
+{
+    let ghost s = slabs@;
+    proof {
+        lemma_lens_ok::<E, X>(s);
+        crate::delta::ddomain::lemma_dslabs_len::<E, X, B>(s);
+    }
+    if exact {
+        delta_running_exact::<E, X, B>(slabs, ix, len, pos)
+    } else {
+        delta_running_decode::<E, X, B>(slabs, len, pos)
+    }
+}
+
+/// [`delta_running_at`] through the index.
+fn delta_running_exact<'a, E, X, B>(slabs: &'a [Slab<E::Tail>], ix: &SlabBTree<SlabAgg>, len: usize, pos: usize) -> (r: i64)
+    where
+        E: Slabs + for<'b> ReadsAgree<'b, X>,
+        X: for<'b> Decoders<'b, Tail = E::Tail>,
+        B: for<'b> DeltaWrite<'b, E, X>,
+    requires
+        all_ok::<E>(slabs@),
+        ix.ok(),
+        ix.ws().len() == slabs@.len(),
+        ws_ok::<E, SlabAgg, DeltaModel<X, B>>(ix.ws(), slabs@),
+        steps_fit(dslabs::<X, B>(slabs@)),
+        len == total(slab_lens(slabs@)),
+        0 < pos <= len,
+        slabs@.len() < usize::MAX,
+    ensures
+        r == crop(crate::delta::agg::psum(deltas_of::<_, B>(crate::iter_core::vals_of::<X>(slabs@).take(pos as int)))),
+{
+    let ghost s = slabs@;
+    proof {
+        lemma_lens_ok::<E, X>(s);
+        crate::delta::ddomain::lemma_dslabs_len::<E, X, B>(s);
+        lemma_ix_exact::<E, X, B>(*ix, s);
+    }
+    let mut core = ICore::at::<X>(slabs, 0, 0, 0, len);
+    let mut running: i64 = 0;
+    proof {
+        core.lemma_here::<X>(s);
+        assert(crate::prefix_core::before::<X>(s, 0) =~= Seq::<<X::D as Decode>::Item>::empty());
+        assert(deltas_of::<_, B>(crate::prefix_core::before::<X>(s, 0)) =~= Seq::<Option<i64>>::empty());
+        lemma_crop(0);
+    }
+    d_nth::<X, B>(&mut core, slabs, Some(ix), pos - 1, &mut running);
+    proof {
+        assert(crate::prefix_core::before::<X>(s, pos as int) == crate::iter_core::vals_of::<X>(s).take(pos as int));
+    }
+    running
+}
+
+/// [`delta_running_at`] by decoding from the start.
+#[allow(unused_variables)] // `len` is for the spec
+fn delta_running_decode<'a, E, X, B>(slabs: &'a [Slab<E::Tail>], len: usize, pos: usize) -> (r: i64)
+    where
+        E: Slabs + for<'b> ReadsAgree<'b, X>,
+        X: for<'b> Decoders<'b, Tail = E::Tail>,
+        B: for<'b> DeltaWrite<'b, E, X>,
+    requires
+        all_ok::<E>(slabs@),
+        len == total(slab_lens(slabs@)),
+        0 < pos <= len,
+        slabs@.len() < usize::MAX,
+    ensures
+        r == crop(crate::delta::agg::psum(deltas_of::<_, B>(crate::iter_core::vals_of::<X>(slabs@).take(pos as int)))),
+{
+    let ghost s = slabs@;
+    proof {
+        lemma_lens_ok::<E, X>(s);
+    }
+    let mut core = ICore::at::<X>(slabs, 0, 0, 0, pos);
+    let mut running: i64 = 0;
+    proof {
+        core.lemma_here::<X>(s);
+        assert(crate::prefix_core::before::<X>(s, 0) =~= Seq::<<X::D as Decode>::Item>::empty());
+        assert(deltas_of::<_, B>(crate::prefix_core::before::<X>(s, 0)) =~= Seq::<Option<i64>>::empty());
+        lemma_crop(0);
+    }
+    while core.pos < pos
+        invariant
+            s == slabs@,
+            crate::delta::diter::at_run::<X, B>(core, running, s),
+            core.pos <= pos,
+            core.out::<X>(s).len() == pos - core.pos,
+        decreases pos - core.pos,
+    {
+        // the window is not empty, so a run comes
+        let _ = crate::delta::diter::d_next_run::<X, B>(&mut core, slabs, usize::MAX, &mut running);
+    }
+    proof {
+        assert(crate::prefix_core::before::<X>(s, pos as int) == crate::iter_core::vals_of::<X>(s).take(pos as int));
+    }
+    running
 }
 
 } // verus!

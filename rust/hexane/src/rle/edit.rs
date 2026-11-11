@@ -1175,6 +1175,45 @@ pub(crate) fn pass<'s, L, G>(e: &mut RleRebuild<L>, s: &'s Slab, n: usize, runs:
     left
 }
 
+/// A slab's values, owned, are its values read, lifted.
+pub(crate) proof fn lemma_vals_read<'s, L: for<'t> Lift<'t, W = L>>(s: Slab, a: int, b: int)
+    requires
+        RleModel::<L>::ok(s),
+        0 <= a <= b <= RleModel::<L>::vals(s).len(),
+    ensures
+        lift_seq::<L>(slab_values::<<L as WriteOps<'s>>::R>(s.data@).subrange(a, b)) == RleModel::<L>::vals(s).subrange(
+            a,
+            b,
+        ),
+{
+    lemma_unlift_slab::<L>(s.data@);
+    lemma_lift_slab::<L>(s.data@);
+    let lv = slab_values::<<L as WriteOps<'s>>::R>(s.data@);
+    assert(lift_seq::<L>(lv.subrange(a, b)) =~= slab_values::<<L as WriteOps<'static>>::R>(s.data@).subrange(a, b));
+}
+
+/// The value a reader of slab `s` stands at, as read.
+pub(crate) fn peek_at<'s, L: for<'t> Lift<'t, W = L>>(s: &'s Slab, st: &RleDecoderState, Ghost(k): Ghost<nat>) -> (v: VOf<'s, L>)
+    requires
+        RleModel::<L>::ok(*s),
+        RleModel::<L>::st_at(s.data@, *st, k),
+        k < RleModel::<L>::vals(*s).len(),
+    ensures
+        L::lift(v) == RleModel::<L>::vals(*s)[k as int],
+{
+    proof {
+        lemma_vals_read::<L>(*s, k as int, k as int + 1);
+    }
+    let mut d = Dec::<'s, <L as WriteOps<'s>>::R>::resume(s.data.as_slice(), st);
+    let r = d.next();
+    proof {
+        let lv = slab_values::<<L as WriteOps<'s>>::R>(s.data@);
+        assert(lv.subrange(k as int, k as int + 1)[0] == lv[k as int]);
+        assert(lift_seq::<L>(lv.subrange(k as int, k as int + 1))[0] == L::lift(lv[k as int]));
+    }
+    r.unwrap()
+}
+
 /// Drop `n` of the slab's values from the rebuild, telling `f` each run:
 /// `Visitor::discard` for RLE slabs.
 #[inline(always)]

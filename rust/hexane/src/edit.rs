@@ -153,18 +153,6 @@ where
         Edit { col, core }
     }
 
-    /// The column's parts as the cursor has left them: its slabs, their
-    /// index and its item count.
-    pub(crate) fn parts(
-        &self,
-    ) -> (
-        &[crate::column::Slab<crate::column::TailOf<T, C>>],
-        &Idx,
-        usize,
-    ) {
-        self.core.parts()
-    }
-
     /// The cursor's position in the column's original coordinates — the
     /// coordinate system [`seek`](Self::seek) takes.
     pub fn pos(&self) -> usize {
@@ -174,11 +162,6 @@ where
     /// The cursor's position in the column as edited so far.
     pub fn out_pos(&self) -> usize {
         self.core.out_pos()
-    }
-
-    /// Original items still ahead of the cursor.
-    pub(crate) fn remaining(&self) -> usize {
-        self.core.remaining()
     }
 
     /// How many slabs this cursor has rebuilt. One per slab *touched*,
@@ -300,14 +283,6 @@ where
     /// drop.
     pub fn finish(&mut self) {
         self.core.close();
-    }
-
-    /// End the edit, closed already and checked to have left the column
-    /// in its weight model's domain, which spares the drop its check: a
-    /// [`DeltaEdit`](crate::delta::DeltaEdit)'s end, which checks it more
-    /// cheaply.
-    pub(crate) fn end_in_domain(&mut self) {
-        self.core.end_in_domain(&mut self.col.core);
     }
 }
 

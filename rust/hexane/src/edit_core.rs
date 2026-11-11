@@ -70,6 +70,20 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> EditCore<E, W, I, G> {
         &&& self.parts matches Some(p) ==> state_ok::<E, W, I, G>(p, self.cur, self.max_segments)
     }
 
+    /// The cursor stands within the original values.
+    pub(crate) proof fn lemma_at(&self)
+        requires
+            self.inv(),
+        ensures
+            0 <= self.at() <= self.orig_vals().len(),
+    {
+    }
+
+    /// The edit's segment budget.
+    pub(crate) closed spec fn budget(&self) -> usize {
+        self.max_segments
+    }
+
     /// The edit holds the column's parts (until it ends).
     pub(crate) closed spec fn held(&self) -> bool {
         self.parts is Some
@@ -114,7 +128,8 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> EditCore<E, W, I, G> {
 
     /// `st` is a reader of `slab` at the next original value.
     pub(crate) open spec fn reads(&self, st: E::State, slab: Slab<E::Tail>) -> bool {
-        exists|k: nat|
+        &&& E::ok(slab)
+        &&& exists|k: nat|
             #![trigger E::st_at(slab.data@, st, k)]
             k < E::vals(slab).len() && E::st_at(slab.data@, st, k) && E::vals(slab)[k as int]
                 == self.orig_vals()[self.at()]
@@ -136,6 +151,8 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> EditCore<E, W, I, G> {
             e.orig_vals() == old(col)@,
             e.at() == at,
             e.written() == old(col)@.take(at as int),
+            old(col).ready(),
+            e.budget() == old(col).budget(),
     {
         if at > col.len() {
             out_of_bounds();
@@ -161,13 +178,19 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> EditCore<E, W, I, G> {
 
     /// The cursor's position in the column as edited so far.
     #[inline(always)]
-    pub(crate) fn out_pos(&self) -> usize {
+    pub(crate) fn out_pos(&self) -> (r: usize)
+        ensures
+            self.inv() && self.held() ==> r == self.written().len(),
+    {
         self.cur.out
     }
 
     /// Original items still ahead of the cursor.
     #[inline(always)]
-    pub(crate) fn remaining(&self) -> usize {
+    pub(crate) fn remaining(&self) -> (r: usize)
+        ensures
+            self.inv() ==> r == self.orig_vals().len() - self.at(),
+    {
         self.cur.remaining
     }
 
@@ -175,19 +198,6 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> EditCore<E, W, I, G> {
     #[inline(always)]
     pub(crate) fn rebuilds(&self) -> usize {
         self.cur.rebuilds
-    }
-
-    /// The column's slabs, index and item count, as the cursor has left
-    /// them.
-    #[inline(always)]
-    pub(crate) fn parts(&self) -> (&[Slab<E::Tail>], &I, usize) {
-        match &self.parts {
-            Some(p) => (p.slabs.as_slice(), &p.index, p.total_len),
-            None => {
-                lost();
-                unreached()
-            },
-        }
     }
 
     /// Move forward `n` items, carrying them, `f` told of each run;
@@ -205,6 +215,7 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> EditCore<E, W, I, G> {
             ),
             // `f` is shown all of them but the last `jumped`
             jumped <= old(self).step_len(n),
+            jumped > 0 ==> !final(self).rebuilding(),
             final(f).seen() == old(f).seen() + old(self).orig_vals().subrange(
                 old(self).at(),
                 old(self).at() + old(self).step_len(n) - jumped,
@@ -299,7 +310,7 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> EditCore<E, W, I, G> {
         requires
             self.inv(),
         ensures
-            r matches Some((st, slab)) ==> self.reads(*st, *slab),
+            r matches Some((st, slab)) ==> self.reads(*st, *slab) && self.at() < self.orig_vals().len(),
             r is None ==> self.at() == self.orig_vals().len() || !self.rebuilding(),
     {
         if self.cur.remaining == 0 || !self.cur.dirty {
@@ -328,8 +339,9 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> EditCore<E, W, I, G> {
             old(self).inv(),
         ensures
             final(self).inv(),
-            r matches Some((st, slab)) ==> final(self).reads(*st, *slab),
+            r matches Some((st, slab)) ==> final(self).reads(*st, *slab) && old(self).at() < old(self).orig_vals().len(),
             r is None ==> old(self).at() == old(self).orig_vals().len(),
+            final(self).rebuilding() == old(self).rebuilding(),
             final(self).held() == old(self).held(),
             final(self).orig_vals() == old(self).orig_vals(),
             final(self).at() == old(self).at(),
@@ -356,10 +368,48 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> EditCore<E, W, I, G> {
         }
     }
 
+    /// The column's parts, with no rebuild open: a column (`col_ok`)
+    /// holding the edit's values.
+    #[inline(always)]
+    pub(crate) fn clean_parts(&self) -> (r: (&Vec<Slab<E::Tail>>, &I, usize))
+        requires
+            self.inv(),
+            self.held(),
+            !self.rebuilding(),
+        ensures
+            crate::cursor::col_ok::<E, W, I, G>(r.0@, *r.1, r.2, self.budget()),
+            r.0@ == self.slabs_now(),
+            vals_of::<E>(r.0@) == self.now(),
+            r.2 == self.now().len(),
+            r.2 + 3 <= usize::MAX,
+    {
+        match &self.parts {
+            Some(p) => {
+                proof {
+                    self.cur.lemma_clean(p.slabs@);
+                    lemma_vals_total::<E>(p.slabs@);
+                }
+                (&p.slabs, &p.index, p.total_len)
+            },
+            None => {
+                lost();
+                unreached()
+            },
+        }
+    }
+
+    /// The slabs the edit holds, as the cursor has left them.
+    pub(crate) closed spec fn slabs_now(&self) -> Seq<Slab<E::Tail>> {
+        match self.parts {
+            Some(p) => p.slabs@,
+            None => Seq::empty(),
+        }
+    }
+
     /// The edit is closed and its column in the weight model's domain
     /// (as a delta edit checks before it ends).
-    pub(crate) closed spec fn clean_in_domain(&self) -> bool {
-        self.parts matches Some(p) ==> !self.rebuilding() && G::dom_ok(p.slabs@)
+    pub(crate) open spec fn clean_in_domain(&self) -> bool {
+        self.held() ==> !self.rebuilding() && G::dom_ok(self.slabs_now())
     }
 
     /// Close the edit: the parts, a column again; `None` if they were

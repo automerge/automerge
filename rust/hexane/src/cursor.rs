@@ -1707,6 +1707,8 @@ impl<E: Slabs> Cursor<E> {
                     old(self).orig as int,
                     old(self).orig + k - jumped,
                 )
+                // a jump is the last step, and leaves no rebuild open
+                &&& jumped > 0 ==> !final(self).dirty
             }),
     {
         let ghost c0 = *self;
@@ -1737,10 +1739,12 @@ impl<E: Slabs> Cursor<E> {
                 jumped <= self.orig - c0.orig,
                 self.p@ == c0.p@ + c0.o@.subrange(c0.orig as int, self.orig as int),
                 f.seen() == old(f).seen() + c0.o@.subrange(c0.orig as int, self.orig - jumped),
+                jumped > 0 ==> !self.dirty,
             ensures
                 self.orig == c0.orig + n || (self.remaining == 0 && self.orig <= c0.orig + n),
                 jumped <= self.orig - c0.orig,
                 f.seen() == old(f).seen() + c0.o@.subrange(c0.orig as int, self.orig - jumped),
+                jumped > 0 ==> !self.dirty,
             decreases want * 2 + if self.dirty { 1int } else { 0 },
         {
             if !self.dirty {

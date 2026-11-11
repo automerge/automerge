@@ -2847,6 +2847,12 @@ impl<A: SlabAggregate> SlabBTree<A> {
             final(self).root == old(self).root,
             final(self).total_slabs == old(self).total_slabs,
     {
+        // the subtrees' readings are reasoned about through lemmas alone:
+        // unfolding them here only gives the solver room to wander
+        hide(SlabBTree::slabs);
+        hide(SlabBTree::children_slabs);
+        hide(SlabBTree::owned);
+        hide(SlabBTree::children_owned);
         let ghost hc = (h - 1) as nat;
         let ghost all = children@;
         let ghost n = all.len() as int;
@@ -2858,6 +2864,8 @@ impl<A: SlabAggregate> SlabBTree<A> {
         proof { lemma_chunk(num as int, b, r, 0); }
         let mut out: Vec<ChildSlot<A>> = Self::placeholders(num);
         proof {
+            reveal_with_fuel(SlabBTree::children_slabs, 1);
+            reveal_with_fuel(SlabBTree::children_owned, 1);
             self.lemma_slots_nil(h);
             assert(out@.subrange(num as int, num as int) =~= Seq::<ChildSlot<A>>::empty());
             assert forall|x: NodeId| #[trigger] owned_all.contains(x) implies old(self).node_spec(x) is Some by {

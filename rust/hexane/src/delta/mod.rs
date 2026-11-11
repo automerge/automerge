@@ -3,6 +3,7 @@ pub(crate) mod dbound;
 pub(crate) mod ddomain;
 mod decoder;
 pub(crate) mod dedit;
+pub(crate) mod dedit_core;
 pub(crate) mod dfind;
 pub(crate) mod diter;
 pub(crate) mod dscan;
@@ -11,14 +12,11 @@ pub mod indexed;
 pub(crate) mod stream;
 
 pub use decoder::DeltaDecoder;
-use vstd::prelude::Ghost;
 
 use crate::column::{normalize_range_max, Dx, Iter, IterState};
 use crate::rle::state::WOps;
 use crate::{Codec, Leb128};
-use dbound::SpanLedger;
-use ddomain::{slabs_fit, SpliceItem, SpliceItems, ValueItems};
-use dedit::run_sum;
+use ddomain::{SpliceItem, SpliceItems, ValueItems};
 use diter::{d_next, d_next_run, d_nth};
 use dscan::{d_scan, d_scan_null};
 use dseek::{d_seek, d_seek_null};
@@ -1140,14 +1138,11 @@ impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
 
 // ── DeltaEdit ───────────────────────────────────────────────────────────────
 
-/// The inner cursor a [`DeltaEdit`] drives — an ordinary column cursor
-/// over the delta storage.
-type InnerEdit<'a, T, C> = crate::edit::Edit<
-    'a,
-    <T as DeltaValue>::Inner,
-    C,
-    IndexedDeltaWeightFn,
-    crate::btree::SlabBTree<crate::btree::SlabAgg>,
+/// A delta edit's verified core, over the storage of a column of `T`.
+type DCore<T, C> = dedit_core::DeltaEditCore<
+    crate::rle::state::WOps<<T as DeltaValue>::Inner, <T as DeltaValue>::Inner, C>,
+    crate::rle::model::Ops<<T as DeltaValue>::Inner, C>,
+    DB<<T as DeltaValue>::Inner, C>,
 >;
 
 /// A cursor over a [`DeltaColumn`], in realized values.
@@ -1170,17 +1165,17 @@ type InnerEdit<'a, T, C> = crate::edit::Edit<
 /// The delta storage is RLE for every codec, but only the `Leb128`
 /// instance says so in the type system, which is why the edit API
 /// restates it.
+///
+/// The cursor and its ledger are verified (`dedit_core::DeltaEditCore`):
+/// what the column cursor carries, deletes and jumps over keeps the
+/// ledger, and the ledger the deltas it writes. This struct only converts
+/// between `T` and the `i64` the core works in.
 pub struct DeltaEdit<'a, T: DeltaValue, C: Codec = Leb128>
 where
     T::Inner: crate::ColumnValueRef<Encoding<C> = crate::RleEncoding<T::Inner, C>>,
 {
-    inner: InnerEdit<'a, T, C>,
-    /// the realized value before the cursor in the column being written,
-    /// and what the next non-null original delta owes: the original
-    /// running value minus that one (verified: `dedit::Ledger`); and a
-    /// bound on the values the column holds once the edit is done
-    /// (verified: `dbound::SpanLedger`)
-    ledger: SpanLedger,
+    col: &'a mut InnerColumn<T, C>,
+    core: DCore<T, C>,
     _phantom: PhantomData<T>,
 }
 
@@ -1189,96 +1184,39 @@ where
     T::Inner: crate::ColumnValueRef<Encoding<C> = crate::RleEncoding<T::Inner, C>>,
 {
     fn new(col: &'a mut InnerColumn<T, C>, at: usize) -> Self {
-        assert!(at <= col.len(), "edit_at out of bounds");
-        // before the cursor borrows the column: the realized value it
-        // starts from, a bound on the column's values, and its deltas
-        // (verified, `ColumnCore::delta_ledger`)
-        let ledger = col.core.delta_ledger(at);
+        // verified (`DeltaEditCore::begin`): the cursor and its ledger,
+        // started from the column
+        let core = DCore::<T, C>::begin(&mut col.core, at);
         DeltaEdit {
-            inner: col.edit_at(at),
-            ledger,
+            col,
+            core,
             _phantom: PhantomData,
         }
     }
 
-    /// The realized value before item `at` of the column of `slabs`,
-    /// indexed by `index`, `len` items long: an index jump (verified,
-    /// `dedit::d_nth`, given the column's invariant).
-    fn prefix_in(
-        slabs: &[crate::column::Slab<crate::column::TailOf<T::Inner, C>>],
-        index: &crate::btree::SlabBTree<crate::btree::SlabAgg>,
-        len: usize,
-        at: usize,
-    ) -> i64 {
-        if at == 0 || len == 0 || slabs.is_empty() {
-            return 0;
-        }
-        let (si, offset) = crate::index::IndexOps::ix_find(index, 0);
-        let mut core = crate::iter_core::ICore::at::<Dx<T::Inner, C>>(slabs, si, offset, 0, len);
-        let mut running = 0;
-        d_nth::<Dx<T::Inner, C>, DB<T::Inner, C>>(
-            &mut core,
-            slabs,
-            Some(index),
-            at - 1,
-            &mut running,
-        );
-        running
-    }
-
     /// The cursor's position in the column's original coordinates.
     pub fn pos(&self) -> usize {
-        self.inner.pos()
+        self.core.edit.pos()
     }
 
     /// Move forward to original position `to`, carrying everything in
     /// between through unchanged. Forward-only, like the inner cursor.
     pub fn seek(&mut self, to: usize) -> &mut Self {
-        let n = to.saturating_sub(self.inner.pos());
+        let n = to.saturating_sub(self.pos());
         self.advance(n)
     }
 
     /// Move forward `n` items from wherever the cursor is.
     pub fn advance(&mut self, n: usize) -> &mut Self {
-        let mut want = n;
-        // The fix-up lands on the first non-null item carried across, so
-        // it is paid *out of* this move, not before it: settling first
-        // and then moving `n` would carry one item too many.
-        while want > 0 && self.ledger.l.adjust != 0 && self.pay_step() {
-            want -= 1;
-        }
-        if want == 0 {
-            return self;
-        }
-        // with the debt paid, the items carried keep their values
-        let ledger = &mut self.ledger;
-        let jumped = self
-            .inner
-            .advance_with(want, |v, count| ledger.carry(T::Inner::to_opt(v), count));
-        if jumped > 0 {
-            // The cursor jumped whole slabs without reading them, so the
-            // accumulator lost track. A jump closes any open rebuild, so
-            // the column is consistent right here and can be asked — and
-            // it has to be asked *now*: the next op may open a rebuild,
-            // after which the index no longer describes the column.
-            let (slabs, index, len) = self.inner.parts();
-            let running = Self::prefix_in(slabs, index, len, self.inner.out_pos());
-            self.ledger.jump(running, Ghost::assume_new());
-        }
+        self.core.advance(n);
         self
     }
 
     /// The realized value at the cursor, without consuming it.
     pub fn peek(&mut self) -> Option<T> {
-        let cur = self.inner.peek().map(T::Inner::to_opt)?;
-        match cur {
+        match self.core.peek_value()? {
             None => Some(T::null_value()),
-            Some(d) => {
-                // the original delta is relative to the original running
-                // value, which is what the fix-up has yet to close
-                let orig = self.ledger.next_value(d);
-                Some(T::try_from_i64(orig).expect("a stored value is in the domain"))
-            }
+            Some(v) => Some(T::try_from_i64(v).expect("a stored value is in the domain")),
         }
     }
 
@@ -1294,21 +1232,8 @@ where
             return self;
         }
         match value.to_i64() {
-            None => {
-                // nulls hold no delta and leave the running value alone
-                self.ledger.insert_nulls(n);
-                self.inner.insert_run(T::Inner::from_opt(None), n);
-            }
-            Some(v) => {
-                // the original values after the cursor are still relative
-                // to where they were; the ledger owes the difference (and
-                // the value widens its bound)
-                let d = self.ledger.insert_value(v, n, true);
-                self.inner.insert(T::Inner::from_opt(Some(d)));
-                if n > 1 {
-                    self.inner.insert_run(T::Inner::from_opt(Some(0)), n - 1);
-                }
-            }
+            None => self.core.insert_nulls(n),
+            Some(v) => self.core.insert_value(v, n),
         }
         self
     }
@@ -1327,27 +1252,9 @@ where
                 continue;
             }
             run.check_domain::<T>();
-            let Some(d) = run.delta else {
-                // a null run holds no delta and leaves the running value
-                // where it is
-                self.ledger.insert_nulls(run.count);
-                self.inner.insert_run(T::Inner::from_opt(None), run.count);
-                continue;
-            };
-            // the original values after the cursor are still relative to
-            // where they were; the ledger owes the difference (and the
-            // run's ends widen its bound)
-            let first = self.ledger.insert_run(run.prefix, d, run.count, true);
-            if first == d {
-                // already anchored where this run expects: copy verbatim
-                self.inner
-                    .insert_run(T::Inner::from_opt(Some(d)), run.count);
-            } else {
-                self.inner.insert(T::Inner::from_opt(Some(first)));
-                if run.count > 1 {
-                    self.inner
-                        .insert_run(T::Inner::from_opt(Some(d)), run.count - 1);
-                }
+            match run.delta {
+                None => self.core.insert_nulls(run.count),
+                Some(d) => self.core.insert_run(run.prefix, d, run.count),
             }
         }
         self
@@ -1355,25 +1262,9 @@ where
 
     /// Delete `n` items at the cursor.
     pub fn delete(&mut self, n: usize) -> &mut Self {
-        if n == 0 {
-            return self;
+        if n > 0 {
+            self.core.delete(n);
         }
-        // one cell, two closures: the runs of a partly-consumed slab and
-        // the aggregate of one dropped whole both land in the same sum
-        let sum = std::cell::Cell::new(0i64);
-        self.inner.delete_with(
-            n,
-            |v, count| sum.set(sum.get().wrapping_add(run_sum(T::Inner::to_opt(v), count))),
-            // a slab dropped whole: its aggregate holds the sum of every
-            // delta in it
-            |s| {
-                let w = <IndexedDeltaWeightFn as crate::column::WeightFn<T::Inner, C>>::compute(s);
-                sum.set(sum.get().wrapping_add(w.total))
-            },
-        );
-        // the deleted items are gone from the output but the ones after
-        // them still decode against their sum
-        self.ledger.delete(sum.get(), Ghost::assume_new());
         self
     }
 
@@ -1407,55 +1298,6 @@ where
     pub fn finish(self) {
         // dropping it pays, writes back and checks the span
     }
-
-    // ── internals ───────────────────────────────────────────────────
-
-    /// Delete the item at the cursor and return the delta it held.
-    ///
-    /// A single item can still be a whole slab — a cursor resting at a
-    /// slab's end deletes into the next one — and then its aggregate is
-    /// what reports it.
-    fn take_delta(&mut self) -> i64 {
-        let d = std::cell::Cell::new(0i64);
-        self.inner.delete_with(
-            1,
-            |v, _| d.set(d.get().wrapping_add(T::Inner::to_opt(v).unwrap_or(0))),
-            |s| {
-                let w = <IndexedDeltaWeightFn as crate::column::WeightFn<T::Inner, C>>::compute(s);
-                d.set(d.get().wrapping_add(w.total))
-            },
-        );
-        d.get()
-    }
-
-    /// Hand the debt to the next real delta, one item at a time. Returns
-    /// whether it consumed one.
-    fn pay_step(&mut self) -> bool {
-        if self.inner.remaining() == 0 {
-            // nothing follows, so nothing decodes against the cursor
-            self.ledger.close();
-            return false;
-        }
-        // a null holds no delta: carry it and keep looking
-        if T::NULLABLE && self.inner.peek().map(T::Inner::to_opt) == Some(None) {
-            self.inner.advance(1);
-            self.ledger.carry(None, 1);
-            return true;
-        }
-        let d = self.take_delta();
-        let paid = self.ledger.pay(d);
-        self.inner.insert(T::Inner::from_opt(Some(paid)));
-        true
-    }
-
-    /// Pay the debt wherever it falls: the next non-null delta absorbs
-    /// what the edits before it owe, so every realized value after the
-    /// cursor is what it was. Unbounded, for a cursor that is closing.
-    fn settle(&mut self) {
-        while self.ledger.l.adjust != 0 {
-            self.pay_step();
-        }
-    }
 }
 
 impl<T: DeltaValue, C: Codec> Drop for DeltaEdit<'_, T, C>
@@ -1463,19 +1305,15 @@ where
     T::Inner: crate::ColumnValueRef<Encoding<C> = crate::RleEncoding<T::Inner, C>>,
 {
     fn drop(&mut self) {
-        // a dropped cursor still owes the boundary
-        self.settle();
-        self.inner.finish();
-        if !std::thread::panicking() {
-            // verified (`SpanLedger::fits`): where the bound fits, so do
-            // the column's values
-            let ledger = &self.ledger;
-            let (slabs, _, len) = self.inner.parts();
-            check_span::<T, C>(slabs, len, || ledger.fits(T::MIN_I64, T::MAX_I64));
-            // which puts the column in its domain, for the inner cursor's
-            // end (`EditCore::end_in_domain`'s precondition)
-            self.inner.end_in_domain();
+        // a panic mid-edit leaves the column without its parts, so it
+        // panics when used again rather than hold what the panic left
+        if std::thread::panicking() {
+            return;
         }
+        // verified (`DeltaEditCore::end`): a dropped cursor still owes the
+        // boundary; it pays it, writes back, checks the column's values in
+        // `T`'s domain, and hands the column its parts back
+        self.core.end(&mut self.col.core, T::MIN_I64, T::MAX_I64);
     }
 }
 
@@ -1542,29 +1380,6 @@ impl DeltaRun {
 }
 
 // ── DeltaIter ──────────────────────────────────────────────────────────────
-
-/// Panic unless the column's values lie in `T`'s domain, within a range
-/// less than 2^63 wide (the [`DeltaValue`] domain contract, which `load`
-/// holds data to), and it holds at most `i64::MAX` items: then every step
-/// between two of its running sums fits `i64`, the column's invariant
-/// (`EditCore::end_in_domain`'s precondition, for [`DeltaEdit`]). `fits` says
-/// whether a bound on the values shows they do; only where it doesn't
-/// are they read (verified, `ddomain::slabs_fit`).
-fn check_span<T: DeltaValue, C: Codec>(
-    slabs: &[crate::column::Slab<crate::column::TailOf<T::Inner, C>>],
-    len: usize,
-    fits: impl FnOnce() -> bool,
-) {
-    if len as u64 <= i64::MAX as u64 && fits() {
-        return;
-    }
-    if len as u64 > i64::MAX as u64 {
-        panic!("a delta column of more than i64::MAX items");
-    }
-    if !slabs_fit::<Dx<T::Inner, C>, DB<T::Inner, C>>(slabs, len, T::MIN_I64, T::MAX_I64) {
-        panic!("delta values out of domain: they would span 2^63 or more");
-    }
-}
 
 type InnerColumn<T, C = Leb128> = Column<<T as DeltaValue>::Inner, C, IndexedDeltaWeightFn>;
 

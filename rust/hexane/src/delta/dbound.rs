@@ -293,6 +293,7 @@ impl SpanLedger {
             !s.l.closed@,
             s.orig@ == orig,
             s.l.read@ == before,
+            s.l.written@ == before,
     {
         proof {
             if track && narrow(lo as int, hi as int) {
@@ -308,34 +309,10 @@ impl SpanLedger {
         requires
             self.inv(),
             !self.l.closed@,
+        ensures
+            Some(v) == realize(psum(self.l.read@), Some(d)),
     {
         self.l.next_value(d)
-    }
-
-    /// Carry the next `n` original items, of delta `d` (see
-    /// [`Ledger::carry`]).
-    #[inline(always)]
-    pub(crate) fn carry(&mut self, d: Option<i64>, n: usize)
-        requires
-            old(self).inv(),
-            !old(self).l.closed@,
-            old(self).l.adjust == 0 || d is None,
-            old(self).l.read@.len() + n <= old(self).orig@.len(),
-            old(self).orig@.subrange(old(self).l.read@.len() as int, old(self).l.read@.len() + n) == reps(n as nat, d),
-        ensures
-            final(self).inv(),
-            !final(self).l.closed@,
-            final(self).l.adjust == old(self).l.adjust,
-            final(self).tracking == old(self).tracking,
-    {
-        let ghost (w0, r0, orig) = (self.l.written@, self.l.read@, self.orig@);
-        self.l.carry(d, n);
-        proof {
-            lemma_next(orig, r0, reps(n as nat, d), self.lo as int, self.hi as int);
-            if self.tracking@ && narrow(self.lo as int, self.hi as int) {
-                lemma_cat(rz(0, w0), rz(psum(r0), reps(n as nat, d)), self.lo as int, self.hi as int);
-            }
-        }
     }
 
     /// The cursor jumped over the next original deltas `x` (see
@@ -354,6 +331,9 @@ impl SpanLedger {
             !final(self).l.closed@,
             final(self).l.adjust == 0,
             final(self).tracking == old(self).tracking,
+            final(self).orig == old(self).orig,
+            final(self).l.written@ == old(self).l.written@ + x,
+            final(self).l.read@ == old(self).l.read@ + x,
     {
         let ghost (w0, r0, orig) = (self.l.written@, self.l.read@, self.orig@);
         self.l.jump(running, Ghost(x));
@@ -377,6 +357,9 @@ impl SpanLedger {
             final(self).inv(),
             final(self).l.closed@ == old(self).l.closed@,
             final(self).tracking == old(self).tracking,
+            final(self).orig == old(self).orig,
+            final(self).l.read@ == old(self).l.read@,
+            final(self).l.written@ == old(self).l.written@ + (seq![Some(d)] + reps((n - 1) as nat, Some(0i64))),
     {
         let ghost (w0, lo0, hi0) = (self.l.written@, self.lo as int, self.hi as int);
         let d = self.l.insert_value(v, n);
@@ -410,6 +393,9 @@ impl SpanLedger {
             final(self).l.closed@ == old(self).l.closed@,
             final(self).l.adjust == old(self).l.adjust,
             final(self).tracking == old(self).tracking,
+            final(self).orig == old(self).orig,
+            final(self).l.read@ == old(self).l.read@,
+            final(self).l.written@ == old(self).l.written@ + reps(n as nat, None),
     {
         let ghost w0 = self.l.written@;
         self.l.insert_nulls(n);
@@ -434,6 +420,9 @@ impl SpanLedger {
             final(self).l.closed@ == old(self).l.closed@,
             final(self).tracking == old(self).tracking,
             prefix == old(self).l.running ==> first == d,
+            final(self).orig == old(self).orig,
+            final(self).l.read@ == old(self).l.read@,
+            final(self).l.written@ == old(self).l.written@ + (seq![Some(first)] + reps((n - 1) as nat, Some(d))),
     {
         let ghost (w0, lo0, hi0) = (self.l.written@, self.lo as int, self.hi as int);
         let first = self.l.insert_run(prefix, d, n);
@@ -492,6 +481,9 @@ impl SpanLedger {
             final(self).inv(),
             !final(self).l.closed@,
             final(self).tracking == old(self).tracking,
+            final(self).orig == old(self).orig,
+            final(self).l.written@ == old(self).l.written@,
+            final(self).l.read@ == old(self).l.read@ + ds,
     {
         let ghost (r0, orig) = (self.l.read@, self.orig@);
         self.l.delete(sum, Ghost(ds));
@@ -514,6 +506,9 @@ impl SpanLedger {
             !final(self).l.closed@,
             final(self).l.adjust == 0,
             final(self).tracking == old(self).tracking,
+            final(self).orig == old(self).orig,
+            final(self).l.read@ == old(self).l.read@.push(Some(d)),
+            final(self).l.written@ == old(self).l.written@.push(Some(nd)),
     {
         let ghost (w0, r0, orig) = (self.l.written@, self.l.read@, self.orig@);
         let nd = self.l.pay(d);
@@ -540,6 +535,9 @@ impl SpanLedger {
             final(self).l.closed@,
             final(self).l.adjust == 0,
             final(self).tracking == old(self).tracking,
+            final(self).orig == old(self).orig,
+            final(self).l.written@ == old(self).l.written@,
+            final(self).l.read@ == old(self).l.read@,
     {
         self.l.close();
     }
