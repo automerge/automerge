@@ -1,6 +1,6 @@
-//! What a delta column's edit cursor needs from the column cursor,
-//! verified with Verus: the sum of the deltas it carries, deletes or
-//! drops whole, as it moves.
+//! A delta column's edit cursor ([`DeltaEdit`]), verified with Verus:
+//! the column cursor over its storage ([`EditCore`]) and the ledger of
+//! the values it writes (`dbound::SpanLedger`).
 //!
 //! The column cursor shows its visitor every item it carries or deletes
 //! (`cursor::Visitor::seen`). [`DSumVisit`] is that visitor for a delta
@@ -8,10 +8,26 @@
 //! [`DSum`], which adds up the deltas of the runs the walk shows it, and
 //! weighs a slab dropped whole (`slab_agg`, whose total is the slab's
 //! deltas' sum, wrapping). Its type invariant: the sum is that of the
-//! deltas of all it has seen (`dvos`), wrapping.
+//! deltas of all it has seen (`dvos`), wrapping. So the ledger hears
+//! exactly what the cursor carried, deleted or jumped over.
+//!
+//! Proved, of [`DeltaEditCore`]: its invariant (the ledger's original
+//! deltas are the column's, those it has passed are the cursor's, and
+//! those it has written are the edit's) holds from `begin` through every
+//! step; each step is stated by the column's values as its iterators read
+//! them (`ddomain::rvals`): the original values (`rorig`) and those
+//! written before the cursor (`rwritten`). An insert writes the values
+//! given, a carry the original values passed, a delete nothing, and a
+//! peek reads the original value at the cursor; `end` pays what is owed,
+//! checks the domain and hands the column back holding the values
+//! written, then the original values after the cursor.
 //!
 //! Trusted: what the delta bridge `DeltaWrite` says of an owned value's
-//! delta (`dvo`, and that a value read holds its owned form's delta).
+//! delta (`dvo`, and that a value read holds its owned form's delta); and
+//! that the glue (`DeltaEdit`) chains the steps, using none after `end`
+//! or after one that panicked.
+//!
+//! [`DeltaEdit`]: crate::delta::DeltaEdit
 
 use crate::btree::{SlabAgg, SlabBTree};
 use crate::column::Slab;
@@ -29,10 +45,14 @@ use crate::delta::agg::{agg_of, steps_fit};
 #[cfg(verus_keep_ghost)]
 use crate::delta::agg::{deltas_of, has_null, psum, reps};
 use crate::delta::agg::{slab_dsum, DeltaOps};
+#[cfg(verus_keep_ghost)]
+use crate::delta::dbound::lemma_rz_sub;
 use crate::delta::ddomain::DeltaWrite;
 #[cfg(verus_keep_ghost)]
-use crate::delta::ddomain::{dslabs, lemma_dix_ok, lemma_dslabs_own, lemma_span_steps};
+use crate::delta::ddomain::{dslabs, lemma_dix_ok, lemma_dslabs_own, lemma_span_steps, rvals};
 use crate::delta::dedit::run_sum;
+#[cfg(verus_keep_ghost)]
+use crate::delta::dedit::{lemma_rest_unchanged, lemma_rz_nulls, run_vals, rz};
 #[cfg(verus_keep_ghost)]
 use crate::delta::diter::{crop, lemma_crop_add, lemma_psum_cat, lemma_wrapping_add};
 #[cfg(verus_keep_ghost)]
@@ -457,6 +477,34 @@ impl<L, O, B> DeltaEditCore<L, O, B> where
         }
     }
 
+    /// The values the column held when the edit began, as its iterators
+    /// read them: at each delta the running sum through it, and nulls.
+    pub(crate) open spec fn rorig(&self) -> Seq<Option<i64>> {
+        rz(0, self.ledger.orig@)
+    }
+
+    /// The values the edit has written before the cursor.
+    pub(crate) open spec fn rwritten(&self) -> Seq<Option<i64>> {
+        rz(0, self.ledger.l.written@)
+    }
+
+    /// The cursor's position among the original items.
+    pub(crate) open spec fn at(&self) -> int {
+        self.edit.at()
+    }
+
+    /// Where a step over `n` items from the cursor ends: `n` on, or the
+    /// end.
+    pub(crate) open spec fn past(&self, n: usize) -> int {
+        self.at() + self.edit.step_len(n)
+    }
+
+    /// The same edit of the same column as `o`, perhaps further on.
+    pub(crate) open spec fn same(&self, o: Self) -> bool {
+        &&& self.ledger.orig == o.ledger.orig
+        &&& self.edit.orig_vals() == o.edit.orig_vals()
+    }
+
     /// Open a delta edit of `col` at item `at`.
     pub(crate) fn begin(col: &mut DCol<L, O, B>, at: usize) -> (e: Self)
         ensures
@@ -464,6 +512,8 @@ impl<L, O, B> DeltaEditCore<L, O, B> where
             e.edit.held(),
             e.edit.orig_vals() == old(col)@,
             e.edit.at() == at,
+            e.rorig() == rvals::<RleModel<L>, RleReads<O>, B>(old(col)@),
+            e.rwritten() == e.rorig().take(at as int),
     {
         if at > col.len() {
             out_of_bounds();
@@ -476,6 +526,10 @@ impl<L, O, B> DeltaEditCore<L, O, B> where
             lemma_dslabs_own::<RleModel<L>, RleReads<O>, B>(c0.slabs_spec());
             assert(dvos::<'static, L, O, B>(c0@) =~= dslabs::<RleReads<O>, B>(c0.slabs_spec()));
             assert(dvos::<'static, L, O, B>(c0@.take(at as int)) =~= dvos::<'static, L, O, B>(c0@).take(at as int));
+            lemma_rz_sub(ledger.orig@, at as int, at as int);
+            assert(dvos::<'static, L, O, B>(c0@) =~= c0@.map_values(
+                |o: VOf<'static, L>| <B as DeltaWrite<'static, RleModel<L>, RleReads<O>>>::dvo(o),
+            ));
         }
         DeltaEditCore { edit, ledger }
     }
@@ -632,6 +686,9 @@ impl<L, O, B> DeltaEditCore<L, O, B> where
         ensures
             final(self).inv(),
             final(self).edit.held(),
+            final(self).same(*old(self)),
+            final(self).at() == old(self).at(),
+            final(self).rwritten() == old(self).rwritten() + reps(n as nat, Some(v)),
     {
         let ghost w0 = dvos::<'static, L, O, B>(self.edit.written());
         let d = self.ledger.insert_value(v, n, true);
@@ -657,6 +714,9 @@ impl<L, O, B> DeltaEditCore<L, O, B> where
         ensures
             final(self).inv(),
             final(self).edit.held(),
+            final(self).same(*old(self)),
+            final(self).at() == old(self).at(),
+            final(self).rwritten() == old(self).rwritten() + reps(n as nat, None),
     {
         self.ledger.insert_nulls(n);
         self.put(None, n);
@@ -672,6 +732,9 @@ impl<L, O, B> DeltaEditCore<L, O, B> where
         ensures
             final(self).inv(),
             final(self).edit.held(),
+            final(self).same(*old(self)),
+            final(self).at() == old(self).at(),
+            final(self).rwritten() == old(self).rwritten() + run_vals(prefix as int, d, n as nat),
     {
         let ghost w0 = dvos::<'static, L, O, B>(self.edit.written());
         let first = self.ledger.insert_run(prefix, d, n, true);
@@ -706,9 +769,17 @@ impl<L, O, B> DeltaEditCore<L, O, B> where
         ensures
             final(self).inv(),
             final(self).edit.held(),
-            final(self).edit.orig_vals() == old(self).edit.orig_vals(),
-            paid ==> final(self).edit.at() == old(self).edit.at() + 1,
-            !paid ==> final(self).edit.at() == old(self).edit.at() && final(self).ledger.l.adjust == 0,
+            final(self).same(*old(self)),
+            paid ==> final(self).at() == old(self).at() + 1,
+            paid ==> final(self).rwritten() == old(self).rwritten() + old(self).rorig().subrange(
+                old(self).at(),
+                old(self).at() + 1,
+            ),
+            !paid ==> {
+                &&& final(self).at() == old(self).at() == old(self).edit.orig_vals().len()
+                &&& final(self).ledger.l.adjust == 0
+                &&& final(self).rwritten() == old(self).rwritten()
+            },
     {
         let ghost a = self.edit.at();
         proof {
@@ -778,17 +849,39 @@ impl<L, O, B> DeltaEditCore<L, O, B> where
         ensures
             final(self).inv(),
             final(self).edit.held(),
+            final(self).same(*old(self)),
+            final(self).at() == old(self).past(n),
+            final(self).rwritten() == old(self).rwritten() + old(self).rorig().subrange(old(self).at(), final(self).at()),
     {
+        let ghost (a0, v0, o0) = (self.at(), self.rwritten(), self.rorig());
+        proof {
+            self.edit.lemma_at();
+            assert(o0.len() == self.edit.orig_vals().len());
+            assert(v0 =~= v0 + o0.subrange(a0, a0));
+        }
         let mut want = n;
         while want > 0 && self.ledger.l.adjust != 0
             invariant
                 self.inv(),
                 self.edit.held(),
+                self.same(*old(self)),
                 want <= n,
+                0 <= a0 == old(self).at(),
+                v0 == old(self).rwritten(),
+                o0 == old(self).rorig(),
+                o0.len() == self.edit.orig_vals().len(),
+                self.at() == a0 + (n - want),
+                self.at() <= self.edit.orig_vals().len(),
+                self.rwritten() == v0 + o0.subrange(a0, self.at()),
             decreases want,
         {
+            let ghost (a1, w1) = (self.at(), self.rwritten());
             if !self.pay_step() {
                 return;
+            }
+            proof {
+                self.edit.lemma_at();
+                assert(w1 + o0.subrange(a1, a1 + 1) =~= v0 + o0.subrange(a0, self.at()));
             }
             want -= 1;
         }
@@ -803,6 +896,8 @@ impl<L, O, B> DeltaEditCore<L, O, B> where
         let ghost x = dvos::<'static, L, O, B>(self.edit.orig_vals().subrange(a, a + k));
         proof {
             self.lemma_orig_range(a, a + k);
+            // the values carried are the original ones there
+            lemma_rz_sub(self.ledger.orig@, a, a + k);
         }
         let mut v = DSumVisit::<L, O, B>::new();
         let jumped = self.edit.advance_with(want, &mut v);
@@ -829,6 +924,7 @@ impl<L, O, B> DeltaEditCore<L, O, B> where
         proof {
             assert(self.ledger.l.read@ =~= self.ledger.orig@.take(self.edit.at()));
             assert(dvos::<'static, L, O, B>(self.edit.written()) =~= self.ledger.l.written@);
+            assert(self.rwritten() =~= v0 + o0.subrange(a0, self.at()));
         }
     }
 
@@ -841,29 +937,47 @@ impl<L, O, B> DeltaEditCore<L, O, B> where
         ensures
             final(self).inv(),
             final(self).edit.held(),
+            final(self).same(*old(self)),
             final(self).ledger.l.adjust == 0,
+            old(self).at() <= final(self).at() <= final(self).edit.orig_vals().len(),
+            final(self).rwritten() == old(self).rwritten() + old(self).rorig().subrange(old(self).at(), final(self).at()),
     {
+        let ghost (a0, v0, o0) = (self.at(), self.rwritten(), self.rorig());
         proof {
             self.edit.lemma_at();
+            assert(o0.len() == self.edit.orig_vals().len());
+            assert(v0 =~= v0 + o0.subrange(a0, a0));
         }
         while self.ledger.l.adjust != 0
             invariant
                 self.inv(),
                 self.edit.held(),
+                self.same(*old(self)),
+                0 <= a0 == old(self).at(),
+                v0 == old(self).rwritten(),
+                o0 == old(self).rorig(),
+                o0.len() == self.edit.orig_vals().len(),
+                a0 <= self.at() <= self.edit.orig_vals().len(),
+                self.rwritten() == v0 + o0.subrange(a0, self.at()),
             ensures
                 self.inv(),
                 self.edit.held(),
+                self.same(*old(self)),
                 self.ledger.l.adjust == 0,
+                a0 <= self.at() <= self.edit.orig_vals().len(),
+                self.rwritten() == v0 + o0.subrange(a0, self.at()),
             decreases self.edit.orig_vals().len() - self.edit.at(),
         {
             proof {
                 self.edit.lemma_at();
             }
+            let ghost (a1, w1) = (self.at(), self.rwritten());
             if !self.pay_step() {
                 break;
             }
             proof {
                 self.edit.lemma_at();
+                assert(w1 + o0.subrange(a1, a1 + 1) =~= v0 + o0.subrange(a0, self.at()));
             }
         }
     }
@@ -877,10 +991,20 @@ impl<L, O, B> DeltaEditCore<L, O, B> where
         ensures
             final(self).inv(),
             final(self).edit.held(),
+            final(self).same(*old(self)),
+            final(self).at() == old(self).at(),
+            final(self).rwritten() == old(self).rwritten(),
+            r is None <==> old(self).at() == old(self).edit.orig_vals().len(),
+            r matches Some(v) ==> v == old(self).rorig()[old(self).at()],
     {
         match self.peek_delta() {
             None => None,
-            Some(None) => Some(None),
+            Some(None) => {
+                proof {
+                    self.edit.lemma_at();
+                }
+                Some(None)
+            },
             Some(Some(d)) => {
                 proof {
                     self.edit.lemma_at();
@@ -899,7 +1023,14 @@ impl<L, O, B> DeltaEditCore<L, O, B> where
         requires
             old(self).inv(),
             old(self).edit.held(),
+        ensures
+            rvals::<RleModel<L>, RleReads<O>, B>(final(col)@) == old(self).rwritten() + old(self).rorig().skip(old(self).at()),
     {
+        let ghost (a0, v0, o0) = (self.at(), self.rwritten(), self.rorig());
+        proof {
+            self.edit.lemma_at();
+            assert(o0.len() == self.edit.orig_vals().len());
+        }
         self.settle();
         self.edit.close();
         let (slabs, _, len) = self.edit.clean_parts();
@@ -921,6 +1052,20 @@ impl<L, O, B> DeltaEditCore<L, O, B> where
             let ov = self.edit.orig_vals();
             assert(self.edit.now() =~= self.edit.written() + ov.skip(self.edit.at()));
             assert(dvos::<'static, L, O, B>(self.edit.now()) =~= dslabs::<RleReads<O>, B>(s));
+            // the values it leaves: those written, then the original ones
+            // after the cursor, as they were
+            let l = self.ledger.l;
+            let rest = self.ledger.rest();
+            assert(rest =~= dvos::<'static, L, O, B>(ov.skip(self.edit.at())));
+            assert(dvos::<'static, L, O, B>(self.edit.now()) =~= l.written@ + rest);
+            lemma_rest_unchanged(l, rest);
+            assert(l.read@ + rest =~= self.ledger.orig@);
+            assert(o0.subrange(a0, self.at()) + o0.skip(self.at()) =~= o0.skip(a0));
+            assert(rz(0, l.written@ + rest) =~= v0 + o0.skip(a0));
+            let now = self.edit.now();
+            assert(dvos::<'static, L, O, B>(now) =~= now.map_values(
+                |o: VOf<'static, L>| <B as DeltaWrite<'static, RleModel<L>, RleReads<O>>>::dvo(o),
+            ));
             if by_bound {
                 assert(self.ledger.rest() =~= dvos::<'static, L, O, B>(ov.skip(self.edit.at())));
                 assert(self.ledger.l.written@ + self.ledger.rest() =~= dslabs::<RleReads<O>, B>(s));
@@ -951,6 +1096,9 @@ impl<L, O, B> DeltaEditCore<L, O, B> where
         ensures
             final(self).inv(),
             final(self).edit.held(),
+            final(self).same(*old(self)),
+            final(self).at() == old(self).past(n),
+            final(self).rwritten() == old(self).rwritten(),
     {
         if self.edit.remaining() == 0 {
             return;

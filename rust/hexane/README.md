@@ -346,10 +346,10 @@ compiles them away. To check them, run `cargo verus verify -p hexane
   describe. The trusted exceptions are that the
   slabs a fill or an encoder hands a new column are well-formed (as
   those verified functions promise; the column weighs them and checks a
-  delta column's domain itself), that the `Edit` glue chains its steps
-  (and uses none after one that panicked, if the panic is caught), and a
-  clone. An `Edit` dropped by a panic hands nothing back, and the column
-  panics when used again.
+  delta column's domain itself), that the `Edit` and `DeltaEdit` glue
+  chains its steps (and uses none after one that panicked, if the panic
+  is caught), and a clone. An `Edit` or a `DeltaEdit` dropped by a panic
+  hands nothing back, and the column panics when used again.
 * A delta column's domain, in its type invariant: every step between two
   of its running sums fits `i64` (so it holds at most `i64::MAX` items,
   and its values lie within a range less than 2^63 wide). So each slab's
@@ -426,19 +426,23 @@ compiles them away. To check them, run `cargo verus verify -p hexane
   `scan_to_value(None)`), with the iterator just past it; or none, with
   the window used up. Slabs the index rules out hold no match. Given the
   index's aggregates, as for reading.
-* The deltas a delta column's edits write (`splice`, `splice_runs`,
-  `insert`, `remove` and the other splices, and the `DeltaEdit` cursor):
-  the delta a value or a run of values needs after the running sum
-  before it, and the cursor's account of what the values after it are
-  owed. Each step of the cursor writes deltas realizing exactly the
-  values inserted, the original values of the items it carries past or
-  re-anchors, or nothing (a delete), and once it has paid what it owes,
-  every original value after it is realized as it was; a splice's
-  rewritten boundary delta does the same for the values after it, and
-  the values it is computed from (the running sum before the edit, the
-  nulls after it, and the value of the item after those) are what the
-  column holds there. Over a model of the column as its sequence of
-  deltas, with sums wrapping as the iterators read them.
+* A delta column's edits (`splice`, `splice_runs`, `insert`, `remove`
+  and the other splices, `from_values`, and the `DeltaEdit` cursor),
+  stated by the column's values as its iterators read them (each the
+  running sum of the deltas through it, wrapping, `ddomain::rvals`): a
+  splice leaves the values before it, then the values of the items it
+  took, then the values after the deleted ones, as they were;
+  `from_values` leaves the values it took. The `DeltaEdit` cursor
+  (`dedit_core::DeltaEditCore`) starts from the column's values, and each
+  of its steps is stated by what it does to them: an insert writes the
+  values given, a carry the original values it passes, a delete nothing,
+  and a peek reads the original value at the cursor; dropped, it hands
+  back the column holding the values written, then the original values
+  after the cursor. Underneath, each delta written is the one that value
+  needs after the running sum before it, and a splice's rewritten
+  boundary delta, or the cursor's account of what the values after it
+  are owed, keeps every value after the edit as it was, its ledger
+  following what the column cursor carries, deletes and jumps over.
 * A delta edit's check that it leaves the values in the domain, so that
   the index's sums fit again (`check_span`): its walk over the column
   passes exactly when the values lie in the domain within a range less
@@ -500,8 +504,7 @@ decode, which the verified code reaches through traits (the contract on
 connects the generic column types to the verified cores, and the closures
 passed through it (including the slabs a new column is built from, which
 come from the verified fills and encoders, and the iterators' state
-between calls; for a delta column, that a `DeltaEdit`'s domain check,
-which is verified, is of the column it leaves); each prefix value type's `accumulate` and
+between calls); each prefix value type's `accumulate` and
 `accumulate_run` (that they add its values, a run as its value
 repeated) and `try_accumulate_run` (that when it succeeds it adds what
 `accumulate_run` does), and that its prefix type's `+` is associative with `default`
@@ -522,12 +525,10 @@ first and values outside the domain last.
   column's sum fits its prefix type, which the searches' results depend on
   (loads reject sums that would not, and edits panic, but those checks are
   not part of the proof); `delta`, which is glue over the verified
-  iterator; and the glue that drives the `DeltaEdit` cursor's verified
-  arithmetic (`copy_ranges` uses it too): that what the cursor reports
-  carrying, deleting or jumping over is what it did. Its ledger starts
-  in verified code (`ColumnCore::delta_ledger`: the value before the
-  cursor, the bound on the column's values, and the column's own deltas
-  as its ghost).
+  iterator; and a delta column's `copy_ranges`, which chains the
+  `DeltaEdit` cursor's verified steps in glue, reading the source
+  through its iterator's runs (`Column::copy_ranges`' chains are
+  verified).
 * `RleEncoderState` and `DeltaEncoderState`, which write into a buffer
   the caller passes to each call, are proved only if every call gets the
   same buffer, with the bytes they wrote unchanged in between. Their

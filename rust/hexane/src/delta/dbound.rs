@@ -24,15 +24,17 @@
 //! it (`bounds_of`). And [`ToDeltas`] gives `from_values` the deltas
 //! realizing its values and a bound on them.
 //!
-//! A splice's wiring is verified too: `ColumnCore::splice_delta` gives
-//! its plan the column's deltas, a bound from the column's invariant and
-//! what `d_boundaries` finds, and the cursor writes what the plan emits
-//! (`ddomain::DeltaFeed`). Trusted, for an edit cursor ([`DeltaEdit`]'s
-//! glue): that the ghost original deltas its [`SpanLedger`] is given are
-//! the column's and, as for the [`Ledger`], that what the cursor reports
-//! carrying, deleting and jumping over is what it did.
+//! The values a splice leaves are the original ones before it, the
+//! items', then the original ones after the deleted items
+//! (`lemma_spliced_vals`), and a cursor's are those it wrote, then the
+//! original ones after it ([`SpanLedger`]'s steps, with the [`Ledger`]'s).
 //!
-//! [`DeltaEdit`]: crate::delta::DeltaEdit
+//! Their wiring is verified too: `ColumnCore::splice_delta` gives its
+//! plan the column's deltas, a bound from the column's invariant and what
+//! `d_boundaries` finds, and the cursor writes what the plan emits
+//! (`ddomain::DeltaFeed`); a delta edit cursor's ledger starts from the
+//! column (`ColumnCore::delta_ledger`) and follows what the column cursor
+//! carries, deletes and jumps over (`dedit_core::DeltaEditCore`).
 
 #[cfg(verus_keep_ghost)]
 use crate::btree::{max_i, min_i};
@@ -334,6 +336,7 @@ impl SpanLedger {
             final(self).orig == old(self).orig,
             final(self).l.written@ == old(self).l.written@ + x,
             final(self).l.read@ == old(self).l.read@ + x,
+            rz(0, final(self).l.written@) == rz(0, old(self).l.written@) + rz(psum(old(self).l.read@), x),
     {
         let ghost (w0, r0, orig) = (self.l.written@, self.l.read@, self.orig@);
         self.l.jump(running, Ghost(x));
@@ -360,6 +363,7 @@ impl SpanLedger {
             final(self).orig == old(self).orig,
             final(self).l.read@ == old(self).l.read@,
             final(self).l.written@ == old(self).l.written@ + (seq![Some(d)] + reps((n - 1) as nat, Some(0i64))),
+            rz(0, final(self).l.written@) == rz(0, old(self).l.written@) + reps(n as nat, Some(v)),
     {
         let ghost (w0, lo0, hi0) = (self.l.written@, self.lo as int, self.hi as int);
         let d = self.l.insert_value(v, n);
@@ -396,6 +400,7 @@ impl SpanLedger {
             final(self).orig == old(self).orig,
             final(self).l.read@ == old(self).l.read@,
             final(self).l.written@ == old(self).l.written@ + reps(n as nat, None),
+            rz(0, final(self).l.written@) == rz(0, old(self).l.written@) + reps(n as nat, None),
     {
         let ghost w0 = self.l.written@;
         self.l.insert_nulls(n);
@@ -423,6 +428,7 @@ impl SpanLedger {
             final(self).orig == old(self).orig,
             final(self).l.read@ == old(self).l.read@,
             final(self).l.written@ == old(self).l.written@ + (seq![Some(first)] + reps((n - 1) as nat, Some(d))),
+            rz(0, final(self).l.written@) == rz(0, old(self).l.written@) + run_vals(prefix as int, d, n as nat),
     {
         let ghost (w0, lo0, hi0) = (self.l.written@, self.lo as int, self.hi as int);
         let first = self.l.insert_run(prefix, d, n);
@@ -509,6 +515,7 @@ impl SpanLedger {
             final(self).orig == old(self).orig,
             final(self).l.read@ == old(self).l.read@.push(Some(d)),
             final(self).l.written@ == old(self).l.written@.push(Some(nd)),
+            rz(0, final(self).l.written@) == rz(0, old(self).l.written@) + rz(psum(old(self).l.read@), seq![Some(d)]),
     {
         let ghost (w0, r0, orig) = (self.l.written@, self.l.read@, self.orig@);
         let nd = self.l.pay(d);
@@ -571,6 +578,22 @@ impl SpanLedger {
         }
         r
     }
+}
+
+/// The values deltas `ds` realize from item `a` to `b` are those their
+/// stretch realizes after the running sum before it.
+pub(crate) proof fn lemma_rz_sub(ds: Seq<Option<i64>>, a: int, b: int)
+    requires
+        0 <= a <= b <= ds.len(),
+    ensures
+        rz(0, ds).subrange(a, b) == rz(psum(ds.take(a)), ds.subrange(a, b)),
+        rz(0, ds).take(a) == rz(0, ds.take(a)),
+{
+    assert(ds =~= ds.take(a) + (ds.subrange(a, b) + ds.skip(b)));
+    lemma_rz_cat(0, ds.take(a), ds.subrange(a, b) + ds.skip(b));
+    lemma_rz_cat(psum(ds.take(a)), ds.subrange(a, b), ds.skip(b));
+    assert(rz(0, ds).subrange(a, b) =~= rz(psum(ds.take(a)), ds.subrange(a, b)));
+    assert(rz(0, ds).take(a) =~= rz(0, ds.take(a)));
 }
 
 /// The column a splice leaves: the original deltas before it (`a`), the
@@ -704,6 +727,83 @@ proof fn lemma_spliced(
     lemma_cat(rz(0, a), rz(psum(a), e + r), lo, hi);
 }
 
+/// The values of the column a splice leaves: the original values before
+/// it, the values it inserted, then the original values after the
+/// deleted ones.
+#[verifier::spinoff_prover]
+pub(crate) proof fn lemma_spliced_vals(
+    orig: Seq<Option<i64>>,
+    a: Seq<Option<i64>>,
+    x: Seq<Option<i64>>,
+    tail: Seq<Option<i64>>,
+    e: Seq<Option<i64>>,
+    wanted: Seq<Option<i64>>,
+    prev: i64,
+    skip: nat,
+    next_val: Option<i64>,
+)
+    requires
+        orig == a + x + tail,
+        bounds_of(a, x, tail, prev as int, skip, next_val),
+        rz(prev as int, e) == splice_vals(wanted, skip, next_val),
+    ensures
+        rz(0, spliced(a, e, tail, skip, next_val)) == rz(0, orig).take(a.len() as int) + wanted + rz(0, orig).skip(
+            (a.len() + x.len()) as int,
+        ),
+{
+    let r = if next_val is Some { tail.skip(skip + 1int) } else { tail };
+    let q = psum(a) + psum(x);
+    assert(spliced(a, e, tail, skip, next_val) =~= a + (e + r));
+    lemma_rz_cat(0, a, e + r);
+    lemma_rz_cat(psum(a), e, r);
+    // the original values: before the splice, then after the deleted ones
+    assert(orig =~= a + (x + tail));
+    lemma_rz_cat(0, a, x + tail);
+    lemma_rz_cat(psum(a), x, tail);
+    assert(rz(0, orig).take(a.len() as int) =~= rz(0, a));
+    assert(rz(0, orig).skip((a.len() + x.len()) as int) =~= rz(q, tail));
+    // what the plan emitted: the items' values, then the nulls and the
+    // value after them
+    lemma_crop(prev as int);
+    lemma_rz_crop(psum(a), prev as int, e);
+    match next_val {
+        Some(v) => {
+            let h = tail.take(skip + 1int);
+            assert(tail =~= h + r);
+            assert(h =~= reps(skip, None) + seq![tail[skip as int]]);
+            let b = tail[skip as int]->0;
+            lemma_rz_cat(q, h, r);
+            lemma_rz_cat(q, reps(skip, None), seq![Some(b)]);
+            crate::delta::dedit::lemma_rz_nulls(q, skip);
+            lemma_rz_one(q, b);
+            crate::delta::dedit::lemma_psum_one(b);
+            crate::delta::diter::lemma_psum_cat(reps(skip, None), seq![Some(b)]);
+            // the item after the nulls realizes `v`
+            crate::delta::diter::lemma_psum_cat(a, x);
+            crate::delta::diter::lemma_psum_cat(a + x, h);
+            assert(crop(q + b) == v);
+            // and after it, the original values, the running sums agreeing
+            lemma_lands(prev as int, e, wanted, skip, v);
+            lemma_crop_add(psum(a), psum(e));
+            lemma_crop_add(prev as int, psum(e));
+            lemma_crop_add(q + b, 0);
+            lemma_rz_crop(psum(a) + psum(e), q + psum(h), r);
+            assert(rz(q, tail) =~= reps(skip, None) + seq![Some(v)] + rz(q + psum(h), r));
+            assert(rz(0, a) + (splice_vals(wanted, skip, next_val) + rz(psum(a) + psum(e), r)) =~= rz(0, a) + wanted
+                + rz(q, tail));
+        },
+        None => {
+            // only nulls follow, which realize nulls whatever comes before
+            assert(rz(psum(a) + psum(e), r) =~= rz(q, tail)) by {
+                assert forall|i: int| 0 <= i < r.len() implies (#[trigger] rz(psum(a) + psum(e), r)[i]) == rz(q, tail)[i] by {
+                    assert(tail[i] is None);
+                }
+            }
+            assert(rz(0, a) + (wanted + rz(psum(a) + psum(e), r)) =~= rz(0, a) + wanted + rz(q, tail));
+        },
+    }
+}
+
 /// A splice's [`SplicePlan`], and a bound on the values of the column it
 /// writes, as for [`SpanLedger`].
 pub(crate) struct SpanPlan {
@@ -758,6 +858,7 @@ impl SpanPlan {
             s.p.skip == skip,
             s.p.next_val == next_val,
             s.p.emitted@.len() == 0,
+            s.p.wanted@.len() == 0,
             s.orig@ == orig,
     {
         SpanPlan {
@@ -781,6 +882,7 @@ impl SpanPlan {
             final(self).fixed(*old(self)),
             final(self).p.phase is Values,
             final(self).p.pending is None,
+            final(self).p.wanted == old(self).p.wanted,
             final(self).p.emitted@ == old(self).p.emitted@ + match r {
                 Some((x, n)) => reps(n as nat, x),
                 None => Seq::empty(),
@@ -803,6 +905,7 @@ impl SpanPlan {
             final(self).tracking == old(self).tracking,
             final(self).fixed(*old(self)),
             final(self).p.phase is Values,
+            final(self).p.wanted@ == old(self).p.wanted@.push(v),
             final(self).p.emitted@ == old(self).p.emitted@ + reps(r.1 as nat, r.0),
     {
         let ghost (w0, lo0, hi0) = (self.p.wanted@, self.lo as int, self.hi as int);
@@ -846,6 +949,10 @@ impl SpanPlan {
             final(self).tracking == old(self).tracking,
             final(self).fixed(*old(self)),
             final(self).p.phase is Values,
+            final(self).p.wanted@ == old(self).p.wanted@ + match d {
+                Some(x) => run_vals(prefix as int, x, count as nat),
+                None => reps(count as nat, None),
+            },
             final(self).p.emitted@ == old(self).p.emitted@ + reps(r.1 as nat, r.0),
     {
         let ghost (w0, lo0, hi0) = (self.p.wanted@, self.lo as int, self.hi as int);
@@ -913,6 +1020,7 @@ impl SpanPlan {
             final(self).tracking == old(self).tracking,
             final(self).fixed(*old(self)),
             final(self).p.emitted == old(self).p.emitted,
+            final(self).p.wanted == old(self).p.wanted,
     {
         self.p.end_values()
     }
@@ -927,6 +1035,7 @@ impl SpanPlan {
             final(self).inv(),
             final(self).tracking == old(self).tracking,
             final(self).fixed(*old(self)),
+            final(self).p.wanted == old(self).p.wanted,
             final(self).p.emitted@ == old(self).p.emitted@ + match r {
                 Some((x, n)) => reps(n as nat, x),
                 None => Seq::empty(),
@@ -946,6 +1055,7 @@ impl SpanPlan {
             final(self).tracking == old(self).tracking,
             final(self).fixed(*old(self)),
             final(self).p.phase is Done,
+            final(self).p.wanted == old(self).p.wanted,
             final(self).p.emitted@ == old(self).p.emitted@ + reps(r.1 as nat, r.0),
     {
         self.p.boundary()

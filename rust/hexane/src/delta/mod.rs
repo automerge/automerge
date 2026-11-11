@@ -1168,7 +1168,9 @@ type DCore<T, C> = dedit_core::DeltaEditCore<
 ///
 /// The cursor and its ledger are verified (`dedit_core::DeltaEditCore`):
 /// what the column cursor carries, deletes and jumps over keeps the
-/// ledger, and the ledger the deltas it writes. This struct only converts
+/// ledger, and the ledger the deltas it writes, so each step does to the
+/// column's values what its docs say, and the column handed back holds
+/// exactly the values the steps describe. This struct only converts
 /// between `T` and the `i64` the core works in.
 pub struct DeltaEdit<'a, T: DeltaValue, C: Codec = Leb128>
 where

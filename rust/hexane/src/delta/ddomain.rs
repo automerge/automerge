@@ -21,19 +21,24 @@
 //! through the splice's plan (`dbound::SpanPlan`) and writes each delta
 //! the plan emits as the value type writes it ([`DeltaWrite`]). Once the
 //! splice is done, the plan's bound on the values shows the column it
-//! leaves is in the domain (`lemma_splice_dom`); where the bound is too
+//! leaves is in the domain (`lemma_splice_deltas`); where the bound is too
 //! wide, the column is read again ([`slabs_fit`]), and a splice that
 //! would leave the domain panics. Building a column from values
 //! (`ColumnCore::fill_delta`) is the same, through a [`ValuesFeed`],
 //! which turns each value into the delta that realizes it
 //! (`dbound::ToDeltas`).
 //!
+//! Each states what it leaves by the column's values as its iterators
+//! read them (`rvals`): a splice, the original values before it, the
+//! values of the items it took (`items_vals`), then the original values
+//! after the deleted ones (`dbound::lemma_spliced_vals`); a build, the
+//! values it took. A load's checks are verified with the load itself
+//! (`load_core`, `weights::DeltaModel`), and an edit cursor's in
+//! `dedit_core`.
+//!
 //! Trusted: [`DeltaWrite`], the value types' bridge (a delta written
 //! reads back as itself, and a value read holds the delta its owned form
-//! does); and, for a delta column's other ways in, the glue: that a
-//! `DeltaEdit`'s checks (`dbound::SpanLedger`, then [`slabs_fit`]) are of
-//! the column it leaves. A load's are verified with the load itself
-//! (`load_core`, `weights::DeltaModel`).
+//! does).
 
 #[cfg(verus_keep_ghost)]
 use crate::btree::{fold, in_i64, SlabAgg, SlabAggregate};
@@ -53,6 +58,8 @@ use crate::delta::agg::{AnySpan, DeltaOps};
 use crate::delta::dbound::{lemma_psum_within, span_ok, spliced};
 use crate::delta::dbound::{SpanPlan, ToDeltas};
 use crate::delta::dedit::SplicePhase;
+#[cfg(verus_keep_ghost)]
+use crate::delta::dedit::{run_vals, rz};
 #[cfg(verus_keep_ghost)]
 use crate::delta::diter::{dix_ok, lemma_psum_cat};
 #[cfg(verus_keep_ghost)]
@@ -504,13 +511,11 @@ pub(crate) proof fn lemma_dslabs_own<E, X, B>(s: Seq<Slab<E::Tail>>)
     assert(dslabs::<X, B>(s) =~= cvals_of::<E>(s).map_values(f));
 }
 
-/// A delta splice keeps the column's domain: its deltas are the
-/// original ones before `at`, the plan's (`e`, holding the values `ins`
-/// written), then the original ones after the deleted items and, where a
-/// value followed them, after its nulls and it; where the plan's bound
-/// shows those values lie in `min..=max`, within a range less than 2^63
-/// wide (`span_ok` of `dbound::spliced`), every step fits.
-pub(crate) proof fn lemma_splice_dom<E, X, B>(
+/// The deltas a delta splice leaves: the original ones before `at`, the
+/// plan's (`e`, holding the values `ins` written), then the original ones
+/// after the deleted items and, where a value followed them, after its
+/// nulls and it (`dbound::spliced`).
+pub(crate) proof fn lemma_splice_deltas<E, X, B>(
     s0: Seq<Slab<E::Tail>>,
     s1: Seq<Slab<E::Tail>>,
     at: int,
@@ -520,8 +525,6 @@ pub(crate) proof fn lemma_splice_dom<E, X, B>(
     e: Seq<Option<i64>>,
     skip: nat,
     next_val: Option<i64>,
-    min: int,
-    max: int,
 )
     where
         E: Slabs + for<'a> ReadsAgree<'a, X>,
@@ -536,16 +539,8 @@ pub(crate) proof fn lemma_splice_dom<E, X, B>(
         at + tdel <= cvals_of::<E>(s0).len(),
         cvals_of::<E>(s1) == cvals_of::<E>(s0).take(at) + ins + cvals_of::<E>(s0).skip(at + tdel),
         ins.map_values(|o: E::V| <B as DeltaWrite<'static, E, X>>::dvo(o)) == e,
-        span_ok(
-            spliced(dslabs::<X, B>(s0).take(at), e, dslabs::<X, B>(s0).skip(at + del), skip, next_val),
-            min,
-            max,
-        ),
-        i64::MIN <= min,
-        max <= i64::MAX,
-        cvals_of::<E>(s1).len() <= i64::MAX,
     ensures
-        steps_fit(dslabs::<X, B>(s1)),
+        dslabs::<X, B>(s1) == spliced(dslabs::<X, B>(s0).take(at), e, dslabs::<X, B>(s0).skip(at + del), skip, next_val),
 {
     let f = |o: E::V| <B as DeltaWrite<'static, E, X>>::dvo(o);
     lemma_dslabs_own::<E, X, B>(s0);
@@ -560,7 +555,17 @@ pub(crate) proof fn lemma_splice_dom<E, X, B>(
         assert(tail.skip(skip + 1int) =~= d0.skip(at + tdel));
     }
     assert(dslabs::<X, B>(s1) =~= spliced(d0.take(at), e, tail, skip, next_val));
-    lemma_span_steps(dslabs::<X, B>(s1), min, max);
+}
+
+/// The realized values of a delta column holding the owned values `vs`,
+/// as its iterators read them: at each delta the running sum through it
+/// (wrapping), and nulls as they are.
+pub(crate) open spec fn rvals<E, X, B>(vs: Seq<E::V>) -> Seq<Option<i64>> where
+    E: Slabs + for<'a> ReadsAgree<'a, X>,
+    X: for<'a> Decoders<'a, Tail = E::Tail>,
+    B: for<'a> DeltaWrite<'a, E, X>,
+ {
+    rz(0, vs.map_values(|o: E::V| <B as DeltaWrite<'static, E, X>>::dvo(o)))
 }
 
 /// An item a delta splice inserts: a value (or a null), or a run of
@@ -575,6 +580,35 @@ pub(crate) enum SpliceItem {
 /// them.
 pub(crate) trait SpliceItems {
     fn next_item(&mut self) -> Option<SpliceItem>;
+}
+
+/// The values an item stands for: itself, or the values of a run after
+/// its `prefix` (`dedit::run_vals`), or nulls.
+pub(crate) open spec fn item_vals(it: SpliceItem) -> Seq<Option<i64>> {
+    match it {
+        SpliceItem::Value(v) => seq![v],
+        SpliceItem::Run(prefix, Some(d), n) => run_vals(prefix as int, d, n as nat),
+        SpliceItem::Run(_, None, n) => reps(n as nat, None),
+    }
+}
+
+/// The values items `its` stand for, one item's after another's.
+pub(crate) open spec fn items_vals(its: Seq<SpliceItem>) -> Seq<Option<i64>>
+    decreases its.len(),
+{
+    if its.len() == 0 {
+        Seq::empty()
+    } else {
+        items_vals(its.drop_last()) + item_vals(its.last())
+    }
+}
+
+/// One more item adds its values.
+proof fn lemma_items_push(its: Seq<SpliceItem>, it: SpliceItem)
+    ensures
+        items_vals(its.push(it)) == items_vals(its) + item_vals(it),
+{
+    assert(its.push(it).drop_last() =~= its);
 }
 
 /// The values a delta column is built from, from outside (`from_values`):
@@ -595,6 +629,9 @@ pub(crate) struct ValuesFeed<S, E: Slabs, M, B> {
     pub(crate) given: Ghost<Seq<E::V>>,
     #[allow(dead_code)]
     pub(crate) ended: Ghost<bool>,
+    /// the values taken so far
+    #[allow(dead_code)]
+    pub(crate) taken: Ghost<Seq<Option<i64>>>,
     pub(crate) _p: PhantomData<(M, B)>,
 }
 
@@ -607,12 +644,13 @@ impl<S: ValueItems, E, M, B> RunFeed<E> for ValuesFeed<S, E, M, B> where
 
     type K = ();
 
-    /// The converter's, keeping its bound, and the values written hold
-    /// the deltas it gave.
+    /// The converter's, keeping its bound, the values written hold the
+    /// deltas it gave, and it was given the values taken.
     open spec fn inv(&self) -> bool {
         &&& self.deltas.inv()
         &&& self.deltas.tracking@
         &&& self.given@.map_values(|o: E::V| <B as DeltaWrite<'static, E, M>>::dvo(o)) == self.deltas.ds@
+        &&& self.deltas.vals@ == self.taken@
     }
 
     open spec fn key(&self) -> () {
@@ -631,6 +669,9 @@ impl<S: ValueItems, E, M, B> RunFeed<E> for ValuesFeed<S, E, M, B> where
     fn next_run(&mut self) -> (r: Option<(Self::X, usize)>) {
         match self.items.next_value() {
             Some(v) => {
+                proof {
+                    self.taken = Ghost(self.taken@.push(v));
+                }
                 let d = self.deltas.next(v, true);
                 let x = <B as DeltaWrite<'static, E, M>>::ins(d);
                 proof {
@@ -689,6 +730,9 @@ pub(crate) struct DeltaFeed<S, E: Slabs, M, B> {
     /// the values written so far
     #[allow(dead_code)]
     pub(crate) given: Ghost<Seq<E::V>>,
+    /// the items taken so far
+    #[allow(dead_code)]
+    pub(crate) taken: Ghost<Seq<SpliceItem>>,
     pub(crate) _p: PhantomData<(M, B)>,
 }
 
@@ -701,11 +745,13 @@ impl<S: SpliceItems, E, M, B> RunFeed<E> for DeltaFeed<S, E, M, B> where
 
     type K = (Ghost<int>, usize, Option<i64>, Ghost<Seq<Option<i64>>>, Ghost<bool>);
 
-    /// The plan's, and the values written hold the deltas it emitted.
+    /// The plan's, the values written hold the deltas it emitted, and the
+    /// values it was given are those of the items taken.
     open spec fn inv(&self) -> bool {
         &&& self.plan.inv()
         &&& self.plan.tracking@ == self.track
         &&& self.given@.map_values(|o: E::V| <B as DeltaWrite<'static, E, M>>::dvo(o)) == self.plan.p.emitted@
+        &&& self.plan.p.wanted@ == items_vals(self.taken@)
     }
 
     /// The splice: around it, and the column's original deltas.
@@ -744,10 +790,28 @@ impl<S: SpliceItems, E, M, B> RunFeed<E> for DeltaFeed<S, E, M, B> where
                             assert(e0 + Seq::<Option<i64>>::empty() =~= e0);
                         }
                         match self.items.next_item() {
-                            Some(SpliceItem::Value(v)) => self.plan.value(v, self.track),
-                            // an empty run inserts nothing
+                            Some(SpliceItem::Value(v)) => {
+                                proof {
+                                    lemma_items_push(self.taken@, SpliceItem::Value(v));
+                                    self.taken = Ghost(self.taken@.push(SpliceItem::Value(v)));
+                                }
+                                let r = self.plan.value(v, self.track);
+                                proof {
+                                    assert(self.plan.p.wanted@ =~= items_vals(self.taken@));
+                                }
+                                r
+                            },
                             Some(SpliceItem::Run(prefix, delta, count)) => {
+                                proof {
+                                    lemma_items_push(self.taken@, SpliceItem::Run(prefix, delta, count));
+                                    self.taken = Ghost(self.taken@.push(SpliceItem::Run(prefix, delta, count)));
+                                }
+                                // an empty run inserts nothing
                                 if count == 0 {
+                                    proof {
+                                        assert(item_vals(SpliceItem::Run(prefix, delta, 0)) =~= Seq::<Option<i64>>::empty());
+                                        assert(self.plan.p.wanted@ =~= items_vals(self.taken@));
+                                    }
                                     continue;
                                 }
                                 self.plan.run(prefix, delta, count, self.track)

@@ -14,12 +14,10 @@
 //! same): it equals the deltas' sum modulo 2^64 (`crop`), which is the sum
 //! itself whenever that fits `i64`, as a column's values do.
 //!
-//! Trusted: the value type's `to_opt` (`DeltaOps`), and that the index
-//! holds each slab's aggregate, with the sums at slab boundaries fitting
-//! `i64` (`dix_ok`): the column's invariant. Loads check it. Edits keep
-//! each slab's aggregate (the cursor), and panic on values out of the
-//! domain, without which the sums fit (`check_span`, verified in
-//! `agg::AnySpan` and `dbound`).
+//! The readers require that the index holds each slab's aggregate, with
+//! the sums at slab boundaries fitting `i64` (`dix_ok`), which follows
+//! from the column's type invariant (`ddomain`). Trusted: the value
+//! type's `to_opt` (`DeltaOps`).
 
 // Verus proofs read more plainly with `x = x + n`.
 #![allow(clippy::assign_op_pattern)]

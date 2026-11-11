@@ -28,11 +28,11 @@
 //! `lemma_splice_keeps_rest`: the boundary delta reaching that value
 //! leaves every value after it as it was; and [`SplicePlan`] emits, a run
 //! at a time, deltas realizing exactly the items' values, then the nulls
-//! after the deleted items and the value after them. Trusted: the glue
-//! that drives these (that `splice` feeds the plan its items), that what the
-//! cursor reports carrying, deleting and jumping over is what it did, the
-//! running sum `prefix_at` reads from the index, and (as for reading,
-//! `diter`) that the index holds each slab's aggregate.
+//! after the deleted items and the value after them. What drives them is
+//! verified elsewhere: a splice's wiring in `ColumnCore::splice_delta`
+//! (through `ddomain::DeltaFeed`), and the cursor's in
+//! `dedit_core::DeltaEditCore`, which together state each edit by the
+//! values the column holds after it (`ddomain::rvals`).
 
 // Verus proofs read more plainly with `x = x + n`.
 #![allow(clippy::assign_op_pattern)]

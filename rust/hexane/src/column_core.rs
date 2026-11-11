@@ -59,14 +59,15 @@ use crate::cursor::{lemma_lens_ok, lemma_vals_own};
 #[cfg(verus_keep_ghost)]
 use crate::delta::agg::{agg_of, deltas_of, reps, steps_fit};
 #[cfg(verus_keep_ghost)]
-use crate::delta::dbound::{bounds_of, span_ok, spliced};
+use crate::delta::dbound::{bounds_of, lemma_spliced_vals, span_ok, spliced};
 use crate::delta::dbound::{root_bound, SpanLedger, SpanPlan, ToDeltas};
 #[cfg(verus_keep_ghost)]
 use crate::delta::ddomain::{
-    dslabs, lemma_dix_ok, lemma_dslabs_own, lemma_span_steps, lemma_splice_dom,
+    dslabs, items_vals, lemma_dix_ok, lemma_dslabs_own, lemma_span_steps, lemma_splice_deltas,
+    rvals,
 };
 use crate::delta::ddomain::{
-    slabs_fit, DeltaFeed, DeltaWrite, SpliceItems, ValueItems, ValuesFeed,
+    slabs_fit, DeltaFeed, DeltaWrite, SpliceItem, SpliceItems, ValueItems, ValuesFeed,
 };
 use crate::delta::dedit::d_boundaries;
 use crate::delta::diter::d_nth;
@@ -945,13 +946,15 @@ impl<E, X, B> ColumnCore<E, SlabAgg, SlabBTree<SlabAgg>, DeltaModel<X, B>> where
         min: i64,
         max: i64,
         f: &mut F,
-    )
+    ) -> (taken: Ghost<Seq<SpliceItem>>)
         requires
             at <= old(self)@.len(),
             del <= old(self)@.len() - at,
         ensures
             final(self).budget() == old(self).budget(),
             final(self).ready(),
+            rvals::<E, X, B>(final(self)@) == rvals::<E, X, B>(old(self)@).take(at as int) + items_vals(taken@)
+                + rvals::<E, X, B>(old(self)@).skip(at + del),
     {
         // the bound on the column's values, and the running sum, the nulls
         // and the value around the splice
@@ -995,9 +998,17 @@ impl<E, X, B> ColumnCore<E, SlabAgg, SlabBTree<SlabAgg>, DeltaModel<X, B>> where
             (lo, hi, prev, skip, next_val)
         };
         let plan = SpanPlan::new(prev, skip, next_val, lo, hi, true, Ghost(orig));
-        let mut feed = DeltaFeed::<S, E, X, B> { items, plan, track: true, given: Ghost(Seq::empty()), _p: PhantomData };
+        let mut feed = DeltaFeed::<S, E, X, B> {
+            items,
+            plan,
+            track: true,
+            given: Ghost(Seq::empty()),
+            taken: Ghost(Seq::empty()),
+            _p: PhantomData,
+        };
         proof {
             assert(Seq::<E::V>::empty().map_values(|o: E::V| <B as DeltaWrite<'static, E, X>>::dvo(o)) =~= feed.plan.p.emitted@);
+            assert(feed.plan.p.wanted@ =~= items_vals(feed.taken@));
         }
         // with a value after the deleted items and their nulls, those are
         // written again
@@ -1020,28 +1031,32 @@ impl<E, X, B> ColumnCore<E, SlabAgg, SlabBTree<SlabAgg>, DeltaModel<X, B>> where
         );
         let fits = p.total_len as u64 <= i64::MAX as u64 && feed.plan.fits(min, max);
         proof {
+            // the deltas the splice leaves, and the values they realize:
+            // the items' before the original ones after the deleted items
+            let a = orig.take(at as int);
+            let x = orig.subrange(at as int, at + del);
+            let tail = orig.skip(at + del);
+            assert(orig =~= a + x + tail);
+            assert(bounds_of(a, x, tail, feed.plan.p.prev@, feed.plan.p.skip as nat, feed.plan.p.next_val));
+            assert(_ins@ =~= feed.given@);
+            lemma_vals_total::<E>(p.slabs@);
+            lemma_splice_deltas::<E, X, B>(
+                s0,
+                p.slabs@,
+                at as int,
+                del as int,
+                total_del as int,
+                _ins@,
+                feed.plan.p.emitted@,
+                skip as nat,
+                next_val,
+            );
+            lemma_spliced_vals(orig, a, x, tail, feed.plan.p.emitted@, feed.plan.p.wanted@, prev, skip as nat, next_val);
+            lemma_dslabs_own::<E, X, B>(s0);
+            lemma_dslabs_own::<E, X, B>(p.slabs@);
             if fits {
                 // the plan's bound holds the values of the column it leaves
-                let a = orig.take(at as int);
-                let x = orig.subrange(at as int, at + del);
-                let tail = orig.skip(at + del);
-                assert(orig =~= a + x + tail);
-                assert(bounds_of(a, x, tail, feed.plan.p.prev@, feed.plan.p.skip as nat, feed.plan.p.next_val));
-                assert(_ins@ =~= feed.given@);
-                lemma_vals_total::<E>(p.slabs@);
-                lemma_splice_dom::<E, X, B>(
-                    s0,
-                    p.slabs@,
-                    at as int,
-                    del as int,
-                    total_del as int,
-                    _ins@,
-                    feed.plan.p.emitted@,
-                    skip as nat,
-                    next_val,
-                    min as int,
-                    max as int,
-                );
+                lemma_span_steps(dslabs::<X, B>(p.slabs@), min as int, max as int);
             }
         }
         if !fits {
@@ -1056,6 +1071,7 @@ impl<E, X, B> ColumnCore<E, SlabAgg, SlabBTree<SlabAgg>, DeltaModel<X, B>> where
             }
         }
         self.restore(p);
+        Ghost(feed.taken@)
     }
 
     /// Fill this empty column with the values `items` gives, each written
@@ -1070,23 +1086,26 @@ impl<E, X, B> ColumnCore<E, SlabAgg, SlabBTree<SlabAgg>, DeltaModel<X, B>> where
         min: i64,
         max: i64,
         f: &mut F,
-    )
+    ) -> (taken: Ghost<Seq<Option<i64>>>)
         requires
             old(self)@.len() == 0,
         ensures
             final(self).budget() == old(self).budget(),
             final(self).ready(),
+            rvals::<E, X, B>(final(self)@) == taken@,
     {
         let mut feed = ValuesFeed::<S, E, X, B> {
             items,
             deltas: ToDeltas::new(true),
             given: Ghost(Seq::empty()),
             ended: Ghost(false),
+            taken: Ghost(Seq::empty()),
             _p: PhantomData,
         };
         proof {
             assert(Seq::<E::V>::empty().map_values(|o: E::V| <B as DeltaWrite<'static, E, X>>::dvo(o))
                 =~= feed.deltas.ds@);
+            assert(feed.deltas.vals@ =~= feed.taken@);
         }
         let max_segments = self.max_segments;
         let mut p = self.take_parts();
@@ -1106,13 +1125,14 @@ impl<E, X, B> ColumnCore<E, SlabAgg, SlabBTree<SlabAgg>, DeltaModel<X, B>> where
         );
         let fits = p.total_len as u64 <= i64::MAX as u64 && feed.deltas.fits(min, max);
         proof {
+            // the column holds just the values written, whose deltas
+            // realize the values taken
+            let v = vals_of::<E>(p.slabs@);
+            assert(v =~= feed.given@);
+            lemma_dslabs_own::<E, X, B>(p.slabs@);
+            lemma_vals_total::<E>(p.slabs@);
             if fits {
-                // the column holds just the values written, whose deltas
-                // the bound holds
-                let v = vals_of::<E>(p.slabs@);
-                assert(v =~= feed.given@);
-                lemma_dslabs_own::<E, X, B>(p.slabs@);
-                lemma_vals_total::<E>(p.slabs@);
+                // the bound holds them
                 lemma_span_steps(dslabs::<X, B>(p.slabs@), min as int, max as int);
             }
         }
@@ -1128,6 +1148,7 @@ impl<E, X, B> ColumnCore<E, SlabAgg, SlabBTree<SlabAgg>, DeltaModel<X, B>> where
             }
         }
         self.restore(p);
+        Ghost(feed.taken@)
     }
 }
 
