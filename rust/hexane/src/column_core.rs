@@ -92,9 +92,9 @@ use crate::prefix_core::{p_prefix, p_sum_range, PrefixOps};
 use crate::prefix_search::found_at;
 use crate::prefix_search::{p_index_for_prefix, PrefixOrd};
 #[cfg(verus_keep_ghost)]
-use crate::splices::{applied, normal};
+use crate::splices::applied;
+use crate::splices::{wrong_columns, Normalized};
 use crate::weights::{DeltaModel, PrefixModel};
-use crate::Splice;
 use std::marker::PhantomData;
 use std::ops::{Add, AddAssign, SubAssign};
 use vstd::prelude::*;
@@ -676,22 +676,28 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> ColumnCore<E, W, I, G> {
     }
 
     /// `copy_ranges`, directly: apply the normalized splices `sps` to this
-    /// column, the items of column `src` (`copy::copy_direct`).
+    /// column, the items of column `src` (`copy::copy_direct`): it gives
+    /// what the splices `list` was made from give one by one.
     #[inline(always)]
     pub(crate) fn copy_direct<'a, X: Decoders<'a, Tail = E::Tail>, F: Visitor<E>>(
         &mut self,
-        sps: &[Splice],
+        list: &Normalized,
         src: &'a Self,
         f: &mut F,
     )
         where E: ReadsAgree<'a, X>
-        requires
-            normal(sps@, src@.len() as int, old(self)@.len() as int),
         ensures
-            final(self)@ == applied(old(self)@, src@, sps@),
+            final(self)@ == applied(old(self)@, src@, list.seen()),
             final(self).budget() == old(self).budget(),
             final(self).ready(),
     {
+        if list.src_len() != src.len() || list.dst_len() != self.len() {
+            wrong_columns();
+        }
+        let sps = list.splices();
+        proof {
+            list.lemma_applied(self@, src@);
+        }
         let mut feed = src.src_feed::<X>();
         let max_segments = self.max_segments;
         let mut p = self.take_parts();
@@ -715,23 +721,29 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> ColumnCore<E, W, I, G> {
     }
 
     /// `copy_ranges`, inverted: this column holds the source; keep the
-    /// normalized splices `sps`' ranges of it and put the items of column
-    /// `dst` back between them (`copy::copy_invert`).
+    /// normalized splices' ranges of it and put the items of column `dst`
+    /// back between them (`copy::copy_invert`): it gives what the splices
+    /// `list` was made from give one by one.
     #[inline(always)]
     pub(crate) fn copy_invert<'a, X: Decoders<'a, Tail = E::Tail>, F: Visitor<E>>(
         &mut self,
-        sps: &[Splice],
+        list: &Normalized,
         dst: &'a Self,
         f: &mut F,
     )
         where E: ReadsAgree<'a, X>
-        requires
-            normal(sps@, old(self)@.len() as int, dst@.len() as int),
         ensures
-            final(self)@ == applied(dst@, old(self)@, sps@),
+            final(self)@ == applied(dst@, old(self)@, list.seen()),
             final(self).budget() == old(self).budget(),
             final(self).ready(),
     {
+        if list.src_len() != self.len() || list.dst_len() != dst.len() {
+            wrong_columns();
+        }
+        let sps = list.splices();
+        proof {
+            list.lemma_applied(dst@, self@);
+        }
         let mut feed = dst.src_feed::<X>();
         let dst_len = dst.len();
         let max_segments = self.max_segments;

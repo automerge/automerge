@@ -1574,10 +1574,7 @@ impl RawColumn {
         I: IntoIterator<Item = Splice>,
     {
         let splices = normalize_splices(splices, src.len(), self.total_len);
-        if splices.is_empty() {
-            return;
-        }
-        for sp in splices.iter().rev() {
+        for sp in splices.splices().iter().rev() {
             let mut at = sp.pos;
             let mut del = sp.delete;
             // Chunked by the source's own slabs. A payload spliced as one

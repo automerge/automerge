@@ -1365,7 +1365,7 @@ fn copy_ranges_multi_point_strategies_agree() {
 
         let mut want = Vec::new();
         let mut prev = 0usize;
-        for sp in &norm {
+        for sp in norm.splices() {
             want.extend_from_slice(&dest_vals[prev..sp.pos]);
             want.extend_from_slice(&src_vals[sp.range.clone()]);
             prev = sp.pos + sp.delete;

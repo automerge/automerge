@@ -27,8 +27,10 @@
 //! `crate::copy` proves of both. `Normalize` works on the columns of
 //! positions (`ids`, `negs`), and what splices in order make of a
 //! destination and source depends only on their lengths
-//! (`lemma_any_columns`), so its result holds for any columns. Trusted:
-//! the glue that feeds `Normalize` the caller's splices.
+//! (`lemma_any_columns`), so its result holds for any columns.
+//! [`normalize`] feeds it the caller's splices and hands the copies a
+//! [`Normalized`] list, whose type invariant carries this, so each copy
+//! is proved to give what the caller's splices give one by one.
 
 use crate::Splice;
 use std::ops::Range;
@@ -49,6 +51,18 @@ fn bad_splices(why: &str)
         false,
 {
     panic!("{}", why)
+}
+
+/// Panics: a normalized list used for columns of other lengths than it
+/// was made for.
+#[verifier::external_body]
+#[cold]
+#[inline(never)]
+pub(crate) fn wrong_columns()
+    ensures
+        false,
+{
+    panic!("splices normalized for columns of other lengths")
 }
 
 pub(crate) open spec fn min_i(a: int, b: int) -> int {
@@ -652,6 +666,145 @@ proof fn lemma_kept_at<V>(src: Seq<V>, sps: Seq<Splice>, i: int)
             assert(sps[i - 2].range.end <= sps[i - 1].range.start);
         }
     }
+}
+
+/// The splices a caller gives `copy_ranges`, from outside: nothing is
+/// assumed of them.
+pub(crate) trait SpliceList {
+    fn next_splice(&mut self) -> Option<Splice>;
+}
+
+/// A normalized list of splices (`Normalize`), for a source of
+/// `src_len` items and a destination of `dst_len`. Its type invariant:
+/// the list is `normal`, and on the columns of positions it gives what
+/// the splices it was made from (`seen`) give one by one, so it does on
+/// any columns of those lengths (`Normalized::lemma_applied`).
+pub(crate) struct Normalized {
+    sps: Vec<Splice>,
+    src_len: usize,
+    dst_len: usize,
+    #[allow(dead_code)]
+    seen: Ghost<Seq<Splice>>,
+}
+
+impl Normalized {
+    #[verifier::type_invariant]
+    spec fn inv(&self) -> bool {
+        let (d, s) = (ids(self.dst_len as nat), negs(self.src_len as nat));
+        &&& normal(self.sps@, self.src_len as int, self.dst_len as int)
+        &&& in_order(self.seen@, self.dst_len as int)
+        &&& applied(d, s, self.sps@) == applied(d, s, self.seen@)
+    }
+
+    /// The normalized list.
+    pub(crate) closed spec fn view(&self) -> Seq<Splice> {
+        self.sps@
+    }
+
+    /// The splices it was made from.
+    pub(crate) closed spec fn seen(&self) -> Seq<Splice> {
+        self.seen@
+    }
+
+    /// The source's and the destination's lengths it was made for.
+    pub(crate) closed spec fn src_count(&self) -> nat {
+        self.src_len as nat
+    }
+
+    pub(crate) closed spec fn dst_count(&self) -> nat {
+        self.dst_len as nat
+    }
+
+    /// The type invariant, in its views.
+    pub(crate) open spec fn wf(&self) -> bool {
+        let (d, s) = (ids(self.dst_count()), negs(self.src_count()));
+        &&& normal(self@, self.src_count() as int, self.dst_count() as int)
+        &&& in_order(self.seen(), self.dst_count() as int)
+        &&& applied(d, s, self@) == applied(d, s, self.seen())
+    }
+
+    #[inline(always)]
+    pub(crate) fn splices(&self) -> (r: &[Splice])
+        ensures
+            r@ == self@,
+            self.wf(),
+    {
+        proof {
+            use_type_invariant(self);
+        }
+        self.sps.as_slice()
+    }
+
+    #[inline(always)]
+    pub(crate) fn src_len(&self) -> (r: usize)
+        ensures
+            r == self.src_count(),
+    {
+        self.src_len
+    }
+
+    #[inline(always)]
+    pub(crate) fn dst_len(&self) -> (r: usize)
+        ensures
+            r == self.dst_count(),
+    {
+        self.dst_len
+    }
+
+    /// Applied to any destination and source of its lengths, the list
+    /// gives what the splices it was made from give one by one.
+    pub(crate) proof fn lemma_applied<V>(&self, dst: Seq<V>, src: Seq<V>)
+        requires
+            self.wf(),
+            dst.len() == self.dst_count(),
+            src.len() == self.src_count(),
+        ensures
+            normal(self@, src.len() as int, dst.len() as int),
+            applied(dst, src, self@) == applied(dst, src, self.seen()),
+    {
+        lemma_any_columns(dst, src, self@, self.seen());
+    }
+}
+
+/// Normalize the caller's `splices` for a source of `src_len` items and
+/// a destination of `dst_len`, checking them (`Normalize`; it panics on
+/// splices out of order or out of bounds). Ends when they do.
+#[verifier::exec_allows_no_decreases_clause]
+// a Verus loop with an invariant: `loop` + `match`
+#[allow(clippy::while_let_loop)]
+#[inline(always)]
+pub(crate) fn normalize<S: SpliceList>(splices: &mut S, src_len: usize, dst_len: usize) -> (r: Normalized)
+    ensures
+        r.src_count() == src_len,
+        r.dst_count() == dst_len,
+{
+    let mut n = Normalize::new(src_len, dst_len);
+    // the splices the caller gave, as it gave them
+    let ghost mut taken = Seq::<Splice>::empty();
+    proof {
+        assert(n.seen@ =~= taken);
+    }
+    loop
+        invariant
+            n.inv(),
+            n.src_len == src_len,
+            n.dst_len == dst_len,
+            n.dst@ == ids(dst_len as nat),
+            n.src@ == negs(src_len as nat),
+            n.seen@ == taken,
+    {
+        match splices.next_splice() {
+            Some(sp) => {
+                proof {
+                    taken = taken.push(sp);
+                }
+                n.push(sp);
+            },
+            None => break,
+        }
+    }
+    let sps = n.finish();
+    Normalized { sps, src_len, dst_len, seen: Ghost(taken) }
 }
 
 /// Cutting the gaps out of the source, back to front (`copy::cut_gaps`,

@@ -50,7 +50,7 @@ use crate::rle::lift::Lift;
 use crate::rle::model::{RleOps, WriteOps};
 #[cfg(verus_keep_ghost)]
 use crate::splices::{applied, copied, cut, end_of, kept, normal, produced, ranges_in, removed};
-use crate::splices::{Cuts, Gaps};
+use crate::splices::{wrong_columns, Cuts, Gaps, Normalized};
 use crate::Splice;
 use std::marker::PhantomData;
 use std::ops::Range;
@@ -329,27 +329,33 @@ fn apply_one<'a, L, O, B>(
 }
 
 /// `copy_ranges`, directly: one cursor over the destination `dst`
-/// applies the normalized splices `sps` in turn, each range's values
-/// from `src`. Its values become `applied(dst, src, sps)`; panics if they
-/// would leave `min..=max` or span 2^63 or more.
+/// applies the normalized splices in turn, each range's values from
+/// `src`. Its values become what the splices `list` was made from give
+/// one by one; panics if they would leave `min..=max` or span 2^63 or
+/// more.
 #[verifier::spinoff_prover]
 #[verifier::rlimit(40)]
-pub(crate) fn copy_direct<L, O, B>(dst: &mut DCol<L, O, B>, sps: &[Splice], src: &DCol<L, O, B>, min: i64, max: i64) where
+pub(crate) fn copy_direct<L, O, B>(dst: &mut DCol<L, O, B>, list: &Normalized, src: &DCol<L, O, B>, min: i64, max: i64) where
     L: for<'t> Lift<'t, W = L> + for<'t> WriteOps<'t, R = O>,
     O: for<'b> RleOps<'b>,
     B: for<'c> DeltaWrite<'c, RleModel<L>, RleReads<O>>,
 
-    requires
-        normal(sps@, src@.len() as int, old(dst)@.len() as int),
     ensures
         rvals::<RleModel<L>, RleReads<O>, B>(final(dst)@) == applied(
             rvals::<RleModel<L>, RleReads<O>, B>(old(dst)@),
             rvals::<RleModel<L>, RleReads<O>, B>(src@),
-            sps@,
+            list.seen(),
         ),
 {
+    if list.src_len() != src.len() || list.dst_len() != dst.len() {
+        wrong_columns();
+    }
+    let sps = list.splices();
     let ghost rd = rvals::<RleModel<L>, RleReads<O>, B>(dst@);
     let ghost rs = rvals::<RleModel<L>, RleReads<O>, B>(src@);
+    proof {
+        list.lemma_applied(rd, rs);
+    }
     let mut feed = src.dsrc();
     let mut e = DeltaEditCore::<L, O, B>::begin(dst, 0);
     proof {
@@ -553,13 +559,14 @@ fn put_gaps<L, O, B>(
 }
 
 /// `copy_ranges`, inverted: `col` holds the source; cut the gaps between
-/// `sps`' ranges out of it, then put the values of the destination `dst`
-/// back between the ranges kept. Its values become `applied(dst, src,
-/// sps)`, as [`copy_direct`] makes them of the destination; panics if
-/// they would leave `min..=max` or span 2^63 or more.
+/// the normalized splices' ranges out of it, then put the values of the
+/// destination `dst` back between the ranges kept. Its values become
+/// what the splices `list` was made from give one by one, as
+/// [`copy_direct`] makes them of the destination; panics if they would
+/// leave `min..=max` or span 2^63 or more.
 pub(crate) fn copy_invert<L, O, B, F: Visitor<RleModel<L>>>(
     col: &mut DCol<L, O, B>,
-    sps: &[Splice],
+    list: &Normalized,
     dst: &DCol<L, O, B>,
     min: i64,
     max: i64,
@@ -569,16 +576,21 @@ pub(crate) fn copy_invert<L, O, B, F: Visitor<RleModel<L>>>(
     O: for<'b> RleOps<'b>,
     B: for<'c> DeltaWrite<'c, RleModel<L>, RleReads<O>>,
 
-    requires
-        normal(sps@, old(col)@.len() as int, dst@.len() as int),
     ensures
         rvals::<RleModel<L>, RleReads<O>, B>(final(col)@) == applied(
             rvals::<RleModel<L>, RleReads<O>, B>(dst@),
             rvals::<RleModel<L>, RleReads<O>, B>(old(col)@),
-            sps@,
+            list.seen(),
         ),
 {
+    if list.src_len() != col.len() || list.dst_len() != dst.len() {
+        wrong_columns();
+    }
+    let sps = list.splices();
     let ghost src = rvals::<RleModel<L>, RleReads<O>, B>(col@);
+    proof {
+        list.lemma_applied(rvals::<RleModel<L>, RleReads<O>, B>(dst@), src);
+    }
     cut_gaps(col, sps, min, max, f);
     put_gaps(col, sps, dst, min, max, Ghost(src));
 }

@@ -1003,20 +1003,20 @@ impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
         T::Inner: crate::ColumnValueRef<Encoding<C> = crate::RleEncoding<T::Inner, C>>,
     {
         let splices = crate::column::normalize_splices(splices, src.len(), self.len());
-        if splices.is_empty() {
+        let list = splices.splices();
+        if list.is_empty() {
             return;
         }
-        let ranges: Vec<Range<usize>> = splices.iter().map(|sp| sp.range.clone()).collect();
-        let strategy = self.col.copy_strategy(&src.col, &ranges, splices.len());
+        let ranges: Vec<Range<usize>> = list.iter().map(|sp| sp.range.clone()).collect();
+        let strategy = self.col.copy_strategy(&src.col, &ranges, list.len());
         self.copy_splices_with(src, &splices, strategy);
     }
 
-    /// [`copy_ranges`](Self::copy_ranges) with the strategy pinned;
-    /// `splices` must already be normalized.
+    /// [`copy_ranges`](Self::copy_ranges) with the strategy pinned.
     pub(crate) fn copy_splices_with(
         &mut self,
         mut src: Self,
-        splices: &[crate::Splice],
+        splices: &crate::splices::Normalized,
         strategy: crate::column::CopyStrategy,
     ) where
         T::Inner: crate::ColumnValueRef<Encoding<C> = crate::RleEncoding<T::Inner, C>>,

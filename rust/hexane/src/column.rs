@@ -4,7 +4,7 @@ use crate::load_core::LoadCore;
 use crate::sealed::Sealed;
 #[cfg(test)]
 use crate::splices::Cuts;
-use crate::splices::Normalize;
+use crate::splices::{normalize, Normalized, SpliceList};
 use crate::weights::LoadWeigh;
 use std::marker::PhantomData;
 use std::ops::{AddAssign, Range, SubAssign};
@@ -662,14 +662,18 @@ pub(crate) fn normalize_splices(
     splices: impl IntoIterator<Item = Splice>,
     src_len: usize,
     dst_len: usize,
-) -> Vec<Splice> {
-    // verified (`splices::Normalize`): the list is normalized, and applied
-    // gives what the splices give one by one
-    let mut n = Normalize::new(src_len, dst_len);
-    for sp in splices {
-        n.push(sp);
+) -> Normalized {
+    // verified (`splices::normalize`): the list is normalized, and applied
+    // gives what the splices give one by one, which its type keeps
+    normalize(&mut splices.into_iter(), src_len, dst_len)
+}
+
+/// The splices a caller gives `copy_ranges`, from its iterator (glue).
+impl<I: Iterator<Item = Splice>> SpliceList for I {
+    #[inline(always)]
+    fn next_splice(&mut self) -> Option<Splice> {
+        self.next()
     }
-    n.finish()
 }
 
 // ── Runs ────────────────────────────────────────────────────────────────────
@@ -1439,20 +1443,20 @@ where
         for<'b> T::Get<'b>: AsColumnRef<T>,
     {
         let splices = normalize_splices(splices, src.len(), self.len());
-        if splices.is_empty() {
+        let list = splices.splices();
+        if list.is_empty() {
             return;
         }
-        let ranges: Vec<Range<usize>> = splices.iter().map(|sp| sp.range.clone()).collect();
-        let strategy = self.copy_strategy(&src, &ranges, splices.len());
+        let ranges: Vec<Range<usize>> = list.iter().map(|sp| sp.range.clone()).collect();
+        let strategy = self.copy_strategy(&src, &ranges, list.len());
         self.copy_splices_with(src, &splices, strategy);
     }
 
-    /// [`copy_ranges`](Self::copy_ranges) with the strategy pinned;
-    /// `splices` must already be normalized.
+    /// [`copy_ranges`](Self::copy_ranges) with the strategy pinned.
     pub(crate) fn copy_splices_with(
         &mut self,
         mut src: Self,
-        splices: &[Splice],
+        splices: &Normalized,
         strategy: CopyStrategy,
     ) where
         for<'b> T::Get<'b>: AsColumnRef<T>,

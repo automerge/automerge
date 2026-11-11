@@ -473,7 +473,10 @@ compiles them away. To check them, run `cargo verus verify -p hexane
   the destination's gaps back (as splices, a normalized list that applied
   to those gives what the splices give). From the column's invariant,
   each leaves the column holding the destination with the splices
-  applied. The source's items come from a verified reader over the
+  applied: the caller's splices, one by one, since the normalized list
+  reaches them in a type that keeps what normalizing proved
+  (`splices::Normalized`), and each checks it was made for the columns'
+  lengths. The source's items come from a verified reader over the
   source column, moved to each range with its own index (`copy::SrcFeed`),
   each run's value written as its owned form. A delta column's
   `copy_ranges` is the same, in the column's values (`delta::dcopy`): the
