@@ -395,13 +395,8 @@ impl<T: ColumnValueRef, C: Codec> Default for Iter<'_, T, C> {
         Self {
             slabs: &[],
             col: None,
-            core: ICore {
-                slab_idx: 0,
-                decoder: T::Encoding::<C>::slab_decoder(&[], crate::sealed::Trusted(())),
-                items_left: 0,
-                slab_remaining: 0,
-                pos: 0,
-            },
+            // verified (`ICore::empty`): well-formed over no slabs
+            core: ICore::empty::<Dx<T, C>>(),
             counter: 0,
         }
     }
@@ -485,13 +480,9 @@ impl<T: ColumnValueRef, C: Codec> Clone for Iter<'_, T, C> {
         Self {
             slabs: self.slabs,
             col: self.col,
-            core: ICore {
-                slab_idx: self.core.slab_idx,
-                decoder: self.core.decoder.clone(),
-                items_left: self.core.items_left,
-                slab_remaining: self.core.slab_remaining,
-                pos: self.core.pos,
-            },
+            // verified (`ICore::dup`): the same in every way the
+            // specifications see
+            core: self.core.dup(),
             counter: self.counter,
         }
     }

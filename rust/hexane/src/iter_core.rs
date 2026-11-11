@@ -667,6 +667,24 @@ impl<D: Decode> ICore<D> {
         it
     }
 
+    /// An iterator over no slabs (`Iter::default`).
+    #[inline(always)]
+    pub(crate) fn empty<'a, X: Decoders<'a, D = D>>() -> (it: Self)
+        ensures
+            it.wf::<X>(Seq::empty()),
+            it.out::<X>(Seq::empty()) == Seq::<D::Item>::empty(),
+            it.pos == 0,
+            it.items_left == 0,
+    {
+        let it = ICore { slab_idx: 0, decoder: X::none(), items_left: 0, slab_remaining: 0, pos: 0 };
+        proof {
+            let s = Seq::<Slab<X::Tail>>::empty();
+            assert(slab_lens(s) =~= Seq::<nat>::empty());
+            it.lemma_here::<X>(s);
+        }
+        it
+    }
+
     /// An iterator at item `at` of slab `si`, with `n` to give.
     pub(crate) fn at<'a, X: Decoders<'a, D = D>>(
         slabs: &'a [Slab<X::Tail>],
