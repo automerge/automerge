@@ -3,7 +3,7 @@
 //!
 //! An `i64` delta column's values must lie within a range less than 2^63
 //! wide, or a delta between two of them wraps and the index's sums leave
-//! `i64` (`check_span`). Walking the whole column after every edit to see
+//! `i64` (`ddomain`). Walking the whole column after every edit to see
 //! would cost what the edit didn't, so an edit keeps a bound instead: the
 //! least and greatest value the column held, widened by each value it
 //! writes. Where that bound is narrow enough, the walk is skipped.

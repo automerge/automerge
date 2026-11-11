@@ -654,8 +654,8 @@ proof fn lemma_kept_at<V>(src: Seq<V>, sps: Seq<Splice>, i: int)
     }
 }
 
-/// Cutting the gaps out of the source, back to front
-/// (`retain_ranges`), leaving what the splices keep.
+/// Cutting the gaps out of the source, back to front (`copy::cut_gaps`,
+/// `dcopy::cut_gaps`), leaving what the splices keep.
 pub(crate) struct Cuts<V> {
     /// the ranges not yet passed (those before `i`), and where the
     /// source runs uncut to
@@ -799,9 +799,10 @@ impl<V> Cuts<V> {
     }
 }
 
+#[cfg(test)]
 impl Cuts<()> {
-    /// [`new`](Self::new), for the glue, which counts rows rather than
-    /// holding values: the cuts' items are units.
+    /// [`new`](Self::new), for the test helpers' glue, which counts rows
+    /// rather than holding values: the cuts' items are units.
     #[inline(always)]
     pub(crate) fn of_len(sps: &[Splice], src_len: usize) -> (c: Self)
         requires
@@ -817,7 +818,8 @@ impl Cuts<()> {
 }
 
 /// The gaps between the splices, in the destination, put back between
-/// the ranges kept (`for_each_gap`): each, as a splice inserting it, is
+/// the ranges kept (`copy::put_gaps`, `dcopy::put_gaps`): each, as a
+/// splice inserting it, is
 /// at the length of the ranges before it.
 pub(crate) struct Gaps<V> {
     /// the splices passed, where the last ends in the destination, and the
@@ -996,25 +998,6 @@ impl<V> Gaps<V> {
             }
         }
         None
-    }
-}
-
-impl Gaps<()> {
-    /// [`new`](Self::new), for the glue, which counts rows rather than
-    /// holding values: the gaps' items are units.
-    #[allow(unused_variables)] // `src_len` is for the spec
-    #[inline(always)]
-    pub(crate) fn of_lens(sps: &[Splice], src_len: usize, dst_len: usize) -> (g: Self)
-        requires
-            normal(sps@, src_len as int, dst_len as int),
-        ensures
-            g.inv(),
-            g.gaps@.len() == 0,
-            g.sps@ == sps@,
-            g.dst@.len() == dst_len,
-            g.src@.len() == src_len,
-    {
-        Self::new(sps, dst_len, Ghost(Seq::new(dst_len as nat, |_i: int| ())), Ghost(Seq::new(src_len as nat, |_i: int| ())))
     }
 }
 

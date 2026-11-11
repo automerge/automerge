@@ -427,7 +427,8 @@ compiles them away. To check them, run `cargo verus verify -p hexane
   the window used up. Slabs the index rules out hold no match. Given the
   index's aggregates, as for reading.
 * A delta column's edits (`splice`, `splice_runs`, `insert`, `remove`
-  and the other splices, `from_values`, and the `DeltaEdit` cursor),
+  and the other splices, `from_values`, `copy_ranges` (below), and the
+  `DeltaEdit` cursor),
   stated by the column's values as its iterators read them (each the
   running sum of the deltas through it, wrapping, `ddomain::rvals`): a
   splice leaves the values before it, then the values of the items it
@@ -444,15 +445,16 @@ compiles them away. To check them, run `cargo verus verify -p hexane
   are owed, keeps every value after the edit as it was, its ledger
   following what the column cursor carries, deletes and jumps over.
 * A delta edit's check that it leaves the values in the domain, so that
-  the index's sums fit again (`check_span`): its walk over the column
-  passes exactly when the values lie in the domain within a range less
-  than 2^63 wide, and then every running sum fits `i64`; and its
-  shortcut, which skips the walk where a bound on the values already
-  fits, passes only where the walk would. The bound starts from the
-  least and greatest running sum in the index's root aggregate, which
-  holds the column's values, and the edit cursor, `splice` and
-  `from_values` widen it by each value they write; every value the column holds after the edit
-  lies in it. Given the column's invariant, as for reading.
+  the index's sums fit again: its walk over the column
+  (`ddomain::slabs_fit`) passes exactly when the values lie in the
+  domain within a range less than 2^63 wide, and then every running sum
+  fits `i64`; and its shortcut, which skips the walk where a bound on the
+  values already fits, passes only where the walk would. The bound
+  starts from the least and greatest running sum in the index's root
+  aggregate, which holds the column's values (by the column's
+  invariant), and the edit cursor, `splice` and `from_values` widen it
+  by each value they write; every value the column holds after the edit
+  lies in it.
 * The value search of `Column` and its iterator (`scope_to_value`,
   `seek_to_value`): where the values in the window are sorted, it returns
   exactly the range of them equal to the target, or, if there are none,
@@ -473,7 +475,14 @@ compiles them away. To check them, run `cargo verus verify -p hexane
   each leaves the column holding the destination with the splices
   applied. The source's items come from a verified reader over the
   source column, moved to each range with its own index (`copy::SrcFeed`),
-  each run's value written as its owned form.
+  each run's value written as its owned form. A delta column's
+  `copy_ranges` is the same, in the column's values (`delta::dcopy`): the
+  direct way is a chain of the `DeltaEdit` cursor's steps, the inverted
+  one cuts the gaps with delta splices that insert nothing and puts the
+  destination's values back with one cursor, and the source's runs come
+  from a verified reader with its running sum (`dcopy::DSrc`), each
+  realizing the source's values there; the column's values become the
+  destination's with the splices applied.
 * The weights a column's index keeps: each weight function names a
   verified model (`weights`), whose relation the column invariant keeps
   between each slab and its weight: a plain column's weight is the slab's
@@ -524,11 +533,8 @@ first and values outside the domain last.
 * The prefix and delta columns' other logic is not verified: that a
   column's sum fits its prefix type, which the searches' results depend on
   (loads reject sums that would not, and edits panic, but those checks are
-  not part of the proof); `delta`, which is glue over the verified
-  iterator; and a delta column's `copy_ranges`, which chains the
-  `DeltaEdit` cursor's verified steps in glue, reading the source
-  through its iterator's runs (`Column::copy_ranges`' chains are
-  verified).
+  not part of the proof); and `delta`, which is glue over the verified
+  iterator.
 * `RleEncoderState` and `DeltaEncoderState`, which write into a buffer
   the caller passes to each call, are proved only if every call gets the
   same buffer, with the bytes they wrote unchanged in between. Their

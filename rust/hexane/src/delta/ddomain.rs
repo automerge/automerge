@@ -582,6 +582,16 @@ pub(crate) trait SpliceItems {
     fn next_item(&mut self) -> Option<SpliceItem>;
 }
 
+/// No items: a splice that only deletes.
+pub(crate) struct NoItems;
+
+impl SpliceItems for NoItems {
+    #[inline(always)]
+    fn next_item(&mut self) -> Option<SpliceItem> {
+        None
+    }
+}
+
 /// The values an item stands for: itself, or the values of a run after
 /// its `prefix` (`dedit::run_vals`), or nulls.
 pub(crate) open spec fn item_vals(it: SpliceItem) -> Seq<Option<i64>> {
@@ -722,7 +732,8 @@ pub(crate) trait DeltaWrite<'a, E: ReadsAgree<'a, X>, X: Decoders<'a, Tail = <E 
 /// the item after the deleted ones (`dbound::SpanPlan`), each delta
 /// written as `B` writes it.
 pub(crate) struct DeltaFeed<S, E: Slabs, M, B> {
-    pub(crate) items: S,
+    /// the items, or none at all (a splice that only deletes)
+    pub(crate) items: Option<S>,
     pub(crate) plan: SpanPlan,
     /// whether the plan keeps a bound on the values (always, for the
     /// column's domain; the field keeps the call sites' constant)
@@ -743,7 +754,7 @@ impl<S: SpliceItems, E, M, B> RunFeed<E> for DeltaFeed<S, E, M, B> where
  {
     type X = <B as DeltaWrite<'static, E, M>>::Ins;
 
-    type K = (Ghost<int>, usize, Option<i64>, Ghost<Seq<Option<i64>>>, Ghost<bool>);
+    type K = (Ghost<int>, usize, Option<i64>, Ghost<Seq<Option<i64>>>, Ghost<bool>, bool);
 
     /// The plan's, the values written hold the deltas it emitted, and the
     /// values it was given are those of the items taken.
@@ -752,11 +763,13 @@ impl<S: SpliceItems, E, M, B> RunFeed<E> for DeltaFeed<S, E, M, B> where
         &&& self.plan.tracking@ == self.track
         &&& self.given@.map_values(|o: E::V| <B as DeltaWrite<'static, E, M>>::dvo(o)) == self.plan.p.emitted@
         &&& self.plan.p.wanted@ == items_vals(self.taken@)
+        &&& self.items is None ==> self.taken@.len() == 0
     }
 
-    /// The splice: around it, and the column's original deltas.
+    /// The splice: around it, the column's original deltas, and whether
+    /// it inserts anything.
     open spec fn key(&self) -> Self::K {
-        (self.plan.p.prev, self.plan.p.skip, self.plan.p.next_val, self.plan.orig, self.plan.tracking)
+        (self.plan.p.prev, self.plan.p.skip, self.plan.p.next_val, self.plan.orig, self.plan.tracking, self.items is None)
     }
 
     open spec fn given(&self) -> Seq<E::V> {
@@ -778,6 +791,7 @@ impl<S: SpliceItems, E, M, B> RunFeed<E> for DeltaFeed<S, E, M, B> where
                 self.plan.fixed(plan0),
                 self.plan.p.emitted@ == e0,
                 self.given == old(self).given,
+                (self.items is None) == (old(self).items is None),
                 e0 == old(self).plan.p.emitted@,
                 plan0 == old(self).plan,
                 self.track == old(self).track,
@@ -789,7 +803,11 @@ impl<S: SpliceItems, E, M, B> RunFeed<E> for DeltaFeed<S, E, M, B> where
                         proof {
                             assert(e0 + Seq::<Option<i64>>::empty() =~= e0);
                         }
-                        match self.items.next_item() {
+                        let item = match &mut self.items {
+                            Some(items) => items.next_item(),
+                            None => None,
+                        };
+                        match item {
                             Some(SpliceItem::Value(v)) => {
                                 proof {
                                     lemma_items_push(self.taken@, SpliceItem::Value(v));

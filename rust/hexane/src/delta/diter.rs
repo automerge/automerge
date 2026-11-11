@@ -377,7 +377,7 @@ pub(crate) fn d_next_run<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item
                 &&& final(core).pos == old(core).pos + run.count
                 &&& run.count < max && run.count < o.len() ==> o[run.count as int] != run.value
             },
-            None => max == 0 || old(core).out::<X>(slabs@).len() == 0,
+            None => (max == 0 || old(core).out::<X>(slabs@).len() == 0) && final(core).pos == old(core).pos,
         },
 {
     let ghost c0 = *core;

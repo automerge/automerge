@@ -2,7 +2,9 @@ use crate::btree::SlabAggregate;
 use crate::column_core::ColumnCore;
 use crate::load_core::LoadCore;
 use crate::sealed::Sealed;
-use crate::splices::{Cuts, Gaps, Normalize};
+#[cfg(test)]
+use crate::splices::Cuts;
+use crate::splices::Normalize;
 use crate::weights::LoadWeigh;
 use std::marker::PhantomData;
 use std::ops::{AddAssign, Range, SubAssign};
@@ -932,29 +934,10 @@ where
     }
 }
 
-/// Call `f` for each gap between `splices` (normalized against a source
-/// of `src_len` rows) in a destination of `dst_len` rows, with the destination's range to read and the
-/// position in the retained column it belongs at.
-///
-/// Positions are the copied ranges' running length: the rows a gap brings
-/// back land before the next copied range and do not move it.
-pub(crate) fn for_each_gap(
-    splices: &[Splice],
-    src_len: usize,
-    dst_len: usize,
-    mut f: impl FnMut(usize, Range<usize>),
-) {
-    // verified (`splices::Gaps`): the gaps, as splices inserting them into
-    // the ranges retained, are normalized and give what `splices` give
-    let mut gaps = Gaps::of_lens(splices, src_len, dst_len);
-    while let Some((at, gap)) = gaps.next(splices) {
-        f(at, gap);
-    }
-}
-
 /// Call `f(at, n)` for each run of rows to remove, back to front, from a
 /// column of `len` rows to keep only those in `splices`' ranges
-/// (normalized).
+/// (normalized): the test helpers' `retain_ranges`.
+#[cfg(test)]
 pub(crate) fn for_each_cut(splices: &[Splice], len: usize, mut f: impl FnMut(usize, usize)) {
     // verified (`splices::Cuts`): the cuts, made in turn, leave exactly the
     // ranges' rows

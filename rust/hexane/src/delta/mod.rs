@@ -1,5 +1,6 @@
 pub(crate) mod agg;
 pub(crate) mod dbound;
+pub(crate) mod dcopy;
 pub(crate) mod ddomain;
 mod decoder;
 pub(crate) mod dedit;
@@ -994,7 +995,8 @@ impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
 
     /// Delta-column version of
     /// [`Column::copy_ranges`](crate::Column::copy_ranges); seam deltas
-    /// re-anchor through the same fix-up machinery as `splice_runs`.
+    /// re-anchor through the same fix-up machinery as `splice_runs`, so
+    /// the column's values become its own with the splices applied.
     pub fn copy_ranges<I>(&mut self, src: Self, splices: I)
     where
         I: IntoIterator<Item = crate::Splice>,
@@ -1020,33 +1022,38 @@ impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
         T::Inner: crate::ColumnValueRef<Encoding<C> = crate::RleEncoding<T::Inner, C>>,
     {
         use crate::column::CopyStrategy;
-        use crate::Shiftable;
         match strategy {
             CopyStrategy::Direct => {
-                // as `Column::copy_splices_with`, and the cursor carries
-                // the running realized value too, so the per-splice
-                // boundary lookup goes as well: a run that arrives
-                // already anchored copies straight through.
-                let mut runs = src.iter().runs();
-                let mut e = self.edit();
-                for sp in splices {
-                    runs.shift(sp.range.clone());
-                    e.seek(sp.pos).delete(sp.delete).insert_runs(&mut runs);
-                }
-                e.finish();
+                // verified (`dcopy::copy_direct`): one delta edit cursor
+                // applies the splices, each run the source gives for a
+                // range arriving anchored at the source's running sum, so
+                // the column's values become the splices applied
+                dcopy::copy_direct::<DWrite<T, C>, DRead<T, C>, DDeltas<T, C>>(
+                    &mut self.col.core,
+                    splices,
+                    &src.col.core,
+                    T::MIN_I64,
+                    T::MAX_I64,
+                );
             }
             CopyStrategy::Invert => {
-                let old_len = self.len();
-                let src_len = src.len();
+                // verified (`dcopy::copy_invert`): the column takes the
+                // source's slabs, cuts the gaps between the ranges out
+                // (delta splices) and puts the destination's values back
+                // between them with one cursor: the same values
                 self.col.swap_contents(&mut src.col);
-                self.retain_ranges(splices);
-                let mut runs = src.iter().runs();
-                let mut e = self.edit();
-                crate::column::for_each_gap(splices, src_len, old_len, |at, gap| {
-                    runs.shift(gap);
-                    e.seek(at).insert_runs(&mut runs);
-                });
-                e.finish();
+                let mut f = |_: <T::Inner as crate::ColumnValueRef>::Get<'_>, _: usize| {};
+                dcopy::copy_invert::<DWrite<T, C>, DRead<T, C>, DDeltas<T, C>, _>(
+                    &mut self.col.core,
+                    splices,
+                    &src.col.core,
+                    T::MIN_I64,
+                    T::MAX_I64,
+                    &mut crate::cursor::Visiting::<
+                        <T::Inner as crate::ColumnValueRef>::Encoding<C>,
+                        _,
+                    >::new(&mut f),
+                );
             }
         }
     }
@@ -1095,6 +1102,7 @@ impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
 
     /// Keep only the rows in `splices`' ranges (normalized), deleting the
     /// gaps back-to-front.
+    #[cfg(test)]
     fn retain_ranges(&mut self, splices: &[crate::Splice]) {
         crate::column::for_each_cut(splices, self.len(), |at, n| self.remove_n(at, n));
     }
@@ -1126,7 +1134,7 @@ impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
         self.col.core.splice_delta(
             index,
             del,
-            items,
+            Some(items),
             T::MIN_I64,
             T::MAX_I64,
             &mut crate::cursor::Visiting::<<T::Inner as crate::ColumnValueRef>::Encoding<C>, _>::new(
@@ -1138,12 +1146,14 @@ impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
 
 // ── DeltaEdit ───────────────────────────────────────────────────────────────
 
+/// The storage of a column of `T`, as the verified delta cores take it:
+/// its writer and reader operations, and its deltas.
+type DWrite<T, C> = crate::rle::state::WOps<<T as DeltaValue>::Inner, <T as DeltaValue>::Inner, C>;
+type DRead<T, C> = crate::rle::model::Ops<<T as DeltaValue>::Inner, C>;
+type DDeltas<T, C> = DB<<T as DeltaValue>::Inner, C>;
+
 /// A delta edit's verified core, over the storage of a column of `T`.
-type DCore<T, C> = dedit_core::DeltaEditCore<
-    crate::rle::state::WOps<<T as DeltaValue>::Inner, <T as DeltaValue>::Inner, C>,
-    crate::rle::model::Ops<<T as DeltaValue>::Inner, C>,
-    DB<<T as DeltaValue>::Inner, C>,
->;
+type DCore<T, C> = dedit_core::DeltaEditCore<DWrite<T, C>, DRead<T, C>, DDeltas<T, C>>;
 
 /// A cursor over a [`DeltaColumn`], in realized values.
 ///
@@ -2263,6 +2273,45 @@ mod tests {
         assert_eq!(dest2.get(2), Some(v(1)));
         assert_eq!(dest2.get(100_000), Some(v(99_999)));
         assert_eq!(dest2.get(100_001), Some(5));
+    }
+
+    /// Both ways of carrying out `copy_ranges` (`dcopy::copy_direct` and
+    /// `dcopy::copy_invert`) leave the destination's values with the
+    /// splices applied, nulls and re-anchored seams included.
+    #[test]
+    fn copy_splices_both_strategies() {
+        use crate::column::CopyStrategy;
+        let src_vals: Vec<Option<i64>> = (0..3_000i64)
+            .map(|i| (i % 11 != 0).then_some(i * 5 - (i % 13) * 40))
+            .collect();
+        let dst_vals: Vec<Option<i64>> = (0..2_000i64)
+            .map(|i| (i % 7 != 0).then_some(1_000 - i * 3))
+            .collect();
+        let splices: Vec<crate::Splice> = (0..40usize)
+            .map(|k| crate::Splice {
+                pos: k * 50,
+                delete: k % 4,
+                range: k * 70..k * 70 + (k % 9) * 5 + usize::from(k % 4 == 0),
+            })
+            .collect();
+        let mut want = Vec::new();
+        let mut at = 0;
+        for sp in &splices {
+            want.extend_from_slice(&dst_vals[at..sp.pos]);
+            want.extend_from_slice(&src_vals[sp.range.clone()]);
+            at = sp.pos + sp.delete;
+        }
+        want.extend_from_slice(&dst_vals[at..]);
+        for strategy in [CopyStrategy::Direct, CopyStrategy::Invert] {
+            let mut src = DeltaColumn::<Option<i64>>::with_max_segments(8);
+            src.splice(0, 0, src_vals.iter().copied());
+            let mut dst = DeltaColumn::<Option<i64>>::with_max_segments(8);
+            dst.splice(0, 0, dst_vals.iter().copied());
+            let norm = crate::column::normalize_splices(splices.clone(), src.len(), dst.len());
+            dst.copy_splices_with(src, &norm, strategy);
+            assert_eq!(dst.to_vec(), want, "{strategy:?}");
+            dst.check_invariants();
+        }
     }
 
     // ── seek_to_value ───────────────────────────────────────────────────────

@@ -702,7 +702,7 @@ proof fn lemma_psum_size(ds: Seq<Option<i64>>)
 }
 
 /// The least and greatest running sums at the values of any deltas
-/// (`check_span`'s walk over a column after an edit, whose deltas may
+/// (`ddomain::slabs_fit`'s walk over a column after an edit, whose deltas may
 /// wrap): in `i128`, which holds any running sum of a column's deltas.
 pub(crate) struct AnySpan {
     pub(crate) running: i128,

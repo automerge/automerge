@@ -61,6 +61,7 @@ use crate::delta::agg::{agg_of, deltas_of, reps, steps_fit};
 #[cfg(verus_keep_ghost)]
 use crate::delta::dbound::{bounds_of, lemma_spliced_vals, span_ok, spliced};
 use crate::delta::dbound::{root_bound, SpanLedger, SpanPlan, ToDeltas};
+use crate::delta::dcopy::DSrc;
 #[cfg(verus_keep_ghost)]
 use crate::delta::ddomain::{
     dslabs, items_vals, lemma_dix_ok, lemma_dslabs_own, lemma_span_steps, lemma_splice_deltas,
@@ -884,6 +885,31 @@ impl<E, X, B> ColumnCore<E, SlabAgg, SlabBTree<SlabAgg>, DeltaModel<X, B>> where
         (slabs, ix)
     }
 
+    /// The column's values, a range at a time, for a delta column's
+    /// `copy_ranges` (`dcopy::DSrc`): a reader at the start, with its
+    /// running sum, moved by the column's own index.
+    #[inline(always)]
+    pub(crate) fn dsrc<'a>(&'a self) -> (r: DSrc<'a, X, B>)
+        ensures
+            r.inv(),
+            r.src() == rvals::<E, X, B>(self@),
+            r.at() == 0,
+    {
+        let (slabs, index) = self.delta_parts();
+        let core = self.reader::<X>(0, 0);
+        self.lemma_column();
+        proof {
+            let s = self.slabs_spec();
+            let v = crate::iter_core::vals_of::<X>(s);
+            assert(v.subrange(0, 0) =~= Seq::<<X::D as Decode>::Item>::empty());
+            assert(crate::prefix_core::before::<X>(s, 0) =~= Seq::<<X::D as Decode>::Item>::empty());
+            assert(deltas_of::<_, B>(Seq::<<X::D as Decode>::Item>::empty()) =~= Seq::<Option<i64>>::empty());
+            lemma_crop(0);
+            lemma_dslabs_own::<E, X, B>(s);
+        }
+        DSrc { slabs, index, core, running: 0, end: 0, _p: PhantomData }
+    }
+
     /// The ledger of a delta edit cursor opening at item `at`: the
     /// realized value before it (an index jump), the bound on the
     /// column's values (from the index's root), and the column's deltas,
@@ -930,7 +956,7 @@ impl<E, X, B> ColumnCore<E, SlabAgg, SlabBTree<SlabAgg>, DeltaModel<X, B>> where
         SpanLedger::new(running, lo, hi, true, Ghost(orig.take(at as int)), Ghost(orig))
     }
 
-    /// Delete `del` items at `at` and insert the values of `items` there,
+    /// Delete `del` items at `at` and insert the values of `items` (if any) there,
     /// the values after them kept (the delta after the deleted items, and
     /// any nulls before it, re-written to reach the same value): panics
     /// if the values would leave `min..=max` or span 2^63 or more, or the
@@ -942,7 +968,7 @@ impl<E, X, B> ColumnCore<E, SlabAgg, SlabBTree<SlabAgg>, DeltaModel<X, B>> where
         &mut self,
         at: usize,
         del: usize,
-        items: S,
+        items: Option<S>,
         min: i64,
         max: i64,
         f: &mut F,
@@ -955,6 +981,7 @@ impl<E, X, B> ColumnCore<E, SlabAgg, SlabBTree<SlabAgg>, DeltaModel<X, B>> where
             final(self).ready(),
             rvals::<E, X, B>(final(self)@) == rvals::<E, X, B>(old(self)@).take(at as int) + items_vals(taken@)
                 + rvals::<E, X, B>(old(self)@).skip(at + del),
+            items is None ==> taken@.len() == 0,
     {
         // the bound on the column's values, and the running sum, the nulls
         // and the value around the splice
