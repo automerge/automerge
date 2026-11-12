@@ -34,6 +34,9 @@
 //! verus --crate-type=lib src/leb128_codec.rs
 //! ```
 
+// Verus has no specification of `is_empty` for slices.
+#![allow(clippy::len_zero)]
+
 #[allow(unused_imports)]
 use vstd::prelude::*;
 
@@ -550,10 +553,34 @@ proof fn lemma_sign_extend(r: u64, k: u64)
 }
 
 /// Decodes a canonical unsigned LEB128 value from the front of `buf`,
-/// returning `(value, bytes_consumed)`.
-#[inline]
-#[verifier::spinoff_prover]
+/// returning `(value, bytes_consumed)`. A value below 128, one byte, is
+/// read inline; longer ones by [`decode_long`].
+#[inline(always)]
 pub fn decode(buf: &[u8]) -> (r: Result<(u64, usize), DecodeError>)
+    ensures decode_ok(buf@, r),
+{
+    if buf.len() > 0 && buf[0] < 0x80 {
+        let b = buf[0];
+        proof {
+            let s = buf@.subrange(0, 1);
+            assert(s =~= Seq::<u8>::empty().push(b));
+            lemma_groups_push(Seq::<u8>::empty(), b);
+            reveal_with_fuel(groups, 1);
+            assert(pow128(0) == 1) by {
+                reveal_with_fuel(pow128, 1);
+            }
+            lemma_shape_encode(s);
+        }
+        return Ok((b as u64, 1));
+    }
+    decode_long(buf)
+}
+
+/// [`decode`], for any value.
+#[cold]
+#[inline(never)]
+#[verifier::spinoff_prover]
+pub fn decode_long(buf: &[u8]) -> (r: Result<(u64, usize), DecodeError>)
     ensures decode_ok(buf@, r),
 {
     let mut result: u64 = 0;
@@ -631,9 +658,30 @@ pub fn decode(buf: &[u8]) -> (r: Result<(u64, usize), DecodeError>)
 }
 
 /// Decodes a canonical signed LEB128 value from the front of `buf`,
-/// returning `(value, bytes_consumed)`.
-#[inline]
+/// returning `(value, bytes_consumed)`. A value in `-64..64`, one byte, is
+/// read inline; longer ones by [`decode_signed_long`].
+#[inline(always)]
 pub fn decode_signed(buf: &[u8]) -> (r: Result<(i64, usize), DecodeError>)
+    ensures decode_signed_ok(buf@, r),
+{
+    if buf.len() > 0 && buf[0] < 0x80 {
+        let b = buf[0];
+        let v: i64 = if b >= 0x40 { b as i64 - 128 } else { b as i64 };
+        proof {
+            let s = buf@.subrange(0, 1);
+            assert(s =~= seq![b]);
+            assert(groups_signed(s) == signed_group(b));
+            lemma_shape_encode_signed(s);
+        }
+        return Ok((v, 1));
+    }
+    decode_signed_long(buf)
+}
+
+/// [`decode_signed`], for any value.
+#[cold]
+#[inline(never)]
+pub fn decode_signed_long(buf: &[u8]) -> (r: Result<(i64, usize), DecodeError>)
     ensures decode_signed_ok(buf@, r),
 {
     let mut result: u64 = 0;

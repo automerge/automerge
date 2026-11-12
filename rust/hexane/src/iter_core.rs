@@ -724,7 +724,7 @@ impl<D: Decode> ICore<D> {
     }
 
     /// Yield the next value of the window.
-    #[inline(always)]
+    #[inline]
     pub(crate) fn next<'a, X: Decoders<'a, D = D>>(&mut self, slabs: &'a [Slab<X::Tail>]) -> (r: Option<D::Item>)
         requires
             old(self).wf::<X>(slabs@),

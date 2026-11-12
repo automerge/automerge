@@ -723,7 +723,6 @@ impl<'a, O: RleOps<'a>> Dec<'a, O> {
     }
 
     /// The next value, if any.
-    #[inline]
     pub(crate) fn next(&mut self) -> (r: Option<O::V>)
         requires old(self).inv(),
         ensures

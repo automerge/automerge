@@ -407,6 +407,11 @@ impl<'a, T: ColumnValueRef, C: Codec> Iterator for Iter<'a, T, C> {
 
     #[inline(always)]
     fn next(&mut self) -> Option<T::Get<'a>> {
+        // an iterator with nothing left (used up, or a default one) needs
+        // no call into the core, which would return `None` here unchanged
+        if self.core.items_left == 0 {
+            return None;
+        }
         self.core.next::<Dx<T, C>>(self.slabs)
     }
 
