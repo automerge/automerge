@@ -8,18 +8,48 @@ See https://github.com/automerge/automerge/pull/1099 for background.
 
 ## Principles
 
-- **The public JavaScript API does not change.** This crate is an alternative
-  backend for the low-level `API` interface that `@automerge/automerge`
-  already consumes (`javascript/src/low_level.ts`, `UseApi`). Anything
-  observable through the public package (values, patches, error classes and
-  messages) must match the WebAssembly binding.
+- **The public JavaScript API does not change.** What `@automerge/automerge`
+  exports, and what is observable through it (values, patches, error classes
+  and messages), is the same whichever binding is underneath. The end-to-end
+  tests in `javascript/test`, which exercise the public API, must pass
+  unchanged against both bindings.
+- **Everything below the public API is in scope.** That includes the
+  low-level `API` interface (`javascript/src/low_level.ts`), the internals of
+  the JS package and how it divides work with the native side.
 - **The WebAssembly binding stays.** `automerge-wasm` remains a first-class
   binding built on `wasm-bindgen`. Bridging WebAssembly through Node-API
   (e.g. via napi-rs' own wasm target) is not something we are pursuing for
   now.
-- **Share logic, not JS glue.** Code with no dependency on a JS engine should
-  live in one place and be used by both bindings. Code that builds or reads
-  JS values may legitimately differ per binding, see below.
+- **Aligned where it makes sense, not at all costs.** Code with no dependency
+  on a JS engine should live in one place and be used by both bindings. Code
+  that builds or reads JS values should use the primitives of its binding
+  generator idiomatically. When that pulls the two bindings apart, we
+  abstract on the JS side and let each binding provide its own
+  implementation, rather than forcing one binding into the shape of the
+  other.
+
+## Where the bindings meet the JS package
+
+The JS package selects its backend through `UseApi` in
+`javascript/src/low_level.ts`. Today that seam assumes `wasm-bindgen` in a
+few places, which is where a JS-side abstraction would go:
+
+- **Materialisation.** `implementation.ts` calls `handle.materialize`,
+  `handle.applyPatches` and `handle.applyAndReturnPatches` and expects fully
+  built, optionally frozen documents carrying hidden metadata. This is the
+  main candidate for an internal abstraction with a per-binding
+  implementation.
+- **Object metadata.** `constants.ts` defines `STATE`
+  (`Symbol.for("_am_meta")`) and `OBJECT_ID` (`Symbol.for("_am_objectId")`),
+  which `internal_state.ts` and `proxies.ts` read from objects that the
+  binding wrote them onto.
+- **Handle identity.** `proxies.ts` compares `handle.__wbg_ptr`, a
+  `wasm-bindgen` internal, to tell whether a value belongs to the same
+  document.
+- **Types.** `wasm_types.d.ts` is copied from the `wasm-bindgen` output by
+  `scripts/build.mjs` and is what the `API` interface is typed against.
+- **Loading.** `initializeWasm` and the files in `src/entrypoints` are about
+  instantiating a wasm module.
 
 ## Building and testing
 
@@ -41,7 +71,7 @@ them have been measured yet.
 | --- | --- | --- | --- |
 | Materialize key strings | `ExportCache::ensure_key` / `ensure_datatype` keep a `HashMap` of `JsString`s so each map key is only encoded once per export (`src/export_cache.rs`) | Every Rust `&str` crossing into JS is copied out of linear memory and decoded | Create property keys directly (`napi_create_string_utf8`, or `node_api_create_property_key_utf16` for internalised keys) and re-measure whether the cache is still needed |
 | Materialize / patch application | Objects are built one `Reflect::set` / `Object.defineProperty` / `Object.freeze` call at a time, each one a call out of wasm into JS glue | No direct access to the engine | Direct engine calls (`napi_set_named_property`, `napi_define_properties` to set several hidden props in one call, `napi_object_freeze`) |
-| Object metadata | Object id, datatype and meta are stored on every materialised object as non-enumerable `Symbol.for("_am_objectId")`, `_am_datatype_`, `_am_raw_value_`, `_am_meta` properties and read back in `unwrap_object` | The only way to associate Rust-side data with a JS object | `napi_wrap` / `napi_type_tag_object` could attach native data. Note that `javascript/src` reads these symbols too, so changing this is a JS-package change and not only a binding change |
+| Object metadata | Object id, datatype and meta are stored on every materialised object as non-enumerable `Symbol.for("_am_objectId")`, `_am_datatype_`, `_am_raw_value_`, `_am_meta` properties and read back in `unwrap_object` | The only way to associate Rust-side data with a JS object | `napi_wrap` / `napi_type_tag_object` could attach native data. The JS package reads `_am_objectId` and `_am_meta` too, so this needs the lookup in `internal_state.ts` to go through a per-binding implementation |
 | Binary data | `Uint8Array::to_vec()` on the way in and `Uint8Array::from(slice)` on the way out (`load`, `save`, changes, sync messages, byte scalars) | JS cannot hold references into linear memory, which may move when it grows | Borrow the incoming `ArrayBuffer` for the duration of the call, and hand ownership of an outgoing `Vec<u8>` to an external `ArrayBuffer`/`Buffer` without copying |
 | Memory ceiling | 32-bit linear memory, 4GB at most | wasm32 | None needed. This is one of the motivations for the binding, and means sizes should not be assumed to fit in `u32` |
 | Lifetime of handles | `Automerge` and `SyncState` must be released with `.free()`; `javascript/src/implementation.ts` calls it explicitly | wasm-bindgen objects are not collected by the JS GC | napi-rs classes are finalised by the GC. `free()` has to keep existing on the low-level API, but can become a no-op or an eager release |
