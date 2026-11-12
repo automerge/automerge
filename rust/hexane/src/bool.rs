@@ -693,7 +693,7 @@ impl<C: Codec> ColumnEncoding for BoolEncoding<C> {
         if slab.len == 0 {
             return None;
         }
-        let mut dec = Self::decoder(&slab.data);
+        let mut dec = Self::slab_decoder(&slab.data, crate::sealed::Trusted(()));
         let mut last_val = None;
         let mut last_count = 0;
         while let Some(run) = dec.next_run() {
