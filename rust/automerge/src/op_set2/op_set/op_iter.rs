@@ -998,18 +998,22 @@ impl<'a> SuccIterIter<'a> {
         self.ctr.advance_to(sub_start);
         self.incs.advance_to(sub_start);
 
-        let iter = SuccCursors {
+        Some(self.take(num_succ))
+    }
+
+    /// The cursors over the next `num_succ` successors; moves past them.
+    #[inline(always)]
+    fn take(&mut self, num_succ: usize) -> SuccCursors<'a> {
+        let cursors = SuccCursors {
             len: num_succ,
             succ_actor: self.actor.clone(),
             succ_counter: self.ctr.clone(),
             inc_values: self.incs.clone(),
         };
-
         self.actor.advance_by(num_succ);
         self.ctr.advance_by(num_succ);
         self.incs.advance_by(num_succ);
-
-        Some(iter)
+        cursors
     }
 
     pub(crate) fn new(
@@ -1033,19 +1037,7 @@ impl<'a> SuccIterIter<'a> {
             .next()
             .ok_or(ReadOpError::MissingValue("succ_count"))?
             .value as usize;
-
-        let result = SuccCursors {
-            len: num_succ,
-            succ_actor: self.actor.clone(),
-            succ_counter: self.ctr.clone(),
-            inc_values: self.incs.clone(),
-        };
-
-        self.actor.advance_by(num_succ);
-        self.ctr.advance_by(num_succ);
-        self.incs.advance_by(num_succ);
-
-        Ok(result)
+        Ok(self.take(num_succ))
     }
 
     pub(crate) fn try_nth(&mut self, n: usize) -> Result<SuccCursors<'a>, ReadOpError> {
@@ -1065,18 +1057,7 @@ impl<'a> SuccIterIter<'a> {
             self.ctr.advance_by(seek);
             self.incs.advance_by(seek);
 
-            let result = SuccCursors {
-                len: num_succ,
-                succ_actor: self.actor.clone(),
-                succ_counter: self.ctr.clone(),
-                inc_values: self.incs.clone(),
-            };
-
-            self.actor.advance_by(num_succ);
-            self.ctr.advance_by(num_succ);
-            self.incs.advance_by(num_succ);
-
-            Ok(result)
+            Ok(self.take(num_succ))
         }
     }
 
@@ -1093,8 +1074,11 @@ impl<'a> SuccIterIter<'a> {
 impl<'a> Iterator for SuccIterIter<'a> {
     type Item = SuccCursors<'a>;
 
+    // not `try_next().ok()`: building the cursors straight into the option
+    // saves a copy of several hundred bytes per op
     fn next(&mut self) -> Option<Self::Item> {
-        self.try_next().ok()
+        let num_succ = self.count.next()?.value as usize;
+        Some(self.take(num_succ))
     }
 
     fn nth(&mut self, n: usize) -> Option<Self::Item> {
