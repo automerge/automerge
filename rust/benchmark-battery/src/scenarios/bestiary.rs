@@ -1,5 +1,6 @@
 use super::SampledBenchmark;
-use benchmark_battery::automerge::{Automerge, ReadDoc};
+use benchmark_battery::automerge::{Automerge, LoadOptions, ReadDoc};
+use benchmark_battery::{load_masked, policy_masked_for_bytes};
 use std::hint::black_box;
 
 const FILES: [(&str, &str); 2] = [
@@ -46,28 +47,28 @@ pub fn benchmarks() -> Vec<SampledBenchmark> {
     }
     benchmarks
 }
-
 fn load(filename: &str) -> Box<dyn FnMut()> {
     let data = std::fs::read(filename).unwrap();
+    let policy = policy_masked_for_bytes(&data);
     Box::new(move || {
-        let doc = Automerge::load(data.as_slice()).unwrap();
-        black_box(doc);
+        let options = LoadOptions::new().write_frontier(policy.clone());
+        black_box(Automerge::load_with_options(data.as_slice(), options).unwrap());
     })
 }
 
 fn reload(filename: &str) -> Box<dyn FnMut()> {
     let data = std::fs::read(filename).unwrap();
-    let doc = Automerge::load(data.as_slice()).unwrap();
-    let saved = doc.save();
+    let saved = load_masked(&data).save();
+    let policy = policy_masked_for_bytes(&saved);
     Box::new(move || {
-        let doc = Automerge::load(saved.as_slice()).unwrap();
-        black_box(doc);
+        let options = LoadOptions::new().write_frontier(policy.clone());
+        black_box(Automerge::load_with_options(saved.as_slice(), options).unwrap());
     })
 }
 
 fn fork(filename: &str) -> Box<dyn FnMut()> {
     let data = std::fs::read(filename).unwrap();
-    let doc = Automerge::load(data.as_slice()).unwrap();
+    let doc = load_masked(&data);
     Box::new(move || {
         let fork = doc.fork();
         black_box(fork.save());
@@ -76,7 +77,7 @@ fn fork(filename: &str) -> Box<dyn FnMut()> {
 
 fn save(filename: &str) -> Box<dyn FnMut()> {
     let data = std::fs::read(filename).unwrap();
-    let doc = Automerge::load(data.as_slice()).unwrap();
+    let doc = load_masked(&data);
     Box::new(move || {
         black_box(doc.save());
     })
@@ -84,7 +85,7 @@ fn save(filename: &str) -> Box<dyn FnMut()> {
 
 fn iter(filename: &str) -> Box<dyn FnMut()> {
     let data = std::fs::read(filename).unwrap();
-    let doc = Automerge::load(data.as_slice()).unwrap();
+    let doc = load_masked(&data);
     Box::new(move || {
         let items = doc.iter().collect::<Vec<_>>();
         black_box(items);

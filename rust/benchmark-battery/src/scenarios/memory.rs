@@ -3,9 +3,11 @@ use super::MemoryBenchmark;
 #[cfg(feature = "memory")]
 use super::MemoryMeasurement;
 #[cfg(feature = "memory")]
-use benchmark_battery::automerge::Automerge;
+use benchmark_battery::automerge::{Automerge, LoadOptions};
 #[cfg(feature = "memory")]
-use benchmark_battery::{big_paste_doc, poorly_simulated_typing_doc, text_splice_100};
+use benchmark_battery::{
+    big_paste_doc, policy_masked_for_bytes, poorly_simulated_typing_doc, text_splice_100,
+};
 #[cfg(feature = "memory")]
 use std::path::Path;
 
@@ -90,5 +92,11 @@ fn load_fixture(filename: &str) -> Box<dyn FnMut() -> MemoryMeasurement> {
 
 #[cfg(feature = "memory")]
 fn load_data(data: Vec<u8>) -> Box<dyn FnMut() -> MemoryMeasurement> {
-    Box::new(move || crate::memory::measure(|| Automerge::load(&data).unwrap()))
+    let policy = policy_masked_for_bytes(&data);
+    Box::new(move || {
+        crate::memory::measure(|| {
+            let options = LoadOptions::new().write_frontier(policy.clone());
+            Automerge::load_with_options(&data, options).unwrap()
+        })
+    })
 }
