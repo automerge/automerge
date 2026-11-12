@@ -26,13 +26,52 @@ pub struct DeltaDecoder<'a, T: DeltaValue, C: Codec = Leb128> {
 }
 
 impl<'a, T: DeltaValue, C: Codec> DeltaDecoder<'a, T, C> {
-    /// Construct a decoder over delta-encoded column `data`.
+    /// Construct a decoder over delta-encoded column `data`, which must be
+    /// a valid encoding whose values lie in `T`'s domain, as an encoder or
+    /// [`DeltaColumn::save`](crate::DeltaColumn::save) writes: on other
+    /// bytes the decoder may panic or yield nonsense. For bytes from
+    /// outside the program, use [`try_new`](Self::try_new).
     pub fn new(data: &'a [u8]) -> Self {
         Self {
             inner: crate::decoder_in::<T::Inner, C>(data),
             running: 0,
             _phantom: PhantomData,
         }
+    }
+
+    /// Like [`new`](Self::new), but first checks that `data` is a valid
+    /// encoding of deltas whose running sums all lie in `T`'s domain:
+    /// on any other bytes, the error, rather than a decoder that could
+    /// panic on them.
+    pub fn try_new(data: &'a [u8]) -> Result<Self, crate::PackError> {
+        use crate::delta::DeltaInner;
+        use crate::encoding::{ColumnEncoding, RunDecoder};
+        <<T::Inner as crate::ColumnValueRef>::Encoding<C> as ColumnEncoding>::validate_encoding(
+            data,
+        )?;
+        let in_domain = |v: i64| T::MIN_I64 <= v && v <= T::MAX_I64;
+        let mut runs = crate::decoder_in::<T::Inner, C>(data);
+        let mut running = 0i64;
+        while let Some(run) = runs.next_run() {
+            let Some(d) = T::Inner::to_opt(run.value) else {
+                continue;
+            };
+            // a run's values lie between its first and its last
+            let first = running.checked_add(d);
+            let last = i64::try_from(run.count)
+                .ok()
+                .and_then(|n| d.checked_mul(n))
+                .and_then(|step| running.checked_add(step));
+            match (first, last) {
+                (Some(f), Some(l)) if in_domain(f) && in_domain(l) => running = l,
+                _ => {
+                    return Err(crate::PackError::InvalidValue(
+                        "delta value out of domain".into(),
+                    ))
+                }
+            }
+        }
+        Ok(Self::new(data))
     }
 
     /// Consume the next run of *raw deltas* (at most `max` items),
