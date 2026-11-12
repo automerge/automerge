@@ -12,7 +12,7 @@ use std::ops::RangeBounds;
 use crate::actor::{ActorRemoval, ActorShift, ActorTable};
 use crate::admission::{AcceptedHistory, CandidateHistory};
 use crate::author::Authors;
-use crate::change_graph::{ChangeGraph, FragmentReadiness};
+use crate::change_graph::{ChangeGraph, FragmentReadiness, OutgoingSelection};
 use crate::op_set2::OpSet;
 use crate::signature::{ed25519, Insert, SignatureStore};
 use crate::{Change, ChangeHash, Fragment};
@@ -121,13 +121,14 @@ impl SigningState {
     ) -> Vec<Fragment> {
         match self {
             Self::Unsigned => graph.fragments(levels).collect(),
-            Self::Required(signing) => signing
-                .fragment_readiness
-                .fragments(graph, levels)
-                .filter(|f| {
-                    f.level > 0 || has_signature(graph, authors, &signing.signatures, &f.head)
-                })
-                .collect(),
+            Self::Required(signing) => {
+                let mut fragments = OutgoingSelection::new(graph, &signing.fragment_readiness)
+                    .collect(|hash| has_signature(graph, authors, &signing.signatures, hash));
+                // Select coverage before filtering: range queries must not
+                // resurrect covered fragments or their singleton members.
+                fragments.retain(|fragment| levels.contains(&fragment.level));
+                fragments
+            }
         }
     }
 
@@ -145,7 +146,9 @@ impl SigningState {
                 } else {
                     signing.fragment_readiness.is_ready(&head)
                 };
-                eligible.then(|| graph.get_fragment(head)).flatten()
+                eligible
+                    .then(|| graph.get_retained_fragment(head))
+                    .flatten()
             }
         }
     }

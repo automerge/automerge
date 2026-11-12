@@ -25,7 +25,7 @@ use crate::{
 mod boundary_memo;
 use boundary_memo::BoundaryMemo;
 mod fragment;
-pub(crate) use fragment::{FragmentCache, FragmentReadiness};
+pub(crate) use fragment::{FragmentCache, FragmentReadiness, OutgoingSelection};
 
 /// The graph of changes
 ///
@@ -589,6 +589,17 @@ impl ChangeGraph {
             self.loose_commit(n)
         } else {
             self.fragment_cache.get_fragment(self, head)
+        }
+    }
+
+    /// Look up an outgoing candidate, including structurally superseded heads.
+    /// Signing callers must check readiness before exporting it.
+    pub(crate) fn get_retained_fragment(&self, head: ChangeHash) -> Option<Fragment> {
+        let n = self.nodes_by_hash.get(&head).copied()?;
+        if head.fragment_level() == 0 {
+            self.loose_commit(n)
+        } else {
+            self.fragment_cache.get_retained_fragment(self, head)
         }
     }
 
@@ -1690,6 +1701,51 @@ mod tests {
         graph
     }
 
+    /// Independent coverage oracle: derive required actor frontiers from frozen
+    /// members, not from the readiness index or outgoing selection algorithm.
+    fn assert_outgoing_coverage(
+        graph: &ChangeGraph,
+        readiness: &FragmentReadiness,
+        signed: &HashSet<ChangeHash>,
+    ) -> HashSet<ChangeHash> {
+        let mut expected: HashSet<_> = graph
+            .hashes
+            .iter()
+            .copied()
+            .filter(|hash| hash.fragment_level() == 0 && signed.contains(hash))
+            .collect();
+        for head in graph.hashes.iter().filter(|hash| hash.fragment_level() > 0) {
+            let Some(fragment) = graph.get_retained_fragment(*head) else {
+                continue;
+            };
+            let mut frontiers = HashMap::new();
+            for hash in &fragment.members {
+                let (actor, seq) = graph.actor_seq_for_hash(hash).unwrap();
+                let entry = frontiers.entry(actor).or_insert((seq, *hash));
+                if seq > entry.0 {
+                    *entry = (seq, *hash);
+                }
+            }
+            if frontiers.values().all(|(_, hash)| signed.contains(hash)) {
+                expected.extend(fragment.members);
+            }
+        }
+        let selected =
+            OutgoingSelection::new(graph, readiness).collect(|hash| signed.contains(hash));
+        let actual = selected
+            .iter()
+            .flat_map(|f| f.members.iter().copied())
+            .collect();
+        assert_eq!(expected, actual);
+        assert!(selected.is_sorted_by_key(|f| std::cmp::Reverse(graph.nodes_by_hash[&f.head])));
+        let mut heads = HashSet::new();
+        for fragment in selected {
+            assert!(heads.insert(fragment.head));
+            assert_eq!(graph.get_retained_fragment(fragment.head), Some(fragment));
+        }
+        actual
+    }
+
     #[test]
     fn readiness_reconciliation_computes_only_new_fragment_requirements() {
         let mut builder = TestGraphBuilder::new();
@@ -1729,7 +1785,7 @@ mod tests {
     }
 
     #[test]
-    fn readiness_reconciliation_cleans_superseded_subscriptions_and_matches_rebuilds() {
+    fn readiness_reconciliation_retains_superseded_subscriptions_and_matches_rebuilds() {
         let mut builder = TestGraphBuilder::new();
         let a = builder.actor();
         let b = builder.actor();
@@ -1744,12 +1800,13 @@ mod tests {
         let empty = readiness_graph(&builder, &[0, 1, 1, 2, 2, 3]);
 
         // Cover ready, partially attested, and entirely missing retired fragments.
-        // The branches share root subscriptions, then supersession makes the root
-        // unnecessary. Compare both directions of the index with a fresh rebuild.
+        // Supersession retains their requirements and shared root subscriptions.
+        // Compare both directions of the index with a fresh rebuild.
         for mask in 0..1 << empty.hashes.len() {
             let mut graph = empty.clone();
             let mut signed = HashSet::new();
             let mut readiness = FragmentReadiness::new(&graph, |_| false);
+            let mut covered = HashSet::new();
             for n in 0..graph.hashes.len() {
                 let hash = graph.hashes[n];
                 // Evidence can predate construction of a fragment's requirements.
@@ -1764,16 +1821,165 @@ mod tests {
                     FragmentReadiness::new(&graph, |hash| signed.contains(hash)),
                     "mask {mask}, node {n}",
                 );
+                let next = assert_outgoing_coverage(&graph, &readiness, &signed);
+                assert!(
+                    covered.is_subset(&next),
+                    "lost outgoing history at node {n}"
+                );
+                covered = next;
             }
-            // Obsolete subscriptions must be gone, not just ignored on delivery.
-            // Remaining signatures (and duplicates) still update the live index.
+            // Delayed evidence must still update retired candidates. Duplicates
+            // remain harmless, and both index directions match a fresh rebuild.
             for hash in &graph.hashes {
                 signed.insert(*hash);
                 readiness.signature_added(hash);
                 readiness.signature_added(hash);
+                if hash.fragment_level() > 0 {
+                    assert!(readiness.is_ready(hash));
+                }
                 assert_eq!(
                     readiness,
                     FragmentReadiness::new(&graph, |hash| signed.contains(hash)),
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn outgoing_selection_keeps_attested_fragment_and_loose_suffix_until_replacement_is_ready() {
+        let mut builder = TestGraphBuilder::new();
+        let actor = builder.actor();
+        let root = builder.change(&actor, 1, &[]);
+        let old = builder.change(&actor, 1, &[root]);
+        let loose = builder.change(&actor, 1, &[old]);
+        builder.change(&actor, 1, &[loose]);
+        let mut graph = readiness_graph(&builder, &[0, 1, 0, 2]);
+        let old = graph.hashes[1];
+        let loose = graph.hashes[2];
+        let new = graph.hashes[3];
+        graph.heads = [loose].into();
+        for n in 0..3 {
+            graph.cache_fragment(NodeIdx(n));
+        }
+        let mut signed = HashSet::from([old, loose]);
+        let mut readiness = FragmentReadiness::new(&graph, |hash| signed.contains(hash));
+        let old_fragment = graph.get_fragment(old).unwrap();
+        let before =
+            OutgoingSelection::new(&graph, &readiness).collect(|hash| signed.contains(hash));
+        assert_eq!(
+            before,
+            [graph.get_fragment(loose).unwrap(), old_fragment.clone()]
+        );
+
+        graph.cache_fragment(NodeIdx(3));
+        graph.heads = [new].into();
+        readiness.reconcile(&graph, |hash| signed.contains(hash));
+        assert!(graph.get_fragment(old).is_none());
+        assert_eq!(graph.get_retained_fragment(old), Some(old_fragment.clone()));
+        assert!(readiness.is_ready(&old));
+        assert!(!readiness.is_ready(&new));
+        assert_eq!(
+            OutgoingSelection::new(&graph, &readiness).collect(|hash| signed.contains(hash)),
+            before,
+        );
+
+        signed.insert(new);
+        readiness.signature_added(&new);
+        assert_eq!(
+            OutgoingSelection::new(&graph, &readiness).collect(|hash| signed.contains(hash)),
+            [graph.get_fragment(new).unwrap()],
+        );
+        assert_eq!(graph.get_retained_fragment(old), Some(old_fragment));
+    }
+
+    #[test]
+    fn outgoing_selection_retains_partially_covered_fragment_even_when_its_head_is_represented() {
+        let mut builder = TestGraphBuilder::new();
+        let a = builder.actor();
+        let b = builder.actor();
+        let c = builder.actor();
+        let root = builder.change(&a, 1, &[]);
+        let old = builder.change(&a, 1, &[root]);
+        let boundary = builder.change(&b, 1, &[root]);
+        builder.change(&c, 1, &[old, boundary]);
+        let mut graph = readiness_graph(&builder, &[0, 1, 2, 2]);
+        graph.cache_fragments();
+        let [root, old, boundary, head] = graph.hashes.as_slice() else {
+            unreachable!()
+        };
+        let signed = HashSet::from([*old, *boundary, *head]);
+        let readiness = FragmentReadiness::new(&graph, |hash| signed.contains(hash));
+        assert!(readiness.is_ready(old));
+        assert!(readiness.is_ready(head));
+        assert!(!readiness.is_ready(boundary));
+        let old_fragment = graph.get_retained_fragment(*old).unwrap();
+        let new_fragment = graph.get_fragment(*head).unwrap();
+        assert!(old_fragment.members.contains(root));
+        assert!(new_fragment.members.contains(old));
+        assert!(!new_fragment.members.contains(root));
+        assert_eq!(new_fragment.boundary, [*boundary]);
+        assert_eq!(
+            OutgoingSelection::new(&graph, &readiness).collect(|hash| signed.contains(hash)),
+            [new_fragment, old_fragment],
+        );
+    }
+
+    #[test]
+    fn outgoing_loose_traversal_follows_boundaries_of_selected_fragments() {
+        let mut builder = TestGraphBuilder::new();
+        let a = builder.actor();
+        let b = builder.actor();
+        let root = builder.change(&a, 1, &[]);
+        let boundary = builder.change(&b, 1, &[root]);
+        builder.change(&a, 1, &[boundary]);
+        let mut graph = readiness_graph(&builder, &[0, 1, 1]);
+        graph.cache_fragments();
+        let root = graph.hashes[0];
+        let boundary = graph.hashes[1];
+        let head = graph.hashes[2];
+        let signed = HashSet::from([root, head]);
+        let readiness = FragmentReadiness::new(&graph, |hash| signed.contains(hash));
+        assert!(readiness.is_ready(&head));
+        assert!(!readiness.is_ready(&boundary));
+        assert_eq!(
+            OutgoingSelection::new(&graph, &readiness).collect(|hash| signed.contains(hash)),
+            [
+                graph.get_fragment(head).unwrap(),
+                graph.get_fragment(root).unwrap()
+            ],
+        );
+    }
+
+    #[test]
+    fn outgoing_selection_accepts_delayed_evidence_across_multiple_supersessions() {
+        use itertools::Itertools;
+
+        let mut builder = TestGraphBuilder::new();
+        let a = builder.actor();
+        let first = builder.change(&a, 1, &[]);
+        let second = builder.change(&a, 1, &[first]);
+        builder.change(&a, 1, &[second]);
+        let mut graph = readiness_graph(&builder, &[1, 2, 3]);
+        graph.cache_fragments();
+        for order in graph.hashes.iter().copied().permutations(3) {
+            let mut readiness = FragmentReadiness::new(&graph, |_| false);
+            let mut signed = HashSet::new();
+            for hash in order {
+                signed.insert(hash);
+                readiness.signature_added(&hash);
+                readiness.signature_added(&hash);
+                let newest = signed
+                    .iter()
+                    .max_by_key(|hash| hash.fragment_level())
+                    .unwrap();
+                assert_eq!(
+                    OutgoingSelection::new(&graph, &readiness)
+                        .collect(|hash| signed.contains(hash)),
+                    [graph.get_retained_fragment(*newest).unwrap()],
+                );
+                assert_eq!(
+                    readiness,
+                    FragmentReadiness::new(&graph, |hash| signed.contains(hash))
                 );
             }
         }
@@ -1799,9 +2005,11 @@ mod tests {
 
         let mut readiness = FragmentReadiness::new(&graph, |hash| *hash == a2);
         assert!(!readiness.is_ready(&a2));
-        assert_eq!(readiness.fragments(&graph, ..).count(), 0);
-        // Missing B's frontier hides the fixed fragment; it does not undo
-        // graph-derived supersession or reclassify members as loose changes.
+        assert!(OutgoingSelection::new(&graph, &readiness)
+            .collect(|hash| *hash == a2)
+            .is_empty());
+        // Missing B's frontier withholds this candidate without undoing
+        // canonical supersession. Retired candidates remain separate fallbacks.
         assert!(graph.get_fragment(a1).is_none());
         assert_eq!(graph.get_fragment(a2), Some(canonical.clone()));
         assert_eq!(graph.fragments(0..=0).count(), 0);
@@ -1809,7 +2017,8 @@ mod tests {
         // a2 attests a1 inside the harder fragment, so no direct a1 evidence
         // is needed. B's signature makes exactly that same descriptor ready.
         readiness.signature_added(&b1);
-        let fragments: Vec<_> = readiness.fragments(&graph, ..).collect();
+        let fragments =
+            OutgoingSelection::new(&graph, &readiness).collect(|hash| [a2, b1].contains(hash));
         assert_eq!(fragments, [canonical]);
         readiness.signature_added(&b1); // idempotent, no readiness underflow
         assert!(readiness.is_ready(&a2));

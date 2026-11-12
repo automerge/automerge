@@ -188,16 +188,19 @@ fn readiness_filters_cached_fragments_but_preserves_loose_changes() {
     at_level(&mut doc, 3, 0);
     let graph = &doc.change_graph;
     let mut readiness = crate::change_graph::FragmentReadiness::new(graph, |_| false);
+    let loose: Vec<_> = graph.fragments(..1).collect();
+    let mut signed: HashSet<_> = loose.iter().map(|fragment| fragment.head).collect();
 
-    assert_eq!(
-        readiness.fragments(graph, ..).collect::<Vec<_>>(),
-        graph.fragments(..1).collect::<Vec<_>>()
-    );
-    assert_eq!(readiness.fragments(graph, 1..).count(), 0);
+    let selected = crate::change_graph::OutgoingSelection::new(graph, &readiness)
+        .collect(|hash| signed.contains(hash));
+    assert_eq!(selected, loose);
+    assert!(selected.iter().all(|fragment| fragment.level == 0));
 
+    signed.insert(cached);
     readiness.signature_added(&cached);
     assert_eq!(
-        readiness.fragments(graph, ..).collect::<Vec<_>>(),
+        crate::change_graph::OutgoingSelection::new(graph, &readiness)
+            .collect(|hash| signed.contains(hash)),
         graph.fragments(..).collect::<Vec<_>>()
     );
 }

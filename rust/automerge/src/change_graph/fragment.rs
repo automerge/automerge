@@ -1,6 +1,7 @@
 //! Fragment boundaries and their cached causal coverage.
 
-use std::collections::{HashMap, HashSet};
+use std::cmp::Reverse;
+use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::ops::RangeBounds;
 
 use crate::actor::{ActorRemoval, ActorShift, ActorTable};
@@ -13,6 +14,9 @@ use super::{ChangeGraph, Fragment, NodeIdx};
 pub(crate) struct FragmentCache {
     top: SeqClock,
     fragments: Vec<FragmentNode>,
+    // Superseded structurally, but still usable as outgoing fallbacks. These
+    // descriptors never participate in canonical boundary selection.
+    retired: HashMap<NodeIdx, FragmentNode>,
 }
 
 pub(super) struct Candidate {
@@ -25,6 +29,7 @@ impl FragmentCache {
         Self {
             top: SeqClock::new(actors),
             fragments: vec![],
+            retired: HashMap::new(),
         }
     }
 
@@ -35,14 +40,14 @@ impl FragmentCache {
 
     pub(super) fn insert_actor(&mut self, shift: &ActorShift) {
         self.top.shift_actor(shift);
-        for fragment in &mut self.fragments {
+        for fragment in self.fragments.iter_mut().chain(self.retired.values_mut()) {
             fragment.clock.shift_actor(shift);
         }
     }
 
     pub(super) fn remove_actor(&mut self, removal: &ActorRemoval) {
         self.top.remove_actor(removal);
-        for fragment in &mut self.fragments {
+        for fragment in self.fragments.iter_mut().chain(self.retired.values_mut()) {
             fragment.clock.remove_actor(removal);
         }
     }
@@ -73,19 +78,45 @@ impl FragmentCache {
 
     pub(super) fn install(&mut self, candidate: Candidate) {
         for i in candidate.supersede {
-            self.fragments.remove(i);
+            let fragment = self.fragments.remove(i);
+            self.retired.insert(fragment.head, fragment);
         }
         SeqClock::merge(&mut self.top, &candidate.fragment.clock);
         self.fragments.push(candidate.fragment);
     }
 
-    pub(crate) fn get_fragment(&self, graph: &ChangeGraph, head: ChangeHash) -> Option<Fragment> {
-        let n = graph.nodes_by_hash.get(&head)?;
+    fn canonical_nodes(&self) -> impl DoubleEndedIterator<Item = &FragmentNode> {
+        self.fragments.iter()
+    }
+
+    fn candidate_nodes(&self) -> impl Iterator<Item = &FragmentNode> {
+        self.canonical_nodes().chain(self.retired.values())
+    }
+
+    fn canonical_at(&self, head: NodeIdx) -> Option<&FragmentNode> {
         assert!(self.fragments.is_sorted_by(|a, b| a.head.0 < b.head.0));
         self.fragments
-            .binary_search_by_key(&n.0, |f| f.head.0)
+            .binary_search_by_key(&head, |f| f.head)
             .ok()
-            .map(|i| self.fragments[i].export(graph))
+            .map(|i| &self.fragments[i])
+    }
+
+    fn candidate_at(&self, head: NodeIdx) -> Option<&FragmentNode> {
+        self.canonical_at(head).or_else(|| self.retired.get(&head))
+    }
+
+    pub(crate) fn get_fragment(&self, graph: &ChangeGraph, head: ChangeHash) -> Option<Fragment> {
+        let node = *graph.nodes_by_hash.get(&head)?;
+        self.canonical_at(node).map(|f| f.export(graph))
+    }
+
+    pub(super) fn get_retained_fragment(
+        &self,
+        graph: &ChangeGraph,
+        head: ChangeHash,
+    ) -> Option<Fragment> {
+        let node = *graph.nodes_by_hash.get(&head)?;
+        self.candidate_at(node).map(|f| f.export(graph))
     }
 
     pub(crate) fn fragments<'a, R: RangeBounds<usize> + 'a>(
@@ -107,7 +138,7 @@ impl FragmentCache {
             .then(|| self.loose_fragments(graph))
             .into_iter()
             .flatten();
-        let mut cached = self.fragments.iter().rev();
+        let mut cached = self.canonical_nodes().rev();
         std::iter::from_fn(move || {
             // Selection must not prune traversal to a rejected head's ancestors.
             for fragment in loose.by_ref() {
@@ -163,9 +194,9 @@ impl FragmentReadiness {
         readiness
     }
 
-    /// Synchronize membership with the canonical cache without recomputing any
-    /// surviving fragment's boundary clock or signature requirements. Existing
-    /// requirements change only through `signature_added`, not later history.
+    /// Synchronize membership with active and retired candidates without
+    /// recomputing surviving requirements. Structural supersession retains
+    /// subscriptions, so delayed evidence can still unlock an older fallback.
     pub(crate) fn reconcile(
         &mut self,
         graph: &ChangeGraph,
@@ -173,8 +204,7 @@ impl FragmentReadiness {
     ) {
         let current: HashSet<_> = graph
             .fragment_cache
-            .fragments
-            .iter()
+            .candidate_nodes()
             .map(|fragment| graph.hashes[fragment.head.0 as usize])
             .collect();
         let waiting = &mut self.waiting;
@@ -192,9 +222,9 @@ impl FragmentReadiness {
             false
         });
 
-        // Always use the graph's canonical descriptors, including boundaries
-        // whose own fragments cannot currently be attested.
-        for fragment in &graph.fragment_cache.fragments {
+        // All descriptors retain their graph-derived boundaries, including
+        // boundaries whose own fragments cannot currently be attested.
+        for fragment in graph.fragment_cache.candidate_nodes() {
             let head = graph.hashes[fragment.head.0 as usize];
             if self.missing.contains_key(&head) {
                 continue;
@@ -232,17 +262,76 @@ impl FragmentReadiness {
     pub(crate) fn is_ready(&self, head: &ChangeHash) -> bool {
         self.missing.get(head).is_some_and(HashSet::is_empty)
     }
+}
 
-    pub(crate) fn fragments<'a, R: RangeBounds<usize> + 'a>(
-        &'a self,
-        graph: &'a ChangeGraph,
-        levels: R,
-    ) -> impl Iterator<Item = Fragment> + 'a {
-        graph
-            .fragment_cache
-            .fragments_matching(graph, levels, |head| {
-                head.fragment_level() == 0 || self.is_ready(&head)
-            })
+/// Choose an outgoing representation without changing structural decomposition.
+/// Ready candidates are selected by member coverage, not just head coverage:
+/// a retired candidate can contribute history excluded by a newer boundary.
+pub(crate) struct OutgoingSelection<'a> {
+    graph: &'a ChangeGraph,
+    readiness: &'a FragmentReadiness,
+}
+
+impl<'a> OutgoingSelection<'a> {
+    pub(crate) fn new(graph: &'a ChangeGraph, readiness: &'a FragmentReadiness) -> Self {
+        Self { graph, readiness }
+    }
+
+    fn select_fragments(&self) -> (Vec<Fragment>, HashSet<ChangeHash>) {
+        let mut candidates: Vec<_> = self.graph.fragment_cache.candidate_nodes().collect();
+        // Node indices are topological, regardless of retired-map iteration order.
+        candidates.sort_unstable_by_key(|candidate| Reverse(candidate.head));
+        let mut selected = Vec::new();
+        let mut represented = HashSet::new();
+        for candidate in candidates {
+            let head = self.graph.hashes[candidate.head.0 as usize];
+            if !self.readiness.is_ready(&head) {
+                continue;
+            }
+            let fragment = candidate.export(self.graph);
+            if fragment
+                .members
+                .iter()
+                .any(|hash| !represented.contains(hash))
+            {
+                represented.extend(fragment.members.iter().copied());
+                selected.push(fragment);
+            }
+        }
+        (selected, represented)
+    }
+
+    /// Return newest to oldest. Callers filter levels only after selection, so
+    /// excluding a larger fragment does not resurrect its covered predecessors.
+    pub(crate) fn collect(
+        &self,
+        mut has_signature: impl FnMut(&ChangeHash) -> bool,
+    ) -> Vec<Fragment> {
+        let (mut result, represented) = self.select_fragments();
+        // A selected fragment covers its members, not its entire causal past.
+        // Explicitly seed boundaries so stopping at members cannot hide gaps.
+        let seeds = self.graph.heads().chain(
+            result
+                .iter()
+                .flat_map(|fragment| fragment.boundary.iter().copied()),
+        );
+        let mut pending: BinaryHeap<_> =
+            seeds.map(|hash| self.graph.nodes_by_hash[&hash]).collect();
+        let mut visited = HashSet::new();
+        while let Some(node) = pending.pop() {
+            let hash = self.graph.hashes[node.0 as usize];
+            if represented.contains(&hash) || !visited.insert(node) {
+                continue;
+            }
+            pending.extend(self.graph.parents(node));
+            // Missing hard-head evidence must not prevent ancestry traversal,
+            // but hard heads never become singleton fallbacks themselves.
+            if hash.fragment_level() == 0 && has_signature(&hash) {
+                result.push(self.graph.loose_commit(node).unwrap());
+            }
+        }
+        result.sort_unstable_by_key(|fragment| Reverse(self.graph.nodes_by_hash[&fragment.head]));
+        result
     }
 }
 

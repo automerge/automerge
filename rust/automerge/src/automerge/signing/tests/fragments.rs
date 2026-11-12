@@ -93,7 +93,7 @@ fn assert_independently_attested(doc: &mut Automerge, fragment: &Fragment) {
 }
 
 #[test]
-fn fragments_wait_for_frontier_evidence_not_interior_signatures() {
+fn fragments_wait_for_frontier_evidence_while_signed_interiors_remain_loose() {
     let (mut doc, key) = document();
     let a1 = append(&mut doc, None, 0);
     let a2 = append(&mut doc, None, 0);
@@ -104,9 +104,10 @@ fn fragments_wait_for_frontier_evidence_not_interior_signatures() {
     assert!(doc.get_fragment(a3).is_none());
 
     sign(&mut doc, a2, &key);
-    // a2 is a member of the fixed a3 fragment, not loose history just because
-    // a3 cannot yet be materialized. No singleton fallback changes the partition.
-    assert!(doc.fragments(..).is_empty());
+    // The canonical descriptor stays fixed, but its unavailable bundle must not
+    // hide directly signed level-0 members from outgoing discovery.
+    assert_eq!(doc.fragments(..), [doc.get_fragment(a2).unwrap()]);
+    assert!(doc.fragments(1..).is_empty());
     assert_eq!(canonical_fragments(&doc), canonical);
 
     sign(&mut doc, a3, &key);
@@ -317,7 +318,7 @@ fn readiness_survives_signature_arrival_order_and_actor_shifts() {
 }
 
 #[test]
-fn signatures_update_readiness_in_place_and_leave_loose_classification_unchanged() {
+fn signatures_update_readiness_in_place_and_consolidate_loose_fallbacks() {
     let (mut doc, key) = document();
     let interior = append(&mut doc, None, 0);
     let head = append(&mut doc, None, 1);
@@ -327,7 +328,8 @@ fn signatures_update_readiness_in_place_and_leave_loose_classification_unchanged
     assert_readiness_matches_graph(&mut doc);
     sign(&mut doc, interior, &key);
     assert_readiness_matches_graph(&mut doc);
-    assert!(doc.fragments(..).is_empty()); // interior is not loose
+    assert_eq!(doc.fragments(..), [doc.get_fragment(interior).unwrap()]);
+    assert_eq!(canonical_fragments(&doc), canonical);
     sign(&mut doc, head, &key);
     assert_readiness_matches_graph(&mut doc);
     assert_eq!(doc.fragments(..), [canonical[0].clone()]);
@@ -355,7 +357,8 @@ fn multiple_missing_frontiers_are_resolved_in_place_in_either_order() {
             sign(&mut doc, order[0], &key);
             assert_readiness_matches_graph(&mut doc);
             if query_between {
-                assert!(doc.fragments(..).is_empty());
+                assert_eq!(doc.fragments(..), [doc.get_fragment(order[0]).unwrap()]);
+                assert!(doc.fragments(1..).is_empty());
             }
             sign(&mut doc, order[0], &key); // duplicate while still pending
             sign(&mut doc, order[1], &key);
@@ -382,6 +385,17 @@ fn every_signature_order_emits_only_the_original_graph_derived_descriptors() {
     // Freeze the oracle before any signatures exist. Its shape must not be
     // recomputed against evidence, even for fragments not yet materializable.
     let canonical = canonical_fragments(&original);
+    let changes = original.get_changes(&[]);
+    let positions: BTreeMap<_, _> = changes
+        .iter()
+        .enumerate()
+        .map(|(i, change)| (change.hash(), i))
+        .collect();
+    let singletons: Vec<_> = changes
+        .iter()
+        .filter(|change| change.hash().fragment_level() == 0)
+        .map(|change| original.change_graph.get_fragment(change.hash()).unwrap())
+        .collect();
     let frontier_sets: Vec<HashSet<ChangeHash>> = canonical
         .iter()
         .map(|fragment| {
@@ -414,12 +428,25 @@ fn every_signature_order_emits_only_the_original_graph_derived_descriptors() {
             sign(&mut doc, hash, &key);
             assert_readiness_matches_graph(&mut doc);
             signed.insert(hash);
-            let expected: Vec<_> = canonical
+            let mut expected: Vec<_> = canonical
                 .iter()
                 .zip(&frontier_sets)
-                .filter(|(_, frontiers)| frontiers.is_subset(&signed))
+                .filter(|(fragment, frontiers)| fragment.level > 0 && frontiers.is_subset(&signed))
                 .map(|(fragment, _)| fragment.clone())
                 .collect();
+            let represented: HashSet<_> = expected
+                .iter()
+                .flat_map(|fragment| fragment.members.iter().copied())
+                .collect();
+            expected.extend(
+                singletons
+                    .iter()
+                    .filter(|fragment| {
+                        signed.contains(&fragment.head) && !represented.contains(&fragment.head)
+                    })
+                    .cloned(),
+            );
+            expected.sort_unstable_by_key(|fragment| positions[&fragment.head]);
             let actual = doc.fragments(..);
             assert_eq!(actual, expected);
             for fragment in actual {
@@ -505,6 +532,79 @@ fn pending_readiness_survives_actor_insertion_and_rollback() {
     assert!(doc.get_fragment(head).is_some());
     sign(&mut doc, loose, &key);
     assert_eq!(doc.fragments(..), canonical_fragments(&doc));
+}
+
+#[test]
+fn unsigned_superseding_commit_preserves_loaded_outgoing_history() {
+    let (mut source, key) = document();
+    append(&mut source, None, 0);
+    let old = append(&mut source, None, 1);
+    let loose = append(&mut source, None, 0);
+    let (mut doc, _) = document();
+    doc.apply_changes_batch(source.get_changes(&[])).unwrap();
+    sign(&mut doc, old, &key);
+    sign(&mut doc, loose, &key);
+    let before = doc.fragments(..);
+    assert_eq!(before.len(), 2);
+    assert_eq!(before[0].head, old);
+    assert_eq!(before[1].head, loose);
+
+    // Precomputed nonce for this fixed actor, author and history: keep the real
+    // level-2 hash without mining roughly 65,536 commits on every test run.
+    let mut tx = doc.transaction();
+    tx.put(crate::ROOT, "value", 4_i64).unwrap();
+    let (new, _) = tx.commit_with(CommitOptions::default().with_time(45_260));
+    let new = new.unwrap();
+    assert_eq!(new.fragment_level(), 2);
+    assert!(doc.change_graph.get_fragment(old).is_none());
+    assert_eq!(doc.get_fragment(old), Some(before[0].clone()));
+    assert!(doc.get_fragment(new).is_none());
+    assert_eq!(doc.fragments(..), before);
+    assert_eq!(doc.fragments(1..), [before[0].clone()]);
+    assert_eq!(doc.fragments(0..=0), [before[1].clone()]);
+    assert!(doc.fragments(2..).is_empty());
+    assert_readiness_matches_graph(&mut doc);
+
+    // Evidence arriving only after structural retirement produces the same
+    // outgoing representation as evidence retained before the local edit.
+    let mut delayed = source.clone();
+    delayed
+        .apply_changes_batch([doc.get_change_by_hash(&new).unwrap()])
+        .unwrap();
+    assert!(delayed.get_fragment(old).is_none());
+    sign(&mut delayed, old, &key);
+    sign(&mut delayed, loose, &key);
+    assert_eq!(delayed.fragments(..), before);
+    assert_eq!(delayed.get_fragment(old), Some(before[0].clone()));
+    assert_readiness_matches_graph(&mut delayed);
+
+    // Outgoing discovery remains read-only, and retained descriptors/clocks and
+    // readiness survive cloning and insertion of an earlier actor slot.
+    let mut shifted = doc.clone();
+    shifted.set_actor(ActorId::from([0]));
+    append(&mut shifted, None, 0);
+    assert_readiness_matches_graph(&mut shifted);
+    assert_eq!(shifted.fragments(..), before);
+    sign(&mut shifted, new, &key);
+    assert_eq!(shifted.fragments(..).len(), 1);
+    assert_eq!(doc.fragments(..), before);
+
+    let mut remote = Automerge::new();
+    for bytes in doc.bundle_fragments(doc.fragments(..)) {
+        remote.load_incremental(&bytes).unwrap();
+    }
+    assert_eq!(remote.get_heads(), [loose]);
+
+    sign(&mut doc, new, &key);
+    let replacement = doc.get_fragment(new).unwrap();
+    assert_eq!(doc.fragments(..), [replacement.clone()]);
+    assert!(doc.fragments(0..=1).is_empty()); // no range-induced resurrection
+    assert_eq!(doc.get_fragment(old), Some(before[0].clone()));
+    assert_readiness_matches_graph(&mut doc);
+    for bytes in doc.bundle_fragments([replacement]) {
+        remote.load_incremental(&bytes).unwrap();
+    }
+    assert_eq!(remote.get_heads(), doc.get_heads());
 }
 
 #[test]
