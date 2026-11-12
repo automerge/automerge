@@ -931,6 +931,21 @@ impl<'a> SuccCursors<'a> {
     pub(crate) fn with_inc(self) -> SuccIncCursors<'a> {
         SuccIncCursors(self)
     }
+
+    /// The next successor and its increment value, read in place: what
+    /// [`Self::with_inc`] yields, without moving the cursors.
+    pub(crate) fn next_with_inc(&mut self) -> Option<(OpId, Option<i64>)> {
+        if self.len == 0 {
+            None
+        } else {
+            let counter = self.succ_counter.next()?;
+            let actor = self.succ_actor.next()?;
+            self.len -= 1;
+            let inc = self.inc_values.next()?;
+            let id = OpId::new(counter as u64, u64::from(actor) as usize);
+            Some((id, inc))
+        }
+    }
 }
 
 impl std::fmt::Debug for SuccCursors<'_> {
@@ -970,16 +985,7 @@ impl Iterator for SuccIncCursors<'_> {
     type Item = (OpId, Option<i64>);
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.0.len == 0 {
-            None
-        } else {
-            let counter = self.0.succ_counter.next()?;
-            let actor = self.0.succ_actor.next()?;
-            self.0.len -= 1;
-            let inc = self.0.inc_values.next()?;
-            let id = OpId::new(counter as u64, u64::from(actor) as usize);
-            Some((id, inc))
-        }
+        self.0.next_with_inc()
     }
 }
 
