@@ -17,9 +17,10 @@ See https://github.com/automerge/automerge/pull/1099 for background.
   low-level `API` interface (`javascript/src/low_level.ts`), the internals of
   the JS package and how it divides work with the native side.
 - **The WebAssembly binding stays.** `automerge-wasm` remains a first-class
-  binding built on `wasm-bindgen`. Bridging WebAssembly through Node-API
-  (e.g. via napi-rs' own wasm target) is not something we are pursuing for
-  now.
+  binding built on `wasm-bindgen`, and the public API of the published
+  `@automerge/automerge-wasm` package stays unbroken. Bridging WebAssembly
+  through Node-API (e.g. via napi-rs' own wasm target) is not something we
+  are pursuing for now.
 - **Aligned where it makes sense, not at all costs.** Code with no dependency
   on a JS engine should live in one place and be used by both bindings. Code
   that builds or reads JS values should use the primitives of its binding
@@ -108,9 +109,16 @@ both generators to produce identical output:
 - Each binding is then free to use whatever its generator produces
   idiomatically.
 
-Open point: `@automerge/automerge-wasm` is published as its own package with
-these types, so they either stay there as well or that package re-exports
-them.
+Two constraints on that:
+
+- **Structural equivalence is enough.** Types that are visible from the JS
+  package, including the hidden `API` and the return type of `getBackend()`,
+  may change name or origin as long as they stay structurally equivalent to
+  what is exported today.
+- **The public API of `@automerge/automerge-wasm` stays unbroken.** That
+  package is published on its own and keeps exporting the same types. If the
+  data shapes move, it has to keep providing them, for example by continuing
+  to emit them or by re-exporting them, and the two copies must not drift.
 
 ## Possible future strategy: lazy materialisation
 
