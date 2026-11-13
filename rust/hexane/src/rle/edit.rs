@@ -1350,6 +1350,12 @@ where
     type Edit = RleEdit<T, C>;
     type Model = RleModel<WOps<T, T, C>>;
     type Loader<'a> = crate::rle::cut::Load<'a, WOps<T, T, C>>;
+    type Recoder<'a> = crate::rle::enc::REncoder<'a, WOps<T, T, C>>;
+
+    #[inline(always)]
+    fn owned_in<'a>(v: T) -> crate::rle::state::RleCow<'a, T, T> {
+        crate::rle::state::RleCow::Owned(v)
+    }
 }
 
 #[cfg(test)]

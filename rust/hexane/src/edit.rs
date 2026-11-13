@@ -31,6 +31,20 @@ pub trait SlabEdit: crate::encoding::ColumnEncoding {
     #[doc(hidden)]
     type Loader<'a>: crate::load_core::Loads<'a, Self::Model, <Self as ColumnEncoding>::ReadModel>;
 
+    /// The encoding's verified encoder, which appends values and cuts
+    /// them into slabs of [`Model`](Self::Model) (`remap::Encodes`), as
+    /// `Column::remap` drives it.
+    #[doc(hidden)]
+    type Recoder<'a>: crate::remap::Encodes<Self::Model>;
+
+    /// An owned value, in the form [`Recoder`](Self::Recoder) appends.
+    // a seal, like `Model`'s bound
+    #[doc(hidden)]
+    #[allow(private_interfaces)]
+    fn owned_in<'a>(
+        v: Self::Value,
+    ) -> <Self::Recoder<'a> as crate::remap::Encodes<Self::Model>>::In;
+
     /// How many runs a cursor carries through an open rebuild before
     /// closing it instead — the trade between re-encoding what it carries
     /// and paying for a write-back.

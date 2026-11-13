@@ -91,6 +91,7 @@ use crate::prefix_core::{p_prefix, p_sum_range, PrefixOps};
 #[cfg(verus_keep_ghost)]
 use crate::prefix_search::found_at;
 use crate::prefix_search::{p_index_for_prefix, PrefixOrd};
+use crate::remap::{Encodes, Mapping};
 #[cfg(verus_keep_ghost)]
 use crate::splices::applied;
 use crate::splices::{wrong_columns, Normalized};
@@ -798,6 +799,92 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> ColumnCore<E, W, I, G> {
         } else {
             self.copy_direct::<X, F>(list, src, f);
         }
+    }
+
+    /// `remap`: the column of what `m` gives for each of this column's
+    /// values, read as model `X` reads them, called once per run and
+    /// appended through the encoder `N`, with this column's segment
+    /// budget. Panics, as `from_cut` does, if the values are outside the
+    /// weight model's domain. With the values `m` gave (`r.1`), one per
+    /// position.
+    #[verifier::spinoff_prover]
+    pub(crate) fn remap<'a, X: Decoders<'a, Tail = E::Tail>, N: Encodes<E>, M: Mapping<<X::D as Decode>::Item, N::In>>(
+        &'a self,
+        m: &M,
+    ) -> (r: (Self, Ghost<Seq<N::In>>))
+        where E: ReadsAgree<'a, X>
+        ensures
+            r.0.ready(),
+            r.0.budget() == self.budget(),
+            r.0@.len() == self@.len(),
+            r.1@.len() == self@.len(),
+            forall|i: int|
+                0 <= i < self@.len() ==> m.maps(crate::iter_core::vals_of::<X>(self.slabs_spec())[i], #[trigger] r.1@[i])
+                    && r.0@[i] == N::val(r.1@[i]),
+    {
+        proof {
+            use_type_invariant(self);
+        }
+        let len = self.len();
+        let mut core = self.reader::<X>(0, len);
+        let slabs = self.slabs();
+        let mut enc = N::with_budget(self.max_segments);
+        let ghost rd = crate::iter_core::vals_of::<X>(self.slabs_spec());
+        let ghost mut ws: Seq<N::In> = Seq::empty();
+        self.lemma_column();
+        proof {
+            lemma_vals_own::<E, X>(slabs@);
+            assert(rd.subrange(0, len as int) =~= rd.skip(0));
+        }
+        while core.pos < len
+            invariant
+                slabs@ == self.slabs_spec(),
+                rd == crate::iter_core::vals_of::<X>(slabs@),
+                len == rd.len(),
+                len == self@.len(),
+                core.wf::<X>(slabs@),
+                core.pos <= len,
+                core.out::<X>(slabs@) == rd.skip(core.pos as int),
+                enc.e_inv(),
+                ws.len() == core.pos,
+                enc.e_values().len() == core.pos,
+                forall|i: int| 0 <= i < core.pos ==> m.maps(rd[i], #[trigger] ws[i]) && enc.e_values()[i] == N::val(ws[i]),
+            decreases len - core.pos,
+        {
+            let ghost (p, w0) = (core.pos as int, ws);
+            match core.next_run::<X>(slabs) {
+                Some(run) => {
+                    let x = m.apply(run.value);
+                    let ghost gx = x;
+                    enc.put(x, run.count);
+                    proof {
+                        let n = run.count as int;
+                        ws = w0 + Seq::new(n as nat, |_i: int| gx);
+                        assert(rd.skip(p).take(n) == Seq::new(n as nat, |_i: int| run.value));
+                        assert forall|i: int| 0 <= i < core.pos implies m.maps(rd[i], #[trigger] ws[i])
+                            && enc.e_values()[i] == N::val(ws[i]) by {
+                            if i >= p {
+                                assert(rd.skip(p).take(n)[i - p] == rd[i]);
+                            }
+                        }
+                        assert(rd.skip(p).skip(n) =~= rd.skip(p + n));
+                    }
+                },
+                None => {
+                    // the window has values left, so there is a run
+                    proof {
+                        assert(rd.skip(p).len() > 0);
+                        assert(false);
+                    }
+                },
+            }
+        }
+        proof {
+            assert(core.pos == len);
+        }
+        let cut = enc.take();
+        let col = Self::from_cut(cut, self.max_segments);
+        (col, Ghost(ws))
     }
 }
 

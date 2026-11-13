@@ -147,6 +147,7 @@ pub mod prefix;
 pub(crate) mod prefix_core;
 pub(crate) mod prefix_search;
 pub mod raw;
+pub(crate) mod remap;
 pub mod rle;
 pub mod shift;
 pub(crate) mod splices;

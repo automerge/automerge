@@ -15,9 +15,10 @@
 use crate::cursor::{all_ok, lemma_vals_cat, lemma_vals_unit, vals_of, Slabs};
 #[cfg(verus_keep_ghost)]
 use crate::rle::dec::lemma_group_values_len;
-use crate::rle::edit::null_in_column;
 #[cfg(verus_keep_ghost)]
-use crate::rle::edit::{lemma_written, RleModel};
+use crate::rle::edit::lemma_written;
+use crate::rle::edit::null_in_column;
+use crate::rle::edit::RleModel;
 use crate::rle::lift::*;
 use crate::rle::model::*;
 #[cfg(verus_keep_ghost)]
@@ -93,7 +94,8 @@ proof fn lemma_lift_len<'s, L: Lift<'s>>(vs: Seq<VOf<'s, L>>)
 }
 
 /// The writer's state and output buffer, and the slabs cut from it.
-pub(crate) struct REncoder<'a, L: WriteOps<'a>> {
+#[doc(hidden)]
+pub struct REncoder<'a, L: WriteOps<'a>> {
     pub(crate) data: Vec<u8>,
     pub(crate) state: State<'a, L>,
     /// segments accounted since the last cut
@@ -383,6 +385,47 @@ impl<'a, L> REncoder<'a, L> where L: for<'x> Lift<'x, W = L> {
             }
         }
         r
+    }
+}
+
+/// The RLE encoder as `remap` drives it (`remap::Encodes`): what it
+/// appends is a value in the writer's form, owned or borrowed.
+impl<'a, L> crate::remap::Encodes<RleModel<L>> for REncoder<'a, L> where L: for<'x> Lift<'x, W = L> {
+    type In = <L as WriteOps<'a>>::Cow;
+
+    open spec fn e_inv(&self) -> bool {
+        self.inv()
+    }
+
+    open spec fn e_values(&self) -> Seq<VOf<'static, L>> {
+        self.values()
+    }
+
+    open spec fn val(x: <L as WriteOps<'a>>::Cow) -> VOf<'static, L> {
+        <L as Lift<'a>>::lift(<L as WriteOps<'a>>::val(x))
+    }
+
+    #[inline(always)]
+    fn with_budget(max: usize) -> (e: Self) {
+        let mut e = REncoder::new();
+        e.max_segments = Some(max);
+        e
+    }
+
+    #[inline(always)]
+    fn put(&mut self, x: <L as WriteOps<'a>>::Cow, n: usize) {
+        self.append(x, n);
+        proof {
+            assert(lift_seq::<L>(copies(n as nat, <L as WriteOps<'a>>::val(x))) =~= Seq::new(
+                n as nat,
+                |_i: int| <L as Lift<'a>>::lift(<L as WriteOps<'a>>::val(x)),
+            ));
+        }
+    }
+
+    #[inline(always)]
+    fn take(&mut self) -> (v: Vec<Slab>) {
+        self.take_slabs()
     }
 }
 

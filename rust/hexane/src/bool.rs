@@ -405,6 +405,13 @@ impl<C: Codec> crate::edit::SlabEdit for BoolEncoding<C> {
     type Edit = BoolEdit<C>;
     type Model = crate::bool_edit::BoolModel<C>;
     type Loader<'a> = crate::bool_edit::BoolLoader<'a, C>;
+    type Recoder<'a> = crate::bool_edit::BoolRecoder<C>;
+
+    #[inline(always)]
+    #[allow(private_interfaces)] // a seal, as on the trait
+    fn owned_in<'a>(v: bool) -> <Self::Recoder<'a> as crate::remap::Encodes<Self::Model>>::In {
+        v
+    }
 }
 
 // Forwards to the verified bool slab model; the column cursor calls the

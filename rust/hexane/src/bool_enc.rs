@@ -396,7 +396,7 @@ impl BEncoder {
     /// budget is reached (no-op unless `max_segments` is set). Only cuts
     /// when `incoming` closes the current run, so the pending run always
     /// lands whole in the finished slab.
-    #[inline]
+    #[inline(always)]
     fn maybe_cut<K: CountOps>(&mut self, incoming: bool)
         requires old(self).inv::<K>(),
         ensures
@@ -416,6 +416,20 @@ impl BEncoder {
         {
             return;
         }
+        self.cut::<K>();
+    }
+
+    /// Roll the pending buffer into a completed slab: `maybe_cut`'s rare
+    /// path, out of line so that the check every append makes stays
+    /// small.
+    #[inline(never)]
+    fn cut<K: CountOps>(&mut self)
+        requires old(self).inv::<K>(),
+        ensures
+            final(self).inv::<K>(), final(self).values::<K>() == old(self).values::<K>(),
+            final(self).state.len == old(self).state.len,
+            final(self).state.segments <= old(self).state.segments,
+    {
         proof {
             lemma_pre_len(self.state.cs@);
             lemma_vals_len(self.state.cs@, 0);

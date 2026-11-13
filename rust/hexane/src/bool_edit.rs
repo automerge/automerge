@@ -1853,6 +1853,51 @@ proof fn lemma_concat_bslabs<C: CountsOf>(s: Seq<BSlab>)
     }
 }
 
+/// The bool encoder as `remap` drives it (`remap::Encodes`), with column
+/// codec `C`'s counts.
+#[doc(hidden)]
+#[verifier::reject_recursive_types(C)]
+pub struct BoolRecoder<C>(pub(crate) crate::bool_enc::BEncoder, pub(crate) PhantomData<C>);
+
+impl<C: CountsOf> crate::remap::Encodes<BoolModel<C>> for BoolRecoder<C> {
+    type In = bool;
+
+    open spec fn e_inv(&self) -> bool {
+        self.0.inv::<C::K>()
+    }
+
+    open spec fn e_values(&self) -> Seq<bool> {
+        self.0.values::<C::K>()
+    }
+
+    open spec fn val(x: bool) -> bool {
+        x
+    }
+
+    #[inline(always)]
+    fn with_budget(max: usize) -> (e: Self) {
+        BoolRecoder(crate::bool_enc::BEncoder::new::<C::K>(Some(max)), PhantomData)
+    }
+
+    #[inline(always)]
+    fn put(&mut self, x: bool, n: usize) {
+        self.0.append::<C::K>(x, n);
+        proof {
+            assert(run_of(n as nat, x) =~= Seq::new(n as nat, |_i: int| x));
+        }
+    }
+
+    #[inline(always)]
+    fn take(&mut self) -> (v: Vec<BSlab>) {
+        let v = self.0.take_slabs::<C::K>();
+        proof {
+            lemma_concat_bslabs::<C>(v@);
+            assert forall|i: int| 0 <= i < v@.len() implies BoolModel::<C>::ok(#[trigger] v@[i]) by {}
+        }
+        v
+    }
+}
+
 /// A well-formed slab's facts, unwrapped from the opaque views.
 proof fn lemma_bslab<K: CountOps>(s: BSlab)
     requires

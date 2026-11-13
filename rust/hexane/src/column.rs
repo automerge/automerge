@@ -627,6 +627,45 @@ impl<'a, T: ColumnValueRef, C: Codec> Iter<'a, T, C> {
     }
 }
 
+/// The function [`Column::remap`] applies (`remap::Mapping`): to a run's
+/// value, owned, in the form the encoding's encoder appends. Nothing is
+/// assumed of what `f` gives.
+struct Remapping<'f, T, C, F>(&'f F, PhantomData<fn() -> (T, C)>);
+
+impl<'a, T, C, F>
+    crate::remap::Mapping<
+        T::Get<'a>,
+        <<T::Encoding<C> as crate::edit::SlabEdit>::Recoder<'a> as crate::remap::Encodes<
+            <T::Encoding<C> as crate::edit::SlabEdit>::Model,
+        >>::In,
+    > for Remapping<'_, T, C, F>
+where
+    T: ColumnValueRef,
+    C: Codec,
+    F: Fn(T) -> T,
+{
+    #[cfg(verus_keep_ghost)]
+    fn maps(
+        &self,
+        _v: T::Get<'a>,
+        _w: <<T::Encoding<C> as crate::edit::SlabEdit>::Recoder<'a> as crate::remap::Encodes<
+            <T::Encoding<C> as crate::edit::SlabEdit>::Model,
+        >>::In,
+    ) -> bool {
+        unimplemented!()
+    }
+
+    #[inline(always)]
+    fn apply(
+        &self,
+        v: T::Get<'a>,
+    ) -> <<T::Encoding<C> as crate::edit::SlabEdit>::Recoder<'a> as crate::remap::Encodes<
+        <T::Encoding<C> as crate::edit::SlabEdit>::Model,
+    >>::In {
+        <T::Encoding<C> as crate::edit::SlabEdit>::owned_in((self.0)(T::to_owned(v)))
+    }
+}
+
 /// The index lookup an iterator's long seeks take (`iter_core::lookups`):
 /// the column's, or for a default iterator, which has no column and no
 /// slabs, past the end.
@@ -1198,7 +1237,15 @@ where
         F: Fn(T) -> T,
     {
         let counter = self.core.counter();
-        *self = T::Encoding::<C>::remap(self.iter(), self.core.max_segments(), f);
+        // verified (`ColumnCore::remap`): the column of what `f` gives for
+        // each value, called once per run, re-encoded by the encoding's
+        // verified encoder with this column's segment budget
+        let (core, _) = self
+            .core
+            .remap::<Dx<T, C>, <T::Encoding<C> as crate::edit::SlabEdit>::Recoder<'_>, _>(
+                &Remapping::<T, C, F>(&f, PhantomData),
+            );
+        self.core = core;
         // a write like any other: iterators suspended before it can't
         // resume (the rebuilt column's count starts again at 0)
         self.core.set_counter(counter.wrapping_add(1));

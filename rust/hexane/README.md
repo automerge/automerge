@@ -393,6 +393,12 @@ compiles them away. To check them, run `cargo verus verify -p hexane
   become those before the splice, the runs inserted, then those after
   the ones deleted. Nothing is assumed of the runs, which come from the
   caller.
+* `Column::remap`: the column becomes what the function gives for each
+  of its values, called once per run (`ColumnCore::remap`). It reads the
+  column a run at a time and appends a run of the function's value to the
+  encoding's verified encoder (the RLE or the bool one, `remap::Encodes`),
+  whose slabs make the new column, weighed and checked as any built
+  column is. Nothing is assumed of the function.
 * Building a column: its index and length are computed from its slabs,
   checking that each slab's weight counts its items, and `Column::fill`
   makes a well-formed slab of the values asked for.
