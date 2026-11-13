@@ -172,7 +172,7 @@ fn check(
         .unwrap();
     let completed: HashSet<_> = actual.into_iter().collect();
     for _ in 0..2 {
-        staged.remove_completed(&completed);
+        staged.remove_completed(&completed, &applied.change_graph);
         assert_eq!(staged.iter().cloned().collect::<Vec<_>>(), blocked);
         assert_eq!(staged.is_empty(), blocked.is_empty());
         assert_eq!(
