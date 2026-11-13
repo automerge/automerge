@@ -767,6 +767,38 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> ColumnCore<E, W, I, G> {
         }
         self.restore(p);
     }
+
+    /// `copy_ranges` either way: the column becomes itself with the
+    /// splices applied, taking the items of their ranges from `src`.
+    /// Inverted (`copy_invert`), the column takes `src`'s slabs, and `src`
+    /// this column's, each keeping its own segment budget, and the
+    /// column's edit counter moves past both columns'; then it keeps the
+    /// ranges and puts its old items back around them. Which way it runs
+    /// changes nothing it holds.
+    pub(crate) fn copy<'a, X: Decoders<'a, Tail = E::Tail>, F: Visitor<E>>(
+        &mut self,
+        list: &Normalized,
+        src: &'a mut Self,
+        invert: bool,
+        f: &mut F,
+    )
+        where E: ReadsAgree<'a, X>
+        ensures
+            final(self)@ == applied(old(self)@, old(src)@, list.seen()),
+            final(self).budget() == old(self).budget(),
+            final(self).ready(),
+    {
+        if invert {
+            let (a, b) = (self.counter(), src.counter());
+            let counter = if a >= b { a } else { b };
+            core::mem::swap(self, src);
+            self.swap_budgets(src);
+            self.set_counter(counter.wrapping_add(1));
+            self.copy_invert::<X, F>(list, src, f);
+        } else {
+            self.copy_direct::<X, F>(list, src, f);
+        }
+    }
 }
 
 /// A prefix column's core: its weights hold each slab's item count and

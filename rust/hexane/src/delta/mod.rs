@@ -1026,40 +1026,27 @@ impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
         T::Inner: crate::ColumnValueRef<Encoding<C> = crate::RleEncoding<T::Inner, C>>,
     {
         use crate::column::CopyStrategy;
-        match strategy {
-            CopyStrategy::Direct => {
-                // verified (`dcopy::copy_direct`): one delta edit cursor
-                // applies the splices, each run the source gives for a
-                // range arriving anchored at the source's running sum, so
-                // the column's values become the splices applied
-                dcopy::copy_direct::<DWrite<T, C>, DRead<T, C>, DDeltas<T, C>>(
-                    &mut self.col.core,
-                    splices,
-                    &src.col.core,
-                    T::MIN_I64,
-                    T::MAX_I64,
-                );
-            }
-            CopyStrategy::Invert => {
-                // verified (`dcopy::copy_invert`): the column takes the
-                // source's slabs, cuts the gaps between the ranges out
-                // (delta splices) and puts the destination's values back
-                // between them with one cursor: the same values
-                self.col.swap_contents(&mut src.col);
-                let mut f = |_: <T::Inner as crate::ColumnValueRef>::Get<'_>, _: usize| {};
-                dcopy::copy_invert::<DWrite<T, C>, DRead<T, C>, DDeltas<T, C>, _>(
-                    &mut self.col.core,
-                    splices,
-                    &src.col.core,
-                    T::MIN_I64,
-                    T::MAX_I64,
-                    &mut crate::cursor::Visiting::<
-                        <T::Inner as crate::ColumnValueRef>::Encoding<C>,
-                        _,
-                    >::new(&mut f),
-                );
-            }
-        }
+        // Direct: one delta edit cursor applies the splices, each run the
+        // source gives for a range arriving anchored at the source's
+        // running sum. Inverted: the column takes the source's slabs, cuts
+        // the gaps between the ranges out (delta splices) and puts the
+        // destination's values back between them with one cursor.
+        // Verified (`dcopy::copy`, from `dcopy::copy_direct` and
+        // `dcopy::copy_invert`): either way the column's values become its
+        // own with the splices applied.
+        let mut f = |_: <T::Inner as crate::ColumnValueRef>::Get<'_>, _: usize| {};
+        dcopy::copy::<DWrite<T, C>, DRead<T, C>, DDeltas<T, C>, _>(
+            &mut self.col.core,
+            splices,
+            &mut src.col.core,
+            strategy == CopyStrategy::Invert,
+            T::MIN_I64,
+            T::MAX_I64,
+            &mut crate::cursor::Visiting::<
+                <T::Inner as crate::ColumnValueRef>::Encoding<C>,
+                _,
+            >::new(&mut f),
+        );
     }
 
     /// Single-point [`copy_ranges`](Self::copy_ranges) with a deletion

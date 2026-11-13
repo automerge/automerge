@@ -311,30 +311,6 @@ where
             &mut Feeding::<Enc<T, C>, _>::new(runs),
         );
     }
-
-    /// `copy_ranges` directly: apply the normalized `splices` to this
-    /// column, copying from `src`, with one cursor (verified,
-    /// `ColumnCore::copy_direct`, reading `src` with its own index).
-    pub(crate) fn copy_direct_from(&mut self, src: &Self, splices: &crate::splices::Normalized) {
-        let mut f = |_: T::Get<'_>, _: usize| {};
-        self.core.copy_direct::<crate::column::Dx<T, C>, _>(
-            splices,
-            &src.core,
-            &mut Visiting::<Enc<T, C>, _>::new(&mut f),
-        );
-    }
-
-    /// `copy_ranges` inverted: this column holds the source; keep the
-    /// normalized `splices`' ranges of it and put `dst`'s items back
-    /// between them (verified, `ColumnCore::copy_invert`).
-    pub(crate) fn copy_invert_from(&mut self, dst: &Self, splices: &crate::splices::Normalized) {
-        let mut f = |_: T::Get<'_>, _: usize| {};
-        self.core.copy_invert::<crate::column::Dx<T, C>, _>(
-            splices,
-            &dst.core,
-            &mut Visiting::<Enc<T, C>, _>::new(&mut f),
-        );
-    }
 }
 
 impl<T, C, WF, Idx> Drop for Edit<'_, T, C, WF, Idx>

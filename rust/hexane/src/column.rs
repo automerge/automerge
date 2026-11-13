@@ -1521,27 +1521,23 @@ where
     ) where
         for<'b> T::Get<'b>: AsColumnRef<T>,
     {
-        match strategy {
-            CopyStrategy::Direct => {
-                // Two forward passes that never restart. The source
-                // ranges ascend and never overlap, so one iterator covers
-                // them; the splice positions ascend in the original
-                // coordinates a cursor seeks in, so one cursor covers
-                // those, and the ones landing in a slab share its rebuild.
-                // Verified (`copy::copy_direct`): the column becomes
-                // `applied(dst, src, splices)`.
-                self.copy_direct_from(&src, splices);
-            }
-            CopyStrategy::Invert => {
-                // keep src's slabs: swap, drop the gaps (interior slabs
-                // undecoded), then splice the old column's kept
-                // segments in between the retained groups (deleted old
-                // rows simply never come back). Verified
-                // (`copy::copy_invert`): the same result.
-                self.swap_contents(&mut src);
-                self.copy_invert_from(&src, splices);
-            }
-        }
+        // Direct: two forward passes that never restart. The source
+        // ranges ascend and never overlap, so one iterator covers them; the
+        // splice positions ascend in the original coordinates a cursor seeks
+        // in, so one cursor covers those, and the ones landing in a slab
+        // share its rebuild. Inverted: keep src's slabs (swap), drop the
+        // gaps (interior slabs undecoded), then splice the old column's
+        // kept segments in between the retained groups (deleted old rows
+        // simply never come back). Verified (`ColumnCore::copy`, from
+        // `copy::copy_direct` and `copy::copy_invert`): either way the
+        // column becomes `applied(dst, src, splices)`.
+        let mut f = |_: T::Get<'_>, _: usize| {};
+        self.core.copy::<Dx<T, C>, _>(
+            splices,
+            &mut src.core,
+            strategy == CopyStrategy::Invert,
+            &mut crate::cursor::Visiting::<T::Encoding<C>, _>::new(&mut f),
+        );
     }
 
     /// Decide direct vs inverted for [`copy_ranges`](Self::copy_ranges)
@@ -1656,7 +1652,9 @@ where
 
     /// Swap contents with `other`, keeping this column's segment budget
     /// and bumping the counter past both so suspended iterators of
-    /// either column can't resume against the swapped data.
+    /// either column can't resume against the swapped data (as
+    /// `ColumnCore::copy` does for `copy_ranges`).
+    #[cfg(test)]
     pub(crate) fn swap_contents(&mut self, other: &mut Self) {
         let counter = self.core.counter().max(other.core.counter()) + 1;
         std::mem::swap(self, other);

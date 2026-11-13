@@ -595,4 +595,42 @@ pub(crate) fn copy_invert<L, O, B, F: Visitor<RleModel<L>>>(
     put_gaps(col, sps, dst, min, max, Ghost(src));
 }
 
+/// `copy_ranges` either way, for a delta column: the column's values
+/// become its own with the splices applied, taking the values of their
+/// ranges from `src`'s. Inverted (`copy_invert`), the column takes
+/// `src`'s slabs, and `src` this column's, each keeping its own segment
+/// budget, and the column's edit counter moves past both columns'. Which
+/// way it runs changes nothing it holds.
+pub(crate) fn copy<L, O, B, F: Visitor<RleModel<L>>>(
+    dst: &mut DCol<L, O, B>,
+    list: &Normalized,
+    src: &mut DCol<L, O, B>,
+    invert: bool,
+    min: i64,
+    max: i64,
+    f: &mut F,
+) where
+    L: for<'t> Lift<'t, W = L> + for<'t> WriteOps<'t, R = O>,
+    O: for<'b> RleOps<'b>,
+    B: for<'c> DeltaWrite<'c, RleModel<L>, RleReads<O>>,
+
+    ensures
+        rvals::<RleModel<L>, RleReads<O>, B>(final(dst)@) == applied(
+            rvals::<RleModel<L>, RleReads<O>, B>(old(dst)@),
+            rvals::<RleModel<L>, RleReads<O>, B>(old(src)@),
+            list.seen(),
+        ),
+{
+    if invert {
+        let (a, b) = (dst.counter(), src.counter());
+        let counter = if a >= b { a } else { b };
+        core::mem::swap(dst, src);
+        dst.swap_budgets(src);
+        dst.set_counter(counter.wrapping_add(1));
+        copy_invert(dst, list, src, min, max, f);
+    } else {
+        copy_direct(dst, list, src, min, max);
+    }
+}
+
 } // verus!
