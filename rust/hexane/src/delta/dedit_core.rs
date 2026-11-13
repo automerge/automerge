@@ -1018,7 +1018,8 @@ impl<L, O, B> DeltaEditCore<L, O, B> where
 
     /// End the edit: pay the debt, close the cursor, check the values in
     /// `min..=max` within less than 2^63 (the ledger's bound shows it, or
-    /// a walk), and hand `col` its parts back.
+    /// a walk), and hand `col` its parts back. The column cursor it leaves
+    /// is one of nothing (`EditCore::spent`): no step may follow.
     pub(crate) fn end(&mut self, col: &mut DCol<L, O, B>, min: i64, max: i64)
         requires
             old(self).inv(),
@@ -1072,7 +1073,9 @@ impl<L, O, B> DeltaEditCore<L, O, B> where
                 lemma_span_steps(dslabs::<RleReads<O>, B>(s), min as int, max as int);
             }
         }
-        self.edit.end_in_domain(col);
+        let mut edit = EditCore::spent();
+        core::mem::swap(&mut self.edit, &mut edit);
+        edit.end_in_domain(col);
     }
 
     /// The original deltas of items `a..b`.

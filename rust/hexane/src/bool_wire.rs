@@ -1256,6 +1256,39 @@ impl<'a> BDec<'a> {
         self.st
     }
 
+    /// [`suspend`](Self::suspend) into `st`, field by field: storing the
+    /// whole struct would carry its padding bytes too, which a loop keeping
+    /// the state in registers then has to load and store around it.
+    #[inline(always)]
+    pub(crate) fn suspend_into(&self, st: &mut BoolDecoderState)
+        ensures *final(st) == self.state(),
+    {
+        st.byte_pos = self.st.byte_pos;
+        st.remaining = self.st.remaining;
+        st.value = self.st.value;
+    }
+
+    /// Skip `n` values of the run in hand, if it has that many left;
+    /// otherwise leave the decoder as it is.
+    #[inline(always)]
+    pub(crate) fn skip_in_run<K: CountOps>(&mut self, n: usize) -> (r: bool)
+        requires old(self).inv::<K>(),
+        ensures
+            final(self).inv::<K>(), final(self).data() == old(self).data(),
+            r ==> final(self).pos::<K>() == old(self).pos::<K>() + n,
+            !r ==> *final(self) == *old(self),
+    {
+        if n <= self.st.remaining {
+            let ghost st0 = self.st;
+            self.st.remaining = self.st.remaining - n;
+            proof {
+                self.lemma_same_k::<K>(st0);
+            }
+            return true;
+        }
+        false
+    }
+
     /// The decoder's state, as fields.
     #[inline(always)]
     pub(crate) fn remaining(&self) -> (n: usize)
@@ -1614,6 +1647,45 @@ impl<'a> BDec<'a> {
         assert(dstate_at::<K>(cs, self.st, k));
         lemma_k_unique::<K>(cs, self.st, bstate_k::<K>(data, self.st), k);
     }
+}
+
+/// The value at position `st` of the valid slab `data`, or `None` at its
+/// end: what [`BDec::next`] returns, without moving. Inside a run that is
+/// the run's value; reading the next count is left to [`peek_long`], out
+/// of line, so the common case needs no frame.
+#[inline(always)]
+pub(crate) fn peek_at<K: CountOps>(data: &[u8], st: &BoolDecoderState) -> (r: Option<bool>)
+    requires bstate_ok::<K>(data@, *st),
+    ensures
+        match r {
+            Some(v) => bstate_pos::<K>(data@, *st) < bool_values::<K>(data@).len()
+                && v == bool_values::<K>(data@)[bstate_pos::<K>(data@, *st)],
+            None => bstate_pos::<K>(data@, *st) == bool_values::<K>(data@).len(),
+        },
+{
+    let d = BDec::resume::<K>(data, st);
+    if d.st.remaining > 0 {
+        proof {
+            d.lemma_value::<K>();
+        }
+        return Some(d.st.value);
+    }
+    peek_long::<K>(data, st)
+}
+
+/// [`peek_at`] at the end of a run.
+#[inline(never)]
+fn peek_long<K: CountOps>(data: &[u8], st: &BoolDecoderState) -> (r: Option<bool>)
+    requires bstate_ok::<K>(data@, *st),
+    ensures
+        match r {
+            Some(v) => bstate_pos::<K>(data@, *st) < bool_values::<K>(data@).len()
+                && v == bool_values::<K>(data@)[bstate_pos::<K>(data@, *st)],
+            None => bstate_pos::<K>(data@, *st) == bool_values::<K>(data@).len(),
+        },
+{
+    let mut d = BDec::resume::<K>(data, st);
+    d.next::<K>()
 }
 
 // ── Merging ─────────────────────────────────────────────────────────────────

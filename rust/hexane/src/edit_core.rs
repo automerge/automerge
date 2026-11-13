@@ -7,7 +7,8 @@
 //! (`on_value`). Opening an edit establishes it ([`EditCore::begin`]),
 //! every step requires and keeps it, and ending the edit hands the parts
 //! back to the column checked to be in its weight model's domain
-//! ([`EditCore::end`]).
+//! ([`EditCore::end`]). Ending takes the edit by value, so no step can
+//! follow it, and none needs to check that the parts are still there.
 //!
 //! Trusted: that the glue only chains these methods, with the invariant
 //! each leaves (the fields are private here), and uses none after a step
@@ -30,22 +31,10 @@ use vstd::prelude::*;
 
 verus! {
 
-/// Panics: the edit's parts were handed back already.
-#[verifier::external_body]
-#[cold]
-#[inline(never)]
-fn lost()
-    ensures
-        false,
-{
-    panic!("the edit cursor holds the parts")
-}
-
 /// A column being edited: its parts and the cursor over them.
 pub(crate) struct EditCore<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> {
-    /// the column's parts while the cursor has them (`None` once handed
-    /// back)
-    parts: Option<Parts<E::Tail, I>>,
+    /// the column's parts, which ending the edit hands back
+    parts: Parts<E::Tail, I>,
     cur: Cursor<E>,
     max_segments: usize,
     _p: PhantomData<(W, G)>,
@@ -67,7 +56,7 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> EditCore<E, W, I, G> {
     pub(crate) closed spec fn inv(&self) -> bool {
         &&& self.max_segments >= 2
         &&& self.cur.orig + self.cur.remaining == self.cur.o@.len()
-        &&& self.parts matches Some(p) ==> state_ok::<E, W, I, G>(p, self.cur, self.max_segments)
+        &&& state_ok::<E, W, I, G>(self.parts, self.cur, self.max_segments)
     }
 
     /// The cursor stands within the original values.
@@ -84,9 +73,10 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> EditCore<E, W, I, G> {
         self.max_segments
     }
 
-    /// The edit holds the column's parts (until it ends).
+    /// The edit holds the column's parts: always, as ending it takes it
+    /// whole ([`end`](Self::end)).
     pub(crate) closed spec fn held(&self) -> bool {
-        self.parts is Some
+        true
     }
 
     /// The column's values when the edit opened.
@@ -164,7 +154,7 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> EditCore<E, W, I, G> {
             lemma_vals_total::<E>(p.slabs@);
         }
         let cur = Cursor::<E>::new::<W, I, G>(&mut p.slabs, &mut p.index, p.total_len, Ghost(max_segments), at);
-        EditCore { parts: Some(p), cur, max_segments, _p: PhantomData }
+        EditCore { parts: p, cur, max_segments, _p: PhantomData }
     }
 
     /// The cursor's position in the column's original coordinates.
@@ -202,6 +192,10 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> EditCore<E, W, I, G> {
 
     /// Move forward `n` items, carrying them, `f` told of each run;
     /// returns how many it jumped through the index without reading.
+    ///
+    /// A move inside the slab with no rebuild open is taken here, inline;
+    /// anything else out of line ([`Self::advance_slow`]), so the common
+    /// move needs no frame and the rest no more than three arguments.
     #[inline(always)]
     pub(crate) fn advance_with<F: Visitor<E>>(&mut self, n: usize, f: &mut F) -> (jumped: usize)
         requires
@@ -221,14 +215,37 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> EditCore<E, W, I, G> {
                 old(self).at() + old(self).step_len(n) - jumped,
             ),
     {
-        let ms = self.max_segments;
-        match &mut self.parts {
-            Some(p) => self.cur.advance_with::<W, I, G, F>(&mut p.slabs, &mut p.index, &mut p.total_len, ms, &mut p.counter, n, f),
-            None => {
-                lost();
-                unreached()
-            },
+        if !self.cur.dirty && n < self.parts.slabs[self.cur.slab].len - self.cur.in_slab {
+            let ms = self.max_segments;
+            let p = &mut self.parts;
+            return self.cur.advance_with::<W, I, G, F>(&mut p.slabs, &mut p.index, &mut p.total_len, ms, &mut p.counter, n, f);
         }
+        self.advance_slow(n, f)
+    }
+
+    /// [`Self::advance_with`], for any move.
+    #[inline(never)]
+    fn advance_slow<F: Visitor<E>>(&mut self, n: usize, f: &mut F) -> (jumped: usize)
+        requires
+            old(self).inv(),
+        ensures
+            final(self).kept(*old(self)),
+            final(self).at() == old(self).at() + old(self).step_len(n),
+            final(self).written() == old(self).written() + old(self).orig_vals().subrange(
+                old(self).at(),
+                old(self).at() + old(self).step_len(n),
+            ),
+            // `f` is shown all of them but the last `jumped`
+            jumped <= old(self).step_len(n),
+            jumped > 0 ==> !final(self).rebuilding(),
+            final(f).seen() == old(f).seen() + old(self).orig_vals().subrange(
+                old(self).at(),
+                old(self).at() + old(self).step_len(n) - jumped,
+            ),
+    {
+        let ms = self.max_segments;
+        let p = &mut self.parts;
+        self.cur.advance_with::<W, I, G, F>(&mut p.slabs, &mut p.index, &mut p.total_len, ms, &mut p.counter, n, f)
     }
 
     /// Insert `n` copies of `x` at the cursor.
@@ -242,10 +259,7 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> EditCore<E, W, I, G> {
             final(self).written() == old(self).written() + Seq::new(n as nat, |_i: int| x.val()),
     {
         let ms = self.max_segments;
-        match &self.parts {
-            Some(p) => self.cur.insert(&p.slabs, ms, x, n),
-            None => lost(),
-        }
+        self.cur.insert(&self.parts.slabs, ms, x, n);
     }
 
     /// Delete `n` items at the cursor, `f` shown each run a rebuild drops
@@ -264,10 +278,8 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> EditCore<E, W, I, G> {
             ),
     {
         let ms = self.max_segments;
-        match &mut self.parts {
-            Some(p) => self.cur.delete_with::<W, I, G, F>(&mut p.slabs, &mut p.index, &mut p.total_len, ms, &mut p.counter, n, f),
-            None => lost(),
-        }
+        let p = &mut self.parts;
+        self.cur.delete_with::<W, I, G, F>(&mut p.slabs, &mut p.index, &mut p.total_len, ms, &mut p.counter, n, f);
     }
 
     /// Close the open rebuild, if any.
@@ -285,10 +297,8 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> EditCore<E, W, I, G> {
     {
         if self.cur.dirty {
             let ms = self.max_segments;
-            match &mut self.parts {
-                Some(p) => self.cur.close::<W, I, G>(&mut p.slabs, &mut p.index, &mut p.total_len, ms, &mut p.counter),
-                None => lost(),
-            }
+            let p = &mut self.parts;
+            self.cur.close::<W, I, G>(&mut p.slabs, &mut p.index, &mut p.total_len, ms, &mut p.counter);
         }
     }
 
@@ -316,23 +326,19 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> EditCore<E, W, I, G> {
         if self.cur.remaining == 0 || !self.cur.dirty {
             return None;
         }
-        match &self.parts {
-            Some(p) => {
-                proof {
-                    self.cur.lemma_here(p.slabs@);
-                    E::lemma_len(p.slabs@[self.cur.slab as int]);
-                }
-                Some((E::read_state(&self.cur.edit), &p.slabs[self.cur.slab]))
-            },
-            None => {
-                lost();
-                unreached()
-            },
+        proof {
+            self.cur.lemma_here(self.parts.slabs@);
+            E::lemma_len(self.parts.slabs@[self.cur.slab as int]);
         }
+        Some((E::read_state(&self.cur.edit), &self.parts.slabs[self.cur.slab]))
     }
 
     /// The cursor's reader, brought to the cursor, and the slab it stands
     /// in, or `None` at the end; with no rebuild open.
+    ///
+    /// Where the reader only has to move inside the run it holds, that is
+    /// done here, inline; anything else is [`Self::reader_long`], out of
+    /// line, so the common read needs no frame.
     #[inline(always)]
     pub(crate) fn reader(&mut self) -> (r: Option<(&E::State, &Slab<E::Tail>)>)
         requires
@@ -350,20 +356,66 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> EditCore<E, W, I, G> {
         if self.cur.remaining == 0 {
             return None;
         }
-        let p = match &self.parts {
-            Some(p) => p,
-            None => {
-                lost();
-                unreached()
+        let at = self.cur.in_slab;
+        let slab = &self.parts.slabs[self.cur.slab];
+        let skipped = match &mut self.cur.dec {
+            Some(r) => {
+                if r.at <= at {
+                    let n = at - r.at;
+                    let ghost pos = r.at as nat;
+                    proof {
+                        E::lemma_len(*slab);
+                    }
+                    if E::state_skip(slab, &mut r.state, n, Ghost(pos)) {
+                        r.at = at;
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
             },
+            None => false,
         };
-        self.cur.load_reader(&p.slabs);
+        if skipped {
+            proof {
+                self.cur.lemma_here(self.parts.slabs@);
+                E::lemma_len(self.parts.slabs@[self.cur.slab as int]);
+            }
+            return match &self.cur.dec {
+                Some(r) => Some((&r.state, &self.parts.slabs[self.cur.slab])),
+                None => unreached(),
+            };
+        }
+        self.reader_long()
+    }
+
+    /// [`Self::reader`], wherever the reader stands.
+    #[inline(never)]
+    fn reader_long(&mut self) -> (r: Option<(&E::State, &Slab<E::Tail>)>)
+        requires
+            old(self).inv(),
+        ensures
+            final(self).inv(),
+            r matches Some((st, slab)) ==> final(self).reads(*st, *slab) && old(self).at() < old(self).orig_vals().len(),
+            r is None ==> old(self).at() == old(self).orig_vals().len(),
+            final(self).rebuilding() == old(self).rebuilding(),
+            final(self).held() == old(self).held(),
+            final(self).orig_vals() == old(self).orig_vals(),
+            final(self).at() == old(self).at(),
+            final(self).written() == old(self).written(),
+    {
+        if self.cur.remaining == 0 {
+            return None;
+        }
+        self.cur.load_reader(&self.parts.slabs);
         proof {
-            self.cur.lemma_here(p.slabs@);
-            E::lemma_len(p.slabs@[self.cur.slab as int]);
+            self.cur.lemma_here(self.parts.slabs@);
+            E::lemma_len(self.parts.slabs@[self.cur.slab as int]);
         }
         match &self.cur.dec {
-            Some(r) => Some((&r.state, &p.slabs[self.cur.slab])),
+            Some(r) => Some((&r.state, &self.parts.slabs[self.cur.slab])),
             None => None,
         }
     }
@@ -383,27 +435,16 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> EditCore<E, W, I, G> {
             r.2 == self.now().len(),
             r.2 + 3 <= usize::MAX,
     {
-        match &self.parts {
-            Some(p) => {
-                proof {
-                    self.cur.lemma_clean(p.slabs@);
-                    lemma_vals_total::<E>(p.slabs@);
-                }
-                (&p.slabs, &p.index, p.total_len)
-            },
-            None => {
-                lost();
-                unreached()
-            },
+        proof {
+            self.cur.lemma_clean(self.parts.slabs@);
+            lemma_vals_total::<E>(self.parts.slabs@);
         }
+        (&self.parts.slabs, &self.parts.index, self.parts.total_len)
     }
 
     /// The slabs the edit holds, as the cursor has left them.
     pub(crate) closed spec fn slabs_now(&self) -> Seq<Slab<E::Tail>> {
-        match self.parts {
-            Some(p) => p.slabs@,
-            None => Seq::empty(),
-        }
+        self.parts.slabs@
     }
 
     /// The edit is closed and its column in the weight model's domain
@@ -412,69 +453,68 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> EditCore<E, W, I, G> {
         self.held() ==> !self.rebuilding() && G::dom_ok(self.slabs_now())
     }
 
-    /// Close the edit: the parts, a column again; `None` if they were
-    /// handed back already.
-    fn finish(&mut self) -> (r: Option<Parts<E::Tail, I>>)
+    /// Close the edit: the parts, a column again.
+    fn finish(self) -> (p: Parts<E::Tail, I>)
         requires
-            old(self).inv(),
+            self.inv(),
         ensures
-            r matches Some(p) ==> {
-                &&& crate::cursor::col_ok::<E, W, I, G>(p.slabs@, p.index, p.total_len, old(self).max_segments)
-                &&& p.total_len + 3 <= usize::MAX
-                &&& old(self).clean_in_domain() ==> G::dom_ok(p.slabs@)
-                &&& vals_of::<E>(p.slabs@) == old(self).now()
-            },
-            r is Some == old(self).held(),
-            final(self).inv(),
-            final(self).max_segments == old(self).max_segments,
-            final(self).parts is None,
+            crate::cursor::col_ok::<E, W, I, G>(p.slabs@, p.index, p.total_len, self.max_segments),
+            p.total_len + 3 <= usize::MAX,
+            self.clean_in_domain() ==> G::dom_ok(p.slabs@),
+            vals_of::<E>(p.slabs@) == self.now(),
     {
         let ms = self.max_segments;
-        let mut p = self.parts.take()?;
-        self.cur.close::<W, I, G>(&mut p.slabs, &mut p.index, &mut p.total_len, ms, &mut p.counter);
+        let mut cur = self.cur;
+        let mut p = self.parts;
+        cur.close::<W, I, G>(&mut p.slabs, &mut p.index, &mut p.total_len, ms, &mut p.counter);
         proof {
-            self.cur.lemma_clean(p.slabs@);
+            cur.lemma_clean(p.slabs@);
             lemma_vals_total::<E>(p.slabs@);
         }
-        Some(p)
+        p
     }
 
     /// End the edit: close it and hand the column its parts back, the
     /// column checked to be in the weight model's domain (free but for a
     /// delta column, whose edit cursor checks it more cheaply and ends
-    /// with [`end_in_domain`](Self::end_in_domain)). Nothing to hand back
-    /// if they were already.
-    pub(crate) fn end(&mut self, col: &mut ColumnCore<E, W, I, G>)
+    /// with [`end_in_domain`](Self::end_in_domain)).
+    pub(crate) fn end(self, col: &mut ColumnCore<E, W, I, G>)
         requires
-            old(self).inv(),
+            self.inv(),
         ensures
-            final(self).inv(),
-            !final(self).held(),
-            old(self).held() ==> final(col)@ == old(self).now(),
+            final(col)@ == self.now(),
     {
         let ms = self.max_segments;
-        if let Some(p) = self.finish() {
-            if !G::dom_check(&p.slabs, p.total_len) {
-                out_of_domain();
-            }
-            col.restore_budget(p, ms);
+        let p = self.finish();
+        if !G::dom_check(&p.slabs, p.total_len) {
+            out_of_domain();
         }
+        col.restore_budget(p, ms);
     }
 
     /// [`end`](Self::end), for an edit closed already and checked to have
     /// left its column in the domain.
-    pub(crate) fn end_in_domain(&mut self, col: &mut ColumnCore<E, W, I, G>)
+    pub(crate) fn end_in_domain(self, col: &mut ColumnCore<E, W, I, G>)
         requires
-            old(self).inv(),
-            old(self).clean_in_domain(),
+            self.inv(),
+            self.clean_in_domain(),
         ensures
-            final(self).inv(),
-            !final(self).held(),
-            old(self).held() ==> final(col)@ == old(self).now(),
+            final(col)@ == self.now(),
     {
         let ms = self.max_segments;
-        if let Some(p) = self.finish() {
-            col.restore_budget(p, ms);
+        let p = self.finish();
+        col.restore_budget(p, ms);
+    }
+
+    /// An edit of nothing, for the glue to leave in place of one it ends
+    /// (`Edit`'s `drop`): no step may be called on it, for it has no
+    /// invariant, and it holds nothing to drop.
+    pub(crate) fn spent() -> Self {
+        EditCore {
+            parts: Parts { slabs: Vec::new(), index: I::spent(), total_len: 0, counter: 0 },
+            cur: Cursor::spent(),
+            max_segments: 2,
+            _p: PhantomData,
         }
     }
 }

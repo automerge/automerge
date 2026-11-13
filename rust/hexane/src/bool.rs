@@ -188,8 +188,9 @@ impl<C: Codec> ColumnEncoding for BoolEncoding<C> {
         d.suspend()
     }
 
+    #[inline(always)]
     fn state_peek(slab: &Slab, state: &Self::State) -> Option<bool> {
-        BoolDecoder::<C>::resume(&slab.data, state).next()
+        crate::bool_wire::peek_at::<Counts<C>>(&slab.data, state)
     }
 
     fn state_advance(slab: &Slab, state: &mut Self::State, n: usize) {

@@ -955,7 +955,7 @@ impl BEdit {
                 self.read_segments = self.read_segments + 1;
             }
         }
-        self.dec = dec.suspend();
+        dec.suspend_into(&mut self.dec);
         want
     }
 
@@ -2235,6 +2235,9 @@ impl<C: CountsOf> Slabs for BoolModel<C> {
         &e.e.dec
     }
 
+    // out of line: a reader made afresh is the rare case, and its decode
+    // loop inline would cost the common read (`EditCore::reader`) a frame
+    #[inline(never)]
     fn state_at(s: &BSlab, at: usize) -> (st: BoolDecoderState) {
         proof {
             lemma_bslab::<C::K>(*s);
@@ -2246,17 +2249,54 @@ impl<C: CountsOf> Slabs for BoolModel<C> {
         d.suspend()
     }
 
-    #[allow(unused_variables)]
+    #[inline(always)]
     fn state_advance(s: &BSlab, st: &mut BoolDecoderState, n: usize, pos: Ghost<nat>) {
         proof {
             lemma_bslab::<C::K>(*s);
         }
         let mut d = BDec::resume::<C::K>(s.data.as_slice(), st);
-        if n > 0 {
-            d.nth::<C::K>(n - 1);
+        if d.skip_in_run::<C::K>(n) {
+            d.suspend_into(st);
+            return;
         }
-        *st = d.suspend();
+        advance_long::<C>(s, st, n, pos);
     }
+
+    #[inline(always)]
+    #[allow(unused_variables)]
+    fn state_skip(s: &BSlab, st: &mut BoolDecoderState, n: usize, pos: Ghost<nat>) -> (r: bool) {
+        proof {
+            lemma_bslab::<C::K>(*s);
+        }
+        let mut d = BDec::resume::<C::K>(s.data.as_slice(), st);
+        if d.skip_in_run::<C::K>(n) {
+            d.suspend_into(st);
+            return true;
+        }
+        false
+    }
+}
+
+/// [`Slabs::state_advance`] past the end of the run in hand: out of
+/// line, so a step inside it needs no frame.
+#[inline(never)]
+#[allow(unused_variables)]
+fn advance_long<C: CountsOf>(s: &BSlab, st: &mut BoolDecoderState, n: usize, pos: Ghost<nat>)
+    requires
+        BoolModel::<C>::ok(*s),
+        BoolModel::<C>::st_at(s.data@, *old(st), pos@),
+        pos@ + n <= s.len,
+    ensures
+        BoolModel::<C>::st_at(s.data@, *final(st), (pos@ + n) as nat),
+{
+    proof {
+        lemma_bslab::<C::K>(*s);
+    }
+    let mut d = BDec::resume::<C::K>(s.data.as_slice(), st);
+    if n > 0 {
+        d.nth::<C::K>(n - 1);
+    }
+    d.suspend_into(st);
 }
 
 /// Carry `n` of the slab's values through the rebuild, telling `f` each

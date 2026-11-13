@@ -1129,6 +1129,12 @@ impl<L> Slabs for RleModel<L> where L: for<'s> Lift<'s, W = L> {
             lemma_lift_state::<L>(s.data@, *st);
         }
     }
+
+    #[inline(always)]
+    fn state_skip(s: &Slab, st: &mut RleDecoderState, n: usize, pos: Ghost<nat>) -> (r: bool) {
+        Self::state_advance(s, st, n, pos);
+        true
+    }
 }
 
 /// Carry `n` of the slab's values through the rebuild, at most `runs`

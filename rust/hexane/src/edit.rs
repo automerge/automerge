@@ -353,7 +353,9 @@ where
         }
         // finishing on drop keeps chains honest: the last call in a
         // chain does not have to be `finish()`; and the parts go back to
-        // the column (verified, `EditCore::end`)
-        self.core.end(&mut self.col.core);
+        // the column (verified, `EditCore::end`), which takes the edit
+        // whole, leaving one of nothing in its place
+        let core = std::mem::replace(&mut self.core, EditCore::spent());
+        core.end(&mut self.col.core);
     }
 }

@@ -138,6 +138,10 @@ pub trait IndexOps<W>: Sized {
             r.ws() == Seq::<W>::empty(),
     ;
 
+    /// A stand-in for an index moved out, made without allocating: it
+    /// need not be `ok`, and is only ever dropped.
+    fn spent() -> Self;
+
     /// The index of the weights `ws`.
     fn ix_from(ws: Vec<W>) -> (r: Self)
         requires
@@ -395,6 +399,10 @@ impl<W: SlabWeight> IndexOps<W> for BitIndex<W> {
         Self::empty()
     }
 
+    fn spent() -> Self {
+        BitIndex { weights: Vec::new(), bit: Vec::new() }
+    }
+
     fn ix_from(ws: Vec<W>) -> Self {
         Self::from_vec(ws)
     }
@@ -531,6 +539,10 @@ impl<A: SlabAggregate> IndexOps<A> for SlabBTree<A> {
 
     fn ix_empty() -> Self {
         Self::new()
+    }
+
+    fn spent() -> Self {
+        Self::spent()
     }
 
     fn ix_from(ws: Vec<A>) -> Self {

@@ -187,6 +187,18 @@ pub(crate) trait Slabs {
         ensures
             Self::st_at(s.data@, *final(st), (pos@ + n) as nat),
     ;
+
+    /// [`Self::state_advance`] where that is cheap (for bool slabs, inside
+    /// the run in hand): whether it did; otherwise `st` is left as it was.
+    fn state_skip(s: &Slab<Self::Tail>, st: &mut Self::State, n: usize, pos: Ghost<nat>) -> (r: bool)
+        requires
+            Self::ok(*s),
+            Self::st_at(s.data@, *old(st), pos@),
+            pos@ + n <= s.len,
+        ensures
+            r ==> Self::st_at(s.data@, *final(st), (pos@ + n) as nat),
+            !r ==> *final(st) == *old(st),
+    ;
 }
 
 /// Carrying and dropping a slab's values through a rebuild, reporting
@@ -984,6 +996,24 @@ impl<E: Slabs> Cursor<E> {
     }
 
     /// Open a cursor at item `at` of the column.
+    /// A cursor over nothing, to stand in for one whose edit has ended
+    /// (`EditCore::spent`).
+    pub(crate) fn spent() -> Self {
+        Cursor {
+            slab: 0,
+            in_slab: 0,
+            orig: 0,
+            out: 0,
+            edit: E::idle(),
+            dirty: false,
+            remaining: 0,
+            rebuilds: 0,
+            dec: None,
+            o: Ghost(Seq::empty()),
+            p: Ghost(Seq::empty()),
+        }
+    }
+
     pub(crate) fn new<W, I: IndexOps<W>, G: Weigh<E, W>>(
         slabs: &mut Vec<Slab<E::Tail>>,
         index: &mut I,
@@ -1677,10 +1707,60 @@ impl<E: Slabs> Cursor<E> {
     /// Move forward `n` original items, carrying them; returns how many it
     /// jumped (moved through the index without visiting).
     ///
-    /// Inlined into its one caller, `Edit::advance_with`, which then takes
-    /// the column whole rather than field by field.
+    /// A move that stays inside the current slab with no rebuild open only
+    /// counts, and is done first, without the rest
+    /// ([`Self::advance_long`]): its caller can take that case inline and
+    /// leave the rest out of line (`EditCore::advance_with`).
     #[inline(always)]
     pub(crate) fn advance_with<W, I: IndexOps<W>, G: Weigh<E, W>, F: Visitor<E>>(
+        &mut self,
+        slabs: &mut Vec<Slab<E::Tail>>,
+        index: &mut I,
+        total_len: &mut usize,
+        max_segments: usize,
+        counter: &mut usize,
+        n: usize,
+        f: &mut F,
+    ) -> (jumped: usize)
+        requires
+            old(self).ok::<W, I, G>(old(slabs)@, *old(index), *old(total_len), max_segments),
+            old(self).on_value(old(slabs)@),
+        ensures
+            final(self).ok::<W, I, G>(final(slabs)@, *final(index), *final(total_len), max_segments),
+            final(self).on_value(final(slabs)@),
+            ({
+                let k = if n <= old(self).remaining { n } else { old(self).remaining };
+                &&& final(self).o == old(self).o
+                &&& final(self).orig == old(self).orig + k
+                &&& final(self).p@ == old(self).p@ + old(self).o@.subrange(old(self).orig as int, old(self).orig + k)
+                &&& jumped <= k
+                // what the visitor saw: all but the jump, which is last
+                &&& final(f).seen() == old(f).seen() + old(self).o@.subrange(
+                    old(self).orig as int,
+                    old(self).orig + k - jumped,
+                )
+                // a jump is the last step, and leaves no rebuild open
+                &&& jumped > 0 ==> !final(self).dirty
+            }),
+    {
+        if !self.dirty && n < slabs[self.slab].len - self.in_slab {
+            let ghost c0 = *self;
+            let ghost f0 = f.seen();
+            let step = self.jump::<W, I, G>(slabs, index, *total_len, Ghost(max_segments), n);
+            proof {
+                self.lemma_room(slabs@);
+                c0.lemma_room(slabs@);
+                assert(c0.o@.subrange(c0.orig as int, c0.orig + step - step) =~= Seq::<E::V>::empty());
+                assert(f0 + Seq::<E::V>::empty() =~= f0);
+            }
+            return step;
+        }
+        self.advance_long::<W, I, G, F>(slabs, index, total_len, max_segments, counter, n, f)
+    }
+
+    /// [`Self::advance_with`], for any move.
+    #[inline(always)]
+    fn advance_long<W, I: IndexOps<W>, G: Weigh<E, W>, F: Visitor<E>>(
         &mut self,
         slabs: &mut Vec<Slab<E::Tail>>,
         index: &mut I,
@@ -1849,7 +1929,11 @@ impl<E: Slabs> Cursor<E> {
                 self.lemma_room(slabs@);
             }
             if left < avail {
-                self.open(slabs, max_segments);
+                // tested here rather than only in `open`, so a delete in a
+                // rebuild already open makes no call, as `insert`
+                if !self.dirty {
+                    self.open(slabs, max_segments);
+                }
                 let ghost c1 = *self;
                 proof {
                     c1.lemma_ahead(slabs@, left as int);
@@ -1884,7 +1968,9 @@ impl<E: Slabs> Cursor<E> {
                 continue;
             }
             // the delete reaches this slab's end: finish it here and go on
-            self.open(slabs, max_segments);
+            if !self.dirty {
+                self.open(slabs, max_segments);
+            }
             let ghost c1 = *self;
             proof {
                 c1.lemma_ahead(slabs@, avail as int);

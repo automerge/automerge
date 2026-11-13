@@ -4567,6 +4567,12 @@ impl<A: SlabAggregate> SlabBTree<A> {
         self.nodes[id as usize].as_ref().expect("freed node id")
     }
 
+    /// A stand-in for a tree moved out, made without allocating: not
+    /// `wf`, and only ever dropped.
+    pub(crate) fn spent() -> Self {
+        Self { nodes: Vec::new(), free: Vec::new(), root: 0, total_slabs: 0, _phantom: PhantomData }
+    }
+
     pub(crate) fn new() -> (t: Self)
         ensures t.wf(), t@ == Seq::<A>::empty(),
     {
