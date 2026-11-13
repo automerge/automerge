@@ -119,7 +119,7 @@ pub use delta::{
     DeltaColumn, DeltaDecoder, DeltaEncoder, DeltaIter, DeltaIterState, DeltaRun, DeltaRuns,
     DeltaValue,
 };
-pub use shift::{Ranges, Shiftable, Unshift};
+pub use shift::{ItemPerValue, Ranges, Shiftable, Unshift};
 /// Streaming encoder for column type `T`, resolved via `T::Encoding<C>`.
 ///
 /// For RLE types (u64, i64, String, etc.) this resolves to `RleEncoder`.

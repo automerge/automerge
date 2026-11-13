@@ -237,16 +237,42 @@ impl<T: DeltaValue, C: crate::Codec + Debug> Shiftable for crate::delta::DeltaRu
     }
 }
 
+/// A [`Shiftable`] iterator that gives an item per value, each at one
+/// position: the column iterators ([`Iter`], [`PrefixIter`],
+/// [`DeltaIter`]), but not the run adapters ([`Runs`](crate::Runs),
+/// [`DeltaRuns`](crate::DeltaRuns)), whose items stand for whole runs.
+/// [`Unshift::shift`] needs one: it takes its lookahead's position to be
+/// the one just before the inner iterator's.
+///
+/// ```compile_fail
+/// use hexane::{Column, Unshift};
+///
+/// let col = Column::<u64>::from_values(vec![7, 7, 7, 9, 9]);
+/// let mut u = Unshift::new(col.iter().runs());
+/// u.shift(2..5); // a run adapter is not `ItemPerValue`
+/// ```
+pub trait ItemPerValue: Shiftable {}
+
+impl<T: ColumnValueRef> ItemPerValue for Iter<'_, T> {}
+
+impl<T: PrefixValue> ItemPerValue for PrefixIter<'_, T> {}
+
+impl<T: DeltaValue> ItemPerValue for DeltaIter<'_, T> {}
+
 /// An iterator with its lookahead already pulled.
 ///
 /// `new` immediately draws the first item, so [`Self::peek`] is free
 /// and needs no `&mut`. [`Self::shift`] repositions the inner
 /// [`Shiftable`] iterator and refills the lookahead from the start of
-/// the new range.
+/// the new range; it needs an inner iterator that gives an item per value
+/// ([`ItemPerValue`]).
 #[derive(Clone, Debug)]
 pub struct Unshift<T: Iterator> {
     inner: T,
     next: Option<T::Item>,
+    /// the lookahead is outside the window (an empty shift at it): kept,
+    /// for a later shift that starts there, but not yielded
+    hidden: bool,
 }
 
 impl<T: Iterator + Default> Default for Unshift<T> {
@@ -254,6 +280,7 @@ impl<T: Iterator + Default> Default for Unshift<T> {
         Self {
             inner: T::default(),
             next: None,
+            hidden: false,
         }
     }
 }
@@ -261,16 +288,34 @@ impl<T: Iterator + Default> Default for Unshift<T> {
 impl<T: Iterator> Unshift<T> {
     pub fn new(mut inner: T) -> Self {
         let next = inner.next();
-        Self { inner, next }
+        Self {
+            inner,
+            next,
+            hidden: false,
+        }
     }
 
     pub fn peek(&self) -> Option<&T::Item> {
+        if self.hidden {
+            return None;
+        }
         self.next.as_ref()
     }
 }
 
-impl<T: Shiftable + Iterator> Unshift<T> {
+impl<T: ItemPerValue> Unshift<T> {
+    /// Reposition to `range`: the lookahead becomes the item at
+    /// `range.start`, and iteration stops at `range.end`. The range may
+    /// start at the lookahead's own item, which is then kept (hidden while
+    /// the range is empty, for a later one starting there), or after it.
     pub fn shift(&mut self, range: Range<usize>) {
+        // the lookahead is the item just before the inner's position
+        if self.next.is_some() && range.start.checked_add(1) == Some(self.inner.get_pos()) {
+            self.inner.set_max(range.end);
+            self.hidden = range.is_empty();
+            return;
+        }
+        self.hidden = false;
         self.next = self.inner.shift_next(range);
     }
 }
@@ -279,6 +324,9 @@ impl<T: Iterator> Iterator for Unshift<T> {
     type Item = T::Item;
 
     fn next(&mut self) -> Option<Self::Item> {
+        if self.hidden {
+            return None;
+        }
         let mut next = self.inner.next();
         std::mem::swap(&mut next, &mut self.next);
         next
@@ -287,6 +335,9 @@ impl<T: Iterator> Iterator for Unshift<T> {
     fn nth(&mut self, n: usize) -> Option<Self::Item> {
         if n == 0 {
             return self.next();
+        }
+        if self.hidden {
+            return None;
         }
         // the lookahead is item 0, so item `n` is the inner's `n - 1`
         let out = self.inner.nth(n - 1);
