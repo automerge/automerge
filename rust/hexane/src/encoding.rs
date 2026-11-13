@@ -12,6 +12,9 @@ use crate::{AsColumnRef, ColumnValueRef, Run};
 ///
 /// Both [`crate::rle::RleEncoding`] and [`crate::bool::BoolEncoding`]
 /// are zero-sized types — all state lives in the slab bytes.
+// `ReadModel`'s bound is the crate's own verified contract, which nothing
+// outside can name or implement — a seal
+#[allow(private_bounds)]
 pub trait ColumnEncoding: Default {
     /// The varint codec this encoding reads and writes with.
     type Codec: crate::Codec;
@@ -39,16 +42,11 @@ pub trait ColumnEncoding: Default {
     /// any invariant is violated.  This is intended for testing and debugging.
     fn validate_encoding(slab: &[u8]) -> Result<SlabInfo<Self::Tail>, PackError>;
 
-    /// Merge slab `b`'s data into accumulator `acc`.
-    /// `a_tail` and `a_segments` describe the current state of `acc`.
-    /// Returns `(segment_delta, new_tail)`, or `None` if `b` is empty.
-    fn do_merge(
-        acc: &mut Vec<u8>,
-        a_tail: Self::Tail,
-        a_segments: usize,
-        b: &Slab<Self::Tail>,
-        buf: &mut Vec<u8>,
-    ) -> (usize, Self::Tail);
+    /// Append the canonical encoding of the slabs' values to `out`: the
+    /// first slab's bytes, then each of the others merged on, joining
+    /// the runs that meet at each boundary. `total` is their item count.
+    /// Verified with Verus for each encoding, given well-formed slabs.
+    fn save_slabs(slabs: &[Slab<Self::Tail>], total: usize, out: &mut Vec<u8>);
 
     /// Splice a single slab: delete `del` items at `index`, insert values.
     /// Each iterator item is `(value, count)` — pass `count = 1` for a single
@@ -69,20 +67,30 @@ pub trait ColumnEncoding: Default {
         f: F,
     ) -> Column<Self::Value, Self::Codec, WF, Idx>
     where
+        Self: crate::edit::SlabEdit,
         WF: WeightFn<Self::Value, Self::Codec>,
         Idx: ColumnIndex<WF::Weight>,
         F: Fn(Self::Value) -> Self::Value,
     {
-        let mut encoder = Self::encoder();
-        encoder.max_segments(max);
-        // (constructed via `encoder()`, not `with_max_segments`, because
-        // `Self::Encoder` isn't bound by `Default` here)
-        while let Some(run) = iter.next_run() {
-            let value = <Self::Value as ColumnValueRef>::to_owned(run.value);
-            let value = f(value);
-            encoder.append_n_owned(value, run.count);
-        }
-        encoder.into_column()
+        assert!(max >= 2, "max_segments must be at least 2");
+        // verified (`ColumnCore::from_mapped_runs`): the column of what `f`
+        // gives for each value the iterator has left, called once per run,
+        // re-encoded by the encoding's verified encoder
+        let (core, _) =
+            crate::column::CoreOf::<Self::Value, Self::Codec, WF, Idx>::from_mapped_runs::<
+                crate::column::Dx<Self::Value, Self::Codec>,
+                <Self as crate::edit::SlabEdit>::Recoder<'a>,
+                _,
+            >(
+                &mut iter.core,
+                iter.slabs,
+                max,
+                &crate::column::Remapping::<Self::Value, Self::Codec, F>(
+                    &f,
+                    std::marker::PhantomData,
+                ),
+            );
+        Column::of_core(core)
     }
 
     /// Decode the last run of a slab using tail metadata.
@@ -92,10 +100,29 @@ pub trait ColumnEncoding: Default {
     fn last_run(slab: &Slab<Self::Tail>) -> Option<Run<<Self::Value as ColumnValueRef>::Get<'_>>>;
 
     /// Decoder type for iterating over all items in a slab.
-    type Decoder<'a>: Iterator<Item = <Self::Value as ColumnValueRef>::Get<'a>> + RunDecoder + Clone;
+    type Decoder<'a>: Iterator<Item = <Self::Value as ColumnValueRef>::Get<'a>>
+        + RunDecoder
+        + Clone
+        + crate::iter_core::Decode<Item = <Self::Value as ColumnValueRef>::Get<'a>>;
+
+    /// The decoders as the verified column iterator sees them: what a slab
+    /// holds, and the decoder operations specified against it. The
+    /// iterator is proved for any model, and each encoding's model is
+    /// proved against its format. An associated type rather than a
+    /// blanket impl so that each encoding can have its own.
+    #[doc(hidden)]
+    type ReadModel: for<'a> crate::iter_core::Decoders<'a, Tail = Self::Tail, D = Self::Decoder<'a>>;
 
     /// Create a decoder that yields all items in `slab` in order.
     fn decoder(slab: &[u8]) -> Self::Decoder<'_>;
+
+    /// [`decoder`](Self::decoder) for a slab of this crate's own, whose
+    /// bytes were checked when they were loaded or written, without the
+    /// checks `decoder` makes of bytes from outside.
+    #[doc(hidden)]
+    fn slab_decoder(slab: &[u8], _: crate::sealed::Trusted) -> Self::Decoder<'_> {
+        Self::decoder(slab)
+    }
 
     /// A [`Decoder`](Self::Decoder)'s position, detached from the bytes
     /// it was reading.
@@ -221,7 +248,9 @@ pub trait EncoderApi<'a, T: ColumnValueRef, C: crate::Codec = crate::Leb128>: Si
     /// Encoders that support slab rollover (`RleEncoder`, `BoolEncoder`)
     /// use this to cut completed output into slabs as values arrive, so
     /// `into_column` can build the column directly without re-decoding.
-    /// Must be called before appending.  The default is a no-op.
+    /// Must be called before appending, and panics if `max < 2`, like
+    /// [`Column::with_max_segments`](crate::Column::with_max_segments).
+    /// The default is a no-op.
     fn max_segments(&mut self, _max: usize) {}
 
     /// Create an encoder with an explicit slab segment budget already set,
@@ -259,6 +288,8 @@ pub trait EncoderApi<'a, T: ColumnValueRef, C: crate::Codec = crate::Leb128>: Si
     /// or consists entirely of a single run of `value`.
     fn save_to_unless(self, out: &mut Vec<u8>, value: T::Get<'a>) -> std::ops::Range<usize>;
     /// Flush and return a single [`Slab`] with correct len, segments, and tail.
+    /// Panics if [`max_segments`](Self::max_segments) has cut the values
+    /// into more than one slab.
     fn into_slab(self) -> Slab<Self::Tail>;
     /// The tail metadata type for this encoding.
     type Tail: Copy + Clone + std::fmt::Debug + Default;

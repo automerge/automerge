@@ -1365,7 +1365,7 @@ fn copy_ranges_multi_point_strategies_agree() {
 
         let mut want = Vec::new();
         let mut prev = 0usize;
-        for sp in &norm {
+        for sp in norm.splices() {
             want.extend_from_slice(&dest_vals[prev..sp.pos]);
             want.extend_from_slice(&src_vals[sp.range.clone()]);
             prev = sp.pos + sp.delete;
@@ -2801,16 +2801,17 @@ fn validate_column<T: crate::ColumnValueRef>(col: &Column<T>)
 where
     for<'a> T::Get<'a>: std::fmt::Debug,
 {
-    let max_segments = col.max_segments;
+    let max_segments = col.core.max_segments();
 
-    let sum_len: usize = col.slabs.iter().map(|s| s.len).sum();
+    let sum_len: usize = col.core.slabs().iter().map(|s| s.len).sum();
     assert_eq!(
-        col.total_len, sum_len,
+        col.core.len(),
+        sum_len,
         "total_len mismatch: stored={} sum={sum_len}",
-        col.total_len,
+        col.core.len(),
     );
 
-    for (i, slab) in col.slabs.iter().enumerate() {
+    for (i, slab) in col.core.slabs().iter().enumerate() {
         assert!(
             slab.segments <= max_segments,
             "slab {i}: segments={} exceeds max_segments={max_segments}",
@@ -2833,7 +2834,7 @@ where
     for<'a> T::Get<'a>: std::fmt::Debug,
 {
     validate_column(col);
-    for (i, slab) in col.slabs.iter().enumerate() {
+    for (i, slab) in col.core.slabs().iter().enumerate() {
         let expected = compute_rle_tail::<T, crate::Leb128>(&slab.data);
         assert_eq!(
             slab.tail.lit_tail, expected.lit_tail,
@@ -4650,21 +4651,25 @@ fn index_items_before_parity() {
     let mut expect = 0;
     for (i, len) in lens.iter().enumerate() {
         assert_eq!(
-            btree.index.items_before(i),
+            btree.core.index().items_before(i),
             expect,
             "btree items_before({i})"
         );
         expect += len;
     }
-    assert_eq!(btree.index.items_before(lens.len()), expect);
+    assert_eq!(btree.core.index().items_before(lens.len()), expect);
 
     let lens = bit.slab_lens();
     let mut expect = 0;
     for (i, len) in lens.iter().enumerate() {
-        assert_eq!(bit.index.items_before(i), expect, "bit items_before({i})");
+        assert_eq!(
+            bit.core.index().items_before(i),
+            expect,
+            "bit items_before({i})"
+        );
         expect += len;
     }
-    assert_eq!(bit.index.items_before(lens.len()), expect);
+    assert_eq!(bit.core.index().items_before(lens.len()), expect);
 }
 
 #[test]
@@ -5547,6 +5552,137 @@ mod alt_codec {
     }
 }
 
+// ── LEB128 canonical decoding ───────────────────────────────────────────────
+mod leb128_canonical {
+    use crate::codec::{Codec, Leb128Error};
+    use crate::{Column, Leb128, PackError};
+
+    fn unsigned(bytes: &[u8]) -> Result<(usize, u64), Leb128Error> {
+        match Leb128::try_read_unsigned(bytes) {
+            Ok(r) => Ok(r),
+            Err(PackError::InvalidNumber(e)) => Err(e),
+            Err(e) => panic!("unexpected error {e:?}"),
+        }
+    }
+
+    fn signed(bytes: &[u8]) -> Result<(usize, i64), Leb128Error> {
+        match Leb128::try_read_signed(bytes) {
+            Ok(r) => Ok(r),
+            Err(PackError::InvalidNumber(e)) => Err(e),
+            Err(e) => panic!("unexpected error {e:?}"),
+        }
+    }
+
+    #[test]
+    fn overlong_encodings_are_rejected() {
+        use Leb128Error::*;
+        // 0 and 1, padded with a zero group
+        assert_eq!(unsigned(&[0x80, 0x00]), Err(Overlong));
+        assert_eq!(unsigned(&[0x81, 0x80, 0x00]), Err(Overlong));
+        assert_eq!(unsigned(&[0x81, 0x00]), Err(Overlong));
+        // ...but a zero group followed by a nonzero one is canonical
+        assert_eq!(unsigned(&[0x80, 0x01]), Ok((2, 128)));
+        // signed: a final byte that only repeats the sign bit
+        assert_eq!(signed(&[0x80, 0x00]), Err(Overlong)); // 0
+        assert_eq!(signed(&[0xbf, 0x00]), Err(Overlong)); // 63
+        assert_eq!(signed(&[0xff, 0x7f]), Err(Overlong)); // -1
+        assert_eq!(signed(&[0xc0, 0x7f]), Err(Overlong)); // -64
+
+        // ...while the same final bytes after the opposite sign bit are
+        // needed
+        assert_eq!(signed(&[0xc0, 0x00]), Ok((2, 64)));
+        assert_eq!(signed(&[0xbf, 0x7f]), Ok((2, -65)));
+        // and the one-byte forms are the canonical ones
+        assert_eq!(signed(&[0x3f]), Ok((1, 63)));
+        assert_eq!(signed(&[0x40]), Ok((1, -64)));
+        assert_eq!(signed(&[0x7f]), Ok((1, -1)));
+    }
+
+    #[test]
+    fn ten_byte_boundaries() {
+        use Leb128Error::*;
+        let mut b = [0xff; 10];
+        b[9] = 0x01;
+        assert_eq!(unsigned(&b), Ok((10, u64::MAX)));
+        b[9] = 0x02;
+        assert_eq!(unsigned(&b), Err(Overflow));
+        b[9] = 0x81;
+        assert_eq!(unsigned(&b), Err(Overflow));
+        let mut b = [0x80; 10];
+        b[9] = 0x00;
+        assert_eq!(unsigned(&b), Err(Overlong));
+        b[9] = 0x01;
+        assert_eq!(unsigned(&b), Ok((10, 1 << 63)));
+
+        let mut b = [0x80; 10];
+        b[9] = 0x7f;
+        assert_eq!(signed(&b), Ok((10, i64::MIN)));
+        b[9] = 0x00;
+        assert_eq!(signed(&b), Err(Overlong));
+        b[9] = 0x01;
+        assert_eq!(signed(&b), Err(Overflow));
+        let mut b = [0xff; 10];
+        b[9] = 0x00;
+        assert_eq!(signed(&b), Ok((10, i64::MAX)));
+        b[9] = 0x7f;
+        assert_eq!(signed(&b), Err(Overlong));
+        b[9] = 0x40;
+        assert_eq!(signed(&b), Err(Overflow));
+    }
+
+    #[test]
+    fn truncated_input() {
+        use Leb128Error::*;
+        assert_eq!(unsigned(&[]), Err(Truncated));
+        assert_eq!(unsigned(&[0x80, 0x80]), Err(Truncated));
+        assert_eq!(signed(&[0xff]), Err(Truncated));
+        assert_eq!(Leb128::read_unsigned(&[0x80]), None);
+        assert_eq!(Leb128::unsigned_len(&[0x80, 0x80]), None);
+    }
+
+    #[test]
+    fn extremes_round_trip() {
+        for v in [0, 1, 127, 128, 16383, 16384, u64::MAX - 1, u64::MAX] {
+            let enc = Leb128::encode_unsigned(v);
+            assert_eq!(enc.len() as u64, Leb128::unsigned_size(v), "size {v}");
+            assert_eq!(Leb128::unsigned_len(&enc), Some(enc.len()));
+            assert_eq!(Leb128::read_unsigned(&enc), Some((enc.len(), v)));
+        }
+        for v in [0, 1, -1, 63, 64, -64, -65, i64::MAX, i64::MIN] {
+            let enc = Leb128::encode_signed(v);
+            assert_eq!(enc.len() as u64, Leb128::signed_size(v), "size {v}");
+            assert_eq!(Leb128::signed_len(&enc), Some(enc.len()));
+            assert_eq!(Leb128::read_signed(&enc), Some((enc.len(), v)));
+        }
+    }
+
+    /// A column whose bytes use an overlong varint anywhere — a run
+    /// header, a value, a length prefix, a bool count — fails to load, so
+    /// every column that loads re-saves to the bytes it was loaded from.
+    #[test]
+    fn load_rejects_overlong_varints() {
+        let canonical = Column::<u64>::from_values(vec![5]).save();
+        assert_eq!(canonical, [0x7f, 0x05]);
+        assert!(Column::<u64>::load(&canonical).is_ok());
+        // the value 5 as 0x85 0x00
+        assert!(Column::<u64>::load(&[0x7f, 0x85, 0x00]).is_err());
+        // the literal-run header -1 as 0xff 0x7f
+        assert!(Column::<u64>::load(&[0xff, 0x7f, 0x05]).is_err());
+        // the i64 value -1 as 0xff 0x7f
+        assert_eq!(Column::<i64>::from_values(vec![-1]).save(), [0x7f, 0x7f]);
+        assert!(Column::<i64>::load(&[0x7f, 0xff, 0x7f]).is_err());
+        // a string's length prefix 2 as 0x82 0x00
+        assert!(Column::<String>::load(&[0x7f, 0x02, b'a', b'b']).is_ok());
+        assert!(Column::<String>::load(&[0x7f, 0x82, 0x00, b'a', b'b']).is_err());
+        // a bool run count 2 as 0x82 0x00
+        assert_eq!(
+            Column::<bool>::from_values(vec![true, true]).save(),
+            [0x00, 0x02]
+        );
+        assert!(Column::<bool>::load(&[0x00, 0x82, 0x00]).is_err());
+    }
+}
+
 // ── Bijou64 codec (feature-gated) ───────────────────────────────────────────
 #[cfg(feature = "bijou64")]
 mod bijou64_codec {
@@ -5755,11 +5891,11 @@ fn splice_invalidates_a_suspended_iter() {
         "unmutated column should resume"
     );
 
-    let slabs_before = col.slabs.len();
+    let slabs_before = col.core.slabs().len();
     col.splice(50, 1, std::iter::once(999u64));
     assert_eq!(
         slabs_before,
-        col.slabs.len(),
+        col.core.slabs().len(),
         "test needs a slab-count-preserving splice"
     );
 

@@ -3,7 +3,8 @@ use std::ops::Range;
 
 use crate::column::Iter;
 use crate::delta::{DeltaIter, DeltaValue};
-use crate::prefix::{PrefixIter, PrefixValue};
+use crate::prefix::{PrefixIter, PrefixValue, PrefixedValue};
+use crate::window::{self, RangeList, Stream, Window};
 use crate::ColumnValueRef;
 
 /// An iterator over a positional window that can be repositioned.
@@ -16,6 +17,25 @@ use crate::ColumnValueRef;
 /// The default `advance_to`/`advance_by` (and therefore `shift` and
 /// `shift_next`) walk via [`Iterator::nth`]; iterators with a faster
 /// way to move (multi-column wrappers, skippers) should override.
+///
+/// # Contract
+///
+/// An implementation ranges over a fixed sequence of values, one per
+/// position, and gives items that each stand for one or more of them, at
+/// consecutive positions: a column iterator's item for its value, a run
+/// adapter's (`Runs`, `DeltaRuns`) for its run. `next()` gives the item
+/// at [`get_pos`](Self::get_pos) and moves past the values it stands
+/// for, while the position is inside the window (before
+/// [`get_max`](Self::get_max) and before the values end), and otherwise
+/// gives `None`; `nth(n)` gives what `n + 1` calls to `next()` would give
+/// the last of; [`set_max`](Self::set_max) moves only the window's end;
+/// and an implementation's own `advance_to`, `shift` and `shift_next` do
+/// what the provided ones do. The provided `advance_to`, `advance_by`,
+/// `shift_next` and `seek_to` count positions in items, so they need an
+/// item per value; the run adapters provide their own. The provided
+/// methods, [`Unshift`] and [`Ranges`] are verified with Verus against
+/// this contract (`window`); the column iterators and the run adapters
+/// keep it by their own verified methods.
 pub trait Shiftable: Iterator + Debug {
     /// The position of the item the next call to `next()` returns.
     fn get_pos(&self) -> usize;
@@ -34,16 +54,14 @@ pub trait Shiftable: Iterator + Debug {
     /// Advance so the next item returned is the one at `target` (no-op
     /// if the iterator is already at or past it).
     fn advance_to(&mut self, target: usize) {
-        if target > self.get_pos() {
-            self.nth(target - self.get_pos() - 1);
-        }
+        // verified (`window::advance_to`)
+        window::advance_to(self, target)
     }
 
     /// Advance past `amount` items.
     fn advance_by(&mut self, amount: usize) {
-        if amount > 0 {
-            self.nth(amount - 1);
-        }
+        // verified (`window::advance_by`)
+        window::advance_by(self, amount)
     }
 
     /// Reposition the window to `range`: iteration yields the items in
@@ -51,8 +69,9 @@ pub trait Shiftable: Iterator + Debug {
     /// before [`get_pos`](Self::get_pos), iteration goes on from
     /// `get_pos()` to `range.end`.
     fn shift(&mut self, range: Range<usize>) {
-        self.set_max(range.end);
-        self.advance_to(range.start);
+        // verified (`window::shift`): exactly the items in the window are
+        // left
+        window::shift(self, range.start, range.end)
     }
 
     /// [`Self::shift`], returning the item at `range.start`.
@@ -60,19 +79,16 @@ pub trait Shiftable: Iterator + Debug {
     /// One `nth` call, not a reposition-then-`next` pair.
     fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
         assert!(range.start >= self.get_pos());
-        self.set_max(range.end);
-        self.nth(range.start - self.get_pos())
+        // verified (`window::shift_next`)
+        window::shift_next(self, range.start, range.end)
     }
 
     /// Consume through `pos`, returning the item there. Equivalent to
     /// `nth(pos - get_pos())`; `pos` must be at or ahead of the
     /// current position, otherwise returns None
     fn seek_to(&mut self, pos: usize) -> Option<<Self as Iterator>::Item> {
-        if pos >= self.get_pos() {
-            self.nth(pos - self.get_pos())
-        } else {
-            None
-        }
+        // verified (`window::seek_to`)
+        window::seek_to(self, pos)
     }
 
     /// Wrap in an [`Unshift`], pulling the first item as the lookahead.
@@ -93,7 +109,8 @@ pub trait Shiftable: Iterator + Debug {
     {
         let mut iter = self;
         // empty the window so the first next() pulls the first range
-        iter.set_max(iter.get_pos());
+        // (verified, `window::empty_window`)
+        window::empty_window(&mut iter);
         Ranges {
             iter,
             ranges: ranges.into_iter(),
@@ -113,21 +130,14 @@ impl<I: Shiftable, R: Iterator<Item = Range<usize>>> Iterator for Ranges<I, R> {
     type Item = I::Item;
 
     fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            if let Some(v) = self.iter.next() {
-                return Some(v);
-            }
-            let r = self.ranges.next()?;
-            assert!(
-                r.start >= self.iter.get_pos(),
-                "ranges must be ascending and non-overlapping"
-            );
-            self.iter.shift(r);
-        }
+        // verified (`window::ranges_next`): the items of each range in turn
+        window::ranges_next(&mut self.iter, &mut self.ranges)
     }
 }
 
-impl<T: ColumnValueRef> Shiftable for Iter<'_, T> {
+// The crate's iterators move by their own verified methods.
+
+impl<'a, T: ColumnValueRef> Shiftable for Iter<'a, T> {
     fn get_pos(&self) -> usize {
         Iter::pos(self)
     }
@@ -139,9 +149,29 @@ impl<T: ColumnValueRef> Shiftable for Iter<'_, T> {
     fn set_max(&mut self, pos: usize) {
         Iter::set_max(self, pos)
     }
+
+    fn advance_to(&mut self, target: usize) {
+        Iter::advance_to(self, target)
+    }
+
+    fn advance_by(&mut self, amount: usize) {
+        Iter::advance_by(self, amount)
+    }
+
+    fn shift(&mut self, range: Range<usize>) {
+        Iter::shift(self, range)
+    }
+
+    fn shift_next(&mut self, range: Range<usize>) -> Option<T::Get<'a>> {
+        Iter::shift_next(self, range)
+    }
+
+    fn seek_to(&mut self, pos: usize) -> Option<T::Get<'a>> {
+        Iter::seek_item(self, pos)
+    }
 }
 
-impl<T: PrefixValue> Shiftable for PrefixIter<'_, T> {
+impl<'a, T: PrefixValue> Shiftable for PrefixIter<'a, T> {
     fn get_pos(&self) -> usize {
         PrefixIter::pos(self)
     }
@@ -152,6 +182,26 @@ impl<T: PrefixValue> Shiftable for PrefixIter<'_, T> {
 
     fn set_max(&mut self, pos: usize) {
         PrefixIter::set_max(self, pos)
+    }
+
+    fn advance_to(&mut self, target: usize) {
+        PrefixIter::advance_to(self, target)
+    }
+
+    fn advance_by(&mut self, amount: usize) {
+        PrefixIter::advance_by(self, amount)
+    }
+
+    fn shift(&mut self, range: Range<usize>) {
+        PrefixIter::shift(self, range)
+    }
+
+    fn shift_next(&mut self, range: Range<usize>) -> Option<PrefixedValue<'a, T>> {
+        PrefixIter::shift_next(self, range)
+    }
+
+    fn seek_to(&mut self, pos: usize) -> Option<PrefixedValue<'a, T>> {
+        PrefixIter::seek_item(self, pos)
     }
 }
 
@@ -166,6 +216,26 @@ impl<T: DeltaValue> Shiftable for DeltaIter<'_, T> {
 
     fn set_max(&mut self, pos: usize) {
         DeltaIter::set_max(self, pos)
+    }
+
+    fn advance_to(&mut self, target: usize) {
+        DeltaIter::advance_to(self, target)
+    }
+
+    fn advance_by(&mut self, amount: usize) {
+        DeltaIter::advance_by(self, amount)
+    }
+
+    fn shift(&mut self, range: Range<usize>) {
+        DeltaIter::shift(self, range)
+    }
+
+    fn shift_next(&mut self, range: Range<usize>) -> Option<T> {
+        DeltaIter::shift_next(self, range)
+    }
+
+    fn seek_to(&mut self, pos: usize) -> Option<T> {
+        DeltaIter::seek_item(self, pos)
     }
 }
 
@@ -195,13 +265,11 @@ impl<'a, T: ColumnValueRef, C: crate::Codec + Debug> Shiftable for crate::column
     }
 
     fn shift_next(&mut self, range: Range<usize>) -> Option<crate::Run<T::Get<'a>>> {
-        self.0.shift(range);
-        self.next()
+        self.0.shift_run(range)
     }
 
     fn seek_to(&mut self, pos: usize) -> Option<crate::Run<T::Get<'a>>> {
-        self.0.advance_to(pos);
-        self.next()
+        self.0.seek_run(pos)
     }
 }
 
@@ -227,51 +295,91 @@ impl<T: DeltaValue, C: crate::Codec + Debug> Shiftable for crate::delta::DeltaRu
     }
 
     fn shift_next(&mut self, range: Range<usize>) -> Option<crate::delta::DeltaRun> {
-        self.0.shift(range);
-        self.next()
+        self.0.shift_run(range)
     }
 
     fn seek_to(&mut self, pos: usize) -> Option<crate::delta::DeltaRun> {
-        self.0.advance_to(pos);
-        self.next()
+        self.0.seek_run(pos)
     }
 }
+
+/// A [`Shiftable`] iterator that gives an item per value, each at one
+/// position: the column iterators ([`Iter`], [`PrefixIter`],
+/// [`DeltaIter`]), but not the run adapters ([`Runs`](crate::Runs),
+/// [`DeltaRuns`](crate::DeltaRuns)), whose items stand for whole runs.
+/// [`Unshift::shift`] needs one: it takes its lookahead's position to be
+/// the one just before the inner iterator's.
+///
+/// ```compile_fail
+/// use hexane::{Column, Unshift};
+///
+/// let col = Column::<u64>::from_values(vec![7, 7, 7, 9, 9]);
+/// let mut u = Unshift::new(col.iter().runs());
+/// u.shift(2..5); // a run adapter is not `ItemPerValue`
+/// ```
+pub trait ItemPerValue: Shiftable {}
+
+impl<T: ColumnValueRef> ItemPerValue for Iter<'_, T> {}
+
+impl<T: PrefixValue> ItemPerValue for PrefixIter<'_, T> {}
+
+impl<T: DeltaValue> ItemPerValue for DeltaIter<'_, T> {}
 
 /// An iterator with its lookahead already pulled.
 ///
 /// `new` immediately draws the first item, so [`Self::peek`] is free
 /// and needs no `&mut`. [`Self::shift`] repositions the inner
 /// [`Shiftable`] iterator and refills the lookahead from the start of
-/// the new range.
+/// the new range; it needs an inner iterator that gives an item per value
+/// ([`ItemPerValue`]).
 #[derive(Clone, Debug)]
 pub struct Unshift<T: Iterator> {
     inner: T,
     next: Option<T::Item>,
+    /// the lookahead is outside the window (an empty shift at it): kept,
+    /// for a later shift that starts there, but not yielded
+    hidden: bool,
 }
 
 impl<T: Iterator + Default> Default for Unshift<T> {
+    /// An `Unshift` over the default iterator, as [`Unshift::new`] makes.
     fn default() -> Self {
-        Self {
-            inner: T::default(),
-            next: None,
-        }
+        Self::new(T::default())
     }
 }
 
 impl<T: Iterator> Unshift<T> {
     pub fn new(mut inner: T) -> Self {
-        let next = inner.next();
-        Self { inner, next }
+        // verified (`window::u_new`)
+        let next = window::u_new(&mut inner);
+        Self {
+            inner,
+            next,
+            hidden: false,
+        }
     }
 
     pub fn peek(&self) -> Option<&T::Item> {
-        self.next.as_ref()
+        // verified (`window::u_peek`)
+        window::u_peek(&self.inner, &self.next, self.hidden)
     }
 }
 
-impl<T: Shiftable + Iterator> Unshift<T> {
+impl<T: ItemPerValue> Unshift<T> {
+    /// Reposition to `range`: the lookahead becomes the item at
+    /// `range.start`, and iteration stops at `range.end`. The range may
+    /// start at the lookahead's own item, which is then kept (hidden while
+    /// the range is empty, for a later one starting there), or after it.
     pub fn shift(&mut self, range: Range<usize>) {
-        self.next = self.inner.shift_next(range);
+        // verified (`window::u_shift`): exactly the items in `range` are
+        // left
+        window::u_shift(
+            &mut self.inner,
+            &mut self.next,
+            &mut self.hidden,
+            range.start,
+            range.end,
+        )
     }
 }
 
@@ -279,18 +387,139 @@ impl<T: Iterator> Iterator for Unshift<T> {
     type Item = T::Item;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let mut next = self.inner.next();
-        std::mem::swap(&mut next, &mut self.next);
-        next
+        // verified (`window::u_next`)
+        window::u_next(&mut self.inner, &mut self.next, self.hidden)
     }
 
     fn nth(&mut self, n: usize) -> Option<Self::Item> {
-        if n == 0 {
-            return self.next();
-        }
-        // the lookahead is item 0, so item `n` is the inner's `n - 1`
-        let out = self.inner.nth(n - 1);
-        self.next = self.inner.next();
-        out
+        // verified (`window::u_nth`): the lookahead is item 0, so item `n`
+        // is the inner's `n - 1`
+        window::u_nth(&mut self.inner, &mut self.next, self.hidden, n)
+    }
+}
+
+// ── The contract's bridges (trusted) ────────────────────────────────────────
+
+/// Every iterator, as the adapters see it (`window::Stream`): trusted to
+/// give items that each stand for one or more values at consecutive
+/// positions of a fixed sequence (a run adapter's item for its run), and
+/// `nth(n)` to be `n + 1` calls to `next`. That each item stands for
+/// itself alone (`unit`) is trusted where `Unshift::shift` needs it, of
+/// every [`ItemPerValue`] iterator, and where `Shiftable`'s provided moves
+/// need it, of every `Shiftable` that keeps them.
+impl<I: Iterator + ?Sized> Stream for I {
+    type Item = I::Item;
+
+    #[cfg(verus_keep_ghost)]
+    fn vals(&self) -> vstd::seq::Seq<I::Item> {
+        unimplemented!()
+    }
+
+    #[cfg(verus_keep_ghost)]
+    fn at(&self) -> vstd::prelude::int {
+        unimplemented!()
+    }
+
+    #[cfg(verus_keep_ghost)]
+    fn left(&self) -> vstd::seq::Seq<I::Item> {
+        unimplemented!()
+    }
+
+    #[cfg(verus_keep_ghost)]
+    fn items(&self) -> vstd::seq::Seq<I::Item> {
+        unimplemented!()
+    }
+
+    #[cfg(verus_keep_ghost)]
+    fn spans(_x: I::Item) -> vstd::seq::Seq<I::Item> {
+        unimplemented!()
+    }
+
+    #[cfg(verus_keep_ghost)]
+    fn unit() -> bool {
+        unimplemented!()
+    }
+
+    #[cfg(verus_keep_ghost)]
+    fn lemma_left(&self) {
+        unimplemented!()
+    }
+
+    #[cfg(verus_keep_ghost)]
+    fn lemma_items(&self) {
+        unimplemented!()
+    }
+
+    #[cfg(verus_keep_ghost)]
+    fn lemma_unit(_x: I::Item) {
+        unimplemented!()
+    }
+
+    #[inline(always)]
+    fn s_next(&mut self) -> Option<I::Item> {
+        self.next()
+    }
+
+    #[inline(always)]
+    fn s_nth(&mut self, n: usize) -> Option<I::Item> {
+        self.nth(n)
+    }
+}
+
+/// Every [`Shiftable`] iterator (`window::Window`): trusted to keep the
+/// contract on [`Shiftable`].
+impl<S: Shiftable + ?Sized> Window for S {
+    #[cfg(verus_keep_ghost)]
+    fn end(&self) -> vstd::prelude::int {
+        unimplemented!()
+    }
+
+    #[cfg(verus_keep_ghost)]
+    fn lemma_window(&self) {
+        unimplemented!()
+    }
+
+    #[inline(always)]
+    fn w_pos(&self) -> usize {
+        self.get_pos()
+    }
+
+    #[inline(always)]
+    fn w_set_max(&mut self, end: usize) {
+        self.set_max(end)
+    }
+
+    #[inline(always)]
+    fn w_advance_to(&mut self, target: usize) {
+        self.advance_to(target)
+    }
+
+    #[inline(always)]
+    fn w_shift(&mut self, start: usize, end: usize) {
+        self.shift(start..end)
+    }
+
+    #[inline(always)]
+    fn w_shift_next(&mut self, start: usize, end: usize) -> Option<<S as Iterator>::Item> {
+        self.shift_next(start..end)
+    }
+}
+
+/// The ranges a caller gives [`Shiftable::ranges`] (`window::RangeList`):
+/// nothing is assumed of them.
+impl<R: Iterator<Item = Range<usize>>> RangeList for R {
+    #[cfg(verus_keep_ghost)]
+    fn given(&self) -> vstd::seq::Seq<Range<usize>> {
+        unimplemented!()
+    }
+
+    #[cfg(verus_keep_ghost)]
+    fn ended(&self) -> bool {
+        unimplemented!()
+    }
+
+    #[inline(always)]
+    fn next_range(&mut self) -> Option<Range<usize>> {
+        self.next()
     }
 }

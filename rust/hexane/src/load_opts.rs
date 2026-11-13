@@ -11,7 +11,8 @@ use crate::column::DEFAULT_MAX_SEG;
 ///   has the expected number of items.
 /// - [`with_fill`](LoadOpts::with_fill) — when data is empty and `length` is
 ///   set, the load reads as `length` copies of this value instead of
-///   an empty column.
+///   an empty column (for a [`DeltaColumn`](crate::DeltaColumn), copies of
+///   this delta).
 /// - [`with_max_segments`](LoadOpts::with_max_segments) — override the
 ///   slab segment budget.
 #[derive(Clone, Copy)]
@@ -60,6 +61,11 @@ impl LoadOpts<NoFill> {
     /// When data is empty and [`with_length`](Self::with_length) is also set,
     /// the load reads as `length` copies of `value` instead of an empty
     /// column.
+    ///
+    /// A [`DeltaColumn`](crate::DeltaColumn) stores the differences between
+    /// consecutive values, and its fill is one of those: `length` copies of
+    /// the delta `d` read as the values `d, 2d, 3d, …` (so a fill of `0`
+    /// reads as zeros).
     ///
     /// Has no effect unless `with_length` is also called.
     pub fn with_fill<A>(self, value: A) -> LoadOpts<Fill<A>> {

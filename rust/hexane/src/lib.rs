@@ -30,6 +30,7 @@ macro_rules! __log {
  }
 
 pub mod edit;
+pub(crate) mod edit_core;
 
 #[cfg(test)]
 mod edit_fuzz;
@@ -59,9 +60,18 @@ pub mod leb128 {
     pub type DeltaEncoder<'a, T> = crate::DeltaEncoder<'a, T, Leb128>;
     pub type DeltaDecoder<'a, T> = crate::DeltaDecoder<'a, T, Leb128>;
 
-    /// Construct a streaming [`Decoder`] over raw column bytes.
+    /// Construct a streaming [`Decoder`] over raw column bytes, which
+    /// must be a valid encoding (see [`crate::decoder`]).
     pub fn decoder<T: crate::ColumnValueRef>(data: &[u8]) -> Decoder<'_, T> {
         crate::decoder_in::<T, Leb128>(data)
+    }
+
+    /// Construct a streaming [`Decoder`] over raw column bytes, checking
+    /// them first (see [`crate::try_decoder`]).
+    pub fn try_decoder<T: crate::ColumnValueRef>(
+        data: &[u8],
+    ) -> Result<Decoder<'_, T>, crate::PackError> {
+        crate::try_decoder_in::<T, Leb128>(data)
     }
 }
 
@@ -93,33 +103,63 @@ pub mod bijou {
     pub type DeltaEncoder<'a, T> = crate::DeltaEncoder<'a, T, Bijou64>;
     pub type DeltaDecoder<'a, T> = crate::DeltaDecoder<'a, T, Bijou64>;
 
-    /// Construct a streaming [`Decoder`] over raw column bytes.
+    /// Construct a streaming [`Decoder`] over raw column bytes, which
+    /// must be a valid encoding (see [`crate::decoder`]).
     pub fn decoder<T: crate::ColumnValueRef>(data: &[u8]) -> Decoder<'_, T> {
         crate::decoder_in::<T, Bijou64>(data)
     }
+
+    /// Construct a streaming [`Decoder`] over raw column bytes, checking
+    /// them first (see [`crate::try_decoder`]).
+    pub fn try_decoder<T: crate::ColumnValueRef>(
+        data: &[u8],
+    ) -> Result<Decoder<'_, T>, crate::PackError> {
+        crate::try_decoder_in::<T, Bijou64>(data)
+    }
 }
 
+pub(crate) mod attrib;
+#[cfg(feature = "bijou64")]
+mod bijou64;
 pub mod bool;
+pub(crate) mod bool_edit;
+pub(crate) mod bool_enc;
+pub(crate) mod bool_unique;
+pub(crate) mod bool_wire;
 pub(crate) mod btree;
 pub mod codec;
 pub mod column;
+pub(crate) mod column_core;
+pub(crate) mod copy;
+pub(crate) mod cursor;
 pub mod delta;
 pub mod encoder;
 pub mod encoding;
+pub(crate) mod fenwick;
 #[doc(hidden)]
 pub mod index;
+pub(crate) mod iter_core;
+mod leb128_codec;
+pub(crate) mod load_core;
 pub mod load_opts;
+pub(crate) mod merge_walk;
 pub mod prefix;
+pub(crate) mod prefix_core;
+pub(crate) mod prefix_search;
 pub mod raw;
+pub(crate) mod remap;
 pub mod rle;
 pub mod shift;
+pub(crate) mod splices;
+pub(crate) mod weights;
+pub(crate) mod window;
 pub use column::{Column, ColumnLoadIter, Iter, IterState, Runs, Splice};
 pub use delta::indexed::FindByRange;
 pub use delta::{
     DeltaColumn, DeltaDecoder, DeltaEncoder, DeltaIter, DeltaIterState, DeltaRun, DeltaRuns,
     DeltaValue,
 };
-pub use shift::{Ranges, Shiftable, Unshift};
+pub use shift::{ItemPerValue, Ranges, Shiftable, Unshift};
 /// Streaming encoder for column type `T`, resolved via `T::Encoding<C>`.
 ///
 /// For RLE types (u64, i64, String, etc.) this resolves to `RleEncoder`.
@@ -137,6 +177,14 @@ pub type Decoder<'a, T, C = Leb128> =
 
 /// Construct a streaming [`Decoder`] over raw column bytes ([`Leb128`]).
 ///
+/// The bytes must be a valid encoding of `T` values, as an encoder or
+/// [`Column::save`] writes: on other bytes the decoder may panic or yield
+/// nonsense. For bytes from outside the program, use [`try_decoder`],
+/// which checks them first. For a string column (`String` or
+/// `Option<String>`), `decoder` checks them too, since a string handed out
+/// must be UTF-8, and panics on bytes that are not a valid column of
+/// strings.
+///
 /// ```no_run
 /// # let bytes: Vec<u8> = vec![0];
 /// for v in hexane::decoder::<Option<u64>>(&bytes) {
@@ -147,9 +195,38 @@ pub fn decoder<'a, T: ColumnValueRef>(data: &'a [u8]) -> Decoder<'a, T> {
     <T::Encoding<Leb128> as ColumnEncoding>::decoder(data)
 }
 
-/// Construct a streaming [`Decoder`] over raw column bytes in codec `C`.
+/// Construct a streaming [`Decoder`] over raw column bytes in codec `C`,
+/// which must be a valid encoding (see [`decoder`]). A string column's
+/// bytes are checked first, as for [`decoder`].
 pub fn decoder_in<'a, T: ColumnValueRef, C: Codec>(data: &'a [u8]) -> Decoder<'a, T, C> {
     <T::Encoding<C> as ColumnEncoding>::decoder(data)
+}
+
+/// Construct a streaming [`Decoder`] over raw column bytes ([`Leb128`]),
+/// first checking that they are a valid encoding of `T` values, as
+/// [`Column::load`] does: on any other bytes, the error, rather than a
+/// decoder that could panic on them.
+///
+/// ```
+/// let bytes = hexane::Column::<u64>::from_values(vec![1, 2, 2]).save();
+/// let values: Vec<u64> = hexane::try_decoder::<u64>(&bytes).unwrap().collect();
+/// assert_eq!(values, vec![1, 2, 2]);
+/// assert!(hexane::try_decoder::<u64>(&[0x02]).is_err());
+/// ```
+pub fn try_decoder<'a, T: ColumnValueRef>(data: &'a [u8]) -> Result<Decoder<'a, T>, PackError> {
+    try_decoder_in::<T, Leb128>(data)
+}
+
+/// [`try_decoder`] in codec `C`.
+pub fn try_decoder_in<'a, T: ColumnValueRef, C: Codec>(
+    data: &'a [u8],
+) -> Result<Decoder<'a, T, C>, PackError> {
+    <T::Encoding<C> as ColumnEncoding>::validate_encoding(data)?;
+    // checked: no need for `decoder`'s own check of strings
+    Ok(<T::Encoding<C> as ColumnEncoding>::slab_decoder(
+        data,
+        crate::sealed::Trusted(()),
+    ))
 }
 pub use bool::BoolLoadIter;
 pub use btree::SlabAggregate;
@@ -171,7 +248,15 @@ pub use rle::RleLoadIter;
 /// external crates from implementing them, so the index/weight machinery
 /// can change shape in any release without breakage.
 mod sealed {
+    vstd::prelude::verus! {
     pub trait Sealed {}
+    } // verus!
+
+    /// Proof that the caller is this crate, decoding a slab of its own
+    /// (see `ColumnEncoding::slab_decoder`). Other crates can't name or
+    /// make one.
+    #[derive(Clone, Copy)]
+    pub struct Trusted(pub(crate) ());
 }
 
 #[cfg(test)]
@@ -314,6 +399,32 @@ impl<T: ColumnValue> ColumnValueRef for T {
 ///
 /// This is implemented by all value types that use [`RleEncoding`] — i.e.,
 /// everything except `bool` (which uses [`BoolEncoding`]).
+///
+/// # Contract
+///
+/// Loading accepts exactly the canonical encodings of a column, and a
+/// column that loads saves back to the same bytes, as long as each value
+/// type's own encoding is a code:
+///
+/// * [`pack`](Self::pack) writes a non-null value as a nonempty string of
+///   bytes and returns `true`, and no value's bytes begin another's: they
+///   are its alone, and they tell where it ends. A null it doesn't write
+///   (it returns `false`).
+/// * [`try_unpack`](Self::try_unpack) succeeds exactly on data that starts
+///   with a value's bytes, returning that value and their length, and
+///   fails on any other data; [`unpack`](Self::unpack) and
+///   [`value_len`](Self::value_len) agree with it where it succeeds.
+/// * `==` on [`Get`](ColumnValueRef::Get) values is equality: equal values
+///   have the same bytes.
+/// * A nullable type ([`NULLABLE`](Self::NULLABLE)) has one null,
+///   [`get_null`](Self::get_null), which [`is_null`](Self::is_null) picks
+///   out. So `Option<T>` needs a `T` that isn't nullable.
+///
+/// The crate's own impls keep to this, and it is what the verified RLE code
+/// assumes of every value type. In particular, convert a length or a
+/// number read from the data with a checked conversion: `as` drops the high
+/// bits (of a `u64` length, on a 32-bit target), and the value would then
+/// load from bytes that aren't its own.
 pub trait RleValue: ColumnValueRef {
     /// Whether this column type allows null entries.
     ///
@@ -353,6 +464,13 @@ pub trait RleValue: ColumnValueRef {
     fn unpack<C: Codec>(data: &[u8]) -> (usize, Self::Get<'_>) {
         Self::try_unpack::<C>(data).unwrap()
     }
+
+    /// Whether [`unpack`](Self::unpack) relies on its bytes having been
+    /// checked for memory safety, as `String`'s does (it skips the UTF-8
+    /// check). A decoder over bytes from outside a column then checks
+    /// them first.
+    #[doc(hidden)]
+    const UNPACK_TRUSTS_INPUT: bool = false;
 
     /// Construct the `Get` value for a null entry.
     ///
@@ -403,19 +521,35 @@ impl<T: RleValue> AsColumnRef<Option<T>> for Option<T> {
     }
 }
 
+/// A nullable column of `T`s. `T` itself can't be nullable: a column has one
+/// null, so a column of nested options couldn't tell `None` from
+/// `Some(None)`, and it doesn't compile:
+///
+/// ```compile_fail
+/// let col = hexane::Column::<Option<Option<u64>>>::from_values(vec![Some(None), None]);
+/// ```
+///
+/// ```
+/// let col = hexane::Column::<Option<u64>>::from_values(vec![Some(1), None]);
+/// assert_eq!(col.iter().collect::<Vec<_>>(), vec![Some(1), None]);
+/// ```
 impl<T: RleValue> RleValue for Option<T> {
     const NULLABLE: bool = true;
+    const UNPACK_TRUSTS_INPUT: bool = T::UNPACK_TRUSTS_INPUT;
 
     fn value_len<C: Codec>(data: &[u8]) -> Option<usize> {
+        not_nested::<T>();
         T::value_len::<C>(data)
     }
 
     fn try_unpack<C: Codec>(data: &[u8]) -> Result<(usize, Option<T::Get<'_>>), PackError> {
+        not_nested::<T>();
         let (n, v) = T::try_unpack::<C>(data)?;
         Ok((n, Some(v)))
     }
 
     fn unpack<C: Codec>(data: &[u8]) -> (usize, Option<T::Get<'_>>) {
+        not_nested::<T>();
         let (n, v) = T::unpack::<C>(data);
         (n, Some(v))
     }
@@ -429,10 +563,23 @@ impl<T: RleValue> RleValue for Option<T> {
     }
 
     fn pack<C: Codec>(value: Option<T::Get<'_>>, out: &mut Vec<u8>) -> bool {
+        not_nested::<T>();
         match value {
             Some(v) => T::pack::<C>(v, out),
             None => false,
         }
+    }
+}
+
+/// Fail to compile where `Option<T>` is used as a column type for a `T`
+/// that is nullable itself (see its `RleValue` impl).
+#[inline(always)]
+fn not_nested<T: RleValue>() {
+    const {
+        assert!(
+            !T::NULLABLE,
+            "a column of a nullable type's options can't tell `None` from `Some(None)`"
+        )
     }
 }
 
@@ -694,12 +841,16 @@ impl ColumnValueRef for String {
 }
 
 impl RleValue for String {
+    const UNPACK_TRUSTS_INPUT: bool = true;
+
     fn value_len<C: Codec>(data: &[u8]) -> Option<usize> {
         Vec::<u8>::value_len::<C>(data)
     }
     fn try_unpack<C: Codec>(data: &[u8]) -> Result<(usize, &str), PackError> {
         let (hdr, len) = C::try_read_unsigned(data)?;
-        let len = len as usize;
+        // a length past `usize::MAX` (on 32-bit targets) is past the data's
+        // end too: reject it rather than truncate it
+        let len = usize::try_from(len).map_err(|_| PackError::BadFormat)?;
         let rest = &data[hdr..];
         if rest.len() < len {
             return Err(PackError::BadFormat);
@@ -747,7 +898,7 @@ impl ColumnValueRef for Vec<u8> {
 impl RleValue for Vec<u8> {
     fn value_len<C: Codec>(data: &[u8]) -> Option<usize> {
         let (hdr, len) = C::read_unsigned(data)?;
-        let len = len as usize;
+        let len = usize::try_from(len).ok()?;
         if data.len() - hdr < len {
             return None;
         }
@@ -755,7 +906,9 @@ impl RleValue for Vec<u8> {
     }
     fn try_unpack<C: Codec>(data: &[u8]) -> Result<(usize, &[u8]), PackError> {
         let (hdr, len) = C::try_read_unsigned(data)?;
-        let len = len as usize;
+        // a length past `usize::MAX` (on 32-bit targets) is past the data's
+        // end too: reject it rather than truncate it
+        let len = usize::try_from(len).map_err(|_| PackError::BadFormat)?;
         let rest = &data[hdr..];
         if rest.len() < len {
             return Err(PackError::BadFormat);

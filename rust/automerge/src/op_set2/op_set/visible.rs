@@ -25,7 +25,7 @@ impl Shiftable for ScanVisIter<'_> {
         let id = self.id.shift_next(range.clone());
         let action = self.action.shift_next(range.clone());
         let succ = self.succ.shift_next(range);
-        let vis = Self::is_visible(id?, action?, succ?, &self.clock);
+        let vis = Self::is_visible(id?, action?, &mut succ?, &self.clock);
         if vis {
             Some(0)
         } else {
@@ -121,10 +121,10 @@ impl<'a> ScanVisIter<'a> {
         }
     }
 
-    fn is_visible(id: OpId, action: Action, succ: SuccCursors<'_>, clock: &Clock) -> bool {
+    fn is_visible(id: OpId, action: Action, succ: &mut SuccCursors<'_>, clock: &Clock) -> bool {
         let is_inc = action == Action::Increment;
         let mut deleted = false;
-        for (id, inc) in succ.with_inc() {
+        while let Some((id, inc)) = succ.next_with_inc() {
             if inc.is_none() && clock.covers(&id) {
                 deleted = true;
             }
@@ -135,7 +135,10 @@ impl<'a> ScanVisIter<'a> {
     fn next_visible(&mut self) -> Option<bool> {
         let id = self.id.next()?;
         let action = self.action.next()?;
-        let succ = self.succ.next()?;
+        // by reference: moving the cursors out of the option costs a
+        // copy of several hundred bytes per op
+        let mut succ = self.succ.next();
+        let succ = succ.as_mut()?;
         Some(Self::is_visible(id, action, succ, &self.clock))
     }
 }

@@ -1,13 +1,21 @@
 use crate::btree::SlabAggregate;
+use crate::column_core::ColumnCore;
+use crate::load_core::LoadCore;
 use crate::sealed::Sealed;
-use std::cmp::Ordering;
+#[cfg(test)]
+use crate::splices::Cuts;
+use crate::splices::{normalize, Normalized, SpliceList};
+use crate::weights::LoadWeigh;
 use std::marker::PhantomData;
 use std::ops::{AddAssign, Range, SubAssign};
+#[allow(unused_imports)]
+use vstd::prelude::*;
 
 use crate::btree::{FindByValue, FindByValueRange, SlabAgg, SlabBTree};
 use crate::edit::Edit;
 use crate::encoding::{ColumnEncoding, RunDecoder};
 use crate::index::ColumnIndex;
+use crate::iter_core::{Cmp, ICore};
 use crate::PackError;
 use crate::{AsColumnRef, Codec, ColumnValueRef, Leb128, LoadOpts, MaybeFill, Run};
 
@@ -22,14 +30,19 @@ pub const DEFAULT_MAX_SEG: usize = 64;
 
 // ── Slab ─────────────────────────────────────────────────────────────────────
 
+verus! {
+
 #[doc(hidden)]
 #[derive(Clone, Debug, Default, PartialEq)]
+#[verifier::allow(autoderive_clone_without_spec)]
 pub struct Slab<Tail: Copy + Clone + std::fmt::Debug + Default = ()> {
     pub(crate) data: Vec<u8>,
     pub(crate) len: usize,
     pub(crate) segments: usize,
     pub(crate) tail: Tail,
 }
+
+} // verus!
 
 impl<Tail: Copy + Clone + std::fmt::Debug + Default> Slab<Tail> {
     pub(crate) fn new(data: Vec<u8>, len: usize, segments: usize) -> Self {
@@ -44,30 +57,98 @@ impl<Tail: Copy + Clone + std::fmt::Debug + Default> Slab<Tail> {
 
 // ── SlabWeight ───────────────────────────────────────────────────────────────
 
+verus! {
+
 /// A value stored in a Fenwick tree (BIT) node.
 ///
 /// For plain `Column`, this is `usize` (just the slab item count).
 /// For columns that track prefix sums, this is a compound value carrying
 /// both the item count and the slab's contribution to the prefix sum.
+///
+/// The Fenwick tree ([`crate::fenwick`]) is verified against the item
+/// counts alone, so these methods are specified only by what they do to
+/// [`weight_len`](Self::weight_len).
 #[doc(hidden)]
 pub trait SlabWeight: Sealed + Clone + Default + std::fmt::Debug + AddAssign + SubAssign {
+    /// [`len`](Self::len), for specifications.
+    spec fn weight_len(&self) -> nat;
+
+    /// A weight that is also an aggregate has the same length as both.
+    proof fn lemma_weight_len(&self)
+        where Self: crate::btree::SlabAggregate
+        ensures
+            self.weight_len() == self.spec_len(),
+    ;
+
     /// The length (item count) component of this weight.
-    fn len(&self) -> usize;
+    fn len(&self) -> (n: usize)
+        ensures n == self.weight_len();
 
     /// Whether this weight represents zero items.
-    fn is_empty(&self) -> bool {
+    fn is_empty(&self) -> (b: bool)
+        ensures b == (self.weight_len() == 0),
+    {
         self.len() == 0
     }
+
+    /// The weight of no items ([`Default`]).
+    fn zero() -> (z: Self)
+        ensures z.weight_len() == 0;
+
+    /// A copy of this weight ([`Clone`]).
+    fn copy(&self) -> (c: Self)
+        ensures c.weight_len() == self.weight_len();
+
+    /// `*self += other`.
+    fn add_weight(&mut self, other: &Self)
+        requires old(self).weight_len() + other.weight_len() <= usize::MAX,
+        ensures final(self).weight_len() == old(self).weight_len() + other.weight_len();
+
+    /// `*self -= other`.
+    fn sub_weight(&mut self, other: &Self)
+        requires other.weight_len() <= old(self).weight_len(),
+        ensures final(self).weight_len() == old(self).weight_len() - other.weight_len();
 }
 
 impl Sealed for usize {}
 
 impl SlabWeight for usize {
+    open spec fn weight_len(&self) -> nat {
+        *self as nat
+    }
+
+    proof fn lemma_weight_len(&self)
+        where Self: crate::btree::SlabAggregate
+    {
+    }
+
     #[inline]
     fn len(&self) -> usize {
         *self
     }
+
+    #[inline]
+    fn zero() -> usize {
+        0
+    }
+
+    #[inline]
+    fn copy(&self) -> usize {
+        *self
+    }
+
+    #[inline]
+    fn add_weight(&mut self, other: &usize) {
+        *self += *other;
+    }
+
+    #[inline]
+    fn sub_weight(&mut self, other: &usize) {
+        *self -= *other;
+    }
 }
+
+} // verus!
 
 // ── WeightFn ─────────────────────────────────────────────────────────────────
 
@@ -78,6 +159,9 @@ impl SlabWeight for usize {
 /// counts.  Prefix-aware columns use a compound weight that also tracks
 /// prefix sums in the same BIT.
 #[doc(hidden)]
+// `Model`'s bound is the crate's own verified contract, which nothing
+// outside can name or implement — a seal, like `SlabEdit::Model`'s
+#[allow(private_bounds)]
 pub trait WeightFn<T: ColumnValueRef, C: Codec = Leb128>: Sealed {
     /// The per-slab weight type.
     ///
@@ -87,6 +171,20 @@ pub trait WeightFn<T: ColumnValueRef, C: Codec = Leb128>: Sealed {
     /// [`SlabAggregate`](SlabAggregate), which permits
     /// non-invertible aggregates like min/max.
     type Weight: Clone + Default + std::fmt::Debug + SlabAggregate;
+
+    /// The weights as the verified cursor sees them: what a slab's weight
+    /// is, and its verified computation ([`crate::weights`]).
+    #[doc(hidden)]
+    type Model: crate::cursor::Weigh<
+            <<T as ColumnValueRef>::Encoding<C> as crate::edit::SlabEdit>::Model,
+            Self::Weight,
+        > + for<'a> crate::weights::LoadWeigh<
+            'a,
+            <<T as ColumnValueRef>::Encoding<C> as crate::edit::SlabEdit>::Model,
+            Dx<T, C>,
+            Self::Weight,
+        >;
+
     fn compute(slab: &Slab<TailOf<T, C>>) -> Self::Weight;
 
     /// `true` when `compute` has to re-decode the slab bytes (prefix sums,
@@ -107,6 +205,32 @@ pub trait WeightFn<T: ColumnValueRef, C: Codec = Leb128>: Sealed {
         count: usize,
         value: T::Get<'_>,
     ) -> Result<(), PackError>;
+
+    /// `true` when the weights of a column's slabs can overflow together
+    /// where none of them does on its own (prefix sums), so that every
+    /// load checks [`check_total`](Self::check_total), and every edit
+    /// [`check_splice`](Self::check_splice), before the weights reach the
+    /// index.
+    const CHECKS_TOTAL: bool = false;
+
+    /// Check that one column of `len` items can hold slabs of weights
+    /// `ws`. The default accepts any.
+    #[inline(always)]
+    fn check_total(_ws: &[Self::Weight], _len: usize) -> Result<(), PackError> {
+        Ok(())
+    }
+
+    /// Check that `index` can take `new` in place of the weights of slabs
+    /// `old`, leaving a column of `len` items; panic if not. The default
+    /// accepts any.
+    #[inline(always)]
+    fn check_splice<Idx: crate::index::IndexOps<Self::Weight>>(
+        _index: &Idx,
+        _old: Range<usize>,
+        _new: &[Self::Weight],
+        _len: usize,
+    ) {
+    }
 }
 
 /// Default weight strategy: BIT stores only slab lengths.
@@ -118,6 +242,7 @@ impl Sealed for LenWeight {}
 
 impl<T: ColumnValueRef, C: Codec> WeightFn<T, C> for LenWeight {
     type Weight = usize;
+    type Model = crate::weights::LenModel;
     #[inline]
     fn compute(slab: &Slab<TailOf<T, C>>) -> usize {
         slab.len
@@ -136,97 +261,7 @@ impl<T: ColumnValueRef, C: Codec> WeightFn<T, C> for LenWeight {
     }
 }
 
-// ── Fenwick tree helpers ─────────────────────────────────────────────────────
-
-/// Rebuild BIT from scratch. O(S).
-/// The BIT is 1-indexed: `bit\[0\]` is unused, `bit\[1..=n\]` holds the tree.
-///
-/// Generic over the slab type and weight: callers pass a closure that extracts
-/// the per-slab weight. `Column` passes `WF::compute`; other column types
-/// (e.g. the raw-byte arena) pass their own slab-length extractor.
-pub(crate) fn rebuild_bit<S, W: SlabWeight>(slabs: &[S], weight: impl Fn(&S) -> W) -> Vec<W> {
-    let n = slabs.len();
-    let mut bit = vec![W::default(); n + 1];
-    for i in 0..n {
-        bit[i + 1] = weight(&slabs[i]);
-    }
-    // Standard O(n) BIT construction: propagate to parent.
-    for i in 1..=n {
-        let parent = i + (i & i.wrapping_neg());
-        if parent <= n {
-            let child = bit[i].clone();
-            bit[parent] += child;
-        }
-    }
-    bit
-}
-
-/// Update the BIT at slab index `si` after a weight change. O(log S).
-///
-/// Subtracts the old weight and adds the new weight at every ancestor node.
-#[inline]
-pub(crate) fn bit_point_update<W: SlabWeight>(bit: &mut [W], si: usize, old: W, new: W) {
-    let mut i = si + 1; // BIT is 1-indexed
-    while i < bit.len() {
-        bit[i] -= old.clone();
-        bit[i] += new.clone();
-        i += i & i.wrapping_neg();
-    }
-}
-
-/// Walk the four slab boundaries around a recently-modified range and attempt
-/// to merge undersized neighbours.  The decision of *whether* two adjacent
-/// slabs can merge is column-specific (encoding-aware for RLE, byte-count-only
-/// for a raw arena); the caller passes `try_merge_pair(a, b)` which returns
-/// `true` if it actually merged slabs `a` and `b` (removing slab `b`).
-///
-/// Returns the adjusted range accounting for any merges that happened — the
-/// end shrinks by one for every merge that collapses two in-range slabs.
-pub(crate) fn try_merge_range_skeleton(
-    range: Range<usize>,
-    mut try_merge_pair: impl FnMut(usize, usize) -> bool,
-) -> Range<usize> {
-    let mut start = range.start;
-    let mut end = range.end;
-
-    if !range.is_empty() {
-        // Only three slabs of a rebuilt range can be undersized, so only
-        // the pairs around them are worth testing — a splice that spills
-        // a thousand slabs should not walk them.
-        //
-        //   [ edited | spill | spill | … | spill | partial ]
-        //
-        // The spills in the middle were cut at the segment budget, so
-        // they are full by construction. What can be short is the *first*
-        // slab (a delete shrank the one being edited), the *last spill*
-        // (it holds whatever was left over), and the *last* slab (one a
-        // cascading delete only partly consumed). `check_invariants`
-        // asserts the result globally, so a violation of that reasoning
-        // fails the fuzz rather than passing silently.
-        //
-        // Right end first: merging there shortens the range, and the left
-        // end's indices do not move.
-        if end >= start + 3 && try_merge_pair(end - 3, end - 2) {
-            end -= 1;
-        }
-        if end >= start + 2 && try_merge_pair(end - 2, end - 1) {
-            end -= 1;
-        }
-        // external right — keep merging outward
-        while try_merge_pair(end - 1, end) {}
-        // the edited slab against the first slab that follows it
-        if end >= start + 2 && try_merge_pair(start, start + 1) {
-            end -= 1;
-        }
-        // external left — keep merging outward
-        while start > 0 && try_merge_pair(start - 1, start) {
-            start -= 1;
-            end -= 1;
-        }
-    }
-
-    start..end
-}
+// ── Splice helpers ───────────────────────────────────────────────────────────
 
 /// Normalize any `RangeBounds` into a concrete `(start, end)` pair, with
 /// `max` standing in for an unbounded end.  Moved verbatim from the v0
@@ -240,12 +275,13 @@ pub(crate) fn normalize_range_max<R: std::ops::RangeBounds<usize>>(
     let start = match range.start_bound() {
         Bound::Unbounded => usize::MIN,
         Bound::Included(n) => *n,
-        Bound::Excluded(n) => *n - 1,
+        // past `usize::MAX` there are no items: saturating is exact
+        Bound::Excluded(n) => n.saturating_add(1),
     };
 
     let end = match range.end_bound() {
         Bound::Unbounded => max,
-        Bound::Included(n) => *n + 1,
+        Bound::Included(n) => n.saturating_add(1),
         Bound::Excluded(n) => *n,
     };
     if start > end {
@@ -295,38 +331,13 @@ pub(crate) fn splice_bytes(vec: &mut Vec<u8>, index: usize, del: usize, bytes: &
     vec[index..index + insert].copy_from_slice(bytes);
 }
 
-// Find slab containing logical index. Returns (slab_index, offset_within_slab). O(log S).
-// Uses binary lifting on the BIT.
-#[inline]
-pub(crate) fn find_slab_bit<W: SlabWeight>(bit: &[W], index: usize, n: usize) -> (usize, usize) {
-    if n == 0 {
-        return (0, 0);
-    }
-    let mut pos = 0usize;
-    let mut idx = 0usize;
-    let mut bit_k = 1;
-    while bit_k <= n {
-        bit_k <<= 1;
-    }
-    bit_k >>= 1;
-    while bit_k > 0 {
-        let next = idx + bit_k;
-        if next <= n && pos + bit[next].len() <= index {
-            pos += bit[next].len();
-            idx = next;
-        }
-        bit_k >>= 1;
-    }
-    (idx, index - pos)
-}
-
 // ── Iter ─────────────────────────────────────────────────────────────────────
 
 /// Object-safe view of a `Column` used by [`Iter`] for index-assisted
 /// slab lookups, independent of the column's `WF` / `Idx` parameters.
 pub(crate) trait ColumnRef<T: ColumnValueRef> {
+    fn len(&self) -> usize;
     fn find_slab(&self, index: usize) -> (usize, usize);
-    fn slab_data(&self, index: usize) -> &[u8];
     fn slab_start(&self, index: usize) -> usize;
 }
 
@@ -337,16 +348,17 @@ where
     WF: WeightFn<T, C>,
     Idx: ColumnIndex<WF::Weight>,
 {
+    fn len(&self) -> usize {
+        self.core.len()
+    }
+
     fn find_slab(&self, index: usize) -> (usize, usize) {
-        self.index.find_slab(index)
+        // verified (`IndexOps::ix_find`); the iterator's seeks rely on it
+        self.core.index().ix_find(index)
     }
 
     fn slab_start(&self, index: usize) -> usize {
         self.slab_start(index)
-    }
-
-    fn slab_data(&self, index: usize) -> &[u8] {
-        &self.slabs[index].data
     }
 }
 
@@ -359,24 +371,32 @@ where
 pub struct Iter<'a, T: ColumnValueRef, C: Codec = Leb128> {
     pub(crate) slabs: &'a [Slab<TailOf<T, C>>],
     pub(crate) col: Option<&'a dyn ColumnRef<T>>,
-    pub(crate) slab_idx: usize,
-    pub(crate) decoder: <T::Encoding<C> as ColumnEncoding>::Decoder<'a>,
-    pub(crate) items_left: usize,
-    pub(crate) slab_remaining: usize,
-    pub(crate) pos: usize,
+    /// The position and decoder, verified ([`crate::iter_core`]).
+    pub(crate) core: ICore<<T::Encoding<C> as ColumnEncoding>::Decoder<'a>>,
     pub(crate) counter: usize,
 }
+
+/// The decoders an iterator over a `Column<T, C>` opens.
+pub(crate) type Dx<T, C> = <<T as ColumnValueRef>::Encoding<C> as ColumnEncoding>::ReadModel;
+
+/// A column's verified load: the encoding's loader and the weights of
+/// its slabs.
+pub(crate) type LoadCoreOf<'a, T, C, WF> = LoadCore<
+    'a,
+    <<T as ColumnValueRef>::Encoding<C> as crate::edit::SlabEdit>::Model,
+    Dx<T, C>,
+    <WF as WeightFn<T, C>>::Weight,
+    <WF as WeightFn<T, C>>::Model,
+    <<T as ColumnValueRef>::Encoding<C> as crate::edit::SlabEdit>::Loader<'a>,
+>;
 
 impl<T: ColumnValueRef, C: Codec> Default for Iter<'_, T, C> {
     fn default() -> Self {
         Self {
             slabs: &[],
             col: None,
-            slab_idx: 0,
-            decoder: T::Encoding::<C>::decoder(&[]),
-            items_left: 0,
-            slab_remaining: 0,
-            pos: 0,
+            // verified (`ICore::empty`): well-formed over no slabs
+            core: ICore::empty::<Dx<T, C>>(),
             counter: 0,
         }
     }
@@ -385,62 +405,34 @@ impl<T: ColumnValueRef, C: Codec> Default for Iter<'_, T, C> {
 impl<'a, T: ColumnValueRef, C: Codec> Iterator for Iter<'a, T, C> {
     type Item = T::Get<'a>;
 
-    #[inline]
+    #[inline(always)]
     fn next(&mut self) -> Option<T::Get<'a>> {
-        if self.items_left == 0 {
+        // an iterator with nothing left (used up, or a default one) needs
+        // no call into the core, which would return `None` here unchanged
+        if self.core.items_left == 0 {
             return None;
         }
-        loop {
-            if let Some(v) = self.decoder.next() {
-                self.items_left -= 1;
-                self.slab_remaining -= 1;
-                self.pos += 1;
-                return Some(v);
-            }
-            self.slab_idx += 1;
-            if self.slab_idx >= self.slabs.len() {
-                self.items_left = 0;
-                return None;
-            }
-            self.slab_remaining = self.slabs[self.slab_idx].len;
-            self.decoder = T::Encoding::<C>::decoder(&self.slabs[self.slab_idx].data);
-        }
+        self.core.next::<Dx<T, C>>(self.slabs)
     }
 
     /// O(log S + runs_skipped) — uses the column's index for slab lookup.
     fn nth(&mut self, n: usize) -> Option<T::Get<'a>> {
-        if n >= self.items_left {
-            if self.items_left > 0 {
-                self.nth(self.items_left - 1);
-            }
-            return None;
-        }
-
-        // Fast path: target is within the current slab.
-        if n < self.slab_remaining {
-            self.items_left -= n + 1;
-            self.slab_remaining -= n + 1;
-            self.pos += n + 1;
-            return self.decoder.nth(n);
-        }
-
-        // Use the column's index for O(log S) slab lookup.
-        let target_pos = self.pos + n;
-        let col = self.col.unwrap();
-        let (si, offset) = col.find_slab(target_pos);
-        if !self.advance_to_slab(si, target_pos - offset) {
-            return None;
-        }
-        self.slab_remaining -= offset + 1;
-        self.items_left -= offset + 1;
-        self.pos += offset + 1;
-        debug_assert_eq!(self.pos, target_pos + 1);
-        self.decoder.nth(offset)
+        let col = self.col;
+        self.core
+            .nth::<Dx<T, C>, _, _>(self.slabs, n, &find_in(col), &start_in(col))
     }
 
     #[inline]
     fn size_hint(&self) -> (usize, Option<usize>) {
-        (self.items_left, Some(self.items_left))
+        // the window (`set_max`) can run past the column's end
+        let left = match self.col {
+            Some(col) => self
+                .core
+                .items_left
+                .min(col.len().saturating_sub(self.core.pos)),
+            None => 0,
+        };
+        (left, Some(left))
     }
 
     fn fold<B, F>(mut self, init: B, mut f: F) -> B
@@ -448,21 +440,15 @@ impl<'a, T: ColumnValueRef, C: Codec> Iterator for Iter<'a, T, C> {
         F: FnMut(B, Self::Item) -> B,
     {
         let mut acc = init;
-        while self.items_left > 0 {
-            if let Some(run) = self.decoder.next_run() {
-                let count = run.count.min(self.items_left);
-                for _ in 0..count {
-                    acc = f(acc, run.value);
+        while self.core.items_left > 0 {
+            let max = self.core.items_left;
+            match self.core.run_once::<Dx<T, C>>(self.slabs, max) {
+                Some(run) => {
+                    for _ in 0..run.count {
+                        acc = f(acc, run.value);
+                    }
                 }
-                self.items_left -= count;
-                self.slab_remaining = self.slab_remaining.saturating_sub(count);
-            } else {
-                self.slab_idx += 1;
-                if self.slab_idx >= self.slabs.len() {
-                    break;
-                }
-                self.decoder = T::Encoding::<C>::decoder(&self.slabs[self.slab_idx].data);
-                self.slab_remaining = self.slabs[self.slab_idx].len;
+                None => break,
             }
         }
         acc
@@ -480,8 +466,8 @@ impl<'a, T: ColumnValueRef, C: Codec> crate::encoding::RunSrc<'a, T> for Iter<'a
 impl<T: ColumnValueRef, C: Codec> std::fmt::Debug for Iter<'_, T, C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Iter")
-            .field("pos", &self.pos)
-            .field("items_left", &self.items_left)
+            .field("pos", &self.core.pos)
+            .field("items_left", &self.core.items_left)
             .finish()
     }
 }
@@ -491,11 +477,9 @@ impl<T: ColumnValueRef, C: Codec> Clone for Iter<'_, T, C> {
         Self {
             slabs: self.slabs,
             col: self.col,
-            slab_idx: self.slab_idx,
-            decoder: self.decoder.clone(),
-            items_left: self.items_left,
-            slab_remaining: self.slab_remaining,
-            pos: self.pos,
+            // verified (`ICore::dup`): the same in every way the
+            // specifications see
+            core: self.core.dup(),
             counter: self.counter,
         }
     }
@@ -508,30 +492,33 @@ impl<'a, T: ColumnValueRef, C: Codec> Iter<'a, T, C> {
     /// beyond the column length, the iterator will cleanly return `None`
     /// when it reaches the end of the data.
     pub fn set_max(&mut self, pos: usize) {
-        self.items_left = pos.saturating_sub(self.pos);
+        self.core.set_max::<Dx<T, C>>(self.slabs, pos);
     }
 
     /// Returns the index of the current slab.
     #[inline]
     pub fn get_slab(&self) -> usize {
-        self.slab_idx
+        self.core.slab_idx
     }
 
     /// Returns the index of the next item to be yielded.
     #[inline]
     pub fn pos(&self) -> usize {
-        self.pos
+        self.core.pos
     }
 
     #[inline]
     pub fn end_pos(&self) -> usize {
-        self.pos + self.items_left
+        self.core.pos + self.core.items_left
     }
 
+    /// Advance so that the next item is the one at `target`; at or past
+    /// it already, stay.
     pub fn advance_to(&mut self, target: usize) {
-        if target > self.pos {
-            self.nth(target - self.pos - 1);
-        }
+        let col = self.col;
+        // verified (`ICore::advance_to`)
+        self.core
+            .advance_to::<Dx<T, C>, _, _>(self.slabs, target, &find_in(col), &start_in(col));
     }
 
     /// Reposition the iterator window to `range`.
@@ -553,12 +540,24 @@ impl<'a, T: ColumnValueRef, C: Codec> Iter<'a, T, C> {
     /// assert_eq!(it.collect::<Vec<_>>(), vec![40]);
     /// ```
     pub fn shift(&mut self, range: Range<usize>) {
-        self.set_max(range.end);
-        self.advance_to(range.start);
+        let col = self.col;
+        // verified (`ICore::shift`): the iterator has left exactly the
+        // values in the window
+        self.core.shift::<Dx<T, C>, _, _>(
+            self.slabs,
+            range.start,
+            range.end,
+            &find_in(col),
+            &start_in(col),
+        );
     }
 
+    /// Move `amount` items on.
     pub fn advance_by(&mut self, amount: usize) {
-        self.advance_to(self.pos.saturating_add(amount))
+        let col = self.col;
+        // verified (`ICore::advance_by`)
+        self.core
+            .advance_by::<Dx<T, C>, _, _>(self.slabs, amount, &find_in(col), &start_in(col));
     }
 
     /// Returns the next run of identical values, merging across slab boundaries.
@@ -566,7 +565,9 @@ impl<'a, T: ColumnValueRef, C: Codec> Iter<'a, T, C> {
     /// For repeat runs, returns the full count. For literal runs, returns
     /// count=1 per value. Null runs return the null value with the full count.
     pub fn next_run(&mut self) -> Option<crate::Run<T::Get<'a>>> {
-        self.next_run_max(self.items_left)
+        // verified (`ICore::next_run`): as many equal values as the
+        // window has
+        self.core.next_run::<Dx<T, C>>(self.slabs)
     }
 
     /// Adapt into an iterator of [`Run`]s — the item shape
@@ -575,99 +576,115 @@ impl<'a, T: ColumnValueRef, C: Codec> Iter<'a, T, C> {
         Runs(self)
     }
 
-    pub(crate) fn next_run_max(&mut self, mut max: usize) -> Option<crate::Run<T::Get<'a>>> {
-        if max == 0 {
-            return None;
-        }
-        let run = loop {
-            let _max = self.items_left.min(self.slab_remaining).min(max);
-            if let Some(run) = self.decoder.next_run_max(_max) {
-                break run;
-            }
-            self.slab_idx += 1;
-            if self.slab_idx >= self.slabs.len() {
-                self.items_left = 0;
-                return None;
-            }
-            self.slab_remaining = self.slabs[self.slab_idx].len;
-            self.decoder = T::Encoding::<C>::decoder(&self.slabs[self.slab_idx].data);
-        };
-
-        let value = run.value;
-        let count = run.count;
-        max -= count;
-        self.items_left -= count;
-        self.slab_remaining -= count;
-        self.pos += count;
-        let mut total_count = count;
-
-        while self.slab_remaining == 0 && self.items_left > 0 {
-            self.slab_idx += 1;
-            if self.slab_idx >= self.slabs.len() {
-                break;
-            }
-            self.slab_remaining = self.slabs[self.slab_idx].len;
-            self.decoder = T::Encoding::<C>::decoder(&self.slabs[self.slab_idx].data);
-
-            let _max = self.items_left.min(self.slab_remaining).min(max);
-            if let Some(next_run) = self.decoder.next_run_max(_max) {
-                if next_run.value == value {
-                    let c = next_run.count;
-                    total_count += c;
-                    max -= c;
-                    self.items_left -= c;
-                    self.slab_remaining -= c;
-                    self.pos += c;
-                    continue;
-                } else {
-                    // Value doesn't match — reset decoder so the consumed
-                    // run can be re-read by subsequent calls.
-                    self.decoder = T::Encoding::<C>::decoder(&self.slabs[self.slab_idx].data);
-                }
-            }
-            break;
-        }
-
-        Some(crate::Run {
-            count: total_count,
-            value,
-        })
-    }
-
     /// Moves the iterator window to `range` and returns the item at `range.start`.
     ///
     /// # Panics
     ///
     /// Panics if `range.start < self.pos()`.
     pub fn shift_next(&mut self, range: Range<usize>) -> Option<T::Get<'a>> {
-        assert!(range.start >= self.pos);
-        self.set_max(range.end);
-        self.nth(range.start - self.pos)
+        assert!(range.start >= self.core.pos);
+        let col = self.col;
+        // verified (`ICore::shift_next`): the value at `range.start`, if
+        // the window holds one
+        self.core.shift_next::<Dx<T, C>, _, _>(
+            self.slabs,
+            range.start,
+            range.end,
+            &find_in(col),
+            &start_in(col),
+        )
     }
 
-    // Invariant: `pos >= self.pos`. This holds because iterators are
-    // always positioned at construction (see `iter_range` — even empty
-    // ranges seek), and every advance moves forward.
-    pub(crate) fn advance_to_slab(&mut self, si: usize, pos: usize) -> bool {
-        if si >= self.slabs.len() {
-            self.slab_idx = si;
-            self.pos = pos;
-            self.items_left = 0;
-            // else a later re-extend decodes items already passed
-            self.slab_remaining = 0;
-            self.decoder = T::Encoding::<C>::decoder(&[]);
-            false
-        } else {
-            debug_assert!(pos >= self.pos);
-            let skipped = pos - self.pos;
-            self.pos = pos;
-            self.slab_idx = si;
-            self.slab_remaining = self.slabs[si].len;
-            self.decoder = T::Encoding::<C>::decoder(&self.slabs[si].data);
-            self.items_left -= skipped;
-            true
-        }
+    /// The item at `pos`, moving past it; `None`, moving nowhere, if `pos`
+    /// is behind the iterator ([`Shiftable::seek_to`](crate::Shiftable::seek_to)).
+    pub(crate) fn seek_item(&mut self, pos: usize) -> Option<T::Get<'a>> {
+        let col = self.col;
+        // verified (`ICore::seek_to`)
+        self.core
+            .seek_to::<Dx<T, C>, _, _>(self.slabs, pos, &find_in(col), &start_in(col))
     }
+
+    /// [`Shiftable::shift_next`](crate::Shiftable::shift_next) for [`Runs`]: move the window to `range`
+    /// and give its first run.
+    pub(crate) fn shift_run(&mut self, range: Range<usize>) -> Option<crate::Run<T::Get<'a>>> {
+        let col = self.col;
+        // verified (`ICore::shift_run`)
+        self.core.shift_run::<Dx<T, C>, _, _>(
+            self.slabs,
+            range.start,
+            range.end,
+            &find_in(col),
+            &start_in(col),
+        )
+    }
+
+    /// [`Shiftable::seek_to`](crate::Shiftable::seek_to) for [`Runs`]: the run from `pos`.
+    pub(crate) fn seek_run(&mut self, pos: usize) -> Option<crate::Run<T::Get<'a>>> {
+        let col = self.col;
+        // verified (`ICore::seek_run`)
+        self.core
+            .seek_run::<Dx<T, C>, _, _>(self.slabs, pos, &find_in(col), &start_in(col))
+    }
+}
+
+/// The function [`Column::remap`] applies (`remap::Mapping`): to a run's
+/// value, owned, in the form the encoding's encoder appends. Nothing is
+/// assumed of what `f` gives.
+pub(crate) struct Remapping<'f, T, C, F>(pub(crate) &'f F, pub(crate) PhantomData<fn() -> (T, C)>);
+
+impl<'a, T, C, F>
+    crate::remap::Mapping<
+        T::Get<'a>,
+        <<T::Encoding<C> as crate::edit::SlabEdit>::Recoder<'a> as crate::remap::Encodes<
+            <T::Encoding<C> as crate::edit::SlabEdit>::Model,
+        >>::In,
+    > for Remapping<'_, T, C, F>
+where
+    T: ColumnValueRef,
+    C: Codec,
+    F: Fn(T) -> T,
+{
+    #[cfg(verus_keep_ghost)]
+    fn maps(
+        &self,
+        _v: T::Get<'a>,
+        _w: <<T::Encoding<C> as crate::edit::SlabEdit>::Recoder<'a> as crate::remap::Encodes<
+            <T::Encoding<C> as crate::edit::SlabEdit>::Model,
+        >>::In,
+    ) -> bool {
+        unimplemented!()
+    }
+
+    #[inline(always)]
+    fn apply(
+        &self,
+        v: T::Get<'a>,
+    ) -> <<T::Encoding<C> as crate::edit::SlabEdit>::Recoder<'a> as crate::remap::Encodes<
+        <T::Encoding<C> as crate::edit::SlabEdit>::Model,
+    >>::In {
+        <T::Encoding<C> as crate::edit::SlabEdit>::owned_in((self.0)(T::to_owned(v)))
+    }
+}
+
+/// The index lookup an iterator's long seeks take (`iter_core::lookups`):
+/// the column's, or for a default iterator, which has no column and no
+/// slabs, past the end.
+#[inline(always)]
+fn find_in<'a, T: ColumnValueRef>(
+    col: Option<&'a dyn ColumnRef<T>>,
+) -> impl Fn(usize) -> (usize, usize) + 'a {
+    move |t: usize| match col {
+        Some(col) => col.find_slab(t),
+        None => (0, t),
+    }
+}
+
+/// The items before each slab, for the lookups (`iter_core::lookups`).
+#[inline(always)]
+fn start_in<'a, T: ColumnValueRef>(
+    col: Option<&'a dyn ColumnRef<T>>,
+) -> impl Fn(usize) -> usize + 'a {
+    move |i: usize| col.map_or(0, |col| col.slab_start(i))
 }
 
 // ── copy_ranges support ─────────────────────────────────────────────────────
@@ -745,40 +762,18 @@ pub(crate) fn normalize_splices(
     splices: impl IntoIterator<Item = Splice>,
     src_len: usize,
     dst_len: usize,
-) -> Vec<Splice> {
-    let mut out: Vec<Splice> = Vec::new();
-    let mut src_pos = 0usize;
-    let mut dst_pos = 0usize;
-    for sp in splices {
-        assert!(
-            sp.pos >= dst_pos,
-            "destination regions must be ascending and non-overlapping"
-        );
-        assert!(sp.pos + sp.delete <= dst_len, "splice out of bounds");
-        assert!(
-            sp.range.start >= src_pos,
-            "src ranges must be ascending and non-overlapping"
-        );
-        dst_pos = sp.pos + sp.delete;
-        src_pos = src_pos.max(sp.range.end);
-        let start = sp.range.start.min(src_len);
-        let end = sp.range.end.min(src_len);
-        if end == start && sp.delete == 0 {
-            continue;
-        }
-        match out.last_mut() {
-            Some(last) if last.pos + last.delete == sp.pos && last.range.end == start => {
-                last.delete += sp.delete;
-                last.range.end = end;
-            }
-            _ => out.push(Splice {
-                pos: sp.pos,
-                delete: sp.delete,
-                range: start..end,
-            }),
-        }
+) -> Normalized {
+    // verified (`splices::normalize`): the list is normalized, and applied
+    // gives what the splices give one by one, which its type keeps
+    normalize(&mut splices.into_iter(), src_len, dst_len)
+}
+
+/// The splices a caller gives `copy_ranges`, from its iterator (glue).
+impl<I: Iterator<Item = Splice>> SpliceList for I {
+    #[inline(always)]
+    fn next_splice(&mut self) -> Option<Splice> {
+        self.next()
     }
-    out
 }
 
 // ── Runs ────────────────────────────────────────────────────────────────────
@@ -816,7 +811,8 @@ impl IterState {
     /// Restores the iterator position in any column.
     ///
     /// Returns [`PackError::InvalidResume`] if `column` was mutated since
-    /// [`Iter::suspend`].
+    /// [`Iter::suspend`], or if the position doesn't fit it (a state taken
+    /// from another column).
     pub fn try_resume<'a, T, C, WF, Idx>(
         &self,
         column: &'a Column<T, C, WF, Idx>,
@@ -827,39 +823,23 @@ impl IterState {
         WF: WeightFn<T, C>,
         Idx: ColumnIndex<WF::Weight>,
     {
-        if self.counter != column.counter {
+        if self.counter != column.core.counter() {
             return Err(PackError::InvalidResume);
         }
-        if self.num_slabs != column.slabs.len() {
+        if self.num_slabs != column.core.slabs().len() {
             return Err(PackError::InvalidResume);
         }
-        let slabs = &column.slabs[..];
-        if self.slab_idx >= slabs.len() {
-            return Ok(Iter {
-                slabs,
-                col: Some(column),
-                slab_idx: slabs.len(),
-                decoder: T::Encoding::<C>::decoder(&[]),
-                items_left: 0,
-                slab_remaining: 0,
-                pos: self.pos,
-                counter: self.counter,
-            });
-        }
-        let slab = &slabs[self.slab_idx];
-        let mut decoder = T::Encoding::<C>::decoder(&slab.data);
-        if self.slab_consumed > 0 {
-            decoder.nth(self.slab_consumed - 1);
-        }
-        let slab_remaining = slab.len - self.slab_consumed;
+        let slabs = column.core.slabs();
+        // verified (`ColumnCore::resume`): `Some` exactly when the state is a
+        // position of this column's slabs, the iterator then standing there
+        let core = column
+            .core
+            .resume::<Dx<T, C>>(self.slab_idx, self.slab_consumed, self.pos, self.items_left)
+            .ok_or(PackError::InvalidResume)?;
         Ok(Iter {
             slabs,
             col: Some(column),
-            slab_idx: self.slab_idx,
-            decoder,
-            items_left: self.items_left,
-            slab_remaining,
-            pos: self.pos,
+            core,
             counter: self.counter,
         })
     }
@@ -868,42 +848,33 @@ impl IterState {
 impl<'a, T: ColumnValueRef, C: Codec> Iter<'a, T, C> {
     /// Captures the current iterator position so it can be restored later.
     pub fn suspend(&self) -> IterState {
-        let slab_len = if self.slab_idx < self.slabs.len() {
-            self.slabs[self.slab_idx].len
-        } else {
-            0
-        };
+        // verified (`ICore::suspended`): a state that resumes, over the
+        // same slabs, to an iterator with the same values left
+        // (`ICore::lemma_resumed`)
+        let (slab_idx, slab_consumed, pos, items_left) =
+            self.core.suspended::<Dx<T, C>>(self.slabs);
         IterState {
             counter: self.counter,
             num_slabs: self.slabs.len(),
-            slab_idx: self.slab_idx,
-            pos: self.pos,
-            items_left: self.items_left,
-            slab_consumed: slab_len - self.slab_remaining,
+            slab_idx,
+            pos,
+            items_left,
+            slab_consumed,
         }
     }
 }
 
 impl<'a, T: ColumnValueRef, C: Codec> Iter<'a, T, C> {
-    /// Narrow the iterator window to the contiguous run of `value` within a
-    /// sorted range, returning that range.
-    ///
-    /// If the value is not found, returns an empty range at the insertion
-    /// point and the iterator is positioned past the search area.
-    ///
-    /// Assumes values within `range` are sorted.  If they aren't, the
-    /// result is unspecified — a wrong or empty range may be returned —
-    /// but never a panic, memory unsafety, or column corruption.
     /// Scan forward for the next occurrence of `target`.
     ///
     /// Unlike [`Self::seek_to_value`] the values need not be sorted —
     /// this is a find, walked run-at-a-time (for RLE data that is one
-    /// step per run, not per item). On a hit, returns `Some((pos,
-    /// value))` with the value consumed: iteration continues with the
-    /// item after it — so repeated calls walk successive occurrences,
-    /// including consecutive items inside one run, with no caller-side
-    /// run state. On a miss, returns `None` with the iterator at the
-    /// end of its window.
+    /// step per run, not per item). On a hit, returns `Some(pos)` with
+    /// the value consumed: iteration continues with the item after it —
+    /// so repeated calls walk successive occurrences, including
+    /// consecutive items inside one run, with no caller-side run state.
+    /// On a miss, returns `None` with the iterator at the end of its
+    /// window.
     pub fn scan_to_value<'t>(&mut self, target: T::Get<'t>) -> Option<usize> {
         let end = self.end_pos();
         let mut probe = self.clone();
@@ -923,6 +894,25 @@ impl<'a, T: ColumnValueRef, C: Codec> Iter<'a, T, C> {
         None
     }
 
+    /// Find the items equal to `target` within `range` of the window,
+    /// whose values are sorted, and move the iterator to the first of
+    /// them: returns their range, or, if there are none, the empty range
+    /// where `target` would go, with the iterator there. The window keeps
+    /// its end.
+    ///
+    /// Assumes values within `range` are sorted.  If they aren't, the
+    /// result is unspecified — a wrong or empty range may be returned —
+    /// but never a panic, memory unsafety, or column corruption.
+    ///
+    /// ```
+    /// let col = hexane::Column::<u64>::from_values(vec![1, 2, 4, 4, 5]);
+    /// let mut it = col.iter();
+    /// assert_eq!(it.seek_to_value(4, ..), 2..4);
+    /// assert_eq!(it.next(), Some(4));
+    /// let mut it = col.iter();
+    /// assert_eq!(it.seek_to_value(3, ..), 2..2);
+    /// assert_eq!((it.pos(), it.next()), (2, Some(4)));
+    /// ```
     pub fn seek_to_value<'t>(
         &mut self,
         target: T::Get<'t>,
@@ -935,7 +925,7 @@ impl<'a, T: ColumnValueRef, C: Codec> Iter<'a, T, C> {
         // the iterator cannot leave its window, so neither can the search
         let end = end.min(self.end_pos());
 
-        if start > self.pos {
+        if start > self.core.pos {
             self.advance_to(start);
         }
 
@@ -952,69 +942,17 @@ impl<'a, T: ColumnValueRef, C: Codec> Iter<'a, T, C> {
     where
         for<'x> T::Get<'x>: Ord,
     {
-        let col = self.col.unwrap();
-        let start = self.pos();
-        let end = self.end_pos();
-
-        let first_run = match self.next_run() {
-            Some(r) => r,
-            None => return start..start,
-        };
-        let si_start = self.get_slab();
-
+        let col = self.col;
         // the column's values and the caller's target have unrelated
         // borrow lifetimes; shorten both to compare
-        match T::shorten(&first_run.value).cmp(&T::shorten(&target)) {
-            Ordering::Equal => {
-                assert!(start + first_run.count <= end);
-                start..start + first_run.count
-            }
-            Ordering::Greater => start..start,
-            Ordering::Less => {
-                let (si_end, _) = col.find_slab(end - 1);
-
-                // Binary search slabs si_start+1..=si_end by first element.
-                let mut lo = si_start + 1;
-                let mut hi = si_end + 1;
-                let mut candidate = None;
-
-                while lo < hi {
-                    let mid = lo + (hi - lo) / 2;
-                    let mut dec = T::Encoding::<C>::decoder(col.slab_data(mid));
-                    let head = dec.next_run().unwrap();
-                    match T::shorten(&head.value).cmp(&T::shorten(&target)) {
-                        Ordering::Less => {
-                            candidate = Some(mid);
-                            lo = mid + 1;
-                        }
-                        // there is a possible optimization here where
-                        // if equal we can call tail(previous_slab)
-                        // but is tricky bc if it has 1 segment we may need to
-                        // keep stepping back
-                        Ordering::Greater | Ordering::Equal => hi = mid,
-                    }
-                }
-
-                // `candidate` is the last slab whose first element < target.
-                // The target (if present) is at the end of this slab.
-                if let Some(i) = candidate {
-                    let pos = col.slab_start(i);
-                    self.advance_to(pos);
-                };
-
-                let mut pos = self.pos();
-                while let Some(run) = self.next_run() {
-                    match T::shorten(&run.value).cmp(&T::shorten(&target)) {
-                        Ordering::Less => {
-                            pos += run.count;
-                        }
-                        Ordering::Greater => return pos..pos,
-                        Ordering::Equal => return pos..pos + run.count,
-                    }
-                }
-                pos..pos
-            }
-        }
+        let probe = Cmp(|v: &T::Get<'a>| T::shorten(v).cmp(&T::shorten(&target)));
+        let (start, end) = self.core.seek_value::<Dx<T, C>, _, _, _>(
+            self.slabs,
+            &probe,
+            &|t: usize| col.unwrap().find_slab(t),
+            &|i: usize| col.unwrap().slab_start(i),
+        );
+        start..end
     }
 }
 
@@ -1042,15 +980,21 @@ pub struct Column<
 > where
     Idx: ColumnIndex<WF::Weight>,
 {
-    pub(crate) slabs: Vec<Slab<TailOf<T, C>>>,
-    /// Per-slab aggregate index (B-tree by default, Fenwick BIT optional).
-    pub(crate) index: Idx,
-    pub(crate) total_len: usize,
-    pub(crate) max_segments: usize,
-    pub(crate) counter: usize,
+    /// The slabs, the per-slab index over them (B-tree by default,
+    /// Fenwick BIT optional) and the counts: always a column (verified,
+    /// [`crate::column_core`]).
+    pub(crate) core: CoreOf<T, C, WF, Idx>,
     #[allow(clippy::type_complexity)]
     _phantom: PhantomData<fn() -> (T, C, WF)>,
 }
+
+/// A `Column<T, C, WF, Idx>`'s state, as the verified core sees it.
+pub(crate) type CoreOf<T, C, WF, Idx> = ColumnCore<
+    <<T as ColumnValueRef>::Encoding<C> as crate::edit::SlabEdit>::Model,
+    <WF as WeightFn<T, C>>::Weight,
+    Idx,
+    <WF as WeightFn<T, C>>::Model,
+>;
 
 impl<T, C, WF, Idx> Clone for Column<T, C, WF, Idx>
 where
@@ -1061,11 +1005,7 @@ where
 {
     fn clone(&self) -> Self {
         Self {
-            slabs: self.slabs.clone(),
-            index: self.index.clone(),
-            total_len: self.total_len,
-            max_segments: self.max_segments,
-            counter: self.counter,
+            core: self.core.clone(),
             _phantom: PhantomData,
         }
     }
@@ -1080,8 +1020,8 @@ where
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Column")
-            .field("len", &self.total_len)
-            .field("slabs", &self.slabs.len())
+            .field("len", &self.core.len())
+            .field("slabs", &self.core.slabs().len())
             .finish()
     }
 }
@@ -1098,28 +1038,30 @@ where
     }
 }
 
-/// Call `f` for each gap between `splices`, with the source range to read
-/// and the position in the retained column it belongs at.
-///
-/// Positions are the copied ranges' running length: the rows a gap brings
-/// back land before the next copied range and do not move it.
-pub(crate) fn for_each_gap(
-    splices: &[Splice],
-    src_len: usize,
-    mut f: impl FnMut(usize, Range<usize>),
-) {
-    let mut end = 0;
-    let mut at = 0;
-    for sp in splices {
-        if sp.pos > end {
-            f(at, end..sp.pos);
-        }
-        end = sp.pos + sp.delete;
-        at += sp.range.len();
+/// Call `f(at, n)` for each run of rows to remove, back to front, from a
+/// column of `len` rows to keep only those in `splices`' ranges
+/// (normalized): the test helpers' `retain_ranges`.
+#[cfg(test)]
+pub(crate) fn for_each_cut(splices: &[Splice], len: usize, mut f: impl FnMut(usize, usize)) {
+    // verified (`splices::Cuts`): the cuts, made in turn, leave exactly the
+    // ranges' rows
+    let mut cuts = Cuts::of_len(splices, len);
+    while let Some((at, n)) = cuts.next(splices) {
+        f(at, n);
     }
-    if src_len > end {
-        f(at, end..src_len);
-    }
+}
+
+/// Splices copying `ranges`, for `retain_ranges`.
+#[cfg(test)]
+pub(crate) fn ranges_as_splices(ranges: &[Range<usize>]) -> Vec<Splice> {
+    ranges
+        .iter()
+        .map(|r| Splice {
+            pos: 0,
+            delete: 0,
+            range: r.clone(),
+        })
+        .collect()
 }
 
 impl<T, C, WF, Idx> Column<T, C, WF, Idx>
@@ -1138,13 +1080,10 @@ where
         // `slab.segments <= max_segments`, so budgets below 2 produce
         // columns that panic on their next mutation.  Reject up front
         // (same policy as `RawColumn::with_max_segments`).
-        assert!(max_segments >= 2, "max_segments must be at least 2");
         Self {
-            slabs: Vec::new(),
-            index: Idx::default(),
-            total_len: 0,
-            max_segments,
-            counter: 0,
+            // verified (`ColumnCore::new`): no slabs, and panics on a
+            // budget below 2
+            core: ColumnCore::new(max_segments),
             _phantom: PhantomData,
         }
     }
@@ -1191,18 +1130,20 @@ where
     {
         assert!(opts.max_segments >= 2, "max_segments must be at least 2");
         let fill = match (data.is_empty(), opts.length) {
-            (true, Some(len)) => opts.fill.fill_value().map(|value| (value, len)),
+            // a fill is one run, which holds at most `i64::MAX` items
+            // (`Column::fill`); past that, the empty data loads as it is
+            // and the length check rejects it
+            (true, Some(len)) if len <= i64::MAX as usize => {
+                opts.fill.fill_value().map(|value| (value, len))
+            }
             _ => None,
         };
         ColumnLoadIter {
-            iter: T::Encoding::<C>::load_iter(data, opts.max_segments),
+            core: LoadCore::start(data, opts.max_segments),
             fill,
             fill_emitted: false,
             length: opts.length,
             max_segments: opts.max_segments,
-            weights: Vec::new(),
-            cur_weight: WF::Weight::default(),
-            cur_emitted: 0,
             _phantom: PhantomData,
         }
     }
@@ -1226,49 +1167,63 @@ where
             );
             debug_assert!(s.segments <= max_segments);
         }
-        let total_len: usize = slabs.iter().map(|s| s.len).sum();
-        let index = Idx::from_weights(slabs.iter().map(WF::compute));
+        // verified (`ColumnCore::from_cut`), which also checks that the
+        // weights' total fits (a prefix column's sum)
+        Self::of_cut(slabs, max_segments)
+    }
+
+    /// The column `core` holds.
+    pub(crate) fn of_core(core: CoreOf<T, C, WF, Idx>) -> Self {
         Self {
-            slabs,
-            index,
-            total_len,
-            max_segments,
-            counter: 0,
+            core,
+            _phantom: PhantomData,
+        }
+    }
+
+    /// The column of the well-formed `slabs` a verified encoder or fill
+    /// cut (verified, `ColumnCore::from_cut`, which weighs them, checks
+    /// the weight model's domain and computes the index). Panics if the
+    /// items are more than an edit can count.
+    pub(crate) fn of_cut(slabs: Vec<Slab<TailOf<T, C>>>, max_segments: usize) -> Self {
+        Self {
+            core: ColumnCore::from_cut(slabs, max_segments),
             _phantom: PhantomData,
         }
     }
 
     /// Create a column of `len` copies of `value`.
     pub fn fill(len: usize, value: T::Get<'_>) -> Self {
+        Self::fill_with_max_segments(len, value, DEFAULT_MAX_SEG)
+    }
+
+    /// [`fill`](Self::fill), with the segment budget given.
+    pub(crate) fn fill_with_max_segments(
+        len: usize,
+        value: T::Get<'_>,
+        max_segments: usize,
+    ) -> Self {
+        // (the second bound only matters where `usize` is narrower)
         assert!(
-            len <= i64::MAX as usize,
+            len <= i64::MAX as usize && len < usize::MAX - 1,
             "fill length {len} is not encodable"
         );
         if len == 0 {
-            return Self::new();
+            return Self::with_max_segments(max_segments);
         }
-        let slab = T::Encoding::<C>::fill(len, value);
-        let index = Idx::from_weights(std::iter::once(WF::compute(&slab)));
-        Self {
-            slabs: vec![slab],
-            index,
-            total_len: len,
-            max_segments: DEFAULT_MAX_SEG,
-            counter: 0,
-            _phantom: PhantomData,
-        }
+        let slabs = vec![T::Encoding::<C>::fill(len, value)];
+        Self::of_cut(slabs, max_segments)
     }
 
     pub fn len(&self) -> usize {
-        self.total_len
+        self.core.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.total_len == 0
+        self.core.len() == 0
     }
 
     pub fn slab_count(&self) -> usize {
-        self.slabs.len()
+        self.core.slabs().len()
     }
 
     pub fn get(&self, index: usize) -> Option<T::Get<'_>> {
@@ -1284,7 +1239,21 @@ where
     where
         F: Fn(T) -> T,
     {
-        *self = T::Encoding::<C>::remap(self.iter(), self.max_segments, f);
+        let counter = self.core.counter();
+        // verified (`ColumnCore::remap`): the column of what `f` gives for
+        // each value, called once per run, re-encoded by the encoding's
+        // verified encoder with this column's segment budget, and checked
+        // as any built column is (`from_cut`: a prefix column's sum must
+        // fit)
+        let (core, _) = self
+            .core
+            .remap::<Dx<T, C>, <T::Encoding<C> as crate::edit::SlabEdit>::Recoder<'_>, _>(
+                &Remapping::<T, C, F>(&f, PhantomData),
+            );
+        *self = Self::of_core(core);
+        // a write like any other: iterators suspended before it can't
+        // resume (the rebuilt column's count starts again at 0)
+        self.core.set_counter(counter.wrapping_add(1));
     }
 
     /// Check the *structural* invariants of the slab vector and index —
@@ -1308,20 +1277,25 @@ where
     where
         WF::Weight: PartialEq + std::fmt::Debug,
     {
-        let max = self.max_segments;
+        let max = self.core.max_segments();
         let min = (max / 4).max(1);
-        if self.total_len == 0 {
+        if self.core.len() == 0 {
             // an empty column keeps one empty slab to land the next
             // splice in; more than that is a leak
             assert!(
-                self.slabs.len() <= 1,
+                self.core.slabs().len() <= 1,
                 "empty column holds {} slabs",
-                self.slabs.len()
+                self.core.slabs().len()
             );
             return;
         }
-        for (i, slab) in self.slabs.iter().enumerate() {
-            assert_ne!(slab.len, 0, "slab {i} of {} is empty", self.slabs.len());
+        for (i, slab) in self.core.slabs().iter().enumerate() {
+            assert_ne!(
+                slab.len,
+                0,
+                "slab {i} of {} is empty",
+                self.core.slabs().len()
+            );
             assert!(
                 slab.segments <= max || slab.segments == 1,
                 "slab {i} has {} segments, over the budget of {max} \
@@ -1333,8 +1307,11 @@ where
             assert_eq!(info.len, slab.len, "slab {i} cached len");
             assert_eq!(info.segments, slab.segments, "slab {i} cached segments");
         }
-        for i in 1..self.slabs.len() {
-            let (a, b) = (self.slabs[i - 1].segments, self.slabs[i].segments);
+        for i in 1..self.core.slabs().len() {
+            let (a, b) = (
+                self.core.slabs()[i - 1].segments,
+                self.core.slabs()[i].segments,
+            );
             assert!(
                 !((a < min || b < min) && a + b <= max),
                 "slabs {} and {i} ({a} and {b} segments) should have been merged \
@@ -1343,15 +1320,19 @@ where
             );
         }
         assert_eq!(
-            self.total_len,
-            self.slabs.iter().map(|s| s.len).sum::<usize>(),
+            self.core.len(),
+            self.core.slabs().iter().map(|s| s.len).sum::<usize>(),
             "total_len"
         );
-        assert_eq!(self.index.len(), self.slabs.len(), "index length");
+        assert_eq!(
+            self.core.index().len(),
+            self.core.slabs().len(),
+            "index length"
+        );
         let mut before = 0usize;
-        for (i, slab) in self.slabs.iter().enumerate() {
+        for (i, slab) in self.core.slabs().iter().enumerate() {
             assert_eq!(
-                self.index.items_before(i),
+                self.core.index().items_before(i),
                 before,
                 "index items_before({i})"
             );
@@ -1374,31 +1355,21 @@ where
 
     pub fn save_to(&self, out: &mut Vec<u8>) -> Range<usize> {
         let start = out.len();
-        if let Some(first) = self.slabs.first() {
-            out.extend_from_slice(&first.data);
-            let mut tail = first.tail;
-            let mut segments = first.segments;
-            let mut buf = Vec::new();
-            for s in &self.slabs[1..] {
-                let (new_seg, new_tail) =
-                    T::Encoding::<C>::do_merge(out, tail, segments, s, &mut buf);
-                segments = new_seg;
-                tail = new_tail;
-                buf.clear();
-            }
-        }
+        // verified with Verus: the canonical encoding of the slabs' values
+        T::Encoding::<C>::save_slabs(self.core.slabs(), self.core.len(), out);
         start..out.len()
     }
 
     pub fn iter(&self) -> Iter<'_, T, C> {
-        self.iter_range(0..self.total_len)
+        self.iter_range(0..self.core.len())
     }
 
     /// Iterator over items in `range`, clamped to the column's length.
     /// O(log S) seek via the index, O(1) per item after.
+    #[inline]
     pub fn iter_range(&self, range: Range<usize>) -> Iter<'_, T, C> {
-        let start = range.start.min(self.total_len);
-        let end = range.end.min(self.total_len).max(start);
+        let start = range.start.min(self.core.len());
+        let end = range.end.min(self.core.len()).max(start);
         // Even an empty range must leave the iterator *positioned* at
         // `start` (decoder and slab state valid): windows are routinely
         // re-extended later via `set_max`/`shift`, and an unpositioned
@@ -1406,32 +1377,15 @@ where
         // `advance_to_slab`'s forward invariant from `nth`. Only a
         // start at/past the end of the data — where there is nothing
         // to sit on — takes the unpositioned shortcut.
-        if start >= self.total_len || self.slabs.is_empty() {
-            return Iter {
-                slabs: &self.slabs,
-                col: Some(self),
-                slab_idx: self.slabs.len(),
-                decoder: T::Encoding::<C>::decoder(&[]),
-                items_left: 0,
-                slab_remaining: 0,
-                pos: start,
-                counter: self.counter,
-            };
-        }
-        let (si, offset) = self.index.find_slab(start);
-        let mut decoder = T::Encoding::<C>::decoder(&self.slabs[si].data);
-        if offset > 0 {
-            decoder.nth(offset - 1);
-        }
+        //
+        // verified (`ColumnCore::reader`): the iterator stands at `start`
+        // and gives exactly the column's values in `start..end`, from the
+        // column's type invariant
         Iter {
-            slabs: &self.slabs,
+            slabs: self.core.slabs(),
             col: Some(self),
-            slab_idx: si,
-            decoder,
-            items_left: end - start,
-            slab_remaining: self.slabs[si].len - offset,
-            pos: start,
-            counter: self.counter,
+            core: self.core.reader::<Dx<T, C>>(start, end),
+            counter: self.core.counter(),
         }
     }
 
@@ -1442,12 +1396,12 @@ where
 
     /// Returns `true` if the column is empty or every item equals `value`.
     pub fn is_only(&self, value: T::Get<'_>) -> bool {
-        self.total_len == 0
-            || self.slabs.iter().all(|s| {
+        self.core.len() == 0
+            || self.core.slabs().iter().all(|s| {
                 if s.len == 0 {
                     return true;
                 }
-                let mut dec = T::Encoding::<C>::decoder(&s.data);
+                let mut dec = T::Encoding::<C>::slab_decoder(&s.data, crate::sealed::Trusted(()));
                 match dec.next_run() {
                     Some(run) => {
                         run.count == s.len && T::eq(run.value, value) && dec.next_run().is_none()
@@ -1468,17 +1422,17 @@ where
     }
 
     pub fn slab_lens(&self) -> Vec<usize> {
-        self.slabs.iter().map(|s| s.len).collect()
+        self.core.slabs().iter().map(|s| s.len).collect()
     }
 
     pub fn slab_segments(&self) -> Vec<usize> {
-        self.slabs.iter().map(|s| s.segments).collect()
+        self.core.slabs().iter().map(|s| s.segments).collect()
     }
 
     pub fn dump_slabs(&self) {
         let mut offset = 0;
-        for (i, s) in self.slabs.iter().enumerate() {
-            let mut dec = T::Encoding::<C>::decoder(&s.data);
+        for (i, s) in self.core.slabs().iter().enumerate() {
+            let mut dec = T::Encoding::<C>::slab_decoder(&s.data, crate::sealed::Trusted(()));
             let first = dec.next_run();
             let last = T::Encoding::<C>::last_run(s);
             log!(
@@ -1495,7 +1449,8 @@ where
     /// Sum of slab lengths over `0..si`.  O(log S) via the index — used by
     /// `scope_to_value`'s slab binary search.
     fn slab_start(&self, si: usize) -> usize {
-        self.index.items_before(si)
+        // verified (`IndexOps::ix_before`); the value search relies on it
+        self.core.index().ix_before(si)
     }
 
     /// Narrow a range to the contiguous run of items matching `value`.
@@ -1515,7 +1470,7 @@ where
     where
         for<'x> T::Get<'x>: Ord,
     {
-        let (start, end) = normalize_range_max(range, self.total_len);
+        let (start, end) = normalize_range_max(range, self.core.len());
         let target = value.as_column_ref();
         self.iter_range(start..end).sorted_scan_to_value(target)
     }
@@ -1527,7 +1482,7 @@ where
     }
 
     pub fn remove(&mut self, index: usize) {
-        if index < self.total_len {
+        if index < self.core.len() {
             self.splice_inner::<T, _>(index, 1, std::iter::empty());
         }
     }
@@ -1547,20 +1502,20 @@ where
     }
 
     pub fn push(&mut self, value: impl AsColumnRef<T>) {
-        let len = self.total_len;
+        let len = self.core.len();
         self.splice_inner(len, 0, [(value, 1)]);
     }
 
     pub fn clear(&mut self) {
-        let len = self.total_len;
+        let len = self.core.len();
         if len > 0 {
             self.splice_inner::<T, _>(0, len, std::iter::empty());
         }
     }
 
     pub fn truncate(&mut self, len: usize) {
-        if len < self.total_len {
-            self.splice_inner::<T, _>(len, self.total_len - len, std::iter::empty());
+        if len < self.core.len() {
+            self.splice_inner::<T, _>(len, self.core.len() - len, std::iter::empty());
         }
     }
 
@@ -1600,58 +1555,41 @@ where
         for<'b> T::Get<'b>: AsColumnRef<T>,
     {
         let splices = normalize_splices(splices, src.len(), self.len());
-        if splices.is_empty() {
+        let list = splices.splices();
+        if list.is_empty() {
             return;
         }
-        let ranges: Vec<Range<usize>> = splices.iter().map(|sp| sp.range.clone()).collect();
-        let strategy = self.copy_strategy(&src, &ranges, splices.len());
+        let ranges: Vec<Range<usize>> = list.iter().map(|sp| sp.range.clone()).collect();
+        let strategy = self.copy_strategy(&src, &ranges, list.len());
         self.copy_splices_with(src, &splices, strategy);
     }
 
-    /// [`copy_ranges`](Self::copy_ranges) with the strategy pinned;
-    /// `splices` must already be normalized.
+    /// [`copy_ranges`](Self::copy_ranges) with the strategy pinned.
     pub(crate) fn copy_splices_with(
         &mut self,
         mut src: Self,
-        splices: &[Splice],
+        splices: &Normalized,
         strategy: CopyStrategy,
     ) where
         for<'b> T::Get<'b>: AsColumnRef<T>,
     {
-        use crate::shift::Shiftable;
-        match strategy {
-            CopyStrategy::Direct => {
-                // Two forward passes that never restart. The source
-                // ranges ascend and never overlap, so one iterator covers
-                // them; the splice positions ascend in the original
-                // coordinates a cursor seeks in, so one cursor covers
-                // those, and the ones landing in a slab share its rebuild.
-                let mut runs = src.iter().runs();
-                let mut e = self.edit();
-                for sp in splices {
-                    runs.shift(sp.range.clone());
-                    e.seek(sp.pos).delete(sp.delete).insert_runs(&mut runs);
-                }
-                e.finish();
-            }
-            CopyStrategy::Invert => {
-                // keep src's slabs: swap, drop the gaps (interior slabs
-                // undecoded), then splice the old column's kept
-                // segments in between the retained groups (deleted old
-                // rows simply never come back)
-                let old_len = self.len();
-                self.swap_contents(&mut src);
-                let ranges: Vec<Range<usize>> = splices.iter().map(|sp| sp.range.clone()).collect();
-                self.retain_ranges(&ranges);
-                let mut runs = src.iter().runs();
-                let mut e = self.edit();
-                for_each_gap(splices, old_len, |at, gap| {
-                    runs.shift(gap);
-                    e.seek(at).insert_runs(&mut runs);
-                });
-                e.finish();
-            }
-        }
+        // Direct: two forward passes that never restart. The source
+        // ranges ascend and never overlap, so one iterator covers them; the
+        // splice positions ascend in the original coordinates a cursor seeks
+        // in, so one cursor covers those, and the ones landing in a slab
+        // share its rebuild. Inverted: keep src's slabs (swap), drop the
+        // gaps (interior slabs undecoded), then splice the old column's
+        // kept segments in between the retained groups (deleted old rows
+        // simply never come back). Verified (`ColumnCore::copy`, from
+        // `copy::copy_direct` and `copy::copy_invert`): either way the
+        // column becomes `applied(dst, src, splices)`.
+        let mut f = |_: T::Get<'_>, _: usize| {};
+        self.core.copy::<Dx<T, C>, _>(
+            splices,
+            &mut src.core,
+            strategy == CopyStrategy::Invert,
+            &mut crate::cursor::Visiting::<T::Encoding<C>, _>::new(&mut f),
+        );
     }
 
     /// Decide direct vs inverted for [`copy_ranges`](Self::copy_ranges)
@@ -1663,47 +1601,13 @@ where
         ranges: &[Range<usize>],
         points: usize,
     ) -> CopyStrategy {
-        // Inverting keeps src's slabs, built under src's segment
-        // budget — only sound when the budgets match.
-        if self.max_segments != src.max_segments || src.slabs.len() < 8 {
-            return CopyStrategy::Direct;
-        }
-
-        let mut item_prefix = Vec::with_capacity(src.slabs.len() + 1);
-        let mut seg_prefix = Vec::with_capacity(src.slabs.len() + 1);
-        item_prefix.push(0usize);
-        seg_prefix.push(0usize);
-        for s in &src.slabs {
-            item_prefix.push(item_prefix.last().unwrap() + s.len);
-            seg_prefix.push(seg_prefix.last().unwrap() + s.segments);
-        }
-        let slab_of = |row: usize| item_prefix.partition_point(|&p| p <= row) - 1;
-
-        // Segments the direct path would decode + re-encode.
-        let mut retained_segs = 0usize;
-        for r in ranges {
-            let sa = slab_of(r.start);
-            let sb = slab_of(r.end - 1);
-            if sa == sb {
-                retained_segs += src.slabs[sa].segments;
-            } else {
-                retained_segs += src.slabs[sa].segments
-                    + src.slabs[sb].segments
-                    + (seg_prefix[sb] - seg_prefix[sa + 1]);
-            }
-        }
-
-        // Direct-path work also cuts a seam in self per insertion
-        // point.
-        let direct_cost = retained_segs + points * 2 * self.max_segments;
-
-        // Inverted-path work: re-encode all of self, boundary segments
-        // per gap seam and per insertion point, O(slabs) bookkeeping.
-        let dest_segs: usize = self.slabs.iter().map(|s| s.segments).sum();
-        let seam_segs = (ranges.len() + points) * 2 * self.max_segments;
-        let invert_cost = dest_segs + seam_segs + src.slabs.len();
-
-        if direct_cost > COPY_INVERT_FACTOR * invert_cost {
+        // verified (`ColumnCore::invert_pays`): runs without panicking or
+        // overflowing, and inverts only when the segment budgets match,
+        // since inverting keeps src's slabs, built under its budget
+        if self
+            .core
+            .invert_pays(&src.core, ranges, points, COPY_INVERT_FACTOR)
+        {
             CopyStrategy::Invert
         } else {
             CopyStrategy::Direct
@@ -1724,7 +1628,11 @@ where
     ) where
         for<'b> T::Get<'b>: AsColumnRef<T>,
     {
-        assert!(index + del <= self.len(), "splice range out of bounds");
+        // `index + del` could overflow
+        assert!(
+            index <= self.len() && del <= self.len() - index,
+            "splice range out of bounds"
+        );
         match strategy {
             CopyStrategy::Direct => {
                 use crate::shift::Shiftable;
@@ -1733,7 +1641,7 @@ where
             CopyStrategy::Invert => {
                 let old_len = self.len();
                 self.swap_contents(&mut src);
-                self.retain_ranges(&ranges);
+                self.retain_ranges(&ranges_as_splices(&ranges));
                 let retained = self.len();
                 if index > 0 {
                     self.splice_runs(0, 0, src.iter_range(0..index).runs());
@@ -1749,29 +1657,24 @@ where
         }
     }
 
-    /// Keep only the rows in `ranges` (normalized), deleting the gaps
-    /// back-to-front; interior slabs of a gap drop without decoding.
-    pub(crate) fn retain_ranges(&mut self, ranges: &[Range<usize>]) {
-        let mut end = self.len();
-        for r in ranges.iter().rev() {
-            if r.end < end {
-                self.remove_n(r.end, end - r.end);
-            }
-            end = r.start;
-        }
-        if end > 0 {
-            self.remove_n(0, end);
-        }
+    /// Keep only the rows in `splices`' ranges (normalized), deleting the
+    /// gaps back-to-front; interior slabs of a gap drop without decoding.
+    #[cfg(test)]
+    pub(crate) fn retain_ranges(&mut self, splices: &[Splice]) {
+        for_each_cut(splices, self.len(), |at, n| self.remove_n(at, n));
     }
 
     /// Swap contents with `other`, keeping this column's segment budget
     /// and bumping the counter past both so suspended iterators of
-    /// either column can't resume against the swapped data.
+    /// either column can't resume against the swapped data (as
+    /// `ColumnCore::copy` does for `copy_ranges`).
+    #[cfg(test)]
     pub(crate) fn swap_contents(&mut self, other: &mut Self) {
-        let counter = self.counter.max(other.counter) + 1;
+        let counter = self.core.counter().max(other.core.counter()) + 1;
         std::mem::swap(self, other);
-        std::mem::swap(&mut self.max_segments, &mut other.max_segments);
-        self.counter = counter;
+        // verified (`ColumnCore::swap_budgets`): each keeps its values
+        self.core.swap_budgets(&mut other.core);
+        self.core.set_counter(counter);
     }
 
     /// Returns the affected slab range (post-merge), mirroring
@@ -1785,34 +1688,14 @@ where
         V: AsColumnRef<T>,
         I: IntoIterator<Item = (V, usize)>,
     {
-        assert!(index + del <= self.total_len, "splice range out of bounds");
-        let mut e = self.edit_at(index);
-        e.delete(del);
-        for (v, n) in values {
-            e.insert_run(v, n);
-        }
-        e.finish();
-    }
-
-    fn try_merge(&mut self, index_a: usize, index_b: usize) -> bool {
-        let max = self.max_segments;
-        // clamped so that even at tiny max_segments a slab emptied by a
-        // deletion (0 segments) always merges away
-        let min = (self.max_segments / 4).max(1);
-        if let Some(a) = self.slabs.get(index_a).map(|s| s.segments) {
-            if let Some(b) = self.slabs.get(index_b).map(|s| s.segments) {
-                if (a < min || b < min) && a + b <= max {
-                    let slab_b = self.slabs.remove(index_b);
-                    T::Encoding::<C>::merge_slabs(&mut self.slabs[index_a], slab_b);
-                    return true;
-                }
-            }
-        }
-        false
-    }
-
-    pub(crate) fn try_merge_range(&mut self, range: Range<usize>) -> Range<usize> {
-        try_merge_range_skeleton(range, |a, b| self.try_merge(a, b))
+        // `index + del` could overflow
+        assert!(
+            index <= self.core.len() && del <= self.core.len() - index,
+            "splice range out of bounds"
+        );
+        // verified (`cursor::splice_feed`): the column's values become
+        // those before `index`, the runs, then those from `index + del`
+        self.splice_feed(index, del, values.into_iter());
     }
 }
 
@@ -1828,13 +1711,13 @@ where
     /// prefix-sum range covers `target`.  Passes through to
     /// `SlabBTree::find_by_value` on the inner index.
     pub fn find_by_value(&self, target: i64) -> FindByValue<'_> {
-        self.index.find_by_value(target)
+        self.core.index().find_by_value(target)
     }
 
     /// Iterator over `(slab_idx, items_before_slab)` for slabs whose
     /// prefix-sum range overlaps `[lo, hi]`.
     pub fn find_by_value_range(&self, lo: i64, hi: i64) -> FindByValueRange<'_> {
-        self.index.find_by_value_range(lo, hi)
+        self.core.index().find_by_value_range(lo, hi)
     }
 }
 
@@ -1858,20 +1741,15 @@ pub struct ColumnLoadIter<
     C: Codec,
     WF: WeightFn<T, C>,
 {
-    iter: <T::Encoding<C> as ColumnEncoding>::LoadIter<'a>,
+    /// the encoding's loader and the slab weights accumulated as its
+    /// runs stream past (verified: `load_core::LoadCore`)
+    core: LoadCoreOf<'a, T, C, WF>,
     /// engaged when the data was absent and the load options carried a
     /// fill: emit one run, write one slab
     fill: Option<(T::Get<'a>, usize)>,
     fill_emitted: bool,
     length: Option<usize>,
     max_segments: usize,
-    /// per-slab weights accumulated as runs stream past — only when
-    /// `WF::ACCUMULATES`, sparing `finalize` the `WF::compute` re-decode
-    weights: Vec<WF::Weight>,
-    /// weight of the slab currently being cut
-    cur_weight: WF::Weight,
-    /// items already attributed to the slab currently being cut
-    cur_emitted: usize,
     _phantom: PhantomData<(WF, Idx)>,
 }
 
@@ -1883,9 +1761,9 @@ where
     Idx: ColumnIndex<WF::Weight>,
 {
     /// The next canonical run, or `None` at end of input. A fill emits
-    /// its entire contents as one run.
+    /// its entire contents as one run. An error ends the load: later calls,
+    /// and [`finalize`](Self::finalize), return [`PackError::BadFormat`].
     pub fn try_next_run(&mut self) -> Result<Option<Run<T::Get<'a>>>, PackError> {
-        use crate::encoding::LoadIterApi;
         if let Some((value, len)) = self.fill {
             if self.fill_emitted || len == 0 {
                 return Ok(None);
@@ -1893,93 +1771,45 @@ where
             self.fill_emitted = true;
             return Ok(Some(Run { count: len, value }));
         }
-        let run = self.iter.try_next_run()?;
-        if WF::ACCUMULATES {
-            if let Some(run) = &run {
-                self.attribute(run.count, run.value)?;
-            }
-        }
-        Ok(run)
-    }
-
-    /// Attribute a pulled run's items to the current slab's weight.
-    /// Every run is exactly one wire segment (canonical input is
-    /// enforced by the loader), so a run never spans a slab boundary —
-    /// if this run's segment completed a slab, the cut landed at the
-    /// run's end and the weight closes with it.
-    fn attribute(&mut self, count: usize, value: T::Get<'a>) -> Result<(), PackError> {
-        use crate::encoding::LoadIterApi;
-        WF::accumulate_run(&mut self.cur_weight, count, value)?;
-        self.cur_emitted += count;
-        if self.weights.len() < self.iter.slabs_completed() {
-            debug_assert_eq!(
-                self.cur_emitted,
-                self.iter.completed_slab_len(self.weights.len())
-            );
-            self.weights.push(std::mem::take(&mut self.cur_weight));
-            self.cur_emitted = 0;
-        }
-        Ok(())
+        // verified: the run's items are attributed to the slab being cut,
+        // and an error ends the load
+        self.core.next_run()
     }
 
     /// Drain and validate whatever was not pulled, apply the length check
     /// from the load options, and return the finished column.
     pub fn finalize(self) -> Result<Column<T, C, WF, Idx>, PackError> {
-        self.finalize_with(|_| Ok(()))
+        self.finalize_in(i64::MIN, i64::MAX)
     }
 
-    /// Like [`finalize`](Self::finalize), but runs `check` over every
-    /// slab's weight (in column order) *before* any weight enters the
-    /// index — so callers can validate aggregates (e.g. delta domain
-    /// bounds) before they reach the index's merge arithmetic.
-    pub(crate) fn finalize_with(
-        mut self,
-        mut check: impl FnMut(&WF::Weight) -> Result<(), PackError>,
-    ) -> Result<Column<T, C, WF, Idx>, PackError> {
-        use crate::encoding::LoadIterApi;
+    /// [`finalize`](Self::finalize), with the weight model's load checks
+    /// given `lo..=hi`, the values' domain (a delta column's): verified,
+    /// with the column built from the loader's slabs and their weights
+    /// (`load_core::LoadCore::finish`).
+    pub(crate) fn finalize_in(self, lo: i64, hi: i64) -> Result<Column<T, C, WF, Idx>, PackError> {
         if let Some((value, len)) = self.fill {
             if len == 0 {
                 return Ok(Column::with_max_segments(self.max_segments));
             }
-            return Ok(Column::fill(len, value));
+            // the fill's one slab is `len` copies of `value`: it gets the
+            // checks a loaded slab's does
+            let slabs = vec![T::Encoding::<C>::fill(len, value)];
+            let ws = if <WF::Model as LoadWeigh<'a, _, Dx<T, C>, _>>::accumulates_exec() {
+                // verified: the weight of `len` copies of `value`
+                vec![crate::attrib::weigh_run::<_, _, WF::Model>(len, value)?]
+            } else {
+                vec![WF::compute(&slabs[0])]
+            };
+            <WF::Model as LoadWeigh<'a, _, Dx<T, C>, _>>::load_check(&ws, &slabs, len, lo, hi)?;
+            // `fill` makes one slab of at most two segments, within any
+            // budget `load_iter` accepts
+            return Ok(Column::of_cut(slabs, self.max_segments));
         }
-        if WF::ACCUMULATES {
-            // `iter.finalize()` below drains and validates whatever is
-            // left, but its fast discard loop never materializes runs —
-            // accumulating weights need every run to pass through
-            // `attribute`, so eat the tail here first (the finalize
-            // below then only flushes the last slab)
-            while self.try_next_run()?.is_some() {}
-        }
-        let slabs = self.iter.finalize()?;
-        let total_len: usize = slabs.iter().map(|s| s.len).sum();
-        if let Some(expected) = self.length {
-            if total_len != expected {
-                return Err(PackError::InvalidLength(total_len, expected));
-            }
-        }
-        let weights: Vec<WF::Weight> = if WF::ACCUMULATES {
-            let mut weights = self.weights;
-            // the final slab is only cut by `finalize` itself; whatever is
-            // not yet attributed to a closed slab belongs to it
-            if weights.len() < slabs.len() {
-                weights.push(self.cur_weight);
-            }
-            debug_assert_eq!(weights.len(), slabs.len());
-            weights
-        } else {
-            slabs.iter().map(WF::compute).collect()
-        };
-        for w in &weights {
-            check(w)?;
-        }
-        let index = Idx::from_weights(weights);
+        let core = self
+            .core
+            .finish::<Idx>(self.max_segments, self.length, lo, hi)?;
         Ok(Column {
-            slabs,
-            index,
-            total_len,
-            max_segments: self.max_segments,
-            counter: 0,
+            core,
             _phantom: PhantomData,
         })
     }
@@ -2014,7 +1844,7 @@ where
     Idx: ColumnIndex<WF::Weight>,
 {
     fn extend<I: IntoIterator<Item = V>>(&mut self, iter: I) {
-        let len = self.total_len;
+        let len = self.core.len();
         self.splice_inner(len, 0, iter.into_iter().map(|v| (v, 1)));
     }
 }
@@ -2480,71 +2310,6 @@ mod edit_fuzz {
                 );
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod merge_skeleton {
-    use super::try_merge_range_skeleton;
-
-    /// Merge the pair when either side is under `min` and the two fit —
-    /// `Column::try_merge`'s rule, over a list of segment counts.
-    fn walk(segs: &mut Vec<usize>, range: std::ops::Range<usize>, min: usize, max: usize) {
-        try_merge_range_skeleton(range, |a, b| {
-            if b >= segs.len() {
-                return false;
-            }
-            if (segs[a] < min || segs[b] < min) && segs[a] + segs[b] <= max {
-                segs[a] += segs[b];
-                segs.remove(b);
-                return true;
-            }
-            false
-        });
-    }
-
-    /// The undersized slab is in the middle of the range, which is where
-    /// a rebuild that spills and then cascades a delete puts it.
-    #[test]
-    fn merges_an_interior_pair() {
-        let mut segs = vec![8, 4, 1, 8];
-        walk(&mut segs, 0..4, 2, 8);
-        assert_eq!(segs, vec![8, 5, 8]);
-    }
-
-    /// The last spill and the partly-consumed slab both short: the merge
-    /// walks from the right end, so the second pair sees the first's
-    /// result.
-    #[test]
-    fn merges_both_short_slabs_at_the_right_end() {
-        let mut segs = vec![8, 4, 1, 1];
-        walk(&mut segs, 0..4, 2, 8);
-        assert_eq!(segs, vec![8, 6]);
-    }
-
-    /// Merging outward, past the right end of the range.
-    #[test]
-    fn merges_past_the_right_end() {
-        let mut segs = vec![3, 1, 3];
-        walk(&mut segs, 1..2, 2, 8);
-        assert_eq!(segs, vec![3, 4]);
-    }
-
-    /// And past the left end.
-    #[test]
-    fn merges_past_the_left_end() {
-        let mut segs = vec![1, 3, 5];
-        walk(&mut segs, 1..2, 2, 8);
-        assert_eq!(segs, vec![4, 5]);
-    }
-
-    /// Neighbours too big to absorb an undersized slab are left alone —
-    /// merging is bounded by the budget, not obligatory.
-    #[test]
-    fn leaves_a_pair_that_would_overflow() {
-        let mut segs = vec![8, 1, 8];
-        walk(&mut segs, 1..2, 2, 8);
-        assert_eq!(segs, vec![8, 1, 8]);
     }
 }
 
