@@ -1486,8 +1486,23 @@ impl Automerge {
     ) -> Result<Vec<ChangeHash>, AutomergeError> {
         // TODO: Make this fallible and figure out how to do this transactionally
         let changes = self.get_changes_added(other);
+
+        let fragments = if changes.is_empty() {
+            Vec::new()
+        } else {
+            let incoming_hashes = changes.iter().map(Change::hash).collect::<HashSet<_>>();
+            let heads = other.get_heads();
+
+            let mut fragments: Vec<_> = other
+                .change_graph
+                .fragments_filtered(&heads, .., |head| incoming_hashes.contains(head))
+                .collect();
+            fragments.reverse();
+            fragments
+        };
+
         tracing::trace!(changes=?changes.iter().map(|c| c.hash()).collect::<Vec<_>>(), "merging new changes");
-        self.apply_changes_log_patches(changes, patch_log)?;
+        self.apply_changes_with_fragments_log_patches(changes, fragments, patch_log)?;
         Ok(self.get_heads())
     }
 

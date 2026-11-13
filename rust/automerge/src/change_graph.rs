@@ -593,12 +593,22 @@ impl ChangeGraph {
         heads: &'a [ChangeHash],
         levels: R,
     ) -> impl Iterator<Item = Fragment> + 'a {
+        self.fragments_filtered(heads, levels, |_| true)
+    }
+
+    pub(crate) fn fragments_filtered<'a, R: RangeBounds<usize> + 'a>(
+        &'a self,
+        heads: &'a [ChangeHash],
+        levels: R,
+        include_head: impl Fn(&ChangeHash) -> bool + Copy + 'a,
+    ) -> impl Iterator<Item = Fragment> + 'a {
         let heads = if levels.contains(&0) { heads } else { &[] };
-        self.loose_fragments(heads).chain(
+        self.loose_fragments(heads, include_head).chain(
             self.fragments
                 .iter()
                 .rev()
                 .filter(move |f| levels.contains(&self.hashes[f.head.0 as usize].fragment_level()))
+                .filter(move |f| include_head(&self.hashes[f.head.0 as usize]))
                 .map(|f| f.export(self)),
         )
     }
@@ -606,12 +616,14 @@ impl ChangeGraph {
     fn loose_fragments<'a>(
         &'a self,
         heads: &'a [ChangeHash],
+        include_head: impl Fn(&ChangeHash) -> bool + Copy + 'a,
     ) -> impl Iterator<Item = Fragment> + 'a {
         let nodes = heads
             .iter()
             .filter(|h| h.fragment_level() == 0)
             .filter_map(|h| self.nodes_by_hash.get(h).copied());
         self.bfs_until_clock(nodes, &self.fragment_top)
+            .filter(move |n| include_head(&self.hashes[n.0 as usize]))
             .filter_map(|n| self.loose_commit(n))
     }
 
@@ -1122,6 +1134,8 @@ mod tests {
     use rand::RngExt;
 
     use super::*;
+
+    mod filtered;
 
     #[test]
     fn clock_by_heads() {
