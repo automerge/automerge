@@ -126,7 +126,7 @@ impl<'a, T: RleValue, V: AsColumnRef<T>, C: Codec> WriteOps<'a> for WOps<T, V, C
 
     #[inline(always)]
     fn put_unsigned(n: u64, buf: &mut Vec<u8>) {
-        buf.extend(C::encode_unsigned(n));
+        C::put_unsigned(n, buf);
     }
 
     #[inline(always)]

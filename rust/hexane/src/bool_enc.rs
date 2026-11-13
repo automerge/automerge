@@ -125,6 +125,35 @@ impl BEnc {
         self.cur_value = !self.cur_value;
     }
 
+    /// `append` of `n` copies of the current run's value: the run grows,
+    /// and nothing is written.
+    #[inline(always)]
+    pub(crate) fn extend(&mut self, n: usize)
+        requires
+            old(self).inv(),
+            n <= usize::MAX - 3 - old(self).len,
+        ensures
+            final(self).inv(), final(self).before@ == old(self).before@,
+            final(self).vals@ == old(self).vals@ + run_of(n as nat, old(self).cur_value),
+            final(self).cs@ == old(self).cs@, final(self).clean@ == old(self).clean@,
+            final(self).segments == old(self).segments, final(self).cur_value == old(self).cur_value,
+            final(self).len == old(self).len + n,
+            final(self).cur_count > 0 || (n == 0 && old(self).cur_count == 0),
+    {
+        proof {
+            lemma_vals_len(self.cs@, 0);
+        }
+        self.cur_count = self.cur_count + n;
+        self.len = self.len + n;
+        proof {
+            let v0 = self.vals@;
+            self.vals = Ghost(v0 + run_of(n as nat, self.cur_value));
+            assert(run_of(old(self).cur_count as nat, self.cur_value) + run_of(n as nat, self.cur_value)
+                =~= run_of(self.cur_count as nat, self.cur_value));
+            assert(self.vals@ =~= vals_at(self.cs@, 0) + run_of(self.cur_count as nat, self.cur_value));
+        }
+    }
+
     /// Append `n` copies of `value`.
     #[inline(always)]
     pub(crate) fn append<K: CountOps>(&mut self, buf: &mut Vec<u8>, value: bool, n: usize)
@@ -476,9 +505,30 @@ impl BEncoder {
         }
     }
 
-    /// Append `n` copies of `value`.
-    #[inline]
+    /// Append `n` copies of `value`. Most appends extend the current run,
+    /// which writes nothing and cuts no slab (`maybe_cut` cuts only where a
+    /// run ends): that is taken inline, and the rest out of line.
+    #[inline(always)]
     pub(crate) fn append<K: CountOps>(&mut self, value: bool, n: usize)
+        requires old(self).inv::<K>(),
+        ensures
+            final(self).inv::<K>(), final(self).values::<K>() == old(self).values::<K>() + run_of(n as nat, value),
+            final(self).state.len == old(self).state.len + n,
+    {
+        if value == self.state.cur_value && n <= usize::MAX - 3 - self.state.len {
+            self.state.extend(n);
+            proof {
+                assert(self.values::<K>() =~= old(self).values::<K>() + run_of(n as nat, value));
+            }
+            return;
+        }
+        self.append_slow::<K>(value, n);
+    }
+
+    /// `append`, where the value starts a run (or the count would not
+    /// fit, which panics).
+    #[inline(never)]
+    fn append_slow<K: CountOps>(&mut self, value: bool, n: usize)
         requires old(self).inv::<K>(),
         ensures
             final(self).inv::<K>(), final(self).values::<K>() == old(self).values::<K>() + run_of(n as nat, value),

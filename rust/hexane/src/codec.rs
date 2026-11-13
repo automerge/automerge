@@ -196,6 +196,22 @@ pub trait Codec: std::fmt::Debug + 'static {
         Self::encode_unsigned(n as u64)
     }
 
+    /// Append the encoding of an unsigned integer to `out`: what
+    /// [`encode_unsigned`](Self::encode_unsigned) gives, without the
+    /// buffer in between where a codec can do better.
+    #[inline(always)]
+    fn put_unsigned(n: u64, out: &mut Vec<u8>) {
+        out.extend(Self::encode_unsigned(n));
+    }
+
+    /// Append the encoding of a count to `out`: what
+    /// [`encode_count`](Self::encode_count) gives, without the buffer in
+    /// between where a codec can do better.
+    #[inline(always)]
+    fn put_count(n: usize, out: &mut Vec<u8>) {
+        out.extend(Self::encode_count(n));
+    }
+
     /// Decode one unsigned count as `usize`.
     #[inline]
     fn read_count(data: &[u8]) -> Option<(usize, usize)> {
@@ -250,6 +266,16 @@ impl Codec for Leb128 {
     #[inline(always)]
     fn encode_unsigned(n: u64) -> VarBuf {
         leb128_codec::encode(n).into()
+    }
+
+    #[inline(always)]
+    fn put_unsigned(n: u64, out: &mut Vec<u8>) {
+        leb128_codec::put::encode_to(n, out)
+    }
+
+    #[inline(always)]
+    fn put_count(n: usize, out: &mut Vec<u8>) {
+        leb128_codec::put::encode_to(n as u64, out)
     }
 
     #[inline(always)]

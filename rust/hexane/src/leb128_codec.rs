@@ -1092,3 +1092,35 @@ impl core::fmt::Display for DecodeError {
 }
 
 impl std::error::Error for DecodeError {}
+
+/// Writing an encoding straight into a `Vec`, apart so that the `Vec`
+/// specifications it uses stay out of the format's proofs.
+pub mod put {
+    use super::encode;
+    #[cfg(verus_keep_ghost)]
+    use super::spec_encode;
+    #[allow(unused_imports)]
+    use vstd::prelude::*;
+
+    verus! {
+
+    /// Appends `value`'s unsigned LEB128 encoding to `out`. A value under
+    /// 128, as most run counts are, is its own single byte, pushed directly.
+    #[inline(always)]
+    pub fn encode_to(value: u64, out: &mut Vec<u8>)
+        ensures
+            final(out)@ == old(out)@ + spec_encode(value as nat),
+    {
+        if value < 0x80 {
+            out.push(value as u8);
+            proof {
+                assert(out@ =~= old(out)@ + spec_encode(value as nat));
+            }
+            return;
+        }
+        let e = encode(value);
+        out.extend_from_slice(e.as_slice());
+    }
+
+        } // verus!
+}

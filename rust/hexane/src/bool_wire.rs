@@ -2355,7 +2355,7 @@ impl<C: crate::Codec> CountOps for Counts<C> {
 
     #[inline(always)]
     fn put_count(n: usize, buf: &mut Vec<u8>) {
-        buf.extend(C::encode_count(n));
+        C::put_count(n, buf);
     }
 
     #[inline(always)]
