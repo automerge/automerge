@@ -303,18 +303,35 @@ impl<T: DeltaValue, C: crate::Codec + Debug> Shiftable for crate::delta::DeltaRu
     }
 }
 
+/// A [`Shiftable`] iterator that gives an item per value, each at one
+/// position: the column iterators ([`Iter`], [`PrefixIter`],
+/// [`DeltaIter`]), but not the run adapters ([`Runs`](crate::Runs),
+/// [`DeltaRuns`](crate::DeltaRuns)), whose items stand for whole runs.
+/// [`Unshift::shift`] needs one: it takes its lookahead's position to be
+/// the one just before the inner iterator's.
+///
+/// ```compile_fail
+/// use hexane::{Column, Unshift};
+///
+/// let col = Column::<u64>::from_values(vec![7, 7, 7, 9, 9]);
+/// let mut u = Unshift::new(col.iter().runs());
+/// u.shift(2..5); // a run adapter is not `ItemPerValue`
+/// ```
+pub trait ItemPerValue: Shiftable {}
+
+impl<T: ColumnValueRef> ItemPerValue for Iter<'_, T> {}
+
+impl<T: PrefixValue> ItemPerValue for PrefixIter<'_, T> {}
+
+impl<T: DeltaValue> ItemPerValue for DeltaIter<'_, T> {}
+
 /// An iterator with its lookahead already pulled.
 ///
 /// `new` immediately draws the first item, so [`Self::peek`] is free
 /// and needs no `&mut`. [`Self::shift`] repositions the inner
 /// [`Shiftable`] iterator and refills the lookahead from the start of
-/// the new range.
-///
-/// The inner iterator must give an item per value, as the column
-/// iterators do, and not a run adapter (`Runs`, `DeltaRuns`): over one,
-/// `shift` to a range starting inside the lookahead run keeps the whole
-/// run, though it starts before the range, and one starting at the run's
-/// own start panics.
+/// the new range; it needs an inner iterator that gives an item per value
+/// ([`ItemPerValue`]).
 #[derive(Clone, Debug)]
 pub struct Unshift<T: Iterator> {
     inner: T,
@@ -348,7 +365,7 @@ impl<T: Iterator> Unshift<T> {
     }
 }
 
-impl<T: Shiftable + Iterator> Unshift<T> {
+impl<T: ItemPerValue> Unshift<T> {
     /// Reposition to `range`: the lookahead becomes the item at
     /// `range.start`, and iteration stops at `range.end`. The range may
     /// start at the lookahead's own item, which is then kept (hidden while
@@ -386,9 +403,10 @@ impl<T: Iterator> Iterator for Unshift<T> {
 /// Every iterator, as the adapters see it (`window::Stream`): trusted to
 /// give items that each stand for one or more values at consecutive
 /// positions of a fixed sequence (a run adapter's item for its run), and
-/// `nth(n)` to be `n + 1` calls to `next`. Whether each item stands for
-/// itself alone (`unit`) is the caller's to know: `Unshift` and
-/// `Shiftable`'s provided moves need it.
+/// `nth(n)` to be `n + 1` calls to `next`. That each item stands for
+/// itself alone (`unit`) is trusted where `Unshift::shift` needs it, of
+/// every [`ItemPerValue`] iterator, and where `Shiftable`'s provided moves
+/// need it, of every `Shiftable` that keeps them.
 impl<I: Iterator + ?Sized> Stream for I {
     type Item = I::Item;
 

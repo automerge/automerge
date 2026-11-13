@@ -15,21 +15,20 @@
 //! the methods every implementation gives (`get_pos`, `get_max`,
 //! `set_max`, `next`, `nth`), for unit iterators (`shift` for any);
 //! `Ranges`, over any iterator, run adapters included, which gives what
-//! stands for the values of each range in turn; and `Unshift`, over a
-//! unit iterator, which gives its lookahead and then what its inner
-//! iterator has left, and after `shift(range)` exactly the values in
-//! `range`.
+//! stands for the values of each range in turn; and `Unshift`, which
+//! gives its lookahead and then what its inner iterator has left, and,
+//! over a unit iterator (`ItemPerValue`), after `shift(range)` exactly
+//! the values in `range`.
 //!
 //! Trusted: that every iterator keeps the contract (`Stream`, `Window`;
 //! implemented in `shift` for every `Iterator` and every `Shiftable`),
-//! and that an `Unshift`'s inner iterator, and a `Shiftable` that keeps
-//! the provided moves, is unit. The crate's own iterators move by their
-//! verified cores (`ICore::shift` and the prefix and delta versions),
-//! whose specifications are the contract's, and the run adapters by
-//! theirs (`ICore::shift_run`, `diter::d_shift_run`). An `Unshift` over a
-//! run adapter is not unit, and its `shift` gives wrong results there: it
-//! keeps a lookahead run whose last value is at `range.start`, though
-//! the run starts before it.
+//! and is unit where it is `ItemPerValue` (what `Unshift::shift`
+//! requires) or a `Shiftable` that keeps the provided moves. The crate's
+//! own iterators move by their verified cores (`ICore::shift` and the
+//! prefix and delta versions), whose specifications are the contract's,
+//! and the run adapters by theirs (`ICore::shift_run`,
+//! `diter::d_shift_run`); the run adapters are not `ItemPerValue`, so an
+//! `Unshift` over one cannot be shifted.
 
 #[cfg(verus_keep_ghost)]
 use crate::cursor::lemma_concat_append;
@@ -592,60 +591,84 @@ pub(crate) fn ranges_next<W: Window, L: RangeList>(w: &mut W, l: &mut L) -> (r: 
 
 // ── Unshift ────────────────────────────────────────────────────────────────
 
-/// What an `Unshift` gives: its lookahead, then what its inner iterator
-/// has left; nothing while hidden.
+/// What an `Unshift` gives: its lookahead, then the items its inner
+/// iterator has left; nothing while hidden.
 pub(crate) open spec fn u_left<S: Stream>(inner: S, next: Option<S::Item>, hidden: bool) -> Seq<S::Item> {
     if hidden {
         Seq::empty()
     } else {
         match next {
-            Some(x) => seq![x] + inner.left(),
+            Some(x) => seq![x] + inner.items(),
             None => Seq::empty(),
         }
     }
 }
 
-/// An `Unshift`'s invariant: its lookahead is the value just before its
-/// inner iterator's position; with none, the inner iterator has nothing
-/// left; and only a lookahead is hidden.
+/// An `Unshift`'s invariant: its lookahead stands for the values just
+/// before its inner iterator's position; with none, the inner iterator
+/// has nothing left; and only a lookahead is hidden.
 pub(crate) open spec fn u_inv<S: Stream>(inner: S, next: Option<S::Item>, hidden: bool) -> bool {
-    &&& next matches Some(x) ==> 1 <= inner.at() <= inner.vals().len() && x == inner.vals()[inner.at() - 1]
-    &&& next is None ==> inner.left().len() == 0
+    &&& next matches Some(x) ==> {
+        let n = S::spans(x).len() as int;
+        &&& 0 < n <= inner.at() <= inner.vals().len()
+        &&& S::spans(x) == inner.vals().subrange(inner.at() - n, inner.at())
+    }
+    &&& next is None ==> inner.items().len() == 0
     &&& hidden ==> next is Some
 }
 
-/// `Unshift::new`: pull the first value as the lookahead.
-pub(crate) fn u_new<S: Stream>(inner: &mut S) -> (next: Option<S::Item>)
+/// An iterator's first item stands for the values from its position on.
+proof fn lemma_first<S: Stream>(s: S)
     requires
-        S::unit(),
+        s.items().len() > 0,
+    ensures
+        ({
+            let n = S::spans(s.items()[0]).len() as int;
+            &&& 0 < n
+            &&& 0 <= s.at()
+            &&& s.at() + n <= s.vals().len()
+            &&& S::spans(s.items()[0]) == s.vals().subrange(s.at(), s.at() + n)
+        }),
+{
+    s.lemma_items();
+    s.lemma_left();
+    lemma_flat_first::<S>(s.items());
+    let x = s.items()[0];
+    assert(S::spans(x) =~= s.vals().subrange(s.at(), s.at() + S::spans(x).len())) by {
+        assert forall|k: int| 0 <= k < S::spans(x).len() implies S::spans(x)[k] == s.vals()[s.at() + k] by {
+            assert(s.left()[k] == S::spans(x)[k]);
+        }
+    }
+}
+
+/// `Unshift::new`: pull the first item as the lookahead.
+pub(crate) fn u_new<S: Stream>(inner: &mut S) -> (next: Option<S::Item>)
     ensures
         final(inner).vals() == old(inner).vals(),
         u_inv(*final(inner), next, false),
-        u_left(*final(inner), next, false) == old(inner).left(),
+        u_left(*final(inner), next, false) == old(inner).items(),
 {
     let ghost i0 = *inner;
     let next = inner.s_next();
     proof {
-        i0.lemma_left();
-        lemma_unit_state::<S>(&i0);
-        lemma_unit_state::<S>(inner);
         if next is Some {
-            S::lemma_unit(next->Some_0);
-        }
-        if next is Some {
-            assert(seq![i0.left()[0]] + i0.left().skip(1) =~= i0.left());
+            let x = next->Some_0;
+            lemma_first::<S>(i0);
+            assert(x == i0.items()[0]);
+            assert(inner.at() == i0.at() + S::spans(x).len());
+            assert(S::spans(x) == inner.vals().subrange(inner.at() - S::spans(x).len(), inner.at()));
+            assert(seq![i0.items()[0]] + i0.items().skip(1) =~= i0.items());
         }
     }
     next
 }
 
-/// `Unshift::peek`: the value `next` gives, without giving it.
+/// `Unshift::peek`: the item `next` gives, without giving it.
 #[allow(unused_variables)] // `inner` is for the spec
 pub(crate) fn u_peek<'b, S: Stream>(inner: &S, next: &'b Option<S::Item>, hidden: bool) -> (r: Option<
     &'b S::Item,
 >)
     requires
-        S::unit(),
         u_inv(*inner, *next, hidden),
     ensures
         u_left(*inner, *next, hidden).len() > 0 ==> r == Some(&u_left(*inner, *next, hidden)[0]),
@@ -660,7 +683,6 @@ pub(crate) fn u_peek<'b, S: Stream>(inner: &S, next: &'b Option<S::Item>, hidden
 /// `Unshift::next`: the lookahead, pulling the next one.
 pub(crate) fn u_next<S: Stream>(inner: &mut S, next: &mut Option<S::Item>, hidden: bool) -> (r: Option<S::Item>)
     requires
-        S::unit(),
         u_inv(*old(inner), *old(next), hidden),
     ensures
         final(inner).vals() == old(inner).vals(),
@@ -680,30 +702,24 @@ pub(crate) fn u_next<S: Stream>(inner: &mut S, next: &mut Option<S::Item>, hidde
     let mut n = inner.s_next();
     std::mem::swap(&mut n, next);
     proof {
-        i0.lemma_left();
-        lemma_unit_state::<S>(&i0);
-        lemma_unit_state::<S>(inner);
-        if *next is Some {
-            S::lemma_unit((*next)->Some_0);
-        }
         let g = u_left(i0, n, hidden);
         if *next is Some {
-            assert(seq![i0.left()[0]] + i0.left().skip(1) =~= i0.left());
+            lemma_first::<S>(i0);
+            assert(seq![i0.items()[0]] + i0.items().skip(1) =~= i0.items());
         }
         if n is Some {
-            assert(g.skip(1) =~= i0.left());
+            assert(g.skip(1) =~= i0.items());
         }
     }
     n
 }
 
-/// `Unshift::nth`: the lookahead is value 0, so value `n` is the inner
+/// `Unshift::nth`: the lookahead is item 0, so item `n` is the inner
 /// iterator's `n - 1`.
 pub(crate) fn u_nth<S: Stream>(inner: &mut S, next: &mut Option<S::Item>, hidden: bool, n: usize) -> (r: Option<
     S::Item,
 >)
     requires
-        S::unit(),
         u_inv(*old(inner), *old(next), hidden),
     ensures
         final(inner).vals() == old(inner).vals(),
@@ -725,33 +741,24 @@ pub(crate) fn u_nth<S: Stream>(inner: &mut S, next: &mut Option<S::Item>, hidden
     let ghost i1 = *inner;
     *next = inner.s_next();
     proof {
-        i0.lemma_left();
-        i1.lemma_left();
-        lemma_unit_state::<S>(&i0);
-        lemma_unit_state::<S>(&i1);
-        lemma_unit_state::<S>(inner);
-        if n - 1 < i0.items().len() {
-            lemma_unit_take::<S>(i0.items(), n as int);
-        }
-        if *next is Some {
-            S::lemma_unit((*next)->Some_0);
-        }
         let g = u_left(i0, x0, hidden);
-        if x0 is Some && n - 1 < i0.left().len() {
-            assert(g.skip(n + 1) =~= i1.left());
-            if *next is Some {
-                assert(seq![i1.left()[0]] + i1.left().skip(1) =~= i1.left());
-                assert(u_left(*inner, *next, hidden) =~= g.skip(n + 1));
-            }
+        if *next is Some {
+            lemma_first::<S>(i1);
+            assert(seq![i1.items()[0]] + i1.items().skip(1) =~= i1.items());
+        }
+        if x0 is Some && n - 1 < i0.items().len() {
+            assert(g.skip(n + 1) =~= i1.items());
         }
     }
     out
 }
 
-/// `Unshift::shift`: the lookahead becomes the value at `start`, and the
-/// window ends at `end`. The lookahead's own value may start the range,
-/// and is then kept (hidden while the range is empty, for a later one
-/// starting there); a range further back panics (`Shiftable::shift_next`).
+/// `Unshift::shift`, over an iterator whose items each stand for one
+/// value (`ItemPerValue`): the lookahead becomes the value at `start`,
+/// and the window ends at `end`. The lookahead's own value may start the
+/// range, and is then kept (hidden while the range is empty, for a later
+/// one starting there); a range further back panics
+/// (`Shiftable::shift_next`).
 pub(crate) fn u_shift<W: Window>(inner: &mut W, next: &mut Option<W::Item>, hidden: &mut bool, start: usize, end: usize)
     requires
         W::unit(),
@@ -767,7 +774,11 @@ pub(crate) fn u_shift<W: Window>(inner: &mut W, next: &mut Option<W::Item>, hidd
         inner.w_set_max(end);
         *hidden = start >= end;
         proof {
+            let x = (*next)->Some_0;
+            W::lemma_unit(x);
+            assert(seq![x][0] == v.subrange(start as int, start + 1)[0]);
             inner.lemma_window();
+            lemma_unit_state::<W>(inner);
             if start < end {
                 assert(seq![v[start as int]] + window(v, start + 1, end as int) =~= window(v, start as int, end as int));
             } else {
@@ -782,6 +793,7 @@ pub(crate) fn u_shift<W: Window>(inner: &mut W, next: &mut Option<W::Item>, hidd
     }
     *next = inner.w_shift_next(start, end);
     proof {
+        lemma_unit_state::<W>(inner);
         let x = window(v, start as int, end as int);
         if *next is Some {
             let y = (*next)->Some_0;
@@ -789,8 +801,7 @@ pub(crate) fn u_shift<W: Window>(inner: &mut W, next: &mut Option<W::Item>, hidd
             // the lookahead is the window's first value, at `start`
             assert(seq![y][0] == x.take(1)[0]);
             assert(x[0] == v[start as int]);
-        }
-        if x.len() > 0 {
+            assert(seq![y] =~= v.subrange(start as int, start + 1));
             assert(seq![x[0]] + x.skip(1) =~= x);
         } else {
             assert(x =~= Seq::<W::Item>::empty());

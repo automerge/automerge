@@ -341,9 +341,11 @@ compiles them away. To check them, run `cargo verus verify -p hexane
   methods every implementation gives; `Ranges`, over any `Shiftable`,
   run adapters included, gives items standing for the values of each of
   its ranges in turn, and panics on one starting behind the iterator;
-  `Unshift`, over an iterator that gives an item per value, gives its
-  lookahead and then what its inner iterator has left, and after
-  `shift(range)` exactly the values in `range`.
+  `Unshift` gives its lookahead and then what its inner iterator has
+  left, and after `shift(range)` exactly the values in `range`. Its
+  `shift` asks for an `ItemPerValue` iterator, which gives an item per
+  value (the column iterators; trusted of others that implement it), and
+  the run adapters are not one.
 * Suspending and resuming an iterator (`Iter::suspend`,
   `IterState::try_resume`, and the prefix and delta iterators' versions,
   which build on them): `suspend` keeps a position that always resumes;
@@ -576,11 +578,6 @@ type's `Ord` orders values as the `i64`s they are stored as, with nulls
 first and values outside the domain last.
 
 **Known limitations:**
-
-* `Unshift` needs an item per value from its inner iterator (trusted of
-  it, and documented), so over a run adapter (`Runs`, `DeltaRuns`),
-  which gives a run per step, it is not proved, and its `shift` gives
-  wrong results there. `Ranges` over a run adapter is proved.
 
 * The prefix and delta columns' other logic is not verified: that a
   column's sum fits its prefix type, which the searches' results depend on
