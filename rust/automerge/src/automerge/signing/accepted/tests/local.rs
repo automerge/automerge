@@ -59,7 +59,10 @@ fn loose_candidates_wait_for_signature_gaps_and_retry_without_reapplication() {
 #[test]
 fn fragment_members_are_not_also_offered_as_loose_candidates() {
     let (mut document, changes, key) = fixture(&[0, 0, 1]);
-    let fragments = document.fragments(..);
+    // Local candidate assembly uses structural membership even when outgoing
+    // materialization is still gated on evidence.
+    assert!(document.fragments(..).is_empty());
+    let fragments: Vec<_> = document.change_graph.fragments(..).collect();
     assert_eq!(fragments.len(), 1);
     assert_eq!(fragments[0].members.len(), 3);
     let heads = document.get_heads();
@@ -104,7 +107,8 @@ fn a_partly_accepted_fragment_is_retained_with_its_full_membership() {
 
     let middle = append_at_level(&mut document, 2, 0);
     let tip = append_at_level(&mut document, 3, 1);
-    let fragment = document.get_fragment(tip).unwrap();
+    assert!(document.get_fragment(tip).is_none());
+    let fragment = document.change_graph.get_fragment(tip).unwrap();
     assert_eq!(fragment.members.len(), 3);
     assert!(fragment.members.contains(&first.hash()));
     let tip_change = document.get_change_by_hash(&tip).unwrap();
@@ -132,7 +136,11 @@ fn a_partly_accepted_fragment_is_retained_with_its_full_membership() {
 #[test]
 fn a_single_member_nonzero_level_fragment_can_complete() {
     let (mut document, changes, key) = fixture(&[1]);
-    let fragment = document.get_fragment(changes[0].hash()).unwrap();
+    assert!(document.get_fragment(changes[0].hash()).is_none());
+    let fragment = document
+        .change_graph
+        .get_fragment(changes[0].hash())
+        .unwrap();
     assert_eq!(fragment.level, 1);
     assert_eq!(fragment.members, [changes[0].hash()]);
     let heads = document.get_heads();

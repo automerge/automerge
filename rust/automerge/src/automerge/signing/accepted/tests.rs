@@ -167,6 +167,9 @@ fn acceptance_waits_for_a_gap_in_loose_signatures_without_reapplying_changes() {
 #[test]
 fn accepting_a_fragment_covers_interior_changes_without_direct_signatures() {
     let (mut document, changes, key) = fixture(&[0, 0, 1]);
+    // Required-mode discovery waits until the fragment can attest itself.
+    assert!(document.get_fragment(changes[2].hash()).is_none());
+    retain_signature(&mut document.try_signing().unwrap(), &changes[2], &key);
     let fragment = document.get_fragment(changes[2].hash()).unwrap();
     assert!(fragment.boundary.is_empty());
     assert_eq!(fragment.members.len(), 3);

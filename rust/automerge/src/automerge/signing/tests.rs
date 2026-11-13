@@ -7,6 +7,7 @@ use crate::{ActorId, Author, Automerge, Change, ChangeHash, ReadDoc};
 
 use super::error;
 
+mod fragments;
 mod insertion;
 
 #[test]
@@ -50,6 +51,10 @@ fn signing_constructor_starts_with_empty_history_acceptance_and_evidence() {
     assert!(signing.graph.is_empty());
     assert_eq!(signing.ops.actors.iter().len(), 0);
     assert!(signing.authors.get_authors().is_empty());
+    assert_eq!(
+        signing.state.fragment_readiness,
+        crate::change_graph::FragmentReadiness::default()
+    );
     assert!(!signing.state.accepted.is_accepted_actor_seq(0, 1));
     assert_eq!(
         signing
