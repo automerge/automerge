@@ -14,11 +14,15 @@ pub(crate) mod stream;
 
 pub use decoder::DeltaDecoder;
 
+use crate::btree::{SlabAgg, SlabBTree};
 use crate::column::{normalize_range_max, Dx, Iter, IterState};
 use crate::rle::state::WOps;
 use crate::{Codec, Leb128};
 use ddomain::{SpliceItem, SpliceItems, ValueItems};
-use diter::{d_next, d_next_run, d_nth};
+use diter::{
+    d_advance_by, d_advance_to, d_next, d_run, d_seek_run, d_seek_to, d_shift, d_shift_next,
+    d_shift_run, d_step,
+};
 use dscan::{d_scan, d_scan_null};
 use dseek::{d_seek, d_seek_null};
 use indexed::DB;
@@ -856,7 +860,7 @@ impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
         DeltaIter {
             inner: self.col.iter(),
             running: 0,
-            col: Some(&self.col),
+            ix: Some(self.col.core.index()),
             _phantom: PhantomData,
         }
     }
@@ -1404,7 +1408,8 @@ type InnerColumn<T, C = Leb128> = Column<<T as DeltaValue>::Inner, C, IndexedDel
 pub struct DeltaIter<'a, T: DeltaValue, C: Codec = Leb128> {
     inner: Iter<'a, T::Inner, C>,
     running: i64,
-    col: Option<&'a InnerColumn<T, C>>,
+    /// The column's index, for long seeks; none for a default iterator.
+    ix: Option<&'a SlabBTree<SlabAgg>>,
     _phantom: PhantomData<T>,
 }
 
@@ -1413,7 +1418,7 @@ impl<T: DeltaValue, C: Codec> Default for DeltaIter<'_, T, C> {
         Self {
             inner: Default::default(),
             running: 0,
-            col: None,
+            ix: None,
             _phantom: PhantomData,
         }
     }
@@ -1438,13 +1443,11 @@ impl<T: DeltaValue, C: Codec> Iterator for DeltaIter<'_, T, C> {
     }
 
     fn nth(&mut self, n: usize) -> Option<T> {
-        if n == 0 {
-            return self.next();
-        }
-        let v = d_nth::<Dx<T::Inner, C>, DB<T::Inner, C>>(
+        // verified (`d_step`: `d_next` for the next value, else `d_nth`)
+        let v = d_step::<Dx<T::Inner, C>, DB<T::Inner, C>>(
             &mut self.inner.core,
             self.inner.slabs,
-            self.col.map(|c| c.core.index()),
+            self.ix,
             n,
             &mut self.running,
         )?;
@@ -1486,15 +1489,17 @@ impl<'a, T: DeltaValue, C: Codec> DeltaIter<'a, T, C> {
         self.inner.set_max(pos);
     }
 
+    /// Advance so that the next item is the one at `target`; at or past
+    /// it already, stay (as [`Iter::advance_to`] does).
     pub fn advance_to(&mut self, target: usize) {
-        assert!(
-            target >= self.pos(),
-            "advance_to: target ({target}) < pos ({})",
-            self.pos()
+        // verified (`d_advance_to`), keeping the running sum
+        d_advance_to::<Dx<T::Inner, C>, DB<T::Inner, C>>(
+            &mut self.inner.core,
+            self.inner.slabs,
+            self.ix,
+            target,
+            &mut self.running,
         );
-        if target > self.pos() {
-            self.nth(target - self.pos() - 1);
-        }
     }
 
     /// Reposition the iterator window to `range`.
@@ -1505,20 +1510,106 @@ impl<'a, T: DeltaValue, C: Codec> DeltaIter<'a, T, C> {
     /// starts before [`pos`](Self::pos), it yields the items from `pos()`
     /// to `range.end`.
     pub fn shift(&mut self, range: Range<usize>) {
-        self.set_max(range.end);
-        self.advance_to(range.start);
+        // verified (`d_shift`): the iterator has left exactly the values in
+        // the window, with the running sum at its start
+        d_shift::<Dx<T::Inner, C>, DB<T::Inner, C>>(
+            &mut self.inner.core,
+            self.inner.slabs,
+            self.ix,
+            range.start,
+            range.end,
+            &mut self.running,
+        );
     }
 
+    /// Move `amount` items on.
     pub fn advance_by(&mut self, amount: usize) {
-        if amount > 0 {
-            self.nth(amount - 1);
-        }
+        // verified (`d_advance_by`), keeping the running sum
+        d_advance_by::<Dx<T::Inner, C>, DB<T::Inner, C>>(
+            &mut self.inner.core,
+            self.inner.slabs,
+            self.ix,
+            amount,
+            &mut self.running,
+        );
     }
 
+    /// Moves the iterator window to `range` and returns the item at
+    /// `range.start`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `range.start < self.pos()`.
     pub fn shift_next(&mut self, range: Range<usize>) -> Option<T> {
         assert!(range.start >= self.inner.core.pos);
-        self.inner.set_max(range.end);
-        self.nth(range.start - self.inner.core.pos)
+        // verified (`d_shift_next`): the value at `range.start`, if the
+        // window holds one
+        let v = d_shift_next::<Dx<T::Inner, C>, DB<T::Inner, C>>(
+            &mut self.inner.core,
+            self.inner.slabs,
+            self.ix,
+            range.start,
+            range.end,
+            &mut self.running,
+        )?;
+        Some(match v {
+            None => T::null_value(),
+            Some(v) => T::from_i64(v),
+        })
+    }
+
+    /// The item at `pos`, moving past it; `None`, moving nowhere, if `pos`
+    /// is behind the iterator ([`Shiftable::seek_to`](crate::Shiftable::seek_to)).
+    pub(crate) fn seek_item(&mut self, pos: usize) -> Option<T> {
+        // verified (`d_seek_to`), keeping the running sum
+        let v = d_seek_to::<Dx<T::Inner, C>, DB<T::Inner, C>>(
+            &mut self.inner.core,
+            self.inner.slabs,
+            self.ix,
+            pos,
+            &mut self.running,
+        )?;
+        Some(match v {
+            None => T::null_value(),
+            Some(v) => T::from_i64(v),
+        })
+    }
+
+    /// [`Shiftable::shift_next`](crate::Shiftable::shift_next) for
+    /// [`DeltaRuns`]: move the window to `range` and give its first run.
+    pub(crate) fn shift_run(&mut self, range: Range<usize>) -> Option<DeltaRun> {
+        // verified (`d_shift_run`), with the running sum before the run
+        let (prefix, run) = d_shift_run::<Dx<T::Inner, C>, DB<T::Inner, C>>(
+            &mut self.inner.core,
+            self.inner.slabs,
+            self.ix,
+            range.start,
+            range.end,
+            &mut self.running,
+        )?;
+        Some(DeltaRun {
+            prefix,
+            delta: T::Inner::to_opt(run.value),
+            count: run.count,
+        })
+    }
+
+    /// [`Shiftable::seek_to`](crate::Shiftable::seek_to) for [`DeltaRuns`]:
+    /// the run from `pos`.
+    pub(crate) fn seek_run(&mut self, pos: usize) -> Option<DeltaRun> {
+        // verified (`d_seek_run`), with the running sum before the run
+        let (prefix, run) = d_seek_run::<Dx<T::Inner, C>, DB<T::Inner, C>>(
+            &mut self.inner.core,
+            self.inner.slabs,
+            self.ix,
+            pos,
+            &mut self.running,
+        )?;
+        Some(DeltaRun {
+            prefix,
+            delta: T::Inner::to_opt(run.value),
+            count: run.count,
+        })
     }
 
     pub fn suspend(&self) -> DeltaIterState {
@@ -1531,12 +1622,11 @@ impl<'a, T: DeltaValue, C: Codec> DeltaIter<'a, T, C> {
     /// value.  Respects the iterator window; a clipped run's remainder
     /// is still a valid self-describing `DeltaRun`.
     pub fn next_run(&mut self) -> Option<DeltaRun> {
-        let prefix = self.running;
-        let max = self.inner.core.items_left;
-        let run = d_next_run::<Dx<T::Inner, C>, DB<T::Inner, C>>(
+        // verified (`d_run`): as many equal deltas as the window has, with
+        // the running sum before them
+        let (prefix, run) = d_run::<Dx<T::Inner, C>, DB<T::Inner, C>>(
             &mut self.inner.core,
             self.inner.slabs,
-            max,
             &mut self.running,
         )?;
         Some(DeltaRun {
@@ -1614,7 +1704,7 @@ impl<'a, T: DeltaValue, C: Codec> DeltaIter<'a, T, C> {
         let (run_start, run_end) = d_seek::<Dx<T::Inner, C>, DB<T::Inner, C>>(
             &mut self.inner.core,
             self.inner.slabs,
-            self.col.map(|c| c.core.index()),
+            self.ix,
             &mut self.running,
             t,
         );
@@ -1691,7 +1781,7 @@ impl<'a, T: DeltaValue, C: Codec> DeltaIter<'a, T, C> {
         let (pos, v) = d_scan::<Dx<T::Inner, C>, DB<T::Inner, C>>(
             &mut self.inner.core,
             self.inner.slabs,
-            self.col.map(|c| c.core.index()),
+            self.ix,
             &mut self.running,
             lo,
             hi,
@@ -1705,7 +1795,7 @@ impl<'a, T: DeltaValue, C: Codec> DeltaIter<'a, T, C> {
         d_scan_null::<Dx<T::Inner, C>, DB<T::Inner, C>>(
             &mut self.inner.core,
             self.inner.slabs,
-            self.col.map(|c| c.core.index()),
+            self.ix,
             &mut self.running,
         )
     }
@@ -1742,7 +1832,7 @@ impl DeltaIterState {
         Ok(DeltaIter {
             inner,
             running: before.running,
-            col: Some(&column.col),
+            ix: Some(column.col.core.index()),
             _phantom: PhantomData,
         })
     }
@@ -1753,7 +1843,7 @@ impl<'a, T: DeltaValue, C: Codec> Clone for DeltaIter<'a, T, C> {
         Self {
             inner: self.inner.clone(),
             running: self.running,
-            col: self.col,
+            ix: self.ix,
             _phantom: PhantomData,
         }
     }

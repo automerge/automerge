@@ -31,7 +31,9 @@ use crate::cursor::slab_lens;
 #[cfg(verus_keep_ghost)]
 use crate::fenwick::{lemma_sum_le, lemma_sum_one, lemma_sum_split, sum, total};
 #[cfg(verus_keep_ghost)]
-use crate::iter_core::{each, lemma_from, lemma_upto, lens_ok, vals_of};
+use crate::iter_core::{
+    each, lemma_from, lemma_upto, lemma_window_past, lens_ok, past, vals_of, window,
+};
 use crate::iter_core::{Decode, Decoders, ICore};
 use crate::prefix::PrefixSlabWeight;
 #[cfg(verus_keep_ghost)]
@@ -93,6 +95,10 @@ pub(crate) trait PrefixOps<V: Copy> {
     /// `a - b.clone()`.
     fn sub(a: Self::P, b: &Self::P) -> (r: Self::P)
         ensures r == prefix_sub(a, *b);
+
+    /// `a.clone()`.
+    fn cp(a: &Self::P) -> (r: Self::P)
+        ensures r == *a;
 
     /// `*a += b`.
     fn add_to(a: &mut Self::P, b: &Self::P)
@@ -289,6 +295,7 @@ pub(crate) fn p_next<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>(
                 &&& old(core).out::<X>(slabs@).len() > 0
                 &&& v == old(core).out::<X>(slabs@)[0]
                 &&& final(core).out::<X>(slabs@) == old(core).out::<X>(slabs@).skip(1)
+                &&& final(core).pos == old(core).pos + 1
                 &&& *final(total) == prefix_add(*old(total), B::contrib(v))
             },
             None => old(core).out::<X>(slabs@).len() == 0 && final(core).out::<X>(slabs@).len() == 0,
@@ -593,6 +600,279 @@ pub(crate) fn p_nth<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>(
         return None;
     }
     p_nth_in::<X, B>(core, slabs, ix, n, total, base)
+}
+
+/// `advance_to`, keeping the running total: advance so that the item at
+/// `target` comes next; at or past it already, stay.
+#[inline(always)]
+pub(crate) fn p_advance_to<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>(
+    core: &mut ICore<X::D>,
+    slabs: &'a [Slab<X::Tail>],
+    ix: Option<&SlabBTree<PrefixSlabWeight<B::P>>>,
+    target: usize,
+    total: &mut B::P,
+    base: &B::P,
+)
+    requires
+        at_sum::<X, B>(*old(core), *old(total), *base, slabs@),
+        index_ok::<X, B>(ix, slabs@),
+    ensures
+        at_sum::<X, B>(*final(core), *final(total), *base, slabs@),
+        final(core).out::<X>(slabs@) == past(old(core).out::<X>(slabs@), target - old(core).pos),
+        target <= old(core).pos ==> final(core).pos == old(core).pos,
+        old(core).pos < target <= old(core).pos + old(core).out::<X>(slabs@).len() ==> final(core).pos
+            == target,
+{
+    if target > core.pos {
+        p_nth::<X, B>(core, slabs, ix, target - core.pos - 1, total, base);
+    }
+}
+
+/// `advance_by`, keeping the running total: move `amount` items on.
+#[inline(always)]
+pub(crate) fn p_advance_by<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>(
+    core: &mut ICore<X::D>,
+    slabs: &'a [Slab<X::Tail>],
+    ix: Option<&SlabBTree<PrefixSlabWeight<B::P>>>,
+    amount: usize,
+    total: &mut B::P,
+    base: &B::P,
+)
+    requires
+        at_sum::<X, B>(*old(core), *old(total), *base, slabs@),
+        index_ok::<X, B>(ix, slabs@),
+    ensures
+        at_sum::<X, B>(*final(core), *final(total), *base, slabs@),
+        final(core).out::<X>(slabs@) == past(old(core).out::<X>(slabs@), amount as int),
+        amount <= old(core).out::<X>(slabs@).len() ==> final(core).pos == old(core).pos + amount,
+{
+    if amount > 0 {
+        let ghost o = core.out::<X>(slabs@);
+        p_nth::<X, B>(core, slabs, ix, amount - 1, total, base);
+        proof {
+            if amount > o.len() {
+                assert(final(core).out::<X>(slabs@) =~= Seq::<<X::D as Decode>::Item>::empty());
+            }
+        }
+    }
+}
+
+/// `shift`, keeping the running total: move the window to `start..end`,
+/// only forwards (from a `start` before the iterator, the window starts
+/// where it stands).
+#[inline(always)]
+pub(crate) fn p_shift<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>(
+    core: &mut ICore<X::D>,
+    slabs: &'a [Slab<X::Tail>],
+    ix: Option<&SlabBTree<PrefixSlabWeight<B::P>>>,
+    start: usize,
+    end: usize,
+    total: &mut B::P,
+    base: &B::P,
+)
+    requires
+        at_sum::<X, B>(*old(core), *old(total), *base, slabs@),
+        index_ok::<X, B>(ix, slabs@),
+    ensures
+        at_sum::<X, B>(*final(core), *final(total), *base, slabs@),
+        final(core).out::<X>(slabs@) == window(
+            vals_of::<X>(slabs@),
+            if start <= old(core).pos { old(core).pos as int } else { start as int },
+            end as int,
+        ),
+        start <= old(core).pos ==> final(core).pos == old(core).pos,
+        old(core).pos < start <= end && start <= vals_of::<X>(slabs@).len() ==> final(core).pos == start,
+{
+    let ghost p = core.pos as int;
+    core.set_max::<X>(slabs, end);
+    proof {
+        core.lemma_out_window::<X>(slabs@);
+        if end < p {
+            assert(window(vals_of::<X>(slabs@), p, p) =~= window(vals_of::<X>(slabs@), p, end as int));
+        }
+        if start > p {
+            lemma_window_past(vals_of::<X>(slabs@), p, end as int, start - p);
+        }
+    }
+    p_advance_to::<X, B>(core, slabs, ix, start, total, base);
+}
+
+/// `shift_next`, keeping the running total: move the window to
+/// `start..end` and give its first value; `start` is at or after the
+/// iterator.
+#[inline(always)]
+pub(crate) fn p_shift_next<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>(
+    core: &mut ICore<X::D>,
+    slabs: &'a [Slab<X::Tail>],
+    ix: Option<&SlabBTree<PrefixSlabWeight<B::P>>>,
+    start: usize,
+    end: usize,
+    total: &mut B::P,
+    base: &B::P,
+) -> (r: Option<<X::D as Decode>::Item>)
+    requires
+        at_sum::<X, B>(*old(core), *old(total), *base, slabs@),
+        index_ok::<X, B>(ix, slabs@),
+        start >= old(core).pos,
+    ensures
+        at_sum::<X, B>(*final(core), *final(total), *base, slabs@),
+        ({
+            let w = window(vals_of::<X>(slabs@), start as int, end as int);
+            &&& w.len() > 0 ==> {
+                &&& r == Some(w[0])
+                &&& final(core).out::<X>(slabs@) == w.skip(1)
+                &&& final(core).pos == start + 1
+            }
+            &&& w.len() == 0 ==> r is None && final(core).out::<X>(slabs@).len() == 0
+        }),
+{
+    let ghost p = core.pos as int;
+    core.set_max::<X>(slabs, end);
+    let ghost o1 = core.out::<X>(slabs@);
+    proof {
+        core.lemma_out_window::<X>(slabs@);
+        if end < p {
+            assert(window(vals_of::<X>(slabs@), p, p) =~= window(vals_of::<X>(slabs@), p, end as int));
+        }
+        lemma_window_past(vals_of::<X>(slabs@), p, end as int, start - p);
+    }
+    let r = p_nth::<X, B>(core, slabs, ix, start - core.pos, total, base);
+    proof {
+        let (w, n) = (window(vals_of::<X>(slabs@), start as int, end as int), start - p);
+        if n < o1.len() {
+            assert(w =~= o1.skip(n));
+            assert(w.skip(1) =~= o1.skip(n + 1));
+        }
+    }
+    r
+}
+
+/// `delta_nth`: the `n`th value left in the window (0-based), as `p_nth`
+/// gives it, and what its prefix added since the iterator's start: the
+/// sum of the values before it from there, `d`, which added to the sum
+/// before the start gives the sum before the value. Taken as the
+/// difference of the running totals before and after the values passed,
+/// which the prefix laws assumed (`b + (a - b) == a`) give.
+pub(crate) fn p_delta_nth<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>(
+    core: &mut ICore<X::D>,
+    slabs: &'a [Slab<X::Tail>],
+    ix: Option<&SlabBTree<PrefixSlabWeight<B::P>>>,
+    n: usize,
+    total: &mut B::P,
+    base: &B::P,
+) -> (r: Option<(<X::D as Decode>::Item, B::P)>)
+    requires
+        at_sum::<X, B>(*old(core), *old(total), *base, slabs@),
+        index_ok::<X, B>(ix, slabs@),
+    ensures
+        at_sum::<X, B>(*final(core), *final(total), *base, slabs@),
+        match r {
+            Some((v, d)) => {
+                let o = old(core).out::<X>(slabs@);
+                &&& n < o.len()
+                &&& v == o[n as int]
+                &&& final(core).out::<X>(slabs@) == o.skip(n + 1)
+                &&& final(core).pos == old(core).pos + n + 1
+                &&& prefix_add(vsum::<_, B>(before::<X>(slabs@, old(core).pos as int)), d) == vsum::<_, B>(
+                    before::<X>(slabs@, old(core).pos + n),
+                )
+            },
+            None => n >= old(core).out::<X>(slabs@).len() && final(core).out::<X>(slabs@).len() == 0,
+        },
+{
+    let ghost c0 = *core;
+    let ghost o = core.out::<X>(slabs@);
+    let t0 = B::cp(total);
+    if n > 0 {
+        p_nth::<X, B>(core, slabs, ix, n - 1, total, base)?;
+    }
+    let ghost t1 = *total;
+    let ghost c1 = *core;
+    proof {
+        // `n` values on
+        if n == 0 {
+            assert(o.skip(0) =~= o);
+        }
+        assert(c1.out::<X>(slabs@) == o.skip(n as int));
+        assert(c1.pos == c0.pos + n);
+    }
+    let d = B::sub(B::cp(total), &t0);
+    let v = p_next::<X, B>(core, slabs, total, base)?;
+    proof {
+        // the sum before the start, plus the difference, is the sum before `v`
+        axiom_prefix_add(*base, t0, d);
+        axiom_prefix_sub(t1, t0);
+        assert(v == o[n as int]);
+        assert(core.out::<X>(slabs@) =~= o.skip(n + 1));
+    }
+    Some((v, d))
+}
+
+/// `seek_to`, keeping the running total: the item at `at`, moving past
+/// it; `None`, moving nowhere, if `at` is behind the iterator.
+#[inline(always)]
+pub(crate) fn p_seek_to<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>(
+    core: &mut ICore<X::D>,
+    slabs: &'a [Slab<X::Tail>],
+    ix: Option<&SlabBTree<PrefixSlabWeight<B::P>>>,
+    at: usize,
+    total: &mut B::P,
+    base: &B::P,
+) -> (r: Option<<X::D as Decode>::Item>)
+    requires
+        at_sum::<X, B>(*old(core), *old(total), *base, slabs@),
+        index_ok::<X, B>(ix, slabs@),
+    ensures
+        at_sum::<X, B>(*final(core), *final(total), *base, slabs@),
+        at < old(core).pos ==> r is None && *final(core) == *old(core) && *final(total) == *old(total),
+        at >= old(core).pos ==> {
+            let (o, k) = (old(core).out::<X>(slabs@), at - old(core).pos);
+            &&& k < o.len() ==> r == Some(o[k]) && final(core).out::<X>(slabs@) == o.skip(k + 1)
+                && final(core).pos == at + 1
+            &&& k >= o.len() ==> r is None && final(core).out::<X>(slabs@).len() == 0
+        },
+{
+    if at >= core.pos {
+        p_nth::<X, B>(core, slabs, ix, at - core.pos, total, base)
+    } else {
+        None
+    }
+}
+
+/// `PrefixColumn::delta`'s seek: advance to `from`, then `p_delta_nth(n)`:
+/// the value at `from + n`, if the window has it, and what its prefix
+/// added since `from` (added to the sum before `from`, the sum before it).
+pub(crate) fn p_delta_from<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>(
+    core: &mut ICore<X::D>,
+    slabs: &'a [Slab<X::Tail>],
+    ix: Option<&SlabBTree<PrefixSlabWeight<B::P>>>,
+    from: usize,
+    n: usize,
+    total: &mut B::P,
+    base: &B::P,
+) -> (r: Option<(<X::D as Decode>::Item, B::P)>)
+    requires
+        at_sum::<X, B>(*old(core), *old(total), *base, slabs@),
+        index_ok::<X, B>(ix, slabs@),
+        from >= old(core).pos,
+    ensures
+        at_sum::<X, B>(*final(core), *final(total), *base, slabs@),
+        ({
+            let o = past(old(core).out::<X>(slabs@), from - old(core).pos);
+            match r {
+                Some((v, d)) => {
+                    &&& n < o.len()
+                    &&& v == o[n as int]
+                    &&& prefix_add(vsum::<_, B>(before::<X>(slabs@, from as int)), d) == vsum::<_, B>(
+                        before::<X>(slabs@, from + n),
+                    )
+                },
+                None => n >= o.len(),
+            }
+        }),
+{
+    p_advance_to::<X, B>(core, slabs, ix, from, total, base);
+    p_delta_nth::<X, B>(core, slabs, ix, n, total, base)
 }
 
 /// `sum_range`: from an iterator over the whole column, at its start with

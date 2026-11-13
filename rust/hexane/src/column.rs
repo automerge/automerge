@@ -418,16 +418,8 @@ impl<'a, T: ColumnValueRef, C: Codec> Iterator for Iter<'a, T, C> {
     /// O(log S + runs_skipped) — uses the column's index for slab lookup.
     fn nth(&mut self, n: usize) -> Option<T::Get<'a>> {
         let col = self.col;
-        self.core.nth::<Dx<T, C>, _, _>(
-            self.slabs,
-            n,
-            &|t: usize| match col {
-                Some(col) => col.find_slab(t),
-                // a default iterator: no column, no slabs
-                None => (0, t),
-            },
-            &|i: usize| col.map_or(0, |col| col.slab_start(i)),
-        )
+        self.core
+            .nth::<Dx<T, C>, _, _>(self.slabs, n, &find_in(col), &start_in(col))
     }
 
     #[inline]
@@ -520,10 +512,13 @@ impl<'a, T: ColumnValueRef, C: Codec> Iter<'a, T, C> {
         self.core.pos + self.core.items_left
     }
 
+    /// Advance so that the next item is the one at `target`; at or past
+    /// it already, stay.
     pub fn advance_to(&mut self, target: usize) {
-        if target > self.core.pos {
-            self.nth(target - self.core.pos - 1);
-        }
+        let col = self.col;
+        // verified (`ICore::advance_to`)
+        self.core
+            .advance_to::<Dx<T, C>, _, _>(self.slabs, target, &find_in(col), &start_in(col));
     }
 
     /// Reposition the iterator window to `range`.
@@ -545,12 +540,24 @@ impl<'a, T: ColumnValueRef, C: Codec> Iter<'a, T, C> {
     /// assert_eq!(it.collect::<Vec<_>>(), vec![40]);
     /// ```
     pub fn shift(&mut self, range: Range<usize>) {
-        self.set_max(range.end);
-        self.advance_to(range.start);
+        let col = self.col;
+        // verified (`ICore::shift`): the iterator has left exactly the
+        // values in the window
+        self.core.shift::<Dx<T, C>, _, _>(
+            self.slabs,
+            range.start,
+            range.end,
+            &find_in(col),
+            &start_in(col),
+        );
     }
 
+    /// Move `amount` items on.
     pub fn advance_by(&mut self, amount: usize) {
-        self.advance_to(self.core.pos.saturating_add(amount))
+        let col = self.col;
+        // verified (`ICore::advance_by`)
+        self.core
+            .advance_by::<Dx<T, C>, _, _>(self.slabs, amount, &find_in(col), &start_in(col));
     }
 
     /// Returns the next run of identical values, merging across slab boundaries.
@@ -558,17 +565,15 @@ impl<'a, T: ColumnValueRef, C: Codec> Iter<'a, T, C> {
     /// For repeat runs, returns the full count. For literal runs, returns
     /// count=1 per value. Null runs return the null value with the full count.
     pub fn next_run(&mut self) -> Option<crate::Run<T::Get<'a>>> {
-        self.next_run_max(self.core.items_left)
+        // verified (`ICore::next_run`): as many equal values as the
+        // window has
+        self.core.next_run::<Dx<T, C>>(self.slabs)
     }
 
     /// Adapt into an iterator of [`Run`]s — the item shape
     /// [`Column::splice_runs`] accepts.
     pub fn runs(self) -> Runs<'a, T, C> {
         Runs(self)
-    }
-
-    pub(crate) fn next_run_max(&mut self, max: usize) -> Option<crate::Run<T::Get<'a>>> {
-        self.core.next_run_max::<Dx<T, C>>(self.slabs, max)
     }
 
     /// Moves the iterator window to `range` and returns the item at `range.start`.
@@ -578,9 +583,69 @@ impl<'a, T: ColumnValueRef, C: Codec> Iter<'a, T, C> {
     /// Panics if `range.start < self.pos()`.
     pub fn shift_next(&mut self, range: Range<usize>) -> Option<T::Get<'a>> {
         assert!(range.start >= self.core.pos);
-        self.set_max(range.end);
-        self.nth(range.start - self.core.pos)
+        let col = self.col;
+        // verified (`ICore::shift_next`): the value at `range.start`, if
+        // the window holds one
+        self.core.shift_next::<Dx<T, C>, _, _>(
+            self.slabs,
+            range.start,
+            range.end,
+            &find_in(col),
+            &start_in(col),
+        )
     }
+
+    /// The item at `pos`, moving past it; `None`, moving nowhere, if `pos`
+    /// is behind the iterator ([`Shiftable::seek_to`](crate::Shiftable::seek_to)).
+    pub(crate) fn seek_item(&mut self, pos: usize) -> Option<T::Get<'a>> {
+        let col = self.col;
+        // verified (`ICore::seek_to`)
+        self.core
+            .seek_to::<Dx<T, C>, _, _>(self.slabs, pos, &find_in(col), &start_in(col))
+    }
+
+    /// [`Shiftable::shift_next`](crate::Shiftable::shift_next) for [`Runs`]: move the window to `range`
+    /// and give its first run.
+    pub(crate) fn shift_run(&mut self, range: Range<usize>) -> Option<crate::Run<T::Get<'a>>> {
+        let col = self.col;
+        // verified (`ICore::shift_run`)
+        self.core.shift_run::<Dx<T, C>, _, _>(
+            self.slabs,
+            range.start,
+            range.end,
+            &find_in(col),
+            &start_in(col),
+        )
+    }
+
+    /// [`Shiftable::seek_to`](crate::Shiftable::seek_to) for [`Runs`]: the run from `pos`.
+    pub(crate) fn seek_run(&mut self, pos: usize) -> Option<crate::Run<T::Get<'a>>> {
+        let col = self.col;
+        // verified (`ICore::seek_run`)
+        self.core
+            .seek_run::<Dx<T, C>, _, _>(self.slabs, pos, &find_in(col), &start_in(col))
+    }
+}
+
+/// The index lookup an iterator's long seeks take (`iter_core::lookups`):
+/// the column's, or for a default iterator, which has no column and no
+/// slabs, past the end.
+#[inline(always)]
+fn find_in<'a, T: ColumnValueRef>(
+    col: Option<&'a dyn ColumnRef<T>>,
+) -> impl Fn(usize) -> (usize, usize) + 'a {
+    move |t: usize| match col {
+        Some(col) => col.find_slab(t),
+        None => (0, t),
+    }
+}
+
+/// The items before each slab, for the lookups (`iter_core::lookups`).
+#[inline(always)]
+fn start_in<'a, T: ColumnValueRef>(
+    col: Option<&'a dyn ColumnRef<T>>,
+) -> impl Fn(usize) -> usize + 'a {
+    move |i: usize| col.map_or(0, |col| col.slab_start(i))
 }
 
 // ── copy_ranges support ─────────────────────────────────────────────────────

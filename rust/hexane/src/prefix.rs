@@ -3,11 +3,13 @@ use crate::sealed::Sealed;
 use std::marker::PhantomData;
 use std::ops::{Add, AddAssign, Div, Range, Sub, SubAssign};
 
+use crate::btree::SlabBTree;
 use crate::column::{Column, Dx, Iter, Slab, SlabWeight, TailOf, WeightFn};
 use crate::encoding::{ColumnEncoding, RunDecoder};
 use crate::index::IndexOps;
 use crate::prefix_core::{
-    p_next, p_next_run_from, p_nth, p_reset, p_slab_sum, p_slab_sum_checked, PrefixOps,
+    p_advance_by, p_advance_to, p_delta_from, p_delta_nth, p_next, p_next_run_from, p_nth, p_reset,
+    p_seek_to, p_shift, p_shift_next, p_slab_sum, p_slab_sum_checked, PrefixOps,
 };
 use crate::prefix_search::{p_advance, PrefixOrd};
 use crate::PackError;
@@ -768,9 +770,7 @@ impl<T: PrefixValue, C: Codec> PrefixColumn<T, C> {
     /// [`PrefixIter::shift_next`]).
     pub fn delta(&self, from: usize, to: usize) -> Option<PrefixSeek<'_, T>> {
         assert!(to >= from);
-        let mut iter = self.iter();
-        iter.advance_to(from);
-        iter.delta_nth(to - from)
+        self.iter().delta_from(from, to - from)
     }
 
     /// Sum of the values in `range` — `get_prefix(range.end)` minus
@@ -851,7 +851,7 @@ impl<T: PrefixValue, C: Codec> PrefixColumn<T, C> {
     /// Iterator yielding a [`PrefixedValue`] per item.
     pub fn iter(&self) -> PrefixIter<'_, T, C> {
         PrefixIter {
-            col: Some(self),
+            ix: Some(self.col.core.index()),
             inner: self.col.iter(),
             total: T::Prefix::default(),
             base: T::Prefix::default(),
@@ -986,6 +986,11 @@ impl<'a, T: PrefixValue> PrefixOps<T::Get<'a>> for PB<T> {
     }
 
     #[inline(always)]
+    fn cp(a: &T::Prefix) -> T::Prefix {
+        a.clone()
+    }
+
+    #[inline(always)]
     fn add_to(a: &mut T::Prefix, b: &T::Prefix) {
         *a += b
     }
@@ -1047,7 +1052,8 @@ where
 /// `next()` is O(1) — it accumulates the running total from each value.
 /// `nth(n)` is O(log S) via the B-tree.
 pub struct PrefixIter<'a, T: PrefixValue, C: Codec = Leb128> {
-    col: Option<&'a PrefixColumn<T, C>>,
+    /// The column's index, for long seeks; none for a default iterator.
+    ix: Option<&'a SlabBTree<PrefixSlabWeight<T::Prefix>>>,
     inner: Iter<'a, T, C>,
     total: T::Prefix,
     /// Offset subtracted from the column's absolute prefixes; see
@@ -1062,7 +1068,7 @@ pub struct PrefixIter<'a, T: PrefixValue, C: Codec = Leb128> {
 impl<T: PrefixValue, C: Codec> Default for PrefixIter<'_, T, C> {
     fn default() -> Self {
         Self {
-            col: None,
+            ix: None,
             inner: Iter::default(),
             total: T::Prefix::default(),
             base: T::Prefix::default(),
@@ -1074,7 +1080,7 @@ impl<T: PrefixValue, C: Codec> Default for PrefixIter<'_, T, C> {
 impl<T: PrefixValue, C: Codec> Clone for PrefixIter<'_, T, C> {
     fn clone(&self) -> Self {
         Self {
-            col: self.col,
+            ix: self.ix,
             inner: self.inner.clone(),
             total: self.total.clone(),
             base: self.base.clone(),
@@ -1116,7 +1122,7 @@ impl<'a, T: PrefixValue, C: Codec> Iterator for PrefixIter<'a, T, C> {
         let value = p_nth::<Dx<T, C>, PB<T>>(
             &mut self.inner.core,
             self.inner.slabs,
-            self.col.map(|c| c.col.core.index()),
+            self.ix,
             n,
             &mut self.total,
             &self.base,
@@ -1183,10 +1189,17 @@ impl<'a, T: PrefixValue, C: Codec> PrefixIter<'a, T, C> {
         self.inner.set_max(pos);
     }
 
+    /// Move `amount` items on.
     pub fn advance_by(&mut self, amount: usize) {
-        if amount > 0 {
-            self.nth(amount - 1);
-        }
+        // verified (`p_advance_by`), keeping the running total
+        p_advance_by::<Dx<T, C>, PB<T>>(
+            &mut self.inner.core,
+            self.inner.slabs,
+            self.ix,
+            amount,
+            &mut self.total,
+            &self.base,
+        );
     }
 
     pub fn suspend(&self) -> PrefixIterState<T> {
@@ -1205,8 +1218,39 @@ impl<'a, T: PrefixValue, C: Codec> PrefixIter<'a, T, C> {
     /// Panics if `range.start < self.pos()`.
     pub fn shift_next(&mut self, range: std::ops::Range<usize>) -> Option<PrefixedValue<'a, T>> {
         assert!(range.start >= self.pos());
-        self.set_max(range.end);
-        self.nth(range.start - self.pos())
+        // verified (`p_shift_next`): the value at `range.start`, if the
+        // window holds one, with the running total through it
+        let value = p_shift_next::<Dx<T, C>, PB<T>>(
+            &mut self.inner.core,
+            self.inner.slabs,
+            self.ix,
+            range.start,
+            range.end,
+            &mut self.total,
+            &self.base,
+        )?;
+        Some(PrefixedValue {
+            value,
+            total: self.total.clone(),
+        })
+    }
+
+    /// The item at `pos`, moving past it; `None`, moving nowhere, if `pos`
+    /// is behind the iterator ([`Shiftable::seek_to`](crate::Shiftable::seek_to)).
+    pub(crate) fn seek_item(&mut self, pos: usize) -> Option<PrefixedValue<'a, T>> {
+        // verified (`p_seek_to`), keeping the running total
+        let value = p_seek_to::<Dx<T, C>, PB<T>>(
+            &mut self.inner.core,
+            self.inner.slabs,
+            self.ix,
+            pos,
+            &mut self.total,
+            &self.base,
+        )?;
+        Some(PrefixedValue {
+            value,
+            total: self.total.clone(),
+        })
     }
 
     /// Adapt into an iterator of plain value [`Run`]s, discarding the
@@ -1239,9 +1283,15 @@ impl<'a, T: PrefixValue, C: Codec> PrefixIter<'a, T, C> {
     /// (a no-op if the iterator is already at or past it): the running
     /// total is then the sum of the items before it.
     pub fn advance_to(&mut self, target: usize) {
-        if target > self.pos() {
-            self.nth(target - self.pos() - 1);
-        }
+        // verified (`p_advance_to`), keeping the running total
+        p_advance_to::<Dx<T, C>, PB<T>>(
+            &mut self.inner.core,
+            self.inner.slabs,
+            self.ix,
+            target,
+            &mut self.total,
+            &self.base,
+        );
     }
 
     /// Reposition the iterator window to `range`.
@@ -1252,8 +1302,17 @@ impl<'a, T: PrefixValue, C: Codec> PrefixIter<'a, T, C> {
     /// starts before [`pos`](Self::pos), it yields the items from `pos()`
     /// to `range.end`.
     pub fn shift(&mut self, range: std::ops::Range<usize>) {
-        self.set_max(range.end);
-        self.advance_to(range.start);
+        // verified (`p_shift`): the iterator has left exactly the values in
+        // the window, with the running total at its start
+        p_shift::<Dx<T, C>, PB<T>>(
+            &mut self.inner.core,
+            self.inner.slabs,
+            self.ix,
+            range.start,
+            range.end,
+            &mut self.total,
+            &self.base,
+        );
     }
 
     /// The accumulated prefix over all items before the current position —
@@ -1262,14 +1321,51 @@ impl<'a, T: PrefixValue, C: Codec> PrefixIter<'a, T, C> {
         self.total.clone()
     }
 
+    /// [`nth`](Iterator::nth), with the prefix consumed on the way: the
+    /// sum of the values from the iterator's position up to the item,
+    /// exclusive, in [`PrefixSeek::delta`].
     pub fn delta_nth(&mut self, n: usize) -> Option<PrefixSeek<'a, T>> {
-        let base = self.total.clone();
-        let pv = self.nth(n)?;
-        let pos = self.pos() - 1;
+        // verified (`p_delta_nth`): the sum before the iterator plus
+        // `delta` is the sum before the item
+        let (value, delta) = p_delta_nth::<Dx<T, C>, PB<T>>(
+            &mut self.inner.core,
+            self.inner.slabs,
+            self.ix,
+            n,
+            &mut self.total,
+            &self.base,
+        )?;
         Some(PrefixSeek {
-            pos,
-            delta: pv.prefix() - base, // prefix consumed before the item
-            pv,
+            pos: self.pos() - 1,
+            delta,
+            pv: PrefixedValue {
+                value,
+                total: self.total.clone(),
+            },
+        })
+    }
+
+    /// [`PrefixColumn::delta`]'s seek: advance to `from`, then
+    /// [`delta_nth`](Self::delta_nth)`(n)`.
+    fn delta_from(&mut self, from: usize, n: usize) -> Option<PrefixSeek<'a, T>> {
+        // verified (`p_delta_from`): the sum before `from` plus `delta` is
+        // the sum before the item
+        let (value, delta) = p_delta_from::<Dx<T, C>, PB<T>>(
+            &mut self.inner.core,
+            self.inner.slabs,
+            self.ix,
+            from,
+            n,
+            &mut self.total,
+            &self.base,
+        )?;
+        Some(PrefixSeek {
+            pos: self.pos() - 1,
+            delta,
+            pv: PrefixedValue {
+                value,
+                total: self.total.clone(),
+            },
         })
     }
 }
@@ -1293,14 +1389,14 @@ where
         // unless we had an Iterator<Item=(slab,prefix)> instead of doing a slab_index +=1
         // currently this isnt a bottleneck anywhere so not a big deal
         // a default iterator has no column: it is empty, as for `next`
-        let col = self.col?;
+        let ix = self.ix?;
         let before = self.total;
         // verified (`prefix_search`), where the column's sum fits its
         // prefix type
         let value = p_advance::<Dx<T, C>, PB<T>>(
             &mut self.inner.core,
             self.inner.slabs,
-            col.col.core.index(),
+            ix,
             &n,
             &mut self.total,
             &self.base,
@@ -1337,7 +1433,7 @@ impl<T: PrefixValue> PrefixIterState<T> {
         let base = column.get_prefix(self.base_at);
         let total = column.get_prefix(inner.pos()) - base.clone();
         Ok(PrefixIter {
-            col: Some(column),
+            ix: Some(column.col.core.index()),
             inner,
             total,
             base,

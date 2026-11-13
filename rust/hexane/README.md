@@ -320,6 +320,28 @@ compiles them away. To check them, run `cargo verus verify -p hexane
   that bridges them is written). The B-tree's invariant asks only that
   its item counts add up; its aggregates are exact wherever they are
   representable, which is all its queries need.
+* Moving an iterator (`advance_to`, `advance_by`, `shift`,
+  `shift_next` and `Shiftable::seek_to` on `Iter`, `PrefixIter` and
+  `DeltaIter`, and `shift_next` and `seek_to` on their run adapters):
+  after `shift(range)` the iterator has left exactly the column's values
+  in `range`, or from where it stands if `range` starts behind it (it
+  moves only forwards); `shift_next` gives the value at `range.start`,
+  if the window holds one; `advance_to` and `advance_by` move it on past
+  exactly the values between, and no further than its window. The
+  prefix iterator's running total and the delta iterator's running sum
+  move with it, so a value read after a move is still the sum before it
+  (for a delta column, the running sum through it). `PrefixIter::delta_nth`
+  and `PrefixColumn::delta` give, with the value, what its prefix added
+  since the start: added to the sum before the start, the sum before the
+  value.
+* `Shiftable`'s provided methods, `Unshift` and `Ranges`, against the
+  contract `Shiftable` states (`window`), which is trusted of each
+  implementation (the column iterators keep it by the methods above):
+  the provided methods do what they say from the methods every
+  implementation gives; `Ranges` gives the values of each of its ranges
+  in turn, and panics on one starting behind the iterator; `Unshift`
+  gives its lookahead and then what its inner iterator has left, and
+  after `shift(range)` exactly the values in `range`.
 * Suspending and resuming an iterator (`Iter::suspend`,
   `IterState::try_resume`, and the prefix and delta iterators' versions,
   which build on them): `suspend` keeps a position that always resumes;
@@ -521,7 +543,8 @@ decode, which the verified code reaches through traits (the contract on
 connects the generic column types to the verified cores, and the closures
 passed through it (including the slabs a new column is built from, which
 come from the verified fills and encoders, and the iterators' state
-between calls); each prefix value type's `accumulate` and
+between calls); that each `Shiftable` iterator keeps the contract its
+docs state; each prefix value type's `accumulate` and
 `accumulate_run` (that they add its values, a run as its value
 repeated) and `try_accumulate_run` (that when it succeeds it adds what
 `accumulate_run` does), and that its prefix type's `+` is associative with `default`
@@ -537,6 +560,10 @@ type's `Ord` orders values as the `i64`s they are stored as, with nulls
 first and values outside the domain last.
 
 **Known limitations:**
+
+* The run adapters (`Runs`, `DeltaRuns`) give a run per step, not a
+  value, so `Shiftable`'s contract does not describe them, and `Ranges`
+  and `Unshift` over them are not proved (their own moves are).
 
 * The prefix and delta columns' other logic is not verified: that a
   column's sum fits its prefix type, which the searches' results depend on

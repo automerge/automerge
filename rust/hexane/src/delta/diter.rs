@@ -36,7 +36,9 @@ use crate::delta::agg::{agg_of, dval, lemma_merge, lemma_run_sum, lemma_take_run
 #[cfg(verus_keep_ghost)]
 use crate::fenwick::{lemma_sum_le, lemma_sum_one, lemma_sum_split, sum, total};
 #[cfg(verus_keep_ghost)]
-use crate::iter_core::{each, lemma_from, lemma_upto, lens_ok, vals_of};
+use crate::iter_core::{
+    each, first_run, lemma_from, lemma_upto, lemma_window_past, lens_ok, past, vals_of, window,
+};
 use crate::iter_core::{Decode, Decoders, ICore};
 #[cfg(verus_keep_ghost)]
 use crate::prefix_core::before;
@@ -737,6 +739,357 @@ pub(crate) fn d_nth<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
         return None;
     }
     d_nth_in::<X, B>(core, slabs, ix, n, running)
+}
+
+/// The value at item `i` of slabs `s`, as a delta column's readers give
+/// it: the running sum of the deltas through it, or null.
+pub(crate) open spec fn dval_at<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
+    s: Seq<Slab<X::Tail>>,
+    i: int,
+) -> Option<i64> {
+    realize(psum(dbefore::<X, B>(s, i)), B::dv(vals_of::<X>(s)[i]))
+}
+
+/// Read from the window's start, the value at offset `k` is the one at
+/// item `a + k`.
+proof fn lemma_realized_window<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
+    s: Seq<Slab<X::Tail>>,
+    a: int,
+    b: int,
+    k: int,
+)
+    requires
+        0 <= a,
+        0 <= k < window(vals_of::<X>(s), a, b).len(),
+    ensures
+        realized_at::<_, B>(window(vals_of::<X>(s), a, b), psum(dbefore::<X, B>(s, a)), k)
+            == dval_at::<X, B>(s, a + k),
+{
+    let v = vals_of::<X>(s);
+    let w = window(v, a, b);
+    assert(w.take(k) =~= v.subrange(a, a + k));
+    assert(v.take(a + k) =~= v.take(a) + v.subrange(a, a + k));
+    assert(deltas_of::<_, B>(v.take(a + k)) =~= deltas_of::<_, B>(v.take(a)) + deltas_of::<_, B>(
+        v.subrange(a, a + k),
+    ));
+    lemma_psum_cat(deltas_of::<_, B>(v.take(a)), deltas_of::<_, B>(v.subrange(a, a + k)));
+    assert(w[k] == v[a + k]);
+}
+
+/// `d_nth`, by `d_next` for the next value: what `DeltaIter::nth` does.
+pub(crate) fn d_step<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
+    core: &mut ICore<X::D>,
+    slabs: &'a [Slab<X::Tail>],
+    ix: Option<&SlabBTree<SlabAgg>>,
+    n: usize,
+    running: &mut i64,
+) -> (r: Option<Option<i64>>)
+    requires
+        at_run::<X, B>(*old(core), *old(running), slabs@),
+        dindex_ok::<X, B>(ix, slabs@),
+    ensures
+        at_run::<X, B>(*final(core), *final(running), slabs@),
+        n < old(core).out::<X>(slabs@).len() ==> {
+            &&& r == Some(realized_at::<_, B>(
+                old(core).out::<X>(slabs@),
+                psum(dbefore::<X, B>(slabs@, old(core).pos as int)),
+                n as int,
+            ))
+            &&& final(core).out::<X>(slabs@) == old(core).out::<X>(slabs@).skip(n + 1)
+            &&& final(core).pos == old(core).pos + n + 1
+        },
+        n >= old(core).out::<X>(slabs@).len() ==> r is None && final(core).out::<X>(slabs@).len() == 0,
+{
+    if n == 0 {
+        proof {
+            let o = core.out::<X>(slabs@);
+            assert(deltas_of::<_, B>(o.take(0)) =~= Seq::<Option<i64>>::empty());
+        }
+        d_next::<X, B>(core, slabs, running)
+    } else {
+        d_nth::<X, B>(core, slabs, ix, n, running)
+    }
+}
+
+/// `advance_to`, keeping the running sum: advance so that the item at
+/// `target` comes next; at or past it already, stay.
+#[inline(always)]
+pub(crate) fn d_advance_to<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
+    core: &mut ICore<X::D>,
+    slabs: &'a [Slab<X::Tail>],
+    ix: Option<&SlabBTree<SlabAgg>>,
+    target: usize,
+    running: &mut i64,
+)
+    requires
+        at_run::<X, B>(*old(core), *old(running), slabs@),
+        dindex_ok::<X, B>(ix, slabs@),
+    ensures
+        at_run::<X, B>(*final(core), *final(running), slabs@),
+        final(core).out::<X>(slabs@) == past(old(core).out::<X>(slabs@), target - old(core).pos),
+        target <= old(core).pos ==> final(core).pos == old(core).pos,
+        old(core).pos < target <= old(core).pos + old(core).out::<X>(slabs@).len() ==> final(core).pos
+            == target,
+{
+    if target > core.pos {
+        d_step::<X, B>(core, slabs, ix, target - core.pos - 1, running);
+    }
+}
+
+/// `advance_by`, keeping the running sum: move `amount` items on.
+#[inline(always)]
+pub(crate) fn d_advance_by<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
+    core: &mut ICore<X::D>,
+    slabs: &'a [Slab<X::Tail>],
+    ix: Option<&SlabBTree<SlabAgg>>,
+    amount: usize,
+    running: &mut i64,
+)
+    requires
+        at_run::<X, B>(*old(core), *old(running), slabs@),
+        dindex_ok::<X, B>(ix, slabs@),
+    ensures
+        at_run::<X, B>(*final(core), *final(running), slabs@),
+        final(core).out::<X>(slabs@) == past(old(core).out::<X>(slabs@), amount as int),
+        amount <= old(core).out::<X>(slabs@).len() ==> final(core).pos == old(core).pos + amount,
+{
+    if amount > 0 {
+        let ghost o = core.out::<X>(slabs@);
+        d_step::<X, B>(core, slabs, ix, amount - 1, running);
+        proof {
+            if amount > o.len() {
+                assert(final(core).out::<X>(slabs@) =~= Seq::<<X::D as Decode>::Item>::empty());
+            }
+        }
+    }
+}
+
+/// `shift`, keeping the running sum: move the window to `start..end`,
+/// only forwards (from a `start` before the iterator, the window starts
+/// where it stands).
+#[inline(always)]
+pub(crate) fn d_shift<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
+    core: &mut ICore<X::D>,
+    slabs: &'a [Slab<X::Tail>],
+    ix: Option<&SlabBTree<SlabAgg>>,
+    start: usize,
+    end: usize,
+    running: &mut i64,
+)
+    requires
+        at_run::<X, B>(*old(core), *old(running), slabs@),
+        dindex_ok::<X, B>(ix, slabs@),
+    ensures
+        at_run::<X, B>(*final(core), *final(running), slabs@),
+        final(core).out::<X>(slabs@) == window(
+            vals_of::<X>(slabs@),
+            if start <= old(core).pos { old(core).pos as int } else { start as int },
+            end as int,
+        ),
+        start <= old(core).pos ==> final(core).pos == old(core).pos,
+        old(core).pos < start <= end && start <= vals_of::<X>(slabs@).len() ==> final(core).pos == start,
+{
+    let ghost p = core.pos as int;
+    core.set_max::<X>(slabs, end);
+    proof {
+        core.lemma_out_window::<X>(slabs@);
+        if end < p {
+            assert(window(vals_of::<X>(slabs@), p, p) =~= window(vals_of::<X>(slabs@), p, end as int));
+        }
+        if start > p {
+            lemma_window_past(vals_of::<X>(slabs@), p, end as int, start - p);
+        }
+    }
+    d_advance_to::<X, B>(core, slabs, ix, start, running);
+}
+
+/// `shift_next`, keeping the running sum: move the window to `start..end`
+/// and give the value at its start; `start` is at or after the iterator.
+#[inline(always)]
+pub(crate) fn d_shift_next<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
+    core: &mut ICore<X::D>,
+    slabs: &'a [Slab<X::Tail>],
+    ix: Option<&SlabBTree<SlabAgg>>,
+    start: usize,
+    end: usize,
+    running: &mut i64,
+) -> (r: Option<Option<i64>>)
+    requires
+        at_run::<X, B>(*old(core), *old(running), slabs@),
+        dindex_ok::<X, B>(ix, slabs@),
+        start >= old(core).pos,
+    ensures
+        at_run::<X, B>(*final(core), *final(running), slabs@),
+        ({
+            let w = window(vals_of::<X>(slabs@), start as int, end as int);
+            &&& w.len() > 0 ==> {
+                &&& r == Some(dval_at::<X, B>(slabs@, start as int))
+                &&& final(core).out::<X>(slabs@) == w.skip(1)
+                &&& final(core).pos == start + 1
+            }
+            &&& w.len() == 0 ==> r is None && final(core).out::<X>(slabs@).len() == 0
+        }),
+{
+    let ghost p = core.pos as int;
+    core.set_max::<X>(slabs, end);
+    let ghost o1 = core.out::<X>(slabs@);
+    proof {
+        core.lemma_out_window::<X>(slabs@);
+        if end < p {
+            assert(window(vals_of::<X>(slabs@), p, p) =~= window(vals_of::<X>(slabs@), p, end as int));
+        }
+        lemma_window_past(vals_of::<X>(slabs@), p, end as int, start - p);
+    }
+    let r = d_step::<X, B>(core, slabs, ix, start - core.pos, running);
+    proof {
+        let (w, n) = (window(vals_of::<X>(slabs@), start as int, end as int), start - p);
+        if n < o1.len() {
+            assert(w =~= o1.skip(n));
+            assert(w.skip(1) =~= o1.skip(n + 1));
+            lemma_realized_window::<X, B>(slabs@, p, end as int, n);
+        }
+    }
+    r
+}
+
+/// `seek_to`, keeping the running sum: the value at item `at`, moving past
+/// it; `None`, moving nowhere, if `at` is behind the iterator.
+#[inline(always)]
+pub(crate) fn d_seek_to<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
+    core: &mut ICore<X::D>,
+    slabs: &'a [Slab<X::Tail>],
+    ix: Option<&SlabBTree<SlabAgg>>,
+    at: usize,
+    running: &mut i64,
+) -> (r: Option<Option<i64>>)
+    requires
+        at_run::<X, B>(*old(core), *old(running), slabs@),
+        dindex_ok::<X, B>(ix, slabs@),
+    ensures
+        at_run::<X, B>(*final(core), *final(running), slabs@),
+        at < old(core).pos ==> r is None && *final(core) == *old(core) && *final(running) == *old(running),
+        at >= old(core).pos ==> {
+            let (o, k) = (old(core).out::<X>(slabs@), at - old(core).pos);
+            &&& k < o.len() ==> r == Some(dval_at::<X, B>(slabs@, at as int)) && final(core).out::<X>(
+                slabs@,
+            ) == o.skip(k + 1) && final(core).pos == at + 1
+            &&& k >= o.len() ==> r is None && final(core).out::<X>(slabs@).len() == 0
+        },
+{
+    if at >= core.pos {
+        let ghost c0 = *core;
+        proof {
+            c0.lemma_out_window::<X>(slabs@);
+            if at - c0.pos < c0.out::<X>(slabs@).len() {
+                lemma_realized_window::<X, B>(slabs@, c0.pos as int, c0.pos + c0.items_left, at - c0.pos);
+            }
+        }
+        d_step::<X, B>(core, slabs, ix, at - core.pos, running)
+    } else {
+        None
+    }
+}
+
+/// The run of a run with its running sum.
+pub(crate) open spec fn run_of<V>(r: Option<(i64, Run<V>)>) -> Option<Run<V>> {
+    match r {
+        Some((_, run)) => Some(run),
+        None => None,
+    }
+}
+
+/// The next run of deltas in the window, as many equal ones as there
+/// are up to the window's end, with the running sum before it: what
+/// `DeltaIter::next_run` gives.
+#[inline(always)]
+pub(crate) fn d_run<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
+    core: &mut ICore<X::D>,
+    slabs: &'a [Slab<X::Tail>],
+    running: &mut i64,
+) -> (r: Option<(i64, Run<<X::D as Decode>::Item>)>)
+    requires
+        at_run::<X, B>(*old(core), *old(running), slabs@),
+    ensures
+        at_run::<X, B>(*final(core), *final(running), slabs@),
+        ({
+            let o = old(core).out::<X>(slabs@);
+            &&& first_run(o, run_of(r))
+            &&& r matches Some((p, run)) ==> {
+                &&& p == *old(running)
+                &&& final(core).out::<X>(slabs@) == o.skip(run.count as int)
+                &&& final(core).pos == old(core).pos + run.count
+            }
+        }),
+{
+    let prefix = *running;
+    let max = core.items_left;
+    proof {
+        assert(core.out::<X>(slabs@).len() <= max);
+    }
+    let run = d_next_run::<X, B>(core, slabs, max, running)?;
+    Some((prefix, run))
+}
+
+/// `DeltaRuns::shift_next`: move the window to `start..end` (only
+/// forwards, as `d_shift`) and give its first run, with the running sum
+/// before it.
+pub(crate) fn d_shift_run<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
+    core: &mut ICore<X::D>,
+    slabs: &'a [Slab<X::Tail>],
+    ix: Option<&SlabBTree<SlabAgg>>,
+    start: usize,
+    end: usize,
+    running: &mut i64,
+) -> (r: Option<(i64, Run<<X::D as Decode>::Item>)>)
+    requires
+        at_run::<X, B>(*old(core), *old(running), slabs@),
+        dindex_ok::<X, B>(ix, slabs@),
+    ensures
+        at_run::<X, B>(*final(core), *final(running), slabs@),
+        ({
+            let a = if start <= old(core).pos { old(core).pos as int } else { start as int };
+            let w = window(vals_of::<X>(slabs@), a, end as int);
+            &&& first_run(w, run_of(r))
+            &&& r matches Some((p, run)) ==> {
+                &&& p == crop(psum(dbefore::<X, B>(slabs@, a)))
+                &&& final(core).out::<X>(slabs@) == w.skip(run.count as int)
+            }
+        }),
+{
+    d_shift::<X, B>(core, slabs, ix, start, end, running);
+    d_run::<X, B>(core, slabs, running)
+}
+
+/// `DeltaRuns::seek_to`: advance to item `at` and give the run from
+/// there, with the running sum before it; `None`, moving nowhere, if `at`
+/// is behind the iterator.
+pub(crate) fn d_seek_run<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
+    core: &mut ICore<X::D>,
+    slabs: &'a [Slab<X::Tail>],
+    ix: Option<&SlabBTree<SlabAgg>>,
+    at: usize,
+    running: &mut i64,
+) -> (r: Option<(i64, Run<<X::D as Decode>::Item>)>)
+    requires
+        at_run::<X, B>(*old(core), *old(running), slabs@),
+        dindex_ok::<X, B>(ix, slabs@),
+    ensures
+        at_run::<X, B>(*final(core), *final(running), slabs@),
+        at < old(core).pos ==> r is None && *final(core) == *old(core) && *final(running) == *old(running),
+        at >= old(core).pos ==> {
+            let w = past(old(core).out::<X>(slabs@), at - old(core).pos);
+            &&& first_run(w, run_of(r))
+            &&& r matches Some((p, run)) ==> {
+                &&& p == crop(psum(dbefore::<X, B>(slabs@, at as int)))
+                &&& final(core).out::<X>(slabs@) == w.skip(run.count as int)
+            }
+        },
+{
+    if at < core.pos {
+        return None;
+    }
+    d_advance_to::<X, B>(core, slabs, ix, at, running);
+    d_run::<X, B>(core, slabs, running)
 }
 
 } // verus!

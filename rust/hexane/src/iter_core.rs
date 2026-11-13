@@ -328,6 +328,46 @@ pub(crate) open spec fn find_ok<T: Copy + Clone + std::fmt::Debug + Default>(
     &&& r.0 == s.len() ==> r.1 <= t && t - r.1 >= total(slab_lens(s))
 }
 
+/// The values of `v` in the window `a..b`: none if it starts at or past
+/// the end of `v` or is empty, and up to the end of `v` if it runs past.
+pub(crate) open spec fn window<V>(v: Seq<V>, a: int, b: int) -> Seq<V> {
+    if a >= v.len() || b <= a {
+        Seq::empty()
+    } else if b <= v.len() {
+        v.subrange(a, b)
+    } else {
+        v.subrange(a, v.len() as int)
+    }
+}
+
+/// What is left of `o` after moving `k` items on: all of it if `k` is
+/// not positive, none if `k` is past its end.
+pub(crate) open spec fn past<V>(o: Seq<V>, k: int) -> Seq<V> {
+    if k <= 0 {
+        o
+    } else if k <= o.len() {
+        o.skip(k)
+    } else {
+        Seq::empty()
+    }
+}
+
+/// Moving `k` on in a window is the window from `k` later.
+pub(crate) proof fn lemma_window_past<V>(v: Seq<V>, a: int, b: int, k: int)
+    requires
+        0 <= a,
+        0 <= k,
+    ensures
+        past(window(v, a, b), k) == window(v, a + k, b),
+{
+    let w = window(v, a, b);
+    if k > 0 && k <= w.len() {
+        assert(w.skip(k) =~= window(v, a + k, b));
+    } else if k > 0 {
+        assert(window(v, a + k, b) =~= Seq::<V>::empty());
+    }
+}
+
 proof fn lemma_concat_at<V>(cs: Seq<Seq<V>>, k: int)
     requires
         0 <= k < cs.len(),
@@ -527,6 +567,14 @@ impl<D: Decode> ICore<D> {
                 assert(slab_lens(s) =~= Seq::<nat>::empty());
             }
         }
+    }
+
+    /// What is left is the column's values in the window.
+    pub(crate) proof fn lemma_out_window<'a, X: Decoders<'a, D = D>>(&self, s: Seq<Slab<X::Tail>>)
+        ensures
+            self.out::<X>(s) == window(vals_of::<X>(s), self.pos as int, self.pos + self.items_left),
+    {
+        assert(self.out::<X>(s) =~= window(vals_of::<X>(s), self.pos as int, self.pos + self.items_left));
     }
 
     /// With no items left in the window, nothing is left.
@@ -1018,6 +1066,7 @@ impl<D: Decode> ICore<D> {
 
     /// The next run of equal values in the window, at most `max`, within
     /// one slab: what a `fold` passes on.
+    #[verifier::spinoff_prover]
     #[inline(always)]
     pub(crate) fn run_once<'a, X: Decoders<'a, D = D>>(&mut self, slabs: &'a [Slab<X::Tail>], max: usize) -> (r: Option<Run<D::Item>>)
         requires
@@ -1631,6 +1680,293 @@ impl<D: Decode> ICore<D> {
     {
         self.items_left = end.saturating_sub(self.pos);
     }
+
+    /// Advance so that the item at `target` comes next; at or past it
+    /// already, stay.
+    #[inline]
+    pub(crate) fn advance_to<'a, X: Decoders<'a, D = D>, F: Fn(usize) -> (usize, usize), G: Fn(usize) -> usize>(
+        &mut self,
+        slabs: &'a [Slab<X::Tail>],
+        target: usize,
+        find: &F,
+        start_of: &G,
+    )
+        requires
+            old(self).wf::<X>(slabs@),
+            lookups(slabs@, *find, *start_of),
+        ensures
+            final(self).wf::<X>(slabs@),
+            final(self).out::<X>(slabs@) == past(old(self).out::<X>(slabs@), target - old(self).pos),
+            target <= old(self).pos ==> final(self).pos == old(self).pos,
+            old(self).pos < target <= old(self).pos + old(self).out::<X>(slabs@).len() ==> final(self).pos
+                == target,
+    {
+        if target > self.pos {
+            self.nth::<X, F, G>(slabs, target - self.pos - 1, find, start_of);
+        }
+    }
+
+    /// Move the window to `start..end`. It moves only forwards: from a
+    /// `start` before the iterator, the window starts where it stands.
+    #[inline]
+    pub(crate) fn shift<'a, X: Decoders<'a, D = D>, F: Fn(usize) -> (usize, usize), G: Fn(usize) -> usize>(
+        &mut self,
+        slabs: &'a [Slab<X::Tail>],
+        start: usize,
+        end: usize,
+        find: &F,
+        start_of: &G,
+    )
+        requires
+            old(self).wf::<X>(slabs@),
+            lookups(slabs@, *find, *start_of),
+        ensures
+            final(self).wf::<X>(slabs@),
+            final(self).out::<X>(slabs@) == window(
+                vals_of::<X>(slabs@),
+                if start <= old(self).pos { old(self).pos as int } else { start as int },
+                end as int,
+            ),
+            start <= old(self).pos ==> final(self).pos == old(self).pos,
+            old(self).pos < start <= end && start <= vals_of::<X>(slabs@).len() ==> final(self).pos == start,
+    {
+        let ghost p = self.pos as int;
+        self.set_max::<X>(slabs, end);
+        proof {
+            self.lemma_out_window::<X>(slabs@);
+            if end < p {
+                assert(window(vals_of::<X>(slabs@), p, p) =~= window(vals_of::<X>(slabs@), p, end as int));
+            }
+            if start > p {
+                lemma_window_past(vals_of::<X>(slabs@), p, end as int, start - p);
+            }
+        }
+        self.advance_to::<X, F, G>(slabs, start, find, start_of);
+    }
+
+    /// Move the window to `start..end` and give its first value; `start`
+    /// is at or after the iterator.
+    #[inline]
+    pub(crate) fn shift_next<'a, X: Decoders<'a, D = D>, F: Fn(usize) -> (usize, usize), G: Fn(usize) -> usize>(
+        &mut self,
+        slabs: &'a [Slab<X::Tail>],
+        start: usize,
+        end: usize,
+        find: &F,
+        start_of: &G,
+    ) -> (r: Option<D::Item>)
+        requires
+            old(self).wf::<X>(slabs@),
+            lookups(slabs@, *find, *start_of),
+            start >= old(self).pos,
+        ensures
+            final(self).wf::<X>(slabs@),
+            ({
+                let w = window(vals_of::<X>(slabs@), start as int, end as int);
+                &&& w.len() > 0 ==> {
+                    &&& r == Some(w[0])
+                    &&& final(self).out::<X>(slabs@) == w.skip(1)
+                    &&& final(self).pos == start + 1
+                }
+                &&& w.len() == 0 ==> r is None && final(self).out::<X>(slabs@).len() == 0
+            }),
+    {
+        let ghost p = self.pos as int;
+        self.set_max::<X>(slabs, end);
+        let ghost o1 = self.out::<X>(slabs@);
+        proof {
+            self.lemma_out_window::<X>(slabs@);
+            if end < p {
+                assert(window(vals_of::<X>(slabs@), p, p) =~= window(vals_of::<X>(slabs@), p, end as int));
+            }
+            lemma_window_past(vals_of::<X>(slabs@), p, end as int, start - p);
+        }
+        let r = self.nth::<X, F, G>(slabs, start - self.pos, find, start_of);
+        proof {
+            let (w, n) = (window(vals_of::<X>(slabs@), start as int, end as int), start - p);
+            if n < o1.len() {
+                assert(w =~= o1.skip(n));
+                assert(w.skip(1) =~= o1.skip(n + 1));
+            }
+        }
+        r
+    }
+
+    /// Move `amount` items on.
+    #[inline]
+    pub(crate) fn advance_by<'a, X: Decoders<'a, D = D>, F: Fn(usize) -> (usize, usize), G: Fn(usize) -> usize>(
+        &mut self,
+        slabs: &'a [Slab<X::Tail>],
+        amount: usize,
+        find: &F,
+        start_of: &G,
+    )
+        requires
+            old(self).wf::<X>(slabs@),
+            lookups(slabs@, *find, *start_of),
+        ensures
+            final(self).wf::<X>(slabs@),
+            final(self).out::<X>(slabs@) == past(old(self).out::<X>(slabs@), amount as int),
+            amount <= old(self).out::<X>(slabs@).len() ==> final(self).pos == old(self).pos + amount,
+    {
+        let ghost o = self.out::<X>(slabs@);
+        proof {
+            self.lemma_out_window::<X>(slabs@);
+            // saturated, both move past everything left
+            if amount > usize::MAX - self.pos {
+                assert(past(o, usize::MAX - self.pos) =~= past(o, amount as int));
+            }
+        }
+        self.advance_to::<X, F, G>(slabs, self.pos.saturating_add(amount), find, start_of);
+    }
+
+    /// Give the item at `at` and move past it; `None`, moving nowhere, if
+    /// `at` is behind the iterator.
+    #[inline]
+    pub(crate) fn seek_to<'a, X: Decoders<'a, D = D>, F: Fn(usize) -> (usize, usize), G: Fn(usize) -> usize>(
+        &mut self,
+        slabs: &'a [Slab<X::Tail>],
+        at: usize,
+        find: &F,
+        start_of: &G,
+    ) -> (r: Option<D::Item>)
+        requires
+            old(self).wf::<X>(slabs@),
+            lookups(slabs@, *find, *start_of),
+        ensures
+            final(self).wf::<X>(slabs@),
+            at < old(self).pos ==> r is None && *final(self) == *old(self),
+            at >= old(self).pos ==> {
+                let (o, k) = (old(self).out::<X>(slabs@), at - old(self).pos);
+                &&& k < o.len() ==> r == Some(o[k]) && final(self).out::<X>(slabs@) == o.skip(k + 1)
+                    && final(self).pos == at + 1
+                &&& k >= o.len() ==> r is None && final(self).out::<X>(slabs@).len() == 0
+            },
+    {
+        if at >= self.pos {
+            self.nth::<X, F, G>(slabs, at - self.pos, find, start_of)
+        } else {
+            None
+        }
+    }
+
+    /// The next run of equal values in the window: as many as there
+    /// are, up to the window's end.
+    #[inline(always)]
+    pub(crate) fn next_run<'a, X: Decoders<'a, D = D>>(&mut self, slabs: &'a [Slab<X::Tail>]) -> (r: Option<Run<D::Item>>)
+        requires
+            old(self).wf::<X>(slabs@),
+        ensures
+            final(self).wf::<X>(slabs@),
+            runs_from::<X>(*old(self), *final(self), slabs@, r),
+    {
+        let max = self.items_left;
+        proof {
+            assert(self.out::<X>(slabs@).len() <= max);
+        }
+        self.next_run_max::<X>(slabs, max)
+    }
+
+    /// Move the window to `start..end` (only forwards, as `shift`) and
+    /// give its first run.
+    #[inline]
+    pub(crate) fn shift_run<'a, X: Decoders<'a, D = D>, F: Fn(usize) -> (usize, usize), G: Fn(usize) -> usize>(
+        &mut self,
+        slabs: &'a [Slab<X::Tail>],
+        start: usize,
+        end: usize,
+        find: &F,
+        start_of: &G,
+    ) -> (r: Option<Run<D::Item>>)
+        requires
+            old(self).wf::<X>(slabs@),
+            lookups(slabs@, *find, *start_of),
+        ensures
+            final(self).wf::<X>(slabs@),
+            ({
+                let w = window(
+                    vals_of::<X>(slabs@),
+                    if start <= old(self).pos { old(self).pos as int } else { start as int },
+                    end as int,
+                );
+                &&& first_run(w, r)
+                &&& r matches Some(run) ==> final(self).out::<X>(slabs@) == w.skip(run.count as int)
+            }),
+    {
+        self.shift::<X, F, G>(slabs, start, end, find, start_of);
+        self.next_run::<X>(slabs)
+    }
+
+    /// Advance to the item at `at` and give the run from there; `None`,
+    /// moving nowhere, if `at` is behind the iterator.
+    #[inline]
+    pub(crate) fn seek_run<'a, X: Decoders<'a, D = D>, F: Fn(usize) -> (usize, usize), G: Fn(usize) -> usize>(
+        &mut self,
+        slabs: &'a [Slab<X::Tail>],
+        at: usize,
+        find: &F,
+        start_of: &G,
+    ) -> (r: Option<Run<D::Item>>)
+        requires
+            old(self).wf::<X>(slabs@),
+            lookups(slabs@, *find, *start_of),
+        ensures
+            final(self).wf::<X>(slabs@),
+            at < old(self).pos ==> r is None && *final(self) == *old(self),
+            at >= old(self).pos ==> {
+                let w = past(old(self).out::<X>(slabs@), at - old(self).pos);
+                &&& first_run(w, r)
+                &&& r matches Some(run) ==> final(self).out::<X>(slabs@) == w.skip(run.count as int)
+            },
+    {
+        if at < self.pos {
+            return None;
+        }
+        self.advance_to::<X, F, G>(slabs, at, find, start_of);
+        self.next_run::<X>(slabs)
+    }
+}
+
+/// The run `r` is the first of `o`, as long as its values are equal; or
+/// `o` is empty.
+pub(crate) open spec fn first_run<V>(o: Seq<V>, r: Option<Run<V>>) -> bool {
+    match r {
+        Some(run) => {
+            &&& 1 <= run.count <= o.len()
+            &&& o.take(run.count as int) == Seq::new(run.count as nat, |_i: int| run.value)
+            &&& run.count < o.len() ==> o[run.count as int] != run.value
+        },
+        None => o.len() == 0,
+    }
+}
+
+/// The run `r` is the next one the window `c0` has left (`first_run`),
+/// and `c` the iterator past it.
+pub(crate) open spec fn runs_from<'a, X: Decoders<'a>>(
+    c0: ICore<X::D>,
+    c: ICore<X::D>,
+    s: Seq<Slab<X::Tail>>,
+    r: Option<Run<<X::D as Decode>::Item>>,
+) -> bool {
+    &&& first_run(c0.out::<X>(s), r)
+    &&& r matches Some(run) ==> {
+        &&& c.out::<X>(s) == c0.out::<X>(s).skip(run.count as int)
+        &&& c.pos == c0.pos + run.count
+    }
+}
+
+/// The index lookups `find` and `start_of` answer right for slabs `s`:
+/// what a long seek (`nth`) is given.
+pub(crate) open spec fn lookups<T: Copy + Clone + std::fmt::Debug + Default, F: Fn(usize) -> (usize, usize), G: Fn(usize) -> usize>(
+    s: Seq<Slab<T>>,
+    find: F,
+    start_of: G,
+) -> bool {
+    &&& forall|t: usize| #[trigger] find.requires((t,))
+    &&& forall|t: usize, x: (usize, usize)| #[trigger] find.ensures((t,), x) ==> find_ok(s, t, x)
+    &&& forall|i: usize| i <= s.len() ==> #[trigger] start_of.requires((i,))
+    &&& forall|i: usize, n: usize|
+        #[trigger] start_of.ensures((i,), n) ==> i <= s.len() ==> n == sum(slab_lens(s), 0, i as int)
 }
 
 } // verus!
