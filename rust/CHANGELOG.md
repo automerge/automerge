@@ -1,7 +1,16 @@
 ## Unreleased
 
+### Breaking Changes
+
+* The actor index hint in `ExId::Id` is now an `Option<u32>`. It's `Some`
+  for IDs the document produced, and `None` for IDs read with
+  `TryFrom<&[u8]>`. Code that constructs or destructures `ExId::Id` must be
+  updated.
+
 ### Fixed
 
+* `ExId::to_bytes` gives the same bytes for an object before and after a merge
+  that changes the order of the document's actors.
 * `ReadDoc::get_marks` is now much faster (a benchmark on a 100,000 character
   text went from 9ms to 1.6us).
 * `ReadDoc::get_marks` uses the same units as `length`, `marks`, and `get`

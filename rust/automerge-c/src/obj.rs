@@ -141,7 +141,8 @@ pub unsafe extern "C" fn AMobjIdEqual(obj_id1: *const AMobjId, obj_id2: *const A
 /// \brief Gets the index component of an object identifier.
 ///
 /// \param[in] obj_id A pointer to an `AMobjId` struct.
-/// \return A 64-bit unsigned integer.
+/// \return A 64-bit unsigned integer, which is `0` for an object identifier
+///         without an index, such as one read from bytes.
 /// \pre \p obj_id `!= NULL`
 /// \internal
 ///
@@ -153,7 +154,7 @@ pub unsafe extern "C" fn AMobjIdIndex(obj_id: *const AMobjId) -> usize {
 
     if let Some(obj_id) = obj_id.as_ref() {
         match obj_id.as_ref() {
-            Id(_, _, index) => *index,
+            Id(_, _, index) => index.map_or(0, |index| index as usize),
             Root => 0,
         }
     } else {
