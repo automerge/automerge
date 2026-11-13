@@ -24,6 +24,8 @@ use crate::{
 
 mod boundary_memo;
 use boundary_memo::BoundaryMemo;
+mod fragment;
+use fragment::FragmentCache;
 
 /// The graph of changes
 ///
@@ -52,9 +54,8 @@ pub(crate) struct ChangeGraph {
     clock_cache: HashMap<NodeIdx, SeqClock>,
     /// Each actor's changes, in `seq` order.
     seq_index: ActorIndexed<Vec<NodeIdx>>,
-    fragment_top: SeqClock,
-    fragments: Vec<FragmentNode>,
     boundary_memo: BoundaryMemo,
+    fragment_cache: FragmentCache,
 }
 
 pub(crate) struct ChangeGraphCols(ChangeGraph);
@@ -112,9 +113,8 @@ impl ChangeGraph {
             heads: BTreeSet::new(),
             clock_cache: HashMap::new(),
             seq_index: ActorIndexed::new(actors),
-            fragments: vec![],
-            fragment_top: SeqClock::new(actors),
             boundary_memo: BoundaryMemo::default(),
+            fragment_cache: FragmentCache::new(actors),
         }
     }
 
@@ -187,10 +187,7 @@ impl ChangeGraph {
         for clock in self.clock_cache.values_mut() {
             clock.shift_actor(shift)
         }
-        for f in &mut self.fragments {
-            f.clock.shift_actor(shift)
-        }
-        self.fragment_top.shift_actor(shift);
+        self.fragment_cache.insert_actor(shift);
         self.seq_index.insert(shift, vec![]);
     }
 
@@ -208,10 +205,7 @@ impl ChangeGraph {
         for clock in &mut self.clock_cache.values_mut() {
             clock.remove_actor(removal)
         }
-        for fragment in &mut self.fragments {
-            fragment.clock.remove_actor(removal)
-        }
-        self.fragment_top.remove_actor(removal);
+        self.fragment_cache.remove_actor(removal);
     }
 
     pub(crate) fn len(&self) -> usize {
@@ -247,6 +241,16 @@ impl ChangeGraph {
             .get(actor)
             .map(|v| v.len() as u64)
             .unwrap_or(0)
+    }
+
+    /// Return the stored actor-table index and sequence for an exact change hash.
+    ///
+    /// Returns `None` if the hash is absent.
+    pub(crate) fn actor_seq_for_hash(&self, hash: &ChangeHash) -> Option<(usize, u32)> {
+        let index = self.hash_to_index(hash)?;
+        let actor = usize::from(self.actors[index]);
+        let seq = self.seq[index];
+        Some((actor, seq))
     }
 
     /// Returns `true` if `actor_index` can safely advance its sequence under
@@ -584,11 +588,7 @@ impl ChangeGraph {
         if head.fragment_level() == 0 {
             self.loose_commit(n)
         } else {
-            assert!(self.fragments.is_sorted_by(|a, b| a.head.0 < b.head.0));
-            self.fragments
-                .binary_search_by_key(&n.0, |f| f.head.0)
-                .ok()
-                .map(|i| self.fragments[i].export(self))
+            self.fragment_cache.get_fragment(self, head)
         }
     }
 
@@ -613,7 +613,7 @@ impl ChangeGraph {
         heads: &'a [ChangeHash],
         levels: R,
     ) -> impl Iterator<Item = Fragment> + 'a {
-        self.fragments_filtered(heads, levels, |_| true)
+        self.fragment_cache.fragments(self, heads, levels)
     }
 
     pub(crate) fn fragments_filtered<'a, R: RangeBounds<usize> + 'a>(
@@ -622,29 +622,8 @@ impl ChangeGraph {
         levels: R,
         include_head: impl Fn(&ChangeHash) -> bool + Copy + 'a,
     ) -> impl Iterator<Item = Fragment> + 'a {
-        let heads = if levels.contains(&0) { heads } else { &[] };
-        self.loose_fragments(heads, include_head).chain(
-            self.fragments
-                .iter()
-                .rev()
-                .filter(move |f| levels.contains(&self.hashes[f.head.0 as usize].fragment_level()))
-                .filter(move |f| include_head(&self.hashes[f.head.0 as usize]))
-                .map(|f| f.export(self)),
-        )
-    }
-
-    fn loose_fragments<'a>(
-        &'a self,
-        heads: &'a [ChangeHash],
-        include_head: impl Fn(&ChangeHash) -> bool + Copy + 'a,
-    ) -> impl Iterator<Item = Fragment> + 'a {
-        let nodes = heads
-            .iter()
-            .filter(|h| h.fragment_level() == 0)
-            .filter_map(|h| self.nodes_by_hash.get(h).copied());
-        self.bfs_until_clock(nodes, &self.fragment_top)
-            .filter(move |n| include_head(&self.hashes[n.0 as usize]))
-            .filter_map(|n| self.loose_commit(n))
+        self.fragment_cache
+            .fragments_matching(self, heads, levels, move |head| include_head(&head))
     }
 
     fn fragment_content<'a>(
@@ -731,19 +710,8 @@ impl ChangeGraph {
             return;
         }
         let deps = self.fragment_boundary(head, level);
-        let mut supercede = vec![];
-        let clock = self.calculate_clock([head].into());
-        // Compact the covering cache independently of boundary discovery.
-        for (i, f) in self.fragments.iter().enumerate().rev() {
-            if clock.covers(&f.clock) && self.hashes[f.head.0 as usize].fragment_level() < level {
-                supercede.push(i);
-            }
-        }
-        for i in supercede {
-            self.fragments.remove(i);
-        }
-        SeqClock::merge(&mut self.fragment_top, &clock);
-        self.fragments.push(FragmentNode { head, deps, clock });
+        let candidate = self.fragment_cache.candidate(self, head, deps);
+        self.fragment_cache.install(candidate);
     }
 
     pub(crate) fn add_change(
@@ -797,7 +765,7 @@ impl ChangeGraph {
     }
 
     fn cache_clock(&mut self, node_idx: NodeIdx) -> SeqClock {
-        let mut clock = self.fragment_top.empty_like();
+        let mut clock = self.fragment_cache.empty_clock();
         let mut to_visit = BTreeSet::from([node_idx]);
 
         self.calculate_clock_inner(&mut clock, &mut to_visit, CACHE_STEP as usize * 2);
@@ -887,7 +855,7 @@ impl ChangeGraph {
     }
 
     fn calculate_clock(&self, mut to_visit: BTreeSet<NodeIdx>) -> SeqClock {
-        let mut clock = self.fragment_top.empty_like();
+        let mut clock = self.fragment_cache.empty_clock();
 
         self.calculate_clock_inner(&mut clock, &mut to_visit, usize::MAX);
 
@@ -1113,8 +1081,7 @@ impl ChangeGraphCols {
         let clock_cache = HashMap::default();
         let hashes = vec![];
         let nodes_by_hash = HashMap::new();
-        let fragments = vec![];
-        let fragment_top = SeqClock::new(actor_table);
+        let fragment_cache = FragmentCache::new(actor_table);
 
         Ok(ChangeGraphCols(ChangeGraph {
             edges,
@@ -1133,9 +1100,8 @@ impl ChangeGraphCols {
             nodes_by_hash,
             clock_cache,
             seq_index,
-            fragments,
-            fragment_top,
             boundary_memo: BoundaryMemo::default(),
+            fragment_cache,
         }))
     }
 }
@@ -1234,6 +1200,33 @@ mod tests {
             matches!(err, LoadError::AuthorOnNonInitialSeq(2, _)),
             "expected AuthorOnNonInitialSeq(2, _), got {err:?}"
         );
+    }
+
+    #[test]
+    fn actor_seq_for_hash_resolves_exact_changes_including_empty_changes() {
+        let mut builder = TestGraphBuilder::new();
+        let actor_a = builder.actor();
+        let actor_b = builder.actor();
+
+        let a1 = builder.change(&actor_a, 10, &[]);
+        let a2 = builder.change(&actor_a, 0, &[a1]);
+        let b1 = builder.change(&actor_b, 1, &[]);
+        let graph = builder.build();
+
+        assert_eq!(
+            graph.actor_seq_for_hash(&a1),
+            Some((builder.index(&actor_a), 1)),
+        );
+        // Empty changes advance the change sequence, not the operation counter.
+        assert_eq!(
+            graph.actor_seq_for_hash(&a2),
+            Some((builder.index(&actor_a), 2)),
+        );
+        assert_eq!(
+            graph.actor_seq_for_hash(&b1),
+            Some((builder.index(&actor_b), 1)),
+        );
+        assert_eq!(graph.actor_seq_for_hash(&ChangeHash([0xff; 32])), None,);
     }
 
     #[test]
@@ -2164,39 +2157,6 @@ impl<'a> Iterator for ChangeIter<'a> {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
-struct FragmentNode {
-    head: NodeIdx,
-    deps: Vec<NodeIdx>,
-    clock: SeqClock,
-}
-
-impl FragmentNode {
-    fn export(&self, graph: &ChangeGraph) -> Fragment {
-        let head = graph.hashes[self.head.0 as usize];
-        let level = head.fragment_level();
-        let boundary = self
-            .deps
-            .iter()
-            .map(|d| graph.hashes[d.0 as usize])
-            .collect();
-        let clock = graph.calculate_clock(self.deps.clone().into_iter().collect());
-        let members: Vec<_> = graph.fragment_content(self.head, &clock).collect();
-        let checkpoints = members
-            .iter()
-            .copied()
-            .filter(|h| *h != head && h.fragment_level() > 0)
-            .collect();
-        Fragment {
-            head,
-            level,
-            boundary,
-            checkpoints,
-            members,
-        }
-    }
-}
-
 /// EXPERIMENTAL: A section of the change graph identified by its head hash.
 ///
 /// This is an experimental API, it may change or be removed without warning.
@@ -2204,6 +2164,7 @@ impl FragmentNode {
 #[derive(Debug, PartialEq, Clone)]
 pub struct Fragment {
     pub head: ChangeHash,
+    /// Hash-hardness level of the head; zero for loose changes.
     pub level: usize,
     /// The first ancestors at or above this fragment's level on each path.
     /// They need not remain standalone heads in the covering fragment cache.
