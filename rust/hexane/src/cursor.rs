@@ -393,6 +393,12 @@ pub(crate) trait Weigh<E: Slabs, W> {
             r ==> Self::dom_ok(slabs@),
     ;
 
+    /// Whether the weights `ws` of a column of `len` items add up to a
+    /// total the weights can hold (a prefix column's sum fits its prefix
+    /// type): a build checks it before its index adds them up. Not part
+    /// of the proof: it can only fail.
+    fn total_ok(ws: &[W], len: usize) -> bool;
+
     /// A column of no values is in the domain.
     proof fn lemma_dom_empty(s: Seq<Slab<E::Tail>>)
         requires

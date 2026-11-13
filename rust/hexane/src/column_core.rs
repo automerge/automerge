@@ -97,7 +97,7 @@ use crate::splices::applied;
 use crate::splices::{wrong_columns, Normalized};
 use crate::weights::{DeltaModel, PrefixModel};
 use std::marker::PhantomData;
-use std::ops::{Add, AddAssign, SubAssign};
+use std::ops::{Add, AddAssign, Range, SubAssign};
 use vstd::prelude::*;
 
 verus! {
@@ -323,8 +323,9 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> ColumnCore<E, W, I, G> {
     /// The column of well-formed slabs `slabs` (cut by a verified encoder
     /// or fill), each weighed by its weight model, with segment budget
     /// `max_segments`. Panics if the items are more than an edit can count
-    /// (`usize::MAX - 3`), or the values are outside the weight model's
-    /// domain (`Weigh::dom_check`).
+    /// (`usize::MAX - 3`), the values are outside the weight model's
+    /// domain (`Weigh::dom_check`), or the weights' total does not fit
+    /// (`Weigh::total_ok`: a prefix column's sum).
     pub(crate) fn from_cut(slabs: Vec<Slab<E::Tail>>, max_segments: usize) -> (r: Self)
         requires
             all_ok::<E>(slabs@),
@@ -360,6 +361,10 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> ColumnCore<E, W, I, G> {
         }
         if !G::dom_check(&slabs, len) {
             out_of_domain();
+        }
+        // before the index adds them up
+        if !G::total_ok(&ws, len) {
+            crate::weights::sum_overflows();
         }
         match Self::from_slabs(slabs, ws, max_segments) {
             Some(c) => c,
@@ -804,10 +809,8 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> ColumnCore<E, W, I, G> {
     /// `remap`: the column of what `m` gives for each of this column's
     /// values, read as model `X` reads them, called once per run and
     /// appended through the encoder `N`, with this column's segment
-    /// budget. Panics, as `from_cut` does, if the values are outside the
-    /// weight model's domain. With the values `m` gave (`r.1`), one per
-    /// position.
-    #[verifier::spinoff_prover]
+    /// budget (`from_mapped_runs` over a reader of the whole column). With
+    /// the values `m` gave (`r.1`), one per position.
     pub(crate) fn remap<'a, X: Decoders<'a, Tail = E::Tail>, N: Encodes<E>, M: Mapping<<X::D as Decode>::Item, N::In>>(
         &'a self,
         m: &M,
@@ -827,63 +830,167 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> ColumnCore<E, W, I, G> {
         }
         let len = self.len();
         let mut core = self.reader::<X>(0, len);
-        let slabs = self.slabs();
-        let mut enc = N::with_budget(self.max_segments);
-        let ghost rd = crate::iter_core::vals_of::<X>(self.slabs_spec());
-        let ghost mut ws: Seq<N::In> = Seq::empty();
         self.lemma_column();
         proof {
-            lemma_vals_own::<E, X>(slabs@);
-            assert(rd.subrange(0, len as int) =~= rd.skip(0));
+            lemma_vals_own::<E, X>(self.slabs_spec());
+            assert(crate::iter_core::vals_of::<X>(self.slabs_spec()).subrange(0, len as int)
+                =~= crate::iter_core::vals_of::<X>(self.slabs_spec()));
         }
-        while core.pos < len
+        Self::from_mapped_runs::<X, N, M>(&mut core, self.slabs(), self.max_segments, m)
+    }
+
+    /// Whether `copy_ranges` from `src` over its `ranges`, with `points`
+    /// splice points, should run inverted (`copy`): a heuristic, from the
+    /// slabs' item and segment counts, weighing the source segments the
+    /// direct way decodes and re-encodes against re-encoding this column
+    /// and the seams the inverted way cuts. Either way gives the same
+    /// column; proved only to run without panicking or overflowing (it
+    /// saturates where counts could not add up), and to invert only
+    /// between columns of the same segment budget, whose slabs an inverted
+    /// copy keeps.
+    pub(crate) fn invert_pays(&self, src: &Self, ranges: &[Range<usize>], points: usize, factor: usize) -> (r: bool)
+        ensures
+            r ==> self.budget() == src.budget(),
+    {
+        let max = self.max_segments;
+        let ss = src.slabs();
+        let n = ss.len();
+        if max != src.max_segments || n < 8 {
+            return false;
+        }
+        let mut item_prefix: Vec<usize> = Vec::with_capacity(n.saturating_add(1));
+        let mut seg_prefix: Vec<usize> = Vec::with_capacity(n.saturating_add(1));
+        item_prefix.push(0);
+        seg_prefix.push(0);
+        let mut k: usize = 0;
+        while k < n
             invariant
-                slabs@ == self.slabs_spec(),
-                rd == crate::iter_core::vals_of::<X>(slabs@),
-                len == rd.len(),
-                len == self@.len(),
-                core.wf::<X>(slabs@),
-                core.pos <= len,
-                core.out::<X>(slabs@) == rd.skip(core.pos as int),
-                enc.e_inv(),
-                ws.len() == core.pos,
-                enc.e_values().len() == core.pos,
-                forall|i: int| 0 <= i < core.pos ==> m.maps(rd[i], #[trigger] ws[i]) && enc.e_values()[i] == N::val(ws[i]),
-            decreases len - core.pos,
+                k <= n,
+                n == ss@.len(),
+                item_prefix@.len() == k + 1,
+                seg_prefix@.len() == k + 1,
+            decreases n - k,
         {
-            let ghost (p, w0) = (core.pos as int, ws);
+            let a = item_prefix[k].saturating_add(ss[k].len);
+            let b = seg_prefix[k].saturating_add(ss[k].segments);
+            item_prefix.push(a);
+            seg_prefix.push(b);
+            k += 1;
+        }
+        // segments the direct way would decode and re-encode
+        let mut retained: usize = 0;
+        let mut i: usize = 0;
+        while i < ranges.len()
+            invariant
+                n == ss@.len(),
+                8 <= n,
+                item_prefix@.len() == n + 1,
+                seg_prefix@.len() == n + 1,
+            decreases ranges.len() - i,
+        {
+            let (start, end) = (ranges[i].start, ranges[i].end);
+            // a splice that only deletes copies nothing
+            if start < end {
+                let sa = slab_of(&item_prefix, start);
+                let sb = slab_of(&item_prefix, end - 1);
+                if sa == sb {
+                    retained = retained.saturating_add(ss[sa].segments);
+                } else {
+                    let between = if sa < sb { seg_prefix[sb].saturating_sub(seg_prefix[sa + 1]) } else { 0 };
+                    retained = retained.saturating_add(ss[sa].segments).saturating_add(ss[sb].segments).saturating_add(
+                        between,
+                    );
+                }
+            }
+            i += 1;
+        }
+        // the direct way also cuts a seam in this column per splice point
+        let direct_cost = retained.saturating_add(points.saturating_mul(2).saturating_mul(max));
+        // the inverted way re-encodes all of this column, the boundary
+        // segments per gap seam and per splice point, and keeps books per
+        // slab
+        let mine = self.slabs();
+        let mut dest_segs: usize = 0;
+        let mut j: usize = 0;
+        while j < mine.len()
+            decreases mine.len() - j,
+        {
+            dest_segs = dest_segs.saturating_add(mine[j].segments);
+            j += 1;
+        }
+        let seam_segs = ranges.len().saturating_add(points).saturating_mul(2).saturating_mul(max);
+        let invert_cost = dest_segs.saturating_add(seam_segs).saturating_add(n);
+        direct_cost > factor.saturating_mul(invert_cost)
+    }
+
+    /// The column of what `m` gives for each value the iterator `core`
+    /// has left (all of them, read as model `X` reads them), called once
+    /// per run and appended through the encoder `N`, with segment budget
+    /// `max`; panics, as `from_cut` does, if the values are outside the
+    /// weight model's domain. With the values `m` gave (`r.1`), one per
+    /// position.
+    #[verifier::spinoff_prover]
+    pub(crate) fn from_mapped_runs<'a, X: Decoders<'a, Tail = E::Tail>, N: Encodes<E>, M: Mapping<<X::D as Decode>::Item, N::In>>(
+        core: &mut ICore<X::D>,
+        slabs: &'a [Slab<E::Tail>],
+        max: usize,
+        m: &M,
+    ) -> (r: (Self, Ghost<Seq<N::In>>))
+        requires
+            old(core).wf::<X>(slabs@),
+            max >= 2,
+        ensures
+            r.0.ready(),
+            r.0.budget() == max,
+            ({
+                let o = old(core).out::<X>(slabs@);
+                &&& r.0@.len() == o.len()
+                &&& r.1@.len() == o.len()
+                &&& forall|i: int| 0 <= i < o.len() ==> m.maps(o[i], #[trigger] r.1@[i]) && r.0@[i] == N::val(r.1@[i])
+            }),
+    {
+        let mut enc = N::with_budget(max);
+        let ghost o = core.out::<X>(slabs@);
+        let ghost mut ws: Seq<N::In> = Seq::empty();
+        let mut done = false;
+        while !done
+            invariant
+                core.wf::<X>(slabs@),
+                ws.len() <= o.len(),
+                !done ==> core.out::<X>(slabs@) == o.skip(ws.len() as int),
+                done ==> ws.len() == o.len(),
+                enc.e_inv(),
+                enc.e_values().len() == ws.len(),
+                forall|i: int| 0 <= i < ws.len() ==> m.maps(o[i], #[trigger] ws[i]) && enc.e_values()[i] == N::val(ws[i]),
+            decreases o.len() - ws.len() + if done { 0int } else { 1int },
+        {
+            let ghost w0 = ws;
             match core.next_run::<X>(slabs) {
                 Some(run) => {
                     let x = m.apply(run.value);
                     let ghost gx = x;
                     enc.put(x, run.count);
                     proof {
-                        let n = run.count as int;
+                        let (p, n) = (w0.len() as int, run.count as int);
                         ws = w0 + Seq::new(n as nat, |_i: int| gx);
-                        assert(rd.skip(p).take(n) == Seq::new(n as nat, |_i: int| run.value));
-                        assert forall|i: int| 0 <= i < core.pos implies m.maps(rd[i], #[trigger] ws[i])
+                        assert(o.skip(p).take(n) == Seq::new(n as nat, |_i: int| run.value));
+                        assert forall|i: int| 0 <= i < ws.len() implies m.maps(o[i], #[trigger] ws[i])
                             && enc.e_values()[i] == N::val(ws[i]) by {
                             if i >= p {
-                                assert(rd.skip(p).take(n)[i - p] == rd[i]);
+                                assert(o.skip(p).take(n)[i - p] == o[i]);
                             }
                         }
-                        assert(rd.skip(p).skip(n) =~= rd.skip(p + n));
+                        assert(o.skip(p).skip(n) =~= o.skip(p + n));
                     }
                 },
                 None => {
-                    // the window has values left, so there is a run
-                    proof {
-                        assert(rd.skip(p).len() > 0);
-                        assert(false);
-                    }
+                    // nothing left: every value has its run
+                    done = true;
                 },
             }
         }
-        proof {
-            assert(core.pos == len);
-        }
         let cut = enc.take();
-        let col = Self::from_cut(cut, self.max_segments);
+        let col = Self::from_cut(cut, max);
         (col, Ghost(ws))
     }
 }
@@ -1470,6 +1577,34 @@ fn delta_running_decode<'a, E, X, B>(slabs: &'a [Slab<E::Tail>], len: usize, pos
         assert(crate::prefix_core::before::<X>(s, pos as int) == crate::iter_core::vals_of::<X>(s).take(pos as int));
     }
     running
+}
+
+/// The slab holding row `row`, by the slabs' item prefix sums `prefix`
+/// (`prefix[0] == 0`, ascending): the last index whose sum is at or
+/// before `row`, kept below the last entry (a binary search, as
+/// `partition_point(|p| p <= row) - 1`).
+fn slab_of(prefix: &[usize], row: usize) -> (r: usize)
+    requires
+        prefix@.len() >= 2,
+    ensures
+        r + 1 < prefix@.len(),
+{
+    let mut lo: usize = 0;
+    let mut hi: usize = prefix.len();
+    while lo < hi
+        invariant
+            lo <= hi <= prefix@.len(),
+        decreases hi - lo,
+    {
+        let mid = lo + (hi - lo) / 2;
+        if prefix[mid] <= row {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    let k = lo.saturating_sub(1);
+    if k + 1 < prefix.len() { k } else { prefix.len() - 2 }
 }
 
 } // verus!

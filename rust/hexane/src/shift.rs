@@ -20,18 +20,22 @@ use crate::ColumnValueRef;
 ///
 /// # Contract
 ///
-/// An implementation gives one item per position, from a fixed sequence
-/// of them: `next()` gives the item at [`get_pos`](Self::get_pos) and
-/// moves on by one, while the position is inside the window
-/// (before [`get_max`](Self::get_max) and before the items end), and
-/// otherwise gives `None`; `nth(n)` gives what `n + 1` calls to `next()`
-/// would give the last of; [`set_max`](Self::set_max) moves only the
-/// window's end; and an implementation's own `shift` and `shift_next`
-/// do what the provided ones do. The provided methods, [`Unshift`] and
-/// [`Ranges`] are verified with Verus against this contract
-/// (`window`); the column iterators keep it, by their own verified
-/// methods. The run adapters (`Runs`, `DeltaRuns`) give a run per step,
-/// so they are not covered, and neither is an [`Unshift`] over one.
+/// An implementation ranges over a fixed sequence of values, one per
+/// position, and gives items that each stand for one or more of them, at
+/// consecutive positions: a column iterator's item for its value, a run
+/// adapter's (`Runs`, `DeltaRuns`) for its run. `next()` gives the item
+/// at [`get_pos`](Self::get_pos) and moves past the values it stands
+/// for, while the position is inside the window (before
+/// [`get_max`](Self::get_max) and before the values end), and otherwise
+/// gives `None`; `nth(n)` gives what `n + 1` calls to `next()` would give
+/// the last of; [`set_max`](Self::set_max) moves only the window's end;
+/// and an implementation's own `advance_to`, `shift` and `shift_next` do
+/// what the provided ones do. The provided `advance_to`, `advance_by`,
+/// `shift_next` and `seek_to` count positions in items, so they need an
+/// item per value; the run adapters provide their own. The provided
+/// methods, [`Unshift`] and [`Ranges`] are verified with Verus against
+/// this contract (`window`); the column iterators and the run adapters
+/// keep it by their own verified methods.
 pub trait Shiftable: Iterator + Debug {
     /// The position of the item the next call to `next()` returns.
     fn get_pos(&self) -> usize;
@@ -305,6 +309,12 @@ impl<T: DeltaValue, C: crate::Codec + Debug> Shiftable for crate::delta::DeltaRu
 /// and needs no `&mut`. [`Self::shift`] repositions the inner
 /// [`Shiftable`] iterator and refills the lookahead from the start of
 /// the new range.
+///
+/// The inner iterator must give an item per value, as the column
+/// iterators do, and not a run adapter (`Runs`, `DeltaRuns`): over one,
+/// `shift` to a range starting inside the lookahead run keeps the whole
+/// run, though it starts before the range, and one starting at the run's
+/// own start panics.
 #[derive(Clone, Debug)]
 pub struct Unshift<T: Iterator> {
     inner: T,
@@ -374,8 +384,11 @@ impl<T: Iterator> Iterator for Unshift<T> {
 // ── The contract's bridges (trusted) ────────────────────────────────────────
 
 /// Every iterator, as the adapters see it (`window::Stream`): trusted to
-/// give its items one per position from a fixed sequence, `nth(n)` being
-/// `n + 1` calls to `next`.
+/// give items that each stand for one or more values at consecutive
+/// positions of a fixed sequence (a run adapter's item for its run), and
+/// `nth(n)` to be `n + 1` calls to `next`. Whether each item stands for
+/// itself alone (`unit`) is the caller's to know: `Unshift` and
+/// `Shiftable`'s provided moves need it.
 impl<I: Iterator + ?Sized> Stream for I {
     type Item = I::Item;
 
@@ -395,7 +408,32 @@ impl<I: Iterator + ?Sized> Stream for I {
     }
 
     #[cfg(verus_keep_ghost)]
+    fn items(&self) -> vstd::seq::Seq<I::Item> {
+        unimplemented!()
+    }
+
+    #[cfg(verus_keep_ghost)]
+    fn spans(_x: I::Item) -> vstd::seq::Seq<I::Item> {
+        unimplemented!()
+    }
+
+    #[cfg(verus_keep_ghost)]
+    fn unit() -> bool {
+        unimplemented!()
+    }
+
+    #[cfg(verus_keep_ghost)]
     fn lemma_left(&self) {
+        unimplemented!()
+    }
+
+    #[cfg(verus_keep_ghost)]
+    fn lemma_items(&self) {
+        unimplemented!()
+    }
+
+    #[cfg(verus_keep_ghost)]
+    fn lemma_unit(_x: I::Item) {
         unimplemented!()
     }
 

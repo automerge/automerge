@@ -1,9 +1,11 @@
 //! The repositioning iterators' contract and the adapters built on it
 //! ([`crate::shift`]), verified with Verus.
 //!
-//! An iterator, as the adapters see it (`Stream`), gives values from a
-//! fixed sequence (`vals`), one per position: from its position `at`, the
-//! values it has `left`, in order. A [`Shiftable`](crate::Shiftable)
+//! An iterator, as the adapters see it (`Stream`), gives items that each
+//! stand for one or more values (`spans`) of a fixed sequence (`vals`),
+//! one value per position: from its position `at`, the values it has
+//! `left`, in order. A column iterator's item stands for its value (it is
+//! `unit`), a run adapter's for its run. A [`Shiftable`](crate::Shiftable)
 //! iterator (`Window`) gives the values of a window, from `at` up to
 //! `end` and no further than the values go (`iter_core::window`), and
 //! can move it: `shift` moves only forwards.
@@ -11,18 +13,23 @@
 //! Proved here, against that contract: `Shiftable`'s provided methods
 //! (`advance_to`, `advance_by`, `shift`, `shift_next`, `seek_to`), from
 //! the methods every implementation gives (`get_pos`, `get_max`,
-//! `set_max`, `next`, `nth`); `Unshift`, which gives its lookahead and
-//! then what its inner iterator has left, and after `shift(range)`
-//! exactly the values in `range`; and `Ranges`, which gives the values of
-//! each range in turn.
+//! `set_max`, `next`, `nth`), for unit iterators (`shift` for any);
+//! `Ranges`, over any iterator, run adapters included, which gives what
+//! stands for the values of each range in turn; and `Unshift`, over a
+//! unit iterator, which gives its lookahead and then what its inner
+//! iterator has left, and after `shift(range)` exactly the values in
+//! `range`.
 //!
 //! Trusted: that every iterator keeps the contract (`Stream`, `Window`;
-//! implemented in `shift` for every `Iterator` and every `Shiftable`).
-//! The crate's own iterators move by their verified cores
-//! (`ICore::shift` and the prefix and delta versions), whose
-//! specifications are the contract's; `Runs` and `DeltaRuns`, which give
-//! a run per step, are not windows of values, and nor are adapters over
-//! them.
+//! implemented in `shift` for every `Iterator` and every `Shiftable`),
+//! and that an `Unshift`'s inner iterator, and a `Shiftable` that keeps
+//! the provided moves, is unit. The crate's own iterators move by their
+//! verified cores (`ICore::shift` and the prefix and delta versions),
+//! whose specifications are the contract's, and the run adapters by
+//! theirs (`ICore::shift_run`, `diter::d_shift_run`). An `Unshift` over a
+//! run adapter is not unit, and its `shift` gives wrong results there: it
+//! keeps a lookahead run whose last value is at `range.start`, though
+//! the run starts before it.
 
 #[cfg(verus_keep_ghost)]
 use crate::cursor::lemma_concat_append;
@@ -36,15 +43,19 @@ use vstd::prelude::*;
 
 verus! {
 
-/// An iterator: it gives the values `left()`, one per position from
-/// `at()` on, of the values `vals()` it ranges over. Trusted, for every
-/// `Iterator` (`shift`): any iterator whose `nth(n)` gives what `n + 1`
-/// calls to `next` would give the last of, and which gives nothing once
-/// it has given nothing, has such a model.
+/// An iterator: it gives the items `items()`, each standing for one or
+/// more values at consecutive positions (`spans`: a column iterator's
+/// item for its value, a run adapter's for its run), so that what it has
+/// left, value by value (`left()`), is the values `vals()` it ranges over
+/// from its position `at()` on. It is `unit()` when each item stands for
+/// itself alone. Trusted, for every `Iterator` (`shift`): any iterator
+/// whose `nth(n)` gives what `n + 1` calls to `next` would give the last
+/// of, and which gives nothing once it has given nothing, has such a
+/// model.
 pub(crate) trait Stream {
     type Item;
 
-    /// The values the iterator ranges over.
+    /// The values the iterator ranges over, one per position.
     spec fn vals(&self) -> Seq<Self::Item>;
 
     /// The position of the value it gives next.
@@ -52,6 +63,15 @@ pub(crate) trait Stream {
 
     /// The values it has left to give.
     spec fn left(&self) -> Seq<Self::Item>;
+
+    /// The items it has left to give.
+    spec fn items(&self) -> Seq<Self::Item>;
+
+    /// The values item `x` stands for.
+    spec fn spans(x: Self::Item) -> Seq<Self::Item>;
+
+    /// Each item stands for itself alone.
+    spec fn unit() -> bool;
 
     /// What it has left is the values from its position on.
     proof fn lemma_left(&self)
@@ -61,18 +81,34 @@ pub(crate) trait Stream {
             forall|k: int| 0 <= k < self.left().len() ==> #[trigger] self.left()[k] == self.vals()[self.at() + k],
     ;
 
+    /// What it has left, value by value, is what its items stand for, and
+    /// each stands for some.
+    proof fn lemma_items(&self)
+        ensures
+            self.left() == concat(self.items().map_values(|x: Self::Item| Self::spans(x))),
+            forall|k: int| 0 <= k < self.items().len() ==> Self::spans(#[trigger] self.items()[k]).len() > 0,
+    ;
+
+    /// A unit iterator's item stands for itself.
+    proof fn lemma_unit(x: Self::Item)
+        requires
+            Self::unit(),
+        ensures
+            Self::spans(x) == seq![x],
+    ;
+
     /// `Iterator::next`.
     fn s_next(&mut self) -> (r: Option<Self::Item>)
         ensures
             final(self).vals() == old(self).vals(),
             match r {
-                Some(v) => {
-                    &&& old(self).left().len() > 0
-                    &&& v == old(self).left()[0]
-                    &&& final(self).left() == old(self).left().skip(1)
-                    &&& final(self).at() == old(self).at() + 1
+                Some(x) => {
+                    &&& old(self).items().len() > 0
+                    &&& x == old(self).items()[0]
+                    &&& final(self).items() == old(self).items().skip(1)
+                    &&& final(self).at() == old(self).at() + Self::spans(x).len()
                 },
-                None => old(self).left().len() == 0 && final(self).left().len() == 0,
+                None => old(self).items().len() == 0 && final(self).items().len() == 0,
             },
     ;
 
@@ -80,13 +116,79 @@ pub(crate) trait Stream {
     fn s_nth(&mut self, n: usize) -> (r: Option<Self::Item>)
         ensures
             final(self).vals() == old(self).vals(),
-            n < old(self).left().len() ==> {
-                &&& r == Some(old(self).left()[n as int])
-                &&& final(self).left() == old(self).left().skip(n + 1)
-                &&& final(self).at() == old(self).at() + n + 1
+            n < old(self).items().len() ==> {
+                &&& r == Some(old(self).items()[n as int])
+                &&& final(self).items() == old(self).items().skip(n + 1)
+                &&& final(self).at() == old(self).at() + concat(
+                    old(self).items().take(n + 1).map_values(|x: Self::Item| Self::spans(x)),
+                ).len()
             },
-            n >= old(self).left().len() ==> r is None && final(self).left().len() == 0,
+            n >= old(self).items().len() ==> r is None && final(self).items().len() == 0,
     ;
+}
+
+/// The values items `xs` stand for, one after another.
+pub(crate) open spec fn flat<S: Stream + ?Sized>(xs: Seq<S::Item>) -> Seq<S::Item> {
+    concat(xs.map_values(|x: S::Item| S::spans(x)))
+}
+
+/// A unit iterator's items are its values.
+pub(crate) proof fn lemma_flat_unit<S: Stream + ?Sized>(xs: Seq<S::Item>)
+    requires
+        S::unit(),
+    ensures
+        flat::<S>(xs) == xs,
+    decreases xs.len(),
+{
+    if xs.len() > 0 {
+        lemma_flat_unit::<S>(xs.drop_last());
+        S::lemma_unit(xs.last());
+        assert(xs.map_values(|x: S::Item| S::spans(x)).drop_last() =~= xs.drop_last().map_values(
+            |x: S::Item| S::spans(x),
+        ));
+        assert(xs.drop_last() + seq![xs.last()] =~= xs);
+    } else {
+        assert(xs.map_values(|x: S::Item| S::spans(x)) =~= Seq::<Seq<S::Item>>::empty());
+    }
+}
+
+/// The first item's values come first.
+pub(crate) proof fn lemma_flat_first<S: Stream + ?Sized>(xs: Seq<S::Item>)
+    requires
+        xs.len() > 0,
+    ensures
+        flat::<S>(xs) == S::spans(xs[0]) + flat::<S>(xs.skip(1)),
+{
+    let m = xs.map_values(|x: S::Item| S::spans(x));
+    let one = seq![S::spans(xs[0])];
+    assert(m =~= one + xs.skip(1).map_values(|x: S::Item| S::spans(x)));
+    lemma_concat_append(one, xs.skip(1).map_values(|x: S::Item| S::spans(x)));
+    assert(one.drop_last() =~= Seq::<Seq<S::Item>>::empty());
+    assert(concat(Seq::<Seq<S::Item>>::empty()) == Seq::<S::Item>::empty());
+    assert(concat(one) == concat(one.drop_last()) + one.last());
+    assert(concat(one) =~= S::spans(xs[0]));
+}
+
+/// A unit iterator's items are the values it has left.
+pub(crate) proof fn lemma_unit_state<S: Stream + ?Sized>(s: &S)
+    requires
+        S::unit(),
+    ensures
+        s.left() == s.items(),
+{
+    s.lemma_items();
+    lemma_flat_unit::<S>(s.items());
+}
+
+/// Moving `n + 1` items on a unit iterator moves `n + 1` values on.
+pub(crate) proof fn lemma_unit_take<S: Stream + ?Sized>(xs: Seq<S::Item>, n: int)
+    requires
+        S::unit(),
+        0 <= n <= xs.len(),
+    ensures
+        flat::<S>(xs.take(n)).len() == n,
+{
+    lemma_flat_unit::<S>(xs.take(n));
 }
 
 /// A `Shiftable` iterator: what it has left is the window `at()..end()`
@@ -141,7 +243,7 @@ pub(crate) trait Window: Stream {
     ;
 
     /// `Shiftable::shift_next`: the window moves to `start..end`, at or
-    /// after the iterator, and gives its first value.
+    /// after the iterator, and gives its first item.
     fn w_shift_next(&mut self, start: usize, end: usize) -> (r: Option<Self::Item>)
         requires
             start >= old(self).at(),
@@ -149,11 +251,13 @@ pub(crate) trait Window: Stream {
             final(self).vals() == old(self).vals(),
             ({
                 let w = window(old(self).vals(), start as int, end as int);
-                &&& w.len() > 0 ==> {
-                    &&& r == Some(w[0])
-                    &&& final(self).left() == w.skip(1)
-                    &&& final(self).at() == start + 1
-                }
+                &&& w.len() > 0 ==> (r matches Some(x) && {
+                    let n = Self::spans(x).len() as int;
+                    &&& 0 < n <= w.len()
+                    &&& Self::spans(x) == w.take(n)
+                    &&& final(self).left() == w.skip(n)
+                    &&& final(self).at() == start + n
+                })
                 &&& w.len() == 0 ==> r is None && final(self).left().len() == 0
             }),
     ;
@@ -166,30 +270,51 @@ pub(crate) trait Window: Stream {
 /// contract.
 #[inline]
 pub(crate) fn advance_to<W: Window + ?Sized>(w: &mut W, target: usize)
+    requires
+        W::unit(),
     ensures
         final(w).vals() == old(w).vals(),
         final(w).left() == past(old(w).left(), target - old(w).at()),
         target <= old(w).at() ==> final(w).at() == old(w).at(),
         old(w).at() < target <= old(w).at() + old(w).left().len() ==> final(w).at() == target,
 {
+    proof {
+        lemma_unit_state::<W>(w);
+    }
     let pos = w.w_pos();
     if target > pos {
+        let ghost it = w.items();
         w.s_nth(target - pos - 1);
+        proof {
+            lemma_unit_state::<W>(w);
+            if target - pos - 1 < it.len() {
+                lemma_unit_take::<W>(it, target - pos);
+            }
+        }
     }
 }
 
 /// `Shiftable::advance_by`: move `amount` values on.
 #[inline]
 pub(crate) fn advance_by<W: Window + ?Sized>(w: &mut W, amount: usize)
+    requires
+        W::unit(),
     ensures
         final(w).vals() == old(w).vals(),
         final(w).left() == past(old(w).left(), amount as int),
         amount <= old(w).left().len() ==> final(w).at() == old(w).at() + amount,
 {
+    proof {
+        lemma_unit_state::<W>(w);
+    }
     if amount > 0 {
         let ghost o = w.left();
         w.s_nth(amount - 1);
         proof {
+            lemma_unit_state::<W>(w);
+            if amount <= o.len() {
+                lemma_unit_take::<W>(o, amount as int);
+            }
             if amount > o.len() {
                 assert(w.left() =~= Seq::<W::Item>::empty());
             }
@@ -232,6 +357,7 @@ pub(crate) fn shift<W: Window + ?Sized>(w: &mut W, start: usize, end: usize)
 #[inline]
 pub(crate) fn shift_next<W: Window + ?Sized>(w: &mut W, start: usize, end: usize) -> (r: Option<W::Item>)
     requires
+        W::unit(),
         start >= old(w).at(),
     ensures
         final(w).vals() == old(w).vals(),
@@ -251,6 +377,7 @@ pub(crate) fn shift_next<W: Window + ?Sized>(w: &mut W, start: usize, end: usize
     proof {
         w.lemma_window();
         w.lemma_left();
+        lemma_unit_state::<W>(w);
         if end < p {
             assert(window(v, p, p) =~= window(v, p, end as int));
         }
@@ -259,6 +386,10 @@ pub(crate) fn shift_next<W: Window + ?Sized>(w: &mut W, start: usize, end: usize
     let pos = w.w_pos();
     let r = w.s_nth(start - pos);
     proof {
+        lemma_unit_state::<W>(w);
+        if start - p < o1.len() {
+            lemma_unit_take::<W>(o1, start - p + 1);
+        }
         let (x, n) = (window(v, start as int, end as int), start - p);
         if n < o1.len() {
             assert(x =~= o1.skip(n));
@@ -272,6 +403,8 @@ pub(crate) fn shift_next<W: Window + ?Sized>(w: &mut W, start: usize, end: usize
 /// nowhere, if `at` is behind the iterator.
 #[inline]
 pub(crate) fn seek_to<W: Window + ?Sized>(w: &mut W, at: usize) -> (r: Option<W::Item>)
+    requires
+        W::unit(),
     ensures
         final(w).vals() == old(w).vals(),
         at < old(w).at() ==> r is None && final(w).left() == old(w).left() && final(w).at() == old(w).at(),
@@ -281,9 +414,20 @@ pub(crate) fn seek_to<W: Window + ?Sized>(w: &mut W, at: usize) -> (r: Option<W:
             &&& k >= o.len() ==> r is None && final(w).left().len() == 0
         },
 {
+    proof {
+        lemma_unit_state::<W>(w);
+    }
     let pos = w.w_pos();
     if at >= pos {
-        w.s_nth(at - pos)
+        let ghost o = w.left();
+        let r = w.s_nth(at - pos);
+        proof {
+            lemma_unit_state::<W>(w);
+            if at - pos < o.len() {
+                lemma_unit_take::<W>(o, at - pos + 1);
+            }
+        }
+        r
     } else {
         None
     }
@@ -357,7 +501,12 @@ pub(crate) fn ranges_next<W: Window, L: RangeList>(w: &mut W, l: &mut L) -> (r: 
         ({
             let g = ranges_give(*old(w), *old(l), *final(l));
             match r {
-                Some(x) => g.len() > 0 && x == g[0] && final(w).left() == g.skip(1),
+                Some(x) => {
+                    let n = W::spans(x).len() as int;
+                    &&& 0 < n <= g.len()
+                    &&& W::spans(x) == g.take(n)
+                    &&& final(w).left() == g.skip(n)
+                },
                 None => g.len() == 0 && final(l).ended() && final(w).left().len() == 0,
             }
         }),
@@ -373,8 +522,25 @@ pub(crate) fn ranges_next<W: Window, L: RangeList>(w: &mut W, l: &mut L) -> (r: 
             ranges_give(w0, l0, *l) == w.left(),
     {
         let ghost (w1, l1) = (*w, *l);
+        proof {
+            w1.lemma_items();
+        }
         if let Some(x) = w.s_next() {
+            proof {
+                // the first item stands for the first values left
+                w.lemma_items();
+                lemma_flat_first::<W>(w1.items());
+                assert(w1.items().skip(1) == w.items());
+                assert(W::spans(x).len() > 0) by {
+                    assert(x == w1.items()[0]);
+                }
+            }
             return Some(x);
+        }
+        proof {
+            w.lemma_items();
+            assert(w1.items().map_values(|x: W::Item| W::spans(x)) =~= Seq::<Seq<W::Item>>::empty());
+            assert(w.items().map_values(|x: W::Item| W::spans(x)) =~= Seq::<Seq<W::Item>>::empty());
         }
         let ghost t = l1.given().skip(l0.given().len() as int);
         let r = match l.next_range() {
@@ -450,6 +616,8 @@ pub(crate) open spec fn u_inv<S: Stream>(inner: S, next: Option<S::Item>, hidden
 
 /// `Unshift::new`: pull the first value as the lookahead.
 pub(crate) fn u_new<S: Stream>(inner: &mut S) -> (next: Option<S::Item>)
+    requires
+        S::unit(),
     ensures
         final(inner).vals() == old(inner).vals(),
         u_inv(*final(inner), next, false),
@@ -459,6 +627,11 @@ pub(crate) fn u_new<S: Stream>(inner: &mut S) -> (next: Option<S::Item>)
     let next = inner.s_next();
     proof {
         i0.lemma_left();
+        lemma_unit_state::<S>(&i0);
+        lemma_unit_state::<S>(inner);
+        if next is Some {
+            S::lemma_unit(next->Some_0);
+        }
         if next is Some {
             assert(seq![i0.left()[0]] + i0.left().skip(1) =~= i0.left());
         }
@@ -472,6 +645,7 @@ pub(crate) fn u_peek<'b, S: Stream>(inner: &S, next: &'b Option<S::Item>, hidden
     &'b S::Item,
 >)
     requires
+        S::unit(),
         u_inv(*inner, *next, hidden),
     ensures
         u_left(*inner, *next, hidden).len() > 0 ==> r == Some(&u_left(*inner, *next, hidden)[0]),
@@ -486,6 +660,7 @@ pub(crate) fn u_peek<'b, S: Stream>(inner: &S, next: &'b Option<S::Item>, hidden
 /// `Unshift::next`: the lookahead, pulling the next one.
 pub(crate) fn u_next<S: Stream>(inner: &mut S, next: &mut Option<S::Item>, hidden: bool) -> (r: Option<S::Item>)
     requires
+        S::unit(),
         u_inv(*old(inner), *old(next), hidden),
     ensures
         final(inner).vals() == old(inner).vals(),
@@ -506,6 +681,11 @@ pub(crate) fn u_next<S: Stream>(inner: &mut S, next: &mut Option<S::Item>, hidde
     std::mem::swap(&mut n, next);
     proof {
         i0.lemma_left();
+        lemma_unit_state::<S>(&i0);
+        lemma_unit_state::<S>(inner);
+        if *next is Some {
+            S::lemma_unit((*next)->Some_0);
+        }
         let g = u_left(i0, n, hidden);
         if *next is Some {
             assert(seq![i0.left()[0]] + i0.left().skip(1) =~= i0.left());
@@ -523,6 +703,7 @@ pub(crate) fn u_nth<S: Stream>(inner: &mut S, next: &mut Option<S::Item>, hidden
     S::Item,
 >)
     requires
+        S::unit(),
         u_inv(*old(inner), *old(next), hidden),
     ensures
         final(inner).vals() == old(inner).vals(),
@@ -546,6 +727,15 @@ pub(crate) fn u_nth<S: Stream>(inner: &mut S, next: &mut Option<S::Item>, hidden
     proof {
         i0.lemma_left();
         i1.lemma_left();
+        lemma_unit_state::<S>(&i0);
+        lemma_unit_state::<S>(&i1);
+        lemma_unit_state::<S>(inner);
+        if n - 1 < i0.items().len() {
+            lemma_unit_take::<S>(i0.items(), n as int);
+        }
+        if *next is Some {
+            S::lemma_unit((*next)->Some_0);
+        }
         let g = u_left(i0, x0, hidden);
         if x0 is Some && n - 1 < i0.left().len() {
             assert(g.skip(n + 1) =~= i1.left());
@@ -564,6 +754,7 @@ pub(crate) fn u_nth<S: Stream>(inner: &mut S, next: &mut Option<S::Item>, hidden
 /// starting there); a range further back panics (`Shiftable::shift_next`).
 pub(crate) fn u_shift<W: Window>(inner: &mut W, next: &mut Option<W::Item>, hidden: &mut bool, start: usize, end: usize)
     requires
+        W::unit(),
         u_inv(*old(inner), *old(next), *old(hidden)),
     ensures
         final(inner).vals() == old(inner).vals(),
@@ -592,6 +783,13 @@ pub(crate) fn u_shift<W: Window>(inner: &mut W, next: &mut Option<W::Item>, hidd
     *next = inner.w_shift_next(start, end);
     proof {
         let x = window(v, start as int, end as int);
+        if *next is Some {
+            let y = (*next)->Some_0;
+            W::lemma_unit(y);
+            // the lookahead is the window's first value, at `start`
+            assert(seq![y][0] == x.take(1)[0]);
+            assert(x[0] == v[start as int]);
+        }
         if x.len() > 0 {
             assert(seq![x[0]] + x.skip(1) =~= x);
         } else {

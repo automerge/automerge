@@ -630,7 +630,7 @@ impl<'a, T: ColumnValueRef, C: Codec> Iter<'a, T, C> {
 /// The function [`Column::remap`] applies (`remap::Mapping`): to a run's
 /// value, owned, in the form the encoding's encoder appends. Nothing is
 /// assumed of what `f` gives.
-struct Remapping<'f, T, C, F>(&'f F, PhantomData<fn() -> (T, C)>);
+pub(crate) struct Remapping<'f, T, C, F>(pub(crate) &'f F, pub(crate) PhantomData<fn() -> (T, C)>);
 
 impl<'a, T, C, F>
     crate::remap::Mapping<
@@ -1167,14 +1167,17 @@ where
             );
             debug_assert!(s.segments <= max_segments);
         }
-        if WF::CHECKS_TOTAL {
-            let weights: Vec<WF::Weight> = slabs.iter().map(WF::compute).collect();
-            let len = slabs.iter().fold(0usize, |n, s| n.saturating_add(s.len));
-            if let Err(e) = WF::check_total(&weights, len) {
-                panic!("from_slabs: {e}");
-            }
-        }
+        // verified (`ColumnCore::from_cut`), which also checks that the
+        // weights' total fits (a prefix column's sum)
         Self::of_cut(slabs, max_segments)
+    }
+
+    /// The column `core` holds.
+    pub(crate) fn of_core(core: CoreOf<T, C, WF, Idx>) -> Self {
+        Self {
+            core,
+            _phantom: PhantomData,
+        }
     }
 
     /// The column of the well-formed `slabs` a verified encoder or fill
@@ -1239,13 +1242,15 @@ where
         let counter = self.core.counter();
         // verified (`ColumnCore::remap`): the column of what `f` gives for
         // each value, called once per run, re-encoded by the encoding's
-        // verified encoder with this column's segment budget
+        // verified encoder with this column's segment budget, and checked
+        // as any built column is (`from_cut`: a prefix column's sum must
+        // fit)
         let (core, _) = self
             .core
             .remap::<Dx<T, C>, <T::Encoding<C> as crate::edit::SlabEdit>::Recoder<'_>, _>(
                 &Remapping::<T, C, F>(&f, PhantomData),
             );
-        self.core = core;
+        *self = Self::of_core(core);
         // a write like any other: iterators suspended before it can't
         // resume (the rebuilt column's count starts again at 0)
         self.core.set_counter(counter.wrapping_add(1));
@@ -1596,51 +1601,13 @@ where
         ranges: &[Range<usize>],
         points: usize,
     ) -> CopyStrategy {
-        // Inverting keeps src's slabs, built under src's segment
-        // budget — only sound when the budgets match.
-        if self.core.max_segments() != src.core.max_segments() || src.core.slabs().len() < 8 {
-            return CopyStrategy::Direct;
-        }
-
-        let mut item_prefix = Vec::with_capacity(src.core.slabs().len() + 1);
-        let mut seg_prefix = Vec::with_capacity(src.core.slabs().len() + 1);
-        item_prefix.push(0usize);
-        seg_prefix.push(0usize);
-        for s in src.core.slabs() {
-            item_prefix.push(item_prefix.last().unwrap() + s.len);
-            seg_prefix.push(seg_prefix.last().unwrap() + s.segments);
-        }
-        let slab_of = |row: usize| item_prefix.partition_point(|&p| p <= row) - 1;
-
-        // Segments the direct path would decode + re-encode.
-        let mut retained_segs = 0usize;
-        for r in ranges {
-            // a splice that only deletes copies nothing
-            if r.is_empty() {
-                continue;
-            }
-            let sa = slab_of(r.start);
-            let sb = slab_of(r.end - 1);
-            if sa == sb {
-                retained_segs += src.core.slabs()[sa].segments;
-            } else {
-                retained_segs += src.core.slabs()[sa].segments
-                    + src.core.slabs()[sb].segments
-                    + (seg_prefix[sb] - seg_prefix[sa + 1]);
-            }
-        }
-
-        // Direct-path work also cuts a seam in self per insertion
-        // point.
-        let direct_cost = retained_segs + points * 2 * self.core.max_segments();
-
-        // Inverted-path work: re-encode all of self, boundary segments
-        // per gap seam and per insertion point, O(slabs) bookkeeping.
-        let dest_segs: usize = self.core.slabs().iter().map(|s| s.segments).sum();
-        let seam_segs = (ranges.len() + points) * 2 * self.core.max_segments();
-        let invert_cost = dest_segs + seam_segs + src.core.slabs().len();
-
-        if direct_cost > COPY_INVERT_FACTOR * invert_cost {
+        // verified (`ColumnCore::invert_pays`): runs without panicking or
+        // overflowing, and inverts only when the segment budgets match,
+        // since inverting keeps src's slabs, built under its budget
+        if self
+            .core
+            .invert_pays(&src.core, ranges, points, COPY_INVERT_FACTOR)
+        {
             CopyStrategy::Invert
         } else {
             CopyStrategy::Direct

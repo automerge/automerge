@@ -336,12 +336,14 @@ compiles them away. To check them, run `cargo verus verify -p hexane
   value.
 * `Shiftable`'s provided methods, `Unshift` and `Ranges`, against the
   contract `Shiftable` states (`window`), which is trusted of each
-  implementation (the column iterators keep it by the methods above):
-  the provided methods do what they say from the methods every
-  implementation gives; `Ranges` gives the values of each of its ranges
-  in turn, and panics on one starting behind the iterator; `Unshift`
-  gives its lookahead and then what its inner iterator has left, and
-  after `shift(range)` exactly the values in `range`.
+  implementation (the column iterators and the run adapters keep it by
+  the methods above): the provided methods do what they say from the
+  methods every implementation gives; `Ranges`, over any `Shiftable`,
+  run adapters included, gives items standing for the values of each of
+  its ranges in turn, and panics on one starting behind the iterator;
+  `Unshift`, over an iterator that gives an item per value, gives its
+  lookahead and then what its inner iterator has left, and after
+  `shift(range)` exactly the values in `range`.
 * Suspending and resuming an iterator (`Iter::suspend`,
   `IterState::try_resume`, and the prefix and delta iterators' versions,
   which build on them): `suspend` keeps a position that always resumes;
@@ -393,12 +395,15 @@ compiles them away. To check them, run `cargo verus verify -p hexane
   become those before the splice, the runs inserted, then those after
   the ones deleted. Nothing is assumed of the runs, which come from the
   caller.
-* `Column::remap`: the column becomes what the function gives for each
-  of its values, called once per run (`ColumnCore::remap`). It reads the
-  column a run at a time and appends a run of the function's value to the
-  encoding's verified encoder (the RLE or the bool one, `remap::Encodes`),
-  whose slabs make the new column, weighed and checked as any built
-  column is. Nothing is assumed of the function.
+* `Column::remap` and `ColumnEncoding::remap`: the column becomes what
+  the function gives for each value the iterator has (for
+  `Column::remap`, all of the column's), called once per run
+  (`ColumnCore::from_mapped_runs`). It reads a run at a time and appends
+  a run of the function's value to the encoding's verified encoder (the
+  RLE or the bool one, `remap::Encodes`), whose slabs make the new
+  column, weighed and checked as any built column is (and a prefix
+  column's total checked, as a build's is). Nothing is assumed of the
+  function.
 * Building a column: its index and length are computed from its slabs,
   checking that each slab's weight counts its items, and `Column::fill`
   makes a well-formed slab of the values asked for.
@@ -499,7 +504,10 @@ compiles them away. To check them, run `cargo verus verify -p hexane
   inside the source and none doing nothing, which applied gives what the
   splices give one by one, to any destination and source (what splices
   make of two columns depends only on their lengths). Which way runs is
-  chosen inside verified code (`ColumnCore::copy`, `dcopy::copy`), and
+  chosen inside verified code (`ColumnCore::copy`, `dcopy::copy`), by a
+  heuristic (`ColumnCore::invert_pays`) proved only to run without
+  panicking or overflowing and to invert only between columns of the
+  same segment budget, and
   both ways of carrying the list out are
   verified chains of the edit cursor's steps (`copy::copy_direct`,
   `copy::copy_invert`): the direct one applies it to the destination with
@@ -569,9 +577,10 @@ first and values outside the domain last.
 
 **Known limitations:**
 
-* The run adapters (`Runs`, `DeltaRuns`) give a run per step, not a
-  value, so `Shiftable`'s contract does not describe them, and `Ranges`
-  and `Unshift` over them are not proved (their own moves are).
+* `Unshift` needs an item per value from its inner iterator (trusted of
+  it, and documented), so over a run adapter (`Runs`, `DeltaRuns`),
+  which gives a run per step, it is not proved, and its `shift` gives
+  wrong results there. `Ranges` over a run adapter is proved.
 
 * The prefix and delta columns' other logic is not verified: that a
   column's sum fits its prefix type, which the searches' results depend on

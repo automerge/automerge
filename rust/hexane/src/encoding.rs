@@ -72,16 +72,25 @@ pub trait ColumnEncoding: Default {
         Idx: ColumnIndex<WF::Weight>,
         F: Fn(Self::Value) -> Self::Value,
     {
-        let mut encoder = Self::encoder();
-        encoder.max_segments(max);
-        // (constructed via `encoder()`, not `with_max_segments`, because
-        // `Self::Encoder` isn't bound by `Default` here)
-        while let Some(run) = iter.next_run() {
-            let value = <Self::Value as ColumnValueRef>::to_owned(run.value);
-            let value = f(value);
-            encoder.append_n_owned(value, run.count);
-        }
-        encoder.into_column()
+        assert!(max >= 2, "max_segments must be at least 2");
+        // verified (`ColumnCore::from_mapped_runs`): the column of what `f`
+        // gives for each value the iterator has left, called once per run,
+        // re-encoded by the encoding's verified encoder
+        let (core, _) =
+            crate::column::CoreOf::<Self::Value, Self::Codec, WF, Idx>::from_mapped_runs::<
+                crate::column::Dx<Self::Value, Self::Codec>,
+                <Self as crate::edit::SlabEdit>::Recoder<'a>,
+                _,
+            >(
+                &mut iter.core,
+                iter.slabs,
+                max,
+                &crate::column::Remapping::<Self::Value, Self::Codec, F>(
+                    &f,
+                    std::marker::PhantomData,
+                ),
+            );
+        Column::of_core(core)
     }
 
     /// Decode the last run of a slab using tail metadata.

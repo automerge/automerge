@@ -66,7 +66,7 @@ verus! {
 #[verifier::external_body]
 #[cold]
 #[inline(never)]
-fn sum_overflows()
+pub(crate) fn sum_overflows()
     ensures
         false,
 {
@@ -189,6 +189,11 @@ impl<E: Slabs> Weigh<E, usize> for LenModel {
         true
     }
 
+    #[inline(always)]
+    fn total_ok(_ws: &[usize], _len: usize) -> bool {
+        true
+    }
+
     proof fn lemma_dom_empty(s: Seq<Slab<E::Tail>>) {
     }
 }
@@ -300,6 +305,26 @@ impl<E, X, B, P> Weigh<E, PrefixSlabWeight<P>> for PrefixModel<X, B> where
         true
     }
 
+    /// A column longer than one whose sums cannot overflow: its total, the
+    /// weights' sum, checked (`try_add`). Its values add nonnegative
+    /// amounts, so the total bounds every prefix sum.
+    #[inline(always)]
+    fn total_ok(ws: &[PrefixSlabWeight<P>], len: usize) -> bool {
+        if len > <B as PrefixOps<<<X as Decoders<'static>>::D as Decode>::Item>>::max_unchecked_len() {
+            let mut total = <B as PrefixOps<<<X as Decoders<'static>>::D as Decode>::Item>>::zero();
+            let mut i: usize = 0;
+            while i < ws.len()
+                decreases ws.len() - i,
+            {
+                if !<B as PrefixOps<<<X as Decoders<'static>>::D as Decode>::Item>>::try_add(&mut total, &ws[i].prefix) {
+                    return false;
+                }
+                i += 1;
+            }
+        }
+        true
+    }
+
     proof fn lemma_dom_empty(s: Seq<Slab<E::Tail>>) {
     }
 }
@@ -362,23 +387,12 @@ impl<'a, E, X, B, P> LoadWeigh<'a, E, X, PrefixSlabWeight<P>> for PrefixModel<X,
         <E as ReadsAgree<'a, X>>::lemma_reads(s);
     }
 
-    /// A column longer than one whose sums cannot overflow: its total, the
-    /// weights' sum, checked (`try_add`). Its values add nonnegative
-    /// amounts, so the total bounds every prefix sum. Not part of the
-    /// proof: it can only fail.
+    /// The total checked (`total_ok`). Not part of the proof: it can only
+    /// fail.
     #[inline(always)]
     fn load_check(ws: &[PrefixSlabWeight<P>], _slabs: &[Slab<E::Tail>], len: usize, _lo: i64, _hi: i64) -> Result<(), PackError> {
-        if len > <B as PrefixOps<<<X as Decoders<'a>>::D as Decode>::Item>>::max_unchecked_len() {
-            let mut total = <B as PrefixOps<<<X as Decoders<'a>>::D as Decode>::Item>>::zero();
-            let mut i: usize = 0;
-            while i < ws.len()
-                decreases ws.len() - i,
-            {
-                if !<B as PrefixOps<<<X as Decoders<'a>>::D as Decode>::Item>>::try_add(&mut total, &ws[i].prefix) {
-                    return Err(prefix_sum_overflows());
-                }
-                i += 1;
-            }
+        if !<Self as Weigh<E, PrefixSlabWeight<P>>>::total_ok(ws, len) {
+            return Err(prefix_sum_overflows());
         }
         Ok(())
     }
@@ -433,6 +447,12 @@ impl<E, X, B> Weigh<E, SlabAgg> for DeltaModel<X, B> where
             lemma_lens_ok::<E, X>(slabs@);
         }
         slabs_fit::<X, B>(slabs.as_slice(), len, i64::MIN, i64::MAX)
+    }
+
+    /// The domain (`dom_check`) bounds the sums: nothing more to check.
+    #[inline(always)]
+    fn total_ok(_ws: &[SlabAgg], _len: usize) -> bool {
+        true
     }
 
     proof fn lemma_dom_empty(s: Seq<Slab<E::Tail>>) {
