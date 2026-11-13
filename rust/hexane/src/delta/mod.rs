@@ -1564,12 +1564,9 @@ impl<'a, T: DeltaValue, C: Codec> DeltaIter<'a, T, C> {
         self.inner.set_max(pos);
     }
 
+    /// Advance so that the next item is the one at `target`; at or past
+    /// it already, stay (as [`Iter::advance_to`] does).
     pub fn advance_to(&mut self, target: usize) {
-        assert!(
-            target >= self.pos(),
-            "advance_to: target ({target}) < pos ({})",
-            self.pos()
-        );
         if target > self.pos() {
             self.nth(target - self.pos() - 1);
         }
