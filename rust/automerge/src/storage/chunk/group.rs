@@ -228,6 +228,20 @@ impl<'a> ReadChunkGroup<'a> {
             group: Box::new(group),
         }
     }
+
+    pub(crate) fn into_inner(self) -> ChunkGroup<'a> {
+        *self.group
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum SingleGroupError {
+    #[error("input contained no chunks")]
+    Empty,
+    #[error("leftover data after parsing chunk group")]
+    LeftoverData,
+    #[error(transparent)]
+    Load(#[from] LoadError),
 }
 
 /// Classification of a partial-load boundary for callers that distinguish
@@ -298,6 +312,22 @@ impl<'a> ChunkGroupReader<'a> {
         Self {
             chunks: ChunkReader { remaining: input },
             state: ReaderState::Active(AssemblyState::Empty),
+        }
+    }
+
+    /// Parse and validate a single chunk group (one body chunk with an optional
+    /// trailing signatures chunk), rejecting empty inputs, trailing bytes, and
+    /// additional chunk groups.
+    pub(crate) fn read_single(input: Input<'a>) -> Result<ChunkGroup<'a>, SingleGroupError> {
+        let mut reader = Self::new(input);
+        let first = reader
+            .next()
+            .ok_or(SingleGroupError::Empty)?
+            .map_err(|e| SingleGroupError::Load(e.error))?;
+        match reader.next() {
+            None => Ok(first.into_inner()),
+            Some(Ok(_)) => Err(SingleGroupError::LeftoverData),
+            Some(Err(e)) => Err(SingleGroupError::Load(e.error)),
         }
     }
 

@@ -109,8 +109,13 @@ impl AutoCommit {
 
     /// Create a new empty document in required signing mode.
     pub fn signing() -> AutoCommit {
+        Self::signing_with_encoding(TextEncoding::platform_default())
+    }
+
+    /// Create a new empty document in required signing mode with an explicit text encoding.
+    pub fn signing_with_encoding(encoding: TextEncoding) -> AutoCommit {
         AutoCommit {
-            doc: Automerge::signing(),
+            doc: Automerge::signing_with_encoding(encoding),
             transaction: None,
             patch_log: PatchLog::inactive(),
             diff_cursor: Vec::new(),
@@ -557,17 +562,23 @@ impl AutoCommit {
         self.with_patch_log(|doc, log| doc.load_incremental_log_patches(data, log))
     }
 
-    pub fn apply_changes(
-        &mut self,
-        changes: impl IntoIterator<Item = Change> + Clone,
-    ) -> Result<(), AutomergeError> {
+    /// Apply changes, encoded chunk groups, or already-decoded groups.
+    /// See [`Automerge::apply_changes`] for accepted inputs and signing rules.
+    pub fn apply_changes<I>(&mut self, changes: I) -> Result<(), AutomergeError>
+    where
+        I: IntoIterator,
+        I::Item: TryInto<crate::LoadedGroup>,
+        AutomergeError: From<<I::Item as TryInto<crate::LoadedGroup>>::Error>,
+    {
         self.with_patch_log(|doc, log| doc.apply_changes_log_patches(changes, log))
     }
 
-    pub fn apply_changes_batch(
-        &mut self,
-        changes: impl IntoIterator<Item = Change> + Clone,
-    ) -> Result<(), AutomergeError> {
+    pub fn apply_changes_batch<I>(&mut self, changes: I) -> Result<(), AutomergeError>
+    where
+        I: IntoIterator,
+        I::Item: TryInto<crate::LoadedGroup>,
+        AutomergeError: From<<I::Item as TryInto<crate::LoadedGroup>>::Error>,
+    {
         self.with_patch_log(|doc, log| doc.apply_changes_batch_log_patches(changes, log))
     }
 

@@ -86,6 +86,7 @@ fn missing_dependency_propagates_exclusion_along_causal_chain() {
     ];
     let selection = select_fragments(&published, &candidates);
     assert_eq!(selection.selected_indices().collect::<Vec<_>>(), [2]);
+    assert_eq!(selection.pending_indices().collect::<Vec<_>>(), [0, 1]);
 }
 
 #[test]
@@ -99,21 +100,24 @@ fn overlapping_supplier_keeps_dependent_admissible_until_last_supplier_is_exclud
     let candidates = [f_bad.clone(), f_good, f_child.clone()];
     let selection = select_fragments(&published, &candidates);
     assert_eq!(selection.selected_indices().collect::<Vec<_>>(), [1, 2]);
+    assert_eq!(selection.pending_indices().collect::<Vec<_>>(), [0]);
 
     // Without f_good, excluding f_bad removes the last supplier of 2 and excludes f_child.
     let without_good = [f_bad, f_child];
     let selection = select_fragments(&published, &without_good);
     assert_eq!(selection.selected().len(), 0);
+    assert_eq!(selection.pending_indices().collect::<Vec<_>>(), [0, 1]);
 }
 
 #[test]
-fn duplicate_occurrences_and_accepted_boundaries_are_selected_independently() {
+fn duplicate_occurrences_and_published_boundaries_preserve_exact_partition() {
     let published = SetHistory::new([hash(1), hash(99)]);
     let f = frag(2, &[2], &[1]);
     let waiting = frag(4, &[4], &[3]);
     let candidates = [f.clone(), waiting.clone(), f, waiting];
     let selection = select_fragments(&published, &candidates);
     assert_eq!(selection.selected_indices().collect::<Vec<_>>(), [0, 2]);
+    assert_eq!(selection.pending_indices().collect::<Vec<_>>(), [1, 3]);
     // Unrelated published history is never scanned.
     assert!(!published.queries.borrow().contains(&hash(99)));
 }
@@ -147,7 +151,12 @@ proptest! {
         let expected = oracle_selected_indices(&published, &fragments);
         let selection = select_fragments(&published, &fragments);
         let actual_selected: Vec<usize> = selection.selected_indices().collect();
+        let actual_pending: Vec<usize> = selection.pending_indices().collect();
 
         prop_assert_eq!(&actual_selected, &expected);
+        prop_assert_eq!(actual_selected.len() + actual_pending.len(), fragments.len());
+        for i in 0..fragments.len() {
+            prop_assert_eq!(actual_selected.contains(&i), !actual_pending.contains(&i));
+        }
     }
 }
