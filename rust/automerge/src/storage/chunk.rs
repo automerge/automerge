@@ -431,8 +431,11 @@ mod tests {
         let Chunk::Signatures(signatures) = chunk else {
             panic!("expected a signatures chunk");
         };
-        assert_eq!(signatures.iter().count(), 0);
         assert_eq!(signatures.bytes(), bytes.as_slice());
+        assert_eq!(
+            signatures.into_entries(),
+            crate::storage::signatures::HashEntries::canonicalize([]).unwrap()
+        );
     }
 
     #[test]
