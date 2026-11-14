@@ -203,7 +203,7 @@ impl FragmentCache {
             .filter_map(|n| graph.loose_commit(n))
     }
 
-    fn covers(&self, graph: &ChangeGraph, n: NodeIdx) -> bool {
+    pub(super) fn covers(&self, graph: &ChangeGraph, n: NodeIdx) -> bool {
         let actor = graph.actors[n.0 as usize].into();
         self.top
             .get_for_actor(&actor)

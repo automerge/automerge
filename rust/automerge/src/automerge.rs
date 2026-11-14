@@ -38,6 +38,7 @@ use crate::{AutomergeError, Change, Cursor, Fragment, ObjType, Prop};
 use actor::ActorMaintenance;
 use author::AuthorRegistration;
 use history::History;
+use signing::SigningState;
 use std::borrow::Cow;
 use view::{ClockRange, Mask, ReadAt, VisibleClock};
 
@@ -46,6 +47,7 @@ mod apply;
 mod author;
 pub(crate) mod current_state;
 mod history;
+pub mod signing;
 pub(crate) mod view;
 mod visibility;
 
@@ -312,6 +314,8 @@ pub struct Automerge {
     pub(crate) staged: StagedChanges,
     /// Graph of changes
     pub(crate) change_graph: ChangeGraph,
+    /// Mode and retained signing state.
+    pub(crate) signing: SigningState,
     authors: Authors,
     /// Authors whose changes are hidden past a heads boundary.
     ///
@@ -380,6 +384,7 @@ impl Automerge {
         Automerge {
             staged: StagedChanges::new(),
             change_graph,
+            signing: SigningState::Unsigned,
             authors,
             write_frontier,
             visibility,
@@ -409,6 +414,7 @@ impl Automerge {
         let mut doc = Automerge {
             staged: StagedChanges::new(),
             change_graph,
+            signing: SigningState::Unsigned,
             authors,
             write_frontier,
             visibility,
@@ -727,6 +733,7 @@ impl Automerge {
             &mut self.actor,
             &mut self.authors,
             &mut self.visibility,
+            &mut self.signing,
         )
         .remove(actor);
     }
@@ -753,6 +760,7 @@ impl Automerge {
             &mut self.actor,
             &mut self.authors,
             &mut self.visibility,
+            &mut self.signing,
         )
         .remove_unused();
     }
@@ -1743,6 +1751,7 @@ impl Automerge {
             &mut self.authors,
             &self.ops.actors,
             &self.visibility,
+            &mut self.signing,
         )
         .update(change)
     }
@@ -1756,6 +1765,7 @@ impl Automerge {
             &mut self.actor,
             &mut self.authors,
             &mut self.visibility,
+            &mut self.signing,
         )
         .insert(actor)
     }
@@ -1911,7 +1921,9 @@ impl Automerge {
     #[doc(hidden)]
     pub fn fragments<R: RangeBounds<usize>>(&self, levels: R) -> Vec<Fragment> {
         // these produce fragments newest to oldest
-        let mut fragments: Vec<_> = self.change_graph.fragments(levels).collect();
+        let mut fragments = self
+            .signing
+            .fragments(&self.change_graph, &self.authors, levels);
         // but we want to return them oldest to newest
         fragments.reverse();
         fragments
@@ -1923,11 +1935,15 @@ impl Automerge {
     /// warning.
     #[doc(hidden)]
     pub fn get_fragment(&self, head: ChangeHash) -> Option<Fragment> {
-        self.change_graph.get_fragment(head)
+        self.signing
+            .get_fragment(&self.change_graph, &self.authors, head)
     }
 
     /// EXPERIMENTAL: Encode each fragment as bytes, either as a single change
     /// (level-0 fragments with one member) or as a bundle.
+    /// In signing mode, each content chunk is immediately followed by its complete
+    /// signature chunk; noncanonical descriptors or fragments lacking proof are
+    /// omitted rather than emitted without signatures.
     ///
     /// This is an experimental API, it may change or be removed without
     /// warning.
@@ -1936,12 +1952,21 @@ impl Automerge {
         fragments
             .into_iter()
             .filter_map(|f| {
-                if f.head.fragment_level() == 0 && f.members.len() == 1 {
-                    // there should be a unwrap().into_owned()/to_vec() to avoid a memory copy
-                    Some(self.get_change_by_hash(&f.head)?.bytes().to_vec())
+                let proof = match &self.signing {
+                    SigningState::Unsigned => None,
+                    SigningState::Required(signing) => {
+                        Some(signing.fragment_proof(&self.change_graph, &self.authors, &f)?)
+                    }
+                };
+                let mut bytes = if f.head.fragment_level() == 0 && f.members.len() == 1 {
+                    self.get_change_by_hash(&f.head)?.bytes().to_vec()
                 } else {
-                    Some(self.bundle(f.members).ok()?.bytes().to_vec())
+                    self.bundle(f.members).ok()?.bytes().to_vec()
+                };
+                if let Some(proof) = proof {
+                    bytes.extend_from_slice(proof.bytes());
                 }
+                Some(bytes)
             })
             .collect()
     }
