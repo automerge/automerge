@@ -12,10 +12,16 @@ fn signature(tag: u8, bytes: &[u8]) -> Signature {
     )
 }
 
-fn values(chunk: &SignaturesChunk<'_>) -> Vec<(ChangeHash, Signature)> {
-    chunk
+fn values(chunk: &SignaturesChunk<'_>, hashes: &[ChangeHash]) -> Vec<(ChangeHash, Signature)> {
+    let entries = chunk.clone().into_entries();
+    hashes
         .iter()
-        .map(|(hash, signature)| (hash, signature.clone()))
+        .flat_map(|hash| {
+            entries
+                .for_hash(hash)
+                .cloned()
+                .map(move |signature| (*hash, signature))
+        })
         .collect()
 }
 
@@ -32,9 +38,9 @@ fn signatures_codec_canonicalizes_domain_values_and_exposes_parsed_and_owned_ent
     let inputs = expected.iter().rev().chain(expected.iter()).cloned();
     let entries = HashEntries::canonicalize(inputs).expect("four distinct entries");
     let chunk = SignaturesChunk::encode(entries);
-    assert_eq!(values(&chunk), expected);
+    assert_eq!(values(&chunk, &[a, b]), expected);
     assert_eq!(
-        values(&chunk),
+        values(&chunk, &[a, b]),
         expected,
         "inspection does not consume entries"
     );
@@ -63,26 +69,25 @@ fn signatures_codec_canonicalizes_domain_values_and_exposes_parsed_and_owned_ent
     let Chunk::Signatures(parsed) = parsed else {
         panic!("expected signatures chunk");
     };
-    assert_eq!(values(&parsed), expected);
-    let reencoded = SignaturesChunk::encode(
-        HashEntries::canonicalize(
-            parsed
-                .iter()
-                .map(|(hash, signature)| (hash, signature.clone())),
-        )
-        .unwrap(),
-    );
+    assert_eq!(values(&parsed, &[a, b]), expected);
+    let reencoded = SignaturesChunk::encode(parsed.into_entries());
     assert_eq!(reencoded.bytes(), chunk.bytes());
 }
 
 #[test]
 fn signatures_codec_accepts_empty_domain_input() {
     let chunk = SignaturesChunk::encode(HashEntries::canonicalize([]).unwrap());
-    assert_eq!(chunk.iter().count(), 0);
+    assert_eq!(
+        chunk.clone().into_entries(),
+        HashEntries::canonicalize([]).unwrap()
+    );
     let (_, Chunk::Signatures(parsed)) = Chunk::parse(Input::new(chunk.bytes())).unwrap() else {
         panic!("expected signatures chunk");
     };
-    assert_eq!(parsed.iter().count(), 0);
+    assert_eq!(
+        parsed.into_entries(),
+        HashEntries::canonicalize([]).unwrap()
+    );
 }
 
 #[test]
@@ -91,7 +96,7 @@ fn signatures_codec_counts_distinct_entries_per_hash_across_schemes() {
     let entries: Vec<_> = (0..16).map(|tag| (hash, signature(tag, &[3]))).collect();
     let duplicates = entries.iter().chain(entries.iter()).cloned();
     let chunk = SignaturesChunk::encode(HashEntries::canonicalize(duplicates).unwrap());
-    assert_eq!(chunk.iter().count(), 16);
+    assert_eq!(chunk.into_entries().for_hash(&hash).count(), 16);
 
     let error = HashEntries::canonicalize(entries.into_iter().chain([(hash, signature(16, &[3]))]))
         .unwrap_err();

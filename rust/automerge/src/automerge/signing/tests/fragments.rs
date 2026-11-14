@@ -170,8 +170,12 @@ fn every_signature_order_emits_only_graph_derived_descriptors_and_valid_proofs()
                     .fragment_requirements(fragment.head)
                     .unwrap();
                 assert_eq!(
-                    proof.iter().map(|(h, _)| h).collect::<Vec<_>>(),
-                    reqs.hashes().copied().collect::<Vec<_>>(),
+                    proof.into_entries(),
+                    crate::storage::signatures::HashEntries::canonicalize(
+                        reqs.hashes()
+                            .map(|hash| (*hash, crate::Signature::ed25519(sig(&k, hash))))
+                    )
+                    .unwrap(),
                 );
                 let entry = previously_emitted
                     .entry(fragment.head)

@@ -82,17 +82,24 @@ fn decode(bytes: &[u8]) -> SignaturesChunk<'_> {
     signatures
 }
 
-fn values(chunk: &SignaturesChunk<'_>) -> Vec<Entry> {
-    // Read the observable entry values without reusing canonicalize or its
-    // collection layout to compute the expected result.
-    chunk
-        .iter()
-        .map(|(hash, signature)| {
-            (
-                hash,
-                signature.tag().inner_tag(),
-                signature.to_bytes().as_bytes().to_vec(),
-            )
+fn values(chunk: &SignaturesChunk<'_>, inputs: &[Entry]) -> Vec<Entry> {
+    // Query the same decoded-entry interface as production. The input domain
+    // supplies the hashes; expected signature ordering is computed separately.
+    let hashes: std::collections::BTreeSet<_> = inputs.iter().map(|(hash, _, _)| *hash).collect();
+    let entries = chunk.clone().into_entries();
+    hashes
+        .into_iter()
+        .flat_map(|hash| {
+            entries
+                .for_hash(&hash)
+                .map(|signature| {
+                    (
+                        hash,
+                        signature.tag().inner_tag(),
+                        signature.to_bytes().as_bytes().to_vec(),
+                    )
+                })
+                .collect::<Vec<_>>()
         })
         .collect()
 }
@@ -104,10 +111,13 @@ proptest! {
     fn round_trip_matches_sorted_unique_input(entries in entries()) {
         let encoded = encode(&entries);
         let parsed = decode(encoded.bytes());
+        // Equality also catches spurious hashes or entries outside the input's
+        // query set; per-hash observations below pin canonical value order.
+        prop_assert_eq!(parsed.clone().into_entries(), encoded.clone().into_entries());
         let mut expected = entries;
         expected.sort();
         expected.dedup();
-        prop_assert_eq!(values(&parsed), expected);
+        prop_assert_eq!(values(&parsed, &expected), expected);
         prop_assert_eq!(parsed.bytes(), encoded.bytes());
     }
 
@@ -139,7 +149,7 @@ proptest! {
     fn reencoding_parsed_entries_preserves_bytes(entries in entries()) {
         let encoded = encode(&entries);
         let parsed = decode(encoded.bytes());
-        let reencoded = encode(&values(&parsed));
+        let reencoded = encode(&values(&parsed, &entries));
         prop_assert_eq!(reencoded.bytes(), encoded.bytes());
         prop_assert!(reencoded.checksum_valid());
     }
@@ -155,8 +165,8 @@ fn round_trip_preserves_typed_and_opaque_entries_in_wire_order() {
     ];
     let encoded = encode(&entries);
     let parsed = decode(encoded.bytes());
-    assert_eq!(values(&parsed), entries);
-    assert_eq!(encode(&values(&parsed)).bytes(), encoded.bytes());
+    assert_eq!(values(&parsed, &entries), entries);
+    assert_eq!(encode(&values(&parsed, &entries)).bytes(), encoded.bytes());
 }
 
 #[test]
@@ -169,5 +179,5 @@ fn round_trip_pins_length_boundaries_and_full_hash_group() {
     let parsed = decode(encoded.bytes());
     let mut expected = entries;
     expected.sort();
-    assert_eq!(values(&parsed), expected);
+    assert_eq!(values(&parsed, &expected), expected);
 }
