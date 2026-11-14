@@ -148,6 +148,7 @@ impl Automerge {
                 &mut self.actor,
                 &mut self.authors,
                 &mut self.visibility,
+                &mut self.signing,
             );
             // Insert every new actor first: a later insertion would shift the
             // indices collected for the earlier ones. The second pass is pure
@@ -191,6 +192,7 @@ impl Automerge {
                 &mut self.authors,
                 &self.ops.actors,
                 &self.visibility,
+                &mut self.signing,
             );
             let mut resolved = false;
             for change in batch.changes() {
@@ -209,6 +211,7 @@ impl Automerge {
             &mut self.actor,
             &mut self.authors,
             &mut self.visibility,
+            &mut self.signing,
         )
         .remove_unused();
 

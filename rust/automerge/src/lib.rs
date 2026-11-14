@@ -297,7 +297,9 @@ mod value;
 mod write_frontier;
 
 pub use crate::anonymize::AnonymizeError;
-pub use crate::automerge::{Automerge, LoadOptions, OnPartialLoad, SaveOptions, StringMigration};
+pub use crate::automerge::{
+    signing, Automerge, LoadOptions, OnPartialLoad, SaveOptions, StringMigration,
+};
 pub use author::Author;
 pub use autocommit::AutoCommit;
 pub use autoserde::AutoSerde;

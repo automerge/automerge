@@ -130,6 +130,27 @@ impl FragmentCache {
         Some(export_fragment(graph, node, &deps))
     }
 
+    pub(super) fn historical_members_all(
+        &self,
+        graph: &ChangeGraph,
+        head: ChangeHash,
+        predicate: impl FnMut(ChangeHash) -> bool,
+    ) -> bool {
+        let Some(&node) = graph.nodes_by_hash.get(&head) else {
+            return false;
+        };
+        let deps: Cow<'_, [NodeIdx]> = if let Some(cached) = self.canonical_at(node) {
+            Cow::Borrowed(&cached.deps)
+        } else {
+            let level = graph.hashes[node.0 as usize].fragment_level();
+            debug_assert!(level > 0);
+            Cow::Owned(graph.fragment_boundary_slow(node, level))
+        };
+        let boundary_clock = graph.calculate_clock(deps.iter().copied().collect());
+        let covered = graph.fragment_content(node, &boundary_clock).all(predicate);
+        covered
+    }
+
     pub(crate) fn fragments<'a, R: RangeBounds<usize> + 'a>(
         &'a self,
         graph: &'a ChangeGraph,
@@ -180,7 +201,7 @@ impl FragmentCache {
             .filter_map(|n| graph.loose_commit(n))
     }
 
-    fn covers(&self, graph: &ChangeGraph, n: NodeIdx) -> bool {
+    pub(super) fn covers(&self, graph: &ChangeGraph, n: NodeIdx) -> bool {
         let actor = graph.actors[n.0 as usize].into();
         self.top
             .get_for_actor(&actor)

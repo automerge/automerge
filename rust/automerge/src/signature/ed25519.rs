@@ -10,7 +10,7 @@ use crate::{Author, ChangeHash};
 
 use super::signing_message;
 
-pub(crate) mod error;
+pub mod error;
 
 /// An owned, unverified Ed25519 signature representation.
 ///
