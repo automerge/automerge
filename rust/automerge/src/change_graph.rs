@@ -637,9 +637,21 @@ impl ChangeGraph {
     }
 
     /// Borrow all applied change hashes in graph order.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(crate) fn applied_hashes(&self) -> &[ChangeHash] {
         &self.hashes
+    }
+
+    /// Return the topological node index for `hash`, if present.
+    pub(crate) fn node_rank(&self, hash: &ChangeHash) -> Option<u32> {
+        self.nodes_by_hash.get(hash).map(|node| node.0)
+    }
+
+    /// Whether `hash` lies within the causal past of at least one cached hard-head fragment.
+    pub(crate) fn is_covered_by_fragment_cache(&self, hash: &ChangeHash) -> bool {
+        self.nodes_by_hash
+            .get(hash)
+            .is_some_and(|node| self.fragment_cache.covers(self, *node))
     }
 
     fn loose_commit(&self, n: NodeIdx) -> Option<Fragment> {

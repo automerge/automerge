@@ -104,12 +104,13 @@ fn identity_and_prepared_resolution_agree_and_preparation_never_downgrades() {
 
     // Internal state check: re-association with identity-only data must retain
     // the already prepared key, not request key decoding again on the next pass.
-    let super::super::ChangeSignatures::Resolved(resolved) = store.by_hash.get(&hash).unwrap()
+    let super::super::ChangeSignatures::AuthorKnown { author, .. } =
+        store.by_hash.get(&hash).unwrap()
     else {
-        panic!("resolved")
+        panic!("author known")
     };
     assert!(matches!(
-        resolved.author,
+        author,
         super::super::AuthorContext::WithEd25519Key(_)
     ));
     assert!(evidence_entries(&store, &hash).is_empty());
@@ -262,15 +263,22 @@ fn inserting_evidence_into_identity_only_context_retains_the_witness_key() {
         store.unchecked_entries(&hash).collect::<Vec<_>>(),
         vec![&other_scheme]
     );
-    let super::super::ChangeSignatures::Resolved(resolved) = store.by_hash.get(&hash).unwrap()
+    let super::super::ChangeSignatures::Verified(verified) = store.by_hash.get(&hash).unwrap()
     else {
-        panic!("expected resolved record");
+        panic!("expected verified record");
     };
     assert!(matches!(
-        resolved.author,
+        verified.author,
         super::super::AuthorContext::WithEd25519Key(_)
     ));
-    assert_eq!(resolved.ed25519_evidence, vec![signature]);
+    assert_eq!(
+        verified
+            .ed25519_evidence
+            .iter()
+            .copied()
+            .collect::<Vec<_>>(),
+        vec![signature]
+    );
 }
 
 #[test]
@@ -296,13 +304,13 @@ fn identity_only_record_prepares_once_and_reuses_key_for_later_entries() {
     store.insert_unchecked(hash, unchecked(0, &[8]));
     assert_eq!(store.verify_ed25519(&hash).unwrap().discarded_invalid, 1);
 
-    let super::super::ChangeSignatures::Resolved(resolved) = store.by_hash.get(&hash).unwrap()
+    let super::super::ChangeSignatures::Verified(verified) = store.by_hash.get(&hash).unwrap()
     else {
-        panic!("resolved")
+        panic!("verified")
     };
     assert!(matches!(
-        resolved.author,
+        verified.author,
         super::super::AuthorContext::WithEd25519Key(_)
     ));
-    assert_eq!(resolved.ed25519_evidence.len(), 1);
+    assert_eq!(verified.ed25519_evidence.len(), 1);
 }

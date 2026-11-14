@@ -107,6 +107,26 @@ impl AutoCommit {
         }
     }
 
+    /// Create a new empty document in required signing mode.
+    pub fn signing() -> AutoCommit {
+        AutoCommit {
+            doc: Automerge::signing(),
+            transaction: None,
+            patch_log: PatchLog::inactive(),
+            diff_cursor: Vec::new(),
+            save_cursor: Vec::new(),
+            isolation: None,
+        }
+    }
+
+    /// Borrow this document's [`crate::signing::SigningDocument`] handle.
+    pub fn try_signing(
+        &mut self,
+    ) -> Result<crate::signing::SigningDocument<'_>, crate::signing::error::SigningMode> {
+        self.ensure_transaction_closed();
+        self.doc.try_signing()
+    }
+
     /// Return a copy of this document with its data anonymized.
     pub fn anonymize(&mut self) -> Result<Self, AnonymizeError> {
         self.ensure_transaction_closed();

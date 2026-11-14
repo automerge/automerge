@@ -4,7 +4,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use proptest::prelude::*;
 
-use crate::signature::store::{AuthorContext, ChangeSignatures, Insert, ResolvedChangeSignatures};
+use crate::signature::store::{
+    AuthorContext, ChangeSignatures, Ed25519Evidence, Insert, VerifiedChangeSignatures,
+};
 use crate::signature::{ed25519, Signature, SignatureBytes, SignatureTag};
 use crate::Author;
 
@@ -15,15 +17,15 @@ fn author(byte: u8) -> Author<'static> {
     Author::from(vec![byte; 32])
 }
 fn group(initial: u8) -> ChangeSignatures {
-    ChangeSignatures::Resolved(Box::new(ResolvedChangeSignatures {
+    ChangeSignatures::Verified(Box::new(VerifiedChangeSignatures {
         author: AuthorContext::IdentityOnly(author(7)),
         unchecked: Vec::new(),
-        ed25519_evidence: vec![signature(initial)],
+        ed25519_evidence: Ed25519Evidence::new(signature(initial)),
     }))
 }
-fn resolved(group: &ChangeSignatures) -> &ResolvedChangeSignatures {
-    let ChangeSignatures::Resolved(group) = group else {
-        panic!("expected resolved group")
+fn verified(group: &ChangeSignatures) -> &VerifiedChangeSignatures {
+    let ChangeSignatures::Verified(group) = group else {
+        panic!("expected verified group")
     };
     group
 }
@@ -36,10 +38,7 @@ fn insert(
     if !group.associate(AuthorContext::IdentityOnly(author.clone())) {
         return None;
     }
-    match group {
-        ChangeSignatures::Resolved(group) => Some(group.insert_ed25519(signature)),
-        ChangeSignatures::Unresolved { .. } => panic!("successful association resolves the group"),
-    }
+    Some(group.insert_verified_ed25519(signature))
 }
 fn full_group() -> ChangeSignatures {
     let mut group = group(0);
@@ -55,9 +54,9 @@ fn full_group() -> ChangeSignatures {
 #[test]
 fn accepts_sixteen_distinct_entries_including_the_initial_entry() {
     let group = full_group();
-    assert_eq!(resolved(&group).ed25519_evidence.len(), 16);
+    assert_eq!(verified(&group).ed25519_evidence.len(), 16);
     for value in 0..16 {
-        assert!(resolved(&group)
+        assert!(verified(&group)
             .ed25519_evidence
             .contains(&signature(value)));
     }
@@ -66,19 +65,19 @@ fn accepts_sixteen_distinct_entries_including_the_initial_entry() {
 #[test]
 fn seventeenth_distinct_entry_is_dropped_without_mutation() {
     let mut group = full_group();
-    let before = resolved(&group).ed25519_evidence.clone();
+    let before = verified(&group).ed25519_evidence.clone();
     assert_eq!(
         insert(&mut group, &author(7), signature(16)),
         Some(Insert::DroppedOverflow)
     );
-    assert_eq!(resolved(&group).ed25519_evidence, before);
-    assert_eq!(resolved(&group).author.author(), &author(7));
+    assert_eq!(verified(&group).ed25519_evidence, before);
+    assert_eq!(verified(&group).author.author(), &author(7));
 }
 
 #[test]
 fn repeated_duplicates_at_capacity_are_still_duplicates() {
     let mut group = full_group();
-    let before = resolved(&group).ed25519_evidence.clone();
+    let before = verified(&group).ed25519_evidence.clone();
     for _ in 0..3 {
         for value in 0..16 {
             assert_eq!(
@@ -87,30 +86,30 @@ fn repeated_duplicates_at_capacity_are_still_duplicates() {
             );
         }
     }
-    assert_eq!(resolved(&group).ed25519_evidence, before);
+    assert_eq!(verified(&group).ed25519_evidence, before);
 }
 
 #[test]
 fn author_conflict_takes_precedence_over_duplicate_and_capacity() {
     let mut group = full_group();
-    let before = resolved(&group).ed25519_evidence.clone();
+    let before = verified(&group).ed25519_evidence.clone();
     assert_eq!(insert(&mut group, &author(8), signature(0)), None);
     assert_eq!(insert(&mut group, &author(8), signature(16)), None);
-    assert_eq!(resolved(&group).ed25519_evidence, before);
-    assert_eq!(resolved(&group).author.author(), &author(7));
+    assert_eq!(verified(&group).ed25519_evidence, before);
+    assert_eq!(verified(&group).author.author(), &author(7));
 }
 
 #[test]
 fn repeated_overflow_never_replaces_an_existing_signature() {
     let mut group = full_group();
-    let before = resolved(&group).ed25519_evidence.clone();
+    let before = verified(&group).ed25519_evidence.clone();
     for value in 16..=u8::MAX {
         assert_eq!(
             insert(&mut group, &author(7), signature(value)),
             Some(Insert::DroppedOverflow)
         );
     }
-    assert_eq!(resolved(&group).ed25519_evidence, before);
+    assert_eq!(verified(&group).ed25519_evidence, before);
     assert_eq!(
         insert(&mut group, &author(7), signature(0)),
         Some(Insert::Duplicate)
@@ -129,8 +128,8 @@ fn capacity_is_per_group_not_shared_between_hashes() {
         insert(&mut other, &author(7), signature(101)),
         Some(Insert::Stored)
     );
-    assert_eq!(resolved(&other).ed25519_evidence.len(), 2);
-    assert_eq!(resolved(&full).ed25519_evidence.len(), 16);
+    assert_eq!(verified(&other).ed25519_evidence.len(), 2);
+    assert_eq!(verified(&full).ed25519_evidence.len(), 16);
 }
 
 #[test]
@@ -151,11 +150,15 @@ fn further_proofs_do_not_displace_entries_but_can_establish_evidence_at_capacity
         Some(Insert::EstablishedEd25519Evidence)
     );
     assert_eq!(
-        resolved(&group).ed25519_evidence,
+        verified(&group)
+            .ed25519_evidence
+            .iter()
+            .copied()
+            .collect::<Vec<_>>(),
         vec![signature(0), signature(15)]
     );
-    assert_eq!(resolved(&group).unchecked.len(), 14);
-    assert!(resolved(&group)
+    assert_eq!(verified(&group).unchecked.len(), 14);
+    assert!(verified(&group)
         .unchecked
         .contains(&Signature::ed25519(signature(1))));
     assert_eq!(
@@ -170,16 +173,23 @@ fn a_known_author_without_evidence_does_not_block_first_proof_replacement() {
         unchecked: (0..16).map(|b| Signature::ed25519(signature(b))).collect(),
     };
     assert!(group.associate(AuthorContext::IdentityOnly(author(7))));
-    assert!(resolved(&group).ed25519_evidence.is_empty());
+    assert!(matches!(group, ChangeSignatures::AuthorKnown { .. }));
     assert_eq!(
         insert(&mut group, &author(7), signature(16)),
         Some(Insert::ReplacedUnchecked)
     );
-    assert_eq!(resolved(&group).unchecked.len(), 15);
-    assert!(!resolved(&group)
+    assert_eq!(verified(&group).unchecked.len(), 15);
+    assert!(!verified(&group)
         .unchecked
         .contains(&Signature::ed25519(signature(15))));
-    assert_eq!(resolved(&group).ed25519_evidence, vec![signature(16)]);
+    assert_eq!(
+        verified(&group)
+            .ed25519_evidence
+            .iter()
+            .copied()
+            .collect::<Vec<_>>(),
+        vec![signature(16)]
+    );
 }
 
 // Independent oracle: raw tag/byte keys and evidence flags, with author binding
@@ -189,8 +199,9 @@ fn observed(group: &ChangeSignatures) -> (Option<Author<'static>>, BTreeMap<Raw,
     let mut result = BTreeMap::new();
     let owner = match group {
         ChangeSignatures::Unresolved { .. } => None,
-        ChangeSignatures::Resolved(group) => {
-            for signature in &group.ed25519_evidence {
+        ChangeSignatures::AuthorKnown { author, .. } => Some(author.author().clone()),
+        ChangeSignatures::Verified(group) => {
+            for signature in group.ed25519_evidence.iter() {
                 assert!(result
                     .insert((0, signature.to_bytes().to_vec()), true)
                     .is_none());
@@ -227,7 +238,7 @@ proptest! {
                 else { retained.insert(value); Some(Insert::Stored) };
             let supplied = if same_author { author(7) } else { author(8) };
             prop_assert_eq!(insert(&mut group, &supplied, signature(value)), expected);
-            let actual = resolved(&group);
+            let actual = verified(&group);
             prop_assert!(actual.ed25519_evidence.len() <= 16);
             prop_assert_eq!(actual.author.author(), &expected_author);
             let actual: BTreeSet<_> = actual.ed25519_evidence.iter().map(|s| s.to_bytes()).collect();
