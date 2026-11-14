@@ -600,9 +600,11 @@ impl ChangeGraph {
     ) -> Option<crate::signature::FragmentRequirements> {
         if head.fragment_level() == 0 {
             let (actor, seq) = self.actor_seq_for_hash(&head)?;
-            Some(crate::signature::FragmentRequirements::for_members([
-                (actor, u64::from(seq), head),
-            ]))
+            Some(crate::signature::FragmentRequirements::for_members([(
+                actor,
+                u64::from(seq),
+                head,
+            )]))
         } else {
             self.fragment_cache.requirements(self, head)
         }
@@ -1745,7 +1747,9 @@ mod tests {
             assert_eq!(graph.fragment_requirements(fragment.head), Some(expected));
             assert_eq!(graph.get_historical_fragment(fragment.head), Some(fragment));
         }
-        assert!(graph.fragment_requirements(ChangeHash([0xff; 32])).is_none());
+        assert!(graph
+            .fragment_requirements(ChangeHash([0xff; 32]))
+            .is_none());
     }
 
     #[test]
@@ -2258,19 +2262,106 @@ pub struct Fragment {
     pub members: Vec<ChangeHash>,
 }
 
+/// EXPERIMENTAL: Failure to parse and validate encoded fragment bytes against a
+/// [`Fragment`] descriptor.
+#[doc(hidden)]
+#[derive(Debug, thiserror::Error)]
+pub enum InvalidFragmentBytes {
+    #[error("fragment bytes contained no chunks")]
+    Empty,
+    #[error("fragment bytes contained leftover data after the chunk group")]
+    LeftoverData,
+    #[error("invalid fragment chunk group: {0}")]
+    Load(#[from] crate::storage::load::Error),
+    #[error("fragment chunk body must be a change or bundle, not a document snapshot")]
+    WrongChunkType,
+    #[error("fragment level mismatch: expected {expected}, actual {actual}")]
+    LevelMismatch { expected: usize, actual: usize },
+    #[error("fragment head {0} is missing from members")]
+    HeadMissing(ChangeHash),
+    #[error("fragment members do not match encoded changes")]
+    MembersMismatch,
+    #[error("fragment boundary does not match encoded dependencies")]
+    BoundaryMismatch,
+}
+
+fn same_unique_hashes(left: &[ChangeHash], right: &[ChangeHash]) -> bool {
+    if left.len() != right.len() {
+        return false;
+    }
+    let left_set: HashSet<_> = left.iter().collect();
+    let right_set: HashSet<_> = right.iter().collect();
+    left_set.len() == left.len() && left_set == right_set
+}
+
 impl Fragment {
     /// Descriptor identity ignores list order but not duplicated or missing hashes.
     /// Callers establish canonicality separately; this only compares descriptors.
     pub(crate) fn same_descriptor(&self, other: &Self) -> bool {
-        fn same_hashes(left: &[ChangeHash], right: &[ChangeHash]) -> bool {
-            left.len() == right.len()
-                && left.iter().collect::<HashSet<_>>() == right.iter().collect::<HashSet<_>>()
-        }
         self.head == other.head
             && self.level == other.level
-            && same_hashes(&self.members, &other.members)
-            && same_hashes(&self.boundary, &other.boundary)
-            && same_hashes(&self.checkpoints, &other.checkpoints)
+            && same_unique_hashes(&self.members, &other.members)
+            && same_unique_hashes(&self.boundary, &other.boundary)
+            && same_unique_hashes(&self.checkpoints, &other.checkpoints)
+    }
+
+    /// EXPERIMENTAL: Parse encoded fragment bytes (a change or bundle chunk with
+    /// an optional trailing signatures chunk), validate them against this
+    /// fragment's descriptor metadata, and retain any attached signatures.
+    #[doc(hidden)]
+    pub fn parse_with_signatures(
+        &self,
+        bytes: &[u8],
+    ) -> Result<crate::LoadedGroup, InvalidFragmentBytes> {
+        use crate::storage::load::{
+            ChunkBody, ChunkGroupReader, Error as LoadError, SingleGroupError,
+        };
+        use crate::storage::parse::Input;
+        use crate::storage::signatures::SignaturesChunk;
+
+        let group = ChunkGroupReader::read_single(Input::new(bytes)).map_err(|err| match err {
+            SingleGroupError::Empty => InvalidFragmentBytes::Empty,
+            SingleGroupError::LeftoverData => InvalidFragmentBytes::LeftoverData,
+            SingleGroupError::Load(load) => InvalidFragmentBytes::Load(load),
+        })?;
+        let signatures = group.signatures.map(SignaturesChunk::into_entries);
+
+        let (changes, actual_deps) = match *group.body {
+            ChunkBody::Change(change) | ChunkBody::CompressedChange(change) => {
+                let deps = change.deps().to_vec();
+                (vec![change], deps)
+            }
+            ChunkBody::Bundle(bundle) => {
+                let changes = bundle
+                    .to_changes()
+                    .map_err(|e| LoadError::InvalidBundleChange(e.into()))?;
+                let deps = bundle.deps().to_vec();
+                (changes, deps)
+            }
+            ChunkBody::Document(_) => return Err(InvalidFragmentBytes::WrongChunkType),
+        };
+
+        let expected_level = self.head.fragment_level();
+        if expected_level != self.level {
+            return Err(InvalidFragmentBytes::LevelMismatch {
+                expected: expected_level,
+                actual: self.level,
+            });
+        }
+        if !self.members.contains(&self.head) {
+            return Err(InvalidFragmentBytes::HeadMissing(self.head));
+        }
+        let actual_members: Vec<_> = changes.iter().map(Change::hash).collect();
+        if !same_unique_hashes(&actual_members, &self.members) {
+            return Err(InvalidFragmentBytes::MembersMismatch);
+        }
+        if !same_unique_hashes(&actual_deps, &self.boundary) {
+            return Err(InvalidFragmentBytes::BoundaryMismatch);
+        }
+        Ok(crate::LoadedGroup {
+            body: crate::storage::load::LoadedGroupBody::Changes(changes),
+            signatures,
+        })
     }
 }
 

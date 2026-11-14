@@ -1,4 +1,5 @@
 use crate::author::Author;
+use crate::signature::error::SigningError;
 use crate::storage::load::Error as LoadError;
 use crate::types::{ActorId, ScalarValue};
 use crate::value::DataType;
@@ -78,6 +79,14 @@ pub enum AutomergeError {
     EncodingError(String),
     #[error("failed to unbundle: {0}")]
     Unbundle(Box<dyn std::error::Error + Send + Sync + 'static>),
+    #[error(transparent)]
+    Signing(#[from] SigningError),
+}
+
+impl From<std::convert::Infallible> for AutomergeError {
+    fn from(error: std::convert::Infallible) -> Self {
+        match error {}
+    }
 }
 
 impl AutomergeError {

@@ -15,11 +15,12 @@ pub(crate) trait AcceptedHistory {
     fn contains(&self, hash: &ChangeHash) -> bool;
 }
 
-/// Input fragment occurrences whose causal boundaries are satisfied.
+/// Partition of input fragment occurrences into causally admissible and waiting sets.
 #[derive(Debug)]
 #[must_use]
 pub(crate) struct Selection<'a> {
     selected: Vec<(usize, &'a Fragment)>,
+    pending: Vec<(usize, &'a Fragment)>,
 }
 
 impl<'a> Selection<'a> {
@@ -27,9 +28,12 @@ impl<'a> Selection<'a> {
         self.selected.iter().map(|(_, fragment)| *fragment)
     }
 
-    #[cfg(test)]
     pub(crate) fn selected_indices(&self) -> impl ExactSizeIterator<Item = usize> + '_ {
         self.selected.iter().map(|(index, _)| *index)
+    }
+
+    pub(crate) fn pending_indices(&self) -> impl ExactSizeIterator<Item = usize> + '_ {
+        self.pending.iter().map(|(index, _)| *index)
     }
 }
 
@@ -82,12 +86,15 @@ pub(crate) fn select_fragments<'a>(
     }
 
     let mut selected = Vec::new();
+    let mut pending = Vec::new();
     for (index, fragment) in fragments.iter().enumerate() {
-        if !excluded[index] {
+        if excluded[index] {
+            pending.push((index, fragment));
+        } else {
             selected.push((index, fragment));
         }
     }
-    Selection { selected }
+    Selection { selected, pending }
 }
 
 #[cfg(test)]

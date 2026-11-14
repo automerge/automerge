@@ -7,7 +7,8 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::op_set2::change::batch::BatchApply;
-use crate::staging::ChangeBatch;
+use crate::signature::error::SigningError;
+use crate::staging::{ChangeBatch, StagedChanges};
 use crate::{ActorId, AutomergeError, Change, ChangeHash, Fragment, PatchLog, PatchLogMismatch};
 
 use super::{ActorMaintenance, AuthorRegistration, Automerge, History, HistoryUpdate};
@@ -25,19 +26,44 @@ enum Grouping {
 }
 
 impl Automerge {
-    pub fn apply_changes_batch(
-        &mut self,
-        changes: impl IntoIterator<Item = Change> + Clone,
-    ) -> Result<(), AutomergeError> {
+    pub fn apply_changes_batch<I>(&mut self, changes: I) -> Result<(), AutomergeError>
+    where
+        I: IntoIterator,
+        I::Item: TryInto<crate::LoadedGroup>,
+        AutomergeError: From<<I::Item as TryInto<crate::LoadedGroup>>::Error>,
+    {
         self.apply_changes_batch_log_patches(changes, &mut PatchLog::inactive())
     }
 
-    pub fn apply_changes_batch_log_patches<I: IntoIterator<Item = Change>>(
+    pub fn apply_changes_batch_log_patches<I>(
         &mut self,
         changes: I,
         log: &mut PatchLog,
-    ) -> Result<(), AutomergeError> {
-        self.apply_changes_with_grouping(changes, Grouping::Unclassified, log)
+    ) -> Result<(), AutomergeError>
+    where
+        I: IntoIterator,
+        I::Item: TryInto<crate::LoadedGroup>,
+        AutomergeError: From<<I::Item as TryInto<crate::LoadedGroup>>::Error>,
+    {
+        use crate::storage::load::LoadedGroupBody;
+
+        log.validate(&self.ops.actors)?;
+        let groups: Vec<crate::LoadedGroup> = changes
+            .into_iter()
+            .map(|item| item.try_into().map_err(AutomergeError::from))
+            .collect::<Result<_, _>>()?;
+        if self.signing.is_required() {
+            if groups.iter().any(|group| group.signatures.is_none()) {
+                return Err(SigningError::UnauthenticatedChanges.into());
+            }
+            self.admit_loaded_groups(groups, log)
+        } else {
+            let changes = groups.into_iter().flat_map(|group| match group.body {
+                LoadedGroupBody::Changes(changes) => changes,
+                LoadedGroupBody::Document => unreachable!("apply_changes inputs exclude snapshots"),
+            });
+            self.apply_changes_with_grouping(changes, Grouping::Unclassified, log)
+        }
     }
 
     /// Import ordered changes with grouping supplied by an internal producer.
@@ -62,6 +88,9 @@ impl Automerge {
         grouping: Grouping,
         log: &mut PatchLog,
     ) -> Result<(), AutomergeError> {
+        if self.signing.is_required() {
+            return Err(SigningError::UnauthenticatedChanges.into());
+        }
         // Validate the observer before staging or applying incoming changes.
         // A rejected log leaves existing staged history and recorded events
         // available for retry. Once validation passes, actor-table growth during
@@ -133,8 +162,27 @@ impl Automerge {
     }
 
     fn apply_ready(&mut self, log: &mut PatchLog) -> Result<(), PatchLogMismatch> {
-        let prepared = self.staged.prepare(&self.change_graph);
-        let mut batch = BatchApply::new(prepared.changes().to_vec());
+        let mut staged = std::mem::replace(&mut self.staged, StagedChanges::new());
+        let result = (|| {
+            let prepared = staged.prepare(&self.change_graph);
+            let changes = prepared.changes().to_vec();
+            let completed = changes.iter().map(|c| c.hash()).collect::<HashSet<_>>();
+            self.apply_prepared_changes(changes, log)?;
+            staged.remove_completed(&completed, &self.change_graph);
+            Ok(())
+        })();
+        self.staged = staged;
+        result
+    }
+
+    /// Apply causally ordered, validated changes to actors, authors, history,
+    /// operations, visibility, and `log`.
+    pub(super) fn apply_prepared_changes(
+        &mut self,
+        changes: Vec<&Change>,
+        log: &mut PatchLog,
+    ) -> Result<(), PatchLogMismatch> {
+        let mut batch = BatchApply::new(changes);
 
         // Align the batch and log with the incoming doc, taking a snapshot of
         // the mask before the op set mutation.
@@ -249,14 +297,6 @@ impl Automerge {
         }
 
         debug_assert!(self.ops.validate_op_order());
-        // Remove completed entries only after operations and visibility are
-        // consistent. Collecting hashes ends the borrowed batch's last use.
-        let completed = batch
-            .changes()
-            .iter()
-            .map(|change| change.hash())
-            .collect::<HashSet<_>>();
-        self.staged.remove_completed(&completed, &self.change_graph);
         Ok(())
     }
 }

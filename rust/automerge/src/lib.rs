@@ -303,9 +303,11 @@ pub use crate::automerge::{
 pub use author::Author;
 pub use autocommit::AutoCommit;
 pub use autoserde::AutoSerde;
+#[doc(hidden)]
+pub use change::ParsedChange;
 pub use change::{Change, LoadError as LoadChangeError};
 #[doc(hidden)]
-pub use change_graph::Fragment;
+pub use change_graph::{Fragment, InvalidFragmentBytes};
 pub use cursor::{Cursor, CursorPosition, MoveCursor, OpCursor};
 pub use error::InvalidActorId;
 pub use error::InvalidChangeHashSlice;
@@ -319,6 +321,7 @@ pub use sequence_tree::SequenceTree;
 pub use signature::{
     signing_message, verify_signature, Signature, SignatureBytes, SignatureTag, Verification,
 };
+pub use storage::load::LoadedGroup;
 pub use storage::{Bundle, BundleChange, BundleChangeIter, VerificationMode};
 pub use text_value::ConcreteTextValue;
 pub use transaction::BlockOrText;
