@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::automerge::Automerge;
@@ -7,7 +9,7 @@ use crate::{
     iter::{SpanInternal, SpansInternal},
     patches::Events,
     transaction::TransactionInner,
-    ObjId as ExId, ReadDoc, TextEncoding,
+    ObjId as ExId, ReadDoc, ScalarValue, TextEncoding,
 };
 mod myers;
 mod replace;
@@ -198,17 +200,32 @@ fn apply_marks_diff(
         }
     }
 
-    // Get current marks on the text
+    // Read the current marks once. Looking them up through an index keyed by
+    // (name, start, end) keeps this linear in the number of marks; calling
+    // `marks_for` per new mark made it O(marks x text length).
     let current_marks = doc.marks_for(text_obj, doc.read_current())?;
+    let mut wanted: HashMap<(&str, usize, usize), Vec<&ScalarValue>> = HashMap::new();
+    for (name, value, start, end) in &new_marks {
+        wanted
+            .entry((name.as_str(), *start, *end))
+            .or_default()
+            .push(value);
+    }
 
-    // Determine which marks to remove (those not in the new set)
+    // Marks not in the new set are removed. The rest stay, and are recorded
+    // in `present` so the add pass below skips them.
     let mut marks_to_remove = Vec::new();
+    let mut present: HashMap<(String, usize, usize), Vec<ScalarValue>> = HashMap::new();
     for mark in current_marks {
-        let should_keep = new_marks.iter().any(|(name, value, start, end)| {
-            name == mark.name && value == &mark.value && *start == mark.start && *end == mark.end
-        });
-
-        if !should_keep {
+        let keep = wanted
+            .get(&(mark.name.as_str(), mark.start, mark.end))
+            .is_some_and(|values| values.contains(&&mark.value));
+        if keep {
+            present
+                .entry((mark.name.to_string(), mark.start, mark.end))
+                .or_default()
+                .push(mark.value.clone());
+        } else {
             marks_to_remove.push(mark);
         }
     }
@@ -226,26 +243,24 @@ fn apply_marks_diff(
         )?;
     }
 
-    // Add new marks that don't already exist
+    // Add new marks that aren't already present. Resolved marks of one name
+    // never overlap, so removing a mark above can't change a kept one.
     for (mark_name, mark_value, start, end) in new_marks {
-        let already_exists = doc
-            .marks_for(text_obj, doc.read_current())?
-            .iter()
-            .any(|m| {
-                m.name == mark_name && m.value == mark_value && m.start == start && m.end == end
-            });
-
-        if !already_exists {
-            let expand = config
-                .per_mark_expands
-                .get(&mark_name)
-                .copied()
-                .unwrap_or(config.default_expand);
-
-            let mark = crate::marks::Mark::new(mark_name, mark_value, start, end);
-
-            tx.mark(doc, patch_log, text_obj, mark, expand)?;
+        let values = present.entry((mark_name.clone(), start, end)).or_default();
+        if values.contains(&mark_value) {
+            continue;
         }
+        values.push(mark_value.clone());
+
+        let expand = config
+            .per_mark_expands
+            .get(&mark_name)
+            .copied()
+            .unwrap_or(config.default_expand);
+
+        let mark = crate::marks::Mark::new(mark_name, mark_value, start, end);
+
+        tx.mark(doc, patch_log, text_obj, mark, expand)?;
     }
 
     Ok(())
