@@ -4,7 +4,9 @@ use crate::{
 };
 
 pub(crate) mod change_collector;
-pub(crate) use crate::storage::chunk::group::{ChunkGroupReader, FailureKind, InitialLoad};
+pub(crate) use crate::storage::chunk::group::{
+    ChunkBody, ChunkGroupReader, FailureKind, InitialLoad, SingleGroupError,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum VerificationMode {
@@ -67,17 +69,89 @@ pub(crate) enum LoadedChanges<'a> {
 }
 
 /// Content of a decoded chunk group prior to authentication or staging.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) enum LoadedGroupBody {
     Document,
     Changes(Vec<Change>),
 }
 
-/// One content chunk together with its own trailing signature entries, if any.
-#[derive(Debug)]
-pub(crate) struct LoadedGroup {
+/// A decoded change or bundle chunk together with its own optional trailing
+/// signatures chunk.
+///
+/// Convert a [`Change`] into an unsigned group, or parse one encoded group with
+/// [`TryFrom<&[u8]>`] or [`TryFrom<Vec<u8>>`]. Use [`crate::Automerge::apply_changes`]
+/// to apply groups without decoding them again. Parsing checks framing and
+/// checksums; cryptographic proofs are checked when applying in signing mode.
+#[derive(Clone, Debug)]
+pub struct LoadedGroup {
     pub(crate) body: LoadedGroupBody,
     pub(crate) signatures: Option<HashEntries>,
+}
+
+impl LoadedGroup {
+    /// Borrow the decoded changes without discarding their attached proof.
+    pub fn changes(&self) -> &[Change] {
+        match &self.body {
+            LoadedGroupBody::Changes(changes) => changes,
+            // Snapshot groups are only constructed by the internal stream loader.
+            LoadedGroupBody::Document => &[],
+        }
+    }
+}
+
+impl From<Change> for LoadedGroup {
+    fn from(change: Change) -> Self {
+        Self {
+            body: LoadedGroupBody::Changes(vec![change]),
+            signatures: None,
+        }
+    }
+}
+
+impl From<crate::change::ParsedChange> for LoadedGroup {
+    fn from(parsed: crate::change::ParsedChange) -> Self {
+        Self {
+            body: LoadedGroupBody::Changes(vec![parsed.change]),
+            signatures: parsed.signatures,
+        }
+    }
+}
+
+impl TryFrom<&[u8]> for LoadedGroup {
+    type Error = crate::AutomergeError;
+
+    fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
+        let group =
+            ChunkGroupReader::read_single(parse::Input::new(bytes)).map_err(
+                |error| match error {
+                    SingleGroupError::LeftoverData => Error::LeftoverData,
+                    SingleGroupError::Load(error) => error,
+                    SingleGroupError::Empty => Error::Parse(Box::new(error)),
+                },
+            )?;
+        let signatures = group
+            .signatures
+            .map(super::signatures::SignaturesChunk::into_entries);
+        let changes = match *group.body {
+            ChunkBody::Change(change) | ChunkBody::CompressedChange(change) => vec![change],
+            ChunkBody::Bundle(bundle) => bundle
+                .to_changes()
+                .map_err(|error| Error::InvalidBundleChange(Box::new(error)))?,
+            ChunkBody::Document(_) => return Err(crate::LoadChangeError::WrongChunkType.into()),
+        };
+        Ok(Self {
+            body: LoadedGroupBody::Changes(changes),
+            signatures,
+        })
+    }
+}
+
+impl TryFrom<Vec<u8>> for LoadedGroup {
+    type Error = crate::AutomergeError;
+
+    fn try_from(bytes: Vec<u8>) -> Result<Self, Self::Error> {
+        Self::try_from(bytes.as_slice())
+    }
 }
 
 /// Result of reading chunk groups without pooling or discarding signatures.

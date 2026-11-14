@@ -1,9 +1,9 @@
 //! Document-owned signing state and access to required-mode operations.
 //!
-//! Create an empty required-mode document with [`Automerge::signing`], then
-//! obtain a [`SigningDocument`] through [`Automerge::try_signing`]. The document
-//! retains its accepted clock, readiness state, and required signatures between
-//! handle borrows.
+//! Create an empty required-mode document with [`Automerge::signing`] (or load a
+//! signed fragment stream with [`crate::LoadOptions::signing`]), then obtain a
+//! [`SigningDocument`] through [`Automerge::try_signing`]. The document retains
+//! its accepted clock, pending groups, and required signatures between borrows.
 
 use std::collections::HashSet;
 use std::ops::RangeBounds;
@@ -16,12 +16,14 @@ use crate::clock::SeqClock;
 use crate::op_set2::OpSet;
 use crate::signature::{ed25519, Insert, Signature, SignatureStore};
 use crate::storage::signatures::{HashEntries, SignaturesChunk};
-use crate::{ChangeHash, Fragment, TextEncoding};
+use crate::{Author, Change, ChangeHash, Fragment, TextEncoding};
 
 use super::Automerge;
 
+mod incoming;
 mod readiness;
 
+use incoming::PendingGroups;
 use readiness::{FragmentReadiness, OutgoingSelection};
 
 /// Contiguous published change sequences, maintained as a dependency-closed prefix.
@@ -76,6 +78,26 @@ pub(crate) enum SigningState {
 }
 
 impl SigningState {
+    pub(crate) fn is_required(&self) -> bool {
+        matches!(self, Self::Required(_))
+    }
+
+    pub(super) fn has_pending_groups(&self) -> bool {
+        match self {
+            Self::Unsigned => false,
+            Self::Required(signing) => !signing.pending.is_empty(),
+        }
+    }
+
+    pub(super) fn queued_changes(&self) -> impl Iterator<Item = &Change> {
+        match self {
+            Self::Unsigned => None,
+            Self::Required(signing) => Some(signing.pending.queued_changes()),
+        }
+        .into_iter()
+        .flatten()
+    }
+
     pub(super) fn insert_actor(&mut self, actor: &ActorShift) {
         if let Self::Required(signing) = self {
             signing.published.insert_actor(actor);
@@ -85,6 +107,12 @@ impl SigningState {
     pub(super) fn remove_actor(&mut self, actor: &ActorRemoval) {
         if let Self::Required(signing) = self {
             signing.published.remove_actor(actor);
+        }
+    }
+
+    pub(super) fn record_local_change(&mut self, hash: ChangeHash) {
+        if let Self::Required(signing) = self {
+            signing.local_unsigned.push(hash);
         }
     }
 
@@ -161,6 +189,8 @@ pub(crate) struct RequiredSigning {
     published: PublishedClock,
     signatures: SignatureStore,
     fragment_readiness: FragmentReadiness,
+    pending: PendingGroups,
+    local_unsigned: Vec<ChangeHash>,
 }
 
 impl RequiredSigning {
@@ -169,6 +199,8 @@ impl RequiredSigning {
             published: PublishedClock::new(actors),
             signatures: SignatureStore::default(),
             fragment_readiness: FragmentReadiness::default(),
+            pending: PendingGroups::default(),
+            local_unsigned: Vec::new(),
         }
     }
 
@@ -283,6 +315,7 @@ pub struct SigningDocument<'a> {
     graph: &'a ChangeGraph,
     ops: &'a OpSet,
     authors: &'a Authors,
+    current_author: Option<&'a Author<'static>>,
     state: &'a mut RequiredSigning,
 }
 
@@ -333,6 +366,14 @@ impl<'a> SigningDocument<'a> {
             self.publish_proved_local();
             self.state.reclaim_covered(self.graph);
         }
+        let graph = self.graph;
+        let published = &self.state.published;
+        self.state.local_unsigned.retain(|pending| {
+            pending != hash
+                && !graph
+                    .actor_seq_for_hash(pending)
+                    .is_some_and(|(actor, seq)| published.is_published_actor_seq(actor, seq))
+        });
         Ok(inserted)
     }
 
@@ -341,6 +382,29 @@ impl<'a> SigningDocument<'a> {
         self.graph
             .actor_seq_for_hash(hash)
             .is_some_and(|(actor, seq)| self.state.published.is_published_actor_seq(actor, seq))
+    }
+
+    /// Return the locally authored commit hashes on this document that belong to
+    /// its current [`Author`] and still need a signature, in commit order.
+    ///
+    /// Only commits created locally on this document are tracked here; changes
+    /// imported from outside the document are never returned.
+    pub fn required_signatures(&self) -> Vec<ChangeHash> {
+        let Some(current_author) = self.current_author else {
+            return Vec::new();
+        };
+        let current_author = current_author.as_borrowed();
+        self.state
+            .local_unsigned
+            .iter()
+            .copied()
+            .filter(|hash| {
+                self.graph
+                    .actor_seq_for_hash(hash)
+                    .and_then(|(actor, _)| self.authors.get_author_for_actor(actor))
+                    .is_some_and(|author| author == current_author)
+            })
+            .collect()
     }
 
     fn publish_proved_local(&mut self) {
@@ -401,7 +465,8 @@ impl Automerge {
         Self::signing_with_encoding(TextEncoding::platform_default())
     }
 
-    pub(super) fn signing_with_encoding(encoding: TextEncoding) -> Self {
+    /// Create a new empty document in required signing mode with an explicit text encoding.
+    pub fn signing_with_encoding(encoding: TextEncoding) -> Self {
         let mut doc = Self::new_with_encoding(encoding);
         let signing = SigningState::Required(Box::new(RequiredSigning::new(doc.actors())));
         doc.signing = signing;
@@ -415,6 +480,7 @@ impl Automerge {
             graph: &self.change_graph,
             ops: &self.ops,
             authors: &self.authors,
+            current_author: self.author.as_ref(),
             state,
         })
     }

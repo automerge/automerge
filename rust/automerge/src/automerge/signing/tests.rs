@@ -9,6 +9,7 @@ use crate::{ActorId, Author, Automerge, Change, ChangeHash, PatchLog, ReadDoc, R
 use super::error;
 
 mod fragments;
+mod incoming;
 
 /// A deterministic signing key derived from `seed`.
 pub(super) fn key(seed: u8) -> SigningKey {
@@ -316,4 +317,55 @@ fn local_fallback_is_published_while_its_container_waits_on_an_unpublished_bound
             .count(),
         2
     );
+}
+
+#[test]
+fn required_signatures_omits_an_injected_non_local_change_with_the_local_author() {
+    let k1 = key(1);
+    let alice = author(&k1);
+
+    // Build a change on a separate document claiming `alice` as its author.
+    let mut remote = Automerge::new()
+        .with_author(Some(alice.clone()))
+        .with_actor(ActorId::from([9]));
+    let mut tx = remote.transaction();
+    tx.put(ROOT, "sneaky", "forged").unwrap();
+    let remote_hash = tx.commit().0.unwrap();
+    let remote_change = remote.get_change_by_hash(&remote_hash).unwrap();
+
+    // Even if an unverified non-local change bearing `alice`'s author somehow
+    // entered `ChangeGraph` directly via `History::update`, it was not locally
+    // authored in `doc` and must never be returned by `required_signatures`.
+    let mut doc = Automerge::signing()
+        .with_author(Some(alice))
+        .with_actor(ActorId::from([1]));
+    doc.put_actor(ActorId::from([9]));
+    let _ = crate::automerge::history::History::new(
+        &mut doc.change_graph,
+        &mut doc.deps,
+        &mut doc.authors,
+        &doc.ops.actors,
+        &doc.visibility,
+        &mut doc.signing,
+    )
+    .update(&remote_change);
+
+    assert!(doc.try_signing().unwrap().required_signatures().is_empty());
+}
+
+#[test]
+fn required_signatures_tracks_a_local_commit_until_it_is_signed() {
+    let k1 = key(1);
+    let mut doc = Automerge::signing()
+        .with_author(Some(author(&k1)))
+        .with_actor(ActorId::from([1]));
+
+    let local_hash = append_at_level(&mut doc, None, 10, 0);
+
+    assert_eq!(
+        doc.try_signing().unwrap().required_signatures(),
+        vec![local_hash]
+    );
+    sign_doc(&mut doc, local_hash, &k1);
+    assert!(doc.try_signing().unwrap().required_signatures().is_empty());
 }

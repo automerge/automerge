@@ -93,6 +93,10 @@ pub use state::{Have, State};
 
 /// A document which can take part in the sync protocol
 ///
+/// Note: sync messages do not carry detached proof chunks. Documents in
+/// required signing mode produce no sync messages and reject received sync
+/// messages with [`crate::signature::error::SigningError::UnauthenticatedChanges`].
+///
 /// See the [module level documentation](crate::sync) for more details.
 pub trait SyncDoc {
     /// Generate a sync message for the remote peer represented by `sync_state`
@@ -165,6 +169,9 @@ impl MessageVersion {
 
 impl SyncDoc for Automerge {
     fn generate_sync_message(&self, sync_state: &mut State) -> Option<Message> {
+        if self.signing.is_required() {
+            return None;
+        }
         let our_heads = self.get_heads();
 
         let our_need = if sync_state.read_only {
@@ -389,6 +396,9 @@ impl Automerge {
         message: Message,
         patch_log: &mut PatchLog,
     ) -> Result<(), AutomergeError> {
+        if self.signing.is_required() {
+            return Err(crate::signature::error::SigningError::UnauthenticatedChanges.into());
+        }
         sync_state.in_flight = false;
         let before_heads = self.get_heads();
 

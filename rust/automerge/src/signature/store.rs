@@ -120,6 +120,35 @@ impl SignatureStore {
         self.by_hash.keys()
     }
 
+    /// Merge verified evidence without repeating cryptographic verification.
+    ///
+    /// All author conflicts are checked before mutation. Duplicate evidence is
+    /// ignored; full records keep their existing signatures. `other` is unchanged.
+    pub(crate) fn merge_verified(&mut self, other: &Self) -> Result<(), InsertError> {
+        for (hash, incoming) in &other.by_hash {
+            if self
+                .by_hash
+                .get(hash)
+                .is_some_and(|existing| existing.author != incoming.author)
+            {
+                return Err(InsertError::AuthorConflict { change: *hash });
+            }
+        }
+        for (&hash, incoming) in &other.by_hash {
+            match self.by_hash.entry(hash) {
+                Entry::Vacant(entry) => {
+                    entry.insert(incoming.clone());
+                }
+                Entry::Occupied(mut entry) => {
+                    for signature in incoming.signatures.iter() {
+                        entry.get_mut().signatures.insert(*signature);
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Retain only records whose change hashes pass `keep`.
     pub(crate) fn retain_hashes(&mut self, mut keep: impl FnMut(&ChangeHash) -> bool) {
         self.by_hash.retain(|hash, _| keep(hash));
