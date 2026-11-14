@@ -15,10 +15,13 @@ use crate::change::Change;
 use crate::change_graph::ChangeGraph;
 use crate::storage::chunk;
 use crate::storage::document::ReconstructError;
-use crate::storage::load::{Error as LoadError, LoadedChanges, MarkOrderValidation};
+use crate::storage::load::{
+    Error as LoadError, LoadedChanges, LoadedGroup, LoadedGroupBody, LoadedGroups,
+    MarkOrderValidation,
+};
 use crate::storage::parse;
 use crate::storage::parse::Input;
-use crate::storage::signatures::SignaturesChunk;
+use crate::storage::signatures::{HashEntries, SignaturesChunk};
 use crate::storage::{Bundle, Chunk, ChunkType, Document, Header};
 use crate::types::TextEncoding;
 
@@ -196,6 +199,24 @@ impl<'a> ReadChunkGroup<'a> {
         self.group.into_changes(text_encoding, current, mark_order)
     }
 
+    fn into_loaded_group(self) -> Result<LoadedGroup, LoadError> {
+        let ChunkGroup { body, signatures } = *self.group;
+        let signatures: Option<HashEntries> = signatures.map(SignaturesChunk::into_entries);
+        let body = match *body {
+            ChunkBody::Change(change) | ChunkBody::CompressedChange(change) => {
+                LoadedGroupBody::Changes(vec![change])
+            }
+            ChunkBody::Bundle(bundle) => {
+                let changes = bundle
+                    .to_changes()
+                    .map_err(|e| LoadError::InvalidBundleChange(e.into()))?;
+                LoadedGroupBody::Changes(changes)
+            }
+            ChunkBody::Document(_) => LoadedGroupBody::Document,
+        };
+        Ok(LoadedGroup { body, signatures })
+    }
+
     /// The input beginning at this group's body, for conversion-error reporting.
     fn start(&self) -> Input<'a> {
         self.start
@@ -209,6 +230,18 @@ impl<'a> ReadChunkGroup<'a> {
     }
 }
 
+/// Classification of a partial-load boundary for callers that distinguish
+/// metadata failures and incomplete prefixes from subsequent body errors.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum FailureKind {
+    /// Failed while reading or pairing a signatures chunk.
+    Signatures,
+    /// Input ended before the next chunk's type could be identified.
+    IncompletePrefix,
+    /// A body chunk, unknown chunk type, or invalid magic failed after any preceding group closed.
+    Body,
+}
+
 /// A loading error together with the input beginning at the failure boundary.
 ///
 /// If trailing signatures invalidate a pending group, the boundary is the
@@ -218,6 +251,7 @@ impl<'a> ReadChunkGroup<'a> {
 pub(crate) struct Error<'a> {
     pub(crate) remaining: Input<'a>,
     pub(crate) error: LoadError,
+    pub(crate) kind: FailureKind,
 }
 
 impl<'a> Error<'a> {
@@ -225,6 +259,7 @@ impl<'a> Error<'a> {
         Self {
             remaining,
             error: LoadError::OrphanSignatures,
+            kind: FailureKind::Signatures,
         }
     }
 
@@ -232,6 +267,7 @@ impl<'a> Error<'a> {
         Self {
             remaining,
             error: LoadError::DuplicateSignatures,
+            kind: FailureKind::Signatures,
         }
     }
 }
@@ -308,6 +344,40 @@ impl<'a> ChunkGroupReader<'a> {
             }
         }
         LoadedChanges::Complete(changes)
+    }
+
+    /// Consume the remaining chunk groups while preserving each group's own
+    /// trailing signature entries and failure-boundary classification.
+    #[tracing::instrument(skip(self))]
+    pub(crate) fn load_groups(self) -> LoadedGroups<'a> {
+        let mut loaded = Vec::new();
+        for result in self {
+            match result {
+                Ok(group) => {
+                    let remaining = group.start();
+                    match group.into_loaded_group() {
+                        Ok(decoded) => loaded.push(decoded),
+                        Err(error) => {
+                            return LoadedGroups::Partial {
+                                loaded,
+                                remaining,
+                                error,
+                                kind: FailureKind::Body,
+                            };
+                        }
+                    }
+                }
+                Err(error) => {
+                    return LoadedGroups::Partial {
+                        loaded,
+                        remaining: error.remaining,
+                        error: error.error,
+                        kind: error.kind,
+                    };
+                }
+            }
+        }
+        LoadedGroups::Complete(loaded)
     }
 
     fn next_group(&mut self) -> GroupResult<'a> {
@@ -488,9 +558,15 @@ impl<'a> ChunkReader<'a> {
                     &error,
                     parse::ParseError::Error(chunk::error::Header::InvalidMagicBytes)
                 );
+                let kind = if matches!(&error, parse::ParseError::Incomplete(_)) {
+                    FailureKind::IncompletePrefix
+                } else {
+                    FailureKind::Body
+                };
                 let failure = Error {
                     remaining: start,
                     error: LoadError::Parse(error.into()),
+                    kind,
                 };
                 // Preserve the diagnostic category. Neither kind identifies
                 // signatures, so both leave the preceding group recoverable.
@@ -504,18 +580,19 @@ impl<'a> ChunkReader<'a> {
 
         // The prefix identifies which group a later decoding/checksum failure
         // belongs to. Known metadata must never be treated as a new body.
-        let failed = |error| {
-            let error = Error {
+        let failed = |error| match chunk_type {
+            ChunkType::Document | ChunkType::Change | ChunkType::Compressed | ChunkType::Bundle => {
+                ChunkEvent::BodyFailed(Error {
+                    remaining: start,
+                    error,
+                    kind: FailureKind::Body,
+                })
+            }
+            ChunkType::Signatures => ChunkEvent::MetadataFailed(Error {
                 remaining: start,
                 error,
-            };
-            match chunk_type {
-                ChunkType::Document
-                | ChunkType::Change
-                | ChunkType::Compressed
-                | ChunkType::Bundle => ChunkEvent::BodyFailed(error),
-                ChunkType::Signatures => ChunkEvent::MetadataFailed(error),
-            }
+                kind: FailureKind::Signatures,
+            }),
         };
         let (remaining, chunk) = match Chunk::parse(start) {
             Ok(parsed) => parsed,
@@ -950,6 +1027,7 @@ mod tests {
             Error {
                 remaining: failed_start,
                 error: LoadError::BadChecksum,
+                kind: FailureKind::Body,
             },
         ))
         else {
@@ -986,6 +1064,11 @@ mod tests {
                 let error = Error {
                     remaining: Input::new(&[2]),
                     error: LoadError::BadChecksum,
+                    kind: if framing {
+                        FailureKind::IncompletePrefix
+                    } else {
+                        FailureKind::Signatures
+                    },
                 };
                 let event = if framing {
                     ChunkEvent::FramingFailed(error)
@@ -1019,6 +1102,11 @@ mod tests {
             let error = Error {
                 remaining: start,
                 error: LoadError::BadChecksum,
+                kind: match kind {
+                    0 => FailureKind::Body,
+                    1 => FailureKind::Signatures,
+                    _ => FailureKind::IncompletePrefix,
+                },
             };
             let event = match kind {
                 0 => ChunkEvent::BodyFailed(error),

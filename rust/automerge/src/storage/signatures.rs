@@ -89,7 +89,7 @@ impl Ord for SignatureEntry {
 /// An unsigned LEB128 total entry count followed by the entries in order.
 /// Each entry repeats its 32-byte change hash before its signature scheme
 /// tag, signature length, and signature bytes.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct HashEntries {
     inner: BTreeMap<ChangeHash, BTreeSet<SignatureEntry>>,
     total: usize,
@@ -106,6 +106,14 @@ impl HashEntries {
     #[cfg(test)]
     fn len(&self) -> usize {
         self.total
+    }
+
+    /// Borrow the retained signatures for one hash in canonical `(tag, bytes)` order.
+    pub(crate) fn for_hash(&self, hash: &ChangeHash) -> impl Iterator<Item = &Signature> {
+        self.inner
+            .get(hash)
+            .into_iter()
+            .flat_map(|entries| entries.iter().map(|entry| &entry.0))
     }
 
     /// Take ownership of domain signatures, sorting and discarding exact duplicates.
@@ -266,6 +274,11 @@ impl<'a> SignaturesChunk<'a> {
             .inner
             .iter()
             .flat_map(|(hash, entries)| entries.iter().map(move |entry| (*hash, &entry.0)))
+    }
+
+    /// Take ownership of the decoded entries, discarding encoded framing bytes.
+    pub(crate) fn into_entries(self) -> HashEntries {
+        self.entries
     }
 
     /// Borrow the complete encoded chunk, including its header and checksum.
