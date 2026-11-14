@@ -3,10 +3,27 @@ import * as Automerge from "../src/entrypoints/fullfat_node.js"
 
 type CounterDoc = { counter: number }
 
+// A change's timestamp is part of its hash, and a fragment's level comes from
+// the leading zero bytes of its head hash. With the current time, the shape of
+// the fragments differs between runs: sometimes there is only one bundled
+// fragment (which reaches the root and has no boundary), or none at all. A
+// fixed actor and time make the hashes, and so the fragments, the same on
+// every run. This time gives 9 bundled fragments, 8 with a non-empty boundary
+// and one of them at level 2.
+const FIXED_TIME = 1700000001
+
 function makeDoc(numChanges = 1500): Automerge.Doc<CounterDoc> {
-  let doc = Automerge.from<CounterDoc>({ counter: 0 }, { actor: "0123456789abcdef" })
+  // `Automerge.from` takes no change options, so its change would use the
+  // current time. Make the initial change explicitly instead.
+  let doc = Automerge.change(
+    Automerge.init<CounterDoc>({ actor: "0123456789abcdef" }),
+    { time: FIXED_TIME },
+    d => {
+      d.counter = 0
+    },
+  )
   for (let i = 1; i <= numChanges; i++) {
-    doc = Automerge.change(doc, d => {
+    doc = Automerge.change(doc, { time: FIXED_TIME }, d => {
       d.counter = i
     })
   }
@@ -104,13 +121,23 @@ describe("the fragments API", () => {
     for (let i = 0; i < commits.length; i++) {
       assert.equal(commits[i].head, commitFragments[i].head)
       assert.deepEqual(commits[i].parents, commitFragments[i].boundary)
-      assert.deepEqual(commits[i].bytes, Automerge.getBackend(doc).bundleFragmentMetadata([commitFragments[i]])[0])
+      assert.deepEqual(
+        commits[i].bytes,
+        Automerge.getBackend(doc).bundleFragmentMetadata([
+          commitFragments[i],
+        ])[0],
+      )
     }
 
     for (let i = 0; i < fragments.length; i++) {
       const { bytes, ...metadata } = fragments[i]
       assert.deepEqual(metadata, fragmentMetadata[i])
-      assert.deepEqual(bytes, Automerge.getBackend(doc).bundleFragmentMetadata([fragmentMetadata[i]])[0])
+      assert.deepEqual(
+        bytes,
+        Automerge.getBackend(doc).bundleFragmentMetadata([
+          fragmentMetadata[i],
+        ])[0],
+      )
     }
   })
 
@@ -146,7 +173,10 @@ describe("the fragments API", () => {
     loaded = Automerge.addFragments(loaded, fragments)
     loaded = Automerge.addCommits(loaded, commits)
 
-    assert.deepEqual(Automerge.getHeads(loaded).sort(), Automerge.getHeads(doc).sort())
+    assert.deepEqual(
+      Automerge.getHeads(loaded).sort(),
+      Automerge.getHeads(doc).sort(),
+    )
     assert.equal(loaded.counter, 1500)
   })
 
