@@ -9,6 +9,7 @@ pub(crate) mod merge;
 pub(crate) mod model;
 pub(crate) mod postfix;
 pub(crate) mod read;
+pub(crate) mod size;
 pub(crate) mod writer;
 pub use load::RleLoadIter;
 pub(crate) mod splice;

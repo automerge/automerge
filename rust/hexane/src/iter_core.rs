@@ -789,6 +789,28 @@ impl<D: Decode> ICore<D> {
                     && final(self).pos == old(self).pos,
             },
     {
+        self.next_inline::<X>(slabs)
+    }
+
+    /// [`next`](Self::next), in line in its caller whatever the size: for
+    /// a loop that does nothing but read.
+    #[inline(always)]
+    pub(crate) fn next_inline<'a, X: Decoders<'a, D = D>>(&mut self, slabs: &'a [Slab<X::Tail>]) -> (r: Option<D::Item>)
+        requires
+            old(self).wf::<X>(slabs@),
+        ensures
+            final(self).wf::<X>(slabs@),
+            match r {
+                Some(v) => {
+                    &&& old(self).out::<X>(slabs@).len() > 0
+                    &&& v == old(self).out::<X>(slabs@)[0]
+                    &&& final(self).out::<X>(slabs@) == old(self).out::<X>(slabs@).skip(1)
+                    &&& final(self).pos == old(self).pos + 1
+                },
+                None => old(self).out::<X>(slabs@).len() == 0 && final(self).out::<X>(slabs@).len() == 0
+                    && final(self).pos == old(self).pos,
+            },
+    {
         let ghost c0 = *self;
         proof {
             self.lemma_here::<X>(slabs@);

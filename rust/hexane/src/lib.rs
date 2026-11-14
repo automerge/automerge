@@ -151,6 +151,7 @@ pub(crate) mod remap;
 pub mod rle;
 pub mod shift;
 pub(crate) mod splices;
+pub mod verified;
 pub(crate) mod weights;
 pub(crate) mod window;
 pub use column::{Column, ColumnLoadIter, Iter, IterState, Runs, Splice};

@@ -409,7 +409,7 @@ proof fn lemma_framed_end(p: Seq<u8>, s: Seq<u8>, i: int)
 }
 
 /// A `u64` needs at most ten bytes, the tenth being `0x01`.
-proof fn lemma_u64_len(v: nat)
+pub proof fn lemma_u64_len(v: nat)
     requires v <= u64::MAX,
     ensures
         spec_encode(v).len() <= 10,
@@ -426,7 +426,7 @@ proof fn lemma_u64_len(v: nat)
 }
 
 /// An `i64` needs at most ten bytes, the tenth being `0x00` or `0x7f`.
-proof fn lemma_i64_len(v: int)
+pub proof fn lemma_i64_len(v: int)
     requires i64::MIN <= v <= i64::MAX,
     ensures
         spec_encode_signed(v).len() <= 10,
