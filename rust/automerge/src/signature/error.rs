@@ -14,6 +14,15 @@ pub enum SignatureBytes {
     },
 }
 
+/// A malformed domain-separated signing message.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum SigningMessage {
+    #[error("signing message does not begin with the automerge-change-signature-v1 domain prefix")]
+    InvalidPrefix,
+    #[error("signing message hash suffix must be 32 bytes, found {actual}")]
+    InvalidHashLength { actual: usize },
+}
+
 /// Structural canonicality or actor-chain failure for an incoming signed group.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum InvalidFragment {

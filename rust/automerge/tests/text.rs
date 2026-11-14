@@ -999,7 +999,8 @@ fn splicing_into_multibyte_characters() {
         deps: vec![parent_hash],
         extra_bytes: Vec::new(),
     };
-    doc.apply_changes(vec![weird_change.into()]).unwrap();
+    doc.apply_changes(vec![automerge::Change::from(weird_change)])
+        .unwrap();
 
     assert_eq!(doc.text(&text).unwrap(), "ABBBBB\u{fffc}C");
 
