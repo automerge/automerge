@@ -43,6 +43,11 @@ impl FragmentRequirements {
     pub(crate) fn hashes(&self) -> impl ExactSizeIterator<Item = &ChangeHash> {
         self.hashes.iter()
     }
+
+    /// Query retained evidence without changing these complete requirements.
+    pub(crate) fn is_satisfied_by(&self, has_signature: impl FnMut(&ChangeHash) -> bool) -> bool {
+        self.hashes().all(has_signature)
+    }
 }
 
 #[cfg(test)]
