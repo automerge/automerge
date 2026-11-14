@@ -42,7 +42,7 @@ use crate::delta::dedit_core::{DCol, DeltaEditCore};
 use crate::delta::diter::{at_run, crop, dbefore, dindex_ok, lemma_crop};
 use crate::delta::diter::{d_next_run, d_nth};
 #[cfg(verus_keep_ghost)]
-use crate::iter_core::vals_of;
+use crate::iter_core::{lemma_sub_skip, lemma_window_in, vals_of};
 use crate::iter_core::{Decode, Decoders, ICore};
 use crate::rle::dec::RleReads;
 use crate::rle::edit::RleModel;
@@ -148,17 +148,15 @@ impl<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>> DSrc<'a, X, B> {
         let ghost v = vals_of::<X>(s);
         self.core.set_max::<X>(self.slabs, range.end);
         proof {
-            assert(self.core.out::<X>(s) =~= v.subrange(self.core.pos as int, range.end as int));
+            self.core.lemma_out_window::<X>(s);
+            lemma_window_in(v, self.core.pos as int, range.end as int);
         }
         if range.start > self.core.pos {
             let ghost p0 = self.core.pos as int;
             let n = range.start - self.core.pos - 1;
             let _ = d_nth::<X, B>(&mut self.core, self.slabs, Some(self.index), n, &mut self.running);
             proof {
-                assert(v.subrange(p0, range.end as int).skip(n + 1) =~= v.subrange(
-                    range.start as int,
-                    range.end as int,
-                ));
+                lemma_sub_skip(v, p0, range.end as int, n + 1);
             }
         }
         self.end = range.end;

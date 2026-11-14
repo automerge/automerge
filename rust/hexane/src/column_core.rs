@@ -282,6 +282,21 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> ColumnCore<E, W, I, G> {
         if max_segments < 2 {
             budget_too_small();
         }
+        Self::with_budget(max_segments)
+    }
+
+    /// An empty column with segment budget `max_segments`, which is at
+    /// least 2: `new` for a caller that has proved so, and cannot panic.
+    #[inline]
+    pub(crate) fn with_budget(max_segments: usize) -> (r: Self)
+        requires
+            max_segments >= 2,
+        ensures
+            r.ready(),
+            r@.len() == 0,
+            r.budget() == max_segments,
+            r.count() == 0,
+    {
         let slabs: Vec<Slab<E::Tail>> = Vec::new();
         let index = I::ix_empty();
         proof {

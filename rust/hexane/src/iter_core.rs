@@ -368,6 +368,28 @@ pub(crate) proof fn lemma_window_past<V>(v: Seq<V>, a: int, b: int, k: int)
     }
 }
 
+/// A window that lies in `v` is that range of it.
+pub(crate) proof fn lemma_window_in<V>(v: Seq<V>, a: int, b: int)
+    requires
+        0 <= a <= b <= v.len(),
+    ensures
+        window(v, a, b) == v.subrange(a, b),
+{
+    assert(window(v, a, b) =~= v.subrange(a, b));
+}
+
+/// A range of `v` from its `n`th on is the range that starts `n` later.
+pub(crate) proof fn lemma_sub_skip<V>(v: Seq<V>, a: int, b: int, n: int)
+    requires
+        0 <= a,
+        0 <= n,
+        a + n <= b <= v.len(),
+    ensures
+        v.subrange(a, b).skip(n) == v.subrange(a + n, b),
+{
+    assert(v.subrange(a, b).skip(n) =~= v.subrange(a + n, b));
+}
+
 proof fn lemma_concat_at<V>(cs: Seq<Seq<V>>, k: int)
     requires
         0 <= k < cs.len(),

@@ -497,9 +497,8 @@ impl<'a, O: RleOps<'a>> Dec<'a, O> {
     }
 
     /// `advance_run`, out of line: for `next_run_max`, which calls it
-    /// once per run. Inlined there (as LLVM does when nothing else calls
-    /// it), the run loop runs a fifth slower on aarch64; `next`, a value
-    /// at a time, keeps `advance_run` for LLVM to place.
+    /// once per run. Inlined there, the run loop runs a fifth slower on
+    /// aarch64.
     #[inline(never)]
     fn advance_run_outlined(&mut self)
         requires old(self).inv(), old(self).remaining == 0,
@@ -512,7 +511,9 @@ impl<'a, O: RleOps<'a>> Dec<'a, O> {
         self.advance_run()
     }
 
-    /// At a run boundary: begin the next run, if there is one.
+    /// At a run boundary: begin the next run, if there is one. In line
+    /// in its caller whatever the size, as `next` is in its own.
+    #[inline(always)]
     fn advance_run(&mut self)
         requires old(self).inv(), old(self).remaining == 0,
         ensures
@@ -636,6 +637,21 @@ impl<'a, O: RleOps<'a>> Dec<'a, O> {
         }
     }
 
+    /// `take_next`, out of line: for `nth`, which from a run boundary
+    /// (where `get` calls it) then saves no registers for a read it
+    /// does not do.
+    #[inline(never)]
+    fn take_next_outlined(&mut self) -> (r: Option<O::V>)
+        requires old(self).inv(), old(self).remaining > 0,
+        ensures
+            final(self).inv(), final(self).data() == old(self).data(),
+            old(self).pos() < old(self).values().len(),
+            r == Some(old(self).values()[old(self).pos()]),
+            final(self).pos() == old(self).pos() + 1,
+    {
+        self.take_next()
+    }
+
     /// Inside a literal run, its count already taken down: read the value
     /// at `byte_pos`.
     #[inline(always)]
@@ -722,7 +738,14 @@ impl<'a, O: RleOps<'a>> Dec<'a, O> {
         self.read_lit(Ghost(r0))
     }
 
-    /// The next value, if any.
+    /// The next value, if any. In line in its caller whatever the size,
+    /// and the start of a run with it: a loop that reads value after
+    /// value then keeps the decoder in registers. Left to LLVM, which of
+    /// the two stays out of line changes from one value type to the next
+    /// and with any edit near them, and where one does, the loop reads
+    /// and writes the decoder's fields for every value, at two to three
+    /// times the instructions.
+    #[inline(always)]
     pub(crate) fn next(&mut self) -> (r: Option<O::V>)
         requires old(self).inv(),
         ensures
@@ -1015,7 +1038,7 @@ impl<'a, O: RleOps<'a>> Dec<'a, O> {
                 proof {
                     self.lemma_pos();
                 }
-                return self.next();
+                return self.take_next_outlined();
             }
             let r0 = self.remaining;
             self.skip_in_run(r0);
