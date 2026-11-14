@@ -1,0 +1,256 @@
+//! Signing handle, signature insertion, and automatic local acceptance tests.
+
+use ed25519_dalek::{Signer, SigningKey};
+
+use crate::signature::{ed25519, signing_message, Insert};
+use crate::transaction::{CommitOptions, Transactable};
+use crate::{ActorId, Author, Automerge, Change, ChangeHash, PatchLog, ReadDoc, ROOT};
+
+use super::error;
+
+mod fragments;
+
+fn key(seed: u8) -> SigningKey {
+    SigningKey::from_bytes(&[seed; 32])
+}
+
+fn author(key: &SigningKey) -> Author<'static> {
+    Author::from(key.verifying_key().to_bytes().to_vec())
+}
+
+fn sig(key: &SigningKey, hash: &ChangeHash) -> ed25519::Signature {
+    ed25519::Signature::from_bytes(key.sign(&signing_message(hash)).to_bytes())
+}
+
+fn sign_doc(doc: &mut Automerge, hash: ChangeHash, key: &SigningKey) {
+    doc.try_signing()
+        .unwrap()
+        .insert_signature(&hash, &sig(key, &hash))
+        .unwrap();
+}
+
+fn append_at_level(
+    doc: &mut Automerge,
+    heads: Option<&[ChangeHash]>,
+    value: i64,
+    level: usize,
+) -> ChangeHash {
+    for time in 0..10_000 {
+        let mut next = doc.clone();
+        let mut tx = match heads {
+            Some(heads) => next.transaction_at(PatchLog::inactive(), heads).unwrap(),
+            None => next.transaction(),
+        };
+        tx.put(ROOT, "value", value).unwrap();
+        let (hash, _) = tx.commit_with(CommitOptions::default().with_time(time));
+        let hash = hash.unwrap();
+        if hash.fragment_level() == level {
+            *doc = next;
+            return hash;
+        }
+    }
+    panic!("fixture level search exhausted for level {level}");
+}
+
+#[test]
+fn unsigned_document_rejects_try_signing_without_converting_mode() {
+    let mut doc = Automerge::new().with_actor(ActorId::from([1]));
+    let mut tx = doc.transaction();
+    tx.put(ROOT, "value", 1).unwrap();
+    tx.commit();
+    let heads = doc.get_heads();
+    assert!(matches!(
+        doc.try_signing(),
+        Err(error::SigningMode::Required)
+    ));
+    assert_eq!(doc.get_heads(), heads);
+}
+
+#[test]
+fn local_edits_are_visible_immediately_and_accepted_automatically_when_signed() {
+    let k = key(7);
+    let mut doc = Automerge::signing()
+        .with_author(Some(author(&k)))
+        .with_actor(ActorId::from([1]));
+    let a1 = append_at_level(&mut doc, None, 1, 0);
+
+    assert_eq!(doc.get_heads(), [a1]);
+    assert_eq!(doc.get(ROOT, "value").unwrap().unwrap().0, 1.into());
+    assert!(!doc.try_signing().unwrap().is_accepted(&a1));
+
+    assert_eq!(
+        doc.try_signing()
+            .unwrap()
+            .insert_signature(&a1, &sig(&k, &a1))
+            .unwrap(),
+        Insert::Stored,
+    );
+    assert!(doc.try_signing().unwrap().is_accepted(&a1));
+}
+
+#[test]
+fn insertion_enforces_recorded_change_authors_and_rejects_bad_inputs() {
+    let alice = key(7);
+    let bob = key(8);
+    let mut doc = Automerge::signing()
+        .with_author(Some(author(&alice)))
+        .with_actor(ActorId::from([1]));
+    let a1 = append_at_level(&mut doc, None, 1, 0);
+
+    doc.set_author(Some(author(&bob)));
+    doc.set_actor(ActorId::from([2]));
+    let b1 = append_at_level(&mut doc, None, 2, 0);
+
+    {
+        let mut signing = doc.try_signing().unwrap();
+        assert!(matches!(
+            signing.insert_signature(&a1, &sig(&bob, &a1)),
+            Err(error::InsertSignature::Verification { change, .. }) if change == a1
+        ));
+        let unknown = ChangeHash([0xff; 32]);
+        assert!(matches!(
+            signing.insert_signature(&unknown, &sig(&alice, &unknown)),
+            Err(error::InsertSignature::UnknownChange { change }) if change == unknown
+        ));
+        signing.insert_signature(&a1, &sig(&alice, &a1)).unwrap();
+        assert!(signing.is_accepted(&a1));
+        assert!(!signing.is_accepted(&b1));
+    }
+
+    let mut authorless = Automerge::signing().with_actor(ActorId::from([1]));
+    let h_none = append_at_level(&mut authorless, None, 1, 0);
+    authorless.set_author(Some(author(&alice)));
+    assert!(matches!(
+        authorless.try_signing().unwrap().insert_signature(&h_none, &sig(&alice, &h_none)),
+        Err(error::InsertSignature::MissingAuthor { change, .. }) if change == h_none
+    ));
+
+    let mut bad_key = Automerge::signing()
+        .with_author(Some(Author::from(vec![1, 2, 3])))
+        .with_actor(ActorId::from([1]));
+    let h_bad = append_at_level(&mut bad_key, None, 1, 0);
+    assert!(matches!(
+        bad_key.try_signing().unwrap().insert_signature(&h_bad, &sig(&alice, &h_bad)),
+        Err(error::InsertSignature::InvalidAuthorKey { change, .. }) if change == h_bad
+    ));
+}
+
+#[test]
+fn acceptance_survives_actor_shifts_rollbacks_and_clones() {
+    let k = key(7);
+    let mut doc = Automerge::signing()
+        .with_author(Some(author(&k)))
+        .with_actor(ActorId::from([2]));
+    let first = append_at_level(&mut doc, None, 1, 0);
+    sign_doc(&mut doc, first, &k);
+    assert!(doc.try_signing().unwrap().is_accepted(&first));
+
+    doc.set_actor(ActorId::from([0]));
+    {
+        let mut tx = doc.transaction();
+        tx.put(ROOT, "value", 2).unwrap();
+        assert_eq!(tx.rollback(), 1);
+    }
+    assert!(doc.try_signing().unwrap().is_accepted(&first));
+
+    let second = append_at_level(&mut doc, None, 3, 0);
+    let mut cloned = doc.clone();
+    assert!(cloned.try_signing().unwrap().is_accepted(&first));
+    assert!(!cloned.try_signing().unwrap().is_accepted(&second));
+
+    sign_doc(&mut cloned, second, &k);
+    assert!(cloned.try_signing().unwrap().is_accepted(&second));
+    assert!(!doc.try_signing().unwrap().is_accepted(&second));
+}
+
+#[test]
+fn local_acceptance_handles_gaps_loose_fallbacks_and_unaccepted_boundaries() {
+    let k1 = key(1);
+    let k2 = key(2);
+
+    // 1. Loose gap: signing 0 and 2 accepts only 0 until 1 is signed.
+    let mut chain = Automerge::signing()
+        .with_author(Some(author(&k1)))
+        .with_actor(ActorId::from([1]));
+    let c0 = append_at_level(&mut chain, None, 1, 0);
+    let c1 = append_at_level(&mut chain, None, 2, 0);
+    let c2 = append_at_level(&mut chain, None, 3, 0);
+    sign_doc(&mut chain, c0, &k1);
+    sign_doc(&mut chain, c2, &k1);
+    assert!(chain.try_signing().unwrap().is_accepted(&c0));
+    assert!(!chain.try_signing().unwrap().is_accepted(&c1));
+    assert!(!chain.try_signing().unwrap().is_accepted(&c2));
+    sign_doc(&mut chain, c1, &k1);
+    assert!(chain.try_signing().unwrap().is_accepted(&c1));
+    assert!(chain.try_signing().unwrap().is_accepted(&c2));
+
+    // 2. Proved container {a, c} waiting on unaccepted boundary b does not hide
+    //    local fallback a, and signing b completes acceptance and reclaims sig(a)!
+    let mut doc = Automerge::signing()
+        .with_author(Some(author(&k1)))
+        .with_actor(ActorId::from([1]));
+    let a = append_at_level(&mut doc, None, 1, 0);
+    doc.set_author(Some(author(&k2)));
+    doc.set_actor(ActorId::from([2]));
+    let b = append_at_level(&mut doc, Some(&[]), 2, 1);
+    doc.set_author(Some(author(&k1)));
+    doc.set_actor(ActorId::from([1]));
+    let c = append_at_level(&mut doc, Some(&[a, b]), 3, 1);
+
+    sign_doc(&mut doc, c, &k1);
+    assert!(!doc.try_signing().unwrap().is_accepted(&a));
+    assert!(!doc.try_signing().unwrap().is_accepted(&c));
+    assert_eq!(doc.fragments(..).len(), 1);
+
+    // Signing fallback `a` accepts `a` even though container `{a, c}` is already
+    // ready for outgoing export while waiting on unaccepted boundary `b`!
+    sign_doc(&mut doc, a, &k1);
+    assert!(doc.try_signing().unwrap().is_accepted(&a));
+    assert!(!doc.try_signing().unwrap().is_accepted(&b));
+    assert!(!doc.try_signing().unwrap().is_accepted(&c));
+
+    sign_doc(&mut doc, b, &k2);
+    assert!(doc.try_signing().unwrap().is_accepted(&b));
+    assert!(doc.try_signing().unwrap().is_accepted(&c));
+    assert_eq!(
+        doc.try_signing()
+            .unwrap()
+            .state
+            .signatures
+            .verified_hashes()
+            .count(),
+        2
+    );
+
+    // 3. Multi-actor scaling: 20 actors x 15 commits inspect only live verified_hashes.
+    let mut many = Automerge::signing();
+    let mut frontiers: Vec<(ChangeHash, SigningKey)> = Vec::new();
+    for actor_num in 1..=20u8 {
+        let k = key(actor_num);
+        many.set_author(Some(author(&k)));
+        many.set_actor(ActorId::from([actor_num]));
+        for step in 0..15 {
+            let h = append_at_level(&mut many, None, i64::from(actor_num) * 100 + step, 0);
+            if step == 14 {
+                frontiers.push((h, k.clone()));
+            }
+        }
+    }
+    let tip = append_at_level(&mut many, None, 9_999, 1);
+    frontiers.pop();
+    frontiers.push((tip, key(20)));
+    for (h, k) in &frontiers {
+        sign_doc(&mut many, *h, k);
+    }
+    assert!(many.try_signing().unwrap().is_accepted(&tip));
+    assert_eq!(
+        many.try_signing()
+            .unwrap()
+            .state
+            .signatures
+            .verified_hashes()
+            .count(),
+        20
+    );
+    let _: Vec<Change> = Vec::new();
+}

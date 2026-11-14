@@ -3,7 +3,7 @@
 /// Author bytes that cannot supply a usable Ed25519 verifying key.
 #[derive(Debug, thiserror::Error)]
 #[error("author bytes are not a usable Ed25519 public key: {0}")]
-pub(crate) struct VerifyingAuthor(#[source] pub(super) VerifyingAuthorInner);
+pub struct VerifyingAuthor(#[source] pub(super) VerifyingAuthorInner);
 
 impl From<VerifyingAuthorInner> for VerifyingAuthor {
     fn from(inner: VerifyingAuthorInner) -> Self {
@@ -25,4 +25,4 @@ pub(super) enum VerifyingAuthorInner {
 /// failed strict verification.
 #[derive(Debug, thiserror::Error)]
 #[error(transparent)]
-pub(crate) struct Verification(pub(super) ed25519_dalek::SignatureError);
+pub struct Verification(pub(super) ed25519_dalek::SignatureError);

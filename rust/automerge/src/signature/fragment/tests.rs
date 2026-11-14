@@ -12,6 +12,8 @@ fn requirements_are_fixed_actor_frontiers_not_all_members() {
         requirements.hashes().copied().collect::<Vec<_>>(),
         [hash(2), hash(3)]
     );
+    assert!(requirements.is_satisfied_by(|h| *h == hash(2) || *h == hash(3)));
+    assert!(!requirements.is_satisfied_by(|h| *h == hash(1) || *h == hash(3)));
     assert_eq!(requirements.hashes().len(), 2);
 }
 

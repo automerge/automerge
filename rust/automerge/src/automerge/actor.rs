@@ -10,19 +10,21 @@ use crate::change_graph::ChangeGraph;
 use crate::op_set2::OpSet;
 use crate::ActorId;
 
+use super::signing::SigningState;
 use super::visibility::FrontierVisibility;
 use super::Actor;
 
 /// Maintain actor indices together without borrowing the whole document.
 ///
 /// Construct from fields belonging to the same document. The handle coordinates
-/// index shifts only. It does not register authors.
+/// index shifts only. It does not register authors or advance accepted history.
 pub(super) struct ActorMaintenance<'a> {
     ops: &'a mut OpSet,
     graph: &'a mut ChangeGraph,
     local_actor: &'a mut Actor,
     authors: &'a mut Authors,
     visibility: &'a mut FrontierVisibility,
+    signing: &'a mut SigningState,
 }
 
 impl<'a> ActorMaintenance<'a> {
@@ -33,6 +35,7 @@ impl<'a> ActorMaintenance<'a> {
         local_actor: &'a mut Actor,
         authors: &'a mut Authors,
         visibility: &'a mut FrontierVisibility,
+        signing: &'a mut SigningState,
     ) -> Self {
         Self {
             ops,
@@ -40,6 +43,7 @@ impl<'a> ActorMaintenance<'a> {
             local_actor,
             authors,
             visibility,
+            signing,
         }
     }
 
@@ -52,6 +56,7 @@ impl<'a> ActorMaintenance<'a> {
                 self.local_actor.shift(&shift);
                 self.authors.insert_actor(&shift);
                 self.visibility.insert_actor(&shift);
+                self.signing.insert_actor(&shift);
                 shift.index()
             }
         }
@@ -64,6 +69,7 @@ impl<'a> ActorMaintenance<'a> {
         self.graph.remove_actor(&removal);
         self.authors.remove_actor(&removal);
         self.visibility.remove_actor(&removal);
+        self.signing.remove_actor(&removal);
     }
 
     /// Find all unused actors, according to the change graph, and remove them
