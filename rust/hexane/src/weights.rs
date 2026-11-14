@@ -133,6 +133,16 @@ pub(crate) trait LoadWeigh<'a, E: ReadsAgree<'a, X>, X: Decoders<'a, Tail = <E a
             r == Self::accumulates(),
     ;
 
+    /// A load of this model makes no checks of its own: it fails only
+    /// where the loader does, or the column is too long.
+    spec fn plain() -> bool;
+
+    /// Such a model accumulates nothing, so no run it is given fails.
+    proof fn lemma_plain()
+        ensures
+            Self::plain() ==> !Self::accumulates(),
+    ;
+
     /// The weight accumulated from a slab's values is its weight.
     proof fn lemma_wrel(w: W, s: Slab<E::Tail>)
         requires
@@ -153,6 +163,7 @@ pub(crate) trait LoadWeigh<'a, E: ReadsAgree<'a, X>, X: Decoders<'a, Tail = <E a
             Self::accumulates() ==> forall|i: int| 0 <= i < ws@.len() ==> Self::wvals(#[trigger] ws@[i], X::vals(slabs@[i])),
         ensures
             r is Ok ==> Self::dom_ok(slabs@),
+            Self::plain() ==> r is Ok,
     ;
 }
 
@@ -227,6 +238,13 @@ impl<'a, E: Slabs + ReadsAgree<'a, X>, X: Decoders<'a, Tail = E::Tail>> LoadWeig
     #[inline(always)]
     fn accumulates_exec() -> bool {
         false
+    }
+
+    open spec fn plain() -> bool {
+        true
+    }
+
+    proof fn lemma_plain() {
     }
 
     proof fn lemma_wrel(w: usize, s: Slab<E::Tail>) {
@@ -383,6 +401,13 @@ impl<'a, E, X, B, P> LoadWeigh<'a, E, X, PrefixSlabWeight<P>> for PrefixModel<X,
         true
     }
 
+    open spec fn plain() -> bool {
+        false
+    }
+
+    proof fn lemma_plain() {
+    }
+
     proof fn lemma_wrel(w: PrefixSlabWeight<P>, s: Slab<E::Tail>) {
         <E as ReadsAgree<'a, X>>::lemma_reads(s);
     }
@@ -519,6 +544,13 @@ impl<'a, E, X, B> LoadWeigh<'a, E, X, SlabAgg> for DeltaModel<X, B> where
     #[inline(always)]
     fn accumulates_exec() -> bool {
         true
+    }
+
+    open spec fn plain() -> bool {
+        false
+    }
+
+    proof fn lemma_plain() {
     }
 
     proof fn lemma_wrel(w: SlabAgg, s: Slab<E::Tail>) {

@@ -22,10 +22,14 @@ use crate::column_core::ColumnCore;
 #[cfg(verus_keep_ghost)]
 use crate::cursor::Weigh;
 #[cfg(verus_keep_ghost)]
-use crate::cursor::{all_ok, lemma_concat_append, lemma_vals_own, slab_lens, ws_ok};
+use crate::cursor::{
+    all_ok, lemma_concat_append, lemma_vals_own, lemma_vals_total, slab_lens, ws_ok,
+};
 use crate::cursor::{ReadsAgree, Slabs};
 #[cfg(verus_keep_ghost)]
 use crate::fenwick::{lemma_sum_le, lemma_sum_one, lemma_sum_split, sum, total};
+#[cfg(verus_keep_ghost)]
+use crate::index::wlens;
 use crate::index::IndexOps;
 #[cfg(verus_keep_ghost)]
 use crate::iter_core::{each, vals_of};
@@ -60,6 +64,14 @@ pub(crate) trait Loads<'a, E: ReadsAgree<'a, X>, X: Decoders<'a, Tail = <E as Sl
 
     /// The values bytes `d` hold, as the format's model reads them.
     spec fn values_of(d: Seq<u8>) -> Seq<<X::D as Decode>::Item>;
+
+    /// Bytes `d` are an encoding in the format: what a load that
+    /// succeeds has checked.
+    spec fn valid(d: Seq<u8>) -> bool;
+
+    /// Bytes `d` are an encoding this loader does not refuse: a load of
+    /// them fails only for what its caller asks besides.
+    spec fn accepts(d: Seq<u8>) -> bool;
 
     /// A load of `data`, into slabs of about `max_segments / 2` segments.
     fn start(data: &'a [u8], max_segments: usize) -> (l: Self)
@@ -105,6 +117,7 @@ pub(crate) trait Loads<'a, E: ReadsAgree<'a, X>, X: Decoders<'a, Tail = <E as Sl
             },
             r is Ok ==> 0 <= final(self).left(),
             r matches Ok(Some(_)) ==> final(self).left() < old(self).left(),
+            r is Err ==> !Self::accepts(old(self).data()),
     ;
 
     fn slabs_completed(&self) -> (n: usize)
@@ -127,6 +140,8 @@ pub(crate) trait Loads<'a, E: ReadsAgree<'a, X>, X: Decoders<'a, Tail = <E as Sl
                 &&& self.at_end() ==> slabs@.len() <= self.done_slabs().len() + 1 && vals_of::<X>(slabs@)
                     == self.pulled()
             },
+            r is Ok ==> Self::valid(self.data()),
+            r is Err ==> !Self::accepts(self.data()),
     ;
 }
 
@@ -186,6 +201,7 @@ impl<'a, E, X, W, G, LD> LoadCore<'a, E, X, W, G, LD> where
         ensures
             c.inv(),
             !c.failed,
+            c.ld.data() == data@,
     {
         let ld = LD::start(data, max_segments);
         let attr = Attribution::new::<G>();
@@ -228,6 +244,7 @@ impl<'a, E, X, W, G, LD> LoadCore<'a, E, X, W, G, LD> where
             r matches Ok(None) ==> final(self).ld.at_end() && final(self).ld.pulled() == old(self).ld.pulled(),
             r matches Ok(Some(_)) ==> final(self).ld.left() < old(self).ld.left(),
             r is Ok ==> final(self).ld.data() == old(self).ld.data(),
+            r is Err ==> !LD::accepts(old(self).ld.data()) || G::accumulates(),
     {
         let ghost (d0, p0) = (self.ld.done_slabs(), self.ld.pulled());
         proof {
@@ -289,6 +306,15 @@ impl<'a, E, X, W, G, LD> LoadCore<'a, E, X, W, G, LD> where
                 &&& c.ready()
                 &&& c.budget() == max_segments
                 &&& c@ == LD::values_of(self.ld.data()).map_values(|v: <X::D as Decode>::Item| E::own(v))
+                &&& LD::valid(self.ld.data())
+            },
+            // a load fails only for one of these
+            r is Err ==> {
+                ||| self.failed
+                ||| !LD::accepts(self.ld.data())
+                ||| !G::plain()
+                ||| LD::values_of(self.ld.data()).len() > usize::MAX - 3
+                ||| expected matches Some(e) && e != LD::values_of(self.ld.data()).len()
             },
     {
         if self.failed {
@@ -297,13 +323,16 @@ impl<'a, E, X, W, G, LD> LoadCore<'a, E, X, W, G, LD> where
         let ghost data = self.ld.data();
         let mut core = self;
         let acc = G::accumulates_exec();
+        proof {
+            G::lemma_plain();
+        }
         if acc {
             // the runs left must pass through the attribution too
             loop
                 invariant
                     core.inv(),
                     !core.failed,
-                    acc == G::accumulates(),
+                    G::accumulates(),
                     core.ld.data() == data,
                 ensures
                     core.inv(),
@@ -315,7 +344,12 @@ impl<'a, E, X, W, G, LD> LoadCore<'a, E, X, W, G, LD> where
                 match core.step() {
                     Ok(Some(_)) => {},
                     Ok(None) => break,
-                    Err(e) => return Err(e),
+                    Err(e) => {
+                        proof {
+                            G::lemma_plain();
+                        }
+                        return Err(e);
+                    },
                 }
             }
         }
@@ -327,6 +361,12 @@ impl<'a, E, X, W, G, LD> LoadCore<'a, E, X, W, G, LD> where
         let attr = core.attr;
         let slabs = ld.finalize()?;
         let ghost s = slabs@;
+        proof {
+            // the slabs' lengths are the count of the values read
+            lemma_vals_own::<E, X>(s);
+            lemma_vals_total::<E>(s);
+            assert(LD::values_of(data).len() == total(slab_lens(s)));
+        }
         // the column's length, which must fit
         let mut len: usize = 0;
         let mut i: usize = 0;
@@ -335,6 +375,8 @@ impl<'a, E, X, W, G, LD> LoadCore<'a, E, X, W, G, LD> where
                 s == slabs@,
                 0 <= i <= s.len(),
                 len == sum(slab_lens(s), 0, i as int),
+                data == self.ld.data(),
+                LD::values_of(data).len() == total(slab_lens(s)),
             decreases s.len() - i,
         {
             proof {
@@ -342,6 +384,9 @@ impl<'a, E, X, W, G, LD> LoadCore<'a, E, X, W, G, LD> where
                 lemma_sum_one(slab_lens(s), i as int);
             }
             if len > usize::MAX - slabs[i].len {
+                proof {
+                    lemma_sum_le(slab_lens(s), 0, i + 1, 0, s.len() as int);
+                }
                 return Err(wrong_length(usize::MAX, usize::MAX - 3));
             }
             len += slabs[i].len;
@@ -385,10 +430,15 @@ impl<'a, E, X, W, G, LD> LoadCore<'a, E, X, W, G, LD> where
                     0 <= k <= s.len(),
                     ws@.len() == k,
                     forall|j: int| 0 <= j < k ==> G::wrel(#[trigger] ws@[j], s[j]),
+                    forall|j: int| 0 <= j < k ==> I::wlen(#[trigger] ws@[j]) == s[j].len,
                 decreases s.len() - k,
             {
                 ws.push(G::compute::<I>(&slabs[k]));
                 k += 1;
+            }
+            proof {
+                // each weight counts its slab's items: the index takes them
+                assert(wlens::<W, I>(ws@) =~= slab_lens(s));
             }
             ws
         };

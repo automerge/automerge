@@ -257,6 +257,7 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> ColumnCore<E, W, I, G> {
             self@.len() == total(slab_lens(self.slabs_spec())),
             self@.len() + 3 <= usize::MAX,
             self.budget() >= 2,
+            all_ok::<E>(self.slabs_spec()),
     {
         proof {
             use_type_invariant(self);
@@ -306,6 +307,7 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> ColumnCore<E, W, I, G> {
         ensures
             r matches Some(c) ==> c.ready() && c@ == vals_of::<E>(slabs@) && c.budget() == max_segments
                 && c.count() == 0,
+            r is None ==> wlens::<W, I>(ws@) != slab_lens(slabs@) || total(slab_lens(slabs@)) > usize::MAX - 3,
     {
         if max_segments < 2 {
             budget_too_small();

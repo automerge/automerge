@@ -676,6 +676,18 @@ pub(crate) proof fn lemma_lit_tail_le<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>)
 
 // ── Cutting ─────────────────────────────────────────────────────────────────
 
+/// No header is longer than `n` bytes.
+pub(crate) open spec fn head_bound<'a, O: RleOps<'a>>(n: nat) -> bool {
+    forall|h: i64| (#[trigger] O::enc_signed(h)).len() <= n
+}
+
+/// Bytes short of 4 GiB by a header's length: no slab cut from them has
+/// a last run of 4 GiB, which is all a load refuses of a canonical
+/// encoding.
+pub(crate) open spec fn small<'a, O: RleOps<'a>>(d: Seq<u8>) -> bool {
+    exists|n: nat| head_bound::<O>(n) && d.len() + n <= 0xffff_ffff
+}
+
 /// The slab-cutting state of a load.
 pub(crate) struct Cut {
     /// the slabs cut so far
@@ -762,6 +774,31 @@ proof fn lemma_build_cases<'a, O: RleOps<'a>>(c: Cut, gs: Seq<Group<O::V>>, il: 
     lemma_build_counts::<O>(c, gs, il, k, cur);
     lemma_build_bytes::<O>(gs, il, k, cur, g0, c0);
     lemma_raw_tail::<O>(gs, il, k, cur, g0, c0);
+}
+
+/// A slab's last run is no longer than its input bytes and a header.
+#[verifier::spinoff_prover]
+proof fn lemma_tail_small<'a, O: RleOps<'a>>(c: Cut, gs: Seq<Group<O::V>>, il: bool, k: nat, cur: Seq<O::V>, n: nat)
+    requires
+        build_ok::<O>(c, gs, il, k, cur),
+        head_bound::<O>(n),
+    ensures
+        tail_bytes_of::<O>(sgroups(gs, il, cur, c.g0@, c.c0@)) <= raw::<O>(gs, il, k, cur, c.g0@, c.c0@).len() + n,
+{
+    let g0 = c.g0@;
+    let c0 = c.c0@;
+    let pc = piece(gs, cur, g0, c0);
+    let rw = raw::<O>(gs, il, k, cur, g0, c0);
+    lemma_build_cases::<O>(c, gs, il, k, cur);
+    if open_in(gs, il, g0, c0) {
+        // the open literal's values, under a header for those read
+        let ow = lit_head::<O>(k) + encs::<O>(cur);
+        assert(ow.len() == lit_head::<O>(k).len() + encs::<O>(cur).len());
+        assert(O::enc_signed(-(cur.len() as int) as i64).len() <= n);
+    } else if pc.len() > 0 {
+        // the input's last group, and the header the piece is given
+        assert(O::enc_signed(-(pc.len() as int) as i64).len() <= n);
+    }
 }
 
 /// The counters' branches in building a slab's bytes.
@@ -1196,6 +1233,7 @@ impl Cut {
             res is Ok ==> final(self).ok_at(r) && final(self).seg_count() == 0
                 && final(self).done_slabs().len() == old(self).done_slabs().len() + 1
                 && final(self).done_slabs().drop_last() == old(self).done_slabs(),
+            res is Err ==> !small::<W::R>(r.data()),
     {
         hide(canonical);
         let ghost gs = r.groups();
@@ -1222,6 +1260,16 @@ impl Cut {
         let raw_bytes = &input[self.start..pos];
         let (data, tb) = self.build::<W>(raw_bytes, Ghost(gs), Ghost(il), Ghost(k), Ghost(cur));
         if tb > 0xffff_ffff {
+            proof {
+                // the last run is among the input's bytes, but for a header
+                assert(rw.len() <= input@.len()) by {
+                    assert(input@.take(pos as int).len() == cut_bytes::<W::R>(gs, cur, g0, c0, k0).len() + rw.len());
+                }
+                if small::<W::R>(input@) {
+                    let n = choose|n: nat| head_bound::<W::R>(n) && input@.len() + n <= 0xffff_ffff;
+                    lemma_tail_small::<W::R>(*self, gs, il, k, cur, n);
+                }
+            }
             return Err(over_4gib());
         }
         proof {
@@ -1481,6 +1529,8 @@ impl<'a, W: WriteOps<'a>> Load<'a, W> {
             },
             r is Ok ==> 0 <= final(self).left(),
             r matches Ok(Some(_)) ==> final(self).left() < old(self).left(),
+            // only what is no canonical encoding fails, or is too long
+            r is Err ==> !valid_slab::<W::R>(old(self).data()) || !small::<W::R>(old(self).data()),
     {
         let ghost l0 = self.left();
         loop
@@ -1558,7 +1608,7 @@ impl<'a, W: WriteOps<'a>> Load<'a, W> {
                         }
                     },
                     Ok(None) => final(self).pulled() == p0 && final(self).done_slabs() == d0,
-                    Err(_) => true,
+                    Err(_) => !small::<W::R>(old(self).data()),
                 }
             }),
     {
@@ -1610,6 +1660,8 @@ impl<'a, W: WriteOps<'a>> Load<'a, W> {
                 &&& self.at_end() ==> slabs@.len() <= self.done_slabs().len() + 1
                     && slabs_values::<W::R>(slabs@) == self.pulled()
             },
+            // only what is no canonical encoding fails, or is too long
+            r is Err ==> !valid_slab::<W::R>(self.data()) || !small::<W::R>(self.data()),
     {
         let mut cut = self.cut;
         let target = self.target;
@@ -1624,6 +1676,7 @@ impl<'a, W: WriteOps<'a>> Load<'a, W> {
                 end0 ==> reader == rd0 && cut.done_slabs() == d0,
             invariant
                 cut.ok(reader, target), input@ == reader.data(), data == input@,
+                data == self.data(),
                 cut.done_slabs().len() >= d0.len(), cut.done_slabs().take(d0.len() as int) == d0,
                 end0 ==> rd0.spec_pos() == rd0.data().len() && rd0.data() == data,
             ensures
@@ -1646,7 +1699,12 @@ impl<'a, W: WriteOps<'a>> Load<'a, W> {
                     }
                     break;
                 },
-                Err(e) => return Err(e),
+                Err(e) => {
+                    proof {
+                        lemma_no_parse::<W::R>(data);
+                    }
+                    return Err(e);
+                },
             };
             proof {
                 reader.lemma_inv();
@@ -1695,6 +1753,17 @@ impl<'a, W: WriteOps<'a>> Load<'a, W> {
             lemma_slab_is_parse::<W::R>(reader.groups(), data);
         }
         Ok(cut.into_slabs())
+    }
+}
+
+/// Bytes with no parse are no canonical encoding.
+proof fn lemma_no_parse<'a, O: RleOps<'a>>(data: Seq<u8>)
+    requires super::read::no_parse::<O>(data),
+    ensures !valid_slab::<O>(data),
+{
+    if valid_slab::<O>(data) {
+        let gs = choose|gs: Seq<Group<O::V>>| parses::<O>(gs, data);
+        assert(!parses::<O>(gs, data));
     }
 }
 
@@ -1772,6 +1841,14 @@ impl<'a, L, O> crate::load_core::Loads<'a, super::edit::RleModel<L>, super::dec:
 
     open spec fn values_of(d: Seq<u8>) -> Seq<<O as RleOps<'a>>::V> {
         slab_values::<O>(d)
+    }
+
+    open spec fn valid(d: Seq<u8>) -> bool {
+        valid_slab::<O>(d)
+    }
+
+    open spec fn accepts(d: Seq<u8>) -> bool {
+        valid_slab::<O>(d) && small::<O>(d)
     }
 
     proof fn lemma_done(&self) {
