@@ -1,9 +1,11 @@
 //! Fragment boundaries and their cached causal coverage.
 
+use std::borrow::Cow;
 use std::ops::RangeBounds;
 
 use crate::actor::{ActorRemoval, ActorShift, ActorTable};
 use crate::clock::SeqClock;
+use crate::signature::FragmentRequirements;
 use crate::ChangeHash;
 
 use super::{ChangeGraph, Fragment, NodeIdx};
@@ -78,33 +80,75 @@ impl FragmentCache {
         self.fragments.push(candidate.fragment);
     }
 
-    pub(crate) fn get_fragment(&self, graph: &ChangeGraph, head: ChangeHash) -> Option<Fragment> {
-        let n = graph.nodes_by_hash.get(&head)?;
+    fn canonical_at(&self, head: NodeIdx) -> Option<&FragmentNode> {
         assert!(self.fragments.is_sorted_by(|a, b| a.head.0 < b.head.0));
         self.fragments
-            .binary_search_by_key(&n.0, |f| f.head.0)
+            .binary_search_by_key(&head, |f| f.head)
             .ok()
-            .map(|i| self.fragments[i].export(graph))
+            .map(|i| &self.fragments[i])
+    }
+
+    fn historical_at(&self, graph: &ChangeGraph, head: NodeIdx) -> Cow<'_, FragmentNode> {
+        if let Some(node) = self.canonical_at(head) {
+            return Cow::Borrowed(node);
+        }
+        let level = graph.hashes[head.0 as usize].fragment_level();
+        debug_assert!(level > 0);
+        Cow::Owned(FragmentNode {
+            head,
+            deps: graph.fragment_boundary_slow(head, level),
+            clock: graph.calculate_clock([head].into()),
+        })
+    }
+
+    pub(crate) fn get_fragment(&self, graph: &ChangeGraph, head: ChangeHash) -> Option<Fragment> {
+        let node = *graph.nodes_by_hash.get(&head)?;
+        self.canonical_at(node).map(|f| f.export(graph))
+    }
+
+    pub(super) fn requirements(
+        &self,
+        graph: &ChangeGraph,
+        head: ChangeHash,
+    ) -> Option<FragmentRequirements> {
+        let node = *graph.nodes_by_hash.get(&head)?;
+        Some(self.historical_at(graph, node).requirements(graph))
+    }
+
+    pub(super) fn get_historical_fragment(
+        &self,
+        graph: &ChangeGraph,
+        head: ChangeHash,
+    ) -> Option<Fragment> {
+        let node = *graph.nodes_by_hash.get(&head)?;
+        if let Some(cached) = self.canonical_at(node) {
+            return Some(cached.export(graph));
+        }
+        let level = graph.hashes[node.0 as usize].fragment_level();
+        debug_assert!(level > 0);
+        let deps = graph.fragment_boundary_slow(node, level);
+        Some(export_fragment(graph, node, &deps))
     }
 
     pub(crate) fn fragments<'a, R: RangeBounds<usize> + 'a>(
         &'a self,
         graph: &'a ChangeGraph,
-        heads: &'a [ChangeHash],
         levels: R,
     ) -> impl Iterator<Item = Fragment> + 'a {
-        self.fragments_matching(graph, heads, levels, |_| true)
+        self.fragments_matching(graph, levels, |_| true)
     }
 
     pub(crate) fn fragments_matching<'a, R: RangeBounds<usize> + 'a>(
         &'a self,
         graph: &'a ChangeGraph,
-        heads: &'a [ChangeHash],
         levels: R,
         include: impl Fn(ChangeHash) -> bool + 'a,
     ) -> impl Iterator<Item = Fragment> + 'a {
-        let heads = if levels.contains(&0) { heads } else { &[] };
-        let mut loose = self.loose_fragments(graph, heads);
+        let mut loose = levels
+            .contains(&0)
+            .then(|| self.loose_fragments(graph))
+            .into_iter()
+            .flatten();
         let mut cached = self.fragments.iter().rev();
         std::iter::from_fn(move || {
             // Selection must not prune traversal to a rejected head's ancestors.
@@ -126,11 +170,10 @@ impl FragmentCache {
     fn loose_fragments<'a>(
         &'a self,
         graph: &'a ChangeGraph,
-        heads: &'a [ChangeHash],
     ) -> impl Iterator<Item = Fragment> + 'a {
-        let nodes = heads
-            .iter()
-            .filter_map(|h| graph.nodes_by_hash.get(h).copied())
+        let nodes = graph
+            .heads()
+            .filter_map(|h| graph.nodes_by_hash.get(&h).copied())
             .filter(|n| !self.covers(graph, *n));
         graph
             .bfs_until_clock(nodes, &self.top)
@@ -153,27 +196,44 @@ struct FragmentNode {
 }
 
 impl FragmentNode {
+    fn requirements(&self, graph: &ChangeGraph) -> FragmentRequirements {
+        let boundary = graph.calculate_clock(self.deps.iter().copied().collect());
+        // A fragment is its head's causal past minus its boundary's causal past.
+        // Linear actor chains make each nonempty difference an actor interval.
+        // Its maximum is sufficient; no member contents need reconstructing.
+        FragmentRequirements::for_members(graph.seq_index.iter().enumerate().filter_map(
+            |(actor, nodes)| {
+                let seq = self.clock.get_for_actor(&actor)?;
+                if Some(seq) <= boundary.get_for_actor(&actor) {
+                    return None;
+                }
+                let hash = graph.hashes[nodes[seq.get() as usize - 1].0 as usize];
+                Some((actor, u64::from(seq.get()), hash))
+            },
+        ))
+    }
+
     fn export(&self, graph: &ChangeGraph) -> Fragment {
-        let head = graph.hashes[self.head.0 as usize];
-        let level = head.fragment_level();
-        let boundary = self
-            .deps
-            .iter()
-            .map(|d| graph.hashes[d.0 as usize])
-            .collect();
-        let clock = graph.calculate_clock(self.deps.iter().copied().collect());
-        let members: Vec<_> = graph.fragment_content(self.head, &clock).collect();
-        let checkpoints = members
-            .iter()
-            .copied()
-            .filter(|h| *h != head && h.fragment_level() > 0)
-            .collect();
-        Fragment {
-            head,
-            level,
-            boundary,
-            checkpoints,
-            members,
-        }
+        export_fragment(graph, self.head, &self.deps)
+    }
+}
+
+fn export_fragment(graph: &ChangeGraph, head_node: NodeIdx, deps: &[NodeIdx]) -> Fragment {
+    let head = graph.hashes[head_node.0 as usize];
+    let level = head.fragment_level();
+    let boundary = deps.iter().map(|d| graph.hashes[d.0 as usize]).collect();
+    let clock = graph.calculate_clock(deps.iter().copied().collect());
+    let members: Vec<_> = graph.fragment_content(head_node, &clock).collect();
+    let checkpoints = members
+        .iter()
+        .copied()
+        .filter(|h| *h != head && h.fragment_level() > 0)
+        .collect();
+    Fragment {
+        head,
+        level,
+        boundary,
+        checkpoints,
+        members,
     }
 }
