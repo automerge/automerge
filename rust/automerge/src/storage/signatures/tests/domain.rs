@@ -7,7 +7,7 @@ use crate::storage::parse::Input;
 use crate::storage::Chunk;
 use crate::ChangeHash;
 
-use super::{error, flattened_entries, frame_body, signature_error, HashEntries, SignatureEntry};
+use super::{error, frame_body, signature_error, HashEntries, SignatureEntry};
 
 fn wrapped(tag: u8, bytes: &[u8]) -> SignatureEntry {
     SignatureEntry(Signature::new(
@@ -46,14 +46,14 @@ fn parsing_classifies_ed25519_without_verifying_and_preserves_opaque_entries() {
         panic!("expected signatures chunk");
     };
     assert_eq!(chunk.bytes(), bytes);
-    let entries = flattened_entries(&chunk);
-    assert_eq!(entries.len(), cases.len());
-    for ((hash, entry), (tag, original)) in entries.iter().zip(&cases) {
-        assert_eq!(*hash, ChangeHash([1; 32]));
-        assert_eq!(entry.0.tag().inner_tag(), *tag);
-        assert_eq!(entry.0.to_bytes().as_bytes(), original);
+    let entries = chunk.into_entries();
+    let signatures: Vec<_> = entries.for_hash(&ChangeHash([1; 32])).collect();
+    assert_eq!(signatures.len(), cases.len());
+    for (signature, (tag, original)) in signatures.iter().zip(&cases) {
+        assert_eq!(signature.tag().inner_tag(), *tag);
+        assert_eq!(signature.to_bytes().as_bytes(), original);
         assert_eq!(
-            entry.0.as_ed25519().is_some(),
+            signature.as_ed25519().is_some(),
             *tag == 0 && original.len() == 64
         );
     }
@@ -89,7 +89,7 @@ fn typed_and_generic_construction_are_the_same_entry_at_capacity() {
     let before = entries.clone();
     entries.insert_bounded(hash, typed).unwrap();
     assert_eq!(entries, before);
-    assert_eq!(entries.len(), 16);
+    assert_eq!(entries.for_hash(&hash).count(), 16);
 
     let error = signature_error(&frame_body(&wire_body(&[
         (0, vec![0; 64]),
@@ -128,9 +128,10 @@ proptest! {
             panic!("expected signatures chunk");
         };
         prop_assert_eq!(chunk.bytes(), bytes.as_slice());
-        let entries = flattened_entries(&chunk);
-        prop_assert_eq!(entries.len(), 1);
-        let signature = &entries[0].1.0;
+        let entries = chunk.into_entries();
+        let signatures: Vec<_> = entries.for_hash(&ChangeHash([1; 32])).collect();
+        prop_assert_eq!(signatures.len(), 1);
+        let signature = signatures[0];
         let recovered = signature.to_bytes();
         prop_assert_eq!(signature.tag().inner_tag(), tag);
         prop_assert_eq!(recovered.as_bytes(), original.as_slice());

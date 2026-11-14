@@ -1,7 +1,10 @@
-use crate::{change::Change, storage::parse};
+use crate::{
+    change::Change,
+    storage::{parse, signatures::HashEntries},
+};
 
 pub(crate) mod change_collector;
-pub(crate) use crate::storage::chunk::group::{ChunkGroupReader, InitialLoad};
+pub(crate) use crate::storage::chunk::group::{ChunkGroupReader, FailureKind, InitialLoad};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum VerificationMode {
@@ -63,12 +66,43 @@ pub(crate) enum LoadedChanges<'a> {
     },
 }
 
+/// Content of a decoded chunk group prior to authentication or staging.
+#[derive(Debug)]
+pub(crate) enum LoadedGroupBody {
+    Document,
+    Changes(Vec<Change>),
+}
+
+/// One content chunk together with its own trailing signature entries, if any.
+#[derive(Debug)]
+pub(crate) struct LoadedGroup {
+    pub(crate) body: LoadedGroupBody,
+    pub(crate) signatures: Option<HashEntries>,
+}
+
+/// Result of reading chunk groups without pooling or discarding signatures.
+pub(crate) enum LoadedGroups<'a> {
+    Complete(Vec<LoadedGroup>),
+    Partial {
+        loaded: Vec<LoadedGroup>,
+        #[allow(dead_code)]
+        remaining: parse::Input<'a>,
+        error: Error,
+        kind: FailureKind,
+    },
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{ChunkGroupReader, Error, LoadedChanges, MarkOrderValidation};
+    use super::{
+        ChunkGroupReader, Error, FailureKind, LoadedChanges, LoadedGroupBody, LoadedGroups,
+        MarkOrderValidation,
+    };
     use crate::actor::ActorTable;
     use crate::change_graph::ChangeGraph;
+    use crate::signature::{Signature, SignatureBytes, SignatureTag};
     use crate::storage::parse::Input;
+    use crate::storage::signatures::{HashEntries, SignaturesChunk};
     use crate::storage::{Chunk, ChunkType, Header};
     use crate::transaction::Transactable;
     use crate::{
@@ -386,5 +420,127 @@ mod tests {
             matches!(error, AutomergeError::Load(Error::OrphanSignatures)),
             "expected orphan signatures error, got {error:?}",
         );
+    }
+
+    #[test]
+    fn load_groups_preserves_each_groups_own_attached_signatures() {
+        let first = change(1);
+        let second = change(2);
+        let third = change(3);
+        let sig_a = Signature::new(
+            SignatureTag::new(7),
+            SignatureBytes::new(vec![1, 2, 3]).unwrap(),
+        );
+        let sig_c = Signature::new(
+            SignatureTag::new(9),
+            SignatureBytes::new(vec![4, 5]).unwrap(),
+        );
+        let first_sigs = SignaturesChunk::encode(
+            HashEntries::canonicalize([(first.hash(), sig_a.clone())]).unwrap(),
+        );
+        let third_sigs = SignaturesChunk::encode(
+            HashEntries::canonicalize([(third.hash(), sig_c.clone())]).unwrap(),
+        );
+        let stream = [
+            first.raw_bytes(),
+            first_sigs.bytes(),
+            second.raw_bytes(),
+            third.raw_bytes(),
+            third_sigs.bytes(),
+        ]
+        .concat();
+
+        let LoadedGroups::Complete(groups) =
+            ChunkGroupReader::new(Input::new(&stream)).load_groups()
+        else {
+            panic!("expected complete group stream");
+        };
+        assert_eq!(groups.len(), 3);
+        let LoadedGroupBody::Changes(ref c0) = groups[0].body else {
+            panic!("expected change group");
+        };
+        assert_eq!(c0.len(), 1);
+        assert_eq!(c0[0].hash(), first.hash());
+        assert_eq!(
+            groups[0]
+                .signatures
+                .as_ref()
+                .unwrap()
+                .for_hash(&first.hash())
+                .collect::<Vec<_>>(),
+            vec![&sig_a],
+        );
+        assert!(groups[1].signatures.is_none());
+        assert_eq!(
+            groups[2]
+                .signatures
+                .as_ref()
+                .unwrap()
+                .for_hash(&third.hash())
+                .collect::<Vec<_>>(),
+            vec![&sig_c],
+        );
+    }
+
+    #[test]
+    fn load_groups_classifies_signature_incomplete_and_body_boundaries() {
+        let first = change(1);
+        let second = change(2);
+        let first_sigs = framed(ChunkType::Signatures, &[0]);
+
+        let malformed_sigs = [
+            first.raw_bytes(),
+            first_sigs.as_slice(),
+            second.raw_bytes(),
+            framed(ChunkType::Signatures, &[1]).as_slice(),
+        ]
+        .concat();
+        let LoadedGroups::Partial {
+            loaded,
+            remaining,
+            error,
+            kind,
+        } = ChunkGroupReader::new(Input::new(&malformed_sigs)).load_groups()
+        else {
+            panic!("expected partial load");
+        };
+        assert!(matches!(error, Error::Parse(_)));
+        assert_eq!(loaded.len(), 1);
+        assert!(loaded[0].signatures.is_some());
+        assert_eq!(kind, FailureKind::Signatures);
+        assert!(remaining.unconsumed_bytes().starts_with(second.raw_bytes()));
+
+        let truncated_prefix = [
+            first.raw_bytes(),
+            first_sigs.as_slice(),
+            &second.raw_bytes()[..4],
+        ]
+        .concat();
+        let LoadedGroups::Partial {
+            loaded,
+            remaining,
+            kind,
+            ..
+        } = ChunkGroupReader::new(Input::new(&truncated_prefix)).load_groups()
+        else {
+            panic!("expected incomplete prefix");
+        };
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(kind, FailureKind::IncompletePrefix);
+        assert_eq!(remaining.unconsumed_bytes(), &second.raw_bytes()[..4]);
+
+        let malformed_body = [
+            first.raw_bytes(),
+            first_sigs.as_slice(),
+            framed(ChunkType::Change, &[]).as_slice(),
+        ]
+        .concat();
+        let LoadedGroups::Partial { loaded, kind, .. } =
+            ChunkGroupReader::new(Input::new(&malformed_body)).load_groups()
+        else {
+            panic!("expected malformed body");
+        };
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(kind, FailureKind::Body);
     }
 }

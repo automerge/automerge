@@ -89,7 +89,7 @@ impl Ord for SignatureEntry {
 /// An unsigned LEB128 total entry count followed by the entries in order.
 /// Each entry repeats its 32-byte change hash before its signature scheme
 /// tag, signature length, and signature bytes.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct HashEntries {
     inner: BTreeMap<ChangeHash, BTreeSet<SignatureEntry>>,
     total: usize,
@@ -103,9 +103,12 @@ impl HashEntries {
         }
     }
 
-    #[cfg(test)]
-    fn len(&self) -> usize {
-        self.total
+    /// Borrow the retained signatures for one hash in canonical `(tag, bytes)` order.
+    pub(crate) fn for_hash(&self, hash: &ChangeHash) -> impl Iterator<Item = &Signature> {
+        self.inner
+            .get(hash)
+            .into_iter()
+            .flat_map(|entries| entries.iter().map(|entry| &entry.0))
     }
 
     /// Take ownership of domain signatures, sorting and discarding exact duplicates.
@@ -239,7 +242,7 @@ impl SignaturesChunk<'static> {
     /// Encode a validated collection as a complete chunk in canonical order.
     ///
     /// Consumes the collection and retains it for inspection through
-    /// [`SignaturesChunk::iter`]. The bytes include the header and checksum.
+    /// [`SignaturesChunk::into_entries`]. The bytes include the header and checksum.
     /// Encoding does not verify or discard any of the supplied signatures.
     pub(crate) fn encode(entries: HashEntries) -> Self {
         let mut buffer = Vec::new();
@@ -257,16 +260,9 @@ impl SignaturesChunk<'static> {
 }
 
 impl<'a> SignaturesChunk<'a> {
-    /// Borrow domain signatures in canonical `(hash, tag, bytes)` order.
-    ///
-    /// Hashes are copied and signatures are borrowed. Works identically for
-    /// parsed and newly encoded chunks, without verifying their signatures.
-    #[cfg(test)]
-    pub(crate) fn iter(&self) -> impl Iterator<Item = (ChangeHash, &Signature)> {
+    /// Take ownership of the decoded entries, discarding encoded framing bytes.
+    pub(crate) fn into_entries(self) -> HashEntries {
         self.entries
-            .inner
-            .iter()
-            .flat_map(|(hash, entries)| entries.iter().map(move |entry| (*hash, &entry.0)))
     }
 
     /// Borrow the complete encoded chunk, including its header and checksum.
@@ -382,13 +378,6 @@ mod tests {
     use crate::storage::{Chunk, ChunkType, Header};
     use crate::ChangeHash;
 
-    fn flattened_entries(chunk: &SignaturesChunk<'_>) -> Vec<(ChangeHash, SignatureEntry)> {
-        chunk
-            .iter()
-            .map(|(hash, signature)| (hash, SignatureEntry(signature.clone())))
-            .collect()
-    }
-
     // Preserve input order and duplicates: malformed fixtures must bypass encode.
     fn raw_body(entries: &[(ChangeHash, SignatureEntry)]) -> Vec<u8> {
         let mut body = Vec::new();
@@ -446,7 +435,11 @@ mod tests {
         let Chunk::Signatures(signatures) = chunk else {
             panic!("expected signatures chunk");
         };
-        assert_eq!(flattened_entries(&signatures), entries);
+        assert_eq!(
+            signatures.clone().into_entries(),
+            HashEntries::canonicalize(entries.iter().map(|(hash, entry)| (*hash, entry.0.clone())))
+                .unwrap()
+        );
         assert_eq!(signatures.bytes(), bytes.as_slice());
     }
 
@@ -496,7 +489,11 @@ mod tests {
         let Chunk::Signatures(signatures) = chunk else {
             panic!("expected signatures chunk");
         };
-        assert_eq!(flattened_entries(&signatures), entries);
+        assert_eq!(
+            signatures.clone().into_entries(),
+            HashEntries::canonicalize(entries.iter().map(|(hash, entry)| (*hash, entry.0.clone())))
+                .unwrap()
+        );
     }
 
     #[test]
@@ -541,7 +538,7 @@ mod tests {
         }
         let before = entries.clone();
         entries.insert_bounded(hash, signature(1, vec![0])).unwrap();
-        assert_eq!(entries.len(), 16);
+        assert_eq!(entries.for_hash(&hash).count(), 16);
         assert_eq!(entries, before);
 
         assert!(matches!(
@@ -628,8 +625,11 @@ mod tests {
         let chunk = SignaturesChunk::encode(
             HashEntries::canonicalize([(hash, signature.clone())]).unwrap(),
         );
-        assert_eq!(chunk.iter().collect::<Vec<_>>(), vec![(hash, &signature)]);
         assert!(chunk.checksum_valid());
+        assert_eq!(
+            chunk.into_entries().for_hash(&hash).collect::<Vec<_>>(),
+            vec![&signature]
+        );
     }
 
     #[test]
@@ -642,7 +642,11 @@ mod tests {
             HashEntries::canonicalize(entries.iter().map(|(hash, entry)| (*hash, entry.0.clone())))
                 .unwrap(),
         );
-        assert_eq!(flattened_entries(&chunk), entries);
+        assert_eq!(
+            chunk.clone().into_entries(),
+            HashEntries::canonicalize(entries.iter().map(|(hash, entry)| (*hash, entry.0.clone())))
+                .unwrap()
+        );
         assert!(chunk.checksum_valid());
     }
 
@@ -682,7 +686,11 @@ mod tests {
             HashEntries::canonicalize(entries.iter().map(|(hash, entry)| (*hash, entry.0.clone())))
                 .unwrap(),
         );
-        assert_eq!(flattened_entries(&chunk), entries);
+        assert_eq!(
+            chunk.clone().into_entries(),
+            HashEntries::canonicalize(entries.iter().map(|(hash, entry)| (*hash, entry.0.clone())))
+                .unwrap()
+        );
         assert_eq!(chunk.bytes(), canonical.bytes());
     }
 
@@ -725,9 +733,9 @@ mod tests {
         Header::new(ChunkType::Signatures, &body).write(&mut expected);
         expected.extend_from_slice(&body);
 
-        assert_eq!(chunk.iter().count(), 0);
         assert_eq!(chunk.bytes(), expected.as_slice());
         assert!(chunk.checksum_valid());
+        assert_eq!(chunk.into_entries(), HashEntries::canonicalize([]).unwrap());
     }
 
     #[test]

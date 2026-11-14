@@ -192,8 +192,12 @@ fn assert_exports_match_graph(
                 .fragment_requirements(fragment.head)
                 .unwrap();
             assert_eq!(
-                proof.iter().map(|(h, _)| h).collect::<Vec<_>>(),
-                reqs.hashes().copied().collect::<Vec<_>>(),
+                proof.into_entries(),
+                crate::storage::signatures::HashEntries::canonicalize(
+                    reqs.hashes()
+                        .map(|hash| (*hash, crate::Signature::ed25519(sig(k, hash))))
+                )
+                .unwrap(),
             );
             let entry = previously_emitted
                 .entry(fragment.head)
