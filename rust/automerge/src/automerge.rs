@@ -1462,11 +1462,10 @@ impl Automerge {
             Vec::new()
         } else {
             let incoming_hashes = changes.iter().map(Change::hash).collect::<HashSet<_>>();
-            let heads = other.get_heads();
 
             let mut fragments: Vec<_> = other
                 .change_graph
-                .fragments_filtered(&heads, .., |head| incoming_hashes.contains(head))
+                .fragments_filtered(.., |head| incoming_hashes.contains(head))
                 .collect();
             fragments.reverse();
             fragments
@@ -1912,10 +1911,7 @@ impl Automerge {
     #[doc(hidden)]
     pub fn fragments<R: RangeBounds<usize>>(&self, levels: R) -> Vec<Fragment> {
         // these produce fragments newest to oldest
-        let mut fragments: Vec<_> = self
-            .change_graph
-            .fragments(&self.get_heads(), levels)
-            .collect();
+        let mut fragments: Vec<_> = self.change_graph.fragments(levels).collect();
         // but we want to return them oldest to newest
         fragments.reverse();
         fragments

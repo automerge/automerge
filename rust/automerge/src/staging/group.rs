@@ -59,13 +59,7 @@ impl StagedGroup {
     pub(super) fn same_descriptor(&self, other: &Self) -> bool {
         match (self, other) {
             (StagedGroup::Loose(a), StagedGroup::Loose(b)) => a == b,
-            (StagedGroup::Fragment(a), StagedGroup::Fragment(b)) => {
-                a.head == b.head
-                    && a.level == b.level
-                    && same_hashes(&a.members, &b.members)
-                    && same_hashes(&a.boundary, &b.boundary)
-                    && same_hashes(&a.checkpoints, &b.checkpoints)
-            }
+            (StagedGroup::Fragment(a), StagedGroup::Fragment(b)) => a.same_descriptor(b),
             (StagedGroup::Loose(_), StagedGroup::Fragment(_))
             | (StagedGroup::Fragment(_), StagedGroup::Loose(_)) => false,
         }
@@ -76,10 +70,6 @@ impl StagedGroup {
     pub(super) fn is_fully_applied(&self, graph: &ChangeGraph) -> bool {
         self.members().iter().all(|hash| graph.has_change(hash))
     }
-}
-
-fn same_hashes(left: &[ChangeHash], right: &[ChangeHash]) -> bool {
-    left.iter().collect::<HashSet<_>>() == right.iter().collect::<HashSet<_>>()
 }
 
 fn assert_fragment_invariants(fragment: &Fragment) {
