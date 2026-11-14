@@ -115,7 +115,6 @@ impl FragmentCache {
         Some(self.historical_at(graph, node).requirements(graph))
     }
 
-    #[allow(dead_code)]
     pub(super) fn get_historical_fragment(
         &self,
         graph: &ChangeGraph,
@@ -131,7 +130,6 @@ impl FragmentCache {
         Some(export_fragment(graph, node, &deps))
     }
 
-    #[allow(dead_code)]
     pub(super) fn historical_members_all(
         &self,
         graph: &ChangeGraph,

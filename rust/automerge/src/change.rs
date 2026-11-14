@@ -132,8 +132,45 @@ impl Change {
         Self::try_from(&bytes[..])
     }
 
+    /// EXPERIMENTAL: Parse a single change chunk together with an optional
+    /// trailing signatures chunk, preserving any attached signatures for
+    /// admission.
+    #[doc(hidden)]
+    pub fn parse_with_signatures(bytes: &[u8]) -> Result<ParsedChange, LoadError> {
+        use crate::storage::load::{ChunkBody, ChunkGroupReader, SingleGroupError};
+        use crate::storage::signatures::SignaturesChunk;
+
+        let group =
+            ChunkGroupReader::read_single(parse::Input::new(bytes)).map_err(|err| match err {
+                SingleGroupError::LeftoverData => LoadError::LeftoverData,
+                other => LoadError::Parse(Box::new(other)),
+            })?;
+        let signatures = group.signatures.map(SignaturesChunk::into_entries);
+        match *group.body {
+            ChunkBody::Change(change) | ChunkBody::CompressedChange(change) => {
+                Ok(ParsedChange { change, signatures })
+            }
+            ChunkBody::Bundle(_) | ChunkBody::Document(_) => Err(LoadError::WrongChunkType),
+        }
+    }
+
     pub fn decode(&self) -> crate::ExpandedChange {
         crate::ExpandedChange::from(self)
+    }
+}
+
+/// EXPERIMENTAL: A decoded change chunk paired with its optional attached
+/// signature entries.
+#[doc(hidden)]
+#[derive(Clone, Debug)]
+pub struct ParsedChange {
+    pub(crate) change: Change,
+    pub(crate) signatures: Option<crate::storage::signatures::HashEntries>,
+}
+
+impl ParsedChange {
+    pub fn change(&self) -> &Change {
+        &self.change
     }
 }
 

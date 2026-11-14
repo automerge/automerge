@@ -68,7 +68,6 @@ impl FragmentRequirements {
     ///
     /// The returned store owns the verified evidence for subsequent retention.
     /// Failure publishes no partial evidence.
-    #[allow(dead_code)]
     pub(crate) fn verify_entries<'a>(
         &self,
         attached: &HashEntries,

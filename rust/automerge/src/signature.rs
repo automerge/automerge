@@ -230,6 +230,18 @@ pub fn signing_message(hash: &ChangeHash) -> [u8; SIGNING_MESSAGE_LEN] {
     message
 }
 
+/// Extract the [`ChangeHash`] from a domain-separated payload produced by
+/// [`signing_message`].
+pub fn parse_signing_message(message: &[u8]) -> Result<ChangeHash, error::SigningMessage> {
+    let rest = message
+        .strip_prefix(SIGNING_MESSAGE_PREFIX)
+        .ok_or(error::SigningMessage::InvalidPrefix)?;
+    let hash: [u8; types::HASH_SIZE] = rest
+        .try_into()
+        .map_err(|_| error::SigningMessage::InvalidHashLength { actual: rest.len() })?;
+    Ok(ChangeHash(hash))
+}
+
 /// The result of checking a signature against a supplied author and change hash.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Verification {

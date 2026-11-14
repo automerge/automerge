@@ -696,7 +696,6 @@ impl SignatureStore {
 
     /// Copy verified Ed25519 evidence and prepared author keys from `other`
     /// without repeating cryptographic verification.
-    #[allow(dead_code)]
     pub(crate) fn merge_verified(&mut self, other: &Self) -> Result<(), InsertError> {
         for (change, record) in &other.by_hash {
             let ChangeSignatures::Verified(src) = record else {

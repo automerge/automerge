@@ -125,6 +125,7 @@ pub struct LoadOptions<'a> {
     text_encoding: TextEncoding,
     author: Option<Author<'static>>,
     write_frontier: HashMap<Author<'static>, Vec<ChangeHash>>,
+    signing: bool,
 }
 
 impl<'a> LoadOptions<'a> {
@@ -209,6 +210,17 @@ impl<'a> LoadOptions<'a> {
             ..self
         }
     }
+
+    /// Load the stream in required signing mode, admitting only canonical
+    /// fragments and loose changes with valid attached proofs.
+    ///
+    /// Document snapshot chunks are rejected in signing mode.
+    pub fn signing(self) -> Self {
+        Self {
+            signing: true,
+            ..self
+        }
+    }
 }
 
 impl std::default::Default for LoadOptions<'static> {
@@ -221,6 +233,7 @@ impl std::default::Default for LoadOptions<'static> {
             text_encoding: TextEncoding::platform_default(),
             author: None,
             write_frontier: HashMap::new(),
+            signing: false,
         }
     }
 }
@@ -1038,6 +1051,9 @@ impl Automerge {
     /// document. A boundary that is not reachable from `heads` is simply
     /// pending in the fork.
     pub fn fork_at(&self, heads: &[ChangeHash]) -> Result<Self, AutomergeError> {
+        if self.signing.is_required() {
+            return Err(crate::signature::error::SigningError::ForkAtNotSupported.into());
+        }
         let mut seen = HashSet::new();
         let mut heads = heads
             .iter()
@@ -1238,6 +1254,9 @@ impl Automerge {
         options: LoadOptions<'_>,
         mark_order: load::MarkOrderValidation,
     ) -> Result<Self, AutomergeError> {
+        if options.signing {
+            return Self::load_signing_with_options(data, options);
+        }
         if data.is_empty() {
             tracing::trace!("no data, initializing empty document");
             let mut doc =
@@ -1322,6 +1341,62 @@ impl Automerge {
         Ok(document.with_author(options.author))
     }
 
+    fn load_signing_with_options(
+        data: &[u8],
+        options: LoadOptions<'_>,
+    ) -> Result<Self, AutomergeError> {
+        let mut document = Self::signing_with_encoding(options.text_encoding);
+        if !data.is_empty() {
+            let reader = storage::load::ChunkGroupReader::new(parse::Input::new(data));
+            match reader.load_groups() {
+                load::LoadedGroups::Complete(groups) => {
+                    document.admit_loaded_groups(groups, &mut PatchLog::inactive())?;
+                    if document.signing.has_pending_groups()
+                        && options.on_partial_load == OnPartialLoad::Error
+                    {
+                        return Err(AutomergeError::MissingDeps);
+                    }
+                }
+                load::LoadedGroups::Partial {
+                    mut loaded,
+                    error,
+                    kind,
+                    ..
+                } => {
+                    if options.on_partial_load == OnPartialLoad::Error
+                        || kind == load::FailureKind::Signatures
+                    {
+                        return Err(error.into());
+                    }
+                    // An incomplete prefix (< 9 bytes) may have truncated a trailing
+                    // signatures chunk before its type was identifiable. Never treat
+                    // bare content before that boundary as authenticated.
+                    if kind == load::FailureKind::IncompletePrefix
+                        && loaded.last().is_some_and(|group| {
+                            matches!(group.body, load::LoadedGroupBody::Changes(_))
+                                && group.signatures.is_none()
+                        })
+                    {
+                        loaded.pop();
+                    }
+                    document.admit_loaded_groups(loaded, &mut PatchLog::inactive())?;
+                }
+            }
+        }
+        if let StringMigration::ConvertToText = options.string_migration {
+            document.convert_scalar_strings_to_text()?;
+        }
+        if !options.write_frontier.is_empty() {
+            document.set_write_frontier(options.write_frontier);
+        }
+        if let Some(patch_log) = options.patch_log {
+            if patch_log.is_active() {
+                document.log_current_state(ObjMeta::root(), patch_log, true);
+            }
+        }
+        Ok(document.with_author(options.author))
+    }
+
     /// Create the patches from a [`PatchLog`]
     ///
     /// See the documentation for [`PatchLog`] for more details on this
@@ -1358,6 +1433,19 @@ impl Automerge {
         data: &[u8],
         patch_log: &mut PatchLog,
     ) -> Result<usize, AutomergeError> {
+        if self.signing.is_required() {
+            patch_log.validate(&self.ops.actors)?;
+            let groups =
+                match storage::load::ChunkGroupReader::new(storage::parse::Input::new(data))
+                    .load_groups()
+                {
+                    load::LoadedGroups::Complete(groups) => groups,
+                    load::LoadedGroups::Partial { error, .. } => return Err(error.into()),
+                };
+            let start = self.ops.len();
+            self.admit_loaded_groups(groups, patch_log)?;
+            return Ok(self.ops.len() - start);
+        }
         if self.is_empty() {
             let mut doc = Self::load_with_options(
                 data,
@@ -1430,24 +1518,55 @@ impl Automerge {
         self.seq_for_actor(change.actor_id()) >= change.seq()
     }
 
-    /// Apply changes to this document.
+    /// Apply changes or chunk groups to this document.
     ///
-    /// This is idempotent in the sense that if a change has already been applied it will be
-    /// ignored.
-    pub fn apply_changes(
-        &mut self,
-        changes: impl IntoIterator<Item = Change> + Clone,
-    ) -> Result<(), AutomergeError> {
+    /// Each item may be a [`Change`], a [`crate::LoadedGroup`], a parsed change,
+    /// or encoded bytes containing one change/bundle chunk with an optional
+    /// trailing signatures chunk. Already-decoded inputs are not parsed again.
+    /// Use [`Self::load_incremental`] for a stream containing multiple groups or
+    /// a document snapshot.
+    ///
+    /// In signing mode each group must carry its own valid proof; bare changes
+    /// are rejected. In unsigned mode attached signatures are ignored.
+    /// All inputs are converted before any history is applied, so a conversion
+    /// error leaves the document unchanged. Already-applied changes are ignored.
+    ///
+    /// ```
+    /// # use automerge::{Automerge, AutomergeError, LoadedGroup};
+    /// # fn example(encoded_groups: Vec<Vec<u8>>, encoded_group: Vec<u8>) -> Result<(), AutomergeError> {
+    /// let mut doc = Automerge::signing();
+    /// doc.apply_changes(encoded_groups)?;
+    ///
+    /// // Or inspect decoded contents before admitting the same proof-bearing groups.
+    /// let group = LoadedGroup::try_from(encoded_group)?;
+    /// for change in group.changes() {
+    ///     println!("{}", change.hash());
+    /// }
+    /// doc.apply_changes([group])?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn apply_changes<I>(&mut self, changes: I) -> Result<(), AutomergeError>
+    where
+        I: IntoIterator,
+        I::Item: TryInto<crate::LoadedGroup>,
+        AutomergeError: From<<I::Item as TryInto<crate::LoadedGroup>>::Error>,
+    {
         self.apply_changes_log_patches(changes, &mut PatchLog::inactive())
     }
 
     /// Like [`Self::apply_changes()`] but log the resulting changes to the current state of the
     /// document to `patch_log`
-    pub fn apply_changes_log_patches<I: IntoIterator<Item = Change> + Clone>(
+    pub fn apply_changes_log_patches<I>(
         &mut self,
         changes: I,
         patch_log: &mut PatchLog,
-    ) -> Result<(), AutomergeError> {
+    ) -> Result<(), AutomergeError>
+    where
+        I: IntoIterator,
+        I::Item: TryInto<crate::LoadedGroup>,
+        AutomergeError: From<<I::Item as TryInto<crate::LoadedGroup>>::Error>,
+    {
         self.apply_changes_batch_log_patches(changes, patch_log)
     }
 
@@ -1463,6 +1582,9 @@ impl Automerge {
         other: &mut Self,
         patch_log: &mut PatchLog,
     ) -> Result<Vec<ChangeHash>, AutomergeError> {
+        if self.signing.is_required() {
+            return Err(crate::signature::error::SigningError::UnauthenticatedChanges.into());
+        }
         // TODO: Make this fallible and figure out how to do this transactionally
         let changes = self.get_changes_added(other);
 
@@ -1520,6 +1642,11 @@ impl Automerge {
     }
 
     /// Save the entirety of this document in a compact form.
+    ///
+    /// Note that document snapshots do not carry detached proof chunks and are
+    /// rejected when loading in required signing mode; use
+    /// [`Automerge::fragments`] and [`Automerge::bundle_fragments`] to export
+    /// proof-bearing fragments.
     pub fn save(&self) -> Vec<u8> {
         self.save_with_options(SaveOptions::default())
     }
@@ -1745,7 +1872,7 @@ impl Automerge {
     /// visibility [`Mask`] — publishing that is the caller's single
     /// [`Automerge::republish_mask`] step after the op set is consistent.
     pub(crate) fn update_history(&mut self, change: &Change) -> HistoryUpdate {
-        History::new(
+        let update = History::new(
             &mut self.change_graph,
             &mut self.deps,
             &mut self.authors,
@@ -1753,7 +1880,17 @@ impl Automerge {
             &self.visibility,
             &mut self.signing,
         )
-        .update(change)
+        .update(change);
+        let has_recorded_author = self
+            .ops
+            .actors
+            .lookup(change.actor_id())
+            .and_then(|actor| self.authors.get_author_for_actor(actor))
+            .is_some();
+        if has_recorded_author {
+            self.signing.record_local_change(change.hash());
+        }
+        update
     }
 
     /// Ensure `actor` is in the actor table and return its index, shifting
@@ -2508,6 +2645,7 @@ impl Automerge {
         let queued_changes = self
             .staged
             .iter()
+            .chain(self.signing.queued_changes())
             .map(|change| (change.hash(), change))
             .collect::<HashMap<_, _>>();
 
@@ -2743,7 +2881,11 @@ impl ReadDoc for Automerge {
     }
 
     fn get_missing_deps(&self, heads: &[ChangeHash]) -> Vec<ChangeHash> {
-        let queued = self.staged.iter().map(|change| change.hash());
+        let queued = self
+            .staged
+            .iter()
+            .chain(self.signing.queued_changes())
+            .map(|change| change.hash());
         self.missing_deps_from(queued.chain(heads.iter().copied()))
     }
 

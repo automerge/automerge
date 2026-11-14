@@ -24,17 +24,14 @@ pub(crate) struct Selection<'a> {
 }
 
 impl<'a> Selection<'a> {
-    #[allow(dead_code)]
     pub(crate) fn selected(&self) -> impl ExactSizeIterator<Item = &'a Fragment> + '_ {
         self.selected.iter().map(|(_, fragment)| *fragment)
     }
 
-    #[allow(dead_code)]
     pub(crate) fn selected_indices(&self) -> impl ExactSizeIterator<Item = usize> + '_ {
         self.selected.iter().map(|(index, _)| *index)
     }
 
-    #[allow(dead_code)]
     pub(crate) fn pending_indices(&self) -> impl ExactSizeIterator<Item = usize> + '_ {
         self.pending.iter().map(|(index, _)| *index)
     }
@@ -42,7 +39,6 @@ impl<'a> Selection<'a> {
 
 /// Select every proved fragment whose causal boundary is satisfied by `accepted`
 /// and/or other selected fragments.
-#[allow(dead_code)]
 pub(crate) fn select_fragments<'a>(
     accepted: &impl AcceptedHistory,
     fragments: &'a [Fragment],
