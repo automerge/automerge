@@ -22,7 +22,7 @@
 //! A `VerifiedColumn<V>` holds values of a type `V` that is a
 //! [`VValue`]:
 //!
-//! * a number: `u64`, `i64`, `u32`, `i32` or `usize`;
+//! * a number: `u64`, `i64`, `u32`, `i32`, `usize` or `NonZeroU32`;
 //! * `bool`;
 //! * a client's own type that is stored as one of those numbers
 //!   ([`VNewtype`]). The client says which number each value is, and a
@@ -68,9 +68,12 @@
 //! # What is trusted
 //!
 //! Verus and its solver Z3, and Verus's specifications of the standard
-//! library (`Vec`, slices). Of this crate, the functions Verus is told to
-//! take as they are, which are few and small, and are those the verified
-//! core of [`Column`](crate::Column) has too:
+//! library: of `Vec` and slices, and for a column of `NonZeroU32` those
+//! of `NonZero`, which Verus keeps behind its feature
+//! `nonzero_internals` (the crate is checked with it on). Of this crate,
+//! the functions Verus is told to take as they are, which are few and
+//! small, and are those the verified core of [`Column`](crate::Column)
+//! has too:
 //!
 //! * the helpers that panic, which say why and do nothing else. A method
 //!   panics where a column would outgrow what its arithmetic can count
@@ -186,9 +189,10 @@ pub closed spec fn saved_values<V: seal::Sealed<C>, C>(d: Seq<u8>) -> Seq<V> {
 /// A value type a [`VerifiedColumn`] can hold, its numbers written with
 /// codec `C`.
 ///
-/// These are `u64`, `i64`, `u32`, `i32`, `usize` and every type that
-/// says which of them it is stored as ([`VNewtype`]); an `Option` of any
-/// of those, whose `None` is a column's null; and `bool`.
+/// These are `u64`, `i64`, `u32`, `i32`, `usize`, `NonZeroU32` and every
+/// type that says which of them it is stored as ([`VNewtype`]); an
+/// `Option` of any of those, whose `None` is a column's null; and
+/// `bool`.
 pub trait VValue<C: VCodec = Leb128>: seal::Sealed<C> {
     /// No column of the values `vs` saves to more bytes than this.
     spec fn size_bound(vs: Seq<Self>) -> nat;

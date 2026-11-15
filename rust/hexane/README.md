@@ -288,7 +288,7 @@ validate-on-load backing the one `unsafe` block in the crate.
 Most of the crate's core is verified with [Verus](https://github.com/verus-lang/verus):
 the proofs live beside the code in `verus!` blocks, and a normal build
 compiles them away. To check them, run `cargo verus verify -p hexane
---features bijou64` with Verus installed.
+--features bijou64,vstd/nonzero_internals` with Verus installed.
 
 **Proved:**
 

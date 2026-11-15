@@ -27,8 +27,10 @@ thiserror = "^2.0.12"
 # normal build.
 vstd = "=0.0.0-2026-10-25-0158"
 
-# `cargo verus verify -p hexane` checks the proofs (src/leb128_codec.rs,
-# src/bijou64.rs with `--features bijou64`, src/btree.rs).
+# `cargo verus verify -p hexane --features bijou64,vstd/nonzero_internals`
+# checks the proofs. The second feature turns on vstd's specifications of
+# `NonZeroU32` (src/verified/value.rs); it is for Verus alone, and a normal
+# build must not name it.
 [package.metadata.verus]
 verify = true
 

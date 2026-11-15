@@ -22,7 +22,7 @@
 //! dies), so under realistic churn their fill follows the leaf count;
 //! worst case is extra memory, never incorrect queries.
 //!
-//! Verification (Verus, `cargo verus verify -p hexane`): the tree stands
+//! Verification (Verus, see the README for the command): the tree stands
 //! for a sequence of slab aggregates (its `View`), and `wf` is the
 //! invariant tying the arena to it: every cached child slab count and
 //! aggregate is right, subtrees don't share nodes, the free list names

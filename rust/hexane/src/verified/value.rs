@@ -10,8 +10,8 @@
 //!
 //! [`VPack`] is proved for `u64` and `i64`, which are the codec's own
 //! numbers, and for every type that says how it is one of those
-//! ([`VNewtype`]): `u32`, `i32` and `usize` here, and a client's own
-//! types.
+//! ([`VNewtype`]): `u32`, `i32`, `usize` and `NonZeroU32` here, and a
+//! client's own types.
 
 // Verus proofs read more plainly with `x = x + n`.
 #![allow(clippy::len_zero, clippy::assign_op_pattern)]
@@ -25,6 +25,7 @@ use crate::rle::model::{RleOps, WriteOps};
 use crate::rle::size::heads_bound;
 use crate::PackError;
 use std::marker::PhantomData;
+use std::num::NonZeroU32;
 #[allow(unused_imports)]
 use vstd::prelude::*;
 
@@ -203,10 +204,11 @@ pub fn refused(msg: &'static str) -> PackError {
 ///
 /// A type that implements this is a [`VPack`], and so a value type of
 /// [`VerifiedColumn`](super::VerifiedColumn), alone and in an `Option`.
-/// It is how this crate's `u32`, `i32` and `usize` are value types, and
-/// how a client's own type is one: a column of it holds the bytes a
-/// column of `Base` would hold for the values' `Base` values, and loads
-/// only bytes whose every value [`from_base`](Self::from_base) takes.
+/// It is how this crate's `u32`, `i32`, `usize` and `NonZeroU32` are
+/// value types, and how a client's own type is one: a column of it holds
+/// the bytes a column of `Base` would hold for the values' `Base`
+/// values, and loads only bytes whose every value
+/// [`from_base`](Self::from_base) takes.
 ///
 /// The proofs about a column of the type rest on what this trait's
 /// functions ensure. Verus checks that for a client it is run on. A
@@ -432,6 +434,39 @@ impl VNewtype for usize {
     #[inline(always)]
     fn from_valid_base(b: u64) -> usize {
         b as usize
+    }
+}
+
+/// Every `u32` but zero. What a `NonZeroU32` is to Verus comes from
+/// vstd's specifications of `NonZero`: its number (`v@`), that no two
+/// have the same, and that `NonZeroU32::new` refuses zero alone.
+impl VNewtype for NonZeroU32 {
+    type Base = u32;
+
+    open spec fn base(v: NonZeroU32) -> u32 {
+        v@
+    }
+
+    proof fn lemma_base(v: NonZeroU32, w: NonZeroU32) {
+        broadcast use vstd::std_specs::nonzero::group_nonzero_axioms;
+
+        assert(vstd::std_specs::nonzero::nonzero_from_primitive(v@) == v);
+        assert(vstd::std_specs::nonzero::nonzero_from_primitive(w@) == w);
+    }
+
+    #[inline(always)]
+    fn to_base(self) -> u32 {
+        self.get()
+    }
+
+    #[inline(always)]
+    fn from_base(b: u32) -> Result<NonZeroU32, PackError> {
+        broadcast use vstd::std_specs::nonzero::group_nonzero_axioms;
+
+        match NonZeroU32::new(b) {
+            Some(v) => Ok(v),
+            None => Err(refused("NonZeroU32 is zero")),
+        }
     }
 }
 

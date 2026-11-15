@@ -11,6 +11,7 @@
 use hexane::verified::{refused, VNewtype, VValue, VerifiedColumn};
 use hexane::{Codec, Column, ColumnValue, ColumnValueRef, PackError, RleEncoding, RleValue};
 use std::fmt::Debug;
+use std::num::NonZeroU32;
 
 /// A small deterministic generator (xorshift64*).
 struct Rng(u64);
@@ -107,6 +108,12 @@ impl Kind for i32 {
 impl Kind for usize {
     fn fresh(rng: &mut Rng) -> usize {
         rng.number() as usize
+    }
+}
+
+impl Kind for NonZeroU32 {
+    fn fresh(rng: &mut Rng) -> NonZeroU32 {
+        NonZeroU32::new(rng.number() as u32).unwrap_or(NonZeroU32::MAX)
     }
 }
 
@@ -237,6 +244,7 @@ macro_rules! for_each_kind {
         $f::<u32>();
         $f::<i32>();
         $f::<usize>();
+        $f::<NonZeroU32>();
         $f::<bool>();
         $f::<Action>();
         $f::<Option<u64>>();
@@ -244,6 +252,7 @@ macro_rules! for_each_kind {
         $f::<Option<u32>>();
         $f::<Option<i32>>();
         $f::<Option<usize>>();
+        $f::<Option<NonZeroU32>>();
         $f::<Option<Action>>();
     };
 }
@@ -490,9 +499,11 @@ fn loads_refuse_bad_runs() {
     refuses::<u32>(&bad);
     refuses::<i32>(&bad);
     refuses::<usize>(&bad);
+    refuses::<NonZeroU32>(&bad);
     refuses::<Action>(&bad);
     refuses::<Option<u64>>(&bad);
     refuses::<Option<i64>>(&bad);
+    refuses::<Option<NonZeroU32>>(&bad);
     refuses::<Option<Action>>(&bad);
 
     // `bool`: a run of none that is not the first; a truncated count; an
@@ -512,8 +523,10 @@ fn loads_refuse_what_the_type_has_no_value_for() {
     assert!(!check_same_load::<u32>(&nulls));
     assert!(!check_same_load::<i32>(&nulls));
     assert!(!check_same_load::<usize>(&nulls));
+    assert!(!check_same_load::<NonZeroU32>(&nulls));
     assert!(!check_same_load::<Action>(&nulls));
     assert!(check_same_load::<Option<u64>>(&nulls));
+    assert!(check_same_load::<Option<NonZeroU32>>(&nulls));
     assert!(check_same_load::<Option<Action>>(&nulls));
     // a null run is no column of `bool`: its count of `true` is none
     assert!(!check_same_load::<bool>(&nulls));
@@ -539,6 +552,28 @@ fn loads_refuse_what_the_type_has_no_value_for() {
         assert_eq!(refusal::<i32>(&over), "invalid value: i32 overflow");
         assert_eq!(refusal::<Option<i32>>(&over), "invalid value: i32 overflow");
     }
+
+    // zero is no `NonZeroU32`, nor is a number past `u32`
+    let fits = both::<u64>(&[1, edge, edge, 7]).0.save();
+    assert!(check_same_load::<NonZeroU32>(&fits));
+    assert!(check_same_load::<Option<NonZeroU32>>(&fits));
+    for model in [[1, 0, 0], [0, 5, 6], [3, 3, 0]] {
+        let zero = both::<u64>(&model).0.save();
+        assert_eq!(
+            refusal::<NonZeroU32>(&zero),
+            "invalid value: NonZeroU32 is zero"
+        );
+        assert_eq!(
+            refusal::<Option<NonZeroU32>>(&zero),
+            "invalid value: NonZeroU32 is zero"
+        );
+    }
+    let over = both::<u64>(&[7, edge + 1, edge + 1, 1]).0.save();
+    assert_eq!(refusal::<NonZeroU32>(&over), "invalid value: u32 overflow");
+    assert_eq!(
+        refusal::<Option<NonZeroU32>>(&over),
+        "invalid value: u32 overflow"
+    );
 
     // every `u64` is a `usize` only where a `usize` is that wide: the two
     // loaders agree either way
@@ -645,6 +680,7 @@ fn loads_of_another_types_bytes() {
             cross::<u32>(bytes);
             cross::<i32>(bytes);
             cross::<usize>(bytes);
+            cross::<NonZeroU32>(bytes);
             cross::<bool>(bytes);
             cross::<Action>(bytes);
             cross::<Option<u64>>(bytes);
@@ -652,6 +688,7 @@ fn loads_of_another_types_bytes() {
             cross::<Option<u32>>(bytes);
             cross::<Option<i32>>(bytes);
             cross::<Option<usize>>(bytes);
+            cross::<Option<NonZeroU32>>(bytes);
             cross::<Option<Action>>(bytes);
         }
     }
