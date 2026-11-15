@@ -10,7 +10,8 @@
 //! null, for `bool`, for byte strings, and for a type of the client's own
 //! that is stored as a number and is not every number ([`Action`]). And
 //! that a column loaded from any bytes at all saves back to those bytes
-//! ([`load_then_save`]).
+//! ([`load_then_save`]). And that a clone is a column of its own with
+//! the same values ([`clone_then_diverge`]).
 //!
 //! This module exists only while Verus checks the crate.
 
@@ -424,6 +425,64 @@ fn only_nulls(x: &[u8], none: &[u8])
     assert(!empties) by {
         assert(col@[0] != Some(none@));
     }
+}
+
+/// A clone is a column of its own with the same values: the two save to
+/// the same bytes, and an edit of one leaves the other as it was. For
+/// every value type and codec.
+#[allow(dead_code)]
+fn clone_then_diverge<'v, V: VValue<C>, C: VCodec>(xs: &Vec<Get<'v, V>>, a: Get<'v, V>) {
+    let mut col = VerifiedColumn::<V, C>::new();
+    col.splice(0, 0, xs.as_slice());
+    let ghost vs = VGet::svs(xs@);
+    assert(col@ == vs);
+
+    let mut twin = col.clone();
+    assert(twin@ == vs);
+    // the same values, so the same bytes
+    let b = col.save();
+    let t = twin.save();
+    assert(t@ == b@);
+
+    // an edit of the clone leaves the column as it was
+    twin.push(a);
+    assert(twin@ == vs.push(a.sv()));
+    assert(col@ == vs);
+
+    // and an edit of the column leaves the clone
+    col.clear();
+    assert(col@.len() == 0);
+    assert(twin@ == vs.push(a.sv()));
+}
+
+/// A clone of a clone, of byte strings that may be null: each of the
+/// three gives what it holds after the others are edited, and a slice
+/// read from one is the bytes written to the first.
+#[allow(dead_code)]
+fn clone_of_clone(x: &[u8]) {
+    let mut col = VerifiedColumn::<Option<Vec<u8>>>::new();
+    col.push(Some(x));
+    col.push(None);
+    let mut twin = col.clone();
+    let third = twin.clone();
+    twin.remove(0);
+    col.truncate(1);
+    assert(col@ == seq![Some(x@)]);
+    assert(twin@ == seq![None::<Seq<u8>>]);
+    assert(third@ == seq![Some(x@), None]);
+    let from_col = col.get(0);
+    let from_twin = twin.get(0);
+    let from_third = third.get(0);
+    assert(from_col matches Some(Some(v)) && v@ == x@);
+    assert(from_twin matches Some(None));
+    assert(from_third matches Some(Some(v)) && v@ == x@);
+
+    // an empty column's clone is empty, and a column on its own
+    let empty = VerifiedColumn::<bool>::new();
+    let mut other = empty.clone();
+    other.push(true);
+    assert(empty@.len() == 0);
+    assert(other@ == seq![true]);
 }
 
 } // verus!

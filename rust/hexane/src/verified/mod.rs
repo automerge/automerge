@@ -63,6 +63,9 @@
 //! * [`is_only`](VerifiedColumn::is_only) says whether every value of the
 //!   column is the one given (`only`), and [`VValue::same`] whether two
 //!   values in a column's form are one value;
+//! * `clone` gives a column with the same values. It is a column of its
+//!   own, as Rust's ownership has it: an edit of either says nothing of
+//!   the other, whose values so stay what they were;
 //! * [`save`](VerifiedColumn::save) writes the one encoding of the
 //!   column's values (`encoding`): bytes that are `valid` and hold those
 //!   `values`, and no more of them than the values' `size_bound`. Two
@@ -105,7 +108,11 @@
 //! `nonzero_internals` (the crate is checked with it on). A column of
 //! byte strings leans on more of them than one of numbers does: that a
 //! slice is its bytes and no more, that a part of a slice is that part of
-//! its bytes, and the copy of a slice into a `Vec`. Of this crate,
+//! its bytes, and the copy of a slice into a `Vec`. `clone` leans on
+//! those of the clones it is made of: that a clone of a `Vec` is as long
+//! and holds a clone of each item, that a clone of an `Option` is one of
+//! what it holds, and that a clone of an integer is that integer. Of
+//! this crate,
 //! the functions Verus is told to take as they are, which are few and
 //! small, and are those the verified core of [`Column`](crate::Column)
 //! has too:
@@ -794,6 +801,16 @@ impl<V: VValue<C>, C: VCodec> Default for VerifiedColumn<V, C> {
             r@ == Seq::<V::S>::empty(),
     {
         Self::new()
+    }
+}
+
+impl<V: VValue<C>, C: VCodec> Clone for VerifiedColumn<V, C> {
+    /// A column of its own with the same values.
+    fn clone(&self) -> (r: Self)
+        ensures
+            r@ == self@,
+    {
+        VerifiedColumn { core: self.core.duplicate() }
     }
 }
 

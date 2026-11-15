@@ -95,7 +95,7 @@ use crate::remap::{Encodes, Mapping};
 #[cfg(verus_keep_ghost)]
 use crate::splices::applied;
 use crate::splices::{wrong_columns, Normalized};
-use crate::weights::{DeltaModel, PrefixModel};
+use crate::weights::{DeltaModel, LenModel, PrefixModel};
 use std::marker::PhantomData;
 use std::ops::{Add, AddAssign, Range, SubAssign};
 use vstd::prelude::*;
@@ -1012,6 +1012,73 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> ColumnCore<E, W, I, G> {
     }
 }
 
+/// A plain column's core: one weighed by its slabs' item counts alone.
+impl<E: Slabs, I: IndexOps<usize>> ColumnCore<E, usize, I, LenModel> {
+    /// Parts of their own for the same column: a clone of the slabs and
+    /// a clone of the index, as the old API's `clone` makes them.
+    #[inline]
+    fn dup_parts(p: &Parts<E::Tail, I>, Ghost(max): Ghost<usize>) -> (r: Parts<E::Tail, I>)
+        requires
+            parts_ok::<E, usize, I, LenModel>(*p, max),
+        ensures
+            parts_ok::<E, usize, I, LenModel>(r, max),
+            vals_of::<E>(r.slabs@) == vals_of::<E>(p.slabs@),
+            r.counter == p.counter,
+    {
+        let r = Parts {
+            slabs: p.slabs.clone(),
+            index: p.index.ix_copy(),
+            total_len: p.total_len,
+            counter: p.counter,
+        };
+        proof {
+            let s = p.slabs@;
+            let t = r.slabs@;
+            assert forall|j: int| 0 <= j < t.len() implies {
+                &&& E::ok(#[trigger] t[j])
+                &&& E::vals(t[j]) == E::vals(s[j])
+                &&& t[j].len == s[j].len
+            } by {
+                assert(cloned::<Slab<E::Tail>>(s[j], t[j]));
+                E::lemma_copy(s[j], t[j]);
+            }
+            let f = |x: Slab<E::Tail>| E::vals(x);
+            assert(t.map_values(f) =~= s.map_values(f));
+            assert(slab_lens(t) =~= slab_lens(s));
+            assert forall|j: int| 0 <= j < t.len() implies #[trigger] <LenModel as Weigh<
+                E,
+                usize,
+            >>::wrel(r.index.ws()[j], t[j]) by {
+                assert(<LenModel as Weigh<E, usize>>::wrel(p.index.ws()[j], s[j]));
+            }
+        }
+        r
+    }
+
+    /// A column of its own with the same values, budget and edit
+    /// counter. It runs what the old API's `clone` runs: the slab
+    /// vector's `clone` and the index's.
+    pub(crate) fn duplicate(&self) -> (r: Self)
+        ensures
+            r.ready() == self.ready(),
+            r@ == self@,
+            r.budget() == self.budget(),
+            r.count() == self.count(),
+    {
+        proof {
+            use_type_invariant(self);
+        }
+        ColumnCore {
+            state: match &self.state {
+                Some(p) => Some(Self::dup_parts(p, Ghost(self.max_segments))),
+                None => None,
+            },
+            max_segments: self.max_segments,
+            _p: PhantomData,
+        }
+    }
+}
+
 /// A prefix column's core: its weights hold each slab's item count and
 /// sum (`weights::PrefixModel`), so the prefix readers' invariant
 /// (`ix_ok`) follows from the type invariant.
@@ -1657,6 +1724,8 @@ fn slab_of(prefix: &[usize], row: usize) -> (r: usize)
 
 // Outside `verus!`: a clone is the same column (std's `Vec::clone` and the
 // index's own `Clone`), trusted like the derived clones of verified state.
+// For a plain column over the tree index it is proved: `duplicate` above
+// runs the same two clones, and the verified API calls that one.
 impl<T: Copy + Clone + std::fmt::Debug + Default, I: Clone> Clone for Parts<T, I> {
     fn clone(&self) -> Self {
         Parts {

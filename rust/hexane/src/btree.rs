@@ -660,21 +660,18 @@ fn out_of_node_ids()
 
 type NodeId = u32;
 
-#[derive(Debug, Clone)]
-#[verifier::allow(autoderive_clone_without_spec)]
+#[derive(Debug)]
 enum Node<A: SlabAggregate> {
     Leaf(Leaf<A>),
     Internal(Internal<A>),
 }
 
-#[derive(Debug, Clone)]
-#[verifier::allow(autoderive_clone_without_spec)]
+#[derive(Debug)]
 struct Leaf<A: SlabAggregate> {
     aggs: Vec<A>,
 }
 
-#[derive(Debug, Clone)]
-#[verifier::allow(autoderive_clone_without_spec)]
+#[derive(Debug)]
 struct Internal<A: SlabAggregate> {
     children: Vec<ChildSlot<A>>,
 }
@@ -683,8 +680,7 @@ struct Internal<A: SlabAggregate> {
 /// subtree's aggregate and slab count (redundant with what the child
 /// root could recompute, but cached here so top-down walks are
 /// constant-time per node).
-#[derive(Debug, Clone)]
-#[verifier::allow(autoderive_clone_without_spec)]
+#[derive(Debug)]
 struct ChildSlot<A: SlabAggregate> {
     id: NodeId,
     agg: A,
@@ -693,14 +689,157 @@ struct ChildSlot<A: SlabAggregate> {
 
 // ── Tree ────────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone)]
-#[verifier::allow(autoderive_clone_without_spec)]
+#[derive(Debug)]
 pub struct SlabBTree<A: SlabAggregate> {
     nodes: Vec<Option<Node<A>>>,
     free: Vec<NodeId>,
     root: NodeId,
     total_slabs: usize,
     _phantom: PhantomData<A>,
+}
+
+// ── Clones ──────────────────────────────────────────────────────────────────
+//
+// Written out, where they were derived, to say what a clone is: Verus
+// gives a derived `clone` no specification unless the type is `Copy`.
+// Each is what `derive(Clone)` writes.
+
+/// A clone of an `A` is that `A`: so for the integers, and for any type
+/// whose `clone` is specified to return its argument.  A type's `clone`
+/// with no specification may return anything, and nothing is then known
+/// of a clone of a tree of them.
+pub open spec fn exact_clone<A: Clone>() -> bool {
+    forall|a: A, b: A| #[trigger] cloned::<A>(a, b) ==> a == b
+}
+
+/// Two arena slots hold the same: no node, or leaves of the same
+/// aggregates, or internal nodes of the same slots.  (A clone's vectors
+/// are other vectors than the original's.)
+spec fn same_node<A: SlabAggregate>(a: Option<Node<A>>, b: Option<Node<A>>) -> bool {
+    match (a, b) {
+        (None, None) => true,
+        (Some(Node::Leaf(x)), Some(Node::Leaf(y))) => x.aggs@ == y.aggs@,
+        (Some(Node::Internal(x)), Some(Node::Internal(y))) => x.children@ == y.children@,
+        _ => false,
+    }
+}
+
+// What each clone promises, as a public name for it: the specification
+// of a trait's method may name no private field.
+impl<A: SlabAggregate> ChildSlot<A> {
+    pub closed spec fn same(self, o: Self) -> bool {
+        o.id == self.id && o.slab_count == self.slab_count && cloned::<A>(self.agg, o.agg)
+    }
+}
+
+impl<A: SlabAggregate> Leaf<A> {
+    pub closed spec fn same(self, o: Self) -> bool {
+        o.aggs@ == self.aggs@
+    }
+}
+
+impl<A: SlabAggregate> Internal<A> {
+    pub closed spec fn same(self, o: Self) -> bool {
+        o.children@ == self.children@
+    }
+}
+
+impl<A: SlabAggregate> Node<A> {
+    pub closed spec fn same(self, o: Self) -> bool {
+        same_node(Some(self), Some(o))
+    }
+}
+
+impl<A: SlabAggregate> Clone for ChildSlot<A> {
+    #[inline]
+    fn clone(&self) -> (r: Self)
+        ensures
+            self.same(r),
+    {
+        ChildSlot { id: self.id, agg: self.agg.clone(), slab_count: self.slab_count }
+    }
+}
+
+impl<A: SlabAggregate> Clone for Leaf<A> {
+    #[inline]
+    fn clone(&self) -> (r: Self)
+        ensures
+            exact_clone::<A>() ==> self.same(r),
+    {
+        let r = Leaf { aggs: self.aggs.clone() };
+        assert(exact_clone::<A>() ==> r.aggs@ =~= self.aggs@);
+        r
+    }
+}
+
+impl<A: SlabAggregate> Clone for Internal<A> {
+    #[inline]
+    fn clone(&self) -> (r: Self)
+        ensures
+            exact_clone::<A>() ==> self.same(r),
+    {
+        let r = Internal { children: self.children.clone() };
+        proof {
+            if exact_clone::<A>() {
+                assert forall|i: int| 0 <= i < r.children@.len() implies r.children@[i]
+                    == self.children@[i] by {
+                    assert(cloned::<ChildSlot<A>>(self.children@[i], r.children@[i]));
+                    assert(self.children@[i].same(r.children@[i]) || self.children@[i]
+                        == r.children@[i]);
+                }
+                assert(r.children@ =~= self.children@);
+            }
+        }
+        r
+    }
+}
+
+impl<A: SlabAggregate> Clone for Node<A> {
+    #[inline]
+    fn clone(&self) -> (r: Self)
+        ensures
+            exact_clone::<A>() ==> self.same(r),
+    {
+        match self {
+            Node::Leaf(l) => Node::Leaf(l.clone()),
+            Node::Internal(n) => Node::Internal(n.clone()),
+        }
+    }
+}
+
+impl<A: SlabAggregate> Clone for SlabBTree<A> {
+    /// A tree of its own with the same nodes.
+    #[inline]
+    fn clone(&self) -> (r: Self)
+        ensures
+            exact_clone::<A>() ==> self.same(r),
+    {
+        let r = SlabBTree {
+            nodes: self.nodes.clone(),
+            free: self.free.clone(),
+            root: self.root,
+            total_slabs: self.total_slabs,
+            _phantom: PhantomData,
+        };
+        proof {
+            assert(r.free@ =~= self.free@);
+            if exact_clone::<A>() {
+                assert forall|i: int| 0 <= i < self.nodes@.len() implies same_node(
+                    #[trigger] self.nodes@[i],
+                    r.nodes@[i],
+                ) by {
+                    let a = self.nodes@[i];
+                    let b = r.nodes@[i];
+                    assert(cloned::<Option<Node<A>>>(a, b));
+                    if a != b && a is Some {
+                        assert(cloned::<Node<A>>(a.unwrap(), b.unwrap()));
+                        assert(a.unwrap().same(b.unwrap()) || a.unwrap() == b.unwrap());
+                    }
+                }
+            }
+        }
+        r
+    }
 }
 
 // ── The tree as a sequence of slab aggregates ───────────────────────────────
@@ -1472,6 +1611,82 @@ impl<A: SlabAggregate> SlabBTree<A> {
             self.lemma_child(id, h2, n, 0);
             self.lemma_height_unique(n.children@[0].id, (h1 - 1) as nat, (h2 - 1) as nat);
         }
+    }
+
+    /// Tree `o` holds what this tree holds, slot for slot: what a clone
+    /// of it is.
+    pub closed spec fn same(&self, o: Self) -> bool {
+        &&& o.nodes@.len() == self.nodes@.len()
+        &&& forall|i: int| 0 <= i < self.nodes@.len() ==> same_node(#[trigger] self.nodes@[i], o.nodes@[i])
+        &&& o.free@ == self.free@
+        &&& o.root == self.root
+        &&& o.total_slabs == self.total_slabs
+    }
+
+    /// A subtree means the same in a tree that holds the same.
+    proof fn lemma_same(t1: &Self, t2: &Self, id: NodeId, h: nat)
+        requires t1.same(*t2),
+        ensures
+            t1.slabs(id, h) == t2.slabs(id, h),
+            t1.owned(id, h) == t2.owned(id, h),
+            t1.wf_node(id, h) == t2.wf_node(id, h),
+        decreases h, 0nat,
+    {
+        reveal(SlabBTree::wf_children);
+        assert(same_node(t1.node_spec(id), t2.node_spec(id)));
+        if let Some(Node::Internal(n)) = t1.node_spec(id) {
+            if h > 0 {
+                let hc = (h - 1) as nat;
+                Self::lemma_same_children(t1, t2, n.children@, hc);
+                assert(t1.owned(id, h) =~= t2.owned(id, h));
+                if t1.wf_node(id, h) != t2.wf_node(id, h) {
+                    assert(t1.slabs(id, h) == t2.slabs(id, h));
+                    assert forall|i: int, j: int| 0 <= i < j < n.children@.len() implies
+                        t1.owned(n.children@[i].id, hc) == t2.owned(n.children@[i].id, hc)
+                        && t1.owned(n.children@[j].id, hc) == t2.owned(n.children@[j].id, hc) by {}
+                }
+            }
+        }
+    }
+
+    proof fn lemma_same_children(t1: &Self, t2: &Self, cs: Seq<ChildSlot<A>>, h: nat)
+        requires t1.same(*t2),
+        ensures
+            t1.children_slabs(cs, h) == t2.children_slabs(cs, h),
+            t1.children_owned(cs, h) == t2.children_owned(cs, h),
+            forall|i: int| 0 <= i < cs.len() ==> {
+                &&& t1.slabs(#[trigger] cs[i].id, h) == t2.slabs(cs[i].id, h)
+                &&& t1.owned(cs[i].id, h) == t2.owned(cs[i].id, h)
+                &&& t1.wf_node(cs[i].id, h) == t2.wf_node(cs[i].id, h)
+            },
+        decreases h, cs.len() + 1,
+    {
+        if cs.len() > 0 {
+            Self::lemma_same_children(t1, t2, cs.drop_last(), h);
+            Self::lemma_same(t1, t2, cs.last().id, h);
+            assert forall|i: int| 0 <= i < cs.len() implies {
+                &&& t1.slabs(#[trigger] cs[i].id, h) == t2.slabs(cs[i].id, h)
+                &&& t1.owned(cs[i].id, h) == t2.owned(cs[i].id, h)
+                &&& t1.wf_node(cs[i].id, h) == t2.wf_node(cs[i].id, h)
+            } by {
+                if i < cs.len() - 1 { assert(cs.drop_last()[i] == cs[i]); }
+            }
+        }
+    }
+
+    /// A tree that holds what a well-formed tree holds is well formed,
+    /// with the same slabs: so is a clone.
+    pub proof fn lemma_same_tree(&self, o: &Self)
+        requires
+            self.wf(),
+            self.same(*o),
+        ensures
+            o.wf(),
+            o@ == self@,
+    {
+        let h = self.height();
+        Self::lemma_same(self, o, self.root, h);
+        o.lemma_height_unique(o.root, h, o.height());
     }
 
     /// Frame: a subtree means the same in any tree that agrees on its

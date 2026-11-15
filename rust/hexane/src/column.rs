@@ -33,13 +33,36 @@ pub const DEFAULT_MAX_SEG: usize = 64;
 verus! {
 
 #[doc(hidden)]
-#[derive(Clone, Debug, Default, PartialEq)]
-#[verifier::allow(autoderive_clone_without_spec)]
+#[derive(Debug, Default, PartialEq)]
 pub struct Slab<Tail: Copy + Clone + std::fmt::Debug + Default = ()> {
     pub(crate) data: Vec<u8>,
     pub(crate) len: usize,
     pub(crate) segments: usize,
     pub(crate) tail: Tail,
+}
+
+impl<Tail: Copy + Clone + std::fmt::Debug + Default> Slab<Tail> {
+    /// Slab `o` has this slab's bytes, counts and tail: what a clone of
+    /// it is.
+    pub open(crate) spec fn same(self, o: Self) -> bool {
+        &&& o.data@ == self.data@
+        &&& o.len == self.len
+        &&& o.segments == self.segments
+        &&& o.tail == self.tail
+    }
+}
+
+// Written out, where it was derived, to say what a clone is: Verus gives
+// a derived `clone` no specification unless the type is `Copy`.
+impl<Tail: Copy + Clone + std::fmt::Debug + Default> Clone for Slab<Tail> {
+    /// A slab of its own with the same bytes, counts and tail.
+    #[inline]
+    fn clone(&self) -> (r: Self)
+        ensures
+            self.same(r),
+    {
+        Slab { data: self.data.clone(), len: self.len, segments: self.segments, tail: self.tail }
+    }
 }
 
 } // verus!

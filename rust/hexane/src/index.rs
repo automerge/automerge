@@ -18,7 +18,8 @@ use std::ops::Range;
 
 #[cfg(verus_keep_ghost)]
 use crate::btree::{
-    fold, lemma_fold_one, lemma_sum_len_concat, lemma_valid_subrange, spliced, sum_len, valid,
+    exact_clone, fold, lemma_fold_one, lemma_sum_len_concat, lemma_valid_subrange, spliced,
+    sum_len, valid,
 };
 use crate::btree::{SlabAggregate, SlabBTree};
 use crate::column::SlabWeight;
@@ -151,6 +152,18 @@ pub trait IndexOps<W>: Sized {
             r.ws() == ws@,
     ;
 
+    /// An index of its own over the same weights: the index's `clone`,
+    /// for weights whose clone is the weight.
+    fn ix_copy(&self) -> (r: Self)
+        where W: Clone
+        requires
+            self.ok(),
+            exact_clone::<W>(),
+        ensures
+            r.ok(),
+            r.ws() == self.ws(),
+    ;
+
     /// The slab holding item `at` and the item's offset in it; past the
     /// end, the number of slabs.
     fn ix_find(&self, at: usize) -> (r: (usize, usize))
@@ -236,14 +249,33 @@ verus! {
 /// The queries and updates are verified (`crate::fenwick`) against the
 /// weights' item counts, given `wf`; only the `IntoIterator`
 /// plumbing of `from_weights` and `splice` is not.
-#[derive(Debug, Clone)]
-#[verifier::allow(autoderive_clone_without_spec)]
+#[derive(Debug)]
 pub struct BitIndex<W: SlabWeight> {
     weights: Vec<W>,
     bit: Vec<W>,
 }
 
+// Written out, where it was derived, to say what a clone is (see the
+// tree's, in `btree.rs`).
+impl<W: SlabWeight> Clone for BitIndex<W> {
+    /// An index of its own with the same weights and sums.
+    #[inline]
+    fn clone(&self) -> (r: Self)
+        ensures
+            exact_clone::<W>() ==> self.same(r),
+    {
+        let r = BitIndex { weights: self.weights.clone(), bit: self.bit.clone() };
+        assert(exact_clone::<W>() ==> r.weights@ =~= self.weights@ && r.bit@ =~= self.bit@);
+        r
+    }
+}
+
 impl<W: SlabWeight> BitIndex<W> {
+    /// Index `o` holds what this index holds: what a clone of it is.
+    pub closed spec fn same(&self, o: Self) -> bool {
+        o.weights@ == self.weights@ && o.bit@ == self.bit@
+    }
+
     /// `bit` is the Fenwick tree of `weights`, whose items fit a `usize`.
     pub(crate) closed spec fn wf(&self) -> bool {
         &&& bit_ok(lens(self.bit@), lens(self.weights@))
@@ -407,6 +439,10 @@ impl<W: SlabWeight> IndexOps<W> for BitIndex<W> {
         Self::from_vec(ws)
     }
 
+    fn ix_copy(&self) -> Self {
+        self.clone()
+    }
+
     fn ix_len(&self) -> usize {
         self.weights.len()
     }
@@ -547,6 +583,14 @@ impl<A: SlabAggregate> IndexOps<A> for SlabBTree<A> {
 
     fn ix_from(ws: Vec<A>) -> Self {
         Self::from_vec(ws)
+    }
+
+    fn ix_copy(&self) -> Self {
+        let r = self.clone();
+        proof {
+            self.lemma_same_tree(&r);
+        }
+        r
     }
 
     fn ix_len(&self) -> usize {

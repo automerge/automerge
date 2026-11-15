@@ -1025,6 +1025,9 @@ impl<L> Slabs for RleModel<L> where L: for<'s> Lift<'s, W = L> {
         s
     }
 
+    proof fn lemma_copy(a: Slab, b: Slab) {
+    }
+
     fn reset(e: &mut RleRebuild<L>, s: &Slab, at: usize, max_segments: usize) {
         if s.data.len() >= i64::MAX as usize {
             slab_too_long();

@@ -123,6 +123,17 @@ pub(crate) trait Slabs {
             Self::vals(s) == Seq::<Self::V>::empty(),
     ;
 
+    /// A slab is its bytes, counts and tail: another slab with those of a
+    /// well-formed slab is well formed, with the same values (a clone).
+    proof fn lemma_copy(a: Slab<Self::Tail>, b: Slab<Self::Tail>)
+        requires
+            Self::ok(a),
+            a.same(b),
+        ensures
+            Self::ok(b),
+            Self::vals(b) == Self::vals(a),
+    ;
+
     /// Open a rebuild of `s` at value `at`.
     fn reset(e: &mut Self::Rebuild, s: &Slab<Self::Tail>, at: usize, max_segments: usize)
         requires

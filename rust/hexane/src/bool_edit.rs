@@ -2885,6 +2885,13 @@ impl<C: CountsOf> Slabs for BoolModel<C> {
         s
     }
 
+    proof fn lemma_copy(a: BSlab, b: BSlab) {
+        reveal(bslab_bytes);
+        reveal(bslab_len);
+        reveal(bslab_segments);
+        reveal(bslab_tail);
+    }
+
     #[inline(always)]
     fn reset(e: &mut BoolEdit<C>, s: &BSlab, at: usize, max_segments: usize) {
         proof {

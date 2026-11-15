@@ -324,6 +324,39 @@ fn check_loads<T: Kind>(v: &VerifiedColumn<T>, c: &Column<T>, model: &[T]) {
     assert_eq!(c2.save(), bytes);
 }
 
+/// A clone of each API's column holds what the column holds, in the same
+/// slabs, and is a column of its own: an edit of the clones (`salt` picks
+/// it) leaves the columns as they were, and the clones agree after it.
+fn check_clone<T: Kind>(v: &VerifiedColumn<T>, c: &Column<T>, model: &[T], salt: u64) {
+    let mut v2 = v.clone();
+    let mut c2 = c.clone();
+    check(&v2, &c2, model);
+    assert_eq!(v2.slab_count(), v.slab_count());
+    assert_eq!(format!("{v2:?}"), format!("{v:?}"));
+    assert_eq!(v2.save(), v.save());
+
+    let mut rng = Rng(salt | 1);
+    let mut m2 = model.to_vec();
+    let at = rng.below(m2.len() + 1);
+    let del = rng.below((m2.len() - at).min(12) + 1);
+    let ins: Vec<T> = rng.values(40);
+    v2.splice(at, del, &lent(&ins));
+    c2.splice(at, del, ins.iter().cloned());
+    m2.splice(at..at + del, ins);
+    let x = T::fresh(&mut rng);
+    v2.push(x.lend());
+    c2.push(x.clone());
+    m2.push(x);
+    check(&v2, &c2, &m2);
+    check(v, c, model);
+
+    // a clone of the clone, and the clone gone
+    let v3 = v2.clone();
+    drop(v2);
+    assert_eq!(new_values(&v3), m2);
+    assert_eq!(v3.slab_count(), c2.slab_count());
+}
+
 /// A column of each API with the values `model`.
 fn both<T: Kind>(model: &[T]) -> (VerifiedColumn<T>, Column<T>) {
     let mut v = VerifiedColumn::<T>::new();
@@ -372,10 +405,11 @@ fn shapes<T: Kind>() {
     for _ in 0..20 {
         shapes.push(rng.values(300));
     }
-    for model in shapes {
+    for (i, model) in shapes.into_iter().enumerate() {
         let (v, c) = both(&model);
         check(&v, &c, &model);
         check_loads(&v, &c, &model);
+        check_clone(&v, &c, &model, 0xc10e + i as u64);
     }
 }
 
@@ -413,6 +447,62 @@ fn empty<T: Kind>() {
 #[test]
 fn an_empty_column() {
     for_each_kind!(empty);
+}
+
+/// A clone keeps the column's segment budget and is its own column: a
+/// clone of an empty column, of one emptied, and of one of small slabs,
+/// each filled after the column it came from is gone.
+fn clones<T: Kind>() {
+    let mut rng = Rng(0xc0de);
+    let more: Vec<T> = (0..300).map(|_| T::fresh(&mut rng)).collect();
+    for budget in [2, 3, 16, 64] {
+        // of an empty column, which has no slab yet
+        let v = VerifiedColumn::<T>::with_max_segments(budget);
+        let c = Column::<T>::with_max_segments(budget);
+        check_clone(&v, &c, &[], budget as u64);
+        let (mut v2, mut c2) = (v.clone(), c.clone());
+        drop((v, c));
+        v2.splice(0, 0, &lent(&more));
+        c2.splice(0, 0, more.iter().cloned());
+        check(&v2, &c2, &more);
+
+        // of a column of many slabs, and then of that column emptied
+        let (mut v3, mut c3) = (v2.clone(), c2.clone());
+        drop((v2, c2));
+        check(&v3, &c3, &more);
+        check_clone(&v3, &c3, &more, 7 * budget as u64);
+        v3.clear();
+        c3.clear();
+        let (mut v4, mut c4) = (v3.clone(), c3.clone());
+        check(&v4, &c4, &[]);
+        v4.splice(0, 0, &lent(&more));
+        c4.splice(0, 0, more.iter().cloned());
+        check(&v4, &c4, &more);
+        check(&v3, &c3, &[]);
+    }
+    let d = VerifiedColumn::<T>::default().clone();
+    assert!(d.is_empty() && d.save().is_empty());
+}
+
+#[test]
+fn a_clone_is_a_column_of_its_own() {
+    for_each_kind!(clones);
+}
+
+/// What a clone of byte strings lends is its own: it outlives the column
+/// it was cloned from.
+#[test]
+fn a_clone_owns_its_bytes() {
+    let mut v = VerifiedColumn::<Vec<u8>>::new();
+    v.push(b"one");
+    v.push(b"two");
+    let w = v.clone();
+    let lent = w.get(1);
+    v.remove(1);
+    v.push(b"three");
+    drop(v);
+    assert_eq!(lent, Some(&b"two"[..]));
+    assert_eq!(w.to_vec(), [&b"one"[..], &b"two"[..]]);
 }
 
 /// The format, in bytes: so that the two APIs agreeing is not both of
@@ -588,6 +678,7 @@ fn edits<T: Kind>() {
             }
             if step % 10 == 9 {
                 check_loads(&v, &c, &model);
+                check_clone(&v, &c, &model, seed * 1000 + step);
             }
         }
         check_loads(&v, &c, &model);
