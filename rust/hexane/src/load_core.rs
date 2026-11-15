@@ -291,7 +291,7 @@ impl<'a, E, X, W, G, LD> LoadCore<'a, E, X, W, G, LD> where
     /// each weighed by its own weight, with segment budget
     /// `max_segments`, if it holds `expected` items (where given) and
     /// passes the weight model's load checks (`lo..=hi`: a delta
-    /// column's domain).
+    /// column's domain). A column returned holds `expected` items.
     pub(crate) fn finish<I: IndexOps<W>>(
         self,
         max_segments: usize,
@@ -307,6 +307,7 @@ impl<'a, E, X, W, G, LD> LoadCore<'a, E, X, W, G, LD> where
                 &&& c.budget() == max_segments
                 &&& c@ == LD::values_of(self.ld.data()).map_values(|v: <X::D as Decode>::Item| E::own(v))
                 &&& LD::valid(self.ld.data())
+                &&& expected matches Some(e) ==> c@.len() == e
             },
             // a load fails only for one of these
             r is Err ==> {

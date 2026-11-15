@@ -1,4 +1,16 @@
+//! The options of a load, for both APIs: what each option holds is
+//! specified here and verified with Verus, so that
+//! [`VerifiedColumn::load_with`](crate::verified::VerifiedColumn::load_with)
+//! can say what a load with them returns.
+
 use crate::column::DEFAULT_MAX_SEG;
+#[allow(unused_imports)]
+use vstd::prelude::*;
+
+verus! {
+
+/// The default segment budget, where Verus sees its value.
+const MAX_SEG: usize = 64;
 
 /// Options for [`Column::load_with`](crate::Column::load_with),
 /// [`Column::load_iter`](crate::Column::load_iter), etc.
@@ -33,16 +45,31 @@ pub struct Fill<A>(pub(crate) A);
 /// The fill state of a [`LoadOpts`]: either [`NoFill`] or a [`Fill`]
 /// carrying a value usable as the column's item type.
 pub trait MaybeFill<G> {
-    fn fill_value(self) -> Option<G>;
+    /// The fill value, if there is one: what
+    /// [`fill_value`](MaybeFill::fill_value) returns, for specifications.
+    spec fn value(self) -> Option<G>;
+
+    fn fill_value(self) -> (r: Option<G>)
+        ensures
+            r == self.value(),
+    ;
 }
 
 impl<G> MaybeFill<G> for NoFill {
+    open spec fn value(self) -> Option<G> {
+        None
+    }
+
     fn fill_value(self) -> Option<G> {
         None
     }
 }
 
 impl<G> MaybeFill<G> for Fill<G> {
+    closed spec fn value(self) -> Option<G> {
+        Some(self.0)
+    }
+
     fn fill_value(self) -> Option<G> {
         Some(self.0)
     }
@@ -50,12 +77,12 @@ impl<G> MaybeFill<G> for Fill<G> {
 
 impl LoadOpts<NoFill> {
     #[allow(clippy::new_without_default)]
-    pub fn new() -> Self {
-        Self {
-            length: None,
-            fill: NoFill,
-            max_segments: DEFAULT_MAX_SEG,
-        }
+    pub fn new() -> (r: Self)
+        ensures
+            r.length() is None,
+            r.max_segments() >= 2,
+    {
+        Self { length: None, fill: NoFill, max_segments: MAX_SEG }
     }
 
     /// When data is empty and [`with_length`](Self::with_length) is also set,
@@ -68,22 +95,55 @@ impl LoadOpts<NoFill> {
     /// reads as zeros).
     ///
     /// Has no effect unless `with_length` is also called.
-    pub fn with_fill<A>(self, value: A) -> LoadOpts<Fill<A>> {
-        LoadOpts {
-            length: self.length,
-            fill: Fill(value),
-            max_segments: self.max_segments,
-        }
+    pub fn with_fill<A>(self, value: A) -> (r: LoadOpts<Fill<A>>)
+        ensures
+            r.length() == self.length(),
+            r.fill().value() == Some(value),
+            r.max_segments() == self.max_segments(),
+    {
+        LoadOpts { length: self.length, fill: Fill(value), max_segments: self.max_segments }
     }
 }
 
 impl Default for LoadOpts<NoFill> {
-    fn default() -> Self {
+    fn default() -> (r: Self)
+        ensures
+            r.length() is None,
+            r.max_segments() >= 2,
+    {
         Self::new()
     }
 }
 
 impl<F> LoadOpts<F> {
+    /// The number of items the loaded column is to have, if one was
+    /// asked for (for specifications).
+    pub closed spec fn length(self) -> Option<usize> {
+        self.length
+    }
+
+    /// The fill state (for specifications).
+    pub closed spec fn fill(self) -> F {
+        self.fill
+    }
+
+    /// The most segments a slab of the loaded column may hold (for
+    /// specifications).
+    pub closed spec fn max_segments(self) -> usize {
+        self.max_segments
+    }
+
+    /// The three options.
+    #[inline(always)]
+    pub(crate) fn parts(self) -> (r: (Option<usize>, F, usize))
+        ensures
+            r.0 == self.length(),
+            r.1 == self.fill(),
+            r.2 == self.max_segments(),
+    {
+        (self.length, self.fill, self.max_segments)
+    }
+
     /// Require the loaded column to have exactly `len` items.
     ///
     /// If the data is non-empty and decodes to a different length, returns
@@ -91,14 +151,29 @@ impl<F> LoadOpts<F> {
     ///
     /// To produce a filled column when data is empty, combine with
     /// [`with_fill`](LoadOpts::with_fill).
-    pub fn with_length(mut self, len: usize) -> Self {
+    pub fn with_length(mut self, len: usize) -> (r: Self)
+        ensures
+            r.length() == Some(len),
+            r.fill() == self.fill(),
+            r.max_segments() == self.max_segments(),
+    {
         self.length = Some(len);
         self
     }
 
     /// Override the maximum number of segments per slab.
-    pub fn with_max_segments(mut self, n: usize) -> Self {
+    pub fn with_max_segments(mut self, n: usize) -> (r: Self)
+        ensures
+            r.length() == self.length(),
+            r.fill() == self.fill(),
+            r.max_segments() == n,
+    {
         self.max_segments = n;
         self
     }
 }
+
+} // verus!
+
+// one default for every column
+const _: () = assert!(MAX_SEG == DEFAULT_MAX_SEG);

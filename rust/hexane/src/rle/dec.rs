@@ -4146,7 +4146,7 @@ impl<'a, O: RleOps<'a>> Decode for RDecoder<'a, O> {
 }
 
 /// The empty slab is valid, with no values.
-proof fn lemma_empty_slab<'a, O: RleOps<'a>>()
+pub(crate) proof fn lemma_empty_slab<'a, O: RleOps<'a>>()
     ensures
         valid_slab::<O>(Seq::<u8>::empty()),
         slab_values::<O>(Seq::<u8>::empty()) == Seq::<O::V>::empty(),

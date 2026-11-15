@@ -14,7 +14,11 @@
 //! the same values ([`clone_then_diverge`]). And that a column made of
 //! what iterators give holds what was handed to them
 //! ([`collect_then_extend`]), and one made of runs each run's value as
-//! often as its count says ([`runs_in`]).
+//! often as its count says ([`runs_in`]). And that a saved column loads
+//! when its own length is asked for and does not when another is
+//! ([`load_with_a_length`]), and that no bytes load as a fill value as
+//! often as asked for, or as an error where no column is that long
+//! ([`load_a_fill`]).
 //!
 //! This module exists only while Verus checks the crate.
 
@@ -22,7 +26,7 @@ use super::{
     lemma_run_values_add, lemma_run_values_push, only, refused, run_values, total_len, Get, VCodec,
     VGet, VNewtype, VValue, VerifiedColumn,
 };
-use crate::{Leb128, PackError, Run};
+use crate::{Leb128, LoadOpts, PackError, Run};
 use vstd::prelude::*;
 
 verus! {
@@ -637,6 +641,114 @@ fn runs_of_slices(x: &[u8], k: usize, a: Vec<Run<u64>>, b: Vec<Run<u64>>) {
         lemma_run_values_add(a@, b@);
     }
     assert(nums@ =~= run_values(a@ + b@));
+}
+
+/// A load with options. A saved column loads, with its own length asked
+/// for, as the values it had, whatever the fill value and the size of a
+/// slab; and with another length asked for it does not load. For every
+/// value type and codec.
+#[allow(dead_code)]
+fn load_with_a_length<'v, V: VValue<C>, C: VCodec>(input: &Vec<Get<'v, V>>, v: Get<'v, V>, other: usize)
+    requires
+        V::size_bound(VGet::svs(input@)) <= 0xffff_fff5,
+        input@.len() <= usize::MAX - 3,
+        other != input@.len(),
+{
+    let mut col = VerifiedColumn::<V, C>::new();
+    col.splice(0, 0, input.as_slice());
+    let n = col.len();
+    let bytes = col.save();
+    proof {
+        VGet::lemma_svs(input@);
+        // no bytes are no values: so these bytes are none if the column
+        // is empty, and only then
+        VerifiedColumn::<V, C>::lemma_no_bytes();
+        if n == 0 {
+            assert(col@ =~= Seq::empty());
+            VerifiedColumn::<V, C>::lemma_save_unique(bytes@, Seq::empty());
+        } else if bytes@.len() == 0 {
+            assert(bytes@ =~= Seq::empty());
+        }
+    }
+
+    let back = VerifiedColumn::<V, C>::load_with(bytes.as_slice(), LoadOpts::new().with_length(n));
+    assert(back is Ok && back->Ok_0@ == col@);
+
+    // a fill value fills nothing but an empty column, with no values
+    let back = VerifiedColumn::<V, C>::load_with(bytes.as_slice(), LoadOpts::new().with_length(n).with_fill(v));
+    assert(back is Ok && back->Ok_0@ =~= col@);
+
+    let back = VerifiedColumn::<V, C>::load_with(bytes.as_slice(), LoadOpts::new().with_length(n).with_max_segments(2));
+    assert(back is Ok && back->Ok_0@ == col@);
+
+    let back = VerifiedColumn::<V, C>::load_with(bytes.as_slice(), LoadOpts::new().with_length(other));
+    assert(back is Err);
+}
+
+/// No bytes, loaded with a length and a fill value: that many of the
+/// value, where a column can be that long, and an error where it
+/// cannot. With a length and no fill value they load only as the empty
+/// column, and with a fill value and no length as that too. For every
+/// value type and codec.
+#[allow(dead_code)]
+fn load_a_fill<'v, V: VValue<C>, C: VCodec>(v: Get<'v, V>, n: usize) {
+    let none: Vec<u8> = Vec::new();
+    proof {
+        VerifiedColumn::<V, C>::lemma_no_bytes();
+    }
+    let r = VerifiedColumn::<V, C>::load_with(none.as_slice(), LoadOpts::new().with_length(n).with_fill(v));
+    if n as u64 <= i64::MAX as u64 && n <= usize::MAX - 3 {
+        assert(r is Ok);
+        let col = r.unwrap();
+        let len = col.len();
+        assert(len == n);
+        let all = col.is_only(v);
+        assert(all);
+        if n > 0 {
+            let last = col.get(n - 1);
+            assert(last matches Some(x) && x.sv() == v.sv());
+        }
+    } else {
+        assert(r is Err);
+    }
+
+    let r = VerifiedColumn::<V, C>::load_with(none.as_slice(), LoadOpts::new().with_length(n));
+    assert(r is Ok <==> n == 0);
+
+    let r = VerifiedColumn::<V, C>::load_with(none.as_slice(), LoadOpts::new().with_fill(v));
+    assert(r is Ok && r->Ok_0@.len() == 0);
+}
+
+/// Fills of nulls, of a byte string and of a number, one that is longer
+/// than any column, and a load with the options a `LoadOpts` starts
+/// with.
+#[allow(dead_code)]
+fn load_fills(x: &[u8]) {
+    let none: Vec<u8> = Vec::new();
+    let r = VerifiedColumn::<Option<Vec<u8>>>::load_with(
+        none.as_slice(),
+        LoadOpts::new().with_length(3).with_fill(None),
+    );
+    assert(r is Ok && r->Ok_0@ =~= seq![None::<Seq<u8>>, None, None]);
+
+    let r = VerifiedColumn::<Vec<u8>>::load_with(
+        none.as_slice(),
+        LoadOpts::default().with_fill(x).with_max_segments(4).with_length(2),
+    );
+    assert(r is Ok && r->Ok_0@ =~= seq![x@, x@]);
+
+    let r = VerifiedColumn::<u64>::load_with(none.as_slice(), LoadOpts::new().with_length(5).with_fill(7));
+    assert(r is Ok && r->Ok_0@ =~= seq![7u64, 7, 7, 7, 7]);
+
+    proof {
+        VerifiedColumn::<u64>::lemma_no_bytes();
+    }
+    let r = VerifiedColumn::<u64>::load_with(none.as_slice(), LoadOpts::new().with_length(usize::MAX).with_fill(7));
+    assert(r is Err);
+
+    // and with no option, no bytes are a column of no values
+    let r = VerifiedColumn::<u64>::load_with(none.as_slice(), LoadOpts::default());
+    assert(r is Ok && r->Ok_0@.len() == 0);
 }
 
 } // verus!

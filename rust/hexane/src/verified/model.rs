@@ -27,7 +27,7 @@ use crate::bool_edit::{BoolEdit, BoolLoader, BoolModel};
 #[cfg(verus_keep_ghost)]
 use crate::bool_unique::lemma_bool_slab_unique;
 #[cfg(verus_keep_ghost)]
-use crate::bool_wire::{bool_valid, bool_values};
+use crate::bool_wire::{bool_valid, bool_values, lemma_empty_valid};
 use crate::bool_wire::{BSlab, BoolReads, CountsOf};
 use crate::btree::SlabBTree;
 use crate::column::Slab;
@@ -42,7 +42,7 @@ use crate::rle::cut::Load;
 use crate::rle::cut::{head_bound, small};
 use crate::rle::dec::RleReads;
 #[cfg(verus_keep_ghost)]
-use crate::rle::dec::{slab_values, valid_slab};
+use crate::rle::dec::{lemma_empty_slab, slab_values, valid_slab};
 use crate::rle::edit::{RleModel, RleRebuild, Visit};
 use crate::rle::lift::Lift;
 #[cfg(verus_keep_ghost)]
@@ -103,6 +103,13 @@ pub(crate) trait Model<X>: Slabs + Sized + for <'a>ReadsAgree<'a, X> where
             d.len() <= Self::size_bound(Self::values(d)),
     ;
 
+    /// No bytes are a saved column, of no values.
+    proof fn lemma_none()
+        ensures
+            Self::valid(Seq::<u8>::empty()),
+            Self::values(Seq::<u8>::empty()) == Seq::<Self::V>::empty(),
+    ;
+
     /// Whether an insert of one value is compiled apart from a splice of
     /// a slice's values, or as a splice of a slice of one. It decides
     /// nothing but speed, and is whichever was measured to run fewer
@@ -141,17 +148,27 @@ pub(crate) trait Model<X>: Slabs + Sized + for <'a>ReadsAgree<'a, X> where
     ;
 
     /// The column saved as `bytes`, in slabs of at most `max_segments`
-    /// runs. An error unless `bytes` is a saved column; and no error
-    /// for one short of 4 GiB by a header's length whose values a
-    /// `usize` can count with three to spare.
-    fn load(bytes: &[u8], max_segments: usize) -> (r: Result<Core<Self>, PackError>)
+    /// runs, if it holds `expected` values (where given). An error
+    /// unless `bytes` is a saved column of that many; and no error for
+    /// one of that many short of 4 GiB by a header's length whose values
+    /// a `usize` can count with three to spare.
+    fn load(bytes: &[u8], max_segments: usize, expected: Option<usize>) -> (r: Result<Core<Self>, PackError>)
         requires
             max_segments >= 2,
         ensures
-            r matches Ok(c) ==> c.ready() && c.budget() == max_segments && Self::valid(bytes@) && c@ == Self::values(
-                bytes@,
-            ),
-            Self::valid(bytes@) && bytes@.len() <= 0xffff_fff5 && Self::values(bytes@).len() <= usize::MAX - 3 ==> r is Ok,
+            r matches Ok(c) ==> {
+                &&& c.ready()
+                &&& c.budget() == max_segments
+                &&& Self::valid(bytes@)
+                &&& c@ == Self::values(bytes@)
+                &&& expected matches Some(e) ==> c@.len() == e
+            },
+            ({
+                &&& Self::valid(bytes@)
+                &&& bytes@.len() <= 0xffff_fff5
+                &&& Self::values(bytes@).len() <= usize::MAX - 3
+                &&& expected matches Some(e) ==> Self::values(bytes@).len() == e
+            }) ==> r is Ok,
     ;
 }
 
@@ -328,6 +345,10 @@ impl<L, O> Model<RleReads<O>> for RleModel<L> where
         assert(2 * 10 * vs.len() == 20 * vs.len()) by (nonlinear_arith);
     }
 
+    proof fn lemma_none() {
+        lemma_empty_slab::<O>();
+    }
+
     #[inline(always)]
     fn blind() -> NoVisit<L> {
         NoVisit { seen: Ghost(Seq::empty()) }
@@ -349,12 +370,12 @@ impl<L, O> Model<RleReads<O>> for RleModel<L> where
     }
 
     #[inline(always)]
-    fn load(bytes: &[u8], max_segments: usize) -> (r: Result<Core<Self>, PackError>) {
+    fn load(bytes: &[u8], max_segments: usize, expected: Option<usize>) -> (r: Result<Core<Self>, PackError>) {
         let ld: LoadCore<'_, RleModel<L>, RleReads<O>, usize, LenModel, Load<'_, L>> = LoadCore::start(
             bytes,
             max_segments,
         );
-        match ld.finish::<SlabBTree<usize>>(max_segments, None, i64::MIN, i64::MAX) {
+        match ld.finish::<SlabBTree<usize>>(max_segments, expected, i64::MIN, i64::MAX) {
             Ok(core) => {
                 proof {
                     let o = slab_values::<O>(bytes@);
@@ -369,7 +390,7 @@ impl<L, O> Model<RleReads<O>> for RleModel<L> where
             Err(e) => {
                 proof {
                     if valid_slab::<O>(bytes@) && bytes@.len() <= 0xffff_fff5 && slab_values::<O>(bytes@).len()
-                        <= usize::MAX - 3 {
+                        <= usize::MAX - 3 && (expected matches Some(e) ==> slab_values::<O>(bytes@).len() == e) {
                         L::lemma_heads();
                         assert(head_bound::<O>(10));
                         assert(small::<O>(bytes@));
@@ -411,6 +432,10 @@ impl<C: CountsOf> Model<BoolReads<C>> for BoolModel<C> {
         lemma_bool_size::<C::K>(d);
     }
 
+    proof fn lemma_none() {
+        lemma_empty_valid::<C::K>();
+    }
+
     #[inline(always)]
     fn blind() -> NoVisitBool<C> {
         NoVisitBool { seen: Ghost(Seq::empty()), _p: PhantomData }
@@ -427,12 +452,12 @@ impl<C: CountsOf> Model<BoolReads<C>> for BoolModel<C> {
     }
 
     #[inline(always)]
-    fn load(bytes: &[u8], max_segments: usize) -> (r: Result<Core<Self>, PackError>) {
+    fn load(bytes: &[u8], max_segments: usize, expected: Option<usize>) -> (r: Result<Core<Self>, PackError>) {
         let ld: LoadCore<'_, BoolModel<C>, BoolReads<C>, usize, LenModel, BoolLoader<'_, C>> = LoadCore::start(
             bytes,
             max_segments,
         );
-        match ld.finish::<SlabBTree<usize>>(max_segments, None, i64::MIN, i64::MAX) {
+        match ld.finish::<SlabBTree<usize>>(max_segments, expected, i64::MIN, i64::MAX) {
             Ok(core) => {
                 proof {
                     let o = bool_values::<C::K>(bytes@);

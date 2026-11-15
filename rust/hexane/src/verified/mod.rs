@@ -85,15 +85,25 @@
 //! * [`load`](VerifiedColumn::load) gives a column only for valid bytes,
 //!   and then the column of their values; and it does give one for all
 //!   valid bytes short of 4 GiB that hold values a `usize` can count
-//!   (`loadable`).
+//!   (`loadable`);
+//! * [`load_with`](VerifiedColumn::load_with) is `load` with options
+//!   ([`LoadOpts`]). Asked for a length, it gives a column only of that
+//!   many values, and does give one for loadable bytes that hold that
+//!   many. Given a fill value too, it makes of no bytes a column of the
+//!   value that many times, for every length a column can have
+//!   (`fill_of` says when); for a longer one it returns an error, since
+//!   no bytes are the saved column of no values (`lemma_no_bytes`).
 //!
 //! `valid`, `values`, `encoding` and `loadable` are specification
 //! functions of a column type (`VerifiedColumn::<V>::valid(bytes)`),
 //! `size_bound` is one of a value type (for byte strings it counts their
-//! bytes, as `total_len` of them), `only` and `run_values` are of this
-//! module, and `lemma_save_unique`, `lemma_encoding`,
-//! `lemma_run_values_push` and `lemma_run_values_add` are lemmas: they
-//! exist only for Verus, and a normal build compiles them away.
+//! bytes, as `total_len` of them), `only`, `run_values` and `fill_of` are
+//! of this module, and `lemma_save_unique`, `lemma_encoding`,
+//! `lemma_no_bytes`, `lemma_run_values_push` and `lemma_run_values_add`
+//! are lemmas: they exist only for Verus, and a normal build compiles
+//! them away. What options hold is said by `length()`, `fill()` and
+//! `max_segments()` of a [`LoadOpts`], and what fill value there is by
+//! `value()` of its fill state ([`MaybeFill`]).
 //!
 //! What a method does with an iterator is stated as Verus states what
 //! the standard library does with one: of the values the iterator is to
@@ -159,7 +169,15 @@
 //!
 //! No value type's encoding is trusted, nor the codec's, and there is no
 //! unverified code between this API and the core: every other function on
-//! a path through this API is checked.
+//! a path through this API is checked. The options of a load
+//! ([`LoadOpts`]) are one type for both APIs, and are checked too:
+//! nothing is assumed of what they hold.
+//!
+//! That a load returns an error for what a column cannot hold, and does
+//! not panic, is not proved: Verus is not asked to show that the helpers
+//! that panic are out of a load's reach. It is tested
+//! (`tests/verified_api.rs`), on targets of 64 and of 32 bits: for a fill
+//! longer than a column, and for bytes of more values than one holds.
 //!
 //! A client's own value type is checked with the client: Verus proves
 //! what [`VNewtype`] asks of it when it is run on the client's crate. A
@@ -213,7 +231,7 @@ use crate::iter_core::{Decode, Decoders, ICore};
 use crate::rle::dec::slab_values;
 use crate::rle::dec::RleReads;
 use crate::rle::edit::RleModel;
-use crate::{Leb128, PackError, Run};
+use crate::{Leb128, LoadOpts, MaybeFill, PackError, Run};
 use counts::VB;
 use model::{Core, Model};
 use std::marker::PhantomData;
@@ -1030,6 +1048,22 @@ proof fn lemma_slab_vals<'a, X: Decoders<'a>>(s: Seq<Slab<X::Tail>>, k: int)
     }
 }
 
+/// The fill that a load makes of the saved bytes `d`, with the length
+/// and the fill value its options hold: its length and its value, where
+/// `d` is empty, both are given, and a column can be that long (a run
+/// counts at most `i64::MAX` values, and a `usize` a column's values
+/// with three to spare). Where it makes none, the load reads `d`.
+pub open spec fn fill_of<G>(d: Seq<u8>, length: Option<usize>, fill: Option<G>) -> Option<(usize, G)> {
+    match (length, fill) {
+        (Some(len), Some(v)) => if d.len() == 0 && len <= i64::MAX && len <= usize::MAX - 3 {
+            Some((len, v))
+        } else {
+            None
+        },
+        _ => None,
+    }
+}
+
 /// Every value of `vs` is `v`: so of no values.
 pub open spec fn only<S>(vs: Seq<S>, v: S) -> bool {
     forall|i: int| 0 <= i < vs.len() ==> vs[i] == v
@@ -1186,6 +1220,16 @@ impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
         assert(Self::valid(e) && Self::values(e) == Self::values(d));
         Self::lemma_save_unique(e, d);
     }
+
+    /// No bytes are a saved column: the one of no values.
+    pub proof fn lemma_no_bytes()
+        ensures
+            Self::valid(Seq::<u8>::empty()),
+            Self::values(Seq::<u8>::empty()) == Seq::<V::S>::empty(),
+    {
+        <V::E as Model<V::X>>::lemma_none();
+        lemma_svs_none::<Held<V, C>>();
+    }
 }
 
 impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
@@ -1250,8 +1294,21 @@ impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
         ensures
             r@ == Seq::new(len as nat, |_i: int| value.sv()),
     {
+        Self::filled(len, value, MAX_SEG)
+    }
+
+    /// [`fill`](Self::fill), in slabs of at most `max_segments` runs.
+    #[inline(always)]
+    fn filled(len: usize, value: Get<'_, V>, max_segments: usize) -> (r: Self)
+        requires
+            len <= i64::MAX,
+            len <= usize::MAX - 3,
+            max_segments >= 2,
+        ensures
+            r@ == Seq::new(len as nat, |_i: int| value.sv()),
+    {
         if len == 0 {
-            let r = Self::new();
+            let r = Self::with_max_segments(max_segments);
             proof {
                 assert(r@ =~= Seq::new(len as nat, |_i: int| value.sv()));
             }
@@ -1265,7 +1322,7 @@ impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
             assert(slabs@ =~= seq![s]);
             lemma_vals_unit::<V::E>(s);
         }
-        let core = Core::<V::E>::from_cut(slabs, MAX_SEG);
+        let core = Core::<V::E>::from_cut(slabs, max_segments);
         proof {
             let vs = Seq::new(len as nat, |_i: int| value.sv());
             <Held<V, C> as VGet>::lemma_svs(core@);
@@ -1863,7 +1920,58 @@ impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
         proof {
             <Held<V, C> as VGet>::lemma_svs(<V::E as Model<V::X>>::values(bytes@));
         }
-        match <V::E as Model<V::X>>::load(bytes, MAX_SEG) {
+        match <V::E as Model<V::X>>::load(bytes, MAX_SEG, None) {
+            Ok(core) => Ok(VerifiedColumn { core }),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// [`load`](Self::load) with options ([`LoadOpts`]): how many values
+    /// the column is to have, a value to fill it with, and how many runs
+    /// a slab may hold.
+    ///
+    /// With a length and a fill value, empty `bytes` load as that many
+    /// copies of the value, if a column can be that long (`fill_of`). If
+    /// it cannot, or with no fill value, `bytes` load as what they are;
+    /// and a column of another length than the one asked for is an error
+    /// ([`PackError::InvalidLength`]), as empty `bytes` are for every
+    /// length but 0.
+    ///
+    /// A slab holds two runs or more: [`Column`](crate::Column) panics
+    /// when asked for fewer, and here that is a `requires`. The fill
+    /// value need not live as long as `bytes` do, nor `bytes` as long as
+    /// it: the column owns what it holds.
+    pub fn load_with<'a, F: MaybeFill<Get<'a, V>>>(bytes: &[u8], opts: LoadOpts<F>) -> (r: Result<Self, PackError>)
+        requires
+            opts.max_segments() >= 2,
+        ensures
+            match fill_of(bytes@, opts.length(), opts.fill().value()) {
+                Some((len, v)) => r matches Ok(c) && c@ == Seq::new(len as nat, |_i: int| v.sv()),
+                None => {
+                    &&& r matches Ok(c) ==> {
+                        &&& Self::valid(bytes@)
+                        &&& c@ == Self::values(bytes@)
+                        &&& opts.length() matches Some(len) ==> c@.len() == len
+                    }
+                    &&& Self::loadable(bytes@) && (opts.length() matches Some(len) ==> Self::values(bytes@).len() == len)
+                        ==> r is Ok
+                },
+            },
+    {
+        let (length, fill, max_segments) = opts.parts();
+        if bytes.len() == 0 {
+            if let Some(len) = length {
+                if len as u64 <= i64::MAX as u64 && len <= usize::MAX - 3 {
+                    if let Some(v) = fill.fill_value() {
+                        return Ok(Self::filled(len, v, max_segments));
+                    }
+                }
+            }
+        }
+        proof {
+            <Held<V, C> as VGet>::lemma_svs(<V::E as Model<V::X>>::values(bytes@));
+        }
+        match <V::E as Model<V::X>>::load(bytes, max_segments, length) {
             Ok(core) => Ok(VerifiedColumn { core }),
             Err(e) => Err(e),
         }

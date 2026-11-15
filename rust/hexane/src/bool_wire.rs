@@ -2584,7 +2584,7 @@ impl<'a, C: CountsOf> Decode for BoolDecoder<'a, C> {
 }
 
 /// The empty slab is valid, with no values.
-proof fn lemma_empty_valid<K: CountOps>()
+pub(crate) proof fn lemma_empty_valid<K: CountOps>()
     ensures
         bool_valid::<K>(Seq::<u8>::empty()),
         bool_values::<K>(Seq::<u8>::empty()) == Seq::<bool>::empty(),

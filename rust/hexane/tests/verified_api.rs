@@ -9,7 +9,10 @@
 //! no proof does.
 
 use hexane::verified::{refused, Get, VNewtype, VValue, VerifiedColumn};
-use hexane::{Codec, Column, ColumnValue, ColumnValueRef, PackError, RleEncoding, RleValue, Run};
+use hexane::{
+    Codec, Column, ColumnValue, ColumnValueRef, LoadOpts, MaybeFill, NoFill, PackError,
+    RleEncoding, RleValue, Run,
+};
 use std::fmt::Debug;
 use std::num::NonZeroU32;
 
@@ -1406,4 +1409,348 @@ fn loads_of_another_types_bytes() {
             cross::<Option<Vec<u8>>>(bytes);
         }
     }
+}
+
+/// A load with options, by both APIs: the length asked for, a fill value,
+/// the most runs of a slab. They give the same column, in the same slabs,
+/// or refuse with the same error. The column's values, or the error.
+fn load_both_with<T: Kind>(
+    bytes: &[u8],
+    length: Option<usize>,
+    fill: Option<&T>,
+    max_segments: Option<usize>,
+) -> Result<(VerifiedColumn<T>, Column<T>), PackError> {
+    let opts = || {
+        let mut opts = LoadOpts::new();
+        if let Some(n) = length {
+            opts = opts.with_length(n);
+        }
+        if let Some(n) = max_segments {
+            opts = opts.with_max_segments(n);
+        }
+        opts
+    };
+    let (v, c) = match fill {
+        Some(x) => (
+            VerifiedColumn::<T>::load_with(bytes, opts().with_fill(x.lend())),
+            Column::<T>::load_with(bytes, opts().with_fill(x.as_column_ref())),
+        ),
+        None => (
+            VerifiedColumn::<T>::load_with(bytes, opts()),
+            Column::<T>::load_with(bytes, opts()),
+        ),
+    };
+    match (v, c) {
+        (Ok(v), Ok(c)) => {
+            assert_eq!(v.len(), c.len());
+            assert_eq!(v.slab_count(), c.slab_count());
+            assert_eq!(v.save(), c.save());
+            Ok((v, c))
+        }
+        (Err(v), Err(c)) => {
+            assert_eq!(
+                v.to_string(),
+                c.to_string(),
+                "the loaders refuse {bytes:?} differently"
+            );
+            Err(v)
+        }
+        (v, c) => panic!(
+            "the loaders disagree on {bytes:?} ({length:?}, {fill:?}, {max_segments:?}): {:?}, {:?}",
+            v.map(|v| v.len()),
+            c.map(|c| c.len())
+        ),
+    }
+}
+
+/// A saved column loaded with options. It loads with its own length asked
+/// for, or none, and with no other; a fill value is of no use to it unless
+/// it is empty; and it has the same values whatever a slab may hold. What
+/// is loaded is edited like any other column.
+fn load_options<T: Kind>() {
+    let mut rng = Rng(0x10ad);
+    let x = T::fresh(&mut rng);
+    let models: Vec<Vec<T>> = vec![
+        vec![],
+        vec![x.clone()],
+        vec![x.clone(); 1000],
+        rng.values(300),
+        (0..2000).map(|_| T::fresh(&mut rng)).collect(),
+    ];
+    for model in models {
+        let len = model.len();
+        let bytes = both(&model).0.save();
+        assert_eq!(bytes.is_empty(), model.is_empty());
+        let lengths = [
+            None,
+            Some(len),
+            Some(len + 1),
+            Some(len.saturating_sub(1)),
+            Some(0),
+            Some(7),
+            Some(usize::MAX),
+        ];
+        for length in lengths {
+            for fill in [None, Some(&x)] {
+                for max_segments in [None, Some(2), Some(3), Some(16), Some(1000)] {
+                    let r = load_both_with(&bytes, length, fill, max_segments);
+                    // what the options ask for
+                    let want = match (length, fill) {
+                        (Some(n), Some(x)) if len == 0 && n <= 1000 => Ok(vec![x.clone(); n]),
+                        (Some(n), _) if n != len => Err((len, n)),
+                        _ => Ok(model.clone()),
+                    };
+                    match (r, want) {
+                        (Ok((mut v, mut c)), Ok(want)) => {
+                            check(&v, &c, &want);
+                            // and is edited as a column made of the values is
+                            let mut m = want;
+                            let at = rng.below(m.len() + 1);
+                            let ins: Vec<T> = rng.values(20);
+                            v.splice(at, 0, &lent(&ins));
+                            c.splice(at, 0, ins.iter().cloned());
+                            m.splice(at..at, ins);
+                            check(&v, &c, &m);
+                        }
+                        (Err(e), Err((has, asked))) => {
+                            assert!(
+                                matches!(e, PackError::InvalidLength(a, b) if a == has && b == asked),
+                                "{e}"
+                            );
+                        }
+                        (r, want) => panic!(
+                            "{length:?}, {max_segments:?}: loaded {:?}, not {:?}",
+                            r.map(|(v, _)| v.len()),
+                            want.map(|m| m.len())
+                        ),
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn loads_with_options_agree() {
+    for_each_kind!(load_options);
+}
+
+/// No bytes, a length and a fill value: the column `fill` makes, in both
+/// APIs, for the lengths around a slab's.
+fn load_fills<T: Kind>() {
+    let mut rng = Rng(0xf1110ad);
+    for n in [0, 1, 2, 3, 63, 64, 65, 1000] {
+        let x = T::fresh(&mut rng);
+        for max_segments in [None, Some(2), Some(64)] {
+            let (v, c) = load_both_with(&[], Some(n), Some(&x), max_segments).unwrap();
+            let model = vec![x.clone(); n];
+            check(&v, &c, &model);
+            assert!(v.is_only(x.lend()));
+            assert_eq!(v.save(), VerifiedColumn::<T>::fill(n, x.lend()).save());
+            check_loads(&v, &c, &model);
+        }
+        // a fill value and no length fills nothing
+        let (v, c) = load_both_with(&[], None, Some(&x), None).unwrap();
+        check(&v, &c, &[]);
+    }
+}
+
+#[test]
+fn loads_of_a_fill_agree() {
+    for_each_kind!(load_fills);
+}
+
+/// The longest fill, and longer ones. A fill is one run in one column, so
+/// it is at most `i64::MAX` values and at most `usize::MAX - 3`, whichever
+/// is less on the target: that many load, in both APIs, and one more is an
+/// error and no panic. (No `catch_unwind` here: wasm32 aborts on a panic,
+/// which would end this test binary.)
+#[test]
+fn a_fill_too_long_is_an_error() {
+    let most = (i64::MAX as u64).min((usize::MAX - 3) as u64) as usize;
+    fn longest<T: Kind>(most: usize, x: T) {
+        let (v, _) = load_both_with(&[], Some(most), Some(&x), None).unwrap();
+        assert_eq!(v.len(), most);
+        assert_eq!(v.get(most - 1).map(T::keep), Some(x.clone()));
+        assert!(v.get(most).is_none());
+        assert!(v.is_only(x.lend()));
+        for n in [most + 1, most + 2, usize::MAX - 1, usize::MAX] {
+            for max_segments in [None, Some(2)] {
+                let e = load_both_with(&[], Some(n), Some(&x), max_segments)
+                    .err()
+                    .unwrap();
+                assert!(matches!(e, PackError::InvalidLength(0, m) if m == n), "{e}");
+            }
+        }
+    }
+    longest::<u64>(most, 7);
+    longest::<Option<i64>>(most, None);
+    longest::<Option<i64>>(most, Some(-1));
+    longest::<bool>(most, true);
+    longest::<bool>(most, false);
+    longest::<Action>(most, Action::Delete);
+    longest::<Vec<u8>>(most, b"ab".to_vec());
+    longest::<Option<Vec<u8>>>(most, None);
+}
+
+/// Bytes at random and saved columns with a byte changed, loaded with a
+/// length asked for and a fill value: the two loaders take the same ones,
+/// as the same values. Both kinds are seen.
+fn fuzz_loads_with<T: Kind>() {
+    let mut rng = Rng(0x5eed0f);
+    let (mut took, mut refused) = (0, 0);
+    for round in 0..3_000 {
+        let model: Vec<T> = rng.values(12);
+        let mut bytes = both(&model).0.save();
+        if round % 2 == 0 && !bytes.is_empty() {
+            let at = rng.below(bytes.len());
+            match rng.below(3) {
+                0 => bytes[at] ^= 1 << rng.below(8),
+                1 => {
+                    bytes.remove(at);
+                }
+                _ => bytes.insert(at, rng.next() as u8),
+            }
+        }
+        let length = match rng.below(4) {
+            0 => None,
+            1 => Some(rng.below(14)),
+            _ => Some(model.len()),
+        };
+        let x = T::fresh(&mut rng);
+        let fill = (rng.below(2) == 0).then_some(&x);
+        let max_segments = [None, Some(2), Some(5)][rng.below(3)];
+        match load_both_with(&bytes, length, fill, max_segments) {
+            Ok((v, c)) => {
+                // a changed byte can make a run of billions: read those
+                // in places
+                if v.len() <= 100_000 {
+                    assert_eq!(new_values(&v), old_values(&c));
+                } else {
+                    for i in [0, 1, v.len() / 2, v.len() - 1] {
+                        assert_eq!(v.get(i).map(T::keep), c.get(i).map(old));
+                    }
+                }
+                if let Some(n) = length {
+                    assert_eq!(v.len(), n);
+                }
+                took += 1;
+            }
+            Err(_) => refused += 1,
+        }
+    }
+    assert!(
+        took > 100 && refused > 100,
+        "{took} taken, {refused} refused"
+    );
+}
+
+#[test]
+fn loads_with_options_refuse_the_same_bytes() {
+    for_each_kind!(fuzz_loads_with);
+}
+
+/// `MaybeFill` is a public trait, which a client's type can implement.
+/// It has a specification now, for Verus; a client compiled without Verus
+/// writes what it wrote before, the one method.
+#[test]
+fn a_fill_state_of_a_clients_own() {
+    struct Seven;
+    impl MaybeFill<u64> for Seven {
+        fn fill_value(self) -> Option<u64> {
+            Some(7)
+        }
+    }
+    assert_eq!(Seven.fill_value(), Some(7));
+    assert_eq!(MaybeFill::<u64>::fill_value(NoFill), None);
+    let opts = LoadOpts::default().with_length(2).with_fill(7u64);
+    let twice = [opts, opts].map(|o| VerifiedColumn::<u64>::load_with(&[], o).unwrap());
+    assert_eq!(twice[0].to_vec(), [7, 7]);
+    assert_eq!(twice[1].to_vec(), [7, 7]);
+}
+
+/// Bytes that hold more values than a column can. A column holds
+/// `usize::MAX - 3` values, and bytes of that many load, in both APIs;
+/// bytes of one more are an error, and so are bytes of more than a
+/// `usize` counts, whatever the options: no load panics. (That is not
+/// proved. No `catch_unwind` here either, for wasm32.)
+#[test]
+fn bytes_of_too_many_values_are_an_error() {
+    fn uleb(mut n: u128) -> Vec<u8> {
+        let mut out = vec![];
+        loop {
+            let b = (n & 0x7f) as u8;
+            n >>= 7;
+            if n == 0 {
+                out.push(b);
+                return out;
+            }
+            out.push(b | 0x80);
+        }
+    }
+    // the count of a run of equal numbers has a sign
+    fn sleb(n: i64) -> Vec<u8> {
+        let mut out = uleb(n as u128);
+        if out.last().unwrap() & 0x40 != 0 {
+            *out.last_mut().unwrap() |= 0x80;
+            out.push(0);
+        }
+        out
+    }
+    // `total` numbers in runs of 7s and 8s, each as long as a run can be
+    // (a run of one is no run), and the last of them
+    fn numbers(total: u128) -> (Vec<u8>, u64) {
+        let (mut bytes, mut left, mut value) = (vec![], total, 8u8);
+        while left > 0 {
+            let mut n = left.min(i64::MAX as u128);
+            if left - n == 1 {
+                n -= 1;
+            }
+            value ^= 15;
+            bytes.extend(sleb(n as i64));
+            bytes.push(value);
+            left -= n;
+        }
+        (bytes, value as u64)
+    }
+    fn case<T: Kind>(bytes: &[u8], total: u128, first: T, last: T) {
+        let most = usize::MAX - 3;
+        for length in [None, Some(most), Some(usize::MAX), Some(0)] {
+            for fill in [None, Some(&first)] {
+                let r = load_both_with(bytes, length, fill, None);
+                let fits = total <= most as u128 && length.is_none_or(|n| n as u128 == total);
+                match r {
+                    Ok((v, _)) => {
+                        assert!(fits, "loaded {total} values, asked for {length:?}");
+                        assert_eq!(v.len() as u128, total);
+                        assert_eq!(v.get(0).map(T::keep), Some(first.clone()));
+                        assert_eq!(v.get(v.len() - 1).map(T::keep), Some(last.clone()));
+                    }
+                    Err(e) => {
+                        // (of the length, or of a count past a `usize`)
+                        assert!(!fits, "{total} values: {e}");
+                    }
+                }
+            }
+        }
+    }
+    let most = (usize::MAX - 3) as u128;
+    let totals = [most, most + 1, most + 3, most + 4, most * 3];
+    for total in totals {
+        let (bytes, last) = numbers(total);
+        case::<u64>(&bytes, total, 7, last);
+        case::<Option<u64>>(&bytes, total, Some(7), Some(last));
+        // nulls, and `bool`s, are counted with no sign
+        if total <= u64::MAX as u128 {
+            let mut nulls = vec![0];
+            nulls.extend(uleb(total));
+            case::<Option<u64>>(&nulls, total, None, None);
+            case::<Option<Vec<u8>>>(&nulls, total, None, None);
+            case::<bool>(&nulls, total, true, true);
+        }
+    }
+    // two runs of `bool`s, of more than a `usize` counts together
+    let mut bools = uleb(most);
+    bools.extend(uleb(most));
+    case::<bool>(&bools, 2 * most, false, true);
 }
