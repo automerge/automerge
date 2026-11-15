@@ -3767,11 +3767,20 @@ impl<A: SlabAggregate> SlabBTree<A> {
         requires sum_len(aggs@) <= usize::MAX,
         ensures t.wf(), t@ == aggs@,
     {
-        let mut t = Self::new();
-        if aggs.len() == 0 {
-            proof { assert(aggs@ =~= t@); }
+        if aggs.len() <= B {
+            // One leaf, which is the root: nothing to cut nor to group.
+            let n = aggs.len();
+            let ghost leaf = Leaf { aggs: aggs };
+            let mut nodes = Vec::with_capacity(8);
+            nodes.push(Some(Node::Leaf(Leaf { aggs })));
+            let t = Self { nodes, free: Vec::new(), root: 0, total_slabs: n, _phantom: PhantomData };
+            proof {
+                t.lemma_wf_leaf(0, 0, leaf);
+                t.lemma_height_unique(t.root, 0, t.height());
+            }
             return t;
         }
+        let mut t = Self::new();
         let ghost all = aggs@;
         let n = aggs.len();
         let root = t.root;
@@ -6498,6 +6507,19 @@ mod tests {
             let got: Vec<_> = t.find_by_value(target).collect();
             let want = reference_find_by_value(&aggs, target);
             assert_eq!(got, want, "target={target}");
+        }
+    }
+
+    /// A tree made of a vector keeps what no proof states: no node over
+    /// `B`, and no slot of the arena that is neither in use nor free. At
+    /// the sizes around one leaf and around one level.
+    #[test]
+    fn from_vec_keeps_the_layout() {
+        for n in [0, 1, 2, B - 1, B, B + 1, 2 * B, 2 * B + 1, B * B, B * B + 1] {
+            let t = SlabBTree::<usize>::from_vec(vec![3usize; n]);
+            t.check_invariants();
+            assert_eq!(t.len(), n, "n={n}");
+            assert_eq!(t.root_agg(), 3 * n, "n={n}");
         }
     }
 
