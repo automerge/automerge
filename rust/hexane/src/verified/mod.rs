@@ -54,6 +54,14 @@
 //!
 //! * [`splice`](VerifiedColumn::splice) leaves the values before `at`,
 //!   the values given, then the values from `at + del`;
+//! * [`splice_iter`](VerifiedColumn::splice_iter) does so with the values
+//!   an iterator gives, and [`splice_runs`](VerifiedColumn::splice_runs)
+//!   with runs, each a value and how many times to repeat it (their
+//!   values are `run_values`). `extend` appends what an iterator gives,
+//!   and `collect()` makes a column of it;
+//! * [`from_values`](VerifiedColumn::from_values) gives a column of the
+//!   values of a slice, and [`fill`](VerifiedColumn::fill) one of a value
+//!   repeated;
 //! * [`remove_n`](VerifiedColumn::remove_n),
 //!   [`truncate`](VerifiedColumn::truncate) and
 //!   [`clear`](VerifiedColumn::clear) leave the values a `splice` that
@@ -82,9 +90,20 @@
 //! `valid`, `values`, `encoding` and `loadable` are specification
 //! functions of a column type (`VerifiedColumn::<V>::valid(bytes)`),
 //! `size_bound` is one of a value type (for byte strings it counts their
-//! bytes, as `total_len` of them), `only` is one of this module, and
-//! `lemma_save_unique` and `lemma_encoding` are lemmas: they exist only
-//! for Verus, and a normal build compiles them away.
+//! bytes, as `total_len` of them), `only` and `run_values` are of this
+//! module, and `lemma_save_unique`, `lemma_encoding`,
+//! `lemma_run_values_push` and `lemma_run_values_add` are lemmas: they
+//! exist only for Verus, and a normal build compiles them away.
+//!
+//! What a method does with an iterator is stated as Verus states what
+//! the standard library does with one: of the values the iterator is to
+//! give (`remaining()`), for an iterator that keeps to Verus's laws of
+//! iterators (`obeys_prophetic_iter_laws`: what `next` returns is the
+//! first of what remains, and `None` when nothing does). Of an iterator
+//! that does not, a method promises nothing but that the column is still
+//! a column. What a client's iterator is to give, the client proves from
+//! the specification of that iterator: of a `Vec` handed over, that it
+//! gives the vector's items.
 //!
 //! The specifications say what a saved column is in their own terms.
 //! That those are the bytes of [`Column`](crate::Column) for the same
@@ -111,16 +130,24 @@
 //! its bytes, and the copy of a slice into a `Vec`. `clone` leans on
 //! those of the clones it is made of: that a clone of a `Vec` is as long
 //! and holds a clone of each item, that a clone of an `Option` is one of
-//! what it holds, and that a clone of an integer is that integer. Of
-//! this crate,
-//! the functions Verus is told to take as they are, which are few and
-//! small, and are those the verified core of [`Column`](crate::Column)
-//! has too:
+//! what it holds, and that a clone of an integer is that integer. The
+//! methods that take an iterator lean on those of iterators: what `next`
+//! returns, and what `IntoIterator` and `FromIterator` are. Of `Extend`
+//! Verus has none, and this crate tells it that the trait has its one
+//! method (`ExExtend`), which assumes nothing of an implementation.
+//!
+//! Of this crate, the functions Verus is told to take as they are, which
+//! are few and small, and are those the verified core of
+//! [`Column`](crate::Column) has too:
 //!
 //! * the helpers that panic, which say why and do nothing else. A method
 //!   panics where a column would outgrow what its arithmetic can count
-//!   (some `usize::MAX` values, or a slab of 4 GiB), and, like every Rust
-//!   function, a method of this API may run out of memory;
+//!   (some `usize::MAX` values, or a slab of 4 GiB) or what the format
+//!   can write (a run of more than `i64::MAX` equal values that are
+//!   neither nulls nor `bool`s, which
+//!   [`splice_runs`](VerifiedColumn::splice_runs) can ask for in one
+//!   call), and, like every Rust function, a method of this API may run
+//!   out of memory;
 //! * the constructors of [`PackError`], of which nothing is assumed
 //!   ([`refused`] is the one for a client's type);
 //! * two specifications of standard-library calls that Verus has none
@@ -139,13 +166,22 @@
 //! client that is compiled without Verus has that to keep by itself, as
 //! it has every `requires` of this API.
 //!
-//! That a [`splice`](VerifiedColumn::splice) returns is not proved: it
-//! runs the core's loop over the values to insert, which Verus is not
-//! asked to show ends. (It ends when the slice does.) Every other loop
-//! is proved to end.
+//! That a splice returns is not proved: it runs the core's loop over the
+//! values to insert, which Verus is not asked to show ends. It ends when
+//! the slice does, or the iterator: with an iterator that never ends,
+//! [`splice_iter`](VerifiedColumn::splice_iter),
+//! [`splice_runs`](VerifiedColumn::splice_runs), `extend` and `collect()`
+//! do not return (they run until memory is out, or a column's length is
+//! more than it can count, which panics). Every other loop is proved to
+//! end.
 
-// Verus proofs read more plainly with `x = x + n`.
-#![allow(clippy::len_zero, clippy::assign_op_pattern)]
+// Verus proofs read more plainly with `x = x + n`, and Verus has no
+// spec for `vec![x]`.
+#![allow(
+    clippy::len_zero,
+    clippy::assign_op_pattern,
+    clippy::vec_init_then_push
+)]
 
 pub(crate) mod bytes;
 #[cfg(verus_keep_ghost)]
@@ -166,7 +202,7 @@ use crate::bool_wire::BoolReads;
 use crate::column::Slab;
 use crate::copy::NoRuns;
 #[cfg(verus_keep_ghost)]
-use crate::cursor::{lemma_lens_ok, lemma_vals_own, slab_lens};
+use crate::cursor::{lemma_lens_ok, lemma_vals_own, lemma_vals_unit, slab_lens};
 use crate::cursor::{ReadsAgree, RunFeed, Slabs};
 #[cfg(verus_keep_ghost)]
 use crate::fenwick::sum;
@@ -177,7 +213,7 @@ use crate::iter_core::{Decode, Decoders, ICore};
 use crate::rle::dec::slab_values;
 use crate::rle::dec::RleReads;
 use crate::rle::edit::RleModel;
-use crate::{Leb128, PackError};
+use crate::{Leb128, PackError, Run};
 use counts::VB;
 use model::{Core, Model};
 use std::marker::PhantomData;
@@ -187,6 +223,8 @@ use value::{lemma_opt_sizes, lemma_plain_sizes};
 use value::{VOps, VOptOps, VOptWrite, VWrite};
 #[allow(unused_imports)]
 use vstd::prelude::*;
+#[cfg(verus_keep_ghost)]
+use vstd::std_specs::iter::{FromIteratorSpecImpl, IteratorSpec};
 
 mod seal {
     use super::model::Model;
@@ -725,6 +763,223 @@ impl<'a, 'v, V: VValue<C>, C: VCodec> RunFeed<V::E> for SliceFeed<'a, 'v, V, C> 
     }
 }
 
+/// The values a splice inserts, from a caller's iterator: each a run of
+/// one.
+#[verifier::reject_recursive_types(C)]
+struct IterFeed<'v, V: VValue<C>, C: VCodec, I: Iterator<Item = Get<'v, V>>> {
+    it: I,
+    /// the iterator as it was handed over
+    #[allow(dead_code)]
+    init: Ghost<I>,
+    /// what it has given since
+    #[allow(dead_code)]
+    given: Ghost<Seq<Get<'v, V>>>,
+    /// it has said that it has no more
+    #[allow(dead_code)]
+    ended: Ghost<bool>,
+    _c: PhantomData<C>,
+}
+
+impl<'v, V: VValue<C>, C: VCodec, I: Iterator<Item = Get<'v, V>>> RunFeed<V::E> for IterFeed<'v, V, C, I> {
+    type X = <V::E as ReadsAgree<'v, V::X>>::Ins;
+
+    /// The iterator as it was handed over: a feed keeps that.
+    type K = I;
+
+    /// Where the iterator keeps to what Verus asks of one, what it has
+    /// given and what it is yet to give are together what it was to give
+    /// when it was handed over.
+    #[verifier::prophetic]
+    closed spec fn inv(&self) -> bool {
+        &&& self.it.obeys_prophetic_iter_laws() == self.init@.obeys_prophetic_iter_laws()
+        &&& self.it.obeys_prophetic_iter_laws() ==> {
+            &&& self.given@ + self.it.remaining() == self.init@.remaining()
+            &&& self.ended@ ==> self.it.remaining().len() == 0
+        }
+    }
+
+    closed spec fn key(&self) -> I {
+        self.init@
+    }
+
+    closed spec fn given(&self) -> Seq<Held<V, C>> {
+        held::<V, C>(self.given@)
+    }
+
+    closed spec fn ended(&self) -> bool {
+        self.ended@
+    }
+
+    #[inline(always)]
+    fn next_run(&mut self) -> (r: Option<(<V::E as ReadsAgree<'v, V::X>>::Ins, usize)>) {
+        let ghost before = self.given@;
+        let ghost rem = self.it.remaining();
+        match self.it.next() {
+            Some(v) => {
+                proof {
+                    let own = <V::E as ReadsAgree<'v, V::X>>::own(v);
+                    self.given@ = before.push(v);
+                    assert(held::<V, C>(before.push(v)) =~= held::<V, C>(before) + Seq::new(1, |_i: int| own));
+                    if self.it.obeys_prophetic_iter_laws() {
+                        assert(self.given@ + self.it.remaining() =~= before + rem);
+                    }
+                }
+                Some((<V::E as ReadsAgree<'v, V::X>>::ins(v), 1))
+            },
+            None => {
+                proof {
+                    self.ended@ = true;
+                }
+                None
+            },
+        }
+    }
+}
+
+/// The values of the runs `rs`, as a column holds them: each run's value
+/// as many times as its count says, the runs in order. A run of count 0
+/// is no value.
+pub open spec fn run_values<G: VGet>(rs: Seq<Run<G>>) -> Seq<G::S>
+    decreases rs.len(),
+{
+    if rs.len() == 0 {
+        Seq::empty()
+    } else {
+        run_values(rs.drop_last()) + Seq::new(rs.last().count as nat, |_i: int| rs.last().value.sv())
+    }
+}
+
+/// The values of runs and one more run.
+pub proof fn lemma_run_values_push<G: VGet>(rs: Seq<Run<G>>, r: Run<G>)
+    ensures
+        run_values(rs.push(r)) == run_values(rs) + Seq::new(r.count as nat, |_i: int| r.value.sv()),
+{
+    assert(rs.push(r).drop_last() =~= rs);
+}
+
+/// The values of runs one after another.
+pub proof fn lemma_run_values_add<G: VGet>(a: Seq<Run<G>>, b: Seq<Run<G>>)
+    ensures
+        run_values(a + b) == run_values(a) + run_values(b),
+    decreases b.len(),
+{
+    if b.len() == 0 {
+        assert(a + b =~= a);
+        assert(run_values(a) + run_values(b) =~= run_values(a));
+    } else {
+        lemma_run_values_add(a, b.drop_last());
+        assert((a + b).drop_last() =~= a + b.drop_last());
+        let run = Seq::new(b.last().count as nat, |_i: int| b.last().value.sv());
+        assert(run_values(a) + run_values(b.drop_last()) + run =~= run_values(a) + (run_values(b.drop_last()) + run));
+    }
+}
+
+/// The values of the runs `rs`, given to a column of `V`, as it holds
+/// them.
+spec fn held_runs<'v, V: seal::Sealed<C>, C>(rs: Seq<Run<Get<'v, V>>>) -> Seq<Held<V, C>>
+    decreases rs.len(),
+{
+    if rs.len() == 0 {
+        Seq::empty()
+    } else {
+        held_runs::<V, C>(rs.drop_last()) + Seq::new(
+            rs.last().count as nat,
+            |_i: int| <V::E as ReadsAgree<'v, V::X>>::own(rs.last().value),
+        )
+    }
+}
+
+/// What a column holds for the runs given are, in a specification, the
+/// runs' values.
+proof fn lemma_held_runs<'v, V: VValue<C>, C: VCodec>(rs: Seq<Run<Get<'v, V>>>)
+    ensures
+        <Held<V, C> as VGet>::svs(held_runs::<V, C>(rs)) == run_values(rs),
+    decreases rs.len(),
+{
+    if rs.len() == 0 {
+        lemma_svs_none::<Held<V, C>>();
+    } else {
+        let r = rs.last();
+        let before = held_runs::<V, C>(rs.drop_last());
+        let own = <V::E as ReadsAgree<'v, V::X>>::own(r.value);
+        let run = Seq::new(r.count as nat, |_i: int| own);
+        lemma_held_runs::<V, C>(rs.drop_last());
+        lemma_svs_add(before, run);
+        <Held<V, C> as VGet>::lemma_svs(run);
+        V::lemma_own(r.value);
+        assert(<Held<V, C> as VGet>::svs(run) =~= Seq::new(r.count as nat, |_i: int| r.value.sv()));
+    }
+}
+
+/// The values a splice inserts, from a caller's iterator of runs.
+#[verifier::reject_recursive_types(C)]
+struct RunsFeed<'v, V: VValue<C>, C: VCodec, I: Iterator<Item = Run<Get<'v, V>>>> {
+    it: I,
+    /// the iterator as it was handed over
+    #[allow(dead_code)]
+    init: Ghost<I>,
+    /// what it has given since
+    #[allow(dead_code)]
+    given: Ghost<Seq<Run<Get<'v, V>>>>,
+    /// it has said that it has no more
+    #[allow(dead_code)]
+    ended: Ghost<bool>,
+    _c: PhantomData<C>,
+}
+
+impl<'v, V: VValue<C>, C: VCodec, I: Iterator<Item = Run<Get<'v, V>>>> RunFeed<V::E> for RunsFeed<'v, V, C, I> {
+    type X = <V::E as ReadsAgree<'v, V::X>>::Ins;
+
+    /// The iterator as it was handed over: a feed keeps that.
+    type K = I;
+
+    /// As [`IterFeed`]'s, of runs.
+    #[verifier::prophetic]
+    closed spec fn inv(&self) -> bool {
+        &&& self.it.obeys_prophetic_iter_laws() == self.init@.obeys_prophetic_iter_laws()
+        &&& self.it.obeys_prophetic_iter_laws() ==> {
+            &&& self.given@ + self.it.remaining() == self.init@.remaining()
+            &&& self.ended@ ==> self.it.remaining().len() == 0
+        }
+    }
+
+    closed spec fn key(&self) -> I {
+        self.init@
+    }
+
+    closed spec fn given(&self) -> Seq<Held<V, C>> {
+        held_runs::<V, C>(self.given@)
+    }
+
+    closed spec fn ended(&self) -> bool {
+        self.ended@
+    }
+
+    #[inline(always)]
+    fn next_run(&mut self) -> (r: Option<(<V::E as ReadsAgree<'v, V::X>>::Ins, usize)>) {
+        let ghost before = self.given@;
+        let ghost rem = self.it.remaining();
+        match self.it.next() {
+            Some(run) => {
+                proof {
+                    self.given@ = before.push(run);
+                    assert(before.push(run).drop_last() =~= before);
+                    if self.it.obeys_prophetic_iter_laws() {
+                        assert(self.given@ + self.it.remaining() =~= before + rem);
+                    }
+                }
+                Some((<V::E as ReadsAgree<'v, V::X>>::ins(run.value), run.count))
+            },
+            None => {
+                proof {
+                    self.ended@ = true;
+                }
+                None
+            },
+        }
+    }
+}
+
 /// What a splice of a slice's values leaves, as a client has it.
 proof fn lemma_spliced<'v, V: VValue<C>, C: VCodec>(
     a: Seq<Held<V, C>>,
@@ -814,6 +1069,73 @@ impl<V: VValue<C>, C: VCodec> Clone for VerifiedColumn<V, C> {
     }
 }
 
+/// What Verus is told of the standard library's `Extend`: that it is a
+/// trait with this method. Of an implementation it assumes nothing: what
+/// [`VerifiedColumn`]'s does is stated there, and proved. (Verus's
+/// library specifies `IntoIterator` and `FromIterator`, and not this
+/// trait.)
+#[verifier::external_trait_specification]
+#[doc(hidden)]
+pub trait ExExtend<A> {
+    type ExternalTraitSpecificationFor: core::iter::Extend<A>;
+
+    fn extend<T>(&mut self, iter: T) where T: IntoIterator<Item = A>;
+}
+
+impl<'v, V: VValue<C>, C: VCodec> Extend<Get<'v, V>> for VerifiedColumn<V, C> {
+    /// Append the values that `iter` gives: what
+    /// [`splice_iter`](VerifiedColumn::splice_iter) does at the column's
+    /// end, and specified as that is.
+    fn extend<I: IntoIterator<Item = Get<'v, V>>>(&mut self, iter: I)
+        ensures
+            exists|it: I::IntoIter| #[trigger]
+                (I::into_iter).ensures((iter,), it) && (it.obeys_prophetic_iter_laws() ==> final(self)@ == old(
+                    self,
+                )@ + VGet::svs(it.remaining())),
+    {
+        let len = self.len();
+        self.splice_iter(len, 0, iter);
+        proof {
+            let it = choose|it: I::IntoIter| #[trigger]
+                (I::into_iter).ensures((iter,), it) && (it.obeys_prophetic_iter_laws() ==> self@ == old(self)@.take(
+                    len as int,
+                ) + VGet::svs(it.remaining()) + old(self)@.skip(len + 0));
+            let vs = <Get<'v, V> as VGet>::svs(it.remaining());
+            assert(old(self)@.take(len as int) + vs + old(self)@.skip(len + 0) =~= old(self)@ + vs);
+        }
+    }
+}
+
+#[cfg(verus_keep_ghost)]
+impl<'v, V: VValue<C>, C: VCodec> FromIteratorSpecImpl<Get<'v, V>> for VerifiedColumn<V, C> {
+    /// A column collected from an iterator holds the values that the
+    /// iterator was to give.
+    open spec fn from_iter_ensures(remaining: Seq<Get<'v, V>>, will_return_none: bool, s: Self) -> bool {
+        s@ == <Get<'v, V> as VGet>::svs(remaining)
+    }
+}
+
+impl<'v, V: VValue<C>, C: VCodec> FromIterator<Get<'v, V>> for VerifiedColumn<V, C> {
+    /// A column of the values that `iter` gives, which is what
+    /// `collect()` returns. Verus's specification of `FromIterator`
+    /// states it for an iterator that keeps to what Verus asks of every
+    /// iterator: the column then holds the values the iterator was to
+    /// give (`from_iter_ensures`).
+    fn from_iter<I: IntoIterator<Item = Get<'v, V>>>(iter: I) -> (s: Self) {
+        let mut s = Self::new();
+        s.splice_iter(0, 0, iter);
+        proof {
+            let it = choose|it: I::IntoIter| #[trigger]
+                (I::into_iter).ensures((iter,), it) && (it.obeys_prophetic_iter_laws() ==> s@ == Seq::<
+                    V::S,
+                >::empty().take(0) + VGet::svs(it.remaining()) + Seq::<V::S>::empty().skip(0));
+            let vs = <Get<'v, V> as VGet>::svs(it.remaining());
+            assert(Seq::<V::S>::empty().take(0) + vs + Seq::<V::S>::empty().skip(0) =~= vs);
+        }
+        s
+    }
+}
+
 // The saved form
 impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
     /// `d` is a saved column: the canonical encoding of some values.
@@ -891,6 +1213,68 @@ impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
         VerifiedColumn { core }
     }
 
+    /// A column of `values`.
+    pub fn from_values(values: &[Get<'_, V>]) -> (r: Self)
+        ensures
+            r@ == VGet::svs(values@),
+    {
+        Self::from_values_with_max_segments(values, MAX_SEG)
+    }
+
+    /// A column of `values` whose slabs hold at most `max_segments` runs
+    /// each.
+    pub fn from_values_with_max_segments(values: &[Get<'_, V>], max_segments: usize) -> (r: Self)
+        requires
+            max_segments >= 2,
+        ensures
+            r@ == VGet::svs(values@),
+    {
+        let mut r = Self::with_max_segments(max_segments);
+        r.splice(0, 0, values);
+        proof {
+            let vs = VGet::svs(values@);
+            assert(Seq::<V::S>::empty().take(0) + vs + Seq::<V::S>::empty().skip(0) =~= vs);
+        }
+        r
+    }
+
+    /// A column of `len` copies of `value`.
+    ///
+    /// The length is one that a column's run can count, and a `usize`
+    /// with three to spare (which says more only where a `usize` has 32
+    /// bits).
+    pub fn fill(len: usize, value: Get<'_, V>) -> (r: Self)
+        requires
+            len <= i64::MAX,
+            len <= usize::MAX - 3,
+        ensures
+            r@ == Seq::new(len as nat, |_i: int| value.sv()),
+    {
+        if len == 0 {
+            let r = Self::new();
+            proof {
+                assert(r@ =~= Seq::new(len as nat, |_i: int| value.sv()));
+            }
+            return r;
+        }
+        let slab = <V::E as Model<V::X>>::fill(len, value);
+        let ghost s = slab;
+        let mut slabs = Vec::with_capacity(1);
+        slabs.push(slab);
+        proof {
+            assert(slabs@ =~= seq![s]);
+            lemma_vals_unit::<V::E>(s);
+        }
+        let core = Core::<V::E>::from_cut(slabs, MAX_SEG);
+        proof {
+            let vs = Seq::new(len as nat, |_i: int| value.sv());
+            <Held<V, C> as VGet>::lemma_svs(core@);
+            V::lemma_own(value);
+            assert(<Held<V, C> as VGet>::svs(core@) =~= vs);
+        }
+        VerifiedColumn { core }
+    }
+
     /// The number of values.
     #[inline(always)]
     pub fn len(&self) -> (r: usize)
@@ -931,6 +1315,99 @@ impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
         let _ins = self.core.splice(at, del, &mut f, &mut feed);
         proof {
             lemma_spliced::<V, C>(old(self).core@, at as int, del as int, values@, _ins@);
+        }
+    }
+
+    /// Delete `del` values at `at` and insert there the values that
+    /// `values` gives, as an iterator.
+    ///
+    /// The specification speaks of the iterator `values` becomes (`it`),
+    /// and of what Verus says that one will give (`it.remaining()`). It
+    /// holds for an iterator that keeps to what Verus asks of every
+    /// iterator (`obeys_prophetic_iter_laws`), as those of the standard
+    /// library that Verus specifies do; of another it says nothing but
+    /// that `self` is a column.
+    pub fn splice_iter<'v, I: IntoIterator<Item = Get<'v, V>>>(&mut self, at: usize, del: usize, values: I)
+        requires
+            at <= old(self)@.len(),
+            del <= old(self)@.len() - at,
+        ensures
+            exists|it: I::IntoIter| #[trigger]
+                (I::into_iter).ensures((values,), it) && (it.obeys_prophetic_iter_laws() ==> final(self)@ == old(
+                    self,
+                )@.take(at as int) + VGet::svs(it.remaining()) + old(self)@.skip(at + del)),
+    {
+        proof {
+            <Held<V, C> as VGet>::lemma_svs(self.core@);
+        }
+        let it = values.into_iter();
+        let ghost it0 = it;
+        let mut f = <V::E as Model<V::X>>::blind();
+        let mut feed = IterFeed::<V, C, I::IntoIter> {
+            it,
+            init: Ghost(it0),
+            given: Ghost(Seq::empty()),
+            ended: Ghost(false),
+            _c: PhantomData,
+        };
+        proof {
+            assert(feed.given@ + feed.it.remaining() =~= it0.remaining());
+        }
+        let _ins = self.core.splice(at, del, &mut f, &mut feed);
+        proof {
+            if it0.obeys_prophetic_iter_laws() {
+                let vs = it0.remaining();
+                assert(feed.given@ =~= feed.given@ + feed.it.remaining());
+                assert(vs.take(0) =~= Seq::<Get<'v, V>>::empty());
+                assert(vs.take(vs.len() as int) =~= vs);
+                lemma_spliced::<V, C>(old(self).core@, at as int, del as int, vs, _ins@);
+            }
+        }
+    }
+
+    /// Delete `del` values at `at` and insert there the runs that `runs`
+    /// gives, as an iterator: of each run its value, as many times as its
+    /// count says (`run_values`). A run of count 0 inserts nothing.
+    ///
+    /// The specification speaks of the iterator as
+    /// [`splice_iter`](Self::splice_iter)'s does. The counts are the
+    /// caller's: with ones that make the column longer than it can count,
+    /// or a run longer than the format can write, this panics.
+    pub fn splice_runs<'v, I: IntoIterator<Item = Run<Get<'v, V>>>>(&mut self, at: usize, del: usize, runs: I)
+        requires
+            at <= old(self)@.len(),
+            del <= old(self)@.len() - at,
+        ensures
+            exists|it: I::IntoIter| #[trigger]
+                (I::into_iter).ensures((runs,), it) && (it.obeys_prophetic_iter_laws() ==> final(self)@ == old(
+                    self,
+                )@.take(at as int) + run_values(it.remaining()) + old(self)@.skip(at + del)),
+    {
+        proof {
+            <Held<V, C> as VGet>::lemma_svs(self.core@);
+        }
+        let it = runs.into_iter();
+        let ghost it0 = it;
+        let mut f = <V::E as Model<V::X>>::blind();
+        let mut feed = RunsFeed::<V, C, I::IntoIter> {
+            it,
+            init: Ghost(it0),
+            given: Ghost(Seq::empty()),
+            ended: Ghost(false),
+            _c: PhantomData,
+        };
+        proof {
+            assert(feed.given@ + feed.it.remaining() =~= it0.remaining());
+        }
+        let _ins = self.core.splice(at, del, &mut f, &mut feed);
+        proof {
+            if it0.obeys_prophetic_iter_laws() {
+                let rs = it0.remaining();
+                assert(feed.given@ =~= feed.given@ + feed.it.remaining());
+                assert(_ins@ =~= Seq::<Held<V, C>>::empty() + _ins@);
+                lemma_svs_spliced(old(self).core@, at as int, del as int, _ins@);
+                lemma_held_runs::<V, C>(rs);
+            }
         }
     }
 

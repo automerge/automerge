@@ -2750,7 +2750,10 @@ pub(crate) trait RunFeed<E: Slabs> {
     /// What the feed keeps fixed as it runs.
     type K;
 
-    /// The feed's own invariant, which it keeps from run to run.
+    /// The feed's own invariant, which it keeps from run to run. It may
+    /// speak of what the feed is yet to give (a caller's iterator, by
+    /// what Verus says it will return): no step of a splice hangs on it.
+    #[verifier::prophetic]
     spec fn inv(&self) -> bool;
 
     /// What stays fixed.

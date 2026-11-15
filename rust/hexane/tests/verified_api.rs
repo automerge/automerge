@@ -9,7 +9,7 @@
 //! no proof does.
 
 use hexane::verified::{refused, Get, VNewtype, VValue, VerifiedColumn};
-use hexane::{Codec, Column, ColumnValue, ColumnValueRef, PackError, RleEncoding, RleValue};
+use hexane::{Codec, Column, ColumnValue, ColumnValueRef, PackError, RleEncoding, RleValue, Run};
 use std::fmt::Debug;
 use std::num::NonZeroU32;
 
@@ -688,6 +688,297 @@ fn edits<T: Kind>() {
 #[test]
 fn edits_agree() {
     for_each_kind!(edits);
+}
+
+/// Runs: often of the value before, some of no value at all, a few long.
+fn some_runs<T: Kind>(rng: &mut Rng, max: usize) -> Vec<(usize, T)> {
+    let n = rng.below(max + 1);
+    let mut last = T::fresh(rng);
+    (0..n)
+        .map(|_| {
+            last = rng.value(&last);
+            let count = [0, 0, 1, 1, 1, 2, 3, 9, 40, 130][rng.below(10)];
+            (count, last.clone())
+        })
+        .collect()
+}
+
+/// The values of `runs`: of each its value, as often as its count says.
+fn run_model<T: Kind>(runs: &[(usize, T)]) -> Vec<T> {
+    runs.iter()
+        .flat_map(|(n, x)| std::iter::repeat_n(x, *n).cloned())
+        .collect()
+}
+
+/// The other ways to put values in. A column made in one step of a slice
+/// or of what an iterator gives, and then edited by the splices that take
+/// an iterator (of several kinds, some that do not say how many values
+/// they have) or runs, and by `extend`: after each step both APIs hold the
+/// same values in the same slabs.
+fn other_forms<T: Kind>() {
+    for seed in 1..=8u64 {
+        let mut rng = Rng(seed.wrapping_mul(0x2545_f491_4f6c_dd1d));
+        let budget = [2, 3, 4, 8, 64][rng.below(5)];
+        let mut model: Vec<T> = rng.values(200);
+
+        let v = VerifiedColumn::<T>::from_values(&lent(&model));
+        let c = Column::<T>::from_values(model.clone());
+        check(&v, &c, &model);
+        let v: VerifiedColumn<T> = model.iter().map(T::lend).collect();
+        let c: Column<T> = model.iter().cloned().collect();
+        check(&v, &c, &model);
+        let v = VerifiedColumn::<T>::from_iter(lent(&model));
+        check(&v, &c, &model);
+
+        let mut v = VerifiedColumn::<T>::from_values_with_max_segments(&lent(&model), budget);
+        let mut c = Column::<T>::from_values_with_max_segments(model.clone(), budget);
+        check(&v, &c, &model);
+        check_loads(&v, &c, &model);
+        for step in 0..60 {
+            let at = rng.below(model.len() + 1);
+            let del = rng.below((model.len() - at).min(30) + 1);
+            match rng.below(10) {
+                0..=4 => {
+                    let ins: Vec<T> = rng.values(40);
+                    let gets = lent(&ins);
+                    match rng.below(6) {
+                        0 => v.splice_iter(at, del, ins.iter().map(T::lend)),
+                        1 => v.splice_iter(at, del, gets),
+                        2 => v.splice_iter(at, del, gets.iter().copied().filter(|_| true)),
+                        3 => {
+                            let (a, b) = gets.split_at(gets.len() / 2);
+                            v.splice_iter(at, del, a.iter().chain(b).copied());
+                        }
+                        4 => {
+                            let mut i = 0;
+                            let next = || {
+                                i += 1;
+                                gets.get(i - 1).copied()
+                            };
+                            v.splice_iter(at, del, std::iter::from_fn(next));
+                        }
+                        _ => v.splice_iter(at, del, gets.iter().rev().rev().copied()),
+                    }
+                    c.splice(at, del, ins.iter().cloned());
+                    model.splice(at..at + del, ins.iter().cloned());
+                }
+                5..=7 => {
+                    let runs = some_runs::<T>(&mut rng, 6);
+                    let lent_runs = runs.iter().map(|(n, x)| Run {
+                        count: *n,
+                        value: x.lend(),
+                    });
+                    v.splice_runs(at, del, lent_runs);
+                    let owned_runs = runs.iter().map(|(n, x)| Run {
+                        count: *n,
+                        value: x.clone(),
+                    });
+                    c.splice_runs(at, del, owned_runs);
+                    model.splice(at..at + del, run_model(&runs));
+                }
+                8 => {
+                    let more: Vec<T> = rng.values(40);
+                    v.extend(more.iter().map(T::lend));
+                    c.extend(more.iter().cloned());
+                    model.extend(more);
+                }
+                _ => {
+                    // nothing to add, and now and then most of it gone
+                    v.extend(std::iter::empty());
+                    c.extend(std::iter::empty::<T>());
+                    v.splice_runs(at, 0, []);
+                    c.splice_runs(at, 0, std::iter::empty::<Run<T>>());
+                    if model.len() > 1500 {
+                        let keep = rng.below(300);
+                        v.truncate(keep);
+                        c.truncate(keep);
+                        model.truncate(keep);
+                    }
+                }
+            }
+            check(&v, &c, &model);
+            if step % 10 == 9 {
+                check_loads(&v, &c, &model);
+                check_clone(&v, &c, &model, seed * 1000 + step);
+            }
+        }
+        check_loads(&v, &c, &model);
+    }
+}
+
+#[test]
+fn the_other_forms_agree() {
+    for_each_kind!(other_forms);
+}
+
+/// A column of one value repeated, made in one step: the column that
+/// `Column::fill` makes, and the one made of the values one by one. It is
+/// edited like any other.
+fn fills<T: Kind>() {
+    let mut rng = Rng(0xf111);
+    for n in [0, 1, 2, 3, 63, 64, 65, 1000] {
+        let x = T::fresh(&mut rng);
+        let mut v = VerifiedColumn::<T>::fill(n, x.lend());
+        let mut c = Column::<T>::fill(n, x.as_column_ref());
+        let mut model = vec![x.clone(); n];
+        check(&v, &c, &model);
+        check_loads(&v, &c, &model);
+        assert!(v.is_only(x.lend()));
+        assert_eq!(
+            v.save(),
+            VerifiedColumn::<T>::from_values(&lent(&model)).save()
+        );
+        check_clone(&v, &c, &model, n as u64);
+
+        let y = T::fresh(&mut rng);
+        v.insert(n / 2, y.lend());
+        c.insert(n / 2, y.clone());
+        model.insert(n / 2, y);
+        check(&v, &c, &model);
+        // more of the same value, as one run, after the first `n`
+        let run = |value| Run {
+            count: 2 * n,
+            value,
+        };
+        v.splice_runs(n, 0, [run(x.lend())]);
+        c.splice_runs(
+            n,
+            0,
+            [Run {
+                count: 2 * n,
+                value: x.clone(),
+            }],
+        );
+        model.splice(n..n, vec![x.clone(); 2 * n]);
+        check(&v, &c, &model);
+    }
+}
+
+#[test]
+fn a_column_filled_with_one_value() {
+    for_each_kind!(fills);
+}
+
+/// What a closure panics with, if it does.
+#[cfg(target_pointer_width = "64")]
+fn panic_of<R>(f: impl FnOnce() -> R + std::panic::UnwindSafe) -> Option<String> {
+    let e = std::panic::catch_unwind(f).err()?;
+    let text = e.downcast_ref::<String>().cloned();
+    Some(text.unwrap_or_else(|| {
+        e.downcast_ref::<&str>()
+            .map(|s| s.to_string())
+            .unwrap_or_default()
+    }))
+}
+
+/// Columns too long to hold their values one by one, made of one run.
+/// The format writes the count of a run of equal numbers with a sign: a
+/// run of `i64::MAX` is the longest, both APIs make it, and both panic
+/// rather than write a longer one. Of `bool`s and of nulls the count has
+/// no sign: there the bound is what a `usize` counts, with three to
+/// spare. (Where a `usize` has 64 bits: one of 32 bits counts less than
+/// either.)
+#[cfg(target_pointer_width = "64")]
+#[test]
+fn the_longest_runs() {
+    let most = i64::MAX as usize;
+    let v = VerifiedColumn::<u64>::fill(most, 7);
+    let c = Column::<u64>::fill(most, 7);
+    assert_eq!(
+        (v.len(), v.get(most - 1), v.get(most)),
+        (most, Some(7), None)
+    );
+    assert_eq!(v.save(), c.save());
+    assert!(v.is_only(7) && !v.is_only(8));
+    let back = VerifiedColumn::<u64>::load(&v.save()).unwrap();
+    assert_eq!((back.len(), back.get(most - 1)), (most, Some(7)));
+    let nulls = VerifiedColumn::<Option<Vec<u8>>>::fill(most, None);
+    assert_eq!(
+        nulls.save(),
+        Column::<Option<Vec<u8>>>::fill(most, None).save()
+    );
+    assert_eq!((nulls.len(), nulls.get(most - 1)), (most, Some(None)));
+
+    // by a run, and then one value more
+    let by_run = |count: usize, then: Option<u64>| {
+        let new = panic_of(move || {
+            let mut v = VerifiedColumn::<u64>::new();
+            v.splice_runs(0, 0, [Run { count, value: 7 }]);
+            if let Some(x) = then {
+                v.push(x);
+            }
+            (v.len(), v.save())
+        });
+        let old = panic_of(move || {
+            let mut c = Column::<u64>::new();
+            c.splice_runs(0, 0, [Run { count, value: 7u64 }]);
+            if let Some(x) = then {
+                c.push(x);
+            }
+            (c.len(), c.save())
+        });
+        assert_eq!(new, old);
+        new
+    };
+    assert_eq!(by_run(most, None), None);
+    assert_eq!(by_run(most, Some(8)), None);
+    let said = by_run(most, Some(7)).unwrap();
+    assert!(said.contains("is not encodable"), "{said}");
+    assert_eq!(by_run(most + 1, None), Some(said));
+    assert!(by_run(usize::MAX, None).is_some());
+
+    // counts with no sign
+    let bools = |count: usize, then: Option<bool>| {
+        let new = panic_of(move || {
+            let mut v = VerifiedColumn::<bool>::new();
+            v.splice_runs(0, 0, [Run { count, value: true }]);
+            if let Some(x) = then {
+                v.push(x);
+            }
+            (v.len(), v.get(count - 1), v.save())
+        });
+        let old = panic_of(move || {
+            let mut c = Column::<bool>::new();
+            c.splice_runs(0, 0, [Run { count, value: true }]);
+            if let Some(x) = then {
+                c.push(x);
+            }
+            (c.len(), c.get(count - 1), c.save())
+        });
+        assert_eq!(new, old);
+        new
+    };
+    assert_eq!(bools(most + 1, Some(true)), None);
+    assert_eq!(bools(usize::MAX - 3, None), None);
+    let said = bools(usize::MAX - 3, Some(false)).unwrap();
+    assert!(said.contains("too long"), "{said}");
+    assert_eq!(bools(usize::MAX - 2, None), Some(said));
+}
+
+/// An iterator is asked for no value after it has said that it has none.
+#[test]
+fn an_iterator_is_run_to_its_end_once() {
+    let items = [3u64, 3, 4];
+    let feed = |asked: &mut usize| {
+        let at = *asked;
+        *asked += 1;
+        assert!(at <= items.len(), "asked again after the end");
+        items.get(at).copied()
+    };
+    let mut asked = 0;
+    let mut v = VerifiedColumn::<u64>::new();
+    v.splice_iter(0, 0, std::iter::from_fn(|| feed(&mut asked)));
+    assert_eq!((v.to_vec(), asked), (items.to_vec(), 4));
+    asked = 0;
+    v.extend(std::iter::from_fn(|| feed(&mut asked)));
+    assert_eq!((v.len(), asked), (6, 4));
+    asked = 0;
+    let w: VerifiedColumn<u64> = std::iter::from_fn(|| feed(&mut asked)).collect();
+    assert_eq!((w.to_vec(), asked), (items.to_vec(), 4));
+    asked = 0;
+    let runs = std::iter::from_fn(|| feed(&mut asked)).map(|x| Run { count: 2, value: x });
+    v.splice_runs(1, 4, runs);
+    assert_eq!((v.to_vec(), asked), (vec![3, 3, 3, 3, 3, 4, 4, 4], 4));
 }
 
 /// Columns of one value, in one slab and in many, and the same with one

@@ -11,12 +11,18 @@
 //! that is stored as a number and is not every number ([`Action`]). And
 //! that a column loaded from any bytes at all saves back to those bytes
 //! ([`load_then_save`]). And that a clone is a column of its own with
-//! the same values ([`clone_then_diverge`]).
+//! the same values ([`clone_then_diverge`]). And that a column made of
+//! what iterators give holds what was handed to them
+//! ([`collect_then_extend`]), and one made of runs each run's value as
+//! often as its count says ([`runs_in`]).
 //!
 //! This module exists only while Verus checks the crate.
 
-use super::{only, refused, total_len, Get, VCodec, VGet, VNewtype, VValue, VerifiedColumn};
-use crate::{Leb128, PackError};
+use super::{
+    lemma_run_values_add, lemma_run_values_push, only, refused, run_values, total_len, Get, VCodec,
+    VGet, VNewtype, VValue, VerifiedColumn,
+};
+use crate::{Leb128, PackError, Run};
 use vstd::prelude::*;
 
 verus! {
@@ -483,6 +489,154 @@ fn clone_of_clone(x: &[u8]) {
     other.push(true);
     assert(empty@.len() == 0);
     assert(other@ == seq![true]);
+}
+
+/// A column of what iterators give. Collected from a vector's items it
+/// holds the vector's values, as the column `from_values` makes of them
+/// does, and the two save to the same bytes; extended by a second
+/// vector's items it holds the first's values and then the second's; and
+/// a third's go in between them. For every value type and codec.
+///
+/// The client hands vectors over, of which Verus's library says what
+/// their iterators give. It proves nothing of an iterator itself.
+#[allow(dead_code)]
+fn collect_then_extend<'v, V: VValue<C>, C: VCodec>(a: Vec<Get<'v, V>>, b: Vec<Get<'v, V>>, c: Vec<Get<'v, V>>) {
+    let ghost (av, bv, cv) = (VGet::svs(a@), VGet::svs(b@), VGet::svs(c@));
+    proof {
+        VGet::lemma_svs(a@);
+    }
+    let by_slice = VerifiedColumn::<V, C>::from_values(a.as_slice());
+    assert(by_slice@ == av);
+    let mut col: VerifiedColumn<V, C> = a.into_iter().collect();
+    assert(col@ == av);
+    // the same values, so the same bytes
+    let x = by_slice.save();
+    let y = col.save();
+    assert(x@ == y@);
+
+    col.extend(b);
+    assert(col@ == av + bv);
+
+    let at = by_slice.len();
+    col.splice_iter(at, 0, c);
+    assert(col@ == av + cv + bv) by {
+        assert((av + bv).take(at as int) =~= av);
+        assert((av + bv).skip(at + 0) =~= bv);
+    }
+}
+
+/// The same of numbers, of byte strings and of byte strings that may be
+/// null, whose vectors hold slices.
+#[allow(dead_code)]
+fn collect_each(a: Vec<u64>, b: Vec<&[u8]>, c: Vec<Option<&[u8]>>, more: Vec<&[u8]>) {
+    let ghost bv = VGet::svs(b@);
+    let nums: VerifiedColumn<u64> = a.into_iter().collect();
+    assert(nums@ == a@);
+    let mut strs: VerifiedColumn<Vec<u8>> = b.into_iter().collect();
+    assert(strs@ == bv);
+    let opts = VerifiedColumn::<Option<Vec<u8>>>::from_iter(c);
+    assert(opts@ == VGet::svs(c@));
+    strs.extend(more);
+    assert(strs@ == bv + VGet::svs(more@));
+}
+
+/// How many values runs are: the sum of their counts.
+spec fn counted<G>(rs: Seq<Run<G>>) -> nat
+    decreases rs.len(),
+{
+    if rs.len() == 0 {
+        0
+    } else {
+        counted(rs.drop_last()) + rs.last().count as nat
+    }
+}
+
+/// Runs are as many values as their counts say: a client's own
+/// induction over `run_values`.
+proof fn lemma_counted<G: VGet>(rs: Seq<Run<G>>)
+    ensures
+        run_values(rs).len() == counted(rs),
+    decreases rs.len(),
+{
+    if rs.len() > 0 {
+        lemma_counted(rs.drop_last());
+    }
+}
+
+/// A column of one value repeated, and runs spliced into it: each run's
+/// value is there as often as its count says, a run of count 0 is no
+/// value, and the column is as much longer as the runs' counts are
+/// together. For every value type and codec.
+#[allow(dead_code)]
+fn runs_in<'v, V: VValue<C>, C: VCodec>(a: Get<'v, V>, b: Get<'v, V>, c: Get<'v, V>, more: Vec<Run<Get<'v, V>>>)
+    requires
+        a.sv() != b.sv(),
+{
+    let mut col = VerifiedColumn::<V, C>::fill(3, a);
+    assert(col@ =~= seq![a.sv(), a.sv(), a.sv()]);
+    let all_a = col.is_only(a);
+    assert(all_a);
+    let empty = VerifiedColumn::<V, C>::fill(0, a);
+    assert(empty@.len() == 0);
+
+    let mut runs: Vec<Run<Get<'v, V>>> = Vec::new();
+    runs.push(Run { count: 2, value: b });
+    runs.push(Run { count: 0, value: c });
+    runs.push(Run { count: 1, value: c });
+    let ghost rs = runs@;
+    proof {
+        let none = Seq::<Run<Get<'v, V>>>::empty();
+        lemma_run_values_push(none, rs[0]);
+        lemma_run_values_push(none.push(rs[0]), rs[1]);
+        lemma_run_values_push(none.push(rs[0]).push(rs[1]), rs[2]);
+        assert(rs =~= none.push(rs[0]).push(rs[1]).push(rs[2]));
+        assert(run_values(rs) =~= seq![b.sv(), b.sv(), c.sv()]);
+    }
+    // the middle `a` replaced by the runs
+    col.splice_runs(1, 1, runs);
+    assert(col@ =~= seq![a.sv(), b.sv(), b.sv(), c.sv(), a.sv()]);
+    let all_a = col.is_only(a);
+    assert(!all_a) by {
+        assert(col@[1] != a.sv());
+    }
+    let second = col.get(2);
+    assert(second matches Some(v) && v.sv() == b.sv());
+
+    // a caller's runs, whatever they are, at the front
+    let ghost before = col@;
+    let ghost n = counted(more@);
+    proof {
+        lemma_counted(more@);
+    }
+    col.splice_runs(0, 0, more);
+    assert(col@ =~= run_values(more@) + before);
+    assert(col@.len() == n + 5);
+}
+
+/// Runs of byte strings and of numbers, given as one iterator after
+/// another: the values of both, in order.
+#[allow(dead_code)]
+fn runs_of_slices(x: &[u8], k: usize, a: Vec<Run<u64>>, b: Vec<Run<u64>>) {
+    let mut col = VerifiedColumn::<Option<Vec<u8>>>::new();
+    let mut runs: Vec<Run<Option<&[u8]>>> = Vec::new();
+    runs.push(Run { count: k, value: Some(x) });
+    proof {
+        lemma_run_values_push(Seq::<Run<Option<&[u8]>>>::empty(), runs@[0]);
+        assert(runs@ =~= Seq::<Run<Option<&[u8]>>>::empty().push(runs@[0]));
+    }
+    col.splice_runs(0, 0, runs);
+    assert(col@ =~= Seq::new(k as nat, |_i: int| Some(x@)));
+    let all = col.is_only(Some(x));
+    assert(all);
+
+    let mut nums = VerifiedColumn::<u64>::new();
+    nums.splice_runs(0, 0, a);
+    let len = nums.len();
+    nums.splice_runs(len, 0, b);
+    proof {
+        lemma_run_values_add(a@, b@);
+    }
+    assert(nums@ =~= run_values(a@ + b@));
 }
 
 } // verus!

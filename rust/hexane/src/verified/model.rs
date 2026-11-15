@@ -35,7 +35,7 @@ use crate::column_core::ColumnCore;
 #[cfg(verus_keep_ghost)]
 use crate::cursor::{all_ok, slab_lens, vals_of};
 use crate::cursor::{ReadsAgree, Slabs, Visitor};
-use crate::iter_core::Decoders;
+use crate::iter_core::{Decode, Decoders};
 use crate::load_core::LoadCore;
 use crate::rle::cut::Load;
 #[cfg(verus_keep_ghost)]
@@ -111,6 +111,17 @@ pub(crate) trait Model<X>: Slabs + Sized + for <'a>ReadsAgree<'a, X> where
 
     /// A visitor that has seen nothing.
     fn blind() -> Self::Blind
+    ;
+
+    /// A slab of `len` copies of the value `v`.
+    fn fill<'s>(len: usize, v: <<X as Decoders<'s>>::D as Decode>::Item) -> (s: Slab<Self::Tail>)
+        requires
+            1 <= len <= i64::MAX,
+            len < usize::MAX - 1,
+        ensures
+            Self::ok(s),
+            Self::vals(s) == Seq::new(len as nat, |_i: int| <Self as ReadsAgree<'s, X>>::own(v)),
+            s.len == len,
     ;
 
     /// The slabs' values, saved: appended to `out`. `total` is their
@@ -323,6 +334,16 @@ impl<L, O> Model<RleReads<O>> for RleModel<L> where
     }
 
     #[inline(always)]
+    fn fill<'s>(len: usize, v: VOf<'s, L>) -> (s: Slab<RleTail>) {
+        let s = crate::rle::edit::fill::<L>(<L as WriteOps<'s>>::cow_ref(v), len);
+        proof {
+            let o = <L as Lift<'s>>::lift(v);
+            assert(copies(len as nat, o) =~= Seq::new(len as nat, |_i: int| o));
+        }
+        s
+    }
+
+    #[inline(always)]
     fn save(slabs: &[Slab<RleTail>], total: usize, out: &mut Vec<u8>) {
         crate::rle::edit::save_slabs::<L>(slabs, total, out)
     }
@@ -393,6 +414,11 @@ impl<C: CountsOf> Model<BoolReads<C>> for BoolModel<C> {
     #[inline(always)]
     fn blind() -> NoVisitBool<C> {
         NoVisitBool { seen: Ghost(Seq::empty()), _p: PhantomData }
+    }
+
+    #[inline(always)]
+    fn fill<'s>(len: usize, v: bool) -> (s: BSlab) {
+        crate::bool_edit::fill::<C>(len, v)
     }
 
     #[inline(always)]
