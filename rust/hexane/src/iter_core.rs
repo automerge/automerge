@@ -146,6 +146,16 @@ pub(crate) trait Decoders<'a> {
             d.inv(),
             d.rest().len() == 0,
     ;
+
+    /// A test of a slab's metadata, its bytes unread, that fails only
+    /// for a slab holding two values side by side that differ.
+    fn maybe_uniform(s: &'a Slab<Self::Tail>) -> (r: bool)
+        requires
+            Self::ok(*s),
+        ensures
+            !r ==> exists|i: int|
+                0 < i < Self::vals(*s).len() && Self::vals(*s)[i - 1] != #[trigger] Self::vals(*s)[i],
+    ;
 }
 
 // ── Searching ──────────────────────────────────────────────────────────────

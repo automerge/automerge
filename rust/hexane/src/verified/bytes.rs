@@ -1060,6 +1060,16 @@ impl<C: VCodec> VValue<C> for Vec<u8> {
 
     proof fn lemma_own<'a>(v: &'a [u8]) {
     }
+
+    #[inline(always)]
+    fn same(a: &[u8], b: &[u8]) -> (r: bool) {
+        proof {
+            if a@ == b@ {
+                lemma_slice_same(a, b);
+            }
+        }
+        same_bytes(&a, &b)
+    }
 }
 
 impl<C: VCodec> seal::Sealed<C> for Option<Vec<u8>> {
@@ -1081,6 +1091,22 @@ impl<C: VCodec> VValue<C> for Option<Vec<u8>> {
     }
 
     proof fn lemma_own<'a>(v: Option<&'a [u8]>) {
+    }
+
+    #[inline(always)]
+    fn same(a: Option<&[u8]>, b: Option<&[u8]>) -> (r: bool) {
+        match (a, b) {
+            (Some(x), Some(y)) => {
+                proof {
+                    if x@ == y@ {
+                        lemma_slice_same(x, y);
+                    }
+                }
+                same_bytes(&x, &y)
+            },
+            (None, None) => true,
+            _ => false,
+        }
     }
 }
 

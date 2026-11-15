@@ -54,13 +54,23 @@
 //!
 //! * [`splice`](VerifiedColumn::splice) leaves the values before `at`,
 //!   the values given, then the values from `at + del`;
+//! * [`remove_n`](VerifiedColumn::remove_n),
+//!   [`truncate`](VerifiedColumn::truncate) and
+//!   [`clear`](VerifiedColumn::clear) leave the values a `splice` that
+//!   deletes the same ones would;
 //! * [`get`](VerifiedColumn::get), [`to_vec`](VerifiedColumn::to_vec) and
 //!   the [iterator](VerifiedIter) give the column's values;
+//! * [`is_only`](VerifiedColumn::is_only) says whether every value of the
+//!   column is the one given (`only`), and [`VValue::same`] whether two
+//!   values in a column's form are one value;
 //! * [`save`](VerifiedColumn::save) writes the one encoding of the
 //!   column's values (`encoding`): bytes that are `valid` and hold those
 //!   `values`, and no more of them than the values' `size_bound`. Two
 //!   columns of the same values so save to the same bytes
-//!   (`lemma_save_unique`);
+//!   (`lemma_save_unique`). [`save_to`](VerifiedColumn::save_to) writes
+//!   that encoding after what a buffer holds, which it keeps, and
+//!   [`save_to_unless`](VerifiedColumn::save_to_unless) writes nothing
+//!   where every value is the one given;
 //! * [`load`](VerifiedColumn::load) gives a column only for valid bytes,
 //!   and then the column of their values; and it does give one for all
 //!   valid bytes short of 4 GiB that hold values a `usize` can count
@@ -69,15 +79,23 @@
 //! `valid`, `values`, `encoding` and `loadable` are specification
 //! functions of a column type (`VerifiedColumn::<V>::valid(bytes)`),
 //! `size_bound` is one of a value type (for byte strings it counts their
-//! bytes, as `total_len` of them), and `lemma_save_unique` and
-//! `lemma_encoding` are lemmas: they exist only for Verus, and a normal
-//! build compiles them away.
+//! bytes, as `total_len` of them), `only` is one of this module, and
+//! `lemma_save_unique` and `lemma_encoding` are lemmas: they exist only
+//! for Verus, and a normal build compiles them away.
 //!
 //! The specifications say what a saved column is in their own terms.
 //! That those are the bytes of [`Column`](crate::Column) for the same
 //! values is not proved but tested (`tests/verified_api.rs`): for each
 //! value type the two save the same bytes, each loads what the other
 //! saved, and they refuse the same bytes with the same error.
+//!
+//! How a column lies in memory is no part of any specification:
+//! [`slab_count`](VerifiedColumn::slab_count) and what `Debug` prints
+//! tell of it and promise nothing. After the same edits a
+//! `VerifiedColumn` has the slabs of a [`Column`](crate::Column), which
+//! is tested too, but for one case: a column that
+//! [`clear`](VerifiedColumn::clear) has emptied has no slab, where
+//! `Column` keeps an empty one, until the next edit.
 //!
 //! # What is trusted
 //!
@@ -140,7 +158,13 @@ use crate::bool_edit::BoolModel;
 use crate::bool_wire::BoolReads;
 use crate::column::Slab;
 use crate::copy::NoRuns;
+#[cfg(verus_keep_ghost)]
+use crate::cursor::{lemma_lens_ok, lemma_vals_own, slab_lens};
 use crate::cursor::{ReadsAgree, RunFeed, Slabs};
+#[cfg(verus_keep_ghost)]
+use crate::fenwick::sum;
+#[cfg(verus_keep_ghost)]
+use crate::iter_core::{lemma_from, lens_ok, vals_of};
 use crate::iter_core::{Decode, Decoders, ICore};
 #[cfg(verus_keep_ghost)]
 use crate::rle::dec::slab_values;
@@ -150,6 +174,7 @@ use crate::{Leb128, PackError};
 use counts::VB;
 use model::{Core, Model};
 use std::marker::PhantomData;
+use std::ops::Range;
 #[cfg(verus_keep_ghost)]
 use value::{lemma_opt_sizes, lemma_plain_sizes};
 use value::{VOps, VOptOps, VOptWrite, VWrite};
@@ -552,6 +577,13 @@ pub trait VValue<C: VCodec = Leb128>: seal::Sealed<C> {
         ensures
             own_kept::<Self, C>(v),
     ;
+
+    /// Whether two values are the same value. They need not live as long
+    /// as each other: one may be a column's, the other a caller's.
+    fn same<'a, 'b>(a: Get<'a, Self>, b: Get<'b, Self>) -> (r: bool)
+        ensures
+            r == (a.sv() == b.sv()),
+    ;
 }
 
 impl<T: VPack, C: VCodec> seal::Sealed<C> for T {
@@ -572,6 +604,11 @@ impl<T: VPack, C: VCodec> VValue<C> for T {
     }
 
     proof fn lemma_own<'a>(v: T) {
+    }
+
+    #[inline(always)]
+    fn same<'a, 'b>(a: T, b: T) -> (r: bool) {
+        <T as VPack>::same(&a, &b)
     }
 }
 
@@ -594,6 +631,15 @@ impl<T: VPack, C: VCodec> VValue<C> for Option<T> {
 
     proof fn lemma_own<'a>(v: Option<T>) {
     }
+
+    #[inline(always)]
+    fn same<'a, 'b>(a: Option<T>, b: Option<T>) -> (r: bool) {
+        match (a, b) {
+            (Some(x), Some(y)) => <T as VPack>::same(&x, &y),
+            (None, None) => true,
+            _ => false,
+        }
+    }
 }
 
 impl<C: VCodec> seal::Sealed<C> for bool {
@@ -613,6 +659,11 @@ impl<C: VCodec> VValue<C> for bool {
     }
 
     proof fn lemma_own<'a>(v: bool) {
+    }
+
+    #[inline(always)]
+    fn same<'a, 'b>(a: bool, b: bool) -> (r: bool) {
+        a == b
     }
 }
 
@@ -690,6 +741,37 @@ proof fn lemma_spliced<'v, V: VValue<C>, C: VCodec>(
 }
 
 // ── The column ──────────────────────────────────────────────────────────────
+
+/// Slab `k` holds the values of the column that come after those of
+/// the slabs before it.
+proof fn lemma_slab_vals<'a, X: Decoders<'a>>(s: Seq<Slab<X::Tail>>, k: int)
+    requires
+        lens_ok::<X>(s),
+        0 <= k < s.len(),
+    ensures
+        sum(slab_lens(s), 0, k + 1) == sum(slab_lens(s), 0, k) + s[k].len,
+        sum(slab_lens(s), 0, k + 1) <= vals_of::<X>(s).len(),
+        X::vals(s[k]).len() == s[k].len,
+        forall|i: int|
+            0 <= i < s[k].len ==> #[trigger] X::vals(s[k])[i] == vals_of::<X>(s)[sum(
+                slab_lens(s),
+                0,
+                k,
+            ) + i],
+{
+    lemma_from::<X>(s, k, 0);
+    let v = X::vals(s[k]);
+    let base = sum(slab_lens(s), 0, k) as int;
+    assert(v.skip(0) =~= v);
+    assert forall|i: int| 0 <= i < s[k].len implies #[trigger] v[i] == vals_of::<X>(s)[base + i] by {
+        assert(vals_of::<X>(s).skip(base)[i] == v[i]);
+    }
+}
+
+/// Every value of `vs` is `v`: so of no values.
+pub open spec fn only<S>(vs: Seq<S>, v: S) -> bool {
+    forall|i: int| 0 <= i < vs.len() ==> vs[i] == v
+}
 
 /// A column of values of type `V`: the sequence `self@`. Its numbers are
 /// written with the codec `C`.
@@ -958,6 +1040,48 @@ impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
         }
     }
 
+    /// Delete the `n` values at `at`.
+    #[inline(always)]
+    pub fn remove_n(&mut self, at: usize, n: usize)
+        requires
+            at <= old(self)@.len(),
+            n <= old(self)@.len() - at,
+        ensures
+            final(self)@ == old(self)@.take(at as int) + old(self)@.skip(at + n),
+    {
+        if n > 0 {
+            self.delete(at, n);
+        } else {
+            proof {
+                assert(self@ =~= self@.take(at as int) + self@.skip(at as int));
+            }
+        }
+    }
+
+    /// Delete every value. The column keeps its segment budget.
+    pub fn clear(&mut self)
+        ensures
+            final(self)@ == Seq::<V::S>::empty(),
+    {
+        // a new column, and not a delete of every value, which would
+        // leave the last slab to be emptied through a rebuild. The edit
+        // counter goes on from where it is, as after any other edit.
+        self.core.lemma_column();
+        let mut core = Core::<V::E>::with_budget(self.core.max_segments());
+        core.set_counter(self.core.counter().wrapping_add(1));
+        proof {
+            assert(core@ =~= Seq::empty());
+            lemma_svs_none::<Held<V, C>>();
+        }
+        self.core = core;
+    }
+
+    /// How many slabs hold the column. That is a fact of how the column
+    /// lies in memory and not of its values: nothing is specified of it.
+    pub fn slab_count(&self) -> usize {
+        self.core.slabs().len()
+    }
+
     /// A reader of the values `start..end`.
     #[inline(always)]
     fn reader(&self, start: usize, end: usize) -> (it: ICore<<V::X as Decoders<'_>>::D>)
@@ -1052,6 +1176,92 @@ impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
         out
     }
 
+    /// Whether every value is `value`: so of an empty column.
+    pub fn is_only(&self, value: Get<'_, V>) -> (r: bool)
+        ensures
+            r == only(self@, value.sv()),
+    {
+        self.core.lemma_column();
+        let slabs = self.core.slabs();
+        let ghost vs = vals_of::<V::X>(slabs@);
+        proof {
+            lemma_lens_ok::<V::E, V::X>(slabs@);
+            lemma_vals_own::<V::E, V::X>(slabs@);
+            assert(self.core@ =~= held::<V, C>(vs));
+            lemma_held::<V, C>(vs);
+            VGet::lemma_svs(vs);
+        }
+        // slab by slab: a slab of one value is one run of it
+        let mut j: usize = 0;
+        while j < slabs.len()
+            invariant
+                j <= slabs@.len(),
+                lens_ok::<V::X>(slabs@),
+                vs == vals_of::<V::X>(slabs@),
+                vs.len() == self@.len(),
+                vs.len() < usize::MAX,
+                forall|i: int| 0 <= i < vs.len() ==> self@[i] == (#[trigger] vs[i]).sv(),
+                forall|i: int| 0 <= i < sum(slab_lens(slabs@), 0, j as int) ==> self@[i] == value.sv(),
+            decreases slabs@.len() - j,
+        {
+            let s = &slabs[j];
+            let ghost base = sum(slab_lens(slabs@), 0, j as int) as int;
+            let ghost sv = <V::X as Decoders>::vals(*s);
+            proof {
+                lemma_slab_vals::<V::X>(slabs@, j as int);
+            }
+            if !<V::X as Decoders>::maybe_uniform(s) {
+                proof {
+                    // two of the slab's values differ, so one is not
+                    // `value`
+                    let i = choose|i: int| 0 < i < sv.len() && sv[i - 1] != #[trigger] sv[i];
+                    let a = sv[i - 1];
+                    let b = sv[i];
+                    assert(a == vs[base + i - 1]);
+                    assert(b == vs[base + i]);
+                    if a.sv() == b.sv() {
+                        VGet::lemma_sv_inj(a, b);
+                    }
+                    if self@[base + i - 1] == value.sv() {
+                        assert(self@[base + i] != value.sv());
+                    }
+                }
+                return false;
+            }
+            let mut d = <V::X as Decoders>::open(s);
+            if let Some(run) = d.d_run_max(usize::MAX) {
+                if run.count != s.len || !V::same(run.value, value) {
+                    proof {
+                        // the slab's first value is another, or the one
+                        // at which its first run ends
+                        let k: int = if run.value.sv() == value.sv() {
+                            run.count as int
+                        } else {
+                            0
+                        };
+                        let w = sv[k];
+                        assert(sv.take(run.count as int)[0] == run.value);
+                        if w.sv() == run.value.sv() {
+                            VGet::lemma_sv_inj(w, run.value);
+                        }
+                        assert(w == vs[base + k]);
+                        assert(self@[base + k] != value.sv());
+                    }
+                    return false;
+                }
+                proof {
+                    assert forall|i: int| base <= i < base + s.len implies self@[i]
+                        == value.sv() by {
+                        assert(sv.take(run.count as int)[i - base] == run.value);
+                        assert(sv[i - base] == vs[i]);
+                    }
+                }
+            }
+            j += 1;
+        }
+        true
+    }
+
     /// An iterator over the values.
     #[inline(always)]
     pub fn iter(&self) -> (it: VerifiedIter<'_, V, C>)
@@ -1098,6 +1308,55 @@ impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
             V::lemma_size(out@);
         }
         out
+    }
+
+    /// Save the column after what `out` holds: `out` is then what it
+    /// was, and after that the encoding of the column's values. The
+    /// range returned is where in `out` that is.
+    pub fn save_to(&self, out: &mut Vec<u8>) -> (r: Range<usize>)
+        ensures
+            final(out)@ == old(out)@ + Self::encoding(self@),
+            Self::valid(Self::encoding(self@)),
+            Self::values(Self::encoding(self@)) == self@,
+            Self::encoding(self@).len() <= V::size_bound(self@),
+            r.start == old(out)@.len(),
+            r.end == final(out)@.len(),
+    {
+        self.core.lemma_column();
+        let start = out.len();
+        <V::E as Model<V::X>>::save(self.core.slabs(), self.core.len(), out);
+        proof {
+            let d = out@.skip(start as int);
+            Self::lemma_encoding(d);
+            V::lemma_size(d);
+            assert(out@ =~= old(out)@ + d);
+        }
+        start..out.len()
+    }
+
+    /// [`save_to`](Self::save_to), unless every value of the column is
+    /// `value`: then nothing is written, and the range is empty. So is
+    /// it for an empty column, whatever `value` is.
+    pub fn save_to_unless(&self, out: &mut Vec<u8>, value: Get<'_, V>) -> (r: Range<usize>)
+        ensures
+            final(out)@ == if only(self@, value.sv()) {
+                old(out)@
+            } else {
+                old(out)@ + Self::encoding(self@)
+            },
+            !only(self@, value.sv()) ==> {
+                &&& Self::valid(Self::encoding(self@))
+                &&& Self::values(Self::encoding(self@)) == self@
+                &&& Self::encoding(self@).len() <= V::size_bound(self@)
+            },
+            r.start == old(out)@.len(),
+            r.end == final(out)@.len(),
+    {
+        if self.is_only(value) {
+            out.len()..out.len()
+        } else {
+            self.save_to(out)
+        }
     }
 
     /// The column saved as `bytes`. An error unless `bytes` is a saved
@@ -1168,6 +1427,16 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedIter<'a, V, C> {
 }
 
 } // verus!
+
+impl<V: VValue<C>, C: VCodec> std::fmt::Debug for VerifiedColumn<V, C> {
+    /// How many values and how many slabs, as `Column` prints itself.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("VerifiedColumn")
+            .field("len", &self.core.len())
+            .field("slabs", &self.core.slabs().len())
+            .finish()
+    }
+}
 
 // one budget for both APIs
 const _: () = assert!(MAX_SEG == crate::column::DEFAULT_MAX_SEG);

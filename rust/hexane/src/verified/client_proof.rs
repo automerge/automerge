@@ -14,7 +14,7 @@
 //!
 //! This module exists only while Verus checks the crate.
 
-use super::{refused, total_len, Get, VCodec, VGet, VNewtype, VValue, VerifiedColumn};
+use super::{only, refused, total_len, Get, VCodec, VGet, VNewtype, VValue, VerifiedColumn};
 use crate::{Leb128, PackError};
 use vstd::prelude::*;
 
@@ -301,6 +301,129 @@ fn count_and_cut(input: &Vec<u32>)
     let mut small = VerifiedColumn::<bool>::with_max_segments(2);
     small.push(true);
     assert(small@ == seq![true]);
+}
+
+/// Two columns saved into one buffer, one after the other, as a document
+/// holds its columns: each loads from its own range of the buffer as the
+/// values it had. For every value type and codec.
+#[allow(dead_code)]
+fn two_in_one_buffer<'v, V: VValue<C>, C: VCodec>(xs: &Vec<Get<'v, V>>, ys: &Vec<Get<'v, V>>)
+    requires
+        V::size_bound(VGet::svs(xs@)) <= 0xffff_fff5,
+        V::size_bound(VGet::svs(ys@)) <= 0xffff_fff5,
+        xs@.len() <= usize::MAX - 3,
+        ys@.len() <= usize::MAX - 3,
+{
+    let mut a = VerifiedColumn::<V, C>::new();
+    a.splice(0, 0, xs.as_slice());
+    let mut b = VerifiedColumn::<V, C>::new();
+    b.splice(0, 0, ys.as_slice());
+    proof {
+        VGet::lemma_svs(xs@);
+        VGet::lemma_svs(ys@);
+    }
+
+    let mut out: Vec<u8> = Vec::new();
+    out.push(0xff);
+    let ra = a.save_to(&mut out);
+    let rb = b.save_to(&mut out);
+    let ghost ea = VerifiedColumn::<V, C>::encoding(a@);
+    let ghost eb = VerifiedColumn::<V, C>::encoding(b@);
+    // the buffer is what it held, then the one column, then the other
+    assert(out@ == seq![0xffu8] + ea + eb);
+    assert(ra.start == 1 && ra.end == rb.start && rb.end == out@.len());
+
+    let da = vstd::slice::slice_subrange(out.as_slice(), ra.start, ra.end);
+    let db = vstd::slice::slice_subrange(out.as_slice(), rb.start, rb.end);
+    assert(da@ == ea);
+    assert(db@ == eb);
+    let la = VerifiedColumn::<V, C>::load(da);
+    let lb = VerifiedColumn::<V, C>::load(db);
+    assert(la is Ok && la->Ok_0@ == VGet::svs(xs@));
+    assert(lb is Ok && lb->Ok_0@ == VGet::svs(ys@));
+}
+
+/// A column of one value only, and one that is not: what `is_only` says
+/// of each, and that a column of the one value alone is not written.
+/// For every value type and codec.
+#[allow(dead_code)]
+fn one_value_only<'v, V: VValue<C>, C: VCodec>(a: Get<'v, V>, b: Get<'v, V>)
+    requires
+        a.sv() != b.sv(),
+{
+    let same = V::same(a, b);
+    assert(!same);
+
+    let mut col = VerifiedColumn::<V, C>::new();
+    // an empty column holds no value that is not `a`
+    let none = col.is_only(a);
+    assert(none);
+    col.push(a);
+    col.push(a);
+    assert(col@ == seq![a.sv(), a.sv()]);
+    let all_a = col.is_only(a);
+    let all_b = col.is_only(b);
+    assert(all_a);
+    assert(!all_b) by {
+        assert(col@[0] != b.sv());
+    }
+
+    // a column of `a` alone is not written
+    let mut out: Vec<u8> = Vec::new();
+    out.push(7);
+    let r = col.save_to_unless(&mut out, a);
+    assert(out@ == seq![7u8]);
+    assert(r.start == 1 && r.end == 1);
+
+    // one that holds another value is
+    col.push(b);
+    let mixed = col.is_only(a);
+    assert(!mixed) by {
+        assert(col@[2] != a.sv());
+    }
+    let r = col.save_to_unless(&mut out, a);
+    assert(!only(col@, a.sv()));
+    assert(out@ == seq![7u8] + VerifiedColumn::<V, C>::encoding(col@));
+    assert(r.start == 1 && r.end == out@.len());
+
+    // the other value taken out again
+    col.remove_n(2, 1);
+    assert(col@ == seq![a.sv(), a.sv()]);
+    col.remove_n(1, 0);
+    assert(col@ == seq![a.sv(), a.sv()]);
+    col.remove_n(0, 2);
+    assert(col@.len() == 0);
+    col.push(b);
+    col.clear();
+    assert(col@.len() == 0);
+    let _slabs = col.slab_count();
+}
+
+/// `is_only` of a client's type, and of byte strings: for those, a null
+/// is a value like another, and the empty string is not the null.
+#[allow(dead_code)]
+fn only_nulls(x: &[u8], none: &[u8])
+    requires
+        none@.len() == 0,
+{
+    one_value_only::<Action, Leb128>(Action::Set, Action::Delete);
+    one_value_only::<Option<u64>, Leb128>(None, Some(0));
+    one_value_only::<bool, Leb128>(false, true);
+    one_value_only::<Option<Vec<u8>>, Leb128>(None, Some(none));
+
+    let mut col = VerifiedColumn::<Option<Vec<u8>>>::new();
+    col.push(None);
+    col.push(None);
+    let nulls = col.is_only(None);
+    assert(nulls);
+    // the unwritten column of a document: all null
+    let mut out: Vec<u8> = Vec::new();
+    let r = col.save_to_unless(&mut out, None);
+    assert(out@.len() == 0 && r.start == r.end);
+    let empties = col.is_only(Some(none));
+    assert(!empties) by {
+        assert(col@[0] != Some(none@));
+    }
 }
 
 } // verus!

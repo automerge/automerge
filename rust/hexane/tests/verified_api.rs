@@ -276,6 +276,40 @@ fn check<T: Kind>(v: &VerifiedColumn<T>, c: &Column<T>, model: &[T]) {
     assert!(v.get(model.len()).is_none());
     assert!(v.get(usize::MAX).is_none());
     assert_eq!(v.save(), c.save());
+    // the same slabs, and so the same of what is printed: but for a cleared
+    // column, which has no slab where `Column` keeps an empty one
+    if model.is_empty() {
+        assert!(v.slab_count() <= c.slab_count() && c.slab_count() <= 1);
+    } else {
+        assert_eq!(v.slab_count(), c.slab_count());
+        assert_eq!(format!("{v:?}"), format!("Verified{c:?}"));
+    }
+    // saved after what a buffer holds: the same bytes, in the same place
+    let (mut a, mut b) = (vec![9u8; 3], vec![9u8; 3]);
+    let range = v.save_to(&mut a);
+    assert_eq!(range, c.save_to(&mut b));
+    assert_eq!(a, b);
+    assert_eq!(a[..3], [9, 9, 9]);
+    assert_eq!(a[range], v.save()[..]);
+    for x in model.first().into_iter().chain(model.last()) {
+        check_only(v, c, model, x);
+    }
+}
+
+/// Whether the column holds `x` alone, and what is saved unless it does.
+fn check_only<T: Kind>(v: &VerifiedColumn<T>, c: &Column<T>, model: &[T], x: &T) {
+    let only = model.iter().all(|m| m == x);
+    assert_eq!(v.is_only(x.lend()), only);
+    assert_eq!(c.is_only(x.as_column_ref()), only);
+    let (mut a, mut b) = (vec![9u8; 3], vec![9u8; 3]);
+    let range = v.save_to_unless(&mut a, x.lend());
+    assert_eq!(range, c.save_to_unless(&mut b, x.as_column_ref()));
+    assert_eq!(a, b);
+    if only {
+        assert_eq!((a, range), (vec![9u8; 3], 3..3));
+    } else {
+        assert_eq!(a[range], v.save()[..]);
+    }
 }
 
 /// Each API loads the bytes the other saved, as the same values.
@@ -472,7 +506,7 @@ fn edits<T: Kind>() {
         let mut c = Column::<T>::with_max_segments(budget);
         let mut model: Vec<T> = vec![];
         for step in 0..120 {
-            match rng.below(10) {
+            match rng.below(12) {
                 0..=3 => {
                     let at = rng.below(model.len() + 1);
                     let del = rng.below((model.len() - at).min(12) + 1);
@@ -508,15 +542,36 @@ fn edits<T: Kind>() {
                         model.remove(at);
                     }
                 }
-                _ => {
+                9 => {
                     // sometimes past the end, which changes nothing
                     let len = rng.below(model.len() + 3);
                     v.truncate(len);
                     c.truncate(len);
                     model.truncate(len);
                 }
+                10 => {
+                    // sometimes none, sometimes all of them
+                    let at = rng.below(model.len() + 1);
+                    let n = match rng.below(8) {
+                        0 => 0,
+                        1 => model.len() - at,
+                        _ => rng.below((model.len() - at).min(40) + 1),
+                    };
+                    v.remove_n(at, n);
+                    c.remove_n(at, n);
+                    model.drain(at..at + n);
+                }
+                _ => {
+                    if rng.below(4) == 0 {
+                        v.clear();
+                        c.clear();
+                        model.clear();
+                    }
+                }
             }
             check(&v, &c, &model);
+            let x = T::fresh(&mut rng);
+            check_only(&v, &c, &model, &x);
             for _ in 0..4 {
                 if !model.is_empty() {
                     let i = rng.below(model.len());
@@ -542,6 +597,113 @@ fn edits<T: Kind>() {
 #[test]
 fn edits_agree() {
     for_each_kind!(edits);
+}
+
+/// Columns of one value, in one slab and in many, and the same with one
+/// other value at each place: `is_only` and `save_to_unless` say the same
+/// of them in both APIs, for the value, for the other and for a third
+/// (where the type has a third).
+fn one_value<T: Kind>() {
+    let mut rng = Rng(0x0e1e);
+    let a = T::fresh(&mut rng);
+    // another value, and a third where the type has one (`bool` has not)
+    let mut others: Vec<T> = vec![];
+    for _ in 0..200 {
+        let x = T::fresh(&mut rng);
+        if x != a && !others.contains(&x) && others.len() < 2 {
+            others.push(x);
+        }
+    }
+    let (b, third) = (others[0].clone(), others[others.len() - 1].clone());
+    for budget in [2, 3, 64] {
+        for n in [0, 1, 2, 3, 7, 40, 700] {
+            let model = vec![a.clone(); n];
+            // one at a time and at both ends, so that a small budget
+            // makes slabs
+            let build = || {
+                let mut v = VerifiedColumn::<T>::with_max_segments(budget);
+                let mut c = Column::<T>::with_max_segments(budget);
+                for (i, x) in model.iter().enumerate() {
+                    let at = if i % 2 == 0 { 0 } else { v.len() };
+                    v.insert(at, x.lend());
+                    c.insert(at, x.clone());
+                }
+                (v, c)
+            };
+            let (v, c) = build();
+            for x in [&a, &b, &third] {
+                check_only(&v, &c, &model, x);
+            }
+            assert!(v.is_only(a.lend()));
+            assert_eq!(v.is_only(b.lend()), n == 0);
+            // one other value, at each of a few places
+            for at in [0, 1, n / 2, n.saturating_sub(1), n] {
+                if at > n {
+                    continue;
+                }
+                let (mut v2, mut c2) = build();
+                let mut m2 = model.clone();
+                v2.insert(at, b.lend());
+                c2.insert(at, b.clone());
+                m2.insert(at, b.clone());
+                assert!(!v2.is_only(a.lend()));
+                assert_eq!(v2.is_only(b.lend()), n == 0);
+                for x in [&a, &b, &third] {
+                    check_only(&v2, &c2, &m2, x);
+                }
+                // and taken out again
+                v2.remove_n(at, 1);
+                c2.remove_n(at, 1);
+                check(&v2, &c2, &model);
+                assert!(v2.is_only(a.lend()));
+                // cleared, a column holds any value alone, and keeps its budget
+                v2.clear();
+                c2.clear();
+                check(&v2, &c2, &[]);
+                assert!(v2.is_only(a.lend()) && v2.is_only(third.lend()));
+            }
+        }
+    }
+}
+
+/// One value alone in many slabs: what is left of a column of two values
+/// in turn when the other is taken out, one at a time.
+fn one_value_in_many_slabs<T: Kind>() {
+    let mut rng = Rng(0x51ab);
+    let a = T::fresh(&mut rng);
+    let mut b = T::fresh(&mut rng);
+    while b == a {
+        b = T::fresh(&mut rng);
+    }
+    for budget in [2, 3, 8] {
+        let mut model: Vec<T> = (0..300).map(|i| [&a, &b][i % 2].clone()).collect();
+        let mut v = VerifiedColumn::<T>::with_max_segments(budget);
+        let mut c = Column::<T>::with_max_segments(budget);
+        for x in &model {
+            v.push(x.lend());
+            c.push(x.clone());
+        }
+        let mut most = 0;
+        for i in (0..model.len()).rev().filter(|i| i % 2 == 1) {
+            v.remove(i);
+            c.remove(i);
+            model.remove(i);
+            check_only(&v, &c, &model, &a);
+            check_only(&v, &c, &model, &b);
+            most = most.max(v.slab_count());
+        }
+        check(&v, &c, &model);
+        assert!(v.is_only(a.lend()) && !v.is_only(b.lend()));
+        // the case is the one meant: under a small budget, `a` alone and
+        // in many slabs
+        assert!(most > 30 && (budget > 3 || v.slab_count() > 30));
+    }
+}
+
+#[test]
+fn a_column_of_one_value() {
+    for_each_kind!(one_value);
+    for_each_kind!(one_value_in_many_slabs);
 }
 
 /// The two loaders take the same bytes, as the same values, and refuse

@@ -2612,6 +2612,7 @@ pub(crate) fn save_slabs<C: CountsOf>(slabs: &[BSlab], total: usize, out: &mut V
         crate::cursor::all_ok::<BoolModel<C>>(slabs@),
         total == crate::fenwick::total(crate::cursor::slab_lens(slabs@)),
     ensures
+        old(out)@.len() <= final(out)@.len(),
         final(out)@.take(old(out)@.len() as int) == old(out)@,
         ({
             let x = final(out)@.skip(old(out)@.len() as int);

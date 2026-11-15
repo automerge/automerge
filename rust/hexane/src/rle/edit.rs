@@ -697,6 +697,7 @@ pub(crate) fn save_slabs<L>(slabs: &[Slab], total: usize, out: &mut Vec<u8>)
         crate::cursor::all_ok::<RleModel<L>>(slabs@),
         total == crate::fenwick::total(crate::cursor::slab_lens(slabs@)),
     ensures
+        old(out)@.len() <= final(out)@.len(),
         final(out)@.take(old(out)@.len() as int) == old(out)@,
         ({
             let x = final(out)@.skip(old(out)@.len() as int);

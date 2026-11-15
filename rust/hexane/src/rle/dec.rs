@@ -84,6 +84,47 @@ pub(crate) proof fn lemma_groups_values_concat<V>(a: Seq<Group<V>>, b: Seq<Group
     }
 }
 
+/// A slab of two segments or more holds two values side by side that
+/// differ: across its first group boundary, or the first two of the
+/// literal that is its one group.
+pub(crate) proof fn lemma_two_segments<'a, O: RleOps<'a>>(data: Seq<u8>)
+    requires
+        valid_slab::<O>(data),
+        groups_segments(slab_groups::<O>(data)) >= 2,
+    ensures
+        exists|i: int|
+            0 < i < slab_values::<O>(data).len() && slab_values::<O>(data)[i - 1]
+                != #[trigger] slab_values::<O>(data)[i],
+{
+    let gs = slab_groups::<O>(data);
+    let vs = slab_values::<O>(data);
+    if gs.len() >= 2 {
+        lemma_boundary::<O>(data, 1);
+        let i = gl(gs, 1);
+        assert(0 < i < vs.len() && vs[i - 1] != vs[i]);
+    } else {
+        assert(gs.len() == 1);
+        let g = gs[0];
+        assert(gs.drop_last() =~= Seq::<Group<O::V>>::empty());
+        assert(groups_segments(gs.drop_last()) == 0);
+        assert(group_segments(g) >= 2);
+        lemma_slab_group::<O>(data, 0);
+        lemma_slab::<O>(data);
+        assert(gs.take(0) =~= Seq::<Group<O::V>>::empty());
+        assert(gl(gs, 0) == 0);
+        lemma_group_values_len(g, O::null());
+        match g {
+            Group::Lit { values } => {
+                assert(values[0] != values[1]);
+                assert(vs[0] == group_values(g, O::null())[0]);
+                assert(vs[1] == group_values(g, O::null())[1]);
+                assert(0 < 1 < vs.len() && vs[1 - 1] != vs[1]);
+            },
+            _ => {},
+        }
+    }
+}
+
 /// Across a group boundary the value changes: canonical groups never put
 /// two equal values side by side there.
 pub(crate) proof fn lemma_boundary<'a, O: RleOps<'a>>(data: Seq<u8>, i: int)
@@ -4157,6 +4198,20 @@ impl<'a, O> Decoders<'a> for RleReads<O> where O: for<'b> RleOps<'b> {
             assert(empty@ =~= Seq::<u8>::empty());
         }
         RDecoder { inner: Dec::new(empty) }
+    }
+
+    /// One segment is one value, however many times.
+    #[inline(always)]
+    fn maybe_uniform(s: &'a Slab) -> (r: bool) {
+        proof {
+            if s.segments >= 2 {
+                let vs = slab_values::<O>(slab_bytes(*s));
+                lemma_two_segments::<O>(slab_bytes(*s));
+                let i = choose|i: int| 0 < i < vs.len() && vs[i - 1] != #[trigger] vs[i];
+                assert(Self::vals(*s)[i - 1] != Self::vals(*s)[i]);
+            }
+        }
+        s.segments < 2
     }
 }
 

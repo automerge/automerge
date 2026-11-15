@@ -2637,6 +2637,13 @@ impl<'a, C: CountsOf> Decoders<'a> for BoolReads<C> {
         }
         BoolDecoder { d: BDec::new::<C::K>(empty), _codec: PhantomData }
     }
+
+    /// No test: a bool slab's first run, which says as much, is read in
+    /// a few instructions.
+    #[inline(always)]
+    fn maybe_uniform(_s: &'a BSlab) -> (r: bool) {
+        true
+    }
 }
 
 #[inline(always)]

@@ -120,6 +120,7 @@ pub(crate) trait Model<X>: Slabs + Sized + for <'a>ReadsAgree<'a, X> where
             all_ok::<Self>(slabs@),
             total == crate::fenwick::total(slab_lens(slabs@)),
         ensures
+            old(out)@.len() <= final(out)@.len(),
             final(out)@.take(old(out)@.len() as int) == old(out)@,
             ({
                 let x = final(out)@.skip(old(out)@.len() as int);
