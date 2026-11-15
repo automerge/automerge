@@ -226,22 +226,46 @@ proof fn lemma_next_group<'a, O: RleOps<'a>>(data: Seq<u8>, gs: Seq<Group<O::V>>
             &&& data.skip(pos) == group_bytes::<O>(g2[gs.len() as int]) + groups_bytes::<O>(g2.skip(gs.len() as int + 1))
         },
 {
-    reveal(parses);
-    reveal(complete);
     let n = gs.len() as int;
     assert forall|g2: Seq<Group<O::V>>| #[trigger] parses::<O>(g2, data) implies {
         &&& g2.len() > n
         &&& g2.take(n) == gs
         &&& data.skip(pos) == group_bytes::<O>(g2[n]) + groups_bytes::<O>(g2.skip(n + 1))
     } by {
-        if g2.len() == n {
-            assert(g2 =~= g2.take(n));
+        assert(g2.len() >= n && g2.take(n) == gs && groups_bytes::<O>(g2) == data) by {
+            reveal(parses);
+            reveal(complete);
         }
-        lemma_parse_after::<O>(g2, n);
-        let tail = group_bytes::<O>(g2[n]) + groups_bytes::<O>(g2.skip(n + 1));
-        assert(data =~= groups_bytes::<O>(gs) + tail);
-        lemma_split(data, groups_bytes::<O>(gs), tail, pos);
+        lemma_group_after::<O>(data, gs, pos, g2);
     }
+}
+
+/// Groups `g2` whose bytes are `data` and which begin with `gs`, the
+/// bytes of `gs` ending before the end of `data`, have a group after
+/// `gs`: its bytes, and those of the groups after it, are the rest of
+/// `data`.
+proof fn lemma_group_after<'a, O: RleOps<'a>>(data: Seq<u8>, gs: Seq<Group<O::V>>, pos: int, g2: Seq<Group<O::V>>)
+    requires
+        0 <= pos < data.len(),
+        data.take(pos) == groups_bytes::<O>(gs),
+        groups_bytes::<O>(g2) == data,
+        g2.len() >= gs.len(),
+        g2.take(gs.len() as int) == gs,
+    ensures
+        g2.len() > gs.len(),
+        data.skip(pos) == group_bytes::<O>(g2[gs.len() as int]) + groups_bytes::<O>(g2.skip(gs.len() as int + 1)),
+{
+    hide(groups_bytes);
+    hide(group_bytes);
+    let n = gs.len() as int;
+    if g2.len() == n {
+        assert(g2 =~= g2.take(n));
+        assert(data.take(pos).len() == pos);
+    }
+    lemma_parse_after::<O>(g2, n);
+    let tail = group_bytes::<O>(g2[n]) + groups_bytes::<O>(g2.skip(n + 1));
+    assert(data =~= groups_bytes::<O>(gs) + tail);
+    lemma_split(data, groups_bytes::<O>(gs), tail, pos);
 }
 
 /// A header read off the next group's bytes.
@@ -254,23 +278,47 @@ proof fn lemma_header_ok<'a, O: RleOps<'a>>(data: Seq<u8>, gs: Seq<Group<O::V>>,
         header_at::<O>(data, gs, h as int, pos + hn),
         data.take(pos + hn) == groups_bytes::<O>(gs) + O::enc_signed(h),
 {
-    reveal(parses);
-    reveal(header_at);
     lemma_next_group::<O>(data, gs, pos);
     let n = gs.len() as int;
     assert forall|g2: Seq<Group<O::V>>| #[trigger] parses::<O>(g2, data) implies {
+        &&& g2.len() > n
+        &&& g2.take(n) == gs
         &&& header_of(g2[n]) == h
         &&& data.skip(pos + hn) == payload::<O>(g2[n]) + groups_bytes::<O>(g2.skip(n + 1))
     } by {
-        let g = g2[n];
-        assert(group_ok::<O>(g));
-        lemma_group_bytes_split::<O>(g);
-        let q = payload::<O>(g) + groups_bytes::<O>(g2.skip(n + 1));
-        assert(data.skip(pos) =~= O::enc_signed(header_of(g) as i64) + q);
-        lemma_header::<O>(data.skip(pos), header_of(g) as i64, q, hn, h);
+        assert(group_ok::<O>(g2[n])) by {
+            reveal(parses);
+        }
+        lemma_header_after::<O>(data.skip(pos), g2[n], groups_bytes::<O>(g2.skip(n + 1)), hn, h);
         assert(data.skip(pos).skip(hn) =~= data.skip(pos + hn));
     }
+    assert(header_at::<O>(data, gs, h as int, pos + hn)) by {
+        reveal(header_at);
+    }
     assert(data.take(pos + hn) =~= data.take(pos) + data.skip(pos).take(hn));
+}
+
+/// A string that starts with the bytes of group `g`, and with the
+/// encoding of the signed `h`: `h` is the group's header, and the group's
+/// payload follows it.
+proof fn lemma_header_after<'a, O: RleOps<'a>>(s: Seq<u8>, g: Group<O::V>, rest: Seq<u8>, hn: int, h: i64)
+    requires
+        group_ok::<O>(g),
+        s == group_bytes::<O>(g) + rest,
+        0 <= hn <= s.len(),
+        s.take(hn) == O::enc_signed(h),
+    ensures
+        header_of(g) == h,
+        s.skip(hn) == payload::<O>(g) + rest,
+{
+    hide(group_bytes);
+    hide(payload);
+    hide(group_ok);
+    hide(header_of);
+    lemma_group_bytes_split::<O>(g);
+    let q = payload::<O>(g) + rest;
+    assert(s =~= O::enc_signed(header_of(g) as i64) + q);
+    lemma_header::<O>(s, header_of(g) as i64, q, hn, h);
 }
 
 /// No header can be read off the next group's bytes: no parse.
@@ -303,29 +351,91 @@ proof fn lemma_lit_at<'a, O: RleOps<'a>>(data: Seq<u8>, gs: Seq<Group<O::V>>, k:
         0 <= pos <= data.len(), data.take(pos) == read_bytes::<O>(gs, k, cur),
     ensures lit_at::<O>(data, gs, k, cur, pos),
 {
-    reveal(complete);
-    reveal(lit_at);
     let n = gs.len() as int;
-    assert forall|g2: Seq<Group<O::V>>| #[trigger] parses::<O>(g2, data) implies
-        data.skip(pos) == encs::<O>(g2[n]->values.skip(cur.len() as int)) + groups_bytes::<O>(g2.skip(n + 1)) by {
-        let vs = g2[n]->values;
-        let i = cur.len() as int;
-        assert(g2.take(n) == gs && g2[n] is Lit && vs.len() == k && vs.take(i) == cur);
+    assert forall|g2: Seq<Group<O::V>>| #[trigger] parses::<O>(g2, data) implies {
+        &&& g2.len() > n
+        &&& g2.take(n) == gs
+        &&& g2[n] is Lit
+        &&& g2[n]->values.len() == k
+        &&& g2[n]->values.take(cur.len() as int) == cur
+        &&& data.skip(pos) == encs::<O>(g2[n]->values.skip(cur.len() as int)) + groups_bytes::<O>(g2.skip(n + 1))
+    } by {
+        assert(g2.len() > n && g2.take(n) == gs && g2[n] is Lit && g2[n]->values.len() == k && g2[n]->values.take(
+            cur.len() as int,
+        ) == cur) by {
+            reveal(complete);
+        }
         assert(groups_bytes::<O>(g2) == data) by {
             reveal(parses);
         }
-        lemma_parse_after::<O>(g2, n);
-        assert(vs =~= vs.take(i) + vs.skip(i));
-        lemma_encs_concat::<O>(cur, vs.skip(i));
-        let tail = encs::<O>(vs.skip(i)) + groups_bytes::<O>(g2.skip(n + 1));
-        assert(group_bytes::<O>(g2[n]) == lit_head::<O>(k) + encs::<O>(vs));
-        assert(data == read_bytes::<O>(gs, k, cur) + tail) by {
-            assert(data == groups_bytes::<O>(gs) + group_bytes::<O>(g2[n]) + groups_bytes::<O>(g2.skip(n + 1)));
-            assert(group_bytes::<O>(g2[n]) == lit_head::<O>(k) + (encs::<O>(cur) + encs::<O>(vs.skip(i))));
-            assert(data =~= read_bytes::<O>(gs, k, cur) + tail);
-        }
-        lemma_split(data, read_bytes::<O>(gs, k, cur), tail, pos);
+        lemma_lit_rest::<O>(data, gs, k, cur, pos, g2);
     }
+    assert(lit_at::<O>(data, gs, k, cur, pos)) by {
+        reveal(lit_at);
+    }
+}
+
+/// Groups `g2` whose bytes are `data`, which continue `gs` with a literal
+/// of `k` values beginning with `cur`: after the bytes read so far come
+/// the literal's remaining values, then the groups after it.
+proof fn lemma_lit_rest<'a, O: RleOps<'a>>(
+    data: Seq<u8>,
+    gs: Seq<Group<O::V>>,
+    k: nat,
+    cur: Seq<O::V>,
+    pos: int,
+    g2: Seq<Group<O::V>>,
+)
+    requires
+        k > 0,
+        cur.len() <= k,
+        0 <= pos <= data.len(),
+        data.take(pos) == read_bytes::<O>(gs, k, cur),
+        groups_bytes::<O>(g2) == data,
+        g2.len() > gs.len(),
+        g2.take(gs.len() as int) == gs,
+        g2[gs.len() as int] is Lit,
+        g2[gs.len() as int]->values.len() == k,
+        g2[gs.len() as int]->values.take(cur.len() as int) == cur,
+    ensures
+        data.skip(pos) == encs::<O>(g2[gs.len() as int]->values.skip(cur.len() as int)) + groups_bytes::<O>(
+            g2.skip(gs.len() as int + 1),
+        ),
+{
+    hide(groups_bytes);
+    hide(encs);
+    let n = gs.len() as int;
+    let vs = g2[n]->values;
+    let i = cur.len() as int;
+    lemma_parse_after::<O>(g2, n);
+    assert(vs =~= vs.take(i) + vs.skip(i));
+    lemma_encs_concat::<O>(cur, vs.skip(i));
+    let tail = encs::<O>(vs.skip(i)) + groups_bytes::<O>(g2.skip(n + 1));
+    assert(group_bytes::<O>(g2[n]) == lit_head::<O>(k) + encs::<O>(vs));
+    assert(data == read_bytes::<O>(gs, k, cur) + tail) by {
+        assert(data == groups_bytes::<O>(gs) + group_bytes::<O>(g2[n]) + groups_bytes::<O>(g2.skip(n + 1)));
+        assert(group_bytes::<O>(g2[n]) == lit_head::<O>(k) + (encs::<O>(cur) + encs::<O>(vs.skip(i))));
+        assert(data =~= read_bytes::<O>(gs, k, cur) + tail);
+    }
+    lemma_split(data, read_bytes::<O>(gs, k, cur), tail, pos);
+}
+
+/// The bytes of the values from `i` on, then `rest`, start with the
+/// value at `i`.
+proof fn lemma_encs_first<'a, O: RleOps<'a>>(vs: Seq<O::V>, i: int, rest: Seq<u8>)
+    requires 0 <= i < vs.len(),
+    ensures
+        encs::<O>(vs.skip(i)) + rest == O::enc(vs[i]) + (encs::<O>(vs.skip(i + 1)) + rest),
+{
+    let one = seq![vs[i]];
+    assert(vs.skip(i) =~= one + vs.skip(i + 1));
+    lemma_encs_concat::<O>(one, vs.skip(i + 1));
+    assert(encs::<O>(one) == O::enc(vs[i])) by {
+        assert(one.drop_last() =~= Seq::<O::V>::empty());
+        assert(encs::<O>(one.drop_last()) =~= Seq::<u8>::empty());
+        assert(encs::<O>(one) =~= O::enc(one.last()));
+    }
+    assert((O::enc(vs[i]) + encs::<O>(vs.skip(i + 1))) + rest =~= O::enc(vs[i]) + (encs::<O>(vs.skip(i + 1)) + rest));
 }
 
 /// The parse's value at a literal position, split off.
@@ -350,14 +460,10 @@ proof fn lemma_lit_value<'a, O: RleOps<'a>>(data: Seq<u8>, gs: Seq<Group<O::V>>,
     let i = cur.len() as int;
     assert(group_ok::<O>(g2[n]));
     if n > 0 {
-        lemma_parse_after::<O>(g2, n);
         assert(adjacent_ok(g2[n - 1], g2[n]));
         assert(g2.take(n)[n - 1] == g2[n - 1]);
     }
-    assert(vs.skip(i) =~= seq![vs[i]] + vs.skip(i + 1));
-    lemma_encs_concat::<O>(seq![vs[i]], vs.skip(i + 1));
-    reveal_with_fuel(encs, 2);
-    assert(encs::<O>(seq![vs[i]]) =~= O::enc(vs[i]));
+    lemma_encs_first::<O>(vs, i, groups_bytes::<O>(g2.skip(n + 1)));
 }
 
 
@@ -409,6 +515,69 @@ proof fn lemma_null_at<'a, O: RleOps<'a>>(data: Seq<u8>, gs: Seq<Group<O::V>>, p
     if n > 0 {
         assert(adjacent_ok(g2[n - 1], g2[n]));
         assert(g2.take(n)[n - 1] == g2[n - 1]);
+    }
+}
+
+/// A count read after a zero header: an acceptable parse has a null run
+/// of that count next.
+proof fn lemma_null_count<'a, O: RleOps<'a>>(data: Seq<u8>, gs: Seq<Group<O::V>>, p: int, cn: int, c: u64, g2: Seq<Group<O::V>>)
+    requires
+        header_at::<O>(data, gs, 0, p),
+        0 <= p <= data.len(),
+        0 <= cn <= data.len() - p,
+        data.skip(p).take(cn) == O::enc_unsigned(c),
+        parses::<O>(g2, data),
+    ensures ({
+        let n = gs.len() as int;
+        &&& g2.len() > n && g2.take(n) == gs
+        &&& g2[n] == (Group::<O::V>::Null { count: c as nat })
+        &&& 1 <= c && O::nullable()
+        &&& groups_len(g2) >= groups_len(gs) + c
+        &&& n > 0 ==> adjacent_ok(gs.last(), g2[n])
+        &&& groups_len(g2) <= usize::MAX
+    }),
+{
+    hide(groups_bytes);
+    hide(groups_len);
+    let n = gs.len() as int;
+    lemma_null_at::<O>(data, gs, p, g2);
+    lemma_count::<O>(data.skip(p), g2[n]->Null_count as u64, groups_bytes::<O>(g2.skip(n + 1)), cn, c);
+}
+
+/// No count after a zero header: no acceptable parse.
+proof fn lemma_null_count_err<'a, O: RleOps<'a>>(data: Seq<u8>, gs: Seq<Group<O::V>>, p: int)
+    requires
+        header_at::<O>(data, gs, 0, p),
+        forall|x: u64| !O::enc_unsigned(x).is_prefix_of(data.skip(p)),
+    ensures no_parse::<O>(data),
+{
+    hide(groups_bytes);
+    hide(groups_len);
+    let n = gs.len() as int;
+    assert forall|g2: Seq<Group<O::V>>| !parses::<O>(g2, data) by {
+        if parses::<O>(g2, data) {
+            lemma_null_at::<O>(data, gs, p, g2);
+            lemma_starts(O::enc_unsigned(g2[n]->Null_count as u64), groups_bytes::<O>(g2.skip(n + 1)));
+        }
+    }
+}
+
+/// A null run that cannot be next: no acceptable parse.
+proof fn lemma_null_bad<'a, O: RleOps<'a>>(data: Seq<u8>, gs: Seq<Group<O::V>>, p: int, cn: int, c: u64)
+    requires
+        header_at::<O>(data, gs, 0, p),
+        0 <= p <= data.len(),
+        0 <= cn <= data.len() - p,
+        data.skip(p).take(cn) == O::enc_unsigned(c),
+        c == 0 || !O::nullable() || (gs.len() > 0 && gs.last() is Null) || groups_len(gs) + c > usize::MAX,
+    ensures no_parse::<O>(data),
+{
+    hide(groups_bytes);
+    hide(groups_len);
+    assert forall|g2: Seq<Group<O::V>>| !parses::<O>(g2, data) by {
+        if parses::<O>(g2, data) {
+            lemma_null_count::<O>(data, gs, p, cn, c, g2);
+        }
     }
 }
 
@@ -524,6 +693,97 @@ proof fn lemma_lit_close<'a, O: RleOps<'a>>(data: Seq<u8>, gs: Seq<Group<O::V>>,
     } by {
         lemma_lit_value::<O>(data, gs, k, cur, p, g2);
         assert(g2[n]->values =~= g2[n]->values.take(i).push(g2[n]->values[i]));
+    }
+}
+
+/// Inside a literal, where no value can be read: no parse.
+proof fn lemma_lit_value_err<'a, O: RleOps<'a>>(data: Seq<u8>, gs: Seq<Group<O::V>>, k: nat, cur: Seq<O::V>, p: int)
+    requires
+        lit_at::<O>(data, gs, k, cur, p), cur.len() < k,
+        forall|v: O::V| !O::is_null(v) ==> !O::enc(v).is_prefix_of(data.skip(p)),
+    ensures no_parse::<O>(data),
+{
+    let n = gs.len() as int;
+    let i = cur.len() as int;
+    assert forall|g2: Seq<Group<O::V>>| !parses::<O>(g2, data) by {
+        if parses::<O>(g2, data) {
+            lemma_lit_value::<O>(data, gs, k, cur, p, g2);
+            let vs = g2[n]->values;
+            lemma_starts(O::enc(vs[i]), encs::<O>(vs.skip(i + 1)) + groups_bytes::<O>(g2.skip(n + 1)));
+        }
+    }
+}
+
+/// A value read inside a literal is the one every acceptable parse has
+/// there.
+proof fn lemma_lit_value_ok<'a, O: RleOps<'a>>(data: Seq<u8>, gs: Seq<Group<O::V>>, k: nat, cur: Seq<O::V>, p: int, bn: int, value: O::V)
+    requires
+        lit_at::<O>(data, gs, k, cur, p), cur.len() < k,
+        0 <= bn <= data.skip(p).len(), data.skip(p).take(bn) == O::enc(value), !O::is_null(value),
+    ensures value_next::<O>(data, gs, cur, value),
+{
+    let n = gs.len() as int;
+    let i = cur.len() as int;
+    assert forall|g2: Seq<Group<O::V>>| #[trigger] parses::<O>(g2, data) implies g2[n]->values[i] == value by {
+        lemma_lit_value::<O>(data, gs, k, cur, p, g2);
+        let vs = g2[n]->values;
+        lemma_value::<O>(data.skip(p), vs[i], encs::<O>(vs.skip(i + 1)) + groups_bytes::<O>(g2.skip(n + 1)), bn, value);
+    }
+}
+
+/// A value read inside a literal that equals the value before it: no
+/// parse.
+proof fn lemma_lit_value_same<'a, O: RleOps<'a>>(data: Seq<u8>, gs: Seq<Group<O::V>>, k: nat, cur: Seq<O::V>, p: int, value: O::V)
+    requires
+        lit_at::<O>(data, gs, k, cur, p), cur.len() < k, value_next::<O>(data, gs, cur, value),
+        prev_of(gs, cur) == Prev::Run(value) || prev_of(gs, cur) == Prev::Lit(value),
+    ensures no_parse::<O>(data),
+{
+    let n = gs.len() as int;
+    let i = cur.len() as int;
+    assert forall|g2: Seq<Group<O::V>>| !parses::<O>(g2, data) by {
+        if parses::<O>(g2, data) {
+            lemma_lit_value::<O>(data, gs, k, cur, p, g2);
+            let vs = g2[n]->values;
+            assert(vs[i] == value);
+            if i > 0 {
+                assert(vs[i - 1] == vs.take(i)[i - 1]);
+            }
+        }
+    }
+}
+
+/// The bytes read and the literal's values, with one more value that
+/// differs from the value before it.
+proof fn lemma_lit_pushed<'a, O: RleOps<'a>>(data: Seq<u8>, gs: Seq<Group<O::V>>, k: nat, cur: Seq<O::V>, p: int, bn: int, value: O::V)
+    requires
+        k > 0, 0 <= p, 0 <= bn, p + bn <= data.len(),
+        data.take(p) == read_bytes::<O>(gs, k, cur),
+        data.skip(p).take(bn) == O::enc(value), !O::is_null(value),
+        lit_prefix_ok::<O>(gs, cur),
+        prev_of(gs, cur) != Prev::Run(value), prev_of(gs, cur) != Prev::Lit(value),
+    ensures
+        data.take(p + bn) == read_bytes::<O>(gs, k, cur.push(value)),
+        lit_prefix_ok::<O>(gs, cur.push(value)),
+        prev_of(gs, cur.push(value)) == Prev::Lit(value),
+        bn == O::enc(value).len(), bn > 0,
+{
+    let cur2 = cur.push(value);
+    let i = cur.len() as int;
+    O::axiom_enc(value, value, Seq::empty(), Seq::empty());
+    assert(data.take(p + bn) =~= data.take(p) + data.skip(p).take(bn));
+    assert(cur2.drop_last() =~= cur);
+    assert(encs::<O>(cur2) == encs::<O>(cur) + O::enc(value));
+    assert(data.take(p + bn) =~= read_bytes::<O>(gs, k, cur2));
+    assert forall|j: int| 0 < j < cur2.len() implies cur2[j - 1] != #[trigger] cur2[j] by {
+        if j < i {
+            assert(cur2[j - 1] == cur[j - 1] && cur2[j] == cur[j]);
+        }
+    }
+    assert forall|j: int| 0 <= j < cur2.len() implies !O::is_null(#[trigger] cur2[j]) by {
+        if j < i {
+            assert(cur2[j] == cur[j]);
+        }
     }
 }
 
@@ -690,6 +950,69 @@ impl<'a, O: RleOps<'a>> Reader<'a, O> {
         ensures r == self.spec_pos(),
     {
         self.pos
+    }
+
+    /// What `next_null` needs of `inv` before it has read the count.
+    proof fn lemma_inv_null(&self)
+        requires self.inv(), !self.in_lit(),
+        ensures
+            self.len == groups_len(self.gs@),
+            self.prev is Null ==> self.gs@.len() > 0 && self.gs@.last() is Null,
+            self.data@.len() <= usize::MAX,
+    {
+        assert(self.data@.len() == self.data.len());
+    }
+
+    /// The step of `next_null`: a null run of `c` values is read.
+    proof fn lemma_null_step(r0: Self, r1: Self, hn: usize, cn: usize, c: u64)
+        requires
+            r0.inv(), !r0.in_lit(),
+            r0.pos + hn + cn <= r0.data@.len(),
+            header_at::<O>(r0.data@, r0.gs@, 0, r0.pos + hn),
+            r0.data@.take(r0.pos + hn) == groups_bytes::<O>(r0.gs@) + O::enc_signed(0),
+            hn == O::enc_signed(0).len(),
+            r0.data@.skip(r0.pos + hn).take(cn as int) == O::enc_unsigned(c),
+            1 <= c <= usize::MAX - r0.len,
+            O::nullable(),
+            !(r0.prev is Null),
+            r1 == (Reader {
+                pos: (r0.pos + hn + cn) as usize,
+                len: (r0.len + c) as usize,
+                prev: Prev::Null,
+                gs: Ghost(r0.gs@.push(Group::Null { count: c as nat })),
+                ..r0
+            }),
+        ensures
+            next_post(r0, r1, Ok(Some(Seg::Null { count: c as usize, bytes: (hn + cn) as usize }))),
+    {
+        let data = r0.data@;
+        let gs = r0.gs@;
+        let n = gs.len() as int;
+        let p = r0.pos + hn;
+        let g = Group::<O::V>::Null { count: c as nat };
+        assert(r0.cur@ =~= Seq::<O::V>::empty());
+        assert forall|g2: Seq<Group<O::V>>| #[trigger] parses::<O>(g2, data) implies
+            g2.len() > n && g2.take(n) == gs && g2[n] == g by {
+            lemma_null_count::<O>(data, gs, p, cn as int, c, g2);
+        }
+        assert(data.take(p + cn) =~= data.take(p) + data.skip(p).take(cn as int));
+        assert(group_bytes::<O>(g) == O::enc_signed(0) + O::enc_unsigned(c));
+        assert(group_ok::<O>(g));
+        if n > 0 {
+            assert(adjacent_ok(gs.last(), g));
+        }
+        lemma_canonical_push::<O>(gs, g);
+        lemma_groups_push::<O>(gs, g);
+        lemma_complete_push::<O>(data, gs, g);
+        O::axiom_enc_signed(0, 0, Seq::empty(), Seq::empty());
+        assert(r1.data@.take(r1.pos as int) == read_bytes::<O>(r1.gs@, r1.lit_k@, r1.cur@));
+        assert(canonical::<O>(r1.gs@));
+        assert(r1.len == groups_len(r1.gs@) + r1.cur@.len());
+        assert(r1.prev == prev_of(r1.gs@, r1.cur@));
+        assert(complete::<O>(r1.data@, r1.gs@, r1.lit_k@, r1.cur@));
+        assert(r1.inv());
+        assert(r1.groups() == gs.push(g));
+        assert(hn + cn == group_bytes::<O>(g).len());
     }
 
     /// The next segment, `None` at the end of the data, or an error if no
@@ -906,7 +1229,6 @@ impl<'a, O: RleOps<'a>> Reader<'a, O> {
     }
 
     #[verifier::spinoff_prover]
-    #[verifier::rlimit(40)]
     fn next_null(&mut self, hn: usize) -> (r: Result<Option<Seg<O::V>>, PackError>)
         requires
             old(self).inv(), !old(self).in_lit(),
@@ -916,35 +1238,23 @@ impl<'a, O: RleOps<'a>> Reader<'a, O> {
             hn == O::enc_signed(0).len(),
         ensures next_post(*old(self), *final(self), r),
     {
+        hide(Reader::inv);
         let ghost data = self.data@;
         let ghost gs = self.gs@;
-        let ghost n = gs.len() as int;
         let ghost p = self.pos + hn;
         proof {
-            assert(self.cur@ =~= Seq::<O::V>::empty());
+            self.lemma_inv_null();
         }
         let rest = &self.data[self.pos + hn..];
         let (cn, c) = match O::read_unsigned(rest) {
             Ok(x) => x,
             Err(e) => {
                 proof {
-                    assert forall|g2: Seq<Group<O::V>>| !parses::<O>(g2, data) by {
-                        if parses::<O>(g2, data) {
-                            lemma_null_at::<O>(data, gs, p, g2);
-                            lemma_starts(O::enc_unsigned(g2[n]->Null_count as u64), groups_bytes::<O>(g2.skip(n + 1)));
-                        }
-                    }
+                    lemma_null_count_err::<O>(data, gs, p);
                 }
                 return Err(e);
             },
         };
-        proof {
-            assert forall|g2: Seq<Group<O::V>>| #[trigger] parses::<O>(g2, data) implies
-                g2.len() > n && g2.take(n) == gs && g2[n] == (Group::<O::V>::Null { count: c as nat }) by {
-                lemma_null_at::<O>(data, gs, p, g2);
-                lemma_count::<O>(rest@, g2[n]->Null_count as u64, groups_bytes::<O>(g2.skip(n + 1)), cn as int, c);
-            }
-        }
         let bad = if c == 0 {
             Some("null run with count 0")
         } else if !O::nullable_exec() {
@@ -958,42 +1268,19 @@ impl<'a, O: RleOps<'a>> Reader<'a, O> {
         };
         if let Some(msg) = bad {
             proof {
-                assert forall|g2: Seq<Group<O::V>>| !parses::<O>(g2, data) by {
-                    if parses::<O>(g2, data) {
-                        lemma_null_at::<O>(data, gs, p, g2);
-                    }
-                }
+                lemma_null_bad::<O>(data, gs, p, cn as int, c);
             }
             return Err(invalid(msg));
         }
         let count = c as usize;
         let bytes = hn + cn;
         let ghost g = Group::<O::V>::Null { count: count as nat };
-        proof {
-            assert(data.take(p + cn) =~= data.take(p) + rest@.take(cn as int));
-            assert(group_bytes::<O>(g) == O::enc_signed(0) + O::enc_unsigned(c));
-            assert(group_ok::<O>(g));
-            if n > 0 {
-                assert(adjacent_ok(gs.last(), g));
-            }
-            lemma_canonical_push::<O>(gs, g);
-            lemma_groups_push::<O>(gs, g);
-            lemma_complete_push::<O>(data, gs, g);
-        }
         self.pos = self.pos + bytes;
         self.len = self.len + count;
         self.prev = Prev::Null;
         self.gs = Ghost(gs.push(g));
         proof {
-            O::axiom_enc_signed(0, 0, Seq::empty(), Seq::empty());
-            assert(self.data@.take(self.pos as int) == read_bytes::<O>(self.gs@, self.lit_k@, self.cur@));
-            assert(canonical::<O>(self.gs@));
-            assert(self.len == groups_len(self.gs@) + self.cur@.len());
-            assert(self.prev == prev_of(self.gs@, self.cur@));
-            assert(complete::<O>(self.data@, self.gs@, self.lit_k@, self.cur@));
-            assert(self.inv());
-            assert(self.groups() == gs.push(g));
-            assert(bytes == group_bytes::<O>(g).len());
+            Self::lemma_null_step(*old(self), *self, hn, cn, c);
         }
         Ok(Some(Seg::Null { count, bytes }))
     }
@@ -1005,10 +1292,8 @@ impl<'a, O: RleOps<'a>> Reader<'a, O> {
     {
         let ghost data = self.data@;
         let ghost gs = self.gs@;
-        let ghost n = gs.len() as int;
         let ghost k = self.lit_k@;
         let ghost cur = self.cur@;
-        let ghost i = cur.len() as int;
         let ghost p = self.pos as int;
         proof {
             lemma_lit_at::<O>(data, gs, k, cur, p);
@@ -1018,39 +1303,19 @@ impl<'a, O: RleOps<'a>> Reader<'a, O> {
             Ok(x) => x,
             Err(e) => {
                 proof {
-                    assert forall|g2: Seq<Group<O::V>>| !parses::<O>(g2, data) by {
-                        if parses::<O>(g2, data) {
-                            lemma_lit_value::<O>(data, gs, k, cur, p, g2);
-                            let vs = g2[n]->values;
-                            lemma_starts(O::enc(vs[i]), encs::<O>(vs.skip(i + 1)) + groups_bytes::<O>(g2.skip(n + 1)));
-                        }
-                    }
+                    lemma_lit_value_err::<O>(data, gs, k, cur, p);
                 }
                 return Err(e);
             },
         };
         proof {
-            assert forall|g2: Seq<Group<O::V>>| #[trigger] parses::<O>(g2, data) implies
-                g2[n]->values[i] == value by {
-                lemma_lit_value::<O>(data, gs, k, cur, p, g2);
-                let vs = g2[n]->values;
-                lemma_value::<O>(rest@, vs[i], encs::<O>(vs.skip(i + 1)) + groups_bytes::<O>(g2.skip(n + 1)), bytes as int, value);
-            }
-            assert(value_next::<O>(data, gs, cur, value));
+            lemma_lit_value_ok::<O>(data, gs, k, cur, p, bytes as int, value);
         }
         match self.prev {
             Prev::Run(x) | Prev::Lit(x) => {
                 if O::same(&x, &value) {
                     proof {
-                        assert forall|g2: Seq<Group<O::V>>| !parses::<O>(g2, data) by {
-                            if parses::<O>(g2, data) {
-                                lemma_lit_value::<O>(data, gs, k, cur, p, g2);
-                                let vs = g2[n]->values;
-                                if i > 0 {
-                                    assert(vs[i - 1] == vs.take(i)[i - 1]);
-                                }
-                            }
-                        }
+                        lemma_lit_value_same::<O>(data, gs, k, cur, p, value);
                     }
                     return Err(invalid("equal values side by side (should be one repeat run)"));
                 }
@@ -1059,24 +1324,7 @@ impl<'a, O: RleOps<'a>> Reader<'a, O> {
         }
         let ghost cur2 = cur.push(value);
         proof {
-            assert(data.take(p + bytes) =~= data.take(p) + rest@.take(bytes as int));
-            lemma_encs_concat::<O>(cur, seq![value]);
-            reveal_with_fuel(encs, 2);
-            assert(encs::<O>(seq![value]) =~= O::enc(value));
-            assert(cur + seq![value] =~= cur2);
-            assert(lit_prefix_ok::<O>(gs, cur2)) by {
-                assert forall|j: int| 0 < j < cur2.len() implies cur2[j - 1] != #[trigger] cur2[j] by {
-                    if j < i {
-                        assert(cur2[j - 1] == cur[j - 1] && cur2[j] == cur[j]);
-                    }
-                }
-                assert forall|j: int| 0 <= j < cur2.len() implies !O::is_null(#[trigger] cur2[j]) by {
-                    if j < i {
-                        assert(cur2[j] == cur[j]);
-                    }
-                }
-            }
-            O::axiom_enc(value, value, Seq::empty(), Seq::empty());
+            lemma_lit_pushed::<O>(data, gs, k, cur, p, bytes as int, value);
         }
         self.pos = self.pos + bytes;
         self.lit_left = self.lit_left - 1;
@@ -1086,17 +1334,12 @@ impl<'a, O: RleOps<'a>> Reader<'a, O> {
         if self.lit_left > 0 {
             proof {
                 lemma_lit_continue::<O>(data, gs, k, cur, p, value);
-                assert(self.data@.take(self.pos as int) == read_bytes::<O>(self.gs@, self.lit_k@, self.cur@));
-                assert(self.prev == prev_of(self.gs@, self.cur@));
                 assert(self.inv());
             }
             return Ok(Some(Seg::Lit { value, bytes }));
         }
         proof {
             lemma_lit_close::<O>(data, gs, k, cur, p, value);
-            assert(self.data@.take(self.pos as int) == read_bytes::<O>(gs, k, self.cur@));
-            assert(self.cur@.len() == k);
-            assert(bytes > 0);
         }
         self.close_lit(Ghost(*old(self)), value, bytes)
     }

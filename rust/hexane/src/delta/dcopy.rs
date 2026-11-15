@@ -26,6 +26,8 @@
 
 use crate::btree::{SlabAgg, SlabBTree};
 use crate::column::Slab;
+#[cfg(verus_keep_ghost)]
+use crate::copy::{lemma_produced_next, lemma_splice_at};
 use crate::cursor::Visitor;
 use crate::delta::agg::DeltaOps;
 #[cfg(verus_keep_ghost)]
@@ -332,7 +334,6 @@ fn apply_one<'a, L, O, B>(
 /// one by one; panics if they would leave `min..=max` or span 2^63 or
 /// more.
 #[verifier::spinoff_prover]
-#[verifier::rlimit(40)]
 pub(crate) fn copy_direct<L, O, B>(dst: &mut DCol<L, O, B>, list: &Normalized, src: &DCol<L, O, B>, min: i64, max: i64) where
     L: for<'t> Lift<'t, W = L> + for<'t> WriteOps<'t, R = O>,
     O: for<'b> RleOps<'b>,
@@ -345,6 +346,10 @@ pub(crate) fn copy_direct<L, O, B>(dst: &mut DCol<L, O, B>, list: &Normalized, s
             list.seen(),
         ),
 {
+    hide(DeltaEditCore::inv);
+    hide(DSrc::inv);
+    hide(normal);
+    hide(produced);
     if list.src_len() != src.len() || list.dst_len() != dst.len() {
         wrong_columns();
     }
@@ -357,10 +362,11 @@ pub(crate) fn copy_direct<L, O, B>(dst: &mut DCol<L, O, B>, list: &Normalized, s
     let mut feed = src.dsrc();
     let mut e = DeltaEditCore::<L, O, B>::begin(dst, 0);
     proof {
-        e.edit.lemma_at();
         assert(e.rwritten() =~= Seq::<Option<i64>>::empty());
         assert(sps@.take(0) =~= Seq::<Splice>::empty());
-        assert(produced(rd, rs, Seq::<Splice>::empty()) =~= Seq::<Option<i64>>::empty());
+        assert(produced(rd, rs, Seq::<Splice>::empty()) =~= Seq::<Option<i64>>::empty()) by {
+            reveal(produced);
+        }
     }
     let mut k: usize = 0;
     while k < sps.len()
@@ -383,23 +389,11 @@ pub(crate) fn copy_direct<L, O, B>(dst: &mut DCol<L, O, B>, list: &Normalized, s
         let del = sps[k].delete;
         let start = sps[k].range.start;
         let end = sps[k].range.end;
-        let ghost sp = sps@[k as int];
         proof {
-            assert(sps@.take(k + 1).drop_last() =~= sps@.take(k as int));
-            assert(sps@.take(k + 1).last() == sp);
-            assert(sp.pos + sp.delete <= rd.len());
-            if k > 0 {
-                assert(sps@.take(k as int).last() == sps@[k - 1]);
-                assert(sps@[k - 1].pos + sps@[k - 1].delete <= sp.pos);
-                assert(sps@[k - 1].range.end <= sp.range.start);
-            }
-            assert(sp.range.start <= sp.range.end <= rs.len());
+            lemma_splice_at(sps@, rs.len() as int, rd.len() as int, k as int);
+            lemma_produced_next(rd, rs, sps@, k as int);
         }
         apply_one(&mut e, &mut feed, pos, del, start, end);
-        proof {
-            assert(copied(rs, sp) =~= rs.subrange(start as int, end as int));
-            assert(e.rwritten() =~= produced(rd, rs, sps@.take(k + 1)));
-        }
         k += 1;
     }
     proof {
@@ -456,7 +450,6 @@ fn cut_gaps<L, O, B, F: Visitor<RleModel<L>>>(col: &mut DCol<L, O, B>, sps: &[Sp
 /// kept of the source `src`: its values become `applied(dst, src,
 /// sps)`.
 #[verifier::spinoff_prover]
-#[verifier::rlimit(40)]
 #[inline(always)]
 fn put_gaps<L, O, B>(
     col: &mut DCol<L, O, B>,
@@ -477,6 +470,8 @@ fn put_gaps<L, O, B>(
         rvals::<RleModel<L>, RleReads<O>, B>(final(col)@) == applied(rvals::<RleModel<L>, RleReads<O>, B>(dst@), src, sps@),
 {
     hide(Gaps::inv);
+    hide(DeltaEditCore::inv);
+    hide(DSrc::inv);
     let ghost rd = rvals::<RleModel<L>, RleReads<O>, B>(dst@);
     let ghost k = kept(src, sps@);
     let mut feed = dst.dsrc();
@@ -484,7 +479,6 @@ fn put_gaps<L, O, B>(
     let mut gaps = Gaps::<Option<i64>>::new(sps, dst_len, Ghost(rd), Ghost(src));
     let mut e = DeltaEditCore::<L, O, B>::begin(col, 0);
     proof {
-        e.edit.lemma_at();
         assert(e.rwritten() =~= Seq::<Option<i64>>::empty());
         assert(produced(k, rd, Seq::<Splice>::empty()) =~= Seq::<Option<i64>>::empty());
     }

@@ -178,6 +178,89 @@ proof fn lemma_span_prefix(vs: Seq<Option<i64>>, n: nat, v: Option<i64>)
     lemma_last_in(vs);
 }
 
+/// The integers of values, then `n` copies of `v`.
+proof fn lemma_ivals_run(vs: Seq<Option<i64>>, n: nat, v: Option<i64>)
+    ensures
+        ivals(vs + copies(n, v)) == ivals(vs) + copies(n, ival(v)),
+{
+    assert(ivals(vs + copies(n, v)) =~= ivals(vs) + copies(n, ival(v)));
+}
+
+/// Values `vs`, then no more.
+proof fn lemma_no_copies<V>(vs: Seq<V>, v: V)
+    ensures
+        vs + copies(0, v) == vs,
+{
+    assert(vs + copies(0, v) =~= vs);
+}
+
+/// Values `vs` and then `n` copies of `x`: where deltas `ds` realize
+/// `vs`, so do `ds`, the step `d` from the last value to `x` and `n - 1`
+/// steps of 0 realize them all (`after`: `ds` and `d`; `all`: the
+/// zeros too).
+proof fn lemma_append_value(
+    vs: Seq<Option<i64>>,
+    ds: Seq<Option<i64>>,
+    after: Seq<Option<i64>>,
+    all: Seq<Option<i64>>,
+    abs: i64,
+    x: i64,
+    d: i64,
+    n: nat,
+)
+    requires
+        n >= 1,
+        abs == last_val(vs),
+        d == vstd::wrapping::i64_specs::wrapping_sub(x, abs),
+        span_ok(vs) ==> realize(ds) == ivals(vs) && psum(ds) == last_val(vs),
+        after == ds + copies(1, Some(d)),
+        all == if n > 1 { after + copies((n - 1) as nat, Some(0i64)) } else { after },
+    ensures ({
+        let r = vs + copies(n, Some(x));
+        &&& vlow(r) == min_i(vlow(vs), x as int)
+        &&& vhigh(r) == max_i(vhigh(vs), x as int)
+        &&& vlow(vs) > vhigh(vs) ==> vlow(vs) == i64::MAX && vhigh(vs) == i64::MIN
+        &&& last_val(r) == x
+        &&& span_ok(r) ==> realize(all) == ivals(r) && psum(all) == x
+    }),
+{
+    let r = vs + copies(n, Some(x));
+    let m = (n - 1) as nat;
+    lemma_vals_run(vs, n, Some(x));
+    lemma_last_in(vs);
+    if span_ok(r) {
+        lemma_span_prefix(vs, n, Some(x));
+        assert(d as int == x - last_val(vs));
+        assert(after =~= ds.push(Some(d)));
+        lemma_realize_push(ds, Some(d));
+        lemma_realize_run(after, m, Some(0i64));
+        lemma_no_copies(after, Some(0i64));
+        assert(all == after + copies(m, Some(0i64)));
+        lemma_ivals_run(vs, n, Some(x));
+        assert(ivals(vs).push(Some(x as int)) + copies(m, Some(x as int)) =~= ivals(vs) + copies(n, Some(x as int)));
+    }
+}
+
+/// Values `vs` and then `n` nulls: where deltas `ds` realize `vs`, `ds`
+/// and `n` nulls (`all`) realize them all.
+proof fn lemma_append_nulls(vs: Seq<Option<i64>>, ds: Seq<Option<i64>>, all: Seq<Option<i64>>, n: nat)
+    requires
+        n >= 1,
+        span_ok(vs) ==> realize(ds) == ivals(vs) && psum(ds) == last_val(vs),
+        all == ds + copies(n, None::<i64>),
+    ensures ({
+        let r = vs + copies(n, None::<i64>);
+        &&& vlow(r) == vlow(vs)
+        &&& vhigh(r) == vhigh(vs)
+        &&& last_val(r) == last_val(vs)
+        &&& span_ok(r) ==> realize(all) == ivals(r) && psum(all) == last_val(r)
+    }),
+{
+    lemma_vals_run(vs, n, None);
+    lemma_realize_run(ds, n, None);
+    lemma_ivals_run(vs, n, None);
+}
+
 /// Values spanning 2^63 or more: not in the delta domain.  Trusted only
 /// in that a panic does not return.
 #[verifier::external_body]
@@ -235,7 +318,6 @@ impl<'a, L> DStream<'a, L> where L: WriteOps<'a>, L::R: RleOps<'a, V = Option<i6
     /// Append `n` copies of `v`, a value in the domain `lo..=hi`.
     #[inline(always)]
     #[verifier::spinoff_prover]
-    #[verifier::rlimit(40)]
     pub(crate) fn append(&mut self, buf: &mut Vec<u8>, v: Option<i64>, n: usize, lo: i64, hi: i64)
         requires
             old(self).inv(old(buf)@, lo, hi),
@@ -247,15 +329,12 @@ impl<'a, L> DStream<'a, L> where L: WriteOps<'a>, L::R: RleOps<'a, V = Option<i6
     {
         let ghost vals0 = self.vals@;
         let ghost cur0 = self.s.cur@;
+        let ghost abs0 = self.abs;
         if n == 0 {
             proof {
-                assert(vals0 + copies(0, v) =~= vals0);
+                lemma_no_copies(vals0, v);
             }
             return;
-        }
-        proof {
-            lemma_vals_run(vals0, n as nat, v);
-            lemma_last_in(vals0);
         }
         match v {
             Some(x) => {
@@ -273,32 +352,14 @@ impl<'a, L> DStream<'a, L> where L: WriteOps<'a>, L::R: RleOps<'a, V = Option<i6
                 }
                 proof {
                     self.vals = Ghost(vals0 + copies(n as nat, v));
-                    assert(cur1 =~= cur0.push(Some(d)));
-                    if span_ok(self.vals@) {
-                        lemma_span_prefix(vals0, n as nat, v);
-                        assert(d as int == x - last_val(vals0));
-                        lemma_realize_push(cur0, Some(d));
-                        let m = (n - 1) as nat;
-                        lemma_realize_run(cur1, m, Some(0i64));
-                        if n == 1 {
-                            assert(self.s.cur@ =~= cur1);
-                        } else {
-                            assert(self.s.cur@ =~= cur1 + copies(m, Some(0i64)));
-                        }
-                        assert(realize(cur1 + copies(m, Some(0i64))) =~= realize(cur1) + copies(m, Some(x as int)));
-                        assert(ivals(self.vals@) =~= ivals(vals0) + copies(n as nat, Some(x as int)));
-                        assert(ivals(vals0) + copies(n as nat, Some(x as int)) =~= (ivals(vals0).push(Some(x as int))) + copies(m, Some(x as int)));
-                    }
+                    lemma_append_value(vals0, cur0, cur1, self.s.cur@, abs0, x, d, n as nat);
                 }
             },
             None => {
                 self.s.append(buf, L::cow_ref(None), n);
                 proof {
                     self.vals = Ghost(vals0 + copies(n as nat, v));
-                    if span_ok(self.vals@) {
-                        lemma_realize_run(cur0, n as nat, None);
-                        assert(ivals(self.vals@) =~= ivals(vals0) + copies(n as nat, None::<int>));
-                    }
+                    lemma_append_nulls(vals0, cur0, self.s.cur@, n as nat);
                 }
             },
         }

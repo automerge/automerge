@@ -200,6 +200,91 @@ proof fn lemma_flat_total(s: Seq<RawSlab>)
     assert(s.take(s.len() as int) =~= s);
 }
 
+/// Bytes `off..off + take` of slab `i` are the column's bytes from the
+/// slab's start plus `off`; and a column with bytes after slab `i` has a
+/// slab after it, which is not empty.
+proof fn lemma_chunk(c: RawColumn, i: int, off: int, take: int)
+    requires
+        c.wf(),
+        0 <= i < c.slabs@.len(),
+        0 <= off,
+        0 <= take,
+        off + take <= c.slabs@[i].data@.len(),
+    ensures
+        ({
+            let w = sizes(c.slabs@);
+            let pos = sum(w, 0, i) + off;
+            &&& pos + take <= c@.len()
+            &&& c@.subrange(pos, pos + take) == c.slabs@[i].data@.subrange(off, off + take)
+            &&& sum(w, 0, i + 1) == sum(w, 0, i) + c.slabs@[i].data@.len()
+            &&& sum(w, 0, i + 1) <= c@.len()
+            &&& sum(w, 0, i + 1) < c@.len() ==> i + 1 < c.slabs@.len() && c.slabs@[i + 1].data@.len() > 0
+        }),
+{
+    let ss = c.slabs@;
+    let w = sizes(ss);
+    let pos = sum(w, 0, i) + off;
+    lemma_flat_at(ss, i);
+    lemma_flat_len(ss, i);
+    lemma_flat_total(ss);
+    lemma_sum_split(w, 0, i, i + 1);
+    lemma_sum_one(w, i);
+    lemma_sum_split(w, 0, i + 1, ss.len() as int);
+    assert(c@.subrange(pos, pos + take) =~= ss[i].data@.subrange(off, off + take));
+}
+
+/// A range of `s` goes into `v0` a chunk at a time, for the `del` bytes
+/// at `at`: with the bytes `start..pos` in, the chunk from `pos` goes
+/// after them, and the first chunk takes the place of the `del` bytes.
+proof fn lemma_splice_chunk(
+    v0: Seq<u8>,
+    v1: Seq<u8>,
+    s: Seq<u8>,
+    at: int,
+    del: int,
+    start: int,
+    pos: int,
+    take: int,
+)
+    requires
+        0 <= at,
+        0 <= del,
+        at + del <= v0.len(),
+        0 <= start <= pos,
+        0 <= take,
+        pos + take <= s.len(),
+        pos == start ==> v1 == v0,
+        pos > start ==> v1 == v0.take(at) + s.subrange(start, pos) + v0.skip(at + del),
+    ensures
+        ({
+            let here = at + (pos - start);
+            let gone = if pos == start {
+                del
+            } else {
+                0
+            };
+            let v2 = v0.take(at) + s.subrange(start, pos + take) + v0.skip(at + del);
+            &&& v1.take(here) + s.subrange(pos, pos + take) + v1.skip(here + gone) == v2
+            &&& here + take <= v2.len()
+        }),
+{
+    let here = at + (pos - start);
+    let gone = if pos == start {
+        del
+    } else {
+        0
+    };
+    let v2 = v0.take(at) + s.subrange(start, pos + take) + v0.skip(at + del);
+    assert(s.subrange(start, pos + take) =~= s.subrange(start, pos) + s.subrange(pos, pos + take));
+    if pos > start {
+        assert(v1.take(here) =~= v0.take(at) + s.subrange(start, pos));
+        assert(v1.skip(here) =~= v0.skip(at + del));
+    } else {
+        assert(s.subrange(start, pos) =~= Seq::<u8>::empty());
+    }
+    assert(v1.take(here) + s.subrange(pos, pos + take) + v1.skip(here + gone) =~= v2);
+}
+
 /// The column with slab `k` gone, when it held nothing.
 proof fn lemma_flat_drop_empty(s: Seq<RawSlab>, k: int)
     requires
@@ -342,6 +427,22 @@ impl RawColumn {
                 0,
                 i + 1,
             )
+    }
+
+    /// A column's length is its slabs' sizes together, and a column that
+    /// holds a byte has a slab.
+    proof fn lemma_len(&self)
+        requires
+            self.wf(),
+        ensures
+            self@.len() == self.total_len,
+            self@.len() == total(sizes(self.slabs@)),
+            self@.len() > 0 ==> self.slabs@.len() > 0,
+    {
+        lemma_flat_total(self.slabs@);
+        if self.slabs@.len() == 0 {
+            assert(sizes(self.slabs@) =~= Seq::<nat>::empty());
+        }
     }
 
     pub fn new() -> (r: Self)
@@ -549,17 +650,14 @@ impl RawColumn {
                 at + del,
             ),
     {
+        hide(flat);
+        hide(RawColumn::wf);
         let ghost (v0, s) = (self@, src@);
         let ghost w = sizes(src.slabs@);
         proof {
-            lemma_flat_total(src.slabs@);
+            src.lemma_len();
         }
         if start < end {
-            proof {
-                if src.slabs@.len() == 0 {
-                    assert(w =~= Seq::<nat>::empty());
-                }
-            }
             let (mut i, mut off) = src.find_slab(start);
             let nslabs = src.slabs.len();
             let mut pos = start;
@@ -584,46 +682,22 @@ impl RawColumn {
                 let data = &src.slabs[i].data;
                 let take = if data.len() - off < end - pos { data.len() - off } else { end - pos };
                 proof {
-                    lemma_flat_at(src.slabs@, i as int);
-                    lemma_flat_len(src.slabs@, i as int);
-                    lemma_sum_split(w, 0, i as int, i + 1);
-                    lemma_sum_one(w, i as int);
-                    assert(s.subrange(pos as int, pos + take) =~= data@.subrange(off as int, off + take));
+                    // the chunk; and if the range goes on, it does from the
+                    // start of the next slab
+                    lemma_chunk(*src, i as int, off as int, take as int);
                 }
                 let chunk = slice_subrange(data.as_slice(), off, off + take);
                 let ghost v1 = self@;
                 self.splice_slice(here, gone, chunk);
                 proof {
-                    lemma_flat_total(self.slabs@);
-                    assert(s.subrange(start as int, pos + take) =~= s.subrange(start as int, pos as int) + s.subrange(
-                        pos as int,
-                        pos + take,
-                    ));
-                    if pos > start {
-                        assert(v1.take(here as int) =~= v0.take(at as int) + s.subrange(start as int, pos as int));
-                        assert(v1.skip(here as int) =~= v0.skip(at + del));
-                    }
-                    if pos + take < end {
-                        // the range goes on into the next slab, from its start
-                        assert(off + take == data@.len());
-                        lemma_sum_split(w, 0, i as int, i + 1);
-                        lemma_sum_one(w, i as int);
-                        lemma_sum_split(w, 0, i + 1, src.slabs@.len() as int);
-                        if i + 1 >= src.slabs@.len() {
-                            assert(sum(w, 0, i + 1) == total(w));
-                        }
-                    }
+                    lemma_splice_chunk(v0, v1, s, at as int, del as int, start as int, pos as int, take as int);
+                    self.lemma_len();
                 }
                 pos += take;
                 here += take;
                 gone = 0;
                 i += 1;
                 off = 0;
-                proof {
-                    if pos < end {
-                        assert(src.slabs@[i as int].data@.len() > 0);
-                    }
-                }
             }
             proof {
                 assert(s.subrange(start as int, end as int) == s.subrange(start as int, pos as int));
@@ -655,9 +729,15 @@ impl RawColumn {
             final(self).wf(),
             final(self)@ == applied(old(self)@, src@, list.seen()),
     {
+        hide(flat);
+        hide(RawColumn::wf);
+        hide(Normalized::wf);
+        hide(normal);
+        hide(applied);
+        hide(applied_from);
         proof {
-            lemma_flat_total(self.slabs@);
-            lemma_flat_total(src.slabs@);
+            self.lemma_len();
+            src.lemma_len();
         }
         if list.src_len() != src.total_len || list.dst_len() != self.total_len {
             wrong_columns();
@@ -915,11 +995,142 @@ spec fn local_del(len: int, offset: int, del: int) -> int {
     }
 }
 
+/// Bytes `a + d + rest` with `del` of them at `offset` of `d` replaced
+/// by `bytes`: `d` keeps what is around the bytes it loses, and `rest`
+/// loses the bytes the deletion reaches into it.
+proof fn lemma_splice_bytes(a: Seq<u8>, d: Seq<u8>, rest: Seq<u8>, offset: int, del: int, bytes: Seq<u8>)
+    requires
+        0 <= offset <= d.len(),
+        0 <= del,
+        offset + del <= d.len() + rest.len(),
+    ensures
+        ({
+            let ld = local_del(d.len() as int, offset, del);
+            let b = a + d + rest;
+            let index = a.len() + offset;
+            a + (d.take(offset) + bytes + d.skip(offset + ld)) + rest.skip(del - ld) == b.take(index) + bytes
+                + b.skip(index + del)
+        }),
+{
+    let ld = local_del(d.len() as int, offset, del);
+    let b = a + d + rest;
+    let index = a.len() + offset;
+    assert(b.take(index) =~= a + d.take(offset));
+    assert(b.skip(index + del) =~= d.skip(offset + ld) + rest.skip(del - ld));
+    assert(a + (d.take(offset) + bytes + d.skip(offset + ld)) + rest.skip(del - ld) =~= b.take(index) + bytes
+        + b.skip(index + del));
+}
+
+/// A splice in bounds at `offset` in slab `si`: what the slab keeps is
+/// no more than the column keeps, and the deletion reaches no further
+/// than the slabs after it.
+proof fn lemma_splice_within(s: Seq<RawSlab>, si: int, offset: int, del: int)
+    requires
+        0 <= si < s.len(),
+        0 <= offset <= s[si].data@.len(),
+        0 <= del,
+        flat(s.take(si)).len() + offset + del <= flat(s).len(),
+    ensures
+        ({
+            let ld = local_del(s[si].data@.len() as int, offset, del);
+            &&& 0 <= ld <= del
+            &&& s[si].data@.len() - ld <= flat(s).len() - del
+            &&& del - ld <= flat(s.skip(si + 1)).len()
+        }),
+{
+    lemma_flat_at(s, si);
+}
+
+/// Slabs `s1` that from `end` on are the slabs after `si` of `s0`, none
+/// of which is empty: none of them is empty.
+proof fn lemma_full_after(s0: Seq<RawSlab>, s1: Seq<RawSlab>, si: int, end: int)
+    requires
+        full(s0),
+        0 <= si < s0.len(),
+        0 <= end <= s1.len(),
+        s1.skip(end) == s0.skip(si + 1),
+    ensures
+        forall|i: int| end <= i < s1.len() ==> #[trigger] s1[i].data@.len() > 0,
+{
+    assert forall|i: int| end <= i < s1.len() implies #[trigger] s1[i].data@.len() > 0 by {
+        assert(s1.skip(end).len() == s1.len() - end);
+        assert(s0.skip(si + 1).len() == s0.len() - si - 1);
+        assert(s1[i] == s1.skip(end)[i - end]);
+        assert(s0.skip(si + 1)[i - end] == s0[i - end + si + 1]);
+    }
+}
+
+/// Slabs `s2` that before `si` are those of `s0`, none of which is
+/// empty, and from `end` on are not empty: none outside `si..hi` is
+/// empty, for any `hi` from `end` on.
+proof fn lemma_full_around(s0: Seq<RawSlab>, s1: Seq<RawSlab>, s2: Seq<RawSlab>, si: int, end: int, hi: int)
+    requires
+        full(s0),
+        0 <= si <= end <= hi,
+        si <= s0.len(),
+        end <= s1.len(),
+        end <= s2.len(),
+        s1.take(si) == s0.take(si),
+        s2.take(end) == s1.take(end),
+        forall|i: int| end <= i < s2.len() ==> #[trigger] s2[i].data@.len() > 0,
+    ensures
+        full_outside(s2, si, hi),
+{
+    assert forall|i: int| 0 <= i < s2.len() && !(si <= i < hi) implies #[trigger] s2[i].data@.len() > 0 by {
+        if i < si {
+            assert(s2[i] == s2.take(end)[i]);
+            assert(s1.take(end)[i] == s1.take(si)[i]);
+            assert(s0.take(si)[i] == s0[i]);
+        }
+    }
+}
+
+/// A splice at `offset` in slab `si` of `s0`, which leaves slabs
+/// `si..end` of `s1` in its place, and then the rest of the deletion
+/// from the slabs after them, which leaves `s2`: together they splice
+/// the column's bytes.
+proof fn lemma_spliced_in(
+    s0: Seq<RawSlab>,
+    s1: Seq<RawSlab>,
+    s2: Seq<RawSlab>,
+    si: int,
+    end: int,
+    offset: int,
+    del: int,
+    bytes: Seq<u8>,
+)
+    requires
+        0 <= si < s0.len(),
+        0 <= offset <= s0[si].data@.len(),
+        0 <= del,
+        flat(s0.take(si)).len() + offset + del <= flat(s0).len(),
+        si < end <= s1.len(),
+        end <= s2.len(),
+        s1.take(si) == s0.take(si),
+        s1.skip(end) == s0.skip(si + 1),
+        flat(s1.subrange(si, end)) == s0[si].data@.take(offset) + bytes + s0[si].data@.skip(
+            offset + local_del(s0[si].data@.len() as int, offset, del),
+        ),
+        s2.take(end) == s1.take(end),
+        flat(s2.skip(end)) == flat(s1.skip(end)).skip(del - local_del(s0[si].data@.len() as int, offset, del)),
+    ensures
+        ({
+            let index = flat(s0.take(si)).len() + offset;
+            flat(s2) == flat(s0).take(index) + bytes + flat(s0).skip(index + del)
+        }),
+{
+    lemma_flat_at(s0, si);
+    lemma_flat_split(s2, end);
+    lemma_flat_split(s1.take(end), si);
+    assert(s1.take(end).take(si) =~= s1.take(si));
+    assert(s1.take(end).skip(si) =~= s1.subrange(si, end));
+    lemma_splice_bytes(flat(s0.take(si)), s0[si].data@, flat(s0.skip(si + 1)), offset, del, bytes);
+}
+
 /// Splice `del` bytes at `offset` in slab `si` for `bytes`, carrying the
 /// deletion on into the slabs after it.  Returns the end of the slabs it
 /// touched, and whether it changed any but slab `si`.
 #[verifier::spinoff_prover]
-#[verifier::rlimit(40)]
 fn splice_in(
     slabs: &mut Vec<RawSlab>,
     max_segments: usize,
@@ -948,66 +1159,21 @@ fn splice_in(
             final(slabs)@[si as int],
         ),
 {
+    hide(flat);
     let ghost s0 = slabs@;
-    let ghost b0 = flat(s0);
-    let ghost index = flat(s0.take(si as int)).len() + offset;
-    let ghost d0 = s0[si as int].data@;
-    let ghost ld = local_del(d0.len() as int, offset as int, del as int);
     proof {
-        lemma_flat_at(s0, si as int);
-        lemma_flat_len(s0, si as int);
+        lemma_splice_within(s0, si as int, offset as int, del as int);
     }
     let (end, overflow_del) = splice_at(slabs, max_segments, si, offset, del, bytes);
     let ghost s1 = slabs@;
     proof {
-        lemma_flat_split(s1, end as int);
-        lemma_flat_split(s1.take(end as int), si as int);
-        assert(s1.take(end as int).take(si as int) =~= s0.take(si as int));
-        assert(s1.take(end as int).skip(si as int) =~= s1.subrange(si as int, end as int));
-        assert(forall|i: int| 0 <= i < s1.len() && !(si <= i < end) ==> #[trigger] s1[i] == if i < si {
-            s0[i]
-        } else {
-            s0[i - end + si + 1]
-        }) by {
-            assert forall|i: int| 0 <= i < s1.len() && !(si <= i < end) implies #[trigger] s1[i]
-                == if i < si {
-                s0[i]
-            } else {
-                s0[i - end + si + 1]
-            } by {
-                if i < si {
-                    assert(s1.take(si as int)[i] == s0.take(si as int)[i]);
-                } else {
-                    assert(s1.skip(end as int)[i - end] == s0.skip(si + 1)[i - end]);
-                }
-            }
-        }
-        lemma_flat_total(s0.skip(si + 1));
-        lemma_flat_total(s0);
-        lemma_flat_total(s0.take(si as int));
+        lemma_full_after(s0, s1, si as int, end as int);
     }
     let (partial, drained) = drain_after(slabs, end, overflow_del);
     let _ = slabs.len();
-    let ghost s2 = slabs@;
     proof {
-        lemma_flat_split(s2, end as int);
-        assert(s2.take(end as int) =~= s1.take(end as int));
-        let rest = flat(s0.skip(si + 1));
-        let mid = d0.take(offset as int) + bytes@ + d0.skip(offset + ld);
-        assert(d0.skip(offset + ld) + rest =~= b0.skip(index + ld));
-        assert(b0.take(index) =~= flat(s0.take(si as int)) + d0.take(offset as int));
-        if overflow_del > 0 {
-            assert(d0.skip(offset + ld) =~= Seq::<u8>::empty());
-            assert(b0.skip(index + del) =~= rest.skip(overflow_del as int));
-        } else {
-            assert(rest.skip(0) =~= rest);
-        }
-        assert(flat(s2) =~= b0.take(index) + bytes@ + b0.skip(index + del));
-        assert forall|i: int| 0 <= i < s2.len() && !(si <= i < end + if partial { 1int } else { 0 }) implies #[trigger] s2[i].data@.len() > 0 by {
-            if i < si {
-                assert(s2[i] == s2.take(end as int)[i]);
-            }
-        }
+        lemma_spliced_in(s0, s1, slabs@, si as int, end as int, offset as int, del as int, bytes@);
+        lemma_full_around(s0, s1, slabs@, si as int, end as int, end + if partial { 1int } else { 0 });
     }
     let changed = end > si + 1 || partial || drained;
     let end = if partial { end + 1 } else { end };
@@ -1080,6 +1246,52 @@ fn splice_at(
     (end, overflow_del)
 }
 
+/// No slabs hold no bytes.
+proof fn lemma_flat_none(s: Seq<RawSlab>)
+    requires
+        s.len() == 0,
+    ensures
+        flat(s) == Seq::<u8>::empty(),
+{
+    assert(datas(s) =~= Seq::<Seq<u8>>::empty());
+}
+
+/// A deletion of the first `remaining` bytes of the slabs from `end` on
+/// that takes all of slab `end`: the rest of it is from the slabs after.
+proof fn lemma_drain_whole(s: Seq<RawSlab>, end: int, remaining: int)
+    requires
+        0 <= end < s.len(),
+        s[end].data@.len() <= remaining <= flat(s.skip(end)).len(),
+    ensures
+        flat(s.skip(end)).len() == s[end].data@.len() + flat(s.skip(end + 1)).len(),
+        flat(s.skip(end)).skip(remaining) == flat(s.skip(end + 1)).skip(remaining - s[end].data@.len()),
+{
+    hide(flat);
+    lemma_flat_first(s.skip(end));
+    assert(s.skip(end).skip(1) =~= s.skip(end + 1));
+    assert(flat(s.skip(end)).skip(remaining) =~= flat(s.skip(end + 1)).skip(remaining - s[end].data@.len()));
+}
+
+/// A deletion of the first `remaining` bytes of the slabs from `end` on
+/// that ends inside slab `end`: the slab loses them, and that is all.
+proof fn lemma_drain_part(s1: Seq<RawSlab>, s2: Seq<RawSlab>, end: int, remaining: int)
+    requires
+        0 <= end < s1.len(),
+        s2.len() == s1.len(),
+        0 <= remaining <= s1[end].data@.len(),
+        s2[end].data@ == s1[end].data@.skip(remaining),
+        s2.skip(end + 1) == s1.skip(end + 1),
+    ensures
+        flat(s2.skip(end)) == flat(s1.skip(end)).skip(remaining),
+{
+    hide(flat);
+    lemma_flat_first(s1.skip(end));
+    lemma_flat_first(s2.skip(end));
+    assert(s1.skip(end).skip(1) =~= s1.skip(end + 1));
+    assert(s2.skip(end).skip(1) =~= s2.skip(end + 1));
+    assert(flat(s2.skip(end)) =~= flat(s1.skip(end)).skip(remaining));
+}
+
 /// Delete the first `del` bytes of the slabs from `start` on: drop the
 /// slabs that go whole, and trim the one that goes in part.  Returns
 /// whether one went in part (it stays at `start`), and whether any went
@@ -1097,6 +1309,7 @@ fn drain_after(slabs: &mut Vec<RawSlab>, start: usize, del: usize) -> (r: (bool,
         r.0 ==> start < final(slabs)@.len(),
         !r.0 && !r.1 ==> final(slabs)@ == old(slabs)@,
 {
+    hide(flat);
     let ghost s0 = slabs@;
     let mut remaining = del;
     let mut end = start;
@@ -1117,32 +1330,22 @@ fn drain_after(slabs: &mut Vec<RawSlab>, start: usize, del: usize) -> (r: (bool,
     {
         let ghost s1 = slabs@;
         let slab_len = slabs[end].data.len();
-        proof {
-            lemma_flat_at(s1.skip(end as int), 0);
-            assert(s1.skip(end as int).take(0) =~= Seq::<RawSlab>::empty());
-            lemma_flat_unit(s1[0]);
-            assert(s1.skip(end as int).skip(1) =~= s1.skip(end + 1));
-        }
         if remaining >= slab_len {
+            proof {
+                lemma_drain_whole(s1, end as int, remaining as int);
+            }
             remaining -= slab_len;
             end += 1;
             proof {
                 assert(slabs@.take(end as int) =~= s0.take(end as int));
-                assert(flat(s1.skip(end - 1)).skip(remaining + slab_len) =~= flat(s1.skip(
-                    end as int,
-                )).skip(remaining as int));
             }
         } else {
             splice_bytes(&mut slabs[end].data, 0, remaining, &[]);
             proof {
                 let s2 = slabs@;
                 assert(s2.skip(end + 1) =~= s1.skip(end + 1));
-                lemma_flat_at(s2.skip(end as int), 0);
-                assert(s2.skip(end as int).take(0) =~= Seq::<RawSlab>::empty());
-                assert(s2.skip(end as int).skip(1) =~= s2.skip(end + 1));
-                assert(flat(s2.skip(end as int)) =~= flat(s1.skip(end as int)).skip(
-                    remaining as int,
-                ));
+                assert(s2[end as int].data@ =~= s1[end as int].data@.skip(remaining as int));
+                lemma_drain_part(s1, s2, end as int, remaining as int);
                 assert(flat(s2.skip(end as int)).skip(0) =~= flat(s2.skip(end as int)));
                 assert(s2.take(end as int) =~= s0.take(end as int));
             }
@@ -1153,8 +1356,7 @@ fn drain_after(slabs: &mut Vec<RawSlab>, start: usize, del: usize) -> (r: (bool,
     proof {
         if remaining > 0 {
             // out of slabs, but the deletion is in bounds
-            assert(slabs@.skip(end as int) =~= Seq::<RawSlab>::empty());
-            assert(datas(slabs@.skip(end as int)) =~= Seq::<Seq<u8>>::empty());
+            lemma_flat_none(slabs@.skip(end as int));
         }
         assert(flat(slabs@.skip(end as int)).skip(0) =~= flat(slabs@.skip(end as int)));
     }
@@ -1307,6 +1509,52 @@ fn pick_split(offset_before_insert: usize, inserted_len: usize, total_len: usize
 
 // ── Merging ─────────────────────────────────────────────────────────────────
 
+/// The first slab's bytes come first.
+proof fn lemma_flat_first(s: Seq<RawSlab>)
+    requires
+        s.len() > 0,
+    ensures
+        flat(s) == s[0].data@ + flat(s.skip(1)),
+{
+    lemma_flat_at(s, 0);
+    assert(s.take(0) =~= Seq::<RawSlab>::empty());
+    lemma_flat_unit(s[0]);
+    assert(Seq::<u8>::empty() + s[0].data@ =~= s[0].data@);
+}
+
+/// Slabs `a` and `a + 1` hold no more bytes than the column.
+proof fn lemma_pair_sizes(s: Seq<RawSlab>, a: int)
+    requires
+        0 <= a,
+        a + 1 < s.len(),
+    ensures
+        s[a].data@.len() + s[a + 1].data@.len() <= flat(s).len(),
+{
+    lemma_flat_at(s, a);
+    lemma_flat_at(s.skip(a + 1), 0);
+}
+
+/// Slab `a + 1` merged into slab `a` leaves the column's bytes as they
+/// were.
+proof fn lemma_pair_merged(s0: Seq<RawSlab>, s1: Seq<RawSlab>, a: int)
+    requires
+        0 <= a,
+        a + 1 < s0.len(),
+        s1.len() == s0.len() - 1,
+        s1.take(a) == s0.take(a),
+        s1.skip(a + 1) == s0.skip(a + 2),
+        s1[a].data@ == s0[a].data@ + s0[a + 1].data@,
+    ensures
+        flat(s1) == flat(s0),
+{
+    hide(flat);
+    lemma_flat_at(s0, a);
+    lemma_flat_first(s0.skip(a + 1));
+    assert(s0.skip(a + 1).skip(1) =~= s0.skip(a + 2));
+    lemma_flat_at(s1, a);
+    assert(flat(s1) =~= flat(s0));
+}
+
 /// Merges two adjacent slabs when either is under a quarter of the budget
 /// and together they fit it; the walk around a splice is the shared
 /// [`merge_around`].
@@ -1327,6 +1575,7 @@ impl Merger<RawSlab> for RawMerge {
 
     #[verifier::spinoff_prover]
     fn try_pair(&self, slabs: &mut Vec<RawSlab>, a: usize) -> bool {
+        hide(flat);
         if a >= slabs.len() || slabs.len() - a < 2 {
             return false;
         }
@@ -1336,11 +1585,7 @@ impl Merger<RawSlab> for RawMerge {
         let a_len = slabs[a].data.len();
         let b_len = slabs[a + 1].data.len();
         proof {
-            lemma_flat_at(s0, a as int);
-            lemma_flat_at(s0.skip(a + 1), 0);
-            assert(s0.skip(a + 1).take(0) =~= Seq::<RawSlab>::empty());
-            assert(s0.skip(a + 1).skip(1) =~= s0.skip(a + 2));
-            lemma_flat_unit(s0[0]);
+            lemma_pair_sizes(s0, a as int);
         }
         if (a_len < min || b_len < min) && a_len + b_len <= max {
             let slab_b = slabs.remove(a + 1);
@@ -1349,9 +1594,8 @@ impl Merger<RawSlab> for RawMerge {
                 let s1 = slabs@;
                 assert(s1.take(a as int) =~= s0.take(a as int));
                 assert(s1.skip(a + 1) =~= s0.skip(a + 2));
-                lemma_flat_at(s1, a as int);
                 assert(s1[a as int].data@ =~= s0[a as int].data@ + s0[a + 1].data@);
-                assert(flat(s1) =~= flat(s0));
+                lemma_pair_merged(s0, s1, a as int);
             }
             true
         } else {

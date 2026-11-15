@@ -388,6 +388,7 @@ pub open spec fn decode_ok(buf: Seq<u8>, r: Result<(u64, usize), DecodeError>) -
 /// Decodes a bijou64 from the front of `buf`, returning
 /// `(value, bytes_consumed)`.
 #[inline]
+#[verifier::spinoff_prover]
 pub fn decode(buf: &[u8]) -> (r: Result<(u64, usize), DecodeError>)
     ensures decode_ok(buf@, r),
 {

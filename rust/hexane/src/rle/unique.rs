@@ -233,6 +233,69 @@ proof fn lemma_run_lit<'a, O: RleOps<'a>>(a: Seq<Group<O::V>>, b: Seq<Group<O::V
     }
 }
 
+/// Group `i` of a canonical sequence is one a writer emits, after the
+/// group before it.
+proof fn lemma_canonical_at<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>, i: int)
+    requires
+        canonical::<O>(gs),
+        0 <= i < gs.len(),
+    ensures
+        group_ok::<O>(gs[i]),
+        i > 0 ==> adjacent_ok(gs[i - 1], gs[i]),
+{
+}
+
+/// Value `i` of a literal that starts a canonical sequence is not null,
+/// and differs from the value before it.
+proof fn lemma_lit_at<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>, va: Seq<O::V>, i: int)
+    requires
+        canonical::<O>(gs),
+        gs.len() > 0,
+        gs[0] == (Group::<O::V>::Lit { values: va }),
+        0 <= i < va.len(),
+    ensures
+        ({
+            let vs = groups_values(gs, O::null());
+            &&& i < vs.len()
+            &&& !O::is_null(vs[i])
+            &&& i > 0 ==> vs[i - 1] != vs[i]
+        }),
+{
+    hide(canonical);
+    lemma_canonical_at::<O>(gs, 0);
+    lemma_values_first(gs, O::null());
+}
+
+/// Where a literal of `l` values that starts a canonical sequence ends,
+/// the values end, or change to a null or to two equal values.
+proof fn lemma_lit_end<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>, va: Seq<O::V>)
+    requires
+        canonical::<O>(gs),
+        gs.len() > 0,
+        gs[0] == (Group::<O::V>::Lit { values: va }),
+    ensures
+        ({
+            let vs = groups_values(gs, O::null());
+            let l = va.len() as int;
+            &&& 1 <= l <= vs.len()
+            &&& l < vs.len() ==> vs[l] != vs[l - 1]
+            &&& l < vs.len() ==> O::is_null(vs[l]) || (l + 1 < vs.len() && vs[l + 1] == vs[l])
+        }),
+{
+    hide(canonical);
+    let null = O::null();
+    let vs = groups_values(gs, null);
+    let l = va.len() as int;
+    lemma_canonical_at::<O>(gs, 0);
+    lemma_after_first::<O>(gs);
+    if gs.len() > 1 {
+        lemma_canonical_at::<O>(gs, 1);
+        lemma_boundary_differs::<O>(gs);
+        assert(vs[l - 1] == group_values(gs[0], null)[l - 1]);
+        O::axiom_null(null);
+    }
+}
+
 /// A literal of `l` values and a literal of `m > l` values cannot both
 /// start canonical sequences with the same values: where the shorter one
 /// ends, the values reach a null or two equal values, which the longer one
@@ -249,33 +312,15 @@ proof fn lemma_lits<'a, O: RleOps<'a>>(a: Seq<Group<O::V>>, b: Seq<Group<O::V>>,
     ensures
         false,
 {
-    let null = O::null();
-    lemma_after_first::<O>(a);
-    lemma_after_first::<O>(b);
-    let vs = groups_values(a, null);
+    hide(canonical);
+    hide(groups_values);
     let l = va.len() as int;
-    assert(group_ok::<O>(a[0]) && group_ok::<O>(b[0]));
-    assert(vs[l] == vb[l]);
-    lemma_boundary_differs::<O>(a);
-    assert(adjacent_ok(a[0], a[1]));
-    O::axiom_null(null);
-    O::axiom_null(vb[l]);
-    match a[1] {
-        Group::Null { count } => {
-            // `a` has a null at `l`, `b` a value
-            assert(group_ok::<O>(a[1]));
-        },
-        Group::Run { count, value } => {
-            // `a` has two equal values at `l`; `b` doesn't
-            assert(vs[l + 1] == vs[l]);
-            if l + 1 < vb.len() {
-                assert(vs[l + 1] == vb[l + 1]);
-            } else {
-                lemma_boundary_differs::<O>(b);
-                assert(last_val(b[0], null) == vb[l]);
-            }
-        },
-        Group::Lit { .. } => {},
+    lemma_lit_end::<O>(a, va);
+    lemma_lit_end::<O>(b, vb);
+    // `b` has a value at `l`, and no two equal values there
+    lemma_lit_at::<O>(b, vb, l);
+    if l + 1 < vb.len() {
+        lemma_lit_at::<O>(b, vb, l + 1);
     }
 }
 

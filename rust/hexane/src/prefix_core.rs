@@ -32,7 +32,8 @@ use crate::cursor::slab_lens;
 use crate::fenwick::{lemma_sum_le, lemma_sum_one, lemma_sum_split, sum, total};
 #[cfg(verus_keep_ghost)]
 use crate::iter_core::{
-    each, lemma_from, lemma_upto, lemma_window_past, lens_ok, past, vals_of, window,
+    each, lemma_from, lemma_skip_add, lemma_skip_none, lemma_upto, lemma_window_past, lens_ok,
+    past, vals_of, window,
 };
 use crate::iter_core::{Decode, Decoders, ICore};
 use crate::prefix::PrefixSlabWeight;
@@ -440,24 +441,80 @@ fn take_nth<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>(
         }
         match p_next_run::<X, B>(core, slabs, m + 1, total, Ghost(base)) {
             Some(run) => {
+                proof {
+                    lemma_skip_add(o0, n - m, run.count as int);
+                }
                 if run.count > m {
                     proof {
                         assert(Seq::new(run.count as nat, |_i: int| run.value)[m as int] == run.value);
                         assert(o.take(run.count as int)[m as int] == o[m as int]);
                         assert(o[m as int] == o0[n as int]);
-                        assert(o.skip(run.count as int) =~= o0.skip(n + 1));
                     }
                     return run.value;
                 }
                 m -= run.count;
-                proof {
-                    assert(o.skip(run.count as int) =~= o0.skip(n - m));
-                }
             },
             None => {
                 past_window();
             },
         }
+    }
+}
+
+/// The slab the index finds for the item `n` on from the iterator, when
+/// that is past the slab the iterator stands in: the iterator can jump to
+/// its start `start`, the index's prefix is the sum of the values before
+/// it, and the item is in it. Past the last slab, the item is past the
+/// window.
+proof fn lemma_jump<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>(
+    c0: ICore<X::D>,
+    ws: Seq<PrefixSlabWeight<B::P>>,
+    s: Seq<Slab<X::Tail>>,
+    k: int,
+    start: int,
+    n: int,
+)
+    requires
+        c0.wf::<X>(s),
+        ix_ok::<X, B>(ws, s),
+        c0.slab_remaining <= n < c0.items_left,
+        0 <= k <= s.len(),
+        start == sum_len(ws.subrange(0, k)),
+        k < s.len() ==> start <= c0.pos + n < start + ws[k].spec_len(),
+        k == s.len() ==> c0.pos + n >= sum_len(ws),
+    ensures
+        fold(ws.subrange(0, k)).spec_prefix() == vsum::<_, B>(before::<X>(s, start)),
+        k < s.len() ==> {
+            &&& start == sum(slab_lens(s), 0, k)
+            &&& c0.pos <= start
+            &&& start - c0.pos <= c0.items_left
+            &&& c0.pos + n - start < s[k].len
+        },
+        k == s.len() ==> start >= total(slab_lens(s)) && n >= c0.out::<X>(s).len(),
+{
+    let lens = slab_lens(s);
+    c0.lemma_here::<X>(s);
+    lemma_fold::<X, B>(ws, s, k);
+    lemma_fold::<X, B>(ws, s, s.len() as int);
+    assert(ws.subrange(0, s.len() as int) =~= ws);
+    lemma_upto::<X>(s, k);
+    if k < s.len() {
+        lemma_from::<X>(s, k, 0);
+        // the slab holding the item starts at or after the iterator
+        if c0.slab_idx < s.len() {
+            let cur = c0.slab_idx as int;
+            lemma_sum_split(lens, 0, cur, cur + 1);
+            lemma_sum_one(lens, cur);
+            if k <= cur {
+                lemma_sum_le(lens, 0, k + 1, 0, cur + 1);
+                lemma_sum_split(lens, 0, k, k + 1);
+                lemma_sum_one(lens, k);
+            } else {
+                lemma_sum_le(lens, 0, cur + 1, 0, k);
+            }
+        }
+    } else {
+        assert(s.take(s.len() as int) =~= s);
     }
 }
 
@@ -487,8 +544,6 @@ fn p_nth_in<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>(
 {
     let ghost s = slabs@;
     let ghost c0 = *core;
-    let ghost vv = vals_of::<X>(s);
-    let ghost lens = slab_lens(s);
     proof {
         core.lemma_here::<X>(s);
     }
@@ -513,27 +568,7 @@ fn p_nth_in<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>(
     let found = ix.find_slab_at_item(target);
     let ghost k = found.index as int;
     proof {
-        lemma_fold::<X, B>(ix@, s, k);
-        lemma_fold::<X, B>(ix@, s, s.len() as int);
-        assert(ix@.subrange(0, s.len() as int) =~= ix@);
-        lemma_upto::<X>(s, k);
-        if k < s.len() {
-            // the slab holding `target` starts at or after the iterator
-            if c0.slab_idx < s.len() {
-                let cur = c0.slab_idx as int;
-                lemma_sum_split(lens, 0, cur, cur + 1);
-                lemma_sum_one(lens, cur);
-                if k <= cur {
-                    lemma_sum_le(lens, 0, k + 1, 0, cur + 1);
-                    lemma_sum_split(lens, 0, k, k + 1);
-                    lemma_sum_one(lens, k);
-                } else {
-                    lemma_sum_le(lens, 0, cur + 1, 0, k);
-                }
-            } else {
-                lemma_from::<X>(s, k, 0);
-            }
-        }
+        lemma_jump::<X, B>(c0, ix@, s, k, found.pos as int, n as int);
     }
     let in_slab = core.advance_to_slab::<X>(slabs, found.index, found.pos);
     // the index hands back the sum before the slab (past the last slab,
@@ -541,22 +576,15 @@ fn p_nth_in<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>(
     *total = B::sub(found.prefix, base);
     proof {
         axiom_prefix_sub(found.prefix, *base);
-        assert(s.take(s.len() as int) =~= s);
     }
     if !in_slab {
         return None;
     }
     let ghost c1 = *core;
     proof {
-        lemma_from::<X>(s, k, 0);
-        assert(c1.out::<X>(s).len() > target - found.pos);
+        c0.lemma_jumped::<X>(c1, s, n as int, target - found.pos);
     }
     let r = take_nth::<X, B>(core, slabs, target - found.pos, total, Ghost(*base));
-    proof {
-        assert(c1.out::<X>(s)[target - found.pos] == vv[target as int]);
-        assert(c0.out::<X>(s)[n as int] == vv[target as int]);
-        assert(c1.out::<X>(s).skip(target - found.pos + 1) =~= c0.out::<X>(s).skip(n + 1));
-    }
     Some(r)
 }
 
@@ -780,6 +808,11 @@ pub(crate) fn p_delta_nth<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::It
             None => n >= old(core).out::<X>(slabs@).len() && final(core).out::<X>(slabs@).len() == 0,
         },
 {
+    hide(ICore::wf);
+    hide(ICore::out);
+    hide(index_ok);
+    hide(vsum);
+    hide(before);
     let ghost c0 = *core;
     let ghost o = core.out::<X>(slabs@);
     let t0 = B::cp(total);
@@ -875,6 +908,29 @@ pub(crate) fn p_delta_from<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::I
     p_delta_nth::<X, B>(core, slabs, ix, n, total, base)
 }
 
+/// At or past the end, the values before a position are all of them.
+proof fn lemma_before_all<'a, X: Decoders<'a>>(s: Seq<Slab<X::Tail>>, pos: int)
+    requires
+        pos >= vals_of::<X>(s).len(),
+    ensures
+        before::<X>(s, pos) == vals_of::<X>(s),
+{
+    let v = vals_of::<X>(s);
+    assert(v.take(v.len() as int) =~= v);
+}
+
+/// An iterator at the column's start with as many items left as the
+/// column holds has all of its values left.
+proof fn lemma_all_out<'a, X: Decoders<'a>>(c: ICore<X::D>, s: Seq<Slab<X::Tail>>)
+    requires
+        c.pos == 0,
+        c.items_left == vals_of::<X>(s).len(),
+    ensures
+        c.out::<X>(s) == vals_of::<X>(s),
+{
+    assert(c.out::<X>(s) =~= vals_of::<X>(s));
+}
+
 /// `sum_range`: from an iterator over the whole column, at its start with
 /// nothing summed, advance to `start`, move the running total into `base`
 /// (as `reset_prefix` does), and advance to `end`. Then `base` is the sum
@@ -901,12 +957,16 @@ pub(crate) fn p_sum_range<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::It
         *final(base) == vsum::<_, B>(before::<X>(slabs@, start as int)),
         prefix_add(*final(base), *final(total)) == vsum::<_, B>(before::<X>(slabs@, end as int)),
 {
+    // the positions and the sums come from the steps' contracts alone
+    hide(ICore::wf);
+    hide(ICore::out);
+    hide(before);
+    hide(vals_of);
     let ghost s = slabs@;
     let ghost vv = vals_of::<X>(s);
     let ghost c0 = *core;
     proof {
-        core.lemma_here::<X>(s);
-        assert(c0.out::<X>(s) =~= vv);
+        lemma_all_out::<X>(c0, s);
     }
     // the whole column is the window: clamp the targets to its end
     let len = core.items_left;
@@ -915,27 +975,30 @@ pub(crate) fn p_sum_range<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::It
     if s0 > 0 {
         p_nth::<X, B>(core, slabs, ix, s0 - 1, total, base);
     }
-    proof {
-        assert(before::<X>(s, s0 as int) == before::<X>(s, start as int));
-        axiom_prefix_add(*base, *base, *base);
-        if s0 > 0 {
-            assert(core.out::<X>(s) == vv.skip(s0 as int));
-        } else {
-            assert(vv.skip(0) =~= vv);
-        }
-    }
     let ghost c1 = *core;
+    proof {
+        if s0 == 0 {
+            lemma_skip_none(vv);
+        }
+        assert(c1.pos == s0);
+        assert(c1.out::<X>(s) == vv.skip(s0 as int));
+    }
     p_reset::<X, B>(core, slabs, total, base);
     proof {
         axiom_prefix_add(*base, *base, *base);
-        assert(*base == vsum::<_, B>(before::<X>(s, c1.pos as int)));
-        assert(c1.pos == s0);
+        if start >= len {
+            lemma_before_all::<X>(s, start as int);
+            lemma_before_all::<X>(s, s0 as int);
+        }
     }
     if s0 < e0 {
         p_nth::<X, B>(core, slabs, ix, e0 - 1 - s0, total, base);
     }
     proof {
-        assert(before::<X>(s, e0 as int) == before::<X>(s, end as int));
+        if end >= len {
+            lemma_before_all::<X>(s, end as int);
+            lemma_before_all::<X>(s, e0 as int);
+        }
     }
 }
 

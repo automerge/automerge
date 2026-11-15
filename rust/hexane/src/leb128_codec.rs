@@ -295,13 +295,64 @@ pub proof fn lemma_encode_signed_shape(v: int)
     }
 }
 
+/// A lone final byte is the encoding of its sign-extended group.
+proof fn lemma_encode_signed_one(b: u8)
+    requires b < 128,
+    ensures spec_encode_signed(signed_group(b)) == seq![b],
+{
+    let v = signed_group(b);
+    assert(-64 <= v < 64);
+    assert(v % 128 == b) by {
+        vstd::arithmetic::div_mod::lemma_fundamental_div_mod_converse(
+            v, 128, if b >= 64 { -1 } else { 0 }, b as int);
+    }
+    assert(spec_encode_signed(v) =~= seq![b]);
+}
+
+/// A number too big for one byte is encoded as its low group `g`, with
+/// the continuation bit, and then the encoding of the rest, `w`.
+proof fn lemma_encode_signed_step(g: int, w: int)
+    requires
+        0 <= g < 128,
+        !(-64 <= g + 128 * w < 64),
+    ensures
+        spec_encode_signed(g + 128 * w) == seq![(g + 128) as u8] + spec_encode_signed(w),
+{
+    vstd::arithmetic::div_mod::lemma_fundamental_div_mod_converse(g + 128 * w, 128, w, g);
+}
+
+/// A number in `-64..64` spelled as a group `g` and a rest `w`: the rest
+/// is 0 or -1, encoded as one byte that only repeats the sign of `g`.
+proof fn lemma_encode_signed_redundant(g: int, w: int)
+    requires
+        0 <= g < 128,
+        -64 <= g + 128 * w < 64,
+    ensures
+        g < 64 ==> spec_encode_signed(w) == seq![0u8],
+        g >= 64 ==> spec_encode_signed(w) == seq![0x7fu8],
+{
+    if g < 64 {
+        assert(w == 0);
+        assert(spec_encode_signed(0) =~= seq![0u8]);
+    } else {
+        assert(w == -1);
+        assert((-1int) % 128 == 127) by {
+            vstd::arithmetic::div_mod::lemma_fundamental_div_mod_converse(-1, 128, -1, 127);
+        }
+        assert(spec_encode_signed(-1) =~= seq![0x7fu8]);
+    }
+}
+
 /// The converse for signed encodings.
 pub proof fn lemma_shape_encode_signed(s: Seq<u8>)
     requires framed(s), minimal_signed(s),
     ensures s == spec_encode_signed(groups_signed(s)),
     decreases s.len(),
 {
+    hide(spec_encode_signed);
     if s.len() == 1 {
+        lemma_encode_signed_one(s[0]);
+        assert(groups_signed(s) == signed_group(s[0]));
         assert(s =~= seq![s[0]]);
     } else {
         let t = s.drop_first();
@@ -314,16 +365,19 @@ pub proof fn lemma_shape_encode_signed(s: Seq<u8>)
         assert(t.last() == s.last());
         lemma_shape_encode_signed(t);
         let w = groups_signed(t);
-        let v = groups_signed(s);
-        vstd::arithmetic::div_mod::lemma_fundamental_div_mod_converse(
-            v, 128, w, (s[0] % 128) as int);
-        if -64 <= v < 64 {
+        let g = (s[0] % 128) as int;
+        assert(groups_signed(s) == g + 128 * w);
+        if -64 <= g + 128 * w < 64 {
             // then w is 0 or -1, whose encodings are one byte that only
             // repeats the sign of s[0]
-            assert(w == 0 || w == -1);
+            lemma_encode_signed_redundant(g, w);
             assert(t.len() == 1);
+            assert(s.last() == t[0]);
+            assert(s[s.len() - 2] == s[0]);
             assert(false);
         }
+        lemma_encode_signed_step(g, w);
+        assert(s[0] == (g + 128) as u8);
         assert(s =~= seq![s[0]] + t);
     }
 }
@@ -628,10 +682,17 @@ pub fn decode_long(buf: &[u8]) -> (r: Result<(u64, usize), DecodeError>)
                 return Err(if b == 0 { DecodeError::Overlong } else { DecodeError::Overflow });
             }
             proof {
+                let s = buf@.subrange(0, 10);
                 lemma_pow128_constants();
+                assert(result < 0x8000_0000_0000_0000u64);
                 assert(result | 1u64 << 63u64 == result + 0x8000_0000_0000_0000)
                     by (bit_vector) requires result < 0x8000_0000_0000_0000u64;
-                lemma_shape_encode(buf@.subrange(0, 10));
+                assert((b % 128) as nat * pow128(9) == 0x8000_0000_0000_0000) by (nonlinear_arith)
+                    requires b == 1, pow128(9) == 0x8000_0000_0000_0000;
+                assert(groups(s) == (result | 1u64 << 63u64) as nat);
+                assert(framed(s));
+                assert(minimal(s));
+                lemma_shape_encode(s);
             }
             return Ok((result | 1u64 << 63u64, 10));
         }
@@ -681,14 +742,24 @@ pub fn decode_signed(buf: &[u8]) -> (r: Result<(i64, usize), DecodeError>)
 /// [`decode_signed`], for any value.
 #[cold]
 #[inline(never)]
+#[verifier::spinoff_prover]
 pub fn decode_signed_long(buf: &[u8]) -> (r: Result<(i64, usize), DecodeError>)
     ensures decode_signed_ok(buf@, r),
 {
+    hide(groups);
+    hide(groups_signed);
+    hide(pow128);
+    hide(spec_encode_signed);
     let mut result: u64 = 0;
     let mut i: usize = 0;
     // the previous byte, whose bit 6 a redundant final byte would repeat
     let mut prev: u8 = 0;
-    proof { lemma_shift(0); }
+    proof {
+        assert(1u64 << 0u64 == 1) by (bit_vector);
+        assert(groups(buf@.subrange(0, 0)) == 0) by {
+            reveal(groups);
+        }
+    }
     loop
         invariant
             i <= 9, i <= buf.len(),
@@ -787,7 +858,9 @@ pub fn decode_signed_long(buf: &[u8]) -> (r: Result<(i64, usize), DecodeError>)
                 lemma_neg_shift((i + 1) as u64);
                 assert((b & 0x40 == 0) == (b % 128 < 64)) by (bit_vector);
                 let p = pow128(i as nat);
-                assert(pow128((i + 1) as nat) == 128 * p);
+                assert(pow128((i + 1) as nat) == 128 * p) by {
+                    reveal(pow128);
+                }
                 assert((b % 128 - 128) * p == (b % 128) as int * p - 128 * p) by (nonlinear_arith);
             }
             let x = result as i64;

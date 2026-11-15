@@ -164,34 +164,100 @@ pub(crate) open spec fn slabs_values<'a, O: RleOps<'a>>(s: Seq<Slab>) -> Seq<O::
 
 // ── Lemmas ──────────────────────────────────────────────────────────────────
 
+/// Values' bytes, split at `c`.
+proof fn lemma_encs_split<'a, O: RleOps<'a>>(vs: Seq<O::V>, c: int)
+    requires 0 <= c <= vs.len(),
+    ensures encs::<O>(vs) == encs::<O>(vs.take(c)) + encs::<O>(vs.skip(c)),
+{
+    assert(vs =~= vs.take(c) + vs.skip(c));
+    lemma_encs_concat::<O>(vs.take(c), vs.skip(c));
+}
+
+/// Groups' bytes, split at `n`.
+proof fn lemma_groups_bytes_split<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>, n: int)
+    requires 0 <= n <= gs.len(),
+    ensures groups_bytes::<O>(gs) == groups_bytes::<O>(gs.take(n)) + groups_bytes::<O>(gs.skip(n)),
+{
+    assert(gs =~= gs.take(n) + gs.skip(n));
+    lemma_groups_bytes_concat::<O>(gs.take(n), gs.skip(n));
+}
+
+/// The bytes read, where the last cut fell between groups.
+proof fn lemma_raw_between<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>, il: bool, k: nat, cur: Seq<O::V>, g0: int, k0: nat)
+    requires 0 <= g0 <= gs.len(), il == (k > 0),
+    ensures
+        read_bytes::<O>(gs, k, cur) == cut_bytes::<O>(gs, cur, g0, 0, k0) + raw::<O>(gs, il, k, cur, g0, 0),
+{
+    let e = Seq::<u8>::empty();
+    let a = groups_bytes::<O>(gs.take(g0));
+    let m = groups_bytes::<O>(gs.skip(g0));
+    let t = if il { lit_head::<O>(k) + encs::<O>(cur) } else { e };
+    lemma_groups_bytes_split::<O>(gs, g0);
+    assert(cut_bytes::<O>(gs, cur, g0, 0, k0) == a + e);
+    assert(raw::<O>(gs, il, k, cur, g0, 0) == e + m + t);
+    assert(read_bytes::<O>(gs, k, cur) =~= (a + e) + (e + m + t));
+}
+
+/// The bytes read, where the last cut split a literal that has closed
+/// since.
+proof fn lemma_raw_closed<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>, il: bool, k: nat, cur: Seq<O::V>, g0: int, c0: int, k0: nat)
+    requires
+        0 <= g0 < gs.len(), 0 < c0 < k0, gs[g0] is Lit, gs[g0]->Lit_values.len() == k0, il == (k > 0),
+    ensures
+        read_bytes::<O>(gs, k, cur) == cut_bytes::<O>(gs, cur, g0, c0, k0) + raw::<O>(gs, il, k, cur, g0, c0),
+{
+    let e = Seq::<u8>::empty();
+    let vs = gs[g0]->Lit_values;
+    let a = groups_bytes::<O>(gs.take(g0));
+    let h0 = lit_head::<O>(k0);
+    let e1 = encs::<O>(vs.take(c0));
+    let e2 = encs::<O>(vs.skip(c0));
+    let m = groups_bytes::<O>(gs.skip(g0 + 1));
+    let t = if il { lit_head::<O>(k) + encs::<O>(cur) } else { e };
+    lemma_groups_bytes_at::<O>(gs, g0);
+    lemma_encs_split::<O>(vs, c0);
+    assert(group_bytes::<O>(gs[g0]) == h0 + (e1 + e2));
+    assert(cut_bytes::<O>(gs, cur, g0, c0, k0) == a + (h0 + e1));
+    assert(raw::<O>(gs, il, k, cur, g0, c0) == e2 + m + t);
+    assert(read_bytes::<O>(gs, k, cur) =~= (a + (h0 + e1)) + (e2 + m + t));
+}
+
+/// The bytes read, where the last cut split the literal still being
+/// read.
+proof fn lemma_raw_open<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>, k: nat, cur: Seq<O::V>, c0: int)
+    requires 0 < c0 <= cur.len(), k > 0,
+    ensures
+        read_bytes::<O>(gs, k, cur) == cut_bytes::<O>(gs, cur, gs.len() as int, c0, k)
+            + raw::<O>(gs, true, k, cur, gs.len() as int, c0),
+{
+    let e = Seq::<u8>::empty();
+    let g0 = gs.len() as int;
+    let a = groups_bytes::<O>(gs);
+    let h = lit_head::<O>(k);
+    let e1 = encs::<O>(cur.take(c0));
+    let e2 = encs::<O>(cur.skip(c0));
+    lemma_encs_split::<O>(cur, c0);
+    assert(gs.take(g0) =~= gs);
+    assert(cut_bytes::<O>(gs, cur, g0, c0, k) == a + (h + e1));
+    assert(groups_bytes::<O>(Seq::<Group<O::V>>::empty()) == e);
+    assert(raw::<O>(gs, true, k, cur, g0, c0) == e2 + e + e);
+    assert(read_bytes::<O>(gs, k, cur) =~= (a + (h + e1)) + (e2 + e + e));
+}
+
 /// The bytes read are those up to the cut, then this slab's.
-#[verifier::spinoff_prover]
 proof fn lemma_raw<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>, il: bool, k: nat, cur: Seq<O::V>, g0: int, c0: int, k0: nat)
     requires
         shape(gs, il, k, cur, g0, c0, k0), il == (k > 0), !il ==> cur.len() == 0,
     ensures
         read_bytes::<O>(gs, k, cur) == cut_bytes::<O>(gs, cur, g0, c0, k0) + raw::<O>(gs, il, k, cur, g0, c0),
 {
-    let e = Seq::<u8>::empty();
-    lemma_groups_bytes_concat::<O>(gs.take(g0), gs.skip(g0));
-    assert(gs =~= gs.take(g0) + gs.skip(g0));
-    if c0 > 0 && gs.len() > g0 {
-        let vs = gs[g0]->Lit_values;
-        let r = gs.skip(g0);
-        assert(r =~= seq![gs[g0]] + gs.skip(g0 + 1));
-        lemma_groups_bytes_first::<O>(r);
-        assert(r.skip(1) =~= gs.skip(g0 + 1));
-        assert(vs =~= vs.take(c0) + vs.skip(c0));
-        lemma_encs_concat::<O>(vs.take(c0), vs.skip(c0));
-    } else if c0 > 0 {
-        assert(gs.skip(g0) =~= Seq::<Group<O::V>>::empty());
-        assert(gs.take(g0) =~= gs);
-        assert(cur =~= cur.take(c0) + cur.skip(c0));
-        lemma_encs_concat::<O>(cur.take(c0), cur.skip(c0));
+    if c0 == 0 {
+        lemma_raw_between::<O>(gs, il, k, cur, g0, k0);
+    } else if gs.len() > g0 {
+        lemma_raw_closed::<O>(gs, il, k, cur, g0, c0, k0);
+    } else {
+        lemma_raw_open::<O>(gs, k, cur, c0);
     }
-    assert(encs::<O>(Seq::<O::V>::empty()) =~= e);
-    assert(groups_bytes::<O>(Seq::<Group<O::V>>::empty()) =~= e);
-    assert(read_bytes::<O>(gs, k, cur) =~= cut_bytes::<O>(gs, cur, g0, c0, k0) + raw::<O>(gs, il, k, cur, g0, c0));
 }
 
 /// A literal of `vs`, as values.
@@ -211,47 +277,125 @@ proof fn lemma_opt_lit<V>(vs: Seq<V>, null: V)
     }
 }
 
+/// Groups' values, split at `n`.
+proof fn lemma_groups_values_split<V>(gs: Seq<Group<V>>, n: int, null: V)
+    requires 0 <= n <= gs.len(),
+    ensures groups_values(gs, null) == groups_values(gs.take(n), null) + groups_values(gs.skip(n), null),
+{
+    assert(gs =~= gs.take(n) + gs.skip(n));
+    lemma_groups_values_concat(gs.take(n), gs.skip(n), null);
+}
+
+/// Groups' values, split around group `n`.
+proof fn lemma_groups_values_at<V>(gs: Seq<Group<V>>, n: int, null: V)
+    requires 0 <= n < gs.len(),
+    ensures
+        groups_values(gs, null) == groups_values(gs.take(n), null) + group_values(gs[n], null)
+            + groups_values(gs.skip(n + 1), null),
+{
+    let one = seq![gs[n]];
+    assert(gs =~= gs.take(n) + one + gs.skip(n + 1));
+    lemma_groups_values_concat(gs.take(n) + one, gs.skip(n + 1), null);
+    lemma_groups_values_concat(gs.take(n), one, null);
+    assert(one.drop_last() =~= Seq::<Group<V>>::empty());
+    reveal_with_fuel(groups_values, 2);
+    assert(groups_values(one, null) =~= group_values(gs[n], null));
+}
+
+/// The values of a literal of `pv` (if any), groups `m` and a literal of
+/// `qv` (if any).
+proof fn lemma_lit_mid_lit<V>(pv: Seq<V>, m: Seq<Group<V>>, qv: Seq<V>, null: V)
+    ensures groups_values(opt_lit(pv) + m + opt_lit(qv), null) == pv + groups_values(m, null) + qv,
+{
+    lemma_opt_lit(pv, null);
+    lemma_opt_lit(qv, null);
+    lemma_groups_values_concat(opt_lit(pv), m, null);
+    lemma_groups_values_concat(opt_lit(pv) + m, opt_lit(qv), null);
+}
+
+/// The values read, where the last cut fell between groups.
+proof fn lemma_vals_between<V>(gs: Seq<Group<V>>, il: bool, cur: Seq<V>, g0: int, null: V)
+    requires 0 <= g0 <= gs.len(), !il ==> cur.len() == 0,
+    ensures
+        groups_values(gs, null) + cur == done(gs, cur, g0, 0, null) + groups_values(sgroups(gs, il, cur, g0, 0), null),
+{
+    let e = Seq::<V>::empty();
+    let a = groups_values(gs.take(g0), null);
+    let m = gs.skip(g0);
+    let qv = if il { cur } else { e };
+    lemma_groups_values_split(gs, g0, null);
+    lemma_lit_mid_lit(e, m, qv, null);
+    assert(sgroups(gs, il, cur, g0, 0) == opt_lit(e) + m + opt_lit(qv));
+    assert(done(gs, cur, g0, 0, null) == a + e);
+    assert(qv =~= cur);
+    assert(groups_values(gs, null) + cur =~= (a + e) + (e + groups_values(m, null) + qv));
+}
+
+/// Five sequences joined, grouped two ways.
+proof fn lemma_regroup<T>(a: Seq<T>, t: Seq<T>, s: Seq<T>, x: Seq<T>, c: Seq<T>)
+    ensures a + (t + s) + x + c == (a + t) + (s + x + c),
+{
+    assert(a + (t + s) + x + c =~= (a + t) + (s + x + c));
+}
+
+/// The values read, where the last cut split a literal that has closed
+/// since.
+proof fn lemma_vals_closed<V>(gs: Seq<Group<V>>, il: bool, cur: Seq<V>, g0: int, c0: int, null: V)
+    requires
+        0 <= g0 < gs.len(), gs[g0] is Lit, 0 < c0 < gs[g0]->Lit_values.len(), !il ==> cur.len() == 0,
+    ensures
+        groups_values(gs, null) + cur == done(gs, cur, g0, c0, null) + groups_values(sgroups(gs, il, cur, g0, c0), null),
+{
+    hide(groups_values);
+    let e = Seq::<V>::empty();
+    let vs = gs[g0]->Lit_values;
+    let a = groups_values(gs.take(g0), null);
+    let m = gs.skip(g0 + 1);
+    let qv = if il { cur } else { e };
+    lemma_groups_values_at(gs, g0, null);
+    lemma_lit_mid_lit(vs.skip(c0), m, qv, null);
+    assert(sgroups(gs, il, cur, g0, c0) == opt_lit(vs.skip(c0)) + m + opt_lit(qv));
+    assert(done(gs, cur, g0, c0, null) == a + vs.take(c0));
+    assert(qv =~= cur);
+    assert(vs =~= vs.take(c0) + vs.skip(c0));
+    lemma_regroup(a, vs.take(c0), vs.skip(c0), groups_values(m, null), cur);
+}
+
+/// The values read, where the last cut split the literal still being
+/// read.
+proof fn lemma_vals_open<V>(gs: Seq<Group<V>>, cur: Seq<V>, c0: int, null: V)
+    requires 0 < c0 <= cur.len(),
+    ensures
+        groups_values(gs, null) + cur == done(gs, cur, gs.len() as int, c0, null)
+            + groups_values(sgroups(gs, true, cur, gs.len() as int, c0), null),
+{
+    let e = Seq::<V>::empty();
+    let g0 = gs.len() as int;
+    let a = groups_values(gs, null);
+    let m = Seq::<Group<V>>::empty();
+    lemma_lit_mid_lit(cur.skip(c0), m, e, null);
+    assert(gs.take(g0) =~= gs);
+    assert(sgroups(gs, true, cur, g0, c0) == opt_lit(cur.skip(c0)) + m + opt_lit(e));
+    assert(done(gs, cur, g0, c0, null) == a + cur.take(c0));
+    assert(groups_values(m, null) == e);
+    assert(cur =~= cur.take(c0) + cur.skip(c0));
+    assert(a + cur =~= (a + cur.take(c0)) + (cur.skip(c0) + e + e));
+}
+
 /// The values read are those up to the cut, then this slab's.
-#[verifier::spinoff_prover]
 proof fn lemma_vals<V>(gs: Seq<Group<V>>, il: bool, k: nat, cur: Seq<V>, g0: int, c0: int, k0: nat, null: V)
     requires shape(gs, il, k, cur, g0, c0, k0), !il ==> cur.len() == 0,
     ensures
         groups_values(gs, null) + cur == done(gs, cur, g0, c0, null) + groups_values(sgroups(gs, il, cur, g0, c0), null),
         groups_len(sgroups(gs, il, cur, g0, c0)) == groups_values(sgroups(gs, il, cur, g0, c0), null).len(),
 {
-    let p = opt_lit(piece(gs, cur, g0, c0));
-    let m = mid(gs, g0, c0);
-    let q = if open_in(gs, il, g0, c0) { opt_lit(cur) } else { Seq::<Group<V>>::empty() };
-    let e = Seq::<Group<V>>::empty();
-    lemma_opt_lit(piece(gs, cur, g0, c0), null);
-    lemma_opt_lit(cur, null);
-    lemma_groups_values_concat(p, m, null);
-    lemma_groups_values_concat(p + m, q, null);
-    lemma_groups_values_concat(gs.take(g0), gs.skip(g0), null);
-    lemma_groups_values_concat(sgroups(gs, il, cur, g0, c0), e, null);
-    assert(sgroups(gs, il, cur, g0, c0) + e =~= sgroups(gs, il, cur, g0, c0));
-    assert(gs =~= gs.take(g0) + gs.skip(g0));
-    assert(groups_values(e, null) =~= Seq::<V>::empty());
-    if c0 > 0 && gs.len() > g0 {
-        let vs = gs[g0]->Lit_values;
-        let r = gs.skip(g0);
-        assert(r =~= seq![gs[g0]] + gs.skip(g0 + 1));
-        lemma_groups_values_concat(seq![gs[g0]], gs.skip(g0 + 1), null);
-        lemma_opt_lit(vs, null);
-        assert(seq![gs[g0]] == opt_lit(vs));
-        assert(vs =~= vs.take(c0) + vs.skip(c0));
-        if il {
-            assert(groups_values(gs, null) + cur =~= done(gs, cur, g0, c0, null) + groups_values(sgroups(gs, il, cur, g0, c0), null));
-        } else {
-            assert(groups_values(gs, null) + cur =~= done(gs, cur, g0, c0, null) + groups_values(sgroups(gs, il, cur, g0, c0), null));
-        }
-    } else if c0 > 0 {
-        assert(gs.skip(g0) =~= e);
-        assert(gs.take(g0) =~= gs);
-        assert(cur =~= cur.take(c0) + cur.skip(c0));
-        assert(groups_values(gs, null) + cur =~= done(gs, cur, g0, c0, null) + groups_values(sgroups(gs, il, cur, g0, c0), null));
+    lemma_groups_values_concat(sgroups(gs, il, cur, g0, c0), Seq::empty(), null);
+    if c0 == 0 {
+        lemma_vals_between(gs, il, cur, g0, null);
+    } else if gs.len() > g0 {
+        lemma_vals_closed(gs, il, cur, g0, c0, null);
     } else {
-        assert(groups_values(gs, null) + cur =~= done(gs, cur, g0, c0, null) + groups_values(sgroups(gs, il, cur, g0, c0), null));
+        lemma_vals_open(gs, cur, c0, null);
     }
 }
 
@@ -300,49 +444,86 @@ proof fn lemma_canonical_skip<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>, i: int)
     }
 }
 
-/// The slab being cut is canonical.
-#[verifier::spinoff_prover]
-proof fn lemma_canon<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>, il: bool, k: nat, cur: Seq<O::V>, g0: int, c0: int, k0: nat)
+/// The piece of a literal the last cut split is canonical.
+proof fn lemma_canon_piece<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>, il: bool, k: nat, cur: Seq<O::V>, g0: int, c0: int, k0: nat)
     requires
         shape(gs, il, k, cur, g0, c0, k0), canonical::<O>(gs), k <= i64::MAX,
         il ==> cur.len() < k && lit_prefix_ok::<O>(gs, cur),
-        !il ==> cur.len() == 0,
-    ensures canonical::<O>(sgroups(gs, il, cur, g0, c0)),
+    ensures canonical::<O>(opt_lit(piece(gs, cur, g0, c0))),
 {
-    let pv = piece(gs, cur, g0, c0);
-    let p = opt_lit(pv);
-    let m = mid(gs, g0, c0);
-    let q = if open_in(gs, il, g0, c0) { opt_lit(cur) } else { Seq::<Group<O::V>>::empty() };
-    // the piece
     if c0 > 0 && gs.len() > g0 {
-        let vs = gs[g0]->Lit_values;
         assert(group_ok::<O>(gs[g0]));
-        lemma_skip_lit::<O>(vs, c0);
+        lemma_skip_lit::<O>(gs[g0]->Lit_values, c0);
     } else if c0 > 0 {
         lemma_skip_lit::<O>(cur, c0);
     } else {
-        assert(p =~= Seq::<Group<O::V>>::empty());
+        lemma_lit_ok::<O>(Seq::<O::V>::empty());
     }
-    // the groups read whole
+}
+
+/// The groups read whole since the last cut are canonical.
+proof fn lemma_canon_mid<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>, g0: int, c0: int)
+    requires canonical::<O>(gs), 0 <= g0 <= gs.len(),
+    ensures canonical::<O>(mid(gs, g0, c0)),
+{
     if c0 > 0 && gs.len() > g0 {
         lemma_canonical_skip::<O>(gs, g0 + 1);
     } else if c0 > 0 {
-        assert(m =~= Seq::<Group<O::V>>::empty());
+        assert(mid(gs, g0, c0) =~= Seq::<Group<O::V>>::empty());
     } else {
         lemma_canonical_skip::<O>(gs, g0);
     }
-    // the literal being read
+}
+
+/// The literal being read, where its header is in this slab, is
+/// canonical.
+proof fn lemma_canon_open<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>, il: bool, k: nat, cur: Seq<O::V>, g0: int, c0: int)
+    requires
+        k <= i64::MAX,
+        il ==> cur.len() < k && lit_prefix_ok::<O>(gs, cur),
+    ensures canonical::<O>(if open_in(gs, il, g0, c0) { opt_lit(cur) } else { Seq::<Group<O::V>>::empty() }),
+{
     if open_in(gs, il, g0, c0) {
         lemma_lit_ok::<O>(cur);
     }
-    // where they meet
+}
+
+/// The first of the groups read whole may follow the piece.
+proof fn lemma_canon_meet_mid<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>, il: bool, k: nat, cur: Seq<O::V>, g0: int, c0: int, k0: nat)
+    requires shape(gs, il, k, cur, g0, c0, k0), canonical::<O>(gs),
+    ensures ({
+        let p = opt_lit(piece(gs, cur, g0, c0));
+        let m = mid(gs, g0, c0);
+        p.len() > 0 && m.len() > 0 ==> adjacent_ok(p.last(), m[0])
+    }),
+{
+    hide(group_ok);
+    let pv = piece(gs, cur, g0, c0);
+    let p = opt_lit(pv);
+    let m = mid(gs, g0, c0);
     if p.len() > 0 && m.len() > 0 {
         assert(adjacent_ok(gs[g0], gs[g0 + 1]));
         assert(m[0] == gs[g0 + 1]);
         assert(p.last() == Group::Lit { values: pv });
         assert(pv.last() == gs[g0]->Lit_values.last());
     }
-    lemma_canonical_concat::<O>(p, m);
+}
+
+/// The literal being read may follow the piece and the groups read
+/// whole.
+proof fn lemma_canon_meet_open<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>, il: bool, k: nat, cur: Seq<O::V>, g0: int, c0: int, k0: nat)
+    requires
+        shape(gs, il, k, cur, g0, c0, k0),
+        il ==> lit_prefix_ok::<O>(gs, cur),
+    ensures ({
+        let x = opt_lit(piece(gs, cur, g0, c0)) + mid(gs, g0, c0);
+        let q = if open_in(gs, il, g0, c0) { opt_lit(cur) } else { Seq::<Group<O::V>>::empty() };
+        x.len() > 0 && q.len() > 0 ==> adjacent_ok(x.last(), q[0])
+    }),
+{
+    let p = opt_lit(piece(gs, cur, g0, c0));
+    let m = mid(gs, g0, c0);
+    let q = if open_in(gs, il, g0, c0) { opt_lit(cur) } else { Seq::<Group<O::V>>::empty() };
     if (p + m).len() > 0 && q.len() > 0 {
         if m.len() > 0 {
             assert((p + m).last() == m.last());
@@ -354,6 +535,36 @@ proof fn lemma_canon<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>, il: bool, k: nat, 
         }
         assert(q[0] == Group::Lit { values: cur });
     }
+}
+
+/// The slab being cut is canonical.
+#[verifier::spinoff_prover]
+proof fn lemma_canon<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>, il: bool, k: nat, cur: Seq<O::V>, g0: int, c0: int, k0: nat)
+    requires
+        shape(gs, il, k, cur, g0, c0, k0), canonical::<O>(gs), k <= i64::MAX,
+        il ==> cur.len() < k && lit_prefix_ok::<O>(gs, cur),
+        !il ==> cur.len() == 0,
+    ensures canonical::<O>(sgroups(gs, il, cur, g0, c0)),
+{
+    // the lemmas called read these; nothing here needs their bodies
+    hide(canonical);
+    hide(adjacent_ok);
+    hide(lit_prefix_ok);
+    hide(piece);
+    hide(mid);
+    hide(open_in);
+    hide(opt_lit);
+    let p = opt_lit(piece(gs, cur, g0, c0));
+    let m = mid(gs, g0, c0);
+    let q = if open_in(gs, il, g0, c0) { opt_lit(cur) } else { Seq::<Group<O::V>>::empty() };
+    // each part
+    lemma_canon_piece::<O>(gs, il, k, cur, g0, c0, k0);
+    lemma_canon_mid::<O>(gs, g0, c0);
+    lemma_canon_open::<O>(gs, il, k, cur, g0, c0);
+    // where they meet
+    lemma_canon_meet_mid::<O>(gs, il, k, cur, g0, c0, k0);
+    lemma_canonical_concat::<O>(p, m);
+    lemma_canon_meet_open::<O>(gs, il, k, cur, g0, c0, k0);
     lemma_canonical_concat::<O>(p + m, q);
 }
 
@@ -494,6 +705,159 @@ proof fn lemma_step_more<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>, k: nat, cur: S
     }
 }
 
+/// A literal's last value read: what came before the last cut is as it
+/// was.
+proof fn lemma_close_cut<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>, k: nat, cur: Seq<O::V>, v: O::V, g0: int, c0: int, k0: nat)
+    requires shape(gs, true, k, cur, g0, c0, k0), cur.len() + 1 == k,
+    ensures ({
+        let e = Seq::<O::V>::empty();
+        let g1 = gs.push(Group::Lit { values: cur.push(v) });
+        &&& shape(g1, false, 0, e, g0, c0, k0)
+        &&& cut_bytes::<O>(g1, e, g0, c0, k0) == cut_bytes::<O>(gs, cur, g0, c0, k0)
+        &&& done(g1, e, g0, c0, O::null()) == done(gs, cur, g0, c0, O::null())
+    }),
+{
+    hide(groups_bytes);
+    hide(groups_values);
+    hide(encs);
+    let c1 = cur.push(v);
+    let g1 = gs.push(Group::Lit { values: c1 });
+    assert(g1.take(g0) =~= gs.take(g0));
+    if gs.len() > g0 {
+        assert(g1[g0] == gs[g0]);
+    } else {
+        assert(g1[g0] == Group::Lit { values: c1 });
+        if c0 > 0 {
+            assert(c1.take(c0) =~= cur.take(c0));
+        }
+    }
+}
+
+/// A literal's last value read, as the slab's groups: some groups and a
+/// literal of some values before, and the same with the value after
+/// those. Where the last cut split this literal, the values are the
+/// piece's.
+proof fn lemma_close_groups<V>(gs: Seq<Group<V>>, k: nat, cur: Seq<V>, v: V, g0: int, c0: int, k0: nat)
+    requires shape(gs, true, k, cur, g0, c0, k0), cur.len() + 1 == k,
+    ensures ({
+        let g1 = gs.push(Group::Lit { values: cur.push(v) });
+        let op = open_in(gs, true, g0, c0);
+        let x = if op { opt_lit(piece(gs, cur, g0, c0)) + mid(gs, g0, c0) } else { Seq::<Group<V>>::empty() };
+        let w = if op { cur } else { piece(gs, cur, g0, c0) };
+        &&& sgroups(gs, true, cur, g0, c0) == x + opt_lit(w)
+        &&& sgroups(g1, false, Seq::<V>::empty(), g0, c0) == x + opt_lit(w.push(v))
+    }),
+{
+    let e = Seq::<V>::empty();
+    let c1 = cur.push(v);
+    let lg = Group::Lit { values: c1 };
+    let g1 = gs.push(lg);
+    assert(opt_lit(e) =~= Seq::<Group<V>>::empty());
+    if open_in(gs, true, g0, c0) {
+        let m0 = mid(gs, g0, c0);
+        let x = opt_lit(piece(gs, cur, g0, c0)) + m0;
+        if c0 > 0 {
+            assert(g1[g0] == gs[g0]);
+        }
+        assert(mid(g1, g0, c0) =~= m0.push(lg));
+        assert(piece(g1, e, g0, c0) =~= piece(gs, cur, g0, c0));
+        assert(sgroups(g1, false, e, g0, c0) =~= x + opt_lit(c1));
+    } else {
+        let x = Seq::<Group<V>>::empty();
+        let p0 = cur.skip(c0);
+        let p1 = c1.skip(c0);
+        assert(g1[g0] == lg);
+        assert(p1 =~= p0.push(v));
+        assert(mid(gs, g0, c0) =~= Seq::<Group<V>>::empty());
+        assert(mid(g1, g0, c0) =~= Seq::<Group<V>>::empty());
+        assert(sgroups(gs, true, cur, g0, c0) =~= x + opt_lit(p0));
+        assert(sgroups(g1, false, e, g0, c0) =~= x + opt_lit(p1));
+    }
+}
+
+/// Groups `x` and a literal of `w` and then `v`, against `x` and a
+/// literal of `w`: one value and one segment more, and `v` is the last
+/// literal value.
+proof fn lemma_lit_grown<'a, O: RleOps<'a>>(x: Seq<Group<O::V>>, w: Seq<O::V>, v: O::V)
+    ensures
+        groups_len(x + opt_lit(w.push(v))) == groups_len(x + opt_lit(w)) + 1,
+        groups_segments(x + opt_lit(w.push(v))) == groups_segments(x + opt_lit(w)) + 1,
+        lit_tail_of::<O>(x + opt_lit(w.push(v))) == O::enc(v).len(),
+{
+    hide(groups_len);
+    hide(groups_segments);
+    hide(groups_values);
+    let w1 = w.push(v);
+    lemma_groups_len_concat(x, opt_lit(w));
+    lemma_groups_len_concat(x, opt_lit(w1));
+    lemma_opt_lit(w, O::null());
+    lemma_opt_lit(w1, O::null());
+    assert((x + opt_lit(w1)).last() == Group::Lit { values: w1 });
+    assert(w1.last() == v);
+}
+
+/// A literal's last value read, where the literal's header is in this
+/// slab: the piece is as it was, the literal is the last with a header,
+/// and the last group's input bytes are those of the literal so far with
+/// the value's.
+proof fn lemma_close_open<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>, k: nat, cur: Seq<O::V>, v: O::V, g0: int, c0: int, k0: nat)
+    requires
+        shape(gs, true, k, cur, g0, c0, k0), cur.len() + 1 == k,
+        open_in(gs, true, g0, c0),
+    ensures ({
+        let e = Seq::<O::V>::empty();
+        let g1 = gs.push(Group::Lit { values: cur.push(v) });
+        &&& piece(g1, e, g0, c0) == piece(gs, cur, g0, c0)
+        &&& head_k(gs, true, k, g0, c0) == k
+        &&& head_k(g1, false, 0, g0, c0) == k
+        &&& raw_tail::<O>(g1, false, 0, e, g0, c0) == raw_tail::<O>(gs, true, k, cur, g0, c0) + O::enc(v).len()
+    }),
+{
+    let e = Seq::<O::V>::empty();
+    let c1 = cur.push(v);
+    let lg = Group::Lit { values: c1 };
+    let g1 = gs.push(lg);
+    let m0 = mid(gs, g0, c0);
+    assert(c1.drop_last() =~= cur);
+    assert(encs::<O>(c1) == encs::<O>(cur) + O::enc(v));
+    if c0 > 0 {
+        assert(g1[g0] == gs[g0]);
+    }
+    assert(mid(g1, g0, c0) =~= m0.push(lg));
+    assert(piece(g1, e, g0, c0) =~= piece(gs, cur, g0, c0));
+    lemma_last_lit_push(m0, lg);
+    assert(mid(g1, g0, c0).last() == lg);
+}
+
+/// A literal's last value read, where the last cut split the literal:
+/// the piece has the value too, no literal header is in this slab, and
+/// the last group's input bytes are the piece's.
+proof fn lemma_close_split<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>, k: nat, cur: Seq<O::V>, v: O::V, g0: int, c0: int, k0: nat)
+    requires
+        shape(gs, true, k, cur, g0, c0, k0), cur.len() + 1 == k,
+        !open_in(gs, true, g0, c0),
+    ensures ({
+        let e = Seq::<O::V>::empty();
+        let g1 = gs.push(Group::Lit { values: cur.push(v) });
+        &&& piece(g1, e, g0, c0).len() == piece(gs, cur, g0, c0).len() + 1
+        &&& head_k(gs, true, k, g0, c0) == 0
+        &&& head_k(g1, false, 0, g0, c0) == 0
+        &&& raw_tail::<O>(g1, false, 0, e, g0, c0) == raw_tail::<O>(gs, true, k, cur, g0, c0) + O::enc(v).len()
+    }),
+{
+    let c1 = cur.push(v);
+    let lg = Group::Lit { values: c1 };
+    let g1 = gs.push(lg);
+    let p0 = cur.skip(c0);
+    let p1 = c1.skip(c0);
+    assert(g1[g0] == lg);
+    assert(p1 =~= p0.push(v));
+    assert(p1.drop_last() =~= p0);
+    assert(encs::<O>(p1) == encs::<O>(p0) + O::enc(v));
+    assert(mid(gs, g0, c0) =~= Seq::<Group<O::V>>::empty());
+    assert(mid(g1, g0, c0) =~= Seq::<Group<O::V>>::empty());
+}
+
 /// A literal value read that closes the literal.
 #[verifier::spinoff_prover]
 proof fn lemma_step_close<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>, k: nat, cur: Seq<O::V>, v: O::V, g0: int, c0: int, k0: nat)
@@ -518,45 +882,29 @@ proof fn lemma_step_close<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>, k: nat, cur: 
             && head_k(gs, true, k, g0, c0) == 0 && head_k(g1, false, 0, g0, c0) == 0
     }),
 {
-    let e = Seq::<O::V>::empty();
-    let c1 = cur.push(v);
-    let lg = Group::Lit { values: c1 };
-    let g1 = gs.push(lg);
-    assert(c1.drop_last() =~= cur);
-    assert(encs::<O>(c1) == encs::<O>(cur) + O::enc(v));
-    assert(g1.take(g0) =~= gs.take(g0));
-    assert(opt_lit(e) =~= Seq::<Group<O::V>>::empty());
-    if open_in(gs, true, g0, c0) {
-        let m0 = mid(gs, g0, c0);
-        let x = opt_lit(piece(gs, cur, g0, c0)) + m0;
-        if c0 > 0 {
-            assert(g1[g0] == gs[g0]);
-        }
-        assert(mid(g1, g0, c0) =~= m0.push(lg));
-        assert(piece(g1, e, g0, c0) =~= piece(gs, cur, g0, c0));
-        assert(sgroups(gs, true, cur, g0, c0) == x + opt_lit(cur));
-        assert(sgroups(g1, false, e, g0, c0) =~= x + opt_lit(c1));
-        lemma_groups_len_concat(x, opt_lit(cur));
-        lemma_groups_len_concat(x, opt_lit(c1));
-        lemma_opt_lit(cur, O::null());
-        lemma_opt_lit(c1, O::null());
-        assert((x + opt_lit(c1)).last() == lg);
-        lemma_last_lit_push(m0, lg);
-        assert(mid(g1, g0, c0).last() == lg);
+    // the lemmas called read these; nothing here needs their bodies
+    hide(shape);
+    hide(cut_bytes);
+    hide(done);
+    hide(sgroups);
+    hide(piece);
+    hide(mid);
+    hide(opt_lit);
+    hide(head_k);
+    hide(raw_tail);
+    hide(lit_tail_of);
+    hide(groups_len);
+    hide(groups_segments);
+    let op = open_in(gs, true, g0, c0);
+    let x = if op { opt_lit(piece(gs, cur, g0, c0)) + mid(gs, g0, c0) } else { Seq::<Group<O::V>>::empty() };
+    let w = if op { cur } else { piece(gs, cur, g0, c0) };
+    lemma_close_cut::<O>(gs, k, cur, v, g0, c0, k0);
+    lemma_close_groups(gs, k, cur, v, g0, c0, k0);
+    lemma_lit_grown::<O>(x, w, v);
+    if op {
+        lemma_close_open::<O>(gs, k, cur, v, g0, c0, k0);
     } else {
-        let p0 = cur.skip(c0);
-        let p1 = c1.skip(c0);
-        assert(g1[g0] == lg);
-        assert(p1 =~= p0.push(v));
-        assert(p1.drop_last() =~= p0);
-        assert(mid(gs, g0, c0) =~= Seq::<Group<O::V>>::empty());
-        assert(mid(g1, g0, c0) =~= Seq::<Group<O::V>>::empty());
-        assert(sgroups(gs, true, cur, g0, c0) =~= opt_lit(p0));
-        assert(sgroups(g1, false, e, g0, c0) =~= opt_lit(p1));
-        lemma_opt_lit(p0, O::null());
-        lemma_opt_lit(p1, O::null());
-        assert(c1.take(c0) =~= cur.take(c0));
-        assert(gs.take(g0) =~= gs);
+        lemma_close_split::<O>(gs, k, cur, v, g0, c0, k0);
     }
 }
 
@@ -674,6 +1022,57 @@ pub(crate) proof fn lemma_lit_tail_le<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>)
     }
 }
 
+/// Bytes `d` that are `a` and then a copy of each of `b` are `a + b`.
+proof fn lemma_extended(d: Seq<u8>, a: Seq<u8>, b: Seq<u8>)
+    requires
+        d.len() == a.len() + b.len(),
+        forall|i: int| #![trigger d[i]] 0 <= i < d.len() ==> if i < a.len() {
+            d[i] == a[i]
+        } else {
+            cloned::<u8>(b[i - a.len()], d[i])
+        },
+    ensures d == a + b,
+{
+    assert forall|i: int| 0 <= i < d.len() implies #[trigger] d[i] == (a + b)[i] by {
+        if i >= a.len() {
+            assert(cloned::<u8>(b[i - a.len()], d[i]));
+        }
+    }
+    assert(d =~= a + b);
+}
+
+/// Where bytes `b` end in a header `h` and bytes `e`, the header starts
+/// the last `h.len() + e.len()` bytes of `a + b`.
+proof fn lemma_tail_head(a: Seq<u8>, b: Seq<u8>, h: Seq<u8>, e: Seq<u8>)
+    requires
+        (h + e).len() <= b.len(),
+        b.skip(b.len() - (h + e).len()) == h + e,
+    ensures h.is_prefix_of((a + b).skip((a + b).len() - (h + e).len())),
+{
+    let n = (h + e).len();
+    assert((a + b).skip((a + b).len() - n) =~= b.skip(b.len() - n));
+    assert((h + e).subrange(0, h.len() as int) =~= h);
+}
+
+/// Where bytes `b` end in a header `h` and bytes `e`: `a + b` with that
+/// header replaced by `h2`.
+proof fn lemma_head_rewritten(d: Seq<u8>, a: Seq<u8>, b: Seq<u8>, h: Seq<u8>, e: Seq<u8>, h2: Seq<u8>)
+    requires
+        (h + e).len() <= b.len(),
+        b.skip(b.len() - (h + e).len()) == h + e,
+        d == (a + b).take((a + b).len() - (h + e).len()) + h2
+            + (a + b).skip((a + b).len() - (h + e).len() + h.len()),
+    ensures
+        d == a + b.take(b.len() - (h + e).len()) + h2 + e,
+        d.len() == (a + b).len() - (h + e).len() + h2.len() + e.len(),
+{
+    let n = (h + e).len();
+    let t = b.skip(b.len() - n);
+    assert((a + b).take((a + b).len() - n) =~= a + b.take(b.len() - n));
+    assert((a + b).skip((a + b).len() - n + h.len()) =~= t.skip(h.len() as int));
+    assert((h + e).skip(h.len() as int) =~= e);
+}
+
 // ── Cutting ─────────────────────────────────────────────────────────────────
 
 /// No header is longer than `n` bytes.
@@ -735,7 +1134,6 @@ closed spec fn build_ok<'a, O: RleOps<'a>>(c: Cut, gs: Seq<Group<O::V>>, il: boo
 
 /// What each branch of building a slab's bytes stands for.
 #[verifier::spinoff_prover]
-#[verifier::rlimit(60)]
 proof fn lemma_build_cases<'a, O: RleOps<'a>>(c: Cut, gs: Seq<Group<O::V>>, il: bool, k: nat, cur: Seq<O::V>)
     requires build_ok::<O>(c, gs, il, k, cur),
     ensures ({
@@ -938,6 +1336,165 @@ proof fn lemma_read_seg<'a, O: RleOps<'a>>(r0: Reader<'a, O>, r1: Reader<'a, O>,
             }
         },
     }
+}
+
+/// Of bytes `d` whose first `pos` are `cb + rw`, those from `cb`'s end
+/// to `pos` are `rw`.
+proof fn lemma_sub_tail(d: Seq<u8>, cb: Seq<u8>, rw: Seq<u8>, pos: int)
+    requires
+        0 <= pos <= d.len(),
+        d.take(pos) == cb + rw,
+    ensures
+        cb.len() <= pos,
+        d.subrange(cb.len() as int, pos) == rw,
+        rw.len() <= d.len(),
+{
+    assert(d.take(pos).len() == cb.len() + rw.len());
+    assert(d.subrange(cb.len() as int, pos) =~= d.take(pos).skip(cb.len() as int));
+    assert((cb + rw).skip(cb.len() as int) =~= rw);
+}
+
+/// Before a cut at the reader `r`: the state `c` is fit for building the
+/// slab's bytes, from the input's bytes since the last cut.
+proof fn lemma_cut_pre<'a, O: RleOps<'a>>(c: Cut, r: Reader<'a, O>, input: Seq<u8>, pos: int)
+    requires
+        c.ok_at(r),
+        input == r.data(),
+        pos == r.spec_pos(),
+        c.seg_count() > 0,
+        !(r.in_lit() && r.lit_values().len() == 0),
+    ensures ({
+        let rw = raw::<O>(r.groups(), r.in_lit(), r.lit_k(), r.lit_values(), c.g0@, c.c0@);
+        &&& build_ok::<O>(c, r.groups(), r.in_lit(), r.lit_k(), r.lit_values())
+        &&& c.start <= pos <= input.len()
+        &&& input.subrange(c.start as int, pos) == rw
+        &&& rw.len() <= input.len()
+    }),
+{
+    let gs = r.groups();
+    let il = r.in_lit();
+    let k = r.lit_k();
+    let cur = r.lit_values();
+    let g0 = c.g0@;
+    let c0 = c.c0@;
+    let k0 = c.k0@;
+    let rw = raw::<O>(gs, il, k, cur, g0, c0);
+    let cb = cut_bytes::<O>(gs, cur, g0, c0, k0);
+    r.lemma_inv();
+    lemma_raw::<O>(gs, il, k, cur, g0, c0, k0);
+    lemma_canon::<O>(gs, il, k, cur, g0, c0, k0);
+    lemma_sub_tail(input, cb, rw, pos);
+}
+
+/// A slab of canonical groups' bytes, recorded with their length,
+/// segments and tail, is a finished slab of their values.
+proof fn lemma_cut_slab<'a, O: RleOps<'a>>(sg: Seq<Group<O::V>>, s: Slab)
+    requires
+        canonical::<O>(sg),
+        slab_bytes(s) == groups_bytes::<O>(sg),
+        slab_len(s) == groups_len(sg),
+        slab_segments(s) == groups_segments(sg),
+        tail_b(slab_tail_of(s)) == tail_bytes_of::<O>(sg),
+        lit_tail_of::<O>(sg) <= tail_bytes_of::<O>(sg) ==> tail_l(slab_tail_of(s)) == lit_tail_of::<O>(sg),
+    ensures
+        slab_ok::<O>(s),
+        slab_values::<O>(slab_bytes(s)) == groups_values(sg, O::null()),
+{
+    lemma_slab_is::<O>(sg, slab_bytes(s));
+    lemma_lit_tail_le::<O>(sg);
+    lemma_groups_values_concat(sg, Seq::empty(), O::null());
+}
+
+/// Finished slabs `a` with a finished slab `s` after them: finished
+/// slabs, of `a`'s values and then `s`'s.
+proof fn lemma_slabs_push<'a, O: RleOps<'a>>(a: Seq<Slab>, s: Slab, b: Seq<Slab>)
+    requires
+        forall|i: int| 0 <= i < a.len() ==> slab_ok::<O>(#[trigger] a[i]),
+        slab_ok::<O>(s),
+        b == a.push(s),
+    ensures
+        forall|i: int| 0 <= i < b.len() ==> slab_ok::<O>(#[trigger] b[i]),
+        slabs_values::<O>(b) == slabs_values::<O>(a) + slab_values::<O>(slab_bytes(s)),
+        b.drop_last() == a,
+{
+    hide(slab_ok);
+    assert(b.drop_last() =~= a);
+    assert(b.last() == s);
+    assert forall|i: int| 0 <= i < b.len() implies slab_ok::<O>(#[trigger] b[i]) by {
+        if i < a.len() {
+            assert(b[i] == a[i]);
+        }
+    }
+}
+
+/// After a cut at the reader `r`: with the slab `s` that was being cut
+/// among the slabs and the rest as at a start, the state `c1` is as
+/// between segments.
+proof fn lemma_cut_post<'a, O: RleOps<'a>>(c0: Cut, c1: Cut, r: Reader<'a, O>, s: Slab, pos: int)
+    requires
+        c0.ok_at(r),
+        pos == r.spec_pos(),
+        !(r.in_lit() && r.lit_values().len() == 0),
+        ({
+            let sg = sgroups(r.groups(), r.in_lit(), r.lit_values(), c0.g0@, c0.c0@);
+            &&& slab_bytes(s) == groups_bytes::<O>(sg)
+            &&& slab_len(s) == c0.len
+            &&& slab_segments(s) == c0.segments
+            &&& tail_b(slab_tail_of(s)) == tail_bytes_of::<O>(sg)
+            &&& c0.lit_tail <= tail_bytes_of::<O>(sg) ==> tail_l(slab_tail_of(s)) == c0.lit_tail
+        }),
+        c1.slabs@ == c0.slabs@.push(s),
+        c1.start == pos,
+        c1.len == 0,
+        c1.segments == 0,
+        c1.lit_tail == 0,
+        c1.tail_len == 0,
+        c1.pending_header == 0,
+        c1.last_lit_count == 0,
+        c1.lit_count == 0,
+        c1.g0@ == r.groups().len(),
+        c1.c0@ == (if r.in_lit() { r.lit_values().len() as int } else { 0 }),
+        c1.k0@ == r.lit_k(),
+    ensures
+        c1.ok_at(r),
+        c1.done_slabs().drop_last() == c0.done_slabs(),
+{
+    // the lemmas called read these; nothing here needs their bodies
+    hide(canonical);
+    hide(lit_prefix_ok);
+    hide(shape);
+    hide(sgroups);
+    hide(piece);
+    hide(head_k);
+    hide(raw_tail);
+    hide(cut_bytes);
+    hide(done);
+    hide(read_bytes);
+    hide(slab_ok);
+    hide(slabs_values);
+    hide(groups_bytes);
+    hide(groups_values);
+    hide(groups_len);
+    hide(groups_segments);
+    hide(lit_tail_of);
+    hide(tail_bytes_of);
+    let gs = r.groups();
+    let il = r.in_lit();
+    let k = r.lit_k();
+    let cur = r.lit_values();
+    let g0 = c0.g0@;
+    let k0 = c0.k0@;
+    let sg = sgroups(gs, il, cur, g0, c0.c0@);
+    let nl = O::null();
+    r.lemma_inv();
+    assert(r.data().take(pos).len() == pos);
+    // the slab cut
+    lemma_canon::<O>(gs, il, k, cur, g0, c0.c0@, k0);
+    lemma_cut_slab::<O>(sg, s);
+    lemma_slabs_push::<O>(c0.slabs@, s, c1.slabs@);
+    // the values read: those up to this cut
+    lemma_vals(gs, il, k, cur, g0, c0.c0@, k0, nl);
+    lemma_cut_reset::<O>(gs, il, k, cur);
 }
 
 impl Cut {
@@ -1148,7 +1705,6 @@ impl Cut {
     /// its header for the values before the cut. Returns the bytes and
     /// the length of their last group.
     #[verifier::spinoff_prover]
-    #[verifier::rlimit(60)]
     fn build<'a, W: WriteOps<'a>>(&self, raw_bytes: &[u8], Ghost(gs): Ghost<Seq<Group<VOf<'a, W>>>>, Ghost(il): Ghost<bool>, Ghost(k): Ghost<nat>, Ghost(cur): Ghost<Seq<VOf<'a, W>>>) -> (res: (Vec<u8>, usize))
         requires
             build_ok::<W::R>(*self, gs, il, k, cur),
@@ -1187,13 +1743,7 @@ impl Cut {
         }
         data.extend_from_slice(raw_bytes);
         proof {
-            assert(data@ =~= hp + rw) by {
-                assert forall|i: int| 0 <= i < data@.len() implies #[trigger] data@[i] == (hp + rw)[i] by {
-                    if i >= hp.len() {
-                        assert(cloned::<u8>(raw_bytes@[i - hp.len()], data@[i]));
-                    }
-                }
-            }
+            lemma_extended(data@, hp, raw_bytes@);
         }
         let _total = data.len();
         if add_head {
@@ -1202,15 +1752,16 @@ impl Cut {
         if self.lit_count < self.last_lit_count {
             let header_pos = data.len() - self.tail_len;
             let ghost d1 = data@;
+            let ghost lh = lit_head::<W::R>(k);
+            let ghost ec = encs::<W::R>(cur);
             proof {
-                assert(d1.skip(header_pos as int) =~= rw.skip(rw.len() - ow.len()));
-                assert(lit_head::<W::R>(k).is_prefix_of(d1.skip(header_pos as int)));
+                lemma_tail_head(hp, rw, lh, ec);
             }
             let _ = W::rewrite_lit_header(&mut data, header_pos, self.lit_count);
             proof {
-                assert(d1.take(header_pos as int) =~= hp + rw.take(rw.len() - ow.len()));
-                assert(d1.skip(header_pos + lit_head::<W::R>(k).len()) =~= encs::<W::R>(cur));
-                assert(data@ =~= groups_bytes::<W::R>(sg));
+                let h2 = lit_head::<W::R>(cur.len());
+                assert(data@ == d1.take(header_pos as int) + h2 + d1.skip(header_pos + lh.len()));
+                lemma_head_rewritten(data@, hp, rw, lh, ec, h2);
             }
             tb = data.len() - header_pos;
         }
@@ -1224,7 +1775,6 @@ impl Cut {
     /// If the slab's last run is 4 GiB or more: its tail record can't
     /// hold it.
     #[verifier::spinoff_prover]
-    #[verifier::rlimit(60)]
     pub(crate) fn cut_slab<'a, W: WriteOps<'a>>(&mut self, input: &[u8], pos: usize, Ghost(r): Ghost<Reader<'a, W::R>>) -> (res: Result<(), PackError>)
         requires
             old(self).ok_at(r), input@ == r.data(), pos == r.spec_pos(), old(self).seg_count() > 0,
@@ -1240,31 +1790,14 @@ impl Cut {
         let ghost il = r.in_lit();
         let ghost k = r.lit_k();
         let ghost cur = r.lit_values();
-        let ghost g0 = self.g0@;
-        let ghost c0 = self.c0@;
-        let ghost k0 = self.k0@;
-        let ghost sg = sgroups(gs, il, cur, g0, c0);
-        let ghost rw = raw::<W::R>(gs, il, k, cur, g0, c0);
-        let ghost nl = <W::R as RleOps<'a>>::null();
         proof {
-            r.lemma_inv();
-            lemma_raw::<W::R>(gs, il, k, cur, g0, c0, k0);
-            lemma_bounds::<W::R>(gs, il, k, cur, g0, c0, k0);
-            lemma_canon::<W::R>(gs, il, k, cur, g0, c0, k0);
-            lemma_vals(gs, il, k, cur, g0, c0, k0, nl);
-            let cb = cut_bytes::<W::R>(gs, cur, g0, c0, k0);
-            assert(input@.take(pos as int) == cb + rw);
-            assert(input@.subrange(self.start as int, pos as int) =~= input@.take(pos as int).skip(self.start as int));
-            assert((cb + rw).skip(cb.len() as int) =~= rw);
+            lemma_cut_pre::<W::R>(*self, r, input@, pos as int);
         }
         let raw_bytes = &input[self.start..pos];
         let (data, tb) = self.build::<W>(raw_bytes, Ghost(gs), Ghost(il), Ghost(k), Ghost(cur));
         if tb > 0xffff_ffff {
             proof {
                 // the last run is among the input's bytes, but for a header
-                assert(rw.len() <= input@.len()) by {
-                    assert(input@.take(pos as int).len() == cut_bytes::<W::R>(gs, cur, g0, c0, k0).len() + rw.len());
-                }
                 if small::<W::R>(input@) {
                     let n = choose|n: nat| head_bound::<W::R>(n) && input@.len() + n <= 0xffff_ffff;
                     lemma_tail_small::<W::R>(*self, gs, il, k, cur, n);
@@ -1272,14 +1805,8 @@ impl Cut {
             }
             return Err(over_4gib());
         }
-        proof {
-            lemma_slab_is::<W::R>(sg, data@);
-            lemma_lit_tail_le::<W::R>(sg);
-            lemma_groups_values_concat(sg, Seq::empty(), nl);
-        }
         let tail = tail_rec(tb, self.lit_tail);
         let slab = new_slab(data, self.len, self.segments, tail);
-        let ghost s0 = self.slabs@;
         self.slabs.push(slab);
         self.start = pos;
         self.len = 0;
@@ -1293,14 +1820,7 @@ impl Cut {
         self.c0 = Ghost(if il { cur.len() as int } else { 0 });
         self.k0 = Ghost(k);
         proof {
-            assert(self.slabs@.drop_last() =~= s0);
-            assert(self.slabs@.last() == slab);
-            assert forall|i: int| 0 <= i < self.slabs@.len() implies slab_ok::<W::R>(#[trigger] self.slabs@[i]) by {
-                if i < s0.len() {
-                    assert(self.slabs@[i] == s0[i]);
-                }
-            }
-            lemma_cut_reset::<W::R>(gs, il, k, cur);
+            lemma_cut_post::<W::R>(*old(self), *self, r, slab, pos as int);
         }
         Ok(())
     }
@@ -1511,7 +2031,6 @@ impl<'a, W: WriteOps<'a>> Load<'a, W> {
     /// 4 GiB or more.
     #[inline]
     #[verifier::spinoff_prover]
-    #[verifier::rlimit(60)]
     pub(crate) fn try_next_run(&mut self) -> (r: Result<Option<crate::Run<VOf<'a, W>>>, PackError>)
         requires old(self).inv(),
         ensures

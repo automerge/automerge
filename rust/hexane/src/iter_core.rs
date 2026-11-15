@@ -390,6 +390,49 @@ pub(crate) proof fn lemma_sub_skip<V>(v: Seq<V>, a: int, b: int, n: int)
     assert(v.subrange(a, b).skip(n) =~= v.subrange(a + n, b));
 }
 
+/// Moving `a` on and then `b` on is moving `a + b` on.
+pub(crate) proof fn lemma_skip_add<V>(o: Seq<V>, a: int, b: int)
+    requires
+        0 <= a,
+        0 <= b,
+        a + b <= o.len(),
+    ensures
+        o.skip(a).skip(b) == o.skip(a + b),
+{
+    assert(o.skip(a).skip(b) =~= o.skip(a + b));
+}
+
+/// Moving no items on leaves all of them.
+pub(crate) proof fn lemma_skip_none<V>(o: Seq<V>)
+    ensures
+        o.skip(0) == o,
+{
+    assert(o.skip(0) =~= o);
+}
+
+/// A run of `v`, `a` long, with a run of `v`, `b` long, after it is one
+/// run of `v`, `a + b` long.
+pub(crate) proof fn lemma_run_join<V>(o: Seq<V>, v: V, a: int, b: int)
+    requires
+        0 <= a,
+        0 <= b,
+        a + b <= o.len(),
+        o.take(a) == Seq::new(a as nat, |_i: int| v),
+        o.skip(a).take(b) == Seq::new(b as nat, |_i: int| v),
+    ensures
+        o.take(a + b) == Seq::new((a + b) as nat, |_i: int| v),
+{
+    let t = o.take(a + b);
+    assert forall|i: int| 0 <= i < t.len() implies t[i] == v by {
+        if i < a {
+            assert(o.take(a)[i] == v);
+        } else {
+            assert(o.skip(a).take(b)[i - a] == v);
+        }
+    }
+    assert(t =~= Seq::new((a + b) as nat, |_i: int| v));
+}
+
 proof fn lemma_concat_at<V>(cs: Seq<Seq<V>>, k: int)
     requires
         0 <= k < cs.len(),
@@ -616,12 +659,135 @@ impl<D: Decode> ICore<D> {
             self.slab_idx + 1 >= s.len(),
         ensures
             self.out::<X>(s).len() == 0,
+            self.pos >= total(slab_lens(s)),
     {
         self.lemma_here::<X>(s);
         if self.slab_idx < s.len() {
             assert(s.skip(self.slab_idx + 1) =~= Seq::<Slab<X::Tail>>::empty());
             assert(each::<X>(s.skip(self.slab_idx + 1)) =~= Seq::<Seq<D::Item>>::empty());
         }
+    }
+
+    /// An iterator `k` further on in the same window has what is left
+    /// after `k` items.
+    pub(crate) proof fn lemma_moved<'a, X: Decoders<'a, D = D>>(&self, after: Self, s: Seq<Slab<X::Tail>>, k: int)
+        requires
+            0 <= k <= self.items_left,
+            after.pos == self.pos + k,
+            after.items_left == self.items_left - k,
+        ensures
+            k <= self.out::<X>(s).len() ==> after.out::<X>(s) == self.out::<X>(s).skip(k),
+            k >= self.out::<X>(s).len() ==> after.out::<X>(s).len() == 0,
+    {
+        self.lemma_out_window::<X>(s);
+        after.lemma_out_window::<X>(s);
+        lemma_window_past(vals_of::<X>(s), self.pos as int, self.pos + self.items_left, k);
+        lemma_skip_none(self.out::<X>(s));
+    }
+
+    /// After a jump ahead to a slab that holds the item `n` on from the
+    /// iterator, `j` on from where it lands: the item is in both windows,
+    /// with the same window after it.
+    pub(crate) proof fn lemma_jumped<'a, X: Decoders<'a, D = D>>(
+        &self,
+        after: Self,
+        s: Seq<Slab<X::Tail>>,
+        n: int,
+        j: int,
+    )
+        requires
+            self.wf::<X>(s),
+            after.wf::<X>(s),
+            after.slab_idx < s.len(),
+            self.pos <= after.pos,
+            after.items_left == self.items_left - (after.pos - self.pos),
+            after.pos + j == self.pos + n,
+            0 <= j < after.slab_remaining,
+            n < self.items_left,
+        ensures
+            j < after.out::<X>(s).len(),
+            n < self.out::<X>(s).len(),
+            after.out::<X>(s)[j] == self.out::<X>(s)[n],
+            after.out::<X>(s).skip(j + 1) == self.out::<X>(s).skip(n + 1),
+    {
+        after.lemma_here::<X>(s);
+        self.lemma_moved::<X>(after, s, after.pos - self.pos);
+        lemma_skip_add(self.out::<X>(s), after.pos - self.pos, j + 1);
+    }
+
+    /// Standing in a slab, the window's values up to the slab's end are
+    /// the decoder's.
+    proof fn lemma_out_at<'a, X: Decoders<'a, D = D>>(&self, s: Seq<Slab<X::Tail>>, i: int)
+        requires
+            self.wf::<X>(s),
+            self.slab_idx < s.len(),
+            0 <= i < self.out::<X>(s).len(),
+            i < self.slab_remaining,
+        ensures
+            self.decoder.rest().len() == self.slab_remaining,
+            self.out::<X>(s)[i] == self.decoder.rest()[i],
+    {
+        self.lemma_here::<X>(s);
+        let vv = vals_of::<X>(s);
+        assert(self.out::<X>(s)[i] == vv[self.pos + i]);
+        assert(vv[self.pos + i] == vv.skip(self.pos as int)[i]);
+    }
+
+    /// Taking the decoder's next `c` values, which are the window's next
+    /// `c`, leaves the iterator `after`.
+    proof fn lemma_taken<'a, X: Decoders<'a, D = D>>(&self, after: Self, s: Seq<Slab<X::Tail>>, c: int)
+        requires
+            self.wf::<X>(s),
+            self.slab_idx < s.len(),
+            0 <= c <= self.items_left,
+            c <= self.slab_remaining,
+            after.items_left == self.items_left - c,
+            after.slab_remaining == self.slab_remaining - c,
+            after.pos == self.pos + c,
+            after.slab_idx == self.slab_idx,
+            after.decoder.inv(),
+            after.decoder.rest() == self.decoder.rest().skip(c),
+        ensures
+            after.wf::<X>(s),
+            self.decoder.rest().len() == self.slab_remaining,
+            c <= self.out::<X>(s).len() <= self.items_left,
+            self.out::<X>(s).take(c) == self.decoder.rest().take(c),
+            after.out::<X>(s) == self.out::<X>(s).skip(c),
+    {
+        self.lemma_here::<X>(s);
+        let si = self.slab_idx as int;
+        let o = self.out::<X>(s);
+        let rest = self.decoder.rest();
+        lemma_skip_add(X::vals(s[si]), s[si].len - self.slab_remaining, c);
+        assert forall|i: int| 0 <= i < c implies o.take(c)[i] == rest.take(c)[i] by {
+            self.lemma_out_at::<X>(s, i);
+        }
+        assert(o.take(c) =~= rest.take(c));
+        assert(after.out::<X>(s) =~= o.skip(c));
+    }
+
+    /// Stepping from the end of a slab to the start of the next, with a
+    /// decoder opened there, leaves the iterator `after`, with the same
+    /// values left.
+    proof fn lemma_stepped<'a, X: Decoders<'a, D = D>>(&self, after: Self, s: Seq<Slab<X::Tail>>)
+        requires
+            self.wf::<X>(s),
+            self.slab_remaining == 0,
+            self.slab_idx + 1 < s.len(),
+            after.items_left == self.items_left,
+            after.pos == self.pos,
+            after.slab_idx == self.slab_idx + 1,
+            after.slab_remaining == s[after.slab_idx as int].len,
+            after.decoder.inv(),
+            after.decoder.rest() == X::vals(s[after.slab_idx as int]),
+        ensures
+            after.wf::<X>(s),
+            after.out::<X>(s) == self.out::<X>(s),
+    {
+        let si = self.slab_idx as int;
+        lemma_sum_split(slab_lens(s), 0, si, si + 1);
+        lemma_sum_one(slab_lens(s), si);
+        lemma_skip_none(X::vals(s[si + 1]));
     }
 
     /// The position an iterator keeps when suspended: its slab, how far
@@ -859,44 +1025,24 @@ impl<D: Decode> ICore<D> {
                 self.slab_remaining -= 1;
                 self.pos += 1;
                 proof {
-                    let si = self.slab_idx as int;
-                    let s = slabs@;
-                    let rest = X::vals(s[si]).skip(s[si].len - c1.slab_remaining);
-                    assert(rest.skip(1) =~= X::vals(s[si]).skip(s[si].len - self.slab_remaining));
-                    let vv = vals_of::<X>(s);
-                    assert(vv[c1.pos as int] == vv.skip(c1.pos as int)[0]);
-                    assert(self.out::<X>(s) =~= c1.out::<X>(s).skip(1));
+                    c1.lemma_taken::<X>(*self, slabs@, 1);
+                    c1.lemma_out_at::<X>(slabs@, 0);
                 }
                 return Some(v);
             }
             if self.slab_idx + 1 >= slabs.len() {
+                proof {
+                    c1.lemma_end_out::<X>(slabs@);
+                }
                 self.slab_idx = slabs.len();
                 self.items_left = 0;
-                proof {
-                    let s = slabs@;
-                    if c1.slab_idx < s.len() {
-                        assert(c1.slab_remaining == 0);
-                        assert(s.skip(c1.slab_idx + 1) =~= Seq::<Slab<X::Tail>>::empty());
-                        assert(each::<X>(s.skip(c1.slab_idx + 1)) =~= Seq::<Seq<D::Item>>::empty());
-                    }
-                    assert(c1.out::<X>(s).len() == 0);
-                }
                 return None;
-            }
-            proof {
-                let s = slabs@;
-                let si = self.slab_idx as int;
-                assert(self.slab_remaining == 0);
-                lemma_sum_split(slab_lens(s), 0, si, si + 1);
-                lemma_sum_one(slab_lens(s), si);
             }
             self.slab_idx += 1;
             self.slab_remaining = slabs[self.slab_idx].len;
             self.decoder = X::open(&slabs[self.slab_idx]);
             proof {
-                let s = slabs@;
-                let si = self.slab_idx as int;
-                assert(X::vals(s[si]).skip(0) =~= X::vals(s[si]));
+                c1.lemma_stepped::<X>(*self, slabs@);
             }
         }
     }
@@ -940,14 +1086,115 @@ impl<D: Decode> ICore<D> {
         self.decoder = X::open(&slabs[si]);
         self.items_left -= skipped;
         proof {
-            assert(X::vals(slabs@[si as int]).skip(0) =~= X::vals(slabs@[si as int]));
+            lemma_skip_none(X::vals(slabs@[si as int]));
         }
         true
     }
 
+    /// What a move in the window needs of an iterator that stands well.
+    proof fn lemma_nth_pre<'a, X: Decoders<'a, D = D>>(&self, s: Seq<Slab<X::Tail>>)
+        requires
+            self.wf::<X>(s),
+        ensures
+            self.decoder.inv(),
+            self.pos + self.items_left <= usize::MAX,
+            self.slab_remaining > 0 ==> self.slab_idx < s.len(),
+    {
+    }
+
+    /// The index's answer `r` for the item `n` on, which is past the
+    /// iterator's slab: a slab that starts at or after the iterator, or
+    /// the end, and then the window ends before the item.
+    proof fn lemma_nth_found<'a, X: Decoders<'a, D = D>>(
+        &self,
+        s: Seq<Slab<X::Tail>>,
+        n: int,
+        target: usize,
+        r: (usize, usize),
+    )
+        requires
+            self.wf::<X>(s),
+            self.slab_remaining <= n < self.items_left,
+            target == self.pos + n,
+            find_ok(s, target, r),
+        ensures
+            r.0 <= s.len(),
+            sum(slab_lens(s), 0, s.len() as int) == total(slab_lens(s)),
+            r.0 < s.len() ==> {
+                &&& r.1 <= target
+                &&& target - r.1 == sum(slab_lens(s), 0, r.0 as int)
+                &&& self.pos <= target - r.1
+                &&& r.1 < s[r.0 as int].len
+            },
+            r.0 == s.len() ==> self.out::<X>(s).len() <= n,
+    {
+        let lens = slab_lens(s);
+        let si = r.0;
+        self.lemma_here::<X>(s);
+        if si < s.len() {
+            // the slab holding `target` starts at or after the cursor
+            if self.slab_idx < s.len() {
+                let cur = self.slab_idx as int;
+                lemma_sum_split(lens, 0, cur, cur + 1);
+                lemma_sum_one(lens, cur);
+                if (si as int) <= cur {
+                    lemma_sum_le(lens, 0, si + 1, 0, cur + 1);
+                    lemma_sum_split(lens, 0, si as int, si + 1);
+                    lemma_sum_one(lens, si as int);
+                } else {
+                    lemma_sum_le(lens, 0, cur + 1, 0, si as int);
+                }
+            } else {
+                lemma_from::<X>(s, si as int, 0);
+            }
+        }
+    }
+
+    /// The item `n` on, taken as the `j`th of the slab the iterator `mid`
+    /// stands in, at or after this one: it is the window's `n`th, and
+    /// `after` has the window past it.
+    proof fn lemma_nth_at<'a, X: Decoders<'a, D = D>>(
+        &self,
+        mid: Self,
+        after: Self,
+        s: Seq<Slab<X::Tail>>,
+        n: int,
+        j: int,
+        r: Option<D::Item>,
+    )
+        requires
+            self.wf::<X>(s),
+            mid.wf::<X>(s),
+            mid.slab_idx < s.len(),
+            self.pos <= mid.pos,
+            mid.items_left == self.items_left - (mid.pos - self.pos),
+            mid.pos + j == self.pos + n,
+            0 <= j < mid.slab_remaining,
+            n < self.items_left,
+            after.items_left == mid.items_left - (j + 1),
+            after.slab_remaining == mid.slab_remaining - (j + 1),
+            after.pos == mid.pos + j + 1,
+            after.slab_idx == mid.slab_idx,
+            after.decoder.inv(),
+            j < mid.decoder.rest().len() ==> r == Some(mid.decoder.rest()[j]) && after.decoder.rest()
+                == mid.decoder.rest().skip(j + 1),
+        ensures
+            after.wf::<X>(s),
+            n < self.out::<X>(s).len(),
+            r == Some(self.out::<X>(s)[n]),
+            after.out::<X>(s) == self.out::<X>(s).skip(n + 1),
+            after.pos <= total(slab_lens(s)),
+    {
+        hide(ICore::wf);
+        hide(ICore::out);
+        self.lemma_jumped::<X>(mid, s, n, j);
+        mid.lemma_here::<X>(s);
+        mid.lemma_taken::<X>(after, s, j + 1);
+        mid.lemma_out_at::<X>(s, j);
+    }
+
     /// `nth`, for `n` inside the window.
     #[verifier::spinoff_prover]
-    #[verifier::rlimit(20)]
     fn nth_in<'a, X: Decoders<'a, D = D>, F: Fn(usize) -> (usize, usize), G: Fn(usize) -> usize>(
         &mut self,
         slabs: &'a [Slab<X::Tail>],
@@ -978,11 +1225,14 @@ impl<D: Decode> ICore<D> {
             // past the data, it stops at the end
             old(self).pos <= total(slab_lens(slabs@)) ==> final(self).pos <= total(slab_lens(slabs@)),
     {
+        hide(ICore::wf);
+        hide(ICore::out);
+        hide(find_ok);
+        hide(sum);
         let ghost c0 = *self;
         let ghost s = slabs@;
-        let ghost vv = vals_of::<X>(s);
         proof {
-            self.lemma_here::<X>(s);
+            self.lemma_nth_pre::<X>(s);
         }
         // Fast path: target is within the current slab.
         if n < self.slab_remaining {
@@ -991,11 +1241,7 @@ impl<D: Decode> ICore<D> {
             self.pos += n + 1;
             let r = self.decoder.d_nth(n);
             proof {
-                let si = self.slab_idx as int;
-                let rest0 = c0.decoder.rest();
-                assert(rest0.skip(n + 1) =~= X::vals(s[si]).skip(s[si].len - self.slab_remaining));
-                assert(vv.skip(c0.pos as int)[n as int] == vv[c0.pos + n]);
-                assert(self.out::<X>(s) =~= c0.out::<X>(s).skip(n + 1));
+                c0.lemma_nth_at::<X>(c0, *self, s, n as int, n as int, r);
             }
             return r;
         }
@@ -1003,24 +1249,7 @@ impl<D: Decode> ICore<D> {
         let target = self.pos + n;
         let (si, off) = find(target);
         proof {
-            let lens = slab_lens(s);
-            if si < s.len() {
-                // the slab holding `target` starts at or after the cursor
-                if c0.slab_idx < s.len() {
-                    let cur = c0.slab_idx as int;
-                    lemma_sum_split(lens, 0, cur, cur + 1);
-                    lemma_sum_one(lens, cur);
-                    if (si as int) <= cur {
-                        lemma_sum_le(lens, 0, si + 1, 0, cur + 1);
-                        lemma_sum_split(lens, 0, si as int, si + 1);
-                        lemma_sum_one(lens, si as int);
-                    } else {
-                        lemma_sum_le(lens, 0, cur + 1, 0, si as int);
-                    }
-                } else {
-                    lemma_from::<X>(s, si as int, 0);
-                }
-            }
+            c0.lemma_nth_found::<X>(s, n as int, target, (si, off));
         }
         // past the data (the window can run past it), stop at its end
         let start = if si < slabs.len() {
@@ -1030,28 +1259,20 @@ impl<D: Decode> ICore<D> {
         };
         if !self.advance_to_slab::<X>(slabs, si, start) {
             proof {
-                assert(c0.out::<X>(s).len() <= n) by {
-                    assert(target >= total(slab_lens(s)));
-                }
+                self.lemma_none_left::<X>(s);
             }
             return None;
         }
         let ghost c1 = *self;
+        proof {
+            c1.lemma_nth_pre::<X>(s);
+        }
         self.slab_remaining -= off + 1;
         self.items_left -= off + 1;
         self.pos += off + 1;
         let r = self.decoder.d_nth(off);
         proof {
-            let k = si as int;
-            lemma_from::<X>(s, k, 0);
-            lemma_from::<X>(s, k, off + 1);
-            let v = X::vals(s[k]);
-            assert(v.skip(0) =~= v);
-            assert(c1.decoder.rest() =~= v);
-            assert(v.skip(off + 1) =~= X::vals(s[k]).skip(s[k].len - self.slab_remaining));
-            assert(vv.skip(sum(slab_lens(s), 0, k) as int)[off as int] == vv[target as int]);
-            assert(vv.skip(c0.pos as int)[n as int] == vv[target as int]);
-            assert(self.out::<X>(s) =~= c0.out::<X>(s).skip(n + 1));
+            c0.lemma_nth_at::<X>(c1, *self, s, n as int, off as int, r);
         }
         r
     }
@@ -1164,29 +1385,16 @@ impl<D: Decode> ICore<D> {
                 max
             };
             if cap > 0 {
-                let ghost d0 = self.decoder;
+                let ghost c1 = *self;
                 if let Some(run) = self.decoder.d_run_max(cap) {
                     let count = run.count;
                     self.items_left -= count;
                     self.slab_remaining -= count;
                     self.pos += count;
                     proof {
-                        let si = self.slab_idx as int;
-                        let vv = vals_of::<X>(s);
-                        let rest = d0.rest();
-                        assert(rest.skip(count as int) =~= X::vals(s[si]).skip(s[si].len - self.slab_remaining));
-                        let o = c0.out::<X>(s);
-                        assert(o.take(count as int) =~= rest.take(count as int)) by {
-                            assert(vv.skip(c0.pos as int) == rest + vals_of::<X>(s.skip(si + 1)));
-                            assert forall|i: int| 0 <= i < count implies o.take(count as int)[i] == rest.take(count as int)[i] by {
-                                assert(o[i] == vv[c0.pos + i]);
-                                assert(vv[c0.pos + i] == vv.skip(c0.pos as int)[i]);
-                            }
-                        }
-                        assert(self.out::<X>(s) =~= o.skip(count as int));
-                        if count < max && count < o.len() && self.slab_remaining > 0 {
-                            assert(o[count as int] == vv[c0.pos + count]);
-                            assert(vv[c0.pos + count] == vv.skip(c0.pos as int)[count as int]);
+                        c1.lemma_taken::<X>(*self, s, count as int);
+                        if count < max && count < c1.out::<X>(s).len() && self.slab_remaining > 0 {
+                            c1.lemma_out_at::<X>(s, count as int);
                         }
                     }
                     return Some(run);
@@ -1194,27 +1402,18 @@ impl<D: Decode> ICore<D> {
             }
             if self.slab_idx + 1 >= slabs.len() {
                 proof {
-                    if self.slab_idx < s.len() {
-                        assert(self.slab_remaining == 0);
-                        assert(s.skip(self.slab_idx + 1) =~= Seq::<Slab<X::Tail>>::empty());
-                        assert(each::<X>(s.skip(self.slab_idx + 1)) =~= Seq::<Seq<D::Item>>::empty());
-                    }
+                    self.lemma_end_out::<X>(s);
                 }
                 self.slab_idx = slabs.len();
                 self.items_left = 0;
                 return None;
             }
-            proof {
-                let si = self.slab_idx as int;
-                assert(self.slab_remaining == 0);
-                lemma_sum_split(slab_lens(s), 0, si, si + 1);
-                lemma_sum_one(slab_lens(s), si);
-            }
+            let ghost c1 = *self;
             self.slab_idx += 1;
             self.slab_remaining = slabs[self.slab_idx].len;
             self.decoder = X::open(&slabs[self.slab_idx]);
             proof {
-                assert(X::vals(s[self.slab_idx as int]).skip(0) =~= X::vals(s[self.slab_idx as int]));
+                c1.lemma_stepped::<X>(*self, s);
             }
         }
     }
@@ -1224,7 +1423,6 @@ impl<D: Decode> ICore<D> {
     /// `next_run_max` after its first run.
     #[inline(always)]
     #[verifier::spinoff_prover]
-    #[verifier::rlimit(60)]
     fn merge_on<'a, X: Decoders<'a, D = D>>(
         &mut self,
         slabs: &'a [Slab<X::Tail>],
@@ -1294,18 +1492,12 @@ impl<D: Decode> ICore<D> {
                 }
                 break;
             }
-            proof {
-                self.lemma_here::<X>(s);
-                let si = self.slab_idx as int;
-                lemma_sum_split(slab_lens(s), 0, si, si + 1);
-                lemma_sum_one(slab_lens(s), si);
-            }
+            let ghost c1 = *self;
             self.slab_idx += 1;
             self.slab_remaining = slabs[self.slab_idx].len;
             self.decoder = X::open(&slabs[self.slab_idx]);
             proof {
-                assert(X::vals(s[self.slab_idx as int]).skip(0) =~= X::vals(s[self.slab_idx as int]));
-                self.lemma_here::<X>(s);
+                c1.lemma_stepped::<X>(*self, s);
             }
             let cap = if self.items_left < self.slab_remaining {
                 self.items_left
@@ -1327,69 +1519,42 @@ impl<D: Decode> ICore<D> {
                 // an empty slab: step over it
                 continue;
             }
-            let ghost d0 = self.decoder;
             let ghost c1 = *self;
             if let Some(next) = self.decoder.d_run_max(cap) {
                 if D::d_eq(&next.value, &value) {
                     let c = next.count;
+                    let ghost t0 = total_count as int;
                     total_count += c;
                     max -= c;
                     self.items_left -= c;
                     self.slab_remaining -= c;
                     self.pos += c;
                     proof {
-                        let si = self.slab_idx as int;
-                        let vv = vals_of::<X>(s);
-                        let rest = d0.rest();
-                        assert(rest.skip(c as int) =~= X::vals(s[si]).skip(s[si].len - self.slab_remaining));
-                        let o1 = c1.out::<X>(s);
-                        assert(o1.take(c as int) =~= rest.take(c as int)) by {
-                            assert(vv.skip(c1.pos as int) == rest + vals_of::<X>(s.skip(si + 1)));
-                            assert forall|i: int| 0 <= i < c implies o1.take(c as int)[i] == rest.take(c as int)[i] by {
-                                assert(o1[i] == vv[c1.pos + i]);
-                                assert(vv[c1.pos + i] == vv.skip(c1.pos as int)[i]);
-                            }
-                        }
-                        assert(self.out::<X>(s) =~= o1.skip(c as int));
-                        assert(o0.take(total_count as int) =~= Seq::new(total_count as nat, |_i: int| value)) by {
-                            assert forall|i: int| 0 <= i < total_count implies o0.take(total_count as int)[i] == value by {
-                                if i < total_count - c {
-                                    assert(o0.take(total_count - c)[i] == value);
-                                } else {
-                                    assert(o1[i - (total_count - c)] == o0[i]);
-                                    assert(o1.take(c as int)[i - (total_count - c)] == value);
-                                }
-                            }
-                        }
-                        assert(self.out::<X>(s) =~= o0.skip(total_count as int));
+                        c1.lemma_taken::<X>(*self, s, c as int);
+                        lemma_run_join(o0, value, t0, c as int);
+                        lemma_skip_add(o0, t0, c as int);
                         if self.slab_remaining > 0 && total_count < max0 && total_count < o0.len() {
                             // short of the slab's end: cut by the decoder,
                             // whose run is maximal, or by the window
-                            assert(o1.len() <= c1.items_left);
-                            assert(o0[total_count as int] == o1[c as int]);
-                            assert(o1[c as int] == vv[c1.pos + c]);
-                            assert(vv[c1.pos + c] == vv.skip(c1.pos as int)[c as int]);
+                            c1.lemma_out_at::<X>(s, c as int);
+                            assert(o0[total_count as int] == c1.out::<X>(s)[c as int]);
                         }
                     }
                     continue;
                 } else {
                     proof {
                         // the next value is this run's, and differs
-                        let si = self.slab_idx as int;
-                        let vv = vals_of::<X>(s);
-                        let o1 = c1.out::<X>(s);
-                        assert(vv.skip(c1.pos as int) == d0.rest() + vals_of::<X>(s.skip(si + 1)));
-                        assert(o1[0] == vv[c1.pos as int]);
-                        assert(vv[c1.pos as int] == vv.skip(c1.pos as int)[0]);
-                        assert(o0[total_count as int] == o1[0]);
-                        assert(d0.rest().take(next.count as int)[0] == next.value);
-                        assert(total_count < max0 && total_count < o0.len() ==> o0[total_count as int] != value);
+                        if total_count < o0.len() {
+                            c1.lemma_out_at::<X>(s, 0);
+                            assert(c1.decoder.rest().take(next.count as int)[0] == next.value);
+                            assert(o0[total_count as int] == c1.out::<X>(s)[0]);
+                        }
                     }
                     // value doesn't match — reset the decoder so the run
                     // it consumed can be re-read by later calls
                     self.decoder = X::open(&slabs[self.slab_idx]);
                     proof {
-                        assert(X::vals(s[self.slab_idx as int]).skip(0) =~= X::vals(s[self.slab_idx as int]));
+                        lemma_skip_none(X::vals(s[self.slab_idx as int]));
                     }
                 }
             }
@@ -1475,6 +1640,7 @@ impl<D: Decode> ICore<D> {
                 &&& monotone(*probe, w) ==> found(*probe, w, r.0 - p0, r.1 - p0)
             }),
     {
+        hide(monotone);
         let ghost s = slabs@;
         let ghost c0 = *self;
         let ghost w = c0.out::<X>(s);

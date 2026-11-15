@@ -57,7 +57,7 @@ use crate::cursor::{col_index, splice_feed, ReadsAgree, RunFeed, Slabs, Visitor,
 #[cfg(verus_keep_ghost)]
 use crate::cursor::{lemma_lens_ok, lemma_vals_own};
 #[cfg(verus_keep_ghost)]
-use crate::delta::agg::{agg_of, deltas_of, reps, steps_fit};
+use crate::delta::agg::{agg_of, deltas_of, psum, reps, steps_fit};
 #[cfg(verus_keep_ghost)]
 use crate::delta::dbound::{bounds_of, lemma_spliced_vals, span_ok, spliced};
 use crate::delta::dbound::{root_bound, SpanLedger, SpanPlan, ToDeltas};
@@ -1238,6 +1238,7 @@ impl<E, X, B> ColumnCore<E, SlabAgg, SlabBTree<SlabAgg>, DeltaModel<X, B>> where
                 + rvals::<E, X, B>(old(self)@).skip(at + del),
             items is None ==> taken@.len() == 0,
     {
+        hide(bounds_of);
         // the bound on the column's values, and the running sum, the nulls
         // and the value around the splice
         let len = self.len();
@@ -1258,24 +1259,7 @@ impl<E, X, B> ColumnCore<E, SlabAgg, SlabBTree<SlabAgg>, DeltaModel<X, B>> where
             let (prev, skip, next_val) = d_boundaries::<X, B>(&mut core, slabs, Some(ix), &mut running, at, del);
             proof {
                 // what it found around the splice, of the column's deltas
-                let a = orig.take(at as int);
-                let x = orig.subrange(at as int, at + del);
-                let tail = orig.skip(at + del);
-                let e = at + del + skip;
-                assert(tail.take(skip as int) =~= reps(skip as nat, None)) by {
-                    assert forall|i: int| 0 <= i < skip implies tail.take(skip as int)[i] == reps(skip as nat, None)[i] by {
-                        assert(orig[at + del + i] is None);
-                    }
-                }
-                if next_val is Some {
-                    assert(a + x + tail.take(skip + 1int) =~= orig.take(e + 1));
-                    assert(tail[skip as int] == orig[e]);
-                } else {
-                    assert forall|i: int| 0 <= i < tail.len() implies (#[trigger] tail[i]) is None by {
-                        assert(orig[at + del + i] is None);
-                    }
-                }
-                assert(bounds_of(a, x, tail, prev as int, skip as nat, next_val));
+                lemma_found_bounds(orig, at as int, del as int, prev, skip, next_val);
             }
             (lo, hi, prev, skip, next_val)
         };
@@ -1471,6 +1455,51 @@ pub(crate) proof fn lemma_ix_exact<E, X, B>(ix: SlabBTree<SlabAgg>, s: Seq<Slab<
         assert(<DeltaModel<X, B> as Weigh<E, SlabAgg>>::wrel(ix.ws()[k], s[k]));
     }
     lemma_dix_ok::<X, B>(ix@, s);
+}
+
+/// What `d_boundaries` finds around a splice of the deltas `orig`, as the
+/// bounds its plan starts from: the sum before the splice, the nulls
+/// after the deleted deltas and the value after them, if there is one.
+proof fn lemma_found_bounds(
+    orig: Seq<Option<i64>>,
+    at: int,
+    del: int,
+    prev: i64,
+    skip: usize,
+    next_val: Option<i64>,
+)
+    requires
+        0 <= at,
+        0 <= del,
+        at + del + skip <= orig.len(),
+        prev == crop(psum(orig.take(at))),
+        forall|j: int| at + del <= j < at + del + skip ==> #[trigger] orig[j] is None,
+        at + del + skip < orig.len() ==> orig[at + del + skip] is Some && next_val == Some(
+            crop(psum(orig.take(at + del + skip + 1))),
+        ),
+        at + del + skip == orig.len() ==> next_val is None,
+    ensures
+        bounds_of(orig.take(at), orig.subrange(at, at + del), orig.skip(at + del), prev as int, skip as nat, next_val),
+{
+    hide(psum);
+    hide(crop);
+    let a = orig.take(at);
+    let x = orig.subrange(at, at + del);
+    let tail = orig.skip(at + del);
+    let e = at + del + skip;
+    assert(tail.take(skip as int) =~= reps(skip as nat, None)) by {
+        assert forall|i: int| 0 <= i < skip implies tail.take(skip as int)[i] == reps(skip as nat, None)[i] by {
+            assert(orig[at + del + i] is None);
+        }
+    }
+    if next_val is Some {
+        assert(a + x + tail.take(skip + 1int) =~= orig.take(e + 1));
+        assert(tail[skip as int] == orig[e]);
+    } else {
+        assert forall|i: int| 0 <= i < tail.len() implies (#[trigger] tail[i]) is None by {
+            assert(orig[at + del + i] is None);
+        }
+    }
 }
 
 /// The running value before item `pos` of the delta column of `slabs`

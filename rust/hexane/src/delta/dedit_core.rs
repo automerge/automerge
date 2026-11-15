@@ -176,6 +176,19 @@ proof fn lemma_deltas_run<V: Copy, B: DeltaOps<V>>(vs: Seq<V>, n: nat, v: V)
     assert(deltas_of::<V, B>(vs + copies(n, v)) =~= deltas_of::<V, B>(vs) + reps(n, B::dv(v)));
 }
 
+/// After `v0`, a stretch of `o` and then the stretch next to it are the
+/// one stretch over both; and so from the start of `o`.
+proof fn lemma_sub_join<V>(v0: Seq<V>, o: Seq<V>, a0: int, a: int, b: int)
+    requires
+        0 <= a0 <= a <= b <= o.len(),
+    ensures
+        v0 + o.subrange(a0, a) + o.subrange(a, b) == v0 + o.subrange(a0, b),
+        o.take(a) + o.subrange(a, b) == o.take(b),
+{
+    assert(v0 + o.subrange(a0, a) + o.subrange(a, b) =~= v0 + o.subrange(a0, b));
+    assert(o.take(a) + o.subrange(a, b) =~= o.take(b));
+}
+
 /// The sum of `ds` then `x`, wrapping, from that of `ds`.
 proof fn lemma_crop_cat(ds: Seq<Option<i64>>, x: Seq<Option<i64>>, s: i64, t: i64)
     requires
@@ -853,9 +866,11 @@ impl<L, O, B> DeltaEditCore<L, O, B> where
             final(self).at() == old(self).past(n),
             final(self).rwritten() == old(self).rwritten() + old(self).rorig().subrange(old(self).at(), final(self).at()),
     {
+        hide(rz);
         let ghost (a0, v0, o0) = (self.at(), self.rwritten(), self.rorig());
         proof {
             self.edit.lemma_at();
+            crate::delta::dedit::lemma_rz_len(0, self.ledger.orig@);
             assert(o0.len() == self.edit.orig_vals().len());
             assert(v0 =~= v0 + o0.subrange(a0, a0));
         }
@@ -875,13 +890,13 @@ impl<L, O, B> DeltaEditCore<L, O, B> where
                 self.rwritten() == v0 + o0.subrange(a0, self.at()),
             decreases want,
         {
-            let ghost (a1, w1) = (self.at(), self.rwritten());
+            let ghost a1 = self.at();
             if !self.pay_step() {
                 return;
             }
             proof {
                 self.edit.lemma_at();
-                assert(w1 + o0.subrange(a1, a1 + 1) =~= v0 + o0.subrange(a0, self.at()));
+                lemma_sub_join(v0, o0, a0, a1, a1 + 1);
             }
             want -= 1;
         }
@@ -893,39 +908,52 @@ impl<L, O, B> DeltaEditCore<L, O, B> where
         }
         let ghost (a, k) = (self.edit.at(), self.edit.step_len(want));
         let ghost w0 = self.ledger.l.written@;
-        let ghost x = dvos::<'static, L, O, B>(self.edit.orig_vals().subrange(a, a + k));
+        let ghost ov = self.edit.orig_vals();
+        let ghost x = dvos::<'static, L, O, B>(ov.subrange(a, a + k));
         proof {
             self.lemma_orig_range(a, a + k);
             // the values carried are the original ones there
             lemma_rz_sub(self.ledger.orig@, a, a + k);
+            Self::lemma_step_deltas(ov, self.edit.written(), a, k);
+            lemma_sub_join(v0, o0, a0, a, a + k);
+            lemma_sub_join(Seq::empty(), self.ledger.orig@, 0, a, a + k);
         }
         let mut v = DSumVisit::<L, O, B>::new();
         let jumped = self.edit.advance_with(want, &mut v);
         let r = if jumped > 0 {
-            proof {
-                let ov = self.edit.orig_vals();
-                assert(self.edit.now() =~= self.edit.written() + ov.skip(a + k));
-                assert(ov.skip(a) =~= ov.subrange(a, a + k) + ov.skip(a + k));
-                assert(dvos::<'static, L, O, B>(self.edit.now()) =~= w0 + dvos::<'static, L, O, B>(ov.skip(a)));
-                assert(self.ledger.rest() =~= dvos::<'static, L, O, B>(ov.skip(a)));
-                assert(dvos::<'static, L, O, B>(self.edit.written()) =~= w0 + x);
-            }
             self.running_now()
         } else {
             let t = v.total();
             proof {
-                assert(Seq::<VOf<'static, L>>::empty() + self.edit.orig_vals().subrange(a, a + k) =~= self.edit.orig_vals().subrange(a, a + k));
                 lemma_crop_cat(w0, x, self.ledger.l.running, t);
                 lemma_wrapping_add(self.ledger.l.running, t);
             }
             self.ledger.l.running.wrapping_add(t)
         };
         self.ledger.jump(r, Ghost(x));
-        proof {
-            assert(self.ledger.l.read@ =~= self.ledger.orig@.take(self.edit.at()));
-            assert(dvos::<'static, L, O, B>(self.edit.written()) =~= self.ledger.l.written@);
-            assert(self.rwritten() =~= v0 + o0.subrange(a0, self.at()));
-        }
+    }
+
+    /// The deltas of what an edit has written, `w`, once it has carried
+    /// the original values `a..a + k` of `ov` on: with those values, and
+    /// with the rest of `ov` after them.
+    proof fn lemma_step_deltas(ov: Seq<VOf<'static, L>>, w: Seq<VOf<'static, L>>, a: int, k: int)
+        requires
+            0 <= a,
+            0 <= k,
+            a + k <= ov.len(),
+        ensures
+            dvos::<'static, L, O, B>(w + ov.subrange(a, a + k)) == dvos::<'static, L, O, B>(w) + dvos::<'static, L, O, B>(
+                ov.subrange(a, a + k),
+            ),
+            dvos::<'static, L, O, B>(w + ov.subrange(a, a + k) + ov.skip(a + k)) == dvos::<'static, L, O, B>(w)
+                + dvos::<'static, L, O, B>(ov).skip(a),
+            Seq::<VOf<'static, L>>::empty() + ov.subrange(a, a + k) == ov.subrange(a, a + k),
+    {
+        let c = ov.subrange(a, a + k);
+        assert(dvos::<'static, L, O, B>(w + c) =~= dvos::<'static, L, O, B>(w) + dvos::<'static, L, O, B>(c));
+        assert(w + c + ov.skip(a + k) =~= w + ov.skip(a));
+        assert(dvos::<'static, L, O, B>(w + ov.skip(a)) =~= dvos::<'static, L, O, B>(w) + dvos::<'static, L, O, B>(ov).skip(a));
+        assert(Seq::<VOf<'static, L>>::empty() + c =~= c);
     }
 
     /// Pay the debt wherever it falls, so every realized value after the

@@ -21,14 +21,18 @@ use crate::column::Slab;
 use crate::cursor::slab_lens;
 use crate::delta::agg::DeltaOps;
 #[cfg(verus_keep_ghost)]
-use crate::delta::agg::{agg_of, deltas_of, lemma_run_sum, lemma_take_run, pmax, pmin, psum, reps};
+use crate::delta::agg::{
+    agg_of, deltas_of, dval, lemma_run_sum, lemma_take_run, pmax, pmin, psum, reps,
+};
 use crate::delta::diter::add_run;
 #[cfg(verus_keep_ghost)]
-use crate::delta::diter::{dbefore, dix_ok, lemma_crop, lemma_dfold, lemma_found, lemma_psum_cat};
+use crate::delta::diter::{
+    crop, dbefore, dix_ok, lemma_crop, lemma_dfold, lemma_found, lemma_psum_cat,
+};
 #[cfg(verus_keep_ghost)]
 use crate::fenwick::{lemma_sum_le, lemma_sum_one, lemma_sum_split, sum, total};
 #[cfg(verus_keep_ghost)]
-use crate::iter_core::{lemma_from, lemma_upto, lens_ok, vals_of};
+use crate::iter_core::{lemma_from, lemma_skip_add, lemma_upto, lens_ok, vals_of};
 use crate::iter_core::{Decode, Decoders};
 #[cfg(verus_keep_ghost)]
 use crate::prefix_core::before;
@@ -219,7 +223,7 @@ pub(crate) proof fn lemma_run_item<V: Copy, B: DeltaOps<V>>(vs: Seq<V>, k: int, 
     requires
         0 <= k,
         k + c <= vs.len(),
-        vs.skip(k).take(c) == Seq::new(c as nat, |_i: int| x),
+        vs.skip(k).take(c) =~= Seq::new(c as nat, |_i: int| x),
         1 <= kk <= c,
     ensures
         vs[k + kk - 1] == x,
@@ -234,6 +238,111 @@ pub(crate) proof fn lemma_run_item<V: Copy, B: DeltaOps<V>>(vs: Seq<V>, k: int, 
     }
     lemma_take_run::<_, B>(vs, k, kk, x);
     lemma_run_sum(deltas_of::<_, B>(vs.take(k)), kk as nat, B::dv(x));
+}
+
+/// A scan that had no match from `f` up to item `k` reads a run of `c`
+/// copies of `x` there. With `[pend, pend_end)` the run's matches (or
+/// empty, if it has none), the matches from `f` through the run are
+/// exactly that range.
+proof fn lemma_scan_run<V: Copy, B: DeltaOps<V>>(
+    vs: Seq<V>,
+    base: int,
+    lo: int,
+    hi: int,
+    f: int,
+    st: int,
+    k: int,
+    c: int,
+    x: V,
+    pend: int,
+    pend_end: int,
+)
+    requires
+        0 <= k,
+        1 <= c,
+        k + c <= vs.len(),
+        vs.skip(k).take(c) =~= Seq::new(c as nat, |_i: int| x),
+        forall|j: int| f <= st + j < st + k ==> !#[trigger] hit::<V, B>(vs, base, lo, hi, j),
+        pend <= pend_end <= st + k + c,
+        pend == pend_end || st + k <= pend,
+        ({
+            let a = s1_running::<V, B>(base, vs, k);
+            match B::dv(x) {
+                None => pend == pend_end,
+                Some(v) => if v == 0 {
+                    if lo <= a <= hi {
+                        pend == st + k && pend_end == st + k + c
+                    } else {
+                        pend == pend_end
+                    }
+                } else {
+                    forall|kk: int|
+                        1 <= kk <= c ==> ((lo <= #[trigger] kth(a, v as int, kk) <= hi) <==> pend <= st + k + kk - 1
+                            < pend_end)
+                },
+            }
+        }),
+    ensures
+        forall|j: int|
+            f <= st + j < st + k + c ==> (#[trigger] hit::<V, B>(vs, base, lo, hi, j) <==> pend <= st + j < pend_end),
+        forall|j: int| f <= st + j < pend ==> !#[trigger] hit::<V, B>(vs, base, lo, hi, j),
+{
+    let a = s1_running::<V, B>(base, vs, k);
+    assert forall|j: int| k <= j < k + c implies (#[trigger] hit::<V, B>(vs, base, lo, hi, j) <==> pend <= st + j
+        < pend_end) by {
+        let kk = j - k + 1;
+        lemma_run_item::<V, B>(vs, k, c, x, kk);
+        assert(j + 1 == k + kk);
+        match B::dv(x) {
+            None => {},
+            Some(v) => {
+                if v == 0 {
+                    assert(kk * 0 == 0);
+                } else {
+                    assert(base + psum(deltas_of::<V, B>(vs.take(j + 1))) == kth(a, v as int, kk));
+                }
+            },
+        }
+    }
+}
+
+/// A run of `c` copies of `x` at item `k` of values whose running sums
+/// fit: the running sum steps `c` times by `x`'s delta, and after one step
+/// and after all of them it fits.
+proof fn lemma_run_fits<V: Copy, B: DeltaOps<V>>(vs: Seq<V>, base: int, k: int, c: int, x: V)
+    requires
+        sums_in_i64::<V, B>(vs, base),
+        0 <= k,
+        1 <= c,
+        k + c <= vs.len(),
+        vs.skip(k).take(c) =~= Seq::new(c as nat, |_i: int| x),
+    ensures
+        match B::dv(x) {
+            Some(v) => {
+                &&& in_i64(s1_running::<V, B>(base, vs, k) + v)
+                &&& in_i64(s1_running::<V, B>(base, vs, k) + c * v)
+                &&& s1_running::<V, B>(base, vs, k + c) == s1_running::<V, B>(base, vs, k) + c * v
+            },
+            None => s1_running::<V, B>(base, vs, k + c) == s1_running::<V, B>(base, vs, k),
+        },
+{
+    hide(psum);
+    lemma_run_item::<V, B>(vs, k, c, x, c);
+    lemma_run_item::<V, B>(vs, k, c, x, 1);
+    assert(in_i64(base + psum(deltas_of::<V, B>(vs.take(k + 1)))));
+    assert(in_i64(base + psum(deltas_of::<V, B>(vs.take(k + c)))));
+    let d = dval(B::dv(x));
+    match B::dv(x) {
+        Some(v) => {
+            assert(c * d == c * v);
+        },
+        None => {
+            assert(c * d == 0) by (nonlinear_arith)
+                requires
+                    d == 0,
+            ;
+        },
+    }
 }
 
 /// A scan of one slab's runs for the items whose values lie in a range.
@@ -332,6 +441,10 @@ pub(crate) fn d_scan_next<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Ite
             >(vs, base, lo as int, hi as int, j),
         },
 {
+    hide(psum);
+    hide(hit);
+    hide(sums_in_i64);
+    hide(crop);
     let ghost s0 = *sc;
     loop
         invariant
@@ -364,12 +477,9 @@ pub(crate) fn d_scan_next<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Ite
             Some(run) => {
                 let count = run.count;
                 let ghost c = count as int;
-                let ghost p0 = sc.pend;
-                let ghost e0 = sc.pend_end;
                 proof {
-                    assert(vs.skip(k).take(c) == Seq::new(count as nat, |_i: int| run.value));
-                    lemma_run_item::<_, B>(vs, k, c, run.value, c);
-                    lemma_run_item::<_, B>(vs, k, c, run.value, 1);
+                    assert(vs.skip(k).take(c) =~= Seq::new(c as nat, |_i: int| run.value));
+                    lemma_run_fits::<_, B>(vs, base, k, c, run.value);
                 }
                 if let Some(v) = B::to_opt(run.value) {
                     let a = sc.running;
@@ -379,52 +489,36 @@ pub(crate) fn d_scan_next<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Ite
                             sc.pend_end = sc.start + sc.item + count;
                         }
                     } else {
-                        proof {
-                            assert(in_i64(base + psum(deltas_of::<_, B>(vs.take(k + 1)))));
-                            assert(in_i64(base + psum(deltas_of::<_, B>(vs.take(k + c)))));
-                        }
                         let (ks, ke) = run_hits(a, v, count, lo, hi);
                         if ks <= ke {
                             sc.pend = sc.start + sc.item + ks - 1;
                             sc.pend_end = sc.start + sc.item + ke;
                         }
                     }
+                    proof {
+                        lemma_crop(a as int);
+                    }
                     sc.running = add_run(a, v, count, Ghost(a as int));
                     proof {
-                        assert(in_i64(base + psum(deltas_of::<_, B>(vs.take(k + c)))));
                         lemma_crop(a + count * v);
                     }
                 }
                 sc.item = sc.item + count;
                 proof {
-                    assert(vs.skip(k).skip(c) =~= vs.skip(k + c));
-                    // before the run: nothing matched since `f`
-                    assert(p0 == e0);
-                    assert forall|j: int| f <= st + j < st + k implies !#[trigger] hit::<_, B>(
+                    lemma_skip_add(vs, k, c);
+                    lemma_scan_run::<_, B>(
                         vs,
                         base,
                         lo as int,
                         hi as int,
-                        j,
-                    ) && !(sc.pend <= st + j < sc.pend_end) by {
-                    }
-                    // the run's items: which match
-                    assert forall|j: int| st + k <= st + j < st + k + c implies (#[trigger] hit::<_, B>(
-                        vs,
-                        base,
-                        lo as int,
-                        hi as int,
-                        j,
-                    ) <==> sc.pend <= st + j < sc.pend_end) by {
-                        let kk = j - k + 1;
-                        lemma_run_item::<_, B>(vs, k, c, run.value, kk);
-                        if let Some(v) = B::dv(run.value) {
-                            assert(base + psum(deltas_of::<_, B>(vs.take(j + 1))) == kth(s1_running::<_, B>(base, vs, k), v as int, kk))
-                                by {
-                                assert(j + 1 == k + kk);
-                            }
-                        }
-                    }
+                        f,
+                        st,
+                        k,
+                        c,
+                        run.value,
+                        sc.pend as int,
+                        sc.pend_end as int,
+                    );
                 }
             },
         }
@@ -463,6 +557,77 @@ pub(crate) open spec fn col_hit<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode
     hit::<_, B>(vals_of::<X>(s), 0, lo, hi, i)
 }
 
+/// A slab of values `vs` with aggregate `w`, after slabs with aggregate `b`
+/// (of deltas `bs`) that merges with it: every running sum of the slab,
+/// after the total before it, fits `i64`.
+proof fn lemma_sums_fit<V: Copy, B: DeltaOps<V>>(vs: Seq<V>, w: SlabAgg, b: SlabAgg, bs: Seq<Option<i64>>)
+    requires
+        agg_of(w, deltas_of::<V, B>(vs)),
+        agg_of(b, bs),
+        SlabAgg::merge_ok(b, w),
+    ensures
+        sums_in_i64::<V, B>(vs, b.total as int),
+{
+    hide(pmin);
+    hide(pmax);
+    let ds = deltas_of::<V, B>(vs);
+    assert forall|m: int| 0 <= m <= vs.len() implies in_i64(b.total + #[trigger] psum(deltas_of::<V, B>(vs.take(m)))) by {
+        if m == 0 {
+            assert(deltas_of::<V, B>(vs.take(0)) =~= Seq::<Option<i64>>::empty());
+        } else {
+            assert(deltas_of::<V, B>(vs.take(m)) =~= ds.take(m));
+            lemma_take_in_bounds(ds, m);
+        }
+    }
+}
+
+/// Values `vs` lying in `vv` from item `l` on: item `j` of `vs`, after the
+/// running sum of `vv` before `l`, realizes what item `l + j` of `vv` does.
+proof fn lemma_hit_at<V: Copy, B: DeltaOps<V>>(vv: Seq<V>, vs: Seq<V>, l: int, lo: int, hi: int, j: int)
+    requires
+        0 <= l,
+        l + vs.len() <= vv.len(),
+        vv.skip(l).take(vs.len() as int) =~= vs,
+        0 <= j < vs.len(),
+    ensures
+        hit::<V, B>(vs, psum(deltas_of::<V, B>(vv.take(l))), lo, hi, j) <==> hit::<V, B>(vv, 0, lo, hi, l + j),
+{
+    hide(psum);
+    let a = vv.take(l);
+    let b = vs.take(j + 1);
+    let t = vv.take(l + j + 1);
+    assert(vv[l + j] == vs[j]) by {
+        assert(vv.skip(l).take(vs.len() as int)[j] == vs[j]);
+    }
+    assert forall|i: int| 0 <= i < l + j + 1 implies t[i] == (a + b)[i] by {
+        if i >= l {
+            assert(vv.skip(l).take(vs.len() as int)[i - l] == vs[i - l]);
+        }
+    }
+    assert(t =~= a + b);
+    assert(deltas_of::<V, B>(t) =~= deltas_of::<V, B>(a) + deltas_of::<V, B>(b));
+    lemma_psum_cat(deltas_of::<V, B>(a), deltas_of::<V, B>(b));
+}
+
+/// A slab of values `vs` with aggregate `w`, after the running sum `base`:
+/// if the range of running sums its offsets give misses `[lo, hi]`, no
+/// item of it realizes a value there.
+proof fn lemma_no_hit<V: Copy, B: DeltaOps<V>>(vs: Seq<V>, w: SlabAgg, base: int, lo: int, hi: int, j: int)
+    requires
+        agg_of(w, deltas_of::<V, B>(vs)),
+        base + w.max_offset < lo || base + w.min_offset > hi,
+        0 <= j < vs.len(),
+    ensures
+        !hit::<V, B>(vs, base, lo, hi, j),
+{
+    hide(psum);
+    hide(pmin);
+    hide(pmax);
+    let ds = deltas_of::<V, B>(vs);
+    assert(deltas_of::<V, B>(vs.take(j + 1)) =~= ds.take(j + 1));
+    lemma_take_in_bounds(ds, j + 1);
+}
+
 /// Slab `k` of the column, scanned after the running sum before it: its
 /// running sums fit, its matches are the column's, and a slab the index
 /// rules out holds none.
@@ -498,51 +663,39 @@ pub(crate) proof fn lemma_slab_hits<'a, X: Decoders<'a>, B: DeltaOps<<X::D as De
             j,
         ),
 {
+    hide(psum);
+    hide(pmin);
+    hide(pmax);
+    hide(fold);
+    hide(sum);
+    hide(hit);
+    hide(sums_in_i64);
     let vv = vals_of::<X>(s);
     let vs = X::vals(s[k]);
-    let ds = deltas_of::<_, B>(vs);
-    let l = sum(slab_lens(s), 0, k);
+    let l = sum(slab_lens(s), 0, k) as int;
     lemma_found::<X, B>(ws, s, k);
     lemma_dfold::<X, B>(ws, s, k);
-    lemma_upto::<X>(s, k);
     lemma_from::<X>(s, k, 0);
     let base = pre_at(ws, k) as int;
     let w = ws[k];
-    assert(agg_of(w, ds));
+    let b = fold(ws.subrange(0, k));
+    assert(agg_of(w, deltas_of::<_, B>(vs)));
     assert(vs.len() == s[k].len);
     // the merge of the slabs before with this one is representable
     lemma_fold_one(ws, k);
-    assert(SlabAgg::merge_ok(fold(ws.subrange(0, k)), fold(ws.subrange(k, k + 1))));
-    let before_agg = fold(ws.subrange(0, k));
-    assert forall|m: int| 0 <= m <= vs.len() implies in_i64(base + #[trigger] psum(deltas_of::<_, B>(vs.take(m)))) by {
-        if m == 0 {
-            assert(vs.take(0) =~= Seq::<<X::D as Decode>::Item>::empty());
-            assert(deltas_of::<_, B>(vs.take(0)) =~= Seq::<Option<i64>>::empty());
-        } else {
-            assert(deltas_of::<_, B>(vs.take(m)) =~= ds.take(m));
-            lemma_take_in_bounds(ds, m);
-            if before_agg.len == 0 {
-                assert(base == 0);
-            }
-        }
-    }
+    assert(SlabAgg::merge_ok(b, fold(ws.subrange(k, k + 1))));
+    lemma_sums_fit::<_, B>(vs, w, b, deltas_of::<_, B>(vals_of::<X>(s.take(k))));
+    assert(vv.skip(l).take(vs.len() as int) =~= vs);
+    assert(base == psum(deltas_of::<_, B>(vv.take(l))));
     assert forall|j: int| 0 <= j < vs.len() implies (#[trigger] hit::<_, B>(vs, base, lo, hi, j) <==> col_hit::<
         X,
         B,
     >(s, lo, hi, l + j)) by {
-        assert(vv.skip(l as int).take(vs.len() as int) =~= vs);
-        assert(vv[l + j] == vs[j]);
-        assert(vv.take(l + j + 1) =~= vv.take(l as int) + vs.take(j + 1));
-        assert(deltas_of::<_, B>(vv.take(l + j + 1)) =~= deltas_of::<_, B>(vv.take(l as int)) + deltas_of::<_, B>(
-            vs.take(j + 1),
-        ));
-        lemma_psum_cat(deltas_of::<_, B>(vv.take(l as int)), deltas_of::<_, B>(vs.take(j + 1)));
-        assert(deltas_of::<_, B>(vv.take(0 + l + j + 1)) == deltas_of::<_, B>(vv.take(l + j + 1)));
+        lemma_hit_at::<_, B>(vv, vs, l, lo, hi, j);
     }
     if !may_hold(ws, lo, hi, k) {
         assert forall|j: int| 0 <= j < vs.len() implies !#[trigger] hit::<_, B>(vs, base, lo, hi, j) by {
-            assert(deltas_of::<_, B>(vs.take(j + 1)) =~= ds.take(j + 1));
-            lemma_take_in_bounds(ds, j + 1);
+            lemma_no_hit::<_, B>(vs, w, base, lo, hi, j);
         }
     }
 }
@@ -691,6 +844,48 @@ proof fn lemma_slab_done<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item
     }
 }
 
+/// An item of slabs `p..q` lies in one of them.
+proof fn lemma_slab_between<'a, X: Decoders<'a>>(s: Seq<Slab<X::Tail>>, j: int, p: int, q: int)
+    requires
+        lens_ok::<X>(s),
+        0 <= p <= q <= s.len(),
+        sum(slab_lens(s), 0, p) <= j < sum(slab_lens(s), 0, q),
+    ensures
+        p <= slab_at(slab_lens(s), j) < q,
+        sum(slab_lens(s), 0, slab_at(slab_lens(s), j)) <= j,
+        j - sum(slab_lens(s), 0, slab_at(slab_lens(s), j)) < X::vals(s[slab_at(slab_lens(s), j)]).len(),
+{
+    let lens = slab_lens(s);
+    lemma_sum_le(lens, 0, q, 0, s.len() as int);
+    lemma_slab_of::<X>(s, j);
+    lemma_slab_exists(lens, j, s.len() as int);
+    lemma_slab_order(lens, j, p, q);
+}
+
+/// An item of a slab the index ruled out is no match.
+proof fn lemma_ruled_out<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
+    ws: Seq<SlabAgg>,
+    s: Seq<Slab<X::Tail>>,
+    lo: int,
+    hi: int,
+    k: int,
+    j: int,
+)
+    requires
+        dix_ok::<X, B>(ws, s),
+        lens_ok::<X>(s),
+        total(slab_lens(s)) <= usize::MAX,
+        0 <= k < s.len(),
+        !may_hold(ws, lo, hi, k),
+        sum(slab_lens(s), 0, k) <= j < sum(slab_lens(s), 0, k) + X::vals(s[k]).len(),
+    ensures
+        !col_hit::<X, B>(s, lo, hi, j),
+{
+    let st = sum(slab_lens(s), 0, k);
+    lemma_slab_hits::<X, B>(ws, s, lo, hi, k);
+    assert(!hit::<_, B>(X::vals(s[k]), pre_at(ws, k) as int, lo, hi, j - st));
+}
+
 /// Slabs `p..q` the index ruled out hold no matches.
 pub(crate) proof fn lemma_skipped<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
     ws: Seq<SlabAgg>,
@@ -715,14 +910,10 @@ pub(crate) proof fn lemma_skipped<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Deco
     let lens = slab_lens(s);
     assert forall|j: int| f0 <= j < sum(lens, 0, q) implies !#[trigger] col_hit::<X, B>(s, lo, hi, j) by {
         if j >= sum(lens, 0, p) {
-            lemma_sum_le(lens, 0, q, 0, s.len() as int);
-            lemma_slab_of::<X>(s, j);
-            lemma_slab_exists(lens, j, s.len() as int);
+            lemma_slab_between::<X>(s, j, p, q);
             let k = slab_at(lens, j);
-            lemma_slab_order(lens, j, p, q);
-            lemma_slab_hits::<X, B>(ws, s, lo, hi, k);
             assert(!may_hold(ws, lo, hi, k));
-            assert(!hit::<_, B>(X::vals(s[k]), pre_at(ws, k) as int, lo, hi, j - sum(lens, 0, k)));
+            lemma_ruled_out::<X, B>(ws, s, lo, hi, k, j);
         }
     }
 }

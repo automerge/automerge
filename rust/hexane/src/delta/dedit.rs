@@ -46,7 +46,7 @@ use crate::delta::agg::DeltaOps;
 use crate::delta::agg::{dval, lemma_push, lemma_run_sum, psum, reps};
 use crate::delta::diter::add_run;
 #[cfg(verus_keep_ghost)]
-use crate::delta::diter::{at_run, dbefore, dindex_ok};
+use crate::delta::diter::{at_run, dbefore, dindex_ok, realized_at};
 #[cfg(verus_keep_ghost)]
 use crate::delta::diter::{
     crop, lemma_crop, lemma_crop_add, lemma_psum_cat, lemma_wrapping_add, realize,
@@ -112,6 +112,19 @@ proof fn lemma_pay(pw: int, pr: int, running: i64, adjust: i64, d: i64, nd: i64,
     lemma_crop_add(running + adjust, d as int);
     lemma_crop_add(pr, d as int);
     lemma_crop(run2 + 0);
+}
+
+/// Owing the difference: once the running sum has moved from `r` to `to`
+/// and `r - to` is added to the debt, `running + adjust` is where it was.
+proof fn lemma_owe(r: i64, adjust: i64, to: i64, pr: int)
+    requires
+        crop(r + adjust) == crop(pr),
+    ensures
+        crop(to + crop(adjust + crop(r - to))) == crop(pr),
+{
+    lemma_crop_add(adjust + crop(r - to), to as int);
+    lemma_crop_add(r - to, adjust + to);
+    assert(r - to + (adjust + to) == r + adjust);
 }
 
 /// Deltas `a` then `b`: `b`'s values follow on from `a`'s running sum.
@@ -213,6 +226,29 @@ pub(crate) proof fn lemma_rz_anchored(p: int, prefix: int, first: i64, d: i64, n
     lemma_crop_add(p + first, (n - 1) * d);
     lemma_crop_add(prefix + d, (n - 1) * d);
     assert(prefix + d + (n - 1) * d == prefix + n * d) by (nonlinear_arith);
+}
+
+/// Such a run written after deltas `w`, whose running sum is `r`: the
+/// values realized are those of `w`, then the run's after `prefix`, and
+/// the running sum is then `end`, which is `prefix + n·d`.
+proof fn lemma_write_run(w: Seq<Option<i64>>, r: i64, prefix: int, first: i64, d: i64, n: nat, end: i64)
+    requires
+        n >= 1,
+        r == crop(psum(w)),
+        crop(r + first) == crop(prefix + d),
+        end == crop(prefix + n * d),
+    ensures
+        ({
+            let x = seq![Some(first)] + reps((n - 1) as nat, Some(d));
+            &&& rz(0, w + x) == rz(0, w) + run_vals(prefix, d, n)
+            &&& end == crop(psum(w + x))
+        }),
+{
+    let x = seq![Some(first)] + reps((n - 1) as nat, Some(d));
+    lemma_rz_cat(0, w, x);
+    lemma_crop_add(psum(w), first as int);
+    lemma_rz_anchored(psum(w), prefix, first, d, n);
+    lemma_psum_cat(w, x);
 }
 
 /// `wrapping_sub` crops the difference.
@@ -453,10 +489,7 @@ impl Ledger {
             lemma_wrapping_add(old(self).adjust, owed);
             lemma_psum_cat(w0, x);
             if !self.closed@ {
-                lemma_crop_add(old(self).adjust + crop(r - v), v as int);
-                lemma_crop_add(r - v, old(self).adjust + v);
-                lemma_crop_add(old(self).adjust + (r - v), v as int);
-                assert(old(self).adjust + (r - v) + v == r + old(self).adjust);
+                lemma_owe(r, old(self).adjust, v, psum(self.read@));
             }
         }
         d
@@ -502,17 +535,16 @@ impl Ledger {
             final(self).written@ == old(self).written@ + (seq![Some(first)] + reps((n - 1) as nat, Some(d))),
             rz(0, final(self).written@) == rz(0, old(self).written@) + run_vals(prefix as int, d, n as nat),
     {
+        hide(rz);
+        hide(run_vals);
+        hide(psum);
+        hide(crop);
         let r = self.running;
         let (first, end) = anchor_run(r, prefix, d, n);
         let ghost w0 = self.written@;
         let ghost x = seq![Some(first)] + reps((n - 1) as nat, Some(d));
         proof {
-            lemma_rz_cat(0, w0, x);
-            lemma_crop_add(psum(w0), first as int);
-            lemma_rz_anchored(psum(w0), prefix as int, first, d, n as nat);
-            lemma_psum_cat(w0, x);
-            lemma_crop_add(psum(w0) + first, psum(x) - first);
-            lemma_crop_add(psum(w0), psum(x));
+            lemma_write_run(w0, r, prefix as int, first, d, n as nat, end);
         }
         let owed = r.wrapping_sub(end);
         self.adjust = self.adjust.wrapping_add(owed);
@@ -522,10 +554,7 @@ impl Ledger {
             lemma_wrapping_sub(r, end);
             lemma_wrapping_add(old(self).adjust, owed);
             if !self.closed@ {
-                lemma_crop_add(old(self).adjust + crop(r - end), end as int);
-                lemma_crop_add(r - end, old(self).adjust + end);
-                lemma_crop_add(old(self).adjust + (r - end), end as int);
-                assert(old(self).adjust + (r - end) + end == r + old(self).adjust);
+                lemma_owe(r, old(self).adjust, end, psum(self.read@));
             }
         }
         first
@@ -670,6 +699,43 @@ pub(crate) proof fn lemma_rest_unchanged(l: Ledger, rest: Seq<Option<i64>>)
     }
 }
 
+/// Deltas realize a value each.
+pub(crate) proof fn lemma_rz_len(p: int, ds: Seq<Option<i64>>)
+    ensures
+        rz(p, ds).len() == ds.len(),
+{
+}
+
+/// `skip` nulls, a delta and then `rest` realize the same values after the
+/// running sums `p` and `q`, where the delta is `bd` after `p` and `b`
+/// after `q` and the two reach the same value.
+proof fn lemma_tails_alike(p: int, q: int, skip: nat, bd: i64, b: i64, rest: Seq<Option<i64>>)
+    requires
+        crop(p + bd) == crop(q + b),
+    ensures
+        rz(p, reps(skip, None) + seq![Some(bd)] + rest) == rz(q, reps(skip, None) + seq![Some(b)] + rest),
+{
+    hide(rz);
+    hide(psum);
+    hide(crop);
+    let nulls = reps(skip, None);
+    // the nulls, then the boundary at the same value, then the rest after
+    // it
+    lemma_rz_nulls(p, skip);
+    lemma_rz_nulls(q, skip);
+    lemma_rz_cat(p, nulls, seq![Some(bd)] + rest);
+    lemma_rz_cat(q, nulls, seq![Some(b)] + rest);
+    assert(nulls + seq![Some(bd)] + rest =~= nulls + (seq![Some(bd)] + rest));
+    assert(nulls + seq![Some(b)] + rest =~= nulls + (seq![Some(b)] + rest));
+    lemma_rz_cat(p, seq![Some(bd)], rest);
+    lemma_rz_cat(q, seq![Some(b)], rest);
+    lemma_psum_one(bd);
+    lemma_psum_one(b);
+    lemma_rz_one(p, bd);
+    lemma_rz_one(q, b);
+    lemma_rz_crop(p + bd, q + b, rest);
+}
+
 /// `splice` replaces deltas `x` after `a` with `e`, carrying over the
 /// `skip` nulls that follow and rewriting the next delta (`b`, if there is
 /// one) to `bd`, which reaches from where `e` leaves off the value `b`
@@ -694,6 +760,9 @@ pub(crate) proof fn lemma_splice_keeps_rest(
             )
         }),
 {
+    hide(rz);
+    hide(psum);
+    hide(crop);
     let nulls = reps(skip, None);
     let tail = nulls + seq![Some(b)] + rest;
     let new_tail = nulls + seq![Some(bd)] + rest;
@@ -703,24 +772,9 @@ pub(crate) proof fn lemma_splice_keeps_rest(
     lemma_psum_cat(a, e);
     lemma_rz_cat(0, a + e, new_tail);
     lemma_rz_cat(0, a + x, tail);
+    lemma_rz_len(0, a + x);
     assert((rz(0, a + x) + rz(q, tail)).skip((a.len() + x.len()) as int) =~= rz(q, tail));
-    // both tails: the nulls, then the boundary at the same value, then the
-    // rest after it
-    lemma_rz_nulls(p, skip);
-    lemma_rz_nulls(q, skip);
-    lemma_rz_cat(p, nulls, seq![Some(bd)] + rest);
-    lemma_rz_cat(q, nulls, seq![Some(b)] + rest);
-    assert(nulls + seq![Some(bd)] + rest =~= nulls + (seq![Some(bd)] + rest));
-    assert(nulls + seq![Some(b)] + rest =~= nulls + (seq![Some(b)] + rest));
-    lemma_rz_cat(p, seq![Some(bd)], rest);
-    lemma_rz_cat(q, seq![Some(b)], rest);
-    lemma_psum_one(bd);
-    lemma_psum_one(b);
-    assert(rz(p, seq![Some(bd)]) =~= rz(q, seq![Some(b)]));
-    lemma_crop_add(p + bd, 0);
-    lemma_crop_add(q + b, 0);
-    lemma_rz_crop(p + bd, q + b, rest);
-    assert(rz(0, a + e + new_tail) =~= rz(0, a) + rz(psum(a), e) + rz(q, tail));
+    lemma_tails_alike(p, q, skip, bd, b, rest);
 }
 
 /// Where a splice's emission of deltas stands: the inserted items, then
@@ -1178,6 +1232,14 @@ pub(crate) fn d_boundaries<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::It
             &&& e == dw.len() ==> r.2 is None
         }),
 {
+    hide(ICore::wf);
+    hide(ICore::out);
+    hide(dindex_ok);
+    hide(dbefore);
+    hide(deltas_of);
+    hide(realized_at);
+    hide(psum);
+    hide(crop);
     let ghost s = slabs@;
     let ghost c0 = *core;
     let ghost w = c0.out::<X>(s);
@@ -1190,9 +1252,7 @@ pub(crate) fn d_boundaries<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::It
         if index == 0 {
             assert(w.skip(0) =~= w);
         }
-        lemma_dbefore_window::<X, B>(c0, s, index as int);
-        assert(deltas_of::<_, B>(w.take(index as int)) =~= dw.take(index as int));
-        lemma_psum_cat(dbefore::<X, B>(s, c0.pos as int), dw.take(index as int));
+        lemma_window_sum::<X, B>(c0, s, index as int);
     }
     let prev = *running;
     if del > 0 {
@@ -1230,7 +1290,6 @@ pub(crate) fn d_boundaries<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::It
                 proof {
                     assert(w.skip(e).len() == 0);
                     assert(e == w.len());
-                    assert(dw.len() == w.len());
                 }
                 return (prev, skip, None);
             },
@@ -1244,7 +1303,6 @@ pub(crate) fn d_boundaries<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::It
             Some((_, Some(v))) => {
                 proof {
                     assert(w.skip(e).len() == w.len() - e);
-                    assert(dw.len() == w.len());
                     lemma_value_in_window::<_, B>(w, e, p0, psum(dbefore::<X, B>(s, c0.pos + e)), v);
                 }
                 return (prev, skip, Some(v));
@@ -1254,7 +1312,7 @@ pub(crate) fn d_boundaries<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::It
 }
 
 /// The deltas before window offset `e`: those before the window and the
-/// window's first `e`.
+/// window's first `e`. The window has a delta for each of its items.
 proof fn lemma_window_sum<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
     c: ICore<X::D>,
     s: Seq<Slab<X::Tail>>,
@@ -1267,6 +1325,7 @@ proof fn lemma_window_sum<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Ite
         psum(dbefore::<X, B>(s, c.pos + e)) == psum(dbefore::<X, B>(s, c.pos as int)) + psum(
             deltas_of::<_, B>(c.out::<X>(s)).take(e),
         ),
+        deltas_of::<_, B>(c.out::<X>(s)).len() == c.out::<X>(s).len(),
 {
     let w = c.out::<X>(s);
     lemma_dbefore_window::<X, B>(c, s, e);

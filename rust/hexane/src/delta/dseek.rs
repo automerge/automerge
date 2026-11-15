@@ -36,7 +36,7 @@ use crate::delta::dfind::{
 use crate::delta::diter::{add_run, d_next_run, d_nth};
 #[cfg(verus_keep_ghost)]
 use crate::delta::diter::{
-    at_run, dbefore, dindex_ok, dix_ok, lemma_crop, lemma_found, lemma_psum_cat,
+    at_run, crop, dbefore, dindex_ok, dix_ok, lemma_crop, lemma_found, lemma_psum_cat,
 };
 #[cfg(verus_keep_ghost)]
 use crate::fenwick::{lemma_sum_le, lemma_sum_one, lemma_sum_split, sum, total};
@@ -104,6 +104,64 @@ pub(crate) open spec fn dfound<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>
     }
 }
 
+/// No values have no deltas, and their running sum is 0.
+proof fn lemma_psum_none<V: Copy, B: DeltaOps<V>>(vv: Seq<V>)
+    ensures
+        psum(deltas_of::<V, B>(vv.take(0))) == 0,
+{
+    assert(deltas_of::<V, B>(vv.take(0)) =~= Seq::<Option<i64>>::empty());
+}
+
+/// The running sum of the first `n` deltas of values `vv`, where `vs`
+/// follows the first `st` of them and `n` is in `vs`: the sum before `vs`
+/// and that of the first `n - st` deltas of `vs`.
+proof fn lemma_psum_into<V: Copy, B: DeltaOps<V>>(vv: Seq<V>, vs: Seq<V>, rest: Seq<V>, st: int, n: int)
+    requires
+        0 <= st <= n,
+        n - st <= vs.len(),
+        st <= vv.len(),
+        vv.skip(st) == vs.skip(0) + rest,
+    ensures
+        psum(deltas_of::<V, B>(vv.take(n))) == psum(deltas_of::<V, B>(vv.take(st))) + psum(
+            deltas_of::<V, B>(vs.take(n - st)),
+        ),
+{
+    let m = n - st;
+    let a = vv.take(st);
+    let b = vs.take(m);
+    let w = vv.skip(st);
+    let c = vv.take(n);
+    assert(w.len() == vs.skip(0).len() + rest.len());
+    assert forall|i: int| 0 <= i < n implies c[i] == (a + b)[i] by {
+        if i >= st {
+            assert(vv[i] == w[i - st]);
+            assert(w[i - st] == vs.skip(0)[i - st]);
+        }
+    }
+    assert(c =~= a + b);
+    assert(deltas_of::<V, B>(a + b) =~= deltas_of::<V, B>(a) + deltas_of::<V, B>(b));
+    lemma_psum_cat(deltas_of::<V, B>(a), deltas_of::<V, B>(b));
+}
+
+/// The index's prefix before slab `k` is the running sum of the deltas
+/// before it, and with it every running sum inside the slab fits `i64`.
+proof fn lemma_slab_sums<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
+    ws: Seq<SlabAgg>,
+    s: Seq<Slab<X::Tail>>,
+    k: int,
+)
+    requires
+        dix_ok::<X, B>(ws, s),
+        lens_ok::<X>(s),
+        total(slab_lens(s)) <= usize::MAX,
+        0 <= k < s.len(),
+    ensures
+        pre_at(ws, k) == psum(dbefore::<X, B>(s, sum(slab_lens(s), 0, k) as int)),
+        sums_in_i64::<_, B>(X::vals(s[k]), pre_at(ws, k) as int),
+{
+    lemma_slab_hits::<X, B>(ws, s, 0, 0, k);
+}
+
 /// Every running sum of the column's deltas fits `i64`, given the index's
 /// aggregates: each slab's running sums lie between its least and
 /// greatest, after the sum before it, and the index's merges of those are
@@ -122,28 +180,23 @@ pub(crate) proof fn lemma_sums_fit<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Dec
     ensures
         in_i64(rsum::<X, B>(s, n)),
 {
+    hide(dix_ok);
     let vv = vals_of::<X>(s);
     let lens = slab_lens(s);
     if n == 0 {
-        assert(vv.take(0) =~= Seq::<<X::D as Decode>::Item>::empty());
-        assert(deltas_of::<_, B>(vv.take(0)) =~= Seq::<Option<i64>>::empty());
+        lemma_psum_none::<_, B>(vv);
     } else {
         lemma_vals_len::<X>(s);
         let j = n - 1;
         lemma_slab_of::<X>(s, j);
         let k = slab_at(lens, j);
-        lemma_slab_hits::<X, B>(ws, s, 0, 0, k);
-        let st = sum(lens, 0, k);
+        lemma_slab_sums::<X, B>(ws, s, k);
+        let st = sum(lens, 0, k) as int;
         let vs = X::vals(s[k]);
         let m = n - st;
-        lemma_upto::<X>(s, k);
         lemma_from::<X>(s, k, 0);
-        assert(vv.skip(st as int).take(vs.len() as int) =~= vs);
-        assert(vv.take(n) =~= vv.take(st as int) + vs.take(m));
-        assert(deltas_of::<_, B>(vv.take(n)) =~= deltas_of::<_, B>(vv.take(st as int)) + deltas_of::<_, B>(vs.take(m)));
-        lemma_psum_cat(deltas_of::<_, B>(vv.take(st as int)), deltas_of::<_, B>(vs.take(m)));
-        assert(dbefore::<X, B>(s, st as int) == deltas_of::<_, B>(vv.take(st as int)));
-        assert(sums_in_i64::<_, B>(vs, pre_at(ws, k) as int));
+        lemma_psum_into::<_, B>(vv, vs, vals_of::<X>(s.skip(k + 1)), st, n);
+        assert(dbefore::<X, B>(s, st) == deltas_of::<_, B>(vv.take(st)));
         assert(in_i64(pre_at(ws, k) + psum(deltas_of::<_, B>(vs.take(m)))));
     }
 }
@@ -607,6 +660,135 @@ fn d_zeros<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
     run_end
 }
 
+/// A run of `c` copies of `x` (delta `d`) at item `pos`, after the
+/// running sum `a`, that ends at or above `t`: `st` items in, as `d_cross`
+/// counts them, is its first item at or above `t`.
+proof fn lemma_cross_first<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
+    s: Seq<Slab<X::Tail>>,
+    pos: int,
+    c: int,
+    x: <X::D as Decode>::Item,
+    a: int,
+    d: i64,
+    t: int,
+    st: int,
+)
+    requires
+        0 <= pos,
+        1 <= c,
+        pos + c <= vals_of::<X>(s).len(),
+        vals_of::<X>(s).skip(pos).take(c) == Seq::new(c as nat, |_i: int| x),
+        B::dv(x) == Some(d),
+        a == rsum::<X, B>(s, pos),
+        rsum::<X, B>(s, pos + c) >= t,
+        st == if d <= 0 || t <= a { 1 } else { (t - a - 1) / (d as int) + 1 },
+    ensures
+        1 <= st <= c,
+        rsum::<X, B>(s, pos + st) == a + st * d,
+        a + st * d >= t,
+        rv::<X, B>(s, pos + st - 1) == Some(a + st * d),
+        forall|k: int| pos <= k < pos + st - 1 ==> below(#[trigger] rv::<X, B>(s, k), Some(t)),
+{
+    lemma_run_rv::<X, B>(s, pos, c, x, c);
+    if d <= 0 || t <= a {
+        lemma_run_rv::<X, B>(s, pos, c, x, 1);
+        assert(1 * d == d) by (nonlinear_arith);
+        assert(c * d <= d || d > 0) by (nonlinear_arith)
+            requires
+                c >= 1,
+        ;
+    } else {
+        lemma_steps(a, d as int, t, c, st - 1);
+        lemma_run_rv::<X, B>(s, pos, c, x, st);
+        assert forall|k: int| pos <= k < pos + st - 1 implies below(#[trigger] rv::<X, B>(s, k), Some(t)) by {
+            let kk = k - pos + 1;
+            lemma_run_rv::<X, B>(s, pos, c, x, kk);
+            assert(a + kk * d < t);
+        }
+    }
+}
+
+/// In that run, where item `st` is `t`: the items equal to `t` from it run
+/// to `re`, the run's end if they are all the same and the next item
+/// otherwise, which is `t + d`.
+proof fn lemma_cross_same<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
+    s: Seq<Slab<X::Tail>>,
+    pos: int,
+    c: int,
+    x: <X::D as Decode>::Item,
+    a: int,
+    d: i64,
+    t: int,
+    st: int,
+    re: int,
+)
+    requires
+        0 <= pos,
+        pos + c <= vals_of::<X>(s).len(),
+        vals_of::<X>(s).skip(pos).take(c) == Seq::new(c as nat, |_i: int| x),
+        B::dv(x) == Some(d),
+        a == rsum::<X, B>(s, pos),
+        1 <= st <= c,
+        a + st * d == t,
+        re == if d == 0 { pos + c } else { pos + st },
+    ensures
+        forall|k: int| pos + st - 1 <= k < re ==> #[trigger] rv::<X, B>(s, k) == Some(t),
+        re < pos + c ==> d != 0 && rv::<X, B>(s, re) == Some(t + d),
+        re == pos + c ==> rsum::<X, B>(s, re) == t,
+{
+    assert(d == 0 ==> st * d == 0) by (nonlinear_arith);
+    assert forall|k: int| pos + st - 1 <= k < re implies #[trigger] rv::<X, B>(s, k) == Some(t) by {
+        let kk = k - pos + 1;
+        lemma_run_rv::<X, B>(s, pos, c, x, kk);
+        assert(d == 0 ==> kk * d == 0) by (nonlinear_arith);
+    }
+    if re < pos + c {
+        lemma_run_rv::<X, B>(s, pos, c, x, st + 1);
+        assert((st + 1) * d == st * d + d) by (nonlinear_arith);
+    } else {
+        lemma_run_rv::<X, B>(s, pos, c, x, c);
+        assert(d == 0 ==> c * d == 0) by (nonlinear_arith);
+    }
+}
+
+/// Sorted values, below `t` before `rs`, where the value `v` is the
+/// first at or above `t`, with the items equal to `t` from there up to
+/// `re`: the search found `rs..re`. (`rc` is the end of the run of `rs`,
+/// whose items step by `d`.)
+proof fn lemma_crossed<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
+    s: Seq<Slab<X::Tail>>,
+    p: int,
+    e: int,
+    t: int,
+    v: int,
+    d: int,
+    pos: int,
+    rs: int,
+    re: int,
+    rc: int,
+)
+    requires
+        dsorted::<X, B>(s, p, e),
+        p <= pos <= rs <= re <= e,
+        rs < rc <= e,
+        forall|k: int| p <= k < pos ==> below(#[trigger] rv::<X, B>(s, k), Some(t)),
+        forall|k: int| pos <= k < rs ==> below(#[trigger] rv::<X, B>(s, k), Some(t)),
+        rv::<X, B>(s, rs) == Some(v),
+        v >= t,
+        v != t ==> re == rs,
+        v == t ==> rs < re && forall|k: int| rs <= k < re ==> #[trigger] rv::<X, B>(s, k) == Some(t),
+        v == t && re < rc ==> d != 0 && rv::<X, B>(s, re) == Some(t + d),
+        v == t && rc <= re < e ==> rv::<X, B>(s, re) != Some(t),
+    ensures
+        dfound::<X, B>(s, p, e, Some(t), rs, re),
+{
+    if re < e {
+        // sorted values do not fall
+        assert(!below(rv::<X, B>(s, re), rv::<X, B>(s, rs)));
+    }
+    lemma_dfound::<X, B>(s, p, e, t, rs, re);
+}
+
 /// The run of `count` copies of `x` (delta `d`) at item `pos`, after the
 /// running sum `a`, ends at or above `t`: its first item at or above `t`,
 /// and where the items equal to `t` from there end.
@@ -643,6 +825,9 @@ fn d_cross<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
         r.0 < pos + count,
         dsorted::<X, B>(slabs@, p, p + o.len()) ==> dfound::<X, B>(slabs@, p, p + o.len(), Some(t as int), r.0 as int, r.1 as int),
 {
+    hide(probe_at);
+    hide(dsorted);
+    hide(dfound);
     let ghost s = slabs@;
     let ghost e = p + o.len();
     let ghost c = count as int;
@@ -661,22 +846,12 @@ fn d_cross<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
     };
     let ghost st = steps as int;
     proof {
-        lemma_run_rv::<X, B>(s, pos as int, c, x, st);
-        if d < 0 {
-            assert(c * d <= d) by (nonlinear_arith)
-                requires
-                    c >= 1,
-                    d < 0,
-            ;
-        }
-        assert(rsum::<X, B>(s, pos + st) >= t);
+        lemma_cross_first::<X, B>(s, pos as int, c, x, a as int, d, t as int, st);
     }
     let run_start = pos + steps - 1;
     let v = add_run(a, d, steps, Ghost(a as int));
     proof {
         lemma_crop(a + st * d);
-        assert(v == rsum::<X, B>(s, pos + st));
-        assert(rv::<X, B>(s, run_start as int) == Some(v as int));
     }
     let mut run_end = run_start;
     if v == t {
@@ -685,13 +860,7 @@ fn d_cross<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
             run_end = pos + count;
         }
         proof {
-            assert forall|k: int| run_start <= k < run_end implies #[trigger] rv::<X, B>(s, k) == Some(t as int) by {
-                lemma_run_rv::<X, B>(s, pos as int, c, x, k - pos + 1);
-            }
-            if run_end < pos + c {
-                lemma_run_rv::<X, B>(s, pos as int, c, x, run_end - pos + 1);
-                assert((st + 1) * d == st * d + d) by (nonlinear_arith);
-            }
+            lemma_cross_same::<X, B>(s, pos as int, c, x, a as int, d, t as int, st, run_end as int);
         }
         if run_end == pos + count {
             run_end = d_zeros::<X, B>(probe, slabs, prun, run_end, end, Ghost(t), Ghost(o), Ghost(p));
@@ -699,18 +868,164 @@ fn d_cross<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
     }
     proof {
         if dsorted::<X, B>(s, p, e) {
-            assert forall|k: int| p <= k < run_start implies below(#[trigger] rv::<X, B>(s, k), Some(t as int)) by {
-                if k >= pos {
-                    lemma_run_rv::<X, B>(s, pos as int, c, x, k - pos + 1);
-                }
-            }
-            if run_end < e {
-                assert(!below(rv::<X, B>(s, run_end as int), rv::<X, B>(s, run_start as int)));
-            }
-            lemma_dfound::<X, B>(s, p, e, t as int, run_start as int, run_end as int);
+            lemma_crossed::<X, B>(s, p, e, t as int, v as int, d as int, pos as int, run_start as int, run_end as int, pos + c);
         }
     }
     (run_start, run_end)
+}
+
+/// A copy of the iterator is well-formed as it is, with its window.
+pub(crate) proof fn lemma_dup<'a, D: Decode, X: Decoders<'a, D = D>>(c0: ICore<D>, c1: ICore<D>, s: Seq<Slab<X::Tail>>)
+    requires
+        c0.wf::<X>(s),
+        c1.items_left == c0.items_left,
+        c1.slab_remaining == c0.slab_remaining,
+        c1.slab_idx == c0.slab_idx,
+        c1.pos == c0.pos,
+        c1.decoder.inv() == c0.decoder.inv(),
+        c1.decoder.rest() == c0.decoder.rest(),
+    ensures
+        c1.wf::<X>(s),
+        c1.out::<X>(s) == c0.out::<X>(s),
+{
+}
+
+/// What a search of the window starts from: the column's items are its
+/// slabs', the window's end fits `usize` and holds no more than the items
+/// left, all of the column's from the iterator on if fewer, every running
+/// sum of the column fits `i64`, and the index, of as many slabs, can be
+/// searched; with no index there are no items.
+pub(crate) proof fn lemma_search_start<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
+    c: ICore<X::D>,
+    ix: Option<&SlabBTree<SlabAgg>>,
+    s: Seq<Slab<X::Tail>>,
+)
+    requires
+        c.wf::<X>(s),
+        dindex_ok::<X, B>(ix, s),
+    ensures
+        lens_ok::<X>(s),
+        total(slab_lens(s)) <= usize::MAX,
+        vals_of::<X>(s).len() == total(slab_lens(s)),
+        c.pos + c.items_left <= usize::MAX,
+        c.out::<X>(s).len() <= c.items_left,
+        c.out::<X>(s).len() > 0 ==> c.pos + c.out::<X>(s).len() <= vals_of::<X>(s).len(),
+        c.out::<X>(s).len() < c.items_left ==> c.pos + c.out::<X>(s).len() >= vals_of::<X>(s).len(),
+        all_fit::<X, B>(s),
+        match ix {
+            Some(ix) => {
+                &&& ix@.len() == s.len()
+                &&& crate::btree::valid(ix@)
+                &&& forall|i: int| 0 <= i < ix@.len() ==> #[trigger] ix@[i].prefix_ok()
+            },
+            None => vals_of::<X>(s).len() == 0,
+        },
+{
+    let vv = vals_of::<X>(s);
+    lemma_window::<X::D, X>(c, s);
+    lemma_vals_len::<X>(s);
+    assert forall|n: int| 0 <= n <= vv.len() implies in_i64(#[trigger] rsum::<X, B>(s, n)) by {
+        match ix {
+            Some(ix) => lemma_sums_fit::<X, B>(ix@, s, n),
+            None => {
+                assert(vv.take(n) =~= Seq::<<X::D as Decode>::Item>::empty());
+                assert(deltas_of::<_, B>(vv.take(n)) =~= Seq::<Option<i64>>::empty());
+            },
+        }
+    }
+    match ix {
+        Some(ix) => lemma_found::<X, B>(ix@, s, 0),
+        None => {
+            assert(slab_lens(s) =~= Seq::<nat>::empty());
+        },
+    }
+}
+
+/// The slab `si` the index found for `t` starts at item `at`, past the
+/// iterator and inside what it has left: that is in its window, the
+/// index's prefix `prefix` is the running sum there, and with the window
+/// sorted the values before it are below `t`.
+proof fn lemma_seek_jump<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
+    c: ICore<X::D>,
+    ws: Seq<SlabAgg>,
+    s: Seq<Slab<X::Tail>>,
+    t: i64,
+    si: int,
+    at: int,
+    prefix: i64,
+)
+    requires
+        c.wf::<X>(s),
+        dix_ok::<X, B>(ws, s),
+        0 <= si < s.len(),
+        passed(ws, t, si),
+        at == sum_len(ws.subrange(0, si)),
+        prefix == pre_at(ws, si),
+        c.pos < at < c.pos + c.items_left,
+    ensures
+        at == sum(slab_lens(s), 0, si),
+        at - c.pos <= c.out::<X>(s).len(),
+        prefix == crop(psum(dbefore::<X, B>(s, at))),
+        dsorted::<X, B>(s, c.pos as int, c.pos + c.out::<X>(s).len()) ==> forall|k: int|
+            c.pos <= k < at ==> below(#[trigger] rv::<X, B>(s, k), Some(t as int)),
+{
+    let p = c.pos as int;
+    let e = p + c.out::<X>(s).len();
+    lemma_window::<X::D, X>(c, s);
+    lemma_vals_len::<X>(s);
+    lemma_found::<X, B>(ws, s, si);
+    lemma_sum_le(slab_lens(s), 0, si, 0, s.len() as int);
+    if dsorted::<X, B>(s, p, e) {
+        lemma_jump::<X, B>(ws, s, t, si, p, e);
+    }
+    lemma_crop(prefix as int);
+}
+
+/// A run of `c` copies of `x` at item `pos` of a sorted window, of nulls
+/// or ending below `t`: each of its items is below `t`.
+proof fn lemma_run_below<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
+    s: Seq<Slab<X::Tail>>,
+    p: int,
+    e: int,
+    pos: int,
+    c: int,
+    x: <X::D as Decode>::Item,
+    t: int,
+)
+    requires
+        dsorted::<X, B>(s, p, e),
+        p <= pos,
+        0 <= pos,
+        1 <= c,
+        pos + c <= e,
+        pos + c <= vals_of::<X>(s).len(),
+        vals_of::<X>(s).skip(pos).take(c) =~= Seq::new(c as nat, |_i: int| x),
+        B::dv(x) is Some ==> rsum::<X, B>(s, pos + c) < t,
+    ensures
+        forall|k: int| pos <= k < pos + c ==> below(#[trigger] rv::<X, B>(s, k), Some(t)),
+{
+    lemma_run_rv::<X, B>(s, pos, c, x, c);
+    assert forall|k: int| pos <= k < pos + c implies below(#[trigger] rv::<X, B>(s, k), Some(t)) by {
+        let kk = k - pos + 1;
+        lemma_run_rv::<X, B>(s, pos, c, x, kk);
+        match B::dv(x) {
+            None => {},
+            Some(d) => {
+                if d >= 0 {
+                    assert(kk * d <= c * d) by (nonlinear_arith)
+                        requires
+                            kk <= c,
+                            d >= 0,
+                    ;
+                } else if c >= 2 {
+                    // falling values aren't sorted
+                    lemma_run_rv::<X, B>(s, pos, c, x, 1);
+                    lemma_run_rv::<X, B>(s, pos, c, x, 2);
+                    assert(!below(rv::<X, B>(s, pos + 1), rv::<X, B>(s, pos)));
+                }
+            },
+        }
+    }
 }
 
 /// `seek_to_value` for the value `t`: where the window's values are
@@ -740,29 +1055,29 @@ pub(crate) fn d_seek<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
             &&& dsorted::<X, B>(slabs@, p, e) ==> dfound::<X, B>(slabs@, p, e, Some(t as int), r.0 as int, r.1 as int)
         }),
 {
+    hide(ICore::wf);
+    hide(ICore::out);
+    hide(dix_ok);
+    hide(dsorted);
+    hide(dfound);
+    hide(all_fit);
+    hide(rv);
+    hide(psum);
     let ghost s = slabs@;
     let ghost c0 = *core;
     let ghost p = core.pos as int;
     let ghost o = core.out::<X>(s);
     let ghost e = p + o.len();
-    let ghost vv = vals_of::<X>(s);
     proof {
-        lemma_window::<X::D, X>(c0, s);
-        lemma_vals_len::<X>(s);
-        assert forall|n: int| 0 <= n <= vv.len() implies in_i64(#[trigger] rsum::<X, B>(s, n)) by {
-            match ix {
-                Some(ix) => lemma_sums_fit::<X, B>(ix@, s, n),
-                None => {
-                    assert(vv.take(n) =~= Seq::<<X::D as Decode>::Item>::empty());
-                    assert(deltas_of::<_, B>(vv.take(n)) =~= Seq::<Option<i64>>::empty());
-                },
-            }
-        }
+        lemma_search_start::<X, B>(c0, ix, s);
         assert(o.skip(0) =~= o);
     }
     let end = core.pos + core.items_left;
     let mut probe = core.dup();
     let mut prun = *running;
+    proof {
+        lemma_dup::<X::D, X>(c0, probe, s);
+    }
     // jump to the slab where the running sum first reaches `t`: with the
     // window sorted, the values before it are below `t`
     if let Some(ix) = ix {
@@ -770,13 +1085,7 @@ pub(crate) fn d_seek<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
         if at > probe.pos && at < end && si < slabs.len() {
             let ghost c1 = probe;
             proof {
-                let ws = ix@;
-                lemma_found::<X, B>(ws, s, si as int);
-                lemma_sum_le(slab_lens(s), 0, si as int, 0, s.len() as int);
-                if dsorted::<X, B>(s, p, e) {
-                    lemma_jump::<X, B>(ws, s, t, si as int, p, e);
-                }
-                lemma_crop(prefix as int);
+                lemma_seek_jump::<X, B>(c0, ix@, s, t, si as int, at as int, prefix);
             }
             prun = prefix;
             probe.advance_to_slab::<X>(slabs, si, at);
@@ -816,18 +1125,11 @@ pub(crate) fn d_seek<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
         };
         let count = run.count;
         let ghost c = count as int;
-        proof {
-            lemma_run_rv::<X, B>(s, pos as int, c, run.value, c);
-        }
         match B::to_opt(run.value) {
             None => {
                 proof {
                     if dsorted::<X, B>(s, p, e) {
-                        assert forall|k: int| p <= k < pos + c implies below(#[trigger] rv::<X, B>(s, k), Some(t as int)) by {
-                            if k >= pos {
-                                lemma_run_rv::<X, B>(s, pos as int, c, run.value, k - pos + 1);
-                            }
-                        }
+                        lemma_run_below::<X, B>(s, p, e, pos as int, c, run.value, t as int);
                     }
                 }
                 pos = pos + count;
@@ -836,24 +1138,7 @@ pub(crate) fn d_seek<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
                 if prun < t {
                     proof {
                         if dsorted::<X, B>(s, p, e) {
-                            assert forall|k: int| p <= k < pos + c implies below(#[trigger] rv::<X, B>(s, k), Some(t as int)) by {
-                                if k >= pos {
-                                    let kk = k - pos + 1;
-                                    lemma_run_rv::<X, B>(s, pos as int, c, run.value, kk);
-                                    if d >= 0 {
-                                        assert(kk * d <= c * d) by (nonlinear_arith)
-                                            requires
-                                                kk <= c,
-                                                d >= 0,
-                                        ;
-                                    } else if c >= 2 {
-                                        // falling values aren't sorted
-                                        lemma_run_rv::<X, B>(s, pos as int, c, run.value, 1);
-                                        lemma_run_rv::<X, B>(s, pos as int, c, run.value, 2);
-                                        assert(!below(rv::<X, B>(s, pos + 1), rv::<X, B>(s, pos as int)));
-                                    }
-                                }
-                            }
+                            lemma_run_below::<X, B>(s, p, e, pos as int, c, run.value, t as int);
                         }
                     }
                     pos = pos + count;

@@ -332,18 +332,99 @@ pub(crate) fn own_postfix<'s, L: Lift<'s>>(p: Option<Postfix<VOf<'s, L>>>) -> (r
     }
 }
 
-/// A literal tail, read with owned values.
+/// A run tail, read with owned values: the same tail, of a null only in
+/// a nullable column, with as many segments in the groups after it.
+proof fn lemma_lift_tail_run<'s, L: Lift<'s>>(data: Seq<u8>, at: int, count: nat, v: VOf<'s, L>, end: int, i: int)
+    requires valid_slab::<L::R>(data), tail_run::<L::R>(data, at, count, v, end, i),
+    ensures
+        valid_slab::<WR<'s, L>>(data),
+        tail_run::<WR<'s, L>>(data, at, count, L::lift(v), end, i),
+        <WR<'s, L> as RleOps<'static>>::is_null(L::lift(v)) ==> <WR<'s, L> as RleOps<'static>>::nullable(),
+        groups_segments(slab_groups::<WR<'s, L>>(data).skip(i + 1))
+            == groups_segments(slab_groups::<L::R>(data).skip(i + 1)),
+{
+    hide(valid_slab);
+    hide(slab_groups);
+    hide(slab_values);
+    hide(gb);
+    hide(gl);
+    hide(gseg);
+    hide(groups_segments);
+    hide(groups_bytes);
+    hide(group_bytes);
+    hide(group_values);
+    let gs = slab_groups::<L::R>(data);
+    lemma_lift_slab::<L>(data);
+    lemma_lift_at::<L>(gs, i);
+    lemma_lift_at::<L>(gs, i + 1);
+    L::axiom_lift(v);
+    lemma_lift_group::<L>(gs[i]);
+    lemma_slab_group::<L::R>(data, i);
+}
+
+/// A literal tail, read with owned values: the same tail, of a value
+/// that is not null, with as many segments in the groups after it.
 proof fn lemma_lift_tail_lit<'s, L: Lift<'s>>(data: Seq<u8>, at: int, v: VOf<'s, L>, lit: nat, end: int, i: int, j: int)
     requires valid_slab::<L::R>(data), tail_lit::<L::R>(data, at, v, lit, end, i, j),
-    ensures tail_lit::<WR<'s, L>>(data, at, L::lift(v), lit, end, i, j),
+    ensures
+        valid_slab::<WR<'s, L>>(data),
+        tail_lit::<WR<'s, L>>(data, at, L::lift(v), lit, end, i, j),
+        !<WR<'s, L> as RleOps<'static>>::is_null(L::lift(v)),
+        groups_segments(slab_groups::<WR<'s, L>>(data).skip(i + 1))
+            == groups_segments(slab_groups::<L::R>(data).skip(i + 1)),
 {
+    hide(valid_slab);
+    hide(slab_groups);
+    hide(slab_values);
+    hide(gb);
+    hide(gl);
+    hide(gseg);
+    hide(groups_segments);
+    hide(groups_bytes);
+    hide(encs);
     let gs = slab_groups::<L::R>(data);
     let vs = gs[i]->values;
     lemma_lift_slab::<L>(data);
     lemma_lift_at::<L>(gs, i);
+    lemma_lift_at::<L>(gs, i + 1);
     L::axiom_lift_codec(-(vs.len() as int) as i64, 0);
     assert(lift_seq::<L>(vs).take(j + 1) =~= lift_seq::<L>(vs.take(j + 1)));
     lemma_lift_encs::<L>(vs.take(j + 1));
+    lemma_slab_lit::<L::R>(data, i, j);
+    L::axiom_lift(v);
+}
+
+/// A repeat run's last value and a literal tail after it, read with
+/// owned values: the same tail, of values that are not null, with as
+/// many segments in the groups after it.
+proof fn lemma_lift_tail_lone<'s, L: Lift<'s>>(data: Seq<u8>, at: int, lone: VOf<'s, L>, v: VOf<'s, L>, lit: nat, end: int, i: int)
+    requires valid_slab::<L::R>(data), tail_lone::<L::R>(data, at, lone, v, lit, end, i),
+    ensures
+        valid_slab::<WR<'s, L>>(data),
+        tail_lone::<WR<'s, L>>(data, at, L::lift(lone), L::lift(v), lit, end, i),
+        !<WR<'s, L> as RleOps<'static>>::is_null(L::lift(lone)),
+        !<WR<'s, L> as RleOps<'static>>::is_null(L::lift(v)),
+        groups_segments(slab_groups::<WR<'s, L>>(data).skip(i + 2))
+            == groups_segments(slab_groups::<L::R>(data).skip(i + 2)),
+{
+    hide(valid_slab);
+    hide(slab_groups);
+    hide(slab_values);
+    hide(tail_lit);
+    hide(gb);
+    hide(gl);
+    hide(gseg);
+    hide(groups_segments);
+    hide(groups_bytes);
+    hide(group_bytes);
+    hide(group_values);
+    let gs = slab_groups::<L::R>(data);
+    lemma_lift_tail_lit::<L>(data, at + 1, v, lit, end, i + 1, 0);
+    lemma_lift_slab::<L>(data);
+    lemma_lift_at::<L>(gs, i);
+    lemma_lift_at::<L>(gs, i + 1);
+    lemma_slab_group::<L::R>(data, i);
+    L::axiom_lift(lone);
 }
 
 /// A postfix of the slab, read with owned values.
@@ -353,25 +434,25 @@ pub(crate) proof fn lemma_lift_postfix<'s, L: Lift<'s>>(data: Seq<u8>, at: int, 
         postfix_ok::<WR<'s, L>>(data, at, plift::<L>(p), end), vnulls_ok::<WR<'s, L>>(plift::<L>(p)),
         rest_segs::<WR<'s, L>>(data, at, plift::<L>(p), end) == rest_segs::<L::R>(data, at, p, end),
 {
-    let gs = slab_groups::<L::R>(data);
-    lemma_lift_slab::<L>(data);
+    hide(valid_slab);
+    hide(slab_groups);
+    hide(slab_values);
+    hide(tail_run);
+    hide(tail_lit);
+    hide(tail_lone);
+    hide(rest_segs);
+    hide(groups_segments);
     match p {
-        None => {},
+        None => {
+            reveal(rest_segs);
+            lemma_lift_slab::<L>(data);
+        },
         Some(Postfix::Run { count, value }) => {
             let i = choose|i: int| tail_run::<L::R>(data, at, count as nat, value, end, i);
-            lemma_lift_at::<L>(gs, i);
-            lemma_lift_at::<L>(gs, i + 1);
-            if i + 1 < gs.len() {
-                assert(lift_groups::<L>(gs)[i + 1] == lift_group::<L>(gs[i + 1]));
-            }
-            L::axiom_lift(value);
-            lemma_lift_group::<L>(gs[i]);
-            lemma_slab_group::<L::R>(data, i);
-            assert(tail_run::<WR<'s, L>>(data, at, count as nat, L::lift(value), end, i));
+            lemma_lift_tail_run::<L>(data, at, count as nat, value, end, i);
             lemma_postfix_run::<WR<'s, L>>(data, at, count, L::lift(value), end, i);
             lemma_rest_run::<WR<'s, L>>(data, at, count, L::lift(value), end, i);
             lemma_rest_run::<L::R>(data, at, count, value, end, i);
-            lemma_lift_at::<L>(gs, i + 1);
         },
         Some(Postfix::Lit { value, lit }) => {
             let (i, j) = choose|i: int, j: int| tail_lit::<L::R>(data, at, value, lit as nat, end, i, j);
@@ -379,24 +460,13 @@ pub(crate) proof fn lemma_lift_postfix<'s, L: Lift<'s>>(data: Seq<u8>, at: int, 
             lemma_postfix_lit::<WR<'s, L>>(data, at, L::lift(value), lit, end, i, j);
             lemma_rest_lit::<WR<'s, L>>(data, at, L::lift(value), lit, end, i, j);
             lemma_rest_lit::<L::R>(data, at, value, lit, end, i, j);
-            lemma_lift_at::<L>(gs, i + 1);
-            lemma_slab_lit::<L::R>(data, i, j);
-            L::axiom_lift(value);
         },
         Some(Postfix::LonePlusLit { lone, value, lit }) => {
             let i = choose|i: int| tail_lone::<L::R>(data, at, lone, value, lit as nat, end, i);
-            lemma_lift_tail_lit::<L>(data, at + 1, value, lit as nat, end, i + 1, 0);
-            lemma_lift_at::<L>(gs, i);
-            lemma_lift_at::<L>(gs, i + 1);
-            assert(tail_lone::<WR<'s, L>>(data, at, L::lift(lone), L::lift(value), lit as nat, end, i));
+            lemma_lift_tail_lone::<L>(data, at, lone, value, lit as nat, end, i);
             lemma_postfix_lone::<WR<'s, L>>(data, at, L::lift(lone), L::lift(value), lit, end, i);
             lemma_rest_lone::<WR<'s, L>>(data, at, L::lift(lone), L::lift(value), lit, end, i);
             lemma_rest_lone::<L::R>(data, at, lone, value, lit, end, i);
-            lemma_lift_at::<L>(gs, i + 2);
-            lemma_slab_group::<L::R>(data, i);
-            lemma_slab_lit::<L::R>(data, i + 1, 0);
-            L::axiom_lift(lone);
-            L::axiom_lift(value);
         },
     }
 }

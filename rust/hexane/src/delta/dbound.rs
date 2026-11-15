@@ -48,7 +48,8 @@ use crate::delta::agg::{deltas_of, lemma_push, pmax, pmin, psum, reps, vmax, vmi
 use crate::delta::dedit::{delta_to, Ledger, SplicePhase, SplicePlan};
 #[cfg(verus_keep_ghost)]
 use crate::delta::dedit::{
-    lemma_rest_unchanged, lemma_rz_cat, lemma_rz_crop, lemma_rz_one, run_vals, rz, splice_vals,
+    lemma_rest_unchanged, lemma_rz_cat, lemma_rz_crop, lemma_rz_len, lemma_rz_one, run_vals, rz,
+    splice_vals,
 };
 #[cfg(verus_keep_ghost)]
 use crate::delta::diter::{crop, dindex_ok, lemma_crop, lemma_crop_add, lemma_dfold, realize};
@@ -687,44 +688,64 @@ proof fn lemma_spliced(
     ensures
         in_bound(rz(0, spliced(a, e, tail, skip, next_val)), lo, hi),
 {
-    let r = if next_val is Some { tail.skip(skip + 1int) } else { tail };
-    assert(spliced(a, e, tail, skip, next_val) =~= a + (e + r));
-    // before the splice: the original values
-    assert(orig.take(a.len() as int) =~= a);
-    lemma_take(orig, a.len() as int, lo, hi);
-    lemma_rz_cat(0, a, e + r);
-    lemma_rz_cat(psum(a), e, r);
-    // what the plan emitted: the items' values, then the nulls and the
-    // value after them
-    lemma_crop(prev as int);
-    lemma_rz_crop(psum(a), prev as int, e);
-    lemma_crop_add(psum(a), psum(e));
-    match next_val {
-        Some(v) => {
-            let k = (a.len() + x.len() + skip + 1) as int;
-            assert(a + x + tail.take(skip + 1int) =~= orig.take(k));
-            // the value after them is an original one
-            assert(orig.take(k).drop_last() =~= orig.take(k - 1));
-            assert(orig[k - 1] == tail[skip as int]);
-            assert(rz(0, orig)[k - 1] == realize(psum(orig.take(k - 1)), orig[k - 1]));
-            assert(rz(0, orig)[k - 1] == Some(v));
-            assert(in_bound(seq![Some(v)], lo, hi));
-            crate::delta::dedit::lemma_rz_nulls(0, skip);
-            lemma_no_values(0, reps(skip, None), lo, hi);
-            lemma_cat(wanted, reps(skip, None), lo, hi);
-            lemma_cat(wanted + reps(skip, None), seq![Some(v)], lo, hi);
-            // and after it, the original values, the running sums agreeing
-            lemma_lands(prev as int, e, wanted, skip, v);
-            assert(tail.skip(skip + 1int) =~= orig.skip(k));
-            lemma_take(orig, k, lo, hi);
-            lemma_rz_crop(psum(a) + psum(e), psum(orig.take(k)), r);
-        },
-        None => {
-            lemma_no_values(psum(a) + psum(e), r, lo, hi);
-        },
+    hide(rz);
+    hide(in_bound);
+    let vo = rz(0, orig);
+    let (i, j) = (a.len() as int, (a.len() + x.len()) as int);
+    lemma_spliced_vals(orig, a, x, tail, e, wanted, prev, skip, next_val);
+    // the original values before the splice and after the deleted ones
+    // are some of the original values
+    lemma_rz_len(0, orig);
+    assert(vo.take(i) + vo.skip(i) =~= vo);
+    assert(vo.take(j) + vo.skip(j) =~= vo);
+    lemma_cat(vo.take(i), vo.skip(i), lo, hi);
+    lemma_cat(vo.take(j), vo.skip(j), lo, hi);
+    lemma_cat(vo.take(i), wanted, lo, hi);
+    lemma_cat(vo.take(i) + wanted, vo.skip(j), lo, hi);
+}
+
+/// Nulls realize nulls, whatever the running sum before them.
+proof fn lemma_nulls_alike(p: int, q: int, ds: Seq<Option<i64>>)
+    requires
+        forall|i: int| 0 <= i < ds.len() ==> (#[trigger] ds[i]) is None,
+    ensures
+        rz(p, ds) == rz(q, ds),
+{
+    assert forall|i: int| 0 <= i < ds.len() implies (#[trigger] rz(p, ds)[i]) == rz(q, ds)[i] by {
+        assert(ds[i] is None);
     }
-    lemma_cat(rz(psum(a), e), rz(psum(a) + psum(e), r), lo, hi);
-    lemma_cat(rz(0, a), rz(psum(a), e + r), lo, hi);
+    assert(rz(p, ds) =~= rz(q, ds));
+}
+
+/// Deltas `tail` that start with `skip` nulls and then an item realize,
+/// after the running sum `q`: the nulls, the item's value, which is the
+/// running sum through it, and then what the deltas after the item
+/// realize after that.
+proof fn lemma_tail_vals(q: int, tail: Seq<Option<i64>>, skip: nat)
+    requires
+        tail.len() > skip,
+        tail.take(skip as int) == reps(skip, None),
+        tail[skip as int] is Some,
+    ensures
+        ({
+            let h = tail.take(skip + 1int);
+            rz(q, tail) == reps(skip, None) + seq![Some(crop(q + psum(h)))] + rz(q + psum(h), tail.skip(skip + 1int))
+        }),
+{
+    hide(rz);
+    hide(psum);
+    hide(crop);
+    let h = tail.take(skip + 1int);
+    let r = tail.skip(skip + 1int);
+    let b = tail[skip as int]->0;
+    assert(tail =~= h + r);
+    assert(h =~= reps(skip, None) + seq![Some(b)]);
+    lemma_rz_cat(q, h, r);
+    lemma_rz_cat(q, reps(skip, None), seq![Some(b)]);
+    crate::delta::dedit::lemma_rz_nulls(q, skip);
+    lemma_rz_one(q, b);
+    crate::delta::dedit::lemma_psum_one(b);
+    crate::delta::diter::lemma_psum_cat(reps(skip, None), seq![Some(b)]);
 }
 
 /// The values of the column a splice leaves: the original values before
@@ -751,6 +772,9 @@ pub(crate) proof fn lemma_spliced_vals(
             (a.len() + x.len()) as int,
         ),
 {
+    hide(rz);
+    hide(psum);
+    hide(crop);
     let r = if next_val is Some { tail.skip(skip + 1int) } else { tail };
     let q = psum(a) + psum(x);
     assert(spliced(a, e, tail, skip, next_val) =~= a + (e + r));
@@ -760,6 +784,8 @@ pub(crate) proof fn lemma_spliced_vals(
     assert(orig =~= a + (x + tail));
     lemma_rz_cat(0, a, x + tail);
     lemma_rz_cat(psum(a), x, tail);
+    lemma_rz_len(0, a);
+    lemma_rz_len(psum(a), x);
     assert(rz(0, orig).take(a.len() as int) =~= rz(0, a));
     assert(rz(0, orig).skip((a.len() + x.len()) as int) =~= rz(q, tail));
     // what the plan emitted: the items' values, then the nulls and the
@@ -769,36 +795,20 @@ pub(crate) proof fn lemma_spliced_vals(
     match next_val {
         Some(v) => {
             let h = tail.take(skip + 1int);
-            assert(tail =~= h + r);
-            assert(h =~= reps(skip, None) + seq![tail[skip as int]]);
-            let b = tail[skip as int]->0;
-            lemma_rz_cat(q, h, r);
-            lemma_rz_cat(q, reps(skip, None), seq![Some(b)]);
-            crate::delta::dedit::lemma_rz_nulls(q, skip);
-            lemma_rz_one(q, b);
-            crate::delta::dedit::lemma_psum_one(b);
-            crate::delta::diter::lemma_psum_cat(reps(skip, None), seq![Some(b)]);
+            lemma_tail_vals(q, tail, skip);
             // the item after the nulls realizes `v`
             crate::delta::diter::lemma_psum_cat(a, x);
             crate::delta::diter::lemma_psum_cat(a + x, h);
-            assert(crop(q + b) == v);
             // and after it, the original values, the running sums agreeing
             lemma_lands(prev as int, e, wanted, skip, v);
             lemma_crop_add(psum(a), psum(e));
-            lemma_crop_add(prev as int, psum(e));
-            lemma_crop_add(q + b, 0);
             lemma_rz_crop(psum(a) + psum(e), q + psum(h), r);
-            assert(rz(q, tail) =~= reps(skip, None) + seq![Some(v)] + rz(q + psum(h), r));
             assert(rz(0, a) + (splice_vals(wanted, skip, next_val) + rz(psum(a) + psum(e), r)) =~= rz(0, a) + wanted
                 + rz(q, tail));
         },
         None => {
             // only nulls follow, which realize nulls whatever comes before
-            assert(rz(psum(a) + psum(e), r) =~= rz(q, tail)) by {
-                assert forall|i: int| 0 <= i < r.len() implies (#[trigger] rz(psum(a) + psum(e), r)[i]) == rz(q, tail)[i] by {
-                    assert(tail[i] is None);
-                }
-            }
+            lemma_nulls_alike(psum(a) + psum(e), q, tail);
             assert(rz(0, a) + (wanted + rz(psum(a) + psum(e), r)) =~= rz(0, a) + wanted + rz(q, tail));
         },
     }

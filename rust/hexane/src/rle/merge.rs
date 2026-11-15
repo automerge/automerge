@@ -96,11 +96,78 @@ proof fn lemma_lift_concat<'s, L: Lift<'s>>(x: Seq<VOf<'s, L>>, y: Seq<VOf<'s, L
     assert(lift_seq::<L>(x + y) =~= lift_seq::<L>(x) + lift_seq::<L>(y));
 }
 
+/// The first `start + n` items are the first `start`, then the first `n`
+/// of the rest.
+proof fn lemma_take_split<T>(a: Seq<T>, start: int, n: int)
+    requires
+        0 <= start,
+        0 <= n,
+        start + n <= a.len(),
+    ensures
+        a.take(start + n) == a.take(start) + a.skip(start).take(n),
+        a.take(start).len() == start,
+{
+    assert(a.take(start + n) =~= a.take(start) + a.skip(start).take(n));
+}
+
+/// A vector extended by a slice holds its own bytes, then the slice's.
+proof fn lemma_extended(v0: Seq<u8>, s: Seq<u8>, v: Seq<u8>)
+    requires
+        v.len() == v0.len() + s.len(),
+        forall|i: int|
+            #![trigger v[i]]
+            0 <= i < v.len() ==> if i < v0.len() {
+                v[i] == v0[i]
+            } else {
+                cloned::<u8>(s[i - v0.len()], v[i])
+            },
+    ensures
+        v == v0 + s,
+{
+    assert forall|i: int| 0 <= i < v.len() implies #[trigger] v[i] == (v0 + s)[i] by {
+        if i >= v0.len() {
+            assert(cloned::<u8>(s[i - v0.len()], v[i]));
+        }
+    }
+    assert(v =~= v0 + s);
+}
+
+/// Four byte strings joined, the last three first.
+proof fn lemma_join4(h: Seq<u8>, x: Seq<u8>, y: Seq<u8>, z: Seq<u8>)
+    ensures
+        h + x + y + z == h + (x + y + z),
+{
+    assert(h + x + y + z =~= h + (x + y + z));
+}
+
+/// Rewriting the header at `rw.pos` in `pre`, where `pre` stands after
+/// `head` (`start` long): the old header is at `start + rw.pos`, and
+/// replacing it there gives `head`, then `pre` with its header rewritten.
+proof fn lemma_apply_after<'a, W: WriteOps<'a>>(head: Seq<u8>, pre: Seq<u8>, start: int, rw: RewriteHeader, h0: i64)
+    requires
+        rw_at::<W>(Some(rw), pre, h0),
+        start == head.len(),
+    ensures
+        start + rw.pos <= (head + pre).len(),
+        <W::R as RleOps<'a>>::enc_signed(h0).is_prefix_of((head + pre).skip(start + rw.pos)),
+        (head + pre).take(start + rw.pos) + <W::R as RleOps<'a>>::enc_signed(-(rw.count as int) as i64)
+            + (head + pre).skip(start + rw.pos + <W::R as RleOps<'a>>::enc_signed(h0).len())
+            == head + apply::<W>(Some(rw), pre, h0),
+{
+    let h = <W::R as RleOps<'a>>::enc_signed(h0);
+    let n = <W::R as RleOps<'a>>::enc_signed(-(rw.count as int) as i64);
+    let x = head + pre;
+    let pos = rw.pos as int;
+    assert(x.skip(start + pos) =~= pre.skip(pos));
+    assert(x.take(start + pos) =~= head + pre.take(pos));
+    assert(x.skip(start + pos + h.len()) =~= pre.skip(pos + h.len()));
+    assert(head + pre.take(pos) + n + pre.skip(pos + h.len()) =~= head + (pre.take(pos) + n + pre.skip(pos + h.len())));
+}
+
 /// Plan merging slab `b` onto the end of slab `a` (both read with
 /// borrowed values, specified with owned ones): flush `a`'s last group
 /// and `b`'s first run into `buf`.
 #[verifier::spinoff_prover]
-#[verifier::rlimit(60)]
 #[allow(unused_variables)] // b_tail is for the spec
 pub(crate) fn merge_plan<'s, L: Lift<'s>>(a: &'s [u8], a_segs: usize, a_tail: &RleTail, b: &'s [u8], b_segs: usize, b_tail: &RleTail, buf: &mut Vec<u8>) -> (p: MergePlan)
     requires
@@ -117,6 +184,11 @@ pub(crate) fn merge_plan<'s, L: Lift<'s>>(a: &'s [u8], a_segs: usize, a_tail: &R
             tail_ok::<WR<'s, L>>(merge_bytes::<L::W>(p, a@, final(buf)@, b@), t.0, t.1) && 0 <= t.1 <= t.0
         }),
 {
+    hide(rel);
+    hide(encodes);
+    hide(tail_ok);
+    hide(canonical);
+    hide(postfix_ok);
     proof {
         lemma_unlift_meta::<L>(a@);
         lemma_unlift_meta::<L>(b@);
@@ -209,19 +281,16 @@ pub(crate) fn merge_apply<'a, W: WriteOps<'a>>(a: &mut Vec<u8>, start: usize, p:
     let ghost head = a0.take(start as int);
     let ghost pre = a0.skip(start as int).take(p.tail_pos as int);
     let ghost h0 = p.h0@;
+    assert(a.len() == a0.len());
     a.truncate(start + p.tail_pos);
-    assert(a@ =~= head + pre);
+    proof {
+        lemma_take_split(a0, start as int, p.tail_pos as int);
+    }
     if let Some(rw) = p.f.rewrite {
-        let ghost h = <W::R as RleOps<'a>>::enc_signed(h0);
         proof {
-            assert(a@.skip(start + rw.pos) =~= pre.skip(rw.pos as int));
-            assert(h.is_prefix_of(a@.skip(start + rw.pos)));
+            lemma_apply_after::<W>(head, pre, start as int, rw, h0);
         }
         let _ = W::rewrite_lit_header(a, start + rw.pos, rw.count);
-        proof {
-            assert(head + pre == a0.take(start + p.tail_pos));
-            assert(a@ =~= head + apply::<W>(p.f.rewrite, pre, h0));
-        }
     }
     let a_len = a.len();
     let ghost a1 = a@;
@@ -230,20 +299,9 @@ pub(crate) fn merge_apply<'a, W: WriteOps<'a>>(a: &mut Vec<u8>, start: usize, p:
     let rest = &b[p.b_bytes..];
     a.extend_from_slice(rest);
     proof {
-        assert(a2 =~= a1 + buf@) by {
-            assert forall|i: int| 0 <= i < a2.len() implies a2[i] == (a1 + buf@)[i] by {
-                if i >= a1.len() {
-                    assert(cloned::<u8>(buf@[i - a1.len()], a2[i]));
-                }
-            }
-        }
-        assert(a@ =~= a2 + b@.skip(p.b_bytes as int)) by {
-            assert forall|i: int| 0 <= i < a@.len() implies a@[i] == (a2 + b@.skip(p.b_bytes as int))[i] by {
-                if i >= a2.len() {
-                    assert(cloned::<u8>(rest@[i - a2.len()], a@[i]));
-                }
-            }
-        }
+        lemma_extended(a1, buf@, a2);
+        lemma_extended(a2, rest@, a@);
+        lemma_join4(head, apply::<W>(p.f.rewrite, pre, h0), buf@, b@.skip(p.b_bytes as int));
     }
     let _total = a.len();
     merge_tail(p.f.wpos, a_len - start, buf.len(), b.len() - p.b_bytes, b_tail)

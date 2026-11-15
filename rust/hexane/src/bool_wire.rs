@@ -656,6 +656,176 @@ fn cut_slab<K: CountOps>(sc: &mut Scan, data: &[u8], slabs: &mut Vec<BSlab>)
     }
 }
 
+/// What bounds a scan's fields.
+proof fn lemma_scan_bounds<K: CountOps>(sc: Scan, data: Seq<u8>, slabs: Seq<BSlab>, target: usize)
+    requires scan_ok::<K>(sc, data, slabs, target),
+    ensures
+        sc.run_index == sc.cs@.len(),
+        sc.run_index <= sc.pos <= data.len(),
+        sc.slab_items <= sc.len,
+        sc.slab_segs < target,
+{
+    let cs = sc.cs@;
+    let a = sc.a@;
+    lemma_bytes_len::<K>(cs);
+    assert(cs =~= cs.take(a) + cs.skip(a));
+    lemma_concat::<K>(cs.take(a), cs.skip(a));
+}
+
+/// Nothing decodes where a scan stands: no parse.
+proof fn lemma_scan_none<K: CountOps>(sc: Scan, data: Seq<u8>, slabs: Seq<BSlab>, target: usize)
+    requires
+        scan_ok::<K>(sc, data, slabs, target), sc.pos < data.len(),
+        forall|x: u64| x <= usize::MAX ==> !(#[trigger] K::enc(x)).is_prefix_of(data.skip(sc.pos as int)),
+    ensures !bool_valid::<K>(data),
+{
+    lemma_none::<K>(data, sc.cs@, sc.pos as int);
+}
+
+/// The counts a scan has read, with the count `x` it reads next, in `n`
+/// bytes.
+proof fn lemma_scan_push<K: CountOps>(sc: Scan, data: Seq<u8>, slabs: Seq<BSlab>, target: usize, n: int, x: u64)
+    requires
+        scan_ok::<K>(sc, data, slabs, target), sc.pos < data.len(),
+        0 <= n <= data.len() - sc.pos, data.skip(sc.pos as int).take(n) == K::enc(x),
+    ensures
+        ({
+            let cs = sc.cs@;
+            let c1 = cs.push(x);
+            let a = sc.a@;
+            &&& complete::<K>(data, c1)
+            &&& data.take(sc.pos + n) == counts_bytes::<K>(c1)
+            &&& n == K::enc(x).len() && 0 < n <= 10
+            &&& counts_len(c1) == sc.len + x
+            &&& c1.take(a) == cs.take(a)
+            &&& counts_len(c1.skip(a)) == sc.slab_items + x
+            &&& x > 0 || sc.run_index == 0 ==> forall|i: int| 1 <= i < c1.len() ==> #[trigger] c1[i] > 0
+        }),
+{
+    let cs = sc.cs@;
+    let c1 = cs.push(x);
+    let a = sc.a@;
+    lemma_next::<K>(data, cs, sc.pos as int, n, x);
+    K::axiom_enc(x, x, Seq::empty(), Seq::empty());
+    lemma_bytes_push::<K>(cs, x);
+    assert(c1.take(a) =~= cs.take(a));
+    assert(c1.skip(a) =~= cs.skip(a).push(x));
+    lemma_bytes_push::<K>(cs.skip(a), x);
+    if x > 0 || sc.run_index == 0 {
+        assert forall|i: int| 1 <= i < c1.len() implies #[trigger] c1[i] > 0 by {
+            if i < c1.len() - 1 {
+                assert(c1[i] == cs[i]);
+            }
+        }
+    }
+}
+
+/// The count a scan reads, `x` in `n` bytes, is of one to ten bytes.
+proof fn lemma_scan_count<K: CountOps>(sc: Scan, data: Seq<u8>, slabs: Seq<BSlab>, target: usize, n: int, x: u64)
+    requires
+        scan_ok::<K>(sc, data, slabs, target), sc.pos < data.len(),
+        0 <= n <= data.len() - sc.pos, data.skip(sc.pos as int).take(n) == K::enc(x),
+    ensures 0 < n <= 10,
+{
+    lemma_scan_push::<K>(sc, data, slabs, target, n, x);
+}
+
+/// A scan reads count `x`, in `n` bytes, where no parse has such a count
+/// (a zero that is not the first count, or is the last; a count that takes
+/// the length over `usize::MAX`): no parse.
+proof fn lemma_scan_bad<K: CountOps>(sc: Scan, data: Seq<u8>, slabs: Seq<BSlab>, target: usize, n: int, x: u64)
+    requires
+        scan_ok::<K>(sc, data, slabs, target), sc.pos < data.len(),
+        0 <= n <= data.len() - sc.pos, data.skip(sc.pos as int).take(n) == K::enc(x),
+        x == 0 && (sc.run_index > 0 || sc.pos + n >= data.len()) || sc.len + x > usize::MAX,
+    ensures !bool_valid::<K>(data),
+{
+    let c1 = sc.cs@.push(x);
+    lemma_scan_push::<K>(sc, data, slabs, target, n, x);
+    if x == 0 && sc.run_index > 0 {
+        lemma_no_parse_count::<K>(data, c1);
+    } else if x == 0 {
+        assert(data =~= data.take(sc.pos + n));
+        lemma_no_parse_trailing::<K>(data, c1);
+    } else {
+        lemma_no_parse_len::<K>(data, c1);
+    }
+}
+
+/// Scan `s0` has read count `x`, in `n` bytes, and is `s1`, short of
+/// `target` runs in its slab: a scan.
+proof fn lemma_scan_step<K: CountOps>(s0: Scan, s1: Scan, data: Seq<u8>, slabs: Seq<BSlab>, target: usize, n: int, x: u64)
+    requires
+        scan_ok::<K>(s0, data, slabs, target), s0.pos < data.len(),
+        0 <= n <= data.len() - s0.pos, data.skip(s0.pos as int).take(n) == K::enc(x),
+        x > 0 || (s0.run_index == 0 && s0.pos + n < data.len()),
+        s0.len + x <= usize::MAX,
+        s1.cs@ == s0.cs@.push(x), s1.a@ == s0.a@,
+        s1.pos == s0.pos + n, s1.run_index == s0.run_index + 1, s1.len == s0.len + x,
+        s1.slab_start == s0.slab_start, s1.slab_items == s0.slab_items + x, s1.slab_segs == s0.slab_segs + 1,
+        s1.tail == n,
+    ensures s1.slab_segs < target ==> scan_ok::<K>(s1, data, slabs, target),
+{
+    lemma_scan_push::<K>(s0, data, slabs, target, n, x);
+    lemma_scan_bounds::<K>(s0, data, slabs, target);
+}
+
+/// Scan `s0` has read count `x`, in `n` bytes, and is `s1`, with `target`
+/// runs in its slab: the slab can be cut.
+proof fn lemma_scan_full<K: CountOps>(s0: Scan, s1: Scan, data: Seq<u8>, slabs: Seq<BSlab>, target: usize, n: int, x: u64)
+    requires
+        scan_ok::<K>(s0, data, slabs, target), s0.pos < data.len(),
+        0 <= n <= data.len() - s0.pos, data.skip(s0.pos as int).take(n) == K::enc(x),
+        x > 0 || (s0.run_index == 0 && s0.pos + n < data.len()),
+        s0.len + x <= usize::MAX,
+        s1.cs@ == s0.cs@.push(x), s1.a@ == s0.a@,
+        s1.pos == s0.pos + n, s1.run_index == s0.run_index + 1, s1.len == s0.len + x,
+        s1.slab_start == s0.slab_start, s1.slab_items == s0.slab_items + x, s1.slab_segs == s0.slab_segs + 1,
+        s1.tail == n,
+        s1.slab_segs >= target,
+    ensures
+        ({
+            &&& x > 0
+            &&& 0 <= s1.a@ < s1.cs@.len() && s1.a@ % 2 == 0
+            &&& s1.pos <= data.len()
+            &&& data.take(s1.pos as int) == counts_bytes::<K>(s1.cs@)
+            &&& forall|i: int| 1 <= i < s1.cs@.len() ==> #[trigger] s1.cs@[i] > 0
+            &&& counts_len(s1.cs@) <= usize::MAX
+            &&& s1.slab_start == counts_bytes::<K>(s1.cs@.take(s1.a@)).len()
+            &&& s1.slab_items == counts_len(s1.cs@.skip(s1.a@))
+            &&& s1.slab_segs == s1.cs@.len() - s1.a@
+            &&& s1.tail == K::enc(s1.cs@.last()).len()
+            &&& forall|i: int| 0 <= i < slabs.len() ==> bslab_ok::<K>(#[trigger] slabs[i])
+            &&& bslabs_values::<K>(slabs) == counts_values(s1.cs@.take(s1.a@))
+        }),
+{
+    lemma_scan_push::<K>(s0, data, slabs, target, n, x);
+    lemma_scan_bounds::<K>(s0, data, slabs, target);
+}
+
+/// Scan `s0` has read count `x`, in `n` bytes, which filled its slab, and
+/// the slab is cut (`s2`, with slabs `cut`): a scan.
+proof fn lemma_scan_cut<K: CountOps>(
+    s0: Scan, s2: Scan, data: Seq<u8>, slabs: Seq<BSlab>, cut: Seq<BSlab>, target: usize, n: int, x: u64,
+)
+    requires
+        scan_ok::<K>(s0, data, slabs, target), s0.pos < data.len(),
+        0 <= n <= data.len() - s0.pos, data.skip(s0.pos as int).take(n) == K::enc(x),
+        x > 0, s0.len + x <= usize::MAX, s0.slab_segs + 1 >= target,
+        s2.cs@ == s0.cs@.push(x), s2.a@ == s2.cs@.len(),
+        s2.pos == s0.pos + n, s2.run_index == s0.run_index + 1, s2.len == s0.len + x,
+        s2.slab_start == s2.pos, s2.slab_items == 0, s2.slab_segs == 0,
+        forall|i: int| 0 <= i < cut.len() ==> bslab_ok::<K>(#[trigger] cut[i]),
+        bslabs_values::<K>(cut) == counts_values(s2.cs@),
+    ensures scan_ok::<K>(s2, data, cut, target),
+{
+    let c1 = s2.cs@;
+    lemma_scan_push::<K>(s0, data, slabs, target, n, x);
+    lemma_scan_bounds::<K>(s0, data, slabs, target);
+    assert(c1.take(c1.len() as int) =~= c1);
+    assert(c1.skip(c1.len() as int) =~= Seq::<u64>::empty());
+}
+
 /// Read one run (and cut the slab if it reaches its target): its count
 /// and value, or `None` at the end of the input.
 #[inline(always)]
@@ -678,34 +848,36 @@ fn read_seg<K: CountOps>(sc: &mut Scan, data: &[u8], slabs: &mut Vec<BSlab>, tar
         },
         r is Err ==> !bool_valid::<K>(data@),
 {
-    // passed through unchanged, to the cut or back out
-    hide(bslabs_values);
+    // a scan is what its lemmas say of it, and its slabs are passed
+    // through unchanged, to the cut or back out
+    hide(scan_ok);
     hide(bslab_ok);
+    let ghost s0 = *sc;
+    let ghost slabs0 = slabs@;
+    proof {
+        lemma_scan_bounds::<K>(s0, data@, slabs0, target);
+    }
     if sc.pos >= data.len() {
         return Ok(None);
     }
-    let ghost cs = sc.cs@;
     let rest = &data[sc.pos..];
     assert(rest@ == data@.skip(sc.pos as int));
     let (cb, count) = match K::read_count(rest) {
         Some(v) => v,
         None => {
             proof {
-                lemma_none::<K>(data@, cs, sc.pos as int);
+                lemma_scan_none::<K>(s0, data@, slabs0, target);
             }
             return Err(bad_format());
         },
     };
     proof {
-        lemma_next::<K>(data@, cs, sc.pos as int, cb as int, count as u64);
-        K::axiom_enc(count as u64, count as u64, Seq::empty(), Seq::empty());
-        lemma_bytes_push::<K>(cs, count as u64);
+        lemma_scan_count::<K>(s0, data@, slabs0, target, cb as int, count as u64);
     }
-    let ghost c1 = cs.push(count as u64);
     // only the very first run may have count 0 (structural padding)
     if count == 0 && sc.run_index > 0 {
         proof {
-            lemma_no_parse_count::<K>(data@, c1);
+            lemma_scan_bad::<K>(s0, data@, slabs0, target, cb as int, count as u64);
         }
         return Err(bad_format());
     }
@@ -713,8 +885,7 @@ fn read_seg<K: CountOps>(sc: &mut Scan, data: &[u8], slabs: &mut Vec<BSlab>, tar
     // a trailing zero-count run is invalid
     if next_pos >= data.len() && count == 0 {
         proof {
-            assert(data@ =~= data@.take(next_pos as int));
-            lemma_no_parse_trailing::<K>(data@, c1);
+            lemma_scan_bad::<K>(s0, data@, slabs0, target, cb as int, count as u64);
         }
         return Err(bad_format());
     }
@@ -723,21 +894,12 @@ fn read_seg<K: CountOps>(sc: &mut Scan, data: &[u8], slabs: &mut Vec<BSlab>, tar
         Some(l) => l,
         None => {
             proof {
-                lemma_no_parse_len::<K>(data@, c1);
+                lemma_scan_bad::<K>(s0, data@, slabs0, target, cb as int, count as u64);
             }
             return Err(bad_format());
         },
     };
     let value = sc.run_index % 2 == 1;
-    proof {
-        lemma_bytes_len::<K>(c1);
-        let a = sc.a@;
-        assert(c1.skip(a) =~= cs.skip(a).push(count as u64));
-        lemma_bytes_push::<K>(cs.skip(a), count as u64);
-        assert(c1.take(a) =~= cs.take(a));
-        assert(c1 =~= c1.take(a) + c1.skip(a));
-        lemma_concat::<K>(c1.take(a), c1.skip(a));
-    }
     sc.tail = cb as u8;
     sc.pos = next_pos;
     sc.run_index = sc.run_index + 1;
@@ -745,26 +907,19 @@ fn read_seg<K: CountOps>(sc: &mut Scan, data: &[u8], slabs: &mut Vec<BSlab>, tar
     sc.slab_items = sc.slab_items + count;
     sc.slab_segs = sc.slab_segs + 1;
     proof {
-        sc.cs = Ghost(c1);
-        assert forall|i: int| 1 <= i < c1.len() implies #[trigger] c1[i] > 0 by {
-            if i < c1.len() - 1 {
-                assert(c1[i] == cs[i]);
-            }
-        }
+        sc.cs = Ghost(s0.cs@.push(count as u64));
+        lemma_scan_step::<K>(s0, *sc, data@, slabs0, target, cb as int, count as u64);
     }
     // cut after target runs — always even, so the next slab starts on a
     // false run and is a copy of the input's bytes
     if sc.slab_segs >= target {
         proof {
             // the padding run (count 0) comes first, and alone cuts nothing
-            if count == 0 {
-                assert(cs.len() == 0);
-            }
+            lemma_scan_full::<K>(s0, *sc, data@, slabs0, target, cb as int, count as u64);
         }
         cut_slab::<K>(sc, data, slabs);
         proof {
-            assert(c1.take(c1.len() as int) =~= c1);
-            assert(sc.a@ % 2 == 0);
+            lemma_scan_cut::<K>(s0, *sc, data@, slabs0, slabs@, target, cb as int, count as u64);
         }
     }
     Ok(Some((count, value)))
@@ -1855,7 +2010,6 @@ proof fn lemma_merged<K: CountOps>(cm: Seq<u64>, m: Seq<u8>, ca: Seq<u64>, aa: S
 /// joins `b`'s run `y` (b's counts are `pre`, then `y`, then `rc`, whose
 /// bytes are `rest`).
 #[verifier::spinoff_prover]
-#[verifier::rlimit(40)]
 fn merge_join<K: CountOps>(
     a: &mut Vec<u8>, Ghost(start): Ghost<usize>, a_last_start: usize, x: usize, y: usize, rest: &[u8], a_segs: usize, b_segs: usize, b_tail: u8, pre_len: usize,
     Ghost(ca): Ghost<Seq<u64>>, Ghost(cb): Ghost<Seq<u64>>, Ghost(pre): Ghost<Seq<u64>>, Ghost(rc): Ghost<Seq<u64>>, Ghost(bb): Ghost<Seq<u8>>,
@@ -1874,15 +2028,13 @@ fn merge_join<K: CountOps>(
         final(a)@.take(start as int) == old(a)@.take(start as int),
         merged_ok::<K>(final(a)@.skip(start as int), old(a)@.skip(start as int), bb, r),
 {
-    let ghost head = old(a)@.take(start as int);
-    let ghost d = ca.drop_last();
+    hide(merged_ok);
+    hide(bool_parses);
+    hide(counts_tail);
+    hide(counts_bytes);
+    hide(counts_len);
     proof {
-        assert(ca =~= d + seq![x as u64]);
-        lemma_count_le(ca, ca.len() - 1);
-        lemma_count_le(cb, pre.len() as int);
-        assert(cb[pre.len() as int] == y);
-        lemma_values_len(ca);
-        lemma_values_len(cb);
+        lemma_join_fits(ca, cb, pre, rc, x, y);
     }
     truncate(a, a_last_start);
     let n1 = a.len();
@@ -1890,57 +2042,290 @@ fn merge_join<K: CountOps>(
     let merge_bytes = a.len() - n1;
     extend(a, rest);
     let _total = a.len();
-    let ghost m = (x + y) as u64;
-    let ghost cm = d + seq![m] + rc;
     proof {
-        K::axiom_enc(m, m, Seq::empty(), Seq::empty());
-        lemma_merge_values(d, x as u64, y as u64, rc, pre.len() as int);
-        if pre.len() == 1 {
-            assert(cb =~= seq![0u64] + (seq![y as u64] + rc));
-            lemma_vals_at_concat(seq![0u64], seq![y as u64] + rc, 0);
-            lemma_vals_single(0, 0);
-            assert(vals_at(seq![0u64], 0) =~= Seq::<bool>::empty());
-            assert(vals_at(cb, 0) =~= vals_at(seq![y as u64] + rc, 1));
-        } else {
-            assert(cb =~= seq![y as u64] + rc);
-        }
-        lemma_concat::<K>(d + seq![m], rc);
-        lemma_bytes_push::<K>(d, m);
-        assert(d.push(m) =~= d + seq![m]);
-        assert(a@.skip(start as int) =~= counts_bytes::<K>(cm));
-        assert(a@.take(start as int) =~= head);
-        assert(cm.take(ca.len() - 1) =~= ca.take(ca.len() - 1));
-        assert forall|i: int| ca.len() <= i < cm.len() implies #[trigger] cm[i] > 0 by {
-            assert(cm[i] == rc[i - ca.len()]);
-            assert(rc[i - ca.len()] == cb[i - ca.len() + pre.len() + 1]);
-        }
-        if rc.len() > 0 {
-            assert(cm.last() == cb.last());
-        }
-        lemma_merged_ok(cm, ca, cb);
-        lemma_bytes_len::<K>(cm);
-        lemma_bytes_len::<K>(rc);
+        lemma_join::<K>(old(a)@, a@, start, a_last_start, x, y, ca, cb, pre, rc, bb, b_tail);
     }
     let tail = if rest.len() == 0 { merge_bytes as u8 } else { b_tail };
-    let r = (a_segs - 1 + (b_segs - pre_len), tail);
-    proof {
-        if rest.len() > 0 {
-            assert(rc.len() > 0) by {
-                if rc.len() == 0 {
-                    assert(counts_bytes::<K>(rc) =~= Seq::<u8>::empty());
-                }
-            }
-        }
-        lemma_merged::<K>(cm, a@.skip(start as int), ca, old(a)@.skip(start as int), cb, bb, r);
+    (a_segs - 1 + (b_segs - pre_len), tail)
+}
+
+/// The runs `merge_join` joins have a length that fits.
+proof fn lemma_join_fits(ca: Seq<u64>, cb: Seq<u64>, pre: Seq<u64>, rc: Seq<u64>, x: usize, y: usize)
+    requires
+        ca.len() >= 1,
+        ca.last() == x,
+        cb == pre + seq![y as u64] + rc,
+        counts_len(ca) + counts_len(cb) <= usize::MAX,
+    ensures x + y <= usize::MAX,
+{
+    lemma_count_le(ca, ca.len() - 1);
+    lemma_count_le(cb, pre.len() as int);
+    assert(cb[pre.len() as int] == y);
+}
+
+/// The values of `merge_join`'s counts: `a`'s (`d`, then `x`), then
+/// `b`'s (`pre`, then `y`, then `rc`).
+proof fn lemma_join_values(d: Seq<u64>, x: u64, y: u64, pre: Seq<u64>, rc: Seq<u64>)
+    requires
+        x + y <= u64::MAX,
+        pre.len() <= 1,
+        pre.len() == 1 ==> pre[0] == 0,
+        d.len() % 2 == pre.len() % 2,
+    ensures
+        vals_at(d + seq![(x + y) as u64] + rc, 0) == vals_at(d + seq![x], 0) + vals_at(pre + seq![y] + rc, 0),
+{
+    lemma_merge_values(d, x, y, rc, pre.len() as int);
+    if pre.len() == 1 {
+        assert(pre =~= seq![0u64]);
+        assert(pre + seq![y] + rc =~= seq![0u64] + (seq![y] + rc));
+        lemma_vals_at_concat(seq![0u64], seq![y] + rc, 0);
+        lemma_vals_single(0, 0);
+        assert(vals_at(seq![0u64], 0) =~= Seq::<bool>::empty());
+        assert(vals_at(pre + seq![y] + rc, 0) =~= vals_at(seq![y] + rc, 1));
+    } else {
+        assert(pre + seq![y] + rc =~= seq![y] + rc);
     }
-    r
+}
+
+/// `merge_join`'s counts are canonical; how many they are, and their
+/// tail.
+proof fn lemma_join_counts<K: CountOps>(ca: Seq<u64>, cb: Seq<u64>, pre: Seq<u64>, rc: Seq<u64>, x: u64, y: u64)
+    requires
+        counts_ok(ca),
+        counts_ok(cb),
+        ca.len() >= 1,
+        ca.last() == x,
+        cb == pre + seq![y] + rc,
+        pre.len() <= 1,
+        pre.len() == 0 ==> y > 0,
+        x + y <= u64::MAX,
+    ensures
+        ({
+            let cm = ca.drop_last() + seq![(x + y) as u64] + rc;
+            &&& counts_ok(cm)
+            &&& cb.len() >= pre.len()
+            &&& cm.len() == ca.len() - 1 + (cb.len() - pre.len())
+            &&& counts_tail::<K>(cm) == if rc.len() == 0 {
+                K::enc((x + y) as u64).len()
+            } else {
+                counts_tail::<K>(cb)
+            }
+        }),
+{
+    let m = (x + y) as u64;
+    let cm = ca.drop_last() + seq![m] + rc;
+    assert(cm.take(ca.len() - 1) =~= ca.take(ca.len() - 1));
+    assert(cm[ca.len() - 1] == m);
+    assert forall|i: int| ca.len() <= i < cm.len() implies #[trigger] cm[i] > 0 by {
+        assert(cm[i] == rc[i - ca.len()]);
+        assert(rc[i - ca.len()] == cb[i - ca.len() + pre.len() + 1]);
+    }
+    if rc.len() > 0 {
+        assert(cm.last() == rc.last());
+        assert(cb.last() == rc.last());
+    } else {
+        assert(cm.last() == m);
+        assert(cb.last() == y);
+    }
+    lemma_merged_ok(cm, ca, cb);
+}
+
+/// What `merge_join` builds: `a1` is `a0` cut where its last run starts,
+/// then the joined count, then `b`'s counts after its joined run.
+proof fn lemma_join<K: CountOps>(a0: Seq<u8>, a1: Seq<u8>, start: usize, a_last_start: usize, x: usize, y: usize, ca: Seq<u64>,
+    cb: Seq<u64>, pre: Seq<u64>, rc: Seq<u64>, bb: Seq<u8>, b_tail: u8)
+    requires
+        start <= a_last_start <= a0.len(),
+        bool_parses::<K>(ca, a0.skip(start as int)),
+        ca.len() >= 1,
+        ca.last() == x,
+        a0.take(a_last_start as int) == a0.take(start as int) + counts_bytes::<K>(ca.drop_last()),
+        bool_parses::<K>(cb, bb),
+        cb == pre + seq![y as u64] + rc,
+        pre.len() <= 1,
+        pre.len() == 1 ==> pre[0] == 0,
+        pre.len() == 0 ==> y > 0,
+        (ca.len() - 1) % 2 == pre.len() % 2,
+        b_tail == counts_tail::<K>(cb),
+        counts_len(ca) + counts_len(cb) <= usize::MAX,
+        x + y <= usize::MAX,
+        a1 == a0.take(a_last_start as int) + K::enc((x + y) as u64) + counts_bytes::<K>(rc),
+        a1.len() <= usize::MAX,
+    ensures
+        start <= a1.len(),
+        a1.take(start as int) == a0.take(start as int),
+        0 < K::enc((x + y) as u64).len() <= 10,
+        (counts_bytes::<K>(rc).len() == 0) == (rc.len() == 0),
+        cb.len() >= pre.len(),
+        ca.len() - 1 + (cb.len() - pre.len()) <= usize::MAX,
+        merged_ok::<K>(
+            a1.skip(start as int),
+            a0.skip(start as int),
+            bb,
+            (
+                (ca.len() - 1 + (cb.len() - pre.len())) as usize,
+                if rc.len() == 0 {
+                    K::enc((x + y) as u64).len() as u8
+                } else {
+                    b_tail
+                },
+            ),
+        ),
+{
+    let head = a0.take(start as int);
+    let d = ca.drop_last();
+    let m = (x + y) as u64;
+    let cm = d + seq![m] + rc;
+    K::axiom_enc(m, m, Seq::empty(), Seq::empty());
+    assert(ca =~= d + seq![x as u64]);
+    lemma_join_values(d, x as u64, y as u64, pre, rc);
+    lemma_join_counts::<K>(ca, cb, pre, rc, x as u64, y as u64);
+    lemma_concat::<K>(d + seq![m], rc);
+    lemma_bytes_push::<K>(d, m);
+    assert(d.push(m) =~= d + seq![m]);
+    assert(a1 =~= head + counts_bytes::<K>(cm));
+    assert(a1.skip(start as int) =~= counts_bytes::<K>(cm));
+    assert(a1.take(start as int) =~= head);
+    lemma_bytes_len::<K>(cm);
+    lemma_bytes_len::<K>(rc);
+    if rc.len() == 0 {
+        assert(counts_bytes::<K>(rc) =~= Seq::<u8>::empty());
+    }
+    let r = (
+        (ca.len() - 1 + (cb.len() - pre.len())) as usize,
+        if rc.len() == 0 {
+            K::enc(m).len() as u8
+        } else {
+            b_tail
+        },
+    );
+    lemma_merged::<K>(cm, a1.skip(start as int), ca, a0.skip(start as int), cb, bb, r);
+}
+
+/// Merging the empty slab onto a slab leaves the slab.
+proof fn lemma_merge_none<K: CountOps>(aa: Seq<u8>, bb: Seq<u8>, r: (usize, u8))
+    requires
+        bool_valid::<K>(aa), bool_valid::<K>(bb), bb.len() == 0,
+        r.0 == bool_counts::<K>(aa).len(), r.1 == counts_tail::<K>(bool_counts::<K>(aa)),
+    ensures merged_ok::<K>(aa, aa, bb, r),
+{
+    let ca = bool_counts::<K>(aa);
+    let cb = bool_counts::<K>(bb);
+    if cb.len() > 0 {
+        lemma_bytes_len::<K>(cb);
+    }
+    assert(vals_at(cb, 0) =~= Seq::<bool>::empty());
+    assert(vals_at(ca, 0) + vals_at(cb, 0) =~= vals_at(ca, 0));
+    lemma_merged::<K>(ca, aa, ca, aa, cb, bb, r);
+}
+
+/// Merging slab `bb` onto the empty slab gives `bb`: `a1` is `a0`, whose
+/// slab from `start` is empty, then `bb`.
+proof fn lemma_merge_all<K: CountOps>(a0: Seq<u8>, start: int, bb: Seq<u8>, a1: Seq<u8>, r: (usize, u8))
+    requires
+        0 <= start <= a0.len(), bool_valid::<K>(a0.skip(start)), bool_counts::<K>(a0.skip(start)).len() == 0,
+        bool_valid::<K>(bb), a1 == a0 + bb,
+        r.0 == bool_counts::<K>(bb).len(), r.1 == counts_tail::<K>(bool_counts::<K>(bb)),
+    ensures
+        a1.take(start) == a0.take(start),
+        merged_ok::<K>(a1.skip(start), a0.skip(start), bb, r),
+{
+    let aa = a0.skip(start);
+    let ca = bool_counts::<K>(aa);
+    let cb = bool_counts::<K>(bb);
+    assert(ca =~= Seq::<u64>::empty());
+    assert(counts_bytes::<K>(ca) =~= Seq::<u8>::empty());
+    assert(a1.skip(start) =~= bb);
+    assert(a1.take(start) =~= a0.take(start));
+    assert(vals_at(ca, 0) =~= Seq::<bool>::empty());
+    assert(vals_at(ca, 0) + vals_at(cb, 0) =~= vals_at(cb, 0));
+    lemma_merged::<K>(cb, bb, ca, aa, cb, bb, r);
+}
+
+/// Where a merge of nonempty slabs reads its counts: the last of `a0`'s
+/// slab from `start`, by its tail record, and the first of `bb`.
+proof fn lemma_merge_ends<K: CountOps>(a0: Seq<u8>, start: int, a_tail: int, bb: Seq<u8>)
+    requires
+        0 <= start <= a0.len(), bool_valid::<K>(a0.skip(start)), bool_counts::<K>(a0.skip(start)).len() > 0,
+        a_tail == counts_tail::<K>(bool_counts::<K>(a0.skip(start))),
+        bool_valid::<K>(bb), bb.len() > 0,
+    ensures
+        ({
+            let ca = bool_counts::<K>(a0.skip(start));
+            let cb = bool_counts::<K>(bb);
+            let at = a0.len() - a_tail;
+            &&& bool_parses::<K>(ca, a0.skip(start)) && bool_parses::<K>(cb, bb) && counts_bytes::<K>(cb) == bb
+            &&& start <= at < a0.len()
+            &&& a0.take(at) == a0.take(start) + counts_bytes::<K>(ca.drop_last())
+            &&& K::enc(ca.last()).is_prefix_of(a0.skip(at)) && ca.last() <= usize::MAX
+            &&& cb.len() > 0 && (cb[0] == 0 ==> cb.len() >= 2)
+            &&& K::enc(cb[0]).is_prefix_of(bb) && cb[0] <= usize::MAX
+            &&& bb.skip(K::enc(cb[0]).len() as int) == counts_bytes::<K>(cb.skip(1))
+            &&& cb == Seq::<u64>::empty() + seq![cb[0]] + cb.skip(1)
+        }),
+{
+    let aa = a0.skip(start);
+    let ca = bool_counts::<K>(aa);
+    let cb = bool_counts::<K>(bb);
+    let d = ca.drop_last();
+    let x = ca.last();
+    let at = a0.len() - a_tail;
+    assert(a0 =~= a0.take(start) + aa);
+    assert(ca =~= d.push(x));
+    lemma_bytes_push::<K>(d, x);
+    K::axiom_enc(x, x, Seq::empty(), Seq::empty());
+    lemma_count_le(ca, ca.len() - 1);
+    assert(a0.take(at) =~= a0.take(start) + counts_bytes::<K>(d));
+    assert(a0.skip(at) =~= K::enc(x));
+    if cb.len() == 0 {
+        assert(counts_bytes::<K>(cb) =~= Seq::<u8>::empty());
+    }
+    lemma_first::<K>(cb);
+    lemma_count_le(cb, 0);
+    assert(bb.skip(K::enc(cb[0]).len() as int) =~= counts_bytes::<K>(cb.skip(1)));
+    assert(cb =~= Seq::<u64>::empty() + seq![cb[0]] + cb.skip(1));
+}
+
+/// Where a merge reads the count after the zero-count pad that `bb`
+/// begins with.
+proof fn lemma_merge_pad<K: CountOps>(bb: Seq<u8>)
+    requires bool_valid::<K>(bb), bool_counts::<K>(bb).len() >= 2,
+    ensures
+        ({
+            let cb = bool_counts::<K>(bb);
+            let rest = bb.skip(K::enc(cb[0]).len() as int);
+            &&& K::enc(cb[1]).is_prefix_of(rest) && cb[1] <= usize::MAX
+            &&& rest.skip(K::enc(cb[1]).len() as int) == counts_bytes::<K>(cb.skip(2))
+            &&& cb == seq![cb[0]] + seq![cb[1]] + cb.skip(2)
+        }),
+{
+    let cb = bool_counts::<K>(bb);
+    let rest = bb.skip(K::enc(cb[0]).len() as int);
+    lemma_first::<K>(cb);
+    assert(rest =~= counts_bytes::<K>(cb.skip(1)));
+    lemma_first::<K>(cb.skip(1));
+    assert(cb.skip(1).skip(1) =~= cb.skip(2));
+    lemma_count_le(cb, 1);
+    assert(rest.skip(K::enc(cb[1]).len() as int) =~= counts_bytes::<K>(cb.skip(2)));
+    assert(cb =~= seq![cb[0]] + seq![cb[1]] + cb.skip(2));
+}
+
+/// The count read, in `n` bytes, from bytes that begin with the encoding
+/// of `x` is `x`.
+proof fn lemma_read_is<K: CountOps>(s: Seq<u8>, n: int, c: u64, x: u64)
+    requires 0 <= n <= s.len(), s.take(n) == K::enc(c), K::enc(x).is_prefix_of(s),
+    ensures c == x, n == K::enc(x).len(),
+{
+    let m = K::enc(x).len() as int;
+    assert(s =~= s.take(n) + s.skip(n));
+    assert(s =~= K::enc(x) + s.skip(m));
+    K::axiom_enc(c, x, s.skip(n), s.skip(m));
 }
 
 /// Merge the bool slab `b` (its counts, segments and tail) onto the end
 /// of the one in `a` from `start` (the bytes before are others').
 /// Returns the merged slab's segments and tail.
 #[verifier::spinoff_prover]
-#[verifier::rlimit(60)]
 #[allow(unused_variables)] // `start` is for the spec: the tail record finds a's last run
 pub(crate) fn merge<K: CountOps>(a: &mut Vec<u8>, start: usize, a_tail: u8, a_segs: usize, b: &[u8], b_segs: usize, b_tail: u8) -> (r: (usize, u8))
     requires
@@ -1961,98 +2346,47 @@ pub(crate) fn merge<K: CountOps>(a: &mut Vec<u8>, start: usize, a_tail: u8, a_se
     let ghost aa = a0.skip(start as int);
     let ghost ca = bool_counts::<K>(aa);
     let ghost cb = bool_counts::<K>(b@);
-    let ghost head = a0.take(start as int);
-    proof {
-        lemma_counts::<K>(ca, aa);
-        lemma_counts::<K>(cb, b@);
-        assert(a0 =~= head + aa);
-    }
     if b.len() == 0 {
         proof {
-            assert(cb.len() == 0) by {
-                if cb.len() > 0 {
-                    lemma_bytes_len::<K>(cb);
-                }
-            }
-            lemma_merged::<K>(ca, aa, ca, aa, cb, b@, (a_segs, a_tail));
-            assert(vals_at(cb, 0) =~= Seq::<bool>::empty());
-            assert(vals_at(ca, 0) + vals_at(cb, 0) =~= vals_at(ca, 0));
-            lemma_merged::<K>(ca, aa, ca, aa, cb, b@, (a_segs, a_tail));
+            lemma_merge_none::<K>(aa, b@, (a_segs, a_tail));
         }
         return (a_segs, a_tail);
-    }
-    proof {
-        if cb.len() == 0 {
-            assert(counts_bytes::<K>(cb) =~= Seq::<u8>::empty());
-        }
-        lemma_first::<K>(cb);
-        lemma_count_le(cb, 0);
-        lemma_values_len(ca);
-        lemma_values_len(cb);
     }
     if a_segs == 0 {
         // nothing to merge with: the slab is `b`
         extend(a, b);
         proof {
-            assert(ca =~= Seq::<u64>::empty());
-            assert(counts_bytes::<K>(ca) =~= Seq::<u8>::empty());
-            assert(a@.skip(start as int) =~= b@);
-            assert(a@.take(start as int) =~= head);
-            assert(vals_at(ca, 0) =~= Seq::<bool>::empty());
-            assert(vals_at(ca, 0) + vals_at(cb, 0) =~= vals_at(cb, 0));
-            lemma_merged::<K>(cb, b@, ca, aa, cb, b@, (b_segs, b_tail));
+            lemma_merge_all::<K>(a0, start as int, b@, a@, (b_segs, b_tail));
         }
         return (b_segs, b_tail);
     }
     // a's last run, found by its tail record
-    let ghost d = ca.drop_last();
-    let ghost x = ca.last();
     proof {
-        assert(ca =~= d.push(x));
-        lemma_bytes_push::<K>(d, x);
-        K::axiom_enc(x, x, Seq::empty(), Seq::empty());
-        lemma_count_le(ca, ca.len() - 1);
-        assert(a0.take(a0.len() - a_tail) =~= head + counts_bytes::<K>(d));
+        lemma_merge_ends::<K>(a0, start as int, a_tail as int, b@);
     }
     let a_last_start = a.len() - a_tail as usize;
     let tail_slice = slice_from(a, a_last_start);
-    proof {
-        assert(tail_slice@ =~= K::enc(x));
-        assert(K::enc(x).is_prefix_of(tail_slice@));
-    }
     let (_n, a_last_count) = match K::read_count(tail_slice) {
         Some(v) => v,
         None => (0, 0),
     };
     proof {
-        K::axiom_enc(a_last_count as u64, x, tail_slice@.skip(_n as int), Seq::empty());
-        assert(tail_slice@ =~= tail_slice@.take(_n as int) + tail_slice@.skip(_n as int));
+        lemma_read_is::<K>(tail_slice@, _n as int, a_last_count as u64, ca.last());
     }
     // runs alternate false/true: an even run count ends on true
     let a_last_value = a_segs % 2 == 0;
     // b's first run (always false)
-    proof {
-        assert(K::enc(cb[0]).is_prefix_of(b@));
-    }
     let (b_first_cb, b_first_count) = match K::read_count(b) {
         Some(v) => v,
         None => (0, 0),
     };
     proof {
-        K::axiom_enc(b_first_count as u64, cb[0], b@.skip(b_first_cb as int), counts_bytes::<K>(cb.skip(1)));
-        assert(b@ =~= b@.take(b_first_cb as int) + b@.skip(b_first_cb as int));
+        lemma_read_is::<K>(b@, b_first_cb as int, b_first_count as u64, cb[0]);
     }
     let b_rest = slice_from(b, b_first_cb);
-    proof {
-        assert(b_rest@ =~= counts_bytes::<K>(cb.skip(1)));
-        assert(seq![cb[0]] + cb.skip(1) =~= cb);
-    }
     if !a_last_value {
         if b_first_count > 0 {
             // a ends false, b starts false: one run of the two
-            proof {
-                assert(Seq::<u64>::empty() + seq![cb[0]] + cb.skip(1) =~= cb);
-            }
             let ghost pre0 = Seq::<u64>::empty();
             let ghost rc1 = cb.skip(1);
             let ghost bb = b@;
@@ -2067,34 +2401,21 @@ pub(crate) fn merge<K: CountOps>(a: &mut Vec<u8>, start: usize, a_tail: u8, a_se
         }
     } else if b_first_count > 0 {
         // a ends true, b starts false: b follows as is
-        proof {
-            assert(cb.skip(0) =~= cb);
-        }
         let ghost bb = b@;
         merge_append::<K>(a, Ghost(start), b, a_segs, b_segs, Ghost(b_segs), b_tail, Ghost(ca), Ghost(cb), Ghost(cb), Ghost(bb))
     } else {
         // b starts with its zero-count pad then true: that run joins a's
         proof {
-            assert(cb.len() >= 2);
-            lemma_first::<K>(cb.skip(1));
-            assert(cb.skip(1)[0] == cb[1]);
-            assert(cb.skip(1).skip(1) =~= cb.skip(2));
-            lemma_count_le(cb, 1);
-            assert(K::enc(cb[1]).is_prefix_of(b_rest@));
+            lemma_merge_pad::<K>(b@);
         }
         let (cb2, count2) = match K::read_count(b_rest) {
             Some(v) => v,
             None => (0, 0),
         };
         proof {
-            K::axiom_enc(count2 as u64, cb[1], b_rest@.skip(cb2 as int), counts_bytes::<K>(cb.skip(2)));
-            assert(b_rest@ =~= b_rest@.take(cb2 as int) + b_rest@.skip(cb2 as int));
-            assert(seq![cb[0]] + seq![cb[1]] + cb.skip(2) =~= cb);
+            lemma_read_is::<K>(b_rest@, cb2 as int, count2 as u64, cb[1]);
         }
         let b_rest2 = slice_from(b_rest, cb2);
-        proof {
-            assert(b_rest2@ =~= counts_bytes::<K>(cb.skip(2)));
-        }
         let ghost pre1 = seq![cb[0]];
         let ghost rc2 = cb.skip(2);
         let ghost bb = b@;

@@ -210,11 +210,106 @@ fn insert_range<E: Slabs, R: RangeFeed<E>>(
     }
 }
 
+/// Splice `k` of a normalized list lies inside both columns, and starts
+/// in each no earlier than the splices before it end.
+pub(crate) proof fn lemma_splice_at(sps: Seq<Splice>, src_len: int, dst_len: int, k: int)
+    requires
+        normal(sps, src_len, dst_len),
+        0 <= k < sps.len(),
+    ensures
+        0 <= end_of(sps.take(k)) <= sps[k].pos,
+        sps[k].pos + sps[k].delete <= dst_len,
+        end_of(sps.take(k + 1)) == sps[k].pos + sps[k].delete,
+        sps[k].range.start <= sps[k].range.end <= src_len,
+        k > 0 ==> sps[k - 1].range.end <= sps[k].range.start,
+{
+    let sp = sps[k];
+    assert(sps.take(k + 1).last() == sp);
+    assert(sp.range.start <= sp.range.end <= src_len);
+    if k > 0 {
+        assert(sps.take(k).last() == sps[k - 1]);
+        assert(sps[k - 1].range.end <= sp.range.start);
+    }
+}
+
+/// What the first `k + 1` splices produce: what the first `k` do, then
+/// the destination's items up to splice `k`, then the range it copies.
+pub(crate) proof fn lemma_produced_next<V>(dst: Seq<V>, src: Seq<V>, sps: Seq<Splice>, k: int)
+    requires
+        0 <= k < sps.len(),
+        sps[k].range.start <= sps[k].range.end <= src.len(),
+    ensures
+        produced(dst, src, sps.take(k + 1)) == produced(dst, src, sps.take(k)) + dst.subrange(
+            end_of(sps.take(k)),
+            sps[k].pos as int,
+        ) + src.subrange(sps[k].range.start as int, sps[k].range.end as int),
+{
+    let t = sps.take(k + 1);
+    assert(t.drop_last() =~= sps.take(k));
+    assert(t.last() == sps[k]);
+    assert(copied(src, sps[k]) =~= src.subrange(sps[k].range.start as int, sps[k].range.end as int));
+}
+
+/// A column's item count is the length of its values.
+proof fn lemma_col_len<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>>(
+    s: Seq<Slab<E::Tail>>,
+    ix: I,
+    total_len: usize,
+    max_segments: usize,
+)
+    requires
+        col_ok::<E, W, I, G>(s, ix, total_len, max_segments),
+    ensures
+        vals_of::<E>(s).len() == total_len,
+{
+    lemma_vals_total::<E>(s);
+}
+
+/// What an edit needs of a cursor in a column: the cursor stands in
+/// well-formed slabs, and the original items from it on are the ones it
+/// has left.
+proof fn lemma_cur_left<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>>(
+    cur: Cursor<E>,
+    s: Seq<Slab<E::Tail>>,
+    ix: I,
+    total_len: usize,
+    max_segments: usize,
+)
+    requires
+        cur.ok::<W, I, G>(s, ix, total_len, max_segments),
+    ensures
+        cur.wf(s),
+        all_ok::<E>(s),
+        max_segments >= 2,
+        cur.orig + cur.remaining == cur.o@.len(),
+{
+}
+
+/// A column whose cursor has no rebuild open holds what the cursor
+/// produced, then the original items from the cursor on; and it has
+/// room for three more items.
+proof fn lemma_cur_closed<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>>(
+    cur: Cursor<E>,
+    s: Seq<Slab<E::Tail>>,
+    ix: I,
+    total_len: usize,
+    max_segments: usize,
+)
+    requires
+        cur.ok::<W, I, G>(s, ix, total_len, max_segments),
+        !cur.dirty,
+    ensures
+        vals_of::<E>(s) == cur.p@ + cur.o@.subrange(cur.orig as int, cur.o@.len() as int),
+        total_len + 3 <= usize::MAX,
+{
+    cur.lemma_clean(s);
+    lemma_vals_total::<E>(s);
+}
+
 /// `copy_ranges`, directly: one cursor over the destination applies the
 /// normalized splices `sps` in turn, each range's items from `feed`. The
 /// column becomes `applied(dst, src, sps)`.
 #[verifier::spinoff_prover]
-#[verifier::rlimit(30)]
 #[inline(always)]
 pub(crate) fn copy_direct<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>, F: Visitor<E>, R: RangeFeed<E>>(
     slabs: &mut Vec<Slab<E::Tail>>,
@@ -237,13 +332,21 @@ pub(crate) fn copy_direct<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>, F: Visito
         *final(total_len) + 3 <= usize::MAX,
         vals_of::<E>(final(slabs)@) == applied(vals_of::<E>(old(slabs)@), old(feed).src(), sps@),
 {
+    hide(col_ok);
+    hide(Cursor::wf);
+    hide(vals_of);
+    hide(all_ok);
+    hide(normal);
+    hide(produced);
     let ghost dst = vals_of::<E>(slabs@);
     let ghost src = feed.src();
     proof {
-        lemma_vals_total::<E>(slabs@);
+        lemma_col_len::<E, W, I, G>(slabs@, *index, *total_len, max_segments);
         assert(sps@.take(0) =~= Seq::<Splice>::empty());
         assert(dst.take(0) =~= Seq::<E::V>::empty());
-        assert(produced(dst, src, Seq::<Splice>::empty()) =~= Seq::<E::V>::empty());
+        assert(produced(dst, src, Seq::<Splice>::empty()) =~= Seq::<E::V>::empty()) by {
+            reveal(produced);
+        }
     }
     let mut cur = Cursor::<E>::new::<W, I, G>(slabs, index, *total_len, Ghost(max_segments), 0);
     let mut k: usize = 0;
@@ -266,35 +369,28 @@ pub(crate) fn copy_direct<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>, F: Visito
         let del = sps[k].delete;
         let start = sps[k].range.start;
         let end = sps[k].range.end;
-        let ghost (sp, p0, orig0) = (sps@[k as int], cur.p@, cur.orig as int);
         proof {
-            assert(sps@.take(k + 1).drop_last() =~= sps@.take(k as int));
-            assert(sps@.take(k + 1).last() == sp);
-            assert(sp.pos + sp.delete <= dst.len());
-            if k > 0 {
-                assert(sps@.take(k as int).last() == sps@[k - 1]);
-                assert(sps@[k - 1].pos + sps@[k - 1].delete <= sp.pos);
-                assert(sps@[k - 1].range.end <= sp.range.start);
-            }
-            assert(sp.range.start <= sp.range.end <= src.len());
+            lemma_splice_at(sps@, src.len() as int, dst.len() as int, k as int);
+            lemma_produced_next(dst, src, sps@, k as int);
+            lemma_cur_left::<E, W, I, G>(cur, slabs@, *index, *total_len, max_segments);
         }
         let to = pos - cur.orig;
         cur.advance_with::<W, I, G, F>(slabs, index, total_len, max_segments, counter, to, f);
+        proof {
+            lemma_cur_left::<E, W, I, G>(cur, slabs@, *index, *total_len, max_segments);
+        }
         cur.delete_with::<W, I, G, F>(slabs, index, total_len, max_segments, counter, del, f);
         feed.shift(start..end);
-        insert_range(&mut cur, slabs, max_segments, feed);
         proof {
-            assert(copied(src, sp) =~= src.subrange(start as int, end as int));
-            assert(cur.p@ =~= produced(dst, src, sps@.take(k + 1)));
+            lemma_cur_left::<E, W, I, G>(cur, slabs@, *index, *total_len, max_segments);
         }
+        insert_range(&mut cur, slabs, max_segments, feed);
         k += 1;
     }
     cur.close::<W, I, G>(slabs, index, total_len, max_segments, counter);
     proof {
-        cur.lemma_clean(slabs@);
-        lemma_vals_total::<E>(slabs@);
+        lemma_cur_closed::<E, W, I, G>(cur, slabs@, *index, *total_len, max_segments);
         assert(sps@.take(sps@.len() as int) =~= sps@);
-        assert(dst.skip(cur.orig as int) =~= dst.subrange(end_of(sps@), dst.len() as int));
     }
 }
 
@@ -376,7 +472,6 @@ fn cut_gaps<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>, F: Visitor<E>, X: Inser
 /// the column kept of the source: the column becomes `applied(dst, src,
 /// sps)`.
 #[verifier::spinoff_prover]
-#[verifier::rlimit(40)]
 #[inline(always)]
 fn put_gaps<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>, F: Visitor<E>, R: RangeFeed<E>>(
     slabs: &mut Vec<Slab<E::Tail>>,
@@ -404,16 +499,28 @@ fn put_gaps<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>, F: Visitor<E>, R: Range
         vals_of::<E>(final(slabs)@) == applied(old(feed).src(), src, sps@),
 {
     hide(Gaps::inv);
+    hide(col_ok);
+    hide(Cursor::wf);
+    hide(vals_of);
+    hide(all_ok);
+    hide(normal);
+    hide(produced);
+    hide(kept);
     let ghost dst = feed.src();
     let ghost k = kept(src, sps@);
     proof {
-        lemma_vals_total::<E>(slabs@);
+        lemma_col_len::<E, W, I, G>(slabs@, *index, *total_len, max_segments);
     }
     let mut gaps = Gaps::<E::V>::new(sps, dst_len, Ghost(dst), Ghost(src));
     let mut cur = Cursor::<E>::new::<W, I, G>(slabs, index, *total_len, Ghost(max_segments), 0);
     proof {
         assert(k.take(0) =~= Seq::<E::V>::empty());
-        assert(produced(k, dst, Seq::<Splice>::empty()) =~= Seq::<E::V>::empty());
+        assert(produced(k, dst, gaps.gaps@) =~= Seq::<E::V>::empty()) by {
+            reveal(produced);
+        }
+        assert(normal(gaps.gaps@, dst.len() as int, k.len() as int)) by {
+            reveal(normal);
+        }
     }
     loop
         invariant
@@ -452,22 +559,24 @@ fn put_gaps<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>, F: Visitor<E>, R: Range
                     assert(gaps.src@ == src);
                     assert(gaps.sps@ == sps@);
                     assert(normal(gs, dst.len() as int, k.len() as int));
-                    assert(gs.drop_last() =~= gaps0);
+                    assert(gs.take(gs.len() - 1) =~= gaps0);
+                    assert(gs.take(gs.len() as int) =~= gs);
                     assert(gs[gs.len() - 1] == sp);
-                    assert(sp.pos + sp.delete <= k.len());
                     if gaps0.len() > 0 {
                         assert(gs[gs.len() - 2] == gaps0.last());
-                        assert(gs[gs.len() - 2].pos + gs[gs.len() - 2].delete <= sp.pos);
-                        assert(gs[gs.len() - 2].range.end <= sp.range.start);
                     }
-                    assert(sp.range.start <= sp.range.end <= dst.len());
+                    lemma_splice_at(gs, dst.len() as int, k.len() as int, gs.len() - 1);
+                    lemma_produced_next(k, dst, gs, gs.len() - 1);
+                    lemma_cur_left::<E, W, I, G>(cur, slabs@, *index, *total_len, max_segments);
                 }
                 let to = at - cur.orig;
                 cur.advance_with::<W, I, G, F>(slabs, index, total_len, max_segments, counter, to, f);
                 feed.shift(gap);
+                proof {
+                    lemma_cur_left::<E, W, I, G>(cur, slabs@, *index, *total_len, max_segments);
+                }
                 insert_range(&mut cur, slabs, max_segments, feed);
                 proof {
-                    assert(copied(dst, sp) =~= dst.subrange(start as int, end as int));
                     assert(cur.p@ =~= produced(k, dst, gs));
                 }
             },
@@ -475,9 +584,7 @@ fn put_gaps<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>, F: Visitor<E>, R: Range
     }
     cur.close::<W, I, G>(slabs, index, total_len, max_segments, counter);
     proof {
-        cur.lemma_clean(slabs@);
-        lemma_vals_total::<E>(slabs@);
-        assert(k.skip(cur.orig as int) =~= k.subrange(end_of(gaps.gaps@), k.len() as int));
+        lemma_cur_closed::<E, W, I, G>(cur, slabs@, *index, *total_len, max_segments);
     }
 }
 
@@ -562,14 +669,23 @@ impl<'a, E, W, I: IndexOps<W>, X> RangeFeed<E> for SrcFeed<'a, E, W, I, X> where
 
     #[inline(always)]
     fn shift(&mut self, range: Range<usize>) {
+        hide(ICore::wf);
+        hide(ICore::out);
+        hide(all_ok);
+        hide(vals_of);
+        hide(iter_vals_of);
+        hide(sum);
         let ghost s = self.slabs@;
         let ghost v = iter_vals_of::<X>(s);
         proof {
             lemma_vals_own::<E, X>(s);
+            assert(v.len() == vals_of::<E>(s).len());
         }
         self.core.set_max::<X>(self.slabs, range.end);
         proof {
-            assert(self.core.out::<X>(s) =~= v.subrange(self.core.pos as int, range.end as int));
+            assert(self.core.out::<X>(s) =~= v.subrange(self.core.pos as int, range.end as int)) by {
+                reveal(ICore::out);
+            }
         }
         if range.start > self.core.pos {
             let index = self.index;

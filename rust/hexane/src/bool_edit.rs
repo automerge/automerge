@@ -232,22 +232,15 @@ impl BWriter {
             final(self).overflowed == old(self).overflowed, final(self).target == old(self).target,
             final(self).standing == old(self).standing, final(self).max_segments == old(self).max_segments,
     {
+        hide(BWriter::inv_w);
+        hide(BWriter::vals);
         if self.cur_count > 0 {
-            let ghost c0 = self.chunk();
             let ghost x = self.cur_count as u64;
             let n0 = self.buf.len();
             K::put_count(self.cur_count, &mut self.buf);
             let n1 = self.buf.len();
             proof {
-                K::axiom_enc(x, x, Seq::empty(), Seq::empty());
-                lemma_bytes_push::<K>(self.cb@, x);
-                lemma_vals_push(c0, x);
-                lemma_vals_at_zero(self.cb@);
-                lemma_values_len(self.cb@);
-                lemma_bytes_len::<K>(self.cb@.push(x));
-                lemma_vals_len(c0, 0);
-                lemma_concat::<K>(if self.overflowed { Seq::empty() } else { self.base@ }, self.cb@);
-                assert(c0 == (if self.overflowed { Seq::<u64>::empty() } else { self.base@ }) + self.cb@);
+                lemma_flush_fits::<K>(*old(self));
             }
             self.tail_byte = (n1 - n0) as u8;
             self.emitted = self.emitted + self.cur_count;
@@ -256,16 +249,7 @@ impl BWriter {
             self.cur_count = 0;
             proof {
                 self.cb = Ghost(self.cb@.push(x));
-                assert(self.chunk() =~= c0.push(x));
-                assert(run_of(0, self.cur_value) =~= Seq::<bool>::empty());
-                assert(self.vals() =~= old(self).vals());
-                assert(counts_pre(self.chunk())) by {
-                    assert forall|i: int| 1 <= i < self.chunk().len() implies #[trigger] self.chunk()[i] > 0 by {
-                        if i < c0.len() {
-                            assert(self.chunk()[i] == c0[i]);
-                        }
-                    }
-                }
+                lemma_flush_run::<K>(*old(self), *self);
             }
         }
     }
@@ -388,18 +372,23 @@ impl BWriter {
             n > 0 ==> final(self).cur_value == value && final(self).cur_count > 0,
             n == 0 ==> *final(self) == *old(self),
     {
+        hide(BWriter::inv_w);
+        hide(BWriter::vals);
         if n == 0 {
-            assert(old(self).vals() + run_of(0, value) =~= old(self).vals());
+            proof {
+                lemma_run_none(old(self).vals(), value);
+            }
             return;
         }
         if value == self.cur_value {
-            self.cur_count = self.cur_count + n;
             proof {
-                assert(run_of(old(self).cur_count as nat, value) + run_of(n as nat, value)
-                    =~= run_of(self.cur_count as nat, value));
-                assert(self.vals() =~= old(self).vals() + run_of(n as nat, value));
+                lemma_push_same::<K>(*old(self), n);
             }
+            self.cur_count = self.cur_count + n;
             return;
+        }
+        proof {
+            lemma_pending::<K>(*old(self));
         }
         if self.cur_count == 0 && self.segments == 0 && !self.overflowed {
             // the rebuild starts the slab and its first run is true, so
@@ -409,38 +398,201 @@ impl BWriter {
             let n1 = self.buf.len();
             proof {
                 K::axiom_enc(0, 0, Seq::empty(), Seq::empty());
-                lemma_bytes_push::<K>(Seq::empty(), 0);
-                assert(self.cb@ =~= Seq::<u64>::empty());
-                assert(Seq::<u64>::empty().push(0) =~= seq![0u64]);
-                assert(self.base@ =~= Seq::<u64>::empty());
             }
             self.tail_byte = (n1 - n0) as u8;
             self.segments = self.segments + 1;
             proof {
                 self.cb = Ghost(seq![0u64]);
-                assert(self.chunk() =~= seq![0u64]);
-                assert(counts_bytes::<K>(Seq::<u64>::empty()) =~= Seq::<u8>::empty());
-                lemma_vals_push(Seq::empty(), 0);
-                assert(vals_at(Seq::<u64>::empty(), 0) =~= Seq::<bool>::empty());
-                assert(run_of(0, run_value(0)) =~= Seq::<bool>::empty());
+                lemma_push_pad::<K>(*old(self), *self);
             }
         } else {
             self.flush_run::<K>();
+            proof {
+                assert(self.cb@.last() == old(self).cur_count as u64);
+                assert(BWriter { cur_value: value, ..*self } == *self);
+            }
         }
+        let ghost w1 = BWriter { cur_value: value, ..*self };
         self.cur_value = value;
         self.cur_count = n;
         proof {
-            assert(run_of(0, !value) =~= Seq::<bool>::empty());
-            assert(self.vals() =~= old(self).vals() + run_of(n as nat, value));
-            lemma_counts_len_le(self.chunk());
-            lemma_vals_len(self.chunk(), 0);
-            lemma_chunk_len(self.chunk(), n as nat, self.vals().len(), chunks_values(self.done@).len());
-            lemma_concat::<K>(if self.overflowed { Seq::empty() } else { self.base@ }, self.cb@);
+            lemma_push_start::<K>(w1, n);
         }
         if self.standing + self.segments >= self.target {
             self.cut::<K>();
         }
     }
+}
+
+/// Counts where only the first may be zero stay so with a run added.
+proof fn lemma_pre_push(c: Seq<u64>, x: u64)
+    requires counts_pre(c), x > 0,
+    ensures counts_pre(c.push(x)),
+{
+    assert forall|i: int| 1 <= i < c.push(x).len() implies #[trigger] c.push(x)[i] > 0 by {
+        if i < c.len() {
+            assert(c.push(x)[i] == c[i]);
+        }
+    }
+}
+
+/// A pending run written into the chunk leaves the values as they were.
+proof fn lemma_vals_flush(d: Seq<bool>, c: Seq<u64>, n: usize, v: bool)
+    requires v == run_value(c.len() as int),
+    ensures d + vals_at(c.push(n as u64), 0) + run_of(0, !v) == d + vals_at(c, 0) + run_of(n as nat, v),
+{
+    lemma_vals_push(c, n as u64);
+    assert(run_of(0, !v) =~= Seq::<bool>::empty());
+    assert(d + vals_at(c.push(n as u64), 0) + run_of(0, !v) =~= d + vals_at(c, 0) + run_of(n as nat, v));
+}
+
+/// Before a pending run is written out: its counters have room.
+proof fn lemma_flush_fits<K: CountOps>(w: BWriter)
+    requires w.inv_w::<K>(),
+    ensures
+        w.emitted + w.cur_count <= usize::MAX,
+        w.segments <= w.buf@.len(),
+        0 < K::enc(w.cur_count as u64).len() <= 10,
+{
+    let x = w.cur_count as u64;
+    let h = if w.overflowed { Seq::<u64>::empty() } else { w.base@ };
+    K::axiom_enc(x, x, Seq::empty(), Seq::empty());
+    lemma_bytes_len::<K>(w.cb@);
+    lemma_vals_len(w.chunk(), 0);
+    lemma_concat::<K>(h, w.cb@);
+    assert(w.vals().len() == chunks_values(w.done@).len() + counts_len(w.chunk()) + w.cur_count);
+}
+
+/// A pending run written out: the writer `w0` after `flush_run`'s
+/// updates, `w`.
+proof fn lemma_flush_run<K: CountOps>(w0: BWriter, w: BWriter)
+    requires
+        w0.inv_w::<K>(),
+        w0.cur_count > 0,
+        w0.segments < usize::MAX,
+        w.buf@ == w0.buf@ + K::enc(w0.cur_count as u64),
+        w == (BWriter {
+            buf: w.buf,
+            tail_byte: K::enc(w0.cur_count as u64).len() as u8,
+            emitted: (w0.emitted + w0.cur_count) as usize,
+            segments: (w0.segments + 1) as usize,
+            cur_value: !w0.cur_value,
+            cur_count: 0,
+            cb: Ghost(w0.cb@.push(w0.cur_count as u64)),
+            ..w0
+        }),
+    ensures
+        w.inv_w::<K>(),
+        w.vals() == w0.vals(),
+{
+    hide(counts_bytes);
+    hide(counts_len);
+    hide(counts_pre);
+    hide(vals_at);
+    hide(chunks_values);
+    hide(run_of);
+    let x = w0.cur_count as u64;
+    let c0 = w0.chunk();
+    lemma_flush_fits::<K>(w0);
+    assert(w.chunk() =~= c0.push(x));
+    lemma_bytes_push::<K>(w0.cb@, x);
+    lemma_pre_push(c0, x);
+    lemma_vals_flush(chunks_values(w0.done@), c0, w0.cur_count, w0.cur_value);
+    assert(w0.cb@.push(x).last() == x);
+}
+
+/// Nothing appended.
+proof fn lemma_run_none(a: Seq<bool>, v: bool)
+    ensures a + run_of(0, v) == a,
+{
+    assert(a + run_of(0, v) =~= a);
+}
+
+/// A writer with nothing pending has written nothing.
+proof fn lemma_pending<K: CountOps>(w: BWriter)
+    requires w.inv::<K>(),
+    ensures w.cur_count == 0 ==> w.segments == 0 && !w.overflowed,
+{
+}
+
+/// More of the pending run's value joins it.
+proof fn lemma_push_same<K: CountOps>(w0: BWriter, n: usize)
+    requires
+        w0.inv::<K>(),
+        w0.vals().len() + n <= usize::MAX,
+        n > 0,
+    ensures
+        w0.cur_count + n <= usize::MAX,
+        ({
+            let w = BWriter { cur_count: (w0.cur_count + n) as usize, ..w0 };
+            w.inv::<K>() && w.vals() == w0.vals() + run_of(n as nat, w0.cur_value)
+        }),
+{
+    let w = BWriter { cur_count: (w0.cur_count + n) as usize, ..w0 };
+    assert(w.chunk() == w0.chunk());
+    assert(run_of(w0.cur_count as nat, w0.cur_value) + run_of(n as nat, w0.cur_value) =~= run_of(
+        (w0.cur_count + n) as nat,
+        w0.cur_value,
+    ));
+    assert(w.vals() =~= w0.vals() + run_of(n as nat, w0.cur_value));
+}
+
+/// A zero-count false pad written into an empty writer `w0`, giving `w`:
+/// a `true` run may start on it.
+proof fn lemma_push_pad<K: CountOps>(w0: BWriter, w: BWriter)
+    requires
+        w0.inv::<K>(),
+        w0.cur_count == 0,
+        w.buf@ == w0.buf@ + K::enc(0),
+        w == (BWriter { buf: w.buf, tail_byte: K::enc(0).len() as u8, segments: 1, cb: Ghost(seq![0u64]), ..w0 }),
+    ensures
+        !w0.cur_value,
+        ({
+            let w1 = BWriter { cur_value: true, ..w };
+            w1.inv_w::<K>() && w1.vals() == w0.vals()
+        }),
+        w.standing + w.segments < w.target,
+        !w.overflowed,
+        w.cur_count == 0,
+{
+    let w1 = BWriter { cur_value: true, ..w };
+    K::axiom_enc(0, 0, Seq::empty(), Seq::empty());
+    assert(w0.base@ =~= Seq::<u64>::empty());
+    assert(w0.cb@ =~= Seq::<u64>::empty());
+    assert(w0.chunk() =~= Seq::<u64>::empty());
+    assert(w1.chunk() =~= seq![0u64]);
+    lemma_bytes_push::<K>(Seq::empty(), 0);
+    assert(Seq::<u64>::empty().push(0) =~= seq![0u64]);
+    assert(counts_bytes::<K>(Seq::<u64>::empty()) =~= Seq::<u8>::empty());
+    assert(w1.buf@ =~= counts_bytes::<K>(w1.cb@));
+    lemma_vals_push(Seq::empty(), 0);
+    assert(vals_at(Seq::<u64>::empty(), 0) =~= Seq::<bool>::empty());
+    assert(run_of(0, run_value(0)) =~= Seq::<bool>::empty());
+    assert(vals_at(seq![0u64], 0) =~= Seq::<bool>::empty());
+    assert(w1.vals() =~= w0.vals());
+}
+
+/// A run of `n` starts pending on a writer with none.
+proof fn lemma_push_start<K: CountOps>(w1: BWriter, n: usize)
+    requires
+        w1.inv_w::<K>(),
+        w1.cur_count == 0,
+        n > 0,
+        w1.vals().len() + n <= usize::MAX,
+    ensures
+        ({
+            let w = BWriter { cur_count: n, ..w1 };
+            &&& w.inv_w::<K>()
+            &&& w.vals() == w1.vals() + run_of(n as nat, w1.cur_value)
+            &&& w.standing + w.segments <= usize::MAX
+        }),
+{
+    let w = BWriter { cur_count: n, ..w1 };
+    assert(w.chunk() == w1.chunk());
+    assert(run_of(0, w1.cur_value) =~= Seq::<bool>::empty());
+    assert(w.vals() =~= w1.vals() + run_of(n as nat, w1.cur_value));
+    lemma_vals_len(w.chunk(), 0);
+    lemma_chunk_len(w.chunk(), n as nat, w.vals().len(), chunks_values(w.done@).len());
 }
 
 /// Counts where only the first may be zero number at most one more than
@@ -680,7 +832,6 @@ pub(crate) proof fn lemma_rc_len(rc: Seq<u64>)
 /// The tail as a slab of its own: a false pad if it would start true,
 /// the partial run, then the carried bytes. `None` if it holds nothing.
 #[verifier::spinoff_prover]
-#[verifier::rlimit(100)]
 fn into_slab<K: CountOps>(t: &BTail, data: &[u8], old_tail: u8, Ghost(read): Ghost<int>, Ghost(j): Ghost<int>) -> (r: Option<BSlab>)
     requires
         tail_ok::<K>(data@, read, *t, j), bool_valid::<K>(data@),
@@ -819,6 +970,486 @@ pub(crate) proof fn lemma_chunks_len(d: Seq<Seq<u64>>, c: Seq<u64>, n: nat, v: b
     lemma_vals_len(c, 0);
 }
 
+/// A slab's bytes, split where run `j` starts.
+pub(crate) proof fn lemma_split_at<K: CountOps>(data: Seq<u8>, cs: Seq<u64>, j: int)
+    requires bool_parses::<K>(cs, data), 0 <= j <= cs.len(),
+    ensures
+        ({
+            let n = counts_bytes::<K>(cs.take(j)).len() as int;
+            &&& n <= data.len()
+            &&& data.take(n) == counts_bytes::<K>(cs.take(j))
+            &&& data.skip(n) == counts_bytes::<K>(cs.skip(j))
+            &&& (n < data.len()) == (j < cs.len())
+            &&& counts_len(cs) == counts_len(cs.take(j)) + counts_len(cs.skip(j))
+        }),
+{
+    let a = counts_bytes::<K>(cs.take(j));
+    let b = counts_bytes::<K>(cs.skip(j));
+    assert(cs =~= cs.take(j) + cs.skip(j));
+    lemma_concat::<K>(cs.take(j), cs.skip(j));
+    lemma_bytes_len::<K>(cs.skip(j));
+    assert(data == a + b);
+    assert(data.take(a.len() as int) =~= a);
+    assert(data.skip(a.len() as int) =~= b);
+}
+
+/// Counts written with counts carried after them are canonical, when
+/// the last written is above zero.
+proof fn lemma_join_ok(f: Seq<u64>, rc: Seq<u64>)
+    requires
+        counts_pre(f),
+        forall|i: int| 0 <= i < rc.len() ==> #[trigger] rc[i] > 0,
+        f.len() > 0 ==> f.last() > 0,
+    ensures
+        counts_ok(f + rc),
+        rc.len() > 0 ==> (f + rc).last() == rc.last(),
+        rc.len() == 0 ==> f + rc == f,
+{
+    let fr = f + rc;
+    assert forall|i: int| 1 <= i < fr.len() implies #[trigger] fr[i] > 0 by {
+        if i >= f.len() {
+            assert(fr[i] == rc[i - f.len()]);
+        } else {
+            assert(fr[i] == f[i]);
+        }
+    }
+    if rc.len() == 0 {
+        assert(fr =~= f);
+    } else {
+        assert(fr.last() == rc[rc.len() - 1]);
+    }
+}
+
+/// Their values: the written counts', then the carried counts' as they
+/// were from run `j` on.
+proof fn lemma_join_vals(f: Seq<u64>, rc: Seq<u64>, j: int)
+    requires 0 <= j, rc.len() > 0 ==> run_value(f.len() as int) == run_value(j),
+    ensures counts_values(f + rc) == vals_at(f, 0) + vals_at(rc, j),
+{
+    lemma_vals_at_zero(f + rc);
+    lemma_vals_at_concat(f, rc, 0);
+    if rc.len() > 0 {
+        lemma_vals_at_parity(rc, f.len() as int, j);
+    }
+}
+
+/// The head's counts, the counts written and the counts carried number
+/// no more than their values and one.
+proof fn lemma_first_sizes<K: CountOps>(base: Seq<u64>, cb: Seq<u64>, rc: Seq<u64>)
+    requires
+        counts_pre(base + cb),
+        forall|i: int| 0 <= i < rc.len() ==> #[trigger] rc[i] > 0,
+    ensures
+        counts_len(base + cb) == counts_len(base) + counts_len(cb),
+        base.len() + cb.len() + rc.len() <= counts_len(base) + counts_len(cb) + counts_len(rc) + 1,
+{
+    lemma_concat::<K>(base, cb);
+    lemma_pre_len(base + cb);
+    lemma_rc_len(rc);
+}
+
+/// The slab rebuilt when nothing has spilled: the head, the counts
+/// written after it, and the slab's counts from run `j` on.
+proof fn lemma_sealed_first<K: CountOps>(r: BClosed, data: Seq<u8>, j: int, base: Seq<u64>, cb: Seq<u64>, tail_byte: u8,
+    slab_tail: u8)
+    requires
+        bool_valid::<K>(data),
+        ({
+            let cs = bool_counts::<K>(data);
+            let rc = cs.skip(j);
+            let f = base + cb;
+            &&& 0 <= j <= cs.len()
+            &&& base.len() <= j && base == cs.take(base.len() as int)
+            &&& counts_pre(f)
+            &&& forall|i: int| 0 <= i < rc.len() ==> #[trigger] rc[i] > 0
+            &&& rc.len() > 0 ==> run_value(f.len() as int) == run_value(j)
+            &&& f.len() > 0 ==> f.last() > 0 && cb.len() > 0
+            &&& cb.len() > 0 ==> tail_byte == K::enc(cb.last()).len()
+            &&& cb.len() == 0 ==> tail_byte == 0
+            &&& slab_tail == counts_tail::<K>(cs)
+            &&& counts_len(f) + counts_len(rc) <= usize::MAX
+            &&& r.start == counts_bytes::<K>(base).len()
+            &&& r.end == counts_bytes::<K>(cs.take(j)).len()
+            &&& r.bytes@ == counts_bytes::<K>(cb)
+            &&& r.len == counts_len(base) + counts_len(cb) + counts_len(rc)
+            &&& r.segments == base.len() + cb.len() + rc.len()
+            &&& r.tail == if r.end < data.len() { slab_tail } else { tail_byte }
+            &&& r.overflow@.len() == 0
+        }),
+    ensures
+        closed_ok::<K>(r, data, vals_at(base + cb, 0) + vals_at(bool_counts::<K>(data).skip(j), j)),
+{
+    let cs = bool_counts::<K>(data);
+    let rc = cs.skip(j);
+    let f = base + cb;
+    let fr = f + rc;
+    let rs = data.take(r.start as int) + r.bytes@ + data.skip(r.end as int);
+    lemma_split_at::<K>(data, cs, j);
+    lemma_split_at::<K>(data, cs, base.len() as int);
+    if base.len() < j {
+        lemma_take_bytes_mono::<K>(cs, base.len() as int, j);
+    }
+    lemma_concat::<K>(base, cb);
+    lemma_concat::<K>(f, rc);
+    assert(rs == counts_bytes::<K>(fr));
+    lemma_join_ok(f, rc);
+    lemma_counts::<K>(fr, rs);
+    lemma_join_vals(f, rc, j);
+    if f.len() > 0 {
+        assert(f.last() == cb.last());
+    }
+    assert(r.tail == counts_tail::<K>(fr));
+    assert(bool_values::<K>(rs) + bslabs_values::<K>(r.overflow@) =~= vals_at(f, 0) + vals_at(rc, j));
+}
+
+/// The first chunk cut: the head's counts and those written after
+/// them, a slab's worth.
+proof fn lemma_out_first<K: CountOps>(base: Seq<u64>, d: Seq<Seq<u64>>, out_cb: Seq<u64>, out_bytes: Seq<u8>, out_emitted: usize,
+    out_segments: usize, out_tail: u8, o: Seq<BSlab>)
+    requires out_ok::<K>(true, base, d, out_cb, out_bytes, out_emitted, out_segments, out_tail, o),
+    ensures
+        d.len() >= 1,
+        d[0] == base + out_cb,
+        counts_ok(d[0]),
+        out_bytes == counts_bytes::<K>(out_cb),
+        out_emitted == counts_len(out_cb),
+        out_segments == d[0].len(),
+        out_tail == counts_tail::<K>(d[0]),
+        counts_len(d[0]) == counts_len(base) + counts_len(out_cb),
+        counts_len(d[0]) <= chunks_values(d).len(),
+{
+    reveal(out_ok);
+    lemma_concat::<K>(base, out_cb);
+    lemma_chunk_le(d, 0);
+    lemma_vals_len(d[0], 0);
+}
+
+/// The chunks cut after the first are valid slabs, which hold those
+/// chunks' values.
+proof fn lemma_cut_slabs<K: CountOps>(base: Seq<u64>, d: Seq<Seq<u64>>, out_cb: Seq<u64>, out_bytes: Seq<u8>, out_emitted: usize,
+    out_segments: usize, out_tail: u8, o: Seq<BSlab>)
+    requires
+        out_ok::<K>(true, base, d, out_cb, out_bytes, out_emitted, out_segments, out_tail, o),
+        chunks_values(d).len() <= usize::MAX,
+    ensures
+        forall|i: int| 0 <= i < o.len() ==> bslab_ok::<K>(#[trigger] o[i]),
+        bslabs_values::<K>(o) == chunks_values(d.skip(1)),
+{
+    reveal(out_ok);
+    let ds = d.skip(1);
+    assert forall|i: int| 0 <= i < o.len() implies bslab_bytes(#[trigger] o[i]) == counts_bytes::<K>(ds[i]) && counts_ok(ds[i])
+        && counts_len(ds[i]) <= usize::MAX && bslab_ok::<K>(o[i]) by {
+        assert(ds[i] == d[i + 1]);
+        lemma_chunk_le(d, i + 1);
+        lemma_vals_len(d[i + 1], 0);
+        lemma_counts::<K>(ds[i], bslab_bytes(o[i]));
+    }
+    lemma_slabs_chunks::<K>(o, ds);
+}
+
+/// The first chunk in the slab's place: the head's bytes, then the
+/// bytes of the chunk's counts after the head.
+proof fn lemma_first_chunk<K: CountOps>(data: Seq<u8>, base: Seq<u64>, out_cb: Seq<u64>)
+    requires
+        bool_valid::<K>(data),
+        base.len() <= bool_counts::<K>(data).len(),
+        base == bool_counts::<K>(data).take(base.len() as int),
+        counts_ok(base + out_cb),
+        counts_len(base + out_cb) <= usize::MAX,
+    ensures
+        ({
+            let n = counts_bytes::<K>(base).len() as int;
+            let rs = data.take(n) + counts_bytes::<K>(out_cb) + data.skip(data.len() as int);
+            &&& n <= data.len()
+            &&& bool_valid::<K>(rs)
+            &&& bool_counts::<K>(rs) == base + out_cb
+        }),
+{
+    let cs = bool_counts::<K>(data);
+    let n = counts_bytes::<K>(base).len() as int;
+    let rs = data.take(n) + counts_bytes::<K>(out_cb) + data.skip(data.len() as int);
+    lemma_split_at::<K>(data, cs, base.len() as int);
+    lemma_concat::<K>(base, out_cb);
+    assert(rs =~= counts_bytes::<K>(base + out_cb));
+    lemma_counts::<K>(base + out_cb, rs);
+}
+
+/// The chunk in hand with the slab's counts from run `j` on, as a
+/// slab of its own.
+proof fn lemma_last_slab<K: CountOps>(s: BSlab, data: Seq<u8>, j: int, cb: Seq<u64>, tail_byte: u8, slab_tail: u8)
+    requires
+        bool_valid::<K>(data),
+        ({
+            let cs = bool_counts::<K>(data);
+            let rc = cs.skip(j);
+            let n = counts_bytes::<K>(cs.take(j)).len();
+            &&& 0 <= j <= cs.len()
+            &&& counts_pre(cb) && cb.len() > 0 && cb.last() > 0
+            &&& forall|i: int| 0 <= i < rc.len() ==> #[trigger] rc[i] > 0
+            &&& rc.len() > 0 ==> run_value(cb.len() as int) == run_value(j)
+            &&& tail_byte == K::enc(cb.last()).len()
+            &&& slab_tail == counts_tail::<K>(cs)
+            &&& counts_len(cb) + counts_len(rc) <= usize::MAX
+            &&& bslab_bytes(s) == counts_bytes::<K>(cb) + data.skip(n as int)
+            &&& bslab_len(s) == counts_len(cb) + counts_len(rc)
+            &&& bslab_segments(s) == cb.len() + rc.len()
+            &&& bslab_tail(s) == if n < data.len() { slab_tail } else { tail_byte }
+        }),
+    ensures
+        bslab_ok::<K>(s),
+        bool_values::<K>(bslab_bytes(s)) == vals_at(cb, 0) + vals_at(bool_counts::<K>(data).skip(j), j),
+{
+    let cs = bool_counts::<K>(data);
+    let rc = cs.skip(j);
+    let fr = cb + rc;
+    lemma_split_at::<K>(data, cs, j);
+    lemma_concat::<K>(cb, rc);
+    lemma_join_ok(cb, rc);
+    lemma_counts::<K>(fr, bslab_bytes(s));
+    lemma_join_vals(cb, rc, j);
+    assert(bslab_tail(s) == counts_tail::<K>(fr));
+}
+
+/// The slab rebuilt when chunks have spilled: the first chunk in the
+/// slab's place from the head on, the chunks cut since as slabs, and
+/// the chunk in hand with the slab's counts from run `j` on as the
+/// last slab `s`.
+proof fn lemma_sealed_spilled<K: CountOps>(r: BClosed, data: Seq<u8>, j: int, w: BWriter, s: BSlab, slab_tail: u8)
+    requires
+        w.overflowed,
+        w.inv_w::<K>(),
+        bool_valid::<K>(data),
+        ({
+            let cs = bool_counts::<K>(data);
+            let rc = cs.skip(j);
+            let n = counts_bytes::<K>(cs.take(j)).len();
+            &&& 0 <= j <= cs.len()
+            &&& forall|i: int| 0 <= i < rc.len() ==> #[trigger] rc[i] > 0
+            &&& rc.len() > 0 ==> run_value(w.chunk().len() as int) == run_value(j)
+            &&& w.cb@.len() > 0 && w.chunk().last() > 0
+            &&& w.base@.len() <= cs.len() && w.base@ == cs.take(w.base@.len() as int)
+            &&& slab_tail == counts_tail::<K>(cs)
+            &&& chunks_values(w.done@).len() + counts_len(w.chunk()) + counts_len(rc) <= usize::MAX
+            &&& bslab_bytes(s) == w.buf@ + data.skip(n as int)
+            &&& bslab_len(s) == w.emitted + counts_len(rc)
+            &&& bslab_segments(s) == w.segments + rc.len()
+            &&& bslab_tail(s) == if n < data.len() { slab_tail } else { w.tail_byte }
+            &&& r.start == counts_bytes::<K>(w.base@).len()
+            &&& r.end == data.len()
+            &&& r.bytes@ == w.out_bytes@
+            &&& r.len == counts_len(w.base@) + w.out_emitted
+            &&& r.segments == w.out_segments
+            &&& r.tail == w.out_tail
+            &&& r.overflow@ == w.overflow@.push(s)
+        }),
+    ensures
+        closed_ok::<K>(r, data, chunks_values(w.done@) + vals_at(w.chunk(), 0) + vals_at(bool_counts::<K>(data).skip(j), j)),
+{
+    let rc = bool_counts::<K>(data).skip(j);
+    let d = w.done@;
+    let base = w.base@;
+    let cb = w.cb@;
+    let f = w.chunk();
+    let o0 = w.overflow@;
+    let o = r.overflow@;
+    let rs = data.take(r.start as int) + r.bytes@ + data.skip(r.end as int);
+    assert(f =~= cb);
+    // the first chunk, in the slab's place
+    lemma_out_first::<K>(base, d, w.out_cb@, w.out_bytes@, w.out_emitted, w.out_segments, w.out_tail, o0);
+    lemma_first_chunk::<K>(data, base, w.out_cb@);
+    lemma_vals_at_zero(d[0]);
+    // the slabs: those cut after the first, then the last
+    lemma_cut_slabs::<K>(base, d, w.out_cb@, w.out_bytes@, w.out_emitted, w.out_segments, w.out_tail, o0);
+    lemma_last_slab::<K>(s, data, j, cb, w.tail_byte, slab_tail);
+    assert(o.drop_last() =~= o0);
+    assert forall|i: int| 0 <= i < o.len() implies bslab_ok::<K>(#[trigger] o[i]) by {
+        if i < o0.len() {
+            assert(o[i] == o0[i]);
+        }
+    }
+    lemma_chunks_first(d);
+    assert(bool_values::<K>(rs) + bslabs_values::<K>(o) =~= chunks_values(d) + vals_at(f, 0) + vals_at(rc, j));
+}
+
+/// Where a reader stands in a slab: `k` runs started, the bytes of as
+/// many counts behind it.
+proof fn lemma_reader_at<K: CountOps>(data: Seq<u8>, st: BoolDecoderState)
+    requires bstate_ok::<K>(data, st),
+    ensures
+        ({
+            let cs = bool_counts::<K>(data);
+            let k = bstate_k::<K>(data, st);
+            &&& bool_parses::<K>(cs, data)
+            &&& dstate_at::<K>(cs, st, k)
+            &&& bool_values::<K>(data).len() == counts_len(cs)
+            &&& counts_len(cs) == counts_len(cs.take(k)) + counts_len(cs.skip(k))
+            &&& st.remaining <= counts_len(cs.take(k))
+            &&& st.byte_pos <= data.len()
+            &&& (st.byte_pos < data.len()) == (k < cs.len())
+        }),
+{
+    let cs = bool_counts::<K>(data);
+    let k = bstate_k::<K>(data, st);
+    assert(bool_parses::<K>(cs, data));
+    assert(dstate_at::<K>(cs, st, k));
+    lemma_values_len(cs);
+    lemma_split_at::<K>(data, cs, k);
+    if k > 0 {
+        lemma_count_le(cs.take(k), k - 1);
+    }
+}
+
+/// Values that end in a run, with more after: from `m` before the
+/// run's end on, `m` of the run's value and what is after.
+proof fn lemma_skip_run(a: Seq<bool>, n: nat, m: nat, v: bool, b: Seq<bool>)
+    requires m <= n,
+    ensures (a + run_of(n, v) + b).skip(a.len() + n - m) == run_of(m, v) + b,
+{
+    assert((a + run_of(n, v) + b).skip(a.len() + n - m) =~= run_of(m, v) + b);
+}
+
+/// A slab's counts from run `j` on are above zero, when `j` is not
+/// the first.
+proof fn lemma_rest_positive(cs: Seq<u64>, j: int)
+    requires counts_ok(cs), 1 <= j <= cs.len(),
+    ensures forall|i: int| 0 <= i < cs.skip(j).len() ==> #[trigger] cs.skip(j)[i] > 0,
+{
+    let rc = cs.skip(j);
+    assert forall|i: int| 0 <= i < rc.len() implies #[trigger] rc[i] > 0 by {
+        assert(rc[i] == cs[j + i]);
+    }
+}
+
+/// What follows a reader inside a run: the rest of the run, then the
+/// runs after it.
+proof fn lemma_tail_inside<K: CountOps>(data: Seq<u8>, st: BoolDecoderState, t: BTail)
+    requires
+        bstate_ok::<K>(data, st),
+        st.remaining > 0,
+        t.value == st.value && t.partial == st.remaining && t.start == st.byte_pos,
+        ({
+            let cs = bool_counts::<K>(data);
+            let k = bstate_k::<K>(data, st);
+            t.items == counts_len(cs.skip(k)) && t.segments == cs.len() - k
+        }),
+    ensures
+        tail_ok::<K>(data, bstate_pos::<K>(data, st), t, bstate_k::<K>(data, st)),
+{
+    let cs = bool_counts::<K>(data);
+    let k = bstate_k::<K>(data, st);
+    let rc = cs.skip(k);
+    lemma_reader_at::<K>(data, st);
+    lemma_rest_positive(cs, k);
+    lemma_values_split(cs, k);
+    let h = cs.take(k - 1);
+    assert(cs.take(k) =~= h.push(cs[k - 1]));
+    lemma_vals_push(h, cs[k - 1]);
+    lemma_bytes_push::<K>(h, cs[k - 1]);
+    lemma_vals_len(h, 0);
+    lemma_skip_run(vals_at(h, 0), cs[k - 1] as nat, st.remaining as nat, st.value, vals_at(rc, k));
+}
+
+/// A reader between runs with bytes ahead of it stands before run `k`,
+/// whose count is the next thing in the bytes.
+proof fn lemma_tail_next<K: CountOps>(data: Seq<u8>, st: BoolDecoderState)
+    requires bstate_ok::<K>(data, st), st.byte_pos < data.len(),
+    ensures
+        ({
+            let cs = bool_counts::<K>(data);
+            let k = bstate_k::<K>(data, st);
+            &&& k < cs.len() && cs[k] <= usize::MAX
+            &&& K::enc(cs[k]).is_prefix_of(data.skip(st.byte_pos as int))
+        }),
+{
+    let cs = bool_counts::<K>(data);
+    let k = bstate_k::<K>(data, st);
+    lemma_reader_at::<K>(data, st);
+    lemma_next_count::<K>(data, cs, k, st.byte_pos as int);
+}
+
+/// The count read there is run `k`'s, and the reader is then past
+/// `k + 1` counts.
+proof fn lemma_tail_count<K: CountOps>(data: Seq<u8>, st: BoolDecoderState, cb: int, count: u64)
+    requires
+        bstate_ok::<K>(data, st),
+        st.byte_pos < data.len(),
+        0 <= cb <= data.len() - st.byte_pos,
+        data.skip(st.byte_pos as int).take(cb) == K::enc(count),
+    ensures
+        ({
+            let cs = bool_counts::<K>(data);
+            let k = bstate_k::<K>(data, st);
+            &&& k < cs.len()
+            &&& count == cs[k]
+            &&& st.byte_pos + cb == counts_bytes::<K>(cs.take(k + 1)).len()
+            &&& counts_len(cs) == counts_len(cs.take(k)) + count + counts_len(cs.skip(k + 1))
+        }),
+{
+    let cs = bool_counts::<K>(data);
+    let k = bstate_k::<K>(data, st);
+    let rest = data.skip(st.byte_pos as int);
+    lemma_reader_at::<K>(data, st);
+    lemma_next_count::<K>(data, cs, k, st.byte_pos as int);
+    assert(rest =~= rest.take(cb) + rest.skip(cb));
+    K::axiom_enc(count, cs[k], rest.skip(cb), counts_bytes::<K>(cs.skip(k + 1)));
+    lemma_split_at::<K>(data, cs, k + 1);
+    assert(cs.take(k + 1) =~= cs.take(k).push(cs[k]));
+    lemma_bytes_push::<K>(cs.take(k), cs[k]);
+}
+
+/// What follows a reader between runs, once run `k`'s count is read:
+/// that run, then the runs after it.
+proof fn lemma_tail_between<K: CountOps>(data: Seq<u8>, st: BoolDecoderState, t: BTail)
+    requires
+        bstate_ok::<K>(data, st),
+        st.remaining == 0,
+        ({
+            let cs = bool_counts::<K>(data);
+            let k = bstate_k::<K>(data, st);
+            &&& 1 <= k < cs.len()
+            &&& t.value == !st.value
+            &&& t.partial == cs[k]
+            &&& t.start == counts_bytes::<K>(cs.take(k + 1)).len()
+            &&& t.items == counts_len(cs.skip(k + 1))
+            &&& t.segments == cs.len() - k - 1
+        }),
+    ensures
+        tail_ok::<K>(data, bstate_pos::<K>(data, st), t, bstate_k::<K>(data, st) + 1),
+{
+    let cs = bool_counts::<K>(data);
+    let k = bstate_k::<K>(data, st);
+    let rk = cs.skip(k);
+    let rc = cs.skip(k + 1);
+    let a = vals_at(cs.take(k), 0);
+    lemma_reader_at::<K>(data, st);
+    lemma_rest_positive(cs, k + 1);
+    lemma_values_split(cs, k);
+    lemma_vals_len(cs.take(k), 0);
+    lemma_vals_first(rk, k);
+    assert(rk.skip(1) =~= rc);
+    assert(rk[0] == cs[k]);
+    assert((a + vals_at(rk, k)).skip(a.len() as int) =~= vals_at(rk, k));
+}
+
+/// Nothing follows a reader at the slab's end.
+proof fn lemma_tail_end<K: CountOps>(data: Seq<u8>, st: BoolDecoderState, t: BTail)
+    requires
+        bstate_ok::<K>(data, st),
+        st.remaining == 0,
+        st.byte_pos >= data.len(),
+        t.partial == 0 && t.start == data.len() && t.items == 0 && t.segments == 0,
+    ensures
+        tail_ok::<K>(data, bstate_pos::<K>(data, st), t, bstate_k::<K>(data, st)),
+{
+    let cs = bool_counts::<K>(data);
+    let k = bstate_k::<K>(data, st);
+    let vs = bool_values::<K>(data);
+    lemma_reader_at::<K>(data, st);
+    assert(cs.take(k) =~= cs);
+    assert(cs.skip(k) =~= Seq::<u64>::empty());
+    assert(vs.skip(vs.len() as int) =~= run_of(0, t.value) + vals_at(cs.skip(k), k));
+}
+
 /// A rebuild of one bool slab: the writer, the head it keeps, and the
 /// reader standing where the edit has read to.
 pub(crate) struct BEdit {
@@ -835,6 +1466,340 @@ pub(crate) struct BEdit {
     /// the slab's bytes
     #[allow(dead_code)]
     pub(crate) data: Ghost<Seq<u8>>,
+}
+
+/// A valid slab's counts are its parse, and none of them has no bytes
+/// and no values.
+proof fn lemma_scan_start<K: CountOps>(data: Seq<u8>)
+    requires bool_valid::<K>(data),
+    ensures
+        ({
+            let cs = bool_counts::<K>(data);
+            &&& bool_parses::<K>(cs, data)
+            &&& counts_bytes::<K>(cs.take(0)).len() == 0
+            &&& counts_len(cs.take(0)) == 0
+            &&& bool_values::<K>(data).len() == counts_len(cs)
+        }),
+{
+    let cs = bool_counts::<K>(data);
+    lemma_values_len(cs);
+    assert(cs.take(0) =~= Seq::<u64>::empty());
+}
+
+/// Counts whose bytes reach the slab's end are all of the slab's.
+proof fn lemma_scan_end<K: CountOps>(data: Seq<u8>, cs: Seq<u64>, i: int)
+    requires
+        bool_parses::<K>(cs, data),
+        0 <= i <= cs.len(),
+        counts_bytes::<K>(cs.take(i)).len() >= data.len(),
+    ensures
+        i == cs.len(),
+        cs.take(i) == cs,
+{
+    if i < cs.len() {
+        lemma_take_bytes_mono::<K>(cs, i, cs.len() as int);
+    }
+    assert(cs.take(cs.len() as int) =~= cs);
+}
+
+/// The count read where run `i` starts is run `i`'s: `cb` bytes, which
+/// end where run `i + 1` starts.
+proof fn lemma_scan_count<K: CountOps>(data: Seq<u8>, cs: Seq<u64>, i: int, cb: int, c: u64)
+    requires
+        bool_parses::<K>(cs, data),
+        0 <= i <= cs.len(),
+        counts_bytes::<K>(cs.take(i)).len() < data.len(),
+        0 <= cb <= data.len() - counts_bytes::<K>(cs.take(i)).len(),
+        data.skip(counts_bytes::<K>(cs.take(i)).len() as int).take(cb) == K::enc(c),
+    ensures
+        i < cs.len(),
+        c == cs[i],
+        cb == K::enc(cs[i]).len(),
+        c == 0 ==> i == 0,
+        counts_bytes::<K>(cs.take(i + 1)).len() == counts_bytes::<K>(cs.take(i)).len() + cb,
+        counts_bytes::<K>(cs.take(i + 1)).len() <= data.len(),
+        counts_len(cs.take(i + 1)) == counts_len(cs.take(i)) + c,
+        counts_len(cs.take(i + 1)) <= counts_len(cs),
+        counts_len(cs) <= usize::MAX,
+        cs.len() <= data.len(),
+{
+    let bp = counts_bytes::<K>(cs.take(i)).len() as int;
+    let rest = data.skip(bp);
+    lemma_bytes_len::<K>(cs);
+    lemma_next_count::<K>(data, cs, i, bp);
+    assert(rest =~= rest.take(cb) + rest.skip(cb));
+    K::axiom_enc(c, cs[i], rest.skip(cb), counts_bytes::<K>(cs.skip(i + 1)));
+    lemma_split_at::<K>(data, cs, i + 1);
+    assert(cs.take(i + 1) =~= cs.take(i).push(cs[i]));
+    lemma_bytes_push::<K>(cs.take(i), cs[i]);
+}
+
+/// Where a rebuild opened at item `at` starts, the scan having stopped
+/// `off` items into run `i`, `prev` the run before if it has items: after
+/// the first `p` runs, with `cur_count` items of the next pending. That
+/// is run `i` and its items before `at`, or, at a run's start, the run
+/// before and all its items.
+proof fn lemma_open_head<K: CountOps>(data: Seq<u8>, cs: Seq<u64>, i: int, at: int, off: int, prev: Option<(usize, usize)>,
+    byte_start: int, p: int, head_len: int, cur_value: bool, cur_count: int)
+    requires
+        bool_parses::<K>(cs, data),
+        0 <= i <= cs.len(),
+        prev matches Some((pb, pc)) ==> i >= 1 && pc == cs[i - 1] && pc > 0
+            && pb == counts_bytes::<K>(cs.take(i - 1)).len(),
+        prev is None ==> i == 0 || (i == 1 && cs[0] == 0),
+        i < cs.len() ==> 0 <= off < cs[i] && at == counts_len(cs.take(i)) + off,
+        i == cs.len() ==> off == 0 && at == counts_len(cs.take(i)),
+        off > 0 ==> p == i && cur_value == run_value(i) && cur_count == off && head_len == at - off
+            && byte_start == counts_bytes::<K>(cs.take(i)).len(),
+        off == 0 ==> match prev {
+            Some((pb, pc)) => p == i - 1 && cur_value == !run_value(i) && cur_count == pc && head_len == at - pc
+                && byte_start == pb,
+            None => p == 0 && !cur_value && cur_count == 0 && head_len == 0 && byte_start == 0,
+        },
+    ensures
+        0 <= p <= i,
+        p < i || i < cs.len() || p == 0,
+        counts_pre(cs.take(p)),
+        cur_value == run_value(p),
+        cur_count >= 0,
+        cur_count == 0 ==> p == 0,
+        counts_len(cs.take(p)) + cur_count == at,
+        head_len == counts_len(cs.take(p)),
+        byte_start == counts_bytes::<K>(cs.take(p)).len(),
+        at <= bool_values::<K>(data).len(),
+        bool_values::<K>(data).take(at) == vals_at(cs.take(p), 0) + run_of(cur_count as nat, cur_value),
+{
+    lemma_counts::<K>(cs, data);
+    let base = cs.take(p);
+    assert(0 <= p <= i);
+    assert(counts_pre(base)) by {
+        assert forall|j: int| 1 <= j < base.len() implies #[trigger] base[j] > 0 by {
+            assert(base[j] == cs[j]);
+        }
+    }
+    if off > 0 {
+        lemma_values_run_take(cs, i, off);
+    } else if prev is Some {
+        assert(cs.take(i).drop_last() =~= cs.take(i - 1));
+        assert(cs.take(i).last() == cs[i - 1]);
+        lemma_values_run_take(cs, i - 1, cs[i - 1] as int);
+    } else {
+        assert(base =~= Seq::<u64>::empty());
+        assert(counts_len(cs.take(0)) == 0);
+        assert(counts_len(cs.take(i)) == 0) by {
+            if i == 1 {
+                assert(cs.take(1).drop_last() =~= cs.take(0));
+                assert(cs.take(1).last() == cs[0]);
+            }
+        }
+        lemma_values_take(cs, 0);
+        assert(run_of(0, cur_value) =~= Seq::<bool>::empty());
+        assert(counts_values(cs).take(0) =~= vals_at(base, 0) + run_of(0, cur_value));
+    }
+}
+
+/// A rebuild put together where the scan stopped is open at item `at`:
+/// its reader is inside run `i`, or past the last run.
+proof fn lemma_opened<K: CountOps>(e: BEdit, data: Seq<u8>, cs: Seq<u64>, i: int, p: int, off: int)
+    requires
+        bool_parses::<K>(cs, data),
+        data.len() <= usize::MAX,
+        0 <= p <= i <= cs.len(),
+        p < i || i < cs.len() || p == 0,
+        e.data@ == data,
+        e.w.inv::<K>(),
+        e.w.base@ == cs.take(p),
+        e.byte_start == counts_bytes::<K>(cs.take(p)).len(),
+        e.head_len == counts_len(cs.take(p)),
+        e.read_segments == i,
+        i < cs.len() ==> {
+            &&& 0 <= off < cs[i]
+            &&& e.read == counts_len(cs.take(i)) + off
+            &&& e.dec.byte_pos == counts_bytes::<K>(cs.take(i)).len() + K::enc(cs[i]).len()
+            &&& e.dec.remaining == cs[i] - off
+            &&& e.dec.value == run_value(i)
+        },
+        i == cs.len() ==> {
+            &&& e.read == counts_len(cs.take(i))
+            &&& e.dec.byte_pos == counts_bytes::<K>(cs.take(i)).len()
+            &&& e.dec.remaining == 0
+            &&& e.dec.value == !run_value(i)
+        },
+    ensures e.inv::<K>(),
+{
+    let k = if i < cs.len() { i + 1 } else { i };
+    lemma_counts::<K>(cs, data);
+    if i < cs.len() {
+        assert(cs.take(i + 1) =~= cs.take(i).push(cs[i]));
+        lemma_bytes_push::<K>(cs.take(i), cs[i]);
+    }
+    assert(dstate_at::<K>(cs, e.dec, k));
+    lemma_k_unique::<K>(cs, e.dec, bstate_k::<K>(data, e.dec), k);
+}
+
+/// A tail's values number its partial run's items and its carried
+/// counts'.
+proof fn lemma_tail_len<K: CountOps>(data: Seq<u8>, read: int, t: BTail, j: int)
+    requires tail_ok::<K>(data, read, t, j),
+    ensures bool_values::<K>(data).skip(read).len() == t.partial + counts_len(bool_counts::<K>(data).skip(j)),
+{
+    lemma_vals_len(bool_counts::<K>(data).skip(j), j);
+}
+
+/// A writer `w0` whose pending run is flushed, giving `w`: the chunk in
+/// hand ends with that run's count, and is empty if there was none.
+proof fn lemma_flushed<K: CountOps>(w0: BWriter, w: BWriter)
+    requires
+        w0.inv::<K>(),
+        w.inv_w::<K>(),
+        w.cur_count == 0,
+        w.vals() == w0.vals(),
+        w0.cur_count > 0 ==> w.cb@ == w0.cb@.push(w0.cur_count as u64),
+        w0.cur_count == 0 ==> w.cb@ == w0.cb@,
+        w.base@ == w0.base@,
+        w.done@ == w0.done@,
+        w.overflowed == w0.overflowed,
+    ensures
+        w.chunk().len() > 0 ==> w.chunk().last() > 0 && w.cb@.len() > 0,
+        w.overflowed ==> w.cb@.len() > 0,
+        w0.cur_count > 0 ==> run_value(w.chunk().len() as int) == !w0.cur_value,
+        chunks_values(w.done@) + vals_at(w.chunk(), 0) == w0.vals(),
+        chunks_values(w.done@).len() + counts_len(w.chunk()) == w0.vals().len(),
+{
+    let f = w.chunk();
+    if w0.cur_count > 0 {
+        assert(f =~= w0.chunk().push(w0.cur_count as u64));
+        assert(f.last() == w0.cur_count as u64);
+    } else {
+        assert(f =~= w0.chunk());
+    }
+    assert(run_of(0, w.cur_value) =~= Seq::<bool>::empty());
+    assert(w.vals() =~= chunks_values(w.done@) + vals_at(f, 0));
+    lemma_vals_len(f, 0);
+}
+
+/// A rebuild's head ends inside its slab's bytes.
+proof fn lemma_head_bytes<K: CountOps>(e: BEdit)
+    requires e.inv::<K>(),
+    ensures e.byte_start <= e.data@.len(),
+{
+    lemma_take_bytes_le::<K>(bool_counts::<K>(e.data@), e.w.base@.len() as int);
+}
+
+/// A writer `w0` on the slab `data`, flushed (then `w`), as `seal`
+/// takes it to carry nothing after it: what `seal` requires, and the
+/// values it then holds.
+proof fn lemma_seal_whole<K: CountOps>(data: Seq<u8>, w0: BWriter, w: BWriter)
+    requires
+        bool_valid::<K>(data),
+        w0.inv::<K>(),
+        w0.vals().len() + 3 <= usize::MAX,
+        w.inv_w::<K>(),
+        w.cur_count == 0,
+        w.vals() == w0.vals(),
+        w0.cur_count > 0 ==> w.cb@ == w0.cb@.push(w0.cur_count as u64),
+        w0.cur_count == 0 ==> w.cb@ == w0.cb@,
+        w.base@ == w0.base@,
+        w.done@ == w0.done@,
+        w.overflowed == w0.overflowed,
+    ensures
+        ({
+            let cs = bool_counts::<K>(data);
+            let n = cs.len() as int;
+            let rc = cs.skip(n);
+            let f = w.chunk();
+            &&& data.len() == counts_bytes::<K>(cs.take(n)).len()
+            &&& rc.len() == 0 && counts_len(rc) == 0
+            &&& f.len() > 0 ==> f.last() > 0 && w.cb@.len() > 0
+            &&& w.overflowed ==> w.cb@.len() > 0
+            &&& chunks_values(w.done@).len() + counts_len(f) + counts_len(rc) + 1 <= usize::MAX
+            &&& chunks_values(w.done@) + vals_at(f, 0) + vals_at(rc, n) == w0.vals()
+        }),
+{
+    hide(BWriter::inv);
+    hide(BWriter::inv_w);
+    hide(BWriter::vals);
+    let cs = bool_counts::<K>(data);
+    let n = cs.len() as int;
+    let rc = cs.skip(n);
+    let f = w.chunk();
+    lemma_flushed::<K>(w0, w);
+    assert(cs.take(n) =~= cs);
+    assert(rc =~= Seq::<u64>::empty());
+    assert(vals_at(rc, n) =~= Seq::<bool>::empty());
+    assert(chunks_values(w.done@) + vals_at(f, 0) + vals_at(rc, n) =~= chunks_values(w.done@) + vals_at(f, 0));
+}
+
+/// A rebuild closed that spills into one slab more holds that slab's
+/// values after its own.
+proof fn lemma_closed_push<K: CountOps>(r0: BClosed, r: BClosed, data: Seq<u8>, out: Seq<bool>, s: BSlab)
+    requires
+        closed_ok::<K>(r0, data, out),
+        bslab_ok::<K>(s),
+        r.bytes@ == r0.bytes@,
+        r.start == r0.start,
+        r.end == r0.end,
+        r.len == r0.len,
+        r.segments == r0.segments,
+        r.tail == r0.tail,
+        r.overflow@ == r0.overflow@.push(s),
+    ensures closed_ok::<K>(r, data, out + bool_values::<K>(bslab_bytes(s))),
+{
+    let o0 = r0.overflow@;
+    let o = r.overflow@;
+    let rs = data.take(r.start as int) + r.bytes@ + data.skip(r.end as int);
+    assert(o.drop_last() =~= o0);
+    assert(o.last() == s);
+    assert forall|i: int| 0 <= i < o.len() implies bslab_ok::<K>(#[trigger] o[i]) by {
+        if i < o0.len() {
+            assert(o[i] == o0[i]);
+        }
+    }
+    assert(bool_values::<K>(rs) + bslabs_values::<K>(o) =~= out + bool_values::<K>(bslab_bytes(s)));
+}
+
+/// A writer that held `v0`, given the partial run of the tail `t` of the
+/// slab `data` (then `w1`) and flushed (then `w`), as `seal` takes it to
+/// carry the tail's counts: what `seal` requires, and the values it then
+/// holds.
+proof fn lemma_seal_tail<K: CountOps>(data: Seq<u8>, read: int, v0: Seq<bool>, w1: BWriter, w: BWriter, t: BTail, j: int)
+    requires
+        tail_ok::<K>(data, read, t, j),
+        v0.len() + bool_values::<K>(data).skip(read).len() + 3 <= usize::MAX,
+        w1.inv::<K>(),
+        w1.vals() == v0 + run_of(t.partial as nat, t.value),
+        t.partial > 0 ==> w1.cur_value == t.value && w1.cur_count > 0,
+        w.inv_w::<K>(),
+        w.cur_count == 0,
+        w.vals() == w1.vals(),
+        w1.cur_count > 0 ==> w.cb@ == w1.cb@.push(w1.cur_count as u64),
+        w1.cur_count == 0 ==> w.cb@ == w1.cb@,
+        w.base@ == w1.base@,
+        w.done@ == w1.done@,
+        w.overflowed == w1.overflowed,
+    ensures
+        ({
+            let rc = bool_counts::<K>(data).skip(j);
+            let f = w.chunk();
+            &&& rc.len() > 0 ==> run_value(f.len() as int) == run_value(j)
+            &&& f.len() > 0 ==> f.last() > 0 && w.cb@.len() > 0
+            &&& w.overflowed ==> w.cb@.len() > 0
+            &&& chunks_values(w.done@).len() + counts_len(f) + counts_len(rc) + 1 <= usize::MAX
+            &&& chunks_values(w.done@) + vals_at(f, 0) + vals_at(rc, j) == v0 + bool_values::<K>(data).skip(read)
+        }),
+{
+    hide(BWriter::inv);
+    hide(BWriter::inv_w);
+    hide(BWriter::vals);
+    let rc = bool_counts::<K>(data).skip(j);
+    let run = run_of(t.partial as nat, t.value);
+    lemma_flushed::<K>(w1, w);
+    lemma_tail_len::<K>(data, read, t, j);
+    if t.partial == 0 {
+        assert(rc.len() == 0);
+    }
+    assert((v0 + run).len() == v0.len() + t.partial);
+    assert(v0 + run + vals_at(rc, j) =~= v0 + (run + vals_at(rc, j)));
 }
 
 impl BEdit {
@@ -962,7 +1927,6 @@ impl BEdit {
     /// What follows the reader. Reads one count — the run the cursor
     /// stands in; everything past it is bytes.
     #[verifier::spinoff_prover]
-    #[verifier::rlimit(150)]
     pub(crate) fn tail_of<K: CountOps>(&self, data: &[u8], slab_len: usize, slab_segments: usize) -> (r: (BTail, Ghost<int>))
         requires
             self.inv::<K>(), data@ == self.data@,
@@ -975,21 +1939,10 @@ impl BEdit {
         // gives Z3 terms to loop on
         hide(BWriter::inv);
         let ghost cs = bool_counts::<K>(data@);
-        let ghost vs = bool_values::<K>(data@);
         let ghost k = bstate_k::<K>(data@, self.dec);
         let data_len = data.len();
         proof {
-            lemma_counts::<K>(cs, data@);
-            lemma_values_len(cs);
-            lemma_values_split(cs, k);
-            lemma_take_bytes_le::<K>(cs, k);
-            assert(cs.take(k) =~= cs.take(k));
-            assert forall|i: int| k <= i < cs.len() implies #[trigger] cs[i] > 0 by {}
-            if k >= 1 {
-                assert(cs.take(k).drop_last() =~= cs.take(k - 1));
-                lemma_vals_len(cs.take(k), 0);
-                lemma_vals_len(cs.take(k - 1), 0);
-            }
+            lemma_reader_at::<K>(data@, self.dec);
         }
         if self.dec.remaining > 0 {
             let partial = self.dec.remaining;
@@ -1001,23 +1954,13 @@ impl BEdit {
                 segments: slab_segments - self.read_segments - 1,
             };
             proof {
-                let rc = cs.skip(k);
-                let a = vals_at(cs.take(k - 1), 0);
-                let run = run_of(cs[k - 1] as nat, run_value(k - 1));
-                assert(vals_at(cs.take(k), 0) == a + run);
-                let lt = counts_len(cs.take(k)) as int;
-                assert(self.read == lt - partial);
-                assert(vs.skip(self.read as int) =~= run_of(partial as nat, t.value) + vals_at(rc, k));
-                lemma_vals_len(rc, k);
-                assert(cs =~= cs.take(k) + rc);
-                lemma_concat::<K>(cs.take(k), rc);
+                lemma_tail_inside::<K>(data@, self.dec, t);
             }
             return (t, Ghost(k));
         }
         if self.dec.byte_pos < data_len {
             proof {
-                lemma_next_count::<K>(data@, cs, k, self.dec.byte_pos as int);
-                lemma_count_le(cs, k);
+                lemma_tail_next::<K>(data@, self.dec);
             }
             let rest = &data[self.dec.byte_pos..];
             assert(rest@ == data@.skip(self.dec.byte_pos as int));
@@ -1026,14 +1969,7 @@ impl BEdit {
                 None => (0, 0),
             };
             proof {
-                K::axiom_enc(count as u64, cs[k], rest@.skip(cb as int), counts_bytes::<K>(cs.skip(k + 1)));
-                assert(rest@ =~= rest@.take(cb as int) + rest@.skip(cb as int));
-                lemma_take_bytes_le::<K>(cs, k + 1);
-                lemma_bytes_len::<K>(cs);
-                assert(cs =~= cs.take(k + 1) + cs.skip(k + 1));
-                lemma_concat::<K>(cs.take(k + 1), cs.skip(k + 1));
-                assert(cs.take(k + 1) =~= cs.take(k).push(cs[k]));
-                lemma_bytes_push::<K>(cs.take(k), cs[k]);
+                lemma_tail_count::<K>(data@, self.dec, cb as int, count as u64);
             }
             let t = BTail {
                 value: !self.dec.value,
@@ -1043,28 +1979,13 @@ impl BEdit {
                 segments: slab_segments - self.read_segments - 1,
             };
             proof {
-                let rc = cs.skip(k + 1);
-                lemma_vals_first(cs.skip(k), k);
-                assert(cs.skip(k).skip(1) =~= rc);
-                assert(cs.skip(k)[0] == cs[k]);
-                assert(vs.skip(self.read as int) =~= vals_at(cs.skip(k), k));
-                lemma_vals_len(rc, k + 1);
-                assert(cs =~= cs.take(k + 1) + rc);
-                lemma_concat::<K>(cs.take(k + 1), rc);
-                assert(cs.take(k + 1) =~= cs.take(k).push(cs[k]));
-                lemma_bytes_push::<K>(cs.take(k), cs[k]);
+                lemma_tail_between::<K>(data@, self.dec, t);
             }
             return (t, Ghost(k + 1));
         }
         proof {
-            if k < cs.len() {
-                lemma_take_bytes_mono::<K>(cs, k, cs.len() as int);
-                assert(cs.take(cs.len() as int) =~= cs);
-            }
-            assert(cs.skip(k) =~= Seq::<u64>::empty());
-            assert(cs.take(k) =~= cs);
-            assert(vs.skip(self.read as int) =~= Seq::<bool>::empty());
-            assert(run_of(0, self.dec.value) + vals_at(cs.skip(k), k) =~= Seq::<bool>::empty());
+            let t = BTail { value: self.dec.value, partial: 0, start: data_len, items: 0, segments: 0 };
+            lemma_tail_end::<K>(data@, self.dec, t);
         }
         (BTail { value: self.dec.value, partial: 0, start: data_len, items: 0, segments: 0 }, Ghost(k))
     }
@@ -1116,7 +2037,6 @@ impl BEdit {
     }
 
     #[verifier::spinoff_prover]
-    #[verifier::rlimit(100)]
     fn seal_first<K: CountOps>(&mut self, data: &[u8], tail_start: usize, raw_items: usize, raw_segs: usize, slab_tail: u8,
         Ghost(j): Ghost<int>) -> (r: BClosed)
         requires
@@ -1151,80 +2071,21 @@ impl BEdit {
             closed_ok::<K>(r, data@, chunks_values(old(self).w.done@) + vals_at(old(self).w.chunk(), 0)
                 + vals_at(bool_counts::<K>(data@).skip(j), j)),
     {
-        let ghost cs = bool_counts::<K>(data@);
-        let ghost rc = cs.skip(j);
+        let ghost rc = bool_counts::<K>(data@).skip(j);
         let ghost f = self.w.chunk();
         let ghost d = self.w.done@;
         let ghost base = self.w.base@;
+        let ghost cb = self.w.cb@;
+        let ghost tail_byte = self.w.tail_byte;
         let data_len = data.len();
         proof {
             reveal(out_ok);
-            lemma_counts::<K>(cs, data@);
-            assert(cs =~= cs.take(j) + rc);
-            lemma_concat::<K>(cs.take(j), rc);
-            lemma_take_bytes_le::<K>(cs, j);
-            lemma_vals_at_concat(f, rc, 0);
-            if rc.len() > 0 {
-                lemma_vals_at_parity(rc, f.len() as int, j);
-            } else {
-                assert(vals_at(rc, f.len() as int) =~= Seq::<bool>::empty());
-                assert(vals_at(rc, j) =~= Seq::<bool>::empty());
-            }
-            lemma_vals_len(f, 0);
-            lemma_vals_len(rc, j);
+            lemma_first_sizes::<K>(base, cb, rc);
         }
         // the slab's last count is unchanged when any tail bytes remain
         let tail = if tail_start < data_len { slab_tail } else { self.w.tail_byte };
         let mut bytes = Vec::new();
         core::mem::swap(&mut self.w.buf, &mut bytes);
-        let ghost fr = f + rc;
-        proof {
-            assert(base.len() <= j);
-            assert(cs.take(j) =~= base + cs.take(j).skip(base.len() as int));
-            lemma_concat::<K>(base, cs.take(j).skip(base.len() as int));
-            lemma_concat::<K>(f, rc);
-            lemma_concat::<K>(base, self.w.cb@);
-            assert(f == base + self.w.cb@);
-            let rs = data@.take(self.byte_start as int) + bytes@ + data@.skip(tail_start as int);
-            assert(data@.take(self.byte_start as int) =~= counts_bytes::<K>(base)) by {
-                assert(data@.take(tail_start as int) == counts_bytes::<K>(cs.take(j)));
-            }
-            assert(data@.skip(tail_start as int) =~= counts_bytes::<K>(rc));
-            assert(rs =~= counts_bytes::<K>(fr));
-            assert(counts_ok(fr)) by {
-                assert forall|i: int| 1 <= i < fr.len() implies #[trigger] fr[i] > 0 by {
-                    if i >= f.len() {
-                        assert(fr[i] == rc[i - f.len()]);
-                    } else {
-                        assert(fr[i] == f[i]);
-                    }
-                }
-                if fr.len() > 0 {
-                    if rc.len() > 0 {
-                        assert(fr.last() == rc.last());
-                    } else {
-                        assert(fr =~= f);
-                    }
-                }
-            }
-            lemma_counts::<K>(fr, rs);
-            lemma_vals_at_zero(fr);
-            assert(chunks_values(d) =~= Seq::<bool>::empty());
-            if rc.len() > 0 {
-                assert(fr.last() == cs.last());
-                assert(rc.last() == cs.last());
-            } else {
-                assert(fr =~= f);
-                if f.len() > 0 {
-                    assert(f.last() == self.w.cb@.last());
-                }
-            }
-            assert(bslabs_values::<K>(Seq::<BSlab>::empty()) =~= Seq::<bool>::empty());
-        }
-        proof {
-            lemma_pre_len(fr);
-            lemma_concat::<K>(base, self.w.cb@);
-        }
         let r = BClosed {
             bytes,
             start: self.byte_start,
@@ -1235,34 +2096,13 @@ impl BEdit {
             overflow: Vec::new(),
         };
         proof {
-            let rs = data@.take(r.start as int) + r.bytes@ + data@.skip(r.end as int);
-            assert(bool_values::<K>(rs) + bslabs_values::<K>(r.overflow@) =~= bool_values::<K>(rs));
-            assert(r.start <= r.end <= data@.len());
-            assert(bool_valid::<K>(rs));
-            let cr = bool_counts::<K>(rs);
-            assert(cr == fr);
-            assert(r.len == counts_len(cr));
-            assert(r.segments == cr.len());
-            if tail_start < data_len {
-                if rc.len() == 0 {
-                    assert(cs.take(j) =~= cs);
-                }
-                assert(rc.last() == cs.last());
-            } else {
-                if rc.len() > 0 {
-                    lemma_take_bytes_mono::<K>(cs, j, cs.len() as int);
-                    assert(cs.take(cs.len() as int) =~= cs);
-                }
-                assert(fr =~= f);
-            }
-            assert(r.tail == counts_tail::<K>(cr));
-            assert(bool_values::<K>(rs) == chunks_values(d) + vals_at(f, 0) + vals_at(rc, j));
+            lemma_sealed_first::<K>(r, data@, j, base, cb, tail_byte, slab_tail);
+            assert(chunks_values(d) + vals_at(f, 0) + vals_at(rc, j) =~= vals_at(f, 0) + vals_at(rc, j));
         }
         r
     }
 
     #[verifier::spinoff_prover]
-    #[verifier::rlimit(100)]
     fn seal_spilled<K: CountOps>(&mut self, data: &[u8], tail_start: usize, raw_items: usize, raw_segs: usize, slab_tail: u8,
         Ghost(j): Ghost<int>) -> (r: BClosed)
         requires
@@ -1299,46 +2139,13 @@ impl BEdit {
     {
         let ghost cs = bool_counts::<K>(data@);
         let ghost rc = cs.skip(j);
-        let ghost f = self.w.chunk();
-        let ghost d = self.w.done@;
-        let ghost base = self.w.base@;
-        let ghost fr = f + rc;
+        let ghost w0 = self.w;
         let data_len = data.len();
         proof {
-            reveal(out_ok);
-            lemma_counts::<K>(cs, data@);
-            assert(cs =~= cs.take(j) + rc);
-            lemma_concat::<K>(cs.take(j), rc);
-            lemma_take_bytes_le::<K>(cs, j);
-            lemma_vals_at_concat(f, rc, 0);
-            if rc.len() > 0 {
-                lemma_vals_at_parity(rc, f.len() as int, j);
-            } else {
-                assert(vals_at(rc, f.len() as int) =~= Seq::<bool>::empty());
-                assert(vals_at(rc, j) =~= Seq::<bool>::empty());
-            }
-            lemma_vals_len(f, 0);
-            lemma_vals_len(rc, j);
-            assert(f =~= self.w.cb@);
-            lemma_concat::<K>(f, rc);
-            lemma_chunks_first(d);
-            lemma_vals_len(d[0], 0);
-            lemma_concat::<K>(base, self.w.out_cb@);
-            assert(counts_ok(fr)) by {
-                assert forall|i: int| 1 <= i < fr.len() implies #[trigger] fr[i] > 0 by {
-                    if i >= f.len() {
-                        assert(fr[i] == rc[i - f.len()]);
-                    } else {
-                        assert(fr[i] == f[i]);
-                    }
-                }
-                if rc.len() > 0 {
-                    assert(fr.last() == rc.last());
-                } else {
-                    assert(fr =~= f);
-                }
-            }
-            lemma_pre_len(fr);
+            lemma_out_first::<K>(w0.base@, w0.done@, w0.out_cb@, w0.out_bytes@, w0.out_emitted, w0.out_segments, w0.out_tail,
+                w0.overflow@);
+            lemma_first_sizes::<K>(Seq::empty(), w0.cb@, rc);
+            lemma_split_at::<K>(data@, cs, j);
         }
         // the slab's last count is unchanged when any tail bytes remain
         let tail = if tail_start < data_len { slab_tail } else { self.w.tail_byte };
@@ -1347,29 +2154,12 @@ impl BEdit {
         // the chunk in hand and the carried tail are a new slab
         let rest = &data[tail_start..];
         assert(rest@ == data@.skip(tail_start as int));
-        proof {
-            assert(rest@ =~= counts_bytes::<K>(rc));
-            if tail_start < data_len {
-                if rc.len() == 0 {
-                    assert(cs.take(j) =~= cs);
-                }
-                assert(fr.last() == rc.last());
-                assert(rc.last() == cs.last());
-            } else {
-                if rc.len() > 0 {
-                    lemma_take_bytes_mono::<K>(cs, j, cs.len() as int);
-                    assert(cs.take(cs.len() as int) =~= cs);
-                }
-                assert(fr =~= f);
-                assert(f.last() == self.w.cb@.last());
-            }
-        }
         let mut last = bytes;
         extend_vec(&mut last, rest);
         let s = new_bslab_vec(last, self.w.emitted + raw_items, self.w.segments + raw_segs, tail);
+        let ghost s0 = s;
         let mut overflow = Vec::new();
         core::mem::swap(&mut self.w.overflow, &mut overflow);
-        let ghost o0 = overflow@;
         overflow.push(s);
         let mut first = Vec::new();
         core::mem::swap(&mut self.w.out_bytes, &mut first);
@@ -1383,41 +2173,7 @@ impl BEdit {
             overflow,
         };
         proof {
-            let rs = data@.take(r.start as int) + r.bytes@ + data@.skip(r.end as int);
-            let d0 = d[0];
-            assert(data@.skip(data_len as int) =~= Seq::<u8>::empty());
-            assert(cs =~= base + cs.skip(base.len() as int));
-            lemma_concat::<K>(base, cs.skip(base.len() as int));
-            assert(data@.take(self.byte_start as int) =~= counts_bytes::<K>(base));
-            assert(rs =~= counts_bytes::<K>(d0));
-            lemma_counts::<K>(d0, rs);
-            lemma_vals_at_zero(d0);
-            // the slabs: those cut after the first, then the last
-            let ds = d.skip(1).push(fr);
-            assert forall|i: int| 0 <= i < r.overflow@.len() implies bslab_bytes(#[trigger] r.overflow@[i]) == counts_bytes::<K>(ds[i])
-                && counts_ok(ds[i]) && counts_len(ds[i]) <= usize::MAX by {
-                if i < o0.len() {
-                    assert(r.overflow@[i] == o0[i]);
-                    assert(ds[i] == d[i + 1]);
-                    lemma_chunk_le(d, i + 1);
-                    lemma_vals_len(d[i + 1], 0);
-                } else {
-                    assert(ds[i] == fr);
-                }
-            }
-            assert forall|i: int| 0 <= i < r.overflow@.len() implies bslab_ok::<K>(#[trigger] r.overflow@[i]) by {
-                lemma_counts::<K>(ds[i], bslab_bytes(r.overflow@[i]));
-                if i < o0.len() {
-                    assert(r.overflow@[i] == o0[i]);
-                    assert(ds[i] == d[i + 1]);
-                }
-            }
-            lemma_slabs_chunks::<K>(r.overflow@, ds);
-            assert(ds.drop_last() =~= d.skip(1));
-            assert(chunks_values(ds) == chunks_values(d.skip(1)) + vals_at(fr, 0));
-            lemma_vals_at_zero(fr);
-            assert(bool_values::<K>(rs) + bslabs_values::<K>(r.overflow@)
-                =~= chunks_values(d) + vals_at(f, 0) + vals_at(rc, j));
+            lemma_sealed_spilled::<K>(r, data@, j, w0, s0, slab_tail);
         }
         r
     }
@@ -1426,7 +2182,6 @@ impl BEdit {
     /// through untouched (or, if they would overfill the slab, as a slab
     /// of their own).
     #[verifier::spinoff_prover]
-    #[verifier::rlimit(100)]
     pub(crate) fn close<K: CountOps>(&mut self, data: &[u8], slab_len: usize, slab_segments: usize, slab_tail: u8) -> (r: BClosed)
         requires
             old(self).inv::<K>(), data@ == old(self).data@,
@@ -1464,7 +2219,6 @@ impl BEdit {
 
     /// The tail does not fit: it becomes a slab of its own.
     #[verifier::spinoff_prover]
-    #[verifier::rlimit(100)]
     fn close_spill<K: CountOps>(&mut self, data: &[u8], slab_tail: u8, t: &BTail, Ghost(j): Ghost<int>) -> (r: BClosed)
         requires
             old(self).inv::<K>(), data@ == old(self).data@,
@@ -1478,45 +2232,31 @@ impl BEdit {
         let ghost vs = bool_values::<K>(data@);
         let ghost read = self.read as int;
         let ghost v0 = self.vals();
-        proof {
-            reveal(out_ok);
-            lemma_counts::<K>(cs, data@);
-            lemma_take_bytes_le::<K>(cs, cs.len() as int);
-            lemma_take_bytes_le::<K>(cs, self.w.base@.len() as int);
-            assert(cs.take(cs.len() as int) =~= cs);
-        }
+        let ghost e0 = *self;
         self.w.flush_run::<K>();
         self.w.cur_count = 0;
         proof {
-            assert(cs.skip(cs.len() as int) =~= Seq::<u64>::empty());
-            assert(run_of(0, self.w.cur_value) =~= Seq::<bool>::empty());
-            assert(self.w.vals() =~= chunks_values(self.w.done@) + vals_at(self.w.chunk(), 0));
-            assert(vals_at(Seq::<u64>::empty(), cs.len() as int) =~= Seq::<bool>::empty());
-            lemma_vals_len(self.w.chunk(), 0);
-            lemma_chunks_len(self.w.done@, self.w.chunk(), 0, self.w.cur_value);
-            assert(counts_len(Seq::<u64>::empty()) == 0);
+            lemma_head_bytes::<K>(e0);
+            lemma_seal_whole::<K>(data@, e0.w, self.w);
         }
         let r0 = self.seal::<K>(data, data.len(), 0, 0, slab_tail, Ghost(cs.len() as int));
         let spill = into_slab::<K>(t, data, slab_tail, Ghost(read), Ghost(j));
         let mut r = r0;
+        let ghost r1 = r;
+        proof {
+            if spill is None {
+                assert(v0 + vs.skip(read) =~= v0);
+            }
+        }
         match spill {
             Some(s) => {
-                let ghost o0 = r.overflow@;
+                let ghost s0 = s;
                 r.overflow.push(s);
                 proof {
-                    assert(r.overflow@.drop_last() =~= o0);
-                    assert forall|i: int| 0 <= i < r.overflow@.len() implies bslab_ok::<K>(#[trigger] r.overflow@[i]) by {
-                        if i < o0.len() {
-                            assert(r.overflow@[i] == o0[i]);
-                        }
-                    }
+                    lemma_closed_push::<K>(r1, r, data@, v0, s0);
                 }
             },
             None => {},
-        }
-        proof {
-            let rs = data@.take(r.start as int) + r.bytes@ + data@.skip(r.end as int);
-            assert(bool_values::<K>(rs) + bslabs_values::<K>(r.overflow@) =~= v0 + vs.skip(read));
         }
         r
     }
@@ -1525,7 +2265,6 @@ impl BEdit {
     /// other, which merges it with the pending run when the parities
     /// agree, and pads or cuts when they do not.
     #[verifier::spinoff_prover]
-    #[verifier::rlimit(100)]
     fn close_fit<K: CountOps>(&mut self, data: &[u8], slab_tail: u8, t: &BTail, Ghost(j): Ghost<int>) -> (r: BClosed)
         requires
             old(self).inv::<K>(), data@ == old(self).data@,
@@ -1535,53 +2274,23 @@ impl BEdit {
         ensures
             closed_ok::<K>(r, data@, old(self).vals() + bool_values::<K>(data@).skip(old(self).read as int)),
     {
-        let ghost cs = bool_counts::<K>(data@);
-        let ghost vs = bool_values::<K>(data@);
-        let ghost rc = cs.skip(j);
-        let ghost read = self.read as int;
-        let ghost v0 = self.vals();
+        let ghost e0 = *self;
         proof {
-            reveal(out_ok);
-            lemma_counts::<K>(cs, data@);
-            lemma_vals_len(rc, j);
-            lemma_take_bytes_le::<K>(cs, self.w.base@.len() as int);
-            assert(vs.skip(read).len() == t.partial + counts_len(rc));
+            lemma_tail_len::<K>(data@, self.read as int, *t, j);
         }
         self.w.push::<K>(t.value, t.partial);
-        let ghost v1 = self.w.vals();
-        let ghost cur1 = self.w.cur_count;
-        let ghost val1 = self.w.cur_value;
-        let ghost c1 = self.w.chunk();
-        let ghost cb1 = self.w.cb@;
+        let ghost w1 = self.w;
         self.w.flush_run::<K>();
         self.w.cur_count = 0;
         proof {
-            assert(run_of(0, self.w.cur_value) =~= Seq::<bool>::empty());
-            assert(self.w.vals() =~= chunks_values(self.w.done@) + vals_at(self.w.chunk(), 0));
-            lemma_vals_len(self.w.chunk(), 0);
-            lemma_chunks_len(self.w.done@, self.w.chunk(), 0, self.w.cur_value);
-            if t.partial > 0 {
-                assert(val1 == t.value);
-                assert(self.w.chunk() == c1.push(cur1 as u64));
-                assert(run_value(self.w.chunk().len() as int) == !t.value);
-            } else {
-                assert(rc.len() == 0);
-            }
-            if cur1 > 0 {
-                assert(self.w.cb@ == cb1.push(cur1 as u64));
-            }
+            lemma_head_bytes::<K>(e0);
+            lemma_seal_tail::<K>(data@, e0.read as int, e0.vals(), w1, self.w, *t, j);
         }
-        let r = self.seal::<K>(data, t.start, t.items, t.segments, slab_tail, Ghost(j));
-        proof {
-            assert(v1 == v0 + run_of(t.partial as nat, t.value));
-            assert(v0 + vs.skip(read) =~= v1 + vals_at(rc, j));
-        }
-        r
+        self.seal::<K>(data, t.start, t.items, t.segments, slab_tail, Ghost(j))
     }
 
     /// Open a rebuild of the valid slab `data` at item `at`.
     #[verifier::spinoff_prover]
-    #[verifier::rlimit(60)]
     #[allow(unused_assignments)] // the scan's results are set where it stops
     pub(crate) fn open<K: CountOps>(data: &[u8], at: usize, max_segments: usize, buf: Vec<u8>) -> (e: Self)
         requires
@@ -1589,12 +2298,19 @@ impl BEdit {
         ensures
             e.inv::<K>(), e.data@ == data@, e.read == at, e.vals() == bool_values::<K>(data@).take(at as int),
     {
+        hide(BEdit::inv);
+        hide(BWriter::inv);
+        hide(BWriter::vals);
+        hide(bool_parses);
+        hide(bool_values);
+        hide(counts_bytes);
+        hide(counts_len);
+        hide(vals_at);
+        hide(run_of);
         let ghost cs = bool_counts::<K>(data@);
         let len = data.len();
         proof {
-            lemma_counts::<K>(cs, data@);
-            lemma_values_len(cs);
-            assert(cs.take(0) =~= Seq::<u64>::empty());
+            lemma_scan_start::<K>(data@);
         }
         let mut byte = 0usize;
         let mut item = 0usize;
@@ -1631,17 +2347,9 @@ impl BEdit {
                 i == cs.len() ==> off == 0 && cbytes == 0 && count == 0 && item == at,
             decreases cs.len() - i,
         {
-            proof {
-                lemma_take_bytes_le::<K>(cs, i);
-            }
             if byte >= len {
                 proof {
-                    if i < cs.len() {
-                        lemma_take_bytes_mono::<K>(cs, i, cs.len() as int);
-                        assert(cs.take(cs.len() as int) =~= cs);
-                    }
-                    assert(cs.take(i) =~= cs);
-                    assert(i == cs.len());
+                    lemma_scan_end::<K>(data@, cs, i);
                 }
                 header = byte;
                 off = 0;
@@ -1651,7 +2359,6 @@ impl BEdit {
             }
             proof {
                 lemma_next_count::<K>(data@, cs, i, byte as int);
-                lemma_count_le(cs, i);
             }
             let rest = &data[byte..];
             assert(rest@ == data@.skip(byte as int));
@@ -1660,18 +2367,7 @@ impl BEdit {
                 None => (0, 0),
             };
             proof {
-                K::axiom_enc(c as u64, cs[i], rest@.skip(cb as int), counts_bytes::<K>(cs.skip(i + 1)));
-                assert(rest@ =~= rest@.take(cb as int) + rest@.skip(cb as int));
-                assert(cs.take(i + 1).drop_last() =~= cs.take(i));
-                lemma_values_take(cs, i + 1);
-                assert(cs.take(i + 1) =~= cs.take(i).push(cs[i]));
-                lemma_bytes_push::<K>(cs.take(i), cs[i]);
-                lemma_take_bytes_le::<K>(cs, i + 1);
-                assert(cs =~= cs.take(i + 1) + cs.skip(i + 1));
-                lemma_concat::<K>(cs.take(i + 1), cs.skip(i + 1));
-                assert(counts_len(cs.take(i + 1)) <= counts_len(cs));
-                assert(item + c == counts_len(cs.take(i + 1)));
-                lemma_bytes_len::<K>(cs);
+                lemma_scan_count::<K>(data@, cs, i, cb as int, c as u64);
             }
             if item + c > at {
                 header = byte;
@@ -1693,6 +2389,11 @@ impl BEdit {
             }
         }
         let ghost i = i;
+        proof {
+            if i >= 1 {
+                lemma_count_le(cs.take(i), i - 1);
+            }
+        }
         // The pending run must not be empty, or a push of the opposite
         // parity would have to merge into a run already encoded in the
         // head: on a run boundary, back up one run and re-encode it.
@@ -1705,29 +2406,8 @@ impl BEdit {
         };
         let ghost base = cs.take(prefix_segments as int);
         proof {
-            assert(counts_pre(base)) by {
-                assert forall|j: int| 1 <= j < base.len() implies #[trigger] base[j] > 0 by {
-                    assert(base[j] == cs[j]);
-                }
-            }
-            if off > 0 {
-                lemma_values_run_take(cs, i, off as int);
-            } else if prev is Some {
-                assert(cs.take(i).drop_last() =~= cs.take(i - 1));
-                lemma_values_run_take(cs, i - 1, cs[i - 1] as int);
-                assert(counts_len(cs.take(i - 1)) + cs[i - 1] == counts_len(cs.take(i)));
-            } else {
-                assert(base =~= Seq::<u64>::empty());
-                assert(counts_len(cs.take(i)) == 0) by {
-                    if i == 1 {
-                        assert(cs.take(1).drop_last() =~= cs.take(0));
-                    }
-                }
-                lemma_values_take(cs, 0);
-                assert(counts_bytes::<K>(base) =~= Seq::<u8>::empty());
-            }
-            lemma_vals_at_zero(base);
-            lemma_values_len(base);
+            lemma_open_head::<K>(data@, cs, i, at as int, off as int, prev, byte_start as int, prefix_segments as int,
+                head_len as int, cur_value, cur_count as int);
         }
         let w = BWriter::new::<K>(cur_value, cur_count, prefix_segments, max_segments, buf, Ghost(base));
         // the reader: inside the run `at` falls in, or past the last run
@@ -1738,17 +2418,7 @@ impl BEdit {
         };
         let e = BEdit { w, head_len, byte_start, dec, read_segments: segments, read: at, data: Ghost(data@) };
         proof {
-            let k = if i < cs.len() { i + 1 } else { i };
-            if i < cs.len() {
-                lemma_bytes_push::<K>(cs.take(i), cs[i]);
-                assert(cs.take(i + 1) =~= cs.take(i).push(cs[i]));
-                assert(cs.take(i + 1).drop_last() =~= cs.take(i));
-            }
-            assert(dstate_at::<K>(cs, dec, k));
-            lemma_k_unique::<K>(cs, dec, bstate_k::<K>(data@, dec), k);
-            if i < cs.len() {
-                assert(counts_len(cs.take(i + 1)) == counts_len(cs.take(i)) + cs[i]);
-            }
+            lemma_opened::<K>(e, data@, cs, i, prefix_segments as int, off as int);
         }
         e
     }

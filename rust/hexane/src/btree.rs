@@ -892,6 +892,13 @@ pub proof fn lemma_passed_step<A: OrdPrefix>(s: Seq<A>, target: A::Prefix, n: in
     }
 }
 
+/// No slab end is passed before the first.
+pub proof fn lemma_passed_none<A: OrdPrefix>(s: Seq<A>, target: A::Prefix)
+    ensures passed(s, target, 0),
+{
+    reveal(passed);
+}
+
 /// When the prefix stays reached, passing slab ends means none reached.
 pub proof fn lemma_passed_first<A: OrdPrefix>(s: Seq<A>, target: A::Prefix, n: int)
     requires passed(s, target, n), stays_reached(s, target), n <= s.len(),
@@ -931,6 +938,136 @@ pub proof fn lemma_valid_subrange<A: SlabAggregate>(s: Seq<A>, a: int, b: int)
     }
 }
 
+/// A sequence has nothing before or after it, and none of it is empty.
+pub proof fn lemma_part_all<T>(s: Seq<T>)
+    ensures
+        Seq::<T>::empty() + s + Seq::<T>::empty() == s,
+        s.take(0) == Seq::<T>::empty(),
+{
+    assert(Seq::<T>::empty() + s + Seq::<T>::empty() =~= s);
+    assert(s.take(0) =~= Seq::<T>::empty());
+}
+
+/// No slabs hold no items, and their aggregate is the empty one.
+pub proof fn lemma_sum_len_none<A: SlabAggregate>()
+    ensures
+        sum_len(Seq::<A>::empty()) == 0,
+        fold(Seq::<A>::empty()) == A::spec_empty(),
+{
+}
+
+/// The prefix of no slabs is zero.
+pub proof fn lemma_pre_none<A: PrefixAggregate>(s: Seq<A>)
+    ensures pre_at(s, 0) == A::prefix_zero(),
+{
+    assert(s.subrange(0, 0) =~= Seq::<A>::empty());
+    A::lemma_prefix_empty(A::prefix_zero());
+}
+
+/// Two sequences with the same first `n` items have the same item `i` of
+/// them.
+pub proof fn lemma_same_at<T>(a: Seq<T>, b: Seq<T>, n: int, i: int)
+    requires
+        0 <= i < n,
+        n <= a.len(),
+        n <= b.len(),
+        a.subrange(0, n) == b.subrange(0, n),
+    ensures a[i] == b[i],
+{
+    assert(a.subrange(0, n)[i] == a[i]);
+    assert(b.subrange(0, n)[i] == b[i]);
+}
+
+/// All of a sequence is the sequence.
+pub proof fn lemma_take_all<T>(s: Seq<T>)
+    ensures s.take(s.len() as int) == s,
+{
+    assert(s.take(s.len() as int) =~= s);
+}
+
+/// What lies before the middle of `left + mid + right`, and how its
+/// items divide.
+pub proof fn lemma_part_front<A: SlabAggregate>(view: Seq<A>, left: Seq<A>, mid: Seq<A>, right: Seq<A>)
+    requires view == left + mid + right,
+    ensures
+        view.take(left.len() as int) == left,
+        sum_len(view) == sum_len(left) + sum_len(mid) + sum_len(right),
+{
+    assert(view.take(left.len() as int) =~= left);
+    lemma_sum_len_concat(left, mid);
+    lemma_sum_len_concat(left + mid, right);
+}
+
+/// With nothing before or after it, the middle of `left + mid + right`
+/// is the whole.
+pub proof fn lemma_part_whole<A: SlabAggregate>(view: Seq<A>, left: Seq<A>, mid: Seq<A>, right: Seq<A>)
+    requires
+        view == left + mid + right,
+        left.len() == 0,
+        right.len() == 0,
+    ensures
+        view == mid,
+        view.take(view.len() as int) == view,
+        sum_len(left) == 0,
+{
+    assert(view =~= mid);
+    assert(view.take(view.len() as int) =~= view);
+}
+
+/// With nothing after it, the middle of `left + mid + right` ends the whole.
+pub proof fn lemma_part_end<A: SlabAggregate>(view: Seq<A>, left: Seq<A>, mid: Seq<A>, right: Seq<A>)
+    requires
+        view == left + mid + right,
+        right.len() == 0,
+    ensures
+        view.take(view.len() as int) == left + mid,
+        sum_len(left + mid) == sum_len(left) + sum_len(mid),
+{
+    assert(view.take(view.len() as int) =~= left + mid);
+    lemma_sum_len_concat(left, mid);
+}
+
+/// Slab `i` of a leaf whose slabs `aggs` lie between `left` and `right`:
+/// where it is in the whole, and the items before and after it.
+pub proof fn lemma_leaf_at<A: SlabAggregate>(view: Seq<A>, left: Seq<A>, aggs: Seq<A>, right: Seq<A>, i: int)
+    requires
+        view == left + aggs + right,
+        0 <= i < aggs.len(),
+    ensures
+        view[left.len() + i] == aggs[i],
+        view.take(left.len() + i) == left + aggs.take(i),
+        sum_len(left + aggs.take(i)) == sum_len(left) + sum_len(aggs.take(i)),
+        sum_len(aggs.take(i + 1)) == sum_len(aggs.take(i)) + aggs[i].spec_len(),
+        sum_len(aggs.take(i + 1)) <= sum_len(aggs),
+        sum_len(view) == sum_len(left) + sum_len(aggs) + sum_len(right),
+{
+    assert(view.take(left.len() + i) =~= left + aggs.take(i));
+    lemma_sum_len_concat(left, aggs.take(i));
+    assert(aggs.take(i + 1).drop_last() =~= aggs.take(i));
+    assert(aggs =~= aggs.take(i + 1) + aggs.skip(i + 1));
+    lemma_sum_len_concat(aggs.take(i + 1), aggs.skip(i + 1));
+    lemma_sum_len_concat(left, aggs);
+    lemma_sum_len_concat(left + aggs, right);
+}
+
+/// A front of `s`, cut in two, gives two pieces of `s`.
+pub proof fn lemma_front_cut<T>(s: Seq<T>, a: int, b: int)
+    requires 0 <= a <= b <= s.len(),
+    ensures
+        s.subrange(0, b).subrange(0, a) == s.subrange(0, a),
+        s.subrange(0, b).subrange(a, b) == s.subrange(a, b),
+{
+    assert(s.subrange(0, b).subrange(0, a) =~= s.subrange(0, a));
+    assert(s.subrange(0, b).subrange(a, b) =~= s.subrange(a, b));
+}
+
+/// Replacing an item within one part of a concatenation.
+pub proof fn lemma_update_in_part<T>(p: Seq<T>, c: Seq<T>, q: Seq<T>, i: int, v: T)
+    requires 0 <= i < c.len(),
+    ensures (p + c + q).update(p.len() + i, v) == p + c.update(i, v) + q,
+{
+    assert((p + c + q).update(p.len() + i, v) =~= p + c.update(i, v) + q);
+}
 
 /// `s` with `a..b` replaced by `n`.
 pub open spec fn spliced<T>(s: Seq<T>, a: int, b: int, n: Seq<T>) -> Seq<T> {
@@ -986,17 +1123,23 @@ pub proof fn lemma_splice_piece<T>(
     let q_k1 = if last { start + m + (pk1 - end) } else { start + cut_k1 };
     let c = s.subrange(pk, pk1);
     let piece = spliced(c, lo, hi, n.subrange(cut_k, cut_k1));
-    lemma_spliced_index(s, start, end, n);
+    assert(f.len() == s.len() - (end - start) + m);
     assert(piece.len() == q_k1 - q_k);
     assert forall|i: int| 0 <= i < piece.len() implies #[trigger] piece[i] == f[q_k + i] by {
+        // where the item is in the result, and what is there
+        let j = q_k + i;
         if i < lo {
             assert(piece[i] == c[i]);
             assert(c[i] == s[pk + i]);
+            assert(f[j] == s[j]);
         } else if i < lo + (cut_k1 - cut_k) {
             assert(piece[i] == n[cut_k + i - lo]);
+            assert(f[j] == n[j - start]);
         } else {
-            assert(piece[i] == c[hi + i - lo - (cut_k1 - cut_k)]);
-            assert(c[hi + i - lo - (cut_k1 - cut_k)] == s[pk + hi + i - lo - (cut_k1 - cut_k)]);
+            let x = hi + i - lo - (cut_k1 - cut_k);
+            assert(piece[i] == c[x]);
+            assert(c[x] == s[pk + x]);
+            assert(f[j] == s[end + (j - start - m)]);
         }
     }
     assert(piece =~= f.subrange(q_k, q_k1));
@@ -1254,6 +1397,69 @@ impl<A: SlabAggregate> SlabBTree<A> {
         }
     }
 
+    /// Child `k` of an internal node whose slabs lie between `left` and
+    /// `right` in `view`: its slabs, what lies before them, and its cached
+    /// counts.
+    proof fn lemma_child_at(
+        &self,
+        view: Seq<A>,
+        left: Seq<A>,
+        right: Seq<A>,
+        id: NodeId,
+        h: nat,
+        n: Internal<A>,
+        k: int,
+    )
+        requires
+            self.wf_node(id, h),
+            self.node_spec(id) == Some(Node::Internal(n)),
+            0 <= k < n.children@.len(),
+            view == left + self.children_slabs(n.children@, (h - 1) as nat) + right,
+        ensures
+            ({
+                let cs = n.children@;
+                let hc = (h - 1) as nat;
+                let before = self.children_slabs(cs.take(k), hc);
+                let mid = self.slabs(cs[k].id, hc);
+                let rest = self.children_slabs(cs.skip(k + 1), hc);
+                let p = (left.len() + before.len()) as int;
+                &&& h > 0
+                &&& self.wf_node(cs[k].id, hc)
+                &&& cs[k].slab_count == mid.len()
+                &&& mid.len() > 0
+                &&& cs[k].agg.spec_len() == sum_len(mid)
+                &&& self.children_slabs(cs.take(k + 1), hc) == before + mid
+                &&& view == (left + before) + mid + (rest + right)
+                &&& view.take(p) == left + before
+                &&& view.subrange(p, p + mid.len()) == mid
+                &&& sum_len(left + before) == sum_len(left) + sum_len(before)
+                &&& sum_len(before + mid) == sum_len(before) + sum_len(mid)
+                &&& sum_len(self.children_slabs(cs, hc)) == sum_len(before) + sum_len(mid) + sum_len(rest)
+                &&& sum_len(view) == sum_len(left) + sum_len(self.children_slabs(cs, hc)) + sum_len(right)
+                &&& valid(view) ==> cs[k].agg == fold(view.subrange(p, p + mid.len()))
+            }),
+    {
+        let cs = n.children@;
+        let hc = (h - 1) as nat;
+        let before = self.children_slabs(cs.take(k), hc);
+        let mid = self.slabs(cs[k].id, hc);
+        let rest = self.children_slabs(cs.skip(k + 1), hc);
+        let p = (left.len() + before.len()) as int;
+        self.lemma_child(id, h, n, k);
+        self.lemma_children_slabs_split(cs, k, hc);
+        self.lemma_children_slabs_push(cs, k, hc);
+        lemma_seq_part(left, before, mid, rest, right);
+        assert(view.take(p) =~= left + before);
+        lemma_sum_len_concat(left, before);
+        lemma_sum_len_concat(before, mid);
+        lemma_sum_len_concat(before + mid, rest);
+        lemma_sum_len_concat(left, self.children_slabs(cs, hc));
+        lemma_sum_len_concat(left + self.children_slabs(cs, hc), right);
+        if valid(view) {
+            lemma_valid_subrange(view, p, p + mid.len());
+        }
+    }
+
     /// A well-formed subtree has one height.
     proof fn lemma_height_unique(&self, id: NodeId, h1: nat, h2: nat)
         requires self.wf_node(id, h1), self.wf_node(id, h2),
@@ -1390,6 +1596,14 @@ impl<A: SlabAggregate> SlabBTree<A> {
             r.spec_len() == sum_len(self.slabs(id, h)),
             valid(self.slabs(id, h)) ==> r == fold(self.slabs(id, h)),
     {
+        // the node's slabs, their counts and their folds are reasoned about
+        // through lemmas alone: unfolding them here only gives the solver
+        // room to wander
+        hide(SlabBTree::slabs);
+        hide(SlabBTree::children_slabs);
+        hide(sum_len);
+        hide(fold);
+        hide(valid);
         let ghost cs = n.children@;
         let ghost hc = (h - 1) as nat;
         let ghost all = self.children_slabs(cs, hc);
@@ -1399,8 +1613,9 @@ impl<A: SlabAggregate> SlabBTree<A> {
         let mut acc = A::empty();
         proof {
             A::lemma_empty(acc);
-            assert(cs.take(0) =~= Seq::<ChildSlot<A>>::empty());
-            self.lemma_children_slabs_split(cs, 0, hc);
+            lemma_part_all(cs);
+            self.lemma_slots_nil(hc);
+            lemma_sum_len_none::<A>();
         }
         let mut k: usize = 0;
         while k < n.children.len()
@@ -1413,30 +1628,56 @@ impl<A: SlabAggregate> SlabBTree<A> {
                 valid(all) ==> acc == fold(self.children_slabs(cs.take(k as int), hc)),
             decreases cs.len() - k,
         {
-            let ghost before = self.children_slabs(cs.take(k as int), hc);
-            let ghost mid = self.slabs(cs[k as int].id, hc);
-            proof {
-                self.lemma_child(id, h, *n, k as int);
-                self.lemma_children_slabs_split(cs, k as int, hc);
-                self.lemma_children_slabs_push(cs, k as int, hc);
-                let (p, q) = (before.len() as int, (before.len() + mid.len()) as int);
-                assert(all.subrange(0, p) =~= before);
-                assert(all.subrange(p, q) =~= mid);
-                assert(all.subrange(0, q) =~= before + mid);
-                assert(all =~= all.subrange(0, q) + all.subrange(q, all.len() as int));
-                lemma_sum_len_concat(before, mid);
-                lemma_sum_len_concat(all.subrange(0, q), all.subrange(q, all.len() as int));
-                if valid(all) {
-                    lemma_valid_subrange(all, p, q);
-                    lemma_fold_split(all, 0, p, q);
-                    assert(A::merge_ok(fold(all.subrange(0, p)), fold(all.subrange(p, q))));
-                }
-            }
+            proof { self.lemma_fold_child(id, h, *n, k as int); }
             acc = A::merge(&acc, &n.children[k].agg);
             k += 1;
         }
-        assert(cs.take(k as int) =~= cs);
+        proof { lemma_take_all(cs); }
         acc
+    }
+
+    /// Child `k` of a well-formed internal node, for folding the children
+    /// from the left: its cached aggregate counts its slabs' items, which
+    /// with those before it are no more than the node's; and where the
+    /// node's slabs are valid, it merges with the fold of the slabs before
+    /// it into the fold of both.
+    proof fn lemma_fold_child(&self, id: NodeId, h: nat, n: Internal<A>, k: int)
+        requires
+            self.wf_node(id, h),
+            self.node_spec(id) == Some(Node::Internal(n)),
+            0 <= k < n.children@.len(),
+        ensures ({
+            let cs = n.children@;
+            let hc = (h - 1) as nat;
+            let before = self.children_slabs(cs.take(k), hc);
+            let upto = self.children_slabs(cs.take(k + 1), hc);
+            let all = self.slabs(id, h);
+            &&& sum_len(upto) == sum_len(before) + cs[k].agg.spec_len()
+            &&& sum_len(upto) <= sum_len(all)
+            &&& valid(all) ==> A::merge_ok(fold(before), cs[k].agg)
+                && fold(upto) == A::spec_merge(fold(before), cs[k].agg)
+        }),
+    {
+        let cs = n.children@;
+        let hc = (h - 1) as nat;
+        let all = self.children_slabs(cs, hc);
+        let before = self.children_slabs(cs.take(k), hc);
+        let mid = self.slabs(cs[k].id, hc);
+        self.lemma_child(id, h, n, k);
+        self.lemma_children_slabs_split(cs, k, hc);
+        self.lemma_children_slabs_push(cs, k, hc);
+        let (p, q) = (before.len() as int, (before.len() + mid.len()) as int);
+        assert(all.subrange(0, p) =~= before);
+        assert(all.subrange(p, q) =~= mid);
+        assert(all.subrange(0, q) =~= before + mid);
+        assert(all =~= all.subrange(0, q) + all.subrange(q, all.len() as int));
+        lemma_sum_len_concat(before, mid);
+        lemma_sum_len_concat(all.subrange(0, q), all.subrange(q, all.len() as int));
+        if valid(all) {
+            lemma_valid_subrange(all, p, q);
+            lemma_fold_split(all, 0, p, q);
+            assert(A::merge_ok(fold(all.subrange(0, p)), fold(all.subrange(p, q))));
+        }
     }
 
     fn node_mut(&mut self, id: NodeId) -> (r: &mut Node<A>)
@@ -1515,27 +1756,42 @@ impl<A: SlabAggregate> SlabBTree<A> {
             final(self).free == old(self).free,
         decreases h,
     {
+        // the subtrees' readings are reasoned about through lemmas alone:
+        // unfolding them here only gives the solver room to wander
+        hide(SlabBTree::slabs);
+        hide(SlabBTree::children_slabs);
+        hide(SlabBTree::owned);
+        hide(SlabBTree::children_owned);
+        hide(sum_len);
         let ghost t0 = *self;
         let (child_idx, child_id, remaining) = match self.node(id) {
             Node::Leaf(_) => {
+                proof {
+                    let l0 = match t0.node_spec(id) { Some(Node::Leaf(l)) => l, _ => arbitrary() };
+                    t0.lemma_wf_leaf(id, h, l0);
+                }
                 let r = self.node_mut(id);
                 if let Node::Leaf(l) = r {
                     l.aggs[idx] = new_agg;
                 }
                 proof {
+                    let l1 = match self.node_spec(id) { Some(Node::Leaf(l)) => l, _ => arbitrary() };
+                    self.lemma_wf_leaf(id, h, l1);
                     assert forall|x: NodeId| !t0.owned(id, h).contains(x)
                         implies #[trigger] self.node_spec(x) == t0.node_spec(x) by {
                         assert(t0.owned(id, h).contains(id));
                     }
-                    assert(self.owned(id, h) =~= t0.owned(id, h));
-                    assert(self.slabs(id, h) =~= t0.slabs(id, h).update(idx as int, new_agg));
                 }
                 return;
             },
             Node::Internal(n) => {
                 let ghost cs = n.children@;
                 let ghost hc = (h - 1) as nat;
-                proof { self.lemma_child(id, h, *n, 0); }
+                proof {
+                    self.lemma_child(id, h, *n, 0);
+                    self.lemma_slots_nil(hc);
+                    lemma_part_all(cs);
+                }
                 let mut remaining = idx;
                 let mut k: usize = 0;
                 let ghost len = n.children.len();
@@ -1555,18 +1811,13 @@ impl<A: SlabAggregate> SlabBTree<A> {
                     let c = &n.children[k];
                     proof {
                         self.lemma_child(id, h, *n, k as int);
-                        self.lemma_children_slabs_split(cs, k as int, hc);
                         self.lemma_children_slabs_push(cs, k as int, hc);
                     }
                     if remaining < c.slab_count {
                         break;
                     }
                     remaining -= c.slab_count;
-                    proof {
-                        if k + 1 == cs.len() {
-                            assert(cs.take(k + 1) =~= cs);
-                        }
-                    }
+                    proof { lemma_take_all(cs); }
                     k += 1;
                 }
                 (k, n.children[k].id, remaining)
@@ -1575,119 +1826,199 @@ impl<A: SlabAggregate> SlabBTree<A> {
         let ghost n0 = match t0.node_spec(id) { Some(Node::Internal(n)) => n, _ => arbitrary() };
         let ghost cs = n0.children@;
         let ghost hc = (h - 1) as nat;
-        let ghost before = t0.children_slabs(cs.take(child_idx as int), hc);
-        let ghost mid = t0.slabs(child_id, hc);
-        let ghost after = t0.children_slabs(cs.skip(child_idx + 1), hc);
-        let ghost all = t0.slabs(id, h);
-        let ghost new_all = all.update(idx as int, new_agg);
         proof {
             assert(child_idx < cs.len());
             assert(child_id == cs[child_idx as int].id);
-            assert(before.len() + remaining == idx);
-            t0.lemma_child(id, h, n0, child_idx as int);
-            t0.lemma_children_slabs_split(cs, child_idx as int, hc);
-            // the child's slabs, updated, are a run of the node's
-            let (p, q) = (before.len() as int, (before.len() + mid.len()) as int);
-            assert(new_all.subrange(p, q) =~= mid.update(remaining as int, new_agg));
-            lemma_sum_len_sub(new_all, p, q);
+            assert(t0.children_slabs(cs.take(child_idx as int), hc).len() + remaining == idx);
+            t0.lemma_update_child(id, h, n0, child_idx as int, remaining as int, new_agg);
         }
         self.update_rec(child_id, Ghost(hc), remaining, new_agg);
         let ghost t1 = *self;
-        proof {
-            // siblings and this node are untouched
-            assert forall|j: int| 0 <= j < cs.len() && j != child_idx implies
-                t1.slabs(#[trigger] cs[j].id, hc) == t0.slabs(cs[j].id, hc)
-                && t1.owned(cs[j].id, hc) == t0.owned(cs[j].id, hc)
-                && t1.wf_node(cs[j].id, hc) == t0.wf_node(cs[j].id, hc) by {
-                t0.lemma_child(id, h, n0, j);
-                assert forall|x: NodeId| t0.owned(cs[j].id, hc).contains(x) implies
-                    t0.node_spec(x) == t1.node_spec(x) by {
-                    assert(!t0.owned(child_id, hc).contains(x));
-                }
-                Self::lemma_frame(&t0, &t1, cs[j].id, hc);
-            }
-            assert(t1.node_spec(id) == t0.node_spec(id));
-        }
         let new_child_agg = self.subtree_agg(child_id, Ghost(hc));
         let r = self.node_mut(id);
         if let Node::Internal(p) = r {
             p.children[child_idx].agg = new_child_agg;
         }
         proof {
-            let t2 = *self;
-            let n2 = match t2.node_spec(id) { Some(Node::Internal(n)) => n, _ => arbitrary() };
-            let cs2 = n2.children@;
-            assert(cs2 == cs.update(child_idx as int, ChildSlot { agg: new_child_agg, ..cs[child_idx as int] }));
-            // every child subtree is untouched by rewriting this node
-            assert forall|j: int| 0 <= j < cs.len() implies
-                t2.slabs(#[trigger] cs[j].id, hc) == t1.slabs(cs[j].id, hc)
-                && t2.owned(cs[j].id, hc) == t1.owned(cs[j].id, hc)
-                && t2.wf_node(cs[j].id, hc) == t1.wf_node(cs[j].id, hc) by {
-                t0.lemma_child(id, h, n0, j);
-                assert forall|x: NodeId| t1.owned(cs[j].id, hc).contains(x) implies
-                    t1.node_spec(x) == t2.node_spec(x) by {}
-                Self::lemma_frame(&t1, &t2, cs[j].id, hc);
-            }
-            assert(cs2.len() == cs.len());
-            assert forall|j: int| 0 <= j < cs.len() implies #[trigger] cs2[j].id == cs[j].id
-                && cs2[j].slab_count == cs[j].slab_count
-                && (j != child_idx ==> cs2[j].agg == cs[j].agg) by {}
-            // what each child stands for now
-            let new_mid = mid.update(remaining as int, new_agg);
-            assert forall|j: int| 0 <= j < cs.len() implies
-                t2.owned(#[trigger] cs2[j].id, hc) == t0.owned(cs[j].id, hc)
-                && t2.slabs(cs2[j].id, hc) == (if j == child_idx { new_mid } else { t0.slabs(cs[j].id, hc) })
-                && t2.wf_node(cs2[j].id, hc) by {
-                t0.lemma_child(id, h, n0, j);
-            }
-            // the node's slabs: before + the updated child + after
-            t2.lemma_children_slabs_split(cs2, child_idx as int, hc);
-            assert forall|i: int| 0 <= i < cs.take(child_idx as int).len() implies
-                t2.slabs(#[trigger] cs2.take(child_idx as int)[i].id, hc) == t0.slabs(cs.take(child_idx as int)[i].id, hc)
-                && t2.owned(cs2.take(child_idx as int)[i].id, hc) == t0.owned(cs.take(child_idx as int)[i].id, hc) by {
-                assert(cs2.take(child_idx as int)[i] == cs2[i]);
-                assert(cs.take(child_idx as int)[i] == cs[i]);
-            }
-            Self::lemma_children_congr(&t2, cs2.take(child_idx as int), &t0, cs.take(child_idx as int), hc);
-            assert forall|i: int| 0 <= i < cs.skip(child_idx + 1).len() implies
-                t2.slabs(#[trigger] cs2.skip(child_idx + 1)[i].id, hc) == t0.slabs(cs.skip(child_idx + 1)[i].id, hc)
-                && t2.owned(cs2.skip(child_idx + 1)[i].id, hc) == t0.owned(cs.skip(child_idx + 1)[i].id, hc) by {
-                assert(cs2.skip(child_idx + 1)[i] == cs2[child_idx + 1 + i]);
-                assert(cs.skip(child_idx + 1)[i] == cs[child_idx + 1 + i]);
-            }
-            Self::lemma_children_congr(&t2, cs2.skip(child_idx + 1), &t0, cs.skip(child_idx + 1), hc);
-            assert(t2.slabs(id, h) == t2.children_slabs(cs2, hc));
-            assert(t2.slabs(id, h) =~= new_all);
-            // its nodes
-            Self::lemma_children_congr_owned(&t2, cs2, &t0, cs, hc);
-            assert(t2.owned(id, h) =~= t0.owned(id, h));
-            // nothing outside the subtree changed
-            t0.lemma_children_owned_contains(cs, child_idx as int, hc);
-            // and it is well formed
-            assert forall|j: int| 0 <= j < cs2.len() implies {
-                let c = #[trigger] cs2[j];
-                &&& t2.wf_node(c.id, hc)
-                &&& !t2.owned(c.id, hc).contains(id)
-                &&& c.slab_count == t2.slabs(c.id, hc).len()
-                &&& c.slab_count > 0
-                &&& valid(t2.slabs(c.id, hc)) ==> c.agg == fold(t2.slabs(c.id, hc))
-                &&& c.agg.spec_len() == sum_len(t2.slabs(c.id, hc))
-            } by {
-                t0.lemma_child(id, h, n0, j);
-            }
-            assert forall|i: int, j: int| 0 <= i < j < cs2.len() implies
-                #[trigger] t2.owned(cs2[i].id, hc).disjoint(#[trigger] t2.owned(cs2[j].id, hc)) by {
-                t0.lemma_child(id, h, n0, i);
-                t0.lemma_child(id, h, n0, j);
-            }
-            assert(t2.wf_node(id, h));
-            assert forall|x: NodeId| !t0.owned(id, h).contains(x)
-                implies #[trigger] t2.node_spec(x) == t0.node_spec(x) by {
-                assert(t0.owned(id, h).contains(id));
-                assert(!t0.owned(child_id, hc).contains(x));
-                assert(t1.node_spec(x) == t0.node_spec(x));
-            }
+            let n2 = match self.node_spec(id) { Some(Node::Internal(n)) => n, _ => arbitrary() };
+            assert(n2.children@ == cs.update(child_idx as int, ChildSlot { agg: new_child_agg, ..cs[child_idx as int] }));
+            Self::lemma_update_step(&t0, &t1, self, id, h, n0, child_idx as int, remaining as int, idx as int,
+                new_agg, new_child_agg);
         }
+    }
+
+    /// What replacing slab `rem` of child `k` of a well-formed internal
+    /// node asks of the child: it is well formed, has that slab, and with
+    /// the slab replaced holds no more items than the node then does.  The
+    /// node is none of the child's.
+    proof fn lemma_update_child(&self, id: NodeId, h: nat, n: Internal<A>, k: int, rem: int, new_agg: A)
+        requires
+            self.wf_node(id, h),
+            self.node_spec(id) == Some(Node::Internal(n)),
+            0 <= k < n.children@.len(),
+            0 <= rem < n.children@[k].slab_count,
+        ensures ({
+            let cs = n.children@;
+            let hc = (h - 1) as nat;
+            let mid = self.slabs(cs[k].id, hc);
+            let idx = self.children_slabs(cs.take(k), hc).len() + rem;
+            &&& h > 0
+            &&& self.wf_node(cs[k].id, hc)
+            &&& !self.owned(cs[k].id, hc).contains(id)
+            &&& rem < mid.len()
+            &&& idx < self.slabs(id, h).len()
+            &&& sum_len(mid.update(rem, new_agg)) <= sum_len(self.slabs(id, h).update(idx, new_agg))
+        }),
+    {
+        let cs = n.children@;
+        let hc = (h - 1) as nat;
+        let before = self.children_slabs(cs.take(k), hc);
+        let mid = self.slabs(cs[k].id, hc);
+        let idx = before.len() + rem;
+        let new_all = self.slabs(id, h).update(idx, new_agg);
+        self.lemma_child(id, h, n, k);
+        self.lemma_children_slabs_split(cs, k, hc);
+        // the child's slabs, updated, are a run of the node's
+        let (p, q) = (before.len() as int, (before.len() + mid.len()) as int);
+        assert(new_all.subrange(p, q) =~= mid.update(rem, new_agg));
+        lemma_sum_len_sub(new_all, p, q);
+    }
+
+    /// Replacing slab `rem` of child `k` of a well-formed internal node
+    /// `id`, and then the child's cached aggregate in its slot, replaces
+    /// slab `idx` of the node and touches no node but the node's own: `t0`
+    /// is the tree before, `t1` once the child is done, `t2` once the slot
+    /// is rewritten.
+    proof fn lemma_update_step(
+        t0: &Self, t1: &Self, t2: &Self, id: NodeId, h: nat, n0: Internal<A>, k: int, rem: int, idx: int,
+        new_agg: A, child_agg: A,
+    )
+        requires
+            t0.wf_node(id, h),
+            t0.node_spec(id) == Some(Node::Internal(n0)),
+            0 <= k < n0.children@.len(),
+            0 <= rem < n0.children@[k].slab_count,
+            ({
+                let cs = n0.children@;
+                let hc = (h - 1) as nat;
+                let c = cs[k].id;
+                &&& idx == t0.children_slabs(cs.take(k), hc).len() + rem
+                &&& sum_len(t0.slabs(id, h).update(idx, new_agg)) <= usize::MAX
+                &&& t1.wf_node(c, hc)
+                &&& t1.slabs(c, hc) == t0.slabs(c, hc).update(rem, new_agg)
+                &&& t1.owned(c, hc) == t0.owned(c, hc)
+                &&& forall|x: NodeId| !t0.owned(c, hc).contains(x) ==> #[trigger] t1.node_spec(x) == t0.node_spec(x)
+                &&& child_agg.spec_len() == sum_len(t1.slabs(c, hc))
+                &&& valid(t1.slabs(c, hc)) ==> child_agg == fold(t1.slabs(c, hc))
+                &&& t2.node_spec(id) matches Some(Node::Internal(n2))
+                    && n2.children@ == cs.update(k, ChildSlot { agg: child_agg, ..cs[k] })
+                &&& forall|x: NodeId| x != id ==> #[trigger] t2.node_spec(x) == t1.node_spec(x)
+            }),
+        ensures
+            t2.wf_node(id, h),
+            t2.slabs(id, h) == t0.slabs(id, h).update(idx, new_agg),
+            t2.owned(id, h) == t0.owned(id, h),
+            forall|x: NodeId| !t0.owned(id, h).contains(x) ==> #[trigger] t2.node_spec(x) == t0.node_spec(x),
+    {
+        hide(SlabBTree::wf_node);
+        hide(SlabBTree::slabs);
+        hide(SlabBTree::children_slabs);
+        hide(SlabBTree::owned);
+        hide(SlabBTree::children_owned);
+        hide(sum_len);
+        hide(fold);
+        hide(valid);
+        let cs = n0.children@;
+        let hc = (h - 1) as nat;
+        let c = cs[k].id;
+        let slot = ChildSlot { agg: child_agg, ..cs[k] };
+        let n2 = match t2.node_spec(id) { Some(Node::Internal(n)) => n, _ => arbitrary() };
+        let cs2 = n2.children@;
+        // the node before: good slots that don't contain it
+        t0.lemma_wf_internal(id, h, n0);
+        t0.lemma_not_in_children(cs, hc, id);
+        t0.lemma_slot(cs, hc, k);
+        t0.lemma_children_owned_contains(cs, k, hc);
+        // its slots after
+        Self::lemma_slot_changed(t0, t1, t2, cs, hc, k, id, slot);
+        // its slabs: before + the updated child + after
+        t0.lemma_children_slabs_split(cs, k, hc);
+        lemma_update_in_part(
+            t0.children_slabs(cs.take(k), hc), t0.slabs(c, hc), t0.children_slabs(cs.skip(k + 1), hc), rem, new_agg,
+        );
+        // and it is well formed
+        assert forall|i: int| 0 <= i < cs2.len() implies !t2.owned(#[trigger] cs2[i].id, hc).contains(id) by {
+            t2.lemma_children_owned_contains(cs2, i, hc);
+        }
+        t2.lemma_wf_internal(id, h, n2);
+    }
+
+    /// A good slot list `cs` whose slot `k` has its subtree changed and is
+    /// then rewritten as `slot` to match: `t0` is the tree before, `t1`
+    /// once the subtree is changed, which keeps its nodes and touches no
+    /// others, and `t2` once node `id`, which is none of the slots', is
+    /// rewritten as well.  The new list is good, owns the nodes the old one
+    /// did, and reads as the old one did around the subtree's new slabs.
+    proof fn lemma_slot_changed(
+        t0: &Self, t1: &Self, t2: &Self, cs: Seq<ChildSlot<A>>, h: nat, k: int, id: NodeId, slot: ChildSlot<A>,
+    )
+        requires
+            t0.slots_ok(cs, h),
+            0 <= k < cs.len(),
+            !t0.children_owned(cs, h).contains(id),
+            t1.wf_node(cs[k].id, h),
+            t1.owned(cs[k].id, h) == t0.owned(cs[k].id, h),
+            forall|x: NodeId| !t0.owned(cs[k].id, h).contains(x) ==> #[trigger] t1.node_spec(x) == t0.node_spec(x),
+            forall|x: NodeId| x != id ==> #[trigger] t2.node_spec(x) == t1.node_spec(x),
+            slot.id == cs[k].id,
+            slot.slab_count == t1.slabs(slot.id, h).len(),
+            slot.slab_count > 0,
+            valid(t1.slabs(slot.id, h)) ==> slot.agg == fold(t1.slabs(slot.id, h)),
+            slot.agg.spec_len() == sum_len(t1.slabs(slot.id, h)),
+        ensures
+            t2.slots_ok(cs.update(k, slot), h),
+            t2.children_slabs(cs.update(k, slot), h)
+                == t0.children_slabs(cs.take(k), h) + t1.slabs(slot.id, h) + t0.children_slabs(cs.skip(k + 1), h),
+            t2.children_owned(cs.update(k, slot), h) == t0.children_owned(cs, h),
+            !t2.children_owned(cs.update(k, slot), h).contains(id),
+    {
+        hide(SlabBTree::wf_node);
+        hide(SlabBTree::slabs);
+        hide(SlabBTree::children_slabs);
+        hide(SlabBTree::owned);
+        hide(SlabBTree::children_owned);
+        hide(sum_len);
+        hide(fold);
+        hide(valid);
+        let c = cs[k].id;
+        let (pre, post) = (cs.subrange(0, k), cs.subrange(k + 1, cs.len() as int));
+        let changed = t0.owned(c, h).insert(id);
+        // the slots before and after share nothing with the subtree, nor
+        // with each other
+        t0.lemma_children_owned_contains(cs, k, h);
+        t0.lemma_slots_sub(cs, 0, k, h);
+        t0.lemma_slots_sub(cs, k + 1, cs.len() as int, h);
+        Self::lemma_child_apart(t0, cs, k, h);
+        // the subtree is as its change left it, and its new slot is good
+        Self::lemma_frame(t1, t2, c, h);
+        t2.lemma_slot_one(slot, h);
+        // the slots before and after are untouched
+        Self::lemma_slots_keep(t0, t2, pre, h, changed);
+        Self::lemma_slots_keep(t0, t2, post, h, changed);
+        assert forall|x: NodeId| #[trigger] t0.children_owned(pre, h).contains(x) implies t0.node_spec(x) is Some by {
+            t0.lemma_slots_live(pre, h, x);
+        }
+        assert forall|x: NodeId| #[trigger] t0.children_owned(post, h).contains(x) implies t0.node_spec(x) is Some by {
+            t0.lemma_slots_live(post, h, x);
+        }
+        Self::lemma_child_join(t2, pre, seq![slot], post, h, id, t0, c);
+        assert(cs.update(k, slot) =~= pre + seq![slot] + post);
+        assert(cs.take(k) == pre && cs.skip(k + 1) == post);
+        // the nodes are the ones the old list owned
+        assert(cs =~= pre + seq![cs[k]] + post);
+        t0.lemma_children_slabs_one(cs[k], h);
+        t0.lemma_children_owned_concat(pre, seq![cs[k]], h);
+        t0.lemma_children_owned_concat(pre + seq![cs[k]], post, h);
     }
 
     // ── Splice ──────────────────────────────────────────────────────────
@@ -1782,16 +2113,29 @@ impl<A: SlabAggregate> SlabBTree<A> {
             final(self).total_slabs == old(self).total_slabs,
         decreases h, 2nat,
     {
+        // the subtrees' readings, the slot counts and the splice's result
+        // are reasoned about through lemmas alone: unfolding them here only
+        // gives the solver room to wander
+        hide(SlabBTree::slabs);
+        hide(SlabBTree::children_slabs);
+        hide(SlabBTree::owned);
+        hide(SlabBTree::children_owned);
+        hide(sum_len);
+        hide(counts);
+        hide(spliced);
         if h == 0 {
             proof {
                 if let Some(Node::Internal(n)) = old(self).node_spec(id) {
                     old(self).lemma_wf_internal(id, 0, n);
                 }
+                if let Some(Node::Leaf(l)) = old(self).node_spec(id) {
+                    old(self).lemma_wf_leaf(id, 0, l);
+                }
             }
             let r = self.splice_leaf(id, start, end, new);
             proof {
-                assert(old(self).owned(id, 0).contains(id));
                 assert(old(self).owned(id, 0) == set![id]);
+                assert(old(self).owned(id, 0).contains(id));
             }
             return r;
         }
@@ -1810,27 +2154,16 @@ impl<A: SlabAggregate> SlabBTree<A> {
             old(self).lemma_wf_internal(id, hn, n0);
             old(self).lemma_not_in_children(cs, hc, id);
             old(self).lemma_counts(cs, hc, cs.len() as int);
-            assert(cs.take(cs.len() as int) =~= cs);
-            Self::lemma_counts_mono(cs);
+            lemma_take_all(cs);
         }
         let (ks, ke, off_s, off_e) = self.locate_range(id, start, end, Ghost(cs));
         if ks == ke {
             proof {
                 old(self).lemma_slabs_at(cs, hc, ks as int);
-                let (pre, post) = (cs.subrange(0, ks as int), cs.subrange(ks + 1, cs.len() as int));
-                let c = old(self).slabs(cs[ks as int].id, hc);
-                old(self).lemma_children_slabs_split(cs, ks as int, hc);
-                assert(cs.take(ks as int) == pre && cs.skip(ks + 1) == post);
-                lemma_splice_in_part(old(self).children_slabs(pre, hc), c, old(self).children_slabs(post, hc),
-                    start as int, end as int, new0);
-                let piece = spliced(c, start - off_s, end - off_s, new0);
-                let p = old(self).children_slabs(pre, hc).len() as int;
-                assert(f.subrange(p, p + piece.len()) =~= piece);
-                lemma_sum_len_sub(f, p, p + piece.len());
+                old(self).lemma_splice_within(cs, hc, ks as int, start as int, end as int, new0);
             }
             self.splice_child(id, h, ks, start - off_s, end - off_s, new, true);
             proof {
-                old(self).lemma_slabs_at(cs, hc, ks as int);
                 old(self).lemma_children_owned_contains(cs, ks as int, hc);
             }
         } else {
@@ -1872,7 +2205,6 @@ impl<A: SlabAggregate> SlabBTree<A> {
     /// length (so most are overwritten in place), the last one whatever is
     /// left.  They are spliced last to first, so each one's piece splits
     /// off the end of `new` and earlier indices stay put.
-    #[verifier::rlimit(30)]
     fn splice_span(&mut self, id: NodeId, h: usize, ks: usize, ke: usize, off_e: usize,
         start: usize, end: usize, new: Vec<A>, Ghost(cs): Ghost<Seq<ChildSlot<A>>>)
         requires
@@ -1906,6 +2238,16 @@ impl<A: SlabAggregate> SlabBTree<A> {
             final(self).total_slabs == old(self).total_slabs,
         decreases h, 1nat,
     {
+        // the subtrees' readings, the slot counts and the splice's result
+        // are reasoned about through lemmas alone: unfolding them here only
+        // gives the solver room to wander
+        hide(SlabBTree::slabs);
+        hide(SlabBTree::children_slabs);
+        hide(SlabBTree::owned);
+        hide(SlabBTree::children_owned);
+        hide(sum_len);
+        hide(counts);
+        hide(spliced);
         let ghost hn = h as nat;
         let ghost hc = (h - 1) as nat;
         let ghost sl = old(self).children_slabs(cs, hc);
@@ -1913,7 +2255,7 @@ impl<A: SlabAggregate> SlabBTree<A> {
         let ghost m = new0.len() as int;
         let ghost f = spliced(sl, start as int, end as int, new0);
         let ghost off_s = counts(cs, ks as int);
-        proof { Self::lemma_counts_mono(cs); }
+        proof { Self::lemma_counts_le(cs, ks + 1, ke as int); }
         // The range spans children ks..=ke.  Each takes its overlap and
         // the piece of `new` that would cover it at the same length (so
         // most are overwritten in place), the last one whatever is
@@ -1924,14 +2266,7 @@ impl<A: SlabAggregate> SlabBTree<A> {
         let mut k = ke;
         let mut off = off_e;
         proof {
-            assert(cs.subrange(0, ke + 1) + cs.subrange(ke + 1, cs.len() as int) =~= cs);
-            old(self).lemma_slabs_at(cs, hc, ke as int);
-            old(self).lemma_slabs_tail(cs, hc, ke + 1);
-            lemma_spliced_index(sl, start as int, end as int, new0);
-            let q = share_at(ke + 1, ks as int, ke as int, m, start as int, end as int, counts(cs, ke + 1) as int);
-            assert(f.subrange(q, f.len() as int) =~= sl.subrange(counts(cs, ke + 1) as int, sl.len() as int));
-            assert(new@ =~= new0.subrange(0, cut_at(ke + 1, ks as int, ke as int, m, start as int, counts(cs, ke + 1) as int)));
-            old(self).lemma_slots_nil(hc);
+            old(self).lemma_span_start(cs, hc, ks as int, ke as int, start as int, end as int, new0);
         }
         loop
             invariant_except_break
@@ -1939,8 +2274,7 @@ impl<A: SlabAggregate> SlabBTree<A> {
                 ks <= k <= ke, off == counts(cs, k as int),
                 off_s == counts(cs, ks as int), off_e == counts(cs, ke as int),
                 off_s <= start < counts(cs, ks + 1), off_e < end <= counts(cs, ke + 1),
-                counts(cs, cs.len() as int) == sl.len(), sl.len() <= usize::MAX,
-                forall|i: int, j: int| 0 <= i <= j <= cs.len() ==> #[trigger] counts(cs, i) <= #[trigger] counts(cs, j),
+                start < end <= sl.len(), sl.len() <= usize::MAX,
                 old(self).slots_ok(cs, hc), sl == old(self).children_slabs(cs, hc),
                 f == spliced(sl, start as int, end as int, new0), sum_len(f) <= usize::MAX, f.len() <= usize::MAX,
                 new0.len() == m,
@@ -1983,10 +2317,18 @@ impl<A: SlabAggregate> SlabBTree<A> {
         {
             let ghost t0 = *self;
             let ghost (pk, pk1) = (counts(cs, k as int) as int, counts(cs, k + 1) as int);
+            let ghost l0 = match t0.node_spec(id) { Some(Node::Internal(n)) => n.children@, _ => arbitrary() };
             proof {
                 old(self).lemma_slabs_at(cs, hc, k as int);
                 old(self).lemma_slot(cs, hc, k as int);
                 Self::lemma_untouched_child(old(self), &t0, cs, hc, k as int, id);
+                lemma_same_at(l0, cs, k + 1, k as int);
+                if k > ks {
+                    Self::lemma_counts_le(cs, ks + 1, k as int);
+                }
+                if k < ke {
+                    Self::lemma_counts_le(cs, k + 1, ke as int);
+                }
             }
             let count = match self.node(id) {
                 Node::Internal(n) => n.children[k].slab_count,
@@ -1998,23 +2340,22 @@ impl<A: SlabAggregate> SlabBTree<A> {
             let part = new.split_off(cut);
             proof {
                 lemma_splice_piece(sl, start as int, end as int, new0, pk, pk1, k == ks, k == ke);
-                assert(sl.subrange(pk, pk1) == old(self).slabs(cs[k as int].id, hc));
-                assert(part@ =~= new0.subrange(cut as int, cut_at(k + 1, ks as int, ke as int, m, start as int, pk1)));
+                lemma_front_cut(new0, cut as int, cut_at(k + 1, ks as int, ke as int, m, start as int, pk1));
                 let qk = share_at(k as int, ks as int, ke as int, m, start as int, end as int, pk);
                 let qk1 = share_at(k + 1, ks as int, ke as int, m, start as int, end as int, pk1);
                 lemma_sum_len_sub(f, qk, qk1);
             }
-            let ghost l0 = match t0.node_spec(id) { Some(Node::Internal(n)) => n.children@, _ => arbitrary() };
             let ghost piece = spliced(t0.slabs(cs[k as int].id, hc), lo as int, hi as int, part@);
             self.splice_child(id, h, k, lo, hi, part, false);
             proof {
                 let l2 = match self.node_spec(id) { Some(Node::Internal(n)) => n.children@, _ => arbitrary() };
-                assert(l0[k as int] == cs[k as int]) by {
-                    assert(l0.subrange(0, k + 1)[k as int] == cs.subrange(0, k + 1)[k as int]);
-                };
                 Self::lemma_multi_step(old(self), &t0, self, cs, l0, l2, hc, k as int, id, f,
                     share_at(k as int, ks as int, ke as int, m, start as int, end as int, pk),
                     share_at(k + 1, ks as int, ke as int, m, start as int, end as int, pk1), piece);
+                if k > ks {
+                    lemma_same_at(l2, cs, k as int, k - 1);
+                    old(self).lemma_slabs_at(cs, hc, k - 1);
+                }
             }
             if k == ks {
                 break;
@@ -2024,15 +2365,9 @@ impl<A: SlabAggregate> SlabBTree<A> {
                 Node::Internal(n) => n.children[k].slab_count,
                 Node::Leaf(_) => unreachable!(),
             };
-            proof {
-                old(self).lemma_slabs_at(cs, hc, k as int);
-                assert(new@ =~= new0.subrange(0, cut_at(k + 1, ks as int, ke as int, m, start as int, counts(cs, k + 1) as int)));
-            }
         }
         proof {
-            old(self).lemma_slabs_at(cs, hc, ks as int);
-            lemma_spliced_index(sl, start as int, end as int, new0);
-            assert(f =~= sl.subrange(0, off_s as int) + f.subrange(off_s as int, f.len() as int));
+            old(self).lemma_span_end(cs, hc, ks as int, ke as int, start as int, end as int, new0);
             old(self).lemma_slots_sub(cs, ks as int, cs.len() as int, hc);
         }
     }
@@ -2234,7 +2569,6 @@ impl<A: SlabAggregate> SlabBTree<A> {
     /// replacing its slot with whatever slots come back (freeing it if
     /// none); with `merge`, then merge it into a sibling if it is a leaf
     /// that shrank below B/4.
-    #[verifier::rlimit(30)]
     fn splice_child(&mut self, id: NodeId, h: usize, k: usize, lo: usize, hi: usize, part: Vec<A>, merge: bool)
         requires
             h >= 1,
@@ -2277,6 +2611,15 @@ impl<A: SlabAggregate> SlabBTree<A> {
             final(self).total_slabs == old(self).total_slabs,
         decreases h, 0nat,
     {
+        // the subtrees' readings and the splice's result are reasoned about
+        // through lemmas alone: unfolding them here only gives the solver
+        // room to wander
+        hide(SlabBTree::slabs);
+        hide(SlabBTree::children_slabs);
+        hide(SlabBTree::owned);
+        hide(SlabBTree::children_owned);
+        hide(sum_len);
+        hide(spliced);
         let ghost n0 = match old(self).node_spec(id) { Some(Node::Internal(n)) => n, _ => arbitrary() };
         let ghost cs = n0.children@;
         let ghost hc = (h - 1) as nat;
@@ -2289,6 +2632,7 @@ impl<A: SlabAggregate> SlabBTree<A> {
         let ghost piece = spliced(t0.slabs(child_id, hc), lo as int, hi as int, part@);
         proof {
             t0.lemma_slot(cs, hc, k as int);
+            t0.lemma_owned_self(child_id, hc);
             t0.lemma_children_owned_contains(cs, k as int, hc);
             t0.lemma_slots_sub(cs, 0, k as int, hc);
             t0.lemma_slots_sub(cs, k + 1, cs.len() as int, hc);
@@ -2468,7 +2812,6 @@ impl<A: SlabAggregate> SlabBTree<A> {
     /// Leaf-level only: internal nodes thin ~B× slower than leaves (they
     /// lose a child only when an entire leaf dies), so leaf merging is
     /// where fill degradation actually shows up.
-    #[verifier::rlimit(30)]
     fn maybe_merge_leaf(&mut self, parent_id: NodeId, child_idx: usize)
         requires
             old(self).arena_ok(),
@@ -2496,6 +2839,13 @@ impl<A: SlabAggregate> SlabBTree<A> {
             final(self).root == old(self).root,
             final(self).total_slabs == old(self).total_slabs,
     {
+        // the subtrees' readings are reasoned about through lemmas alone:
+        // unfolding them here only gives the solver room to wander
+        hide(SlabBTree::slabs);
+        hide(SlabBTree::children_slabs);
+        hide(SlabBTree::owned);
+        hide(SlabBTree::children_owned);
+        hide(sum_len);
         let ghost n0 = match old(self).node_spec(parent_id) { Some(Node::Internal(n)) => n, _ => arbitrary() };
         let ghost cs = n0.children@;
         let (sibling_count, my_len) = match self.node(parent_id) {
@@ -2517,9 +2867,8 @@ impl<A: SlabAggregate> SlabBTree<A> {
         let ghost (pre, post) = (cs.subrange(0, d), cs.subrange(sr + 1, cs.len() as int));
         let ghost (dc, sc) = (cs[d], cs[sr]);
         proof {
-            self.lemma_slot(cs, 0, d);
-            self.lemma_slot(cs, 0, sr);
-            self.lemma_pair_slabs(cs, d, 0);
+            // both are leaves (height 0), distinct, and not the parent
+            self.lemma_pair_leaves(cs, d);
         }
         let (dst_id, src_id, combined) = match self.node(parent_id) {
             Node::Internal(p) => (
@@ -2535,21 +2884,6 @@ impl<A: SlabAggregate> SlabBTree<A> {
         let ghost t0 = *self;
         let ghost dl = match t0.node_spec(dst_id) { Some(Node::Leaf(l)) => l, _ => arbitrary() };
         let ghost sl = match t0.node_spec(src_id) { Some(Node::Leaf(l)) => l, _ => arbitrary() };
-        proof {
-            // both are leaves (height 0), distinct, and not the parent
-            assert(t0.wf_node(dst_id, 0) && t0.wf_node(src_id, 0));
-            assert(t0.owned(dst_id, 0) == set![dst_id]) by { if let Some(Node::Internal(_)) = t0.node_spec(dst_id) {} };
-            assert(t0.owned(src_id, 0) == set![src_id]) by { if let Some(Node::Internal(_)) = t0.node_spec(src_id) {} };
-            reveal(SlabBTree::slots_ok);
-            assert(t0.owned(cs[d].id, 0).disjoint(t0.owned(cs[sr].id, 0)));
-            t0.lemma_children_owned_contains(cs, d, 0);
-            t0.lemma_children_owned_contains(cs, sr, 0);
-            assert(dst_id == cs[d].id && src_id == cs[sr].id);
-            assert(t0.owned(dst_id, 0).contains(dst_id));
-            assert(t0.owned(src_id, 0).contains(src_id));
-            assert(dst_id != src_id);
-            assert(dst_id != parent_id && src_id != parent_id);
-        }
         let mut src_aggs = Vec::new();
         let sn = self.node_mut(src_id);
         if let Node::Leaf(l) = sn {
@@ -2565,9 +2899,7 @@ impl<A: SlabAggregate> SlabBTree<A> {
         let ghost t1 = *self;
         let ghost dl2 = match t1.node_spec(dst_id) { Some(Node::Leaf(l)) => l, _ => arbitrary() };
         proof {
-            assert(src_aggs@.len() == 0);
             assert(dl2.aggs@ =~= dl.aggs@ + sl.aggs@);
-            t0.lemma_pair_sum_len(cs, d, 0);
             t1.lemma_wf_leaf(dst_id, 0, dl2);
         }
         let new_agg = self.leaf_agg(dst_id, Ghost(0));
@@ -2601,12 +2933,6 @@ impl<A: SlabAggregate> SlabBTree<A> {
             assert forall|i: int| 0 <= i < self.free@.len() implies
                 (#[trigger] self.free@[i] as int) < self.nodes@.len() && self.nodes@[self.free@[i] as int] is None by {
                 assert(tb.free@[i] == self.free@[i]);
-            }
-            assert forall|x: NodeId| x != parent_id && old(self).node_spec(x) is Some
-                && !t0.children_owned(cs, 0).contains(x)
-                implies #[trigger] self.node_spec(x) == old(self).node_spec(x) by {
-                t0.lemma_children_owned_contains(cs, d, 0);
-                t0.lemma_children_owned_contains(cs, sr, 0);
             }
         }
     }
@@ -2712,7 +3038,6 @@ impl<A: SlabAggregate> SlabBTree<A> {
 
     /// Split `aggs` into leaves (one per chunk), the first being
     /// `first_id`.
-    #[verifier::rlimit(30)]
     fn split_leaf(&mut self, first_id: NodeId, aggs: Vec<A>) -> (r: Vec<ChildSlot<A>>)
         requires
             old(self).arena_ok(),
@@ -2821,7 +3146,6 @@ impl<A: SlabAggregate> SlabBTree<A> {
 
     /// Split `children` (slots one level down) into internal nodes (one
     /// per chunk), the first being `first_id`.
-    #[verifier::rlimit(60)]
     #[verifier::spinoff_prover]
     fn split_internal(&mut self, first_id: NodeId, children: Vec<ChildSlot<A>>, Ghost(h): Ghost<nat>) -> (r: Vec<ChildSlot<A>>)
         requires
@@ -3257,7 +3581,6 @@ impl<A: SlabAggregate> SlabBTree<A> {
     ///
     /// O(log n) — descends the tree by `len`, accumulating `prefix`
     /// and `len` of children visited before the descent.
-    #[verifier::rlimit(40)]
     pub(crate) fn find_slab_at_item(&self, item_idx: usize) -> (r: FoundSlab<A>)
         where A: PrefixAggregate
         requires
@@ -3271,6 +3594,10 @@ impl<A: SlabAggregate> SlabBTree<A> {
             r.index < self@.len() ==> r.pos <= item_idx < r.pos + self@[r.index as int].spec_len(),
             r.index == self@.len() ==> item_idx >= sum_len(self@),
     {
+        // counts and prefixes are reasoned about through lemmas alone:
+        // unfolded here, each gives the solver a last slab to index
+        hide(sum_len);
+        hide(fold);
         let ghost view = self@;
         let ghost mut h = self.height();
         let ghost mut left = Seq::<A>::empty();
@@ -3282,9 +3609,9 @@ impl<A: SlabAggregate> SlabBTree<A> {
         let mut node = self.root;
         proof {
             assert(self.wf_node(self.root, h));
-            assert(self@ =~= left + self.slabs(node, h) + right);
-            assert(view.subrange(0, 0) =~= Seq::<A>::empty());
-            A::lemma_prefix_empty(A::prefix_zero());
+            lemma_part_all(view);
+            lemma_sum_len_none::<A>();
+            lemma_pre_none(view);
         }
         loop
             invariant
@@ -3300,17 +3627,17 @@ impl<A: SlabAggregate> SlabBTree<A> {
             decreases h,
         {
             proof {
-                lemma_sum_len_concat(left, self.slabs(node, h));
-                lemma_sum_len_concat(left + self.slabs(node, h), right);
-                assert(view.subrange(0, left.len() as int) =~= left);
-                lemma_valid_subrange(view, 0, view.len() as int);
-                assert(view.subrange(0, view.len() as int) =~= view);
+                lemma_part_front(view, left, self.slabs(node, h), right);
             }
             match self.node(node) {
                 Node::Leaf(l) => {
                     let ghost aggs = l.aggs@;
                     assert(self.slabs(node, h) == aggs);
                     let mut i: usize = 0;
+                    proof {
+                        lemma_part_all(aggs);
+                        lemma_sum_len_none::<A>();
+                    }
                     while i < l.aggs.len()
                         invariant
                             self.wf(), view == self@, valid(view),
@@ -3328,18 +3655,13 @@ impl<A: SlabAggregate> SlabBTree<A> {
                         let a = &l.aggs[i];
                         let ghost j = left.len() + i;
                         proof {
-                            assert(aggs.take(i + 1).drop_last() =~= aggs.take(i as int));
-                            assert(view.subrange(0, j) =~= left + aggs.take(i as int));
-                            assert(view[j] == aggs[i as int]);
-                            lemma_sum_len_concat(left, aggs.take(i as int));
+                            lemma_leaf_at(view, left, aggs, right, i as int);
                         }
                         let l_len = a.len();
                         if remaining < l_len {
                             return FoundSlab { index: slab_base + i, prefix, pos };
                         }
                         proof {
-                            lemma_valid_subrange(view, 0, view.len() as int);
-                            assert(view.subrange(0, view.len() as int) =~= view);
                             lemma_fold_prefix(view, j, j + 1);
                             lemma_fold_one(view, j);
                         }
@@ -3349,9 +3671,8 @@ impl<A: SlabAggregate> SlabBTree<A> {
                         i += 1;
                     }
                     proof {
-                        assert(aggs.take(i as int) =~= aggs);
-                        assert(view =~= aggs);
-                        assert(view.subrange(0, view.len() as int) =~= view);
+                        lemma_take_all(aggs);
+                        lemma_part_whole(view, left, aggs, right);
                     }
                     return FoundSlab { index: slab_base + l.aggs.len(), prefix, pos };
                 }
@@ -3364,6 +3685,10 @@ impl<A: SlabAggregate> SlabBTree<A> {
                     }
                     assert(self.slabs(node, h) == self.children_slabs(cs, hc));
                     let mut k: usize = 0;
+                    proof {
+                        lemma_part_all(cs);
+                        lemma_sum_len_none::<A>();
+                    }
                     loop
                         invariant_except_break
                             k <= cs.len(), h == h0,
@@ -3393,9 +3718,8 @@ impl<A: SlabAggregate> SlabBTree<A> {
                     {
                         if k == n.children.len() {
                             proof {
-                                assert(cs.take(k as int) =~= cs);
-                                assert(view =~= self.children_slabs(cs, hc));
-                                assert(view.subrange(0, view.len() as int) =~= view);
+                                lemma_take_all(cs);
+                                lemma_part_whole(view, left, self.children_slabs(cs, hc), right);
                             }
                             return FoundSlab { index: slab_base, prefix, pos };
                         }
@@ -3405,31 +3729,20 @@ impl<A: SlabAggregate> SlabBTree<A> {
                         let ghost after = self.children_slabs(cs.skip(k + 1), hc);
                         proof {
                             assert(c == cs[k as int]);
-                            self.lemma_child(node, h, *n, k as int);
-                            self.lemma_children_slabs_split(cs, k as int, hc);
-                            self.lemma_children_slabs_push(cs, k as int, hc);
-                            lemma_sum_len_concat(before, mid);
-                            lemma_sum_len_concat(before + mid, after);
+                            self.lemma_child_at(view, left, right, node, h, *n, k as int);
                         }
                         let c_len = c.agg.len();
                         if remaining < c_len {
                             proof {
-                                lemma_sum_len_concat(left, before);
                                 left = left + before;
                                 right = after + right;
                                 h = hc;
-                                assert(view =~= left + self.slabs(c.id, h) + right);
                             }
                             node = c.id;
                             break;
                         }
                         proof {
-                            let (p, q) = (slab_base as int, slab_base + mid.len());
-                            assert(view.subrange(p, q) =~= mid);
-                            lemma_valid_subrange(view, p, q);
-                            lemma_valid_subrange(view, 0, view.len() as int);
-                            assert(view.subrange(0, view.len() as int) =~= view);
-                            lemma_fold_prefix(view, p, q);
+                            lemma_fold_prefix(view, slab_base as int, slab_base + mid.len());
                         }
                         A::add_prefix(&mut prefix, c.agg.prefix());
                         pos += c_len;
@@ -3453,7 +3766,6 @@ impl<A: SlabAggregate> SlabBTree<A> {
     /// every slab end it passes that reaches `target` is followed, before
     /// the result, by one that doesn't.
     #[verifier::spinoff_prover]
-    #[verifier::rlimit(40)]
     pub(crate) fn find_slab_at_prefix(&self, target: &A::Prefix) -> (r: (usize, A::Prefix, usize))
         where A: OrdPrefix
         requires
@@ -3469,6 +3781,10 @@ impl<A: SlabAggregate> SlabBTree<A> {
             stays_reached(self@, *target)
                 ==> forall|k: int| 0 < k <= r.0 ==> !#[trigger] reached(self@, *target, k),
     {
+        // counts and prefixes are reasoned about through lemmas alone:
+        // unfolded here, each gives the solver a last slab to index
+        hide(sum_len);
+        hide(fold);
         let ghost view = self@;
         let ghost mut h = self.height();
         let ghost mut left = Seq::<A>::empty();
@@ -3479,12 +3795,10 @@ impl<A: SlabAggregate> SlabBTree<A> {
         let mut node = self.root;
         proof {
             assert(self.wf_node(self.root, h));
-            assert(self@ =~= left + self.slabs(node, h) + right);
-            assert(view.subrange(0, 0) =~= Seq::<A>::empty());
-            A::lemma_prefix_empty(A::prefix_zero());
-            reveal(passed);
-            lemma_valid_subrange(view, 0, view.len() as int);
-            assert(view.subrange(0, view.len() as int) =~= view);
+            lemma_part_all(view);
+            lemma_sum_len_none::<A>();
+            lemma_pre_none(view);
+            lemma_passed_none(view, *target);
         }
         loop
             invariant
@@ -3501,15 +3815,17 @@ impl<A: SlabAggregate> SlabBTree<A> {
             decreases h,
         {
             proof {
-                lemma_sum_len_concat(left, self.slabs(node, h));
-                lemma_sum_len_concat(left + self.slabs(node, h), right);
-                assert(view.subrange(0, left.len() as int) =~= left);
+                lemma_part_front(view, left, self.slabs(node, h), right);
             }
             match self.node(node) {
                 Node::Leaf(l) => {
                     let ghost aggs = l.aggs@;
                     assert(self.slabs(node, h) == aggs);
                     let mut i: usize = 0;
+                    proof {
+                        lemma_part_all(aggs);
+                        lemma_sum_len_none::<A>();
+                    }
                     while i < l.aggs.len()
                         invariant
                             self.wf(), view == self@, valid(view),
@@ -3528,16 +3844,9 @@ impl<A: SlabAggregate> SlabBTree<A> {
                         let a = &l.aggs[i];
                         let ghost j = left.len() + i;
                         proof {
-                            assert(aggs.take(i + 1).drop_last() =~= aggs.take(i as int));
-                            assert(view.subrange(0, j) =~= left + aggs.take(i as int));
-                            assert(view[j] == aggs[i as int]);
-                            lemma_sum_len_concat(left, aggs.take(i as int));
+                            lemma_leaf_at(view, left, aggs, right, i as int);
                             lemma_fold_prefix(view, j, j + 1);
                             lemma_fold_one(view, j);
-                            assert(aggs =~= aggs.take(i + 1) + aggs.skip(i + 1));
-                            lemma_sum_len_concat(aggs.take(i + 1), aggs.skip(i + 1));
-                            lemma_sum_len_concat(left, aggs);
-                            lemma_sum_len_concat(left + aggs, right);
                         }
                         let after = A::plus_prefix(&acc_prefix, a.prefix());
                         if A::le_prefix(target, &after) {
@@ -3556,9 +3865,8 @@ impl<A: SlabAggregate> SlabBTree<A> {
                         i += 1;
                     }
                     proof {
-                        assert(aggs.take(i as int) =~= aggs);
-                        assert(view =~= aggs);
-                        assert(view.subrange(0, view.len() as int) =~= view);
+                        lemma_take_all(aggs);
+                        lemma_part_whole(view, left, aggs, right);
                         if stays_reached(view, *target) {
                             lemma_passed_first(view, *target, view.len() as int);
                         }
@@ -3576,6 +3884,8 @@ impl<A: SlabAggregate> SlabBTree<A> {
                     let mut k: usize = 0;
                     proof {
                         assert(sum_len(left) + sum_len(self.children_slabs(cs, hc)) <= usize::MAX);
+                        lemma_part_all(cs);
+                        lemma_sum_len_none::<A>();
                     }
                     loop
                         invariant_except_break
@@ -3609,9 +3919,8 @@ impl<A: SlabAggregate> SlabBTree<A> {
                     {
                         if k == n.children.len() {
                             proof {
-                                assert(cs.take(k as int) =~= cs);
-                                assert(view =~= self.children_slabs(cs, hc));
-                                assert(view.subrange(0, view.len() as int) =~= view);
+                                lemma_take_all(cs);
+                                lemma_part_whole(view, left, self.children_slabs(cs, hc), right);
                                 if stays_reached(view, *target) {
                                     lemma_passed_first(view, *target, view.len() as int);
                                 }
@@ -3625,19 +3934,12 @@ impl<A: SlabAggregate> SlabBTree<A> {
                         let ghost (p, q) = (slab_base as int, slab_base + mid.len());
                         proof {
                             assert(c == cs[k as int]);
-                            self.lemma_child(node, h, *n, k as int);
-                            self.lemma_children_slabs_split(cs, k as int, hc);
-                            self.lemma_children_slabs_push(cs, k as int, hc);
-                            lemma_sum_len_concat(before, mid);
-                            lemma_sum_len_concat(before + mid, rest);
-                            lemma_seq_part(left, before, mid, rest, right);
-                            lemma_valid_subrange(view, p, q);
+                            self.lemma_child_at(view, left, right, node, h, *n, k as int);
                             lemma_fold_prefix(view, p, q);
                         }
                         let after = A::plus_prefix(&acc_prefix, c.agg.prefix());
                         if A::le_prefix(target, &after) {
                             proof {
-                                lemma_sum_len_concat(left, before);
                                 left = left + before;
                                 right = rest + right;
                                 h = hc;
@@ -3727,6 +4029,12 @@ impl<A: SlabAggregate> SlabBTree<A> {
             self.lemma_children_owned_contains(cs.drop_last(), k, h);
             assert(cs.drop_last()[k] == cs[k]);
         }
+    }
+
+    /// A node is among its subtree's nodes.
+    proof fn lemma_owned_self(&self, id: NodeId, h: nat)
+        ensures self.owned(id, h).contains(id),
+    {
     }
 
     /// Every node of a well-formed subtree is live.
@@ -4195,6 +4503,10 @@ impl<A: SlabAggregate> SlabBTree<A> {
                 + (self.owned(cs[d].id, h) + self.owned(cs[d + 1].id, h)) + self.children_owned(post, h)
         }),
     {
+        hide(SlabBTree::slabs);
+        hide(SlabBTree::children_slabs);
+        hide(SlabBTree::owned);
+        hide(SlabBTree::children_owned);
         let (pre, post) = (cs.subrange(0, d), cs.subrange(d + 2, cs.len() as int));
         let (dc, sc) = (cs[d], cs[d + 1]);
         Self::lemma_pair_split(cs, d);
@@ -4210,6 +4522,49 @@ impl<A: SlabAggregate> SlabBTree<A> {
         assert(a + b + c + e =~= a + (b + c) + e);
         let (oa, ob, oc, oe) = (self.children_owned(pre, h), self.owned(dc.id, h), self.owned(sc.id, h), self.children_owned(post, h));
         assert(oa + ob + oc + oe =~= oa + (ob + oc) + oe);
+    }
+
+    /// Two adjacent leaf children `d` and `d + 1` of a good slot list are
+    /// different leaves, both among the list's nodes, each holding the
+    /// slabs its slot counts, which together are a run of the list's.
+    proof fn lemma_pair_leaves(&self, cs: Seq<ChildSlot<A>>, d: int)
+        requires
+            self.slots_ok(cs, 0),
+            0 <= d, d + 1 < cs.len(),
+        ensures
+            cs[d].id != cs[d + 1].id,
+            self.children_owned(cs, 0).contains(cs[d].id),
+            self.children_owned(cs, 0).contains(cs[d + 1].id),
+            self.node_spec(cs[d].id) matches Some(Node::Leaf(dl))
+                && self.node_spec(cs[d + 1].id) matches Some(Node::Leaf(sl)) && {
+                &&& dl.aggs@ == self.slabs(cs[d].id, 0)
+                &&& sl.aggs@ == self.slabs(cs[d + 1].id, 0)
+                &&& dl.aggs@.len() == cs[d].slab_count
+                &&& sl.aggs@.len() == cs[d + 1].slab_count
+                &&& dl.aggs@.len() + sl.aggs@.len() <= self.children_slabs(cs, 0).len()
+                &&& sum_len(self.children_slabs(cs, 0)) <= usize::MAX
+                    ==> sum_len(dl.aggs@ + sl.aggs@) <= usize::MAX
+            },
+    {
+        let (dc, sc) = (cs[d], cs[d + 1]);
+        self.lemma_slot(cs, 0, d);
+        self.lemma_slot(cs, 0, d + 1);
+        if let Some(Node::Leaf(l)) = self.node_spec(dc.id) {
+            self.lemma_wf_leaf(dc.id, 0, l);
+        }
+        if let Some(Node::Leaf(l)) = self.node_spec(sc.id) {
+            self.lemma_wf_leaf(sc.id, 0, l);
+        }
+        assert(self.owned(dc.id, 0).disjoint(self.owned(sc.id, 0))) by {
+            reveal(SlabBTree::slots_ok);
+        }
+        assert(self.owned(dc.id, 0).contains(dc.id) && self.owned(sc.id, 0).contains(sc.id));
+        self.lemma_children_owned_contains(cs, d, 0);
+        self.lemma_children_owned_contains(cs, d + 1, 0);
+        self.lemma_pair_slabs(cs, d, 0);
+        if sum_len(self.children_slabs(cs, 0)) <= usize::MAX {
+            self.lemma_pair_sum_len(cs, d, 0);
+        }
     }
 
     /// The two adjacent children's slabs are a valid run of the node's.
@@ -4433,6 +4788,40 @@ impl<A: SlabAggregate> SlabBTree<A> {
         assert(all.subrange(a.len() as int, (a.len() + b.len()) as int) =~= b);
     }
 
+    /// A splice that falls within slot `k` of a good slot list is a splice
+    /// of that slot's slabs, between the slabs of the slots before and
+    /// after as they were.
+    proof fn lemma_splice_within(&self, cs: Seq<ChildSlot<A>>, h: nat, k: int, start: int, end: int, n: Seq<A>)
+        requires
+            self.slots_ok(cs, h),
+            0 <= k < cs.len(),
+            counts(cs, k) <= start <= end <= counts(cs, k + 1),
+        ensures ({
+            let c = self.slabs(cs[k].id, h);
+            let off = counts(cs, k) as int;
+            let piece = spliced(c, start - off, end - off, n);
+            let f = spliced(self.children_slabs(cs, h), start, end, n);
+            &&& end - off <= c.len()
+            &&& f == self.children_slabs(cs.subrange(0, k), h) + piece
+                + self.children_slabs(cs.subrange(k + 1, cs.len() as int), h)
+            &&& piece.len() <= f.len()
+            &&& sum_len(piece) <= sum_len(f)
+        }),
+    {
+        let (pre, post) = (cs.subrange(0, k), cs.subrange(k + 1, cs.len() as int));
+        let c = self.slabs(cs[k].id, h);
+        let off = counts(cs, k) as int;
+        let piece = spliced(c, start - off, end - off, n);
+        let f = spliced(self.children_slabs(cs, h), start, end, n);
+        self.lemma_slabs_at(cs, h, k);
+        self.lemma_children_slabs_split(cs, k, h);
+        assert(cs.take(k) == pre && cs.skip(k + 1) == post);
+        lemma_splice_in_part(self.children_slabs(pre, h), c, self.children_slabs(post, h), start, end, n);
+        let p = self.children_slabs(pre, h).len() as int;
+        assert(f.subrange(p, p + piece.len()) =~= piece);
+        lemma_sum_len_sub(f, p, p + piece.len());
+    }
+
     /// What a good slot list's slabs past slot `k` are.
     proof fn lemma_slabs_tail(&self, cs: Seq<ChildSlot<A>>, h: nat, k: int)
         requires self.slots_ok(cs, h), 0 <= k <= cs.len(),
@@ -4443,6 +4832,62 @@ impl<A: SlabAggregate> SlabBTree<A> {
         self.lemma_counts(cs, h, k);
         assert(cs =~= cs.subrange(0, k) + cs.subrange(k, cs.len() as int));
         self.lemma_children_slabs_concat(cs.subrange(0, k), cs.subrange(k, cs.len() as int), h);
+    }
+
+    /// Before a multi-child splice has touched a child, the slots stand
+    /// for the result's tail from where child `ke`'s share ends: the slabs
+    /// past the range are as they were.  All of `n` is still to be shared
+    /// out.
+    proof fn lemma_span_start(&self, cs: Seq<ChildSlot<A>>, h: nat, ks: int, ke: int, start: int, end: int, n: Seq<A>)
+        requires
+            self.slots_ok(cs, h),
+            0 <= ks < ke < cs.len(),
+            0 <= start <= end <= counts(cs, ke + 1),
+        ensures ({
+            let sl = self.children_slabs(cs, h);
+            let f = spliced(sl, start, end, n);
+            let m = n.len() as int;
+            let p = counts(cs, ke + 1) as int;
+            &&& end <= sl.len()
+            &&& sl == self.children_slabs(cs.subrange(0, ke + 1), h)
+                + f.subrange(share_at(ke + 1, ks, ke, m, start, end, p), f.len() as int)
+            &&& n == n.subrange(0, cut_at(ke + 1, ks, ke, m, start, p))
+        }),
+    {
+        let sl = self.children_slabs(cs, h);
+        let f = spliced(sl, start, end, n);
+        let p = counts(cs, ke + 1) as int;
+        self.lemma_slabs_at(cs, h, ke);
+        self.lemma_slabs_tail(cs, h, ke + 1);
+        lemma_spliced_index(sl, start, end, n);
+        let q = start + n.len() + (p - end);
+        assert(f.subrange(q, f.len() as int) =~= sl.subrange(p, sl.len() as int));
+        assert(sl.subrange(p, sl.len() as int) =~= self.children_slabs(cs.subrange(ke + 1, cs.len() as int), h));
+        assert(n =~= n.subrange(0, n.len() as int));
+    }
+
+    /// Once a multi-child splice has done child `ks`, the slabs before it
+    /// and the result's tail from its share are the whole result: the
+    /// slabs before the range are as they were.
+    proof fn lemma_span_end(&self, cs: Seq<ChildSlot<A>>, h: nat, ks: int, ke: int, start: int, end: int, n: Seq<A>)
+        requires
+            self.slots_ok(cs, h),
+            0 <= ks < cs.len(),
+            counts(cs, ks) <= start <= end <= self.children_slabs(cs, h).len(),
+        ensures ({
+            let sl = self.children_slabs(cs, h);
+            let f = spliced(sl, start, end, n);
+            let p = counts(cs, ks) as int;
+            f == self.children_slabs(cs.subrange(0, ks), h)
+                + f.subrange(share_at(ks, ks, ke, n.len() as int, start, end, p), f.len() as int)
+        }),
+    {
+        let sl = self.children_slabs(cs, h);
+        let f = spliced(sl, start, end, n);
+        let p = counts(cs, ks) as int;
+        self.lemma_slabs_at(cs, h, ks);
+        lemma_spliced_index(sl, start, end, n);
+        assert(f =~= sl.subrange(0, p) + f.subrange(p, f.len() as int));
     }
 
     /// In the middle of a multi-child splice, child `k` and the ones
@@ -4514,7 +4959,14 @@ impl<A: SlabAggregate> SlabBTree<A> {
                 && !o.children_owned(cs.subrange(k, cs.len() as int), h).contains(x)
                 ==> #[trigger] t.node_spec(x) == o.node_spec(x),
     {
-        assert(l0[k] == cs[k]) by { assert(l0.subrange(0, k + 1)[k] == cs.subrange(0, k + 1)[k]); }
+        hide(SlabBTree::wf_node);
+        hide(SlabBTree::slabs);
+        hide(SlabBTree::children_slabs);
+        hide(SlabBTree::owned);
+        hide(SlabBTree::children_owned);
+        assert(l0.subrange(0, k + 1)[k] == l0[k]);
+        assert(cs.subrange(0, k + 1)[k] == cs[k]);
+        assert(l0[k] == cs[k]);
         assert(l2.subrange(0, k) =~= cs.subrange(0, k)) by {
             assert(l0.subrange(0, k) =~= l0.subrange(0, k + 1).subrange(0, k));
             assert(cs.subrange(0, k) =~= cs.subrange(0, k + 1).subrange(0, k));
@@ -4625,6 +5077,9 @@ impl<A: SlabAggregate> SlabBTree<A> {
                 None => pos >= sum_len(self@),
             },
     {
+        // counts are reasoned about through lemmas alone: unfolded here,
+        // each gives the solver a last slab to index
+        hide(sum_len);
         // the items left to skip within `node`'s subtree
         let ghost mut h = self.height();
         // the slabs left and right of `node`'s subtree
@@ -4636,7 +5091,8 @@ impl<A: SlabAggregate> SlabBTree<A> {
         let mut items_before: usize = 0;
         proof {
             assert(self.wf_node(self.root, h));
-            assert(self@ =~= left + self.slabs(node, h) + right);
+            lemma_part_all(self@);
+            lemma_sum_len_none::<A>();
         }
         loop
             invariant
@@ -4650,14 +5106,17 @@ impl<A: SlabAggregate> SlabBTree<A> {
             decreases h,
         {
             proof {
-                lemma_sum_len_concat(left, self.slabs(node, h));
-                lemma_sum_len_concat(left + self.slabs(node, h), right);
+                lemma_part_front(self@, left, self.slabs(node, h), right);
             }
             match self.node(node) {
                 Node::Leaf(l) => {
                     let ghost aggs = l.aggs@;
                     assert(self.slabs(node, h) == aggs);
                     let mut i: usize = 0;
+                    proof {
+                        lemma_part_all(aggs);
+                        lemma_sum_len_none::<A>();
+                    }
                     while i < l.aggs.len()
                         invariant
                             self.wf(),
@@ -4672,10 +5131,7 @@ impl<A: SlabAggregate> SlabBTree<A> {
                     {
                         let a = &l.aggs[i];
                         proof {
-                            assert(aggs.take(i + 1).drop_last() =~= aggs.take(i as int));
-                            assert(self@.take(left.len() + i) =~= left + aggs.take(i as int));
-                            assert(self@[left.len() + i] == aggs[i as int]);
-                            lemma_sum_len_concat(left, aggs.take(i as int));
+                            lemma_leaf_at(self@, left, aggs, right, i as int);
                         }
                         if rest < a.len() {
                             return Some((slab_idx_base + i, items_before));
@@ -4685,8 +5141,8 @@ impl<A: SlabAggregate> SlabBTree<A> {
                         i += 1;
                     }
                     proof {
-                        assert(aggs.take(i as int) =~= aggs);
-                        assert(self@ =~= aggs);
+                        lemma_take_all(aggs);
+                        lemma_part_whole(self@, left, aggs, right);
                     }
                     return None;
                 }
@@ -4703,6 +5159,10 @@ impl<A: SlabAggregate> SlabBTree<A> {
                     }
                     assert(self.slabs(node, h) == self.children_slabs(cs, hc));
                     let mut k: usize = 0;
+                    proof {
+                        lemma_part_all(cs);
+                        lemma_sum_len_none::<A>();
+                    }
                     loop
                         invariant_except_break
                             k <= cs.len(), h == h0,
@@ -4729,8 +5189,8 @@ impl<A: SlabAggregate> SlabBTree<A> {
                     {
                         if k == n.children.len() {
                             proof {
-                                assert(cs.take(k as int) =~= cs);
-                                assert(self@ =~= self.children_slabs(cs, hc));
+                                lemma_take_all(cs);
+                                lemma_part_whole(self@, left, self.children_slabs(cs, hc), right);
                             }
                             return None;
                         }
@@ -4740,19 +5200,13 @@ impl<A: SlabAggregate> SlabBTree<A> {
                         let ghost after = self.children_slabs(cs.skip(k + 1), hc);
                         proof {
                             assert(c == cs[k as int]);
-                            self.lemma_child(node, h, *n, k as int);
-                            self.lemma_children_slabs_split(cs, k as int, hc);
-                            self.lemma_children_slabs_push(cs, k as int, hc);
-                            lemma_sum_len_concat(before, mid);
-                            lemma_sum_len_concat(before + mid, after);
+                            self.lemma_child_at(self@, left, right, node, h, *n, k as int);
                         }
                         if rest < c.agg.len() {
                             proof {
-                                lemma_sum_len_concat(left, before);
                                 left = left + before;
                                 right = after + right;
                                 h = hc;
-                                assert(self@ =~= left + self.slabs(c.id, h) + right);
                             }
                             node = c.id;
                             break;
@@ -4774,6 +5228,9 @@ impl<A: SlabAggregate> SlabBTree<A> {
         requires self.wf(), slab_idx <= self@.len(),
         ensures r == sum_len(self@.take(slab_idx as int)),
     {
+        // counts are reasoned about through lemmas alone: unfolded here,
+        // each gives the solver a last slab to index
+        hide(sum_len);
         let ghost mut h = self.height();
         // the slabs left and right of `node`'s subtree
         let ghost mut left = Seq::<A>::empty();
@@ -4783,7 +5240,8 @@ impl<A: SlabAggregate> SlabBTree<A> {
         let mut node = self.root;
         proof {
             assert(self.wf_node(self.root, h));
-            assert(self@ =~= left + self.slabs(node, h) + right);
+            lemma_part_all(self@);
+            lemma_sum_len_none::<A>();
         }
         loop
             invariant
@@ -4795,15 +5253,15 @@ impl<A: SlabAggregate> SlabBTree<A> {
                 remaining < self.slabs(node, h).len() || right.len() == 0,
             decreases h,
         {
-            proof {
-                lemma_sum_len_concat(left, self.slabs(node, h));
-                lemma_sum_len_concat(left + self.slabs(node, h), right);
-            }
             match self.node(node) {
                 Node::Leaf(l) => {
                     let ghost aggs = l.aggs@;
                     assert(self.slabs(node, h) == aggs);
                     let mut i: usize = 0;
+                    proof {
+                        lemma_part_all(aggs);
+                        lemma_sum_len_none::<A>();
+                    }
                     while i < l.aggs.len()
                         invariant
                             self.wf(),
@@ -4815,27 +5273,18 @@ impl<A: SlabAggregate> SlabBTree<A> {
                         decreases aggs.len() - i,
                     {
                         proof {
-                            assert(aggs.take(i + 1).drop_last() =~= aggs.take(i as int));
-                            lemma_sum_len_concat(left, aggs.take(i as int));
+                            lemma_leaf_at(self@, left, aggs, right, i as int);
                         }
                         if remaining == 0 {
-                            proof { assert(self@.take(slab_idx as int) =~= left + aggs.take(i as int)); }
                             return items;
-                        }
-                        proof {
-                            assert(self@.take(left.len() + i + 1) =~= left + aggs.take(i + 1));
-                            lemma_sum_len_concat(left, aggs.take(i + 1));
-                            assert(self@ =~= self@.take(left.len() + i + 1) + self@.skip(left.len() + i + 1));
-                            lemma_sum_len_concat(self@.take(left.len() + i + 1), self@.skip(left.len() + i + 1));
                         }
                         remaining -= 1;
                         items += l.aggs[i].len();
                         i += 1;
                     }
                     proof {
-                        assert(aggs.take(i as int) =~= aggs);
-                        assert(self@.take(slab_idx as int) =~= left + aggs);
-                        lemma_sum_len_concat(left, aggs);
+                        lemma_take_all(aggs);
+                        lemma_part_end(self@, left, aggs, right);
                     }
                     return items;
                 }
@@ -4852,6 +5301,10 @@ impl<A: SlabAggregate> SlabBTree<A> {
                     }
                     assert(self.slabs(node, h) == self.children_slabs(cs, hc));
                     let mut k: usize = 0;
+                    proof {
+                        lemma_part_all(cs);
+                        lemma_sum_len_none::<A>();
+                    }
                     loop
                         invariant_except_break
                             k <= cs.len(), h == h0,
@@ -4877,9 +5330,8 @@ impl<A: SlabAggregate> SlabBTree<A> {
                     {
                         if k == n.children.len() {
                             proof {
-                                assert(cs.take(k as int) =~= cs);
-                                assert(self@.take(slab_idx as int) =~= left + self.children_slabs(cs, hc));
-                                lemma_sum_len_concat(left, self.children_slabs(cs, hc));
+                                lemma_take_all(cs);
+                                lemma_part_end(self@, left, self.children_slabs(cs, hc), right);
                             }
                             return items;
                         }
@@ -4889,21 +5341,13 @@ impl<A: SlabAggregate> SlabBTree<A> {
                         let ghost after = self.children_slabs(cs.skip(k + 1), hc);
                         proof {
                             assert(c == cs[k as int]);
-                            self.lemma_child(node, h, *n, k as int);
-                            self.lemma_children_slabs_split(cs, k as int, hc);
-                            self.lemma_children_slabs_push(cs, k as int, hc);
-                            lemma_sum_len_concat(before, mid);
-                            lemma_sum_len_concat(left, before);
-                            lemma_sum_len_concat(left, before + mid);
-                            assert(self@ =~= (left + (before + mid)) + (after + right));
-                            lemma_sum_len_concat(left + (before + mid), after + right);
+                            self.lemma_child_at(self@, left, right, node, h, *n, k as int);
                         }
                         if remaining < c.slab_count {
                             proof {
                                 left = left + before;
                                 right = after + right;
                                 h = hc;
-                                assert(self@ =~= left + self.slabs(c.id, h) + right);
                             }
                             node = c.id;
                             break;

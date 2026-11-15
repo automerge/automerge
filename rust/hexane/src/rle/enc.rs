@@ -72,6 +72,7 @@ proof fn lemma_written_empty<'a, W: WriteOps<'a>>(buf: Seq<u8>)
 proof fn lemma_written_room<'a, W: WriteOps<'a>>(s: State<'a, W>, buf: Seq<u8>, base: int, vals: Seq<VOf<'a, W>>, segs: int)
     requires written(s, buf, base, vals, segs),
     ensures
+        wf(s, buf),
         s.plen() <= vals.len(),
         0 <= segs, segs + s.pseg() <= vals.len(),
         0 <= base <= buf.len(),
@@ -85,6 +86,36 @@ proof fn lemma_written_room<'a, W: WriteOps<'a>>(s: State<'a, W>, buf: Seq<u8>, 
         lemma_push::<W::R>(gs, g);
         lemma_group_values_len(g, <W::R as RleOps<'a>>::null());
     }
+}
+
+/// A step on from a state the writer may go on from gives another: it
+/// returns no rewrite, and the state stands for the values and segments
+/// with those added.
+proof fn lemma_written_step<'a, W: WriteOps<'a>>(s0: State<'a, W>, b0: Seq<u8>, base: int, vals: Seq<VOf<'a, W>>, segs: int, s1: State<'a, W>, b1: Seq<u8>, rw: Option<RewriteHeader>, added: Seq<VOf<'a, W>>, seg: int)
+    requires
+        written(s0, b0, base, vals, segs),
+        wf(s1, b1), step(s0, b0, s1, b1, rw, added, seg), rw_ok(s0, s1, rw),
+    ensures
+        rw is None,
+        written(s1, b1, base, vals + added, segs + seg),
+{
+    hide(rel);
+    let e = Seq::<u8>::empty();
+    let (gs, ws) = choose|gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>| #[trigger] rel(s0, e, b0, base, gs, ws, 0)
+        && values_of(s0, gs, ws) == vals && acc(s0, gs, ws) == segs;
+    // a state written from empty has no header pending in the slab
+    assert(rw is None);
+    let (gs2, ws2) = choose|gs2: Seq<Group<VOf<'a, W>>>, ws2: Seq<VOf<'a, W>>| #[trigger] rel(s1, apply::<W>(rw, e, 0), b1, base, gs2, ws2, 0)
+        && values_of(s1, gs2, ws2) == values_of(s0, gs, ws) + added
+        && acc(s1, gs2, ws2) == acc(s0, gs, ws) + seg;
+    assert(rel(s1, e, b1, base, gs2, ws2, 0));
+}
+
+/// Owned copies of values and of more values, after `x`.
+proof fn lemma_lift_cat<'s, L: Lift<'s>>(x: Seq<VOf<'static, L::W>>, a: Seq<VOf<'s, L>>, b: Seq<VOf<'s, L>>)
+    ensures x + lift_seq::<L>(a + b) == (x + lift_seq::<L>(a)) + lift_seq::<L>(b),
+{
+    assert(x + lift_seq::<L>(a + b) =~= (x + lift_seq::<L>(a)) + lift_seq::<L>(b));
 }
 
 /// Owned copies, as many as the values.
@@ -274,6 +305,7 @@ impl<'a, L> REncoder<'a, L> where L: for<'x> Lift<'x, W = L> {
             final(self).values() == old(self).values() + lift_seq::<L>(copies(n as nat, <L as WriteOps<'a>>::val(value))),
             final(self).len == old(self).len + n, final(self).max_segments == old(self).max_segments,
     {
+        hide(written);
         if n > usize::MAX - 2 - self.len {
             too_many_values(Ghost(true));
         }
@@ -284,30 +316,19 @@ impl<'a, L> REncoder<'a, L> where L: for<'x> Lift<'x, W = L> {
         let ghost s0 = self.state;
         let ghost b0 = self.data@;
         let ghost cur0 = self.cur@;
-        let ghost v0 = self.values();
-        let ghost (gs, ws) = choose|gs: Seq<Group<VOf<'a, L>>>, ws: Seq<VOf<'a, L>>| #[trigger] rel(s0, Seq::empty(), b0, 0, gs, ws, 0)
-            && values_of(s0, gs, ws) == cur0 && acc(s0, gs, ws) == self.segments;
         proof {
             lemma_written_room::<L>(s0, b0, 0, cur0, self.segments as int);
         }
         let f = self.state.append_cow(&mut self.data, value, n);
         let ghost added = copies(n as nat, <L as WriteOps<'a>>::val(value));
         proof {
-            // a state written from empty has no header pending in the slab
-            assert(f.rewrite is None);
-            let (gs2, ws2) = choose|gs2: Seq<Group<VOf<'a, L>>>, ws2: Seq<VOf<'a, L>>| #[trigger] rel(self.state, apply::<L>(f.rewrite, Seq::empty(), 0), self.data@, 0, gs2, ws2, 0)
-                && values_of(self.state, gs2, ws2) == values_of(s0, gs, ws) + added
-                && acc(self.state, gs2, ws2) == acc(s0, gs, ws) + f.segments;
-            assert(rel(self.state, Seq::empty(), self.data@, 0, gs2, ws2, 0));
+            lemma_written_step::<L>(s0, b0, 0, cur0, self.segments as int, self.state, self.data@, f.rewrite, added, f.segments as int);
             self.cur = Ghost(cur0 + added);
-            lemma_written_room::<L>(self.state, self.data@, 0, self.cur@, acc(self.state, gs2, ws2));
+            lemma_written_room::<L>(self.state, self.data@, 0, self.cur@, self.segments + f.segments);
+            lemma_lift_cat::<L>(vals_of::<RleModel<L>>(self.slabs@), cur0, added);
         }
         self.segments = self.segments + f.segments;
         self.len = self.len + n;
-        proof {
-            assert(lift_seq::<L>(cur0 + added) =~= lift_seq::<L>(cur0) + lift_seq::<L>(added));
-            assert(self.values() =~= v0 + lift_seq::<L>(added));
-        }
     }
 
     /// Flush, and take the bytes written since the last cut: the

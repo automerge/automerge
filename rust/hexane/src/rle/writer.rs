@@ -492,7 +492,10 @@ impl<'a, W: WriteOps<'a>> Splice<'a, W> {
     /// The pending group is among the values written.
     proof fn lemma_room(&self)
         requires self.inv(),
-        ensures self.state.plen() <= self.cur@.len(),
+        ensures
+            self.state.plen() <= self.cur@.len(),
+            wf(self.state, self.buf@),
+            self.inserted <= self.cur@.len(),
     {
         let (gs, ws) = choose|gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>|
             #[trigger] rel(self.state, apply::<W>(self.f.rewrite, self.cur_pre(), self.h0@), self.buf@, 0, gs, ws, self.h0@)
@@ -626,41 +629,91 @@ impl<'a, W: WriteOps<'a>> Splice<'a, W> {
             final(self).end() == old(self).end(), final(self).used() <= old(self).used() + count,
     {
         hide(canonical);
+        hide(Splice::inv);
+        proof {
+            self.lemma_room();
+        }
         if add(add(self.starting_segments, self.f.segments), self.state.pending_segments()) >= self.target {
             self.cut();
         }
         proof {
             self.lemma_room();
         }
-        let ghost s0 = self.state;
-        let ghost b0 = self.buf@;
-        let ghost rw0 = self.f.rewrite;
-        let ghost cur0 = self.cur@;
-        let ghost f0 = self.f.segments;
+        let ghost r0 = *self;
         let f = self.state.append_cow(&mut self.buf, value, count);
         let ghost added = copies(count as nat, W::val(value));
-        let ghost p0 = apply::<W>(rw0, self.cur_pre(), self.h0@);
-        let ghost (gs, ws) = choose|gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>| #[trigger] rel(s0, p0, b0, 0, gs, ws, self.h0@)
-            && values_of(s0, gs, ws) == cur0 && acc(s0, gs, ws) == self.base_segs() + f0;
-        let ghost (gs2, ws2) = choose|gs2: Seq<Group<VOf<'a, W>>>, ws2: Seq<VOf<'a, W>>| #[trigger] rel(self.state, apply::<W>(f.rewrite, p0, self.h0@), self.buf@, 0, gs2, ws2, self.h0@)
-            && values_of(self.state, gs2, ws2) == values_of(s0, gs, ws) + added
-            && acc(self.state, gs2, ws2) == acc(s0, gs, ws) + f.segments;
         proof {
-            lemma_acc::<W>(self.state, apply::<W>(f.rewrite, p0, self.h0@), self.buf@, 0, gs2, ws2, self.h0@);
+            Self::lemma_append_fits(r0, self.state, self.buf@, f, added);
         }
         add_flush(&mut self.f, f);
         // counted once appended, so a run that panics as too long leaves
         // the rebuild as it was for the cursor's drop to close
         self.inserted = self.inserted + count;
         proof {
-            self.cur = Ghost(cur0 + added);
-            lemma_apply_comb::<W>(rw0, f.rewrite, self.cur_pre(), self.h0@);
-            lemma_rw_at::<W>(s0, p0, b0, 0, gs, ws, self.h0@, f.rewrite);
-            assert(rel(self.state, apply::<W>(self.f.rewrite, self.cur_pre(), self.h0@), self.buf@, 0, gs2, ws2, self.h0@));
-            assert(self.vals() =~= old(self).vals() + added);
-            assert(cur0.len() <= old(self).cur@.len());
-            assert(self.inv());
+            self.cur = Ghost(r0.cur@ + added);
+            Self::lemma_appended(r0, *self, f, added);
         }
+    }
+
+    /// The segments an append counts, with those counted before, are no
+    /// more than the values the slab in hand then holds.
+    proof fn lemma_append_fits(r0: Self, s1: State<'a, W>, b1: Seq<u8>, f: FlushState, added: Seq<VOf<'a, W>>)
+        requires
+            r0.inv(),
+            step(r0.state, r0.buf@, s1, b1, f.rewrite, added, f.segments as int),
+        ensures
+            r0.f.segments + f.segments <= r0.cur@.len() + added.len(),
+    {
+        hide(canonical);
+        let h0 = r0.h0@;
+        let p0 = apply::<W>(r0.f.rewrite, r0.cur_pre(), h0);
+        let (gs, ws) = choose|gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>| #[trigger] rel(r0.state, p0, r0.buf@, 0, gs, ws, h0)
+            && values_of(r0.state, gs, ws) == r0.cur@ && acc(r0.state, gs, ws) == r0.base_segs() + r0.f.segments;
+        let p1 = apply::<W>(f.rewrite, p0, h0);
+        let (gs2, ws2) = choose|gs2: Seq<Group<VOf<'a, W>>>, ws2: Seq<VOf<'a, W>>| #[trigger] rel(s1, p1, b1, 0, gs2, ws2, h0)
+            && values_of(s1, gs2, ws2) == values_of(r0.state, gs, ws) + added
+            && acc(s1, gs2, ws2) == acc(r0.state, gs, ws) + f.segments;
+        lemma_acc::<W>(s1, p1, b1, 0, gs2, ws2, h0);
+    }
+
+    /// An append to the state keeps the rebuild whole: the slab in hand
+    /// gains the values appended and the segments the append counted.
+    proof fn lemma_appended(r0: Self, r1: Self, f: FlushState, added: Seq<VOf<'a, W>>)
+        requires
+            r0.inv(),
+            wf(r1.state, r1.buf@),
+            step(r0.state, r0.buf@, r1.state, r1.buf@, f.rewrite, added, f.segments as int),
+            rw_ok(r0.state, r1.state, f.rewrite),
+            r1.f.rewrite == comb(r0.f.rewrite, f.rewrite),
+            r1.f.segments == r0.f.segments + f.segments,
+            r1.cur@ == r0.cur@ + added,
+            r1.inserted == r0.inserted + added.len(),
+            r1.cur@.len() <= usize::MAX,
+            r1.overflowed == r0.overflowed,
+            r1.head_len == r0.head_len,
+            r1.prefix_segments == r0.prefix_segments,
+            r1.out == r0.out,
+            r1.pre == r0.pre,
+            r1.h0 == r0.h0,
+            r1.done == r0.done,
+        ensures
+            r1.inv(),
+            r1.vals() == r0.vals() + added,
+    {
+        hide(canonical);
+        let h0 = r0.h0@;
+        let rw0 = r0.f.rewrite;
+        let p0 = apply::<W>(rw0, r0.cur_pre(), h0);
+        let (gs, ws) = choose|gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>| #[trigger] rel(r0.state, p0, r0.buf@, 0, gs, ws, h0)
+            && values_of(r0.state, gs, ws) == r0.cur@ && acc(r0.state, gs, ws) == r0.base_segs() + r0.f.segments;
+        let p1 = apply::<W>(f.rewrite, p0, h0);
+        let (gs2, ws2) = choose|gs2: Seq<Group<VOf<'a, W>>>, ws2: Seq<VOf<'a, W>>| #[trigger] rel(r1.state, p1, r1.buf@, 0, gs2, ws2, h0)
+            && values_of(r1.state, gs2, ws2) == values_of(r0.state, gs, ws) + added
+            && acc(r1.state, gs2, ws2) == acc(r0.state, gs, ws) + f.segments;
+        lemma_apply_comb::<W>(rw0, f.rewrite, r0.cur_pre(), h0);
+        lemma_rw_at::<W>(r0.state, p0, r0.buf@, 0, gs, ws, h0, f.rewrite);
+        assert(rel(r1.state, apply::<W>(r1.f.rewrite, r1.cur_pre(), h0), r1.buf@, 0, gs2, ws2, h0));
+        assert(r1.vals() =~= r0.vals() + added);
     }
 
     /// Close the slab in hand and start a new one.

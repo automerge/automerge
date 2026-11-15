@@ -586,8 +586,12 @@ proof fn lemma_values_unique<'a, O: RleOps<'a>>(a: Seq<O::V>, b: Seq<O::V>, s: S
     ensures a == b, s == t,
     decreases a.len(),
 {
+    hide(encs);
     if a.len() == 0 {
         assert(a =~= b);
+        assert(encs::<O>(a) =~= Seq::<u8>::empty() && encs::<O>(b) =~= Seq::<u8>::empty()) by {
+            reveal(encs);
+        }
         assert(encs::<O>(a) + s =~= s);
         assert(encs::<O>(b) + t =~= t);
     } else {

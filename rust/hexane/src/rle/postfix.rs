@@ -587,11 +587,171 @@ proof fn lemma_join_rest<'a, O: RleOps<'a>>(a: Seq<Group<O::V>>, rest: Seq<Group
     assert(canonical::<O>(a + rest));
 }
 
+/// `a`, then `b` and `c`, are `a` and `b`, then `c`.
+proof fn lemma_cat3<T>(a: Seq<T>, b: Seq<T>, c: Seq<T>)
+    ensures a + (b + c) == a + b + c,
+{
+    assert(a + (b + c) =~= a + b + c);
+}
+
+/// `a` and `b`, then `c` and `d`, are `a`, then `b` and `c`, then `d`.
+proof fn lemma_cat4<T>(a: Seq<T>, b: Seq<T>, c: Seq<T>, d: Seq<T>)
+    ensures (a + b) + (c + d) == a + (b + c) + d,
+{
+    assert((a + b) + (c + d) =~= a + (b + c) + d);
+}
+
+/// What flushing a state ending in a non-null `v` wrote, onto `lit`
+/// literal values that follow: its groups' bytes, and for `lit > 0` the
+/// header of the literal those values join, a new one after a repeat run
+/// and else the pending one, of the values `w`.
+proof fn lemma_flush_onto<'a, W: WriteOps<'a>>(s1: State<'a, W>, pre1: Seq<u8>, b1: Seq<u8>, base: int, gs1: Seq<Group<VOf<'a, W>>>, ws1: Seq<VOf<'a, W>>, h0: i64, b2: Seq<u8>, rw2: Option<RewriteHeader>, v: VOf<'a, W>, lit: nat, seg: int)
+    requires
+        rel(s1, pre1, b1, base, gs1, ws1, h0), last_is(s1, v),
+        !<W::R as RleOps<'a>>::is_null(v),
+        lit == 0 ==> flushed(s1, b1, b2, rw2, seg),
+        lit > 0 ==> flushed_lit(s1, b1, b2, rw2, lit, seg),
+        lit > 0 ==> lit_fits(s1, lit),
+    ensures ({
+        let a = all_groups(s1, gs1, ws1);
+        let out = apply::<W>(rw2, pre1, h0) + b2.skip(base);
+        let w = pend_group(s1, ws1)->Some_0->values;
+        &&& 0 <= base <= b2.len()
+        &&& canonical::<W::R>(a)
+        &&& lit == 0 || s1 is Run ==> groups_segments(a) == acc(s1, gs1, ws1) + seg
+        &&& lit == 0 ==> out == groups_bytes::<W::R>(a)
+        &&& lit > 0 && s1 is Run ==> out == groups_bytes::<W::R>(a) + lit_head::<W::R>(lit)
+        &&& lit > 0 && !(s1 is Run) ==> {
+            &&& s1 is Lit || s1 is Lone
+            &&& a == gs1.push(Group::Lit { values: w })
+            &&& w.len() > 0 && w.last() == v && w.len() + lit <= i64::MAX
+            &&& out == groups_bytes::<W::R>(gs1) + lit_head::<W::R>(w.len() + lit) + encs::<W::R>(w)
+            &&& groups_segments(gs1) + w.len() == acc(s1, gs1, ws1) + seg
+        }
+    }),
+{
+    hide(canonical);
+    if let State::Lone(c) = s1 {
+        lemma_lone_bytes::<W::R>(W::val(c));
+    }
+}
+
+/// Groups `p` and a literal of `vals` ending in `last`, then groups that
+/// may follow it: canonical, with their bytes and values joined, and the
+/// literal the last group where none follow.
+proof fn lemma_join_pushed<'a, O: RleOps<'a>>(p: Seq<Group<O::V>>, vals: Seq<O::V>, rest: Seq<Group<O::V>>, last: O::V)
+    requires
+        canonical::<O>(p.push(Group::Lit { values: vals })), canonical::<O>(rest),
+        vals.len() > 0, vals.last() == last, may_follow(last, rest),
+    ensures ({
+        let bytes = groups_bytes::<O>(p) + (lit_head::<O>(vals.len()) + encs::<O>(vals)) + groups_bytes::<O>(rest);
+        &&& encodes::<O>(bytes, groups_values(p, O::null()) + vals + groups_values(rest, O::null()),
+            (groups_segments(p) + vals.len() + groups_segments(rest)) as int)
+        &&& tail_ok::<O>(bytes,
+            if rest.len() > 0 { tail_bytes_of::<O>(rest) as int } else { bytes.len() - groups_bytes::<O>(p).len() },
+            if rest.len() > 0 { lit_tail_of::<O>(rest) as int } else { O::enc(last).len() as int })
+    }),
+{
+    hide(canonical);
+    let n = Group::<O::V>::Lit { values: vals };
+    lemma_push::<O>(p, n);
+    lemma_join_rest::<O>(p.push(n), rest, last);
+    lemma_tail_concat::<O>(p.push(n), rest);
+}
+
+/// Groups `a` ending in `last`, then the groups `rest` that may follow
+/// it, with no literal values `l` between them: canonical, with their
+/// bytes and values joined.
+proof fn lemma_join_none<'a, O: RleOps<'a>>(a: Seq<Group<O::V>>, rest: Seq<Group<O::V>>, last: O::V, l: Seq<O::V>, out: Seq<u8>, tb: Seq<u8>, tv: Seq<O::V>)
+    requires
+        canonical::<O>(a), canonical::<O>(rest), a.len() > 0, may_follow(last, rest),
+        match a.last() {
+            Group::Run { value, .. } => value == last,
+            Group::Lit { values } => values.len() > 0 && values.last() == last,
+            Group::Null { .. } => false,
+        },
+        l.len() == 0,
+        out == groups_bytes::<O>(a),
+        tb == encs::<O>(l) + groups_bytes::<O>(rest),
+        tv == l + groups_values(rest, O::null()),
+    ensures
+        encodes::<O>(out + tb, groups_values(a, O::null()) + tv,
+            (groups_segments(a) + groups_segments(rest)) as int),
+        tail_ok::<O>(out + tb,
+            if rest.len() > 0 { tail_bytes_of::<O>(rest) as int } else { tail_bytes_of::<O>(a) as int },
+            if rest.len() > 0 { lit_tail_of::<O>(rest) as int } else { lit_tail_of::<O>(a) as int }),
+{
+    hide(canonical);
+    assert(tb =~= groups_bytes::<O>(rest));
+    assert(tv =~= groups_values(rest, O::null()));
+    lemma_join_rest::<O>(a, rest, last);
+    lemma_tail_concat::<O>(a, rest);
+}
+
+/// Groups `a`, then a new literal of the values `l` ending in `last`,
+/// whose header the bytes `out` end in, then the groups `rest` that may
+/// follow it: canonical, with their bytes and values joined.
+proof fn lemma_join_new_lit<'a, O: RleOps<'a>>(a: Seq<Group<O::V>>, rest: Seq<Group<O::V>>, last: O::V, l: Seq<O::V>, out: Seq<u8>, tb: Seq<u8>, tv: Seq<O::V>)
+    requires
+        canonical::<O>(a), canonical::<O>(rest), may_follow(last, rest),
+        group_ok::<O>(Group::Lit { values: l }), l.len() > 0, l.last() == last,
+        a.len() > 0 ==> adjacent_ok(a.last(), Group::Lit { values: l }),
+        out == groups_bytes::<O>(a) + lit_head::<O>(l.len()),
+        tb == encs::<O>(l) + groups_bytes::<O>(rest),
+        tv == l + groups_values(rest, O::null()),
+    ensures
+        encodes::<O>(out + tb, groups_values(a, O::null()) + tv,
+            (groups_segments(a) + l.len() + groups_segments(rest)) as int),
+        tail_ok::<O>(out + tb,
+            if rest.len() > 0 { tail_bytes_of::<O>(rest) as int } else { (out + tb).len() - groups_bytes::<O>(a).len() },
+            if rest.len() > 0 { lit_tail_of::<O>(rest) as int } else { O::enc(last).len() as int }),
+{
+    hide(canonical);
+    lemma_canonical_join::<O>(a, Group::Lit { values: l });
+    lemma_join_pushed::<O>(a, l, rest, last);
+    lemma_cat4(groups_bytes::<O>(a), lit_head::<O>(l.len()), encs::<O>(l), groups_bytes::<O>(rest));
+    lemma_cat3(groups_values(a, O::null()), l, groups_values(rest, O::null()));
+}
+
+/// Groups `g`, then a literal of `w` that takes in the values `l` ending
+/// in `last`, whose header and `w` the bytes `out` end in, then the
+/// groups `rest` that may follow it: canonical, with their bytes and
+/// values joined.
+proof fn lemma_join_open_lit<'a, O: RleOps<'a>>(g: Seq<Group<O::V>>, w: Seq<O::V>, rest: Seq<Group<O::V>>, last: O::V, l: Seq<O::V>, out: Seq<u8>, tb: Seq<u8>, tv: Seq<O::V>)
+    requires
+        canonical::<O>(g.push(Group::Lit { values: w })), canonical::<O>(rest), may_follow(last, rest),
+        group_ok::<O>(Group::Lit { values: l }), l.len() > 0, l.last() == last,
+        w.len() > 0 && w.last() != l[0], w.len() + l.len() <= i64::MAX,
+        out == groups_bytes::<O>(g) + lit_head::<O>(w.len() + l.len()) + encs::<O>(w),
+        tb == encs::<O>(l) + groups_bytes::<O>(rest),
+        tv == l + groups_values(rest, O::null()),
+    ensures
+        encodes::<O>(out + tb, groups_values(g.push(Group::Lit { values: w }), O::null()) + tv,
+            (groups_segments(g) + w.len() + l.len() + groups_segments(rest)) as int),
+        tail_ok::<O>(out + tb,
+            if rest.len() > 0 { tail_bytes_of::<O>(rest) as int } else { (out + tb).len() - groups_bytes::<O>(g).len() },
+            if rest.len() > 0 { lit_tail_of::<O>(rest) as int } else { O::enc(last).len() as int }),
+{
+    hide(canonical);
+    let n = w + l;
+    let pb = groups_bytes::<O>(g);
+    let h = lit_head::<O>(n.len());
+    let vg = groups_values(g, O::null());
+    let vr = groups_values(rest, O::null());
+    lemma_lit_extend::<O>(g, w, l);
+    assert(n.last() == l.last());
+    lemma_join_pushed::<O>(g, n, rest, last);
+    lemma_push::<O>(g, Group::Lit { values: w });
+    lemma_encs_concat::<O>(w, l);
+    lemma_cat4(pb + h, encs::<O>(w), encs::<O>(l), groups_bytes::<O>(rest));
+    lemma_cat3(pb, h, encs::<O>(w) + encs::<O>(l));
+    lemma_cat4(vg, w, l, vr);
+}
+
 /// A state ending in `v`, flushed onto the literal tail at `at`: the
 /// bytes written, then the slab's from `end`, are the canonical encoding
 /// of the values written, then the slab's after `at`.
 #[verifier::spinoff_prover]
-#[verifier::rlimit(60)]
 proof fn lemma_join_lit<'a, W: WriteOps<'a>>(s1: State<'a, W>, pre1: Seq<u8>, b1: Seq<u8>, base: int, gs1: Seq<Group<VOf<'a, W>>>, ws1: Seq<VOf<'a, W>>, h0: i64, b2: Seq<u8>, rw2: Option<RewriteHeader>, data: Seq<u8>, at: int, v: VOf<'a, W>, lit: nat, end: int, i: int, j: int, seg: int)
     requires
         rel(s1, pre1, b1, base, gs1, ws1, h0), last_is(s1, v),
@@ -617,59 +777,33 @@ proof fn lemma_join_lit<'a, W: WriteOps<'a>>(s1: State<'a, W>, pre1: Seq<u8>, b1
                     else if lit == 0 { lit_tail_of::<W::R>(a) as int } else { <W::R as RleOps<'a>>::enc(vs.last()).len() as int })
         }),
 {
+    // the case lemmas read these; nothing here needs their bodies
     hide(canonical);
+    hide(rel);
+    hide(flushed);
+    hide(flushed_lit);
+    hide(tail_lit);
+    hide(encodes);
+    hide(tail_ok);
     let gs = slab_groups::<W::R>(data);
     let vs = gs[i]->values;
     let l = vs.skip(j + 1);
     let rest = gs.skip(i + 1);
-    let nul = <W::R as RleOps<'a>>::null();
+    let a = all_groups(s1, gs1, ws1);
     let out = apply::<W>(rw2, pre1, h0) + b2.skip(base);
+    let tb = data.skip(end);
+    let tv = slab_values::<W::R>(data).skip(at + 1);
     lemma_lit_tail_facts::<W::R>(data, at, v, lit, end, i, j);
     lemma_last_group::<W>(s1, gs1, ws1, v);
-    let a = all_groups(s1, gs1, ws1);
+    lemma_flush_onto::<W>(s1, pre1, b1, base, gs1, ws1, h0, b2, rw2, v, lit, seg);
     if lit == 0 {
-        assert(l =~= Seq::<VOf<'a, W>>::empty());
-        assert(encs::<W::R>(l) =~= Seq::<u8>::empty());
-        assert(out + data.skip(end) =~= groups_bytes::<W::R>(a) + groups_bytes::<W::R>(rest));
-        assert(values_of(s1, gs1, ws1) + slab_values::<W::R>(data).skip(at + 1)
-            =~= groups_values(a, nul) + groups_values(rest, nul));
-        lemma_join_rest::<W::R>(a, rest, vs.last());
-        lemma_tail_concat::<W::R>(a, rest);
+        lemma_join_none::<W::R>(a, rest, vs.last(), l, out, tb, tv);
     } else if s1 is Run {
-        let n = Group::<VOf<'a, W>>::Lit { values: l };
-        lemma_canonical_join::<W::R>(a, n);
-        lemma_push::<W::R>(a, n);
-        assert(out + data.skip(end) =~= groups_bytes::<W::R>(a.push(n)) + groups_bytes::<W::R>(rest));
-        assert(values_of(s1, gs1, ws1) + slab_values::<W::R>(data).skip(at + 1)
-            =~= groups_values(a.push(n), nul) + groups_values(rest, nul));
-        lemma_join_rest::<W::R>(a.push(n), rest, vs.last());
-        lemma_tail_concat::<W::R>(a.push(n), rest);
-        assert(a.push(n).last() == n);
-        lemma_groups_bytes_concat::<W::R>(a.push(n), rest);
-        assert(l.last() == vs.last());
+        lemma_join_new_lit::<W::R>(a, rest, vs.last(), l, out, tb, tv);
     } else {
         // the pending literal (or lone value) takes in the slab's
         let w = pend_group(s1, ws1)->Some_0->values;
-        assert(w.len() > 0 && w.last() == v);
-        assert(w.len() == s1.plen());
-        assert(w.len() + l.len() <= i64::MAX);
-        let n = Group::<VOf<'a, W>>::Lit { values: w + l };
-        lemma_lit_extend::<W::R>(gs1, w, l);
-        lemma_push::<W::R>(gs1, n);
-        lemma_push::<W::R>(gs1, Group::Lit { values: w });
-        lemma_encs_concat::<W::R>(w, l);
-        if s1 is Lone {
-            reveal_with_fuel(encs, 2);
-            assert(encs::<W::R>(w) =~= <W::R as RleOps<'a>>::enc(v));
-        }
-        assert(out + data.skip(end) =~= groups_bytes::<W::R>(gs1.push(n)) + groups_bytes::<W::R>(rest));
-        assert(values_of(s1, gs1, ws1) + slab_values::<W::R>(data).skip(at + 1)
-            =~= groups_values(gs1.push(n), nul) + groups_values(rest, nul));
-        lemma_join_rest::<W::R>(gs1.push(n), rest, vs.last());
-        lemma_tail_concat::<W::R>(gs1.push(n), rest);
-        assert(gs1.push(n).last() == n);
-        lemma_groups_bytes_concat::<W::R>(gs1.push(n), rest);
-        assert((w + l).last() == l.last() && l.last() == vs.last());
+        lemma_join_open_lit::<W::R>(gs1, w, rest, vs.last(), l, out, tb, tv);
     }
 }
 
@@ -768,16 +902,36 @@ proof fn lemma_joined_run<'a, W: WriteOps<'a>>(s0: State<'a, W>, b0: Seq<u8>, s1
     }
 }
 
+/// A sequence from one of its items on: that item, then the rest.
+proof fn lemma_skip_first<T>(s: Seq<T>, at: int)
+    requires 0 <= at < s.len(),
+    ensures s.skip(at) == seq![s[at]] + s.skip(at + 1),
+{
+    assert(s.skip(at) =~= seq![s[at]] + s.skip(at + 1));
+}
+
+/// A literal tail's value is the slab's value at its position.
+proof fn lemma_lit_tail_at<'a, O: RleOps<'a>>(data: Seq<u8>, at: int, v: O::V, lit: nat, end: int, i: int, j: int)
+    requires valid_slab::<O>(data), tail_lit::<O>(data, at, v, lit, end, i, j),
+    ensures 0 <= at < slab_values::<O>(data).len(), slab_values::<O>(data)[at] == v,
+{
+    hide(valid_slab);
+    hide(slab_values);
+    let gs = slab_groups::<O>(data);
+    lemma_slab_group::<O>(data, i);
+    assert(group_values(gs[i], O::null())[j] == v);
+}
+
 /// The slab value at a literal tail's position.
 proof fn lemma_lit_tail_value<'a, O: RleOps<'a>>(data: Seq<u8>, at: int, v: O::V, lit: nat, end: int, i: int, j: int)
     requires valid_slab::<O>(data), tail_lit::<O>(data, at, v, lit, end, i, j),
     ensures slab_values::<O>(data).skip(at) == seq![v] + slab_values::<O>(data).skip(at + 1),
 {
-    let gs = slab_groups::<O>(data);
-    lemma_slab_group::<O>(data, i);
-    assert(group_values(gs[i], O::null())[j] == v);
-    assert(slab_values::<O>(data)[at] == v);
-    assert(slab_values::<O>(data).skip(at) =~= seq![v] + slab_values::<O>(data).skip(at + 1));
+    hide(valid_slab);
+    hide(tail_lit);
+    hide(slab_values);
+    lemma_lit_tail_at::<O>(data, at, v, lit, end, i, j);
+    lemma_skip_first(slab_values::<O>(data), at);
 }
 
 /// A literal postfix: its value appended, then flushed onto the rest of
@@ -813,6 +967,80 @@ proof fn lemma_joined_lit<'a, W: WriteOps<'a>>(s0: State<'a, W>, b0: Seq<u8>, s1
     }
 }
 
+/// The slab's values from a repeat run's last value before a literal:
+/// that value, the literal's first, and the values after it.
+proof fn lemma_lone_tail_values<'a, O: RleOps<'a>>(data: Seq<u8>, at: int, lone: O::V, v: O::V, lit: nat, end: int, i: int)
+    requires
+        valid_slab::<O>(data),
+        tail_lone::<O>(data, at, lone, v, lit, end, i),
+    ensures
+        slab_values::<O>(data).skip(at) == seq![lone] + seq![v] + slab_values::<O>(data).skip(at + 2),
+{
+    hide(slab_values);
+    let gs = slab_groups::<O>(data);
+    let x = slab_values::<O>(data);
+    lemma_slab_group::<O>(data, i);
+    assert(group_values(gs[i], O::null())[group_len(gs[i]) - 1] == lone);
+    assert(x[at] == lone);
+    lemma_skip_first(x, at);
+    lemma_lit_tail_value::<O>(data, at + 1, v, lit, end, i + 1, 0);
+    lemma_cat3(seq![lone], seq![v], x.skip(at + 2));
+}
+
+/// [`lemma_joined_lone`] for one view of the state it started from, and
+/// one slab the postfix is the first run of, its lone value closing
+/// group `i`.
+proof fn lemma_joined_lone_at<'a, W: WriteOps<'a>>(s0: State<'a, W>, b0: Seq<u8>, s1: State<'a, W>, b1: Seq<u8>, s2: State<'a, W>, b2: Seq<u8>, b3: Seq<u8>, rw1: Option<RewriteHeader>, rw2: Option<RewriteHeader>, rw3: Option<RewriteHeader>, lone: VOf<'a, W>, v: VOf<'a, W>, lit: usize, seg1: int, seg2: int, seg3: int, pre: Seq<u8>, base: int, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>, h0: i64, data: Seq<u8>, at: int, end: int, i: int)
+    requires
+        step(s0, b0, s1, b1, rw1, copies(1, lone), seg1),
+        rw_ok(s0, s1, rw1),
+        step(s1, b1, s2, b2, rw2, copies(1, v), seg2),
+        rw_ok(s1, s2, rw2),
+        last_is(s2, v),
+        lit == 0 ==> flushed(s2, b2, b3, rw3, seg3),
+        lit > 0 ==> flushed_lit(s2, b2, b3, rw3, lit as nat, seg3),
+        rw3 is Some ==> pre_lit(s2),
+        lit > 0 ==> lit_fits(s2, lit as nat),
+        rel(s0, pre, b0, base, gs, ws, h0),
+        valid_slab::<W::R>(data),
+        tail_lone::<W::R>(data, at, lone, v, lit as nat, end, i),
+    ensures
+        0 <= base <= b3.len(),
+        encodes::<W::R>(apply::<W>(comb(comb(rw1, rw2), rw3), pre, h0) + b3.skip(base) + data.skip(end),
+            values_of(s0, gs, ws) + slab_values::<W::R>(data).skip(at),
+            acc(s0, gs, ws) + (seg1 + seg2 + seg3) + lit + groups_segments(slab_groups::<W::R>(data).skip(i + 2))),
+{
+    // the lemmas called read these; nothing here needs their bodies
+    hide(canonical);
+    hide(rel);
+    hide(flushed);
+    hide(flushed_lit);
+    hide(tail_lit);
+    hide(encodes);
+    hide(valid_slab);
+    hide(slab_values);
+    hide(values_of);
+    hide(acc);
+    hide(groups_segments);
+    let pre1 = apply::<W>(rw1, pre, h0);
+    let (gs1, ws1) = choose|gs1: Seq<Group<VOf<'a, W>>>, ws1: Seq<VOf<'a, W>>| #[trigger] rel(s1, pre1, b1, base, gs1, ws1, h0)
+        && values_of(s1, gs1, ws1) == values_of(s0, gs, ws) + copies(1, lone)
+        && acc(s1, gs1, ws1) == acc(s0, gs, ws) + seg1;
+    let pre2 = apply::<W>(rw2, pre1, h0);
+    let (gs2, ws2) = choose|gs2: Seq<Group<VOf<'a, W>>>, ws2: Seq<VOf<'a, W>>| #[trigger] rel(s2, pre2, b2, base, gs2, ws2, h0)
+        && values_of(s2, gs2, ws2) == values_of(s1, gs1, ws1) + copies(1, v)
+        && acc(s2, gs2, ws2) == acc(s1, gs1, ws1) + seg2;
+    lemma_apply_comb::<W>(rw1, rw2, pre, h0);
+    lemma_apply_comb::<W>(comb(rw1, rw2), rw3, pre, h0);
+    lemma_join_lit::<W>(s2, pre2, b2, base, gs2, ws2, h0, b3, rw3, data, at + 1, v, lit as nat, end, i + 1, 0, seg3);
+    lemma_lone_tail_values::<W::R>(data, at, lone, v, lit as nat, end, i);
+    let x = values_of(s0, gs, ws);
+    let y = slab_values::<W::R>(data).skip(at + 2);
+    assert(copies(1, v) =~= seq![v]);
+    assert(copies(1, lone) =~= seq![lone]);
+    assert(x + (seq![lone] + seq![v] + y) =~= x + seq![lone] + seq![v] + y);
+}
+
 /// A repeat run's last value then a literal's first: both appended, then
 /// flushed onto the rest of the literal.
 #[verifier::spinoff_prover]
@@ -826,8 +1054,14 @@ proof fn lemma_joined_lone<'a, W: WriteOps<'a>>(s0: State<'a, W>, b0: Seq<u8>, s
     ensures joined(s0, b0, b3, comb(comb(rw1, rw2), rw3), Some(Postfix::LonePlusLit { lone, value: v, lit }), seg1 + seg2 + seg3),
 {
     hide(canonical);
+    hide(rel);
+    hide(step);
+    hide(flushed);
+    hide(flushed_lit);
+    hide(tail_lone);
+    hide(encodes);
+    hide(rest_segs);
     let p = Some(Postfix::LonePlusLit { lone, value: v, lit });
-    let nul = <W::R as RleOps<'a>>::null();
     assert forall|pre: Seq<u8>, base: int, gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>, h0: i64, data: Seq<u8>, at: int, end: int|
         #[trigger] rel(s0, pre, b0, base, gs, ws, h0) && #[trigger] postfix_ok::<W::R>(data, at, p, end)
         implies 0 <= base <= b3.len()
@@ -835,28 +1069,8 @@ proof fn lemma_joined_lone<'a, W: WriteOps<'a>>(s0: State<'a, W>, b0: Seq<u8>, s
                 values_of(s0, gs, ws) + slab_values::<W::R>(data).skip(at),
                 acc(s0, gs, ws) + (seg1 + seg2 + seg3) + rest_segs::<W::R>(data, at, p, end)) by {
         let i = choose|i: int| tail_lone::<W::R>(data, at, lone, v, lit as nat, end, i);
-        let pre1 = apply::<W>(rw1, pre, h0);
-        let (gs1, ws1) = choose|gs1: Seq<Group<VOf<'a, W>>>, ws1: Seq<VOf<'a, W>>| #[trigger] rel(s1, pre1, b1, base, gs1, ws1, h0)
-            && values_of(s1, gs1, ws1) == values_of(s0, gs, ws) + copies(1, lone)
-            && acc(s1, gs1, ws1) == acc(s0, gs, ws) + seg1;
-        let pre2 = apply::<W>(rw2, pre1, h0);
-        let (gs2, ws2) = choose|gs2: Seq<Group<VOf<'a, W>>>, ws2: Seq<VOf<'a, W>>| #[trigger] rel(s2, pre2, b2, base, gs2, ws2, h0)
-            && values_of(s2, gs2, ws2) == values_of(s1, gs1, ws1) + copies(1, v)
-            && acc(s2, gs2, ws2) == acc(s1, gs1, ws1) + seg2;
-        lemma_apply_comb::<W>(rw1, rw2, pre, h0);
-        lemma_apply_comb::<W>(comb(rw1, rw2), rw3, pre, h0);
-        lemma_join_lit::<W>(s2, pre2, b2, base, gs2, ws2, h0, b3, rw3, data, at + 1, v, lit as nat, end, i + 1, 0, seg3);
-        lemma_lit_tail_value::<W::R>(data, at + 1, v, lit as nat, end, i + 1, 0);
-        // the value before the literal is the repeat run's last
-        let dg = slab_groups::<W::R>(data);
-        lemma_slab_group::<W::R>(data, i);
-        assert(group_values(dg[i], nul)[group_len(dg[i]) - 1] == lone);
-        assert(slab_values::<W::R>(data)[at] == lone);
-        assert(slab_values::<W::R>(data).skip(at) =~= seq![lone] + slab_values::<W::R>(data).skip(at + 1));
-        assert(copies(1, v) =~= seq![v]);
-        assert(copies(1, lone) =~= seq![lone]);
-        assert(values_of(s0, gs, ws) + slab_values::<W::R>(data).skip(at)
-            =~= values_of(s2, gs2, ws2) + slab_values::<W::R>(data).skip(at + 2));
+        lemma_rest_lone::<W::R>(data, at, lone, v, lit, end, i);
+        lemma_joined_lone_at::<W>(s0, b0, s1, b1, s2, b2, b3, rw1, rw2, rw3, lone, v, lit, seg1, seg2, seg3, pre, base, gs, ws, h0, data, at, end, i);
     }
 }
 
@@ -1230,8 +1444,97 @@ proof fn lemma_joined_run_tail<'a, W: WriteOps<'a>>(s0: State<'a, W>, b0: Seq<u8
     }
 }
 
+/// A literal's values after value `j`, where there are some: their bytes
+/// are some of the literal's, and not all of them.
+proof fn lemma_lit_rest_bytes<'a, O: RleOps<'a>>(vs: Seq<O::V>, j: int)
+    requires
+        0 <= j,
+        j + 1 < vs.len(),
+    ensures
+        0 < encs::<O>(vs.skip(j + 1)).len() < group_bytes::<O>(Group::Lit { values: vs }).len(),
+{
+    let l = vs.skip(j + 1);
+    assert(vs =~= vs.take(j + 1) + l);
+    lemma_encs_concat::<O>(vs.take(j + 1), l);
+    O::axiom_enc_signed(-(vs.len() as int) as i64, 0, Seq::empty(), Seq::empty());
+    O::axiom_enc(l.last(), l.last(), Seq::empty(), Seq::empty());
+    assert(encs::<O>(l) == encs::<O>(l.drop_last()) + O::enc(l.last()));
+}
+
+/// A slab's tail record, against its bytes after a literal tail: where
+/// groups follow the literal, those bytes hold the last group whole;
+/// where none do, the literal is the last group, with no bytes after the
+/// tail if it ends there, and else some, but fewer than the literal's.
+proof fn lemma_lit_tail_old<'a, O: RleOps<'a>>(data: Seq<u8>, at: int, v: O::V, lit: nat, end: int, i: int, j: int)
+    requires
+        valid_slab::<O>(data),
+        tail_lit::<O>(data, at, v, lit, end, i, j),
+    ensures ({
+        let gs = slab_groups::<O>(data);
+        let rest = gs.skip(i + 1);
+        let q = data.skip(end).len();
+        let tb = tail_bytes_of::<O>(gs);
+        let tl = lit_tail_of::<O>(gs);
+        &&& rest.len() > 0 ==> 0 < q && tb <= q && tb == tail_bytes_of::<O>(rest) && tl == lit_tail_of::<O>(rest)
+        &&& rest.len() == 0 && lit == 0 ==> q == 0
+        &&& rest.len() == 0 && lit > 0 ==> 0 < q < tb && tl == O::enc(gs[i]->values.last()).len()
+    }),
+{
+    hide(canonical);
+    hide(group_ok);
+    let gs = slab_groups::<O>(data);
+    let vs = gs[i]->values;
+    let l = vs.skip(j + 1);
+    let rest = gs.skip(i + 1);
+    lemma_lit_tail_facts::<O>(data, at, v, lit, end, i, j);
+    lemma_tail_rest::<O>(data, i + 1);
+    if rest.len() > 0 {
+        lemma_group_bytes_nonempty::<O>(rest.last());
+    } else {
+        assert(groups_bytes::<O>(rest) =~= Seq::<u8>::empty());
+        if lit == 0 {
+            assert(l =~= Seq::<O::V>::empty());
+            assert(encs::<O>(l) =~= Seq::<u8>::empty());
+        } else {
+            // the slab's last group is the literal the postfix ends inside
+            assert(gs.last() == gs[i]);
+            assert(gs[i] == Group::Lit { values: vs });
+            lemma_lit_rest_bytes::<O>(vs, j);
+        }
+    }
+}
+
+/// What flushing a state ending in `v` left `w` naming, as a tail
+/// record: the last of the groups written.
+proof fn lemma_flushed_last<'a, W: WriteOps<'a>>(s1: State<'a, W>, pre1: Seq<u8>, b1: Seq<u8>, gs1: Seq<Group<VOf<'a, W>>>, ws1: Seq<VOf<'a, W>>, h0: i64, b2: Seq<u8>, rw2: Option<RewriteHeader>, v: VOf<'a, W>, seg: int, w: WPos)
+    requires
+        rel(s1, pre1, b1, 0, gs1, ws1, h0),
+        last_is(s1, v),
+        flushed(s1, b1, b2, rw2, seg),
+        flushed_tail(s1, b1, b2, rw2, w),
+    ensures ({
+        let a = all_groups(s1, gs1, ws1);
+        let plen = apply::<W>(rw2, pre1, h0).len() as int;
+        &&& plen + b2.len() - wstart(w, plen, 0) == tail_bytes_of::<W::R>(a)
+        &&& lit_tail_of::<W::R>(a) == match w {
+            WPos::Lit { bytes, .. } => bytes as int,
+            _ => 0int,
+        }
+    }),
+{
+    hide(canonical);
+    hide(rel);
+    hide(groups_bytes);
+    let a = all_groups(s1, gs1, ws1);
+    let out = apply::<W>(rw2, pre1, h0) + b2.skip(0);
+    lemma_last_group::<W>(s1, gs1, ws1, v);
+    lemma_push::<W::R>(gs1, pend_group(s1, ws1)->Some_0);
+    assert(out.len() == groups_bytes::<W::R>(gs1).len() + group_bytes::<W::R>(a.last()).len());
+}
+
 /// What a literal-tail flush leaves for the merge to read: the
 /// remainder's last group, else the writer's, else the literal joined.
+#[verifier::spinoff_prover]
 proof fn lemma_lit_tail_after<'a, W: WriteOps<'a>>(s1: State<'a, W>, pre1: Seq<u8>, b1: Seq<u8>, gs1: Seq<Group<VOf<'a, W>>>, ws1: Seq<VOf<'a, W>>, h0: i64, b2: Seq<u8>, rw2: Option<RewriteHeader>, data: Seq<u8>, at: int, v: VOf<'a, W>, lit: nat, end: int, i: int, j: int, seg: int, w: WPos)
     requires
         rel(s1, pre1, b1, 0, gs1, ws1, h0), last_is(s1, v),
@@ -1246,60 +1549,18 @@ proof fn lemma_lit_tail_after<'a, W: WriteOps<'a>>(s1: State<'a, W>, pre1: Seq<u
     }),
 {
     hide(canonical);
-    let dg = slab_groups::<W::R>(data);
-    let vs = dg[i]->values;
-    let l = vs.skip(j + 1);
-    let rest = dg.skip(i + 1);
-    let a = all_groups(s1, gs1, ws1);
+    hide(rel);
+    hide(flushed);
+    hide(flushed_lit);
+    hide(flushed_tail);
+    hide(tail_lit);
+    hide(encodes);
+    hide(tail_ok);
+    let rest = slab_groups::<W::R>(data).skip(i + 1);
     lemma_join_lit::<W>(s1, pre1, b1, 0, gs1, ws1, h0, b2, rw2, data, at, v, lit, end, i, j, seg);
-    lemma_lit_tail_facts::<W::R>(data, at, v, lit, end, i, j);
-    lemma_tail_rest::<W::R>(data, i + 1);
-    lemma_last_group::<W>(s1, gs1, ws1, v);
-    lemma_slab_group::<W::R>(data, i);
-    lemma_encs_concat::<W::R>(l, Seq::empty());
-    lemma_groups_bytes_concat::<W::R>(Seq::empty(), rest);
-    assert(b2.skip(0) =~= b2);
-    let q = data.skip(end).len() as int;
-    let tb = tail_bytes_of::<W::R>(dg) as int;
-    let tl = lit_tail_of::<W::R>(dg) as int;
-    let plen = apply::<W>(rw2, pre1, h0).len() as int;
-    let bytes = apply::<W>(rw2, pre1, h0) + b2.skip(0) + data.skip(end);
-    let t = tail_after(w, plen, 0, b2.len() as int, q, tb, tl);
-    if rest.len() > 0 {
-        lemma_group_bytes_nonempty::<W::R>(rest.last());
-        assert(groups_bytes::<W::R>(rest) == groups_bytes::<W::R>(rest.drop_last()) + group_bytes::<W::R>(rest.last()));
-        assert(q >= groups_bytes::<W::R>(rest).len());
-        assert(q > 0);
-        assert(tb <= q);
-        assert(t.0 == tail_bytes_of::<W::R>(rest) && t.1 == lit_tail_of::<W::R>(rest));
-    } else if lit == 0 {
-        assert(l =~= Seq::<VOf<'a, W>>::empty());
-        assert(encs::<W::R>(l) =~= Seq::<u8>::empty());
-        assert(groups_bytes::<W::R>(rest) =~= Seq::<u8>::empty());
-        lemma_push::<W::R>(gs1, pend_group(s1, ws1)->Some_0);
-        assert(q == 0);
-        assert(apply::<W>(rw2, pre1, h0) + b2.skip(0) == groups_bytes::<W::R>(a));
-        assert(t.0 == tail_bytes_of::<W::R>(a));
-        assert(t.1 == lit_tail_of::<W::R>(a));
-    } else {
-        // the slab's last group is the literal the postfix ends inside,
-        // longer than the values of it carried over
-        assert(dg.last() == dg[i]);
-        assert(groups_bytes::<W::R>(rest) =~= Seq::<u8>::empty());
-        assert(vs =~= vs.take(j + 1) + l);
-        lemma_encs_concat::<W::R>(vs.take(j + 1), l);
-        lemma_encs_at::<W::R>(vs, j);
-        <W::R as RleOps<'a>>::axiom_enc(vs[j], vs[j], Seq::empty(), Seq::empty());
-        <W::R as RleOps<'a>>::axiom_enc_signed(header_of(dg[i]) as i64, 0, Seq::empty(), Seq::empty());
-        assert(l.last() == vs.last());
-        assert(q == encs::<W::R>(l).len());
-        <W::R as RleOps<'a>>::axiom_enc(l.last(), l.last(), Seq::empty(), Seq::empty());
-        assert(encs::<W::R>(l) == encs::<W::R>(l.drop_last()) + <W::R as RleOps<'a>>::enc(l.last()));
-        assert(tb == group_bytes::<W::R>(dg[i]).len());
-        assert(tb > q);
-        assert(q > 0);
-        assert(t.0 == bytes.len() - wstart(w, plen, 0));
-        assert(t.1 == <W::R as RleOps<'a>>::enc(vs.last()).len());
+    lemma_lit_tail_old::<W::R>(data, at, v, lit, end, i, j);
+    if rest.len() == 0 && lit == 0 {
+        lemma_flushed_last::<W>(s1, pre1, b1, gs1, ws1, h0, b2, rw2, v, seg, w);
     }
 }
 
