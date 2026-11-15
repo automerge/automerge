@@ -118,6 +118,41 @@ pub(crate) trait Decode: Sized {
             r.inv() == self.inv(),
             r.rest() == self.rest(),
     ;
+
+    /// Append all the values still to come to `out`.
+    fn d_drain(&mut self, out: &mut Vec<Self::Item>)
+        requires
+            old(self).inv(),
+        ensures
+            final(self).inv(),
+            final(self).rest().len() == 0,
+            final(out)@ == old(out)@ + old(self).rest(),
+    ;
+}
+
+/// Append `n` copies of `v` to `out`.
+#[inline(always)]
+pub(crate) fn push_n<T: Copy>(out: &mut Vec<T>, v: T, n: usize)
+    ensures
+        final(out)@ == old(out)@ + Seq::new(n as nat, |_i: int| v),
+{
+    let ghost o0 = out@;
+    let mut i: usize = 0;
+    proof {
+        assert(out@ =~= o0 + Seq::new(0, |_i: int| v));
+    }
+    while i < n
+        invariant
+            i <= n,
+            out@ == o0 + Seq::new(i as nat, |_i: int| v),
+        decreases n - i,
+    {
+        out.push(v);
+        i += 1;
+        proof {
+            assert(out@ =~= o0 + Seq::new(i as nat, |_i: int| v));
+        }
+    }
 }
 
 /// Decoders on a column's slabs, which live for `'a`.
@@ -1424,6 +1459,93 @@ impl<D: Decode> ICore<D> {
             self.decoder = X::open(&slabs[self.slab_idx]);
             proof {
                 c1.lemma_stepped::<X>(*self, s);
+            }
+        }
+    }
+
+    /// Append what is left of the window to `out`: each slab that the
+    /// window takes to its end in one call of the slab's decoder, and
+    /// the values of a slab in which the window ends one by one.
+    #[inline(always)]
+    pub(crate) fn drain_into<'a, X: Decoders<'a, D = D>>(&mut self, slabs: &'a [Slab<X::Tail>], out: &mut Vec<D::Item>)
+        requires
+            old(self).wf::<X>(slabs@),
+        ensures
+            final(self).wf::<X>(slabs@),
+            final(out)@ == old(out)@ + old(self).out::<X>(slabs@),
+            final(self).out::<X>(slabs@).len() == 0,
+    {
+        let ghost c0 = *self;
+        let ghost s = slabs@;
+        let ghost o0 = out@;
+        loop
+            invariant
+                s == slabs@,
+                self.wf::<X>(s),
+                out@ + self.out::<X>(s) == o0 + c0.out::<X>(s),
+            decreases s.len() - self.slab_idx,
+        {
+            proof {
+                self.lemma_here::<X>(s);
+            }
+            let k = self.slab_remaining;
+            if self.items_left == 0 || k > self.items_left {
+                break ;
+            }
+            if k > 0 {
+                let ghost c1 = *self;
+                let ghost o1 = out@;
+                self.decoder.d_drain(out);
+                self.items_left -= k;
+                self.slab_remaining = 0;
+                self.pos += k;
+                proof {
+                    let r = c1.decoder.rest();
+                    assert(self.decoder.rest() =~= r.skip(k as int));
+                    c1.lemma_taken::<X>(*self, s, k as int);
+                    let w = c1.out::<X>(s);
+                    assert(r.take(k as int) =~= r);
+                    assert(w =~= w.take(k as int) + w.skip(k as int));
+                    assert(out@ + self.out::<X>(s) =~= o1 + w);
+                }
+            }
+            if self.slab_idx + 1 >= slabs.len() {
+                break ;
+            }
+            let ghost c1 = *self;
+            self.slab_idx += 1;
+            self.slab_remaining = slabs[self.slab_idx].len;
+            self.decoder = X::open(&slabs[self.slab_idx]);
+            proof {
+                c1.lemma_stepped::<X>(*self, s);
+            }
+        }
+        loop
+            invariant
+                s == slabs@,
+                self.wf::<X>(s),
+                out@ + self.out::<X>(s) == o0 + c0.out::<X>(s),
+            ensures
+                self.wf::<X>(s),
+                out@ == o0 + c0.out::<X>(s),
+                self.out::<X>(s).len() == 0,
+            decreases self.out::<X>(s).len(),
+        {
+            let ghost o1 = out@;
+            let ghost w = self.out::<X>(s);
+            match self.next::<X>(slabs) {
+                Some(v) => {
+                    out.push(v);
+                    proof {
+                        assert(out@ + w.skip(1) =~= o1 + w);
+                    }
+                },
+                None => {
+                    proof {
+                        assert(out@ + w =~= out@);
+                    }
+                    break ;
+                },
             }
         }
     }

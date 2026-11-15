@@ -589,19 +589,6 @@ proof fn lemma_svs_spliced<T: VGet>(a: Seq<T>, at: int, del: int, ins: Seq<T>)
     lemma_svs_sub(a, at + del, a.len() as int);
 }
 
-/// A value read and put with those read before it is the values read,
-/// and the one after it left to read.
-proof fn lemma_svs_step<T: VGet>(a: Seq<T>, o: Seq<T>)
-    requires
-        o.len() > 0,
-    ensures
-        T::svs(a.push(o[0])) + T::svs(o.skip(1)) == T::svs(a) + T::svs(o),
-{
-    assert(a.push(o[0]) + o.skip(1) =~= a + o);
-    lemma_svs_add(a.push(o[0]), o.skip(1));
-    lemma_svs_add(a, o);
-}
-
 /// The values `vs`, given to a column of `V`, as it holds them.
 spec fn held<'v, V: seal::Sealed<C>, C>(vs: Seq<Get<'v, V>>) -> Seq<Held<V, C>> {
     Seq::new(vs.len(), |i: int| <V::E as ReadsAgree<'v, V::X>>::own(vs[i]))
@@ -1880,35 +1867,11 @@ impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
         let slabs = self.core.slabs();
         let mut it = self.reader(0, n);
         let mut out: Vec<Get<'_, V>> = Vec::with_capacity(n);
+        let ghost o = it.out::<V::X>(slabs@);
+        it.drain_into::<V::X>(slabs, &mut out);
         proof {
+            assert(out@ =~= o);
             assert(self@.subrange(0, n as int) =~= self@);
-            lemma_svs_none::<Get<'_, V>>();
-            assert(VGet::svs(out@) + VGet::svs(it.out::<V::X>(slabs@)) =~= self@);
-        }
-        loop
-            invariant
-                it.wf::<V::X>(slabs@),
-                VGet::svs(out@) + VGet::svs(it.out::<V::X>(slabs@)) == self@,
-            ensures
-                VGet::svs(out@) == self@,
-            decreases it.out::<V::X>(slabs@).len(),
-        {
-            let ghost o = it.out::<V::X>(slabs@);
-            match it.next_inline::<V::X>(slabs) {
-                Some(v) => {
-                    proof {
-                        lemma_svs_step(out@, o);
-                    }
-                    out.push(v);
-                },
-                None => {
-                    proof {
-                        VGet::lemma_svs(o);
-                        assert(VGet::svs(out@) + VGet::svs(o) =~= VGet::svs(out@));
-                    }
-                    break ;
-                },
-            }
         }
         out
     }
@@ -2345,3 +2308,52 @@ impl<V: VValue<C>, C: VCodec> std::fmt::Debug for VerifiedColumn<V, C> {
 
 // one budget for both APIs
 const _: () = assert!(MAX_SEG == crate::column::DEFAULT_MAX_SEG);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// For each window `start..end` of a column of `vals` that lies in
+    /// several slabs: `ICore::drain_into` appends the window's values to
+    /// what the vector held, and leaves nothing to read.
+    macro_rules! windows {
+        ($t:ty, $vals:expr) => {{
+            let vals = $vals;
+            let col = VerifiedColumn::<$t>::from_values_with_max_segments(&vals, 4);
+            let slabs = col.core.slabs();
+            assert!(slabs.len() > 3, "{} slabs", slabs.len());
+            for start in 0..=vals.len() {
+                for end in start..=vals.len() {
+                    let mut out = Vec::new();
+                    let mut it = col.reader(0, start);
+                    it.drain_into::<<$t as seal::Sealed<Leb128>>::X>(slabs, &mut out);
+                    let mut it = col.reader(start, end);
+                    it.drain_into::<<$t as seal::Sealed<Leb128>>::X>(slabs, &mut out);
+                    assert_eq!(out[..], vals[..end], "{start}..{end}");
+                    assert!(it.next::<<$t as seal::Sealed<Leb128>>::X>(slabs).is_none());
+                }
+            }
+        }};
+    }
+
+    /// `to_vec` reads a whole column, and so every slab to its end. Here
+    /// the windows end anywhere, inside a slab and inside a run.
+    #[test]
+    fn drain_into_appends_a_window() {
+        let nums: Vec<u64> = (0..90u64)
+            .map(|i| if i % 9 < 4 { i / 9 } else { i * 1000 })
+            .collect();
+        windows!(u64, nums.clone());
+        let opts: Vec<Option<u64>> = nums
+            .iter()
+            .enumerate()
+            .map(|(i, v)| (i % 5 != 0 && i % 13 != 6).then_some(*v))
+            .collect();
+        windows!(Option<u64>, opts);
+        let bools: Vec<bool> = (0..90).map(|i| i % 7 < 3 || i % 11 == 0).collect();
+        windows!(bool, bools);
+        let owned: Vec<Vec<u8>> = nums.iter().map(|v| v.to_string().into_bytes()).collect();
+        let lent: Vec<&[u8]> = owned.iter().map(|v| &v[..]).collect();
+        windows!(Vec<u8>, lent);
+    }
+}

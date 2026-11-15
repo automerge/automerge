@@ -20,7 +20,7 @@
     clippy::manual_is_multiple_of
 )]
 
-use crate::iter_core::{Decode, Decoders};
+use crate::iter_core::{push_n, Decode, Decoders};
 use crate::{PackError, Run};
 use std::marker::PhantomData;
 #[allow(unused_imports)]
@@ -2580,6 +2580,47 @@ impl<'a, C: CountsOf> Decode for BoolDecoder<'a, C> {
     #[inline(always)]
     fn dup(&self) -> (r: Self) {
         BoolDecoder { d: self.d, _codec: PhantomData }
+    }
+
+    #[allow(clippy::while_let_loop)]
+    #[inline(always)]
+    fn d_drain(&mut self, out: &mut Vec<bool>) {
+        let ghost v = bool_values::<C::K>(self.d.data());
+        let ghost p = self.d.pos::<C::K>();
+        let ghost o0 = out@;
+        proof {
+            self.d.lemma_pos::<C::K>();
+            assert(out@ =~= o0 + v.subrange(p, p));
+        }
+        loop
+            invariant
+                self.d.inv::<C::K>(), self.d.data() == old(self).d.data(),
+                v == bool_values::<C::K>(self.d.data()),
+                0 <= p <= self.d.pos::<C::K>() <= v.len(),
+                out@ == o0 + v.subrange(p, self.d.pos::<C::K>()),
+            ensures
+                self.d.pos::<C::K>() == v.len(),
+            decreases v.len() - self.d.pos::<C::K>(),
+        {
+            let ghost p1 = self.d.pos::<C::K>();
+            match self.d.next_run_max::<C::K>(usize::MAX) {
+                Some(run) => {
+                    push_n(out, run.value, run.count);
+                    proof {
+                        assert(out@ =~= o0 + v.subrange(p, p1 + run.count)) by {
+                            assert(v.subrange(p, p1 + run.count) =~= v.subrange(p, p1) + v.subrange(p1, p1 + run.count));
+                        }
+                    }
+                },
+                None => {
+                    break;
+                },
+            }
+        }
+        proof {
+            assert(v.subrange(p, v.len() as int) =~= v.skip(p));
+            assert(v.skip(self.d.pos::<C::K>()) =~= Seq::<bool>::empty());
+        }
     }
 }
 

@@ -28,7 +28,7 @@ use super::read::{lit_tail_of, tail_bytes_of};
 use super::state::*;
 #[cfg(verus_keep_ghost)]
 use super::writer::slab_bytes;
-use crate::iter_core::{Decode, Decoders};
+use crate::iter_core::{push_n, Decode, Decoders};
 use crate::rle::{RleTail, Slab};
 use std::marker::PhantomData;
 #[allow(unused_imports)]
@@ -1056,6 +1056,129 @@ impl<'a, O: RleOps<'a>> Dec<'a, O> {
             if self.remaining == 0 {
                 return None;
             }
+        }
+    }
+
+    /// Append all the values still to come to `out`: a repeat or null
+    /// run's value as often as the run goes on, a literal's values one
+    /// after another.
+    #[inline(always)]
+    pub(crate) fn drain_into(&mut self, out: &mut Vec<O::V>)
+        requires old(self).inv(),
+        ensures
+            final(self).inv(), final(self).data() == old(self).data(),
+            final(self).pos() == old(self).values().len(),
+            0 <= old(self).pos() <= old(self).values().len(),
+            final(out)@ == old(out)@ + old(self).values().skip(old(self).pos()),
+    {
+        let ghost p0 = self.pos();
+        let ghost vs = self.values();
+        let ghost o0 = out@;
+        proof {
+            self.lemma_pos();
+            assert(out@ =~= o0 + vs.subrange(p0, p0));
+        }
+        loop
+            invariant
+                self.inv(), self.data() == old(self).data(), self.values() == vs,
+                0 <= p0 <= self.pos() <= vs.len(),
+                out@ == o0 + vs.subrange(p0, self.pos()),
+            ensures
+                self.pos() == vs.len(),
+            decreases vs.len() - self.pos(),
+        {
+            if self.remaining == 0 {
+                self.advance_run();
+                if self.remaining == 0 {
+                    break;
+                }
+            }
+            let ghost p1 = self.pos();
+            let ghost o1 = out@;
+            self.run_into(out);
+            proof {
+                assert(out@ =~= o0 + vs.subrange(p0, self.pos())) by {
+                    assert(vs.subrange(p0, self.pos()) =~= vs.subrange(p0, p1) + vs.subrange(p1, self.pos()));
+                }
+            }
+        }
+        proof {
+            assert(vs.subrange(p0, vs.len() as int) =~= vs.skip(p0));
+        }
+    }
+
+    /// Inside a run: append what is left of it to `out`.
+    #[inline(always)]
+    fn run_into(&mut self, out: &mut Vec<O::V>)
+        requires old(self).inv(), old(self).remaining > 0,
+        ensures
+            final(self).inv(), final(self).data() == old(self).data(),
+            final(self).pos() > old(self).pos(),
+            final(self).pos() <= old(self).values().len(),
+            final(out)@ == old(out)@ + old(self).values().subrange(old(self).pos(), final(self).pos()),
+    {
+        let ghost data = self.data@;
+        let ghost gi = self.gi@;
+        let ghost p0 = self.pos();
+        let ghost vs = self.values();
+        let ghost o0 = out@;
+        proof {
+            self.lemma_pos();
+            lemma_slab_group_ok::<O>(data, gi - 1);
+        }
+        match &self.state {
+            RunState::Repeat(v) => {
+                let value = *v;
+                let count = self.remaining;
+                self.remaining = 0;
+                proof {
+                    lemma_slab_run_values::<O>(data, gi - 1, value);
+                }
+                push_n(out, value, count);
+                proof {
+                    assert(Seq::new(count as nat, |_i: int| value) =~= vs.subrange(p0, p0 + count));
+                }
+            },
+            RunState::Literal => {
+                let ghost r0 = self.remaining;
+                proof {
+                    assert(out@ =~= o0 + vs.subrange(p0, p0));
+                }
+                while self.remaining > 0
+                    invariant
+                        self.inv(), self.data() == old(self).data(), self.values() == vs,
+                        self.state is Literal,
+                        self.remaining <= r0,
+                        self.pos() == p0 + (r0 - self.remaining),
+                        0 <= p0, self.pos() <= vs.len(),
+                        out@ == o0 + vs.subrange(p0, self.pos()),
+                    decreases self.remaining,
+                {
+                    let ghost p1 = self.pos();
+                    let value = self.take_lit();
+                    out.push(value);
+                    proof {
+                        assert(out@ =~= o0 + vs.subrange(p0, p1 + 1));
+                    }
+                }
+            },
+            RunState::Null => {
+                let value = O::get_null();
+                let count = self.remaining;
+                self.remaining = 0;
+                proof {
+                    lemma_slab_run_values::<O>(data, gi - 1, value);
+                }
+                push_n(out, value, count);
+                proof {
+                    assert(Seq::new(count as nat, |_i: int| value) =~= vs.subrange(p0, p0 + count));
+                }
+            },
+            RunState::Idle => {
+                proof {
+                    assert(false);
+                }
+            },
         }
     }
 
@@ -4142,6 +4265,15 @@ impl<'a, O: RleOps<'a>> Decode for RDecoder<'a, O> {
     #[inline(always)]
     fn dup(&self) -> (r: Self) {
         RDecoder { inner: self.inner.dup() }
+    }
+
+    #[inline(always)]
+    fn d_drain(&mut self, out: &mut Vec<O::V>) {
+        self.inner.drain_into(out);
+        proof {
+            let v = self.inner.values();
+            assert(v.skip(self.inner.pos()) =~= Seq::<O::V>::empty());
+        }
     }
 }
 
