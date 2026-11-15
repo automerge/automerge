@@ -8,6 +8,11 @@
 //! is proved of both: what a saved column is, that there is one for each
 //! sequence of values, how long it can be, and a save and a load that
 //! keep to it.
+//!
+//! The values here are the model's own. What a client reads and what its
+//! specifications speak of is settled a layer up
+//! ([`VGet`](super::VGet)): for a number the three are one type, for
+//! bytes they are not.
 
 // Verus proofs read more plainly with `x = x + n`.
 #![allow(clippy::len_zero, clippy::assign_op_pattern)]
@@ -30,7 +35,7 @@ use crate::column_core::ColumnCore;
 #[cfg(verus_keep_ghost)]
 use crate::cursor::{all_ok, slab_lens, vals_of};
 use crate::cursor::{ReadsAgree, Slabs, Visitor};
-use crate::iter_core::{Decode, Decoders};
+use crate::iter_core::Decoders;
 use crate::load_core::LoadCore;
 use crate::rle::cut::Load;
 #[cfg(verus_keep_ghost)]
@@ -64,10 +69,9 @@ verus! {
 pub(crate) type Core<E> = ColumnCore<E, usize, SlabBTree<usize>, LenModel>;
 
 /// A slab model whose columns the verified public API can hold, read
-/// through the decoders `X`: the readers give the values the model
-/// holds, as they are.
+/// through the decoders `X`.
 pub(crate) trait Model<X>: Slabs + Sized + for <'a>ReadsAgree<'a, X> where
-    X: for <'a>Decoders<'a, Tail = <Self as Slabs>::Tail, D: Decode<Item = <Self as Slabs>::V>>,
+    X: for <'a>Decoders<'a, Tail = <Self as Slabs>::Tail>,
  {
     /// A visitor of the model's rebuilds that looks at nothing.
     type Blind: Visitor<Self>;
@@ -97,12 +101,6 @@ pub(crate) trait Model<X>: Slabs + Sized + for <'a>ReadsAgree<'a, X> where
             Self::valid(d),
         ensures
             d.len() <= Self::size_bound(Self::values(d)),
-    ;
-
-    /// A value read is the value the column holds.
-    proof fn lemma_own(v: Self::V)
-        ensures
-            <Self as ReadsAgree<'static, X>>::own(v) == v,
     ;
 
     /// Whether an insert of one value is compiled apart from a splice of
@@ -247,8 +245,8 @@ impl<C: CountsOf> Visitor<BoolModel<C>> for NoVisitBool<C> {
 
 // ── Run-length slabs ────────────────────────────────────────────────────────
 
-/// A writer whose values are owned as they are read, and no longer than
-/// ten bytes each, with headers and counts no longer either.
+/// A writer whose values are owned as they are read, with headers and
+/// counts no longer than ten bytes.
 pub(crate) trait Plain: for <'s>Lift<'s, W = Self> {
     /// A value read is the value written.
     proof fn lemma_plain(v: VOf<'static, Self>)
@@ -256,12 +254,10 @@ pub(crate) trait Plain: for <'s>Lift<'s, W = Self> {
             <Self as Lift<'static>>::lift(v) == v,
     ;
 
-    /// No header and no count is longer than ten bytes, and the values
-    /// encode to at most ten bytes each.
-    proof fn lemma_sizes(vs: Seq<VOf<'static, Self>>)
+    /// No header and no count is longer than ten bytes.
+    proof fn lemma_heads()
         ensures
             heads_bound::<<Self as WriteOps<'static>>::R>(10),
-            encs::<<Self as WriteOps<'static>>::R>(vs).len() <= 10 * vs.len(),
     ;
 }
 
@@ -269,8 +265,8 @@ impl<T: VPack, C: VCodec> Plain for VWrite<T, C> {
     proof fn lemma_plain(v: T) {
     }
 
-    proof fn lemma_sizes(vs: Seq<T>) {
-        lemma_plain_sizes::<T, C>(vs);
+    proof fn lemma_heads() {
+        lemma_plain_sizes::<T, C>(Seq::empty());
     }
 }
 
@@ -278,15 +274,14 @@ impl<T: VPack, C: VCodec> Plain for VOptWrite<T, C> {
     proof fn lemma_plain(v: Option<T>) {
     }
 
-    proof fn lemma_sizes(vs: Seq<Option<T>>) {
-        lemma_opt_sizes::<T, C>(vs);
+    proof fn lemma_heads() {
+        lemma_opt_sizes::<T, C>(Seq::empty());
     }
 }
 
-impl<L, O, T> Model<RleReads<O>> for RleModel<L> where
+impl<L, O> Model<RleReads<O>> for RleModel<L> where
     L: Plain + for <'s>Lift<'s, W = L> + for <'s>WriteOps<'s, R = O>,
-    O: for <'b>RleOps<'b, V = T>,
-    T: Copy,
+    O: for <'b>RleOps<'b>,
  {
     type Blind = NoVisit<L>;
 
@@ -300,13 +295,14 @@ impl<L, O, T> Model<RleReads<O>> for RleModel<L> where
         valid_slab::<O>(d)
     }
 
-    open spec fn values(d: Seq<u8>) -> Seq<T> {
+    open spec fn values(d: Seq<u8>) -> Seq<VOf<'static, L>> {
         slab_values::<O>(d)
     }
 
-    /// Ten bytes a value, and a header and a count of ten bytes each.
-    open spec fn size_bound(vs: Seq<T>) -> nat {
-        30 * vs.len()
+    /// The values' own bytes, and for each a header and a count of ten
+    /// bytes.
+    open spec fn size_bound(vs: Seq<VOf<'static, L>>) -> nat {
+        20 * vs.len() + encs::<O>(vs).len()
     }
 
     proof fn lemma_unique(x: Seq<u8>, y: Seq<u8>) {
@@ -315,13 +311,9 @@ impl<L, O, T> Model<RleReads<O>> for RleModel<L> where
 
     proof fn lemma_size(d: Seq<u8>) {
         let vs = slab_values::<O>(d);
-        L::lemma_sizes(vs);
+        L::lemma_heads();
         lemma_slab_size::<O>(d, 10);
         assert(2 * 10 * vs.len() == 20 * vs.len()) by (nonlinear_arith);
-    }
-
-    proof fn lemma_own(v: T) {
-        L::lemma_plain(v);
     }
 
     #[inline(always)]
@@ -356,7 +348,7 @@ impl<L, O, T> Model<RleReads<O>> for RleModel<L> where
                 proof {
                     if valid_slab::<O>(bytes@) && bytes@.len() <= 0xffff_fff5 && slab_values::<O>(bytes@).len()
                         <= usize::MAX - 3 {
-                        L::lemma_sizes(Seq::empty());
+                        L::lemma_heads();
                         assert(head_bound::<O>(10));
                         assert(small::<O>(bytes@));
                     }
@@ -395,9 +387,6 @@ impl<C: CountsOf> Model<BoolReads<C>> for BoolModel<C> {
 
     proof fn lemma_size(d: Seq<u8>) {
         lemma_bool_size::<C::K>(d);
-    }
-
-    proof fn lemma_own(v: bool) {
     }
 
     #[inline(always)]

@@ -1,14 +1,14 @@
 //! The verified public API (`hexane::verified`) and `Column` are two
 //! doors to one format: for the same values they save the same bytes, each
 //! loads what the other saved, and they refuse the same bytes. That holds
-//! for every value type of the verified API, and for a type of a client's
-//! own.
+//! for every value type of the verified API (numbers, `bool`, byte strings,
+//! each with nulls where it has them), and for a type of a client's own.
 //!
 //! Verus proves the verified API against its own specifications. These
 //! tests are what ties those specifications to `Column`'s format, which
 //! no proof does.
 
-use hexane::verified::{refused, VNewtype, VValue, VerifiedColumn};
+use hexane::verified::{refused, Get, VNewtype, VValue, VerifiedColumn};
 use hexane::{Codec, Column, ColumnValue, ColumnValueRef, PackError, RleEncoding, RleValue};
 use std::fmt::Debug;
 use std::num::NonZeroU32;
@@ -29,9 +29,9 @@ impl Rng {
     }
 
     /// A value: often a repeat of `last`, else a new one.
-    fn value<T: Kind>(&mut self, last: T) -> T {
+    fn value<T: Kind>(&mut self, last: &T) -> T {
         match self.below(8) {
-            0..=3 => last,
+            0..=3 => last.clone(),
             _ => T::fresh(self),
         }
     }
@@ -41,8 +41,8 @@ impl Rng {
         let mut last = T::fresh(self);
         (0..n)
             .map(|_| {
-                last = self.value(last);
-                last
+                last = self.value(&last);
+                last.clone()
             })
             .collect()
     }
@@ -75,63 +75,113 @@ impl Rng {
     }
 }
 
-/// A value type of both APIs.
-trait Kind: VValue + ColumnValueRef + Copy + PartialEq + Debug {
+/// A value type of both APIs. A test holds its values owned. The verified
+/// API takes and gives a value in the form `lend` makes: the value itself,
+/// or for a byte string a borrow of it.
+trait Kind: VValue + ColumnValueRef + Clone + PartialEq + Debug {
     /// A value that is not likely the one before it.
     fn fresh(rng: &mut Rng) -> Self;
+
+    fn lend(&self) -> Get<'_, Self>;
+
+    fn keep(v: Get<'_, Self>) -> Self;
 }
 
-impl Kind for u64 {
-    fn fresh(rng: &mut Rng) -> u64 {
-        rng.number()
-    }
+/// A type that is its own form, and the same type with nulls.
+macro_rules! plain_kind {
+    ($t:ty, $fresh:expr) => {
+        impl Kind for $t {
+            fn fresh(rng: &mut Rng) -> $t {
+                let fresh: fn(&mut Rng) -> $t = $fresh;
+                fresh(rng)
+            }
+
+            fn lend(&self) -> $t {
+                *self
+            }
+
+            fn keep(v: $t) -> $t {
+                v
+            }
+        }
+
+        impl Kind for Option<$t> {
+            fn fresh(rng: &mut Rng) -> Option<$t> {
+                match rng.below(3) {
+                    0 => None,
+                    _ => Some(<$t>::fresh(rng)),
+                }
+            }
+
+            fn lend(&self) -> Option<$t> {
+                *self
+            }
+
+            fn keep(v: Option<$t>) -> Option<$t> {
+                v
+            }
+        }
+    };
 }
 
-impl Kind for i64 {
-    fn fresh(rng: &mut Rng) -> i64 {
-        rng.number() as i64
-    }
-}
-
-impl Kind for u32 {
-    fn fresh(rng: &mut Rng) -> u32 {
-        rng.number() as u32
-    }
-}
-
-impl Kind for i32 {
-    fn fresh(rng: &mut Rng) -> i32 {
-        rng.number() as i32
-    }
-}
-
-impl Kind for usize {
-    fn fresh(rng: &mut Rng) -> usize {
-        rng.number() as usize
-    }
-}
-
-impl Kind for NonZeroU32 {
-    fn fresh(rng: &mut Rng) -> NonZeroU32 {
-        NonZeroU32::new(rng.number() as u32).unwrap_or(NonZeroU32::MAX)
-    }
-}
+plain_kind!(u64, |rng| rng.number());
+plain_kind!(i64, |rng| rng.number() as i64);
+plain_kind!(u32, |rng| rng.number() as u32);
+plain_kind!(i32, |rng| rng.number() as i32);
+plain_kind!(usize, |rng| rng.number() as usize);
+plain_kind!(NonZeroU32, |rng| {
+    NonZeroU32::new(rng.number() as u32).unwrap_or(NonZeroU32::MAX)
+});
 
 impl Kind for bool {
     fn fresh(rng: &mut Rng) -> bool {
         rng.below(2) == 1
     }
+
+    fn lend(&self) -> bool {
+        *self
+    }
+
+    fn keep(v: bool) -> bool {
+        v
+    }
 }
 
-impl<T: Kind + RleValue> Kind for Option<T>
-where
-    Option<T>: VValue,
-{
-    fn fresh(rng: &mut Rng) -> Option<T> {
+/// Byte strings: mostly short, the empty one among them; some with a
+/// length of two bytes on the wire, a few with one of three.
+impl Kind for Vec<u8> {
+    fn fresh(rng: &mut Rng) -> Vec<u8> {
+        let n = match rng.below(64) {
+            0 => 16_384 + rng.below(100),
+            1..=4 => 100 + rng.below(100),
+            _ => rng.below(4),
+        };
+        (0..n).map(|_| rng.next() as u8).collect()
+    }
+
+    fn lend(&self) -> &[u8] {
+        self
+    }
+
+    fn keep(v: &[u8]) -> Vec<u8> {
+        v.to_vec()
+    }
+}
+
+impl Kind for Option<Vec<u8>> {
+    fn fresh(rng: &mut Rng) -> Option<Vec<u8>> {
         match rng.below(3) {
             0 => None,
-            _ => Some(T::fresh(rng)),
+            _ => Some(Vec::fresh(rng)),
         }
+    }
+
+    fn lend(&self) -> Option<&[u8]> {
+        self.as_deref()
+    }
+
+    fn keep(v: Option<&[u8]>) -> Option<Vec<u8>> {
+        v.map(<[u8]>::to_vec)
     }
 }
 
@@ -186,15 +236,28 @@ impl RleValue for Action {
     }
 }
 
-impl Kind for Action {
-    fn fresh(rng: &mut Rng) -> Action {
-        [Action::Make, Action::Set, Action::Delete, Action::Increment][rng.below(4)]
-    }
-}
+plain_kind!(Action, |rng| {
+    [Action::Make, Action::Set, Action::Delete, Action::Increment][rng.below(4)]
+});
 
 /// What a `Column` holds.
 fn old_values<T: Kind>(c: &Column<T>) -> Vec<T> {
-    c.to_vec().into_iter().map(T::to_owned).collect()
+    c.to_vec().into_iter().map(old).collect()
+}
+
+/// A value a `Column` gave.
+fn old<T: Kind>(v: <T as ColumnValueRef>::Get<'_>) -> T {
+    <T as ColumnValueRef>::to_owned(v)
+}
+
+/// Values in the form the verified API takes.
+fn lent<T: Kind>(vs: &[T]) -> Vec<Get<'_, T>> {
+    vs.iter().map(T::lend).collect()
+}
+
+/// What a `VerifiedColumn` holds.
+fn new_values<T: Kind>(v: &VerifiedColumn<T>) -> Vec<T> {
+    v.to_vec().into_iter().map(T::keep).collect()
 }
 
 /// Both columns hold `model`, read the same way through every reader, and
@@ -202,16 +265,16 @@ fn old_values<T: Kind>(c: &Column<T>) -> Vec<T> {
 fn check<T: Kind>(v: &VerifiedColumn<T>, c: &Column<T>, model: &[T]) {
     assert_eq!(v.len(), model.len());
     assert_eq!(v.is_empty(), model.is_empty());
-    assert_eq!(v.to_vec(), model);
+    assert_eq!(new_values(v), model);
     assert_eq!(old_values(c), model);
     let mut it = v.iter();
-    for &m in model {
-        assert_eq!(it.next(), Some(m));
+    for m in model {
+        assert_eq!(it.next().map(T::keep).as_ref(), Some(m));
     }
-    assert_eq!(it.next(), None);
-    assert_eq!(it.next(), None);
-    assert_eq!(v.get(model.len()), None);
-    assert_eq!(v.get(usize::MAX), None);
+    assert!(it.next().is_none());
+    assert!(it.next().is_none());
+    assert!(v.get(model.len()).is_none());
+    assert!(v.get(usize::MAX).is_none());
     assert_eq!(v.save(), c.save());
 }
 
@@ -221,7 +284,7 @@ fn check_loads<T: Kind>(v: &VerifiedColumn<T>, c: &Column<T>, model: &[T]) {
     assert_eq!(bytes, c.save());
     let v2 = VerifiedColumn::<T>::load(&c.save()).unwrap();
     let c2 = Column::<T>::load(&bytes).unwrap();
-    assert_eq!(v2.to_vec(), model);
+    assert_eq!(new_values(&v2), model);
     assert_eq!(old_values(&c2), model);
     assert_eq!(v2.save(), bytes);
     assert_eq!(c2.save(), bytes);
@@ -230,9 +293,9 @@ fn check_loads<T: Kind>(v: &VerifiedColumn<T>, c: &Column<T>, model: &[T]) {
 /// A column of each API with the values `model`.
 fn both<T: Kind>(model: &[T]) -> (VerifiedColumn<T>, Column<T>) {
     let mut v = VerifiedColumn::<T>::new();
-    v.splice(0, 0, model);
+    v.splice(0, 0, &lent(model));
     let mut c = Column::<T>::new();
-    c.splice(0, 0, model.iter().copied());
+    c.splice(0, 0, model.iter().cloned());
     (v, c)
 }
 
@@ -254,20 +317,23 @@ macro_rules! for_each_kind {
         $f::<Option<usize>>();
         $f::<Option<NonZeroU32>>();
         $f::<Option<Action>>();
+        $f::<Vec<u8>>();
+        $f::<Option<Vec<u8>>>();
     };
 }
 
 fn shapes<T: Kind>() {
     let mut rng = Rng(0x5a17);
     let (a, b, c) = (T::fresh(&mut rng), T::fresh(&mut rng), T::fresh(&mut rng));
+    let pick = |i: usize| [&a, &b, &c][i].clone();
     let mut shapes: Vec<Vec<T>> = vec![
         vec![],
-        vec![a],
-        vec![a; 1000],
-        (0..1000).map(|i| [a, b][i / 7 % 2]).collect(),
-        (0..1000).map(|i| [a, b, c][i % 3]).collect(),
+        vec![pick(0)],
+        vec![pick(0); 1000],
+        (0..1000).map(|i| pick(i / 7 % 2)).collect(),
+        (0..1000).map(|i| pick(i % 3)).collect(),
         (0..5000).map(|_| T::fresh(&mut rng)).collect(),
-        vec![a, a, b, c, c, c, a, b, b, a],
+        [0, 0, 1, 2, 2, 2, 0, 1, 1, 0].map(pick).to_vec(),
     ];
     for _ in 0..20 {
         shapes.push(rng.values(300));
@@ -350,6 +416,52 @@ fn the_bytes_of_a_column() {
     // `bool`: the lengths of its runs, the first of them of `false`
     assert_eq!(bytes::<bool>(&[false, false, true]), [2, 1]);
     assert_eq!(bytes::<bool>(&[true, false]), [0, 1, 1]);
+    // a byte string is its length, then its bytes; the empty one is a zero
+    let s = |b: &[u8]| b.to_vec();
+    assert_eq!(
+        bytes::<Vec<u8>>(&[s(b"ab"), s(b"ab"), s(b"")]),
+        [2, 2, b'a', b'b', 0x7f, 0]
+    );
+    assert_eq!(
+        bytes::<Vec<u8>>(&[s(b"a"), s(b"b"), s(b"ab")]),
+        [0x7d, 1, b'a', 1, b'b', 2, b'a', b'b']
+    );
+    // a length past 127 is two bytes
+    let long = vec![7u8; 200];
+    let saved = bytes::<Vec<u8>>(&[long.clone(), long.clone()]);
+    assert_eq!(saved[..3], [2, 0xc8, 0x01]);
+    assert_eq!(saved[3..], long[..]);
+    // a null string is a null run, which the empty string is not
+    assert_eq!(
+        bytes::<Option<Vec<u8>>>(&[Some(s(b"x")), None, None, Some(s(b""))]),
+        [0x7f, 1, b'x', 0, 2, 0x7f, 0]
+    );
+}
+
+/// What a column of byte strings gives is a borrow of the column: it
+/// lives as long as the column is not changed, across other reads.
+#[test]
+fn byte_strings_are_lent() {
+    let mut v = VerifiedColumn::<Vec<u8>>::new();
+    v.splice(0, 0, &[b"one", b"two", b"two"]);
+    v.push(b"three");
+    let first: &[u8] = v.get(0).unwrap();
+    let all: Vec<&[u8]> = v.to_vec();
+    let mut it = v.iter_range(1, 3);
+    let (x, y) = (it.next().unwrap(), it.next().unwrap());
+    assert!(it.next().is_none());
+    assert_eq!(first, b"one");
+    assert_eq!(all, [&b"one"[..], b"two", b"two", b"three"]);
+    assert_eq!((x, y), (&b"two"[..], &b"two"[..]));
+
+    let mut o = VerifiedColumn::<Option<Vec<u8>>>::new();
+    o.splice(0, 0, &[Some(b"one"), None]);
+    o.insert(1, Some(&[]));
+    o.push(None);
+    let all: Vec<Option<&[u8]>> = o.to_vec();
+    assert_eq!(all, [Some(&b"one"[..]), Some(&[]), None, None]);
+    assert_eq!(o.get(3), Some(None));
+    assert_eq!(o.get(4), None);
 }
 
 fn edits<T: Kind>() {
@@ -365,27 +477,27 @@ fn edits<T: Kind>() {
                     let at = rng.below(model.len() + 1);
                     let del = rng.below((model.len() - at).min(12) + 1);
                     let ins: Vec<T> = rng.values(40);
-                    v.splice(at, del, &ins);
-                    c.splice(at, del, ins.iter().copied());
+                    v.splice(at, del, &lent(&ins));
+                    c.splice(at, del, ins.iter().cloned());
                     model.splice(at..at + del, ins);
                 }
                 4 | 5 => {
                     let at = rng.below(model.len() + 1);
                     let x = match at.checked_sub(1) {
-                        Some(i) => rng.value(model[i]),
+                        Some(i) => rng.value(&model[i]),
                         None => T::fresh(&mut rng),
                     };
-                    v.insert(at, x);
-                    c.insert(at, x);
+                    v.insert(at, x.lend());
+                    c.insert(at, x.clone());
                     model.insert(at, x);
                 }
                 6 => {
                     let x = match model.last() {
-                        Some(&last) => rng.value(last),
+                        Some(last) => rng.value(last),
                         None => T::fresh(&mut rng),
                     };
-                    v.push(x);
-                    c.push(x);
+                    v.push(x.lend());
+                    c.push(x.clone());
                     model.push(x);
                 }
                 7 | 8 => {
@@ -408,16 +520,16 @@ fn edits<T: Kind>() {
             for _ in 0..4 {
                 if !model.is_empty() {
                     let i = rng.below(model.len());
-                    assert_eq!(v.get(i), Some(model[i]));
-                    assert_eq!(v.get(i), c.get(i).map(T::to_owned));
+                    assert_eq!(v.get(i).map(T::keep).as_ref(), Some(&model[i]));
+                    assert_eq!(v.get(i).map(T::keep), c.get(i).map(old));
                 }
                 let start = rng.below(model.len() + 1);
                 let end = start + rng.below(model.len() - start + 1);
                 let mut it = v.iter_range(start, end);
-                for &m in &model[start..end] {
-                    assert_eq!(it.next(), Some(m));
+                for m in &model[start..end] {
+                    assert_eq!(it.next().map(T::keep).as_ref(), Some(m));
                 }
-                assert_eq!(it.next(), None);
+                assert!(it.next().is_none());
             }
             if step % 10 == 9 {
                 check_loads(&v, &c, &model);
@@ -442,10 +554,10 @@ fn check_same_load<T: Kind>(bytes: &[u8]) -> bool {
             assert_eq!(v.len(), c.len());
             // a few bytes can be a run of billions: read those in places
             if v.len() <= 100_000 {
-                assert_eq!(v.to_vec(), old_values(&c));
+                assert_eq!(new_values(&v), old_values(&c));
             } else {
                 for i in [0, 1, v.len() / 2, v.len() - 1] {
-                    assert_eq!(v.get(i), c.get(i).map(T::to_owned));
+                    assert_eq!(v.get(i).map(T::keep), c.get(i).map(old));
                 }
             }
             // what loads is canonical: it is what its values save to
@@ -505,6 +617,8 @@ fn loads_refuse_bad_runs() {
     refuses::<Option<i64>>(&bad);
     refuses::<Option<NonZeroU32>>(&bad);
     refuses::<Option<Action>>(&bad);
+    refuses::<Vec<u8>>(&bad);
+    refuses::<Option<Vec<u8>>>(&bad);
 
     // `bool`: a run of none that is not the first; a truncated count; an
     // overlong one
@@ -604,6 +718,58 @@ fn loads_refuse_what_the_type_has_no_value_for() {
     }
 }
 
+/// Byte strings: a length is a number like any other, and the bytes it
+/// counts must be there.
+#[test]
+fn loads_refuse_bad_byte_strings() {
+    let bad_format = PackError::BadFormat.to_string();
+    // a length past the data's end: in a run, in a literal run, in the
+    // second value of one; as long as a length can be; of no bytes at all
+    let short: [&[u8]; 6] = [
+        &[2, 3, 1, 2],
+        &[0x7f, 3, 1, 2],
+        &[0x7e, 1, 7, 2, 9],
+        &[
+            2, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x01,
+        ],
+        &[2, 0xff, 0xff, 0xff, 0xff, 0x0f, 1, 2, 3],
+        &[2, 1],
+    ];
+    for b in short {
+        assert_eq!(refusal::<Vec<u8>>(b), bad_format, "{b:?}");
+        assert_eq!(refusal::<Option<Vec<u8>>>(b), bad_format, "{b:?}");
+    }
+    // a truncated length; an overlong one; two runs of one string; one
+    // string twice in a literal run; a run with no string; a literal run
+    // that ends early
+    let bad: [&[u8]; 6] = [
+        &[2, 0x81],
+        &[2, 0x81, 0x00, 7],
+        &[2, 1, 7, 2, 1, 7],
+        &[0x7e, 1, 7, 1, 7],
+        &[2, 1, 7, 9],
+        &[0x7d, 1, 7, 0],
+    ];
+    for b in bad {
+        assert!(!check_same_load::<Vec<u8>>(b), "loaded {b:?}");
+        assert!(!check_same_load::<Option<Vec<u8>>>(b), "loaded {b:?}");
+    }
+    // these are columns: the empty string in a run, and one string after
+    // another that it is the start of
+    let good: [&[u8]; 3] = [&[3, 0], &[0x7e, 1, 7, 2, 7, 7], &[2, 1, 7, 0x7f, 0]];
+    for b in good {
+        assert!(check_same_load::<Vec<u8>>(b), "refused {b:?}");
+        assert!(check_same_load::<Option<Vec<u8>>>(b), "refused {b:?}");
+    }
+    // a null run, where the type has nulls
+    assert!(!check_same_load::<Vec<u8>>(&[2, 1, 7, 0, 2]));
+    assert!(check_same_load::<Option<Vec<u8>>>(&[2, 1, 7, 0, 2]));
+    // nulls and no nulls save alike where there is no null
+    let model: Vec<Vec<u8>> = Rng(0xb17e5).values(200);
+    let some: Vec<Option<Vec<u8>>> = model.iter().cloned().map(Some).collect();
+    assert_eq!(both(&model).0.save(), both(&some).0.save());
+}
+
 /// Bytes at random and saved columns with a byte changed, dropped or
 /// added: the two loaders take the same ones. Both kinds are seen.
 fn fuzz_loads<T: Kind>() {
@@ -666,13 +832,15 @@ fn loads_of_another_types_bytes() {
     }
     let mut rng = Rng(0xc405);
     for _ in 0..300 {
-        let all: [Vec<u8>; 6] = [
+        let all: [Vec<u8>; 8] = [
             both(&rng.values::<u64>(30)).0.save(),
             both(&rng.values::<i64>(30)).0.save(),
             both(&rng.values::<Option<u32>>(30)).0.save(),
             both(&rng.values::<Option<i32>>(30)).0.save(),
             both(&rng.values::<bool>(30)).0.save(),
             both(&rng.values::<Option<Action>>(30)).0.save(),
+            both(&rng.values::<Vec<u8>>(30)).0.save(),
+            both(&rng.values::<Option<Vec<u8>>>(30)).0.save(),
         ];
         for bytes in &all {
             cross::<u64>(bytes);
@@ -690,6 +858,8 @@ fn loads_of_another_types_bytes() {
             cross::<Option<usize>>(bytes);
             cross::<Option<NonZeroU32>>(bytes);
             cross::<Option<Action>>(bytes);
+            cross::<Vec<u8>>(bytes);
+            cross::<Option<Vec<u8>>>(bytes);
         }
     }
 }
