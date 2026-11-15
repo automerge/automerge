@@ -13,6 +13,7 @@ use hexane::{
     Codec, Column, ColumnValue, ColumnValueRef, LoadOpts, MaybeFill, NoFill, PackError,
     RleEncoding, RleValue, Run,
 };
+use std::cell::{Cell, RefCell};
 use std::cmp::Ordering;
 use std::fmt::Debug;
 use std::num::NonZeroU32;
@@ -1598,6 +1599,245 @@ fn a_search_is_in_the_order_of_the_stored_numbers() {
     assert_eq!(v.scope_to_value(Rank::High, 0, n), 2000..3000);
     assert_eq!(v.scope_to_value(Rank::Mid, 1500, 2500), 1500..2000);
     assert_eq!(v.scope_to_value(Rank::Low, 1500, 2500), 1500..1500);
+}
+
+/// The runs of equal values of `model`, each as long as it can be: a
+/// remap calls its function with the value of each, once, wherever the
+/// column's slabs end.
+fn runs_of<T: Kind>(model: &[T]) -> Vec<(usize, T)> {
+    let mut runs: Vec<(usize, T)> = vec![];
+    for x in model {
+        match runs.last_mut() {
+            Some((count, y)) if y == x => *count += 1,
+            _ => runs.push((1, x.clone())),
+        }
+    }
+    runs
+}
+
+/// A remap of both columns by `f`, which is given how many calls came
+/// before and the value. Both call it once for each run of equal values,
+/// in the column's order, and each place has what the call for its run gave:
+/// the columns are then checked as columns of those values, which are
+/// returned. A remapped column's slabs are cut as a loaded one's are, so
+/// it is checked as one of those ([`check_loaded`]).
+fn check_remap<T: Kind>(
+    v: &mut VerifiedColumn<T>,
+    c: &mut Column<T>,
+    model: &[T],
+    f: impl Fn(usize, &T) -> T,
+) -> Vec<T> {
+    let runs = runs_of(model);
+    let (seen_v, seen_c) = (RefCell::new(vec![]), RefCell::new(vec![]));
+    v.remap(|x: T| {
+        let mut seen = seen_v.borrow_mut();
+        seen.push(x.clone());
+        f(seen.len() - 1, &x)
+    });
+    c.remap(|x: T| {
+        let mut seen = seen_c.borrow_mut();
+        seen.push(x.clone());
+        f(seen.len() - 1, &x)
+    });
+    let called: Vec<T> = runs.iter().map(|(_, x)| x.clone()).collect();
+    assert_eq!(seen_v.into_inner(), called);
+    assert_eq!(seen_c.into_inner(), called);
+    let mut want = vec![];
+    for (i, (count, x)) in runs.iter().enumerate() {
+        let y = f(i, x);
+        want.extend((0..*count).map(|_| y.clone()));
+    }
+    check_loaded(v, c, &want);
+    want
+}
+
+/// Remaps of columns in one slab and in many, also of ones loaded from
+/// saved bytes, by functions of several kinds: one that changes nothing,
+/// one that gives one value for all, ones that give few values or many
+/// for the column's values, one that turns the column's values round
+/// among themselves, and one that gives another value at each call. The
+/// remapped column keeps its segment budget, which the edits after show.
+fn remaps<T: Kind>() {
+    let mut rng = Rng(0x4e3a);
+    let (a, b) = (T::fresh(&mut rng), T::fresh(&mut rng));
+    let models: Vec<Vec<T>> = vec![
+        vec![],
+        vec![a.clone()],
+        vec![a.clone(); 300],
+        (0..400).map(|i| [&a, &b][i / 9 % 2].clone()).collect(),
+        (0..400).map(|i| [&a, &b][i % 2].clone()).collect(),
+        (0..500).map(|_| T::fresh(&mut rng)).collect(),
+        rng.values(300),
+        rng.values(700),
+    ];
+    for (i, model) in models.iter().enumerate() {
+        let mut keys: Vec<T> = vec![];
+        for x in model {
+            if !keys.contains(x) {
+                keys.push(x.clone());
+            }
+        }
+        let key = |x: &T| keys.iter().position(|k| k == x).unwrap();
+        let few: Vec<T> = (0..3).map(|_| T::fresh(&mut rng)).collect();
+        let many: Vec<T> = (0..keys.len() + 7).map(|_| T::fresh(&mut rng)).collect();
+        for (budget, loaded) in [(3, false), (3, true), (16, false), (64, true)] {
+            for kind in 0..6 {
+                let (mut v, mut c) = if budget < 64 {
+                    both_in_slabs(&mut rng, model, budget)
+                } else {
+                    both_with(model, budget)
+                };
+                if loaded {
+                    let bytes = v.save();
+                    let opts = LoadOpts::new().with_max_segments(budget);
+                    v = VerifiedColumn::<T>::load_with(&bytes, opts).unwrap();
+                    c = Column::<T>::load_with(&bytes, opts).unwrap();
+                }
+                assert!(i != 5 || budget > 3 || loaded || v.slab_count() > 40);
+                let mut now = match kind {
+                    0 => check_remap(&mut v, &mut c, model, |_, x| x.clone()),
+                    1 => check_remap(&mut v, &mut c, model, |_, _| b.clone()),
+                    2 => check_remap(&mut v, &mut c, model, |_, x| few[key(x) % 3].clone()),
+                    3 => check_remap(&mut v, &mut c, model, |_, x| many[key(x)].clone()),
+                    4 => check_remap(&mut v, &mut c, model, |_, x| {
+                        keys[(key(x) + 1) % keys.len()].clone()
+                    }),
+                    _ => check_remap(&mut v, &mut c, model, |n, _| many[n % many.len()].clone()),
+                };
+                assert_eq!(now.len(), model.len());
+                if kind == 0 {
+                    assert_eq!(&now, model);
+                }
+                // a column like any other after it: edits, a second
+                // remap, and what it saves loads
+                for _ in 0..3 {
+                    let at = rng.below(now.len() + 1);
+                    let del = rng.below((now.len() - at).min(4) + 1);
+                    let put: Vec<T> = rng.values(40);
+                    v.splice(at, del, &lent(&put));
+                    c.splice(at, del, put.iter().cloned());
+                    now.splice(at..at + del, put);
+                }
+                check_loaded(&v, &c, &now);
+                let again = check_remap(&mut v, &mut c, &now, |n, x| {
+                    if n % 2 == 0 {
+                        x.clone()
+                    } else {
+                        a.clone()
+                    }
+                });
+                check_loads(&v, &c, &again);
+            }
+        }
+    }
+}
+
+#[test]
+fn a_remap_gives_each_run_what_the_function_gave() {
+    for_each_kind!(remaps);
+}
+
+/// A column that has been emptied, and one that never held a value: the
+/// function is not called.
+#[test]
+fn a_remap_of_no_values() {
+    fn none<T: Kind>() {
+        let mut rng = Rng(0x0e3a);
+        let (mut v, mut c) = both(&rng.values::<T>(200));
+        v.clear();
+        c.clear();
+        v.remap(|_| unreachable!());
+        c.remap(|_| unreachable!());
+        check(&v, &c, &[]);
+        let (mut v, mut c) = (VerifiedColumn::<T>::new(), Column::<T>::new());
+        v.remap(|_| unreachable!());
+        c.remap(|_| unreachable!());
+        check(&v, &c, &[]);
+        let x = T::fresh(&mut rng);
+        v.push(x.lend());
+        c.push(x.clone());
+        check(&v, &c, &[x]);
+    }
+    for_each_kind!(none);
+}
+
+/// Byte strings made longer, shorter and empty, nulls made strings and
+/// strings nulls: the function is given a string of its own for each run,
+/// and what it hands back is copied into the column.
+#[test]
+fn a_remap_of_byte_strings() {
+    let mut rng = Rng(0xb3a9);
+    let model: Vec<Vec<u8>> = (0..2000)
+        .map(|i| vec![(i / 3 % 251) as u8; rng.below(40)])
+        .collect();
+    let (mut v, mut c) = both_with(&model, 16);
+    assert!(v.slab_count() > 10);
+    let longer = check_remap(&mut v, &mut c, &model, |_, x| {
+        let mut y = x.clone();
+        y.extend_from_slice(&[7; 300]);
+        y
+    });
+    assert!(longer.iter().all(|x| x.len() >= 300));
+    let shorter = check_remap(&mut v, &mut c, &longer, |_, x| x[..x.len() - 299].to_vec());
+    assert!(shorter
+        .iter()
+        .zip(&model)
+        .all(|(s, m)| s[..m.len()] == m[..]));
+    let empty = check_remap(&mut v, &mut c, &shorter, |_, _| vec![]);
+    assert_eq!(empty, vec![vec![]; 2000]);
+    assert!(v.is_only(&[]));
+
+    let model: Vec<Option<Vec<u8>>> = (0..2000)
+        .map(|i| match i / 5 % 3 {
+            0 => None,
+            k => Some(vec![k as u8; i % 7]),
+        })
+        .collect();
+    let (mut v, mut c) = both_with(&model, 16);
+    let turned = check_remap(&mut v, &mut c, &model, |_, x| match x {
+        None => Some(b"null".to_vec()),
+        Some(x) if x.is_empty() => Some(vec![]),
+        Some(_) => None,
+    });
+    assert_eq!(turned.iter().filter(|x| x.is_none()).count(), 1140);
+    let nulls = check_remap(&mut v, &mut c, &turned, |_, _| None);
+    assert!(v.is_only(None) && nulls.iter().all(|x| x.is_none()));
+}
+
+/// A function that panics leaves the column as it was, in both APIs:
+/// the new column is put in the old one's place only when it is whole.
+#[cfg(any(target_pointer_width = "64", panic = "unwind"))]
+#[test]
+fn a_remap_whose_function_panics() {
+    fn stopped<T: Kind>() {
+        let mut rng = Rng(0x9a1c);
+        let model: Vec<T> = rng.values(1200);
+        let (mut v, mut c) = both_with(&model, 8);
+        let runs = runs_of(&model).len();
+        for stop in [0, 1, runs / 2, runs - 1] {
+            let calls = Cell::new(0);
+            let f = |x: T| {
+                calls.set(calls.get() + 1);
+                if calls.get() > stop {
+                    panic!("no more");
+                }
+                x
+            };
+            let new = panic_of(std::panic::AssertUnwindSafe(|| v.remap(f))).unwrap();
+            assert_eq!((new.as_str(), calls.get()), ("no more", stop + 1));
+            calls.set(0);
+            let old = panic_of(std::panic::AssertUnwindSafe(|| c.remap(f))).unwrap();
+            assert_eq!((old.as_str(), calls.get()), ("no more", stop + 1));
+            check(&v, &c, &model);
+        }
+        // and takes a remap, and an edit, as before
+        let x = T::fresh(&mut rng);
+        let all = check_remap(&mut v, &mut c, &model, |_, _| x.clone());
+        v.push(x.lend());
+        c.push(x.clone());
+        check_loaded(&v, &c, &vec![x; all.len() + 1]);
+    }
+    for_each_kind!(stopped);
 }
 
 /// The two loaders take the same bytes, as the same values, and refuse

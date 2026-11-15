@@ -833,6 +833,9 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> ColumnCore<E, W, I, G> {
         m: &M,
     ) -> (r: (Self, Ghost<Seq<N::In>>))
         where E: ReadsAgree<'a, X>
+        requires
+            forall|i: int|
+                0 <= i < self@.len() ==> m.pre(#[trigger] crate::iter_core::vals_of::<X>(self.slabs_spec())[i]),
         ensures
             r.0.ready(),
             r.0.budget() == self.budget(),
@@ -956,6 +959,8 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> ColumnCore<E, W, I, G> {
         requires
             old(core).wf::<X>(slabs@),
             max >= 2,
+            forall|i: int|
+                0 <= i < old(core).out::<X>(slabs@).len() ==> m.pre(#[trigger] old(core).out::<X>(slabs@)[i]),
         ensures
             r.0.ready(),
             r.0.budget() == max,
@@ -979,11 +984,18 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> ColumnCore<E, W, I, G> {
                 enc.e_inv(),
                 enc.e_values().len() == ws.len(),
                 forall|i: int| 0 <= i < ws.len() ==> m.maps(o[i], #[trigger] ws[i]) && enc.e_values()[i] == N::val(ws[i]),
+                forall|i: int| 0 <= i < o.len() ==> m.pre(#[trigger] o[i]),
             decreases o.len() - ws.len() + if done { 0int } else { 1int },
         {
             let ghost w0 = ws;
             match core.next_run::<X>(slabs) {
                 Some(run) => {
+                    proof {
+                        // the run's value is the first value left
+                        let (p, n) = (w0.len() as int, run.count as int);
+                        assert(o.skip(p).take(n) == Seq::new(n as nat, |_i: int| run.value));
+                        assert(o.skip(p).take(n)[0] == o[p]);
+                    }
                     let x = m.apply(run.value);
                     let ghost gx = x;
                     enc.put(x, run.count);

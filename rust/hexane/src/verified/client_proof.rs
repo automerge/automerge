@@ -32,12 +32,21 @@
 //! and a null before every number ([`find_flags_and_nulls`]). And that
 //! the search needs the values in order only as far as the value it
 //! looks for can tell ([`find_the_gap`]), and that a client can ask how
-//! two values stand in the order ([`later_of`]).
+//! two values stand in the order ([`later_of`]). And that a remap puts
+//! in each place what the client's function gives for the value there,
+//! as that function's own specification says it: one that gives its
+//! argument back leaves a column of any value type as it was
+//! ([`remap_as_it_is`]); a closure may ask of its argument what the
+//! client can show of the column's values ([`double_the_small`],
+//! [`one_more`]), may be a named function ([`step_the_actions`]), may
+//! use what it captured ([`longer_and_emptied`], for byte strings), and
+//! may say of its result less than which value it is
+//! ([`turned_and_raised`]).
 //!
 //! This module exists only while Verus checks the crate.
 
 use super::{
-    below_at, bytes_below, lemma_run_values_add, lemma_run_values_push, lemma_sorted, only,
+    below_at, bytes_below, lemma_run_values_add, lemma_run_values_push, lemma_sorted, mapped, only,
     refused, run_values, sorted, sorted_for, sum_of, total_len, Get, VCodec, VGet, VNewtype, VSpec,
     VValue, VerifiedColumn,
 };
@@ -1191,6 +1200,206 @@ fn find_the_gap(col: &VerifiedColumn<i64>, x: i64, m: usize) -> (r: Range<usize>
         }
     }
     r
+}
+
+/// A remap by a function that gives each value back leaves a column as
+/// it was: for every value type and codec. The client knows of the
+/// function only what it wrote as its `ensures`, and of the column only
+/// that each place holds what the function gave for the value that was
+/// there (`mapped`).
+#[allow(dead_code)]
+fn remap_as_it_is<V: VValue<C>, C: VCodec>(col: &mut VerifiedColumn<V, C>)
+    ensures
+        final(col)@ == old(col)@,
+{
+    let f = |v: V| -> (w: V)
+        ensures
+            w == v,
+        { v };
+    col.remap(f);
+    assert(col@ =~= old(col)@);
+}
+
+/// Numbers doubled, by a function that does not take every number: the
+/// client has to show that it takes those of the column, and no more.
+#[allow(dead_code)]
+fn double_the_small(col: &mut VerifiedColumn<u64>)
+    requires
+        forall|i: int| 0 <= i < old(col)@.len() ==> old(col)@[i] <= 1000,
+    ensures
+        final(col)@.len() == old(col)@.len(),
+        forall|i: int| 0 <= i < old(col)@.len() ==> final(col)@[i] == 2 * old(col)@[i],
+{
+    let f = |v: u64| -> (w: u64)
+        requires
+            v <= 1000,
+        ensures
+            w == 2 * v,
+        { 2 * v };
+    col.remap(f);
+    // the column is a column still
+    col.push(7);
+    let last = col.get(col.len() - 1);
+    assert(last == Some(7u64));
+    col.remove(col.len() - 1);
+    assert(col@ =~= col@.push(7).drop_last());
+}
+
+/// The action after an action.
+pub open spec fn after(a: Action) -> Action {
+    match a {
+        Action::Make => Action::Set,
+        Action::Set => Action::Delete,
+        Action::Delete => Action::Increment,
+        Action::Increment => Action::Make,
+    }
+}
+
+#[allow(dead_code)]
+fn next_action(a: Action) -> (b: Action)
+    ensures
+        b == after(a),
+{
+    match a {
+        Action::Make => Action::Set,
+        Action::Set => Action::Delete,
+        Action::Delete => Action::Increment,
+        Action::Increment => Action::Make,
+    }
+}
+
+/// The client's own type, remapped by a function that has a name; and
+/// nulls of it, which the function leaves.
+#[allow(dead_code)]
+fn step_the_actions(col: &mut VerifiedColumn<Action>, nullable: &mut VerifiedColumn<Option<Action>>)
+    ensures
+        final(col)@.len() == old(col)@.len(),
+        forall|i: int| 0 <= i < old(col)@.len() ==> final(col)@[i] == after(old(col)@[i]),
+        final(nullable)@.len() == old(nullable)@.len(),
+        forall|i: int|
+            0 <= i < old(nullable)@.len() ==> final(nullable)@[i] == match old(nullable)@[i] {
+                Some(a) => Some(after(a)),
+                None => None,
+            },
+{
+    col.remap(next_action);
+    let f = |v: Option<Action>| -> (w: Option<Action>)
+        ensures
+            w == match v {
+                Some(a) => Some(after(a)),
+                None => None,
+            },
+        {
+            match v {
+                Some(a) => Some(next_action(a)),
+                None => None,
+            }
+        };
+    nullable.remap(f);
+}
+
+/// Byte strings, each with one more byte at its end; and byte strings
+/// or nulls, of which the nulls stay and the strings are emptied. The
+/// function is given a string of its own, and may hand back that one.
+#[allow(dead_code)]
+fn longer_and_emptied(col: &mut VerifiedColumn<Vec<u8>>, nullable: &mut VerifiedColumn<Option<Vec<u8>>>, b: u8)
+    ensures
+        final(col)@.len() == old(col)@.len(),
+        forall|i: int| 0 <= i < old(col)@.len() ==> final(col)@[i] == old(col)@[i].push(b),
+        final(nullable)@.len() == old(nullable)@.len(),
+        forall|i: int|
+            0 <= i < old(nullable)@.len() ==> final(nullable)@[i] == match old(nullable)@[i] {
+                Some(_) => Some(Seq::<u8>::empty()),
+                None => None,
+            },
+{
+    let f = |v: Vec<u8>| -> (w: Vec<u8>)
+        ensures
+            w@ == v@.push(b),
+        {
+            let mut v = v;
+            v.push(b);
+            v
+        };
+    col.remap(f);
+    let g = |v: Option<Vec<u8>>| -> (w: Option<Vec<u8>>)
+        ensures
+            v is None ==> w is None,
+            v is Some ==> w is Some && w->0@ == Seq::<u8>::empty(),
+        {
+            match v {
+                Some(_) => Some(Vec::new()),
+                None => None,
+            }
+        };
+    nullable.remap(g);
+    assert forall|i: int| 0 <= i < old(nullable)@.len() implies nullable@[i] == match old(nullable)@[i] {
+        Some(_) => Some(Seq::<u8>::empty()),
+        None => None,
+    } by {
+        assert(mapped(g, old(nullable)@[i], nullable@[i]));
+    }
+}
+
+/// `bool`s turned over; and numbers by a function of which the client
+/// says only that it gives no less than it is given, so that it knows
+/// only that of the column.
+#[allow(dead_code)]
+fn turned_and_raised(flags: &mut VerifiedColumn<bool>, col: &mut VerifiedColumn<i64>, floor: i64)
+    ensures
+        final(flags)@.len() == old(flags)@.len(),
+        forall|i: int| 0 <= i < old(flags)@.len() ==> final(flags)@[i] == !old(flags)@[i],
+        final(col)@.len() == old(col)@.len(),
+        forall|i: int| 0 <= i < old(col)@.len() ==> final(col)@[i] >= old(col)@[i] && final(col)@[i] >= floor,
+{
+    let f = |v: bool| -> (w: bool)
+        ensures
+            w == !v,
+        { !v };
+    flags.remap(f);
+    let g = |v: i64| -> (w: i64)
+        ensures
+            w >= v,
+            w >= floor,
+        {
+            if v < floor {
+                floor
+            } else {
+                v
+            }
+        };
+    col.remap(g);
+}
+
+/// Numbers or nulls: a function that takes every value but the greatest
+/// number, of a column that the client knows to be without it.
+#[allow(dead_code)]
+fn one_more(col: &mut VerifiedColumn<Option<u64>>)
+    requires
+        forall|i: int| 0 <= i < old(col)@.len() ==> old(col)@[i] != Some(u64::MAX),
+    ensures
+        final(col)@.len() == old(col)@.len(),
+        forall|i: int|
+            0 <= i < old(col)@.len() ==> final(col)@[i] == match old(col)@[i] {
+                Some(x) => Some((x + 1) as u64),
+                None => None,
+            },
+{
+    let f = |v: Option<u64>| -> (w: Option<u64>)
+        requires
+            v != Some(u64::MAX),
+        ensures
+            w == match v {
+                Some(x) => Some((x + 1) as u64),
+                None => None,
+            },
+        {
+            match v {
+                Some(x) => Some(x + 1),
+                None => None,
+            }
+        };
+    col.remap(f);
 }
 
 } // verus!

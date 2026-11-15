@@ -41,7 +41,8 @@
 //! each as its type's [`VSpec::S`]: a number as itself, a byte string as
 //! its bytes (`Seq<u8>`). What a value in a column's form is there is its
 //! `sv`, and `svs` of several ([`VGet`]): for a slice `v` that is `v@`,
-//! and for a number the number.
+//! and for a number the number. What a value of the type itself is
+//! there (a `Vec<u8>` for a byte string) is its `VSpec::sv_of`.
 //!
 //! The values of a type are in an order (`VSpec::below`), which a
 //! search goes by: numbers in the order of numbers, `false` before
@@ -88,6 +89,12 @@
 //!   can tell (`sorted_for`). Of values in no order it gives some range
 //!   within the one searched. [`VValue::compare`] says how two values in
 //!   a column's form stand in the order;
+//! * [`remap`](VerifiedColumn::remap) puts in each place what a function
+//!   of the client's gave for the value that was there (`mapped`). The
+//!   function is handed a value of the type itself (for a byte string a
+//!   `Vec<u8>` of its own) and has to accept every value of the column.
+//!   Nothing is assumed of it: what it gives is said by its own
+//!   `ensures`, and by nothing else;
 //! * `clone` gives a column with the same values. It is a column of its
 //!   own, as Rust's ownership has it: an edit of either says nothing of
 //!   the other, whose values so stay what they were;
@@ -121,8 +128,8 @@
 //! functions of a column type (`VerifiedColumn::<V>::valid(bytes)`),
 //! `size_bound` is one of a value type (for byte strings it counts their
 //! bytes, as `total_len` of them), `only`, `sorted`, `sorted_for`,
-//! `bytes_below`, `run_values`, `fill_of` and `sum_of` are of this
-//! module, and `lemma_save_unique`, `lemma_encoding`, `lemma_no_bytes`,
+//! `bytes_below`, `mapped`, `run_values`, `fill_of` and `sum_of` are of
+//! this module, and `lemma_save_unique`, `lemma_encoding`, `lemma_no_bytes`,
 //! `lemma_sorted`, `lemma_run_values_push` and `lemma_run_values_add`
 //! are lemmas, as is `VSpec::lemma_below` (the order is a strict total
 //! order): they exist only for Verus, and a normal build compiles
@@ -151,8 +158,10 @@
 //! [`slab_lens`](VerifiedColumn::slab_lens),
 //! [`slab_segments`](VerifiedColumn::slab_segments) and what
 //! [`dump_slabs`](VerifiedColumn::dump_slabs) and `Debug` print tell of
-//! it, and promise nothing but that the lengths add up. After the same
-//! edits a `VerifiedColumn` has the slabs of a
+//! it, and promise nothing but that the lengths add up. Nor is how
+//! often [`remap`](VerifiedColumn::remap) calls its function: once for
+//! each run of equal values, as `Column`'s does, which is tested. After
+//! the same edits a `VerifiedColumn` has the slabs of a
 //! [`Column`](crate::Column), each as long and of as many runs, and
 //! `dump_slabs` prints the same lines. That is tested too, but for one
 //! case: a column that [`clear`](VerifiedColumn::clear) has emptied has
@@ -262,7 +271,7 @@ pub use bytes::{below_at, bytes_below, total_len, total_len_opt};
 pub use codec::VCodec;
 pub use value::{refused, VNewtype, VPack};
 
-use crate::bool_edit::BoolModel;
+use crate::bool_edit::{BoolModel, BoolRecoder};
 use crate::bool_wire::BoolReads;
 #[cfg(verus_keep_ghost)]
 use crate::btree::SlabBTree;
@@ -279,10 +288,12 @@ use crate::index::IndexOps;
 #[cfg(verus_keep_ghost)]
 use crate::iter_core::{find_ok, found, lemma_from, lens_ok, monotone, vals_of};
 use crate::iter_core::{Decode, Decoders, ICore, Probe, Side};
+use crate::remap::{Encodes, Mapping};
 #[cfg(verus_keep_ghost)]
 use crate::rle::dec::slab_values;
 use crate::rle::dec::RleReads;
 use crate::rle::edit::RleModel;
+use crate::rle::enc::REncoder;
 use crate::{Leb128, LoadOpts, MaybeFill, PackError, Run};
 use counts::VB;
 use model::{Core, Model};
@@ -461,11 +472,16 @@ impl VGet for bool {
 /// A type of values, and what a value of it is in a specification.
 /// Every [`VValue`] is one, and no other type: the trait cannot be
 /// implemented outside this crate.
-pub trait VSpec: seal::SpecSeal {
+pub trait VSpec: Sized + seal::SpecSeal {
     /// What a value is in a specification: for a number, the number,
     /// and for a byte string its bytes (`Seq<u8>`). A column of the type
     /// is a sequence of these (`col@`).
     type S;
+
+    /// What the value `v` of the type is in a specification: `v` itself
+    /// for a number, an `Option` of one or a `bool`, and for a byte
+    /// string its bytes (`v@`).
+    spec fn sv_of(v: Self) -> Self::S;
 
     /// Whether `a` comes before `b` in the order of the type's values.
     /// Numbers are in the order of numbers, and a type stored as a
@@ -508,6 +524,10 @@ impl<T: VPack> seal::SpecSeal for T {
 impl<T: VPack> VSpec for T {
     type S = T;
 
+    open spec fn sv_of(v: T) -> T {
+        v
+    }
+
     open spec fn below(a: T, b: T) -> bool {
         T::num(a) < T::num(b)
     }
@@ -527,6 +547,10 @@ impl<T: VPack> seal::SpecSeal for Option<T> {
 
 impl<T: VPack> VSpec for Option<T> {
     type S = Option<T>;
+
+    open spec fn sv_of(v: Option<T>) -> Option<T> {
+        v
+    }
 
     open spec fn below(a: Option<T>, b: Option<T>) -> bool {
         match (a, b) {
@@ -553,6 +577,10 @@ impl seal::SpecSeal for bool {
 
 impl VSpec for bool {
     type S = bool;
+
+    open spec fn sv_of(v: bool) -> bool {
+        v
+    }
 
     open spec fn below(a: bool, b: bool) -> bool {
         !a && b
@@ -701,6 +729,25 @@ pub closed spec fn saved_values<V: seal::Sealed<C>, C>(d: Seq<u8>) -> Seq<<V as 
     <Held<V, C> as VGet>::svs(<V::E as Model<V::X>>::values(d))
 }
 
+/// How the values of a type go through a remap: read from a column,
+/// handed to the client's function owned, and what it gives appended.
+pub(crate) trait Owned<C>: seal::Sealed<C> {
+    /// The encoder that a remap of a column appends to.
+    type N: Encodes<Self::E>;
+
+    /// A value read from a column, owned.
+    fn to_owned<'a>(g: <Self as VForm<'a>>::Get) -> (v: Self)
+        ensures
+            Self::sv_of(v) == g.sv(),
+    ;
+
+    /// An owned value, as the encoder appends it.
+    fn owned_in(w: Self) -> (x: <Self::N as Encodes<Self::E>>::In)
+        ensures
+            <Self::N as Encodes<Self::E>>::val(x).sv() == Self::sv_of(w),
+    ;
+}
+
 /// A value type a [`VerifiedColumn`] can hold, its numbers written with
 /// codec `C`.
 ///
@@ -708,7 +755,8 @@ pub closed spec fn saved_values<V: seal::Sealed<C>, C>(d: Seq<u8>) -> Seq<<V as 
 /// type that says which of them it is stored as ([`VNewtype`]); byte
 /// strings (`Vec<u8>`); an `Option` of any of those, whose `None` is a
 /// column's null; and `bool`.
-pub trait VValue<C: VCodec = Leb128>: seal::Sealed<C> {
+#[allow(private_bounds)]
+pub trait VValue<C: VCodec = Leb128>: seal::Sealed<C> + Owned<C> {
     /// No column of the values `vs` saves to more bytes than this.
     spec fn size_bound(vs: Seq<Self::S>) -> nat;
 
@@ -754,6 +802,20 @@ impl<T: VPack, C: VCodec> seal::Sealed<C> for T {
     type E = RleModel<VWrite<T, C>>;
 }
 
+impl<T: VPack, C: VCodec> Owned<C> for T {
+    type N = REncoder<'static, VWrite<T, C>>;
+
+    #[inline(always)]
+    fn to_owned<'a>(g: T) -> (v: T) {
+        g
+    }
+
+    #[inline(always)]
+    fn owned_in(w: T) -> (x: T) {
+        w
+    }
+}
+
 impl<T: VPack, C: VCodec> VValue<C> for T {
     /// Ten bytes a value, and a header and a count of ten bytes each.
     open spec fn size_bound(vs: Seq<T>) -> nat {
@@ -786,6 +848,20 @@ impl<T: VPack, C: VCodec> seal::Sealed<C> for Option<T> {
     type X = RleReads<VOptOps<T, C>>;
 
     type E = RleModel<VOptWrite<T, C>>;
+}
+
+impl<T: VPack, C: VCodec> Owned<C> for Option<T> {
+    type N = REncoder<'static, VOptWrite<T, C>>;
+
+    #[inline(always)]
+    fn to_owned<'a>(g: Option<T>) -> (v: Option<T>) {
+        g
+    }
+
+    #[inline(always)]
+    fn owned_in(w: Option<T>) -> (x: Option<T>) {
+        w
+    }
 }
 
 impl<T: VPack, C: VCodec> VValue<C> for Option<T> {
@@ -831,6 +907,20 @@ impl<C: VCodec> seal::Sealed<C> for bool {
     type X = BoolReads<VB<C>>;
 
     type E = BoolModel<VB<C>>;
+}
+
+impl<C: VCodec> Owned<C> for bool {
+    type N = BoolRecoder<VB<C>>;
+
+    #[inline(always)]
+    fn to_owned<'a>(g: bool) -> (v: bool) {
+        g
+    }
+
+    #[inline(always)]
+    fn owned_in(w: bool) -> (x: bool) {
+        w
+    }
 }
 
 impl<C: VCodec> VValue<C> for bool {
@@ -904,6 +994,42 @@ impl<'a, 't, V: VValue<C>, C: VCodec> Probe<Get<'a, V>> for VProbe<'t, V, C> {
             Ordering::Equal => Side::At,
             Ordering::Greater => Side::Above,
         }
+    }
+}
+
+// ── Remapping ───────────────────────────────────────────────────────────────
+
+/// A client's function as a remap applies it (`Mapping`): to a value
+/// read from the column, owned, and what it gives in the form the
+/// encoder appends. Nothing is assumed of the function: what it asks of
+/// a value and what it gives are its own `requires` and `ensures`.
+#[verifier::reject_recursive_types(V)]
+#[verifier::reject_recursive_types(C)]
+#[verifier::reject_recursive_types(F)]
+struct VMap<'f, V, C, F> {
+    f: &'f F,
+    _c: PhantomData<(V, C)>,
+}
+
+impl<'a, 'f, V: VValue<C>, C: VCodec, F: Fn(V) -> V> Mapping<Get<'a, V>, <V::N as Encodes<V::E>>::In> for VMap<
+    'f,
+    V,
+    C,
+    F,
+> {
+    closed spec fn pre(&self, g: Get<'a, V>) -> bool {
+        forall|v: V| V::sv_of(v) == g.sv() ==> #[trigger] call_requires(*self.f, (v,))
+    }
+
+    closed spec fn maps(&self, g: Get<'a, V>, x: <V::N as Encodes<V::E>>::In) -> bool {
+        mapped(*self.f, g.sv(), <V::N as Encodes<V::E>>::val(x).sv())
+    }
+
+    #[inline(always)]
+    fn apply(&self, g: Get<'a, V>) -> (x: <V::N as Encodes<V::E>>::In) {
+        let v = V::to_owned(g);
+        let w = (self.f)(v);
+        V::owned_in(w)
     }
 }
 
@@ -1280,6 +1406,15 @@ pub proof fn lemma_sorted<V: VSpec>(vs: Seq<V::S>, t: V::S)
         V::lemma_below(vs[i], vs[j], t);
         V::lemma_below(t, vs[i], vs[j]);
     }
+}
+
+/// The function `f` gave, for a value that is `a` in a specification,
+/// one that is `b` ([`VerifiedColumn::remap`]): there are values `v` and
+/// `w` of the type, `a` and `b` in a specification (`VSpec::sv_of`),
+/// such that `f`'s `ensures` holds of the call `f(v)` and its result
+/// `w`.
+pub open spec fn mapped<V: VSpec, F: Fn(V) -> V>(f: F, a: V::S, b: V::S) -> bool {
+    exists|v: V, w: V| V::sv_of(v) == a && #[trigger] call_ensures(f, (v,), w) && V::sv_of(w) == b
 }
 
 /// The numbers `lens` added up: how many values slabs of those lengths
@@ -2260,6 +2395,56 @@ impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
             }
         }
         r.0..r.1
+    }
+
+    /// Replace each value by what `f` gives for it. `f` is called once
+    /// for a run of equal values that lie together, and what it gives
+    /// stands for all of them: so every place holds what `f` gave for
+    /// the value that was there (`mapped`), and where `f` can give
+    /// more than one value for a value, places apart may get different
+    /// ones. `f` has to accept every value of the column, and need
+    /// accept no other.
+    ///
+    /// If `f` panics, the column is as it was. The column keeps its
+    /// segment budget, and its slabs are cut anew, as those of a loaded
+    /// column are.
+    pub fn remap<F: Fn(V) -> V>(&mut self, f: F)
+        requires
+            forall|v: V| old(self)@.contains(V::sv_of(v)) ==> #[trigger] call_requires(f, (v,)),
+        ensures
+            final(self)@.len() == old(self)@.len(),
+            forall|i: int| 0 <= i < old(self)@.len() ==> mapped(f, old(self)@[i], #[trigger] final(self)@[i]),
+    {
+        let counter = self.core.counter();
+        let m = VMap::<V, C, F> { f: &f, _c: PhantomData };
+        let ghost o = vals_of::<V::X>(self.core.slabs_spec());
+        self.core.lemma_column();
+        proof {
+            // the values read are the column's
+            lemma_vals_own::<V::E, V::X>(self.core.slabs_spec());
+            assert(self.core@ =~= held::<V, C>(o));
+            lemma_held::<V, C>(o);
+            VGet::lemma_svs(o);
+            assert forall|i: int| 0 <= i < self.core@.len() implies m.pre(#[trigger] o[i]) by {
+                assert(self@[i] == o[i].sv());
+            }
+        }
+        let (core, Ghost(ws)) = self.core.remap::<V::X, V::N, VMap<V, C, F>>(&m);
+        proof {
+            <Held<V, C> as VGet>::lemma_svs(core@);
+            assert forall|i: int| 0 <= i < o.len() implies mapped(
+                f,
+                old(self)@[i],
+                #[trigger] <Held<V, C> as VGet>::svs(core@)[i],
+            ) by {
+                assert(m.maps(o[i], ws[i]));
+                assert(old(self)@[i] == o[i].sv());
+            }
+        }
+        self.core = core;
+        // a write like any other: the edit counter goes on from where it
+        // was
+        self.core.set_counter(counter.wrapping_add(1));
     }
 
     /// An iterator over the values.

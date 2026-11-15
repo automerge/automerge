@@ -9,8 +9,12 @@
 //! (`ColumnCore::from_cut`). So the new column holds, at each position,
 //! what the function gave for the value there, called once per run.
 //!
-//! Trusted: nothing of the function (`Column::remap`'s `Remapping`), whose
-//! results the specification names but does not constrain.
+//! Trusted: nothing of the function, whose results the specification
+//! names (`Mapping::maps`) but does not constrain. What a function asks
+//! of a value (`Mapping::pre`) the caller has to show of every value of
+//! the column: `VerifiedColumn::remap` asks it of its client in turn.
+//! `Column::remap` is not checked, and its `Remapping` wraps a Rust
+//! closure, which takes every value of its argument's type.
 //!
 //! [`Column::remap`]: crate::Column::remap
 
@@ -66,12 +70,17 @@ pub(crate) trait Encodes<E: Slabs>: Sized {
     ;
 }
 
-/// The caller's function, from a value read to one to append: `maps(v,
-/// w)` is that it gave `w` for `v`, and nothing more is known of it.
+/// The caller's function, from a value read to one to append: `pre(v)`
+/// is that it may be called for `v`, `maps(v, w)` that it gave `w` for
+/// `v`, and nothing more is known of it.
 pub(crate) trait Mapping<V, W> {
+    spec fn pre(&self, v: V) -> bool;
+
     spec fn maps(&self, v: V, w: W) -> bool;
 
     fn apply(&self, v: V) -> (w: W)
+        requires
+            self.pre(v),
         ensures
             self.maps(v, w),
     ;

@@ -668,6 +668,11 @@ where
     F: Fn(T) -> T,
 {
     #[cfg(verus_keep_ghost)]
+    fn pre(&self, _v: T::Get<'a>) -> bool {
+        unimplemented!()
+    }
+
+    #[cfg(verus_keep_ghost)]
     fn maps(
         &self,
         _v: T::Get<'a>,

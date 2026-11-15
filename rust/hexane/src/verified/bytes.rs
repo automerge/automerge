@@ -27,11 +27,12 @@ use super::codec::VCodec;
 #[cfg(verus_keep_ghost)]
 use super::model::Model;
 use super::model::Plain;
-use super::{seal, VForm, VGet, VSpec, VValue};
+use super::{seal, Owned, VForm, VGet, VSpec, VValue};
 #[cfg(verus_keep_ghost)]
 use crate::rle::dec::slab_values;
 use crate::rle::dec::RleReads;
 use crate::rle::edit::RleModel;
+use crate::rle::enc::REncoder;
 use crate::rle::lift::Lift;
 #[cfg(verus_keep_ghost)]
 use crate::rle::model::encs;
@@ -854,6 +855,19 @@ fn cow_own<'a>(c: BytesCow<'a>) -> (r: BytesCow<'static>)
     }
 }
 
+/// An owned byte string as a cow: it is moved, not copied.
+#[inline(always)]
+fn cow_of(o: Vec<u8>) -> (r: BytesCow<'static>)
+    ensures
+        cow_val(r)@ == o@,
+{
+    // there is a slice of these bytes: the vector's own
+    let _v = o.as_slice();
+    assert(_v@ == o@);
+    assert(slice_of(o@)@ == o@);
+    BytesCow::Own(o)
+}
+
 // ── Byte strings to the RLE layer ───────────────────────────────────────────
 
 /// Byte strings under codec `C`, none of them null: what they are on the
@@ -1399,6 +1413,10 @@ impl seal::SpecSeal for Vec<u8> {
 impl VSpec for Vec<u8> {
     type S = Seq<u8>;
 
+    open spec fn sv_of(v: Vec<u8>) -> Seq<u8> {
+        v@
+    }
+
     open spec fn below(a: Seq<u8>, b: Seq<u8>) -> bool {
         bytes_below(a, b)
     }
@@ -1418,6 +1436,13 @@ impl seal::SpecSeal for Option<Vec<u8>> {
 
 impl VSpec for Option<Vec<u8>> {
     type S = Option<Seq<u8>>;
+
+    open spec fn sv_of(v: Option<Vec<u8>>) -> Option<Seq<u8>> {
+        match v {
+            Some(b) => Some(b@),
+            None => None,
+        }
+    }
 
     open spec fn below(a: Option<Seq<u8>>, b: Option<Seq<u8>>) -> bool {
         match (a, b) {
@@ -1530,6 +1555,20 @@ impl<C: VCodec> seal::Sealed<C> for Vec<u8> {
     type E = RleModel<VBytesWrite<C>>;
 }
 
+impl<C: VCodec> Owned<C> for Vec<u8> {
+    type N = REncoder<'static, VBytesWrite<C>>;
+
+    #[inline(always)]
+    fn to_owned(g: &[u8]) -> (v: Vec<u8>) {
+        slice_to_vec(g)
+    }
+
+    #[inline(always)]
+    fn owned_in(w: Vec<u8>) -> (x: BytesCow<'static>) {
+        cow_of(w)
+    }
+}
+
 impl<C: VCodec> VValue<C> for Vec<u8> {
     /// The byte strings' own bytes, and for each a length, a header and
     /// a count of ten bytes each.
@@ -1568,6 +1607,28 @@ impl<C: VCodec> seal::Sealed<C> for Option<Vec<u8>> {
     type X = RleReads<VOptBytesOps<C>>;
 
     type E = RleModel<VOptBytesWrite<C>>;
+}
+
+impl<C: VCodec> Owned<C> for Option<Vec<u8>> {
+    type N = REncoder<'static, VOptBytesWrite<C>>;
+
+    #[inline(always)]
+    #[allow(clippy::manual_map)]  // Verus has no closure to read here
+    fn to_owned(g: Option<&[u8]>) -> (v: Option<Vec<u8>>) {
+        match g {
+            Some(b) => Some(slice_to_vec(b)),
+            None => None,
+        }
+    }
+
+    #[inline(always)]
+    #[allow(clippy::manual_map)]  // Verus has no closure to read here
+    fn owned_in(w: Option<Vec<u8>>) -> (x: Option<BytesCow<'static>>) {
+        match w {
+            Some(b) => Some(cow_of(b)),
+            None => None,
+        }
+    }
 }
 
 impl<C: VCodec> VValue<C> for Option<Vec<u8>> {
