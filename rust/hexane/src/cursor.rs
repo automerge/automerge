@@ -920,6 +920,168 @@ proof fn lemma_sum_agree(s: Seq<nat>, t: Seq<nat>, k: int)
     }
 }
 
+/// One more whole slab to drop: slabs `i..j + 1` hold the values of
+/// slabs `i..j` and then slab `j`'s, which are as many as it counts.
+proof fn lemma_drop_more<E: Slabs>(s: Seq<Slab<E::Tail>>, i: int, j: int, seen: Seq<E::V>)
+    requires
+        all_ok::<E>(s),
+        0 <= i <= j < s.len(),
+    ensures
+        E::ok(s[j]),
+        vals_of::<E>(s.subrange(i, j + 1)) == vals_of::<E>(s.subrange(i, j)) + E::vals(s[j]),
+        vals_of::<E>(s.subrange(i, j + 1)).len() == vals_of::<E>(s.subrange(i, j)).len() + s[j].len,
+        seen + vals_of::<E>(s.subrange(i, j)) + E::vals(s[j]) == seen + vals_of::<E>(s.subrange(i, j + 1)),
+{
+    assert(s.subrange(i, j + 1) =~= s.subrange(i, j) + seq![s[j]]);
+    lemma_vals_cat::<E>(s.subrange(i, j), seq![s[j]]);
+    lemma_vals_unit::<E>(s[j]);
+    E::lemma_len(s[j]);
+    assert(seen + vals_of::<E>(s.subrange(i, j)) + E::vals(s[j]) =~= seen + vals_of::<E>(s.subrange(i, j + 1)));
+}
+
+/// Slabs `i..j` among the others: the slabs hold the values before
+/// theirs, theirs and the values after; the slabs from `i` on hold
+/// theirs and the values after; and without them, the slabs hold the
+/// values before and after.
+proof fn lemma_vals_three<E: Slabs>(s: Seq<Slab<E::Tail>>, i: int, j: int)
+    requires
+        0 <= i <= j <= s.len(),
+    ensures
+        vals_of::<E>(s) == vals_of::<E>(s.take(i)) + vals_of::<E>(s.subrange(i, j)) + vals_of::<E>(s.skip(j)),
+        vals_of::<E>(s.skip(i)) == vals_of::<E>(s.subrange(i, j)) + vals_of::<E>(s.skip(j)),
+        vals_of::<E>(s.take(i) + s.skip(j)) == vals_of::<E>(s.take(i)) + vals_of::<E>(s.skip(j)),
+{
+    let t = s.skip(i);
+    lemma_vals_split::<E>(s, i);
+    lemma_vals_split::<E>(t, j - i);
+    assert(t.take(j - i) =~= s.subrange(i, j));
+    assert(t.skip(j - i) =~= s.skip(j));
+    lemma_vals_cat::<E>(s.take(i), s.skip(j));
+    assert(vals_of::<E>(s) =~= vals_of::<E>(s.take(i)) + vals_of::<E>(s.subrange(i, j)) + vals_of::<E>(s.skip(j)));
+}
+
+/// The slabs from `i` on hold slab `i`'s values and then those of the
+/// slabs after it.
+proof fn lemma_vals_head<E: Slabs>(s: Seq<Slab<E::Tail>>, i: int)
+    requires
+        0 <= i < s.len(),
+    ensures
+        vals_of::<E>(s.skip(i)) == E::vals(s[i]) + vals_of::<E>(s.skip(i + 1)),
+{
+    let t = s.skip(i);
+    lemma_vals_split::<E>(t, 1);
+    assert(t.take(1) =~= seq![s[i]]);
+    assert(t.skip(1) =~= s.skip(i + 1));
+    lemma_vals_unit::<E>(s[i]);
+}
+
+/// A column without its slabs `i..j` is a column: the slabs left are
+/// well-formed, the weights left are theirs and count their items, an
+/// index can hold them, and the items are fewer by those that went.
+proof fn lemma_cut<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>>(
+    s: Seq<Slab<E::Tail>>,
+    ws: Seq<W>,
+    i: int,
+    j: int,
+)
+    requires
+        all_ok::<E>(s),
+        wlens::<W, I>(ws) == slab_lens(s),
+        ws_ok::<E, W, G>(ws, s),
+        I::plain(),
+        total(slab_lens(s)) <= usize::MAX,
+        s.len() <= usize::MAX,
+        0 <= i <= j <= s.len(),
+    ensures
+        ({
+            let s1 = s.take(i) + s.skip(j);
+            let w1 = ws.take(i) + Seq::<W>::empty() + ws.skip(j);
+            &&& all_ok::<E>(s1)
+            &&& wlens::<W, I>(w1) == slab_lens(s1)
+            &&& ws_ok::<E, W, G>(w1, s1)
+            &&& I::fits(w1)
+            &&& vals_of::<E>(s.subrange(i, j)).len() <= total(slab_lens(s))
+            &&& total(slab_lens(s1)) == total(slab_lens(s)) - vals_of::<E>(s.subrange(i, j)).len()
+            &&& vals_of::<E>(s1) == vals_of::<E>(s.take(i)) + vals_of::<E>(s.skip(j))
+        }),
+{
+    let k = j - i;
+    let s1 = s.take(i) + s.skip(j);
+    let w1 = ws.take(i) + Seq::<W>::empty() + ws.skip(j);
+    assert(wlens::<W, I>(ws).len() == ws.len());
+    assert(wlens::<W, I>(w1) =~= slab_lens(s1)) by {
+        assert forall|x: int| 0 <= x < s1.len() implies #[trigger] wlens::<W, I>(w1)[x] == slab_lens(s1)[x] by {
+            let y = if x < i { x } else { x + k };
+            assert(wlens::<W, I>(ws)[y] == I::wlen(ws[y]));
+            assert(slab_lens(s)[y] == s[y].len);
+        }
+    }
+    assert forall|x: int| 0 <= x < s1.len() implies #[trigger] E::ok(s1[x]) by {
+        if x < i {
+            assert(s1[x] == s[x]);
+        } else {
+            assert(s1[x] == s[x + k]);
+        }
+    }
+    assert forall|x: int| 0 <= x < s1.len() implies #[trigger] G::wrel(w1[x], s1[x]) by {
+        let y = if x < i { x } else { x + k };
+        assert(G::wrel(ws[y], s[y]));
+    }
+    lemma_vals_three::<E>(s, i, j);
+    lemma_vals_total::<E>(s);
+    lemma_vals_total::<E>(s1);
+    assert(w1.len() == s1.len() <= s.len());
+    I::lemma_fits(w1);
+}
+
+/// The slabs from `si` on, short of slab `end`, that are whole in the
+/// next `left` items: `f` sees each as one a delete drops.  Returns the
+/// slab after the last of them and the items they hold together.
+fn whole_slabs<E: Slabs, F: Visitor<E>>(
+    slabs: &Vec<Slab<E::Tail>>,
+    si: usize,
+    end: usize,
+    left: usize,
+    f: &mut F,
+) -> (r: (usize, usize))
+    requires
+        all_ok::<E>(slabs@),
+        si <= end <= slabs@.len(),
+    ensures
+        si <= r.0 <= end,
+        r.1 <= left,
+        r.1 == vals_of::<E>(slabs@.subrange(si as int, r.0 as int)).len(),
+        final(f).seen() == old(f).seen() + vals_of::<E>(slabs@.subrange(si as int, r.0 as int)),
+        si < end && slabs@[si as int].len <= left ==> si < r.0 && slabs@[si as int].len <= r.1,
+{
+    let mut sj = si;
+    let mut gone: usize = 0;
+    proof {
+        assert(slabs@.subrange(si as int, si as int) =~= Seq::<Slab<E::Tail>>::empty());
+        lemma_vals_unit::<E>(slabs@[0]);
+        assert(f.seen() + Seq::<E::V>::empty() =~= f.seen());
+    }
+    while sj < end && slabs[sj].len <= left - gone
+        invariant
+            all_ok::<E>(slabs@),
+            si <= sj <= end <= slabs@.len(),
+            gone <= left,
+            sj == si ==> gone == 0,
+            sj > si ==> gone >= slabs@[si as int].len,
+            gone == vals_of::<E>(slabs@.subrange(si as int, sj as int)).len(),
+            f.seen() == old(f).seen() + vals_of::<E>(slabs@.subrange(si as int, sj as int)),
+        decreases end - sj,
+    {
+        proof {
+            lemma_drop_more::<E>(slabs@, si as int, sj as int, old(f).seen());
+        }
+        f.dropped(&slabs[sj]);
+        gone += slabs[sj].len;
+        sj += 1;
+    }
+    (sj, gone)
+}
+
 /// Two runs of `o` that meet, after `seen`, are one run after it.
 proof fn lemma_run_joined<V>(seen: Seq<V>, o: Seq<V>, a: int, b: int, c: int)
     requires
@@ -2269,22 +2431,17 @@ impl<E: Slabs> Cursor<E> {
                 }
                 return;
             }
-            // a whole slab, and no rebuild reading it: drop it outright.
+            // a whole slab, and no rebuild reading it: drop it outright,
+            // with the whole slabs after it that the delete covers.
             // The column always keeps one slab, so the last one is
             // emptied through the rebuild below instead.
             if self.in_slab == 0 && !self.dirty && slabs.len() > 1 {
                 let ghost c1 = *self;
-                proof {
-                    E::lemma_len(slabs@[c1.slab as int]);
-                    c1.lemma_ahead(slabs@, avail as int);
-                    assert(E::vals(slabs@[c1.slab as int]).subrange(0, avail as int) =~= E::vals(slabs@[c1.slab as int]));
-                }
-                f.dropped(&slabs[self.slab]);
-                self.drop_slab::<W, I, G>(slabs, index, total_len, Ghost(max_segments));
+                let gone = self.drop_slabs::<W, I, G, F>(slabs, index, total_len, left, f, Ghost(max_segments));
                 proof {
                     lemma_run_joined(old(f).seen(), c0.o@, c0.orig as int, c1.orig as int, self.orig as int);
                 }
-                left -= avail;
+                left -= gone;
                 dropped = true;
                 *counter = counter.wrapping_add(1);
                 continue;
@@ -2304,6 +2461,16 @@ impl<E: Slabs> Cursor<E> {
                 lemma_run_joined(old(f).seen(), c0.o@, c0.orig as int, c1.orig as int, self.orig as int);
             }
             left -= avail;
+            // the whole slabs after this one that the delete covers go
+            // first, while the rebuild is open
+            if left > 0 && self.slab + 1 < slabs.len() && slabs[self.slab + 1].len <= left {
+                let ghost c2 = *self;
+                let gone = self.drop_after::<W, I, G, F>(slabs, index, total_len, left, f, Ghost(max_segments));
+                proof {
+                    lemma_run_joined(old(f).seen(), c0.o@, c0.orig as int, c2.orig as int, self.orig as int);
+                }
+                left -= gone;
+            }
             // `close` re-locates, which is what carries the cursor into
             // the next slab
             self.close::<W, I, G>(slabs, index, total_len, max_segments, counter);
@@ -2328,85 +2495,192 @@ impl<E: Slabs> Cursor<E> {
         }
     }
 
-    /// Drop the current slab whole: the cursor stands at its start with no
-    /// rebuild open, and it is not the column's only slab.
-    fn drop_slab<W, I: IndexOps<W>, G: Weigh<E, W>>(
+    /// Take slabs `si..sj`, of `gone` items together, out of a column:
+    /// out of its slabs and out of its index at once, however many they
+    /// are.
+    fn cut_slabs<W, I: IndexOps<W>, G: Weigh<E, W>>(
+        slabs: &mut Vec<Slab<E::Tail>>,
+        index: &mut I,
+        total_len: &mut usize,
+        si: usize,
+        sj: usize,
+        gone: usize,
+        Ghost(max_segments): Ghost<usize>,
+    )
+        requires
+            col_ok::<E, W, I, G>(old(slabs)@, *old(index), *old(total_len), max_segments),
+            si < sj <= old(slabs)@.len() <= usize::MAX,
+            gone == vals_of::<E>(old(slabs)@.subrange(si as int, sj as int)).len(),
+        ensures
+            col_ok::<E, W, I, G>(final(slabs)@, *final(index), *final(total_len), max_segments),
+            final(slabs)@ == old(slabs)@.take(si as int) + old(slabs)@.skip(sj as int),
+            vals_of::<E>(final(slabs)@) == vals_of::<E>(old(slabs)@.take(si as int)) + vals_of::<E>(
+                old(slabs)@.skip(sj as int),
+            ),
+            *final(total_len) == *old(total_len) - gone,
+    {
+        let ghost s0 = slabs@;
+        proof {
+            lemma_cut::<E, W, I, G>(s0, index.ws(), si as int, sj as int);
+        }
+        if sj == si + 1 {
+            slabs.remove(si);
+            assert(slabs@ =~= s0.take(si as int) + s0.skip(sj as int));
+        } else {
+            crate::index::splice_vec(slabs, si, sj, Vec::new());
+            assert(slabs@ =~= s0.take(si as int) + s0.skip(sj as int));
+        }
+        index.ix_splice(si, sj, Vec::new());
+        *total_len -= gone;
+    }
+
+    /// Drop the current slab whole, and the slabs after it for as long as
+    /// they are whole in the next `left` items: the cursor stands at the
+    /// first one's start with no rebuild open, the first one is whole in
+    /// `left`, and it is not the column's only slab.  One slab stays,
+    /// whatever `left` is.  `f` sees each slab dropped.
+    fn drop_slabs<W, I: IndexOps<W>, G: Weigh<E, W>, F: Visitor<E>>(
         &mut self,
         slabs: &mut Vec<Slab<E::Tail>>,
         index: &mut I,
         total_len: &mut usize,
+        left: usize,
+        f: &mut F,
         Ghost(max_segments): Ghost<usize>,
-    )
+    ) -> (gone: usize)
         requires
             old(self).ok::<W, I, G>(old(slabs)@, *old(index), *old(total_len), max_segments),
             !old(self).dirty,
             old(self).in_slab == 0,
             old(slabs)@.len() > 1,
+            old(slabs)@[old(self).slab as int].len <= left,
         ensures
             final(self).ok::<W, I, G>(final(slabs)@, *final(index), *final(total_len), max_segments),
             !final(self).dirty,
             final(self).o == old(self).o,
             final(self).p == old(self).p,
-            final(self).orig == old(self).orig + old(slabs)@[old(self).slab as int].len,
-            final(self).remaining == old(self).remaining - old(slabs)@[old(self).slab as int].len,
+            old(slabs)@[old(self).slab as int].len <= gone <= left,
+            gone <= old(self).remaining,
+            final(self).orig == old(self).orig + gone,
+            final(self).remaining == old(self).remaining - gone,
             final(self).remaining > 0 ==> final(self).in_slab < final(slabs)@[final(self).slab as int].len,
+            final(f).seen() == old(f).seen() + old(self).o@.subrange(
+                old(self).orig as int,
+                old(self).orig + gone,
+            ),
     {
         let ghost c0 = *self;
         let ghost s0 = slabs@;
-        let _ = slabs.len();
+        let n = slabs.len();
         let si = self.slab;
-        let len = slabs[si].len;
+        // the column always keeps one slab
+        let end = if si == 0 {
+            n - 1
+        } else {
+            n
+        };
+        let (sj, gone) = whole_slabs::<E, F>(slabs, si, end, left, f);
+        let ghost mid = vals_of::<E>(s0.subrange(si as int, sj as int));
+        let ghost rest = vals_of::<E>(s0.skip(sj as int));
         proof {
-            self.lemma_room(s0);
-            lemma_vals_at::<E>(s0, si as int);
-            lemma_vals_total::<E>(s0);
+            lemma_vals_head::<E>(s0, si as int);
+            lemma_vals_three::<E>(s0, si as int, sj as int);
             let v = E::vals(s0[si as int]);
             assert(v.skip(0) =~= v);
             assert(v.take(0) =~= Seq::<E::V>::empty());
-        }
-        slabs.remove(si);
-        let _ = slabs.len();
-        let ghost ws = index.ws();
-        proof {
-            let n = ws.take(si as int) + Seq::<W>::empty() + ws.skip(si + 1);
-            assert(wlens::<W, I>(ws).len() == ws.len());
-            assert(wlens::<W, I>(n) =~= slab_lens(slabs@)) by {
-                assert forall|i: int| 0 <= i < slabs@.len() implies #[trigger] wlens::<W, I>(n)[i] == slab_lens(slabs@)[i] by {
-                    let j = if i < si { i } else { i + 1 };
-                    assert(wlens::<W, I>(ws)[j] == I::wlen(ws[j]));
-                    assert(slab_lens(s0)[j] == s0[j].len);
-                }
+            // what the cursor has yet to give starts with the slabs that go
+            assert(c0.o@.skip(c0.orig as int) == mid + rest);
+            assert(c0.o@.skip(c0.orig as int).len() == c0.remaining);
+            assert(c0.o@.subrange(c0.orig as int, c0.orig + gone) =~= mid) by {
+                assert(c0.o@.subrange(c0.orig as int, c0.orig + gone) =~= c0.o@.skip(c0.orig as int).take(
+                    gone as int,
+                ));
+                assert((mid + rest).take(gone as int) =~= mid);
             }
-            let s1 = slabs@;
-            assert(s1 =~= s0.take(si as int) + s0.skip(si + 1));
-            lemma_vals_cat::<E>(s0.take(si as int), s0.skip(si + 1));
-            assert forall|i: int| 0 <= i < s1.len() implies #[trigger] E::ok(s1[i]) by {
-                if i < si {
-                    assert(s1[i] == s0[i]);
-                } else {
-                    assert(s1[i] == s0[i + 1]);
-                }
-            }
-            lemma_vals_total::<E>(s1);
-            E::lemma_len(s0[si as int]);
-            I::lemma_fits(n);
         }
-        index.ix_splice(si, si + 1, Vec::new());
-        *total_len -= len;
-        self.orig += len;
-        self.remaining -= len;
+        Self::cut_slabs::<W, I, G>(slabs, index, total_len, si, sj, gone, Ghost(max_segments));
+        self.orig += gone;
+        self.remaining -= gone;
         proof {
-            let v = E::vals(s0[si as int]);
-            let rest = vals_of::<E>(s0.skip(si + 1));
-            assert(c0.o@.skip(c0.orig as int) == v.skip(0) + rest);
-            assert(v.skip(0) =~= v);
-            assert(self.o@.skip(self.orig as int) =~= c0.o@.skip(c0.orig as int).skip(len as int));
-            assert((v + rest).skip(len as int) =~= rest);
-            assert(self.p@ =~= vals_of::<E>(s0.take(si as int)) + v.take(0));
+            assert(self.o@.skip(self.orig as int) =~= c0.o@.skip(c0.orig as int).skip(gone as int));
+            assert((mid + rest).skip(gone as int) =~= rest);
             assert(self.p@ =~= vals_of::<E>(s0.take(si as int)));
             assert(self.now() =~= vals_of::<E>(slabs@));
         }
         self.locate_out::<W, I, G>(slabs, index, *total_len, Ghost(max_segments));
+        gone
+    }
+
+    /// With the open rebuild at its slab's end, drop the slabs after it
+    /// for as long as they are whole in the next `left` items, the first
+    /// of which is.  They go before the rebuild is closed: closed first,
+    /// a slab left short would take in the slab after it, and the delete
+    /// would rebuild that one too, and so on through every slab it covers.
+    /// `f` sees each slab dropped.
+    fn drop_after<W, I: IndexOps<W>, G: Weigh<E, W>, F: Visitor<E>>(
+        &mut self,
+        slabs: &mut Vec<Slab<E::Tail>>,
+        index: &mut I,
+        total_len: &mut usize,
+        left: usize,
+        f: &mut F,
+        Ghost(max_segments): Ghost<usize>,
+    ) -> (gone: usize)
+        requires
+            old(self).ok::<W, I, G>(old(slabs)@, *old(index), *old(total_len), max_segments),
+            old(self).dirty,
+            old(self).in_slab == old(slabs)@[old(self).slab as int].len,
+            old(self).slab + 1 < old(slabs)@.len(),
+            old(slabs)@[old(self).slab + 1].len <= left,
+        ensures
+            final(self).ok::<W, I, G>(final(slabs)@, *final(index), *final(total_len), max_segments),
+            final(self).dirty,
+            final(self).o == old(self).o,
+            final(self).p == old(self).p,
+            gone <= left,
+            gone <= old(self).remaining,
+            final(self).orig == old(self).orig + gone,
+            final(self).remaining == old(self).remaining - gone,
+            final(f).seen() == old(f).seen() + old(self).o@.subrange(
+                old(self).orig as int,
+                old(self).orig + gone,
+            ),
+    {
+        let ghost c0 = *self;
+        let ghost s0 = slabs@;
+        let n = slabs.len();
+        let si = self.slab + 1;
+        let (sj, gone) = whole_slabs::<E, F>(slabs, si, n, left, f);
+        let ghost mid = vals_of::<E>(s0.subrange(si as int, sj as int));
+        let ghost rest = vals_of::<E>(s0.skip(sj as int));
+        proof {
+            lemma_vals_three::<E>(s0, si as int, sj as int);
+            let v = E::vals(s0[c0.slab as int]);
+            E::lemma_len(s0[c0.slab as int]);
+            assert(v.skip(c0.in_slab as int) =~= Seq::<E::V>::empty());
+            // what the cursor has yet to give starts with the slabs that go
+            assert(c0.o@.skip(c0.orig as int) =~= mid + rest);
+            assert(c0.o@.skip(c0.orig as int).len() == c0.remaining);
+            assert(c0.o@.subrange(c0.orig as int, c0.orig + gone) =~= mid) by {
+                assert(c0.o@.subrange(c0.orig as int, c0.orig + gone) =~= c0.o@.skip(c0.orig as int).take(
+                    gone as int,
+                ));
+                assert((mid + rest).take(gone as int) =~= mid);
+            }
+        }
+        Self::cut_slabs::<W, I, G>(slabs, index, total_len, si, sj, gone, Ghost(max_segments));
+        self.orig += gone;
+        self.remaining -= gone;
+        proof {
+            let s1 = slabs@;
+            assert(s1.take(c0.slab as int) =~= s0.take(c0.slab as int));
+            assert(s1.skip(si as int) =~= s0.skip(sj as int));
+            assert(s1[c0.slab as int] == s0[c0.slab as int]);
+            assert(self.o@.skip(self.orig as int) =~= c0.o@.skip(c0.orig as int).skip(gone as int));
+            assert((mid + rest).skip(gone as int) =~= rest);
+            assert(Seq::<E::V>::empty() + rest =~= rest);
+        }
+        gone
     }
 
     /// Account for `n` items the open rebuild has dropped.
