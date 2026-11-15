@@ -1154,9 +1154,11 @@ where
         assert!(opts.max_segments >= 2, "max_segments must be at least 2");
         let fill = match (data.is_empty(), opts.length) {
             // a fill is one run, which holds at most `i64::MAX` items
-            // (`Column::fill`); past that, the empty data loads as it is
-            // and the length check rejects it
-            (true, Some(len)) if len <= i64::MAX as usize => {
+            // (`Column::fill`), in a column, which holds at most
+            // `usize::MAX - 3` (the second bound only matters where `usize`
+            // is narrower); past that, the empty data loads as it is and
+            // the length check rejects it
+            (true, Some(len)) if len <= i64::MAX as usize && len <= usize::MAX - 3 => {
                 opts.fill.fill_value().map(|value| (value, len))
             }
             _ => None,
