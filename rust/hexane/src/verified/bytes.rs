@@ -39,6 +39,7 @@ use crate::rle::model::{RleOps, WriteOps};
 #[cfg(verus_keep_ghost)]
 use crate::rle::size::heads_bound;
 use crate::PackError;
+use std::cmp::Ordering;
 use std::marker::PhantomData;
 #[allow(unused_imports)]
 use vstd::prelude::*;
@@ -332,6 +333,464 @@ fn same_bytes(a: &&[u8], b: &&[u8]) -> (r: bool)
         }
     }
     r
+}
+
+// ── The order of byte strings ───────────────────────────────────────────────
+
+/// The byte string `a` comes before `b` by what is at `i`: up to there
+/// they are the same bytes, and there `a` ends and `b` does not, or
+/// `a` has the lower byte.
+pub open spec fn below_at(a: Seq<u8>, b: Seq<u8>, i: int) -> bool {
+    &&& 0 <= i <= a.len()
+    &&& i < b.len()
+    &&& a.take(i) == b.take(i)
+    &&& (i == a.len() || a[i] < b[i])
+}
+
+/// Whether the byte string `a` comes before `b`, in the order of slices
+/// (`[u8]`): at the first place where they are not the same, `a` has
+/// the lower byte, or ends where `b` goes on.
+pub open spec fn bytes_below(a: Seq<u8>, b: Seq<u8>) -> bool {
+    exists|i: int| below_at(a, b, i)
+}
+
+/// What comes before a byte string comes before all that come after
+/// it.
+proof fn lemma_bytes_trans(a: Seq<u8>, b: Seq<u8>, c: Seq<u8>)
+    requires
+        bytes_below(a, b),
+        bytes_below(b, c),
+    ensures
+        bytes_below(a, c),
+{
+    let i = choose|i: int| below_at(a, b, i);
+    let j = choose|j: int| below_at(b, c, j);
+    // the first of the two places decides
+    let k = if i < j {
+        i
+    } else {
+        j
+    };
+    assert(a.take(k) =~= a.take(i).take(k));
+    assert(b.take(k) =~= b.take(i).take(k));
+    assert(b.take(k) =~= b.take(j).take(k));
+    assert(c.take(k) =~= c.take(j).take(k));
+    if i < j {
+        assert(b[i] == b.take(j)[i]);
+        assert(c[i] == c.take(j)[i]);
+    } else if j < i {
+        assert(a[j] == a.take(i)[j]);
+        assert(b[j] == b.take(i)[j]);
+    }
+    assert(below_at(a, c, k));
+}
+
+/// Of two byte strings that are the same up to `i` and differ, one
+/// comes before the other.
+proof fn lemma_bytes_total(a: Seq<u8>, b: Seq<u8>, i: int)
+    requires
+        0 <= i <= a.len(),
+        i <= b.len(),
+        a.take(i) == b.take(i),
+    ensures
+        a == b || bytes_below(a, b) || bytes_below(b, a),
+    decreases a.len() - i,
+{
+    if i == a.len() {
+        if i == b.len() {
+            assert(a =~= a.take(i));
+            assert(b =~= b.take(i));
+        } else {
+            assert(below_at(a, b, i));
+        }
+    } else if i == b.len() {
+        assert(below_at(b, a, i));
+    } else if a[i] < b[i] {
+        assert(below_at(a, b, i));
+    } else if b[i] < a[i] {
+        assert(below_at(b, a, i));
+    } else {
+        assert(a.take(i + 1) =~= a.take(i).push(a[i]));
+        assert(b.take(i + 1) =~= b.take(i).push(b[i]));
+        lemma_bytes_total(a, b, i + 1);
+    }
+}
+
+/// The order of byte strings is a strict total order.
+pub(crate) proof fn lemma_bytes_below(a: Seq<u8>, b: Seq<u8>, c: Seq<u8>)
+    ensures
+        !bytes_below(a, a),
+        bytes_below(a, b) && bytes_below(b, c) ==> bytes_below(a, c),
+        a == b || bytes_below(a, b) || bytes_below(b, a),
+{
+    assert forall|i: int| !below_at(a, a, i) by {
+    }
+    if bytes_below(a, b) && bytes_below(b, c) {
+        lemma_bytes_trans(a, b, c);
+    }
+    assert(a.take(0) =~= b.take(0));
+    lemma_bytes_total(a, b, 0);
+}
+
+/// Whether the slices `a` and `b` have the same first `w` bytes. For a
+/// `w` that is a small constant this is a few loads and one comparison
+/// of them.
+#[inline(always)]
+fn same_front(a: &[u8], b: &[u8], w: usize) -> (r: bool)
+    requires
+        w <= a@.len(),
+        w <= b@.len(),
+    ensures
+        r == (a@.take(w as int) == b@.take(w as int)),
+{
+    broadcast use vstd::slice::group_slice_axioms;
+
+    let x = slice_subrange(a, 0, w);
+    let y = slice_subrange(b, 0, w);
+    let r = same_bytes(&x, &y);
+    proof {
+        if x@ == y@ {
+            assert(x =~= y);
+        }
+    }
+    r
+}
+
+/// Byte strings that are the same up to `i` and in the `w` bytes from
+/// there are the same up to `i + w`.
+proof fn lemma_same_more(a: Seq<u8>, b: Seq<u8>, i: int, w: int)
+    requires
+        0 <= i,
+        0 <= w,
+        i + w <= a.len(),
+        i + w <= b.len(),
+        a.take(i) == b.take(i),
+        a.subrange(i, i + w) == b.subrange(i, i + w),
+    ensures
+        a.take(i + w) == b.take(i + w),
+{
+    assert(a.take(i + w) =~= a.take(i) + a.subrange(i, i + w));
+    assert(b.take(i + w) =~= b.take(i) + b.subrange(i, i + w));
+}
+
+/// The bytes of `s` read as one number, the first byte the highest.
+spec fn word_of(s: Seq<u8>) -> nat
+    decreases s.len(),
+{
+    if s.len() == 0 {
+        0
+    } else {
+        word_of(s.drop_last()) * 256 + s.last() as nat
+    }
+}
+
+/// One more byte of a string is one more digit of its number.
+proof fn lemma_word_take(s: Seq<u8>, k: int)
+    requires
+        0 < k <= s.len(),
+    ensures
+        word_of(s.take(k)) == word_of(s.take(k - 1)) * 256 + s[k - 1] as nat,
+{
+    assert(s.take(k).drop_last() =~= s.take(k - 1));
+}
+
+/// Byte strings of one length with the same number are the same.
+proof fn lemma_word_same(x: Seq<u8>, y: Seq<u8>)
+    requires
+        x.len() == y.len(),
+        word_of(x) == word_of(y),
+    ensures
+        x == y,
+    decreases x.len(),
+{
+    if x.len() > 0 {
+        lemma_word_same(x.drop_last(), y.drop_last());
+        assert(x =~= x.drop_last().push(x.last()));
+        assert(y =~= y.drop_last().push(y.last()));
+    } else {
+        assert(x =~= y);
+    }
+}
+
+/// Of two byte strings of one length, the one with the lower number
+/// has the lower byte at the first place `k` where they differ.
+proof fn lemma_word_less(x: Seq<u8>, y: Seq<u8>) -> (k: int)
+    requires
+        x.len() == y.len(),
+        word_of(x) < word_of(y),
+    ensures
+        0 <= k < x.len(),
+        x.take(k) == y.take(k),
+        x[k] < y[k],
+    decreases x.len(),
+{
+    let p = x.drop_last();
+    let q = y.drop_last();
+    if word_of(p) < word_of(q) {
+        let k = lemma_word_less(p, q);
+        assert(x.take(k) =~= p.take(k));
+        assert(y.take(k) =~= q.take(k));
+        k
+    } else {
+        // the same but for the last byte
+        lemma_word_same(p, q);
+        assert(x.take(x.len() - 1) =~= p);
+        assert(y.take(x.len() - 1) =~= q);
+        x.len() - 1
+    }
+}
+
+/// The first 8 bytes of `s` as one number, the first byte the highest:
+/// one load of them.
+#[inline(always)]
+fn word(s: &[u8]) -> (r: u64)
+    requires
+        8 <= s@.len(),
+    ensures
+        r as nat == word_of(s@.take(8)),
+{
+    let w = slice_subrange(s, 0, 8);
+    let r = w[0] as u64;
+    let r = r * 256 + w[1] as u64;
+    let r = r * 256 + w[2] as u64;
+    let r = r * 256 + w[3] as u64;
+    let r = r * 256 + w[4] as u64;
+    let r = r * 256 + w[5] as u64;
+    let r = r * 256 + w[6] as u64;
+    let r = r * 256 + w[7] as u64;
+    proof {
+        let t = w@;
+        assert(t =~= s@.take(8));
+        assert(t.take(8) =~= t);
+        assert(word_of(t.take(0)) == 0);
+        lemma_word_take(t, 1);
+        lemma_word_take(t, 2);
+        lemma_word_take(t, 3);
+        lemma_word_take(t, 4);
+        lemma_word_take(t, 5);
+        lemma_word_take(t, 6);
+        lemma_word_take(t, 7);
+        lemma_word_take(t, 8);
+    }
+    r
+}
+
+/// Where the 8 bytes of `a` and of `b` from `j` on have numbers that
+/// differ, and the strings are the same up to `j`: the string with the
+/// lower number comes first.
+proof fn lemma_word_decides(a: Seq<u8>, b: Seq<u8>, j: int)
+    requires
+        0 <= j,
+        j + 8 <= a.len(),
+        j + 8 <= b.len(),
+        a.take(j) == b.take(j),
+        word_of(a.subrange(j, j + 8)) < word_of(b.subrange(j, j + 8)),
+    ensures
+        bytes_below(a, b),
+        !bytes_below(b, a),
+        a != b,
+{
+    let s = a.subrange(j, j + 8);
+    let t = b.subrange(j, j + 8);
+    let k = lemma_word_less(s, t);
+    assert(a.subrange(j, j + k) =~= s.take(k));
+    assert(b.subrange(j, j + k) =~= t.take(k));
+    lemma_same_more(a, b, j, k);
+    assert(a[j + k] == s[k]);
+    assert(b[j + k] == t[k]);
+    assert(below_at(a, b, j + k));
+    lemma_bytes_below(a, b, a);
+    lemma_bytes_below(b, a, b);
+}
+
+/// How the slice `a` stands to `b` in the order of byte strings.
+///
+/// The bytes the two share at their fronts are passed over 64 at a
+/// time. From there the strings are read 8 bytes at a time as numbers,
+/// the first byte the highest: the first two numbers that differ stand
+/// as the strings do. The last bytes both have, fewer than 8, are read
+/// as the end of one more such number, or, in strings shorter than
+/// that, one by one.
+#[inline]
+fn compare_bytes(a: &[u8], b: &[u8]) -> (r: Ordering)
+    ensures
+        (r is Less) == bytes_below(a@, b@),
+        (r is Greater) == bytes_below(b@, a@),
+{
+    // what is left of each: all but its first `i` bytes
+    let mut x = a;
+    let mut y = b;
+    let ghost mut i: int = 0;
+    proof {
+        assert(a@.take(0) =~= b@.take(0));
+        assert(x@ =~= a@.skip(0));
+        assert(y@ =~= b@.skip(0));
+    }
+    while x.len() >= 64 && y.len() >= 64 && same_front(x, y, 64)
+        invariant
+            0 <= i <= a@.len(),
+            i <= b@.len(),
+            x@ == a@.skip(i),
+            y@ == b@.skip(i),
+            a@.take(i) == b@.take(i),
+        decreases x@.len(),
+    {
+        proof {
+            assert(a@.subrange(i, i + 64) =~= x@.take(64));
+            assert(b@.subrange(i, i + 64) =~= y@.take(64));
+            lemma_same_more(a@, b@, i, 64);
+        }
+        x = slice_subrange(x, 64, x.len());
+        y = slice_subrange(y, 64, y.len());
+        proof {
+            i = i + 64;
+            assert(x@ =~= a@.skip(i));
+            assert(y@ =~= b@.skip(i));
+        }
+    }
+    while x.len() >= 8 && y.len() >= 8
+        invariant
+            0 <= i <= a@.len(),
+            i <= b@.len(),
+            x@ == a@.skip(i),
+            y@ == b@.skip(i),
+            a@.take(i) == b@.take(i),
+        decreases x@.len(),
+    {
+        let p = word(x);
+        let q = word(y);
+        proof {
+            assert(a@.subrange(i, i + 8) =~= x@.take(8));
+            assert(b@.subrange(i, i + 8) =~= y@.take(8));
+        }
+        if p != q {
+            proof {
+                if p < q {
+                    lemma_word_decides(a@, b@, i);
+                } else {
+                    lemma_word_decides(b@, a@, i);
+                }
+            }
+            return if p < q {
+                Ordering::Less
+            } else {
+                Ordering::Greater
+            };
+        }
+        proof {
+            lemma_word_same(x@.take(8), y@.take(8));
+            lemma_same_more(a@, b@, i, 8);
+        }
+        x = slice_subrange(x, 8, x.len());
+        y = slice_subrange(y, 8, y.len());
+        proof {
+            i = i + 8;
+            assert(x@ =~= a@.skip(i));
+            assert(y@ =~= b@.skip(i));
+        }
+    }
+    let n = if a.len() < b.len() {
+        a.len()
+    } else {
+        b.len()
+    };
+    // the bytes both have that are left: fewer than 8
+    let m = if x.len() < y.len() {
+        x.len()
+    } else {
+        y.len()
+    };
+    if m > 0 && n >= 8 {
+        // the last 8 that both have, some of them read before: the
+        // strings are the same up to these
+        let j = n - 8;
+        let p = word(slice_subrange(a, j, n));
+        let q = word(slice_subrange(b, j, n));
+        proof {
+            assert(a@.subrange(j as int, n as int) =~= a@.subrange(j as int, n as int).take(8));
+            assert(b@.subrange(j as int, n as int) =~= b@.subrange(j as int, n as int).take(8));
+            assert(a@.take(j as int) =~= a@.take(i).take(j as int));
+            assert(b@.take(j as int) =~= b@.take(i).take(j as int));
+        }
+        if p != q {
+            proof {
+                if p < q {
+                    lemma_word_decides(a@, b@, j as int);
+                } else {
+                    lemma_word_decides(b@, a@, j as int);
+                }
+            }
+            return if p < q {
+                Ordering::Less
+            } else {
+                Ordering::Greater
+            };
+        }
+        proof {
+            lemma_word_same(a@.subrange(j as int, n as int), b@.subrange(j as int, n as int));
+            lemma_same_more(a@, b@, j as int, 8);
+        }
+    } else {
+        let mut k: usize = 0;
+        while k < m
+            invariant
+                0 <= i,
+                k <= m,
+                i + m == n,
+                n <= a@.len(),
+                n <= b@.len(),
+                x@ == a@.skip(i),
+                y@ == b@.skip(i),
+                a@.take(i + k) == b@.take(i + k),
+            decreases m - k,
+        {
+            let c = x[k];
+            let d = y[k];
+            if c != d {
+                proof {
+                    // one comes before the other here, and so not after it
+                    if c < d {
+                        assert(below_at(a@, b@, i + k));
+                    } else {
+                        assert(below_at(b@, a@, i + k));
+                    }
+                    lemma_bytes_below(a@, b@, a@);
+                    lemma_bytes_below(b@, a@, b@);
+                }
+                return if c < d {
+                    Ordering::Less
+                } else {
+                    Ordering::Greater
+                };
+            }
+            proof {
+                assert(a@.take(i + k + 1) =~= a@.take(i + k).push(c));
+                assert(b@.take(i + k + 1) =~= b@.take(i + k).push(d));
+            }
+            k += 1;
+        }
+    }
+    proof {
+        // the same as far as the shorter goes: the shorter is first
+        assert(a@.take(n as int) == b@.take(n as int));
+        if a@.len() < b@.len() {
+            assert(below_at(a@, b@, n as int));
+        } else if b@.len() < a@.len() {
+            assert(below_at(b@, a@, n as int));
+        } else {
+            assert(a@ =~= a@.take(n as int));
+            assert(b@ =~= b@.take(n as int));
+        }
+        lemma_bytes_below(a@, b@, a@);
+        lemma_bytes_below(b@, a@, b@);
+    }
+    if a.len() < b.len() {
+        Ordering::Less
+    } else if a.len() > b.len() {
+        Ordering::Greater
+    } else {
+        Ordering::Equal
+    }
 }
 
 // ── A byte string a writer is handed ────────────────────────────────────────
@@ -939,6 +1398,14 @@ impl seal::SpecSeal for Vec<u8> {
 
 impl VSpec for Vec<u8> {
     type S = Seq<u8>;
+
+    open spec fn below(a: Seq<u8>, b: Seq<u8>) -> bool {
+        bytes_below(a, b)
+    }
+
+    proof fn lemma_below(a: Seq<u8>, b: Seq<u8>, c: Seq<u8>) {
+        lemma_bytes_below(a, b, c);
+    }
 }
 
 impl<'a> VForm<'a> for Vec<u8> {
@@ -951,6 +1418,23 @@ impl seal::SpecSeal for Option<Vec<u8>> {
 
 impl VSpec for Option<Vec<u8>> {
     type S = Option<Seq<u8>>;
+
+    open spec fn below(a: Option<Seq<u8>>, b: Option<Seq<u8>>) -> bool {
+        match (a, b) {
+            (None, Some(_)) => true,
+            (Some(x), Some(y)) => bytes_below(x, y),
+            _ => false,
+        }
+    }
+
+    proof fn lemma_below(a: Option<Seq<u8>>, b: Option<Seq<u8>>, c: Option<Seq<u8>>) {
+        match (a, b, c) {
+            (Some(x), Some(y), Some(z)) => lemma_bytes_below(x, y, z),
+            (Some(x), Some(y), None) => lemma_bytes_below(x, y, y),
+            (Some(x), None, _) => lemma_bytes_below(x, x, x),
+            _ => {},
+        }
+    }
 }
 
 impl<'a> VForm<'a> for Option<Vec<u8>> {
@@ -1070,6 +1554,14 @@ impl<C: VCodec> VValue<C> for Vec<u8> {
         }
         same_bytes(&a, &b)
     }
+
+    #[inline(always)]
+    fn compare(a: &[u8], b: &[u8]) -> (r: Ordering) {
+        proof {
+            lemma_bytes_below(a@, b@, a@);
+        }
+        compare_bytes(a, b)
+    }
 }
 
 impl<C: VCodec> seal::Sealed<C> for Option<Vec<u8>> {
@@ -1106,6 +1598,21 @@ impl<C: VCodec> VValue<C> for Option<Vec<u8>> {
             },
             (None, None) => true,
             _ => false,
+        }
+    }
+
+    #[inline(always)]
+    fn compare(a: Option<&[u8]>, b: Option<&[u8]>) -> (r: Ordering) {
+        match (a, b) {
+            (Some(x), Some(y)) => {
+                proof {
+                    lemma_bytes_below(x@, y@, x@);
+                }
+                compare_bytes(x, y)
+            },
+            (None, None) => Ordering::Equal,
+            (None, Some(_)) => Ordering::Less,
+            (Some(_), None) => Ordering::Greater,
         }
     }
 }

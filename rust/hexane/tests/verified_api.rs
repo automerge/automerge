@@ -13,8 +13,10 @@ use hexane::{
     Codec, Column, ColumnValue, ColumnValueRef, LoadOpts, MaybeFill, NoFill, PackError,
     RleEncoding, RleValue, Run,
 };
+use std::cmp::Ordering;
 use std::fmt::Debug;
 use std::num::NonZeroU32;
+use std::ops::Range;
 
 /// A small deterministic generator (xorshift64*).
 struct Rng(u64);
@@ -88,6 +90,13 @@ trait Kind: VValue + ColumnValueRef + Clone + PartialEq + Debug {
     fn lend(&self) -> Get<'_, Self>;
 
     fn keep(v: Get<'_, Self>) -> Self;
+
+    /// How the value stands to `other` in the order of a column's values,
+    /// as the standard library has it for the type.
+    fn order(&self, other: &Self) -> Ordering;
+
+    /// Where `Column` finds the value among its values `range`.
+    fn old_scope(&self, c: &Column<Self>, range: Range<usize>) -> Range<usize>;
 }
 
 /// A type that is its own form, and the same type with nulls.
@@ -106,6 +115,14 @@ macro_rules! plain_kind {
             fn keep(v: $t) -> $t {
                 v
             }
+
+            fn order(&self, other: &$t) -> Ordering {
+                self.cmp(other)
+            }
+
+            fn old_scope(&self, c: &Column<$t>, range: Range<usize>) -> Range<usize> {
+                c.scope_to_value(*self, range)
+            }
         }
 
         impl Kind for Option<$t> {
@@ -122,6 +139,14 @@ macro_rules! plain_kind {
 
             fn keep(v: Option<$t>) -> Option<$t> {
                 v
+            }
+
+            fn order(&self, other: &Option<$t>) -> Ordering {
+                self.cmp(other)
+            }
+
+            fn old_scope(&self, c: &Column<Option<$t>>, range: Range<usize>) -> Range<usize> {
+                c.scope_to_value(*self, range)
             }
         }
     };
@@ -148,6 +173,14 @@ impl Kind for bool {
     fn keep(v: bool) -> bool {
         v
     }
+
+    fn order(&self, other: &bool) -> Ordering {
+        self.cmp(other)
+    }
+
+    fn old_scope(&self, c: &Column<bool>, range: Range<usize>) -> Range<usize> {
+        c.scope_to_value(*self, range)
+    }
 }
 
 /// Byte strings: mostly short, the empty one among them; some with a
@@ -169,6 +202,14 @@ impl Kind for Vec<u8> {
     fn keep(v: &[u8]) -> Vec<u8> {
         v.to_vec()
     }
+
+    fn order(&self, other: &Vec<u8>) -> Ordering {
+        self.cmp(other)
+    }
+
+    fn old_scope(&self, c: &Column<Vec<u8>>, range: Range<usize>) -> Range<usize> {
+        c.scope_to_value(self.as_slice(), range)
+    }
 }
 
 impl Kind for Option<Vec<u8>> {
@@ -186,12 +227,21 @@ impl Kind for Option<Vec<u8>> {
     fn keep(v: Option<&[u8]>) -> Option<Vec<u8>> {
         v.map(<[u8]>::to_vec)
     }
+
+    fn order(&self, other: &Option<Vec<u8>>) -> Ordering {
+        self.cmp(other)
+    }
+
+    fn old_scope(&self, c: &Column<Option<Vec<u8>>>, range: Range<usize>) -> Range<usize> {
+        c.scope_to_value(self.as_deref(), range)
+    }
 }
 
 /// A value type of a client's own, as a client compiled without Verus
 /// writes it: one of four actions, each stored as a number. Any other
-/// number is no action.
-#[derive(Clone, Copy, PartialEq, Debug)]
+/// number is no action. The actions are declared in the order of their
+/// numbers, which is the order a column has them in.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 enum Action {
     Make,
     Set,
@@ -1159,6 +1209,395 @@ fn one_value_in_many_slabs<T: Kind>() {
 fn a_column_of_one_value() {
     for_each_kind!(one_value);
     for_each_kind!(one_value_in_many_slabs);
+}
+
+/// Where the two APIs find `x` among the values `start..end`. Both give
+/// a range within the window, and the same one: they run one search over
+/// the same slabs. Where the window is in order as far as `x` can tell
+/// (the values before `x` first, those after it last), which the result
+/// says, the range is that of the places of `x`, or the empty range where
+/// `x` would stand: by the model, in the order the standard library has
+/// for the type.
+fn check_scope<T: Kind>(
+    v: &VerifiedColumn<T>,
+    c: &Column<T>,
+    model: &[T],
+    x: &T,
+    start: usize,
+    end: usize,
+) -> bool {
+    let r = v.scope_to_value(x.lend(), start, end);
+    assert!(
+        start <= r.start && r.start <= r.end && r.end <= end,
+        "{r:?} of {start}..{end}"
+    );
+    assert_eq!(r, x.old_scope(c, start..end), "{x:?} in {start}..{end}");
+    let sides: Vec<Ordering> = model[start..end].iter().map(|m| m.order(x)).collect();
+    let in_order = sides.windows(2).all(|w| w[0] <= w[1]);
+    if in_order {
+        let before = sides.iter().filter(|s| **s == Ordering::Less).count();
+        let after = sides.iter().filter(|s| **s == Ordering::Greater).count();
+        assert_eq!(r, start + before..end - after, "{x:?} in {start}..{end}");
+        assert!(model[r].iter().all(|m| m == x));
+    }
+    in_order
+}
+
+/// Windows of a column of `n` values in slabs of the lengths `lens`: all
+/// of it, empty ones, ones that start or end where a slab does or one
+/// place from there, one inside each of a few slabs, and some at random.
+fn windows(rng: &mut Rng, lens: &[usize], n: usize) -> Vec<(usize, usize)> {
+    let mut ws = vec![(0, n), (0, 0), (n, n), (n / 2, n / 2), (n / 3, n - n / 3)];
+    let mut at = 0;
+    let step = lens.len() / 6 + 1;
+    for (i, len) in lens.iter().enumerate() {
+        if i % step == 0 {
+            let to = at + len;
+            ws.extend([(at, n), (0, at), (at, at), (at, to), (0, to), (to, n)]);
+            ws.extend([
+                (at.saturating_sub(1), (to + 1).min(n)),
+                (at, (at + 1).min(to)),
+            ]);
+            if *len > 2 {
+                ws.push((at + 1, to - 1));
+            }
+        }
+        at += len;
+    }
+    for _ in 0..12 {
+        let a = rng.below(n + 1);
+        ws.push((a, a + rng.below(n - a + 1)));
+    }
+    ws
+}
+
+/// Some of the values of `model`, the first and the last among them, and
+/// some that it may not hold.
+fn targets<T: Kind>(rng: &mut Rng, model: &[T]) -> Vec<T> {
+    let mut xs: Vec<T> = (0..8).map(|_| T::fresh(rng)).collect();
+    xs.extend(model.first().cloned());
+    xs.extend(model.last().cloned());
+    for _ in 0..12.min(model.len()) {
+        xs.push(model[rng.below(model.len())].clone());
+    }
+    xs
+}
+
+/// A column of each API with the values `model`, of slabs of at most
+/// `budget` runs.
+fn both_with<T: Kind>(model: &[T], budget: usize) -> (VerifiedColumn<T>, Column<T>) {
+    let mut v = VerifiedColumn::<T>::with_max_segments(budget);
+    v.splice(0, 0, &lent(model));
+    let mut c = Column::<T>::with_max_segments(budget);
+    c.splice(0, 0, model.iter().cloned());
+    (v, c)
+}
+
+/// A column of each API with the values `model`, of slabs of at most
+/// `budget` runs and in many of them even where `model` is one value
+/// many times over: made with another value after each, which is then
+/// taken out again.
+fn both_in_slabs<T: Kind>(
+    rng: &mut Rng,
+    model: &[T],
+    budget: usize,
+) -> (VerifiedColumn<T>, Column<T>) {
+    let mut v = VerifiedColumn::<T>::with_max_segments(budget);
+    let mut c = Column::<T>::with_max_segments(budget);
+    for x in model {
+        let mut other = T::fresh(rng);
+        while other == *x {
+            other = T::fresh(rng);
+        }
+        v.push(x.lend());
+        v.push(other.lend());
+        c.push(x.clone());
+        c.push(other);
+    }
+    for i in (0..model.len()).rev() {
+        v.remove(2 * i + 1);
+        c.remove(2 * i + 1);
+    }
+    (v, c)
+}
+
+/// Values in order, in one slab and in many: the search finds each value
+/// where the model has it, and says where one that is not there would
+/// stand, in every window. So too in columns loaded from the saved bytes.
+fn scopes<T: Kind>() {
+    let mut rng = Rng(0x5c0e);
+    for n in [0, 1, 2, 3, 50, 400, 3000] {
+        let mut model: Vec<T> = (0..n).map(|_| T::fresh(&mut rng)).collect();
+        if n == 400 {
+            // few values, each many times over
+            model = (0..n).map(|i| model[i % 5].clone()).collect();
+        }
+        model.sort_by(T::order);
+        for budget in [3, 16, 64] {
+            let (v, c) = if budget < 64 {
+                both_in_slabs(&mut rng, &model, budget)
+            } else {
+                both_with(&model, budget)
+            };
+            check(&v, &c, &model);
+            assert!(n < 400 || budget > 3 || v.slab_count() > 30);
+            let bytes = v.save();
+            let v2 = VerifiedColumn::<T>::load(&bytes).unwrap();
+            let c2 = Column::<T>::load(&bytes).unwrap();
+            let ws = windows(&mut rng, &v.slab_lens(), n);
+            for x in targets(&mut rng, &model) {
+                for &(start, end) in &ws {
+                    assert!(check_scope(&v, &c, &model, &x, start, end));
+                }
+                assert!(check_scope(&v2, &c2, &model, &x, 0, n));
+                assert!(check_scope(&v2, &c2, &model, &x, n / 4, n - n / 4));
+            }
+        }
+    }
+}
+
+#[test]
+fn a_search_of_values_in_order() {
+    for_each_kind!(scopes);
+}
+
+/// Values in no order. The search still gives a range within the window,
+/// and the two APIs the same one. And where the values are in order only
+/// as far as the value looked for can tell (those before it first, in any
+/// order, and those after it last, in any order), the search gives its
+/// places, or the place where it would stand.
+fn scopes_out_of_order<T: Kind>() {
+    let mut rng = Rng(0x0dd5);
+    let mut exact = 0;
+    for round in 0..40 {
+        let n = [0, 1, 7, 60, 300, 2000][round % 6];
+        let model: Vec<T> = (0..n).map(|_| T::fresh(&mut rng)).collect();
+        let (v, c) = both_with(&model, [3, 64][round % 2]);
+        let ws = windows(&mut rng, &v.slab_lens(), n);
+        for x in targets(&mut rng, &model) {
+            for &(start, end) in &ws {
+                check_scope(&v, &c, &model, &x, start, end);
+            }
+            // the same values, those before `x` first and those after it
+            // last, each part in the order it had
+            let mut parted: Vec<T> = vec![];
+            for side in [Ordering::Less, Ordering::Equal, Ordering::Greater] {
+                parted.extend(model.iter().filter(|m| m.order(&x) == side).cloned());
+            }
+            let (v, c) = both_with(&parted, [3, 64][round % 2]);
+            for (start, end) in windows(&mut rng, &v.slab_lens(), n) {
+                assert!(check_scope(&v, &c, &parted, &x, start, end));
+            }
+            exact += 1;
+        }
+    }
+    assert!(exact > 300);
+}
+
+#[test]
+fn a_search_of_values_in_no_order() {
+    for_each_kind!(scopes_out_of_order);
+}
+
+/// The order of byte strings is that of their bytes, a string before
+/// every longer one that starts with it, and the null before them all:
+/// for strings that are long and differ late, or only in their lengths.
+#[test]
+fn a_search_of_long_byte_strings() {
+    let stem: Vec<u8> = (0..400u32).map(|i| (i * 7 % 251) as u8).collect();
+    let mut strings: Vec<Vec<u8>> = vec![vec![], vec![0], vec![0, 0], vec![1], vec![255]];
+    for cut in [
+        1, 2, 7, 8, 9, 15, 16, 17, 31, 32, 33, 63, 64, 65, 255, 256, 399, 400,
+    ] {
+        // the stem's first `cut` bytes; then with one more byte that is
+        // less than the stem's next, the same or greater
+        let s = stem[..cut].to_vec();
+        strings.push(s.clone());
+        for last in [0u8, 1, 128, 250, 255] {
+            let mut t = s.clone();
+            t.push(last);
+            strings.push(t);
+        }
+        if cut < 400 {
+            let mut t = stem.clone();
+            t[cut] = t[cut].wrapping_add(1);
+            strings.push(t.clone());
+            t[cut] = t[cut].wrapping_sub(2);
+            strings.push(t);
+        }
+    }
+    strings.sort();
+    // some of them more than once
+    let model: Vec<Vec<u8>> = strings
+        .iter()
+        .enumerate()
+        .flat_map(|(i, s)| vec![s.clone(); 1 + i % 3])
+        .collect();
+    let mut rng = Rng(0xb17e);
+    for budget in [3, 64] {
+        let (v, c) = both_with(&model, budget);
+        let ws = windows(&mut rng, &v.slab_lens(), model.len());
+        for x in &strings {
+            for &(start, end) in &ws {
+                assert!(check_scope(&v, &c, &model, x, start, end));
+            }
+        }
+        // a string that is not there stands between its neighbours
+        let mut absent = stem[..300].to_vec();
+        absent.extend([0, 0, 0]);
+        assert!(!model.contains(&absent));
+        let at = model.iter().filter(|m| **m < absent).count();
+        assert_eq!(v.scope_to_value(&absent, 0, model.len()), at..at);
+        assert!(0 < at && at < model.len());
+
+        // with nulls, which come first
+        let mut nullable: Vec<Option<Vec<u8>>> = vec![None; 5];
+        nullable.extend(model.iter().cloned().map(Some));
+        let (v, c) = both_with(&nullable, budget);
+        let n = nullable.len();
+        assert_eq!(v.scope_to_value(None, 0, n), 0..5);
+        assert_eq!(v.scope_to_value(Some(&[]), 0, n), 5..6);
+        for x in strings.iter().cloned().map(Some).chain([None]) {
+            for (start, end) in windows(&mut rng, &v.slab_lens(), n) {
+                assert!(check_scope(&v, &c, &nullable, &x, start, end));
+            }
+        }
+    }
+}
+
+/// How two byte strings stand in the order of the values is how their
+/// slices stand in Rust, wherever the first difference falls and however
+/// long the two are.
+#[test]
+fn the_order_of_byte_strings_is_the_order_of_slices() {
+    fn check(a: &[u8], b: &[u8]) {
+        assert_eq!(<Vec<u8> as VValue>::compare(a, b), a.cmp(b), "{a:?} {b:?}");
+        assert_eq!(<Vec<u8> as VValue>::compare(b, a), b.cmp(a), "{b:?} {a:?}");
+        assert_eq!(
+            <Option<Vec<u8>> as VValue>::compare(Some(a), Some(b)),
+            a.cmp(b)
+        );
+        assert_eq!(<Vec<u8> as VValue>::same(a, b), a == b);
+    }
+    let mut rng = Rng(0x0bde);
+    let base: Vec<u8> = (0..300u32).map(|i| (i * 11 % 253) as u8).collect();
+    let lens = (0..=150).chain([191, 192, 193, 199, 200, 201, 255, 256, 257, 300]);
+    for len in lens {
+        let a = &base[..len];
+        check(a, a);
+        // what `a` starts, and what starts with it
+        for more in [1, 2, 7, 8, 9, 63, 64, 65] {
+            let mut b = a.to_vec();
+            b.extend((0..more).map(|_| rng.next() as u8));
+            check(a, &b);
+            check(&a[..len.saturating_sub(more)], a);
+        }
+        // a first difference at `d`: one more or one less there, or any
+        // other byte; after it the same bytes, others, fewer or more
+        for d in 0..len {
+            for delta in [1, 255, 1 + rng.below(255) as u8] {
+                let mut b = a.to_vec();
+                b[d] = b[d].wrapping_add(delta);
+                check(a, &b);
+                let mut c = b.clone();
+                for x in &mut c[d + 1..] {
+                    *x = rng.next() as u8;
+                }
+                check(a, &c);
+                check(&b, &c);
+                let cut = d + 1 + rng.below(len - d);
+                check(a, &b[..cut]);
+                check(&a[..cut], &b);
+                c.extend((0..rng.below(70)).map(|_| rng.next() as u8));
+                check(a, &c);
+            }
+        }
+    }
+    assert_eq!(
+        <Option<Vec<u8>> as VValue>::compare(None, Some(&[])),
+        Ordering::Less
+    );
+    assert_eq!(
+        <Option<Vec<u8>> as VValue>::compare(Some(&[]), None),
+        Ordering::Greater
+    );
+    assert_eq!(
+        <Option<Vec<u8>> as VValue>::compare(None, None),
+        Ordering::Equal
+    );
+}
+
+/// A type of a client's own is in the order of the numbers it is stored
+/// as, whatever order the type has in Rust: here the two are opposite.
+#[test]
+fn a_search_is_in_the_order_of_the_stored_numbers() {
+    #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+    enum Rank {
+        High,
+        Mid,
+        Low,
+    }
+
+    impl VNewtype for Rank {
+        type Base = u32;
+
+        fn to_base(self) -> u32 {
+            match self {
+                Rank::High => 900,
+                Rank::Mid => 50,
+                Rank::Low => 1,
+            }
+        }
+
+        fn from_base(b: u32) -> Result<Rank, PackError> {
+            match b {
+                900 => Ok(Rank::High),
+                50 => Ok(Rank::Mid),
+                1 => Ok(Rank::Low),
+                _ => Err(refused("not a rank")),
+            }
+        }
+    }
+
+    assert!(Rank::High < Rank::Mid && Rank::Mid < Rank::Low);
+    let by_number = [Rank::Low, Rank::Low, Rank::Mid, Rank::High, Rank::High];
+    let v = VerifiedColumn::<Rank>::from_values(&by_number);
+    assert_eq!(v.scope_to_value(Rank::Low, 0, 5), 0..2);
+    assert_eq!(v.scope_to_value(Rank::Mid, 0, 5), 2..3);
+    assert_eq!(v.scope_to_value(Rank::High, 0, 5), 3..5);
+    assert_eq!(v.scope_to_value(Rank::Mid, 3, 5), 3..3);
+    assert_eq!(v.scope_to_value(Rank::Mid, 0, 2), 2..2);
+
+    let mut nullable = vec![None, None];
+    nullable.extend(by_number.map(Some));
+    let v = VerifiedColumn::<Option<Rank>>::from_values(&nullable);
+    assert_eq!(v.scope_to_value(None, 0, 7), 0..2);
+    assert_eq!(v.scope_to_value(Some(Rank::Low), 0, 7), 2..4);
+    assert_eq!(v.scope_to_value(Some(Rank::High), 0, 7), 5..7);
+    assert_eq!(v.scope_to_value(Some(Rank::Mid), 0, 2), 2..2);
+
+    // many of them, in many slabs: made with another value after each,
+    // which is then taken out again
+    let n = 3000;
+    let ranks = [Rank::Low, Rank::Mid, Rank::High];
+    let mut v = VerifiedColumn::<Rank>::with_max_segments(3);
+    for i in 0..n {
+        v.push(ranks[i * 3 / n]);
+        v.push(ranks[(i * 3 / n + 1) % 3]);
+    }
+    for i in (0..n).rev() {
+        v.remove(2 * i + 1);
+    }
+    assert!(v.slab_count() > 30);
+    assert_eq!(
+        v.to_vec()[998..1002],
+        [Rank::Low, Rank::Low, Rank::Mid, Rank::Mid]
+    );
+    assert_eq!(v.scope_to_value(Rank::Low, 0, n), 0..1000);
+    assert_eq!(v.scope_to_value(Rank::Mid, 0, n), 1000..2000);
+    assert_eq!(v.scope_to_value(Rank::High, 0, n), 2000..3000);
+    assert_eq!(v.scope_to_value(Rank::Mid, 1500, 2500), 1500..2000);
+    assert_eq!(v.scope_to_value(Rank::Low, 1500, 2500), 1500..1500);
 }
 
 /// The two loaders take the same bytes, as the same values, and refuse
@@ -2142,6 +2581,9 @@ fn the_layout_after_a_panic_in_an_edit() {
     c.check_invariants();
     assert!(v.validate_encoding().is_ok() && c.validate_encoding().is_ok());
     assert_eq!(format!("{v:?}"), format!("Verified{c:?}"));
+    // a search of no values asks for none of the column's parts
+    assert_eq!(v.scope_to_value(7, 0, 0), 0..0);
+    assert_eq!(c.scope_to_value(7u64, 0..0), 0..0);
     // and neither takes an edit any more
     let new = panic_of(std::panic::AssertUnwindSafe(|| v.push(7))).unwrap();
     let old = panic_of(std::panic::AssertUnwindSafe(|| c.push(7))).unwrap();

@@ -43,6 +43,14 @@
 //! `sv`, and `svs` of several ([`VGet`]): for a slice `v` that is `v@`,
 //! and for a number the number.
 //!
+//! The values of a type are in an order (`VSpec::below`), which a
+//! search goes by: numbers in the order of numbers, `false` before
+//! `true`, byte strings in the order of their bytes with a string before
+//! every longer one that starts with it (`bytes_below`), and `None`
+//! before every `Some`. That is the order Rust has for these types
+//! (`Ord`). A client's type is in the order of the numbers it is stored
+//! as, whatever order it may have in Rust.
+//!
 //! The second parameter of `VerifiedColumn<V, C>` is the codec the
 //! column's numbers are written with, a [`VCodec`]. It is [`Leb128`]
 //! where none is named, which is for now the only one.
@@ -71,6 +79,15 @@
 //! * [`is_only`](VerifiedColumn::is_only) says whether every value of the
 //!   column is the one given (`only`), and [`VValue::same`] whether two
 //!   values in a column's form are one value;
+//! * [`scope_to_value`](VerifiedColumn::scope_to_value) finds a value
+//!   among values in order (`sorted`): it gives the range of the places
+//!   that hold it, which has the values that come before it on one side
+//!   and those that come after it on the other, and is so the empty
+//!   range at the place where the value would stand where none holds
+//!   it. The values need be in order only as far as the value looked for
+//!   can tell (`sorted_for`). Of values in no order it gives some range
+//!   within the one searched. [`VValue::compare`] says how two values in
+//!   a column's form stand in the order;
 //! * `clone` gives a column with the same values. It is a column of its
 //!   own, as Rust's ownership has it: an edit of either says nothing of
 //!   the other, whose values so stay what they were;
@@ -103,10 +120,12 @@
 //! `valid`, `values`, `encoding` and `loadable` are specification
 //! functions of a column type (`VerifiedColumn::<V>::valid(bytes)`),
 //! `size_bound` is one of a value type (for byte strings it counts their
-//! bytes, as `total_len` of them), `only`, `run_values`, `fill_of` and
-//! `sum_of` are of this module, and `lemma_save_unique`, `lemma_encoding`,
-//! `lemma_no_bytes`, `lemma_run_values_push` and `lemma_run_values_add`
-//! are lemmas: they exist only for Verus, and a normal build compiles
+//! bytes, as `total_len` of them), `only`, `sorted`, `sorted_for`,
+//! `bytes_below`, `run_values`, `fill_of` and `sum_of` are of this
+//! module, and `lemma_save_unique`, `lemma_encoding`, `lemma_no_bytes`,
+//! `lemma_sorted`, `lemma_run_values_push` and `lemma_run_values_add`
+//! are lemmas, as is `VSpec::lemma_below` (the order is a strict total
+//! order): they exist only for Verus, and a normal build compiles
 //! them away. What options hold is said by `length()`, `fill()` and
 //! `max_segments()` of a [`LoadOpts`], and what fill value there is by
 //! `value()` of its fill state ([`MaybeFill`]).
@@ -154,7 +173,10 @@
 //! methods that take an iterator lean on those of iterators: what `next`
 //! returns, and what `IntoIterator` and `FromIterator` are. Of `Extend`
 //! Verus has none, and this crate tells it that the trait has its one
-//! method (`ExExtend`), which assumes nothing of an implementation.
+//! method (`ExExtend`), which assumes nothing of an implementation. A
+//! search leans on that of the comparison of two integers (`cmp`); byte
+//! strings it compares in code that is checked, which leans on that of
+//! the equality of two slices (`==`).
 //!
 //! Of this crate, the functions Verus is told to take as they are, which
 //! are few and small, and are those the verified core of
@@ -236,12 +258,14 @@ pub(crate) mod value;
 
 // spec functions exist only when Verus compiles the crate
 #[cfg(verus_keep_ghost)]
-pub use bytes::{total_len, total_len_opt};
+pub use bytes::{below_at, bytes_below, total_len, total_len_opt};
 pub use codec::VCodec;
 pub use value::{refused, VNewtype, VPack};
 
 use crate::bool_edit::BoolModel;
 use crate::bool_wire::BoolReads;
+#[cfg(verus_keep_ghost)]
+use crate::btree::SlabBTree;
 use crate::column::Slab;
 use crate::copy::NoRuns;
 #[cfg(verus_keep_ghost)]
@@ -249,10 +273,12 @@ use crate::cursor::{lemma_lens_ok, lemma_vals_own, lemma_vals_unit, slab_lens};
 use crate::cursor::{ReadsAgree, RunFeed, Slabs};
 #[cfg(verus_keep_ghost)]
 use crate::fenwick::sum;
+#[cfg(verus_keep_ghost)]
+use crate::index::wlens;
 use crate::index::IndexOps;
 #[cfg(verus_keep_ghost)]
-use crate::iter_core::{lemma_from, lens_ok, vals_of};
-use crate::iter_core::{Decode, Decoders, ICore};
+use crate::iter_core::{find_ok, found, lemma_from, lens_ok, monotone, vals_of};
+use crate::iter_core::{Decode, Decoders, ICore, Probe, Side};
 #[cfg(verus_keep_ghost)]
 use crate::rle::dec::slab_values;
 use crate::rle::dec::RleReads;
@@ -260,6 +286,7 @@ use crate::rle::edit::RleModel;
 use crate::{Leb128, LoadOpts, MaybeFill, PackError, Run};
 use counts::VB;
 use model::{Core, Model};
+use std::cmp::Ordering;
 use std::marker::PhantomData;
 use std::ops::Range;
 #[cfg(verus_keep_ghost)]
@@ -439,6 +466,25 @@ pub trait VSpec: seal::SpecSeal {
     /// and for a byte string its bytes (`Seq<u8>`). A column of the type
     /// is a sequence of these (`col@`).
     type S;
+
+    /// Whether `a` comes before `b` in the order of the type's values.
+    /// Numbers are in the order of numbers, and a type stored as a
+    /// number ([`VNewtype`]) in the order of the numbers it is stored as
+    /// ([`VPack::num`]); `false` comes before `true`; byte strings are
+    /// in the order of slices ([`bytes_below`]: byte by byte, and a
+    /// byte string before every longer one that starts with it); and a
+    /// null comes before every value.
+    spec fn below(a: Self::S, b: Self::S) -> bool;
+
+    /// The order is a strict total order: no value comes before itself,
+    /// what comes before a value comes before all that come after it,
+    /// and of two values that differ one comes before the other.
+    proof fn lemma_below(a: Self::S, b: Self::S, c: Self::S)
+        ensures
+            !Self::below(a, a),
+            Self::below(a, b) && Self::below(b, c) ==> Self::below(a, c),
+            a == b || Self::below(a, b) || Self::below(b, a),
+    ;
 }
 
 /// The form in which a column of this type gives a value and takes
@@ -461,6 +507,14 @@ impl<T: VPack> seal::SpecSeal for T {
 
 impl<T: VPack> VSpec for T {
     type S = T;
+
+    open spec fn below(a: T, b: T) -> bool {
+        T::num(a) < T::num(b)
+    }
+
+    proof fn lemma_below(a: T, b: T, c: T) {
+        T::lemma_num(a, b);
+    }
 }
 
 impl<'a, T: VPack> VForm<'a> for T {
@@ -473,6 +527,20 @@ impl<T: VPack> seal::SpecSeal for Option<T> {
 
 impl<T: VPack> VSpec for Option<T> {
     type S = Option<T>;
+
+    open spec fn below(a: Option<T>, b: Option<T>) -> bool {
+        match (a, b) {
+            (None, Some(_)) => true,
+            (Some(x), Some(y)) => T::num(x) < T::num(y),
+            _ => false,
+        }
+    }
+
+    proof fn lemma_below(a: Option<T>, b: Option<T>, c: Option<T>) {
+        if let (Some(x), Some(y)) = (a, b) {
+            T::lemma_num(x, y);
+        }
+    }
 }
 
 impl<'a, T: VPack> VForm<'a> for Option<T> {
@@ -485,6 +553,13 @@ impl seal::SpecSeal for bool {
 
 impl VSpec for bool {
     type S = bool;
+
+    open spec fn below(a: bool, b: bool) -> bool {
+        !a && b
+    }
+
+    proof fn lemma_below(a: bool, b: bool, c: bool) {
+    }
 }
 
 impl<'a> VForm<'a> for bool {
@@ -660,6 +735,17 @@ pub trait VValue<C: VCodec = Leb128>: seal::Sealed<C> {
         ensures
             r == (a.sv() == b.sv()),
     ;
+
+    /// How `a` stands to `b` in the order of the values
+    /// (`VSpec::below`): `Less` where it comes before `b`,
+    /// `Greater` where it comes after, and `Equal` where they are the
+    /// same value.
+    fn compare<'a, 'b>(a: Get<'a, Self>, b: Get<'b, Self>) -> (r: Ordering)
+        ensures
+            (r is Less) == Self::below(a.sv(), b.sv()),
+            (r is Greater) == Self::below(b.sv(), a.sv()),
+            (r is Equal) == (a.sv() == b.sv()),
+    ;
 }
 
 impl<T: VPack, C: VCodec> seal::Sealed<C> for T {
@@ -685,6 +771,14 @@ impl<T: VPack, C: VCodec> VValue<C> for T {
     #[inline(always)]
     fn same<'a, 'b>(a: T, b: T) -> (r: bool) {
         <T as VPack>::same(&a, &b)
+    }
+
+    #[inline(always)]
+    fn compare<'a, 'b>(a: T, b: T) -> (r: Ordering) {
+        proof {
+            T::lemma_num(a, b);
+        }
+        <T as VPack>::compare(&a, &b)
     }
 }
 
@@ -716,6 +810,21 @@ impl<T: VPack, C: VCodec> VValue<C> for Option<T> {
             _ => false,
         }
     }
+
+    #[inline(always)]
+    fn compare<'a, 'b>(a: Option<T>, b: Option<T>) -> (r: Ordering) {
+        match (a, b) {
+            (Some(x), Some(y)) => {
+                proof {
+                    T::lemma_num(x, y);
+                }
+                <T as VPack>::compare(&x, &y)
+            },
+            (None, None) => Ordering::Equal,
+            (None, Some(_)) => Ordering::Less,
+            (Some(_), None) => Ordering::Greater,
+        }
+    }
 }
 
 impl<C: VCodec> seal::Sealed<C> for bool {
@@ -740,6 +849,61 @@ impl<C: VCodec> VValue<C> for bool {
     #[inline(always)]
     fn same<'a, 'b>(a: bool, b: bool) -> (r: bool) {
         a == b
+    }
+
+    #[inline(always)]
+    fn compare<'a, 'b>(a: bool, b: bool) -> (r: Ordering) {
+        if a == b {
+            Ordering::Equal
+        } else if b {
+            Ordering::Less
+        } else {
+            Ordering::Greater
+        }
+    }
+}
+
+// ── Searching ───────────────────────────────────────────────────────────────
+
+/// A search target in a column of `V`: where a value stands to it in
+/// the order of the values. Nothing here is trusted: the comparison is
+/// the value type's own, which is verified.
+#[verifier::reject_recursive_types(C)]
+struct VProbe<'t, V: VValue<C>, C: VCodec> {
+    target: Get<'t, V>,
+    _c: PhantomData<C>,
+}
+
+impl<'a, 't, V: VValue<C>, C: VCodec> Probe<Get<'a, V>> for VProbe<'t, V, C> {
+    closed spec fn side(&self, v: Get<'a, V>) -> int {
+        if V::below(v.sv(), self.target.sv()) {
+            -1
+        } else if V::below(self.target.sv(), v.sv()) {
+            1
+        } else {
+            0
+        }
+    }
+
+    proof fn axiom_at(&self, a: Get<'a, V>, b: Get<'a, V>) {
+        let t = self.target.sv();
+        // neither before the target nor after it: the target's value
+        V::lemma_below(a.sv(), t, t);
+        V::lemma_below(b.sv(), t, t);
+        VGet::lemma_sv_inj(a, b);
+    }
+
+    #[inline(always)]
+    fn side_of(&self, v: &Get<'a, V>) -> Side {
+        proof {
+            // not both before the target and after it
+            V::lemma_below(v.sv(), self.target.sv(), v.sv());
+        }
+        match V::compare(*v, self.target) {
+            Ordering::Less => Side::Below,
+            Ordering::Equal => Side::At,
+            Ordering::Greater => Side::Above,
+        }
     }
 }
 
@@ -1080,6 +1244,42 @@ pub open spec fn fill_of<G>(d: Seq<u8>, length: Option<usize>, fill: Option<G>) 
 /// Every value of `vs` is `v`: so of no values.
 pub open spec fn only<S>(vs: Seq<S>, v: S) -> bool {
     forall|i: int| 0 <= i < vs.len() ==> vs[i] == v
+}
+
+/// The values `vs` are in order ([`VSpec::below`]): none comes before
+/// one that is before it in `vs`.
+pub open spec fn sorted<V: VSpec>(vs: Seq<V::S>) -> bool {
+    forall|i: int, j: int| 0 <= i <= j < vs.len() ==> !V::below(#[trigger] vs[j], #[trigger] vs[i])
+}
+
+/// The values `vs` are in order as far as the value `t` can tell: those
+/// that come before `t` are first in `vs`, and those that come after
+/// `t` last. What a search for `t` needs
+/// ([`VerifiedColumn::scope_to_value`]), and what values in order
+/// ([`sorted`]) are for every `t` ([`lemma_sorted`]).
+pub open spec fn sorted_for<V: VSpec>(vs: Seq<V::S>, t: V::S) -> bool {
+    forall|i: int, j: int|
+        0 <= i <= j < vs.len() ==> {
+            &&& V::below(#[trigger] vs[j], t) ==> V::below(#[trigger] vs[i], t)
+            &&& V::below(t, vs[i]) ==> V::below(t, vs[j])
+        }
+}
+
+/// Values in order are in order as far as any value can tell.
+pub proof fn lemma_sorted<V: VSpec>(vs: Seq<V::S>, t: V::S)
+    requires
+        sorted::<V>(vs),
+    ensures
+        sorted_for::<V>(vs, t),
+{
+    assert forall|i: int, j: int| 0 <= i <= j < vs.len() implies {
+        &&& V::below(#[trigger] vs[j], t) ==> V::below(#[trigger] vs[i], t)
+        &&& V::below(t, vs[i]) ==> V::below(t, vs[j])
+    } by {
+        // `vs[i]` is `vs[j]` or comes before it
+        V::lemma_below(vs[i], vs[j], t);
+        V::lemma_below(t, vs[i], vs[j]);
+    }
 }
 
 /// The numbers `lens` added up: how many values slabs of those lengths
@@ -1813,6 +2013,7 @@ impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
             start <= end <= self@.len(),
         ensures
             it.wf::<V::X>(self.core.slabs_spec()),
+            it.pos == start,
             VGet::svs(it.out::<V::X>(self.core.slabs_spec())) == self@.subrange(start as int, end as int),
     {
         proof {
@@ -1960,6 +2161,105 @@ impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
             j += 1;
         }
         true
+    }
+
+    /// Where `value` is among the values `start..end`, which are taken
+    /// to be in order: the range of the places that hold it or, where
+    /// none does, the empty range at the place where it would stand.
+    ///
+    /// The search looks at few of the values: it is a search by halves
+    /// over the column's slabs and then a walk along the runs of one or
+    /// a few of them. The values need be in order only as far as
+    /// `value` can tell (`sorted_for`), which values in order
+    /// (`sorted`) are for every `value` (`lemma_sorted`). Where
+    /// they are not, the range is some range within `start..end`.
+    pub fn scope_to_value(&self, value: Get<'_, V>, start: usize, end: usize) -> (r: Range<usize>)
+        requires
+            start <= end <= self@.len(),
+        ensures
+            start <= r.start <= r.end <= end,
+            sorted_for::<V>(self@.subrange(start as int, end as int), value.sv()) ==> forall|k: int|
+                start <= k < end ==> {
+                    &&& (k < r.start) == V::below(#[trigger] self@[k], value.sv())
+                    &&& (k < r.end) == !V::below(value.sv(), self@[k])
+                    &&& (r.start <= k < r.end) == (self@[k] == value.sv())
+                },
+    {
+        if start == end {
+            // nothing to look at (and a column that an edit's panic left
+            // without its parts has no index to ask)
+            return start..start;
+        }
+        self.core.lemma_column();
+        let slabs = self.core.slabs();
+        let index = self.core.index();
+        let mut it = self.reader(start, end);
+        let ghost w = it.out::<V::X>(slabs@);
+        let ghost sub = self@.subrange(start as int, end as int);
+        let probe = VProbe::<V, C> { target: value, _c: PhantomData };
+        let find = |t: usize| -> (r: (usize, usize))
+            requires
+                index.ok(),
+                wlens::<usize, SlabBTree<usize>>(index.ws()) == slab_lens(slabs@),
+            ensures
+                find_ok(slabs@, t, r),
+            {
+                let r = index.ix_find(t);
+                proof {
+                    assert(index.ws().map_values(|w: usize| <SlabBTree<usize> as IndexOps<usize>>::wlen(w))
+                        =~= wlens::<usize, SlabBTree<usize>>(index.ws()));
+                }
+                // past the slabs, the whole position lies beyond them
+                if r.0 >= slabs.len() {
+                    (slabs.len(), 0)
+                } else {
+                    r
+                }
+            };
+        let start_of = |i: usize| -> (n: usize)
+            requires
+                index.ok(),
+                wlens::<usize, SlabBTree<usize>>(index.ws()) == slab_lens(slabs@),
+                i <= slabs@.len(),
+            ensures
+                n == sum(slab_lens(slabs@), 0, i as int),
+            {
+                let n = index.ix_before(i);
+                proof {
+                    assert(index.ws().map_values(|w: usize| <SlabBTree<usize> as IndexOps<usize>>::wlen(w))
+                        =~= wlens::<usize, SlabBTree<usize>>(index.ws()));
+                }
+                n
+            };
+        let r = it.seek_value::<V::X, _, _, _>(slabs, &probe, &find, &start_of);
+        proof {
+            let t = value.sv();
+            VGet::lemma_svs(w);
+            assert(VGet::svs(w) == sub);
+            if sorted_for::<V>(sub, t) {
+                assert forall|i: int, j: int| 0 <= i <= j < w.len() implies #[trigger] probe.side(w[i])
+                    <= #[trigger] probe.side(w[j]) by {
+                    assert(sub[i] == w[i].sv());
+                    assert(sub[j] == w[j].sv());
+                }
+                assert(monotone(probe, w));
+                assert(found(probe, w, r.0 - start, r.1 - start));
+                assert forall|k: int| start <= k < end implies {
+                    &&& (k < r.0) == V::below(#[trigger] self@[k], t)
+                    &&& (k < r.1) == !V::below(t, self@[k])
+                    &&& (r.0 <= k < r.1) == (self@[k] == t)
+                } by {
+                    let x = self@[k];
+                    assert(sub[k - start] == x);
+                    assert(w[k - start].sv() == x);
+                    // not both before `t` and after it, and where
+                    // neither, `t`
+                    V::lemma_below(x, t, x);
+                    V::lemma_below(t, t, t);
+                }
+            }
+        }
+        r.0..r.1
     }
 
     /// An iterator over the values.

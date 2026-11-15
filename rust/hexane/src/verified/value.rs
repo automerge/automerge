@@ -24,6 +24,7 @@ use crate::rle::model::{RleOps, WriteOps};
 #[cfg(verus_keep_ghost)]
 use crate::rle::size::heads_bound;
 use crate::PackError;
+use std::cmp::Ordering;
 use std::marker::PhantomData;
 use std::num::NonZeroU32;
 #[allow(unused_imports)]
@@ -50,10 +51,28 @@ pub trait VPack: Copy + Sized + super::seal::PackSeal {
             Self::enc::<C>(v) + s == Self::enc::<C>(w) + t ==> v == w,
     ;
 
+    /// The number `v` is stored as: the values' order is that of their
+    /// numbers.
+    spec fn num(v: Self) -> int;
+
+    /// No two values are stored as the same number.
+    proof fn lemma_num(v: Self, w: Self)
+        ensures
+            Self::num(v) == Self::num(w) ==> v == w,
+    ;
+
     /// `a == b`.
     fn same(a: &Self, b: &Self) -> (r: bool)
         ensures
             r == (*a == *b),
+    ;
+
+    /// How `a` stands to `b` in the order of the values: that of their
+    /// numbers.
+    fn compare(a: &Self, b: &Self) -> (r: Ordering)
+        ensures
+            (r is Less) == (Self::num(*a) < Self::num(*b)),
+            (r is Greater) == (Self::num(*a) > Self::num(*b)),
     ;
 
     /// The value at the start of `data` and its length, or an error
@@ -102,9 +121,21 @@ impl VPack for u64 {
         C::lemma_u(v, w, s, t);
     }
 
+    open spec fn num(v: u64) -> int {
+        v as int
+    }
+
+    proof fn lemma_num(v: u64, w: u64) {
+    }
+
     #[inline(always)]
     fn same(a: &u64, b: &u64) -> bool {
         *a == *b
+    }
+
+    #[inline(always)]
+    fn compare(a: &u64, b: &u64) -> Ordering {
+        a.cmp(b)
     }
 
     #[inline(always)]
@@ -152,9 +183,21 @@ impl VPack for i64 {
         C::lemma_i(v, w, s, t);
     }
 
+    open spec fn num(v: i64) -> int {
+        v as int
+    }
+
+    proof fn lemma_num(v: i64, w: i64) {
+    }
+
     #[inline(always)]
     fn same(a: &i64, b: &i64) -> bool {
         *a == *b
+    }
+
+    #[inline(always)]
+    fn compare(a: &i64, b: &i64) -> Ordering {
+        a.cmp(b)
     }
 
     #[inline(always)]
@@ -208,7 +251,10 @@ pub fn refused(msg: &'static str) -> PackError {
 /// value types, and how a client's own type is one: a column of it holds
 /// the bytes a column of `Base` would hold for the values' `Base`
 /// values, and loads only bytes whose every value
-/// [`from_base`](Self::from_base) takes.
+/// [`from_base`](Self::from_base) takes. And a column has the values in
+/// the order of their `Base` values (`VSpec::below`),
+/// which is the order a search of it goes by: an `Ord` of the type's
+/// own is not asked.
 ///
 /// The proofs about a column of the type rest on what this trait's
 /// functions ensure. Verus checks that for a client it is run on. A
@@ -280,12 +326,26 @@ impl<T: VNewtype> VPack for T {
         T::lemma_base(v, w);
     }
 
+    open spec fn num(v: T) -> int {
+        T::Base::num(T::base(v))
+    }
+
+    proof fn lemma_num(v: T, w: T) {
+        T::Base::lemma_num(T::base(v), T::base(w));
+        T::lemma_base(v, w);
+    }
+
     #[inline(always)]
     fn same(a: &T, b: &T) -> bool {
         proof {
             T::lemma_base(*a, *b);
         }
         T::Base::same(&a.to_base(), &b.to_base())
+    }
+
+    #[inline(always)]
+    fn compare(a: &T, b: &T) -> Ordering {
+        T::Base::compare(&a.to_base(), &b.to_base())
     }
 
     #[inline(always)]

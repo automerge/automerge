@@ -21,15 +21,29 @@
 //! ([`load_a_fill`]). And that the slabs of a column are within it, each
 //! starting where the lengths before it add up to, and that a column
 //! finds no fault in what it saves ([`slabs_and_validation`],
-//! [`load_then_validate`]).
+//! [`load_then_validate`]). And that a search of values in order finds
+//! where a value stands among them, so that a column a client keeps in
+//! order by inserting each value where the search says stays in order
+//! ([`insert_in_order`]): for every value type and codec, and so for
+//! numbers in the order of numbers ([`find_number`]), for the client's
+//! type in the order of the numbers it is stored as ([`find_action`]),
+//! for byte strings in the order of their bytes, nulls first
+//! ([`find_bytes`], [`find_by_a_byte`]), and for `false` before `true`
+//! and a null before every number ([`find_flags_and_nulls`]). And that
+//! the search needs the values in order only as far as the value it
+//! looks for can tell ([`find_the_gap`]), and that a client can ask how
+//! two values stand in the order ([`later_of`]).
 //!
 //! This module exists only while Verus checks the crate.
 
 use super::{
-    lemma_run_values_add, lemma_run_values_push, only, refused, run_values, sum_of, total_len, Get,
-    VCodec, VGet, VNewtype, VValue, VerifiedColumn,
+    below_at, bytes_below, lemma_run_values_add, lemma_run_values_push, lemma_sorted, only,
+    refused, run_values, sorted, sorted_for, sum_of, total_len, Get, VCodec, VGet, VNewtype, VSpec,
+    VValue, VerifiedColumn,
 };
 use crate::{Leb128, LoadOpts, PackError, Run};
+use std::cmp::Ordering;
+use std::ops::Range;
 use vstd::prelude::*;
 
 verus! {
@@ -843,6 +857,340 @@ fn load_then_validate<V: VValue<C>, C: VCodec>(bytes: &[u8])
         let r = col.validate_encoding();
         assert(r is Ok);
     }
+}
+
+/// How two values stand in the order is a thing a client can ask
+/// ([`VValue::compare`]): the later of two is one of them, and neither
+/// comes after it. For every value type and codec.
+#[allow(dead_code)]
+fn later_of<'v, V: VValue<C>, C: VCodec>(a: Get<'v, V>, b: Get<'v, V>) -> (r: Get<'v, V>)
+    ensures
+        r.sv() == a.sv() || r.sv() == b.sv(),
+        !V::below(r.sv(), a.sv()),
+        !V::below(r.sv(), b.sv()),
+{
+    proof {
+        V::lemma_below(a.sv(), b.sv(), a.sv());
+        V::lemma_below(b.sv(), b.sv(), b.sv());
+    }
+    match V::compare(a, b) {
+        Ordering::Less => b,
+        _ => a,
+    }
+}
+
+/// A column a client keeps in order. It asks where a value stands among
+/// values in order and inserts it there, after those equal to it: the
+/// column is then the old one with the value at that place, and is in
+/// order still. For every value type and codec, from the laws of the
+/// order alone ([`VSpec::lemma_below`]).
+#[allow(dead_code)]
+fn insert_in_order<'v, V: VValue<C>, C: VCodec>(col: &mut VerifiedColumn<V, C>, x: Get<'v, V>) -> (at:
+    usize)
+    requires
+        sorted::<V>(old(col)@),
+    ensures
+        at <= old(col)@.len(),
+        final(col)@ == old(col)@.insert(at as int, x.sv()),
+        sorted::<V>(final(col)@),
+{
+    let n = col.len();
+    let ghost before = col@;
+    let ghost t = x.sv();
+    proof {
+        lemma_sorted::<V>(before, t);
+        assert(before.subrange(0, n as int) =~= before);
+    }
+    let r = col.scope_to_value(x, 0, n);
+    let at = r.end;
+    col.insert(at, x);
+    proof {
+        let after = col@;
+        assert forall|i: int, j: int| 0 <= i <= j < after.len() implies !V::below(
+            #[trigger] after[j],
+            #[trigger] after[i],
+        ) by {
+            // what was at `k` before: the search says how it stands to `t`
+            let was = |k: int| before[k];
+            if i == at && j == at {
+                V::lemma_below(t, t, t);
+            } else if j == at {
+                // before the place: not after `t`
+                assert(after[i] == was(i));
+            } else if i == at {
+                // from the place on: after `t`, so not before it
+                assert(after[j] == was(j - 1));
+                V::lemma_below(t, was(j - 1), t);
+            } else {
+                // both were there before, in this order
+                let a = if i < at { i } else { i - 1 };
+                let b = if j < at { j } else { j - 1 };
+                assert(after[i] == before[a] && after[j] == before[b]);
+            }
+        }
+    }
+    at
+}
+
+/// Numbers in order as a client says it of numbers, with `<=`: the
+/// search gives the places of `x`, with the lesser numbers before them
+/// and the greater ones after. A client says so with `<` and `>`: what
+/// the order of a number type is can be read ([`VSpec::below`]).
+#[allow(dead_code)]
+fn find_number(col: &VerifiedColumn<u32>, x: u32) -> (r: Range<usize>)
+    requires
+        forall|i: int, j: int| 0 <= i <= j < col@.len() ==> col@[i] <= col@[j],
+    ensures
+        r.start <= r.end <= col@.len(),
+        forall|k: int| 0 <= k < r.start ==> col@[k] < x,
+        forall|k: int| r.start <= k < r.end ==> col@[k] == x,
+        forall|k: int| r.end <= k < col@.len() ==> col@[k] > x,
+{
+    let n = col.len();
+    proof {
+        assert(sorted::<u32>(col@));
+        lemma_sorted::<u32>(col@, x);
+        assert(col@.subrange(0, n as int) =~= col@);
+    }
+    col.scope_to_value(x, 0, n)
+}
+
+/// The client's own type is in the order of the numbers it is stored
+/// as, which is the client's to choose ([`VNewtype::base`]): `Set` (1)
+/// is before `Delete` (3). In a column of some `Set`s and then some
+/// `Delete`s, the search for `Delete` gives the `Delete`s; that for
+/// `Increment` (4), which is after both, the empty range at the end;
+/// and a search of the `Delete`s alone for `Make` (0), the empty range
+/// where they start.
+#[allow(dead_code)]
+fn find_action(sets: usize, deletes: usize)
+    requires
+        sets + deletes <= 1000,
+{
+    let mut col = VerifiedColumn::<Action>::new();
+    let mut i: usize = 0;
+    while i < sets
+        invariant
+            i <= sets,
+            col@.len() == i,
+            only(col@, Action::Set),
+        decreases sets - i,
+    {
+        col.push(Action::Set);
+        i += 1;
+    }
+    let mut j: usize = 0;
+    while j < deletes
+        invariant
+            j <= deletes,
+            col@.len() == sets + j,
+            forall|k: int| 0 <= k < sets ==> col@[k] == Action::Set,
+            forall|k: int| sets <= k < sets + j ==> col@[k] == Action::Delete,
+        decreases deletes - j,
+    {
+        col.push(Action::Delete);
+        j += 1;
+    }
+    let n = col.len();
+    proof {
+        assert(sorted::<Action>(col@));
+        lemma_sorted::<Action>(col@, Action::Delete);
+        lemma_sorted::<Action>(col@, Action::Increment);
+        assert(col@.subrange(0, n as int) =~= col@);
+    }
+    let r = col.scope_to_value(Action::Delete, 0, n);
+    proof {
+        if sets > 0 {
+            assert(col@[sets - 1] == Action::Set);
+        }
+        if deletes > 0 {
+            assert(col@[sets as int] == Action::Delete);
+            assert(col@[n - 1] == Action::Delete);
+        }
+    }
+    assert(r.start == sets && r.end == n);
+
+    let r = col.scope_to_value(Action::Increment, 0, n);
+    proof {
+        if n > 0 {
+            assert(col@[n - 1] == Action::Set || col@[n - 1] == Action::Delete);
+        }
+    }
+    assert(r.start == n && r.end == n);
+
+    // a part of the column: its values need be in order, no others
+    proof {
+        let part = col@.subrange(sets as int, n as int);
+        assert(sorted::<Action>(part));
+        lemma_sorted::<Action>(part, Action::Make);
+    }
+    let r = col.scope_to_value(Action::Make, sets, n);
+    proof {
+        if deletes > 0 {
+            assert(col@[sets as int] == Action::Delete);
+        }
+    }
+    assert(r.start == sets && r.end == sets);
+}
+
+/// Byte strings are in the order of their bytes, a string before every
+/// longer one that starts with it ([`bytes_below`]), and the null is
+/// before them all. So a null, a string and a longer one that starts
+/// with it are in order, and the search finds each at its place: the
+/// client proves the order from its definition and its laws, which it
+/// can read.
+#[allow(dead_code)]
+fn find_bytes(a: &[u8], b: &[u8])
+    requires
+        a@.len() < b@.len(),
+        b@.take(a@.len() as int) == a@,
+{
+    let mut col = VerifiedColumn::<Option<Vec<u8>>>::new();
+    col.push(None);
+    col.push(Some(a));
+    col.push(Some(b));
+    assert(col@ == seq![None, Some(a@), Some(b@)]);
+    proof {
+        // `a` is before `b`: all of it is how `b` starts
+        assert(a@.take(a@.len() as int) =~= a@);
+        assert(below_at(a@, b@, a@.len() as int));
+        assert(bytes_below(a@, b@));
+        // so `b` is not before `a`, and neither is before itself
+        <Vec<u8> as VSpec>::lemma_below(a@, b@, a@);
+        <Vec<u8> as VSpec>::lemma_below(b@, b@, b@);
+        assert(sorted::<Option<Vec<u8>>>(col@));
+        lemma_sorted::<Option<Vec<u8>>>(col@, Some(a@));
+        lemma_sorted::<Option<Vec<u8>>>(col@, None);
+        lemma_sorted::<Option<Vec<u8>>>(col@, Some(b@));
+        assert(col@.subrange(0, 3) =~= col@);
+        assert(col@[0] is None && col@[1] == Some(a@) && col@[2] == Some(b@));
+    }
+    let r = col.scope_to_value(Some(a), 0, 3);
+    assert(r.start == 1 && r.end == 2);
+    let r = col.scope_to_value(None, 0, 3);
+    assert(r.start == 0 && r.end == 1);
+    let r = col.scope_to_value(Some(b), 0, 3);
+    assert(r.start == 2 && r.end == 3);
+}
+
+/// Of two byte strings that are the same up to a place where one has
+/// the lower byte, that one is first, whatever their lengths and
+/// whatever comes after ([`below_at`]): the search finds each at its
+/// place.
+#[allow(dead_code)]
+fn find_by_a_byte(a: &[u8], b: &[u8], i: usize)
+    requires
+        i < a@.len(),
+        i < b@.len(),
+        a@.take(i as int) == b@.take(i as int),
+        a@[i as int] < b@[i as int],
+{
+    let mut col = VerifiedColumn::<Vec<u8>>::new();
+    col.push(a);
+    col.push(b);
+    assert(col@ == seq![a@, b@]);
+    proof {
+        assert(below_at(a@, b@, i as int));
+        assert(bytes_below(a@, b@));
+        <Vec<u8> as VSpec>::lemma_below(a@, b@, a@);
+        <Vec<u8> as VSpec>::lemma_below(b@, b@, b@);
+        assert(sorted::<Vec<u8>>(col@));
+        lemma_sorted::<Vec<u8>>(col@, a@);
+        lemma_sorted::<Vec<u8>>(col@, b@);
+        assert(col@.subrange(0, 2) =~= col@);
+        assert(col@[0] == a@ && col@[1] == b@);
+    }
+    let r = col.scope_to_value(a, 0, 2);
+    assert(r.start == 0 && r.end == 1);
+    let r = col.scope_to_value(b, 0, 2);
+    assert(r.start == 1 && r.end == 2);
+}
+
+/// `false` is before `true`, and a null before every number: in a
+/// column of some `false`s and then some `true`s the search for `true`
+/// gives the `true`s, and in one of nulls and then a number the search
+/// for the null gives the nulls.
+#[allow(dead_code)]
+fn find_flags_and_nulls(falses: usize, trues: usize, x: u32)
+    requires
+        falses + trues <= 1000,
+{
+    let mut col = VerifiedColumn::<bool>::new();
+    let mut i: usize = 0;
+    while i < falses + trues
+        invariant
+            i <= falses + trues <= 1000,
+            col@.len() == i,
+            forall|k: int| 0 <= k < i ==> col@[k] == (k >= falses),
+        decreases falses + trues - i,
+    {
+        col.push(i >= falses);
+        i += 1;
+    }
+    let n = col.len();
+    proof {
+        assert(sorted::<bool>(col@));
+        lemma_sorted::<bool>(col@, true);
+        assert(col@.subrange(0, n as int) =~= col@);
+    }
+    let r = col.scope_to_value(true, 0, n);
+    proof {
+        if falses > 0 {
+            assert(col@[falses - 1] == false);
+        }
+        if trues > 0 {
+            assert(col@[falses as int] == true);
+            assert(col@[n - 1] == true);
+        }
+    }
+    assert(r.start == falses && r.end == n);
+
+    let mut col = VerifiedColumn::<Option<u32>>::new();
+    col.push(None);
+    col.push(None);
+    col.push(Some(x));
+    assert(col@ == seq![None, None, Some(x)]);
+    proof {
+        assert(sorted::<Option<u32>>(col@));
+        lemma_sorted::<Option<u32>>(col@, None);
+        lemma_sorted::<Option<u32>>(col@, Some(x));
+        assert(col@.subrange(0, 3) =~= col@);
+        assert(col@[0] is None && col@[1] is None && col@[2] == Some(x));
+    }
+    let r = col.scope_to_value(None, 0, 3);
+    assert(r.start == 0 && r.end == 2);
+    let r = col.scope_to_value(Some(x), 0, 3);
+    assert(r.start == 2 && r.end == 3);
+}
+
+/// The search needs the values in order only as far as the value it
+/// looks for can tell ([`sorted_for`]). Of numbers of which the first
+/// `m` are less than `x` and the others greater, in whatever order
+/// among themselves, it gives the empty range at `m`.
+#[allow(dead_code)]
+fn find_the_gap(col: &VerifiedColumn<i64>, x: i64, m: usize) -> (r: Range<usize>)
+    requires
+        m <= col@.len(),
+        forall|k: int| 0 <= k < m ==> col@[k] < x,
+        forall|k: int| m <= k < col@.len() ==> col@[k] > x,
+    ensures
+        r.start == m && r.end == m,
+{
+    let n = col.len();
+    proof {
+        assert(col@.subrange(0, n as int) =~= col@);
+        assert(sorted_for::<i64>(col@, x));
+    }
+    let r = col.scope_to_value(x, 0, n);
+    proof {
+        if m > 0 {
+            assert(col@[m - 1] < x);
+        }
+        if m < n {
+            assert(col@[m as int] > x);
+        }
+    }
+    r
 }
 
 } // verus!
