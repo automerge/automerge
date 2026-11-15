@@ -84,6 +84,7 @@ pub trait VCodec: super::seal::CodecSeal {
                 Some((n, v)) => n <= data.len() && data@.take(n as int) == Self::enc_u(v),
                 None => forall|v: u64| !(#[trigger] Self::enc_u(v)).is_prefix_of(data@),
             },
+        no_unwind
     ;
 
     /// The signed number at the start of `data` and its length, or an
@@ -103,6 +104,7 @@ pub trait VCodec: super::seal::CodecSeal {
                 Some((n, v)) => n <= data.len() && data@.take(n as int) == Self::enc_i(v),
                 None => forall|v: i64| !(#[trigger] Self::enc_i(v)).is_prefix_of(data@),
             },
+        no_unwind
     ;
 
     /// The length of the unsigned number that starts `data`, without
@@ -110,6 +112,7 @@ pub trait VCodec: super::seal::CodecSeal {
     fn len_u(data: &[u8]) -> (r: Option<usize>)
         ensures
             forall|v: u64| (#[trigger] Self::enc_u(v)).is_prefix_of(data@) ==> r == Some(Self::enc_u(v).len() as usize),
+        no_unwind
     ;
 
     /// The length of the signed number that starts `data`, without
@@ -117,6 +120,7 @@ pub trait VCodec: super::seal::CodecSeal {
     fn len_i(data: &[u8]) -> (r: Option<usize>)
         ensures
             forall|v: i64| (#[trigger] Self::enc_i(v)).is_prefix_of(data@) ==> r == Some(Self::enc_i(v).len() as usize),
+        no_unwind
     ;
 
     /// Replace the signed number at `pos`, a literal run's header, with
@@ -183,6 +187,7 @@ fn read_u64(data: &[u8]) -> (r: Result<(usize, u64), DecodeError>)
             Ok((n, v)) => n <= data.len() && data@.take(n as int) == spec_encode(v as nat),
             Err(_) => forall|v: u64| !(#[trigger] spec_encode(v as nat)).is_prefix_of(data@),
         },
+    no_unwind
 {
     match decode(data) {
         Ok((v, n)) => {
@@ -203,6 +208,7 @@ fn read_i64(data: &[u8]) -> (r: Result<(usize, i64), DecodeError>)
             Ok((n, v)) => n <= data.len() && data@.take(n as int) == spec_encode_signed(v as int),
             Err(_) => forall|v: i64| !(#[trigger] spec_encode_signed(v as int)).is_prefix_of(data@),
         },
+    no_unwind
 {
     match decode_signed(data) {
         Ok((v, n)) => {

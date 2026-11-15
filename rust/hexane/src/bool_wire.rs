@@ -20,7 +20,7 @@
     clippy::manual_is_multiple_of
 )]
 
-use crate::iter_core::{push_n, Decode, Decoders};
+use crate::iter_core::{no_bytes, push_n, tail, Decode, Decoders};
 use crate::{PackError, Run};
 use std::marker::PhantomData;
 #[allow(unused_imports)]
@@ -53,7 +53,8 @@ pub trait CountOps {
             match r {
                 Some((n, x)) => n <= data.len() && data@.take(n as int) == Self::enc(x as u64),
                 None => forall|x: u64| x <= usize::MAX ==> !(#[trigger] Self::enc(x)).is_prefix_of(data@),
-            };
+            },
+        no_unwind;
 }
 
 // ── The model ───────────────────────────────────────────────────────────────
@@ -1260,6 +1261,7 @@ impl BoolDecoderState {
     /// The state of a decoder standing at the start of a slab.
     pub(crate) fn start() -> (r: Self)
         ensures r.byte_pos == 0 && r.remaining == 0 && r.value,
+        no_unwind
     {
         BoolDecoderState { byte_pos: 0, remaining: 0, value: true }
     }
@@ -1382,6 +1384,7 @@ impl<'a> BDec<'a> {
     pub(crate) fn new<K: CountOps>(data: &'a [u8]) -> (d: Self)
         requires bool_valid::<K>(data@),
         ensures d.inv::<K>(), d.data() == data@, d.pos::<K>() == 0,
+        no_unwind
     {
         let d = BDec { data, st: BoolDecoderState::start() };
         let _ = data.len();
@@ -1466,6 +1469,7 @@ impl<'a> BDec<'a> {
             final(self).k::<K>() == old(self).k::<K>() + 1,
             old(self).k::<K>() < bool_counts::<K>(old(self).data()).len(),
             final(self).state().remaining == bool_counts::<K>(old(self).data())[old(self).k::<K>()],
+        no_unwind
     {
         let ghost data = self.data@;
         let ghost cs = bool_counts::<K>(data);
@@ -1473,7 +1477,7 @@ impl<'a> BDec<'a> {
         proof {
             lemma_next_count::<K>(data, cs, k, self.st.byte_pos as int);
         }
-        let rest = &self.data[self.st.byte_pos..];
+        let rest = tail(self.data, self.st.byte_pos);
         assert(rest@ == data.skip(self.st.byte_pos as int));
         if let Some((cb, count)) = K::read_count(rest) {
             proof {
@@ -1545,6 +1549,7 @@ impl<'a> BDec<'a> {
                 None => old(self).pos::<K>() == bool_values::<K>(old(self).data()).len()
                     && final(self).pos::<K>() == old(self).pos::<K>(),
             },
+        no_unwind
     {
         proof {
             self.lemma_bytes_le::<K>();
@@ -1588,6 +1593,7 @@ impl<'a> BDec<'a> {
                 None => old(self).pos::<K>() + n0 >= bool_values::<K>(old(self).data()).len()
                     && final(self).pos::<K>() == bool_values::<K>(old(self).data()).len(),
             },
+        no_unwind
     {
         let mut n = n0;
         proof {
@@ -1647,6 +1653,7 @@ impl<'a> BDec<'a> {
                 None => old(self).pos::<K>() == bool_values::<K>(old(self).data()).len()
                     && final(self).pos::<K>() == old(self).pos::<K>(),
             },
+        no_unwind
     {
         proof {
             self.lemma_bytes_le::<K>();
@@ -2671,7 +2678,7 @@ impl<'a, C: CountsOf> Decoders<'a> for BoolReads<C> {
 
     #[inline(always)]
     fn none() -> (d: BoolDecoder<'a, C>) {
-        let empty: &'a [u8] = &[];
+        let empty: &'a [u8] = no_bytes();
         proof {
             lemma_empty_valid::<C::K>();
             assert(empty@ =~= Seq::<u8>::empty());

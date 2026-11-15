@@ -434,6 +434,23 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> ColumnCore<E, W, I, G> {
         }
     }
 
+    /// The index over the slabs, or none if an edit's panic left the
+    /// column without its parts: for a reader, which then has no slabs to
+    /// ask about.
+    #[inline(always)]
+    pub(crate) fn index_opt(&self) -> (r: Option<&I>)
+        ensures
+            match r {
+                Some(ix) => self.ready() && *ix == self.index_spec(),
+                None => !self.ready() && self.slabs_spec().len() == 0,
+            },
+    {
+        match &self.state {
+            Some(p) => Some(&p.index),
+            None => None,
+        }
+    }
+
     #[inline(always)]
     pub(crate) fn max_segments(&self) -> (n: usize)
         ensures

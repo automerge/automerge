@@ -612,6 +612,7 @@ proof fn lemma_sign_extend(r: u64, k: u64)
 #[inline(always)]
 pub fn decode(buf: &[u8]) -> (r: Result<(u64, usize), DecodeError>)
     ensures decode_ok(buf@, r),
+    no_unwind
 {
     if buf.len() > 0 && buf[0] < 0x80 {
         let b = buf[0];
@@ -636,6 +637,7 @@ pub fn decode(buf: &[u8]) -> (r: Result<(u64, usize), DecodeError>)
 #[verifier::spinoff_prover]
 pub fn decode_long(buf: &[u8]) -> (r: Result<(u64, usize), DecodeError>)
     ensures decode_ok(buf@, r),
+    no_unwind
 {
     let mut result: u64 = 0;
     let mut i: usize = 0;
@@ -724,6 +726,7 @@ pub fn decode_long(buf: &[u8]) -> (r: Result<(u64, usize), DecodeError>)
 #[inline(always)]
 pub fn decode_signed(buf: &[u8]) -> (r: Result<(i64, usize), DecodeError>)
     ensures decode_signed_ok(buf@, r),
+    no_unwind
 {
     if buf.len() > 0 && buf[0] < 0x80 {
         let b = buf[0];
@@ -745,6 +748,7 @@ pub fn decode_signed(buf: &[u8]) -> (r: Result<(i64, usize), DecodeError>)
 #[verifier::spinoff_prover]
 pub fn decode_signed_long(buf: &[u8]) -> (r: Result<(i64, usize), DecodeError>)
     ensures decode_signed_ok(buf@, r),
+    no_unwind
 {
     hide(groups);
     hide(groups_signed);
@@ -887,6 +891,7 @@ pub fn encoded_len_at(data: &[u8]) -> (r: Option<usize>)
             ==> r == Some(spec_encode(v).len() as usize),
         forall|v: int| i64::MIN <= v <= i64::MAX && #[trigger] spec_encode_signed(v).is_prefix_of(data@)
             ==> r == Some(spec_encode_signed(v).len() as usize),
+    no_unwind
 {
     let n = if data.len() < MAX_BYTES { data.len() } else { MAX_BYTES };
     let mut i: usize = 0;

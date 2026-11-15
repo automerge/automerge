@@ -71,6 +71,7 @@ pub(crate) trait Decode: Sized {
                     == old(self).rest().skip(1),
                 None => old(self).rest().len() == 0 && final(self).rest() == old(self).rest(),
             },
+        no_unwind
     ;
 
     fn d_nth(&mut self, n: usize) -> (r: Option<Self::Item>)
@@ -81,6 +82,7 @@ pub(crate) trait Decode: Sized {
             n < old(self).rest().len() ==> r == Some(old(self).rest()[n as int]) && final(self).rest()
                 == old(self).rest().skip(n + 1),
             n >= old(self).rest().len() ==> r is None && final(self).rest().len() == 0,
+        no_unwind
     ;
 
     /// The next run of equal values, at most `max` of them.
@@ -105,6 +107,7 @@ pub(crate) trait Decode: Sized {
                 },
                 None => old(self).rest().len() == 0 && final(self).rest() == old(self).rest(),
             },
+        no_unwind
     ;
 
     fn d_eq(a: &Self::Item, b: &Self::Item) -> (r: bool)
@@ -155,6 +158,84 @@ pub(crate) fn push_n<T: Copy>(out: &mut Vec<T>, v: T, n: usize)
     }
 }
 
+/// `&s[at..]`, which Verus is shown not to unwind.
+///
+/// Verus knows of `split_at_checked` that it does not unwind, and not of
+/// a range index. The first arm and the `None` are proved not to be
+/// taken, so what the first calls need not be known. They are there for
+/// the compiler, which makes of the whole what it makes of `&s[at..]`
+/// alone: the test, the panic it guards, and the slice.
+#[inline(always)]
+#[track_caller]
+pub(crate) fn tail<T>(s: &[T], at: usize) -> (r: &[T])
+    requires
+        at <= s@.len(),
+    ensures
+        r@ == s@.skip(at as int),
+    no_unwind
+{
+    if at > s.len() {
+        &s[at..]
+    } else {
+        match s.split_at_checked(at) {
+            Some(p) => p.1,
+            None => s,
+        }
+    }
+}
+
+/// `&s[..to]`, which Verus is shown not to unwind: as `tail`.
+#[inline(always)]
+#[track_caller]
+pub(crate) fn head<T>(s: &[T], to: usize) -> (r: &[T])
+    requires
+        to <= s@.len(),
+    ensures
+        r@ == s@.take(to as int),
+    no_unwind
+{
+    if to > s.len() {
+        &s[..to]
+    } else {
+        match s.split_at_checked(to) {
+            Some(p) => p.0,
+            None => s,
+        }
+    }
+}
+
+/// What an option known to hold a value holds: `o.unwrap()`, which
+/// Verus is shown not to unwind. The `None` arm is proved not to be
+/// taken, and is there for the compiler, as in `tail`.
+#[inline(always)]
+#[track_caller]
+#[allow(clippy::unnecessary_literal_unwrap)]
+pub(crate) fn known<T>(o: Option<T>) -> (r: T)
+    requires
+        o is Some,
+    ensures
+        o == Some(r),
+    no_unwind
+{
+    match o {
+        Some(v) => v,
+        None => None.unwrap(),
+    }
+}
+
+/// No bytes: `&[]`, which Verus is shown not to unwind. Verus knows of
+/// an array's `as_slice` that it does not unwind, and not of the
+/// coercion that `&[]` as a slice asks for.
+#[inline(always)]
+pub(crate) fn no_bytes<'a>() -> (r: &'a [u8])
+    ensures
+        r@.len() == 0,
+    no_unwind
+{
+    let none: &'static [u8; 0] = &[];
+    none.as_slice()
+}
+
 /// Decoders on a column's slabs, which live for `'a`.
 pub(crate) trait Decoders<'a> {
     type Tail: Copy + Clone + std::fmt::Debug + Default;
@@ -173,6 +254,7 @@ pub(crate) trait Decoders<'a> {
         ensures
             d.inv(),
             d.rest() == Self::vals(*s),
+        no_unwind
     ;
 
     /// A decoder with nothing to give.
@@ -180,6 +262,7 @@ pub(crate) trait Decoders<'a> {
         ensures
             d.inv(),
             d.rest().len() == 0,
+        no_unwind
     ;
 
     /// A test of a slab's metadata, its bytes unread, that fails only
@@ -371,6 +454,21 @@ pub(crate) open spec fn find_ok<T: Copy + Clone + std::fmt::Debug + Default>(
     &&& r.0 <= s.len()
     &&& r.0 < s.len() ==> sum(slab_lens(s), 0, r.0 as int) + r.1 == t && r.1 < s[r.0 as int].len
     &&& r.0 == s.len() ==> r.1 <= t && t - r.1 >= total(slab_lens(s))
+}
+
+/// The index's answers `far` for item `t`, as a move to it takes them:
+/// the slab `far.0` holding the item and the item's offset there `far.1`
+/// (as `find_ok` has them), and `far.2` the item the iterator stands at
+/// when it has gone to that slab: the slab's first, or past the last
+/// slab the column's end.
+pub(crate) open spec fn far_ok<T: Copy + Clone + std::fmt::Debug + Default>(
+    s: Seq<Slab<T>>,
+    t: usize,
+    far: (usize, usize, usize),
+) -> bool {
+    &&& find_ok(s, t, (far.0, far.1))
+    &&& far.0 < s.len() ==> far.2 == t - far.1
+    &&& far.0 >= s.len() ==> far.2 == sum(slab_lens(s), 0, s.len() as int)
 }
 
 /// The values of `v` in the window `a..b`: none if it starts at or past
@@ -1043,6 +1141,7 @@ impl<D: Decode> ICore<D> {
                 None => old(self).out::<X>(slabs@).len() == 0 && final(self).out::<X>(slabs@).len() == 0
                     && final(self).pos == old(self).pos,
             },
+        no_unwind
     {
         let ghost c0 = *self;
         proof {
@@ -1114,6 +1213,7 @@ impl<D: Decode> ICore<D> {
                 &&& final(self).items_left == old(self).items_left - (start - old(self).pos)
             },
             !r ==> final(self).items_left == 0,
+        no_unwind
     {
         if si >= slabs.len() {
             self.slab_idx = si;
@@ -1236,6 +1336,169 @@ impl<D: Decode> ICore<D> {
         mid.lemma_here::<X>(s);
         mid.lemma_taken::<X>(after, s, j + 1);
         mid.lemma_out_at::<X>(s, j);
+    }
+
+    /// The item the index is to be asked for, to move `n` items on in the
+    /// window (`nth(n)`): none when the move ends in the slab the
+    /// iterator stands in, or the window is empty.
+    pub(crate) open spec fn far_spec(&self, n: usize) -> Option<usize> {
+        if self.items_left == 0 {
+            None
+        } else {
+            let k = if n >= self.items_left {
+                (self.items_left - 1) as usize
+            } else {
+                n
+            };
+            if k < self.slab_remaining {
+                None
+            } else {
+                Some((self.pos + k) as usize)
+            }
+        }
+    }
+
+    /// `far_spec`, computed: what `nth_at` is to be given the index's
+    /// answers for.
+    #[inline(always)]
+    pub(crate) fn far_target(&self, n: usize) -> (r: Option<usize>)
+        requires
+            self.pos + self.items_left <= usize::MAX,
+        ensures
+            r == self.far_spec(n),
+        no_unwind
+    {
+        if self.items_left == 0 {
+            return None;
+        }
+        let k = if n >= self.items_left {
+            self.items_left - 1
+        } else {
+            n
+        };
+        if k < self.slab_remaining {
+            None
+        } else {
+            Some(self.pos + k)
+        }
+    }
+
+    /// `nth_at`, for `n` inside the window.
+    #[verifier::spinoff_prover]
+    #[inline(always)]
+    fn nth_in_at<'a, X: Decoders<'a, D = D>>(
+        &mut self,
+        slabs: &'a [Slab<X::Tail>],
+        n: usize,
+        far: (usize, usize, usize),
+    ) -> (r: Option<D::Item>)
+        requires
+            old(self).wf::<X>(slabs@),
+            n < old(self).items_left,
+            n >= old(self).slab_remaining ==> far_ok(slabs@, (old(self).pos + n) as usize, far),
+        ensures
+            final(self).wf::<X>(slabs@),
+            n < old(self).out::<X>(slabs@).len() ==> {
+                &&& r == Some(old(self).out::<X>(slabs@)[n as int])
+                &&& final(self).out::<X>(slabs@) == old(self).out::<X>(slabs@).skip(n + 1)
+                &&& final(self).pos == old(self).pos + n + 1
+            },
+            n >= old(self).out::<X>(slabs@).len() ==> r is None && final(self).out::<X>(slabs@).len() == 0,
+            // past the data, it stops at the end
+            old(self).pos <= total(slab_lens(slabs@)) ==> final(self).pos <= total(slab_lens(slabs@)),
+        no_unwind
+    {
+        hide(ICore::wf);
+        hide(ICore::out);
+        hide(find_ok);
+        hide(sum);
+        let ghost c0 = *self;
+        let ghost s = slabs@;
+        proof {
+            self.lemma_nth_pre::<X>(s);
+        }
+        // Fast path: target is within the current slab.
+        if n < self.slab_remaining {
+            self.items_left -= n + 1;
+            self.slab_remaining -= n + 1;
+            self.pos += n + 1;
+            let r = self.decoder.d_nth(n);
+            proof {
+                c0.lemma_nth_at::<X>(c0, *self, s, n as int, n as int, r);
+            }
+            return r;
+        }
+        // The column's index gave the slab, in O(log S); past the data
+        // (the window can run past it), stop at its end.
+        let (si, off, start) = far;
+        proof {
+            c0.lemma_nth_found::<X>(s, n as int, (c0.pos + n) as usize, (si, off));
+        }
+        if !self.advance_to_slab::<X>(slabs, si, start) {
+            proof {
+                self.lemma_none_left::<X>(s);
+            }
+            return None;
+        }
+        let ghost c1 = *self;
+        proof {
+            c1.lemma_nth_pre::<X>(s);
+        }
+        self.slab_remaining -= off + 1;
+        self.items_left -= off + 1;
+        self.pos += off + 1;
+        let r = self.decoder.d_nth(off);
+        proof {
+            c0.lemma_nth_at::<X>(c1, *self, s, n as int, off as int, r);
+        }
+        r
+    }
+
+    /// The `n`th value left in the window (0-based), consuming it and those
+    /// before it; past the window, consume the window. Past the data (the
+    /// window can run past it), stop at its end. `far` holds the index's
+    /// answers for the item `far_target(n)` names, if it names one: the
+    /// caller asks the index, and this function calls nothing that can
+    /// unwind.
+    #[inline(always)]
+    pub(crate) fn nth_at<'a, X: Decoders<'a, D = D>>(
+        &mut self,
+        slabs: &'a [Slab<X::Tail>],
+        n: usize,
+        far: (usize, usize, usize),
+    ) -> (r: Option<D::Item>)
+        requires
+            old(self).wf::<X>(slabs@),
+            old(self).far_spec(n) matches Some(t) ==> far_ok(slabs@, t, far),
+        ensures
+            final(self).wf::<X>(slabs@),
+            n < old(self).out::<X>(slabs@).len() ==> {
+                &&& r == Some(old(self).out::<X>(slabs@)[n as int])
+                &&& final(self).out::<X>(slabs@) == old(self).out::<X>(slabs@).skip(n + 1)
+                &&& final(self).pos == old(self).pos + n + 1
+            },
+            n >= old(self).out::<X>(slabs@).len() ==> r is None && final(self).out::<X>(slabs@).len() == 0,
+            // past the data (the window can run past it), it stops at the end
+            old(self).pos <= total(slab_lens(slabs@)) ==> final(self).pos <= total(slab_lens(slabs@)),
+        no_unwind
+    {
+        if n >= self.items_left {
+            proof {
+                assert(self.out::<X>(slabs@).len() <= self.items_left);
+            }
+            if self.items_left > 0 {
+                let k = self.items_left - 1;
+                let ghost c0 = *self;
+                self.nth_in_at::<X>(slabs, k, far);
+                proof {
+                    if k < c0.out::<X>(slabs@).len() {
+                        assert(c0.out::<X>(slabs@).skip(k + 1).len() == 0);
+                    }
+                }
+            }
+            return None;
+        }
+        self.nth_in_at::<X>(slabs, n, far)
     }
 
     /// `nth`, for `n` inside the window.
@@ -1401,6 +1664,7 @@ impl<D: Decode> ICore<D> {
                 None => old(self).out::<X>(slabs@).len() == 0 && final(self).out::<X>(slabs@).len() == 0
                     && final(self).pos == old(self).pos,
             },
+        no_unwind
     {
         let ghost c0 = *self;
         let ghost s = slabs@;
@@ -2019,6 +2283,7 @@ impl<D: Decode> ICore<D> {
             final(self).pos == old(self).pos,
             final(self).items_left == if end >= old(self).pos { end - old(self).pos } else { 0 },
             final(self).slab_idx == old(self).slab_idx,
+        no_unwind
     {
         self.items_left = end.saturating_sub(self.pos);
     }

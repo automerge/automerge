@@ -41,14 +41,21 @@
 //! [`one_more`]), may be a named function ([`step_the_actions`]), may
 //! use what it captured ([`longer_and_emptied`], for byte strings), and
 //! may say of its result less than which value it is
-//! ([`turned_and_raised`]).
+//! ([`turned_and_raised`]). And that a column's iterator is one of the
+//! standard library's: a `for` loop over it, or over the column, reads
+//! the column's values in order ([`read_in_a_loop`], [`all_below`]), two
+//! columns can be read side by side with `zip` ([`agree`]), `nth` steps
+//! over values and `len` counts those left ([`every_other`],
+//! [`the_third`]), a `fold` gives what the client's function makes of
+//! the values in turn ([`the_greatest`]), and a copy of an iterator
+//! reads on from the same place on its own ([`two_readers`]).
 //!
 //! This module exists only while Verus checks the crate.
 
 use super::{
-    below_at, bytes_below, lemma_run_values_add, lemma_run_values_push, lemma_sorted, mapped, only,
-    refused, run_values, sorted, sorted_for, sum_of, total_len, Get, VCodec, VGet, VNewtype, VSpec,
-    VValue, VerifiedColumn,
+    below_at, bytes_below, folded, lemma_run_values_add, lemma_run_values_push, lemma_sorted,
+    mapped, only, refused, run_values, sorted, sorted_for, sum_of, total_len, Get, VCodec, VGet,
+    VNewtype, VSpec, VValue, VerifiedColumn, VerifiedIter,
 };
 use crate::{Leb128, LoadOpts, PackError, Run};
 use std::cmp::Ordering;
@@ -1400,6 +1407,198 @@ fn one_more(col: &mut VerifiedColumn<Option<u64>>)
             }
         };
     col.remap(f);
+}
+
+/// A `for` loop over a column's iterator gives the column's values, in
+/// order: here each goes into a `Vec`, which then holds what the column
+/// does. For every value type and codec.
+#[allow(dead_code)]
+fn read_in_a_loop<'a, V: VValue<C>, C: VCodec>(col: &'a VerifiedColumn<V, C>) -> (out: Vec<Get<'a, V>>)
+    ensures
+        <Get<'a, V> as VGet>::svs(out@) == col@,
+{
+    let it = col.iter();
+    let ghost all = it.items();
+    let mut out: Vec<Get<'a, V>> = Vec::new();
+    for x in at: it
+        invariant
+            at.seq() == all,
+            out@ == all.take(at.index()),
+    {
+        out.push(x);
+        proof {
+            assert(all.take(at.index() + 1) =~= all.take(at.index()).push(x));
+        }
+    }
+    proof {
+        assert(all.take(all.len() as int) =~= all);
+    }
+    out
+}
+
+/// A `for` loop over a column itself: whether every number of it is
+/// below `m`.
+#[allow(dead_code)]
+fn all_below(col: &VerifiedColumn<u32>, m: u32) -> (r: bool)
+    ensures
+        r == forall|i: int| 0 <= i < col@.len() ==> col@[i] < m,
+{
+    let mut r = true;
+    for x in at: col
+        invariant
+            at.seq() == col@,
+            r == forall|i: int| 0 <= i < at.index() ==> col@[i] < m,
+    {
+        if x >= m {
+            r = false;
+        }
+    }
+    r
+}
+
+/// Two columns read side by side, with the standard library's `zip`:
+/// whether they hold the same numbers.
+#[allow(dead_code)]
+fn agree(a: &VerifiedColumn<u64>, b: &VerifiedColumn<u64>) -> (r: bool)
+    requires
+        a@.len() == b@.len(),
+    ensures
+        r == (a@ == b@),
+{
+    let mut same = true;
+    for pair in at: a.iter().zip(b.iter())
+        invariant
+            a@.len() == b@.len(),
+            at.seq() == a@.zip_with(b@),
+            same == forall|i: int| 0 <= i < at.index() ==> a@[i] == b@[i],
+    {
+        if pair.0 != pair.1 {
+            same = false;
+        }
+    }
+    proof {
+        if same {
+            assert(a@ =~= b@);
+        }
+    }
+    same
+}
+
+/// Steps over values: `nth` gives the value that many places on and
+/// leaves the iterator behind it, and an iterator knows how many values
+/// it has left.
+#[allow(dead_code)]
+fn every_other(col: &VerifiedColumn<i64>)
+    requires
+        col@.len() == 5,
+{
+    let mut it = col.iter();
+    let n = it.len();
+    assert(n == 5);
+    let a = it.nth(1);
+    assert(a == Some(col@[1]));
+    let h = it.size_hint();
+    assert(h == (3usize, Some(3usize)));
+    let b = it.nth(1);
+    assert(b == Some(col@[3]));
+    let c = it.next();
+    assert(c == Some(col@[4]));
+    let d = it.nth(0);
+    assert(d is None);
+    let m = it.len();
+    assert(m == 0);
+}
+
+/// The value two places on, if a column is that long: for every value
+/// type and codec.
+#[allow(dead_code)]
+fn the_third<'a, V: VValue<C>, C: VCodec>(col: &'a VerifiedColumn<V, C>) -> (r: Option<Get<'a, V>>)
+    ensures
+        match r {
+            Some(v) => col@.len() > 2 && v.sv() == col@[2],
+            None => col@.len() <= 2,
+        },
+{
+    let mut it = col.iter();
+    let n = it.len();
+    assert(n == col@.len());
+    it.nth(2)
+}
+
+/// What a fold makes of numbers with a function that gives back no less
+/// than it was given is no less than any of them: a client's own
+/// induction over [`folded`], which it can read.
+proof fn lemma_no_less<F: FnMut(u64, u64) -> u64>(f: F, m: u64, vs: Seq<u64>, r: u64)
+    requires
+        forall|a: u64, v: u64, b: u64| #[trigger] f.ensures((a, v), b) ==> b >= a && b >= v,
+        folded(f, m, vs, r),
+    ensures
+        r >= m,
+        forall|i: int| 0 <= i < vs.len() ==> r >= vs[i],
+    decreases vs.len(),
+{
+    if vs.len() > 0 {
+        let b = choose|b: u64| #[trigger] f.ensures((m, vs[0]), b) && folded(f, b, vs.drop_first(), r);
+        lemma_no_less(f, b, vs.drop_first(), r);
+        assert forall|i: int| 0 <= i < vs.len() implies r >= vs[i] by {
+            if i > 0 {
+                assert(vs[i] == vs.drop_first()[i - 1]);
+            }
+        }
+    }
+}
+
+/// A fold: a number that is no less than any of a column's, by a closure
+/// that keeps the greater of two.
+#[allow(dead_code)]
+fn the_greatest(col: &VerifiedColumn<u64>) -> (r: u64)
+    ensures
+        forall|i: int| 0 <= i < col@.len() ==> r >= col@[i],
+{
+    let f = |m: u64, v: u64| -> (b: u64)
+        ensures
+            b == if v > m { v } else { m },
+        {
+            if v > m {
+                v
+            } else {
+                m
+            }
+        };
+    let r = col.iter().fold(0u64, f);
+    proof {
+        lemma_no_less(f, 0, col@, r);
+    }
+    r
+}
+
+/// A copy of an iterator goes on from where the iterator is, and each
+/// then goes its own way; and an iterator of no column gives nothing.
+/// For every value type and codec.
+#[allow(dead_code)]
+fn two_readers<'a, V: VValue<C>, C: VCodec>(col: &'a VerifiedColumn<V, C>)
+    requires
+        col@.len() == 3,
+{
+    let mut a = col.iter();
+    let first = a.next();
+    let mut b = a.clone();
+    let x = a.next();
+    let y = b.next();
+    assert(first is Some && x is Some && y is Some);
+    proof {
+        <Get<'a, V> as VGet>::lemma_sv_inj(x->0, y->0);
+    }
+    assert(x == y);
+    assert((x->0).sv() == col@[1]);
+    let z = a.next();
+    assert(z is Some && (z->0).sv() == col@[2]);
+    let left_a = a.len();
+    let left_b = b.len();
+    assert(left_a == 0 && left_b == 1);
+    let mut none = VerifiedIter::<V, C>::default();
+    let n = none.next();
+    assert(n is None);
 }
 
 } // verus!

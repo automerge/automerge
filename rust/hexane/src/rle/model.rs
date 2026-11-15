@@ -104,19 +104,22 @@ pub trait RleOps<'a> {
     /// Decode the non-null value known to start `data`.
     fn unpack(data: &'a [u8]) -> (r: (usize, Self::V))
         requires exists|v: Self::V| !Self::is_null(v) && Self::enc(v).is_prefix_of(data@),
-        ensures !Self::is_null(r.1), r.0 <= data.len(), data@.take(r.0 as int) == Self::enc(r.1);
+        ensures !Self::is_null(r.1), r.0 <= data.len(), data@.take(r.0 as int) == Self::enc(r.1),
+        no_unwind;
 
     /// The length of the non-null value starting `data`, without
     /// decoding it.
     fn value_len(data: &[u8]) -> (r: Option<usize>)
         ensures
             forall|v: Self::V| !Self::is_null(v) && Self::enc(v).is_prefix_of(data@)
-                ==> r == Some(Self::enc(v).len() as usize);
+                ==> r == Some(Self::enc(v).len() as usize),
+        no_unwind;
 
     /// The null value.
     fn get_null() -> (r: Self::V)
         requires Self::nullable(),
-        ensures r == Self::null(), Self::is_null(r);
+        ensures r == Self::null(), Self::is_null(r),
+        no_unwind;
 
     /// Decode the signed integer at the start of `data`, if any.
     fn read_signed_opt(data: &[u8]) -> (r: Option<(usize, i64)>)
@@ -124,7 +127,8 @@ pub trait RleOps<'a> {
             match r {
                 Some((n, x)) => n <= data.len() && data@.take(n as int) == Self::enc_signed(x),
                 None => forall|x: i64| !Self::enc_signed(x).is_prefix_of(data@),
-            };
+            },
+        no_unwind;
 
     /// Decode the unsigned integer at the start of `data`, if any.
     fn read_unsigned_opt(data: &[u8]) -> (r: Option<(usize, u64)>)
@@ -132,7 +136,8 @@ pub trait RleOps<'a> {
             match r {
                 Some((n, x)) => n <= data.len() && data@.take(n as int) == Self::enc_unsigned(x),
                 None => forall|x: u64| !Self::enc_unsigned(x).is_prefix_of(data@),
-            };
+            },
+        no_unwind;
 
     /// Decode the signed integer at the start of `data`.
     fn read_signed(data: &[u8]) -> (r: Result<(usize, i64), PackError>)

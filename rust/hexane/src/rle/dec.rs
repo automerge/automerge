@@ -28,7 +28,7 @@ use super::read::{lit_tail_of, tail_bytes_of};
 use super::state::*;
 #[cfg(verus_keep_ghost)]
 use super::writer::slab_bytes;
-use crate::iter_core::{push_n, Decode, Decoders};
+use crate::iter_core::{known, no_bytes, push_n, tail, Decode, Decoders};
 use crate::rle::{RleTail, Slab};
 use std::marker::PhantomData;
 #[allow(unused_imports)]
@@ -686,6 +686,7 @@ impl<'a, O: RleOps<'a>> Dec<'a, O> {
     pub(crate) fn new(data: &'a [u8]) -> (r: Self)
         requires valid_slab::<O>(data@),
         ensures r.inv(), r.data() == data@, r.pos() == 0,
+        no_unwind
     {
         proof {
             let gs = slab_groups::<O>(data@);
@@ -788,6 +789,7 @@ impl<'a, O: RleOps<'a>> Dec<'a, O> {
             final(self).pos() == old(self).pos(),
             final(self).remaining == 0 ==> final(self).pos() == final(self).values().len(),
             final(self).dsegs() == old(self).dsegs(),
+        no_unwind
     {
         self.advance_run()
     }
@@ -802,6 +804,7 @@ impl<'a, O: RleOps<'a>> Dec<'a, O> {
             final(self).pos() == old(self).pos(),
             final(self).remaining == 0 ==> final(self).pos() == final(self).values().len(),
             final(self).dsegs() == old(self).dsegs(),
+        no_unwind
     {
         hide(valid_slab);
         hide(slab_groups);
@@ -832,7 +835,7 @@ impl<'a, O: RleOps<'a>> Dec<'a, O> {
         proof {
             lemma_header_starts::<O>(data, gi);
         }
-        let (count_bytes, count_raw) = match O::read_signed_opt(&self.data[self.byte_pos..]) {
+        let (count_bytes, count_raw) = match O::read_signed_opt(tail(self.data, self.byte_pos)) {
             Some(x) => x,
             None => {
                 // unreachable on a valid slab
@@ -849,7 +852,7 @@ impl<'a, O: RleOps<'a>> Dec<'a, O> {
         if count_raw > 0 {
             let count = count_raw as usize;
             let value_start = self.byte_pos + count_bytes;
-            let (vlen, value) = O::unpack(&self.data[value_start..]);
+            let (vlen, value) = O::unpack(tail(self.data, value_start));
             proof {
                 lemma_read_run::<O>(data, gi, b0, count_bytes as int, count_raw, vlen as int, value);
             }
@@ -874,7 +877,7 @@ impl<'a, O: RleOps<'a>> Dec<'a, O> {
                 assert(self.inv());
             }
         } else {
-            let (ncb, null_count) = O::read_unsigned_opt(&self.data[self.byte_pos + count_bytes..]).unwrap();
+            let (ncb, null_count) = known(O::read_unsigned_opt(tail(self.data, self.byte_pos + count_bytes)));
             proof {
                 lemma_walk_null_count::<O>(data, gi, b0, count_bytes as int, ncb as int, null_count);
             }
@@ -897,6 +900,7 @@ impl<'a, O: RleOps<'a>> Dec<'a, O> {
             old(self).pos() < old(self).values().len(),
             r == Some(old(self).values()[old(self).pos()]),
             final(self).pos() == old(self).pos() + 1,
+        no_unwind
     {
         let ghost r0 = *self;
         proof {
@@ -927,6 +931,7 @@ impl<'a, O: RleOps<'a>> Dec<'a, O> {
             old(self).pos() < old(self).values().len(),
             r == Some(old(self).values()[old(self).pos()]),
             final(self).pos() == old(self).pos() + 1,
+        no_unwind
     {
         self.take_next()
     }
@@ -947,6 +952,7 @@ impl<'a, O: RleOps<'a>> Dec<'a, O> {
             final(self).pos() == r0.pos() + 1,
             final(self).gi == old(self).gi, final(self).state == old(self).state,
             final(self).remaining == old(self).remaining,
+        no_unwind
     {
         let ghost data = self.data@;
         let ghost gs = slab_groups::<O>(data);
@@ -963,7 +969,7 @@ impl<'a, O: RleOps<'a>> Dec<'a, O> {
             lemma_slab_lit::<O>(data, gi - 1, i);
             lemma_starts(O::enc(vs[i]), after);
         }
-        let rest = &self.data[self.byte_pos..];
+        let rest = tail(self.data, self.byte_pos);
         assert(rest@.len() == data.len() - b);
         let (vlen, value) = O::unpack(rest);
         proof {
@@ -1017,6 +1023,7 @@ impl<'a, O: RleOps<'a>> Dec<'a, O> {
             final(self).pos() == old(self).pos() + 1,
             final(self).gi == old(self).gi, final(self).state is Literal,
             final(self).remaining == old(self).remaining - 1,
+        no_unwind
     {
         let ghost r0 = *self;
         self.remaining = self.remaining - 1;
@@ -1038,6 +1045,7 @@ impl<'a, O: RleOps<'a>> Dec<'a, O> {
             old(self).pos() < old(self).values().len() ==> r == Some(old(self).values()[old(self).pos()])
                 && final(self).pos() == old(self).pos() + 1,
             old(self).pos() >= old(self).values().len() ==> r is None && final(self).pos() == old(self).pos(),
+        no_unwind
     {
         proof {
             self.lemma_pos();
@@ -1203,6 +1211,7 @@ impl<'a, O: RleOps<'a>> Dec<'a, O> {
                 None => final(self).pos() == old(self).pos() && final(self).dsegs() == old(self).dsegs()
                     && (max > 0 ==> old(self).pos() == old(self).values().len()),
             },
+        no_unwind
     {
         proof {
             self.lemma_pos();
@@ -1311,6 +1320,7 @@ impl<'a, O: RleOps<'a>> Dec<'a, O> {
                 },
                 None => false,
             },
+        no_unwind
     {
         let ghost data = self.data@;
         let ghost gs = slab_groups::<O>(data);
@@ -1368,6 +1378,7 @@ impl<'a, O: RleOps<'a>> Dec<'a, O> {
             final(self).inv(), final(self).data() == old(self).data(),
             final(self).state is Literal, final(self).remaining == old(self).remaining - n,
             final(self).gi == old(self).gi, final(self).pos() == old(self).pos() + n,
+        no_unwind
     {
         let ghost data = self.data@;
         let ghost gs = slab_groups::<O>(data);
@@ -1388,9 +1399,9 @@ impl<'a, O: RleOps<'a>> Dec<'a, O> {
                 lemma_slab_lit::<O>(data, gi - 1, i);
                 lemma_starts(O::enc(vs[i]), after);
             }
-            let rest = &self.data[self.byte_pos..];
+            let rest = tail(self.data, self.byte_pos);
             assert(rest@ == data.skip(b));
-            let vlen = O::value_len(rest).unwrap();
+            let vlen = known(O::value_len(rest));
             proof {
                 assert(vs.take(i + 1).len() == i + 1);
             }
@@ -1410,6 +1421,7 @@ impl<'a, O: RleOps<'a>> Dec<'a, O> {
                 && final(self).pos() == old(self).pos() + n + 1,
             old(self).pos() + n >= old(self).values().len() ==> r is None
                 && final(self).pos() == old(self).values().len(),
+        no_unwind
     {
         proof {
             self.lemma_pos();
@@ -1436,6 +1448,7 @@ impl<'a, O: RleOps<'a>> Dec<'a, O> {
             final(self).inv(), final(self).data() == old(self).data(),
             final(self).pos() == old(self).pos() + n,
             final(self).remaining == old(self).remaining - n,
+        no_unwind
     {
         if let RunState::Literal = self.state {
             self.skip_literals(n);
@@ -1453,6 +1466,7 @@ impl<'a, O: RleOps<'a>> Dec<'a, O> {
                 && final(self).pos() == old(self).pos() + n + 1,
             old(self).pos() + n >= old(self).values().len() ==> r is None
                 && final(self).pos() == old(self).values().len(),
+        no_unwind
     {
         let ghost data = self.data@;
         let ghost target = self.pos() + n;
@@ -1515,6 +1529,7 @@ impl<'a, O: RleOps<'a>> Dec<'a, O> {
                 &&& final(self).byte_pos <= final(self).data().len()
                 &&& final(self).pos() + r->Err_0 == old(self).pos() + n
             },
+        no_unwind
     {
         if n < self.remaining {
             self.skip_literals(n);
@@ -1549,13 +1564,14 @@ impl<'a, O: RleOps<'a>> Dec<'a, O> {
             old(self).inv(), old(self).remaining == 0, old(self).state is Idle,
             old(self).byte_pos < old(self).data().len(),
         ensures Self::skip_post(*old(self), *final(self), n, r),
+        no_unwind
     {
         let ghost gi = self.gi@;
         let ghost r0 = *self;
         proof {
             self.lemma_header_ahead();
         }
-        let (count_bytes, count_raw) = O::read_signed_opt(&self.data[self.byte_pos..]).unwrap();
+        let (count_bytes, count_raw) = known(O::read_signed_opt(tail(self.data, self.byte_pos)));
         proof {
             self.lemma_header_read(count_bytes as int, count_raw);
         }
@@ -1650,6 +1666,7 @@ impl<'a, O: RleOps<'a>> Dec<'a, O> {
             slab_groups::<O>(old(self).data())[old(self).gi@] is Run,
             count == group_len(slab_groups::<O>(old(self).data())[old(self).gi@]),
         ensures Self::skip_post(*old(self), *final(self), n, r),
+        no_unwind
     {
         let ghost data = self.data@;
         let ghost gs = slab_groups::<O>(data);
@@ -1664,7 +1681,7 @@ impl<'a, O: RleOps<'a>> Dec<'a, O> {
         }
         let value_start = self.byte_pos + count_bytes;
         if n < count {
-            let (vlen, value) = O::unpack(&self.data[value_start..]);
+            let (vlen, value) = O::unpack(tail(self.data, value_start));
             proof {
                 lemma_value::<O>(data.skip(p), run_value(g), rest, vlen as int, value);
                 assert(group_values(g, O::null())[n as int] == value);
@@ -1676,7 +1693,7 @@ impl<'a, O: RleOps<'a>> Dec<'a, O> {
             self.gi = Ghost(gi + 1);
             return Ok(value);
         }
-        let vlen = O::value_len(&self.data[value_start..]).unwrap();
+        let vlen = known(O::value_len(tail(self.data, value_start)));
         self.byte_pos = value_start + vlen;
         self.gi = Ghost(gi + 1);
         proof {
@@ -1693,6 +1710,7 @@ impl<'a, O: RleOps<'a>> Dec<'a, O> {
             at_header::<O>(old(self).data(), old(self).gi@, old(self).byte_pos as int, count_bytes as int),
             slab_groups::<O>(old(self).data())[old(self).gi@] is Null,
         ensures Self::skip_post(*old(self), *final(self), n, r),
+        no_unwind
     {
         let ghost data = self.data@;
         let ghost gs = slab_groups::<O>(data);
@@ -1705,7 +1723,7 @@ impl<'a, O: RleOps<'a>> Dec<'a, O> {
             lemma_slab_group::<O>(data, gi);
             lemma_starts(O::enc_unsigned(g->Null_count as u64), rest);
         }
-        let (ncb, null_count) = O::read_unsigned_opt(&self.data[self.byte_pos + count_bytes..]).unwrap();
+        let (ncb, null_count) = known(O::read_unsigned_opt(tail(self.data, self.byte_pos + count_bytes)));
         proof {
             lemma_count::<O>(data.skip(p), g->Null_count as u64, rest, ncb as int, null_count);
         }
@@ -4324,7 +4342,7 @@ impl<'a, O> Decoders<'a> for RleReads<O> where O: for<'b> RleOps<'b> {
 
     #[inline(always)]
     fn none() -> (d: RDecoder<'a, O>) {
-        let empty: &'a [u8] = &[];
+        let empty: &'a [u8] = no_bytes();
         proof {
             lemma_empty_slab::<O>();
             assert(empty@ =~= Seq::<u8>::empty());

@@ -75,8 +75,19 @@
 //!   [`truncate`](VerifiedColumn::truncate) and
 //!   [`clear`](VerifiedColumn::clear) leave the values a `splice` that
 //!   deletes the same ones would;
-//! * [`get`](VerifiedColumn::get), [`to_vec`](VerifiedColumn::to_vec) and
-//!   the [iterator](VerifiedIter) give the column's values;
+//! * [`get`](VerifiedColumn::get) and [`to_vec`](VerifiedColumn::to_vec)
+//!   give the column's values;
+//! * the [iterator](VerifiedIter) is one of the standard library's
+//!   (`Iterator` and `ExactSizeIterator`, and a borrowed column is an
+//!   `IntoIterator`). It has the column's values left to give, or those
+//!   of a range (`rest`), and `next` gives the first of them and leaves
+//!   the others. It so keeps to Verus's laws of iterators, and a `for`
+//!   loop over it reads those values, as do the standard library's
+//!   functions that Verus has a specification of (`zip`, `skip`, `take`
+//!   among them). `nth` gives the value that many places on, `len` and
+//!   `size_hint` the number left, and `fold` what the client's function
+//!   makes of the values in turn (`folded`), as that function's own
+//!   `ensures` says it;
 //! * [`is_only`](VerifiedColumn::is_only) says whether every value of the
 //!   column is the one given (`only`), and [`VValue::same`] whether two
 //!   values in a column's form are one value;
@@ -128,8 +139,8 @@
 //! functions of a column type (`VerifiedColumn::<V>::valid(bytes)`),
 //! `size_bound` is one of a value type (for byte strings it counts their
 //! bytes, as `total_len` of them), `only`, `sorted`, `sorted_for`,
-//! `bytes_below`, `mapped`, `run_values`, `fill_of` and `sum_of` are of
-//! this module, and `lemma_save_unique`, `lemma_encoding`, `lemma_no_bytes`,
+//! `bytes_below`, `mapped`, `folded`, `run_values`, `fill_of` and `sum_of`
+//! are of this module, and `lemma_save_unique`, `lemma_encoding`, `lemma_no_bytes`,
 //! `lemma_sorted`, `lemma_run_values_push` and `lemma_run_values_add`
 //! are lemmas, as is `VSpec::lemma_below` (the order is a strict total
 //! order): they exist only for Verus, and a normal build compiles
@@ -180,7 +191,13 @@
 //! and holds a clone of each item, that a clone of an `Option` is one of
 //! what it holds, and that a clone of an integer is that integer. The
 //! methods that take an iterator lean on those of iterators: what `next`
-//! returns, and what `IntoIterator` and `FromIterator` are. Of `Extend`
+//! returns, and what `IntoIterator` and `FromIterator` are. A client
+//! that reads a column's iterator through a function of the standard
+//! library leans on Verus's specification of that function, or of the
+//! `for` loop: what is proved here is what the iterator's own `next`,
+//! `nth`, `size_hint`, `len` and `fold` do. (Of the standard library's
+//! `count`, `last`, `sum` and `for_each`, which run that `fold`, Verus
+//! has no specification.) Of `Extend`
 //! Verus has none, and this crate tells it that the trait has its one
 //! method (`ExExtend`), which assumes nothing of an implementation. A
 //! search leans on that of the comparison of two integers (`cmp`); byte
@@ -286,7 +303,7 @@ use crate::fenwick::sum;
 use crate::index::wlens;
 use crate::index::IndexOps;
 #[cfg(verus_keep_ghost)]
-use crate::iter_core::{find_ok, found, lemma_from, lens_ok, monotone, vals_of};
+use crate::iter_core::{far_ok, find_ok, found, lemma_from, lens_ok, monotone, vals_of};
 use crate::iter_core::{Decode, Decoders, ICore, Probe, Side};
 use crate::remap::{Encodes, Mapping};
 #[cfg(verus_keep_ghost)]
@@ -2451,7 +2468,6 @@ impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
     #[inline(always)]
     pub fn iter(&self) -> (it: VerifiedIter<'_, V, C>)
         ensures
-            it.wf(),
             it.rest() == self@,
     {
         proof {
@@ -2461,7 +2477,7 @@ impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
         proof {
             assert(self@.subrange(0, n as int) =~= self@);
         }
-        VerifiedIter { it: self.reader(0, n), slabs: self.core.slabs() }
+        VerifiedIter { it: self.reader(0, n), slabs: self.core.slabs(), col: Some(&self.core) }
     }
 
     /// An iterator over the values `start..end`.
@@ -2470,10 +2486,9 @@ impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
         requires
             start <= end <= self@.len(),
         ensures
-            it.wf(),
             it.rest() == self@.subrange(start as int, end as int),
     {
-        VerifiedIter { it: self.reader(start, end), slabs: self.core.slabs() }
+        VerifiedIter { it: self.reader(start, end), slabs: self.core.slabs(), col: Some(&self.core) }
     }
 
     /// The column, saved: the encoding of its values.
@@ -2634,32 +2649,172 @@ impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
 
 // ── The iterator ────────────────────────────────────────────────────────────
 
-/// An iterator over a column's values.
+/// `r` is what folding `f` over the values `vs` from `init` gives: what
+/// `f` has made of `init` and then of each value in turn.
+pub open spec fn folded<B, T, F: FnMut(B, T) -> B>(f: F, init: B, vs: Seq<T>, r: B) -> bool
+    decreases vs.len(),
+{
+    if vs.len() == 0 {
+        r == init
+    } else {
+        exists|b: B| #[trigger] f.ensures((init, vs[0]), b) && folded(f, b, vs.drop_first(), r)
+    }
+}
+
+/// A fold of `vs` is `f` on its first value and a fold of the others.
+proof fn lemma_folded_step<B, T, F: FnMut(B, T) -> B>(f: F, a: B, vs: Seq<T>, b: B, r: B)
+    requires
+        vs.len() > 0,
+        f.ensures((a, vs[0]), b),
+        folded(f, b, vs.drop_first(), r),
+    ensures
+        folded(f, a, vs, r),
+{
+}
+
+/// An iterator over a column's values, which
+/// [`VerifiedColumn::iter`] and [`VerifiedColumn::iter_range`] give.
+///
+/// It is a `std::iter::Iterator`. What it has left to give is in a
+/// specification `items()`, and as values `rest()`. Verus's
+/// specifications of the standard library's iterator functions speak of
+/// `remaining()`, which is `items()`.
 pub struct VerifiedIter<'a, V: VValue<C>, C: VCodec = Leb128> {
     it: ICore<<V::X as Decoders<'a>>::D>,
     slabs: &'a [Slab<<V::E as Slabs>::Tail>],
+    /// The column the slabs are of; a default iterator has none.
+    col: Option<&'a Core<V::E>>,
 }
 
 impl<'a, V: VValue<C>, C: VCodec> VerifiedIter<'a, V, C> {
-    /// The values the iterator has left to give.
-    pub closed spec fn rest(&self) -> Seq<V::S> {
-        <Get<'a, V> as VGet>::svs(self.it.out::<V::X>(self.slabs@))
+    /// The iterator stands in the slabs of its column.
+    #[verifier::type_invariant]
+    spec fn inv(&self) -> bool {
+        &&& self.it.wf::<V::X>(self.slabs@)
+        &&& match self.col {
+            Some(c) => self.slabs@ == c.slabs_spec(),
+            None => self.slabs@.len() == 0,
+        }
     }
 
-    /// The iterator stands in its column: as every iterator a column
-    /// gives does, and keeps doing.
-    pub closed spec fn wf(&self) -> bool {
-        self.it.wf::<V::X>(self.slabs@)
+    /// What the iterator has left to give.
+    pub closed spec fn items(&self) -> Seq<Get<'a, V>> {
+        self.it.out::<V::X>(self.slabs@)
     }
+
+    /// The values the iterator has left to give.
+    pub open spec fn rest(&self) -> Seq<V::S> {
+        <Get<'a, V> as VGet>::svs(self.items())
+    }
+
+    /// Where item `t` of the column is, as the column's index has it:
+    /// what a long move asks before it goes. (A column that an edit's
+    /// panic left without its parts has no slabs and no index, and every
+    /// item is past its end.)
+    #[inline(always)]
+    fn look(&self, t: usize) -> (far: (usize, usize, usize))
+        ensures
+            far_ok(self.slabs@, t, far),
+    {
+        proof {
+            use_type_invariant(self);
+        }
+        let n = self.slabs.len();
+        match self.col {
+            Some(c) => {
+                c.lemma_column();
+                match c.index_opt() {
+                    Some(ix) => {
+                        let r = ix.ix_find(t);
+                        proof {
+                            assert(ix.ws().map_values(|w: usize| <SlabBTree<usize> as IndexOps<usize>>::wlen(w))
+                                =~= wlens::<usize, SlabBTree<usize>>(ix.ws()));
+                        }
+                        if r.0 >= n {
+                            // past the slabs, the whole position lies
+                            // beyond them
+                            (n, 0, c.len())
+                        } else {
+                            (r.0, r.1, t - r.1)
+                        }
+                    },
+                    None => (n, 0, 0),
+                }
+            },
+            None => (n, 0, 0),
+        }
+    }
+
+    /// `nth`, for a move that may leave the slab the iterator stands in:
+    /// a function of its own, so that a caller of `nth` has the short
+    /// move inline and calls for the long one.
+    #[inline(never)]
+    fn nth_far(&mut self, n: usize) -> (r: Option<Get<'a, V>>)
+        ensures
+            n < old(self).items().len() ==> {
+                &&& r == Some(old(self).items()[n as int])
+                &&& final(self).items() == old(self).items().skip(n + 1)
+                &&& r matches Some(v) && v.sv() == old(self).rest()[n as int]
+                &&& final(self).rest() == old(self).rest().skip(n + 1)
+            },
+            n >= old(self).items().len() ==> r is None && final(self).items().len() == 0,
+    {
+        proof {
+            use_type_invariant(&*self);
+        }
+        let ghost o = self.it.out::<V::X>(self.slabs@);
+        let far = match self.it.far_target(n) {
+            Some(t) => self.look(t),
+            None => (0, 0, 0),
+        };
+        let r = self.it.nth_at::<V::X>(self.slabs, n, far);
+        proof {
+            <Get<'a, V> as VGet>::lemma_svs(o);
+            <Get<'a, V> as VGet>::lemma_svs(self.it.out::<V::X>(self.slabs@));
+            if n < o.len() {
+                lemma_svs_sub(o, n + 1, o.len() as int);
+            }
+        }
+        r
+    }
+}
+
+#[cfg(verus_keep_ghost)]
+impl<'a, V: VValue<C>, C: VCodec> vstd::std_specs::iter::IteratorSpecImpl for VerifiedIter<'a, V, C> {
+    /// The iterator keeps to what Verus asks of an iterator: `next` gives
+    /// `remaining()`, one value after another, and then `None`.
+    open spec fn obeys_prophetic_iter_laws(&self) -> bool {
+        true
+    }
+
+    open spec fn remaining(&self) -> Seq<Get<'a, V>> {
+        self.items()
+    }
+
+    open spec fn will_return_none(&self) -> bool {
+        true
+    }
+
+    open spec fn decrease(&self) -> Option<nat> {
+        Some(self.items().len())
+    }
+
+    open spec fn peek(&self, index: int) -> Option<Get<'a, V>> {
+        if 0 <= index < self.items().len() {
+            Some(self.items()[index])
+        } else {
+            None
+        }
+    }
+}
+
+impl<'a, V: VValue<C>, C: VCodec> Iterator for VerifiedIter<'a, V, C> {
+    type Item = Get<'a, V>;
 
     /// The next value, if one is left.
     #[inline(always)]
-    #[allow(clippy::should_implement_trait)]  // `Iterator::next` has no `requires`
-    pub fn next(&mut self) -> (r: Option<Get<'a, V>>)
-        requires
-            old(self).wf(),
+    fn next(&mut self) -> (r: Option<Get<'a, V>>)
         ensures
-            final(self).wf(),
             match r {
                 Some(v) => {
                     &&& old(self).rest().len() > 0
@@ -2669,20 +2824,235 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedIter<'a, V, C> {
                 None => old(self).rest().len() == 0 && final(self).rest().len() == 0,
             },
     {
+        proof {
+            use_type_invariant(&*self);
+        }
         let ghost o = self.it.out::<V::X>(self.slabs@);
         let r = self.it.next_inline::<V::X>(self.slabs);
         proof {
+            let o1 = self.it.out::<V::X>(self.slabs@);
             <Get<'a, V> as VGet>::lemma_svs(o);
-            <Get<'a, V> as VGet>::lemma_svs(self.it.out::<V::X>(self.slabs@));
+            <Get<'a, V> as VGet>::lemma_svs(o1);
             if r is Some {
                 lemma_svs_sub(o, 1, o.len() as int);
+                assert(o.skip(1) =~= o.drop_first());
+            } else {
+                assert(o1 =~= o);
             }
+        }
+        r
+    }
+
+    /// The `n`th of the values left, counted from 0, if there are that
+    /// many: it and the values before it are then given. If there are
+    /// not, none is left.
+    ///
+    /// Few of the values passed over are looked at: a long move asks the
+    /// column's index for the slab to go to, and within a slab a whole
+    /// run is passed over at once.
+    #[inline]
+    fn nth(&mut self, n: usize) -> (r: Option<Get<'a, V>>)
+        ensures
+            n < old(self).items().len() ==> {
+                &&& r == Some(old(self).items()[n as int])
+                &&& final(self).items() == old(self).items().skip(n + 1)
+                &&& r matches Some(v) && v.sv() == old(self).rest()[n as int]
+                &&& final(self).rest() == old(self).rest().skip(n + 1)
+            },
+            n >= old(self).items().len() ==> r is None && final(self).items().len() == 0,
+    {
+        proof {
+            use_type_invariant(&*self);
+        }
+        if n < self.it.items_left && n < self.it.slab_remaining {
+            // within the slab the iterator stands in, and its window:
+            // the index is not asked
+            let ghost o = self.it.out::<V::X>(self.slabs@);
+            let r = self.it.nth_at::<V::X>(self.slabs, n, (0, 0, 0));
+            proof {
+                <Get<'a, V> as VGet>::lemma_svs(o);
+                <Get<'a, V> as VGet>::lemma_svs(self.it.out::<V::X>(self.slabs@));
+                if n < o.len() {
+                    lemma_svs_sub(o, n + 1, o.len() as int);
+                }
+            }
+            r
+        } else {
+            self.nth_far(n)
+        }
+    }
+
+    /// How many values are left: exactly.
+    #[inline]
+    fn size_hint(&self) -> (r: (usize, Option<usize>))
+        ensures
+            r.0 == self.items().len(),
+            r.0 == self.rest().len(),
+            r.1 == Some(r.0),
+    {
+        proof {
+            use_type_invariant(self);
+            self.it.lemma_here::<V::X>(self.slabs@);
+            <Get<'a, V> as VGet>::lemma_svs(self.items());
+        }
+        // the window can run past the column's end
+        let left = match self.col {
+            Some(col) => {
+                col.lemma_column();
+                self.it.items_left.min(col.len().saturating_sub(self.it.pos))
+            },
+            None => 0,
+        };
+        (left, Some(left))
+    }
+
+    /// What `f` makes of `init` and each of the values left in turn. `f`
+    /// is to take any value with any accumulator.
+    ///
+    /// The values are read a run at a time, as are those the standard
+    /// library reads through `fold` (`count`, `last`, `sum`, `for_each`
+    /// among them): faster than a loop over `next` where values come in
+    /// runs, and slower where few values repeat.
+    fn fold<B, F>(self, init: B, f: F) -> (r: B) where F: FnMut(B, Get<'a, V>) -> B
+        requires
+            forall|b: B, v: Get<'a, V>| #[trigger] f.requires((b, v)),
+        ensures
+            folded(f, init, self.items(), r),
+    {
+        let ghost all = self.it.out::<V::X>(self.slabs@);
+        let ghost f0 = f;
+        let mut me = self;
+        let mut f = f;
+        let mut acc = init;
+        loop
+            invariant
+                f == f0,
+                forall|b: B, v: Get<'a, V>| #[trigger] f.requires((b, v)),
+                forall|r: B| folded(f, acc, me.it.out::<V::X>(me.slabs@), r) ==> folded(f, init, all, r),
+            ensures
+                folded(f, init, all, acc),
+            decreases me.it.items_left,
+        {
+            proof {
+                use_type_invariant(&me);
+            }
+            if me.it.items_left == 0 {
+                proof {
+                    assert(me.it.out::<V::X>(me.slabs@).len() == 0);
+                }
+                break ;
+            }
+            let max = me.it.items_left;
+            let ghost o = me.it.out::<V::X>(me.slabs@);
+            match me.it.run_once::<V::X>(me.slabs, max) {
+                Some(run) => {
+                    proof {
+                        assert(o.skip(0) =~= o);
+                    }
+                    let mut k: usize = 0;
+                    while k < run.count
+                        invariant
+                            k <= run.count <= o.len(),
+                            o.take(run.count as int) == Seq::new(run.count as nat, |i: int| run.value),
+                            f == f0,
+                            forall|b: B, v: Get<'a, V>| #[trigger] f.requires((b, v)),
+                            forall|r: B| folded(f, acc, o.skip(k as int), r) ==> folded(f, init, all, r),
+                        decreases run.count - k,
+                    {
+                        let ghost a = acc;
+                        acc = f(acc, run.value);
+                        proof {
+                            let now = o.skip(k as int);
+                            assert(now[0] == o.take(run.count as int)[k as int]);
+                            assert(now.drop_first() =~= o.skip(k + 1));
+                            assert forall|r: B| folded(f, acc, o.skip(k + 1), r) implies folded(f, init, all, r) by {
+                                lemma_folded_step(f, a, now, acc, r);
+                            }
+                        }
+                        k += 1;
+                    }
+                },
+                None => {
+                    break ;
+                },
+            }
+        }
+        acc
+    }
+}
+
+#[cfg(verus_keep_ghost)]
+impl<'a, V: VValue<C>, C: VCodec> vstd::std_specs::iter::ExactSizeIteratorSpecImpl for VerifiedIter<'a, V, C> {
+    open spec fn exact_len(&self) -> usize {
+        self.items().len() as usize
+    }
+}
+
+impl<'a, V: VValue<C>, C: VCodec> ExactSizeIterator for VerifiedIter<'a, V, C> {
+    /// How many values are left.
+    #[inline]
+    fn len(&self) -> (len: usize)
+        ensures
+            len == self.items().len(),
+            len == self.rest().len(),
+    {
+        self.size_hint().0
+    }
+}
+
+impl<'a, V: VValue<C>, C: VCodec> Clone for VerifiedIter<'a, V, C> {
+    /// An iterator of its own with the same values left.
+    fn clone(&self) -> (r: Self)
+        ensures
+            r.items() == self.items(),
+    {
+        proof {
+            use_type_invariant(self);
+        }
+        VerifiedIter { it: self.it.dup(), slabs: self.slabs, col: self.col }
+    }
+}
+
+impl<'a, V: VValue<C>, C: VCodec> Default for VerifiedIter<'a, V, C> {
+    /// An iterator with nothing to give.
+    fn default() -> (r: Self)
+        ensures
+            r.items().len() == 0,
+            r.rest().len() == 0,
+    {
+        let r = VerifiedIter { it: ICore::empty::<V::X>(), slabs: &[], col: None };
+        proof {
+            <Get<'a, V> as VGet>::lemma_svs(r.items());
         }
         r
     }
 }
 
+impl<'a, V: VValue<C>, C: VCodec> IntoIterator for &'a VerifiedColumn<V, C> {
+    type Item = Get<'a, V>;
+
+    type IntoIter = VerifiedIter<'a, V, C>;
+
+    /// An iterator over the values ([`VerifiedColumn::iter`]).
+    #[inline(always)]
+    fn into_iter(self) -> (it: VerifiedIter<'a, V, C>)
+        ensures
+            it.rest() == self@,
+    {
+        self.iter()
+    }
+}
+
 } // verus!
+
+impl<V: VValue<C>, C: VCodec> std::fmt::Debug for VerifiedIter<'_, V, C> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("VerifiedIter")
+            .field("pos", &self.it.pos)
+            .field("items_left", &self.it.items_left)
+            .finish()
+    }
+}
 
 // The two functions of this block print and compare, and Verus does not
 // check them. They read the column through checked functions that ask

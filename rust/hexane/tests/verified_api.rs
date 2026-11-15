@@ -8,7 +8,10 @@
 //! tests are what ties those specifications to `Column`'s format, which
 //! no proof does.
 
-use hexane::verified::{refused, Get, VNewtype, VValue, VerifiedColumn};
+// `nth(0)` is here for what `nth` does, which is under test
+#![allow(clippy::iter_nth_zero)]
+
+use hexane::verified::{refused, Get, VNewtype, VValue, VerifiedColumn, VerifiedIter};
 use hexane::{
     Codec, Column, ColumnValue, ColumnValueRef, LoadOpts, MaybeFill, NoFill, PackError,
     RleEncoding, RleValue, Run,
@@ -1840,6 +1843,301 @@ fn a_remap_whose_function_panics() {
     for_each_kind!(stopped);
 }
 
+/// The iterators of both APIs over the values `a..b`, read in each way
+/// the standard library's `Iterator` has: they give the values of `model`
+/// there and count the same number left at every step.
+fn check_iters<T: Kind>(
+    v: &VerifiedColumn<T>,
+    c: &Column<T>,
+    model: &[T],
+    (a, b): (usize, usize),
+    rng: &mut Rng,
+) {
+    let want = &model[a..b];
+    let new = || v.iter_range(a, b);
+    let old_it = || c.iter_range(a..b);
+    let same = |x: &VerifiedIter<'_, T>, y: &hexane::Iter<'_, T>, left: usize| {
+        assert_eq!((x.len(), y.len()), (left, left));
+        assert_eq!(x.size_hint(), (left, Some(left)));
+        assert_eq!(format!("{x:?}"), format!("Verified{y:?}"));
+    };
+
+    // one value at a time, and nothing after the last
+    let (mut x, mut y) = (new(), old_it());
+    for (i, m) in want.iter().enumerate() {
+        same(&x, &y, want.len() - i);
+        assert_eq!(x.next().map(T::keep).as_ref(), Some(m));
+        assert_eq!(y.next().map(old).as_ref(), Some(m));
+    }
+    for _ in 0..2 {
+        same(&x, &y, 0);
+        assert!(x.next().is_none() && y.next().is_none());
+    }
+
+    // all of them at once
+    assert_eq!(new().map(T::keep).collect::<Vec<_>>(), want);
+    assert_eq!(new().count(), want.len());
+    assert_eq!(new().last().map(T::keep).as_ref(), want.last());
+    let folded = new().fold(Vec::new(), |mut all, x| {
+        all.push(T::keep(x));
+        all
+    });
+    assert_eq!(folded, want);
+    let mut each = Vec::new();
+    new().for_each(|x| each.push(T::keep(x)));
+    assert_eq!(each, want);
+    let mut looped = Vec::new();
+    for x in new() {
+        looped.push(T::keep(x));
+    }
+    assert_eq!(looped, want);
+
+    // steps of one length: each gives the value that far on, and a step
+    // past the last value uses the iterator up
+    for k in [0, 1, 2, 5, 63, 64, 1000, usize::MAX - 1, usize::MAX] {
+        let (mut x, mut y) = (new(), old_it());
+        let mut at = 0usize;
+        loop {
+            let to = at.checked_add(k).filter(|i| *i < want.len());
+            assert_eq!(x.nth(k).map(T::keep).as_ref(), to.map(|i| &want[i]));
+            assert_eq!(y.nth(k).map(old).as_ref(), to.map(|i| &want[i]));
+            match to {
+                Some(i) => at = i + 1,
+                None => break,
+            }
+            same(&x, &y, want.len() - at);
+        }
+        same(&x, &y, 0);
+        assert!(x.next().is_none() && x.nth(0).is_none() && x.nth(k).is_none());
+        same(&x, &y, 0);
+    }
+
+    // steps of every length mixed with single values, and copies made on
+    // the way, each of which reads on from where it was made
+    let (mut x, mut y) = (new(), old_it());
+    let mut at = 0usize;
+    let mut copies = vec![(x.clone(), 0)];
+    while at < want.len() {
+        let left = want.len() - at;
+        if rng.below(3) == 0 {
+            copies.push((x.clone(), at));
+        }
+        if rng.below(3) == 0 {
+            assert_eq!(x.next().map(T::keep).as_ref(), Some(&want[at]));
+            assert_eq!(y.next().map(old).as_ref(), Some(&want[at]));
+            at += 1;
+        } else {
+            let k = match rng.below(4) {
+                0 => rng.below(3),
+                1 => rng.below(left + 2),
+                2 => rng.below(200),
+                _ => rng.below(left / 4 + 1),
+            };
+            let to = Some(at + k).filter(|i| *i < want.len());
+            assert_eq!(x.nth(k).map(T::keep).as_ref(), to.map(|i| &want[i]));
+            assert_eq!(y.nth(k).map(old).as_ref(), to.map(|i| &want[i]));
+            at = to.map_or(want.len(), |i| i + 1);
+        }
+        same(&x, &y, want.len() - at);
+    }
+    copies.push((x.clone(), at));
+    for (i, (mut copy, at)) in copies.into_iter().enumerate() {
+        assert_eq!(copy.len(), want.len() - at);
+        if i % 2 == 0 {
+            assert_eq!(copy.map(T::keep).collect::<Vec<_>>(), &want[at..]);
+        } else {
+            // and steps on its own
+            let k = rng.below(want.len() - at + 1);
+            assert_eq!(copy.nth(k).map(T::keep).as_ref(), want.get(at + k));
+            assert_eq!(copy.next().map(T::keep).as_ref(), want.get(at + k + 1));
+        }
+    }
+
+    // through the standard library's adaptors
+    let kept = |it: &mut dyn Iterator<Item = Get<'_, T>>| it.map(T::keep).collect::<Vec<T>>();
+    let s = rng.below(want.len() + 2);
+    assert_eq!(
+        kept(&mut new().skip(s).take(20)),
+        want.iter().skip(s).take(20).cloned().collect::<Vec<_>>()
+    );
+    assert_eq!(
+        kept(&mut new().step_by(7)),
+        want.iter().step_by(7).cloned().collect::<Vec<_>>()
+    );
+    let mut by_ref = new();
+    assert_eq!(
+        kept(&mut by_ref.by_ref().take(s)),
+        &want[..s.min(want.len())]
+    );
+    assert_eq!(kept(&mut by_ref), &want[s.min(want.len())..]);
+    let pairs: Vec<(T, T)> = new()
+        .zip(v.iter())
+        .map(|(p, q)| (T::keep(p), T::keep(q)))
+        .collect();
+    let model_pairs: Vec<(T, T)> = want.iter().cloned().zip(model.iter().cloned()).collect();
+    assert_eq!(pairs, model_pairs);
+    assert_eq!(
+        new().enumerate().last().map(|(i, x)| (i, T::keep(x))),
+        want.iter().cloned().enumerate().last()
+    );
+    if let Some(x) = want.get(rng.below(want.len() + 1)) {
+        assert_eq!(
+            new().position(|y| T::keep(y) == *x),
+            want.iter().position(|y| y == x)
+        );
+        assert!(new().any(|y| T::keep(y) == *x));
+    }
+    let mut ahead = new().peekable();
+    let mut seen = 0;
+    while let Some(next) = ahead.peek().copied() {
+        assert_eq!(ahead.next().map(T::keep), Some(T::keep(next)));
+        seen += 1;
+    }
+    assert_eq!(seen, want.len());
+}
+
+/// Columns in one slab and in many, as built and as loaded: over every
+/// window the iterator reads what `Column`'s does, in every way the
+/// standard library has of reading one. And a `for` loop over the column
+/// itself reads all of it.
+fn iterators<T: Kind>() {
+    let mut rng = Rng(0x17e2);
+    let (p, q) = (T::fresh(&mut rng), T::fresh(&mut rng));
+    let models: Vec<Vec<T>> = vec![
+        vec![],
+        vec![p.clone()],
+        vec![p.clone(), q.clone()],
+        vec![p.clone(); 300],
+        (0..400).map(|i| [&p, &q][i / 9 % 2].clone()).collect(),
+        (0..400).map(|i| [&p, &q][i % 2].clone()).collect(),
+        (0..1500).map(|_| T::fresh(&mut rng)).collect(),
+        rng.values(300),
+        rng.values(900),
+    ];
+    for (i, model) in models.iter().enumerate() {
+        let n = model.len();
+        for (budget, loaded) in [(3, false), (3, true), (16, false), (64, true)] {
+            let (mut v, mut c) = if budget < 64 {
+                both_in_slabs(&mut rng, model, budget)
+            } else {
+                both_with(model, budget)
+            };
+            if loaded {
+                let bytes = v.save();
+                let opts = LoadOpts::new().with_max_segments(budget);
+                v = VerifiedColumn::<T>::load_with(&bytes, opts).unwrap();
+                c = Column::<T>::load_with(&bytes, opts).unwrap();
+            }
+            assert!(i != 6 || budget > 3 || loaded || v.slab_count() > 100);
+            let mut ws = windows(&mut rng, &v.slab_lens(), n);
+            if n > 600 {
+                // the long ones are read whole a few times only
+                ws.retain(|(a, b)| b - a < 300 || rng.below(4) == 0);
+                ws.push((0, n));
+            }
+            for w in ws {
+                check_iters(&v, &c, model, w, &mut rng);
+            }
+            let mut all = Vec::new();
+            for x in &v {
+                all.push(T::keep(x));
+            }
+            assert_eq!(&all, model);
+            let it = (&v).into_iter();
+            assert_eq!(it.len(), n);
+            assert_eq!(it.count(), n);
+        }
+    }
+}
+
+#[test]
+fn an_iterator_reads_as_the_standard_library_has_it() {
+    for_each_kind!(iterators);
+}
+
+/// A column that edits have made: its iterators read what it holds now.
+/// (An iterator borrows its column, so none lives through an edit.)
+#[test]
+fn an_iterator_after_edits() {
+    fn edited<T: Kind>() {
+        let mut rng = Rng(0xed17);
+        for budget in [2, 5, 64] {
+            let mut model: Vec<T> = rng.values(200);
+            let (mut v, mut c) = both_with(&model, budget);
+            for round in 0..40 {
+                let at = rng.below(model.len() + 1);
+                let del = rng.below((model.len() - at).min(30) + 1);
+                let put: Vec<T> = rng.values(60);
+                v.splice(at, del, &lent(&put));
+                c.splice(at, del, put.iter().cloned());
+                model.splice(at..at + del, put);
+                if round % 13 == 12 {
+                    v.truncate(model.len() / 2);
+                    c.truncate(model.len() / 2);
+                    model.truncate(model.len() / 2);
+                }
+                let n = model.len();
+                let a = rng.below(n + 1);
+                let b = a + rng.below(n - a + 1);
+                check_iters(&v, &c, &model, (a, b), &mut rng);
+                check_iters(&v, &c, &model, (0, n), &mut rng);
+            }
+            v.clear();
+            c.clear();
+            check_iters(&v, &c, &[], (0, 0), &mut rng);
+        }
+    }
+    for_each_kind!(edited);
+}
+
+/// An iterator of no column, which `Default` makes: it has nothing to
+/// give, however it is asked.
+#[test]
+fn an_iterator_of_no_column() {
+    fn none<T: Kind>() {
+        let mut it = VerifiedIter::<T>::default();
+        assert_eq!(format!("{it:?}"), "VerifiedIter { pos: 0, items_left: 0 }");
+        let old_it = hexane::Iter::<T>::default();
+        assert_eq!(format!("{it:?}"), format!("Verified{old_it:?}"));
+        for _ in 0..2 {
+            assert_eq!((it.len(), it.size_hint()), (0, (0, Some(0))));
+            assert!(it.next().is_none());
+            assert!(it.nth(0).is_none() && it.nth(7).is_none());
+            assert!(it.nth(usize::MAX).is_none());
+            assert!(it.clone().next().is_none());
+        }
+        assert_eq!(it.fold(3, |n, _| n + 1), 3);
+        assert_eq!(VerifiedIter::<T>::default().count(), 0);
+        assert!(VerifiedIter::<T>::default().last().is_none());
+    }
+    for_each_kind!(none);
+}
+
+/// `fold` reads a run at a time: its function is called once for each
+/// value all the same, in order, and a panic in it leaves the column as
+/// it was.
+#[test]
+fn a_fold_calls_its_function_for_each_value() {
+    let (v, _) = both_with(&[7u64, 7, 7, 8, 8, 9, 7, 7], 3);
+    let calls = Cell::new(0);
+    let sum = v.iter().fold(0, |s, x| {
+        calls.set(calls.get() + 1);
+        s * 10 + x
+    });
+    assert_eq!((sum, calls.get()), (77788977, 8));
+    #[cfg(panic = "unwind")]
+    {
+        let text = panic_of(std::panic::AssertUnwindSafe(|| {
+            v.iter_range(1, 8).fold(0, |s, x| {
+                assert!(x != 9, "nine");
+                s + x
+            })
+        }));
+        assert_eq!(text.as_deref(), Some("nine"));
+        assert_eq!(new_values(&v), [7u64, 7, 7, 8, 8, 9, 7, 7]);
+    }
+}
+
 /// The two loaders take the same bytes, as the same values, and refuse
 /// the rest with the same error.
 fn check_same_load<T: Kind>(bytes: &[u8]) -> bool {
@@ -2824,6 +3122,17 @@ fn the_layout_after_a_panic_in_an_edit() {
     // a search of no values asks for none of the column's parts
     assert_eq!(v.scope_to_value(7, 0, 0), 0..0);
     assert_eq!(c.scope_to_value(7u64, 0..0), 0..0);
+    // and an iterator has nothing to give, however it is asked
+    let mut it = v.iter();
+    assert_eq!((it.len(), it.next(), it.nth(0)), (0, None, None));
+    assert_eq!(
+        (it.nth(usize::MAX), it.nth(70_000), it.len()),
+        (None, None, 0)
+    );
+    assert_eq!(v.iter().fold(1, |a, x| a + x), 1);
+    assert_eq!(v.iter_range(0, 0).count(), 0);
+    assert_eq!((&v).into_iter().last(), None);
+    assert_eq!((c.iter().len(), c.iter().next()), (0, None));
     // and neither takes an edit any more
     let new = panic_of(std::panic::AssertUnwindSafe(|| v.push(7))).unwrap();
     let old = panic_of(std::panic::AssertUnwindSafe(|| c.push(7))).unwrap();

@@ -28,6 +28,7 @@ use super::codec::VCodec;
 use super::model::Model;
 use super::model::Plain;
 use super::{seal, Owned, VForm, VGet, VSpec, VValue};
+use crate::iter_core::{head, tail};
 #[cfg(verus_keep_ghost)]
 use crate::rle::dec::slab_values;
 use crate::rle::dec::RleReads;
@@ -234,6 +235,7 @@ fn read_bytes<C: VCodec>(data: &[u8]) -> (r: (usize, &[u8]))
     ensures
         r.0 <= data.len(),
         data@.take(r.0 as int) == enc_bytes::<C>(r.1@),
+    no_unwind
 {
     broadcast use vstd::slice::group_slice_axioms;
 
@@ -244,8 +246,8 @@ fn read_bytes<C: VCodec>(data: &[u8]) -> (r: (usize, &[u8]))
                 lemma_front_bytes::<C>(data@, hdr as int, len, b);
             }
             let n = len as usize;
-            let rest = &data[hdr..];
-            let v = &rest[..n];
+            let rest = tail(data, hdr);
+            let v = head(rest, n);
             proof {
                 assert(v@ =~= data@.subrange(hdr as int, hdr + n));
                 lemma_bytes_at::<C>(data@, hdr as int, len);
@@ -272,6 +274,7 @@ fn bytes_len<C: VCodec>(data: &[u8]) -> (r: Option<usize>)
             b.len() <= usize::MAX && (#[trigger] enc_bytes::<C>(b)).is_prefix_of(data@) ==> r == Some(
                 enc_bytes::<C>(b).len() as usize,
             ),
+    no_unwind
 {
     let (hdr, len) = match C::read_u_opt(data) {
         Some(x) => x,
@@ -289,12 +292,10 @@ fn bytes_len<C: VCodec>(data: &[u8]) -> (r: Option<usize>)
             lemma_front_bytes::<C>(data@, hdr as int, len, b);
         }
     }
-    let n = match usize::try_from(len) {
-        Ok(n) => n,
-        Err(_) => {
-            return None;
-        },
-    };
+    if len > usize::MAX as u64 {
+        return None;
+    }
+    let n = len as usize;
     if data.len() - hdr < n {
         return None;
     }

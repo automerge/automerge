@@ -92,12 +92,14 @@ pub trait VPack: Copy + Sized + super::seal::PackSeal {
         ensures
             r.0 <= data.len(),
             data@.take(r.0 as int) == Self::enc::<C>(r.1),
+        no_unwind
     ;
 
     /// The length of the value that starts `data`, without reading it.
     fn value_len<C: VCodec>(data: &[u8]) -> (r: Option<usize>)
         ensures
             forall|v: Self| (#[trigger] Self::enc::<C>(v)).is_prefix_of(data@) ==> r == Some(Self::enc::<C>(v).len() as usize),
+        no_unwind
     ;
 
     /// Append the bytes of `v`; their number.
@@ -290,6 +292,7 @@ pub trait VNewtype: Copy + Sized {
                 Ok(v) => Self::base(v) == b,
                 Err(_) => forall|v: Self| #[trigger] Self::base(v) != b,
             },
+        no_unwind when exists|v: Self| #[trigger] Self::base(v) == b
     ;
 
     /// The value whose `Base` value is `b`, for a `b` that is some
@@ -304,6 +307,7 @@ pub trait VNewtype: Copy + Sized {
             exists|v: Self| #[trigger] Self::base(v) == b,
         ensures
             Self::base(r) == b,
+        no_unwind
     {
         match Self::from_base(b) {
             Ok(v) => v,
