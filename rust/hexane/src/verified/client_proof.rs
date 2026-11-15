@@ -18,13 +18,16 @@
 //! when its own length is asked for and does not when another is
 //! ([`load_with_a_length`]), and that no bytes load as a fill value as
 //! often as asked for, or as an error where no column is that long
-//! ([`load_a_fill`]).
+//! ([`load_a_fill`]). And that the slabs of a column are within it, each
+//! starting where the lengths before it add up to, and that a column
+//! finds no fault in what it saves ([`slabs_and_validation`],
+//! [`load_then_validate`]).
 //!
 //! This module exists only while Verus checks the crate.
 
 use super::{
-    lemma_run_values_add, lemma_run_values_push, only, refused, run_values, total_len, Get, VCodec,
-    VGet, VNewtype, VValue, VerifiedColumn,
+    lemma_run_values_add, lemma_run_values_push, only, refused, run_values, sum_of, total_len, Get,
+    VCodec, VGet, VNewtype, VValue, VerifiedColumn,
 };
 use crate::{Leb128, LoadOpts, PackError, Run};
 use vstd::prelude::*;
@@ -749,6 +752,97 @@ fn load_fills(x: &[u8]) {
     // and with no option, no bytes are a column of no values
     let r = VerifiedColumn::<u64>::load_with(none.as_slice(), LoadOpts::default());
     assert(r is Ok && r->Ok_0@.len() == 0);
+}
+
+/// Of lengths added up ([`sum_of`]): the first `i + 1` are the first `i`
+/// and one more, and are no more than all of them. A client proves it
+/// from the definition.
+proof fn lemma_sum_of(lens: Seq<usize>, i: int)
+    requires
+        0 <= i < lens.len(),
+    ensures
+        sum_of(lens.take(i + 1)) == sum_of(lens.take(i)) + lens[i],
+        sum_of(lens.take(i + 1)) <= sum_of(lens),
+    decreases lens.len(),
+{
+    assert(lens.take(i + 1).drop_last() =~= lens.take(i));
+    if i + 1 == lens.len() {
+        assert(lens.take(i + 1) =~= lens);
+    } else {
+        lemma_sum_of(lens.drop_last(), i);
+        assert(lens.drop_last().take(i + 1) =~= lens.take(i + 1));
+    }
+}
+
+/// The slabs of a column are within it. A client adds up their lengths
+/// to find where each slab starts, as `dump_slabs` prints it: the sum is
+/// never more than a `usize` counts, every slab ends within the column,
+/// and the sum of all is the column's length. And a column whose values
+/// save to less than 4 GiB finds no fault in what it saves. For every
+/// value type and codec.
+#[allow(dead_code)]
+fn slabs_and_validation<'v, V: VValue<C>, C: VCodec>(input: &Vec<Get<'v, V>>)
+    requires
+        V::size_bound(VGet::svs(input@)) <= u32::MAX,
+{
+    let mut col = VerifiedColumn::<V, C>::new();
+    col.splice(0, 0, input.as_slice());
+    proof {
+        VGet::lemma_svs(input@);
+    }
+    assert(col@ =~= VGet::svs(input@));
+
+    let n = col.len();
+    let lens = col.slab_lens();
+    let mut offset: usize = 0;
+    let mut i: usize = 0;
+    while i < lens.len()
+        invariant
+            i <= lens@.len(),
+            offset == sum_of(lens@.take(i as int)),
+            sum_of(lens@) == n,
+        decreases lens@.len() - i,
+    {
+        proof {
+            lemma_sum_of(lens@, i as int);
+        }
+        // the slab ends within the column
+        assert(offset + lens@[i as int] <= n);
+        offset = offset + lens[i];
+        i += 1;
+    }
+    assert(lens@.take(i as int) =~= lens@);
+    assert(offset == n && n == input@.len());
+
+    let r = col.validate_encoding();
+    assert(r is Ok);
+}
+
+/// The slabs of numbers and of `bool`s.
+#[allow(dead_code)]
+fn slabs_of_each(a: &Vec<u64>, b: &Vec<bool>)
+    requires
+        a@.len() < 1_000_000,
+        b@.len() < 1_000_000,
+{
+    slabs_and_validation::<u64, Leb128>(a);
+    slabs_and_validation::<bool, Leb128>(b);
+}
+
+/// A column loaded from less than 4 GiB of bytes finds no fault in what
+/// it saves, which is those bytes. For any bytes, of any provenance.
+#[allow(dead_code)]
+fn load_then_validate<V: VValue<C>, C: VCodec>(bytes: &[u8])
+    requires
+        bytes@.len() <= u32::MAX,
+{
+    if let Ok(col) = VerifiedColumn::<V, C>::load(bytes) {
+        proof {
+            VerifiedColumn::<V, C>::lemma_encoding(bytes@);
+        }
+        let r = col.validate_encoding();
+        assert(r is Ok);
+    }
 }
 
 } // verus!

@@ -27,7 +27,7 @@ use crate::bool_edit::{BoolEdit, BoolLoader, BoolModel};
 #[cfg(verus_keep_ghost)]
 use crate::bool_unique::lemma_bool_slab_unique;
 #[cfg(verus_keep_ghost)]
-use crate::bool_wire::{bool_valid, bool_values, lemma_empty_valid};
+use crate::bool_wire::{bool_counts, bool_valid, bool_values, lemma_empty_valid, lemma_values_len};
 use crate::bool_wire::{BSlab, BoolReads, CountsOf};
 use crate::btree::SlabBTree;
 use crate::column::Slab;
@@ -39,15 +39,19 @@ use crate::iter_core::{Decode, Decoders};
 use crate::load_core::LoadCore;
 use crate::rle::cut::Load;
 #[cfg(verus_keep_ghost)]
-use crate::rle::cut::{head_bound, small};
+use crate::rle::cut::{head_bound, lemma_slab_is_parse, small};
 use crate::rle::dec::RleReads;
 #[cfg(verus_keep_ghost)]
-use crate::rle::dec::{lemma_empty_slab, slab_values, valid_slab};
+use crate::rle::dec::{
+    lemma_empty_slab, lemma_groups_values_concat, slab_groups, slab_values, valid_slab,
+};
 use crate::rle::edit::{RleModel, RleRebuild, Visit};
 use crate::rle::lift::Lift;
 #[cfg(verus_keep_ghost)]
-use crate::rle::model::encs;
+use crate::rle::model::{encs, group_bytes, groups_bytes, groups_len, parses, Group};
 use crate::rle::model::{RleOps, WriteOps};
+#[cfg(verus_keep_ghost)]
+use crate::rle::read::tail_fits;
 #[cfg(verus_keep_ghost)]
 use crate::rle::size::{heads_bound, lemma_slab_size};
 #[cfg(verus_keep_ghost)]
@@ -169,6 +173,16 @@ pub(crate) trait Model<X>: Slabs + Sized + for <'a>ReadsAgree<'a, X> where
                 &&& Self::values(bytes@).len() <= usize::MAX - 3
                 &&& expected matches Some(e) ==> Self::values(bytes@).len() == e
             }) ==> r is Ok,
+    ;
+
+    /// The saved column `bytes`, read through: how many values it holds
+    /// and in how many runs. An error unless `bytes` is a saved column;
+    /// and no error for one of less than 4 GiB (the last run of a longer
+    /// one may be more than a slab can note of its tail).
+    fn validate(bytes: &[u8]) -> (r: Result<(usize, usize), PackError>)
+        ensures
+            r matches Ok(n) ==> Self::valid(bytes@) && n.0 == Self::values(bytes@).len(),
+            Self::valid(bytes@) && bytes@.len() <= u32::MAX ==> r is Ok,
     ;
 }
 
@@ -400,6 +414,48 @@ impl<L, O> Model<RleReads<O>> for RleModel<L> where
             },
         }
     }
+
+    #[inline(always)]
+    fn validate(bytes: &[u8]) -> (r: Result<(usize, usize), PackError>) {
+        rle_validate::<O>(bytes)
+    }
+}
+
+/// A run-length slab read through
+/// ([`validate`](crate::rle::read::validate)), in the terms of a saved
+/// column: the number of its values and of its runs.
+#[inline(always)]
+fn rle_validate<'a, O: RleOps<'a>>(data: &'a [u8]) -> (r: Result<(usize, usize), PackError>)
+    ensures
+        r matches Ok(n) ==> valid_slab::<O>(data@) && n.0 == slab_values::<O>(data@).len(),
+        valid_slab::<O>(data@) && data@.len() <= u32::MAX ==> r is Ok,
+{
+    match crate::rle::read::validate::<O>(data) {
+        Ok(s) => {
+            proof {
+                // the parse the check found is the slab's
+                let gs = choose|gs: Seq<Group<O::V>>| parses::<O>(gs, data@) && s.len == groups_len(gs);
+                lemma_slab_is_parse::<O>(gs, data@);
+                lemma_groups_values_concat(gs, Seq::empty(), O::null());
+            }
+            Ok((s.len, s.segments))
+        },
+        Err(e) => {
+            proof {
+                if valid_slab::<O>(data@) && data@.len() <= u32::MAX {
+                    // the last group is part of the bytes, so as short
+                    let gs = slab_groups::<O>(data@);
+                    assert(parses::<O>(gs, data@));
+                    reveal(parses);
+                    if gs.len() > 0 {
+                        assert(groups_bytes::<O>(gs) == groups_bytes::<O>(gs.drop_last()) + group_bytes::<O>(gs.last()));
+                    }
+                    assert(tail_fits::<O>(gs));
+                }
+            }
+            Err(e)
+        },
+    }
 }
 
 // ── `bool` slabs ────────────────────────────────────────────────────────────
@@ -464,6 +520,19 @@ impl<C: CountsOf> Model<BoolReads<C>> for BoolModel<C> {
                     assert(o.map_values(|v: bool| v) =~= o);
                 }
                 Ok(core)
+            },
+            Err(e) => Err(e),
+        }
+    }
+
+    #[inline(always)]
+    fn validate(bytes: &[u8]) -> (r: Result<(usize, usize), PackError>) {
+        match crate::bool_wire::validate::<C::K>(bytes) {
+            Ok(i) => {
+                proof {
+                    lemma_values_len(bool_counts::<C::K>(bytes@));
+                }
+                Ok((i.len, i.segments))
             },
             Err(e) => Err(e),
         }

@@ -2287,7 +2287,7 @@ proof fn lemma_no_parse<'a, O: RleOps<'a>>(data: Seq<u8>)
 }
 
 /// A parse of a slab's bytes is the slab's.
-proof fn lemma_slab_is_parse<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>, data: Seq<u8>)
+pub(crate) proof fn lemma_slab_is_parse<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>, data: Seq<u8>)
     requires parses::<O>(gs, data),
     ensures valid_slab::<O>(data), slab_values::<O>(data) == groups_values(gs, O::null()),
 {

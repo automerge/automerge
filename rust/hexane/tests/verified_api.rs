@@ -263,9 +263,23 @@ fn new_values<T: Kind>(v: &VerifiedColumn<T>) -> Vec<T> {
     v.to_vec().into_iter().map(T::keep).collect()
 }
 
-/// Both columns hold `model`, read the same way through every reader, and
-/// save to the same bytes.
+/// Both columns hold `model`, read the same way through every reader,
+/// save to the same bytes and lie in the same slabs, which pass the checks
+/// of `check_invariants`. For columns that edits have made of values.
 fn check<T: Kind>(v: &VerifiedColumn<T>, c: &Column<T>, model: &[T]) {
+    check_with(v, c, model, true);
+}
+
+/// [`check`] for columns that were loaded from bytes, and for what edits
+/// have made of those. Of such a column `check_invariants` may say that
+/// two slabs should have been merged (see
+/// `check_invariants_takes_a_loaded_column_as_edited`): here it is to say
+/// the same of both columns.
+fn check_loaded<T: Kind>(v: &VerifiedColumn<T>, c: &Column<T>, model: &[T]) {
+    check_with(v, c, model, false);
+}
+
+fn check_with<T: Kind>(v: &VerifiedColumn<T>, c: &Column<T>, model: &[T], built: bool) {
     assert_eq!(v.len(), model.len());
     assert_eq!(v.is_empty(), model.is_empty());
     assert_eq!(new_values(v), model);
@@ -287,6 +301,7 @@ fn check<T: Kind>(v: &VerifiedColumn<T>, c: &Column<T>, model: &[T]) {
         assert_eq!(v.slab_count(), c.slab_count());
         assert_eq!(format!("{v:?}"), format!("Verified{c:?}"));
     }
+    check_layout(v, c, model, built);
     // saved after what a buffer holds: the same bytes, in the same place
     let (mut a, mut b) = (vec![9u8; 3], vec![9u8; 3]);
     let range = v.save_to(&mut a);
@@ -298,6 +313,47 @@ fn check<T: Kind>(v: &VerifiedColumn<T>, c: &Column<T>, model: &[T]) {
         check_only(v, c, model, x);
     }
 }
+
+/// What the layout tools say of the two columns. The slabs of the
+/// verified column hold `model.len()` values between them; they are as
+/// long, and of as many runs, as `Column`'s (but for a column of no
+/// values, which may have no slab in one API and an empty one in the
+/// other); the checks of `check_invariants` pass, in both, if the columns
+/// are `built` of values, and say the same of both if they were loaded;
+/// and the bytes the column saves are a column's.
+fn check_layout<T: Kind>(v: &VerifiedColumn<T>, c: &Column<T>, model: &[T], built: bool) {
+    let (lens, segments) = (v.slab_lens(), v.slab_segments());
+    assert_eq!(lens.len(), v.slab_count());
+    assert_eq!(segments.len(), v.slab_count());
+    assert_eq!(lens.iter().sum::<usize>(), model.len());
+    if model.is_empty() {
+        assert_eq!(segments.iter().sum::<usize>(), 0);
+    } else {
+        assert_eq!(lens, c.slab_lens());
+        assert_eq!(segments, c.slab_segments());
+        assert!(lens.iter().all(|&n| n > 0));
+    }
+    if built {
+        v.check_invariants();
+        c.check_invariants();
+    } else {
+        check_invariants_agree(v, c);
+    }
+    assert!(v.validate_encoding().is_ok());
+    assert!(c.validate_encoding().is_ok());
+}
+
+/// `check_invariants` says the same of both columns: nothing, or the same
+/// words. (Where a panic can be caught: not on wasm32.)
+#[cfg(panic = "unwind")]
+fn check_invariants_agree<T: Kind>(v: &VerifiedColumn<T>, c: &Column<T>) {
+    let new = panic_of(std::panic::AssertUnwindSafe(|| v.check_invariants()));
+    let old = panic_of(std::panic::AssertUnwindSafe(|| c.check_invariants()));
+    assert_eq!(new, old);
+}
+
+#[cfg(not(panic = "unwind"))]
+fn check_invariants_agree<T: Kind>(_v: &VerifiedColumn<T>, _c: &Column<T>) {}
 
 /// Whether the column holds `x` alone, and what is saved unless it does.
 fn check_only<T: Kind>(v: &VerifiedColumn<T>, c: &Column<T>, model: &[T], x: &T) {
@@ -371,24 +427,24 @@ fn both<T: Kind>(model: &[T]) -> (VerifiedColumn<T>, Column<T>) {
 
 /// The same checks for each value type.
 macro_rules! for_each_kind {
-    ($f:ident) => {
-        $f::<u64>();
-        $f::<i64>();
-        $f::<u32>();
-        $f::<i32>();
-        $f::<usize>();
-        $f::<NonZeroU32>();
-        $f::<bool>();
-        $f::<Action>();
-        $f::<Option<u64>>();
-        $f::<Option<i64>>();
-        $f::<Option<u32>>();
-        $f::<Option<i32>>();
-        $f::<Option<usize>>();
-        $f::<Option<NonZeroU32>>();
-        $f::<Option<Action>>();
-        $f::<Vec<u8>>();
-        $f::<Option<Vec<u8>>>();
+    ($f:ident $(, $arg:expr)*) => {
+        $f::<u64>($($arg),*);
+        $f::<i64>($($arg),*);
+        $f::<u32>($($arg),*);
+        $f::<i32>($($arg),*);
+        $f::<usize>($($arg),*);
+        $f::<NonZeroU32>($($arg),*);
+        $f::<bool>($($arg),*);
+        $f::<Action>($($arg),*);
+        $f::<Option<u64>>($($arg),*);
+        $f::<Option<i64>>($($arg),*);
+        $f::<Option<u32>>($($arg),*);
+        $f::<Option<i32>>($($arg),*);
+        $f::<Option<usize>>($($arg),*);
+        $f::<Option<NonZeroU32>>($($arg),*);
+        $f::<Option<Action>>($($arg),*);
+        $f::<Vec<u8>>($($arg),*);
+        $f::<Option<Vec<u8>>>($($arg),*);
     };
 }
 
@@ -445,6 +501,20 @@ fn empty<T: Kind>() {
     assert_eq!(v.save(), Column::<T>::new().save());
     assert_eq!(v.save(), Vec::<u8>::new());
     assert!(VerifiedColumn::<T>::load(&[]).unwrap().is_empty());
+    // a new column has no slab, in either API; one made of no values
+    // has an empty one, in both
+    let c = Column::<T>::new();
+    check(&v, &c, &[]);
+    check(&d, &c, &[]);
+    assert_eq!((v.slab_lens(), v.slab_segments()), (vec![], vec![]));
+    assert_eq!((c.slab_lens(), c.slab_segments()), (vec![], vec![]));
+    let (v, c) = (
+        VerifiedColumn::<T>::from_values(&[]),
+        Column::<T>::from_values(vec![]),
+    );
+    check(&v, &c, &[]);
+    assert_eq!((v.slab_lens(), v.slab_segments()), (vec![0], vec![0]));
+    assert_eq!((c.slab_lens(), c.slab_segments()), (vec![0], vec![0]));
 }
 
 #[test]
@@ -863,7 +933,7 @@ fn a_column_filled_with_one_value() {
 }
 
 /// What a closure panics with, if it does.
-#[cfg(target_pointer_width = "64")]
+#[cfg(any(target_pointer_width = "64", panic = "unwind"))]
 fn panic_of<R>(f: impl FnOnce() -> R + std::panic::UnwindSafe) -> Option<String> {
     let e = std::panic::catch_unwind(f).err()?;
     let text = e.downcast_ref::<String>().cloned();
@@ -1502,7 +1572,7 @@ fn load_options<T: Kind>() {
                     };
                     match (r, want) {
                         (Ok((mut v, mut c)), Ok(want)) => {
-                            check(&v, &c, &want);
+                            check_loaded(&v, &c, &want);
                             // and is edited as a column made of the values is
                             let mut m = want;
                             let at = rng.below(m.len() + 1);
@@ -1510,7 +1580,7 @@ fn load_options<T: Kind>() {
                             v.splice(at, 0, &lent(&ins));
                             c.splice(at, 0, ins.iter().cloned());
                             m.splice(at..at, ins);
-                            check(&v, &c, &m);
+                            check_loaded(&v, &c, &m);
                         }
                         (Err(e), Err((has, asked))) => {
                             assert!(
@@ -1753,4 +1823,328 @@ fn bytes_of_too_many_values_are_an_error() {
     let mut bools = uleb(most);
     bools.extend(uleb(most));
     case::<bool>(&bools, 2 * most, false, true);
+}
+
+/// Columns of both APIs with slabs to look at, their values, and whether
+/// they are built of values and not loaded: of one slab and of many,
+/// built at once, edited in small slabs, loaded in small slabs, and
+/// filled. None is empty.
+#[allow(clippy::type_complexity)]
+fn layouts<T: Kind>() -> Vec<(VerifiedColumn<T>, Column<T>, Vec<T>, bool)> {
+    let mut rng = Rng(0x51ab);
+    let x = T::fresh(&mut rng);
+    let mut models: Vec<Vec<T>> = vec![
+        vec![x.clone()],
+        vec![x.clone(); 1000],
+        (0..3000).map(|_| T::fresh(&mut rng)).collect(),
+    ];
+    for _ in 0..4 {
+        let mut model: Vec<T> = rng.values(300);
+        model.push(T::fresh(&mut rng));
+        models.push(model);
+    }
+    let mut out = vec![];
+    for model in models {
+        let (v, c) = both(&model);
+        out.push((v, c, model, true));
+    }
+    for budget in [2, 3, 4, 8] {
+        let mut v = VerifiedColumn::<T>::with_max_segments(budget);
+        let mut c = Column::<T>::with_max_segments(budget);
+        let mut model = vec![T::fresh(&mut rng)];
+        v.push(model[0].lend());
+        c.push(model[0].clone());
+        for _ in 0..30 {
+            // after the first value, which stays
+            let at = 1 + rng.below(model.len());
+            let del = rng.below((model.len() - at).min(8) + 1);
+            let ins: Vec<T> = rng.values(20);
+            v.splice(at, del, &lent(&ins));
+            c.splice(at, del, ins.iter().cloned());
+            model.splice(at..at + del, ins);
+        }
+        let (loaded_v, loaded_c) =
+            load_both_with::<T>(&v.save(), None, None, Some(budget)).unwrap();
+        out.push((v, c, model.clone(), true));
+        out.push((loaded_v, loaded_c, model, false));
+    }
+    let mut v = VerifiedColumn::<T>::fill(500, x.lend());
+    let mut c = Column::<T>::fill(500, x.as_column_ref());
+    let mut model = vec![x.clone(); 500];
+    out.push((v.clone(), c.clone(), model.clone(), true));
+    let y = T::fresh(&mut rng);
+    v.insert(250, y.lend());
+    c.insert(250, y.clone());
+    model.insert(250, y);
+    out.push((v, c, model, true));
+    out
+}
+
+/// The lines `dump_slabs` prints of a column of the values `model`, going
+/// by `slab_lens` and `slab_segments`: of each slab where it starts, how
+/// many values and how many runs it holds, and the first and the last of
+/// its runs, which are the equal values the slab starts with and those it
+/// ends with.
+fn slab_lines<T: Kind>(v: &VerifiedColumn<T>, model: &[T]) -> Vec<String>
+where
+    for<'a> Get<'a, T>: Debug,
+{
+    let mut lines = vec![];
+    let mut offset = 0;
+    for (i, (len, segments)) in v.slab_lens().into_iter().zip(v.slab_segments()).enumerate() {
+        let slab = &model[offset..offset + len];
+        let first = slab.first().map(|x| Run {
+            count: slab.iter().take_while(|y| *y == x).count(),
+            value: x.lend(),
+        });
+        let last = slab.last().map(|x| Run {
+            count: slab.iter().rev().take_while(|y| *y == x).count(),
+            value: x.lend(),
+        });
+        lines.push(format!(
+            "  slab[{i}]: offset={offset} len={len} segments={segments} first={first:?} last={last:?}"
+        ));
+        offset += len;
+    }
+    assert_eq!(offset, model.len());
+    lines
+}
+
+/// The slabs of the columns of `layouts` pass every check, and are the
+/// same in both APIs; what `dump_slabs` is to print of them goes to
+/// `lines`, after a line that names the column.
+fn layout_lines<T: Kind>(lines: &mut Vec<String>)
+where
+    for<'a> Get<'a, T>: Debug,
+{
+    for (i, (v, c, model, built)) in layouts::<T>().iter().enumerate() {
+        check_with(v, c, model, *built);
+        assert_eq!(v.slab_count(), c.slab_count());
+        lines.push(format!("== {} {i}", std::any::type_name::<T>()));
+        lines.extend(slab_lines(v, model));
+    }
+}
+
+/// The variable that tells `dump_slabs_child` which API to print with.
+#[cfg(not(target_family = "wasm"))]
+const DUMP_API: &str = "HEXANE_TEST_DUMP_SLABS";
+
+#[cfg(not(target_family = "wasm"))]
+fn dump_layouts<T: Kind>(old: bool)
+where
+    for<'a> Get<'a, T>: Debug,
+{
+    for (i, (v, c, _, _)) in layouts::<T>().iter().enumerate() {
+        println!("== {} {i}", std::any::type_name::<T>());
+        if old {
+            c.dump_slabs();
+        } else {
+            v.dump_slabs();
+        }
+    }
+}
+
+/// Not a test of its own. `dump_slabs_prints_each_slab` runs it in a
+/// process of its own, to read what `dump_slabs` prints there; run with
+/// the other tests it does nothing.
+#[cfg(not(target_family = "wasm"))]
+#[test]
+fn dump_slabs_child() {
+    if let Ok(api) = std::env::var(DUMP_API) {
+        let old = api == "old";
+        // the test harness has written the test's name on this line
+        println!();
+        for_each_kind!(dump_layouts, old);
+    }
+}
+
+/// `dump_slabs` prints a line for each slab, the same line in both APIs,
+/// and the line says of the slab what the column holds there. What is
+/// printed is not what Verus checks, and the printing itself is outside
+/// of what it checks: this test is all there is for it. (It prints to the
+/// standard output, so the test reads that of a process that runs
+/// `dump_slabs_child`. Not on wasm32, which starts no process.)
+#[cfg(not(target_family = "wasm"))]
+#[test]
+fn dump_slabs_prints_each_slab() {
+    let printed = |api: &str| -> Vec<String> {
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "dump_slabs_child",
+                "--nocapture",
+                "--test-threads=1",
+            ])
+            .env(DUMP_API, api)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8(out.stdout)
+            .unwrap()
+            .lines()
+            .filter(|l| l.starts_with("== ") || l.starts_with("  slab["))
+            .map(String::from)
+            .collect()
+    };
+    let mut expected = vec![];
+    for_each_kind!(layout_lines, &mut expected);
+    // more slabs than columns: many of the columns have several
+    let columns = expected.iter().filter(|l| l.starts_with("== ")).count();
+    assert_eq!(columns, 17 * 17);
+    assert!(expected.len() > 20 * columns);
+    for api in ["new", "old"] {
+        let lines = printed(api);
+        for (i, (said, want)) in lines.iter().zip(&expected).enumerate() {
+            assert_eq!(said, want, "line {i} of the {api} API");
+        }
+        assert_eq!(lines.len(), expected.len(), "lines of the {api} API");
+    }
+}
+
+/// The layout tools on wasm32 too, where `dump_slabs` is not read: the
+/// columns of `layouts` pass every check.
+#[test]
+fn the_layout_of_a_column() {
+    let mut lines = vec![];
+    for_each_kind!(layout_lines, &mut lines);
+    assert!(lines.iter().any(|l| l.starts_with("  slab[7]")));
+}
+
+/// What `check_invariants` says of a loaded column. A load cuts slabs of
+/// half the budget and leaves the rest to the last slab, which may be
+/// one that an edit would have merged into the slab before it. And
+/// `check_invariants` takes every column as one that edits have made: it
+/// panics for a column loaded so, in both APIs and with the same words,
+/// though nothing is wrong with the column. That is what `Column` does,
+/// and the verified API does the same: this test says so, it does not
+/// say that it should be so.
+#[cfg(panic = "unwind")]
+#[test]
+fn check_invariants_takes_a_loaded_column_as_edited() {
+    let model: Vec<u64> = (0..70).collect();
+    let (v, c) = both(&model);
+    assert_eq!(v.slab_segments(), [64, 6]);
+    check(&v, &c, &model);
+    let (v, c) = load_both_with::<u64>(&v.save(), None, None, None).unwrap();
+    assert_eq!(v.slab_segments(), [32, 32, 6]);
+    assert_eq!(c.slab_segments(), [32, 32, 6]);
+    let new = panic_of(std::panic::AssertUnwindSafe(|| v.check_invariants())).unwrap();
+    let old = panic_of(std::panic::AssertUnwindSafe(|| c.check_invariants())).unwrap();
+    assert_eq!(
+        new,
+        "slabs 1 and 2 (32 and 6 segments) should have been merged (min 16, max 64)"
+    );
+    assert_eq!(new, old);
+    check_loaded(&v, &c, &model);
+    // a column of the same values that is loaded in slabs of a size
+    // that leaves the last one long enough passes
+    let (w, d) = load_both_with::<u64>(&v.save(), None, None, Some(140)).unwrap();
+    assert_eq!(w.slab_segments(), [70]);
+    check(&w, &d, &model);
+    // an edit away from the short slab leaves it as it is; an edit next
+    // to it merges it, and then the column passes
+    let (mut v, mut c, mut model) = (v, c, model);
+    for (at, x, after) in [(0, 1000, vec![33, 32, 6]), (41, 2000, vec![33, 39])] {
+        v.insert(at, x);
+        c.insert(at, x);
+        model.insert(at, x);
+        assert_eq!(v.slab_segments(), after);
+        assert_eq!(c.slab_segments(), after);
+        let new = panic_of(std::panic::AssertUnwindSafe(|| v.check_invariants()));
+        assert_eq!(new.is_some(), after.len() == 3);
+        check_loaded(&v, &c, &model);
+    }
+    check(&v, &c, &model);
+}
+
+/// The edge of a merge. An edit merges two neighbours, one of them short
+/// of the least a slab should hold, if they fit the budget together, also
+/// if they fill it exactly. With one run more it leaves them alone, and
+/// `check_invariants` has nothing against them. The neighbours here are
+/// the first and the last slab of a loaded column, once the slab between
+/// them is deleted.
+///
+/// (Neighbours that fill the budget exactly and are not merged, which
+/// `check_invariants` is to complain of, are in no test: no load and no
+/// edit was found to leave such.)
+#[test]
+fn neighbours_at_the_edge_of_a_merge() {
+    for (grow, after) in [(26, vec![64]), (27, vec![59, 6])] {
+        let mut model: Vec<u64> = (0..70).collect();
+        let (v, _) = both(&model);
+        let (mut v, mut c) = load_both_with::<u64>(&v.save(), None, None, None).unwrap();
+        // runs of their own in the first slab: the others are left alone
+        for k in 0..grow {
+            let x = 1000 + k as u64;
+            v.insert(0, x);
+            c.insert(0, x);
+            model.insert(0, x);
+        }
+        assert_eq!(v.slab_segments(), [32 + grow, 32, 6]);
+        assert_eq!(c.slab_segments(), [32 + grow, 32, 6]);
+        check_loaded(&v, &c, &model);
+        let lens = v.slab_lens();
+        v.splice(lens[0], lens[1], &[]);
+        c.splice(lens[0], lens[1], Vec::<u64>::new());
+        model.drain(lens[0]..lens[0] + lens[1]);
+        // the budget is 64 runs, and 16 the least a slab should hold
+        assert_eq!(v.slab_segments(), after);
+        assert_eq!(c.slab_segments(), after);
+        check(&v, &c, &model);
+    }
+}
+
+/// A panic in the middle of an edit leaves a column without its values.
+/// The layout tools take it as an empty column of no slab, in both APIs,
+/// and `check_invariants` has nothing to say against it. (One of the
+/// panics that `the_longest_runs` looks at, so on 64 bits only.)
+#[cfg(target_pointer_width = "64")]
+#[test]
+fn the_layout_after_a_panic_in_an_edit() {
+    let most = i64::MAX as usize;
+    let mut v = VerifiedColumn::<u64>::new();
+    v.splice_runs(
+        0,
+        0,
+        [Run {
+            count: most,
+            value: 7,
+        }],
+    );
+    let mut c = Column::<u64>::new();
+    c.splice_runs(
+        0,
+        0,
+        [Run {
+            count: most,
+            value: 7u64,
+        }],
+    );
+    assert_eq!((v.slab_lens(), v.slab_segments()), (vec![most], vec![1]));
+    assert_eq!((c.slab_lens(), c.slab_segments()), (vec![most], vec![1]));
+    v.check_invariants();
+    c.check_invariants();
+    assert!(v.validate_encoding().is_ok() && c.validate_encoding().is_ok());
+
+    let new = panic_of(std::panic::AssertUnwindSafe(|| v.push(7))).unwrap();
+    let old = panic_of(std::panic::AssertUnwindSafe(|| c.push(7))).unwrap();
+    assert!(new.contains("is not encodable"), "{new}");
+    assert_eq!(new, old);
+    assert_eq!((v.len(), c.len()), (0, 0));
+    assert_eq!((v.slab_count(), c.slab_count()), (0, 0));
+    assert_eq!((v.slab_lens(), v.slab_segments()), (vec![], vec![]));
+    assert_eq!((c.slab_lens(), c.slab_segments()), (vec![], vec![]));
+    v.check_invariants();
+    c.check_invariants();
+    assert!(v.validate_encoding().is_ok() && c.validate_encoding().is_ok());
+    assert_eq!(format!("{v:?}"), format!("Verified{c:?}"));
+    // and neither takes an edit any more
+    let new = panic_of(std::panic::AssertUnwindSafe(|| v.push(7))).unwrap();
+    let old = panic_of(std::panic::AssertUnwindSafe(|| c.push(7))).unwrap();
+    assert!(new.contains("after a panic"), "{new}");
+    assert_eq!(new, old);
 }

@@ -82,6 +82,10 @@
 //!   that encoding after what a buffer holds, which it keeps, and
 //!   [`save_to_unless`](VerifiedColumn::save_to_unless) writes nothing
 //!   where every value is the one given;
+//! * [`validate_encoding`](VerifiedColumn::validate_encoding) saves the
+//!   column and reads the bytes through, and returns no error for a
+//!   column that saves to less than 4 GiB: what it looks for at run
+//!   time is proved of `save`;
 //! * [`load`](VerifiedColumn::load) gives a column only for valid bytes,
 //!   and then the column of their values; and it does give one for all
 //!   valid bytes short of 4 GiB that hold values a `usize` can count
@@ -92,13 +96,15 @@
 //!   many. Given a fill value too, it makes of no bytes a column of the
 //!   value that many times, for every length a column can have
 //!   (`fill_of` says when); for a longer one it returns an error, since
-//!   no bytes are the saved column of no values (`lemma_no_bytes`).
+//!   no bytes are the saved column of no values (`lemma_no_bytes`);
+//! * [`slab_lens`](VerifiedColumn::slab_lens) gives numbers that add up
+//!   to the column's length (`sum_of`).
 //!
 //! `valid`, `values`, `encoding` and `loadable` are specification
 //! functions of a column type (`VerifiedColumn::<V>::valid(bytes)`),
 //! `size_bound` is one of a value type (for byte strings it counts their
-//! bytes, as `total_len` of them), `only`, `run_values` and `fill_of` are
-//! of this module, and `lemma_save_unique`, `lemma_encoding`,
+//! bytes, as `total_len` of them), `only`, `run_values`, `fill_of` and
+//! `sum_of` are of this module, and `lemma_save_unique`, `lemma_encoding`,
 //! `lemma_no_bytes`, `lemma_run_values_push` and `lemma_run_values_add`
 //! are lemmas: they exist only for Verus, and a normal build compiles
 //! them away. What options hold is said by `length()`, `fill()` and
@@ -122,12 +128,16 @@
 //! saved, and they refuse the same bytes with the same error.
 //!
 //! How a column lies in memory is no part of any specification:
-//! [`slab_count`](VerifiedColumn::slab_count) and what `Debug` prints
-//! tell of it and promise nothing. After the same edits a
-//! `VerifiedColumn` has the slabs of a [`Column`](crate::Column), which
-//! is tested too, but for one case: a column that
-//! [`clear`](VerifiedColumn::clear) has emptied has no slab, where
-//! `Column` keeps an empty one, until the next edit.
+//! [`slab_count`](VerifiedColumn::slab_count),
+//! [`slab_lens`](VerifiedColumn::slab_lens),
+//! [`slab_segments`](VerifiedColumn::slab_segments) and what
+//! [`dump_slabs`](VerifiedColumn::dump_slabs) and `Debug` print tell of
+//! it, and promise nothing but that the lengths add up. After the same
+//! edits a `VerifiedColumn` has the slabs of a
+//! [`Column`](crate::Column), each as long and of as many runs, and
+//! `dump_slabs` prints the same lines. That is tested too, but for one
+//! case: a column that [`clear`](VerifiedColumn::clear) has emptied has
+//! no slab, where `Column` keeps an empty one, until the next edit.
 //!
 //! # What is trusted
 //!
@@ -172,6 +182,21 @@
 //! a path through this API is checked. The options of a load
 //! ([`LoadOpts`]) are one type for both APIs, and are checked too:
 //! nothing is assumed of what they hold.
+//!
+//! Three functions of a column are not checked, and nothing is specified
+//! of them. They read the column through checked functions that ask
+//! nothing of a caller, and then print or compare: `Debug`;
+//! [`dump_slabs`](VerifiedColumn::dump_slabs), whose printing of what
+//! checked code has read of each slab is not checked; and
+//! `check_invariants`, a tool for tests that these docs leave out, as
+//! [`Column`](crate::Column)'s do. It looks at run time for what is
+//! proved of every column (a slab's bytes hold the values and runs it
+//! counts, and the index counts the slabs' lengths) and for the layout
+//! policy, which is not proved (a slab's runs are within the budget,
+//! and no two neighbours should have been merged), and panics if it
+//! finds otherwise. As `Column`'s, it takes every column as one that
+//! edits have made, and panics for some that were loaded: a load leaves
+//! a short last slab unmerged.
 //!
 //! That a load returns an error for what a column cannot hold, and does
 //! not panic, is not proved: Verus is not asked to show that the helpers
@@ -224,6 +249,7 @@ use crate::cursor::{lemma_lens_ok, lemma_vals_own, lemma_vals_unit, slab_lens};
 use crate::cursor::{ReadsAgree, RunFeed, Slabs};
 #[cfg(verus_keep_ghost)]
 use crate::fenwick::sum;
+use crate::index::IndexOps;
 #[cfg(verus_keep_ghost)]
 use crate::iter_core::{lemma_from, lens_ok, vals_of};
 use crate::iter_core::{Decode, Decoders, ICore};
@@ -1069,6 +1095,81 @@ pub open spec fn only<S>(vs: Seq<S>, v: S) -> bool {
     forall|i: int| 0 <= i < vs.len() ==> vs[i] == v
 }
 
+/// The numbers `lens` added up: how many values slabs of those lengths
+/// hold between them.
+pub open spec fn sum_of(lens: Seq<usize>) -> nat
+    decreases lens.len(),
+{
+    if lens.len() == 0 {
+        0
+    } else {
+        sum_of(lens.drop_last()) + lens.last() as nat
+    }
+}
+
+/// How many values a slab holds.
+fn len_of<T: Copy + Clone + std::fmt::Debug + Default>(s: &Slab<T>) -> (n: usize)
+    ensures
+        n == s.len,
+{
+    s.len
+}
+
+/// How many runs a slab holds.
+fn segments_in<T: Copy + Clone + std::fmt::Debug + Default>(s: &Slab<T>) -> usize {
+    s.segments
+}
+
+/// The lengths of slabs, collected as [`Column`](crate::Column) collects
+/// them. The functions mapped have names because Verus proves nothing of
+/// a closure here whose argument is of a generic type.
+#[inline]
+fn lens_of<T: Copy + Clone + std::fmt::Debug + Default>(slabs: &[Slab<T>]) -> (r: Vec<usize>)
+    ensures
+        r@.len() == slabs@.len(),
+        forall|k: int| 0 <= k < r@.len() ==> r@[k] == (#[trigger] slabs@[k]).len,
+{
+    let it = slabs.iter();
+    let r: Vec<usize> = it.map(len_of::<T>).collect();
+    proof {
+        assert forall|k: int| 0 <= k < r@.len() implies r@[k] == (#[trigger] slabs@[k]).len by {
+            assert(*it.remaining()[k] == slabs@[k]);
+        }
+    }
+    r
+}
+
+/// The segment counts of slabs, collected likewise.
+#[inline]
+fn segments_of<T: Copy + Clone + std::fmt::Debug + Default>(slabs: &[Slab<T>]) -> Vec<usize> {
+    slabs.iter().map(segments_in::<T>).collect()
+}
+
+/// Numbers that are the lengths of slabs add up as the slabs' lengths do.
+proof fn lemma_sum_of_lens<T: Copy + Clone + std::fmt::Debug + Default>(lens: Seq<usize>, slabs: Seq<Slab<T>>, k: int)
+    requires
+        lens.len() == slabs.len(),
+        forall|i: int| 0 <= i < lens.len() ==> lens[i] == (#[trigger] slabs[i]).len,
+        0 <= k <= lens.len(),
+    ensures
+        sum_of(lens.take(k)) == sum(slab_lens(slabs), 0, k),
+    decreases k,
+{
+    if k > 0 {
+        lemma_sum_of_lens(lens, slabs, k - 1);
+        assert(lens.take(k).drop_last() =~= lens.take(k - 1));
+    }
+}
+
+/// What [`VerifiedColumn::dump_slabs`] prints of a slab: the values and
+/// the runs it counts, its first run and its last.
+struct SlabRuns<G> {
+    len: usize,
+    segments: usize,
+    first: Option<Run<G>>,
+    last: Option<Run<G>>,
+}
+
 /// A column of values of type `V`: the sequence `self@`. Its numbers are
 /// written with the codec `C`.
 pub struct VerifiedColumn<V: VValue<C>, C: VCodec = Leb128> {
@@ -1633,6 +1734,91 @@ impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
         self.core.slabs().len()
     }
 
+    /// How many values each slab holds, slab by slab. They add up to the
+    /// column's length (`sum_of`). How the values are spread over the
+    /// slabs is a fact of how the column lies in memory: nothing else is
+    /// specified of it.
+    pub fn slab_lens(&self) -> (r: Vec<usize>)
+        ensures
+            sum_of(r@) == self@.len(),
+    {
+        self.core.lemma_column();
+        let slabs = self.core.slabs();
+        proof {
+            <Held<V, C> as VGet>::lemma_svs(self.core@);
+        }
+        let r = lens_of(slabs);
+        proof {
+            lemma_sum_of_lens(r@, slabs@, r@.len() as int);
+            assert(r@.take(r@.len() as int) =~= r@);
+        }
+        r
+    }
+
+    /// How many runs each slab holds, slab by slab. That is a fact of
+    /// how the column lies in memory: nothing is specified of it.
+    pub fn slab_segments(&self) -> Vec<usize> {
+        segments_of(self.core.slabs())
+    }
+
+    /// Slab `i` as [`dump_slabs`](Self::dump_slabs) prints it: the
+    /// counts it holds, its first run and its last, which are `None` for
+    /// a slab of no values. `None` if the column has no slab `i`.
+    // a Verus loop with an invariant: `loop` + `match`
+    #[allow(clippy::while_let_loop)]
+    fn slab_runs(&self, i: usize) -> Option<SlabRuns<Get<'_, V>>> {
+        self.core.lemma_column();
+        let slabs = self.core.slabs();
+        if i >= slabs.len() {
+            return None;
+        }
+        proof {
+            lemma_lens_ok::<V::E, V::X>(slabs@);
+        }
+        let s = &slabs[i];
+        let mut d = <V::X as Decoders>::open(s);
+        let first = d.d_run_max(usize::MAX);
+        let mut last = first;
+        if first.is_some() {
+            loop
+                invariant
+                    d.inv(),
+                decreases d.rest().len(),
+            {
+                match d.d_run_max(usize::MAX) {
+                    Some(run) => {
+                        last = Some(run);
+                    },
+                    None => {
+                        break ;
+                    },
+                }
+            }
+        }
+        Some(SlabRuns { len: s.len, segments: s.segments, first, last })
+    }
+
+    /// How many slabs the column's index counts. For a column that
+    /// holds values: an emptied one may be without its index (after a
+    /// panic in an edit), and this panics then.
+    fn index_len(&self) -> usize {
+        self.core.lemma_column();
+        self.core.index().ix_len()
+    }
+
+    /// How many values the column's index counts before slab `i`, or
+    /// `None` if it counts fewer than `i` slabs. For a column that holds
+    /// values, as [`index_len`](Self::index_len).
+    fn index_before(&self, i: usize) -> Option<usize> {
+        self.core.lemma_column();
+        let ix = self.core.index();
+        if i <= ix.ix_len() {
+            Some(ix.ix_before(i))
+        } else {
+            None
+        }
+    }
+
     /// A reader of the values `start..end`.
     #[inline(always)]
     fn reader(&self, start: usize, end: usize) -> (it: ICore<<V::X as Decoders<'_>>::D>)
@@ -1910,6 +2096,26 @@ impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
         }
     }
 
+    /// Save the column and read the bytes through, as a load does: an
+    /// error if they are not a saved column.
+    ///
+    /// That they are one is proved of [`save`](Self::save). So this
+    /// returns no error for a column that saves to less than 4 GiB, as
+    /// one does whose values' `size_bound` is less. (A longer column
+    /// saves to a saved column too. But its last run may be more bytes
+    /// than a slab can count, and the read refuses that.)
+    pub fn validate_encoding(&self) -> (r: Result<(), PackError>)
+        ensures
+            Self::encoding(self@).len() <= u32::MAX ==> r is Ok,
+            V::size_bound(self@) <= u32::MAX ==> r is Ok,
+    {
+        let bytes = self.save();
+        match <V::E as Model<V::X>>::validate(bytes.as_slice()) {
+            Ok(_) => Ok(()),
+            Err(e) => Err(e),
+        }
+    }
+
     /// The column saved as `bytes`. An error unless `bytes` is a saved
     /// column; and no error for one that is `loadable`.
     pub fn load(bytes: &[u8]) -> (r: Result<Self, PackError>)
@@ -2029,6 +2235,103 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedIter<'a, V, C> {
 }
 
 } // verus!
+
+// The two functions of this block print and compare, and Verus does not
+// check them. They read the column through checked functions that ask
+// nothing of a caller.
+impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
+    /// Print a line for each slab, as [`Column`](crate::Column) does:
+    /// where in the column the slab starts, how many values and runs it
+    /// holds, its first run and its last.
+    ///
+    /// The numbers and the runs are read by checked code; the printing
+    /// is not checked. Nothing is specified of what is printed: it tells
+    /// how the column lies in memory.
+    pub fn dump_slabs<'a>(&'a self)
+    where
+        Get<'a, V>: std::fmt::Debug,
+    {
+        let mut offset = 0;
+        let mut i = 0;
+        while let Some(s) = self.slab_runs(i) {
+            log!(
+                "  slab[{i}]: offset={offset} len={} segments={} first={:?} last={:?}",
+                s.len,
+                s.segments,
+                s.first,
+                s.last
+            );
+            offset += s.len;
+            i += 1;
+        }
+    }
+
+    /// Check at run time how the column lies in memory, and panic with
+    /// what is wrong, as `Column::check_invariants` does: every slab
+    /// holds values, and no more runs than the budget (but for one value
+    /// too long to share a slab); its bytes read through as the values
+    /// and runs it counts; no two neighbours should have been merged;
+    /// the lengths add up to the column's; and the index counts the
+    /// slabs and their lengths.
+    ///
+    /// A tool for tests. Verus does not check it, and it promises
+    /// nothing. What it compares of the bytes, the lengths and the index
+    /// is proved of every column; the budget and the merging are the
+    /// layout policy, which is not proved.
+    ///
+    /// The merging is the policy of edits, and a load does not keep it:
+    /// it cuts slabs of half the budget, and the last slab holds what is
+    /// left, however little. So this panics for some columns that were
+    /// loaded, with nothing wrong with them, as `Column::check_invariants`
+    /// does for the same columns.
+    #[doc(hidden)]
+    pub fn check_invariants(&self) {
+        let slabs = self.core.slabs();
+        let max = self.core.max_segments();
+        let min = (max / 4).max(1);
+        if self.core.len() == 0 {
+            assert!(slabs.len() <= 1, "empty column holds {} slabs", slabs.len());
+            return;
+        }
+        for (i, slab) in slabs.iter().enumerate() {
+            assert_ne!(slab.len, 0, "slab {i} of {} is empty", slabs.len());
+            assert!(
+                slab.segments <= max || slab.segments == 1,
+                "slab {i} has {} segments, over the budget of {max} \
+                 (only a single oversize value may exceed it)",
+                slab.segments
+            );
+            let (len, segments) = <V::E as Model<V::X>>::validate(&slab.data)
+                .unwrap_or_else(|e| panic!("slab {i} does not parse: {e}"));
+            assert_eq!(len, slab.len, "slab {i} cached len");
+            assert_eq!(segments, slab.segments, "slab {i} cached segments");
+        }
+        for i in 1..slabs.len() {
+            let (a, b) = (slabs[i - 1].segments, slabs[i].segments);
+            assert!(
+                !((a < min || b < min) && a + b <= max),
+                "slabs {} and {i} ({a} and {b} segments) should have been merged \
+                 (min {min}, max {max})",
+                i - 1
+            );
+        }
+        assert_eq!(
+            self.core.len(),
+            slabs.iter().map(|s| s.len).sum::<usize>(),
+            "total_len"
+        );
+        assert_eq!(self.index_len(), slabs.len(), "index length");
+        let mut before = 0usize;
+        for (i, slab) in slabs.iter().enumerate() {
+            assert_eq!(
+                self.index_before(i),
+                Some(before),
+                "index items_before({i})"
+            );
+            before += slab.len;
+        }
+    }
+}
 
 impl<V: VValue<C>, C: VCodec> std::fmt::Debug for VerifiedColumn<V, C> {
     /// How many values and how many slabs, as `Column` prints itself.
