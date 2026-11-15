@@ -1286,6 +1286,7 @@ impl<'a, O: RleOps<'a>> Reader<'a, O> {
     }
 
     #[verifier::spinoff_prover]
+    #[inline(always)]
     fn next_lit_value(&mut self) -> (r: Result<Option<Seg<O::V>>, PackError>)
         requires old(self).inv(), old(self).in_lit(),
         ensures next_post(*old(self), *final(self), r),
