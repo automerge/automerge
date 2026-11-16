@@ -23,7 +23,8 @@ use super::counts::lemma_bool_size;
 #[cfg(verus_keep_ghost)]
 use super::value::{lemma_opt_sizes, lemma_plain_sizes};
 use super::value::{VOptWrite, VPack, VWrite};
-use crate::bool_edit::{BoolEdit, BoolLoader, BoolModel};
+use crate::bool_edit::{BoolEdit, BoolLoader, BoolModel, BoolRecoder};
+use crate::bool_enc::BEncoder;
 #[cfg(verus_keep_ghost)]
 use crate::bool_unique::lemma_bool_slab_unique;
 #[cfg(verus_keep_ghost)]
@@ -33,10 +34,11 @@ use crate::btree::SlabBTree;
 use crate::column::Slab;
 use crate::column_core::ColumnCore;
 #[cfg(verus_keep_ghost)]
-use crate::cursor::{all_ok, slab_lens, vals_of};
+use crate::cursor::{all_ok, lemma_vals_total, slab_lens, vals_of};
 use crate::cursor::{ReadsAgree, Slabs, Visitor};
 use crate::iter_core::{Decode, Decoders};
 use crate::load_core::LoadCore;
+use crate::remap::Encodes;
 use crate::rle::cut::Load;
 #[cfg(verus_keep_ghost)]
 use crate::rle::cut::{head_bound, lemma_slab_is_parse, small};
@@ -45,11 +47,18 @@ use crate::rle::dec::RleReads;
 use crate::rle::dec::{
     lemma_empty_slab, lemma_groups_values_concat, slab_groups, slab_values, valid_slab,
 };
+#[cfg(verus_keep_ghost)]
+use crate::rle::edit::lemma_valid_of;
 use crate::rle::edit::{RleModel, RleRebuild, Visit};
+use crate::rle::enc::REncoder;
 use crate::rle::lift::Lift;
+#[cfg(verus_keep_ghost)]
+use crate::rle::lift::{lemma_lift_encodes, lift_seq};
 #[cfg(verus_keep_ghost)]
 use crate::rle::model::{encs, group_bytes, groups_bytes, groups_len, parses, Group};
 use crate::rle::model::{RleOps, WriteOps};
+#[cfg(verus_keep_ghost)]
+use crate::rle::postfix::encodes;
 #[cfg(verus_keep_ghost)]
 use crate::rle::read::tail_fits;
 #[cfg(verus_keep_ghost)]
@@ -536,6 +545,187 @@ impl<C: CountsOf> Model<BoolReads<C>> for BoolModel<C> {
             },
             Err(e) => Err(e),
         }
+    }
+}
+
+// ── Encoders ────────────────────────────────────────────────────────────────
+
+/// A slab model with an encoder that takes values one after another,
+/// in the form `X` reads them in for the lifetime `'a`, and gives the
+/// saved column of them.
+pub(crate) trait Streams<'a, X>: Model<X> where
+    X: for <'b>Decoders<'b, Tail = <Self as Slabs>::Tail>,
+ {
+    /// The encoder. What it keeps, what it has been given, and how it
+    /// takes a run are [`Encodes`]'s to say.
+    type Enc: Encodes<Self>;
+
+    /// An encoder that has been given nothing. It has no segment
+    /// budget, so it cuts no slab.
+    fn fresh() -> (e: Self::Enc)
+        ensures
+            e.e_inv(),
+            e.e_values().len() == 0,
+    ;
+
+    /// How many values the encoder has been given.
+    fn count(e: &Self::Enc) -> (n: usize)
+        requires
+            e.e_inv(),
+        ensures
+            n == e.e_values().len(),
+    ;
+
+    /// A value as it is read, for the encoder to take: it takes what
+    /// the value is owned.
+    fn given(v: <<X as Decoders<'a>>::D as Decode>::Item) -> (x: <Self::Enc as Encodes<Self>>::In)
+        ensures
+            <Self::Enc as Encodes<Self>>::val(x) == <Self as ReadsAgree<'a, X>>::own(v),
+    ;
+
+    /// The saved column of the values the encoder was given.
+    fn bytes(e: Self::Enc) -> (r: Vec<u8>)
+        requires
+            e.e_inv(),
+        ensures
+            Self::valid(r@),
+            Self::values(r@) == e.e_values(),
+    ;
+
+    /// The saved column of the values the encoder was given, appended
+    /// to `out`.
+    fn write(e: Self::Enc, out: &mut Vec<u8>)
+        requires
+            e.e_inv(),
+        ensures
+            old(out)@.len() <= final(out)@.len(),
+            final(out)@.take(old(out)@.len() as int) == old(out)@,
+            ({
+                let x = final(out)@.skip(old(out)@.len() as int);
+                &&& Self::valid(x)
+                &&& Self::values(x) == e.e_values()
+            }),
+    ;
+}
+
+impl<'a, L, O> Streams<'a, RleReads<O>> for RleModel<L> where
+    L: Plain + for <'s>Lift<'s, W = L> + for <'s>WriteOps<'s, R = O>,
+    O: for <'b>RleOps<'b>,
+ {
+    type Enc = REncoder<'a, L>;
+
+    #[inline(always)]
+    fn fresh() -> (e: REncoder<'a, L>) {
+        REncoder::new()
+    }
+
+    #[inline(always)]
+    fn count(e: &REncoder<'a, L>) -> (n: usize) {
+        e.len
+    }
+
+    #[inline(always)]
+    fn given(v: VOf<'a, L>) -> (x: <L as WriteOps<'a>>::Cow) {
+        <L as WriteOps<'a>>::cow_ref(v)
+    }
+
+    #[inline(always)]
+    fn bytes(e: REncoder<'a, L>) -> (r: Vec<u8>) {
+        let mut e = e;
+        if e.slabs.len() == 0 {
+            // no slab was cut: the bytes in hand are the column
+            let ghost cur = e.cur@;
+            let r = e.take_bytes();
+            proof {
+                let segs = choose|segs: int| encodes::<<L as WriteOps<'a>>::R>(r@, cur, segs);
+                lemma_lift_encodes::<L>(r@, cur, segs);
+                lemma_valid_of::<O>(r@, lift_seq::<L>(cur), segs);
+            }
+            return r;
+        }
+        let total = e.len;
+        let slabs = e.take_slabs();
+        let mut out: Vec<u8> = Vec::new();
+        crate::rle::edit::save_slabs::<L>(slabs.as_slice(), total, &mut out);
+        proof {
+            assert(out@.skip(0) =~= out@);
+        }
+        out
+    }
+
+    #[inline(always)]
+    fn write(e: REncoder<'a, L>, out: &mut Vec<u8>) {
+        let mut e = e;
+        if e.slabs.len() == 0 {
+            let ghost cur = e.cur@;
+            let ghost o0 = out@;
+            let r = e.take_bytes();
+            out.extend_from_slice(r.as_slice());
+            proof {
+                let segs = choose|segs: int| encodes::<<L as WriteOps<'a>>::R>(r@, cur, segs);
+                lemma_lift_encodes::<L>(r@, cur, segs);
+                lemma_valid_of::<O>(r@, lift_seq::<L>(cur), segs);
+                assert(out@.skip(o0.len() as int) =~= r@);
+                assert(out@.take(o0.len() as int) =~= o0);
+            }
+            return ;
+        }
+        let total = e.len;
+        let slabs = e.take_slabs();
+        crate::rle::edit::save_slabs::<L>(slabs.as_slice(), total, out);
+    }
+}
+
+impl<'a, C: CountsOf> Streams<'a, BoolReads<C>> for BoolModel<C> {
+    type Enc = BoolRecoder<C>;
+
+    #[inline(always)]
+    fn fresh() -> (e: BoolRecoder<C>) {
+        BoolRecoder(BEncoder::new::<C::K>(None), PhantomData)
+    }
+
+    #[inline(always)]
+    fn count(e: &BoolRecoder<C>) -> (n: usize) {
+        e.0.state.len
+    }
+
+    #[inline(always)]
+    fn given(v: bool) -> (x: bool) {
+        v
+    }
+
+    #[inline(always)]
+    fn bytes(e: BoolRecoder<C>) -> (r: Vec<u8>) {
+        let mut e = e;
+        if e.0.slabs.len() == 0 {
+            return e.0.into_bytes::<C::K>();
+        }
+        let total = e.0.state.len;
+        let slabs = <BoolRecoder<C> as Encodes<BoolModel<C>>>::take(&mut e);
+        proof {
+            lemma_vals_total::<BoolModel<C>>(slabs@);
+        }
+        let mut out: Vec<u8> = Vec::new();
+        crate::bool_edit::save_slabs::<C>(slabs.as_slice(), total, &mut out);
+        proof {
+            assert(out@.skip(0) =~= out@);
+        }
+        out
+    }
+
+    #[inline(always)]
+    fn write(e: BoolRecoder<C>, out: &mut Vec<u8>) {
+        let mut e = e;
+        if e.0.slabs.len() == 0 {
+            e.0.write_to::<C::K>(out);
+            return ;
+        }
+        let total = e.0.state.len;
+        let slabs = <BoolRecoder<C> as Encodes<BoolModel<C>>>::take(&mut e);
+        proof {
+            lemma_vals_total::<BoolModel<C>>(slabs@);
+        }
+        crate::bool_edit::save_slabs::<C>(slabs.as_slice(), total, out);
     }
 }
 

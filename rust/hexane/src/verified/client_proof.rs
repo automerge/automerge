@@ -97,13 +97,35 @@
 //! [`resumed_on_any`]); the state of an iterator of no column is
 //! promised no column ([`of_no_column`]).
 //!
+//! And of a [`VerifiedEncoder`]: that values appended one by one are
+//! saved as a column of them, in the one encoding of them
+//! ([`encoded_as_saved`]), so that an encoder and a column save the same
+//! bytes for the same values ([`encoder_or_column`]), and what an
+//! encoder saves loads as a column of the values it was given
+//! ([`encode_then_load`]); that a column read into an encoder by its
+//! iterator is saved as the column saves itself ([`reencoded`]); that
+//! runs given with `append_n` are saved as their values
+//! ([`encoded_by_runs`]); that each way an encoder takes a value gives
+//! it that value, of numbers and of byte strings, borrowed and owned
+//! ([`encode_numbers`], [`encode_strings`]); and that a client can keep
+//! encoders between calls, hand them to its functions and write them
+//! one after another into one buffer, where each is found again
+//! ([`log_both`], [`Rows`], [`rows_written`]). An encoder's functions
+//! require of it that it is one (`wf()`), which `new` says and each
+//! function keeps: the loops and the signatures of these clients carry
+//! it. And each function of an encoder says each of these things on its
+//! own ([`told_by_a_new_encoder`], [`told_by_the_count`],
+//! [`told_by_an_append`], [`told_by_an_append_n`], [`told_by_an_owned`],
+//! [`told_by_owned_n`], [`told_by_an_extend`],
+//! [`told_by_an_encoders_save`], [`told_by_an_encoders_save_to`]).
+//!
 //! This module exists only while Verus checks the crate.
 
 use super::{
     below_at, bytes_below, folded, head_run, lemma_run_values_add, lemma_run_values_push,
     lemma_runs_first, lemma_runs_of_values, lemma_sorted, mapped, only, refused, run_values,
     runs_of, sorted, sorted_for, sum_of, total_len, window, Get, VCodec, VGet, VNewtype, VSpec,
-    VValue, VerifiedColumn, VerifiedIter, VerifiedIterState,
+    VValue, VerifiedColumn, VerifiedEncoder, VerifiedIter, VerifiedIterState,
 };
 use crate::{Leb128, LoadOpts, PackError, Run};
 use std::cmp::Ordering;
@@ -2801,6 +2823,446 @@ fn step_both(numbers: &VerifiedColumn<u64>, flags: &VerifiedColumn<bool>, p: Pau
     match (a.next(), b.next()) {
         (Some(x), Some(y)) => Some((x, y, Paused { numbers: a.suspend(), flags: b.suspend() })),
         _ => None,
+    }
+}
+
+// ── The encoder ─────────────────────────────────────────────────────────────
+/// What `new` and `default` say of the encoder they give.
+#[allow(dead_code)]
+fn told_by_a_new_encoder<'a, V: VValue<C>, C: VCodec>() -> (r: (VerifiedEncoder<'a, V, C>, VerifiedEncoder<'a, V, C>))
+    ensures
+        r.0.wf(),
+        r.0@.len() == 0,
+        r.1.wf(),
+        r.1@.len() == 0,
+{
+    let a = VerifiedEncoder::<V, C>::new();
+    let b = VerifiedEncoder::<V, C>::default();
+    (a, b)
+}
+
+/// What `len` and `is_empty` say.
+#[allow(dead_code)]
+fn told_by_the_count<'a, V: VValue<C>, C: VCodec>(enc: &VerifiedEncoder<'a, V, C>) -> (r: (usize, bool))
+    requires
+        enc.wf(),
+    ensures
+        r.0 == enc@.len(),
+        r.1 == (enc@.len() == 0),
+{
+    (enc.len(), enc.is_empty())
+}
+
+/// What `append` says: the encoder is one still, and has one value
+/// more, the one given, after those it had.
+#[allow(dead_code)]
+fn told_by_an_append<'a, V: VValue<C>, C: VCodec>(enc: &mut VerifiedEncoder<'a, V, C>, v: Get<'a, V>)
+    requires
+        old(enc).wf(),
+    ensures
+        final(enc).wf(),
+        final(enc)@.len() == old(enc)@.len() + 1,
+        final(enc)@.last() == v.sv(),
+        final(enc)@.drop_last() == old(enc)@,
+{
+    enc.append(v);
+    assert(enc@.drop_last() =~= old(enc)@);
+}
+
+/// What `append_n` says: `n` values more, each the one given, after
+/// those the encoder had.
+#[allow(dead_code)]
+fn told_by_an_append_n<'a, V: VValue<C>, C: VCodec>(enc: &mut VerifiedEncoder<'a, V, C>, v: Get<'a, V>, n: usize)
+    requires
+        old(enc).wf(),
+    ensures
+        final(enc).wf(),
+        final(enc)@.len() == old(enc)@.len() + n,
+        final(enc)@.take(old(enc)@.len() as int) == old(enc)@,
+        forall|i: int| old(enc)@.len() <= i < final(enc)@.len() ==> final(enc)@[i] == v.sv(),
+{
+    enc.append_n(v, n);
+    assert(enc@.take(old(enc)@.len() as int) =~= old(enc)@);
+}
+
+/// What `append_owned` says: as `append`, of the value handed over.
+#[allow(dead_code)]
+fn told_by_an_owned<'a, V: VValue<C>, C: VCodec>(enc: &mut VerifiedEncoder<'a, V, C>, w: V)
+    requires
+        old(enc).wf(),
+    ensures
+        final(enc).wf(),
+        final(enc)@.len() == old(enc)@.len() + 1,
+        final(enc)@.last() == V::sv_of(w),
+        final(enc)@.drop_last() == old(enc)@,
+{
+    enc.append_owned(w);
+    assert(enc@.drop_last() =~= old(enc)@);
+}
+
+/// What `append_n_owned` says: as `append_n`, of the value handed over.
+#[allow(dead_code)]
+fn told_by_owned_n<'a, V: VValue<C>, C: VCodec>(enc: &mut VerifiedEncoder<'a, V, C>, w: V, n: usize)
+    requires
+        old(enc).wf(),
+    ensures
+        final(enc).wf(),
+        final(enc)@.len() == old(enc)@.len() + n,
+        final(enc)@.take(old(enc)@.len() as int) == old(enc)@,
+        forall|i: int| old(enc)@.len() <= i < final(enc)@.len() ==> final(enc)@[i] == V::sv_of(w),
+{
+    enc.append_n_owned(w, n);
+    assert(enc@.take(old(enc)@.len() as int) =~= old(enc)@);
+}
+
+/// What `extend` says of a vector handed over: its values, after those
+/// the encoder had.
+#[allow(dead_code)]
+fn told_by_an_extend<'a, V: VValue<C>, C: VCodec>(enc: &mut VerifiedEncoder<'a, V, C>, vs: Vec<Get<'a, V>>)
+    requires
+        old(enc).wf(),
+    ensures
+        final(enc).wf(),
+        final(enc)@ == old(enc)@ + VGet::svs(vs@),
+{
+    enc.extend(vs);
+}
+
+/// What an encoder's `save` says: the bytes are a saved column, of the
+/// values given, the one encoding of them, and within the bound of
+/// their size.
+#[allow(dead_code)]
+fn told_by_an_encoders_save<'a, V: VValue<C>, C: VCodec>(enc: VerifiedEncoder<'a, V, C>) -> (r: Vec<u8>)
+    requires
+        enc.wf(),
+    ensures
+        VerifiedColumn::<V, C>::valid(r@),
+        VerifiedColumn::<V, C>::values(r@) == enc@,
+        r@ == VerifiedColumn::<V, C>::encoding(enc@),
+        r@.len() <= V::size_bound(enc@),
+{
+    enc.save()
+}
+
+/// What an encoder's `save_to` says: the buffer is what it was and then
+/// the encoding of the values given, which is a saved column of them
+/// within the bound of their size, and the range returned is where.
+#[allow(dead_code)]
+fn told_by_an_encoders_save_to<'a, V: VValue<C>, C: VCodec>(enc: VerifiedEncoder<'a, V, C>, out: &mut Vec<u8>) -> (r:
+    Range<usize>)
+    requires
+        enc.wf(),
+    ensures
+        final(out)@ == old(out)@ + VerifiedColumn::<V, C>::encoding(enc@),
+        VerifiedColumn::<V, C>::valid(VerifiedColumn::<V, C>::encoding(enc@)),
+        VerifiedColumn::<V, C>::values(VerifiedColumn::<V, C>::encoding(enc@)) == enc@,
+        VerifiedColumn::<V, C>::encoding(enc@).len() <= V::size_bound(enc@),
+        r.start == old(out)@.len(),
+        r.end == final(out)@.len(),
+{
+    enc.save_to(out)
+}
+
+/// Values appended one by one are saved as a column of them: the bytes
+/// are a saved column, of those values, and the one encoding of them.
+/// The loop carries `enc.wf()`, and what the encoder has been given so
+/// far.
+#[allow(dead_code)]
+fn encoded_as_saved<'v, V: VValue<C>, C: VCodec>(input: &Vec<Get<'v, V>>) -> (r: Vec<u8>)
+    ensures
+        VerifiedColumn::<V, C>::valid(r@),
+        VerifiedColumn::<V, C>::values(r@) == VGet::svs(input@),
+        r@ == VerifiedColumn::<V, C>::encoding(VGet::svs(input@)),
+        r@.len() <= V::size_bound(VGet::svs(input@)),
+{
+    let mut enc = VerifiedEncoder::<V, C>::new();
+    let mut i: usize = 0;
+    proof {
+        VGet::lemma_svs(input@.take(0));
+        assert(enc@ =~= VGet::svs(input@.take(0)));
+    }
+    while i < input.len()
+        invariant
+            enc.wf(),
+            i <= input@.len(),
+            enc@ == VGet::svs(input@.take(i as int)),
+        decreases input@.len() - i,
+    {
+        enc.append(input[i]);
+        proof {
+            VGet::lemma_svs(input@.take(i as int));
+            VGet::lemma_svs(input@.take(i + 1));
+            assert(enc@ =~= VGet::svs(input@.take(i + 1)));
+        }
+        i += 1;
+    }
+    proof {
+        assert(input@.take(i as int) =~= input@);
+    }
+    enc.save()
+}
+
+/// An encoder and a column save the same bytes for the same values.
+#[allow(dead_code)]
+fn encoder_or_column<'v, V: VValue<C>, C: VCodec>(input: &Vec<Get<'v, V>>) {
+    let a = encoded_as_saved::<V, C>(input);
+    let col = VerifiedColumn::<V, C>::from_values(input.as_slice());
+    let b = col.save();
+    assert(a@ == b@);
+}
+
+/// What an encoder saves loads as a column of the values given, where
+/// their number and size are a column's to load.
+#[allow(dead_code)]
+fn encode_then_load<'v, V: VValue<C>, C: VCodec>(input: &Vec<Get<'v, V>>) -> (r: VerifiedColumn<V, C>)
+    requires
+        V::size_bound(VGet::svs(input@)) <= 0xffff_fff5,
+        input@.len() <= usize::MAX - 3,
+    ensures
+        r@ == VGet::svs(input@),
+{
+    let bytes = encoded_as_saved::<V, C>(input);
+    proof {
+        VGet::lemma_svs(input@);
+    }
+    let back = VerifiedColumn::<V, C>::load(bytes.as_slice());
+    assert(back is Ok);
+    back.unwrap()
+}
+
+/// A column's values, given to an encoder by the column's iterator, are
+/// saved as the column saves them.
+#[allow(dead_code)]
+fn reencoded<V: VValue<C>, C: VCodec>(col: &VerifiedColumn<V, C>) -> (r: Vec<u8>)
+    ensures
+        r@ == VerifiedColumn::<V, C>::encoding(col@),
+{
+    let mut enc = VerifiedEncoder::<V, C>::new();
+    enc.extend(col.iter());
+    let bytes = col.save();
+    let r = enc.save();
+    assert(r@ == bytes@);
+    r
+}
+
+/// Runs given to an encoder with `append_n`, run by run: what is saved
+/// holds each run's value as often as its count says.
+#[allow(dead_code)]
+fn encoded_by_runs<'v, V: VValue<C>, C: VCodec>(runs: &Vec<Run<Get<'v, V>>>) -> (r: Vec<u8>)
+    ensures
+        VerifiedColumn::<V, C>::valid(r@),
+        VerifiedColumn::<V, C>::values(r@) == run_values(runs@),
+{
+    let mut enc = VerifiedEncoder::<V, C>::new();
+    let mut i: usize = 0;
+    proof {
+        assert(enc@ =~= run_values(runs@.take(0)));
+    }
+    while i < runs.len()
+        invariant
+            enc.wf(),
+            i <= runs@.len(),
+            enc@ == run_values(runs@.take(i as int)),
+        decreases runs@.len() - i,
+    {
+        let run = &runs[i];
+        enc.append_n(run.value, run.count);
+        proof {
+            lemma_run_values_push(runs@.take(i as int), runs@[i as int]);
+            assert(runs@.take(i + 1) =~= runs@.take(i as int).push(runs@[i as int]));
+        }
+        i += 1;
+    }
+    proof {
+        assert(runs@.take(i as int) =~= runs@);
+    }
+    enc.save()
+}
+
+/// Numbers given in each of the ways an encoder takes them: what is
+/// saved holds them in the order given, and the encoder counts them.
+#[allow(dead_code)]
+fn encode_numbers() -> (r: Vec<u8>)
+    ensures
+        VerifiedColumn::<u64>::valid(r@),
+        VerifiedColumn::<u64>::values(r@) == seq![7u64, 7, 7, 9, 1, 2, 3],
+{
+    let mut enc = VerifiedEncoder::<u64>::new();
+    let none = enc.is_empty();
+    assert(none);
+    enc.append(7);
+    enc.append_n(7, 2);
+    enc.append_owned(9);
+    // no copy of a value is no value
+    enc.append_n_owned(5, 0);
+    let mut more: Vec<u64> = Vec::new();
+    more.push(1);
+    more.push(2);
+    more.push(3);
+    proof {
+        <u64 as VGet>::lemma_svs(more@);
+        assert(<u64 as VGet>::svs(more@) =~= seq![1u64, 2, 3]);
+    }
+    enc.extend(more);
+    assert(enc@ =~= seq![7u64, 7, 7, 9, 1, 2, 3]);
+    let n = enc.len();
+    assert(n == 7);
+    let none = enc.is_empty();
+    assert(!none);
+    enc.save()
+}
+
+/// Byte strings, borrowed and owned, with nulls and without: an encoder
+/// takes each, and what is saved holds their bytes.
+#[allow(dead_code)]
+fn encode_strings<'a>(a: &'a [u8], b: Vec<u8>, c: Vec<u8>) -> (r: (Vec<u8>, Vec<u8>))
+    ensures
+        VerifiedColumn::<Vec<u8>>::values(r.0@) == seq![a@, b@, a@, a@],
+        VerifiedColumn::<Option<Vec<u8>>>::values(r.1@) == seq![Some(a@), None, None, Some(c@)],
+{
+    let mut x = VerifiedEncoder::<Vec<u8>>::new();
+    x.append(a);
+    x.append_owned(b);
+    x.append_n(a, 2);
+    assert(x@ =~= seq![a@, b@, a@, a@]);
+    let mut y = VerifiedEncoder::<Option<Vec<u8>>>::new();
+    y.append(Some(a));
+    y.append_n(None, 2);
+    y.append_owned(Some(c));
+    assert(y@ =~= seq![Some(a@), None, None, Some(c@)]);
+    (x.save(), y.save())
+}
+
+/// A client's function that is handed encoders: it requires that they
+/// are encoders (`wf()`), and says that they still are.
+#[allow(dead_code)]
+fn log_both<'a>(numbers: &mut VerifiedEncoder<'a, u64>, flags: &mut VerifiedEncoder<'a, bool>, x: u64, f: bool)
+    requires
+        old(numbers).wf(),
+        old(flags).wf(),
+    ensures
+        final(numbers).wf(),
+        final(flags).wf(),
+        final(numbers)@ == old(numbers)@.push(x),
+        final(flags)@ == old(flags)@.push(f),
+{
+    numbers.append(x);
+    flags.append(f);
+}
+
+/// A client's writer of rows: an encoder for each column of a table.
+pub struct Rows<'a> {
+    pub ids: VerifiedEncoder<'a, u64>,
+    pub names: VerifiedEncoder<'a, Vec<u8>>,
+    pub flags: VerifiedEncoder<'a, bool>,
+}
+
+/// Where the three columns of a table were written.
+pub struct Written {
+    pub ids: Range<usize>,
+    pub names: Range<usize>,
+    pub flags: Range<usize>,
+}
+
+impl<'a> Rows<'a> {
+    /// What the client keeps of its writer: the three are encoders, and
+    /// have been given as many values each.
+    pub open spec fn wf(&self) -> bool {
+        &&& self.ids.wf()
+        &&& self.names.wf()
+        &&& self.flags.wf()
+        &&& self.ids@.len() == self.names@.len()
+        &&& self.ids@.len() == self.flags@.len()
+    }
+
+    /// A writer with no row.
+    pub fn new() -> (r: Self)
+        ensures
+            r.wf(),
+            r.ids@.len() == 0,
+    {
+        Rows { ids: VerifiedEncoder::new(), names: VerifiedEncoder::new(), flags: VerifiedEncoder::new() }
+    }
+
+    /// One row more.
+    pub fn add(&mut self, id: u64, name: &'a [u8], flag: bool)
+        requires
+            old(self).wf(),
+        ensures
+            final(self).wf(),
+            final(self).ids@ == old(self).ids@.push(id),
+            final(self).names@ == old(self).names@.push(name@),
+            final(self).flags@ == old(self).flags@.push(flag),
+    {
+        self.ids.append(id);
+        self.names.append(name);
+        self.flags.append(flag);
+    }
+
+    /// The table, written to `out` after what it holds: the three
+    /// columns one after another, each where its range says, and each
+    /// the encoding of the values its encoder was given, which is a
+    /// saved column of them.
+    pub fn finish(self, out: &mut Vec<u8>) -> (r: Written)
+        requires
+            self.wf(),
+        ensures
+            final(out)@.len() >= old(out)@.len(),
+            final(out)@.take(old(out)@.len() as int) == old(out)@,
+            r.ids.start == old(out)@.len(),
+            r.ids.end == r.names.start,
+            r.names.end == r.flags.start,
+            r.flags.end == final(out)@.len(),
+            r.ids.start <= r.ids.end <= r.names.end <= r.flags.end,
+            final(out)@.subrange(r.ids.start as int, r.ids.end as int) == VerifiedColumn::<u64>::encoding(self.ids@),
+            final(out)@.subrange(r.names.start as int, r.names.end as int) == VerifiedColumn::<Vec<u8>>::encoding(
+                self.names@,
+            ),
+            final(out)@.subrange(r.flags.start as int, r.flags.end as int) == VerifiedColumn::<bool>::encoding(
+                self.flags@,
+            ),
+            VerifiedColumn::<u64>::values(VerifiedColumn::<u64>::encoding(self.ids@)) == self.ids@,
+            VerifiedColumn::<Vec<u8>>::values(VerifiedColumn::<Vec<u8>>::encoding(self.names@)) == self.names@,
+            VerifiedColumn::<bool>::values(VerifiedColumn::<bool>::encoding(self.flags@)) == self.flags@,
+    {
+        let Rows { ids, names, flags } = self;
+        let ghost (a, b, c) = (
+            VerifiedColumn::<u64>::encoding(ids@),
+            VerifiedColumn::<Vec<u8>>::encoding(names@),
+            VerifiedColumn::<bool>::encoding(flags@),
+        );
+        let x = ids.save_to(out);
+        let y = names.save_to(out);
+        let z = flags.save_to(out);
+        proof {
+            let o = old(out)@;
+            assert(out@ =~= o + a + b + c);
+            assert(out@.take(o.len() as int) =~= o);
+            assert(out@.subrange(x.start as int, x.end as int) =~= a);
+            assert(out@.subrange(y.start as int, y.end as int) =~= b);
+            assert(out@.subrange(z.start as int, z.end as int) =~= c);
+        }
+        Written { ids: x, names: y, flags: z }
+    }
+}
+
+/// Two rows written, and the column of numbers read back from where the
+/// writer says it is: if those bytes load, they load as the numbers
+/// given.
+#[allow(dead_code)]
+fn rows_written<'a>(first: &'a [u8], second: &'a [u8], out: &mut Vec<u8>) -> (r: Option<VerifiedColumn<u64>>)
+    ensures
+        r matches Some(col) ==> col@ == seq![1u64, 2],
+{
+    let mut rows = Rows::new();
+    rows.add(1, first, true);
+    rows.add(2, second, false);
+    assert(rows.ids@ =~= seq![1u64, 2]);
+    let w = rows.finish(out);
+    let bytes = vstd::slice::slice_subrange(out.as_slice(), w.ids.start, w.ids.end);
+    match VerifiedColumn::<u64>::load(bytes) {
+        Ok(col) => Some(col),
+        Err(_) => None,
     }
 }
 

@@ -3117,7 +3117,15 @@ impl<'a, C: CountsOf> crate::load_core::Loads<'a, BoolModel<C>, BoolReads<C>> fo
 
     #[inline(always)]
     fn start(data: &'a [u8], max_segments: usize) -> (l: Self) {
-        BoolLoader { l: BoolLoad::new::<C::K>(data, max_segments), _p: PhantomData }
+        let l = BoolLoader { l: BoolLoad::new::<C::K>(data, max_segments), _p: PhantomData };
+        proof {
+            // What this ensures is the trait's to say, in the trait's
+            // spec functions. Verus defines this impl's of them before
+            // it checks this function only if the function names them.
+            assert(l.inv() && l.data() == data@ && l.pulled().len() == 0);
+            assert(l.done_slabs().len() == 0 && 0 <= l.left());
+        }
+        l
     }
 
     open spec fn pulled(&self) -> Seq<bool> {

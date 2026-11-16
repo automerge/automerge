@@ -653,6 +653,70 @@ impl BEncoder {
         }
         (bytes, self.state.len, self.state.segments, tail)
     }
+
+    /// Flush, and give the encoding: the bytes of
+    /// [`take_slab`](Self::take_slab) and no more, of an encoder that is
+    /// done with.
+    #[inline]
+    pub(crate) fn into_bytes<K: CountOps>(self) -> (r: Vec<u8>)
+        requires self.inv::<K>(), self.slabs@.len() == 0,
+        ensures bool_valid::<K>(r@), bool_values::<K>(r@) == self.values::<K>(),
+    {
+        let mut e = self;
+        proof {
+            lemma_pre_len(e.state.cs@);
+            lemma_vals_len(e.state.cs@, 0);
+        }
+        let ghost c0 = e.state.cs@;
+        e.state.finish::<K>(&mut e.data);
+        proof {
+            assert(e.state.cs@ =~= c0 + e.state.cs@.skip(c0.len() as int));
+            lemma_concat::<K>(c0, e.state.cs@.skip(c0.len() as int));
+            let x = self.state.cur_count as u64;
+            K::axiom_enc(x, x, Seq::empty(), Seq::empty());
+            lemma_bytes_push::<K>(c0, x);
+            lemma_finished_slab::<K>(e.state, e.data@);
+            assert(bslabs_values::<K>(Seq::<BSlab>::empty()) =~= Seq::<bool>::empty());
+            assert(self.values::<K>() =~= e.state.vals@);
+        }
+        e.data
+    }
+
+    /// Flush, and add the encoding to `out`: what
+    /// [`into_bytes`](Self::into_bytes) gives, with no buffer between.
+    #[inline]
+    pub(crate) fn write_to<K: CountOps>(self, out: &mut Vec<u8>)
+        requires self.inv::<K>(), self.slabs@.len() == 0,
+        ensures
+            final(out)@.len() >= old(out)@.len(),
+            final(out)@.take(old(out)@.len() as int) == old(out)@,
+            bool_valid::<K>(final(out)@.skip(old(out)@.len() as int)),
+            bool_values::<K>(final(out)@.skip(old(out)@.len() as int)) == self.values::<K>(),
+    {
+        let mut e = self;
+        proof {
+            lemma_pre_len(e.state.cs@);
+            lemma_vals_len(e.state.cs@, 0);
+        }
+        let ghost c0 = e.state.cs@;
+        let ghost o0 = out@;
+        e.state.finish::<K>(&mut e.data);
+        proof {
+            assert(e.state.cs@ =~= c0 + e.state.cs@.skip(c0.len() as int));
+            lemma_concat::<K>(c0, e.state.cs@.skip(c0.len() as int));
+            let x = self.state.cur_count as u64;
+            K::axiom_enc(x, x, Seq::empty(), Seq::empty());
+            lemma_bytes_push::<K>(c0, x);
+            lemma_finished_slab::<K>(e.state, e.data@);
+            assert(bslabs_values::<K>(Seq::<BSlab>::empty()) =~= Seq::<bool>::empty());
+            assert(self.values::<K>() =~= e.state.vals@);
+        }
+        out.extend_from_slice(e.data.as_slice());
+        proof {
+            assert(out@.skip(o0.len() as int) =~= e.data@);
+            assert(out@.take(o0.len() as int) =~= o0);
+        }
+    }
 }
 
 } // verus!

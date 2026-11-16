@@ -638,7 +638,7 @@ pub(crate) proof fn lemma_written<'s, L>(s: Slab, vals: Seq<VOf<'s, L>>, w: WPos
 
 /// Bytes that are the canonical encoding of `vals` with `segs` segments
 /// are a valid slab of them.
-proof fn lemma_valid_of<'a, O: RleOps<'a>>(data: Seq<u8>, vals: Seq<O::V>, segs: int)
+pub(crate) proof fn lemma_valid_of<'a, O: RleOps<'a>>(data: Seq<u8>, vals: Seq<O::V>, segs: int)
     requires
         encodes::<O>(data, vals, segs),
         vals.len() <= usize::MAX,

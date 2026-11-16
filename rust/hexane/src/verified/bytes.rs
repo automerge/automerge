@@ -1568,6 +1568,11 @@ impl<C: VCodec> Owned<C> for Vec<u8> {
     fn owned_in(w: Vec<u8>) -> (x: BytesCow<'static>) {
         cow_of(w)
     }
+
+    #[inline(always)]
+    fn owned_for<'a>(w: Vec<u8>) -> (x: BytesCow<'a>) {
+        cow_of(w)
+    }
 }
 
 impl<C: VCodec> VValue<C> for Vec<u8> {
@@ -1625,6 +1630,15 @@ impl<C: VCodec> Owned<C> for Option<Vec<u8>> {
     #[inline(always)]
     #[allow(clippy::manual_map)]  // Verus has no closure to read here
     fn owned_in(w: Option<Vec<u8>>) -> (x: Option<BytesCow<'static>>) {
+        match w {
+            Some(b) => Some(cow_of(b)),
+            None => None,
+        }
+    }
+
+    #[inline(always)]
+    #[allow(clippy::manual_map)]  // Verus has no closure to read here
+    fn owned_for<'a>(w: Option<Vec<u8>>) -> (x: Option<BytesCow<'a>>) {
         match w {
             Some(b) => Some(cow_of(b)),
             None => None,

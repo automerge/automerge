@@ -17,6 +17,9 @@
 //! `counts`, `bytes`) and all that lies between this API and the core are
 //! verified too.
 //!
+//! [`VerifiedEncoder`] takes values one after another and gives the
+//! saved column of them, with no column in between.
+//!
 //! # Value types
 //!
 //! A `VerifiedColumn<V>` holds values of a type `V` that is a
@@ -162,7 +165,15 @@
 //!   (`fill_of` says when); for a longer one it returns an error, since
 //!   no bytes are the saved column of no values (`lemma_no_bytes`);
 //! * [`slab_lens`](VerifiedColumn::slab_lens) gives numbers that add up
-//!   to the column's length (`sum_of`).
+//!   to the column's length (`sum_of`);
+//! * a [`VerifiedEncoder`] is specified by the values it has been given
+//!   (`enc@`): each `append` adds its value to them, `append_n` adds it
+//!   that many times, and `extend` adds what an iterator gives. Its
+//!   [`save`](VerifiedEncoder::save) writes the `encoding` of them, which
+//!   is what a column of those values saves, and
+//!   [`save_to`](VerifiedEncoder::save_to) writes it after what a buffer
+//!   holds. An encoder asks of its client what a column does not: every
+//!   method requires `wf()`, which `new` gives and every method keeps.
 //!
 //! `valid`, `values`, `encoding` and `loadable` are specification
 //! functions of a column type (`VerifiedColumn::<V>::valid(bytes)`),
@@ -289,7 +300,8 @@
 //! and no two neighbours should have been merged), and panics if it
 //! finds otherwise. As `Column`'s, it takes every column as one that
 //! edits have made, and panics for some that were loaded: a load leaves
-//! a short last slab unmerged.
+//! a short last slab unmerged. `Debug` of a [`VerifiedEncoder`] is not
+//! checked either: it prints the number that the checked `len` returns.
 //!
 //! That a load returns an error for what a column cannot hold, and does
 //! not panic, is not proved: Verus is not asked to show that the helpers
@@ -308,8 +320,9 @@
 //! [`splice_iter`](VerifiedColumn::splice_iter),
 //! [`splice_runs`](VerifiedColumn::splice_runs), `extend` and `collect()`
 //! do not return (they run until memory is out, or a column's length is
-//! more than it can count, which panics). Every other loop is proved to
-//! end.
+//! more than it can count, which panics). Nor is it proved that an
+//! encoder's [`extend`](VerifiedEncoder::extend) returns, which is a
+//! loop over the client's iterator. Every other loop is proved to end.
 
 // Verus proofs read more plainly with `x = x + n`, and Verus has no
 // spec for `vec![x]`.
@@ -324,6 +337,7 @@ pub(crate) mod bytes;
 mod client_proof;
 pub(crate) mod codec;
 pub(crate) mod counts;
+mod encoder;
 pub(crate) mod model;
 pub(crate) mod value;
 
@@ -333,6 +347,7 @@ pub use crate::iter_core::{past, window};
 #[cfg(verus_keep_ghost)]
 pub use bytes::{below_at, bytes_below, total_len, total_len_opt};
 pub use codec::VCodec;
+pub use encoder::VerifiedEncoder;
 pub use value::{refused, VNewtype, VPack};
 
 use crate::bool_edit::{BoolModel, BoolRecoder};
@@ -359,7 +374,7 @@ use crate::rle::edit::RleModel;
 use crate::rle::enc::REncoder;
 use crate::{Leb128, LoadOpts, MaybeFill, PackError, Run};
 use counts::VB;
-use model::{Core, Model};
+use model::{Core, Model, Streams};
 use std::cmp::Ordering;
 use std::marker::PhantomData;
 use std::ops::Range;
@@ -372,7 +387,7 @@ use vstd::prelude::*;
 use vstd::std_specs::iter::{FromIteratorSpecImpl, IteratorSpec};
 
 mod seal {
-    use super::model::Model;
+    use super::model::{Model, Streams};
     use super::{Items, VForm, VGet, VSpec};
     use crate::cursor::Slabs;
     use crate::iter_core::Decoders;
@@ -416,8 +431,8 @@ mod seal {
             Tail = <Self::E as Slabs>::Tail,
         >;
 
-        /// The slabs that hold them.
-        type E: Slabs<V: VGet<S = <Self as VSpec>::S>> + Model<Self::X>;
+        /// The slabs that hold them, and whose encoder takes them.
+        type E: Slabs<V: VGet<S = <Self as VSpec>::S>> + Model<Self::X> + for <'a>Streams<'a, Self::X>;
     }
 
     } // verus!
@@ -809,6 +824,13 @@ pub closed spec fn saved_values<V: seal::Sealed<C>, C>(d: Seq<u8>) -> Seq<<V as 
     <Held<V, C> as VGet>::svs(<V::E as Model<V::X>>::values(d))
 }
 
+/// What the encoder of values of type `V` takes: a value in the
+/// encoder's own form.
+type Given<'a, V, C> = <<<V as seal::Sealed<C>>::E as Streams<
+    'a,
+    <V as seal::Sealed<C>>::X,
+>>::Enc as Encodes<<V as seal::Sealed<C>>::E>>::In;
+
 /// How the values of a type go through a remap: read from a column,
 /// handed to the client's function owned, and what it gives appended.
 pub(crate) trait Owned<C>: seal::Sealed<C> {
@@ -825,6 +847,13 @@ pub(crate) trait Owned<C>: seal::Sealed<C> {
     fn owned_in(w: Self) -> (x: <Self::N as Encodes<Self::E>>::In)
         ensures
             <Self::N as Encodes<Self::E>>::val(x).sv() == Self::sv_of(w),
+    ;
+
+    /// An owned value, as a [`VerifiedEncoder`] of the lifetime `'a`
+    /// appends it.
+    fn owned_for<'a>(w: Self) -> (x: Given<'a, Self, C>)
+        ensures
+            <<Self::E as Streams<'a, Self::X>>::Enc as Encodes<Self::E>>::val(x).sv() == Self::sv_of(w),
     ;
 }
 
@@ -894,6 +923,11 @@ impl<T: VPack, C: VCodec> Owned<C> for T {
     fn owned_in(w: T) -> (x: T) {
         w
     }
+
+    #[inline(always)]
+    fn owned_for<'a>(w: T) -> (x: Given<'a, T, C>) {
+        w
+    }
 }
 
 impl<T: VPack, C: VCodec> VValue<C> for T {
@@ -940,6 +974,11 @@ impl<T: VPack, C: VCodec> Owned<C> for Option<T> {
 
     #[inline(always)]
     fn owned_in(w: Option<T>) -> (x: Option<T>) {
+        w
+    }
+
+    #[inline(always)]
+    fn owned_for<'a>(w: Option<T>) -> (x: Given<'a, Option<T>, C>) {
         w
     }
 }
@@ -999,6 +1038,11 @@ impl<C: VCodec> Owned<C> for bool {
 
     #[inline(always)]
     fn owned_in(w: bool) -> (x: bool) {
+        w
+    }
+
+    #[inline(always)]
+    fn owned_for<'a>(w: bool) -> (x: Given<'a, bool, C>) {
         w
     }
 }

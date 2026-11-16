@@ -250,15 +250,17 @@ impl VCodec for Leb128 {
     }
 
     /// One in `-64..64`, as most headers are, is its own single byte,
-    /// pushed directly.
+    /// pushed directly: by the push of the unsigned writer, so that a
+    /// program has one place that pushes a byte of a number, and not
+    /// two for the compiler to tell apart at each.
     #[inline(always)]
     #[allow(clippy::manual_range_contains)]
     fn put_i(n: i64, buf: &mut Vec<u8>) {
         if n >= -64 && n < 64 {
-            assert((n & 0x7f) == n % 128) by (bit_vector);
-            buf.push((n & 0x7f) as u8);
+            assert((n & 0x7f) == n % 128 && 0 <= (n & 0x7f) < 128) by (bit_vector);
+            crate::leb128_codec::put::encode_to((n & 0x7f) as u64, buf);
             proof {
-                assert(buf@ =~= old(buf)@ + spec_encode_signed(n as int));
+                assert(spec_encode((n & 0x7f) as nat) =~= spec_encode_signed(n as int));
             }
             return ;
         }
@@ -317,7 +319,6 @@ impl VCodec for Leb128 {
             }
             encoded_len_at(tail).unwrap_or(0)
         };
-        let e = encode_signed(-(total as i64));
         proof {
             lemma_i64_len(h0 as int);
             lemma_i64_len(-(total as int));
@@ -330,6 +331,22 @@ impl VCodec for Leb128 {
                 lemma_unique_signed(h as int, h0 as int, buf@.skip(pos as int));
             }
         }
+        // one byte in the place of one, as it is for a literal run of up
+        // to 64 values whose header was one byte: written where it is
+        if n == 1 && total <= 64 {
+            let t = -(total as i64);
+            assert((t & 0x7f) == t % 128 && 0 <= (t & 0x7f) < 128) by (bit_vector)
+                requires
+                    -64 <= t < 0,
+            ;
+            let ghost b0 = buf@;
+            buf.set(pos, (t & 0x7f) as u8);
+            proof {
+                assert(buf@ =~= b0.take(pos as int) + spec_encode_signed(t as int) + b0.skip(pos + 1));
+            }
+            return 0;
+        }
+        let e = encode_signed(-(total as i64));
         let m = e.as_slice().len();
         crate::rle::writer::splice_bytes(buf, pos, n, e.as_slice());
         m as i64 - n as i64

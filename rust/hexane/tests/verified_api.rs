@@ -12,11 +12,12 @@
 #![allow(clippy::iter_nth_zero)]
 
 use hexane::verified::{
-    refused, Get, VNewtype, VValue, VerifiedColumn, VerifiedIter, VerifiedIterState, VerifiedRuns,
+    refused, Get, VNewtype, VValue, VerifiedColumn, VerifiedEncoder, VerifiedIter,
+    VerifiedIterState, VerifiedRuns,
 };
 use hexane::{
-    Codec, Column, ColumnValue, ColumnValueRef, IterState, LoadOpts, MaybeFill, NoFill, PackError,
-    RleEncoding, RleValue, Run,
+    Codec, Column, ColumnEncoding, ColumnValue, ColumnValueRef, Encoder, EncoderApi, IterState,
+    Leb128, LoadOpts, MaybeFill, NoFill, PackError, RleEncoding, RleValue, Run,
 };
 use std::cell::{Cell, RefCell};
 use std::cmp::Ordering;
@@ -4568,4 +4569,431 @@ fn the_layout_after_a_panic_in_an_edit() {
     let old = panic_of(std::panic::AssertUnwindSafe(|| c.push(7))).unwrap();
     assert!(new.contains("after a panic"), "{new}");
     assert_eq!(new, old);
+}
+
+// ── `VerifiedEncoder` ───────────────────────────────────────────────────
+//
+// The verified API's encoder against `Column`'s (`RleEncoder`, and for
+// `bool` `BoolEncoder`): given the same values in the same steps, the two
+// count the same and save the same bytes, which are the bytes a column of
+// the values saves.
+
+/// `Column`'s encoder for the value type.
+fn old_encoder<'a, T: Kind>() -> Encoder<'a, T> {
+    <<T as ColumnValueRef>::Encoding<Leb128> as ColumnEncoding>::encoder()
+}
+
+/// An encoder of each API, given the same values in the same steps. After
+/// each step both have counted the values given so far.
+struct Encoders<'a, T: Kind> {
+    new: VerifiedEncoder<'a, T>,
+    old: Encoder<'a, T>,
+    len: usize,
+}
+
+impl<'a, T: Kind> Encoders<'a, T> {
+    fn new() -> Self {
+        let mut e = Encoders {
+            new: VerifiedEncoder::new(),
+            old: old_encoder::<T>(),
+            len: 0,
+        };
+        e.counted(0);
+        e
+    }
+
+    fn counted(&mut self, added: usize) {
+        self.len += added;
+        assert_eq!(self.new.len(), self.len);
+        assert_eq!(self.old.len(), self.len);
+        assert_eq!(self.new.is_empty(), self.len == 0);
+        assert_eq!(self.old.is_empty(), self.len == 0);
+    }
+
+    fn append(&mut self, x: &'a T) {
+        self.new.append(x.lend());
+        self.old.append(x.as_column_ref());
+        self.counted(1);
+    }
+
+    fn append_owned(&mut self, x: &T) {
+        self.new.append_owned(x.clone());
+        self.old.append_owned(x.clone());
+        self.counted(1);
+    }
+
+    fn append_n(&mut self, x: &'a T, n: usize) {
+        self.new.append_n(x.lend(), n);
+        self.old.append_n(x.as_column_ref(), n);
+        self.counted(n);
+    }
+
+    fn append_n_owned(&mut self, x: &T, n: usize) {
+        self.new.append_n_owned(x.clone(), n);
+        self.old.append_n_owned(x.clone(), n);
+        self.counted(n);
+    }
+
+    fn extend(&mut self, xs: &'a [T]) {
+        self.new.extend(xs.iter().map(T::lend));
+        self.old.extend(xs.iter().map(|x| x.as_column_ref()));
+        self.counted(xs.len());
+    }
+
+    /// The values `model`, given in one of seven ways: one by one,
+    /// borrowed (0) or owned (1); run by run, borrowed (2) or owned (3);
+    /// run by run, each run in two parts with a run of no values of
+    /// another value between them (4); in pieces from an iterator, some
+    /// of them empty (5); or by all of these in turn (6).
+    fn given(model: &'a [T], other: &'a T, how: usize, rng: &mut Rng) -> Self {
+        let mut e = Self::new();
+        let mut at = 0;
+        while at < model.len() {
+            let x = &model[at];
+            let run = model[at..].iter().take_while(|y| *y == x).count();
+            let step = if how == 6 { rng.below(6) } else { how };
+            at += match step {
+                0 => {
+                    e.append(x);
+                    1
+                }
+                1 => {
+                    e.append_owned(x);
+                    1
+                }
+                2 => {
+                    e.append_n(x, run);
+                    run
+                }
+                3 => {
+                    e.append_n_owned(x, run);
+                    run
+                }
+                4 => {
+                    let first = rng.below(run + 1);
+                    e.append_n(x, first);
+                    e.append_n(other, 0);
+                    e.append_n_owned(other, 0);
+                    e.append_n_owned(x, run - first);
+                    run
+                }
+                _ => {
+                    let n = rng.below((model.len() - at).min(70) + 1);
+                    e.extend(&model[at..at + n]);
+                    n
+                }
+            };
+        }
+        assert_eq!(e.len, model.len());
+        e
+    }
+
+    /// What both save: the same bytes.
+    fn save(self) -> Vec<u8> {
+        assert_eq!(
+            format!("{:?}", self.new),
+            format!("VerifiedEncoder {{ len: {} }}", self.len)
+        );
+        let bytes = self.new.save();
+        assert_eq!(bytes, self.old.save());
+        bytes
+    }
+
+    /// What both save after what a buffer holds: the same bytes in the
+    /// same place, and what the buffer held before them.
+    fn save_to(self, held: &[u8]) -> Vec<u8> {
+        let (mut a, mut b) = (held.to_vec(), held.to_vec());
+        let range = self.new.save_to(&mut a);
+        assert_eq!(range, self.old.save_to(&mut b));
+        assert_eq!(a, b);
+        assert_eq!(range, held.len()..a.len());
+        assert_eq!(a[..held.len()], *held);
+        a.split_off(held.len())
+    }
+}
+
+/// Encoders given `model` in each way save what a column of `model`
+/// saves, and both APIs load it as `model`.
+fn check_encoders<T: Kind>(model: &[T], other: &T, rng: &mut Rng) {
+    let (v, c) = both(model);
+    let bytes = v.save();
+    assert_eq!(bytes, c.save());
+    for how in 0..7 {
+        let salt = rng.next() | 1;
+        let saved = Encoders::given(model, other, how, &mut Rng(salt)).save();
+        assert_eq!(saved, bytes, "how {how}");
+        let held = [vec![], vec![9u8; 3]][rng.below(2)].clone();
+        let saved = Encoders::given(model, other, how, &mut Rng(salt)).save_to(&held);
+        assert_eq!(saved, bytes, "how {how}");
+    }
+    assert_eq!(
+        new_values(&VerifiedColumn::<T>::load(&bytes).unwrap()),
+        model
+    );
+    assert_eq!(old_values(&Column::<T>::load(&bytes).unwrap()), model);
+
+    // from what a column's iterator gives: the column's bytes again
+    let mut e = VerifiedEncoder::<T>::new();
+    e.extend(v.iter());
+    assert_eq!(e.len(), model.len());
+    assert_eq!(e.save(), bytes);
+    // and in two parts, with a value of the model's own between
+    let cut = rng.below(model.len() + 1);
+    let mut e = VerifiedEncoder::<T>::default();
+    e.extend(v.iter_range(0, cut));
+    if let Some(x) = model.get(cut) {
+        e.append_owned(x.clone());
+        e.extend(v.iter_range(cut + 1, model.len()));
+    }
+    let mut out = vec![1u8, 2];
+    assert_eq!(e.save_to(&mut out), 2..2 + bytes.len());
+    assert_eq!(out[2..], bytes[..]);
+}
+
+fn encoders<T: Kind>() {
+    let mut rng = Rng(0xe7c0de);
+    let (a, b, c) = (T::fresh(&mut rng), T::fresh(&mut rng), T::fresh(&mut rng));
+    let pick = |i: usize| [&a, &b, &c][i].clone();
+    let mut shapes: Vec<Vec<T>> = vec![
+        vec![],
+        vec![pick(0)],
+        vec![pick(0); 2],
+        vec![pick(0); 1000],
+        (0..1000).map(|i| pick(i / 7 % 2)).collect(),
+        (0..1000).map(|i| pick(i % 3)).collect(),
+        (0..3000).map(|_| T::fresh(&mut rng)).collect(),
+        [0, 0, 1, 2, 2, 2, 0, 1, 1, 0].map(pick).to_vec(),
+    ];
+    for _ in 0..24 {
+        shapes.push(rng.values(300));
+    }
+    for model in shapes {
+        let other = T::fresh(&mut rng);
+        check_encoders(&model, &other, &mut rng);
+    }
+}
+
+#[test]
+fn encoders_agree() {
+    for_each_kind!(encoders);
+}
+
+/// Values with no two alike in a row are written as one run with their
+/// count before them, which the encoder puts there when the run ends. The
+/// count takes one byte up to 64 values, two up to 8192, and three from
+/// there: runs of every length about those, alone and between runs of
+/// equal values.
+fn literal_runs<T: Kind>() {
+    let mut rng = Rng(0x117e7a1);
+    let mut pool: Vec<T> = (0..9000).map(|_| T::fresh(&mut rng)).collect();
+    pool.dedup();
+    let lens = (0..=140).chain([255, 256, 257, 8190, 8191, 8192, 8193, 8194]);
+    for len in lens.filter(|&n| n <= pool.len()) {
+        let lit = &pool[pool.len() - len..];
+        let other = T::fresh(&mut rng);
+        check_encoders(lit, &other, &mut rng);
+        // a run of equal values before and after, each of a value other
+        // than its neighbour's
+        let Some((first, last)) = lit.first().zip(lit.last()) else {
+            continue;
+        };
+        let before = pool.iter().find(|x| *x != first).unwrap_or(first);
+        let after = pool.iter().find(|x| *x != last).unwrap_or(last);
+        let mut model = vec![before.clone(); 3];
+        model.extend_from_slice(lit);
+        model.extend(std::iter::repeat_n(after.clone(), 2));
+        check_encoders(&model, &other, &mut rng);
+    }
+}
+
+#[test]
+fn encoders_agree_on_literal_runs() {
+    for_each_kind!(literal_runs);
+}
+
+/// An encoder given nothing saves nothing, as `Column`'s does and as a
+/// column of no values does, however it was made and whatever runs of no
+/// values it was given.
+fn empty_encoders<T: Kind>() {
+    let mut rng = Rng(0xe0);
+    let x = T::fresh(&mut rng);
+    let none = VerifiedColumn::<T>::new().save();
+    assert_eq!(none, Column::<T>::new().save());
+    assert_eq!(none, old_encoder::<T>().save());
+    assert_eq!(VerifiedEncoder::<T>::new().save(), none);
+    assert_eq!(VerifiedEncoder::<T>::default().save(), none);
+    let mut e = VerifiedEncoder::<T>::new();
+    e.append_n(x.lend(), 0);
+    e.append_n_owned(x.clone(), 0);
+    e.extend(std::iter::empty());
+    assert!(e.is_empty());
+    assert_eq!(format!("{e:?}"), "VerifiedEncoder { len: 0 }");
+    let mut out = vec![5u8];
+    assert_eq!(e.save_to(&mut out), 1..1 + none.len());
+    assert_eq!(out[1..], none[..]);
+    let mut old = vec![5u8];
+    assert_eq!(old_encoder::<T>().save_to(&mut old), 1..1 + none.len());
+    assert_eq!(old, out);
+}
+
+#[test]
+fn encoders_of_nothing() {
+    for_each_kind!(empty_encoders);
+}
+
+/// An encoder counts its values in a `usize`, and runs make many of them
+/// cheap to give. Up to `usize::MAX - 2` values are counted (of `bool`,
+/// one fewer), and saved as `Column`'s encoder saves them; given more,
+/// both APIs panic with the same words, whether the last values come in a
+/// run or one by one.
+#[cfg(panic = "unwind")]
+#[test]
+fn encoders_count_to_the_end() {
+    // each run fits the format's count on any target
+    let half = usize::MAX / 2;
+
+    let numbers = |first: usize, then: &'static [(u64, usize)]| {
+        let new = panic_of(move || {
+            let mut e = VerifiedEncoder::<u64>::new();
+            e.append_n(1, first);
+            e.append_n(2, first);
+            for &(x, n) in then {
+                match n {
+                    1 => e.append(x),
+                    _ => e.append_n(x, n),
+                }
+            }
+            (e.len(), e.save())
+        });
+        let old = panic_of(move || {
+            let mut e = old_encoder::<u64>();
+            e.append_n(1, first);
+            e.append_n(2, first);
+            for &(x, n) in then {
+                match n {
+                    1 => e.append(x),
+                    _ => e.append_n(x, n),
+                }
+            }
+            (e.len(), e.save())
+        });
+        assert_eq!(new, old);
+        new
+    };
+    assert_eq!(numbers(half - 1, &[]), None);
+    assert_eq!(numbers(half - 1, &[(3, 1)]), None);
+    assert_eq!(numbers(half - 1, &[(2, 1), (2, 0)]), None);
+    let said = numbers(half - 1, &[(3, 2)]).unwrap();
+    assert!(said.contains("encoder too long to append to"), "{said}");
+    assert_eq!(numbers(half - 1, &[(3, 1), (4, 1)]), Some(said.clone()));
+    assert_eq!(numbers(half - 1, &[(2, 2)]), Some(said.clone()));
+    assert_eq!(numbers(half, &[]), Some(said.clone()));
+    assert_eq!(
+        numbers(half - 1, &[(3, 0), (3, usize::MAX)]),
+        Some(said.clone())
+    );
+
+    let mut e = VerifiedEncoder::<u64>::new();
+    e.append_n(1, half - 1);
+    e.append_n_owned(2, half - 1);
+    assert_eq!(e.len(), usize::MAX - 3);
+    assert_eq!(
+        format!("{e:?}"),
+        format!("VerifiedEncoder {{ len: {} }}", usize::MAX - 3)
+    );
+
+    let bools = |first: usize, then: &'static [(bool, usize)]| {
+        let new = panic_of(move || {
+            let mut e = VerifiedEncoder::<bool>::new();
+            e.append_n(true, first);
+            e.append_n(false, first);
+            for &(x, n) in then {
+                match n {
+                    1 => e.append(x),
+                    _ => e.append_n(x, n),
+                }
+            }
+            (e.len(), e.save())
+        });
+        let old = panic_of(move || {
+            let mut e = old_encoder::<bool>();
+            e.append_n(true, first);
+            e.append_n(false, first);
+            for &(x, n) in then {
+                match n {
+                    1 => e.append(x),
+                    _ => e.append_n(x, n),
+                }
+            }
+            (e.len(), e.save())
+        });
+        assert_eq!(new, old);
+        new
+    };
+    assert_eq!(bools(half - 1, &[]), None);
+    assert_eq!(bools(half - 1, &[(true, 0), (false, 0)]), None);
+    assert_eq!(bools(half - 1, &[(true, 1)]), Some(said.clone()));
+    assert_eq!(bools(half - 1, &[(false, 1)]), Some(said.clone()));
+    assert_eq!(bools(half - 1, &[(false, 2)]), Some(said.clone()));
+    assert_eq!(bools(half, &[]), Some(said.clone()));
+
+    // nulls, whose count has no sign either
+    let nulls = |n: usize, more: usize| {
+        let new = panic_of(move || {
+            let mut e = VerifiedEncoder::<Option<u64>>::new();
+            e.append_n(None, n);
+            e.append_n(None, more);
+            (e.len(), e.save())
+        });
+        let old = panic_of(move || {
+            let mut e = old_encoder::<Option<u64>>();
+            e.append_n(None, n);
+            e.append_n(None, more);
+            (e.len(), e.save())
+        });
+        assert_eq!(new, old);
+        new
+    };
+    assert_eq!(nulls(half, half - 1), None);
+    assert_eq!(nulls(usize::MAX - 2, 0), None);
+    assert_eq!(nulls(usize::MAX - 2, 1), Some(said.clone()));
+    assert_eq!(nulls(usize::MAX, 0), Some(said));
+}
+
+/// The longest run of equal numbers the format writes is of `i64::MAX`.
+/// An encoder given one more of the value panics in both APIs, with the
+/// same words. (Where a `usize` has 64 bits: one of 32 bits counts less.)
+#[cfg(target_pointer_width = "64")]
+#[test]
+fn encoders_of_the_longest_runs() {
+    let most = i64::MAX as usize;
+    let run = |count: usize, then: Option<u64>| {
+        let new = panic_of(move || {
+            let mut e = VerifiedEncoder::<u64>::new();
+            e.append_n(7, count);
+            if let Some(x) = then {
+                e.append(x);
+            }
+            (e.len(), e.save())
+        });
+        let old = panic_of(move || {
+            let mut e = old_encoder::<u64>();
+            e.append_n(7, count);
+            if let Some(x) = then {
+                e.append(x);
+            }
+            (e.len(), e.save())
+        });
+        assert_eq!(new, old);
+        new
+    };
+    assert_eq!(run(most, None), None);
+    assert_eq!(run(most, Some(8)), None);
+    let said = run(most, Some(7)).unwrap();
+    assert!(said.contains("is not encodable"), "{said}");
+    assert_eq!(run(most + 1, None), Some(said));
+
+    let mut e = VerifiedEncoder::<u64>::new();
+    e.append_n(7, most);
+    assert_eq!(e.save(), VerifiedColumn::<u64>::fill(most, 7).save());
 }
