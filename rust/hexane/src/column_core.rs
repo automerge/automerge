@@ -260,13 +260,28 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> ColumnCore<E, W, I, G> {
             all_ok::<E>(self.slabs_spec()),
     {
         proof {
-            use_type_invariant(self);
-            if self.state is Some {
-                lemma_vals_total::<E>(self.state->Some_0.slabs@);
-            } else {
-                assert(vals_of::<E>(Seq::<Slab<E::Tail>>::empty()) =~= Seq::<E::V>::empty());
-                assert(slab_lens(Seq::<Slab<E::Tail>>::empty()) =~= Seq::<nat>::empty());
-            }
+            self.lemma_view();
+        }
+    }
+
+    /// [`lemma_column`](Self::lemma_column) for a proof, which has no
+    /// call to make.
+    pub(crate) proof fn lemma_view(tracked &self)
+        ensures
+            self.ready() ==> col_ok::<E, W, I, G>(self.slabs_spec(), self.index_spec(), self@.len() as usize, self.budget()),
+            self.ready() ==> G::dom_ok(self.slabs_spec()),
+            self@ == vals_of::<E>(self.slabs_spec()),
+            self@.len() == total(slab_lens(self.slabs_spec())),
+            self@.len() + 3 <= usize::MAX,
+            self.budget() >= 2,
+            all_ok::<E>(self.slabs_spec()),
+    {
+        use_type_invariant(self);
+        if self.state is Some {
+            lemma_vals_total::<E>(self.state->Some_0.slabs@);
+        } else {
+            assert(vals_of::<E>(Seq::<Slab<E::Tail>>::empty()) =~= Seq::<E::V>::empty());
+            assert(slab_lens(Seq::<Slab<E::Tail>>::empty()) =~= Seq::<nat>::empty());
         }
     }
 
@@ -534,7 +549,12 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> ColumnCore<E, W, I, G> {
         where E: ReadsAgree<'a, X>
         ensures
             r is Some <==> crate::iter_core::resumes(slab_lens(self.slabs_spec()), si, consumed, pos, n),
-            r matches Some(it) ==> it.wf::<X>(self.slabs_spec()) && it.pos == pos,
+            r matches Some(it) ==> {
+                &&& it.wf::<X>(self.slabs_spec())
+                &&& it.pos == pos
+                &&& si < self.slabs_spec().len() ==> it.items_left == n
+                &&& si >= self.slabs_spec().len() ==> it.items_left == 0
+            },
     {
         self.lemma_column();
         let slabs = self.slabs();

@@ -84,7 +84,18 @@
 //! range is named: one that ends behind the iterator, or starts past
 //! its window, is searched nowhere ([`seek_out_of_range`]). The search
 //! is the column's own, and the value found is the one read next
-//! ([`seek_then_read`]).
+//! ([`seek_then_read`]). And that an iterator can be suspended, given
+//! up, and resumed. The state it suspends to stands where it does, and
+//! fits the column it reads, whatever moves it has made
+//! ([`told_by_a_suspend`], [`of_a_range`], [`after_every_move`]); a
+//! state that fits a column is sure to resume on it, and a reader goes
+//! on where it stopped ([`stop_and_go_on`]); so a client can keep the
+//! readers of its columns between calls as states, and step them call
+//! by call ([`step_both`]). An iterator that a state resumes to is one
+//! of the column it is resumed on, whatever column the state was taken
+//! of, and gives that column's values ([`told_by_a_resume`],
+//! [`resumed_on_any`]); the state of an iterator of no column is
+//! promised no column ([`of_no_column`]).
 //!
 //! This module exists only while Verus checks the crate.
 
@@ -92,7 +103,7 @@ use super::{
     below_at, bytes_below, folded, head_run, lemma_run_values_add, lemma_run_values_push,
     lemma_runs_first, lemma_runs_of_values, lemma_sorted, mapped, only, refused, run_values,
     runs_of, sorted, sorted_for, sum_of, total_len, window, Get, VCodec, VGet, VNewtype, VSpec,
-    VValue, VerifiedColumn, VerifiedIter,
+    VValue, VerifiedColumn, VerifiedIter, VerifiedIterState,
 };
 use crate::{Leb128, LoadOpts, PackError, Run};
 use std::cmp::Ordering;
@@ -1885,6 +1896,7 @@ fn told_by_the_call(col: &VerifiedColumn<u64>)
     it.set_max(20);
     let b = it.clone();
     assert(b.pos() == 1 && b.end_pos() == 20 && b.column() == col@);
+    assert(b.source() == it.source());
     // an iterator of no column
     let d = VerifiedIter::<u64>::default();
     assert(d.pos() == 0 && d.end_pos() == 0);
@@ -2245,6 +2257,7 @@ fn told_by_the_runs<'a, V: VValue<C>, C: VCodec>(it: VerifiedIter<'a, V, C>) -> 
         },
     }
     assert(rs.iter().column() == it.column());
+    assert(rs.iter().source() == it.source());
     r
 }
 
@@ -2524,6 +2537,271 @@ fn seek_then_read(col: &VerifiedColumn<u64>, x: u64) -> (r: Range<usize>)
     }
     assert(r.start == n ==> v is None);
     r
+}
+
+/// What `suspend` says by itself, of any iterator, each thing asked for
+/// on its own: where the state stands and where its window ends, that
+/// the iterator has left its column's values in that window, and that
+/// the state fits the column the iterator reads.
+#[allow(dead_code)]
+fn told_by_a_suspend<'a, V: VValue<C>, C: VCodec>(it: &VerifiedIter<'a, V, C>, col: &VerifiedColumn<V, C>) -> (s:
+    VerifiedIterState)
+    ensures
+        s.pos() == it.pos(),
+        s.end_pos() == it.end_pos(),
+        it.rest() == window(it.column(), s.pos() as int, s.end_pos() as int),
+        it.source() == Some(*col) ==> s.fits(col),
+{
+    it.suspend()
+}
+
+/// What `try_resume` says by itself, of any state and any column, each
+/// thing asked for on its own: an iterator is given exactly when the
+/// state fits the column, and only when the two count the same edits;
+/// and the iterator given reads this column, stands where the state
+/// does, and has left this column's values in the state's window, which
+/// is its own window too unless the state stands at the column's end.
+#[allow(dead_code)]
+fn told_by_a_resume<'a, V: VValue<C>, C: VCodec>(s: &VerifiedIterState, col: &'a VerifiedColumn<V, C>) -> (r: Result<
+    VerifiedIter<'a, V, C>,
+    PackError,
+>)
+    ensures
+        r is Ok <==> s.fits(col),
+        r is Ok ==> s.edits() == col.edits(),
+        r matches Ok(it) ==> it.source() == Some(*col),
+        r matches Ok(it) ==> it.column() == col@,
+        r matches Ok(it) ==> it.pos() == s.pos(),
+        r matches Ok(it) ==> it.rest() == window(col@, s.pos() as int, s.end_pos() as int),
+        r matches Ok(it) ==> it.end_pos() == s.end_pos() || (s.pos() == col@.len() && it.end_pos() == s.pos()),
+{
+    s.try_resume(col)
+}
+
+/// What `lemma_source` says by itself, of any iterator, each case asked
+/// for on its own: an iterator that reads a column has that column's
+/// values for its own, and one that reads none has none.
+#[allow(dead_code)]
+fn told_by_the_source<'a, V: VValue<C>, C: VCodec>(it: &VerifiedIter<'a, V, C>, col: &VerifiedColumn<V, C>)
+    ensures
+        it.source() == Some(*col) ==> it.column() == col@,
+        it.source() is None ==> it.column().len() == 0,
+{
+    proof {
+        it.lemma_source();
+    }
+}
+
+/// An iterator handed over, of which no more is known than the column
+/// it reads. Suspended and resumed on that column, it is sure to be
+/// given back, where it stood and with the same values left.
+#[allow(dead_code)]
+fn handed_over<'a, V: VValue<C>, C: VCodec>(it: VerifiedIter<'_, V, C>, col: &'a VerifiedColumn<V, C>) -> (on:
+    VerifiedIter<'a, V, C>)
+    requires
+        it.source() == Some(*col),
+    ensures
+        on.pos() == it.pos(),
+        on.rest() == it.rest(),
+{
+    let s = it.suspend();
+    proof {
+        it.lemma_source();
+    }
+    let got = s.try_resume(col);
+    got.unwrap()
+}
+
+/// A reader that stops and goes on. It reads the value at `k`, and is
+/// suspended: the iterator is given up, and with it the borrow of the
+/// column. Resumed on the column, which nothing has edited, it is sure
+/// to be given, and reads the value at `k + 1`. For every value type
+/// and codec.
+#[allow(dead_code)]
+fn stop_and_go_on<'a, V: VValue<C>, C: VCodec>(col: &'a VerifiedColumn<V, C>, k: usize) -> (r: (
+    Option<Get<'a, V>>,
+    Option<Get<'a, V>>,
+))
+    requires
+        k + 1 < col@.len(),
+    ensures
+        r.0 matches Some(v) && v.sv() == col@[k as int],
+        r.1 matches Some(v) && v.sv() == col@[k + 1],
+{
+    let mut it = col.iter();
+    proof {
+        // it has as many values left as the column has
+        it.lemma_items_len();
+    }
+    let a = it.nth(k);
+    let s = it.suspend();
+    let got = s.try_resume(col);
+    assert(got is Ok);
+    let mut on = got.unwrap();
+    assert(on.rest() == it.rest());
+    assert(on.rest() == col@.skip(k + 1));
+    let b = on.next();
+    (a, b)
+}
+
+/// The states of an iterator over a range of a column and of one over
+/// all of it fit the column, and stand and end where the iterators do.
+#[allow(dead_code)]
+fn of_a_range<V: VValue<C>, C: VCodec>(col: &VerifiedColumn<V, C>, a: usize, b: usize) -> (r: (
+    VerifiedIterState,
+    VerifiedIterState,
+))
+    requires
+        a <= b <= col@.len(),
+    ensures
+        r.0.fits(col) && r.0.pos() == a && r.0.end_pos() == b,
+        r.1.fits(col) && r.1.pos() == 0 && r.1.end_pos() == col@.len(),
+{
+    let s = col.iter_range(a, b).suspend();
+    let t = col.into_iter().suspend();
+    (s, t)
+}
+
+/// An iterator of no column: it reads none, and its state stands at 0
+/// with nothing in its window. Nothing says that the state fits a
+/// column; if it does fit one, the iterator given stands at 0 with
+/// nothing to give.
+#[allow(dead_code)]
+fn of_no_column<V: VValue<C>, C: VCodec>(col: &VerifiedColumn<V, C>) -> (r: bool)
+{
+    let it = VerifiedIter::<V, C>::default();
+    assert(it.source() is None);
+    let s = it.suspend();
+    assert(s.pos() == 0 && s.end_pos() == 0);
+    match s.try_resume(col) {
+        Ok(on) => {
+            assert(on.pos() == 0);
+            assert(on.rest().len() == 0);
+            true
+        },
+        Err(_) => false,
+    }
+}
+
+/// No move of an iterator changes the column it reads: of any iterator,
+/// each move asked on its own.
+#[allow(dead_code)]
+fn reads_the_same_column<'a, V: VValue<C>, C: VCodec>(
+    it: &mut VerifiedIter<'a, V, C>,
+    which: u8,
+    n: usize,
+    x: Get<'_, V>,
+)
+    ensures
+        final(it).source() == old(it).source(),
+{
+    match which {
+        0 => it.set_max(n),
+        1 => it.advance_to(n),
+        2 => it.advance_by(n),
+        3 => it.shift(n..n),
+        4 => {
+            let p = it.pos();
+            let _ = it.shift_next(p..n);
+        },
+        5 => {
+            let _ = it.next_run();
+        },
+        6 => {
+            let _ = it.scan_to_value(x);
+        },
+        7 => {
+            let _ = it.seek_to_value(x, 0..n);
+        },
+        8 => {
+            let _ = it.next();
+        },
+        _ => {
+            let _ = it.nth(n);
+        },
+    }
+}
+
+/// Whatever moves an iterator makes, it reads the column it was made
+/// of: so does a copy of it, and what that suspends to fits the column.
+#[allow(dead_code)]
+fn after_every_move(col: &VerifiedColumn<u64>, x: u64) -> (s: VerifiedIterState)
+    ensures
+        s.fits(col),
+{
+    let mut it = col.iter();
+    it.set_max(7);
+    it.advance_to(2);
+    it.advance_by(1);
+    it.shift(3..9);
+    let p = it.pos();
+    let _ = it.shift_next(p..usize::MAX);
+    let _ = it.next_run();
+    let _ = it.scan_to_value(x);
+    let _ = it.seek_to_value(x, 0..usize::MAX);
+    let _ = it.next();
+    let _ = it.nth(1);
+    let other = it.clone();
+    other.suspend()
+}
+
+/// A state of any iterator, resumed on any column, whether or not it
+/// is the one the state was taken of: if an iterator is given, the
+/// value it gives is that column's at the state's place.
+#[allow(dead_code)]
+fn resumed_on_any<'a, V: VValue<C>, C: VCodec>(s: &VerifiedIterState, col: &'a VerifiedColumn<V, C>) -> (r: Option<
+    Get<'a, V>,
+>)
+    ensures
+        r matches Some(v) ==> s.pos() < col@.len() && v.sv() == col@[s.pos() as int],
+{
+    match s.try_resume(col) {
+        Ok(it) => {
+            let mut it = it;
+            it.next()
+        },
+        Err(_) => None,
+    }
+}
+
+/// The readers of two columns, kept between calls as states.
+pub struct Paused {
+    pub numbers: VerifiedIterState,
+    pub flags: VerifiedIterState,
+}
+
+/// A client that keeps the readers of its columns between calls as
+/// states, and in each call resumes them, reads a value of each and
+/// suspends them again. States that fit their columns are sure to
+/// resume, give the columns' values at their places, and are given back
+/// one place on, fitting their columns still: so the next call can be
+/// made. Nothing is given where one of the windows has no value left.
+#[allow(dead_code)]
+fn step_both(numbers: &VerifiedColumn<u64>, flags: &VerifiedColumn<bool>, p: Paused) -> (r: Option<(u64, bool, Paused)>)
+    requires
+        p.numbers.fits(numbers),
+        p.flags.fits(flags),
+    ensures
+        match r {
+            Some((x, y, q)) => {
+                &&& p.numbers.pos() < numbers@.len() && x == numbers@[p.numbers.pos() as int]
+                &&& p.flags.pos() < flags@.len() && y == flags@[p.flags.pos() as int]
+                &&& q.numbers.fits(numbers) && q.numbers.pos() == p.numbers.pos() + 1
+                &&& q.flags.fits(flags) && q.flags.pos() == p.flags.pos() + 1
+            },
+            None => window(numbers@, p.numbers.pos() as int, p.numbers.end_pos() as int).len() == 0 || window(
+                flags@,
+                p.flags.pos() as int,
+                p.flags.end_pos() as int,
+            ).len() == 0,
+        },
+{
+    let mut a = p.numbers.try_resume(numbers).unwrap();
+    let mut b = p.flags.try_resume(flags).unwrap();
+    match (a.next(), b.next()) {
+        (Some(x), Some(y)) => Some((x, y, Paused { numbers: a.suspend(), flags: b.suspend() })),
+        _ => None,
+    }
 }
 
 } // verus!

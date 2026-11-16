@@ -996,7 +996,7 @@ impl<D: Decode> ICore<D> {
                 &&& it.pos == pos
                 &&& it.slab_idx == si || (si >= slabs@.len() && it.slab_idx == slabs@.len())
                 &&& si < slabs@.len() ==> it.items_left == n
-                &&& si >= slabs@.len() ==> it.out::<X>(slabs@).len() == 0
+                &&& si >= slabs@.len() ==> it.out::<X>(slabs@).len() == 0 && it.items_left == 0
             },
     {
         let ghost lens = slab_lens(slabs@);

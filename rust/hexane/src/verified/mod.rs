@@ -108,6 +108,15 @@
 //!   had left (`runs_of`), which are those values
 //!   (`lemma_runs_of_values`) with no two runs side by side of one
 //!   value, and are what `splice_runs` takes;
+//! * [`suspend`](VerifiedIter::suspend) gives what an iterator needs to
+//!   go on later ([`VerifiedIterState`]), which holds no borrow of the
+//!   column, and [`try_resume`](VerifiedIterState::try_resume) gives an
+//!   iterator from it exactly when the state fits the column it is
+//!   given (`fits`): one that stands where the first stood and has left
+//!   that column's values in the same window. The state of an iterator
+//!   fits the column the iterator reads (`source()`), which no method of
+//!   the iterator changes, and whose values are the iterator's
+//!   (`lemma_source`);
 //! * [`is_only`](VerifiedColumn::is_only) says whether every value of the
 //!   column is the one given (`only`), and [`VValue::same`] whether two
 //!   values in a column's form are one value;
@@ -165,8 +174,9 @@
 //! `lemma_sorted`, `lemma_run_values_push`, `lemma_run_values_add`,
 //! `lemma_runs_first`, `lemma_runs_of` and `lemma_runs_of_values` are
 //! lemmas, as are `VSpec::lemma_below` (the order is a strict total
-//! order) and `VerifiedIter::lemma_items_len`: they exist only for
-//! Verus, and a normal build compiles them away. What options hold is
+//! order), `VerifiedIter::lemma_items_len` and
+//! `VerifiedIter::lemma_source`: they exist only for Verus, and a normal
+//! build compiles them away. What options hold is
 //! said by `length()`, `fill()` and `max_segments()` of a [`LoadOpts`],
 //! and what fill value there is by `value()` of its fill state
 //! ([`MaybeFill`]).
@@ -201,6 +211,17 @@
 //! `dump_slabs` prints the same lines. That is tested too, but for one
 //! case: a column that [`clear`](VerifiedColumn::clear) has emptied has
 //! no slab, where `Column` keeps an empty one, until the next edit.
+//!
+//! That an edit of a column ends what was suspended of it is not proved
+//! either. A state fits only a column that counts the edits the state
+//! does (`edits()`), and nothing is specified of how an edit moves that
+//! count. That every call which changes a value moves it, so that a
+//! state taken before is refused after, is tested, as is that the calls
+//! which are no edits of a `Column` are none here. (The count is a
+//! `usize` that wraps around, here as there.) What is proved is that a
+//! state which does resume cannot misread: the iterator given has the
+//! values of the column it was resumed on, in the state's window,
+//! whatever column the state was taken of.
 //!
 //! # What is trusted
 //!
@@ -1936,6 +1957,13 @@ impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
         self.core.len() == 0
     }
 
+    /// The count of the column's edits, which a suspended iterator's
+    /// state keeps and [`VerifiedIterState::try_resume`] compares.
+    /// Nothing is specified of how an edit moves it.
+    pub closed spec fn edits(&self) -> usize {
+        self.core.count()
+    }
+
     /// Delete `del` values at `at` and insert `values` there.
     pub fn splice(&mut self, at: usize, del: usize, values: &[Get<'_, V>])
         requires
@@ -2190,10 +2218,20 @@ impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
     }
 
     /// Delete every value. The column keeps its segment budget.
+    ///
+    /// Of a column with no value this is no edit, as it is none of
+    /// [`Column`](crate::Column): what was suspended of it resumes still.
     pub fn clear(&mut self)
         ensures
             final(self)@ == Seq::<V::S>::empty(),
     {
+        if self.core.len() == 0 {
+            proof {
+                <Held<V, C> as VGet>::lemma_svs(self.core@);
+                assert(self@ =~= Seq::empty());
+            }
+            return;
+        }
         // a new column, and not a delete of every value, which would
         // leave the last slab to be emptied through a rebuild. The edit
         // counter goes on from where it is, as after any other edit.
@@ -2579,6 +2617,7 @@ impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
         ensures
             it.rest() == self@,
             it.column() == self@,
+            it.source() == Some(*self),
             it.pos() == 0,
             it.end_pos() == self@.len(),
     {
@@ -2601,6 +2640,7 @@ impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
         ensures
             it.rest() == self@.subrange(start as int, end as int),
             it.column() == self@,
+            it.source() == Some(*self),
             it.pos() == start,
             it.end_pos() == end,
     {
@@ -2952,6 +2992,16 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedIter<'a, V, C> {
         <Get<'a, V> as VGet>::svs(vals_of::<V::X>(self.slabs@))
     }
 
+    /// The column the iterator reads, as it was when the iterator was
+    /// made of it; a default iterator reads none. No method of the
+    /// iterator changes it.
+    pub closed spec fn source(&self) -> Option<VerifiedColumn<V, C>> {
+        match self.col {
+            Some(c) => Some(VerifiedColumn { core: *c }),
+            None => None,
+        }
+    }
+
     /// [`pos`](Self::pos), as a specification sees it: there it is
     /// written `pos()`.
     pub closed spec fn spec_pos(&self) -> usize {
@@ -2972,6 +3022,33 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedIter<'a, V, C> {
             self.rest().len() == self.items().len(),
     {
         <Get<'a, V> as VGet>::lemma_svs(self.items());
+    }
+
+    /// What the iterator reads is what its column holds: of
+    /// [`source`](Self::source) and [`column`](Self::column), the first
+    /// tells the second.
+    pub proof fn lemma_source(tracked &self)
+        ensures
+            match self.source() {
+                Some(c) => self.column() == c@,
+                None => self.column().len() == 0,
+            },
+    {
+        use_type_invariant(self);
+        match self.col {
+            Some(c) => {
+                c.lemma_view();
+                let o = vals_of::<V::X>(c.slabs_spec());
+                lemma_vals_own::<V::E, V::X>(c.slabs_spec());
+                assert(c@ =~= held::<V, C>(o));
+                lemma_held::<V, C>(o);
+                <Held<V, C> as VGet>::lemma_svs(c@);
+            },
+            None => {
+                assert(vals_of::<V::X>(self.slabs@) =~= Seq::empty());
+                <Get<'a, V> as VGet>::lemma_svs(vals_of::<V::X>(self.slabs@));
+            },
+        }
     }
 
     /// What is left is the column's values in the window.
@@ -3042,6 +3119,35 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedIter<'a, V, C> {
         self.it.slab_idx
     }
 
+    /// Where the iterator stands and where its window ends, to keep
+    /// without the borrow of the column:
+    /// [`VerifiedIterState::try_resume`] gives an iterator from it.
+    ///
+    /// The state fits the column the iterator reads: resumed on that
+    /// column, as it is, it gives an iterator that stands where this one
+    /// does and has the same values left.
+    pub fn suspend(&self) -> (s: VerifiedIterState)
+        ensures
+            s.pos() == self.pos(),
+            s.end_pos() == self.end_pos(),
+            self.rest() == window(self.column(), s.pos() as int, s.end_pos() as int),
+            match self.source() {
+                Some(c) => s.fits(&c),
+                None => true,
+            },
+    {
+        proof {
+            use_type_invariant(self);
+            self.lemma_window();
+        }
+        let (slab_idx, slab_consumed, pos, items_left) = self.it.suspended::<V::X>(self.slabs);
+        let counter = match self.col {
+            Some(c) => c.counter(),
+            None => 0,
+        };
+        VerifiedIterState { counter, num_slabs: self.slabs.len(), slab_idx, pos, items_left, slab_consumed }
+    }
+
     /// Make the window end at `end`: the iterator then gives the
     /// column's values from where it stands up to `end`, and none if it
     /// stands at `end` or past it.
@@ -3051,6 +3157,7 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedIter<'a, V, C> {
     pub fn set_max(&mut self, end: usize)
         ensures
             final(self).column() == old(self).column(),
+            final(self).source() == old(self).source(),
             final(self).pos() == old(self).pos(),
             final(self).end_pos() == if end >= old(self).pos() {
                 end
@@ -3077,6 +3184,7 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedIter<'a, V, C> {
     pub fn advance_to(&mut self, target: usize)
         ensures
             final(self).column() == old(self).column(),
+            final(self).source() == old(self).source(),
             final(self).rest() == past(old(self).rest(), target - old(self).pos()),
             target <= old(self).pos() ==> {
                 &&& final(self).pos() == old(self).pos()
@@ -3107,6 +3215,7 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedIter<'a, V, C> {
     pub fn advance_by(&mut self, amount: usize)
         ensures
             final(self).column() == old(self).column(),
+            final(self).source() == old(self).source(),
             final(self).rest() == past(old(self).rest(), amount as int),
             amount <= old(self).rest().len() ==> {
                 &&& final(self).pos() == old(self).pos() + amount
@@ -3135,6 +3244,7 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedIter<'a, V, C> {
     pub fn shift(&mut self, range: Range<usize>)
         ensures
             final(self).column() == old(self).column(),
+            final(self).source() == old(self).source(),
             final(self).rest() == window(
                 old(self).column(),
                 if range.start <= old(self).pos() {
@@ -3185,6 +3295,7 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedIter<'a, V, C> {
             range.start >= old(self).pos(),
         ensures
             final(self).column() == old(self).column(),
+            final(self).source() == old(self).source(),
             ({
                 let w = window(old(self).column(), range.start as int, range.end as int);
                 &&& w.len() > 0 ==> {
@@ -3239,6 +3350,7 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedIter<'a, V, C> {
     pub fn next_run(&mut self) -> (r: Option<Run<Get<'a, V>>>)
         ensures
             final(self).column() == old(self).column(),
+            final(self).source() == old(self).source(),
             match r {
                 Some(run) => {
                     &&& head_run(old(self).items(), run.value, run.count as int)
@@ -3318,6 +3430,7 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedIter<'a, V, C> {
     pub fn scan_to_value(&mut self, target: Get<'_, V>) -> (r: Option<usize>)
         ensures
             final(self).column() == old(self).column(),
+            final(self).source() == old(self).source(),
             match r {
                 Some(at) => {
                     &&& old(self).pos() <= at < old(self).pos() + old(self).rest().len()
@@ -3348,6 +3461,7 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedIter<'a, V, C> {
                 self.pos() == p0,
                 self.end_pos() == end,
                 self.column() == old(self).column(),
+                self.source() == old(self).source(),
                 o == old(self).items(),
                 p0 == old(self).pos(),
                 end == old(self).end_pos(),
@@ -3414,6 +3528,7 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedIter<'a, V, C> {
     pub fn seek_to_value(&mut self, target: Get<'_, V>, range: Range<usize>) -> (r: Range<usize>)
         ensures
             final(self).column() == old(self).column(),
+            final(self).source() == old(self).source(),
             ({
                 let (p, o, t) = (old(self).pos(), old(self).rest(), target.sv());
                 // how far the iterator moves before it searches, and the
@@ -3546,6 +3661,7 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedIter<'a, V, C> {
                 &&& final(self).end_pos() == final(self).pos()
             },
             final(self).column() == old(self).column(),
+            final(self).source() == old(self).source(),
     {
         proof {
             use_type_invariant(&*self);
@@ -3619,6 +3735,7 @@ impl<'a, V: VValue<C>, C: VCodec> Iterator for VerifiedIter<'a, V, C> {
                 },
             },
             final(self).column() == old(self).column(),
+            final(self).source() == old(self).source(),
     {
         proof {
             use_type_invariant(&*self);
@@ -3665,6 +3782,7 @@ impl<'a, V: VValue<C>, C: VCodec> Iterator for VerifiedIter<'a, V, C> {
                 &&& final(self).end_pos() == final(self).pos()
             },
             final(self).column() == old(self).column(),
+            final(self).source() == old(self).source(),
     {
         proof {
             use_type_invariant(&*self);
@@ -3814,6 +3932,7 @@ impl<'a, V: VValue<C>, C: VCodec> Clone for VerifiedIter<'a, V, C> {
         ensures
             r.items() == self.items(),
             r.column() == self.column(),
+            r.source() == self.source(),
             r.pos() == self.pos(),
             r.end_pos() == self.end_pos(),
     {
@@ -3831,6 +3950,7 @@ impl<'a, V: VValue<C>, C: VCodec> Default for VerifiedIter<'a, V, C> {
             r.items().len() == 0,
             r.rest().len() == 0,
             r.column().len() == 0,
+            r.source() is None,
             r.pos() == 0,
             r.end_pos() == 0,
     {
@@ -3856,10 +3976,124 @@ impl<'a, V: VValue<C>, C: VCodec> IntoIterator for &'a VerifiedColumn<V, C> {
         ensures
             it.rest() == self@,
             it.column() == self@,
+            it.source() == Some(*self),
             it.pos() == 0,
             it.end_pos() == self@.len(),
     {
         self.iter()
+    }
+}
+
+/// The error of a [`VerifiedIterState::try_resume`] on a column that the
+/// state does not fit. Nothing is assumed of it.
+#[verifier::external_body]
+#[cold]
+fn invalid_resume() -> PackError {
+    PackError::InvalidResume
+}
+
+/// Where a [`VerifiedIter`] stood and where its window ended, kept
+/// without the borrow of the column: [`VerifiedIter::suspend`] gives it,
+/// and [`try_resume`](Self::try_resume) an iterator from it.
+///
+/// It holds the iterator's place in the column's slabs, and how many
+/// slabs and edits the column counted then. It is of no value type: a
+/// state fits any column whose slabs it is a place in.
+pub struct VerifiedIterState {
+    counter: usize,
+    num_slabs: usize,
+    slab_idx: usize,
+    pos: usize,
+    items_left: usize,
+    /// How many values the iterator had given of the slab it stood in.
+    slab_consumed: usize,
+}
+
+impl VerifiedIterState {
+    /// Where the iterator stood: its `pos()`.
+    pub closed spec fn pos(&self) -> usize {
+        self.pos
+    }
+
+    /// Where the iterator's window ended: its `end_pos()`.
+    pub closed spec fn end_pos(&self) -> usize {
+        (self.pos + self.items_left) as usize
+    }
+
+    /// The count of edits of the column the state was taken of
+    /// (`VerifiedColumn::edits`).
+    pub closed spec fn edits(&self) -> usize {
+        self.counter
+    }
+
+    /// The state is a place in `column` as it is: the column counts the
+    /// edits and the slabs that the state does, the state's place is one
+    /// in those slabs, and it is in the column or at its end.
+    /// [`try_resume`](Self::try_resume) gives an iterator exactly then.
+    pub closed spec fn fits<V: VValue<C>, C: VCodec>(&self, column: &VerifiedColumn<V, C>) -> bool {
+        let lens = slab_lens(column.core.slabs_spec());
+        &&& self.counter == column.core.count()
+        &&& self.num_slabs == lens.len()
+        &&& crate::iter_core::resumes(lens, self.slab_idx, self.slab_consumed, self.pos, self.items_left)
+        &&& self.pos <= total(lens)
+    }
+
+    /// An iterator of `column` that stands where the suspended one stood,
+    /// with its window, if the state fits the column (`fits`); an error
+    /// ([`PackError::InvalidResume`]) if it does not.
+    ///
+    /// A state fits the column it was taken of, as long as that is not
+    /// edited ([`VerifiedIter::suspend`]). The iterator given is one of
+    /// `column` whatever column the state was taken of: it gives the
+    /// values of `column` in the state's window. Where the state stands
+    /// at the column's end, the iterator's window ends there.
+    ///
+    /// That every edit moves the column's count of edits
+    /// (`VerifiedColumn::edits`), so that a state taken before an edit is
+    /// refused after it, is tested and not proved.
+    ///
+    /// Panics, as [`Column`](crate::Column)'s does, where an edit's panic
+    /// left `column` without its parts and the state would fit it.
+    pub fn try_resume<'a, V: VValue<C>, C: VCodec>(&self, column: &'a VerifiedColumn<V, C>) -> (r: Result<
+        VerifiedIter<'a, V, C>,
+        PackError,
+    >)
+        ensures
+            r is Ok <==> self.fits(column),
+            r is Ok ==> self.edits() == column.edits(),
+            r matches Ok(it) ==> {
+                &&& it.source() == Some(*column)
+                &&& it.column() == column@
+                &&& it.pos() == self.pos()
+                &&& it.rest() == window(column@, self.pos() as int, self.end_pos() as int)
+                &&& it.end_pos() == self.end_pos() || (self.pos() == column@.len() && it.end_pos() == self.pos())
+            },
+    {
+        if self.counter != column.core.counter() {
+            return Err(invalid_resume());
+        }
+        let slabs = column.core.slabs();
+        if self.num_slabs != slabs.len() {
+            return Err(invalid_resume());
+        }
+        column.lemma_read();
+        proof {
+            <Held<V, C> as VGet>::lemma_svs(column.core@);
+        }
+        if self.pos > column.core.len() {
+            return Err(invalid_resume());
+        }
+        let it = match column.core.resume::<V::X>(self.slab_idx, self.slab_consumed, self.pos, self.items_left) {
+            Some(it) => it,
+            None => {
+                return Err(invalid_resume());
+            },
+        };
+        let r = VerifiedIter { it, slabs, col: Some(&column.core) };
+        proof {
+            r.lemma_window();
+        }
+        Ok(r)
     }
 }
 
@@ -3912,6 +4146,7 @@ impl<'a, V: VValue<C>, C: VCodec> Iterator for VerifiedRuns<'a, V, C> {
     fn next(&mut self) -> (r: Option<Run<Get<'a, V>>>)
         ensures
             final(self).iter().column() == old(self).iter().column(),
+            final(self).iter().source() == old(self).iter().source(),
             match r {
                 Some(run) => {
                     &&& head_run(old(self).iter().items(), run.value, run.count as int)

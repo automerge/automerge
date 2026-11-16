@@ -12,10 +12,10 @@
 #![allow(clippy::iter_nth_zero)]
 
 use hexane::verified::{
-    refused, Get, VNewtype, VValue, VerifiedColumn, VerifiedIter, VerifiedRuns,
+    refused, Get, VNewtype, VValue, VerifiedColumn, VerifiedIter, VerifiedIterState, VerifiedRuns,
 };
 use hexane::{
-    Codec, Column, ColumnValue, ColumnValueRef, LoadOpts, MaybeFill, NoFill, PackError,
+    Codec, Column, ColumnValue, ColumnValueRef, IterState, LoadOpts, MaybeFill, NoFill, PackError,
     RleEncoding, RleValue, Run,
 };
 use std::cell::{Cell, RefCell};
@@ -2194,6 +2194,57 @@ fn window<T>(model: &[T], a: usize, b: usize) -> &[T] {
     }
 }
 
+/// What a suspended iterator's state resumes to on a column: where the
+/// iterator stands, where its window ends and the values it has left. Or
+/// nothing, where the state does not fit the column.
+fn resumed<T: Kind>(
+    s: &VerifiedIterState,
+    v: &VerifiedColumn<T>,
+) -> Option<(usize, usize, Vec<T>)> {
+    match s.try_resume(v) {
+        Ok(it) => Some((it.pos(), it.end_pos(), rest_of(&it))),
+        Err(e) => {
+            assert!(matches!(e, PackError::InvalidResume), "{e:?}");
+            None
+        }
+    }
+}
+
+/// The same of `Column`'s state.
+fn old_resumed<T: Kind>(s: &IterState, c: &Column<T>) -> Option<(usize, usize, Vec<T>)> {
+    match s.try_resume(c) {
+        Ok(it) => Some((it.pos(), it.end_pos(), it.map(old).collect())),
+        Err(e) => {
+            assert!(matches!(e, PackError::InvalidResume), "{e:?}");
+            None
+        }
+    }
+}
+
+/// Both iterators suspended where they stand and resumed on their own
+/// columns, which are given back: they stand where the two did, with the
+/// same values left, and where `Column`'s does. The window ends where it
+/// did, or at the column's end where the iterator stood there. And a
+/// state resumes as often as it is asked.
+fn check_pause<'a, T: Kind>(
+    x: &VerifiedIter<'_, T>,
+    y: &hexane::Iter<'_, T>,
+    v: &'a VerifiedColumn<T>,
+    c: &'a Column<T>,
+    slabs: bool,
+) -> (VerifiedIter<'a, T>, hexane::Iter<'a, T>) {
+    let (s, t) = (x.suspend(), y.suspend());
+    let (x2, y2) = (s.try_resume(v).unwrap(), t.try_resume(c).unwrap());
+    stand(&x2, &y2, slabs);
+    assert_eq!(x2.pos(), x.pos());
+    assert!(x2.end_pos() == x.end_pos() || (x.pos() == v.len() && x2.end_pos() == x.pos()));
+    assert_eq!(rest_of(&x2), rest_of(x));
+    assert_eq!(rest_of(&x2), y2.clone().map(old).collect::<Vec<T>>());
+    let again = s.try_resume(v).unwrap();
+    assert_eq!((again.pos(), again.end_pos()), (x2.pos(), x2.end_pos()));
+    (x2, y2)
+}
+
 /// Where the specifications say an iterator stands that stood at `p`
 /// and was moved to a window with no value, ending at `to`: where the
 /// window ends or the column does, whichever comes first, if that is
@@ -2240,6 +2291,11 @@ fn check_moves<T: Kind>(
     assert_eq!((x.pos(), x.end_pos()), (a, b));
     for step in 0..50 {
         stand(&x, &y, slabs);
+        let (x2, y2) = check_pause(&x, &y, v, c, slabs);
+        if step % 5 == 4 {
+            // and the moves go on with the iterators resumed
+            (x, y) = (x2, y2);
+        }
         let (p, e) = (x.pos(), x.end_pos());
         assert!(p <= e && p <= n);
         let had = left(&x);
@@ -2941,6 +2997,543 @@ fn a_search_then_a_read() {
         it.scan_to_value(&target[..])
     };
     assert_eq!((cat, at, it.next()), (&b"cat"[..], Some(6), None));
+}
+
+/// A column read in pages: an iterator suspended after each page, and
+/// resumed for the next, gives every value once and in order. A state
+/// holds no borrow of its column, which is read between the pages.
+#[test]
+fn a_column_read_in_pages() {
+    fn pages<T: Kind>() {
+        let mut rng = Rng(0x9a6e5);
+        for n in [0, 1, 50, 400] {
+            let model: Vec<T> = (0..n).map(|_| T::fresh(&mut rng)).collect();
+            let model: Vec<T> = (0..n).map(|i| model[i - i % 3].clone()).collect();
+            for (v, c) in columns_of(&mut rng, &model) {
+                let slabs = v.slab_lens() == c.slab_lens();
+                for page in [1, 7, 64, 1000] {
+                    let (mut s, mut t) = (v.iter().suspend(), c.iter().suspend());
+                    let (mut got, mut old_got) = (Vec::<T>::new(), Vec::<T>::new());
+                    loop {
+                        assert_eq!(v.len(), n);
+                        let (mut x, mut y) = (s.try_resume(&v).unwrap(), t.try_resume(&c).unwrap());
+                        stand(&x, &y, slabs);
+                        assert_eq!(x.pos(), got.len());
+                        let before = got.len();
+                        got.extend(x.by_ref().take(page).map(T::keep));
+                        old_got.extend(y.by_ref().take(page).map(old));
+                        (s, t) = (x.suspend(), y.suspend());
+                        if got.len() == before {
+                            break;
+                        }
+                    }
+                    assert_eq!(got, model);
+                    assert_eq!(old_got, model);
+                }
+            }
+        }
+    }
+    for_each_kind!(pages);
+}
+
+/// One of the edits of a column, made of both columns and of the model.
+/// Says whether it changed the values.
+fn an_edit<T: Kind>(
+    rng: &mut Rng,
+    which: usize,
+    v: &mut VerifiedColumn<T>,
+    c: &mut Column<T>,
+    model: &mut Vec<T>,
+) -> bool {
+    let n = model.len();
+    let at = rng.below(n + 1);
+    let del = rng.below((n - at).min(5) + 1);
+    let before = model.clone();
+    match which {
+        0 => {
+            let ins: Vec<T> = rng.values(3);
+            v.splice(at, del, &lent(&ins));
+            c.splice(at, del, ins.iter().cloned());
+            model.splice(at..at + del, ins);
+        }
+        1 => {
+            let ins: Vec<T> = rng.values(3);
+            v.splice_iter(at, del, ins.iter().map(T::lend));
+            c.splice(at, del, ins.iter().cloned());
+            model.splice(at..at + del, ins);
+        }
+        2 => {
+            let runs = some_runs::<T>(rng, 2);
+            v.splice_runs(
+                at,
+                del,
+                runs.iter().map(|(n, x)| Run {
+                    count: *n,
+                    value: x.lend(),
+                }),
+            );
+            c.splice_runs(
+                at,
+                del,
+                runs.iter().map(|(n, x)| Run {
+                    count: *n,
+                    value: x.clone(),
+                }),
+            );
+            model.splice(at..at + del, run_model(&runs));
+        }
+        3 => {
+            let x = T::fresh(rng);
+            v.insert(at, x.lend());
+            c.insert(at, x.clone());
+            model.insert(at, x);
+        }
+        4 => {
+            let x = T::fresh(rng);
+            v.push(x.lend());
+            c.push(x.clone());
+            model.push(x);
+        }
+        5 => {
+            if at < n {
+                v.remove(at);
+                c.remove(at);
+                model.remove(at);
+            }
+        }
+        6 => {
+            // sometimes past the end, which changes nothing
+            let len = rng.below(n + 3);
+            v.truncate(len);
+            c.truncate(len);
+            model.truncate(len);
+        }
+        7 => {
+            v.remove_n(at, del);
+            c.remove_n(at, del);
+            model.drain(at..at + del);
+        }
+        8 => {
+            v.clear();
+            c.clear();
+            model.clear();
+        }
+        9 => {
+            // each value to itself, or each to one value
+            let to = match rng.below(2) {
+                0 => None,
+                _ => Some(T::fresh(rng)),
+            };
+            v.remap(|x: T| to.clone().unwrap_or(x));
+            c.remap(|x: T| to.clone().unwrap_or(x));
+            if let Some(to) = to {
+                model.fill(to);
+            }
+        }
+        _ => {
+            let more: Vec<T> = rng.values(3);
+            v.extend(more.iter().map(T::lend));
+            c.extend(more.iter().cloned());
+            model.extend(more);
+        }
+    }
+    *model != before
+}
+
+/// An edit of a column ends what was suspended of it. A state taken
+/// before any edit that changes the column's values resumes no more, as
+/// `Column`'s does not, and stays so through later edits, one that puts
+/// the old values back among them. After a call that changes no value,
+/// the state resumes or not as `Column`'s does. A state taken after the
+/// edits resumes. Columns built and loaded, in one slab and in many, so
+/// that some of the edits leave the count of slabs as it was.
+///
+/// The specification of `try_resume` does not say this: what an edit
+/// does to the column's count of edits is tested here, and not proved.
+#[test]
+fn an_edit_ends_what_was_suspended() {
+    fn ends<T: Kind>() {
+        let mut rng = Rng(0x4d5e);
+        let (mut ended, mut kept) = (0, 0);
+        for round in 0..220 {
+            let which = round % 11;
+            let budget = [3, 16, 64][round / 11 % 3];
+            let mut model: Vec<T> = rng.values(if round / 33 % 2 == 0 { 8 } else { 250 });
+            let (mut v, mut c) = both_with(&model, budget);
+            if round / 66 % 2 == 1 {
+                let bytes = v.save();
+                let opts = LoadOpts::new().with_max_segments(budget);
+                v = VerifiedColumn::<T>::load_with(&bytes, opts).unwrap();
+                c = Column::<T>::load_with(&bytes, opts).unwrap();
+            }
+            let n = model.len();
+            let (a, b, k) = windows_into(&mut rng, n, 1)[1];
+            let (s, t) = {
+                let (mut x, mut y) = (v.iter_range(a, b), c.iter_range(a..b));
+                if k > 0 {
+                    x.nth(k - 1);
+                    y.nth(k - 1);
+                }
+                (x.suspend(), y.suspend())
+            };
+            let first = resumed(&s, &v);
+            assert_eq!(first, old_resumed(&t, &c));
+            assert_eq!(first.as_ref().map(|r| r.0), Some(a + k));
+            assert_eq!(
+                first.as_ref().map(|r| &r.2[..]),
+                Some(window(&model, a + k, b))
+            );
+            // a copy of the column is as much the state's column
+            let (v2, c2) = (v.clone(), c.clone());
+            assert_eq!(resumed(&s, &v2), first);
+            assert_eq!(old_resumed(&t, &c2), first);
+
+            let slabs = v.slab_count();
+            let changed = an_edit(&mut rng, which, &mut v, &mut c, &mut model);
+            let (new, old) = (resumed(&s, &v), old_resumed(&t, &c));
+            assert_eq!(new, old, "after edit {which}");
+            if changed {
+                assert!(new.is_none(), "edit {which} at {slabs} slabs");
+                ended += (v.slab_count() == slabs) as usize;
+                // nor after further edits, the first undone among them
+                if which == 4 {
+                    v.remove(n);
+                    c.remove(n);
+                    model.pop();
+                } else {
+                    let next = rng.below(11);
+                    an_edit(&mut rng, next, &mut v, &mut c, &mut model);
+                }
+                assert!(resumed(&s, &v).is_none() && old_resumed(&t, &c).is_none());
+            } else {
+                kept += new.is_some() as usize;
+            }
+            // the copy took none of it
+            assert_eq!(resumed(&s, &v2), first);
+            assert_eq!(old_resumed(&t, &c2), first);
+            // and a state of the column as it now is resumes (some of the
+            // columns were loaded, and a remap leaves slabs as a load does)
+            check_loaded(&v, &c, &model);
+            let (s, t) = (v.iter().suspend(), c.iter().suspend());
+            let all = Some((0, model.len(), model.clone()));
+            assert_eq!(resumed(&s, &v), all);
+            assert_eq!(old_resumed(&t, &c), all);
+        }
+        // edits that left the count of slabs alone, and calls that left
+        // the state resuming
+        assert!(ended > 40 && kept > 3, "{ended} {kept}");
+    }
+    for_each_kind!(ends);
+}
+
+/// A column cleared of its values refuses what was suspended of it, and
+/// does so still once it has a slab again. `clear` leaves a column of
+/// this API with no slab, and a call that changes no value then gives it
+/// its first: a column that had one slab has one again, and a state that
+/// stood at its start is told from a state of the column as it now is
+/// by the count of edits alone. (`Column` keeps a slab through its
+/// `clear`, and refuses its state as well.)
+#[test]
+fn a_cleared_column_refuses_what_was_suspended() {
+    fn cleared<T: Kind>() {
+        let mut rng = Rng(0xc1ea5);
+        let mut one_slab = 0;
+        for round in 0..48 {
+            let n = [1, 8, 250][round % 3];
+            let model: Vec<T> = (0..n).map(|_| T::fresh(&mut rng)).collect();
+            let (mut v, mut c) = both_with(&model, 64);
+            if round / 24 == 1 {
+                let bytes = v.save();
+                v = VerifiedColumn::<T>::load(&bytes).unwrap();
+                c = Column::<T>::load(&bytes).unwrap();
+            }
+            let (a, b) = [(0, 0), (0, n), (0, 1), (n, n)][round / 3 % 4];
+            let (s, t) = (v.iter_range(a, b).suspend(), c.iter_range(a..b).suspend());
+            let first = Some((a, b, window(&model, a, b).to_vec()));
+            assert_eq!(resumed(&s, &v), first);
+            assert_eq!(old_resumed(&t, &c), first);
+            one_slab += (v.slab_count() == 1) as usize;
+
+            v.clear();
+            c.clear();
+            assert_eq!(v.slab_count(), 0);
+            assert!(resumed(&s, &v).is_none() && old_resumed(&t, &c).is_none());
+            // the first slab again, by a call that changes no value
+            let none = &model[..0];
+            if round / 12 % 2 == 0 {
+                v.splice(0, 0, &lent(none));
+                c.splice(0, 0, none.iter().cloned());
+            } else {
+                v.extend(none.iter().map(T::lend));
+                c.extend(none.iter().cloned());
+            }
+            assert_eq!(v.slab_count(), 1);
+            assert!(
+                resumed(&s, &v).is_none() && old_resumed(&t, &c).is_none(),
+                "round {round}"
+            );
+            // and with values in it again, the old ones
+            v.splice(0, 0, &lent(&model));
+            c.splice(0, 0, model.iter().cloned());
+            assert!(resumed(&s, &v).is_none() && old_resumed(&t, &c).is_none());
+            check_loaded(&v, &c, &model);
+        }
+        assert!(one_slab > 20, "{one_slab}");
+    }
+    for_each_kind!(cleared);
+}
+
+/// Calls that change no value of a column: a splice of nothing for
+/// nothing, in each of its three forms, a truncate at the end or past
+/// it, a delete of no value, an extend by nothing, a clear of a column
+/// of no value, a remap of each value to itself, and a value put in the
+/// place of its equal. After each, what was suspended resumes or does
+/// not as `Column`'s does. The first seven are no edits, and the state
+/// resumes after each to what it resumed to before, with one exception:
+/// a column that has no slab yet (a new one, and one loaded from no
+/// bytes) is given its first by a splice or an extend, of nothing too,
+/// and that ends what was suspended of it, as it does in `Column`. The
+/// last two are edits, though they change no value: the state resumes
+/// after neither.
+#[test]
+fn a_call_that_changes_no_value() {
+    fn quiet<T: Kind>() {
+        let mut rng = Rng(0x9017e);
+        let mut kept = [0usize; 9];
+        for round in 0..216 {
+            let which = round % 9;
+            let n = [0, 1, 8, 250][round / 9 % 4];
+            let budget = [3, 64][round / 36 % 2];
+            let model: Vec<T> = (0..n).map(|_| T::fresh(&mut rng)).collect();
+            let model: Vec<T> = (0..n).map(|i| model[i - i % 3].clone()).collect();
+            let (mut v, mut c) = both_with(&model, budget);
+            if round / 72 % 3 == 1 {
+                let bytes = v.save();
+                let opts = LoadOpts::new().with_max_segments(budget);
+                v = VerifiedColumn::<T>::load_with(&bytes, opts).unwrap();
+                c = Column::<T>::load_with(&bytes, opts).unwrap();
+            } else if round / 72 % 3 == 2 && n > 0 {
+                // a column that has counted edits
+                let x = T::fresh(&mut rng);
+                v.push(x.lend());
+                c.push(x.clone());
+                v.remove(n);
+                c.remove(n);
+            }
+            let (a, b, k) = windows_into(&mut rng, n, 1)[1];
+            let (s, t) = {
+                let (mut x, mut y) = (v.iter_range(a, b), c.iter_range(a..b));
+                if k > 0 {
+                    x.nth(k - 1);
+                    y.nth(k - 1);
+                }
+                (x.suspend(), y.suspend())
+            };
+            let first = resumed(&s, &v);
+            assert_eq!(first, Some((a + k, b, window(&model, a + k, b).to_vec())));
+            assert_eq!(first, old_resumed(&t, &c));
+            let at = rng.below(n + 1);
+            let slabs = v.slab_count();
+            let none = &model[..0];
+            let no_runs: Vec<(usize, T)> = Vec::new();
+            match which {
+                0 => {
+                    v.splice(at, 0, &lent(none));
+                    c.splice(at, 0, none.iter().cloned());
+                }
+                1 => {
+                    v.splice_iter(at, 0, none.iter().map(T::lend));
+                    c.splice(at, 0, none.iter().cloned());
+                }
+                2 => {
+                    v.splice_runs(
+                        at,
+                        0,
+                        no_runs.iter().map(|(n, x)| Run {
+                            count: *n,
+                            value: x.lend(),
+                        }),
+                    );
+                    c.splice_runs(
+                        at,
+                        0,
+                        no_runs.iter().map(|(n, x)| Run {
+                            count: *n,
+                            value: x.clone(),
+                        }),
+                    );
+                }
+                3 => {
+                    let len = n + rng.below(3);
+                    v.truncate(len);
+                    c.truncate(len);
+                }
+                4 => {
+                    v.remove_n(at, 0);
+                    c.remove_n(at, 0);
+                }
+                5 => {
+                    v.extend(none.iter().map(T::lend));
+                    c.extend(none.iter().cloned());
+                }
+                6 => {
+                    if n > 0 {
+                        continue;
+                    }
+                    v.clear();
+                    c.clear();
+                }
+                7 => {
+                    v.remap(|x: T| x);
+                    c.remap(|x: T| x);
+                }
+                _ => {
+                    if at == n {
+                        continue;
+                    }
+                    v.splice(at, 1, &lent(&model[at..at + 1]));
+                    c.splice(at, 1, model[at..at + 1].iter().cloned());
+                }
+            }
+            let (new, old) = (resumed(&s, &v), old_resumed(&t, &c));
+            assert_eq!(new, old, "after call {which} of {n} values");
+            if which < 7 {
+                let first_slab = slabs == 0 && v.slab_count() == 1;
+                assert!(v.slab_count() == slabs || first_slab);
+                assert!(!first_slab || [0, 1, 2, 5].contains(&which));
+                let same = if first_slab { None } else { first };
+                assert_eq!(new, same, "after call {which} of {n} values");
+            } else {
+                assert!(new.is_none(), "after call {which} of {n} values");
+            }
+            kept[which] += new.is_some() as usize;
+            check_loaded(&v, &c, &model);
+        }
+        assert!(kept[..7].iter().all(|&k| k > 0), "{kept:?}");
+    }
+    for_each_kind!(quiet);
+}
+
+/// A state resumed on a column other than its own, among columns as
+/// loaded, which count no edits. Where `Column`'s state does not resume,
+/// nor does this one. Where `Column`'s resumes, this one resumes to the
+/// same place, window and values, with one exception: a state that stood
+/// at the end of its own column, on a column that ends before that place.
+/// `Column` resumes it as an iterator with nothing left that stands past
+/// the column's end. The verified API refuses it, since its iterator
+/// stands in its column.
+#[test]
+fn a_state_on_another_column() {
+    fn others<T: Kind>() {
+        let mut rng = Rng(0x57a7e);
+        let mut cols = Vec::new();
+        for n in [0, 1, 2, 5, 5, 9, 40, 40, 41, 300] {
+            let model: Vec<T> = (0..n).map(|_| T::fresh(&mut rng)).collect();
+            let model: Vec<T> = (0..n).map(|i| model[i - i % 2].clone()).collect();
+            for budget in [3, 64] {
+                let bytes = both_with(&model, 64).0.save();
+                let opts = LoadOpts::new().with_max_segments(budget);
+                cols.push((
+                    VerifiedColumn::<T>::load_with(&bytes, opts).unwrap(),
+                    Column::<T>::load_with(&bytes, opts).unwrap(),
+                ));
+            }
+        }
+        let (mut on_another, mut past) = (0, 0);
+        for (i, (va, ca)) in cols.iter().enumerate() {
+            let n = va.len();
+            let mut states = Vec::new();
+            for (a, b, k) in windows_into(&mut rng, n, 5) {
+                let (mut x, mut y) = (va.iter_range(a, b), ca.iter_range(a..b));
+                if k > 0 {
+                    x.nth(k - 1);
+                    y.nth(k - 1);
+                }
+                states.push((x.suspend(), y.suspend()));
+                // and with all of the window read
+                assert_eq!(x.by_ref().count(), y.by_ref().count());
+                states.push((x.suspend(), y.suspend()));
+            }
+            // at the column's end, by several roads
+            let (mut x, mut y) = (va.iter(), ca.iter());
+            x.advance_to(n);
+            y.advance_to(n);
+            states.push((x.suspend(), y.suspend()));
+            x.set_max(usize::MAX);
+            y.set_max(usize::MAX);
+            states.push((x.suspend(), y.suspend()));
+            assert!(x.next().is_none() && y.next().is_none());
+            states.push((x.suspend(), y.suspend()));
+            let (mut x, mut y) = (va.iter(), ca.iter());
+            assert!(x.nth(usize::MAX).is_none() && y.nth(usize::MAX).is_none());
+            states.push((x.suspend(), y.suspend()));
+            states.push((va.iter_range(n, n).suspend(), ca.iter_range(n..n).suspend()));
+
+            for (s, t) in &states {
+                for (j, (vb, cb)) in cols.iter().enumerate() {
+                    let (new, old) = (resumed(s, vb), old_resumed(t, cb));
+                    if new == old {
+                        on_another += (i != j && new.is_some()) as usize;
+                        assert!(i != j || new.is_some());
+                        continue;
+                    }
+                    // the one exception
+                    let (p, e, rest) = old.unwrap();
+                    assert!(new.is_none() && i != j);
+                    assert!(p > vb.len() && p == n && e == p && rest.is_empty());
+                    past += 1;
+                }
+            }
+        }
+        assert!(on_another > 50 && past > 10, "{on_another} {past}");
+    }
+    for_each_kind!(others);
+}
+
+/// The state of an iterator of no column, which counts no edits and no
+/// slabs: it resumes on a column that has neither, which a new column is
+/// and one loaded from no bytes, to an iterator with nothing to give.
+/// On any other column it does not resume. `Column`'s does the same. And
+/// a state is plain data, with no borrow in it.
+#[test]
+fn the_state_of_an_iterator_of_no_column() {
+    fn plain<S: Send + Sync + 'static>() {}
+    plain::<VerifiedIterState>();
+
+    fn none<T: Kind>() {
+        let mut rng = Rng(0xd0);
+        let s = VerifiedIter::<T>::default().suspend();
+        let t = hexane::Iter::<T>::default().suspend();
+        let model: Vec<T> = rng.values(30);
+        // what each column gives, and whether it has no slab and no edit
+        let mut seen = Vec::new();
+        for model in [&model[..], &[]] {
+            // built by an edit of a new column
+            let (mut v, mut c) = both(model);
+            seen.push((resumed(&s, &v), old_resumed(&t, &c), false));
+            let bytes = v.save();
+            let v2 = VerifiedColumn::<T>::load(&bytes).unwrap();
+            let c2 = Column::<T>::load(&bytes).unwrap();
+            assert_eq!(v2.slab_count() == 0, model.is_empty());
+            seen.push((resumed(&s, &v2), old_resumed(&t, &c2), model.is_empty()));
+            // a cleared column has counted an edit, or has a slab still
+            v.clear();
+            c.clear();
+            seen.push((resumed(&s, &v), old_resumed(&t, &c), false));
+        }
+        let (v, c) = (VerifiedColumn::<T>::new(), Column::<T>::new());
+        assert_eq!((v.slab_count(), c.slab_count()), (0, 0));
+        seen.push((resumed(&s, &v), old_resumed(&t, &c), true));
+        let (mut v, mut c) = (v, c);
+        v.clear();
+        c.clear();
+        seen.push((resumed(&s, &v), old_resumed(&t, &c), true));
+        for (new, old, bare) in seen {
+            assert_eq!(new, old);
+            assert_eq!(new, bare.then(|| (0, 0, Vec::new())));
+        }
+    }
+    for_each_kind!(none);
 }
 
 /// `fold` reads a run at a time: its function is called once for each
@@ -3963,6 +4556,13 @@ fn the_layout_after_a_panic_in_an_edit() {
     assert_eq!(v.iter_range(0, 0).count(), 0);
     assert_eq!((&v).into_iter().last(), None);
     assert_eq!((c.iter().len(), c.iter().next()), (0, None));
+    // a state that counts no edits and no slabs would fit it, and to
+    // resume it asks for the column's parts: both APIs panic
+    let (s, t) = (v.iter().suspend(), c.iter().suspend());
+    let new = panic_of(std::panic::AssertUnwindSafe(|| s.try_resume(&v).is_ok())).unwrap();
+    let old = panic_of(std::panic::AssertUnwindSafe(|| t.try_resume(&c).is_ok())).unwrap();
+    assert!(new.contains("after a panic"), "{new}");
+    assert_eq!(new, old);
     // and neither takes an edit any more
     let new = panic_of(std::panic::AssertUnwindSafe(|| v.push(7))).unwrap();
     let old = panic_of(std::panic::AssertUnwindSafe(|| c.push(7))).unwrap();
