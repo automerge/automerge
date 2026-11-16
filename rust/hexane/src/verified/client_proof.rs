@@ -69,7 +69,22 @@
 //! follow one another are of one value ([`in_runs`]); the counts of
 //! the runs add up to the number of values ([`count_by_runs`]); and the
 //! runs of one column, spliced into another, copy it
-//! ([`copied_by_runs`]).
+//! ([`copied_by_runs`]); and a run, and the iterator of runs, say each
+//! of these things of the iterator on its own ([`told_by_a_run`],
+//! [`told_by_the_runs`], `no_more_than_counted`). And that an iterator
+//! finds a value among those it has left. A scan gives the first place
+//! that holds the value, or says that none does, and leaves the iterator
+//! past that place, or with nothing ([`told_by_a_scan`]): so the first
+//! place of a value in a range of a column is found
+//! ([`first_place_in`]), and by scan after scan every place of it
+//! ([`all_places`]). And a search of values in order gives the range of
+//! the places that hold the value, within the range of the column that
+//! the client names, and leaves the iterator at its start with the
+//! window it had ([`told_by_a_seek`], [`find_in_the_rest`]), whatever
+//! range is named: one that ends behind the iterator, or starts past
+//! its window, is searched nowhere ([`seek_out_of_range`]). The search
+//! is the column's own, and the value found is the one read next
+//! ([`seek_then_read`]).
 //!
 //! This module exists only while Verus checks the crate.
 
@@ -2241,6 +2256,274 @@ proof fn no_more_than_counted<'a, V: VValue<C>, C: VCodec>(it: VerifiedIter<'a, 
         it.rest().len() == it.items().len(),
 {
     it.lemma_items_len();
+}
+
+/// What `scan_to_value` says by itself, of any iterator, each thing asked
+/// for on its own and with no lemma: where the first of the values left
+/// is that is `x`, or that none of them is; and where that leaves the
+/// iterator.
+#[allow(dead_code)]
+fn told_by_a_scan<'a, V: VValue<C>, C: VCodec>(it: VerifiedIter<'a, V, C>, x: Get<'_, V>) -> (r: Option<usize>)
+    ensures
+        match r {
+            Some(k) => {
+                &&& it.pos() <= k < it.pos() + it.rest().len()
+                &&& it.rest()[k - it.pos()] == x.sv()
+                &&& forall|i: int| 0 <= i < k - it.pos() ==> it.rest()[i] != x.sv()
+            },
+            None => forall|i: int| 0 <= i < it.rest().len() ==> it.rest()[i] != x.sv(),
+        },
+{
+    let mut at = it;
+    let r = at.scan_to_value(x);
+    match r {
+        Some(k) => {
+            assert(at.items() == it.items().skip(k - it.pos() + 1));
+            assert(at.rest() == it.rest().skip(k - it.pos() + 1));
+            assert(at.pos() == k + 1);
+            assert(at.end_pos() == it.end_pos());
+        },
+        None => {
+            assert(at.items().len() == 0);
+            assert(at.rest().len() == 0);
+            assert(at.pos() == it.pos() + it.rest().len());
+            assert(at.end_pos() == at.pos());
+        },
+    }
+    assert(at.column() == it.column());
+    r
+}
+
+/// The first place of `x` among the values `a..b` of a column, said of
+/// the column's values alone: a scan of an iterator over that window.
+/// For every value type and codec.
+#[allow(dead_code)]
+fn first_place_in<V: VValue<C>, C: VCodec>(col: &VerifiedColumn<V, C>, x: Get<'_, V>, a: usize, b: usize) -> (r:
+    Option<usize>)
+    requires
+        a <= b <= col@.len(),
+    ensures
+        match r {
+            Some(k) => a <= k < b && col@[k as int] == x.sv() && forall|i: int| a <= i < k ==> col@[i] != x.sv(),
+            None => forall|i: int| a <= i < b ==> col@[i] != x.sv(),
+        },
+{
+    let mut it = col.iter_range(a, b);
+    let ghost o = it.rest();
+    let r = it.scan_to_value(x);
+    proof {
+        assert forall|i: int| a <= i < b implies col@[i] == #[trigger] o[i - a] by {}
+        match r {
+            Some(k) => {
+                assert(col@[k as int] == o[k - a]);
+                assert forall|i: int| a <= i < k implies col@[i] != x.sv() by {
+                    assert(col@[i] == o[i - a]);
+                }
+            },
+            None => {
+                assert forall|i: int| a <= i < b implies col@[i] != x.sv() by {
+                    assert(col@[i] == o[i - a]);
+                }
+            },
+        }
+    }
+    r
+}
+
+/// Every place of `x` in a column, by scans that each go on from where
+/// the last one stopped: the places come in rising order, each holds
+/// `x`, and no other place does. For every value type and codec.
+#[allow(dead_code)]
+fn all_places<V: VValue<C>, C: VCodec>(col: &VerifiedColumn<V, C>, x: Get<'_, V>) -> (out: Vec<usize>)
+    ensures
+        forall|i: int, j: int| 0 <= i < j < out@.len() ==> out@[i] < out@[j],
+        forall|i: int| 0 <= i < out@.len() ==> out@[i] < col@.len() && col@[out@[i] as int] == x.sv(),
+        forall|k: int| 0 <= k < col@.len() && col@[k] == x.sv() ==> exists|i: int| 0 <= i < out@.len() && out@[i] == k,
+{
+    let mut out: Vec<usize> = Vec::new();
+    let mut it = col.iter();
+    loop
+        invariant
+            it.column() == col@,
+            it.pos() <= col@.len(),
+            it.rest() == col@.skip(it.pos() as int),
+            forall|i: int, j: int| 0 <= i < j < out@.len() ==> out@[i] < out@[j],
+            forall|i: int| 0 <= i < out@.len() ==> out@[i] < it.pos() && col@[out@[i] as int] == x.sv(),
+            forall|k: int|
+                0 <= k < it.pos() && col@[k] == x.sv() ==> exists|i: int| 0 <= i < out@.len() && out@[i] == k,
+        ensures
+            forall|i: int, j: int| 0 <= i < j < out@.len() ==> out@[i] < out@[j],
+            forall|i: int| 0 <= i < out@.len() ==> out@[i] < col@.len() && col@[out@[i] as int] == x.sv(),
+            forall|k: int|
+                0 <= k < col@.len() && col@[k] == x.sv() ==> exists|i: int| 0 <= i < out@.len() && out@[i] == k,
+        decreases col@.len() - it.pos(),
+    {
+        let ghost p = it.pos() as int;
+        let ghost o = it.rest();
+        let ghost before = out@;
+        match it.scan_to_value(x) {
+            Some(k) => {
+                out.push(k);
+                proof {
+                    assert(col@[k as int] == o[k - p]);
+                    assert(it.rest() =~= col@.skip(k + 1));
+                    assert forall|j: int| 0 <= j < it.pos() && col@[j] == x.sv() implies exists|i: int|
+                        0 <= i < out@.len() && out@[i] == j by {
+                        if j < p {
+                            let i = choose|i: int| 0 <= i < before.len() && before[i] == j;
+                            assert(out@[i] == j);
+                        } else if j < k {
+                            assert(col@[j] == o[j - p]);
+                        } else {
+                            assert(out@[before.len() as int] == j);
+                        }
+                    }
+                }
+            },
+            None => {
+                proof {
+                    assert forall|j: int| 0 <= j < col@.len() && col@[j] == x.sv() implies exists|i: int|
+                        0 <= i < out@.len() && out@[i] == j by {
+                        if j >= p {
+                            assert(col@[j] == o[j - p]);
+                        }
+                    }
+                }
+                break ;
+            },
+        }
+    }
+    out
+}
+
+/// What `seek_to_value` says by itself, of any iterator and a range that
+/// lies in what the iterator has left, each thing asked for on its own
+/// and with no lemma: where `x` stands among the values of the range,
+/// if they are in order as far as `x` can tell; and where that leaves
+/// the iterator.
+#[allow(dead_code)]
+fn told_by_a_seek<'a, V: VValue<C>, C: VCodec>(it: VerifiedIter<'a, V, C>, x: Get<'_, V>, range: Range<usize>) -> (r:
+    Range<usize>)
+    requires
+        it.pos() <= range.start <= range.end <= it.pos() + it.rest().len(),
+        sorted_for::<V>(it.rest().subrange(range.start - it.pos(), range.end - it.pos()), x.sv()),
+    ensures
+        range.start <= r.start <= r.end <= range.end,
+        forall|j: int|
+            range.start - it.pos() <= j < range.end - it.pos() ==> {
+                &&& (it.pos() + j < r.start) == V::below(#[trigger] it.rest()[j], x.sv())
+                &&& (it.pos() + j < r.end) == !V::below(x.sv(), it.rest()[j])
+                &&& (r.start <= it.pos() + j < r.end) == (it.rest()[j] == x.sv())
+            },
+{
+    let mut at = it;
+    let r = at.seek_to_value(x, range);
+    assert(at.column() == it.column());
+    assert(at.pos() == r.start);
+    assert(at.rest() == it.rest().skip(r.start - it.pos()));
+    assert(at.end_pos() == it.end_pos());
+    r
+}
+
+/// A search over a range that does not lie in what the iterator has
+/// left, of any iterator and whatever its values are: the search is of
+/// no value and gives an empty range. A range that starts past what the
+/// iterator has left takes the iterator to the end of that, where its
+/// window then ends; an empty range, or one that ends before it starts,
+/// takes it to where the range starts, or leaves it where it is if that
+/// is behind it; and so does a range that ends behind the iterator.
+#[allow(dead_code)]
+fn seek_out_of_range<'a, V: VValue<C>, C: VCodec>(it: VerifiedIter<'a, V, C>, x: Get<'_, V>, range: Range<usize>) -> (r:
+    Range<usize>)
+    ensures
+        r.start == r.end || (range.start < range.end && it.pos() < range.end && range.start < it.pos()
+            + it.rest().len()),
+        range.start > it.pos() + it.rest().len() ==> r.start == it.pos() + it.rest().len(),
+        it.pos() <= range.start <= it.pos() + it.rest().len() && range.end <= range.start ==> r.start
+            == range.start,
+        range.start <= it.pos() && range.end <= it.pos() ==> r.start == it.pos(),
+{
+    let mut at = it;
+    let r = at.seek_to_value(x, range);
+    assert(range.start > it.pos() + it.rest().len() ==> at.rest().len() == 0 && at.end_pos() == at.pos());
+    assert(range.start <= it.pos() + it.rest().len() ==> at.end_pos() == it.end_pos());
+    assert(at.pos() == r.start);
+    r
+}
+
+/// Where `x` stands among all the values an iterator has left, which
+/// are in order: the search over `0..usize::MAX` is over all of them,
+/// wherever the iterator stands and wherever its window ends. The
+/// iterator is left at the first place of `x`, or where `x` would
+/// stand, with the same end to its window. For every value type and
+/// codec.
+#[allow(dead_code)]
+fn find_in_the_rest<V: VValue<C>, C: VCodec>(it: &mut VerifiedIter<'_, V, C>, x: Get<'_, V>) -> (r: Range<usize>)
+    requires
+        sorted::<V>(old(it).rest()),
+    ensures
+        final(it).column() == old(it).column(),
+        old(it).pos() <= r.start <= r.end <= old(it).pos() + old(it).rest().len(),
+        forall|j: int|
+            0 <= j < old(it).rest().len() ==> {
+                &&& (old(it).pos() + j < r.start) == V::below(#[trigger] old(it).rest()[j], x.sv())
+                &&& (old(it).pos() + j < r.end) == !V::below(x.sv(), old(it).rest()[j])
+                &&& (r.start <= old(it).pos() + j < r.end) == (old(it).rest()[j] == x.sv())
+            },
+        final(it).pos() == r.start,
+        final(it).end_pos() == old(it).end_pos(),
+        final(it).rest() == old(it).rest().skip(r.start - old(it).pos()),
+        sorted::<V>(final(it).rest()),
+{
+    // asked for what it says of the window
+    let _ = it.pos();
+    proof {
+        lemma_sorted::<V>(it.rest(), x.sv());
+    }
+    it.seek_to_value(x, 0..usize::MAX)
+}
+
+/// Numbers in order, sought by an iterator: the range is the one the
+/// column's own search gives, the lesser numbers are before it and the
+/// greater ones after, and the iterator then gives the first `x`, if
+/// the column has one.
+#[allow(dead_code)]
+fn seek_then_read(col: &VerifiedColumn<u64>, x: u64) -> (r: Range<usize>)
+    requires
+        forall|i: int, j: int| 0 <= i <= j < col@.len() ==> col@[i] <= col@[j],
+    ensures
+        r.start <= r.end <= col@.len(),
+        forall|k: int| 0 <= k < r.start ==> col@[k] < x,
+        forall|k: int| r.start <= k < r.end ==> col@[k] == x,
+        forall|k: int| r.end <= k < col@.len() ==> col@[k] > x,
+{
+    let n = col.len();
+    proof {
+        assert(sorted::<u64>(col@));
+        lemma_sorted::<u64>(col@, x);
+        assert(col@.subrange(0, n as int) =~= col@);
+    }
+    let mut it = col.iter();
+    let r = it.seek_to_value(x, 0..n);
+    let s = col.scope_to_value(x, 0, n);
+    assert(r.start == s.start && r.end == s.end) by {
+        if r.start != s.start {
+            let k = if r.start < s.start { r.start as int } else { s.start as int };
+            assert((k < r.start) == (col@[k] < x));
+        }
+        if r.end != s.end {
+            let k = if r.end < s.end { r.end as int } else { s.end as int };
+            assert((k < r.end) == !(x < col@[k]));
+        }
+    }
+    let v = it.next();
+    assert(r.start < r.end ==> v == Some(x)) by {
+        if r.start < r.end {
+            assert(col@.skip(r.start as int)[0] == col@[r.start as int]);
+        }
+    }
+    assert(r.start == n ==> v is None);
+    r
 }
 
 } // verus!

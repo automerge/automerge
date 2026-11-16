@@ -103,6 +103,13 @@ trait Kind: VValue + ColumnValueRef + Clone + PartialEq + Debug {
 
     /// Where `Column` finds the value among its values `range`.
     fn old_scope(&self, c: &Column<Self>, range: Range<usize>) -> Range<usize>;
+
+    /// Where `Column`'s iterator finds the value in `range` of the column,
+    /// among the values it has left.
+    fn old_seek(&self, it: &mut hexane::Iter<'_, Self>, range: Range<usize>) -> Range<usize>;
+
+    /// The next place where `Column`'s iterator has the value.
+    fn old_scan(&self, it: &mut hexane::Iter<'_, Self>) -> Option<usize>;
 }
 
 /// A type that is its own form, and the same type with nulls.
@@ -129,6 +136,14 @@ macro_rules! plain_kind {
             fn old_scope(&self, c: &Column<$t>, range: Range<usize>) -> Range<usize> {
                 c.scope_to_value(*self, range)
             }
+
+            fn old_seek(&self, it: &mut hexane::Iter<'_, $t>, range: Range<usize>) -> Range<usize> {
+                it.seek_to_value(*self, range)
+            }
+
+            fn old_scan(&self, it: &mut hexane::Iter<'_, $t>) -> Option<usize> {
+                it.scan_to_value(*self)
+            }
         }
 
         impl Kind for Option<$t> {
@@ -153,6 +168,18 @@ macro_rules! plain_kind {
 
             fn old_scope(&self, c: &Column<Option<$t>>, range: Range<usize>) -> Range<usize> {
                 c.scope_to_value(*self, range)
+            }
+
+            fn old_seek(
+                &self,
+                it: &mut hexane::Iter<'_, Option<$t>>,
+                range: Range<usize>,
+            ) -> Range<usize> {
+                it.seek_to_value(*self, range)
+            }
+
+            fn old_scan(&self, it: &mut hexane::Iter<'_, Option<$t>>) -> Option<usize> {
+                it.scan_to_value(*self)
             }
         }
     };
@@ -187,6 +214,14 @@ impl Kind for bool {
     fn old_scope(&self, c: &Column<bool>, range: Range<usize>) -> Range<usize> {
         c.scope_to_value(*self, range)
     }
+
+    fn old_seek(&self, it: &mut hexane::Iter<'_, bool>, range: Range<usize>) -> Range<usize> {
+        it.seek_to_value(*self, range)
+    }
+
+    fn old_scan(&self, it: &mut hexane::Iter<'_, bool>) -> Option<usize> {
+        it.scan_to_value(*self)
+    }
 }
 
 /// Byte strings: mostly short, the empty one among them; some with a
@@ -216,6 +251,14 @@ impl Kind for Vec<u8> {
     fn old_scope(&self, c: &Column<Vec<u8>>, range: Range<usize>) -> Range<usize> {
         c.scope_to_value(self.as_slice(), range)
     }
+
+    fn old_seek(&self, it: &mut hexane::Iter<'_, Vec<u8>>, range: Range<usize>) -> Range<usize> {
+        it.seek_to_value(self.as_slice(), range)
+    }
+
+    fn old_scan(&self, it: &mut hexane::Iter<'_, Vec<u8>>) -> Option<usize> {
+        it.scan_to_value(self.as_slice())
+    }
 }
 
 impl Kind for Option<Vec<u8>> {
@@ -240,6 +283,18 @@ impl Kind for Option<Vec<u8>> {
 
     fn old_scope(&self, c: &Column<Option<Vec<u8>>>, range: Range<usize>) -> Range<usize> {
         c.scope_to_value(self.as_deref(), range)
+    }
+
+    fn old_seek(
+        &self,
+        it: &mut hexane::Iter<'_, Option<Vec<u8>>>,
+        range: Range<usize>,
+    ) -> Range<usize> {
+        it.seek_to_value(self.as_deref(), range)
+    }
+
+    fn old_scan(&self, it: &mut hexane::Iter<'_, Option<Vec<u8>>>) -> Option<usize> {
+        it.scan_to_value(self.as_deref())
     }
 }
 
@@ -2526,6 +2581,366 @@ fn runs_as_columns_does() {
         }
     }
     for_each_kind!(runs);
+}
+
+/// What an iterator has left to give.
+fn rest_of<T: Kind>(x: &VerifiedIter<'_, T>) -> Vec<T> {
+    x.clone().map(T::keep).collect()
+}
+
+/// Ranges to search with an iterator that stands at `p` in a window
+/// ending at `e`, of a column of `n` values: all the iterator has left,
+/// its window, and `count` ranges between places behind it, in its
+/// window, past that and past the column, the wrong way round among them.
+fn seek_ranges(rng: &mut Rng, p: usize, e: usize, n: usize, count: usize) -> Vec<Range<usize>> {
+    let place = |rng: &mut Rng| match rng.below(12) {
+        0 => p,
+        1 => e,
+        2 => n + rng.below(3),
+        3 => p.saturating_sub(1 + rng.below(3)),
+        4 => e + 1 + rng.below(3),
+        5 => usize::MAX - rng.below(2),
+        6 => rng.below(n + 1),
+        _ => p + rng.below(e - p + 1),
+    };
+    let mut ranges = vec![0..usize::MAX, p..e];
+    for _ in 0..count {
+        let start = place(rng);
+        ranges.push(start..place(rng));
+    }
+    ranges
+}
+
+/// A search for `x` in `range` by the iterators of both APIs, which
+/// stand `k` values into the window `a..b`. They give the same range and
+/// stand at the same place after, with the same window; and these are
+/// what the specification of the verified one says: the range lies in
+/// what was searched, the iterator stands at its start with the values
+/// from there on left, and its window ends where it did, or where the
+/// iterator stands if `range` starts past it. Where the values searched
+/// are in order as far as `x` can tell, which the result says, the range
+/// is that of the places of `x`, or the empty one where `x` would stand,
+/// and `x` comes next if it is there.
+fn check_seek<T: Kind>(
+    v: &VerifiedColumn<T>,
+    c: &Column<T>,
+    model: &[T],
+    x: &T,
+    (a, b, k): (usize, usize, usize),
+    range: Range<usize>,
+) -> bool {
+    let slabs = v.slab_lens() == c.slab_lens();
+    let (mut it, mut old_it) = (v.iter_range(a, b), c.iter_range(a..b));
+    it.advance_by(k);
+    old_it.advance_by(k);
+    let (p, e) = (it.pos(), it.end_pos());
+    assert_eq!((p, e), (a + k, b));
+    let had = &model[p..e];
+    let r = it.seek_to_value(x.lend(), range.clone());
+    let case = format!("{x:?} in {range:?} from {p} of {a}..{b}");
+    assert_eq!(r, x.old_seek(&mut old_it, range.clone()), "{case}");
+    stand(&it, &old_it, slabs);
+    // how far the iterator moves before it searches, and what it searches
+    let skip = if range.start <= p {
+        0
+    } else {
+        (range.start - p).min(had.len())
+    };
+    let searched = window(had, skip, range.end.saturating_sub(p));
+    let from = p + skip;
+    assert!(
+        from <= r.start && r.start <= r.end && r.end <= from + searched.len(),
+        "{r:?}: {case}"
+    );
+    assert_eq!(it.pos(), r.start, "{case}");
+    assert_eq!(it.end_pos(), if range.start <= e { e } else { r.start });
+    assert_eq!(rest_of(&it), had[r.start - p..], "{case}");
+    let sides: Vec<Ordering> = searched.iter().map(|m| m.order(x)).collect();
+    let in_order = sides.windows(2).all(|w| w[0] <= w[1]);
+    if in_order {
+        let before = sides.iter().filter(|s| **s == Ordering::Less).count();
+        let after = sides.iter().filter(|s| **s == Ordering::Greater).count();
+        assert_eq!(r, from + before..from + searched.len() - after, "{case}");
+        assert!(model[r.clone()].iter().all(|m| m == x));
+        assert!(r.is_empty() || it.next().map(T::keep).as_ref() == Some(x));
+    }
+    in_order
+}
+
+/// Scans for `x` by the iterators of both APIs, which stand `k` values
+/// into the window `a..b`, one after another until `x` is found no more.
+/// Each gives the same place in both, the next one where the model has
+/// `x`, and leaves the iterators past it with the window they had; the
+/// last finds none and leaves them with nothing, their windows ending
+/// where they stand. The number of places found is given.
+fn check_scan<T: Kind>(
+    v: &VerifiedColumn<T>,
+    c: &Column<T>,
+    model: &[T],
+    x: &T,
+    (a, b, k): (usize, usize, usize),
+) -> usize {
+    let slabs = v.slab_lens() == c.slab_lens();
+    let (mut it, mut old_it) = (v.iter_range(a, b), c.iter_range(a..b));
+    it.advance_by(k);
+    old_it.advance_by(k);
+    let mut found = 0;
+    loop {
+        let p = it.pos();
+        let had = &model[p..b];
+        let r = it.scan_to_value(x.lend());
+        assert_eq!(r, x.old_scan(&mut old_it), "{x:?} from {p} of {a}..{b}");
+        stand(&it, &old_it, slabs);
+        let Some(at) = r else {
+            assert!(!had.contains(x), "{x:?} from {p} of {a}..{b}");
+            assert_eq!((it.pos(), it.end_pos()), (b, b));
+            assert!(it.next().is_none());
+            return found;
+        };
+        assert_eq!(had.iter().position(|m| m == x), Some(at - p));
+        assert_eq!((it.pos(), it.end_pos()), (at + 1, b));
+        if found < 3 {
+            assert_eq!(rest_of(&it), model[at + 1..b]);
+        }
+        found += 1;
+    }
+}
+
+/// Columns of each API with the values `model`: built under the budgets
+/// 3 and 16, in many slabs, and under 64; and those of 3 and 64 loaded
+/// from their bytes too.
+fn columns_of<T: Kind>(rng: &mut Rng, model: &[T]) -> Vec<(VerifiedColumn<T>, Column<T>)> {
+    let mut out = Vec::new();
+    for (budget, loaded) in [(3, false), (3, true), (16, false), (64, true)] {
+        let (mut v, mut c) = if budget < 64 {
+            both_in_slabs(rng, model, budget)
+        } else {
+            both_with(model, budget)
+        };
+        if loaded {
+            let bytes = v.save();
+            let opts = LoadOpts::new().with_max_segments(budget);
+            v = VerifiedColumn::<T>::load_with(&bytes, opts).unwrap();
+            c = Column::<T>::load_with(&bytes, opts).unwrap();
+        }
+        out.push((v, c));
+    }
+    out
+}
+
+/// The window of all `n` values, from its start, and `count` windows at
+/// random with the iterator some way into each.
+fn windows_into(rng: &mut Rng, n: usize, count: usize) -> Vec<(usize, usize, usize)> {
+    let mut ws = vec![(0, n, 0)];
+    for _ in 0..count {
+        let a = rng.below(n + 1);
+        let b = a + rng.below(n - a + 1);
+        ws.push((a, b, rng.below(b - a + 1)));
+    }
+    ws
+}
+
+/// The iterator's two searches, in columns of one slab and of many, as
+/// built and as loaded, from any place in any window. `seek_to_value`
+/// gives what `Column`'s does for every range, in the window and out of
+/// it; in values in order, and in values in order only as far as the
+/// one looked for can tell, it finds that one's places; and in values in
+/// no order it still keeps what its specification says of every case.
+/// `scan_to_value` finds each place of a value in turn, as `Column`'s
+/// does, in values in any order.
+#[test]
+fn searches_as_columns_does() {
+    fn seeks<T: Kind>() {
+        let mut rng = Rng(0x4c);
+        for n in [0, 1, 2, 3, 50, 400] {
+            let mut model: Vec<T> = (0..n).map(|_| T::fresh(&mut rng)).collect();
+            if n == 400 {
+                // few values, each many times over
+                model = (0..n).map(|i| model[i % 5].clone()).collect();
+            }
+            model.sort_by(T::order);
+            let mut most = 0;
+            for (v, c) in columns_of(&mut rng, &model) {
+                most = most.max(v.slab_count());
+                let ws = windows_into(&mut rng, n, 4);
+                for x in targets(&mut rng, &model).iter().step_by(2) {
+                    for &w in &ws {
+                        for range in seek_ranges(&mut rng, w.0 + w.2, w.1, n, 5) {
+                            assert!(check_seek(&v, &c, &model, x, w, range));
+                        }
+                    }
+                }
+            }
+            assert!(n < 400 || most > 30);
+        }
+    }
+    for_each_kind!(seeks);
+
+    fn seeks_out_of_order<T: Kind>() {
+        let mut rng = Rng(0x0dd4c);
+        let mut exact = 0;
+        for round in 0..20 {
+            let n = [0, 1, 7, 60, 300][round % 5];
+            let model: Vec<T> = if round % 2 == 0 {
+                (0..n).map(|_| T::fresh(&mut rng)).collect()
+            } else {
+                rng.values(n)
+            };
+            let n = model.len();
+            let budget = [3, 64][round / 5 % 2];
+            let (v, c) = both_with(&model, budget);
+            let ws = windows_into(&mut rng, n, 3);
+            for x in targets(&mut rng, &model).iter().step_by(3) {
+                for &w in &ws {
+                    for range in seek_ranges(&mut rng, w.0 + w.2, w.1, n, 4) {
+                        check_seek(&v, &c, &model, x, w, range);
+                    }
+                }
+                // the same values, those before `x` first and those after
+                // it last, each part in the order it had
+                let mut parted: Vec<T> = vec![];
+                for side in [Ordering::Less, Ordering::Equal, Ordering::Greater] {
+                    parted.extend(model.iter().filter(|m| m.order(x) == side).cloned());
+                }
+                let (v, c) = both_with(&parted, budget);
+                for &w in &ws {
+                    for range in seek_ranges(&mut rng, w.0 + w.2, w.1, n, 4) {
+                        assert!(check_seek(&v, &c, &parted, x, w, range));
+                        exact += 1;
+                    }
+                }
+            }
+        }
+        assert!(exact > 300);
+    }
+    for_each_kind!(seeks_out_of_order);
+
+    fn scans<T: Kind>() {
+        let mut rng = Rng(0x5ca);
+        let (p, q) = (T::fresh(&mut rng), T::fresh(&mut rng));
+        let models: Vec<Vec<T>> = vec![
+            vec![],
+            vec![p.clone()],
+            vec![p.clone(); 200],
+            (0..300).map(|i| [&p, &q][i / 9 % 2].clone()).collect(),
+            (0..400).map(|i| [&p, &q][i / 150 % 2].clone()).collect(),
+            (0..200).map(|_| T::fresh(&mut rng)).collect(),
+            rng.values(300),
+            rng.values(600),
+        ];
+        let mut found = 0;
+        for model in &models {
+            for (v, c) in columns_of(&mut rng, model) {
+                let ws = windows_into(&mut rng, model.len(), 4);
+                let mut xs = targets(&mut rng, model);
+                xs.truncate(14);
+                xs.extend([p.clone(), q.clone()]);
+                for x in &xs {
+                    for &w in &ws {
+                        found += check_scan(&v, &c, model, x, w);
+                    }
+                }
+            }
+        }
+        assert!(found > 1000);
+    }
+    for_each_kind!(scans);
+
+    // an iterator of no column finds nothing and stays where it is, and
+    // so does one of a column with no values
+    fn none<T: Kind>() {
+        let mut rng = Rng(0x4c0);
+        let x = T::fresh(&mut rng);
+        let (mut it, mut old_it) = (VerifiedIter::<T>::default(), hexane::Iter::<T>::default());
+        assert_eq!(it.scan_to_value(x.lend()), None);
+        assert_eq!(x.old_scan(&mut old_it), None);
+        stand(&it, &old_it, true);
+        // one of them the wrong way round
+        #[allow(clippy::reversed_empty_ranges)]
+        let ranges = [0..usize::MAX, 0..0, 3..9, 9..3, usize::MAX..usize::MAX];
+        for range in ranges.clone() {
+            assert_eq!(it.seek_to_value(x.lend(), range.clone()), 0..0);
+            assert_eq!(x.old_seek(&mut old_it, range), 0..0);
+            stand(&it, &old_it, true);
+            assert_eq!((it.pos(), it.end_pos()), (0, 0));
+        }
+        let (mut v, mut c) = (VerifiedColumn::<T>::new(), Column::<T>::new());
+        for emptied in [false, true] {
+            if emptied {
+                v.push(x.lend());
+                c.push(x.clone());
+                v.clear();
+                c.clear();
+            }
+            assert_eq!(check_scan(&v, &c, &[], &x, (0, 0, 0)), 0);
+            for range in ranges.clone() {
+                assert!(check_seek(&v, &c, &[], &x, (0, 0, 0), range));
+            }
+        }
+    }
+    for_each_kind!(none);
+}
+
+/// A search with the iterator in the hands of a caller: what it gave
+/// before and what it gives after are the column's values, with none
+/// lost and none given twice, for values of a type of the client's own
+/// and for byte strings, which are lent.
+#[test]
+fn a_search_then_a_read() {
+    // the numbers 0, 3, 6, ... each three times over, in many slabs
+    let model: Vec<u64> = (0..600).map(|i| i / 3 * 3).collect();
+    let (v, c) = both_with(&model, 3);
+    assert!(v.slab_count() > 30);
+    let mut it = v.iter();
+    assert_eq!(it.by_ref().take(10).collect::<Vec<u64>>(), model[..10]);
+    // a value that is there, searched for in all that is left
+    assert_eq!(it.seek_to_value(300, 0..usize::MAX), 300..303);
+    assert_eq!((it.pos(), it.end_pos()), (300, 600));
+    assert_eq!(it.next(), Some(300));
+    // one that is not: the iterator stands where it would be
+    assert_eq!(it.seek_to_value(400, 0..usize::MAX), 402..402);
+    assert_eq!(it.next(), Some(402));
+    // a range that starts behind the iterator is searched from where the
+    // iterator stands, and one that ends behind it not at all
+    assert_eq!(it.seek_to_value(402, 0..500), 403..405);
+    assert_eq!(it.seek_to_value(0, 0..5), 403..403);
+    // a range ahead: the iterator moves there first, though the value
+    // lies before it
+    assert_eq!(it.seek_to_value(402, 450..460), 450..450);
+    assert_eq!((it.pos(), it.end_pos()), (450, 600));
+    // a scan goes on from there, past the value it finds
+    assert_eq!(it.scan_to_value(501), Some(501));
+    assert_eq!((it.pos(), it.next()), (502, Some(501)));
+    // one for a value behind the iterator finds none, and spends it
+    assert_eq!(it.scan_to_value(300), None);
+    assert_eq!((it.pos(), it.end_pos(), it.next()), (600, 600, None));
+    // a range that starts past the window: so too
+    let mut it = v.iter_range(10, 20);
+    assert_eq!(it.seek_to_value(9, 21..30), 20..20);
+    assert_eq!((it.pos(), it.end_pos(), it.next()), (20, 20, None));
+    let mut old_it = c.iter_range(10..20);
+    assert_eq!(old_it.seek_to_value(9, 21..30), 20..20);
+    assert_eq!((old_it.pos(), old_it.end_pos()), (20, 20));
+
+    // byte strings: the target is lent for the call alone, and the value
+    // found is lent by the column
+    let words: Vec<Vec<u8>> = ["ant", "ant", "bee", "cat", "cat", "cat", "dog"]
+        .iter()
+        .map(|w| w.as_bytes().to_vec())
+        .collect();
+    let (v, _) = both_with(&words, 3);
+    let mut it = v.iter();
+    let found = {
+        let target = b"cat".to_vec();
+        it.seek_to_value(&target[..], 0..usize::MAX)
+    };
+    assert_eq!(found, 3..6);
+    let cat: &[u8] = it.next().unwrap();
+    let at = {
+        let target = b"dog".to_vec();
+        it.scan_to_value(&target[..])
+    };
+    assert_eq!((cat, at, it.next()), (&b"cat"[..], Some(6), None));
 }
 
 /// `fold` reads a run at a time: its function is called once for each

@@ -316,7 +316,6 @@ pub use value::{refused, VNewtype, VPack};
 
 use crate::bool_edit::{BoolModel, BoolRecoder};
 use crate::bool_wire::BoolReads;
-#[cfg(verus_keep_ghost)]
 use crate::btree::SlabBTree;
 use crate::column::Slab;
 use crate::copy::NoRuns;
@@ -1055,6 +1054,104 @@ impl<'a, 't, V: VValue<C>, C: VCodec> Probe<Get<'a, V>> for VProbe<'t, V, C> {
             Ordering::Greater => Side::Above,
         }
     }
+}
+
+/// The search of [`VerifiedColumn::scope_to_value`] and of
+/// [`VerifiedIter::seek_to_value`], over what the cursor `it` has left
+/// in `slabs`: the range of the places that hold `target`, or the empty
+/// range where it would stand, if the values are in order as far as
+/// `target` can tell. Where they are not, some range of the places the
+/// cursor had left.
+#[inline(always)]
+fn seek_sorted<'a, 't, V: VValue<C>, C: VCodec>(
+    it: ICore<<V::X as Decoders<'a>>::D>,
+    slabs: &'a [Slab<<V::E as Slabs>::Tail>],
+    index: &SlabBTree<usize>,
+    target: Get<'t, V>,
+) -> (r: (usize, usize))
+    requires
+        it.wf::<V::X>(slabs@),
+        index.ok(),
+        wlens::<usize, SlabBTree<usize>>(index.ws()) == slab_lens(slabs@),
+    ensures
+        ({
+            let w = <Get<'a, V> as VGet>::svs(it.out::<V::X>(slabs@));
+            let t = target.sv();
+            &&& it.pos <= r.0 <= r.1 <= it.pos + w.len()
+            &&& sorted_for::<V>(w, t) ==> forall|k: int|
+                0 <= k < w.len() ==> {
+                    &&& (it.pos + k < r.0) == V::below(#[trigger] w[k], t)
+                    &&& (it.pos + k < r.1) == !V::below(t, w[k])
+                    &&& (r.0 <= it.pos + k < r.1) == (w[k] == t)
+                }
+        }),
+{
+    let ghost w = it.out::<V::X>(slabs@);
+    let ghost p0 = it.pos;
+    let mut it = it;
+    let probe = VProbe::<V, C> { target, _c: PhantomData };
+    let find = |t: usize| -> (r: (usize, usize))
+        requires
+            index.ok(),
+            wlens::<usize, SlabBTree<usize>>(index.ws()) == slab_lens(slabs@),
+        ensures
+            find_ok(slabs@, t, r),
+        {
+            let r = index.ix_find(t);
+            proof {
+                assert(index.ws().map_values(|w: usize| <SlabBTree<usize> as IndexOps<usize>>::wlen(w))
+                    =~= wlens::<usize, SlabBTree<usize>>(index.ws()));
+            }
+            // past the slabs, the whole position lies beyond them
+            if r.0 >= slabs.len() {
+                (slabs.len(), 0)
+            } else {
+                r
+            }
+        };
+    let start_of = |i: usize| -> (n: usize)
+        requires
+            index.ok(),
+            wlens::<usize, SlabBTree<usize>>(index.ws()) == slab_lens(slabs@),
+            i <= slabs@.len(),
+        ensures
+            n == sum(slab_lens(slabs@), 0, i as int),
+        {
+            let n = index.ix_before(i);
+            proof {
+                assert(index.ws().map_values(|w: usize| <SlabBTree<usize> as IndexOps<usize>>::wlen(w))
+                    =~= wlens::<usize, SlabBTree<usize>>(index.ws()));
+            }
+            n
+        };
+    let r = it.seek_value::<V::X, _, _, _>(slabs, &probe, &find, &start_of);
+    proof {
+        let t = target.sv();
+        let sub = <Get<'a, V> as VGet>::svs(w);
+        <Get<'a, V> as VGet>::lemma_svs(w);
+        if sorted_for::<V>(sub, t) {
+            assert forall|i: int, j: int| 0 <= i <= j < w.len() implies #[trigger] probe.side(w[i])
+                <= #[trigger] probe.side(w[j]) by {
+                assert(sub[i] == w[i].sv());
+                assert(sub[j] == w[j].sv());
+            }
+            assert(monotone(probe, w));
+            assert(found(probe, w, r.0 - p0, r.1 - p0));
+            assert forall|k: int| 0 <= k < sub.len() implies {
+                &&& (p0 + k < r.0) == V::below(#[trigger] sub[k], t)
+                &&& (p0 + k < r.1) == !V::below(t, sub[k])
+                &&& (r.0 <= p0 + k < r.1) == (sub[k] == t)
+            } by {
+                let x = sub[k];
+                assert(w[k].sv() == x);
+                // not both before `t` and after it, and where
+                // neither, `t`
+                V::lemma_below(x, t, x);
+                V::lemma_below(t, t, t);
+            }
+        }
+    }
+    r
 }
 
 // ── Remapping ───────────────────────────────────────────────────────────────
@@ -2406,69 +2503,20 @@ impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
         self.core.lemma_column();
         let slabs = self.core.slabs();
         let index = self.core.index();
-        let mut it = self.reader(start, end);
+        let it = self.reader(start, end);
         let ghost w = it.out::<V::X>(slabs@);
         let ghost sub = self@.subrange(start as int, end as int);
-        let probe = VProbe::<V, C> { target: value, _c: PhantomData };
-        let find = |t: usize| -> (r: (usize, usize))
-            requires
-                index.ok(),
-                wlens::<usize, SlabBTree<usize>>(index.ws()) == slab_lens(slabs@),
-            ensures
-                find_ok(slabs@, t, r),
-            {
-                let r = index.ix_find(t);
-                proof {
-                    assert(index.ws().map_values(|w: usize| <SlabBTree<usize> as IndexOps<usize>>::wlen(w))
-                        =~= wlens::<usize, SlabBTree<usize>>(index.ws()));
-                }
-                // past the slabs, the whole position lies beyond them
-                if r.0 >= slabs.len() {
-                    (slabs.len(), 0)
-                } else {
-                    r
-                }
-            };
-        let start_of = |i: usize| -> (n: usize)
-            requires
-                index.ok(),
-                wlens::<usize, SlabBTree<usize>>(index.ws()) == slab_lens(slabs@),
-                i <= slabs@.len(),
-            ensures
-                n == sum(slab_lens(slabs@), 0, i as int),
-            {
-                let n = index.ix_before(i);
-                proof {
-                    assert(index.ws().map_values(|w: usize| <SlabBTree<usize> as IndexOps<usize>>::wlen(w))
-                        =~= wlens::<usize, SlabBTree<usize>>(index.ws()));
-                }
-                n
-            };
-        let r = it.seek_value::<V::X, _, _, _>(slabs, &probe, &find, &start_of);
+        let r = seek_sorted::<V, C>(it, slabs, index, value);
         proof {
-            let t = value.sv();
             VGet::lemma_svs(w);
             assert(VGet::svs(w) == sub);
-            if sorted_for::<V>(sub, t) {
-                assert forall|i: int, j: int| 0 <= i <= j < w.len() implies #[trigger] probe.side(w[i])
-                    <= #[trigger] probe.side(w[j]) by {
-                    assert(sub[i] == w[i].sv());
-                    assert(sub[j] == w[j].sv());
-                }
-                assert(monotone(probe, w));
-                assert(found(probe, w, r.0 - start, r.1 - start));
+            if sorted_for::<V>(sub, value.sv()) {
                 assert forall|k: int| start <= k < end implies {
-                    &&& (k < r.0) == V::below(#[trigger] self@[k], t)
-                    &&& (k < r.1) == !V::below(t, self@[k])
-                    &&& (r.0 <= k < r.1) == (self@[k] == t)
+                    &&& (k < r.0) == V::below(#[trigger] self@[k], value.sv())
+                    &&& (k < r.1) == !V::below(value.sv(), self@[k])
+                    &&& (r.0 <= k < r.1) == (self@[k] == value.sv())
                 } by {
-                    let x = self@[k];
-                    assert(sub[k - start] == x);
-                    assert(w[k - start].sv() == x);
-                    // not both before `t` and after it, and where
-                    // neither, `t`
-                    V::lemma_below(x, t, x);
-                    V::lemma_below(t, t, t);
+                    assert(sub[k - start] == self@[k]);
                 }
             }
         }
@@ -3257,6 +3305,186 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedIter<'a, V, C> {
             r.iter() == self,
     {
         VerifiedRuns(self)
+    }
+
+    /// Move on to the first of the values left that is `target`, and
+    /// past it: its index in the column is given. If none of them is
+    /// `target`, the iterator gives all it has, as
+    /// [`advance_to`](Self::advance_to) leaves it then.
+    ///
+    /// The values are read a run at a time.
+    // a Verus loop with an invariant: `loop` + `match`
+    #[allow(clippy::while_let_loop)]
+    pub fn scan_to_value(&mut self, target: Get<'_, V>) -> (r: Option<usize>)
+        ensures
+            final(self).column() == old(self).column(),
+            match r {
+                Some(at) => {
+                    &&& old(self).pos() <= at < old(self).pos() + old(self).rest().len()
+                    &&& old(self).rest()[at - old(self).pos()] == target.sv()
+                    &&& forall|i: int| 0 <= i < at - old(self).pos() ==> #[trigger] old(self).rest()[i] != target.sv()
+                    &&& final(self).items() == old(self).items().skip(at - old(self).pos() + 1)
+                    &&& final(self).rest() == old(self).rest().skip(at - old(self).pos() + 1)
+                    &&& final(self).pos() == at + 1
+                    &&& final(self).end_pos() == old(self).end_pos()
+                },
+                None => {
+                    &&& forall|i: int| 0 <= i < old(self).rest().len() ==> #[trigger] old(self).rest()[i] != target.sv()
+                    &&& final(self).items().len() == 0
+                    &&& final(self).rest().len() == 0
+                    &&& final(self).pos() == old(self).pos() + old(self).rest().len()
+                    &&& final(self).end_pos() == final(self).pos()
+                },
+            },
+    {
+        let end = self.end_pos();
+        let mut probe = self.clone();
+        let mut pos = probe.pos();
+        let ghost o = self.items();
+        let ghost p0 = self.pos();
+        loop
+            invariant
+                self.items() == o,
+                self.pos() == p0,
+                self.end_pos() == end,
+                self.column() == old(self).column(),
+                o == old(self).items(),
+                p0 == old(self).pos(),
+                end == old(self).end_pos(),
+                p0 <= pos,
+                pos - p0 <= o.len(),
+                probe.pos() == pos,
+                probe.items() == o.skip(pos - p0),
+                forall|i: int| 0 <= i < pos - p0 ==> (#[trigger] o[i]).sv() != target.sv(),
+            ensures
+                forall|i: int| 0 <= i < o.len() ==> (#[trigger] o[i]).sv() != target.sv(),
+            decreases o.len() - (pos - p0),
+        {
+            let ghost left = probe.items();
+            let run = match probe.next_run() {
+                Some(run) => run,
+                None => {
+                    break ;
+                },
+            };
+            proof {
+                assert forall|i: int| pos - p0 <= i < pos - p0 + run.count implies #[trigger] o[i] == run.value by {
+                    assert(left[i - (pos - p0)] == run.value);
+                }
+            }
+            if V::same(run.value, target) {
+                proof {
+                    <Get<'a, V> as VGet>::lemma_svs(o);
+                }
+                if pos == self.it.pos {
+                    // the value is where the iterator stands
+                    self.next();
+                } else {
+                    self.nth(pos - self.it.pos);
+                }
+                return Some(pos);
+            }
+            pos += run.count;
+        }
+        self.advance_to(end);
+        proof {
+            <Get<'a, V> as VGet>::lemma_svs(o);
+            <Get<'a, V> as VGet>::lemma_svs(self.items());
+        }
+        None
+    }
+
+    /// Search the values left for `target`, where they are in order,
+    /// and move on to it: given is the range of the places in the column
+    /// that hold it, and the iterator gives the first of them next. If
+    /// no value is `target`, the range is the empty one at the place
+    /// where it would stand, and the iterator stands there. The window
+    /// keeps its end.
+    ///
+    /// The search is over `range` of the column, as far as that lies
+    /// in what the iterator has left: the iterator moves on to where
+    /// `range` starts first ([`advance_to`](Self::advance_to)), and
+    /// looks no further than where it ends. `0..usize::MAX` is all the
+    /// iterator has left.
+    ///
+    /// Few of the values are looked at
+    /// ([`scope_to_value`](VerifiedColumn::scope_to_value)). They need be
+    /// in order only as far as `target` can tell (`sorted_for`); where
+    /// they are not, the range is some range of the places searched.
+    pub fn seek_to_value(&mut self, target: Get<'_, V>, range: Range<usize>) -> (r: Range<usize>)
+        ensures
+            final(self).column() == old(self).column(),
+            ({
+                let (p, o, t) = (old(self).pos(), old(self).rest(), target.sv());
+                // how far the iterator moves before it searches, and the
+                // values searched
+                let a = if range.start <= p {
+                    0
+                } else if range.start - p <= o.len() {
+                    range.start - p
+                } else {
+                    o.len() as int
+                };
+                let w = window(o, a, range.end - p);
+                &&& p + a <= r.start <= r.end <= p + a + w.len()
+                &&& final(self).pos() == r.start
+                &&& final(self).rest() == o.skip(r.start - p)
+                &&& final(self).end_pos() == if range.start <= p + o.len() {
+                    old(self).end_pos()
+                } else {
+                    final(self).pos()
+                }
+                &&& sorted_for::<V>(w, t) ==> forall|j: int|
+                    a <= j < a + w.len() ==> {
+                        &&& (p + j < r.start) == V::below(#[trigger] o[j], t)
+                        &&& (p + j < r.end) == !V::below(t, o[j])
+                        &&& (r.start <= p + j < r.end) == (o[j] == t)
+                    }
+            }),
+    {
+        let ghost (p, o, c) = (self.pos() as int, self.rest(), self.column());
+        // the iterator cannot leave its window, so neither can the search
+        let end = range.end.min(self.end_pos());
+        if range.start > self.it.pos {
+            self.advance_to(range.start);
+        }
+        proof {
+            use_type_invariant(&*self);
+            self.lemma_window();
+        }
+        let here = self.it.pos;
+        let ghost a = here - p;
+        let slabs = self.slabs;
+        let index = match self.col {
+            Some(col) => {
+                col.lemma_column();
+                match col.index_opt() {
+                    Some(index) => index,
+                    None => {
+                        return here..here;
+                    },
+                }
+            },
+            None => {
+                return here..here;
+            },
+        };
+        // The search is a comparison of values, which is not known to
+        // return; so it is made on a copy of where the iterator stands.
+        let mut it = self.it.dup();
+        it.set_max::<V::X>(slabs, end);
+        let ghost w = <Get<'a, V> as VGet>::svs(it.out::<V::X>(slabs@));
+        proof {
+            it.lemma_out_window::<V::X>(slabs@);
+            lemma_svs_window(vals_of::<V::X>(slabs@), here as int, here + it.items_left);
+            assert(w =~= window(o, a, range.end - p));
+        }
+        let r = seek_sorted::<V, C>(it, slabs, index, target);
+        self.advance_to(r.0);
+        proof {
+            assert forall|j: int| a <= j < a + w.len() implies w[j - a] == #[trigger] o[j] by {}
+        }
+        r.0..r.1
     }
 
     /// Where item `t` of the column is, as the column's index has it:
