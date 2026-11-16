@@ -88,6 +88,18 @@
 //!   `size_hint` the number left, and `fold` what the client's function
 //!   makes of the values in turn (`folded`), as that function's own
 //!   `ensures` says it;
+//! * the iterator says where it stands: [`pos`](VerifiedIter::pos) is
+//!   the index in the column of the value it gives next, and
+//!   [`end_pos`](VerifiedIter::end_pos) is where its window ends. What it
+//!   has left is the values of its column (`column()`) between the two,
+//!   as far as the column goes (`window`), and `next` and `nth` say where
+//!   they leave it. [`set_max`](VerifiedIter::set_max) moves the window's
+//!   end, [`advance_to`](VerifiedIter::advance_to) and
+//!   [`advance_by`](VerifiedIter::advance_by) move the iterator on (what
+//!   it has left is then `past` what it had),
+//!   [`shift`](VerifiedIter::shift) moves the window to a range ahead,
+//!   and [`shift_next`](VerifiedIter::shift_next) gives the first value
+//!   there;
 //! * [`is_only`](VerifiedColumn::is_only) says whether every value of the
 //!   column is the one given (`only`), and [`VValue::same`] whether two
 //!   values in a column's form are one value;
@@ -139,10 +151,11 @@
 //! functions of a column type (`VerifiedColumn::<V>::valid(bytes)`),
 //! `size_bound` is one of a value type (for byte strings it counts their
 //! bytes, as `total_len` of them), `only`, `sorted`, `sorted_for`,
-//! `bytes_below`, `mapped`, `folded`, `run_values`, `fill_of` and `sum_of`
-//! are of this module, and `lemma_save_unique`, `lemma_encoding`, `lemma_no_bytes`,
-//! `lemma_sorted`, `lemma_run_values_push` and `lemma_run_values_add`
-//! are lemmas, as is `VSpec::lemma_below` (the order is a strict total
+//! `bytes_below`, `mapped`, `folded`, `window`, `past`, `run_values`,
+//! `fill_of` and `sum_of` are of this module, and `lemma_save_unique`,
+//! `lemma_encoding`, `lemma_no_bytes`, `lemma_sorted`,
+//! `lemma_run_values_push` and `lemma_run_values_add` are lemmas, as is
+//! `VSpec::lemma_below` (the order is a strict total
 //! order): they exist only for Verus, and a normal build compiles
 //! them away. What options hold is said by `length()`, `fill()` and
 //! `max_segments()` of a [`LoadOpts`], and what fill value there is by
@@ -169,7 +182,8 @@
 //! [`slab_lens`](VerifiedColumn::slab_lens),
 //! [`slab_segments`](VerifiedColumn::slab_segments) and what
 //! [`dump_slabs`](VerifiedColumn::dump_slabs) and `Debug` print tell of
-//! it, and promise nothing but that the lengths add up. Nor is how
+//! it, as does an iterator's [`get_slab`](VerifiedIter::get_slab), and
+//! promise nothing but that the lengths add up. Nor is how
 //! often [`remap`](VerifiedColumn::remap) calls its function: once for
 //! each run of equal values, as `Column`'s does, which is tested. After
 //! the same edits a `VerifiedColumn` has the slabs of a
@@ -284,6 +298,8 @@ pub(crate) mod value;
 
 // spec functions exist only when Verus compiles the crate
 #[cfg(verus_keep_ghost)]
+pub use crate::iter_core::{past, window};
+#[cfg(verus_keep_ghost)]
 pub use bytes::{below_at, bytes_below, total_len, total_len_opt};
 pub use codec::VCodec;
 pub use value::{refused, VNewtype, VPack};
@@ -298,7 +314,7 @@ use crate::copy::NoRuns;
 use crate::cursor::{lemma_lens_ok, lemma_vals_own, lemma_vals_unit, slab_lens};
 use crate::cursor::{ReadsAgree, RunFeed, Slabs};
 #[cfg(verus_keep_ghost)]
-use crate::fenwick::sum;
+use crate::fenwick::{sum, total};
 #[cfg(verus_keep_ghost)]
 use crate::index::wlens;
 use crate::index::IndexOps;
@@ -654,6 +670,23 @@ proof fn lemma_svs_sub<T: VGet>(a: Seq<T>, i: int, j: int)
     T::lemma_svs(a);
     T::lemma_svs(a.subrange(i, j));
     assert(T::svs(a.subrange(i, j)) =~= T::svs(a).subrange(i, j));
+}
+
+/// `svs` goes through a window.
+proof fn lemma_svs_window<T: VGet>(v: Seq<T>, a: int, b: int)
+    requires
+        0 <= a,
+    ensures
+        T::svs(window(v, a, b)) == window(T::svs(v), a, b),
+{
+    T::lemma_svs(v);
+    if a >= v.len() || b <= a {
+        lemma_svs_none::<T>();
+    } else if b <= v.len() {
+        lemma_svs_sub(v, a, b);
+    } else {
+        lemma_svs_sub(v, a, v.len() as int);
+    }
 }
 
 /// No values are no values.
@@ -2158,6 +2191,23 @@ impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
         }
     }
 
+    /// What the slabs' readers give is, as values, the column's.
+    #[inline(always)]
+    fn lemma_read(&self)
+        ensures
+            VGet::svs(vals_of::<V::X>(self.core.slabs_spec())) == self@,
+            self@.len() == total(slab_lens(self.core.slabs_spec())),
+    {
+        self.core.lemma_column();
+        proof {
+            let o = vals_of::<V::X>(self.core.slabs_spec());
+            lemma_vals_own::<V::E, V::X>(self.core.slabs_spec());
+            assert(self.core@ =~= held::<V, C>(o));
+            lemma_held::<V, C>(o);
+            <Held<V, C> as VGet>::lemma_svs(self.core@);
+        }
+    }
+
     /// A reader of the values `start..end`.
     #[inline(always)]
     fn reader(&self, start: usize, end: usize) -> (it: ICore<<V::X as Decoders<'_>>::D>)
@@ -2166,6 +2216,7 @@ impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
         ensures
             it.wf::<V::X>(self.core.slabs_spec()),
             it.pos == start,
+            it.items_left == end - start,
             VGet::svs(it.out::<V::X>(self.core.slabs_spec())) == self@.subrange(start as int, end as int),
     {
         proof {
@@ -2469,10 +2520,14 @@ impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
     pub fn iter(&self) -> (it: VerifiedIter<'_, V, C>)
         ensures
             it.rest() == self@,
+            it.column() == self@,
+            it.pos() == 0,
+            it.end_pos() == self@.len(),
     {
         proof {
             <Held<V, C> as VGet>::lemma_svs(self.core@);
         }
+        self.lemma_read();
         let n = self.core.len();
         proof {
             assert(self@.subrange(0, n as int) =~= self@);
@@ -2487,7 +2542,11 @@ impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
             start <= end <= self@.len(),
         ensures
             it.rest() == self@.subrange(start as int, end as int),
+            it.column() == self@,
+            it.pos() == start,
+            it.end_pos() == end,
     {
+        self.lemma_read();
         VerifiedIter { it: self.reader(start, end), slabs: self.core.slabs(), col: Some(&self.core) }
     }
 
@@ -2687,10 +2746,12 @@ pub struct VerifiedIter<'a, V: VValue<C>, C: VCodec = Leb128> {
 }
 
 impl<'a, V: VValue<C>, C: VCodec> VerifiedIter<'a, V, C> {
-    /// The iterator stands in the slabs of its column.
+    /// The iterator stands in the slabs of its column, in the column or
+    /// at its end.
     #[verifier::type_invariant]
     spec fn inv(&self) -> bool {
         &&& self.it.wf::<V::X>(self.slabs@)
+        &&& self.it.pos <= total(slab_lens(self.slabs@))
         &&& match self.col {
             Some(c) => self.slabs@ == c.slabs_spec(),
             None => self.slabs@.len() == 0,
@@ -2705,6 +2766,279 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedIter<'a, V, C> {
     /// The values the iterator has left to give.
     pub open spec fn rest(&self) -> Seq<V::S> {
         <Get<'a, V> as VGet>::svs(self.items())
+    }
+
+    /// The values of the column the iterator reads: all of them, whatever
+    /// the iterator's window.
+    pub closed spec fn column(&self) -> Seq<V::S> {
+        <Get<'a, V> as VGet>::svs(vals_of::<V::X>(self.slabs@))
+    }
+
+    /// [`pos`](Self::pos), as a specification sees it: there it is
+    /// written `pos()`.
+    pub closed spec fn spec_pos(&self) -> usize {
+        self.it.pos
+    }
+
+    /// [`end_pos`](Self::end_pos), as a specification sees it: there it
+    /// is written `end_pos()`.
+    pub closed spec fn spec_end_pos(&self) -> usize {
+        (self.it.pos + self.it.items_left) as usize
+    }
+
+    /// What is left is the column's values in the window.
+    proof fn lemma_window(&self)
+        requires
+            self.it.wf::<V::X>(self.slabs@),
+        ensures
+            self.spec_pos() == self.it.pos,
+            self.spec_end_pos() == self.it.pos + self.it.items_left,
+            self.column().len() == total(slab_lens(self.slabs@)),
+            self.rest().len() == self.items().len(),
+            self.rest() == window(self.column(), self.spec_pos() as int, self.spec_end_pos() as int),
+    {
+        self.it.lemma_out_len::<V::X>(self.slabs@);
+        self.it.lemma_out_window::<V::X>(self.slabs@);
+        <Get<'a, V> as VGet>::lemma_svs(vals_of::<V::X>(self.slabs@));
+        <Get<'a, V> as VGet>::lemma_svs(self.items());
+        lemma_svs_window(vals_of::<V::X>(self.slabs@), self.it.pos as int, self.it.pos + self.it.items_left);
+    }
+
+    /// The index in the column of the value `next` gives, if it gives
+    /// one.
+    ///
+    /// What the iterator has left is the column's values from here up to
+    /// [`end_pos`](Self::end_pos), as far as the column goes. The
+    /// iterator stands in the column or at its end.
+    #[verifier::when_used_as_spec(spec_pos)]
+    #[inline]
+    pub fn pos(&self) -> (r: usize)
+        ensures
+            r == self.pos(),
+            self.pos() <= self.end_pos(),
+            self.pos() <= self.column().len(),
+            self.rest() == window(self.column(), self.pos() as int, self.end_pos() as int),
+    {
+        proof {
+            use_type_invariant(self);
+            self.lemma_window();
+        }
+        self.it.pos
+    }
+
+    /// Where the iterator's window ends: the index in the column that
+    /// its last value comes before. It can lie past the column's end
+    /// ([`set_max`](Self::set_max)), and the iterator then gives what the
+    /// column has. Once the iterator has given all it has, its window
+    /// ends where it stands.
+    #[verifier::when_used_as_spec(spec_end_pos)]
+    #[inline]
+    pub fn end_pos(&self) -> (r: usize)
+        ensures
+            r == self.end_pos(),
+            self.pos() <= self.end_pos(),
+            self.pos() <= self.column().len(),
+            self.rest() == window(self.column(), self.pos() as int, self.end_pos() as int),
+    {
+        proof {
+            use_type_invariant(self);
+            self.lemma_window();
+        }
+        self.it.pos + self.it.items_left
+    }
+
+    /// The index of the slab the iterator stands in. This is how the
+    /// column lies in memory, of which no specification speaks.
+    #[inline]
+    pub fn get_slab(&self) -> usize {
+        self.it.slab_idx
+    }
+
+    /// Make the window end at `end`: the iterator then gives the
+    /// column's values from where it stands up to `end`, and none if it
+    /// stands at `end` or past it.
+    ///
+    /// This can widen the window as well as narrow it. With an `end`
+    /// past the column's, the iterator gives what the column has.
+    pub fn set_max(&mut self, end: usize)
+        ensures
+            final(self).column() == old(self).column(),
+            final(self).pos() == old(self).pos(),
+            final(self).end_pos() == if end >= old(self).pos() {
+                end
+            } else {
+                old(self).pos()
+            },
+            final(self).rest() == window(old(self).column(), old(self).pos() as int, end as int),
+    {
+        proof {
+            use_type_invariant(&*self);
+        }
+        self.it.set_max::<V::X>(self.slabs, end);
+        proof {
+            self.lemma_window();
+        }
+    }
+
+    /// Move on so that the value at index `target` of the column comes
+    /// next. The iterator moves only forwards: at `target` or past it
+    /// already, it stays. With a `target` past what it has left, it
+    /// gives all it has, and stands at the end of that with nothing left.
+    ///
+    /// Few of the values passed over are looked at ([`nth`](Self::nth)).
+    pub fn advance_to(&mut self, target: usize)
+        ensures
+            final(self).column() == old(self).column(),
+            final(self).rest() == past(old(self).rest(), target - old(self).pos()),
+            target <= old(self).pos() ==> {
+                &&& final(self).pos() == old(self).pos()
+                &&& final(self).end_pos() == old(self).end_pos()
+            },
+            old(self).pos() < target <= old(self).pos() + old(self).rest().len() ==> {
+                &&& final(self).pos() == target
+                &&& final(self).end_pos() == old(self).end_pos()
+            },
+            target > old(self).pos() + old(self).rest().len() ==> {
+                &&& final(self).pos() == old(self).pos() + old(self).rest().len()
+                &&& final(self).end_pos() == final(self).pos()
+            },
+    {
+        proof {
+            <Get<'a, V> as VGet>::lemma_svs(self.items());
+        }
+        if target > self.it.pos {
+            self.nth(target - self.it.pos - 1);
+            proof {
+                <Get<'a, V> as VGet>::lemma_svs(self.items());
+            }
+        }
+    }
+
+    /// Move `amount` values on: past as many as the iterator has left,
+    /// if it has fewer.
+    pub fn advance_by(&mut self, amount: usize)
+        ensures
+            final(self).column() == old(self).column(),
+            final(self).rest() == past(old(self).rest(), amount as int),
+            amount <= old(self).rest().len() ==> {
+                &&& final(self).pos() == old(self).pos() + amount
+                &&& final(self).end_pos() == old(self).end_pos()
+            },
+            amount > old(self).rest().len() ==> {
+                &&& final(self).pos() == old(self).pos() + old(self).rest().len()
+                &&& final(self).end_pos() == final(self).pos()
+            },
+    {
+        proof {
+            use_type_invariant(&*self);
+            // if the sum saturates, both move past everything left
+            self.lemma_window();
+        }
+        self.advance_to(self.it.pos.saturating_add(amount));
+    }
+
+    /// Move the window to `range`: the iterator then gives the column's
+    /// values there. It moves only forwards: if `range` starts before
+    /// the iterator, the window starts where the iterator stands.
+    ///
+    /// If `range` starts past its own end or the column's, the iterator
+    /// has nothing left, and stands where `range` ends or the column
+    /// does, whichever comes first, if that is ahead of it.
+    pub fn shift(&mut self, range: Range<usize>)
+        ensures
+            final(self).column() == old(self).column(),
+            final(self).rest() == window(
+                old(self).column(),
+                if range.start <= old(self).pos() {
+                    old(self).pos() as int
+                } else {
+                    range.start as int
+                },
+                range.end as int,
+            ),
+            range.start <= old(self).pos() ==> {
+                &&& final(self).pos() == old(self).pos()
+                &&& final(self).end_pos() == if range.end >= old(self).pos() {
+                    range.end
+                } else {
+                    old(self).pos()
+                }
+            },
+            old(self).pos() < range.start <= range.end && range.start <= old(self).column().len() ==> {
+                &&& final(self).pos() == range.start
+                &&& final(self).end_pos() == range.end
+            },
+            old(self).pos() < range.start && (range.start > range.end || range.start > old(self).column().len()) ==> {
+                &&& final(self).pos() == if range.end <= old(self).pos() {
+                    old(self).pos() as int
+                } else if range.end <= old(self).column().len() {
+                    range.end as int
+                } else {
+                    old(self).column().len() as int
+                }
+                &&& final(self).end_pos() == final(self).pos()
+            },
+    {
+        proof {
+            use_type_invariant(&*self);
+            self.lemma_window();
+        }
+        self.set_max(range.end);
+        self.advance_to(range.start);
+    }
+
+    /// Move the window to `range` and give its first value, if it has
+    /// one. `range` is to start at the iterator or after it.
+    ///
+    /// If the window has no value, the iterator has nothing left, and
+    /// stands where [`shift`](Self::shift) leaves it then.
+    pub fn shift_next(&mut self, range: Range<usize>) -> (r: Option<Get<'a, V>>)
+        requires
+            range.start >= old(self).pos(),
+        ensures
+            final(self).column() == old(self).column(),
+            ({
+                let w = window(old(self).column(), range.start as int, range.end as int);
+                &&& w.len() > 0 ==> {
+                    &&& r matches Some(v) && v.sv() == w[0]
+                    &&& final(self).rest() == w.skip(1)
+                    &&& final(self).pos() == range.start + 1
+                    &&& final(self).end_pos() == range.end
+                }
+                &&& w.len() == 0 ==> {
+                    &&& r is None
+                    &&& final(self).rest().len() == 0
+                    &&& final(self).pos() == if range.end <= old(self).pos() {
+                        old(self).pos() as int
+                    } else if range.end <= old(self).column().len() {
+                        range.end as int
+                    } else {
+                        old(self).column().len() as int
+                    }
+                    &&& final(self).end_pos() == final(self).pos()
+                }
+            }),
+    {
+        let ghost (c, p) = (self.column(), self.it.pos as int);
+        proof {
+            use_type_invariant(&*self);
+            self.lemma_window();
+        }
+        self.set_max(range.end);
+        let ghost o1 = self.rest();
+        proof {
+            <Get<'a, V> as VGet>::lemma_svs(self.items());
+        }
+        let r = self.nth(range.start - self.it.pos);
+        proof {
+            let (w, n) = (window(c, range.start as int, range.end as int), range.start - p);
+            <Get<'a, V> as VGet>::lemma_svs(self.items());
+            if n < o1.len() {
+                assert(w =~= o1.skip(n));
+                assert(w.skip(1) =~= o1.skip(n + 1));
+            }
+        }
+        r
     }
 
     /// Where item `t` of the column is, as the column's index has it:
@@ -2756,8 +3090,16 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedIter<'a, V, C> {
                 &&& final(self).items() == old(self).items().skip(n + 1)
                 &&& r matches Some(v) && v.sv() == old(self).rest()[n as int]
                 &&& final(self).rest() == old(self).rest().skip(n + 1)
+                &&& final(self).pos() == old(self).pos() + n + 1
+                &&& final(self).end_pos() == old(self).end_pos()
             },
-            n >= old(self).items().len() ==> r is None && final(self).items().len() == 0,
+            n >= old(self).items().len() ==> {
+                &&& r is None
+                &&& final(self).items().len() == 0
+                &&& final(self).pos() == old(self).pos() + old(self).items().len()
+                &&& final(self).end_pos() == final(self).pos()
+            },
+            final(self).column() == old(self).column(),
     {
         proof {
             use_type_invariant(&*self);
@@ -2820,12 +3162,21 @@ impl<'a, V: VValue<C>, C: VCodec> Iterator for VerifiedIter<'a, V, C> {
                     &&& old(self).rest().len() > 0
                     &&& v.sv() == old(self).rest()[0]
                     &&& final(self).rest() == old(self).rest().skip(1)
+                    &&& final(self).pos() == old(self).pos() + 1
+                    &&& final(self).end_pos() == old(self).end_pos()
                 },
-                None => old(self).rest().len() == 0 && final(self).rest().len() == 0,
+                None => {
+                    &&& old(self).rest().len() == 0
+                    &&& final(self).rest().len() == 0
+                    &&& final(self).pos() == old(self).pos()
+                    &&& final(self).end_pos() == old(self).pos()
+                },
             },
+            final(self).column() == old(self).column(),
     {
         proof {
             use_type_invariant(&*self);
+            self.it.lemma_out_len::<V::X>(self.slabs@);
         }
         let ghost o = self.it.out::<V::X>(self.slabs@);
         let r = self.it.next_inline::<V::X>(self.slabs);
@@ -2858,8 +3209,16 @@ impl<'a, V: VValue<C>, C: VCodec> Iterator for VerifiedIter<'a, V, C> {
                 &&& final(self).items() == old(self).items().skip(n + 1)
                 &&& r matches Some(v) && v.sv() == old(self).rest()[n as int]
                 &&& final(self).rest() == old(self).rest().skip(n + 1)
+                &&& final(self).pos() == old(self).pos() + n + 1
+                &&& final(self).end_pos() == old(self).end_pos()
             },
-            n >= old(self).items().len() ==> r is None && final(self).items().len() == 0,
+            n >= old(self).items().len() ==> {
+                &&& r is None
+                &&& final(self).items().len() == 0
+                &&& final(self).pos() == old(self).pos() + old(self).items().len()
+                &&& final(self).end_pos() == final(self).pos()
+            },
+            final(self).column() == old(self).column(),
     {
         proof {
             use_type_invariant(&*self);
@@ -2944,6 +3303,9 @@ impl<'a, V: VValue<C>, C: VCodec> Iterator for VerifiedIter<'a, V, C> {
             }
             let max = me.it.items_left;
             let ghost o = me.it.out::<V::X>(me.slabs@);
+            proof {
+                me.it.lemma_out_len::<V::X>(me.slabs@);
+            }
             match me.it.run_once::<V::X>(me.slabs, max) {
                 Some(run) => {
                     proof {
@@ -3005,6 +3367,9 @@ impl<'a, V: VValue<C>, C: VCodec> Clone for VerifiedIter<'a, V, C> {
     fn clone(&self) -> (r: Self)
         ensures
             r.items() == self.items(),
+            r.column() == self.column(),
+            r.pos() == self.pos(),
+            r.end_pos() == self.end_pos(),
     {
         proof {
             use_type_invariant(self);
@@ -3019,10 +3384,16 @@ impl<'a, V: VValue<C>, C: VCodec> Default for VerifiedIter<'a, V, C> {
         ensures
             r.items().len() == 0,
             r.rest().len() == 0,
+            r.column().len() == 0,
+            r.pos() == 0,
+            r.end_pos() == 0,
     {
         let r = VerifiedIter { it: ICore::empty::<V::X>(), slabs: &[], col: None };
         proof {
             <Get<'a, V> as VGet>::lemma_svs(r.items());
+            r.it.lemma_out_len::<V::X>(r.slabs@);
+            assert(slab_lens(r.slabs@) =~= Seq::<nat>::empty());
+            <Get<'a, V> as VGet>::lemma_svs(vals_of::<V::X>(r.slabs@));
         }
         r
     }
@@ -3038,6 +3409,9 @@ impl<'a, V: VValue<C>, C: VCodec> IntoIterator for &'a VerifiedColumn<V, C> {
     fn into_iter(self) -> (it: VerifiedIter<'a, V, C>)
         ensures
             it.rest() == self@,
+            it.column() == self@,
+            it.pos() == 0,
+            it.end_pos() == self@.len(),
     {
         self.iter()
     }

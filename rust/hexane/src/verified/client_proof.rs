@@ -48,14 +48,25 @@
 //! over values and `len` counts those left ([`every_other`],
 //! [`the_third`]), a `fold` gives what the client's function makes of
 //! the values in turn ([`the_greatest`]), and a copy of an iterator
-//! reads on from the same place on its own ([`two_readers`]).
+//! reads on from the same place on its own ([`two_readers`]). And that
+//! an iterator knows where in its column it stands and where its window
+//! ends, and has left the column's values between the two
+//! ([`where_it_stands`], [`window_len`]), and that once it gives
+//! nothing its window ends where it stands ([`read_out`]); and that its
+//! window moves on to a range of the column, which a `for` loop then
+//! reads ([`in_the_range`]), and from one place to another to read the
+//! value at each ([`at_two_places`]); and where every move leaves it
+//! that goes past what it has ([`moved_past`]). A call says all this of
+//! the iterator it makes or moves, so a client need not ask the iterator
+//! ([`told_by_the_call`]); and a client that does ask may ask for the
+//! window's end alone ([`ends_within`]).
 //!
 //! This module exists only while Verus checks the crate.
 
 use super::{
     below_at, bytes_below, folded, lemma_run_values_add, lemma_run_values_push, lemma_sorted,
-    mapped, only, refused, run_values, sorted, sorted_for, sum_of, total_len, Get, VCodec, VGet,
-    VNewtype, VSpec, VValue, VerifiedColumn, VerifiedIter,
+    mapped, only, refused, run_values, sorted, sorted_for, sum_of, total_len, window, Get, VCodec,
+    VGet, VNewtype, VSpec, VValue, VerifiedColumn, VerifiedIter,
 };
 use crate::{Leb128, LoadOpts, PackError, Run};
 use std::cmp::Ordering;
@@ -1599,6 +1610,284 @@ fn two_readers<'a, V: VValue<C>, C: VCodec>(col: &'a VerifiedColumn<V, C>)
     let mut none = VerifiedIter::<V, C>::default();
     let n = none.next();
     assert(n is None);
+}
+
+/// An iterator's window moved to a range of the column: a `for` loop
+/// then reads the column's values there. For every value type and codec.
+#[allow(dead_code)]
+fn in_the_range<'a, V: VValue<C>, C: VCodec>(col: &'a VerifiedColumn<V, C>, a: usize, b: usize) -> (out: Vec<
+    Get<'a, V>,
+>)
+    requires
+        a <= b <= col@.len(),
+    ensures
+        <Get<'a, V> as VGet>::svs(out@) == col@.subrange(a as int, b as int),
+{
+    let mut it = col.iter();
+    it.shift(a..b);
+    proof {
+        assert(window(col@, a as int, b as int) =~= col@.subrange(a as int, b as int));
+    }
+    let ghost all = it.items();
+    let mut out: Vec<Get<'a, V>> = Vec::new();
+    for x in at: it
+        invariant
+            at.seq() == all,
+            out@ == all.take(at.index()),
+    {
+        out.push(x);
+        proof {
+            assert(all.take(at.index() + 1) =~= all.take(at.index()).push(x));
+        }
+    }
+    proof {
+        assert(all.take(all.len() as int) =~= all);
+    }
+    out
+}
+
+/// Where an iterator stands and where its window ends: a step moves the
+/// one, `set_max` the other, and what is left is the column's values
+/// between the two.
+#[allow(dead_code)]
+fn where_it_stands(col: &VerifiedColumn<u64>)
+    requires
+        col@.len() == 10,
+{
+    let mut it = col.iter_range(2, 8);
+    let (p, e) = (it.pos(), it.end_pos());
+    assert(p == 2 && e == 8);
+    let a = it.next();
+    assert(a == Some(col@[2]));
+    it.advance_by(2);
+    let p = it.pos();
+    assert(p == 5);
+    // a place behind the iterator: it stays
+    it.advance_to(4);
+    let (p, n) = (it.pos(), it.len());
+    assert(p == 5 && n == 3);
+    // a wider window, which ends past the column: what the column has
+    it.set_max(20);
+    let (e, n) = (it.end_pos(), it.len());
+    assert(e == 20 && n == 5);
+    let b = it.next();
+    assert(b == Some(col@[5]));
+    // a window that ends behind the iterator: nothing, and the window
+    // then ends where the iterator stands
+    it.set_max(3);
+    let c = it.next();
+    let (p, e) = (it.pos(), it.end_pos());
+    assert(c is None && p == 6 && e == 6);
+}
+
+/// An iterator read until it gives nothing stands at the end of what it
+/// gave, and its window ends there: where the range ended, or the
+/// column if that came first. For every value type and codec.
+#[allow(dead_code)]
+fn read_out<V: VValue<C>, C: VCodec>(col: &VerifiedColumn<V, C>, a: usize, b: usize) -> (r: (usize, usize, usize))
+    requires
+        a <= b,
+        a <= col@.len(),
+    ensures
+        // how many values it gave, where it then stands, and where its
+        // window ends
+        r.0 == r.1 - a,
+        r.1 == if b <= col@.len() {
+            b
+        } else {
+            col@.len() as usize
+        },
+        r.2 == r.1,
+{
+    let mut it = col.iter();
+    it.shift(a..b);
+    let mut n: usize = 0;
+    loop
+        invariant_except_break
+            it.end_pos() == b,
+        invariant
+            it.column() == col@,
+            it.pos() == a + n,
+        ensures
+            it.end_pos() == it.pos(),
+            b <= col@.len() ==> it.pos() == b,
+            b > col@.len() ==> it.pos() == col@.len(),
+        decreases it.rest().len(),
+    {
+        // what is left is the column's values in the window
+        let _ = it.pos();
+        match it.next() {
+            Some(_) => {
+                n += 1;
+            },
+            None => {
+                break ;
+            },
+        }
+    }
+    (n, it.pos(), it.end_pos())
+}
+
+/// The values at two places, read with one iterator whose window moves
+/// from the one to the other, and how many values the second window then
+/// has left: for every value type and codec.
+#[allow(dead_code)]
+fn at_two_places<'a, V: VValue<C>, C: VCodec>(col: &'a VerifiedColumn<V, C>, i: usize, j: usize, n: usize) -> (r: (
+    Get<'a, V>,
+    Get<'a, V>,
+    usize,
+))
+    requires
+        i < j,
+        0 < n,
+        j + n <= col@.len(),
+    ensures
+        r.0.sv() == col@[i as int],
+        r.1.sv() == col@[j as int],
+        r.2 == n - 1,
+{
+    // a column is no longer than a `usize` counts
+    let _ = col.len();
+    let mut it = col.iter();
+    let x = it.shift_next(i..i + 1);
+    let y = it.shift_next(j..j + n);
+    let left = it.len();
+    let p = it.pos();
+    assert(p == j + 1);
+    (x.unwrap(), y.unwrap(), left)
+}
+
+/// How long an iterator's window is: that many values it has left,
+/// unless the window ends past the column and it has fewer.
+#[allow(dead_code)]
+fn window_len<V: VValue<C>, C: VCodec>(it: &VerifiedIter<'_, V, C>) -> (r: usize)
+    ensures
+        r >= it.rest().len(),
+        it.end_pos() <= it.column().len() ==> r == it.rest().len(),
+{
+    let (p, e) = (it.pos(), it.end_pos());
+    e - p
+}
+
+/// Where each move leaves an iterator and its window, when it moves past
+/// what the iterator has, to a window with no value, or not at all; and
+/// where a copy, an iterator over a whole column and an iterator of no
+/// column stand.
+#[allow(dead_code)]
+fn moved_past(col: &VerifiedColumn<u64>)
+    requires
+        col@.len() == 10,
+{
+    // past the window's end: the iterator stands there with nothing left
+    let mut it = col.iter_range(2, 8);
+    it.advance_by(7);
+    let (p, e, n) = (it.pos(), it.end_pos(), it.len());
+    assert(p == 8 && e == 8 && n == 0);
+    // a copy stands where the iterator does, and then moves on its own
+    let mut it = col.iter_range(2, 8);
+    let _ = it.next();
+    let mut b = it.clone();
+    let (p, e) = (b.pos(), b.end_pos());
+    assert(p == 3 && e == 8);
+    b.advance_to(9);
+    let (p, e) = (b.pos(), b.end_pos());
+    assert(p == 8 && e == 8);
+    it.advance_to(5);
+    let (p, e) = (it.pos(), it.end_pos());
+    assert(p == 5 && e == 8);
+    let v = it.next();
+    assert(v == Some(col@[5]));
+    // `nth`: past the value it gives, or at the end of what there was
+    let mut it = col.into_iter();
+    let (p, e) = (it.pos(), it.end_pos());
+    assert(p == 0 && e == 10);
+    let v = it.nth(3);
+    let (p, e, n) = (it.pos(), it.end_pos(), it.len());
+    assert(v == Some(col@[3]) && p == 4 && e == 10 && n == 6);
+    let v = it.nth(6);
+    let (p, e) = (it.pos(), it.end_pos());
+    assert(v is None && p == 10 && e == 10);
+    // a window past the column: the iterator stands at the column's end
+    let mut it = col.iter_range(0, 5);
+    it.shift(12..15);
+    let (p, e, n) = (it.pos(), it.end_pos(), it.len());
+    assert(p == 10 && e == 10 && n == 0);
+    // a window that starts past its own end: where that end is, if ahead
+    let mut it = col.iter_range(1, 5);
+    it.shift(7..4);
+    let (p, e) = (it.pos(), it.end_pos());
+    assert(p == 4 && e == 4);
+    it.shift(9..2);
+    let (p, e) = (it.pos(), it.end_pos());
+    assert(p == 4 && e == 4);
+    // a window behind the iterator: from where the iterator stands
+    let mut it = col.iter_range(6, 10);
+    it.shift(2..8);
+    let (p, e, n) = (it.pos(), it.end_pos(), it.len());
+    assert(p == 6 && e == 8 && n == 2);
+    // `shift_next` to a window with no value
+    let mut it = col.iter();
+    let v = it.shift_next(3..3);
+    let (p, e) = (it.pos(), it.end_pos());
+    assert(v is None && p == 3 && e == 3);
+    let v = it.shift_next(11..14);
+    let (p, e, n) = (it.pos(), it.end_pos(), it.len());
+    assert(v is None && p == 10 && e == 10 && n == 0);
+    // an iterator of no column
+    let mut d = VerifiedIter::<u64>::default();
+    let (p, e) = (d.pos(), d.end_pos());
+    assert(p == 0 && e == 0);
+    d.set_max(4);
+    let (p, e, n) = (d.pos(), d.end_pos(), d.len());
+    assert(p == 0 && e == 4 && n == 0);
+}
+
+/// What a call says by itself, with no question put to the iterator:
+/// which column a new iterator or a copy reads, where it stands and
+/// where its window ends, and what a move leaves it to give.
+#[allow(dead_code)]
+fn told_by_the_call(col: &VerifiedColumn<u64>)
+    requires
+        col@.len() == 10,
+{
+    // an iterator over a whole column
+    let mut it = col.into_iter();
+    assert(it.pos() == 0 && it.end_pos() == 10 && it.column() == col@);
+    // a copy, of an iterator that has moved and whose window ends past
+    // the column
+    let _ = it.next();
+    it.set_max(20);
+    let b = it.clone();
+    assert(b.pos() == 1 && b.end_pos() == 20 && b.column() == col@);
+    // an iterator of no column
+    let d = VerifiedIter::<u64>::default();
+    assert(d.pos() == 0 && d.end_pos() == 0);
+    // a move on, and two moves of the window: to one with values, and
+    // to one with none
+    let mut it = col.iter_range(2, 8);
+    it.advance_by(2);
+    assert(it.rest() =~= col@.subrange(4, 8));
+    let v = it.shift_next(5..7);
+    assert(v == Some(col@[5]) && it.end_pos() == 7);
+    assert(it.rest() =~= col@.subrange(6, 7));
+    let v = it.shift_next(7..7);
+    assert(v is None && it.rest().len() == 0);
+}
+
+/// Whether an iterator's window ends in its column, of which `len` is
+/// the length: asked of the window's end alone. If it does, the iterator
+/// has left as many values as lie between where it stands and that end.
+#[allow(dead_code)]
+fn ends_within<V: VValue<C>, C: VCodec>(it: &VerifiedIter<'_, V, C>, len: usize) -> (r: bool)
+    requires
+        len == it.column().len(),
+    ensures
+        r == (it.end_pos() <= it.column().len()),
+        r ==> it.rest().len() == it.end_pos() - it.pos(),
+        it.pos() <= it.end_pos(),
+        it.pos() <= len,
+{
+    it.end_pos() <= len
 }
 
 } // verus!

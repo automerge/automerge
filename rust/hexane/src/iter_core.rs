@@ -473,7 +473,7 @@ pub(crate) open spec fn far_ok<T: Copy + Clone + std::fmt::Debug + Default>(
 
 /// The values of `v` in the window `a..b`: none if it starts at or past
 /// the end of `v` or is empty, and up to the end of `v` if it runs past.
-pub(crate) open spec fn window<V>(v: Seq<V>, a: int, b: int) -> Seq<V> {
+pub open spec fn window<V>(v: Seq<V>, a: int, b: int) -> Seq<V> {
     if a >= v.len() || b <= a {
         Seq::empty()
     } else if b <= v.len() {
@@ -485,7 +485,7 @@ pub(crate) open spec fn window<V>(v: Seq<V>, a: int, b: int) -> Seq<V> {
 
 /// What is left of `o` after moving `k` items on: all of it if `k` is
 /// not positive, none if `k` is past its end.
-pub(crate) open spec fn past<V>(o: Seq<V>, k: int) -> Seq<V> {
+pub open spec fn past<V>(o: Seq<V>, k: int) -> Seq<V> {
     if k <= 0 {
         o
     } else if k <= o.len() {
@@ -783,6 +783,25 @@ impl<D: Decode> ICore<D> {
             self.out::<X>(s) == window(vals_of::<X>(s), self.pos as int, self.pos + self.items_left),
     {
         assert(self.out::<X>(s) =~= window(vals_of::<X>(s), self.pos as int, self.pos + self.items_left));
+    }
+
+    /// How many values are left, for an iterator that stands in the
+    /// column or at its end: as many as the window has, or the column
+    /// from where it stands.
+    pub(crate) proof fn lemma_out_len<'a, X: Decoders<'a, D = D>>(&self, s: Seq<Slab<X::Tail>>)
+        requires
+            self.wf::<X>(s),
+        ensures
+            vals_of::<X>(s).len() == total(slab_lens(s)),
+            self.pos <= total(slab_lens(s)) ==> self.out::<X>(s).len() == if self.pos + self.items_left <= total(
+                slab_lens(s),
+            ) {
+                self.items_left as int
+            } else {
+                total(slab_lens(s)) - self.pos
+            },
+    {
+        self.lemma_here::<X>(s);
     }
 
     /// With no items left in the window, nothing is left.
@@ -1115,9 +1134,10 @@ impl<D: Decode> ICore<D> {
                     &&& v == old(self).out::<X>(slabs@)[0]
                     &&& final(self).out::<X>(slabs@) == old(self).out::<X>(slabs@).skip(1)
                     &&& final(self).pos == old(self).pos + 1
+                    &&& final(self).items_left == old(self).items_left - 1
                 },
                 None => old(self).out::<X>(slabs@).len() == 0 && final(self).out::<X>(slabs@).len() == 0
-                    && final(self).pos == old(self).pos,
+                    && final(self).pos == old(self).pos && final(self).items_left == 0,
             },
     {
         self.next_inline::<X>(slabs)
@@ -1137,9 +1157,10 @@ impl<D: Decode> ICore<D> {
                     &&& v == old(self).out::<X>(slabs@)[0]
                     &&& final(self).out::<X>(slabs@) == old(self).out::<X>(slabs@).skip(1)
                     &&& final(self).pos == old(self).pos + 1
+                    &&& final(self).items_left == old(self).items_left - 1
                 },
                 None => old(self).out::<X>(slabs@).len() == 0 && final(self).out::<X>(slabs@).len() == 0
-                    && final(self).pos == old(self).pos,
+                    && final(self).pos == old(self).pos && final(self).items_left == 0,
             },
         no_unwind
     {
@@ -1402,8 +1423,16 @@ impl<D: Decode> ICore<D> {
                 &&& r == Some(old(self).out::<X>(slabs@)[n as int])
                 &&& final(self).out::<X>(slabs@) == old(self).out::<X>(slabs@).skip(n + 1)
                 &&& final(self).pos == old(self).pos + n + 1
+                &&& final(self).pos + final(self).items_left == old(self).pos + old(self).items_left
             },
-            n >= old(self).out::<X>(slabs@).len() ==> r is None && final(self).out::<X>(slabs@).len() == 0,
+            n >= old(self).out::<X>(slabs@).len() ==> {
+                &&& r is None
+                &&& final(self).out::<X>(slabs@).len() == 0
+                &&& final(self).items_left == 0
+                &&& old(self).pos <= total(slab_lens(slabs@)) ==> final(self).pos == old(self).pos + old(self).out::<X>(
+                    slabs@,
+                ).len()
+            },
             // past the data, it stops at the end
             old(self).pos <= total(slab_lens(slabs@)) ==> final(self).pos <= total(slab_lens(slabs@)),
         no_unwind
@@ -1437,6 +1466,9 @@ impl<D: Decode> ICore<D> {
         if !self.advance_to_slab::<X>(slabs, si, start) {
             proof {
                 self.lemma_none_left::<X>(s);
+                // the window ran past the data, and this is the data's
+                // end
+                c0.lemma_out_len::<X>(s);
             }
             return None;
         }
@@ -1476,8 +1508,16 @@ impl<D: Decode> ICore<D> {
                 &&& r == Some(old(self).out::<X>(slabs@)[n as int])
                 &&& final(self).out::<X>(slabs@) == old(self).out::<X>(slabs@).skip(n + 1)
                 &&& final(self).pos == old(self).pos + n + 1
+                &&& final(self).pos + final(self).items_left == old(self).pos + old(self).items_left
             },
-            n >= old(self).out::<X>(slabs@).len() ==> r is None && final(self).out::<X>(slabs@).len() == 0,
+            n >= old(self).out::<X>(slabs@).len() ==> {
+                &&& r is None
+                &&& final(self).out::<X>(slabs@).len() == 0
+                &&& final(self).items_left == 0
+                &&& old(self).pos <= total(slab_lens(slabs@)) ==> final(self).pos == old(self).pos + old(self).out::<X>(
+                    slabs@,
+                ).len()
+            },
             // past the data (the window can run past it), it stops at the end
             old(self).pos <= total(slab_lens(slabs@)) ==> final(self).pos <= total(slab_lens(slabs@)),
         no_unwind

@@ -2081,10 +2081,13 @@ fn an_iterator_after_edits() {
                 let b = a + rng.below(n - a + 1);
                 check_iters(&v, &c, &model, (a, b), &mut rng);
                 check_iters(&v, &c, &model, (0, n), &mut rng);
+                check_moves(&v, &c, &model, (a, b), &mut rng);
+                check_moves(&v, &c, &model, (0, n), &mut rng);
             }
             v.clear();
             c.clear();
             check_iters(&v, &c, &[], (0, 0), &mut rng);
+            check_moves(&v, &c, &[], (0, 0), &mut rng);
         }
     }
     for_each_kind!(edited);
@@ -2109,6 +2112,275 @@ fn an_iterator_of_no_column() {
         assert_eq!(it.fold(3, |n, _| n + 1), 3);
         assert_eq!(VerifiedIter::<T>::default().count(), 0);
         assert!(VerifiedIter::<T>::default().last().is_none());
+    }
+    for_each_kind!(none);
+}
+
+/// The two iterators stand at the same place, with windows that end at
+/// the same place, and count the same number left. And they stand in the
+/// same slab, where their columns lie in the same slabs (`slabs`).
+fn stand<T: Kind>(x: &VerifiedIter<'_, T>, y: &hexane::Iter<'_, T>, slabs: bool) {
+    assert_eq!((x.pos(), x.end_pos()), (y.pos(), y.end_pos()));
+    assert!(!slabs || x.get_slab() == y.get_slab());
+    assert_eq!((x.len(), x.size_hint()), (y.len(), y.size_hint()));
+    assert_eq!(format!("{x:?}"), format!("Verified{y:?}"));
+}
+
+/// The values of `model` in the window `a..b`, as the specifications
+/// have it: none if it starts at the end of `model` or past it, and up
+/// to the end of `model` if it ends past that.
+fn window<T>(model: &[T], a: usize, b: usize) -> &[T] {
+    if a >= model.len() || b <= a {
+        &[]
+    } else {
+        &model[a..b.min(model.len())]
+    }
+}
+
+/// Where the specifications say an iterator stands that stood at `p`
+/// and was moved to a window with no value, ending at `to`: where the
+/// window ends or the column does, whichever comes first, if that is
+/// ahead of it.
+fn stays(p: usize, to: usize, n: usize) -> usize {
+    if to <= p {
+        p
+    } else {
+        to.min(n)
+    }
+}
+
+/// The iterators of both APIs over the values `a..b`, moved about in
+/// every way they have, to places in the column, at its end, past it and
+/// behind them: after each move they stand at the same place with the
+/// same window and give the same values, and these are what the
+/// verified operation's specification says, in every case.
+fn check_moves<T: Kind>(
+    v: &VerifiedColumn<T>,
+    c: &Column<T>,
+    model: &[T],
+    (a, b): (usize, usize),
+    rng: &mut Rng,
+) {
+    let n = model.len();
+    // the columns lie in the same slabs, but that a `VerifiedColumn`
+    // emptied by `clear` has no slab where a `Column` has an empty one
+    let slabs = v.slab_lens() == c.slab_lens();
+    assert!(slabs || (n == 0 && v.slab_count() == 0));
+    let left = |x: &VerifiedIter<'_, T>| x.clone().map(T::keep).collect::<Vec<T>>();
+    // a place: most often a little ahead of `from`
+    let place = |rng: &mut Rng, from: usize| match rng.below(14) {
+        0 => n,
+        1 => n + 1 + rng.below(5),
+        2 => usize::MAX - rng.below(2),
+        3 | 4 => rng.below(n + 1),
+        5 => from,
+        6 => from.saturating_sub(1 + rng.below(3)),
+        7 => from.saturating_add(rng.below(n + 2)),
+        _ => from.saturating_add(rng.below(n.saturating_sub(from).min(40) + 2)),
+    };
+    let (mut x, mut y) = (v.iter_range(a, b), c.iter_range(a..b));
+    assert_eq!((x.pos(), x.end_pos()), (a, b));
+    for step in 0..50 {
+        stand(&x, &y, slabs);
+        let (p, e) = (x.pos(), x.end_pos());
+        assert!(p <= e && p <= n);
+        let had = left(&x);
+        // with nothing left, the iterator stands at the end of all it gave
+        let spent = (p + had.len(), p + had.len());
+        assert_eq!(had, window(model, p, e));
+        assert_eq!(had, y.clone().map(old).collect::<Vec<T>>());
+        match rng.below(10) {
+            0 => {
+                let r = x.next().map(T::keep);
+                assert_eq!(r, y.next().map(old));
+                assert_eq!(r.as_ref(), had.first());
+                match r {
+                    Some(_) => assert_eq!((x.pos(), x.end_pos()), (p + 1, e)),
+                    None => assert_eq!((x.pos(), x.end_pos()), (p, p)),
+                }
+                assert_eq!(left(&x), had.get(1..).unwrap_or_default());
+            }
+            1 => {
+                let k = match rng.below(4) {
+                    0 => had.len() + rng.below(3),
+                    1 => usize::MAX - rng.below(2),
+                    _ => rng.below(had.len().min(60) + 1),
+                };
+                let r = x.nth(k).map(T::keep);
+                assert_eq!(r, y.nth(k).map(old));
+                assert_eq!(r.as_ref(), had.get(k));
+                if k < had.len() {
+                    assert_eq!((x.pos(), x.end_pos()), (p + k + 1, e));
+                    assert_eq!(left(&x), &had[k + 1..]);
+                } else {
+                    assert!(left(&x).is_empty());
+                    assert_eq!((x.pos(), x.end_pos()), spent);
+                }
+            }
+            2 | 3 => {
+                let end = place(rng, p);
+                x.set_max(end);
+                y.set_max(end);
+                assert_eq!((x.pos(), x.end_pos()), (p, end.max(p)));
+                assert_eq!(left(&x), window(model, p, end));
+            }
+            4 | 5 => {
+                let to = place(rng, p);
+                x.advance_to(to);
+                y.advance_to(to);
+                // what was left, `to - p` places on
+                let k = to.saturating_sub(p);
+                assert_eq!(left(&x), had.get(k..).unwrap_or_default());
+                if to <= p {
+                    assert_eq!((x.pos(), x.end_pos()), (p, e));
+                } else if k <= had.len() {
+                    assert_eq!((x.pos(), x.end_pos()), (to, e));
+                } else {
+                    assert_eq!((x.pos(), x.end_pos()), spent);
+                }
+            }
+            6 => {
+                let k = match rng.below(6) {
+                    0 => usize::MAX - rng.below(3),
+                    1 => had.len(),
+                    2 => had.len() + 1 + rng.below(4),
+                    _ => rng.below(had.len().min(50) + 2),
+                };
+                x.advance_by(k);
+                y.advance_by(k);
+                assert_eq!(left(&x), had.get(k..).unwrap_or_default());
+                if k <= had.len() {
+                    assert_eq!((x.pos(), x.end_pos()), (p + k, e));
+                } else {
+                    assert_eq!((x.pos(), x.end_pos()), spent);
+                }
+            }
+            7 | 8 => {
+                let from = place(rng, p);
+                let to = place(rng, from);
+                x.shift(from..to);
+                y.shift(from..to);
+                assert_eq!(left(&x), window(model, from.max(p), to));
+                if from <= p {
+                    assert_eq!((x.pos(), x.end_pos()), (p, to.max(p)));
+                } else if from <= to && from <= n {
+                    assert_eq!((x.pos(), x.end_pos()), (from, to));
+                } else {
+                    let at = stays(p, to, n);
+                    assert_eq!((x.pos(), x.end_pos()), (at, at));
+                }
+            }
+            _ => {
+                // the window is to start at the iterator or after it
+                let from = place(rng, p).max(p);
+                let to = place(rng, from);
+                let r = x.shift_next(from..to).map(T::keep);
+                assert_eq!(r, y.shift_next(from..to).map(old));
+                let w = window(model, from, to);
+                assert_eq!(r.as_ref(), w.first());
+                if w.is_empty() {
+                    assert!(left(&x).is_empty());
+                    let at = stays(p, to, n);
+                    assert_eq!((x.pos(), x.end_pos()), (at, at));
+                } else {
+                    assert_eq!(left(&x), &w[1..]);
+                    assert_eq!((x.pos(), x.end_pos()), (from + 1, to));
+                }
+            }
+        }
+        if step % 8 == 7 {
+            // a copy stands where the iterator does
+            stand(&x.clone(), &y, slabs);
+        }
+    }
+    stand(&x, &y, slabs);
+}
+
+/// Columns in one slab and in many, as built and as loaded: an iterator
+/// moved about, by steps and with its window, stands where `Column`'s
+/// does after every move and gives what the specifications say.
+#[test]
+fn an_iterator_moves_as_columns_does() {
+    fn moves<T: Kind>() {
+        let mut rng = Rng(0x30fe5);
+        let (p, q) = (T::fresh(&mut rng), T::fresh(&mut rng));
+        let models: Vec<Vec<T>> = vec![
+            vec![],
+            vec![p.clone()],
+            vec![p.clone(); 300],
+            (0..400).map(|i| [&p, &q][i / 9 % 2].clone()).collect(),
+            (0..700).map(|_| T::fresh(&mut rng)).collect(),
+            rng.values(300),
+            rng.values(900),
+        ];
+        for model in &models {
+            let n = model.len();
+            for (budget, loaded) in [(3, false), (3, true), (16, false), (64, true)] {
+                let (mut v, mut c) = if budget < 64 {
+                    both_in_slabs(&mut rng, model, budget)
+                } else {
+                    both_with(model, budget)
+                };
+                if loaded {
+                    let bytes = v.save();
+                    let opts = LoadOpts::new().with_max_segments(budget);
+                    v = VerifiedColumn::<T>::load_with(&bytes, opts).unwrap();
+                    c = Column::<T>::load_with(&bytes, opts).unwrap();
+                }
+                let mut ws = vec![(0, n), (0, 0), (n, n), (n / 3, n - n / 3)];
+                for _ in 0..6 {
+                    let a = rng.below(n + 1);
+                    ws.push((a, a + rng.below(n - a + 1)));
+                }
+                for w in ws {
+                    check_moves(&v, &c, model, w, &mut rng);
+                }
+            }
+        }
+    }
+    for_each_kind!(moves);
+}
+
+/// An iterator of no column moved about: its window is what it is set
+/// to, and it stays where it is with nothing to give.
+#[test]
+fn an_iterator_of_no_column_moves_nowhere() {
+    fn none<T: Kind>() {
+        let (mut x, mut y) = (VerifiedIter::<T>::default(), hexane::Iter::<T>::default());
+        stand(&x, &y, true);
+        assert_eq!((x.pos(), x.end_pos(), x.get_slab()), (0, 0, 0));
+        x.set_max(5);
+        y.set_max(5);
+        stand(&x, &y, true);
+        assert_eq!((x.pos(), x.end_pos(), x.len()), (0, 5, 0));
+        // past all it has, which is nothing: its window ends where it stands
+        x.advance_to(3);
+        y.advance_to(3);
+        stand(&x, &y, true);
+        assert_eq!((x.pos(), x.end_pos()), (0, 0));
+        x.advance_by(2);
+        y.advance_by(2);
+        stand(&x, &y, true);
+        x.advance_by(usize::MAX);
+        y.advance_by(usize::MAX);
+        stand(&x, &y, true);
+        x.set_max(7);
+        y.set_max(7);
+        x.shift(1..4);
+        y.shift(1..4);
+        stand(&x, &y, true);
+        assert_eq!((x.pos(), x.end_pos()), (0, 0));
+        x.shift(usize::MAX..usize::MAX);
+        y.shift(usize::MAX..usize::MAX);
+        stand(&x, &y, true);
+        let from = x.pos();
+        assert!(x.shift_next(from..from + 9).is_none());
+        assert!(y.shift_next(from..from + 9).is_none());
+        stand(&x, &y, true);
+        assert_eq!(x.len(), 0);
+        assert!(x.next().is_none() && x.nth(2).is_none());
+        stand(&x, &y, true);
+        assert_eq!((x.pos(), x.end_pos(), x.get_slab()), (0, 0, 0));
     }
     for_each_kind!(none);
 }
