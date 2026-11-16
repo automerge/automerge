@@ -4,6 +4,7 @@ pub mod build;
 pub mod diff;
 pub mod edit_trace;
 pub mod egwalker_paper;
+pub mod fragments;
 pub mod length;
 pub mod list;
 pub mod load_save;
@@ -262,6 +263,7 @@ pub fn benchmarks() -> Vec<Benchmark> {
     benchmarks.extend(diff::benchmarks().into_iter().map(Into::into));
     benchmarks.extend(edit_trace::benchmarks().into_iter().map(Into::into));
     benchmarks.extend(egwalker_paper::benchmarks().into_iter().map(Into::into));
+    benchmarks.extend(fragments::benchmarks());
     benchmarks.extend(length::benchmarks().into_iter().map(Into::into));
     benchmarks.extend(list::benchmarks().into_iter().map(Into::into));
     benchmarks.extend(load_save::benchmarks().into_iter().map(Into::into));
@@ -345,5 +347,15 @@ fn is_fast(name: &str) -> bool {
                 | "sync/every_change/100"
                 | "sync/big_chunky_sync_message"
                 | "typing/single_char_100_bulk_incremental_load"
+                | "fragments/build/deep_history_2000/unsigned"
+                | "fragments/build/deep_history_2000/signing_unaccepted"
+                | "fragments/build/deep_history_2000/signing_verified"
+                | "fragments/export/actors_100/unsigned"
+                | "fragments/export/actors_100/signed"
+                | "fragments/load/actors_100/unsigned"
+                | "fragments/load/actors_100/signed_in_order"
+                | "fragments/load/actors_100/signed_reversed"
+                | "fragments/incremental_load_50_edits/unsigned"
+                | "fragments/incremental_load_50_edits/signed"
         )
 }
