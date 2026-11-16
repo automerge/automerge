@@ -100,6 +100,14 @@
 //!   [`shift`](VerifiedIter::shift) moves the window to a range ahead,
 //!   and [`shift_next`](VerifiedIter::shift_next) gives the first value
 //!   there;
+//! * [`next_run`](VerifiedIter::next_run) gives the value the iterator
+//!   gives next and how many times it comes before another value does
+//!   or the iterator has no more (`head_run`), and moves past them all.
+//!   [`runs`](VerifiedIter::runs) makes of the iterator one of such
+//!   runs ([`VerifiedRuns`]). It gives the runs of what the iterator
+//!   had left (`runs_of`), which are those values
+//!   (`lemma_runs_of_values`) with no two runs side by side of one
+//!   value, and are what `splice_runs` takes;
 //! * [`is_only`](VerifiedColumn::is_only) says whether every value of the
 //!   column is the one given (`only`), and [`VValue::same`] whether two
 //!   values in a column's form are one value;
@@ -151,15 +159,17 @@
 //! functions of a column type (`VerifiedColumn::<V>::valid(bytes)`),
 //! `size_bound` is one of a value type (for byte strings it counts their
 //! bytes, as `total_len` of them), `only`, `sorted`, `sorted_for`,
-//! `bytes_below`, `mapped`, `folded`, `window`, `past`, `run_values`,
-//! `fill_of` and `sum_of` are of this module, and `lemma_save_unique`,
-//! `lemma_encoding`, `lemma_no_bytes`, `lemma_sorted`,
-//! `lemma_run_values_push` and `lemma_run_values_add` are lemmas, as is
-//! `VSpec::lemma_below` (the order is a strict total
-//! order): they exist only for Verus, and a normal build compiles
-//! them away. What options hold is said by `length()`, `fill()` and
-//! `max_segments()` of a [`LoadOpts`], and what fill value there is by
-//! `value()` of its fill state ([`MaybeFill`]).
+//! `bytes_below`, `mapped`, `folded`, `window`, `past`, `head_run`,
+//! `runs_of`, `run_values`, `fill_of` and `sum_of` are of this module,
+//! and `lemma_save_unique`, `lemma_encoding`, `lemma_no_bytes`,
+//! `lemma_sorted`, `lemma_run_values_push`, `lemma_run_values_add`,
+//! `lemma_runs_first`, `lemma_runs_of` and `lemma_runs_of_values` are
+//! lemmas, as are `VSpec::lemma_below` (the order is a strict total
+//! order) and `VerifiedIter::lemma_items_len`: they exist only for
+//! Verus, and a normal build compiles them away. What options hold is
+//! said by `length()`, `fill()` and `max_segments()` of a [`LoadOpts`],
+//! and what fill value there is by `value()` of its fill state
+//! ([`MaybeFill`]).
 //!
 //! What a method does with an iterator is stated as Verus states what
 //! the standard library does with one: of the values the iterator is to
@@ -2731,6 +2741,126 @@ proof fn lemma_folded_step<B, T, F: FnMut(B, T) -> B>(f: F, a: B, vs: Seq<T>, b:
 {
 }
 
+/// The values `o` begin with a run of `n` values `v`, which ends there:
+/// `o` has no more, or its next value is another.
+pub open spec fn head_run<S>(o: Seq<S>, v: S, n: int) -> bool {
+    &&& 1 <= n <= o.len()
+    &&& forall|i: int| 0 <= i < n ==> #[trigger] o[i] == v
+    &&& n < o.len() ==> o[n] != v
+}
+
+/// The values `o` as runs: each run is of as many equal values as lie
+/// together, so that no two runs side by side are of one value.
+pub open spec fn runs_of<T>(o: Seq<T>) -> Seq<Run<T>>
+    decreases o.len(),
+{
+    if o.len() == 0 {
+        Seq::empty()
+    } else {
+        let r = runs_of(o.drop_first());
+        if r.len() > 0 && r[0].value == o[0] {
+            seq![Run { count: (r[0].count + 1) as usize, value: o[0] }] + r.drop_first()
+        } else {
+            seq![Run { count: 1, value: o[0] }] + r
+        }
+    }
+}
+
+/// Values have a first run if there are any: it is of the first value,
+/// and no longer than the values are.
+pub proof fn lemma_runs_first<T>(o: Seq<T>)
+    requires
+        o.len() <= usize::MAX,
+    ensures
+        (runs_of(o).len() == 0) == (o.len() == 0),
+        o.len() > 0 ==> runs_of(o)[0].value == o[0] && 1 <= runs_of(o)[0].count <= o.len(),
+    decreases o.len(),
+{
+    if o.len() > 0 {
+        lemma_runs_first(o.drop_first());
+    }
+}
+
+/// If `o` begins with a run of `n` values `v` that ends there
+/// (`head_run`), the runs of `o` are that run and the runs of what
+/// comes after it.
+pub proof fn lemma_runs_of<T>(o: Seq<T>, v: T, n: usize)
+    requires
+        head_run(o, v, n as int),
+        o.len() <= usize::MAX,
+    ensures
+        runs_of(o) == seq![Run { count: n, value: v }] + runs_of(o.skip(n as int)),
+    decreases n,
+{
+    let d = o.drop_first();
+    let r = runs_of(d);
+    lemma_runs_first(d);
+    if n == 1 {
+        assert(d =~= o.skip(1));
+        if d.len() > 0 {
+            assert(d[0] == o[1]);
+        }
+    } else {
+        assert forall|i: int| 0 <= i < n - 1 implies #[trigger] d[i] == v by {
+            assert(d[i] == o[i + 1]);
+        }
+        if n - 1 < d.len() {
+            assert(d[n - 1] == o[n as int]);
+        }
+        lemma_runs_of(d, v, (n - 1) as usize);
+        assert(d.skip(n - 1) =~= o.skip(n as int));
+        assert(r.drop_first() =~= runs_of(o.skip(n as int)));
+    }
+}
+
+/// The values of the runs of `o` are `o`'s.
+pub proof fn lemma_runs_of_values<G: VGet>(o: Seq<G>)
+    requires
+        o.len() <= usize::MAX,
+    ensures
+        run_values(runs_of(o)) == G::svs(o),
+    decreases o.len(),
+{
+    G::lemma_svs(o);
+    if o.len() == 0 {
+        assert(run_values(runs_of(o)) =~= G::svs(o));
+    } else {
+        let d = o.drop_first();
+        let r = runs_of(d);
+        let x = o[0].sv();
+        lemma_runs_of_values(d);
+        lemma_runs_first(d);
+        G::lemma_svs(d);
+        let none = Seq::<Run<G>>::empty();
+        if r.len() > 0 && r[0].value == o[0] {
+            let (a, b) = (Run { count: (r[0].count + 1) as usize, value: o[0] }, r.drop_first());
+            lemma_run_values_push(none, a);
+            lemma_run_values_push(none, r[0]);
+            assert(none.push(a) =~= seq![a]);
+            assert(none.push(r[0]) =~= seq![r[0]]);
+            lemma_run_values_add(seq![a], b);
+            lemma_run_values_add(seq![r[0]], b);
+            assert(seq![r[0]] + b =~= r);
+            let was = Seq::new(r[0].count as nat, |_i: int| x) + run_values(b);
+            let now = Seq::new(a.count as nat, |_i: int| x) + run_values(b);
+            assert(G::svs(d) == was);
+            assert(run_values(runs_of(o)) == now);
+            assert forall|i: int| 0 <= i < o.len() implies now[i] == #[trigger] G::svs(o)[i] by {
+                if i > 0 {
+                    assert(was[i - 1] == d[i - 1].sv());
+                }
+            }
+            assert(now =~= G::svs(o));
+        } else {
+            let a = Run { count: 1, value: o[0] };
+            lemma_run_values_push(none, a);
+            assert(none.push(a) =~= seq![a]);
+            lemma_run_values_add(seq![a], r);
+            assert(run_values(runs_of(o)) =~= G::svs(o));
+        }
+    }
+}
+
 /// An iterator over a column's values, which
 /// [`VerifiedColumn::iter`] and [`VerifiedColumn::iter_range`] give.
 ///
@@ -2784,6 +2914,16 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedIter<'a, V, C> {
     /// is written `end_pos()`.
     pub closed spec fn spec_end_pos(&self) -> usize {
         (self.it.pos + self.it.items_left) as usize
+    }
+
+    /// The iterator has no more values left than a `usize` counts, and
+    /// as many in either form.
+    pub proof fn lemma_items_len(&self)
+        ensures
+            self.items().len() <= usize::MAX,
+            self.rest().len() == self.items().len(),
+    {
+        <Get<'a, V> as VGet>::lemma_svs(self.items());
     }
 
     /// What is left is the column's values in the window.
@@ -3039,6 +3179,84 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedIter<'a, V, C> {
             }
         }
         r
+    }
+
+    /// The next run: the value the iterator gives next, and how many
+    /// times it comes before another value does or the iterator has no
+    /// more. The iterator moves past the whole run.
+    ///
+    /// A run is as long as the values make it: how the column lies in
+    /// memory does not cut it short.
+    #[inline(always)]
+    pub fn next_run(&mut self) -> (r: Option<Run<Get<'a, V>>>)
+        ensures
+            final(self).column() == old(self).column(),
+            match r {
+                Some(run) => {
+                    &&& head_run(old(self).items(), run.value, run.count as int)
+                    &&& head_run(old(self).rest(), run.value.sv(), run.count as int)
+                    &&& final(self).items() == old(self).items().skip(run.count as int)
+                    &&& final(self).rest() == old(self).rest().skip(run.count as int)
+                    &&& final(self).pos() == old(self).pos() + run.count
+                    &&& final(self).end_pos() == old(self).end_pos()
+                },
+                None => {
+                    &&& old(self).items().len() == 0
+                    &&& old(self).rest().len() == 0
+                    &&& final(self).items().len() == 0
+                    &&& final(self).rest().len() == 0
+                    &&& final(self).pos() == old(self).pos()
+                    &&& final(self).end_pos() == old(self).pos()
+                },
+            },
+    {
+        proof {
+            use_type_invariant(&*self);
+            self.it.lemma_out_len::<V::X>(self.slabs@);
+        }
+        let ghost o = self.it.out::<V::X>(self.slabs@);
+        proof {
+            <Get<'a, V> as VGet>::lemma_svs(o);
+        }
+        let max = self.it.items_left;
+        if max == 0 {
+            return None;
+        }
+        let first = self.it.run_once::<V::X>(self.slabs, max)?;
+        let run = if self.it.slab_remaining == 0 && self.it.items_left > 0 {
+            // The run reaches its slab's end, and may go on in the next.
+            // Whether it does is a comparison of two values, which is not
+            // known to return; so it is made on a copy of where the
+            // iterator stands, and the iterator stands rightly whatever
+            // comes of it.
+            let mut it = self.it.dup();
+            let count = it.merge_on::<V::X>(self.slabs, first.value, first.count, max - first.count, Ghost(o));
+            self.it = it;
+            Run { count, value: first.value }
+        } else {
+            first
+        };
+        proof {
+            let n = run.count as int;
+            lemma_svs_sub(o, n, o.len() as int);
+            assert forall|i: int| 0 <= i < n implies #[trigger] o[i] == run.value by {
+                assert(o.take(n)[i] == run.value);
+            }
+            if n < o.len() && o[n].sv() == run.value.sv() {
+                <Get<'a, V> as VGet>::lemma_sv_inj(o[n], run.value);
+            }
+        }
+        Some(run)
+    }
+
+    /// An iterator of the runs the iterator has left to give
+    /// ([`next_run`](Self::next_run)): what
+    /// [`splice_runs`](VerifiedColumn::splice_runs) takes.
+    pub fn runs(self) -> (r: VerifiedRuns<'a, V, C>)
+        ensures
+            r.iter() == self,
+    {
+        VerifiedRuns(self)
     }
 
     /// Where item `t` of the column is, as the column's index has it:
@@ -3417,7 +3635,92 @@ impl<'a, V: VValue<C>, C: VCodec> IntoIterator for &'a VerifiedColumn<V, C> {
     }
 }
 
+/// An iterator of the runs of a column's values, which
+/// [`VerifiedIter::runs`] gives: each run is of as many equal values as
+/// lie together in what the iterator had left (`runs_of`).
+pub struct VerifiedRuns<'a, V: VValue<C>, C: VCodec = Leb128>(VerifiedIter<'a, V, C>);
+
+impl<'a, V: VValue<C>, C: VCodec> VerifiedRuns<'a, V, C> {
+    /// The iterator of values whose runs these are, where it stands now.
+    pub closed spec fn iter(&self) -> VerifiedIter<'a, V, C> {
+        self.0
+    }
+}
+
+#[cfg(verus_keep_ghost)]
+impl<'a, V: VValue<C>, C: VCodec> vstd::std_specs::iter::IteratorSpecImpl for VerifiedRuns<'a, V, C> {
+    /// The iterator keeps to what Verus asks of an iterator: `next` gives
+    /// `remaining()`, one run after another, and then `None`.
+    open spec fn obeys_prophetic_iter_laws(&self) -> bool {
+        true
+    }
+
+    open spec fn remaining(&self) -> Seq<Run<Get<'a, V>>> {
+        runs_of(self.iter().items())
+    }
+
+    open spec fn will_return_none(&self) -> bool {
+        true
+    }
+
+    open spec fn decrease(&self) -> Option<nat> {
+        Some(self.iter().items().len())
+    }
+
+    open spec fn peek(&self, index: int) -> Option<Run<Get<'a, V>>> {
+        if 0 <= index < runs_of(self.iter().items()).len() {
+            Some(runs_of(self.iter().items())[index])
+        } else {
+            None
+        }
+    }
+}
+
+impl<'a, V: VValue<C>, C: VCodec> Iterator for VerifiedRuns<'a, V, C> {
+    type Item = Run<Get<'a, V>>;
+
+    /// The next run, if one is left ([`VerifiedIter::next_run`]).
+    #[inline(always)]
+    fn next(&mut self) -> (r: Option<Run<Get<'a, V>>>)
+        ensures
+            final(self).iter().column() == old(self).iter().column(),
+            match r {
+                Some(run) => {
+                    &&& head_run(old(self).iter().items(), run.value, run.count as int)
+                    &&& head_run(old(self).iter().rest(), run.value.sv(), run.count as int)
+                    &&& final(self).iter().items() == old(self).iter().items().skip(run.count as int)
+                    &&& final(self).iter().rest() == old(self).iter().rest().skip(run.count as int)
+                    &&& final(self).iter().pos() == old(self).iter().pos() + run.count
+                    &&& final(self).iter().end_pos() == old(self).iter().end_pos()
+                },
+                None => {
+                    &&& old(self).iter().items().len() == 0
+                    &&& old(self).iter().rest().len() == 0
+                    &&& final(self).iter().items().len() == 0
+                    &&& final(self).iter().rest().len() == 0
+                    &&& final(self).iter().pos() == old(self).iter().pos()
+                    &&& final(self).iter().end_pos() == old(self).iter().pos()
+                },
+            },
+    {
+        let ghost o = self.0.items();
+        let r = self.0.next_run();
+        proof {
+            if let Some(run) = r {
+                lemma_runs_of(o, run.value, run.count);
+            }
+        }
+        r
+    }
+}
+
 } // verus!
+
+impl<V: VValue<C>, C: VCodec> std::fmt::Debug for VerifiedRuns<'_, V, C> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("VerifiedRuns").field(&self.0).finish()
+    }
+}
 
 impl<V: VValue<C>, C: VCodec> std::fmt::Debug for VerifiedIter<'_, V, C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

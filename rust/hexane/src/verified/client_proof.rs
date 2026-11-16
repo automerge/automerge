@@ -59,14 +59,25 @@
 //! that goes past what it has ([`moved_past`]). A call says all this of
 //! the iterator it makes or moves, so a client need not ask the iterator
 //! ([`told_by_the_call`]); and a client that does ask may ask for the
-//! window's end alone ([`ends_within`]).
+//! window's end alone ([`ends_within`]). And that an iterator gives its
+//! values by runs: the first run of a column is of its first value, as
+//! often as the column has it there and no more often
+//! ([`the_first_run`]); the runs are those of the iterator's window, and
+//! each moves the iterator on by its count ([`runs_in_a_window`],
+//! [`run_by_run`]); a `for` loop over the runs collects the column's
+//! values, in runs none of which is empty and no two of which that
+//! follow one another are of one value ([`in_runs`]); the counts of
+//! the runs add up to the number of values ([`count_by_runs`]); and the
+//! runs of one column, spliced into another, copy it
+//! ([`copied_by_runs`]).
 //!
 //! This module exists only while Verus checks the crate.
 
 use super::{
-    below_at, bytes_below, folded, lemma_run_values_add, lemma_run_values_push, lemma_sorted,
-    mapped, only, refused, run_values, sorted, sorted_for, sum_of, total_len, window, Get, VCodec,
-    VGet, VNewtype, VSpec, VValue, VerifiedColumn, VerifiedIter,
+    below_at, bytes_below, folded, head_run, lemma_run_values_add, lemma_run_values_push,
+    lemma_runs_first, lemma_runs_of_values, lemma_sorted, mapped, only, refused, run_values,
+    runs_of, sorted, sorted_for, sum_of, total_len, window, Get, VCodec, VGet, VNewtype, VSpec,
+    VValue, VerifiedColumn, VerifiedIter,
 };
 use crate::{Leb128, LoadOpts, PackError, Run};
 use std::cmp::Ordering;
@@ -1888,6 +1899,348 @@ fn ends_within<V: VValue<C>, C: VCodec>(it: &VerifiedIter<'_, V, C>, len: usize)
         it.pos() <= len,
 {
     it.end_pos() <= len
+}
+
+/// The first run of a column, as its iterator gives it: one value, as
+/// often as the column has it at its start and no more often; and no run
+/// only of a column with no value. For every value type and codec.
+#[allow(dead_code)]
+fn the_first_run<'a, V: VValue<C>, C: VCodec>(col: &'a VerifiedColumn<V, C>) -> (r: Option<Run<Get<'a, V>>>)
+    ensures
+        match r {
+            Some(run) => {
+                &&& 1 <= run.count <= col@.len()
+                &&& forall|i: int| 0 <= i < run.count ==> col@[i] == run.value.sv()
+                &&& run.count < col@.len() ==> col@[run.count as int] != run.value.sv()
+            },
+            None => col@.len() == 0,
+        },
+{
+    let mut it = col.iter();
+    it.next_run()
+}
+
+/// Runs as an iterator's window has them. Of three of one value and two
+/// of another, an iterator over all gives a run of three and a run of
+/// two; one over the middle three gives a run of two and a run of one,
+/// the runs of the window and not of the column. Each run moves the
+/// iterator on by its count and leaves the window's end where it was;
+/// and an iterator that gives no run has its window end where it stands.
+/// For every value type and codec.
+#[allow(dead_code)]
+fn runs_in_a_window<'v, V: VValue<C>, C: VCodec>(a: Get<'v, V>, b: Get<'v, V>)
+    requires
+        a.sv() != b.sv(),
+{
+    let mut col = VerifiedColumn::<V, C>::fill(3, a);
+    let mut bs: Vec<Run<Get<'v, V>>> = Vec::new();
+    bs.push(Run { count: 2, value: b });
+    proof {
+        lemma_run_values_push(Seq::<Run<Get<'v, V>>>::empty(), bs@[0]);
+        assert(bs@ =~= Seq::<Run<Get<'v, V>>>::empty().push(bs@[0]));
+    }
+    col.splice_runs(3, 0, bs);
+    assert(col@ =~= seq![a.sv(), a.sv(), a.sv(), b.sv(), b.sv()]);
+
+    // the whole column, with a window that ends past it
+    let mut it = col.iter();
+    it.set_max(20);
+    assert(it.rest() =~= col@);
+    let r = it.next_run();
+    assert(r matches Some(run) && run.count == 3 && run.value.sv() == a.sv()) by {
+        assert(col@[0] == a.sv() && col@[1] == a.sv() && col@[2] == a.sv() && col@[3] == b.sv());
+    }
+    let (p, e) = (it.pos(), it.end_pos());
+    assert(p == 3 && e == 20);
+    let ghost left = it.rest();
+    assert(left =~= seq![b.sv(), b.sv()]);
+    let r = it.next_run();
+    assert(r matches Some(run) && run.count == 2 && run.value.sv() == b.sv()) by {
+        assert(left[0] == b.sv() && left[1] == b.sv());
+    }
+    let (p, e) = (it.pos(), it.end_pos());
+    assert(p == 5 && e == 20);
+    let r = it.next_run();
+    let (p, e) = (it.pos(), it.end_pos());
+    assert(r is None && p == 5 && e == 5);
+
+    // the middle three
+    let mut it = col.iter_range(1, 4);
+    assert(it.rest() =~= seq![a.sv(), a.sv(), b.sv()]);
+    let r = it.next_run();
+    assert(r matches Some(run) && run.count == 2 && run.value.sv() == a.sv()) by {
+        assert(col@.subrange(1, 4)[0] == a.sv() && col@.subrange(1, 4)[1] == a.sv());
+        assert(col@.subrange(1, 4)[2] == b.sv());
+    }
+    let ghost left = it.rest();
+    assert(left =~= seq![b.sv()]);
+    let r = it.next_run();
+    assert(r matches Some(run) && run.count == 1 && run.value.sv() == b.sv()) by {
+        assert(left[0] == b.sv());
+    }
+    let (p, e) = (it.pos(), it.end_pos());
+    assert(p == 4 && e == 4);
+    let r = it.next_run();
+    assert(r is None);
+}
+
+/// Runs are apart: each is of one value or more, and no two that follow
+/// one another are of the same value. A client's own induction over
+/// `runs_of`.
+proof fn lemma_runs_apart<T>(o: Seq<T>)
+    requires
+        o.len() <= usize::MAX,
+    ensures
+        forall|i: int| 0 <= i < runs_of(o).len() ==> (#[trigger] runs_of(o)[i]).count >= 1,
+        forall|i: int| 0 < i < runs_of(o).len() ==> runs_of(o)[i - 1].value != (#[trigger] runs_of(o)[i]).value,
+    decreases o.len(),
+{
+    if o.len() > 0 {
+        let d = o.drop_first();
+        lemma_runs_apart(d);
+        lemma_runs_first(d);
+        let r = runs_of(d);
+        let rs = runs_of(o);
+        if r.len() > 0 && r[0].value == o[0] {
+            assert forall|i: int| 0 < i < rs.len() implies rs[i - 1].value != (#[trigger] rs[i]).value by {
+                assert(rs[i] == r[i]);
+                if i > 1 {
+                    assert(rs[i - 1] == r[i - 1]);
+                }
+            }
+            assert forall|i: int| 0 <= i < rs.len() implies (#[trigger] rs[i]).count >= 1 by {
+                if i > 0 {
+                    assert(rs[i] == r[i]);
+                }
+            }
+        } else {
+            assert forall|i: int| 0 < i < rs.len() implies rs[i - 1].value != (#[trigger] rs[i]).value by {
+                assert(rs[i] == r[i - 1]);
+                if i > 1 {
+                    assert(rs[i - 1] == r[i - 2]);
+                }
+            }
+            assert forall|i: int| 0 <= i < rs.len() implies (#[trigger] rs[i]).count >= 1 by {
+                if i > 0 {
+                    assert(rs[i] == r[i - 1]);
+                }
+            }
+        }
+    }
+}
+
+/// A column's values as runs: a `for` loop over the runs of its iterator
+/// collects them. They are the column's values, each run's as often as
+/// its count says; none is of no value, and no two that follow one
+/// another are of the same value. For every value type and codec.
+#[allow(dead_code)]
+fn in_runs<'a, V: VValue<C>, C: VCodec>(col: &'a VerifiedColumn<V, C>) -> (out: Vec<Run<Get<'a, V>>>)
+    ensures
+        run_values(out@) == col@,
+        forall|i: int| 0 <= i < out@.len() ==> (#[trigger] out@[i]).count >= 1,
+        forall|i: int| 0 < i < out@.len() ==> out@[i - 1].value.sv() != (#[trigger] out@[i]).value.sv(),
+{
+    let it = col.iter();
+    let ghost all = it.items();
+    let ghost rs = runs_of(all);
+    proof {
+        it.lemma_items_len();
+    }
+    let mut out: Vec<Run<Get<'a, V>>> = Vec::new();
+    for run in at: it.runs()
+        invariant
+            at.seq() == rs,
+            out@ == rs.take(at.index()),
+    {
+        out.push(run);
+        proof {
+            assert(rs.take(at.index() + 1) =~= rs.take(at.index()).push(run));
+        }
+    }
+    proof {
+        assert(rs.take(rs.len() as int) =~= rs);
+        lemma_runs_of_values(all);
+        lemma_runs_apart(all);
+        assert forall|i: int| 0 < i < out@.len() implies out@[i - 1].value.sv() != (#[trigger] out@[i]).value.sv() by {
+            if out@[i - 1].value.sv() == out@[i].value.sv() {
+                <Get<'a, V> as VGet>::lemma_sv_inj(out@[i - 1].value, out@[i].value);
+            }
+        }
+    }
+    out
+}
+
+/// The first runs of some are no more values than all of them.
+proof fn lemma_counted_take<G>(rs: Seq<Run<G>>, k: int)
+    requires
+        0 <= k <= rs.len(),
+    ensures
+        counted(rs.take(k)) <= counted(rs),
+    decreases rs.len() - k,
+{
+    if k < rs.len() {
+        lemma_counted_take(rs, k + 1);
+        assert(rs.take(k + 1).drop_last() =~= rs.take(k));
+    } else {
+        assert(rs.take(k) =~= rs);
+    }
+}
+
+/// How many values a range of a column has, counted by its runs: their
+/// counts add up to the length of the range, and adding them does not
+/// overflow. For every value type and codec.
+#[allow(dead_code)]
+fn count_by_runs<V: VValue<C>, C: VCodec>(col: &VerifiedColumn<V, C>, a: usize, b: usize) -> (n: usize)
+    requires
+        a <= b <= col@.len(),
+    ensures
+        n == b - a,
+{
+    let it = col.iter_range(a, b);
+    let ghost all = it.items();
+    let ghost rs = runs_of(all);
+    proof {
+        it.lemma_items_len();
+        lemma_runs_of_values(all);
+        lemma_counted(rs);
+    }
+    let mut n: usize = 0;
+    for run in at: it.runs()
+        invariant
+            at.seq() == rs,
+            counted(rs) == b - a,
+            n == counted(rs.take(at.index())),
+    {
+        proof {
+            lemma_counted_take(rs, at.index() + 1);
+            assert(rs.take(at.index() + 1).drop_last() =~= rs.take(at.index()));
+        }
+        n = n + run.count;
+    }
+    proof {
+        assert(rs.take(rs.len() as int) =~= rs);
+    }
+    n
+}
+
+/// A column copied by its runs: the runs of its iterator, spliced into a
+/// new column, make a column of the same values. For every value type
+/// and codec.
+#[allow(dead_code)]
+fn copied_by_runs<V: VValue<C>, C: VCodec>(col: &VerifiedColumn<V, C>) -> (r: VerifiedColumn<V, C>)
+    ensures
+        r@ == col@,
+{
+    let mut r = VerifiedColumn::<V, C>::new();
+    let it = col.iter();
+    proof {
+        it.lemma_items_len();
+        lemma_runs_of_values(it.items());
+    }
+    r.splice_runs(0, 0, it.runs());
+    assert(r@ =~= col@);
+    r
+}
+
+/// Runs asked for one at a time, and what they say of the iterator they
+/// read: after a run it stands past the run in the same column, with
+/// the same end of its window, and has left what it had less the run.
+#[allow(dead_code)]
+fn run_by_run(col: &VerifiedColumn<bool>)
+    requires
+        col@.len() > 0,
+{
+    let mut rs = col.iter_range(0, col.len()).runs();
+    assert(rs.iter().pos() == 0 && rs.iter().column() == col@);
+    let r = rs.next();
+    assert(r matches Some(run) && run.value == col@[0] && rs.iter().pos() == run.count && rs.iter().end_pos()
+        == col@.len() && rs.iter().column() == col@ && rs.iter().rest() =~= col@.skip(run.count as int)) by {
+        assert(col@.subrange(0, col@.len() as int) =~= col@);
+    }
+    let ghost left = rs.iter().rest();
+    let r = rs.next();
+    assert(r is None ==> left.len() == 0 && rs.iter().end_pos() == rs.iter().pos());
+    assert(r matches Some(run) ==> run.value == left[0] && run.value != col@[0]);
+}
+
+/// What `next_run` says by itself, of any iterator, each thing asked for
+/// on its own and with no lemma: the run is the first of the values the
+/// iterator had, as it gives them and as specifications have them; and
+/// what is left is those less the run.
+#[allow(dead_code)]
+fn told_by_a_run<'a, V: VValue<C>, C: VCodec>(it: VerifiedIter<'a, V, C>) -> (r: Option<Run<Get<'a, V>>>)
+    ensures
+        match r {
+            Some(run) => head_run(it.items(), run.value, run.count as int) && head_run(
+                it.rest(),
+                run.value.sv(),
+                run.count as int,
+            ),
+            None => it.items().len() == 0 && it.rest().len() == 0,
+        },
+{
+    let mut at = it;
+    let r = at.next_run();
+    match r {
+        Some(run) => {
+            assert(at.items() == it.items().skip(run.count as int));
+            assert(at.rest() == it.rest().skip(run.count as int));
+            assert(at.pos() == it.pos() + run.count);
+            assert(at.end_pos() == it.end_pos());
+        },
+        None => {
+            assert(at.items().len() == 0);
+            assert(at.rest().len() == 0);
+            assert(at.pos() == it.pos());
+            assert(at.end_pos() == it.pos());
+        },
+    }
+    assert(at.column() == it.column());
+    r
+}
+
+/// The same of the iterator of runs: what its `next` says of the
+/// iterator of values whose runs it gives.
+#[allow(dead_code)]
+fn told_by_the_runs<'a, V: VValue<C>, C: VCodec>(it: VerifiedIter<'a, V, C>) -> (r: Option<Run<Get<'a, V>>>)
+    ensures
+        match r {
+            Some(run) => head_run(it.items(), run.value, run.count as int) && head_run(
+                it.rest(),
+                run.value.sv(),
+                run.count as int,
+            ),
+            None => it.items().len() == 0 && it.rest().len() == 0,
+        },
+{
+    let mut rs = it.runs();
+    let r = rs.next();
+    match r {
+        Some(run) => {
+            assert(rs.iter().items() == it.items().skip(run.count as int));
+            assert(rs.iter().rest() == it.rest().skip(run.count as int));
+            assert(rs.iter().pos() == it.pos() + run.count);
+            assert(rs.iter().end_pos() == it.end_pos());
+        },
+        None => {
+            assert(rs.iter().items().len() == 0);
+            assert(rs.iter().rest().len() == 0);
+            assert(rs.iter().pos() == it.pos());
+            assert(rs.iter().end_pos() == it.pos());
+        },
+    }
+    assert(rs.iter().column() == it.column());
+    r
+}
+
+/// Any iterator has left no more values than a `usize` counts, and as
+/// many as a specification has of them.
+proof fn no_more_than_counted<'a, V: VValue<C>, C: VCodec>(it: VerifiedIter<'a, V, C>)
+    ensures
+        it.items().len() <= usize::MAX,
+        it.rest().len() == it.items().len(),
+{
+    it.lemma_items_len();
 }
 
 } // verus!

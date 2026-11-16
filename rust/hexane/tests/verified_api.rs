@@ -11,7 +11,9 @@
 // `nth(0)` is here for what `nth` does, which is under test
 #![allow(clippy::iter_nth_zero)]
 
-use hexane::verified::{refused, Get, VNewtype, VValue, VerifiedColumn, VerifiedIter};
+use hexane::verified::{
+    refused, Get, VNewtype, VValue, VerifiedColumn, VerifiedIter, VerifiedRuns,
+};
 use hexane::{
     Codec, Column, ColumnValue, ColumnValueRef, LoadOpts, MaybeFill, NoFill, PackError,
     RleEncoding, RleValue, Run,
@@ -2151,9 +2153,10 @@ fn stays(p: usize, to: usize, n: usize) -> usize {
 
 /// The iterators of both APIs over the values `a..b`, moved about in
 /// every way they have, to places in the column, at its end, past it and
-/// behind them: after each move they stand at the same place with the
-/// same window and give the same values, and these are what the
-/// verified operation's specification says, in every case.
+/// behind them, and read by values and by runs: after each move they
+/// stand at the same place with the same window and give the same
+/// values, and these are what the verified operation's specification
+/// says, in every case.
 fn check_moves<T: Kind>(
     v: &VerifiedColumn<T>,
     c: &Column<T>,
@@ -2189,7 +2192,7 @@ fn check_moves<T: Kind>(
         let spent = (p + had.len(), p + had.len());
         assert_eq!(had, window(model, p, e));
         assert_eq!(had, y.clone().map(old).collect::<Vec<T>>());
-        match rng.below(10) {
+        match rng.below(12) {
             0 => {
                 let r = x.next().map(T::keep);
                 assert_eq!(r, y.next().map(old));
@@ -2270,7 +2273,7 @@ fn check_moves<T: Kind>(
                     assert_eq!((x.pos(), x.end_pos()), (at, at));
                 }
             }
-            _ => {
+            9 => {
                 // the window is to start at the iterator or after it
                 let from = place(rng, p).max(p);
                 let to = place(rng, from);
@@ -2285,6 +2288,24 @@ fn check_moves<T: Kind>(
                 } else {
                     assert_eq!(left(&x), &w[1..]);
                     assert_eq!((x.pos(), x.end_pos()), (from + 1, to));
+                }
+            }
+            _ => {
+                let r = x.next_run().map(|r| (r.count, T::keep(r.value)));
+                assert_eq!(r, y.next_run().map(|r| (r.count, old(r.value))));
+                match r {
+                    // the first value left, as often as it stood at the
+                    // front of what was left
+                    Some((count, value)) => {
+                        assert_eq!(Some(&value), had.first());
+                        assert_eq!(count, had.iter().take_while(|h| **h == value).count());
+                        assert_eq!((x.pos(), x.end_pos()), (p + count, e));
+                        assert_eq!(left(&x), &had[count..]);
+                    }
+                    None => {
+                        assert!(had.is_empty());
+                        assert_eq!((x.pos(), x.end_pos()), (p, p));
+                    }
                 }
             }
         }
@@ -2381,8 +2402,130 @@ fn an_iterator_of_no_column_moves_nowhere() {
         assert!(x.next().is_none() && x.nth(2).is_none());
         stand(&x, &y, true);
         assert_eq!((x.pos(), x.end_pos(), x.get_slab()), (0, 0, 0));
+        // and it has no run, with a window set or with none
+        x.set_max(6);
+        y.set_max(6);
+        assert!(x.next_run().is_none() && y.next_run().is_none());
+        stand(&x, &y, true);
+        assert_eq!((x.pos(), x.end_pos()), (0, 0));
+        assert!(x.next_run().is_none());
+        assert!(x.runs().next().is_none() && y.runs().next().is_none());
     }
     for_each_kind!(none);
+}
+
+/// The runs of `vs`: each value with how often it stands there together.
+fn model_runs<T: Kind>(vs: &[T]) -> Vec<(usize, T)> {
+    let mut out: Vec<(usize, T)> = Vec::new();
+    for v in vs {
+        match out.last_mut() {
+            Some((count, value)) if value == v => *count += 1,
+            _ => out.push((1, v.clone())),
+        }
+    }
+    out
+}
+
+/// All the runs an iterator of runs gives.
+fn taken<T: Kind>(runs: VerifiedRuns<'_, T>) -> Vec<(usize, T)> {
+    runs.map(|r| (r.count, T::keep(r.value))).collect()
+}
+
+/// Columns in one slab and in many, as built and as loaded: the runs of
+/// a window are the runs of its values, whatever slabs they lie in, as
+/// `next_run` gives them and as the iterator `runs()` does, and as
+/// `Column` gives them; each run leaves the iterator past it; and the
+/// runs spliced into a column make the window's values.
+#[test]
+fn runs_as_columns_does() {
+    fn runs<T: Kind>() {
+        let mut rng = Rng(0x4b2);
+        let (p, q) = (T::fresh(&mut rng), T::fresh(&mut rng));
+        let models: Vec<Vec<T>> = vec![
+            vec![],
+            vec![p.clone()],
+            vec![p.clone(); 300],
+            (0..400).map(|i| [&p, &q][i / 9 % 2].clone()).collect(),
+            (0..600).map(|i| [&p, &q][i / 150 % 2].clone()).collect(),
+            (0..300).map(|_| T::fresh(&mut rng)).collect(),
+            rng.values(300),
+            rng.values(900),
+        ];
+        for model in &models {
+            let n = model.len();
+            for (budget, loaded) in [(3, false), (3, true), (16, false), (64, true)] {
+                let (mut v, mut c) = if budget < 64 {
+                    both_in_slabs(&mut rng, model, budget)
+                } else {
+                    both_with(model, budget)
+                };
+                if loaded {
+                    let bytes = v.save();
+                    let opts = LoadOpts::new().with_max_segments(budget);
+                    v = VerifiedColumn::<T>::load_with(&bytes, opts).unwrap();
+                    c = Column::<T>::load_with(&bytes, opts).unwrap();
+                }
+                let slabs = v.slab_lens() == c.slab_lens();
+                let mut ws = vec![(0, n), (0, 0), (n, n), (n / 3, n - n / 3)];
+                for _ in 0..8 {
+                    let a = rng.below(n + 1);
+                    ws.push((a, a + rng.below(n - a + 1)));
+                }
+                for (a, b) in ws {
+                    let want = model_runs(&model[a..b]);
+                    // run by run, and where the iterator stands after each
+                    let (mut x, mut y) = (v.iter_range(a, b), c.iter_range(a..b));
+                    let mut got = Vec::new();
+                    let mut at = a;
+                    loop {
+                        let r = x.next_run().map(|r| (r.count, T::keep(r.value)));
+                        assert_eq!(r, y.next_run().map(|r| (r.count, old(r.value))));
+                        stand(&x, &y, slabs);
+                        let Some(run) = r else {
+                            assert_eq!((x.pos(), x.end_pos()), (at, at));
+                            break;
+                        };
+                        at += run.0;
+                        assert_eq!((x.pos(), x.end_pos()), (at, b));
+                        got.push(run);
+                    }
+                    assert_eq!(got, want);
+                    assert_eq!(at, b);
+                    assert!(x.next_run().is_none() && x.next().is_none());
+
+                    // the iterator of runs, and `Column`'s
+                    let rs = v.iter_range(a, b).runs();
+                    let old_rs = c.iter_range(a..b).runs();
+                    assert_eq!(
+                        format!("{rs:?}"),
+                        format!("Verified{old_rs:?}").replace("(Iter", "(VerifiedIter")
+                    );
+                    assert_eq!(taken(rs), want);
+                    let old_runs: Vec<(usize, T)> =
+                        old_rs.map(|r| (r.count, old(r.value))).collect();
+                    assert_eq!(old_runs, want);
+
+                    // a window that ends past the column: the runs up to
+                    // the column's end
+                    let mut x = v.iter_range(a, b);
+                    x.set_max(usize::MAX - rng.below(2));
+                    assert_eq!(taken(x.runs()), model_runs(&model[a..]));
+
+                    // from inside a run: the rest of that run comes first
+                    let k = rng.below(b - a + 1);
+                    let mut x = v.iter_range(a, b);
+                    x.advance_by(k);
+                    assert_eq!(taken(x.runs()), model_runs(&model[a + k..b]));
+
+                    // the runs make the values, in a column of their own
+                    let mut w = VerifiedColumn::<T>::new();
+                    w.splice_runs(0, 0, v.iter_range(a, b).runs());
+                    assert_eq!(new_values(&w), &model[a..b]);
+                }
+            }
+        }
+    }
+    for_each_kind!(runs);
 }
 
 /// `fold` reads a run at a time: its function is called once for each

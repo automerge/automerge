@@ -1702,7 +1702,7 @@ impl<D: Decode> ICore<D> {
                         ==> o[run.count as int] != run.value
                 },
                 None => old(self).out::<X>(slabs@).len() == 0 && final(self).out::<X>(slabs@).len() == 0
-                    && final(self).pos == old(self).pos,
+                    && final(self).pos == old(self).pos && final(self).items_left == 0,
             },
         no_unwind
     {
@@ -1859,7 +1859,7 @@ impl<D: Decode> ICore<D> {
     /// `next_run_max` after its first run.
     #[inline(always)]
     #[verifier::spinoff_prover]
-    fn merge_on<'a, X: Decoders<'a, D = D>>(
+    pub(crate) fn merge_on<'a, X: Decoders<'a, D = D>>(
         &mut self,
         slabs: &'a [Slab<X::Tail>],
         value: D::Item,
@@ -1881,10 +1881,12 @@ impl<D: Decode> ICore<D> {
             o0.take(t as int) == Seq::new(t as nat, |_i: int| value),
             final(self).out::<X>(slabs@) == o0.skip(t as int),
             final(self).pos == old(self).pos + (t - total),
+            final(self).items_left == old(self).items_left - (t - total),
             t < total + left && t < o0.len() ==> o0[t as int] != value,
     {
         let ghost s = slabs@;
         let ghost p0 = self.pos;
+        let ghost end0 = self.pos + self.items_left;
         let ghost total0 = total;
         let ghost max0 = (total + left) as usize;
         let mut total_count = total;
@@ -1897,6 +1899,7 @@ impl<D: Decode> ICore<D> {
                 o0.take(total_count as int) == Seq::new(total_count as nat, |_i: int| value),
                 self.out::<X>(s) == o0.skip(total_count as int),
                 self.pos + total0 == p0 + total_count,
+                self.pos + self.items_left == end0,
                 total_count + max == max0,
                 total0 <= total_count,
                 // not at a slab's end, the run is already maximal
