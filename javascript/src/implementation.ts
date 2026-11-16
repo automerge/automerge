@@ -208,6 +208,8 @@ export type InitOptions<T> = {
   actor?: ActorId
   /** The author for this document */
   author?: Author
+  /** Require valid attached Ed25519 proofs on incoming history and sign outgoing fragments */
+  signing?: boolean
   freeze?: boolean
   /** A callback which will be called with the initial patch once the document has finished loading */
   patchCallback?: PatchCallback<T>
@@ -275,9 +277,14 @@ export function init<T>(_opts?: ActorId | InitOptions<T>): Doc<T> {
   const freeze = !!opts.freeze
   const patchCallback = opts.patchCallback
   const actor = opts.actor
-  const handle = ApiHandler.create({ actor })
+  const handle = ApiHandler.create({ actor, signing: opts.signing })
   if (typeof opts.author == "string") {
-    handle.setAuthor(opts.author)
+    try {
+      handle.setAuthor(opts.author)
+    } catch (e) {
+      handle.free()
+      throw e
+    }
   }
   handle.enableFreeze(!!opts.freeze)
   registerDatatypes(handle)
@@ -337,9 +344,19 @@ export function clone<T>(
   const state = _state(doc)
   const heads = state.heads
   const opts = importOpts(_opts)
+  if (opts.signing !== undefined) {
+    throw new RangeError(
+      "The signing mode is fixed when a document is created and inherited by clones",
+    )
+  }
   const handle = state.handle.fork(opts.actor, heads)
   if (typeof opts.author == "string") {
-    handle.setAuthor(opts.author)
+    try {
+      handle.setAuthor(opts.author)
+    } catch (e) {
+      handle.free()
+      throw e
+    }
   }
   handle.updateDiffCursor()
 
@@ -770,7 +787,16 @@ export function load<T>(
     unchecked,
     allowMissingDeps,
     convertImmutableStringsToText,
+    signing: opts.signing,
   })
+  if (typeof opts.author == "string") {
+    try {
+      handle.setAuthor(opts.author)
+    } catch (e) {
+      handle.free()
+      throw e
+    }
+  }
   handle.enableFreeze(!!opts.freeze)
   registerDatatypes(handle)
   const doc = handle.materialize("/", undefined, {
@@ -1470,6 +1496,7 @@ export type {
   API,
   SyncState,
   ActorId,
+  Author,
   Conflicts,
   Prop,
   Change,
@@ -2159,4 +2186,43 @@ export function readBundle(bundle: Uint8Array): {
   deps: Heads
 } {
   return ApiHandler.readBundle(bundle)
+}
+
+/**
+ * EXPERIMENTAL: Return an iterator of domain-separated payloads for locally
+ * authored commits on this document that belong to its current author and
+ * still need to be signed, in commit order.
+ *
+ * Sign each yielded `Uint8Array` directly with Ed25519 and pass both the
+ * payload and signature to {@link insertSignature}.
+ *
+ * @experimental
+ */
+export function requiredSignatures<T>(doc: Doc<T>): Iterable<Uint8Array> {
+  const state = _state(doc, false)
+  return state.handle.requiredSignatures().values()
+}
+
+/**
+ * EXPERIMENTAL: Verify and attach an Ed25519 signature for a payload yielded by
+ * {@link requiredSignatures}, automatically accepting causally complete local
+ * history and updating outgoing fragment readiness.
+ *
+ * @experimental
+ */
+export function insertSignature<T>(
+  doc: Doc<T>,
+  data: Uint8Array,
+  signature: Uint8Array,
+): void {
+  const state = _state(doc)
+  if (state.heads) {
+    throw new RangeError(
+      "Attempting to change an outdated document.  Use Automerge.clone() if you wish to make a writable copy.",
+    )
+  }
+  if (_is_proxy(doc)) {
+    throw new RangeError("Calls to Automerge.change cannot be nested")
+  }
+  state.handle.insertSignature(data, signature)
 }
