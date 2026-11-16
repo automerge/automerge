@@ -1082,6 +1082,9 @@ impl<C: VCodec> Plain for VBytesWrite<C> {
     proof fn lemma_heads() {
         lemma_bytes_sizes::<C>(Seq::empty());
     }
+
+    proof fn lemma_lift_inj<'s>(v: &'s [u8], w: &'s [u8]) {
+    }
 }
 
 // ── Byte strings that may be null ───────────────────────────────────────────
@@ -1346,6 +1349,9 @@ impl<C: VCodec> Plain for VOptBytesWrite<C> {
 
     proof fn lemma_heads() {
         lemma_opt_bytes_sizes::<C>(Seq::empty());
+    }
+
+    proof fn lemma_lift_inj<'s>(v: Option<&'s [u8]>, w: Option<&'s [u8]>) {
     }
 }
 

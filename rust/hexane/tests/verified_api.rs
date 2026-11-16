@@ -4592,12 +4592,27 @@ struct Encoders<'a, T: Kind> {
 }
 
 impl<'a, T: Kind> Encoders<'a, T> {
-    fn new() -> Self {
-        let mut e = Encoders {
-            new: VerifiedEncoder::new(),
-            old: old_encoder::<T>(),
-            len: 0,
+    /// Encoders with the segment budget `max`, or with none.
+    fn with(max: Option<usize>) -> Self {
+        let mut old = old_encoder::<T>();
+        let new = match max {
+            Some(max) => {
+                old.max_segments(max);
+                VerifiedEncoder::with_max_segments(max)
+            }
+            None => VerifiedEncoder::new(),
         };
+        let mut e = Encoders { new, old, len: 0 };
+        e.counted(0);
+        e
+    }
+
+    /// Encoders with the default segment budget: what `with_segments`
+    /// gives in each API.
+    fn with_segments() -> Self {
+        let new = VerifiedEncoder::with_segments();
+        let old = old_encoder::<T>().with_segments();
+        let mut e = Encoders { new, old, len: 0 };
         e.counted(0);
         e
     }
@@ -4646,7 +4661,24 @@ impl<'a, T: Kind> Encoders<'a, T> {
     /// another value between them (4); in pieces from an iterator, some
     /// of them empty (5); or by all of these in turn (6).
     fn given(model: &'a [T], other: &'a T, how: usize, rng: &mut Rng) -> Self {
-        let mut e = Self::new();
+        Self::given_with(None, model, other, how, rng)
+    }
+
+    /// [`given`](Self::given), to encoders with the segment budget `max`
+    /// or with none.
+    fn given_with(
+        max: Option<usize>,
+        model: &'a [T],
+        other: &'a T,
+        how: usize,
+        rng: &mut Rng,
+    ) -> Self {
+        Self::with(max).give(model, other, how, rng)
+    }
+
+    /// These encoders, given `model` as [`given`](Self::given) gives it.
+    fn give(self, model: &'a [T], other: &'a T, how: usize, rng: &mut Rng) -> Self {
+        let mut e = self;
         let mut at = 0;
         while at < model.len() {
             let x = &model[at];
@@ -4709,6 +4741,25 @@ impl<'a, T: Kind> Encoders<'a, T> {
         assert_eq!(range, held.len()..a.len());
         assert_eq!(a[..held.len()], *held);
         a.split_off(held.len())
+    }
+
+    /// What both write after what a buffer holds when asked to save unless
+    /// every value is `x`: the same bytes in the same place, or both
+    /// nothing (`None`), which the range returned tells.
+    fn save_to_unless(self, held: &[u8], x: &'a T) -> Option<Vec<u8>> {
+        let (mut a, mut b) = (held.to_vec(), held.to_vec());
+        let range = self.new.save_to_unless(&mut a, x.lend());
+        let old = self.old.save_to_unless(&mut b, x.as_column_ref());
+        assert_eq!(range, old);
+        assert_eq!(a, b);
+        assert_eq!(range, held.len()..a.len());
+        assert_eq!(a[..held.len()], *held);
+        (!range.is_empty()).then(|| a.split_off(held.len()))
+    }
+
+    /// The column each becomes.
+    fn into_column(self) -> (VerifiedColumn<T>, Column<T>) {
+        (self.new.into_column(), self.old.into_column())
     }
 }
 
@@ -4996,4 +5047,243 @@ fn encoders_of_the_longest_runs() {
     let mut e = VerifiedEncoder::<u64>::new();
     e.append_n(7, most);
     assert_eq!(e.save(), VerifiedColumn::<u64>::fill(most, 7).save());
+}
+
+// ── `VerifiedEncoder`: a segment budget ─────────────────────────────────
+//
+// An encoder made with a segment budget against `Column`'s encoder set to
+// the same one: what they save, what they write when asked to save unless
+// every value is a given one, and the column each becomes.
+
+/// The budgets an encoder is tried with: none, the two smallest (with
+/// which it cuts the most), and larger ones.
+const BUDGETS: [Option<usize>; 8] = [
+    None,
+    Some(2),
+    Some(3),
+    Some(4),
+    Some(5),
+    Some(8),
+    Some(16),
+    Some(1000),
+];
+
+/// Encoders with the segment budget `max` (or none), given `model` in
+/// each way. They save what a column of `model` saves. Asked to save
+/// unless every value is `x`, both write those bytes or both nothing:
+/// nothing only if every value is `x`, and always then if there is no
+/// budget. And the columns they become hold `model` in the same slabs,
+/// and take an edit alike.
+fn check_budgeted<T: Kind>(max: Option<usize>, model: &[T], other: &T, rng: &mut Rng) {
+    let (v, _) = both(model);
+    let bytes = v.save();
+    for how in 0..7 {
+        let salt = rng.next() | 1;
+        let given = || Encoders::given_with(max, model, other, how, &mut Rng(salt));
+        assert_eq!(given().save(), bytes, "{max:?}, how {how}");
+        assert_eq!(given().save_to(&[7]), bytes, "{max:?}, how {how}");
+
+        let held = [vec![], vec![9u8; 3]][rng.below(2)].clone();
+        for x in model.first().into_iter().chain(model.last()).chain([other]) {
+            let all = model.iter().all(|y| y == x);
+            let written = given().save_to_unless(&held, x);
+            if written.is_none() {
+                assert!(all, "{max:?}, how {how}");
+            } else {
+                assert_eq!(written.as_ref(), Some(&bytes), "{max:?}, how {how}");
+            }
+            if max.is_none() {
+                assert_eq!(written.is_none(), all, "how {how}");
+            }
+        }
+
+        let (mut nv, mut nc) = given().into_column();
+        check_loaded(&nv, &nc, model);
+        let at = rng.below(model.len() + 1);
+        let del = rng.below((model.len() - at).min(5) + 1);
+        nv.splice(at, del, &[other.lend(), other.lend()]);
+        nc.splice(at, del, [other.clone(), other.clone()]);
+        let mut edited = model.to_vec();
+        edited.splice(at..at + del, [other.clone(), other.clone()]);
+        check_loaded(&nv, &nc, &edited);
+    }
+}
+
+fn budgeted<T: Kind>() {
+    let mut rng = Rng(0xb0d6e7);
+    let (a, b, c) = (T::fresh(&mut rng), T::fresh(&mut rng), T::fresh(&mut rng));
+    let pick = |i: usize| [&a, &b, &c][i].clone();
+    let mut shapes: Vec<Vec<T>> = vec![
+        vec![],
+        vec![pick(0)],
+        vec![pick(0); 2],
+        vec![pick(0); 300],
+        (0..600).map(|i| pick(i / 7 % 2)).collect(),
+        (0..600).map(|i| pick(i % 3)).collect(),
+        (0..1500).map(|_| T::fresh(&mut rng)).collect(),
+        [0, 0, 1, 2, 2, 2, 0, 1, 1, 0].map(pick).to_vec(),
+    ];
+    for _ in 0..16 {
+        shapes.push(rng.values(200));
+    }
+    for (i, model) in shapes.iter().enumerate() {
+        let other = T::fresh(&mut rng);
+        // the small shapes with every budget, the others with three each
+        let some = [0, 1, 2].map(|k| BUDGETS[(i + 3 * k) % BUDGETS.len()]);
+        let budgets = if model.len() <= 10 {
+            &BUDGETS[..]
+        } else {
+            &some[..]
+        };
+        for &max in budgets {
+            check_budgeted(max, model, &other, &mut rng);
+        }
+    }
+}
+
+#[test]
+fn budgeted_encoders_agree() {
+    for_each_kind!(budgeted);
+}
+
+/// Encoders with the default segment budget (`with_segments`) against
+/// `Column`'s: they save the same bytes and become columns of the same
+/// slabs. The slabs are those a budget of 64 gives, and where the values
+/// are many enough to be cut they are not those a budget of 32 gives.
+fn default_budget<T: Kind>() {
+    let mut rng = Rng(0x5e6de7a);
+    let layout = |v: &VerifiedColumn<T>| (v.slab_lens(), v.slab_segments());
+    let models: Vec<Vec<T>> = vec![
+        vec![],
+        vec![T::fresh(&mut rng); 3],
+        rng.values(400),
+        (0..900).map(|_| T::fresh(&mut rng)).collect(),
+    ];
+    for (i, model) in models.iter().enumerate() {
+        let other = T::fresh(&mut rng);
+        let (v, _) = both(model);
+        let bytes = v.save();
+        for how in 0..7 {
+            let salt = rng.next() | 1;
+            let given = || Encoders::with_segments().give(model, &other, how, &mut Rng(salt));
+            assert_eq!(given().save(), bytes, "how {how}");
+            let (nv, nc) = given().into_column();
+            check_loaded(&nv, &nc, model);
+            let with = |max| {
+                let e = Encoders::given_with(Some(max), model, &other, how, &mut Rng(salt));
+                e.into_column().0
+            };
+            assert_eq!(layout(&nv), layout(&with(64)), "how {how}");
+            if i == 3 {
+                assert!(nv.slab_count() > 1, "how {how}");
+                assert_ne!(layout(&nv), layout(&with(32)), "how {how}");
+            }
+        }
+    }
+}
+
+#[test]
+fn default_budget_encoders_agree() {
+    for_each_kind!(default_budget);
+}
+
+/// When an encoder with a budget cuts equal values apart, and so writes
+/// them though every one is the value it is to save unless. No
+/// specification says when: this holds both APIs to what `Column`'s
+/// encoder was seen to do. With a budget of 2 or 3, equal values of a
+/// type other than `bool` given in more than one call are written. Given
+/// in one call, or of `bool`, or with a budget of 4 or more, they are not.
+fn equal_values_cut<T: Kind>() {
+    let mut rng = Rng(0xc07);
+    let is_bool = std::any::type_name::<T>() == "bool";
+    for x in [T::fresh(&mut rng), T::fresh(&mut rng)] {
+        for max in [2, 3, 4, 5, 8, 16, 1000] {
+            for n in [0, 1, 2, 3, 10, 300] {
+                // in one call, in two, or in a call for each value
+                for calls in 0..3 {
+                    let mut e = Encoders::<T>::with(Some(max));
+                    match calls {
+                        0 => e.append_n(&x, n),
+                        1 => {
+                            e.append_n(&x, n / 2);
+                            e.append_n(&x, n - n / 2);
+                        }
+                        _ => (0..n).for_each(|_| e.append(&x)),
+                    }
+                    let written = e.save_to_unless(&[5], &x).is_some();
+                    let cut = max < 4 && !is_bool && n >= 2 && calls != 0;
+                    assert_eq!(written, cut, "{max}, {n} of {x:?}, {calls}");
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn budgeted_encoders_of_equal_values() {
+    for_each_kind!(equal_values_cut);
+}
+
+/// An encoder becomes a column of up to `usize::MAX - 3` values, the most
+/// a column counts, with a budget or without. An encoder of numbers or of
+/// nulls counts one more: of that both APIs make no column and panic, with
+/// the same words (those of the column's bound with a budget, and of the
+/// load that fails without one).
+#[cfg(panic = "unwind")]
+#[test]
+fn encoders_become_columns_to_the_end() {
+    // each run fits the format's count on any target
+    let half = usize::MAX / 2;
+
+    fn made<T>(max: Option<usize>, runs: [(T, usize); 3]) -> Option<String>
+    where
+        T: Kind + std::panic::UnwindSafe,
+    {
+        let (r, s) = (runs.clone(), runs);
+        let new = panic_of(move || {
+            let mut e = match max {
+                Some(max) => VerifiedEncoder::<T>::with_max_segments(max),
+                None => VerifiedEncoder::new(),
+            };
+            for (x, n) in &r {
+                e.append_n_owned(x.clone(), *n);
+            }
+            let c = e.into_column();
+            let n = c.len();
+            let ends = [c.get(0), c.get(n - 1), c.get(n)].map(|x| x.map(T::keep));
+            (n, ends, c.save())
+        });
+        let old = panic_of(move || {
+            let mut e = old_encoder::<T>();
+            if let Some(max) = max {
+                e.max_segments(max);
+            }
+            for (x, n) in &s {
+                e.append_n_owned(x.clone(), *n);
+            }
+            let c: Column<T> = e.into_column();
+            let n = c.len();
+            let ends = [c.get(0), c.get(n - 1), c.get(n)].map(|x| x.map(self::old::<T>));
+            (n, ends, c.save())
+        });
+        assert_eq!(new, old, "{max:?}");
+        new
+    }
+
+    for max in [None, Some(2), Some(3), Some(16)] {
+        let fits = |n: usize| [(1u64, half - 1), (2, half - 1), (3, n)];
+        assert_eq!(made(max, fits(0)), None);
+        let said = made(max, fits(1)).unwrap();
+        match max {
+            Some(_) => assert!(said.contains("more than usize::MAX - 3 items"), "{said}"),
+            None => assert!(said.contains("`Result::unwrap()` on an `Err`"), "{said}"),
+        }
+
+        let bools = [(true, half - 1), (false, half - 1), (true, 0)];
+        assert_eq!(made(max, bools), None);
+
+        let nulls = |n: usize| [(None::<u64>, half), (None, half - 2), (None, n)];
+        assert_eq!(made(max, nulls(0)), None);
+        assert_eq!(made(max, nulls(1)), Some(said));
+    }
 }

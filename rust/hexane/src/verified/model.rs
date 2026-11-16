@@ -23,18 +23,22 @@ use super::counts::lemma_bool_size;
 #[cfg(verus_keep_ghost)]
 use super::value::{lemma_opt_sizes, lemma_plain_sizes};
 use super::value::{VOptWrite, VPack, VWrite};
+#[cfg(verus_keep_ghost)]
+use crate::bool_edit::run_of;
 use crate::bool_edit::{BoolEdit, BoolLoader, BoolModel, BoolRecoder};
 use crate::bool_enc::BEncoder;
 #[cfg(verus_keep_ghost)]
 use crate::bool_unique::lemma_bool_slab_unique;
 #[cfg(verus_keep_ghost)]
-use crate::bool_wire::{bool_counts, bool_valid, bool_values, lemma_empty_valid, lemma_values_len};
+use crate::bool_wire::{
+    bool_counts, bool_valid, bool_values, bslabs_values, lemma_empty_valid, lemma_values_len,
+};
 use crate::bool_wire::{BSlab, BoolReads, CountsOf};
 use crate::btree::SlabBTree;
 use crate::column::Slab;
 use crate::column_core::ColumnCore;
 #[cfg(verus_keep_ghost)]
-use crate::cursor::{all_ok, lemma_vals_total, slab_lens, vals_of};
+use crate::cursor::{all_ok, lemma_vals_total, lemma_vals_unit, slab_lens, vals_of};
 use crate::cursor::{ReadsAgree, Slabs, Visitor};
 use crate::iter_core::{Decode, Decoders};
 use crate::load_core::LoadCore;
@@ -311,6 +315,12 @@ pub(crate) trait Plain: for <'s>Lift<'s, W = Self> {
         ensures
             heads_bound::<<Self as WriteOps<'static>>::R>(10),
     ;
+
+    /// Owning tells values apart: no two have one owned copy.
+    proof fn lemma_lift_inj<'s>(v: VOf<'s, Self>, w: VOf<'s, Self>)
+        ensures
+            <Self as Lift<'s>>::lift(v) == <Self as Lift<'s>>::lift(w) ==> v == w,
+    ;
 }
 
 impl<T: VPack, C: VCodec> Plain for VWrite<T, C> {
@@ -320,6 +330,9 @@ impl<T: VPack, C: VCodec> Plain for VWrite<T, C> {
     proof fn lemma_heads() {
         lemma_plain_sizes::<T, C>(Seq::empty());
     }
+
+    proof fn lemma_lift_inj<'s>(v: T, w: T) {
+    }
 }
 
 impl<T: VPack, C: VCodec> Plain for VOptWrite<T, C> {
@@ -328,6 +341,9 @@ impl<T: VPack, C: VCodec> Plain for VOptWrite<T, C> {
 
     proof fn lemma_heads() {
         lemma_opt_sizes::<T, C>(Seq::empty());
+    }
+
+    proof fn lemma_lift_inj<'s>(v: Option<T>, w: Option<T>) {
     }
 }
 
@@ -560,12 +576,67 @@ pub(crate) trait Streams<'a, X>: Model<X> where
     /// takes a run are [`Encodes`]'s to say.
     type Enc: Encodes<Self>;
 
+    /// The encoder's segment budget, if it has one: it cuts what it is
+    /// given into slabs within it.
+    spec fn budget(e: Self::Enc) -> Option<usize>;
+
+    /// The encoder has cut no slab: it holds what it was given in one
+    /// piece.
+    spec fn whole(e: Self::Enc) -> bool;
+
     /// An encoder that has been given nothing. It has no segment
     /// budget, so it cuts no slab.
     fn fresh() -> (e: Self::Enc)
         ensures
             e.e_inv(),
             e.e_values().len() == 0,
+            Self::budget(e) is None,
+            Self::whole(e),
+    ;
+
+    /// An encoder that has been given nothing, with the segment budget
+    /// `max`. (That a budget is at least 2 is the public constructor's
+    /// to require: nothing here depends on it.)
+    fn budgeted(max: usize) -> (e: Self::Enc)
+        ensures
+            e.e_inv(),
+            e.e_values().len() == 0,
+            Self::budget(e) == Some(max),
+    ;
+
+    /// The encoder's segment budget.
+    fn budget_of(e: &Self::Enc) -> (r: Option<usize>)
+        ensures
+            r == Self::budget(*e),
+    ;
+
+    /// Give the encoder `n` copies of `x`: [`Encodes::put`], which also
+    /// keeps the budget, and without one cuts no slab.
+    fn give(e: &mut Self::Enc, x: <Self::Enc as Encodes<Self>>::In, n: usize)
+        requires
+            old(e).e_inv(),
+        ensures
+            final(e).e_inv(),
+            final(e).e_values() == old(e).e_values() + Seq::new(
+                n as nat,
+                |_i: int| <Self::Enc as Encodes<Self>>::val(x),
+            ),
+            Self::budget(*final(e)) == Self::budget(*old(e)),
+            Self::budget(*old(e)) is None && Self::whole(*old(e)) ==> Self::whole(*final(e)),
+    ;
+
+    /// Whether the encoder has cut no slab and every value it was given
+    /// is `x` (or it was given none): true only if every value is, and
+    /// true if every value is and no slab was cut.
+    fn all_are(e: &Self::Enc, x: &<Self::Enc as Encodes<Self>>::In) -> (r: bool)
+        requires
+            e.e_inv(),
+        ensures
+            r ==> e.e_values() == Seq::new(e.e_values().len(), |_i: int| <Self::Enc as Encodes<Self>>::val(*x)),
+            Self::whole(*e) && e.e_values() == Seq::new(
+                e.e_values().len(),
+                |_i: int| <Self::Enc as Encodes<Self>>::val(*x),
+            ) ==> r,
     ;
 
     /// How many values the encoder has been given.
@@ -614,9 +685,66 @@ impl<'a, L, O> Streams<'a, RleReads<O>> for RleModel<L> where
  {
     type Enc = REncoder<'a, L>;
 
+    open spec fn budget(e: REncoder<'a, L>) -> Option<usize> {
+        e.max_segments
+    }
+
+    open spec fn whole(e: REncoder<'a, L>) -> bool {
+        e.slabs@.len() == 0
+    }
+
     #[inline(always)]
     fn fresh() -> (e: REncoder<'a, L>) {
         REncoder::new()
+    }
+
+    #[inline(always)]
+    fn budgeted(max: usize) -> (e: REncoder<'a, L>) {
+        let mut e = REncoder::new();
+        e.max_segments = Some(max);
+        e
+    }
+
+    #[inline(always)]
+    fn budget_of(e: &REncoder<'a, L>) -> (r: Option<usize>) {
+        e.max_segments
+    }
+
+    #[inline(always)]
+    fn give(e: &mut REncoder<'a, L>, x: <L as WriteOps<'a>>::Cow, n: usize) {
+        e.append(x, n);
+        proof {
+            assert(lift_seq::<L>(copies(n as nat, <L as WriteOps<'a>>::val(x))) =~= Seq::new(
+                n as nat,
+                |_i: int| <L as Lift<'a>>::lift(<L as WriteOps<'a>>::val(x)),
+            ));
+        }
+    }
+
+    #[inline(always)]
+    fn all_are(e: &REncoder<'a, L>, x: &<L as WriteOps<'a>>::Cow) -> (r: bool) {
+        let r = e.single_run_of(x);
+        proof {
+            let v = <L as WriteOps<'a>>::val(*x);
+            let lv = <L as Lift<'a>>::lift(v);
+            let n = e.values().len();
+            lemma_vals_unit::<RleModel<L>>(arbitrary());
+            if e.slabs@.len() == 0 {
+                assert(e.slabs@ =~= Seq::empty());
+                assert(e.values() =~= lift_seq::<L>(e.cur@));
+                if r {
+                    assert(e.values() =~= Seq::new(n, |_i: int| lv));
+                }
+                if e.values() == Seq::new(n, |_i: int| lv) {
+                    assert forall|i: int| 0 <= i < e.cur@.len() implies e.cur@[i] == v by {
+                        assert(lift_seq::<L>(e.cur@)[i] == lv);
+                        <L as Plain>::lemma_lift_inj(e.cur@[i], v);
+                    }
+                    assert(e.cur@ =~= copies(e.cur@.len(), v));
+                }
+            }
+        }
+        r
     }
 
     #[inline(always)]
@@ -679,9 +807,55 @@ impl<'a, L, O> Streams<'a, RleReads<O>> for RleModel<L> where
 impl<'a, C: CountsOf> Streams<'a, BoolReads<C>> for BoolModel<C> {
     type Enc = BoolRecoder<C>;
 
+    open spec fn budget(e: BoolRecoder<C>) -> Option<usize> {
+        e.0.max_segments
+    }
+
+    open spec fn whole(e: BoolRecoder<C>) -> bool {
+        e.0.slabs@.len() == 0
+    }
+
     #[inline(always)]
     fn fresh() -> (e: BoolRecoder<C>) {
         BoolRecoder(BEncoder::new::<C::K>(None), PhantomData)
+    }
+
+    #[inline(always)]
+    fn budgeted(max: usize) -> (e: BoolRecoder<C>) {
+        BoolRecoder(BEncoder::new::<C::K>(Some(max)), PhantomData)
+    }
+
+    #[inline(always)]
+    fn budget_of(e: &BoolRecoder<C>) -> (r: Option<usize>) {
+        e.0.max_segments
+    }
+
+    #[inline(always)]
+    fn give(e: &mut BoolRecoder<C>, x: bool, n: usize) {
+        e.0.append::<C::K>(x, n);
+        proof {
+            assert(run_of(n as nat, x) =~= Seq::new(n as nat, |_i: int| x));
+        }
+    }
+
+    #[inline(always)]
+    fn all_are(e: &BoolRecoder<C>, x: &bool) -> (r: bool) {
+        if e.0.slabs.len() != 0 {
+            return false;
+        }
+        proof {
+            assert(e.0.slabs@ =~= Seq::<BSlab>::empty());
+            assert(bslabs_values::<C::K>(Seq::<BSlab>::empty()) =~= Seq::<bool>::empty());
+            assert(e.0.values::<C::K>() =~= e.0.state.vals@);
+        }
+        let r = e.0.state.all_equal_pre_finish(*x);
+        proof {
+            let vs = e.0.state.vals@;
+            if r {
+                assert(vs =~= Seq::new(vs.len(), |_i: int| *x));
+            }
+        }
+        r
     }
 
     #[inline(always)]

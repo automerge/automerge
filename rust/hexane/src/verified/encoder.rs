@@ -9,15 +9,14 @@
 // Verus proofs read more plainly with `x = x + n`.
 #![allow(clippy::len_zero, clippy::assign_op_pattern)]
 
-use super::model::Streams;
-// named in specifications, and in these docs
-#[allow(unused_imports)]
+use super::model::{Core, Streams};
 use super::VerifiedColumn;
 #[cfg(verus_keep_ghost)]
-use super::{lemma_svs_add, lemma_svs_none, lemma_svs_one, Held, VGet, VSpec};
-use super::{Get, Given, VCodec, VValue};
+use super::{lemma_svs_add, lemma_svs_inj, lemma_svs_none, lemma_svs_one, only, Held, VGet, VSpec};
+use super::{Get, Given, VCodec, VValue, MAX_SEG};
 use crate::remap::Encodes;
 use crate::Leb128;
+use crate::PackError;
 use std::ops::Range;
 #[allow(unused_imports)]
 use vstd::prelude::*;
@@ -42,11 +41,19 @@ verus! {
 /// until the encoder is saved, so the encoder lives no longer than
 /// `'a`.
 ///
+/// An encoder made with a segment budget
+/// ([`with_max_segments`](Self::with_max_segments),
+/// [`with_segments`](Self::with_segments)) cuts what it is
+/// given into a column's slabs as it arrives, and
+/// [`into_column`](Self::into_column) then builds the column from them
+/// without reading the bytes again. What it saves is the same.
+///
 /// # What a client has to keep
 ///
 /// Unlike a column, an encoder asks its client for a fact about itself:
 /// every method requires `wf()`, and every method that changes the
-/// encoder ensures it again. [`new`](Self::new) gives it. So
+/// encoder ensures it again. [`new`](Self::new) and
+/// [`with_max_segments`](Self::with_max_segments) give it. So
 /// a client's loop that appends carries `enc.wf()` as an invariant, and
 /// a client's function that takes an encoder requires it. No method
 /// loses it, and a client that compiles without Verus has nothing to
@@ -75,23 +82,36 @@ impl<'a, V: VValue<C>, C: VCodec> Default for VerifiedEncoder<'a, V, C> {
         ensures
             r.wf(),
             r@ == Seq::<V::S>::empty(),
+            r.max_segments() is None,
     {
         Self::new()
     }
 }
 
 impl<'a, V: VValue<C>, C: VCodec> VerifiedEncoder<'a, V, C> {
-    /// The encoder is one that [`new`](Self::new) gave and this type's
-    /// methods have changed: what each of them requires, and keeps.
+    /// The encoder is one that [`new`](Self::new) or
+    /// [`with_max_segments`](Self::with_max_segments) gave and this
+    /// type's methods have changed: what each of them requires, and
+    /// keeps.
     pub closed spec fn wf(&self) -> bool {
-        self.e.e_inv()
+        &&& self.e.e_inv()
+        &&& <V::E as Streams<'a, V::X>>::budget(self.e) is None ==> <V::E as Streams<'a, V::X>>::whole(self.e)
     }
 
-    /// An encoder that has been given nothing.
+    /// The segment budget the encoder was made with
+    /// ([`with_max_segments`](Self::with_max_segments)), if with one. No
+    /// method changes it.
+    pub closed spec fn max_segments(&self) -> Option<usize> {
+        <V::E as Streams<'a, V::X>>::budget(self.e)
+    }
+
+    /// An encoder that has been given nothing. It has no segment
+    /// budget.
     pub fn new() -> (r: Self)
         ensures
             r.wf(),
             r@ == Seq::<V::S>::empty(),
+            r.max_segments() is None,
     {
         let e = <V::E as Streams<'a, V::X>>::fresh();
         proof {
@@ -99,6 +119,50 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedEncoder<'a, V, C> {
             lemma_svs_none::<Held<V, C>>();
         }
         VerifiedEncoder { e }
+    }
+
+    /// An encoder that has been given nothing, with the segment budget
+    /// `max_segments`: it cuts what it is given into slabs as it
+    /// arrives (at half the budget, as an edit of a column leaves
+    /// them), and [`into_column`](Self::into_column) builds a column of
+    /// that budget from them, without reading the bytes again.
+    ///
+    /// `Column`'s encoder gets a budget from the setter
+    /// [`EncoderApi::max_segments`](crate::EncoderApi::max_segments),
+    /// which has to be called before anything is appended, or from the
+    /// builder [`EncoderApi::with_max_segments`](crate::EncoderApi::with_max_segments):
+    /// what `RleEncoder::new().with_max_segments(max)` gives there, this
+    /// gives here. It requires a budget of at least 2, as a column's
+    /// [`with_max_segments`](VerifiedColumn::with_max_segments) does;
+    /// the old ones panic on less.
+    pub fn with_max_segments(max_segments: usize) -> (r: Self)
+        requires
+            max_segments >= 2,
+        ensures
+            r.wf(),
+            r@ == Seq::<V::S>::empty(),
+            r.max_segments() == Some(max_segments),
+    {
+        let e = <V::E as Streams<'a, V::X>>::budgeted(max_segments);
+        proof {
+            assert(e.e_values() =~= Seq::empty());
+            lemma_svs_none::<Held<V, C>>();
+        }
+        VerifiedEncoder { e }
+    }
+
+    /// An encoder that has been given nothing, with the segment budget
+    /// of a column that was made without one, which is 64:
+    /// [`with_max_segments`](Self::with_max_segments) of that. It is
+    /// what [`EncoderApi::with_segments`](crate::EncoderApi::with_segments)
+    /// gives of `Column`'s encoder.
+    pub fn with_segments() -> (r: Self)
+        ensures
+            r.wf(),
+            r@ == Seq::<V::S>::empty(),
+            r.max_segments() == Some(64usize),
+    {
+        Self::with_max_segments(MAX_SEG)
     }
 
     /// The number of values given.
@@ -139,8 +203,9 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedEncoder<'a, V, C> {
         ensures
             final(self).wf(),
             final(self)@ == old(self)@ + Seq::new(n as nat, |_i: int| s),
+            final(self).max_segments() == old(self).max_segments(),
     {
-        <<V::E as Streams<'a, V::X>>::Enc as Encodes<V::E>>::put(&mut self.e, x, n);
+        <V::E as Streams<'a, V::X>>::give(&mut self.e, x, n);
         proof {
             let o = <<V::E as Streams<'a, V::X>>::Enc as Encodes<V::E>>::val(x);
             let added = Seq::new(n as nat, |_i: int| o);
@@ -162,6 +227,7 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedEncoder<'a, V, C> {
         ensures
             final(self).wf(),
             final(self)@ == old(self)@.push(value.sv()),
+            final(self).max_segments() == old(self).max_segments(),
     {
         proof {
             V::lemma_own(value);
@@ -181,6 +247,7 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedEncoder<'a, V, C> {
         ensures
             final(self).wf(),
             final(self)@ == old(self)@ + Seq::new(n as nat, |_i: int| value.sv()),
+            final(self).max_segments() == old(self).max_segments(),
     {
         proof {
             V::lemma_own(value);
@@ -198,6 +265,7 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedEncoder<'a, V, C> {
         ensures
             final(self).wf(),
             final(self)@ == old(self)@.push(V::sv_of(value)),
+            final(self).max_segments() == old(self).max_segments(),
     {
         let ghost s = V::sv_of(value);
         let x = V::owned_for(value);
@@ -215,6 +283,7 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedEncoder<'a, V, C> {
         ensures
             final(self).wf(),
             final(self)@ == old(self)@ + Seq::new(n as nat, |_i: int| V::sv_of(value)),
+            final(self).max_segments() == old(self).max_segments(),
     {
         let ghost s = V::sv_of(value);
         let x = V::owned_for(value);
@@ -237,6 +306,7 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedEncoder<'a, V, C> {
             old(self).wf(),
         ensures
             final(self).wf(),
+            final(self).max_segments() == old(self).max_segments(),
             exists|it: I::IntoIter| #[trigger]
                 (I::into_iter).ensures((iter,), it) && (it.obeys_prophetic_iter_laws() ==> final(self)@ == old(
                     self,
@@ -257,6 +327,7 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedEncoder<'a, V, C> {
                 it.obeys_prophetic_iter_laws() ==> given + it.remaining() == it0.remaining(),
             invariant
                 self.wf(),
+                self.max_segments() == old(self).max_segments(),
                 it.obeys_prophetic_iter_laws() == it0.obeys_prophetic_iter_laws(),
                 self@ == old(self)@ + <Get<'a, V> as VGet>::svs(given),
             ensures
@@ -335,6 +406,131 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedEncoder<'a, V, C> {
         }
         start..out.len()
     }
+
+    /// [`save_to`](Self::save_to), unless every value given is `value`:
+    /// then nothing is written, and the range is empty. So is it for an
+    /// encoder that was given nothing, whatever `value` is.
+    ///
+    /// For an encoder without a segment budget that is all of it, as it
+    /// is of a column's
+    /// [`save_to_unless`](VerifiedColumn::save_to_unless). One with a
+    /// budget writes nothing only if every value is `value`, and may
+    /// write the values though every one is: it does once it has cut a
+    /// slab, as [`EncoderApi::save_to_unless`](crate::EncoderApi::save_to_unless)
+    /// does. When it cuts is tested against the old encoder and not
+    /// proved: with a budget of 2 or 3, equal values other than `bool`
+    /// given in more than one call are cut apart, and are then written;
+    /// given in one call, or of `bool`, or with a budget of 4 or more,
+    /// they were not cut in what was tried.
+    pub fn save_to_unless(self, out: &mut Vec<u8>, value: Get<'a, V>) -> (r: Range<usize>)
+        requires
+            self.wf(),
+        ensures
+            final(out)@ == old(out)@ ==> only(self@, value.sv()),
+            self.max_segments() is None && only(self@, value.sv()) ==> final(out)@ == old(out)@,
+            final(out)@ != old(out)@ ==> {
+                &&& final(out)@ == old(out)@ + VerifiedColumn::<V, C>::encoding(self@)
+                &&& VerifiedColumn::<V, C>::valid(VerifiedColumn::<V, C>::encoding(self@))
+                &&& VerifiedColumn::<V, C>::values(VerifiedColumn::<V, C>::encoding(self@)) == self@
+                &&& VerifiedColumn::<V, C>::encoding(self@).len() <= V::size_bound(self@)
+            },
+            r.start == old(out)@.len(),
+            r.end == final(out)@.len(),
+    {
+        proof {
+            V::lemma_own(value);
+        }
+        let x = <V::E as Streams<'a, V::X>>::given(value);
+        let ghost o = <<V::E as Streams<'a, V::X>>::Enc as Encodes<V::E>>::val(x);
+        let ghost vs = self.e.e_values();
+        let ghost all = Seq::new(vs.len(), |_i: int| o);
+        proof {
+            <Held<V, C> as VGet>::lemma_svs(vs);
+            <Held<V, C> as VGet>::lemma_svs(all);
+        }
+        if <V::E as Streams<'a, V::X>>::all_are(&self.e, &x) {
+            let n = out.len();
+            return n..n;
+        }
+        proof {
+            if self.max_segments() is None && only(self@, value.sv()) {
+                assert(<Held<V, C> as VGet>::svs(vs) =~= <Held<V, C> as VGet>::svs(all));
+                lemma_svs_inj::<Held<V, C>>(vs, all);
+            }
+        }
+        let r = self.save_to(out);
+        proof {
+            let d = VerifiedColumn::<V, C>::encoding(self@);
+            if out@ == old(out)@ {
+                assert(d =~= Seq::empty());
+                VerifiedColumn::<V, C>::lemma_no_bytes();
+            }
+        }
+        r
+    }
+
+    /// A column of the values given.
+    ///
+    /// With a segment budget
+    /// ([`with_max_segments`](Self::with_max_segments)) the column is
+    /// built from the slabs the encoder cut, and has that budget.
+    /// Without one the values are saved and the bytes loaded, as
+    /// [`EncoderApi::into_column`](crate::EncoderApi::into_column) does.
+    ///
+    /// Panics if the values are more than a column counts (`usize::MAX
+    /// - 3`), or, without a budget, if they save to 4 GiB or more: a
+    /// load reads no more than that. Without a budget it is proved to
+    /// panic for no other values (those whose encoding is of at most
+    /// `0xffff_fff5` bytes and that are at most `usize::MAX - 3` become
+    /// a column).
+    pub fn into_column(self) -> (r: VerifiedColumn<V, C>)
+        requires
+            self.wf(),
+        ensures
+            r@ == self@,
+    {
+        let mut e = self.e;
+        match <V::E as Streams<'a, V::X>>::budget_of(&e) {
+            Some(max) => {
+                let slabs = <<V::E as Streams<'a, V::X>>::Enc as Encodes<V::E>>::take(&mut e);
+                let core = Core::<V::E>::from_cut(slabs, max);
+                VerifiedColumn { core }
+            },
+            None => {
+                let bytes = <V::E as Streams<'a, V::X>>::bytes(e);
+                match VerifiedColumn::<V, C>::load(bytes.as_slice()) {
+                    Ok(c) => c,
+                    Err(err) => {
+                        proof {
+                            // what was saved is the encoding, and a load
+                            // takes every encoding that is `loadable`
+                            VerifiedColumn::<V, C>::lemma_encoding(bytes@);
+                            assert(!VerifiedColumn::<V, C>::loadable(bytes@));
+                        }
+                        unloadable(err, Ghost(self@))
+                    },
+                }
+            },
+        }
+    }
+}
+
+/// Panics: what an encoder saved is no column that loads. A caller has
+/// to show that it is not one a load is sure to take
+/// ([`loadable`](VerifiedColumn::loadable)): that the values `vs` save
+/// to bytes too long for it, or are more than a column counts. The
+/// words are those of the `unwrap` in
+/// [`EncoderApi::into_column`](crate::EncoderApi::into_column).
+#[verifier::external_body]
+#[cold]
+#[inline(never)]
+fn unloadable<V: VValue<C>, C: VCodec>(e: PackError, Ghost(vs): Ghost<Seq<V::S>>) -> VerifiedColumn<V, C>
+    requires
+        VerifiedColumn::<V, C>::encoding(vs).len() > 0xffff_fff5 || vs.len() > usize::MAX - 3,
+    ensures
+        false,
+{
+    panic!("called `Result::unwrap()` on an `Err` value: {e:?}")
 }
 
 } // verus!

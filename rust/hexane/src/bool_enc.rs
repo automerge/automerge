@@ -301,6 +301,7 @@ impl BEnc {
         ensures
             r ==> forall|i: int| 0 <= i < self.vals@.len() ==> #[trigger] self.vals@[i] == value,
             self.clean@ && self.cur_count > 0 && (forall|i: int| 0 <= i < self.vals@.len() ==> #[trigger] self.vals@[i] == value) ==> r,
+            self.vals@.len() == 0 ==> r,
     {
         let r = self.len == 0 || (self.cur_count == self.len && self.cur_value == value);
         proof {
@@ -411,7 +412,7 @@ impl BEncoder {
     }
 
     pub(crate) fn new<K: CountOps>(max_segments: Option<usize>) -> (e: Self)
-        ensures e.inv::<K>(), e.values::<K>().len() == 0,
+        ensures e.inv::<K>(), e.values::<K>().len() == 0, e.slabs@.len() == 0, e.max_segments == max_segments,
     {
         let e = BEncoder { data: Vec::new(), state: BEnc::new(), slabs: Vec::new(), max_segments, len_flushed: 0 };
         proof {
@@ -432,6 +433,8 @@ impl BEncoder {
             final(self).inv::<K>(), final(self).values::<K>() == old(self).values::<K>(),
             final(self).state.len == old(self).state.len,
             final(self).state.segments <= old(self).state.segments,
+            final(self).max_segments == old(self).max_segments,
+            old(self).max_segments is None ==> final(self).slabs@ == old(self).slabs@,
     {
         let max = match self.max_segments {
             Some(m) => m,
@@ -458,6 +461,7 @@ impl BEncoder {
             final(self).inv::<K>(), final(self).values::<K>() == old(self).values::<K>(),
             final(self).state.len == old(self).state.len,
             final(self).state.segments <= old(self).state.segments,
+            final(self).max_segments == old(self).max_segments,
     {
         proof {
             lemma_pre_len(self.state.cs@);
@@ -514,6 +518,8 @@ impl BEncoder {
         ensures
             final(self).inv::<K>(), final(self).values::<K>() == old(self).values::<K>() + run_of(n as nat, value),
             final(self).state.len == old(self).state.len + n,
+            final(self).max_segments == old(self).max_segments,
+            old(self).max_segments is None ==> final(self).slabs@ == old(self).slabs@,
     {
         if value == self.state.cur_value && n <= usize::MAX - 3 - self.state.len {
             self.state.extend(n);
@@ -533,6 +539,8 @@ impl BEncoder {
         ensures
             final(self).inv::<K>(), final(self).values::<K>() == old(self).values::<K>() + run_of(n as nat, value),
             final(self).state.len == old(self).state.len + n,
+            final(self).max_segments == old(self).max_segments,
+            old(self).max_segments is None ==> final(self).slabs@ == old(self).slabs@,
     {
         if n == 0 {
             assert(old(self).values::<K>() + run_of(0, value) =~= old(self).values::<K>());

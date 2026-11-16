@@ -119,6 +119,20 @@
 //! [`told_by_owned_n`], [`told_by_an_extend`],
 //! [`told_by_an_encoders_save`], [`told_by_an_encoders_save_to`]).
 //!
+//! And of an encoder's segment budget: that the column of an encoder is
+//! the column of the values it was given, with a budget and without,
+//! and saves what the encoder saves ([`encoded_into_column`],
+//! [`one_column_three_ways`]); that the budget is no part of what is
+//! saved ([`a_budget_saves_the_same`]); that a `save_to_unless` writes
+//! nothing for an encoder of nothing but the value named, and writes
+//! the values where another is among them ([`zeros_take_no_bytes`],
+//! [`others_take_bytes`]); and that the range it returns tells a reader
+//! who has no encoder which of the two happened, and where the encoding
+//! is ([`read_from_the_range`]). Each function says so on its own
+//! ([`told_by_a_budget`], [`told_by_no_budget`], [`told_of_a_budget`],
+//! [`told_by_an_encoders_save_to_unless`],
+//! [`told_by_an_encoders_column`]).
+//!
 //! This module exists only while Verus checks the crate.
 
 use super::{
@@ -2135,6 +2149,19 @@ proof fn lemma_counted_take<G>(rs: Seq<Run<G>>, k: int)
     }
 }
 
+/// One run more is its count more, and still no more than all of them.
+proof fn lemma_counted_step<G>(rs: Seq<Run<G>>, k: int)
+    requires
+        0 <= k < rs.len(),
+    ensures
+        counted(rs.take(k + 1)) == counted(rs.take(k)) + rs[k].count,
+        counted(rs.take(k + 1)) <= counted(rs),
+{
+    lemma_counted_take(rs, k + 1);
+    assert(rs.take(k + 1).drop_last() =~= rs.take(k));
+    assert(rs.take(k + 1).last() == rs[k]);
+}
+
 /// How many values a range of a column has, counted by its runs: their
 /// counts add up to the length of the range, and adding them does not
 /// overflow. For every value type and codec.
@@ -2161,8 +2188,7 @@ fn count_by_runs<V: VValue<C>, C: VCodec>(col: &VerifiedColumn<V, C>, a: usize, 
             n == counted(rs.take(at.index())),
     {
         proof {
-            lemma_counted_take(rs, at.index() + 1);
-            assert(rs.take(at.index() + 1).drop_last() =~= rs.take(at.index()));
+            lemma_counted_step(rs, at.index());
         }
         n = n + run.count;
     }
@@ -3264,6 +3290,296 @@ fn rows_written<'a>(first: &'a [u8], second: &'a [u8], out: &mut Vec<u8>) -> (r:
         Ok(col) => Some(col),
         Err(_) => None,
     }
+}
+
+// ── The encoder's segment budget ────────────────────────────────────────────
+/// What `with_max_segments` says of the encoder it gives.
+#[allow(dead_code)]
+fn told_by_a_budget<'a, V: VValue<C>, C: VCodec>(max: usize) -> (r: VerifiedEncoder<'a, V, C>)
+    requires
+        max >= 2,
+    ensures
+        r.wf(),
+        r@.len() == 0,
+        r.max_segments() == Some(max),
+{
+    VerifiedEncoder::<V, C>::with_max_segments(max)
+}
+
+/// What `with_segments` says of the encoder it gives: its budget is the
+/// one a column has that was given none.
+#[allow(dead_code)]
+fn told_by_the_default_budget<'a, V: VValue<C>, C: VCodec>() -> (r: VerifiedEncoder<'a, V, C>)
+    ensures
+        r.wf(),
+        r@.len() == 0,
+        r.max_segments() == Some(64usize),
+{
+    VerifiedEncoder::<V, C>::with_segments()
+}
+
+/// What `new` and `default` say of the budget: there is none.
+#[allow(dead_code)]
+fn told_by_no_budget<'a, V: VValue<C>, C: VCodec>() -> (r: (VerifiedEncoder<'a, V, C>, VerifiedEncoder<'a, V, C>))
+    ensures
+        r.0.max_segments() is None,
+        r.1.max_segments() is None,
+{
+    let a = VerifiedEncoder::<V, C>::new();
+    let b = VerifiedEncoder::<V, C>::default();
+    (a, b)
+}
+
+/// What each way of giving values says of the budget: it is kept.
+#[allow(dead_code)]
+fn told_of_a_budget<'a, V: VValue<C>, C: VCodec>(
+    enc: &mut VerifiedEncoder<'a, V, C>,
+    v: Get<'a, V>,
+    w: V,
+    x: V,
+    n: usize,
+    vs: Vec<Get<'a, V>>,
+)
+    requires
+        old(enc).wf(),
+    ensures
+        final(enc).wf(),
+        final(enc).max_segments() == old(enc).max_segments(),
+{
+    enc.append(v);
+    assert(enc.max_segments() == old(enc).max_segments());
+    enc.append_n(v, n);
+    assert(enc.max_segments() == old(enc).max_segments());
+    enc.append_owned(w);
+    assert(enc.max_segments() == old(enc).max_segments());
+    enc.append_n_owned(x, n);
+    assert(enc.max_segments() == old(enc).max_segments());
+    enc.extend(vs);
+}
+
+/// What an encoder's `save_to_unless` says. Either the buffer is what
+/// it was, and then every value given is `v`; or it is not, and then it
+/// is what it was and after that the encoding of the values, a saved
+/// column of them within the bound of their size. An encoder without a
+/// budget leaves the buffer whenever every value is `v`. And the range
+/// returned is what was added.
+#[allow(dead_code)]
+fn told_by_an_encoders_save_to_unless<'a, V: VValue<C>, C: VCodec>(
+    enc: VerifiedEncoder<'a, V, C>,
+    out: &mut Vec<u8>,
+    v: Get<'a, V>,
+) -> (r: Range<usize>)
+    requires
+        enc.wf(),
+    ensures
+        final(out)@ == old(out)@ ==> only(enc@, v.sv()),
+        enc.max_segments() is None && only(enc@, v.sv()) ==> final(out)@ == old(out)@,
+        final(out)@ != old(out)@ ==> {
+            &&& final(out)@ == old(out)@ + VerifiedColumn::<V, C>::encoding(enc@)
+            &&& VerifiedColumn::<V, C>::valid(VerifiedColumn::<V, C>::encoding(enc@))
+            &&& VerifiedColumn::<V, C>::values(VerifiedColumn::<V, C>::encoding(enc@)) == enc@
+            &&& VerifiedColumn::<V, C>::encoding(enc@).len() <= V::size_bound(enc@)
+        },
+        r.start == old(out)@.len(),
+        r.end == final(out)@.len(),
+{
+    enc.save_to_unless(out, v)
+}
+
+/// What an encoder's `into_column` says: a column of the values given.
+#[allow(dead_code)]
+fn told_by_an_encoders_column<'a, V: VValue<C>, C: VCodec>(enc: VerifiedEncoder<'a, V, C>) -> (r: VerifiedColumn<V, C>)
+    requires
+        enc.wf(),
+    ensures
+        r@ == enc@,
+{
+    enc.into_column()
+}
+
+/// What the range of a `save_to_unless` tells its reader, who has the
+/// range and not the encoder: an empty range, that every value was `v`
+/// and nothing was written; another, that the bytes there are the
+/// encoding of the values. This holds of an encoder with a budget and
+/// of one without.
+#[allow(dead_code)]
+fn read_from_the_range<'a, V: VValue<C>, C: VCodec>(enc: VerifiedEncoder<'a, V, C>, out: &mut Vec<u8>, v: Get<'a, V>) -> (r:
+    Range<usize>)
+    requires
+        enc.wf(),
+    ensures
+        r.start <= r.end <= final(out)@.len(),
+        r.start == r.end ==> only(enc@, v.sv()) && final(out)@ == old(out)@,
+        r.start < r.end ==> final(out)@.subrange(r.start as int, r.end as int) == VerifiedColumn::<V, C>::encoding(enc@),
+{
+    let r = enc.save_to_unless(out, v);
+    proof {
+        let d = VerifiedColumn::<V, C>::encoding(enc@);
+        if out@ != old(out)@ {
+            assert(out@.subrange(r.start as int, r.end as int) =~= d);
+            assert(d.len() > 0) by {
+                if d.len() == 0 {
+                    assert(out@ =~= old(out)@);
+                }
+            }
+        }
+    }
+    r
+}
+
+/// A column of zeros takes no bytes: an encoder (without a budget) that
+/// was given nothing but zeros writes nothing when asked to save unless
+/// all is zero.
+#[allow(dead_code)]
+fn zeros_take_no_bytes(n: usize, m: usize, out: &mut Vec<u8>)
+    ensures
+        final(out)@ == old(out)@,
+{
+    let mut enc = VerifiedEncoder::<u64>::new();
+    enc.append_n(0, n);
+    enc.append_n_owned(0, m);
+    assert(only(enc@, 0u64));
+    let r = enc.save_to_unless(out, 0);
+    assert(r.start == r.end);
+}
+
+/// And one that was given another value too writes them all, whatever
+/// its budget.
+#[allow(dead_code)]
+fn others_take_bytes(with: Option<usize>, out: &mut Vec<u8>) -> (r: Range<usize>)
+    requires
+        with matches Some(max) ==> max >= 2,
+    ensures
+        final(out)@ == old(out)@ + VerifiedColumn::<u64>::encoding(seq![0u64, 5]),
+        VerifiedColumn::<u64>::values(final(out)@.subrange(r.start as int, r.end as int)) == seq![0u64, 5],
+{
+    let mut enc = match with {
+        Some(max) => VerifiedEncoder::<u64>::with_max_segments(max),
+        None => VerifiedEncoder::<u64>::new(),
+    };
+    enc.append(0);
+    enc.append(5);
+    assert(enc@ =~= seq![0u64, 5]);
+    assert(!only(enc@, 0u64)) by {
+        assert(enc@[1] == 5);
+    }
+    let r = enc.save_to_unless(out, 0);
+    proof {
+        let d = VerifiedColumn::<u64>::encoding(seq![0u64, 5]);
+        assert(out@.subrange(r.start as int, r.end as int) =~= d);
+    }
+    r
+}
+
+/// An encoder that was given nothing writes nothing, with a budget or
+/// without, whatever the value it is to save unless: no values are
+/// saved as no bytes.
+#[allow(dead_code)]
+fn nothing_given_nothing_written<'a, V: VValue<C>, C: VCodec>(with: Option<usize>, out: &mut Vec<u8>, v: Get<'a, V>) -> (r:
+    Range<usize>)
+    requires
+        with matches Some(max) ==> max >= 2,
+    ensures
+        final(out)@ == old(out)@,
+        r.start == r.end,
+{
+    let enc = match with {
+        Some(max) => VerifiedEncoder::<V, C>::with_max_segments(max),
+        None => VerifiedEncoder::<V, C>::new(),
+    };
+    let r = enc.save_to_unless(out, v);
+    proof {
+        VerifiedColumn::<V, C>::lemma_no_bytes();
+        VerifiedColumn::<V, C>::lemma_encoding(Seq::<u8>::empty());
+        assert(out@ =~= old(out)@);
+    }
+    r
+}
+
+/// Values appended one by one to an encoder, with a budget or without,
+/// and the column made of them: it holds those values. The loop
+/// carries `enc.wf()` and what the encoder has been given, and nothing
+/// of the budget.
+#[allow(dead_code)]
+fn encoded_into_column<'v, V: VValue<C>, C: VCodec>(input: &Vec<Get<'v, V>>, with: Option<usize>) -> (r: VerifiedColumn<
+    V,
+    C,
+>)
+    requires
+        with matches Some(max) ==> max >= 2,
+    ensures
+        r@ == VGet::svs(input@),
+{
+    let mut enc = match with {
+        Some(max) => VerifiedEncoder::<V, C>::with_max_segments(max),
+        None => VerifiedEncoder::<V, C>::new(),
+    };
+    let mut i: usize = 0;
+    proof {
+        VGet::lemma_svs(input@.take(0));
+        assert(enc@ =~= VGet::svs(input@.take(0)));
+    }
+    while i < input.len()
+        invariant
+            enc.wf(),
+            i <= input@.len(),
+            enc@ == VGet::svs(input@.take(i as int)),
+        decreases input@.len() - i,
+    {
+        enc.append(input[i]);
+        proof {
+            VGet::lemma_svs(input@.take(i as int));
+            VGet::lemma_svs(input@.take(i + 1));
+            assert(enc@ =~= VGet::svs(input@.take(i + 1)));
+        }
+        i += 1;
+    }
+    proof {
+        assert(input@.take(i as int) =~= input@);
+    }
+    enc.into_column()
+}
+
+/// An encoder's column is the column of its values however it is made:
+/// with a budget, without one, and from the values at once, the three
+/// columns have the same values and save the same bytes, which are what
+/// the encoder saves.
+#[allow(dead_code)]
+fn one_column_three_ways<'v, V: VValue<C>, C: VCodec>(input: &Vec<Get<'v, V>>, max: usize) -> (r: Vec<u8>)
+    requires
+        max >= 2,
+    ensures
+        r@ == VerifiedColumn::<V, C>::encoding(VGet::svs(input@)),
+{
+    let a = encoded_into_column::<V, C>(input, Some(max));
+    let b = encoded_into_column::<V, C>(input, None);
+    let c = VerifiedColumn::<V, C>::from_values(input.as_slice());
+    assert(a@ == b@ && b@ == c@);
+    let x = a.save();
+    let y = b.save();
+    let z = c.save();
+    assert(x@ == y@ && y@ == z@);
+    let via = encoded_as_saved::<V, C>(input);
+    assert(x@ == via@);
+    x
+}
+
+/// An encoder with a budget saves what one without saves: the budget
+/// is how the encoder keeps the values, and no part of what they are
+/// saved as.
+#[allow(dead_code)]
+fn a_budget_saves_the_same<'a>(a: &'a [u8], n: usize) -> (r: (Vec<u8>, Vec<u8>))
+    ensures
+        r.0@ == r.1@,
+{
+    let mut x = VerifiedEncoder::<Option<Vec<u8>>>::new();
+    let mut y = VerifiedEncoder::<Option<Vec<u8>>>::with_max_segments(2);
+    x.append(Some(a));
+    y.append(Some(a));
+    x.append_n(None, n);
+    y.append_n(None, n);
+    assert(x@ == y@);
+    (x.save(), y.save())
 }
 
 } // verus!

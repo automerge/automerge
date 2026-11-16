@@ -281,6 +281,7 @@ impl<'a, L> REncoder<'a, L> where L: for<'x> Lift<'x, W = L> {
         ensures
             final(self).inv(), final(self).values() == old(self).values(), final(self).len == old(self).len,
             final(self).cur@.len() <= old(self).cur@.len(), final(self).max_segments == old(self).max_segments,
+            old(self).max_segments is None ==> final(self).slabs@ == old(self).slabs@,
     {
         let max = match self.max_segments {
             Some(m) => m,
@@ -304,6 +305,7 @@ impl<'a, L> REncoder<'a, L> where L: for<'x> Lift<'x, W = L> {
             final(self).inv(),
             final(self).values() == old(self).values() + lift_seq::<L>(copies(n as nat, <L as WriteOps<'a>>::val(value))),
             final(self).len == old(self).len + n, final(self).max_segments == old(self).max_segments,
+            old(self).max_segments is None ==> final(self).slabs@ == old(self).slabs@,
     {
         hide(written);
         if n > usize::MAX - 2 - self.len {
@@ -391,18 +393,22 @@ impl<'a, L> REncoder<'a, L> where L: for<'x> Lift<'x, W = L> {
         v
     }
 
-    /// True only if every value appended is `value` (or there are none).
+    /// Whether no slab was cut and every value appended is `value` (or
+    /// there are none).
     #[inline]
     pub(crate) fn single_run_of(&self, value: &<L as WriteOps<'a>>::Cow) -> (r: bool)
         requires self.inv(),
         ensures
-            r ==> self.slabs@.len() == 0
-                && self.cur@ == copies(self.cur@.len(), <L as WriteOps<'a>>::val(*value)),
+            r == (self.slabs@.len() == 0
+                && self.cur@ == copies(self.cur@.len(), <L as WriteOps<'a>>::val(*value))),
     {
         let r = self.slabs.len() == 0 && self.segments == 0 && self.state.single_run_of(value);
         proof {
             if r {
                 lemma_single_run::<L>(self.state, self.data@, 0, self.cur@, *value);
+            }
+            if self.cur@ == copies(self.cur@.len(), <L as WriteOps<'a>>::val(*value)) {
+                lemma_single_run_only::<L>(self.state, self.data@, 0, self.cur@, self.segments as int, *value);
             }
         }
         r
@@ -645,6 +651,72 @@ proof fn lemma_single_run<'a, W: WriteOps<'a>>(s: State<'a, W>, buf: Seq<u8>, ba
         }
     }
     assert(vals =~= copies(vals.len(), W::val(value)));
+}
+
+/// And only such a state does: one written from empty that stands for
+/// copies of `value` has emitted nothing, and holds one run of `value`
+/// or nothing.
+proof fn lemma_single_run_only<'a, W: WriteOps<'a>>(s: State<'a, W>, buf: Seq<u8>, base: int, vals: Seq<VOf<'a, W>>, segs: int, value: W::Cow)
+    requires
+        written(s, buf, base, vals, segs),
+        vals == copies(vals.len(), W::val(value)),
+    ensures
+        segs == 0,
+        match s {
+            State::Empty => true,
+            State::Lone(v) => W::val(v) == W::val(value),
+            State::Run(_, v) => W::val(v) == W::val(value),
+            State::Null(_) => <W::R as RleOps<'a>>::is_null(W::val(value)),
+            State::Lit { .. } => false,
+        },
+{
+    let (gs, ws) = choose|gs: Seq<Group<VOf<'a, W>>>, ws: Seq<VOf<'a, W>>| #[trigger] rel(s, Seq::empty(), buf, base, gs, ws, 0)
+        && values_of(s, gs, ws) == vals && acc(s, gs, ws) == segs;
+    let null = <W::R as RleOps<'a>>::null();
+    if s is Empty {
+        assert(gs =~= Seq::<Group<VOf<'a, W>>>::empty());
+    } else {
+        let g = pend_group(s, ws)->Some_0;
+        lemma_canonical_split::<W::R>(gs, g);
+        lemma_push::<W::R>(gs, g);
+        let x = groups_values(gs, null);
+        let y = group_values(g, null);
+        assert(vals == x + y);
+        assert(y.len() >= 1);
+        assert(y[0] == vals[x.len() as int]);
+        if gs.len() > 0 {
+            // an emitted group ends in another value than the pending one
+            // begins with
+            let h = gs.last();
+            let w = groups_values(gs.drop_last(), null);
+            let z = group_values(h, null);
+            assert(group_ok::<W::R>(gs[gs.len() - 1]));
+            assert(adjacent_ok(h, g));
+            assert(x == w + z);
+            assert(z.len() >= 1);
+            assert(z.last() == vals[w.len() + z.len() - 1]);
+            <W::R as RleOps<'a>>::axiom_null(z.last());
+            <W::R as RleOps<'a>>::axiom_null(y[0]);
+            assert(z.last() != y[0]);
+            assert(false);
+        }
+        assert(gs =~= Seq::<Group<VOf<'a, W>>>::empty());
+        assert(x =~= Seq::<VOf<'a, W>>::empty());
+        assert(vals =~= y);
+        match s {
+            State::Lit { .. } => {
+                // a literal in progress holds two values, and no two
+                // neighbours in it are equal
+                assert(y.len() >= 2);
+                assert(y[0] != y[1]);
+                assert(false);
+            },
+            State::Null(_) => {
+                <W::R as RleOps<'a>>::axiom_null(W::val(value));
+            },
+            _ => {},
+        }
+    }
 }
 
 } // verus!
