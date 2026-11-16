@@ -133,6 +133,23 @@
 //! [`told_by_an_encoders_save_to_unless`],
 //! [`told_by_an_encoders_column`]).
 //!
+//! And of an encoder's remap forms: that a function which gives each
+//! value back saves what `save_to` saves ([`saved_as_it_is`]); that
+//! numbers are doubled as they are saved by a function that takes
+//! only the numbers given, and load as the doubles
+//! ([`doubled_as_saved`]); that the client's own type goes through a
+//! function that has a name ([`stepped_as_saved`]); that `bool`s and
+//! byte strings go through, two encoders into one buffer, each found
+//! again by its range ([`turned_and_longer`]); that where the function
+//! can give only the value named, nothing is written, whatever the
+//! encoder's budget ([`zeroed_takes_no_bytes`],
+//! [`nulled_takes_no_bytes`]), and where it gives each value back and
+//! one is another value, they are written ([`kept_and_written`]); and
+//! that a reader with the range alone knows which happened
+//! ([`read_from_the_remapped_range`]). Each of the two says so on its
+//! own ([`told_by_a_remapping_save`],
+//! [`told_by_a_remapping_save_unless`]).
+//!
 //! This module exists only while Verus checks the crate.
 
 use super::{
@@ -3580,6 +3597,345 @@ fn a_budget_saves_the_same<'a>(a: &'a [u8], n: usize) -> (r: (Vec<u8>, Vec<u8>))
     y.append_n(None, n);
     assert(x@ == y@);
     (x.save(), y.save())
+}
+
+// ── The encoder's remap forms ───────────────────────────────────────────────
+/// What an encoder's `save_to_and_remap` says. The buffer is what it
+/// was and after that a saved column, the encoding of its values and
+/// within the bound of their size; those are as many values as were
+/// given, each what the function gave for the value given in its place.
+/// And the range returned is what was added.
+#[allow(dead_code)]
+fn told_by_a_remapping_save<'a, V: VValue<C>, C: VCodec, F: Fn(V) -> V>(
+    enc: VerifiedEncoder<'a, V, C>,
+    out: &mut Vec<u8>,
+    f: F,
+) -> (r: Range<usize>)
+    requires
+        enc.wf(),
+        forall|v: V| enc@.contains(V::sv_of(v)) ==> #[trigger] call_requires(f, (v,)),
+    ensures
+        ({
+            let d = final(out)@.skip(old(out)@.len() as int);
+            let w = VerifiedColumn::<V, C>::values(d);
+            &&& final(out)@ == old(out)@ + d
+            &&& VerifiedColumn::<V, C>::valid(d)
+            &&& d == VerifiedColumn::<V, C>::encoding(w)
+            &&& d.len() <= V::size_bound(w)
+            &&& w.len() == enc@.len()
+            &&& forall|i: int| 0 <= i < enc@.len() ==> mapped(f, enc@[i], #[trigger] w[i])
+        }),
+        r.start == old(out)@.len(),
+        r.end == final(out)@.len(),
+{
+    enc.save_to_and_remap(out, f)
+}
+
+/// What an encoder's `save_to_unless_and_remap` says. Either the
+/// buffer is what it was, and then the function gave `v` for every
+/// value given; or it is not, and then all that `save_to_and_remap`
+/// says holds. A function that can give nothing but `v` for the values
+/// given leaves the buffer, whether the encoder has a budget or not.
+/// And the range returned is what was added.
+#[allow(dead_code)]
+fn told_by_a_remapping_save_unless<'a, V: VValue<C>, C: VCodec, F: Fn(V) -> V>(
+    enc: VerifiedEncoder<'a, V, C>,
+    out: &mut Vec<u8>,
+    v: Get<'a, V>,
+    f: F,
+) -> (r: Range<usize>)
+    requires
+        enc.wf(),
+        forall|x: V| enc@.contains(V::sv_of(x)) ==> #[trigger] call_requires(f, (x,)),
+    ensures
+        final(out)@ == old(out)@ ==> forall|i: int| 0 <= i < enc@.len() ==> mapped(f, #[trigger] enc@[i], v.sv()),
+        (forall|i: int, b: V::S| 0 <= i < enc@.len() && #[trigger] mapped(f, enc@[i], b) ==> b == v.sv())
+            ==> final(out)@ == old(out)@,
+        final(out)@ != old(out)@ ==> {
+            let d = final(out)@.skip(old(out)@.len() as int);
+            let w = VerifiedColumn::<V, C>::values(d);
+            &&& final(out)@ == old(out)@ + d
+            &&& VerifiedColumn::<V, C>::valid(d)
+            &&& d == VerifiedColumn::<V, C>::encoding(w)
+            &&& d.len() <= V::size_bound(w)
+            &&& w.len() == enc@.len()
+            &&& forall|i: int| 0 <= i < enc@.len() ==> mapped(f, enc@[i], #[trigger] w[i])
+        },
+        r.start == old(out)@.len(),
+        r.end == final(out)@.len(),
+{
+    enc.save_to_unless_and_remap(out, v, f)
+}
+
+/// An encoder saved through a function that gives each value back
+/// saves what `save_to` saves: the encoding of the values given. For
+/// every value type and codec, with a budget or without.
+#[allow(dead_code)]
+fn saved_as_it_is<'a, V: VValue<C>, C: VCodec>(enc: VerifiedEncoder<'a, V, C>, out: &mut Vec<u8>) -> (r: Range<usize>)
+    requires
+        enc.wf(),
+    ensures
+        final(out)@ == old(out)@ + VerifiedColumn::<V, C>::encoding(enc@),
+        r.start == old(out)@.len(),
+        r.end == final(out)@.len(),
+{
+    let f = |v: V| -> (w: V)
+        ensures
+            w == v,
+        { v };
+    let r = enc.save_to_and_remap(out, f);
+    proof {
+        let w = VerifiedColumn::<V, C>::values(out@.skip(old(out)@.len() as int));
+        assert(w =~= enc@);
+    }
+    r
+}
+
+/// Numbers doubled as they are saved, by a function that does not take
+/// every number: the client has to show that it takes those given, and
+/// no more. If what was written loads, it loads as the doubles.
+#[allow(dead_code)]
+fn doubled_as_saved(input: &Vec<u64>, with: Option<usize>, out: &mut Vec<u8>) -> (r: Option<VerifiedColumn<u64>>)
+    requires
+        with matches Some(max) ==> max >= 2,
+        forall|i: int| 0 <= i < input@.len() ==> input@[i] <= 1000,
+    ensures
+        r matches Some(col) ==> {
+            &&& col@.len() == input@.len()
+            &&& forall|i: int| 0 <= i < input@.len() ==> col@[i] == 2 * input@[i]
+        },
+{
+    let mut enc = match with {
+        Some(max) => VerifiedEncoder::<u64>::with_max_segments(max),
+        None => VerifiedEncoder::<u64>::new(),
+    };
+    let mut i: usize = 0;
+    while i < input.len()
+        invariant
+            enc.wf(),
+            i <= input@.len(),
+            enc@ == input@.take(i as int),
+        decreases input@.len() - i,
+    {
+        enc.append(input[i]);
+        proof {
+            assert(enc@ =~= input@.take(i + 1));
+        }
+        i += 1;
+    }
+    proof {
+        assert(input@.take(i as int) =~= input@);
+    }
+    let f = |v: u64| -> (w: u64)
+        requires
+            v <= 1000,
+        ensures
+            w == 2 * v,
+        { 2 * v };
+    let r = enc.save_to_and_remap(out, f);
+    let bytes = vstd::slice::slice_subrange(out.as_slice(), r.start, r.end);
+    proof {
+        assert(bytes@ =~= out@.skip(old(out)@.len() as int));
+    }
+    match VerifiedColumn::<u64>::load(bytes) {
+        Ok(col) => {
+            proof {
+                assert forall|i: int| 0 <= i < input@.len() implies col@[i] == 2 * input@[i] by {
+                    assert(mapped(f, enc@[i], col@[i]));
+                }
+            }
+            Some(col)
+        },
+        Err(_) => None,
+    }
+}
+
+/// The client's own type, saved through a function that has a name.
+#[allow(dead_code)]
+fn stepped_as_saved(enc: VerifiedEncoder<'_, Action>, out: &mut Vec<u8>) -> (r: Range<usize>)
+    requires
+        enc.wf(),
+    ensures
+        r.start <= r.end <= final(out)@.len(),
+        ({
+            let w = VerifiedColumn::<Action>::values(final(out)@.subrange(r.start as int, r.end as int));
+            &&& w.len() == enc@.len()
+            &&& forall|i: int| 0 <= i < enc@.len() ==> w[i] == after(enc@[i])
+        }),
+{
+    let r = enc.save_to_and_remap(out, next_action);
+    proof {
+        let d = out@.skip(old(out)@.len() as int);
+        let w = VerifiedColumn::<Action>::values(d);
+        assert(out@.subrange(r.start as int, r.end as int) =~= d);
+        assert forall|i: int| 0 <= i < enc@.len() implies w[i] == after(enc@[i]) by {
+            assert(mapped(next_action, enc@[i], w[i]));
+        }
+    }
+    r
+}
+
+/// `bool`s turned over and byte strings made a byte longer, as two
+/// encoders are saved one after the other into one buffer; each is
+/// found again by its range.
+#[allow(dead_code)]
+fn turned_and_longer<'a>(
+    flags: VerifiedEncoder<'a, bool>,
+    names: VerifiedEncoder<'a, Vec<u8>>,
+    b: u8,
+    out: &mut Vec<u8>,
+) -> (r: (Range<usize>, Range<usize>))
+    requires
+        flags.wf(),
+        names.wf(),
+    ensures
+        r.0.start <= r.0.end <= r.1.start <= r.1.end <= final(out)@.len(),
+        ({
+            let x = VerifiedColumn::<bool>::values(final(out)@.subrange(r.0.start as int, r.0.end as int));
+            let y = VerifiedColumn::<Vec<u8>>::values(final(out)@.subrange(r.1.start as int, r.1.end as int));
+            &&& x.len() == flags@.len()
+            &&& forall|i: int| 0 <= i < flags@.len() ==> x[i] == !flags@[i]
+            &&& y.len() == names@.len()
+            &&& forall|i: int| 0 <= i < names@.len() ==> y[i] == names@[i].push(b)
+        }),
+{
+    let f = |v: bool| -> (w: bool)
+        ensures
+            w == !v,
+        { !v };
+    let g = |v: Vec<u8>| -> (w: Vec<u8>)
+        ensures
+            w@ == v@.push(b),
+        {
+            let mut v = v;
+            v.push(b);
+            v
+        };
+    let ghost o = out@;
+    let p = flags.save_to_and_remap(out, f);
+    let ghost mid = out@;
+    let q = names.save_to_and_remap(out, g);
+    proof {
+        let d = mid.skip(o.len() as int);
+        let e = out@.skip(mid.len() as int);
+        let x = VerifiedColumn::<bool>::values(d);
+        let y = VerifiedColumn::<Vec<u8>>::values(e);
+        assert(out@.subrange(p.start as int, p.end as int) =~= d);
+        assert(out@.subrange(q.start as int, q.end as int) =~= e);
+        assert forall|i: int| 0 <= i < flags@.len() implies x[i] == !flags@[i] by {
+            assert(mapped(f, flags@[i], x[i]));
+        }
+        assert forall|i: int| 0 <= i < names@.len() implies y[i] == names@[i].push(b) by {
+            assert(mapped(g, names@[i], y[i]));
+        }
+    }
+    (p, q)
+}
+
+/// Numbers all made zero take no bytes: an encoder saved through a
+/// function that gives zero for every number writes nothing when asked
+/// to save unless all is zero. That holds whatever the encoder was
+/// given and whatever its budget, which a plain `save_to_unless` does
+/// not say of an encoder with one.
+#[allow(dead_code)]
+fn zeroed_takes_no_bytes(enc: VerifiedEncoder<'_, u64>, out: &mut Vec<u8>)
+    requires
+        enc.wf(),
+    ensures
+        final(out)@ == old(out)@,
+{
+    let f = |v: u64| -> (w: u64)
+        ensures
+            w == 0,
+        { 0 };
+    let r = enc.save_to_unless_and_remap(out, 0, f);
+    assert(r.start == r.end);
+}
+
+/// And so do byte strings all made null.
+#[allow(dead_code)]
+fn nulled_takes_no_bytes<'a>(enc: VerifiedEncoder<'a, Option<Vec<u8>>>, out: &mut Vec<u8>)
+    requires
+        enc.wf(),
+    ensures
+        final(out)@ == old(out)@,
+{
+    let f = |v: Option<Vec<u8>>| -> (w: Option<Vec<u8>>)
+        ensures
+            w is None,
+        { None };
+    enc.save_to_unless_and_remap(out, None, f);
+}
+
+/// Where the function gives each value back, and one of them is not
+/// the value named, the values are written: all of them, as `save_to`
+/// writes them. For every value type and codec.
+#[allow(dead_code)]
+fn kept_and_written<'a, V: VValue<C>, C: VCodec>(enc: VerifiedEncoder<'a, V, C>, out: &mut Vec<u8>, v: Get<'a, V>) -> (r:
+    Range<usize>)
+    requires
+        enc.wf(),
+        !only(enc@, v.sv()),
+    ensures
+        final(out)@ == old(out)@ + VerifiedColumn::<V, C>::encoding(enc@),
+        final(out)@ != old(out)@,
+{
+    let f = |x: V| -> (w: V)
+        ensures
+            w == x,
+        { x };
+    let r = enc.save_to_unless_and_remap(out, v, f);
+    proof {
+        if out@ == old(out)@ {
+            assert forall|i: int| 0 <= i < enc@.len() implies enc@[i] == v.sv() by {
+                assert(mapped(f, enc@[i], v.sv()));
+            }
+        }
+        let w = VerifiedColumn::<V, C>::values(out@.skip(old(out)@.len() as int));
+        assert(w =~= enc@);
+    }
+    r
+}
+
+/// What the range of a `save_to_unless_and_remap` tells its reader,
+/// who has the range and not the encoder: an empty range, that the
+/// function gave `v` for every value and nothing was written; another,
+/// that the bytes there are a saved column of what the function gave.
+#[allow(dead_code)]
+fn read_from_the_remapped_range<'a, V: VValue<C>, C: VCodec, F: Fn(V) -> V>(
+    enc: VerifiedEncoder<'a, V, C>,
+    out: &mut Vec<u8>,
+    v: Get<'a, V>,
+    f: F,
+) -> (r: Range<usize>)
+    requires
+        enc.wf(),
+        forall|x: V| enc@.contains(V::sv_of(x)) ==> #[trigger] call_requires(f, (x,)),
+    ensures
+        r.start <= r.end <= final(out)@.len(),
+        r.start == r.end ==> final(out)@ == old(out)@ && forall|i: int|
+            0 <= i < enc@.len() ==> mapped(f, #[trigger] enc@[i], v.sv()),
+        r.start < r.end ==> {
+            let d = final(out)@.subrange(r.start as int, r.end as int);
+            let w = VerifiedColumn::<V, C>::values(d);
+            &&& VerifiedColumn::<V, C>::valid(d)
+            &&& w.len() == enc@.len()
+            &&& forall|i: int| 0 <= i < enc@.len() ==> mapped(f, enc@[i], #[trigger] w[i])
+        },
+{
+    let r = enc.save_to_unless_and_remap(out, v, f);
+    proof {
+        if out@ != old(out)@ {
+            let d = out@.skip(old(out)@.len() as int);
+            assert(out@.subrange(r.start as int, r.end as int) =~= d);
+            assert(d.len() > 0) by {
+                if d.len() == 0 {
+                    assert(out@ =~= old(out)@);
+                }
+            }
+        }
+    }
+    r
 }
 
 } // verus!

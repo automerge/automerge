@@ -111,6 +111,23 @@ trait Kind: VValue + ColumnValueRef + Clone + PartialEq + Debug {
 
     /// The next place where `Column`'s iterator has the value.
     fn old_scan(&self, it: &mut hexane::Iter<'_, Self>) -> Option<usize>;
+
+    /// `Column`'s encoder asked to save what `f` gives for its values
+    /// (`RleEncoder::save_to_and_remap`): the range it returns. `None`
+    /// for `bool`, whose encoder in the old API has no such form.
+    fn old_remap(
+        e: Encoder<'_, Self>,
+        out: &mut Vec<u8>,
+        f: &dyn Fn(Self) -> Self,
+    ) -> Option<Range<usize>>;
+
+    /// The same of `RleEncoder::save_to_unless_and_remap`.
+    fn old_remap_unless<'a>(
+        e: Encoder<'a, Self>,
+        out: &mut Vec<u8>,
+        unless: &'a Self,
+        f: &dyn Fn(Self) -> Self,
+    ) -> Option<Range<usize>>;
 }
 
 /// A type that is its own form, and the same type with nulls.
@@ -144,6 +161,23 @@ macro_rules! plain_kind {
 
             fn old_scan(&self, it: &mut hexane::Iter<'_, $t>) -> Option<usize> {
                 it.scan_to_value(*self)
+            }
+
+            fn old_remap(
+                e: Encoder<'_, $t>,
+                out: &mut Vec<u8>,
+                f: &dyn Fn($t) -> $t,
+            ) -> Option<Range<usize>> {
+                Some(e.save_to_and_remap(out, f))
+            }
+
+            fn old_remap_unless<'a>(
+                e: Encoder<'a, $t>,
+                out: &mut Vec<u8>,
+                unless: &'a $t,
+                f: &dyn Fn($t) -> $t,
+            ) -> Option<Range<usize>> {
+                Some(e.save_to_unless_and_remap(out, *unless, f))
             }
         }
 
@@ -181,6 +215,23 @@ macro_rules! plain_kind {
 
             fn old_scan(&self, it: &mut hexane::Iter<'_, Option<$t>>) -> Option<usize> {
                 it.scan_to_value(*self)
+            }
+
+            fn old_remap(
+                e: Encoder<'_, Option<$t>>,
+                out: &mut Vec<u8>,
+                f: &dyn Fn(Option<$t>) -> Option<$t>,
+            ) -> Option<Range<usize>> {
+                Some(e.save_to_and_remap(out, f))
+            }
+
+            fn old_remap_unless<'a>(
+                e: Encoder<'a, Option<$t>>,
+                out: &mut Vec<u8>,
+                unless: &'a Option<$t>,
+                f: &dyn Fn(Option<$t>) -> Option<$t>,
+            ) -> Option<Range<usize>> {
+                Some(e.save_to_unless_and_remap(out, *unless, f))
             }
         }
     };
@@ -223,6 +274,23 @@ impl Kind for bool {
     fn old_scan(&self, it: &mut hexane::Iter<'_, bool>) -> Option<usize> {
         it.scan_to_value(*self)
     }
+
+    fn old_remap(
+        _: Encoder<'_, bool>,
+        _: &mut Vec<u8>,
+        _: &dyn Fn(bool) -> bool,
+    ) -> Option<Range<usize>> {
+        None
+    }
+
+    fn old_remap_unless<'a>(
+        _: Encoder<'a, bool>,
+        _: &mut Vec<u8>,
+        _: &'a bool,
+        _: &dyn Fn(bool) -> bool,
+    ) -> Option<Range<usize>> {
+        None
+    }
 }
 
 /// Byte strings: mostly short, the empty one among them; some with a
@@ -260,6 +328,23 @@ impl Kind for Vec<u8> {
     fn old_scan(&self, it: &mut hexane::Iter<'_, Vec<u8>>) -> Option<usize> {
         it.scan_to_value(self.as_slice())
     }
+
+    fn old_remap(
+        e: Encoder<'_, Vec<u8>>,
+        out: &mut Vec<u8>,
+        f: &dyn Fn(Vec<u8>) -> Vec<u8>,
+    ) -> Option<Range<usize>> {
+        Some(e.save_to_and_remap(out, f))
+    }
+
+    fn old_remap_unless<'a>(
+        e: Encoder<'a, Vec<u8>>,
+        out: &mut Vec<u8>,
+        unless: &'a Vec<u8>,
+        f: &dyn Fn(Vec<u8>) -> Vec<u8>,
+    ) -> Option<Range<usize>> {
+        Some(e.save_to_unless_and_remap(out, unless.as_slice(), f))
+    }
 }
 
 impl Kind for Option<Vec<u8>> {
@@ -296,6 +381,23 @@ impl Kind for Option<Vec<u8>> {
 
     fn old_scan(&self, it: &mut hexane::Iter<'_, Option<Vec<u8>>>) -> Option<usize> {
         it.scan_to_value(self.as_deref())
+    }
+
+    fn old_remap(
+        e: Encoder<'_, Option<Vec<u8>>>,
+        out: &mut Vec<u8>,
+        f: &dyn Fn(Option<Vec<u8>>) -> Option<Vec<u8>>,
+    ) -> Option<Range<usize>> {
+        Some(e.save_to_and_remap(out, f))
+    }
+
+    fn old_remap_unless<'a>(
+        e: Encoder<'a, Option<Vec<u8>>>,
+        out: &mut Vec<u8>,
+        unless: &'a Option<Vec<u8>>,
+        f: &dyn Fn(Option<Vec<u8>>) -> Option<Vec<u8>>,
+    ) -> Option<Range<usize>> {
+        Some(e.save_to_unless_and_remap(out, unless.as_deref(), f))
     }
 }
 
@@ -5286,4 +5388,324 @@ fn encoders_become_columns_to_the_end() {
         assert_eq!(made(max, nulls(0)), None);
         assert_eq!(made(max, nulls(1)), Some(said));
     }
+}
+
+// ── The encoder's remap forms ───────────────────────────────────────────
+//
+// `save_to_and_remap` and `save_to_unless_and_remap` against
+// `RleEncoder`'s. `BoolEncoder` has neither: an encoder of `bool` is
+// checked against the values alone, as every other is as well.
+
+impl<'a, T: Kind> Encoders<'a, T> {
+    /// What both write after what a buffer holds when asked to save what
+    /// `f` gives for their values, and the values `f` was called with.
+    /// `f` is given how many calls came before and the value. Both call
+    /// it with the same values in the same order, and write the same
+    /// bytes in the same place. Of `bool` only the new encoder is asked.
+    fn save_to_and_remap(self, held: &[u8], f: impl Fn(usize, &T) -> T) -> (Vec<u8>, Vec<T>) {
+        let (mut a, mut b) = (held.to_vec(), held.to_vec());
+        let (seen_new, seen_old) = (RefCell::new(vec![]), RefCell::new(vec![]));
+        let range = self.new.save_to_and_remap(&mut a, |x: T| {
+            let mut seen = seen_new.borrow_mut();
+            seen.push(x.clone());
+            f(seen.len() - 1, &x)
+        });
+        let g = |x: T| {
+            let mut seen = seen_old.borrow_mut();
+            seen.push(x.clone());
+            f(seen.len() - 1, &x)
+        };
+        let seen = seen_new.into_inner();
+        if let Some(old) = T::old_remap(self.old, &mut b, &g) {
+            assert_eq!(range, old);
+            assert_eq!(a, b);
+            assert_eq!(seen, seen_old.into_inner());
+        }
+        assert_eq!(range, held.len()..a.len());
+        assert_eq!(a[..held.len()], *held);
+        (a.split_off(held.len()), seen)
+    }
+
+    /// The same when asked to save what `f` gives unless all of it is
+    /// `x`: the same bytes in the same place, or both nothing (`None`),
+    /// which the range returned tells.
+    fn save_to_unless_and_remap(
+        self,
+        held: &[u8],
+        x: &'a T,
+        f: impl Fn(usize, &T) -> T,
+    ) -> (Option<Vec<u8>>, Vec<T>) {
+        let (mut a, mut b) = (held.to_vec(), held.to_vec());
+        let (seen_new, seen_old) = (RefCell::new(vec![]), RefCell::new(vec![]));
+        let range = self.new.save_to_unless_and_remap(&mut a, x.lend(), |x: T| {
+            let mut seen = seen_new.borrow_mut();
+            seen.push(x.clone());
+            f(seen.len() - 1, &x)
+        });
+        let g = |x: T| {
+            let mut seen = seen_old.borrow_mut();
+            seen.push(x.clone());
+            f(seen.len() - 1, &x)
+        };
+        let seen = seen_new.into_inner();
+        if let Some(old) = T::old_remap_unless(self.old, &mut b, x, &g) {
+            assert_eq!(range, old);
+            assert_eq!(a, b);
+            assert_eq!(seen, seen_old.into_inner());
+        }
+        assert_eq!(range, held.len()..a.len());
+        assert_eq!(a[..held.len()], *held);
+        let written = (!range.is_empty()).then(|| a.split_off(held.len()));
+        (written, seen)
+    }
+}
+
+/// The runs a remap of an encoder calls its function for: the runs of
+/// equal values of each slab the encoder has cut, and of what it holds
+/// after them. `lens` are the lengths of those. A run that a cut divides
+/// is two.
+fn runs_in<T: Kind>(model: &[T], lens: &[usize]) -> Vec<(usize, T)> {
+    let mut at = 0;
+    let mut runs = vec![];
+    for n in lens {
+        runs.extend(runs_of(&model[at..at + n]));
+        at += n;
+    }
+    assert_eq!(at, model.len());
+    runs
+}
+
+/// Encoders with the segment budget `max` (or none), given `model` in
+/// each way and asked to save what a function gives for their values,
+/// by functions of several kinds: one that changes nothing, one that
+/// gives one value for all, ones that give few values or many for the
+/// encoder's values, one that turns the values round among themselves,
+/// and one that gives another value at each call. Both call the function
+/// once for each run of each slab the encoder has cut, in order, which
+/// for an encoder without a budget is once for each run of `model`. Both
+/// write what a column of the values the calls gave saves. And asked to
+/// save unless all of those is `x`, both write those bytes or both
+/// nothing: nothing exactly if all of them is `x`, whatever the budget.
+fn check_remapping<T: Kind>(max: Option<usize>, model: &[T], other: &T, rng: &mut Rng) {
+    let mut keys: Vec<T> = vec![];
+    for x in model {
+        if !keys.contains(x) {
+            keys.push(x.clone());
+        }
+    }
+    let key = |x: &T| keys.iter().position(|k| k == x).unwrap();
+    let few: Vec<T> = (0..3).map(|_| T::fresh(rng)).collect();
+    let many: Vec<T> = (0..keys.len() + 7).map(|_| T::fresh(rng)).collect();
+    for how in 0..7 {
+        let salt = rng.next() | 1;
+        // where the encoder has cut: the slabs of the column that the old
+        // encoder becomes when given the same
+        let lens = match max {
+            Some(_) => {
+                let e = Encoders::given_with(max, model, other, how, &mut Rng(salt));
+                e.into_column().1.slab_lens()
+            }
+            None => vec![model.len()],
+        };
+        let runs = runs_in(model, &lens);
+        let calls: Vec<T> = runs.iter().map(|(_, x)| x.clone()).collect();
+        if max.is_none() {
+            assert_eq!(runs, runs_of(model));
+        }
+        for kind in 0..6 {
+            let f = |n: usize, x: &T| -> T {
+                match kind {
+                    0 => x.clone(),
+                    1 => other.clone(),
+                    2 => few[key(x) % 3].clone(),
+                    3 => many[key(x)].clone(),
+                    4 => keys[(key(x) + 1) % keys.len()].clone(),
+                    _ => many[n % many.len()].clone(),
+                }
+            };
+            let mut want: Vec<T> = vec![];
+            for (n, (count, x)) in runs.iter().enumerate() {
+                let y = f(n, x);
+                want.extend((0..*count).map(|_| y.clone()));
+            }
+            if kind == 0 {
+                assert_eq!(want, model);
+            }
+            let bytes = both(&want).0.save();
+            let held = [vec![], vec![9u8; 3]][rng.below(2)].clone();
+            let given = || Encoders::given_with(max, model, other, how, &mut Rng(salt));
+
+            let (written, seen) = given().save_to_and_remap(&held, f);
+            assert_eq!(seen, calls, "{max:?}, how {how}, kind {kind}");
+            assert_eq!(written, bytes, "{max:?}, how {how}, kind {kind}");
+
+            for x in want.first().into_iter().chain(want.last()).chain([other]) {
+                let all = want.iter().all(|y| y == x);
+                let (written, seen) = given().save_to_unless_and_remap(&held, x, f);
+                assert_eq!(seen, calls, "{max:?}, how {how}, kind {kind}");
+                let wrote = (!all).then(|| bytes.clone());
+                assert_eq!(written, wrote, "{max:?}, how {how}, kind {kind}");
+            }
+        }
+    }
+}
+
+fn remapping<T: Kind>() {
+    let mut rng = Rng(0x7e3a9);
+    let (a, b, c) = (T::fresh(&mut rng), T::fresh(&mut rng), T::fresh(&mut rng));
+    let pick = |i: usize| [&a, &b, &c][i].clone();
+    let mut shapes: Vec<Vec<T>> = vec![
+        vec![],
+        vec![pick(0)],
+        vec![pick(0); 2],
+        vec![pick(0); 300],
+        (0..600).map(|i| pick(i / 7 % 2)).collect(),
+        (0..600).map(|i| pick(i % 3)).collect(),
+        (0..900).map(|_| T::fresh(&mut rng)).collect(),
+        [0, 0, 1, 2, 2, 2, 0, 1, 1, 0].map(pick).to_vec(),
+    ];
+    for _ in 0..8 {
+        shapes.push(rng.values(200));
+    }
+    for (i, model) in shapes.iter().enumerate() {
+        let other = T::fresh(&mut rng);
+        // the small shapes with every budget, the others with three each
+        let some = [0, 1, 2].map(|k| BUDGETS[(i + 3 * k) % BUDGETS.len()]);
+        let budgets = if model.len() <= 10 {
+            &BUDGETS[..]
+        } else {
+            &some[..]
+        };
+        for &max in budgets {
+            check_remapping(max, model, &other, &mut rng);
+        }
+    }
+}
+
+#[test]
+fn remapping_encoders_agree() {
+    for_each_kind!(remapping);
+}
+
+/// An encoder with a small budget cuts a run of equal values that it is
+/// given in parts, and a remap then calls its function for each part:
+/// more often than a column's remap would, in both APIs. What the calls
+/// give goes to an encoder without a budget, where equal values are one
+/// run again: they are not written when all of them is the value to save
+/// without, and they are written as a column of them saves.
+fn remapping_cut_runs<T: Kind>() {
+    let mut rng = Rng(0xc07e);
+    let is_bool = std::any::type_name::<T>() == "bool";
+    let (a, b) = (T::fresh(&mut rng), T::fresh(&mut rng));
+    let model = vec![a.clone(); 40];
+    for max in [2, 3] {
+        let given = || {
+            let mut e = Encoders::<T>::with(Some(max));
+            for part in model.chunks(4) {
+                e.extend(part);
+            }
+            e
+        };
+        let lens = given().into_column().1.slab_lens();
+        // of `bool` the encoder cuts nothing here
+        assert_eq!(lens.len() > 1, !is_bool, "{lens:?}");
+        let calls = vec![a.clone(); lens.len()];
+
+        let (written, seen) = given().save_to_unless_and_remap(&[5], &b, |_, _| b.clone());
+        assert_eq!(seen, calls);
+        assert_eq!(written, None);
+
+        let (written, seen) = given().save_to_unless_and_remap(&[5], &a, |_, _| b.clone());
+        assert_eq!(seen, calls);
+        let bytes = both(&vec![b.clone(); 40]).0.save();
+        assert_eq!(written, (a != b).then(|| bytes.clone()));
+
+        let (written, seen) = given().save_to_and_remap(&[], |_, _| b.clone());
+        assert_eq!(seen, calls);
+        assert_eq!(written, bytes);
+    }
+}
+
+#[test]
+fn remapping_encoders_of_cut_runs() {
+    for_each_kind!(remapping_cut_runs);
+}
+
+/// A remap of an encoder that was given nothing does not call its
+/// function. `save_to_and_remap` writes what a column of nothing saves,
+/// and `save_to_unless_and_remap` nothing, whatever the value.
+fn remapping_nothing<T: Kind>() {
+    let mut rng = Rng(0x3e);
+    let x = T::fresh(&mut rng);
+    let nothing = both::<T>(&[]).0.save();
+    for max in BUDGETS {
+        let never = |_: usize, _: &T| -> T { panic!("called for no value") };
+        let (written, seen) = Encoders::<T>::with(max).save_to_and_remap(&[1, 2], never);
+        assert_eq!(seen, []);
+        assert_eq!(written, nothing);
+        let e = Encoders::<T>::with(max);
+        let (written, seen) = e.save_to_unless_and_remap(&[1, 2], &x, never);
+        assert_eq!(seen, []);
+        assert_eq!(written, None);
+    }
+}
+
+#[test]
+fn remapping_encoders_of_nothing() {
+    for_each_kind!(remapping_nothing);
+}
+
+/// A function that panics, at its first call, at one in the middle or at
+/// its last: the panic is the caller's, and the buffer is as it was. So
+/// with the old encoder, with the same words.
+#[cfg(panic = "unwind")]
+fn remapping_panics<T: Kind>() {
+    use std::panic::AssertUnwindSafe;
+    let mut rng = Rng(0x9a41c);
+    let mut model: Vec<T> = rng.values(300);
+    model.push(T::fresh(&mut rng));
+    let other = T::fresh(&mut rng);
+    for max in [None, Some(2), Some(5), Some(64)] {
+        let given = || Encoders::given_with(max, &model, &other, 6, &mut Rng(77));
+        let (_, seen) = given().save_to_and_remap(&[], |_, x| x.clone());
+        for at in [0, seen.len() / 2, seen.len() - 1] {
+            for unless in [false, true] {
+                let count = Cell::new(0);
+                let f = |x: T| -> T {
+                    if count.get() == at {
+                        panic!("no value for call {at}");
+                    }
+                    count.set(count.get() + 1);
+                    x
+                };
+                let Encoders { new, old, .. } = given();
+                let (mut a, mut b) = (vec![1u8, 2, 3], vec![1u8, 2, 3]);
+                let said = panic_of(AssertUnwindSafe(|| match unless {
+                    false => new.save_to_and_remap(&mut a, &f),
+                    true => new.save_to_unless_and_remap(&mut a, other.lend(), &f),
+                }));
+                assert_eq!(said, Some(format!("no value for call {at}")));
+                assert_eq!(a, [1, 2, 3]);
+                assert_eq!(count.get(), at);
+
+                count.set(0);
+                let said_old = panic_of(AssertUnwindSafe(|| match unless {
+                    false => T::old_remap(old, &mut b, &f),
+                    true => T::old_remap_unless(old, &mut b, &other, &f),
+                }));
+                // no old encoder of `bool` has these
+                if std::any::type_name::<T>() != "bool" {
+                    assert_eq!(said_old, said);
+                    assert_eq!(count.get(), at);
+                }
+                assert_eq!(b, [1, 2, 3]);
+            }
+        }
+    }
+}
+
+#[cfg(panic = "unwind")]
+#[test]
+fn remapping_encoders_leave_the_buffer_at_a_panic() {
+    for_each_kind!(remapping_panics);
 }

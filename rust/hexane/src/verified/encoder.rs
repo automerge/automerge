@@ -12,8 +12,18 @@
 use super::model::{Core, Streams};
 use super::VerifiedColumn;
 #[cfg(verus_keep_ghost)]
-use super::{lemma_svs_add, lemma_svs_inj, lemma_svs_none, lemma_svs_one, only, Held, VGet, VSpec};
+use super::{
+    held, lemma_held, lemma_svs_add, lemma_svs_inj, lemma_svs_none, lemma_svs_one, mapped, only,
+    Held, VGet, VSpec,
+};
 use super::{Get, Given, VCodec, VValue, MAX_SEG};
+use crate::column::Slab;
+use crate::cursor::Slabs;
+#[cfg(verus_keep_ghost)]
+use crate::cursor::{all_ok, lemma_lens_ok, lemma_vals_own};
+#[cfg(verus_keep_ghost)]
+use crate::iter_core::{each, lens_ok, vals_of};
+use crate::iter_core::{Decode, Decoders};
 use crate::remap::Encodes;
 use crate::Leb128;
 use crate::PackError;
@@ -469,6 +479,258 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedEncoder<'a, V, C> {
         r
     }
 
+    /// An encoder without a segment budget, given what `f` gives for
+    /// the values of the slabs `s`: read slab by slab, `f` called once
+    /// for each run of equal values of a slab, and what it gives given
+    /// for the run.
+    fn walk<'s, F: Fn(V) -> V>(s: &'s [Slab<<V::E as Slabs>::Tail>], f: &F) -> (to: <V::E as Streams<'a, V::X>>::Enc)
+        requires
+            all_ok::<V::E>(s@),
+            forall|v: V|
+                <Held<V, C> as VGet>::svs(crate::cursor::vals_of::<V::E>(s@)).contains(V::sv_of(v))
+                    ==> #[trigger] call_requires(*f, (v,)),
+        ensures
+            to.e_inv(),
+            <V::E as Streams<'a, V::X>>::budget(to) is None,
+            <V::E as Streams<'a, V::X>>::whole(to),
+            ({
+                let src = <Held<V, C> as VGet>::svs(crate::cursor::vals_of::<V::E>(s@));
+                let dst = <Held<V, C> as VGet>::svs(to.e_values());
+                &&& dst.len() == src.len()
+                &&& forall|i: int| 0 <= i < src.len() ==> mapped(*f, src[i], #[trigger] dst[i])
+            }),
+    {
+        let mut to = <V::E as Streams<'a, V::X>>::fresh();
+        let ghost src = <Held<V, C> as VGet>::svs(crate::cursor::vals_of::<V::E>(s@));
+        // the values as a reader gives them, and those read so far
+        let ghost o: Seq<Get<'s, V>> = vals_of::<V::X>(s@);
+        let ghost mut done: Seq<Get<'s, V>> = Seq::empty();
+        proof {
+            lemma_lens_ok::<V::E, V::X>(s@);
+            lemma_vals_own::<V::E, V::X>(s@);
+            assert(crate::cursor::vals_of::<V::E>(s@) =~= held::<V, C>(o));
+            lemma_held::<V, C>(o);
+            <Get<'s, V> as VGet>::lemma_svs(o);
+            assert(each::<V::X>(s@.take(0)) =~= Seq::empty());
+        }
+        let mut k: usize = 0;
+        while k < s.len()
+            invariant
+                k <= s.len(),
+                lens_ok::<V::X>(s@),
+                o == vals_of::<V::X>(s@),
+                src.len() == o.len(),
+                forall|i: int| 0 <= i < o.len() ==> #[trigger] src[i] == o[i].sv(),
+                forall|v: V| src.contains(V::sv_of(v)) ==> #[trigger] call_requires(*f, (v,)),
+                done == vals_of::<V::X>(s@.take(k as int)),
+                to.e_inv(),
+                <V::E as Streams<'a, V::X>>::budget(to) is None,
+                <V::E as Streams<'a, V::X>>::whole(to),
+                to.e_values().len() == done.len(),
+                forall|i: int|
+                    0 <= i < done.len() ==> mapped(*f, done[i].sv(), (#[trigger] to.e_values()[i]).sv()),
+            decreases s.len() - k,
+        {
+            // the values up to the end of this slab
+            let ghost pre = vals_of::<V::X>(s@.take(k + 1));
+            proof {
+                lemma_read_on::<V::X>(s@, k as int);
+                lemma_read_first::<V::X>(s@, k + 1);
+            }
+            let mut dec = <V::X as Decoders<'s>>::open(&s[k]);
+            // a Verus loop with an invariant: `loop` + `match`
+            #[allow(clippy::while_let_loop)]
+            loop
+                invariant
+                    dec.inv(),
+                    done + dec.rest() == pre,
+                    pre.len() <= o.len(),
+                    forall|i: int| 0 <= i < pre.len() ==> #[trigger] pre[i] == o[i],
+                    src.len() == o.len(),
+                    forall|i: int| 0 <= i < o.len() ==> #[trigger] src[i] == o[i].sv(),
+                    forall|v: V| src.contains(V::sv_of(v)) ==> #[trigger] call_requires(*f, (v,)),
+                    to.e_inv(),
+                    <V::E as Streams<'a, V::X>>::budget(to) is None,
+                    <V::E as Streams<'a, V::X>>::whole(to),
+                    to.e_values().len() == done.len(),
+                    forall|i: int|
+                        0 <= i < done.len() ==> mapped(*f, done[i].sv(), (#[trigger] to.e_values()[i]).sv()),
+                ensures
+                    done == pre,
+                decreases dec.rest().len(),
+            {
+                let ghost rest0 = dec.rest();
+                let ghost done0 = done;
+                let ghost vals0 = to.e_values();
+                match dec.d_run_max(usize::MAX) {
+                    Some(run) => {
+                        proof {
+                            // the run's value is the first value left, and
+                            // one of the encoder's
+                            let p = done0.len() as int;
+                            assert(rest0.take(run.count as int)[0] == run.value);
+                            assert(pre[p] == rest0[0]);
+                            assert(src[p] == o[p].sv());
+                            assert(src.contains(run.value.sv()));
+                        }
+                        let v = V::to_owned(run.value);
+                        let ghost gv = v;
+                        let w = f(v);
+                        let ghost gw = w;
+                        let x = V::owned_for(w);
+                        <V::E as Streams<'a, V::X>>::give(&mut to, x, run.count);
+                        proof {
+                            let n = run.count as int;
+                            let xv = <<V::E as Streams<'a, V::X>>::Enc as Encodes<V::E>>::val(x);
+                            done = done0 + rest0.take(n);
+                            assert(done + dec.rest() =~= pre);
+                            assert forall|i: int| 0 <= i < done.len() implies mapped(
+                                *f,
+                                done[i].sv(),
+                                (#[trigger] to.e_values()[i]).sv(),
+                            ) by {
+                                if i >= done0.len() {
+                                    assert(done[i] == rest0.take(n)[i - done0.len()]);
+                                    assert(to.e_values()[i] == xv);
+                                    assert(call_ensures(*f, (gv,), gw));
+                                } else {
+                                    assert(done[i] == done0[i]);
+                                    assert(to.e_values()[i] == vals0[i]);
+                                }
+                            }
+                        }
+                    },
+                    None => {
+                        proof {
+                            assert(done =~= pre);
+                        }
+                        break ;
+                    },
+                }
+            }
+            k = k + 1;
+        }
+        proof {
+            assert(s@.take(k as int) =~= s@);
+            <Held<V, C> as VGet>::lemma_svs(to.e_values());
+        }
+        to
+    }
+
+    /// An encoder without a segment budget, given what `f` gives for
+    /// the values this one was given.
+    fn remapped<F: Fn(V) -> V>(self, f: &F) -> (r: Self)
+        requires
+            self.wf(),
+            forall|v: V| self@.contains(V::sv_of(v)) ==> #[trigger] call_requires(*f, (v,)),
+        ensures
+            r.wf(),
+            r.max_segments() is None,
+            r@.len() == self@.len(),
+            forall|i: int| 0 <= i < self@.len() ==> mapped(*f, self@[i], #[trigger] r@[i]),
+    {
+        let mut e = self.e;
+        let slabs = <<V::E as Streams<'a, V::X>>::Enc as Encodes<V::E>>::take(&mut e);
+        let to = Self::walk(slabs.as_slice(), f);
+        VerifiedEncoder { e: to }
+    }
+
+    /// [`save_to`](Self::save_to), of what `f` gives for the values
+    /// given: `out` is then what it was, and after that the encoding of
+    /// as many values, each what `f` gave for the value given in its
+    /// place (`mapped`). The range returned is where in `out` that is.
+    ///
+    /// `f` is called once for a run of equal values that lie together,
+    /// and what it gives stands for all of them: where `f` can give
+    /// more than one value for a value, places apart may get different
+    /// ones. `f` has to accept every value given, and need accept no
+    /// other. If `f` panics, `out` is as it was.
+    ///
+    /// It is [`RleEncoder::save_to_and_remap`](crate::encoder::RleEncoder::save_to_and_remap),
+    /// and here an encoder of `bool` has it too. The values are read
+    /// from what the encoder has written: no column is made of them,
+    /// as [`into_column`](Self::into_column) and then a column's
+    /// [`remap`](VerifiedColumn::remap) would make two.
+    pub fn save_to_and_remap<F: Fn(V) -> V>(self, out: &mut Vec<u8>, f: F) -> (r: Range<usize>)
+        requires
+            self.wf(),
+            forall|v: V| self@.contains(V::sv_of(v)) ==> #[trigger] call_requires(f, (v,)),
+        ensures
+            ({
+                // what was written, and the values it is the encoding of
+                let d = final(out)@.skip(old(out)@.len() as int);
+                let w = VerifiedColumn::<V, C>::values(d);
+                &&& final(out)@ == old(out)@ + d
+                &&& VerifiedColumn::<V, C>::valid(d)
+                &&& d == VerifiedColumn::<V, C>::encoding(w)
+                &&& d.len() <= V::size_bound(w)
+                &&& w.len() == self@.len()
+                &&& forall|i: int| 0 <= i < self@.len() ==> mapped(f, self@[i], #[trigger] w[i])
+            }),
+            r.start == old(out)@.len(),
+            r.end == final(out)@.len(),
+    {
+        let m = self.remapped(&f);
+        let r = m.save_to(out);
+        proof {
+            assert(out@.skip(old(out)@.len() as int) =~= VerifiedColumn::<V, C>::encoding(m@));
+        }
+        r
+    }
+
+    /// [`save_to_and_remap`](Self::save_to_and_remap), unless every
+    /// value `f` gives is `unless`: then nothing is written, and the
+    /// range is empty. So is it for an encoder that was given nothing,
+    /// whatever `unless` is.
+    ///
+    /// If nothing was written, `f` gave `unless` for every value given.
+    /// And if `f` can give nothing but `unless` for the values given,
+    /// nothing is written, whether the encoder has a segment budget or
+    /// not: what `f` gives goes to an encoder without one. It is
+    /// [`RleEncoder::save_to_unless_and_remap`](crate::encoder::RleEncoder::save_to_unless_and_remap).
+    pub fn save_to_unless_and_remap<F: Fn(V) -> V>(self, out: &mut Vec<u8>, unless: Get<'a, V>, f: F) -> (r: Range<
+        usize,
+    >)
+        requires
+            self.wf(),
+            forall|v: V| self@.contains(V::sv_of(v)) ==> #[trigger] call_requires(f, (v,)),
+        ensures
+            final(out)@ == old(out)@ ==> forall|i: int|
+                0 <= i < self@.len() ==> mapped(f, #[trigger] self@[i], unless.sv()),
+            (forall|i: int, b: V::S| 0 <= i < self@.len() && #[trigger] mapped(f, self@[i], b) ==> b == unless.sv())
+                ==> final(out)@ == old(out)@,
+            final(out)@ != old(out)@ ==> {
+                let d = final(out)@.skip(old(out)@.len() as int);
+                let w = VerifiedColumn::<V, C>::values(d);
+                &&& final(out)@ == old(out)@ + d
+                &&& VerifiedColumn::<V, C>::valid(d)
+                &&& d == VerifiedColumn::<V, C>::encoding(w)
+                &&& d.len() <= V::size_bound(w)
+                &&& w.len() == self@.len()
+                &&& forall|i: int| 0 <= i < self@.len() ==> mapped(f, self@[i], #[trigger] w[i])
+            },
+            r.start == old(out)@.len(),
+            r.end == final(out)@.len(),
+    {
+        let m = self.remapped(&f);
+        let r = m.save_to_unless(out, unless);
+        proof {
+            if out@ != old(out)@ {
+                assert(out@.skip(old(out)@.len() as int) =~= VerifiedColumn::<V, C>::encoding(m@));
+            } else {
+                assert forall|i: int| 0 <= i < self@.len() implies mapped(f, #[trigger] self@[i], unless.sv()) by {
+                    assert(mapped(f, self@[i], m@[i]));
+                }
+            }
+            if forall|i: int, b: V::S| 0 <= i < self@.len() && #[trigger] mapped(f, self@[i], b) ==> b == unless.sv() {
+                assert forall|i: int| 0 <= i < m@.len() implies m@[i] == unless.sv() by {
+                    assert(mapped(f, self@[i], m@[i]));
+                }
+            }
+        }
+        r
+    }
+
     /// A column of the values given.
     ///
     /// With a segment budget
@@ -511,6 +773,42 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedEncoder<'a, V, C> {
                     },
                 }
             },
+        }
+    }
+}
+
+/// The values of the slabs up to and with slab `k`, as a reader gives
+/// them, are those of the slabs before it and then its own.
+proof fn lemma_read_on<'s, X: Decoders<'s>>(s: Seq<Slab<X::Tail>>, k: int)
+    requires
+        0 <= k < s.len(),
+    ensures
+        vals_of::<X>(s.take(k + 1)) == vals_of::<X>(s.take(k)) + X::vals(s[k]),
+{
+    let cs = each::<X>(s.take(k + 1));
+    assert(cs.drop_last() =~= each::<X>(s.take(k)));
+    assert(cs.last() == X::vals(s[k]));
+}
+
+/// The values of the first `k` slabs are the first of all the values.
+proof fn lemma_read_first<'s, X: Decoders<'s>>(s: Seq<Slab<X::Tail>>, k: int)
+    requires
+        0 <= k <= s.len(),
+    ensures
+        vals_of::<X>(s.take(k)).len() <= vals_of::<X>(s).len(),
+        forall|i: int|
+            0 <= i < vals_of::<X>(s.take(k)).len() ==> (#[trigger] vals_of::<X>(s.take(k))[i]) == vals_of::<X>(s)[i],
+    decreases s.len() - k,
+{
+    if k == s.len() {
+        assert(s.take(k) =~= s);
+    } else {
+        lemma_read_on::<X>(s, k);
+        lemma_read_first::<X>(s, k + 1);
+        let a = vals_of::<X>(s.take(k));
+        let b = vals_of::<X>(s.take(k + 1));
+        assert forall|i: int| 0 <= i < a.len() implies (#[trigger] a[i]) == vals_of::<X>(s)[i] by {
+            assert(b[i] == a[i]);
         }
     }
 }
