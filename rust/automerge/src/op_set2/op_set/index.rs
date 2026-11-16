@@ -14,7 +14,7 @@ pub(crate) struct IndexBuilder {
     top: Vec<bool>,
     widths: Vec<u64>,
     incs: Vec<Option<i64>>,
-    marks: Vec<Option<MarkIndexBuilder>>,
+    marks: Vec<(usize, MarkIndexBuilder)>,
     obj_info: ObjIndex,
     last_flush: usize,
     text_encoding: TextEncoding,
@@ -166,7 +166,7 @@ impl IndexBuilder {
             top: Vec::with_capacity(op_set.len()),
             widths: Vec::with_capacity(op_set.len()),
             incs: Vec::with_capacity(op_set.sub_len()),
-            marks: Vec::with_capacity(op_set.len()),
+            marks: Vec::new(),
             obj_info: ObjIndex::default(),
             last_flush: 0,
             text_encoding: encoding,
@@ -203,7 +203,9 @@ impl IndexBuilder {
 
         let mark_index = op.mark_index();
         self.mark_order.process_mark_index(op, &mark_index);
-        self.marks.push(if visible { mark_index } else { None });
+        if let Some(mark) = mark_index.filter(|_| visible) {
+            self.marks.push((self.succ.len(), mark));
+        }
 
         self.succ.push(vis_num(op, clock));
         self.top.push(false);
@@ -259,7 +261,12 @@ impl IndexBuilder {
         let inc = hexane::Column::from_values(self.incs);
 
         let mut mark = MarkIndexColumn::new();
-        mark.extend(0, self.marks);
+        let len = self.succ.len();
+        let mut marks = self.marks.into_iter().peekable();
+        mark.extend(
+            0,
+            (0..len).map(|i| marks.next_if(|(pos, _)| *pos == i).map(|(_, m)| m)),
+        );
 
         let obj_info = self.obj_info;
 

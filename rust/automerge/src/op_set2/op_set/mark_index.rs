@@ -280,17 +280,19 @@ impl MarkIndexColumn {
         self.data = new_data;
     }
 
-    pub(crate) fn extend(&mut self, index: usize, values: Vec<Option<MarkIndexBuilder>>) {
-        let mark_values: Vec<Option<MarkIdx>> = values
-            .into_iter()
-            .map(|v| match v? {
-                MarkIndexBuilder::Start(id, mark) => {
-                    self.cache.insert(id, mark);
-                    Some(MarkIdx::Start(id))
-                }
-                MarkIndexBuilder::End(id) => Some(MarkIdx::End(id)),
-            })
-            .collect();
+    pub(crate) fn extend(
+        &mut self,
+        index: usize,
+        values: impl IntoIterator<Item = Option<MarkIndexBuilder>>,
+    ) {
+        let cache = &mut self.cache;
+        let mark_values = values.into_iter().map(|v| match v? {
+            MarkIndexBuilder::Start(id, mark) => {
+                cache.insert(id, mark);
+                Some(MarkIdx::Start(id))
+            }
+            MarkIndexBuilder::End(id) => Some(MarkIdx::End(id)),
+        });
         self.data.splice(index, 0, mark_values);
     }
 
