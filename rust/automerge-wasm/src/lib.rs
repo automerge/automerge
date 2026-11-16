@@ -370,6 +370,7 @@ export type LoadOptions = {
   unchecked?: boolean;
   allowMissingDeps?: boolean;
   convertImmutableStringsToText?: boolean;
+  signing?: boolean;
 };
 
 // if recursive is false do not diff child objects
@@ -379,6 +380,7 @@ export type DiffOptions = {
 
 export type InitOptions = {
   actor?: Actor;
+  signing?: boolean;
 };
 
 export function create(options?: InitOptions): Automerge;
@@ -453,7 +455,18 @@ pub struct Automerge {
 #[wasm_bindgen]
 impl Automerge {
     pub fn new(actor: Option<String>) -> Result<Automerge, error::BadActorId> {
-        let mut doc = AutoCommit::new_with_encoding(TextEncoding::Utf16CodeUnit);
+        Self::new_with_signing(actor, false)
+    }
+
+    fn new_with_signing(
+        actor: Option<String>,
+        signing: bool,
+    ) -> Result<Automerge, error::BadActorId> {
+        let mut doc = if signing {
+            AutoCommit::signing_with_encoding(TextEncoding::Utf16CodeUnit)
+        } else {
+            AutoCommit::new_with_encoding(TextEncoding::Utf16CodeUnit)
+        };
         if let Some(a) = actor {
             let a = automerge::ActorId::from(hex::decode(a)?.to_vec());
             doc.set_actor(a);
@@ -1477,17 +1490,45 @@ impl Automerge {
             .collect())
     }
 
+    #[wasm_bindgen(js_name = requiredSignatures, unchecked_return_type = "Uint8Array[]")]
+    pub fn required_signatures(&mut self) -> Result<Array, error::SigningMode> {
+        let signing = self.doc.try_signing()?;
+        Ok(signing
+            .required_signatures()
+            .into_iter()
+            .map(|hash| Uint8Array::from(am::signing_message(&hash).as_slice()))
+            .collect())
+    }
+
+    #[wasm_bindgen(js_name = insertSignature)]
+    pub fn insert_signature(
+        &mut self,
+        data: Uint8Array,
+        signature: Uint8Array,
+    ) -> Result<(), error::InsertSignature> {
+        let data_bytes = data.to_vec();
+        let hash = am::signature::parse_signing_message(&data_bytes)?;
+        let sig_vec = signature.to_vec();
+        let sig_bytes: [u8; 64] = sig_vec
+            .try_into()
+            .map_err(|bytes: Vec<u8>| error::InsertSignature::BadSignatureLength(bytes.len()))?;
+        let signature = am::signature::ed25519::Signature::from_bytes(sig_bytes);
+        let mut signing = self.doc.try_signing()?;
+        signing.insert_signature(&hash, &signature)?;
+        Ok(())
+    }
+
     #[wasm_bindgen(js_name = addCommits)]
     pub fn add_commits(
         &mut self,
         #[wasm_bindgen(unchecked_param_type = "Commit[]")] commits: JsValue,
     ) -> Result<(), error::AddCommits> {
         let commits = Vec::<Commit>::try_from(JS(commits))?;
-        let changes = commits
+        let groups = commits
             .into_iter()
-            .map(|commit| commit.into_change())
+            .map(Commit::into_loaded_group)
             .collect::<Result<Vec<_>, _>>()?;
-        self.doc.apply_changes(changes)?;
+        self.doc.apply_changes(groups)?;
         Ok(())
     }
 
@@ -1497,14 +1538,11 @@ impl Automerge {
         #[wasm_bindgen(unchecked_param_type = "Fragment[]")] fragments: JsValue,
     ) -> Result<(), error::AddFragments> {
         let fragments = Vec::<FragmentInput>::try_from(JS(fragments))?;
-        let mut bytes = Vec::new();
-        for fragment in fragments {
-            // Touch the metadata so parsing validates the whole input shape even
-            // though the bundle bytes remain the authoritative representation.
-            let _metadata = fragment.fragment;
-            bytes.extend(fragment.bytes);
-        }
-        self.doc.load_incremental(&bytes)?;
+        let groups = fragments
+            .into_iter()
+            .map(|fragment| fragment.fragment.parse_with_signatures(&fragment.bytes))
+            .collect::<Result<Vec<_>, _>>()?;
+        self.doc.apply_changes(groups)?;
         Ok(())
     }
 
@@ -1904,12 +1942,26 @@ fn on_start() {
     let _ = wasm_bindgen::__rt::set_on_abort(log_abort);
 }
 
+fn signing_option(options: &JsValue) -> Result<bool, error::BadSigningOption> {
+    if options.is_null() || options.is_undefined() {
+        return Ok(false);
+    }
+    let Ok(value) = js_get(options, "signing") else {
+        return Ok(false);
+    };
+    if value.0.is_undefined() {
+        return Ok(false);
+    }
+    value.0.as_bool().ok_or(error::BadSigningOption)
+}
+
 // skip_typescript as the definition requires an optional argument so we define
 // the function in the typescript custom section at the top of the file
 #[wasm_bindgen(js_name = create, skip_typescript)]
-pub fn init(options: JsValue) -> Result<Automerge, error::BadActorId> {
+pub fn init(options: JsValue) -> Result<Automerge, error::Create> {
     let actor = js_get(&options, "actor").ok().and_then(|a| a.as_string());
-    Automerge::new(actor)
+    let signing = signing_option(&options)?;
+    Ok(Automerge::new_with_signing(actor, signing)?)
 }
 
 // skip_typescript as the options argument is optional which can only be typed
@@ -1918,6 +1970,7 @@ pub fn init(options: JsValue) -> Result<Automerge, error::BadActorId> {
 pub fn load(data: Uint8Array, options: JsValue) -> Result<Automerge, error::Load> {
     let data = data.to_vec();
     let actor = js_get(&options, "actor").ok().and_then(|a| a.as_string());
+    let signing = signing_option(&options)?;
     let unchecked = js_get(&options, "unchecked")
         .ok()
         .and_then(|v1| v1.as_bool())
@@ -1945,14 +1998,15 @@ pub fn load(data: Uint8Array, options: JsValue) -> Result<Automerge, error::Load
     } else {
         StringMigration::NoMigration
     };
-    let mut doc = am::AutoCommit::load_with_options(
-        &data,
-        am::LoadOptions::new()
-            .on_partial_load(on_partial_load)
-            .verification_mode(verification_mode)
-            .migrate_strings(string_migration)
-            .text_encoding(TextEncoding::Utf16CodeUnit),
-    )?;
+    let mut load_options = am::LoadOptions::new()
+        .on_partial_load(on_partial_load)
+        .verification_mode(verification_mode)
+        .migrate_strings(string_migration)
+        .text_encoding(TextEncoding::Utf16CodeUnit);
+    if signing {
+        load_options = load_options.signing();
+    }
+    let mut doc = am::AutoCommit::load_with_options(&data, load_options)?;
     if let Some(s) = actor {
         let actor =
             automerge::ActorId::from(hex::decode(s).map_err(error::BadActorId::from)?.to_vec());
@@ -2159,8 +2213,9 @@ struct Commit {
 }
 
 impl Commit {
-    fn into_change(self) -> Result<Change, error::BadCommitBytes> {
-        let change = Change::try_from(self.bytes.as_slice())?;
+    fn into_loaded_group(self) -> Result<am::LoadedGroup, error::BadCommitBytes> {
+        let parsed = Change::parse_with_signatures(&self.bytes)?;
+        let change = parsed.change();
         // Validate that JS metadata lines up with the supplied bytes. This keeps
         // Automerge's API shaped like Subduction's addCommits input while still
         // treating the encoded change as authoritative.
@@ -2173,7 +2228,7 @@ impl Commit {
         if change.deps() != self.parents.as_slice() {
             return Err(error::BadCommitBytes::ParentsMismatch);
         }
-        Ok(change)
+        Ok(am::LoadedGroup::from(parsed))
     }
 }
 
@@ -2434,6 +2489,58 @@ pub mod error {
     }
 
     #[derive(Debug, thiserror::Error)]
+    #[error("signing option must be a boolean")]
+    pub struct BadSigningOption;
+
+    impl From<BadSigningOption> for JsValue {
+        fn from(e: BadSigningOption) -> Self {
+            RangeError::new(&e.to_string()).into()
+        }
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    pub enum Create {
+        #[error(transparent)]
+        BadActor(#[from] BadActorId),
+        #[error(transparent)]
+        BadSigning(#[from] BadSigningOption),
+    }
+
+    impl From<Create> for JsValue {
+        fn from(e: Create) -> Self {
+            RangeError::new(&e.to_string()).into()
+        }
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    #[error(transparent)]
+    pub struct SigningMode(#[from] automerge::signing::error::SigningMode);
+
+    impl From<SigningMode> for JsValue {
+        fn from(e: SigningMode) -> Self {
+            RangeError::new(&e.to_string()).into()
+        }
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    pub enum InsertSignature {
+        #[error(transparent)]
+        BadPayload(#[from] automerge::signature::error::SigningMessage),
+        #[error("ed25519 signature must contain 64 bytes, found {0}")]
+        BadSignatureLength(usize),
+        #[error(transparent)]
+        SigningMode(#[from] automerge::signing::error::SigningMode),
+        #[error(transparent)]
+        Insert(#[from] automerge::signing::error::InsertSignature),
+    }
+
+    impl From<InsertSignature> for JsValue {
+        fn from(e: InsertSignature) -> Self {
+            RangeError::new(&e.to_string()).into()
+        }
+    }
+
+    #[derive(Debug, thiserror::Error)]
     pub enum BadCommitBytes {
         #[error("bad commit bytes: {0}")]
         Load(#[from] automerge::LoadChangeError),
@@ -2503,6 +2610,8 @@ pub mod error {
     pub enum AddFragments {
         #[error(transparent)]
         BadInputs(#[from] BadJSFragmentInputs),
+        #[error(transparent)]
+        BadBytes(#[from] automerge::InvalidFragmentBytes),
         #[error("error loading fragment bundles: {0}")]
         Load(#[from] AutomergeError),
     }
@@ -2891,6 +3000,8 @@ pub mod error {
         Automerge(#[from] AutomergeError),
         #[error(transparent)]
         BadActor(#[from] BadActorId),
+        #[error(transparent)]
+        BadSigning(#[from] BadSigningOption),
     }
 
     impl From<Load> for JsValue {
