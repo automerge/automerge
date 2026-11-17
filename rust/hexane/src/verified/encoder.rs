@@ -9,7 +9,7 @@
 // Verus proofs read more plainly with `x = x + n`.
 #![allow(clippy::len_zero, clippy::assign_op_pattern)]
 
-use super::model::{Core, Streams};
+use super::model::{Core, Flows, Streams};
 use super::VerifiedColumn;
 #[cfg(verus_keep_ghost)]
 use super::{
@@ -479,6 +479,121 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedEncoder<'a, V, C> {
         r
     }
 
+    /// The encoding of the values of `iter`: what a column of them
+    /// saves, and what an encoder given them saves.
+    pub fn encode<I: IntoIterator<Item = Get<'a, V>>>(iter: I) -> (r: Vec<u8>)
+        ensures
+            VerifiedColumn::<V, C>::valid(r@),
+            r@ == VerifiedColumn::<V, C>::encoding(VerifiedColumn::<V, C>::values(r@)),
+            r@.len() <= V::size_bound(VerifiedColumn::<V, C>::values(r@)),
+            exists|it: I::IntoIter| #[trigger]
+                (I::into_iter).ensures((iter,), it) && (it.obeys_prophetic_iter_laws()
+                    ==> VerifiedColumn::<V, C>::values(r@) == VGet::svs(it.remaining())),
+    {
+        let mut buf: Vec<u8> = Vec::new();
+        Self::encode_to(&mut buf, iter);
+        proof {
+            assert(buf@.skip(0) =~= buf@);
+        }
+        buf
+    }
+
+    /// Write the encoding of the values of `iter` after what `buf`
+    /// holds. The range returned is where in `buf` it is.
+    ///
+    /// Nothing is held but the run in hand: the bytes go to `buf` as
+    /// the values come.
+    pub fn encode_to<I: IntoIterator<Item = Get<'a, V>>>(buf: &mut Vec<u8>, iter: I) -> (r: Range<usize>)
+        ensures
+            ({
+                let d = final(buf)@.skip(old(buf)@.len() as int);
+                let w = VerifiedColumn::<V, C>::values(d);
+                &&& final(buf)@ == old(buf)@ + d
+                &&& VerifiedColumn::<V, C>::valid(d)
+                &&& d == VerifiedColumn::<V, C>::encoding(w)
+                &&& d.len() <= V::size_bound(w)
+                &&& exists|it: I::IntoIter| #[trigger]
+                    (I::into_iter).ensures((iter,), it) && (it.obeys_prophetic_iter_laws() ==> w == VGet::svs(
+                        it.remaining(),
+                    ))
+            }),
+            r.start == old(buf)@.len(),
+            r.end == final(buf)@.len(),
+    {
+        let start = buf.len();
+        let mut s = VerifiedEncoderState::<'a, V, C>::new();
+        s.extend(buf, iter);
+        let ghost vs = s@;
+        s.finish(buf);
+        proof {
+            let d = buf@.skip(start as int);
+            assert(d =~= VerifiedColumn::<V, C>::encoding(vs));
+            assert(Seq::<V::S>::empty() + vs =~= vs);
+        }
+        start..buf.len()
+    }
+
+    /// [`encode_to`](Self::encode_to), unless every value of `iter` is
+    /// `unless`: then `buf` is left as it was, and the range is empty.
+    /// So it is for an `iter` of no values, whatever `unless` is.
+    pub fn encode_to_unless<I: IntoIterator<Item = Get<'a, V>>>(
+        buf: &mut Vec<u8>,
+        iter: I,
+        unless: Get<'a, V>,
+    ) -> (r: Range<usize>)
+        ensures
+            ({
+                let d = final(buf)@.skip(old(buf)@.len() as int);
+                let w = VerifiedColumn::<V, C>::values(d);
+                &&& final(buf)@ == old(buf)@ + d
+                &&& VerifiedColumn::<V, C>::valid(d)
+                &&& d == VerifiedColumn::<V, C>::encoding(w)
+                &&& d.len() <= V::size_bound(w)
+                &&& exists|it: I::IntoIter| #[trigger]
+                    (I::into_iter).ensures((iter,), it) && (it.obeys_prophetic_iter_laws() ==> {
+                        let vs = VGet::svs(it.remaining());
+                        &&& (final(buf)@ == old(buf)@) == only(vs, unless.sv())
+                        &&& !only(vs, unless.sv()) ==> w == vs
+                    })
+            }),
+            r.start == old(buf)@.len(),
+            r.end == final(buf)@.len(),
+    {
+        let start = buf.len();
+        let mut s = VerifiedEncoderState::<'a, V, C>::new();
+        s.extend(buf, iter);
+        let ghost vs = s@;
+        proof {
+            assert(Seq::<V::S>::empty() + vs =~= vs);
+        }
+        if s.is_single_run_of(unless) {
+            proof {
+                s.lemma_before(buf@);
+            }
+            buf.truncate(start);
+            proof {
+                assert(buf@ =~= old(buf)@);
+                let d = buf@.skip(start as int);
+                assert(d =~= Seq::<u8>::empty());
+                VerifiedColumn::<V, C>::lemma_no_bytes();
+                VerifiedColumn::<V, C>::lemma_encoding(d);
+                V::lemma_size(d);
+                assert(buf@ =~= old(buf)@ + d);
+            }
+            return start..start;
+        }
+        s.finish(buf);
+        proof {
+            let d = buf@.skip(start as int);
+            assert(d =~= VerifiedColumn::<V, C>::encoding(vs));
+            if buf@ == old(buf)@ {
+                assert(d =~= Seq::<u8>::empty());
+                VerifiedColumn::<V, C>::lemma_no_bytes();
+            }
+        }
+        start..buf.len()
+    }
+
     /// An encoder without a segment budget, given what `f` gives for
     /// the values of the slabs `s`: read slab by slab, `f` called once
     /// for each run of equal values of a slab, and what it gives given
@@ -829,6 +944,315 @@ fn unloadable<V: VValue<C>, C: VCodec>(e: PackError, Ghost(vs): Ghost<Seq<V::S>>
         false,
 {
     panic!("called `Result::unwrap()` on an `Err` value: {e:?}")
+}
+
+/// An encoder that writes into a buffer of its caller's, which is given
+/// to every call that may write: it holds no bytes of its own, only the
+/// run in hand. [`finish`](Self::finish) writes what is left.
+///
+/// The buffer must be the same one each time, with what this state wrote
+/// to it left as it is: that is `on`, which every method that takes the
+/// buffer requires and nothing checks as it runs.
+pub struct VerifiedEncoderState<'a, V: VValue<C>, C: VCodec = Leb128> {
+    s: <V::E as Flows<'a, V::X>>::Flow,
+}
+
+impl<'a, V: VValue<C>, C: VCodec> View for VerifiedEncoderState<'a, V, C> {
+    type V = Seq<V::S>;
+
+    /// The values given so far.
+    closed spec fn view(&self) -> Seq<V::S> {
+        <Held<V, C> as VGet>::svs(<V::E as Flows<'a, V::X>>::f_values(self.s))
+    }
+}
+
+impl<'a, V: VValue<C>, C: VCodec> Default for VerifiedEncoderState<'a, V, C> {
+    fn default() -> (r: Self)
+        ensures
+            r@ == Seq::<V::S>::empty(),
+            forall|buf: Seq<u8>| #[trigger] r.on(buf),
+            forall|buf: Seq<u8>| #[trigger] r.before(buf) == buf,
+    {
+        Self::new()
+    }
+}
+
+impl<'a, V: VValue<C>, C: VCodec> VerifiedEncoderState<'a, V, C> {
+    /// `buf` is what the buffer this state writes into holds now.
+    pub closed spec fn on(&self, buf: Seq<u8>) -> bool {
+        <V::E as Flows<'a, V::X>>::f_on(self.s, buf)
+    }
+
+    /// What the buffer held before this state wrote to it, the buffer
+    /// holding `buf` now.
+    pub closed spec fn before(&self, buf: Seq<u8>) -> Seq<u8> {
+        <V::E as Flows<'a, V::X>>::f_head(self.s, buf)
+    }
+
+    /// A state that was given nothing. It may start on any buffer.
+    #[inline(always)]
+    pub fn new() -> (r: Self)
+        ensures
+            r@ == Seq::<V::S>::empty(),
+            forall|buf: Seq<u8>| #[trigger] r.on(buf),
+            forall|buf: Seq<u8>| #[trigger] r.before(buf) == buf,
+    {
+        let r = VerifiedEncoderState { s: <V::E as Flows<'a, V::X>>::f_new() };
+        proof {
+            lemma_svs_none::<Held<V, C>>();
+            assert(<V::E as Flows<'a, V::X>>::f_values(r.s) =~= Seq::empty());
+        }
+        r
+    }
+
+    /// The number of values given.
+    #[inline(always)]
+    pub fn len(&self) -> (r: usize)
+        requires
+            exists|buf: Seq<u8>| self.on(buf),
+        ensures
+            r == self@.len(),
+    {
+        proof {
+            <Held<V, C> as VGet>::lemma_svs(<V::E as Flows<'a, V::X>>::f_values(self.s));
+        }
+        <V::E as Flows<'a, V::X>>::f_count(&self.s)
+    }
+
+    /// Whether no value was given.
+    #[inline(always)]
+    pub fn is_empty(&self) -> (r: bool)
+        requires
+            exists|buf: Seq<u8>| self.on(buf),
+        ensures
+            r == (self@.len() == 0),
+    {
+        self.len() == 0
+    }
+
+    #[inline(always)]
+    fn put(&mut self, buf: &mut Vec<u8>, x: Given<'a, V, C>, n: usize, Ghost(s): Ghost<V::S>)
+        requires
+            old(self).on(old(buf)@),
+            <<V::E as Streams<'a, V::X>>::Enc as Encodes<V::E>>::val(x).sv() == s,
+        ensures
+            final(self).on(final(buf)@),
+            final(self).before(final(buf)@) == old(self).before(old(buf)@),
+            final(self)@ == old(self)@ + Seq::new(n as nat, |_i: int| s),
+    {
+        <V::E as Flows<'a, V::X>>::f_give(&mut self.s, buf, x, n);
+        proof {
+            let o = <<V::E as Streams<'a, V::X>>::Enc as Encodes<V::E>>::val(x);
+            let added = Seq::new(n as nat, |_i: int| o);
+            lemma_svs_add(<V::E as Flows<'a, V::X>>::f_values(old(self).s), added);
+            <Held<V, C> as VGet>::lemma_svs(added);
+            assert(<Held<V, C> as VGet>::svs(added) =~= Seq::new(n as nat, |_i: int| s));
+        }
+    }
+
+    /// Give the state `value`, writing to `buf` what no longer needs to
+    /// be held.
+    ///
+    /// Like every method that gives the state values, this panics if
+    /// there would be more of them than a column can count (some
+    /// `usize::MAX`).
+    #[inline(always)]
+    pub fn append(&mut self, buf: &mut Vec<u8>, value: Get<'a, V>)
+        requires
+            old(self).on(old(buf)@),
+        ensures
+            final(self).on(final(buf)@),
+            final(self).before(final(buf)@) == old(self).before(old(buf)@),
+            final(self)@ == old(self)@.push(value.sv()),
+    {
+        proof {
+            V::lemma_own(value);
+        }
+        let x = <V::E as Streams<'a, V::X>>::given(value);
+        self.put(buf, x, 1, Ghost(value.sv()));
+        proof {
+            assert(self@ =~= old(self)@.push(value.sv()));
+        }
+    }
+
+    /// Give the state `value`, `n` times.
+    #[inline(always)]
+    pub fn append_n(&mut self, buf: &mut Vec<u8>, value: Get<'a, V>, n: usize)
+        requires
+            old(self).on(old(buf)@),
+        ensures
+            final(self).on(final(buf)@),
+            final(self).before(final(buf)@) == old(self).before(old(buf)@),
+            final(self)@ == old(self)@ + Seq::new(n as nat, |_i: int| value.sv()),
+    {
+        proof {
+            V::lemma_own(value);
+        }
+        let x = <V::E as Streams<'a, V::X>>::given(value);
+        self.put(buf, x, n, Ghost(value.sv()));
+    }
+
+    /// [`append`](Self::append), of a value that is owned.
+    #[inline(always)]
+    pub fn append_owned(&mut self, buf: &mut Vec<u8>, value: V)
+        requires
+            old(self).on(old(buf)@),
+        ensures
+            final(self).on(final(buf)@),
+            final(self).before(final(buf)@) == old(self).before(old(buf)@),
+            final(self)@ == old(self)@.push(V::sv_of(value)),
+    {
+        let ghost s = V::sv_of(value);
+        let x = V::owned_for(value);
+        self.put(buf, x, 1, Ghost(s));
+        proof {
+            assert(self@ =~= old(self)@.push(s));
+        }
+    }
+
+    /// [`append_n`](Self::append_n), of a value that is owned.
+    #[inline(always)]
+    pub fn append_n_owned(&mut self, buf: &mut Vec<u8>, value: V, n: usize)
+        requires
+            old(self).on(old(buf)@),
+        ensures
+            final(self).on(final(buf)@),
+            final(self).before(final(buf)@) == old(self).before(old(buf)@),
+            final(self)@ == old(self)@ + Seq::new(n as nat, |_i: int| V::sv_of(value)),
+    {
+        let ghost s = V::sv_of(value);
+        let x = V::owned_for(value);
+        self.put(buf, x, n, Ghost(s));
+    }
+
+    /// The buffer a state is on still begins with what it held before
+    /// the state wrote to it.
+    pub proof fn lemma_before(&self, buf: Seq<u8>)
+        requires
+            self.on(buf),
+        ensures
+            self.before(buf).len() <= buf.len(),
+            buf.take(self.before(buf).len() as int) == self.before(buf),
+    {
+        <V::E as Flows<'a, V::X>>::lemma_f_head(self.s, buf);
+    }
+
+    /// Give the state each value of `iter`, in order.
+    #[verifier::exec_allows_no_decreases_clause]
+    pub fn extend<I: IntoIterator<Item = Get<'a, V>>>(&mut self, buf: &mut Vec<u8>, iter: I)
+        requires
+            old(self).on(old(buf)@),
+        ensures
+            final(self).on(final(buf)@),
+            final(self).before(final(buf)@) == old(self).before(old(buf)@),
+            exists|it: I::IntoIter| #[trigger]
+                (I::into_iter).ensures((iter,), it) && (it.obeys_prophetic_iter_laws() ==> final(self)@ == old(
+                    self,
+                )@ + VGet::svs(it.remaining())),
+    {
+        let mut it = iter.into_iter();
+        let ghost it0 = it;
+        let ghost mut given: Seq<Get<'a, V>> = Seq::empty();
+        proof {
+            lemma_svs_none::<Get<'a, V>>();
+            assert(given + it.remaining() =~= it0.remaining());
+            assert(self@ =~= old(self)@ + <Get<'a, V> as VGet>::svs(given));
+        }
+        // a Verus loop with an invariant: `loop` + `match`
+        #[allow(clippy::while_let_loop)]
+        loop
+            invariant_except_break
+                it.obeys_prophetic_iter_laws() ==> given + it.remaining() == it0.remaining(),
+            invariant
+                self.on(buf@),
+                self.before(buf@) == old(self).before(old(buf)@),
+                it.obeys_prophetic_iter_laws() == it0.obeys_prophetic_iter_laws(),
+                self@ == old(self)@ + <Get<'a, V> as VGet>::svs(given),
+            ensures
+                it0.obeys_prophetic_iter_laws() ==> given == it0.remaining(),
+        {
+            let ghost before = given;
+            let ghost rem = it.remaining();
+            match it.next() {
+                Some(v) => {
+                    let ghost s0 = self@;
+                    self.append(buf, v);
+                    proof {
+                        given = before.push(v);
+                        lemma_svs_add(before, seq![v]);
+                        lemma_svs_one(v);
+                        assert(before.push(v) =~= before + seq![v]);
+                        assert(s0.push(v.sv()) =~= s0 + seq![v.sv()]);
+                        assert(self@ =~= old(self)@ + <Get<'a, V> as VGet>::svs(given));
+                        if it.obeys_prophetic_iter_laws() {
+                            assert(given + it.remaining() =~= before + rem);
+                        }
+                    }
+                },
+                None => {
+                    proof {
+                        if it.obeys_prophetic_iter_laws() {
+                            assert(given =~= before + rem);
+                        }
+                    }
+                    break ;
+                },
+            }
+        }
+    }
+
+    /// Whether every value given is `value`. It is for a state that was
+    /// given nothing, whatever `value` is.
+    #[inline(always)]
+    pub fn is_single_run_of(&self, value: Get<'a, V>) -> (r: bool)
+        requires
+            exists|buf: Seq<u8>| self.on(buf),
+        ensures
+            r == only(self@, value.sv()),
+    {
+        proof {
+            V::lemma_own(value);
+        }
+        let x = <V::E as Streams<'a, V::X>>::given(value);
+        let ghost o = <<V::E as Streams<'a, V::X>>::Enc as Encodes<V::E>>::val(x);
+        let ghost vs = <V::E as Flows<'a, V::X>>::f_values(self.s);
+        let ghost all = Seq::new(vs.len(), |_i: int| o);
+        proof {
+            <Held<V, C> as VGet>::lemma_svs(vs);
+            <Held<V, C> as VGet>::lemma_svs(all);
+        }
+        let r = <V::E as Flows<'a, V::X>>::f_all_are(&self.s, &x);
+        proof {
+            if only(self@, value.sv()) {
+                assert(<Held<V, C> as VGet>::svs(vs) =~= <Held<V, C> as VGet>::svs(all));
+                lemma_svs_inj::<Held<V, C>>(vs, all);
+            }
+        }
+        r
+    }
+
+    /// Write what is still held. `buf` is then what it held before this
+    /// state and after that the encoding of the values given, which is
+    /// what a column of them saves.
+    #[inline(always)]
+    pub fn finish(self, buf: &mut Vec<u8>)
+        requires
+            self.on(old(buf)@),
+        ensures
+            final(buf)@ == self.before(old(buf)@) + VerifiedColumn::<V, C>::encoding(self@),
+            VerifiedColumn::<V, C>::valid(VerifiedColumn::<V, C>::encoding(self@)),
+            VerifiedColumn::<V, C>::values(VerifiedColumn::<V, C>::encoding(self@)) == self@,
+            VerifiedColumn::<V, C>::encoding(self@).len() <= V::size_bound(self@),
+    {
+        let ghost h = self.before(buf@);
+        <V::E as Flows<'a, V::X>>::f_finish(self.s, buf);
+        proof {
+            let d = buf@.skip(h.len() as int);
+            VerifiedColumn::<V, C>::lemma_encoding(d);
+            V::lemma_size(d);
+            assert(buf@ =~= h + d);
+        }
+    }
 }
 
 } // verus!

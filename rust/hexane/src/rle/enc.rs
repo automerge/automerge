@@ -459,7 +459,7 @@ impl<'a, L> crate::remap::Encodes<RleModel<L>> for REncoder<'a, L> where L: for<
 /// The RLE writer appending to a caller's buffer, after the bytes the
 /// buffer held when the first value came (`head`): `encode_to` and
 /// `RleEncoderState`.
-pub(crate) struct RStream<'a, L: WriteOps<'a>> {
+pub struct RStream<'a, L: WriteOps<'a>> {
     pub(crate) state: State<'a, L>,
     /// segments accounted
     pub(crate) segments: usize,
@@ -593,20 +593,23 @@ impl<'a, L: WriteOps<'a>> RStream<'a, L> {
         }
     }
 
-    /// True only if every value appended is `value` (or there are none).
+    /// Whether every value appended is `value` (or there are none).
     #[inline]
     pub(crate) fn single_run_of(&self, value: &L::Cow) -> (r: bool)
         requires exists|buf: Seq<u8>| self.on(buf),
-        ensures r ==> self.cur@ == copies(self.cur@.len(), L::val(*value)),
+        ensures r == (self.cur@ == copies(self.cur@.len(), L::val(*value))),
     {
         let r = self.segments == 0 && self.state.single_run_of(value);
         proof {
-            if r {
-                let buf = choose|buf: Seq<u8>| self.on(buf);
-                if self.fresh() {
-                    assert(self.cur@ =~= copies(0, L::val(*value)));
-                } else {
+            let buf = choose|buf: Seq<u8>| self.on(buf);
+            if self.fresh() {
+                assert(self.cur@ =~= copies(0, L::val(*value)));
+            } else {
+                if r {
                     lemma_single_run::<L>(self.state, buf, self.head@.len() as int, self.cur@, *value);
+                }
+                if self.cur@ == copies(self.cur@.len(), L::val(*value)) {
+                    lemma_single_run_only::<L>(self.state, buf, self.head@.len() as int, self.cur@, self.segments as int, *value);
                 }
             }
         }

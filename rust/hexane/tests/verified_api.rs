@@ -11,9 +11,10 @@
 // `nth(0)` is here for what `nth` does, which is under test
 #![allow(clippy::iter_nth_zero)]
 
+use hexane::encoder::{BoolEncoder, BoolEncoderState, RleEncoder, RleEncoderState};
 use hexane::verified::{
-    refused, Get, VNewtype, VValue, VerifiedColumn, VerifiedEncoder, VerifiedIter,
-    VerifiedIterState, VerifiedRuns,
+    refused, Get, VNewtype, VValue, VerifiedColumn, VerifiedEncoder, VerifiedEncoderState,
+    VerifiedIter, VerifiedIterState, VerifiedRuns,
 };
 use hexane::{
     Codec, Column, ColumnEncoding, ColumnValue, ColumnValueRef, Encoder, EncoderApi, IterState,
@@ -91,6 +92,10 @@ impl Rng {
 /// API takes and gives a value in the form `lend` makes: the value itself,
 /// or for a byte string a borrow of it.
 trait Kind: VValue + ColumnValueRef + Clone + PartialEq + Debug {
+    /// The old API's state for the type that writes into a buffer of
+    /// its caller's.
+    type OldState<'a>: OldStream<'a, Self>;
+
     /// A value that is not likely the one before it.
     fn fresh(rng: &mut Rng) -> Self;
 
@@ -134,6 +139,8 @@ trait Kind: VValue + ColumnValueRef + Clone + PartialEq + Debug {
 macro_rules! plain_kind {
     ($t:ty, $fresh:expr) => {
         impl Kind for $t {
+            type OldState<'a> = RleEncoderState<'a, $t>;
+
             fn fresh(rng: &mut Rng) -> $t {
                 let fresh: fn(&mut Rng) -> $t = $fresh;
                 fresh(rng)
@@ -182,6 +189,8 @@ macro_rules! plain_kind {
         }
 
         impl Kind for Option<$t> {
+            type OldState<'a> = RleEncoderState<'a, Option<$t>>;
+
             fn fresh(rng: &mut Rng) -> Option<$t> {
                 match rng.below(3) {
                     0 => None,
@@ -247,6 +256,8 @@ plain_kind!(NonZeroU32, |rng| {
 });
 
 impl Kind for bool {
+    type OldState<'a> = BoolEncoderState;
+
     fn fresh(rng: &mut Rng) -> bool {
         rng.below(2) == 1
     }
@@ -296,6 +307,8 @@ impl Kind for bool {
 /// Byte strings: mostly short, the empty one among them; some with a
 /// length of two bytes on the wire, a few with one of three.
 impl Kind for Vec<u8> {
+    type OldState<'a> = RleEncoderState<'a, Vec<u8>>;
+
     fn fresh(rng: &mut Rng) -> Vec<u8> {
         let n = match rng.below(64) {
             0 => 16_384 + rng.below(100),
@@ -348,6 +361,8 @@ impl Kind for Vec<u8> {
 }
 
 impl Kind for Option<Vec<u8>> {
+    type OldState<'a> = RleEncoderState<'a, Option<Vec<u8>>>;
+
     fn fresh(rng: &mut Rng) -> Option<Vec<u8>> {
         match rng.below(3) {
             0 => None,
@@ -5708,4 +5723,713 @@ fn remapping_panics<T: Kind>() {
 #[test]
 fn remapping_encoders_leave_the_buffer_at_a_panic() {
     for_each_kind!(remapping_panics);
+}
+
+// ── `VerifiedEncoderState` and the static forms ─────────────────────────
+//
+// The verified API's state that writes into a buffer of its caller's
+// against the old API's (`RleEncoderState`, and for `bool`
+// `BoolEncoderState`), and `encode`, `encode_to` and `encode_to_unless`
+// against those of `Column`'s encoder.
+
+/// The old API's state for a value type, and the static forms of its
+/// encoder. Its two state types have no trait in common, and no bound
+/// tells that `Column`'s encoder has a default: this is the trait the
+/// tests reach both through. It takes the values as a test holds them.
+trait OldStream<'a, T: Kind>: Default {
+    fn len(&self) -> usize;
+
+    fn is_empty(&self) -> bool;
+
+    fn append(&mut self, buf: &mut Vec<u8>, x: &'a T);
+
+    fn append_owned(&mut self, buf: &mut Vec<u8>, x: T);
+
+    fn append_n(&mut self, buf: &mut Vec<u8>, x: &'a T, n: usize);
+
+    fn append_n_owned(&mut self, buf: &mut Vec<u8>, x: T, n: usize);
+
+    fn extend(&mut self, buf: &mut Vec<u8>, xs: &'a [T]);
+
+    fn finish(&mut self, buf: &mut Vec<u8>);
+
+    /// Whether every value given is `x`: `is_single_run_of`, and for
+    /// `bool` `all_equal_pre_finish`.
+    fn single(&self, x: &'a T) -> bool;
+
+    fn encode(xs: &'a [T]) -> Vec<u8>;
+
+    fn encode_to(buf: &mut Vec<u8>, xs: &'a [T]) -> Range<usize>;
+
+    fn encode_to_unless(buf: &mut Vec<u8>, xs: &'a [T], x: &'a T) -> Range<usize>;
+}
+
+impl<'a, T> OldStream<'a, T> for RleEncoderState<'a, T>
+where
+    T: Kind + RleValue + ColumnValueRef<Encoding<Leb128> = RleEncoding<T, Leb128>>,
+{
+    fn len(&self) -> usize {
+        RleEncoderState::len(self)
+    }
+
+    fn is_empty(&self) -> bool {
+        RleEncoderState::is_empty(self)
+    }
+
+    fn append(&mut self, buf: &mut Vec<u8>, x: &'a T) {
+        RleEncoderState::append(self, buf, x.as_column_ref());
+    }
+
+    fn append_owned(&mut self, buf: &mut Vec<u8>, x: T) {
+        RleEncoderState::append_owned(self, buf, x);
+    }
+
+    fn append_n(&mut self, buf: &mut Vec<u8>, x: &'a T, n: usize) {
+        RleEncoderState::append_n(self, buf, x.as_column_ref(), n);
+    }
+
+    fn append_n_owned(&mut self, buf: &mut Vec<u8>, x: T, n: usize) {
+        RleEncoderState::append_n_owned(self, buf, x, n);
+    }
+
+    fn extend(&mut self, buf: &mut Vec<u8>, xs: &'a [T]) {
+        RleEncoderState::extend(self, buf, xs.iter().map(|x| x.as_column_ref()));
+    }
+
+    fn finish(&mut self, buf: &mut Vec<u8>) {
+        RleEncoderState::finish(self, buf);
+    }
+
+    fn single(&self, x: &'a T) -> bool {
+        self.is_single_run_of(x.as_column_ref())
+    }
+
+    fn encode(xs: &'a [T]) -> Vec<u8> {
+        <RleEncoder<'a, T> as EncoderApi<'a, T>>::encode(xs.iter().map(|x| x.as_column_ref()))
+    }
+
+    fn encode_to(buf: &mut Vec<u8>, xs: &'a [T]) -> Range<usize> {
+        <RleEncoder<'a, T> as EncoderApi<'a, T>>::encode_to(
+            buf,
+            xs.iter().map(|x| x.as_column_ref()),
+        )
+    }
+
+    fn encode_to_unless(buf: &mut Vec<u8>, xs: &'a [T], x: &'a T) -> Range<usize> {
+        <RleEncoder<'a, T> as EncoderApi<'a, T>>::encode_to_unless(
+            buf,
+            xs.iter().map(|x| x.as_column_ref()),
+            x.as_column_ref(),
+        )
+    }
+}
+
+/// The state of `bool` has no owned forms: a `bool` is given as it is.
+impl<'a> OldStream<'a, bool> for BoolEncoderState {
+    fn len(&self) -> usize {
+        BoolEncoderState::len(self)
+    }
+
+    fn is_empty(&self) -> bool {
+        BoolEncoderState::is_empty(self)
+    }
+
+    fn append(&mut self, buf: &mut Vec<u8>, x: &'a bool) {
+        BoolEncoderState::append(self, buf, *x);
+    }
+
+    fn append_owned(&mut self, buf: &mut Vec<u8>, x: bool) {
+        BoolEncoderState::append(self, buf, x);
+    }
+
+    fn append_n(&mut self, buf: &mut Vec<u8>, x: &'a bool, n: usize) {
+        BoolEncoderState::append_n(self, buf, *x, n);
+    }
+
+    fn append_n_owned(&mut self, buf: &mut Vec<u8>, x: bool, n: usize) {
+        BoolEncoderState::append_n(self, buf, x, n);
+    }
+
+    fn extend(&mut self, buf: &mut Vec<u8>, xs: &'a [bool]) {
+        BoolEncoderState::extend(self, buf, xs.iter().copied());
+    }
+
+    fn finish(&mut self, buf: &mut Vec<u8>) {
+        BoolEncoderState::finish(self, buf);
+    }
+
+    fn single(&self, x: &'a bool) -> bool {
+        self.all_equal_pre_finish(*x)
+    }
+
+    fn encode(xs: &'a [bool]) -> Vec<u8> {
+        <BoolEncoder as EncoderApi<'a, bool>>::encode(xs.iter().copied())
+    }
+
+    fn encode_to(buf: &mut Vec<u8>, xs: &'a [bool]) -> Range<usize> {
+        <BoolEncoder as EncoderApi<'a, bool>>::encode_to(buf, xs.iter().copied())
+    }
+
+    fn encode_to_unless(buf: &mut Vec<u8>, xs: &'a [bool], x: &'a bool) -> Range<usize> {
+        <BoolEncoder as EncoderApi<'a, bool>>::encode_to_unless(buf, xs.iter().copied(), *x)
+    }
+}
+
+/// A state of each API, each on a buffer of its own that held the same
+/// bytes, given the values of `model` in the same steps. After each step
+/// both have counted the values given so far, both say of a value
+/// whether every value given so far is that one, and say it rightly, and
+/// each buffer still begins with what it held.
+struct States<'a, T: Kind> {
+    new: VerifiedEncoderState<'a, T>,
+    old: T::OldState<'a>,
+    a: Vec<u8>,
+    b: Vec<u8>,
+    held: &'a [u8],
+    model: &'a [T],
+    other: &'a T,
+    len: usize,
+    /// whether a value given is not the first of the model
+    mixed: bool,
+}
+
+impl<'a, T: Kind> States<'a, T> {
+    /// States that were given nothing, the old one made by `new` and the
+    /// verified one by `new` or by `default`.
+    fn on(held: &'a [u8], model: &'a [T], other: &'a T, default: bool) -> Self {
+        let mut s = States {
+            new: match default {
+                false => VerifiedEncoderState::new(),
+                true => VerifiedEncoderState::default(),
+            },
+            old: Default::default(),
+            a: held.to_vec(),
+            b: held.to_vec(),
+            held,
+            model,
+            other,
+            len: 0,
+            mixed: false,
+        };
+        s.counted(0);
+        s
+    }
+
+    fn counted(&mut self, added: usize) {
+        let model = self.model;
+        self.mixed |= model[self.len..self.len + added]
+            .iter()
+            .any(|x| *x != model[0]);
+        self.len += added;
+        assert_eq!(self.new.len(), self.len);
+        assert_eq!(self.old.len(), self.len);
+        assert_eq!(self.new.is_empty(), self.len == 0);
+        assert_eq!(self.old.is_empty(), self.len == 0);
+        let last = self.len.checked_sub(1).map(|i| &model[i]);
+        for x in [Some(self.other), model.first(), last]
+            .into_iter()
+            .flatten()
+        {
+            let all = self.len == 0 || (!self.mixed && model[0] == *x);
+            assert_eq!(self.new.is_single_run_of(x.lend()), all);
+            assert_eq!(self.old.single(x), all);
+        }
+        assert_eq!(self.a[..self.held.len()], *self.held);
+        assert_eq!(self.b[..self.held.len()], *self.held);
+    }
+
+    /// These states, given the model in one of the seven ways an encoder
+    /// is given values (see [`Encoders::given`]).
+    fn give(mut self, how: usize, rng: &mut Rng) -> Self {
+        let (model, other) = (self.model, self.other);
+        while self.len < model.len() {
+            let at = self.len;
+            let x = &model[at];
+            let run = model[at..].iter().take_while(|y| *y == x).count();
+            let step = if how == 6 { rng.below(6) } else { how };
+            match step {
+                0 => {
+                    self.new.append(&mut self.a, x.lend());
+                    self.old.append(&mut self.b, x);
+                    self.counted(1);
+                }
+                1 => {
+                    self.new.append_owned(&mut self.a, x.clone());
+                    self.old.append_owned(&mut self.b, x.clone());
+                    self.counted(1);
+                }
+                2 => {
+                    self.new.append_n(&mut self.a, x.lend(), run);
+                    self.old.append_n(&mut self.b, x, run);
+                    self.counted(run);
+                }
+                3 => {
+                    self.new.append_n_owned(&mut self.a, x.clone(), run);
+                    self.old.append_n_owned(&mut self.b, x.clone(), run);
+                    self.counted(run);
+                }
+                4 => {
+                    let first = rng.below(run + 1);
+                    self.new.append_n(&mut self.a, x.lend(), first);
+                    self.old.append_n(&mut self.b, x, first);
+                    self.counted(first);
+                    self.new.append_n(&mut self.a, other.lend(), 0);
+                    self.old.append_n(&mut self.b, other, 0);
+                    self.new.append_n_owned(&mut self.a, other.clone(), 0);
+                    self.old.append_n_owned(&mut self.b, other.clone(), 0);
+                    self.counted(0);
+                    self.new.append_n_owned(&mut self.a, x.clone(), run - first);
+                    self.old.append_n_owned(&mut self.b, x.clone(), run - first);
+                    self.counted(run - first);
+                }
+                _ => {
+                    let n = rng.below((model.len() - at).min(70) + 1);
+                    let xs = &model[at..at + n];
+                    self.new.extend(&mut self.a, xs.iter().map(T::lend));
+                    self.old.extend(&mut self.b, xs);
+                    self.counted(n);
+                }
+            }
+        }
+        self
+    }
+
+    /// Both finish. Each buffer is then what it held and after that the
+    /// same bytes, which are returned.
+    fn finish(mut self) -> Vec<u8> {
+        self.new.finish(&mut self.a);
+        self.old.finish(&mut self.b);
+        assert_eq!(self.a, self.b);
+        assert_eq!(self.a[..self.held.len()], *self.held);
+        self.a.split_off(self.held.len())
+    }
+}
+
+fn old_encode<T: Kind>(xs: &[T]) -> Vec<u8> {
+    <T::OldState<'_> as OldStream<'_, T>>::encode(xs)
+}
+
+fn old_encode_to<T: Kind>(buf: &mut Vec<u8>, xs: &[T]) -> Range<usize> {
+    <T::OldState<'_> as OldStream<'_, T>>::encode_to(buf, xs)
+}
+
+fn old_encode_to_unless<'a, T: Kind>(buf: &mut Vec<u8>, xs: &'a [T], x: &'a T) -> Range<usize> {
+    <T::OldState<'a> as OldStream<'a, T>>::encode_to_unless(buf, xs, x)
+}
+
+/// States given `model` in each way write what a column of `model`
+/// saves, after what the buffer held. So does `encode_to`, and `encode`
+/// gives it. `encode_to_unless` writes it too, unless every value of
+/// `model` is the one named: then it writes nothing. All as the old API
+/// does, to the same range of the buffer.
+fn check_streams<T: Kind>(model: &[T], other: &T, rng: &mut Rng) {
+    let (v, c) = both(model);
+    let bytes = v.save();
+    assert_eq!(bytes, c.save());
+    let holds = [vec![], vec![9u8; 3], bytes.clone()];
+    for how in 0..7 {
+        let held = &holds[rng.below(3)];
+        let s = States::on(held, model, other, how % 2 == 1);
+        assert_eq!(s.give(how, rng).finish(), bytes, "how {how}");
+    }
+
+    let new = VerifiedEncoder::<T>::encode(model.iter().map(T::lend));
+    assert_eq!(new, old_encode(model));
+    assert_eq!(new, bytes);
+    assert_eq!(VerifiedEncoder::<T>::encode(lent(model)), bytes);
+    assert_eq!(VerifiedEncoder::<T>::encode(v.iter()), bytes);
+
+    let held = &holds[rng.below(3)];
+    let (mut a, mut b) = (held.clone(), held.clone());
+    let range = VerifiedEncoder::<T>::encode_to(&mut a, model.iter().map(T::lend));
+    assert_eq!(range, old_encode_to(&mut b, model));
+    assert_eq!(a, b);
+    assert_eq!(range, held.len()..a.len());
+    assert_eq!(a[..held.len()], held[..]);
+    assert_eq!(a[held.len()..], bytes[..]);
+    // and a second after the first, from a column's iterator
+    let range = VerifiedEncoder::<T>::encode_to(&mut a, v.iter());
+    assert_eq!(range, held.len() + bytes.len()..a.len());
+    assert_eq!(a[range], bytes[..]);
+
+    for x in [Some(other), model.first(), model.last()]
+        .into_iter()
+        .flatten()
+    {
+        let (mut a, mut b) = (held.clone(), held.clone());
+        let range =
+            VerifiedEncoder::<T>::encode_to_unless(&mut a, model.iter().map(T::lend), x.lend());
+        assert_eq!(range, old_encode_to_unless(&mut b, model, x));
+        assert_eq!(a, b);
+        assert_eq!(range, held.len()..a.len());
+        if model.iter().all(|y| y == x) {
+            assert_eq!(a, *held);
+        } else {
+            assert!(!range.is_empty());
+            assert_eq!(a[..held.len()], held[..]);
+            assert_eq!(a[held.len()..], bytes[..]);
+        }
+    }
+}
+
+fn streams<T: Kind>() {
+    let mut rng = Rng(0x57a7e5);
+    let (a, b, c) = (T::fresh(&mut rng), T::fresh(&mut rng), T::fresh(&mut rng));
+    let pick = |i: usize| [&a, &b, &c][i].clone();
+    let mut shapes: Vec<Vec<T>> = vec![
+        vec![],
+        vec![pick(0)],
+        vec![pick(0); 2],
+        vec![pick(0); 1000],
+        (0..1000).map(|i| pick(i / 7 % 2)).collect(),
+        (0..1000).map(|i| pick(i % 3)).collect(),
+        (0..3000).map(|_| T::fresh(&mut rng)).collect(),
+        [0, 0, 1, 2, 2, 2, 0, 1, 1, 0].map(pick).to_vec(),
+    ];
+    for _ in 0..24 {
+        shapes.push(rng.values(300));
+    }
+    for model in shapes {
+        let other = T::fresh(&mut rng);
+        check_streams(&model, &other, &mut rng);
+        // and with a value named that the model begins with
+        if let Some(first) = model.first() {
+            check_streams(&model, first, &mut rng);
+        }
+    }
+}
+
+#[test]
+fn states_and_static_forms_agree() {
+    for_each_kind!(streams);
+}
+
+/// Values with no two alike in a row, whose count the state writes
+/// before them when the run ends, into the buffer it does not own: runs
+/// of the lengths at which the count takes one byte more, alone and
+/// between runs of equal values.
+fn literal_streams<T: Kind>() {
+    let mut rng = Rng(0x117e7a2);
+    let mut pool: Vec<T> = (0..9000).map(|_| T::fresh(&mut rng)).collect();
+    pool.dedup();
+    let lens = (0..=3).chain([62, 63, 64, 65, 66, 8190, 8191, 8192, 8193, 8194]);
+    for len in lens.filter(|&n| n <= pool.len()) {
+        let lit = &pool[pool.len() - len..];
+        let other = T::fresh(&mut rng);
+        check_streams(lit, &other, &mut rng);
+        let Some((first, last)) = lit.first().zip(lit.last()) else {
+            continue;
+        };
+        let before = pool.iter().find(|x| *x != first).unwrap_or(first);
+        let after = pool.iter().find(|x| *x != last).unwrap_or(last);
+        let mut model = vec![before.clone(); 3];
+        model.extend_from_slice(lit);
+        model.extend(std::iter::repeat_n(after.clone(), 2));
+        check_streams(&model, &other, &mut rng);
+    }
+}
+
+#[test]
+fn states_agree_on_literal_runs() {
+    for_each_kind!(literal_streams);
+}
+
+/// A state given nothing writes nothing, as the old one does and as a
+/// column of no values saves nothing: whatever runs of no values it was
+/// given, and whatever the buffer held. Every value is the only one it
+/// was given. And it may be made before the buffer it is to write into
+/// holds what it holds then.
+fn empty_streams<T: Kind>() {
+    let mut rng = Rng(0x57a7e0);
+    let (x, y) = (T::fresh(&mut rng), T::fresh(&mut rng));
+    assert!(VerifiedColumn::<T>::new().save().is_empty());
+    assert!(VerifiedEncoder::<T>::encode(std::iter::empty()).is_empty());
+    assert!(old_encode::<T>(&[]).is_empty());
+    for held in [vec![], vec![5u8], vec![0u8; 70]] {
+        let mut buf = held.clone();
+        let mut s = VerifiedEncoderState::<T>::new();
+        s.append_n(&mut buf, x.lend(), 0);
+        s.append_n_owned(&mut buf, y.clone(), 0);
+        s.extend(&mut buf, std::iter::empty());
+        assert_eq!((s.len(), s.is_empty()), (0, true));
+        assert!(s.is_single_run_of(x.lend()) && s.is_single_run_of(y.lend()));
+        s.finish(&mut buf);
+        assert_eq!(buf, held);
+
+        let mut old = held.clone();
+        let mut s = <T::OldState<'_>>::default();
+        s.append_n(&mut old, &x, 0);
+        s.append_n_owned(&mut old, y.clone(), 0);
+        s.extend(&mut old, &[]);
+        assert_eq!((s.len(), s.is_empty()), (0, true));
+        assert!(s.single(&x) && s.single(&y));
+        s.finish(&mut old);
+        assert_eq!(old, held);
+
+        assert_eq!(
+            VerifiedEncoder::<T>::encode_to(&mut buf, std::iter::empty()),
+            held.len()..held.len()
+        );
+        assert_eq!(
+            VerifiedEncoder::<T>::encode_to_unless(&mut buf, std::iter::empty(), x.lend()),
+            held.len()..held.len()
+        );
+        assert_eq!(old_encode_to::<T>(&mut old, &[]), held.len()..held.len());
+        assert_eq!(
+            old_encode_to_unless(&mut old, &[], &x),
+            held.len()..held.len()
+        );
+        assert_eq!((&buf, &old), (&held, &held));
+
+        // a state made before the buffer holds what it is to follow
+        let mut s = VerifiedEncoderState::<T>::default();
+        let mut buf = held.clone();
+        buf.push(1);
+        s.append(&mut buf, x.lend());
+        s.append_owned(&mut buf, y.clone());
+        s.finish(&mut buf);
+        let two = [x.clone(), y.clone()];
+        assert_eq!(buf[..held.len()], held[..]);
+        assert_eq!(buf[held.len()], 1);
+        assert_eq!(buf[held.len() + 1..], both(&two).0.save()[..]);
+    }
+}
+
+#[test]
+fn states_of_nothing() {
+    for_each_kind!(empty_streams);
+}
+
+/// States that follow one another in one buffer, each started where the
+/// last finished: the buffer holds what it held and then what a column of
+/// each state's values saves, one after another, as with the old API.
+/// What each wrote loads as its values.
+#[test]
+fn states_follow_one_another() {
+    let mut rng = Rng(0xf0110);
+    for round in 0..60 {
+        let ids: Vec<u64> = rng.values(300);
+        let flags: Vec<bool> = rng.values(300);
+        let names: Vec<Option<Vec<u8>>> = rng.values(40);
+        let held = vec![7u8; round % 4];
+
+        let mut a = held.clone();
+        let mut s = VerifiedEncoderState::<u64>::new();
+        s.extend(&mut a, ids.iter().copied());
+        s.finish(&mut a);
+        let first = a.len();
+        let mut s = VerifiedEncoderState::<bool>::default();
+        for x in &flags {
+            s.append(&mut a, *x);
+        }
+        s.finish(&mut a);
+        let second = a.len();
+        let mut s = VerifiedEncoderState::<Option<Vec<u8>>>::new();
+        s.extend(&mut a, names.iter().map(|x| x.as_deref()));
+        s.finish(&mut a);
+
+        let mut b = held.clone();
+        let mut s = RleEncoderState::<u64>::new();
+        s.extend(&mut b, ids.iter().copied());
+        s.finish(&mut b);
+        let mut s = BoolEncoderState::<Leb128>::new();
+        for x in &flags {
+            s.append(&mut b, *x);
+        }
+        s.finish(&mut b);
+        let mut s = RleEncoderState::<Option<Vec<u8>>>::new();
+        s.extend(&mut b, names.iter().map(|x| x.as_deref()));
+        s.finish(&mut b);
+        assert_eq!(a, b);
+
+        let mut c = held.clone();
+        c.extend(both(&ids).0.save());
+        c.extend(both(&flags).0.save());
+        c.extend(both(&names).0.save());
+        assert_eq!(a, c);
+
+        let h = held.len();
+        let load = VerifiedColumn::<u64>::load(&a[h..first]).unwrap();
+        assert_eq!(new_values(&load), ids);
+        let load = VerifiedColumn::<bool>::load(&a[first..second]).unwrap();
+        assert_eq!(new_values(&load), flags);
+        let load = VerifiedColumn::<Option<Vec<u8>>>::load(&a[second..]).unwrap();
+        assert_eq!(new_values(&load), names);
+        assert_eq!(old_values(&Column::<u64>::load(&a[h..first]).unwrap()), ids);
+    }
+}
+
+/// A state counts its values in a `usize`, as an encoder does, and stops
+/// where an encoder stops: up to `usize::MAX - 2` values are counted (of
+/// `bool`, one fewer) and written as the old state writes them; given
+/// more, both APIs panic with the words an encoder panics with.
+#[cfg(panic = "unwind")]
+#[test]
+fn states_count_to_the_end() {
+    // each run fits the format's count on any target
+    let half = usize::MAX / 2;
+
+    let numbers = |first: usize, then: &'static [(u64, usize)]| {
+        let new = panic_of(move || {
+            let mut buf = vec![3u8];
+            let mut s = VerifiedEncoderState::<u64>::new();
+            s.append_n(&mut buf, 1, first);
+            s.append_n(&mut buf, 2, first);
+            for &(x, n) in then {
+                match n {
+                    1 => s.append(&mut buf, x),
+                    _ => s.append_n(&mut buf, x, n),
+                }
+            }
+            let len = s.len();
+            s.finish(&mut buf);
+            (len, buf)
+        });
+        let old = panic_of(move || {
+            let mut buf = vec![3u8];
+            let mut s = RleEncoderState::<u64>::new();
+            s.append_n(&mut buf, 1, first);
+            s.append_n(&mut buf, 2, first);
+            for &(x, n) in then {
+                match n {
+                    1 => s.append(&mut buf, x),
+                    _ => s.append_n(&mut buf, x, n),
+                }
+            }
+            let len = s.len();
+            s.finish(&mut buf);
+            (len, buf)
+        });
+        assert_eq!(new, old);
+        new
+    };
+    assert_eq!(numbers(half - 1, &[]), None);
+    assert_eq!(numbers(half - 1, &[(3, 1)]), None);
+    assert_eq!(numbers(half - 1, &[(2, 1), (2, 0)]), None);
+    let said = numbers(half - 1, &[(3, 2)]).unwrap();
+    assert!(said.contains("encoder too long to append to"), "{said}");
+    assert_eq!(numbers(half - 1, &[(3, 1), (4, 1)]), Some(said.clone()));
+    assert_eq!(numbers(half - 1, &[(2, 2)]), Some(said.clone()));
+    assert_eq!(numbers(half, &[]), Some(said.clone()));
+    assert_eq!(
+        numbers(half - 1, &[(3, 0), (3, usize::MAX)]),
+        Some(said.clone())
+    );
+
+    // what the states that count to the end write is what the encoders
+    // save
+    let mut buf = vec![];
+    let mut s = VerifiedEncoderState::<u64>::new();
+    s.append_n(&mut buf, 1, half - 1);
+    s.append_n_owned(&mut buf, 2, half - 1);
+    s.append_owned(&mut buf, 3);
+    assert_eq!(s.len(), usize::MAX - 2);
+    assert!(!s.is_single_run_of(1));
+    s.finish(&mut buf);
+    let mut e = VerifiedEncoder::<u64>::new();
+    e.append_n(1, half - 1);
+    e.append_n(2, half - 1);
+    e.append(3);
+    assert_eq!(buf, e.save());
+
+    let bools = |first: usize, then: &'static [(bool, usize)]| {
+        let new = panic_of(move || {
+            let mut buf = vec![3u8];
+            let mut s = VerifiedEncoderState::<bool>::new();
+            s.append_n(&mut buf, true, first);
+            s.append_n(&mut buf, false, first);
+            for &(x, n) in then {
+                match n {
+                    1 => s.append(&mut buf, x),
+                    _ => s.append_n(&mut buf, x, n),
+                }
+            }
+            let len = s.len();
+            s.finish(&mut buf);
+            (len, buf)
+        });
+        let old = panic_of(move || {
+            let mut buf = vec![3u8];
+            let mut s = BoolEncoderState::<Leb128>::new();
+            s.append_n(&mut buf, true, first);
+            s.append_n(&mut buf, false, first);
+            for &(x, n) in then {
+                match n {
+                    1 => s.append(&mut buf, x),
+                    _ => s.append_n(&mut buf, x, n),
+                }
+            }
+            let len = s.len();
+            s.finish(&mut buf);
+            (len, buf)
+        });
+        assert_eq!(new, old);
+        new
+    };
+    assert_eq!(bools(half - 1, &[]), None);
+    assert_eq!(bools(half - 1, &[(true, 0), (false, 0)]), None);
+    assert_eq!(bools(half - 1, &[(true, 1)]), Some(said.clone()));
+    assert_eq!(bools(half - 1, &[(false, 1)]), Some(said.clone()));
+    assert_eq!(bools(half - 1, &[(false, 2)]), Some(said.clone()));
+    assert_eq!(bools(half, &[]), Some(said.clone()));
+
+    // nulls, whose count has no sign either
+    let nulls = |n: usize, more: usize| {
+        let new = panic_of(move || {
+            let mut buf = vec![];
+            let mut s = VerifiedEncoderState::<Option<u64>>::new();
+            s.append_n(&mut buf, None, n);
+            s.append_n(&mut buf, None, more);
+            let (len, all) = (s.len(), s.is_single_run_of(None));
+            s.finish(&mut buf);
+            (len, all, buf)
+        });
+        let old = panic_of(move || {
+            let mut buf = vec![];
+            let mut s = RleEncoderState::<Option<u64>>::new();
+            s.append_n(&mut buf, None, n);
+            s.append_n(&mut buf, None, more);
+            let (len, all) = (s.len(), s.is_single_run_of(None));
+            s.finish(&mut buf);
+            (len, all, buf)
+        });
+        assert_eq!(new, old);
+        new
+    };
+    assert_eq!(nulls(half, half - 1), None);
+    assert_eq!(nulls(usize::MAX - 2, 0), None);
+    assert_eq!(nulls(usize::MAX - 2, 1), Some(said.clone()));
+    assert_eq!(nulls(usize::MAX, 0), Some(said));
+}
+
+/// The static forms take what any iterator gives, and read it once and in
+/// order: one that counts what it gave has given every value by the time
+/// the form returns, and no more, whether or not anything was written.
+#[test]
+fn static_forms_read_an_iterator_once() {
+    let mut rng = Rng(0x17e2);
+    for _ in 0..200 {
+        let model: Vec<u64> = rng.values(120);
+        let bytes = both(&model).0.save();
+        let given = Cell::new(0);
+        let counting = || {
+            given.set(0);
+            model.iter().map(|x| {
+                given.set(given.get() + 1);
+                *x
+            })
+        };
+        assert_eq!(VerifiedEncoder::<u64>::encode(counting()), bytes);
+        assert_eq!(given.get(), model.len());
+        let mut out = vec![4u8];
+        VerifiedEncoder::<u64>::encode_to(&mut out, counting());
+        assert_eq!(given.get(), model.len());
+        assert_eq!(out[1..], bytes[..]);
+        let unless = model.first().copied().unwrap_or(0);
+        let mut out = vec![4u8];
+        let range = VerifiedEncoder::<u64>::encode_to_unless(&mut out, counting(), unless);
+        assert_eq!(given.get(), model.len());
+        assert_eq!(range.is_empty(), model.iter().all(|x| *x == unless));
+        assert_eq!(out.len(), range.end);
+    }
 }

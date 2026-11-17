@@ -19,6 +19,8 @@
 //!
 //! [`VerifiedEncoder`] takes values one after another and gives the
 //! saved column of them, with no column in between.
+//! [`VerifiedEncoderState`] does so into a buffer of its client's,
+//! holding only the run in hand.
 //!
 //! # Value types
 //!
@@ -173,10 +175,24 @@
 //!   is what a column of those values saves, and
 //!   [`save_to`](VerifiedEncoder::save_to) writes it after what a buffer
 //!   holds. An encoder asks of its client what a column does not: every
-//!   method requires `wf()`, which `new` gives and every method keeps.
+//!   method requires `wf()`, which `new` gives and every method keeps;
+//! * a [`VerifiedEncoderState`] is specified by the values it has been
+//!   given too (`state@`), and writes into a buffer that each call is
+//!   handed. Its [`finish`](VerifiedEncoderState::finish) leaves the
+//!   buffer holding what it held before the state wrote to it
+//!   (`before`) and then the `encoding` of the values. What it asks of
+//!   its client is that the buffer be the one it has written to, with
+//!   those bytes as they were left (`on`): every method that takes the
+//!   buffer requires it, a state that was given nothing has it of any
+//!   buffer, and nothing checks it as the program runs. The static
+//!   forms ([`encode`](VerifiedEncoder::encode),
+//!   [`encode_to`](VerifiedEncoder::encode_to),
+//!   [`encode_to_unless`](VerifiedEncoder::encode_to_unless)) give a
+//!   state the values of an iterator and finish it.
 //!
 //! `valid`, `values`, `encoding` and `loadable` are specification
 //! functions of a column type (`VerifiedColumn::<V>::valid(bytes)`),
+//! `on` and `before` are of a state (`state.on(bytes)`),
 //! `size_bound` is one of a value type (for byte strings it counts their
 //! bytes, as `total_len` of them), `only`, `sorted`, `sorted_for`,
 //! `bytes_below`, `mapped`, `folded`, `window`, `past`, `head_run`,
@@ -185,9 +201,10 @@
 //! `lemma_sorted`, `lemma_run_values_push`, `lemma_run_values_add`,
 //! `lemma_runs_first`, `lemma_runs_of` and `lemma_runs_of_values` are
 //! lemmas, as are `VSpec::lemma_below` (the order is a strict total
-//! order), `VerifiedIter::lemma_items_len` and
-//! `VerifiedIter::lemma_source`: they exist only for Verus, and a normal
-//! build compiles them away. What options hold is
+//! order), `VerifiedIter::lemma_items_len`,
+//! `VerifiedIter::lemma_source` and
+//! `VerifiedEncoderState::lemma_before`: they exist only for Verus, and
+//! a normal build compiles them away. What options hold is
 //! said by `length()`, `fill()` and `max_segments()` of a [`LoadOpts`],
 //! and what fill value there is by `value()` of its fill state
 //! ([`MaybeFill`]).
@@ -321,8 +338,10 @@
 //! [`splice_runs`](VerifiedColumn::splice_runs), `extend` and `collect()`
 //! do not return (they run until memory is out, or a column's length is
 //! more than it can count, which panics). Nor is it proved that an
-//! encoder's [`extend`](VerifiedEncoder::extend) returns, which is a
-//! loop over the client's iterator. Every other loop is proved to end.
+//! encoder's [`extend`](VerifiedEncoder::extend) returns, or a
+//! state's ([`VerifiedEncoderState::extend`]), or a static form that
+//! is built on it: each is a loop over the client's iterator. Every
+//! other loop is proved to end.
 
 // Verus proofs read more plainly with `x = x + n`, and Verus has no
 // spec for `vec![x]`.
@@ -347,7 +366,7 @@ pub use crate::iter_core::{past, window};
 #[cfg(verus_keep_ghost)]
 pub use bytes::{below_at, bytes_below, total_len, total_len_opt};
 pub use codec::VCodec;
-pub use encoder::VerifiedEncoder;
+pub use encoder::{VerifiedEncoder, VerifiedEncoderState};
 pub use value::{refused, VNewtype, VPack};
 
 use crate::bool_edit::{BoolModel, BoolRecoder};
@@ -387,7 +406,7 @@ use vstd::prelude::*;
 use vstd::std_specs::iter::{FromIteratorSpecImpl, IteratorSpec};
 
 mod seal {
-    use super::model::{Model, Streams};
+    use super::model::{Flows, Model, Streams};
     use super::{Items, VForm, VGet, VSpec};
     use crate::cursor::Slabs;
     use crate::iter_core::Decoders;
@@ -432,7 +451,7 @@ mod seal {
         >;
 
         /// The slabs that hold them, and whose encoder takes them.
-        type E: Slabs<V: VGet<S = <Self as VSpec>::S>> + Model<Self::X> + for <'a>Streams<'a, Self::X>;
+        type E: Slabs<V: VGet<S = <Self as VSpec>::S>> + Model<Self::X> + for <'a>Streams<'a, Self::X> + for <'a>Flows<'a, Self::X>;
     }
 
     } // verus!

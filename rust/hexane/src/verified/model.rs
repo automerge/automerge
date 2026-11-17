@@ -26,7 +26,7 @@ use super::value::{VOptWrite, VPack, VWrite};
 #[cfg(verus_keep_ghost)]
 use crate::bool_edit::run_of;
 use crate::bool_edit::{BoolEdit, BoolLoader, BoolModel, BoolRecoder};
-use crate::bool_enc::BEncoder;
+use crate::bool_enc::{BEncoder, BStream};
 #[cfg(verus_keep_ghost)]
 use crate::bool_unique::lemma_bool_slab_unique;
 #[cfg(verus_keep_ghost)]
@@ -54,7 +54,7 @@ use crate::rle::dec::{
 #[cfg(verus_keep_ghost)]
 use crate::rle::edit::lemma_valid_of;
 use crate::rle::edit::{RleModel, RleRebuild, Visit};
-use crate::rle::enc::REncoder;
+use crate::rle::enc::{REncoder, RStream};
 use crate::rle::lift::Lift;
 #[cfg(verus_keep_ghost)]
 use crate::rle::lift::{lemma_lift_encodes, lift_seq};
@@ -900,6 +900,222 @@ impl<'a, C: CountsOf> Streams<'a, BoolReads<C>> for BoolModel<C> {
             lemma_vals_total::<BoolModel<C>>(slabs@);
         }
         crate::bool_edit::save_slabs::<C>(slabs.as_slice(), total, out);
+    }
+}
+
+/// A model's stream into a buffer of its caller's: nothing is held but
+/// the run in hand, and what is written goes after what the buffer had.
+pub(crate) trait Flows<'a, X>: Streams<'a, X> where
+    X: for <'b>Decoders<'b, Tail = <Self as Slabs>::Tail>,
+ {
+    type Flow;
+
+    /// `buf` is the buffer the stream is writing into.
+    spec fn f_on(s: Self::Flow, buf: Seq<u8>) -> bool;
+
+    /// What `buf` held before the stream wrote to it.
+    spec fn f_head(s: Self::Flow, buf: Seq<u8>) -> Seq<u8>;
+
+    spec fn f_values(s: Self::Flow) -> Seq<Self::V>;
+
+    proof fn lemma_f_head(s: Self::Flow, buf: Seq<u8>)
+        requires
+            Self::f_on(s, buf),
+        ensures
+            Self::f_head(s, buf).len() <= buf.len(),
+            buf.take(Self::f_head(s, buf).len() as int) == Self::f_head(s, buf),
+    ;
+
+    fn f_new() -> (s: Self::Flow)
+        ensures
+            Self::f_values(s).len() == 0,
+            forall|buf: Seq<u8>| #[trigger] Self::f_on(s, buf),
+            forall|buf: Seq<u8>| #[trigger] Self::f_head(s, buf) == buf,
+    ;
+
+    fn f_give(s: &mut Self::Flow, buf: &mut Vec<u8>, x: <Self::Enc as Encodes<Self>>::In, n: usize)
+        requires
+            Self::f_on(*old(s), old(buf)@),
+        ensures
+            Self::f_on(*final(s), final(buf)@),
+            Self::f_head(*final(s), final(buf)@) == Self::f_head(*old(s), old(buf)@),
+            Self::f_values(*final(s)) == Self::f_values(*old(s)) + Seq::new(
+                n as nat,
+                |_i: int| <Self::Enc as Encodes<Self>>::val(x),
+            ),
+    ;
+
+    fn f_all_are(s: &Self::Flow, x: &<Self::Enc as Encodes<Self>>::In) -> (r: bool)
+        requires
+            exists|buf: Seq<u8>| Self::f_on(*s, buf),
+        ensures
+            r == (Self::f_values(*s) == Seq::new(
+                Self::f_values(*s).len(),
+                |_i: int| <Self::Enc as Encodes<Self>>::val(*x),
+            )),
+    ;
+
+    fn f_count(s: &Self::Flow) -> (n: usize)
+        requires
+            exists|buf: Seq<u8>| Self::f_on(*s, buf),
+        ensures
+            n == Self::f_values(*s).len(),
+    ;
+
+    fn f_finish(s: Self::Flow, buf: &mut Vec<u8>)
+        requires
+            Self::f_on(s, old(buf)@),
+        ensures
+            ({
+                let h = Self::f_head(s, old(buf)@);
+                let d = final(buf)@.skip(h.len() as int);
+                &&& h.len() <= final(buf)@.len()
+                &&& final(buf)@.take(h.len() as int) == h
+                &&& Self::valid(d)
+                &&& Self::values(d) == Self::f_values(s)
+            }),
+    ;
+}
+
+impl<'a, L, O> Flows<'a, RleReads<O>> for RleModel<L> where
+    L: Plain + for <'s>Lift<'s, W = L> + for <'s>WriteOps<'s, R = O>,
+    O: for <'b>RleOps<'b>,
+ {
+    type Flow = RStream<'a, L>;
+
+    open spec fn f_on(s: RStream<'a, L>, buf: Seq<u8>) -> bool {
+        s.on(buf)
+    }
+
+    open spec fn f_head(s: RStream<'a, L>, buf: Seq<u8>) -> Seq<u8> {
+        s.head_of(buf)
+    }
+
+    open spec fn f_values(s: RStream<'a, L>) -> Seq<Self::V> {
+        lift_seq::<L>(s.cur@)
+    }
+
+    proof fn lemma_f_head(s: RStream<'a, L>, buf: Seq<u8>) {
+        if s.fresh() {
+            assert(buf.take(buf.len() as int) =~= buf);
+        }
+    }
+
+    #[inline(always)]
+    fn f_new() -> (s: RStream<'a, L>) {
+        RStream::new()
+    }
+
+    #[inline(always)]
+    fn f_give(s: &mut RStream<'a, L>, buf: &mut Vec<u8>, x: <L as WriteOps<'a>>::Cow, n: usize) {
+        s.append(buf, x, n);
+        proof {
+            assert(lift_seq::<L>(copies(n as nat, <L as WriteOps<'a>>::val(x))) =~= Seq::new(
+                n as nat,
+                |_i: int| <L as Lift<'a>>::lift(<L as WriteOps<'a>>::val(x)),
+            ));
+            let more = copies(n as nat, <L as WriteOps<'a>>::val(x));
+            assert(lift_seq::<L>(old(s).cur@ + more) =~= lift_seq::<L>(old(s).cur@) + lift_seq::<L>(more));
+        }
+    }
+
+    #[inline(always)]
+    fn f_all_are(s: &RStream<'a, L>, x: &<L as WriteOps<'a>>::Cow) -> (r: bool) {
+        let r = s.single_run_of(x);
+        proof {
+            let v = <L as WriteOps<'a>>::val(*x);
+            let lv = <L as Lift<'a>>::lift(v);
+            let vs = lift_seq::<L>(s.cur@);
+            if r {
+                assert(vs =~= Seq::new(vs.len(), |_i: int| lv));
+            }
+            if vs == Seq::new(vs.len(), |_i: int| lv) {
+                assert forall|i: int| 0 <= i < s.cur@.len() implies s.cur@[i] == v by {
+                    assert(lift_seq::<L>(s.cur@)[i] == lv);
+                    <L as Plain>::lemma_lift_inj(s.cur@[i], v);
+                }
+                assert(s.cur@ =~= copies(s.cur@.len(), v));
+            }
+        }
+        r
+    }
+
+    #[inline(always)]
+    fn f_count(s: &RStream<'a, L>) -> (n: usize) {
+        s.len
+    }
+
+    #[inline(always)]
+    fn f_finish(s: RStream<'a, L>, buf: &mut Vec<u8>) {
+        let mut s = s;
+        let ghost cur = s.cur@;
+        let ghost h = s.head_of(buf@);
+        s.finish(buf);
+        proof {
+            let d = buf@.skip(h.len() as int);
+            let segs = choose|segs: int| encodes::<<L as WriteOps<'a>>::R>(d, cur, segs);
+            lemma_lift_encodes::<L>(d, cur, segs);
+            lemma_valid_of::<O>(d, lift_seq::<L>(cur), segs);
+        }
+    }
+}
+
+impl<'a, C: CountsOf> Flows<'a, BoolReads<C>> for BoolModel<C> {
+    type Flow = BStream;
+
+    open spec fn f_on(s: BStream, buf: Seq<u8>) -> bool {
+        s.on::<C::K>(buf)
+    }
+
+    open spec fn f_head(s: BStream, buf: Seq<u8>) -> Seq<u8> {
+        s.head_of(buf)
+    }
+
+    open spec fn f_values(s: BStream) -> Seq<bool> {
+        s.state.vals@
+    }
+
+    proof fn lemma_f_head(s: BStream, buf: Seq<u8>) {
+        assert(buf.take(s.head_of(buf).len() as int) =~= s.head_of(buf));
+    }
+
+    #[inline(always)]
+    fn f_new() -> (s: BStream) {
+        BStream::new::<C::K>()
+    }
+
+    #[inline(always)]
+    fn f_give(s: &mut BStream, buf: &mut Vec<u8>, x: bool, n: usize) {
+        s.append::<C::K>(buf, x, n);
+        proof {
+            assert(run_of(n as nat, x) =~= Seq::new(n as nat, |_i: int| x));
+        }
+    }
+
+    #[inline(always)]
+    fn f_all_are(s: &BStream, x: &bool) -> (r: bool) {
+        let r = s.all_are(*x);
+        proof {
+            let vs = s.state.vals@;
+            if r {
+                assert(vs =~= Seq::new(vs.len(), |_i: int| *x));
+            }
+        }
+        r
+    }
+
+    #[inline(always)]
+    fn f_count(s: &BStream) -> (n: usize) {
+        s.state.len
+    }
+
+    #[inline(always)]
+    fn f_finish(s: BStream, buf: &mut Vec<u8>) {
+        let ghost h = s.head_of(buf@);
+        s.finish::<C::K>(buf);
+        proof {
+            assert(buf@.take(h.len() as int) =~= h);
+        }
     }
 }
 

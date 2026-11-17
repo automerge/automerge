@@ -169,6 +169,7 @@ impl BEnc {
             final(self).segments <= old(self).segments + 1,
             final(self).cur_count > 0 || n == 0,
             n > 0 ==> final(self).cur_value == value,
+            n == 0 ==> *final(self) == *old(self),
     {
         let ghost c0 = self.cs@;
         proof {
@@ -723,6 +724,139 @@ impl BEncoder {
         proof {
             assert(out@.skip(o0.len() as int) =~= e.data@);
             assert(out@.take(o0.len() as int) =~= o0);
+        }
+    }
+}
+
+/// A [`BEnc`] that writes into its caller's buffer, and what it has made
+/// of that buffer: what was there before, and then the counts written.
+pub struct BStream {
+    pub(crate) state: BEnc,
+    #[allow(dead_code)]
+    pub(crate) head: Ghost<Seq<u8>>,
+}
+
+impl BStream {
+    /// Nothing is written yet, so any buffer will do.
+    pub(crate) open spec fn fresh(&self) -> bool {
+        self.state.cs@.len() == 0
+    }
+
+    /// What was in the buffer before this stream wrote to it.
+    pub(crate) open spec fn head_of(&self, buf: Seq<u8>) -> Seq<u8> {
+        if self.fresh() {
+            buf
+        } else {
+            self.head@
+        }
+    }
+
+    /// `buf` is the buffer this stream is writing into.
+    pub(crate) open spec fn on<K: CountOps>(&self, buf: Seq<u8>) -> bool {
+        &&& self.state.inv() && self.state.clean@ && self.state.before@ == 0
+        &&& self.state.cur_count > 0 || self.state.segments == 0
+        &&& self.fresh() || buf == self.head@ + counts_bytes::<K>(self.state.cs@)
+    }
+
+    pub(crate) fn new<K: CountOps>() -> (s: Self)
+        ensures
+            s.fresh(),
+            s.state.vals@.len() == 0,
+            forall|buf: Seq<u8>| s.on::<K>(buf),
+    {
+        BStream { state: BEnc::new(), head: Ghost(Seq::empty()) }
+    }
+
+    #[inline(always)]
+    pub(crate) fn append<K: CountOps>(&mut self, buf: &mut Vec<u8>, value: bool, n: usize)
+        requires
+            old(self).on::<K>(old(buf)@),
+        ensures
+            final(self).on::<K>(final(buf)@),
+            final(self).head_of(final(buf)@) == old(self).head_of(old(buf)@),
+            final(self).state.vals@ == old(self).state.vals@ + run_of(n as nat, value),
+    {
+        let ghost c0 = self.state.cs@;
+        let ghost b0 = buf@;
+        let ghost h = self.head_of(buf@);
+        self.state.append::<K>(buf, value, n);
+        proof {
+            let c1 = self.state.cs@;
+            let more = c1.skip(c0.len() as int);
+            assert(c1 =~= c0 + more);
+            lemma_concat::<K>(c0, more);
+            assert(counts_bytes::<K>(Seq::<u64>::empty()) =~= Seq::<u8>::empty());
+            if c0.len() == 0 {
+                assert(c0 =~= Seq::<u64>::empty());
+                assert(b0 + Seq::<u8>::empty() =~= b0);
+            }
+            assert(b0 =~= h + counts_bytes::<K>(c0));
+            assert(buf@ =~= h + counts_bytes::<K>(c1));
+            if c1.len() == 0 {
+                assert(c1 =~= Seq::<u64>::empty());
+                assert(h + Seq::<u8>::empty() =~= h);
+            }
+            self.head = Ghost(h);
+        }
+    }
+
+    /// Whether every value given is `value`.
+    #[inline(always)]
+    pub(crate) fn all_are(&self, value: bool) -> (r: bool)
+        requires
+            self.state.inv() && self.state.clean@ && self.state.before@ == 0,
+            self.state.cur_count > 0 || self.state.segments == 0,
+        ensures
+            r == (forall|i: int| 0 <= i < self.state.vals@.len() ==> #[trigger] self.state.vals@[i] == value),
+    {
+        proof {
+            if self.state.cur_count == 0 {
+                assert(self.state.cs@ =~= Seq::<u64>::empty());
+                lemma_vals_len(self.state.cs@, 0);
+            }
+        }
+        self.state.all_equal_pre_finish(value)
+    }
+
+    /// Write what is still held: the buffer is then what it was before
+    /// this stream and after that the column of the values given.
+    #[inline(always)]
+    pub(crate) fn finish<K: CountOps>(self, buf: &mut Vec<u8>)
+        requires
+            self.on::<K>(old(buf)@),
+        ensures
+            ({
+                let h = self.head_of(old(buf)@);
+                let d = final(buf)@.skip(h.len() as int);
+                &&& final(buf)@ == h + d
+                &&& bool_valid::<K>(d)
+                &&& bool_values::<K>(d) == self.state.vals@
+            }),
+    {
+        let mut e = self;
+        let ghost c0 = e.state.cs@;
+        let ghost b0 = buf@;
+        let ghost h = self.head_of(buf@);
+        proof {
+            lemma_pre_len(c0);
+            lemma_vals_len(c0, 0);
+        }
+        e.state.finish::<K>(buf);
+        proof {
+            let c1 = e.state.cs@;
+            let more = c1.skip(c0.len() as int);
+            assert(c1 =~= c0 + more);
+            lemma_concat::<K>(c0, more);
+            assert(counts_bytes::<K>(Seq::<u64>::empty()) =~= Seq::<u8>::empty());
+            if c0.len() == 0 {
+                assert(c0 =~= Seq::<u64>::empty());
+                assert(b0 + Seq::<u8>::empty() =~= b0);
+            }
+            assert(b0 =~= h + counts_bytes::<K>(c0));
+            let d = counts_bytes::<K>(c1);
+            assert(buf@ =~= h + d);
+            lemma_finished_slab::<K>(e.state, d);
+            assert(buf@.skip(h.len() as int) =~= d);
         }
     }
 }

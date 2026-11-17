@@ -150,13 +150,47 @@
 //! own ([`told_by_a_remapping_save`],
 //! [`told_by_a_remapping_save_unless`]).
 //!
+//! And of a [`VerifiedEncoderState`], which writes into a buffer of its
+//! caller's as the values come: that values given one by one are
+//! written as a column of them, after what the buffer held
+//! ([`streamed_as_saved`]); that a state, an encoder, a column and
+//! `encode` give the same bytes for the same values
+//! ([`one_encoding_four_ways`]), which load as a column of them
+//! ([`stream_then_load`]); that byte strings go through, borrowed and
+//! owned, two states one after the other into one buffer
+//! ([`strings_streamed`]); that a state knows whether all it was given
+//! is one value, and counts what it was given ([`a_single_run`]); that
+//! a client can keep a state with its buffer between calls ([`Log`],
+//! [`logged`]); and that a client can give up what a state wrote by
+//! cutting the buffer back, and so build its own `encode_to_unless`
+//! ([`given_up`], [`written_unless_one`]). A state's functions require
+//! of the buffer that it is the state's (`on`), which `new` says of any
+//! buffer and each function keeps: the loops and the types of these
+//! clients carry it. And each function of a state says each of these
+//! things on its own ([`told_by_a_new_state`],
+//! [`told_by_a_states_count`], [`told_by_a_states_append`],
+//! [`told_by_a_states_append_n`], [`told_by_a_states_owned`],
+//! [`told_by_a_states_extend`], [`told_by_a_single_run`],
+//! [`told_by_a_finish`], [`told_by_the_bytes_before`]).
+//!
+//! And of the static forms: that `encode_to` writes two columns into
+//! one buffer, each found again by its range
+//! ([`two_columns_one_buffer`]); that `encode_to_unless` leaves the
+//! buffer for values that are all the one named, as nulls are, or no
+//! values at all ([`all_the_one_leave_the_buffer`],
+//! [`nulls_leave_the_buffer`]), and writes them where another is among
+//! them ([`another_is_written`]); and that the range it returns tells a
+//! reader which of the two happened ([`read_from_the_encoded_range`]).
+//! Each says so on its own ([`told_by_an_encode`],
+//! [`told_by_an_encode_to`], [`told_by_an_encode_to_unless`]).
+//!
 //! This module exists only while Verus checks the crate.
 
 use super::{
     below_at, bytes_below, folded, head_run, lemma_run_values_add, lemma_run_values_push,
     lemma_runs_first, lemma_runs_of_values, lemma_sorted, mapped, only, refused, run_values,
     runs_of, sorted, sorted_for, sum_of, total_len, window, Get, VCodec, VGet, VNewtype, VSpec,
-    VValue, VerifiedColumn, VerifiedEncoder, VerifiedIter, VerifiedIterState,
+    VValue, VerifiedColumn, VerifiedEncoder, VerifiedEncoderState, VerifiedIter, VerifiedIterState,
 };
 use crate::{Leb128, LoadOpts, PackError, Run};
 use std::cmp::Ordering;
@@ -3933,6 +3967,611 @@ fn read_from_the_remapped_range<'a, V: VValue<C>, C: VCodec, F: Fn(V) -> V>(
                     assert(out@ =~= old(out)@);
                 }
             }
+        }
+    }
+    r
+}
+
+// ── The state that writes into its caller's buffer ──────────────────────────
+/// What `new` and `default` say of the state they give: it was given
+/// nothing, and may start on any buffer, all of which is then what was
+/// there before it.
+#[allow(dead_code)]
+fn told_by_a_new_state<'a, V: VValue<C>, C: VCodec>() -> (r: (
+    VerifiedEncoderState<'a, V, C>,
+    VerifiedEncoderState<'a, V, C>,
+))
+    ensures
+        r.0@.len() == 0,
+        r.1@.len() == 0,
+        forall|buf: Seq<u8>| #[trigger] r.0.on(buf),
+        forall|buf: Seq<u8>| #[trigger] r.0.before(buf) == buf,
+        forall|buf: Seq<u8>| #[trigger] r.1.on(buf),
+        forall|buf: Seq<u8>| #[trigger] r.1.before(buf) == buf,
+{
+    let a = VerifiedEncoderState::<V, C>::new();
+    let b = VerifiedEncoderState::<V, C>::default();
+    (a, b)
+}
+
+/// What a state's `len` and `is_empty` say: the number of values it
+/// was given. They take no buffer, and require that there is one the
+/// state is on.
+#[allow(dead_code)]
+fn told_by_a_states_count<'a, V: VValue<C>, C: VCodec>(s: &VerifiedEncoderState<'a, V, C>, buf: &Vec<u8>) -> (r: (
+    usize,
+    bool,
+))
+    requires
+        s.on(buf@),
+    ensures
+        r.0 == s@.len(),
+        r.1 == (s@.len() == 0),
+{
+    (s.len(), s.is_empty())
+}
+
+/// What a state's `append` says: the value, after those the state had;
+/// the buffer is still the state's, and what was there before the state
+/// is what was.
+#[allow(dead_code)]
+fn told_by_a_states_append<'a, V: VValue<C>, C: VCodec>(
+    s: &mut VerifiedEncoderState<'a, V, C>,
+    buf: &mut Vec<u8>,
+    v: Get<'a, V>,
+)
+    requires
+        old(s).on(old(buf)@),
+    ensures
+        final(s).on(final(buf)@),
+        final(s).before(final(buf)@) == old(s).before(old(buf)@),
+        final(s)@.len() == old(s)@.len() + 1,
+        final(s)@.last() == v.sv(),
+        final(s)@.drop_last() == old(s)@,
+{
+    s.append(buf, v);
+    assert(s@.drop_last() =~= old(s)@);
+}
+
+/// What a state's `append_n` says: the value `n` times, after those the
+/// state had.
+#[allow(dead_code)]
+fn told_by_a_states_append_n<'a, V: VValue<C>, C: VCodec>(
+    s: &mut VerifiedEncoderState<'a, V, C>,
+    buf: &mut Vec<u8>,
+    v: Get<'a, V>,
+    n: usize,
+)
+    requires
+        old(s).on(old(buf)@),
+    ensures
+        final(s).on(final(buf)@),
+        final(s).before(final(buf)@) == old(s).before(old(buf)@),
+        final(s)@.len() == old(s)@.len() + n,
+        final(s)@.take(old(s)@.len() as int) == old(s)@,
+        forall|i: int| old(s)@.len() <= i < final(s)@.len() ==> final(s)@[i] == v.sv(),
+{
+    s.append_n(buf, v, n);
+    assert(s@.take(old(s)@.len() as int) =~= old(s)@);
+}
+
+/// What a state's `append_owned` and `append_n_owned` say: as `append`
+/// and `append_n`, of the value handed over.
+#[allow(dead_code)]
+fn told_by_a_states_owned<'a, V: VValue<C>, C: VCodec>(
+    s: &mut VerifiedEncoderState<'a, V, C>,
+    buf: &mut Vec<u8>,
+    v: V,
+    w: V,
+    n: usize,
+)
+    requires
+        old(s).on(old(buf)@),
+    ensures
+        final(s).on(final(buf)@),
+        final(s).before(final(buf)@) == old(s).before(old(buf)@),
+        final(s)@.len() == old(s)@.len() + 1 + n,
+        final(s)@.take(old(s)@.len() as int) == old(s)@,
+        final(s)@[old(s)@.len() as int] == V::sv_of(v),
+        forall|i: int| old(s)@.len() < i < final(s)@.len() ==> final(s)@[i] == V::sv_of(w),
+{
+    s.append_owned(buf, v);
+    s.append_n_owned(buf, w, n);
+    assert(s@.take(old(s)@.len() as int) =~= old(s)@);
+}
+
+/// What a state's `extend` says of a vector handed over: its values,
+/// after those the state had.
+#[allow(dead_code)]
+fn told_by_a_states_extend<'a, V: VValue<C>, C: VCodec>(
+    s: &mut VerifiedEncoderState<'a, V, C>,
+    buf: &mut Vec<u8>,
+    vs: Vec<Get<'a, V>>,
+)
+    requires
+        old(s).on(old(buf)@),
+    ensures
+        final(s).on(final(buf)@),
+        final(s).before(final(buf)@) == old(s).before(old(buf)@),
+        final(s)@ == old(s)@ + VGet::svs(vs@),
+{
+    s.extend(buf, vs);
+}
+
+/// What `is_single_run_of` says: whether every value given is the one
+/// asked for, either way.
+#[allow(dead_code)]
+fn told_by_a_single_run<'a, V: VValue<C>, C: VCodec>(
+    s: &VerifiedEncoderState<'a, V, C>,
+    buf: &Vec<u8>,
+    v: Get<'a, V>,
+) -> (r: bool)
+    requires
+        s.on(buf@),
+    ensures
+        r ==> forall|i: int| 0 <= i < s@.len() ==> s@[i] == v.sv(),
+        !r ==> exists|i: int| 0 <= i < s@.len() && s@[i] != v.sv(),
+{
+    s.is_single_run_of(v)
+}
+
+/// What a state's `finish` says: the buffer is what was there before
+/// the state and then the encoding of the values given, which is a
+/// saved column of them within the bound of their size.
+#[allow(dead_code)]
+fn told_by_a_finish<'a, V: VValue<C>, C: VCodec>(s: VerifiedEncoderState<'a, V, C>, buf: &mut Vec<u8>)
+    requires
+        s.on(old(buf)@),
+    ensures
+        final(buf)@ == s.before(old(buf)@) + VerifiedColumn::<V, C>::encoding(s@),
+        VerifiedColumn::<V, C>::valid(VerifiedColumn::<V, C>::encoding(s@)),
+        VerifiedColumn::<V, C>::values(VerifiedColumn::<V, C>::encoding(s@)) == s@,
+        VerifiedColumn::<V, C>::encoding(s@).len() <= V::size_bound(s@),
+{
+    s.finish(buf);
+}
+
+/// What `lemma_before` says: what was in the buffer before the state
+/// is still its start.
+#[allow(dead_code)]
+proof fn told_by_the_bytes_before<'a, V: VValue<C>, C: VCodec>(s: VerifiedEncoderState<'a, V, C>, buf: Seq<u8>)
+    requires
+        s.on(buf),
+    ensures
+        s.before(buf).len() <= buf.len(),
+        forall|i: int| 0 <= i < s.before(buf).len() ==> buf[i] == s.before(buf)[i],
+{
+    s.lemma_before(buf);
+    assert forall|i: int| 0 <= i < s.before(buf).len() implies buf[i] == s.before(buf)[i] by {
+        assert(buf.take(s.before(buf).len() as int)[i] == buf[i]);
+    }
+}
+
+/// Values given one by one to a state are written as a column of them:
+/// the buffer is what it was and then the one encoding of the values.
+/// The loop carries that the buffer is the state's (`on`), what was
+/// there before the state, and what the state has been given so far.
+#[allow(dead_code)]
+fn streamed_as_saved<'v, V: VValue<C>, C: VCodec>(input: &Vec<Get<'v, V>>, buf: &mut Vec<u8>) -> (r: Range<usize>)
+    ensures
+        final(buf)@ == old(buf)@ + VerifiedColumn::<V, C>::encoding(VGet::svs(input@)),
+        r.start == old(buf)@.len(),
+        r.end == final(buf)@.len(),
+        VerifiedColumn::<V, C>::valid(final(buf)@.subrange(r.start as int, r.end as int)),
+        VerifiedColumn::<V, C>::values(final(buf)@.subrange(r.start as int, r.end as int)) == VGet::svs(input@),
+{
+    let start = buf.len();
+    let mut s = VerifiedEncoderState::<V, C>::new();
+    let mut i: usize = 0;
+    proof {
+        VGet::lemma_svs(input@.take(0));
+        assert(s@ =~= VGet::svs(input@.take(0)));
+    }
+    while i < input.len()
+        invariant
+            s.on(buf@),
+            s.before(buf@) == old(buf)@,
+            i <= input@.len(),
+            s@ == VGet::svs(input@.take(i as int)),
+        decreases input@.len() - i,
+    {
+        s.append(buf, input[i]);
+        proof {
+            VGet::lemma_svs(input@.take(i as int));
+            VGet::lemma_svs(input@.take(i + 1));
+            assert(s@ =~= VGet::svs(input@.take(i + 1)));
+        }
+        i += 1;
+    }
+    proof {
+        assert(input@.take(i as int) =~= input@);
+    }
+    s.finish(buf);
+    proof {
+        let d = VerifiedColumn::<V, C>::encoding(VGet::svs(input@));
+        assert(buf@.subrange(start as int, buf@.len() as int) =~= d);
+    }
+    start..buf.len()
+}
+
+/// A state, an encoder, a column and `encode` give the same bytes for
+/// the same values.
+#[allow(dead_code)]
+fn one_encoding_four_ways<'v, V: VValue<C>, C: VCodec>(input: Vec<Get<'v, V>>) -> (r: Vec<u8>)
+    ensures
+        r@ == VerifiedColumn::<V, C>::encoding(VGet::svs(input@)),
+{
+    let mut a: Vec<u8> = Vec::new();
+    streamed_as_saved::<V, C>(&input, &mut a);
+    let b = encoded_as_saved::<V, C>(&input);
+    let col = VerifiedColumn::<V, C>::from_values(input.as_slice());
+    let c = col.save();
+    let d = VerifiedEncoder::<V, C>::encode(input);
+    assert(a@ =~= b@);
+    assert(b@ == c@);
+    assert(c@ == d@);
+    d
+}
+
+/// What `encode` gives loads as a column of the values given, where
+/// their number and size are a column's to load.
+#[allow(dead_code)]
+fn stream_then_load<'v, V: VValue<C>, C: VCodec>(input: Vec<Get<'v, V>>) -> (r: VerifiedColumn<V, C>)
+    requires
+        V::size_bound(VGet::svs(input@)) <= 0xffff_fff5,
+        input@.len() <= usize::MAX - 3,
+    ensures
+        r@ == VGet::svs(input@),
+{
+    proof {
+        VGet::lemma_svs(input@);
+    }
+    let bytes = VerifiedEncoder::<V, C>::encode(input);
+    let back = VerifiedColumn::<V, C>::load(bytes.as_slice());
+    assert(back is Ok);
+    back.unwrap()
+}
+
+/// Byte strings, borrowed and owned, with nulls and without, through
+/// two states one after the other into one buffer: it holds what it
+/// did, then the first column, then the second.
+#[allow(dead_code)]
+fn strings_streamed<'a>(a: &'a [u8], b: Vec<u8>, c: Vec<u8>, buf: &mut Vec<u8>) -> (r: usize)
+    ensures
+        final(buf)@ == old(buf)@ + VerifiedColumn::<Vec<u8>>::encoding(seq![a@, b@, a@, a@]) + VerifiedColumn::<
+            Option<Vec<u8>>,
+        >::encoding(seq![Some(a@), None, None, Some(c@)]),
+        r == old(buf)@.len() + VerifiedColumn::<Vec<u8>>::encoding(seq![a@, b@, a@, a@]).len(),
+{
+    let mut x = VerifiedEncoderState::<Vec<u8>>::new();
+    x.append(buf, a);
+    x.append_owned(buf, b);
+    x.append_n(buf, a, 2);
+    assert(x@ =~= seq![a@, b@, a@, a@]);
+    x.finish(buf);
+    let mid = buf.len();
+    let mut y = VerifiedEncoderState::<Option<Vec<u8>>>::new();
+    y.append(buf, Some(a));
+    y.append_n(buf, None, 2);
+    y.append_owned(buf, Some(c));
+    assert(y@ =~= seq![Some(a@), None, None, Some(c@)]);
+    y.finish(buf);
+    mid
+}
+
+/// A state knows whether all it was given is one value: so it is of a
+/// state that was given nothing, whatever the value, and of one run,
+/// and no longer once another value came. And it counts what it was
+/// given.
+#[allow(dead_code)]
+fn a_single_run(buf: &mut Vec<u8>)
+    ensures
+        final(buf)@ == old(buf)@ + VerifiedColumn::<u64>::encoding(seq![7u64, 7, 7, 7, 8]),
+{
+    let mut s = VerifiedEncoderState::<u64>::new();
+    assert(s.on(buf@));
+    let none = s.is_single_run_of(3);
+    assert(none);
+    let empty = s.is_empty();
+    assert(empty);
+    s.append_n(buf, 7, 4);
+    assert(s@ =~= seq![7u64, 7, 7, 7]);
+    let sevens = s.is_single_run_of(7);
+    assert(sevens);
+    let eights = s.is_single_run_of(8);
+    assert(!eights) by {
+        assert(s@[0] == 7);
+    }
+    s.append(buf, 8);
+    assert(s@ =~= seq![7u64, 7, 7, 7, 8]);
+    let still = s.is_single_run_of(7);
+    assert(!still) by {
+        assert(s@[4] == 8);
+    }
+    let n = s.len();
+    assert(n == 5);
+    s.finish(buf);
+}
+
+/// A client's log of numbers: a buffer, and the state that writes into
+/// it. The client keeps the two together between calls.
+pub struct Log<'a> {
+    pub buf: Vec<u8>,
+    pub s: VerifiedEncoderState<'a, u64>,
+}
+
+impl<'a> Log<'a> {
+    /// What the client keeps of its log: the buffer is the state's.
+    pub open spec fn wf(&self) -> bool {
+        self.s.on(self.buf@)
+    }
+
+    /// What the buffer held when the log was made.
+    pub open spec fn head(&self) -> Seq<u8> {
+        self.s.before(self.buf@)
+    }
+
+    /// A log with no number, after what `buf` holds.
+    pub fn new(buf: Vec<u8>) -> (r: Self)
+        ensures
+            r.wf(),
+            r.s@.len() == 0,
+            r.head() == buf@,
+    {
+        Log { buf, s: VerifiedEncoderState::new() }
+    }
+
+    /// One number more.
+    pub fn add(&mut self, x: u64)
+        requires
+            old(self).wf(),
+        ensures
+            final(self).wf(),
+            final(self).head() == old(self).head(),
+            final(self).s@ == old(self).s@.push(x),
+    {
+        self.s.append(&mut self.buf, x);
+    }
+
+    /// The buffer: what it held when the log was made, and then the
+    /// numbers as a saved column.
+    pub fn finish(self) -> (r: Vec<u8>)
+        requires
+            self.wf(),
+        ensures
+            r@ == self.head() + VerifiedColumn::<u64>::encoding(self.s@),
+            VerifiedColumn::<u64>::values(VerifiedColumn::<u64>::encoding(self.s@)) == self.s@,
+    {
+        let Log { mut buf, s } = self;
+        s.finish(&mut buf);
+        buf
+    }
+}
+
+/// Three numbers logged after a header, and read back from behind it:
+/// if those bytes load, they load as the numbers.
+#[allow(dead_code)]
+fn logged(header: Vec<u8>) -> (r: Option<VerifiedColumn<u64>>)
+    ensures
+        r matches Some(col) ==> col@ == seq![4u64, 5, 6],
+{
+    let at = header.len();
+    let ghost h = header@;
+    let mut log = Log::new(header);
+    log.add(4);
+    log.add(5);
+    log.add(6);
+    assert(log.s@ =~= seq![4u64, 5, 6]);
+    let out = log.finish();
+    proof {
+        let d = VerifiedColumn::<u64>::encoding(seq![4u64, 5, 6]);
+        assert(out@ =~= h + d);
+        assert(out@.subrange(at as int, out@.len() as int) =~= d);
+    }
+    let bytes = vstd::slice::slice_subrange(out.as_slice(), at, out.len());
+    match VerifiedColumn::<u64>::load(bytes) {
+        Ok(col) => Some(col),
+        Err(_) => None,
+    }
+}
+
+/// A client gives up what a state wrote: it cuts the buffer back to
+/// where the state started, and the buffer is what it was. That needs
+/// `lemma_before`: what was there before the state is still there.
+#[allow(dead_code)]
+fn given_up<'a, V: VValue<C>, C: VCodec>(vs: Vec<Get<'a, V>>, buf: &mut Vec<u8>)
+    ensures
+        final(buf)@ == old(buf)@,
+{
+    let start = buf.len();
+    let mut s = VerifiedEncoderState::<V, C>::new();
+    s.extend(buf, vs);
+    proof {
+        s.lemma_before(buf@);
+    }
+    buf.truncate(start);
+    assert(buf@ =~= old(buf)@);
+}
+
+/// A client's own `encode_to_unless`, of the state's functions alone:
+/// the values are written unless each is `v`, and the client is told
+/// which.
+#[allow(dead_code)]
+fn written_unless_one<'a, V: VValue<C>, C: VCodec>(vs: Vec<Get<'a, V>>, v: Get<'a, V>, buf: &mut Vec<u8>) -> (r: bool)
+    ensures
+        r == only(VGet::svs(vs@), v.sv()),
+        r ==> final(buf)@ == old(buf)@,
+        !r ==> final(buf)@ == old(buf)@ + VerifiedColumn::<V, C>::encoding(VGet::svs(vs@)),
+{
+    let start = buf.len();
+    let mut s = VerifiedEncoderState::<V, C>::new();
+    s.extend(buf, vs);
+    assert(s@ =~= VGet::svs(vs@));
+    if s.is_single_run_of(v) {
+        proof {
+            s.lemma_before(buf@);
+        }
+        buf.truncate(start);
+        assert(buf@ =~= old(buf)@);
+        true
+    } else {
+        s.finish(buf);
+        false
+    }
+}
+
+// ── The static forms ────────────────────────────────────────────────────────
+/// What `encode` says of a vector handed over: the bytes are a saved
+/// column of its values, the one encoding of them, within the bound of
+/// their size.
+#[allow(dead_code)]
+fn told_by_an_encode<'a, V: VValue<C>, C: VCodec>(vs: Vec<Get<'a, V>>) -> (r: Vec<u8>)
+    ensures
+        VerifiedColumn::<V, C>::valid(r@),
+        VerifiedColumn::<V, C>::values(r@) == VGet::svs(vs@),
+        r@ == VerifiedColumn::<V, C>::encoding(VGet::svs(vs@)),
+        r@.len() <= V::size_bound(VGet::svs(vs@)),
+{
+    VerifiedEncoder::<V, C>::encode(vs)
+}
+
+/// What `encode_to` says of a vector handed over: the buffer is what it
+/// was and then the encoding of the vector's values, which is a saved
+/// column of them within the bound of their size, and the range
+/// returned is where.
+#[allow(dead_code)]
+fn told_by_an_encode_to<'a, V: VValue<C>, C: VCodec>(buf: &mut Vec<u8>, vs: Vec<Get<'a, V>>) -> (r: Range<usize>)
+    ensures
+        final(buf)@ == old(buf)@ + VerifiedColumn::<V, C>::encoding(VGet::svs(vs@)),
+        VerifiedColumn::<V, C>::valid(VerifiedColumn::<V, C>::encoding(VGet::svs(vs@))),
+        VerifiedColumn::<V, C>::values(VerifiedColumn::<V, C>::encoding(VGet::svs(vs@))) == VGet::svs(vs@),
+        VerifiedColumn::<V, C>::encoding(VGet::svs(vs@)).len() <= V::size_bound(VGet::svs(vs@)),
+        r.start == old(buf)@.len(),
+        r.end == final(buf)@.len(),
+{
+    VerifiedEncoder::<V, C>::encode_to(buf, vs)
+}
+
+/// What `encode_to_unless` says of a vector handed over. The buffer is
+/// what it was exactly if every value is `v`; if one is not, it is
+/// what it was and after that the encoding of the values, a saved
+/// column of them within the bound of their size. And the range
+/// returned is what was added.
+#[allow(dead_code)]
+fn told_by_an_encode_to_unless<'a, V: VValue<C>, C: VCodec>(buf: &mut Vec<u8>, vs: Vec<Get<'a, V>>, v: Get<'a, V>) -> (r:
+    Range<usize>)
+    ensures
+        (final(buf)@ == old(buf)@) == only(VGet::svs(vs@), v.sv()),
+        final(buf)@ != old(buf)@ ==> {
+            &&& final(buf)@ == old(buf)@ + VerifiedColumn::<V, C>::encoding(VGet::svs(vs@))
+            &&& VerifiedColumn::<V, C>::valid(VerifiedColumn::<V, C>::encoding(VGet::svs(vs@)))
+            &&& VerifiedColumn::<V, C>::values(VerifiedColumn::<V, C>::encoding(VGet::svs(vs@))) == VGet::svs(vs@)
+            &&& VerifiedColumn::<V, C>::encoding(VGet::svs(vs@)).len() <= V::size_bound(VGet::svs(vs@))
+        },
+        r.start == old(buf)@.len(),
+        r.end == final(buf)@.len(),
+{
+    VerifiedEncoder::<V, C>::encode_to_unless(buf, vs, v)
+}
+
+/// Two columns written into one buffer by `encode_to`, one after the
+/// other, and each found again by its range.
+#[allow(dead_code)]
+fn two_columns_one_buffer(ids: Vec<u64>, flags: Vec<bool>, buf: &mut Vec<u8>) -> (r: (Range<usize>, Range<usize>))
+    ensures
+        final(buf)@.len() >= old(buf)@.len(),
+        final(buf)@.take(old(buf)@.len() as int) == old(buf)@,
+        r.0.start == old(buf)@.len(),
+        r.0.end == r.1.start,
+        r.1.end == final(buf)@.len(),
+        r.0.start <= r.0.end <= r.1.end,
+        VerifiedColumn::<u64>::values(final(buf)@.subrange(r.0.start as int, r.0.end as int)) == ids@,
+        VerifiedColumn::<bool>::values(final(buf)@.subrange(r.1.start as int, r.1.end as int)) == flags@,
+{
+    let ghost (a, b) = (VerifiedColumn::<u64>::encoding(ids@), VerifiedColumn::<bool>::encoding(flags@));
+    let x = VerifiedEncoder::<u64>::encode_to(buf, ids);
+    let y = VerifiedEncoder::<bool>::encode_to(buf, flags);
+    proof {
+        let o = old(buf)@;
+        assert(buf@ =~= o + a + b);
+        assert(buf@.take(o.len() as int) =~= o);
+        assert(buf@.subrange(x.start as int, x.end as int) =~= a);
+        assert(buf@.subrange(y.start as int, y.end as int) =~= b);
+    }
+    (x, y)
+}
+
+/// Values that are all the one named take no bytes: `encode_to_unless`
+/// leaves the buffer.
+#[allow(dead_code)]
+fn all_the_one_leave_the_buffer<'a, V: VValue<C>, C: VCodec>(vs: Vec<Get<'a, V>>, v: Get<'a, V>, buf: &mut Vec<u8>)
+    requires
+        forall|i: int| 0 <= i < vs@.len() ==> (#[trigger] vs@[i]).sv() == v.sv(),
+    ensures
+        final(buf)@ == old(buf)@,
+{
+    proof {
+        VGet::lemma_svs(vs@);
+        assert(only(VGet::svs(vs@), v.sv()));
+    }
+    let r = VerifiedEncoder::<V, C>::encode_to_unless(buf, vs, v);
+    assert(r.start == r.end);
+}
+
+/// So a column of nulls takes none, and neither does a column of no
+/// values, whatever the value named.
+#[allow(dead_code)]
+fn nulls_leave_the_buffer(buf: &mut Vec<u8>)
+    ensures
+        final(buf)@ == old(buf)@,
+{
+    let mut nulls: Vec<Option<u64>> = Vec::new();
+    nulls.push(None);
+    nulls.push(None);
+    all_the_one_leave_the_buffer::<Option<u64>, Leb128>(nulls, None, buf);
+    let none: Vec<u64> = Vec::new();
+    all_the_one_leave_the_buffer::<u64, Leb128>(none, 9, buf);
+}
+
+/// And where another value is among them, they are all written.
+#[allow(dead_code)]
+fn another_is_written(buf: &mut Vec<u8>) -> (r: Range<usize>)
+    ensures
+        final(buf)@ == old(buf)@ + VerifiedColumn::<u64>::encoding(seq![0u64, 5]),
+        VerifiedColumn::<u64>::values(final(buf)@.subrange(r.start as int, r.end as int)) == seq![0u64, 5],
+{
+    let mut vs: Vec<u64> = Vec::new();
+    vs.push(0);
+    vs.push(5);
+    assert(vs@ =~= seq![0u64, 5]);
+    let r = VerifiedEncoder::<u64>::encode_to_unless(buf, vs, 0);
+    proof {
+        let d = VerifiedColumn::<u64>::encoding(seq![0u64, 5]);
+        assert(buf@.subrange(r.start as int, r.end as int) =~= d);
+    }
+    r
+}
+
+/// What the range of an `encode_to_unless` tells its reader, who has
+/// the range and the buffer: an empty range, that every value was `v`
+/// and nothing was written; another, that the bytes there are the
+/// encoding of the values.
+#[allow(dead_code)]
+fn read_from_the_encoded_range<'a, V: VValue<C>, C: VCodec>(vs: Vec<Get<'a, V>>, buf: &mut Vec<u8>, v: Get<'a, V>) -> (r:
+    Range<usize>)
+    ensures
+        r.start <= r.end <= final(buf)@.len(),
+        r.start == r.end ==> only(VGet::svs(vs@), v.sv()) && final(buf)@ == old(buf)@,
+        r.start < r.end ==> final(buf)@.subrange(r.start as int, r.end as int) == VerifiedColumn::<V, C>::encoding(
+            VGet::svs(vs@),
+        ),
+{
+    let r = VerifiedEncoder::<V, C>::encode_to_unless(buf, vs, v);
+    proof {
+        let d = buf@.skip(old(buf)@.len() as int);
+        assert(buf@.subrange(r.start as int, r.end as int) =~= d);
+        if r.start == r.end {
+            assert(buf@ =~= old(buf)@);
         }
     }
     r
