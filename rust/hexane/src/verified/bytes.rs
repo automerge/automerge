@@ -138,7 +138,7 @@ proof fn lemma_bytes_at<C: VCodec>(d: Seq<u8>, h: int, n: u64)
 }
 
 /// A slice is no longer than a `usize` can count.
-proof fn lemma_slice_len(v: &[u8])
+pub(crate) proof fn lemma_slice_len(v: &[u8])
     ensures
         v@.len() <= usize::MAX,
 {
@@ -148,7 +148,7 @@ proof fn lemma_slice_len(v: &[u8])
 }
 
 /// Two slices of the same bytes are one slice.
-proof fn lemma_slice_same(v: &[u8], w: &[u8])
+pub(crate) proof fn lemma_slice_same(v: &[u8], w: &[u8])
     requires
         v@ == w@,
     ensures
@@ -169,7 +169,7 @@ fn bad_format() -> PackError {
 /// The byte string at the start of `data` and how many bytes it takes
 /// there, or an error where no byte string's bytes start `data`.
 #[inline(always)]
-fn try_read_bytes<C: VCodec>(data: &[u8]) -> (r: Result<(usize, &[u8]), PackError>)
+pub(crate) fn try_read_bytes<C: VCodec>(data: &[u8]) -> (r: Result<(usize, &[u8]), PackError>)
     ensures
         match r {
             Ok((n, v)) => n <= data.len() && data@.take(n as int) == enc_bytes::<C>(v@),
@@ -229,7 +229,7 @@ fn try_read_bytes<C: VCodec>(data: &[u8]) -> (r: Result<(usize, &[u8]), PackErro
 /// The byte string known to start `data`, and how many bytes it takes
 /// there.
 #[inline(always)]
-fn read_bytes<C: VCodec>(data: &[u8]) -> (r: (usize, &[u8]))
+pub(crate) fn read_bytes<C: VCodec>(data: &[u8]) -> (r: (usize, &[u8]))
     requires
         exists|b: Seq<u8>| b.len() <= usize::MAX && (#[trigger] enc_bytes::<C>(b)).is_prefix_of(data@),
     ensures
@@ -268,7 +268,7 @@ fn read_bytes<C: VCodec>(data: &[u8]) -> (r: (usize, &[u8]))
 /// How many bytes the byte string that starts `data` takes there,
 /// without reading it.
 #[inline(always)]
-fn bytes_len<C: VCodec>(data: &[u8]) -> (r: Option<usize>)
+pub(crate) fn bytes_len<C: VCodec>(data: &[u8]) -> (r: Option<usize>)
     ensures
         forall|b: Seq<u8>|
             b.len() <= usize::MAX && (#[trigger] enc_bytes::<C>(b)).is_prefix_of(data@) ==> r == Some(
@@ -304,7 +304,7 @@ fn bytes_len<C: VCodec>(data: &[u8]) -> (r: Option<usize>)
 
 /// Append the bytes of the byte string `v`; how many they are.
 #[inline(always)]
-fn put_bytes<C: VCodec>(v: &[u8], buf: &mut Vec<u8>) -> (n: usize)
+pub(crate) fn put_bytes<C: VCodec>(v: &[u8], buf: &mut Vec<u8>) -> (n: usize)
     ensures
         final(buf)@ == old(buf)@ + enc_bytes::<C>(v@),
         n == enc_bytes::<C>(v@).len(),
@@ -614,7 +614,7 @@ proof fn lemma_word_decides(a: Seq<u8>, b: Seq<u8>, j: int)
 /// as the end of one more such number, or, in strings shorter than
 /// that, one by one.
 #[inline]
-fn compare_bytes(a: &[u8], b: &[u8]) -> (r: Ordering)
+pub(crate) fn compare_bytes(a: &[u8], b: &[u8]) -> (r: Ordering)
     ensures
         (r is Less) == bytes_below(a@, b@),
         (r is Greater) == bytes_below(b@, a@),

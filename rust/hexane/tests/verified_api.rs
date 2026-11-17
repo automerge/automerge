@@ -1,8 +1,9 @@
 //! The verified public API (`hexane::verified`) and `Column` are two
 //! doors to one format: for the same values they save the same bytes, each
 //! loads what the other saved, and they refuse the same bytes. That holds
-//! for every value type of the verified API (numbers, `bool`, byte strings,
-//! each with nulls where it has them), and for a type of a client's own.
+//! for every value type of the verified API (numbers, `bool`, byte strings
+//! and strings, each with nulls where it has them), and for a type of a
+//! client's own.
 //!
 //! Verus proves the verified API against its own specifications. These
 //! tests are what ties those specifications to `Column`'s format, which
@@ -90,7 +91,7 @@ impl Rng {
 
 /// A value type of both APIs. A test holds its values owned. The verified
 /// API takes and gives a value in the form `lend` makes: the value itself,
-/// or for a byte string a borrow of it.
+/// or for a byte string or a string a borrow of it.
 trait Kind: VValue + ColumnValueRef + Clone + PartialEq + Debug {
     /// The old API's state for the type that writes into a buffer of
     /// its caller's.
@@ -416,6 +417,109 @@ impl Kind for Option<Vec<u8>> {
     }
 }
 
+/// A character at random: of one byte in UTF-8, or of two, three or four,
+/// the least and the greatest of each among them.
+fn a_char(rng: &mut Rng) -> char {
+    const ENDS: [char; 10] = [
+        '\0',
+        '\u{7f}',
+        '\u{80}',
+        '\u{7ff}',
+        '\u{800}',
+        '\u{d7ff}',
+        '\u{e000}',
+        '\u{ffff}',
+        '\u{10000}',
+        '\u{10ffff}',
+    ];
+    match rng.below(8) {
+        0 => ENDS[rng.below(ENDS.len())],
+        1 => char::from_u32(0x80 + rng.below(0x780) as u32).unwrap(),
+        2 => char::from_u32(0x800 + rng.below(0xd000) as u32).unwrap(),
+        3 => char::from_u32(0x1_0000 + rng.below(0x10_0000) as u32).unwrap(),
+        _ => (b'a' + rng.below(26) as u8) as char,
+    }
+}
+
+/// The character after `c` of all characters, and round to the first.
+fn char_after(c: char) -> char {
+    match c {
+        '\u{d7ff}' => '\u{e000}',
+        '\u{10ffff}' => '\0',
+        c => char::from_u32(c as u32 + 1).unwrap(),
+    }
+}
+
+/// The character before `c`, and round to the last.
+fn char_before(c: char) -> char {
+    match c {
+        '\u{e000}' => '\u{d7ff}',
+        '\0' => '\u{10ffff}',
+        c => char::from_u32(c as u32 - 1).unwrap(),
+    }
+}
+
+/// Strings: mostly short, the empty one among them, of characters of one
+/// to four bytes each; some with a length of two bytes on the wire, a few
+/// with one of three.
+impl Kind for String {
+    type OldState<'a> = RleEncoderState<'a, String>;
+
+    fn fresh(rng: &mut Rng) -> String {
+        let n = match rng.below(64) {
+            0 => 16_384 + rng.below(100),
+            1..=4 => 100 + rng.below(100),
+            _ => rng.below(4),
+        };
+        let mut s = String::new();
+        while s.len() < n {
+            s.push(a_char(rng));
+        }
+        s
+    }
+
+    fn lend(&self) -> &str {
+        self
+    }
+
+    fn keep(v: &str) -> String {
+        v.to_owned()
+    }
+
+    fn order(&self, other: &String) -> Ordering {
+        self.cmp(other)
+    }
+
+    fn old_scope(&self, c: &Column<String>, range: Range<usize>) -> Range<usize> {
+        c.scope_to_value(self.as_str(), range)
+    }
+
+    fn old_seek(&self, it: &mut hexane::Iter<'_, String>, range: Range<usize>) -> Range<usize> {
+        it.seek_to_value(self.as_str(), range)
+    }
+
+    fn old_scan(&self, it: &mut hexane::Iter<'_, String>) -> Option<usize> {
+        it.scan_to_value(self.as_str())
+    }
+
+    fn old_remap(
+        e: Encoder<'_, String>,
+        out: &mut Vec<u8>,
+        f: &dyn Fn(String) -> String,
+    ) -> Option<Range<usize>> {
+        Some(e.save_to_and_remap(out, f))
+    }
+
+    fn old_remap_unless<'a>(
+        e: Encoder<'a, String>,
+        out: &mut Vec<u8>,
+        unless: &'a String,
+        f: &dyn Fn(String) -> String,
+    ) -> Option<Range<usize>> {
+        Some(e.save_to_unless_and_remap(out, unless.as_str(), f))
+    }
+}
+
 /// A value type of a client's own, as a client compiled without Verus
 /// writes it: one of four actions, each stored as a number. Any other
 /// number is no action. The actions are declared in the order of their
@@ -674,6 +778,7 @@ macro_rules! for_each_kind {
         $f::<Option<Action>>($($arg),*);
         $f::<Vec<u8>>($($arg),*);
         $f::<Option<Vec<u8>>>($($arg),*);
+        $f::<String>($($arg),*);
     };
 }
 
@@ -851,6 +956,11 @@ fn the_bytes_of_a_column() {
     assert_eq!(
         bytes::<Vec<u8>>(&[s(b"a"), s(b"b"), s(b"ab")]),
         [0x7d, 1, b'a', 1, b'b', 2, b'a', b'b']
+    );
+    // a string is the byte string of its UTF-8: its length is in bytes
+    assert_eq!(
+        bytes::<String>(&["é".to_owned(), "é".to_owned(), String::new()]),
+        [2, 2, 0xc3, 0xa9, 0x7f, 0]
     );
     // a length past 127 is two bytes
     let long = vec![7u8; 200];
@@ -3754,6 +3864,7 @@ fn loads_refuse_bad_runs() {
     refuses::<Option<Action>>(&bad);
     refuses::<Vec<u8>>(&bad);
     refuses::<Option<Vec<u8>>>(&bad);
+    refuses::<String>(&bad);
 
     // `bool`: a run of none that is not the first; a truncated count; an
     // overlong one
@@ -3967,7 +4078,7 @@ fn loads_of_another_types_bytes() {
     }
     let mut rng = Rng(0xc405);
     for _ in 0..300 {
-        let all: [Vec<u8>; 8] = [
+        let all: [Vec<u8>; 9] = [
             both(&rng.values::<u64>(30)).0.save(),
             both(&rng.values::<i64>(30)).0.save(),
             both(&rng.values::<Option<u32>>(30)).0.save(),
@@ -3976,6 +4087,7 @@ fn loads_of_another_types_bytes() {
             both(&rng.values::<Option<Action>>(30)).0.save(),
             both(&rng.values::<Vec<u8>>(30)).0.save(),
             both(&rng.values::<Option<Vec<u8>>>(30)).0.save(),
+            both(&rng.values::<String>(30)).0.save(),
         ];
         for bytes in &all {
             cross::<u64>(bytes);
@@ -3995,8 +4107,313 @@ fn loads_of_another_types_bytes() {
             cross::<Option<Action>>(bytes);
             cross::<Vec<u8>>(bytes);
             cross::<Option<Vec<u8>>>(bytes);
+            cross::<String>(bytes);
         }
     }
+}
+
+/// What a column of strings gives is a borrow of the column, as a `&str`:
+/// it lives as long as the column is not changed, across other reads, and
+/// it is the column's own bytes and no copy of them. A value to search
+/// for is lent for the call alone. What a clone lends is the clone's.
+#[test]
+fn strings_are_lent() {
+    let last = "größer: 日本語 🦀";
+    let mut v = VerifiedColumn::<String>::new();
+    v.splice(0, 0, &["ant", "bee", "bee"]);
+    v.push(last);
+    let first: &str = v.get(0).unwrap();
+    let all: Vec<&str> = v.to_vec();
+    let mut it = v.iter_range(1, 3);
+    let (x, y) = (it.next().unwrap(), it.next().unwrap());
+    assert!(it.next().is_none());
+    assert_eq!(first, "ant");
+    assert_eq!(all, ["ant", "bee", "bee", last]);
+    assert_eq!((x, y), ("bee", "bee"));
+    // one read and another give the same bytes, in the same place
+    assert!(std::ptr::eq(first, all[0]));
+    assert!(std::ptr::eq(v.get(3).unwrap(), all[3]));
+
+    let mut it = v.iter();
+    let found = {
+        let target = String::from("bee");
+        it.seek_to_value(target.as_str(), 0..usize::MAX)
+    };
+    assert_eq!(found, 1..3);
+    let bee: &str = it.next().unwrap();
+    let at = {
+        let target = last.to_owned();
+        it.scan_to_value(target.as_str())
+    };
+    assert_eq!((bee, at, it.next()), ("bee", Some(3), None));
+
+    let w = v.clone();
+    let lent = w.get(3);
+    v.remove(3);
+    v.push("cat");
+    drop(v);
+    assert_eq!(lent, Some(last));
+    assert_eq!(w.to_vec(), ["ant", "bee", "bee", last]);
+}
+
+/// How two strings stand in the order of the values is how they stand in
+/// Rust, which is how their UTF-8 bytes stand: wherever the first
+/// difference falls, in characters of however many bytes, and however
+/// long the two are.
+#[test]
+fn the_order_of_strings_is_the_order_of_str() {
+    fn check(a: &str, b: &str) {
+        assert_eq!(<String as VValue>::compare(a, b), a.cmp(b), "{a:?} {b:?}");
+        assert_eq!(<String as VValue>::compare(b, a), b.cmp(a), "{b:?} {a:?}");
+        assert_eq!(<String as VValue>::same(a, b), a == b);
+        // as their bytes stand, for a column of byte strings
+        assert_eq!(
+            <Vec<u8> as VValue>::compare(a.as_bytes(), b.as_bytes()),
+            a.cmp(b)
+        );
+    }
+    let text = |cs: &[char]| cs.iter().collect::<String>();
+    let mut rng = Rng(0x57a1);
+    let base: Vec<char> = (0..90).map(|_| a_char(&mut rng)).collect();
+    for len in 0..=base.len() {
+        let a = text(&base[..len]);
+        check(&a, &a);
+        // what `a` starts, and what starts with it
+        for more in [1, 2, 7, 30] {
+            let mut b = a.clone();
+            b.extend((0..more).map(|_| a_char(&mut rng)));
+            check(&a, &b);
+            check(&text(&base[..len.saturating_sub(more)]), &a);
+        }
+        // a first difference at the character `d`: the next character
+        // there or the one before, or any other, of as many bytes or not;
+        // after it the same characters, others, fewer or more
+        for d in 0..len {
+            let others = [char_after(base[d]), char_before(base[d]), a_char(&mut rng)];
+            for other in others {
+                let mut b = base[..len].to_vec();
+                b[d] = other;
+                check(&a, &text(&b));
+                let mut c = b.clone();
+                for x in &mut c[d + 1..] {
+                    *x = a_char(&mut rng);
+                }
+                check(&a, &text(&c));
+                check(&text(&b), &text(&c));
+                let cut = d + 1 + rng.below(len - d);
+                check(&a, &text(&b[..cut]));
+                check(&text(&base[..cut]), &text(&b));
+                c.extend((0..rng.below(20)).map(|_| a_char(&mut rng)));
+                check(&a, &text(&c));
+            }
+        }
+    }
+    // the ends of the order, and of each length of a character
+    let ends = [
+        "",
+        "\0",
+        "\u{7f}",
+        "\u{80}",
+        "\u{7ff}",
+        "\u{800}",
+        "\u{d7ff}",
+        "\u{e000}",
+        "\u{ffff}",
+        "\u{10000}",
+        "\u{10ffff}",
+    ];
+    for (i, a) in ends.iter().enumerate() {
+        for (j, b) in ends.iter().enumerate() {
+            assert_eq!(<String as VValue>::compare(a, b), i.cmp(&j), "{a:?} {b:?}");
+        }
+    }
+}
+
+/// The order of strings is that of their bytes, a string before every
+/// longer one that starts with it: for strings that are long and differ
+/// late, or only in their lengths, in characters of every length.
+#[test]
+fn a_search_of_long_strings() {
+    let mut rng = Rng(0x7e47);
+    let stem: Vec<char> = (0..200).map(|_| a_char(&mut rng)).collect();
+    let text = |cs: &[char]| cs.iter().collect::<String>();
+    let mut strings: Vec<String> = ["", "\0", "\0\0", "\u{1}", "\u{7f}", "\u{80}", "\u{10ffff}"]
+        .map(String::from)
+        .to_vec();
+    for cut in [1, 2, 7, 8, 9, 15, 16, 17, 31, 32, 33, 63, 64, 65, 199, 200] {
+        // the stem's first `cut` characters; then with one more that is
+        // less than the stem's next, the same or greater
+        let s = text(&stem[..cut]);
+        strings.push(s.clone());
+        for last in ['\0', 'a', '\u{80}', '語', '\u{10ffff}'] {
+            let mut t = s.clone();
+            t.push(last);
+            strings.push(t);
+        }
+        if cut < 200 {
+            let mut t = stem.clone();
+            t[cut] = char_after(stem[cut]);
+            strings.push(text(&t));
+            t[cut] = char_before(stem[cut]);
+            strings.push(text(&t));
+        }
+    }
+    strings.sort();
+    strings.dedup();
+    // some of them more than once
+    let model: Vec<String> = strings
+        .iter()
+        .enumerate()
+        .flat_map(|(i, s)| vec![s.clone(); 1 + i % 3])
+        .collect();
+    for budget in [3, 64] {
+        let (v, c) = both_with(&model, budget);
+        let ws = windows(&mut rng, &v.slab_lens(), model.len());
+        for x in &strings {
+            for &(start, end) in &ws {
+                assert!(check_scope(&v, &c, &model, x, start, end));
+            }
+        }
+        // a string that is not there stands between its neighbours
+        let mut absent = text(&stem[..150]);
+        absent.push_str("\0\0\0");
+        assert!(!model.contains(&absent));
+        let at = model.iter().filter(|m| **m < absent).count();
+        assert_eq!(v.scope_to_value(absent.as_str(), 0, model.len()), at..at);
+        assert!(0 < at && at < model.len());
+    }
+}
+
+/// Strings made longer, shorter, of other characters and empty: the
+/// function is given a `String` of its own for each run, and what it
+/// hands back is copied into the column.
+#[test]
+fn a_remap_of_strings() {
+    let mut rng = Rng(0x57b3);
+    let letters = ['a', 'é', '語', '🦀', '\0'];
+    let model: Vec<String> = (0..2000)
+        .map(|i| {
+            vec![letters[i / 3 % 5]; rng.below(40)]
+                .into_iter()
+                .collect()
+        })
+        .collect();
+    let (mut v, mut c) = both_with(&model, 16);
+    assert!(v.slab_count() > 10);
+    let longer = check_remap(&mut v, &mut c, &model, |_, x| {
+        let mut y = x.clone();
+        y.push_str(&"語".repeat(100));
+        y
+    });
+    assert!(longer.iter().all(|x| x.len() >= 300));
+    let shorter = check_remap(&mut v, &mut c, &longer, |_, x| {
+        x[..x.len() - 297].to_owned()
+    });
+    assert!(shorter
+        .iter()
+        .zip(&model)
+        .all(|(s, m)| s.strip_prefix(m.as_str()) == Some("語")));
+    let upper = check_remap(&mut v, &mut c, &shorter, |_, x| x.to_uppercase());
+    assert!(upper.iter().any(|x| x.starts_with('É')));
+    let empty = check_remap(&mut v, &mut c, &upper, |_, _| String::new());
+    assert_eq!(empty, vec![String::new(); 2000]);
+    assert!(v.is_only(""));
+}
+
+/// Strings: a column of them is a column of their UTF-8 bytes, and bytes
+/// that are not UTF-8 are no string. Both loaders say so, of bytes that
+/// load as byte strings.
+#[test]
+fn loads_refuse_bad_strings() {
+    let invalid = PackError::InvalidUtf8.to_string();
+    let bad_format = PackError::BadFormat.to_string();
+    assert_ne!(invalid, bad_format);
+    // a byte that starts no character; a character that its string's end
+    // cuts short; one in more bytes than it needs; half of a surrogate
+    // pair; one past the last character; a byte from the middle of a
+    // character; such a string in a run, and second in a literal run; a
+    // character with a byte in each of two strings
+    let not_utf8: [&[u8]; 9] = [
+        &[0x7f, 1, 0xff],
+        &[0x7f, 2, 0xe6, 0x97],
+        &[0x7f, 2, 0xc0, 0x80],
+        &[0x7f, 3, 0xed, 0xa0, 0x80],
+        &[0x7f, 4, 0xf4, 0x90, 0x80, 0x80],
+        &[0x7f, 1, 0x80],
+        &[2, 1, 0xff],
+        &[0x7e, 1, b'a', 1, 0xff],
+        &[0x7e, 1, 0xc3, 1, 0xa9],
+    ];
+    for b in not_utf8 {
+        assert_eq!(refusal::<String>(b), invalid, "{b:?}");
+        assert!(check_same_load::<Vec<u8>>(b), "refused {b:?}");
+    }
+    // bytes with two faults: the loaders name the same one
+    let twice: [&[u8]; 5] = [
+        &[0x7f, 1, 0xff, 0x7f, 3, 1],
+        &[0x7f, 3, 1, 0xff],
+        &[0x7f, 1, 0xff, 0x7f, 1, 0xff],
+        &[0x7e, 1, 0xff, 1, 0xff],
+        &[2, 1, 0xff, 2, 1, 0xff],
+    ];
+    for b in twice {
+        assert!(!check_same_load::<String>(b), "loaded {b:?}");
+    }
+    // the faults of byte strings are faults of strings: a length past
+    // the data's end
+    let short: [&[u8]; 6] = [
+        &[2, 3, 1, 2],
+        &[0x7f, 3, 1, 2],
+        &[0x7e, 1, 7, 2, 9],
+        &[
+            2, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x01,
+        ],
+        &[2, 0xff, 0xff, 0xff, 0xff, 0x0f, 1, 2, 3],
+        &[2, 1],
+    ];
+    for b in short {
+        assert_eq!(refusal::<String>(b), bad_format, "{b:?}");
+    }
+    // a truncated length; an overlong one; two runs of one string; one
+    // string twice in a literal run; a run with no string; a literal run
+    // that ends early; a null run, which strings do not have
+    let bad: [&[u8]; 7] = [
+        &[2, 0x81],
+        &[2, 0x81, 0x00, 7],
+        &[2, 1, 7, 2, 1, 7],
+        &[0x7e, 1, 7, 1, 7],
+        &[2, 1, 7, 9],
+        &[0x7d, 1, 7, 0],
+        &[2, 1, 7, 0, 2],
+    ];
+    for b in bad {
+        assert!(!check_same_load::<String>(b), "loaded {b:?}");
+    }
+    // these are columns: the empty string in a run; one string after
+    // another that it is the start of; characters of two bytes, of three
+    // and of four, the last of all characters among them
+    let good: [&[u8]; 7] = [
+        &[3, 0],
+        &[0x7e, 1, 7, 2, 7, 7],
+        &[2, 1, 7, 0x7f, 0],
+        &[0x7f, 2, 0xc3, 0xa9],
+        &[2, 3, 0xe8, 0xaa, 0x9e],
+        &[0x7f, 4, 0xf0, 0x9f, 0xa6, 0x80],
+        &[0x7f, 4, 0xf4, 0x8f, 0xbf, 0xbf],
+    ];
+    for b in good {
+        assert!(check_same_load::<String>(b), "refused {b:?}");
+    }
+    let two = [0x7e, 2, 0xc3, 0xa9, 4, 0xf0, 0x9f, 0xa6, 0x80];
+    let v = VerifiedColumn::<String>::load(&two).unwrap();
+    assert_eq!(v.to_vec(), ["é", "🦀"]);
+    // strings save as their bytes do, and load as them
+    let model: Vec<String> = Rng(0x57b17e).values(200);
+    let as_bytes: Vec<Vec<u8>> = model.iter().map(|s| s.as_bytes().to_vec()).collect();
+    let saved = both(&model).0.save();
+    assert_eq!(saved, both(&as_bytes).0.save());
+    let v = VerifiedColumn::<Vec<u8>>::load(&saved).unwrap();
+    assert_eq!(new_values(&v), as_bytes);
 }
 
 /// A load with options, by both APIs: the length asked for, a fill value,
@@ -4179,6 +4596,7 @@ fn a_fill_too_long_is_an_error() {
     longest::<Action>(most, Action::Delete);
     longest::<Vec<u8>>(most, b"ab".to_vec());
     longest::<Option<Vec<u8>>>(most, None);
+    longest::<String>(most, "größer".to_owned());
 }
 
 /// Bytes at random and saved columns with a byte changed, loaded with a
@@ -4512,7 +4930,7 @@ fn dump_slabs_prints_each_slab() {
     for_each_kind!(layout_lines, &mut expected);
     // more slabs than columns: many of the columns have several
     let columns = expected.iter().filter(|l| l.starts_with("== ")).count();
-    assert_eq!(columns, 17 * 17);
+    assert_eq!(columns, 18 * 17);
     assert!(expected.len() > 20 * columns);
     for api in ["new", "old"] {
         let lines = printed(api);

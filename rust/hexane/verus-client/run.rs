@@ -959,3 +959,112 @@ fn statics() {
         vec![true, false]
     );
 }
+
+#[test]
+fn strings() {
+    let words = vec!["pear", "", "apple", "apple", "größer", "日本語", "🦀"];
+    verus_client::round_trip_text(&words);
+    verus_client::text_in_text_out("größer", "");
+    let mut col = VerifiedColumn::<String>::new();
+    col.splice(0, 0, &words);
+    assert!(verus_client::the_string_itself(&mut col, "日本語"));
+    assert_eq!(col.len(), 8);
+
+    let bytes = verus_client::fruit();
+    let back = VerifiedColumn::<String>::load(&bytes).unwrap();
+    assert_eq!(back.to_vec(), vec!["apple", "pear", "", "pear"]);
+    let long = "x".repeat(1001);
+    assert_eq!(verus_client::saved_if_short(&long), None);
+    let short = verus_client::saved_if_short(&long[..1000]).unwrap();
+    let back = VerifiedColumn::<String>::load(&short).unwrap();
+    assert_eq!(back.to_vec(), vec![&long[..1000]]);
+
+    // the order is that of the bytes, which is `str`'s own
+    verus_client::find_text("apple", "pear");
+    verus_client::find_text("", "\0");
+    verus_client::find_text("z", "é");
+    verus_client::find_text("pear", "pears");
+    verus_client::find_fruit();
+    for a in &words {
+        for b in &words {
+            assert_eq!(verus_client::text_compared(a, b), a.cmp(b));
+            let later = verus_client::later_of::<String, Leb128>(a, b);
+            assert_eq!(later, *std::cmp::max(a, b));
+        }
+    }
+    let mut sorted = VerifiedColumn::<String>::new();
+    for w in &words {
+        verus_client::insert_in_order(&mut sorted, w);
+    }
+    let mut expect = words.clone();
+    expect.sort();
+    assert_eq!(sorted.to_vec(), expect);
+
+    verus_client::exclaimed(&mut col);
+    assert_eq!(
+        col.to_vec(),
+        vec![
+            "pear!",
+            "!",
+            "apple!",
+            "apple!",
+            "größer!",
+            "日本語!",
+            "🦀!",
+            "日本語!"
+        ]
+    );
+    verus_client::remap_as_it_is(&mut col);
+    assert_eq!(verus_client::read_in_a_loop(&col).len(), 8);
+    let runs = verus_client::in_runs(&col);
+    assert_eq!(runs.len(), 7);
+    assert_eq!(
+        runs[2],
+        Run {
+            count: 2,
+            value: "apple!"
+        }
+    );
+
+    let bytes = verus_client::encode_text("ab", "çd".to_string());
+    let back = VerifiedColumn::<String>::load(&bytes).unwrap();
+    assert_eq!(back.to_vec(), vec!["ab", "çd", "ab", "ab"]);
+    let mut buf = vec![9u8];
+    verus_client::text_streamed("ab", "çd".to_string(), &mut buf);
+    assert_eq!(buf[0], 9);
+    assert_eq!(&buf[1..], &bytes[..]);
+    verus_client::load_text(&bytes);
+    // one string of one byte that is not UTF-8: it does not load
+    verus_client::load_text(&[0x7f, 1, 0xff]);
+    assert!(VerifiedColumn::<String>::load(&[0x7f, 1, 0xff]).is_err());
+    assert!(VerifiedColumn::<Vec<u8>>::load(&[0x7f, 1, 0xff]).is_ok());
+
+    // the clients that are for every value type, of strings
+    verus_client::round_trip::<String, Leb128>(&words);
+    verus_client::two_in_one_buffer::<String, Leb128>(&words, &vec![]);
+    verus_client::one_value_only::<String, Leb128>("a", "");
+    verus_client::clone_then_diverge::<String, Leb128>(&words, "c");
+    verus_client::collect_then_extend::<String, Leb128>(vec!["a", "a"], vec![], vec!["é"]);
+    verus_client::runs_in::<String, Leb128>(
+        "a",
+        "b",
+        "a",
+        vec![Run {
+            count: 2,
+            value: "",
+        }],
+    );
+    verus_client::load_with_a_length::<String, Leb128>(&words, "x", 3);
+    for n in [0, 1, 100, 70_000, usize::MAX - 3, usize::MAX] {
+        verus_client::load_a_fill::<String, Leb128>("ab", n);
+    }
+    verus_client::slabs_and_validation::<String, Leb128>(&words);
+    verus_client::load_then_validate::<String, Leb128>(&bytes);
+    verus_client::runs_in_a_window::<String, Leb128>("", "é");
+    assert_eq!(verus_client::the_third(&col), Some("apple!"));
+    let mut enc = VerifiedEncoder::<String>::new();
+    verus_client::told_by_an_append(&mut enc, "ab");
+    verus_client::told_by_an_owned(&mut enc, "çd".to_string());
+    verus_client::told_by_an_append_n(&mut enc, "ab", 2);
+    assert_eq!(enc.save(), bytes);
+}

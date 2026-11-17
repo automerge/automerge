@@ -47,9 +47,9 @@ verus! {
 /// is what a [`VerifiedColumn`] of them saves, and what a load reads
 /// back.
 ///
-/// A value given by reference (a byte string) is kept by reference
-/// until the encoder is saved, so the encoder lives no longer than
-/// `'a`.
+/// A value given by reference (a byte string or a string) is kept by
+/// reference until the encoder is saved, so the encoder lives no longer
+/// than `'a`.
 ///
 /// An encoder made with a segment budget
 /// ([`with_max_segments`](Self::with_max_segments),
@@ -266,8 +266,8 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedEncoder<'a, V, C> {
         self.put(x, n, Ghost(value.sv()));
     }
 
-    /// Give the encoder `value`, which it then owns: for a byte string,
-    /// nothing is borrowed and nothing is copied.
+    /// Give the encoder `value`, which it then owns: for a byte string
+    /// or a string, nothing is borrowed and nothing is copied.
     #[inline(always)]
     pub fn append_owned(&mut self, value: V)
         requires

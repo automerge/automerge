@@ -184,18 +184,34 @@
 //! Each says so on its own ([`told_by_an_encode`],
 //! [`told_by_an_encode_to`], [`told_by_an_encode_to_unless`]).
 //!
+//! And of strings, which a column takes and gives as `&str` and of
+//! which a specification says the characters: that a column gives back
+//! what was put in and loads from what it saves ([`round_trip_text`],
+//! [`text_in_text_out`], [`load_text`]), that a string read is the
+//! string written ([`the_string_itself`]), for strings the client wrote
+//! out ([`fruit`]) and for one whose length it finds out as it runs
+//! ([`saved_if_short`]); that strings are in the order of their UTF-8
+//! bytes, in which the search finds them and a client can ask how two
+//! stand ([`find_text`], [`find_fruit`], [`text_compared`]); that a
+//! remap is given a `String` of its own ([`exclaimed`]); and that an
+//! encoder and a state take strings borrowed and owned
+//! ([`encode_text`], [`text_streamed`]).
+//!
 //! This module exists only while Verus checks the crate.
 
 use super::{
     below_at, bytes_below, folded, head_run, lemma_run_values_add, lemma_run_values_push,
     lemma_runs_first, lemma_runs_of_values, lemma_sorted, mapped, only, refused, run_values,
-    runs_of, sorted, sorted_for, sum_of, total_len, window, Get, VCodec, VGet, VNewtype, VSpec,
-    VValue, VerifiedColumn, VerifiedEncoder, VerifiedEncoderState, VerifiedIter, VerifiedIterState,
+    runs_of, sorted, sorted_for, sum_of, total_len, total_str_len, window, Get, VCodec, VGet,
+    VNewtype, VSpec, VValue, VerifiedColumn, VerifiedEncoder, VerifiedEncoderState, VerifiedIter,
+    VerifiedIterState,
 };
 use crate::{Leb128, LoadOpts, PackError, Run};
 use std::cmp::Ordering;
 use std::ops::Range;
 use vstd::prelude::*;
+#[cfg(verus_keep_ghost)]
+use vstd::utf8::{encode_utf8, is_ascii_chars_encode_utf8};
 
 verus! {
 
@@ -4575,6 +4591,270 @@ fn read_from_the_encoded_range<'a, V: VValue<C>, C: VCodec>(vs: Vec<Get<'a, V>>,
         }
     }
     r
+}
+
+// ── Strings ─────────────────────────────────────────────────────────────────
+
+/// The bytes of strings of at most `m` bytes each: a client's own
+/// induction over [`total_str_len`], which it can read.
+proof fn lemma_total_str(vs: Seq<Seq<char>>, m: nat)
+    requires
+        forall|i: int| 0 <= i < vs.len() ==> encode_utf8(#[trigger] vs[i]).len() <= m,
+    ensures
+        total_str_len(vs) <= m * vs.len(),
+    decreases vs.len(),
+{
+    if vs.len() > 0 {
+        lemma_total_str(vs.drop_last(), m);
+        assert(m * (vs.len() - 1) + m == m * vs.len()) by (nonlinear_arith);
+    }
+}
+
+/// Strings. A column takes and gives them as `&str`, and what a
+/// specification says of one is its characters; how long one is, is
+/// how many bytes it is in UTF-8. A thousand strings of at most a
+/// thousand bytes each are few enough for `load`.
+#[allow(dead_code)]
+fn round_trip_text(input: &Vec<&str>)
+    requires
+        input@.len() <= 1000,
+        forall|i: int| 0 <= i < input@.len() ==> encode_utf8((#[trigger] input@[i])@).len() <= 1000,
+{
+    proof {
+        <&str as VGet>::lemma_svs(input@);
+        lemma_total_str(<&str as VGet>::svs(input@), 1000);
+    }
+    round_trip::<String, Leb128>(input);
+}
+
+/// What a client reads of a column of strings is the characters it
+/// wrote: from the column, and from one loaded from its saved bytes.
+#[allow(dead_code)]
+fn text_in_text_out(a: &str, b: &str)
+    requires
+        encode_utf8(a@).len() <= 1000,
+        encode_utf8(b@).len() <= 1000,
+{
+    let mut col = VerifiedColumn::<String>::new();
+    col.push(a);
+    col.push(b);
+    col.insert(1, a);
+    assert(col@ == seq![a@, a@, b@]);
+    let x = col.get(2);
+    let z = col.get(3);
+    assert(x matches Some(v) && v@ == b@);
+    assert(z is None);
+    let all = col.to_vec();
+    proof {
+        <&str as VGet>::lemma_svs(all@);
+        assert(<&str as VGet>::svs(all@)[1] == a@);
+    }
+    assert(all@.len() == 3);
+    assert(all@[1]@ == a@);
+
+    let bytes = col.save();
+    proof {
+        lemma_total_str(col@, 1000);
+    }
+    let back = VerifiedColumn::<String>::load(bytes.as_slice());
+    assert(back is Ok);
+    let back = back.unwrap();
+    let mut it = back.iter_range(1, 3);
+    let first = it.next();
+    let second = it.next();
+    let third = it.next();
+    assert(first matches Some(v) && v@ == a@);
+    assert(second matches Some(v) && v@ == b@);
+    assert(third is None);
+}
+
+/// A string read is the string written, and not only as long: no two
+/// strings have the same characters.
+#[allow(dead_code)]
+fn the_string_itself<'a>(col: &mut VerifiedColumn<String>, a: &'a str) -> (r: bool)
+    requires
+        old(col)@.len() < 1000,
+    ensures
+        r,
+{
+    col.push(a);
+    let n = col.len();
+    let x = col.get(n - 1);
+    assert(x matches Some(v) && v@ == a@);
+    match x {
+        Some(v) => {
+            proof {
+                <&str as VGet>::lemma_sv_inj(v, a);
+            }
+            assert(v == a);
+            // and so the standard library's comparison says, as it runs
+            v == a
+        },
+        None => false,
+    }
+}
+
+/// Strings the client wrote out: a column holds their characters, the
+/// empty one among them, and what it saves holds them.
+#[allow(dead_code)]
+fn fruit() -> (r: Vec<u8>)
+    ensures
+        VerifiedColumn::<String>::values(r@) == seq!["apple"@, "pear"@, ""@, "pear"@],
+{
+    let mut col = VerifiedColumn::<String>::new();
+    col.push("apple");
+    col.push("pear");
+    col.push("");
+    col.push("pear");
+    let x = col.get(1);
+    let y = col.get(2);
+    proof {
+        reveal_strlit("pear");
+        reveal_strlit("");
+    }
+    assert(x matches Some(v) && v@.len() == 4 && v@[0] == 'p' && v@[3] == 'r');
+    assert(y matches Some(v) && v@.len() == 0);
+    col.save()
+}
+
+/// A client that does not know how long its string is finds out as it
+/// runs, from the string's bytes: one of at most a thousand bytes is
+/// saved as bytes that `load` is sure to take.
+#[allow(dead_code)]
+fn saved_if_short(a: &str) -> (r: Option<Vec<u8>>)
+    ensures
+        r matches Some(bytes) ==> VerifiedColumn::<String>::values(bytes@) == seq![a@],
+        encode_utf8(a@).len() <= 1000 ==> r is Some,
+{
+    if a.as_bytes().len() > 1000 {
+        return None;
+    }
+    let mut col = VerifiedColumn::<String>::new();
+    col.push(a);
+    let bytes = col.save();
+    proof {
+        lemma_total_str(col@, 1000);
+    }
+    let back = VerifiedColumn::<String>::load(bytes.as_slice());
+    assert(back is Ok);
+    assert(back->Ok_0@ == seq![a@]);
+    Some(bytes)
+}
+
+/// Strings are in the order of their UTF-8 bytes ([`bytes_below`] of
+/// them), which is the order Rust has for `str`. Of two strings in
+/// that order the search finds each at its place: the client proves
+/// that the column is in order from the order's definition and its
+/// laws, which it can read.
+#[allow(dead_code)]
+fn find_text(a: &str, b: &str)
+    requires
+        bytes_below(encode_utf8(a@), encode_utf8(b@)),
+{
+    let mut col = VerifiedColumn::<String>::new();
+    col.push(a);
+    col.push(b);
+    assert(col@ == seq![a@, b@]);
+    proof {
+        <String as VSpec>::lemma_below(a@, b@, a@);
+        <String as VSpec>::lemma_below(b@, b@, b@);
+        assert(sorted::<String>(col@));
+        lemma_sorted::<String>(col@, a@);
+        lemma_sorted::<String>(col@, b@);
+        assert(col@.subrange(0, 2) =~= col@);
+        assert(col@[0] == a@ && col@[1] == b@);
+    }
+    let r = col.scope_to_value(a, 0, 2);
+    assert(r.start == 0 && r.end == 1);
+    let r = col.scope_to_value(b, 0, 2);
+    assert(r.start == 1 && r.end == 2);
+}
+
+/// Of two strings it wrote out, a client can say which is first: these
+/// are ASCII, so their bytes are their characters, and `a` is before
+/// `p`.
+#[allow(dead_code)]
+fn find_fruit() {
+    let a = "apple";
+    let p = "pear";
+    proof {
+        reveal_strlit("apple");
+        reveal_strlit("pear");
+        is_ascii_chars_encode_utf8(a@);
+        is_ascii_chars_encode_utf8(p@);
+        assert(encode_utf8(a@)[0] == 'a' as u8);
+        assert(encode_utf8(p@)[0] == 'p' as u8);
+        assert(encode_utf8(a@).take(0) =~= encode_utf8(p@).take(0));
+        assert(below_at(encode_utf8(a@), encode_utf8(p@), 0));
+    }
+    find_text(a, p);
+}
+
+/// A client can ask how two strings stand in the order, and is told by
+/// their bytes.
+#[allow(dead_code)]
+fn text_compared(a: &str, b: &str) -> (r: Ordering)
+    ensures
+        (r is Less) == bytes_below(encode_utf8(a@), encode_utf8(b@)),
+        (r is Equal) == (a@ == b@),
+{
+    <String as VValue<Leb128>>::compare(a, b)
+}
+
+/// Strings, each with a `!` at its end: the function is given a
+/// `String` of its own, and may hand back that one.
+#[allow(dead_code)]
+fn exclaimed(col: &mut VerifiedColumn<String>)
+    ensures
+        final(col)@.len() == old(col)@.len(),
+        forall|i: int| 0 <= i < old(col)@.len() ==> final(col)@[i] == old(col)@[i].push('!'),
+{
+    let f = |v: String| -> (w: String)
+        ensures
+            w@ == v@.push('!'),
+        {
+            let mut v = v;
+            v.push('!');
+            v
+        };
+    col.remap(f);
+}
+
+/// Strings, borrowed and owned: an encoder takes each, and what is
+/// saved holds their characters.
+#[allow(dead_code)]
+fn encode_text<'a>(a: &'a str, b: String) -> (r: Vec<u8>)
+    ensures
+        VerifiedColumn::<String>::values(r@) == seq![a@, b@, a@, a@],
+{
+    let mut x = VerifiedEncoder::<String>::new();
+    x.append(a);
+    x.append_owned(b);
+    x.append_n(a, 2);
+    assert(x@ =~= seq![a@, b@, a@, a@]);
+    x.save()
+}
+
+/// Strings, borrowed and owned, through a state into a buffer: it
+/// holds what it did, then the column of them.
+#[allow(dead_code)]
+fn text_streamed<'a>(a: &'a str, b: String, buf: &mut Vec<u8>)
+    ensures
+        final(buf)@ == old(buf)@ + VerifiedColumn::<String>::encoding(seq![a@, b@, a@, a@]),
+{
+    let mut x = VerifiedEncoderState::<String>::new();
+    x.append(buf, a);
+    x.append_owned(buf, b);
+    x.append_n(buf, a, 2);
+    assert(x@ =~= seq![a@, b@, a@, a@]);
+    x.finish(buf);
+}
+
+/// What loads as strings, saves back to the bytes it was loaded from:
+/// for any bytes, of any provenance.
+#[allow(dead_code)]
+fn load_text(bytes: &[u8]) {
+    load_then_save::<String, Leb128>(bytes);
 }
 
 } // verus!

@@ -34,28 +34,43 @@
 //!   load refuses bytes that hold a number that is none of its values;
 //! * a byte string: `Vec<u8>`;
 //! * `Option<T>` of a number, a client's type or a byte string `T`:
-//!   `None` is a column's null.
+//!   `None` is a column's null;
+//! * a string: `String`. (There is no `Option<String>` yet.)
 //!
 //! A column takes and gives a value in the type's form, [`Get<'a, V>`](Get).
 //! For a number, an `Option` of one or a `bool` that is the type itself.
 //! A column of `Vec<u8>` takes a byte string as a slice (`&[u8]`) and
 //! gives one as a slice borrowed from the column, with no copy; one of
-//! `Option<Vec<u8>>` takes and gives `Option<&[u8]>`.
+//! `Option<Vec<u8>>` takes and gives `Option<&[u8]>`. A column of
+//! `String` takes a string as a `&str` and gives one as a `&str`
+//! borrowed from the column, with no copy.
+//!
+//! A column of strings holds UTF-8, as a `str` does. On the wire a
+//! string is the byte string of its UTF-8, and a load refuses bytes
+//! where a string is not UTF-8 ([`PackError::InvalidUtf8`]). This
+//! module has no `unsafe`, so what makes a `&str` of a column's bytes is
+//! the standard library's check of them (`core::str::from_utf8`), at
+//! each read: it is proved to find them UTF-8, and it looks at every
+//! byte of the string. [`Column`](crate::Column) reads a string without
+//! that check.
 //!
 //! In a specification a column is the sequence of its values (`col@`),
 //! each as its type's [`VSpec::S`]: a number as itself, a byte string as
-//! its bytes (`Seq<u8>`). What a value in a column's form is there is its
-//! `sv`, and `svs` of several ([`VGet`]): for a slice `v` that is `v@`,
-//! and for a number the number. What a value of the type itself is
-//! there (a `Vec<u8>` for a byte string) is its `VSpec::sv_of`.
+//! its bytes (`Seq<u8>`), a string as its characters (`Seq<char>`). What
+//! a value in a column's form is there is its `sv`, and `svs` of several
+//! ([`VGet`]): for a slice or a `&str` `v` that is `v@`, and for a number
+//! the number. What a value of the type itself is there (a `Vec<u8>` for
+//! a byte string, a `String` for a string) is its `VSpec::sv_of`.
 //!
 //! The values of a type are in an order (`VSpec::below`), which a
 //! search goes by: numbers in the order of numbers, `false` before
 //! `true`, byte strings in the order of their bytes with a string before
-//! every longer one that starts with it (`bytes_below`), and `None`
-//! before every `Some`. That is the order Rust has for these types
-//! (`Ord`). A client's type is in the order of the numbers it is stored
-//! as, whatever order it may have in Rust.
+//! every longer one that starts with it (`bytes_below`), strings in
+//! that order of their UTF-8 bytes (`bytes_below` of
+//! `vstd::utf8::encode_utf8` of their characters), and `None` before
+//! every `Some`. That is the order Rust has for these types (`Ord`). A
+//! client's type is in the order of the numbers it is stored as,
+//! whatever order it may have in Rust.
 //!
 //! The second parameter of `VerifiedColumn<V, C>` is the codec the
 //! column's numbers are written with, a [`VCodec`]. It is [`Leb128`]
@@ -137,7 +152,8 @@
 //! * [`remap`](VerifiedColumn::remap) puts in each place what a function
 //!   of the client's gave for the value that was there (`mapped`). The
 //!   function is handed a value of the type itself (for a byte string a
-//!   `Vec<u8>` of its own) and has to accept every value of the column.
+//!   `Vec<u8>` of its own, for a string a `String`) and has to accept
+//!   every value of the column.
 //!   Nothing is assumed of it: what it gives is said by its own
 //!   `ensures`, and by nothing else;
 //! * `clone` gives a column with the same values. It is a column of its
@@ -194,7 +210,8 @@
 //! functions of a column type (`VerifiedColumn::<V>::valid(bytes)`),
 //! `on` and `before` are of a state (`state.on(bytes)`),
 //! `size_bound` is one of a value type (for byte strings it counts their
-//! bytes, as `total_len` of them), `only`, `sorted`, `sorted_for`,
+//! bytes, as `total_len` of them, and for strings their UTF-8 bytes, as
+//! `total_str_len`), `only`, `sorted`, `sorted_for`,
 //! `bytes_below`, `mapped`, `folded`, `window`, `past`, `head_run`,
 //! `runs_of`, `run_values`, `fill_of` and `sum_of` are of this module,
 //! and `lemma_save_unique`, `lemma_encoding`, `lemma_no_bytes`,
@@ -259,7 +276,12 @@
 //! `nonzero_internals` (the crate is checked with it on). A column of
 //! byte strings leans on more of them than one of numbers does: that a
 //! slice is its bytes and no more, that a part of a slice is that part of
-//! its bytes, and the copy of a slice into a `Vec`. `clone` leans on
+//! its bytes, and the copy of a slice into a `Vec`. One of strings
+//! leans on those of `str` and `String` besides: that the bytes of a
+//! `str` are the UTF-8 of its characters (`as_bytes`), what the copy of a
+//! `str` into a `String` holds, and what a `String` lends (`as_str`). Of
+//! UTF-8 itself nothing is assumed: Verus's library proves what is used
+//! of it here (`vstd::utf8`). `clone` leans on
 //! those of the clones it is made of: that a clone of a `Vec` is as long
 //! and holds a clone of each item, that a clone of an `Option` is one of
 //! what it holds, and that a clone of an integer is that integer. The
@@ -294,6 +316,17 @@
 //! * two specifications of standard-library calls that Verus has none
 //!   for: replacing a range of a `Vec` of bytes (`rle::writer::splice_bytes`)
 //!   and of a `Vec` of slabs (`index::splice_vec`);
+//! * for a column of strings, two more things that Verus does not say
+//!   (in `verified::text`). One is a specification of the standard
+//!   library's `core::str::from_utf8`: that the `str` it gives is of the
+//!   bytes it was given, that it gives one for all bytes that are UTF-8,
+//!   and that it does not panic. (With it goes the name of its error
+//!   type, `Utf8Error`, of which nothing is said.) Verus wants the
+//!   specification of a public function to be public: a crate that is
+//!   checked together with this one has this specification of
+//!   `from_utf8`, and cannot give one of its own. The other is that two
+//!   `str`s of the same characters are one `str` (`axiom_str_same`),
+//!   which Verus says of slices and not of `str`;
 //! * three helpers of which nothing is assumed: an addition of counts
 //!   whose sum the proofs take as unknown (`rle::writer::add`), the reuse
 //!   of a buffer (`recycle`), and a constant (`carry_budget`).
@@ -358,6 +391,7 @@ pub(crate) mod codec;
 pub(crate) mod counts;
 mod encoder;
 pub(crate) mod model;
+pub(crate) mod text;
 pub(crate) mod value;
 
 // spec functions exist only when Verus compiles the crate
@@ -367,6 +401,8 @@ pub use crate::iter_core::{past, window};
 pub use bytes::{below_at, bytes_below, total_len, total_len_opt};
 pub use codec::VCodec;
 pub use encoder::{VerifiedEncoder, VerifiedEncoderState};
+#[cfg(verus_keep_ghost)]
+pub use text::total_str_len;
 pub use value::{refused, VNewtype, VPack};
 
 use crate::bool_edit::{BoolModel, BoolRecoder};
@@ -466,12 +502,13 @@ const MAX_SEG: usize = 64;
 // ── What a value is to a client ─────────────────────────────────────────────
 
 /// The form in which a column gives a value and takes one: the value
-/// itself for a number or a `bool`, and for bytes a borrowed slice. The
-/// forms are this crate's: no other type can implement this trait.
+/// itself for a number or a `bool`, for bytes a borrowed slice, and for
+/// a string a `&str`. The forms are this crate's: no other type can
+/// implement this trait.
 ///
 /// A column's specifications speak of values as `S`: `v.sv()` is the
-/// value `v` there. For a number that is the number, and for a slice it
-/// is the slice's bytes (`v@`).
+/// value `v` there. For a number that is the number, for a slice it is
+/// the slice's bytes and for a `&str` its characters (`v@`).
 pub trait VGet: Copy + seal::GetSeal {
     /// What a value is in a specification.
     type S;
@@ -571,13 +608,14 @@ impl VGet for bool {
 /// implemented outside this crate.
 pub trait VSpec: Sized + seal::SpecSeal {
     /// What a value is in a specification: for a number, the number,
-    /// and for a byte string its bytes (`Seq<u8>`). A column of the type
-    /// is a sequence of these (`col@`).
+    /// for a byte string its bytes (`Seq<u8>`) and for a string its
+    /// characters (`Seq<char>`). A column of the type is a sequence of
+    /// these (`col@`).
     type S;
 
     /// What the value `v` of the type is in a specification: `v` itself
-    /// for a number, an `Option` of one or a `bool`, and for a byte
-    /// string its bytes (`v@`).
+    /// for a number, an `Option` of one or a `bool`, for a byte string
+    /// its bytes and for a string its characters (`v@`).
     spec fn sv_of(v: Self) -> Self::S;
 
     /// Whether `a` comes before `b` in the order of the type's values.
@@ -585,8 +623,10 @@ pub trait VSpec: Sized + seal::SpecSeal {
     /// number ([`VNewtype`]) in the order of the numbers it is stored as
     /// ([`VPack::num`]); `false` comes before `true`; byte strings are
     /// in the order of slices ([`bytes_below`]: byte by byte, and a
-    /// byte string before every longer one that starts with it); and a
-    /// null comes before every value.
+    /// byte string before every longer one that starts with it);
+    /// strings are in that order of their UTF-8 bytes (`bytes_below` of
+    /// `encode_utf8` of their characters); and a null comes before every
+    /// value.
     spec fn below(a: Self::S, b: Self::S) -> bool;
 
     /// The order is a strict total order: no value comes before itself,
@@ -605,13 +645,14 @@ pub trait VSpec: Sized + seal::SpecSeal {
 pub trait VForm<'a>: VSpec {
     /// The form: for a number, an `Option` of one or a `bool`, the
     /// type itself; for `Vec<u8>`, `&'a [u8]`; for `Option<Vec<u8>>`,
-    /// `Option<&'a [u8]>`.
+    /// `Option<&'a [u8]>`; for `String`, `&'a str`.
     type Get: VGet<S = <Self as VSpec>::S>;
 }
 
 /// The form in which a column of `V` gives a value and takes one
 /// ([`VForm`]): `V` itself for a number, an `Option` of one or a
-/// `bool`, and a borrowed slice for a byte string.
+/// `bool`, a borrowed slice for a byte string and a `&str` for a
+/// string.
 pub type Get<'a, V> = <V as VForm<'a>>::Get;
 
 impl<T: VPack> seal::SpecSeal for T {
@@ -882,7 +923,7 @@ pub(crate) trait Owned<C>: seal::Sealed<C> {
 /// These are `u64`, `i64`, `u32`, `i32`, `usize`, `NonZeroU32` and every
 /// type that says which of them it is stored as ([`VNewtype`]); byte
 /// strings (`Vec<u8>`); an `Option` of any of those, whose `None` is a
-/// column's null; and `bool`.
+/// column's null; strings (`String`); and `bool`.
 #[allow(private_bounds)]
 pub trait VValue<C: VCodec = Leb128>: seal::Sealed<C> + Owned<C> {
     /// No column of the values `vs` saves to more bytes than this.
