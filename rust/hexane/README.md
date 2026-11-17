@@ -290,6 +290,12 @@ the proofs live beside the code in `verus!` blocks, and a normal build
 compiles them away. To check them, run `cargo verus verify -p hexane
 --features bijou64,vstd/nonzero_internals` with Verus installed.
 
+The verified API (`hexane::verified`) has acceptance clients in
+`src/verified/client_proof.rs`: functions written as a user of the API
+would write them, which that run proves. To prove them again as a crate
+outside hexane, from what hexane exports alone, see
+`verus-client/README.md`.
+
 **Proved:**
 
 * The LEB128 and bijou64 codecs: each value has exactly one encoding.
