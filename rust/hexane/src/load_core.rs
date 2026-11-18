@@ -313,7 +313,7 @@ impl<'a, E, X, W, G, LD> LoadCore<'a, E, X, W, G, LD> where
             r is Err ==> {
                 ||| self.failed
                 ||| !LD::accepts(self.ld.data())
-                ||| !G::plain()
+                ||| G::may_refuse(LD::values_of(self.ld.data()).map_values(|v: <X::D as Decode>::Item| E::own(v)))
                 ||| LD::values_of(self.ld.data()).len() > usize::MAX - 3
                 ||| expected matches Some(e) && e != LD::values_of(self.ld.data()).len()
             },
@@ -324,9 +324,6 @@ impl<'a, E, X, W, G, LD> LoadCore<'a, E, X, W, G, LD> where
         let ghost data = self.ld.data();
         let mut core = self;
         let acc = G::accumulates_exec();
-        proof {
-            G::lemma_plain();
-        }
         if acc {
             // the runs left must pass through the attribution too
             loop
@@ -335,6 +332,7 @@ impl<'a, E, X, W, G, LD> LoadCore<'a, E, X, W, G, LD> where
                     !core.failed,
                     G::accumulates(),
                     core.ld.data() == data,
+                    data == self.ld.data(),
                 ensures
                     core.inv(),
                     !core.failed,
@@ -347,7 +345,9 @@ impl<'a, E, X, W, G, LD> LoadCore<'a, E, X, W, G, LD> where
                     Ok(None) => break,
                     Err(e) => {
                         proof {
-                            G::lemma_plain();
+                            G::lemma_may_refuse(
+                                LD::values_of(data).map_values(|v: <X::D as Decode>::Item| E::own(v)),
+                            );
                         }
                         return Err(e);
                     },
@@ -459,12 +459,17 @@ impl<'a, E, X, W, G, LD> LoadCore<'a, E, X, W, G, LD> where
             }
             lemma_slab_total(s, len);
         }
+        proof {
+            lemma_vals_own::<E, X>(s);
+            let owned = LD::values_of(data).map_values(|v: <X::D as Decode>::Item| E::own(v));
+            assert(crate::cursor::vals_of::<E>(s) =~= owned);
+            // weights accumulated may count the items otherwise than the
+            // slabs do: nothing is said of such a model's loads
+            G::lemma_may_refuse(owned);
+        }
         match G::load_check(ws.as_slice(), slabs.as_slice(), len, lo, hi) {
             Ok(()) => {},
             Err(e) => return Err(e),
-        }
-        proof {
-            lemma_vals_own::<E, X>(s);
         }
         match ColumnCore::<E, W, I, G>::from_slabs(slabs, ws, max_segments) {
             Some(c) => Ok(c),

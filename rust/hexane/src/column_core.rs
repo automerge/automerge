@@ -95,7 +95,7 @@ use crate::remap::{Encodes, Mapping};
 #[cfg(verus_keep_ghost)]
 use crate::splices::applied;
 use crate::splices::{wrong_columns, Normalized};
-use crate::weights::{DeltaModel, LenModel, PrefixModel};
+use crate::weights::{CopyWeigh, DeltaModel, PrefixModel};
 use std::marker::PhantomData;
 use std::ops::{Add, AddAssign, Range, SubAssign};
 use vstd::prelude::*;
@@ -262,6 +262,13 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> ColumnCore<E, W, I, G> {
         proof {
             self.lemma_view();
         }
+    }
+
+    /// A column without its parts has no slabs.
+    pub(crate) proof fn lemma_no_parts(&self)
+        ensures
+            !self.ready() ==> self.slabs_spec().len() == 0,
+    {
     }
 
     /// [`lemma_column`](Self::lemma_column) for a proof, which has no
@@ -1061,19 +1068,23 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> ColumnCore<E, W, I, G> {
     }
 }
 
-/// A plain column's core: one weighed by its slabs' item counts alone.
-impl<E: Slabs, I: IndexOps<usize>> ColumnCore<E, usize, I, LenModel> {
+/// A core whose weight model's columns can be copied
+/// (`weights::CopyWeigh`).
+impl<E: Slabs, W: Clone, I: IndexOps<W>, G: CopyWeigh<E, W>> ColumnCore<E, W, I, G> {
     /// Parts of their own for the same column: a clone of the slabs and
     /// a clone of the index, as the old API's `clone` makes them.
     #[inline]
     fn dup_parts(p: &Parts<E::Tail, I>, Ghost(max): Ghost<usize>) -> (r: Parts<E::Tail, I>)
         requires
-            parts_ok::<E, usize, I, LenModel>(*p, max),
+            parts_ok::<E, W, I, G>(*p, max),
         ensures
-            parts_ok::<E, usize, I, LenModel>(r, max),
+            parts_ok::<E, W, I, G>(r, max),
             vals_of::<E>(r.slabs@) == vals_of::<E>(p.slabs@),
             r.counter == p.counter,
     {
+        proof {
+            G::lemma_copy_weight();
+        }
         let r = Parts {
             slabs: p.slabs.clone(),
             index: p.index.ix_copy(),
@@ -1087,6 +1098,7 @@ impl<E: Slabs, I: IndexOps<usize>> ColumnCore<E, usize, I, LenModel> {
                 &&& E::ok(#[trigger] t[j])
                 &&& E::vals(t[j]) == E::vals(s[j])
                 &&& t[j].len == s[j].len
+                &&& s[j].same(t[j])
             } by {
                 assert(cloned::<Slab<E::Tail>>(s[j], t[j]));
                 E::lemma_copy(s[j], t[j]);
@@ -1094,12 +1106,11 @@ impl<E: Slabs, I: IndexOps<usize>> ColumnCore<E, usize, I, LenModel> {
             let f = |x: Slab<E::Tail>| E::vals(x);
             assert(t.map_values(f) =~= s.map_values(f));
             assert(slab_lens(t) =~= slab_lens(s));
-            assert forall|j: int| 0 <= j < t.len() implies #[trigger] <LenModel as Weigh<
-                E,
-                usize,
-            >>::wrel(r.index.ws()[j], t[j]) by {
-                assert(<LenModel as Weigh<E, usize>>::wrel(p.index.ws()[j], s[j]));
+            assert forall|j: int| 0 <= j < t.len() implies #[trigger] G::wrel(r.index.ws()[j], t[j]) by {
+                assert(G::wrel(p.index.ws()[j], s[j]));
+                G::lemma_copy_wrel(p.index.ws()[j], s[j], t[j]);
             }
+            G::lemma_copy_dom(s, t);
         }
         r
     }
@@ -1773,7 +1784,7 @@ fn slab_of(prefix: &[usize], row: usize) -> (r: usize)
 
 // Outside `verus!`: a clone is the same column (std's `Vec::clone` and the
 // index's own `Clone`), trusted like the derived clones of verified state.
-// For a plain column over the tree index it is proved: `duplicate` above
+// For a column whose weights can be copied it is proved: `duplicate` above
 // runs the same two clones, and the verified API calls that one.
 impl<T: Copy + Clone + std::fmt::Debug + Default, I: Clone> Clone for Parts<T, I> {
     fn clone(&self) -> Self {

@@ -417,6 +417,7 @@ pub(crate) mod codec;
 pub(crate) mod counts;
 mod decoder;
 mod encoder;
+pub(crate) mod kind;
 pub(crate) mod model;
 pub(crate) mod text;
 pub(crate) mod value;
@@ -433,17 +434,18 @@ pub use decoder::{
     head_len, head_run_max, lemma_head_len, lemma_head_run_max, scan_of, scan_taken,
 };
 pub use encoder::{VerifiedEncoder, VerifiedEncoderState};
+pub use kind::{LenIndex, VIndex, VKeeps};
 #[cfg(verus_keep_ghost)]
 pub use text::total_str_len;
 pub use value::{refused, VNewtype, VPack};
 
 use crate::bool_edit::{BoolModel, BoolRecoder};
 use crate::bool_wire::BoolReads;
-use crate::btree::SlabBTree;
+use crate::btree::{SlabAggregate, SlabBTree};
 use crate::column::Slab;
 use crate::copy::NoRuns;
 #[cfg(verus_keep_ghost)]
-use crate::cursor::{lemma_lens_ok, lemma_vals_own, lemma_vals_unit, slab_lens};
+use crate::cursor::{lemma_lens_ok, lemma_vals_own, lemma_vals_unit, slab_lens, Weigh};
 use crate::cursor::{ReadsAgree, RunFeed, Slabs};
 #[cfg(verus_keep_ghost)]
 use crate::fenwick::{sum, total};
@@ -461,7 +463,8 @@ use crate::rle::edit::RleModel;
 use crate::rle::enc::REncoder;
 use crate::{Leb128, LoadOpts, MaybeFill, PackError, Run};
 use counts::VB;
-use model::{Core, Model, Streams};
+use kind::KCore;
+use model::{Model, Streams};
 use std::cmp::Ordering;
 use std::marker::PhantomData;
 use std::ops::Range;
@@ -1220,16 +1223,16 @@ impl<'a, 't, V: VValue<C>, C: VCodec> Probe<Get<'a, V>> for VProbe<'t, V, C> {
 /// `target` can tell. Where they are not, some range of the places the
 /// cursor had left.
 #[inline(always)]
-fn seek_sorted<'a, 't, V: VValue<C>, C: VCodec>(
+fn seek_sorted<'a, 't, V: VValue<C>, C: VCodec, W: SlabAggregate>(
     it: ICore<<V::X as Decoders<'a>>::D>,
     slabs: &'a [Slab<<V::E as Slabs>::Tail>],
-    index: &SlabBTree<usize>,
+    index: &SlabBTree<W>,
     target: Get<'t, V>,
 ) -> (r: (usize, usize))
     requires
         it.wf::<V::X>(slabs@),
         index.ok(),
-        wlens::<usize, SlabBTree<usize>>(index.ws()) == slab_lens(slabs@),
+        wlens::<W, SlabBTree<W>>(index.ws()) == slab_lens(slabs@),
     ensures
         ({
             let w = <Get<'a, V> as VGet>::svs(it.out::<V::X>(slabs@));
@@ -1250,14 +1253,14 @@ fn seek_sorted<'a, 't, V: VValue<C>, C: VCodec>(
     let find = |t: usize| -> (r: (usize, usize))
         requires
             index.ok(),
-            wlens::<usize, SlabBTree<usize>>(index.ws()) == slab_lens(slabs@),
+            wlens::<W, SlabBTree<W>>(index.ws()) == slab_lens(slabs@),
         ensures
             find_ok(slabs@, t, r),
         {
             let r = index.ix_find(t);
             proof {
-                assert(index.ws().map_values(|w: usize| <SlabBTree<usize> as IndexOps<usize>>::wlen(w))
-                    =~= wlens::<usize, SlabBTree<usize>>(index.ws()));
+                assert(index.ws().map_values(|w: W| <SlabBTree<W> as IndexOps<W>>::wlen(w))
+                    =~= wlens::<W, SlabBTree<W>>(index.ws()));
             }
             // past the slabs, the whole position lies beyond them
             if r.0 >= slabs.len() {
@@ -1269,15 +1272,15 @@ fn seek_sorted<'a, 't, V: VValue<C>, C: VCodec>(
     let start_of = |i: usize| -> (n: usize)
         requires
             index.ok(),
-            wlens::<usize, SlabBTree<usize>>(index.ws()) == slab_lens(slabs@),
+            wlens::<W, SlabBTree<W>>(index.ws()) == slab_lens(slabs@),
             i <= slabs@.len(),
         ensures
             n == sum(slab_lens(slabs@), 0, i as int),
         {
             let n = index.ix_before(i);
             proof {
-                assert(index.ws().map_values(|w: usize| <SlabBTree<usize> as IndexOps<usize>>::wlen(w))
-                    =~= wlens::<usize, SlabBTree<usize>>(index.ws()));
+                assert(index.ws().map_values(|w: W| <SlabBTree<W> as IndexOps<W>>::wlen(w))
+                    =~= wlens::<W, SlabBTree<W>>(index.ws()));
             }
             n
         };
@@ -1852,11 +1855,19 @@ pub proof fn lemma_after_edits(n: usize, k: nat)
 
 /// A column of values of type `V`: the sequence `self@`. Its numbers are
 /// written with the codec `C`.
-pub struct VerifiedColumn<V: VValue<C>, C: VCodec = Leb128> {
-    core: Core<V::E>,
+///
+/// The third parameter is the kind of index the column is kept with
+/// ([`VIndex`]). A plain column's is [`LenIndex`], which need not be
+/// written: `VerifiedColumn<V>` and `VerifiedColumn<V, C>` are plain
+/// columns. Every method is of every kind's, the constructors and the
+/// loads too: `VerifiedColumn::<V>::new()` is a plain column, and where
+/// the type is known otherwise, `VerifiedColumn::new()` is of the kind
+/// it says.
+pub struct VerifiedColumn<V: VValue<C>, C: VCodec = Leb128, K: VIndex<V, C> = LenIndex> {
+    core: KCore<V, C, K>,
 }
 
-impl<V: VValue<C>, C: VCodec> View for VerifiedColumn<V, C> {
+impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> View for VerifiedColumn<V, C, K> {
     type V = Seq<V::S>;
 
     closed spec fn view(&self) -> Seq<V::S> {
@@ -1864,7 +1875,7 @@ impl<V: VValue<C>, C: VCodec> View for VerifiedColumn<V, C> {
     }
 }
 
-impl<V: VValue<C>, C: VCodec> Default for VerifiedColumn<V, C> {
+impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> Default for VerifiedColumn<V, C, K> {
     /// An empty column.
     fn default() -> (r: Self)
         ensures
@@ -1874,7 +1885,7 @@ impl<V: VValue<C>, C: VCodec> Default for VerifiedColumn<V, C> {
     }
 }
 
-impl<V: VValue<C>, C: VCodec> Clone for VerifiedColumn<V, C> {
+impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> Clone for VerifiedColumn<V, C, K> {
     /// A column of its own with the same values, which counts the edits
     /// this one does.
     fn clone(&self) -> (r: Self)
@@ -1899,7 +1910,7 @@ pub trait ExExtend<A> {
     fn extend<T>(&mut self, iter: T) where T: IntoIterator<Item = A>;
 }
 
-impl<'v, V: VValue<C>, C: VCodec> Extend<Get<'v, V>> for VerifiedColumn<V, C> {
+impl<'v, V: VValue<C>, C: VCodec, K: VIndex<V, C>> Extend<Get<'v, V>> for VerifiedColumn<V, C, K> {
     /// Append the values that `iter` gives: what
     /// [`splice_iter`](VerifiedColumn::splice_iter) does at the column's
     /// end, and specified as that is. The column counts an edit more if
@@ -1930,7 +1941,7 @@ impl<'v, V: VValue<C>, C: VCodec> Extend<Get<'v, V>> for VerifiedColumn<V, C> {
 }
 
 #[cfg(verus_keep_ghost)]
-impl<'v, V: VValue<C>, C: VCodec> FromIteratorSpecImpl<Get<'v, V>> for VerifiedColumn<V, C> {
+impl<'v, V: VValue<C>, C: VCodec, K: VIndex<V, C>> FromIteratorSpecImpl<Get<'v, V>> for VerifiedColumn<V, C, K> {
     /// A column collected from an iterator holds the values that the
     /// iterator was to give.
     open spec fn from_iter_ensures(remaining: Seq<Get<'v, V>>, will_return_none: bool, s: Self) -> bool {
@@ -1938,7 +1949,7 @@ impl<'v, V: VValue<C>, C: VCodec> FromIteratorSpecImpl<Get<'v, V>> for VerifiedC
     }
 }
 
-impl<'v, V: VValue<C>, C: VCodec> FromIterator<Get<'v, V>> for VerifiedColumn<V, C> {
+impl<'v, V: VValue<C>, C: VCodec, K: VIndex<V, C>> FromIterator<Get<'v, V>> for VerifiedColumn<V, C, K> {
     /// A column of the values that `iter` gives, which is what
     /// `collect()` returns. Verus's specification of `FromIterator`
     /// states it for an iterator that keeps to what Verus asks of every
@@ -1959,7 +1970,8 @@ impl<'v, V: VValue<C>, C: VCodec> FromIterator<Get<'v, V>> for VerifiedColumn<V,
     }
 }
 
-// The saved form
+// The saved form. It is the same for every kind of index, and is
+// spoken of as a plain column's: `VerifiedColumn::<V, C>::valid(d)`.
 impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
     /// `d` is a saved column: the canonical encoding of some values.
     pub closed spec fn valid(d: Seq<u8>) -> bool {
@@ -2021,7 +2033,8 @@ impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
     }
 }
 
-impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
+// The constructors.
+impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
     /// An empty column.
     pub fn new() -> (r: Self)
         ensures
@@ -2038,7 +2051,7 @@ impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
         ensures
             r@ == Seq::<V::S>::empty(),
     {
-        let core = Core::<V::E>::with_budget(max_segments);
+        let core = KCore::<V, C, K>::with_budget(max_segments);
         proof {
             assert(core@ =~= Seq::empty());
             lemma_svs_none::<Held<V, C>>();
@@ -2111,7 +2124,7 @@ impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
             assert(slabs@ =~= seq![s]);
             lemma_vals_unit::<V::E>(s);
         }
-        let core = Core::<V::E>::from_cut(slabs, max_segments);
+        let core = KCore::<V, C, K>::from_cut(slabs, max_segments);
         proof {
             let vs = Seq::new(len as nat, |_i: int| value.sv());
             <Held<V, C> as VGet>::lemma_svs(core@);
@@ -2121,6 +2134,9 @@ impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
         VerifiedColumn { core }
     }
 
+}
+
+impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
     /// The number of values.
     #[inline(always)]
     pub fn len(&self) -> (r: usize)
@@ -2527,7 +2543,7 @@ impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
             <Held<V, C> as VGet>::lemma_svs(self.core@);
         }
         self.core.lemma_column();
-        let mut core = Core::<V::E>::with_budget(self.core.max_segments());
+        let mut core = KCore::<V, C, K>::with_budget(self.core.max_segments());
         core.set_counter(self.core.counter().wrapping_add(1));
         proof {
             assert(core@ =~= Seq::empty());
@@ -2642,6 +2658,24 @@ impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
             lemma_held::<V, C>(o);
             <Held<V, C> as VGet>::lemma_svs(self.core@);
         }
+    }
+
+    /// The column's kind of index is kept for the values the column
+    /// holds (`VKeeps::keeps`; of a plain column this says nothing).
+    /// So what a column saves loads as a column of its kind, if it
+    /// loads as a plain one.
+    pub proof fn lemma_kept(tracked &self)
+        ensures
+            K::keeps(self@),
+    {
+        let s = self.core.slabs_spec();
+        self.core.lemma_view();
+        self.core.lemma_no_parts();
+        if !self.core.ready() {
+            assert(slab_lens(s) =~= Seq::<nat>::empty());
+            <K::G as Weigh<V::E, K::W>>::lemma_dom_empty(s);
+        }
+        K::lemma_kept(s);
     }
 
     /// A reader of the values `start..end`.
@@ -2835,7 +2869,7 @@ impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
         let it = self.reader(start, end);
         let ghost w = it.out::<V::X>(slabs@);
         let ghost sub = self@.subrange(start as int, end as int);
-        let r = seek_sorted::<V, C>(it, slabs, index, value);
+        let r = seek_sorted::<V, C, K::W>(it, slabs, index, value);
         proof {
             VGet::lemma_svs(w);
             assert(VGet::svs(w) == sub);
@@ -2906,7 +2940,7 @@ impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
 
     /// An iterator over the values.
     #[inline(always)]
-    pub fn iter(&self) -> (it: VerifiedIter<'_, V, C>)
+    pub fn iter(&self) -> (it: VerifiedIter<'_, V, C, K>)
         ensures
             it.rest() == self@,
             it.column() == self@,
@@ -2927,7 +2961,7 @@ impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
 
     /// An iterator over the values `start..end`.
     #[inline(always)]
-    pub fn iter_range(&self, start: usize, end: usize) -> (it: VerifiedIter<'_, V, C>)
+    pub fn iter_range(&self, start: usize, end: usize) -> (it: VerifiedIter<'_, V, C, K>)
         requires
             start <= end <= self@.len(),
         ensures
@@ -2944,9 +2978,9 @@ impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
     /// The column, saved: the encoding of its values.
     pub fn save(&self) -> (r: Vec<u8>)
         ensures
-            Self::valid(r@),
-            Self::values(r@) == self@,
-            r@ == Self::encoding(self@),
+            VerifiedColumn::<V, C>::valid(r@),
+            VerifiedColumn::<V, C>::values(r@) == self@,
+            r@ == VerifiedColumn::<V, C>::encoding(self@),
             r@.len() <= V::size_bound(self@),
     {
         self.core.lemma_column();
@@ -2954,7 +2988,7 @@ impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
         <V::E as Model<V::X>>::save(self.core.slabs(), self.core.len(), &mut out);
         proof {
             assert(out@.skip(0) =~= out@);
-            Self::lemma_encoding(out@);
+            VerifiedColumn::<V, C>::lemma_encoding(out@);
             V::lemma_size(out@);
         }
         out
@@ -2965,10 +2999,10 @@ impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
     /// range returned is where in `out` that is.
     pub fn save_to(&self, out: &mut Vec<u8>) -> (r: Range<usize>)
         ensures
-            final(out)@ == old(out)@ + Self::encoding(self@),
-            Self::valid(Self::encoding(self@)),
-            Self::values(Self::encoding(self@)) == self@,
-            Self::encoding(self@).len() <= V::size_bound(self@),
+            final(out)@ == old(out)@ + VerifiedColumn::<V, C>::encoding(self@),
+            VerifiedColumn::<V, C>::valid(VerifiedColumn::<V, C>::encoding(self@)),
+            VerifiedColumn::<V, C>::values(VerifiedColumn::<V, C>::encoding(self@)) == self@,
+            VerifiedColumn::<V, C>::encoding(self@).len() <= V::size_bound(self@),
             r.start == old(out)@.len(),
             r.end == final(out)@.len(),
     {
@@ -2977,7 +3011,7 @@ impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
         <V::E as Model<V::X>>::save(self.core.slabs(), self.core.len(), out);
         proof {
             let d = out@.skip(start as int);
-            Self::lemma_encoding(d);
+            VerifiedColumn::<V, C>::lemma_encoding(d);
             V::lemma_size(d);
             assert(out@ =~= old(out)@ + d);
         }
@@ -2992,12 +3026,12 @@ impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
             final(out)@ == if only(self@, value.sv()) {
                 old(out)@
             } else {
-                old(out)@ + Self::encoding(self@)
+                old(out)@ + VerifiedColumn::<V, C>::encoding(self@)
             },
             !only(self@, value.sv()) ==> {
-                &&& Self::valid(Self::encoding(self@))
-                &&& Self::values(Self::encoding(self@)) == self@
-                &&& Self::encoding(self@).len() <= V::size_bound(self@)
+                &&& VerifiedColumn::<V, C>::valid(VerifiedColumn::<V, C>::encoding(self@))
+                &&& VerifiedColumn::<V, C>::values(VerifiedColumn::<V, C>::encoding(self@)) == self@
+                &&& VerifiedColumn::<V, C>::encoding(self@).len() <= V::size_bound(self@)
             },
             r.start == old(out)@.len(),
             r.end == final(out)@.len(),
@@ -3019,7 +3053,7 @@ impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
     /// than a slab can count, and the read refuses that.)
     pub fn validate_encoding(&self) -> (r: Result<(), PackError>)
         ensures
-            Self::encoding(self@).len() <= u32::MAX ==> r is Ok,
+            VerifiedColumn::<V, C>::encoding(self@).len() <= u32::MAX ==> r is Ok,
             V::size_bound(self@) <= u32::MAX ==> r is Ok,
     {
         let bytes = self.save();
@@ -3029,17 +3063,28 @@ impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
         }
     }
 
+}
+
+// The loads. What is saved is spoken of as a plain column's, whatever
+// the kind of the column loaded.
+impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
     /// The column saved as `bytes`. An error unless `bytes` is a saved
-    /// column; and no error for one that is `loadable`.
+    /// column; and no error for one that is `loadable` and whose values
+    /// the column's kind of index is kept for (`VKeeps::keeps`: for a
+    /// plain column, any).
     pub fn load(bytes: &[u8]) -> (r: Result<Self, PackError>)
         ensures
-            Self::loadable(bytes@) ==> r is Ok,
-            r matches Ok(c) ==> Self::valid(bytes@) && c@ == Self::values(bytes@),
+            VerifiedColumn::<V, C>::loadable(bytes@) && K::keeps(VerifiedColumn::<V, C>::values(bytes@)) ==> r is Ok,
+            r matches Ok(c) ==> VerifiedColumn::<V, C>::valid(bytes@) && c@ == VerifiedColumn::<V, C>::values(bytes@),
     {
         proof {
-            <Held<V, C> as VGet>::lemma_svs(<V::E as Model<V::X>>::values(bytes@));
+            let vs = <V::E as Model<V::X>>::values(bytes@);
+            <Held<V, C> as VGet>::lemma_svs(vs);
+            if K::keeps(<Held<V, C> as VGet>::svs(vs)) {
+                K::lemma_refuses(vs);
+            }
         }
-        match <V::E as Model<V::X>>::load(bytes, MAX_SEG, None) {
+        match <V::E as Model<V::X>>::load::<K::W, K::G>(bytes, MAX_SEG, None) {
             Ok(core) => Ok(VerifiedColumn { core }),
             Err(e) => Err(e),
         }
@@ -3068,11 +3113,12 @@ impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
                 Some((len, v)) => r matches Ok(c) && c@ == Seq::new(len as nat, |_i: int| v.sv()),
                 None => {
                     &&& r matches Ok(c) ==> {
-                        &&& Self::valid(bytes@)
-                        &&& c@ == Self::values(bytes@)
+                        &&& VerifiedColumn::<V, C>::valid(bytes@)
+                        &&& c@ == VerifiedColumn::<V, C>::values(bytes@)
                         &&& opts.length() matches Some(len) ==> c@.len() == len
                     }
-                    &&& Self::loadable(bytes@) && (opts.length() matches Some(len) ==> Self::values(bytes@).len() == len)
+                    &&& VerifiedColumn::<V, C>::loadable(bytes@) && K::keeps(VerifiedColumn::<V, C>::values(bytes@))
+                        && (opts.length() matches Some(len) ==> VerifiedColumn::<V, C>::values(bytes@).len() == len)
                         ==> r is Ok
                 },
             },
@@ -3088,9 +3134,13 @@ impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
             }
         }
         proof {
-            <Held<V, C> as VGet>::lemma_svs(<V::E as Model<V::X>>::values(bytes@));
+            let vs = <V::E as Model<V::X>>::values(bytes@);
+            <Held<V, C> as VGet>::lemma_svs(vs);
+            if K::keeps(<Held<V, C> as VGet>::svs(vs)) {
+                K::lemma_refuses(vs);
+            }
         }
-        match <V::E as Model<V::X>>::load(bytes, max_segments, length) {
+        match <V::E as Model<V::X>>::load::<K::W, K::G>(bytes, max_segments, length) {
             Ok(core) => Ok(VerifiedColumn { core }),
             Err(e) => Err(e),
         }
@@ -3249,14 +3299,14 @@ pub proof fn lemma_runs_of_values<G: VGet>(o: Seq<G>)
 /// specification `items()`, and as values `rest()`. Verus's
 /// specifications of the standard library's iterator functions speak of
 /// `remaining()`, which is `items()`.
-pub struct VerifiedIter<'a, V: VValue<C>, C: VCodec = Leb128> {
+pub struct VerifiedIter<'a, V: VValue<C>, C: VCodec = Leb128, K: VIndex<V, C> = LenIndex> {
     it: ICore<<V::X as Decoders<'a>>::D>,
     slabs: &'a [Slab<<V::E as Slabs>::Tail>],
     /// The column the slabs are of; a default iterator has none.
-    col: Option<&'a Core<V::E>>,
+    col: Option<&'a KCore<V, C, K>>,
 }
 
-impl<'a, V: VValue<C>, C: VCodec> VerifiedIter<'a, V, C> {
+impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedIter<'a, V, C, K> {
     /// The iterator stands in the slabs of its column, in the column or
     /// at its end.
     #[verifier::type_invariant]
@@ -3288,7 +3338,7 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedIter<'a, V, C> {
     /// The column the iterator reads, as it was when the iterator was
     /// made of it; a default iterator reads none. No method of the
     /// iterator changes it.
-    pub closed spec fn source(&self) -> Option<VerifiedColumn<V, C>> {
+    pub closed spec fn source(&self) -> Option<VerifiedColumn<V, C, K>> {
         match self.col {
             Some(c) => Some(VerifiedColumn { core: *c }),
             None => None,
@@ -3705,7 +3755,7 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedIter<'a, V, C> {
     /// An iterator of the runs the iterator has left to give
     /// ([`next_run`](Self::next_run)): what
     /// [`splice_runs`](VerifiedColumn::splice_runs) takes.
-    pub fn runs(self) -> (r: VerifiedRuns<'a, V, C>)
+    pub fn runs(self) -> (r: VerifiedRuns<'a, V, C, K>)
         ensures
             r.iter() == self,
     {
@@ -3887,7 +3937,7 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedIter<'a, V, C> {
             lemma_svs_window(vals_of::<V::X>(slabs@), here as int, here + it.items_left);
             assert(w =~= window(o, a, range.end - p));
         }
-        let r = seek_sorted::<V, C>(it, slabs, index, target);
+        let r = seek_sorted::<V, C, K::W>(it, slabs, index, target);
         self.advance_to(r.0);
         proof {
             assert forall|j: int| a <= j < a + w.len() implies w[j - a] == #[trigger] o[j] by {}
@@ -3915,8 +3965,8 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedIter<'a, V, C> {
                     Some(ix) => {
                         let r = ix.ix_find(t);
                         proof {
-                            assert(ix.ws().map_values(|w: usize| <SlabBTree<usize> as IndexOps<usize>>::wlen(w))
-                                =~= wlens::<usize, SlabBTree<usize>>(ix.ws()));
+                            assert(ix.ws().map_values(|w: K::W| <SlabBTree<K::W> as IndexOps<K::W>>::wlen(w))
+                                =~= wlens::<K::W, SlabBTree<K::W>>(ix.ws()));
                         }
                         if r.0 >= n {
                             // past the slabs, the whole position lies
@@ -3977,7 +4027,7 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedIter<'a, V, C> {
 }
 
 #[cfg(verus_keep_ghost)]
-impl<'a, V: VValue<C>, C: VCodec> vstd::std_specs::iter::IteratorSpecImpl for VerifiedIter<'a, V, C> {
+impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> vstd::std_specs::iter::IteratorSpecImpl for VerifiedIter<'a, V, C, K> {
     /// The iterator keeps to what Verus asks of an iterator: `next` gives
     /// `remaining()`, one value after another, and then `None`.
     open spec fn obeys_prophetic_iter_laws(&self) -> bool {
@@ -4005,7 +4055,7 @@ impl<'a, V: VValue<C>, C: VCodec> vstd::std_specs::iter::IteratorSpecImpl for Ve
     }
 }
 
-impl<'a, V: VValue<C>, C: VCodec> Iterator for VerifiedIter<'a, V, C> {
+impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> Iterator for VerifiedIter<'a, V, C, K> {
     type Item = Get<'a, V>;
 
     /// The next value, if one is left.
@@ -4201,13 +4251,13 @@ impl<'a, V: VValue<C>, C: VCodec> Iterator for VerifiedIter<'a, V, C> {
 }
 
 #[cfg(verus_keep_ghost)]
-impl<'a, V: VValue<C>, C: VCodec> vstd::std_specs::iter::ExactSizeIteratorSpecImpl for VerifiedIter<'a, V, C> {
+impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> vstd::std_specs::iter::ExactSizeIteratorSpecImpl for VerifiedIter<'a, V, C, K> {
     open spec fn exact_len(&self) -> usize {
         self.items().len() as usize
     }
 }
 
-impl<'a, V: VValue<C>, C: VCodec> ExactSizeIterator for VerifiedIter<'a, V, C> {
+impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> ExactSizeIterator for VerifiedIter<'a, V, C, K> {
     /// How many values are left.
     #[inline]
     fn len(&self) -> (len: usize)
@@ -4219,7 +4269,7 @@ impl<'a, V: VValue<C>, C: VCodec> ExactSizeIterator for VerifiedIter<'a, V, C> {
     }
 }
 
-impl<'a, V: VValue<C>, C: VCodec> Clone for VerifiedIter<'a, V, C> {
+impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> Clone for VerifiedIter<'a, V, C, K> {
     /// An iterator of its own with the same values left.
     fn clone(&self) -> (r: Self)
         ensures
@@ -4236,7 +4286,7 @@ impl<'a, V: VValue<C>, C: VCodec> Clone for VerifiedIter<'a, V, C> {
     }
 }
 
-impl<'a, V: VValue<C>, C: VCodec> Default for VerifiedIter<'a, V, C> {
+impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> Default for VerifiedIter<'a, V, C, K> {
     /// An iterator with nothing to give.
     fn default() -> (r: Self)
         ensures
@@ -4258,14 +4308,14 @@ impl<'a, V: VValue<C>, C: VCodec> Default for VerifiedIter<'a, V, C> {
     }
 }
 
-impl<'a, V: VValue<C>, C: VCodec> IntoIterator for &'a VerifiedColumn<V, C> {
+impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> IntoIterator for &'a VerifiedColumn<V, C, K> {
     type Item = Get<'a, V>;
 
-    type IntoIter = VerifiedIter<'a, V, C>;
+    type IntoIter = VerifiedIter<'a, V, C, K>;
 
     /// An iterator over the values ([`VerifiedColumn::iter`]).
     #[inline(always)]
-    fn into_iter(self) -> (it: VerifiedIter<'a, V, C>)
+    fn into_iter(self) -> (it: VerifiedIter<'a, V, C, K>)
         ensures
             it.rest() == self@,
             it.column() == self@,
@@ -4323,7 +4373,7 @@ impl VerifiedIterState {
     /// edits and the slabs that the state does, the state's place is one
     /// in those slabs, and it is in the column or at its end.
     /// [`try_resume`](Self::try_resume) gives an iterator exactly then.
-    pub closed spec fn fits<V: VValue<C>, C: VCodec>(&self, column: &VerifiedColumn<V, C>) -> bool {
+    pub closed spec fn fits<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(&self, column: &VerifiedColumn<V, C, K>) -> bool {
         let lens = slab_lens(column.core.slabs_spec());
         &&& self.counter == column.core.count()
         &&& self.num_slabs == lens.len()
@@ -4335,7 +4385,7 @@ impl VerifiedIterState {
     /// column that has been edited since counts others
     /// (`lemma_after_edits`), so the state does not fit it, and
     /// [`try_resume`](Self::try_resume) refuses it.
-    pub proof fn lemma_fits<V: VValue<C>, C: VCodec>(&self, column: &VerifiedColumn<V, C>)
+    pub proof fn lemma_fits<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(&self, column: &VerifiedColumn<V, C, K>)
         requires
             self.fits(column),
         ensures
@@ -4361,8 +4411,8 @@ impl VerifiedIterState {
     ///
     /// Panics, as [`Column`](crate::Column)'s does, where an edit's panic
     /// left `column` without its parts and the state would fit it.
-    pub fn try_resume<'a, V: VValue<C>, C: VCodec>(&self, column: &'a VerifiedColumn<V, C>) -> (r: Result<
-        VerifiedIter<'a, V, C>,
+    pub fn try_resume<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(&self, column: &'a VerifiedColumn<V, C, K>) -> (r: Result<
+        VerifiedIter<'a, V, C, K>,
         PackError,
     >)
         ensures
@@ -4407,17 +4457,19 @@ impl VerifiedIterState {
 /// An iterator of the runs of a column's values, which
 /// [`VerifiedIter::runs`] gives: each run is of as many equal values as
 /// lie together in what the iterator had left (`runs_of`).
-pub struct VerifiedRuns<'a, V: VValue<C>, C: VCodec = Leb128>(VerifiedIter<'a, V, C>);
+pub struct VerifiedRuns<'a, V: VValue<C>, C: VCodec = Leb128, K: VIndex<V, C> = LenIndex>(
+    VerifiedIter<'a, V, C, K>,
+);
 
-impl<'a, V: VValue<C>, C: VCodec> VerifiedRuns<'a, V, C> {
+impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedRuns<'a, V, C, K> {
     /// The iterator of values whose runs these are, where it stands now.
-    pub closed spec fn iter(&self) -> VerifiedIter<'a, V, C> {
+    pub closed spec fn iter(&self) -> VerifiedIter<'a, V, C, K> {
         self.0
     }
 }
 
 #[cfg(verus_keep_ghost)]
-impl<'a, V: VValue<C>, C: VCodec> vstd::std_specs::iter::IteratorSpecImpl for VerifiedRuns<'a, V, C> {
+impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> vstd::std_specs::iter::IteratorSpecImpl for VerifiedRuns<'a, V, C, K> {
     /// The iterator keeps to what Verus asks of an iterator: `next` gives
     /// `remaining()`, one run after another, and then `None`.
     open spec fn obeys_prophetic_iter_laws(&self) -> bool {
@@ -4445,7 +4497,7 @@ impl<'a, V: VValue<C>, C: VCodec> vstd::std_specs::iter::IteratorSpecImpl for Ve
     }
 }
 
-impl<'a, V: VValue<C>, C: VCodec> Iterator for VerifiedRuns<'a, V, C> {
+impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> Iterator for VerifiedRuns<'a, V, C, K> {
     type Item = Run<Get<'a, V>>;
 
     /// The next run, if one is left ([`VerifiedIter::next_run`]).
@@ -4486,13 +4538,13 @@ impl<'a, V: VValue<C>, C: VCodec> Iterator for VerifiedRuns<'a, V, C> {
 
 } // verus!
 
-impl<V: VValue<C>, C: VCodec> std::fmt::Debug for VerifiedRuns<'_, V, C> {
+impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> std::fmt::Debug for VerifiedRuns<'_, V, C, K> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("VerifiedRuns").field(&self.0).finish()
     }
 }
 
-impl<V: VValue<C>, C: VCodec> std::fmt::Debug for VerifiedIter<'_, V, C> {
+impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> std::fmt::Debug for VerifiedIter<'_, V, C, K> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("VerifiedIter")
             .field("pos", &self.it.pos)
@@ -4504,7 +4556,7 @@ impl<V: VValue<C>, C: VCodec> std::fmt::Debug for VerifiedIter<'_, V, C> {
 // The two functions of this block print and compare, and Verus does not
 // check them. They read the column through checked functions that ask
 // nothing of a caller.
-impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
+impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
     /// Print a line for each slab, as [`Column`](crate::Column) does:
     /// where in the column the slab starts, how many values and runs it
     /// holds, its first run and its last.
@@ -4598,7 +4650,7 @@ impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
     }
 }
 
-impl<V: VValue<C>, C: VCodec> std::fmt::Debug for VerifiedColumn<V, C> {
+impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> std::fmt::Debug for VerifiedColumn<V, C, K> {
     /// How many values and how many slabs, as `Column` prints itself.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("VerifiedColumn")

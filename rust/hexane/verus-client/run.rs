@@ -1,7 +1,9 @@
 //! Runs the clients Verus checked: each call meets its client's
 //! `requires`, and the client's own run-time work (loading, saving,
 //! unwrapping) must not panic.
-use hexane::verified::{VerifiedColumn, VerifiedDecoder, VerifiedEncoder, VerifiedEncoderState};
+use hexane::verified::{
+    LenIndex, VerifiedColumn, VerifiedDecoder, VerifiedEncoder, VerifiedEncoderState,
+};
 use hexane::{Leb128, Run};
 use verus_client::Action;
 
@@ -31,9 +33,20 @@ fn runs() {
     verus_client::round_trip_bytes(&vec![&b"ab"[..], b"", b"ab"]);
     verus_client::bytes_in_bytes_out(b"ab", b"");
     verus_client::bytes_or_null(b"x", b"");
-    verus_client::load_then_save::<Option<Action>, Leb128>(&bytes);
-    verus_client::load_then_save::<u64, Leb128>(&[0x7f]);
-    verus_client::load_then_save::<bool, Leb128>(&[3, 2]);
+    verus_client::load_then_save::<Option<Action>, Leb128, LenIndex>(&bytes);
+    verus_client::load_then_save::<u64, Leb128, LenIndex>(&[0x7f]);
+    verus_client::load_then_save::<bool, Leb128, LenIndex>(&[3, 2]);
+    for b in [&bytes[..], &[0x7f], &[3, 2], &[]] {
+        let plain = VerifiedColumn::<u64>::load(b).ok().map(|c| c.to_vec());
+        let of_a_kind = verus_client::load_as_a_kind::<u64, Leb128, LenIndex>(b);
+        assert_eq!(of_a_kind.map(|c| c.to_vec()), plain);
+        assert_eq!(
+            verus_client::load_plain::<u64, Leb128>(b).map(|c| c.to_vec()),
+            plain
+        );
+    }
+    let back = verus_client::load_plain::<Option<Action>, Leb128>(&bytes).unwrap();
+    assert_eq!(back.save(), bytes);
     verus_client::count_and_cut(&vec![7, 7, 8, 9]);
 
     verus_client::two_in_one_buffer::<u64, Leb128>(&v, &vec![9; 40]);
@@ -41,12 +54,12 @@ fn runs() {
     verus_client::one_value_only::<u64, Leb128>(1, 2);
     verus_client::one_value_only::<Option<Vec<u8>>, Leb128>(Some(b"x"), None);
     verus_client::only_nulls(b"x", b"");
-    verus_client::clone_then_diverge::<Vec<u8>, Leb128>(&vec![&b"ab"[..], b""], b"c");
-    verus_client::clone_then_diverge::<Option<Action>, Leb128>(&acts, None);
+    verus_client::clone_then_diverge::<Vec<u8>, Leb128, LenIndex>(&vec![&b"ab"[..], b""], b"c");
+    verus_client::clone_then_diverge::<Option<Action>, Leb128, LenIndex>(&acts, None);
     verus_client::clone_of_clone(b"xy");
 
-    verus_client::collect_then_extend::<u64, Leb128>(vec![1, 1, 2], vec![3], vec![4, 4]);
-    verus_client::collect_then_extend::<Option<Vec<u8>>, Leb128>(
+    verus_client::collect_then_extend::<u64, Leb128, LenIndex>(vec![1, 1, 2], vec![3], vec![4, 4]);
+    verus_client::collect_then_extend::<Option<Vec<u8>>, Leb128, LenIndex>(
         vec![Some(&b"a"[..]), None],
         vec![],
         vec![Some(b"")],
@@ -57,13 +70,13 @@ fn runs() {
         vec![None, Some(b"x")],
         vec![b"c"],
     );
-    verus_client::runs_in::<u64, Leb128>(
+    verus_client::runs_in::<u64, Leb128, LenIndex>(
         1,
         2,
         3,
         vec![Run { count: 3, value: 9 }, Run { count: 0, value: 8 }],
     );
-    verus_client::runs_in::<Vec<u8>, Leb128>(
+    verus_client::runs_in::<Vec<u8>, Leb128, LenIndex>(
         b"a",
         b"b",
         b"a",
@@ -90,11 +103,14 @@ fn runs() {
     verus_client::load_a_fill::<i64, Leb128>(-1, i64::MAX as u64 as usize);
     verus_client::load_fills(b"xyz");
 
-    verus_client::slabs_and_validation::<u64, Leb128>(&(0..10_000).collect());
-    verus_client::slabs_and_validation::<Option<Vec<u8>>, Leb128>(&vec![Some(&b"a"[..]), None]);
+    verus_client::slabs_and_validation::<u64, Leb128, LenIndex>(&(0..10_000).collect());
+    verus_client::slabs_and_validation::<Option<Vec<u8>>, Leb128, LenIndex>(&vec![
+        Some(&b"a"[..]),
+        None,
+    ]);
     verus_client::slabs_of_each(&v, &vec![true, false, false]);
-    verus_client::load_then_validate::<Option<Action>, Leb128>(&bytes);
-    verus_client::load_then_validate::<u64, Leb128>(&[0x7f]);
+    verus_client::load_then_validate::<Option<Action>, Leb128, LenIndex>(&bytes);
+    verus_client::load_then_validate::<u64, Leb128, LenIndex>(&[0x7f]);
 
     let mut col = VerifiedColumn::<u64>::new();
     col.splice(0, 0, &v);
@@ -175,8 +191,8 @@ fn iterators() {
         verus_client::the_first_run(&VerifiedColumn::<u64>::new()),
         None
     );
-    verus_client::runs_in_a_window::<u64, Leb128>(1, 2);
-    verus_client::runs_in_a_window::<Option<Vec<u8>>, Leb128>(None, Some(b""));
+    verus_client::runs_in_a_window::<u64, Leb128, LenIndex>(1, 2);
+    verus_client::runs_in_a_window::<Option<Vec<u8>>, Leb128, LenIndex>(None, Some(b""));
     let runs = verus_client::in_runs(&col);
     assert_eq!(runs.len(), 334);
     assert!(runs.iter().take(333).all(|r| r.count == 3) && runs[333].count == 1);
@@ -198,8 +214,14 @@ fn iterators() {
         ]
     );
     assert_eq!(verus_client::count_by_runs(&col, 10, 500), 490);
-    assert_eq!(verus_client::copied_by_runs(&col).to_vec(), v);
-    assert_eq!(verus_client::copied_by_runs(&b).to_vec(), b.to_vec());
+    assert_eq!(
+        verus_client::copied_by_runs::<_, _, _, LenIndex>(&col).to_vec(),
+        v
+    );
+    assert_eq!(
+        verus_client::copied_by_runs::<_, _, _, LenIndex>(&b).to_vec(),
+        b.to_vec()
+    );
     let mut flags = VerifiedColumn::<bool>::new();
     flags.splice(0, 0, &vec![true, true, false]);
     verus_client::run_by_run(&flags);
@@ -1040,12 +1062,16 @@ fn strings() {
     assert!(VerifiedColumn::<Vec<u8>>::load(&[0x7f, 1, 0xff]).is_ok());
 
     // the clients that are for every value type, of strings
-    verus_client::round_trip::<String, Leb128>(&words);
+    verus_client::round_trip::<String, Leb128, LenIndex>(&words);
     verus_client::two_in_one_buffer::<String, Leb128>(&words, &vec![]);
     verus_client::one_value_only::<String, Leb128>("a", "");
-    verus_client::clone_then_diverge::<String, Leb128>(&words, "c");
-    verus_client::collect_then_extend::<String, Leb128>(vec!["a", "a"], vec![], vec!["é"]);
-    verus_client::runs_in::<String, Leb128>(
+    verus_client::clone_then_diverge::<String, Leb128, LenIndex>(&words, "c");
+    verus_client::collect_then_extend::<String, Leb128, LenIndex>(
+        vec!["a", "a"],
+        vec![],
+        vec!["é"],
+    );
+    verus_client::runs_in::<String, Leb128, LenIndex>(
         "a",
         "b",
         "a",
@@ -1058,9 +1084,9 @@ fn strings() {
     for n in [0, 1, 100, 70_000, usize::MAX - 3, usize::MAX] {
         verus_client::load_a_fill::<String, Leb128>("ab", n);
     }
-    verus_client::slabs_and_validation::<String, Leb128>(&words);
-    verus_client::load_then_validate::<String, Leb128>(&bytes);
-    verus_client::runs_in_a_window::<String, Leb128>("", "é");
+    verus_client::slabs_and_validation::<String, Leb128, LenIndex>(&words);
+    verus_client::load_then_validate::<String, Leb128, LenIndex>(&bytes);
+    verus_client::runs_in_a_window::<String, Leb128, LenIndex>("", "é");
     assert_eq!(verus_client::the_third(&col), Some("apple!"));
     let mut enc = VerifiedEncoder::<String>::new();
     verus_client::told_by_an_append(&mut enc, "ab");

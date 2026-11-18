@@ -14,7 +14,7 @@
 
 use hexane::encoder::{BoolEncoder, BoolEncoderState, RleEncoder, RleEncoderState};
 use hexane::verified::{
-    refused, Get, VNewtype, VValue, VerifiedColumn, VerifiedDecoder, VerifiedEncoder,
+    refused, Get, LenIndex, VNewtype, VValue, VerifiedColumn, VerifiedDecoder, VerifiedEncoder,
     VerifiedEncoderState, VerifiedIter, VerifiedIterState, VerifiedRuns,
 };
 use hexane::{
@@ -7221,4 +7221,38 @@ fn decoders_of_the_longest_runs() {
     assert_eq!(y.scan_for(true, usize::MAX - 1), (usize::MAX - 2, 1));
     assert_eq!((x.next(), x.next()), (Some(true), None));
     assert_eq!((y.next(), y.next()), (Some(true), None));
+}
+
+/// The kind of index a column is kept with is a third parameter of its
+/// type, with a default: a plain column is one type, the kind named or
+/// left out, and each constructor and each load makes a column of the
+/// kind its type says.
+#[test]
+fn the_kind_of_a_plain_column() {
+    let vs: Vec<u64> = (0..2000).map(|i| i / 7).collect();
+    let named = VerifiedColumn::<u64, Leb128, LenIndex>::from_values(&vs);
+    let short: VerifiedColumn<u64> = named.clone();
+    let collected: VerifiedColumn<u64, Leb128, LenIndex> = vs.iter().copied().collect();
+    let loaded = VerifiedColumn::<u64, Leb128, LenIndex>::load(&short.save()).unwrap();
+    let with: VerifiedColumn<u64> = VerifiedColumn::load_with(
+        &short.save(),
+        LoadOpts::new().with_length(vs.len()).with_max_segments(4),
+    )
+    .unwrap();
+    let none: VerifiedColumn<u64, Leb128, LenIndex> = Default::default();
+    let mut budget = VerifiedColumn::<u64, Leb128, LenIndex>::with_max_segments(4);
+    budget.extend(vs.iter().copied());
+    let fill = VerifiedColumn::<u64, Leb128, LenIndex>::fill(5, 7);
+
+    let old: Column<u64> = vs.iter().copied().collect();
+    for c in [&named, &short, &collected, &loaded, &with, &budget] {
+        assert_eq!(c.to_vec(), vs);
+        assert_eq!(c.save(), old.save());
+    }
+    assert!(none.is_empty() && none.save().is_empty());
+    assert_eq!(fill.to_vec(), vec![7; 5]);
+    let it: VerifiedIter<'_, u64, Leb128, LenIndex> = short.iter();
+    assert_eq!(it.count(), vs.len());
+    let it = VerifiedIter::<u64, Leb128, LenIndex>::default();
+    assert_eq!(it.count(), 0);
 }

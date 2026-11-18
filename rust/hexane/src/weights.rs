@@ -32,10 +32,10 @@
 use crate::attrib::Accumulate;
 use crate::btree::SlabAgg;
 #[cfg(verus_keep_ghost)]
-use crate::btree::{in_i64, lemma_prefix_len, SlabAggregate};
+use crate::btree::{exact_clone, in_i64, lemma_prefix_len, SlabAggregate};
 use crate::column::Slab;
 #[cfg(verus_keep_ghost)]
-use crate::cursor::{all_ok, lemma_lens_ok, lemma_vals_own, slab_lens};
+use crate::cursor::{all_ok, lemma_lens_ok, lemma_vals_own, slab_lens, vals_of};
 use crate::cursor::{ReadsAgree, Slabs, Weigh};
 #[cfg(verus_keep_ghost)]
 use crate::delta::agg::{agg_of, deltas_of, pdiff, psum, reps, steps_fit};
@@ -133,14 +133,16 @@ pub(crate) trait LoadWeigh<'a, E: ReadsAgree<'a, X>, X: Decoders<'a, Tail = <E a
             r == Self::accumulates(),
     ;
 
-    /// A load of this model makes no checks of its own: it fails only
-    /// where the loader does, or the column is too long.
-    spec fn plain() -> bool;
+    /// A load of this model may refuse a column of the values `vs`: it
+    /// fails only where the loader does, where the column is too long,
+    /// or where this holds.
+    spec fn may_refuse(vs: Seq<E::V>) -> bool;
 
-    /// Such a model accumulates nothing, so no run it is given fails.
-    proof fn lemma_plain()
+    /// A model that accumulates the weights may refuse any column: its
+    /// checks are made as the runs pass, and nothing is said of them.
+    proof fn lemma_may_refuse(vs: Seq<E::V>)
         ensures
-            Self::plain() ==> !Self::accumulates(),
+            Self::accumulates() ==> Self::may_refuse(vs),
     ;
 
     /// The weight accumulated from a slab's values is its weight.
@@ -163,7 +165,36 @@ pub(crate) trait LoadWeigh<'a, E: ReadsAgree<'a, X>, X: Decoders<'a, Tail = <E a
             Self::accumulates() ==> forall|i: int| 0 <= i < ws@.len() ==> Self::wvals(#[trigger] ws@[i], X::vals(slabs@[i])),
         ensures
             r is Ok ==> Self::dom_ok(slabs@),
-            Self::plain() ==> r is Ok,
+            r is Err ==> Self::may_refuse(vals_of::<E>(slabs@)),
+    ;
+}
+
+/// A weight model whose columns can be copied: a clone of a weight is the
+/// weight, and what the model says of a slab and of a column it says of
+/// their clones (`Slab::same`).
+pub(crate) trait CopyWeigh<E: Slabs, W: Clone>: Weigh<E, W> {
+    proof fn lemma_copy_weight()
+        ensures
+            exact_clone::<W>(),
+    ;
+
+    proof fn lemma_copy_wrel(w: W, a: Slab<E::Tail>, b: Slab<E::Tail>)
+        requires
+            E::ok(a),
+            a.same(b),
+            Self::wrel(w, a),
+        ensures
+            Self::wrel(w, b),
+    ;
+
+    proof fn lemma_copy_dom(s: Seq<Slab<E::Tail>>, t: Seq<Slab<E::Tail>>)
+        requires
+            all_ok::<E>(s),
+            t.len() == s.len(),
+            forall|j: int| 0 <= j < s.len() ==> (#[trigger] s[j]).same(t[j]),
+            Self::dom_ok(s),
+        ensures
+            Self::dom_ok(t),
     ;
 }
 
@@ -209,6 +240,17 @@ impl<E: Slabs> Weigh<E, usize> for LenModel {
     }
 }
 
+impl<E: Slabs> CopyWeigh<E, usize> for LenModel {
+    proof fn lemma_copy_weight() {
+    }
+
+    proof fn lemma_copy_wrel(w: usize, a: Slab<E::Tail>, b: Slab<E::Tail>) {
+    }
+
+    proof fn lemma_copy_dom(s: Seq<Slab<E::Tail>>, t: Seq<Slab<E::Tail>>) {
+    }
+}
+
 impl<V> Accumulate<V, usize> for LenModel {
     open spec fn wvals(w: usize, vs: Seq<V>) -> bool {
         w == vs.len()
@@ -240,11 +282,11 @@ impl<'a, E: Slabs + ReadsAgree<'a, X>, X: Decoders<'a, Tail = E::Tail>> LoadWeig
         false
     }
 
-    open spec fn plain() -> bool {
-        true
+    open spec fn may_refuse(vs: Seq<E::V>) -> bool {
+        false
     }
 
-    proof fn lemma_plain() {
+    proof fn lemma_may_refuse(vs: Seq<E::V>) {
     }
 
     proof fn lemma_wrel(w: usize, s: Slab<E::Tail>) {
@@ -401,11 +443,11 @@ impl<'a, E, X, B, P> LoadWeigh<'a, E, X, PrefixSlabWeight<P>> for PrefixModel<X,
         true
     }
 
-    open spec fn plain() -> bool {
-        false
+    open spec fn may_refuse(vs: Seq<E::V>) -> bool {
+        true
     }
 
-    proof fn lemma_plain() {
+    proof fn lemma_may_refuse(vs: Seq<E::V>) {
     }
 
     proof fn lemma_wrel(w: PrefixSlabWeight<P>, s: Slab<E::Tail>) {
@@ -546,11 +588,11 @@ impl<'a, E, X, B> LoadWeigh<'a, E, X, SlabAgg> for DeltaModel<X, B> where
         true
     }
 
-    open spec fn plain() -> bool {
-        false
+    open spec fn may_refuse(vs: Seq<E::V>) -> bool {
+        true
     }
 
-    proof fn lemma_plain() {
+    proof fn lemma_may_refuse(vs: Seq<E::V>) {
     }
 
     proof fn lemma_wrel(w: SlabAgg, s: Slab<E::Tail>) {

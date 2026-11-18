@@ -113,6 +113,20 @@
 //! [`counted_by_a_clone`]), and what the count is after an edit is
 //! there to compute with ([`the_count_after`]).
 //!
+//! A column is of a kind of index ([`VIndex`]), and what is said here
+//! of every value type and codec is said of every kind too: a client
+//! that is given a column or an iterator takes one of any kind, and so
+//! do those of [`round_trip`], [`load_then_save`],
+//! [`clone_then_diverge`], [`collect_then_extend`], [`runs_in`],
+//! [`runs_in_a_window`], [`slabs_and_validation`] and
+//! [`load_then_validate`], which make their own. A column's kind is
+//! kept for the values it holds, so what it saves loads as a column of
+//! its kind ([`round_trip`]); bytes load as a column of a kind where
+//! they would load as a plain column and the kind is kept for their
+//! values, and a plain column is kept for any ([`load_as_a_kind`],
+//! [`load_plain`]); and the runs of a column of one kind make a column
+//! of another ([`copied_by_runs`]).
+//!
 //! And of a [`VerifiedEncoder`]: that values appended one by one are
 //! saved as a column of them, in the one encoding of them
 //! ([`encoded_as_saved`]), so that an encoder and a column save the same
@@ -247,8 +261,9 @@ use super::{
     lemma_after_edits, lemma_head_len, lemma_head_run_max, lemma_run_values_add,
     lemma_run_values_push, lemma_runs_first, lemma_runs_of_values, lemma_sorted, mapped, only,
     refused, run_values, runs_of, scan_of, scan_taken, sorted, sorted_for, sum_of, total_len,
-    total_str_len, window, Get, VCodec, VGet, VNewtype, VSpec, VValue, VerifiedColumn,
-    VerifiedDecoder, VerifiedEncoder, VerifiedEncoderState, VerifiedIter, VerifiedIterState,
+    total_str_len, window, Get, LenIndex, VCodec, VGet, VIndex, VKeeps, VNewtype, VSpec, VValue,
+    VerifiedColumn, VerifiedDecoder, VerifiedEncoder, VerifiedEncoderState, VerifiedIter,
+    VerifiedIterState,
 };
 use crate::{Leb128, LoadOpts, PackError, Run};
 use std::cmp::Ordering;
@@ -268,18 +283,23 @@ verus! {
 /// ([`Get`]: for a number, the number), and what they are in a
 /// specification is [`VGet::svs`] of them (for numbers, themselves).
 #[allow(dead_code)]
-fn round_trip<'v, V: VValue<C>, C: VCodec>(input: &Vec<Get<'v, V>>)
+fn round_trip<'v, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(input: &Vec<Get<'v, V>>)
     requires
         V::size_bound(VGet::svs(input@)) <= 0xffff_fff5,
         input@.len() <= usize::MAX - 3,
 {
-    let mut col = VerifiedColumn::<V, C>::new();
+    let mut col = VerifiedColumn::<V, C, K>::new();
     col.splice(0, 0, input.as_slice());
     let out = col.to_vec();
     assert(VGet::svs(out@) == VGet::svs(input@));
 
     let bytes = col.save();
-    let back = VerifiedColumn::<V, C>::load(bytes.as_slice());
+    proof {
+        // the column's kind is kept for its values, so they load as one
+        // of its kind
+        col.lemma_kept();
+    }
+    let back = VerifiedColumn::<V, C, K>::load(bytes.as_slice());
     proof {
         // as many values in a specification as were put in
         VGet::lemma_svs(input@);
@@ -297,7 +317,7 @@ fn round_trip_u64(input: &Vec<u64>)
     requires
         input@.len() < 1_000_000,
 {
-    round_trip::<u64, Leb128>(input);
+    round_trip::<u64, Leb128, LenIndex>(input);
 }
 
 /// Values that may be null.
@@ -306,7 +326,7 @@ fn round_trip_nullable(input: &Vec<Option<i64>>)
     requires
         input@.len() < 1_000_000,
 {
-    round_trip::<Option<i64>, Leb128>(input);
+    round_trip::<Option<i64>, Leb128, LenIndex>(input);
 }
 
 /// `bool`, whose bound is another.
@@ -315,7 +335,7 @@ fn round_trip_bool(input: &Vec<bool>)
     requires
         input@.len() < 1_000_000,
 {
-    round_trip::<bool, Leb128>(input);
+    round_trip::<bool, Leb128, LenIndex>(input);
 }
 
 /// A value type of the client's own: one of four actions, each stored as
@@ -372,8 +392,8 @@ fn round_trip_action(input: &Vec<Action>, nullable: &Vec<Option<Action>>)
         input@.len() < 1_000_000,
         nullable@.len() < 1_000_000,
 {
-    round_trip::<Action, Leb128>(input);
-    round_trip::<Option<Action>, Leb128>(nullable);
+    round_trip::<Action, Leb128, LenIndex>(input);
+    round_trip::<Option<Action>, Leb128, LenIndex>(nullable);
 }
 
 /// What a client reads is what it wrote: an edit, then a read of each
@@ -430,7 +450,7 @@ fn round_trip_bytes(input: &Vec<&[u8]>)
         <&[u8] as VGet>::lemma_svs(input@);
         lemma_total(<&[u8] as VGet>::svs(input@), 1000);
     }
-    round_trip::<Vec<u8>, Leb128>(input);
+    round_trip::<Vec<u8>, Leb128, LenIndex>(input);
 }
 
 /// What a client reads of a column of byte strings is the bytes it
@@ -500,14 +520,46 @@ fn bytes_or_null(a: &[u8], none: &[u8])
 /// What loads, saves back to the bytes it was loaded from: no two byte
 /// strings load as the same column. For any bytes, of any provenance.
 #[allow(dead_code)]
-fn load_then_save<V: VValue<C>, C: VCodec>(bytes: &[u8]) {
-    if let Ok(col) = VerifiedColumn::<V, C>::load(bytes) {
+fn load_then_save<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(bytes: &[u8]) {
+    if let Ok(col) = VerifiedColumn::<V, C, K>::load(bytes) {
         proof {
             VerifiedColumn::<V, C>::lemma_encoding(bytes@);
         }
         let again = col.save();
         assert(again@ == bytes@);
     }
+}
+
+/// Bytes loaded as a column of a kind of index: they load where they
+/// would load as a plain column and the kind is kept for their values
+/// ([`VKeeps::keeps`]), and a column they load as is of their values,
+/// for which its kind is kept. For every value type, codec and kind.
+#[allow(dead_code)]
+fn load_as_a_kind<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(bytes: &[u8]) -> (r: Option<VerifiedColumn<V, C, K>>)
+    ensures
+        VerifiedColumn::<V, C>::loadable(bytes@) && K::keeps(VerifiedColumn::<V, C>::values(bytes@)) ==> r is Some,
+        r matches Some(c) ==> c@ == VerifiedColumn::<V, C>::values(bytes@) && K::keeps(c@),
+{
+    match VerifiedColumn::<V, C, K>::load(bytes) {
+        Ok(c) => {
+            proof {
+                c.lemma_kept();
+            }
+            Some(c)
+        },
+        Err(_) => None,
+    }
+}
+
+/// A plain column is kept for any values: bytes that are `loadable`
+/// load as one.
+#[allow(dead_code)]
+fn load_plain<V: VValue<C>, C: VCodec>(bytes: &[u8]) -> (r: Option<VerifiedColumn<V, C>>)
+    ensures
+        VerifiedColumn::<V, C>::loadable(bytes@) ==> r is Some,
+        r matches Some(c) ==> c@ == VerifiedColumn::<V, C>::values(bytes@),
+{
+    load_as_a_kind::<V, C, LenIndex>(bytes)
 }
 
 /// Counting and cutting: a column's length, a range of it, and what is
@@ -669,8 +721,8 @@ fn only_nulls(x: &[u8], none: &[u8])
 /// the same bytes, and an edit of one leaves the other as it was. For
 /// every value type and codec.
 #[allow(dead_code)]
-fn clone_then_diverge<'v, V: VValue<C>, C: VCodec>(xs: &Vec<Get<'v, V>>, a: Get<'v, V>) {
-    let mut col = VerifiedColumn::<V, C>::new();
+fn clone_then_diverge<'v, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(xs: &Vec<Get<'v, V>>, a: Get<'v, V>) {
+    let mut col = VerifiedColumn::<V, C, K>::new();
     col.splice(0, 0, xs.as_slice());
     let ghost vs = VGet::svs(xs@);
     assert(col@ == vs);
@@ -732,14 +784,14 @@ fn clone_of_clone(x: &[u8]) {
 /// The client hands vectors over, of which Verus's library says what
 /// their iterators give. It proves nothing of an iterator itself.
 #[allow(dead_code)]
-fn collect_then_extend<'v, V: VValue<C>, C: VCodec>(a: Vec<Get<'v, V>>, b: Vec<Get<'v, V>>, c: Vec<Get<'v, V>>) {
+fn collect_then_extend<'v, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(a: Vec<Get<'v, V>>, b: Vec<Get<'v, V>>, c: Vec<Get<'v, V>>) {
     let ghost (av, bv, cv) = (VGet::svs(a@), VGet::svs(b@), VGet::svs(c@));
     proof {
         VGet::lemma_svs(a@);
     }
-    let by_slice = VerifiedColumn::<V, C>::from_values(a.as_slice());
+    let by_slice = VerifiedColumn::<V, C, K>::from_values(a.as_slice());
     assert(by_slice@ == av);
-    let mut col: VerifiedColumn<V, C> = a.into_iter().collect();
+    let mut col: VerifiedColumn<V, C, K> = a.into_iter().collect();
     assert(col@ == av);
     // the same values, so the same bytes
     let x = by_slice.save();
@@ -800,15 +852,15 @@ proof fn lemma_counted<G: VGet>(rs: Seq<Run<G>>)
 /// value, and the column is as much longer as the runs' counts are
 /// together. For every value type and codec.
 #[allow(dead_code)]
-fn runs_in<'v, V: VValue<C>, C: VCodec>(a: Get<'v, V>, b: Get<'v, V>, c: Get<'v, V>, more: Vec<Run<Get<'v, V>>>)
+fn runs_in<'v, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(a: Get<'v, V>, b: Get<'v, V>, c: Get<'v, V>, more: Vec<Run<Get<'v, V>>>)
     requires
         a.sv() != b.sv(),
 {
-    let mut col = VerifiedColumn::<V, C>::fill(3, a);
+    let mut col = VerifiedColumn::<V, C, K>::fill(3, a);
     assert(col@ =~= seq![a.sv(), a.sv(), a.sv()]);
     let all_a = col.is_only(a);
     assert(all_a);
-    let empty = VerifiedColumn::<V, C>::fill(0, a);
+    let empty = VerifiedColumn::<V, C, K>::fill(0, a);
     assert(empty@.len() == 0);
 
     let mut runs: Vec<Run<Get<'v, V>>> = Vec::new();
@@ -1006,11 +1058,11 @@ proof fn lemma_sum_of(lens: Seq<usize>, i: int)
 /// save to less than 4 GiB finds no fault in what it saves. For every
 /// value type and codec.
 #[allow(dead_code)]
-fn slabs_and_validation<'v, V: VValue<C>, C: VCodec>(input: &Vec<Get<'v, V>>)
+fn slabs_and_validation<'v, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(input: &Vec<Get<'v, V>>)
     requires
         V::size_bound(VGet::svs(input@)) <= u32::MAX,
 {
-    let mut col = VerifiedColumn::<V, C>::new();
+    let mut col = VerifiedColumn::<V, C, K>::new();
     col.splice(0, 0, input.as_slice());
     proof {
         VGet::lemma_svs(input@);
@@ -1050,18 +1102,18 @@ fn slabs_of_each(a: &Vec<u64>, b: &Vec<bool>)
         a@.len() < 1_000_000,
         b@.len() < 1_000_000,
 {
-    slabs_and_validation::<u64, Leb128>(a);
-    slabs_and_validation::<bool, Leb128>(b);
+    slabs_and_validation::<u64, Leb128, LenIndex>(a);
+    slabs_and_validation::<bool, Leb128, LenIndex>(b);
 }
 
 /// A column loaded from less than 4 GiB of bytes finds no fault in what
 /// it saves, which is those bytes. For any bytes, of any provenance.
 #[allow(dead_code)]
-fn load_then_validate<V: VValue<C>, C: VCodec>(bytes: &[u8])
+fn load_then_validate<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(bytes: &[u8])
     requires
         bytes@.len() <= u32::MAX,
 {
-    if let Ok(col) = VerifiedColumn::<V, C>::load(bytes) {
+    if let Ok(col) = VerifiedColumn::<V, C, K>::load(bytes) {
         proof {
             VerifiedColumn::<V, C>::lemma_encoding(bytes@);
         }
@@ -1096,7 +1148,7 @@ fn later_of<'v, V: VValue<C>, C: VCodec>(a: Get<'v, V>, b: Get<'v, V>) -> (r: Ge
 /// order still. For every value type and codec, from the laws of the
 /// order alone ([`VSpec::lemma_below`]).
 #[allow(dead_code)]
-fn insert_in_order<'v, V: VValue<C>, C: VCodec>(col: &mut VerifiedColumn<V, C>, x: Get<'v, V>) -> (at:
+fn insert_in_order<'v, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &mut VerifiedColumn<V, C, K>, x: Get<'v, V>) -> (at:
     usize)
     requires
         sorted::<V>(old(col)@),
@@ -1410,7 +1462,7 @@ fn find_the_gap(col: &VerifiedColumn<i64>, x: i64, m: usize) -> (r: Range<usize>
 /// that each place holds what the function gave for the value that was
 /// there (`mapped`).
 #[allow(dead_code)]
-fn remap_as_it_is<V: VValue<C>, C: VCodec>(col: &mut VerifiedColumn<V, C>)
+fn remap_as_it_is<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &mut VerifiedColumn<V, C, K>)
     ensures
         final(col)@ == old(col)@,
 {
@@ -1608,7 +1660,7 @@ fn one_more(col: &mut VerifiedColumn<Option<u64>>)
 /// order: here each goes into a `Vec`, which then holds what the column
 /// does. For every value type and codec.
 #[allow(dead_code)]
-fn read_in_a_loop<'a, V: VValue<C>, C: VCodec>(col: &'a VerifiedColumn<V, C>) -> (out: Vec<Get<'a, V>>)
+fn read_in_a_loop<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &'a VerifiedColumn<V, C, K>) -> (out: Vec<Get<'a, V>>)
     ensures
         <Get<'a, V> as VGet>::svs(out@) == col@,
 {
@@ -1707,7 +1759,7 @@ fn every_other(col: &VerifiedColumn<i64>)
 /// The value two places on, if a column is that long: for every value
 /// type and codec.
 #[allow(dead_code)]
-fn the_third<'a, V: VValue<C>, C: VCodec>(col: &'a VerifiedColumn<V, C>) -> (r: Option<Get<'a, V>>)
+fn the_third<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &'a VerifiedColumn<V, C, K>) -> (r: Option<Get<'a, V>>)
     ensures
         match r {
             Some(v) => col@.len() > 2 && v.sv() == col@[2],
@@ -1771,7 +1823,7 @@ fn the_greatest(col: &VerifiedColumn<u64>) -> (r: u64)
 /// then goes its own way; and an iterator of no column gives nothing.
 /// For every value type and codec.
 #[allow(dead_code)]
-fn two_readers<'a, V: VValue<C>, C: VCodec>(col: &'a VerifiedColumn<V, C>)
+fn two_readers<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &'a VerifiedColumn<V, C, K>)
     requires
         col@.len() == 3,
 {
@@ -1791,7 +1843,7 @@ fn two_readers<'a, V: VValue<C>, C: VCodec>(col: &'a VerifiedColumn<V, C>)
     let left_a = a.len();
     let left_b = b.len();
     assert(left_a == 0 && left_b == 1);
-    let mut none = VerifiedIter::<V, C>::default();
+    let mut none = VerifiedIter::<V, C, K>::default();
     let n = none.next();
     assert(n is None);
 }
@@ -1799,7 +1851,7 @@ fn two_readers<'a, V: VValue<C>, C: VCodec>(col: &'a VerifiedColumn<V, C>)
 /// An iterator's window moved to a range of the column: a `for` loop
 /// then reads the column's values there. For every value type and codec.
 #[allow(dead_code)]
-fn in_the_range<'a, V: VValue<C>, C: VCodec>(col: &'a VerifiedColumn<V, C>, a: usize, b: usize) -> (out: Vec<
+fn in_the_range<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &'a VerifiedColumn<V, C, K>, a: usize, b: usize) -> (out: Vec<
     Get<'a, V>,
 >)
     requires
@@ -1868,7 +1920,7 @@ fn where_it_stands(col: &VerifiedColumn<u64>)
 /// gave, and its window ends there: where the range ended, or the
 /// column if that came first. For every value type and codec.
 #[allow(dead_code)]
-fn read_out<V: VValue<C>, C: VCodec>(col: &VerifiedColumn<V, C>, a: usize, b: usize) -> (r: (usize, usize, usize))
+fn read_out<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &VerifiedColumn<V, C, K>, a: usize, b: usize) -> (r: (usize, usize, usize))
     requires
         a <= b,
         a <= col@.len(),
@@ -1916,7 +1968,7 @@ fn read_out<V: VValue<C>, C: VCodec>(col: &VerifiedColumn<V, C>, a: usize, b: us
 /// from the one to the other, and how many values the second window then
 /// has left: for every value type and codec.
 #[allow(dead_code)]
-fn at_two_places<'a, V: VValue<C>, C: VCodec>(col: &'a VerifiedColumn<V, C>, i: usize, j: usize, n: usize) -> (r: (
+fn at_two_places<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &'a VerifiedColumn<V, C, K>, i: usize, j: usize, n: usize) -> (r: (
     Get<'a, V>,
     Get<'a, V>,
     usize,
@@ -1944,7 +1996,7 @@ fn at_two_places<'a, V: VValue<C>, C: VCodec>(col: &'a VerifiedColumn<V, C>, i: 
 /// How long an iterator's window is: that many values it has left,
 /// unless the window ends past the column and it has fewer.
 #[allow(dead_code)]
-fn window_len<V: VValue<C>, C: VCodec>(it: &VerifiedIter<'_, V, C>) -> (r: usize)
+fn window_len<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(it: &VerifiedIter<'_, V, C, K>) -> (r: usize)
     ensures
         r >= it.rest().len(),
         it.end_pos() <= it.column().len() ==> r == it.rest().len(),
@@ -2063,7 +2115,7 @@ fn told_by_the_call(col: &VerifiedColumn<u64>)
 /// the length: asked of the window's end alone. If it does, the iterator
 /// has left as many values as lie between where it stands and that end.
 #[allow(dead_code)]
-fn ends_within<V: VValue<C>, C: VCodec>(it: &VerifiedIter<'_, V, C>, len: usize) -> (r: bool)
+fn ends_within<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(it: &VerifiedIter<'_, V, C, K>, len: usize) -> (r: bool)
     requires
         len == it.column().len(),
     ensures
@@ -2079,7 +2131,7 @@ fn ends_within<V: VValue<C>, C: VCodec>(it: &VerifiedIter<'_, V, C>, len: usize)
 /// often as the column has it at its start and no more often; and no run
 /// only of a column with no value. For every value type and codec.
 #[allow(dead_code)]
-fn the_first_run<'a, V: VValue<C>, C: VCodec>(col: &'a VerifiedColumn<V, C>) -> (r: Option<Run<Get<'a, V>>>)
+fn the_first_run<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &'a VerifiedColumn<V, C, K>) -> (r: Option<Run<Get<'a, V>>>)
     ensures
         match r {
             Some(run) => {
@@ -2102,11 +2154,11 @@ fn the_first_run<'a, V: VValue<C>, C: VCodec>(col: &'a VerifiedColumn<V, C>) -> 
 /// and an iterator that gives no run has its window end where it stands.
 /// For every value type and codec.
 #[allow(dead_code)]
-fn runs_in_a_window<'v, V: VValue<C>, C: VCodec>(a: Get<'v, V>, b: Get<'v, V>)
+fn runs_in_a_window<'v, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(a: Get<'v, V>, b: Get<'v, V>)
     requires
         a.sv() != b.sv(),
 {
-    let mut col = VerifiedColumn::<V, C>::fill(3, a);
+    let mut col = VerifiedColumn::<V, C, K>::fill(3, a);
     let mut bs: Vec<Run<Get<'v, V>>> = Vec::new();
     bs.push(Run { count: 2, value: b });
     proof {
@@ -2208,7 +2260,7 @@ proof fn lemma_runs_apart<T>(o: Seq<T>)
 /// its count says; none is of no value, and no two that follow one
 /// another are of the same value. For every value type and codec.
 #[allow(dead_code)]
-fn in_runs<'a, V: VValue<C>, C: VCodec>(col: &'a VerifiedColumn<V, C>) -> (out: Vec<Run<Get<'a, V>>>)
+fn in_runs<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &'a VerifiedColumn<V, C, K>) -> (out: Vec<Run<Get<'a, V>>>)
     ensures
         run_values(out@) == col@,
         forall|i: int| 0 <= i < out@.len() ==> (#[trigger] out@[i]).count >= 1,
@@ -2277,7 +2329,7 @@ proof fn lemma_counted_step<G>(rs: Seq<Run<G>>, k: int)
 /// counts add up to the length of the range, and adding them does not
 /// overflow. For every value type and codec.
 #[allow(dead_code)]
-fn count_by_runs<V: VValue<C>, C: VCodec>(col: &VerifiedColumn<V, C>, a: usize, b: usize) -> (n: usize)
+fn count_by_runs<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &VerifiedColumn<V, C, K>, a: usize, b: usize) -> (n: usize)
     requires
         a <= b <= col@.len(),
     ensures
@@ -2311,13 +2363,14 @@ fn count_by_runs<V: VValue<C>, C: VCodec>(col: &VerifiedColumn<V, C>, a: usize, 
 
 /// A column copied by its runs: the runs of its iterator, spliced into a
 /// new column, make a column of the same values. For every value type
-/// and codec.
+/// and codec, and from a column of any kind of index into one of any.
 #[allow(dead_code)]
-fn copied_by_runs<V: VValue<C>, C: VCodec>(col: &VerifiedColumn<V, C>) -> (r: VerifiedColumn<V, C>)
+fn copied_by_runs<V: VValue<C>, C: VCodec, K: VIndex<V, C>, K2: VIndex<V, C>>(col: &VerifiedColumn<V, C, K>) -> (r:
+    VerifiedColumn<V, C, K2>)
     ensures
         r@ == col@,
 {
-    let mut r = VerifiedColumn::<V, C>::new();
+    let mut r = VerifiedColumn::<V, C, K2>::new();
     let it = col.iter();
     proof {
         it.lemma_items_len();
@@ -2354,7 +2407,7 @@ fn run_by_run(col: &VerifiedColumn<bool>)
 /// iterator had, as it gives them and as specifications have them; and
 /// what is left is those less the run.
 #[allow(dead_code)]
-fn told_by_a_run<'a, V: VValue<C>, C: VCodec>(it: VerifiedIter<'a, V, C>) -> (r: Option<Run<Get<'a, V>>>)
+fn told_by_a_run<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(it: VerifiedIter<'a, V, C, K>) -> (r: Option<Run<Get<'a, V>>>)
     ensures
         match r {
             Some(run) => head_run(it.items(), run.value, run.count as int) && head_run(
@@ -2388,7 +2441,7 @@ fn told_by_a_run<'a, V: VValue<C>, C: VCodec>(it: VerifiedIter<'a, V, C>) -> (r:
 /// The same of the iterator of runs: what its `next` says of the
 /// iterator of values whose runs it gives.
 #[allow(dead_code)]
-fn told_by_the_runs<'a, V: VValue<C>, C: VCodec>(it: VerifiedIter<'a, V, C>) -> (r: Option<Run<Get<'a, V>>>)
+fn told_by_the_runs<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(it: VerifiedIter<'a, V, C, K>) -> (r: Option<Run<Get<'a, V>>>)
     ensures
         match r {
             Some(run) => head_run(it.items(), run.value, run.count as int) && head_run(
@@ -2422,7 +2475,7 @@ fn told_by_the_runs<'a, V: VValue<C>, C: VCodec>(it: VerifiedIter<'a, V, C>) -> 
 
 /// Any iterator has left no more values than a `usize` counts, and as
 /// many as a specification has of them.
-proof fn no_more_than_counted<'a, V: VValue<C>, C: VCodec>(it: VerifiedIter<'a, V, C>)
+proof fn no_more_than_counted<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(it: VerifiedIter<'a, V, C, K>)
     ensures
         it.items().len() <= usize::MAX,
         it.rest().len() == it.items().len(),
@@ -2435,7 +2488,7 @@ proof fn no_more_than_counted<'a, V: VValue<C>, C: VCodec>(it: VerifiedIter<'a, 
 /// is that is `x`, or that none of them is; and where that leaves the
 /// iterator.
 #[allow(dead_code)]
-fn told_by_a_scan<'a, V: VValue<C>, C: VCodec>(it: VerifiedIter<'a, V, C>, x: Get<'_, V>) -> (r: Option<usize>)
+fn told_by_a_scan<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(it: VerifiedIter<'a, V, C, K>, x: Get<'_, V>) -> (r: Option<usize>)
     ensures
         match r {
             Some(k) => {
@@ -2470,7 +2523,7 @@ fn told_by_a_scan<'a, V: VValue<C>, C: VCodec>(it: VerifiedIter<'a, V, C>, x: Ge
 /// the column's values alone: a scan of an iterator over that window.
 /// For every value type and codec.
 #[allow(dead_code)]
-fn first_place_in<V: VValue<C>, C: VCodec>(col: &VerifiedColumn<V, C>, x: Get<'_, V>, a: usize, b: usize) -> (r:
+fn first_place_in<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &VerifiedColumn<V, C, K>, x: Get<'_, V>, a: usize, b: usize) -> (r:
     Option<usize>)
     requires
         a <= b <= col@.len(),
@@ -2506,7 +2559,7 @@ fn first_place_in<V: VValue<C>, C: VCodec>(col: &VerifiedColumn<V, C>, x: Get<'_
 /// the last one stopped: the places come in rising order, each holds
 /// `x`, and no other place does. For every value type and codec.
 #[allow(dead_code)]
-fn all_places<V: VValue<C>, C: VCodec>(col: &VerifiedColumn<V, C>, x: Get<'_, V>) -> (out: Vec<usize>)
+fn all_places<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &VerifiedColumn<V, C, K>, x: Get<'_, V>) -> (out: Vec<usize>)
     ensures
         forall|i: int, j: int| 0 <= i < j < out@.len() ==> out@[i] < out@[j],
         forall|i: int| 0 <= i < out@.len() ==> out@[i] < col@.len() && col@[out@[i] as int] == x.sv(),
@@ -2574,7 +2627,7 @@ fn all_places<V: VValue<C>, C: VCodec>(col: &VerifiedColumn<V, C>, x: Get<'_, V>
 /// if they are in order as far as `x` can tell; and where that leaves
 /// the iterator.
 #[allow(dead_code)]
-fn told_by_a_seek<'a, V: VValue<C>, C: VCodec>(it: VerifiedIter<'a, V, C>, x: Get<'_, V>, range: Range<usize>) -> (r:
+fn told_by_a_seek<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(it: VerifiedIter<'a, V, C, K>, x: Get<'_, V>, range: Range<usize>) -> (r:
     Range<usize>)
     requires
         it.pos() <= range.start <= range.end <= it.pos() + it.rest().len(),
@@ -2605,7 +2658,7 @@ fn told_by_a_seek<'a, V: VValue<C>, C: VCodec>(it: VerifiedIter<'a, V, C>, x: Ge
 /// takes it to where the range starts, or leaves it where it is if that
 /// is behind it; and so does a range that ends behind the iterator.
 #[allow(dead_code)]
-fn seek_out_of_range<'a, V: VValue<C>, C: VCodec>(it: VerifiedIter<'a, V, C>, x: Get<'_, V>, range: Range<usize>) -> (r:
+fn seek_out_of_range<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(it: VerifiedIter<'a, V, C, K>, x: Get<'_, V>, range: Range<usize>) -> (r:
     Range<usize>)
     ensures
         r.start == r.end || (range.start < range.end && it.pos() < range.end && range.start < it.pos()
@@ -2630,7 +2683,7 @@ fn seek_out_of_range<'a, V: VValue<C>, C: VCodec>(it: VerifiedIter<'a, V, C>, x:
 /// stand, with the same end to its window. For every value type and
 /// codec.
 #[allow(dead_code)]
-fn find_in_the_rest<V: VValue<C>, C: VCodec>(it: &mut VerifiedIter<'_, V, C>, x: Get<'_, V>) -> (r: Range<usize>)
+fn find_in_the_rest<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(it: &mut VerifiedIter<'_, V, C, K>, x: Get<'_, V>) -> (r: Range<usize>)
     requires
         sorted::<V>(old(it).rest()),
     ensures
@@ -2703,7 +2756,7 @@ fn seek_then_read(col: &VerifiedColumn<u64>, x: u64) -> (r: Range<usize>)
 /// the iterator has left its column's values in that window, and that
 /// the state fits the column the iterator reads.
 #[allow(dead_code)]
-fn told_by_a_suspend<'a, V: VValue<C>, C: VCodec>(it: &VerifiedIter<'a, V, C>, col: &VerifiedColumn<V, C>) -> (s:
+fn told_by_a_suspend<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(it: &VerifiedIter<'a, V, C, K>, col: &VerifiedColumn<V, C, K>) -> (s:
     VerifiedIterState)
     ensures
         s.pos() == it.pos(),
@@ -2721,8 +2774,8 @@ fn told_by_a_suspend<'a, V: VValue<C>, C: VCodec>(it: &VerifiedIter<'a, V, C>, c
 /// does, and has left this column's values in the state's window, which
 /// is its own window too unless the state stands at the column's end.
 #[allow(dead_code)]
-fn told_by_a_resume<'a, V: VValue<C>, C: VCodec>(s: &VerifiedIterState, col: &'a VerifiedColumn<V, C>) -> (r: Result<
-    VerifiedIter<'a, V, C>,
+fn told_by_a_resume<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(s: &VerifiedIterState, col: &'a VerifiedColumn<V, C, K>) -> (r: Result<
+    VerifiedIter<'a, V, C, K>,
     PackError,
 >)
     ensures
@@ -2741,7 +2794,7 @@ fn told_by_a_resume<'a, V: VValue<C>, C: VCodec>(s: &VerifiedIterState, col: &'a
 /// for on its own: an iterator that reads a column has that column's
 /// values for its own, and one that reads none has none.
 #[allow(dead_code)]
-fn told_by_the_source<'a, V: VValue<C>, C: VCodec>(it: &VerifiedIter<'a, V, C>, col: &VerifiedColumn<V, C>)
+fn told_by_the_source<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(it: &VerifiedIter<'a, V, C, K>, col: &VerifiedColumn<V, C, K>)
     ensures
         it.source() == Some(*col) ==> it.column() == col@,
         it.source() is None ==> it.column().len() == 0,
@@ -2755,8 +2808,8 @@ fn told_by_the_source<'a, V: VValue<C>, C: VCodec>(it: &VerifiedIter<'a, V, C>, 
 /// it reads. Suspended and resumed on that column, it is sure to be
 /// given back, where it stood and with the same values left.
 #[allow(dead_code)]
-fn handed_over<'a, V: VValue<C>, C: VCodec>(it: VerifiedIter<'_, V, C>, col: &'a VerifiedColumn<V, C>) -> (on:
-    VerifiedIter<'a, V, C>)
+fn handed_over<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(it: VerifiedIter<'_, V, C, K>, col: &'a VerifiedColumn<V, C, K>) -> (on:
+    VerifiedIter<'a, V, C, K>)
     requires
         it.source() == Some(*col),
     ensures
@@ -2777,7 +2830,7 @@ fn handed_over<'a, V: VValue<C>, C: VCodec>(it: VerifiedIter<'_, V, C>, col: &'a
 /// to be given, and reads the value at `k + 1`. For every value type
 /// and codec.
 #[allow(dead_code)]
-fn stop_and_go_on<'a, V: VValue<C>, C: VCodec>(col: &'a VerifiedColumn<V, C>, k: usize) -> (r: (
+fn stop_and_go_on<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &'a VerifiedColumn<V, C, K>, k: usize) -> (r: (
     Option<Get<'a, V>>,
     Option<Get<'a, V>>,
 ))
@@ -2806,7 +2859,7 @@ fn stop_and_go_on<'a, V: VValue<C>, C: VCodec>(col: &'a VerifiedColumn<V, C>, k:
 /// The states of an iterator over a range of a column and of one over
 /// all of it fit the column, and stand and end where the iterators do.
 #[allow(dead_code)]
-fn of_a_range<V: VValue<C>, C: VCodec>(col: &VerifiedColumn<V, C>, a: usize, b: usize) -> (r: (
+fn of_a_range<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &VerifiedColumn<V, C, K>, a: usize, b: usize) -> (r: (
     VerifiedIterState,
     VerifiedIterState,
 ))
@@ -2826,9 +2879,9 @@ fn of_a_range<V: VValue<C>, C: VCodec>(col: &VerifiedColumn<V, C>, a: usize, b: 
 /// column; if it does fit one, the iterator given stands at 0 with
 /// nothing to give.
 #[allow(dead_code)]
-fn of_no_column<V: VValue<C>, C: VCodec>(col: &VerifiedColumn<V, C>) -> (r: bool)
+fn of_no_column<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &VerifiedColumn<V, C, K>) -> (r: bool)
 {
-    let it = VerifiedIter::<V, C>::default();
+    let it = VerifiedIter::<V, C, K>::default();
     assert(it.source() is None);
     let s = it.suspend();
     assert(s.pos() == 0 && s.end_pos() == 0);
@@ -2845,8 +2898,8 @@ fn of_no_column<V: VValue<C>, C: VCodec>(col: &VerifiedColumn<V, C>) -> (r: bool
 /// No move of an iterator changes the column it reads: of any iterator,
 /// each move asked on its own.
 #[allow(dead_code)]
-fn reads_the_same_column<'a, V: VValue<C>, C: VCodec>(
-    it: &mut VerifiedIter<'a, V, C>,
+fn reads_the_same_column<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(
+    it: &mut VerifiedIter<'a, V, C, K>,
     which: u8,
     n: usize,
     x: Get<'_, V>,
@@ -2908,7 +2961,7 @@ fn after_every_move(col: &VerifiedColumn<u64>, x: u64) -> (s: VerifiedIterState)
 /// is the one the state was taken of: if an iterator is given, the
 /// value it gives is that column's at the state's place.
 #[allow(dead_code)]
-fn resumed_on_any<'a, V: VValue<C>, C: VCodec>(s: &VerifiedIterState, col: &'a VerifiedColumn<V, C>) -> (r: Option<
+fn resumed_on_any<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(s: &VerifiedIterState, col: &'a VerifiedColumn<V, C, K>) -> (r: Option<
     Get<'a, V>,
 >)
     ensures
@@ -3170,7 +3223,7 @@ fn encode_then_load<'v, V: VValue<C>, C: VCodec>(input: &Vec<Get<'v, V>>) -> (r:
 /// A column's values, given to an encoder by the column's iterator, are
 /// saved as the column saves them.
 #[allow(dead_code)]
-fn reencoded<V: VValue<C>, C: VCodec>(col: &VerifiedColumn<V, C>) -> (r: Vec<u8>)
+fn reencoded<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &VerifiedColumn<V, C, K>) -> (r: Vec<u8>)
     ensures
         r@ == VerifiedColumn::<V, C>::encoding(col@),
 {
@@ -4668,7 +4721,7 @@ fn round_trip_text(input: &Vec<&str>)
         <&str as VGet>::lemma_svs(input@);
         lemma_total_str(<&str as VGet>::svs(input@), 1000);
     }
-    round_trip::<String, Leb128>(input);
+    round_trip::<String, Leb128, LenIndex>(input);
 }
 
 /// What a client reads of a column of strings is the characters it
@@ -4898,7 +4951,7 @@ fn text_streamed<'a>(a: &'a str, b: String, buf: &mut Vec<u8>)
 /// for any bytes, of any provenance.
 #[allow(dead_code)]
 fn load_text(bytes: &[u8]) {
-    load_then_save::<String, Leb128>(bytes);
+    load_then_save::<String, Leb128, LenIndex>(bytes);
 }
 
 /// An edit ends what was suspended. The state of an iterator fits the
@@ -4906,7 +4959,7 @@ fn load_text(bytes: &[u8]) {
 /// after a push the column counts one more, and refuses the state. For
 /// every value type and codec.
 #[allow(dead_code)]
-fn ended_by_a_push<V: VValue<C>, C: VCodec>(col: &mut VerifiedColumn<V, C>, v: Get<'_, V>) -> (r: bool)
+fn ended_by_a_push<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &mut VerifiedColumn<V, C, K>, v: Get<'_, V>) -> (r: bool)
     ensures
         !r,
         final(col)@ == old(col)@.push(v.sv()),
@@ -4926,8 +4979,8 @@ fn ended_by_a_push<V: VValue<C>, C: VCodec>(col: &mut VerifiedColumn<V, C>, v: G
 /// is one whatever its iterator gives, and a remap is one though it
 /// leaves each value as it was.
 #[allow(dead_code)]
-fn ended_by_each_edit<'v, V: VValue<C>, C: VCodec>(
-    col: &mut VerifiedColumn<V, C>,
+fn ended_by_each_edit<'v, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(
+    col: &mut VerifiedColumn<V, C, K>,
     v: Get<'v, V>,
     more: Vec<Get<'v, V>>,
     runs: Vec<Run<Get<'v, V>>>,
@@ -4981,7 +5034,7 @@ fn ended_by_each_edit<'v, V: VValue<C>, C: VCodec>(
 /// nothing, an extend by nothing, and splices of what an iterator with
 /// no item gives, values or runs.
 #[allow(dead_code)]
-fn no_edits<'v, V: VValue<C>, C: VCodec>(col: &mut VerifiedColumn<V, C>, at: usize, none: &[Get<'v, V>])
+fn no_edits<'v, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &mut VerifiedColumn<V, C, K>, at: usize, none: &[Get<'v, V>])
     requires
         at <= old(col)@.len(),
         none@.len() == 0,
@@ -5019,7 +5072,7 @@ fn no_edits<'v, V: VValue<C>, C: VCodec>(col: &mut VerifiedColumn<V, C>, at: usi
 /// A column of no value is not edited by a `clear`: it counts what it
 /// did. One of any value is.
 #[allow(dead_code)]
-fn cleared<V: VValue<C>, C: VCodec>(col: &mut VerifiedColumn<V, C>)
+fn cleared<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &mut VerifiedColumn<V, C, K>)
     ensures
         final(col)@.len() == 0,
         old(col)@.len() == 0 ==> final(col).edits() == old(col).edits(),
@@ -5033,7 +5086,7 @@ fn cleared<V: VValue<C>, C: VCodec>(col: &mut VerifiedColumn<V, C>)
 /// column's count after `k` of them, for any `k` a `usize` holds, is
 /// not what it was (`lemma_after_edits`).
 #[allow(dead_code)]
-fn ended_by_many<V: VValue<C>, C: VCodec>(col: &mut VerifiedColumn<V, C>, v: Get<'_, V>, k: usize) -> (r: bool)
+fn ended_by_many<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &mut VerifiedColumn<V, C, K>, v: Get<'_, V>, k: usize) -> (r: bool)
     requires
         k > 0,
     ensures
@@ -5066,7 +5119,7 @@ fn ended_by_many<V: VValue<C>, C: VCodec>(col: &mut VerifiedColumn<V, C>, v: Get
 /// removal of what was pushed the column holds what it did, and refuses
 /// the state taken before the two.
 #[allow(dead_code)]
-fn ended_though_undone<V: VValue<C>, C: VCodec>(col: &mut VerifiedColumn<V, C>, v: Get<'_, V>) -> (r: bool)
+fn ended_though_undone<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &mut VerifiedColumn<V, C, K>, v: Get<'_, V>) -> (r: bool)
     ensures
         !r,
         final(col)@ == old(col)@,
@@ -5094,7 +5147,7 @@ fn ended_though_undone<V: VValue<C>, C: VCodec>(col: &mut VerifiedColumn<V, C>, 
 /// state of the column, and the column, which nothing has edited, gives
 /// an iterator for it still.
 #[allow(dead_code)]
-fn a_copy_edited<V: VValue<C>, C: VCodec>(col: &VerifiedColumn<V, C>, v: Get<'_, V>) -> (r: (bool, bool))
+fn a_copy_edited<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &VerifiedColumn<V, C, K>, v: Get<'_, V>) -> (r: (bool, bool))
     ensures
         !r.0,
         r.1,
@@ -5114,8 +5167,8 @@ fn a_copy_edited<V: VValue<C>, C: VCodec>(col: &VerifiedColumn<V, C>, v: Get<'_,
 /// for on its own. A splice of a slice: an edit more if it deletes a
 /// value or the slice has one.
 #[allow(dead_code)]
-fn counted_by_a_splice<V: VValue<C>, C: VCodec>(
-    col: &mut VerifiedColumn<V, C>,
+fn counted_by_a_splice<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(
+    col: &mut VerifiedColumn<V, C, K>,
     at: usize,
     del: usize,
     values: &[Get<'_, V>],
@@ -5134,8 +5187,8 @@ fn counted_by_a_splice<V: VValue<C>, C: VCodec>(
 /// runs: an edit more if it deletes a value or leaves the column of
 /// another length.
 #[allow(dead_code)]
-fn counted_by_a_splice_iter<'v, V: VValue<C>, C: VCodec, I: IntoIterator<Item = Get<'v, V>>>(
-    col: &mut VerifiedColumn<V, C>,
+fn counted_by_a_splice_iter<'v, V: VValue<C>, C: VCodec, K: VIndex<V, C>, I: IntoIterator<Item = Get<'v, V>>>(
+    col: &mut VerifiedColumn<V, C, K>,
     at: usize,
     del: usize,
     values: I,
@@ -5151,8 +5204,8 @@ fn counted_by_a_splice_iter<'v, V: VValue<C>, C: VCodec, I: IntoIterator<Item = 
 }
 
 #[allow(dead_code)]
-fn counted_by_a_splice_runs<'v, V: VValue<C>, C: VCodec, I: IntoIterator<Item = Run<Get<'v, V>>>>(
-    col: &mut VerifiedColumn<V, C>,
+fn counted_by_a_splice_runs<'v, V: VValue<C>, C: VCodec, K: VIndex<V, C>, I: IntoIterator<Item = Run<Get<'v, V>>>>(
+    col: &mut VerifiedColumn<V, C, K>,
     at: usize,
     del: usize,
     runs: I,
@@ -5170,8 +5223,8 @@ fn counted_by_a_splice_runs<'v, V: VValue<C>, C: VCodec, I: IntoIterator<Item = 
 /// An `extend`, by any iterator: an edit more if the column is the
 /// longer for it.
 #[allow(dead_code)]
-fn counted_by_an_extend<'v, V: VValue<C>, C: VCodec, I: IntoIterator<Item = Get<'v, V>>>(
-    col: &mut VerifiedColumn<V, C>,
+fn counted_by_an_extend<'v, V: VValue<C>, C: VCodec, K: VIndex<V, C>, I: IntoIterator<Item = Get<'v, V>>>(
+    col: &mut VerifiedColumn<V, C, K>,
     values: I,
 )
     ensures
@@ -5183,7 +5236,7 @@ fn counted_by_an_extend<'v, V: VValue<C>, C: VCodec, I: IntoIterator<Item = Get<
 
 /// An insert, a push and a removal: an edit more, each.
 #[allow(dead_code)]
-fn counted_by_an_insert<V: VValue<C>, C: VCodec>(col: &mut VerifiedColumn<V, C>, at: usize, v: Get<'_, V>)
+fn counted_by_an_insert<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &mut VerifiedColumn<V, C, K>, at: usize, v: Get<'_, V>)
     requires
         at <= old(col)@.len(),
     ensures
@@ -5193,7 +5246,7 @@ fn counted_by_an_insert<V: VValue<C>, C: VCodec>(col: &mut VerifiedColumn<V, C>,
 }
 
 #[allow(dead_code)]
-fn counted_by_a_push<V: VValue<C>, C: VCodec>(col: &mut VerifiedColumn<V, C>, v: Get<'_, V>)
+fn counted_by_a_push<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &mut VerifiedColumn<V, C, K>, v: Get<'_, V>)
     ensures
         final(col).edits() == after_edit(old(col).edits()),
 {
@@ -5201,7 +5254,7 @@ fn counted_by_a_push<V: VValue<C>, C: VCodec>(col: &mut VerifiedColumn<V, C>, v:
 }
 
 #[allow(dead_code)]
-fn counted_by_a_remove<V: VValue<C>, C: VCodec>(col: &mut VerifiedColumn<V, C>, at: usize)
+fn counted_by_a_remove<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &mut VerifiedColumn<V, C, K>, at: usize)
     requires
         at < old(col)@.len(),
     ensures
@@ -5212,7 +5265,7 @@ fn counted_by_a_remove<V: VValue<C>, C: VCodec>(col: &mut VerifiedColumn<V, C>, 
 
 /// A `truncate`: an edit more if the column was longer than asked for.
 #[allow(dead_code)]
-fn counted_by_a_truncate<V: VValue<C>, C: VCodec>(col: &mut VerifiedColumn<V, C>, len: usize)
+fn counted_by_a_truncate<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &mut VerifiedColumn<V, C, K>, len: usize)
     ensures
         len < old(col)@.len() ==> final(col).edits() == after_edit(old(col).edits()),
         len >= old(col)@.len() ==> final(col).edits() == old(col).edits(),
@@ -5222,7 +5275,7 @@ fn counted_by_a_truncate<V: VValue<C>, C: VCodec>(col: &mut VerifiedColumn<V, C>
 
 /// A `remove_n`: an edit more unless it removes no value.
 #[allow(dead_code)]
-fn counted_by_a_remove_n<V: VValue<C>, C: VCodec>(col: &mut VerifiedColumn<V, C>, at: usize, n: usize)
+fn counted_by_a_remove_n<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &mut VerifiedColumn<V, C, K>, at: usize, n: usize)
     requires
         at <= old(col)@.len(),
         n <= old(col)@.len() - at,
@@ -5235,7 +5288,7 @@ fn counted_by_a_remove_n<V: VValue<C>, C: VCodec>(col: &mut VerifiedColumn<V, C>
 
 /// A `clear`: an edit more if the column held a value.
 #[allow(dead_code)]
-fn counted_by_a_clear<V: VValue<C>, C: VCodec>(col: &mut VerifiedColumn<V, C>)
+fn counted_by_a_clear<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &mut VerifiedColumn<V, C, K>)
     ensures
         old(col)@.len() > 0 ==> final(col).edits() == after_edit(old(col).edits()),
         old(col)@.len() == 0 ==> final(col).edits() == old(col).edits(),
@@ -5246,7 +5299,7 @@ fn counted_by_a_clear<V: VValue<C>, C: VCodec>(col: &mut VerifiedColumn<V, C>)
 /// A remap: an edit more, whatever the function and whatever the
 /// column.
 #[allow(dead_code)]
-fn counted_by_a_remap<V: VValue<C>, C: VCodec, F: Fn(V) -> V>(col: &mut VerifiedColumn<V, C>, f: F)
+fn counted_by_a_remap<V: VValue<C>, C: VCodec, K: VIndex<V, C>, F: Fn(V) -> V>(col: &mut VerifiedColumn<V, C, K>, f: F)
     requires
         forall|v: V| old(col)@.contains(V::sv_of(v)) ==> #[trigger] call_requires(f, (v,)),
     ensures
@@ -5257,7 +5310,7 @@ fn counted_by_a_remap<V: VValue<C>, C: VCodec, F: Fn(V) -> V>(col: &mut Verified
 
 /// And a copy: what the column counts.
 #[allow(dead_code)]
-fn counted_by_a_clone<V: VValue<C>, C: VCodec>(col: &VerifiedColumn<V, C>) -> (r: VerifiedColumn<V, C>)
+fn counted_by_a_clone<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &VerifiedColumn<V, C, K>) -> (r: VerifiedColumn<V, C, K>)
     ensures
         r.edits() == col.edits(),
         r@ == col@,
@@ -5333,7 +5386,7 @@ fn decode_all<'a, V: VValue<C>, C: VCodec>(bytes: &'a [u8]) -> (out: Vec<Get<'a,
 /// when it runs, and it reads as many as the column has. For every
 /// value type and codec.
 #[allow(dead_code)]
-fn decoded_as_held<V: VValue<C>, C: VCodec>(col: &VerifiedColumn<V, C>) -> (r: bool)
+fn decoded_as_held<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &VerifiedColumn<V, C, K>) -> (r: bool)
     ensures
         r,
 {
@@ -5737,7 +5790,7 @@ fn find_decoded(bytes: &[u8], x: u32) -> (r: (usize, usize))
 /// value type and codec, from what the order is said to be
 /// ([`VSpec::lemma_below`]).
 #[allow(dead_code)]
-fn scanned_as_searched<V: VValue<C>, C: VCodec>(col: &VerifiedColumn<V, C>, x: Get<'_, V>) -> (r: bool)
+fn scanned_as_searched<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &VerifiedColumn<V, C, K>, x: Get<'_, V>) -> (r: bool)
     requires
         sorted::<V>(col@),
     ensures
