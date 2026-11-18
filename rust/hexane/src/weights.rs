@@ -76,14 +76,14 @@ pub(crate) fn sum_overflows()
 /// The error a load reports for a slab whose item count overflows.
 #[verifier::external_body]
 #[cold]
-fn count_overflows() -> PackError {
+pub(crate) fn count_overflows() -> PackError {
     PackError::BadFormat
 }
 
 /// The error a load reports for a prefix sum that overflows its type.
 #[verifier::external_body]
 #[cold]
-fn prefix_sum_overflows() -> PackError {
+pub(crate) fn prefix_sum_overflows() -> PackError {
     PackError::InvalidValue("prefix sum overflows its type".into())
 }
 

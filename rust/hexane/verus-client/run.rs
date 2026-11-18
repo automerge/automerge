@@ -2,7 +2,8 @@
 //! `requires`, and the client's own run-time work (loading, saving,
 //! unwrapping) must not panic.
 use hexane::verified::{
-    LenIndex, VerifiedColumn, VerifiedDecoder, VerifiedEncoder, VerifiedEncoderState,
+    LenIndex, SumIndex, VerifiedColumn, VerifiedDecoder, VerifiedEncoder, VerifiedEncoderState,
+    VerifiedPrefixColumn,
 };
 use hexane::{Leb128, Run};
 use verus_client::Action;
@@ -1277,4 +1278,95 @@ fn decoders() {
     let whole = VerifiedDecoder::<u64>::new(&bytes);
     assert_eq!(verus_client::told_by_a_decoders_loop(whole), Some(333));
     assert_eq!(verus_client::told_by_a_decoders_loop(dec), None);
+}
+
+#[test]
+fn sums() {
+    let v: Vec<u64> = (0..1000).map(|i| i / 3).collect();
+    let plain = VerifiedColumn::<u64>::from_values(&v);
+    let bytes = plain.save();
+    // the clients of a column of any kind, of prefix columns
+    verus_client::round_trip::<u32, Leb128, SumIndex>(&vec![1, 2, 2, u32::MAX]);
+    verus_client::round_trip::<Option<i64>, Leb128, SumIndex>(&vec![
+        Some(i64::MIN),
+        None,
+        Some(-1),
+    ]);
+    verus_client::round_trip::<bool, Leb128, SumIndex>(&vec![true, false, false]);
+    verus_client::load_then_save::<u64, Leb128, SumIndex>(&bytes);
+    verus_client::clone_then_diverge::<u64, Leb128, SumIndex>(&v, 7);
+    verus_client::collect_then_extend::<u64, Leb128, SumIndex>(vec![1, 1, 2], vec![3], vec![4, 4]);
+    verus_client::slabs_and_validation::<u64, Leb128, SumIndex>(&(0..10_000).collect());
+    verus_client::runs_in_a_window::<u64, Leb128, SumIndex>(1, 2);
+    let col: VerifiedPrefixColumn<u64> = verus_client::copied_by_runs(&plain);
+    assert_eq!(col.to_vec(), v);
+    assert_eq!(verus_client::read_in_a_loop(&col), v);
+    assert_eq!(verus_client::in_runs(&col).len(), 334);
+    assert_eq!(verus_client::count_by_runs(&col, 10, 500), 490);
+    let back: VerifiedColumn<u64> = verus_client::copied_by_runs(&col);
+    assert_eq!(back.to_vec(), v);
+    // loads
+    let loaded = verus_client::load_with_sums::<u64, Leb128>(&bytes).unwrap();
+    assert_eq!(loaded.to_vec(), v);
+    assert!(verus_client::load_with_sums::<u64, Leb128>(&[2]).is_none());
+    assert!(verus_client::load_short_sums::<u64, Leb128>(&bytes).is_some());
+    assert!(verus_client::load_short_sums::<bool, Leb128>(&[3, 2]).is_some());
+    let wide = vec![Some(i64::MIN), None, Some(i64::MAX)];
+    let signed = VerifiedColumn::<Option<i64>>::from_values(&wide).save();
+    let (a, b) = verus_client::load_wide_sums(&bytes, &signed);
+    assert_eq!(a.unwrap().to_vec(), v);
+    assert_eq!(b.unwrap().to_vec(), wide);
+    let small = VerifiedColumn::<u32>::from_values(&[u32::MAX, 0, 7]).save();
+    assert_eq!(
+        verus_client::load_small_sums(&small).unwrap().to_vec(),
+        vec![u32::MAX, 0, 7]
+    );
+    // edits
+    let mut col = loaded;
+    verus_client::push_within_the_sums(&mut col, u64::MAX);
+    assert_eq!((col.len(), col.get(1000)), (1001, Some(u64::MAX)));
+    let mut flags = VerifiedPrefixColumn::<bool>::new();
+    verus_client::push_within_the_sums(&mut flags, true);
+    assert_eq!(flags.to_vec(), vec![true]);
+    // saved as a plain column of the values
+    let sums = verus_client::summed_up(&plain);
+    let (x, y) = verus_client::saved_alike(&plain, &sums);
+    assert_eq!(x, y);
+    assert_eq!(x, bytes);
+}
+
+#[cfg(target_pointer_width = "64")]
+#[test]
+#[should_panic(expected = "prefix sum overflows")]
+fn a_fill_past_the_sums() {
+    verus_client::a_fill_past_the_sums(1 << 33);
+}
+
+#[cfg(target_pointer_width = "64")]
+#[test]
+#[should_panic(expected = "prefix sum overflows")]
+fn a_push_past_the_sums() {
+    let mut col = VerifiedPrefixColumn::<u32>::fill((1 << 32) + 1, u32::MAX);
+    verus_client::a_push_past_the_sums(&mut col, 1);
+}
+
+#[cfg(target_pointer_width = "64")]
+#[test]
+fn sums_refused() {
+    // more than a `u32` column's sums hold: no prefix column, a plain one
+    let long = VerifiedColumn::<u32>::fill(1 << 33, u32::MAX).save();
+    assert!(verus_client::load_with_sums::<u32, Leb128>(&long).is_none());
+    assert!(verus_client::load_plain::<u32, Leb128>(&long).is_some());
+    // the most they hold
+    let most = VerifiedColumn::<u32>::fill((1 << 32) + 1, u32::MAX).save();
+    let mut col = verus_client::load_small_sums(&most).unwrap();
+    verus_client::push_within_the_sums(&mut col, 0);
+    assert_eq!(col.len(), (1 << 32) + 2);
+}
+
+#[cfg(target_pointer_width = "64")]
+#[test]
+#[should_panic(expected = "prefix sum overflows")]
+fn sums_of_a_plain_column_past_the_type() {
+    verus_client::summed_up(&VerifiedColumn::<u32>::fill(1 << 33, u32::MAX));
 }

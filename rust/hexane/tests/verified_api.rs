@@ -13,13 +13,16 @@
 #![allow(clippy::iter_nth_zero)]
 
 use hexane::encoder::{BoolEncoder, BoolEncoderState, RleEncoder, RleEncoderState};
+use hexane::prefix::PrefixWeightFn;
 use hexane::verified::{
-    refused, Get, LenIndex, VNewtype, VValue, VerifiedColumn, VerifiedDecoder, VerifiedEncoder,
-    VerifiedEncoderState, VerifiedIter, VerifiedIterState, VerifiedRuns,
+    refused, Get, LenIndex, SumIndex, VNewtype, VSummed, VValue, VerifiedColumn, VerifiedDecoder,
+    VerifiedEncoder, VerifiedEncoderState, VerifiedIter, VerifiedIterState, VerifiedPrefixColumn,
+    VerifiedRuns,
 };
 use hexane::{
     Codec, Column, ColumnEncoding, ColumnValue, ColumnValueRef, Encoder, EncoderApi, IterState,
-    Leb128, LoadOpts, MaybeFill, NoFill, PackError, RleEncoding, RleValue, Run, RunDecoder,
+    Leb128, LoadOpts, MaybeFill, NoFill, PackError, PrefixColumn, PrefixValue, RleEncoding,
+    RleValue, Run, RunDecoder,
 };
 use std::cell::{Cell, RefCell};
 use std::cmp::Ordering;
@@ -7255,4 +7258,659 @@ fn the_kind_of_a_plain_column() {
     assert_eq!(it.count(), vs.len());
     let it = VerifiedIter::<u64, Leb128, LenIndex>::default();
     assert_eq!(it.count(), 0);
+}
+
+/// A value type a prefix column holds, in both APIs.
+trait Summed: Kind + VSummed + PrefixValue {}
+
+impl<T: Kind + VSummed + PrefixValue> Summed for T {}
+
+/// The same checks for each value type of a prefix column.
+macro_rules! for_each_sum {
+    ($f:ident) => {
+        $f::<u64>();
+        $f::<i64>();
+        $f::<u32>();
+        $f::<NonZeroU32>();
+        $f::<bool>();
+        $f::<Option<u64>>();
+        $f::<Option<i64>>();
+        $f::<Option<u32>>();
+        $f::<Option<NonZeroU32>>();
+    };
+}
+
+/// What a prefix column of the verified API holds.
+fn sum_values<T: Summed>(p: &VerifiedPrefixColumn<T>) -> Vec<T> {
+    p.to_vec().into_iter().map(T::keep).collect()
+}
+
+/// What a `PrefixColumn` holds.
+fn old_sum_values<T: Summed>(c: &PrefixColumn<T>) -> Vec<T> {
+    c.to_vec().into_iter().map(old).collect()
+}
+
+/// `check_invariants` says of a prefix column what it says of the plain
+/// column of the same edits: nothing, or the same words. (Where a panic
+/// can be caught: not on wasm32.)
+#[cfg(panic = "unwind")]
+fn check_sum_invariants<T: Summed>(p: &VerifiedPrefixColumn<T>, v: &VerifiedColumn<T>) {
+    let sums = panic_of(std::panic::AssertUnwindSafe(|| p.check_invariants()));
+    let plain = panic_of(std::panic::AssertUnwindSafe(|| v.check_invariants()));
+    assert_eq!(sums, plain);
+}
+
+#[cfg(not(panic = "unwind"))]
+fn check_sum_invariants<T: Summed>(_p: &VerifiedPrefixColumn<T>, _v: &VerifiedColumn<T>) {}
+
+/// A prefix column of the verified API is a column: it holds `model` and
+/// reads as the plain column `v` of the same edits does, it lies in that
+/// column's slabs, and it saves the bytes that column and `PrefixColumn`
+/// save. `built` says that edits made the columns of values, which the
+/// checks of `check_invariants` then pass.
+fn check_sums<T: Summed>(
+    p: &VerifiedPrefixColumn<T>,
+    v: &VerifiedColumn<T>,
+    c: &PrefixColumn<T>,
+    model: &[T],
+    built: bool,
+) {
+    assert_eq!(p.len(), model.len());
+    assert_eq!(p.is_empty(), model.is_empty());
+    assert_eq!(sum_values(p), model);
+    assert_eq!(new_values(v), model);
+    assert_eq!(old_sum_values(c), model);
+    let mut it = p.iter();
+    for m in model {
+        assert_eq!(it.next().map(T::keep).as_ref(), Some(m));
+    }
+    assert!(it.next().is_none());
+    assert!(it.next().is_none());
+    assert!(p.get(model.len()).is_none());
+    assert!(p.get(usize::MAX).is_none());
+    let bytes = p.save();
+    assert_eq!(bytes, v.save());
+    assert_eq!(bytes, c.save());
+
+    assert_eq!(p.slab_count(), v.slab_count());
+    assert_eq!(p.slab_lens(), v.slab_lens());
+    assert_eq!(p.slab_segments(), v.slab_segments());
+    assert_eq!(format!("{p:?}"), format!("{v:?}"));
+    if !model.is_empty() {
+        assert_eq!(p.slab_count(), c.slab_count());
+    }
+    if built {
+        p.check_invariants();
+    } else {
+        check_sum_invariants(p, v);
+    }
+    assert!(p.validate_encoding().is_ok());
+
+    let (mut a, mut b) = (vec![9u8; 3], vec![9u8; 3]);
+    let range = p.save_to(&mut a);
+    assert_eq!(range, c.save_to(&mut b));
+    assert_eq!(a, b);
+    assert_eq!(a[range], bytes[..]);
+    for x in model.first().into_iter().chain(model.last()) {
+        let only = model.iter().all(|m| m == x);
+        assert_eq!(p.is_only(x.lend()), only);
+        let (mut a, mut b) = (vec![9u8; 3], vec![9u8; 3]);
+        let range = p.save_to_unless(&mut a, x.lend());
+        assert_eq!(range, c.save_to_unless(&mut b, x.as_column_ref()));
+        assert_eq!(a, b);
+    }
+}
+
+/// Each API's prefix column loads the bytes the other saved, as the same
+/// values, and the verified one into the slabs a plain column loads them
+/// into.
+fn check_sum_loads<T: Summed>(p: &VerifiedPrefixColumn<T>, c: &PrefixColumn<T>, model: &[T]) {
+    let bytes = p.save();
+    assert_eq!(bytes, c.save());
+    let p2 = VerifiedPrefixColumn::<T>::load(&c.save()).unwrap();
+    let c2 = PrefixColumn::<T>::load(&bytes).unwrap();
+    let v2 = VerifiedColumn::<T>::load(&bytes).unwrap();
+    check_sums(&p2, &v2, &c2, model, false);
+    assert_eq!(p2.save(), bytes);
+    assert_eq!(c2.save(), bytes);
+}
+
+/// The reads of a plain column, of a prefix column: a value by its
+/// place, a range of values, a search for a value, and a clone, which is
+/// a column of its own.
+fn check_sum_reads<T: Summed>(
+    rng: &mut Rng,
+    p: &VerifiedPrefixColumn<T>,
+    v: &VerifiedColumn<T>,
+    model: &[T],
+) {
+    for _ in 0..4 {
+        if !model.is_empty() {
+            let i = rng.below(model.len());
+            assert_eq!(p.get(i).map(T::keep).as_ref(), Some(&model[i]));
+        }
+        let start = rng.below(model.len() + 1);
+        let end = start + rng.below(model.len() - start + 1);
+        let mut it = p.iter_range(start, end);
+        assert_eq!(it.len(), end - start);
+        for m in &model[start..end] {
+            assert_eq!(it.next().map(T::keep).as_ref(), Some(m));
+        }
+        assert!(it.next().is_none());
+        let x = match model.get(start) {
+            Some(x) => x.clone(),
+            None => T::fresh(rng),
+        };
+        assert_eq!(
+            p.scope_to_value(x.lend(), start, end),
+            v.scope_to_value(x.lend(), start, end)
+        );
+        let runs: Vec<(usize, T)> = p
+            .iter_range(start, end)
+            .runs()
+            .map(|r| (r.count, T::keep(r.value)))
+            .collect();
+        assert_eq!(runs, runs_of(&model[start..end]));
+    }
+    let mut p2 = p.clone();
+    assert_eq!(p2.slab_lens(), p.slab_lens());
+    let x = T::fresh(rng);
+    p2.insert(model.len() / 2, x.lend());
+    assert_eq!(p2.len(), model.len() + 1);
+    assert_eq!(p2.get(model.len() / 2).map(T::keep), Some(x));
+    assert_eq!(sum_values(p), model);
+}
+
+fn sum_edits<T: Summed>() {
+    for seed in 1..=8u64 {
+        let mut rng = Rng(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) ^ 0x50f5);
+        let budget = [2, 3, 4, 8, 64][rng.below(5)];
+        let mut p = VerifiedPrefixColumn::<T>::with_max_segments(budget);
+        let mut v = VerifiedColumn::<T>::with_max_segments(budget);
+        let mut c = PrefixColumn::<T>::with_max_segments(budget);
+        let mut model: Vec<T> = vec![];
+        for step in 0..120 {
+            match rng.below(14) {
+                0..=3 => {
+                    let at = rng.below(model.len() + 1);
+                    let del = rng.below((model.len() - at).min(12) + 1);
+                    let ins: Vec<T> = rng.values(40);
+                    if rng.below(2) == 0 {
+                        p.splice(at, del, &lent(&ins));
+                    } else {
+                        p.splice_iter(at, del, ins.iter().map(T::lend));
+                    }
+                    v.splice(at, del, &lent(&ins));
+                    c.splice(at, del, ins.iter().cloned());
+                    model.splice(at..at + del, ins);
+                }
+                4 | 5 => {
+                    let at = rng.below(model.len() + 1);
+                    let x = match at.checked_sub(1) {
+                        Some(i) => rng.value(&model[i]),
+                        None => T::fresh(&mut rng),
+                    };
+                    p.insert(at, x.lend());
+                    v.insert(at, x.lend());
+                    c.insert(at, x.clone());
+                    model.insert(at, x);
+                }
+                6 => {
+                    let x = match model.last() {
+                        Some(last) => rng.value(last),
+                        None => T::fresh(&mut rng),
+                    };
+                    p.push(x.lend());
+                    v.push(x.lend());
+                    c.push(x.clone());
+                    model.push(x);
+                }
+                7 | 8 => {
+                    if !model.is_empty() {
+                        let at = rng.below(model.len());
+                        p.remove(at);
+                        v.remove(at);
+                        c.remove(at);
+                        model.remove(at);
+                    }
+                }
+                9 => {
+                    // sometimes past the end, which changes nothing
+                    let len = rng.below(model.len() + 3);
+                    p.truncate(len);
+                    v.truncate(len);
+                    c.truncate(len);
+                    model.truncate(len);
+                }
+                10 => {
+                    let at = rng.below(model.len() + 1);
+                    let n = match rng.below(8) {
+                        0 => 0,
+                        1 => model.len() - at,
+                        _ => rng.below((model.len() - at).min(40) + 1),
+                    };
+                    p.remove_n(at, n);
+                    v.remove_n(at, n);
+                    c.remove_n(at, n);
+                    model.drain(at..at + n);
+                }
+                11 | 12 => {
+                    let at = rng.below(model.len() + 1);
+                    let del = rng.below((model.len() - at).min(30) + 1);
+                    let runs = some_runs::<T>(&mut rng, 6);
+                    let lent_runs = || {
+                        runs.iter().map(|(n, x)| Run {
+                            count: *n,
+                            value: x.lend(),
+                        })
+                    };
+                    p.splice_runs(at, del, lent_runs());
+                    v.splice_runs(at, del, lent_runs());
+                    let owned_runs = runs.iter().map(|(n, x)| Run {
+                        count: *n,
+                        value: x.clone(),
+                    });
+                    c.splice_runs(at, del, owned_runs);
+                    model.splice(at..at + del, run_model(&runs));
+                }
+                _ => {
+                    if rng.below(3) == 0 {
+                        p.clear();
+                        v.clear();
+                        c.clear();
+                        model.clear();
+                    } else {
+                        let more: Vec<T> = rng.values(40);
+                        p.extend(more.iter().map(T::lend));
+                        v.extend(more.iter().map(T::lend));
+                        c.extend(more.iter().cloned());
+                        model.extend(more);
+                    }
+                }
+            }
+            check_sums(&p, &v, &c, &model, true);
+            check_sum_reads(&mut rng, &p, &v, &model);
+            if step % 10 == 9 {
+                check_sum_loads(&p, &c, &model);
+            }
+        }
+        check_sum_loads(&p, &c, &model);
+    }
+}
+
+/// A prefix column of the verified API ([`VerifiedPrefixColumn`]) is a
+/// column kept with another index. Under the same edits it holds what a
+/// plain column holds, in the same slabs, reads the same, and saves the
+/// same bytes, which are the bytes `PrefixColumn` saves; and each API's
+/// prefix column loads what the other saved.
+#[test]
+fn a_prefix_column_is_a_column() {
+    for_each_sum!(sum_edits);
+}
+
+fn sum_forms<T: Summed>() {
+    for seed in 1..=6u64 {
+        let mut rng = Rng(seed.wrapping_mul(0x2545_f491_4f6c_dd1d) ^ 0x50f6);
+        let budget = [2, 3, 4, 8, 64][rng.below(5)];
+        let model: Vec<T> = rng.values(300);
+        let plain = VerifiedColumn::<T>::from_values(&lent(&model));
+        let old = PrefixColumn::<T>::from_values(model.clone());
+
+        let p = VerifiedPrefixColumn::<T>::from_values(&lent(&model));
+        check_sums(&p, &plain, &old, &model, true);
+        let p: VerifiedPrefixColumn<T> = model.iter().map(T::lend).collect();
+        check_sums(&p, &plain, &old, &model, true);
+        let p = VerifiedColumn::<T, Leb128, SumIndex>::from_iter(lent(&model));
+        check_sums(&p, &plain, &old, &model, true);
+        let mut p = VerifiedPrefixColumn::<T>::new();
+        p.extend(lent(&model));
+        check_sums(&p, &plain, &old, &model, true);
+        let none = VerifiedPrefixColumn::<T>::default();
+        assert!(none.is_empty() && none.save().is_empty());
+        assert_eq!(none.slab_count(), 0);
+
+        // in slabs of a budget, and loaded with one
+        let mut p = VerifiedPrefixColumn::<T>::from_values_with_max_segments(&lent(&model), budget);
+        let mut v = VerifiedColumn::<T>::from_values_with_max_segments(&lent(&model), budget);
+        let mut inner = Column::<T, Leb128, PrefixWeightFn<T>>::with_max_segments(budget);
+        inner.splice(0, 0, model.iter().cloned());
+        let c = PrefixColumn::from_column(inner);
+        check_sums(&p, &v, &c, &model, true);
+        check_sum_loads(&p, &c, &model);
+        let opts = LoadOpts::new()
+            .with_length(model.len())
+            .with_max_segments(budget);
+        let p2 = VerifiedPrefixColumn::<T>::load_with(&p.save(), opts).unwrap();
+        let v2 = VerifiedColumn::<T>::load_with(&p.save(), opts).unwrap();
+        let c2 = PrefixColumn::<T>::load_with(&p.save(), opts).unwrap();
+        check_sums(&p2, &v2, &c2, &model, false);
+        // of a length the bytes do not have: the same error
+        let long = LoadOpts::new().with_length(model.len() + 1);
+        assert_eq!(
+            VerifiedPrefixColumn::<T>::load_with(&p.save(), long)
+                .map(|p| p.len())
+                .map_err(|e| e.to_string()),
+            PrefixColumn::<T>::load_with(&p.save(), long)
+                .map(|c| c.len())
+                .map_err(|e| e.to_string()),
+        );
+
+        // one value for each of a run's, as `Column::remap` gives them
+        let (a, b) = (T::fresh(&mut rng), T::fresh(&mut rng));
+        let f = |x: T| if not_above(&x, &a) { b.clone() } else { x };
+        p.remap(f);
+        v.remap(f);
+        let mut inner = c.values().clone();
+        inner.remap(f);
+        let c = PrefixColumn::from_column(inner);
+        let want: Vec<T> = model.iter().cloned().map(f).collect();
+        check_sums(&p, &v, &c, &want, false);
+        check_sum_loads(&p, &c, &want);
+
+        // a column of one value
+        let n = rng.below(500);
+        let p = VerifiedPrefixColumn::<T>::fill(n, a.lend());
+        let v = VerifiedColumn::<T>::fill(n, a.lend());
+        let c = PrefixColumn::from_column(Column::fill(n, a.as_column_ref()));
+        check_sums(&p, &v, &c, &vec![a.clone(); n], true);
+    }
+}
+
+/// Whether `x` is not above `a`, as the type orders its values: the
+/// values a remap of these tests gives another value for.
+fn not_above<T: Kind>(x: &T, a: &T) -> bool {
+    x.order(a) != Ordering::Greater
+}
+
+/// The other ways to make a prefix column of the verified API make what
+/// they make of a plain column, and what `PrefixColumn` holds: a slice,
+/// an iterator, `extend`, a segment budget, a load with options, a
+/// remap, and `fill`.
+#[test]
+fn the_other_forms_of_a_prefix_column() {
+    for_each_sum!(sum_forms);
+}
+
+/// The kind of a prefix column is the third parameter of the column's
+/// type: `VerifiedPrefixColumn<V, C>` is `VerifiedColumn<V, C, SumIndex>`
+/// written short, and its iterators are the column's.
+#[test]
+fn the_kind_of_a_prefix_column() {
+    let vs: Vec<u32> = (0..2000).map(|i| i / 7).collect();
+    let short = VerifiedPrefixColumn::<u32>::from_values(&vs);
+    let named: VerifiedColumn<u32, Leb128, SumIndex> = short.clone();
+    let coded: VerifiedPrefixColumn<u32, Leb128> = named.clone();
+    assert_eq!(coded.to_vec(), vs);
+    let it: VerifiedIter<'_, u32, Leb128, SumIndex> = short.iter();
+    assert_eq!(it.count(), vs.len());
+    let it = VerifiedIter::<u32, Leb128, SumIndex>::default();
+    assert_eq!(it.count(), 0);
+    let state: VerifiedIterState = short.iter_range(5, 900).suspend();
+    let mut it = state.try_resume(&named).unwrap();
+    assert_eq!((it.pos(), it.next()), (5, Some(0)));
+    // a plain column of the same values is another type, with the same
+    // bytes
+    let plain = VerifiedColumn::<u32>::from_values(&vs);
+    assert_eq!(plain.save(), short.save());
+}
+
+/// A prefix column is kept only of values whose sums fit the type they
+/// are kept in: the sums of `u32`s, in a `u64`. Bytes whose values add up
+/// past it are a plain column's, which loads them, and no prefix column's:
+/// the load refuses them, with the error of `PrefixColumn`'s. The sums of
+/// a column of `u64`s, of `i64`s or of `bool`s fit whatever it holds.
+///
+/// (The columns here are longer than a 32-bit `usize` counts.)
+#[cfg(target_pointer_width = "64")]
+#[test]
+fn a_load_refuses_sums_that_do_not_fit() {
+    fn loads<T: Summed>(bytes: &[u8]) -> Result<usize, String> {
+        let new = VerifiedPrefixColumn::<T>::load(bytes).map(|p| (p.len(), p.save()));
+        let old = PrefixColumn::<T>::load(bytes).map(|c| (c.len(), c.save()));
+        let (new, old) = (
+            new.map_err(|e| e.to_string()),
+            old.map_err(|e| e.to_string()),
+        );
+        assert_eq!(new, old);
+        // with options: the same
+        let with =
+            VerifiedPrefixColumn::<T>::load_with(bytes, LoadOpts::new().with_max_segments(4));
+        assert_eq!(
+            with.map(|p| p.len()).map_err(|e| e.to_string()),
+            new.clone().map(|x| x.0)
+        );
+        // a plain column loads them either way
+        let plain = VerifiedColumn::<T>::load(bytes).unwrap();
+        assert_eq!(plain.save(), bytes);
+        new.map(|(len, saved)| {
+            assert_eq!(saved, bytes);
+            assert_eq!(len, plain.len());
+            len
+        })
+    }
+    let refused = Err("invalid value: prefix sum overflows its type".to_string());
+
+    // `u32::MAX` 2^32 + 1 times adds up to `u64::MAX`
+    let most = (1usize << 32) + 1;
+    let mut v = VerifiedColumn::<u32>::fill(most, u32::MAX);
+    assert_eq!(loads::<u32>(&v.save()), Ok(most));
+    v.push(0);
+    assert_eq!(loads::<u32>(&v.save()), Ok(most + 1));
+    v.push(1);
+    assert_eq!(loads::<u32>(&v.save()), refused);
+    v.remove(0);
+    assert_eq!(loads::<u32>(&v.save()), Ok(most + 1));
+    let v = VerifiedColumn::<u32>::fill(most + 1, u32::MAX);
+    assert_eq!(loads::<u32>(&v.save()), refused);
+    let v = VerifiedColumn::<u32>::fill(1 << 33, u32::MAX);
+    assert_eq!(loads::<u32>(&v.save()), refused);
+
+    // in slabs whose sums each fit, while their total does not
+    let run = |value: u32, count: usize| Run { count, value };
+    let mut v = VerifiedColumn::<u32>::new();
+    let runs = [
+        run(u32::MAX, 1 << 32),
+        run(0, 1),
+        run(u32::MAX - 1, 1 << 32),
+    ];
+    v.splice_runs(0, 0, runs);
+    let bytes = v.save();
+    assert_eq!(loads::<u32>(&bytes), refused);
+    let opts = LoadOpts::new().with_max_segments(2);
+    let new = VerifiedPrefixColumn::<u32>::load_with(&bytes, opts);
+    let old = PrefixColumn::<u32>::load_with(&bytes, opts);
+    assert_eq!(
+        new.err().unwrap().to_string(),
+        old.err().unwrap().to_string()
+    );
+    assert_eq!(
+        VerifiedColumn::<u32>::load_with(&bytes, opts)
+            .unwrap()
+            .slab_count(),
+        3
+    );
+
+    // with nulls, which add nothing, and of numbers that are not zero
+    let mut v = VerifiedColumn::<Option<u32>>::fill(most, Some(u32::MAX));
+    v.splice_runs(
+        7,
+        0,
+        [Run {
+            count: 1 << 40,
+            value: None,
+        }],
+    );
+    assert_eq!(loads::<Option<u32>>(&v.save()), Ok(most + (1 << 40)));
+    v.push(Some(1));
+    assert_eq!(loads::<Option<u32>>(&v.save()), refused);
+    let v = VerifiedColumn::<NonZeroU32>::fill(most, NonZeroU32::MAX);
+    assert_eq!(loads::<NonZeroU32>(&v.save()), Ok(most));
+    let v = VerifiedColumn::<NonZeroU32>::fill(most + 1, NonZeroU32::MAX);
+    assert_eq!(loads::<NonZeroU32>(&v.save()), refused);
+    let v = VerifiedColumn::<Option<NonZeroU32>>::fill(1 << 33, Some(NonZeroU32::MAX));
+    assert_eq!(loads::<Option<NonZeroU32>>(&v.save()), refused);
+
+    // the longest columns of the wider types
+    let long = i64::MAX as usize;
+    let v = VerifiedColumn::<u64>::fill(long, u64::MAX);
+    assert_eq!(loads::<u64>(&v.save()), Ok(long));
+    let v = VerifiedColumn::<i64>::fill(long, i64::MIN);
+    assert_eq!(loads::<i64>(&v.save()), Ok(long));
+    let v = VerifiedColumn::<Option<i64>>::fill(long, Some(i64::MAX));
+    assert_eq!(loads::<Option<i64>>(&v.save()), Ok(long));
+    let v = VerifiedColumn::<bool>::fill(long, true);
+    assert_eq!(loads::<bool>(&v.save()), Ok(long));
+}
+
+/// An edit that would leave a prefix column of values whose sums do not
+/// fit panics, as `PrefixColumn`'s does and with its words, and so do a
+/// `fill` and a remap; one whose sums fit goes through, also where the
+/// sum is the largest of its type.
+///
+/// (The columns here are longer than a 32-bit `usize` counts.)
+#[cfg(target_pointer_width = "64")]
+#[test]
+fn an_edit_past_the_sums_panics() {
+    type P<T> = VerifiedPrefixColumn<T>;
+    let run = |value: u32, count: usize| Run { count, value };
+    let words = Some("prefix sum overflows its type".to_string());
+    let most = (1usize << 32) + 1;
+    let panics = |f: &dyn Fn()| panic_of(std::panic::AssertUnwindSafe(f));
+
+    // one run; and two edits of one slab
+    let new = panics(&|| P::<u32>::new().splice_runs(0, 0, [run(u32::MAX, 1 << 33)]));
+    let old = panics(&|| PrefixColumn::<u32>::new().splice_runs(0, 0, [run(u32::MAX, 1 << 33)]));
+    assert_eq!((&new, &old), (&words, &words));
+    let new = panics(&|| {
+        let mut p = P::<u32>::new();
+        p.splice_runs(0, 0, [run(u32::MAX, 1 << 32)]);
+        p.splice_runs(0, 0, [run(u32::MAX - 1, 1 << 32)]);
+    });
+    assert_eq!(new, words);
+
+    // slabs of at most two runs: the sums of each fit, and their total
+    // does not
+    let new = panics(&|| {
+        let mut p = P::<u32>::with_max_segments(2);
+        p.splice_runs(0, 0, [run(u32::MAX, 1 << 32)]);
+        assert_eq!(p.len(), 1 << 32);
+        p.splice_runs(1 << 32, 0, [run(0, 1), run(u32::MAX - 1, 1 << 32)]);
+    });
+    assert_eq!(new, words);
+    let new = panics(&|| {
+        let mut p = P::<u32>::with_max_segments(2);
+        let big = run(u32::MAX, 1 << 32);
+        p.splice_runs(0, 0, [big, run(0, 1), run(u32::MAX - 1, 1 << 32)]);
+    });
+    assert_eq!(new, words);
+    let new = panics(&|| {
+        let mut p = P::<u32>::with_max_segments(2);
+        let big = run(u32::MAX, 1 << 32);
+        p.splice_runs(0, 0, [big, run(0, 1), run(u32::MAX - 1, 1)]);
+        // lengthens the last run, which keeps its slab
+        p.splice_runs(p.len(), 0, [run(u32::MAX - 1, 1 << 32)]);
+    });
+    assert_eq!(new, words);
+
+    // with nulls, and of numbers that are not zero
+    let new = panics(&|| {
+        let run = |value: Option<u32>, count: usize| Run { count, value };
+        let mut p = P::<Option<u32>>::with_max_segments(2);
+        p.splice_runs(0, 0, [run(Some(u32::MAX), 1 << 32)]);
+        p.splice_runs(0, 0, [run(Some(u32::MAX - 1), 1 << 32), run(None, 5)]);
+    });
+    assert_eq!(new, words);
+    let new = panics(&|| {
+        let big = Run {
+            count: 1 << 33,
+            value: NonZeroU32::MAX,
+        };
+        P::<NonZeroU32>::new().splice_runs(0, 0, [big]);
+    });
+    assert_eq!(new, words);
+
+    // a column filled with one value
+    assert_eq!(panics(&|| drop(P::<u32>::fill(1 << 33, u32::MAX))), words);
+    assert_eq!(panics(&|| drop(P::<u32>::fill(most + 1, u32::MAX))), words);
+    assert_eq!(
+        panics(&|| drop(P::<Option<NonZeroU32>>::fill(
+            most + 1,
+            Some(NonZeroU32::MAX)
+        ))),
+        words
+    );
+
+    // the largest sum, and one more: by each edit of one value
+    let full = P::<u32>::fill(most, u32::MAX);
+    assert_eq!(full.len(), most);
+    let old_full = PrefixColumn::<u32>::from_column(Column::fill(most, u32::MAX));
+    assert_eq!(full.save(), old_full.save());
+    assert_eq!(panics(&|| full.clone().push(1)), words);
+    assert_eq!(panics(&|| old_full.clone().push(1u32)), words);
+    assert_eq!(panics(&|| full.clone().insert(5, 1)), words);
+    assert_eq!(panics(&|| full.clone().splice(most, 0, &[0, 0, 1])), words);
+    assert_eq!(panics(&|| full.clone().splice_iter(0, 0, [0, 1])), words);
+    assert_eq!(panics(&|| full.clone().extend([0, 0, 1])), words);
+    let (mut p, mut c) = (full.clone(), old_full.clone());
+    p.push(0);
+    c.push(0u32);
+    p.insert(5, 0);
+    c.insert(5, 0u32);
+    p.extend([0, 0]);
+    c.extend([0u32, 0]);
+    p.splice(3, 2, &[u32::MAX, u32::MAX]);
+    c.splice(3, 2, [u32::MAX, u32::MAX]);
+    assert_eq!(p.len(), most + 4);
+    // and room made by a deletion can be filled again
+    p.remove(0);
+    c.remove(0);
+    p.push(u32::MAX);
+    c.push(u32::MAX);
+    p.remove_n(0, 2);
+    c.remove_n(0, 2);
+    p.splice(0, 0, &[u32::MAX - 1, u32::MAX, 1]);
+    c.splice(0, 0, [u32::MAX - 1, u32::MAX, 1]);
+    assert_eq!(p.save(), c.save());
+    assert_eq!(panics(&|| p.clone().push(1)), words);
+    assert_eq!(panics(&|| c.clone().push(1u32)), words);
+    let loaded = P::<u32>::load(&p.save()).unwrap();
+    assert_eq!(loaded.len(), most + 5);
+    assert_eq!(panics(&|| loaded.clone().push(1)), words);
+
+    // sums that fit still edit: u32::MAX * (2^32 + 1) == u64::MAX
+    let mut p = P::<u32>::with_max_segments(2);
+    p.splice_runs(0, 0, [run(u32::MAX, 1 << 32)]);
+    p.splice_runs(0, 0, [run(0, 1 << 40)]);
+    // three runs: two slabs
+    p.insert(0, u32::MAX);
+    let mut c = PrefixColumn::<u32>::with_max_segments(2);
+    c.splice_runs(0, 0, [run(u32::MAX, 1 << 32)]);
+    c.splice_runs(0, 0, [run(0, 1 << 40)]);
+    c.insert(0, u32::MAX);
+    assert_eq!((p.slab_count(), c.slab_count()), (2, 2));
+    assert_eq!(p.save(), c.save());
+    assert_eq!(p.len(), (1 << 40) + most);
+    assert_eq!(panics(&|| p.clone().push(1)), words);
+    assert_eq!(panics(&|| p.clone().insert(1 << 39, 1)), words);
+
+    // a remap: 2^33 ones add up to 2^33, and as `u32::MAX` past `u64::MAX`
+    let ones = P::<u32>::fill(1 << 33, 1);
+    assert_eq!(panics(&|| ones.clone().remap(|_| u32::MAX)), words);
+    let mut twos = ones.clone();
+    twos.remap(|x| x + 1);
+    assert_eq!((twos.len(), twos.get(77)), (1 << 33, Some(2)));
+    // across slabs: a segment budget of 2 cuts the remapped column into a
+    // slab for each run
+    let new = panics(&|| {
+        let mut p = P::<u32>::with_max_segments(2);
+        p.splice_runs(0, 0, [run(1, 1 << 32), run(0, 1), run(1, 1 << 32)]);
+        p.remap(|x| if x == 0 { 0 } else { u32::MAX });
+    });
+    assert_eq!(new, words);
+
+    // a plain column of the same edits takes them all
+    let mut v = VerifiedColumn::<u32>::fill(1 << 33, u32::MAX);
+    v.push(1);
+    v.remap(|_| u32::MAX);
+    assert_eq!(v.len(), (1 << 33) + 1);
 }

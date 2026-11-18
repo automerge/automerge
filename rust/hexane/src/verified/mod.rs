@@ -78,6 +78,36 @@
 //! column's numbers are written with, a [`VCodec`]. It is [`Leb128`]
 //! where none is named, which is for now the only one.
 //!
+//! # Prefix columns
+//!
+//! A [`VerifiedPrefixColumn`] is a column kept with the sums of its
+//! values: a `VerifiedColumn` whose third parameter, the kind of index
+//! it is kept with ([`VIndex`]), is [`SumIndex`], where a plain
+//! column's is [`LenIndex`]. Its values are of a type that is summed
+//! ([`VSummed`]): `u64`, `i64`, `u32` or `NonZeroU32`, or an `Option`
+//! of one, whose `None` adds nothing, or `bool`, whose `true` adds
+//! one. The sums are kept in a `u128` for `u64`, an `i128` for `i64`,
+//! a `u64` for `u32` and `NonZeroU32`, and a `usize` for `bool`
+//! ([`VSummed::Sum`]).
+//!
+//! Every method of a column is a prefix column's, with the
+//! specification it has of a plain one, and a prefix column saves the
+//! bytes a plain column of its values does. What differs is that there
+//! is a prefix column only of values whose sums fit the type they are
+//! kept in (`sums_fit`: what the first `k` of them add up to, `summed`,
+//! is a value of the type, for every `k`). A prefix column says so of
+//! its values (`lemma_kept`). A load takes a saved column of such
+//! values where it would take it as a plain column, and refuses one of
+//! other values; and an edit that would leave other values does not
+//! return: it panics. No column is long enough for that to happen to
+//! sums of `u64`s, of `i64`s or of `bool`s (`lemma_sums_fit`). One of
+//! `u32`s is, if it has more than 2^32 + 1 of them.
+//!
+//! That a prefix column refuses the saved columns
+//! [`PrefixColumn`](crate::PrefixColumn) refuses, with the same error,
+//! and that its edits panic where `PrefixColumn`'s do, with the same
+//! words, is tested, as is that an edit whose sums fit does not panic.
+//!
 //! # What is proved
 //!
 //! Of every method, its `ensures`, for every input that meets its
@@ -419,6 +449,8 @@ mod decoder;
 mod encoder;
 pub(crate) mod kind;
 pub(crate) mod model;
+mod prefix;
+pub(crate) mod sums;
 pub(crate) mod text;
 pub(crate) mod value;
 
@@ -435,6 +467,13 @@ pub use decoder::{
 };
 pub use encoder::{VerifiedEncoder, VerifiedEncoderState};
 pub use kind::{LenIndex, VIndex, VKeeps};
+pub use prefix::{SumIndex, VerifiedPrefixColumn};
+#[cfg(verus_keep_ghost)]
+pub use sums::{
+    lemma_sum_bound, lemma_sum_cat, lemma_sum_mono, lemma_sum_run, lemma_sums_fit,
+    lemma_sums_fit_take, lemma_sums_fit_unsigned, summed, sums_fit, u32_room,
+};
+pub use sums::{VAmount, VSum, VSummed};
 #[cfg(verus_keep_ghost)]
 pub use text::total_str_len;
 pub use value::{refused, VNewtype, VPack};
@@ -487,6 +526,19 @@ mod seal {
     /// A codec of the verified public API is one of this crate's: no
     /// other can name this trait.
     pub trait CodecSeal {
+
+    }
+
+    /// A type sums are kept in is one of this crate's: no other can
+    /// name this trait.
+    pub trait SumSeal {
+
+    }
+
+    /// A value type a prefix column can hold is one of this crate's,
+    /// or says what its values add to a sum: no other can name this
+    /// trait.
+    pub trait SummedSeal {
 
     }
 
@@ -1862,7 +1914,8 @@ pub proof fn lemma_after_edits(n: usize, k: nat)
 /// columns. Every method is of every kind's, the constructors and the
 /// loads too: `VerifiedColumn::<V>::new()` is a plain column, and where
 /// the type is known otherwise, `VerifiedColumn::new()` is of the kind
-/// it says.
+/// it says. A column kept with a [`SumIndex`] is a prefix column
+/// ([`VerifiedPrefixColumn`]).
 pub struct VerifiedColumn<V: VValue<C>, C: VCodec = Leb128, K: VIndex<V, C> = LenIndex> {
     core: KCore<V, C, K>,
 }

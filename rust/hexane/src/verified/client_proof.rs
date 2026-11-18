@@ -254,16 +254,33 @@
 //! [`told_by_a_decoders_scan`], [`told_by_a_decoders_copy`],
 //! [`told_by_a_decoders_loop`]).
 //!
+//! And of a prefix column ([`VerifiedPrefixColumn`]), a column kept
+//! with the sums of its values, which the clients above of a column of
+//! any kind of index take too: that bytes load as one where they load
+//! as a plain column and the sums of their values fit the type they
+//! are kept in, and nowhere else ([`load_with_sums`]); that the sums
+//! of few enough values always fit ([`load_short_sums`]), those of
+//! `u64`s and of `i64`s whatever their number ([`load_wide_sums`]),
+//! and those of 2^32 + 1 `u32`s ([`load_small_sums`]); that the sums
+//! of what a prefix column holds fit ([`the_sums_of_a_column`]), after
+//! an edit too ([`push_within_the_sums`]), so that an edit which would
+//! leave other sums does not return ([`a_push_past_the_sums`],
+//! [`a_fill_past_the_sums`]); that a prefix column saves the bytes a
+//! plain column of its values does ([`saved_alike`]); and that a plain
+//! column's values are copied into a prefix column only if their sums
+//! fit ([`summed_up`]).
+//!
 //! This module exists only while Verus checks the crate.
 
 use super::{
     after_edit, after_edits, below_at, bytes_below, folded, head_len, head_run, head_run_max,
     lemma_after_edits, lemma_head_len, lemma_head_run_max, lemma_run_values_add,
-    lemma_run_values_push, lemma_runs_first, lemma_runs_of_values, lemma_sorted, mapped, only,
-    refused, run_values, runs_of, scan_of, scan_taken, sorted, sorted_for, sum_of, total_len,
-    total_str_len, window, Get, LenIndex, VCodec, VGet, VIndex, VKeeps, VNewtype, VSpec, VValue,
-    VerifiedColumn, VerifiedDecoder, VerifiedEncoder, VerifiedEncoderState, VerifiedIter,
-    VerifiedIterState,
+    lemma_run_values_push, lemma_runs_first, lemma_runs_of_values, lemma_sorted, lemma_sum_run,
+    lemma_sums_fit, mapped, only, refused, run_values, runs_of, scan_of, scan_taken, sorted,
+    sorted_for, sum_of, summed, sums_fit, total_len, total_str_len, window, Get, LenIndex,
+    SumIndex, VCodec, VGet, VIndex, VKeeps, VNewtype, VSpec, VSum, VSummed, VValue, VerifiedColumn,
+    VerifiedDecoder, VerifiedEncoder, VerifiedEncoderState, VerifiedIter, VerifiedIterState,
+    VerifiedPrefixColumn,
 };
 use crate::{Leb128, LoadOpts, PackError, Run};
 use std::cmp::Ordering;
@@ -6183,6 +6200,167 @@ proof fn the_run_at_the_head<S>(o: Seq<S>, v: S, n: int, w: S, m: int, max: int)
     if head_run_max(o, w, m, max) {
         lemma_head_run_max(o, v, n, w, m, max);
     }
+}
+
+/// Bytes loaded as a prefix column: they load where they would load as
+/// a plain column and the sums of their values fit the type they are
+/// kept in, and nowhere else; a column they load as is of their values,
+/// whose sums fit. For every value type that is summed, and every
+/// codec.
+#[allow(dead_code)]
+fn load_with_sums<V: VSummed + VValue<C>, C: VCodec>(bytes: &[u8]) -> (r: Option<VerifiedPrefixColumn<V, C>>)
+    ensures
+        VerifiedColumn::<V, C>::loadable(bytes@) && sums_fit::<V>(VerifiedColumn::<V, C>::values(bytes@)) ==> r is Some,
+        r matches Some(c) ==> c@ == VerifiedColumn::<V, C>::values(bytes@) && sums_fit::<V>(c@),
+        !sums_fit::<V>(VerifiedColumn::<V, C>::values(bytes@)) ==> r is None,
+{
+    load_as_a_kind::<V, C, SumIndex>(bytes)
+}
+
+/// The sums of no more than `V::safe()` values fit, whatever the
+/// values: bytes of so few load as a prefix column where they load as a
+/// plain one.
+#[allow(dead_code)]
+fn load_short_sums<V: VSummed + VValue<C>, C: VCodec>(bytes: &[u8]) -> (r: Option<VerifiedPrefixColumn<V, C>>)
+    ensures
+        VerifiedColumn::<V, C>::loadable(bytes@) && VerifiedColumn::<V, C>::values(bytes@).len() <= V::safe() ==> r is Some,
+{
+    proof {
+        let vs = VerifiedColumn::<V, C>::values(bytes@);
+        if vs.len() <= V::safe() {
+            lemma_sums_fit::<V>(vs);
+        }
+    }
+    load_with_sums::<V, C>(bytes)
+}
+
+/// `u64`s are summed in a `u128`, and `i64`s in an `i128`, which no
+/// column is long enough to overflow: whatever loads as a plain column
+/// of them loads as a prefix column.
+#[allow(dead_code)]
+fn load_wide_sums(bytes: &[u8], signed: &[u8]) -> (r: (Option<VerifiedPrefixColumn<u64>>, Option<VerifiedPrefixColumn<Option<i64>>>))
+    ensures
+        VerifiedColumn::<u64>::loadable(bytes@) ==> r.0 is Some,
+        VerifiedColumn::<Option<i64>>::loadable(signed@) ==> r.1 is Some,
+{
+    (load_short_sums::<u64, Leb128>(bytes), load_short_sums::<Option<i64>, Leb128>(signed))
+}
+
+/// `u32`s are summed in a `u64`: 2^32 + 1 of them cannot overflow it,
+/// and more can.
+#[allow(dead_code)]
+fn load_small_sums(bytes: &[u8]) -> (r: Option<VerifiedPrefixColumn<u32>>)
+    ensures
+        VerifiedColumn::<u32>::loadable(bytes@) && VerifiedColumn::<u32>::values(bytes@).len() <= 0x1_0000_0001 ==> r is Some,
+        r matches Some(c) ==> summed::<u32>(c@) <= u64::MAX,
+{
+    let r = load_short_sums::<u32, Leb128>(bytes);
+    match &r {
+        Some(c) => {
+            proof {
+                the_sums_of_a_column(c, c@.len() as int);
+                assert(c@.take(c@.len() as int) =~= c@);
+            }
+        },
+        None => {},
+    }
+    r
+}
+
+/// What a prefix column holds has sums that fit: what the first `k` of
+/// its values add up to is a sum of the type, for every `k`.
+#[allow(dead_code)]
+proof fn the_sums_of_a_column<V: VSummed + VValue<C>, C: VCodec>(tracked col: &VerifiedPrefixColumn<V, C>, k: int)
+    requires
+        0 <= k <= col@.len(),
+    ensures
+        V::Sum::lo() <= summed::<V>(col@.take(k)) <= V::Sum::hi(),
+{
+    col.lemma_kept();
+}
+
+/// What is pushed onto a prefix column is in it, and adds what it adds
+/// to a sum that still fits.
+#[allow(dead_code)]
+fn push_within_the_sums<V: VSummed + VValue<C>, C: VCodec>(col: &mut VerifiedPrefixColumn<V, C>, v: Get<'_, V>)
+    ensures
+        final(col)@ == old(col)@.push(v.sv()),
+        summed::<V>(final(col)@) == summed::<V>(old(col)@) + V::amount(v.sv()),
+        V::Sum::lo() <= summed::<V>(final(col)@) <= V::Sum::hi(),
+{
+    col.push(v);
+    proof {
+        the_sums_of_a_column(col, col@.len() as int);
+        assert(col@.take(col@.len() as int) =~= col@);
+        assert(col@.drop_last() =~= old(col)@);
+    }
+}
+
+/// A push that would take the sum of a column of `u32`s past a `u64`
+/// does not return.
+#[allow(dead_code)]
+fn a_push_past_the_sums(col: &mut VerifiedPrefixColumn<u32>, v: u32)
+    requires
+        summed::<u32>(old(col)@) + v > u64::MAX,
+    ensures
+        false,
+{
+    push_within_the_sums(col, v);
+}
+
+/// Nor does a `fill` of more `u32::MAX`s than a `u64` can add up: there
+/// is no such prefix column.
+#[allow(dead_code)]
+fn a_fill_past_the_sums(len: usize) -> (r: VerifiedPrefixColumn<u32>)
+    requires
+        0x1_0000_0001 < len <= i64::MAX,
+        len <= usize::MAX - 3,
+    ensures
+        false,
+{
+    let c = VerifiedPrefixColumn::<u32>::fill(len, u32::MAX);
+    proof {
+        the_sums_of_a_column(&c, c@.len() as int);
+        assert(c@.take(c@.len() as int) =~= c@);
+        assert(c@ =~= Seq::new(len as nat, |_i: int| u32::MAX));
+        lemma_sum_run::<u32>(len as nat, u32::MAX);
+        assert(u32::MAX * len > u64::MAX) by (nonlinear_arith)
+            requires
+                len > 0x1_0000_0001,
+        ;
+    }
+    c
+}
+
+/// A prefix column and a plain column of the same values save the same
+/// bytes.
+#[allow(dead_code)]
+fn saved_alike<V: VSummed + VValue<C>, C: VCodec>(plain: &VerifiedColumn<V, C>, sums: &VerifiedPrefixColumn<V, C>) -> (r: (
+    Vec<u8>,
+    Vec<u8>,
+))
+    requires
+        plain@ == sums@,
+    ensures
+        r.0@ == r.1@,
+{
+    (plain.save(), sums.save())
+}
+
+/// A plain column's values as a prefix column, made of its runs. The
+/// copy does not return unless their sums fit: where it does, they
+/// fit.
+#[allow(dead_code)]
+fn summed_up<V: VSummed + VValue<C>, C: VCodec>(plain: &VerifiedColumn<V, C>) -> (r: VerifiedPrefixColumn<V, C>)
+    ensures
+        r@ == plain@,
+        sums_fit::<V>(plain@),
+{
+    let r = copied_by_runs::<V, C, LenIndex, SumIndex>(plain);
+    proof {
+        r.lemma_kept();
+    }
+    r
 }
 
 } // verus!
