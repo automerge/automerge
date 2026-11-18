@@ -103,6 +103,21 @@
 //! sums of `u64`s, of `i64`s or of `bool`s (`lemma_sums_fit`). One of
 //! `u32`s is, if it has more than 2^32 + 1 of them.
 //!
+//! A prefix column answers from its sums, without reading the values
+//! they are of: what the values before a position add up to
+//! ([`get_prefix`](VerifiedColumn::get_prefix)), what those through it
+//! do ([`get_total`](VerifiedColumn::get_total)), and what those of a
+//! range do ([`sum_range`](VerifiedColumn::sum_range)). Their
+//! specifications say the answer as an integer, `summed` of the values,
+//! which the sum returned is (`VSum::as_int`). Where the sums are never
+//! negative ([`VCount`]: every summed type but `i64` and `Option<i64>`),
+//! they do not fall from one position to the next, and the column is
+//! searched by sum: for the first position that the values before it
+//! add up to a target
+//! ([`get_index_for_prefix`](VerifiedColumn::get_index_for_prefix)), and
+//! for the first that the values through it do
+//! ([`get_index_for_total`](VerifiedColumn::get_index_for_total)).
+//!
 //! That a prefix column refuses the saved columns
 //! [`PrefixColumn`](crate::PrefixColumn) refuses, with the same error,
 //! and that its edits panic where `PrefixColumn`'s do, with the same
@@ -470,10 +485,10 @@ pub use kind::{LenIndex, VIndex, VKeeps};
 pub use prefix::{SumIndex, VerifiedPrefixColumn};
 #[cfg(verus_keep_ghost)]
 pub use sums::{
-    lemma_sum_bound, lemma_sum_cat, lemma_sum_mono, lemma_sum_run, lemma_sums_fit,
+    lemma_sum_bound, lemma_sum_cat, lemma_sum_mono, lemma_sum_range, lemma_sum_run, lemma_sums_fit,
     lemma_sums_fit_take, lemma_sums_fit_unsigned, summed, sums_fit, u32_room,
 };
-pub use sums::{VAmount, VSum, VSummed};
+pub use sums::{VAmount, VCount, VSum, VSummed};
 #[cfg(verus_keep_ghost)]
 pub use text::total_str_len;
 pub use value::{refused, VNewtype, VPack};

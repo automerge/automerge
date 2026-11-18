@@ -7421,7 +7421,7 @@ fn check_sum_reads<T: Summed>(
     assert_eq!(sum_values(p), model);
 }
 
-fn sum_edits<T: Summed>() {
+fn sum_edits<T: Totalled>() {
     for seed in 1..=8u64 {
         let mut rng = Rng(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) ^ 0x50f5);
         let budget = [2, 3, 4, 8, 64][rng.below(5)];
@@ -7530,11 +7530,15 @@ fn sum_edits<T: Summed>() {
             }
             check_sums(&p, &v, &c, &model, true);
             check_sum_reads(&mut rng, &p, &v, &model);
+            check_prefix_reads(&mut rng, &p, &c, &model);
             if step % 10 == 9 {
                 check_sum_loads(&p, &c, &model);
             }
         }
         check_sum_loads(&p, &c, &model);
+        // loaded: an index made at once of all the slabs
+        let p2 = VerifiedPrefixColumn::<T>::load(&p.save()).unwrap();
+        check_prefix_reads(&mut rng, &p2, &c, &model);
     }
 }
 
@@ -7913,4 +7917,476 @@ fn an_edit_past_the_sums_panics() {
     v.push(1);
     v.remap(|_| u32::MAX);
     assert_eq!(v.len(), (1 << 33) + 1);
+}
+
+/// A sum of either API, as one type of integer. (The sums of these tests
+/// are far from its bounds.)
+trait Wide {
+    fn wide(&self) -> i128;
+}
+
+impl Wide for u64 {
+    fn wide(&self) -> i128 {
+        i128::from(*self)
+    }
+}
+
+impl Wide for u128 {
+    fn wide(&self) -> i128 {
+        i128::try_from(*self).unwrap()
+    }
+}
+
+impl Wide for usize {
+    fn wide(&self) -> i128 {
+        i128::try_from(*self).unwrap()
+    }
+}
+
+impl Wide for i128 {
+    fn wide(&self) -> i128 {
+        *self
+    }
+}
+
+/// What a value adds to the sums of a prefix column: the model of both
+/// APIs' sums.
+trait Adds {
+    fn adds(&self) -> i128;
+}
+
+impl Adds for u64 {
+    fn adds(&self) -> i128 {
+        i128::from(*self)
+    }
+}
+
+impl Adds for i64 {
+    fn adds(&self) -> i128 {
+        i128::from(*self)
+    }
+}
+
+impl Adds for u32 {
+    fn adds(&self) -> i128 {
+        i128::from(*self)
+    }
+}
+
+impl Adds for NonZeroU32 {
+    fn adds(&self) -> i128 {
+        i128::from(self.get())
+    }
+}
+
+impl Adds for bool {
+    fn adds(&self) -> i128 {
+        i128::from(*self)
+    }
+}
+
+impl<T: Adds> Adds for Option<T> {
+    fn adds(&self) -> i128 {
+        self.as_ref().map_or(0, T::adds)
+    }
+}
+
+/// A value type a prefix column holds whose sums, of either API, these
+/// tests read as integers.
+trait Totalled: Summed + Adds {
+    fn new_sum(s: <Self as VSummed>::Sum) -> i128;
+
+    fn old_sum(s: <Self as PrefixValue>::Prefix) -> i128;
+}
+
+impl<T: Summed + Adds> Totalled for T
+where
+    <T as VSummed>::Sum: Wide,
+    <T as PrefixValue>::Prefix: Wide,
+{
+    fn new_sum(s: <T as VSummed>::Sum) -> i128 {
+        s.wide()
+    }
+
+    fn old_sum(s: <T as PrefixValue>::Prefix) -> i128 {
+        s.wide()
+    }
+}
+
+/// The sums before each position of `model`, and before its end.
+fn sums_before<T: Adds>(model: &[T]) -> Vec<i128> {
+    let mut before = vec![0];
+    for m in model {
+        before.push(before[before.len() - 1] + m.adds());
+    }
+    before
+}
+
+/// Positions to ask a column of `len` values for: its ends, some within
+/// it and some past it.
+fn some_places(rng: &mut Rng, len: usize) -> Vec<usize> {
+    let mut places = vec![
+        0,
+        1,
+        len / 2,
+        len.saturating_sub(1),
+        len,
+        len + 1,
+        len + 7,
+        usize::MAX - 1,
+        usize::MAX,
+    ];
+    for _ in 0..4 {
+        places.push(rng.below(len + 1));
+    }
+    places
+}
+
+/// What a prefix column answers from its sums is what its values add
+/// up to, and what `PrefixColumn` answers: the sum before a position
+/// and through one, at any position, and the sum of a range, whatever
+/// its ends.
+fn check_prefix_reads<T: Totalled>(
+    rng: &mut Rng,
+    p: &VerifiedPrefixColumn<T>,
+    c: &PrefixColumn<T>,
+    model: &[T],
+) {
+    let before = sums_before(model);
+    let at = |i: usize| before[i.min(model.len())];
+    let places = some_places(rng, model.len());
+    for &i in &places {
+        assert_eq!(T::new_sum(p.get_prefix(i)), at(i));
+        assert_eq!(T::old_sum(c.get_prefix(i)), at(i));
+        assert_eq!(T::new_sum(p.get_total(i)), at(i.saturating_add(1)));
+        assert_eq!(T::old_sum(c.get_total(i)), at(i.saturating_add(1)));
+    }
+    for (n, &start) in places.iter().enumerate() {
+        // each end with some of the starts
+        for &end in places.iter().skip(n % 3).step_by(3) {
+            let want = if start < end { at(end) - at(start) } else { 0 };
+            assert_eq!(T::new_sum(p.sum_range(start, end)), want);
+            assert_eq!(T::old_sum(c.sum_range(start..end)), want);
+        }
+    }
+    assert_eq!(T::new_sum(p.sum_range(0, model.len())), at(model.len()));
+}
+
+/// A sum that is never negative, made of a number of these tests.
+trait Target {
+    fn target(x: u128) -> Self;
+}
+
+impl Target for u64 {
+    fn target(x: u128) -> u64 {
+        u64::try_from(x).unwrap()
+    }
+}
+
+impl Target for u128 {
+    fn target(x: u128) -> u128 {
+        x
+    }
+}
+
+impl Target for usize {
+    fn target(x: u128) -> usize {
+        usize::try_from(x).unwrap()
+    }
+}
+
+/// A value type whose sums are never negative, in both APIs: a prefix
+/// column of it is searched by sum. The searches give the place for a
+/// sum before it, and the place for a sum through it.
+trait Counted: Totalled {
+    fn new_search(p: &VerifiedPrefixColumn<Self>, target: u128) -> (usize, usize);
+
+    fn old_search(c: &PrefixColumn<Self>, target: u128) -> (usize, usize);
+}
+
+macro_rules! counted {
+    ($($t:ty => $s:ty),*) => {
+        $(
+            impl Counted for $t {
+                fn new_search(p: &VerifiedPrefixColumn<$t>, target: u128) -> (usize, usize) {
+                    let t = <$s as Target>::target(target);
+                    (p.get_index_for_prefix(t), p.get_index_for_total(t))
+                }
+
+                fn old_search(c: &PrefixColumn<$t>, target: u128) -> (usize, usize) {
+                    let t = <$s as Target>::target(target);
+                    (c.get_index_for_prefix(t), c.get_index_for_total(t))
+                }
+            }
+        )*
+    };
+}
+
+counted!(
+    u64 => u128,
+    u32 => u64,
+    NonZeroU32 => u64,
+    bool => usize,
+    Option<u64> => u128,
+    Option<u32> => u64,
+    Option<NonZeroU32> => u64
+);
+
+/// The searches of a prefix column by sum find what a walk of the sums
+/// finds, and what `PrefixColumn`'s find: the first position that the
+/// values before it add up to a target, which is one past the end where
+/// none does, and the position ahead of it.
+fn check_sum_searches<T: Counted>(
+    rng: &mut Rng,
+    p: &VerifiedPrefixColumn<T>,
+    c: &PrefixColumn<T>,
+    model: &[T],
+) {
+    let before: Vec<u128> = sums_before(model)
+        .into_iter()
+        .map(|b| u128::try_from(b).unwrap())
+        .collect();
+    let all = before[model.len()];
+    let mut targets = vec![
+        0,
+        1,
+        2,
+        all / 2,
+        all.saturating_sub(1),
+        all,
+        all + 1,
+        all + 3,
+    ];
+    for _ in 0..6 {
+        // a sum the column has, and those beside it
+        let b = before[rng.below(before.len())];
+        targets.extend([b.saturating_sub(1), b, b + 1]);
+    }
+    for t in targets {
+        let place = before
+            .iter()
+            .position(|b| *b >= t)
+            .unwrap_or(model.len() + 1);
+        let want = (place, place.saturating_sub(1));
+        assert_eq!(T::new_search(p, t), want);
+        assert_eq!(T::old_search(c, t), want);
+    }
+}
+
+fn sum_searches<T: Counted>() {
+    for seed in 1..=8u64 {
+        let mut rng = Rng(seed.wrapping_mul(0xd6e8_feb8_6659_fd93) ^ 0x50f7);
+        let budget = [2, 3, 4, 8, 64][rng.below(5)];
+        let mut p = VerifiedPrefixColumn::<T>::with_max_segments(budget);
+        let mut c = PrefixColumn::<T>::with_max_segments(budget);
+        let mut model: Vec<T> = vec![];
+        check_sum_searches(&mut rng, &p, &c, &model);
+        for _ in 0..60 {
+            let at = rng.below(model.len() + 1);
+            let del = rng.below((model.len() - at).min(20) + 1);
+            if rng.below(3) == 0 {
+                let runs = some_runs::<T>(&mut rng, 6);
+                let lent_runs = runs.iter().map(|(n, x)| Run {
+                    count: *n,
+                    value: x.lend(),
+                });
+                p.splice_runs(at, del, lent_runs);
+                let owned_runs = runs.iter().map(|(n, x)| Run {
+                    count: *n,
+                    value: x.clone(),
+                });
+                c.splice_runs(at, del, owned_runs);
+                model.splice(at..at + del, run_model(&runs));
+            } else {
+                let ins: Vec<T> = rng.values(40);
+                p.splice(at, del, &lent(&ins));
+                c.splice(at, del, ins.iter().cloned());
+                model.splice(at..at + del, ins);
+            }
+            check_sum_searches(&mut rng, &p, &c, &model);
+            check_prefix_reads(&mut rng, &p, &c, &model);
+        }
+        // loaded: an index made at once of all the slabs
+        let p2 = VerifiedPrefixColumn::<T>::load(&p.save()).unwrap();
+        let c2 = PrefixColumn::<T>::load(&c.save()).unwrap();
+        check_sum_searches(&mut rng, &p2, &c2, &model);
+        check_prefix_reads(&mut rng, &p2, &c2, &model);
+    }
+}
+
+/// A prefix column whose sums are never negative is searched by sum
+/// ([`VerifiedColumn::get_index_for_prefix`],
+/// [`VerifiedColumn::get_index_for_total`]): under the same edits the
+/// searches find the places a walk of the sums finds, and
+/// `PrefixColumn`'s searches find.
+#[test]
+fn a_prefix_column_is_searched_by_sum() {
+    sum_searches::<u64>();
+    sum_searches::<u32>();
+    sum_searches::<NonZeroU32>();
+    sum_searches::<bool>();
+    sum_searches::<Option<u64>>();
+    sum_searches::<Option<u32>>();
+    sum_searches::<Option<NonZeroU32>>();
+}
+
+/// The sums of a short column, by hand: before a position, through one,
+/// of a range, and the places of sums.
+#[test]
+fn the_sums_of_a_prefix_column() {
+    let p = VerifiedPrefixColumn::<u64>::from_values(&[3, 0, 4, 4, 10]);
+    let sums: Vec<u128> = (0..7).map(|i| p.get_prefix(i)).collect();
+    assert_eq!(sums, [0, 3, 3, 7, 11, 21, 21]);
+    let sums: Vec<u128> = (0..6).map(|i| p.get_total(i)).collect();
+    assert_eq!(sums, [3, 3, 7, 11, 21, 21]);
+    assert_eq!(p.get_total(usize::MAX), 21);
+    assert_eq!(p.sum_range(1, 4), 8);
+    assert_eq!(p.sum_range(2, 2), 0);
+    assert_eq!(p.sum_range(4, 2), 0);
+    assert_eq!(p.sum_range(3, 99), 14);
+    assert_eq!(p.sum_range(5, 99), 0);
+    assert_eq!(p.sum_range(usize::MAX, usize::MAX), 0);
+    // the first position the values before it add up to the target
+    let places: Vec<usize> = [0, 1, 3, 4, 7, 8, 11, 12, 21, 22]
+        .into_iter()
+        .map(|t| p.get_index_for_prefix(t))
+        .collect();
+    assert_eq!(places, [0, 1, 1, 3, 3, 4, 4, 5, 5, 6]);
+    // the first position the values through it add up to the target
+    let places: Vec<usize> = [0, 1, 3, 4, 7, 8, 11, 12, 21, 22]
+        .into_iter()
+        .map(|t| p.get_index_for_total(t))
+        .collect();
+    assert_eq!(places, [0, 0, 0, 2, 2, 3, 3, 4, 4, 5]);
+
+    // signed values: the sums go down too
+    let p = VerifiedPrefixColumn::<Option<i64>>::from_values(&[
+        Some(5),
+        None,
+        Some(-9),
+        Some(i64::MIN),
+    ]);
+    assert_eq!(p.get_prefix(3), -4);
+    assert_eq!(p.get_total(3), -4 + i128::from(i64::MIN));
+    assert_eq!(p.sum_range(1, 3), -9);
+    assert_eq!(p.sum_range(3, 4), i128::from(i64::MIN));
+
+    // flags: the sums count those that are set
+    let flags = [false, true, true, false, false, true];
+    let p = VerifiedPrefixColumn::<bool>::from_values(&flags);
+    assert_eq!(p.get_prefix(6), 3);
+    assert_eq!(p.sum_range(2, 5), 1);
+    // the place of the `k`th that is set
+    let set: Vec<usize> = (0..4).map(|k| p.get_index_for_total(k + 1)).collect();
+    assert_eq!(set, [1, 2, 5, 6]);
+
+    // no values: no sums, and a place for no sum but zero
+    let none = VerifiedPrefixColumn::<u32>::new();
+    assert_eq!((none.get_prefix(0), none.get_prefix(9)), (0, 0));
+    assert_eq!((none.get_total(0), none.sum_range(0, 9)), (0, 0));
+    assert_eq!(none.get_index_for_prefix(0), 0);
+    assert_eq!(none.get_index_for_prefix(1), 1);
+    assert_eq!(none.get_index_for_total(0), 0);
+    assert_eq!(none.get_index_for_total(1), 0);
+    let old = PrefixColumn::<u32>::new();
+    assert_eq!(old.get_index_for_prefix(1), 1);
+    assert_eq!(old.get_index_for_total(1), 0);
+}
+
+/// The sums of columns of long runs, up to the largest a type holds:
+/// what the runs add up to, and what `PrefixColumn` answers.
+///
+/// (The columns here are longer than a 32-bit `usize` counts.)
+#[cfg(target_pointer_width = "64")]
+#[test]
+fn the_sums_of_long_runs() {
+    // `u32::MAX` 2^32 + 1 times adds up to `u64::MAX`
+    let most = (1usize << 32) + 1;
+    let p = VerifiedPrefixColumn::<u32>::fill(most, u32::MAX);
+    let c = PrefixColumn::<u32>::from_column(Column::fill(most, u32::MAX));
+    let each = u64::from(u32::MAX);
+    assert_eq!(p.get_prefix(most), u64::MAX);
+    assert_eq!(p.get_prefix(usize::MAX), u64::MAX);
+    assert_eq!(p.get_total(most - 1), u64::MAX);
+    assert_eq!(p.get_prefix(most - 1), u64::MAX - each);
+    assert_eq!(p.sum_range(1, most), u64::MAX - each);
+    assert_eq!(p.sum_range(0, usize::MAX), u64::MAX);
+    assert_eq!(p.sum_range(77, 1 << 32), ((1 << 32) - 77) * each);
+    for t in [
+        1,
+        each,
+        each + 1,
+        5 * each,
+        u64::MAX - each,
+        u64::MAX - each + 1,
+        u64::MAX,
+    ] {
+        let place = usize::try_from(t.div_ceil(each)).unwrap();
+        assert_eq!(p.get_index_for_prefix(t), place);
+        assert_eq!(c.get_index_for_prefix(t), place);
+        assert_eq!(p.get_index_for_total(t), place - 1);
+        assert_eq!(c.get_index_for_total(t), place - 1);
+    }
+
+    // in slabs of two runs
+    let run = |value: u32, count: usize| Run { count, value };
+    let mut p = VerifiedPrefixColumn::<u32>::with_max_segments(2);
+    let mut c = PrefixColumn::<u32>::with_max_segments(2);
+    for (at, runs) in [
+        (0, [run(u32::MAX, 1 << 30), run(7, 1 << 40)]),
+        (1 << 20, [run(0, 1 << 50), run(u32::MAX - 1, 1 << 30)]),
+        (5, [run(1, 3), run(u32::MAX, 1)]),
+    ] {
+        p.splice_runs(at, 0, runs);
+        c.splice_runs(at, 0, runs);
+    }
+    assert_eq!(p.save(), c.save());
+    assert!(p.slab_count() > 2);
+    let len = p.len();
+    let mut rng = Rng(0x50f8);
+    let mut places = some_places(&mut rng, len);
+    places.extend([5, 9, 1 << 20, (1 << 20) + (1 << 50), (1 << 30) + 4, len - 1]);
+    for &i in &places {
+        assert_eq!(p.get_prefix(i), c.get_prefix(i));
+        assert_eq!(p.get_total(i), c.get_total(i));
+        for &j in &places {
+            assert_eq!(p.sum_range(i, j), c.sum_range(i..j));
+        }
+        // the sum before a place, and those beside it, as targets
+        let sum = p.get_prefix(i);
+        for t in [sum.saturating_sub(1), sum, sum.saturating_add(1)] {
+            let place = p.get_index_for_prefix(t);
+            assert_eq!(place, c.get_index_for_prefix(t));
+            assert_eq!(p.get_index_for_total(t), c.get_index_for_total(t));
+            if place <= len {
+                assert!(p.get_prefix(place) >= t);
+                assert!(place == 0 || p.get_prefix(place - 1) < t);
+            } else {
+                assert!(p.get_prefix(len) < t);
+            }
+        }
+    }
+
+    // the longest columns: of the widest values, of signed ones, of flags
+    let long = i64::MAX as usize;
+    let p = VerifiedPrefixColumn::<u64>::fill(long, u64::MAX);
+    let all = u128::from(u64::MAX) * (long as u128);
+    assert_eq!(p.get_prefix(long), all);
+    assert_eq!(p.sum_range(1, long - 1), all - 2 * u128::from(u64::MAX));
+    assert_eq!(p.get_index_for_prefix(all), long);
+    assert_eq!(p.get_index_for_prefix(all + 1), long + 1);
+    assert_eq!(p.get_index_for_total(all + 1), long);
+    assert_eq!(p.get_index_for_prefix(u128::MAX), long + 1);
+    let p = VerifiedPrefixColumn::<i64>::fill(long, i64::MIN);
+    let all = i128::from(i64::MIN) * (long as i128);
+    assert_eq!(p.get_prefix(long), all);
+    assert_eq!(p.get_total(usize::MAX), all);
+    assert_eq!(p.sum_range(long - 3, usize::MAX), 3 * i128::from(i64::MIN));
+    let p = VerifiedPrefixColumn::<bool>::fill(long, true);
+    assert_eq!(p.get_prefix(long), long);
+    assert_eq!(p.sum_range(12, long), long - 12);
+    assert_eq!(p.get_index_for_prefix(long), long);
+    assert_eq!(p.get_index_for_prefix(long + 1), long + 1);
+    assert_eq!(p.get_index_for_total(1 << 40), (1 << 40) - 1);
+    assert_eq!(p.get_index_for_total(usize::MAX), long);
 }

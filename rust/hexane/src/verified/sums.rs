@@ -47,6 +47,9 @@ use crate::iter_core::{Decode, Decoders};
 #[cfg(verus_keep_ghost)]
 use crate::prefix_core::{lemma_vsum_cat, lemma_vsum_run, reps, vsum};
 use crate::prefix_core::{p_slab_sum, PrefixOps, PrefixWeight};
+#[cfg(verus_keep_ghost)]
+use crate::prefix_search::nsum;
+use crate::prefix_search::PrefixOrd;
 use crate::weights::{count_overflows, prefix_sum_overflows, sum_overflows, CopyWeigh, LoadWeigh};
 use crate::{PackError, Run};
 use std::fmt::Debug;
@@ -55,8 +58,8 @@ use std::num::NonZeroU32;
 use std::ops::{Add, AddAssign, SubAssign};
 #[cfg(verus_keep_ghost)]
 use vstd::arithmetic::div_mod::{
-    lemma_add_mod_noop_right, lemma_fundamental_div_mod_converse, lemma_mod_bound,
-    lemma_mod_sub_multiples_vanish,
+    lemma_add_mod_noop_right, lemma_div_nonincreasing, lemma_fundamental_div_mod_converse,
+    lemma_mod_bound, lemma_mod_sub_multiples_vanish,
 };
 #[cfg(verus_keep_ghost)]
 use vstd::arithmetic::mul::lemma_mul_inequality;
@@ -191,9 +194,42 @@ proof fn lemma_wrap(x: int, y: int, m: int)
     lemma_mod_sub_multiples_vanish((x % m) + y, m);
 }
 
+/// A type of sums that are never negative: `u64`, `u128` or `usize`.
+/// The sums of values of such a type do not fall as more are added, so
+/// a prefix column of them can be searched by sum
+/// ([`get_index_for_prefix`](super::VerifiedColumn::get_index_for_prefix)).
+pub trait VCount: VSum {
+    /// The least sum of the type is zero.
+    proof fn lemma_count()
+        ensures
+            Self::lo() == 0,
+    ;
+
+    /// `self / b`, rounded up, where neither is zero.
+    #[doc(hidden)]
+    fn div_up(self, b: Self) -> (r: Self)
+        ensures
+            self.as_int() > 0 && b.as_int() > 0 ==> r.as_int() == (self.as_int() - 1) / b.as_int() + 1,
+    ;
+
+    /// The sum as a `usize`, where it is one.
+    #[doc(hidden)]
+    fn as_len(self) -> (r: Option<usize>)
+        ensures
+            self.as_int() <= usize::MAX ==> r == Some(self.as_int() as usize),
+    ;
+
+    /// One.
+    #[doc(hidden)]
+    fn one() -> (r: Self)
+        ensures
+            r.as_int() == 1,
+    ;
+}
+
 } // verus!
-/// [`VSum`] for an unsigned type: its integers are those from zero, and
-/// it wraps by the remainder.
+/// [`VSum`] and [`VCount`] for an unsigned type: its integers are those
+/// from zero, and it wraps by the remainder.
 macro_rules! unsigned_sum {
     ($t:ty) => {
         verus! {
@@ -269,6 +305,39 @@ macro_rules! unsigned_sum {
             #[inline(always)]
             fn le(self, b: $t) -> bool {
                 self <= b
+            }
+        }
+
+        impl VCount for $t {
+            proof fn lemma_count() {
+            }
+
+            #[inline(always)]
+            fn div_up(self, b: $t) -> $t {
+                if self == 0 || b == 0 {
+                    return 0;
+                }
+                proof {
+                    lemma_div_nonincreasing((self - 1) as int, b as int);
+                }
+                (self - 1) / b + 1
+            }
+
+            // one text for the three types: of one of them a cast is to
+            // the type itself
+            #[allow(clippy::unnecessary_cast)]
+            #[inline(always)]
+            fn as_len(self) -> Option<usize> {
+                if (self as u128) <= (usize::MAX as u128) {
+                    Some(self as usize)
+                } else {
+                    None
+                }
+            }
+
+            #[inline(always)]
+            fn one() -> $t {
+                1
             }
         }
 
@@ -1094,6 +1163,37 @@ pub proof fn lemma_sums_fit_take<V: VSummed>(vs: Seq<<V as VSpec>::S>, k: int)
     }
 }
 
+/// What the values at the positions from `i` up to `j` add up to is
+/// the sum before `j` less the sum before `i`. Of values whose sums
+/// fit, and no more of them than a column holds, it fits.
+pub proof fn lemma_sum_range<V: VSummed>(vs: Seq<<V as VSpec>::S>, i: int, j: int)
+    requires
+        0 <= i <= j <= vs.len(),
+    ensures
+        summed::<V>(vs.subrange(i, j)) == summed::<V>(vs.take(j)) - summed::<V>(vs.take(i)),
+        sums_fit::<V>(vs) && vs.len() <= usize::MAX ==> V::Sum::lo() <= summed::<V>(vs.subrange(i, j)) <= V::Sum::hi(),
+{
+    let part = vs.subrange(i, j);
+    assert(vs.take(j) =~= vs.take(i) + part);
+    lemma_sum_cat::<V>(vs.take(i), part);
+    if sums_fit::<V>(vs) && vs.len() <= usize::MAX {
+        lemma_sum_bound::<V>(part);
+        lemma_sum_bound::<V>(vs.take(i));
+        if V::Sum::lo() != 0 {
+            // a signed sum: so few values cannot leave the type
+            V::lemma_safe();
+            let m = V::most() as int;
+            let s = V::safe() as int;
+            let n = part.len() as int;
+            assert(n * m <= s * m) by (nonlinear_arith)
+                requires
+                    0 <= n <= s,
+                    0 <= m,
+            ;
+        }
+    }
+}
+
 /// What one value adds is a sum of the type.
 proof fn lemma_part<V: VSummed>(x: <V as VSpec>::S)
     ensures
@@ -1210,6 +1310,133 @@ pub(crate) proof fn lemma_vsum<'a, V: VSummed>(vs: Seq<Get<'a, V>>)
         lemma_vsum::<V>(d);
         lemma_part::<V>(vs.last().sv());
         V::Sum::lemma_of_int(summed::<V>(sv.drop_last()), V::amount(vs.last().sv()));
+    }
+}
+
+/// Where a sum and a second, wrapped, are what the shared proofs give
+/// for two integers that fit, and so does their difference, the second
+/// is the difference.
+pub(crate) proof fn lemma_sum_diff<P: VSum>(base: P, t: P, a: int, b: int)
+    requires
+        base == P::of_int(a),
+        <SumWeight<P> as PrefixAggregate>::prefix_plus(base, t) == P::of_int(b),
+        P::lo() <= a <= P::hi(),
+        P::lo() <= b <= P::hi(),
+        P::lo() <= b - a <= P::hi(),
+    ensures
+        t.as_int() == b - a,
+{
+    P::lemma_of_int(a, 0);
+    P::lemma_of_int(b, 0);
+    P::lemma_of_int(b - a, 0);
+    P::lemma_as_int(t);
+    // `a + t` wraps to what `b` does: less `a`, `t` to what `b - a` does
+    P::lemma_of_int(a + t.as_int(), -a);
+    P::lemma_of_int(b, -a);
+}
+
+/// The sums of a column of `V` as numbers, where they are never
+/// negative: what the shared search by sum takes of them (`PrefixOrd`).
+/// That a prefix type's sums and order are its numbers' is trusted of
+/// the old API's types; of these it is proved.
+impl<'a, V: VSummed> PrefixOrd<Get<'a, V>> for SumOf<V> where V::Sum: VCount {
+    open spec fn pnum(p: V::Sum) -> nat {
+        p.as_int() as nat
+    }
+
+    open spec fn pmax() -> nat {
+        V::Sum::hi() as nat
+    }
+
+    proof fn axiom_pnum(a: V::Sum, b: V::Sum) {
+        V::Sum::lemma_count();
+        V::Sum::lemma_as_int(a);
+        V::Sum::lemma_as_int(b);
+        V::Sum::lemma_of_int(0, 0);
+        V::Sum::lemma_of_int(a.as_int() + b.as_int(), 0);
+        V::Sum::lemma_of_int(a.as_int() - b.as_int(), 0);
+    }
+
+    proof fn axiom_ple(a: V::Sum, b: V::Sum) {
+        V::Sum::lemma_count();
+        V::Sum::lemma_as_int(a);
+        V::Sum::lemma_as_int(b);
+    }
+
+    #[inline(always)]
+    fn le(a: &V::Sum, b: &V::Sum) -> bool {
+        proof {
+            V::Sum::lemma_count();
+            V::Sum::lemma_as_int(*a);
+            V::Sum::lemma_as_int(*b);
+        }
+        (*a).le(*b)
+    }
+
+    #[inline(always)]
+    fn div_ceil(a: &V::Sum, b: &V::Sum) -> V::Sum {
+        let r = (*a).div_up(*b);
+        proof {
+            V::Sum::lemma_count();
+            V::Sum::lemma_as_int(*a);
+            V::Sum::lemma_as_int(*b);
+            V::Sum::lemma_as_int(r);
+        }
+        r
+    }
+
+    #[inline(always)]
+    fn to_usize(p: &V::Sum) -> Option<usize> {
+        proof {
+            V::Sum::lemma_count();
+            V::Sum::lemma_as_int(*p);
+        }
+        (*p).as_len()
+    }
+
+    #[inline(always)]
+    fn add(a: &V::Sum, b: &V::Sum) -> V::Sum {
+        (*a).w_add(*b)
+    }
+
+    #[inline(always)]
+    fn checked_add(a: &V::Sum, b: &V::Sum) -> Option<V::Sum> {
+        let r = (*a).c_add(*b);
+        proof {
+            V::Sum::lemma_count();
+            V::Sum::lemma_as_int(*a);
+            V::Sum::lemma_as_int(*b);
+            if r is Some {
+                V::Sum::lemma_as_int(r->0);
+            }
+        }
+        r
+    }
+
+    #[inline(always)]
+    fn one() -> V::Sum {
+        V::Sum::one()
+    }
+}
+
+/// The number the shared search takes for a sum of values is what the
+/// values add up to.
+pub(crate) proof fn lemma_nsum<'a, V: VSummed>(vs: Seq<Get<'a, V>>)
+    where V::Sum: VCount
+    ensures
+        nsum::<Get<'a, V>, SumOf<V>>(vs) == summed::<V>(<Get<'a, V> as VGet>::svs(vs)),
+    decreases vs.len(),
+{
+    let sv = <Get<'a, V> as VGet>::svs(vs);
+    <Get<'a, V> as VGet>::lemma_svs(vs);
+    if vs.len() > 0 {
+        let d = vs.drop_last();
+        <Get<'a, V> as VGet>::lemma_svs(d);
+        assert(sv.drop_last() =~= <Get<'a, V> as VGet>::svs(d));
+        lemma_nsum::<V>(d);
+        lemma_part::<V>(vs.last().sv());
+        V::lemma_amount(vs.last().sv());
+        V::Sum::lemma_count();
     }
 }
 

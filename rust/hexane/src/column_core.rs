@@ -130,7 +130,7 @@ fn poisoned()
 #[verifier::external_body]
 #[cold]
 #[inline(never)]
-fn too_many_slabs()
+pub(crate) fn too_many_slabs()
     ensures
         false,
 {

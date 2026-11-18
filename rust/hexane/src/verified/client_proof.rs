@@ -270,17 +270,31 @@
 //! column's values are copied into a prefix column only if their sums
 //! fit ([`summed_up`]).
 //!
+//! And of what a prefix column answers from its sums: that the sum for
+//! a position is what the values before it add up to
+//! ([`the_sum_before`]), that the sum through a position adds the
+//! value there ([`the_sum_through`]), and that the sum of a range is
+//! the difference of two of them ([`the_sum_of_a_range`]), which does
+//! not overflow ([`a_range_by_its_ends`]); that the sums take any
+//! position ([`sums_past_the_end`]) and follow an edit
+//! ([`a_sum_after_a_push`]); and, of sums that are never negative,
+//! that the place found for a sum is the first whose sum reaches it
+//! ([`the_place_of_a_sum`], [`a_sum_and_its_place`]), which finds in a
+//! column of flags the `k`th that is set ([`the_kth_true`]), and that
+//! the two searches' specifications say what each finds
+//! ([`the_two_places`]).
+//!
 //! This module exists only while Verus checks the crate.
 
 use super::{
     after_edit, after_edits, below_at, bytes_below, folded, head_len, head_run, head_run_max,
     lemma_after_edits, lemma_head_len, lemma_head_run_max, lemma_run_values_add,
-    lemma_run_values_push, lemma_runs_first, lemma_runs_of_values, lemma_sorted, lemma_sum_run,
-    lemma_sums_fit, mapped, only, refused, run_values, runs_of, scan_of, scan_taken, sorted,
-    sorted_for, sum_of, summed, sums_fit, total_len, total_str_len, window, Get, LenIndex,
-    SumIndex, VCodec, VGet, VIndex, VKeeps, VNewtype, VSpec, VSum, VSummed, VValue, VerifiedColumn,
-    VerifiedDecoder, VerifiedEncoder, VerifiedEncoderState, VerifiedIter, VerifiedIterState,
-    VerifiedPrefixColumn,
+    lemma_run_values_push, lemma_runs_first, lemma_runs_of_values, lemma_sorted, lemma_sum_bound,
+    lemma_sum_range, lemma_sum_run, lemma_sums_fit, mapped, only, refused, run_values, runs_of,
+    scan_of, scan_taken, sorted, sorted_for, sum_of, summed, sums_fit, total_len, total_str_len,
+    window, Get, LenIndex, SumIndex, VCodec, VCount, VGet, VIndex, VKeeps, VNewtype, VSpec, VSum,
+    VSummed, VValue, VerifiedColumn, VerifiedDecoder, VerifiedEncoder, VerifiedEncoderState,
+    VerifiedIter, VerifiedIterState, VerifiedPrefixColumn,
 };
 use crate::{Leb128, LoadOpts, PackError, Run};
 use std::cmp::Ordering;
@@ -6361,6 +6375,222 @@ fn summed_up<V: VSummed + VValue<C>, C: VCodec>(plain: &VerifiedColumn<V, C>) ->
         r.lemma_kept();
     }
     r
+}
+
+/// The sum a prefix column answers with for a position is what the
+/// values before the position add up to: an integer, whatever the type
+/// it is kept in.
+#[allow(dead_code)]
+fn the_sum_before<V: VSummed + VValue<C>, C: VCodec>(col: &VerifiedPrefixColumn<V, C>, i: usize) -> (r: V::Sum)
+    requires
+        i <= col@.len(),
+    ensures
+        r.as_int() == summed::<V>(col@.take(i as int)),
+{
+    col.get_prefix(i)
+}
+
+/// The sum through a position is the sum before it and what the value
+/// there adds.
+#[allow(dead_code)]
+fn the_sum_through<V: VSummed + VValue<C>, C: VCodec>(col: &VerifiedPrefixColumn<V, C>, i: usize) -> (r: (V::Sum, V::Sum))
+    requires
+        i < col@.len(),
+    ensures
+        r.1.as_int() == r.0.as_int() + V::amount(col@[i as int]),
+{
+    let before = col.get_prefix(i);
+    let through = col.get_total(i);
+    proof {
+        assert(col@.take(i + 1).drop_last() =~= col@.take(i as int));
+    }
+    (before, through)
+}
+
+/// The sum of a range of positions is what the values there add up to,
+/// which is the sum before its end less the sum before its start.
+#[allow(dead_code)]
+fn the_sum_of_a_range<V: VSummed + VValue<C>, C: VCodec>(col: &VerifiedPrefixColumn<V, C>, start: usize, end: usize) -> (r: (
+    V::Sum,
+    V::Sum,
+    V::Sum,
+))
+    requires
+        start <= end <= col@.len(),
+    ensures
+        r.2.as_int() == summed::<V>(col@.subrange(start as int, end as int)),
+        r.2.as_int() == r.1.as_int() - r.0.as_int(),
+{
+    let a = col.get_prefix(start);
+    let b = col.get_prefix(end);
+    let s = col.sum_range(start, end);
+    proof {
+        lemma_sum_range::<V>(col@, start as int, end as int);
+    }
+    (a, b, s)
+}
+
+/// In a column of `i64`s, whose sums are `i128`s: the sum of a range is
+/// the sum before its end less the sum before its start, and to take
+/// the one from the other does not overflow, for what the range adds up
+/// to is a sum of the type.
+#[allow(dead_code)]
+fn a_range_by_its_ends(col: &VerifiedPrefixColumn<i64>, start: usize, end: usize) -> (r: i128)
+    requires
+        start <= end <= col@.len(),
+    ensures
+        r == summed::<i64>(col@.subrange(start as int, end as int)),
+{
+    // a column's length is a `usize`
+    let _ = col.len();
+    let a = col.get_prefix(start);
+    let b = col.get_prefix(end);
+    proof {
+        col.lemma_kept();
+        lemma_sum_range::<i64>(col@, start as int, end as int);
+    }
+    b - a
+}
+
+/// The sums take any position: past the end they are the sum of all the
+/// values, and a range that holds no position adds up to nothing.
+#[allow(dead_code)]
+fn sums_past_the_end<V: VSummed + VValue<C>, C: VCodec>(col: &VerifiedPrefixColumn<V, C>) -> (r: (V::Sum, V::Sum, V::Sum, V::Sum))
+    ensures
+        r.0.as_int() == summed::<V>(col@),
+        r.1.as_int() == summed::<V>(col@),
+        r.2.as_int() == summed::<V>(col@),
+        r.3.as_int() == 0,
+{
+    let n = col.len();
+    proof {
+        assert(col@.subrange(0, col@.len() as int) =~= col@);
+    }
+    (col.get_prefix(usize::MAX), col.get_total(n), col.sum_range(0, usize::MAX), col.sum_range(5, 3))
+}
+
+/// A push adds to the sum of a prefix column what the value adds.
+#[allow(dead_code)]
+fn a_sum_after_a_push<V: VSummed + VValue<C>, C: VCodec>(col: &mut VerifiedPrefixColumn<V, C>, v: Get<'_, V>) -> (r: (
+    V::Sum,
+    V::Sum,
+))
+    ensures
+        final(col)@ == old(col)@.push(v.sv()),
+        r.1.as_int() == r.0.as_int() + V::amount(v.sv()),
+{
+    let before = col.get_prefix(col.len());
+    col.push(v);
+    let after = col.get_prefix(col.len());
+    proof {
+        assert(col@.drop_last() =~= old(col)@);
+    }
+    (before, after)
+}
+
+/// Where the sums of a column are never negative, the first position
+/// that the values before it add up to `target` or more, if there is
+/// one: no earlier position's do, and if there is none, all the values
+/// add up to less.
+#[allow(dead_code)]
+fn the_place_of_a_sum<V: VSummed + VValue<C>, C: VCodec>(col: &VerifiedPrefixColumn<V, C>, target: V::Sum) -> (r: Option<usize>)
+    where V::Sum: VCount
+    ensures
+        match r {
+            Some(i) => {
+                &&& i <= col@.len()
+                &&& target.as_int() <= summed::<V>(col@.take(i as int))
+                &&& forall|j: int| 0 <= j < i ==> summed::<V>(#[trigger] col@.take(j)) < target.as_int()
+            },
+            None => summed::<V>(col@) < target.as_int(),
+        },
+{
+    let i = col.get_index_for_prefix(target);
+    if i <= col.len() {
+        Some(i)
+    } else {
+        proof {
+            assert(col@.take(col@.len() as int) =~= col@);
+        }
+        None
+    }
+}
+
+/// In a column of `u64`s, whose sums are `u128`s: the sum before the
+/// place found for a target is the target or more, and the sum before
+/// the place ahead of it is less.
+#[allow(dead_code)]
+fn a_sum_and_its_place(col: &VerifiedPrefixColumn<u64>, target: u128) -> (r: Option<(u128, u128)>)
+    ensures
+        r matches Some((less, more)) ==> less < target <= more,
+{
+    let i = col.get_index_for_prefix(target);
+    if 0 < i && i <= col.len() {
+        Some((col.get_prefix(i - 1), col.get_prefix(i)))
+    } else {
+        None
+    }
+}
+
+/// The place of the `k`th `true` of a column of flags, counting from
+/// zero, where there is one: the flag there is `true`, and `k` of the
+/// flags before it are. Where there is none, no more than `k` flags of
+/// the column are `true`.
+#[allow(dead_code)]
+fn the_kth_true(col: &VerifiedPrefixColumn<bool>, k: usize) -> (r: Option<usize>)
+    requires
+        k < usize::MAX,
+    ensures
+        match r {
+            Some(i) => i < col@.len() && col@[i as int] && summed::<bool>(col@.take(i as int)) == k,
+            None => summed::<bool>(col@) <= k,
+        },
+{
+    let i = col.get_index_for_total(k + 1);
+    if i < col.len() {
+        proof {
+            assert(col@.take(i + 1).drop_last() =~= col@.take(i as int));
+            assert(col@.take(0).len() == 0);
+        }
+        Some(i)
+    } else {
+        proof {
+            assert(col@.take(col@.len() as int) =~= col@);
+        }
+        None
+    }
+}
+
+/// The two searches say enough to tell what each finds: the place for
+/// a sum through a position is the one ahead of the place for a sum
+/// before a position, and the first place where that is the first.
+#[allow(dead_code)]
+fn the_two_places<V: VSummed + VValue<C>, C: VCodec>(col: &VerifiedPrefixColumn<V, C>, target: V::Sum) -> (r: (usize, usize))
+    where V::Sum: VCount
+    ensures
+        r.0 == 0 ==> r.1 == 0,
+        r.0 > 0 ==> r.1 == r.0 - 1,
+{
+    let before = col.get_index_for_prefix(target);
+    let through = col.get_index_for_total(target);
+    proof {
+        if before == 0 {
+            // a target that no values reach: no sum is less
+            assert(col@.take(0).len() == 0);
+            if through > 0 {
+                lemma_sum_bound::<V>(col@.take(through as int));
+                V::Sum::lemma_count();
+            }
+        } else {
+            if through < before - 1 {
+                assert(summed::<V>(col@.take(through + 1)) < target.as_int());
+            }
+            if through >= before {
+                assert(summed::<V>(col@.take(before as int)) < target.as_int());
+            }
+        }
+    }
+    (before, through)
 }
 
 } // verus!

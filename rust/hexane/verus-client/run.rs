@@ -1370,3 +1370,112 @@ fn sums_refused() {
 fn sums_of_a_plain_column_past_the_type() {
     verus_client::summed_up(&VerifiedColumn::<u32>::fill(1 << 33, u32::MAX));
 }
+
+#[test]
+fn sums_read() {
+    let v: Vec<u64> = (0..1000).map(|i| i / 3).collect();
+    let col = VerifiedPrefixColumn::<u64>::from_values(&v);
+    let before = |i: usize| v[..i].iter().map(|x| u128::from(*x)).sum::<u128>();
+    let all = before(1000);
+    for i in [0, 1, 500, 999, 1000] {
+        assert_eq!(verus_client::the_sum_before(&col, i), before(i));
+    }
+    for i in [0, 1, 500, 999] {
+        let (a, b) = verus_client::the_sum_through(&col, i);
+        assert_eq!((a, b), (before(i), before(i + 1)));
+    }
+    for (start, end) in [(0, 0), (0, 1000), (3, 700), (999, 1000), (1000, 1000)] {
+        let (a, b, range) = verus_client::the_sum_of_a_range(&col, start, end);
+        assert_eq!(
+            (a, b, range),
+            (before(start), before(end), before(end) - before(start))
+        );
+    }
+    assert_eq!(verus_client::sums_past_the_end(&col), (all, all, all, 0));
+    let none = VerifiedPrefixColumn::<Option<i64>>::new();
+    assert_eq!(verus_client::sums_past_the_end(&none), (0, 0, 0, 0));
+    // signed values
+    let signed = VerifiedPrefixColumn::<i64>::from_values(&[4, -9, i64::MIN, 2]);
+    assert_eq!(verus_client::the_sum_before(&signed, 2), -5);
+    let (a, b, range) = verus_client::the_sum_of_a_range(&signed, 1, 3);
+    assert_eq!(
+        (a, b, range),
+        (4, -5 + i128::from(i64::MIN), -9 + i128::from(i64::MIN))
+    );
+    assert_eq!(
+        verus_client::a_range_by_its_ends(&signed, 1, 3),
+        -9 + i128::from(i64::MIN)
+    );
+    assert_eq!(verus_client::a_range_by_its_ends(&signed, 2, 2), 0);
+    let wide = VerifiedPrefixColumn::<i64>::from_values(&[i64::MIN, i64::MAX, i64::MAX]);
+    assert_eq!(
+        verus_client::a_range_by_its_ends(&wide, 0, 1),
+        i128::from(i64::MIN)
+    );
+    assert_eq!(
+        verus_client::a_range_by_its_ends(&wide, 1, 3),
+        2 * i128::from(i64::MAX)
+    );
+    // after an edit
+    let mut col = col;
+    assert_eq!(
+        verus_client::a_sum_after_a_push(&mut col, 77),
+        (all, all + 77)
+    );
+    assert_eq!(col.len(), 1001);
+    let mut flags = VerifiedPrefixColumn::<bool>::from_values(&[true, false, true]);
+    assert_eq!(verus_client::a_sum_after_a_push(&mut flags, true), (2, 3));
+    assert_eq!(verus_client::a_sum_after_a_push(&mut flags, false), (3, 3));
+}
+
+#[test]
+fn sums_searched() {
+    let v: Vec<u64> = vec![3, 0, 4, 4, 10];
+    let col = VerifiedPrefixColumn::<u64>::from_values(&v);
+    let places: Vec<Option<usize>> = [0, 1, 3, 4, 7, 8, 21, 22]
+        .into_iter()
+        .map(|t| verus_client::the_place_of_a_sum(&col, t))
+        .collect();
+    assert_eq!(
+        places,
+        [
+            Some(0),
+            Some(1),
+            Some(1),
+            Some(3),
+            Some(3),
+            Some(4),
+            Some(5),
+            None
+        ]
+    );
+    assert_eq!(verus_client::a_sum_and_its_place(&col, 0), None);
+    assert_eq!(verus_client::a_sum_and_its_place(&col, 3), Some((0, 3)));
+    assert_eq!(verus_client::a_sum_and_its_place(&col, 5), Some((3, 7)));
+    assert_eq!(verus_client::a_sum_and_its_place(&col, 21), Some((11, 21)));
+    assert_eq!(verus_client::a_sum_and_its_place(&col, 22), None);
+    let small = VerifiedPrefixColumn::<Option<u32>>::from_values(&[None, Some(u32::MAX), Some(1)]);
+    assert_eq!(verus_client::the_place_of_a_sum(&small, 1), Some(2));
+    assert_eq!(verus_client::the_place_of_a_sum(&small, 1 << 32), Some(3));
+    assert_eq!(
+        verus_client::the_place_of_a_sum(&small, (1 << 32) + 1),
+        None
+    );
+    let none = VerifiedPrefixColumn::<u32>::new();
+    assert_eq!(verus_client::the_place_of_a_sum(&none, 0), Some(0));
+    assert_eq!(verus_client::the_place_of_a_sum(&none, 1), None);
+    assert_eq!(verus_client::the_two_places(&none, 0), (0, 0));
+    assert_eq!(verus_client::the_two_places(&none, 1), (1, 0));
+    assert_eq!(verus_client::the_two_places(&col, 0), (0, 0));
+    assert_eq!(verus_client::the_two_places(&col, 4), (3, 2));
+    assert_eq!(verus_client::the_two_places(&col, 22), (6, 5));
+    // the flags that are set, in order
+    let flags: Vec<bool> = (0..3000).map(|i| i % 7 == 2 || i % 11 == 0).collect();
+    let col = VerifiedPrefixColumn::<bool>::from_values(&flags);
+    let set: Vec<usize> = (0..flags.len()).filter(|i| flags[*i]).collect();
+    for (k, place) in set.iter().enumerate() {
+        assert_eq!(verus_client::the_kth_true(&col, k), Some(*place));
+    }
+    assert_eq!(verus_client::the_kth_true(&col, set.len()), None);
+    assert_eq!(verus_client::the_kth_true(&col, usize::MAX - 1), None);
+}
