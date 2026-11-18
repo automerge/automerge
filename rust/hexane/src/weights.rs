@@ -264,7 +264,7 @@ pub struct PrefixModel<X, B>(PhantomData<(X, B)>);
 impl<E, X, B, P> Weigh<E, PrefixSlabWeight<P>> for PrefixModel<X, B> where
     E: Slabs + for<'a> ReadsAgree<'a, X>,
     X: for<'a> Decoders<'a, Tail = E::Tail>,
-    B: for<'a> PrefixOps<<<X as Decoders<'a>>::D as Decode>::Item, P = P>,
+    B: for<'a> PrefixOps<<<X as Decoders<'a>>::D as Decode>::Item, P = P, W = PrefixSlabWeight<P>>,
     P: Clone + Default + std::fmt::Debug + AddAssign + SubAssign,
  {
     open spec fn wrel(w: PrefixSlabWeight<P>, s: Slab<E::Tail>) -> bool {
@@ -349,7 +349,7 @@ impl<E, X, B, P> Weigh<E, PrefixSlabWeight<P>> for PrefixModel<X, B> where
 
 impl<'a, X, B, P> Accumulate<<X::D as Decode>::Item, PrefixSlabWeight<P>> for PrefixModel<X, B> where
     X: Decoders<'a>,
-    B: PrefixOps<<X::D as Decode>::Item, P = P>,
+    B: PrefixOps<<X::D as Decode>::Item, P = P, W = PrefixSlabWeight<P>>,
     P: Clone + Default + std::fmt::Debug + AddAssign + SubAssign,
  {
     open spec fn wvals(w: PrefixSlabWeight<P>, vs: Seq<<X::D as Decode>::Item>) -> bool {
@@ -389,7 +389,7 @@ impl<'a, X, B, P> Accumulate<<X::D as Decode>::Item, PrefixSlabWeight<P>> for Pr
 impl<'a, E, X, B, P> LoadWeigh<'a, E, X, PrefixSlabWeight<P>> for PrefixModel<X, B> where
     E: Slabs + for<'b> ReadsAgree<'b, X>,
     X: for<'b> Decoders<'b, Tail = E::Tail>,
-    B: for<'b> PrefixOps<<<X as Decoders<'b>>::D as Decode>::Item, P = P>,
+    B: for<'b> PrefixOps<<<X as Decoders<'b>>::D as Decode>::Item, P = P, W = PrefixSlabWeight<P>>,
     P: Clone + Default + std::fmt::Debug + AddAssign + SubAssign,
  {
     open spec fn accumulates() -> bool {
@@ -639,7 +639,7 @@ fn check_total<I, B, P, V>(
     len: usize,
 ) where
     I: IndexOps<PrefixSlabWeight<P>>,
-    B: PrefixOps<V, P = P>,
+    B: PrefixOps<V, P = P, W = PrefixSlabWeight<P>>,
     V: Copy,
     P: Clone + Default + std::fmt::Debug + AddAssign + SubAssign,
 {
@@ -653,7 +653,7 @@ fn check_total<I, B, P, V>(
 fn check_spliced_total<I, B, P, V>(index: &I, start: usize, end: usize, new: &[PrefixSlabWeight<P>])
 where
     I: IndexOps<PrefixSlabWeight<P>>,
-    B: PrefixOps<V, P = P>,
+    B: PrefixOps<V, P = P, W = PrefixSlabWeight<P>>,
     V: Copy,
     P: Clone + Default + std::fmt::Debug + AddAssign + SubAssign,
 {

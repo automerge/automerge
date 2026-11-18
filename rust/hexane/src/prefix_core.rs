@@ -9,22 +9,26 @@
 //! (`at_sum`): `base` plus the running total is the sum of the
 //! contributions of the values before the iterator.
 //!
-//! Trusted: prefix arithmetic's laws (`axiom_prefix_add`: `+` is
-//! associative, with `default` its identity; `axiom_prefix_sub`:
-//! `b + (a - b) == a`), as for the wrapping integers (in debug builds an
-//! operation that would wrap panics rather than return), and that the
-//! value type's `accumulate` and `accumulate_run` add its values'
-//! contributions (`PrefixOps`: user code). That each slab's weight in the
-//! index holds the slab's sum is the column's invariant (`ix_ok`).
+//! The sums are a slab weight's prefixes (`PrefixOps::W`), and the
+//! arithmetic is that weight's, with the laws the functions here rest on
+//! (`PrefixWeight`): `+` is associative, with zero its identity, and
+//! `b + (a - b) == a`. A weight proves them, or assumes them.
+//!
+//! Trusted, for the unverified API's weight
+//! ([`PrefixSlabWeight`](crate::prefix::PrefixSlabWeight)): those laws
+//! (`axiom_prefix_add`, `axiom_prefix_sub`), as for the wrapping integers
+//! (in debug builds an operation that would wrap panics rather than
+//! return), and that the value type's `accumulate` and `accumulate_run`
+//! add its values' contributions (`PrefixOps`: user code). That each
+//! slab's weight in the index holds the slab's sum is the column's
+//! invariant (`ix_ok`).
 
 // Verus proofs read more plainly with `x = x + n`.
 #![allow(clippy::assign_op_pattern)]
 
-use crate::btree::SlabBTree;
 #[cfg(verus_keep_ghost)]
-use crate::btree::{
-    axiom_prefix_add, fold, prefix_add, prefix_zero, sum_len, PrefixAggregate, SlabAggregate,
-};
+use crate::btree::{axiom_prefix_add, fold, prefix_add, sum_len, SlabAggregate};
+use crate::btree::{PrefixAggregate, SlabBTree};
 use crate::column::Slab;
 #[cfg(verus_keep_ghost)]
 use crate::cursor::slab_lens;
@@ -61,41 +65,93 @@ pub(crate) proof fn axiom_prefix_sub<P>(a: P, b: P)
 {
 }
 
+/// A slab weight whose prefixes the functions here can sum: its `+` has
+/// the laws they rest on, and a `-` that undoes it.
+pub(crate) trait PrefixWeight: PrefixAggregate {
+    /// `a - b` on prefixes.
+    spec fn prefix_minus(a: Self::Prefix, b: Self::Prefix) -> Self::Prefix;
+
+    /// `+` is associative, with `prefix_zero` its identity.
+    proof fn lemma_prefix_add(a: Self::Prefix, b: Self::Prefix, c: Self::Prefix)
+        ensures
+            Self::prefix_plus(Self::prefix_plus(a, b), c) == Self::prefix_plus(a, Self::prefix_plus(b, c)),
+            Self::prefix_plus(Self::prefix_zero(), a) == a,
+            Self::prefix_plus(a, Self::prefix_zero()) == a;
+
+    /// Adding back what was subtracted restores the sum.
+    proof fn lemma_prefix_sub(a: Self::Prefix, b: Self::Prefix)
+        ensures Self::prefix_plus(b, Self::prefix_minus(a, b)) == a;
+
+    /// Weights whose lengths fit always merge, and the laws of sums cover
+    /// every weight.
+    proof fn lemma_prefix_total()
+        ensures
+            Self::plain(),
+            forall|w: Self| #[trigger] w.prefix_ok();
+}
+
+/// The unverified API's weight: its laws are the trusted ones.
+impl<P> PrefixWeight for PrefixSlabWeight<P>
+where
+    P: Clone + Default + std::fmt::Debug + AddAssign + SubAssign + Add<Output = P>
+        + for<'a> AddAssign<&'a P>,
+{
+    open spec fn prefix_minus(a: P, b: P) -> P {
+        prefix_sub(a, b)
+    }
+
+    proof fn lemma_prefix_add(a: P, b: P, c: P) {
+        axiom_prefix_add(a, b, c);
+    }
+
+    proof fn lemma_prefix_sub(a: P, b: P) {
+        axiom_prefix_sub(a, b);
+    }
+
+    proof fn lemma_prefix_total() {
+    }
+}
+
 /// `n` copies of `c`, added.
-pub(crate) open spec fn reps<P>(n: nat, c: P) -> P
+pub(crate) open spec fn reps<W: PrefixWeight>(n: nat, c: W::Prefix) -> W::Prefix
     decreases n,
 {
-    if n == 0 { prefix_zero() } else { prefix_add(reps((n - 1) as nat, c), c) }
+    if n == 0 { W::prefix_zero() } else { W::prefix_plus(reps::<W>((n - 1) as nat, c), c) }
 }
 
 /// A prefix column's values' contributions, and its prefix arithmetic:
-/// the trusted bridge to `PrefixValue` (user code) and `T::Prefix`.
+/// for the unverified API, the trusted bridge to `PrefixValue` (user
+/// code) and `T::Prefix`.
 pub(crate) trait PrefixOps<V: Copy> {
     type P: Clone + Default + std::fmt::Debug + AddAssign + SubAssign + Add<Output = Self::P>
         + for<'x> AddAssign<&'x Self::P>;
+
+    /// The slab weight whose prefixes the sums are: its arithmetic is
+    /// theirs.
+    type W: PrefixWeight<Prefix = Self::P>;
 
     /// What value `v` adds to a running sum.
     spec fn contrib(v: V) -> Self::P;
 
     /// `T::accumulate`.
     fn acc(t: &mut Self::P, v: V)
-        ensures *final(t) == prefix_add(*old(t), Self::contrib(v));
+        ensures *final(t) == Self::W::prefix_plus(*old(t), Self::contrib(v));
 
     /// `T::accumulate_run`.
     fn acc_run(t: &mut Self::P, run: &Run<V>)
-        ensures *final(t) == prefix_add(*old(t), reps(run.count as nat, Self::contrib(run.value)));
+        ensures *final(t) == Self::W::prefix_plus(*old(t), reps::<Self::W>(run.count as nat, Self::contrib(run.value)));
 
     /// `T::try_accumulate_run`: `acc_run`, unless the sum would not fit.
     fn try_acc_run(t: &mut Self::P, run: &Run<V>) -> (ok: bool)
-        ensures ok ==> *final(t) == prefix_add(*old(t), reps(run.count as nat, Self::contrib(run.value)));
+        ensures ok ==> *final(t) == Self::W::prefix_plus(*old(t), reps::<Self::W>(run.count as nat, Self::contrib(run.value)));
 
     /// `P::default()`.
     fn zero() -> (r: Self::P)
-        ensures r == prefix_zero::<Self::P>();
+        ensures r == Self::W::prefix_zero();
 
     /// `a - b.clone()`.
     fn sub(a: Self::P, b: &Self::P) -> (r: Self::P)
-        ensures r == prefix_sub(a, *b);
+        ensures r == Self::W::prefix_minus(a, *b);
 
     /// `a.clone()`.
     fn cp(a: &Self::P) -> (r: Self::P)
@@ -103,7 +159,7 @@ pub(crate) trait PrefixOps<V: Copy> {
 
     /// `*a += b`.
     fn add_to(a: &mut Self::P, b: &Self::P)
-        ensures *final(a) == prefix_add(*old(a), *b);
+        ensures *final(a) == Self::W::prefix_plus(*old(a), *b);
 
     /// `T::MAX_UNCHECKED_LEN`: a slab of at most this many items cannot
     /// overflow its sum, so it is summed without checking.
@@ -118,35 +174,35 @@ pub(crate) trait PrefixOps<V: Copy> {
 pub(crate) open spec fn vsum<V: Copy, B: PrefixOps<V>>(vs: Seq<V>) -> B::P
     decreases vs.len(),
 {
-    if vs.len() == 0 { prefix_zero() } else { prefix_add(vsum::<V, B>(vs.drop_last()), B::contrib(vs.last())) }
+    if vs.len() == 0 { B::W::prefix_zero() } else { B::W::prefix_plus(vsum::<V, B>(vs.drop_last()), B::contrib(vs.last())) }
 }
 
 proof fn lemma_vsum_push<V: Copy, B: PrefixOps<V>>(vs: Seq<V>, v: V)
-    ensures vsum::<V, B>(vs.push(v)) == prefix_add(vsum::<V, B>(vs), B::contrib(v)),
+    ensures vsum::<V, B>(vs.push(v)) == B::W::prefix_plus(vsum::<V, B>(vs), B::contrib(v)),
 {
     assert(vs.push(v).drop_last() =~= vs);
 }
 
 /// Sums add over concatenation.
 pub(crate) proof fn lemma_vsum_cat<V: Copy, B: PrefixOps<V>>(a: Seq<V>, b: Seq<V>)
-    ensures vsum::<V, B>(a + b) == prefix_add(vsum::<V, B>(a), vsum::<V, B>(b)),
+    ensures vsum::<V, B>(a + b) == B::W::prefix_plus(vsum::<V, B>(a), vsum::<V, B>(b)),
     decreases b.len(),
 {
     if b.len() == 0 {
         assert(a + b =~= a);
-        axiom_prefix_add(vsum::<V, B>(a), vsum::<V, B>(a), vsum::<V, B>(a));
+        B::W::lemma_prefix_add(vsum::<V, B>(a), vsum::<V, B>(a), vsum::<V, B>(a));
     } else {
         let b0 = b.drop_last();
         lemma_vsum_cat::<V, B>(a, b0);
         assert(a + b =~= (a + b0).push(b.last()));
         lemma_vsum_push::<V, B>(a + b0, b.last());
-        axiom_prefix_add(vsum::<V, B>(a), vsum::<V, B>(b0), B::contrib(b.last()));
+        B::W::lemma_prefix_add(vsum::<V, B>(a), vsum::<V, B>(b0), B::contrib(b.last()));
     }
 }
 
 /// A run's sum.
 pub(crate) proof fn lemma_vsum_run<V: Copy, B: PrefixOps<V>>(n: nat, v: V)
-    ensures vsum::<V, B>(Seq::new(n, |_i: int| v)) == reps(n, B::contrib(v)),
+    ensures vsum::<V, B>(Seq::new(n, |_i: int| v)) == reps::<B::W>(n, B::contrib(v)),
     decreases n,
 {
     if n > 0 {
@@ -170,13 +226,13 @@ pub(crate) open spec fn at_sum<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode
     s: Seq<Slab<X::Tail>>,
 ) -> bool {
     &&& core.wf::<X>(s)
-    &&& prefix_add(base, total) == vsum::<_, B>(before::<X>(s, core.pos as int))
+    &&& B::W::prefix_plus(base, total) == vsum::<_, B>(before::<X>(s, core.pos as int))
 }
 
 /// Each slab's weight in the index holds its item count and its sum: the
 /// column's invariant.
 pub(crate) open spec fn ix_ok<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>(
-    ws: Seq<PrefixSlabWeight<B::P>>,
+    ws: Seq<B::W>,
     s: Seq<Slab<X::Tail>>,
 ) -> bool {
     &&& ws.len() == s.len()
@@ -188,7 +244,7 @@ pub(crate) open spec fn ix_ok<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>
 
 /// The index's sums before slab `k` are those of the values before it.
 pub(crate) proof fn lemma_fold<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>(
-    ws: Seq<PrefixSlabWeight<B::P>>,
+    ws: Seq<B::W>,
     s: Seq<Slab<X::Tail>>,
     k: int,
 )
@@ -203,13 +259,14 @@ pub(crate) proof fn lemma_fold<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode
         vals_of::<X>(s.take(k)).len() == sum(slab_lens(s), 0, k),
     decreases k,
 {
+    B::W::lemma_prefix_total();
     let w0 = ws.subrange(0, k);
     if k == 0 {
-        assert(w0 =~= Seq::<PrefixSlabWeight<B::P>>::empty());
+        assert(w0 =~= Seq::<B::W>::empty());
         assert(s.take(0) =~= Seq::<Slab<X::Tail>>::empty());
         assert(each::<X>(s.take(0)) =~= Seq::<Seq<<X::D as Decode>::Item>>::empty());
-        <PrefixSlabWeight<B::P> as PrefixAggregate>::lemma_prefix_empty(prefix_zero());
-        <PrefixSlabWeight<B::P> as SlabAggregate>::lemma_empty(PrefixSlabWeight::<B::P>::spec_empty());
+        <B::W as PrefixAggregate>::lemma_prefix_empty(B::W::prefix_zero());
+        <B::W as SlabAggregate>::lemma_empty(B::W::spec_empty());
     } else {
         lemma_fold::<X, B>(ws, s, k - 1);
         let w1 = ws.subrange(0, k - 1);
@@ -220,9 +277,9 @@ pub(crate) proof fn lemma_fold<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode
         lemma_sum_le(slab_lens(s), 0, k, 0, s.len() as int);
         let a = fold(w1);
         let b = ws[k - 1];
-        <PrefixSlabWeight<B::P> as SlabAggregate>::lemma_plain(a, b);
-        <PrefixSlabWeight<B::P> as SlabAggregate>::lemma_merge_len(a, b);
-        <PrefixSlabWeight<B::P> as PrefixAggregate>::lemma_prefix_merge(a, b);
+        <B::W as SlabAggregate>::lemma_plain(a, b);
+        <B::W as SlabAggregate>::lemma_merge_len(a, b);
+        <B::W as PrefixAggregate>::lemma_prefix_merge(a, b);
         // the slabs' values, one more slab
         assert(each::<X>(s.take(k)) =~= each::<X>(s.take(k - 1)).push(X::vals(s[k - 1])));
         assert(each::<X>(s.take(k)).drop_last() =~= each::<X>(s.take(k - 1)));
@@ -243,14 +300,14 @@ proof fn lemma_take<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>(
         k <= c0.out::<X>(s).len(),
         c0.out::<X>(s).take(k as int) == Seq::new(k, |_i: int| v),
     ensures
-        vsum::<_, B>(before::<X>(s, c0.pos + k)) == prefix_add(
+        vsum::<_, B>(before::<X>(s, c0.pos + k)) == B::W::prefix_plus(
             vsum::<_, B>(before::<X>(s, c0.pos as int)),
-            reps(k, B::contrib(v)),
+            reps::<B::W>(k, B::contrib(v)),
         ),
 {
     let b0 = vsum::<_, B>(before::<X>(s, c0.pos as int));
     if k == 0 {
-        axiom_prefix_add(b0, b0, b0);
+        B::W::lemma_prefix_add(b0, b0, b0);
     } else {
         let vv = vals_of::<X>(s);
         let o = c0.out::<X>(s);
@@ -269,7 +326,7 @@ proof fn lemma_take<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>(
 /// The index: the column's, whose weights hold its slabs' sums, or for a
 /// default iterator none, over no slabs.
 pub(crate) open spec fn index_ok<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>(
-    ix: Option<&SlabBTree<PrefixSlabWeight<B::P>>>,
+    ix: Option<&SlabBTree<B::W>>,
     s: Seq<Slab<X::Tail>>,
 ) -> bool {
     match ix {
@@ -297,7 +354,7 @@ pub(crate) fn p_next<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>(
                 &&& v == old(core).out::<X>(slabs@)[0]
                 &&& final(core).out::<X>(slabs@) == old(core).out::<X>(slabs@).skip(1)
                 &&& final(core).pos == old(core).pos + 1
-                &&& *final(total) == prefix_add(*old(total), B::contrib(v))
+                &&& *final(total) == B::W::prefix_plus(*old(total), B::contrib(v))
             },
             None => old(core).out::<X>(slabs@).len() == 0 && final(core).out::<X>(slabs@).len() == 0,
         },
@@ -310,10 +367,10 @@ pub(crate) fn p_next<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>(
         proof {
             assert(c0.out::<X>(slabs@).take(1) =~= Seq::new(1, |_i: int| v));
             lemma_take::<X, B>(c0, slabs@, 1, v);
-            assert(reps(1, B::contrib(v)) == prefix_add(reps(0, B::contrib(v)), B::contrib(v)));
-            assert(reps(0, B::contrib(v)) == prefix_zero::<B::P>());
-            axiom_prefix_add(B::contrib(v), B::contrib(v), B::contrib(v));
-            axiom_prefix_add(*base, t0, B::contrib(v));
+            assert(reps::<B::W>(1, B::contrib(v)) == B::W::prefix_plus(reps::<B::W>(0, B::contrib(v)), B::contrib(v)));
+            assert(reps::<B::W>(0, B::contrib(v)) == B::W::prefix_zero());
+            B::W::lemma_prefix_add(B::contrib(v), B::contrib(v), B::contrib(v));
+            B::W::lemma_prefix_add(*base, t0, B::contrib(v));
         }
     }
     r
@@ -342,7 +399,7 @@ pub(crate) fn p_next_run_from<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>
                 &&& final(core).out::<X>(slabs@) == o.skip(run.count as int)
                 &&& final(core).pos == old(core).pos + run.count
                 &&& run.count < max && run.count < o.len() ==> o[run.count as int] != run.value
-                &&& *final(total) == prefix_add(*old(total), reps(run.count as nat, B::contrib(run.value)))
+                &&& *final(total) == B::W::prefix_plus(*old(total), reps::<B::W>(run.count as nat, B::contrib(run.value)))
             },
             None => max == 0 || old(core).out::<X>(slabs@).len() == 0,
         },
@@ -372,7 +429,7 @@ pub(crate) fn p_next_run<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Ite
                 &&& final(core).out::<X>(slabs@) == o.skip(run.count as int)
                 &&& final(core).pos == old(core).pos + run.count
                 &&& run.count < max && run.count < o.len() ==> o[run.count as int] != run.value
-                &&& *final(total) == prefix_add(*old(total), reps(run.count as nat, B::contrib(run.value)))
+                &&& *final(total) == B::W::prefix_plus(*old(total), reps::<B::W>(run.count as nat, B::contrib(run.value)))
             },
             None => max == 0 || old(core).out::<X>(slabs@).len() == 0,
         },
@@ -384,7 +441,7 @@ pub(crate) fn p_next_run<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Ite
         B::acc_run(total, run);
         proof {
             lemma_take::<X, B>(c0, slabs@, run.count as nat, run.value);
-            axiom_prefix_add(base, t0, reps(run.count as nat, B::contrib(run.value)));
+            B::W::lemma_prefix_add(base, t0, reps::<B::W>(run.count as nat, B::contrib(run.value)));
         }
     }
     r
@@ -468,7 +525,7 @@ fn take_nth<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>(
 /// window.
 proof fn lemma_jump<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>(
     c0: ICore<X::D>,
-    ws: Seq<PrefixSlabWeight<B::P>>,
+    ws: Seq<B::W>,
     s: Seq<Slab<X::Tail>>,
     k: int,
     start: int,
@@ -524,7 +581,7 @@ proof fn lemma_jump<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>(
 fn p_nth_in<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>(
     core: &mut ICore<X::D>,
     slabs: &'a [Slab<X::Tail>],
-    ix: Option<&SlabBTree<PrefixSlabWeight<B::P>>>,
+    ix: Option<&SlabBTree<B::W>>,
     n: usize,
     total: &mut B::P,
     base: &B::P,
@@ -563,6 +620,7 @@ fn p_nth_in<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>(
     // Use the column's index for an O(log S) slab lookup.
     proof {
         ix.lemma_wf_len();
+        B::W::lemma_prefix_total();
         lemma_plain_valid(ix@);
     }
     let found = ix.find_slab_at_item(target);
@@ -575,7 +633,7 @@ fn p_nth_in<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>(
     // the column's); carry any `reset_prefix` offset across the jump
     *total = B::sub(found.prefix, base);
     proof {
-        axiom_prefix_sub(found.prefix, *base);
+        B::W::lemma_prefix_sub(found.prefix, *base);
     }
     if !in_slab {
         return None;
@@ -594,7 +652,7 @@ fn p_nth_in<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>(
 pub(crate) fn p_nth<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>(
     core: &mut ICore<X::D>,
     slabs: &'a [Slab<X::Tail>],
-    ix: Option<&SlabBTree<PrefixSlabWeight<B::P>>>,
+    ix: Option<&SlabBTree<B::W>>,
     n: usize,
     total: &mut B::P,
     base: &B::P,
@@ -636,7 +694,7 @@ pub(crate) fn p_nth<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>(
 pub(crate) fn p_advance_to<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>(
     core: &mut ICore<X::D>,
     slabs: &'a [Slab<X::Tail>],
-    ix: Option<&SlabBTree<PrefixSlabWeight<B::P>>>,
+    ix: Option<&SlabBTree<B::W>>,
     target: usize,
     total: &mut B::P,
     base: &B::P,
@@ -661,7 +719,7 @@ pub(crate) fn p_advance_to<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::I
 pub(crate) fn p_advance_by<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>(
     core: &mut ICore<X::D>,
     slabs: &'a [Slab<X::Tail>],
-    ix: Option<&SlabBTree<PrefixSlabWeight<B::P>>>,
+    ix: Option<&SlabBTree<B::W>>,
     amount: usize,
     total: &mut B::P,
     base: &B::P,
@@ -692,7 +750,7 @@ pub(crate) fn p_advance_by<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::I
 pub(crate) fn p_shift<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>(
     core: &mut ICore<X::D>,
     slabs: &'a [Slab<X::Tail>],
-    ix: Option<&SlabBTree<PrefixSlabWeight<B::P>>>,
+    ix: Option<&SlabBTree<B::W>>,
     start: usize,
     end: usize,
     total: &mut B::P,
@@ -732,7 +790,7 @@ pub(crate) fn p_shift<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>
 pub(crate) fn p_shift_next<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>(
     core: &mut ICore<X::D>,
     slabs: &'a [Slab<X::Tail>],
-    ix: Option<&SlabBTree<PrefixSlabWeight<B::P>>>,
+    ix: Option<&SlabBTree<B::W>>,
     start: usize,
     end: usize,
     total: &mut B::P,
@@ -784,7 +842,7 @@ pub(crate) fn p_shift_next<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::I
 pub(crate) fn p_delta_nth<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>(
     core: &mut ICore<X::D>,
     slabs: &'a [Slab<X::Tail>],
-    ix: Option<&SlabBTree<PrefixSlabWeight<B::P>>>,
+    ix: Option<&SlabBTree<B::W>>,
     n: usize,
     total: &mut B::P,
     base: &B::P,
@@ -801,7 +859,7 @@ pub(crate) fn p_delta_nth<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::It
                 &&& v == o[n as int]
                 &&& final(core).out::<X>(slabs@) == o.skip(n + 1)
                 &&& final(core).pos == old(core).pos + n + 1
-                &&& prefix_add(vsum::<_, B>(before::<X>(slabs@, old(core).pos as int)), d) == vsum::<_, B>(
+                &&& B::W::prefix_plus(vsum::<_, B>(before::<X>(slabs@, old(core).pos as int)), d) == vsum::<_, B>(
                     before::<X>(slabs@, old(core).pos + n),
                 )
             },
@@ -833,8 +891,8 @@ pub(crate) fn p_delta_nth<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::It
     let v = p_next::<X, B>(core, slabs, total, base)?;
     proof {
         // the sum before the start, plus the difference, is the sum before `v`
-        axiom_prefix_add(*base, t0, d);
-        axiom_prefix_sub(t1, t0);
+        B::W::lemma_prefix_add(*base, t0, d);
+        B::W::lemma_prefix_sub(t1, t0);
         assert(v == o[n as int]);
         assert(core.out::<X>(slabs@) =~= o.skip(n + 1));
     }
@@ -847,7 +905,7 @@ pub(crate) fn p_delta_nth<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::It
 pub(crate) fn p_seek_to<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>(
     core: &mut ICore<X::D>,
     slabs: &'a [Slab<X::Tail>],
-    ix: Option<&SlabBTree<PrefixSlabWeight<B::P>>>,
+    ix: Option<&SlabBTree<B::W>>,
     at: usize,
     total: &mut B::P,
     base: &B::P,
@@ -878,7 +936,7 @@ pub(crate) fn p_seek_to<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item
 pub(crate) fn p_delta_from<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>(
     core: &mut ICore<X::D>,
     slabs: &'a [Slab<X::Tail>],
-    ix: Option<&SlabBTree<PrefixSlabWeight<B::P>>>,
+    ix: Option<&SlabBTree<B::W>>,
     from: usize,
     n: usize,
     total: &mut B::P,
@@ -896,7 +954,7 @@ pub(crate) fn p_delta_from<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::I
                 Some((v, d)) => {
                     &&& n < o.len()
                     &&& v == o[n as int]
-                    &&& prefix_add(vsum::<_, B>(before::<X>(slabs@, from as int)), d) == vsum::<_, B>(
+                    &&& B::W::prefix_plus(vsum::<_, B>(before::<X>(slabs@, from as int)), d) == vsum::<_, B>(
                         before::<X>(slabs@, from + n),
                     )
                 },
@@ -940,7 +998,7 @@ proof fn lemma_all_out<'a, X: Decoders<'a>>(c: ICore<X::D>, s: Seq<Slab<X::Tail>
 pub(crate) fn p_sum_range<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>(
     core: &mut ICore<X::D>,
     slabs: &'a [Slab<X::Tail>],
-    ix: Option<&SlabBTree<PrefixSlabWeight<B::P>>>,
+    ix: Option<&SlabBTree<B::W>>,
     start: usize,
     end: usize,
     total: &mut B::P,
@@ -951,11 +1009,11 @@ pub(crate) fn p_sum_range<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::It
         index_ok::<X, B>(ix, slabs@),
         old(core).pos == 0,
         old(core).items_left == vals_of::<X>(slabs@).len(),
-        *old(base) == prefix_zero::<B::P>(),
+        *old(base) == B::W::prefix_zero(),
         start < end,
     ensures
         *final(base) == vsum::<_, B>(before::<X>(slabs@, start as int)),
-        prefix_add(*final(base), *final(total)) == vsum::<_, B>(before::<X>(slabs@, end as int)),
+        B::W::prefix_plus(*final(base), *final(total)) == vsum::<_, B>(before::<X>(slabs@, end as int)),
 {
     // the positions and the sums come from the steps' contracts alone
     hide(ICore::wf);
@@ -985,7 +1043,7 @@ pub(crate) fn p_sum_range<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::It
     }
     p_reset::<X, B>(core, slabs, total, base);
     proof {
-        axiom_prefix_add(*base, *base, *base);
+        B::W::lemma_prefix_add(*base, *base, *base);
         if start >= len {
             lemma_before_all::<X>(s, start as int);
             lemma_before_all::<X>(s, s0 as int);
@@ -1016,12 +1074,12 @@ pub(crate) fn p_reset<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>
         at_sum::<X, B>(*core, *old(total), *old(base), slabs@),
     ensures
         at_sum::<X, B>(*core, *final(total), *final(base), slabs@),
-        *final(total) == prefix_zero::<B::P>(),
+        *final(total) == B::W::prefix_zero(),
 {
     B::add_to(base, total);
     *total = B::zero();
     proof {
-        axiom_prefix_add(*base, *base, *base);
+        B::W::lemma_prefix_add(*base, *base, *base);
     }
 }
 
@@ -1030,7 +1088,7 @@ pub(crate) fn p_reset<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>
 /// then that slab's values before it, run by run.
 pub(crate) fn p_prefix<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>(
     slabs: &'a [Slab<X::Tail>],
-    ix: &SlabBTree<PrefixSlabWeight<B::P>>,
+    ix: &SlabBTree<B::W>,
     index: usize,
 ) -> (r: B::P)
     requires
@@ -1045,6 +1103,7 @@ pub(crate) fn p_prefix<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>
     let ghost s = slabs@;
     proof {
         ix.lemma_wf_len();
+        B::W::lemma_prefix_total();
         lemma_plain_valid(ix@);
     }
     let found = ix.find_slab_at_item(index);
@@ -1055,7 +1114,7 @@ pub(crate) fn p_prefix<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>
         lemma_fold::<X, B>(ix@, s, s.len() as int);
         assert(ix@.subrange(0, s.len() as int) =~= ix@);
         assert(s.take(s.len() as int) =~= s);
-        axiom_prefix_add(found.prefix, found.prefix, found.prefix);
+        B::W::lemma_prefix_add(found.prefix, found.prefix, found.prefix);
     }
     if found.index >= slabs.len() {
         // `index` is at or past the column's end
@@ -1069,14 +1128,14 @@ pub(crate) fn p_prefix<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>
     if n == 0 {
         return t;
     }
-    let ghost zero = prefix_zero::<B::P>();
+    let ghost zero = B::W::prefix_zero();
     let mut core = ICore::at::<X>(slabs, found.index, 0, found.pos, n);
     proof {
         assert(core.out::<X>(s).len() == n);
     }
     take_nth::<X, B>(&mut core, slabs, n - 1, &mut t, Ghost(zero));
     proof {
-        axiom_prefix_add(t, t, t);
+        B::W::lemma_prefix_add(t, t, t);
     }
     t
 }

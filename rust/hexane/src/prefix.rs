@@ -954,6 +954,7 @@ pub struct PB<T>(PhantomData<fn() -> T>);
 
 impl<'a, T: PrefixValue> PrefixOps<T::Get<'a>> for PB<T> {
     type P = T::Prefix;
+    type W = PrefixSlabWeight<T::Prefix>;
 
     #[cfg(verus_keep_ghost)]
     fn contrib(_v: T::Get<'a>) -> T::Prefix {
@@ -1012,7 +1013,20 @@ where
     T::Prefix: UnsignedPrefix + Div<Output = T::Prefix> + TryInto<usize> + TryFrom<usize> + Ord,
 {
     #[cfg(verus_keep_ghost)]
+    fn pnum(_p: T::Prefix) -> vstd::prelude::nat {
+        unimplemented!()
+    }
+
+    #[cfg(verus_keep_ghost)]
+    fn pmax() -> vstd::prelude::nat {
+        unimplemented!()
+    }
+
+    #[cfg(verus_keep_ghost)]
     fn axiom_pnum(_a: T::Prefix, _b: T::Prefix) {}
+
+    #[cfg(verus_keep_ghost)]
+    fn axiom_ple(_a: T::Prefix, _b: T::Prefix) {}
 
     #[inline(always)]
     fn le(a: &T::Prefix, b: &T::Prefix) -> bool {

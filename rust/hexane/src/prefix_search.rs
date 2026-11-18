@@ -11,19 +11,16 @@
 //! The searches compare and divide sums, so they need a model of the
 //! prefix type as numbers: each prefix value stands for a natural number
 //! (`pnum`), sums that fit the type are the numbers' sums, `<=` is the
-//! numbers' order, and so on. That model is trusted (`PrefixOrd`): it is
-//! what unsigned integers do, and the searches are only offered for prefix
-//! types that are (`UnsignedPrefix`).
+//! numbers' order, and so on (`PrefixOrd`). For the unverified API that
+//! model is trusted: it is what unsigned integers do, and the searches are
+//! only offered for prefix types that are (`UnsignedPrefix`).
 
 // Verus proofs read more plainly with `x = x + n`.
 #![allow(clippy::assign_op_pattern)]
 
-use crate::btree::SlabBTree;
 #[cfg(verus_keep_ghost)]
-use crate::btree::{
-    axiom_prefix_add, fold, pre_at, prefix_add, prefix_leq, prefix_zero, reached, stays_reached,
-    sum_len, PrefixAggregate,
-};
+use crate::btree::{fold, pre_at, reached, stays_reached, sum_len, PrefixAggregate};
+use crate::btree::{OrdPrefix, SlabBTree};
 use crate::column::Slab;
 #[cfg(verus_keep_ghost)]
 use crate::cursor::slab_lens;
@@ -32,10 +29,9 @@ use crate::fenwick::{lemma_sum_le, lemma_sum_one, lemma_sum_split, sum, total};
 #[cfg(verus_keep_ghost)]
 use crate::iter_core::{lemma_from, lemma_upto, lens_ok, vals_of};
 use crate::iter_core::{Decode, Decoders, ICore};
-use crate::prefix::PrefixSlabWeight;
 #[cfg(verus_keep_ghost)]
 use crate::prefix_core::{
-    at_sum, before, ix_ok, lemma_fold, lemma_vsum_cat, lemma_vsum_run, prefix_sub, reps, vsum,
+    at_sum, before, ix_ok, lemma_fold, lemma_vsum_cat, lemma_vsum_run, reps, vsum, PrefixWeight,
 };
 use crate::prefix_core::{p_nth, PrefixOps};
 #[allow(unused_imports)]
@@ -46,78 +42,84 @@ use crate::index::lemma_plain_valid;
 
 verus! {
 
-/// The number a prefix value stands for.
-pub(crate) uninterp spec fn pnum<P>(p: P) -> nat;
-
-/// The largest number prefix type `P` holds.
-pub(crate) uninterp spec fn pmax<P>() -> nat;
-
-/// An unsigned prefix type's arithmetic and order, as numbers: the
-/// trusted bridge to `T::Prefix`'s `<=`, `/` and `try_into`.
+/// An unsigned prefix type's arithmetic and order, as numbers: for the
+/// unverified API, the trusted bridge to `T::Prefix`'s `<=`, `/` and
+/// `try_into`.
 pub(crate) trait PrefixOrd<V: Copy>: PrefixOps<V> {
-    /// Sums that fit the type are the numbers' sums, a difference that
-    /// isn't negative is theirs, and `<=` is their order, as for unsigned
-    /// integers.
+    /// The number a prefix value stands for.
+    spec fn pnum(p: Self::P) -> nat;
+
+    /// The largest number the prefix type holds.
+    spec fn pmax() -> nat;
+
+    /// Sums that fit the type are the numbers' sums, and a difference
+    /// that isn't negative is theirs, as for unsigned integers.
     proof fn axiom_pnum(a: Self::P, b: Self::P)
         ensures
-            pnum(a) <= pmax::<Self::P>(),
-            pnum(prefix_zero::<Self::P>()) == 0,
-            pnum(a) + pnum(b) <= pmax::<Self::P>() ==> pnum(prefix_add(a, b)) == pnum(a) + pnum(b),
-            pnum(b) <= pnum(a) ==> pnum(prefix_sub(a, b)) == pnum(a) - pnum(b),
-            prefix_leq(a, b) == (pnum(a) <= pnum(b)),
+            Self::pnum(a) <= Self::pmax(),
+            Self::pnum(Self::W::prefix_zero()) == 0,
+            Self::pnum(a) + Self::pnum(b) <= Self::pmax() ==> Self::pnum(Self::W::prefix_plus(a, b)) == Self::pnum(a) + Self::pnum(b),
+            Self::pnum(b) <= Self::pnum(a) ==> Self::pnum(Self::W::prefix_minus(a, b)) == Self::pnum(a) - Self::pnum(b),
+    ;
+
+    /// The weight's `<=` is the numbers' order, as for unsigned integers.
+    proof fn axiom_ple(a: Self::P, b: Self::P)
+        where Self::W: OrdPrefix
+        ensures
+            <Self::W as OrdPrefix>::prefix_le(a, b) == (Self::pnum(a) <= Self::pnum(b)),
     ;
 
     /// `a <= b`.
     fn le(a: &Self::P, b: &Self::P) -> (r: bool)
         ensures
-            r == (pnum(*a) <= pnum(*b)),
+            r == (Self::pnum(*a) <= Self::pnum(*b)),
     ;
 
     /// `(a - 1) / b + 1`: `a` divided by `b`, rounding up (when both are
     /// positive; otherwise it may panic).
     fn div_ceil(a: &Self::P, b: &Self::P) -> (r: Self::P)
         ensures
-            pnum(*a) > 0 && pnum(*b) > 0 ==> pnum(r) == (pnum(*a) - 1) as nat / pnum(*b) + 1,
+            Self::pnum(*a) > 0 && Self::pnum(*b) > 0 ==> Self::pnum(r) == (Self::pnum(*a) - 1) as nat / Self::pnum(*b) + 1,
     ;
 
     /// `p.try_into()`.
     fn to_usize(p: &Self::P) -> (r: Option<usize>)
         ensures
-            pnum(*p) <= usize::MAX ==> r == Some(pnum(*p) as usize),
+            Self::pnum(*p) <= usize::MAX ==> r == Some(Self::pnum(*p) as usize),
     ;
 
     /// `*a + *b`.
     fn add(a: &Self::P, b: &Self::P) -> (r: Self::P)
         ensures
-            r == prefix_add(*a, *b),
+            r == Self::W::prefix_plus(*a, *b),
     ;
 
     /// `a.checked_add(b)` (`UnsignedPrefix`).
     fn checked_add(a: &Self::P, b: &Self::P) -> (r: Option<Self::P>)
         ensures
-            r is Some <==> pnum(*a) + pnum(*b) <= pmax::<Self::P>(),
-            r matches Some(c) ==> c == prefix_add(*a, *b),
+            r is Some <==> Self::pnum(*a) + Self::pnum(*b) <= Self::pmax(),
+            r matches Some(c) ==> c == Self::W::prefix_plus(*a, *b),
     ;
 
     /// `1`.
     fn one() -> (r: Self::P)
         ensures
-            pnum(r) == 1,
+            Self::pnum(r) == 1,
     ;
 }
 
 /// The sum of values' contributions, as numbers.
-pub(crate) open spec fn nsum<V: Copy, B: PrefixOps<V>>(vs: Seq<V>) -> nat
+pub(crate) open spec fn nsum<V: Copy, B: PrefixOrd<V>>(vs: Seq<V>) -> nat
     decreases vs.len(),
 {
     if vs.len() == 0 {
         0
     } else {
-        nsum::<V, B>(vs.drop_last()) + pnum(B::contrib(vs.last()))
+        nsum::<V, B>(vs.drop_last()) + B::pnum(B::contrib(vs.last()))
     }
 }
 
-pub(crate) proof fn lemma_nsum_cat<V: Copy, B: PrefixOps<V>>(a: Seq<V>, b: Seq<V>)
+pub(crate) proof fn lemma_nsum_cat<V: Copy, B: PrefixOrd<V>>(a: Seq<V>, b: Seq<V>)
     ensures
         nsum::<V, B>(a + b) == nsum::<V, B>(a) + nsum::<V, B>(b),
     decreases b.len(),
@@ -131,7 +133,7 @@ pub(crate) proof fn lemma_nsum_cat<V: Copy, B: PrefixOps<V>>(a: Seq<V>, b: Seq<V
 }
 
 /// Sums of longer prefixes are no smaller.
-pub(crate) proof fn lemma_nsum_mono<V: Copy, B: PrefixOps<V>>(vs: Seq<V>, i: int, j: int)
+pub(crate) proof fn lemma_nsum_mono<V: Copy, B: PrefixOrd<V>>(vs: Seq<V>, i: int, j: int)
     requires
         0 <= i <= j <= vs.len(),
     ensures
@@ -144,13 +146,13 @@ pub(crate) proof fn lemma_nsum_mono<V: Copy, B: PrefixOps<V>>(vs: Seq<V>, i: int
 /// A sum that fits is its number.
 pub(crate) proof fn lemma_nsum_vsum<V: Copy, B: PrefixOrd<V>>(vs: Seq<V>)
     requires
-        nsum::<V, B>(vs) <= pmax::<B::P>(),
+        nsum::<V, B>(vs) <= B::pmax(),
     ensures
-        pnum(vsum::<V, B>(vs)) == nsum::<V, B>(vs),
+        B::pnum(vsum::<V, B>(vs)) == nsum::<V, B>(vs),
     decreases vs.len(),
 {
     if vs.len() == 0 {
-        B::axiom_pnum(prefix_zero::<B::P>(), prefix_zero::<B::P>());
+        B::axiom_pnum(B::W::prefix_zero(), B::W::prefix_zero());
     } else {
         let d = vs.drop_last();
         lemma_nsum_vsum::<V, B>(d);
@@ -159,12 +161,12 @@ pub(crate) proof fn lemma_nsum_vsum<V: Copy, B: PrefixOrd<V>>(vs: Seq<V>)
 }
 
 /// A run of `n` copies of `v` adds `n` times `v`'s contribution.
-pub(crate) proof fn lemma_nsum_run<V: Copy, B: PrefixOps<V>>(n: nat, v: V)
+pub(crate) proof fn lemma_nsum_run<V: Copy, B: PrefixOrd<V>>(n: nat, v: V)
     ensures
-        nsum::<V, B>(Seq::new(n, |_i: int| v)) == n * pnum(B::contrib(v)),
+        nsum::<V, B>(Seq::new(n, |_i: int| v)) == n * B::pnum(B::contrib(v)),
     decreases n,
 {
-    let c = pnum(B::contrib(v));
+    let c = B::pnum(B::contrib(v));
     if n > 0 {
         lemma_nsum_run::<V, B>((n - 1) as nat, v);
         assert(Seq::new(n, |_i: int| v).drop_last() =~= Seq::new((n - 1) as nat, |_i: int| v));
@@ -178,11 +180,11 @@ pub(crate) proof fn lemma_nsum_run<V: Copy, B: PrefixOps<V>>(n: nat, v: V)
 /// `r` is the first index whose prefix sum (of the values before it)
 /// reaches `target`, or one past the end if none does: whenever the sum of
 /// all the values `v` fits the prefix type.
-pub(crate) open spec fn found_at<V: Copy, B: PrefixOps<V>>(v: Seq<V>, target: B::P, r: int) -> bool {
-    nsum::<V, B>(v) <= pmax::<B::P>() ==> {
+pub(crate) open spec fn found_at<V: Copy, B: PrefixOrd<V>>(v: Seq<V>, target: B::P, r: int) -> bool {
+    nsum::<V, B>(v) <= B::pmax() ==> {
         &&& 0 <= r <= v.len() + 1
-        &&& forall|i: int| 0 <= i < r && i <= v.len() ==> nsum::<V, B>(#[trigger] v.take(i)) < pnum(target)
-        &&& r <= v.len() ==> pnum(target) <= nsum::<V, B>(v.take(r))
+        &&& forall|i: int| 0 <= i < r && i <= v.len() ==> nsum::<V, B>(#[trigger] v.take(i)) < B::pnum(target)
+        &&& r <= v.len() ==> B::pnum(target) <= nsum::<V, B>(v.take(r))
     }
 }
 
@@ -195,7 +197,7 @@ proof fn lemma_run_sum<V: Copy, B: PrefixOrd<V>>(v: Seq<V>, k: int, c: int, x: V
         k + c <= v.len(),
         v.skip(k).take(c) =~= Seq::new(c as nat, |_i: int| x),
     ensures
-        nsum::<V, B>(v.take(k + i)) == nsum::<V, B>(v.take(k)) + i * pnum(B::contrib(x)),
+        nsum::<V, B>(v.take(k + i)) == nsum::<V, B>(v.take(k)) + i * B::pnum(B::contrib(x)),
 {
     hide(nsum);
     let ri = Seq::new(i as nat, |_i: int| x);
@@ -207,7 +209,7 @@ proof fn lemma_run_sum<V: Copy, B: PrefixOrd<V>>(v: Seq<V>, k: int, c: int, x: V
     assert(v.take(k + i) =~= v.take(k) + ri);
     lemma_nsum_cat::<V, B>(v.take(k), ri);
     lemma_nsum_run::<V, B>(i as nat, x);
-    assert((i as nat) * pnum(B::contrib(x)) == i * pnum(B::contrib(x)));
+    assert((i as nat) * B::pnum(B::contrib(x)) == i * B::pnum(B::contrib(x)));
 }
 
 /// A run of `c` copies of `x` at `k` in `v`: what is left after it, the
@@ -221,8 +223,8 @@ proof fn lemma_run_step<V: Copy, B: PrefixOrd<V>>(v: Seq<V>, k: int, c: int, x: 
         v.skip(k).take(c) =~= Seq::new(c as nat, |_i: int| x),
     ensures
         v.skip(k).skip(c) == v.skip(k + c),
-        nsum::<V, B>(v.take(k + c)) == nsum::<V, B>(v.take(k)) + c * pnum(B::contrib(x)),
-        nsum::<V, B>(v) <= pmax::<B::P>() ==> pnum(reps(c as nat, B::contrib(x))) == c * pnum(B::contrib(x)),
+        nsum::<V, B>(v.take(k + c)) == nsum::<V, B>(v.take(k)) + c * B::pnum(B::contrib(x)),
+        nsum::<V, B>(v) <= B::pmax() ==> B::pnum(reps::<B::W>(c as nat, B::contrib(x))) == c * B::pnum(B::contrib(x)),
 {
     hide(nsum);
     let rs = Seq::new(c as nat, |_i: int| x);
@@ -230,8 +232,8 @@ proof fn lemma_run_step<V: Copy, B: PrefixOrd<V>>(v: Seq<V>, k: int, c: int, x: 
     assert(v.skip(k).skip(c) =~= v.skip(k + c));
     lemma_nsum_run::<V, B>(c as nat, x);
     lemma_vsum_run::<V, B>(c as nat, x);
-    assert((c as nat) * pnum(B::contrib(x)) == c * pnum(B::contrib(x)));
-    if nsum::<V, B>(v) <= pmax::<B::P>() {
+    assert((c as nat) * B::pnum(B::contrib(x)) == c * B::pnum(B::contrib(x)));
+    if nsum::<V, B>(v) <= B::pmax() {
         lemma_nsum_mono::<V, B>(v, k + c, v.len() as int);
         assert(v.take(v.len() as int) =~= v);
         lemma_nsum_vsum::<V, B>(rs);
@@ -247,15 +249,15 @@ proof fn lemma_in_run<V: Copy, B: PrefixOrd<V>>(v: Seq<V>, k: int, c: int, x: V,
         0 <= c,
         k + c <= v.len(),
         v.skip(k).take(c) =~= Seq::new(c as nat, |_i: int| x),
-        0 < l <= c * pnum(B::contrib(x)),
-        pnum(B::contrib(x)) > 0 ==> m == (l - 1) as nat / pnum(B::contrib(x)) + 1,
+        0 < l <= c * B::pnum(B::contrib(x)),
+        B::pnum(B::contrib(x)) > 0 ==> m == (l - 1) as nat / B::pnum(B::contrib(x)) + 1,
     ensures
         1 <= m <= c,
         forall|j: int| 0 <= j < k + m ==> nsum::<V, B>(#[trigger] v.take(j)) < nsum::<V, B>(v.take(k)) + l,
         l <= nsum::<V, B>(v.take(k + m)) - nsum::<V, B>(v.take(k)),
 {
     hide(nsum);
-    let pc = pnum(B::contrib(x));
+    let pc = B::pnum(B::contrib(x));
     let base = nsum::<V, B>(v.take(k));
     assert(pc > 0) by {
         if pc == 0 {
@@ -319,15 +321,15 @@ pub(crate) fn p_find_in_slab<'a, X: Decoders<'a>, B: PrefixOrd<<X::D as Decode>:
         X::vals(*slab).len() <= usize::MAX,
     ensures
         r <= X::vals(*slab).len(),
-        nsum::<_, B>(X::vals(*slab)) <= pmax::<B::P>() && pnum(rem) > 0 ==> {
-            &&& forall|j: int| 0 <= j < r ==> nsum::<_, B>(#[trigger] X::vals(*slab).take(j)) < pnum(rem)
-            &&& pnum(rem) <= nsum::<_, B>(X::vals(*slab)) ==> pnum(rem) <= nsum::<_, B>(
+        nsum::<_, B>(X::vals(*slab)) <= B::pmax() && B::pnum(rem) > 0 ==> {
+            &&& forall|j: int| 0 <= j < r ==> nsum::<_, B>(#[trigger] X::vals(*slab).take(j)) < B::pnum(rem)
+            &&& B::pnum(rem) <= nsum::<_, B>(X::vals(*slab)) ==> B::pnum(rem) <= nsum::<_, B>(
                 X::vals(*slab).take(r as int),
             )
         },
 {
     let ghost v = X::vals(*slab);
-    let ghost fits = nsum::<_, B>(v) <= pmax::<B::P>() && pnum(rem) > 0;
+    let ghost fits = nsum::<_, B>(v) <= B::pmax() && B::pnum(rem) > 0;
     let ghost r0 = rem;
     let mut d = X::open(slab);
     // what is left to reach, past the values so far
@@ -345,12 +347,12 @@ pub(crate) fn p_find_in_slab<'a, X: Decoders<'a>, B: PrefixOrd<<X::D as Decode>:
             d.inv(),
             0 <= items <= v.len(),
             d.rest() == v.skip(items as int),
-            fits == (nsum::<_, B>(v) <= pmax::<B::P>() && pnum(r0) > 0),
-            fits ==> pnum(left) + nsum::<_, B>(v.take(items as int)) == pnum(r0),
-            fits ==> nsum::<_, B>(v.take(items as int)) < pnum(r0),
+            fits == (nsum::<_, B>(v) <= B::pmax() && B::pnum(r0) > 0),
+            fits ==> B::pnum(left) + nsum::<_, B>(v.take(items as int)) == B::pnum(r0),
+            fits ==> nsum::<_, B>(v.take(items as int)) < B::pnum(r0),
         ensures
             items == v.len(),
-            fits ==> nsum::<_, B>(v) < pnum(r0),
+            fits ==> nsum::<_, B>(v) < B::pnum(r0),
         decreases d.rest().len(),
     {
         match d.d_run_max(usize::MAX) {
@@ -364,7 +366,7 @@ pub(crate) fn p_find_in_slab<'a, X: Decoders<'a>, B: PrefixOrd<<X::D as Decode>:
                 let mut runsum = B::zero();
                 B::acc_run(&mut runsum, &run);
                 proof {
-                    axiom_prefix_add(reps(run.count as nat, B::contrib(run.value)), runsum, runsum);
+                    B::W::lemma_prefix_add(reps::<B::W>(run.count as nat, B::contrib(run.value)), runsum, runsum);
                 }
                 if B::le(&left, &runsum) {
                     // within this run: divide by the value's contribution,
@@ -372,7 +374,7 @@ pub(crate) fn p_find_in_slab<'a, X: Decoders<'a>, B: PrefixOrd<<X::D as Decode>:
                     let mut p = B::zero();
                     B::acc(&mut p, run.value);
                     proof {
-                        axiom_prefix_add(B::contrib(run.value), p, p);
+                        B::W::lemma_prefix_add(B::contrib(run.value), p, p);
                     }
                     let needed = B::div_ceil(&left, &p);
                     let mut n = run.count;
@@ -383,7 +385,7 @@ pub(crate) fn p_find_in_slab<'a, X: Decoders<'a>, B: PrefixOrd<<X::D as Decode>:
                     }
                     proof {
                         if fits {
-                            lemma_in_run::<_, B>(v, k, c, run.value, pnum(left) as int, pnum(needed) as int);
+                            lemma_in_run::<_, B>(v, k, c, run.value, B::pnum(left) as int, B::pnum(needed) as int);
                         }
                     }
                     return items + n;
@@ -406,7 +408,7 @@ pub(crate) fn p_find_in_slab<'a, X: Decoders<'a>, B: PrefixOrd<<X::D as Decode>:
     }
     proof {
         if fits {
-            assert forall|j: int| 0 <= j < items implies nsum::<_, B>(#[trigger] v.take(j)) < pnum(
+            assert forall|j: int| 0 <= j < items implies nsum::<_, B>(#[trigger] v.take(j)) < B::pnum(
                 r0,
             ) by {
                 lemma_nsum_mono::<_, B>(v, j, v.len() as int);
@@ -421,24 +423,24 @@ pub(crate) fn p_find_in_slab<'a, X: Decoders<'a>, B: PrefixOrd<<X::D as Decode>:
 /// prefix there is the number of the values before slab `k`, and whether
 /// it reaches `target` is whether that number does.
 proof fn lemma_at_slab<'a, X: Decoders<'a>, B: PrefixOrd<<X::D as Decode>::Item>>(
-    ws: Seq<PrefixSlabWeight<B::P>>,
+    ws: Seq<B::W>,
     s: Seq<Slab<X::Tail>>,
     target: B::P,
     k: int,
 )
-    where B::P: Ord
+    where B::W: OrdPrefix
     requires
         ix_ok::<X, B>(ws, s),
         lens_ok::<X>(s),
         total(slab_lens(s)) <= usize::MAX,
         0 <= k <= s.len(),
-        nsum::<_, B>(vals_of::<X>(s)) <= pmax::<B::P>(),
+        nsum::<_, B>(vals_of::<X>(s)) <= B::pmax(),
     ensures
         vals_of::<X>(s).len() == total(slab_lens(s)),
         sum(slab_lens(s), 0, k) <= vals_of::<X>(s).len(),
         sum_len(ws.subrange(0, k)) == sum(slab_lens(s), 0, k),
-        pnum(pre_at(ws, k)) == nsum::<_, B>(vals_of::<X>(s).take(sum(slab_lens(s), 0, k) as int)),
-        reached(ws, target, k) == (pnum(target) <= nsum::<_, B>(
+        B::pnum(pre_at(ws, k)) == nsum::<_, B>(vals_of::<X>(s).take(sum(slab_lens(s), 0, k) as int)),
+        reached(ws, target, k) == (B::pnum(target) <= nsum::<_, B>(
             vals_of::<X>(s).take(sum(slab_lens(s), 0, k) as int),
         )),
 {
@@ -454,21 +456,22 @@ proof fn lemma_at_slab<'a, X: Decoders<'a>, B: PrefixOrd<<X::D as Decode>::Item>
     assert(v.take(v.len() as int) =~= v);
     lemma_nsum_vsum::<_, B>(v.take(l as int));
     B::axiom_pnum(target, pre_at(ws, k));
+    B::axiom_ple(target, pre_at(ws, k));
 }
 
 /// Where the column's sum fits its prefix type, a running sum that has
 /// reached the target stays there.
 proof fn lemma_stays<'a, X: Decoders<'a>, B: PrefixOrd<<X::D as Decode>::Item>>(
-    ws: Seq<PrefixSlabWeight<B::P>>,
+    ws: Seq<B::W>,
     s: Seq<Slab<X::Tail>>,
     target: B::P,
 )
-    where B::P: Ord
+    where B::W: OrdPrefix
     requires
         ix_ok::<X, B>(ws, s),
         lens_ok::<X>(s),
         total(slab_lens(s)) <= usize::MAX,
-        nsum::<_, B>(vals_of::<X>(s)) <= pmax::<B::P>(),
+        nsum::<_, B>(vals_of::<X>(s)) <= B::pmax(),
     ensures
         stays_reached(ws, target),
 {
@@ -491,7 +494,7 @@ proof fn lemma_stays<'a, X: Decoders<'a>, B: PrefixOrd<<X::D as Decode>::Item>>(
 /// with the items before it fit a `usize`; and the index counts those
 /// items.
 proof fn lemma_slab_at<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>(
-    ws: Seq<PrefixSlabWeight<B::P>>,
+    ws: Seq<B::W>,
     s: Seq<Slab<X::Tail>>,
     k: int,
 )
@@ -513,7 +516,7 @@ proof fn lemma_slab_at<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>
 
 /// The column's values before item `i` of slab `k` are those before the
 /// slab and the slab's first `i`: they sum to the two's sums.
-proof fn lemma_nsum_in<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>(
+proof fn lemma_nsum_in<'a, X: Decoders<'a>, B: PrefixOrd<<X::D as Decode>::Item>>(
     s: Seq<Slab<X::Tail>>,
     k: int,
     i: int,
@@ -542,17 +545,17 @@ proof fn lemma_nsum_in<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>
 /// With every slab's end below the target, the first index whose prefix
 /// sum reaches it is one past the column's end.
 proof fn lemma_found_past<'a, X: Decoders<'a>, B: PrefixOrd<<X::D as Decode>::Item>>(
-    ws: Seq<PrefixSlabWeight<B::P>>,
+    ws: Seq<B::W>,
     s: Seq<Slab<X::Tail>>,
     target: B::P,
 )
-    where B::P: Ord
+    where B::W: OrdPrefix
     requires
         ix_ok::<X, B>(ws, s),
         lens_ok::<X>(s),
         total(slab_lens(s)) <= usize::MAX,
-        pnum(target) > 0,
-        nsum::<_, B>(vals_of::<X>(s)) <= pmax::<B::P>() && s.len() > 0 ==> !reached(ws, target, s.len() as int),
+        B::pnum(target) > 0,
+        nsum::<_, B>(vals_of::<X>(s)) <= B::pmax() && s.len() > 0 ==> !reached(ws, target, s.len() as int),
     ensures
         sum_len(ws.subrange(0, s.len() as int)) == vals_of::<X>(s).len(),
         found_at::<_, B>(vals_of::<X>(s), target, vals_of::<X>(s).len() as int + 1),
@@ -562,12 +565,12 @@ proof fn lemma_found_past<'a, X: Decoders<'a>, B: PrefixOrd<<X::D as Decode>::It
     lemma_fold::<X, B>(ws, s, n);
     lemma_upto::<X>(s, n);
     assert(s.take(n) =~= s);
-    if nsum::<_, B>(v) <= pmax::<B::P>() {
+    if nsum::<_, B>(v) <= B::pmax() {
         lemma_at_slab::<X, B>(ws, s, target, n);
         assert(v.take(v.len() as int) =~= v);
-        assert(nsum::<_, B>(v) < pnum(target));
+        assert(nsum::<_, B>(v) < B::pnum(target));
         assert forall|i: int| 0 <= i < v.len() + 1 && i <= v.len() implies nsum::<_, B>(#[trigger] v.take(i))
-            < pnum(target) by {
+            < B::pnum(target) by {
             lemma_nsum_mono::<_, B>(v, i, v.len() as int);
         }
     }
@@ -578,28 +581,28 @@ proof fn lemma_found_past<'a, X: Decoders<'a>, B: PrefixOrd<<X::D as Decode>::It
 /// `j` is what `p_find_in_slab` gives for what is left of the target past
 /// the slabs before.
 proof fn lemma_found_in<'a, X: Decoders<'a>, B: PrefixOrd<<X::D as Decode>::Item>>(
-    ws: Seq<PrefixSlabWeight<B::P>>,
+    ws: Seq<B::W>,
     s: Seq<Slab<X::Tail>>,
     target: B::P,
     k: int,
     rem: B::P,
     j: int,
 )
-    where B::P: Ord
+    where B::W: OrdPrefix
     requires
         ix_ok::<X, B>(ws, s),
         lens_ok::<X>(s),
         total(slab_lens(s)) <= usize::MAX,
-        nsum::<_, B>(vals_of::<X>(s)) <= pmax::<B::P>(),
+        nsum::<_, B>(vals_of::<X>(s)) <= B::pmax(),
         0 <= k < s.len(),
-        pnum(target) > 0,
+        B::pnum(target) > 0,
         k > 0 ==> !reached(ws, target, k),
         reached(ws, target, k + 1),
-        rem == prefix_sub(target, pre_at(ws, k)),
+        rem == B::W::prefix_minus(target, pre_at(ws, k)),
         0 <= j <= X::vals(s[k]).len(),
-        nsum::<_, B>(X::vals(s[k])) <= pmax::<B::P>() && pnum(rem) > 0 ==> {
-            &&& forall|i: int| 0 <= i < j ==> nsum::<_, B>(#[trigger] X::vals(s[k]).take(i)) < pnum(rem)
-            &&& pnum(rem) <= nsum::<_, B>(X::vals(s[k])) ==> pnum(rem) <= nsum::<_, B>(X::vals(s[k]).take(j))
+        nsum::<_, B>(X::vals(s[k])) <= B::pmax() && B::pnum(rem) > 0 ==> {
+            &&& forall|i: int| 0 <= i < j ==> nsum::<_, B>(#[trigger] X::vals(s[k]).take(i)) < B::pnum(rem)
+            &&& B::pnum(rem) <= nsum::<_, B>(X::vals(s[k])) ==> B::pnum(rem) <= nsum::<_, B>(X::vals(s[k]).take(j))
         },
     ensures
         found_at::<_, B>(vals_of::<X>(s), target, sum(slab_lens(s), 0, k) + j),
@@ -614,20 +617,20 @@ proof fn lemma_found_in<'a, X: Decoders<'a>, B: PrefixOrd<<X::D as Decode>::Item
     lemma_sum_split(slab_lens(s), 0, k, k + 1);
     lemma_sum_one(slab_lens(s), k);
     // the sums before the slab are below the target
-    assert(below < pnum(target)) by {
+    assert(below < B::pnum(target)) by {
         if k == 0 {
             assert(v.take(0).len() == 0);
         }
     }
     B::axiom_pnum(target, pre_at(ws, k));
-    assert(pnum(rem) == pnum(target) - below);
+    assert(B::pnum(rem) == B::pnum(target) - below);
     // and the slab's sum takes them to it
     lemma_nsum_in::<X, B>(s, k, sv.len() as int);
     assert(sv.take(sv.len() as int) =~= sv);
     lemma_nsum_mono::<_, B>(v, l + sv.len(), v.len() as int);
     assert(v.take(v.len() as int) =~= v);
-    assert(pnum(rem) <= nsum::<_, B>(sv) <= pmax::<B::P>());
-    assert forall|i: int| 0 <= i < l + j && i <= v.len() implies nsum::<_, B>(#[trigger] v.take(i)) < pnum(
+    assert(B::pnum(rem) <= nsum::<_, B>(sv) <= B::pmax());
+    assert forall|i: int| 0 <= i < l + j && i <= v.len() implies nsum::<_, B>(#[trigger] v.take(i)) < B::pnum(
         target,
     ) by {
         if i <= l {
@@ -635,7 +638,7 @@ proof fn lemma_found_in<'a, X: Decoders<'a>, B: PrefixOrd<<X::D as Decode>::Item
         } else {
             lemma_nsum_in::<X, B>(s, k, i - l);
             assert(l + (i - l) == i);
-            assert(nsum::<_, B>(sv.take(i - l)) < pnum(rem));
+            assert(nsum::<_, B>(sv.take(i - l)) < B::pnum(rem));
         }
     }
     lemma_nsum_in::<X, B>(s, k, j);
@@ -656,10 +659,10 @@ fn past_usize()
 #[verifier::spinoff_prover]
 pub(crate) fn p_index_for_prefix<'a, X: Decoders<'a>, B: PrefixOrd<<X::D as Decode>::Item>>(
     slabs: &'a [Slab<X::Tail>],
-    ix: &SlabBTree<PrefixSlabWeight<B::P>>,
+    ix: &SlabBTree<B::W>,
     target: B::P,
 ) -> (r: usize)
-    where B::P: Ord
+    where B::W: OrdPrefix
     requires
         ix.wf(),
         ix_ok::<X, B>(ix@, slabs@),
@@ -670,7 +673,7 @@ pub(crate) fn p_index_for_prefix<'a, X: Decoders<'a>, B: PrefixOrd<<X::D as Deco
 {
     let ghost s = slabs@;
     let ghost v = vals_of::<X>(s);
-    let ghost fits = nsum::<_, B>(v) <= pmax::<B::P>();
+    let ghost fits = nsum::<_, B>(v) <= B::pmax();
     let zero = B::zero();
     if B::le(&target, &zero) {
         proof {
@@ -681,6 +684,7 @@ pub(crate) fn p_index_for_prefix<'a, X: Decoders<'a>, B: PrefixOrd<<X::D as Deco
     }
     proof {
         ix.lemma_wf_len();
+        B::W::lemma_prefix_total();
         lemma_plain_valid(ix@);
     }
     let (si, prefix_before, items_before) = ix.find_slab_at_prefix(&target);
@@ -718,7 +722,7 @@ pub(crate) fn p_index_for_prefix<'a, X: Decoders<'a>, B: PrefixOrd<<X::D as Deco
 /// whose running sum, from the window's start, exceeds `n` (returning it,
 /// and leaving the window after it), or, if none does, runs to the end.
 /// Given that the column's sum fits its prefix type.
-pub(crate) open spec fn advanced<V: Copy, B: PrefixOps<V>>(
+pub(crate) open spec fn advanced<V: Copy, B: PrefixOrd<V>>(
     o: Seq<V>,
     n: B::P,
     r: Option<V>,
@@ -730,10 +734,10 @@ pub(crate) open spec fn advanced<V: Copy, B: PrefixOps<V>>(
             &&& 0 <= k < o.len()
             &&& v == o[k]
             &&& o2 == o.skip(k + 1)
-            &&& pnum(n) < nsum::<V, B>(o.take(k + 1))
-            &&& forall|j: int| 0 <= j < k ==> nsum::<V, B>(#[trigger] o.take(j + 1)) <= pnum(n)
+            &&& B::pnum(n) < nsum::<V, B>(o.take(k + 1))
+            &&& forall|j: int| 0 <= j < k ==> nsum::<V, B>(#[trigger] o.take(j + 1)) <= B::pnum(n)
         },
-        None => nsum::<V, B>(o) <= pnum(n) && o2.len() == 0,
+        None => nsum::<V, B>(o) <= B::pnum(n) && o2.len() == 0,
     }
 }
 
@@ -761,7 +765,7 @@ proof fn lemma_window<'a, X: Decoders<'a>, B: PrefixOrd<<X::D as Decode>::Item>>
 
 /// `r` is the last index whose running sum (of the values before it) is
 /// at most `m`; `None` if every one is.
-pub(crate) open spec fn target_ok<V: Copy, B: PrefixOps<V>>(v: Seq<V>, m: nat, r: Option<usize>) -> bool {
+pub(crate) open spec fn target_ok<V: Copy, B: PrefixOrd<V>>(v: Seq<V>, m: nat, r: Option<usize>) -> bool {
     match r {
         None => nsum::<V, B>(v) <= m,
         Some(tp) => {
@@ -774,7 +778,7 @@ pub(crate) open spec fn target_ok<V: Copy, B: PrefixOps<V>>(v: Seq<V>, m: nat, r
 
 /// The running sums of a stretch `o` of `v` from `p0` are those of `v`,
 /// less the sum before `p0`.
-proof fn lemma_stretch_sum<V: Copy, B: PrefixOps<V>>(v: Seq<V>, o: Seq<V>, p0: int, k: int)
+proof fn lemma_stretch_sum<V: Copy, B: PrefixOrd<V>>(v: Seq<V>, o: Seq<V>, p0: int, k: int)
     requires
         0 <= p0,
         p0 + o.len() <= v.len(),
@@ -791,7 +795,7 @@ proof fn lemma_stretch_sum<V: Copy, B: PrefixOps<V>>(v: Seq<V>, o: Seq<V>, p0: i
 /// From the target position, where a search lands in a stretch `o` of
 /// `v` from `p0` that is no longer than `left`: on the item there, if
 /// the stretch holds it, else past its end.
-proof fn lemma_advance_in<V: Copy, B: PrefixOps<V>>(
+proof fn lemma_advance_in<V: Copy, B: PrefixOrd<V>>(
     v: Seq<V>,
     o: Seq<V>,
     p0: int,
@@ -851,7 +855,7 @@ proof fn lemma_advance<'a, X: Decoders<'a>, B: PrefixOrd<<X::D as Decode>::Item>
 )
     requires
         c0.wf::<X>(s),
-        nsum::<_, B>(vals_of::<X>(s)) <= pmax::<B::P>(),
+        nsum::<_, B>(vals_of::<X>(s)) <= B::pmax(),
         target_ok::<_, B>(vals_of::<X>(s), nsum::<_, B>(before::<X>(s, c0.pos as int)) + pn, target),
     ensures
         ({
@@ -895,13 +899,13 @@ proof fn lemma_advance_from<'a, X: Decoders<'a>, B: PrefixOrd<<X::D as Decode>::
         total(slab_lens(s)) <= usize::MAX,
         c0.pos + c0.items_left <= usize::MAX,
         c0.out::<X>(s).len() <= c0.items_left,
-        nsum::<_, B>(vals_of::<X>(s)) <= pmax::<B::P>() ==> pnum(prefix_add(base, sum)) == nsum::<_, B>(
+        nsum::<_, B>(vals_of::<X>(s)) <= B::pmax() ==> B::pnum(B::W::prefix_plus(base, sum)) == nsum::<_, B>(
             before::<X>(s, c0.pos as int),
         ),
 {
     let v = vals_of::<X>(s);
     let p0 = c0.pos as int;
-    if nsum::<_, B>(v) <= pmax::<B::P>() {
+    if nsum::<_, B>(v) <= B::pmax() {
         if p0 <= v.len() {
             lemma_nsum_mono::<_, B>(v, p0, v.len() as int);
             assert(v.take(v.len() as int) =~= v);
@@ -916,20 +920,20 @@ proof fn lemma_advance_from<'a, X: Decoders<'a>, B: PrefixOrd<<X::D as Decode>::
 /// so every running sum).
 fn p_target<'a, X: Decoders<'a>, B: PrefixOrd<<X::D as Decode>::Item>>(
     slabs: &'a [Slab<X::Tail>],
-    ix: &SlabBTree<PrefixSlabWeight<B::P>>,
+    ix: &SlabBTree<B::W>,
     abs: &B::P,
     n: &B::P,
 ) -> (r: Option<usize>)
-    where B::P: Ord
+    where B::W: OrdPrefix
     requires
         ix.wf(),
         ix_ok::<X, B>(ix@, slabs@),
         lens_ok::<X>(slabs@),
         total(slab_lens(slabs@)) <= usize::MAX,
     ensures
-        nsum::<_, B>(vals_of::<X>(slabs@)) <= pmax::<B::P>() ==> target_ok::<_, B>(
+        nsum::<_, B>(vals_of::<X>(slabs@)) <= B::pmax() ==> target_ok::<_, B>(
             vals_of::<X>(slabs@),
-            pnum(*abs) + pnum(*n),
+            B::pnum(*abs) + B::pnum(*n),
             r,
         ),
 {
@@ -964,19 +968,19 @@ fn p_target<'a, X: Decoders<'a>, B: PrefixOrd<<X::D as Decode>::Item>>(
 pub(crate) fn p_advance<'a, X: Decoders<'a>, B: PrefixOrd<<X::D as Decode>::Item>>(
     core: &mut ICore<X::D>,
     slabs: &'a [Slab<X::Tail>],
-    ix: &SlabBTree<PrefixSlabWeight<B::P>>,
+    ix: &SlabBTree<B::W>,
     n: &B::P,
     total: &mut B::P,
     base: &B::P,
 ) -> (r: Option<<X::D as Decode>::Item>)
-    where B::P: Ord
+    where B::W: OrdPrefix
     requires
         at_sum::<X, B>(*old(core), *old(total), *base, slabs@),
         ix.wf(),
         ix_ok::<X, B>(ix@, slabs@),
     ensures
         at_sum::<X, B>(*final(core), *final(total), *base, slabs@),
-        nsum::<_, B>(vals_of::<X>(slabs@)) <= pmax::<B::P>() ==> advanced::<_, B>(
+        nsum::<_, B>(vals_of::<X>(slabs@)) <= B::pmax() ==> advanced::<_, B>(
             old(core).out::<X>(slabs@),
             *n,
             r,
@@ -988,7 +992,7 @@ pub(crate) fn p_advance<'a, X: Decoders<'a>, B: PrefixOrd<<X::D as Decode>::Item
     hide(ICore::out);
     hide(target_ok);
     let ghost s = slabs@;
-    let ghost fits = nsum::<_, B>(vals_of::<X>(s)) <= pmax::<B::P>();
+    let ghost fits = nsum::<_, B>(vals_of::<X>(s)) <= B::pmax();
     let ghost c0 = *core;
     // the sum of the values before the iterator
     let abs = B::add(base, total);
@@ -998,7 +1002,7 @@ pub(crate) fn p_advance<'a, X: Decoders<'a>, B: PrefixOrd<<X::D as Decode>::Item
     let target = p_target::<X, B>(slabs, ix, &abs, n);
     proof {
         if fits {
-            lemma_advance::<X, B>(c0, s, pnum(*n), target);
+            lemma_advance::<X, B>(c0, s, B::pnum(*n), target);
         }
     }
     // the item, if the window holds it; else run to the window's end

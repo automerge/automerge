@@ -1134,7 +1134,7 @@ impl<E: Slabs, I: IndexOps<usize>> ColumnCore<E, usize, I, LenModel> {
 impl<E, X, B, P> ColumnCore<E, PrefixSlabWeight<P>, SlabBTree<PrefixSlabWeight<P>>, PrefixModel<X, B>> where
     E: Slabs + for<'a> ReadsAgree<'a, X>,
     X: for<'a> Decoders<'a, Tail = E::Tail>,
-    B: for<'a> PrefixOps<<<X as Decoders<'a>>::D as Decode>::Item, P = P>,
+    B: for<'a> PrefixOps<<<X as Decoders<'a>>::D as Decode>::Item, P = P, W = PrefixSlabWeight<P>>,
     P: Clone + Default + std::fmt::Debug + AddAssign + SubAssign + Add<Output = P> + for<'b> AddAssign<&'b P>,
  {
     /// The prefix readers' view of the column invariant, from the type
