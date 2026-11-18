@@ -333,6 +333,20 @@
 //! [`told_by_a_prefix_clone`], [`told_by_a_prefix_default`],
 //! [`told_by_a_column_delta`], [`told_by_a_prefix_seek`]).
 //!
+//! A prefix column adds up a type of the client's own once the client
+//! says what a value of it adds, in which type the sums are kept, and
+//! how many values cannot overflow that type ([`Meta`], whose values
+//! each say how long they are, with [`a_meta`] to make one): that the
+//! sums are then of the lengths ([`lengths_added_up`], by the client's
+//! own unfolding of the sum, [`the_sum_of_three`]), a null adding
+//! nothing ([`a_null_has_no_length`]); that bytes of no more values
+//! than the client said load, and that whatever loads has sums that fit
+//! ([`load_lengths`]); that a push past them does not return
+//! ([`a_length_past_the_sums`]); that the value in which a place of the
+//! whole lies is found ([`the_value_at`]); and that what is proved of
+//! every summed type is proved of the client's and of its nulls
+//! ([`sums_of_the_clients_own`]).
+//!
 //! This module exists only while Verus checks the crate.
 
 use super::{
@@ -341,8 +355,8 @@ use super::{
     lemma_run_values_push, lemma_runs_first, lemma_runs_of_values, lemma_sorted, lemma_sum_bound,
     lemma_sum_mono, lemma_sum_range, lemma_sum_run, lemma_sums_fit, mapped, only, past, refused,
     run_values, runs_of, scan_of, scan_taken, sorted, sorted_for, sum_of, summed, sums_fit,
-    total_len, total_str_len, window, Get, LenIndex, SumIndex, VCodec, VCount, VGet, VIndex,
-    VKeeps, VNewtype, VSpec, VSum, VSummed, VValue, VerifiedColumn, VerifiedDecoder,
+    total_len, total_str_len, window, Get, LenIndex, SumIndex, VAmount, VCodec, VCount, VGet,
+    VIndex, VKeeps, VNewtype, VSpec, VSum, VSummed, VValue, VerifiedColumn, VerifiedDecoder,
     VerifiedEncoder, VerifiedEncoderState, VerifiedIter, VerifiedIterState, VerifiedPrefixColumn,
     VerifiedPrefixIter, VerifiedPrefixIterState, VerifiedPrefixSeek, VerifiedPrefixedValue,
     VerifiedRuns,
@@ -7913,6 +7927,235 @@ fn told_by_a_prefix_seek<'a, V: VSummed>(seek: &VerifiedPrefixSeek<'a, V>) -> (r
     let copy = seek.clone();
     assert(copy == *seek);
     (copy.pos, seek.delta, seek.pv)
+}
+
+// ── A client's own type in a prefix column ─────────────────────────────────
+
+/// A value type of the client's own for a prefix column to add up: one
+/// number that says what a value is, in its low four bits, and how long
+/// it is, in the bits above them. A prefix column of them adds up the
+/// lengths, in a `u64`. Sixteen lengths cannot overflow one, so a
+/// column of no more values is not checked, and a longer one is.
+#[derive(Clone, Copy)]
+#[allow(dead_code)]
+pub struct Meta(pub u64);
+
+impl VNewtype for Meta {
+    type Base = u64;
+
+    open spec fn base(v: Meta) -> u64 {
+        v.0
+    }
+
+    proof fn lemma_base(v: Meta, w: Meta) {
+    }
+
+    fn to_base(self) -> u64 {
+        self.0
+    }
+
+    fn from_base(b: u64) -> Result<Meta, PackError> {
+        Ok(Meta(b))
+    }
+}
+
+impl VAmount for Meta {
+    type Sum = u64;
+
+    open spec fn amount_of(v: Meta) -> int {
+        (v.0 >> 4) as int
+    }
+
+    open spec fn amount_max() -> nat {
+        0x0fff_ffff_ffff_ffff
+    }
+
+    open spec fn room() -> nat {
+        16
+    }
+
+    proof fn lemma_amount_of(v: Meta) {
+        let x = v.0;
+        assert(x >> 4 <= 0x0fff_ffff_ffff_ffffu64) by (bit_vector);
+    }
+
+    proof fn lemma_room() {
+    }
+
+    fn room_len() -> usize {
+        16
+    }
+
+    fn part_of(v: Meta) -> u64 {
+        v.0 >> 4
+    }
+}
+
+/// How long a value is: what it adds to the sums of a prefix column.
+#[allow(dead_code)]
+spec fn length_of(v: Meta) -> int {
+    (v.0 >> 4) as int
+}
+
+/// A value of the kind `kind` that is `len` long.
+#[allow(dead_code)]
+fn a_meta(kind: u8, len: u64) -> (r: Meta)
+    requires
+        kind < 16,
+        len <= 0x0fff_ffff_ffff_ffff,
+    ensures
+        length_of(r) == len,
+        r.0 & 15 == kind,
+{
+    let k = kind as u64;
+    assert(((len << 4) | k) >> 4 == len && ((len << 4) | k) & 15 == k) by (bit_vector)
+        requires
+            k < 16,
+            len <= 0x0fff_ffff_ffff_ffffu64,
+    ;
+    Meta((len << 4) | k)
+}
+
+/// What one, two and three values add up to: a client's own unfolding
+/// of [`summed`], which it can read.
+#[allow(dead_code)]
+proof fn the_sum_of_three<V: VSummed>(a: <V as VSpec>::S, b: <V as VSpec>::S, c: <V as VSpec>::S)
+    ensures
+        summed::<V>(seq![a]) == V::amount(a),
+        summed::<V>(seq![a, b]) == V::amount(a) + V::amount(b),
+        summed::<V>(seq![a, b, c]) == V::amount(a) + V::amount(b) + V::amount(c),
+{
+    assert(summed::<V>(Seq::<<V as VSpec>::S>::empty()) == 0);
+    assert(seq![a].drop_last() =~= Seq::<<V as VSpec>::S>::empty());
+    assert(summed::<V>(seq![a]) == V::amount(a));
+    assert(seq![a, b].drop_last() =~= seq![a]);
+    assert(summed::<V>(seq![a, b]) == V::amount(a) + V::amount(b));
+    assert(seq![a, b, c].drop_last() =~= seq![a, b]);
+}
+
+/// Three of the client's values in a prefix column: the sum before the
+/// third is the lengths of the first two, and the sum through it is
+/// the lengths of all three.
+#[allow(dead_code)]
+fn lengths_added_up(a: Meta, b: Meta, c: Meta) -> (r: (u64, u64))
+    ensures
+        r.0 == length_of(a) + length_of(b),
+        r.1 == length_of(a) + length_of(b) + length_of(c),
+{
+    let mut col = VerifiedPrefixColumn::<Meta>::new();
+    col.push(a);
+    col.push(b);
+    col.push(c);
+    proof {
+        the_sum_of_three::<Meta>(a, b, c);
+        assert(col@ =~= seq![a, b, c]);
+        assert(col@.take(2) =~= seq![a, b]);
+        assert(col@.take(3) =~= seq![a, b, c]);
+    }
+    (col.get_prefix(2), col.get_total(2))
+}
+
+/// A null of the client's type adds nothing.
+#[allow(dead_code)]
+fn a_null_has_no_length(a: Meta, b: Meta) -> (r: u64)
+    ensures
+        r == length_of(a) + length_of(b),
+{
+    let mut col = VerifiedPrefixColumn::<Option<Meta>>::new();
+    col.push(Some(a));
+    col.push(None);
+    col.push(Some(b));
+    proof {
+        the_sum_of_three::<Option<Meta>>(Some(a), None, Some(b));
+        assert(col@ =~= seq![Some(a), None, Some(b)]);
+        assert(col@.take(3) =~= col@);
+    }
+    col.get_prefix(3)
+}
+
+/// Sixteen lengths cannot overflow a `u64`: bytes of no more of the
+/// client's values load as a prefix column wherever they load as a
+/// plain one. And whatever loads as one has lengths that add up to a
+/// `u64`.
+#[allow(dead_code)]
+fn load_lengths(bytes: &[u8]) -> (r: Option<VerifiedPrefixColumn<Meta>>)
+    ensures
+        VerifiedColumn::<Meta>::loadable(bytes@) && VerifiedColumn::<Meta>::values(bytes@).len() <= 16 ==> r is Some,
+        r matches Some(c) ==> summed::<Meta>(c@) <= u64::MAX,
+{
+    let r = load_short_sums::<Meta, Leb128>(bytes);
+    match &r {
+        Some(c) => {
+            proof {
+                the_sums_of_a_column(c, c@.len() as int);
+                assert(c@.take(c@.len() as int) =~= c@);
+            }
+        },
+        None => {},
+    }
+    r
+}
+
+/// A push that would take the lengths of a column past a `u64` does
+/// not return.
+#[allow(dead_code)]
+fn a_length_past_the_sums(col: &mut VerifiedPrefixColumn<Meta>, v: Meta)
+    requires
+        summed::<Meta>(old(col)@) + length_of(v) > u64::MAX,
+    ensures
+        false,
+{
+    push_within_the_sums(col, v);
+}
+
+/// The value in which the place `n` of the whole lies, the lengths
+/// counted from zero: the values before it are together `n` long at
+/// most, and with it they are longer. Where there is none, all the
+/// values are together `n` long at most.
+#[allow(dead_code)]
+fn the_value_at(col: &VerifiedPrefixColumn<Meta>, n: u64) -> (r: Option<usize>)
+    requires
+        n < u64::MAX,
+    ensures
+        match r {
+            Some(i) => i < col@.len() && summed::<Meta>(col@.take(i as int)) <= n < summed::<Meta>(col@.take(i + 1)),
+            None => summed::<Meta>(col@) <= n,
+        },
+{
+    let i = col.get_index_for_total(n + 1);
+    proof {
+        assert(col@.take(0).len() == 0);
+        assert(col@.take(col@.len() as int) =~= col@);
+    }
+    if i < col.len() {
+        Some(i)
+    } else {
+        None
+    }
+}
+
+/// What is proved of every summed type is proved of the client's own
+/// and of its nulls: the running sums of a column of them, the place
+/// of a sum in it, and a column of nulls and values summed run by run.
+#[allow(dead_code)]
+fn sums_of_the_clients_own(
+    col: &VerifiedPrefixColumn<Meta>,
+    nullable: &VerifiedPrefixColumn<Option<Meta>>,
+    target: u64,
+) -> (r: (Vec<u64>, Option<usize>, (u64, usize)))
+    ensures
+        r.0@.len() == col@.len(),
+        forall|i: int| 0 <= i < r.0@.len() ==> #[trigger] r.0@[i] == summed::<Meta>(col@.take(i + 1)),
+        r.1 matches Some(i) ==> i <= col@.len() && target <= summed::<Meta>(col@.take(i as int)),
+        r.1 is None ==> summed::<Meta>(col@) < target,
+        r.2.0 == summed::<Option<Meta>>(nullable@),
+        r.2.1 == nullable@.len(),
+{
+    (
+        running_sums::<Meta, Leb128>(col),
+        the_place_of_a_sum::<Meta, Leb128>(col, target),
+        summed_by_runs::<Option<Meta>, Leb128>(nullable),
+    )
 }
 
 } // verus!

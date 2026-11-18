@@ -6,7 +6,7 @@ use hexane::verified::{
     VerifiedPrefixColumn,
 };
 use hexane::{Leb128, Run};
-use verus_client::Action;
+use verus_client::{Action, Meta};
 
 #[test]
 fn runs() {
@@ -1732,7 +1732,10 @@ fn sums_sought() {
         (seek.pos, seek.delta, seek.pv.value, seek.pv.total()),
         (102, 19, 11, before(103))
     );
-    assert_eq!(verus_client::told_by_a_prefix_seek(&seek), (102, 19, seek.pv));
+    assert_eq!(
+        verus_client::told_by_a_prefix_seek(&seek),
+        (102, 19, seek.pv)
+    );
     // by count, with what is passed over
     let seek = verus_client::told_by_a_delta_nth(&mut it, 10).unwrap();
     assert_eq!(
@@ -1800,4 +1803,76 @@ fn sums_stopped_and_started() {
     assert!(!verus_client::sums_ended_by_a_push(&mut col, 7));
     assert!(verus_client::told_by_a_prefix_resume(&s, &col).is_err());
     assert_eq!(col.len(), 1001);
+}
+
+/// A thousand of the client's own values: of the kinds 0 to 15 and the
+/// lengths 0 to 12, each by turns.
+fn some_metas() -> (Vec<Meta>, Vec<u64>) {
+    let lens: Vec<u64> = (0..1000).map(|i| i % 13).collect();
+    let metas = lens
+        .iter()
+        .enumerate()
+        .map(|(i, len)| verus_client::a_meta((i % 16) as u8, *len))
+        .collect();
+    (metas, lens)
+}
+
+#[test]
+fn the_clients_own_sums() {
+    let (v, lens) = some_metas();
+    let before = |i: usize| lens[..i].iter().sum::<u64>();
+    for (i, m) in v.iter().enumerate() {
+        assert_eq!(m.0, lens[i] << 4 | (i as u64 % 16));
+    }
+    assert_eq!(verus_client::lengths_added_up(v[5], v[6], v[7]), (11, 18));
+    assert_eq!(verus_client::a_null_has_no_length(v[5], v[12]), 17);
+
+    let col = VerifiedPrefixColumn::<Meta>::from_values(&v);
+    let nulls: Vec<Option<Meta>> = v
+        .iter()
+        .enumerate()
+        .map(|(i, m)| if i % 3 == 0 { None } else { Some(*m) })
+        .collect();
+    let nullable = VerifiedPrefixColumn::<Option<Meta>>::from_values(&nulls);
+    let kept = (0..1000)
+        .filter(|i| i % 3 != 0)
+        .map(|i| lens[i])
+        .sum::<u64>();
+    for target in [0, 1, 2, 77, before(1000), before(1000) + 1, u64::MAX] {
+        let (sums, place, by_runs) = verus_client::sums_of_the_clients_own(&col, &nullable, target);
+        assert_eq!(sums.len(), 1000);
+        assert!(sums.iter().enumerate().all(|(i, s)| *s == before(i + 1)));
+        assert_eq!(place, (0..=1000).find(|i| before(*i) >= target));
+        assert_eq!(by_runs, (kept, 1000));
+    }
+    // the value in which a place of the whole lies
+    for n in [0, 1, 4, 5, 77, before(1000) - 1, before(1000), u64::MAX - 1] {
+        assert_eq!(
+            verus_client::the_value_at(&col, n),
+            (0..1000).find(|i| before(i + 1) > n)
+        );
+    }
+
+    // what loads: any sixteen values, and more whose lengths fit
+    let loaded = verus_client::load_lengths(&col.save()).unwrap();
+    assert_eq!(loaded.len(), 1000);
+    assert_eq!(loaded.get_prefix(1000), before(1000));
+    let longest = verus_client::a_meta(9, (1 << 60) - 1);
+    let mut plain = VerifiedColumn::<Meta>::fill(16, longest);
+    let sixteen = verus_client::load_lengths(&plain.save()).unwrap();
+    assert_eq!(sixteen.get_prefix(16), u64::MAX - 15);
+    plain.push(verus_client::a_meta(0, 15));
+    let full = verus_client::load_lengths(&plain.save()).unwrap();
+    assert_eq!((full.len(), full.get_prefix(17)), (17, u64::MAX));
+    plain.push(verus_client::a_meta(0, 1));
+    assert!(verus_client::load_lengths(&plain.save()).is_none());
+}
+
+#[test]
+#[should_panic(expected = "prefix sum overflows")]
+fn a_length_past_the_sums() {
+    let longest = verus_client::a_meta(9, (1 << 60) - 1);
+    let mut col = VerifiedPrefixColumn::<Meta>::fill(16, longest);
+    col.push(verus_client::a_meta(0, 15));
+    verus_client::a_length_past_the_sums(&mut col, verus_client::a_meta(3, 1));
 }

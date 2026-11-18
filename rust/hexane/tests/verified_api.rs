@@ -15,10 +15,10 @@
 use hexane::encoder::{BoolEncoder, BoolEncoderState, RleEncoder, RleEncoderState};
 use hexane::prefix::{PrefixSeek, PrefixWeightFn};
 use hexane::verified::{
-    refused, Get, LenIndex, SumIndex, VNewtype, VSummed, VValue, VerifiedColumn, VerifiedDecoder,
-    VerifiedEncoder, VerifiedEncoderState, VerifiedIter, VerifiedIterState, VerifiedPrefixColumn,
-    VerifiedPrefixIter, VerifiedPrefixIterState, VerifiedPrefixSeek, VerifiedPrefixedValue,
-    VerifiedRuns,
+    refused, Get, LenIndex, SumIndex, VAmount, VNewtype, VSummed, VValue, VerifiedColumn,
+    VerifiedDecoder, VerifiedEncoder, VerifiedEncoderState, VerifiedIter, VerifiedIterState,
+    VerifiedPrefixColumn, VerifiedPrefixIter, VerifiedPrefixIterState, VerifiedPrefixSeek,
+    VerifiedPrefixedValue, VerifiedRuns,
 };
 use hexane::{
     Codec, Column, ColumnEncoding, ColumnValue, ColumnValueRef, Encoder, EncoderApi, IterState,
@@ -9351,4 +9351,346 @@ fn the_seeks_of_a_prefix_iterator() {
     let on = state.try_resume(&none).unwrap();
     assert_eq!((on.pos(), on.end_pos(), on.total()), (0, 0, 0));
     assert!(state.try_resume(&p).is_err());
+}
+
+/// A value type of a client's own that a prefix column adds up, as a
+/// client compiled without Verus writes it: one number that says what a
+/// value is, in its low four bits, and how long it is, in the bits above
+/// them. A prefix column of them adds up the lengths in a `u64`, which
+/// sixteen lengths cannot overflow: a column of no more values is not
+/// checked, and a longer one is.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+struct Meta(u64);
+
+impl Meta {
+    /// The longest a value can be.
+    const LONGEST: u64 = (1 << 60) - 1;
+
+    fn of(kind: u64, len: u64) -> Meta {
+        assert!(kind < 16 && len <= Meta::LONGEST);
+        Meta(len << 4 | kind)
+    }
+
+    fn length(self) -> u64 {
+        self.0 >> 4
+    }
+}
+
+impl VNewtype for Meta {
+    type Base = u64;
+
+    fn to_base(self) -> u64 {
+        self.0
+    }
+
+    fn from_base(b: u64) -> Result<Meta, PackError> {
+        Ok(Meta(b))
+    }
+}
+
+impl VAmount for Meta {
+    type Sum = u64;
+
+    fn room_len() -> usize {
+        16
+    }
+
+    fn part_of(v: Meta) -> u64 {
+        v.length()
+    }
+}
+
+// the same type for `Column`
+impl ColumnValue for Meta {
+    type Encoding<C: Codec> = RleEncoding<Meta, C>;
+}
+
+impl RleValue for Meta {
+    fn try_unpack<C: Codec>(data: &[u8]) -> Result<(usize, Meta), PackError> {
+        let (n, b) = C::try_read_unsigned(data)?;
+        Ok((n, Meta(b)))
+    }
+
+    fn pack<C: Codec>(value: Meta, out: &mut Vec<u8>) -> bool {
+        out.extend(C::encode_unsigned(value.0));
+        true
+    }
+}
+
+/// `*target += len * count`, unless that overflows a `u64`. (`len` is
+/// below 2^60, so the product fits a `u128`.)
+fn try_add_lengths(target: &mut u64, len: u64, count: usize) -> bool {
+    let sum = u128::from(*target) + u128::from(len) * count as u128;
+    match u64::try_from(sum) {
+        Ok(sum) => {
+            *target = sum;
+            true
+        }
+        Err(_) => false,
+    }
+}
+
+// and for `PrefixColumn`: the same sums, checked for the same columns
+impl PrefixValue for Meta {
+    type Prefix = u64;
+
+    fn accumulate(target: &mut u64, val: Meta) {
+        *target += val.length();
+    }
+
+    fn accumulate_run(target: &mut u64, run: &Run<Meta>) {
+        *target += run.value.length() * run.count as u64;
+    }
+
+    const MAX_UNCHECKED_LEN: usize = 16;
+
+    fn try_accumulate_run(target: &mut u64, run: &Run<Meta>) -> bool {
+        try_add_lengths(target, run.value.length(), run.count)
+    }
+
+    fn try_add_prefix(total: &mut u64, part: &u64) -> bool {
+        try_add_lengths(total, *part, 1)
+    }
+}
+
+// short values of every kind: the sums of these tests are far from a
+// `u64`'s end
+plain_kind!(Meta, |rng| {
+    Meta::of(rng.below(16) as u64, rng.below(40) as u64)
+});
+
+impl Adds for Meta {
+    fn adds(&self) -> i128 {
+        i128::from(self.length())
+    }
+}
+
+counted!(Meta => u64, Option<Meta> => u64);
+
+sought!(Meta => u64, Option<Meta> => u64);
+
+/// A prefix column of a client's own type is, in every respect these
+/// tests look at, what a prefix column of the types hexane gives is,
+/// and what `PrefixColumn` of the client's type is: under edits, in its
+/// other forms, in what it answers from its sums, searched by sum, and
+/// read by its iterator, by runs and on to a sum. So is one of the
+/// type's nulls.
+#[test]
+fn a_prefix_column_of_a_clients_own_type() {
+    macro_rules! each {
+        ($($f:ident),*) => {
+            $(
+                $f::<Meta>();
+                $f::<Option<Meta>>();
+            )*
+        };
+    }
+    each!(
+        sum_edits,
+        sum_forms,
+        sum_searches,
+        sum_iters,
+        sum_runs,
+        sum_seeks
+    );
+}
+
+/// The sums of a client's type are what the client says its values add:
+/// here the lengths, and nothing for what kind a value is of.
+#[test]
+fn a_clients_values_add_what_it_says() {
+    let model = [
+        Meta::of(3, 5),
+        Meta::of(0, 0),
+        Meta::of(15, 7),
+        Meta::of(15, 7),
+        Meta::of(1, 1 << 40),
+    ];
+    let p = VerifiedPrefixColumn::<Meta>::from_values(&model);
+    let c: PrefixColumn<Meta> = model.iter().copied().collect();
+    assert_eq!(p.save(), c.save());
+    assert_eq!(p.to_vec(), model);
+    let sums = [0, 5, 5, 12, 19, 19 + (1 << 40)];
+    for (i, &sum) in sums.iter().enumerate() {
+        assert_eq!(p.get_prefix(i), sum);
+        assert_eq!(c.get_prefix(i), sum);
+    }
+    assert_eq!(p.get_total(2), 12);
+    assert_eq!(p.sum_range(1, 4), 14);
+    assert_eq!(c.sum_range(1..4), 14);
+    // the value in which a place of the whole lies
+    assert_eq!(p.get_index_for_total(1), 0);
+    assert_eq!(p.get_index_for_total(5), 0);
+    assert_eq!(p.get_index_for_total(6), 2);
+    assert_eq!(p.get_index_for_total(13), 3);
+    assert_eq!(p.get_index_for_total(20), 4);
+    assert_eq!(p.get_index_for_total(20 + (1 << 40)), 5);
+    for target in [0, 1, 5, 6, 12, 13, 19, 20, 19 + (1 << 40), 20 + (1 << 40)] {
+        assert_eq!(p.get_index_for_total(target), c.get_index_for_total(target));
+        assert_eq!(
+            p.get_index_for_prefix(target),
+            c.get_index_for_prefix(target)
+        );
+    }
+    let mut it = p.prefix_iter();
+    let found = it.advance_prefix(12).unwrap();
+    assert_eq!((found.pos, found.delta, found.pv.value), (3, 12, model[3]));
+    assert_eq!((found.pv.prefix(), found.pv.total()), (12, 19));
+
+    // nulls add nothing
+    let nulls = [Some(model[0]), None, Some(model[2]), None, None];
+    let p = VerifiedPrefixColumn::<Option<Meta>>::from_values(&nulls);
+    let c: PrefixColumn<Option<Meta>> = nulls.iter().copied().collect();
+    assert_eq!(p.save(), c.save());
+    for (i, sum) in [0, 5, 5, 12, 12, 12].into_iter().enumerate() {
+        assert_eq!(p.get_prefix(i), sum);
+        assert_eq!(c.get_prefix(i), sum);
+    }
+}
+
+/// A prefix column of a client's type is kept only of values whose sums
+/// fit the type the client keeps them in: sixteen of the longest values
+/// add up to sixteen short of a `u64`'s end. Bytes whose values add up
+/// past it are a plain column's and no prefix column's, and the load
+/// refuses them with the error of `PrefixColumn`'s.
+#[test]
+fn a_clients_sums_that_do_not_fit_are_refused() {
+    fn loads<T: Summed>(bytes: &[u8]) -> Result<usize, String> {
+        let new = VerifiedPrefixColumn::<T>::load(bytes).map(|p| (p.len(), p.save()));
+        let old = PrefixColumn::<T>::load(bytes).map(|c| (c.len(), c.save()));
+        let (new, old) = (
+            new.map_err(|e| e.to_string()),
+            old.map_err(|e| e.to_string()),
+        );
+        assert_eq!(new, old);
+        // a plain column loads them either way
+        let plain = VerifiedColumn::<T>::load(bytes).unwrap();
+        assert_eq!(plain.save(), bytes);
+        new.map(|(len, saved)| {
+            assert_eq!(saved, bytes);
+            assert_eq!(len, plain.len());
+            len
+        })
+    }
+    let refused = Err("invalid value: prefix sum overflows its type".to_string());
+    let longest = Meta::of(9, Meta::LONGEST);
+
+    let mut v = VerifiedColumn::<Meta>::fill(16, longest);
+    assert_eq!(loads::<Meta>(&v.save()), Ok(16));
+    v.push(Meta::of(0, 15));
+    assert_eq!(loads::<Meta>(&v.save()), Ok(17));
+    v.push(Meta::of(2, 0));
+    assert_eq!(loads::<Meta>(&v.save()), Ok(18));
+    v.push(Meta::of(0, 1));
+    assert_eq!(loads::<Meta>(&v.save()), refused);
+    v.remove(0);
+    assert_eq!(loads::<Meta>(&v.save()), Ok(18));
+    let v = VerifiedColumn::<Meta>::fill(17, longest);
+    assert_eq!(loads::<Meta>(&v.save()), refused);
+    let v = VerifiedColumn::<Meta>::fill(1 << 20, longest);
+    assert_eq!(loads::<Meta>(&v.save()), refused);
+
+    // in slabs whose sums each fit, while their total does not
+    let run = |value: Meta, count: usize| Run { count, value };
+    let mut v = VerifiedColumn::<Meta>::new();
+    let runs = [
+        run(longest, 9),
+        run(Meta::of(0, 0), 1),
+        run(Meta::of(9, Meta::LONGEST - 1), 8),
+    ];
+    v.splice_runs(0, 0, runs);
+    let bytes = v.save();
+    assert_eq!(loads::<Meta>(&bytes), refused);
+    let opts = LoadOpts::new().with_max_segments(2);
+    let new = VerifiedPrefixColumn::<Meta>::load_with(&bytes, opts);
+    let old = PrefixColumn::<Meta>::load_with(&bytes, opts);
+    assert_eq!(
+        new.err().unwrap().to_string(),
+        old.err().unwrap().to_string()
+    );
+    assert_eq!(
+        VerifiedColumn::<Meta>::load_with(&bytes, opts)
+            .unwrap()
+            .slab_count(),
+        3
+    );
+
+    // with nulls, which add nothing
+    let mut v = VerifiedColumn::<Option<Meta>>::fill(16, Some(longest));
+    v.splice_runs(
+        7,
+        0,
+        [Run {
+            count: 1000,
+            value: None,
+        }],
+    );
+    assert_eq!(loads::<Option<Meta>>(&v.save()), Ok(1016));
+    v.push(Some(Meta::of(0, 16)));
+    assert_eq!(loads::<Option<Meta>>(&v.save()), refused);
+}
+
+/// An edit that would leave a prefix column of a client's type with
+/// sums that do not fit panics, as `PrefixColumn`'s does and with its
+/// words; one whose sums fit goes through, also where the sum is the
+/// largest of its type. (Where a panic can be caught: not on wasm32.)
+#[cfg(panic = "unwind")]
+#[test]
+fn an_edit_past_a_clients_sums_panics() {
+    type P<T> = VerifiedPrefixColumn<T>;
+    let words = Some("prefix sum overflows its type".to_string());
+    let panics = |f: &dyn Fn()| panic_of(std::panic::AssertUnwindSafe(f));
+    let longest = Meta::of(9, Meta::LONGEST);
+    let run = |value: Meta, count: usize| Run { count, value };
+
+    let new = panics(&|| P::<Meta>::new().splice_runs(0, 0, [run(longest, 17)]));
+    let old = panics(&|| PrefixColumn::<Meta>::new().splice_runs(0, 0, [run(longest, 17)]));
+    assert_eq!((&new, &old), (&words, &words));
+    assert_eq!(panics(&|| drop(P::<Meta>::fill(17, longest))), words);
+    assert_eq!(
+        panics(&|| drop(P::<Option<Meta>>::fill(1 << 20, Some(longest)))),
+        words
+    );
+
+    // the largest sum, and one more: by each edit of one value
+    let mut full = P::<Meta>::fill(16, longest);
+    let mut old_full = PrefixColumn::<Meta>::from_column(Column::fill(16, longest));
+    full.push(Meta::of(0, 15));
+    old_full.push(Meta::of(0, 15));
+    assert_eq!(full.get_prefix(17), u64::MAX);
+    assert_eq!(old_full.get_prefix(17), u64::MAX);
+    assert_eq!(full.save(), old_full.save());
+    let one = Meta::of(4, 1);
+    let none = Meta::of(4, 0);
+    assert_eq!(panics(&|| full.clone().push(one)), words);
+    assert_eq!(panics(&|| old_full.clone().push(one)), words);
+    assert_eq!(panics(&|| full.clone().insert(5, one)), words);
+    assert_eq!(panics(&|| old_full.clone().insert(5, one)), words);
+    assert_eq!(
+        panics(&|| full.clone().splice(17, 0, &[none, none, one])),
+        words
+    );
+    assert_eq!(panics(&|| full.clone().extend([none, one])), words);
+    assert_eq!(panics(&|| full.clone().remap(|_| longest)), words);
+    let (mut p, mut c) = (full.clone(), old_full.clone());
+    p.push(none);
+    c.push(none);
+    p.insert(5, none);
+    c.insert(5, none);
+    // room made by a deletion can be filled again
+    p.remove(0);
+    c.remove(0);
+    p.push(longest);
+    c.push(longest);
+    assert_eq!(p.save(), c.save());
+    assert_eq!(p.get_prefix(p.len()), u64::MAX);
+    assert_eq!(panics(&|| p.clone().push(one)), words);
+    assert_eq!(panics(&|| c.clone().push(one)), words);
+    let loaded = P::<Meta>::load(&p.save()).unwrap();
+    assert_eq!(panics(&|| loaded.clone().push(one)), words);
+
+    // a plain column of the same edits takes them all
+    let mut v = VerifiedColumn::<Meta>::fill(17, longest);
+    v.push(one);
+    assert_eq!(v.len(), 18);
 }
