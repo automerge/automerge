@@ -2,8 +2,8 @@
 //! `requires`, and the client's own run-time work (loading, saving,
 //! unwrapping) must not panic.
 use hexane::verified::{
-    AccIndex, LenIndex, SumIndex, VerifiedAccColumn, VerifiedColumn, VerifiedDecoder,
-    VerifiedEncoder, VerifiedEncoderState, VerifiedPrefixColumn,
+    AccIndex, LenIndex, SumIndex, VerifiedAccColumn, VerifiedAccIter, VerifiedAccValue,
+    VerifiedColumn, VerifiedDecoder, VerifiedEncoder, VerifiedEncoderState, VerifiedPrefixColumn,
 };
 use hexane::{Leb128, Run};
 use verus_client::{Action, Board, Flags, Mark, Meta, Step};
@@ -2076,4 +2076,338 @@ fn accumulators_by_runs() {
     let open = verus_client::told_by_acc_of(Mark(70));
     let both = verus_client::added_then_taken_away(&Flags(0xf0), &open);
     assert_eq!((open.0, both.0), (0x40, 0x40));
+}
+
+/// A mark an accumulator column's iterator gives, with the kinds open
+/// before it and through it.
+fn mark_with_sums(pv: &VerifiedAccValue<'_, Mark>) -> (u64, u64, u64) {
+    (pv.prefix().0, pv.value.0, pv.total().0)
+}
+
+/// A step an accumulator column's iterator gives, with the board before
+/// it and through it.
+fn step_with_sums(pv: &VerifiedAccValue<'_, Step>) -> ((u64, bool), u64, (u64, bool)) {
+    (lamps(pv.prefix()), pv.value.0, lamps(pv.total()))
+}
+
+/// Where an iterator over steps stands, where its window ends, and the
+/// board of the steps it has passed.
+fn stands(it: &VerifiedAccIter<'_, Step>) -> (usize, usize, (u64, bool)) {
+    (it.pos(), it.end_pos(), lamps(it.total()))
+}
+
+#[test]
+fn accumulators_read_in_step() {
+    let marks: Vec<Mark> = (0..1000).map(|i| Mark(i / 7 % 5 * 13)).collect();
+    let steps: Vec<Step> = (0..1000).map(|i| a_step(i / 5)).collect();
+    let col = VerifiedAccColumn::<Mark>::from_values(&marks);
+    let board = VerifiedAccColumn::<Step>::from_values(&steps);
+    let open = |i: usize| flags_of(&marks[..i]);
+    let lit = |i: usize| board_of(&steps[..i]);
+    // each running sum, of the column and of a range
+    let sums = verus_client::running_accs(&col);
+    let sums: Vec<u64> = sums.iter().map(|f| f.0).collect();
+    assert_eq!(sums, (1..=1000).map(open).collect::<Vec<_>>());
+    let sums = verus_client::running_accs(&board);
+    let sums: Vec<(u64, bool)> = sums.into_iter().map(lamps).collect();
+    assert_eq!(sums, (1..=1000).map(lit).collect::<Vec<_>>());
+    assert!(verus_client::running_accs(&VerifiedAccColumn::<Option<Mark>>::new()).is_empty());
+    for (a, b) in [(0, 0), (0, 1000), (3, 700), (999, 1000), (1000, 1000)] {
+        let got: Vec<(u64, (u64, bool))> = verus_client::accs_in_a_range(&board, a, b)
+            .into_iter()
+            .map(|(step, before)| (step.0, lamps(before)))
+            .collect();
+        let want: Vec<(u64, (u64, bool))> = (a..b).map(|i| (steps[i].0, lit(i))).collect();
+        assert_eq!(got, want);
+        let range = board_of(&steps[a..b]);
+        let (moved, asked) = verus_client::added_by_moving(&board, a, b);
+        assert_eq!((lamps(moved), lamps(asked)), (range, range));
+        let range = flags_of(&marks[a..b]);
+        let (moved, asked) = verus_client::added_by_moving(&col, a, b);
+        assert_eq!((moved.0, asked.0), (range, range));
+    }
+    // one value with its sums
+    for i in [0, 1, 500, 999] {
+        let sums = (lit(i), steps[i].0, lit(i + 1));
+        let (before, v, through) = verus_client::a_value_with_its_accs(&board, i);
+        assert_eq!((lamps(before), v.0, lamps(through)), sums);
+        let (given, asked) = verus_client::accs_two_ways(&board, i);
+        assert_eq!((lamps(given.0), lamps(given.1)), (sums.0, sums.2));
+        assert_eq!((lamps(asked.0), lamps(asked.1)), (sums.0, sums.2));
+        let sums = (open(i), marks[i].0, open(i + 1));
+        let pv = verus_client::told_by_an_acc_get_prefixed(&col, i).unwrap();
+        assert_eq!(mark_with_sums(&pv), sums);
+        assert_eq!(verus_client::told_by_an_acc_values_total(&pv).0, sums.2);
+        assert_eq!(verus_client::told_by_an_acc_values_prefix(&pv).0, sums.0);
+        let twin = verus_client::told_by_an_acc_values_clone(&pv);
+        assert_eq!(mark_with_sums(&twin), sums);
+    }
+    assert!(verus_client::told_by_an_acc_get_prefixed(&col, 1000).is_none());
+    for (i, j) in [(0, 1), (0, 999), (17, 400), (998, 999)] {
+        let (first, then) = verus_client::two_skips_added(&board, i, j);
+        assert_eq!((lamps(first), lamps(then)), (lit(i + 1), lit(j + 1)));
+    }
+    // step by step, to the end
+    let mut it = verus_client::told_by_an_acc_iter_range(&board, 998, 1000);
+    for i in [998, 999] {
+        let (before, v, through) = verus_client::a_step_with_its_accs(&mut it).unwrap();
+        let sums = (lit(i), steps[i].0, lit(i + 1));
+        assert_eq!((lamps(before), v.0, lamps(through)), sums);
+    }
+    assert!(verus_client::a_step_with_its_accs(&mut it).is_none());
+    // two steps in either order: the board before the second, and after
+    let (one_way, the_other) = verus_client::steps_read_in_order();
+    assert_eq!(lamps(one_way.0), board_of(&[Step(3)]));
+    assert_eq!(lamps(one_way.1), board_of(&[Step(3), Step(4)]));
+    assert_eq!(lamps(the_other.0), board_of(&[Step(4)]));
+    assert_eq!(lamps(the_other.1), board_of(&[Step(4), Step(3)]));
+    assert_eq!(
+        (lamps(one_way.1), lamps(the_other.1)),
+        ((0x2_0000_0001, true), (3, true))
+    );
+    // nulls, which add nothing
+    let nullable = VerifiedAccColumn::<Option<Mark>>::from_values(&[
+        None,
+        Some(Mark(3)),
+        None,
+        Some(Mark(5)),
+        Some(Mark(3)),
+    ]);
+    let sums = verus_client::running_accs(&nullable);
+    let sums: Vec<u64> = sums.iter().map(|f| f.0).collect();
+    assert_eq!(sums, [0, 8, 8, 0x28, 0x20]);
+    let (before, v, through) = verus_client::a_value_with_its_accs(&nullable, 2);
+    assert_eq!((before.0, v.map(|m| m.0), through.0), (8, None, 8));
+}
+
+#[test]
+fn accumulators_kept_by_each_move() {
+    let steps: Vec<Step> = (0..1000).map(|i| a_step(i / 5)).collect();
+    let board = VerifiedAccColumn::<Step>::from_values(&steps);
+    let lit = |i: usize| board_of(&steps[..i]);
+    verus_client::moved_with_accs(&VerifiedAccColumn::<Step>::from_values(&steps[..10]));
+
+    let mut it = verus_client::told_by_an_acc_iter(&board);
+    let sum = verus_client::told_of_the_running_acc(&it);
+    let before = verus_client::told_of_the_acc_before(&it);
+    assert_eq!((lamps(sum), lamps(before)), ((0, false), (0, false)));
+    assert_eq!(verus_client::told_by_an_acc_iters_place(&it), 0);
+    assert_eq!(verus_client::told_by_an_acc_iters_end(&it), 1000);
+    assert_eq!(verus_client::told_by_an_acc_iters_reach(&it), 1000);
+    assert_eq!(verus_client::told_by_an_acc_iters_len(&it), 1000);
+    assert_eq!(
+        verus_client::told_by_an_acc_size_hint(&it),
+        (1000, Some(1000))
+    );
+    verus_client::told_of_the_accs_left(&it);
+    // read, and stepped over
+    let pv = verus_client::told_by_an_acc_next(&mut it).unwrap();
+    assert_eq!(step_with_sums(&pv), ((0, false), steps[0].0, lit(1)));
+    let pv = verus_client::told_by_an_acc_nth(&mut it, 499).unwrap();
+    assert_eq!(step_with_sums(&pv), (lit(500), steps[500].0, lit(501)));
+    let sum = verus_client::told_of_the_running_acc(&it);
+    let before = verus_client::told_of_the_acc_before(&it);
+    assert_eq!((lamps(sum), lamps(before)), (lit(501), lit(501)));
+    // its sum counts from the column's start, where the column's own do
+    let (kept, asked) = verus_client::a_running_acc_two_ways(&it, &board);
+    assert_eq!((lamps(kept), lamps(asked)), (lit(501), lit(501)));
+    // the window's end moved, and the iterator
+    verus_client::told_by_an_acc_set_max(&mut it, 900);
+    assert_eq!(verus_client::told_by_an_acc_iters_reach(&it), 399);
+    assert_eq!(verus_client::told_by_an_acc_iters_len(&it), 399);
+    assert_eq!(
+        verus_client::told_by_an_acc_size_hint(&it),
+        (399, Some(399))
+    );
+    verus_client::told_by_an_acc_advance_to(&mut it, 600);
+    assert_eq!(stands(&it), (600, 900, lit(600)));
+    verus_client::told_by_an_acc_advance_by(&mut it, 50);
+    assert_eq!(stands(&it), (650, 900, lit(650)));
+    // its sum started again
+    verus_client::told_by_an_acc_reset(&mut it);
+    assert_eq!(stands(&it), (650, 900, (0, false)));
+    let since = |i: usize| board_of(&steps[650..i]);
+    verus_client::told_by_an_acc_shift(&mut it, 700..950);
+    assert_eq!(stands(&it), (700, 950, since(700)));
+    // a window that ends past the column
+    let pv = verus_client::told_by_an_acc_shift_next(&mut it, 800..2000).unwrap();
+    assert_eq!(step_with_sums(&pv), (since(800), steps[800].0, since(801)));
+    assert_eq!(verus_client::told_by_an_acc_iters_place(&it), 801);
+    assert_eq!(verus_client::told_by_an_acc_iters_end(&it), 2000);
+    assert_eq!(verus_client::told_by_an_acc_iters_reach(&it), 1199);
+    assert_eq!(verus_client::told_by_an_acc_iters_len(&it), 199);
+    assert_eq!(
+        verus_client::told_by_an_acc_size_hint(&it),
+        (199, Some(199))
+    );
+    verus_client::told_of_the_accs_left(&it);
+    // past what it has
+    assert!(verus_client::told_by_an_acc_nth(&mut it, 199).is_none());
+    assert_eq!(stands(&it), (1000, 1000, since(1000)));
+    assert!(verus_client::told_by_an_acc_next(&mut it).is_none());
+    assert!(verus_client::told_by_an_acc_shift_next(&mut it, 1000..1000).is_none());
+    assert!(verus_client::a_step_with_its_accs(&mut it).is_none());
+    verus_client::told_by_an_acc_advance_to(&mut it, usize::MAX);
+    verus_client::told_by_an_acc_advance_by(&mut it, usize::MAX);
+    verus_client::told_by_an_acc_shift(&mut it, 5..3);
+    assert_eq!(stands(&it), (1000, 1000, since(1000)));
+    verus_client::told_of_the_accs_left(&it);
+    // an iterator of a column of nothing
+    let none = VerifiedAccColumn::<Option<Mark>>::new();
+    let mut it = verus_client::told_by_an_acc_iter(&none);
+    assert!(verus_client::told_by_an_acc_next(&mut it).is_none());
+    assert_eq!(verus_client::told_of_the_running_acc(&it).0, 0);
+    assert!(verus_client::told_by_an_acc_get_prefixed(&none, 0).is_none());
+    let it = verus_client::told_by_an_acc_iter_range(&none, 0, 0);
+    assert_eq!(verus_client::told_by_an_acc_iters_len(&it), 0);
+    assert_eq!(verus_client::told_by_an_acc_size_hint(&it), (0, Some(0)));
+}
+
+#[test]
+fn accumulators_read_by_runs() {
+    let marks: Vec<Mark> = (0..1000).map(|i| Mark(i / 7 % 5 * 13)).collect();
+    let steps: Vec<Step> = (0..1000).map(|i| a_step(i / 5)).collect();
+    let col = VerifiedAccColumn::<Mark>::from_values(&marks);
+    let board = VerifiedAccColumn::<Step>::from_values(&steps);
+    let open = |i: usize| flags_of(&marks[..i]);
+    let lit = |i: usize| board_of(&steps[..i]);
+    let (sum, count) = verus_client::added_by_run_moves(&col);
+    assert_eq!((sum.0, count), (open(1000), 1000));
+    let (sum, count) = verus_client::added_by_run_moves(&board);
+    assert_eq!((lamps(sum), count), (lit(1000), 1000));
+    let none = VerifiedAccColumn::<Option<Mark>>::new();
+    let (sum, count) = verus_client::added_by_run_moves(&none);
+    assert_eq!((sum.0, count), (0, 0));
+    // run by run, in a window that starts and ends within runs
+    let mut it = col.prefix_iter_range(5, 20);
+    let (n, v, through) = verus_client::a_run_with_its_accs(&mut it).unwrap();
+    assert_eq!((n, v.0, through.0), (2, 0, open(7)));
+    let run = verus_client::told_by_an_acc_next_run(&mut it).unwrap();
+    assert_eq!(run.count, 7);
+    assert_eq!(mark_with_sums(&run.value), (open(13), 13, open(14)));
+    let (n, v, through) = verus_client::a_run_of_marks(&mut it).unwrap();
+    assert_eq!((n, v.0, through.0), (6, 26, open(20)));
+    assert!(verus_client::a_run_with_its_accs(&mut it).is_none());
+    assert!(verus_client::told_by_an_acc_next_run(&mut it).is_none());
+    assert!(verus_client::a_run_of_marks(&mut it).is_none());
+    assert_eq!((it.pos(), it.end_pos(), it.total().0), (20, 20, open(20)));
+    // a run of an odd number of marks opens their kind
+    let mut it = col.prefix_iter_range(7, 14);
+    let (n, v, through) = verus_client::a_run_of_marks(&mut it).unwrap();
+    assert_eq!((n, v.0, through.0), (7, 13, open(7) ^ 1 << 13));
+    // steps: each of a run is taken after the one before it
+    let mut it = board.prefix_iter_range(3, 12);
+    for (count, to) in [(2, 5), (5, 10), (2, 12)] {
+        let (n, v, through) = verus_client::a_run_with_its_accs(&mut it).unwrap();
+        assert_eq!((n, v.0, lamps(through)), (count, steps[to - 1].0, lit(to)));
+    }
+    assert!(verus_client::a_run_with_its_accs(&mut it).is_none());
+    // the runs without their sums, and a range copied by them
+    let runs = verus_client::told_by_an_acc_runs(col.prefix_iter_range(5, 20));
+    let got: Vec<(usize, u64)> = runs.map(|run| (run.count, run.value.0)).collect();
+    assert_eq!(got, [(2, 0), (7, 13), (6, 26)]);
+    for (a, b) in [(0, 0), (0, 1000), (3, 700), (1000, 1000)] {
+        let copy = verus_client::accs_copied_by_runs(&col, a, b);
+        let got: Vec<u64> = copy.to_vec().iter().map(|m| m.0).collect();
+        let want: Vec<u64> = marks[a..b].iter().map(|m| m.0).collect();
+        assert_eq!(got, want);
+    }
+}
+
+#[test]
+fn accumulators_sought() {
+    let marks: Vec<Mark> = (0..10).map(|i| Mark(i / 7 % 5 * 13)).collect();
+    let steps: Vec<Step> = (0..1000).map(|i| a_step(i / 5)).collect();
+    let board = VerifiedAccColumn::<Step>::from_values(&steps);
+    let lit = |i: usize| board_of(&steps[..i]);
+    verus_client::found_with_accs(&VerifiedAccColumn::<Mark>::from_values(&marks));
+    // by count, with what is passed over
+    let mut it = board.prefix_iter_range(100, 900);
+    let seek = verus_client::told_by_an_acc_delta_nth(&mut it, 10).unwrap();
+    let passed = board_of(&steps[100..110]);
+    let found = (lit(110), steps[110].0, lit(111));
+    assert_eq!((seek.pos, lamps(seek.delta)), (110, passed));
+    assert_eq!(step_with_sums(&seek.pv), found);
+    let twin = verus_client::told_by_an_acc_seek(&seek);
+    assert_eq!((twin.pos, lamps(twin.delta)), (110, passed));
+    assert_eq!(step_with_sums(&twin.pv), found);
+    let (pos, delta, v, total) = verus_client::the_parts_of_a_find(seek);
+    assert_eq!((pos, lamps(delta)), (110, passed));
+    assert_eq!((v.0, lamps(total)), (steps[110].0, lit(111)));
+    // past what it has
+    assert!(verus_client::told_by_an_acc_delta_nth(&mut it, 789).is_none());
+    assert_eq!(stands(&it), (900, 900, lit(900)));
+    // the column asked for a value and the sum of a range before it
+    for (a, b) in [(0, 0), (0, 999), (17, 400), (999, 999)] {
+        let range = board_of(&steps[a..b]);
+        let (found, asked) = verus_client::a_range_added_two_ways(&board, a, b);
+        assert_eq!((lamps(found), lamps(asked)), (range, range));
+        let seek = verus_client::told_by_an_acc_delta(&board, a, b).unwrap();
+        assert_eq!((seek.pos, lamps(seek.delta)), (b, range));
+        assert_eq!(step_with_sums(&seek.pv), (lit(b), steps[b].0, lit(b + 1)));
+    }
+    assert!(verus_client::told_by_an_acc_delta(&board, 3, 1000).is_none());
+}
+
+#[test]
+fn accumulators_stopped_and_started() {
+    let steps: Vec<Step> = (0..1000).map(|i| a_step(i / 5)).collect();
+    let mut board = VerifiedAccColumn::<Step>::from_values(&steps);
+    for (a, m, b) in [
+        (0, 0, 0),
+        (0, 500, 1000),
+        (3, 3, 700),
+        (10, 990, 990),
+        (1000, 1000, 1000),
+    ] {
+        let sum = verus_client::added_in_two_goes(&board, a, m, b);
+        assert_eq!(lamps(sum), board_of(&steps[a..b]));
+    }
+    // an iterator whose sum counts from within the column
+    let mut it = board.prefix_iter_range(100, 900);
+    it.nth(49);
+    it.reset_prefix();
+    it.nth(9);
+    let since = board_of(&steps[150..160]);
+    let s = verus_client::told_by_an_acc_suspend(&it, &board);
+    verus_client::told_by_an_acc_states_fit(&s, &board);
+    let twin = verus_client::told_by_an_acc_clone(&it);
+    let on = verus_client::handed_over_with_its_acc(it, &board);
+    assert_eq!(stands(&on), (160, 900, since));
+    assert_eq!(stands(&twin), (160, 900, since));
+    let mut on = verus_client::told_by_an_acc_resume(&s, &board).unwrap();
+    let pv = on.next().unwrap();
+    assert_eq!(
+        (lamps(pv.prefix()), lamps(pv.total())),
+        (since, board_of(&steps[150..161]))
+    );
+    // an iterator of no column
+    let no = verus_client::told_by_an_acc_default::<Step, Leb128>();
+    assert_eq!((stands(&no), no.len()), ((0, 0, (0, false)), 0));
+    // an edit ends what was suspended
+    assert!(!verus_client::accs_ended_by_a_push(&mut board, Step(7)));
+    assert!(verus_client::told_by_an_acc_resume(&s, &board).is_err());
+    assert_eq!(board.len(), 1001);
+}
+
+#[test]
+fn the_clients_own_accumulators() {
+    let marks: Vec<Mark> = (0..1000).map(|i| Mark(i / 7 % 5 * 13)).collect();
+    let steps: Vec<Step> = (0..1000).map(|i| a_step(i / 5)).collect();
+    // marks of which every third is none
+    let some: Vec<Option<Mark>> = (0..1000)
+        .map(|i| (i % 3 != 0).then_some(marks[i]))
+        .collect();
+    let there: Vec<Mark> = some.iter().flatten().copied().collect();
+    let col = VerifiedAccColumn::<Mark>::from_values(&marks);
+    let nullable = VerifiedAccColumn::<Option<Mark>>::from_values(&some);
+    let board = VerifiedAccColumn::<Step>::from_values(&steps);
+    let (sums, (open, count), (moved, asked)) =
+        verus_client::accs_of_the_clients_own(&col, &nullable, &board, 123, 987);
+    let sums: Vec<u64> = sums.iter().map(|f| f.0).collect();
+    let want: Vec<u64> = (1..=1000).map(|i| flags_of(&marks[..i])).collect();
+    assert_eq!(sums, want);
+    assert_eq!((open.0, count), (flags_of(&there), 1000));
+    let range = board_of(&steps[123..987]);
+    assert_eq!((lamps(moved), lamps(asked)), (range, range));
 }

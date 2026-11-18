@@ -172,6 +172,18 @@
 //! what those of a range do (`sum_range`): each is `accumulated` of
 //! those values, which adds them in the order the column holds them.
 //!
+//! `prefix_iter` of an accumulator column gives a [`VerifiedAccIter`]:
+//! an iterator that keeps what the values it has passed add up to, and
+//! gives each value with what the values through it add up to and what
+//! those before it do ([`VerifiedAccValue`]). It moves as a
+//! [`VerifiedPrefixIter`] does, but for the search by sum, which an
+//! accumulator has no order for. A move that finds a value gives it
+//! with what the values passed over add up to ([`VerifiedAccSeek`]),
+//! and the iterator's place is kept without the borrow of the column
+//! in a [`VerifiedAccIterState`]. An accumulator need not be `Copy`:
+//! what the iterator gives holds a copy of its running sum, made as
+//! the accumulator says one is (`dup`).
+//!
 //! [`PrefixColumn`](crate::PrefixColumn) takes the laws of its prefix
 //! type on trust. Here they are the client's to prove, and what the
 //! column answers is proved from them: Verus checks a client's
@@ -513,6 +525,7 @@
 )]
 
 mod acc;
+mod acc_iter;
 pub(crate) mod bytes;
 #[cfg(verus_keep_ghost)]
 mod client_proof;
@@ -534,6 +547,7 @@ pub use crate::iter_core::{past, window};
 #[cfg(verus_keep_ghost)]
 pub use acc::{accumulated, lemma_acc_cat, lemma_acc_range, lemma_acc_run, lemma_cancel, times};
 pub use acc::{AccIndex, VAccum, VAccumulated, VAdds, VGroup, VerifiedAccColumn};
+pub use acc_iter::{VerifiedAccIter, VerifiedAccIterState, VerifiedAccSeek, VerifiedAccValue};
 #[cfg(verus_keep_ghost)]
 pub use bytes::{below_at, bytes_below, total_len, total_len_opt};
 pub use codec::VCodec;

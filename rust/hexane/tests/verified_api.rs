@@ -16,7 +16,8 @@ use hexane::encoder::{BoolEncoder, BoolEncoderState, RleEncoder, RleEncoderState
 use hexane::prefix::{PrefixSeek, PrefixWeightFn};
 use hexane::verified::{
     refused, AccIndex, Get, LenIndex, SumIndex, VAccum, VAccumulated, VAdds, VAmount, VGroup,
-    VNewtype, VSummed, VValue, VerifiedAccColumn, VerifiedColumn, VerifiedDecoder, VerifiedEncoder,
+    VNewtype, VSummed, VValue, VerifiedAccColumn, VerifiedAccIter, VerifiedAccIterState,
+    VerifiedAccSeek, VerifiedAccValue, VerifiedColumn, VerifiedDecoder, VerifiedEncoder,
     VerifiedEncoderState, VerifiedIter, VerifiedIterState, VerifiedPrefixColumn,
     VerifiedPrefixIter, VerifiedPrefixIterState, VerifiedPrefixSeek, VerifiedPrefixedValue,
     VerifiedRuns,
@@ -10592,5 +10593,1001 @@ fn a_run_adds_its_value_times_over() {
         let odd = n % 2 == 1;
         assert_eq!(p.get_prefix(n), Flags(if odd { 1 << 9 } else { 0 }));
         assert_eq!(p.get_total(2 * n + 2), Flags(if odd { 0x240 } else { 0 }));
+    }
+}
+
+/// A value type of an accumulator column that `PrefixColumn` holds too,
+/// with the same accumulator.
+trait OldAccd: Accd + PrefixValue<Prefix = Added<Self>> {}
+
+impl<T: Accd + PrefixValue<Prefix = Added<T>>> OldAccd for T {}
+
+/// Where an accumulator column's iterator stands, how far its window
+/// reaches, how many values it has left, and its running sum (under both
+/// its names).
+type AccPlace<T> = (usize, usize, usize, usize, Added<T>, Added<T>);
+
+fn acc_place<T: Accd>(it: &VerifiedAccIter<'_, T>) -> AccPlace<T> {
+    (
+        it.pos(),
+        it.end_pos(),
+        it.items_left(),
+        it.len(),
+        it.total(),
+        it.prefix(),
+    )
+}
+
+fn old_acc_place<T: OldAccd>(it: &PrefixIter<'_, T>) -> AccPlace<T> {
+    (
+        it.pos(),
+        it.end_pos(),
+        it.items_left(),
+        it.len(),
+        it.total(),
+        it.prefix(),
+    )
+}
+
+/// A value with what the values before it and through it add up to.
+type AccItem<T> = Option<(T, Added<T>, Added<T>)>;
+
+fn acc_item<T: Accd>(pv: Option<VerifiedAccValue<'_, T>>) -> AccItem<T> {
+    pv.map(|pv| (T::keep(pv.value), pv.prefix(), pv.total()))
+}
+
+fn old_acc_item<T: OldAccd>(pv: Option<PrefixedValue<'_, T>>) -> AccItem<T> {
+    pv.map(|pv| (old(pv.value), pv.prefix(), pv.total()))
+}
+
+/// A run with the sums of its last value: before that value, and
+/// through it.
+type AccRun<T> = Option<(usize, T, Added<T>, Added<T>)>;
+
+fn acc_run<T: Accd>(run: Option<Run<VerifiedAccValue<'_, T>>>) -> AccRun<T> {
+    run.map(|run| {
+        (
+            run.count,
+            T::keep(run.value.value),
+            run.value.prefix(),
+            run.value.total(),
+        )
+    })
+}
+
+fn old_acc_run<T: OldAccd>(run: Option<Run<PrefixedValue<'_, T>>>) -> AccRun<T> {
+    run.map(|run| {
+        (
+            run.count,
+            old(run.value.value),
+            run.value.prefix(),
+            run.value.total(),
+        )
+    })
+}
+
+/// A value found: where it is, what the values passed over before it add
+/// up to, and the value with its sums.
+type AccFound<T> = Option<(usize, Added<T>, (T, Added<T>, Added<T>))>;
+
+fn acc_found<T: Accd>(seek: Option<VerifiedAccSeek<'_, T>>) -> AccFound<T> {
+    seek.map(|seek| (seek.pos, seek.delta, acc_item(Some(seek.pv)).unwrap()))
+}
+
+fn old_acc_found<T: OldAccd>(seek: Option<PrefixSeek<'_, T>>) -> AccFound<T> {
+    seek.map(|seek| (seek.pos, seek.delta, old_acc_item(Some(seek.pv)).unwrap()))
+}
+
+/// What the values before each place add up to, and at the last place
+/// what all of them do: each sum is the one before it with the value's
+/// own added after it, as the client's accumulator adds.
+fn accs_before<T: Accd>(model: &[T]) -> Vec<Added<T>> {
+    let mut sum = T::added(&[]);
+    let mut before = vec![sum.dup()];
+    for v in model {
+        sum.add_acc(&T::added(std::slice::from_ref(v)));
+        before.push(sum.dup());
+    }
+    // which is what the tests reckon of the values by themselves
+    for i in [model.len() / 3, model.len() / 2, model.len()] {
+        assert_eq!(before[i], T::added(&model[..i]));
+    }
+    before
+}
+
+/// A move of an accumulator column's iterator.
+#[derive(Clone, Debug)]
+enum Move {
+    Next,
+    Nth(usize),
+    SetMax(usize),
+    AdvanceBy(usize),
+    AdvanceTo(usize),
+    Shift(Range<usize>),
+    ShiftNext(Range<usize>),
+    ResetPrefix,
+    NextRun,
+    DeltaNth(usize),
+    /// Stopped, and started again on its column.
+    Resume,
+    /// A copy moved on, which leaves the iterator where it is.
+    Copy(usize),
+}
+
+/// What a move gives.
+#[derive(PartialEq, Debug)]
+enum Gave<T: Accd> {
+    Nothing,
+    Item(AccItem<T>),
+    Run(AccRun<T>),
+    Found(AccFound<T>),
+}
+
+/// An accumulator column's iterator as its specification has it: where
+/// it stands, where its window ends, and where its sum counts from. Its
+/// sums are reckoned of the values themselves, in their order.
+#[derive(Clone)]
+struct AccWalk<'m, T: Accd> {
+    model: &'m [T],
+    before: &'m [Added<T>],
+    pos: usize,
+    end: usize,
+    base: usize,
+}
+
+impl<T: Accd> AccWalk<'_, T> {
+    /// What the values from where the sum counts up to `to` add up to.
+    fn sum(&self, to: usize) -> Added<T> {
+        if self.base == 0 {
+            self.before[to].dup()
+        } else {
+            T::added(&self.model[self.base..to])
+        }
+    }
+
+    /// The values left: the window can run past the column.
+    fn left(&self) -> usize {
+        self.end.min(self.model.len()) - self.pos
+    }
+
+    fn place(&self) -> AccPlace<T> {
+        (
+            self.pos,
+            self.end,
+            self.end - self.pos,
+            self.left(),
+            self.sum(self.pos),
+            self.sum(self.pos),
+        )
+    }
+
+    fn nth(&mut self, n: usize) -> AccItem<T> {
+        if n < self.left() {
+            let i = self.pos + n;
+            self.pos = i + 1;
+            Some((self.model[i].clone(), self.sum(i), self.sum(i + 1)))
+        } else {
+            // all it had is passed, and its window ends there
+            self.pos += self.left();
+            self.end = self.pos;
+            None
+        }
+    }
+
+    fn set_max(&mut self, end: usize) {
+        self.end = end.max(self.pos);
+    }
+
+    fn advance_to(&mut self, target: usize) {
+        if target > self.pos {
+            self.nth(target - self.pos - 1);
+        }
+    }
+
+    fn next_run(&mut self) -> AccRun<T> {
+        let left = self.left();
+        if left == 0 {
+            // its window ends where it stands
+            self.end = self.pos;
+            return None;
+        }
+        let v = self.model[self.pos].clone();
+        let n = self.model[self.pos..self.pos + left]
+            .iter()
+            .take_while(|x| **x == v)
+            .count();
+        self.pos += n;
+        Some((n, v, self.sum(self.pos - 1), self.sum(self.pos)))
+    }
+
+    fn delta_nth(&mut self, n: usize) -> AccFound<T> {
+        let from = self.pos;
+        let item = self.nth(n)?;
+        let at = self.pos - 1;
+        Some((at, T::added(&self.model[from..at]), item))
+    }
+
+    /// What a move gives, and where it leaves the iterator.
+    fn does(&mut self, mv: &Move) -> Gave<T> {
+        match mv.clone() {
+            Move::Next => return Gave::Item(self.nth(0)),
+            Move::Nth(n) => return Gave::Item(self.nth(n)),
+            Move::SetMax(end) => self.set_max(end),
+            Move::AdvanceBy(amount) => {
+                if amount > 0 {
+                    self.nth(amount - 1);
+                }
+            }
+            Move::AdvanceTo(target) => self.advance_to(target),
+            Move::Shift(range) => {
+                self.set_max(range.end);
+                self.advance_to(range.start);
+            }
+            Move::ShiftNext(range) => {
+                self.set_max(range.end);
+                return Gave::Item(self.nth(range.start - self.pos));
+            }
+            Move::ResetPrefix => self.base = self.pos,
+            Move::NextRun => return Gave::Run(self.next_run()),
+            Move::DeltaNth(n) => return Gave::Found(self.delta_nth(n)),
+            // (where its window then ends is seen of the iterator)
+            Move::Resume => {}
+            Move::Copy(n) => return Gave::Item(self.clone().nth(n)),
+        }
+        Gave::Nothing
+    }
+
+    /// The window of an iterator that was stopped and started again:
+    /// at the column's end it can come back closed.
+    fn resumed(&mut self, mv: &Move, end_pos: usize) {
+        let len = self.model.len();
+        if matches!(mv, Move::Resume) && self.pos == len && end_pos == len {
+            self.end = len;
+        }
+    }
+}
+
+/// The move made of an accumulator column's iterator, which is one of
+/// `p`.
+fn new_does<'a, T: Accd>(
+    x: &mut VerifiedAccIter<'a, T>,
+    p: &'a VerifiedAccColumn<T>,
+    mv: &Move,
+) -> Gave<T> {
+    match mv.clone() {
+        Move::Next => return Gave::Item(acc_item(x.next())),
+        Move::Nth(n) => return Gave::Item(acc_item(x.nth(n))),
+        Move::SetMax(end) => x.set_max(end),
+        Move::AdvanceBy(amount) => x.advance_by(amount),
+        Move::AdvanceTo(target) => x.advance_to(target),
+        Move::Shift(range) => x.shift(range),
+        Move::ShiftNext(range) => return Gave::Item(acc_item(x.shift_next(range))),
+        Move::ResetPrefix => x.reset_prefix(),
+        Move::NextRun => return Gave::Run(acc_run(x.next_run())),
+        Move::DeltaNth(n) => return Gave::Found(acc_found(x.delta_nth(n))),
+        Move::Resume => {
+            let state = x.suspend();
+            *x = state.try_resume(p).unwrap();
+            // and a state starts as often as it is asked
+            assert_eq!(acc_place(&state.try_resume(p).unwrap()), acc_place(x));
+        }
+        Move::Copy(n) => return Gave::Item(acc_item(x.clone().nth(n))),
+    }
+    Gave::Nothing
+}
+
+/// The move made of `PrefixColumn`'s iterator, which is one of `c`.
+fn old_does<'a, T: OldAccd>(
+    y: &mut PrefixIter<'a, T>,
+    c: &'a PrefixColumn<T>,
+    mv: &Move,
+) -> Gave<T> {
+    match mv.clone() {
+        Move::Next => return Gave::Item(old_acc_item(y.next())),
+        Move::Nth(n) => return Gave::Item(old_acc_item(y.nth(n))),
+        Move::SetMax(end) => y.set_max(end),
+        Move::AdvanceBy(amount) => y.advance_by(amount),
+        Move::AdvanceTo(target) => y.advance_to(target),
+        Move::Shift(range) => y.shift(range),
+        Move::ShiftNext(range) => return Gave::Item(old_acc_item(y.shift_next(range))),
+        Move::ResetPrefix => y.reset_prefix(),
+        Move::NextRun => return Gave::Run(old_acc_run(y.next_run())),
+        Move::DeltaNth(n) => return Gave::Found(old_acc_found(y.delta_nth(n))),
+        Move::Resume => *y = y.suspend().try_resume(c).unwrap(),
+        Move::Copy(n) => return Gave::Item(old_acc_item(y.clone().nth(n))),
+    }
+    Gave::Nothing
+}
+
+/// A move for an iterator that stands as `m` does: mostly within what it
+/// has left, sometimes past it.
+fn a_move<T: Accd>(rng: &mut Rng, m: &AccWalk<'_, T>) -> Move {
+    let len = m.model.len();
+    // how many values to pass over
+    let count = |rng: &mut Rng| match rng.below(4) {
+        0 => a_place(rng, len),
+        _ => rng.below(m.left() + 2),
+    };
+    match rng.below(19) {
+        0..=2 => Move::Next,
+        3 | 4 => Move::Nth(count(rng)),
+        5 => Move::SetMax(a_place(rng, len)),
+        6 => Move::AdvanceBy(a_place(rng, len - m.pos)),
+        7 => Move::AdvanceTo(a_place(rng, len)),
+        // any range: one that starts behind the iterator, one that ends
+        // before it starts
+        8 => Move::Shift(a_place(rng, len)..a_place(rng, len)),
+        9 | 10 => {
+            // a range that starts at the iterator or after it
+            let start = m.pos + a_place(rng, len - m.pos).min(usize::MAX - m.pos);
+            Move::ShiftNext(start..a_place(rng, len))
+        }
+        11 => Move::ResetPrefix,
+        12 | 13 => Move::NextRun,
+        14 | 15 => Move::DeltaNth(count(rng)),
+        16 | 17 => Move::Resume,
+        _ => Move::Copy(rng.below(3)),
+    }
+}
+
+/// An accumulator column's iterator gives each value with what the
+/// values before it and through it add up to, in the order the column
+/// holds them, and keeps its running sum under every move: by single
+/// values and by runs, over values it does not give, into another
+/// window, with its sum started again, stopped and started again, and
+/// copied. As its specification says, which a walk of the values
+/// follows.
+fn check_acc_iters<T: Accd>(rng: &mut Rng, p: &VerifiedAccColumn<T>, model: &[T]) {
+    let len = model.len();
+    let before = accs_before(model);
+    let item =
+        |i: usize| (i < len).then(|| (model[i].clone(), before[i].dup(), before[i + 1].dup()));
+    // all of it, in a `for` loop and by the standard library's functions
+    for (n, pv) in p.prefix_iter().enumerate() {
+        assert_eq!(acc_item(Some(pv)), item(n));
+    }
+    assert_eq!(p.prefix_iter().count(), len);
+    let last = len.checked_sub(1).and_then(item);
+    assert_eq!(acc_item(p.prefix_iter().last()), last);
+    // one value by its place, which can be past the column
+    for i in some_places(rng, len) {
+        assert_eq!(acc_item(p.get_prefixed(i)), item(i));
+    }
+    // all of it by runs, each with the sums of its last value
+    let mut x = p.prefix_iter();
+    let mut m = AccWalk {
+        model,
+        before: &before,
+        pos: 0,
+        end: len,
+        base: 0,
+    };
+    loop {
+        let want = m.next_run();
+        assert_eq!(acc_run(x.next_run()), want);
+        assert_eq!(acc_place(&x), m.place());
+        if want.is_none() {
+            break;
+        }
+    }
+    for _ in 0..3 {
+        // the runs of a range without their sums: what `splice_runs`
+        // takes
+        let start = rng.below(len + 1);
+        let end = start + rng.below(len - start + 1);
+        let runs: Vec<(usize, T)> = p
+            .prefix_iter_range(start, end)
+            .runs()
+            .map(|run| (run.count, T::keep(run.value)))
+            .collect();
+        assert_eq!(runs, runs_of(&model[start..end]));
+        let mut copy = VerifiedAccColumn::<T>::new();
+        copy.splice_runs(0, 0, p.prefix_iter_range(start, end).runs());
+        assert_eq!(acc_values(&copy), model[start..end]);
+        assert_eq!(copy.get_prefix(usize::MAX), T::added(&model[start..end]));
+    }
+    // the value at a place, with what a range before it adds up to
+    for _ in 0..6 {
+        let to = a_place(rng, len);
+        let from = rng.below(to.min(len) + 1);
+        let want = item(to).map(|it| (to, T::added(&model[from..to]), it));
+        assert_eq!(acc_found(p.delta(from, to)), want);
+    }
+    // an iterator of a range, moved about
+    for _ in 0..4 {
+        let start = rng.below(len + 1);
+        let end = start + rng.below(len - start + 1);
+        let mut x = p.prefix_iter_range(start, end);
+        let mut m = AccWalk {
+            model,
+            before: &before,
+            pos: start,
+            end,
+            base: 0,
+        };
+        assert_eq!(acc_place(&x), m.place());
+        for _ in 0..16 {
+            let mv = a_move(rng, &m);
+            let want = m.does(&mv);
+            assert_eq!(new_does(&mut x, p, &mv), want, "{mv:?}");
+            m.resumed(&mv, x.end_pos());
+            assert_eq!(acc_place(&x), m.place(), "{mv:?}");
+            assert_eq!(x.size_hint(), (m.left(), Some(m.left())));
+        }
+        // what it has left
+        let rest: Vec<AccItem<T>> = x.map(|pv| acc_item(Some(pv))).collect();
+        let mut want = vec![];
+        while let Some(v) = m.nth(0) {
+            want.push(Some(v));
+        }
+        assert_eq!(rest, want);
+    }
+}
+
+/// An accumulator column under edits that put in single values and
+/// runs: `check` is asked of it after each edit, and of the column
+/// loaded from its bytes.
+fn under_acc_edits<T: Accd>(salt: u64, check: fn(&mut Rng, &VerifiedAccColumn<T>, &[T])) {
+    for seed in 1..=8u64 {
+        let mut rng = Rng(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) ^ salt);
+        let budget = [2, 3, 4, 8, 64][rng.below(5)];
+        let mut p = VerifiedAccColumn::<T>::with_max_segments(budget);
+        let mut model: Vec<T> = vec![];
+        check(&mut rng, &p, &model);
+        for _ in 0..40 {
+            let at = rng.below(model.len() + 1);
+            let del = rng.below((model.len() - at).min(12) + 1);
+            if rng.below(3) == 0 {
+                let runs = some_runs::<T>(&mut rng, 6);
+                let lent_runs = runs.iter().map(|(n, x)| Run {
+                    count: *n,
+                    value: x.lend(),
+                });
+                p.splice_runs(at, del, lent_runs);
+                model.splice(at..at + del, run_model(&runs));
+            } else {
+                let ins: Vec<T> = rng.values(40);
+                p.splice(at, del, &lent(&ins));
+                model.splice(at..at + del, ins);
+            }
+            check(&mut rng, &p, &model);
+        }
+        // loaded: an index made at once of all the slabs
+        let p2 = VerifiedAccColumn::<T>::load(&p.save()).unwrap();
+        check(&mut rng, &p2, &model);
+    }
+}
+
+fn acc_iters<T: Accd>() {
+    under_acc_edits::<T>(0xacc8, check_acc_iters::<T>);
+}
+
+/// An accumulator column of the verified API is read with its sums
+/// ([`VerifiedAccIter`]) as its specification says: each value comes
+/// with what the values before it and through it add up to, and the
+/// iterator's running sum is of the values it has passed since its sum
+/// was last started, in their order, whether it read them or stepped
+/// over them, one at a time or a run at a time, in a window that is
+/// moved, widened past the column, or closed. It finds a value further
+/// on with what it passes over on the way
+/// ([`VerifiedAccIter::delta_nth`], [`VerifiedColumn::delta`]), and is
+/// copied, and stopped and started again ([`VerifiedAccIter::suspend`],
+/// [`VerifiedAccIterState::try_resume`]). For an accumulator in which
+/// the order does not matter and for one in which it does, after edits
+/// and after a load.
+#[test]
+fn an_accumulator_column_is_read_with_its_sums() {
+    for_each_acc!(acc_iters);
+}
+
+/// `PrefixColumn` of the same values, with an accumulator that has
+/// std's operators: its iterator, asked what the accumulator column's
+/// is at each step, gives the same and stands in the same place after
+/// it.
+fn check_old_acc_iters<T: OldAccd>(rng: &mut Rng, p: &VerifiedAccColumn<T>, model: &[T]) {
+    let len = model.len();
+    let c = PrefixColumn::<T>::from_values(model.to_vec());
+    let before = accs_before(model);
+    // all of it, and one value by its place
+    let new: Vec<AccItem<T>> = p.prefix_iter().map(|pv| acc_item(Some(pv))).collect();
+    let was: Vec<AccItem<T>> = c.iter().map(|pv| old_acc_item(Some(pv))).collect();
+    assert_eq!(new, was);
+    for i in some_places(rng, len) {
+        assert_eq!(acc_item(p.get_prefixed(i)), old_acc_item(c.get(i)));
+    }
+    for _ in 0..3 {
+        // the runs of a range, and the value at a place with what a
+        // range before it adds up to
+        let start = rng.below(len + 1);
+        let end = start + rng.below(len - start + 1);
+        let runs: Vec<(usize, T)> = p
+            .prefix_iter_range(start, end)
+            .runs()
+            .map(|run| (run.count, T::keep(run.value)))
+            .collect();
+        let old_runs: Vec<(usize, T)> = c
+            .iter_range(start..end)
+            .runs()
+            .map(|run| (run.count, old(run.value)))
+            .collect();
+        assert_eq!(runs, old_runs);
+        let to = a_place(rng, len);
+        let from = rng.below(to.min(len) + 1);
+        assert_eq!(
+            acc_found(p.delta(from, to)),
+            old_acc_found(c.delta(from, to))
+        );
+    }
+    // an iterator of a range, moved about
+    for _ in 0..4 {
+        let start = rng.below(len + 1);
+        let end = start + rng.below(len - start + 1);
+        let mut x = p.prefix_iter_range(start, end);
+        let mut y = c.iter_range(start..end);
+        let mut m = AccWalk {
+            model,
+            before: &before,
+            pos: start,
+            end,
+            base: 0,
+        };
+        assert_eq!(old_acc_place(&y), m.place());
+        for _ in 0..16 {
+            let mv = a_move(rng, &m);
+            let want = m.does(&mv);
+            assert_eq!(new_does(&mut x, p, &mv), want, "{mv:?}");
+            assert_eq!(old_does(&mut y, &c, &mv), want, "{mv:?}");
+            m.resumed(&mv, x.end_pos());
+            assert_eq!(acc_place(&x), m.place(), "{mv:?}");
+            assert_eq!(old_acc_place(&y), m.place(), "{mv:?}");
+        }
+        // what they have left
+        let rest = x.map(|pv| acc_item(Some(pv)));
+        assert!(rest.eq(y.map(|pv| old_acc_item(Some(pv)))));
+    }
+}
+
+fn old_acc_iters<T: OldAccd>() {
+    under_acc_edits::<T>(0xacc9, check_old_acc_iters::<T>);
+}
+
+/// Where the old API has the accumulator too, the iterator of an
+/// accumulator column moves as `PrefixColumn`'s does: the two, asked
+/// the same at each step, give the same values with the same sums, and
+/// stand in the same place with the same window after it.
+#[test]
+fn an_accumulator_iterator_moves_as_a_prefix_columns_does() {
+    old_acc_iters::<Mark>();
+    old_acc_iters::<Option<Mark>>();
+}
+
+/// The iterator of a short accumulator column, by hand.
+#[test]
+fn the_iterator_of_an_accumulator_column() {
+    // of the kinds 3, 5, 3, 5 and 0
+    let model = [Mark(3), Mark(5), Mark(67), Mark(5), Mark(64)];
+    let open = [0, 8, 0x28, 0x20, 0, 1].map(Flags);
+    let p = VerifiedAccColumn::<Mark>::from_values(&model);
+    let got: Vec<(Flags, Mark, Flags)> = p
+        .prefix_iter()
+        .map(|pv| (pv.prefix(), pv.value, pv.total()))
+        .collect();
+    let want: Vec<(Flags, Mark, Flags)> =
+        (0..5).map(|i| (open[i], model[i], open[i + 1])).collect();
+    assert_eq!(got, want);
+    // a range: the sum counts from the column's start
+    let mut it = p.prefix_iter_range(1, 4);
+    assert_eq!(
+        (it.pos(), it.end_pos(), it.len(), it.total()),
+        (1, 4, 3, Flags(8))
+    );
+    let pv = it.next().unwrap();
+    let given = VerifiedAccValue {
+        value: Mark(5),
+        total: Flags(0x28),
+    };
+    assert_eq!(pv, given);
+    assert_eq!(
+        format!("{pv:?}"),
+        "VerifiedAccValue { value: Mark(5), total: Flags(40) }"
+    );
+    let copy = pv.clone();
+    assert_eq!(
+        (copy.prefix(), copy.total(), pv.total()),
+        (open[1], open[2], open[2])
+    );
+    // started again, it counts from where the iterator stands
+    it.reset_prefix();
+    assert_eq!((it.pos(), it.total(), it.prefix()), (2, Flags(0), Flags(0)));
+    let pv = it.nth(1).unwrap();
+    assert_eq!(
+        (pv.prefix(), pv.value, pv.total()),
+        (Flags(8), Mark(5), Flags(0x28))
+    );
+    assert!(it.next().is_none());
+    assert_eq!((it.pos(), it.end_pos(), it.total()), (4, 4, Flags(0x28)));
+    // a window past the column closes at the column's end
+    let mut it = p.prefix_iter();
+    it.set_max(9);
+    assert_eq!((it.end_pos(), it.items_left(), it.len()), (9, 9, 5));
+    it.advance_by(7);
+    assert_eq!((it.pos(), it.end_pos(), it.total()), (5, 5, open[5]));
+    // moved to a window, and to one that starts behind it
+    let mut it = p.prefix_iter();
+    it.shift(2..4);
+    assert_eq!((it.pos(), it.end_pos(), it.total()), (2, 4, open[2]));
+    it.shift(0..5);
+    assert_eq!((it.pos(), it.end_pos(), it.total()), (2, 5, open[2]));
+    let pv = it.shift_next(3..5).unwrap();
+    assert_eq!(
+        (pv.prefix(), pv.value, pv.total()),
+        (open[3], Mark(5), open[4])
+    );
+    assert_eq!((it.pos(), it.end_pos(), it.total()), (4, 5, open[4]));
+    assert!(it.shift_next(5..5).is_none());
+    assert_eq!((it.pos(), it.end_pos(), it.total()), (5, 5, open[5]));
+    // one value by its place
+    let pv = p.get_prefixed(4).unwrap();
+    assert_eq!(
+        (pv.prefix(), pv.value, pv.total()),
+        (open[4], Mark(64), open[5])
+    );
+    assert!(p.get_prefixed(5).is_none());
+    // nulls, which add nothing
+    let nulls = [Some(Mark(3)), None, Some(Mark(5))];
+    let p = VerifiedAccColumn::<Option<Mark>>::from_values(&nulls);
+    let got: Vec<(Flags, Option<Mark>, Flags)> = p
+        .prefix_iter()
+        .map(|pv| (pv.prefix(), pv.value, pv.total()))
+        .collect();
+    let want = [(0, nulls[0], 8), (8, None, 8), (8, nulls[2], 0x28)];
+    assert_eq!(got, want.map(|(b, v, t)| (Flags(b), v, Flags(t))));
+
+    // steps, whose order matters: the sum before a value is the sum
+    // through it with the value's own taken off its end
+    let board = |lit, turned| Board { lit, turned };
+    let p = VerifiedAccColumn::<Step>::from_values(&[Step(3), Step(4), Step(3)]);
+    let got: Vec<(Board, Step, Board)> = p
+        .prefix_iter()
+        .map(|pv| (pv.prefix(), pv.value, pv.total()))
+        .collect();
+    let after = [
+        board(0, false),
+        board(1, true),
+        board(0x2_0000_0001, true),
+        board(0x3_0000_0001, false),
+    ];
+    let steps = [Step(3), Step(4), Step(3)];
+    let want: Vec<(Board, Step, Board)> =
+        (0..3).map(|i| (after[i], steps[i], after[i + 1])).collect();
+    assert_eq!(got, want);
+    // a sum started again is of the steps since, on a board of their
+    // own: what the column answers of that range
+    let mut it = p.prefix_iter_range(1, 3);
+    it.reset_prefix();
+    let pv = it.next().unwrap();
+    assert_eq!(
+        (pv.prefix(), pv.total()),
+        (board(0, false), board(2, false))
+    );
+    let pv = it.next().unwrap();
+    assert_eq!((pv.prefix(), pv.total()), (board(2, false), board(3, true)));
+    assert_eq!(
+        (it.total(), p.sum_range(1, 3)),
+        (board(3, true), board(3, true))
+    );
+    // a column of nothing
+    let none = VerifiedAccColumn::<Step>::new();
+    let mut it = none.prefix_iter();
+    assert!(it.next().is_none() && it.nth(3).is_none());
+    assert_eq!(
+        (it.pos(), it.end_pos(), it.total()),
+        (0, 0, board(0, false))
+    );
+    assert!(none.get_prefixed(0).is_none());
+}
+
+/// The runs, seeks and states of a short accumulator column's iterator,
+/// by hand.
+#[test]
+fn the_seeks_of_an_accumulator_iterator() {
+    // three marks of the kind 3, one of the kind 5, two of the kind 0
+    let model = [Mark(3), Mark(3), Mark(3), Mark(5), Mark(64), Mark(64)];
+    let mut p = VerifiedAccColumn::<Mark>::from_values(&model);
+    // by runs: the sums are those of each run's last value
+    let mut it = p.prefix_iter();
+    let mut runs = vec![];
+    while let Some(run) = it.next_run() {
+        runs.push((
+            run.count,
+            run.value.value,
+            run.value.prefix(),
+            run.value.total(),
+        ));
+    }
+    let want = [(3, 3, 0, 8), (1, 5, 8, 0x28), (2, 64, 0x29, 0x28)];
+    assert_eq!(
+        runs,
+        want.map(|(n, v, b, t)| (n, Mark(v), Flags(b), Flags(t)))
+    );
+    assert_eq!(
+        format!("{it:?}"),
+        "VerifiedAccIter { total: Flags(40), pos: 6 }"
+    );
+    // the runs of a window, without sums
+    let runs: Vec<(usize, Mark)> = p
+        .prefix_iter_range(1, 5)
+        .runs()
+        .map(|run| (run.count, run.value))
+        .collect();
+    assert_eq!(runs, [(2, Mark(3)), (1, Mark(5)), (1, Mark(64))]);
+    // a value by its count from the iterator, with what is passed over
+    let mut it = p.prefix_iter_range(1, 6);
+    let seek = it.delta_nth(3).unwrap();
+    let found = VerifiedAccSeek {
+        pos: 4,
+        delta: Flags(0x20),
+        pv: VerifiedAccValue {
+            value: Mark(64),
+            total: Flags(0x29),
+        },
+    };
+    assert_eq!(seek, found);
+    assert_eq!(
+        format!("{seek:?}"),
+        "VerifiedAccSeek { pos: 4, delta: Flags(32), pv: VerifiedAccValue { value: Mark(64), total: Flags(41) } }"
+    );
+    assert_eq!(
+        (seek.clone(), seek.pv.prefix()),
+        (found.clone(), Flags(0x28))
+    );
+    assert!(it.delta_nth(1).is_none());
+    assert_eq!((it.pos(), it.end_pos(), it.total()), (6, 6, Flags(0x28)));
+    // the same of the column: the value at a place, and what a range
+    // before it adds up to
+    assert_eq!(p.delta(1, 4), Some(found));
+    let seek = p.delta(2, 2).unwrap();
+    assert_eq!(
+        (seek.pos, seek.delta, seek.pv.total()),
+        (2, Flags(0), Flags(8))
+    );
+    assert!(p.delta(0, 6).is_none());
+
+    // a copy is an iterator of its own
+    let mut it = p.prefix_iter_range(1, 5);
+    it.next();
+    it.reset_prefix();
+    let mut twin = it.clone();
+    assert_eq!(twin.next().map(|pv| pv.total()), Some(Flags(8)));
+    assert_eq!((it.pos(), it.total(), twin.pos()), (2, Flags(0), 3));
+    // stopped and started again: its place, its window, and where its
+    // sum counts from
+    it.next();
+    let state: VerifiedAccIterState<Mark> = it.suspend();
+    let mut on = state.try_resume(&p).unwrap();
+    assert_eq!((on.pos(), on.end_pos(), on.total()), (3, 5, Flags(8)));
+    let pv = on.next().unwrap();
+    assert_eq!(
+        (pv.prefix(), pv.value, pv.total()),
+        (Flags(8), Mark(5), Flags(0x28))
+    );
+    // on another column of that many edits, with that column's sums
+    let other = VerifiedAccColumn::<Mark>::from_values(&[1, 2, 4, 7, 9, 9].map(Mark));
+    let on = state.try_resume(&other).unwrap();
+    assert_eq!((on.pos(), on.end_pos(), on.total()), (3, 5, Flags(0x10)));
+    // and not on a column edited since
+    p.push(Mark(1));
+    assert!(matches!(
+        state.try_resume(&p),
+        Err(PackError::InvalidResume)
+    ));
+    // a state is plain data, with no borrow in it
+    fn plain<S: Send + Sync + 'static>() {}
+    plain::<VerifiedAccIterState<Option<Step>>>();
+
+    // an iterator of no column
+    let mut it = VerifiedAccIter::<Mark>::default();
+    assert_eq!(
+        (it.pos(), it.end_pos(), it.len(), it.total()),
+        (0, 0, 0, Flags(0))
+    );
+    assert!(it.next_run().is_none() && it.delta_nth(0).is_none() && it.next().is_none());
+    assert_eq!(it.clone().runs().count(), 0);
+    assert_eq!(
+        format!("{it:?}"),
+        "VerifiedAccIter { total: Flags(0), pos: 0 }"
+    );
+    // its state starts on a new column
+    let state = VerifiedAccIter::<Mark>::default().suspend();
+    let none = VerifiedAccColumn::<Mark>::new();
+    let on = state.try_resume(&none).unwrap();
+    assert_eq!((on.pos(), on.end_pos(), on.total()), (0, 0, Flags(0)));
+    assert!(state.try_resume(&p).is_err());
+}
+
+/// A long run is stepped over by its count where the accumulator adds a
+/// run in a way of its own, and the sum of what is passed is the run's
+/// value added as many times over.
+///
+/// (The columns here are longer than a 32-bit `usize` counts.)
+#[cfg(target_pointer_width = "64")]
+#[test]
+fn the_accumulator_iterator_over_long_runs() {
+    // an odd count of marks of one kind
+    let long = i64::MAX as usize;
+    let p = VerifiedAccColumn::<Mark>::fill(long, Mark(5));
+    let mut it = p.prefix_iter();
+    let pv = it.nth(long - 2).unwrap();
+    assert_eq!((pv.prefix(), pv.total()), (Flags(0x20), Flags(0)));
+    let pv = it.next().unwrap();
+    assert_eq!(pv.total(), Flags(0x20));
+    assert!(it.next().is_none());
+    assert_eq!((it.pos(), it.total()), (long, Flags(0x20)));
+    // from the middle on: an odd count before it, an even one after
+    let half = long / 2;
+    let mut it = p.prefix_iter_range(half, long);
+    assert_eq!(it.total(), Flags(0x20));
+    it.reset_prefix();
+    it.advance_to(long);
+    assert_eq!(it.total(), Flags(0));
+    // one run of them all
+    let run = p.prefix_iter().next_run().unwrap();
+    assert_eq!(
+        (run.count, run.value.prefix(), run.value.total()),
+        (long, Flags(0), Flags(0x20))
+    );
+
+    // in slabs of two runs, against `PrefixColumn`'s iterator
+    let run = |mark: u64, count: usize| Run {
+        count,
+        value: Mark(mark),
+    };
+    let mut p = VerifiedAccColumn::<Mark>::with_max_segments(2);
+    let mut c = PrefixColumn::<Mark>::with_max_segments(2);
+    for (at, runs) in [
+        (0, [run(3, 1 << 30), run(7, (1 << 40) + 1)]),
+        (1 << 20, [run(0, (1 << 50) + 1), run(70, 1 << 30)]),
+        (5, [run(1, 3), run(67, 1)]),
+    ] {
+        p.splice_runs(at, 0, runs);
+        c.splice_runs(at, 0, runs);
+    }
+    let len = p.len();
+    let mut rng = Rng(0xacca);
+    let mut places = some_places(&mut rng, len);
+    places.extend([5, 9, 1 << 20, (1 << 20) + (1 << 50), (1 << 30) + 4, len - 1]);
+    places.sort();
+    places.dedup();
+    let mut x = p.prefix_iter();
+    let mut y = c.iter();
+    for &i in &places {
+        x.advance_to(i);
+        y.advance_to(i);
+        assert_eq!(acc_place(&x), old_acc_place(&y));
+        assert_eq!(x.total(), p.get_prefix(i));
+        assert_eq!(acc_item(x.next()), old_acc_item(y.next()));
+    }
+}
+
+/// An accumulator is its client's code, and can panic. If it does while
+/// an iterator moves, the iterator is left with nothing to give, as one
+/// of no column is, and the column is as it was. (Where a panic can be
+/// caught: not on wasm32.)
+#[cfg(panic = "unwind")]
+#[test]
+fn an_accumulator_that_panics_under_an_iterator() {
+    thread_local! {
+        /// How many more times a `Fused` sum adds before it panics: at
+        /// the most there is, any number.
+        static FUSE: Cell<u32> = const { Cell::new(u32::MAX) };
+    }
+
+    /// An accumulator that panics when it is told to: a sum whose adds
+    /// are counted down.
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    struct Fused(u64);
+
+    impl VGroup for Fused {}
+
+    impl VAccum for Fused {
+        fn new_zero() -> Fused {
+            Fused(0)
+        }
+
+        fn add_acc(&mut self, b: &Fused) {
+            let left = FUSE.get();
+            if left == 0 {
+                panic!("the fuse is burnt");
+            }
+            if left < u32::MAX {
+                FUSE.set(left - 1);
+            }
+            self.0 = self.0.wrapping_add(b.0);
+        }
+
+        fn sub_acc(&mut self, b: &Fused) {
+            self.0 = self.0.wrapping_sub(b.0);
+        }
+
+        fn dup(&self) -> Fused {
+            *self
+        }
+    }
+
+    /// A value for a column that adds up in a `Fused` sum.
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    struct Tick(u64);
+
+    impl VNewtype for Tick {
+        type Base = u64;
+
+        fn to_base(self) -> u64 {
+            self.0
+        }
+
+        fn from_base(b: u64) -> Result<Tick, PackError> {
+            Ok(Tick(b))
+        }
+    }
+
+    impl VAdds for Tick {
+        type Acc = Fused;
+
+        fn acc_of(v: Tick) -> Fused {
+            Fused(v.0)
+        }
+    }
+
+    let model = [1, 2, 2, 3, 4].map(Tick);
+    let p = VerifiedAccColumn::<Tick>::from_values(&model);
+    let moves: [fn(&mut VerifiedAccIter<'_, Tick>); 7] = [
+        |it| {
+            let _ = it.next();
+        },
+        |it| {
+            let _ = it.nth(2);
+        },
+        |it| it.advance_to(4),
+        |it| {
+            let _ = it.next_run();
+        },
+        |it| {
+            let _ = it.delta_nth(3);
+        },
+        |it| {
+            let _ = it.shift_next(3..5);
+        },
+        // which adds the sum so far to what came before it
+        |it| it.reset_prefix(),
+    ];
+    for go in moves {
+        let mut it = p.prefix_iter();
+        assert_eq!(it.next().map(|pv| pv.total()), Some(Fused(1)));
+        // the next add panics
+        FUSE.set(0);
+        let said = panic_of(std::panic::AssertUnwindSafe(|| go(&mut it)));
+        FUSE.set(u32::MAX);
+        assert_eq!(said.as_deref(), Some("the fuse is burnt"));
+        assert_eq!(
+            (it.pos(), it.end_pos(), it.len(), it.total()),
+            (0, 0, 0, Fused(0))
+        );
+        assert!(it.next().is_none() && it.next_run().is_none());
+        // the column is as it was
+        assert_eq!(p.to_vec(), model);
+        let sums: Vec<u64> = p.prefix_iter().map(|pv| pv.total().0).collect();
+        assert_eq!(sums, [1, 3, 5, 8, 12]);
+    }
+    // and a fuse that burns later, in the middle of a move
+    for burn in 1..3 {
+        let mut it = p.prefix_iter();
+        FUSE.set(burn);
+        let said = panic_of(std::panic::AssertUnwindSafe(|| it.by_ref().count()));
+        FUSE.set(u32::MAX);
+        assert_eq!(said.as_deref(), Some("the fuse is burnt"));
+        assert_eq!(
+            (it.pos(), it.end_pos(), it.len(), it.total()),
+            (0, 0, 0, Fused(0))
+        );
     }
 }

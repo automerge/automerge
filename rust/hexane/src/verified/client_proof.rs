@@ -367,6 +367,28 @@
 //! ([`told_by_an_acc_prefix`], [`told_by_an_acc_total`],
 //! [`told_by_an_acc_range`], [`told_by_add_times`]).
 //!
+//! An accumulator column's iterator keeps what the values it has passed
+//! add up to, and gives each value with the sums before it and through
+//! it ([`running_accs`], [`accs_in_a_range`],
+//! [`a_value_with_its_accs`], [`a_step_with_its_accs`]), which are the
+//! sums the column answers with ([`accs_two_ways`],
+//! [`a_running_acc_two_ways`]). Its sum counts the values it steps
+//! over, in their order, and counts from where it is started again
+//! ([`added_by_moving`], [`two_skips_added`], and [`moved_with_accs`]
+//! in a column of [`Step`]s, whose order matters:
+//! [`steps_read_in_order`]). It reads a run at a time, the run's value
+//! added as many times over as the run is long
+//! ([`added_by_run_moves`], [`a_run_with_its_accs`],
+//! [`a_run_of_marks`]), and its runs make a column
+//! ([`accs_copied_by_runs`]); it finds a value further on with what is
+//! passed over ([`found_with_accs`], [`a_range_added_two_ways`]); and
+//! it is suspended and resumed with its sum
+//! ([`handed_over_with_its_acc`], [`added_in_two_goes`],
+//! [`accs_ended_by_a_push`]). Each function says its part on its own
+//! here as well ([`told_by_an_acc_iter`] and those after it), and what
+//! is proved of every type is proved of the client's own
+//! ([`accs_of_the_clients_own`]).
+//!
 //! This module exists only while Verus checks the crate.
 
 use super::{
@@ -378,9 +400,10 @@ use super::{
     runs_of, scan_of, scan_taken, sorted, sorted_for, sum_of, summed, sums_fit, times, total_len,
     total_str_len, window, AccIndex, Get, LenIndex, SumIndex, VAccum, VAccumulated, VAdds, VAmount,
     VCodec, VCount, VGet, VGroup, VIndex, VKeeps, VNewtype, VSpec, VSum, VSummed, VValue,
-    VerifiedAccColumn, VerifiedColumn, VerifiedDecoder, VerifiedEncoder, VerifiedEncoderState,
-    VerifiedIter, VerifiedIterState, VerifiedPrefixColumn, VerifiedPrefixIter,
-    VerifiedPrefixIterState, VerifiedPrefixSeek, VerifiedPrefixedValue, VerifiedRuns,
+    VerifiedAccColumn, VerifiedAccIter, VerifiedAccIterState, VerifiedAccSeek, VerifiedAccValue,
+    VerifiedColumn, VerifiedDecoder, VerifiedEncoder, VerifiedEncoderState, VerifiedIter,
+    VerifiedIterState, VerifiedPrefixColumn, VerifiedPrefixIter, VerifiedPrefixIterState,
+    VerifiedPrefixSeek, VerifiedPrefixedValue, VerifiedRuns,
 };
 use crate::{Leb128, LoadOpts, PackError, Run};
 use std::cmp::Ordering;
@@ -8805,6 +8828,1277 @@ fn steps_in_order() -> (r: (Board, Board))
         assert(1u64 ^ ((2u64 >> 32) | (2u64 << 32)) == 0x2_0000_0001u64 && 2u64 ^ 1u64 == 3u64) by (bit_vector);
     }
     (one.get_prefix(2), other.get_prefix(2))
+}
+
+// ── The iterator of an accumulator column ───────────────────────────────────
+
+/// A `for` loop over an accumulator column's iterator gives each value
+/// with what the values through it add up to: here those go into a
+/// `Vec`, which then holds, for each position, what the values through
+/// it add up to. For every type an accumulator column holds, and every
+/// codec.
+#[allow(dead_code)]
+fn running_accs<V: VAccumulated + VValue<C>, C: VCodec>(col: &VerifiedAccColumn<V, C>) -> (out: Vec<V::Acc>)
+    ensures
+        out@.len() == col@.len(),
+        forall|i: int| 0 <= i < out@.len() ==> #[trigger] out@[i] == accumulated::<V>(col@.take(i + 1)),
+{
+    let it = col.prefix_iter();
+    let ghost all = it.items();
+    proof {
+        it.lemma_items();
+    }
+    let mut out: Vec<V::Acc> = Vec::new();
+    for pv in at: it
+        invariant
+            at.seq() == all,
+            out@.len() == at.index(),
+            forall|i: int| 0 <= i < out@.len() ==> #[trigger] out@[i] == all[i].total(),
+    {
+        out.push(pv.total());
+    }
+    out
+}
+
+/// The values of a range of an accumulator column, each with what the
+/// values before it add up to: counted from the column's start, though
+/// the iterator reads only the range.
+#[allow(dead_code)]
+fn accs_in_a_range<'a, V: VAccumulated + VValue<C>, C: VCodec>(col: &'a VerifiedAccColumn<V, C>, a: usize, b: usize) -> (out:
+    Vec<(Get<'a, V>, V::Acc)>)
+    requires
+        a <= b <= col@.len(),
+    ensures
+        out@.len() == b - a,
+        forall|i: int|
+            0 <= i < out@.len() ==> {
+                &&& (#[trigger] out@[i]).0.sv() == col@[a + i]
+                &&& out@[i].1 == accumulated::<V>(col@.take(a + i))
+            },
+{
+    let it = col.prefix_iter_range(a, b);
+    let ghost all = it.items();
+    proof {
+        it.lemma_items();
+    }
+    let mut out: Vec<(Get<'a, V>, V::Acc)> = Vec::new();
+    for pv in at: it
+        invariant
+            at.seq() == all,
+            out@.len() == at.index(),
+            forall|i: int|
+                0 <= i < out@.len() ==> (#[trigger] out@[i]).0 == all[i].value && out@[i].1 == all[i].prefix(),
+    {
+        out.push((pv.value, pv.prefix()));
+    }
+    out
+}
+
+/// One value of an accumulator column with its sums: the value at the
+/// position, what the values before it add up to and what those through
+/// it do, which is the first and then what the value adds.
+#[allow(dead_code)]
+fn a_value_with_its_accs<'a, V: VAccumulated + VValue<C>, C: VCodec>(col: &'a VerifiedAccColumn<V, C>, i: usize) -> (r: (
+    V::Acc,
+    Get<'a, V>,
+    V::Acc,
+))
+    requires
+        i < col@.len(),
+    ensures
+        r.1.sv() == col@[i as int],
+        r.0 == accumulated::<V>(col@.take(i as int)),
+        r.2 == accumulated::<V>(col@.take(i + 1)),
+        r.2 == <V::Acc as VGroup>::plus(r.0, V::adds(col@[i as int])),
+{
+    let pv = col.get_prefixed(i).unwrap();
+    (pv.prefix(), pv.value, pv.total())
+}
+
+/// The sums that come with a value are the sums the column answers
+/// with for its position.
+#[allow(dead_code)]
+fn accs_two_ways<V: VAccumulated + VValue<C>, C: VCodec>(col: &VerifiedAccColumn<V, C>, i: usize) -> (r: (
+    (V::Acc, V::Acc),
+    (V::Acc, V::Acc),
+))
+    requires
+        i < col@.len(),
+    ensures
+        r.0 == r.1,
+{
+    let pv = col.get_prefixed(i).unwrap();
+    ((pv.prefix(), pv.total()), (col.get_prefix(i), col.get_total(i)))
+}
+
+/// A step of an accumulator column's iterator, wherever it stands: the
+/// sum before the value it gives is the running sum as it was, the sum
+/// through the value is the running sum after, and the second is the
+/// first and then what the value adds.
+#[allow(dead_code)]
+fn a_step_with_its_accs<'a, V: VAccumulated + VValue<C>, C: VCodec>(it: &mut VerifiedAccIter<'a, V, C>) -> (r: Option<
+    (V::Acc, Get<'a, V>, V::Acc),
+>)
+    ensures
+        match r {
+            Some((before, v, through)) => {
+                &&& old(it).rest().len() > 0
+                &&& v.sv() == old(it).rest()[0]
+                &&& before == old(it).total()
+                &&& through == final(it).total()
+                &&& through == <V::Acc as VGroup>::plus(before, V::adds(v.sv()))
+                &&& final(it).rest() == old(it).rest().skip(1)
+            },
+            None => old(it).rest().len() == 0 && final(it).total() == old(it).total(),
+        },
+{
+    let before = it.total();
+    match it.next() {
+        Some(pv) => {
+            let through = it.total();
+            Some((before, pv.value, through))
+        },
+        None => None,
+    }
+}
+
+/// What the values of a range add up to, read with an iterator: moved
+/// to where the range starts, its sum started again there, and moved to
+/// where the range ends. It is what the column answers with for the
+/// range.
+#[allow(dead_code)]
+fn added_by_moving<V: VAccumulated + VValue<C>, C: VCodec>(col: &VerifiedAccColumn<V, C>, a: usize, b: usize) -> (r: (
+    V::Acc,
+    V::Acc,
+))
+    requires
+        a <= b <= col@.len(),
+    ensures
+        r.0 == accumulated::<V>(col@.subrange(a as int, b as int)),
+        r.0 == r.1,
+{
+    let mut it = col.prefix_iter();
+    it.advance_to(a);
+    it.reset_prefix();
+    it.advance_to(b);
+    (it.total(), col.sum_range(a, b))
+}
+
+/// Two values read with one iterator, which steps over the values
+/// before each: the sums through them count the values stepped over.
+#[allow(dead_code)]
+fn two_skips_added<V: VAccumulated + VValue<C>, C: VCodec>(col: &VerifiedAccColumn<V, C>, i: usize, j: usize) -> (r: (
+    V::Acc,
+    V::Acc,
+))
+    requires
+        i < j < col@.len(),
+    ensures
+        r.0 == accumulated::<V>(col@.take(i + 1)),
+        r.1 == accumulated::<V>(col@.take(j + 1)),
+{
+    let mut it = col.prefix_iter();
+    let a = it.nth(i).unwrap();
+    let b = it.nth(j - i - 1).unwrap();
+    (a.total(), b.total())
+}
+
+/// The running sum of an iterator whose sum counts from the column's
+/// start is what the column answers with for where it stands.
+#[allow(dead_code)]
+fn a_running_acc_two_ways<V: VAccumulated + VValue<C>, C: VCodec>(
+    it: &VerifiedAccIter<'_, V, C>,
+    col: &VerifiedAccColumn<V, C>,
+) -> (r: (V::Acc, V::Acc))
+    requires
+        it.source() == Some(*col),
+        it.base_pos() == 0,
+    ensures
+        r.0 == r.1,
+{
+    proof {
+        it.lemma_source();
+    }
+    (it.total(), col.get_prefix(it.pos()))
+}
+
+/// Where each move leaves an accumulator column's iterator, its window
+/// and its running sum: the sum is of the values the iterator has
+/// passed, in their order, whether it read them or stepped over them,
+/// and a move of the window alone leaves it. In a column of ten
+/// [`Step`]s, whose sums depend on the order.
+#[allow(dead_code)]
+fn moved_with_accs(col: &VerifiedAccColumn<Step>)
+    requires
+        col@.len() == 10,
+{
+    let ghost upto = |k: int| accumulated::<Step>(col@.take(k));
+    // an iterator of a range: its sum counts from the column's start
+    let mut it = col.prefix_iter_range(2, 8);
+    let (p, e, n, w, t) = (it.pos(), it.end_pos(), it.len(), it.items_left(), it.total());
+    assert(p == 2 && e == 8 && n == 6 && w == 6 && t == upto(2));
+    // a step
+    let a = it.next().unwrap();
+    let t = it.total();
+    assert(a.value == col@[2] && a.prefix() == upto(2) && a.total() == upto(3) && t == upto(3));
+    // values stepped over are added
+    it.advance_by(2);
+    let (p, t) = (it.pos(), it.total());
+    assert(p == 5 && t == upto(5));
+    // a place behind the iterator: it stays, and so does its sum
+    it.advance_to(4);
+    let (p, t2) = (it.pos(), it.total());
+    assert(p == 5 && t2 == t);
+    // a wider window, which ends past the column: the sum stays
+    it.set_max(20);
+    let (e, n, w, t3) = (it.end_pos(), it.len(), it.items_left(), it.total());
+    assert(e == 20 && n == 5 && w == 15 && t3 == t);
+    // past what it has: all of it is passed, and added
+    it.advance_by(9);
+    let (p, e, n, t) = (it.pos(), it.end_pos(), it.len(), it.total());
+    assert(p == 10 && e == 10 && n == 0);
+    assert(t == accumulated::<Step>(col@)) by {
+        assert(col@.take(10) =~= col@);
+    }
+    // the window moved to a range, and then to one that starts behind
+    // the iterator
+    let mut it = col.prefix_iter();
+    it.shift(3..7);
+    let (p, e, n, t) = (it.pos(), it.end_pos(), it.len(), it.total());
+    assert(p == 3 && e == 7 && n == 4 && t == upto(3));
+    it.shift(1..5);
+    let (p, e, n, t) = (it.pos(), it.end_pos(), it.len(), it.total());
+    assert(p == 3 && e == 5 && n == 2 && t == upto(3));
+    // the first value of a window, with its sums
+    let b = it.shift_next(6..9).unwrap();
+    let (p, e, n, t) = (it.pos(), it.end_pos(), it.len(), it.total());
+    assert(b.value == col@[6] && b.prefix() == upto(6) && b.total() == upto(7));
+    assert(p == 7 && e == 9 && n == 2 && t == upto(7));
+    // a window with no value
+    let c = it.shift_next(9..9);
+    let (p, e, t) = (it.pos(), it.end_pos(), it.total());
+    assert(c is None && p == 9 && e == 9 && t == upto(9));
+    // the sum started again: it counts from where the iterator stands
+    let mut it = col.prefix_iter_range(4, 10);
+    it.reset_prefix();
+    let (p, e, t) = (it.pos(), it.end_pos(), it.total());
+    assert(p == 4 && e == 10 && t == (Board { lit: 0, turned: false }));
+    let d = it.nth(2).unwrap();
+    let t = it.total();
+    assert(d.value == col@[6] && t == d.total());
+    assert(d.prefix() == accumulated::<Step>(col@.subrange(4, 6)) && d.total() == accumulated::<Step>(col@.subrange(4, 7)));
+}
+
+/// Of an iterator a client is handed, wherever it stands and wherever
+/// its sum counts from: the running sum is what the column's values
+/// from there up to the iterator add up to.
+#[allow(dead_code)]
+fn told_of_the_running_acc<V: VAccumulated + VValue<C>, C: VCodec>(it: &VerifiedAccIter<'_, V, C>) -> (r: V::Acc)
+    ensures
+        it.base_pos() <= it.pos() <= it.column().len(),
+        r == it.total(),
+        r == accumulated::<V>(it.column().subrange(it.base_pos() as int, it.pos() as int)),
+{
+    it.total()
+}
+
+/// The running sum under its other name: before the value the iterator
+/// is to give next.
+#[allow(dead_code)]
+fn told_of_the_acc_before<V: VAccumulated + VValue<C>, C: VCodec>(it: &VerifiedAccIter<'_, V, C>) -> (r: V::Acc)
+    ensures
+        it.base_pos() <= it.pos() <= it.column().len(),
+        r == it.total(),
+        r == accumulated::<V>(it.column().subrange(it.base_pos() as int, it.pos() as int)),
+{
+    it.prefix()
+}
+
+/// Of an iterator a client is handed, what it has left to give: each of
+/// the values left, with the sums before it and through it; and that it
+/// reads the values of its column.
+#[allow(dead_code)]
+fn told_of_the_accs_left<V: VAccumulated + VValue<C>, C: VCodec>(it: &VerifiedAccIter<'_, V, C>)
+    ensures
+        it.items().len() == it.rest().len(),
+        forall|i: int|
+            0 <= i < it.items().len() ==> {
+                &&& (#[trigger] it.items()[i]).value.sv() == it.rest()[i]
+                &&& it.items()[i].total() == it.acc_to(it.pos() + i + 1)
+                &&& it.items()[i].prefix() == it.acc_to(it.pos() + i)
+                &&& it.items()[i].total() == <V::Acc as VGroup>::plus(it.items()[i].prefix(), V::adds(it.rest()[i]))
+            },
+        it.base_pos() <= it.pos() <= it.column().len(),
+        it.total() == it.acc_to(it.pos() as int),
+        match it.source() {
+            Some(c) => it.column() == c@,
+            None => it.column().len() == 0,
+        },
+{
+    proof {
+        it.lemma_items();
+        it.lemma_total();
+        it.lemma_source();
+    }
+}
+
+/// What `prefix_iter` says by itself, of any accumulator column: the
+/// iterator reads the column, has all its values left, and its sum
+/// counts from the column's start and is what no values add up to.
+#[allow(dead_code)]
+fn told_by_an_acc_iter<'a, V: VAccumulated + VValue<C>, C: VCodec>(col: &'a VerifiedAccColumn<V, C>) -> (it: VerifiedAccIter<
+    'a,
+    V,
+    C,
+>)
+    ensures
+        it.rest() == col@,
+        it.column() == col@,
+        it.source() == Some(*col),
+        it.pos() == 0,
+        it.end_pos() == col@.len(),
+        it.base_pos() == 0,
+        it.total() == <V::Acc as VGroup>::zero(),
+{
+    col.prefix_iter()
+}
+
+/// What `prefix_iter_range` says by itself: the iterator has the values
+/// of the range left, and its sum counts from the column's start, so it
+/// is what the values before the range add up to.
+#[allow(dead_code)]
+fn told_by_an_acc_iter_range<'a, V: VAccumulated + VValue<C>, C: VCodec>(
+    col: &'a VerifiedAccColumn<V, C>,
+    start: usize,
+    end: usize,
+) -> (it: VerifiedAccIter<'a, V, C>)
+    requires
+        start <= end <= col@.len(),
+    ensures
+        it.rest() == col@.subrange(start as int, end as int),
+        it.column() == col@,
+        it.source() == Some(*col),
+        it.pos() == start,
+        it.end_pos() == end,
+        it.base_pos() == 0,
+        it.total() == accumulated::<V>(col@.take(start as int)),
+{
+    col.prefix_iter_range(start, end)
+}
+
+/// What `get_prefixed` says by itself of an accumulator column, of any
+/// position.
+#[allow(dead_code)]
+fn told_by_an_acc_get_prefixed<'a, V: VAccumulated + VValue<C>, C: VCodec>(col: &'a VerifiedAccColumn<V, C>, index: usize) -> (r:
+    Option<VerifiedAccValue<'a, V>>)
+    ensures
+        index < col@.len() ==> {
+            &&& r matches Some(pv)
+            &&& pv.value.sv() == col@[index as int]
+            &&& pv.total() == accumulated::<V>(col@.take(index + 1))
+            &&& pv.prefix() == accumulated::<V>(col@.take(index as int))
+            &&& pv.total() == <V::Acc as VGroup>::plus(pv.prefix(), V::adds(pv.value.sv()))
+        },
+        index >= col@.len() ==> r is None,
+{
+    col.get_prefixed(index)
+}
+
+/// What a value with its sums says of the sum through it: a copy of the
+/// one it holds.
+#[allow(dead_code)]
+fn told_by_an_acc_values_total<'a, V: VAccumulated>(pv: &VerifiedAccValue<'a, V>) -> (r: V::Acc)
+    ensures
+        r == pv.total,
+        r == pv.total(),
+{
+    pv.total()
+}
+
+/// What a value with its sums says of the sum before it: the sum
+/// through it, and then what undoes what the value adds, which is what
+/// gives nothing when added after that.
+#[allow(dead_code)]
+fn told_by_an_acc_values_prefix<'a, V: VAccumulated>(pv: &VerifiedAccValue<'a, V>) -> (r: V::Acc)
+    ensures
+        r == pv.prefix(),
+        r == <V::Acc as VGroup>::plus(
+            pv.total,
+            <V::Acc as VGroup>::minus(<V::Acc as VGroup>::zero(), V::adds(pv.value.sv())),
+        ),
+{
+    pv.prefix()
+}
+
+/// What a copy of a value with its sums is: the same.
+#[allow(dead_code)]
+fn told_by_an_acc_values_clone<'a, V: VAccumulated>(pv: &VerifiedAccValue<'a, V>) -> (r: VerifiedAccValue<'a, V>)
+    ensures
+        r == *pv,
+        r.value == pv.value,
+        r.total == pv.total,
+{
+    pv.clone()
+}
+
+/// Where the sum through a value is some sum and then what the value
+/// adds, that sum is the one before the value: of any value with its
+/// sums, a client's own as well.
+#[allow(dead_code)]
+proof fn told_of_the_sum_undone<'a, V: VAccumulated>(pv: VerifiedAccValue<'a, V>, p: V::Acc)
+    requires
+        pv.total() == <V::Acc as VGroup>::plus(p, V::adds(pv.value.sv())),
+    ensures
+        pv.prefix() == p,
+{
+    pv.lemma_prefix(p);
+}
+
+/// What `next` says by itself of an accumulator column's iterator: in
+/// the words of the iterator's own specification, and in those of
+/// Verus's specification of an iterator.
+#[allow(dead_code)]
+fn told_by_an_acc_next<'a, V: VAccumulated + VValue<C>, C: VCodec>(it: &mut VerifiedAccIter<'a, V, C>) -> (r: Option<
+    VerifiedAccValue<'a, V>,
+>)
+    ensures
+        match r {
+            Some(pv) => {
+                &&& old(it).rest().len() > 0
+                &&& pv.value.sv() == old(it).rest()[0]
+                &&& pv.prefix() == old(it).total()
+                &&& pv.total() == final(it).total()
+                &&& pv.prefix() == old(it).acc_to(old(it).pos() as int)
+                &&& pv.total() == old(it).acc_to(old(it).pos() + 1)
+                &&& pv.total() == <V::Acc as VGroup>::plus(pv.prefix(), V::adds(pv.value.sv()))
+                &&& final(it).rest() == old(it).rest().skip(1)
+                &&& final(it).pos() == old(it).pos() + 1
+                &&& final(it).end_pos() == old(it).end_pos()
+            },
+            None => {
+                &&& old(it).rest().len() == 0
+                &&& final(it).rest().len() == 0
+                &&& final(it).pos() == old(it).pos()
+                &&& final(it).end_pos() == old(it).pos()
+                &&& final(it).total() == old(it).total()
+            },
+        },
+        final(it).column() == old(it).column(),
+        final(it).source() == old(it).source(),
+        final(it).base_pos() == old(it).base_pos(),
+        old(it).items().len() > 0 ==> r == Some(old(it).items()[0]) && final(it).items() == old(it).items().drop_first(),
+        old(it).items().len() == 0 ==> r is None && final(it).items() == old(it).items(),
+{
+    it.next()
+}
+
+/// What `nth` says by itself of an accumulator column's iterator.
+#[allow(dead_code)]
+fn told_by_an_acc_nth<'a, V: VAccumulated + VValue<C>, C: VCodec>(it: &mut VerifiedAccIter<'a, V, C>, n: usize) -> (r: Option<
+    VerifiedAccValue<'a, V>,
+>)
+    ensures
+        n < old(it).rest().len() ==> {
+            &&& r == Some(old(it).items()[n as int])
+            &&& r matches Some(pv)
+            &&& pv.value.sv() == old(it).rest()[n as int]
+            &&& pv.total() == final(it).total()
+            &&& pv.total() == old(it).acc_to(old(it).pos() + n + 1)
+            &&& pv.prefix() == old(it).acc_to(old(it).pos() + n)
+            &&& pv.total() == <V::Acc as VGroup>::plus(pv.prefix(), V::adds(pv.value.sv()))
+            &&& final(it).items() == old(it).items().skip(n + 1)
+            &&& final(it).rest() == old(it).rest().skip(n + 1)
+            &&& final(it).pos() == old(it).pos() + n + 1
+            &&& final(it).end_pos() == old(it).end_pos()
+        },
+        n >= old(it).rest().len() ==> {
+            &&& r is None
+            &&& final(it).rest().len() == 0
+            &&& final(it).pos() == old(it).pos() + old(it).rest().len()
+            &&& final(it).end_pos() == final(it).pos()
+        },
+        final(it).column() == old(it).column(),
+        final(it).source() == old(it).source(),
+        final(it).base_pos() == old(it).base_pos(),
+        final(it).total() == old(it).acc_to(final(it).pos() as int),
+{
+    it.nth(n)
+}
+
+/// What the questions put to an accumulator column's iterator say by
+/// themselves. Asked where it stands, it says where: within its
+/// window, in its column and not before where its sum counts from.
+#[allow(dead_code)]
+fn told_by_an_acc_iters_place<V: VAccumulated + VValue<C>, C: VCodec>(it: &VerifiedAccIter<'_, V, C>) -> (r: usize)
+    ensures
+        r == it.pos(),
+        it.base_pos() <= it.pos() <= it.end_pos(),
+        it.pos() <= it.column().len(),
+        it.rest() == window(it.column(), it.pos() as int, it.end_pos() as int),
+{
+    it.pos()
+}
+
+/// Asked how far its window reaches, an iterator says how many
+/// positions, which may be past the column.
+#[allow(dead_code)]
+fn told_by_an_acc_iters_reach<V: VAccumulated + VValue<C>, C: VCodec>(it: &VerifiedAccIter<'_, V, C>) -> (r: usize)
+    ensures
+        r == it.end_pos() - it.pos(),
+{
+    it.items_left()
+}
+
+/// Asked how many values it has left, an iterator says how many.
+#[allow(dead_code)]
+fn told_by_an_acc_iters_len<V: VAccumulated + VValue<C>, C: VCodec>(it: &VerifiedAccIter<'_, V, C>) -> (r: usize)
+    ensures
+        r == it.rest().len(),
+        r == it.items().len(),
+{
+    it.len()
+}
+
+/// Asked how many values it may yet give, an iterator says exactly how
+/// many it has left, as its least and as its most.
+#[allow(dead_code)]
+fn told_by_an_acc_size_hint<V: VAccumulated + VValue<C>, C: VCodec>(it: &VerifiedAccIter<'_, V, C>) -> (r: (
+    usize,
+    Option<usize>,
+))
+    ensures
+        r.0 == it.rest().len(),
+        r.0 == it.items().len(),
+        r.1 == Some(r.0),
+{
+    it.size_hint()
+}
+
+/// Asked for the window's end alone, an iterator says as much.
+#[allow(dead_code)]
+fn told_by_an_acc_iters_end<V: VAccumulated + VValue<C>, C: VCodec>(it: &VerifiedAccIter<'_, V, C>) -> (r: usize)
+    ensures
+        r == it.end_pos(),
+        it.base_pos() <= it.pos() <= it.end_pos(),
+        it.pos() <= it.column().len(),
+        it.rest() == window(it.column(), it.pos() as int, it.end_pos() as int),
+{
+    it.end_pos()
+}
+
+/// What `reset_prefix` says by itself: the iterator and its window stay,
+/// and its sum counts from where it stands and is what no values add
+/// up to.
+#[allow(dead_code)]
+fn told_by_an_acc_reset<V: VAccumulated + VValue<C>, C: VCodec>(it: &mut VerifiedAccIter<'_, V, C>)
+    ensures
+        final(it).rest() == old(it).rest(),
+        final(it).column() == old(it).column(),
+        final(it).source() == old(it).source(),
+        final(it).pos() == old(it).pos(),
+        final(it).end_pos() == old(it).end_pos(),
+        final(it).base_pos() == old(it).pos(),
+        final(it).total() == <V::Acc as VGroup>::zero(),
+{
+    it.reset_prefix()
+}
+
+/// What `set_max` says by itself of an accumulator column's iterator.
+#[allow(dead_code)]
+fn told_by_an_acc_set_max<V: VAccumulated + VValue<C>, C: VCodec>(it: &mut VerifiedAccIter<'_, V, C>, end: usize)
+    ensures
+        final(it).column() == old(it).column(),
+        final(it).source() == old(it).source(),
+        final(it).base_pos() == old(it).base_pos(),
+        final(it).total() == old(it).total(),
+        final(it).pos() == old(it).pos(),
+        final(it).end_pos() == if end >= old(it).pos() {
+            end
+        } else {
+            old(it).pos()
+        },
+        final(it).rest() == window(old(it).column(), old(it).pos() as int, end as int),
+{
+    it.set_max(end)
+}
+
+/// What `advance_to` says by itself of an accumulator column's iterator.
+#[allow(dead_code)]
+fn told_by_an_acc_advance_to<V: VAccumulated + VValue<C>, C: VCodec>(it: &mut VerifiedAccIter<'_, V, C>, target: usize)
+    ensures
+        final(it).column() == old(it).column(),
+        final(it).source() == old(it).source(),
+        final(it).base_pos() == old(it).base_pos(),
+        final(it).total() == old(it).acc_to(final(it).pos() as int),
+        final(it).rest() == past(old(it).rest(), target - old(it).pos()),
+        target <= old(it).pos() ==> {
+            &&& final(it).pos() == old(it).pos()
+            &&& final(it).end_pos() == old(it).end_pos()
+        },
+        old(it).pos() < target <= old(it).pos() + old(it).rest().len() ==> {
+            &&& final(it).pos() == target
+            &&& final(it).end_pos() == old(it).end_pos()
+        },
+        target > old(it).pos() + old(it).rest().len() ==> {
+            &&& final(it).pos() == old(it).pos() + old(it).rest().len()
+            &&& final(it).end_pos() == final(it).pos()
+        },
+{
+    it.advance_to(target)
+}
+
+/// What `advance_by` says by itself of an accumulator column's iterator.
+#[allow(dead_code)]
+fn told_by_an_acc_advance_by<V: VAccumulated + VValue<C>, C: VCodec>(it: &mut VerifiedAccIter<'_, V, C>, amount: usize)
+    ensures
+        final(it).column() == old(it).column(),
+        final(it).source() == old(it).source(),
+        final(it).base_pos() == old(it).base_pos(),
+        final(it).total() == old(it).acc_to(final(it).pos() as int),
+        final(it).rest() == past(old(it).rest(), amount as int),
+        amount <= old(it).rest().len() ==> {
+            &&& final(it).pos() == old(it).pos() + amount
+            &&& final(it).end_pos() == old(it).end_pos()
+        },
+        amount > old(it).rest().len() ==> {
+            &&& final(it).pos() == old(it).pos() + old(it).rest().len()
+            &&& final(it).end_pos() == final(it).pos()
+        },
+{
+    it.advance_by(amount)
+}
+
+/// What `shift` says by itself of an accumulator column's iterator.
+#[allow(dead_code)]
+fn told_by_an_acc_shift<V: VAccumulated + VValue<C>, C: VCodec>(it: &mut VerifiedAccIter<'_, V, C>, range: Range<usize>)
+    ensures
+        final(it).column() == old(it).column(),
+        final(it).source() == old(it).source(),
+        final(it).base_pos() == old(it).base_pos(),
+        final(it).total() == old(it).acc_to(final(it).pos() as int),
+        final(it).rest() == window(
+            old(it).column(),
+            if range.start <= old(it).pos() {
+                old(it).pos() as int
+            } else {
+                range.start as int
+            },
+            range.end as int,
+        ),
+        range.start <= old(it).pos() ==> {
+            &&& final(it).pos() == old(it).pos()
+            &&& final(it).end_pos() == if range.end >= old(it).pos() {
+                range.end
+            } else {
+                old(it).pos()
+            }
+        },
+        old(it).pos() < range.start <= range.end && range.start <= old(it).column().len() ==> {
+            &&& final(it).pos() == range.start
+            &&& final(it).end_pos() == range.end
+        },
+        old(it).pos() < range.start && (range.start > range.end || range.start > old(it).column().len()) ==> {
+            &&& final(it).pos() == if range.end <= old(it).pos() {
+                old(it).pos() as int
+            } else if range.end <= old(it).column().len() {
+                range.end as int
+            } else {
+                old(it).column().len() as int
+            }
+            &&& final(it).end_pos() == final(it).pos()
+        },
+{
+    it.shift(range)
+}
+
+/// What `shift_next` says by itself of an accumulator column's
+/// iterator.
+#[allow(dead_code)]
+fn told_by_an_acc_shift_next<'a, V: VAccumulated + VValue<C>, C: VCodec>(
+    it: &mut VerifiedAccIter<'a, V, C>,
+    range: Range<usize>,
+) -> (r: Option<VerifiedAccValue<'a, V>>)
+    requires
+        range.start >= old(it).pos(),
+    ensures
+        final(it).column() == old(it).column(),
+        final(it).source() == old(it).source(),
+        final(it).base_pos() == old(it).base_pos(),
+        final(it).total() == old(it).acc_to(final(it).pos() as int),
+        ({
+            let w = window(old(it).column(), range.start as int, range.end as int);
+            &&& w.len() > 0 ==> {
+                &&& r matches Some(pv)
+                &&& pv.value.sv() == w[0]
+                &&& pv.total() == final(it).total()
+                &&& pv.total() == old(it).acc_to(range.start + 1)
+                &&& pv.prefix() == old(it).acc_to(range.start as int)
+                &&& pv.total() == <V::Acc as VGroup>::plus(pv.prefix(), V::adds(pv.value.sv()))
+                &&& final(it).rest() == w.skip(1)
+                &&& final(it).pos() == range.start + 1
+                &&& final(it).end_pos() == range.end
+            }
+            &&& w.len() == 0 ==> {
+                &&& r is None
+                &&& final(it).rest().len() == 0
+                &&& final(it).pos() == if range.end <= old(it).pos() {
+                    old(it).pos() as int
+                } else if range.end <= old(it).column().len() {
+                    range.end as int
+                } else {
+                    old(it).column().len() as int
+                }
+                &&& final(it).end_pos() == final(it).pos()
+            }
+        }),
+{
+    it.shift_next(range)
+}
+
+/// What an accumulator column's values add up to, read a run at a time:
+/// when no run is left, the running sum is that of the column, and the
+/// runs' counts have added up to its length. For every type an
+/// accumulator column holds, and every codec.
+#[allow(dead_code)]
+fn added_by_run_moves<V: VAccumulated + VValue<C>, C: VCodec>(col: &VerifiedAccColumn<V, C>) -> (r: (V::Acc, usize))
+    ensures
+        r.0 == accumulated::<V>(col@),
+        r.1 == col@.len(),
+{
+    let mut it = col.prefix_iter();
+    let mut count: usize = 0;
+    loop
+        invariant
+            it.column() == col@,
+            it.base_pos() == 0,
+            it.rest().len() == col@.len() - it.pos(),
+            count == it.pos(),
+        decreases it.rest().len(),
+    {
+        match it.next_run() {
+            Some(run) => {
+                count = count + run.count;
+            },
+            None => {
+                let sum = it.total();
+                proof {
+                    assert(col@.subrange(0, col@.len() as int) =~= col@);
+                }
+                return (sum, count);
+            },
+        }
+    }
+}
+
+/// A run of an accumulator column's iterator, wherever it stands: the
+/// values the iterator had next are the run's, as many as the run is
+/// long and no more, and the running sum is as it was and then what the
+/// run's value adds, as many times over as the run is long.
+#[allow(dead_code)]
+fn a_run_with_its_accs<'a, V: VAccumulated + VValue<C>, C: VCodec>(it: &mut VerifiedAccIter<'a, V, C>) -> (r: Option<
+    (usize, Get<'a, V>, V::Acc),
+>)
+    ensures
+        match r {
+            Some((n, v, through)) => {
+                &&& 1 <= n <= old(it).rest().len()
+                &&& forall|i: int| 0 <= i < n ==> #[trigger] old(it).rest()[i] == v.sv()
+                &&& n < old(it).rest().len() ==> old(it).rest()[n as int] != v.sv()
+                &&& through == final(it).total()
+                &&& through == <V::Acc as VGroup>::plus(old(it).total(), times::<V::Acc>(n as nat, V::adds(v.sv())))
+                &&& final(it).rest() == old(it).rest().skip(n as int)
+            },
+            None => old(it).rest().len() == 0 && final(it).total() == old(it).total(),
+        },
+{
+    match it.next_run() {
+        Some(run) => Some((run.count, run.value.value, run.value.total())),
+        None => None,
+    }
+}
+
+/// A run of marks read by the iterator: an even number of marks of one
+/// kind leave open the kinds that were, and an odd number open the one
+/// kind or close it, by what the client proved of its accumulator added
+/// many times over ([`lemma_flags_times`]).
+#[allow(dead_code)]
+fn a_run_of_marks(it: &mut VerifiedAccIter<'_, Mark>) -> (r: Option<(usize, Mark, Flags)>)
+    ensures
+        match r {
+            Some((n, v, through)) => {
+                &&& through == final(it).total()
+                &&& n % 2 == 0 ==> through == old(it).total()
+                &&& n % 2 == 1 ==> through == Flags(old(it).total().0 ^ flag_of(v))
+            },
+            None => final(it).total() == old(it).total(),
+        },
+{
+    match it.next_run() {
+        Some(run) => {
+            proof {
+                lemma_flags_times(run.count as nat, Flags(flag_of(run.value.value)));
+                let x = old(it).total().0;
+                assert(x ^ 0u64 == x) by (bit_vector);
+            }
+            Some((run.count, run.value.value, run.value.total()))
+        },
+        None => None,
+    }
+}
+
+/// A range of an accumulator column copied by its runs: the runs its
+/// iterator has left are those of the values it has left, and spliced
+/// into a new column they make a column of those values.
+#[allow(dead_code)]
+fn accs_copied_by_runs<V: VAccumulated + VValue<C>, C: VCodec>(col: &VerifiedAccColumn<V, C>, a: usize, b: usize) -> (r:
+    VerifiedColumn<V, C, LenIndex>)
+    requires
+        a <= b <= col@.len(),
+    ensures
+        r@ == col@.subrange(a as int, b as int),
+{
+    let mut r = VerifiedColumn::<V, C, LenIndex>::new();
+    let it = col.prefix_iter_range(a, b);
+    proof {
+        it.plain().lemma_items_len();
+        lemma_runs_of_values(it.plain().items());
+    }
+    r.splice_runs(0, 0, it.runs());
+    assert(r@ =~= col@.subrange(a as int, b as int));
+    r
+}
+
+/// What the values of a range add up to, said two ways: by `delta`,
+/// asked for the value after the range, and by `sum_range`.
+#[allow(dead_code)]
+fn a_range_added_two_ways<V: VAccumulated + VValue<C>, C: VCodec>(col: &VerifiedAccColumn<V, C>, a: usize, b: usize) -> (r: (
+    V::Acc,
+    V::Acc,
+))
+    requires
+        a <= b < col@.len(),
+    ensures
+        r.0 == accumulated::<V>(col@.subrange(a as int, b as int)),
+        r.0 == r.1,
+{
+    let seek = col.delta(a, b).unwrap();
+    (seek.delta, col.sum_range(a, b))
+}
+
+/// An accumulator column's iterator handed over, of which no more is
+/// known than the column it reads. Suspended and resumed on that
+/// column, it is sure to be given back: where it stood, with the same
+/// values left and the same running sum, counted from the same place.
+#[allow(dead_code)]
+fn handed_over_with_its_acc<'a, V: VAccumulated + VValue<C>, C: VCodec>(
+    it: VerifiedAccIter<'_, V, C>,
+    col: &'a VerifiedAccColumn<V, C>,
+) -> (on: VerifiedAccIter<'a, V, C>)
+    requires
+        it.source() == Some(*col),
+    ensures
+        on.pos() == it.pos(),
+        on.rest() == it.rest(),
+        on.base_pos() == it.base_pos(),
+        on.total() == it.total(),
+{
+    let s = it.suspend();
+    proof {
+        it.lemma_source();
+        it.lemma_total();
+    }
+    let got = s.try_resume(col);
+    got.unwrap()
+}
+
+/// A reader of sums that stops and goes on. It adds up the values of
+/// `a..m`, and is suspended: the iterator is given up, and with it the
+/// borrow of the column. Resumed on the column, which nothing has
+/// edited, it is sure to be given, and its sum goes on to count from
+/// `a`: read to `b`, it is what the values of `a..b` add up to.
+#[allow(dead_code)]
+fn added_in_two_goes<V: VAccumulated + VValue<C>, C: VCodec>(col: &VerifiedAccColumn<V, C>, a: usize, m: usize, b: usize) -> (r:
+    V::Acc)
+    requires
+        a <= m <= b <= col@.len(),
+    ensures
+        r == accumulated::<V>(col@.subrange(a as int, b as int)),
+{
+    let mut it = col.prefix_iter();
+    it.advance_to(a);
+    it.reset_prefix();
+    it.advance_to(m);
+    let s = it.suspend();
+    let got = s.try_resume(col);
+    assert(got is Ok);
+    let mut on = got.unwrap();
+    on.advance_to(b);
+    on.total()
+}
+
+/// An edit ends what was suspended of an accumulator column's iterator
+/// too. The state fits the column the iterator reads, and so counts the
+/// edits that one does; after a push the column counts one more, and
+/// refuses the state.
+#[allow(dead_code)]
+fn accs_ended_by_a_push<V: VAccumulated + VValue<C>, C: VCodec>(col: &mut VerifiedAccColumn<V, C>, v: Get<'_, V>) -> (r: bool)
+    ensures
+        !r,
+        final(col)@ == old(col)@.push(v.sv()),
+{
+    let s = col.prefix_iter().suspend();
+    proof {
+        s.lemma_fits(&*col);
+    }
+    col.push(v);
+    s.try_resume(col).is_ok()
+}
+
+/// Values found with their sums, an iterator and its copy, and an
+/// iterator of no column: what each call leaves, in a column of ten
+/// [`Mark`]s.
+#[allow(dead_code)]
+fn found_with_accs(col: &VerifiedAccColumn<Mark>)
+    requires
+        col@.len() == 10,
+{
+    let ghost upto = |k: int| accumulated::<Mark>(col@.take(k));
+    // a value further on, with where it is and what is passed over
+    let mut it = col.prefix_iter_range(2, 9);
+    let a = it.delta_nth(3).unwrap();
+    let (p, e, t) = (it.pos(), it.end_pos(), it.total());
+    assert(a.pos == 5 && a.pv.value == col@[5] && p == 6 && e == 9 && t == upto(6));
+    assert(a.pv.prefix() == upto(5) && a.pv.total() == upto(6));
+    assert(a.delta == accumulated::<Mark>(col@.subrange(2, 5))) by {
+        assert(col@.subrange(2, 9).take(3) =~= col@.subrange(2, 5));
+    }
+    // a copy is an iterator of its own: it moves, and this one stays
+    let mut twin = it.clone();
+    let b = twin.next().unwrap();
+    let (p, q, t, u) = (it.pos(), twin.pos(), it.total(), twin.total());
+    assert(b.value == col@[6] && p == 6 && q == 7 && t == upto(6) && u == upto(7));
+    // more than it has left: none is found, and all is passed
+    let c = it.delta_nth(3);
+    let (p, e, t) = (it.pos(), it.end_pos(), it.total());
+    assert(c is None && p == 9 && e == 9 && t == upto(9));
+    // the column asked for the same value
+    let d = col.delta(2, 5).unwrap();
+    assert(d.pos == 5 && d.pv.value == col@[5] && d.delta == a.delta && d.pv.total() == upto(6));
+    let f = col.delta(2, 10);
+    assert(f is None);
+    // an iterator of no column: nothing to give, to find or to pass
+    let mut no = VerifiedAccIter::<Mark>::default();
+    let (p, e, n, t) = (no.pos(), no.end_pos(), no.len(), no.total());
+    assert(p == 0 && e == 0 && n == 0 && t == Flags(0));
+    let x = no.next_run();
+    let z = no.delta_nth(0);
+    let (p, t) = (no.pos(), no.total());
+    assert(x is None && z is None && p == 0 && t == Flags(0));
+}
+
+/// The same two steps in either order, each column read for its second
+/// value with its sums: before it is what the first step adds, and
+/// through it the two in the order the column holds them, which leaves
+/// other lamps lit in one column than in the other
+/// ([`steps_in_order`]).
+#[allow(dead_code)]
+fn steps_read_in_order() -> (r: ((Board, Board), (Board, Board)))
+    ensures
+        r.0 == (Board { lit: 1, turned: true }, Board { lit: 0x2_0000_0001, turned: true }),
+        r.1 == (Board { lit: 2, turned: false }, Board { lit: 3, turned: true }),
+{
+    let turn = Step(3);
+    let light = Step(4);
+    let mut one = VerifiedAccColumn::<Step>::new();
+    one.push(turn);
+    one.push(light);
+    let mut other = VerifiedAccColumn::<Step>::new();
+    other.push(light);
+    other.push(turn);
+    proof {
+        the_acc_of_three::<Step>(turn, light, turn);
+        the_acc_of_three::<Step>(light, turn, turn);
+        assert(one@ =~= seq![turn, light]);
+        assert(other@ =~= seq![light, turn]);
+        assert(one@.take(1) =~= seq![turn]);
+        assert(other@.take(1) =~= seq![light]);
+        assert(one@.take(2) =~= seq![turn, light]);
+        assert(other@.take(2) =~= seq![light, turn]);
+        assert(3u64 >> 1 == 1u64 && 3u64 & 1 == 1u64 && 4u64 >> 1 == 2u64 && 4u64 & 1 == 0u64) by (bit_vector);
+        assert(1u64 ^ ((2u64 >> 32) | (2u64 << 32)) == 0x2_0000_0001u64 && 2u64 ^ 1u64 == 3u64) by (bit_vector);
+    }
+    let a = one.get_prefixed(1).unwrap();
+    let b = other.get_prefixed(1).unwrap();
+    ((a.prefix(), a.total()), (b.prefix(), b.total()))
+}
+
+/// What `next_run` says by itself of an accumulator column's iterator.
+#[allow(dead_code)]
+fn told_by_an_acc_next_run<'a, V: VAccumulated + VValue<C>, C: VCodec>(it: &mut VerifiedAccIter<'a, V, C>) -> (r: Option<
+    Run<VerifiedAccValue<'a, V>>,
+>)
+    ensures
+        final(it).column() == old(it).column(),
+        final(it).source() == old(it).source(),
+        final(it).base_pos() == old(it).base_pos(),
+        final(it).total() == old(it).acc_to(final(it).pos() as int),
+        match r {
+            Some(run) => {
+                &&& head_run(old(it).rest(), run.value.value.sv(), run.count as int)
+                &&& run.value == old(it).items()[run.count - 1]
+                &&& run.value.total() == final(it).total()
+                &&& run.value.total() == old(it).acc_to(old(it).pos() + run.count)
+                &&& run.value.prefix() == old(it).acc_to(old(it).pos() + run.count - 1)
+                &&& run.value.total() == <V::Acc as VGroup>::plus(
+                    old(it).total(),
+                    times::<V::Acc>(run.count as nat, V::adds(run.value.value.sv())),
+                )
+                &&& final(it).items() == old(it).items().skip(run.count as int)
+                &&& final(it).rest() == old(it).rest().skip(run.count as int)
+                &&& final(it).pos() == old(it).pos() + run.count
+                &&& final(it).end_pos() == old(it).end_pos()
+            },
+            None => {
+                &&& old(it).rest().len() == 0
+                &&& final(it).rest().len() == 0
+                &&& final(it).pos() == old(it).pos()
+                &&& final(it).end_pos() == old(it).pos()
+                &&& final(it).total() == old(it).total()
+            },
+        },
+{
+    it.next_run()
+}
+
+/// What `runs` says by itself: the iterator of runs reads on from the
+/// iterator it is made of, which is the accumulator column's without
+/// its sums, and so stands where that stood with the same values left.
+#[allow(dead_code)]
+fn told_by_an_acc_runs<'a, V: VAccumulated + VValue<C>, C: VCodec>(it: VerifiedAccIter<'a, V, C>) -> (r: VerifiedRuns<
+    'a,
+    V,
+    C,
+    AccIndex,
+>)
+    ensures
+        r.iter() == it.plain(),
+        r.iter().rest() == it.rest(),
+        r.iter().column() == it.column(),
+        r.iter().source() == it.source(),
+        r.iter().pos() == it.pos(),
+        r.iter().end_pos() == it.end_pos(),
+{
+    it.runs()
+}
+
+/// What `delta_nth` says by itself of an accumulator column's iterator.
+#[allow(dead_code)]
+fn told_by_an_acc_delta_nth<'a, V: VAccumulated + VValue<C>, C: VCodec>(it: &mut VerifiedAccIter<'a, V, C>, n: usize) -> (r:
+    Option<VerifiedAccSeek<'a, V>>)
+    ensures
+        n < old(it).rest().len() ==> {
+            &&& r matches Some(seek)
+            &&& seek.pos == old(it).pos() + n
+            &&& seek.pv == old(it).items()[n as int]
+            &&& seek.pv.value.sv() == old(it).rest()[n as int]
+            &&& seek.delta == accumulated::<V>(old(it).rest().take(n as int))
+            &&& seek.pv.total() == final(it).total()
+            &&& seek.pv.total() == old(it).acc_to(old(it).pos() + n + 1)
+            &&& seek.pv.prefix() == old(it).acc_to(old(it).pos() + n)
+            &&& seek.pv.prefix() == <V::Acc as VGroup>::plus(old(it).total(), seek.delta)
+            &&& seek.pv.total() == <V::Acc as VGroup>::plus(seek.pv.prefix(), V::adds(seek.pv.value.sv()))
+            &&& final(it).items() == old(it).items().skip(n + 1)
+            &&& final(it).rest() == old(it).rest().skip(n + 1)
+            &&& final(it).pos() == old(it).pos() + n + 1
+            &&& final(it).end_pos() == old(it).end_pos()
+        },
+        n >= old(it).rest().len() ==> {
+            &&& r is None
+            &&& final(it).rest().len() == 0
+            &&& final(it).pos() == old(it).pos() + old(it).rest().len()
+            &&& final(it).end_pos() == final(it).pos()
+        },
+        final(it).column() == old(it).column(),
+        final(it).source() == old(it).source(),
+        final(it).base_pos() == old(it).base_pos(),
+        final(it).total() == old(it).acc_to(final(it).pos() as int),
+{
+    it.delta_nth(n)
+}
+
+/// What `suspend` says by itself of an accumulator column's iterator,
+/// and what its state says of where its sum counts from.
+#[allow(dead_code)]
+fn told_by_an_acc_suspend<'a, V: VAccumulated + VValue<C>, C: VCodec>(
+    it: &VerifiedAccIter<'a, V, C>,
+    col: &VerifiedAccColumn<V, C>,
+) -> (s: VerifiedAccIterState<V>)
+    ensures
+        s.pos() == it.pos(),
+        s.end_pos() == it.end_pos(),
+        s.base_pos() == it.base_pos(),
+        it.rest() == window(it.column(), s.pos() as int, s.end_pos() as int),
+        it.source() == Some(*col) ==> s.fits(col),
+        s.base_pos() <= s.pos(),
+{
+    let s = it.suspend();
+    proof {
+        s.lemma_base();
+    }
+    s
+}
+
+/// What `try_resume` says by itself, of any state of an accumulator
+/// column's iterator and any accumulator column, each thing asked for
+/// on its own.
+#[allow(dead_code)]
+fn told_by_an_acc_resume<'a, V: VAccumulated + VValue<C>, C: VCodec>(
+    s: &VerifiedAccIterState<V>,
+    col: &'a VerifiedAccColumn<V, C>,
+) -> (r: Result<VerifiedAccIter<'a, V, C>, PackError>)
+    ensures
+        r is Ok <==> s.fits(col),
+        r is Ok ==> s.edits() == col.edits(),
+        r matches Ok(it) ==> it.source() == Some(*col),
+        r matches Ok(it) ==> it.column() == col@,
+        r matches Ok(it) ==> it.pos() == s.pos(),
+        r matches Ok(it) ==> it.rest() == window(col@, s.pos() as int, s.end_pos() as int),
+        r matches Ok(it) ==> it.end_pos() == s.end_pos() || (s.pos() == col@.len() && it.end_pos() == s.pos()),
+        r matches Ok(it) ==> it.base_pos() == s.base_pos(),
+        r matches Ok(it) ==> it.total() == accumulated::<V>(col@.subrange(s.base_pos() as int, s.pos() as int)),
+{
+    s.try_resume(col)
+}
+
+/// What a state that fits a column says of it: the two count the same
+/// edits, and the state is a place in the column as a plain iterator's
+/// state is.
+#[allow(dead_code)]
+fn told_by_an_acc_states_fit<V: VAccumulated + VValue<C>, C: VCodec>(s: &VerifiedAccIterState<V>, col: &VerifiedAccColumn<V, C>)
+    requires
+        s.fits(col),
+    ensures
+        s.edits() == col.edits(),
+        s.plain().fits(col),
+        s.pos() == s.plain().pos(),
+        s.end_pos() == s.plain().end_pos(),
+{
+    proof {
+        s.lemma_fits(col);
+    }
+}
+
+/// What `clone` says by itself of an accumulator column's iterator.
+#[allow(dead_code)]
+fn told_by_an_acc_clone<'a, V: VAccumulated + VValue<C>, C: VCodec>(it: &VerifiedAccIter<'a, V, C>) -> (r: VerifiedAccIter<
+    'a,
+    V,
+    C,
+>)
+    ensures
+        r.items() == it.items(),
+        r.rest() == it.rest(),
+        r.column() == it.column(),
+        r.source() == it.source(),
+        r.pos() == it.pos(),
+        r.end_pos() == it.end_pos(),
+        r.base_pos() == it.base_pos(),
+        r.total() == it.total(),
+{
+    it.clone()
+}
+
+/// What `default` says by itself of an accumulator column's iterator.
+#[allow(dead_code)]
+fn told_by_an_acc_default<'a, V: VAccumulated + VValue<C>, C: VCodec>() -> (r: VerifiedAccIter<'a, V, C>)
+    ensures
+        r.items().len() == 0,
+        r.rest().len() == 0,
+        r.column().len() == 0,
+        r.source() is None,
+        r.pos() == 0,
+        r.end_pos() == 0,
+        r.base_pos() == 0,
+        r.total() == <V::Acc as VGroup>::zero(),
+{
+    VerifiedAccIter::<V, C>::default()
+}
+
+/// What `delta` says by itself of an accumulator column, of any two
+/// positions in order.
+#[allow(dead_code)]
+fn told_by_an_acc_delta<'a, V: VAccumulated + VValue<C>, C: VCodec>(col: &'a VerifiedAccColumn<V, C>, from: usize, to: usize) -> (r:
+    Option<VerifiedAccSeek<'a, V>>)
+    requires
+        from <= to,
+    ensures
+        to < col@.len() ==> {
+            &&& r matches Some(seek)
+            &&& seek.pos == to
+            &&& seek.pv.value.sv() == col@[to as int]
+            &&& seek.delta == accumulated::<V>(col@.subrange(from as int, to as int))
+            &&& seek.pv.total() == accumulated::<V>(col@.take(to + 1))
+            &&& seek.pv.prefix() == accumulated::<V>(col@.take(to as int))
+            &&& seek.pv.total() == <V::Acc as VGroup>::plus(seek.pv.prefix(), V::adds(seek.pv.value.sv()))
+        },
+        to >= col@.len() ==> r is None,
+{
+    col.delta(from, to)
+}
+
+/// What a copy of a value found is: the same, part for part.
+#[allow(dead_code)]
+fn told_by_an_acc_seek<'a, V: VAccumulated>(seek: &VerifiedAccSeek<'a, V>) -> (r: VerifiedAccSeek<'a, V>)
+    ensures
+        r == *seek,
+        r.pos == seek.pos,
+        r.delta == seek.delta,
+        r.pv == seek.pv,
+{
+    seek.clone()
+}
+
+/// The parts of a value found are there to take: where it is, what was
+/// passed over, the value and the sum through it.
+#[allow(dead_code)]
+fn the_parts_of_a_find<'a, V: VAccumulated>(seek: VerifiedAccSeek<'a, V>) -> (r: (usize, V::Acc, Get<'a, V>, V::Acc))
+    ensures
+        r.0 == seek.pos,
+        r.1 == seek.delta,
+        r.2 == seek.pv.value,
+        r.3 == seek.pv.total,
+{
+    (seek.pos, seek.delta, seek.pv.value, seek.pv.total)
+}
+
+/// What is proved of every type an accumulator column holds is proved
+/// of the client's own and of its nulls: the running sums of a column
+/// of marks, a column of nulls and marks added up run by run, and a
+/// range of steps added up by moving, in the order the column holds
+/// them.
+#[allow(dead_code)]
+fn accs_of_the_clients_own(
+    col: &VerifiedAccColumn<Mark>,
+    nullable: &VerifiedAccColumn<Option<Mark>>,
+    steps: &VerifiedAccColumn<Step>,
+    a: usize,
+    b: usize,
+) -> (r: (Vec<Flags>, (Flags, usize), (Board, Board)))
+    requires
+        a <= b <= steps@.len(),
+    ensures
+        r.0@.len() == col@.len(),
+        forall|i: int| 0 <= i < r.0@.len() ==> #[trigger] r.0@[i] == accumulated::<Mark>(col@.take(i + 1)),
+        r.1.0 == accumulated::<Option<Mark>>(nullable@),
+        r.1.1 == nullable@.len(),
+        r.2.0 == accumulated::<Step>(steps@.subrange(a as int, b as int)),
+        r.2.0 == r.2.1,
+{
+    (
+        running_accs::<Mark, Leb128>(col),
+        added_by_run_moves::<Option<Mark>, Leb128>(nullable),
+        added_by_moving::<Step, Leb128>(steps, a, b),
+    )
 }
 
 } // verus!
