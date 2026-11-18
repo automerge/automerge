@@ -95,7 +95,23 @@
 //! of the column it is resumed on, whatever column the state was taken
 //! of, and gives that column's values ([`told_by_a_resume`],
 //! [`resumed_on_any`]); the state of an iterator of no column is
-//! promised no column ([`of_no_column`]).
+//! promised no column ([`of_no_column`]). And that an edit of a column
+//! ends what was suspended of it: a column refuses a state taken before
+//! a push ([`ended_by_a_push`]), and before any call that deletes a
+//! value or inserts one, or a remap ([`ended_by_each_edit`]); before as
+//! many edits as a client makes in a loop ([`ended_by_many`]), and
+//! before edits that undo each other ([`ended_though_undone`]). Calls
+//! that delete no value and insert none are no edits ([`no_edits`],
+//! [`cleared`]), and a copy of a column counts its own
+//! ([`a_copy_edited`]). Each call that changes a column says what the
+//! column counts after it ([`counted_by_a_splice`],
+//! [`counted_by_a_splice_iter`], [`counted_by_a_splice_runs`],
+//! [`counted_by_an_extend`], [`counted_by_an_insert`],
+//! [`counted_by_a_push`], [`counted_by_a_remove`],
+//! [`counted_by_a_truncate`], [`counted_by_a_remove_n`],
+//! [`counted_by_a_clear`], [`counted_by_a_remap`],
+//! [`counted_by_a_clone`]), and what the count is after an edit is
+//! there to compute with ([`the_count_after`]).
 //!
 //! And of a [`VerifiedEncoder`]: that values appended one by one are
 //! saved as a column of them, in the one encoding of them
@@ -200,11 +216,11 @@
 //! This module exists only while Verus checks the crate.
 
 use super::{
-    below_at, bytes_below, folded, head_run, lemma_run_values_add, lemma_run_values_push,
-    lemma_runs_first, lemma_runs_of_values, lemma_sorted, mapped, only, refused, run_values,
-    runs_of, sorted, sorted_for, sum_of, total_len, total_str_len, window, Get, VCodec, VGet,
-    VNewtype, VSpec, VValue, VerifiedColumn, VerifiedEncoder, VerifiedEncoderState, VerifiedIter,
-    VerifiedIterState,
+    after_edit, after_edits, below_at, bytes_below, folded, head_run, lemma_after_edits,
+    lemma_run_values_add, lemma_run_values_push, lemma_runs_first, lemma_runs_of_values,
+    lemma_sorted, mapped, only, refused, run_values, runs_of, sorted, sorted_for, sum_of,
+    total_len, total_str_len, window, Get, VCodec, VGet, VNewtype, VSpec, VValue, VerifiedColumn,
+    VerifiedEncoder, VerifiedEncoderState, VerifiedIter, VerifiedIterState,
 };
 use crate::{Leb128, LoadOpts, PackError, Run};
 use std::cmp::Ordering;
@@ -4855,6 +4871,392 @@ fn text_streamed<'a>(a: &'a str, b: String, buf: &mut Vec<u8>)
 #[allow(dead_code)]
 fn load_text(bytes: &[u8]) {
     load_then_save::<String, Leb128>(bytes);
+}
+
+/// An edit ends what was suspended. The state of an iterator fits the
+/// column the iterator reads, and so counts the edits that one does;
+/// after a push the column counts one more, and refuses the state. For
+/// every value type and codec.
+#[allow(dead_code)]
+fn ended_by_a_push<V: VValue<C>, C: VCodec>(col: &mut VerifiedColumn<V, C>, v: Get<'_, V>) -> (r: bool)
+    ensures
+        !r,
+        final(col)@ == old(col)@.push(v.sv()),
+{
+    let s = col.iter().suspend();
+    proof {
+        s.lemma_fits(&*col);
+    }
+    col.push(v);
+    s.try_resume(col).is_ok()
+}
+
+/// So does each call that deletes a value or inserts one, and a remap:
+/// `which` picks one of twelve, and after each the column refuses a
+/// state taken before it. A value put in the place of another is an
+/// edit whether or not the two are equal, a splice that deletes a value
+/// is one whatever its iterator gives, and a remap is one though it
+/// leaves each value as it was.
+#[allow(dead_code)]
+fn ended_by_each_edit<'v, V: VValue<C>, C: VCodec>(
+    col: &mut VerifiedColumn<V, C>,
+    v: Get<'v, V>,
+    more: Vec<Get<'v, V>>,
+    runs: Vec<Run<Get<'v, V>>>,
+    which: u8,
+) -> (r: bool)
+    requires
+        old(col)@.len() >= 2,
+        more@.len() > 0,
+    ensures
+        !r,
+{
+    let s = col.iter_range(1, 2).suspend();
+    proof {
+        s.lemma_fits(&*col);
+        VGet::lemma_svs(more@);
+    }
+    let n = col.len();
+    let one = [v];
+    if which == 0 {
+        col.insert(1, v);
+    } else if which == 1 {
+        col.remove(0);
+    } else if which == 2 {
+        col.truncate(n - 1);
+    } else if which == 3 {
+        col.remove_n(0, 2);
+    } else if which == 4 {
+        col.clear();
+    } else if which == 5 {
+        col.splice(0, 1, one.as_slice());
+    } else if which == 6 {
+        col.splice(n, 0, one.as_slice());
+    } else if which == 7 {
+        col.splice(1, 1, more.as_slice());
+    } else if which == 8 {
+        col.splice_iter(0, 1, more);
+    } else if which == 9 {
+        col.splice_runs(0, 2, runs);
+    } else if which == 10 {
+        col.extend(more);
+        assert(col@.len() == n + more@.len());
+    } else {
+        col.remap(|x: V| x);
+    }
+    s.try_resume(col).is_ok()
+}
+
+/// Calls that delete no value and insert none are no edits: the column
+/// counts what it did, and holds what it did. A truncate at the
+/// column's length, a delete of no value, a splice of nothing for
+/// nothing, an extend by nothing, and splices of what an iterator with
+/// no item gives, values or runs.
+#[allow(dead_code)]
+fn no_edits<'v, V: VValue<C>, C: VCodec>(col: &mut VerifiedColumn<V, C>, at: usize, none: &[Get<'v, V>])
+    requires
+        at <= old(col)@.len(),
+        none@.len() == 0,
+    ensures
+        final(col).edits() == old(col).edits(),
+        final(col)@ == old(col)@,
+{
+    proof {
+        VGet::lemma_svs(none@);
+    }
+    let n = col.len();
+    col.truncate(n);
+    col.truncate(usize::MAX);
+    col.remove_n(at, 0);
+    assert(col@ =~= old(col)@);
+    col.splice(at, 0, none);
+    assert(col@ =~= old(col)@);
+    let nothing: Vec<Get<'v, V>> = Vec::new();
+    proof {
+        VGet::lemma_svs(nothing@);
+    }
+    col.extend(nothing);
+    assert(col@ =~= old(col)@);
+    let nothing: Vec<Get<'v, V>> = Vec::new();
+    proof {
+        VGet::lemma_svs(nothing@);
+    }
+    col.splice_iter(at, 0, nothing);
+    assert(col@ =~= old(col)@);
+    let no_runs: Vec<Run<Get<'v, V>>> = Vec::new();
+    col.splice_runs(at, 0, no_runs);
+    assert(col@ =~= old(col)@);
+}
+
+/// A column of no value is not edited by a `clear`: it counts what it
+/// did. One of any value is.
+#[allow(dead_code)]
+fn cleared<V: VValue<C>, C: VCodec>(col: &mut VerifiedColumn<V, C>)
+    ensures
+        final(col)@.len() == 0,
+        old(col)@.len() == 0 ==> final(col).edits() == old(col).edits(),
+        old(col)@.len() > 0 ==> final(col).edits() != old(col).edits(),
+{
+    col.clear();
+}
+
+/// A state is refused after more edits than one: here after `k` pushes,
+/// for any `k` but 0. The client counts the edits in a loop, and the
+/// column's count after `k` of them, for any `k` a `usize` holds, is
+/// not what it was (`lemma_after_edits`).
+#[allow(dead_code)]
+fn ended_by_many<V: VValue<C>, C: VCodec>(col: &mut VerifiedColumn<V, C>, v: Get<'_, V>, k: usize) -> (r: bool)
+    requires
+        k > 0,
+    ensures
+        !r,
+        final(col)@.len() == old(col)@.len() + k,
+{
+    let s = col.iter().suspend();
+    proof {
+        s.lemma_fits(&*col);
+    }
+    let ghost e = col.edits();
+    let mut i: usize = 0;
+    while i < k
+        invariant
+            i <= k,
+            col.edits() == after_edits(e, i as nat),
+            col@.len() == old(col)@.len() + i,
+        decreases k - i,
+    {
+        col.push(v);
+        i += 1;
+    }
+    proof {
+        lemma_after_edits(e, k as nat);
+    }
+    s.try_resume(col).is_ok()
+}
+
+/// Edits that undo each other are edits still: after a push and the
+/// removal of what was pushed the column holds what it did, and refuses
+/// the state taken before the two.
+#[allow(dead_code)]
+fn ended_though_undone<V: VValue<C>, C: VCodec>(col: &mut VerifiedColumn<V, C>, v: Get<'_, V>) -> (r: bool)
+    ensures
+        !r,
+        final(col)@ == old(col)@,
+{
+    let s = col.iter().suspend();
+    proof {
+        s.lemma_fits(&*col);
+    }
+    let ghost e = col.edits();
+    let n = col.len();
+    col.push(v);
+    col.remove(n);
+    assert(col@ =~= old(col)@);
+    proof {
+        assert(col.edits() == after_edits(e, 2)) by {
+            reveal_with_fuel(after_edits, 3);
+        }
+        lemma_after_edits(e, 2);
+    }
+    s.try_resume(col).is_ok()
+}
+
+/// A copy of a column counts the edits the column does, and each counts
+/// its own from there: after an edit of the copy, the copy refuses a
+/// state of the column, and the column, which nothing has edited, gives
+/// an iterator for it still.
+#[allow(dead_code)]
+fn a_copy_edited<V: VValue<C>, C: VCodec>(col: &VerifiedColumn<V, C>, v: Get<'_, V>) -> (r: (bool, bool))
+    ensures
+        !r.0,
+        r.1,
+{
+    let s = col.iter().suspend();
+    proof {
+        s.lemma_fits(col);
+    }
+    let mut other = col.clone();
+    other.push(v);
+    let on_copy = s.try_resume(&other).is_ok();
+    let on_column = s.try_resume(col).is_ok();
+    (on_copy, on_column)
+}
+
+/// What each call that changes a column says it counts after it, asked
+/// for on its own. A splice of a slice: an edit more if it deletes a
+/// value or the slice has one.
+#[allow(dead_code)]
+fn counted_by_a_splice<V: VValue<C>, C: VCodec>(
+    col: &mut VerifiedColumn<V, C>,
+    at: usize,
+    del: usize,
+    values: &[Get<'_, V>],
+)
+    requires
+        at <= old(col)@.len(),
+        del <= old(col)@.len() - at,
+    ensures
+        del > 0 || values@.len() > 0 ==> final(col).edits() == after_edit(old(col).edits()),
+        del == 0 && values@.len() == 0 ==> final(col).edits() == old(col).edits(),
+{
+    col.splice(at, del, values);
+}
+
+/// A splice of what an iterator gives, of any iterator, and one of
+/// runs: an edit more if it deletes a value or leaves the column of
+/// another length.
+#[allow(dead_code)]
+fn counted_by_a_splice_iter<'v, V: VValue<C>, C: VCodec, I: IntoIterator<Item = Get<'v, V>>>(
+    col: &mut VerifiedColumn<V, C>,
+    at: usize,
+    del: usize,
+    values: I,
+)
+    requires
+        at <= old(col)@.len(),
+        del <= old(col)@.len() - at,
+    ensures
+        del > 0 || final(col)@.len() != old(col)@.len() ==> final(col).edits() == after_edit(old(col).edits()),
+        del == 0 && final(col)@.len() == old(col)@.len() ==> final(col).edits() == old(col).edits(),
+{
+    col.splice_iter(at, del, values);
+}
+
+#[allow(dead_code)]
+fn counted_by_a_splice_runs<'v, V: VValue<C>, C: VCodec, I: IntoIterator<Item = Run<Get<'v, V>>>>(
+    col: &mut VerifiedColumn<V, C>,
+    at: usize,
+    del: usize,
+    runs: I,
+)
+    requires
+        at <= old(col)@.len(),
+        del <= old(col)@.len() - at,
+    ensures
+        del > 0 || final(col)@.len() != old(col)@.len() ==> final(col).edits() == after_edit(old(col).edits()),
+        del == 0 && final(col)@.len() == old(col)@.len() ==> final(col).edits() == old(col).edits(),
+{
+    col.splice_runs(at, del, runs);
+}
+
+/// An `extend`, by any iterator: an edit more if the column is the
+/// longer for it.
+#[allow(dead_code)]
+fn counted_by_an_extend<'v, V: VValue<C>, C: VCodec, I: IntoIterator<Item = Get<'v, V>>>(
+    col: &mut VerifiedColumn<V, C>,
+    values: I,
+)
+    ensures
+        final(col)@.len() != old(col)@.len() ==> final(col).edits() == after_edit(old(col).edits()),
+        final(col)@.len() == old(col)@.len() ==> final(col).edits() == old(col).edits(),
+{
+    col.extend(values);
+}
+
+/// An insert, a push and a removal: an edit more, each.
+#[allow(dead_code)]
+fn counted_by_an_insert<V: VValue<C>, C: VCodec>(col: &mut VerifiedColumn<V, C>, at: usize, v: Get<'_, V>)
+    requires
+        at <= old(col)@.len(),
+    ensures
+        final(col).edits() == after_edit(old(col).edits()),
+{
+    col.insert(at, v);
+}
+
+#[allow(dead_code)]
+fn counted_by_a_push<V: VValue<C>, C: VCodec>(col: &mut VerifiedColumn<V, C>, v: Get<'_, V>)
+    ensures
+        final(col).edits() == after_edit(old(col).edits()),
+{
+    col.push(v);
+}
+
+#[allow(dead_code)]
+fn counted_by_a_remove<V: VValue<C>, C: VCodec>(col: &mut VerifiedColumn<V, C>, at: usize)
+    requires
+        at < old(col)@.len(),
+    ensures
+        final(col).edits() == after_edit(old(col).edits()),
+{
+    col.remove(at);
+}
+
+/// A `truncate`: an edit more if the column was longer than asked for.
+#[allow(dead_code)]
+fn counted_by_a_truncate<V: VValue<C>, C: VCodec>(col: &mut VerifiedColumn<V, C>, len: usize)
+    ensures
+        len < old(col)@.len() ==> final(col).edits() == after_edit(old(col).edits()),
+        len >= old(col)@.len() ==> final(col).edits() == old(col).edits(),
+{
+    col.truncate(len);
+}
+
+/// A `remove_n`: an edit more unless it removes no value.
+#[allow(dead_code)]
+fn counted_by_a_remove_n<V: VValue<C>, C: VCodec>(col: &mut VerifiedColumn<V, C>, at: usize, n: usize)
+    requires
+        at <= old(col)@.len(),
+        n <= old(col)@.len() - at,
+    ensures
+        n > 0 ==> final(col).edits() == after_edit(old(col).edits()),
+        n == 0 ==> final(col).edits() == old(col).edits(),
+{
+    col.remove_n(at, n);
+}
+
+/// A `clear`: an edit more if the column held a value.
+#[allow(dead_code)]
+fn counted_by_a_clear<V: VValue<C>, C: VCodec>(col: &mut VerifiedColumn<V, C>)
+    ensures
+        old(col)@.len() > 0 ==> final(col).edits() == after_edit(old(col).edits()),
+        old(col)@.len() == 0 ==> final(col).edits() == old(col).edits(),
+{
+    col.clear();
+}
+
+/// A remap: an edit more, whatever the function and whatever the
+/// column.
+#[allow(dead_code)]
+fn counted_by_a_remap<V: VValue<C>, C: VCodec, F: Fn(V) -> V>(col: &mut VerifiedColumn<V, C>, f: F)
+    requires
+        forall|v: V| old(col)@.contains(V::sv_of(v)) ==> #[trigger] call_requires(f, (v,)),
+    ensures
+        final(col).edits() == after_edit(old(col).edits()),
+{
+    col.remap(f);
+}
+
+/// And a copy: what the column counts.
+#[allow(dead_code)]
+fn counted_by_a_clone<V: VValue<C>, C: VCodec>(col: &VerifiedColumn<V, C>) -> (r: VerifiedColumn<V, C>)
+    ensures
+        r.edits() == col.edits(),
+        r@ == col@,
+{
+    col.clone()
+}
+
+/// What the count is after an edit, and after several: one more, and 0
+/// after the greatest; and not what it was after any number of edits
+/// from one to `usize::MAX`.
+#[allow(dead_code)]
+proof fn the_count_after(n: usize, k: nat)
+    ensures
+        n < usize::MAX ==> after_edit(n) == n + 1,
+        after_edit(usize::MAX) == 0,
+        after_edit(n) != n,
+        after_edits(n, 0) == n,
+        after_edits(n, 1) == after_edit(n),
+        0 < k <= usize::MAX ==> after_edits(n, k) != n,
+        after_edits(n, usize::MAX as nat + 1) == n,
+{
+    reveal_with_fuel(after_edits, 2);
+    if 0 < k <= usize::MAX {
+        lemma_after_edits(n, k);
+    }
+    lemma_after_edits(n, usize::MAX as nat);
+    assert(after_edits(n, usize::MAX as nat + 1) == after_edit(after_edits(n, usize::MAX as nat)));
 }
 
 } // verus!

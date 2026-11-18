@@ -3376,8 +3376,12 @@ fn an_edit<T: Kind>(
 /// edits resumes. Columns built and loaded, in one slab and in many, so
 /// that some of the edits leave the count of slabs as it was.
 ///
-/// The specification of `try_resume` does not say this: what an edit
-/// does to the column's count of edits is tested here, and not proved.
+/// That a state taken before a call which deletes a value or inserts
+/// one, or before a remap, resumes no more is proved as well (each such
+/// call says that the column counts an edit more, and `try_resume`
+/// refuses a state that counts another number). What is tested here and
+/// not proved is that those are the calls after which `Column`'s state
+/// resumes no more.
 #[test]
 fn an_edit_ends_what_was_suspended() {
     fn ends<T: Kind>() {
@@ -3512,35 +3516,37 @@ fn a_cleared_column_refuses_what_was_suspended() {
 }
 
 /// Calls that change no value of a column: a splice of nothing for
-/// nothing, in each of its three forms, a truncate at the end or past
-/// it, a delete of no value, an extend by nothing, a clear of a column
-/// of no value, a remap of each value to itself, and a value put in the
-/// place of its equal. After each, what was suspended resumes or does
-/// not as `Column`'s does. The first seven are no edits, and the state
-/// resumes after each to what it resumed to before, with one exception:
-/// a column that has no slab yet (a new one, and one loaded from no
-/// bytes) is given its first by a splice or an extend, of nothing too,
-/// and that ends what was suspended of it, as it does in `Column`. The
-/// last two are edits, though they change no value: the state resumes
-/// after neither.
+/// nothing, in each of its three forms and as runs that are all of
+/// count 0, a truncate at the end or past it, a delete of no value, an
+/// extend by nothing, a clear of a column of no value, a remap of each
+/// value to itself, and a value put in the place of its equal. After
+/// each, what was suspended resumes or does not as `Column`'s does. The
+/// first eight are no edits (the column is specified to count what it
+/// did), and the state resumes after each to what it resumed to before,
+/// with one exception: a column that has no slab yet (a new one, and one
+/// loaded from no bytes) is given its first by a splice or an extend, of
+/// nothing too, and that ends what was suspended of it, as it does in
+/// `Column`. The last two are edits, though they change no value (the
+/// column is specified to count one more): the state resumes after
+/// neither.
 #[test]
 fn a_call_that_changes_no_value() {
     fn quiet<T: Kind>() {
         let mut rng = Rng(0x9017e);
-        let mut kept = [0usize; 9];
-        for round in 0..216 {
-            let which = round % 9;
-            let n = [0, 1, 8, 250][round / 9 % 4];
-            let budget = [3, 64][round / 36 % 2];
+        let mut kept = [0usize; 10];
+        for round in 0..240 {
+            let which = round % 10;
+            let n = [0, 1, 8, 250][round / 10 % 4];
+            let budget = [3, 64][round / 40 % 2];
             let model: Vec<T> = (0..n).map(|_| T::fresh(&mut rng)).collect();
             let model: Vec<T> = (0..n).map(|i| model[i - i % 3].clone()).collect();
             let (mut v, mut c) = both_with(&model, budget);
-            if round / 72 % 3 == 1 {
+            if round / 80 % 3 == 1 {
                 let bytes = v.save();
                 let opts = LoadOpts::new().with_max_segments(budget);
                 v = VerifiedColumn::<T>::load_with(&bytes, opts).unwrap();
                 c = Column::<T>::load_with(&bytes, opts).unwrap();
-            } else if round / 72 % 3 == 2 && n > 0 {
+            } else if round / 80 % 3 == 2 && n > 0 {
                 // a column that has counted edits
                 let x = T::fresh(&mut rng);
                 v.push(x.lend());
@@ -3563,7 +3569,13 @@ fn a_call_that_changes_no_value() {
             let at = rng.below(n + 1);
             let slabs = v.slab_count();
             let none = &model[..0];
-            let no_runs: Vec<(usize, T)> = Vec::new();
+            let mut no_runs: Vec<(usize, T)> = Vec::new();
+            if which == 3 {
+                // runs that give no value
+                no_runs = (0..1 + rng.below(3))
+                    .map(|_| (0, T::fresh(&mut rng)))
+                    .collect();
+            }
             match which {
                 0 => {
                     v.splice(at, 0, &lent(none));
@@ -3573,7 +3585,7 @@ fn a_call_that_changes_no_value() {
                     v.splice_iter(at, 0, none.iter().map(T::lend));
                     c.splice(at, 0, none.iter().cloned());
                 }
-                2 => {
+                2 | 3 => {
                     v.splice_runs(
                         at,
                         0,
@@ -3591,27 +3603,27 @@ fn a_call_that_changes_no_value() {
                         }),
                     );
                 }
-                3 => {
+                4 => {
                     let len = n + rng.below(3);
                     v.truncate(len);
                     c.truncate(len);
                 }
-                4 => {
+                5 => {
                     v.remove_n(at, 0);
                     c.remove_n(at, 0);
                 }
-                5 => {
+                6 => {
                     v.extend(none.iter().map(T::lend));
                     c.extend(none.iter().cloned());
                 }
-                6 => {
+                7 => {
                     if n > 0 {
                         continue;
                     }
                     v.clear();
                     c.clear();
                 }
-                7 => {
+                8 => {
                     v.remap(|x: T| x);
                     c.remap(|x: T| x);
                 }
@@ -3625,10 +3637,10 @@ fn a_call_that_changes_no_value() {
             }
             let (new, old) = (resumed(&s, &v), old_resumed(&t, &c));
             assert_eq!(new, old, "after call {which} of {n} values");
-            if which < 7 {
+            if which < 8 {
                 let first_slab = slabs == 0 && v.slab_count() == 1;
                 assert!(v.slab_count() == slabs || first_slab);
-                assert!(!first_slab || [0, 1, 2, 5].contains(&which));
+                assert!(!first_slab || [0, 1, 2, 3, 6].contains(&which));
                 let same = if first_slab { None } else { first };
                 assert_eq!(new, same, "after call {which} of {n} values");
             } else {
@@ -3637,7 +3649,7 @@ fn a_call_that_changes_no_value() {
             kept[which] += new.is_some() as usize;
             check_loaded(&v, &c, &model);
         }
-        assert!(kept[..7].iter().all(|&k| k > 0), "{kept:?}");
+        assert!(kept[..8].iter().all(|&k| k > 0), "{kept:?}");
     }
     for_each_kind!(quiet);
 }

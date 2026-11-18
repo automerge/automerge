@@ -1068,3 +1068,83 @@ fn strings() {
     verus_client::told_by_an_append_n(&mut enc, "ab", 2);
     assert_eq!(enc.save(), bytes);
 }
+
+#[test]
+fn edits() {
+    let v: Vec<u64> = (0..1000).map(|i| i / 3).collect();
+    let mut col = VerifiedColumn::<u64>::new();
+    col.splice(0, 0, &v);
+    assert!(!verus_client::ended_by_a_push(&mut col, 7));
+    assert_eq!(col.len(), 1001);
+    let mut none = VerifiedColumn::<Option<Vec<u8>>>::new();
+    assert!(!verus_client::ended_by_a_push(&mut none, None));
+
+    for which in 0..12 {
+        let mut col = VerifiedColumn::<u64>::new();
+        col.splice(0, 0, &v);
+        let runs = vec![Run { count: 2, value: 0 }];
+        let ended = !verus_client::ended_by_each_edit(&mut col, 0, vec![0], runs, which);
+        assert!(ended, "{which}");
+        // a column of byte strings, in slabs of few values
+        let mut col = VerifiedColumn::<Vec<u8>>::with_max_segments(4);
+        col.splice(0, 0, &vec![&b"ab"[..]; 40]);
+        let runs = vec![Run {
+            count: 2,
+            value: &b"ab"[..],
+        }];
+        let ended = !verus_client::ended_by_each_edit(&mut col, b"ab", vec![b"ab"], runs, which);
+        assert!(ended, "{which}");
+    }
+
+    let s = col.iter_range(3, 9).suspend();
+    verus_client::no_edits(&mut col, 5, &[]);
+    assert_eq!(s.try_resume(&col).unwrap().len(), 6);
+    let mut empty = VerifiedColumn::<bool>::new();
+    verus_client::cleared(&mut empty);
+    verus_client::cleared(&mut col);
+    assert!(s.try_resume(&col).is_err());
+    assert!(col.is_empty());
+
+    col.splice(0, 0, &v);
+    assert!(!verus_client::ended_by_many(&mut col, 1, 1));
+    assert!(!verus_client::ended_by_many(&mut col, 1, 300));
+    assert!(!verus_client::ended_though_undone(&mut col, 1));
+    assert_eq!(col.len(), 1301);
+    assert_eq!(verus_client::a_copy_edited(&col, 4), (false, true));
+
+    // what each call says of the count
+    let s = col.iter().suspend();
+    verus_client::counted_by_a_splice(&mut col, 3, 0, &[]);
+    verus_client::counted_by_a_splice_iter(&mut col, 3, 0, None);
+    verus_client::counted_by_a_splice_runs(&mut col, 3, 0, vec![Run { count: 0, value: 9 }]);
+    verus_client::counted_by_an_extend(&mut col, Vec::new());
+    verus_client::counted_by_a_truncate(&mut col, 1301);
+    verus_client::counted_by_a_remove_n(&mut col, 1301, 0);
+    let copy = verus_client::counted_by_a_clone(&col);
+    assert!(s.try_resume(&col).is_ok() && s.try_resume(&copy).is_ok());
+    for which in 0..10 {
+        let mut col = copy.clone();
+        match which {
+            0 => verus_client::counted_by_a_splice(&mut col, 3, 1, &[]),
+            1 => verus_client::counted_by_a_splice_iter(&mut col, 3, 0, Some(1)),
+            2 => verus_client::counted_by_a_splice_runs(
+                &mut col,
+                3,
+                0,
+                vec![Run { count: 1, value: 9 }],
+            ),
+            3 => verus_client::counted_by_an_extend(&mut col, vec![1]),
+            4 => verus_client::counted_by_an_insert(&mut col, 0, 1),
+            5 => verus_client::counted_by_a_push(&mut col, 1),
+            6 => verus_client::counted_by_a_remove(&mut col, 0),
+            7 => verus_client::counted_by_a_truncate(&mut col, 1300),
+            8 => verus_client::counted_by_a_remove_n(&mut col, 1300, 1),
+            _ => verus_client::counted_by_a_remap(&mut col, |x: u64| x),
+        }
+        assert!(s.try_resume(&col).is_err(), "{which}");
+        assert!(s.try_resume(&copy).is_ok(), "{which}");
+    }
+    let mut col = copy.clone();
+    verus_client::counted_by_a_clear(&mut col);
+    assert!(s.try_resume(&col).is_err());
+}

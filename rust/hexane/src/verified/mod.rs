@@ -257,16 +257,22 @@
 //! case: a column that [`clear`](VerifiedColumn::clear) has emptied has
 //! no slab, where `Column` keeps an empty one, until the next edit.
 //!
-//! That an edit of a column ends what was suspended of it is not proved
-//! either. A state fits only a column that counts the edits the state
-//! does (`edits()`), and nothing is specified of how an edit moves that
-//! count. That every call which changes a value moves it, so that a
-//! state taken before is refused after, is tested, as is that the calls
-//! which are no edits of a `Column` are none here. (The count is a
-//! `usize` that wraps around, here as there.) What is proved is that a
-//! state which does resume cannot misread: the iterator given has the
-//! values of the column it was resumed on, in the state's window,
-//! whatever column the state was taken of.
+//! That an edit of a column ends what was suspended of it is proved. A
+//! state fits only a column that counts the edits the state does
+//! (`edits()`, `lemma_fits`), and each method that changes a column says
+//! what the column counts after it: one more (`after_edit`) where the
+//! call was an edit, and what it counted before where it was none. A
+//! call is an edit if it deletes a value or inserts one, a value put in
+//! the place of its equal too, and a `remap` is one always. The count is
+//! a `usize` that wraps around, as `Column`'s is: after one edit or
+//! more, and no more of them than `usize::MAX`, it is not what it was
+//! (`lemma_after_edits`), so a state taken before them is refused. The
+//! column sets the count itself after each call. That the calls which
+//! end what was suspended of a `Column` are those that end it here is
+//! tested, as is that after a call which is no edit a state resumes
+//! where `Column`'s does. And a state that does resume cannot misread:
+//! the iterator given has the values of the column it was resumed on,
+//! in the state's window, whatever column the state was taken of.
 //!
 //! # What is trusted
 //!
@@ -1774,6 +1780,50 @@ struct SlabRuns<G> {
     last: Option<Run<G>>,
 }
 
+/// What a column counts of edits (`VerifiedColumn::edits`) after one
+/// more, where it counted `n`: one more, and 0 after the greatest number
+/// a `usize` holds, for the count wraps around.
+pub open spec fn after_edit(n: usize) -> usize {
+    if n == usize::MAX {
+        0
+    } else {
+        (n + 1) as usize
+    }
+}
+
+/// What a column counts of edits after `k` more, where it counted `n`.
+pub open spec fn after_edits(n: usize, k: nat) -> usize
+    decreases k,
+{
+    if k == 0 {
+        n
+    } else {
+        after_edit(after_edits(n, (k - 1) as nat))
+    }
+}
+
+/// After `k` edits, of which there are no more than `usize::MAX`, a
+/// column counts `k` more than it did, less `usize::MAX + 1` where that
+/// is more than a `usize` holds. So after one edit or more it does not
+/// count what it did: a state taken before them is refused
+/// (`VerifiedIterState::lemma_fits`).
+pub proof fn lemma_after_edits(n: usize, k: nat)
+    requires
+        k <= usize::MAX,
+    ensures
+        after_edits(n, k) == if n + k <= usize::MAX {
+            n + k
+        } else {
+            n + k - usize::MAX - 1
+        },
+        k > 0 ==> after_edits(n, k) != n,
+    decreases k,
+{
+    if k > 0 {
+        lemma_after_edits(n, (k - 1) as nat);
+    }
+}
+
 /// A column of values of type `V`: the sequence `self@`. Its numbers are
 /// written with the codec `C`.
 pub struct VerifiedColumn<V: VValue<C>, C: VCodec = Leb128> {
@@ -1799,10 +1849,12 @@ impl<V: VValue<C>, C: VCodec> Default for VerifiedColumn<V, C> {
 }
 
 impl<V: VValue<C>, C: VCodec> Clone for VerifiedColumn<V, C> {
-    /// A column of its own with the same values.
+    /// A column of its own with the same values, which counts the edits
+    /// this one does.
     fn clone(&self) -> (r: Self)
         ensures
             r@ == self@,
+            r.edits() == self.edits(),
     {
         VerifiedColumn { core: self.core.duplicate() }
     }
@@ -1824,13 +1876,19 @@ pub trait ExExtend<A> {
 impl<'v, V: VValue<C>, C: VCodec> Extend<Get<'v, V>> for VerifiedColumn<V, C> {
     /// Append the values that `iter` gives: what
     /// [`splice_iter`](VerifiedColumn::splice_iter) does at the column's
-    /// end, and specified as that is.
+    /// end, and specified as that is. The column counts an edit more if
+    /// it is the longer for it.
     fn extend<I: IntoIterator<Item = Get<'v, V>>>(&mut self, iter: I)
         ensures
             exists|it: I::IntoIter| #[trigger]
                 (I::into_iter).ensures((iter,), it) && (it.obeys_prophetic_iter_laws() ==> final(self)@ == old(
                     self,
                 )@ + VGet::svs(it.remaining())),
+            final(self).edits() == if final(self)@.len() != old(self)@.len() {
+                after_edit(old(self).edits())
+            } else {
+                old(self).edits()
+            },
     {
         let len = self.len();
         self.splice_iter(len, 0, iter);
@@ -2062,29 +2120,66 @@ impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
     }
 
     /// The count of the column's edits, which a suspended iterator's
-    /// state keeps and [`VerifiedIterState::try_resume`] compares.
-    /// Nothing is specified of how an edit moves it.
+    /// state keeps and [`VerifiedIterState::try_resume`] compares. Each
+    /// method that changes the column says what it is after the call:
+    /// one more (`after_edit`) where the call was an edit, and what it
+    /// was where the call was none.
     pub closed spec fn edits(&self) -> usize {
         self.core.count()
     }
 
+    /// Set the count of edits after a call: to one more than `before`,
+    /// which the column counted before the call, if the call was an edit
+    /// (`edit`), and to `before` if it was none. The shared cursor moves
+    /// the count as it writes, by a number that depends on the edit;
+    /// this makes it one an edit.
+    #[inline(always)]
+    fn count_call(&mut self, before: usize, edit: bool)
+        ensures
+            final(self)@ == old(self)@,
+            final(self).core@ == old(self).core@,
+            final(self).edits() == if edit {
+                after_edit(before)
+            } else {
+                before
+            },
+    {
+        self.core.set_counter(
+            if edit {
+                before.wrapping_add(1)
+            } else {
+                before
+            },
+        );
+    }
+
     /// Delete `del` values at `at` and insert `values` there.
+    ///
+    /// The column counts an edit more (`after_edit` of its `edits()`),
+    /// unless the call deletes no value and inserts none.
     pub fn splice(&mut self, at: usize, del: usize, values: &[Get<'_, V>])
         requires
             at <= old(self)@.len(),
             del <= old(self)@.len() - at,
         ensures
             final(self)@ == old(self)@.take(at as int) + VGet::svs(values@) + old(self)@.skip(at + del),
+            final(self).edits() == if del > 0 || values@.len() > 0 {
+                after_edit(old(self).edits())
+            } else {
+                old(self).edits()
+            },
     {
         proof {
             <Held<V, C> as VGet>::lemma_svs(self.core@);
         }
+        let counter = self.core.counter();
         let mut f = <V::E as Model<V::X>>::blind();
         let mut feed = SliceFeed::<V, C> { values, pos: 0, _c: PhantomData };
         let _ins = self.core.splice(at, del, &mut f, &mut feed);
         proof {
             lemma_spliced::<V, C>(old(self).core@, at as int, del as int, values@, _ins@);
         }
+        self.count_call(counter, del > 0 || values.len() > 0);
     }
 
     /// Delete `del` values at `at` and insert there the values that
@@ -2095,7 +2190,11 @@ impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
     /// holds for an iterator that keeps to what Verus asks of every
     /// iterator (`obeys_prophetic_iter_laws`), as those of the standard
     /// library that Verus specifies do; of another it says nothing but
-    /// that `self` is a column.
+    /// that `self` is a column, and what it counts.
+    ///
+    /// The column counts an edit more unless the call deletes no value
+    /// and inserts none, which is where `del` is 0 and the column is as
+    /// long as it was. That holds of every iterator.
     pub fn splice_iter<'v, I: IntoIterator<Item = Get<'v, V>>>(&mut self, at: usize, del: usize, values: I)
         requires
             at <= old(self)@.len(),
@@ -2105,10 +2204,17 @@ impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
                 (I::into_iter).ensures((values,), it) && (it.obeys_prophetic_iter_laws() ==> final(self)@ == old(
                     self,
                 )@.take(at as int) + VGet::svs(it.remaining()) + old(self)@.skip(at + del)),
+            final(self).edits() == if del > 0 || final(self)@.len() != old(self)@.len() {
+                after_edit(old(self).edits())
+            } else {
+                old(self).edits()
+            },
     {
         proof {
             <Held<V, C> as VGet>::lemma_svs(self.core@);
         }
+        let counter = self.core.counter();
+        let len = self.core.len();
         let it = values.into_iter();
         let ghost it0 = it;
         let mut f = <V::E as Model<V::X>>::blind();
@@ -2131,7 +2237,10 @@ impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
                 assert(vs.take(vs.len() as int) =~= vs);
                 lemma_spliced::<V, C>(old(self).core@, at as int, del as int, vs, _ins@);
             }
+            <Held<V, C> as VGet>::lemma_svs(self.core@);
         }
+        let edit = del > 0 || self.core.len() != len;
+        self.count_call(counter, edit);
     }
 
     /// Delete `del` values at `at` and insert there the runs that `runs`
@@ -2142,6 +2251,10 @@ impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
     /// [`splice_iter`](Self::splice_iter)'s does. The counts are the
     /// caller's: with ones that make the column longer than it can count,
     /// or a run longer than the format can write, this panics.
+    ///
+    /// The column counts an edit more unless the call deletes no value
+    /// and inserts none, as [`splice_iter`](Self::splice_iter)'s does:
+    /// runs that are all of count 0 insert none.
     pub fn splice_runs<'v, I: IntoIterator<Item = Run<Get<'v, V>>>>(&mut self, at: usize, del: usize, runs: I)
         requires
             at <= old(self)@.len(),
@@ -2151,10 +2264,17 @@ impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
                 (I::into_iter).ensures((runs,), it) && (it.obeys_prophetic_iter_laws() ==> final(self)@ == old(
                     self,
                 )@.take(at as int) + run_values(it.remaining()) + old(self)@.skip(at + del)),
+            final(self).edits() == if del > 0 || final(self)@.len() != old(self)@.len() {
+                after_edit(old(self).edits())
+            } else {
+                old(self).edits()
+            },
     {
         proof {
             <Held<V, C> as VGet>::lemma_svs(self.core@);
         }
+        let counter = self.core.counter();
+        let len = self.core.len();
         let it = runs.into_iter();
         let ghost it0 = it;
         let mut f = <V::E as Model<V::X>>::blind();
@@ -2177,20 +2297,29 @@ impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
                 lemma_svs_spliced(old(self).core@, at as int, del as int, _ins@);
                 lemma_held_runs::<V, C>(rs);
             }
+            <Held<V, C> as VGet>::lemma_svs(self.core@);
         }
+        let edit = del > 0 || self.core.len() != len;
+        self.count_call(counter, edit);
     }
 
-    /// Delete `del` values at `at`.
+    /// Delete `del` values at `at`, which is an edit unless `del` is 0.
     fn delete(&mut self, at: usize, del: usize)
         requires
             at <= old(self)@.len(),
             del <= old(self)@.len() - at,
         ensures
             final(self)@ == old(self)@.take(at as int) + old(self)@.skip(at + del),
+            final(self).edits() == if del > 0 {
+                after_edit(old(self).edits())
+            } else {
+                old(self).edits()
+            },
     {
         proof {
             <Held<V, C> as VGet>::lemma_svs(self.core@);
         }
+        let counter = self.core.counter();
         let mut f = <V::E as Model<V::X>>::blind();
         let mut feed = NoRuns::<<V::E as ReadsAgree<'static, V::X>>::Ins> { none: None };
         let _ins = self.core.splice(at, del, &mut f, &mut feed);
@@ -2202,15 +2331,18 @@ impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
             lemma_svs_none::<Held<V, C>>();
             assert(self@ =~= old(self)@.take(at as int) + old(self)@.skip(at + del));
         }
+        self.count_call(counter, del > 0);
     }
 
-    /// Insert `value` before the value at `at`.
+    /// Insert `value` before the value at `at`. The column counts an
+    /// edit more.
     #[inline(always)]
     pub fn insert(&mut self, at: usize, value: Get<'_, V>)
         requires
             at <= old(self)@.len(),
         ensures
             final(self)@ == old(self)@.insert(at as int, value.sv()),
+            final(self).edits() == after_edit(old(self).edits()),
     {
         // Which of the two it is, is a constant of the column's type: the
         // other is not compiled.
@@ -2234,10 +2366,12 @@ impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
             at <= old(self)@.len(),
         ensures
             final(self)@ == old(self)@.insert(at as int, value.sv()),
+            final(self).edits() == after_edit(old(self).edits()),
     {
         proof {
             <Held<V, C> as VGet>::lemma_svs(self.core@);
         }
+        let counter = self.core.counter();
         let one = [value];
         let values = one.as_slice();
         let mut f = <V::E as Model<V::X>>::blind();
@@ -2249,13 +2383,15 @@ impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
             lemma_svs_one(value);
             assert(self@ =~= old(self)@.insert(at as int, value.sv()));
         }
+        self.count_call(counter, true);
     }
 
-    /// Add `value` at the end.
+    /// Add `value` at the end. The column counts an edit more.
     #[inline(always)]
     pub fn push(&mut self, value: Get<'_, V>)
         ensures
             final(self)@ == old(self)@.push(value.sv()),
+            final(self).edits() == after_edit(old(self).edits()),
     {
         proof {
             <Held<V, C> as VGet>::lemma_svs(self.core@);
@@ -2267,13 +2403,14 @@ impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
         }
     }
 
-    /// Delete the value at `at`.
+    /// Delete the value at `at`. The column counts an edit more.
     #[inline(always)]
     pub fn remove(&mut self, at: usize)
         requires
             at < old(self)@.len(),
         ensures
             final(self)@ == old(self)@.remove(at as int),
+            final(self).edits() == after_edit(old(self).edits()),
     {
         self.delete(at, 1);
         proof {
@@ -2281,7 +2418,9 @@ impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
         }
     }
 
-    /// Keep the first `len` values, where there are more.
+    /// Keep the first `len` values, where there are more: then the
+    /// column counts an edit more, and where there are no more it counts
+    /// what it did.
     #[inline(always)]
     pub fn truncate(&mut self, len: usize)
         ensures
@@ -2289,6 +2428,11 @@ impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
                 old(self)@.take(len as int)
             } else {
                 old(self)@
+            },
+            final(self).edits() == if len < old(self)@.len() {
+                after_edit(old(self).edits())
+            } else {
+                old(self).edits()
             },
     {
         proof {
@@ -2303,7 +2447,8 @@ impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
         }
     }
 
-    /// Delete the `n` values at `at`.
+    /// Delete the `n` values at `at`. The column counts an edit more,
+    /// unless `n` is 0.
     #[inline(always)]
     pub fn remove_n(&mut self, at: usize, n: usize)
         requires
@@ -2311,6 +2456,11 @@ impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
             n <= old(self)@.len() - at,
         ensures
             final(self)@ == old(self)@.take(at as int) + old(self)@.skip(at + n),
+            final(self).edits() == if n > 0 {
+                after_edit(old(self).edits())
+            } else {
+                old(self).edits()
+            },
     {
         if n > 0 {
             self.delete(at, n);
@@ -2324,10 +2474,17 @@ impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
     /// Delete every value. The column keeps its segment budget.
     ///
     /// Of a column with no value this is no edit, as it is none of
-    /// [`Column`](crate::Column): what was suspended of it resumes still.
+    /// [`Column`](crate::Column): the column counts what it did, and
+    /// what was suspended of it resumes still. Of any other the column
+    /// counts an edit more.
     pub fn clear(&mut self)
         ensures
             final(self)@ == Seq::<V::S>::empty(),
+            final(self).edits() == if old(self)@.len() > 0 {
+                after_edit(old(self).edits())
+            } else {
+                old(self).edits()
+            },
     {
         if self.core.len() == 0 {
             proof {
@@ -2339,6 +2496,10 @@ impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
         // a new column, and not a delete of every value, which would
         // leave the last slab to be emptied through a rebuild. The edit
         // counter goes on from where it is, as after any other edit.
+        proof {
+            // the column has a value
+            <Held<V, C> as VGet>::lemma_svs(self.core@);
+        }
         self.core.lemma_column();
         let mut core = Core::<V::E>::with_budget(self.core.max_segments());
         core.set_counter(self.core.counter().wrapping_add(1));
@@ -2675,13 +2836,15 @@ impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
     ///
     /// If `f` panics, the column is as it was. The column keeps its
     /// segment budget, and its slabs are cut anew, as those of a loaded
-    /// column are.
+    /// column are. It counts an edit more, whatever `f` gives and of a
+    /// column with no value too.
     pub fn remap<F: Fn(V) -> V>(&mut self, f: F)
         requires
             forall|v: V| old(self)@.contains(V::sv_of(v)) ==> #[trigger] call_requires(f, (v,)),
         ensures
             final(self)@.len() == old(self)@.len(),
             forall|i: int| 0 <= i < old(self)@.len() ==> mapped(f, old(self)@[i], #[trigger] final(self)@[i]),
+            final(self).edits() == after_edit(old(self).edits()),
     {
         let counter = self.core.counter();
         let m = VMap::<V, C, F> { f: &f, _c: PhantomData };
@@ -4142,6 +4305,18 @@ impl VerifiedIterState {
         &&& self.pos <= total(lens)
     }
 
+    /// A state fits only a column that counts the edits it does. A
+    /// column that has been edited since counts others
+    /// (`lemma_after_edits`), so the state does not fit it, and
+    /// [`try_resume`](Self::try_resume) refuses it.
+    pub proof fn lemma_fits<V: VValue<C>, C: VCodec>(&self, column: &VerifiedColumn<V, C>)
+        requires
+            self.fits(column),
+        ensures
+            self.edits() == column.edits(),
+    {
+    }
+
     /// An iterator of `column` that stands where the suspended one stood,
     /// with its window, if the state fits the column (`fits`); an error
     /// ([`PackError::InvalidResume`]) if it does not.
@@ -4152,9 +4327,11 @@ impl VerifiedIterState {
     /// values of `column` in the state's window. Where the state stands
     /// at the column's end, the iterator's window ends there.
     ///
-    /// That every edit moves the column's count of edits
-    /// (`VerifiedColumn::edits`), so that a state taken before an edit is
-    /// refused after it, is tested and not proved.
+    /// An edit moves the column's count of edits
+    /// (`VerifiedColumn::edits`), as each method that edits says, so a
+    /// state taken before an edit is refused after it (`lemma_fits`),
+    /// and after more edits unless they are `usize::MAX + 1` or more
+    /// (`lemma_after_edits`).
     ///
     /// Panics, as [`Column`](crate::Column)'s does, where an edit's panic
     /// left `column` without its parts and the state would fit it.
