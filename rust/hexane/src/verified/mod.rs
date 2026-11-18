@@ -20,7 +20,9 @@
 //! [`VerifiedEncoder`] takes values one after another and gives the
 //! saved column of them, with no column in between.
 //! [`VerifiedEncoderState`] does so into a buffer of its client's,
-//! holding only the run in hand.
+//! holding only the run in hand. [`VerifiedDecoder`] gives a saved
+//! column's values one after another from its bytes, with no column in
+//! between either.
 //!
 //! # Value types
 //!
@@ -204,7 +206,22 @@
 //!   forms ([`encode`](VerifiedEncoder::encode),
 //!   [`encode_to`](VerifiedEncoder::encode_to),
 //!   [`encode_to_unless`](VerifiedEncoder::encode_to_unless)) give a
-//!   state the values of an iterator and finish it.
+//!   state the values of an iterator and finish it;
+//! * a [`VerifiedDecoder`] is specified, as an iterator of a column
+//!   is, by what it has left to give (`items()`, and as values
+//!   `rest()`). [`new`](VerifiedDecoder::new) requires that the bytes
+//!   be a saved column (`valid`) and gives a decoder that has its
+//!   `values` left, all of them;
+//!   [`try_new`](VerifiedDecoder::try_new) reads the bytes through
+//!   first, and gives such a decoder or an error. `next`, `nth` and
+//!   [`advance_by`](VerifiedDecoder::advance_by) are an iterator's.
+//!   [`next_run_max`](VerifiedDecoder::next_run_max) gives the next
+//!   run counted up to a bound (`head_run_max`), and
+//!   [`next_run`](VerifiedDecoder::next_run) up to `usize::MAX`;
+//!   [`scan_for`](VerifiedDecoder::scan_for) passes the runs that come
+//!   before a target and says how many values those were and how many
+//!   of the target follow (`scan_of`), and how far it has moved
+//!   (`scan_taken`).
 //!
 //! `valid`, `values`, `encoding` and `loadable` are specification
 //! functions of a column type (`VerifiedColumn::<V>::valid(bytes)`),
@@ -213,12 +230,15 @@
 //! bytes, as `total_len` of them, and for strings their UTF-8 bytes, as
 //! `total_str_len`), `only`, `sorted`, `sorted_for`,
 //! `bytes_below`, `mapped`, `folded`, `window`, `past`, `head_run`,
+//! `head_run_max`, `head_len`, `scan_of`, `scan_taken`,
 //! `runs_of`, `run_values`, `fill_of` and `sum_of` are of this module,
 //! and `lemma_save_unique`, `lemma_encoding`, `lemma_no_bytes`,
 //! `lemma_sorted`, `lemma_run_values_push`, `lemma_run_values_add`,
-//! `lemma_runs_first`, `lemma_runs_of` and `lemma_runs_of_values` are
+//! `lemma_runs_first`, `lemma_runs_of`, `lemma_runs_of_values`,
+//! `lemma_head_run_max` and `lemma_head_len` are
 //! lemmas, as are `VSpec::lemma_below` (the order is a strict total
 //! order), `VerifiedIter::lemma_items_len`,
+//! `VerifiedDecoder::lemma_items_len`,
 //! `VerifiedIter::lemma_source` and
 //! `VerifiedEncoderState::lemma_before`: they exist only for Verus, and
 //! a normal build compiles them away. What options hold is
@@ -395,6 +415,7 @@ pub(crate) mod bytes;
 mod client_proof;
 pub(crate) mod codec;
 pub(crate) mod counts;
+mod decoder;
 mod encoder;
 pub(crate) mod model;
 pub(crate) mod text;
@@ -406,6 +427,11 @@ pub use crate::iter_core::{past, window};
 #[cfg(verus_keep_ghost)]
 pub use bytes::{below_at, bytes_below, total_len, total_len_opt};
 pub use codec::VCodec;
+pub use decoder::VerifiedDecoder;
+#[cfg(verus_keep_ghost)]
+pub use decoder::{
+    head_len, head_run_max, lemma_head_len, lemma_head_run_max, scan_of, scan_taken,
+};
 pub use encoder::{VerifiedEncoder, VerifiedEncoderState};
 #[cfg(verus_keep_ghost)]
 pub use text::total_str_len;

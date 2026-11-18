@@ -14,12 +14,12 @@
 
 use hexane::encoder::{BoolEncoder, BoolEncoderState, RleEncoder, RleEncoderState};
 use hexane::verified::{
-    refused, Get, VNewtype, VValue, VerifiedColumn, VerifiedEncoder, VerifiedEncoderState,
-    VerifiedIter, VerifiedIterState, VerifiedRuns,
+    refused, Get, VNewtype, VValue, VerifiedColumn, VerifiedDecoder, VerifiedEncoder,
+    VerifiedEncoderState, VerifiedIter, VerifiedIterState, VerifiedRuns,
 };
 use hexane::{
     Codec, Column, ColumnEncoding, ColumnValue, ColumnValueRef, Encoder, EncoderApi, IterState,
-    Leb128, LoadOpts, MaybeFill, NoFill, PackError, RleEncoding, RleValue, Run,
+    Leb128, LoadOpts, MaybeFill, NoFill, PackError, RleEncoding, RleValue, Run, RunDecoder,
 };
 use std::cell::{Cell, RefCell};
 use std::cmp::Ordering;
@@ -118,6 +118,10 @@ trait Kind: VValue + ColumnValueRef + Clone + PartialEq + Debug {
     /// The next place where `Column`'s iterator has the value.
     fn old_scan(&self, it: &mut hexane::Iter<'_, Self>) -> Option<usize>;
 
+    /// What the old API's decoder returns from a scan for the value
+    /// (`RunDecoder::scan_for`).
+    fn old_scan_for<'a>(&'a self, d: &mut hexane::Decoder<'a, Self>, max: usize) -> (usize, usize);
+
     /// `Column`'s encoder asked to save what `f` gives for its values
     /// (`RleEncoder::save_to_and_remap`): the range it returns. `None`
     /// for `bool`, whose encoder in the old API has no such form.
@@ -169,6 +173,14 @@ macro_rules! plain_kind {
 
             fn old_scan(&self, it: &mut hexane::Iter<'_, $t>) -> Option<usize> {
                 it.scan_to_value(*self)
+            }
+
+            fn old_scan_for<'a>(
+                &'a self,
+                d: &mut hexane::Decoder<'a, $t>,
+                max: usize,
+            ) -> (usize, usize) {
+                d.scan_for(*self, max)
             }
 
             fn old_remap(
@@ -225,6 +237,14 @@ macro_rules! plain_kind {
 
             fn old_scan(&self, it: &mut hexane::Iter<'_, Option<$t>>) -> Option<usize> {
                 it.scan_to_value(*self)
+            }
+
+            fn old_scan_for<'a>(
+                &'a self,
+                d: &mut hexane::Decoder<'a, Option<$t>>,
+                max: usize,
+            ) -> (usize, usize) {
+                d.scan_for(*self, max)
             }
 
             fn old_remap(
@@ -287,6 +307,10 @@ impl Kind for bool {
         it.scan_to_value(*self)
     }
 
+    fn old_scan_for<'a>(&'a self, d: &mut hexane::Decoder<'a, bool>, max: usize) -> (usize, usize) {
+        d.scan_for(*self, max)
+    }
+
     fn old_remap(
         _: Encoder<'_, bool>,
         _: &mut Vec<u8>,
@@ -343,6 +367,14 @@ impl Kind for Vec<u8> {
         it.scan_to_value(self.as_slice())
     }
 
+    fn old_scan_for<'a>(
+        &'a self,
+        d: &mut hexane::Decoder<'a, Vec<u8>>,
+        max: usize,
+    ) -> (usize, usize) {
+        d.scan_for(self.as_slice(), max)
+    }
+
     fn old_remap(
         e: Encoder<'_, Vec<u8>>,
         out: &mut Vec<u8>,
@@ -397,6 +429,14 @@ impl Kind for Option<Vec<u8>> {
 
     fn old_scan(&self, it: &mut hexane::Iter<'_, Option<Vec<u8>>>) -> Option<usize> {
         it.scan_to_value(self.as_deref())
+    }
+
+    fn old_scan_for<'a>(
+        &'a self,
+        d: &mut hexane::Decoder<'a, Option<Vec<u8>>>,
+        max: usize,
+    ) -> (usize, usize) {
+        d.scan_for(self.as_deref(), max)
     }
 
     fn old_remap(
@@ -500,6 +540,14 @@ impl Kind for String {
 
     fn old_scan(&self, it: &mut hexane::Iter<'_, String>) -> Option<usize> {
         it.scan_to_value(self.as_str())
+    }
+
+    fn old_scan_for<'a>(
+        &'a self,
+        d: &mut hexane::Decoder<'a, String>,
+        max: usize,
+    ) -> (usize, usize) {
+        d.scan_for(self.as_str(), max)
     }
 
     fn old_remap(
@@ -3802,12 +3850,15 @@ fn a_fold_calls_its_function_for_each_value() {
 }
 
 /// The two loaders take the same bytes, as the same values, and refuse
-/// the rest with the same error.
+/// the rest with the same error. So do the two checked decoders
+/// (`check_same_decoder`), which read what loads.
 fn check_same_load<T: Kind>(bytes: &[u8]) -> bool {
     let v = VerifiedColumn::<T>::load(bytes);
     let c = Column::<T>::load(bytes);
+    let decodes = check_same_decoder::<T>(bytes);
     match (v, c) {
         (Ok(v), Ok(c)) => {
+            assert!(decodes, "no decoder of {bytes:?}, which load");
             assert_eq!(v.len(), c.len());
             // a few bytes can be a run of billions: read those in places
             if v.len() <= 100_000 {
@@ -4732,6 +4783,8 @@ fn bytes_of_too_many_values_are_an_error() {
         (bytes, value as u64)
     }
     fn case<T: Kind>(bytes: &[u8], total: u128, first: T, last: T) {
+        // the decoders count no total: they read the runs, or refuse alike
+        check_same_decoder::<T>(bytes);
         let most = usize::MAX - 3;
         for length in [None, Some(most), Some(usize::MAX), Some(0)] {
             for fill in [None, Some(&first)] {
@@ -6862,4 +6915,310 @@ fn static_forms_read_an_iterator_once() {
         assert_eq!(range.is_empty(), model.iter().all(|x| *x == unless));
         assert_eq!(out.len(), range.end);
     }
+}
+
+/// A run a `VerifiedDecoder` gave.
+fn new_run<T: Kind>(r: Option<Run<Get<'_, T>>>) -> Option<(usize, T)> {
+    r.map(|r| (r.count, T::keep(r.value)))
+}
+
+/// A run the old API's decoder gave.
+fn old_run<T: Kind>(r: Option<Run<<T as ColumnValueRef>::Get<'_>>>) -> Option<(usize, T)> {
+    r.map(|r| (r.count, old(r.value)))
+}
+
+/// The two decoders have the same values left; how many.
+fn check_left<T: Kind>(x: &VerifiedDecoder<'_, T>, y: &hexane::Decoder<'_, T>) -> usize {
+    let a: Vec<T> = x.clone().map(T::keep).collect();
+    let b: Vec<T> = y.clone().map(old).collect();
+    assert_eq!(a, b);
+    a.len()
+}
+
+/// How many values at the head of `vs` are equal, counted to `max`.
+fn head_of<T: Kind>(vs: &[T], max: usize) -> usize {
+    vs.iter().take(max).take_while(|v| **v == vs[0]).count()
+}
+
+/// What a scan for `x` of at most `max` of the values `vs` returns, and
+/// how many values it passes: it reads run after run, each cut where
+/// `max` is reached, to the first that is not less than `x`, and passes
+/// that one too.
+fn model_scan<T: Kind>(vs: &[T], x: &T, max: usize) -> ((usize, usize), usize) {
+    let mut skipped = 0;
+    while skipped < max && skipped < vs.len() {
+        let n = head_of(&vs[skipped..], max - skipped);
+        match vs[skipped].order(x) {
+            Ordering::Less => skipped += n,
+            Ordering::Equal => return ((skipped, n), skipped + n),
+            Ordering::Greater => return ((skipped, 0), skipped + n),
+        }
+    }
+    ((skipped, 0), skipped)
+}
+
+/// A `VerifiedDecoder` and the old API's decoder of the bytes `model`
+/// saves to, each stepped the same way, at random: what the two give at
+/// each step is the same, it is what `model` has there, and they have
+/// the same values left. So do the copies taken of them on the way, when
+/// the two have moved on. At the end each call gives nothing, and
+/// leaves the decoder at the end.
+fn check_decoders<T: Kind>(model: &[T], rng: &mut Rng) {
+    // (before the decoders: the old one keeps what it is asked to find)
+    let ts = targets(rng, model);
+    let bytes = both(model).0.save();
+    let mut x = VerifiedDecoder::<T>::new(&bytes);
+    let mut y = hexane::decoder::<T>(&bytes);
+    assert_eq!(check_left(&x, &y), model.len());
+    assert_eq!(new_values_of(&x), model);
+    let tried = VerifiedDecoder::<T>::try_new(&bytes).unwrap();
+    let old_tried = hexane::try_decoder::<T>(&bytes).unwrap();
+    assert_eq!(check_left(&tried, &old_tried), model.len());
+
+    let mut copies = Vec::new();
+    let mut at = 0;
+    while at < model.len() {
+        let left = &model[at..];
+        let k = match rng.below(4) {
+            0 => 0,
+            1 => 1 + rng.below(3),
+            2 => rng.below(left.len() + 2),
+            _ => rng.below(40),
+        };
+        match rng.below(9) {
+            0 | 1 => {
+                let (a, b) = (x.next().map(T::keep), y.next().map(old));
+                assert_eq!(a, b);
+                assert_eq!(a.as_ref(), Some(&left[0]));
+                at += 1;
+            }
+            2 => {
+                let (a, b) = (x.nth(k).map(T::keep), y.nth(k).map(old));
+                assert_eq!(a, b);
+                assert_eq!(a.as_ref(), left.get(k));
+                at += left.len().min(k + 1);
+            }
+            3 => {
+                x.advance_by(k);
+                RunDecoder::advance_by(&mut y, k);
+                at += left.len().min(k);
+            }
+            4 => {
+                let (a, b) = (new_run::<T>(x.next_run()), old_run::<T>(y.next_run()));
+                assert_eq!(a, b);
+                let n = head_of(left, usize::MAX);
+                assert_eq!(a, Some((n, left[0].clone())));
+                at += n;
+            }
+            5 | 6 => {
+                let a = new_run::<T>(x.next_run_max(k));
+                let b = old_run::<T>(y.next_run_max(k));
+                assert_eq!(a, b);
+                let n = head_of(left, k);
+                assert_eq!(a, (k > 0).then(|| (n, left[0].clone())));
+                at += n;
+            }
+            7 => {
+                let t = &ts[rng.below(ts.len())];
+                let max = [usize::MAX, usize::MAX, k, left.len()][rng.below(4)];
+                let a = x.scan_for(t.lend(), max);
+                assert_eq!(a, t.old_scan_for(&mut y, max));
+                let (found, passed) = model_scan(left, t, max);
+                assert_eq!(a, found, "a scan of at most {max} for {t:?} in {left:?}");
+                at += passed;
+            }
+            _ => copies.push((x.clone(), y.clone(), at)),
+        }
+        assert_eq!(check_left(&x, &y), model.len() - at);
+    }
+
+    let t = &ts[0];
+    assert_eq!(x.next().map(T::keep), None);
+    assert_eq!(y.next().map(old::<T>), None);
+    assert_eq!(x.nth(0).map(T::keep), None);
+    assert_eq!(x.nth(5).map(T::keep), None);
+    assert_eq!(y.nth(5).map(old::<T>), None);
+    x.advance_by(3);
+    RunDecoder::advance_by(&mut y, 3);
+    assert_eq!(new_run::<T>(x.next_run()), None);
+    assert_eq!(old_run::<T>(y.next_run()), None);
+    assert_eq!(new_run::<T>(x.next_run_max(4)), None);
+    assert_eq!(new_run::<T>(x.next_run_max(0)), None);
+    assert_eq!(old_run::<T>(y.next_run_max(4)), None);
+    assert_eq!(x.scan_for(t.lend(), usize::MAX), (0, 0));
+    assert_eq!(t.old_scan_for(&mut y, usize::MAX), (0, 0));
+    assert_eq!(x.next().map(T::keep), None);
+    assert_eq!(check_left(&x, &y), 0);
+    for (x, y, at) in copies {
+        assert_eq!(check_left(&x, &y), model.len() - at);
+        assert_eq!(new_values_of(&x), model[at..]);
+    }
+}
+
+/// What a `VerifiedDecoder` has left.
+fn new_values_of<T: Kind>(x: &VerifiedDecoder<'_, T>) -> Vec<T> {
+    x.clone().map(T::keep).collect()
+}
+
+fn decoders<T: Kind>() {
+    let mut rng = Rng(0xdec0);
+    let (a, b, c) = (T::fresh(&mut rng), T::fresh(&mut rng), T::fresh(&mut rng));
+    let pick = |i: usize| [&a, &b, &c][i].clone();
+    let mut shapes: Vec<Vec<T>> = vec![
+        vec![],
+        vec![pick(0)],
+        vec![pick(0); 300],
+        (0..300).map(|i| pick(i / 7 % 2)).collect(),
+        (0..300).map(|i| pick(i % 3)).collect(),
+        (0..300).map(|_| T::fresh(&mut rng)).collect(),
+        [0, 0, 1, 2, 2, 2, 0, 1, 1, 0].map(pick).to_vec(),
+    ];
+    for i in 0..40 {
+        let mut model: Vec<T> = rng.values(200);
+        // every other one in order, for the scans
+        if i % 2 == 0 {
+            model.sort_by(T::order);
+        }
+        shapes.push(model);
+    }
+    for model in shapes {
+        for _ in 0..3 {
+            check_decoders(&model, &mut rng);
+        }
+    }
+}
+
+/// A `VerifiedDecoder` reads saved bytes as the old API's decoder does:
+/// value by value, in steps, run by run, a run in parts, and in scans
+/// for a value, for every value type.
+#[test]
+fn decoders_agree() {
+    for_each_kind!(decoders);
+}
+
+/// The two checked decoders take the same bytes, read them alike, and
+/// refuse the rest with the same error.
+fn check_same_decoder<T: Kind>(bytes: &[u8]) -> bool {
+    let x = VerifiedDecoder::<T>::try_new(bytes);
+    let y = hexane::try_decoder::<T>(bytes);
+    match (x, y) {
+        (Ok(mut x), Ok(mut y)) => {
+            for k in [0, 7, usize::MAX] {
+                let a = x.clone().nth(k).map(T::keep);
+                assert_eq!(a, y.clone().nth(k).map(old));
+            }
+            // run by run: a few bytes can be a run of billions
+            loop {
+                let (a, b) = (new_run::<T>(x.next_run()), old_run::<T>(y.next_run()));
+                assert_eq!(a, b, "the decoders read {bytes:?} differently");
+                if a.is_none() {
+                    return true;
+                }
+            }
+        }
+        (Err(x), Err(y)) => {
+            assert_eq!(
+                x.to_string(),
+                y.to_string(),
+                "the decoders refuse {bytes:?} differently"
+            );
+            false
+        }
+        (x, y) => panic!(
+            "the decoders disagree on {bytes:?}: {}, {}",
+            x.is_ok(),
+            y.is_ok()
+        ),
+    }
+}
+
+/// What a decoder gives is lent by the bytes, not by the decoder: it is
+/// there when the decoder is gone.
+#[test]
+fn a_decoder_lends_what_the_bytes_hold() {
+    let words = ["pear".to_string(), String::new(), "größer".to_string()];
+    let bytes = both(&words).0.save();
+    let (first, run) = {
+        let mut d = VerifiedDecoder::<String>::new(&bytes);
+        (d.next(), d.next_run())
+    };
+    assert_eq!(first, Some("pear"));
+    assert_eq!(run.map(|r| (r.count, r.value)), Some((1, "")));
+    let blobs = [Some(b"ab".to_vec()), None, None];
+    let bytes = both(&blobs).0.save();
+    let (first, second) = {
+        let mut d = VerifiedDecoder::<Option<Vec<u8>>>::new(&bytes);
+        (d.next(), d.nth(1))
+    };
+    assert_eq!(first, Some(Some(&b"ab"[..])));
+    assert_eq!(second, Some(None));
+    // the bytes of the string are bytes of the saved column
+    let at = bytes.as_ptr_range();
+    let lent = first.unwrap().unwrap().as_ptr_range();
+    assert!(at.start <= lent.start && lent.end <= at.end);
+}
+
+/// Runs as long as a run can be: the decoders count them alike, pass
+/// them in one step, and give them in parts.
+#[cfg(target_pointer_width = "64")]
+#[test]
+fn decoders_of_the_longest_runs() {
+    // a run of `i64::MAX` sevens, one of eights, a nine
+    let mut bytes = vec![0xff; 9];
+    bytes.extend([0, 7]);
+    bytes.extend([0xff; 9]);
+    bytes.extend([0, 8, 0x7f, 9]);
+    assert!(check_same_decoder::<u64>(&bytes));
+    assert!(check_same_decoder::<Option<u64>>(&bytes));
+    let long = i64::MAX as usize;
+    let mut x = VerifiedDecoder::<u64>::try_new(&bytes).unwrap();
+    let mut y = hexane::try_decoder::<u64>(&bytes).unwrap();
+    assert_eq!(x.next_run_max(5), Some(Run { count: 5, value: 7 }));
+    assert_eq!(y.next_run_max(5), Some(Run { count: 5, value: 7 }));
+    let rest = Some(Run {
+        count: long - 5,
+        value: 7,
+    });
+    assert_eq!(x.clone().next_run(), rest);
+    assert_eq!(y.clone().next_run(), rest);
+    assert_eq!(x.clone().scan_for(8, usize::MAX), (long - 5, long));
+    assert_eq!(y.clone().scan_for(8, usize::MAX), (long - 5, long));
+    assert_eq!(x.clone().scan_for(8, long), (long - 5, 5));
+    assert_eq!(y.clone().scan_for(8, long), (long - 5, 5));
+    assert_eq!(x.clone().scan_for(9, usize::MAX), (2 * long - 5, 1));
+    assert_eq!(y.clone().scan_for(9, usize::MAX), (2 * long - 5, 1));
+    x.advance_by(2 * long - 6);
+    RunDecoder::advance_by(&mut y, 2 * long - 6);
+    assert_eq!(x.next(), Some(8));
+    assert_eq!(y.next(), Some(8));
+    assert_eq!(x.nth(0), Some(9));
+    assert_eq!(y.nth(0), Some(9));
+    assert_eq!(x.next(), None);
+    assert_eq!(y.next(), None);
+
+    // nulls, and `bool`s, are counted with no sign
+    let mut nulls = vec![0];
+    nulls.extend([0xff; 9]);
+    nulls.push(1);
+    assert!(check_same_decoder::<Option<u64>>(&nulls));
+    assert!(check_same_decoder::<Option<Vec<u8>>>(&nulls));
+    let mut x = VerifiedDecoder::<Option<u64>>::try_new(&nulls).unwrap();
+    let all = Some(Run {
+        count: usize::MAX,
+        value: None,
+    });
+    assert_eq!(x.clone().next_run(), all);
+    assert_eq!(x.nth(usize::MAX - 1), Some(None));
+    assert_eq!(x.next(), None);
+    // `usize::MAX - 2` times `false`, and `true` twice
+    let mut flags = vec![0xfd];
+    flags.extend([0xff; 8]);
+    flags.extend([1, 2]);
+    assert!(check_same_decoder::<bool>(&flags));
+    let mut x = VerifiedDecoder::<bool>::try_new(&flags).unwrap();
+    let mut y = hexane::try_decoder::<bool>(&flags).unwrap();
+    assert_eq!(x.scan_for(true, usize::MAX - 1), (usize::MAX - 2, 1));
+    assert_eq!(y.scan_for(true, usize::MAX - 1), (usize::MAX - 2, 1));
+    assert_eq!((x.next(), x.next()), (Some(true), None));
+    assert_eq!((y.next(), y.next()), (Some(true), None));
 }

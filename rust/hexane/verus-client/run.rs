@@ -1,7 +1,7 @@
 //! Runs the clients Verus checked: each call meets its client's
 //! `requires`, and the client's own run-time work (loading, saving,
 //! unwrapping) must not panic.
-use hexane::verified::{VerifiedColumn, VerifiedEncoder, VerifiedEncoderState};
+use hexane::verified::{VerifiedColumn, VerifiedDecoder, VerifiedEncoder, VerifiedEncoderState};
 use hexane::{Leb128, Run};
 use verus_client::Action;
 
@@ -1147,4 +1147,108 @@ fn edits() {
     let mut col = copy.clone();
     verus_client::counted_by_a_clear(&mut col);
     assert!(s.try_resume(&col).is_err());
+}
+
+#[test]
+fn decoders() {
+    let v: Vec<u64> = (0..1000).map(|i| i / 3).collect();
+    let mut col = VerifiedColumn::<u64>::new();
+    col.splice(0, 0, &v);
+    let bytes = col.save();
+    let all = verus_client::read_all(VerifiedDecoder::<u64>::new(&bytes));
+    assert_eq!(all, v);
+    assert_eq!(verus_client::decode_all::<u64, Leb128>(&bytes), v);
+    assert!(verus_client::decoded_as_held(&col));
+    assert!(verus_client::encoded_then_decoded::<u64, Leb128>(&v));
+    let known = verus_client::decode_unknown::<u64, Leb128>(&bytes);
+    assert_eq!(known, Some(v.clone()));
+    // a run of two with no value after it
+    assert_eq!(verus_client::decode_unknown::<u64, Leb128>(&[2]), None);
+    assert!(verus_client::decoded_or_loaded::<u64, Leb128>(&bytes));
+    assert!(verus_client::decoded_or_loaded::<u64, Leb128>(&[2]));
+    assert!(verus_client::decoded_or_loaded::<bool, Leb128>(&[3, 2]));
+    assert_eq!(verus_client::the_sixth(&bytes), Some(1));
+    assert_eq!(verus_client::the_sixth(&[]), None);
+    assert_eq!(verus_client::recoded_by_runs::<u64, Leb128>(&bytes), bytes);
+    let mut dec = VerifiedDecoder::<u64>::new(&bytes);
+    for _ in 0..200 {
+        assert!(verus_client::runs_differ(&mut dec));
+    }
+    assert_eq!(dec.next(), None);
+    verus_client::a_run_in_parts();
+    verus_client::nulls_and_flags_decoded();
+    verus_client::after_a_scan();
+
+    // strings, and byte strings that may be null
+    let words = vec!["", "apple", "apple", "größer", "pear", "日本語"];
+    let mut text = VerifiedColumn::<String>::new();
+    text.splice(0, 0, &words);
+    let text_bytes = text.save();
+    assert_eq!(verus_client::first_text(&text_bytes), Some(""));
+    assert_eq!(verus_client::first_text(&[]), None);
+    let all = verus_client::decode_all::<String, Leb128>(&text_bytes);
+    assert_eq!(all, words);
+    assert!(verus_client::decoded_as_held(&text));
+    assert!(verus_client::encoded_then_decoded::<String, Leb128>(&words));
+    let again = verus_client::recoded_by_runs::<String, Leb128>(&text_bytes);
+    assert_eq!(again, text_bytes);
+    for x in ["", "apple", "b", "pear", "日本語", "🦀"] {
+        assert!(verus_client::scanned_as_searched(&text, x), "{x}");
+    }
+    let blobs = vec![None, None, Some(&b"ab"[..]), Some(b""), None];
+    let mut blob = VerifiedColumn::<Option<Vec<u8>>>::new();
+    blob.splice(0, 0, &blobs);
+    let blob_bytes = blob.save();
+    assert_eq!(verus_client::first_bytes(&blob_bytes), Some(None));
+    let mut some = VerifiedColumn::<Option<Vec<u8>>>::new();
+    some.push(Some(b"ab"));
+    let some_bytes = some.save();
+    let first = verus_client::first_bytes(&some_bytes);
+    assert_eq!(first, Some(Some(&b"ab"[..])));
+    assert_eq!(verus_client::first_bytes(&[]), None);
+    assert!(verus_client::decoded_as_held(&blob));
+    assert!(verus_client::encoded_then_decoded::<Option<Vec<u8>>, Leb128>(&blobs));
+    let again = verus_client::recoded_by_runs::<Option<Vec<u8>>, Leb128>(&blob_bytes);
+    assert_eq!(again, blob_bytes);
+
+    // a scan of numbers in order
+    let sorted: Vec<u32> = (0..1000).map(|i| i / 3 * 2).collect();
+    let mut scol = VerifiedColumn::<u32>::new();
+    scol.splice(0, 0, &sorted);
+    let sbytes = scol.save();
+    assert_eq!(verus_client::find_decoded(&sbytes, 0), (0, 3));
+    assert_eq!(verus_client::find_decoded(&sbytes, 10), (15, 3));
+    assert_eq!(verus_client::find_decoded(&sbytes, 11), (18, 0));
+    assert_eq!(verus_client::find_decoded(&sbytes, 666), (999, 1));
+    assert_eq!(verus_client::find_decoded(&sbytes, 7000), (1000, 0));
+    for x in [0, 1, 10, 11, 666, 667, 7000] {
+        assert!(verus_client::scanned_as_searched(&scol, x), "{x}");
+    }
+
+    // what each call says
+    let mut dec = verus_client::told_by_a_decoder::<u64, Leb128>(&bytes);
+    assert!(verus_client::told_by_a_try::<u64, Leb128>(&bytes).is_ok());
+    assert!(verus_client::told_by_a_try::<u64, Leb128>(&[2]).is_err());
+    assert_eq!(verus_client::told_by_a_decoded_value(&mut dec), Some(0));
+    assert_eq!(verus_client::told_by_a_decoders_nth(&mut dec, 4), Some(1));
+    verus_client::told_by_an_advance(&mut dec, 3);
+    let run = verus_client::told_by_a_decoded_run(&mut dec);
+    assert_eq!(run, Some(Run { count: 3, value: 3 }));
+    let run = verus_client::told_by_a_bounded_run(&mut dec, 2);
+    assert_eq!(run, Some(Run { count: 2, value: 4 }));
+    assert_eq!(verus_client::told_by_a_bounded_run(&mut dec, 0), None);
+    let found = verus_client::told_by_a_decoders_scan(&mut dec, 6, 100);
+    assert_eq!(found, (4, 3));
+    let copy = verus_client::told_by_a_decoders_copy(&dec);
+    assert_eq!(copy.collect::<Vec<_>>(), v[21..]);
+    assert_eq!(dec.next(), Some(7));
+    verus_client::told_by_an_advance(&mut dec, 2000);
+    assert_eq!(verus_client::told_by_a_decoded_value(&mut dec), None);
+    assert_eq!(verus_client::told_by_a_decoders_nth(&mut dec, 0), None);
+    assert_eq!(verus_client::told_by_a_decoded_run(&mut dec), None);
+    let found = verus_client::told_by_a_decoders_scan(&mut dec, 6, 100);
+    assert_eq!(found, (0, 0));
+    let whole = VerifiedDecoder::<u64>::new(&bytes);
+    assert_eq!(verus_client::told_by_a_decoders_loop(whole), Some(333));
+    assert_eq!(verus_client::told_by_a_decoders_loop(dec), None);
 }

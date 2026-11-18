@@ -4365,6 +4365,26 @@ impl<'a, O> Decoders<'a> for RleReads<O> where O: for<'b> RleOps<'b> {
     }
 }
 
+impl<'a, O: RleOps<'a>> RDecoder<'a, O> {
+    /// A decoder on the valid slab `data`: it has all its values to
+    /// give.
+    #[inline(always)]
+    pub(crate) fn on(data: &'a [u8]) -> (d: Self)
+        requires
+            valid_slab::<O>(data@),
+        ensures
+            d.inv(),
+            d.rest() == slab_values::<O>(data@),
+        no_unwind
+    {
+        let d = RDecoder { inner: Dec::new(data) };
+        proof {
+            assert(d.inner.values().skip(0) =~= d.inner.values());
+        }
+        d
+    }
+}
+
 } // verus!
 
 impl<V: Copy> Clone for RunState<V> {

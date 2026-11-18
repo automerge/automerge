@@ -2694,6 +2694,26 @@ impl<'a, C: CountsOf> Decoders<'a> for BoolReads<C> {
     }
 }
 
+impl<'a, C: CountsOf> BoolDecoder<'a, C> {
+    /// A decoder on the valid bool slab `data`: it has all its values
+    /// to give.
+    #[inline(always)]
+    pub(crate) fn on(data: &'a [u8]) -> (d: Self)
+        requires
+            bool_valid::<C::K>(data@),
+        ensures
+            d.inv(),
+            d.rest() == bool_values::<C::K>(data@),
+        no_unwind
+    {
+        let d = BoolDecoder { d: BDec::new::<C::K>(data), _codec: PhantomData };
+        proof {
+            assert(bool_values::<C::K>(data@).skip(0) =~= bool_values::<C::K>(data@));
+        }
+        d
+    }
+}
+
 #[inline(always)]
 fn slice_from(v: &[u8], n: usize) -> (s: &[u8])
     requires n <= v@.len(),

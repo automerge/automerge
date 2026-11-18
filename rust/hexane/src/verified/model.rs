@@ -33,7 +33,7 @@ use crate::bool_unique::lemma_bool_slab_unique;
 use crate::bool_wire::{
     bool_counts, bool_valid, bool_values, bslabs_values, lemma_empty_valid, lemma_values_len,
 };
-use crate::bool_wire::{BSlab, BoolReads, CountsOf};
+use crate::bool_wire::{BSlab, BoolDecoder, BoolReads, CountsOf};
 use crate::btree::SlabBTree;
 use crate::column::Slab;
 use crate::column_core::ColumnCore;
@@ -46,11 +46,11 @@ use crate::remap::Encodes;
 use crate::rle::cut::Load;
 #[cfg(verus_keep_ghost)]
 use crate::rle::cut::{head_bound, lemma_slab_is_parse, small};
-use crate::rle::dec::RleReads;
 #[cfg(verus_keep_ghost)]
 use crate::rle::dec::{
     lemma_empty_slab, lemma_groups_values_concat, slab_groups, slab_values, valid_slab,
 };
+use crate::rle::dec::{RDecoder, RleReads};
 #[cfg(verus_keep_ghost)]
 use crate::rle::edit::lemma_valid_of;
 use crate::rle::edit::{RleModel, RleRebuild, Visit};
@@ -196,6 +196,17 @@ pub(crate) trait Model<X>: Slabs + Sized + for <'a>ReadsAgree<'a, X> where
         ensures
             r matches Ok(n) ==> Self::valid(bytes@) && n.0 == Self::values(bytes@).len(),
             Self::valid(bytes@) && bytes@.len() <= u32::MAX ==> r is Ok,
+    ;
+
+    /// A decoder on the saved column `d`, as they are that read a slab:
+    /// it has all the column's values to give.
+    fn decoder<'s>(d: &'s [u8]) -> (r: <X as Decoders<'s>>::D)
+        requires
+            Self::valid(d@),
+        ensures
+            r.inv(),
+            r.rest().map_values(|v: <<X as Decoders<'s>>::D as Decode>::Item| <Self as ReadsAgree<'s, X>>::own(v))
+                == Self::values(d@),
     ;
 }
 
@@ -444,6 +455,22 @@ impl<L, O> Model<RleReads<O>> for RleModel<L> where
     fn validate(bytes: &[u8]) -> (r: Result<(usize, usize), PackError>) {
         rle_validate::<O>(bytes)
     }
+
+    #[inline(always)]
+    fn decoder<'s>(d: &'s [u8]) -> (r: RDecoder<'s, O>) {
+        let r = RDecoder::on(d);
+        proof {
+            let o = slab_values::<O>(d@);
+            let m = r.rest().map_values(
+                |v: <O as RleOps<'s>>::V| <RleModel<L> as ReadsAgree<'s, RleReads<O>>>::own(v),
+            );
+            assert forall|i: int| 0 <= i < o.len() implies m[i] == #[trigger] o[i] by {
+                L::lemma_plain(o[i]);
+            }
+            assert(m =~= o);
+        }
+        r
+    }
 }
 
 /// A run-length slab read through
@@ -561,6 +588,16 @@ impl<C: CountsOf> Model<BoolReads<C>> for BoolModel<C> {
             },
             Err(e) => Err(e),
         }
+    }
+
+    #[inline(always)]
+    fn decoder<'s>(d: &'s [u8]) -> (r: BoolDecoder<'s, C>) {
+        let r = BoolDecoder::on(d);
+        proof {
+            let o = bool_values::<C::K>(d@);
+            assert(o.map_values(|v: bool| v) =~= o);
+        }
+        r
     }
 }
 

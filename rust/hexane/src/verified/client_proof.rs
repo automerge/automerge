@@ -213,14 +213,42 @@
 //! encoder and a state take strings borrowed and owned
 //! ([`encode_text`], [`text_streamed`]).
 //!
+//! And of a [`VerifiedDecoder`], which reads a saved column from its
+//! bytes with no column in between: that a `for` loop over it gives
+//! the values the bytes are the saved column of ([`read_all`],
+//! [`decode_all`]), which are those of the column that saved them and
+//! those an encoder was given ([`decoded_as_held`],
+//! [`encoded_then_decoded`]); that of bytes of any provenance a
+//! decoder is given only if they are a saved column
+//! ([`decode_unknown`]), as a load takes them
+//! ([`decoded_or_loaded`]); that it steps over values
+//! ([`the_sixth`]); that the runs it gives, given to an encoder, are
+//! saved as the bytes that were decoded ([`recoded_by_runs`]), that
+//! two runs one after the other are of different values
+//! ([`runs_differ`]), and that a run can be asked for in parts
+//! ([`a_run_in_parts`]); that nulls and `bool`s are read
+//! ([`nulls_and_flags_decoded`]), and strings and byte strings
+//! borrowed from the bytes ([`first_text`], [`first_bytes`]); that a
+//! scan of values in order gives how many come before a value and how
+//! many of it there are ([`find_decoded`]), which is what a column's
+//! search finds ([`scanned_as_searched`]); and where a decoder stands
+//! after a scan ([`after_a_scan`], [`the_run_at_the_head`]). Each
+//! function of a decoder says so on its own ([`told_by_a_decoder`],
+//! [`told_by_a_try`], [`told_by_a_decoded_value`],
+//! [`told_by_a_decoders_nth`], [`told_by_an_advance`],
+//! [`told_by_a_decoded_run`], [`told_by_a_bounded_run`],
+//! [`told_by_a_decoders_scan`], [`told_by_a_decoders_copy`],
+//! [`told_by_a_decoders_loop`]).
+//!
 //! This module exists only while Verus checks the crate.
 
 use super::{
-    after_edit, after_edits, below_at, bytes_below, folded, head_run, lemma_after_edits,
-    lemma_run_values_add, lemma_run_values_push, lemma_runs_first, lemma_runs_of_values,
-    lemma_sorted, mapped, only, refused, run_values, runs_of, sorted, sorted_for, sum_of,
-    total_len, total_str_len, window, Get, VCodec, VGet, VNewtype, VSpec, VValue, VerifiedColumn,
-    VerifiedEncoder, VerifiedEncoderState, VerifiedIter, VerifiedIterState,
+    after_edit, after_edits, below_at, bytes_below, folded, head_len, head_run, head_run_max,
+    lemma_after_edits, lemma_head_len, lemma_head_run_max, lemma_run_values_add,
+    lemma_run_values_push, lemma_runs_first, lemma_runs_of_values, lemma_sorted, mapped, only,
+    refused, run_values, runs_of, scan_of, scan_taken, sorted, sorted_for, sum_of, total_len,
+    total_str_len, window, Get, VCodec, VGet, VNewtype, VSpec, VValue, VerifiedColumn,
+    VerifiedDecoder, VerifiedEncoder, VerifiedEncoderState, VerifiedIter, VerifiedIterState,
 };
 use crate::{Leb128, LoadOpts, PackError, Run};
 use std::cmp::Ordering;
@@ -5257,6 +5285,851 @@ proof fn the_count_after(n: usize, k: nat)
     }
     lemma_after_edits(n, usize::MAX as nat);
     assert(after_edits(n, usize::MAX as nat + 1) == after_edit(after_edits(n, usize::MAX as nat)));
+}
+
+/// What a decoder has left, read by a `for` loop into a `Vec`: a
+/// decoder is an iterator of the standard library's, as a column's
+/// iterator is.
+#[allow(dead_code)]
+fn read_all<'a, V: VValue<C>, C: VCodec>(dec: VerifiedDecoder<'a, V, C>) -> (out: Vec<Get<'a, V>>)
+    ensures
+        out@ == dec.items(),
+        <Get<'a, V> as VGet>::svs(out@) == dec.rest(),
+{
+    let ghost all = dec.items();
+    let mut out: Vec<Get<'a, V>> = Vec::new();
+    for x in at: dec
+        invariant
+            at.seq() == all,
+            out@ == all.take(at.index()),
+    {
+        out.push(x);
+        proof {
+            assert(all.take(at.index() + 1) =~= all.take(at.index()).push(x));
+        }
+    }
+    proof {
+        assert(all.take(all.len() as int) =~= all);
+    }
+    out
+}
+
+/// A decoder gives the values of a saved column from its bytes, in
+/// order, each borrowed from the bytes where it borrows: the `Vec` they
+/// are read into holds the values the bytes are the saved column of.
+/// For every value type and codec.
+#[allow(dead_code)]
+fn decode_all<'a, V: VValue<C>, C: VCodec>(bytes: &'a [u8]) -> (out: Vec<Get<'a, V>>)
+    requires
+        VerifiedColumn::<V, C>::valid(bytes@),
+    ensures
+        <Get<'a, V> as VGet>::svs(out@) == VerifiedColumn::<V, C>::values(bytes@),
+{
+    read_all(VerifiedDecoder::<V, C>::new(bytes))
+}
+
+/// What a column saves, a decoder gives back: each value it reads from
+/// the saved bytes is the column's own at that place, as `same` finds
+/// when it runs, and it reads as many as the column has. For every
+/// value type and codec.
+#[allow(dead_code)]
+fn decoded_as_held<V: VValue<C>, C: VCodec>(col: &VerifiedColumn<V, C>) -> (r: bool)
+    ensures
+        r,
+{
+    let bytes = col.save();
+    let mut dec = VerifiedDecoder::<V, C>::new(bytes.as_slice());
+    let n = col.len();
+    let mut i: usize = 0;
+    let mut r = true;
+    proof {
+        assert(col@.skip(0) =~= col@);
+    }
+    while i < n
+        invariant
+            i <= n,
+            n == col@.len(),
+            dec.rest() == col@.skip(i as int),
+            r,
+        decreases n - i,
+    {
+        let x = dec.next();
+        let y = col.get(i);
+        match (x, y) {
+            (Some(a), Some(b)) => {
+                if !V::same(a, b) {
+                    r = false;
+                }
+            },
+            _ => {
+                r = false;
+            },
+        }
+        proof {
+            assert(col@.skip(i as int).skip(1) =~= col@.skip(i + 1));
+        }
+        i += 1;
+    }
+    let last = dec.next();
+    r && last.is_none()
+}
+
+/// What an encoder saves, a decoder reads as the values the encoder
+/// was given, one for one. For every value type and codec.
+#[allow(dead_code)]
+fn encoded_then_decoded<'v, V: VValue<C>, C: VCodec>(input: &Vec<Get<'v, V>>) -> (r: bool)
+    ensures
+        r,
+{
+    let bytes = encoded_as_saved::<V, C>(input);
+    let dec = VerifiedDecoder::<V, C>::new(bytes.as_slice());
+    let ghost all = dec.items();
+    proof {
+        dec.lemma_items_len();
+        VGet::lemma_svs(input@);
+    }
+    let n = input.len();
+    let mut i: usize = 0;
+    let mut r = true;
+    for x in at: dec
+        invariant
+            at.seq() == all,
+            VGet::svs(all) == VGet::svs(input@),
+            all.len() == n == input@.len(),
+            i == at.index(),
+            r,
+    {
+        proof {
+            VGet::lemma_svs(all);
+            VGet::lemma_svs(input@);
+            assert(VGet::svs(all)[i as int] == x.sv());
+            assert(VGet::svs(input@)[i as int] == input@[i as int].sv());
+        }
+        if !V::same(x, input[i]) {
+            r = false;
+        }
+        i += 1;
+    }
+    r && i == n
+}
+
+/// Bytes of which nothing is known: `try_new` reads them through
+/// first, and gives a decoder only of a saved column, whose values the
+/// decoder then gives; and it gives one for every saved column of less
+/// than 4 GiB.
+#[allow(dead_code)]
+fn decode_unknown<'a, V: VValue<C>, C: VCodec>(bytes: &'a [u8]) -> (r: Option<Vec<Get<'a, V>>>)
+    ensures
+        r matches Some(out) ==> VerifiedColumn::<V, C>::valid(bytes@) && <Get<'a, V> as VGet>::svs(out@)
+            == VerifiedColumn::<V, C>::values(bytes@),
+        VerifiedColumn::<V, C>::valid(bytes@) && bytes@.len() <= u32::MAX ==> r is Some,
+{
+    match VerifiedDecoder::<V, C>::try_new(bytes) {
+        Ok(dec) => Some(read_all(dec)),
+        Err(_) => None,
+    }
+}
+
+/// A decoder and a load read the same bytes alike. Where both take
+/// them, the decoder has the loaded column's values to give. Bytes that
+/// load and are refused a decoder are 4 GiB or more; and bytes that a
+/// load refuses and a decoder is given of are a saved column that a load
+/// is not sure to take (`loadable`).
+#[allow(dead_code)]
+fn decoded_or_loaded<V: VValue<C>, C: VCodec>(bytes: &[u8]) -> (r: bool)
+    ensures
+        r,
+{
+    let col = VerifiedColumn::<V, C>::load(bytes);
+    let dec = VerifiedDecoder::<V, C>::try_new(bytes);
+    match (col, dec) {
+        (Ok(col), Ok(dec)) => {
+            assert(dec.rest() == col@);
+            true
+        },
+        (Ok(_), Err(_)) => bytes.len() > 0xffff_ffff,
+        (Err(_), Ok(_)) => {
+            assert(VerifiedColumn::<V, C>::valid(bytes@));
+            assert(!VerifiedColumn::<V, C>::loadable(bytes@));
+            true
+        },
+        (Err(_), Err(_)) => true,
+    }
+}
+
+/// A decoder steps over values: over two with `advance_by` and over
+/// three more with `nth`, which so gives the sixth of the saved
+/// numbers, if there are six, and nothing if there are not.
+#[allow(dead_code)]
+fn the_sixth(bytes: &[u8]) -> (r: Option<u64>)
+    requires
+        VerifiedColumn::<u64>::valid(bytes@),
+    ensures
+        ({
+            let vs = VerifiedColumn::<u64>::values(bytes@);
+            if vs.len() > 5 {
+                r == Some(vs[5])
+            } else {
+                r is None
+            }
+        }),
+{
+    let mut dec = VerifiedDecoder::<u64>::new(bytes);
+    let ghost vs = dec.rest();
+    dec.advance_by(2);
+    proof {
+        dec.lemma_items_len();
+    }
+    let r = dec.nth(3);
+    proof {
+        if vs.len() > 5 {
+            assert(vs.skip(2)[3] == vs[5]);
+            assert(dec.rest() =~= vs.skip(6));
+        } else {
+            assert(dec.rest().len() == 0);
+        }
+    }
+    r
+}
+
+/// A saved column decoded run by run, each run given to an encoder as
+/// it comes: what the encoder saves is the bytes that were decoded.
+/// For every value type and codec, and for any saved column: also one
+/// of more values than a column holds.
+#[allow(dead_code)]
+fn recoded_by_runs<'a, V: VValue<C>, C: VCodec>(bytes: &'a [u8]) -> (r: Vec<u8>)
+    requires
+        VerifiedColumn::<V, C>::valid(bytes@),
+    ensures
+        r@ == bytes@,
+{
+    let mut dec = VerifiedDecoder::<V, C>::new(bytes);
+    let ghost all = dec.rest();
+    let mut enc = VerifiedEncoder::<'a, V, C>::new();
+    proof {
+        assert(enc@ + dec.rest() =~= all);
+    }
+    loop
+        invariant
+            enc.wf(),
+            enc@ + dec.rest() == all,
+        ensures
+            enc@ == all,
+        decreases dec.rest().len(),
+    {
+        let ghost left = dec.rest();
+        let ghost had = enc@;
+        match dec.next_run() {
+            Some(run) => {
+                enc.append_n(run.value, run.count);
+                proof {
+                    let n = run.count as int;
+                    assert(left.take(n) =~= Seq::new(n as nat, |_i: int| run.value.sv()));
+                    assert(left =~= left.take(n) + left.skip(n));
+                    assert(enc@ + dec.rest() =~= had + left);
+                }
+            },
+            None => {
+                proof {
+                    assert(enc@ + dec.rest() =~= enc@);
+                }
+                break ;
+            },
+        }
+    }
+    let r = enc.save();
+    proof {
+        VerifiedColumn::<V, C>::lemma_save_unique(r@, bytes@);
+    }
+    r
+}
+
+/// Two runs that a decoder gives one after the other are of different
+/// values, unless the first is one cut off at `usize::MAX` values; and
+/// after it has given no run it gives none. For every value type and
+/// codec.
+#[allow(dead_code)]
+fn runs_differ<'a, V: VValue<C>, C: VCodec>(dec: &mut VerifiedDecoder<'a, V, C>) -> (r: bool)
+    ensures
+        r,
+{
+    let ghost left = dec.rest();
+    let a = dec.next_run();
+    let b = dec.next_run();
+    match (a, b) {
+        (Some(x), Some(y)) => {
+            proof {
+                let n = x.count as int;
+                assert(left.skip(n)[0] == y.value.sv());
+                assert(left[n] == y.value.sv());
+            }
+            x.count == usize::MAX || !V::same(x.value, y.value)
+        },
+        (None, Some(_)) => false,
+        _ => true,
+    }
+}
+
+/// A run asked for in parts: five sevens and a nine, the run asked for
+/// three values at a time, come as three sevens, two sevens (the run
+/// ends there) and, asked for whole, one nine. A run of no more than 0
+/// values is no run, and the decoder stays where it is.
+#[allow(dead_code)]
+fn a_run_in_parts() {
+    let mut enc = VerifiedEncoder::<u64>::new();
+    enc.append_n(7, 5);
+    enc.append(9);
+    let bytes = enc.save();
+    let mut dec = VerifiedDecoder::<u64>::new(bytes.as_slice());
+    let ghost o = dec.rest();
+    assert(o =~= seq![7u64, 7, 7, 7, 7, 9]);
+    assert(o[0] == 7 && o[1] == 7 && o[2] == 7 && o[3] == 7 && o[4] == 7 && o[5] == 9);
+
+    let none = dec.next_run_max(0);
+    assert(none is None && dec.rest() == o);
+
+    let a = dec.next_run_max(3);
+    assert(a matches Some(run) && run.value == 7 && run.count == 3);
+    let ghost o3 = dec.rest();
+    assert(o3 =~= seq![7u64, 7, 9]);
+    assert(o3[0] == 7 && o3[1] == 7 && o3[2] == 9);
+
+    let b = dec.next_run_max(3);
+    assert(b matches Some(run) && run.value == 7 && run.count == 2);
+    let ghost o5 = dec.rest();
+    assert(o5 =~= seq![9u64]);
+    assert(o5[0] == 9);
+
+    let c = dec.next_run();
+    assert(c matches Some(run) && run.value == 9 && run.count == 1);
+    assert(dec.rest().len() == 0);
+
+    let d = dec.next_run();
+    assert(d is None);
+}
+
+/// Nulls and `bool`s decoded: three nulls come as one run of a null,
+/// and the number after them as a number; and of two `true`s and a
+/// `false` the third is the `false`.
+#[allow(dead_code)]
+fn nulls_and_flags_decoded() {
+    let mut enc = VerifiedEncoder::<Option<u64>>::new();
+    enc.append_n(None, 3);
+    enc.append(Some(4));
+    let bytes = enc.save();
+    let mut dec = VerifiedDecoder::<Option<u64>>::new(bytes.as_slice());
+    let ghost o = dec.rest();
+    assert(o =~= seq![None, None, None, Some(4u64)]);
+    assert(o[0] is None && o[1] is None && o[2] is None && o[3] == Some(4u64));
+    let a = dec.next_run();
+    assert(a matches Some(run) && run.value is None && run.count == 3);
+    assert(dec.rest() =~= seq![Some(4u64)]);
+    let b = dec.next();
+    assert(b == Some(Some(4u64)));
+    let c = dec.next();
+    assert(c is None);
+
+    let mut flags = VerifiedEncoder::<bool>::new();
+    flags.append_n(true, 2);
+    flags.append(false);
+    let bytes = flags.save();
+    let mut dec = VerifiedDecoder::<bool>::new(bytes.as_slice());
+    assert(dec.rest() =~= seq![true, true, false]);
+    proof {
+        dec.lemma_items_len();
+    }
+    let third = dec.nth(2);
+    assert(third == Some(false));
+    assert(dec.rest().len() == 0);
+}
+
+/// What a decoder gives borrows from the bytes and not from the
+/// decoder: the first string of a saved column of strings is there
+/// when the decoder that read it is gone.
+#[allow(dead_code)]
+fn first_text<'a>(bytes: &'a [u8]) -> (r: Option<&'a str>)
+    requires
+        VerifiedColumn::<String>::valid(bytes@),
+    ensures
+        ({
+            let vs = VerifiedColumn::<String>::values(bytes@);
+            if vs.len() > 0 {
+                r matches Some(s) && s@ == vs[0]
+            } else {
+                r is None
+            }
+        }),
+{
+    let mut dec = VerifiedDecoder::<String>::new(bytes);
+    dec.next()
+}
+
+/// The same of byte strings that may be null: the first of them is a
+/// null, or a slice of the saved column's bytes.
+#[allow(dead_code)]
+fn first_bytes<'a>(bytes: &'a [u8]) -> (r: Option<Option<&'a [u8]>>)
+    requires
+        VerifiedColumn::<Option<Vec<u8>>>::valid(bytes@),
+    ensures
+        ({
+            let vs = VerifiedColumn::<Option<Vec<u8>>>::values(bytes@);
+            if vs.len() > 0 {
+                r matches Some(v) && match v {
+                    Some(b) => vs[0] == Some(b@),
+                    None => vs[0] is None,
+                }
+            } else {
+                r is None
+            }
+        }),
+{
+    let mut dec = VerifiedDecoder::<Option<Vec<u8>>>::new(bytes);
+    dec.next()
+}
+
+/// A scan of saved numbers that are in order, as a client says it of
+/// numbers: `scan_for` gives how many are less than `x` and how many
+/// are `x`, and those after them are greater.
+#[allow(dead_code)]
+fn find_decoded(bytes: &[u8], x: u32) -> (r: (usize, usize))
+    requires
+        VerifiedColumn::<u32>::valid(bytes@),
+        VerifiedColumn::<u32>::values(bytes@).len() <= usize::MAX,
+        ({
+            let vs = VerifiedColumn::<u32>::values(bytes@);
+            forall|i: int, j: int| 0 <= i <= j < vs.len() ==> vs[i] <= vs[j]
+        }),
+    ensures
+        ({
+            let vs = VerifiedColumn::<u32>::values(bytes@);
+            &&& r.0 + r.1 <= vs.len()
+            &&& forall|k: int| 0 <= k < r.0 ==> vs[k] < x
+            &&& forall|k: int| r.0 <= k < r.0 + r.1 ==> vs[k] == x
+            &&& forall|k: int| r.0 + r.1 <= k < vs.len() ==> vs[k] > x
+        }),
+{
+    let mut dec = VerifiedDecoder::<u32>::new(bytes);
+    let ghost vs = dec.rest();
+    let r = dec.scan_for(x, usize::MAX);
+    proof {
+        let s = r.0 as int;
+        let c = r.1 as int;
+        if c > 0 {
+            assert forall|k: int| s <= k < s + c implies vs[k] == x by {
+                assert(vs.skip(s)[k - s] == x);
+            }
+            if s + c < vs.len() {
+                assert(vs.skip(s)[c] != x);
+                assert(vs[s + c - 1] == x);
+                assert(vs[s + c] > x);
+            }
+        } else if s < vs.len() {
+            assert(vs[s] > x);
+        }
+    }
+    r
+}
+
+/// A decoder's scan finds what a column's search finds: of a column
+/// whose values are in order, the scan of what the column saved passes
+/// as many values as are before the range that `scope_to_value` gives,
+/// and finds as many of the target as that range is long. For every
+/// value type and codec, from what the order is said to be
+/// ([`VSpec::lemma_below`]).
+#[allow(dead_code)]
+fn scanned_as_searched<V: VValue<C>, C: VCodec>(col: &VerifiedColumn<V, C>, x: Get<'_, V>) -> (r: bool)
+    requires
+        sorted::<V>(col@),
+    ensures
+        r,
+{
+    let n = col.len();
+    let bytes = col.save();
+    let mut dec = VerifiedDecoder::<V, C>::new(bytes.as_slice());
+    let (skipped, count) = dec.scan_for(x, usize::MAX);
+    proof {
+        lemma_sorted::<V>(col@, x.sv());
+        assert(col@.subrange(0, n as int) =~= col@);
+    }
+    let found = col.scope_to_value(x, 0, n);
+    proof {
+        let o = col@;
+        let t = x.sv();
+        let s = skipped as int;
+        let c = count as int;
+        let a = found.start as int;
+        let b = found.end as int;
+        V::lemma_below(t, t, t);
+        // the scan passed the values before the range, and no more
+        if s < a {
+            assert(V::below(o[s], t));
+            if c > 0 {
+                assert(o.skip(s)[0] == t);
+            } else {
+                V::lemma_below(t, o[s], t);
+            }
+            assert(false);
+        }
+        if s > a {
+            assert(V::below(o[a], t));
+            assert(false);
+        }
+        // and found the range
+        if c > 0 {
+            assert(o.skip(s)[c - 1] == t);
+            assert(o[s + c - 1] == t);
+            if s + c < b {
+                assert(o[s + c] == t);
+                assert(o.skip(s)[c] != t);
+                assert(false);
+            }
+        } else if a < b {
+            assert(o[a] == t);
+            assert(false);
+        }
+    }
+    found.start == skipped && found.end - found.start == count
+}
+
+/// Where a decoder stands after a scan. Of the numbers 1, 1, 5, 5, 7:
+/// a scan for 5 passes two and finds two, and the decoder gives the 7
+/// next. A scan for 3 passes two and finds none, and the decoder gives
+/// the 7 next too: it has read the run of 5 to see that it is not 3,
+/// and does not give it again (`scan_taken`). A scan for 7 of three
+/// values at most passes three and finds none, and the decoder gives
+/// the second 5 next. Each on a copy of the decoder, which reads on
+/// its own.
+#[allow(dead_code)]
+fn after_a_scan() {
+    let mut enc = VerifiedEncoder::<u32>::new();
+    enc.append_n(1, 2);
+    enc.append_n(5, 2);
+    enc.append(7);
+    let bytes = enc.save();
+    let dec = VerifiedDecoder::<u32>::new(bytes.as_slice());
+    let ghost o = dec.rest();
+    assert(o =~= seq![1u32, 1, 5, 5, 7]);
+    assert(o[0] == 1 && o[1] == 1 && o[2] == 5 && o[3] == 5 && o[4] == 7);
+
+    let mut first = dec.clone();
+    let a = first.scan_for(5, usize::MAX);
+    proof {
+        if a.1 > 0 {
+            assert(o.skip(a.0 as int)[0] == 5);
+            assert(o.skip(2)[1] == 5 && o.skip(2)[2] == 7);
+        }
+    }
+    assert(a.0 == 2 && a.1 == 2);
+    assert(first.rest() =~= seq![7u32]);
+    let x = first.next();
+    assert(x == Some(7u32));
+
+    let mut second = dec.clone();
+    let b = second.scan_for(3, usize::MAX);
+    proof {
+        if b.1 > 0 {
+            assert(o.skip(b.0 as int)[0] == 3);
+        }
+    }
+    assert(b.0 == 2 && b.1 == 0);
+    proof {
+        let rest = o.skip(2);
+        assert(rest[0] == 5 && rest[1] == 5 && rest[2] == 7);
+        assert(head_run_max(rest, 5u32, 2, usize::MAX - 2));
+        lemma_head_len(rest, 5u32, 2, usize::MAX - 2);
+        assert(scan_taken(o, usize::MAX as int, 2, 0) == 4);
+    }
+    assert(second.rest() =~= seq![7u32]);
+    let y = second.next();
+    assert(y == Some(7u32));
+
+    let mut third = dec.clone();
+    let c = third.scan_for(7, 3);
+    proof {
+        if c.1 > 0 {
+            assert(o.skip(c.0 as int)[0] == 7);
+        }
+    }
+    assert(c.0 == 3 && c.1 == 0);
+    assert(third.rest() =~= seq![5u32, 7]);
+    let z = third.next();
+    assert(z == Some(5u32));
+
+    // and the decoder they are copies of has given nothing
+    assert(dec.rest() == o);
+}
+
+/// What `new` says by itself: the decoder has the saved column's values
+/// to give.
+#[allow(dead_code)]
+fn told_by_a_decoder<'a, V: VValue<C>, C: VCodec>(bytes: &'a [u8]) -> (r: VerifiedDecoder<'a, V, C>)
+    requires
+        VerifiedColumn::<V, C>::valid(bytes@),
+    ensures
+        r.rest() == VerifiedColumn::<V, C>::values(bytes@),
+        r.items().len() == VerifiedColumn::<V, C>::values(bytes@).len(),
+{
+    let r = VerifiedDecoder::<V, C>::new(bytes);
+    proof {
+        r.lemma_items_len();
+    }
+    r
+}
+
+/// What `try_new` says: a decoder is one of a saved column, with that
+/// column's values to give; and a saved column of less than 4 GiB is
+/// given one.
+#[allow(dead_code)]
+fn told_by_a_try<'a, V: VValue<C>, C: VCodec>(bytes: &'a [u8]) -> (r: Result<VerifiedDecoder<'a, V, C>, PackError>)
+    ensures
+        r matches Ok(d) ==> VerifiedColumn::<V, C>::valid(bytes@) && d.rest() == VerifiedColumn::<V, C>::values(
+            bytes@,
+        ),
+        VerifiedColumn::<V, C>::valid(bytes@) && bytes@.len() <= u32::MAX ==> r is Ok,
+        r is Err ==> !VerifiedColumn::<V, C>::valid(bytes@) || bytes@.len() > u32::MAX,
+{
+    VerifiedDecoder::<V, C>::try_new(bytes)
+}
+
+/// What `next` says of any decoder, each thing on its own and with no
+/// lemma: the value is the first of those the decoder had, as it gives
+/// them and as specifications have them, and those after it are left;
+/// and a decoder that gives nothing had nothing, and has nothing.
+#[allow(dead_code)]
+fn told_by_a_decoded_value<'a, V: VValue<C>, C: VCodec>(dec: &mut VerifiedDecoder<'a, V, C>) -> (r: Option<Get<'a, V>>)
+    ensures
+        match r {
+            Some(v) => {
+                &&& old(dec).items().len() > 0
+                &&& v == old(dec).items()[0]
+                &&& final(dec).items() == old(dec).items().drop_first()
+                &&& old(dec).rest().len() > 0
+                &&& v.sv() == old(dec).rest()[0]
+                &&& final(dec).rest() == old(dec).rest().skip(1)
+            },
+            None => {
+                &&& old(dec).items().len() == 0
+                &&& old(dec).rest().len() == 0
+                &&& final(dec).items() == old(dec).items()
+                &&& final(dec).rest().len() == 0
+            },
+        },
+{
+    dec.next()
+}
+
+/// What `nth` says: the value at that place of those the decoder had,
+/// in either form, and those after it left; or nothing, and nothing
+/// left, where it had no more than `n`.
+#[allow(dead_code)]
+fn told_by_a_decoders_nth<'a, V: VValue<C>, C: VCodec>(dec: &mut VerifiedDecoder<'a, V, C>, n: usize) -> (r: Option<
+    Get<'a, V>,
+>)
+    ensures
+        n < old(dec).rest().len() ==> {
+            &&& r matches Some(v) && v == old(dec).items()[n as int] && v.sv() == old(dec).rest()[n as int]
+            &&& final(dec).items() == old(dec).items().skip(n + 1)
+            &&& final(dec).rest() == old(dec).rest().skip(n + 1)
+        },
+        n >= old(dec).rest().len() ==> {
+            &&& r is None
+            &&& final(dec).items().len() == 0
+            &&& final(dec).rest().len() == 0
+        },
+{
+    proof {
+        dec.lemma_items_len();
+    }
+    dec.nth(n)
+}
+
+/// What `advance_by` says: the values after the first `n` are left, in
+/// either form; all of them where `n` is 0, and none where the decoder
+/// had fewer.
+#[allow(dead_code)]
+fn told_by_an_advance<'a, V: VValue<C>, C: VCodec>(dec: &mut VerifiedDecoder<'a, V, C>, n: usize)
+    ensures
+        n <= old(dec).rest().len() ==> final(dec).rest() == old(dec).rest().skip(n as int),
+        n <= old(dec).items().len() ==> final(dec).items() == old(dec).items().skip(n as int),
+        n == 0 ==> final(dec).rest() == old(dec).rest() && final(dec).items() == old(dec).items(),
+        n > old(dec).rest().len() ==> final(dec).rest().len() == 0 && final(dec).items().len() == 0,
+{
+    proof {
+        dec.lemma_items_len();
+        assert(dec.rest().skip(0) =~= dec.rest());
+        assert(dec.items().skip(0) =~= dec.items());
+    }
+    dec.advance_by(n);
+}
+
+/// What `next_run` says: the run is the first of the values the decoder
+/// had, in either form, counted up to `usize::MAX`; what is left is
+/// those less the run; and no run is given only of no values.
+#[allow(dead_code)]
+fn told_by_a_decoded_run<'a, V: VValue<C>, C: VCodec>(dec: &mut VerifiedDecoder<'a, V, C>) -> (r: Option<
+    Run<Get<'a, V>>,
+>)
+    ensures
+        match r {
+            Some(run) => {
+                &&& head_run_max(old(dec).items(), run.value, run.count as int, usize::MAX as int)
+                &&& head_run_max(old(dec).rest(), run.value.sv(), run.count as int, usize::MAX as int)
+                &&& run.count >= 1
+                &&& run.value.sv() == old(dec).rest()[0]
+                &&& final(dec).items() == old(dec).items().skip(run.count as int)
+                &&& final(dec).rest() == old(dec).rest().skip(run.count as int)
+                &&& final(dec).rest().len() == old(dec).rest().len() - run.count
+            },
+            None => {
+                &&& old(dec).items().len() == 0
+                &&& old(dec).rest().len() == 0
+                &&& final(dec).items() == old(dec).items()
+                &&& final(dec).rest() == old(dec).rest()
+            },
+        },
+{
+    let r = dec.next_run();
+    proof {
+        if let Some(run) = r {
+            assert(old(dec).rest()[0] == run.value.sv());
+        }
+    }
+    r
+}
+
+/// What `next_run_max` says: as `next_run`, counted up to `max`; and
+/// no run is given only of no values or for a `max` of 0, which leaves
+/// the decoder as it was.
+#[allow(dead_code)]
+fn told_by_a_bounded_run<'a, V: VValue<C>, C: VCodec>(dec: &mut VerifiedDecoder<'a, V, C>, max: usize) -> (r: Option<
+    Run<Get<'a, V>>,
+>)
+    ensures
+        match r {
+            Some(run) => {
+                &&& head_run_max(old(dec).items(), run.value, run.count as int, max as int)
+                &&& head_run_max(old(dec).rest(), run.value.sv(), run.count as int, max as int)
+                &&& 1 <= run.count <= max
+                &&& final(dec).items() == old(dec).items().skip(run.count as int)
+                &&& final(dec).rest() == old(dec).rest().skip(run.count as int)
+            },
+            None => {
+                &&& max == 0 || old(dec).rest().len() == 0
+                &&& final(dec).items() == old(dec).items()
+                &&& final(dec).rest() == old(dec).rest()
+            },
+        },
+        max == 0 ==> r is None,
+        max > 0 && old(dec).rest().len() > 0 ==> r is Some,
+{
+    proof {
+        dec.lemma_items_len();
+    }
+    dec.next_run_max(max)
+}
+
+/// What `scan_for` says: what it returns is `scan_of` the values the
+/// decoder had, and what is left is those less `scan_taken`; so the
+/// values passed are before the target, and where the target was found
+/// the run of it is passed too.
+#[allow(dead_code)]
+fn told_by_a_decoders_scan<'a, V: VValue<C>, C: VCodec>(
+    dec: &mut VerifiedDecoder<'a, V, C>,
+    x: Get<'_, V>,
+    max: usize,
+) -> (r: (usize, usize))
+    ensures
+        scan_of::<V>(old(dec).rest(), x.sv(), max as int, r.0 as int, r.1 as int),
+        r.0 <= max,
+        r.0 <= old(dec).rest().len(),
+        forall|i: int| 0 <= i < r.0 ==> V::below(old(dec).rest()[i], x.sv()),
+        r.1 > 0 ==> {
+            &&& r.0 + r.1 <= max
+            &&& r.0 + r.1 <= old(dec).rest().len()
+            &&& forall|i: int| r.0 <= i < r.0 + r.1 ==> old(dec).rest()[i] == x.sv()
+            &&& final(dec).rest() == old(dec).rest().skip(r.0 + r.1)
+            &&& final(dec).items() == old(dec).items().skip(r.0 + r.1)
+        },
+        r.1 == 0 && r.0 < max && r.0 < old(dec).rest().len() ==> V::below(x.sv(), old(dec).rest()[r.0 as int]),
+        r.1 == 0 && (r.0 == max || r.0 == old(dec).rest().len()) ==> final(dec).rest() == old(dec).rest().skip(
+            r.0 as int,
+        ),
+{
+    let ghost o = dec.rest();
+    let r = dec.scan_for(x, max);
+    proof {
+        let s = r.0 as int;
+        if r.1 > 0 {
+            assert forall|i: int| s <= i < s + r.1 implies o[i] == x.sv() by {
+                assert(o.skip(s)[i - s] == x.sv());
+            }
+        }
+    }
+    r
+}
+
+/// What `clone` says: the copy has the same values left, in either
+/// form; and reading the copy leaves the decoder where it was.
+#[allow(dead_code)]
+fn told_by_a_decoders_copy<'a, V: VValue<C>, C: VCodec>(dec: &VerifiedDecoder<'a, V, C>) -> (r: VerifiedDecoder<
+    'a,
+    V,
+    C,
+>)
+    ensures
+        r.items() == dec.items(),
+        r.rest() == dec.rest(),
+{
+    let mut other = dec.clone();
+    let _ = other.next();
+    assert(other.rest().len() == 0 || other.rest() == dec.rest().skip(1));
+    dec.clone()
+}
+
+/// What a `for` loop over a decoder may say in its invariant of the
+/// value it is about to be given: that it is the next of those the
+/// decoder had (Verus's `peek` of an iterator). So this one knows, of
+/// the value it kept, that it is the last.
+#[allow(dead_code)]
+fn told_by_a_decoders_loop<'a, V: VValue<C>, C: VCodec>(dec: VerifiedDecoder<'a, V, C>) -> (last: Option<Get<'a, V>>)
+    ensures
+        match last {
+            Some(v) => dec.items().len() > 0 && v == dec.items().last(),
+            None => dec.items().len() == 0,
+        },
+{
+    let ghost all = dec.items();
+    let mut last: Option<Get<'a, V>> = None;
+    for x in at: dec
+        invariant
+            at.seq() == all,
+            at.index() < all.len() ==> x == all[at.index()],
+            match last {
+                Some(v) => at.index() > 0 && v == all[at.index() - 1],
+                None => at.index() == 0,
+            },
+    {
+        last = Some(x);
+    }
+    last
+}
+
+/// A run counted up to `max` is one run and no other, and `head_len`
+/// is its length: so the client knows what `scan_taken` is where it
+/// knows the values.
+#[allow(dead_code)]
+proof fn the_run_at_the_head<S>(o: Seq<S>, v: S, n: int, w: S, m: int, max: int)
+    requires
+        head_run_max(o, v, n, max),
+    ensures
+        v == o[0],
+        head_len(o, max) == n,
+        head_run_max(o, w, m, max) ==> w == v && m == n,
+{
+    lemma_head_len(o, v, n, max);
+    if head_run_max(o, w, m, max) {
+        lemma_head_run_max(o, v, n, w, m, max);
+    }
 }
 
 } // verus!
