@@ -354,9 +354,16 @@ pub(crate) fn p_next<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>(
                 &&& v == old(core).out::<X>(slabs@)[0]
                 &&& final(core).out::<X>(slabs@) == old(core).out::<X>(slabs@).skip(1)
                 &&& final(core).pos == old(core).pos + 1
+                &&& final(core).items_left == old(core).items_left - 1
                 &&& *final(total) == B::W::prefix_plus(*old(total), B::contrib(v))
             },
-            None => old(core).out::<X>(slabs@).len() == 0 && final(core).out::<X>(slabs@).len() == 0,
+            None => {
+                &&& old(core).out::<X>(slabs@).len() == 0
+                &&& final(core).out::<X>(slabs@).len() == 0
+                &&& final(core).pos == old(core).pos
+                &&& final(core).items_left == 0
+                &&& *final(total) == *old(total)
+            },
         },
 {
     let ghost c0 = *core;
@@ -398,10 +405,20 @@ pub(crate) fn p_next_run_from<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>
                 &&& o.take(run.count as int) == Seq::new(run.count as nat, |_i: int| run.value)
                 &&& final(core).out::<X>(slabs@) == o.skip(run.count as int)
                 &&& final(core).pos == old(core).pos + run.count
+                &&& final(core).items_left == old(core).items_left - run.count
                 &&& run.count < max && run.count < o.len() ==> o[run.count as int] != run.value
                 &&& *final(total) == B::W::prefix_plus(*old(total), reps::<B::W>(run.count as nat, B::contrib(run.value)))
             },
-            None => max == 0 || old(core).out::<X>(slabs@).len() == 0,
+            None => {
+                &&& max == 0 || old(core).out::<X>(slabs@).len() == 0
+                &&& final(core).pos == old(core).pos
+                &&& final(core).items_left == if max == 0 {
+                    old(core).items_left
+                } else {
+                    0
+                }
+                &&& *final(total) == *old(total)
+            },
         },
 {
     p_next_run::<X, B>(core, slabs, max, total, Ghost(*base))
@@ -428,10 +445,20 @@ pub(crate) fn p_next_run<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Ite
                 &&& o.take(run.count as int) == Seq::new(run.count as nat, |_i: int| run.value)
                 &&& final(core).out::<X>(slabs@) == o.skip(run.count as int)
                 &&& final(core).pos == old(core).pos + run.count
+                &&& final(core).items_left == old(core).items_left - run.count
                 &&& run.count < max && run.count < o.len() ==> o[run.count as int] != run.value
                 &&& *final(total) == B::W::prefix_plus(*old(total), reps::<B::W>(run.count as nat, B::contrib(run.value)))
             },
-            None => max == 0 || old(core).out::<X>(slabs@).len() == 0,
+            None => {
+                &&& max == 0 || old(core).out::<X>(slabs@).len() == 0
+                &&& final(core).pos == old(core).pos
+                &&& final(core).items_left == if max == 0 {
+                    old(core).items_left
+                } else {
+                    0
+                }
+                &&& *final(total) == *old(total)
+            },
         },
 {
     let ghost c0 = *core;
@@ -474,6 +501,7 @@ fn take_nth<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>(
         r == old(core).out::<X>(slabs@)[n as int],
         final(core).out::<X>(slabs@) == old(core).out::<X>(slabs@).skip(n + 1),
         final(core).pos == old(core).pos + n + 1,
+        final(core).pos + final(core).items_left == old(core).pos + old(core).items_left,
 {
     let ghost s = slabs@;
     let ghost c0 = *core;
@@ -490,6 +518,7 @@ fn take_nth<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>(
             m <= n,
             core.out::<X>(s) == o0.skip(n - m),
             core.pos == c0.pos + (n - m),
+            core.pos + core.items_left == c0.pos + c0.items_left,
         decreases m,
     {
         let ghost o = core.out::<X>(s);
@@ -547,7 +576,7 @@ proof fn lemma_jump<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>(
             &&& start - c0.pos <= c0.items_left
             &&& c0.pos + n - start < s[k].len
         },
-        k == s.len() ==> start >= total(slab_lens(s)) && n >= c0.out::<X>(s).len(),
+        k == s.len() ==> start == total(slab_lens(s)) && n >= c0.out::<X>(s).len(),
 {
     let lens = slab_lens(s);
     c0.lemma_here::<X>(s);
@@ -596,8 +625,16 @@ fn p_nth_in<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>(
             &&& r == Some(old(core).out::<X>(slabs@)[n as int])
             &&& final(core).out::<X>(slabs@) == old(core).out::<X>(slabs@).skip(n + 1)
             &&& final(core).pos == old(core).pos + n + 1
+            &&& final(core).pos + final(core).items_left == old(core).pos + old(core).items_left
         },
-        n >= old(core).out::<X>(slabs@).len() ==> r is None && final(core).out::<X>(slabs@).len() == 0,
+        n >= old(core).out::<X>(slabs@).len() ==> {
+            &&& r is None
+            &&& final(core).out::<X>(slabs@).len() == 0
+            &&& final(core).items_left == 0
+            // past the data (the window can run past it), it stops at the end
+            &&& old(core).pos <= crate::fenwick::total(slab_lens(slabs@)) ==> final(core).pos == old(core).pos
+                + old(core).out::<X>(slabs@).len()
+        },
 {
     let ghost s = slabs@;
     let ghost c0 = *core;
@@ -614,6 +651,10 @@ fn p_nth_in<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>(
         None => {
             // a default iterator: no column, no slabs
             core.advance_to_slab::<X>(slabs, slabs.len(), 0);
+            proof {
+                c0.lemma_out_len::<X>(s);
+                assert(crate::fenwick::total(slab_lens(s)) == 0);
+            }
             return None;
         },
     };
@@ -636,6 +677,10 @@ fn p_nth_in<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>(
         B::W::lemma_prefix_sub(found.prefix, *base);
     }
     if !in_slab {
+        proof {
+            // the window ran past the data, and this is the data's end
+            c0.lemma_out_len::<X>(s);
+        }
         return None;
     }
     let ghost c1 = *core;
@@ -666,8 +711,16 @@ pub(crate) fn p_nth<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>(
             &&& r == Some(old(core).out::<X>(slabs@)[n as int])
             &&& final(core).out::<X>(slabs@) == old(core).out::<X>(slabs@).skip(n + 1)
             &&& final(core).pos == old(core).pos + n + 1
+            &&& final(core).pos + final(core).items_left == old(core).pos + old(core).items_left
         },
-        n >= old(core).out::<X>(slabs@).len() ==> r is None && final(core).out::<X>(slabs@).len() == 0,
+        n >= old(core).out::<X>(slabs@).len() ==> {
+            &&& r is None
+            &&& final(core).out::<X>(slabs@).len() == 0
+            &&& final(core).items_left == 0
+            // past the data (the window can run past it), it stops at the end
+            &&& old(core).pos <= crate::fenwick::total(slab_lens(slabs@)) ==> final(core).pos == old(core).pos
+                + old(core).out::<X>(slabs@).len()
+        },
 {
     if n >= core.items_left {
         proof {
@@ -859,11 +912,19 @@ pub(crate) fn p_delta_nth<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::It
                 &&& v == o[n as int]
                 &&& final(core).out::<X>(slabs@) == o.skip(n + 1)
                 &&& final(core).pos == old(core).pos + n + 1
+                &&& final(core).pos + final(core).items_left == old(core).pos + old(core).items_left
                 &&& B::W::prefix_plus(vsum::<_, B>(before::<X>(slabs@, old(core).pos as int)), d) == vsum::<_, B>(
                     before::<X>(slabs@, old(core).pos + n),
                 )
             },
-            None => n >= old(core).out::<X>(slabs@).len() && final(core).out::<X>(slabs@).len() == 0,
+            None => {
+                &&& n >= old(core).out::<X>(slabs@).len()
+                &&& final(core).out::<X>(slabs@).len() == 0
+                &&& final(core).items_left == 0
+                // past the data (the window can run past it), it stops at the end
+                &&& old(core).pos <= crate::fenwick::total(slab_lens(slabs@)) ==> final(core).pos == old(core).pos
+                    + old(core).out::<X>(slabs@).len()
+            },
         },
 {
     hide(ICore::wf);
@@ -886,6 +947,10 @@ pub(crate) fn p_delta_nth<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::It
         }
         assert(c1.out::<X>(slabs@) == o.skip(n as int));
         assert(c1.pos == c0.pos + n);
+        // if no value is left there, the window ends there
+        assert(n <= o.len());
+        assert(c1.out::<X>(slabs@).len() == o.len() - n);
+        assert(c1.pos + c1.items_left == c0.pos + c0.items_left);
     }
     let d = B::sub(B::cp(total), &t0);
     let v = p_next::<X, B>(core, slabs, total, base)?;
@@ -1075,6 +1140,7 @@ pub(crate) fn p_reset<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Item>>
     ensures
         at_sum::<X, B>(*core, *final(total), *final(base), slabs@),
         *final(total) == B::W::prefix_zero(),
+        *final(base) == B::W::prefix_plus(*old(base), *old(total)),
 {
     B::add_to(base, total);
     *total = B::zero();

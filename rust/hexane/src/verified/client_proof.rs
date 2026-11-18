@@ -284,17 +284,45 @@
 //! the two searches' specifications say what each finds
 //! ([`the_two_places`]).
 //!
+//! And of a prefix column's iterator ([`VerifiedPrefixIter`]), which
+//! gives each value with the sums before it and through it: that a
+//! `for` loop over it gives the running sums of the column
+//! ([`running_sums`]), counted from the column's start though it reads
+//! only a range ([`sums_in_a_range`]); that one value is read with its
+//! sums ([`a_value_with_its_sums`]), which are the sums the column
+//! answers with for its position ([`sums_two_ways`]); that a step adds
+//! to the running sum what the value it gives adds
+//! ([`a_step_with_its_sums`]), and values stepped over are summed too
+//! ([`two_skips`]); that an iterator whose sum is started again where
+//! a range starts has, where the range ends, the range's sum
+//! ([`summed_by_moving`]); that reading on until the running sum is
+//! past a limit finds the first position whose sum is
+//! ([`first_over`]); and where each move leaves the iterator, its
+//! window and its sum ([`moved_with_sums`]). An iterator a client is
+//! handed says these things too, wherever it stands
+//! ([`told_of_the_running_sum`], [`told_of_the_sum_before`],
+//! [`told_of_what_is_left`]), and each function says its part on its
+//! own ([`told_by_a_prefix_iter`], [`told_by_a_prefix_iter_range`],
+//! [`told_by_a_get_prefixed`], [`told_by_a_prefixed_value`],
+//! [`told_by_a_prefixed_next`], [`told_by_a_prefixed_nth`],
+//! [`told_by_a_prefix_iters_place`], [`told_by_a_prefix_iters_count`],
+//! [`told_by_a_prefix_size_hint`], [`told_by_a_prefix_iters_end`],
+//! [`told_by_a_reset`], [`told_by_a_prefix_set_max`],
+//! [`told_by_a_prefix_advance_to`], [`told_by_a_prefix_advance_by`],
+//! [`told_by_a_prefix_shift`], [`told_by_a_prefix_shift_next`]).
+//!
 //! This module exists only while Verus checks the crate.
 
 use super::{
     after_edit, after_edits, below_at, bytes_below, folded, head_len, head_run, head_run_max,
     lemma_after_edits, lemma_head_len, lemma_head_run_max, lemma_run_values_add,
     lemma_run_values_push, lemma_runs_first, lemma_runs_of_values, lemma_sorted, lemma_sum_bound,
-    lemma_sum_range, lemma_sum_run, lemma_sums_fit, mapped, only, refused, run_values, runs_of,
-    scan_of, scan_taken, sorted, sorted_for, sum_of, summed, sums_fit, total_len, total_str_len,
-    window, Get, LenIndex, SumIndex, VCodec, VCount, VGet, VIndex, VKeeps, VNewtype, VSpec, VSum,
-    VSummed, VValue, VerifiedColumn, VerifiedDecoder, VerifiedEncoder, VerifiedEncoderState,
-    VerifiedIter, VerifiedIterState, VerifiedPrefixColumn,
+    lemma_sum_range, lemma_sum_run, lemma_sums_fit, mapped, only, past, refused, run_values,
+    runs_of, scan_of, scan_taken, sorted, sorted_for, sum_of, summed, sums_fit, total_len,
+    total_str_len, window, Get, LenIndex, SumIndex, VCodec, VCount, VGet, VIndex, VKeeps, VNewtype,
+    VSpec, VSum, VSummed, VValue, VerifiedColumn, VerifiedDecoder, VerifiedEncoder,
+    VerifiedEncoderState, VerifiedIter, VerifiedIterState, VerifiedPrefixColumn,
+    VerifiedPrefixIter, VerifiedPrefixedValue,
 };
 use crate::{Leb128, LoadOpts, PackError, Run};
 use std::cmp::Ordering;
@@ -6591,6 +6619,725 @@ fn the_two_places<V: VSummed + VValue<C>, C: VCodec>(col: &VerifiedPrefixColumn<
         }
     }
     (before, through)
+}
+
+/// A `for` loop over a prefix column's iterator gives each value with
+/// the running sum through it: here the sums go into a `Vec`, which
+/// then holds, for each position, what the values through it add up to.
+/// For every summed type and codec.
+#[allow(dead_code)]
+fn running_sums<V: VSummed + VValue<C>, C: VCodec>(col: &VerifiedPrefixColumn<V, C>) -> (out: Vec<V::Sum>)
+    ensures
+        out@.len() == col@.len(),
+        forall|i: int| 0 <= i < out@.len() ==> (#[trigger] out@[i]).as_int() == summed::<V>(col@.take(i + 1)),
+{
+    let it = col.prefix_iter();
+    let ghost all = it.items();
+    proof {
+        it.lemma_items();
+    }
+    let mut out: Vec<V::Sum> = Vec::new();
+    for pv in at: it
+        invariant
+            at.seq() == all,
+            out@.len() == at.index(),
+            forall|i: int| 0 <= i < out@.len() ==> #[trigger] out@[i] == all[i].total(),
+    {
+        out.push(pv.total());
+    }
+    out
+}
+
+/// The values of a range of a prefix column, each with what the values
+/// before it add up to: counted from the column's start, though the
+/// iterator reads only the range.
+#[allow(dead_code)]
+fn sums_in_a_range<'a, V: VSummed + VValue<C>, C: VCodec>(col: &'a VerifiedPrefixColumn<V, C>, a: usize, b: usize) -> (out: Vec<
+    (Get<'a, V>, V::Sum),
+>)
+    requires
+        a <= b <= col@.len(),
+    ensures
+        out@.len() == b - a,
+        forall|i: int|
+            0 <= i < out@.len() ==> {
+                &&& (#[trigger] out@[i]).0.sv() == col@[a + i]
+                &&& out@[i].1.as_int() == summed::<V>(col@.take(a + i))
+            },
+{
+    let it = col.prefix_iter_range(a, b);
+    let ghost all = it.items();
+    proof {
+        it.lemma_items();
+    }
+    let mut out: Vec<(Get<'a, V>, V::Sum)> = Vec::new();
+    for pv in at: it
+        invariant
+            at.seq() == all,
+            out@.len() == at.index(),
+            forall|i: int|
+                0 <= i < out@.len() ==> (#[trigger] out@[i]).0 == all[i].value && out@[i].1 == all[i].prefix(),
+    {
+        out.push((pv.value, pv.prefix()));
+    }
+    out
+}
+
+/// One value of a prefix column with its sums: the value at the
+/// position, what the values before it add up to and what those through
+/// it do, which is more by what the value adds.
+#[allow(dead_code)]
+fn a_value_with_its_sums<'a, V: VSummed + VValue<C>, C: VCodec>(col: &'a VerifiedPrefixColumn<V, C>, i: usize) -> (r: (
+    V::Sum,
+    Get<'a, V>,
+    V::Sum,
+))
+    requires
+        i < col@.len(),
+    ensures
+        r.1.sv() == col@[i as int],
+        r.0.as_int() == summed::<V>(col@.take(i as int)),
+        r.2.as_int() == summed::<V>(col@.take(i + 1)),
+        r.2.as_int() == r.0.as_int() + V::amount(col@[i as int]),
+{
+    let pv = col.get_prefixed(i).unwrap();
+    (pv.prefix(), pv.value, pv.total())
+}
+
+/// The sums that come with a value are the sums the column answers
+/// with for its position.
+#[allow(dead_code)]
+fn sums_two_ways<V: VSummed + VValue<C>, C: VCodec>(col: &VerifiedPrefixColumn<V, C>, i: usize) -> (r: (
+    (V::Sum, V::Sum),
+    (V::Sum, V::Sum),
+))
+    requires
+        i < col@.len(),
+    ensures
+        r.0 == r.1,
+{
+    let pv = col.get_prefixed(i).unwrap();
+    let (a, b) = (pv.prefix(), pv.total());
+    let (c, d) = (col.get_prefix(i), col.get_total(i));
+    proof {
+        // sums that are the same number are the same sum
+        V::Sum::lemma_as_int(a);
+        V::Sum::lemma_as_int(b);
+        V::Sum::lemma_as_int(c);
+        V::Sum::lemma_as_int(d);
+    }
+    ((a, b), (c, d))
+}
+
+/// A step of a prefix column's iterator, wherever it stands: the sum
+/// before the value it gives is the running sum as it was, the sum
+/// through the value is the running sum after, and the second is more
+/// by what the value adds.
+#[allow(dead_code)]
+fn a_step_with_its_sums<'a, V: VSummed + VValue<C>, C: VCodec>(it: &mut VerifiedPrefixIter<'a, V, C>) -> (r: Option<
+    (V::Sum, Get<'a, V>, V::Sum),
+>)
+    ensures
+        match r {
+            Some((before, v, through)) => {
+                &&& old(it).rest().len() > 0
+                &&& v.sv() == old(it).rest()[0]
+                &&& before == old(it).total()
+                &&& through == final(it).total()
+                &&& through.as_int() == before.as_int() + V::amount(v.sv())
+                &&& final(it).rest() == old(it).rest().skip(1)
+            },
+            None => old(it).rest().len() == 0 && final(it).total() == old(it).total(),
+        },
+{
+    let before = it.total();
+    match it.next() {
+        Some(pv) => {
+            let through = it.total();
+            Some((before, pv.value, through))
+        },
+        None => None,
+    }
+}
+
+/// What the values of a range add up to, read with an iterator: moved
+/// to where the range starts, its sum started again there, and moved to
+/// where the range ends. It is what the column answers with for the
+/// range.
+#[allow(dead_code)]
+fn summed_by_moving<V: VSummed + VValue<C>, C: VCodec>(col: &VerifiedPrefixColumn<V, C>, a: usize, b: usize) -> (r: (
+    V::Sum,
+    V::Sum,
+))
+    requires
+        a <= b <= col@.len(),
+    ensures
+        r.0.as_int() == summed::<V>(col@.subrange(a as int, b as int)),
+        r.0 == r.1,
+{
+    let mut it = col.prefix_iter();
+    it.advance_to(a);
+    it.reset_prefix();
+    it.advance_to(b);
+    let moved = it.total();
+    let asked = col.sum_range(a, b);
+    proof {
+        V::Sum::lemma_as_int(moved);
+        V::Sum::lemma_as_int(asked);
+    }
+    (moved, asked)
+}
+
+/// Two values read with one iterator, which steps over the values
+/// before each: the sums through them count the values stepped over.
+#[allow(dead_code)]
+fn two_skips<V: VSummed + VValue<C>, C: VCodec>(col: &VerifiedPrefixColumn<V, C>, i: usize, j: usize) -> (r: (V::Sum, V::Sum))
+    requires
+        i < j < col@.len(),
+    ensures
+        r.0.as_int() == summed::<V>(col@.take(i + 1)),
+        r.1.as_int() == summed::<V>(col@.take(j + 1)),
+{
+    let mut it = col.prefix_iter();
+    let a = it.nth(i).unwrap();
+    let b = it.nth(j - i - 1).unwrap();
+    (a.total(), b.total())
+}
+
+/// In a column of `u64`s, the first position that the values through
+/// it add up to more than `limit`, found by reading on until the
+/// running sum is past it: no sum before is, and if there is no such
+/// position, no sum of the column is.
+#[allow(dead_code)]
+fn first_over(col: &VerifiedPrefixColumn<u64>, limit: u128) -> (r: Option<usize>)
+    ensures
+        match r {
+            Some(i) => {
+                &&& i < col@.len()
+                &&& summed::<u64>(col@.take(i + 1)) > limit
+                &&& forall|j: int| 0 <= j <= i ==> summed::<u64>(#[trigger] col@.take(j)) <= limit
+            },
+            None => forall|j: int| 0 <= j <= col@.len() ==> summed::<u64>(#[trigger] col@.take(j)) <= limit,
+        },
+{
+    let mut it = col.prefix_iter();
+    proof {
+        assert(col@.take(0).len() == 0);
+    }
+    loop
+        invariant
+            it.column() == col@,
+            it.base_pos() == 0,
+            it.end_pos() == col@.len(),
+            forall|j: int| 0 <= j <= it.pos() ==> summed::<u64>(#[trigger] col@.take(j)) <= limit,
+        decreases it.rest().len(),
+    {
+        let i = it.pos();
+        match it.next() {
+            Some(pv) => {
+                if pv.total() > limit {
+                    return Some(i);
+                }
+            },
+            None => {
+                return None;
+            },
+        }
+    }
+}
+
+/// Where each move leaves a prefix column's iterator, its window and
+/// its running sum: the sum is of the values the iterator has passed,
+/// whether it read them or stepped over them, and a move of the window
+/// alone leaves it.
+#[allow(dead_code)]
+fn moved_with_sums(col: &VerifiedPrefixColumn<u64>)
+    requires
+        col@.len() == 10,
+{
+    let ghost upto = |k: int| summed::<u64>(col@.take(k));
+    // an iterator of a range: its sum counts from the column's start
+    let mut it = col.prefix_iter_range(2, 8);
+    let (p, e, n, w, t) = (it.pos(), it.end_pos(), it.len(), it.items_left(), it.total());
+    assert(p == 2 && e == 8 && n == 6 && w == 6 && t == upto(2));
+    // a step
+    let a = it.next().unwrap();
+    let t = it.total();
+    assert(a.value == col@[2] && a.prefix() == upto(2) && a.total() == upto(3) && t == upto(3));
+    // values stepped over are summed
+    it.advance_by(2);
+    let (p, t) = (it.pos(), it.total());
+    assert(p == 5 && t == upto(5));
+    // a place behind the iterator: it stays, and so does its sum
+    it.advance_to(4);
+    let (p, t2) = (it.pos(), it.total());
+    assert(p == 5 && t2 == t);
+    // a wider window, which ends past the column: the sum stays
+    it.set_max(20);
+    let (e, n, w, t3) = (it.end_pos(), it.len(), it.items_left(), it.total());
+    assert(e == 20 && n == 5 && w == 15 && t3 == t);
+    // past what it has: all of it is passed, and summed
+    it.advance_by(9);
+    let (p, e, n, t) = (it.pos(), it.end_pos(), it.len(), it.total());
+    assert(p == 10 && e == 10 && n == 0);
+    assert(t == summed::<u64>(col@)) by {
+        assert(col@.take(10) =~= col@);
+    }
+    // the window moved to a range, and then to one that starts behind
+    // the iterator
+    let mut it = col.prefix_iter();
+    it.shift(3..7);
+    let (p, e, n, t) = (it.pos(), it.end_pos(), it.len(), it.total());
+    assert(p == 3 && e == 7 && n == 4 && t == upto(3));
+    it.shift(1..5);
+    let (p, e, n, t) = (it.pos(), it.end_pos(), it.len(), it.total());
+    assert(p == 3 && e == 5 && n == 2 && t == upto(3));
+    // the first value of a window, with its sums
+    let b = it.shift_next(6..9).unwrap();
+    let (p, e, n, t) = (it.pos(), it.end_pos(), it.len(), it.total());
+    assert(b.value == col@[6] && b.prefix() == upto(6) && b.total() == upto(7));
+    assert(p == 7 && e == 9 && n == 2 && t == upto(7));
+    // a window with no value
+    let c = it.shift_next(9..9);
+    let (p, e, t) = (it.pos(), it.end_pos(), it.total());
+    assert(c is None && p == 9 && e == 9 && t == upto(9));
+    // the sum started again: it counts from where the iterator stands
+    let mut it = col.prefix_iter_range(4, 10);
+    it.reset_prefix();
+    let (p, e, t) = (it.pos(), it.end_pos(), it.total());
+    assert(p == 4 && e == 10 && t == 0);
+    let d = it.nth(2).unwrap();
+    let t = it.total();
+    assert(d.value == col@[6] && t == d.total());
+    assert(d.prefix() == summed::<u64>(col@.subrange(4, 6)) && d.total() == summed::<u64>(col@.subrange(4, 7)));
+}
+
+/// Of an iterator a client is handed, wherever it stands and wherever
+/// its sum counts from: the running sum is what the column's values
+/// from there up to the iterator add up to.
+#[allow(dead_code)]
+fn told_of_the_running_sum<V: VSummed + VValue<C>, C: VCodec>(it: &VerifiedPrefixIter<'_, V, C>) -> (r: V::Sum)
+    ensures
+        it.base_pos() <= it.pos() <= it.column().len(),
+        r == it.total(),
+        r.as_int() == summed::<V>(it.column().subrange(it.base_pos() as int, it.pos() as int)),
+{
+    it.total()
+}
+
+/// The running sum under its other name: before the value the iterator
+/// is to give next.
+#[allow(dead_code)]
+fn told_of_the_sum_before<V: VSummed + VValue<C>, C: VCodec>(it: &VerifiedPrefixIter<'_, V, C>) -> (r: V::Sum)
+    ensures
+        it.base_pos() <= it.pos() <= it.column().len(),
+        r == it.total(),
+        r.as_int() == summed::<V>(it.column().subrange(it.base_pos() as int, it.pos() as int)),
+{
+    it.prefix()
+}
+
+/// Of an iterator a client is handed, what it has left to give: each of
+/// the values left, with the sums before it and through it; and that
+/// the sums of the column it reads fit, and that it reads the values
+/// of its column.
+#[allow(dead_code)]
+fn told_of_what_is_left<V: VSummed + VValue<C>, C: VCodec>(it: &VerifiedPrefixIter<'_, V, C>)
+    ensures
+        it.items().len() == it.rest().len(),
+        forall|i: int|
+            0 <= i < it.items().len() ==> {
+                &&& (#[trigger] it.items()[i]).value.sv() == it.rest()[i]
+                &&& it.items()[i].total().as_int() == it.sum_to(it.pos() + i + 1)
+                &&& it.items()[i].prefix().as_int() == it.sum_to(it.pos() + i)
+                &&& it.items()[i].total().as_int() == it.items()[i].prefix().as_int() + V::amount(it.rest()[i])
+            },
+        it.base_pos() <= it.pos() <= it.column().len(),
+        it.total().as_int() == it.sum_to(it.pos() as int),
+        sums_fit::<V>(it.column()),
+        match it.source() {
+            Some(c) => it.column() == c@,
+            None => it.column().len() == 0,
+        },
+{
+    proof {
+        it.lemma_items();
+        it.lemma_total();
+        it.lemma_source();
+    }
+}
+
+/// What `prefix_iter` says by itself, of any prefix column: the
+/// iterator reads the column, has all its values left, and its sum
+/// counts from the column's start and is nothing yet.
+#[allow(dead_code)]
+fn told_by_a_prefix_iter<'a, V: VSummed + VValue<C>, C: VCodec>(col: &'a VerifiedPrefixColumn<V, C>) -> (it: VerifiedPrefixIter<
+    'a,
+    V,
+    C,
+>)
+    ensures
+        it.rest() == col@,
+        it.column() == col@,
+        it.source() == Some(*col),
+        it.pos() == 0,
+        it.end_pos() == col@.len(),
+        it.base_pos() == 0,
+        it.total().as_int() == 0,
+{
+    col.prefix_iter()
+}
+
+/// What `prefix_iter_range` says by itself: the iterator has the values
+/// of the range left, and its sum counts from the column's start, so it
+/// is what the values before the range add up to.
+#[allow(dead_code)]
+fn told_by_a_prefix_iter_range<'a, V: VSummed + VValue<C>, C: VCodec>(
+    col: &'a VerifiedPrefixColumn<V, C>,
+    start: usize,
+    end: usize,
+) -> (it: VerifiedPrefixIter<'a, V, C>)
+    requires
+        start <= end <= col@.len(),
+    ensures
+        it.rest() == col@.subrange(start as int, end as int),
+        it.column() == col@,
+        it.source() == Some(*col),
+        it.pos() == start,
+        it.end_pos() == end,
+        it.base_pos() == 0,
+        it.total().as_int() == summed::<V>(col@.take(start as int)),
+{
+    col.prefix_iter_range(start, end)
+}
+
+/// What `get_prefixed` says by itself, of any position.
+#[allow(dead_code)]
+fn told_by_a_get_prefixed<'a, V: VSummed + VValue<C>, C: VCodec>(col: &'a VerifiedPrefixColumn<V, C>, index: usize) -> (r: Option<
+    VerifiedPrefixedValue<'a, V>,
+>)
+    ensures
+        index < col@.len() ==> {
+            &&& r matches Some(pv)
+            &&& pv.value.sv() == col@[index as int]
+            &&& pv.total().as_int() == summed::<V>(col@.take(index + 1))
+            &&& pv.prefix().as_int() == summed::<V>(col@.take(index as int))
+            &&& pv.total().as_int() == pv.prefix().as_int() + V::amount(pv.value.sv())
+        },
+        index >= col@.len() ==> r is None,
+{
+    col.get_prefixed(index)
+}
+
+/// What a value with its sums says of them: the sum through the value
+/// is the one it holds, and the sum before is that less what the value
+/// adds, in the arithmetic of the sums' type.
+#[allow(dead_code)]
+fn told_by_a_prefixed_value<'a, V: VSummed>(pv: &VerifiedPrefixedValue<'a, V>) -> (r: (V::Sum, V::Sum))
+    ensures
+        r.0 == pv.total,
+        r.1 == V::Sum::of_int(pv.total.as_int() - V::amount(pv.value.sv())),
+        r.0 == pv.total(),
+        r.1 == pv.prefix(),
+{
+    let copy = pv.clone();
+    assert(copy == *pv);
+    (pv.total(), copy.prefix())
+}
+
+/// What `next` says by itself of a prefix column's iterator: in the
+/// words of the iterator's own specification, and in those of Verus's
+/// specification of an iterator.
+#[allow(dead_code)]
+fn told_by_a_prefixed_next<'a, V: VSummed + VValue<C>, C: VCodec>(it: &mut VerifiedPrefixIter<'a, V, C>) -> (r: Option<
+    VerifiedPrefixedValue<'a, V>,
+>)
+    ensures
+        match r {
+            Some(pv) => {
+                &&& old(it).rest().len() > 0
+                &&& pv.value.sv() == old(it).rest()[0]
+                &&& pv.prefix() == old(it).total()
+                &&& pv.total() == final(it).total()
+                &&& pv.prefix().as_int() == old(it).sum_to(old(it).pos() as int)
+                &&& pv.total().as_int() == old(it).sum_to(old(it).pos() + 1)
+                &&& pv.total().as_int() == pv.prefix().as_int() + V::amount(pv.value.sv())
+                &&& final(it).rest() == old(it).rest().skip(1)
+                &&& final(it).pos() == old(it).pos() + 1
+                &&& final(it).end_pos() == old(it).end_pos()
+            },
+            None => {
+                &&& old(it).rest().len() == 0
+                &&& final(it).rest().len() == 0
+                &&& final(it).pos() == old(it).pos()
+                &&& final(it).end_pos() == old(it).pos()
+                &&& final(it).total() == old(it).total()
+            },
+        },
+        final(it).column() == old(it).column(),
+        final(it).source() == old(it).source(),
+        final(it).base_pos() == old(it).base_pos(),
+        old(it).items().len() > 0 ==> r == Some(old(it).items()[0]) && final(it).items() == old(it).items().drop_first(),
+        old(it).items().len() == 0 ==> r is None && final(it).items() == old(it).items(),
+{
+    it.next()
+}
+
+/// What `nth` says by itself of a prefix column's iterator.
+#[allow(dead_code)]
+fn told_by_a_prefixed_nth<'a, V: VSummed + VValue<C>, C: VCodec>(it: &mut VerifiedPrefixIter<'a, V, C>, n: usize) -> (r: Option<
+    VerifiedPrefixedValue<'a, V>,
+>)
+    ensures
+        n < old(it).rest().len() ==> {
+            &&& r == Some(old(it).items()[n as int])
+            &&& r matches Some(pv)
+            &&& pv.value.sv() == old(it).rest()[n as int]
+            &&& pv.total() == final(it).total()
+            &&& pv.total().as_int() == old(it).sum_to(old(it).pos() + n + 1)
+            &&& pv.prefix().as_int() == old(it).sum_to(old(it).pos() + n)
+            &&& pv.total().as_int() == pv.prefix().as_int() + V::amount(pv.value.sv())
+            &&& final(it).items() == old(it).items().skip(n + 1)
+            &&& final(it).rest() == old(it).rest().skip(n + 1)
+            &&& final(it).pos() == old(it).pos() + n + 1
+            &&& final(it).end_pos() == old(it).end_pos()
+        },
+        n >= old(it).rest().len() ==> {
+            &&& r is None
+            &&& final(it).rest().len() == 0
+            &&& final(it).pos() == old(it).pos() + old(it).rest().len()
+            &&& final(it).end_pos() == final(it).pos()
+        },
+        final(it).column() == old(it).column(),
+        final(it).source() == old(it).source(),
+        final(it).base_pos() == old(it).base_pos(),
+        final(it).total().as_int() == old(it).sum_to(final(it).pos() as int),
+{
+    it.nth(n)
+}
+
+/// What the questions put to a prefix column's iterator say by
+/// themselves. Asked where it stands, it says where: within its
+/// window, in its column and not before where its sum counts from.
+#[allow(dead_code)]
+fn told_by_a_prefix_iters_place<V: VSummed + VValue<C>, C: VCodec>(it: &VerifiedPrefixIter<'_, V, C>) -> (r: usize)
+    ensures
+        r == it.pos(),
+        it.base_pos() <= it.pos() <= it.end_pos(),
+        it.pos() <= it.column().len(),
+        it.rest() == window(it.column(), it.pos() as int, it.end_pos() as int),
+{
+    it.pos()
+}
+
+/// Asked how far its window reaches and how many values it has left,
+/// an iterator says each: the first counts positions, which may be
+/// past the column, and the second values.
+#[allow(dead_code)]
+fn told_by_a_prefix_iters_count<V: VSummed + VValue<C>, C: VCodec>(it: &VerifiedPrefixIter<'_, V, C>) -> (r: (
+    usize,
+    usize,
+))
+    ensures
+        r.0 == it.end_pos() - it.pos(),
+        r.1 == it.rest().len(),
+        r.1 == it.items().len(),
+{
+    (it.items_left(), it.len())
+}
+
+/// Asked how many values it may yet give, an iterator says exactly how
+/// many it has left, as its least and as its most.
+#[allow(dead_code)]
+fn told_by_a_prefix_size_hint<V: VSummed + VValue<C>, C: VCodec>(it: &VerifiedPrefixIter<'_, V, C>) -> (r: (
+    usize,
+    Option<usize>,
+))
+    ensures
+        r.0 == it.rest().len(),
+        r.0 == it.items().len(),
+        r.1 == Some(r.0),
+{
+    it.size_hint()
+}
+
+/// Asked for the window's end alone, an iterator says as much.
+#[allow(dead_code)]
+fn told_by_a_prefix_iters_end<V: VSummed + VValue<C>, C: VCodec>(it: &VerifiedPrefixIter<'_, V, C>) -> (r: usize)
+    ensures
+        r == it.end_pos(),
+        it.base_pos() <= it.pos() <= it.end_pos(),
+        it.pos() <= it.column().len(),
+        it.rest() == window(it.column(), it.pos() as int, it.end_pos() as int),
+{
+    it.end_pos()
+}
+
+/// What `reset_prefix` says by itself: the iterator and its window stay,
+/// and its sum counts from where it stands and is nothing yet.
+#[allow(dead_code)]
+fn told_by_a_reset<V: VSummed + VValue<C>, C: VCodec>(it: &mut VerifiedPrefixIter<'_, V, C>)
+    ensures
+        final(it).rest() == old(it).rest(),
+        final(it).column() == old(it).column(),
+        final(it).source() == old(it).source(),
+        final(it).pos() == old(it).pos(),
+        final(it).end_pos() == old(it).end_pos(),
+        final(it).base_pos() == old(it).pos(),
+        final(it).total().as_int() == 0,
+{
+    it.reset_prefix()
+}
+
+/// What `set_max` says by itself of a prefix column's iterator.
+#[allow(dead_code)]
+fn told_by_a_prefix_set_max<V: VSummed + VValue<C>, C: VCodec>(it: &mut VerifiedPrefixIter<'_, V, C>, end: usize)
+    ensures
+        final(it).column() == old(it).column(),
+        final(it).source() == old(it).source(),
+        final(it).base_pos() == old(it).base_pos(),
+        final(it).total() == old(it).total(),
+        final(it).pos() == old(it).pos(),
+        final(it).end_pos() == if end >= old(it).pos() {
+            end
+        } else {
+            old(it).pos()
+        },
+        final(it).rest() == window(old(it).column(), old(it).pos() as int, end as int),
+{
+    it.set_max(end)
+}
+
+/// What `advance_to` says by itself of a prefix column's iterator.
+#[allow(dead_code)]
+fn told_by_a_prefix_advance_to<V: VSummed + VValue<C>, C: VCodec>(it: &mut VerifiedPrefixIter<'_, V, C>, target: usize)
+    ensures
+        final(it).column() == old(it).column(),
+        final(it).source() == old(it).source(),
+        final(it).base_pos() == old(it).base_pos(),
+        final(it).total().as_int() == old(it).sum_to(final(it).pos() as int),
+        final(it).rest() == past(old(it).rest(), target - old(it).pos()),
+        target <= old(it).pos() ==> {
+            &&& final(it).pos() == old(it).pos()
+            &&& final(it).end_pos() == old(it).end_pos()
+        },
+        old(it).pos() < target <= old(it).pos() + old(it).rest().len() ==> {
+            &&& final(it).pos() == target
+            &&& final(it).end_pos() == old(it).end_pos()
+        },
+        target > old(it).pos() + old(it).rest().len() ==> {
+            &&& final(it).pos() == old(it).pos() + old(it).rest().len()
+            &&& final(it).end_pos() == final(it).pos()
+        },
+{
+    it.advance_to(target)
+}
+
+/// What `advance_by` says by itself of a prefix column's iterator.
+#[allow(dead_code)]
+fn told_by_a_prefix_advance_by<V: VSummed + VValue<C>, C: VCodec>(it: &mut VerifiedPrefixIter<'_, V, C>, amount: usize)
+    ensures
+        final(it).column() == old(it).column(),
+        final(it).source() == old(it).source(),
+        final(it).base_pos() == old(it).base_pos(),
+        final(it).total().as_int() == old(it).sum_to(final(it).pos() as int),
+        final(it).rest() == past(old(it).rest(), amount as int),
+        amount <= old(it).rest().len() ==> {
+            &&& final(it).pos() == old(it).pos() + amount
+            &&& final(it).end_pos() == old(it).end_pos()
+        },
+        amount > old(it).rest().len() ==> {
+            &&& final(it).pos() == old(it).pos() + old(it).rest().len()
+            &&& final(it).end_pos() == final(it).pos()
+        },
+{
+    it.advance_by(amount)
+}
+
+/// What `shift` says by itself of a prefix column's iterator.
+#[allow(dead_code)]
+fn told_by_a_prefix_shift<V: VSummed + VValue<C>, C: VCodec>(it: &mut VerifiedPrefixIter<'_, V, C>, range: Range<usize>)
+    ensures
+        final(it).column() == old(it).column(),
+        final(it).source() == old(it).source(),
+        final(it).base_pos() == old(it).base_pos(),
+        final(it).total().as_int() == old(it).sum_to(final(it).pos() as int),
+        final(it).rest() == window(
+            old(it).column(),
+            if range.start <= old(it).pos() {
+                old(it).pos() as int
+            } else {
+                range.start as int
+            },
+            range.end as int,
+        ),
+        range.start <= old(it).pos() ==> {
+            &&& final(it).pos() == old(it).pos()
+            &&& final(it).end_pos() == if range.end >= old(it).pos() {
+                range.end
+            } else {
+                old(it).pos()
+            }
+        },
+        old(it).pos() < range.start <= range.end && range.start <= old(it).column().len() ==> {
+            &&& final(it).pos() == range.start
+            &&& final(it).end_pos() == range.end
+        },
+        old(it).pos() < range.start && (range.start > range.end || range.start > old(it).column().len()) ==> {
+            &&& final(it).pos() == if range.end <= old(it).pos() {
+                old(it).pos() as int
+            } else if range.end <= old(it).column().len() {
+                range.end as int
+            } else {
+                old(it).column().len() as int
+            }
+            &&& final(it).end_pos() == final(it).pos()
+        },
+{
+    it.shift(range)
+}
+
+/// What `shift_next` says by itself of a prefix column's iterator.
+#[allow(dead_code)]
+fn told_by_a_prefix_shift_next<'a, V: VSummed + VValue<C>, C: VCodec>(
+    it: &mut VerifiedPrefixIter<'a, V, C>,
+    range: Range<usize>,
+) -> (r: Option<VerifiedPrefixedValue<'a, V>>)
+    requires
+        range.start >= old(it).pos(),
+    ensures
+        final(it).column() == old(it).column(),
+        final(it).source() == old(it).source(),
+        final(it).base_pos() == old(it).base_pos(),
+        final(it).total().as_int() == old(it).sum_to(final(it).pos() as int),
+        ({
+            let w = window(old(it).column(), range.start as int, range.end as int);
+            &&& w.len() > 0 ==> {
+                &&& r matches Some(pv)
+                &&& pv.value.sv() == w[0]
+                &&& pv.total() == final(it).total()
+                &&& pv.total().as_int() == old(it).sum_to(range.start + 1)
+                &&& pv.prefix().as_int() == old(it).sum_to(range.start as int)
+                &&& pv.total().as_int() == pv.prefix().as_int() + V::amount(pv.value.sv())
+                &&& final(it).rest() == w.skip(1)
+                &&& final(it).pos() == range.start + 1
+                &&& final(it).end_pos() == range.end
+            }
+            &&& w.len() == 0 ==> {
+                &&& r is None
+                &&& final(it).rest().len() == 0
+                &&& final(it).pos() == if range.end <= old(it).pos() {
+                    old(it).pos() as int
+                } else if range.end <= old(it).column().len() {
+                    range.end as int
+                } else {
+                    old(it).column().len() as int
+                }
+                &&& final(it).end_pos() == final(it).pos()
+            }
+        }),
+{
+    it.shift_next(range)
 }
 
 } // verus!

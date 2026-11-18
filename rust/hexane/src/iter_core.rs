@@ -2020,10 +2020,21 @@ impl<D: Decode> ICore<D> {
                     &&& o.take(run.count as int) == Seq::new(run.count as nat, |_i: int| run.value)
                     &&& final(self).out::<X>(slabs@) == o.skip(run.count as int)
                     &&& final(self).pos == old(self).pos + run.count
+                    &&& final(self).items_left == old(self).items_left - run.count
                     // maximal, unless cut by `max`: the next value differs
                     &&& run.count < max && run.count < o.len() ==> o[run.count as int] != run.value
                 },
-                None => (max == 0 || old(self).out::<X>(slabs@).len() == 0) && final(self).pos == old(self).pos,
+                None => {
+                    &&& max == 0 || old(self).out::<X>(slabs@).len() == 0
+                    &&& final(self).pos == old(self).pos
+                    // asked for a run and with none to give, the window
+                    // is closed
+                    &&& final(self).items_left == if max == 0 {
+                        old(self).items_left
+                    } else {
+                        0
+                    }
+                },
             },
     {
         let ghost c0 = *self;

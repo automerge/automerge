@@ -17,12 +17,12 @@ use hexane::prefix::PrefixWeightFn;
 use hexane::verified::{
     refused, Get, LenIndex, SumIndex, VNewtype, VSummed, VValue, VerifiedColumn, VerifiedDecoder,
     VerifiedEncoder, VerifiedEncoderState, VerifiedIter, VerifiedIterState, VerifiedPrefixColumn,
-    VerifiedRuns,
+    VerifiedPrefixIter, VerifiedPrefixedValue, VerifiedRuns,
 };
 use hexane::{
     Codec, Column, ColumnEncoding, ColumnValue, ColumnValueRef, Encoder, EncoderApi, IterState,
-    Leb128, LoadOpts, MaybeFill, NoFill, PackError, PrefixColumn, PrefixValue, RleEncoding,
-    RleValue, Run, RunDecoder,
+    Leb128, LoadOpts, MaybeFill, NoFill, PackError, PrefixColumn, PrefixIter, PrefixValue,
+    PrefixedValue, RleEncoding, RleValue, Run, RunDecoder,
 };
 use std::cell::{Cell, RefCell};
 use std::cmp::Ordering;
@@ -8389,4 +8389,410 @@ fn the_sums_of_long_runs() {
     assert_eq!(p.get_index_for_prefix(long + 1), long + 1);
     assert_eq!(p.get_index_for_total(1 << 40), (1 << 40) - 1);
     assert_eq!(p.get_index_for_total(usize::MAX), long);
+}
+
+/// Where a prefix iterator stands, how far its window reaches, how many
+/// values it has left, and its running sum (under both its names).
+type Place = (usize, usize, usize, usize, i128, i128);
+
+fn new_place<T: Totalled>(it: &VerifiedPrefixIter<'_, T>) -> Place {
+    (
+        it.pos(),
+        it.end_pos(),
+        it.items_left(),
+        it.len(),
+        T::new_sum(it.total()),
+        T::new_sum(it.prefix()),
+    )
+}
+
+fn old_place<T: Totalled>(it: &PrefixIter<'_, T>) -> Place {
+    (
+        it.pos(),
+        it.end_pos(),
+        it.items_left(),
+        it.len(),
+        T::old_sum(it.total()),
+        T::old_sum(it.prefix()),
+    )
+}
+
+/// A value with the sums before it and through it.
+type Item<T> = Option<(T, i128, i128)>;
+
+fn new_item<T: Totalled>(pv: Option<VerifiedPrefixedValue<'_, T>>) -> Item<T> {
+    pv.map(|pv| {
+        (
+            T::keep(pv.value),
+            T::new_sum(pv.prefix()),
+            T::new_sum(pv.total()),
+        )
+    })
+}
+
+fn old_item<T: Totalled>(pv: Option<PrefixedValue<'_, T>>) -> Item<T> {
+    pv.map(|pv| {
+        (
+            old(pv.value),
+            T::old_sum(pv.prefix()),
+            T::old_sum(pv.total()),
+        )
+    })
+}
+
+/// A prefix iterator as its specification has it: where it stands,
+/// where its window ends, and where its sum counts from.
+struct SumIter<'m, T> {
+    model: &'m [T],
+    before: &'m [i128],
+    pos: usize,
+    end: usize,
+    base: usize,
+}
+
+impl<T: Totalled> SumIter<'_, T> {
+    fn sum(&self, to: usize) -> i128 {
+        self.before[to] - self.before[self.base]
+    }
+
+    /// The values left: the window can run past the column.
+    fn left(&self) -> usize {
+        self.end.min(self.model.len()) - self.pos
+    }
+
+    fn place(&self) -> Place {
+        let sum = self.sum(self.pos);
+        (
+            self.pos,
+            self.end,
+            self.end - self.pos,
+            self.left(),
+            sum,
+            sum,
+        )
+    }
+
+    fn nth(&mut self, n: usize) -> Item<T> {
+        if n < self.left() {
+            let i = self.pos + n;
+            self.pos = i + 1;
+            Some((self.model[i].clone(), self.sum(i), self.sum(i + 1)))
+        } else {
+            // all it had is passed, and its window ends there
+            self.pos += self.left();
+            self.end = self.pos;
+            None
+        }
+    }
+
+    fn set_max(&mut self, end: usize) {
+        self.end = end.max(self.pos);
+    }
+
+    fn advance_to(&mut self, target: usize) {
+        if target > self.pos {
+            self.nth(target - self.pos - 1);
+        }
+    }
+
+    fn advance_by(&mut self, amount: usize) {
+        if amount > 0 {
+            self.nth(amount - 1);
+        }
+    }
+}
+
+/// A position to move an iterator to: mostly in the column, sometimes
+/// near its ends, sometimes far past it.
+fn a_place(rng: &mut Rng, len: usize) -> usize {
+    match rng.below(8) {
+        0 => rng.below(3),
+        1 => len + rng.below(3),
+        2 => usize::MAX - rng.below(2),
+        _ => rng.below(len + 1),
+    }
+}
+
+/// A prefix column's iterator gives each value with the sums before it
+/// and through it, and keeps its running sum under every move: as its
+/// specification says, and as `PrefixColumn`'s iterator does, the two
+/// being asked the same at each step and standing in the same place
+/// after it.
+fn check_prefix_iters<T: Totalled>(
+    rng: &mut Rng,
+    p: &VerifiedPrefixColumn<T>,
+    c: &PrefixColumn<T>,
+    model: &[T],
+) {
+    let len = model.len();
+    let before = sums_before(model);
+    let item = |i: usize| (i < len).then(|| (model[i].clone(), before[i], before[i + 1]));
+    // all of it, in a `for` loop and as an iterator of the standard
+    // library
+    for (n, pv) in p.prefix_iter().enumerate() {
+        assert_eq!(new_item(Some(pv)), item(n));
+    }
+    assert_eq!(p.prefix_iter().count(), len);
+    let all: Vec<Item<T>> = (0..len).map(item).collect();
+    let new: Vec<Item<T>> = p.prefix_iter().map(|pv| new_item(Some(pv))).collect();
+    let old: Vec<Item<T>> = c.iter().map(|pv| old_item(Some(pv))).collect();
+    assert_eq!(new, all);
+    assert_eq!(old, all);
+    // one value by its place, which can be past the column
+    for i in some_places(rng, len) {
+        assert_eq!(new_item(p.get_prefixed(i)), item(i));
+        assert_eq!(old_item(c.get(i)), item(i));
+    }
+    // an iterator of a range, moved about
+    for _ in 0..4 {
+        let start = rng.below(len + 1);
+        let end = start + rng.below(len - start + 1);
+        let mut x = p.prefix_iter_range(start, end);
+        let mut y = c.iter_range(start..end);
+        let mut m = SumIter {
+            model,
+            before: &before,
+            pos: start,
+            end,
+            base: 0,
+        };
+        assert_eq!(new_place(&x), m.place());
+        assert_eq!(old_place(&y), m.place());
+        for _ in 0..16 {
+            match rng.below(12) {
+                0..=2 => {
+                    let want = m.nth(0);
+                    assert_eq!(new_item(x.next()), want);
+                    assert_eq!(old_item(y.next()), want);
+                }
+                3 | 4 => {
+                    let n = match rng.below(4) {
+                        0 => a_place(rng, len),
+                        _ => rng.below(m.left() + 2),
+                    };
+                    let want = m.nth(n);
+                    assert_eq!(new_item(x.nth(n)), want);
+                    assert_eq!(old_item(y.nth(n)), want);
+                }
+                5 => {
+                    let end = a_place(rng, len);
+                    x.set_max(end);
+                    y.set_max(end);
+                    m.set_max(end);
+                }
+                6 => {
+                    let amount = a_place(rng, len - m.pos);
+                    x.advance_by(amount);
+                    y.advance_by(amount);
+                    m.advance_by(amount);
+                }
+                7 => {
+                    let target = a_place(rng, len);
+                    x.advance_to(target);
+                    y.advance_to(target);
+                    m.advance_to(target);
+                }
+                8 => {
+                    // any range: one that starts behind the iterator, one
+                    // that ends before it starts
+                    let range = a_place(rng, len)..a_place(rng, len);
+                    x.shift(range.clone());
+                    y.shift(range.clone());
+                    m.set_max(range.end);
+                    m.advance_to(range.start);
+                }
+                9 | 10 => {
+                    // a range that starts at the iterator or after it
+                    let start = m.pos + a_place(rng, len - m.pos).min(usize::MAX - m.pos);
+                    let range = start..a_place(rng, len);
+                    m.set_max(range.end);
+                    let want = m.nth(range.start - m.pos);
+                    assert_eq!(new_item(x.shift_next(range.clone())), want);
+                    assert_eq!(old_item(y.shift_next(range)), want);
+                }
+                _ => {
+                    x.reset_prefix();
+                    y.reset_prefix();
+                    m.base = m.pos;
+                }
+            }
+            assert_eq!(new_place(&x), m.place());
+            assert_eq!(old_place(&y), m.place());
+            assert_eq!(x.size_hint(), (m.left(), Some(m.left())));
+        }
+        // what it has left
+        let rest: Vec<Item<T>> = x.map(|pv| new_item(Some(pv))).collect();
+        let old_rest: Vec<Item<T>> = y.map(|pv| old_item(Some(pv))).collect();
+        let mut want = vec![];
+        while let Some(v) = m.nth(0) {
+            want.push(Some(v));
+        }
+        assert_eq!(rest, want);
+        assert_eq!(old_rest, want);
+    }
+}
+
+fn sum_iters<T: Totalled>() {
+    for seed in 1..=8u64 {
+        let mut rng = Rng(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) ^ 0x50f8);
+        let budget = [2, 3, 4, 8, 64][rng.below(5)];
+        let mut p = VerifiedPrefixColumn::<T>::with_max_segments(budget);
+        let mut c = PrefixColumn::<T>::with_max_segments(budget);
+        let mut model: Vec<T> = vec![];
+        check_prefix_iters(&mut rng, &p, &c, &model);
+        for _ in 0..40 {
+            let at = rng.below(model.len() + 1);
+            let del = rng.below((model.len() - at).min(12) + 1);
+            let ins: Vec<T> = rng.values(40);
+            p.splice(at, del, &lent(&ins));
+            c.splice(at, del, ins.iter().cloned());
+            model.splice(at..at + del, ins);
+            check_prefix_iters(&mut rng, &p, &c, &model);
+        }
+        // loaded: an index made at once of all the slabs
+        let p2 = VerifiedPrefixColumn::<T>::load(&p.save()).unwrap();
+        let c2 = PrefixColumn::<T>::load(&c.save()).unwrap();
+        check_prefix_iters(&mut rng, &p2, &c2, &model);
+    }
+}
+
+/// A prefix column of the verified API is read with its sums
+/// ([`VerifiedPrefixIter`]) as its specification says and as
+/// `PrefixColumn` is: each value comes with what the values before it
+/// and through it add up to, and the iterator's running sum is of the
+/// values it has passed since its sum was last started, whether it read
+/// them or stepped over them, in a window that is moved, widened past
+/// the column, or closed. Of every summed type, after edits and after a
+/// load.
+#[test]
+fn a_prefix_column_is_read_with_its_sums() {
+    for_each_sum!(sum_iters);
+}
+
+/// The iterator of a short prefix column, by hand.
+// (`clone` is here for what it does)
+#[allow(clippy::clone_on_copy)]
+#[test]
+fn the_iterator_of_a_prefix_column() {
+    let p = VerifiedPrefixColumn::<u64>::from_values(&[3, 0, 4, 4, 10]);
+    let got: Vec<(u128, u64, u128)> = p
+        .prefix_iter()
+        .map(|pv| (pv.prefix(), pv.value, pv.total()))
+        .collect();
+    assert_eq!(
+        got,
+        [(0, 3, 3), (3, 0, 3), (3, 4, 7), (7, 4, 11), (11, 10, 21)]
+    );
+    // a range: the sum counts from the column's start
+    let mut it = p.prefix_iter_range(1, 4);
+    assert_eq!((it.pos(), it.end_pos(), it.len(), it.total()), (1, 4, 3, 3));
+    let pv = it.next().unwrap();
+    assert_eq!(pv, VerifiedPrefixedValue { value: 0, total: 3 });
+    assert_eq!(
+        format!("{pv:?}"),
+        "VerifiedPrefixedValue { value: 0, total: 3 }"
+    );
+    let copy = pv;
+    assert_eq!((copy.prefix(), copy.total(), pv.clone().total()), (3, 3, 3));
+    // started again, it counts from where the iterator stands
+    it.reset_prefix();
+    assert_eq!((it.pos(), it.total(), it.prefix()), (2, 0, 0));
+    let pv = it.nth(1).unwrap();
+    assert_eq!((pv.prefix(), pv.value, pv.total()), (4, 4, 8));
+    assert!(it.next().is_none());
+    assert_eq!((it.pos(), it.end_pos(), it.total()), (4, 4, 8));
+    // a window past the column closes at the column's end
+    let mut it = p.prefix_iter();
+    it.set_max(9);
+    assert_eq!((it.end_pos(), it.items_left(), it.len()), (9, 9, 5));
+    it.advance_by(7);
+    assert_eq!((it.pos(), it.end_pos(), it.total()), (5, 5, 21));
+    // moved to a window, and to one that starts behind it
+    let mut it = p.prefix_iter();
+    it.shift(2..4);
+    assert_eq!((it.pos(), it.end_pos(), it.total()), (2, 4, 3));
+    it.shift(0..5);
+    assert_eq!((it.pos(), it.end_pos(), it.total()), (2, 5, 3));
+    let pv = it.shift_next(3..5).unwrap();
+    assert_eq!((pv.prefix(), pv.value, pv.total()), (7, 4, 11));
+    assert_eq!((it.pos(), it.end_pos(), it.total()), (4, 5, 11));
+    assert!(it.shift_next(5..5).is_none());
+    assert_eq!((it.pos(), it.end_pos(), it.total()), (5, 5, 21));
+    // one value by its place
+    let pv = p.get_prefixed(4).unwrap();
+    assert_eq!((pv.prefix(), pv.value, pv.total()), (11, 10, 21));
+    assert!(p.get_prefixed(5).is_none());
+    // signed sums, and nulls, which add nothing
+    let p = VerifiedPrefixColumn::<Option<i64>>::from_values(&[Some(4), None, Some(-9)]);
+    let got: Vec<(i128, Option<i64>, i128)> = p
+        .prefix_iter()
+        .map(|pv| (pv.prefix(), pv.value, pv.total()))
+        .collect();
+    assert_eq!(got, [(0, Some(4), 4), (4, None, 4), (4, Some(-9), -5)]);
+    // flags: how many are set
+    let p = VerifiedPrefixColumn::<bool>::from_values(&[true, false, true]);
+    let got: Vec<(bool, usize)> = p.prefix_iter().map(|pv| (pv.value, pv.total())).collect();
+    assert_eq!(got, [(true, 1), (false, 1), (true, 2)]);
+    // a column of nothing
+    let none = VerifiedPrefixColumn::<u32>::new();
+    let mut it = none.prefix_iter();
+    assert!(it.next().is_none() && it.nth(3).is_none());
+    assert_eq!((it.pos(), it.end_pos(), it.total()), (0, 0, 0));
+    assert!(none.get_prefixed(0).is_none());
+}
+
+/// Sums as far as a type's go, read by the iterator: a long run is
+/// stepped over by its count, and the sum of what is passed is exact.
+///
+/// (The columns here are longer than a 32-bit `usize` counts.)
+#[cfg(target_pointer_width = "64")]
+#[test]
+fn the_iterator_over_long_runs() {
+    let long = i64::MAX as usize;
+    let each = u128::from(u64::MAX);
+    let p = VerifiedPrefixColumn::<u64>::fill(long, u64::MAX);
+    let mut it = p.prefix_iter();
+    let pv = it.nth(long - 2).unwrap();
+    assert_eq!(pv.prefix(), (long as u128 - 2) * each);
+    assert_eq!(pv.total(), (long as u128 - 1) * each);
+    let pv = it.next().unwrap();
+    assert_eq!(pv.total(), long as u128 * each);
+    assert!(it.next().is_none());
+    assert_eq!((it.pos(), it.total()), (long, long as u128 * each));
+    // the widest sums of the signed type, from the middle on
+    let p = VerifiedPrefixColumn::<i64>::fill(long, i64::MIN);
+    let half = long / 2;
+    let mut it = p.prefix_iter_range(half, long);
+    assert_eq!(it.total(), half as i128 * i128::from(i64::MIN));
+    it.reset_prefix();
+    it.advance_to(long);
+    assert_eq!(it.total(), (long - half) as i128 * i128::from(i64::MIN));
+
+    // in slabs of two runs, against `PrefixColumn`'s iterator
+    let run = |value: u32, count: usize| Run { count, value };
+    let mut p = VerifiedPrefixColumn::<u32>::with_max_segments(2);
+    let mut c = PrefixColumn::<u32>::with_max_segments(2);
+    for (at, runs) in [
+        (0, [run(u32::MAX, 1 << 30), run(7, 1 << 40)]),
+        (1 << 20, [run(0, 1 << 50), run(u32::MAX - 1, 1 << 30)]),
+        (5, [run(1, 3), run(u32::MAX, 1)]),
+    ] {
+        p.splice_runs(at, 0, runs);
+        c.splice_runs(at, 0, runs);
+    }
+    let len = p.len();
+    let mut rng = Rng(0x50f9);
+    let mut places = some_places(&mut rng, len);
+    places.extend([5, 9, 1 << 20, (1 << 20) + (1 << 50), (1 << 30) + 4, len - 1]);
+    places.sort();
+    places.dedup();
+    let mut x = p.prefix_iter();
+    let mut y = c.iter();
+    for &i in &places {
+        x.advance_to(i);
+        y.advance_to(i);
+        assert_eq!(new_place(&x), old_place(&y));
+        assert_eq!(x.total(), p.get_prefix(i));
+        assert_eq!(new_item(x.next()), old_item(y.next()));
+    }
 }

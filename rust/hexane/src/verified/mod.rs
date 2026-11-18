@@ -118,6 +118,20 @@
 //! for the first that the values through it do
 //! ([`get_index_for_total`](VerifiedColumn::get_index_for_total)).
 //!
+//! A prefix column is also read with its sums, value by value:
+//! [`prefix_iter`](VerifiedColumn::prefix_iter) gives a
+//! [`VerifiedPrefixIter`], an iterator that moves as a [`VerifiedIter`]
+//! does and keeps the sum of the values it has passed. What it gives is
+//! each value as a [`VerifiedPrefixedValue`], with what the values
+//! through it add up to and what those before it do; a long move
+//! ([`nth`](Iterator::nth), `advance_to`, `shift`) takes the sum of
+//! what it passes over from the index. Its specifications say the
+//! running sum as an integer too: it is `summed` of the column's values
+//! from where the sum counts from (the column's start, or where
+//! [`reset_prefix`](VerifiedPrefixIter::reset_prefix) was called) up to
+//! the iterator. [`get_prefixed`](VerifiedColumn::get_prefixed) is one
+//! value read so.
+//!
 //! That a prefix column refuses the saved columns
 //! [`PrefixColumn`](crate::PrefixColumn) refuses, with the same error,
 //! and that its edits panic where `PrefixColumn`'s do, with the same
@@ -465,6 +479,7 @@ mod encoder;
 pub(crate) mod kind;
 pub(crate) mod model;
 mod prefix;
+mod prefix_iter;
 pub(crate) mod sums;
 pub(crate) mod text;
 pub(crate) mod value;
@@ -483,6 +498,7 @@ pub use decoder::{
 pub use encoder::{VerifiedEncoder, VerifiedEncoderState};
 pub use kind::{LenIndex, VIndex, VKeeps};
 pub use prefix::{SumIndex, VerifiedPrefixColumn};
+pub use prefix_iter::{VerifiedPrefixIter, VerifiedPrefixedValue};
 #[cfg(verus_keep_ghost)]
 pub use sums::{
     lemma_sum_bound, lemma_sum_cat, lemma_sum_mono, lemma_sum_range, lemma_sum_run, lemma_sums_fit,

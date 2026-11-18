@@ -89,7 +89,7 @@ impl<V: VSummed + VValue<C>, C: VCodec> VerifiedColumn<V, C, SumIndex> {
     /// of it; none for a column an edit's panic left without its parts,
     /// which is empty.
     #[inline(always)]
-    fn sum_index(&self) -> (r: Option<&SlabBTree<SumWeight<V::Sum>>>)
+    pub(super) fn sum_index(&self) -> (r: Option<&SlabBTree<SumWeight<V::Sum>>>)
         ensures
             sums_fit::<V>(self@),
             <Get<'static, V> as VGet>::svs(vals_of::<V::X>(self.core.slabs_spec())) == self@,
@@ -104,7 +104,7 @@ impl<V: VSummed + VValue<C>, C: VCodec> VerifiedColumn<V, C, SumIndex> {
                     &&& total(slab_lens(self.core.slabs_spec())) <= usize::MAX
                     &&& self.core.slabs_spec().len() < usize::MAX
                 },
-                None => self@.len() == 0,
+                None => self@.len() == 0 && self.core.slabs_spec().len() == 0,
             },
     {
         self.core.lemma_column();
