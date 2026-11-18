@@ -123,8 +123,10 @@ pub(crate) open spec fn reps<W: PrefixWeight>(n: nat, c: W::Prefix) -> W::Prefix
 /// for the unverified API, the trusted bridge to `PrefixValue` (user
 /// code) and `T::Prefix`.
 pub(crate) trait PrefixOps<V: Copy> {
-    type P: Clone + Default + std::fmt::Debug + AddAssign + SubAssign + Add<Output = Self::P>
-        + for<'x> AddAssign<&'x Self::P>;
+    /// What the sums are kept in. Nothing is asked of the type here:
+    /// the readers reach its arithmetic through the functions below
+    /// alone.
+    type P;
 
     /// The slab weight whose prefixes the sums are: its arithmetic is
     /// theirs.

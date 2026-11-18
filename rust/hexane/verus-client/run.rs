@@ -2,11 +2,11 @@
 //! `requires`, and the client's own run-time work (loading, saving,
 //! unwrapping) must not panic.
 use hexane::verified::{
-    LenIndex, SumIndex, VerifiedColumn, VerifiedDecoder, VerifiedEncoder, VerifiedEncoderState,
-    VerifiedPrefixColumn,
+    AccIndex, LenIndex, SumIndex, VerifiedAccColumn, VerifiedColumn, VerifiedDecoder,
+    VerifiedEncoder, VerifiedEncoderState, VerifiedPrefixColumn,
 };
 use hexane::{Leb128, Run};
-use verus_client::{Action, Meta};
+use verus_client::{Action, Board, Flags, Mark, Meta, Step};
 
 #[test]
 fn runs() {
@@ -1875,4 +1875,205 @@ fn a_length_past_the_sums() {
     let mut col = VerifiedPrefixColumn::<Meta>::fill(16, longest);
     col.push(verus_client::a_meta(0, 15));
     verus_client::a_length_past_the_sums(&mut col, verus_client::a_meta(3, 1));
+}
+
+/// What marks add up to: each opens its kind, or closes it where it is
+/// open.
+fn flags_of(marks: &[Mark]) -> u64 {
+    marks.iter().fold(0, |open, m| open ^ 1 << (m.0 % 64))
+}
+
+/// What steps leave of a board: each changes the lamps of its number as
+/// the board then lies, and an odd one turns the board round.
+fn board_of(steps: &[Step]) -> (u64, bool) {
+    steps.iter().fold((0, false), |(lit, turned), s| {
+        let changed = s.0 >> 1;
+        let changed = if turned {
+            changed.rotate_left(32)
+        } else {
+            changed
+        };
+        (lit ^ changed, turned != (s.0 & 1 == 1))
+    })
+}
+
+fn lamps(b: Board) -> (u64, bool) {
+    (b.lit, b.turned)
+}
+
+/// A step whose lamps lie on both halves of the board, and that turns
+/// the board round for one `k` in three.
+fn a_step(k: u64) -> Step {
+    Step((k % 11) << 31 | (k % 3))
+}
+
+#[test]
+fn accumulators() {
+    // seven marks of a kind at a time, and five equal steps
+    let marks: Vec<Mark> = (0..1000).map(|i| Mark(i / 7 % 5 * 13)).collect();
+    let steps: Vec<Step> = (0..1000).map(|i| a_step(i / 5)).collect();
+    let col = VerifiedAccColumn::<Mark>::from_values(&marks);
+    let board = VerifiedAccColumn::<Step>::from_values(&steps);
+    let plain = VerifiedColumn::<Mark>::from_values(&marks);
+    let bytes = plain.save();
+
+    // the clients of a column of any kind, of accumulator columns
+    verus_client::round_trip::<Mark, Leb128, AccIndex>(&marks);
+    verus_client::round_trip::<Option<Step>, Leb128, AccIndex>(&vec![
+        Some(Step(3)),
+        None,
+        None,
+        Some(Step(4)),
+    ]);
+    verus_client::load_then_save::<Mark, Leb128, AccIndex>(&bytes);
+    verus_client::clone_then_diverge::<Step, Leb128, AccIndex>(&steps, Step(77));
+    verus_client::collect_then_extend::<Mark, Leb128, AccIndex>(
+        vec![Mark(1), Mark(1), Mark(2)],
+        vec![Mark(3)],
+        vec![Mark(4), Mark(4)],
+    );
+    verus_client::slabs_and_validation::<Mark, Leb128, AccIndex>(&(0..10_000).map(Mark).collect());
+
+    // by hand: the kinds 0, 13 and 26, and one kind opened and closed
+    let (two, three) = verus_client::marks_added_up(marks[5], marks[7], marks[14]);
+    assert_eq!((two.0, three.0), (0x2001, 0x400_2001));
+    assert_eq!(verus_client::a_null_adds_no_mark(Mark(3), Mark(5)).0, 0x28);
+    assert_eq!(verus_client::a_null_adds_no_mark(Mark(3), Mark(67)).0, 0);
+    let (one_way, the_other) = verus_client::steps_in_order();
+    assert_eq!(lamps(one_way), (0x2_0000_0001, true));
+    assert_eq!(lamps(the_other), (3, true));
+    assert_eq!(lamps(one_way), board_of(&[Step(3), Step(4)]));
+    assert_eq!(lamps(the_other), board_of(&[Step(4), Step(3)]));
+
+    // what each of the three answers says, also past the end
+    for i in [0, 1, 7, 999, 1000, 1001, usize::MAX] {
+        let (to, through) = (i.min(1000), i.saturating_add(1).min(1000));
+        let mark = verus_client::told_by_an_acc_prefix(&col, i);
+        let step = verus_client::told_by_an_acc_prefix(&board, i);
+        assert_eq!(
+            (mark.0, lamps(step)),
+            (flags_of(&marks[..to]), board_of(&steps[..to]))
+        );
+        let mark = verus_client::told_by_an_acc_total(&col, i);
+        let step = verus_client::told_by_an_acc_total(&board, i);
+        assert_eq!(mark.0, flags_of(&marks[..through]));
+        assert_eq!(lamps(step), board_of(&steps[..through]));
+    }
+    let places = [(0, 0), (0, 1000), (3, 3), (6, 8), (123, 987), (1000, 1000)];
+    let past = [(5, 3), (3, 2000), (1000, 1001), (2000, 3000), (2000, 0)];
+    for (start, end) in places.into_iter().chain(past) {
+        let range = if start >= end || start >= 1000 {
+            0..0
+        } else {
+            start..end.min(1000)
+        };
+        let mark = verus_client::told_by_an_acc_range(&col, start, end);
+        let step = verus_client::told_by_an_acc_range(&board, start, end);
+        assert_eq!(mark.0, flags_of(&marks[range.clone()]));
+        assert_eq!(lamps(step), board_of(&steps[range]));
+    }
+
+    // a range after what is before it, and by taking that away
+    for (start, end) in places {
+        let (before, range, through) = verus_client::a_range_added_after(&col, start, end);
+        assert_eq!(before.0, flags_of(&marks[..start]));
+        assert_eq!(range.0, flags_of(&marks[start..end]));
+        assert_eq!(through.0, flags_of(&marks[..end]));
+        let taken = verus_client::a_range_by_taking_away(&col, start, end);
+        assert_eq!(taken.0, range.0);
+
+        let (before, range, through) = verus_client::a_range_added_after(&board, start, end);
+        assert_eq!(lamps(before), board_of(&steps[..start]));
+        assert_eq!(lamps(range), board_of(&steps[start..end]));
+        assert_eq!(lamps(through), board_of(&steps[..end]));
+        let taken = verus_client::a_range_by_taking_away(&board, start, end);
+        assert_eq!(lamps(taken), lamps(range));
+    }
+
+    // whatever loads as a plain column loads as one, and nothing else
+    let loaded = verus_client::load_as_an_acc::<Mark, Leb128>(&bytes).unwrap();
+    assert_eq!((loaded.len(), loaded.save()), (1000, bytes.clone()));
+    assert_eq!(loaded.get_prefix(1000).0, flags_of(&marks));
+    let cut = &bytes[..bytes.len() - 1];
+    for b in [cut, &[], &[1], &[0x7f], &[2, 5, 2, 5]] {
+        let as_one = verus_client::load_as_an_acc::<Mark, Leb128>(b);
+        assert_eq!(as_one.is_some(), VerifiedColumn::<Mark>::load(b).is_ok());
+    }
+    assert!(verus_client::load_as_an_acc::<Mark, Leb128>(&[1]).is_none());
+    let up = verus_client::added_up(&plain);
+    assert_eq!((up.len(), up.save()), (1000, bytes));
+    assert_eq!(up.get_total(999).0, flags_of(&marks));
+
+    // a mark put in adds its kind to what is before it
+    let mut more = col.clone();
+    let with_it = verus_client::a_mark_put_in(&mut more, 500, Mark(63));
+    assert_eq!(with_it.0, flags_of(&marks[..500]) ^ 1 << 63);
+    assert_eq!((more.len(), more.get_prefix(501).0), (1001, with_it.0));
+    assert_eq!(more.get_prefix(1001).0, flags_of(&marks) ^ 1 << 63);
+    assert_eq!(col.get_prefix(1000).0, flags_of(&marks));
+}
+
+#[test]
+fn accumulators_by_runs() {
+    let marks: Vec<Mark> = (0..1000).map(|i| Mark(i / 7 % 5 * 13)).collect();
+    let steps: Vec<Step> = (0..1000).map(|i| a_step(i / 5)).collect();
+    let col = VerifiedAccColumn::<Mark>::from_values(&marks);
+    let board = VerifiedAccColumn::<Step>::from_values(&steps);
+    let by_runs = verus_client::added_by_runs::<Mark, Leb128>(&col);
+    assert_eq!(by_runs.0, flags_of(&marks));
+    let by_runs = verus_client::added_by_runs::<Step, Leb128>(&board);
+    assert_eq!(lamps(by_runs), board_of(&steps));
+
+    // long runs: a mark an odd number of times over is open, and a step
+    // is taken one time after another
+    for n in [0, 1, 2, 4_000, 100_001] {
+        let long = VerifiedAccColumn::<Mark>::fill(n, Mark(9));
+        let by_runs = verus_client::added_by_runs::<Mark, Leb128>(&long);
+        assert_eq!(by_runs.0, if n % 2 == 1 { 1 << 9 } else { 0 });
+        let same = vec![a_step(4); n];
+        let long = VerifiedAccColumn::<Step>::from_values(&same);
+        let by_runs = verus_client::added_by_runs::<Step, Leb128>(&long);
+        assert_eq!(lamps(by_runs), board_of(&same));
+    }
+
+    // adding a number of times over: in a way of the type's own, and as
+    // the trait gives it
+    for n in [0, 1, 2, 5, 64] {
+        let mut open = Flags(0xf0);
+        verus_client::told_by_add_times(&mut open, &Flags(0x3c), n);
+        assert_eq!(open.0, if n % 2 == 1 { 0xcc } else { 0xf0 });
+
+        let mut b = Board {
+            lit: 7,
+            turned: true,
+        };
+        let step = Board {
+            lit: 1 << 32 | 2,
+            turned: true,
+        };
+        verus_client::told_by_add_times(&mut b, &step, n);
+        let mut steps = vec![Step(15)];
+        steps.resize(n + 1, Step(1 << 33 | 5));
+        assert_eq!(lamps(b), board_of(&steps));
+    }
+
+    // an accumulator's own functions, and what was added found again by
+    // taking away what there was before it
+    let none = verus_client::told_by_new_zero::<Board>();
+    assert_eq!(lamps(none), (0, false));
+    let (first, then) = (Step(15), Step(1 << 33 | 5));
+    let step = verus_client::told_by_acc_of(then);
+    let mut b = verus_client::told_by_dup(&none);
+    verus_client::told_by_add_acc(&mut b, &verus_client::told_by_acc_of(first));
+    let before = verus_client::told_by_dup(&b);
+    verus_client::told_by_add_acc(&mut b, &step);
+    assert_eq!(lamps(b), board_of(&[first, then]));
+    assert_eq!(lamps(before), board_of(&[first]));
+    let added = verus_client::added_then_taken_away(&before, &step);
+    assert_eq!(lamps(added), lamps(step));
+    verus_client::told_by_sub_acc(&mut b, &before);
+    assert_eq!(lamps(b), lamps(step));
+    let open = verus_client::told_by_acc_of(Mark(70));
+    let both = verus_client::added_then_taken_away(&Flags(0xf0), &open);
+    assert_eq!((open.0, both.0), (0x40, 0x40));
 }

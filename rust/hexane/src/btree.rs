@@ -415,24 +415,21 @@ where
 /// For verification, prefix addition is given as mathematics
 /// (`prefix_plus`) with laws tying it to `merge`.
 pub trait PrefixAggregate: SlabAggregate {
-    /// `Ord` is not required here — only forward accumulation needs `Add`.
-    /// The "find slab whose prefix reaches target" search is provided in a
-    /// separate impl block bounded on `Self::Prefix: Ord`.
+    /// What the prefixes are. Nothing is asked of the type here: the
+    /// tree reaches a prefix's arithmetic only through
+    /// [`zero_prefix`](Self::zero_prefix) and
+    /// [`add_prefix`](Self::add_prefix), and by reference, so that a
+    /// large non-scalar prefix (e.g. a `HashMap`-backed mark set) is not
+    /// cloned at each level of a descent. What a weight asks of its
+    /// prefix type is the weight's to say: `PrefixSlabWeight<P>` asks
+    /// std's operators of `P`, and those two functions of it are `+=`
+    /// and `P::default()`; a weight of the verified API gives verified
+    /// functions and asks for no operator.
     ///
-    /// `Clone` (not `Copy`) so non-scalar prefixes (e.g. a `HashMap`-backed
-    /// mark set) can serve as the per-slab aggregate.
-    ///
-    /// `for<'a> AddAssign<&'a Self::Prefix>` lets the B-tree descent
-    /// accumulate prefixes via `+=` against the stored aggregate by
-    /// reference — avoiding a per-level clone of large non-scalar
-    /// prefixes (the dominant cost for `MarkAcc`-style HashMap prefixes).
-    /// All scalar primitives (`u128`, `i128`, `u64`, etc.) impl this in
-    /// `core` already.
-    type Prefix: Clone
-        + Default
-        + Add<Output = Self::Prefix>
-        + Debug
-        + for<'a> AddAssign<&'a Self::Prefix>;
+    /// `Ord` is not required here either. The "find slab whose prefix
+    /// reaches target" search is provided in a separate impl block
+    /// bounded on `Self::Prefix: Ord`.
+    type Prefix;
 
     /// [`prefix`](Self::prefix), for specifications.
     spec fn spec_prefix(&self) -> Self::Prefix;
@@ -6427,7 +6424,10 @@ impl Iterator for FindByValueRange<'_> {
 
 // ── Test helpers ────────────────────────────────────────────────────────────
 
-impl<A: PrefixAggregate> FoundSlab<A> {
+impl<A: PrefixAggregate> FoundSlab<A>
+where
+    A::Prefix: Clone,
+{
     #[cfg(test)]
     pub(crate) fn decompose(&self) -> (usize, A::Prefix, usize) {
         (self.index, self.prefix.clone(), self.pos)

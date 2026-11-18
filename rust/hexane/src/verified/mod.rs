@@ -150,6 +150,33 @@
 //! and that its edits panic where `PrefixColumn`'s do, with the same
 //! words, is tested, as is that an edit whose sums fit does not panic.
 //!
+//! # Accumulator columns
+//!
+//! A [`VerifiedAccColumn`] is a column kept with what its values add up
+//! to in a type its client gives: a `VerifiedColumn` whose kind of
+//! index is [`AccIndex`]. The type is an accumulator ([`VAccum`]), and
+//! its client proves the laws of it ([`VGroup`]): that its addition is
+//! associative, that its zero adds nothing, and that what was added can
+//! be taken away again. Two accumulators need not add up to the same in
+//! either order. The column's values are of a type of the client's own
+//! that says what a value adds ([`VAdds`]), or an `Option` of one, whose
+//! `None` adds nothing ([`VAccumulated`]).
+//!
+//! Every method of a column is an accumulator column's, with the
+//! specification it has of a plain one, and an accumulator column saves
+//! the bytes a plain column of its values does. There is one of any
+//! values, since nothing overflows: a load takes whatever it would take
+//! as a plain column, and no edit panics for what the values add up to.
+//! From its index the column answers what the values before a position
+//! add up to (`get_prefix`), what those through it do (`get_total`) and
+//! what those of a range do (`sum_range`): each is `accumulated` of
+//! those values, which adds them in the order the column holds them.
+//!
+//! [`PrefixColumn`](crate::PrefixColumn) takes the laws of its prefix
+//! type on trust. Here they are the client's to prove, and what the
+//! column answers is proved from them: Verus checks a client's
+//! accumulator when it is run on the client's crate.
+//!
 //! # What is proved
 //!
 //! Of every method, its `ensures`, for every input that meets its
@@ -458,9 +485,12 @@
 //! longer than a column, and for bytes of more values than one holds.
 //!
 //! A client's own value type is checked with the client: Verus proves
-//! what [`VNewtype`] asks of it when it is run on the client's crate. A
-//! client that is compiled without Verus has that to keep by itself, as
-//! it has every `requires` of this API.
+//! what [`VNewtype`] asks of it when it is run on the client's crate,
+//! and so what [`VAmount`] asks of one that a prefix column adds up, and
+//! what [`VGroup`], [`VAccum`] and [`VAdds`] ask of an accumulator and
+//! of the values added up in it. A client that is compiled without
+//! Verus has that to keep by itself, as it has every `requires` of this
+//! API.
 //!
 //! That a splice returns is not proved: it runs the core's loop over the
 //! values to insert, which Verus is not asked to show ends. It ends when
@@ -482,6 +512,7 @@
     clippy::vec_init_then_push
 )]
 
+mod acc;
 pub(crate) mod bytes;
 #[cfg(verus_keep_ghost)]
 mod client_proof;
@@ -500,6 +531,9 @@ pub(crate) mod value;
 // spec functions exist only when Verus compiles the crate
 #[cfg(verus_keep_ghost)]
 pub use crate::iter_core::{past, window};
+#[cfg(verus_keep_ghost)]
+pub use acc::{accumulated, lemma_acc_cat, lemma_acc_range, lemma_acc_run, lemma_cancel, times};
+pub use acc::{AccIndex, VAccum, VAccumulated, VAdds, VGroup, VerifiedAccColumn};
 #[cfg(verus_keep_ghost)]
 pub use bytes::{below_at, bytes_below, total_len, total_len_opt};
 pub use codec::VCodec;
@@ -585,6 +619,13 @@ mod seal {
     /// or says what its values add to a sum: no other can name this
     /// trait.
     pub trait SummedSeal {
+
+    }
+
+    /// A value type an accumulator column can hold says what its values
+    /// add, or is an `Option` of one that does: no other can name this
+    /// trait.
+    pub trait AccSeal {
 
     }
 

@@ -15,10 +15,11 @@
 use hexane::encoder::{BoolEncoder, BoolEncoderState, RleEncoder, RleEncoderState};
 use hexane::prefix::{PrefixSeek, PrefixWeightFn};
 use hexane::verified::{
-    refused, Get, LenIndex, SumIndex, VAmount, VNewtype, VSummed, VValue, VerifiedColumn,
-    VerifiedDecoder, VerifiedEncoder, VerifiedEncoderState, VerifiedIter, VerifiedIterState,
-    VerifiedPrefixColumn, VerifiedPrefixIter, VerifiedPrefixIterState, VerifiedPrefixSeek,
-    VerifiedPrefixedValue, VerifiedRuns,
+    refused, AccIndex, Get, LenIndex, SumIndex, VAccum, VAccumulated, VAdds, VAmount, VGroup,
+    VNewtype, VSummed, VValue, VerifiedAccColumn, VerifiedColumn, VerifiedDecoder, VerifiedEncoder,
+    VerifiedEncoderState, VerifiedIter, VerifiedIterState, VerifiedPrefixColumn,
+    VerifiedPrefixIter, VerifiedPrefixIterState, VerifiedPrefixSeek, VerifiedPrefixedValue,
+    VerifiedRuns,
 };
 use hexane::{
     Codec, Column, ColumnEncoding, ColumnValue, ColumnValueRef, Encoder, EncoderApi, IterState,
@@ -29,7 +30,7 @@ use std::cell::{Cell, RefCell};
 use std::cmp::Ordering;
 use std::fmt::Debug;
 use std::num::NonZeroU32;
-use std::ops::Range;
+use std::ops::{Add, AddAssign, Range, Sub, SubAssign};
 
 /// A small deterministic generator (xorshift64*).
 struct Rng(u64);
@@ -9693,4 +9694,903 @@ fn an_edit_past_a_clients_sums_panics() {
     let mut v = VerifiedColumn::<Meta>::fill(17, longest);
     v.push(one);
     assert_eq!(v.len(), 18);
+}
+
+/// An accumulator of a client's own, as a client compiled without Verus
+/// writes it: which of 64 kinds of mark are open. A mark opens its kind,
+/// or closes it where it is open, so adding is `^`, and so is taking
+/// away.
+#[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
+struct Flags(u64);
+
+// the laws are Verus's to check: a client compiled without it has them
+// to keep by itself
+impl VGroup for Flags {}
+
+impl VAccum for Flags {
+    fn new_zero() -> Flags {
+        Flags(0)
+    }
+
+    fn add_acc(&mut self, b: &Flags) {
+        self.0 ^= b.0;
+    }
+
+    fn sub_acc(&mut self, b: &Flags) {
+        self.0 ^= b.0;
+    }
+
+    fn dup(&self) -> Flags {
+        *self
+    }
+
+    // in a way of its own: twice over adds nothing
+    fn add_times(&mut self, b: &Flags, n: usize) {
+        if n % 2 == 1 {
+            self.0 ^= b.0;
+        }
+    }
+}
+
+/// A value type of a client's own for an accumulator column to add up:
+/// a mark, of the kind its number's last six bits say.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+struct Mark(u64);
+
+impl Mark {
+    /// The flag of the mark's kind.
+    fn flag(self) -> u64 {
+        1 << (self.0 % 64)
+    }
+}
+
+impl VNewtype for Mark {
+    type Base = u64;
+
+    fn to_base(self) -> u64 {
+        self.0
+    }
+
+    fn from_base(b: u64) -> Result<Mark, PackError> {
+        Ok(Mark(b))
+    }
+}
+
+impl VAdds for Mark {
+    type Acc = Flags;
+
+    fn acc_of(v: Mark) -> Flags {
+        Flags(v.flag())
+    }
+}
+
+// the same type for `Column`
+impl ColumnValue for Mark {
+    type Encoding<C: Codec> = RleEncoding<Mark, C>;
+}
+
+impl RleValue for Mark {
+    fn try_unpack<C: Codec>(data: &[u8]) -> Result<(usize, Mark), PackError> {
+        let (n, b) = C::try_read_unsigned(data)?;
+        Ok((n, Mark(b)))
+    }
+
+    fn pack<C: Codec>(value: Mark, out: &mut Vec<u8>) -> bool {
+        out.extend(C::encode_unsigned(value.0));
+        true
+    }
+}
+
+// and for `PrefixColumn`, which asks std's operators of what it adds
+// up in, and takes their laws on trust
+#[allow(clippy::suspicious_arithmetic_impl)]
+impl Add for Flags {
+    type Output = Flags;
+
+    fn add(self, b: Flags) -> Flags {
+        Flags(self.0 ^ b.0)
+    }
+}
+
+#[allow(clippy::suspicious_arithmetic_impl)]
+impl Sub for Flags {
+    type Output = Flags;
+
+    fn sub(self, b: Flags) -> Flags {
+        Flags(self.0 ^ b.0)
+    }
+}
+
+#[allow(clippy::suspicious_op_assign_impl)]
+impl AddAssign for Flags {
+    fn add_assign(&mut self, b: Flags) {
+        self.0 ^= b.0;
+    }
+}
+
+#[allow(clippy::suspicious_op_assign_impl)]
+impl SubAssign for Flags {
+    fn sub_assign(&mut self, b: Flags) {
+        self.0 ^= b.0;
+    }
+}
+
+#[allow(clippy::suspicious_op_assign_impl)]
+impl AddAssign<&Flags> for Flags {
+    fn add_assign(&mut self, b: &Flags) {
+        self.0 ^= b.0;
+    }
+}
+
+impl PrefixValue for Mark {
+    type Prefix = Flags;
+
+    fn accumulate(target: &mut Flags, val: Mark) {
+        target.0 ^= val.flag();
+    }
+
+    fn accumulate_run(target: &mut Flags, run: &Run<Mark>) {
+        if run.count % 2 == 1 {
+            target.0 ^= run.value.flag();
+        }
+    }
+}
+
+// two hundred marks of the 64 kinds, so that marks of a kind meet
+plain_kind!(Mark, |rng| Mark(rng.below(200) as u64));
+
+/// An accumulator in which the order matters: the lamps of a board, and
+/// whether the board is turned round. A step changes the lamps of its
+/// number as the board then lies, and an odd one turns the board round,
+/// so two steps leave a board differently in either order.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+struct Board {
+    lit: u64,
+    turned: bool,
+}
+
+/// The lamps `x` as they lie on a board that is turned round, or is
+/// not.
+fn across(turned: bool, x: u64) -> u64 {
+    if turned {
+        x.rotate_left(32)
+    } else {
+        x
+    }
+}
+
+impl VGroup for Board {}
+
+// `add_times` is left as the trait gives it
+impl VAccum for Board {
+    fn new_zero() -> Board {
+        Board {
+            lit: 0,
+            turned: false,
+        }
+    }
+
+    fn add_acc(&mut self, b: &Board) {
+        self.lit ^= across(self.turned, b.lit);
+        self.turned ^= b.turned;
+    }
+
+    // what is to be added to `b` for the board
+    fn sub_acc(&mut self, b: &Board) {
+        self.lit = across(b.turned, self.lit ^ b.lit);
+        self.turned ^= b.turned;
+    }
+
+    fn dup(&self) -> Board {
+        *self
+    }
+}
+
+/// A value type for a column that adds up in a [`Board`]: a step, which
+/// changes the lamps that half its number says and is odd where it
+/// turns the board round.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+struct Step(u64);
+
+impl VNewtype for Step {
+    type Base = u64;
+
+    fn to_base(self) -> u64 {
+        self.0
+    }
+
+    fn from_base(b: u64) -> Result<Step, PackError> {
+        Ok(Step(b))
+    }
+}
+
+impl VAdds for Step {
+    type Acc = Board;
+
+    fn acc_of(v: Step) -> Board {
+        Board {
+            lit: v.0 >> 1,
+            turned: v.0 & 1 == 1,
+        }
+    }
+}
+
+impl ColumnValue for Step {
+    type Encoding<C: Codec> = RleEncoding<Step, C>;
+}
+
+impl RleValue for Step {
+    fn try_unpack<C: Codec>(data: &[u8]) -> Result<(usize, Step), PackError> {
+        let (n, b) = C::try_read_unsigned(data)?;
+        Ok((n, Step(b)))
+    }
+
+    fn pack<C: Codec>(value: Step, out: &mut Vec<u8>) -> bool {
+        out.extend(C::encode_unsigned(value.0));
+        true
+    }
+}
+
+// lamps on both halves of the board, and every other step turning it
+// round
+plain_kind!(Step, |rng| {
+    Step((rng.below(7) as u64) << 31 | rng.below(4) as u64)
+});
+
+/// What an accumulator column of `T` adds its values up in.
+type Added<T> = <T as VAccumulated>::Acc;
+
+/// A value type an accumulator column holds. The tests reckon by
+/// themselves what values of it add up to, one value after another.
+trait Accd: Kind + VAccumulated<Acc: PartialEq> {
+    /// What the values add up to, in the order they are in.
+    fn added(vs: &[Self]) -> Added<Self>;
+
+    /// What runs of values add up to, for a type whose accumulator adds
+    /// a run in a way of its own, so that a run of billions is added at
+    /// once.
+    fn added_runs(_runs: &[(usize, Self)]) -> Option<Added<Self>> {
+        None
+    }
+
+    /// What `PrefixColumn` answers of the values, for a type the tests
+    /// have a `PrefixColumn` of.
+    fn check_old(_rng: &mut Rng, _p: &VerifiedAccColumn<Self>, _model: &[Self]) {}
+}
+
+impl Accd for Mark {
+    fn added(vs: &[Mark]) -> Flags {
+        Flags(vs.iter().fold(0, |open, m| open ^ m.flag()))
+    }
+
+    fn added_runs(runs: &[(usize, Mark)]) -> Option<Flags> {
+        let odd = runs.iter().filter(|(n, _)| n % 2 == 1);
+        Some(Flags(odd.fold(0, |open, (_, m)| open ^ m.flag())))
+    }
+
+    fn check_old(rng: &mut Rng, p: &VerifiedAccColumn<Mark>, model: &[Mark]) {
+        check_old_acc(rng, p, model);
+    }
+}
+
+impl Accd for Option<Mark> {
+    fn added(vs: &[Option<Mark>]) -> Flags {
+        Flags(vs.iter().flatten().fold(0, |open, m| open ^ m.flag()))
+    }
+
+    fn added_runs(runs: &[(usize, Option<Mark>)]) -> Option<Flags> {
+        let odd = runs.iter().filter(|(n, _)| n % 2 == 1);
+        let marks = odd.flat_map(|(_, m)| m);
+        Some(Flags(marks.fold(0, |open, m| open ^ m.flag())))
+    }
+
+    fn check_old(rng: &mut Rng, p: &VerifiedAccColumn<Option<Mark>>, model: &[Option<Mark>]) {
+        check_old_acc(rng, p, model);
+    }
+}
+
+/// The board after the steps, taken one after another.
+fn board_after<'a>(steps: impl Iterator<Item = &'a Step>) -> Board {
+    let (mut lit, mut turned) = (0u64, false);
+    for s in steps {
+        let lamps = s.0 >> 1;
+        lit ^= if turned { lamps.rotate_left(32) } else { lamps };
+        turned ^= s.0 % 2 == 1;
+    }
+    Board { lit, turned }
+}
+
+impl Accd for Step {
+    fn added(vs: &[Step]) -> Board {
+        board_after(vs.iter())
+    }
+}
+
+impl Accd for Option<Step> {
+    fn added(vs: &[Option<Step>]) -> Board {
+        board_after(vs.iter().flatten())
+    }
+}
+
+/// The same checks for each value type of an accumulator column.
+macro_rules! for_each_acc {
+    ($f:ident) => {
+        $f::<Mark>();
+        $f::<Option<Mark>>();
+        $f::<Step>();
+        $f::<Option<Step>>();
+    };
+}
+
+/// What an accumulator column holds.
+fn acc_values<T: Accd>(p: &VerifiedAccColumn<T>) -> Vec<T> {
+    p.to_vec().into_iter().map(T::keep).collect()
+}
+
+/// `check_invariants` says of an accumulator column what it says of the
+/// plain column of the same edits: nothing, or the same words. (Where a
+/// panic can be caught: not on wasm32.)
+#[cfg(panic = "unwind")]
+fn check_acc_invariants<T: Accd>(p: &VerifiedAccColumn<T>, v: &VerifiedColumn<T>) {
+    let acc = panic_of(std::panic::AssertUnwindSafe(|| p.check_invariants()));
+    let plain = panic_of(std::panic::AssertUnwindSafe(|| v.check_invariants()));
+    assert_eq!(acc, plain);
+}
+
+#[cfg(not(panic = "unwind"))]
+fn check_acc_invariants<T: Accd>(_p: &VerifiedAccColumn<T>, _v: &VerifiedColumn<T>) {}
+
+/// An accumulator column is a column: it holds `model` and reads as the
+/// plain column `v` of the same edits does, it lies in that column's
+/// slabs, and it saves that column's bytes. `built` says that edits made
+/// the columns of values, which the checks of `check_invariants` then
+/// pass.
+fn check_acc<T: Accd>(p: &VerifiedAccColumn<T>, v: &VerifiedColumn<T>, model: &[T], built: bool) {
+    assert_eq!(p.len(), model.len());
+    assert_eq!(p.is_empty(), model.is_empty());
+    assert_eq!(acc_values(p), model);
+    assert_eq!(new_values(v), model);
+    let mut it = p.iter();
+    for m in model {
+        assert_eq!(it.next().map(T::keep).as_ref(), Some(m));
+    }
+    assert!(it.next().is_none());
+    assert!(it.next().is_none());
+    assert!(p.get(model.len()).is_none());
+    assert!(p.get(usize::MAX).is_none());
+    let bytes = p.save();
+    assert_eq!(bytes, v.save());
+
+    assert_eq!(p.slab_count(), v.slab_count());
+    assert_eq!(p.slab_lens(), v.slab_lens());
+    assert_eq!(p.slab_segments(), v.slab_segments());
+    assert_eq!(format!("{p:?}"), format!("{v:?}"));
+    if built {
+        p.check_invariants();
+    } else {
+        check_acc_invariants(p, v);
+    }
+    assert!(p.validate_encoding().is_ok());
+
+    let (mut a, mut b) = (vec![9u8; 3], vec![9u8; 3]);
+    let range = p.save_to(&mut a);
+    assert_eq!(range, v.save_to(&mut b));
+    assert_eq!(a, b);
+    assert_eq!(a[range], bytes[..]);
+    for x in model.first().into_iter().chain(model.last()) {
+        let only = model.iter().all(|m| m == x);
+        assert_eq!(p.is_only(x.lend()), only);
+        let (mut a, mut b) = (vec![9u8; 3], vec![9u8; 3]);
+        let range = p.save_to_unless(&mut a, x.lend());
+        assert_eq!(range, v.save_to_unless(&mut b, x.lend()));
+        assert_eq!(a, b);
+    }
+}
+
+/// What an accumulator column answers from its index is what its values
+/// add up to in the order it holds them: those before a position and
+/// those through one, at any position, and those of a range, whatever
+/// its ends.
+fn check_acc_reads<T: Accd>(rng: &mut Rng, p: &VerifiedAccColumn<T>, model: &[T]) {
+    let len = model.len();
+    let places = some_places(rng, len);
+    for &i in &places {
+        assert_eq!(p.get_prefix(i), T::added(&model[..i.min(len)]));
+        let through = i.saturating_add(1).min(len);
+        assert_eq!(p.get_total(i), T::added(&model[..through]));
+    }
+    for (n, &start) in places.iter().enumerate() {
+        // each end with some of the starts
+        for &end in places.iter().skip(n % 3).step_by(3) {
+            let range = if start < end.min(len) {
+                start..end.min(len)
+            } else {
+                0..0
+            };
+            assert_eq!(p.sum_range(start, end), T::added(&model[range]));
+        }
+    }
+    assert_eq!(p.sum_range(0, len), T::added(model));
+}
+
+/// `PrefixColumn` of the same values, with an accumulator that has
+/// std's operators, saves the same bytes and answers the same.
+fn check_old_acc<T>(rng: &mut Rng, p: &VerifiedAccColumn<T>, model: &[T])
+where
+    T: Accd + PrefixValue<Prefix = Added<T>>,
+{
+    let c = PrefixColumn::<T>::from_values(model.to_vec());
+    assert_eq!(p.save(), c.save());
+    let places = some_places(rng, model.len());
+    for (n, &i) in places.iter().enumerate() {
+        assert_eq!(p.get_prefix(i), c.get_prefix(i));
+        assert_eq!(p.get_total(i), c.get_total(i));
+        for &end in places.iter().skip(n % 3).step_by(3) {
+            assert_eq!(p.sum_range(i, end), c.sum_range(i..end));
+        }
+    }
+}
+
+/// The reads of a plain column, of an accumulator column: a value by
+/// its place, a range of values, a search for a value, and a clone,
+/// which is a column of its own with an index of its own.
+fn check_acc_plain_reads<T: Accd>(
+    rng: &mut Rng,
+    p: &VerifiedAccColumn<T>,
+    v: &VerifiedColumn<T>,
+    model: &[T],
+) {
+    for _ in 0..4 {
+        if !model.is_empty() {
+            let i = rng.below(model.len());
+            assert_eq!(p.get(i).map(T::keep).as_ref(), Some(&model[i]));
+        }
+        let start = rng.below(model.len() + 1);
+        let end = start + rng.below(model.len() - start + 1);
+        let mut it = p.iter_range(start, end);
+        assert_eq!(it.len(), end - start);
+        for m in &model[start..end] {
+            assert_eq!(it.next().map(T::keep).as_ref(), Some(m));
+        }
+        assert!(it.next().is_none());
+        let x = match model.get(start) {
+            Some(x) => x.clone(),
+            None => T::fresh(rng),
+        };
+        assert_eq!(
+            p.scope_to_value(x.lend(), start, end),
+            v.scope_to_value(x.lend(), start, end)
+        );
+        let runs: Vec<(usize, T)> = p
+            .iter_range(start, end)
+            .runs()
+            .map(|r| (r.count, T::keep(r.value)))
+            .collect();
+        assert_eq!(runs, runs_of(&model[start..end]));
+    }
+    let mut p2 = p.clone();
+    assert_eq!(p2.slab_lens(), p.slab_lens());
+    let (at, x) = (model.len() / 2, T::fresh(rng));
+    p2.insert(at, x.lend());
+    let mut with_it = model.to_vec();
+    with_it.insert(at, x);
+    assert_eq!(acc_values(&p2), with_it);
+    assert_eq!(p2.get_total(at), T::added(&with_it[..at + 1]));
+    assert_eq!(p2.get_prefix(usize::MAX), T::added(&with_it));
+    assert_eq!(acc_values(p), model);
+    assert_eq!(p.get_prefix(usize::MAX), T::added(model));
+}
+
+/// An accumulator column loads the bytes it saved, which are a plain
+/// column's, as the same values and into the slabs a plain column loads
+/// them into, and answers of them what it answered.
+fn check_acc_loads<T: Accd>(rng: &mut Rng, p: &VerifiedAccColumn<T>, model: &[T]) {
+    let bytes = p.save();
+    let p2 = VerifiedAccColumn::<T>::load(&bytes).unwrap();
+    let v2 = VerifiedColumn::<T>::load(&bytes).unwrap();
+    check_acc(&p2, &v2, model, false);
+    assert_eq!(p2.save(), bytes);
+    // of an index made at once of all the slabs
+    check_acc_reads(rng, &p2, model);
+}
+
+fn acc_edits<T: Accd>() {
+    for seed in 1..=8u64 {
+        let mut rng = Rng(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) ^ 0xacc5);
+        let budget = [2, 3, 4, 8, 64][rng.below(5)];
+        let mut p = VerifiedAccColumn::<T>::with_max_segments(budget);
+        let mut v = VerifiedColumn::<T>::with_max_segments(budget);
+        let mut model: Vec<T> = vec![];
+        // one edit, of the accumulator column and of the plain one
+        macro_rules! each {
+            ($col:ident => $edit:expr) => {{
+                let $col = &mut p;
+                $edit;
+                let $col = &mut v;
+                $edit;
+            }};
+        }
+        for step in 0..120 {
+            match rng.below(14) {
+                0..=3 => {
+                    let at = rng.below(model.len() + 1);
+                    let del = rng.below((model.len() - at).min(12) + 1);
+                    let ins: Vec<T> = rng.values(40);
+                    if rng.below(2) == 0 {
+                        each!(col => col.splice(at, del, &lent(&ins)));
+                    } else {
+                        each!(col => col.splice_iter(at, del, ins.iter().map(T::lend)));
+                    }
+                    model.splice(at..at + del, ins);
+                }
+                4 | 5 => {
+                    let at = rng.below(model.len() + 1);
+                    let x = match at.checked_sub(1) {
+                        Some(i) => rng.value(&model[i]),
+                        None => T::fresh(&mut rng),
+                    };
+                    each!(col => col.insert(at, x.lend()));
+                    model.insert(at, x);
+                }
+                6 => {
+                    let x = match model.last() {
+                        Some(last) => rng.value(last),
+                        None => T::fresh(&mut rng),
+                    };
+                    each!(col => col.push(x.lend()));
+                    model.push(x);
+                }
+                7 | 8 => {
+                    if !model.is_empty() {
+                        let at = rng.below(model.len());
+                        each!(col => col.remove(at));
+                        model.remove(at);
+                    }
+                }
+                9 => {
+                    // sometimes past the end, which changes nothing
+                    let len = rng.below(model.len() + 3);
+                    each!(col => col.truncate(len));
+                    model.truncate(len);
+                }
+                10 => {
+                    let at = rng.below(model.len() + 1);
+                    let n = match rng.below(8) {
+                        0 => 0,
+                        1 => model.len() - at,
+                        _ => rng.below((model.len() - at).min(40) + 1),
+                    };
+                    each!(col => col.remove_n(at, n));
+                    model.drain(at..at + n);
+                }
+                11 | 12 => {
+                    let at = rng.below(model.len() + 1);
+                    let del = rng.below((model.len() - at).min(30) + 1);
+                    let runs = some_runs::<T>(&mut rng, 6);
+                    let lent_runs = || {
+                        runs.iter().map(|(n, x)| Run {
+                            count: *n,
+                            value: x.lend(),
+                        })
+                    };
+                    each!(col => col.splice_runs(at, del, lent_runs()));
+                    model.splice(at..at + del, run_model(&runs));
+                }
+                _ => {
+                    if rng.below(3) == 0 {
+                        each!(col => col.clear());
+                        model.clear();
+                    } else {
+                        let more: Vec<T> = rng.values(40);
+                        each!(col => col.extend(more.iter().map(T::lend)));
+                        model.extend(more);
+                    }
+                }
+            }
+            check_acc(&p, &v, &model, true);
+            check_acc_reads(&mut rng, &p, &model);
+            check_acc_plain_reads(&mut rng, &p, &v, &model);
+            T::check_old(&mut rng, &p, &model);
+            if step % 10 == 9 {
+                check_acc_loads(&mut rng, &p, &model);
+            }
+        }
+        check_acc_loads(&mut rng, &p, &model);
+    }
+}
+
+/// An accumulator column of the verified API ([`VerifiedAccColumn`]) is
+/// a column kept with another index. Under the same edits it holds what
+/// a plain column holds, in the same slabs, reads the same, and saves
+/// the same bytes; and what it answers from its index after each edit
+/// is what its values then add up to in their order, for an accumulator
+/// in which the order does not matter and for one in which it does.
+/// Where the old API has the accumulator too, `PrefixColumn` of the
+/// values saves the same bytes and answers the same.
+#[test]
+fn an_accumulator_column_is_a_column() {
+    for_each_acc!(acc_edits);
+}
+
+fn acc_forms<T: Accd>() {
+    for seed in 1..=6u64 {
+        let mut rng = Rng(seed.wrapping_mul(0x2545_f491_4f6c_dd1d) ^ 0xacc6);
+        let budget = [2, 3, 4, 8, 64][rng.below(5)];
+        let model: Vec<T> = rng.values(300);
+        let plain = VerifiedColumn::<T>::from_values(&lent(&model));
+
+        let p = VerifiedAccColumn::<T>::from_values(&lent(&model));
+        check_acc(&p, &plain, &model, true);
+        check_acc_reads(&mut rng, &p, &model);
+        T::check_old(&mut rng, &p, &model);
+        let p: VerifiedAccColumn<T> = model.iter().map(T::lend).collect();
+        check_acc(&p, &plain, &model, true);
+        check_acc_reads(&mut rng, &p, &model);
+        let p = VerifiedColumn::<T, Leb128, AccIndex>::from_iter(lent(&model));
+        check_acc(&p, &plain, &model, true);
+        check_acc_reads(&mut rng, &p, &model);
+        let mut p = VerifiedAccColumn::<T>::new();
+        p.extend(lent(&model));
+        check_acc(&p, &plain, &model, true);
+        check_acc_reads(&mut rng, &p, &model);
+        let none = VerifiedAccColumn::<T>::default();
+        assert!(none.is_empty() && none.save().is_empty());
+        assert_eq!(none.slab_count(), 0);
+        assert_eq!(none.get_prefix(3), T::added(&[]));
+        assert_eq!(none.get_total(0), T::added(&[]));
+
+        // in slabs of a budget, and loaded with one
+        let mut p = VerifiedAccColumn::<T>::from_values_with_max_segments(&lent(&model), budget);
+        let mut v = VerifiedColumn::<T>::from_values_with_max_segments(&lent(&model), budget);
+        check_acc(&p, &v, &model, true);
+        check_acc_reads(&mut rng, &p, &model);
+        check_acc_loads(&mut rng, &p, &model);
+        let opts = LoadOpts::new()
+            .with_length(model.len())
+            .with_max_segments(budget);
+        let p2 = VerifiedAccColumn::<T>::load_with(&p.save(), opts).unwrap();
+        let v2 = VerifiedColumn::<T>::load_with(&p.save(), opts).unwrap();
+        check_acc(&p2, &v2, &model, false);
+        check_acc_reads(&mut rng, &p2, &model);
+        // of a length the bytes do not have: the same error
+        let long = LoadOpts::new().with_length(model.len() + 1);
+        assert_eq!(
+            VerifiedAccColumn::<T>::load_with(&p.save(), long)
+                .map(|p| p.len())
+                .map_err(|e| e.to_string()),
+            VerifiedColumn::<T>::load_with(&p.save(), long)
+                .map(|v| v.len())
+                .map_err(|e| e.to_string()),
+        );
+
+        // one value for each of a run's
+        let (a, b) = (T::fresh(&mut rng), T::fresh(&mut rng));
+        let f = |x: T| if not_above(&x, &a) { b.clone() } else { x };
+        p.remap(f);
+        v.remap(f);
+        let want: Vec<T> = model.iter().cloned().map(f).collect();
+        check_acc(&p, &v, &want, false);
+        check_acc_reads(&mut rng, &p, &want);
+        T::check_old(&mut rng, &p, &want);
+        check_acc_loads(&mut rng, &p, &want);
+
+        // a column of one value
+        let n = rng.below(500);
+        let p = VerifiedAccColumn::<T>::fill(n, a.lend());
+        let v = VerifiedColumn::<T>::fill(n, a.lend());
+        check_acc(&p, &v, &vec![a.clone(); n], true);
+        check_acc_reads(&mut rng, &p, &vec![a.clone(); n]);
+        T::check_old(&mut rng, &p, &vec![a.clone(); n]);
+    }
+}
+
+/// The other ways to make an accumulator column make what they make of
+/// a plain column, and one that answers what its values add up to: a
+/// slice, an iterator, `extend`, a segment budget, a load with options,
+/// a remap, and `fill`.
+#[test]
+fn the_other_forms_of_an_accumulator_column() {
+    for_each_acc!(acc_forms);
+}
+
+/// Whether the bytes load. An accumulator column loads them where a
+/// plain column does, as the same values in the same slabs, and is
+/// refused them where that is, with the same error.
+fn same_acc_load<T: Accd>(bytes: &[u8]) -> bool {
+    let v = match VerifiedColumn::<T>::load(bytes) {
+        Ok(v) => v,
+        Err(e) => {
+            let as_one = VerifiedAccColumn::<T>::load(bytes).map(|p| p.len());
+            assert_eq!(as_one.map_err(|f| f.to_string()), Err(e.to_string()));
+            return false;
+        }
+    };
+    if v.len() <= 100_000 {
+        let p = VerifiedAccColumn::<T>::load(bytes).unwrap();
+        let model = new_values(&v);
+        check_acc(&p, &v, &model, false);
+        assert_eq!(p.get_prefix(usize::MAX), T::added(&model));
+        return true;
+    }
+    // a few bytes can be a run of billions. That is read in places; and
+    // it is not for an accumulator that adds a run one time after
+    // another, which would be as long about it as the run is
+    let runs = v.iter().runs().map(|r| (r.count, T::keep(r.value)));
+    if let Some(all) = T::added_runs(&runs.collect::<Vec<_>>()) {
+        let p = VerifiedAccColumn::<T>::load(bytes).unwrap();
+        assert_eq!(p.len(), v.len());
+        assert_eq!(p.save(), bytes);
+        assert_eq!(p.get_prefix(usize::MAX), all);
+        assert_eq!(p.sum_range(0, v.len()), all);
+        for i in [0, 1, v.len() / 2, v.len() - 1] {
+            assert_eq!(p.get(i).map(T::keep), v.get(i).map(T::keep));
+        }
+    }
+    true
+}
+
+fn acc_loads<T: Accd>() {
+    let mut rng = Rng(0xacc7);
+    // how many were refused, and how many taken
+    let mut seen = [0usize; 2];
+    // bytes at random, mostly not a column
+    for _ in 0..3_000 {
+        let n = rng.below(12);
+        let bytes: Vec<u8> = (0..n)
+            .map(|_| match rng.below(4) {
+                0 => rng.next() as u8,
+                1 => [0x7f, 0x7e, 0x00, 0x80][rng.below(4)],
+                _ => (rng.next() % 6) as u8,
+            })
+            .collect();
+        seen[usize::from(same_acc_load::<T>(&bytes))] += 1;
+    }
+    // a column's bytes with one changed, taken out or put in
+    for _ in 0..1_000 {
+        let model: Vec<T> = rng.values(30);
+        let mut bytes = VerifiedColumn::<T>::from_values(&lent(&model)).save();
+        assert!(same_acc_load::<T>(&bytes));
+        if bytes.is_empty() {
+            continue;
+        }
+        let at = rng.below(bytes.len());
+        match rng.below(3) {
+            0 => bytes[at] ^= 1 << rng.below(8),
+            1 => {
+                bytes.remove(at);
+            }
+            _ => bytes.insert(at, rng.next() as u8),
+        }
+        seen[usize::from(same_acc_load::<T>(&bytes))] += 1;
+    }
+    assert!(seen[0] > 100 && seen[1] > 100, "{seen:?}");
+    // a run of billions, in a few bytes
+    let x = T::fresh(&mut rng);
+    let long = VerifiedColumn::<T>::fill(1 << 31, x.lend()).save();
+    assert!(long.len() < 20 && same_acc_load::<T>(&long));
+}
+
+/// Nothing overflows in an accumulator, so there is an accumulator
+/// column of any values: whatever bytes load as a plain column load as
+/// one, and no others. (An accumulator that adds a run one time after
+/// another is as long about a load as the column is, so the test loads
+/// no run of billions for one.)
+#[test]
+fn an_accumulator_column_loads_what_a_plain_column_loads() {
+    for_each_acc!(acc_loads);
+}
+
+/// The kind of an accumulator column is the third parameter of the
+/// column's type: `VerifiedAccColumn<V, C>` is
+/// `VerifiedColumn<V, C, AccIndex>`, and each constructor and each load
+/// makes a column of the kind its type says. Its iterator, and what
+/// `IntoIterator` gives of it, are a column's.
+#[test]
+fn the_kind_of_an_accumulator_column() {
+    let vs: Vec<Mark> = (0..2000).map(|i| Mark(i / 7)).collect();
+    let named = VerifiedColumn::<Mark, Leb128, AccIndex>::from_values(&vs);
+    let short: VerifiedAccColumn<Mark> = named.clone();
+    let collected: VerifiedAccColumn<Mark, Leb128> = vs.iter().copied().collect();
+    let loaded = VerifiedAccColumn::<Mark>::load(&short.save()).unwrap();
+    let plain: VerifiedColumn<Mark> = vs.iter().copied().collect();
+    for c in [&named, &short, &collected, &loaded] {
+        assert_eq!(c.to_vec(), vs);
+        assert_eq!(c.save(), plain.save());
+        assert_eq!(c.get_prefix(2000), Mark::added(&vs));
+    }
+    let it: VerifiedIter<'_, Mark, Leb128, AccIndex> = short.iter();
+    assert_eq!(it.count(), vs.len());
+    assert!((&short).into_iter().eq(vs.iter().copied()));
+}
+
+/// What an accumulator column answers is what its client says its
+/// values add, added in the order the column holds them: by hand, for
+/// marks, for nulls, which add nothing, and for steps, which two columns
+/// of the same values in another order answer differently of.
+#[test]
+fn an_accumulator_adds_what_its_client_says() {
+    // of the kinds 3, 5, 3, 5 and 0
+    let model = [Mark(3), Mark(5), Mark(67), Mark(5), Mark(64)];
+    let p = VerifiedAccColumn::<Mark>::from_values(&model);
+    let c: PrefixColumn<Mark> = model.iter().copied().collect();
+    assert_eq!(p.save(), c.save());
+    assert_eq!(p.to_vec(), model);
+    for (i, open) in [0, 8, 0x28, 0x20, 0, 1].into_iter().enumerate() {
+        assert_eq!(p.get_prefix(i), Flags(open));
+        assert_eq!(c.get_prefix(i), Flags(open));
+    }
+    assert_eq!(p.get_total(1), Flags(0x28));
+    assert_eq!(p.sum_range(1, 4), Flags(8));
+    assert_eq!(c.sum_range(1..4), Flags(8));
+    assert_eq!(p.sum_range(3, 99), Flags(0x21));
+    assert_eq!(p.sum_range(4, 1), Flags(0));
+
+    let nulls = [Some(model[0]), None, Some(model[1]), None, None];
+    let p = VerifiedAccColumn::<Option<Mark>>::from_values(&nulls);
+    let c: PrefixColumn<Option<Mark>> = nulls.iter().copied().collect();
+    assert_eq!(p.save(), c.save());
+    for (i, open) in [0, 8, 8, 0x28, 0x28, 0x28].into_iter().enumerate() {
+        assert_eq!(p.get_prefix(i), Flags(open));
+        assert_eq!(c.get_prefix(i), Flags(open));
+    }
+
+    // any values at all: nothing overflows
+    let p = VerifiedAccColumn::<Mark>::fill(1 << 20, Mark(u64::MAX));
+    assert_eq!(p.get_prefix(1 << 20), Flags(0));
+    assert_eq!(p.get_prefix((1 << 20) - 1), Flags(1 << 63));
+    let loaded = VerifiedAccColumn::<Mark>::load(&p.save()).unwrap();
+    assert_eq!(loaded.get_total(0), Flags(1 << 63));
+
+    let board = |lit, turned| Board { lit, turned };
+    let one_way = VerifiedAccColumn::<Step>::from_values(&[Step(3), Step(4)]);
+    let the_other = VerifiedAccColumn::<Step>::from_values(&[Step(4), Step(3)]);
+    assert_eq!(one_way.get_prefix(2), board(0x2_0000_0001, true));
+    assert_eq!(the_other.get_prefix(2), board(3, true));
+    assert_eq!(one_way.get_total(0), board(1, true));
+    // a range's own steps, of a board that is not turned round
+    assert_eq!(one_way.sum_range(1, 2), board(2, false));
+    assert_eq!(the_other.sum_range(1, 2), board(1, true));
+}
+
+/// A run adds its value as many times over as it is long: for an
+/// accumulator that adds so in a way of its own (`Flags`), and for one
+/// that adds as the trait gives it, one time after another (`Board`).
+#[test]
+fn a_run_adds_its_value_times_over() {
+    let step = Step(1 << 33 | 5);
+    for n in [0usize, 1, 2, 3, 64, 1000, 65_537] {
+        let mut open = Flags(0xf0);
+        open.add_times(&Flags(0x3c), n);
+        assert_eq!(open, Flags(if n % 2 == 1 { 0xcc } else { 0xf0 }));
+
+        // a board of the step 15, and the step `n` times
+        let mut steps = vec![Step(15)];
+        steps.resize(n + 1, step);
+        let mut at_once = Step::acc_of(Step(15));
+        let mut one_by_one = at_once.dup();
+        at_once.add_times(&Step::acc_of(step), n);
+        for _ in 0..n {
+            one_by_one.add_acc(&Step::acc_of(step));
+        }
+        assert_eq!(at_once, one_by_one);
+        assert_eq!(at_once, Step::added(&steps));
+        // what was added after the first step, by taking that away
+        one_by_one.sub_acc(&Step::acc_of(Step(15)));
+        assert_eq!(one_by_one, Step::added(&steps[1..]));
+        one_by_one.sub_acc(&Step::added(&steps[1..]));
+        assert_eq!(one_by_one, Board::new_zero());
+
+        // in a column: one run, and runs put in
+        let p = VerifiedAccColumn::<Step>::fill(n, step);
+        for i in [0, 1, n / 2, n, n + 1] {
+            assert_eq!(p.get_prefix(i), Step::added(&steps[1..][..i.min(n)]));
+        }
+        let mut p = VerifiedAccColumn::<Option<Mark>>::new();
+        let run = |count, value| Run { count, value };
+        let runs = [run(n, Some(Mark(9))), run(3, None), run(n, Some(Mark(70)))];
+        p.splice_runs(0, 0, runs);
+        let odd = n % 2 == 1;
+        assert_eq!(p.get_prefix(n), Flags(if odd { 1 << 9 } else { 0 }));
+        assert_eq!(p.get_total(2 * n + 2), Flags(if odd { 0x240 } else { 0 }));
+    }
 }

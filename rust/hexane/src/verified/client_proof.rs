@@ -347,19 +347,40 @@
 //! every summed type is proved of the client's and of its nulls
 //! ([`sums_of_the_clients_own`]).
 //!
+//! An accumulator column adds its values up in a type of the client's
+//! own, whose laws the client proves: [`Flags`], which of 64 kinds of
+//! mark are open, added up of [`Mark`]s that each open a kind or close
+//! it; and [`Board`], the lamps of a board that [`Step`]s change and
+//! turn round, which two steps leave differently in either order
+//! ([`the_order_matters`]). What the column answers is then what its
+//! values add up to in the order it holds them ([`marks_added_up`], by
+//! the client's own unfolding, [`the_acc_of_three`]; and
+//! [`steps_in_order`]), a null adding nothing
+//! ([`a_null_adds_no_mark`]); a range's answer, added after that of
+//! what is before it, is that of what is before its end
+//! ([`a_range_added_after`]), and is found by taking away as well
+//! ([`a_range_by_taking_away`]); whatever loads as a plain column loads
+//! as one ([`load_as_an_acc`]), and a plain column's runs make one
+//! ([`added_up`]); a value put in adds what it says
+//! ([`a_mark_put_in`]); and a column is added up a run at a time
+//! ([`added_by_runs`]). Each function says its part on its own here too
+//! ([`told_by_an_acc_prefix`], [`told_by_an_acc_total`],
+//! [`told_by_an_acc_range`], [`told_by_add_times`]).
+//!
 //! This module exists only while Verus checks the crate.
 
 use super::{
-    after_edit, after_edits, below_at, bytes_below, folded, head_len, head_run, head_run_max,
-    lemma_after_edits, lemma_head_len, lemma_head_run_max, lemma_run_values_add,
-    lemma_run_values_push, lemma_runs_first, lemma_runs_of_values, lemma_sorted, lemma_sum_bound,
-    lemma_sum_mono, lemma_sum_range, lemma_sum_run, lemma_sums_fit, mapped, only, past, refused,
-    run_values, runs_of, scan_of, scan_taken, sorted, sorted_for, sum_of, summed, sums_fit,
-    total_len, total_str_len, window, Get, LenIndex, SumIndex, VAmount, VCodec, VCount, VGet,
-    VIndex, VKeeps, VNewtype, VSpec, VSum, VSummed, VValue, VerifiedColumn, VerifiedDecoder,
-    VerifiedEncoder, VerifiedEncoderState, VerifiedIter, VerifiedIterState, VerifiedPrefixColumn,
-    VerifiedPrefixIter, VerifiedPrefixIterState, VerifiedPrefixSeek, VerifiedPrefixedValue,
-    VerifiedRuns,
+    accumulated, after_edit, after_edits, below_at, bytes_below, folded, head_len, head_run,
+    head_run_max, lemma_acc_cat, lemma_acc_range, lemma_acc_run, lemma_after_edits, lemma_cancel,
+    lemma_head_len, lemma_head_run_max, lemma_run_values_add, lemma_run_values_push,
+    lemma_runs_first, lemma_runs_of_values, lemma_sorted, lemma_sum_bound, lemma_sum_mono,
+    lemma_sum_range, lemma_sum_run, lemma_sums_fit, mapped, only, past, refused, run_values,
+    runs_of, scan_of, scan_taken, sorted, sorted_for, sum_of, summed, sums_fit, times, total_len,
+    total_str_len, window, AccIndex, Get, LenIndex, SumIndex, VAccum, VAccumulated, VAdds, VAmount,
+    VCodec, VCount, VGet, VGroup, VIndex, VKeeps, VNewtype, VSpec, VSum, VSummed, VValue,
+    VerifiedAccColumn, VerifiedColumn, VerifiedDecoder, VerifiedEncoder, VerifiedEncoderState,
+    VerifiedIter, VerifiedIterState, VerifiedPrefixColumn, VerifiedPrefixIter,
+    VerifiedPrefixIterState, VerifiedPrefixSeek, VerifiedPrefixedValue, VerifiedRuns,
 };
 use crate::{Leb128, LoadOpts, PackError, Run};
 use std::cmp::Ordering;
@@ -8156,6 +8177,634 @@ fn sums_of_the_clients_own(
         the_place_of_a_sum::<Meta, Leb128>(col, target),
         summed_by_runs::<Option<Meta>, Leb128>(nullable),
     )
+}
+
+// ── Accumulator columns ─────────────────────────────────────────────────────
+
+/// An accumulator of the client's own: which of 64 kinds of mark are
+/// open, a bit for each. A mark of a kind opens it where it is closed
+/// and closes it where it is open, so two of them add up to the
+/// exclusive or of their bits, and one is taken away from another as it
+/// is added.
+#[derive(Debug, Clone, Copy)]
+#[allow(dead_code)]
+pub struct Flags(pub u64);
+
+impl VGroup for Flags {
+    open spec fn zero() -> Flags {
+        Flags(0)
+    }
+
+    open spec fn plus(a: Flags, b: Flags) -> Flags {
+        Flags(a.0 ^ b.0)
+    }
+
+    open spec fn minus(a: Flags, b: Flags) -> Flags {
+        Flags(a.0 ^ b.0)
+    }
+
+    proof fn lemma_plus(a: Flags, b: Flags, c: Flags) {
+        let (x, y, z) = (a.0, b.0, c.0);
+        assert((x ^ y) ^ z == x ^ (y ^ z) && 0u64 ^ x == x && x ^ 0u64 == x) by (bit_vector);
+    }
+
+    proof fn lemma_minus(a: Flags, b: Flags) {
+        let (x, y) = (a.0, b.0);
+        assert(y ^ (x ^ y) == x) by (bit_vector);
+    }
+}
+
+/// An odd number of copies of some flags add up to the flags, and an
+/// even number of them to none.
+proof fn lemma_flags_times(n: nat, b: Flags)
+    ensures
+        times::<Flags>(n, b) == if n % 2 == 1 {
+            b
+        } else {
+            Flags(0)
+        },
+    decreases n,
+{
+    if n > 0 {
+        lemma_flags_times((n - 1) as nat, b);
+        let x = b.0;
+        assert(0u64 ^ x == x && x ^ x == 0u64) by (bit_vector);
+    }
+}
+
+impl VAccum for Flags {
+    fn new_zero() -> Flags {
+        Flags(0)
+    }
+
+    fn add_acc(&mut self, b: &Flags) {
+        self.0 = self.0 ^ b.0;
+    }
+
+    fn sub_acc(&mut self, b: &Flags) {
+        self.0 = self.0 ^ b.0;
+    }
+
+    fn dup(&self) -> Flags {
+        *self
+    }
+
+    /// A run of a mark adds its flags where the run is of an odd
+    /// number, and nothing where it is of an even one: no loop.
+    fn add_times(&mut self, b: &Flags, n: usize) {
+        proof {
+            lemma_flags_times(n as nat, *b);
+            let x = self.0;
+            assert(x ^ 0u64 == x) by (bit_vector);
+        }
+        if n % 2 == 1 {
+            self.0 = self.0 ^ b.0;
+        }
+    }
+}
+
+/// A value type of the client's own for an accumulator column to add
+/// up: a mark, of the kind that its number says, one of 64. What it
+/// adds is the flag of its kind.
+#[derive(Clone, Copy)]
+#[allow(dead_code)]
+pub struct Mark(pub u64);
+
+impl VNewtype for Mark {
+    type Base = u64;
+
+    open spec fn base(v: Mark) -> u64 {
+        v.0
+    }
+
+    proof fn lemma_base(v: Mark, w: Mark) {
+    }
+
+    fn to_base(self) -> u64 {
+        self.0
+    }
+
+    fn from_base(b: u64) -> Result<Mark, PackError> {
+        Ok(Mark(b))
+    }
+}
+
+impl VAdds for Mark {
+    type Acc = Flags;
+
+    open spec fn adds_of(v: Mark) -> Flags {
+        Flags(1u64 << (v.0 % 64))
+    }
+
+    fn acc_of(v: Mark) -> Flags {
+        Flags(1u64 << (v.0 % 64))
+    }
+}
+
+/// The flag of a mark's kind: what the mark adds.
+#[allow(dead_code)]
+spec fn flag_of(v: Mark) -> u64 {
+    1u64 << (v.0 % 64)
+}
+
+/// A row of 64 lamps as it lies across a board that is turned round, or
+/// one that is not: turned round, its two halves change places.
+pub open spec fn across(turned: bool, x: u64) -> u64 {
+    if turned {
+        (x >> 32) | (x << 32)
+    } else {
+        x
+    }
+}
+
+/// [`across`], computed.
+#[allow(dead_code)]
+fn put_across(turned: bool, x: u64) -> (r: u64)
+    ensures
+        r == across(turned, x),
+{
+    if turned {
+        (x >> 32) | (x << 32)
+    } else {
+        x
+    }
+}
+
+/// An accumulator whose sums depend on the order: a board of 64 lamps,
+/// which of them are lit and whether the board is turned round. A step
+/// changes some lamps and may turn the board round; a step taken after
+/// the board is turned round changes the lamps that lie across from
+/// its own. So a step that turns the board and one that changes a lamp
+/// leave another lamp lit in one order than in the other.
+#[derive(Debug, Clone, Copy)]
+#[allow(dead_code)]
+pub struct Board {
+    pub lit: u64,
+    pub turned: bool,
+}
+
+impl VGroup for Board {
+    open spec fn zero() -> Board {
+        Board { lit: 0, turned: false }
+    }
+
+    open spec fn plus(a: Board, b: Board) -> Board {
+        Board { lit: a.lit ^ across(a.turned, b.lit), turned: a.turned != b.turned }
+    }
+
+    open spec fn minus(a: Board, b: Board) -> Board {
+        Board { lit: across(b.turned, a.lit ^ b.lit), turned: a.turned != b.turned }
+    }
+
+    proof fn lemma_plus(a: Board, b: Board, c: Board) {
+        let (x, y, z) = (a.lit, b.lit, c.lit);
+        let sy = (y >> 32) | (y << 32);
+        let sz = (z >> 32) | (z << 32);
+        let w = y ^ sz;
+        assert(0u64 ^ x == x && x ^ 0u64 == x && (0u64 >> 32) | (0u64 << 32) == 0u64) by (bit_vector);
+        // neither of the first two turns the board, or the second does
+        assert((x ^ y) ^ z == x ^ (y ^ z) && (x ^ y) ^ sz == x ^ (y ^ sz)) by (bit_vector);
+        // the first does
+        assert((x ^ sy) ^ sz == x ^ (((y ^ z) >> 32) | ((y ^ z) << 32))) by (bit_vector)
+            requires
+                sy == (y >> 32) | (y << 32),
+                sz == (z >> 32) | (z << 32),
+        ;
+        // both do
+        assert((x ^ sy) ^ z == x ^ ((w >> 32) | (w << 32))) by (bit_vector)
+            requires
+                sy == (y >> 32) | (y << 32),
+                sz == (z >> 32) | (z << 32),
+                w == y ^ sz,
+        ;
+    }
+
+    proof fn lemma_minus(a: Board, b: Board) {
+        let (x, y) = (a.lit, b.lit);
+        let w = x ^ y;
+        let s = (w >> 32) | (w << 32);
+        assert(y ^ w == x && y ^ ((s >> 32) | (s << 32)) == x) by (bit_vector)
+            requires
+                w == x ^ y,
+                s == (w >> 32) | (w << 32),
+        ;
+    }
+}
+
+impl VAccum for Board {
+    fn new_zero() -> Board {
+        Board { lit: 0, turned: false }
+    }
+
+    fn add_acc(&mut self, b: &Board) {
+        *self = Board { lit: self.lit ^ put_across(self.turned, b.lit), turned: self.turned != b.turned };
+    }
+
+    fn sub_acc(&mut self, b: &Board) {
+        *self = Board { lit: put_across(b.turned, self.lit ^ b.lit), turned: self.turned != b.turned };
+    }
+
+    fn dup(&self) -> Board {
+        *self
+    }
+
+    // `add_times` is left as the trait gives it: a run adds its step
+    // one time after another
+}
+
+/// A value type of the client's own that a [`Board`] adds up: a step,
+/// which turns the board round where its number is odd, and changes the
+/// lamps that the rest of its number says.
+#[derive(Clone, Copy)]
+#[allow(dead_code)]
+pub struct Step(pub u64);
+
+impl VNewtype for Step {
+    type Base = u64;
+
+    open spec fn base(v: Step) -> u64 {
+        v.0
+    }
+
+    proof fn lemma_base(v: Step, w: Step) {
+    }
+
+    fn to_base(self) -> u64 {
+        self.0
+    }
+
+    fn from_base(b: u64) -> Result<Step, PackError> {
+        Ok(Step(b))
+    }
+}
+
+impl VAdds for Step {
+    type Acc = Board;
+
+    open spec fn adds_of(v: Step) -> Board {
+        Board { lit: v.0 >> 1, turned: v.0 & 1 == 1 }
+    }
+
+    fn acc_of(v: Step) -> Board {
+        Board { lit: v.0 >> 1, turned: v.0 & 1 == 1 }
+    }
+}
+
+/// What one, two and three values add up to, in the order they are in:
+/// a client's own unfolding of [`accumulated`], which it can read.
+#[allow(dead_code)]
+proof fn the_acc_of_three<V: VAccumulated>(a: <V as VSpec>::S, b: <V as VSpec>::S, c: <V as VSpec>::S)
+    ensures
+        accumulated::<V>(seq![a]) == V::adds(a),
+        accumulated::<V>(seq![a, b]) == <V::Acc as VGroup>::plus(V::adds(a), V::adds(b)),
+        accumulated::<V>(seq![a, b, c]) == <V::Acc as VGroup>::plus(
+            <V::Acc as VGroup>::plus(V::adds(a), V::adds(b)),
+            V::adds(c),
+        ),
+{
+    <V::Acc as VGroup>::lemma_plus(V::adds(a), V::adds(a), V::adds(a));
+    assert(accumulated::<V>(Seq::<<V as VSpec>::S>::empty()) == <V::Acc as VGroup>::zero());
+    assert(seq![a].drop_last() =~= Seq::<<V as VSpec>::S>::empty());
+    assert(accumulated::<V>(seq![a]) == V::adds(a));
+    assert(seq![a, b].drop_last() =~= seq![a]);
+    assert(accumulated::<V>(seq![a, b]) == <V::Acc as VGroup>::plus(V::adds(a), V::adds(b)));
+    assert(seq![a, b, c].drop_last() =~= seq![a, b]);
+}
+
+/// Three marks in an accumulator column: before the third, the kinds of
+/// the first two are open, or closed again where they are one kind; and
+/// through it, those of all three.
+#[allow(dead_code)]
+fn marks_added_up(a: Mark, b: Mark, c: Mark) -> (r: (Flags, Flags))
+    ensures
+        r.0 == Flags(flag_of(a) ^ flag_of(b)),
+        r.1 == Flags(flag_of(a) ^ flag_of(b) ^ flag_of(c)),
+{
+    let mut col = VerifiedAccColumn::<Mark>::new();
+    col.push(a);
+    col.push(b);
+    col.push(c);
+    proof {
+        the_acc_of_three::<Mark>(a, b, c);
+        assert(col@ =~= seq![a, b, c]);
+        assert(col@.take(2) =~= seq![a, b]);
+        assert(col@.take(3) =~= seq![a, b, c]);
+    }
+    (col.get_prefix(2), col.get_total(2))
+}
+
+/// A null among the marks adds nothing.
+#[allow(dead_code)]
+fn a_null_adds_no_mark(a: Mark, b: Mark) -> (r: Flags)
+    ensures
+        r == Flags(flag_of(a) ^ flag_of(b)),
+{
+    let mut col = VerifiedAccColumn::<Option<Mark>>::new();
+    col.push(Some(a));
+    col.push(None);
+    col.push(Some(b));
+    proof {
+        the_acc_of_three::<Option<Mark>>(Some(a), None, Some(b));
+        assert(col@ =~= seq![Some(a), None, Some(b)]);
+        assert(col@.take(3) =~= col@);
+        let (x, y) = (flag_of(a), flag_of(b));
+        assert((x ^ 0u64) ^ y == x ^ y) by (bit_vector);
+    }
+    col.get_prefix(3)
+}
+
+/// What `get_prefix` says of an accumulator column, on its own: what
+/// the values before the position add up to, and what all of them do
+/// where the position is past the end. For every type an accumulator
+/// column holds, and every codec.
+#[allow(dead_code)]
+fn told_by_an_acc_prefix<V: VAccumulated + VValue<C>, C: VCodec>(col: &VerifiedAccColumn<V, C>, index: usize) -> (r:
+    V::Acc)
+    ensures
+        index <= col@.len() ==> r == accumulated::<V>(col@.take(index as int)),
+        index >= col@.len() ==> r == accumulated::<V>(col@),
+{
+    col.get_prefix(index)
+}
+
+/// What `get_total` says, on its own: what the values through the
+/// position add up to.
+#[allow(dead_code)]
+fn told_by_an_acc_total<V: VAccumulated + VValue<C>, C: VCodec>(col: &VerifiedAccColumn<V, C>, index: usize) -> (r:
+    V::Acc)
+    ensures
+        index < col@.len() ==> r == accumulated::<V>(col@.take(index + 1)),
+        index >= col@.len() ==> r == accumulated::<V>(col@),
+{
+    col.get_total(index)
+}
+
+/// What `sum_range` says, on its own: what the values of the range add
+/// up to, of those of them that the column has, and nothing where there
+/// are none.
+#[allow(dead_code)]
+fn told_by_an_acc_range<V: VAccumulated + VValue<C>, C: VCodec>(
+    col: &VerifiedAccColumn<V, C>,
+    start: usize,
+    end: usize,
+) -> (r: V::Acc)
+    ensures
+        start <= end <= col@.len() ==> r == accumulated::<V>(col@.subrange(start as int, end as int)),
+        start <= col@.len() <= end ==> r == accumulated::<V>(col@.subrange(start as int, col@.len() as int)),
+        start >= end || start >= col@.len() ==> r == <V::Acc as VGroup>::zero(),
+{
+    col.sum_range(start, end)
+}
+
+/// What `add_times` says, on its own: the accumulator with `b` added
+/// `n` times over, for every accumulator, whether it adds them as the
+/// trait gives it or in a way of its own.
+#[allow(dead_code)]
+fn told_by_add_times<A: VAccum>(a: &mut A, b: &A, n: usize)
+    ensures
+        *final(a) == A::plus(*old(a), times::<A>(n as nat, *b)),
+{
+    a.add_times(b, n);
+}
+
+/// What an accumulator's own functions say, each on its own, for every
+/// accumulator: what a client that is given one counts on. Here, that
+/// a new one is what no values add up to.
+#[allow(dead_code)]
+fn told_by_new_zero<A: VAccum>() -> (r: A)
+    ensures
+        r == A::zero(),
+{
+    A::new_zero()
+}
+
+/// What `add_acc` says, on its own: the accumulator, and then `b`.
+#[allow(dead_code)]
+fn told_by_add_acc<A: VAccum>(a: &mut A, b: &A)
+    ensures
+        *final(a) == A::plus(*old(a), *b),
+{
+    a.add_acc(b);
+}
+
+/// What `sub_acc` says, on its own: what, added after `b`, gives the
+/// accumulator there was.
+#[allow(dead_code)]
+fn told_by_sub_acc<A: VAccum>(a: &mut A, b: &A)
+    ensures
+        *final(a) == A::minus(*old(a), *b),
+{
+    a.sub_acc(b);
+}
+
+/// What `dup` says, on its own: a copy.
+#[allow(dead_code)]
+fn told_by_dup<A: VAccum>(a: &A) -> (r: A)
+    ensures
+        r == *a,
+{
+    a.dup()
+}
+
+/// What `acc_of` says, on its own: what the value adds, for every type
+/// of a client's that says it.
+#[allow(dead_code)]
+fn told_by_acc_of<T: VAdds>(v: T) -> (r: <T as VAdds>::Acc)
+    ensures
+        r == T::adds_of(v),
+{
+    T::acc_of(v)
+}
+
+/// Something added to an accumulator, and what there was taken away
+/// again: what is left is what was added, whatever the accumulator and
+/// whether or not it adds the same in either order. What is taken away
+/// is what was there first.
+#[allow(dead_code)]
+fn added_then_taken_away<A: VAccum>(a: &A, b: &A) -> (r: A)
+    ensures
+        r == *b,
+{
+    let mut r = a.dup();
+    r.add_acc(b);
+    r.sub_acc(a);
+    proof {
+        A::lemma_minus(A::plus(*a, *b), *a);
+        lemma_cancel::<A>(*a, r, *b);
+    }
+    r
+}
+
+/// What the values before a range add up to, and then what those of the
+/// range do, is what those before its end do: the three answers of a
+/// column agree, whatever the accumulator and in the order it adds.
+#[allow(dead_code)]
+fn a_range_added_after<V: VAccumulated + VValue<C>, C: VCodec>(
+    col: &VerifiedAccColumn<V, C>,
+    start: usize,
+    end: usize,
+) -> (r: (V::Acc, V::Acc, V::Acc))
+    requires
+        start <= end <= col@.len(),
+    ensures
+        <V::Acc as VGroup>::plus(r.0, r.1) == r.2,
+        r.2 == accumulated::<V>(col@.take(end as int)),
+{
+    proof {
+        lemma_acc_range::<V>(col@, start as int, end as int);
+    }
+    (col.get_prefix(start), col.sum_range(start, end), col.get_prefix(end))
+}
+
+/// What a range adds up to, found by taking away: what the values
+/// before its start add up to, taken from what those before its end do.
+/// It is what `sum_range` answers, by the laws of the accumulator
+/// alone.
+#[allow(dead_code)]
+fn a_range_by_taking_away<V: VAccumulated + VValue<C>, C: VCodec>(
+    col: &VerifiedAccColumn<V, C>,
+    start: usize,
+    end: usize,
+) -> (r: V::Acc)
+    requires
+        start <= end <= col@.len(),
+    ensures
+        r == accumulated::<V>(col@.subrange(start as int, end as int)),
+{
+    let before = col.get_prefix(start);
+    let mut r = col.get_prefix(end);
+    r.sub_acc(&before);
+    proof {
+        lemma_acc_range::<V>(col@, start as int, end as int);
+        <V::Acc as VGroup>::lemma_minus(accumulated::<V>(col@.take(end as int)), before);
+        lemma_cancel::<V::Acc>(before, r, accumulated::<V>(col@.subrange(start as int, end as int)));
+    }
+    r
+}
+
+/// Nothing overflows in an accumulator column: bytes load as one
+/// wherever they load as a plain column, with the values a plain column
+/// would have of them.
+#[allow(dead_code)]
+fn load_as_an_acc<V: VAccumulated + VValue<C>, C: VCodec>(bytes: &[u8]) -> (r: Option<VerifiedAccColumn<V, C>>)
+    ensures
+        VerifiedColumn::<V, C>::loadable(bytes@) ==> r is Some,
+        r matches Some(c) ==> c@ == VerifiedColumn::<V, C>::values(bytes@),
+{
+    load_as_a_kind::<V, C, AccIndex>(bytes)
+}
+
+/// A plain column's values as an accumulator column, made of its runs:
+/// there is one of any values.
+#[allow(dead_code)]
+fn added_up<V: VAccumulated + VValue<C>, C: VCodec>(plain: &VerifiedColumn<V, C>) -> (r: VerifiedAccColumn<V, C>)
+    ensures
+        r@ == plain@,
+{
+    copied_by_runs::<V, C, LenIndex, AccIndex>(plain)
+}
+
+/// A mark put in at a position of a column: the kinds open through it
+/// are those that were open before the position, with the mark's kind
+/// opened, or closed where it was open.
+#[allow(dead_code)]
+fn a_mark_put_in(col: &mut VerifiedAccColumn<Mark>, at: usize, v: Mark) -> (r: Flags)
+    requires
+        at <= old(col)@.len(),
+    ensures
+        final(col)@ == old(col)@.insert(at as int, v),
+        r == Flags(accumulated::<Mark>(old(col)@.take(at as int)).0 ^ flag_of(v)),
+{
+    col.insert(at, v);
+    proof {
+        assert(col@.take(at + 1).drop_last() =~= old(col)@.take(at as int));
+        assert(col@.take(at + 1).last() == v);
+    }
+    col.get_total(at)
+}
+
+/// What a column's values add up to, added a run at a time: a run adds
+/// what its value does, as many times over as the run is long, which is
+/// the accumulator's to do in one step where it has a shorter way. For
+/// every type of a client's that says what its values add.
+#[allow(dead_code)]
+fn added_by_runs<T: VAdds, C: VCodec>(col: &VerifiedAccColumn<T, C>) -> (r: <T as VAdds>::Acc)
+    ensures
+        r == accumulated::<T>(col@),
+{
+    let it = col.iter();
+    let ghost all = it.items();
+    let ghost rs = runs_of(all);
+    proof {
+        it.lemma_items_len();
+        lemma_runs_of_values(all);
+        assert(run_values(rs.take(0)).len() == 0);
+    }
+    let mut acc = <<T as VAdds>::Acc as VAccum>::new_zero();
+    for run in at: it.runs()
+        invariant
+            at.seq() == rs,
+            acc == accumulated::<T>(run_values(rs.take(at.index()))),
+    {
+        proof {
+            let done = rs.take(at.index());
+            let more = Seq::new(run.count as nat, |_i: int| run.value.sv());
+            assert(rs.take(at.index() + 1) =~= done.push(run));
+            lemma_run_values_push(done, run);
+            lemma_acc_cat::<T>(run_values(done), more);
+            lemma_acc_run::<T>(run.count as nat, run.value.sv());
+        }
+        let b = T::acc_of(run.value);
+        acc.add_times(&b, run.count);
+    }
+    proof {
+        assert(rs.take(rs.len() as int) =~= rs);
+    }
+    acc
+}
+
+/// Two accumulators need not add up to the same in either order: a
+/// board turned round and then a lamp changed is not the board with the
+/// lamp changed and then turned round.
+#[allow(dead_code)]
+proof fn the_order_matters()
+    ensures
+        exists|a: Board, b: Board| Board::plus(a, b) != Board::plus(b, a),
+{
+    let a = Board { lit: 1, turned: true };
+    let b = Board { lit: 2, turned: false };
+    assert(1u64 ^ ((2u64 >> 32) | (2u64 << 32)) == 0x2_0000_0001u64 && 2u64 ^ 1u64 == 3u64) by (bit_vector);
+    assert(Board::plus(a, b) != Board::plus(b, a));
+}
+
+/// The same two steps in a column, in either order: an accumulator
+/// column adds its values in the order it holds them, and here the two
+/// orders leave different lamps lit.
+#[allow(dead_code)]
+fn steps_in_order() -> (r: (Board, Board))
+    ensures
+        r.0 == (Board { lit: 0x2_0000_0001, turned: true }),
+        r.1 == (Board { lit: 3, turned: true }),
+{
+    let turn = Step(3);
+    let light = Step(4);
+    let mut one = VerifiedAccColumn::<Step>::new();
+    one.push(turn);
+    one.push(light);
+    let mut other = VerifiedAccColumn::<Step>::new();
+    other.push(light);
+    other.push(turn);
+    proof {
+        the_acc_of_three::<Step>(turn, light, turn);
+        the_acc_of_three::<Step>(light, turn, turn);
+        assert(one@ =~= seq![turn, light]);
+        assert(other@ =~= seq![light, turn]);
+        assert(one@.take(2) =~= seq![turn, light]);
+        assert(other@.take(2) =~= seq![light, turn]);
+        assert(3u64 >> 1 == 1u64 && 3u64 & 1 == 1u64 && 4u64 >> 1 == 2u64 && 4u64 & 1 == 0u64) by (bit_vector);
+        assert(1u64 ^ ((2u64 >> 32) | (2u64 << 32)) == 0x2_0000_0001u64 && 2u64 ^ 1u64 == 3u64) by (bit_vector);
+    }
+    (one.get_prefix(2), other.get_prefix(2))
 }
 
 } // verus!
