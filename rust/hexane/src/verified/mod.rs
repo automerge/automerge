@@ -132,6 +132,19 @@
 //! the iterator. [`get_prefixed`](VerifiedColumn::get_prefixed) is one
 //! value read so.
 //!
+//! The iterator reads by runs too
+//! ([`next_run`](VerifiedPrefixIter::next_run)), and reads on to a
+//! value it is asked for by count
+//! ([`delta_nth`](VerifiedPrefixIter::delta_nth)) or by sum
+//! ([`advance_prefix`](VerifiedPrefixIter::advance_prefix), the first
+//! value at which what it has passed adds up to more than a number):
+//! what it finds is a [`VerifiedPrefixSeek`], the value with its
+//! position and with what the values passed over add up to. It is put
+//! away and taken up again as a [`VerifiedPrefixIterState`], which
+//! keeps where the sum counts from; the sum itself is asked of the
+//! column's index on resuming. [`delta`](VerifiedColumn::delta) is the
+//! value at a position with the sum of a range before it.
+//!
 //! That a prefix column refuses the saved columns
 //! [`PrefixColumn`](crate::PrefixColumn) refuses, with the same error,
 //! and that its edits panic where `PrefixColumn`'s do, with the same
@@ -498,7 +511,9 @@ pub use decoder::{
 pub use encoder::{VerifiedEncoder, VerifiedEncoderState};
 pub use kind::{LenIndex, VIndex, VKeeps};
 pub use prefix::{SumIndex, VerifiedPrefixColumn};
-pub use prefix_iter::{VerifiedPrefixIter, VerifiedPrefixedValue};
+pub use prefix_iter::{
+    VerifiedPrefixIter, VerifiedPrefixIterState, VerifiedPrefixSeek, VerifiedPrefixedValue,
+};
 #[cfg(verus_keep_ghost)]
 pub use sums::{
     lemma_sum_bound, lemma_sum_cat, lemma_sum_mono, lemma_sum_range, lemma_sum_run, lemma_sums_fit,

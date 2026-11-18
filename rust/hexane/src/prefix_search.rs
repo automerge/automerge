@@ -987,6 +987,14 @@ pub(crate) fn p_advance<'a, X: Decoders<'a>, B: PrefixOrd<<X::D as Decode>::Item
             final(core).pos - old(core).pos - 1,
             final(core).out::<X>(slabs@),
         ),
+        // a value found leaves the window's end where it was
+        r is Some ==> final(core).pos + final(core).items_left == old(core).pos + old(core).items_left,
+        r is None ==> {
+            &&& final(core).items_left == 0
+            // past the data (the window can run past it), it stops at the end
+            &&& old(core).pos <= crate::fenwick::total(slab_lens(slabs@)) ==> final(core).pos == old(core).pos
+                + old(core).out::<X>(slabs@).len()
+        },
 {
     hide(ICore::wf);
     hide(ICore::out);
@@ -994,6 +1002,9 @@ pub(crate) fn p_advance<'a, X: Decoders<'a>, B: PrefixOrd<<X::D as Decode>::Item
     let ghost s = slabs@;
     let ghost fits = nsum::<_, B>(vals_of::<X>(s)) <= B::pmax();
     let ghost c0 = *core;
+    proof {
+        c0.lemma_out_len::<X>(s);
+    }
     // the sum of the values before the iterator
     let abs = B::add(base, total);
     proof {

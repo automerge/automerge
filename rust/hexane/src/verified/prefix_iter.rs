@@ -8,7 +8,12 @@
 //! [`reset_prefix`](VerifiedPrefixIter::reset_prefix) was last called
 //! (`base_pos`). Each value it gives comes as a
 //! [`VerifiedPrefixedValue`]: the value, the sum through it and the sum
-//! before it.
+//! before it. A move that finds a value ([`delta_nth`], [`advance_prefix`])
+//! gives a [`VerifiedPrefixSeek`]: the value with its sums, where it is,
+//! and what the values passed over on the way add up to.
+//!
+//! [`delta_nth`]: VerifiedPrefixIter::delta_nth
+//! [`advance_prefix`]: VerifiedPrefixIter::advance_prefix
 //!
 //! As with the sums a prefix column answers with, what is proved is
 //! said of integers: the running sum *is* what the column's values from
@@ -16,20 +21,28 @@
 //! of a prefix column fit the type they are kept in.
 //!
 //! The moves are [`PrefixIter`](crate::PrefixIter)'s, the shared ones of
-//! `prefix_core.rs` (`p_next`, `p_nth`, `p_reset`), instantiated with
+//! `prefix_core.rs` (`p_next`, `p_nth`, `p_next_run_from`, `p_delta_nth`,
+//! `p_reset`) and `prefix_search.rs` (`p_advance`), instantiated with
 //! the verified sums: a long move asks the column's index for the slab
 //! to go to, and for what the slabs passed over add up to.
+//!
+//! An iterator's place is kept without the borrow of its column in a
+//! [`VerifiedPrefixIterState`] ([`VerifiedPrefixIter::suspend`]), from
+//! which [`VerifiedPrefixIterState::try_resume`] gives an iterator
+//! again: one whose running sum counts from where the suspended one's
+//! did.
 
 use super::prefix::SumIndex;
 #[cfg(verus_keep_ghost)]
 use super::sums::{
-    lemma_sum_diff, lemma_sum_range, lemma_sums_fit_take, lemma_vsum, summed, sums_fit,
+    lemma_nsum, lemma_sum_diff, lemma_sum_range, lemma_sum_run, lemma_sums_fit,
+    lemma_sums_fit_take, lemma_vsum, summed, sums_fit,
 };
-use super::sums::{SumOf, SumWeight, VSum, VSummed};
+use super::sums::{SumOf, SumWeight, VCount, VSum, VSummed};
 use super::Get;
 #[cfg(verus_keep_ghost)]
-use super::{lemma_svs_sub, VGet, VSpec};
-use super::{VCodec, VValue, VerifiedColumn, VerifiedIter};
+use super::{head_run, lemma_svs_sub, VGet, VSpec};
+use super::{VCodec, VValue, VerifiedColumn, VerifiedIter, VerifiedIterState, VerifiedRuns};
 #[cfg(verus_keep_ghost)]
 use crate::btree::PrefixAggregate;
 use crate::btree::SlabBTree;
@@ -44,8 +57,12 @@ use crate::iter_core::{past, vals_of, window};
 use crate::iter_core::{Decoders, ICore};
 #[cfg(verus_keep_ghost)]
 use crate::prefix_core::{at_sum, before, index_ok, vsum, PrefixWeight};
-use crate::prefix_core::{p_next, p_nth, p_reset};
-use crate::Leb128;
+use crate::prefix_core::{p_delta_nth, p_next, p_next_run_from, p_nth, p_reset};
+use crate::prefix_search::p_advance;
+#[cfg(verus_keep_ghost)]
+use crate::prefix_search::{nsum, PrefixOrd};
+use crate::{Leb128, PackError, Run};
+use std::marker::PhantomData;
 use std::ops::Range;
 use vstd::prelude::*;
 
@@ -123,6 +140,40 @@ impl<'a, V: VSummed> Copy for VerifiedPrefixedValue<'a, V> {
 
 }
 
+// ── A value found, and how far it was ───────────────────────────────────────
+/// What [`VerifiedPrefixIter::delta_nth`],
+/// [`VerifiedPrefixIter::advance_prefix`] and [`VerifiedColumn::delta`]
+/// find: a value with its sums, where it is, and what the values passed
+/// over on the way to it add up to.
+///
+/// With values `[1, 2, 3, 4]`, `delta_nth(2)` of an iterator at the
+/// start finds the `3`: `pos == 2`, `delta == 3` (the `1` and the `2`
+/// passed over), `pv.prefix() == 3` and `pv.total() == 6`.
+pub struct VerifiedPrefixSeek<'a, V: VSummed> {
+    /// The index in the column of the value found. The iterator stands
+    /// just after it.
+    pub pos: usize,
+    /// What the values the move passed over before the value found add
+    /// up to: the running sum before the value, less the running sum as
+    /// it was before the move.
+    pub delta: V::Sum,
+    /// The value found, with the running sums through it and before it.
+    pub pv: VerifiedPrefixedValue<'a, V>,
+}
+
+impl<'a, V: VSummed> Clone for VerifiedPrefixSeek<'a, V> {
+    fn clone(&self) -> (r: Self)
+        ensures
+            r == *self,
+    {
+        *self
+    }
+}
+
+impl<'a, V: VSummed> Copy for VerifiedPrefixSeek<'a, V> {
+
+}
+
 // ── What the running sum is ─────────────────────────────────────────────────
 /// One more value adds its amount to the sum of a range.
 proof fn lemma_step<V: VSummed>(c: Seq<<V as VSpec>::S>, b: int, k: int)
@@ -171,6 +222,25 @@ proof fn lemma_running<'a, V: VSummed + VValue<C>, C: VCodec>(
     lemma_sums_fit_take::<V>(c, pos);
     lemma_sum_range::<V>(c, base_at, pos);
     lemma_sum_diff::<V::Sum>(base, sum, summed::<V>(c.take(base_at)), summed::<V>(c.take(pos)));
+}
+
+/// What the values before index `i` add up to, as the shared cores
+/// keep it, is the sum of the column's first `i` values.
+proof fn lemma_sum_before<'a, V: VSummed + VValue<C>, C: VCodec>(s: Seq<Slab<<V::E as Slabs>::Tail>>, i: int)
+    requires
+        0 <= i <= vals_of::<V::X>(s).len(),
+    ensures
+        vsum::<Get<'a, V>, SumOf<V>>(before::<V::X>(s, i)) == V::Sum::of_int(
+            summed::<V>(<Get<'a, V> as VGet>::svs(vals_of::<V::X>(s)).take(i)),
+        ),
+{
+    let o = vals_of::<V::X>(s);
+    let c = <Get<'a, V> as VGet>::svs(o);
+    let b = before::<V::X>(s, i);
+    assert(b =~= o.subrange(0, i));
+    lemma_svs_sub(o, 0, i);
+    assert(c.subrange(0, i) =~= c.take(i));
+    lemma_vsum::<V>(b);
 }
 
 // ── The iterator ────────────────────────────────────────────────────────────
@@ -365,6 +435,27 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> VerifiedPrefixIter<'a, V, C> {
         lemma_svs_sub(o, k, o.len() as int);
         assert(after.rest() =~= self.rest().skip(k));
         assert(after.items() =~= self.items().skip(k));
+    }
+
+    /// What the first `k` of the values left add up to is what takes
+    /// the running sum from where the iterator stands to `k` values on.
+    proof fn lemma_passed(&self, k: int)
+        requires
+            self.ok(),
+            0 <= k <= self.inner.items().len(),
+        ensures
+            self.rest().take(k) == self.column().subrange(self.spec_pos() as int, self.spec_pos() + k),
+            self.sum_to(self.spec_pos() + k) == self.sum_to(self.spec_pos() as int) + summed::<V>(self.rest().take(k)),
+            V::Sum::lo() <= summed::<V>(self.rest().take(k)) <= V::Sum::hi(),
+    {
+        self.lemma_sums();
+        let c = self.column();
+        let b = self.base_at as int;
+        let p = self.inner.it.pos as int;
+        assert(self.rest().take(k) =~= c.subrange(p, p + k));
+        lemma_sum_range::<V>(c, b, p);
+        lemma_sum_range::<V>(c, b, p + k);
+        lemma_sum_range::<V>(c, p, p + k);
     }
 
     /// The iterator stands in the column, at `base_pos()` or after it,
@@ -781,6 +872,339 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> VerifiedPrefixIter<'a, V, C> {
         }
         r
     }
+
+    /// The next run: the value the iterator gives next, and how many
+    /// times it comes before another value does or the iterator has no
+    /// more ([`VerifiedIter::next_run`]). The iterator moves past the
+    /// whole run. The sums given are those of the run's last value:
+    /// `total()` is the running sum through the run, and `prefix()` the
+    /// sum before its last value.
+    pub fn next_run(&mut self) -> (r: Option<Run<VerifiedPrefixedValue<'a, V>>>)
+        ensures
+            final(self).column() == old(self).column(),
+            final(self).source() == old(self).source(),
+            final(self).base_pos() == old(self).base_pos(),
+            final(self).total().as_int() == old(self).sum_to(final(self).pos() as int),
+            match r {
+                Some(run) => {
+                    &&& head_run(old(self).rest(), run.value.value.sv(), run.count as int)
+                    &&& run.value == old(self).items()[run.count - 1]
+                    &&& run.value.total() == final(self).total()
+                    &&& run.value.total().as_int() == old(self).sum_to(old(self).pos() + run.count)
+                    &&& run.value.prefix().as_int() == old(self).sum_to(old(self).pos() + run.count - 1)
+                    &&& run.value.total().as_int() == old(self).total().as_int() + V::amount(run.value.value.sv())
+                        * run.count
+                    &&& final(self).items() == old(self).items().skip(run.count as int)
+                    &&& final(self).rest() == old(self).rest().skip(run.count as int)
+                    &&& final(self).pos() == old(self).pos() + run.count
+                    &&& final(self).end_pos() == old(self).end_pos()
+                },
+                None => {
+                    &&& old(self).rest().len() == 0
+                    &&& final(self).rest().len() == 0
+                    &&& final(self).pos() == old(self).pos()
+                    &&& final(self).end_pos() == old(self).pos()
+                    &&& final(self).total() == old(self).total()
+                },
+            },
+    {
+        let ghost me = *self;
+        proof {
+            use_type_invariant(&*self);
+            me.lemma_sums();
+            me.inner.it.lemma_out_len::<V::X>(me.inner.slabs@);
+        }
+        let mut it = self.inner.it.dup();
+        let mut sum = self.total;
+        let base = self.base;
+        let max = it.items_left;
+        let r = p_next_run_from::<V::X, SumOf<V>>(&mut it, self.inner.slabs, max, &mut sum, &base);
+        self.put(it, sum, base, self.base_at);
+        proof {
+            use_type_invariant(&*self);
+            self.inner.it.lemma_out_len::<V::X>(self.inner.slabs@);
+        }
+        match r {
+            Some(run) => {
+                let pv = VerifiedPrefixedValue { value: run.value, total: sum };
+                proof {
+                    let o = me.inner.items();
+                    let n = run.count as int;
+                    let v = run.value.sv();
+                    me.lemma_moved(*self, n);
+                    assert(o.take(n)[n - 1] == run.value);
+                    me.lemma_gives(n - 1, pv);
+                    me.lemma_passed(n);
+                    <Get<'a, V> as VGet>::lemma_svs(o);
+                    assert forall|i: int| 0 <= i < n implies #[trigger] me.rest()[i] == v by {
+                        assert(o.take(n)[i] == run.value);
+                    }
+                    if n < o.len() && o[n].sv() == v {
+                        <Get<'a, V> as VGet>::lemma_sv_inj(o[n], run.value);
+                    }
+                    // the run adds its value as many times as it is long
+                    assert(me.rest().take(n) =~= Seq::new(n as nat, |_i: int| v));
+                    lemma_sum_run::<V>(n as nat, v);
+                }
+                Some(Run { count: run.count, value: pv })
+            },
+            None => {
+                proof {
+                    assert(self.inner.items() =~= me.inner.items().skip(0));
+                    me.lemma_moved(*self, 0);
+                }
+                None
+            },
+        }
+    }
+
+    /// An iterator of the runs the iterator has left to give, without
+    /// their sums ([`VerifiedIter::runs`]): what
+    /// [`splice_runs`](VerifiedColumn::splice_runs) takes.
+    pub fn runs(self) -> (r: VerifiedRuns<'a, V, C, SumIndex>)
+        ensures
+            r.iter() == self.plain(),
+    {
+        VerifiedRuns(self.inner)
+    }
+
+    /// The `n`th of the values left, counted from 0, as
+    /// [`nth`](Self::nth) gives it, with where it is and what the `n`
+    /// values passed over before it add up to (`delta`). It and the
+    /// values before it are then given; if there are not that many,
+    /// none is left.
+    pub fn delta_nth(&mut self, n: usize) -> (r: Option<VerifiedPrefixSeek<'a, V>>)
+        ensures
+            n < old(self).rest().len() ==> {
+                &&& r matches Some(seek)
+                &&& seek.pos == old(self).pos() + n
+                &&& seek.pv == old(self).items()[n as int]
+                &&& seek.pv.value.sv() == old(self).rest()[n as int]
+                &&& seek.delta.as_int() == summed::<V>(old(self).rest().take(n as int))
+                &&& seek.pv.total() == final(self).total()
+                &&& seek.pv.total().as_int() == old(self).sum_to(old(self).pos() + n + 1)
+                &&& seek.pv.prefix().as_int() == old(self).sum_to(old(self).pos() + n)
+                &&& seek.pv.prefix().as_int() == old(self).total().as_int() + seek.delta.as_int()
+                &&& seek.pv.total().as_int() == seek.pv.prefix().as_int() + V::amount(seek.pv.value.sv())
+                &&& final(self).items() == old(self).items().skip(n + 1)
+                &&& final(self).rest() == old(self).rest().skip(n + 1)
+                &&& final(self).pos() == old(self).pos() + n + 1
+                &&& final(self).end_pos() == old(self).end_pos()
+            },
+            n >= old(self).rest().len() ==> {
+                &&& r is None
+                &&& final(self).rest().len() == 0
+                &&& final(self).pos() == old(self).pos() + old(self).rest().len()
+                &&& final(self).end_pos() == final(self).pos()
+            },
+            final(self).column() == old(self).column(),
+            final(self).source() == old(self).source(),
+            final(self).base_pos() == old(self).base_pos(),
+            final(self).total().as_int() == old(self).sum_to(final(self).pos() as int),
+    {
+        let ghost me = *self;
+        proof {
+            use_type_invariant(&*self);
+            me.lemma_sums();
+            me.inner.it.lemma_out_len::<V::X>(me.inner.slabs@);
+        }
+        let mut it = self.inner.it.dup();
+        let mut sum = self.total;
+        let base = self.base;
+        let r = p_delta_nth::<V::X, SumOf<V>>(&mut it, self.inner.slabs, self.ix, n, &mut sum, &base);
+        self.put(it, sum, base, self.base_at);
+        proof {
+            use_type_invariant(&*self);
+        }
+        match r {
+            Some((value, delta)) => {
+                let pv = VerifiedPrefixedValue { value, total: sum };
+                proof {
+                    let s = me.inner.slabs@;
+                    let p = me.inner.it.pos as int;
+                    me.lemma_moved(*self, n + 1);
+                    me.lemma_gives(n as int, pv);
+                    me.lemma_passed(n as int);
+                    // `delta` is what the values passed over add up to
+                    lemma_running::<V, C>(s, vsum::<Get<'a, V>, SumOf<V>>(before::<V::X>(s, p)), delta, p, p + n);
+                }
+                Some(VerifiedPrefixSeek { pos: self.inner.it.pos - 1, delta, pv })
+            },
+            None => {
+                proof {
+                    let k = me.inner.items().len() as int;
+                    assert(self.inner.items() =~= me.inner.items().skip(k));
+                    me.lemma_moved(*self, k);
+                }
+                None
+            },
+        }
+    }
+
+    /// Where the iterator stands, where its window ends and where its
+    /// running sum counts from, to keep without the borrow of the
+    /// column: [`VerifiedPrefixIterState::try_resume`] gives an iterator
+    /// from it.
+    ///
+    /// The state fits the column the iterator reads: resumed on that
+    /// column, as it is, it gives an iterator that stands where this one
+    /// does, with the same values left and the same running sum.
+    pub fn suspend(&self) -> (s: VerifiedPrefixIterState<V>)
+        ensures
+            s.pos() == self.pos(),
+            s.end_pos() == self.end_pos(),
+            s.base_pos() == self.base_pos(),
+            self.rest() == window(self.column(), s.pos() as int, s.end_pos() as int),
+            match self.source() {
+                Some(c) => s.fits(&c),
+                None => true,
+            },
+    {
+        proof {
+            use_type_invariant(self);
+            self.lemma_sums();
+        }
+        VerifiedPrefixIterState { inner: self.inner.suspend(), base_at: self.base_at, _phantom: PhantomData }
+    }
+}
+
+/// Reading on until the running sum is past a limit: for sums that are
+/// counts, which no value takes down.
+impl<'a, V: VSummed + VValue<C>, C: VCodec> VerifiedPrefixIter<'a, V, C> where V::Sum: VCount {
+    /// The sums the search counts by are those of the values left.
+    proof fn lemma_counted(&self, j: int)
+        requires
+            0 <= j <= self.inner.items().len(),
+        ensures
+            nsum::<Get<'a, V>, SumOf<V>>(self.inner.items().take(j)) == summed::<V>(self.rest().take(j)),
+    {
+        let o = self.inner.items();
+        lemma_nsum::<V>(o.take(j));
+        lemma_svs_sub(o, 0, j);
+    }
+
+    /// Move on to the first of the values left with which the values
+    /// given from here on add up to more than `n`, and past it: it is
+    /// given with its sums, where it is, and what the values passed
+    /// over before it add up to (`delta`), which is `n` at most. If all
+    /// the values left add up to `n` or less, the iterator gives them
+    /// all, and none is found.
+    ///
+    /// Few of the values passed over are looked at: the column's index
+    /// is asked for the slab the sum is passed in.
+    ///
+    /// An iterator of no column (`default()`) has no index to ask: it
+    /// finds nothing, and its window is closed where it stands.
+    /// ([`PrefixIter`](crate::PrefixIter)'s leaves the window of such
+    /// an iterator as it is.)
+    pub fn advance_prefix(&mut self, n: V::Sum) -> (r: Option<VerifiedPrefixSeek<'a, V>>)
+        ensures
+            final(self).column() == old(self).column(),
+            final(self).source() == old(self).source(),
+            final(self).base_pos() == old(self).base_pos(),
+            final(self).total().as_int() == old(self).sum_to(final(self).pos() as int),
+            match r {
+                Some(seek) => {
+                    let k = seek.pos - old(self).pos();
+                    &&& 0 <= k < old(self).rest().len()
+                    &&& seek.pv == old(self).items()[k]
+                    &&& seek.pv.value.sv() == old(self).rest()[k]
+                    &&& n.as_int() < summed::<V>(old(self).rest().take(k + 1))
+                    &&& forall|j: int| 0 <= j <= k ==> summed::<V>(#[trigger] old(self).rest().take(j)) <= n.as_int()
+                    &&& seek.delta.as_int() == summed::<V>(old(self).rest().take(k))
+                    &&& seek.pv.total() == final(self).total()
+                    &&& seek.pv.total().as_int() == old(self).sum_to(seek.pos + 1)
+                    &&& seek.pv.prefix().as_int() == old(self).sum_to(seek.pos as int)
+                    &&& seek.pv.prefix().as_int() == old(self).total().as_int() + seek.delta.as_int()
+                    &&& seek.pv.total().as_int() == seek.pv.prefix().as_int() + V::amount(seek.pv.value.sv())
+                    &&& final(self).items() == old(self).items().skip(k + 1)
+                    &&& final(self).rest() == old(self).rest().skip(k + 1)
+                    &&& final(self).pos() == seek.pos + 1
+                    &&& final(self).end_pos() == old(self).end_pos()
+                },
+                None => {
+                    &&& summed::<V>(old(self).rest()) <= n.as_int()
+                    &&& final(self).rest().len() == 0
+                    &&& final(self).pos() == old(self).pos() + old(self).rest().len()
+                    &&& final(self).end_pos() == final(self).pos()
+                },
+            },
+    {
+        let ghost me = *self;
+        let ghost s = self.inner.slabs@;
+        proof {
+            use_type_invariant(&*self);
+            me.lemma_sums();
+            me.inner.it.lemma_out_len::<V::X>(s);
+            V::Sum::lemma_count();
+            V::Sum::lemma_as_int(n);
+        }
+        let ix = match self.ix {
+            Some(ix) => ix,
+            None => {
+                // An iterator of no column: there is nothing to find.
+                proof {
+                    assert(slab_lens(s) =~= Seq::<nat>::empty());
+                    assert(me.rest() =~= Seq::empty());
+                }
+                let at = self.inner.it.pos;
+                self.set_max(at);
+                return None;
+            },
+        };
+        proof {
+            // the sums of the whole column fit, so the search's do
+            let c = me.column();
+            lemma_nsum::<V>(vals_of::<V::X>(s));
+            lemma_sums_fit_take::<V>(c, c.len() as int);
+            assert(c.take(c.len() as int) =~= c);
+        }
+        let was = self.total;
+        let mut it = self.inner.it.dup();
+        let mut sum = self.total;
+        let base = self.base;
+        let r = p_advance::<V::X, SumOf<V>>(&mut it, self.inner.slabs, ix, &n, &mut sum, &base);
+        self.put(it, sum, base, self.base_at);
+        proof {
+            use_type_invariant(&*self);
+        }
+        let ghost o = me.inner.items();
+        match r {
+            Some(value) => {
+                let pv = VerifiedPrefixedValue::<V> { value, total: sum };
+                let delta = pv.prefix().w_sub(was);
+                proof {
+                    let k = self.inner.it.pos - me.inner.it.pos - 1;
+                    me.lemma_moved(*self, k + 1);
+                    me.lemma_gives(k, pv);
+                    me.lemma_passed(k);
+                    V::Sum::lemma_of_int(summed::<V>(me.rest().take(k)), 0);
+                    me.lemma_counted(k + 1);
+                    assert forall|j: int| 0 <= j <= k implies summed::<V>(#[trigger] me.rest().take(j)) <= n.as_int() by {
+                        me.lemma_counted(j);
+                        if j > 0 {
+                            let i = j - 1;
+                            assert(nsum::<Get<'a, V>, SumOf<V>>(o.take(i + 1)) <= <SumOf<V> as PrefixOrd<Get<'a, V>>>::pnum(n));
+                        } else {
+                            assert(me.rest().take(0) =~= Seq::empty());
+                        }
+                    }
+                }
+                Some(VerifiedPrefixSeek { pos: self.inner.it.pos - 1, delta, pv })
+            },
+            None => {
+                proof {
+                    let k = o.len() as int;
+                    assert(self.inner.items() =~= o.skip(k));
+                    me.lemma_moved(*self, k);
+                    me.lemma_counted(k);
+                    assert(o.take(k) =~= o);
+                    assert(me.rest().take(k) =~= me.rest());
+                }
+                None
+            },
+        }
+    }
 }
 
 #[cfg(verus_keep_ghost)]
@@ -980,6 +1404,210 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> ExactSizeIterator for VerifiedPrefix
     }
 }
 
+impl<'a, V: VSummed + VValue<C>, C: VCodec> Clone for VerifiedPrefixIter<'a, V, C> {
+    /// An iterator of its own that stands where this one does, with the
+    /// same values left and the same running sum.
+    fn clone(&self) -> (r: Self)
+        ensures
+            r.items() == self.items(),
+            r.rest() == self.rest(),
+            r.column() == self.column(),
+            r.source() == self.source(),
+            r.pos() == self.pos(),
+            r.end_pos() == self.end_pos(),
+            r.base_pos() == self.base_pos(),
+            r.total() == self.total(),
+    {
+        proof {
+            use_type_invariant(self);
+            use_type_invariant(&self.inner);
+        }
+        let r = VerifiedPrefixIter {
+            ix: self.ix,
+            inner: VerifiedIter { it: self.inner.it.dup(), slabs: self.inner.slabs, col: self.inner.col },
+            total: self.total,
+            base: self.base,
+            base_at: self.base_at,
+        };
+        proof {
+            assert(r.items() =~= self.items());
+        }
+        r
+    }
+}
+
+impl<'a, V: VSummed + VValue<C>, C: VCodec> Default for VerifiedPrefixIter<'a, V, C> {
+    /// An iterator with nothing to give.
+    fn default() -> (r: Self)
+        ensures
+            r.items().len() == 0,
+            r.rest().len() == 0,
+            r.column().len() == 0,
+            r.source() is None,
+            r.pos() == 0,
+            r.end_pos() == 0,
+            r.base_pos() == 0,
+            r.total().as_int() == 0,
+    {
+        let inner: VerifiedIter<'a, V, C, SumIndex> = VerifiedIter { it: ICore::empty::<V::X>(), slabs: &[], col: None };
+        let zero = <V::Sum as VSum>::zero();
+        proof {
+            let s = inner.slabs@;
+            <Get<'a, V> as VGet>::lemma_svs(inner.items());
+            inner.it.lemma_out_len::<V::X>(s);
+            assert(slab_lens(s) =~= Seq::<nat>::empty());
+            <Get<'a, V> as VGet>::lemma_svs(vals_of::<V::X>(s));
+            assert(before::<V::X>(s, 0) =~= Seq::<Get<'a, V>>::empty());
+            <SumWeight<V::Sum> as PrefixWeight>::lemma_prefix_add(zero, zero, zero);
+            V::Sum::lemma_as_int(zero);
+            V::Sum::lemma_of_int(0, 0);
+            V::lemma_safe();
+            lemma_sums_fit::<V>(<Get<'a, V> as VGet>::svs(vals_of::<V::X>(s)));
+        }
+        VerifiedPrefixIter { ix: None, inner, total: zero, base: zero, base_at: 0 }
+    }
+}
+
+// ── A place to come back to ─────────────────────────────────────────────────
+/// Where a [`VerifiedPrefixIter`] stood, where its window ended and
+/// where its running sum counted from, kept without the borrow of the
+/// column: [`VerifiedPrefixIter::suspend`] gives it, and
+/// [`try_resume`](Self::try_resume) an iterator from it.
+///
+/// It holds a [`VerifiedIterState`] (`plain()`) and `base_pos()`. The
+/// sums themselves are not kept: `try_resume` asks the column for them.
+pub struct VerifiedPrefixIterState<V: VSummed> {
+    inner: VerifiedIterState,
+    /// Where the running sum counts from.
+    base_at: usize,
+    _phantom: PhantomData<V>,
+}
+
+impl<V: VSummed> VerifiedPrefixIterState<V> {
+    /// The sum counts from the iterator's place or before it.
+    #[verifier::type_invariant]
+    spec fn inv(&self) -> bool {
+        self.base_at <= self.inner.pos
+    }
+
+    /// The state without where the sum counts from: that of a
+    /// [`VerifiedIter`] standing where the iterator stood, with its
+    /// window.
+    pub closed spec fn plain(&self) -> VerifiedIterState {
+        self.inner
+    }
+
+    /// Where the iterator stood: its `pos()`.
+    pub open spec fn pos(&self) -> usize {
+        self.plain().pos()
+    }
+
+    /// Where the iterator's window ended: its `end_pos()`.
+    pub open spec fn end_pos(&self) -> usize {
+        self.plain().end_pos()
+    }
+
+    /// The count of edits of the column the state was taken of
+    /// (`VerifiedColumn::edits`).
+    pub open spec fn edits(&self) -> usize {
+        self.plain().edits()
+    }
+
+    /// Where the iterator's running sum counted from: its `base_pos()`.
+    pub closed spec fn base_pos(&self) -> usize {
+        self.base_at
+    }
+
+    /// The state is a place in `column` as it is
+    /// ([`VerifiedIterState`]'s `fits`):
+    /// [`try_resume`](Self::try_resume) gives an iterator exactly then.
+    pub open spec fn fits<C: VCodec>(&self, column: &VerifiedColumn<V, C, SumIndex>) -> bool where V: VValue<C> {
+        self.plain().fits(column)
+    }
+
+    /// A state fits only a column that counts the edits it does: one
+    /// edited since the state was taken is refused
+    /// ([`VerifiedIterState`]'s `lemma_fits`).
+    pub proof fn lemma_fits<C: VCodec>(&self, column: &VerifiedColumn<V, C, SumIndex>) where V: VValue<C>
+        requires
+            self.fits(column),
+        ensures
+            self.edits() == column.edits(),
+    {
+        self.plain().lemma_fits(column);
+    }
+
+    /// The running sum counts from the iterator's place or before it.
+    pub proof fn lemma_base(tracked &self)
+        ensures
+            self.base_pos() <= self.pos(),
+    {
+        use_type_invariant(self);
+    }
+
+    /// An iterator of `column` that stands where the suspended one
+    /// stood, with its window, and whose running sum counts from where
+    /// that one's did, if the state fits the column (`fits`); an error
+    /// ([`PackError::InvalidResume`]) if it does not
+    /// ([`VerifiedIterState::try_resume`]).
+    ///
+    /// The iterator given is one of `column` whatever column the state
+    /// was taken of, and its running sum is `column`'s: what the values
+    /// of `column` from `base_pos()` up to the iterator add up to, which
+    /// the column's index gives.
+    ///
+    /// Panics, as [`PrefixColumn`](crate::PrefixColumn)'s does, where an
+    /// edit's panic left `column` without its parts and the state would
+    /// fit it.
+    pub fn try_resume<'a, C: VCodec>(&self, column: &'a VerifiedColumn<V, C, SumIndex>) -> (r: Result<
+        VerifiedPrefixIter<'a, V, C>,
+        PackError,
+    >) where V: VValue<C>
+        ensures
+            r is Ok <==> self.fits(column),
+            r is Ok ==> self.edits() == column.edits(),
+            r matches Ok(it) ==> {
+                &&& it.source() == Some(*column)
+                &&& it.column() == column@
+                &&& it.pos() == self.pos()
+                &&& it.rest() == window(column@, self.pos() as int, self.end_pos() as int)
+                &&& it.end_pos() == self.end_pos() || (self.pos() == column@.len() && it.end_pos() == self.pos())
+                &&& it.base_pos() == self.base_pos()
+                &&& it.total().as_int() == summed::<V>(column@.subrange(self.base_pos() as int, self.pos() as int))
+            },
+    {
+        proof {
+            use_type_invariant(self);
+        }
+        let inner = match self.inner.try_resume(column) {
+            Ok(it) => it,
+            Err(e) => {
+                return Err(e);
+            },
+        };
+        let ix = column.sum_index();
+        let base = column.get_prefix(self.base_at);
+        let sum = column.get_prefix(self.inner.pos).w_sub(base);
+        proof {
+            use_type_invariant(&inner);
+            let s = inner.slabs@;
+            assert(s == column.core.slabs_spec());
+            inner.it.lemma_out_len::<V::X>(s);
+            lemma_sum_before::<V, C>(s, self.base_at as int);
+            lemma_sum_before::<V, C>(s, self.inner.pos as int);
+            let a = summed::<V>(column@.take(self.base_at as int));
+            let b = summed::<V>(column@.take(self.inner.pos as int));
+            V::Sum::lemma_as_int(base);
+            V::Sum::lemma_of_int(b - a, a);
+        }
+        let it = VerifiedPrefixIter { ix, inner, total: sum, base, base_at: self.base_at };
+        proof {
+            it.lemma_sums();
+        }
+        Ok(it)
+    }
+}
+
 // ── The column's ────────────────────────────────────────────────────────────
 /// A prefix column's values with their running sums.
 impl<V: VSummed + VValue<C>, C: VCodec> VerifiedColumn<V, C, SumIndex> {
@@ -1051,6 +1679,36 @@ impl<V: VSummed + VValue<C>, C: VCodec> VerifiedColumn<V, C, SumIndex> {
         let mut it = self.prefix_iter();
         it.nth(index)
     }
+
+    /// The value at `to` with its sums, as
+    /// [`get_prefixed`](Self::get_prefixed) gives them, and what the
+    /// values `from..to` before it add up to (`delta`); `None` if `to`
+    /// is past the end. `from` is to be `to` at most.
+    pub fn delta(&self, from: usize, to: usize) -> (r: Option<VerifiedPrefixSeek<'_, V>>)
+        requires
+            from <= to,
+        ensures
+            to < self@.len() ==> {
+                &&& r matches Some(seek)
+                &&& seek.pos == to
+                &&& seek.pv.value.sv() == self@[to as int]
+                &&& seek.delta.as_int() == summed::<V>(self@.subrange(from as int, to as int))
+                &&& seek.pv.total().as_int() == summed::<V>(self@.take(to + 1))
+                &&& seek.pv.prefix().as_int() == summed::<V>(self@.take(to as int))
+                &&& seek.pv.total().as_int() == seek.pv.prefix().as_int() + V::amount(seek.pv.value.sv())
+            },
+            to >= self@.len() ==> r is None,
+    {
+        let mut it = self.prefix_iter();
+        it.advance_to(from);
+        let r = it.delta_nth(to - from);
+        proof {
+            if to < self@.len() {
+                assert(self@.skip(from as int).take(to - from) =~= self@.subrange(from as int, to as int));
+            }
+        }
+        r
+    }
 }
 
 } // verus!
@@ -1073,5 +1731,37 @@ where
 {
     fn eq(&self, other: &Self) -> bool {
         self.value == other.value && self.total == other.total
+    }
+}
+
+impl<'a, V: VSummed> std::fmt::Debug for VerifiedPrefixSeek<'a, V>
+where
+    Get<'a, V>: std::fmt::Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("VerifiedPrefixSeek")
+            .field("pos", &self.pos)
+            .field("delta", &self.delta)
+            .field("pv", &self.pv)
+            .finish()
+    }
+}
+
+impl<'a, V: VSummed> PartialEq for VerifiedPrefixSeek<'a, V>
+where
+    Get<'a, V>: PartialEq,
+    V::Sum: PartialEq,
+{
+    fn eq(&self, other: &Self) -> bool {
+        self.pos == other.pos && self.delta == other.delta && self.pv == other.pv
+    }
+}
+
+impl<'a, V: VSummed + VValue<C>, C: VCodec> std::fmt::Debug for VerifiedPrefixIter<'a, V, C> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("VerifiedPrefixIter")
+            .field("total", &self.total)
+            .field("pos", &self.inner.pos())
+            .finish()
     }
 }

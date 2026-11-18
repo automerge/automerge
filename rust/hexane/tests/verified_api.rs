@@ -13,11 +13,12 @@
 #![allow(clippy::iter_nth_zero)]
 
 use hexane::encoder::{BoolEncoder, BoolEncoderState, RleEncoder, RleEncoderState};
-use hexane::prefix::PrefixWeightFn;
+use hexane::prefix::{PrefixSeek, PrefixWeightFn};
 use hexane::verified::{
     refused, Get, LenIndex, SumIndex, VNewtype, VSummed, VValue, VerifiedColumn, VerifiedDecoder,
     VerifiedEncoder, VerifiedEncoderState, VerifiedIter, VerifiedIterState, VerifiedPrefixColumn,
-    VerifiedPrefixIter, VerifiedPrefixedValue, VerifiedRuns,
+    VerifiedPrefixIter, VerifiedPrefixIterState, VerifiedPrefixSeek, VerifiedPrefixedValue,
+    VerifiedRuns,
 };
 use hexane::{
     Codec, Column, ColumnEncoding, ColumnValue, ColumnValueRef, Encoder, EncoderApi, IterState,
@@ -8795,4 +8796,559 @@ fn the_iterator_over_long_runs() {
         assert_eq!(x.total(), p.get_prefix(i));
         assert_eq!(new_item(x.next()), old_item(y.next()));
     }
+}
+
+/// A run with the sums of its last value: before that value, and
+/// through it.
+type RunOf<T> = Option<(usize, T, i128, i128)>;
+
+fn new_sum_run<T: Totalled>(run: Option<Run<VerifiedPrefixedValue<'_, T>>>) -> RunOf<T> {
+    run.map(|run| {
+        (
+            run.count,
+            T::keep(run.value.value),
+            T::new_sum(run.value.prefix()),
+            T::new_sum(run.value.total()),
+        )
+    })
+}
+
+fn old_sum_run<T: Totalled>(run: Option<Run<PrefixedValue<'_, T>>>) -> RunOf<T> {
+    run.map(|run| {
+        (
+            run.count,
+            old(run.value.value),
+            T::old_sum(run.value.prefix()),
+            T::old_sum(run.value.total()),
+        )
+    })
+}
+
+/// A value found: where it is, what the values passed over before it add
+/// up to, and the value with its sums.
+type Found<T> = Option<(usize, i128, (T, i128, i128))>;
+
+fn new_found<T: Totalled>(seek: Option<VerifiedPrefixSeek<'_, T>>) -> Found<T> {
+    seek.map(|seek| {
+        (
+            seek.pos,
+            T::new_sum(seek.delta),
+            new_item(Some(seek.pv)).unwrap(),
+        )
+    })
+}
+
+fn old_found<T: Totalled>(seek: Option<PrefixSeek<'_, T>>) -> Found<T> {
+    seek.map(|seek| {
+        (
+            seek.pos,
+            T::old_sum(seek.delta),
+            old_item(Some(seek.pv)).unwrap(),
+        )
+    })
+}
+
+impl<T: Totalled> SumIter<'_, T> {
+    fn next_run(&mut self) -> RunOf<T> {
+        let left = self.left();
+        if left == 0 {
+            // its window ends where it stands
+            self.end = self.pos;
+            return None;
+        }
+        let v = self.model[self.pos].clone();
+        let n = self.model[self.pos..self.pos + left]
+            .iter()
+            .take_while(|x| **x == v)
+            .count();
+        self.pos += n;
+        Some((n, v, self.sum(self.pos - 1), self.sum(self.pos)))
+    }
+
+    fn delta_nth(&mut self, n: usize) -> Found<T> {
+        let from = self.pos;
+        let item = self.nth(n)?;
+        let at = self.pos - 1;
+        Some((at, self.before[at] - self.before[from], item))
+    }
+
+    /// On to the first value with which the values from here on add up
+    /// to more than `n`.
+    fn advance_prefix(&mut self, n: i128) -> Found<T> {
+        let from = self.pos;
+        let over = (0..self.left()).find(|k| self.before[from + k + 1] - self.before[from] > n);
+        self.delta_nth(over.unwrap_or(usize::MAX))
+    }
+}
+
+/// A prefix column's iterator read by runs, moved by a count with what
+/// it passes over summed (`delta_nth`), copied, and stopped and started
+/// again, and the column asked for the sum of a range before a value
+/// (`delta`): as the specifications say, and as `PrefixColumn`'s
+/// iterator does, the two being asked the same at each step and standing
+/// in the same place after it.
+fn check_prefix_runs<T: Totalled>(
+    rng: &mut Rng,
+    p: &VerifiedPrefixColumn<T>,
+    c: &PrefixColumn<T>,
+    model: &[T],
+) {
+    let len = model.len();
+    let before = sums_before(model);
+    // all of it by runs, each with the sums of its last value
+    let (mut x, mut y) = (p.prefix_iter(), c.iter());
+    let mut m = SumIter {
+        model,
+        before: &before,
+        pos: 0,
+        end: len,
+        base: 0,
+    };
+    loop {
+        let want = m.next_run();
+        assert_eq!(new_sum_run(x.next_run()), want);
+        assert_eq!(old_sum_run(y.next_run()), want);
+        assert_eq!(new_place(&x), m.place());
+        assert_eq!(old_place(&y), m.place());
+        if want.is_none() {
+            break;
+        }
+    }
+    for _ in 0..3 {
+        // the runs of a range without their sums: what `splice_runs`
+        // takes
+        let start = rng.below(len + 1);
+        let end = start + rng.below(len - start + 1);
+        let runs: Vec<(usize, T)> = p
+            .prefix_iter_range(start, end)
+            .runs()
+            .map(|run| (run.count, T::keep(run.value)))
+            .collect();
+        let old_runs: Vec<(usize, T)> = c
+            .iter_range(start..end)
+            .runs()
+            .map(|run| (run.count, old(run.value)))
+            .collect();
+        assert_eq!(run_model(&runs), model[start..end]);
+        assert_eq!(runs, old_runs);
+        assert!(runs.windows(2).all(|w| w[0].1 != w[1].1));
+        let mut copy = VerifiedColumn::<T>::new();
+        copy.splice_runs(0, 0, p.prefix_iter_range(start, end).runs());
+        assert_eq!(new_values(&copy), model[start..end]);
+    }
+    // the value at a place, with the sum of a range before it
+    for _ in 0..6 {
+        let to = a_place(rng, len);
+        let from = rng.below(to.min(len) + 1);
+        let want = (to < len).then(|| (to, before[to] - before[from], item_at(model, &before, to)));
+        assert_eq!(new_found(p.delta(from, to)), want);
+        assert_eq!(old_found(c.delta(from, to)), want);
+    }
+    // an iterator of a range, moved about
+    for _ in 0..4 {
+        let start = rng.below(len + 1);
+        let end = start + rng.below(len - start + 1);
+        let mut x = p.prefix_iter_range(start, end);
+        let mut y = c.iter_range(start..end);
+        let mut m = SumIter {
+            model,
+            before: &before,
+            pos: start,
+            end,
+            base: 0,
+        };
+        for _ in 0..16 {
+            match rng.below(11) {
+                0 | 1 => {
+                    let want = m.next_run();
+                    assert_eq!(new_sum_run(x.next_run()), want);
+                    assert_eq!(old_sum_run(y.next_run()), want);
+                }
+                2 | 3 => {
+                    let n = match rng.below(4) {
+                        0 => a_place(rng, len),
+                        _ => rng.below(m.left() + 2),
+                    };
+                    let want = m.delta_nth(n);
+                    assert_eq!(new_found(x.delta_nth(n)), want);
+                    assert_eq!(old_found(y.delta_nth(n)), want);
+                }
+                4 => {
+                    let want = m.nth(0);
+                    assert_eq!(new_item(x.next()), want);
+                    assert_eq!(old_item(y.next()), want);
+                }
+                5 => {
+                    let end = a_place(rng, len);
+                    x.set_max(end);
+                    y.set_max(end);
+                    m.set_max(end);
+                }
+                6 => {
+                    x.reset_prefix();
+                    y.reset_prefix();
+                    m.base = m.pos;
+                }
+                7 | 8 => {
+                    // stopped, and started again on the same column: at
+                    // the column's end the window can come back closed
+                    let (s, t) = (x.suspend(), y.suspend());
+                    x = s.try_resume(p).unwrap();
+                    y = t.try_resume(c).unwrap();
+                    if m.pos == len && x.end_pos() == len {
+                        m.end = len;
+                    }
+                    // and a state starts as often as it is asked
+                    assert_eq!(new_place(&s.try_resume(p).unwrap()), new_place(&x));
+                }
+                9 => {
+                    // a copy is an iterator of its own
+                    let (mut x2, mut y2) = (x.clone(), y.clone());
+                    assert_eq!(new_place(&x2), m.place());
+                    assert_eq!(new_item(x2.nth(1)), old_item(y2.nth(1)));
+                    assert_eq!(new_place(&x2), old_place(&y2));
+                }
+                _ => {
+                    let target = a_place(rng, len);
+                    x.advance_to(target);
+                    y.advance_to(target);
+                    m.advance_to(target);
+                }
+            }
+            assert_eq!(new_place(&x), m.place());
+            assert_eq!(old_place(&y), m.place());
+        }
+    }
+}
+
+/// The value at `i` with the sums before it and through it.
+fn item_at<T: Totalled>(model: &[T], before: &[i128], i: usize) -> (T, i128, i128) {
+    (model[i].clone(), before[i], before[i + 1])
+}
+
+/// A prefix column of the two APIs, of the same values in the same
+/// slabs, under edits that put in single values and runs: `check` is
+/// asked of them after each edit, and of the two loaded from their
+/// bytes.
+fn under_sum_edits<T: Totalled>(
+    salt: u64,
+    check: fn(&mut Rng, &VerifiedPrefixColumn<T>, &PrefixColumn<T>, &[T]),
+) {
+    for seed in 1..=8u64 {
+        let mut rng = Rng(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) ^ salt);
+        let budget = [2, 3, 4, 8, 64][rng.below(5)];
+        let mut p = VerifiedPrefixColumn::<T>::with_max_segments(budget);
+        let mut c = PrefixColumn::<T>::with_max_segments(budget);
+        let mut model: Vec<T> = vec![];
+        check(&mut rng, &p, &c, &model);
+        for _ in 0..40 {
+            let at = rng.below(model.len() + 1);
+            let del = rng.below((model.len() - at).min(12) + 1);
+            if rng.below(3) == 0 {
+                let runs = some_runs::<T>(&mut rng, 6);
+                let lent_runs = runs.iter().map(|(n, x)| Run {
+                    count: *n,
+                    value: x.lend(),
+                });
+                p.splice_runs(at, del, lent_runs);
+                let owned_runs = runs.iter().map(|(n, x)| Run {
+                    count: *n,
+                    value: x.clone(),
+                });
+                c.splice_runs(at, del, owned_runs);
+                model.splice(at..at + del, run_model(&runs));
+            } else {
+                let ins: Vec<T> = rng.values(40);
+                p.splice(at, del, &lent(&ins));
+                c.splice(at, del, ins.iter().cloned());
+                model.splice(at..at + del, ins);
+            }
+            check(&mut rng, &p, &c, &model);
+        }
+        // loaded: an index made at once of all the slabs
+        let p2 = VerifiedPrefixColumn::<T>::load(&p.save()).unwrap();
+        let c2 = PrefixColumn::<T>::load(&c.save()).unwrap();
+        check(&mut rng, &p2, &c2, &model);
+    }
+}
+
+fn sum_runs<T: Totalled>() {
+    under_sum_edits::<T>(0x50fa, check_prefix_runs::<T>);
+}
+
+/// A prefix column of the verified API is read by runs with their sums
+/// ([`VerifiedPrefixIter::next_run`]), moved by a count with what is
+/// passed over summed ([`VerifiedPrefixIter::delta_nth`],
+/// [`VerifiedColumn::delta`]), copied, and stopped and started again
+/// ([`VerifiedPrefixIter::suspend`],
+/// [`VerifiedPrefixIterState::try_resume`]) as its specification says
+/// and as `PrefixColumn` is. Of every summed type, after edits and after
+/// a load.
+#[test]
+fn a_prefix_column_is_read_by_runs_with_its_sums() {
+    for_each_sum!(sum_runs);
+}
+
+/// A value type whose prefix iterators, of both APIs, read on until
+/// their sum is past a limit.
+trait Sought: Counted {
+    fn new_sought(it: &mut VerifiedPrefixIter<'_, Self>, n: u128) -> Found<Self>;
+
+    fn old_sought(it: &mut PrefixIter<'_, Self>, n: u128) -> Found<Self>;
+}
+
+macro_rules! sought {
+    ($($t:ty => $s:ty),*) => {
+        $(
+            impl Sought for $t {
+                fn new_sought(it: &mut VerifiedPrefixIter<'_, $t>, n: u128) -> Found<$t> {
+                    new_found(it.advance_prefix(<$s as Target>::target(n)))
+                }
+
+                fn old_sought(it: &mut PrefixIter<'_, $t>, n: u128) -> Found<$t> {
+                    old_found(it.advance_prefix(<$s as Target>::target(n)))
+                }
+            }
+        )*
+    };
+}
+
+sought!(
+    u64 => u128,
+    u32 => u64,
+    NonZeroU32 => u64,
+    bool => usize,
+    Option<u64> => u128,
+    Option<u32> => u64,
+    Option<NonZeroU32> => u64
+);
+
+/// A prefix column's iterator reads on until the values it has given
+/// from where it stood add up to more than a limit
+/// (`advance_prefix`), among its other moves: it finds what a walk of
+/// the sums finds, and what `PrefixColumn`'s iterator finds, and the
+/// two stand in the same place after each step.
+fn check_prefix_seeks<T: Sought>(
+    rng: &mut Rng,
+    p: &VerifiedPrefixColumn<T>,
+    c: &PrefixColumn<T>,
+    model: &[T],
+) {
+    let len = model.len();
+    let before = sums_before(model);
+    for _ in 0..4 {
+        let start = rng.below(len + 1);
+        let end = start + rng.below(len - start + 1);
+        let mut x = p.prefix_iter_range(start, end);
+        let mut y = c.iter_range(start..end);
+        let mut m = SumIter {
+            model,
+            before: &before,
+            pos: start,
+            end,
+            base: 0,
+        };
+        for _ in 0..12 {
+            match rng.below(8) {
+                0..=3 => {
+                    // a sum the values left reach, those beside it, and
+                    // one past them all
+                    let reach = before[m.pos + rng.below(m.left() + 1)] - before[m.pos];
+                    let all = before[m.pos + m.left()] - before[m.pos];
+                    let n = [0, (reach - 1).max(0), reach, reach + 1, all + 3][rng.below(5)];
+                    let want = m.advance_prefix(n);
+                    let n = u128::try_from(n).unwrap();
+                    assert_eq!(T::new_sought(&mut x, n), want);
+                    assert_eq!(T::old_sought(&mut y, n), want);
+                }
+                4 => {
+                    let want = m.nth(0);
+                    assert_eq!(new_item(x.next()), want);
+                    assert_eq!(old_item(y.next()), want);
+                }
+                5 => {
+                    x.reset_prefix();
+                    y.reset_prefix();
+                    m.base = m.pos;
+                }
+                6 => {
+                    let want = m.next_run();
+                    assert_eq!(new_sum_run(x.next_run()), want);
+                    assert_eq!(old_sum_run(y.next_run()), want);
+                }
+                _ => {
+                    let end = a_place(rng, len);
+                    x.set_max(end);
+                    y.set_max(end);
+                    m.set_max(end);
+                }
+            }
+            assert_eq!(new_place(&x), m.place());
+            assert_eq!(old_place(&y), m.place());
+        }
+    }
+}
+
+fn sum_seeks<T: Sought>() {
+    under_sum_edits::<T>(0x50fb, check_prefix_seeks::<T>);
+}
+
+/// A prefix column of the verified API whose sums are counts is read on
+/// to a sum ([`VerifiedPrefixIter::advance_prefix`]) as its
+/// specification says and as `PrefixColumn` is: the value found is the
+/// first with which the values from where the iterator stood add up to
+/// more than the limit, and with none found the iterator has given all
+/// it had.
+#[test]
+fn a_prefix_iterator_reads_on_to_a_sum() {
+    sum_seeks::<u64>();
+    sum_seeks::<u32>();
+    sum_seeks::<NonZeroU32>();
+    sum_seeks::<bool>();
+    sum_seeks::<Option<u64>>();
+    sum_seeks::<Option<u32>>();
+    sum_seeks::<Option<NonZeroU32>>();
+}
+
+/// The runs, seeks and states of a short prefix column's iterator, by
+/// hand.
+// (`clone` is here for what it does)
+#[allow(clippy::clone_on_copy)]
+#[test]
+fn the_seeks_of_a_prefix_iterator() {
+    let mut p = VerifiedPrefixColumn::<u64>::from_values(&[3, 0, 4, 4, 10]);
+    // by runs: the sums are those of each run's last value
+    let mut it = p.prefix_iter();
+    let mut runs = vec![];
+    while let Some(run) = it.next_run() {
+        runs.push((
+            run.count,
+            run.value.value,
+            run.value.prefix(),
+            run.value.total(),
+        ));
+    }
+    assert_eq!(
+        runs,
+        [(1, 3, 0, 3), (1, 0, 3, 3), (2, 4, 7, 11), (1, 10, 11, 21)]
+    );
+    assert_eq!(
+        format!("{it:?}"),
+        "VerifiedPrefixIter { total: 21, pos: 5 }"
+    );
+    // the runs of a window, without sums
+    let runs: Vec<(usize, u64)> = p
+        .prefix_iter_range(1, 4)
+        .runs()
+        .map(|run| (run.count, run.value))
+        .collect();
+    assert_eq!(runs, [(1, 0), (2, 4)]);
+    // a value by its count from the iterator, with what is passed over
+    let mut it = p.prefix_iter_range(1, 5);
+    let seek = it.delta_nth(2).unwrap();
+    let found = VerifiedPrefixSeek {
+        pos: 3,
+        delta: 4,
+        pv: VerifiedPrefixedValue {
+            value: 4,
+            total: 11,
+        },
+    };
+    assert_eq!(seek, found);
+    assert_eq!(
+        format!("{seek:?}"),
+        "VerifiedPrefixSeek { pos: 3, delta: 4, pv: VerifiedPrefixedValue { value: 4, total: 11 } }"
+    );
+    let copy = seek;
+    assert_eq!((copy.clone(), seek.pv.prefix()), (found, 7));
+    assert!(it.delta_nth(1).is_none());
+    assert_eq!((it.pos(), it.end_pos(), it.total()), (5, 5, 21));
+    // the same of the column: the value at a place, and the sum of a
+    // range before it
+    assert_eq!(p.delta(1, 3), Some(found));
+    let seek = p.delta(2, 2).unwrap();
+    assert_eq!((seek.pos, seek.delta, seek.pv.total()), (2, 0, 7));
+    assert!(p.delta(0, 5).is_none());
+    // on to a sum: the first value with which the sum is past the limit
+    let mut it = p.prefix_iter();
+    let seek = it.advance_prefix(3).unwrap();
+    assert_eq!(
+        (seek.pos, seek.delta, seek.pv.value, seek.pv.total()),
+        (2, 3, 4, 7)
+    );
+    // from where the iterator stands, whatever its sum counts from
+    let seek = it.advance_prefix(4).unwrap();
+    assert_eq!(
+        (seek.pos, seek.delta, seek.pv.value, seek.pv.total()),
+        (4, 4, 10, 21)
+    );
+    assert!(it.advance_prefix(0).is_none());
+    assert_eq!((it.pos(), it.end_pos(), it.total()), (5, 5, 21));
+    // values of one unit each: a limit of `n` units finds the value
+    // that holds unit `n + 1`
+    let units = VerifiedPrefixColumn::<u64>::from_values(&[1, 1, 1]);
+    for n in 0..3 {
+        let seek = units.prefix_iter().advance_prefix(n as u128).unwrap();
+        assert_eq!((seek.pos, seek.delta), (n, n as u128));
+    }
+    assert!(units.prefix_iter().advance_prefix(3).is_none());
+    // within a window, all of whose values add up to the limit or less
+    let mut it = p.prefix_iter_range(0, 3);
+    assert!(it.advance_prefix(7).is_none());
+    assert_eq!((it.pos(), it.end_pos(), it.total()), (3, 3, 7));
+    // flags: on to the second that is set
+    let flags = VerifiedPrefixColumn::<bool>::from_values(&[false, true, false, true, true]);
+    let seek = flags.prefix_iter().advance_prefix(1).unwrap();
+    assert_eq!((seek.pos, seek.delta, seek.pv.total()), (3, 1, 2));
+
+    // a copy is an iterator of its own
+    let mut it = p.prefix_iter_range(1, 4);
+    it.next();
+    it.reset_prefix();
+    let mut twin = it.clone();
+    assert_eq!(twin.next().map(|pv| pv.total()), Some(4));
+    assert_eq!((it.pos(), it.total(), twin.pos()), (2, 0, 3));
+    // stopped and started again: its place, its window, and where its
+    // sum counts from
+    it.next();
+    let state: VerifiedPrefixIterState<u64> = it.suspend();
+    let mut on = state.try_resume(&p).unwrap();
+    assert_eq!((on.pos(), on.end_pos(), on.total()), (3, 4, 4));
+    let pv = on.next().unwrap();
+    assert_eq!((pv.prefix(), pv.value, pv.total()), (4, 4, 8));
+    // on another column of that many edits, with that column's sums
+    let other = VerifiedPrefixColumn::<u64>::from_values(&[1, 2, 3, 4, 5, 6]);
+    let on = state.try_resume(&other).unwrap();
+    assert_eq!((on.pos(), on.end_pos(), on.total()), (3, 4, 3));
+    // and not on a column edited since
+    p.push(1);
+    assert!(matches!(
+        state.try_resume(&p),
+        Err(PackError::InvalidResume)
+    ));
+    // a state is plain data, with no borrow in it
+    fn plain<S: Send + Sync + 'static>() {}
+    plain::<VerifiedPrefixIterState<Option<i64>>>();
+
+    // an iterator of no column
+    let mut it = VerifiedPrefixIter::<u64>::default();
+    assert_eq!((it.pos(), it.end_pos(), it.len(), it.total()), (0, 0, 0, 0));
+    assert!(it.next_run().is_none() && it.delta_nth(0).is_none() && it.next().is_none());
+    assert_eq!(it.clone().runs().count(), 0);
+    assert_eq!(format!("{it:?}"), "VerifiedPrefixIter { total: 0, pos: 0 }");
+    // it has no index to ask: it finds nothing, and its window is
+    // closed (that of `PrefixColumn`'s is left as it was)
+    it.set_max(5);
+    assert!(it.advance_prefix(0).is_none());
+    assert_eq!((it.pos(), it.end_pos()), (0, 0));
+    let mut old = PrefixIter::<u64>::default();
+    old.set_max(5);
+    assert!(old.advance_prefix(0).is_none());
+    assert_eq!((old.pos(), old.end_pos()), (0, 5));
+    // its state starts on a new column
+    let state = VerifiedPrefixIter::<u64>::default().suspend();
+    let none = VerifiedPrefixColumn::<u64>::new();
+    let on = state.try_resume(&none).unwrap();
+    assert_eq!((on.pos(), on.end_pos(), on.total()), (0, 0, 0));
+    assert!(state.try_resume(&p).is_err());
 }

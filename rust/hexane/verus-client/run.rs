@@ -1651,3 +1651,153 @@ fn sums_kept_by_each_move() {
     assert_eq!(verus_client::told_by_a_prefix_iters_count(&it), (0, 0));
     assert_eq!(verus_client::told_by_a_prefix_size_hint(&it), (0, Some(0)));
 }
+
+#[test]
+fn sums_read_by_runs() {
+    let v: Vec<u64> = (0..1000).map(|i| i / 7).collect();
+    let col = VerifiedPrefixColumn::<u64>::from_values(&v);
+    let before = |i: usize| v[..i].iter().map(|x| u128::from(*x)).sum::<u128>();
+    assert_eq!(verus_client::summed_by_runs(&col), (before(1000), 1000));
+    let none = VerifiedPrefixColumn::<Option<i64>>::new();
+    assert_eq!(verus_client::summed_by_runs(&none), (0, 0));
+    // run by run, in a window that starts and ends within runs
+    let mut it = col.prefix_iter_range(5, 20);
+    assert_eq!(
+        verus_client::a_run_with_its_sums(&mut it),
+        Some((2, 0, before(7)))
+    );
+    let run = verus_client::told_by_a_prefix_next_run(&mut it).unwrap();
+    assert_eq!(
+        (
+            run.count,
+            run.value.value,
+            run.value.prefix(),
+            run.value.total()
+        ),
+        (7, 1, before(13), before(14))
+    );
+    assert_eq!(
+        verus_client::a_run_with_its_sums(&mut it),
+        Some((6, 2, before(20)))
+    );
+    assert_eq!(verus_client::a_run_with_its_sums(&mut it), None);
+    assert!(verus_client::told_by_a_prefix_next_run(&mut it).is_none());
+    assert_eq!((it.pos(), it.end_pos(), it.total()), (20, 20, before(20)));
+    // the runs without their sums, and a range copied by them
+    let runs = verus_client::told_by_a_prefix_runs(col.prefix_iter_range(5, 20));
+    let got: Vec<(usize, u64)> = runs.map(|run| (run.count, run.value)).collect();
+    assert_eq!(got, [(2, 0), (7, 1), (6, 2)]);
+    for (a, b) in [(0, 0), (0, 1000), (3, 700), (1000, 1000)] {
+        let copy = verus_client::sums_copied_by_runs(&col, a, b);
+        assert_eq!(copy.to_vec(), v[a..b]);
+    }
+    // signed values and flags
+    let signed = VerifiedPrefixColumn::<i64>::from_values(&[-4, -4, -4, 9]);
+    assert_eq!(verus_client::summed_by_runs(&signed), (-3, 4));
+    let mut it = signed.prefix_iter();
+    assert_eq!(
+        verus_client::a_run_with_its_sums(&mut it),
+        Some((3, -4, -12))
+    );
+    let flags = VerifiedPrefixColumn::<bool>::from_values(&[true, true, false]);
+    assert_eq!(verus_client::summed_by_runs(&flags), (2, 3));
+}
+
+#[test]
+fn sums_sought() {
+    let v: Vec<u64> = (0..1000).map(|i| i % 13).collect();
+    let col = VerifiedPrefixColumn::<u64>::from_values(&v);
+    let before = |i: usize| v[..i].iter().map(|x| u128::from(*x)).sum::<u128>();
+    verus_client::found_with_sums(&VerifiedPrefixColumn::<u64>::from_values(&v[..10]));
+    // the first sum past a limit, by the index and by reading on
+    for limit in [0, 1, 2, 3, 1000, before(1000) - 1, before(1000), u128::MAX] {
+        let first = (0..1000).find(|i| before(i + 1) > limit);
+        assert_eq!(
+            verus_client::found_by_its_sum(&col, limit),
+            first.map(|i| (i, v[i]))
+        );
+        assert_eq!(
+            verus_client::first_over_two_ways(&col, limit),
+            (first, first)
+        );
+    }
+    let flags = VerifiedPrefixColumn::<bool>::from_values(&[false, true, false, true]);
+    assert_eq!(verus_client::found_by_its_sum(&flags, 0), Some((1, true)));
+    assert_eq!(verus_client::found_by_its_sum(&flags, 1), Some((3, true)));
+    assert_eq!(verus_client::found_by_its_sum(&flags, 2), None);
+    // from where an iterator stands: 9, 10 and 11 come next
+    let mut it = col.prefix_iter_range(100, 900);
+    let seek = verus_client::told_by_an_advance_prefix(&mut it, 20).unwrap();
+    assert_eq!(
+        (seek.pos, seek.delta, seek.pv.value, seek.pv.total()),
+        (102, 19, 11, before(103))
+    );
+    assert_eq!(verus_client::told_by_a_prefix_seek(&seek), (102, 19, seek.pv));
+    // by count, with what is passed over
+    let seek = verus_client::told_by_a_delta_nth(&mut it, 10).unwrap();
+    assert_eq!(
+        (seek.pos, seek.delta, seek.pv.value, seek.pv.total()),
+        (113, before(113) - before(103), v[113], before(114))
+    );
+    // past what it has
+    assert!(verus_client::told_by_a_delta_nth(&mut it, 786).is_none());
+    assert_eq!(
+        (it.pos(), it.end_pos(), it.total()),
+        (900, 900, before(900))
+    );
+    assert!(verus_client::told_by_an_advance_prefix(&mut it, 0).is_none());
+    // the column asked for a value and the sum of a range before it
+    for (a, b) in [(0, 0), (0, 999), (17, 400), (999, 999)] {
+        let range = before(b) - before(a);
+        assert_eq!(verus_client::a_range_two_ways(&col, a, b), (range, range));
+        let seek = verus_client::told_by_a_column_delta(&col, a, b).unwrap();
+        assert_eq!((seek.pos, seek.delta, seek.pv.value), (b, range, v[b]));
+    }
+    assert!(verus_client::told_by_a_column_delta(&col, 3, 1000).is_none());
+}
+
+#[test]
+fn sums_stopped_and_started() {
+    let v: Vec<u64> = (0..1000).map(|i| i % 13).collect();
+    let mut col = VerifiedPrefixColumn::<u64>::from_values(&v);
+    let before = |i: usize| v[..i].iter().map(|x| u128::from(*x)).sum::<u128>();
+    for (a, m, b) in [
+        (0, 0, 0),
+        (0, 500, 1000),
+        (3, 3, 700),
+        (10, 990, 990),
+        (1000, 1000, 1000),
+    ] {
+        assert_eq!(
+            verus_client::summed_in_two_goes(&col, a, m, b),
+            before(b) - before(a)
+        );
+    }
+    // an iterator whose sum counts from within the column
+    let mut it = col.prefix_iter_range(100, 900);
+    it.nth(49);
+    it.reset_prefix();
+    it.nth(9);
+    let since = before(160) - before(150);
+    let s = verus_client::told_by_a_prefix_suspend(&it, &col);
+    verus_client::told_by_a_prefix_states_fit(&s, &col);
+    let twin = verus_client::told_by_a_prefix_clone(&it);
+    let on = verus_client::handed_over_with_its_sum(it, &col);
+    assert_eq!((on.pos(), on.end_pos(), on.total()), (160, 900, since));
+    assert_eq!(
+        (twin.pos(), twin.end_pos(), twin.total()),
+        (160, 900, since)
+    );
+    let mut on = verus_client::told_by_a_prefix_resume(&s, &col).unwrap();
+    assert_eq!(
+        on.next().map(|pv| (pv.prefix(), pv.total())),
+        Some((since, before(161) - before(150)))
+    );
+    // an iterator of no column
+    let no = verus_client::told_by_a_prefix_default::<u64, Leb128>();
+    assert_eq!((no.pos(), no.end_pos(), no.len(), no.total()), (0, 0, 0, 0));
+    // an edit ends what was suspended
+    assert!(!verus_client::sums_ended_by_a_push(&mut col, 7));
+    assert!(verus_client::told_by_a_prefix_resume(&s, &col).is_err());
+    assert_eq!(col.len(), 1001);
+}
