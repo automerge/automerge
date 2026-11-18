@@ -105,15 +105,24 @@ fn preparation_retains_invalid_key_diagnostics_outside_the_batch() {
     for (bytes, weak) in [(vec![7; 31], false), (identity, true)] {
         let omitted = changes(9, Author::from(bytes.clone()));
         let error = VerifyingAuthor::new(Author::from(bytes)).unwrap_err();
-        match (&error.0, weak) {
-            (error::VerifyingAuthorInner::WeakKey, true) => {}
-            (error::VerifyingAuthorInner::Key(_), false) => {}
-            _ => panic!("wrong key failure reason: {error:?}"),
-        }
+        assert_eq!(
+            error.kind(),
+            if weak {
+                error::VerifyingAuthorKind::WeakKey
+            } else {
+                error::VerifyingAuthorKind::InvalidKey
+            }
+        );
         // The preparation error stays with the caller. Omitting the key from
         // the final map does not erase inputs or mark their signatures invalid.
         let diagnostic: &error::VerifyingAuthor = &error;
-        assert!(std::error::Error::source(diagnostic).is_some());
+        if weak {
+            assert!(std::error::Error::source(diagnostic).is_none());
+        } else {
+            assert!(std::error::Error::source(diagnostic)
+                .unwrap()
+                .is::<ed25519_dalek::SignatureError>());
+        }
         let signatures = [
             sign(&key, &omitted[0]),
             sign(&key, &known[1]),

@@ -34,6 +34,7 @@ impl PendingMask {
         let author = Author::try_from("aaaa").unwrap();
         let mut source = AutoCommit::new_with_encoding(ENCODING)
             .with_author(Some(author.clone()))
+            .unwrap()
             .with_actor(ActorId::from(vec![0x80]));
         source.put(ROOT, "x", 1).unwrap();
         let original_heads = source.get_heads();
@@ -44,7 +45,9 @@ impl PendingMask {
         }
         let original_changes = source.get_changes(&[]);
 
-        source.set_author(Some(Author::try_from("bbbb").unwrap()));
+        source
+            .set_author(Some(Author::try_from("bbbb").unwrap()))
+            .unwrap();
         source.set_actor(ActorId::from(vec![0x10]));
         source.put(ROOT, "ack", true).unwrap();
         let boundary_heads = source.get_heads();
@@ -275,12 +278,13 @@ fn incoming_boundary_change_is_not_logged_as_masked() {
     let author = Author::try_from("aaaa").unwrap();
     let mut source = AutoCommit::new_with_encoding(ENCODING)
         .with_author(Some(Author::try_from("bbbb").unwrap()))
+        .unwrap()
         .with_actor(ActorId::from(vec![0x80]));
     source.put(ROOT, "base", true).unwrap();
     source.commit();
     let mut target = source.clone();
 
-    source.set_author(Some(author.clone()));
+    source.set_author(Some(author.clone())).unwrap();
     source.set_actor(ActorId::from(vec![0x10]));
     source.put(ROOT, "x", 1).unwrap();
     let boundary_heads = source.get_heads();
@@ -310,7 +314,9 @@ fn incoming_boundary_change_is_not_logged_as_masked() {
 #[test]
 fn locally_reconstructed_pending_boundary_resolves_at_commit() {
     let author = Author::try_from("aaaa").unwrap();
-    let base = AutoCommit::new_with_encoding(ENCODING).with_author(Some(author.clone()));
+    let base = AutoCommit::new_with_encoding(ENCODING)
+        .with_author(Some(author.clone()))
+        .unwrap();
     let mut source = base.clone();
     source.put(ROOT, "boundary", 42).unwrap();
     source.commit();
@@ -343,11 +349,15 @@ fn locally_reconstructed_pending_boundary_resolves_at_commit() {
 
 fn pending_subtree_restoration(isolated: bool) {
     let author = Author::try_from("aaaa").unwrap();
-    let mut source = AutoCommit::new_with_encoding(ENCODING).with_author(Some(author.clone()));
+    let mut source = AutoCommit::new_with_encoding(ENCODING)
+        .with_author(Some(author.clone()))
+        .unwrap();
     let text = source.put_object(ROOT, "text", ObjType::Text).unwrap();
     source.splice_text(&text, 0, 0, "abc").unwrap();
     source.commit();
-    source.set_author(Some(Author::try_from("bbbb").unwrap()));
+    source
+        .set_author(Some(Author::try_from("bbbb").unwrap()))
+        .unwrap();
     source.splice_text(&text, 3, 0, "X").unwrap();
     let observed_heads = source.get_heads();
     let original_changes = source.get_changes(&[]);
@@ -391,11 +401,14 @@ fn isolated_pending_resolution_restores_other_author_children() {
 #[test]
 fn isolated_reveal_restores_only_the_pinned_subtree_contents() {
     let author = Author::try_from("aaaa").unwrap();
-    let mut doc = AutoCommit::new_with_encoding(ENCODING).with_author(Some(author.clone()));
+    let mut doc = AutoCommit::new_with_encoding(ENCODING)
+        .with_author(Some(author.clone()))
+        .unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
     doc.splice_text(&text, 0, 0, "abc").unwrap();
     doc.commit();
-    doc.set_author(Some(Author::try_from("bbbb").unwrap()));
+    doc.set_author(Some(Author::try_from("bbbb").unwrap()))
+        .unwrap();
     doc.splice_text(&text, 3, 0, "X").unwrap();
     let heads = doc.get_heads();
     doc.splice_text(&text, 4, 0, "future").unwrap();
@@ -419,7 +432,8 @@ fn queued_boundary_restores_only_the_isolated_view_when_dependency_arrives() {
     let author = Author::try_from("aaaa").unwrap();
     let mut source = AutoCommit::new_with_encoding(ENCODING)
         .with_actor(ActorId::from(vec![0x80]))
-        .with_author(Some(author.clone()));
+        .with_author(Some(author.clone()))
+        .unwrap();
     source.put(ROOT, "x", 1).unwrap();
     let pinned = source.get_heads();
     let original = source.get_last_local_change().unwrap();
@@ -427,7 +441,9 @@ fn queued_boundary_restores_only_the_isolated_view_when_dependency_arrives() {
     source.commit();
     let dependency = source.get_last_local_change().unwrap();
     source.set_actor(ActorId::from(vec![0x10]));
-    source.set_author(Some(Author::try_from("bbbb").unwrap()));
+    source
+        .set_author(Some(Author::try_from("bbbb").unwrap()))
+        .unwrap();
     source.put(ROOT, "ack", true).unwrap();
     let boundary_heads = source.get_heads();
     let boundary = source.get_last_local_change().unwrap();
@@ -465,26 +481,27 @@ fn restored_subtree_paths_survive_pending_and_subsequent_isolated_edits() {
     let allowed = Author::try_from("bbbb").unwrap();
     let mut source = AutoCommit::new_with_encoding(ENCODING)
         .with_actor(ActorId::from(vec![0xe0]))
-        .with_author(Some(allowed.clone()));
+        .with_author(Some(allowed.clone()))
+        .unwrap();
     let list = source.put_object(ROOT, "list", ObjType::List).unwrap();
     source.insert(&list, 0, "base").unwrap();
     source.commit();
 
     source.set_actor(ActorId::from(vec![0x80]));
-    source.set_author(Some(masked.clone()));
+    source.set_author(Some(masked.clone())).unwrap();
     let text = source.insert_object(&list, 1, ObjType::Text).unwrap();
     source.splice_text(&text, 0, 0, "abc").unwrap();
     source.commit();
 
     source.set_actor(ActorId::from(vec![0x40]));
-    source.set_author(Some(allowed.clone()));
+    source.set_author(Some(allowed.clone())).unwrap();
     source.splice_text(&text, 3, 0, "X").unwrap();
     let pinned = source.get_heads();
 
     // These known operations are later than the pinned view. Restoring them
     // would give the text both the wrong contents and the wrong list path.
     source.set_actor(ActorId::from(vec![0x80]));
-    source.set_author(Some(masked.clone()));
+    source.set_author(Some(masked.clone())).unwrap();
     source.insert(&list, 0, "future").unwrap();
     source.splice_text(&text, 4, 0, "future").unwrap();
     source.commit();
@@ -492,14 +509,15 @@ fn restored_subtree_paths_survive_pending_and_subsequent_isolated_edits() {
 
     // Inserting this actor reorders the actor table during resolution.
     source.set_actor(ActorId::from(vec![0x10]));
-    source.set_author(Some(allowed.clone()));
+    source.set_author(Some(allowed.clone())).unwrap();
     source.splice_text(&text, 10, 0, "Y").unwrap();
     let boundary_heads = source.get_heads();
     let boundary = source.get_last_local_change().unwrap();
 
     let mut doc = AutoCommit::new_with_encoding(ENCODING)
         .with_actor(ActorId::from(vec![0xc0]))
-        .with_author(Some(allowed));
+        .with_author(Some(allowed))
+        .unwrap();
     doc.apply_changes(original).unwrap();
     doc.isolate(&pinned);
     doc.mask_author(masked, &boundary_heads);
@@ -535,8 +553,9 @@ fn loading_into_an_empty_isolated_document_does_not_log_the_loaded_state() {
     for full_document in [false, true] {
         for tracking in [false, true] {
             let author = Author::try_from("aaaa").unwrap();
-            let mut source =
-                AutoCommit::new_with_encoding(ENCODING).with_author(Some(author.clone()));
+            let mut source = AutoCommit::new_with_encoding(ENCODING)
+                .with_author(Some(author.clone()))
+                .unwrap();
             source.put(ROOT, "x", 1).unwrap();
             let boundary = source.get_heads();
             let bytes = if full_document {
@@ -588,13 +607,13 @@ fn isolation_preserves_empty_document_load_validation() {
 fn partially_unknown_multi_head_boundary_preserves_known_history() {
     let alice = Author::try_from("aaaa").unwrap();
     let bob = Author::try_from("bbbb").unwrap();
-    let mut a = AutoCommit::new().with_author(Some(alice.clone()));
+    let mut a = AutoCommit::new().with_author(Some(alice.clone())).unwrap();
     a.put(ROOT, "x", 1).unwrap();
     a.commit();
     let h1 = a.get_heads()[0];
 
     // Bob's acknowledgement, not delivered to the observer yet.
-    let mut b = a.fork().with_author(Some(bob));
+    let mut b = a.fork().with_author(Some(bob)).unwrap();
     b.put(ROOT, "z", 9).unwrap();
     b.commit();
     let h2 = b.get_heads()[0];
@@ -629,6 +648,7 @@ fn partially_known_boundary_expands_per_actor_on_import() {
         let bob = Author::try_from("bbbb").unwrap();
         let mut a = AutoCommit::new_with_encoding(ENCODING)
             .with_author(Some(alice.clone()))
+            .unwrap()
             .with_actor(ActorId::from(vec![0x80]));
         a.put(ROOT, "x", 1).unwrap();
         let h1 = a.get_heads()[0];
@@ -642,11 +662,11 @@ fn partially_known_boundary_expands_per_actor_on_import() {
         a.commit();
 
         // Bob's acknowledgement bounds the second actor, but is initially absent.
-        b.set_author(Some(bob));
+        b.set_author(Some(bob)).unwrap();
         b.set_actor(ActorId::from(vec![0x10]));
         b.put(ROOT, "ack", true).unwrap();
         let h2 = b.get_heads()[0];
-        b.set_author(Some(alice.clone()));
+        b.set_author(Some(alice.clone())).unwrap();
         b.set_actor(ActorId::from(vec![0x90]));
         b.put(ROOT, "y_later", true).unwrap();
         b.commit();
@@ -732,12 +752,12 @@ fn pending_set_is_read_only_between_derivations() {
 fn reveal_clears_pending_heads() {
     let alice = Author::try_from("aaaa").unwrap();
     let bob = Author::try_from("bbbb").unwrap();
-    let mut a = AutoCommit::new().with_author(Some(alice.clone()));
+    let mut a = AutoCommit::new().with_author(Some(alice.clone())).unwrap();
     a.put(ROOT, "x", 1).unwrap();
     a.commit();
 
     // Bob's change is the (not yet delivered) write-frontier boundary.
-    let mut b = a.fork().with_author(Some(bob));
+    let mut b = a.fork().with_author(Some(bob)).unwrap();
     b.put(ROOT, "z", 9).unwrap();
     b.commit();
     let h2 = b.get_heads()[0];

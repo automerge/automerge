@@ -206,9 +206,13 @@ export function use(api: API) {
 export type InitOptions<T> = {
   /** The actor ID to use for this document, a random one will be generated if `null` is passed */
   actor?: ActorId
-  /** The author for this document */
+  /** The author for this document. Required when `signing` is enabled. */
   author?: Author
-  /** Require valid attached Ed25519 proofs on incoming history and sign outgoing fragments */
+  /**
+   * Require valid attached Ed25519 proofs on incoming history and sign
+   * outgoing fragments. A signing document always has a current `author`,
+   * whose bytes must form a usable Ed25519 public key.
+   */
   signing?: boolean
   freeze?: boolean
   /** A callback which will be called with the initial patch once the document has finished loading */
@@ -277,8 +281,14 @@ export function init<T>(_opts?: ActorId | InitOptions<T>): Doc<T> {
   const freeze = !!opts.freeze
   const patchCallback = opts.patchCallback
   const actor = opts.actor
-  const handle = ApiHandler.create({ actor, signing: opts.signing })
-  if (typeof opts.author == "string") {
+  // In signing mode the author is part of construction; otherwise it is set
+  // afterwards so that an invalid author does not leak the handle.
+  const handle = ApiHandler.create({
+    actor,
+    signing: opts.signing,
+    author: opts.signing ? opts.author : undefined,
+  })
+  if (!opts.signing && typeof opts.author == "string") {
     try {
       handle.setAuthor(opts.author)
     } catch (e) {
@@ -788,8 +798,9 @@ export function load<T>(
     allowMissingDeps,
     convertImmutableStringsToText,
     signing: opts.signing,
+    author: opts.signing ? opts.author : undefined,
   })
-  if (typeof opts.author == "string") {
+  if (!opts.signing && typeof opts.author == "string") {
     try {
       handle.setAuthor(opts.author)
     } catch (e) {
@@ -1003,7 +1014,10 @@ export function getAuthors<T>(doc: Doc<T>): Author[] {
   return state.handle.getAuthors()
 }
 
-export function getAuthorForActor<T>(doc: Doc<T>, actor: ActorId): Author | null {
+export function getAuthorForActor<T>(
+  doc: Doc<T>,
+  actor: ActorId,
+): Author | null {
   const state = _state(doc)
   return state.handle.getAuthorForActor(actor)
 }

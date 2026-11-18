@@ -13,13 +13,13 @@ mod rich_model;
 fn two_authors() -> (Automerge, Author<'static>, Vec<automerge::ChangeHash>) {
     let alice = Author::try_from("aaaa").unwrap();
     let bob = Author::try_from("bbbb").unwrap();
-    let mut a = AutoCommit::new().with_author(Some(alice.clone()));
+    let mut a = AutoCommit::new().with_author(Some(alice.clone())).unwrap();
     a.put(ROOT, "x", 1).unwrap();
     a.commit();
     let epoch = a.get_heads();
     a.put(ROOT, "y", 2).unwrap();
     a.commit();
-    let mut b = a.fork().with_author(Some(bob));
+    let mut b = a.fork().with_author(Some(bob)).unwrap();
     b.put(ROOT, "z", 3).unwrap();
     b.commit();
     a.merge(&mut b).unwrap();
@@ -33,7 +33,7 @@ fn two_authors() -> (Automerge, Author<'static>, Vec<automerge::ChangeHash>) {
 fn mask_apply_changes() {
     let good = Author::try_from("aaaa").unwrap();
     let bad = Author::try_from("ffff").unwrap();
-    let mut doc = AutoCommit::new().with_author(Some(good.clone()));
+    let mut doc = AutoCommit::new().with_author(Some(good.clone())).unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
     let list = doc.put_object(ROOT, "list", ObjType::List).unwrap();
     let map = doc.put_object(ROOT, "map", ObjType::Map).unwrap();
@@ -46,7 +46,7 @@ fn mask_apply_changes() {
     doc.splice_text(&text, 0, 0, "the quick fox jumped over the lazy dog")
         .unwrap();
 
-    let mut fork = doc.fork().with_author(Some(bad.clone()));
+    let mut fork = doc.fork().with_author(Some(bad.clone())).unwrap();
     fork.increment(ROOT, "counter", 4).unwrap();
 
     doc.merge(&mut fork).unwrap();
@@ -162,7 +162,7 @@ fn current_slow_paths_honour_mask() {
     // the mask.
     let alice = Author::try_from("aaaa").unwrap();
     let bob = Author::try_from("bbbb").unwrap();
-    let mut a = AutoCommit::new().with_author(Some(alice.clone()));
+    let mut a = AutoCommit::new().with_author(Some(alice.clone())).unwrap();
     let text = a.put_object(ROOT, "text", ObjType::Text).unwrap();
     a.splice_text(&text, 0, 0, "hello").unwrap();
     a.put(ROOT, "c", ScalarValue::counter(10)).unwrap();
@@ -178,7 +178,7 @@ fn current_slow_paths_honour_mask() {
     a.increment(ROOT, "c", 5).unwrap();
     a.put(ROOT, "sig", "alice").unwrap();
     a.commit();
-    let mut b = a.fork().with_author(Some(bob));
+    let mut b = a.fork().with_author(Some(bob)).unwrap();
     b.splice_text(&text, 0, 0, "bob ").unwrap();
     b.increment(ROOT, "c", 1).unwrap();
     b.commit();
@@ -226,13 +226,13 @@ fn current_state_patches_honour_mask() {
     // by the current-state walk must report the masked counter value.
     let alice = Author::try_from("aaaa").unwrap();
     let bob = Author::try_from("bbbb").unwrap();
-    let mut a = AutoCommit::new().with_author(Some(alice.clone()));
+    let mut a = AutoCommit::new().with_author(Some(alice.clone())).unwrap();
     a.put(ROOT, "c", ScalarValue::counter(10)).unwrap();
     a.commit();
     let epoch = a.get_heads();
     a.increment(ROOT, "c", 5).unwrap();
     a.commit();
-    let mut b = a.fork().with_author(Some(bob));
+    let mut b = a.fork().with_author(Some(bob)).unwrap();
     b.increment(ROOT, "c", 1).unwrap();
     b.commit();
     a.merge(&mut b).unwrap();
@@ -271,11 +271,11 @@ fn mask_list_insert_delete() {
     let good = Author::try_from("aaaa").unwrap();
     let bad = Author::try_from("ffff").unwrap();
 
-    let mut doc = AutoCommit::new().with_author(Some(good.clone()));
+    let mut doc = AutoCommit::new().with_author(Some(good.clone())).unwrap();
     let list = doc.put_object(ROOT, "list", ObjType::List).unwrap();
     doc.splice(&list, 0, 0, [1, 2, 3]).unwrap();
 
-    let mut fork = doc.fork().with_author(Some(bad.clone()));
+    let mut fork = doc.fork().with_author(Some(bad.clone())).unwrap();
     doc.merge(&mut fork).unwrap();
     let epoch = doc.get_heads();
 
@@ -312,7 +312,7 @@ fn mask_text_mark() {
     let good = Author::try_from("aaaa").unwrap();
     let bad = Author::try_from("ffff").unwrap();
 
-    let mut doc = AutoCommit::new().with_author(Some(good.clone()));
+    let mut doc = AutoCommit::new().with_author(Some(good.clone())).unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
     doc.splice_text(&text, 0, 0, "hello world").unwrap();
     // Good author adds an italic mark on "world" before the epoch
@@ -324,7 +324,7 @@ fn mask_text_mark() {
     .unwrap();
 
     let epoch = doc.get_heads();
-    let mut fork = doc.fork().with_author(Some(bad.clone()));
+    let mut fork = doc.fork().with_author(Some(bad.clone())).unwrap();
 
     // Bad author adds a bold mark on "hello"
     fork.mark(
@@ -401,9 +401,9 @@ fn mask_valid_put_in_masked_object() {
     let good = Author::try_from("aaaa").unwrap();
     let bad = Author::try_from("ffff").unwrap();
 
-    let mut doc = AutoCommit::new().with_author(Some(good.clone()));
+    let mut doc = AutoCommit::new().with_author(Some(good.clone())).unwrap();
 
-    let mut fork = doc.fork().with_author(Some(bad.clone()));
+    let mut fork = doc.fork().with_author(Some(bad.clone())).unwrap();
     doc.merge(&mut fork).unwrap();
     let epoch = doc.get_heads();
 
@@ -435,7 +435,7 @@ fn cached_mask_handles_multi_op_changes() {
     // Bad author makes a SINGLE change containing multiple ops. The change
     // has seq=1, but its ops have global op-counters > 1 (the global counter
     // is incremented per op, across all actors).
-    let mut fork = doc.fork().with_author(Some(bad.clone()));
+    let mut fork = doc.fork().with_author(Some(bad.clone())).unwrap();
     fork.put(ROOT, "k1", "v1").unwrap();
     fork.put(ROOT, "k2", "v2").unwrap();
     fork.put(ROOT, "k3", "v3").unwrap();
@@ -496,12 +496,14 @@ fn regression_masked_mark_does_not_attract_inserts() {
     let carol = Author::try_from("cccc").unwrap();
     let mut main = AutoCommit::new_with_encoding(TextEncoding::UnicodeCodePoint)
         .with_author(Some(carol.clone()))
+        .unwrap()
         .with_actor(ActorId::from(vec![0x01]));
     let text = main.put_object(ROOT, "text", ObjType::Text).unwrap();
     main.commit();
     let mut peer = main
         .fork()
         .with_author(Some(alice.clone()))
+        .unwrap()
         .with_actor(ActorId::from(vec![0xA0]));
     peer.split_block(&text, 0).unwrap();
     peer.commit();
@@ -549,17 +551,17 @@ fn mask_with_new_actor_same_author() {
     let good = Author::try_from("aaaa").unwrap();
     let bad = Author::try_from("ffff").unwrap();
 
-    let mut doc = AutoCommit::new().with_author(Some(good.clone()));
+    let mut doc = AutoCommit::new().with_author(Some(good.clone())).unwrap();
     doc.put(ROOT, "key", "original").unwrap();
 
-    let mut fork = doc.fork().with_author(Some(bad.clone()));
+    let mut fork = doc.fork().with_author(Some(bad.clone())).unwrap();
     let epoch = doc.get_heads();
 
     // Bad author makes changes with first actor
     fork.put(ROOT, "key1", "bad1").unwrap();
 
     // Create a new doc with the same bad author (different actor)
-    let mut fork2 = doc.fork().with_author(Some(bad.clone()));
+    let mut fork2 = doc.fork().with_author(Some(bad.clone())).unwrap();
     fork2.put(ROOT, "key2", "bad2").unwrap();
 
     doc.merge(&mut fork).unwrap();
@@ -626,7 +628,7 @@ fn write_frontier_mask_survives_actor_reordering() {
     let pre_change = doc.get_heads();
 
     // First bad actor publishes a change.
-    let mut fork_late = doc.fork().with_author(Some(bad.clone()));
+    let mut fork_late = doc.fork().with_author(Some(bad.clone())).unwrap();
     fork_late.set_actor(actor_late);
     fork_late.put(ROOT, "late_actor_key", "from_late").unwrap();
     fork_late.commit();
@@ -643,7 +645,7 @@ fn write_frontier_mask_survives_actor_reordering() {
     // Now add a second bad actor with an ID that sorts BEFORE the existing
     // bad actor. This forces `insert_actor` to insert at a low index,
     // shifting the existing bad actor (and the doc actor) up.
-    let mut fork_early = doc.fork().with_author(Some(bad.clone()));
+    let mut fork_early = doc.fork().with_author(Some(bad.clone())).unwrap();
     fork_early.set_actor(actor_early);
     fork_early
         .put(ROOT, "early_actor_key", "from_early")
@@ -690,7 +692,7 @@ fn mask_reflected_in_hydrate_with_implicit_and_explicit_current_heads() {
     let ffff = Author::try_from("ffff").unwrap();
     let aaaa = Author::try_from("aaaa").unwrap();
 
-    let mut doc = AutoCommit::new().with_author(Some(ffff.clone()));
+    let mut doc = AutoCommit::new().with_author(Some(ffff.clone())).unwrap();
     doc.put(ROOT, "key1", "val1").unwrap();
     doc.put(ROOT, "counter", ScalarValue::counter(10)).unwrap();
     doc.increment(ROOT, "counter", 1).unwrap();
@@ -701,7 +703,7 @@ fn mask_reflected_in_hydrate_with_implicit_and_explicit_current_heads() {
     let heads1 = doc.get_heads();
     let before = doc.hydrate(&ROOT, None).unwrap();
 
-    doc.set_author(Some(aaaa.clone()));
+    doc.set_author(Some(aaaa.clone())).unwrap();
     doc.put(ROOT, "key1", "val2").unwrap();
     doc.increment(ROOT, "counter", 2).unwrap();
     doc.insert(&list, 3, "cat").unwrap();
@@ -746,12 +748,12 @@ fn mask_reflected_in_hydrate_with_implicit_and_explicit_current_heads() {
 fn masked_text_delete_preserves_positional_get() {
     let good = Author::try_from("900d").unwrap();
     let bad = Author::try_from("badd").unwrap();
-    let mut doc = AutoCommit::new().with_author(Some(good));
+    let mut doc = AutoCommit::new().with_author(Some(good)).unwrap();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
     doc.splice_text(&text, 0, 0, "abc").unwrap();
     doc.commit();
 
-    let mut b = doc.fork().with_author(Some(bad.clone()));
+    let mut b = doc.fork().with_author(Some(bad.clone())).unwrap();
     b.splice_text(&text, 0, 1, "").unwrap();
     b.commit();
 
@@ -787,12 +789,12 @@ fn masked_text_delete_preserves_positional_get() {
 fn masked_list_increment_does_not_leak() {
     let good = Author::try_from("900d").unwrap();
     let bad = Author::try_from("badd").unwrap();
-    let mut doc = AutoCommit::new().with_author(Some(good));
+    let mut doc = AutoCommit::new().with_author(Some(good)).unwrap();
     let list = doc.put_object(ROOT, "list", ObjType::List).unwrap();
     doc.insert(&list, 0, ScalarValue::counter(10)).unwrap();
     doc.commit();
 
-    let mut b = doc.fork().with_author(Some(bad.clone()));
+    let mut b = doc.fork().with_author(Some(bad.clone())).unwrap();
     b.increment(&list, 0, 5).unwrap();
     b.commit();
 
@@ -818,11 +820,11 @@ fn masked_list_increment_does_not_leak() {
 fn mask_is_included_in_incremental_diff() {
     let good = Author::try_from("aaaa").unwrap();
     let bad = Author::try_from("ffff").unwrap();
-    let mut doc = AutoCommit::new().with_author(Some(good));
+    let mut doc = AutoCommit::new().with_author(Some(good)).unwrap();
     doc.put(ROOT, "key", "original").unwrap();
     let epoch = doc.get_heads();
 
-    let mut fork = doc.fork().with_author(Some(bad.clone()));
+    let mut fork = doc.fork().with_author(Some(bad.clone())).unwrap();
     fork.put(ROOT, "key", "replacement").unwrap();
     doc.merge(&mut fork).unwrap();
     doc.update_diff_cursor();
@@ -848,12 +850,12 @@ fn mask_is_included_in_incremental_diff() {
 fn unmask_is_included_in_incremental_diff() {
     let good = Author::try_from("aaaa").unwrap();
     let bad = Author::try_from("ffff").unwrap();
-    let mut doc = AutoCommit::new().with_author(Some(good));
+    let mut doc = AutoCommit::new().with_author(Some(good)).unwrap();
     doc.put(ROOT, "key", "original").unwrap();
 
     // Bad overwrites the key before the epoch, then makes more changes
     // after it.
-    let mut fork = doc.fork().with_author(Some(bad.clone()));
+    let mut fork = doc.fork().with_author(Some(bad.clone())).unwrap();
     fork.put(ROOT, "key", "value2").unwrap();
     doc.merge(&mut fork).unwrap();
     let epoch = doc.get_heads();
@@ -913,10 +915,10 @@ fn unmask_is_included_in_incremental_diff() {
 fn historical_diff_reflects_current_write_frontier_state() {
     let good = Author::try_from("aaaa").unwrap();
     let bad = Author::try_from("ffff").unwrap();
-    let mut doc = AutoCommit::new().with_author(Some(good));
+    let mut doc = AutoCommit::new().with_author(Some(good)).unwrap();
     doc.put(ROOT, "key", "original").unwrap();
     let epoch = doc.get_heads();
-    let mut fork = doc.fork().with_author(Some(bad.clone()));
+    let mut fork = doc.fork().with_author(Some(bad.clone())).unwrap();
     fork.put(ROOT, "key", "replacement").unwrap();
     doc.merge(&mut fork).unwrap();
     let heads = doc.get_heads();
@@ -954,13 +956,13 @@ fn historical_diff_reflects_current_write_frontier_state() {
 fn write_frontier_preserves_pending_patch_paths_and_order() {
     let good = Author::try_from("aaaa").unwrap();
     let bad = Author::try_from("ffff").unwrap();
-    let mut doc = AutoCommit::new().with_author(Some(good));
+    let mut doc = AutoCommit::new().with_author(Some(good)).unwrap();
     let list = doc.put_object(ROOT, "list", ObjType::List).unwrap();
     let good_map = doc.insert_object(&list, 0, ObjType::Map).unwrap();
     doc.put(&good_map, "value", "initial").unwrap();
     let epoch = doc.get_heads();
 
-    let mut fork = doc.fork().with_author(Some(bad.clone()));
+    let mut fork = doc.fork().with_author(Some(bad.clone())).unwrap();
     let bad_map = fork.insert_object(&list, 0, ObjType::Map).unwrap();
     fork.put(&bad_map, "bad", true).unwrap();
     doc.merge(&mut fork).unwrap();
@@ -987,6 +989,7 @@ fn caller_owned_write_frontier_log_tracks_actor_reordering() {
     let author = Author::try_from("aaaa").unwrap();
     let mut doc = Automerge::new_with_encoding(TextEncoding::UnicodeCodePoint)
         .with_author(Some(author.clone()))
+        .unwrap()
         .with_actor(ActorId::from(vec![0x80]));
     let mut tx = doc.transaction();
     let text = tx.put_object(ROOT, "text", ObjType::Text).unwrap();
@@ -1001,7 +1004,8 @@ fn caller_owned_write_frontier_log_tracks_actor_reordering() {
     // The fresh write-frontier log already references actor 0x80. A subsequent
     // transaction inserts actor 0x00 before it in the actor table. These fixed
     // identities make the required reindexing deterministic.
-    doc.set_author(Some(Author::try_from("bbbb").unwrap()));
+    doc.set_author(Some(Author::try_from("bbbb").unwrap()))
+        .unwrap();
     doc.set_actor(ActorId::from(vec![0x00]));
     let mut tx = doc.transaction_log_patches(log).unwrap();
     tx.put(ROOT, "other", 1).unwrap();
@@ -1018,11 +1022,11 @@ fn caller_owned_write_frontier_log_tracks_actor_reordering() {
 fn mask_tracks_the_isolated_view() {
     let good = Author::try_from("aaaa").unwrap();
     let bad = Author::try_from("ffff").unwrap();
-    let mut doc = AutoCommit::new().with_author(Some(good));
+    let mut doc = AutoCommit::new().with_author(Some(good)).unwrap();
     let list = doc.put_object(ROOT, "list", ObjType::List).unwrap();
     doc.insert(&list, 0, 1).unwrap();
     let epoch = doc.get_heads();
-    let mut fork = doc.fork().with_author(Some(bad.clone()));
+    let mut fork = doc.fork().with_author(Some(bad.clone())).unwrap();
     fork.insert(&list, 0, 2).unwrap();
     doc.merge(&mut fork).unwrap();
 
@@ -1123,7 +1127,8 @@ fn load_with_write_frontier_at_heads_hides_nothing() {
         automerge::LoadOptions::new().write_frontier(write_frontier.clone()),
     )
     .unwrap()
-    .with_author(Some(alice.clone()));
+    .with_author(Some(alice.clone()))
+    .unwrap();
 
     assert!(loaded.is_author_masked(&alice));
     assert_eq!(loaded.get_write_frontier(), write_frontier);
@@ -1181,12 +1186,14 @@ fn load_with_write_frontier_before_heads_hides_later_ops() {
 #[test]
 fn load_incremental_into_empty_doc_preserves_author() {
     let alice = Author::try_from("aaaa").unwrap();
-    let mut doc = Automerge::new().with_author(Some(alice.clone()));
+    let mut doc = Automerge::new().with_author(Some(alice.clone())).unwrap();
     doc.mask_author(alice.clone(), &[], &mut PatchLog::inactive())
         .unwrap();
 
     // A non-empty document from another author.
-    let mut other = AutoCommit::new().with_author(Some(Author::try_from("bbbb").unwrap()));
+    let mut other = AutoCommit::new()
+        .with_author(Some(Author::try_from("bbbb").unwrap()))
+        .unwrap();
     other.put(ROOT, "seed", 1).unwrap();
     let bytes = other.document().save();
 

@@ -22,6 +22,7 @@ fn fixture(seed: [u8; 32]) -> (Vec<Change>, ActorTable, Authors, SigningKey) {
     let author = Author::from(key.verifying_key().to_bytes().to_vec());
     let mut doc = AutoCommit::new()
         .with_author(Some(author.clone()))
+        .unwrap()
         .with_actor(ActorId::from([2]));
     for value in [1, 2] {
         doc.put(ROOT, "value", value).unwrap();

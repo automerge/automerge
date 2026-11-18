@@ -311,7 +311,7 @@ pub use change_graph::{Fragment, InvalidFragmentBytes};
 pub use cursor::{Cursor, CursorPosition, MoveCursor, OpCursor};
 pub use error::InvalidActorId;
 pub use error::InvalidChangeHashSlice;
-pub use error::{AutomergeError, PatchLogMismatch};
+pub use error::{AutomergeError, PatchLogMismatch, SigningAuthorError};
 pub use exid::{ExId as ObjId, ObjIdFromBytesError};
 pub use legacy::Change as ExpandedChange;
 pub use op_set2::{ChangeMetadata, Parent, Parents, ScalarValue as ScalarValueRef, ValueRef};

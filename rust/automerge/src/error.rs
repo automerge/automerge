@@ -10,6 +10,22 @@ use thiserror::Error;
 #[error("patch logs cannot be shared between documents; this probably means a PatchLog created for one document was reused with another")]
 pub struct PatchLogMismatch;
 
+/// A signing-mode current author is absent or cannot supply a usable Ed25519 key.
+///
+/// Returned by author setters and signing-mode construction. Rejection leaves
+/// the previous author and actor unchanged. No signing key is required.
+#[derive(Error, Debug)]
+#[error("{0}")]
+pub struct SigningAuthorError(#[source] pub(crate) SigningAuthorErrorInner);
+
+#[derive(Error, Debug)]
+pub(crate) enum SigningAuthorErrorInner {
+    #[error("signing mode needs an author")]
+    MissingAuthor,
+    #[error("signing author is unusable: {0}")]
+    InvalidKey(#[source] crate::signature::ed25519::error::VerifyingAuthor),
+}
+
 #[derive(Error, Debug)]
 pub enum AutomergeError {
     #[error(transparent)]
@@ -75,6 +91,8 @@ pub enum AutomergeError {
     HydrateError(#[from] HydrateError),
     #[error(transparent)]
     PatchLogMismatch(#[from] PatchLogMismatch),
+    #[error(transparent)]
+    SigningAuthor(#[from] SigningAuthorError),
     #[error("{0}")]
     EncodingError(String),
     #[error("failed to unbundle: {0}")]

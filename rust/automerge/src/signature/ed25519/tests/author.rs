@@ -10,6 +10,7 @@ use crate::{ActorId, Author, AutoCommit, Change, ROOT};
 pub(super) fn changes(actor: u8, author: Author<'static>) -> Vec<Change> {
     let mut doc = AutoCommit::new()
         .with_author(Some(author))
+        .unwrap()
         .with_actor(ActorId::from([actor]));
     for value in [1, 2] {
         doc.put(ROOT, "value", value).unwrap();

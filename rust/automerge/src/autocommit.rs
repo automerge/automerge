@@ -107,27 +107,32 @@ impl AutoCommit {
         }
     }
 
-    /// Create a new empty document in required signing mode.
-    pub fn signing() -> AutoCommit {
-        Self::signing_with_encoding(TextEncoding::platform_default())
+    /// Create a new empty document in required signing mode with `author` as
+    /// its current author. See [`Automerge::signing`].
+    pub fn signing(author: Author<'static>) -> Result<AutoCommit, crate::SigningAuthorError> {
+        Self::signing_with_encoding(author, TextEncoding::platform_default())
     }
 
-    /// Create a new empty document in required signing mode with an explicit text encoding.
-    pub fn signing_with_encoding(encoding: TextEncoding) -> AutoCommit {
-        AutoCommit {
-            doc: Automerge::signing_with_encoding(encoding),
+    /// Create a new empty document in required signing mode with an explicit
+    /// text encoding. See [`Automerge::signing_with_encoding`].
+    pub fn signing_with_encoding(
+        author: Author<'static>,
+        encoding: TextEncoding,
+    ) -> Result<AutoCommit, crate::SigningAuthorError> {
+        Ok(AutoCommit {
+            doc: Automerge::signing_with_encoding(author, encoding)?,
             transaction: None,
             patch_log: PatchLog::inactive(),
             diff_cursor: Vec::new(),
             save_cursor: Vec::new(),
             isolation: None,
-        }
+        })
     }
 
     /// Borrow this document's [`crate::signing::SigningDocument`] handle.
     pub fn try_signing(
         &mut self,
-    ) -> Result<crate::signing::SigningDocument<'_>, crate::signing::error::SigningMode> {
+    ) -> Result<crate::signing::SigningDocument<'_>, crate::signing::error::SigningAccess> {
         self.ensure_transaction_closed();
         self.doc.try_signing()
     }
@@ -380,16 +385,33 @@ impl AutoCommit {
         self
     }
 
-    pub fn with_author(mut self, author: Option<Author<'static>>) -> Self {
-        self.ensure_transaction_closed();
-        self.doc.set_author(author);
-        self
+    /// Set the author using [`Self::set_author`], consuming this document.
+    ///
+    /// On error the consumed document is not returned. Use the mutable setter
+    /// when ownership must be preserved after rejection.
+    pub fn with_author(
+        mut self,
+        author: Option<Author<'static>>,
+    ) -> Result<Self, crate::SigningAuthorError> {
+        self.set_author(author)?;
+        Ok(self)
     }
 
-    pub fn set_author(&mut self, author: Option<Author<'static>>) -> &mut Self {
+    /// Set the current author, committing pending edits under the previous author.
+    ///
+    /// # Errors
+    ///
+    /// Required-mode validation happens before closing an open transaction, so
+    /// rejection leaves pending edits, author, actor and patch state unchanged.
+    /// Unsigned mode accepts any author, including `None`.
+    pub fn set_author(
+        &mut self,
+        author: Option<Author<'static>>,
+    ) -> Result<&mut Self, crate::SigningAuthorError> {
+        self.doc.validate_author(author.as_ref())?;
         self.ensure_transaction_closed();
-        self.doc.set_author(author);
-        self
+        self.doc.set_author(author)?;
+        Ok(self)
     }
 
     pub fn get_actor(&self) -> &ActorId {
@@ -1463,6 +1485,10 @@ impl SyncDoc for SyncWrapper<'_> {
             .receive_sync_message_log_patches(sync_state, message, patch_log)
     }
 }
+
+#[cfg(test)]
+#[path = "autocommit/author_tests.rs"]
+mod author_tests;
 
 #[cfg(test)]
 mod tests {

@@ -1856,7 +1856,7 @@ mod tests {
     #[test]
     fn batch_multiple_changes_same_author() {
         let author = crate::Author::try_from("aabbccdd").unwrap();
-        let mut doc1 = AutoCommit::new().with_author(Some(author.clone()));
+        let mut doc1 = AutoCommit::new().with_author(Some(author.clone())).unwrap();
         doc1.put(&ROOT, "key1", "value1").unwrap();
         doc1.commit();
         doc1.put(&ROOT, "key2", "value2").unwrap();

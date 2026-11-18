@@ -70,9 +70,9 @@ impl<'a> VerifyingAuthor<'a> {
     /// small-order key. A successful construction is not signature verification.
     pub(crate) fn new(author: Author<'a>) -> Result<Self, error::VerifyingAuthor> {
         let key = ed25519_dalek::VerifyingKey::try_from(author.as_bytes())
-            .map_err(error::VerifyingAuthorInner::Key)?;
+            .map_err(error::VerifyingAuthor::invalid_key)?;
         if key.is_weak() {
-            Err(error::VerifyingAuthorInner::WeakKey.into())
+            Err(error::VerifyingAuthor::weak_key())
         } else {
             Ok(Self { author, key })
         }

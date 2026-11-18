@@ -360,6 +360,7 @@ impl Runner {
         // actor id.
         let mut main = AutoCommit::new_with_encoding(ENCODING)
             .with_author(Some(carol.clone()))
+            .unwrap()
             .with_actor(ActorId::from(vec![0x01]));
         // A shared init commit creates the sequence objects, so peer and
         // local write-frontier boundaries (all at or after these heads) never
@@ -371,6 +372,7 @@ impl Runner {
         let peer = |main: &mut AutoCommit, author: &Author<'static>, actor: u8| {
             main.fork()
                 .with_author(Some(author.clone()))
+                .unwrap()
                 .with_actor(ActorId::from(vec![actor]))
         };
         let peers = [peer(&mut main, &alice, 0xA0), peer(&mut main, &bob, 0xB0)];
@@ -938,12 +940,14 @@ fn regression_masked_overwrite_keeps_doc_op_a_conflict_candidate() {
     let bob = Author::try_from("bbbb").unwrap();
     let mut a = AutoCommit::new_with_encoding(ENCODING)
         .with_author(Some(alice))
+        .unwrap()
         .with_actor(ActorId::from(vec![0xA0]));
     let child = a.put_object(ROOT, "k3", ObjType::Map).unwrap();
     a.put(&child, "c0", 0).unwrap();
     a.commit();
     let mut b = AutoCommit::new_with_encoding(ENCODING)
         .with_author(Some(bob.clone()))
+        .unwrap()
         .with_actor(ActorId::from(vec![0xB0]));
     b.put(ROOT, "k3", 0).unwrap();
     b.commit();
@@ -1011,7 +1015,7 @@ proptest! {
         let alice = Author::try_from("aaaa").unwrap();
         let bob = Author::try_from("bbbb").unwrap();
         let mut a = AutoCommit::new_with_encoding(ENCODING)
-            .with_author(Some(alice.clone()))
+            .with_author(Some(alice.clone())).unwrap()
             .with_actor(ActorId::from(vec![0xA0]));
         for (i, val) in alice_vals.iter().enumerate() {
             a.put(ROOT, key_name(i as u8), *val).unwrap();
@@ -1021,7 +1025,7 @@ proptest! {
         let boundary = a.get_heads();
         let mut b = a
             .fork()
-            .with_author(Some(bob))
+            .with_author(Some(bob)).unwrap()
             .with_actor(ActorId::from(vec![0xB0]));
         for (i, val) in bob_vals.iter().enumerate() {
             b.put(ROOT, key_name(i as u8), *val).unwrap();
@@ -1113,6 +1117,7 @@ fn regression_reveal_under_visible_mark_carries_the_mark() {
     let carol = Author::try_from("cccc").unwrap();
     let mut main = AutoCommit::new_with_encoding(ENCODING)
         .with_author(Some(carol.clone()))
+        .unwrap()
         .with_actor(ActorId::from(vec![0x01]));
     let text = main.put_object(ROOT, "text", ObjType::Text).unwrap();
     main.commit();
@@ -1123,6 +1128,7 @@ fn regression_reveal_under_visible_mark_carries_the_mark() {
     let mut peer = main
         .fork()
         .with_author(Some(alice.clone()))
+        .unwrap()
         .with_actor(ActorId::from(vec![0xA0]));
     peer.mark(
         &text,

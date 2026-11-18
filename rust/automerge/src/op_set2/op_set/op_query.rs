@@ -152,10 +152,10 @@ mod tests {
     /// A two-author map, masked at its heads so that a mask is present but
     /// nothing is hidden.
     fn masked_doc() -> AutoCommit {
-        let mut doc = AutoCommit::new().with_author(Some(author(1)));
+        let mut doc = AutoCommit::new().with_author(Some(author(1))).unwrap();
         doc.put(ROOT, "k", 1).unwrap();
         doc.commit();
-        doc.set_author(Some(author(2)));
+        doc.set_author(Some(author(2))).unwrap();
         doc.put(ROOT, "k", 2).unwrap();
         doc.commit();
         let heads = doc.get_heads();

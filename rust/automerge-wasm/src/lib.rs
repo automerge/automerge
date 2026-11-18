@@ -370,7 +370,9 @@ export type LoadOptions = {
   unchecked?: boolean;
   allowMissingDeps?: boolean;
   convertImmutableStringsToText?: boolean;
+  // Load in required signing mode. Requires `author`.
   signing?: boolean;
+  author?: Author;
 };
 
 // if recursive is false do not diff child objects
@@ -380,7 +382,9 @@ export type DiffOptions = {
 
 export type InitOptions = {
   actor?: Actor;
+  // Create in required signing mode. Requires `author`.
   signing?: boolean;
+  author?: Author;
 };
 
 export function create(options?: InitOptions): Automerge;
@@ -454,21 +458,22 @@ pub struct Automerge {
 
 #[wasm_bindgen]
 impl Automerge {
-    pub fn new(actor: Option<String>) -> Result<Automerge, error::BadActorId> {
-        Self::new_with_signing(actor, false)
+    pub fn new(actor: Option<String>) -> Result<Automerge, error::Create> {
+        Self::new_with_signing(actor, None)
     }
 
+    /// Create a document, in required signing mode when `signing_author` is given.
     fn new_with_signing(
         actor: Option<String>,
-        signing: bool,
-    ) -> Result<Automerge, error::BadActorId> {
-        let mut doc = if signing {
-            AutoCommit::signing_with_encoding(TextEncoding::Utf16CodeUnit)
-        } else {
-            AutoCommit::new_with_encoding(TextEncoding::Utf16CodeUnit)
+        signing_author: Option<Author<'static>>,
+    ) -> Result<Automerge, error::Create> {
+        let mut doc = match signing_author {
+            Some(author) => AutoCommit::signing_with_encoding(author, TextEncoding::Utf16CodeUnit)?,
+            None => AutoCommit::new_with_encoding(TextEncoding::Utf16CodeUnit),
         };
         if let Some(a) = actor {
-            let a = automerge::ActorId::from(hex::decode(a)?.to_vec());
+            let a =
+                automerge::ActorId::from(hex::decode(a).map_err(error::BadActorId::from)?.to_vec());
             doc.set_actor(a);
         }
         Ok(Automerge {
@@ -1615,7 +1620,9 @@ impl Automerge {
             .map(Author::try_from)
             .transpose()
             .map_err(error::BadAuthor::from)?;
-        self.doc.set_author(author);
+        self.doc
+            .set_author(author)
+            .map_err(error::SigningAuthor::from)?;
         Ok(())
     }
 
@@ -1955,13 +1962,31 @@ fn signing_option(options: &JsValue) -> Result<bool, error::BadSigningOption> {
     value.0.as_bool().ok_or(error::BadSigningOption)
 }
 
+/// Resolve the author a signing document is created with.
+///
+/// Returns `None` when `signing` is off. In signing mode an `author` option is
+/// required, and the author's bytes must form a usable Ed25519 key.
+fn signing_author(options: &JsValue) -> Result<Option<Author<'static>>, error::SigningAuthor> {
+    if !signing_option(options)? {
+        return Ok(None);
+    }
+    let author = js_get(options, "author")
+        .ok()
+        .and_then(|a| a.as_string())
+        .map(Author::try_from)
+        .transpose()
+        .map_err(error::BadAuthor::from)?;
+    let author = author.ok_or(error::SigningAuthor::Missing)?;
+    Ok(Some(author))
+}
+
 // skip_typescript as the definition requires an optional argument so we define
 // the function in the typescript custom section at the top of the file
 #[wasm_bindgen(js_name = create, skip_typescript)]
 pub fn init(options: JsValue) -> Result<Automerge, error::Create> {
     let actor = js_get(&options, "actor").ok().and_then(|a| a.as_string());
-    let signing = signing_option(&options)?;
-    Ok(Automerge::new_with_signing(actor, signing)?)
+    let signing_author = signing_author(&options)?;
+    Automerge::new_with_signing(actor, signing_author)
 }
 
 // skip_typescript as the options argument is optional which can only be typed
@@ -1970,7 +1995,7 @@ pub fn init(options: JsValue) -> Result<Automerge, error::Create> {
 pub fn load(data: Uint8Array, options: JsValue) -> Result<Automerge, error::Load> {
     let data = data.to_vec();
     let actor = js_get(&options, "actor").ok().and_then(|a| a.as_string());
-    let signing = signing_option(&options)?;
+    let signing_author = signing_author(&options)?;
     let unchecked = js_get(&options, "unchecked")
         .ok()
         .and_then(|v1| v1.as_bool())
@@ -2003,8 +2028,8 @@ pub fn load(data: Uint8Array, options: JsValue) -> Result<Automerge, error::Load
         .verification_mode(verification_mode)
         .migrate_strings(string_migration)
         .text_encoding(TextEncoding::Utf16CodeUnit);
-    if signing {
-        load_options = load_options.signing();
+    if let Some(author) = signing_author {
+        load_options = load_options.signing().author(author);
     }
     let mut doc = am::AutoCommit::load_with_options(&data, load_options)?;
     if let Some(s) = actor {
@@ -2492,6 +2517,25 @@ pub mod error {
     #[error("signing option must be a boolean")]
     pub struct BadSigningOption;
 
+    /// A signing document was created, loaded, or updated without a usable author.
+    #[derive(Debug, thiserror::Error)]
+    pub enum SigningAuthor {
+        #[error(transparent)]
+        BadSigning(#[from] BadSigningOption),
+        #[error(transparent)]
+        BadAuthor(#[from] BadAuthor),
+        #[error("signing documents require an author option")]
+        Missing,
+        #[error(transparent)]
+        Invalid(#[from] automerge::SigningAuthorError),
+    }
+
+    impl From<SigningAuthor> for JsValue {
+        fn from(e: SigningAuthor) -> Self {
+            RangeError::new(&e.to_string()).into()
+        }
+    }
+
     impl From<BadSigningOption> for JsValue {
         fn from(e: BadSigningOption) -> Self {
             RangeError::new(&e.to_string()).into()
@@ -2503,7 +2547,13 @@ pub mod error {
         #[error(transparent)]
         BadActor(#[from] BadActorId),
         #[error(transparent)]
-        BadSigning(#[from] BadSigningOption),
+        SigningAuthor(#[from] SigningAuthor),
+    }
+
+    impl From<automerge::SigningAuthorError> for Create {
+        fn from(e: automerge::SigningAuthorError) -> Self {
+            Self::SigningAuthor(SigningAuthor::Invalid(e))
+        }
     }
 
     impl From<Create> for JsValue {
@@ -2514,7 +2564,7 @@ pub mod error {
 
     #[derive(Debug, thiserror::Error)]
     #[error(transparent)]
-    pub struct SigningMode(#[from] automerge::signing::error::SigningMode);
+    pub struct SigningMode(#[from] automerge::signing::error::SigningAccess);
 
     impl From<SigningMode> for JsValue {
         fn from(e: SigningMode) -> Self {
@@ -2529,7 +2579,7 @@ pub mod error {
         #[error("ed25519 signature must contain 64 bytes, found {0}")]
         BadSignatureLength(usize),
         #[error(transparent)]
-        SigningMode(#[from] automerge::signing::error::SigningMode),
+        SigningMode(#[from] automerge::signing::error::SigningAccess),
         #[error(transparent)]
         Insert(#[from] automerge::signing::error::InsertSignature),
     }
@@ -3001,7 +3051,7 @@ pub mod error {
         #[error(transparent)]
         BadActor(#[from] BadActorId),
         #[error(transparent)]
-        BadSigning(#[from] BadSigningOption),
+        SigningAuthor(#[from] SigningAuthor),
     }
 
     impl From<Load> for JsValue {

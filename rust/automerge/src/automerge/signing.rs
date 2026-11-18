@@ -4,6 +4,10 @@
 //! signed fragment stream with [`crate::LoadOptions::signing`]), then obtain a
 //! [`SigningDocument`] through [`Automerge::try_signing`]. The document retains
 //! its accepted clock, pending groups, and required signatures between borrows.
+//!
+//! A required-mode document always has a current [`Author`] whose bytes form a
+//! usable Ed25519 verifying key. Construction and author setters validate this
+//! before changing any state; see [`crate::SigningAuthorError`].
 
 use std::collections::HashSet;
 use std::ops::RangeBounds;
@@ -13,10 +17,11 @@ use crate::admission::{self, AcceptedHistory};
 use crate::author::Authors;
 use crate::change_graph::ChangeGraph;
 use crate::clock::SeqClock;
+use crate::error::SigningAuthorErrorInner;
 use crate::op_set2::OpSet;
 use crate::signature::{ed25519, Insert, Signature, SignatureStore};
 use crate::storage::signatures::{HashEntries, SignaturesChunk};
-use crate::{Author, Change, ChangeHash, Fragment, TextEncoding};
+use crate::{Author, Change, ChangeHash, Fragment, SigningAuthorError, TextEncoding};
 
 use super::Automerge;
 
@@ -80,6 +85,20 @@ pub(crate) enum SigningState {
 impl SigningState {
     pub(crate) fn is_required(&self) -> bool {
         matches!(self, Self::Required(_))
+    }
+
+    /// Check that `author` may become the document's current author in this mode.
+    ///
+    /// Unsigned mode accepts anything, including `None`. Required mode needs an
+    /// author whose bytes form a usable Ed25519 verifying key.
+    pub(super) fn validate_author(
+        &self,
+        author: Option<&Author<'static>>,
+    ) -> Result<(), SigningAuthorError> {
+        match self {
+            Self::Unsigned => Ok(()),
+            Self::Required(_) => prepare_author(author).map(drop),
+        }
     }
 
     pub(super) fn has_pending_groups(&self) -> bool {
@@ -181,6 +200,18 @@ impl SigningState {
             SigningState::Required(signing) => Ok(signing),
         }
     }
+}
+
+/// Prepare the Ed25519 verifying key for a required-mode current author.
+///
+/// Fails if no author is supplied or its bytes are not a usable key. Successful
+/// preparation is not signature verification.
+fn prepare_author<'a>(
+    author: Option<&'a Author<'static>>,
+) -> Result<ed25519::VerifyingAuthor<'a>, SigningAuthorError> {
+    let author = author.ok_or(SigningAuthorError(SigningAuthorErrorInner::MissingAuthor))?;
+    ed25519::VerifyingAuthor::new(author.as_borrowed())
+        .map_err(|source| SigningAuthorError(SigningAuthorErrorInner::InvalidKey(source)))
 }
 
 /// Long-lived required-mode data owned by the document.
@@ -310,12 +341,15 @@ pub(super) fn has_signature(
 }
 
 /// Access to a document in required signing mode, obtained via [`Automerge::try_signing`].
+///
+/// Holding a handle guarantees the document's current author has been prepared
+/// as a usable Ed25519 verifying key.
 #[derive(Debug)]
 pub struct SigningDocument<'a> {
     graph: &'a ChangeGraph,
     ops: &'a OpSet,
     authors: &'a Authors,
-    current_author: Option<&'a Author<'static>>,
+    author: ed25519::VerifyingAuthor<'a>,
     state: &'a mut RequiredSigning,
 }
 
@@ -390,10 +424,7 @@ impl<'a> SigningDocument<'a> {
     /// Only commits created locally on this document are tracked here; changes
     /// imported from outside the document are never returned.
     pub fn required_signatures(&self) -> Vec<ChangeHash> {
-        let Some(current_author) = self.current_author else {
-            return Vec::new();
-        };
-        let current_author = current_author.as_borrowed();
+        let current_author = self.author.author().as_borrowed();
         self.state
             .local_unsigned
             .iter()
@@ -460,27 +491,55 @@ impl AcceptedHistory for SigningDocument<'_> {
 }
 
 impl Automerge {
-    /// Create a new empty document in required signing mode.
-    pub fn signing() -> Self {
-        Self::signing_with_encoding(TextEncoding::platform_default())
+    /// Create a new empty document in required signing mode with `author` as
+    /// its current author.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SigningAuthorError`] if `author` cannot supply a usable Ed25519
+    /// verifying key.
+    pub fn signing(author: Author<'static>) -> Result<Self, SigningAuthorError> {
+        Self::signing_with_encoding(author, TextEncoding::platform_default())
     }
 
-    /// Create a new empty document in required signing mode with an explicit text encoding.
-    pub fn signing_with_encoding(encoding: TextEncoding) -> Self {
+    /// Create a new empty document in required signing mode with an explicit
+    /// text encoding. See [`Self::signing`].
+    pub fn signing_with_encoding(
+        author: Author<'static>,
+        encoding: TextEncoding,
+    ) -> Result<Self, SigningAuthorError> {
+        prepare_author(Some(&author))?;
         let mut doc = Self::new_with_encoding(encoding);
-        let signing = SigningState::Required(RequiredSigning::new(doc.actors()));
-        doc.signing = signing;
-        doc
+        doc.signing = SigningState::Required(RequiredSigning::new(doc.actors()));
+        doc.author = Some(author);
+        Ok(doc)
+    }
+
+    /// Check that `author` may become this document's current author.
+    ///
+    /// See [`SigningState::validate_author`].
+    pub(crate) fn validate_author(
+        &self,
+        author: Option<&Author<'static>>,
+    ) -> Result<(), SigningAuthorError> {
+        self.signing.validate_author(author)
     }
 
     /// Borrow this document's [`SigningDocument`] handle.
-    pub fn try_signing(&mut self) -> Result<SigningDocument<'_>, error::SigningMode> {
+    ///
+    /// # Errors
+    ///
+    /// Fails if the document is not in required signing mode, or if its current
+    /// author is missing or unusable. The latter indicates the author invariant
+    /// was bypassed; constructors and setters never produce it.
+    pub fn try_signing(&mut self) -> Result<SigningDocument<'_>, error::SigningAccess> {
         let state = self.signing.required_mut()?;
+        let author = prepare_author(self.author.as_ref())?;
         Ok(SigningDocument {
             graph: &self.change_graph,
             ops: &self.ops,
             authors: &self.authors,
-            current_author: self.author.as_ref(),
+            author,
             state,
         })
     }
@@ -526,6 +585,15 @@ pub mod error {
     pub enum SigningMode {
         #[error("operation requires a signing document")]
         Required,
+    }
+
+    /// Failure to obtain a [`super::SigningDocument`] handle.
+    #[derive(Debug, thiserror::Error)]
+    pub enum SigningAccess {
+        #[error(transparent)]
+        Mode(#[from] SigningMode),
+        #[error(transparent)]
+        Author(#[from] crate::SigningAuthorError),
     }
 }
 

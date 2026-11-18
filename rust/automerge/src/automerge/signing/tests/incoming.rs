@@ -21,6 +21,15 @@ fn author(key: &SigningKey) -> Author<'static> {
     Author::from(key.verifying_key().to_bytes().to_vec())
 }
 
+/// A receiving replica with its own (never signing) author.
+fn new_receiver() -> Automerge {
+    Automerge::signing(author(&key(200))).unwrap()
+}
+
+fn signing_load() -> LoadOptions<'static> {
+    LoadOptions::new().signing().author(author(&key(200)))
+}
+
 fn sig(key: &SigningKey, hash: ChangeHash) -> Signature {
     Signature::ed25519(ed25519::Signature::from_bytes(
         key.sign(&signing_message(&hash)).to_bytes(),
@@ -78,14 +87,14 @@ fn framed(chunk_type: ChunkType, body: &[u8]) -> Vec<u8> {
 fn signed_fragment_stream_loads_reexports_and_reclaims_superseded_signatures() {
     let k1 = key(1);
     let k2 = key(2);
-    let mut sender = Automerge::signing()
-        .with_author(Some(author(&k1)))
+    let mut sender = Automerge::signing(author(&k1))
+        .unwrap()
         .with_actor(ActorId::from([1]));
     let a1 = append_at_level(&mut sender, None, "a", 1, 0);
-    sender.set_author(Some(author(&k2)));
+    sender.set_author(Some(author(&k2))).unwrap();
     sender.set_actor(ActorId::from([2]));
     let b1 = append_at_level(&mut sender, None, "b", 2, 1);
-    sender.set_author(Some(author(&k1)));
+    sender.set_author(Some(author(&k1))).unwrap();
     sender.set_actor(ActorId::from([1]));
     let a2 = append_at_level(&mut sender, None, "c", 3, 0);
 
@@ -99,11 +108,8 @@ fn signed_fragment_stream_loads_reexports_and_reclaims_superseded_signatures() {
     let stream = encoded.concat();
 
     let mut initial_log = PatchLog::active();
-    let mut loaded = Automerge::load_with_options(
-        &stream,
-        LoadOptions::new().signing().patch_log(&mut initial_log),
-    )
-    .unwrap();
+    let mut loaded =
+        Automerge::load_with_options(&stream, signing_load().patch_log(&mut initial_log)).unwrap();
     assert_eq!(loaded.get_heads(), sender.get_heads());
     assert_eq!(loaded.hydrate(None), sender.hydrate(None));
     assert!(!loaded.make_patches(&mut initial_log).is_empty());
@@ -114,7 +120,7 @@ fn signed_fragment_stream_loads_reexports_and_reclaims_superseded_signatures() {
     assert_eq!(loaded.bundle_fragments(loaded.fragments(..)), encoded);
 
     // Incremental superseding delivery reclaims covered resident signatures.
-    let mut incremental = Automerge::signing();
+    let mut incremental = new_receiver();
     let a1_loose = attach_signatures(
         sender.get_change_by_hash(&a1).unwrap().raw_bytes(),
         [(a1, sig(&k1, a1))],
@@ -142,11 +148,11 @@ fn signed_fragment_stream_loads_reexports_and_reclaims_superseded_signatures() {
 fn out_of_order_groups_wait_for_causal_dependencies_and_author_bindings() {
     let k1 = key(1);
     let k2 = key(2);
-    let mut sender = Automerge::signing()
-        .with_author(Some(author(&k1)))
+    let mut sender = Automerge::signing(author(&k1))
+        .unwrap()
         .with_actor(ActorId::from([1]));
     let a1 = append_at_level(&mut sender, None, "a", 1, 0);
-    sender.set_author(Some(author(&k2)));
+    sender.set_author(Some(author(&k2))).unwrap();
     sender.set_actor(ActorId::from([2]));
     let b1 = append_at_level(&mut sender, None, "b", 2, 1);
     let b2 = append_at_level(&mut sender, None, "b2", 3, 1);
@@ -159,15 +165,13 @@ fn out_of_order_groups_wait_for_causal_dependencies_and_author_bindings() {
     let (f_bytes, g_bytes) = (&encoded[0], &encoded[1]);
 
     assert!(matches!(
-        Automerge::load_with_options(g_bytes, LoadOptions::new().signing()),
+        Automerge::load_with_options(g_bytes, signing_load()),
         Err(AutomergeError::MissingDeps)
     ));
 
     let mut from_ignore = Automerge::load_with_options(
         g_bytes,
-        LoadOptions::new()
-            .signing()
-            .on_partial_load(OnPartialLoad::Ignore),
+        signing_load().on_partial_load(OnPartialLoad::Ignore),
     )
     .unwrap();
     assert!(from_ignore.get_heads().is_empty());
@@ -177,12 +181,11 @@ fn out_of_order_groups_wait_for_causal_dependencies_and_author_bindings() {
     assert!(from_ignore.try_signing().unwrap().is_accepted(&b2));
 
     let reversed = [g_bytes.as_slice(), f_bytes.as_slice()].concat();
-    let mut single_call =
-        Automerge::load_with_options(&reversed, LoadOptions::new().signing()).unwrap();
+    let mut single_call = Automerge::load_with_options(&reversed, signing_load()).unwrap();
     assert_eq!(single_call.get_heads(), [b2]);
     assert!(single_call.try_signing().unwrap().is_accepted(&b2));
 
-    let mut receiver = Automerge::signing();
+    let mut receiver = new_receiver();
     assert_eq!(receiver.load_incremental(g_bytes).unwrap(), 0);
     assert_eq!(receiver.get_missing_deps(&[]), vec![b1]);
     assert_eq!(receiver.load_incremental(f_bytes).unwrap(), 3);
@@ -195,8 +198,8 @@ fn out_of_order_groups_wait_for_causal_dependencies_and_author_bindings() {
 fn missing_malformed_or_invalid_proofs_do_not_mutate_state() {
     let k1 = key(1);
     let wrong = key(9);
-    let mut sender = Automerge::signing()
-        .with_author(Some(author(&k1)))
+    let mut sender = Automerge::signing(author(&k1))
+        .unwrap()
         .with_actor(ActorId::from([1]));
     let a1 = append_at_level(&mut sender, None, "a", 1, 1);
     let a2 = append_at_level(&mut sender, None, "b", 2, 1);
@@ -236,8 +239,8 @@ fn missing_malformed_or_invalid_proofs_do_not_mutate_state() {
         ]
         .concat(),
     ] {
-        assert!(Automerge::load_with_options(&bad_stream, LoadOptions::new().signing()).is_err());
-        let mut receiver = Automerge::signing();
+        assert!(Automerge::load_with_options(&bad_stream, signing_load()).is_err());
+        let mut receiver = new_receiver();
         assert!(receiver.load_incremental(&bad_stream).is_err());
         assert!(receiver.get_heads().is_empty());
         assert!(receiver.get_missing_deps(&[]).is_empty());
@@ -248,7 +251,7 @@ fn missing_malformed_or_invalid_proofs_do_not_mutate_state() {
     let mut authorless = Automerge::new().with_actor(ActorId::from([3]));
     let h_none = append_at_level(&mut authorless, None, "x", 1, 0);
     let raw_none = authorless.get_change_by_hash(&h_none).unwrap();
-    let mut receiver = Automerge::signing();
+    let mut receiver = new_receiver();
     assert!(matches!(
         receiver.load_incremental(&attach_signatures(raw_none.raw_bytes(), [(h_none, sig(&k1, h_none))])),
         Err(AutomergeError::Signing(SigningError::InvalidProof(
@@ -258,6 +261,7 @@ fn missing_malformed_or_invalid_proofs_do_not_mutate_state() {
 
     let mut bad_author = Automerge::new()
         .with_author(Some(Author::from(vec![1, 2, 3])))
+        .unwrap()
         .with_actor(ActorId::from([4]));
     let h_bad = append_at_level(&mut bad_author, None, "y", 1, 0);
     let raw_bad = bad_author.get_change_by_hash(&h_bad).unwrap();
@@ -273,14 +277,14 @@ fn missing_malformed_or_invalid_proofs_do_not_mutate_state() {
 fn neither_other_groups_nor_resident_evidence_repairs_an_incomplete_proof() {
     let k1 = key(1);
     let k2 = key(2);
-    let mut sender = Automerge::signing()
-        .with_author(Some(author(&k1)))
+    let mut sender = Automerge::signing(author(&k1))
+        .unwrap()
         .with_actor(ActorId::from([1]));
     let a1 = append_at_level(&mut sender, None, "a", 1, 0);
-    sender.set_author(Some(author(&k2)));
+    sender.set_author(Some(author(&k2))).unwrap();
     sender.set_actor(ActorId::from([2]));
     let b1 = append_at_level(&mut sender, None, "b", 2, 1);
-    sender.set_author(Some(author(&k1)));
+    sender.set_author(Some(author(&k1))).unwrap();
     sender.set_actor(ActorId::from([1]));
     let a2 = append_at_level(&mut sender, None, "c", 3, 1);
 
@@ -298,14 +302,14 @@ fn neither_other_groups_nor_resident_evidence_repairs_an_incomplete_proof() {
         [g_with_extra.as_slice(), f_incomplete.as_slice()].concat(),
     ] {
         assert!(matches!(
-            Automerge::load_with_options(&stream, LoadOptions::new().signing()),
+            Automerge::load_with_options(&stream, signing_load()),
             Err(AutomergeError::Signing(SigningError::InvalidProof(
                 ProofError::MissingSignature(h)
             ))) if h == a1
         ));
     }
 
-    let mut receiver = Automerge::signing();
+    let mut receiver = new_receiver();
     assert_eq!(receiver.load_incremental(&g_with_extra).unwrap(), 0);
     assert!(matches!(
         receiver.load_incremental(&f_incomplete),
@@ -318,7 +322,7 @@ fn neither_other_groups_nor_resident_evidence_repairs_an_incomplete_proof() {
         sender.get_change_by_hash(&a1).unwrap().raw_bytes(),
         [(a1, sig(&k1, a1))],
     );
-    let mut with_resident = Automerge::signing();
+    let mut with_resident = new_receiver();
     with_resident.load_incremental(&a1_loose).unwrap();
     assert!(matches!(
         with_resident.load_incremental(&f_incomplete),
@@ -340,12 +344,13 @@ fn canonical_membership_diamond_boundaries_and_broken_chains_are_enforced() {
     // 1. Non-diamond: independent a1 (L0) and b1 (L1); c1 (L1) depends on [a1, b1].
     let mut non_diamond = Automerge::new()
         .with_author(Some(author(&k1)))
+        .unwrap()
         .with_actor(ActorId::from([1]));
     let a1 = append_at_level(&mut non_diamond, None, "a", 1, 0);
-    non_diamond.set_author(Some(author(&k2)));
+    non_diamond.set_author(Some(author(&k2))).unwrap();
     non_diamond.set_actor(ActorId::from([2]));
     let b1 = append_at_level(&mut non_diamond, Some(&[]), "b", 2, 1);
-    non_diamond.set_author(Some(author(&k3)));
+    non_diamond.set_author(Some(author(&k3))).unwrap();
     non_diamond.set_actor(ActorId::from([3]));
     let c1 = append_at_level(&mut non_diamond, Some(&[a1, b1]), "c", 3, 1);
 
@@ -368,7 +373,7 @@ fn canonical_membership_diamond_boundaries_and_broken_chains_are_enforced() {
     ]
     .concat();
     assert!(matches!(
-        Automerge::load_with_options(&stream, LoadOptions::new().signing()),
+        Automerge::load_with_options(&stream, signing_load()),
         Err(AutomergeError::Signing(SigningError::InvalidFragment(
             InvalidFragment::NonCanonicalMembership(h)
         ))) if h == c1
@@ -377,12 +382,13 @@ fn canonical_membership_diamond_boundaries_and_broken_chains_are_enforced() {
     // 2. Honest diamond: db1 (L1) depends on da1 (L0); dc1 (L1) depends on [da1, db1].
     let mut diamond = Automerge::new()
         .with_author(Some(author(&k1)))
+        .unwrap()
         .with_actor(ActorId::from([1]));
     let da1 = append_at_level(&mut diamond, None, "a", 1, 0);
-    diamond.set_author(Some(author(&k2)));
+    diamond.set_author(Some(author(&k2))).unwrap();
     diamond.set_actor(ActorId::from([2]));
     let db1 = append_at_level(&mut diamond, Some(&[da1]), "b", 2, 1);
-    diamond.set_author(Some(author(&k3)));
+    diamond.set_author(Some(author(&k3))).unwrap();
     diamond.set_actor(ActorId::from([3]));
     let dc1 = append_at_level(&mut diamond, Some(&[da1, db1]), "c", 3, 1);
 
@@ -399,7 +405,7 @@ fn canonical_membership_diamond_boundaries_and_broken_chains_are_enforced() {
         [(da1, sig(&k1, da1)), (dc1, sig(&k3, dc1))],
     );
 
-    let mut receiver = Automerge::signing();
+    let mut receiver = new_receiver();
     assert_eq!(receiver.load_incremental(&dc1_canonical).unwrap(), 0);
     assert_eq!(receiver.load_incremental(&db1_group).unwrap(), 3);
     assert_eq!(receiver.get_heads(), diamond.get_heads());
@@ -407,7 +413,7 @@ fn canonical_membership_diamond_boundaries_and_broken_chains_are_enforced() {
     assert!(matches!(
         Automerge::load_with_options(
             &[db1_group.as_slice(), dc1_stuffed.as_slice()].concat(),
-            LoadOptions::new().signing(),
+            signing_load(),
         ),
         Err(AutomergeError::Signing(SigningError::InvalidFragment(
             InvalidFragment::NonCanonicalMembership(h)
@@ -415,7 +421,7 @@ fn canonical_membership_diamond_boundaries_and_broken_chains_are_enforced() {
     ));
 
     // 3. Cross-group broken actor chain (X:2 missing direct X:1 predecessor edge).
-    diamond.set_author(Some(author(&k1)));
+    diamond.set_author(Some(author(&k1))).unwrap();
     diamond.set_actor(ActorId::from([1]));
     let dx2 = append_at_level(&mut diamond, Some(&[db1]), "x2", 4, 0);
     let mut expanded = ExpandedChange::from(&diamond.get_change_by_hash(&dx2).unwrap());
@@ -429,7 +435,7 @@ fn canonical_membership_diamond_boundaries_and_broken_chains_are_enforced() {
     assert!(matches!(
         Automerge::load_with_options(
             &[db1_group.as_slice(), bad_dx2_bytes.as_slice()].concat(),
-            LoadOptions::new().signing(),
+            signing_load(),
         ),
         Err(AutomergeError::Signing(SigningError::InvalidFragment(
             InvalidFragment::BrokenActorChain(h)
@@ -444,15 +450,15 @@ fn overlaps_forged_orphans_local_boundaries_partial_tails_and_bypasses() {
     let k3 = key(3);
     let malloy = key(99);
 
-    let mut source = Automerge::signing()
-        .with_author(Some(author(&k1)))
+    let mut source = Automerge::signing(author(&k1))
+        .unwrap()
         .with_actor(ActorId::from([1]));
     let root = append_at_level(&mut source, None, "root", 0, 1);
     let a1 = append_at_level(&mut source, None, "a1", 1, 0);
-    source.set_author(Some(author(&k2)));
+    source.set_author(Some(author(&k2))).unwrap();
     source.set_actor(ActorId::from([2]));
     let b1 = append_at_level(&mut source, Some(&[a1]), "b1", 2, 1);
-    source.set_author(Some(author(&k3)));
+    source.set_author(Some(author(&k3))).unwrap();
     source.set_actor(ActorId::from([3]));
     let c1 = append_at_level(&mut source, Some(&[a1]), "c1", 3, 1);
     for (h, k) in [(root, &k1), (a1, &k1), (b1, &k2), (c1, &k3)] {
@@ -463,11 +469,12 @@ fn overlaps_forged_orphans_local_boundaries_partial_tails_and_bypasses() {
     let fb_bytes = &source.bundle_fragments([source.get_fragment(b1).unwrap()])[0];
     let fc_bytes = &source.bundle_fragments([source.get_fragment(c1).unwrap()])[0];
 
-    let mut receiver = Automerge::signing();
+    let mut receiver = new_receiver();
 
     // Forged orphan claiming unknown Actor 2 seq 2 is purged once real Actor 2 arrives.
     let mut forged = Automerge::new()
         .with_author(Some(author(&malloy)))
+        .unwrap()
         .with_actor(ActorId::from([2]));
     append_at_level(&mut forged, None, "f1", 1, 0);
     let forged_seq2 = append_at_level(&mut forged, None, "f2", 2, 0);
@@ -499,9 +506,7 @@ fn overlaps_forged_orphans_local_boundaries_partial_tails_and_bypasses() {
     let bare_truncated = [bare_root.raw_bytes(), &[0x85, 0x6f, 0x4a, 0x83]].concat();
     let recovered = Automerge::load_with_options(
         &bare_truncated,
-        LoadOptions::new()
-            .signing()
-            .on_partial_load(OnPartialLoad::Ignore),
+        signing_load().on_partial_load(OnPartialLoad::Ignore),
     )
     .unwrap();
     assert!(recovered.get_heads().is_empty());
@@ -509,10 +514,10 @@ fn overlaps_forged_orphans_local_boundaries_partial_tails_and_bypasses() {
     // Entry-point bypasses: snapshots, apply_changes, merge, and sync all reject.
     let snapshot = source.save();
     assert!(matches!(
-        Automerge::load_with_options(&snapshot, LoadOptions::new().signing()),
+        Automerge::load_with_options(&snapshot, signing_load()),
         Err(AutomergeError::Signing(SigningError::SnapshotNotSupported))
     ));
-    let mut target = Automerge::signing();
+    let mut target = new_receiver();
     assert!(matches!(
         target.load_incremental(&snapshot),
         Err(AutomergeError::Signing(SigningError::SnapshotNotSupported))

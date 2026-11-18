@@ -1,24 +1,65 @@
 //! Failures preparing Ed25519 authors or verifying their signatures.
 
+use std::fmt;
+
 use crate::{ActorId, ChangeHash};
 
 /// Author bytes that cannot supply a usable Ed25519 verifying key.
+///
+/// Use [`Self::kind`] for a copyable classification. A decoding failure retains
+/// the library error as its direct source; a weak-key failure has no source.
+/// Private fields and dedicated constructors keep the kind and source paired.
 #[derive(Debug, thiserror::Error)]
-#[error("author bytes are not a usable Ed25519 public key: {0}")]
-pub struct VerifyingAuthor(#[source] pub(super) VerifyingAuthorInner);
+pub struct VerifyingAuthor {
+    kind: VerifyingAuthorKind,
+    #[source]
+    source: Option<ed25519_dalek::SignatureError>,
+}
 
-impl From<VerifyingAuthorInner> for VerifyingAuthor {
-    fn from(inner: VerifyingAuthorInner) -> Self {
-        Self(inner)
+/// Copyable classification of an author-key preparation failure.
+///
+/// The original [`VerifyingAuthor`] error retains its full source chain. This
+/// kind can be copied into independent batch diagnostics without sharing that
+/// source or repeating key preparation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VerifyingAuthorKind {
+    /// The author bytes could not be decoded as an Ed25519 verifying key.
+    InvalidKey,
+    /// The key decodes but has small order and is unsuitable for verification.
+    WeakKey,
+}
+
+impl VerifyingAuthor {
+    pub(super) fn invalid_key(source: ed25519_dalek::SignatureError) -> Self {
+        Self {
+            kind: VerifyingAuthorKind::InvalidKey,
+            source: Some(source),
+        }
+    }
+
+    pub(super) fn weak_key() -> Self {
+        Self {
+            kind: VerifyingAuthorKind::WeakKey,
+            source: None,
+        }
+    }
+
+    /// Classify this failure without consuming it or discarding its source.
+    pub fn kind(&self) -> VerifyingAuthorKind {
+        self.kind
     }
 }
 
-#[derive(Debug, thiserror::Error)]
-pub(super) enum VerifyingAuthorInner {
-    #[error("the public key is considered weak, i.e., the public key has low order")]
-    WeakKey,
-    #[error("failed to parse key, due to {0}")]
-    Key(#[source] ed25519_dalek::SignatureError),
+impl fmt::Display for VerifyingAuthor {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("author bytes are not a usable Ed25519 public key: ")?;
+        match &self.source {
+            Some(source) => write!(f, "failed to parse key, due to {source}"),
+            None => {
+                f.write_str("the public key is considered weak, i.e., the public key has low order")
+            }
+        }
+    }
 }
 
 /// Failure to find a change's prepared verifying author or verify its signature.

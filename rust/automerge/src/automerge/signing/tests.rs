@@ -8,6 +8,7 @@ use crate::{ActorId, Author, Automerge, Change, ChangeHash, PatchLog, ReadDoc, R
 
 use super::error;
 
+mod author_invariant;
 mod fragments;
 mod incoming;
 
@@ -62,7 +63,7 @@ fn unsigned_document_rejects_try_signing_without_converting_mode() {
     let heads = doc.get_heads();
     assert!(matches!(
         doc.try_signing(),
-        Err(error::SigningMode::Required)
+        Err(error::SigningAccess::Mode(error::SigningMode::Required))
     ));
     assert_eq!(doc.get_heads(), heads);
 }
@@ -70,8 +71,8 @@ fn unsigned_document_rejects_try_signing_without_converting_mode() {
 #[test]
 fn local_edits_are_visible_immediately_and_accepted_automatically_when_signed() {
     let k = key(7);
-    let mut doc = Automerge::signing()
-        .with_author(Some(author(&k)))
+    let mut doc = Automerge::signing(author(&k))
+        .unwrap()
         .with_actor(ActorId::from([1]));
     let a1 = append_at_level(&mut doc, None, 1, 0);
 
@@ -93,12 +94,12 @@ fn local_edits_are_visible_immediately_and_accepted_automatically_when_signed() 
 fn insertion_enforces_recorded_change_authors_and_rejects_bad_inputs() {
     let alice = key(7);
     let bob = key(8);
-    let mut doc = Automerge::signing()
-        .with_author(Some(author(&alice)))
+    let mut doc = Automerge::signing(author(&alice))
+        .unwrap()
         .with_actor(ActorId::from([1]));
     let a1 = append_at_level(&mut doc, None, 1, 0);
 
-    doc.set_author(Some(author(&bob)));
+    doc.set_author(Some(author(&bob))).unwrap();
     doc.set_actor(ActorId::from([2]));
     let b1 = append_at_level(&mut doc, None, 2, 0);
 
@@ -118,29 +119,19 @@ fn insertion_enforces_recorded_change_authors_and_rejects_bad_inputs() {
         assert!(!signing.is_accepted(&b1));
     }
 
-    let mut authorless = Automerge::signing().with_actor(ActorId::from([1]));
-    let h_none = append_at_level(&mut authorless, None, 1, 0);
-    authorless.set_author(Some(author(&alice)));
-    assert!(matches!(
-        authorless.try_signing().unwrap().insert_signature(&h_none, &sig(&alice, &h_none)),
-        Err(error::InsertSignature::MissingAuthor { change, .. }) if change == h_none
-    ));
-
-    let mut bad_key = Automerge::signing()
-        .with_author(Some(Author::from(vec![1, 2, 3])))
-        .with_actor(ActorId::from([1]));
-    let h_bad = append_at_level(&mut bad_key, None, 1, 0);
-    assert!(matches!(
-        bad_key.try_signing().unwrap().insert_signature(&h_bad, &sig(&alice, &h_bad)),
-        Err(error::InsertSignature::InvalidAuthorKey { change, .. }) if change == h_bad
-    ));
+    // Signing documents cannot be constructed without a usable author, so the
+    // missing- and invalid-author insertion failures only arise for imported
+    // history; see `incoming`.
+    assert!(Automerge::signing(Author::from(vec![1, 2, 3])).is_err());
+    assert!(doc.set_author(None).is_err());
+    assert!(doc.set_author(Some(Author::from(vec![1, 2, 3]))).is_err());
 }
 
 #[test]
 fn acceptance_survives_actor_shifts_rollbacks_and_clones() {
     let k = key(7);
-    let mut doc = Automerge::signing()
-        .with_author(Some(author(&k)))
+    let mut doc = Automerge::signing(author(&k))
+        .unwrap()
         .with_actor(ActorId::from([2]));
     let first = append_at_level(&mut doc, None, 1, 0);
     sign_doc(&mut doc, first, &k);
@@ -170,8 +161,8 @@ fn local_acceptance_handles_gaps_loose_fallbacks_and_unaccepted_boundaries() {
     let k2 = key(2);
 
     // 1. Loose gap: signing 0 and 2 accepts only 0 until 1 is signed.
-    let mut chain = Automerge::signing()
-        .with_author(Some(author(&k1)))
+    let mut chain = Automerge::signing(author(&k1))
+        .unwrap()
         .with_actor(ActorId::from([1]));
     let c0 = append_at_level(&mut chain, None, 1, 0);
     let c1 = append_at_level(&mut chain, None, 2, 0);
@@ -187,14 +178,14 @@ fn local_acceptance_handles_gaps_loose_fallbacks_and_unaccepted_boundaries() {
 
     // 2. Proved container {a, c} waiting on unaccepted boundary b does not hide
     //    local fallback a, and signing b completes acceptance and reclaims sig(a)!
-    let mut doc = Automerge::signing()
-        .with_author(Some(author(&k1)))
+    let mut doc = Automerge::signing(author(&k1))
+        .unwrap()
         .with_actor(ActorId::from([1]));
     let a = append_at_level(&mut doc, None, 1, 0);
-    doc.set_author(Some(author(&k2)));
+    doc.set_author(Some(author(&k2))).unwrap();
     doc.set_actor(ActorId::from([2]));
     let b = append_at_level(&mut doc, Some(&[]), 2, 1);
-    doc.set_author(Some(author(&k1)));
+    doc.set_author(Some(author(&k1))).unwrap();
     doc.set_actor(ActorId::from([1]));
     let c = append_at_level(&mut doc, Some(&[a, b]), 3, 1);
 
@@ -216,11 +207,11 @@ fn local_acceptance_handles_gaps_loose_fallbacks_and_unaccepted_boundaries() {
     assert_eq!(doc.try_signing().unwrap().state.signatures.len(), 2);
 
     // 3. Multi-actor scaling: 20 actors x 15 commits inspect only live verified_hashes.
-    let mut many = Automerge::signing();
+    let mut many = Automerge::signing(author(&key(1))).unwrap();
     let mut frontiers: Vec<(ChangeHash, SigningKey)> = Vec::new();
     for actor_num in 1..=20u8 {
         let k = key(actor_num);
-        many.set_author(Some(author(&k)));
+        many.set_author(Some(author(&k))).unwrap();
         many.set_actor(ActorId::from([actor_num]));
         for step in 0..15 {
             let h = append_at_level(&mut many, None, i64::from(actor_num) * 100 + step, 0);
@@ -248,6 +239,7 @@ fn required_signatures_never_returns_non_local_changes_even_with_matching_author
     // Build a change on a separate document claiming `alice` as its author.
     let mut remote = Automerge::new()
         .with_author(Some(alice.clone()))
+        .unwrap()
         .with_actor(ActorId::from([9]));
     let mut tx = remote.transaction();
     tx.put(ROOT, "sneaky", "forged").unwrap();
@@ -257,8 +249,8 @@ fn required_signatures_never_returns_non_local_changes_even_with_matching_author
     // Even if an unverified non-local change bearing `alice`'s author somehow
     // entered `ChangeGraph` directly via `History::update`, it was not locally
     // authored in `doc` and must never be returned by `required_signatures`.
-    let mut doc = Automerge::signing()
-        .with_author(Some(alice))
+    let mut doc = Automerge::signing(alice)
+        .unwrap()
         .with_actor(ActorId::from([1]));
     doc.put_actor(ActorId::from([9]));
     let _ = crate::automerge::history::History::new(

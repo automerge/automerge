@@ -3506,8 +3506,8 @@ fn authorship() {
 
     let mut doc2 = doc1.fork();
 
-    doc1.set_author(Some(author1.clone()));
-    doc2.set_author(Some(author2.clone()));
+    doc1.set_author(Some(author1.clone())).unwrap();
+    doc2.set_author(Some(author2.clone())).unwrap();
 
     doc1.put(ROOT, "key", "value2").unwrap();
     let change = doc1.get_last_local_change().unwrap();

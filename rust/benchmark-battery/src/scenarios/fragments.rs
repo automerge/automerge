@@ -63,7 +63,7 @@ pub fn benchmarks() -> Vec<Benchmark> {
                 let actor = actor_id(0);
                 Box::new(move || {
                     black_box(build_deep_history(
-                        Automerge::signing(),
+                        signing_doc(&author),
                         &actor,
                         &author,
                         BUILD_COMMITS,
@@ -89,7 +89,7 @@ pub fn benchmarks() -> Vec<Benchmark> {
                         .collect();
                 Box::new(move || {
                     let mut doc =
-                        build_deep_history(Automerge::signing(), &actor, &author, BUILD_COMMITS);
+                        build_deep_history(signing_doc(&author), &actor, &author, BUILD_COMMITS);
                     {
                         let mut signing = doc.try_signing().unwrap();
                         for (hash, sig) in &frontier_sigs {
@@ -197,10 +197,7 @@ pub fn benchmarks() -> Vec<Benchmark> {
                 let (_, signed) = prepared_deep_history_pair(DEEP_HISTORY_COMMITS);
                 let stream = signed.bundle_fragments(signed.fragments(..)).concat();
                 Box::new(move || {
-                    black_box(
-                        Automerge::load_with_options(&stream, LoadOptions::new().signing())
-                            .unwrap(),
-                    );
+                    black_box(Automerge::load_with_options(&stream, signing_load()).unwrap());
                 })
             },
         )
@@ -216,10 +213,7 @@ pub fn benchmarks() -> Vec<Benchmark> {
                 groups.reverse();
                 let stream = groups.concat();
                 Box::new(move || {
-                    black_box(
-                        Automerge::load_with_options(&stream, LoadOptions::new().signing())
-                            .unwrap(),
-                    );
+                    black_box(Automerge::load_with_options(&stream, signing_load()).unwrap());
                 })
             },
         )
@@ -249,10 +243,7 @@ pub fn benchmarks() -> Vec<Benchmark> {
                     let (_, signed) = prepared_multi_actor_pair(actors, MULTI_ACTOR_COMMITS);
                     let stream = signed.bundle_fragments(signed.fragments(..)).concat();
                     Box::new(move || {
-                        black_box(
-                            Automerge::load_with_options(&stream, LoadOptions::new().signing())
-                                .unwrap(),
-                        );
+                        black_box(Automerge::load_with_options(&stream, signing_load()).unwrap());
                     })
                 },
             )
@@ -268,10 +259,7 @@ pub fn benchmarks() -> Vec<Benchmark> {
                     groups.reverse();
                     let stream = groups.concat();
                     Box::new(move || {
-                        black_box(
-                            Automerge::load_with_options(&stream, LoadOptions::new().signing())
-                                .unwrap(),
-                        );
+                        black_box(Automerge::load_with_options(&stream, signing_load()).unwrap());
                     })
                 },
             )
@@ -328,8 +316,7 @@ fn memory_benchmarks() -> Vec<MemoryBenchmark> {
                             .concat();
                         Box::new(move || {
                             measure_alloc(|| {
-                                Automerge::load_with_options(&stream, LoadOptions::new().signing())
-                                    .unwrap()
+                                Automerge::load_with_options(&stream, signing_load()).unwrap()
                             })
                         })
                     } else {
@@ -378,6 +365,19 @@ fn actor_id(index: usize) -> ActorId {
     ActorId::from(&(index as u64 + 1).to_be_bytes()[..])
 }
 
+/// Author for receiving replicas that never sign.
+fn receiver_author() -> Author<'static> {
+    actor_credentials(usize::MAX / 2).1
+}
+
+fn signing_doc(author: &Author<'static>) -> Automerge {
+    Automerge::signing(author.clone()).expect("benchmark author is a valid Ed25519 key")
+}
+
+fn signing_load() -> LoadOptions<'static> {
+    LoadOptions::new().signing().author(receiver_author())
+}
+
 fn actor_credentials(index: usize) -> (SigningKey, Author<'static>) {
     let mut seed = [0u8; 32];
     seed[..8].copy_from_slice(&(index as u64 + 1).to_le_bytes());
@@ -397,7 +397,7 @@ fn build_deep_history(
     author: &Author<'static>,
     commits: u64,
 ) -> Automerge {
-    doc.set_author(Some(author.clone()));
+    doc.set_author(Some(author.clone())).unwrap();
     doc.set_actor(actor.clone());
     for step in 0..commits {
         let mut tx = doc.transaction();
@@ -440,7 +440,7 @@ fn prepared_deep_history_pair(commits: u64) -> (Automerge, Automerge) {
     let (key, author) = actor_credentials(0);
     let actor = actor_id(0);
     let unsigned = build_deep_history(Automerge::new(), &actor, &author, commits);
-    let mut signed = build_deep_history(Automerge::signing(), &actor, &author, commits);
+    let mut signed = build_deep_history(signing_doc(&author), &actor, &author, commits);
     {
         let mut handle = signed.try_signing().unwrap();
         for hash in required_frontiers(&unsigned) {
@@ -467,7 +467,7 @@ fn prepared_multi_actor_pair(actor_count: usize, total_commits: usize) -> (Autom
     let build = |mut doc: Automerge| -> Automerge {
         for step in 0..total_commits {
             let (ref actor, _, ref author) = creds[step % actor_count];
-            doc.set_author(Some(author.clone()));
+            doc.set_author(Some(author.clone())).unwrap();
             doc.set_actor(actor.clone());
             let mut tx = doc.transaction();
             tx.put(ROOT, format!("k{}", step % 32), step as i64)
@@ -478,7 +478,7 @@ fn prepared_multi_actor_pair(actor_count: usize, total_commits: usize) -> (Autom
     };
 
     let unsigned = build(Automerge::new());
-    let mut signed = build(Automerge::signing());
+    let mut signed = build(signing_doc(&creds[0].2));
     let actor_of_hash: HashMap<ChangeHash, ActorId> = unsigned
         .get_changes(&[])
         .into_iter()
@@ -523,7 +523,7 @@ fn incremental_series(signed: bool) -> Box<dyn FnMut(usize)> {
     let make_base = |mut doc: Automerge,
                      rng: &mut StdRng|
      -> (Automerge, benchmark_battery::automerge::ObjId) {
-        doc.set_author(Some(author.clone()));
+        doc.set_author(Some(author.clone())).unwrap();
         doc.set_actor(actor.clone());
         let text = {
             let mut tx = doc.transaction();
@@ -578,7 +578,7 @@ fn incremental_series(signed: bool) -> Box<dyn FnMut(usize)> {
 
     let (mut sender, text) = make_base(
         if signed {
-            Automerge::signing()
+            signing_doc(&author)
         } else {
             Automerge::new()
         },
@@ -601,7 +601,7 @@ fn incremental_series(signed: bool) -> Box<dyn FnMut(usize)> {
     let base_stream = sender.bundle_fragments(base_fragments).concat();
 
     let mut receiver = if signed {
-        Automerge::load_with_options(&base_stream, LoadOptions::new().signing()).unwrap()
+        Automerge::load_with_options(&base_stream, signing_load()).unwrap()
     } else {
         Automerge::load(&base_stream).unwrap()
     };

@@ -26,6 +26,11 @@ async function makeSigner() {
   return { author, sign }
 }
 
+// A fixed author for receiving replicas that never sign anything: the
+// compressed Ed25519 base point, a valid non-weak public key.
+const RECEIVER_AUTHOR = "58" + "66".repeat(31)
+const RECEIVER = { signing: true as const, author: RECEIVER_AUTHOR }
+
 async function signRequired<T>(
   doc: Automerge.Doc<T>,
   sign: (data: Uint8Array) => Promise<Uint8Array>,
@@ -62,13 +67,9 @@ describe("fragment signing API", () => {
     let hitFragment = false
     while (!hitFragment || totalCommits < 5) {
       totalCommits++
-      doc = Automerge.change(
-        doc,
-        { time: totalCommits },
-        d => {
-          d.counter = totalCommits
-        },
-      )
+      doc = Automerge.change(doc, { time: totalCommits }, d => {
+        d.counter = totalCommits
+      })
       const [head] = Automerge.getHeads(doc)
       if (totalCommits >= 2 && head.startsWith("00")) {
         hitFragment = true
@@ -76,13 +77,9 @@ describe("fragment signing API", () => {
     }
     for (let extra = 0; extra < 3; extra++) {
       totalCommits++
-      doc = Automerge.change(
-        doc,
-        { time: totalCommits },
-        d => {
-          d.counter = totalCommits
-        },
-      )
+      doc = Automerge.change(doc, { time: totalCommits }, d => {
+        d.counter = totalCommits
+      })
     }
 
     // Local edits are visible locally, but unsigned exports are withheld.
@@ -115,7 +112,7 @@ describe("fragment signing API", () => {
 
     // Reconstruct in a signing document via addFragments + addCommits with patch callbacks.
     const patchSources: Automerge.PatchSource[] = []
-    let receiver = Automerge.init<CounterDoc>({ signing: true })
+    let receiver = Automerge.init<CounterDoc>(RECEIVER)
     receiver = Automerge.addFragments(receiver, fragments, {
       patchCallback: (_patches, info) => patchSources.push(info.source),
     })
@@ -131,13 +128,13 @@ describe("fragment signing API", () => {
     const wire = concatBytes(
       Automerge.bundleFragmentMetadata(doc, Automerge.getFragmentMetadata(doc)),
     )
-    const loaded = Automerge.load<CounterDoc>(wire, { signing: true })
+    const loaded = Automerge.load<CounterDoc>(wire, RECEIVER)
     assert.deepEqual(Automerge.getHeads(loaded), Automerge.getHeads(doc))
     assert.equal(loaded.counter, totalCommits)
 
     const loadPatches: Automerge.Patch[][] = []
     const loadedWithPatches = Automerge.load<CounterDoc>(wire, {
-      signing: true,
+      ...RECEIVER,
       patchCallback: patches => loadPatches.push(patches),
     })
     assert.equal(loadedWithPatches.counter, totalCommits)
@@ -171,8 +168,8 @@ describe("fragment signing API", () => {
       ),
     )
 
-    // Read-only signing replica with no author set yields no required signatures.
-    const reader = Automerge.load<CounterDoc>(aliceWire, { signing: true })
+    // A replica with a different author has nothing of its own to sign.
+    const reader = Automerge.load<CounterDoc>(aliceWire, RECEIVER)
     assert.deepEqual([...Automerge.requiredSignatures(reader)], [])
 
     let bobDoc = Automerge.load<CounterDoc>(aliceWire, {
@@ -241,7 +238,7 @@ describe("fragment signing API", () => {
 
     const seenValues: Array<number | undefined> = []
     let target = Automerge.init<CounterDoc>({
-      signing: true,
+      ...RECEIVER,
       patchCallback: (_patches, info) => seenValues.push(info.after.counter),
     })
 
@@ -261,7 +258,7 @@ describe("fragment signing API", () => {
 
     const reversedWire = concatBytes([...chunks].reverse())
     const loadedReversed = Automerge.load<CounterDoc>(reversedWire, {
-      signing: true,
+      ...RECEIVER,
     })
     assert.equal(loadedReversed.counter, 3)
   })
@@ -319,21 +316,34 @@ describe("fragment signing API", () => {
       )
     })
 
-    // Authorless signing document yields no required signatures and rejects forged payload insertion.
-    let authorless = Automerge.init<CounterDoc>({ signing: true })
-    authorless = Automerge.change(authorless, d => {
-      d.title = "no author"
+    // Signing documents always carry a usable author: construction without one,
+    // or with bytes that are not an Ed25519 public key, is rejected.
+    assert.throws(
+      () => Automerge.init<CounterDoc>({ signing: true }),
+      RangeError,
+    )
+    assert.throws(
+      () => Automerge.init<CounterDoc>({ signing: true, author: "010203" }),
+      RangeError,
+    )
+    assert.throws(
+      () => Automerge.load<CounterDoc>(new Uint8Array(0), { signing: true }),
+      RangeError,
+    )
+    // A forged signature over a locally authored commit is rejected.
+    let other = Automerge.init<CounterDoc>(RECEIVER)
+    other = Automerge.change(other, d => {
+      d.title = "receiver"
     })
-    assert.deepEqual([...Automerge.requiredSignatures(authorless)], [])
-    const [authorlessHead] = Automerge.getHeads(authorless)
+    const [otherHead] = Automerge.getHeads(other)
     const forgedPayload = Buffer.concat([
       Buffer.from("automerge-change-signature-v1", "utf8"),
-      Buffer.from(authorlessHead, "hex"),
+      Buffer.from(otherHead, "hex"),
     ])
     assert.throws(
       () =>
         Automerge.insertSignature(
-          authorless,
+          other,
           new Uint8Array(forgedPayload),
           new Uint8Array(64),
         ),
@@ -345,12 +355,9 @@ describe("fragment signing API", () => {
     const snapshot = Automerge.save(doc)
     const rawChange = Automerge.getLastLocalChange(doc)!
 
-    assert.throws(
-      () => Automerge.load(snapshot, { signing: true }),
-      RangeError,
-    )
+    assert.throws(() => Automerge.load(snapshot, RECEIVER), RangeError)
 
-    const receiver = Automerge.init<CounterDoc>({ signing: true })
+    const receiver = Automerge.init<CounterDoc>(RECEIVER)
     assert.throws(
       () => Automerge.loadIncremental(receiver, snapshot),
       RangeError,
@@ -368,9 +375,7 @@ describe("fragment signing API", () => {
     const [signedCommit] = Automerge.getCommits(doc)
     assert.throws(
       () =>
-        Automerge.addCommits(receiver, [
-          { ...signedCommit, bytes: rawChange },
-        ]),
+        Automerge.addCommits(receiver, [{ ...signedCommit, bytes: rawChange }]),
       RangeError,
     )
     const tamperedBytes = new Uint8Array(signedCommit.bytes)
@@ -413,10 +418,7 @@ describe("fragment signing API", () => {
     // clone() at current heads works and inherits signing mode; overriding signing or cloning a view throws.
     const cloned = Automerge.clone(doc, { author: alice.author })
     assert.deepEqual([...Automerge.requiredSignatures(cloned)], [])
-    assert.throws(
-      () => Automerge.clone(doc, { signing: false }),
-      RangeError,
-    )
+    assert.throws(() => Automerge.clone(doc, { signing: false }), RangeError)
     doc = Automerge.change(doc, d => {
       d.title = "v2"
     })
