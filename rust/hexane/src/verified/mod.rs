@@ -532,6 +532,7 @@ mod client_proof;
 pub(crate) mod codec;
 pub(crate) mod counts;
 mod decoder;
+mod delta;
 mod encoder;
 pub(crate) mod kind;
 pub(crate) mod model;
@@ -556,6 +557,9 @@ pub use decoder::VerifiedDecoder;
 pub use decoder::{
     head_len, head_run_max, lemma_head_len, lemma_head_run_max, scan_of, scan_taken,
 };
+#[cfg(verus_keep_ghost)]
+pub use delta::{all_dom, all_fit, dom, dvs, in_dom, vals};
+pub use delta::{VDelta, VDeltaNum, VDeltaValue, VerifiedDeltaColumn};
 pub use encoder::{VerifiedEncoder, VerifiedEncoderState};
 pub use kind::{LenIndex, VIndex, VKeeps};
 pub use prefix::{SumIndex, VerifiedPrefixColumn};
@@ -626,6 +630,18 @@ mod seal {
     /// A type sums are kept in is one of this crate's: no other can
     /// name this trait.
     pub trait SumSeal {
+
+    }
+
+    /// A number a delta column can hold is one of this crate's: no
+    /// other can name this trait.
+    pub trait DeltaSeal {
+
+    }
+
+    /// A value type of a delta column is one of those numbers or an
+    /// `Option` of one: no other can name this trait.
+    pub trait DeltaValSeal {
 
     }
 

@@ -3,7 +3,8 @@
 //! unwrapping) must not panic.
 use hexane::verified::{
     AccIndex, LenIndex, SumIndex, VerifiedAccColumn, VerifiedAccIter, VerifiedAccValue,
-    VerifiedColumn, VerifiedDecoder, VerifiedEncoder, VerifiedEncoderState, VerifiedPrefixColumn,
+    VerifiedColumn, VerifiedDecoder, VerifiedDeltaColumn, VerifiedEncoder, VerifiedEncoderState,
+    VerifiedPrefixColumn,
 };
 use hexane::{Leb128, Run};
 use verus_client::{Action, Board, Flags, Mark, Meta, Step};
@@ -2410,4 +2411,26 @@ fn the_clients_own_accumulators() {
     assert_eq!((open.0, count), (flags_of(&there), 1000));
     let range = board_of(&steps[123..987]);
     assert_eq!((lamps(moved), lamps(asked)), (range, range));
+}
+
+#[test]
+fn delta_columns() {
+    let values: Vec<u64> = vec![3, 4, 5, 5, 1 << 40, 7];
+    let mut col: VerifiedDeltaColumn<u64> = verus_client::delta_built(&values);
+    assert_eq!(verus_client::delta_values(&col), values);
+    assert_eq!(verus_client::delta_len(&col), 6);
+    verus_client::delta_set(&mut col, 1, 9);
+    verus_client::delta_push_u64(&mut col, 2);
+    verus_client::delta_spliced(&mut col, 2, 3, &[8, 8]);
+    assert_eq!(verus_client::delta_values(&col), vec![3, 9, 8, 8, 7, 2]);
+    assert_eq!(verus_client::delta_read(&col, 4), Some(7));
+    assert_eq!(verus_client::delta_read_fits(&col, 6), None);
+
+    let mut opts = verus_client::delta_new::<Option<i32>, Leb128>();
+    assert!(verus_client::delta_is_empty(&opts));
+    let nums = [Some(-5), None, Some(i32::MAX), Some(i32::MIN), None];
+    for v in nums {
+        verus_client::delta_push_opt(&mut opts, v);
+    }
+    assert_eq!(verus_client::delta_values(&opts), nums.to_vec());
 }

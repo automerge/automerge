@@ -15,17 +15,17 @@
 use hexane::encoder::{BoolEncoder, BoolEncoderState, RleEncoder, RleEncoderState};
 use hexane::prefix::{PrefixSeek, PrefixWeightFn};
 use hexane::verified::{
-    refused, AccIndex, Get, LenIndex, SumIndex, VAccum, VAccumulated, VAdds, VAmount, VGroup,
-    VNewtype, VSummed, VValue, VerifiedAccColumn, VerifiedAccIter, VerifiedAccIterState,
-    VerifiedAccSeek, VerifiedAccValue, VerifiedColumn, VerifiedDecoder, VerifiedEncoder,
-    VerifiedEncoderState, VerifiedIter, VerifiedIterState, VerifiedPrefixColumn,
+    refused, AccIndex, Get, LenIndex, SumIndex, VAccum, VAccumulated, VAdds, VAmount, VDeltaValue,
+    VGroup, VNewtype, VSummed, VValue, VerifiedAccColumn, VerifiedAccIter, VerifiedAccIterState,
+    VerifiedAccSeek, VerifiedAccValue, VerifiedColumn, VerifiedDecoder, VerifiedDeltaColumn,
+    VerifiedEncoder, VerifiedEncoderState, VerifiedIter, VerifiedIterState, VerifiedPrefixColumn,
     VerifiedPrefixIter, VerifiedPrefixIterState, VerifiedPrefixSeek, VerifiedPrefixedValue,
     VerifiedRuns,
 };
 use hexane::{
-    Codec, Column, ColumnEncoding, ColumnValue, ColumnValueRef, Encoder, EncoderApi, IterState,
-    Leb128, LoadOpts, MaybeFill, NoFill, PackError, PrefixColumn, PrefixIter, PrefixValue,
-    PrefixedValue, RleEncoding, RleValue, Run, RunDecoder,
+    Codec, Column, ColumnEncoding, ColumnValue, ColumnValueRef, DeltaColumn, DeltaValue, Encoder,
+    EncoderApi, IterState, Leb128, LoadOpts, MaybeFill, NoFill, PackError, PrefixColumn,
+    PrefixIter, PrefixValue, PrefixedValue, RleEncoding, RleValue, Run, RunDecoder,
 };
 use std::cell::{Cell, RefCell};
 use std::cmp::Ordering;
@@ -11589,5 +11589,100 @@ fn an_accumulator_that_panics_under_an_iterator() {
             (it.pos(), it.end_pos(), it.len(), it.total()),
             (0, 0, 0, Fused(0))
         );
+    }
+}
+
+/// A value type of a delta column that `DeltaColumn` holds too.
+trait Deltad: VDeltaValue + DeltaValue + PartialEq + Debug {
+    /// A value near `last`, or (now and then) null or far away.
+    fn near(rng: &mut Rng, last: i64) -> (Self, i64);
+}
+
+macro_rules! deltad {
+    ($t:ty, $lo:expr, $hi:expr) => {
+        impl Deltad for $t {
+            fn near(rng: &mut Rng, last: i64) -> (Self, i64) {
+                let step = if rng.below(8) == 0 {
+                    rng.next() as i64 >> 24
+                } else {
+                    rng.below(7) as i64 - 3
+                };
+                let n = last.wrapping_add(step).clamp($lo, $hi);
+                (n as $t, n)
+            }
+        }
+
+        impl Deltad for Option<$t> {
+            fn near(rng: &mut Rng, last: i64) -> (Self, i64) {
+                if rng.below(5) == 0 {
+                    (None, last)
+                } else {
+                    let (v, n) = <$t as Deltad>::near(rng, last);
+                    (Some(v), n)
+                }
+            }
+        }
+    };
+}
+
+deltad!(u32, 0, u32::MAX as i64);
+deltad!(u64, 0, i64::MAX >> 2);
+deltad!(i32, i32::MIN as i64, i32::MAX as i64);
+deltad!(i64, i64::MIN >> 2, i64::MAX >> 2);
+deltad!(usize, 0, i64::MAX >> 2);
+
+fn delta_agrees<T: Deltad>(new: &VerifiedDeltaColumn<T>, old: &DeltaColumn<T>) {
+    assert_eq!(new.len(), old.len());
+    assert_eq!(new.is_empty(), old.is_empty());
+    for i in 0..old.len() + 2 {
+        assert_eq!(new.get(i), old.get(i));
+    }
+}
+
+fn delta_edits<T: Deltad>(seed: u64) {
+    let mut rng = Rng(seed | 1);
+    let mut last = 0;
+    let mut some = |rng: &mut Rng, n: usize| -> Vec<T> {
+        (0..n)
+            .map(|_| {
+                let (v, l) = T::near(rng, last);
+                last = l;
+                v
+            })
+            .collect()
+    };
+    let n = rng.below(300);
+    let start = some(&mut rng, n);
+    let mut new = VerifiedDeltaColumn::<T>::from_values(&start);
+    let mut old = DeltaColumn::<T>::from_values(start);
+    delta_agrees(&new, &old);
+    for _ in 0..60 {
+        let at = rng.below(old.len() + 1);
+        let del = rng.below((old.len() - at).min(6) + 1);
+        let n = rng.below(9);
+        let values = some(&mut rng, n);
+        new.splice(at, del, &values);
+        old.splice(at, del, values);
+        delta_agrees(&new, &old);
+    }
+    let empty = VerifiedDeltaColumn::<T>::new();
+    delta_agrees(&empty, &DeltaColumn::<T>::new());
+}
+
+/// A verified delta column and the old one hold the same values after
+/// the same builds and splices, for every type of value.
+#[test]
+fn delta_columns_agree() {
+    for seed in 0..12 {
+        delta_edits::<u32>(seed);
+        delta_edits::<u64>(seed);
+        delta_edits::<i32>(seed);
+        delta_edits::<i64>(seed);
+        delta_edits::<usize>(seed);
+        delta_edits::<Option<u32>>(seed);
+        delta_edits::<Option<u64>>(seed);
+        delta_edits::<Option<i32>>(seed);
+        delta_edits::<Option<i64>>(seed);
+        delta_edits::<Option<usize>>(seed);
     }
 }

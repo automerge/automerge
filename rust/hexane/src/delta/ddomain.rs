@@ -576,16 +576,34 @@ pub(crate) enum SpliceItem {
     Run(i64, Option<i64>, usize),
 }
 
-/// The items a delta splice inserts, from outside: nothing is assumed of
-/// them.
+/// The items a delta splice inserts. Of a source from outside (a
+/// caller's iterator) nothing is assumed: it does not say what it has
+/// left (`left` is `None`, or not given at all for an implementation
+/// outside the proof, of which nothing is then known). A source that
+/// says what it has left gives those items in their order, and then no
+/// more.
 pub(crate) trait SpliceItems {
-    fn next_item(&mut self) -> Option<SpliceItem>;
+    /// The items the source has left to give, where it says.
+    spec fn left(&self) -> Option<Seq<SpliceItem>>;
+
+    fn next_item(&mut self) -> (r: Option<SpliceItem>)
+        ensures
+            old(self).left() matches Some(l) ==> if l.len() == 0 {
+                r is None && final(self).left() == Some(l)
+            } else {
+                r == Some(l[0]) && final(self).left() == Some(l.skip(1))
+            },
+    ;
 }
 
 /// No items: a splice that only deletes.
 pub(crate) struct NoItems;
 
 impl SpliceItems for NoItems {
+    open spec fn left(&self) -> Option<Seq<SpliceItem>> {
+        Some(Seq::empty())
+    }
+
     #[inline(always)]
     fn next_item(&mut self) -> Option<SpliceItem> {
         None
@@ -621,10 +639,22 @@ proof fn lemma_items_push(its: Seq<SpliceItem>, it: SpliceItem)
     assert(its.push(it).drop_last() =~= its);
 }
 
-/// The values a delta column is built from, from outside (`from_values`):
-/// nothing is assumed of them.
+/// The values a delta column is built from. Of a source from outside
+/// (`from_values`: a caller's iterator) nothing is assumed, as of a
+/// splice's ([`SpliceItems`]); a source that says what it has left gives
+/// those values in their order, and then no more.
 pub(crate) trait ValueItems {
-    fn next_value(&mut self) -> Option<Option<i64>>;
+    /// The values the source has left to give, where it says.
+    spec fn left(&self) -> Option<Seq<Option<i64>>>;
+
+    fn next_value(&mut self) -> (r: Option<Option<i64>>)
+        ensures
+            old(self).left() matches Some(l) ==> if l.len() == 0 {
+                r is None && final(self).left() == Some(l)
+            } else {
+                r == Some(l[0]) && final(self).left() == Some(l.skip(1))
+            },
+    ;
 }
 
 /// A delta column's values, as the cursor takes them ([`RunFeed`]) to
@@ -642,6 +672,9 @@ pub(crate) struct ValuesFeed<S, E: Slabs, M, B> {
     /// the values taken so far
     #[allow(dead_code)]
     pub(crate) taken: Ghost<Seq<Option<i64>>>,
+    /// the values the items had to give, where they said
+    #[allow(dead_code)]
+    pub(crate) all: Ghost<Option<Seq<Option<i64>>>>,
     pub(crate) _p: PhantomData<(M, B)>,
 }
 
@@ -652,19 +685,27 @@ impl<S: ValueItems, E, M, B> RunFeed<E> for ValuesFeed<S, E, M, B> where
  {
     type X = <B as DeltaWrite<'static, E, M>>::Ins;
 
-    type K = ();
+    type K = Ghost<Option<Seq<Option<i64>>>>;
 
     /// The converter's, keeping its bound, the values written hold the
-    /// deltas it gave, and it was given the values taken.
+    /// deltas it gave, and it was given the values taken: the first of
+    /// those the items had to give, where they said, and all of them
+    /// once the items have run out.
     open spec fn inv(&self) -> bool {
         &&& self.deltas.inv()
         &&& self.deltas.tracking@
         &&& self.given@.map_values(|o: E::V| <B as DeltaWrite<'static, E, M>>::dvo(o)) == self.deltas.ds@
         &&& self.deltas.vals@ == self.taken@
+        &&& self.all@ matches Some(a) ==> {
+            &&& self.items.left() matches Some(l)
+            &&& self.taken@ + l == a
+            &&& self.ended@ ==> l.len() == 0
+        }
     }
 
-    open spec fn key(&self) -> () {
-        ()
+    /// What the items had to give.
+    open spec fn key(&self) -> Self::K {
+        self.all
     }
 
     open spec fn given(&self) -> Seq<E::V> {
@@ -677,9 +718,14 @@ impl<S: ValueItems, E, M, B> RunFeed<E> for ValuesFeed<S, E, M, B> where
 
     #[inline(always)]
     fn next_run(&mut self) -> (r: Option<(Self::X, usize)>) {
+        let ghost left0 = self.items.left();
         match self.items.next_value() {
             Some(v) => {
                 proof {
+                    if self.all@ is Some {
+                        let l = left0->0;
+                        assert(self.taken@.push(v) + l.skip(1) =~= self.taken@ + l);
+                    }
                     self.taken = Ghost(self.taken@.push(v));
                 }
                 let d = self.deltas.next(v, true);
@@ -744,6 +790,9 @@ pub(crate) struct DeltaFeed<S, E: Slabs, M, B> {
     /// the items taken so far
     #[allow(dead_code)]
     pub(crate) taken: Ghost<Seq<SpliceItem>>,
+    /// the items the source had to give, where it said
+    #[allow(dead_code)]
+    pub(crate) all: Ghost<Option<Seq<SpliceItem>>>,
     pub(crate) _p: PhantomData<(M, B)>,
 }
 
@@ -754,22 +803,46 @@ impl<S: SpliceItems, E, M, B> RunFeed<E> for DeltaFeed<S, E, M, B> where
  {
     type X = <B as DeltaWrite<'static, E, M>>::Ins;
 
-    type K = (Ghost<int>, usize, Option<i64>, Ghost<Seq<Option<i64>>>, Ghost<bool>, bool);
+    type K = (
+        Ghost<int>,
+        usize,
+        Option<i64>,
+        Ghost<Seq<Option<i64>>>,
+        Ghost<bool>,
+        bool,
+        Ghost<Option<Seq<SpliceItem>>>,
+    );
 
     /// The plan's, the values written hold the deltas it emitted, and the
-    /// values it was given are those of the items taken.
+    /// values it was given are those of the items taken: the first of
+    /// those the source had to give, where it said, and all of them once
+    /// the plan is past the items.
     open spec fn inv(&self) -> bool {
         &&& self.plan.inv()
         &&& self.plan.tracking@ == self.track
         &&& self.given@.map_values(|o: E::V| <B as DeltaWrite<'static, E, M>>::dvo(o)) == self.plan.p.emitted@
         &&& self.plan.p.wanted@ == items_vals(self.taken@)
         &&& self.items is None ==> self.taken@.len() == 0
+        &&& self.all@ matches Some(a) ==> {
+            &&& self.items matches Some(s)
+            &&& s.left() matches Some(l)
+            &&& self.taken@ + l == a
+            &&& !(self.plan.p.phase is Values) ==> l.len() == 0
+        }
     }
 
-    /// The splice: around it, the column's original deltas, and whether
-    /// it inserts anything.
+    /// The splice: around it, the column's original deltas, whether it
+    /// inserts anything, and what its source had to give.
     open spec fn key(&self) -> Self::K {
-        (self.plan.p.prev, self.plan.p.skip, self.plan.p.next_val, self.plan.orig, self.plan.tracking, self.items is None)
+        (
+            self.plan.p.prev,
+            self.plan.p.skip,
+            self.plan.p.next_val,
+            self.plan.orig,
+            self.plan.tracking,
+            self.items is None,
+            self.all,
+        )
     }
 
     open spec fn given(&self) -> Seq<E::V> {
@@ -792,6 +865,7 @@ impl<S: SpliceItems, E, M, B> RunFeed<E> for DeltaFeed<S, E, M, B> where
                 self.plan.p.emitted@ == e0,
                 self.given == old(self).given,
                 (self.items is None) == (old(self).items is None),
+                self.all == old(self).all,
                 e0 == old(self).plan.p.emitted@,
                 plan0 == old(self).plan,
                 self.track == old(self).track,
@@ -803,10 +877,19 @@ impl<S: SpliceItems, E, M, B> RunFeed<E> for DeltaFeed<S, E, M, B> where
                         proof {
                             assert(e0 + Seq::<Option<i64>>::empty() =~= e0);
                         }
+                        let ghost left0 = if self.items is Some { self.items->0.left() } else { None };
+                        let ghost taken0 = self.taken@;
                         let item = match &mut self.items {
                             Some(items) => items.next_item(),
                             None => None,
                         };
+                        proof {
+                            // an item taken is the first of those left
+                            if self.all@ is Some && item is Some {
+                                let l = left0->0;
+                                assert(taken0.push(item->0) + l.skip(1) =~= taken0 + l);
+                            }
+                        }
                         match item {
                             Some(SpliceItem::Value(v)) => {
                                 proof {

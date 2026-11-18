@@ -1841,6 +1841,12 @@ impl<'a, T: DeltaValue, C: Codec> Clone for DeltaIter<'a, T, C> {
 /// The values a delta column is built from, from the caller's iterator
 /// (glue).
 impl<It: Iterator<Item = Option<i64>>> ValueItems for It {
+    // outside the proof: what an iterator has left is not said
+    #[cfg(verus_keep_ghost)]
+    fn left(&self) -> Option<vstd::seq::Seq<Option<i64>>> {
+        unimplemented!()
+    }
+
     #[inline(always)]
     fn next_value(&mut self) -> Option<Option<i64>> {
         self.next()
@@ -1851,6 +1857,12 @@ impl<It: Iterator<Item = Option<i64>>> ValueItems for It {
 /// lone realized values (from `splice`) or whole [`DeltaRun`]s (from
 /// `splice_runs`).
 impl<It: Iterator<Item = SpliceItem>> SpliceItems for It {
+    // outside the proof: what an iterator has left is not said
+    #[cfg(verus_keep_ghost)]
+    fn left(&self) -> Option<vstd::seq::Seq<SpliceItem>> {
+        unimplemented!()
+    }
+
     #[inline(always)]
     fn next_item(&mut self) -> Option<SpliceItem> {
         self.next()

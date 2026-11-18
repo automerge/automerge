@@ -1364,6 +1364,8 @@ impl<E, X, B> ColumnCore<E, SlabAgg, SlabBTree<SlabAgg>, DeltaModel<X, B>> where
             rvals::<E, X, B>(final(self)@) == rvals::<E, X, B>(old(self)@).take(at as int) + items_vals(taken@)
                 + rvals::<E, X, B>(old(self)@).skip(at + del),
             items is None ==> taken@.len() == 0,
+            // a source that says what it has gives all of it
+            items matches Some(s) ==> (s.left() matches Some(l) ==> taken@ == l),
     {
         hide(bounds_of);
         // the bound on the column's values, and the running sum, the nulls
@@ -1391,15 +1393,20 @@ impl<E, X, B> ColumnCore<E, SlabAgg, SlabBTree<SlabAgg>, DeltaModel<X, B>> where
             (lo, hi, prev, skip, next_val)
         };
         let plan = SpanPlan::new(prev, skip, next_val, lo, hi, true, Ghost(orig));
+        let ghost all = if items is Some { items->0.left() } else { None };
         let mut feed = DeltaFeed::<S, E, X, B> {
             items,
             plan,
             track: true,
             given: Ghost(Seq::empty()),
             taken: Ghost(Seq::empty()),
+            all: Ghost(all),
             _p: PhantomData,
         };
         proof {
+            if all is Some {
+                assert(feed.taken@ + all->0 =~= all->0);
+            }
             assert(Seq::<E::V>::empty().map_values(|o: E::V| <B as DeltaWrite<'static, E, X>>::dvo(o)) =~= feed.plan.p.emitted@);
             assert(feed.plan.p.wanted@ =~= items_vals(feed.taken@));
         }
@@ -1432,6 +1439,11 @@ impl<E, X, B> ColumnCore<E, SlabAgg, SlabBTree<SlabAgg>, DeltaModel<X, B>> where
             assert(orig =~= a + x + tail);
             assert(bounds_of(a, x, tail, feed.plan.p.prev@, feed.plan.p.skip as nat, feed.plan.p.next_val));
             assert(_ins@ =~= feed.given@);
+            if all is Some {
+                // the plan is done, so the source has nothing left
+                assert(feed.all@ == all);
+                assert(feed.taken@ + Seq::<SpliceItem>::empty() =~= feed.taken@);
+            }
             lemma_vals_total::<E>(p.slabs@);
             lemma_splice_deltas::<E, X, B>(
                 s0,
@@ -1486,16 +1498,23 @@ impl<E, X, B> ColumnCore<E, SlabAgg, SlabBTree<SlabAgg>, DeltaModel<X, B>> where
             final(self).budget() == old(self).budget(),
             final(self).ready(),
             rvals::<E, X, B>(final(self)@) == taken@,
+            // a source that says what it has gives all of it
+            items.left() matches Some(l) ==> taken@ == l,
     {
+        let ghost all = items.left();
         let mut feed = ValuesFeed::<S, E, X, B> {
             items,
             deltas: ToDeltas::new(true),
             given: Ghost(Seq::empty()),
             ended: Ghost(false),
             taken: Ghost(Seq::empty()),
+            all: Ghost(all),
             _p: PhantomData,
         };
         proof {
+            if all is Some {
+                assert(feed.taken@ + all->0 =~= all->0);
+            }
             assert(Seq::<E::V>::empty().map_values(|o: E::V| <B as DeltaWrite<'static, E, X>>::dvo(o))
                 =~= feed.deltas.ds@);
             assert(feed.deltas.vals@ =~= feed.taken@);
@@ -1522,6 +1541,11 @@ impl<E, X, B> ColumnCore<E, SlabAgg, SlabBTree<SlabAgg>, DeltaModel<X, B>> where
             // realize the values taken
             let v = vals_of::<E>(p.slabs@);
             assert(v =~= feed.given@);
+            if all is Some {
+                // the items have run out, so they have nothing left
+                assert(feed.all@ == all);
+                assert(feed.taken@ + Seq::<Option<i64>>::empty() =~= feed.taken@);
+            }
             lemma_dslabs_own::<E, X, B>(p.slabs@);
             lemma_vals_total::<E>(p.slabs@);
             if fits {

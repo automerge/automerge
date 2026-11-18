@@ -392,18 +392,19 @@
 //! This module exists only while Verus checks the crate.
 
 use super::{
-    accumulated, after_edit, after_edits, below_at, bytes_below, folded, head_len, head_run,
-    head_run_max, lemma_acc_cat, lemma_acc_range, lemma_acc_run, lemma_after_edits, lemma_cancel,
-    lemma_head_len, lemma_head_run_max, lemma_run_values_add, lemma_run_values_push,
+    accumulated, after_edit, after_edits, all_fit, below_at, bytes_below, folded, head_len,
+    head_run, head_run_max, lemma_acc_cat, lemma_acc_range, lemma_acc_run, lemma_after_edits,
+    lemma_cancel, lemma_head_len, lemma_head_run_max, lemma_run_values_add, lemma_run_values_push,
     lemma_runs_first, lemma_runs_of_values, lemma_sorted, lemma_sum_bound, lemma_sum_mono,
     lemma_sum_range, lemma_sum_run, lemma_sums_fit, mapped, only, past, refused, run_values,
     runs_of, scan_of, scan_taken, sorted, sorted_for, sum_of, summed, sums_fit, times, total_len,
     total_str_len, window, AccIndex, Get, LenIndex, SumIndex, VAccum, VAccumulated, VAdds, VAmount,
-    VCodec, VCount, VGet, VGroup, VIndex, VKeeps, VNewtype, VSpec, VSum, VSummed, VValue,
-    VerifiedAccColumn, VerifiedAccIter, VerifiedAccIterState, VerifiedAccSeek, VerifiedAccValue,
-    VerifiedColumn, VerifiedDecoder, VerifiedEncoder, VerifiedEncoderState, VerifiedIter,
-    VerifiedIterState, VerifiedPrefixColumn, VerifiedPrefixIter, VerifiedPrefixIterState,
-    VerifiedPrefixSeek, VerifiedPrefixedValue, VerifiedRuns,
+    VCodec, VCount, VDeltaValue, VGet, VGroup, VIndex, VKeeps, VNewtype, VSpec, VSum, VSummed,
+    VValue, VerifiedAccColumn, VerifiedAccIter, VerifiedAccIterState, VerifiedAccSeek,
+    VerifiedAccValue, VerifiedColumn, VerifiedDecoder, VerifiedDeltaColumn, VerifiedEncoder,
+    VerifiedEncoderState, VerifiedIter, VerifiedIterState, VerifiedPrefixColumn,
+    VerifiedPrefixIter, VerifiedPrefixIterState, VerifiedPrefixSeek, VerifiedPrefixedValue,
+    VerifiedRuns,
 };
 use crate::{Leb128, LoadOpts, PackError, Run};
 use std::cmp::Ordering;
@@ -10099,6 +10100,164 @@ fn accs_of_the_clients_own(
         added_by_run_moves::<Option<Mark>, Leb128>(nullable),
         added_by_moving::<Step, Leb128>(steps, a, b),
     )
+}
+
+// ── A delta column ──────────────────────────────────────────────────────────
+
+/// A delta column built from values holds those values: for every type a
+/// delta column holds, and every codec.
+#[allow(dead_code)]
+fn delta_built<T: VDeltaValue<C>, C: VCodec>(values: &[T]) -> (col: VerifiedDeltaColumn<T, C>)
+    requires
+        all_fit(values@),
+    ensures
+        col@ == values@,
+{
+    VerifiedDeltaColumn::from_values(values)
+}
+
+/// A new delta column is empty.
+#[allow(dead_code)]
+fn delta_new<T: VDeltaValue<C>, C: VCodec>() -> (col: VerifiedDeltaColumn<T, C>)
+    ensures
+        col@.len() == 0,
+{
+    VerifiedDeltaColumn::new()
+}
+
+/// How many values a delta column holds.
+#[allow(dead_code)]
+fn delta_len<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>) -> (n: usize)
+    ensures
+        n == col@.len(),
+{
+    col.len()
+}
+
+/// Whether a delta column holds none.
+#[allow(dead_code)]
+fn delta_is_empty<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>) -> (r: bool)
+    ensures
+        r == (col@.len() == 0),
+{
+    col.is_empty()
+}
+
+/// Reading a delta column gives the value kept at an index, and nothing
+/// past the end.
+#[allow(dead_code)]
+fn delta_read<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>, i: usize) -> (r: Option<T>)
+    ensures
+        i < col@.len() ==> r == Some(col@[i as int]),
+        i >= col@.len() ==> r is None,
+{
+    col.get(i)
+}
+
+/// A value read from a delta column is one a delta column can hold, so
+/// it can go into another.
+#[allow(dead_code)]
+fn delta_read_fits<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>, i: usize) -> (r: Option<T>)
+    ensures
+        r matches Some(v) ==> v.fits(),
+{
+    proof {
+        col.lemma_fits();
+    }
+    col.get(i)
+}
+
+/// A splice replaces `del` values at `at` by the given ones and leaves
+/// the rest as they were.
+#[allow(dead_code)]
+fn delta_spliced<T: VDeltaValue<C>, C: VCodec>(col: &mut VerifiedDeltaColumn<T, C>, at: usize, del: usize, values: &[T])
+    requires
+        at <= old(col)@.len(),
+        del <= old(col)@.len() - at,
+        all_fit(values@),
+    ensures
+        final(col)@ == old(col)@.take(at as int) + values@ + old(col)@.skip(at + del),
+{
+    col.splice(at, del, values);
+}
+
+/// One value put in place of another.
+#[allow(dead_code)]
+fn delta_set<T: VDeltaValue<C>, C: VCodec>(col: &mut VerifiedDeltaColumn<T, C>, i: usize, v: T)
+    requires
+        i < old(col)@.len(),
+        v.fits(),
+    ensures
+        final(col)@ == old(col)@.update(i as int, v),
+{
+    let mut one: Vec<T> = Vec::new();
+    one.push(v);
+    col.splice(i, 1, one.as_slice());
+    assert(col@ =~= old(col)@.update(i as int, v));
+}
+
+/// A `u64` up to `i64::MAX` goes at the end of a column of them; a
+/// larger one a delta column cannot hold.
+#[allow(dead_code)]
+fn delta_push_u64(col: &mut VerifiedDeltaColumn<u64>, v: u64)
+    requires
+        v <= 0x7fff_ffff_ffff_ffff,
+    ensures
+        final(col)@ == old(col)@.push(v),
+{
+    let n = col.len();
+    let mut one: Vec<u64> = Vec::new();
+    one.push(v);
+    col.splice(n, 0, one.as_slice());
+    assert(col@ =~= old(col)@.push(v));
+}
+
+/// A column of `Option<i32>` takes a null, and any `i32`.
+#[allow(dead_code)]
+fn delta_push_opt(col: &mut VerifiedDeltaColumn<Option<i32>>, v: Option<i32>)
+    ensures
+        final(col)@ == old(col)@.push(v),
+{
+    let n = col.len();
+    let mut one: Vec<Option<i32>> = Vec::new();
+    one.push(v);
+    col.splice(n, 0, one.as_slice());
+    assert(col@ =~= old(col)@.push(v));
+}
+
+/// The values of a delta column, read one at a time into a `Vec`.
+#[allow(dead_code)]
+fn delta_values<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>) -> (out: Vec<T>)
+    ensures
+        out@ == col@,
+{
+    let n = col.len();
+    let mut out: Vec<T> = Vec::new();
+    let mut i = 0;
+    while i < n
+        invariant
+            i <= n == col@.len(),
+            out@ == col@.take(i as int),
+        decreases n - i,
+    {
+        match col.get(i) {
+            Some(v) => out.push(v),
+            None => {},
+        }
+        assert(col@.take(i + 1) =~= col@.take(i as int).push(col@[i as int]));
+        i += 1;
+    }
+    assert(col@.take(n as int) =~= col@);
+    out
+}
+
+/// The default delta column is empty.
+#[allow(dead_code)]
+fn delta_default<T: VDeltaValue<C>, C: VCodec>() -> (r: VerifiedDeltaColumn<T, C>)
+    ensures
+        r@.len() == 0,
+{
+    Default::default()
 }
 
 } // verus!
