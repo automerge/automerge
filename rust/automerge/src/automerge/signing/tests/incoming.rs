@@ -38,10 +38,7 @@ fn sig(key: &SigningKey, hash: ChangeHash) -> Signature {
 
 fn sign_doc(doc: &mut Automerge, hash: ChangeHash, key: &SigningKey) {
     let raw = ed25519::Signature::from_bytes(key.sign(&signing_message(&hash)).to_bytes());
-    doc.try_signing()
-        .unwrap()
-        .insert_signature(&hash, &raw)
-        .unwrap();
+    super::insert_one(doc, hash, raw).unwrap();
 }
 
 fn append_at_level(

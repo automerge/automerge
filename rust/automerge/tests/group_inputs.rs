@@ -17,6 +17,13 @@ fn receiver_author() -> Author<'static> {
     author(200)
 }
 
+/// Whether `hash` is published: its canonical fragment exports with proof.
+fn is_published(doc: &Automerge, hash: &ChangeHash) -> bool {
+    doc.get_fragment(*hash)
+        .map(|fragment| !doc.bundle_fragments([fragment]).is_empty())
+        .unwrap_or(false)
+}
+
 fn signed_history() -> (Automerge, Vec<Vec<u8>>, Vec<ChangeHash>) {
     let key = SigningKey::from_bytes(&[91; 32]);
     let mut doc = Automerge::signing(author(91))
@@ -40,13 +47,15 @@ fn signed_history() -> (Automerge, Vec<Vec<u8>>, Vec<ChangeHash>) {
             }
         }
     }
-    for hash in &hashes {
+    let batch = hashes.iter().map(|hash| {
         let sig = ed25519::Signature::from_bytes(key.sign(&signing_message(hash)).to_bytes());
-        doc.try_signing()
-            .unwrap()
-            .insert_signature(hash, &sig)
-            .unwrap();
-    }
+        (*hash, sig)
+    });
+    assert!(matches!(
+        doc.insert_signatures(batch),
+        automerge::SignatureBatchOutcome::Completed { .. }
+    ));
+    assert!(!doc.has_unpublished_changes());
     let wire = hashes
         .iter()
         .map(|hash| {
@@ -78,8 +87,9 @@ fn apply_changes_accepts_owned_borrowed_and_preparsed_groups() {
     for target in [&mut owned, &mut borrowed] {
         assert_eq!(target.get_heads(), source.get_heads());
         for hash in &hashes {
-            assert!(target.try_signing().unwrap().is_accepted(hash));
+            assert!(is_published(target, hash));
         }
+        assert!(!target.has_unpublished_changes());
         // Attached evidence survived parsing, conversion, and admission.
         for (bytes, hash) in wire.iter().zip(&hashes) {
             let fragment = target.get_fragment(*hash).unwrap();
@@ -87,7 +97,7 @@ fn apply_changes_accepts_owned_borrowed_and_preparsed_groups() {
         }
     }
     assert_eq!(autocommit.get_heads(), source.get_heads());
-    assert!(autocommit.try_signing().unwrap().is_accepted(&hashes[1]));
+    assert!(!autocommit.has_unpublished_changes());
 
     // Bare Changes remain supported in unsigned mode, including the batch alias.
     let changes = source.get_changes(&[]);
@@ -119,7 +129,7 @@ fn decoded_groups_keep_boundaries_and_patch_logging() {
         .unwrap();
     assert_eq!(target.get_heads(), source.get_heads());
     assert!(!target.make_patches(&mut log).is_empty());
-    assert!(target.try_signing().unwrap().is_accepted(&hashes[1]));
+    assert!(is_published(&target, &hashes[1]));
     let mut retry_log = PatchLog::active();
     target
         .apply_changes_log_patches(groups, &mut retry_log)
@@ -135,7 +145,7 @@ fn conversion_errors_and_missing_proofs_leave_the_whole_batch_unapplied() {
     let mut target = Automerge::signing(receiver_author()).unwrap();
     assert!(target.apply_changes([wire[0].clone(), vec![0]]).is_err());
     assert!(target.get_heads().is_empty());
-    assert!(!target.try_signing().unwrap().is_accepted(&hashes[0]));
+    assert!(!is_published(&target, &hashes[0]));
 
     let mixed = [
         LoadedGroup::try_from(wire[0].clone()).unwrap(),

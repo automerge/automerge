@@ -7,7 +7,8 @@ use automerge::sync::{self, SyncDoc};
 use automerge::transaction::{CommitOptions, Transactable};
 use automerge::{
     signing, ActorId, Author, AutoCommit, Automerge, AutomergeError, Change, ChangeHash,
-    InvalidFragmentBytes, LoadChangeError, LoadOptions, LoadedGroup, ReadDoc, ROOT,
+    InvalidFragmentBytes, LoadChangeError, LoadOptions, LoadedGroup, ReadDoc,
+    SignatureBatchOutcome, SignatureInsertError, ROOT,
 };
 use ed25519_dalek::{Signer, SigningKey};
 
@@ -26,6 +27,81 @@ fn signing_load() -> LoadOptions<'static> {
     LoadOptions::new().signing().author(receiver_author())
 }
 
+fn sign(key: &SigningKey, hash: &ChangeHash) -> ed25519::Signature {
+    ed25519::Signature::from_bytes(key.sign(&signing_message(hash)).to_bytes())
+}
+
+/// Insert one signature through the public batch API, returning its owned
+/// per-entry result. The batch itself must not be rejected.
+fn insert_one<D: Batch>(
+    doc: &mut D,
+    hash: ChangeHash,
+    signature: ed25519::Signature,
+) -> Result<Insert, SignatureInsertError> {
+    match doc.batch([(hash, signature)]) {
+        SignatureBatchOutcome::Completed { mut insertions }
+        | SignatureBatchOutcome::PublicationFailed { mut insertions, .. } => {
+            insertions
+                .pop()
+                .expect("one input yields one outcome")
+                .result
+        }
+        SignatureBatchOutcome::Rejected { error } => panic!("batch rejected: {error}"),
+    }
+}
+
+/// Hashes the fixed author should sign next, in hash order.
+fn requested<D: Batch>(doc: &mut D) -> Vec<ChangeHash> {
+    doc.requests().iter().map(|r| r.hash()).collect()
+}
+
+/// Whether `hash` is published: its canonical fragment exports with proof.
+fn is_published<D: Batch>(doc: &D, hash: &ChangeHash) -> bool {
+    doc.fragment_exports(hash)
+}
+
+/// Shared access to the public batch surface of both document types.
+trait Batch {
+    fn batch(
+        &mut self,
+        inputs: impl IntoIterator<Item = (ChangeHash, ed25519::Signature)>,
+    ) -> SignatureBatchOutcome;
+    fn requests(&mut self) -> automerge::SigningRequests;
+    fn fragment_exports(&self, hash: &ChangeHash) -> bool;
+}
+
+impl Batch for Automerge {
+    fn batch(
+        &mut self,
+        inputs: impl IntoIterator<Item = (ChangeHash, ed25519::Signature)>,
+    ) -> SignatureBatchOutcome {
+        self.insert_signatures(inputs)
+    }
+    fn requests(&mut self) -> automerge::SigningRequests {
+        self.request_signatures().unwrap()
+    }
+    fn fragment_exports(&self, hash: &ChangeHash) -> bool {
+        self.get_fragment(*hash)
+            .is_some_and(|f| !self.bundle_fragments([f]).is_empty())
+    }
+}
+
+impl Batch for AutoCommit {
+    fn batch(
+        &mut self,
+        inputs: impl IntoIterator<Item = (ChangeHash, ed25519::Signature)>,
+    ) -> SignatureBatchOutcome {
+        self.insert_signatures(inputs)
+    }
+    fn requests(&mut self) -> automerge::SigningRequests {
+        self.request_signatures().unwrap()
+    }
+    fn fragment_exports(&self, hash: &ChangeHash) -> bool {
+        self.get_fragment(*hash)
+            .is_some_and(|f| !self.bundle_fragments([f]).is_empty())
+    }
+}
+
 #[test]
 fn public_automerge_and_autocommit_signing_workflow_roundtrips_authenticated_fragments() {
     let (alice_key, alice_author) = key_and_author(11);
@@ -37,26 +113,23 @@ fn public_automerge_and_autocommit_signing_workflow_roundtrips_authenticated_fra
     alice.put(ROOT, "title", "fragments").unwrap();
     let a1 = alice.commit().unwrap();
 
-    assert!(!alice.try_signing().unwrap().is_accepted(&a1));
+    assert!(!is_published(&alice, &a1));
+    assert!(alice.has_unpublished_changes());
     assert!(alice.fragments(..).is_empty());
 
-    let sig_a1 = ed25519::Signature::from_bytes(alice_key.sign(&signing_message(&a1)).to_bytes());
     assert_eq!(
-        alice
-            .try_signing()
-            .unwrap()
-            .insert_signature(&a1, &sig_a1)
-            .unwrap(),
+        insert_one(&mut alice, a1, sign(&alice_key, &a1)).unwrap(),
         Insert::Stored,
     );
-    assert!(alice.try_signing().unwrap().is_accepted(&a1));
+    assert!(is_published(&alice, &a1));
+    assert!(!alice.has_unpublished_changes());
 
     let alice_wire = alice.bundle_fragments(alice.fragments(..)).concat();
 
     let mut bob =
         AutoCommit::load_with_options(&alice_wire, LoadOptions::new().signing().author(bob_author))
             .unwrap();
-    assert!(bob.try_signing().unwrap().is_accepted(&a1));
+    assert!(is_published(&bob, &a1));
     assert_eq!(
         bob.get(ROOT, "title").unwrap().unwrap().0.as_str(),
         Some("fragments")
@@ -65,17 +138,13 @@ fn public_automerge_and_autocommit_signing_workflow_roundtrips_authenticated_fra
     bob.set_actor(ActorId::from([2]));
     bob.put(ROOT, "count", 2_i64).unwrap();
     let b1 = bob.commit().unwrap();
-    let sig_b1 = ed25519::Signature::from_bytes(bob_key.sign(&signing_message(&b1)).to_bytes());
-    bob.try_signing()
-        .unwrap()
-        .insert_signature(&b1, &sig_b1)
-        .unwrap();
+    insert_one(&mut bob, b1, sign(&bob_key, &b1)).unwrap();
 
     let full_wire = bob.bundle_fragments(bob.fragments(..)).concat();
 
     alice.load_incremental(&full_wire).unwrap();
     assert_eq!(alice.get_heads(), bob.get_heads());
-    assert!(alice.try_signing().unwrap().is_accepted(&b1));
+    assert!(is_published(&alice, &b1));
     assert_eq!(
         alice.get(ROOT, "count").unwrap().unwrap().0.as_i64(),
         Some(2)
@@ -83,8 +152,12 @@ fn public_automerge_and_autocommit_signing_workflow_roundtrips_authenticated_fra
 
     let mut unsigned = Automerge::new();
     assert!(matches!(
-        unsigned.try_signing().unwrap_err(),
+        unsigned.request_signatures().unwrap_err(),
         signing::error::SigningAccess::Mode(signing::error::SigningMode::Required)
+    ));
+    assert!(matches!(
+        unsigned.insert_signatures([(a1, sign(&alice_key, &a1))]),
+        SignatureBatchOutcome::Rejected { .. }
     ));
 }
 
@@ -98,19 +171,14 @@ fn public_signing_documents_reject_bare_snapshots_and_unauthenticated_entry_poin
     tx.put(ROOT, "k", "v").unwrap();
     let (hash, _) = tx.commit();
     let hash = hash.unwrap();
-    let sig = ed25519::Signature::from_bytes(key.sign(&signing_message(&hash)).to_bytes());
-    source
-        .try_signing()
-        .unwrap()
-        .insert_signature(&hash, &sig)
-        .unwrap();
+    insert_one(&mut source, hash, sign(&key, &hash)).unwrap();
 
     // A required-mode save is a signed snapshot that reloads in required mode;
     // a bare snapshot of the same history is rejected without silent adoption.
     let signed_snapshot = source.save();
-    let mut from_snapshot = Automerge::load_with_options(&signed_snapshot, signing_load()).unwrap();
+    let from_snapshot = Automerge::load_with_options(&signed_snapshot, signing_load()).unwrap();
     assert_eq!(from_snapshot.get_heads(), vec![hash]);
-    assert!(from_snapshot.try_signing().unwrap().is_accepted(&hash));
+    assert!(is_published(&from_snapshot, &hash));
     assert!(Automerge::load(&signed_snapshot).is_err());
     let mut unsigned_copy = Automerge::new();
     unsigned_copy
@@ -151,7 +219,7 @@ fn public_signing_documents_reject_bare_snapshots_and_unauthenticated_entry_poin
     ));
     assert!(receiver.get_heads().is_empty());
     assert_eq!(receiver.merge(&mut source).unwrap(), vec![hash]);
-    assert!(receiver.try_signing().unwrap().is_accepted(&hash));
+    assert!(is_published(&receiver, &hash));
     assert!(receiver.request_signatures().unwrap().is_empty());
     assert!(matches!(
         source.fork_at(&[hash]),
@@ -200,30 +268,32 @@ fn required_signatures_tracks_locally_authored_commits_under_the_fixed_author() 
     // Requests cover canonical fragment frontiers only: every requested hash
     // is a local commit, in hash order, and signing exactly those publishes
     // the whole local history, interior members included.
-    let required = alice.try_signing().unwrap().required_signatures();
+    let requests = alice.request_signatures().unwrap();
+    let required: Vec<_> = requests.iter().map(|r| r.hash()).collect();
     assert!(!required.is_empty());
     assert!(required.len() <= all_hashes.len());
     assert!(required.windows(2).all(|pair| pair[0] < pair[1]));
     assert!(required.iter().all(|hash| all_hashes.contains(hash)));
     assert!(alice.has_unpublished_changes());
-    for hash in &required {
-        let msg = signing_message(hash);
-        assert_eq!(parse_signing_message(&msg), Ok(*hash));
-        let sig = ed25519::Signature::from_bytes(alice_key.sign(&msg).to_bytes());
-        alice
-            .try_signing()
-            .unwrap()
-            .insert_signature(hash, &sig)
-            .unwrap();
-    }
-    assert!(alice
-        .try_signing()
-        .unwrap()
-        .required_signatures()
-        .is_empty());
-    assert!(all_hashes
+    let batch: Vec<_> = requests
         .iter()
-        .all(|hash| alice.try_signing().unwrap().is_accepted(hash)));
+        .map(|request| {
+            assert_eq!(request.author(), &alice_author);
+            assert_eq!(request.message(), signing_message(&request.hash()));
+            assert_eq!(parse_signing_message(request.message()), Ok(request.hash()));
+            let sig = ed25519::Signature::from_bytes(alice_key.sign(request.message()).to_bytes());
+            (request.hash(), sig)
+        })
+        .collect();
+    let SignatureBatchOutcome::Completed { insertions } = alice.insert_signatures(batch) else {
+        panic!("batch should complete");
+    };
+    assert_eq!(insertions.len(), required.len());
+    assert!(insertions
+        .iter()
+        .all(|i| matches!(i.result, Ok(Insert::Stored))));
+    assert!(requested(&mut alice).is_empty());
+    assert!(all_hashes.iter().all(|hash| is_published(&alice, hash)));
     assert!(!alice.has_unpublished_changes());
 
     assert_eq!(
@@ -241,12 +311,12 @@ fn required_signatures_tracks_locally_authored_commits_under_the_fixed_author() 
         LoadOptions::new().signing().author(bob_author.clone()),
     )
     .unwrap();
-    assert!(bob.try_signing().unwrap().required_signatures().is_empty());
+    assert!(requested(&mut bob).is_empty());
 
     bob.set_actor(ActorId::from([2]));
     bob.put(ROOT, "bob", 1_i64).unwrap();
     let b1 = bob.commit().unwrap();
-    assert_eq!(bob.try_signing().unwrap().required_signatures(), vec![b1]);
+    assert_eq!(requested(&mut bob), vec![b1]);
 
     // The author is fixed per instance: while Bob's draft is unpublished no
     // other author may take over this history, and a signing document always
@@ -262,14 +332,11 @@ fn required_signatures_tracks_locally_authored_commits_under_the_fixed_author() 
         Err(AutomergeError::SigningAuthor(_))
     ));
     assert_eq!(bob.get_author(), Some(&bob_author));
-    assert_eq!(bob.try_signing().unwrap().required_signatures(), vec![b1]);
+    assert_eq!(requested(&mut bob), vec![b1]);
 
-    let sig_b1 = ed25519::Signature::from_bytes(bob_key.sign(&signing_message(&b1)).to_bytes());
-    bob.try_signing()
-        .unwrap()
-        .insert_signature(&b1, &sig_b1)
-        .unwrap();
-    assert!(bob.try_signing().unwrap().is_accepted(&b1));
+    insert_one(&mut bob, b1, sign(&bob_key, &b1)).unwrap();
+    assert!(is_published(&bob, &b1));
+    assert!(!bob.has_unpublished_changes());
 }
 
 #[test]
@@ -295,13 +362,14 @@ fn change_and_fragment_parse_with_signatures_validate_framing_and_metadata() {
         .commit_with(CommitOptions::default().with_time(step + 1))
         .unwrap();
 
-    for hash in doc.try_signing().unwrap().required_signatures() {
-        let sig = ed25519::Signature::from_bytes(key.sign(&signing_message(&hash)).to_bytes());
-        doc.try_signing()
-            .unwrap()
-            .insert_signature(&hash, &sig)
-            .unwrap();
-    }
+    let batch: Vec<_> = requested(&mut doc)
+        .into_iter()
+        .map(|hash| (hash, sign(&key, &hash)))
+        .collect();
+    assert!(matches!(
+        doc.insert_signatures(batch),
+        SignatureBatchOutcome::Completed { .. }
+    ));
 
     let loose_meta = doc.fragments(0..=0).pop().unwrap();
     let signed_commit = doc.bundle_fragments([loose_meta.clone()]).pop().unwrap();
@@ -345,7 +413,7 @@ fn change_and_fragment_parse_with_signatures_validate_framing_and_metadata() {
         .apply_changes([parsed_bundle, LoadedGroup::from(parsed_change)])
         .unwrap();
     assert_eq!(target.get_heads(), doc.get_heads());
-    assert!(target.try_signing().unwrap().is_accepted(&loose_hash));
+    assert!(is_published(&target, &loose_hash));
 
     let mut doubled_bundle = signed_bundle.clone();
     doubled_bundle.extend_from_slice(&signed_bundle);

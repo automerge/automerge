@@ -12,7 +12,7 @@ use std::hint::black_box;
 use benchmark_battery::automerge::signature::{ed25519, signing_message};
 use benchmark_battery::automerge::transaction::{CommitOptions, Transactable};
 use benchmark_battery::automerge::{
-    ActorId, Author, Automerge, ChangeHash, LoadOptions, ObjType, ROOT,
+    ActorId, Author, Automerge, ChangeHash, LoadOptions, ObjType, SignatureBatchOutcome, ROOT,
 };
 use ed25519_dalek::{Signer, SigningKey};
 use rand::rngs::StdRng;
@@ -94,12 +94,7 @@ pub fn benchmarks() -> Vec<Benchmark> {
                 Box::new(move || {
                     let mut doc =
                         build_deep_history(signing_doc(&author), &actor, &author, BUILD_COMMITS);
-                    {
-                        let mut signing = doc.try_signing().unwrap();
-                        for (hash, sig) in &frontier_sigs {
-                            signing.insert_signature(hash, sig).unwrap();
-                        }
-                    }
+                    insert_all(&mut doc, frontier_sigs.iter().copied());
                     black_box(doc);
                 })
             },
@@ -395,6 +390,22 @@ fn sign_hash(key: &SigningKey, hash: &ChangeHash) -> ed25519::Signature {
     ed25519::Signature::from_bytes(key.sign(&signing_message(hash)).to_bytes())
 }
 
+/// Insert pre-computed signatures through the public batch API, asserting
+/// every entry was accepted.
+fn insert_all(
+    doc: &mut Automerge,
+    inputs: impl IntoIterator<Item = (ChangeHash, ed25519::Signature)>,
+) {
+    match doc.insert_signatures(inputs) {
+        SignatureBatchOutcome::Completed { insertions } => {
+            for insertion in insertions {
+                insertion.result.expect("benchmark signatures verify");
+            }
+        }
+        other => panic!("benchmark signature batch did not complete: {other:?}"),
+    }
+}
+
 /// `doc` must already carry `author` as its fixed author.
 fn build_deep_history(
     mut doc: Automerge,
@@ -451,14 +462,12 @@ fn prepared_deep_history_pair(commits: u64) -> (Automerge, Automerge) {
         commits,
     );
     let mut signed = build_deep_history(signing_doc(&author), &actor, &author, commits);
-    {
-        let mut handle = signed.try_signing().unwrap();
-        for hash in required_frontiers(&unsigned) {
-            handle
-                .insert_signature(&hash, &sign_hash(&key, &hash))
-                .unwrap();
-        }
-    }
+    insert_all(
+        &mut signed,
+        required_frontiers(&unsigned)
+            .into_iter()
+            .map(|hash| (hash, sign_hash(&key, &hash))),
+    );
     assert_eq!(unsigned.get_heads(), signed.get_heads());
     assert_same_fragment_cover(&unsigned, &signed);
     (unsigned, signed)
@@ -482,14 +491,12 @@ fn prepared_multi_actor_pair(actor_count: usize, total_commits: usize) -> (Autom
 
     let unsigned = build(Automerge::new_with_author(Some(author.clone())));
     let mut signed = build(signing_doc(&author));
-    {
-        let mut handle = signed.try_signing().unwrap();
-        for hash in required_frontiers(&unsigned) {
-            handle
-                .insert_signature(&hash, &sign_hash(&key, &hash))
-                .unwrap();
-        }
-    }
+    insert_all(
+        &mut signed,
+        required_frontiers(&unsigned)
+            .into_iter()
+            .map(|hash| (hash, sign_hash(&key, &hash))),
+    );
     assert_eq!(unsigned.get_heads(), signed.get_heads());
     assert_same_fragment_cover(&unsigned, &signed);
     (unsigned, signed)
@@ -582,12 +589,12 @@ fn incremental_series(signed: bool) -> Box<dyn FnMut(usize)> {
         &mut rng,
     );
     if signed {
-        let mut handle = sender.try_signing().unwrap();
-        for hash in &base_frontiers {
-            handle
-                .insert_signature(hash, &sign_hash(&key, hash))
-                .unwrap();
-        }
+        insert_all(
+            &mut sender,
+            base_frontiers
+                .iter()
+                .map(|hash| (*hash, sign_hash(&key, hash))),
+        );
     }
 
     let base_fragments = sender.fragments(..);
@@ -611,10 +618,7 @@ fn incremental_series(signed: bool) -> Box<dyn FnMut(usize)> {
             tx.commit_with(CommitOptions::default().with_time(time));
         }
         if signed {
-            let mut handle = sender.try_signing().unwrap();
-            for (hash, sig) in &step_signatures[step] {
-                handle.insert_signature(hash, sig).unwrap();
-            }
+            insert_all(&mut sender, step_signatures[step].iter().copied());
         }
         let delta_fragments: Vec<_> = sender
             .fragments(..)

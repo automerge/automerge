@@ -1,9 +1,14 @@
 //! Document-owned signing state and access to required-mode operations.
 //!
 //! Create an empty required-mode document with [`Automerge::signing`] (or load a
-//! signed fragment stream with [`crate::LoadOptions::signing`]), then obtain a
-//! [`SigningDocument`] through [`Automerge::try_signing`]. The document retains
-//! its accepted clock, pending groups, and required signatures between borrows.
+//! signed fragment stream with [`crate::LoadOptions::signing`]). Discover
+//! signing work with [`Automerge::request_signatures`], sign each request's
+//! message externally, and submit the results through
+//! [`Automerge::insert_signatures`]; [`Automerge::has_unpublished_changes`]
+//! reports whether applied history is still waiting on publication. The
+//! document retains its accepted clock, pending groups, and required
+//! signatures across those calls; the internal `SigningDocument` handle that
+//! implements them is not part of the public API.
 //!
 //! A required-mode document always has a current [`Author`] whose bytes form a
 //! usable Ed25519 verifying key. The author is fixed at construction and
@@ -20,7 +25,7 @@ use crate::change_graph::ChangeGraph;
 use crate::clock::SeqClock;
 use crate::error::SigningAuthorErrorInner;
 use crate::op_set2::OpSet;
-use crate::signature::{ed25519, Insert, Signature, SignatureStore};
+use crate::signature::{ed25519, Signature, SignatureStore};
 use crate::storage::signatures::{HashEntries, SignaturesChunk};
 use crate::{Author, Change, ChangeHash, Fragment, SigningAuthorError, TextEncoding};
 
@@ -387,9 +392,11 @@ pub(super) fn has_signature(
 /// Access to a document in required signing mode, obtained via [`Automerge::try_signing`].
 ///
 /// Holding a handle guarantees the document's current author has been prepared
-/// as a usable Ed25519 verifying key.
+/// as a usable Ed25519 verifying key. Internal implementation detail: the
+/// public surface is [`Automerge::insert_signatures`],
+/// [`Automerge::request_signatures`] and [`Automerge::has_unpublished_changes`].
 #[derive(Debug)]
-pub struct SigningDocument<'a> {
+pub(crate) struct SigningDocument<'a> {
     graph: &'a ChangeGraph,
     ops: &'a OpSet,
     authors: &'a Authors,
@@ -398,41 +405,11 @@ pub struct SigningDocument<'a> {
 }
 
 impl<'a> SigningDocument<'a> {
-    /// Verify and insert one Ed25519 signature for an already-applied change.
-    ///
-    /// Temporary scalar adapter over the batch receipt in
-    /// [`Automerge::insert_signatures`]: it verifies under the change's
-    /// historical author and then runs the same local publication and
-    /// reclamation step. Incoming pending groups enabled by that publication
-    /// are retried on the next batch call, since this handle cannot apply
-    /// operations. Scheduled for removal once bindings use the batch API.
-    pub fn insert_signature(
-        &mut self,
-        hash: &ChangeHash,
-        signature: &ed25519::Signature,
-    ) -> Result<Insert, error::InsertSignature> {
-        let inserted = self.receive_signature(hash, signature)?;
-        self.publish_local();
-        Ok(inserted)
-    }
-
     /// Whether this exact applied change belongs to accepted history.
-    pub fn is_accepted(&self, hash: &ChangeHash) -> bool {
+    pub(crate) fn is_accepted(&self, hash: &ChangeHash) -> bool {
         self.graph
             .actor_seq_for_hash(hash)
             .is_some_and(|(actor, seq)| self.state.accepted.is_accepted_actor_seq(actor, seq))
-    }
-
-    /// Return the hashes the current author should sign next, in hash order.
-    ///
-    /// Temporary scalar adapter over [`Automerge::request_signatures`] for
-    /// bindings that still consume bare hashes; scheduled for removal once
-    /// bindings use the owned request snapshot.
-    pub fn required_signatures(&self) -> Vec<ChangeHash> {
-        self.plan_requests()
-            .iter()
-            .map(SigningRequest::hash)
-            .collect()
     }
 
     fn accept_local(&mut self) {
@@ -522,7 +499,7 @@ impl Automerge {
     /// Fails if the document is not in required signing mode, or if its current
     /// author is missing or unusable. The latter indicates the author invariant
     /// was bypassed; constructors, loads and forks never produce it.
-    pub fn try_signing(&mut self) -> Result<SigningDocument<'_>, error::SigningAccess> {
+    pub(crate) fn try_signing(&mut self) -> Result<SigningDocument<'_>, error::SigningAccess> {
         let state = self.signing.required_mut()?;
         let author = prepare_author(self.author.as_ref())?;
         Ok(SigningDocument {
@@ -577,7 +554,8 @@ pub mod error {
         Required,
     }
 
-    /// Failure to obtain a [`super::SigningDocument`] handle.
+    /// Failure to access a document's required signing state, e.g. from
+    /// [`crate::Automerge::request_signatures`].
     #[derive(Debug, thiserror::Error)]
     pub enum SigningAccess {
         #[error(transparent)]

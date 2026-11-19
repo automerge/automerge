@@ -48,6 +48,7 @@ use wasm_bindgen::JsCast;
 
 mod export_cache;
 mod interop;
+mod signing;
 mod sync;
 mod value;
 
@@ -190,6 +191,52 @@ export type Commit = {
 export type Fragment = FragmentMeta & {
   bytes: Uint8Array;
 };
+
+// One signature the fixed local author should produce. `message` is the
+// exact domain-separated byte string to sign with Ed25519; `hash` is the
+// applied change it covers and `author` the key expected to sign it.
+export type SigningRequest = {
+  hash: Hash;
+  author: Author;
+  message: Uint8Array;
+};
+
+// One `{message, signature}` entry for `insertSignatures`.
+export type SignatureInput = {
+  message: Uint8Array;
+  signature: Uint8Array;
+};
+
+// How a verified signature was retained.
+export type SignatureInsert =
+  | "stored"
+  | "duplicate"
+  | "establishedEd25519Evidence"
+  | "replacedUnchecked"
+  | "droppedOverflow";
+
+// Owned result for one batch entry (duplicates included), in input order.
+export type SignatureInsertion = {
+  hash: Hash;
+  message: Uint8Array;
+  signature: Uint8Array;
+  result: { ok: true; insert: SignatureInsert } | { ok: false; error: string };
+};
+
+// `rejected`: nothing was processed and nothing changed (wrong mode or a
+// malformed batch; `reason` names the offending index). `completed`: every
+// entry has a result and publication settled; this does not mean every
+// change is published. `publicationFailed`: entries were processed and local
+// publication kept, but applying causally enabled incoming groups hit a
+// recoverable conflict described by `error`.
+export type SignatureBatchOutcome =
+  | { status: "rejected"; reason: string }
+  | { status: "completed"; insertions: SignatureInsertion[] }
+  | {
+      status: "publicationFailed";
+      insertions: SignatureInsertion[];
+      error: string;
+    };
 
 type PartialBy<T, K extends keyof T> = Omit<T, K> & Partial<Pick<T, K>>;
 export type ChangeToEncode = PartialBy<DecodedChange, "hash">;
@@ -358,6 +405,16 @@ interface Automerge {
     bundleFragmentMetadata(fragments: FragmentMeta[]): Uint8Array[];
     addCommits(commits: Commit[]): void;
     addFragments(fragments: Fragment[]): void;
+
+    // Owned snapshot of the signatures the fixed author should produce next.
+    // Commits any pending transaction first (after the signing-mode check).
+    requestSignatures(): SigningRequest[];
+    // Verify and attach signatures, then complete publication once. The whole
+    // batch is parsed before anything is committed or mutated.
+    insertSignatures(inputs: SignatureInput[]): SignatureBatchOutcome;
+    // Whether any applied history is still unpublished (always false when
+    // unsigned). Read-only: never commits a pending transaction.
+    hasUnpublishedChanges(): boolean;
 
     getBlock(obj: ObjID, index: number, heads?: Heads): { [key: string]: MaterializeValue } | null;
 
@@ -567,18 +624,22 @@ impl Automerge {
         author: Option<String>,
         actor: Option<String>,
     ) -> Result<Automerge, error::Fork> {
+        // Parse both inputs before forking: the native fork commits the
+        // source's pending transaction, so a malformed actor must fail first.
         let author = author
             .map(Author::try_from)
             .transpose()
             .map_err(error::BadAuthor::from)?;
+        let actor = actor
+            .map(|s| hex::decode(s).map(automerge::ActorId::from))
+            .transpose()
+            .map_err(error::BadActorId::from)?;
         let mut automerge = Automerge {
             doc: self.doc.fork_with_author(author)?,
             freeze: self.freeze,
             external_types: self.external_types.clone(),
         };
-        if let Some(s) = actor {
-            let actor =
-                automerge::ActorId::from(hex::decode(s).map_err(error::BadActorId::from)?.to_vec());
+        if let Some(actor) = actor {
             automerge.doc.set_actor(actor);
         }
         Ok(automerge)
@@ -1529,32 +1590,41 @@ impl Automerge {
             .collect())
     }
 
-    #[wasm_bindgen(js_name = requiredSignatures, unchecked_return_type = "Uint8Array[]")]
-    pub fn required_signatures(&mut self) -> Result<Array, error::SigningMode> {
-        let signing = self.doc.try_signing()?;
-        Ok(signing
-            .required_signatures()
-            .into_iter()
-            .map(|hash| Uint8Array::from(am::signing_message(&hash).as_slice()))
-            .collect())
+    /// Owned snapshot of the signatures the fixed local author should
+    /// produce next. Typed in the `interface Automerge` custom section.
+    ///
+    /// The signing-mode check runs before the pending transaction is
+    /// committed, so an unsigned document keeps its open transaction.
+    #[wasm_bindgen(js_name = requestSignatures, skip_typescript)]
+    pub fn request_signatures(&mut self) -> Result<Array, error::SigningMode> {
+        let requests = self.doc.request_signatures()?;
+        Ok(requests.iter().map(signing::request_to_js).collect())
     }
 
-    #[wasm_bindgen(js_name = insertSignature)]
-    pub fn insert_signature(
-        &mut self,
-        data: Uint8Array,
-        signature: Uint8Array,
-    ) -> Result<(), error::InsertSignature> {
-        let data_bytes = data.to_vec();
-        let hash = am::signature::parse_signing_message(&data_bytes)?;
-        let sig_vec = signature.to_vec();
-        let sig_bytes: [u8; 64] = sig_vec
-            .try_into()
-            .map_err(|bytes: Vec<u8>| error::InsertSignature::BadSignatureLength(bytes.len()))?;
-        let signature = am::signature::ed25519::Signature::from_bytes(sig_bytes);
-        let mut signing = self.doc.try_signing()?;
-        signing.insert_signature(&hash, &signature)?;
-        Ok(())
+    /// Verify and attach a batch of `{message, signature}` entries, then run
+    /// one completion pass. Typed in the `interface Automerge` custom section.
+    ///
+    /// The entire batch is parsed first; any malformed entry yields a
+    /// `rejected` outcome before the pending transaction is committed and
+    /// before any entry is processed. Wrong mode is likewise `rejected`
+    /// without closing the transaction.
+    #[wasm_bindgen(js_name = insertSignatures, skip_typescript)]
+    pub fn insert_signatures(&mut self, inputs: JsValue) -> JsValue {
+        let inputs = match signing::parse_batch(&inputs) {
+            Ok(inputs) => inputs,
+            Err(error) => return signing::rejected_to_js(&error),
+        };
+        let outcome = self
+            .doc
+            .insert_signatures(inputs.iter().map(|input| input.pair()));
+        signing::outcome_to_js(&inputs, outcome)
+    }
+
+    /// Whether any applied history is still unpublished. Read-only: never
+    /// commits a pending transaction. Always `false` when unsigned.
+    #[wasm_bindgen(js_name = hasUnpublishedChanges, skip_typescript)]
+    pub fn has_unpublished_changes(&self) -> bool {
+        self.doc.has_unpublished_changes()
     }
 
     #[wasm_bindgen(js_name = addCommits)]
@@ -2604,24 +2674,6 @@ pub mod error {
 
     impl From<SigningMode> for JsValue {
         fn from(e: SigningMode) -> Self {
-            RangeError::new(&e.to_string()).into()
-        }
-    }
-
-    #[derive(Debug, thiserror::Error)]
-    pub enum InsertSignature {
-        #[error(transparent)]
-        BadPayload(#[from] automerge::signature::error::SigningMessage),
-        #[error("ed25519 signature must contain 64 bytes, found {0}")]
-        BadSignatureLength(usize),
-        #[error(transparent)]
-        SigningMode(#[from] automerge::signing::error::SigningAccess),
-        #[error(transparent)]
-        Insert(#[from] automerge::signing::error::InsertSignature),
-    }
-
-    impl From<InsertSignature> for JsValue {
-        fn from(e: InsertSignature) -> Self {
             RangeError::new(&e.to_string()).into()
         }
     }

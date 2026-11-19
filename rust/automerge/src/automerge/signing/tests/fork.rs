@@ -203,11 +203,7 @@ fn fully_published_fork_with_new_author_keeps_old_proofs_and_uses_fresh_actor() 
     assert_eq!(drafts(&mut fork), [b]);
     assert!(fork.has_unpublished_changes());
     // The old author cannot sign the new author's change.
-    assert!(fork
-        .try_signing()
-        .unwrap()
-        .insert_signature(&b, &sig(&k, &b))
-        .is_err());
+    assert!(insert_one(&mut fork, b, sig(&k, &b)).is_err());
     fork.insert_signatures([(b, sig(&k2, &b))]);
     assert!(is_accepted(&mut fork, &b));
 

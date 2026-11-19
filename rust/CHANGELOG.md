@@ -46,6 +46,14 @@
   preserving receiver drafts. Merging an unsigned document with a required-mode
   document in either direction fails with `SigningError::MergeModeMismatch`
   before any mutation.
+* Required signing mode exposes a batch signing surface: `request_signatures`
+  returns an owned `SigningRequests` snapshot (`hash`, historical `author`,
+  exact signing `message`), `insert_signatures` verifies a batch of
+  `(ChangeHash, ed25519::Signature)` pairs under each change's historical
+  author and returns a `SignatureBatchOutcome` with one owned result per
+  entry, and `has_unpublished_changes` reports publication status without
+  committing. The signing handle (`SigningDocument`, `try_signing`) and its
+  scalar `insert_signature`/`required_signatures` are internal.
 * `SyncDoc::generate_sync_message` now returns
   `Result<Option<Message>, AutomergeError>`. Required-mode documents fail
   with `SigningError::SyncNotSupported` when generating or receiving sync

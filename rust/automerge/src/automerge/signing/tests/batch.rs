@@ -91,7 +91,7 @@ fn mixed_batch_reports_every_owned_pair_and_continues_after_errors() {
     assert!(!is_accepted(&mut doc, &b));
     assert!(!is_accepted(&mut doc, &c));
     // c is signed but unpublished: still tracked, no longer requested.
-    assert_eq!(doc.try_signing().unwrap().required_signatures(), [b]);
+    assert_eq!(requested_hashes(&mut doc), [b]);
     assert_eq!(
         doc.try_signing()
             .unwrap()
@@ -107,7 +107,7 @@ fn mixed_batch_reports_every_owned_pair_and_continues_after_errors() {
     assert!(matches!(insertions(&outcome)[0].result, Ok(Insert::Stored)));
     assert!(is_accepted(&mut doc, &b));
     assert!(is_accepted(&mut doc, &c));
-    assert!(doc.try_signing().unwrap().required_signatures().is_empty());
+    assert!(requested_hashes(&mut doc).is_empty());
 }
 
 #[test]
@@ -201,7 +201,7 @@ fn autocommit_checks_mode_before_closing_pending_transaction() {
     assert_eq!(signed.pending_ops(), 0);
     assert_eq!(signed.get_heads().len(), 1);
     assert_ne!(signed.get_heads(), [a]);
-    assert!(signed.try_signing().unwrap().is_accepted(&a));
+    assert!(signed.doc.try_signing().unwrap().is_accepted(&a));
 }
 
 #[test]
@@ -244,7 +244,7 @@ fn local_publication_applies_causally_enabled_pending_group_with_patches() {
         [o2]
     );
     assert_eq!(doc.get_missing_deps(&[]), [o1]);
-    assert!(doc.try_signing().unwrap().required_signatures().is_empty());
+    assert!(requested_hashes(&mut doc).is_empty());
 
     // Repeated and empty batches make no further progress and reapply nothing.
     let mut log = PatchLog::active();
@@ -272,10 +272,15 @@ fn empty_and_all_error_batches_still_attempt_completion() {
     // A pending group whose dependency is published *locally* before any
     // batch call: the next batch, even with no usable signature, completes it.
     let (mut doc, k1, [a, b]) = local_a_with_pending_b();
-    sign_doc(&mut doc, a, &k1);
+    {
+        // Internal receipt and local publication without the completion pass
+        // (the state a non-batch publication path would leave behind): the
+        // next batch call, even empty, completes the enabled group.
+        let mut signing = doc.try_signing().unwrap();
+        signing.receive_signature(&a, &sig(&k1, &a)).unwrap();
+        signing.publish_local();
+    }
     assert!(is_accepted(&mut doc, &a));
-    // The scalar adapter publishes locally but cannot apply operations; the
-    // next batch call, even empty, completes the enabled group.
     assert!(!is_accepted(&mut doc, &b));
     let outcome = doc.insert_signatures(std::iter::empty());
     assert!(matches!(outcome, SignatureBatchOutcome::Completed { .. }));
@@ -425,7 +430,7 @@ fn simultaneously_admissible_pending_equivocation_fails_publication_but_retains_
     assert_eq!(doc.get_heads(), [a]);
     assert_eq!(doc.signing.queued_changes().count(), 2);
     assert!(doc.make_patches(&mut log).is_empty());
-    assert!(doc.try_signing().unwrap().required_signatures().is_empty());
+    assert!(requested_hashes(&mut doc).is_empty());
 
     // Unchanged retry fails the same way without choosing a winner.
     let outcome = doc.insert_signatures(std::iter::empty());

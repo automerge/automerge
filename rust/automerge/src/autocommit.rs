@@ -189,14 +189,6 @@ impl AutoCommit {
         self.doc.has_unpublished_changes()
     }
 
-    /// Borrow this document's [`crate::signing::SigningDocument`] handle.
-    pub fn try_signing(
-        &mut self,
-    ) -> Result<crate::signing::SigningDocument<'_>, crate::signing::error::SigningAccess> {
-        self.ensure_transaction_closed();
-        self.doc.try_signing()
-    }
-
     /// Return a copy of this document with its data anonymized.
     pub fn anonymize(&mut self) -> Result<Self, AnonymizeError> {
         self.ensure_transaction_closed();

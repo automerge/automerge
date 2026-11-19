@@ -106,10 +106,7 @@ fn rejected_required_author_forks_preserve_actor_history_and_evidence() {
     let (hash, _) = tx.commit();
     let hash = hash.unwrap();
     let sig = ed25519::Signature::from_bytes(key.sign(&signing_message(&hash)).to_bytes());
-    doc.try_signing()
-        .unwrap()
-        .insert_signature(&hash, &sig)
-        .unwrap();
+    super::insert_one(&mut doc, hash, sig).unwrap();
     assert!(doc.try_signing().unwrap().is_accepted(&hash));
     let mut candidates = vec![None];
     candidates.extend(invalid_authors().into_iter().map(Some));
@@ -155,10 +152,7 @@ fn same_author_forks_keep_identity_and_later_commits_omit_the_author_footer() {
             .sign(&signing_message(&first.hash()))
             .to_bytes(),
     );
-    fork.try_signing()
-        .unwrap()
-        .insert_signature(&first.hash(), &old_signature)
-        .unwrap();
+    super::insert_one(&mut fork, first.hash(), old_signature).unwrap();
     // Drafts remain, so Bob cannot take over this history yet.
     assert!(matches!(
         fork.fork_with_author(Some(bob)),

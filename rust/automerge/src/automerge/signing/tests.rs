@@ -4,7 +4,10 @@ use ed25519_dalek::{Signer, SigningKey};
 
 use crate::signature::{ed25519, signing_message, Insert};
 use crate::transaction::{CommitOptions, Transactable};
-use crate::{ActorId, Author, Automerge, Change, ChangeHash, PatchLog, ReadDoc, ROOT};
+use crate::{
+    ActorId, Author, Automerge, Change, ChangeHash, PatchLog, ReadDoc, SignatureBatchOutcome,
+    SignatureInsertError, ROOT,
+};
 
 use super::error;
 
@@ -32,10 +35,35 @@ fn sig(key: &SigningKey, hash: &ChangeHash) -> ed25519::Signature {
 }
 
 fn sign_doc(doc: &mut Automerge, hash: ChangeHash, key: &SigningKey) {
-    doc.try_signing()
+    insert_one(doc, hash, sig(key, &hash)).unwrap();
+}
+
+/// Insert a single signature through the public batch API and return its
+/// owned per-entry result (the batch itself must not be rejected).
+fn insert_one(
+    doc: &mut Automerge,
+    hash: ChangeHash,
+    signature: ed25519::Signature,
+) -> Result<Insert, SignatureInsertError> {
+    match doc.insert_signatures([(hash, signature)]) {
+        SignatureBatchOutcome::Completed { mut insertions }
+        | SignatureBatchOutcome::PublicationFailed { mut insertions, .. } => {
+            insertions
+                .pop()
+                .expect("one input yields one outcome")
+                .result
+        }
+        SignatureBatchOutcome::Rejected { error } => panic!("batch rejected: {error}"),
+    }
+}
+
+/// Hashes the fixed author should sign next, in hash order.
+fn requested_hashes(doc: &mut Automerge) -> Vec<ChangeHash> {
+    doc.request_signatures()
         .unwrap()
-        .insert_signature(&hash, &sig(key, &hash))
-        .unwrap();
+        .iter()
+        .map(|request| request.hash())
+        .collect()
 }
 
 /// An unsigned replica of `doc`'s applied history writing as `author` with
@@ -96,10 +124,7 @@ fn local_edits_are_visible_immediately_and_accepted_automatically_when_signed() 
     assert!(!doc.try_signing().unwrap().is_accepted(&a1));
 
     assert_eq!(
-        doc.try_signing()
-            .unwrap()
-            .insert_signature(&a1, &sig(&k, &a1))
-            .unwrap(),
+        insert_one(&mut doc, a1, sig(&k, &a1)).unwrap(),
         Insert::Stored,
     );
     assert!(doc.try_signing().unwrap().is_accepted(&a1));
@@ -134,22 +159,19 @@ fn insertion_enforces_recorded_change_authors_and_rejects_bad_inputs() {
     .concat();
     assert_eq!(doc.load_incremental(&b1_bytes).unwrap(), 0);
 
-    {
-        let mut signing = doc.try_signing().unwrap();
-        assert!(matches!(
-            signing.insert_signature(&a1, &sig(&bob, &a1)),
-            Err(error::InsertSignature::Verification { change, .. }) if change == a1
-        ));
-        let unknown = ChangeHash([0xff; 32]);
-        assert!(matches!(
-            signing.insert_signature(&unknown, &sig(&alice, &unknown)),
-            Err(error::InsertSignature::UnknownChange { change }) if change == unknown
-        ));
-        assert!(matches!(
-            signing.insert_signature(&b1, &sig(&bob, &b1)),
-            Err(error::InsertSignature::UnknownChange { change }) if change == b1
-        ));
-    }
+    assert!(matches!(
+        insert_one(&mut doc, a1, sig(&bob, &a1)),
+        Err(error::InsertSignature::Verification { change, .. }) if change == a1
+    ));
+    let unknown = ChangeHash([0xff; 32]);
+    assert!(matches!(
+        insert_one(&mut doc, unknown, sig(&alice, &unknown)),
+        Err(error::InsertSignature::UnknownChange { change }) if change == unknown
+    ));
+    assert!(matches!(
+        insert_one(&mut doc, b1, sig(&bob, &b1)),
+        Err(error::InsertSignature::UnknownChange { change }) if change == b1
+    ));
     // Publishing `a1` through the batch API admits Bob's pending group; its
     // recorded author is Bob, so only Bob's signature verifies it.
     doc.insert_signatures([(a1, sig(&alice, &a1))]);
@@ -160,7 +182,7 @@ fn insertion_enforces_recorded_change_authors_and_rejects_bad_inputs() {
         Some(author(&bob))
     );
     assert!(matches!(
-        doc.try_signing().unwrap().insert_signature(&b1, &sig(&alice, &b1)),
+        insert_one(&mut doc, b1, sig(&alice, &b1)),
         Err(error::InsertSignature::Verification { change, .. }) if change == b1
     ));
 
@@ -299,7 +321,7 @@ fn required_signatures_never_returns_non_local_changes_even_with_matching_author
     )
     .update(&remote_change);
 
-    assert!(doc.try_signing().unwrap().required_signatures().is_empty());
+    assert!(requested_hashes(&mut doc).is_empty());
     assert!(!doc
         .try_signing()
         .unwrap()
@@ -319,14 +341,11 @@ fn required_signatures_never_returns_non_local_changes_even_with_matching_author
         .state
         .local_drafts
         .contains(&dependent));
-    assert_eq!(
-        doc.try_signing().unwrap().required_signatures(),
-        vec![local_hash]
-    );
+    assert_eq!(requested_hashes(&mut doc), vec![local_hash]);
     sign_doc(&mut doc, local_hash, &k1);
     assert!(doc.try_signing().unwrap().is_accepted(&local_hash));
     assert!(!doc.try_signing().unwrap().is_accepted(&dependent));
-    assert!(doc.try_signing().unwrap().required_signatures().is_empty());
+    assert!(requested_hashes(&mut doc).is_empty());
     assert!(doc.has_unpublished_changes());
 }
 
