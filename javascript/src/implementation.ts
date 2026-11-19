@@ -67,6 +67,9 @@ import type {
   Span,
   DecodedSyncMessage,
   UpdateSpansConfig,
+  SigningRequest,
+  SignatureInput,
+  SignatureBatchOutcome,
 } from "./wasm_types.js"
 export type {
   ChangeMetadata,
@@ -74,6 +77,11 @@ export type {
   Commit,
   Fragment,
   FragmentLevelRange,
+  SigningRequest,
+  SignatureInput,
+  SignatureInsert,
+  SignatureInsertion,
+  SignatureBatchOutcome,
   PutPatch,
   DelPatch,
   DiffOptions,
@@ -350,16 +358,24 @@ export function clone<T>(
       "The signing mode is fixed when a document is created and inherited by clones",
     )
   }
-  // A clone inherits the author unless one is requested; in signing mode a
-  // different author is accepted only when no local change is unpublished.
+  // A clone inherits the author unless one is requested. A new author goes
+  // through the guarded full fork: in signing mode a different author is
+  // accepted only when no local change is unpublished, and a signed
+  // historical view cannot be cloned at all (historical forks are
+  // unsupported there). Unsigned historical views keep their semantics: fork
+  // the view first, then take the authored full fork of that copy.
   let handle
   if (typeof opts.author == "string") {
     if (heads !== undefined) {
-      throw new RangeError(
-        "A view cannot be cloned with a different author; clone the full document instead",
-      )
+      const historical = state.handle.fork(undefined, heads)
+      try {
+        handle = historical.forkWithAuthor(opts.author, opts.actor)
+      } finally {
+        historical.free()
+      }
+    } else {
+      handle = state.handle.forkWithAuthor(opts.author, opts.actor)
     }
-    handle = state.handle.forkWithAuthor(opts.author, opts.actor)
   } else {
     handle = state.handle.fork(opts.actor, heads)
   }
@@ -967,6 +983,11 @@ function applyVisibilityMutation<T>(
  * an error which says "Attempting to change an out of date document". To
  * overcome this call {@link clone} on the argument before passing it to {@link
  * merge}.
+ *
+ * Between two signing documents only `remote`'s *published* history (with its
+ * complete proofs) is merged; `remote`'s unpublished drafts are left out and
+ * `local`'s own drafts are kept. Merging a signing document with an unsigned
+ * one throws in either direction before anything is changed.
  */
 export function merge<T>(local: Doc<T>, remote: Doc<T>): Doc<T> {
   const localState = _state(local)
@@ -978,8 +999,7 @@ export function merge<T>(local: Doc<T>, remote: Doc<T>): Doc<T> {
   }
   const heads = localState.handle.getHeads()
   const remoteState = _state(remote)
-  const changes = localState.handle.getChangesAdded(remoteState.handle)
-  localState.handle.applyChanges(changes)
+  localState.handle.merge(remoteState.handle)
   return progressDocument(local, "merge", heads, localState.patchCallback)
 }
 
@@ -2190,32 +2210,77 @@ export function readBundle(bundle: Uint8Array): {
 }
 
 /**
- * EXPERIMENTAL: Return an iterator of domain-separated payloads for locally
- * authored commits on this document that belong to its current author and
- * still need to be signed, in commit order.
+ * EXPERIMENTAL: The signatures this document's fixed author should produce
+ * next, as an owned snapshot.
  *
- * Sign each yielded `Uint8Array` directly with Ed25519 and pass both the
- * payload and signature to {@link insertSignature}.
+ * Each {@link SigningRequest} carries the applied change `hash`, the `author`
+ * whose Ed25519 key must sign, and the exact `message` bytes to sign. Sign
+ * `message` externally (the private key never enters Automerge) and hand the
+ * results to {@link insertSignatures}. The snapshot stays valid for its exact
+ * hashes after the document moves on, so late or duplicate responses are
+ * harmless. An empty result does not mean everything is published; see
+ * {@link hasUnpublishedChanges}.
+ *
+ * Throws if `doc` is not a signing document.
+ *
+ * @example
+ * ```ts
+ * // Signing happens outside Automerge, e.g. in a worker holding the key.
+ * const requests = Automerge.requestSignatures(doc)
+ * const inputs = await Promise.all(
+ *   requests.map(async r => ({ message: r.message, signature: await sign(r.message) })),
+ * )
+ * ;({ doc } = Automerge.insertSignatures(doc, inputs))
+ * ```
  *
  * @experimental
  */
-export function requiredSignatures<T>(doc: Doc<T>): Iterable<Uint8Array> {
+export function requestSignatures<T>(doc: Doc<T>): SigningRequest[] {
   const state = _state(doc, false)
-  return state.handle.requiredSignatures().values()
+  return state.handle.requestSignatures()
 }
 
 /**
- * EXPERIMENTAL: Verify and attach an Ed25519 signature for a payload yielded by
- * {@link requiredSignatures}, automatically accepting causally complete local
- * history and updating outgoing fragment readiness.
+ * EXPERIMENTAL: Verify and attach a batch of signatures, then complete
+ * publication once.
+ *
+ * The whole batch is parsed before anything changes: if any entry is
+ * malformed, or `doc` is not a signing document, the outcome is `rejected`
+ * (with the offending index in `reason`), nothing is processed and the
+ * original `doc` is returned unchanged and still usable. Otherwise every
+ * entry, duplicates included, gets an owned {@link SignatureInsertion} in
+ * input order; a signature that fails verification or names an unknown
+ * change fails individually while later entries continue.
+ *
+ * `completed` means the batch was processed and publication settled, not that
+ * every change is published (missing dependencies or proof are normal waiting
+ * states). `publicationFailed` means inserted evidence and local publication
+ * were kept but applying newly enabled incoming history hit a recoverable
+ * conflict. In both cases the returned `doc` supersedes the input one and any
+ * incoming history applied by completion is reported through the patch
+ * callback with source `"insertSignatures"`.
+ *
+ * @example Shutdown: stop editing, finish signing, then wait with your own
+ * timeout before saving. {@link save} only returns bytes; durability is the
+ * application's job, and unpublished drafts are not in the saved bytes.
+ * ```ts
+ * const deadline = Date.now() + 5_000
+ * while (Automerge.hasUnpublishedChanges(doc) && Date.now() < deadline) {
+ *   const requests = Automerge.requestSignatures(doc)
+ *   if (requests.length === 0) break // blocked on peers, nothing to sign
+ *   const inputs = await signAll(requests)
+ *   ;({ doc } = Automerge.insertSignatures(doc, inputs))
+ * }
+ * await storage.write(Automerge.save(doc)) // published history only
+ * ```
  *
  * @experimental
  */
-export function insertSignature<T>(
+export function insertSignatures<T>(
   doc: Doc<T>,
-  data: Uint8Array,
-  signature: Uint8Array,
-): void {
+  inputs: SignatureInput[],
+  opts?: ApplyOptions<T>,
+): { doc: Doc<T>; outcome: SignatureBatchOutcome } {
   const state = _state(doc)
   if (state.heads) {
     throw new RangeError(
@@ -2225,5 +2290,32 @@ export function insertSignature<T>(
   if (_is_proxy(doc)) {
     throw new RangeError("Calls to Automerge.change cannot be nested")
   }
-  state.handle.insertSignature(data, signature)
+  const heads = state.handle.getHeads()
+  const outcome = state.handle.insertSignatures(inputs)
+  if (outcome.status === "rejected") {
+    // Nothing was processed or mutated: the input document stays current.
+    return { doc, outcome }
+  }
+  state.heads = heads
+  const next = progressDocument(
+    doc,
+    "insertSignatures",
+    heads,
+    opts?.patchCallback || state.patchCallback,
+  )
+  return { doc: next, outcome }
+}
+
+/**
+ * EXPERIMENTAL: Whether any applied history of a signing document is not yet
+ * published. Always `false` for unsigned, empty or fully published documents.
+ *
+ * Read-only: it never commits or triggers publication, and it is not the
+ * same as having signing requests. History blocked on missing proof from
+ * other authors is unpublished with nothing to request.
+ *
+ * @experimental
+ */
+export function hasUnpublishedChanges<T>(doc: Doc<T>): boolean {
+  return _state(doc, false).handle.hasUnpublishedChanges()
 }

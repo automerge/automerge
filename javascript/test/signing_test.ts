@@ -10,7 +10,11 @@ type CounterDoc = {
   items?: string[]
   alice?: string
   bob?: string
+  draft?: string
+  mine?: string
 }
+
+const SIGNING_PREFIX = "automerge-change-signature-v1"
 
 async function makeSigner() {
   const keys = (await subtle.generateKey("Ed25519", true, [
@@ -31,17 +35,48 @@ async function makeSigner() {
 const RECEIVER_AUTHOR = "58" + "66".repeat(31)
 const RECEIVER = { signing: true as const, author: RECEIVER_AUTHOR }
 
-async function signRequired<T>(
+async function signRequests(
+  requests: Automerge.SigningRequest[],
+  sign: (data: Uint8Array) => Promise<Uint8Array>,
+): Promise<Automerge.SignatureInput[]> {
+  const inputs: Automerge.SignatureInput[] = []
+  for (const request of requests) {
+    inputs.push({
+      message: request.message,
+      signature: await sign(request.message),
+    })
+  }
+  return inputs
+}
+
+/** Sign every outstanding request and insert the batch, expecting completion. */
+async function publishAll<T>(
   doc: Automerge.Doc<T>,
   sign: (data: Uint8Array) => Promise<Uint8Array>,
-): Promise<Uint8Array[]> {
-  const payloads: Uint8Array[] = []
-  for (const data of Automerge.requiredSignatures(doc)) {
-    payloads.push(data)
-    const sig = await sign(data)
-    Automerge.insertSignature(doc, data, sig)
-  }
-  return payloads
+  opts?: Automerge.ApplyOptions<T>,
+): Promise<Automerge.Doc<T>> {
+  const requests = Automerge.requestSignatures(doc)
+  const inputs = await signRequests(requests, sign)
+  const { doc: next, outcome } = Automerge.insertSignatures(doc, inputs, opts)
+  assert.equal(outcome.status, "completed", JSON.stringify(outcome))
+  return next
+}
+
+function completed(
+  outcome: Automerge.SignatureBatchOutcome,
+): Automerge.SignatureInsertion[] {
+  assert.equal(outcome.status, "completed", JSON.stringify(outcome))
+  if (outcome.status !== "completed") throw new Error("unreachable")
+  return outcome.insertions
+}
+
+function messageFor(hash: string): Uint8Array {
+  return new Uint8Array(
+    Buffer.concat([
+      Buffer.from(SIGNING_PREFIX, "utf8"),
+      Buffer.from(hash, "hex"),
+    ]),
+  )
 }
 
 function concatBytes(chunks: Uint8Array[]): Uint8Array {
@@ -87,22 +122,50 @@ describe("fragment signing API", () => {
     assert.equal(Automerge.getFragments(doc).length, 0)
     assert.equal(Automerge.getCommits(doc).length, 0)
     assert.equal(Automerge.getFragmentMetadata(doc).length, 0)
+    assert.equal(Automerge.hasUnpublishedChanges(doc), true)
 
-    const payloads = [...Automerge.requiredSignatures(doc)]
-    assert.equal(payloads.length, totalCommits)
-    for (const data of payloads) {
-      assert.equal(data.length, 61)
+    // Requests cover canonical frontiers only (fewer than the commits) and
+    // carry the exact message to sign.
+    const requests = Automerge.requestSignatures(doc)
+    assert.ok(requests.length >= 1)
+    assert.ok(requests.length < totalCommits)
+    for (const request of requests) {
+      assert.equal(request.author, alice.author)
+      assert.equal(request.message.length, 61)
       assert.equal(
-        Buffer.from(data.subarray(0, 29)).toString("utf8"),
-        "automerge-change-signature-v1",
+        Buffer.from(request.message.subarray(0, 29)).toString("utf8"),
+        SIGNING_PREFIX,
       )
-      const sig = await alice.sign(data)
-      Automerge.insertSignature(doc, data, sig)
-      // Duplicate insertion is idempotent; also check next namespace export.
-      Automerge.next.insertSignature(doc, data, sig)
+      assert.equal(
+        Buffer.from(request.message.subarray(29)).toString("hex"),
+        request.hash,
+      )
     }
-    assert.deepEqual([...Automerge.requiredSignatures(doc)], [])
-    assert.deepEqual([...Automerge.next.requiredSignatures(doc)], [])
+    // Views and the `next` namespace see the same requests.
+    assert.deepEqual(Automerge.next.requestSignatures(doc), requests)
+
+    const inputs = await signRequests(requests, alice.sign)
+    inputs.push(inputs[0]) // duplicate gets its own owned result
+    const preBatch = doc
+    const { doc: published, outcome } = Automerge.insertSignatures(doc, inputs)
+    const insertions = completed(outcome)
+    assert.equal(insertions.length, inputs.length)
+    insertions.slice(0, requests.length).forEach((insertion, i) => {
+      assert.equal(insertion.hash, requests[i].hash)
+      assert.deepEqual(insertion.result, { ok: true, insert: "stored" })
+      assert.deepEqual(insertion.signature, inputs[i].signature)
+      assert.deepEqual(insertion.message, inputs[i].message)
+    })
+    assert.deepEqual(insertions[insertions.length - 1].result, {
+      ok: true,
+      insert: "duplicate",
+    })
+    // The returned document supersedes the input; the input is outdated.
+    doc = published
+    assert.throws(() => Automerge.change(preBatch, () => {}), RangeError)
+    assert.deepEqual(Automerge.requestSignatures(doc), [])
+    assert.equal(Automerge.hasUnpublishedChanges(doc), false)
+    assert.equal(doc.counter, totalCommits)
 
     const fragments = Automerge.getFragments(doc)
     const commits = Automerge.getCommits(doc)
@@ -123,6 +186,9 @@ describe("fragment signing API", () => {
     assert.ok(patchSources.includes("addCommits"))
     assert.deepEqual(Automerge.getHeads(receiver), Automerge.getHeads(doc))
     assert.equal(receiver.counter, totalCommits)
+    assert.equal(Automerge.hasUnpublishedChanges(receiver), false)
+    // Imported history is never signing work for the receiver.
+    assert.deepEqual(Automerge.requestSignatures(receiver), [])
 
     // Reconstruct via load(..., { signing: true }) both directly and with patchCallback.
     const wire = concatBytes(
@@ -140,14 +206,21 @@ describe("fragment signing API", () => {
     assert.equal(loadedWithPatches.counter, totalCommits)
     assert.ok(loadPatches.length > 0)
 
-    // Unsigned documents can also ingest proof-bearing fragments and commits.
-    let unsignedReceiver = Automerge.init<CounterDoc>()
-    unsignedReceiver = Automerge.addFragments(unsignedReceiver, fragments)
-    unsignedReceiver = Automerge.addCommits(unsignedReceiver, commits)
-    assert.equal(unsignedReceiver.counter, totalCommits)
+    // Unsigned documents never silently discard attached proofs: signed
+    // fragments and commits are rejected rather than stripped.
+    const unsignedReceiver = Automerge.init<CounterDoc>()
+    assert.throws(
+      () => Automerge.addFragments(unsignedReceiver, fragments),
+      RangeError,
+    )
+    assert.throws(
+      () => Automerge.addCommits(unsignedReceiver, commits),
+      RangeError,
+    )
+    assert.deepEqual(Automerge.getHeads(unsignedReceiver), [])
   })
 
-  it("returns only payloads needing signatures from the document's current author across peers", async () => {
+  it("returns owned snapshot requests for the fixed author across peers and accepts stale responses", async () => {
     const alice = await makeSigner()
     const bob = await makeSigner()
 
@@ -159,7 +232,7 @@ describe("fragment signing API", () => {
       d.alice = "hello from alice"
       d.items = ["a"]
     })
-    await signRequired(aliceDoc, alice.sign)
+    aliceDoc = await publishAll(aliceDoc, alice.sign)
 
     const aliceWire = concatBytes(
       Automerge.bundleFragmentMetadata(
@@ -170,13 +243,13 @@ describe("fragment signing API", () => {
 
     // A replica with a different author has nothing of its own to sign.
     const reader = Automerge.load<CounterDoc>(aliceWire, RECEIVER)
-    assert.deepEqual([...Automerge.requiredSignatures(reader)], [])
+    assert.deepEqual(Automerge.requestSignatures(reader), [])
 
     let bobDoc = Automerge.load<CounterDoc>(aliceWire, {
       author: bob.author,
       signing: true,
     })
-    assert.deepEqual([...Automerge.requiredSignatures(bobDoc)], [])
+    assert.deepEqual(Automerge.requestSignatures(bobDoc), [])
     assert.equal(Automerge.getAuthor(bobDoc), bob.author)
 
     bobDoc = Automerge.change(bobDoc, d => {
@@ -184,13 +257,31 @@ describe("fragment signing API", () => {
       d.items?.push("b")
     })
     const [bobHead] = Automerge.getHeads(bobDoc)
-    const bobPayloads = await signRequired(bobDoc, bob.sign)
-    assert.equal(bobPayloads.length, 1)
-    assert.equal(
-      Buffer.from(bobPayloads[0].subarray(29)).toString("hex"),
-      bobHead,
+    const stale = Automerge.requestSignatures(bobDoc)
+    assert.equal(stale.length, 1)
+    assert.equal(stale[0].hash, bobHead)
+    assert.equal(stale[0].author, bob.author)
+
+    // The snapshot is independent of later edits, and a late response to it
+    // is still accepted for its exact hash.
+    bobDoc = Automerge.change(bobDoc, d => {
+      d.items?.push("c")
+    })
+    assert.equal(stale[0].hash, bobHead)
+    assert.equal(Automerge.requestSignatures(bobDoc).length, 2)
+    const { doc: afterStale, outcome } = Automerge.insertSignatures(
+      bobDoc,
+      await signRequests(stale, bob.sign),
     )
-    assert.deepEqual([...Automerge.requiredSignatures(bobDoc)], [])
+    bobDoc = afterStale
+    assert.deepEqual(
+      completed(outcome).map(i => i.result),
+      [{ ok: true, insert: "stored" }],
+    )
+    assert.equal(Automerge.hasUnpublishedChanges(bobDoc), true)
+    assert.equal(Automerge.requestSignatures(bobDoc).length, 1)
+    bobDoc = await publishAll(bobDoc, bob.sign)
+    assert.equal(Automerge.hasUnpublishedChanges(bobDoc), false)
 
     const bobWire = concatBytes(
       Automerge.bundleFragmentMetadata(
@@ -203,67 +294,13 @@ describe("fragment signing API", () => {
       Automerge.getHeads(aliceDoc).sort(),
       Automerge.getHeads(bobDoc).sort(),
     )
-    assert.deepEqual(aliceDoc.items, ["a", "b"])
+    assert.deepEqual(aliceDoc.items, ["a", "b", "c"])
     assert.equal(aliceDoc.bob, "hello from bob")
+    // Imported peers' history is verified but never requested locally.
+    assert.deepEqual(Automerge.requestSignatures(aliceDoc), [])
   })
 
-  it("stages out-of-order incoming groups until causal dependencies and author bindings arrive", async () => {
-    const alice = await makeSigner()
-    let source = Automerge.init<CounterDoc>({
-      author: alice.author,
-      signing: true,
-    })
-    source = Automerge.change(source, d => {
-      d.counter = 1
-    })
-    source = Automerge.change(source, d => {
-      d.counter = 2
-    })
-    source = Automerge.change(source, d => {
-      d.counter = 3
-    })
-    await signRequired(source, alice.sign)
-
-    const chunks = Automerge.bundleFragmentMetadata(
-      source,
-      Automerge.getFragmentMetadata(source),
-    )
-    const commits = Automerge.getCommits(source)
-    const byCausalOrder = [...commits].sort((a, b) => {
-      if (a.parents.length === 0) return -1
-      if (b.parents.length === 0) return 1
-      return b.parents.includes(a.head) ? -1 : 1
-    })
-    assert.equal(byCausalOrder.length, 3)
-
-    const seenValues: Array<number | undefined> = []
-    let target = Automerge.init<CounterDoc>({
-      ...RECEIVER,
-      patchCallback: (_patches, info) => seenValues.push(info.after.counter),
-    })
-
-    target = Automerge.addCommits(target, [byCausalOrder[2]])
-    assert.deepEqual(Automerge.getHeads(target), [])
-    assert.equal(target.counter, undefined)
-    assert.deepEqual(seenValues, [])
-
-    target = Automerge.addCommits(target, [byCausalOrder[1]])
-    assert.deepEqual(Automerge.getHeads(target), [])
-    assert.deepEqual(seenValues, [])
-
-    target = Automerge.addCommits(target, [byCausalOrder[0]])
-    assert.deepEqual(Automerge.getHeads(target), Automerge.getHeads(source))
-    assert.equal(target.counter, 3)
-    assert.deepEqual(seenValues, [3])
-
-    const reversedWire = concatBytes([...chunks].reverse())
-    const loadedReversed = Automerge.load<CounterDoc>(reversedWire, {
-      ...RECEIVER,
-    })
-    assert.equal(loadedReversed.counter, 3)
-  })
-
-  it("enforces independent attached proofs, signing-mode entry points, and handle invariants", async () => {
+  it("rejects a malformed batch atomically, continues past per-entry errors, and keeps the outdated document usable on rejection", async () => {
     const alice = await makeSigner()
     const mallory = await makeSigner()
 
@@ -271,53 +308,349 @@ describe("fragment signing API", () => {
       author: alice.author,
       signing: true,
     })
-    const staleDoc = doc
     doc = Automerge.change(doc, d => {
       d.title = "v1"
     })
-    const [h1] = Automerge.getHeads(doc)
-    const [payload] = [...Automerge.requiredSignatures(doc)]
-    assert.ok(payload)
+    doc = Automerge.change(doc, d => {
+      d.title = "v2"
+    })
+    const [h2] = Automerge.getHeads(doc)
+    const requests = Automerge.requestSignatures(doc)
+    assert.equal(requests.length, 2)
+    const good = await signRequests(requests, alice.sign)
 
-    // Wrong key, malformed payload, bad signature length, stale doc, historical view, and nested change callback all fail.
-    const wrongSig = await mallory.sign(payload)
-    assert.throws(
-      () => Automerge.insertSignature(doc, payload, wrongSig),
-      RangeError,
-    )
-    assert.throws(
-      () => Automerge.insertSignature(doc, new Uint8Array(61), wrongSig),
-      RangeError,
-    )
-    assert.throws(
-      () => Automerge.insertSignature(doc, payload, new Uint8Array(64)),
-      RangeError,
-    )
+    const malformed: Array<[unknown, RegExp]> = [
+      [
+        [
+          good[0],
+          { message: new Uint8Array(61), signature: good[1].signature },
+        ],
+        /index 1/,
+      ],
+      [
+        [
+          good[0],
+          {
+            message: good[1].message.subarray(0, 40),
+            signature: good[1].signature,
+          },
+        ],
+        /index 1/,
+      ],
+      [
+        [good[0], { message: good[1].message, signature: new Uint8Array(63) }],
+        /index 1/,
+      ],
+      [[good[0], { message: "text", signature: good[1].signature }], /index 1/],
+      [[good[0], 7], /index 1/],
+      ["not an array", /array/],
+    ]
+    for (const [inputs, reason] of malformed) {
+      const result = Automerge.insertSignatures(
+        doc,
+        inputs as Automerge.SignatureInput[],
+      )
+      assert.equal(result.outcome.status, "rejected")
+      if (result.outcome.status === "rejected") {
+        assert.match(result.outcome.reason, reason)
+      }
+      // Rejection returns the very same document; it is not outdated.
+      assert.strictEqual(result.doc, doc)
+    }
+    assert.equal(Automerge.requestSignatures(doc).length, 2)
+    assert.equal(Automerge.getCommits(doc).length, 0)
+    doc = Automerge.change(doc, d => {
+      d.title = "v3"
+    })
 
-    const validSig = await alice.sign(payload)
+    // Stale document, historical view, and nested change callback all fail.
+    const stale = Automerge.init<CounterDoc>({
+      author: alice.author,
+      signing: true,
+    })
+    Automerge.change(stale, d => {
+      d.title = "x"
+    })
+    assert.throws(() => Automerge.insertSignatures(stale, good), RangeError)
+    const historical = Automerge.view(doc, [h2])
     assert.throws(
-      () => Automerge.insertSignature(staleDoc, payload, validSig),
-      RangeError,
-    )
-    const historical = Automerge.view(doc, [h1])
-    assert.throws(
-      () => Automerge.insertSignature(historical, payload, validSig),
+      () => Automerge.insertSignatures(historical, good),
       RangeError,
     )
     Automerge.change(Automerge.clone(doc), d => {
       assert.throws(
-        () =>
-          Automerge.insertSignature(
-            d as Automerge.Doc<CounterDoc>,
-            payload,
-            validSig,
-          ),
+        () => Automerge.insertSignatures(d as Automerge.Doc<CounterDoc>, good),
         RangeError,
       )
     })
 
-    // Signing documents always carry a usable author: construction without one,
-    // or with bytes that are not an Ed25519 public key, is rejected.
+    // Per-entry errors: wrong key and unknown hash fail individually while
+    // later valid entries, including a duplicate, continue.
+    const current = Automerge.requestSignatures(doc)
+    assert.equal(current.length, 3)
+    const unknown = messageFor("ee".repeat(32))
+    const wrongKey = await mallory.sign(current[0].message)
+    const valid = await signRequests(current, alice.sign)
+    const { doc: next, outcome } = Automerge.insertSignatures(doc, [
+      { message: current[0].message, signature: wrongKey },
+      { message: unknown, signature: await alice.sign(unknown) },
+      ...valid,
+      valid[2],
+    ])
+    doc = next
+    const insertions = completed(outcome)
+    assert.equal(insertions.length, 6)
+    assert.equal(insertions[0].result.ok, false)
+    assert.equal(insertions[0].hash, current[0].hash)
+    assert.match(
+      (insertions[0].result as { error: string }).error,
+      /verification/,
+    )
+    assert.equal(insertions[1].result.ok, false)
+    assert.equal(insertions[1].hash, "ee".repeat(32))
+    assert.deepEqual(insertions[2].result, { ok: true, insert: "stored" })
+    assert.deepEqual(insertions[3].result, { ok: true, insert: "stored" })
+    assert.deepEqual(insertions[4].result, { ok: true, insert: "stored" })
+    assert.deepEqual(insertions[5].result, { ok: true, insert: "duplicate" })
+    assert.deepEqual(Automerge.requestSignatures(doc), [])
+    assert.equal(Automerge.hasUnpublishedChanges(doc), false)
+    assert.equal(doc.title, "v3")
+
+    // An empty batch completes with no insertions and the document stays usable.
+    const empty = Automerge.insertSignatures(doc, [])
+    assert.deepEqual(empty.outcome, { status: "completed", insertions: [] })
+    doc = Automerge.change(empty.doc, d => {
+      d.title = "v4"
+    })
+    assert.equal(doc.title, "v4")
+
+    // Unsigned documents: rejected batch, thrown request, false status.
+    let unsigned = Automerge.init<CounterDoc>({ actor: "09" })
+    unsigned = Automerge.change(unsigned, d => {
+      d.counter = 42
+    })
+    const rejected = Automerge.insertSignatures(unsigned, good)
+    assert.equal(rejected.outcome.status, "rejected")
+    assert.strictEqual(rejected.doc, unsigned)
+    assert.throws(() => Automerge.requestSignatures(unsigned), RangeError)
+    assert.equal(Automerge.hasUnpublishedChanges(unsigned), false)
+    unsigned = Automerge.change(unsigned, d => {
+      d.counter = 43
+    })
+    assert.equal(unsigned.counter, 43)
+  })
+
+  it("delivers incoming patches from completion and keeps status pure", async () => {
+    const alice = await makeSigner()
+    const bob = await makeSigner()
+
+    // Alice commits `a`. A same-author clone taken now keeps `a` as an
+    // unpublished draft while the original publishes it for Bob.
+    let aliceDoc = Automerge.init<CounterDoc>({
+      author: alice.author,
+      signing: true,
+      actor: "01",
+    })
+    aliceDoc = Automerge.change(aliceDoc, d => {
+      d.counter = 1
+    })
+    const [a] = Automerge.getHeads(aliceDoc)
+    const laggard = Automerge.clone(aliceDoc)
+    aliceDoc = await publishAll(aliceDoc, alice.sign)
+
+    // Bob builds and publishes `b` on top of the published `a`.
+    let bobDoc = Automerge.load<CounterDoc>(
+      concatBytes(
+        Automerge.bundleFragmentMetadata(
+          aliceDoc,
+          Automerge.getFragmentMetadata(aliceDoc),
+        ),
+      ),
+      { signing: true, author: bob.author, actor: "02" },
+    )
+    bobDoc = Automerge.change(bobDoc, d => {
+      d.bob = "dependent"
+    })
+    bobDoc = await publishAll(bobDoc, bob.sign)
+    const [b] = Automerge.getHeads(bobDoc)
+    const bobCommit = Automerge.getCommits(bobDoc).find(c => c.head === b)!
+    assert.deepEqual(bobCommit.parents, [a])
+
+    // Deliver Bob's signed commit to the laggard before its `a` is published:
+    // it is verified but stays pending.
+    const patches: Automerge.PatchInfo<CounterDoc>[] = []
+    aliceDoc = Automerge.addCommits(laggard, [bobCommit], {
+      patchCallback: (_p, info) => patches.push(info),
+    })
+    assert.deepEqual(Automerge.getHeads(aliceDoc), [a])
+    assert.equal(aliceDoc.bob, undefined)
+    assert.equal(patches.length, 0)
+    // Pending incoming groups are not unpublished *applied* history, but `a` is.
+    assert.equal(Automerge.hasUnpublishedChanges(aliceDoc), true)
+    assert.equal(Automerge.requestSignatures(aliceDoc).length, 1)
+
+    // Publishing `a` completes Bob's group with a patch from insertSignatures.
+    const requests = Automerge.requestSignatures(aliceDoc)
+    const sources: Automerge.PatchSource[] = []
+    const { doc: next, outcome } = Automerge.insertSignatures(
+      aliceDoc,
+      await signRequests(requests, alice.sign),
+      {
+        patchCallback: (p, info) => {
+          patches.push(info)
+          sources.push(info.source)
+          assert.ok(p.length > 0)
+        },
+      },
+    )
+    completed(outcome)
+    aliceDoc = next
+    assert.deepEqual(sources, ["insertSignatures"])
+    assert.equal(patches.length, 1)
+    assert.equal(patches[0].after.bob, "dependent")
+    assert.deepEqual(Automerge.getHeads(aliceDoc), [b])
+    assert.equal(aliceDoc.bob, "dependent")
+    assert.equal(Automerge.hasUnpublishedChanges(aliceDoc), false)
+    assert.deepEqual(Automerge.requestSignatures(aliceDoc), [])
+  })
+
+  it("merges published history only, in both signed directions, and rejects mode mismatches before mutation", async () => {
+    const alice = await makeSigner()
+    const bob = await makeSigner()
+    let source = Automerge.init<CounterDoc>({
+      author: alice.author,
+      signing: true,
+      actor: "01",
+    })
+    source = Automerge.change(source, d => {
+      d.counter = 1
+    })
+    source = await publishAll(source, alice.sign)
+    const [published] = Automerge.getHeads(source)
+    source = Automerge.change(source, d => {
+      d.draft = "unpublished"
+    })
+    const [draft] = Automerge.getHeads(source)
+
+    let receiver = Automerge.init<CounterDoc>({
+      author: bob.author,
+      signing: true,
+      actor: "02",
+    })
+    receiver = Automerge.change(receiver, d => {
+      d.mine = "receiver draft"
+    })
+    const [mine] = Automerge.getHeads(receiver)
+
+    const seen: Automerge.PatchSource[] = []
+    receiver = Automerge.merge(
+      Automerge.clone(receiver, {
+        patchCallback: (_p, info) => seen.push(info.source),
+      }),
+      source,
+    )
+    assert.deepEqual(seen, ["merge"])
+    assert.deepEqual(
+      Automerge.getHeads(receiver).sort(),
+      [mine, published].sort(),
+    )
+    assert.equal(receiver.counter, 1)
+    assert.equal(receiver.draft, undefined)
+    assert.equal(receiver.mine, "receiver draft")
+    assert.equal(Automerge.hasHeads(receiver, [draft]), false)
+    // Receiver's own draft is retained and still requested; the merged
+    // history is not.
+    assert.deepEqual(
+      Automerge.requestSignatures(receiver).map(r => r.hash),
+      [mine],
+    )
+    // The source remains a usable document with its draft.
+    assert.deepEqual(Automerge.getHeads(source), [draft])
+    source = Automerge.change(source, d => {
+      d.draft = "still editable"
+    })
+
+    // Repeated merge deduplicates.
+    receiver = Automerge.merge(receiver, source)
+    assert.equal(Automerge.getAllChanges(receiver).length, 2)
+
+    // Merged proof is re-exportable to an empty peer.
+    const wire = concatBytes(
+      Automerge.bundleFragmentMetadata(
+        receiver,
+        Automerge.getFragmentMetadata(receiver),
+      ),
+    )
+    const empty = Automerge.load<CounterDoc>(wire, RECEIVER)
+    assert.deepEqual(Automerge.getHeads(empty), [published])
+
+    // Mode mismatch is rejected both ways and leaves both documents usable.
+    let unsigned = Automerge.init<CounterDoc>({ actor: "09" })
+    unsigned = Automerge.change(unsigned, d => {
+      d.counter = 9
+    })
+    assert.throws(() => Automerge.merge(receiver, unsigned), RangeError)
+    assert.throws(() => Automerge.merge(unsigned, receiver), RangeError)
+    receiver = Automerge.change(receiver, d => {
+      d.mine = "after mismatch"
+    })
+    unsigned = Automerge.change(unsigned, d => {
+      d.counter = 10
+    })
+    assert.equal(receiver.mine, "after mismatch")
+    assert.equal(unsigned.counter, 10)
+  })
+
+  it("saves only the published prefix, keeps drafts live, and emits them incrementally once published", async () => {
+    const alice = await makeSigner()
+    let doc = Automerge.init<CounterDoc>({
+      author: alice.author,
+      signing: true,
+      actor: "01",
+    })
+    doc = Automerge.change(doc, d => {
+      d.counter = 1
+    })
+    doc = await publishAll(doc, alice.sign)
+    const [a] = Automerge.getHeads(doc)
+    doc = Automerge.change(doc, d => {
+      d.counter = 2
+    })
+    const [b] = Automerge.getHeads(doc)
+
+    const snapshot = Automerge.save(doc)
+    // Signed bytes are never read by an unsigned default load.
+    assert.throws(() => Automerge.load(snapshot), RangeError)
+    const reloaded = Automerge.load<CounterDoc>(snapshot, {
+      signing: true,
+      author: alice.author,
+    })
+    assert.deepEqual(Automerge.getHeads(reloaded), [a])
+    assert.equal(reloaded.counter, 1)
+    assert.equal(Automerge.hasUnpublishedChanges(reloaded), false)
+    assert.deepEqual(Automerge.requestSignatures(reloaded), [])
+    // The draft stays in the live document.
+    assert.deepEqual(Automerge.getHeads(doc), [b])
+    assert.equal(doc.counter, 2)
+    assert.equal(Automerge.hasUnpublishedChanges(doc), true)
+
+    assert.equal(Automerge.saveIncremental(doc).length, 0)
+    doc = await publishAll(doc, alice.sign)
+    const increment = Automerge.saveIncremental(doc)
+    assert.ok(increment.length > 0)
+    const caughtUp = Automerge.loadIncremental(reloaded, increment)
+    assert.deepEqual(Automerge.getHeads(caughtUp), [b])
+    assert.equal(caughtUp.counter, 2)
+
+    // saveSince / full save of the published document round-trips.
+    const full = Automerge.load<CounterDoc>(Automerge.save(doc), RECEIVER)
+    assert.equal(full.counter, 2)
+  })
+
+  it("fixes the author at construction and guards new-author clones", async () => {
+    const alice = await makeSigner()
+    const bob = await makeSigner()
+
     assert.throws(
       () => Automerge.init<CounterDoc>({ signing: true }),
       RangeError,
@@ -330,109 +663,207 @@ describe("fragment signing API", () => {
       () => Automerge.load<CounterDoc>(new Uint8Array(0), { signing: true }),
       RangeError,
     )
-    // A forged signature over a locally authored commit is rejected.
-    let other = Automerge.init<CounterDoc>(RECEIVER)
-    other = Automerge.change(other, d => {
-      d.title = "receiver"
-    })
-    const [otherHead] = Automerge.getHeads(other)
-    const forgedPayload = Buffer.concat([
-      Buffer.from("automerge-change-signature-v1", "utf8"),
-      Buffer.from(otherHead, "hex"),
-    ])
-    assert.throws(
-      () =>
-        Automerge.insertSignature(
-          other,
-          new Uint8Array(forgedPayload),
-          new Uint8Array(64),
-        ),
-      RangeError,
+    assert.equal(
+      (Automerge as unknown as { setAuthor?: unknown }).setAuthor,
+      undefined,
     )
 
-    // Sign valid doc and test incoming/entry-point restrictions.
-    Automerge.insertSignature(doc, payload, validSig)
-    const snapshot = Automerge.save(doc)
-    const rawChange = Automerge.getLastLocalChange(doc)!
+    let doc = Automerge.init<CounterDoc>({
+      author: alice.author,
+      signing: true,
+    })
+    doc = Automerge.change(doc, d => {
+      d.title = "v1"
+    })
+    const [h1] = Automerge.getHeads(doc)
 
-    assert.throws(() => Automerge.load(snapshot, RECEIVER), RangeError)
+    // Signing mode is fixed; same-author clone is allowed; a different author
+    // is rejected while a draft is unpublished, without invalidating the source.
+    assert.throws(() => Automerge.clone(doc, { signing: false }), RangeError)
+    const same = Automerge.clone(doc, { author: alice.author })
+    assert.equal(Automerge.getAuthor(same), alice.author)
+    assert.deepEqual(
+      Automerge.requestSignatures(same).map(r => r.hash),
+      [h1],
+    )
+    assert.throws(
+      () => Automerge.clone(doc, { author: bob.author }),
+      RangeError,
+    )
+    assert.throws(() => Automerge.clone(doc, { author: "010203" }), RangeError)
+    doc = Automerge.change(doc, d => {
+      d.title = "v2"
+    })
+    assert.equal(doc.title, "v2")
+
+    // A signed historical view cannot be cloned (fork_at is unsupported),
+    // with or without an author override, and the view stays readable.
+    const viewAtV1 = Automerge.view(doc, [h1])
+    assert.throws(() => Automerge.clone(viewAtV1), RangeError)
+    assert.throws(
+      () => Automerge.clone(viewAtV1, { author: alice.author }),
+      RangeError,
+    )
+    assert.throws(
+      () => Automerge.clone(viewAtV1, { author: bob.author }),
+      RangeError,
+    )
+    assert.equal(viewAtV1.title, "v1")
+    assert.equal(doc.title, "v2")
+
+    // Once published, Bob may take a full fork with a fresh actor; the source
+    // author and historical bindings are unchanged and no eligibility moves.
+    doc = await publishAll(doc, alice.sign)
+    const forked = Automerge.clone(doc, { author: bob.author })
+    assert.equal(Automerge.getAuthor(forked), bob.author)
+    assert.notEqual(Automerge.getActorId(forked), Automerge.getActorId(doc))
+    assert.deepEqual(Automerge.requestSignatures(forked), [])
+    assert.equal(
+      Automerge.getAuthorForActor(forked, Automerge.getActorId(doc)),
+      alice.author,
+    )
+    assert.equal(Automerge.getAuthor(doc), alice.author)
+    const forkedEdit = Automerge.change(forked, d => {
+      d.bob = "hi"
+    })
+    const [bobHead] = Automerge.getHeads(forkedEdit)
+    const [request] = Automerge.requestSignatures(forkedEdit)
+    assert.equal(request.hash, bobHead)
+    assert.equal(request.author, bob.author)
+
+    // Unsigned historical clones keep working, with or without an author.
+    let unsigned = Automerge.init<CounterDoc>({ actor: "09" })
+    unsigned = Automerge.change(unsigned, d => {
+      d.counter = 1
+    })
+    const [u1] = Automerge.getHeads(unsigned)
+    unsigned = Automerge.change(unsigned, d => {
+      d.counter = 2
+    })
+    const historical = Automerge.view(unsigned, [u1])
+    const plain = Automerge.clone(historical)
+    assert.equal(plain.counter, 1)
+    assert.equal(Automerge.getAuthor(plain), null)
+    const authored = Automerge.clone(historical, { author: "abcd" })
+    assert.equal(authored.counter, 1)
+    assert.equal(Automerge.getAuthor(authored), "abcd")
+    assert.deepEqual(Automerge.getHeads(authored), [u1])
+    const edited = Automerge.change(authored, d => {
+      d.counter = 3
+    })
+    assert.equal(
+      Automerge.decodeChange(Automerge.getLastLocalChange(edited)!).author,
+      "abcd",
+    )
+    // The source is untouched by any of this.
+    assert.equal(unsigned.counter, 2)
+    assert.equal(Automerge.getAuthor(unsigned), null)
+    const sameAuthorView = Automerge.clone(Automerge.view(authored, [u1]), {
+      author: "abcd",
+    })
+    assert.equal(sameAuthorView.counter, 1)
+  })
+
+  it("preserves attached proofs through commit/fragment transport and rejects forged metadata", async () => {
+    const alice = await makeSigner()
+    let doc = Automerge.init<CounterDoc>({
+      author: alice.author,
+      signing: true,
+      actor: "01",
+    })
+    doc = Automerge.change(doc, d => {
+      d.title = "v1"
+    })
+    doc = Automerge.change(doc, d => {
+      d.title = "v2"
+    })
+    doc = await publishAll(doc, alice.sign)
+    const commits = Automerge.getCommits(doc)
+    assert.equal(commits.length, 2)
+    const rawChange = Automerge.getLastLocalChange(doc)!
+    // Exported commit bytes carry the proof beyond the raw change.
+    const last = commits.find(c => c.head === Automerge.getHeads(doc)[0])!
+    assert.ok(last.bytes.length > rawChange.length)
 
     const receiver = Automerge.init<CounterDoc>(RECEIVER)
+    // Raw change in place of the signed bytes, tampered bytes, wrong head,
+    // wrong parents: all rejected without mutation.
     assert.throws(
-      () => Automerge.loadIncremental(receiver, snapshot),
+      () => Automerge.addCommits(receiver, [{ ...last, bytes: rawChange }]),
+      RangeError,
+    )
+    const tampered = new Uint8Array(last.bytes)
+    tampered[tampered.length - 1] ^= 0xff
+    assert.throws(
+      () => Automerge.addCommits(receiver, [{ ...last, bytes: tampered }]),
+      RangeError,
+    )
+    assert.throws(
+      () =>
+        Automerge.addCommits(receiver, [{ ...last, head: "ff".repeat(32) }]),
+      RangeError,
+    )
+    assert.throws(
+      () => Automerge.addCommits(receiver, [{ ...last, parents: [] }]),
+      RangeError,
+    )
+    const [fragmentMeta] = Automerge.getFragmentMetadata(doc)
+    const [fragment] = Automerge.getFragments(doc, { start: 0 })
+    assert.throws(
+      () =>
+        Automerge.addFragments(receiver, [
+          { ...fragment, members: [...fragment.members, "ff".repeat(32)] },
+        ]),
+      RangeError,
+    )
+    assert.throws(
+      () =>
+        Automerge.addFragments(receiver, [
+          { ...fragment, level: fragment.level + 1 },
+        ]),
+      RangeError,
+    )
+    assert.deepEqual(Automerge.getHeads(receiver), [])
+    assert.ok(fragmentMeta)
+
+    // Raw inspectors remain available but are not authenticated transport.
+    assert.throws(
+      () => Automerge.applyChanges(receiver, Automerge.getAllChanges(doc)),
       RangeError,
     )
     assert.throws(
       () => Automerge.loadIncremental(receiver, rawChange),
       RangeError,
     )
-    assert.throws(
-      () => Automerge.applyChanges(receiver, [rawChange]),
-      RangeError,
+    // Bundling non-canonical member sets yields no fake authenticated output.
+    assert.deepEqual(
+      Automerge.bundleFragmentMetadata(doc, [
+        { ...fragmentMeta, members: [fragmentMeta.head] },
+      ]).filter(bytes => fragmentMeta.members.length > 1 && bytes.length > 0),
+      [],
     )
-    assert.throws(() => Automerge.merge(receiver, doc), RangeError)
 
-    const [signedCommit] = Automerge.getCommits(doc)
-    assert.throws(
-      () =>
-        Automerge.addCommits(receiver, [{ ...signedCommit, bytes: rawChange }]),
-      RangeError,
-    )
-    const tamperedBytes = new Uint8Array(signedCommit.bytes)
-    tamperedBytes[tamperedBytes.length - 1] ^= 0xff
-    assert.throws(
-      () =>
-        Automerge.addCommits(receiver, [
-          { ...signedCommit, bytes: tamperedBytes },
-        ]),
-      RangeError,
-    )
-    assert.deepEqual(Automerge.getHeads(receiver), [])
+    const complete = Automerge.addCommits(receiver, commits)
+    assert.deepEqual(Automerge.getHeads(complete), Automerge.getHeads(doc))
+    assert.equal(complete.title, "v2")
 
-    // Sync protocol is disabled for unauthenticated transport in signing mode.
-    let unsignedPeer = Automerge.init<CounterDoc>({ actor: "09" })
-    unsignedPeer = Automerge.change(unsignedPeer, d => {
-      d.counter = 42
-    })
-    const [, peerMsg] = Automerge.generateSyncMessage(
-      unsignedPeer,
+    // Signed sync is an explicit error in both directions.
+    const [, msg] = Automerge.generateSyncMessage(
+      Automerge.change(Automerge.init<CounterDoc>(), d => {
+        d.counter = 1
+      }),
       Automerge.initSyncState(),
     )
-    assert.ok(peerMsg != null)
-
-    const [, signingMsg] = Automerge.generateSyncMessage(
-      receiver,
-      Automerge.initSyncState(),
+    assert.ok(msg)
+    assert.throws(
+      () => Automerge.generateSyncMessage(complete, Automerge.initSyncState()),
+      RangeError,
     )
-    assert.equal(signingMsg, null)
     assert.throws(
       () =>
-        Automerge.receiveSyncMessage(
-          receiver,
-          Automerge.initSyncState(),
-          peerMsg,
-        ),
+        Automerge.receiveSyncMessage(complete, Automerge.initSyncState(), msg),
       RangeError,
     )
-
-    // clone() at current heads works and inherits signing mode; overriding signing or cloning a view throws.
-    const cloned = Automerge.clone(doc, { author: alice.author })
-    assert.deepEqual([...Automerge.requiredSignatures(cloned)], [])
-    assert.throws(() => Automerge.clone(doc, { signing: false }), RangeError)
-    doc = Automerge.change(doc, d => {
-      d.title = "v2"
-    })
-    const viewAtV1 = Automerge.view(doc, [h1])
-    assert.throws(() => Automerge.clone(viewAtV1), RangeError)
-
-    // Unsigned documents reject signing-only queries/mutations.
-    assert.throws(
-      () => [...Automerge.requiredSignatures(unsignedPeer)],
-      RangeError,
-    )
-    assert.throws(
-      () => Automerge.insertSignature(unsignedPeer, payload, validSig),
-      RangeError,
-    )
+    assert.equal(complete.title, "v2")
   })
 })

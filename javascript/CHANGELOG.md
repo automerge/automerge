@@ -9,7 +9,19 @@ Changes since 3.4.1.
 * It is now possible to add metadata to a change which identifies the "author"
   of the change. This is an opaque (from Automerge's perspective) hex string.
   The author is recorded in the change metadata and can be retrieved from
-  the change history using `getAuthor` and `getAuthors`.
+  the change history using `getAuthor` and `getAuthors`. The author is fixed
+  when a document is created or loaded (`init`/`load` `author` option);
+  `clone(doc, { author })` makes a full copy for another author.
+* Experimental required signing mode (`init`/`load` with
+  `{ signing: true, author }`): `requestSignatures` returns the
+  `{ hash, author, message }` entries the fixed author should sign
+  externally, `insertSignatures(doc, [{ message, signature }], opts?)`
+  returns `{ doc, outcome }` where `outcome` is a `rejected` /
+  `completed` / `publicationFailed` union with an owned result per entry, and
+  `hasUnpublishedChanges` reports publication status. `save` writes only
+  published history with its proofs; `merge` between signing documents moves
+  published history only and mixed-mode merges throw. Signed documents reject
+  `generateSyncMessage`/`receiveSyncMessage` and historical clones.
 
 ### Changed
 
