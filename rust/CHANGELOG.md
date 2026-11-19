@@ -7,6 +7,9 @@
 * `ReadDoc::get_marks` uses the same units as `length`, `marks`, and `get`
   rather than disagreeing under some text encodings.
 * `ReadDoc::list_range` on a text no longer yields marks as elements.
+* `Automerge::apply_changes`, `load_incremental` and `merge` without a patch
+  log no longer build patch events only to drop them. This lowers peak memory
+  by about 30% in a test on a large document.
 
 ## 0.12.0
 
