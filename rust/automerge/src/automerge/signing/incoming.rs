@@ -1088,6 +1088,7 @@ impl Automerge {
                 .accepted
                 .include_hashes(&self.change_graph, plan.accepted_member_hashes);
             signing.reclaim_covered(&self.change_graph);
+            signing.retire_published_drafts(&self.change_graph);
         }
 
         let mut next_pending = PendingGroups::default();

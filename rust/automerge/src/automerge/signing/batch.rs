@@ -221,12 +221,6 @@ impl SigningDocument<'_> {
     pub(super) fn publish_local(&mut self) {
         self.accept_local();
         self.state.reclaim_covered(self.graph);
-        let graph = self.graph;
-        let accepted = &self.state.accepted;
-        self.state.local_unsigned.retain(|pending| {
-            !graph
-                .actor_seq_for_hash(pending)
-                .is_some_and(|(actor, seq)| accepted.is_accepted_actor_seq(actor, seq))
-        });
+        self.state.retire_published_drafts(self.graph);
     }
 }

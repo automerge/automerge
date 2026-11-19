@@ -94,7 +94,15 @@ fn mixed_batch_reports_every_owned_pair_and_continues_after_errors() {
     assert!(!is_accepted(&mut doc, &c));
     // c is signed but unpublished: still tracked, no longer requested.
     assert_eq!(doc.try_signing().unwrap().required_signatures(), [b]);
-    assert_eq!(doc.try_signing().unwrap().state.local_unsigned, [b, c]);
+    assert_eq!(
+        doc.try_signing()
+            .unwrap()
+            .state
+            .local_drafts
+            .iter()
+            .collect::<Vec<_>>(),
+        [b, c]
+    );
 
     // Closing the gap publishes both in one operation.
     let outcome = doc.insert_signatures([(b, sig(&k, &b))]);
@@ -509,7 +517,15 @@ fn completion_continues_after_publication_only_progress_of_pending_group() {
     assert!(matches!(insertions(&outcome)[0].result, Ok(Insert::Stored)));
     assert!(!is_accepted(&mut doc, &c));
     // a was committed on this document too, so it is tracked alongside l and c.
-    assert_eq!(doc.try_signing().unwrap().state.local_unsigned, [l, a, c]);
+    assert_eq!(
+        doc.try_signing()
+            .unwrap()
+            .state
+            .local_drafts
+            .iter()
+            .collect::<Vec<_>>(),
+        [l, a, c]
+    );
     let graph_len = doc.change_graph.len();
 
     let mut log = PatchLog::active();
@@ -524,7 +540,7 @@ fn completion_continues_after_publication_only_progress_of_pending_group() {
     assert_eq!(doc.change_graph.len(), graph_len, "no new history applied");
     assert!(!doc.signing.has_pending_groups());
     assert!(
-        doc.try_signing().unwrap().state.local_unsigned.is_empty(),
+        doc.try_signing().unwrap().state.local_drafts.is_empty(),
         "published local tracking retired in the same call"
     );
     assert!(doc.make_patches(&mut log).is_empty());

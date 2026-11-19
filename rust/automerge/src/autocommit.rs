@@ -152,6 +152,30 @@ impl AutoCommit {
         .unwrap_or_else(|never| match never {})
     }
 
+    /// Discover the signatures the fixed local author should produce next.
+    /// See [`Automerge::request_signatures`].
+    ///
+    /// The required-mode check runs first: an unsigned document fails with its
+    /// pending transaction left open. In required mode the pending
+    /// transaction is committed so its change can be requested, then the
+    /// owned snapshot is returned.
+    pub fn request_signatures(
+        &mut self,
+    ) -> Result<crate::SigningRequests, crate::signing::error::SigningAccess> {
+        self.doc.try_signing()?;
+        self.ensure_transaction_closed();
+        self.doc.request_signatures()
+    }
+
+    /// Whether any applied history is not yet published. See
+    /// [`Automerge::has_unpublished_changes`].
+    ///
+    /// Read-only: an open transaction is neither closed nor counted, since
+    /// its operations are not applied history yet.
+    pub fn has_unpublished_changes(&self) -> bool {
+        self.doc.has_unpublished_changes()
+    }
+
     /// Borrow this document's [`crate::signing::SigningDocument`] handle.
     pub fn try_signing(
         &mut self,

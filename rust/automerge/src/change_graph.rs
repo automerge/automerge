@@ -636,7 +636,6 @@ impl ChangeGraph {
     }
 
     /// Borrow all applied change hashes in graph order.
-    #[cfg(test)]
     pub(crate) fn applied_hashes(&self) -> &[ChangeHash] {
         &self.hashes
     }

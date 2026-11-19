@@ -171,8 +171,15 @@ fn required_signatures_tracks_locally_authored_commits_and_filters_to_current_au
         all_hashes.push(hash);
     }
 
+    // Requests cover canonical fragment frontiers only: every requested hash
+    // is a local commit, in hash order, and signing exactly those publishes
+    // the whole local history, interior members included.
     let required = alice.try_signing().unwrap().required_signatures();
-    assert_eq!(required, all_hashes);
+    assert!(!required.is_empty());
+    assert!(required.len() <= all_hashes.len());
+    assert!(required.windows(2).all(|pair| pair[0] < pair[1]));
+    assert!(required.iter().all(|hash| all_hashes.contains(hash)));
+    assert!(alice.has_unpublished_changes());
     for hash in &required {
         let msg = signing_message(hash);
         assert_eq!(parse_signing_message(&msg), Ok(*hash));
@@ -191,6 +198,7 @@ fn required_signatures_tracks_locally_authored_commits_and_filters_to_current_au
     assert!(all_hashes
         .iter()
         .all(|hash| alice.try_signing().unwrap().is_accepted(hash)));
+    assert!(!alice.has_unpublished_changes());
 
     assert_eq!(
         parse_signing_message(b"wrong-prefix"),

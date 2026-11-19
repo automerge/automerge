@@ -18,7 +18,7 @@ pub(crate) use fragment::{verify_frontier_entry, FragmentRequirements};
 pub(crate) use store::SignatureStore;
 pub use store::{Insert, InsertError};
 
-const SIGNING_MESSAGE_LEN: usize = SIGNING_MESSAGE_PREFIX.len() + types::HASH_SIZE;
+pub(crate) const SIGNING_MESSAGE_LEN: usize = SIGNING_MESSAGE_PREFIX.len() + types::HASH_SIZE;
 const SIGNING_MESSAGE_PREFIX: &[u8] = b"automerge-change-signature-v1";
 
 /// A signature scheme tag and its size-checked signature bytes.

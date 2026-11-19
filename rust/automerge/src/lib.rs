@@ -299,7 +299,7 @@ mod write_frontier;
 pub use crate::anonymize::AnonymizeError;
 pub use crate::automerge::signing::{
     PublicationError, SignatureBatchOutcome, SignatureInsertError, SignatureInsertOutcome,
-    SignatureRejection,
+    SignatureRejection, SigningRequest, SigningRequests,
 };
 pub use crate::automerge::{
     signing, Automerge, LoadOptions, OnPartialLoad, SaveOptions, StringMigration,

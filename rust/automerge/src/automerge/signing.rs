@@ -28,6 +28,7 @@ use super::Automerge;
 mod batch;
 mod incoming;
 mod readiness;
+mod requests;
 
 pub use batch::{
     PublicationError, SignatureBatchOutcome, SignatureInsertError, SignatureInsertOutcome,
@@ -35,6 +36,8 @@ pub use batch::{
 };
 use incoming::PendingGroups;
 use readiness::{FragmentReadiness, OutgoingSelection};
+use requests::LocalDrafts;
+pub use requests::{SigningRequest, SigningRequests};
 
 /// Contiguous accepted change sequences, maintained as a dependency-closed prefix.
 #[derive(Clone, Debug)]
@@ -151,9 +154,13 @@ impl SigningState {
         }
     }
 
+    /// Record a successful local commit as an unpublished draft.
+    ///
+    /// Only the local commit path may call this; imports and loads never
+    /// create drafts.
     pub(super) fn record_local_change(&mut self, hash: ChangeHash) {
         if let Self::Required(signing) = self {
-            signing.local_unsigned.push(hash);
+            signing.local_drafts.record(hash);
         }
     }
 
@@ -243,7 +250,7 @@ pub(crate) struct RequiredSigning {
     signatures: SignatureStore,
     fragment_readiness: FragmentReadiness,
     pending: PendingGroups,
-    local_unsigned: Vec<ChangeHash>,
+    local_drafts: LocalDrafts,
 }
 
 impl RequiredSigning {
@@ -253,7 +260,7 @@ impl RequiredSigning {
             signatures: SignatureStore::default(),
             fragment_readiness: FragmentReadiness::default(),
             pending: PendingGroups::default(),
-            local_unsigned: Vec::new(),
+            local_drafts: LocalDrafts::default(),
         }
     }
 
@@ -329,6 +336,19 @@ impl RequiredSigning {
     }
 }
 
+impl RequiredSigning {
+    /// Forget local drafts that are now published, whether by local
+    /// completion or by incoming admission.
+    pub(super) fn retire_published_drafts(&mut self, graph: &ChangeGraph) {
+        let accepted = &self.accepted;
+        self.local_drafts.retire(|hash| {
+            graph
+                .actor_seq_for_hash(hash)
+                .is_some_and(|(actor, seq)| accepted.is_accepted_actor_seq(actor, seq))
+        });
+    }
+}
+
 fn signature_for<'a>(
     graph: &ChangeGraph,
     authors: &Authors,
@@ -390,26 +410,15 @@ impl<'a> SigningDocument<'a> {
             .is_some_and(|(actor, seq)| self.state.accepted.is_accepted_actor_seq(actor, seq))
     }
 
-    /// Return the locally authored commit hashes on this document that belong to
-    /// its current [`Author`] and still need a signature, in commit order.
+    /// Return the hashes the current author should sign next, in hash order.
     ///
-    /// Only commits created locally on this document are tracked here; changes
-    /// imported from outside the document are never returned. Signed but not
-    /// yet published commits stay tracked, but their existing evidence
-    /// suppresses a redundant request.
+    /// Temporary scalar adapter over [`Automerge::request_signatures`] for
+    /// bindings that still consume bare hashes; scheduled for removal once
+    /// bindings use the owned request snapshot.
     pub fn required_signatures(&self) -> Vec<ChangeHash> {
-        let current_author = self.author.author().as_borrowed();
-        self.state
-            .local_unsigned
+        self.plan_requests()
             .iter()
-            .copied()
-            .filter(|hash| {
-                self.graph
-                    .actor_seq_for_hash(hash)
-                    .and_then(|(actor, _)| self.authors.get_author_for_actor(actor))
-                    .is_some_and(|author| author == current_author)
-            })
-            .filter(|hash| !has_signature(self.graph, self.authors, &self.state.signatures, hash))
+            .map(SigningRequest::hash)
             .collect()
     }
 

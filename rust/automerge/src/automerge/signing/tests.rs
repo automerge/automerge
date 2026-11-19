@@ -12,6 +12,7 @@ mod author_invariant;
 mod batch;
 mod fragments;
 mod incoming;
+mod requests;
 
 fn key(seed: u8) -> SigningKey {
     SigningKey::from_bytes(&[seed; 32])
@@ -265,15 +266,34 @@ fn required_signatures_never_returns_non_local_changes_even_with_matching_author
     .update(&remote_change);
 
     assert!(doc.try_signing().unwrap().required_signatures().is_empty());
+    assert!(!doc
+        .try_signing()
+        .unwrap()
+        .state
+        .local_drafts
+        .contains(&remote_hash));
+    assert!(doc.has_unpublished_changes());
 
-    // A commit actually authored locally on `doc` is tracked and cleared once signed.
-    let local_hash = append_at_level(&mut doc, None, 10, 0);
+    // A commit on an independent local branch is requested, while a local
+    // commit depending on the injected (unpublished, unprovable) change is
+    // blocked: the injected hash is never requested to unblock it.
+    let dependent = append_at_level(&mut doc, Some(&[remote_hash]), 11, 0);
+    let local_hash = append_at_level(&mut doc, Some(&[]), 10, 0);
+    assert!(doc
+        .try_signing()
+        .unwrap()
+        .state
+        .local_drafts
+        .contains(&dependent));
     assert_eq!(
         doc.try_signing().unwrap().required_signatures(),
         vec![local_hash]
     );
     sign_doc(&mut doc, local_hash, &k1);
+    assert!(doc.try_signing().unwrap().is_accepted(&local_hash));
+    assert!(!doc.try_signing().unwrap().is_accepted(&dependent));
     assert!(doc.try_signing().unwrap().required_signatures().is_empty());
+    assert!(doc.has_unpublished_changes());
 }
 
 #[test]
