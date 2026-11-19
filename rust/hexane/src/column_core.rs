@@ -343,7 +343,7 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> ColumnCore<E, W, I, G> {
             G::dom_ok(slabs@),
         ensures
             r matches Some(c) ==> c.ready() && c@ == vals_of::<E>(slabs@) && c.budget() == max_segments
-                && c.count() == 0,
+                && c.count() == 0 && c.slabs_spec() == slabs@,
             r is None ==> wlens::<W, I>(ws@) != slab_lens(slabs@) || total(slab_lens(slabs@)) > usize::MAX - 3,
     {
         if max_segments < 2 {

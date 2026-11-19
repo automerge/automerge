@@ -11829,3 +11829,301 @@ fn delta_column_ends() {
         "VerifiedDeltaColumn { len: 1, slabs: 1 }"
     );
 }
+
+/// Bytes loaded as a delta column by both APIs: they load in both or in
+/// neither, as the same values, and refused with the same error. Whether
+/// they load.
+fn delta_same_load<T: Deltad>(bytes: &[u8]) -> bool {
+    match (
+        VerifiedDeltaColumn::<T>::load(bytes),
+        DeltaColumn::<T>::load(bytes),
+    ) {
+        (Ok(v), Ok(c)) => {
+            assert_eq!(v.len(), c.len());
+            // a few bytes can be a run of billions: read those in places
+            if v.len() <= 100_000 {
+                assert_eq!(v.to_vec(), c.to_vec());
+            } else {
+                for i in [0, 1, v.len() / 2, v.len() - 1] {
+                    assert_eq!(v.get(i), c.get(i));
+                }
+            }
+            // what loads is canonical: it is what its values save to
+            assert_eq!(v.save(), bytes);
+            assert_eq!(c.save(), bytes);
+            // and it is laid out in the same slabs: but for no values,
+            // which `DeltaColumn` can keep an empty slab for
+            if v.is_empty() {
+                assert!(v.slab_count() <= c.slab_count() && c.slab_count() <= 1);
+            } else {
+                assert_eq!(v.slab_count(), c.slab_count());
+            }
+            true
+        }
+        (Err(v), Err(c)) => {
+            assert_eq!(
+                v.to_string(),
+                c.to_string(),
+                "the loaders refuse {bytes:?} differently"
+            );
+            false
+        }
+        (v, c) => panic!(
+            "the loaders disagree on {bytes:?}: {:?}, {:?}",
+            v.map(|v| v.len()),
+            c.map(|c| c.len())
+        ),
+    }
+}
+
+/// What both delta columns save to, whole and unless they hold one value
+/// only, and whether they do: the same bytes at the same place.
+fn delta_saves_agree<T: Deltad>(new: &VerifiedDeltaColumn<T>, old: &DeltaColumn<T>, others: &[T]) {
+    let values = old.to_vec();
+    let bytes = old.save();
+    assert_eq!(new.save(), bytes);
+    assert!(delta_same_load::<T>(&bytes));
+
+    let (mut a, mut b) = (vec![1u8, 2, 3], vec![1u8, 2, 3]);
+    assert_eq!(new.save_to(&mut a), old.save_to(&mut b));
+    assert_eq!(a, b);
+    assert_eq!(a[3..], bytes[..]);
+
+    for v in values.iter().take(2).chain(values.last()).chain(others) {
+        let only = values.iter().all(|x| x == v);
+        assert_eq!(new.is_only(*v), only);
+        let (ra, rb) = (
+            new.save_to_unless(&mut a, *v),
+            old.save_to_unless(&mut b, *v),
+        );
+        assert_eq!(ra, rb);
+        assert_eq!(a, b);
+        assert_eq!(ra.is_empty(), only || bytes.is_empty());
+        assert_eq!(&a[ra], if only { &[][..] } else { &bytes[..] });
+    }
+}
+
+fn delta_saves<T: Deltad>(seed: u64, max_segments: Option<usize>) {
+    let mut rng = Rng(seed.wrapping_mul(0x51_7cc1).wrapping_add(11) | 1);
+    let mut last = 0;
+    let mut some = |rng: &mut Rng, n: usize| -> Vec<T> {
+        (0..n)
+            .map(|_| {
+                let (v, l) = T::near(rng, last);
+                last = l;
+                v
+            })
+            .collect()
+    };
+    let others = some(&mut rng, 3);
+    let (mut new, mut old) = match max_segments {
+        Some(m) => (
+            VerifiedDeltaColumn::<T>::with_max_segments(m),
+            DeltaColumn::<T>::with_max_segments(m),
+        ),
+        None => (
+            VerifiedDeltaColumn::<T>::default(),
+            DeltaColumn::<T>::default(),
+        ),
+    };
+    delta_saves_agree(&new, &old, &others);
+    for _ in 0..12 {
+        let at = rng.below(old.len() + 1);
+        let del = rng.below((old.len() - at).min(20) + 1);
+        let n = rng.below(40);
+        let values = some(&mut rng, n);
+        new.splice(at, del, &values);
+        old.splice(at, del, values);
+        delta_saves_agree(&new, &old, &others);
+    }
+}
+
+/// A verified delta column and the old one save to the same bytes, which
+/// load as the same values in both, for every type of value, whatever
+/// the edits that made the column and however small its slabs.
+#[test]
+fn delta_columns_save_the_same() {
+    for seed in 0..8 {
+        for m in [None, Some(4), Some(16)] {
+            delta_saves::<u32>(seed, m);
+            delta_saves::<u64>(seed, m);
+            delta_saves::<i32>(seed, m);
+            delta_saves::<i64>(seed, m);
+            delta_saves::<usize>(seed, m);
+            delta_saves::<Option<u32>>(seed, m);
+            delta_saves::<Option<u64>>(seed, m);
+            delta_saves::<Option<i32>>(seed, m);
+            delta_saves::<Option<i64>>(seed, m);
+            delta_saves::<Option<usize>>(seed, m);
+        }
+    }
+}
+
+fn delta_uniform<T: Deltad>(values: &[T], others: &[T]) {
+    for m in [2, 4, 64] {
+        let mut new = VerifiedDeltaColumn::<T>::with_max_segments(m);
+        let mut old = DeltaColumn::<T>::with_max_segments(m);
+        // one by one, so that small slabs are split
+        for v in values {
+            new.push(*v);
+            old.push(*v);
+        }
+        delta_saves_agree(&new, &old, others);
+    }
+    let new = VerifiedDeltaColumn::<T>::from_values(values);
+    let old = DeltaColumn::<T>::from_values(values.to_vec());
+    delta_saves_agree(&new, &old, others);
+}
+
+/// Columns of one value only, and ones that all but are: both APIs say
+/// which is which, and leave the same ones unwritten.
+#[test]
+fn delta_columns_of_one_value() {
+    delta_uniform::<i64>(&[], &[0, 7]);
+    delta_uniform::<i64>(&[7], &[0, 7, 8]);
+    delta_uniform::<i64>(&[0; 9], &[0, 1, -1]);
+    delta_uniform::<i64>(&[7; 300], &[0, 7, 8]);
+    delta_uniform::<i64>(&[-7, -7, -7, -8], &[0, -7, -8]);
+    delta_uniform::<i64>(&[8, 7, 7, 7], &[0, 7, 8]);
+    delta_uniform::<i64>(&[7, 7, 8, 7, 7], &[0, 7, 8]);
+    // a step and a step back: the last value is the first again
+    delta_uniform::<i64>(&[7, 8, 7], &[0, 1, 7, 8]);
+    delta_uniform::<u32>(&[u32::MAX; 40], &[0, u32::MAX, u32::MAX - 1]);
+    delta_uniform::<u64>(&[1 << 62; 40], &[0, 1 << 62]);
+    delta_uniform::<i32>(&[i32::MIN; 40], &[0, i32::MIN, i32::MAX]);
+    delta_uniform::<usize>(&[3; 40], &[0, 3]);
+
+    delta_uniform::<Option<i64>>(&[], &[None, Some(0)]);
+    delta_uniform::<Option<i64>>(&[None], &[None, Some(0)]);
+    delta_uniform::<Option<i64>>(&[None; 300], &[None, Some(0), Some(5)]);
+    delta_uniform::<Option<i64>>(&[Some(5); 300], &[None, Some(0), Some(5)]);
+    delta_uniform::<Option<i64>>(&[Some(0); 30], &[None, Some(0), Some(5)]);
+    // a null between two of the same number is another value
+    delta_uniform::<Option<i64>>(&[Some(5), None, Some(5)], &[None, Some(0), Some(5)]);
+    delta_uniform::<Option<i64>>(&[None, Some(5), Some(5)], &[None, Some(0), Some(5)]);
+    delta_uniform::<Option<i64>>(&[Some(5), Some(5), None], &[None, Some(0), Some(5)]);
+    delta_uniform::<Option<i64>>(&[None, None, Some(0)], &[None, Some(0), Some(5)]);
+    delta_uniform::<Option<u32>>(&[Some(u32::MAX); 40], &[None, Some(u32::MAX), Some(0)]);
+    delta_uniform::<Option<u64>>(&[None, None, Some(9), None], &[None, Some(9)]);
+}
+
+/// The saved bytes of `values`, as the old API saves them.
+fn delta_bytes<T: Deltad>(values: &[T]) -> Vec<u8> {
+    DeltaColumn::<T>::from_values(values.to_vec()).save()
+}
+
+/// Whether `bytes` load as a delta column of each type: the same in
+/// both APIs.
+fn delta_loads(bytes: &[u8]) -> [bool; 10] {
+    [
+        delta_same_load::<u32>(bytes),
+        delta_same_load::<u64>(bytes),
+        delta_same_load::<i32>(bytes),
+        delta_same_load::<i64>(bytes),
+        delta_same_load::<usize>(bytes),
+        delta_same_load::<Option<u32>>(bytes),
+        delta_same_load::<Option<u64>>(bytes),
+        delta_same_load::<Option<i32>>(bytes),
+        delta_same_load::<Option<i64>>(bytes),
+        delta_same_load::<Option<usize>>(bytes),
+    ]
+}
+
+/// A delta column loads only as a type that has each of its values: the
+/// load of one saved from a wider type is refused where a value is not
+/// one of the narrower type's, by both APIs alike.
+#[test]
+fn delta_loads_keep_to_the_type() {
+    const Y: bool = true;
+    const N: bool = false;
+    // where a `usize` is as wide as a `u64`
+    const W: bool = usize::BITS == 64;
+    // u32, u64, i32, i64, usize, and then the options of them
+    assert_eq!(delta_loads(&[]), [Y; 10]);
+    assert_eq!(delta_loads(&delta_bytes::<i64>(&[3, 4, 5])), [Y; 10]);
+    assert_eq!(
+        delta_loads(&delta_bytes::<i64>(&[3, -1, 5])),
+        [N, N, Y, Y, N, N, N, Y, Y, N]
+    );
+    assert_eq!(
+        delta_loads(&delta_bytes::<i64>(&[-1])),
+        [N, N, Y, Y, N, N, N, Y, Y, N]
+    );
+    let wide = delta_bytes::<i64>(&[0, u32::MAX as i64]);
+    assert_eq!(delta_loads(&wide), [Y, Y, N, Y, Y, Y, Y, N, Y, Y]);
+    let wider = delta_bytes::<i64>(&[0, u32::MAX as i64 + 1, 0]);
+    assert_eq!(delta_loads(&wider), [N, Y, N, Y, W, N, Y, N, Y, W]);
+    let low = delta_bytes::<i64>(&[i32::MIN as i64 - 1, 0]);
+    assert_eq!(delta_loads(&low), [N, N, N, Y, N, N, N, N, Y, N]);
+    // the ends of each type are values of it
+    let ends = delta_bytes::<i64>(&[i32::MAX as i64, i32::MIN as i64, i32::MAX as i64]);
+    assert_eq!(delta_loads(&ends), [N, N, Y, Y, N, N, N, Y, Y, N]);
+    let top = delta_bytes::<i64>(&[i64::MAX, i64::MAX - 1, i64::MAX]);
+    assert_eq!(delta_loads(&top), [N, Y, N, Y, W, N, Y, N, Y, W]);
+    // a value that leaves the type and comes back within one run
+    let out = delta_bytes::<i64>(&[2, 1, 0, -1, -2, -1, 0, 1, 2]);
+    assert_eq!(delta_loads(&out), [N, N, Y, Y, N, N, N, Y, Y, N]);
+    // a null is a value only of the options
+    let nulls = delta_bytes::<Option<i64>>(&[Some(3), None, Some(4)]);
+    assert_eq!(delta_loads(&nulls), [N, N, N, N, N, Y, Y, Y, Y, Y]);
+    let only_nulls = delta_bytes::<Option<i64>>(&[None, None]);
+    assert_eq!(delta_loads(&only_nulls), [N, N, N, N, N, Y, Y, Y, Y, Y]);
+    let both = delta_bytes::<Option<i64>>(&[None, Some(-3), None]);
+    assert_eq!(delta_loads(&both), [N, N, N, N, N, N, N, Y, Y, N]);
+}
+
+/// Saved delta columns with a byte changed, cut short or with bytes
+/// added: both APIs load the same of them, as the same values, and
+/// refuse the others with the same error.
+#[test]
+fn delta_loads_agree_on_any_bytes() {
+    let mut loaded = 0;
+    let mut refused = 0;
+    for seed in 0..40u64 {
+        let mut rng = Rng(seed.wrapping_mul(0x2f_9be5).wrapping_add(3) | 1);
+        let mut last = 0;
+        let n = rng.below(60);
+        let values: Vec<Option<i64>> = (0..n)
+            .map(|_| {
+                let (v, l) = <Option<i64> as Deltad>::near(&mut rng, last);
+                last = l;
+                // nulls in some columns only
+                if seed % 2 == 0 {
+                    v.or(Some(l))
+                } else {
+                    v
+                }
+            })
+            .collect();
+        let bytes = delta_bytes(&values);
+        for _ in 0..40 {
+            let mut b = bytes.clone();
+            match rng.below(4) {
+                0 if !b.is_empty() => {
+                    let i = rng.below(b.len());
+                    b[i] ^= 1 << rng.below(8);
+                }
+                1 if !b.is_empty() => {
+                    let i = rng.below(b.len());
+                    b[i] = rng.next() as u8;
+                }
+                2 => b.truncate(rng.below(b.len() + 1)),
+                _ => {
+                    for _ in 0..rng.below(4) + 1 {
+                        b.push(rng.next() as u8);
+                    }
+                }
+            }
+            for ok in delta_loads(&b) {
+                if ok {
+                    loaded += 1;
+                } else {
+                    refused += 1;
+                }
+            }
+        }
+    }
+    // the test is of both
+    assert!(loaded > 1000, "{loaded} loaded");
+    assert!(refused > 1000, "{refused} refused");
+}

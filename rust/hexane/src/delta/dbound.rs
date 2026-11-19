@@ -1267,7 +1267,7 @@ pub(crate) proof fn lemma_psum_within(ds: Seq<Option<i64>>, k: int)
 
 /// Where the running sums of deltas `ds` fit `i64`, their least and
 /// greatest bound the values they realize.
-proof fn lemma_sums_bound(ds: Seq<Option<i64>>)
+pub(crate) proof fn lemma_sums_bound(ds: Seq<Option<i64>>)
     requires
         ds.len() > 0,
         i64::MIN <= pmin(ds),

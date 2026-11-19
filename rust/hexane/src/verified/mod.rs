@@ -3254,7 +3254,7 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
                 K::lemma_refuses(vs);
             }
         }
-        match <V::E as Model<V::X>>::load::<K::W, K::G>(bytes, MAX_SEG, None) {
+        match <V::E as Model<V::X>>::load::<K::W, K::G>(bytes, MAX_SEG, None, i64::MIN, i64::MAX) {
             Ok(core) => Ok(VerifiedColumn { core }),
             Err(e) => Err(e),
         }
@@ -3310,7 +3310,7 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
                 K::lemma_refuses(vs);
             }
         }
-        match <V::E as Model<V::X>>::load::<K::W, K::G>(bytes, max_segments, length) {
+        match <V::E as Model<V::X>>::load::<K::W, K::G>(bytes, max_segments, length, i64::MIN, i64::MAX) {
             Ok(core) => Ok(VerifiedColumn { core }),
             Err(e) => Err(e),
         }

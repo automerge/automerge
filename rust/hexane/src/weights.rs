@@ -41,11 +41,15 @@ use crate::cursor::{ReadsAgree, Slabs, Weigh};
 use crate::delta::agg::{agg_of, deltas_of, pdiff, psum, reps, steps_fit};
 use crate::delta::agg::{agg_run, slab_agg, DeltaOps, DomainWalk};
 #[cfg(verus_keep_ghost)]
+use crate::delta::dbound::{in_bound, lemma_sums_bound};
+#[cfg(verus_keep_ghost)]
 use crate::delta::ddomain::{
     dslabs, lemma_dslabs_cat, lemma_dslabs_len, lemma_dslabs_own, lemma_dslabs_unit,
     lemma_walk_steps,
 };
 use crate::delta::ddomain::{slabs_fit, DeltaWrite};
+#[cfg(verus_keep_ghost)]
+use crate::delta::dedit::rz;
 #[cfg(verus_keep_ghost)]
 use crate::delta::diter::{crop, lemma_crop};
 #[cfg(verus_keep_ghost)]
@@ -146,6 +150,11 @@ pub(crate) trait LoadWeigh<'a, E: ReadsAgree<'a, X>, X: Decoders<'a, Tail = <E a
             Self::accumulates() ==> Self::may_refuse(vs),
     ;
 
+    /// What the checks of a load say of the slabs `s` they pass, made
+    /// with the domain `lo..=hi`: of a delta column, that its values
+    /// lie in it.
+    spec fn bounded(s: Seq<Slab<E::Tail>>, lo: i64, hi: i64) -> bool;
+
     /// The weight accumulated from a slab's values is its weight.
     proof fn lemma_wrel(w: W, s: Slab<E::Tail>)
         requires
@@ -157,7 +166,7 @@ pub(crate) trait LoadWeigh<'a, E: ReadsAgree<'a, X>, X: Decoders<'a, Tail = <E a
 
     /// The checks a load makes of the weights of `slabs`, `len` items
     /// (`lo..=hi`, a delta column's domain): passing, the column is in
-    /// the model's domain.
+    /// the model's domain, and is what the checks say (`bounded`).
     fn load_check(ws: &[W], slabs: &[Slab<E::Tail>], len: usize, lo: i64, hi: i64) -> (r: Result<(), PackError>)
         requires
             all_ok::<E>(slabs@),
@@ -165,7 +174,7 @@ pub(crate) trait LoadWeigh<'a, E: ReadsAgree<'a, X>, X: Decoders<'a, Tail = <E a
             len == total(slab_lens(slabs@)),
             Self::accumulates() ==> forall|i: int| 0 <= i < ws@.len() ==> Self::wvals(#[trigger] ws@[i], X::vals(slabs@[i])),
         ensures
-            r is Ok ==> Self::dom_ok(slabs@),
+            r is Ok ==> Self::dom_ok(slabs@) && Self::bounded(slabs@, lo, hi),
             r is Err ==> Self::may_refuse(vals_of::<E>(slabs@)),
     ;
 }
@@ -285,6 +294,10 @@ impl<'a, E: Slabs + ReadsAgree<'a, X>, X: Decoders<'a, Tail = E::Tail>> LoadWeig
 
     open spec fn may_refuse(vs: Seq<E::V>) -> bool {
         false
+    }
+
+    open spec fn bounded(s: Seq<Slab<E::Tail>>, lo: i64, hi: i64) -> bool {
+        true
     }
 
     proof fn lemma_may_refuse(vs: Seq<E::V>) {
@@ -445,6 +458,10 @@ impl<'a, E, X, B, P> LoadWeigh<'a, E, X, PrefixSlabWeight<P>> for PrefixModel<X,
     }
 
     open spec fn may_refuse(vs: Seq<E::V>) -> bool {
+        true
+    }
+
+    open spec fn bounded(s: Seq<Slab<E::Tail>>, lo: i64, hi: i64) -> bool {
         true
     }
 
@@ -632,6 +649,10 @@ impl<'a, E, X, B> LoadWeigh<'a, E, X, SlabAgg> for DeltaModel<X, B> where
         true
     }
 
+    open spec fn bounded(s: Seq<Slab<E::Tail>>, lo: i64, hi: i64) -> bool {
+        in_bound(rz(0, dslabs::<X, B>(s)), lo as int, hi as int)
+    }
+
     proof fn lemma_may_refuse(vs: Seq<E::V>) {
     }
 
@@ -690,6 +711,14 @@ impl<'a, E, X, B> LoadWeigh<'a, E, X, SlabAgg> for DeltaModel<X, B> where
             proof {
                 lemma_dslabs_len::<E, X, B>(s);
                 lemma_walk_steps(dslabs::<X, B>(s), lo as int, hi as int);
+            }
+        }
+        proof {
+            // the least and the greatest of the sums walked bound the
+            // values
+            let ds = dslabs::<X, B>(s);
+            if ds.len() > 0 {
+                lemma_sums_bound(ds);
             }
         }
         Ok(())

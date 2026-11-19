@@ -2468,3 +2468,49 @@ fn delta_simple_edits() {
     assert_eq!(verus_client::delta_values(&col), vec![1, 9, 9]);
     assert_eq!(verus_client::delta_pop_empty::<Option<u32>, Leb128>(), None);
 }
+
+#[test]
+fn delta_saved_and_loaded() {
+    let col: VerifiedDeltaColumn<i64> = verus_client::delta_built(&[5, 6, 7, -9, -9, 40]);
+    let bytes = verus_client::delta_saved(&col);
+    let back = verus_client::delta_save_then_load(&col).unwrap();
+    assert_eq!(verus_client::delta_values(&back), vec![5, 6, 7, -9, -9, 40]);
+    verus_client::delta_load_then_save::<i64, Leb128>(&bytes);
+    // not a column of these: there is nothing to save again
+    verus_client::delta_load_then_save::<u32, Leb128>(&bytes);
+    let (a, b) = verus_client::delta_same_values_same_bytes(&col, &back);
+    assert_eq!(a, b);
+    assert_eq!(a, bytes);
+    assert!(verus_client::delta_empty_saves_nothing::<Option<u64>, Leb128>().is_empty());
+    assert!(verus_client::delta_load_no_bytes::<u32, Leb128>()
+        .unwrap()
+        .is_empty());
+
+    let mut out = vec![9u8];
+    let r = verus_client::delta_saved_after(&col, &mut out);
+    assert_eq!(out[r], bytes[..]);
+    let other: VerifiedDeltaColumn<i64> = verus_client::delta_built(&[1, 1]);
+    let second = verus_client::delta_saved_in_one_buffer(&col, &other).unwrap();
+    assert_eq!(verus_client::delta_values(&second), vec![1, 1]);
+
+    assert!(!verus_client::delta_only(&col, 5));
+    assert!(verus_client::delta_only(&other, 1));
+    verus_client::delta_one_value_only::<Option<i32>, Leb128>(None, Some(-4));
+    verus_client::delta_one_value_only::<u64, Leb128>(3, 4);
+    let mut out = vec![];
+    let (r0, r1) = verus_client::delta_only_nulls(8, &mut out);
+    assert!(r0.is_empty());
+    assert_eq!(r1, 0..out.len());
+    assert!(!out.is_empty());
+
+    // a column with a negative number is none of `u64`s
+    assert_eq!(verus_client::delta_loaded_fits(&bytes, 0), None);
+    let small: VerifiedDeltaColumn<u64> = verus_client::delta_built(&[4, 2]);
+    let small = verus_client::delta_saved(&small);
+    assert_eq!(verus_client::delta_loaded_fits(&small, 1), Some(2));
+    let edited = verus_client::delta_loaded_edits::<i64, Leb128>(&bytes).unwrap();
+    assert_eq!(
+        verus_client::delta_values(&edited),
+        vec![5, 6, 7, -9, -9, 40]
+    );
+}

@@ -9,22 +9,33 @@
 use super::after_edit;
 use super::codec::VCodec;
 use super::model::Model;
+#[cfg(verus_keep_ghost)]
+use super::only;
 use super::seal;
 use super::value::{VOps, VOptOps, VOptWrite, VWrite};
 use super::{VValue, MAX_SEG};
 use crate::btree::{SlabAgg, SlabBTree};
 use crate::column_core::ColumnCore;
+#[cfg(verus_keep_ghost)]
+use crate::cursor::Slabs;
+#[cfg(verus_keep_ghost)]
+use crate::delta::agg::psum;
 use crate::delta::agg::DeltaOps;
 #[cfg(verus_keep_ghost)]
-use crate::delta::ddomain::{item_vals, items_vals, rvals};
+use crate::delta::dbound::in_bound;
+#[cfg(verus_keep_ghost)]
+use crate::delta::ddomain::{dslabs, item_vals, items_vals, lemma_dslabs_own, rvals};
 use crate::delta::ddomain::{DeltaWrite, SpliceItem, SpliceItems, ValueItems};
 #[cfg(verus_keep_ghost)]
-use crate::delta::diter::{crop, lemma_crop_add, lemma_wrapping_add};
+use crate::delta::dedit::rz;
+#[cfg(verus_keep_ghost)]
+use crate::delta::diter::{crop, lemma_crop, lemma_crop_add, lemma_wrapping_add};
 use crate::rle::dec::RleReads;
 use crate::rle::edit::{null_in_column, ReadIns, RleModel};
 use crate::weights::DeltaModel;
-use crate::Leb128;
+use crate::{Leb128, PackError};
 use std::marker::PhantomData;
+use std::ops::Range;
 use vstd::prelude::*;
 
 verus! {
@@ -806,18 +817,36 @@ pub(crate) trait DKind<C: VCodec>: VDelta {
 
     /// Its values as deltas.
     type B: for <'a>DeltaWrite<'a, <Self::I as seal::Sealed<C>>::E, <Self::I as seal::Sealed<C>>::X>;
+
+    /// Two values of the column underneath are two deltas, and none of
+    /// them is a null where the type has none.
+    proof fn lemma_kind(a: <DE<Self, C> as Slabs>::V, b: <DE<Self, C> as Slabs>::V)
+        ensures
+            <Self::B as DeltaWrite<'static, DE<Self, C>, DX<Self, C>>>::dvo(a) == <Self::B as DeltaWrite<
+                'static,
+                DE<Self, C>,
+                DX<Self, C>,
+            >>::dvo(b) ==> a == b,
+            !Self::nullable() ==> <Self::B as DeltaWrite<'static, DE<Self, C>, DX<Self, C>>>::dvo(a) is Some,
+    ;
 }
 
 impl<T: VDeltaNum, C: VCodec> DKind<C> for T {
     type I = i64;
 
     type B = VDeltas<i64, C>;
+
+    proof fn lemma_kind(a: i64, b: i64) {
+    }
 }
 
 impl<T: VDeltaNum, C: VCodec> DKind<C> for Option<T> {
     type I = Option<i64>;
 
     type B = VDeltas<Option<i64>, C>;
+
+    proof fn lemma_kind(a: Option<i64>, b: Option<i64>) {
+    }
 }
 
 /// A value type of a delta column under codec `C`: a number
@@ -1411,6 +1440,390 @@ impl<T: VDeltaValue<C>, C: VCodec> VerifiedDeltaColumn<T, C> {
             assert(kept.take(len as int) =~= kept);
         }
         out
+    }
+}
+
+// ── The saved form ──────────────────────────────────────────────────────────
+
+/// Two `i64`s that take a running sum to the same wrapped sum are the
+/// same.
+proof fn lemma_crop_same(q: int, u: i64, v: i64)
+    requires
+        crop(q + u) == crop(q + v),
+    ensures
+        u == v,
+{
+    let m = 0x1_0000_0000_0000_0000int;
+    lemma_crop(q + u);
+    lemma_crop(q + v);
+    vstd::arithmetic::div_mod::lemma_mod_equivalence(q + u, q + v, m);
+    let d = u - v;
+    assert((q + u) - (q + v) == d);
+    assert(d % m == 0);
+    if d > 0 {
+        vstd::arithmetic::div_mod::lemma_small_mod(d as nat, m as nat);
+    } else if d < 0 {
+        vstd::arithmetic::div_mod::lemma_mod_add_multiples_vanish(d, m);
+        vstd::arithmetic::div_mod::lemma_small_mod((m + d) as nat, m as nat);
+    }
+}
+
+/// Deltas that realize the same values after the same running sum are
+/// the same deltas.
+proof fn lemma_rz_inj(p: int, a: Seq<Option<i64>>, b: Seq<Option<i64>>)
+    requires
+        rz(p, a) == rz(p, b),
+    ensures
+        a == b,
+    decreases a.len(),
+{
+    assert(a.len() == rz(p, a).len() && b.len() == rz(p, b).len());
+    if a.len() > 0 {
+        let n = a.len() - 1;
+        let (a0, b0) = (a.drop_last(), b.drop_last());
+        assert(rz(p, a0) =~= rz(p, b0)) by {
+            assert forall|i: int| 0 <= i < n implies rz(p, a0)[i] == rz(p, b0)[i] by {
+                assert(a0.take(i) =~= a.take(i));
+                assert(b0.take(i) =~= b.take(i));
+                assert(rz(p, a)[i] == rz(p, b)[i]);
+            }
+        }
+        lemma_rz_inj(p, a0, b0);
+        // the last ones: after the same sum, to the same value
+        assert(a.take(n) =~= a0);
+        assert(b.take(n) =~= b0);
+        assert(rz(p, a)[n] == rz(p, b)[n]);
+        match (a[n], b[n]) {
+            (Some(u), Some(v)) => {
+                lemma_crop_same(p + psum(a0), u, v);
+            },
+            _ => {},
+        }
+        assert(a[n] == b[n]);
+        assert(a =~= a0.push(a[n]));
+        assert(b =~= b0.push(b[n]));
+    } else {
+        assert(a =~= b);
+    }
+}
+
+// The saved form is the column's underneath, of `i64`s or of
+// `Option<i64>`s: the values' deltas, each value one of the type's.
+impl<T: VDeltaValue<C>, C: VCodec> VerifiedDeltaColumn<T, C> {
+    /// What the saved column `d` keeps: each value as an `i64`, or
+    /// none for a null.
+    #[doc(hidden)]
+    pub closed spec fn saved_kept(d: Seq<u8>) -> Seq<Option<i64>> {
+        rvals::<DE<T, C>, DX<T, C>, <T as DKind<C>>::B>(<DE<T, C> as Model<DX<T, C>>>::values(d))
+    }
+
+    /// `d` is a saved delta column of `T`: the canonical encoding of
+    /// some values' deltas, each of the values one of the type's.
+    pub closed spec fn valid(d: Seq<u8>) -> bool {
+        <DE<T, C> as Model<DX<T, C>>>::valid(d) && all_dom::<T>(Self::saved_kept(d))
+    }
+
+    /// The values of the saved delta column `d`.
+    pub closed spec fn values(d: Seq<u8>) -> Seq<T> {
+        vals::<T>(Self::saved_kept(d))
+    }
+
+    /// The bytes a delta column of the values `vs` saves to.
+    pub closed spec fn encoding(vs: Seq<T>) -> Seq<u8> {
+        choose|d: Seq<u8>| Self::valid(d) && Self::values(d) == vs
+    }
+
+    /// Two saved delta columns of the same values are the same bytes.
+    pub proof fn lemma_save_unique(x: Seq<u8>, y: Seq<u8>)
+        requires
+            Self::valid(x),
+            Self::valid(y),
+            Self::values(x) == Self::values(y),
+        ensures
+            x == y,
+    {
+        let (kx, ky) = (Self::saved_kept(x), Self::saved_kept(y));
+        // they keep the same: each value is kept as one thing only
+        assert(kx =~= ky) by {
+            assert(kx.len() == vals::<T>(kx).len() && ky.len() == vals::<T>(ky).len());
+            assert forall|i: int| 0 <= i < kx.len() implies kx[i] == ky[i] by {
+                assert(in_dom::<T>(kx[i]) && in_dom::<T>(ky[i]));
+                assert(vals::<T>(kx)[i] == vals::<T>(ky)[i]);
+                let v = T::of(kx[i]);
+                T::lemma_delta(v, kx[i]);
+                T::lemma_delta(v, ky[i]);
+            }
+        }
+        // so the deltas are the same, and what the columns underneath
+        // hold
+        let vx = <DE<T, C> as Model<DX<T, C>>>::values(x);
+        let vy = <DE<T, C> as Model<DX<T, C>>>::values(y);
+        let f = |o: <DE<T, C> as Slabs>::V| <<T as DKind<C>>::B as DeltaWrite<'static, DE<T, C>, DX<T, C>>>::dvo(o);
+        lemma_rz_inj(0, vx.map_values(f), vy.map_values(f));
+        assert(vx =~= vy) by {
+            assert(vx.len() == vx.map_values(f).len() && vy.len() == vy.map_values(f).len());
+            assert forall|i: int| 0 <= i < vx.len() implies vx[i] == vy[i] by {
+                assert(vx.map_values(f)[i] == vy.map_values(f)[i]);
+                T::lemma_kind(vx[i], vy[i]);
+            }
+        }
+        <DE<T, C> as Model<DX<T, C>>>::lemma_unique(x, y);
+    }
+
+    /// A saved delta column is the encoding of its values.
+    pub proof fn lemma_encoding(d: Seq<u8>)
+        requires
+            Self::valid(d),
+        ensures
+            Self::encoding(Self::values(d)) == d,
+    {
+        let e = Self::encoding(Self::values(d));
+        assert(Self::valid(e) && Self::values(e) == Self::values(d));
+        Self::lemma_save_unique(e, d);
+    }
+
+    /// No bytes are a saved delta column: the one of no values.
+    pub proof fn lemma_no_bytes()
+        ensures
+            Self::valid(Seq::<u8>::empty()),
+            Self::values(Seq::<u8>::empty()) == Seq::<T>::empty(),
+    {
+        <DE<T, C> as Model<DX<T, C>>>::lemma_none();
+        let e = Seq::<u8>::empty();
+        assert(Self::saved_kept(e) =~= Seq::<Option<i64>>::empty());
+        assert(Self::values(e) =~= Seq::<T>::empty());
+    }
+
+    /// The column, saved: the encoding of its values.
+    pub fn save(&self) -> (r: Vec<u8>)
+        ensures
+            Self::valid(r@),
+            Self::values(r@) == self@,
+            r@ == Self::encoding(self@),
+    {
+        proof {
+            use_type_invariant(self);
+        }
+        self.core.lemma_column();
+        let mut out: Vec<u8> = Vec::new();
+        <DE<T, C> as Model<DX<T, C>>>::save(self.core.slabs(), self.core.len(), &mut out);
+        proof {
+            assert(out@.skip(0) =~= out@);
+            Self::lemma_encoding(out@);
+        }
+        out
+    }
+
+    /// Save the column after what `out` holds: `out` is then what it
+    /// was, and after that the encoding of the column's values. The
+    /// range returned is where in `out` that is.
+    pub fn save_to(&self, out: &mut Vec<u8>) -> (r: Range<usize>)
+        ensures
+            final(out)@ == old(out)@ + Self::encoding(self@),
+            Self::valid(Self::encoding(self@)),
+            Self::values(Self::encoding(self@)) == self@,
+            r.start == old(out)@.len(),
+            r.end == final(out)@.len(),
+    {
+        proof {
+            use_type_invariant(self);
+        }
+        self.core.lemma_column();
+        let start = out.len();
+        <DE<T, C> as Model<DX<T, C>>>::save(self.core.slabs(), self.core.len(), out);
+        proof {
+            let d = out@.skip(start as int);
+            Self::lemma_encoding(d);
+            assert(out@ =~= old(out)@ + d);
+        }
+        start..out.len()
+    }
+
+    /// Whether every value of the column is `value`. So it is of an
+    /// empty column, whatever `value` is. The column's runs are read,
+    /// not each of its values.
+    #[allow(clippy::while_let_loop)]  // a loop with its invariants
+    pub fn is_only(&self, value: T) -> (r: bool)
+        requires
+            value.fits(),
+        ensures
+            r == only(self@, value),
+    {
+        proof {
+            use_type_invariant(self);
+            T::lemma_delta(value, None);
+        }
+        let want = value.to_i64();
+        let len = self.core.len();
+        let ghost kept = self.kept();
+        let mut src = self.core.dsrc();
+        src.shift(0..len);
+        loop
+            invariant
+                src.inv(),
+                src.src() == kept,
+                src.end() == len,
+                kept == self.kept(),
+                kept.len() == len,
+                0 <= src.at() <= len,
+                all_dom::<T>(kept),
+                value.fits(),
+                want == value.dv(),
+                forall|i: int| 0 <= i < src.at() ==> kept[i] == want,
+            ensures
+                src.at() == len,
+            decreases len - src.at(),
+        {
+            let ghost at0 = src.at();
+            match src.next_run() {
+                Some((prefix, d, n)) => {
+                    let ghost run = item_vals(SpliceItem::Run(prefix, d, n));
+                    // a run of one value: of nulls; or of a delta that
+                    // is 0, or of one item
+                    let same = match (d, want) {
+                        (Some(x), Some(w)) => prefix.wrapping_add(x) == w && (n == 1 || x == 0),
+                        (None, None) => true,
+                        _ => false,
+                    };
+                    // an item of the run that is not the value, if any
+                    let ghost mut other: int = 0;
+                    proof {
+                        assert forall|k: int| 0 <= k < n implies kept[at0 + k] == #[trigger] run[k] by {
+                            assert(kept.subrange(at0 as int, at0 + n)[k] == kept[at0 + k]);
+                        }
+                        match (d, want) {
+                            (Some(x), Some(w)) => {
+                                lemma_wrapping_add(prefix, x);
+                                let first = crop(prefix + x);
+                                assert(prefix + (0 + 1) * x == prefix + x) by (nonlinear_arith);
+                                assert(run[0] == Some(first));
+                                if x == 0 {
+                                    assert forall|k: int| 0 <= k < n implies run[k] == Some(first) by {
+                                        assert((k + 1) * x == 0) by (nonlinear_arith)
+                                            requires
+                                                x == 0,
+                                        ;
+                                    }
+                                } else if n > 1 {
+                                    // the second is another than the first
+                                    assert(prefix + (1 + 1) * x == prefix + x + x) by (nonlinear_arith);
+                                    assert(run[1] == Some(crop(prefix + x + x)));
+                                    if run[1] == run[0] {
+                                        lemma_crop_same(prefix + x, x, 0);
+                                    }
+                                    if run[0] == want {
+                                        other = 1;
+                                    }
+                                }
+                            },
+                            (None, None) => {
+                                assert forall|k: int| 0 <= k < n implies run[k] == want by {}
+                            },
+                            _ => {
+                                assert(run[0] != want);
+                            },
+                        }
+                        assert(same ==> forall|k: int| 0 <= k < n ==> run[k] == want);
+                        assert(!same ==> 0 <= other < n && run[other] != want);
+                    }
+                    if !same {
+                        proof {
+                            // that item is not `value`: `value` is kept
+                            // as `want` and as nothing else
+                            let j = at0 + other;
+                            assert(kept[j] == run[other]);
+                            assert(in_dom::<T>(kept[j]));
+                            T::lemma_delta(value, kept[j]);
+                            assert(self@[j] == T::of(kept[j]));
+                            assert(self@[j] != value);
+                        }
+                        return false;
+                    }
+                    proof {
+                        assert forall|i: int| 0 <= i < at0 + n implies kept[i] == want by {
+                            if i >= at0 {
+                                assert(kept[at0 + (i - at0)] == run[i - at0]);
+                            }
+                        }
+                    }
+                },
+                None => {
+                    break;
+                },
+            }
+        }
+        proof {
+            T::lemma_delta(value, None);
+            assert forall|i: int| 0 <= i < self@.len() implies self@[i] == value by {
+                assert(self@[i] == T::of(kept[i]));
+            }
+        }
+        true
+    }
+
+    /// [`save_to`](Self::save_to), unless every value of the column is
+    /// `value`: then nothing is written, and the range is empty. So is
+    /// it for an empty column, whatever `value` is.
+    pub fn save_to_unless(&self, out: &mut Vec<u8>, value: T) -> (r: Range<usize>)
+        requires
+            value.fits(),
+        ensures
+            final(out)@ == if only(self@, value) {
+                old(out)@
+            } else {
+                old(out)@ + Self::encoding(self@)
+            },
+            !only(self@, value) ==> {
+                &&& Self::valid(Self::encoding(self@))
+                &&& Self::values(Self::encoding(self@)) == self@
+            },
+            r.start == old(out)@.len(),
+            r.end == final(out)@.len(),
+    {
+        if self.is_only(value) {
+            out.len()..out.len()
+        } else {
+            self.save_to(out)
+        }
+    }
+
+    /// The delta column saved as `bytes`. An error unless `bytes` is a
+    /// saved delta column of `T`: the load checks, as it reads the
+    /// runs, that each value they stand for is one of the type's.
+    ///
+    /// What is not said: that a saved delta column loads. The checks
+    /// are made of sums kept as the runs pass, and those are not
+    /// proved of the bytes.
+    pub fn load(bytes: &[u8]) -> (r: Result<Self, PackError>)
+        ensures
+            r matches Ok(c) ==> Self::valid(bytes@) && c@ == Self::values(bytes@),
+    {
+        match <DE<T, C> as Model<DX<T, C>>>::load::<SlabAgg, DeltaModel<DX<T, C>, <T as DKind<C>>::B>>(
+            bytes,
+            MAX_SEG,
+            None,
+            T::lo(),
+            T::hi(),
+        ) {
+            Ok(core) => {
+                core.lemma_column();
+                proof {
+                    // the load's bound is on what the column keeps
+                    let s = core.slabs_spec();
+                    lemma_dslabs_own::<DE<T, C>, DX<T, C>, <T as DKind<C>>::B>(s);
+                    let ds = dslabs::<DX<T, C>, <T as DKind<C>>::B>(s);
+                    let k = rvals::<DE<T, C>, DX<T, C>, <T as DKind<C>>::B>(core@);
+                    assert(k == rz(0, ds));
+                    assert(in_bound(k, T::least() as int, T::most() as int));
+                    assert forall|i: int| 0 <= i < k.len() implies in_dom::<T>(#[trigger] k[i]) by {
+                        // and a null is kept only by a kind that has them
+                        T::lemma_kind(core@[i], core@[i]);
+                    }
+                }
+                Ok(VerifiedDeltaColumn { core })
+            },
+            Err(e) => Err(e),
+        }
     }
 }
 

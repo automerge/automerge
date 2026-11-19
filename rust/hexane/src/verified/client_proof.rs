@@ -10515,4 +10515,265 @@ fn delta_move_last<T: VDeltaValue<C>, C: VCodec>(a: &mut VerifiedDeltaColumn<T, 
     }
 }
 
+// ── A delta column: saved and loaded ────────────────────────────────────────
+
+/// A delta column saved: the bytes are a saved delta column of its
+/// values, and the one encoding of them. For every type a delta column
+/// holds, and every codec.
+#[allow(dead_code)]
+fn delta_saved<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>) -> (r: Vec<u8>)
+    ensures
+        VerifiedDeltaColumn::<T, C>::valid(r@),
+        VerifiedDeltaColumn::<T, C>::values(r@) == col@,
+        r@ == VerifiedDeltaColumn::<T, C>::encoding(col@),
+{
+    col.save()
+}
+
+/// What a saved delta column loads as, where it loads, is the column
+/// saved.
+#[allow(dead_code)]
+fn delta_save_then_load<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>) -> (r: Option<
+    VerifiedDeltaColumn<T, C>,
+>)
+    ensures
+        r matches Some(c) ==> c@ == col@,
+{
+    let bytes = col.save();
+    match VerifiedDeltaColumn::<T, C>::load(bytes.as_slice()) {
+        Ok(c) => Some(c),
+        Err(_) => None,
+    }
+}
+
+/// What loads as a delta column saves back to the bytes it was loaded
+/// from: no two byte strings load as the same delta column. For any
+/// bytes, of any provenance.
+#[allow(dead_code)]
+fn delta_load_then_save<T: VDeltaValue<C>, C: VCodec>(bytes: &[u8]) {
+    if let Ok(col) = VerifiedDeltaColumn::<T, C>::load(bytes) {
+        proof {
+            VerifiedDeltaColumn::<T, C>::lemma_encoding(bytes@);
+        }
+        let again = col.save();
+        assert(again@ == bytes@);
+    }
+}
+
+/// Two delta columns of the same values save to the same bytes, however
+/// each came to hold them; two of different values to different bytes.
+#[allow(dead_code)]
+fn delta_same_values_same_bytes<T: VDeltaValue<C>, C: VCodec>(
+    a: &VerifiedDeltaColumn<T, C>,
+    b: &VerifiedDeltaColumn<T, C>,
+) -> (r: (Vec<u8>, Vec<u8>))
+    ensures
+        (a@ == b@) == (r.0@ == r.1@),
+{
+    (a.save(), b.save())
+}
+
+/// A delta column that holds no values saves to no bytes.
+#[allow(dead_code)]
+fn delta_empty_saves_nothing<T: VDeltaValue<C>, C: VCodec>() -> (r: Vec<u8>)
+    ensures
+        r@.len() == 0,
+{
+    let col = VerifiedDeltaColumn::<T, C>::new();
+    let r = col.save();
+    proof {
+        VerifiedDeltaColumn::<T, C>::lemma_no_bytes();
+        assert(col@ =~= Seq::<T>::empty());
+        VerifiedDeltaColumn::<T, C>::lemma_save_unique(r@, Seq::<u8>::empty());
+    }
+    r
+}
+
+/// And what no bytes load as, where they load, holds no values.
+#[allow(dead_code)]
+fn delta_load_no_bytes<T: VDeltaValue<C>, C: VCodec>() -> (r: Option<VerifiedDeltaColumn<T, C>>)
+    ensures
+        r matches Some(c) ==> c@.len() == 0,
+{
+    let none: Vec<u8> = Vec::new();
+    proof {
+        VerifiedDeltaColumn::<T, C>::lemma_no_bytes();
+    }
+    match VerifiedDeltaColumn::<T, C>::load(none.as_slice()) {
+        Ok(c) => Some(c),
+        Err(_) => None,
+    }
+}
+
+/// A delta column saved after what a buffer holds: the buffer is what it
+/// was and then the column's encoding, and the range returned is where.
+#[allow(dead_code)]
+fn delta_saved_after<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>, out: &mut Vec<u8>) -> (r: Range<
+    usize,
+>)
+    ensures
+        final(out)@.take(old(out)@.len() as int) == old(out)@,
+        final(out)@.subrange(r.start as int, r.end as int) == VerifiedDeltaColumn::<T, C>::encoding(col@),
+        VerifiedDeltaColumn::<T, C>::valid(final(out)@.subrange(r.start as int, r.end as int)),
+        VerifiedDeltaColumn::<T, C>::values(final(out)@.subrange(r.start as int, r.end as int)) == col@,
+{
+    let r = col.save_to(out);
+    proof {
+        let e = VerifiedDeltaColumn::<T, C>::encoding(col@);
+        assert((old(out)@ + e).take(old(out)@.len() as int) =~= old(out)@);
+        assert((old(out)@ + e).subrange(r.start as int, r.end as int) =~= e);
+    }
+    r
+}
+
+/// Two delta columns saved into one buffer, and the second loaded from
+/// where its range says it is: where it loads, it is the second.
+#[allow(dead_code)]
+fn delta_saved_in_one_buffer<T: VDeltaValue<C>, C: VCodec>(
+    a: &VerifiedDeltaColumn<T, C>,
+    b: &VerifiedDeltaColumn<T, C>,
+) -> (r: Option<VerifiedDeltaColumn<T, C>>)
+    ensures
+        r matches Some(c) ==> c@ == b@,
+{
+    let mut out: Vec<u8> = Vec::new();
+    let _ = a.save_to(&mut out);
+    let ghost mid = out@;
+    let rb = b.save_to(&mut out);
+    let s = out.as_slice();
+    let part = vstd::slice::slice_subrange(s, rb.start, rb.end);
+    proof {
+        let e = VerifiedDeltaColumn::<T, C>::encoding(b@);
+        assert((mid + e).subrange(rb.start as int, rb.end as int) =~= e);
+    }
+    match VerifiedDeltaColumn::<T, C>::load(part) {
+        Ok(c) => Some(c),
+        Err(_) => None,
+    }
+}
+
+/// Whether a delta column holds one value only: so it does when empty,
+/// whatever the value.
+#[allow(dead_code)]
+fn delta_only<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>, v: T) -> (r: bool)
+    requires
+        v.fits(),
+    ensures
+        r == only(col@, v),
+        col@.len() == 0 ==> r,
+        r && col@.len() > 0 ==> col@[0] == v && col@.last() == v,
+{
+    col.is_only(v)
+}
+
+/// A column of one value only, and one that is not: what `is_only` says
+/// of each, and that a column of the one value alone is not written.
+#[allow(dead_code)]
+fn delta_one_value_only<T: VDeltaValue<C>, C: VCodec>(a: T, b: T)
+    requires
+        a.fits(),
+        b.fits(),
+        a != b,
+{
+    let mut col = VerifiedDeltaColumn::<T, C>::new();
+    // an empty column holds no value that is not `a`
+    let none = col.is_only(a);
+    assert(none);
+    col.push(a);
+    col.push(a);
+    assert(col@ =~= seq![a, a]);
+    let all_a = col.is_only(a);
+    let all_b = col.is_only(b);
+    assert(all_a);
+    assert(!all_b) by {
+        assert(col@[0] != b);
+    }
+
+    // a column of `a` alone is not written
+    let mut out: Vec<u8> = Vec::new();
+    out.push(7);
+    let r = col.save_to_unless(&mut out, a);
+    assert(out@ == seq![7u8]);
+    assert(r.start == 1 && r.end == 1);
+
+    // one that holds another value is
+    col.push(b);
+    let mixed = col.is_only(a);
+    assert(!mixed) by {
+        assert(col@[2] != a);
+    }
+    let ghost e = VerifiedDeltaColumn::<T, C>::encoding(col@);
+    let r = col.save_to_unless(&mut out, a);
+    assert(out@ == seq![7u8] + e);
+    assert(r.start == 1 && r.end == 1 + e.len());
+    assert(VerifiedDeltaColumn::<T, C>::valid(e));
+    assert(VerifiedDeltaColumn::<T, C>::values(e) =~= seq![a, a, b]);
+}
+
+/// A column of nulls only is not written where the null is the value
+/// left out, and is written where a number is.
+#[allow(dead_code)]
+fn delta_only_nulls(n: u32, out: &mut Vec<u8>) -> (r: (Range<usize>, Range<usize>))
+    ensures
+        r.0.start == old(out)@.len(),
+        r.0.end == old(out)@.len(),
+        final(out)@ == old(out)@ + VerifiedDeltaColumn::<Option<u32>>::encoding(seq![None::<u32>, None::<u32>]),
+{
+    let nulls: [Option<u32>; 2] = [None, None];
+    let col = VerifiedDeltaColumn::<Option<u32>>::from_values(nulls.as_slice());
+    assert(col@ =~= seq![None::<u32>, None::<u32>]);
+    assert(only(col@, None::<u32>));
+    let r0 = col.save_to_unless(out, None);
+    assert(!only(col@, Some(n))) by {
+        assert(col@[0] != Some(n));
+    }
+    let r1 = col.save_to_unless(out, Some(n));
+    (r0, r1)
+}
+
+/// Whatever the bytes, a number read from a delta column they load as
+/// is one a delta column holds: of `u64`s, none above `i64::MAX`.
+#[allow(dead_code)]
+fn delta_loaded_fits(bytes: &[u8], i: usize) -> (r: Option<u64>)
+    ensures
+        r matches Some(v) ==> v <= 0x7fff_ffff_ffff_ffff,
+{
+    match VerifiedDeltaColumn::<u64>::load(bytes) {
+        Ok(col) => {
+            proof {
+                col.lemma_fits();
+            }
+            col.get(i)
+        },
+        Err(_) => None,
+    }
+}
+
+/// And so what loads can be edited as any delta column is: a value read
+/// from it put back where it was read is no change to its values.
+#[allow(dead_code)]
+fn delta_loaded_edits<T: VDeltaValue<C>, C: VCodec>(bytes: &[u8]) -> (r: Option<VerifiedDeltaColumn<T, C>>)
+    ensures
+        r matches Some(c) ==> c@ == VerifiedDeltaColumn::<T, C>::values(bytes@),
+{
+    match VerifiedDeltaColumn::<T, C>::load(bytes) {
+        Ok(mut col) => {
+            let ghost was = col@;
+            proof {
+                col.lemma_fits();
+            }
+            match col.get(0) {
+                Some(v) => {
+                    col.remove(0);
+                    col.insert(0, v);
+                    assert(col@ =~= was);
+                },
+                None => {},
+            }
+            Some(col)
+        },
+        Err(_) => None,
+    }
+}
+
 } // verus!

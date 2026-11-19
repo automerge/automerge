@@ -1834,6 +1834,10 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> LoadWeigh<'a, V::E, V::X, SumWeight<
         !sums_fit::<V>(<Held<V, C> as VGet>::svs(vs))
     }
 
+    open spec fn bounded(s: Seq<Slab<<V::E as Slabs>::Tail>>, lo: i64, hi: i64) -> bool {
+        true
+    }
+
     proof fn lemma_may_refuse(vs: Seq<Held<V, C>>) {
     }
 

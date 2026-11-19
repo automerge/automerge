@@ -169,11 +169,15 @@ pub(crate) trait Model<X>: Slabs + Sized + for <'a>ReadsAgree<'a, X> where
     /// (where given). An error unless `bytes` is a saved column of that
     /// many; and no error for one of that many short of 4 GiB by a
     /// header's length whose values a `usize` can count with three to
-    /// spare, and which the weight model does not refuse.
+    /// spare, and which the weight model does not refuse. The model's
+    /// checks are made with the domain `lo..=hi` (a delta column's),
+    /// and the column loaded is what they say (`LoadWeigh::bounded`).
     fn load<'a, W: SlabAggregate, G: LoadWeigh<'a, Self, X, W>>(
         bytes: &'a [u8],
         max_segments: usize,
         expected: Option<usize>,
+        lo: i64,
+        hi: i64,
     ) -> (r: Result<ColumnCore<Self, W, SlabBTree<W>, G>, PackError>)
         requires
             max_segments >= 2,
@@ -184,6 +188,7 @@ pub(crate) trait Model<X>: Slabs + Sized + for <'a>ReadsAgree<'a, X> where
                 &&& Self::valid(bytes@)
                 &&& c@ == Self::values(bytes@)
                 &&& expected matches Some(e) ==> c@.len() == e
+                &&& G::bounded(c.slabs_spec(), lo, hi)
             },
             ({
                 &&& Self::valid(bytes@)
@@ -430,6 +435,8 @@ impl<L, O> Model<RleReads<O>> for RleModel<L> where
         bytes: &'a [u8],
         max_segments: usize,
         expected: Option<usize>,
+        lo: i64,
+        hi: i64,
     ) -> (r: Result<ColumnCore<Self, W, SlabBTree<W>, G>, PackError>) {
         let ld: LoadCore<'a, RleModel<L>, RleReads<O>, W, G, Load<'a, L>> = LoadCore::start(
             bytes,
@@ -446,7 +453,7 @@ impl<L, O> Model<RleReads<O>> for RleModel<L> where
             }
             assert(m =~= o);
         }
-        match ld.finish::<SlabBTree<W>>(max_segments, expected, i64::MIN, i64::MAX) {
+        match ld.finish::<SlabBTree<W>>(max_segments, expected, lo, hi) {
             Ok(core) => {
                 proof {
                     let o = slab_values::<O>(bytes@);
@@ -586,6 +593,8 @@ impl<C: CountsOf> Model<BoolReads<C>> for BoolModel<C> {
         bytes: &'a [u8],
         max_segments: usize,
         expected: Option<usize>,
+        lo: i64,
+        hi: i64,
     ) -> (r: Result<ColumnCore<Self, W, SlabBTree<W>, G>, PackError>) {
         let ld: LoadCore<'a, BoolModel<C>, BoolReads<C>, W, G, BoolLoader<'a, C>> = LoadCore::start(
             bytes,
@@ -596,7 +605,7 @@ impl<C: CountsOf> Model<BoolReads<C>> for BoolModel<C> {
             assert(o.map_values(|v: bool| v) =~= o);
             assert(o.map_values(|v: bool| <BoolModel<C> as ReadsAgree<'a, BoolReads<C>>>::own(v)) =~= o);
         }
-        match ld.finish::<SlabBTree<W>>(max_segments, expected, i64::MIN, i64::MAX) {
+        match ld.finish::<SlabBTree<W>>(max_segments, expected, lo, hi) {
             Ok(core) => Ok(core),
             Err(e) => Err(e),
         }
