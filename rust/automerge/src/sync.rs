@@ -188,7 +188,13 @@ impl SyncDoc for Automerge {
             HashSet::new()
         };
         let our_have = if our_need.iter().all(|hash| their_heads_set.contains(hash)) {
-            vec![self.make_bloom_filter(sync_state.shared_heads.clone())]
+            let shared_heads = sync_state
+                .shared_heads
+                .iter()
+                .filter(|hash| self.has_change(hash))
+                .copied()
+                .collect();
+            vec![self.make_bloom_filter(shared_heads)]
         } else {
             Vec::new()
         };
@@ -1349,6 +1355,24 @@ mod tests {
             // At this point both documents should be equal
             assert_eq!(doc1.get_heads(), doc2.get_heads());
         }
+    }
+
+    #[test]
+    fn restored_state_naming_a_change_neither_side_has_still_syncs() {
+        let mut elsewhere = crate::AutoCommit::new();
+        elsewhere.put(crate::ROOT, "x", 1).unwrap();
+        let mut doc1 = crate::AutoCommit::new();
+        let mut doc2 = crate::AutoCommit::new();
+        doc2.put(crate::ROOT, "y", 2).unwrap();
+
+        let mut saved = State::new();
+        saved.shared_heads = elsewhere.get_heads();
+        let mut s1 = State::decode(&saved.encode()).unwrap();
+        let mut s2 = State::new();
+
+        sync(&mut doc1, &mut doc2, &mut s1, &mut s2);
+
+        assert_eq!(doc1.get_heads(), doc2.get_heads());
     }
 
     fn sync(
