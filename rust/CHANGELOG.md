@@ -1,5 +1,12 @@
 ## Unreleased
 
+### Changed
+
+* `automerge-wasm`: `getCursor` and `getCursorPosition` accept list objects as
+  well as text, as `ReadDoc::get_cursor` and `ReadDoc::get_cursor_position`
+  already did. Maps and tables are still rejected, now with the error
+  "cursors are only valid on lists and text".
+
 ### Fixed
 
 * `ReadDoc::get_marks` is now much faster (a benchmark on a 100,000 character

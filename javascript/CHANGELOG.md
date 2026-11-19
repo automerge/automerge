@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+* `getCursor` and `getCursorPosition` work on lists as well as text. A cursor
+  to a list index follows the element at that index through concurrent
+  inserts and deletes; if the element is deleted the cursor resolves to the
+  previous or next element according to `move` (`"before"` / `"after"`),
+  just as for text. List indices are element indices. List methods
+  (`insertAt`, `deleteAt`, `splice` on a list proxy) still take numbers, so
+  resolve a list cursor with `getCursorPosition` before using it there.
+  Calling either function on a map throws "cursors are only valid on lists and
+  text" (previously "cursors only valid on text").
+
 ## 3.5.0
 
 Changes since 3.4.1.
