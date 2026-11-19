@@ -12,6 +12,18 @@ use crate::{Codec, Leb128};
 
 // ── validate_encoding ────────────────────────────────────────────────────────
 
+/// A run's byte length, as a slab's [`RleTail`] records it: a run of
+/// 4 GiB or more has no tail record, so it is not loadable.
+fn tail_bytes(bytes: usize) -> Result<u32, PackError> {
+    u32::try_from(bytes).map_err(|_| over_4gib())
+}
+
+#[cold]
+#[inline(never)]
+fn over_4gib() -> PackError {
+    PackError::InvalidValue("a run must stay under 4 GiB".to_string())
+}
+
 pub(crate) fn rle_validate_encoding<T: RleValue, C: Codec>(
     slab: &[u8],
 ) -> Result<SlabInfo<RleTail>, PackError> {
@@ -19,6 +31,8 @@ pub(crate) fn rle_validate_encoding<T: RleValue, C: Codec>(
     let mut len = 0;
     let mut segments = 0;
     let mut tail = RleTail::default();
+    // the last run's length, checked against its u32 record at the end
+    let mut tail_len: usize = 0;
     let mut prev: Option<RleSegment<'_, T>> = None;
     let mut prev_lit: Option<T::Get<'_>> = None;
 
@@ -30,7 +44,7 @@ pub(crate) fn rle_validate_encoding<T: RleValue, C: Codec>(
         match segment {
             RleSegment::LitHead { bytes, .. } => {
                 prev_lit = None;
-                tail.bytes = bytes as u32;
+                tail_len = bytes;
             }
             RleSegment::Lit { value, bytes } => {
                 prev_lit = Some(value);
@@ -38,24 +52,25 @@ pub(crate) fn rle_validate_encoding<T: RleValue, C: Codec>(
                 len += 1;
                 segments += 1;
                 tail.lit_tail = NonZeroU32::new(bytes as u32);
-                tail.bytes += bytes as u32;
+                tail_len += bytes;
             }
             RleSegment::Run { count, bytes, .. } => {
                 prev = Some(segment);
                 len += count;
                 segments += 1;
                 tail.lit_tail = None;
-                tail.bytes = bytes as u32;
+                tail_len = bytes;
             }
             RleSegment::Null { count, bytes } => {
                 prev = Some(segment);
                 len += count;
                 segments += 1;
                 tail.lit_tail = None;
-                tail.bytes = bytes as u32;
+                tail_len = bytes;
             }
         }
     }
+    tail.bytes = tail_bytes(tail_len)?;
     Ok(SlabInfo {
         segments,
         len,
@@ -104,6 +119,9 @@ struct CutState {
     last_lit_count: usize,
     lit_count: usize,
     pending_header: usize,
+    /// the byte length of the slab's last run so far, recorded in its
+    /// `u32` tail when the slab is cut (an error if it is 4 GiB or more)
+    tail_len: usize,
 }
 
 impl CutState {
@@ -123,7 +141,7 @@ impl CutState {
                 if self.last_lit_count < self.lit_count {
                     self.pending_header = self.lit_count;
                 }
-                self.slab.tail.bytes = bytes as u32;
+                self.tail_len = bytes;
                 self.last_lit_count = count;
                 self.lit_count = 0;
                 None
@@ -132,7 +150,7 @@ impl CutState {
                 self.slab.len += 1;
                 self.slab.segments += 1;
                 self.slab.tail.lit_tail = NonZeroU32::new(bytes as u32);
-                self.slab.tail.bytes += bytes as u32;
+                self.tail_len += bytes;
                 self.lit_count += 1;
                 Some(crate::Run { count: 1, value })
             }
@@ -144,14 +162,14 @@ impl CutState {
                 self.slab.len += count;
                 self.slab.segments += 1;
                 self.slab.tail.lit_tail = None;
-                self.slab.tail.bytes = bytes as u32;
+                self.tail_len = bytes;
                 (count > 0).then_some(crate::Run { count, value })
             }
             RleSegment::Null { count, bytes } => {
                 self.slab.len += count;
                 self.slab.segments += 1;
                 self.slab.tail.lit_tail = None;
-                self.slab.tail.bytes = bytes as u32;
+                self.tail_len = bytes;
                 (count > 0).then_some(crate::Run {
                     count,
                     value: T::get_null(),
@@ -162,18 +180,23 @@ impl CutState {
 
     /// Cut a slab at byte position `pos` (the block loader's split,
     /// byte-for-byte).
-    fn cut_slab<C: Codec>(&mut self, input: &[u8], pos: usize) {
-        self.slab.copy_from::<C>(
+    fn cut_slab<C: Codec>(&mut self, input: &[u8], pos: usize) -> Result<(), PackError> {
+        self.slab.tail.bytes = tail_bytes(self.tail_len)?;
+        if !self.slab.copy_from::<C>(
             &input[self.start..pos],
             self.pending_header,
             self.lit_count,
             self.last_lit_count,
-        );
+        ) {
+            return Err(over_4gib());
+        }
         self.slabs.push(std::mem::take(&mut self.slab));
+        self.tail_len = 0;
         self.pending_header = 0;
         self.last_lit_count = 0;
         self.lit_count = 0;
         self.start = pos;
+        Ok(())
     }
 }
 
@@ -218,7 +241,7 @@ impl<'a, T: RleValue, C: Codec> RleLoadIter<'a, T, C> {
             }
             let out = self.cut.track::<T>(segment);
             if self.cut.slab.segments == self.target_segments {
-                self.cut.cut_slab::<C>(self.input, self.decoder.pos());
+                self.cut.cut_slab::<C>(self.input, self.decoder.pos())?;
             }
             if let Some(run) = out {
                 return Ok(Some(run));
@@ -253,11 +276,11 @@ impl<'a, T: RleValue, C: Codec> RleLoadIter<'a, T, C> {
             }
             let _ = cut.track::<T>(segment);
             if cut.slab.segments == target_segments {
-                cut.cut_slab::<C>(input, decoder.pos());
+                cut.cut_slab::<C>(input, decoder.pos())?;
             }
         }
         if cut.slab.segments > 0 {
-            cut.cut_slab::<C>(input, decoder.pos());
+            cut.cut_slab::<C>(input, decoder.pos())?;
         }
         Ok(cut.slabs)
     }
@@ -288,13 +311,16 @@ where
 }
 
 impl Slab {
+    /// Returns false if the slab's last run grows to 4 GiB or more,
+    /// which its tail record can't hold.
+    #[must_use]
     fn copy_from<C: Codec>(
         &mut self,
         input: &[u8],
         pending_header: usize,
         lit_count: usize,
         last_lit_count: usize,
-    ) {
+    ) -> bool {
         if pending_header > 0 {
             // we split a lit run but it terminated
             let hdr = C::encode_signed(-(pending_header as i64));
@@ -304,7 +330,10 @@ impl Slab {
             let hdr = C::encode_signed(-(lit_count as i64));
             if self.tail.lit_tail.is_some() {
                 // header and tail
-                self.tail.bytes += hdr.len() as u32;
+                match self.tail.bytes.checked_add(hdr.len() as u32) {
+                    Some(b) => self.tail.bytes = b,
+                    None => return false,
+                }
             }
             self.data.extend_from_slice(hdr.as_bytes());
         }
@@ -312,13 +341,64 @@ impl Slab {
         if lit_count < last_lit_count {
             let header_pos = self.data.len() - self.tail.bytes as usize;
             let delta = C::rewrite_lit_header(&mut self.data, header_pos, lit_count);
-            self.tail.bytes = (self.tail.bytes as i64 + delta) as u32;
+            match u32::try_from(self.tail.bytes as i64 + delta) {
+                Ok(b) => self.tail.bytes = b,
+                Err(_) => return false,
+            }
         }
+        true
     }
 }
 
 #[cfg(test)]
 mod tests {
+    /// A run of 4 GiB or more has no tail record: loading it is an error,
+    /// where its length used to be truncated to `u32`.
+    #[cfg(target_pointer_width = "64")]
+    #[test]
+    fn a_run_of_4gib_is_not_loadable() {
+        let mut cut = super::CutState::default();
+        let _ = cut.track::<Option<u64>>(crate::rle::decoder::RleSegment::Null {
+            count: 1,
+            bytes: 1 << 32,
+        });
+        assert!(cut.cut_slab::<Leb128>(&[], 0).is_err());
+    }
+
+    /// Only the slab's last run is recorded, so a run of 4 GiB that does
+    /// not end a slab loads: what the writer would have written.
+    #[cfg(target_pointer_width = "64")]
+    #[test]
+    fn a_run_of_4gib_before_the_last_loads() {
+        use crate::rle::decoder::RleSegment;
+        let mut cut = super::CutState::default();
+        let _ = cut.track::<Option<u64>>(RleSegment::Null {
+            count: 1,
+            bytes: 1 << 32,
+        });
+        let _ = cut.track::<Option<u64>>(RleSegment::Run {
+            count: 2,
+            value: Some(1),
+            bytes: 2,
+        });
+        assert!(cut.cut_slab::<Leb128>(&[], 0).is_ok());
+        assert_eq!(cut.slabs[0].tail.bytes, 2);
+    }
+
+    /// The same for a literal run whose values add up to 4 GiB.
+    #[test]
+    fn a_literal_of_4gib_is_not_loadable() {
+        use crate::rle::decoder::RleSegment;
+        let mut cut = super::CutState::default();
+        let _ = cut.track::<u64>(RleSegment::LitHead { count: 2, bytes: 1 });
+        for _ in 0..2 {
+            let _ = cut.track::<u64>(RleSegment::Lit {
+                value: 1,
+                bytes: 1 << 31,
+            });
+        }
+        assert!(cut.cut_slab::<Leb128>(&[], 0).is_err());
+    }
     use crate::rle::state::{RleCow, RleState};
     use crate::rle::*;
     use crate::rle::{RleDecoder, RleEncoding};
