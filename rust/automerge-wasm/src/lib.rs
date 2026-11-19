@@ -1661,6 +1661,15 @@ impl Automerge {
         AR::from(heads).into()
     }
 
+    /// Heads of the committed history without committing the pending
+    /// transaction. Equals `getHeads()` when nothing is pending; intended for
+    /// read-only preflight snapshots before operations that may refuse to run.
+    #[wasm_bindgen(js_name = getCommittedHeads, unchecked_return_type="Heads")]
+    pub fn get_committed_heads(&self) -> Array {
+        let heads = self.doc.committed_heads();
+        AR::from(heads).into()
+    }
+
     #[wasm_bindgen(js_name = getActorId, unchecked_return_type="Actor")]
     pub fn get_actor_id(&self) -> String {
         self.doc.get_actor().to_string()

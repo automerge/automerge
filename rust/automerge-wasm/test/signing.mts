@@ -218,6 +218,9 @@ describe("Automerge Wasm fragment signing", function () {
     // Open a transaction; a malformed batch must leave it pending.
     doc.put("/", "b", 2);
     assert.equal(doc.pendingOps(), 1);
+    // Committed heads are readable without closing the transaction.
+    assert.deepEqual(doc.getCommittedHeads(), [h1]);
+    assert.equal(doc.pendingOps(), 1);
     const malformed: Array<[unknown, RegExp]> = [
       [[good, { message: new Uint8Array(61), signature: good.signature }], /index 1/],
       [[good, { message: request.message.subarray(0, 40), signature: good.signature }], /index 1/],
@@ -390,6 +393,72 @@ describe("Automerge Wasm fragment signing", function () {
     );
     const empty = load(wire, { signing: true, author: bob.author });
     assert.deepEqual(empty.getHeads(), [published]);
+  });
+
+  it("reports publicationFailed when local publication enables two equivocating pending groups, retaining state", async () => {
+    // Source holds unpublished draft `a`. Two same-author clones share the
+    // SAME remote actor and commit different successors of `a`; each signed
+    // level-0 group is individually valid but only admissible once `a`
+    // publishes, at which point they conflict (equivocation).
+    const alice = await makeSigner();
+    const source = create({ signing: true, author: alice.author, actor: "01" });
+    source.put("/", "a", 1);
+    const a = source.commit("a", 1)!;
+    assert.equal(source.hasUnpublishedChanges(), true);
+
+    const branch = async (value: number) => {
+      const clone = source.forkWithAuthor(alice.author, "02");
+      clone.put("/", "b", value);
+      const b = clone.commit(`b ${value}`, value)!;
+      // The same-author clone is asked for `a` too; sign only `b` so `a`
+      // stays unpublished everywhere.
+      const onlyB = clone.requestSignatures().filter(r => r.hash === b);
+      assert.equal(onlyB.length, 1);
+      completed(clone.insertSignatures(await signAll(onlyB, alice.sign)));
+      // Signature-ready and exportable, but blocked behind unpublished `a`.
+      const meta = clone.getFragmentMeta(b);
+      assert.ok(meta);
+      const [wire] = clone.bundleFragmentMetadata([meta]);
+      assert.ok(wire);
+      assert.equal(clone.hasUnpublishedChanges(), true);
+      return { clone, b, wire };
+    };
+    const left = await branch(2);
+    const right = await branch(3);
+    assert.notEqual(left.b, right.b);
+
+    // The receiver retains both pending behind `a`.
+    source.loadIncremental(left.wire);
+    source.loadIncremental(right.wire);
+    assert.deepEqual(source.getHeads(), [a]);
+    const requests = source.requestSignatures();
+    assert.deepEqual(requests.map(r => r.hash), [a]);
+
+    const outcome = source.insertSignatures(await signAll(requests, alice.sign));
+    assert.equal(outcome.status, "publicationFailed", JSON.stringify(outcome));
+    if (outcome.status !== "publicationFailed") throw new Error("unreachable");
+    assert.equal(outcome.insertions.length, 1);
+    assert.equal(outcome.insertions[0].hash, a);
+    assert.deepEqual(outcome.insertions[0].result, { ok: true, insert: "stored" });
+    assert.match(outcome.error, /admission/);
+
+    // Local publication retained; neither conflicting group applied.
+    assert.equal(source.hasUnpublishedChanges(), false);
+    assert.deepEqual(source.getHeads(), [a]);
+    assert.equal(source.getChangeByHash(left.b), null);
+    assert.equal(source.getChangeByHash(right.b), null);
+    assert.deepEqual(source.requestSignatures(), []);
+    const reloaded = load(source.save(), { signing: true, author: alice.author });
+    assert.deepEqual(reloaded.getHeads(), [a]);
+
+    // Retry without new evidence fails stably and still picks no winner.
+    const retry = source.insertSignatures([]);
+    assert.equal(retry.status, "publicationFailed");
+    assert.deepEqual(source.getHeads(), [a]);
+
+    // Branch documents are untouched.
+    assert.deepEqual(left.clone.getHeads(), [left.b]);
+    assert.deepEqual(right.clone.getHeads(), [right.b]);
   });
 
   it("saves only published history and later emits published drafts incrementally", async () => {

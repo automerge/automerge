@@ -54,6 +54,9 @@
   entry, and `has_unpublished_changes` reports publication status without
   committing. The signing handle (`SigningDocument`, `try_signing`) and its
   scalar `insert_signature`/`required_signatures` are internal.
+* `AutoCommit::committed_heads` returns the heads of committed history
+  without closing an open transaction (equal to `get_heads` when nothing is
+  pending), for preflight snapshots before operations that may refuse to run.
 * `SyncDoc::generate_sync_message` now returns
   `Result<Option<Message>, AutomergeError>`. Required-mode documents fail
   with `SigningError::SyncNotSupported` when generating or receiving sync

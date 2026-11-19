@@ -2,8 +2,8 @@
 use automerge::signature::{ed25519, signing_message};
 use automerge::transaction::{CommitOptions, Transactable};
 use automerge::{
-    ActorId, Author, AutoCommit, Automerge, AutomergeError, Change, ChangeHash, LoadedGroup,
-    PatchLog, ReadDoc, ROOT,
+    ActorId, Author, AutoCommit, Automerge, AutomergeError, Change, ChangeHash, LoadOptions,
+    LoadedGroup, PatchLog, ReadDoc, ROOT,
 };
 use ed25519_dalek::{Signer, SigningKey};
 
@@ -17,11 +17,17 @@ fn receiver_author() -> Author<'static> {
     author(200)
 }
 
-/// Whether `hash` is published: its canonical fragment exports with proof.
+/// Whether `hash` is published: a required-mode save is the published
+/// projection, so the change is published iff a fresh required-mode load of
+/// the saved bytes contains it.
 fn is_published(doc: &Automerge, hash: &ChangeHash) -> bool {
-    doc.get_fragment(*hash)
-        .map(|fragment| !doc.bundle_fragments([fragment]).is_empty())
-        .unwrap_or(false)
+    Automerge::load_with_options(
+        &doc.save(),
+        LoadOptions::new().signing().author(receiver_author()),
+    )
+    .expect("a required-mode save reloads in required mode")
+    .get_change_by_hash(hash)
+    .is_some()
 }
 
 fn signed_history() -> (Automerge, Vec<Vec<u8>>, Vec<ChangeHash>) {

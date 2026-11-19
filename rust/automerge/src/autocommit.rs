@@ -858,6 +858,16 @@ impl AutoCommit {
     /// This closes the transaction first, if one is in progress.
     pub fn get_heads(&mut self) -> Vec<ChangeHash> {
         self.ensure_transaction_closed();
+        self.committed_heads()
+    }
+
+    /// The heads of the committed history, without closing an open
+    /// transaction.
+    ///
+    /// Equals [`Self::get_heads`] when no transaction is pending (isolation
+    /// heads included). Use it to snapshot heads before an operation that
+    /// may legitimately refuse to run and must leave pending operations open.
+    pub fn committed_heads(&self) -> Vec<ChangeHash> {
         if let Some(i) = &self.isolation {
             i.clone()
         } else {
@@ -1596,5 +1606,24 @@ mod tests {
     #[test]
     fn test_autocommit_is_send() {
         is_send::<super::AutoCommit>();
+    }
+
+    #[test]
+    fn committed_heads_ignore_the_open_transaction() {
+        use crate::transaction::Transactable;
+        let mut doc = super::AutoCommit::new();
+        doc.put(crate::ROOT, "a", 1_i64).unwrap();
+        let first = doc.commit().unwrap();
+        doc.put(crate::ROOT, "b", 2_i64).unwrap();
+        assert_eq!(doc.pending_ops(), 1);
+        assert_eq!(doc.committed_heads(), vec![first]);
+        assert_eq!(doc.pending_ops(), 1, "read-only: transaction stays open");
+        // Isolation reports the isolated heads, like `get_heads`.
+        doc.isolate(&[]);
+        assert!(doc.committed_heads().is_empty());
+        doc.integrate();
+        assert_eq!(doc.get_heads().len(), 1);
+        assert_ne!(doc.get_heads(), vec![first]);
+        assert_eq!(doc.committed_heads(), doc.get_heads());
     }
 }
