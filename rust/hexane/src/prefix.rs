@@ -824,13 +824,16 @@ impl<'a, T: PrefixValue, C: Codec> Iterator for PrefixIter<'a, T, C> {
 
         let found = self.col.unwrap().col.index.find_slab_at_item(target_pos);
 
-        if !self.inner.advance_to_slab(found.index, found.pos) {
+        let in_slab = self.inner.advance_to_slab(found.index, found.pos);
+
+        // the tree hands back the absolute prefix at the slab start (past
+        // the last slab, the column's total); carry any reset_prefix
+        // offset across the jump
+        self.total = found.prefix - self.base.clone();
+
+        if !in_slab {
             return None;
         }
-
-        // the tree hands back the absolute prefix at the slab start;
-        // carry any reset_prefix offset across the jump
-        self.total = found.prefix - self.base.clone();
 
         Some(self.same_slab_nth(target_pos - found.pos))
     }
