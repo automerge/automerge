@@ -13,7 +13,8 @@ use crate::automerge::view::{ReadAt, VisibleClock};
 use crate::automerge::HistoryUpdate;
 use crate::exid::ExId;
 use crate::marks::{ExpandMark, Mark, MarkSet};
-use crate::op_set2::change::build_change;
+use crate::op_set2::change::{build_change, build_change_encoded, EncodedOps};
+use crate::op_set2::op_set::RootStream;
 use crate::op_set2::{Op, OpSet, PropRef, SuccInsert, TxOp};
 use crate::patches::Events;
 use crate::types::{ElemId, ObjMeta, OpId, ScalarValue, SequenceType, TextEncoding, HEAD};
@@ -39,6 +40,11 @@ pub(crate) struct TransactionInner {
     /// creation. Masked ops are still committed but they are never logged as
     /// visible patches.
     masked: bool,
+    /// The change columns of the ops at the start of the transaction that
+    /// `pending` does not hold: a root written into an empty document,
+    /// which the op set holds loaded from these bytes. The commit reuses
+    /// them.
+    encoded: Option<EncodedOps>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -100,6 +106,7 @@ impl TransactionInner {
             scope,
             author,
             masked,
+            encoded: None,
         }
     }
 
@@ -121,7 +128,12 @@ impl TransactionInner {
     }
 
     pub(crate) fn pending_ops(&self) -> usize {
-        self.pending.len()
+        self.held_ops() + self.pending.len()
+    }
+
+    /// How many ops at the start of the transaction `pending` does not hold.
+    fn held_ops(&self) -> usize {
+        self.encoded.as_ref().map_or(0, |e| e.ops)
     }
 
     fn exid_to_obj(&self, doc: &Automerge, id: &ExId) -> Result<ObjMeta, AutomergeError> {
@@ -204,7 +216,7 @@ impl TransactionInner {
             actor: self.actor,
             seq: self.seq,
             start_op: self.start_op.get(),
-            max_op: self.start_op.get() + self.pending.len() as u64 - 1,
+            max_op: self.start_op.get() + self.pending_ops() as u64 - 1,
             timestamp: self.time,
             message: self.message.as_ref().map(|s| Cow::Owned(s.to_string())),
             extra: self.extra_bytes(),
@@ -227,17 +239,28 @@ impl TransactionInner {
             .filter_map(|hash| Some(change_graph.hash_to_index(hash)? as u64))
             .collect();
         let meta = self.change_meta(deps_index);
-        let stored = build_change(&self.pending, &meta, change_graph, &op_set.actors);
+        count_write!(ops_held, self.pending.len());
+        let stored = match self.encoded.take() {
+            Some(encoded) => {
+                build_change_encoded(&self.pending, &meta, change_graph, &op_set.actors, encoded)
+            }
+            None => build_change(&self.pending, &meta, change_graph, &op_set.actors),
+        };
         Change::new(stored)
     }
 
     /// Undo the operations added in this transaction, returning the number of cancelled
     /// operations.
     pub(crate) fn rollback(self, doc: &mut Automerge) -> usize {
-        let num = self.pending.len();
+        let num = self.pending_ops();
 
-        for o in self.pending.iter().rev() {
-            doc.ops.undo_op(o);
+        if self.encoded.is_some() {
+            // The document was empty when the transaction began.
+            doc.ops.clear_ops();
+        } else {
+            for o in self.pending.iter().rev() {
+                doc.ops.undo_op(o);
+            }
         }
 
         //doc.ops_mut().load_checkpoint(self.checkpoint);
@@ -1396,38 +1419,31 @@ impl TransactionInner {
             id: crate::types::ObjId::root(),
             typ: ObjType::Map,
         };
-
-        let insert_pos = doc.ops().len();
-        let mut batch = BatchInsertion::new(self, doc, patch_log, insert_pos);
         let mut queue: VecDeque<(ObjMeta, &hydrate::Value)> = VecDeque::new();
 
-        let mut keys: Vec<_> = value.iter().collect();
-        keys.sort_by(|(a, _), (b, _)| a.cmp(b));
-
-        for (key, map_value) in keys {
-            let child_value = &map_value.value;
-            let (child_obj_type, op_type) = value_to_op_type(child_value);
-
-            let id = batch.append(|pos, id| {
-                TxOp::map(
-                    id,
-                    root_meta,
-                    pos,
-                    ResolvedAction::VisibleUpdate(op_type),
-                    key.to_string(),
-                    vec![],
-                )
-            });
-
-            if let Some(obj_type) = child_obj_type {
-                let child_obj_meta = ObjMeta {
-                    id: crate::types::ObjId(id),
-                    typ: obj_type,
-                };
-                queue.push_back((child_obj_meta, child_value));
+        let insert_pos = doc.ops().len();
+        if insert_pos == 0 && self.pending_ops() == 0 {
+            // Into an empty document, breadth first, the ops come in the op
+            // set's order and overwrite nothing: each is encoded as it is
+            // made, and the op set is loaded from that encoding.
+            let encoding = doc.text_encoding();
+            let mut sink = StreamSink {
+                stream: RootStream::new(self.actor, encoding),
+                encoding,
+                inner: self,
+                patch_log,
+            };
+            sink.append_entries(root_meta, value, &mut queue);
+            batch_bfs(&mut sink, &mut queue)?;
+            let stream = sink.stream;
+            if stream.len() > 0 {
+                self.encoded = Some(doc.ops_mut().load_stream(stream));
             }
+            return Ok(());
         }
 
+        let mut batch = BatchInsertion::new(self, doc, patch_log, insert_pos);
+        batch.append_entries(root_meta, value, &mut queue);
         batch_bfs(&mut batch, &mut queue)?;
 
         batch.finish();
@@ -1601,39 +1617,14 @@ fn value_to_op_type(value: &hydrate::Value) -> (Option<ObjType>, OpType) {
 ///
 /// This is the shared logic used by `batch_create_object`, `batch_init_map`,
 /// and `inner_splice` to populate the children of container objects.
-fn batch_bfs(
-    batch: &mut BatchInsertion<'_, '_>,
-    queue: &mut VecDeque<(ObjMeta, &'_ hydrate::Value)>,
+fn batch_bfs<'h, S: BfsSink<'h>>(
+    batch: &mut S,
+    queue: &mut VecDeque<(ObjMeta, &'h hydrate::Value)>,
 ) -> Result<(), AutomergeError> {
     while let Some((container_meta, container_value)) = queue.pop_front() {
         match (container_meta.typ, container_value) {
             (ObjType::Map, hydrate::Value::Map(map)) => {
-                let mut keys: Vec<_> = map.iter().collect();
-                keys.sort_by(|(a, _), (b, _)| a.cmp(b));
-
-                for (key, map_value) in keys {
-                    let child_value = &map_value.value;
-                    let (child_obj_type, op_type) = value_to_op_type(child_value);
-
-                    let id = batch.append(|pos, id| {
-                        TxOp::map(
-                            id,
-                            container_meta,
-                            pos,
-                            ResolvedAction::VisibleUpdate(op_type),
-                            key.to_string(),
-                            vec![],
-                        )
-                    });
-
-                    if let Some(obj_type) = child_obj_type {
-                        let child_obj_meta = ObjMeta {
-                            id: crate::types::ObjId(id),
-                            typ: obj_type,
-                        };
-                        queue.push_back((child_obj_meta, child_value));
-                    }
-                }
+                batch.append_entries(container_meta, map, queue);
             }
             (ObjType::List, hydrate::Value::List(list)) => {
                 let mut elemid = HEAD;
@@ -1641,7 +1632,7 @@ fn batch_bfs(
                     let child_value = &list_value.value;
                     let (child_obj_type, op_type) = value_to_op_type(child_value);
 
-                    let id = batch.append(move |pos, id| {
+                    let id = batch.append_op(None, move |pos, id| {
                         TxOp::insert(id, container_meta, pos, index, op_type, elemid)
                     });
                     elemid = ElemId(id);
@@ -1657,7 +1648,7 @@ fn batch_bfs(
             }
             (ObjType::Text, hydrate::Value::Text(text)) => {
                 let text_str = text.to_string();
-                batch.splice_text(container_meta, 0, ElemId::head(), &text_str, None);
+                batch.fill_text(container_meta, &text_str);
             }
             _ => {
                 return Err(AutomergeError::InvalidOp(container_meta.typ));
@@ -1665,6 +1656,122 @@ fn batch_bfs(
         }
     }
     Ok(())
+}
+
+/// Where `batch_bfs` writes the ops it makes.
+trait BfsSink<'h> {
+    /// Adds the op `factory` makes from its position and id; `key` is its
+    /// string key, if it has one.
+    fn append_op<F: FnOnce(usize, OpId) -> TxOp>(
+        &mut self,
+        key: Option<&'h str>,
+        factory: F,
+    ) -> OpId;
+
+    /// Fills the empty text `container` with `text`.
+    fn fill_text(&mut self, container: ObjMeta, text: &str);
+
+    /// Adds the entries of `map`, the new map `container`, in key order,
+    /// queueing the objects among them.
+    fn append_entries(
+        &mut self,
+        container: ObjMeta,
+        map: &'h hydrate::Map,
+        queue: &mut VecDeque<(ObjMeta, &'h hydrate::Value)>,
+    ) {
+        let mut keys: Vec<_> = map.iter().collect();
+        keys.sort_by(|(a, _), (b, _)| a.cmp(b));
+
+        for (key, map_value) in keys {
+            let child_value = &map_value.value;
+            let (child_obj_type, op_type) = value_to_op_type(child_value);
+
+            let id = self.append_op(Some(key.as_str()), |pos, id| {
+                TxOp::map(
+                    id,
+                    container,
+                    pos,
+                    ResolvedAction::VisibleUpdate(op_type),
+                    key.to_string(),
+                    vec![],
+                )
+            });
+
+            if let Some(obj_type) = child_obj_type {
+                let child_obj_meta = ObjMeta {
+                    id: crate::types::ObjId(id),
+                    typ: obj_type,
+                };
+                queue.push_back((child_obj_meta, child_value));
+            }
+        }
+    }
+}
+
+impl<'h> BfsSink<'h> for BatchInsertion<'_, '_> {
+    fn append_op<F: FnOnce(usize, OpId) -> TxOp>(
+        &mut self,
+        _key: Option<&'h str>,
+        factory: F,
+    ) -> OpId {
+        self.append(factory)
+    }
+
+    fn fill_text(&mut self, container: ObjMeta, text: &str) {
+        self.splice_text(container, 0, ElemId::head(), text, None);
+    }
+}
+
+/// A root written into an empty document: each op is encoded as it is
+/// made, its patches logged as `BatchInsertion` logs them, and dropped.
+struct StreamSink<'a, 'e, 'h> {
+    inner: &'a mut TransactionInner,
+    patch_log: &'a mut Events<'e>,
+    encoding: TextEncoding,
+    stream: RootStream<'h>,
+}
+
+impl StreamSink<'_, '_, '_> {
+    /// The id of the next op: the transaction holds none yet.
+    fn next_id(&self) -> OpId {
+        OpId::new(
+            self.inner.start_op.get() + self.stream.len() as u64,
+            self.inner.actor,
+        )
+    }
+}
+
+impl<'h> BfsSink<'h> for StreamSink<'_, '_, 'h> {
+    fn append_op<F: FnOnce(usize, OpId) -> TxOp>(
+        &mut self,
+        key: Option<&'h str>,
+        factory: F,
+    ) -> OpId {
+        let id = self.next_id();
+        let op = factory(self.stream.len(), id).masked(self.inner.masked);
+        self.inner
+            .finalize_op(self.encoding, self.patch_log, &op, None, None);
+        self.stream.push(&op, key);
+        id
+    }
+
+    fn fill_text(&mut self, container: ObjMeta, text: &str) {
+        // Split as `BatchInsertion::splice_text` splits it.
+        let chars: Vec<ScalarValue> = match self.encoding {
+            TextEncoding::GraphemeCluster => text.graphemes(true).map(ScalarValue::from).collect(),
+            _ => text.chars().map(ScalarValue::from).collect(),
+        };
+        let mut elemid = ElemId::head();
+        for char in chars {
+            let op = TxOp::insert_val(self.next_id(), container, self.stream.len(), char, elemid)
+                .masked(self.inner.masked);
+            elemid = ElemId(op.id());
+            self.stream.push(&op, None);
+        }
+        if self.inner.logs(self.patch_log) {
+            self.patch_log.splice(container.id, 0, text, None);
+        }
+    }
 }
 
 fn increment_replacement(
@@ -1695,6 +1802,77 @@ mod tests {
     use crate::{transaction::Transactable, ReadDoc, ROOT};
 
     use super::*;
+
+    /// A root of `keys` maps, each holding a string, an integer, a list of
+    /// three strings and a five character text: 13 ops per key.
+    fn wide_root(keys: usize) -> hydrate::Map {
+        let entries: std::collections::HashMap<String, hydrate::Value> = (0..keys)
+            .map(|i| {
+                let value = crate::hydrate_map! {
+                    "name" => format!("item {i}").as_str(),
+                    "v" => i as i64,
+                    "tags" => crate::hydrate_list!["a", "b", format!("t{}", i % 7).as_str()],
+                    "t" => crate::hydrate_text!("hello"),
+                };
+                (format!("key{i:05}"), value.into())
+            })
+            .collect();
+        hydrate::Map::from(entries)
+    }
+
+    /// A root written into an empty document is encoded once, as its
+    /// change's columns, and the op set is loaded from that encoding: no op
+    /// is spliced into the op set's columns, and the transaction holds none
+    /// of them as records of its own.
+    #[test]
+    fn a_root_written_into_an_empty_document_is_encoded_once() {
+        use crate::write_counters::{counts, reset};
+        let root = wide_root(1_000);
+        let mut doc = Automerge::new().with_actor(crate::ActorId::from(&[3u8; 16][..]));
+        reset();
+        let mut tx = doc.transaction();
+        tx.init_root_from_hydrate(&root).unwrap();
+        tx.commit();
+        let c = counts();
+        let ops = doc.get_changes(&[])[0].len() as u64;
+        assert_eq!(ops, 13_000);
+        // Each op is encoded once, for the change.
+        assert_eq!(c.ops_encoded, ops);
+        // Before this change every op was spliced into the op set's columns
+        // as well, and held by the transaction until the commit: 13,000
+        // each. Now 0 each. The gates sit a tenth of the way from 0 to
+        // 13,000.
+        assert!(c.ops_spliced <= 1_300, "{c:?}");
+        assert!(c.ops_held <= 1_300, "{c:?}");
+        // The key, action and value metadata columns are handed to the op
+        // set as the encoder's slabs, not decoded back from the change's
+        // bytes: the op set decoded 88,046 bytes of op columns before that,
+        // 50,132 after. The gate sits a tenth of the way from the second to
+        // the first.
+        assert!(c.column_bytes_decoded <= 53_923, "{c:?}");
+    }
+
+    /// Ops written after such a root in the same transaction are spliced,
+    /// held and encoded as any are, and only they are.
+    #[test]
+    fn only_the_ops_after_a_loaded_root_are_spliced_and_held() {
+        use crate::write_counters::{counts, reset};
+        let root = wide_root(100);
+        let mut doc = Automerge::new().with_actor(crate::ActorId::from(&[3u8; 16][..]));
+        reset();
+        let mut tx = doc.transaction();
+        tx.init_root_from_hydrate(&root).unwrap();
+        tx.put(ROOT, "key00000", "overwritten").unwrap();
+        tx.put(ROOT, "after", 1).unwrap();
+        tx.delete(ROOT, "key00001").unwrap();
+        tx.commit();
+        let c = counts();
+        assert_eq!(doc.get_changes(&[])[0].len(), 1_303);
+        assert_eq!(c.ops_encoded, 1_303);
+        // The delete is held but has no row of its own in the op set.
+        assert_eq!(c.ops_spliced, 2);
+        assert_eq!(c.ops_held, 3);
+    }
 
     #[test]
     fn map_rollback_doesnt_panic() {

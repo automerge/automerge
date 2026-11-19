@@ -15,6 +15,9 @@ utf16-indexing = []
 # Whether to enable "slow path" assertions which check that various invariants hold
 # should only be enabled when running tests
 slow_path_assertions = ["hexane/slow_path_assertions"]
+# Counts of the work writing ops does (ops spliced, encoded, held, column
+# bytes decoded), for tests that check a write's cost without timing it
+write-counters = []
 
 [dependencies]
 cfg-if = "1.0"

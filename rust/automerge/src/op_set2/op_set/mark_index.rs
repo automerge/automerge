@@ -234,6 +234,23 @@ impl MarkIndexColumn {
         }
     }
 
+    /// The index of `len` ops none of which is a mark.
+    pub(crate) fn unmarked(len: usize) -> Self {
+        let mut data = PrefixColumn::new();
+        data.splice_runs(
+            0,
+            0,
+            [hexane::Run {
+                count: len,
+                value: None::<MarkIdx>,
+            }],
+        );
+        Self {
+            data,
+            cache: ActorRefs::default(),
+        }
+    }
+
     pub(crate) fn len(&self) -> usize {
         self.data.len()
     }
