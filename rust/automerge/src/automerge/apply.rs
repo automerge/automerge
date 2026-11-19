@@ -182,13 +182,16 @@ impl Automerge {
     /// # Errors
     ///
     /// Fails only if `log` is incompatible with this document, and only before
-    /// any actor, history, operation, or visibility mutation. Once that
-    /// preflight succeeds the log's actors equal the document's; every later
-    /// log operation in this method sees a document whose actor table either
-    /// grew (a superset migrates infallibly) or is unchanged. The debug
-    /// assertion ahead of `remove_unused` guarantees that cleanup cannot drop
-    /// an actor the log already knows. A failure after preflight is therefore
-    /// an internal invariant violation and panics, rather than returning an
+    /// any actor, history, operation, or visibility mutation of the document.
+    /// Once that preflight succeeds the log's actors equal the document's;
+    /// every later log operation in this method sees a document whose actor
+    /// table either grew (a superset migrates infallibly) or is unchanged.
+    /// Cleanup cannot shrink it by construction: every actor inserted above
+    /// gains a graph entry from `History::update` before `remove_unused`
+    /// runs, and `remove_unused` only drops actors without one; the debug
+    /// assertions around it check this, they do not enforce it in release
+    /// builds. A log failure after preflight is therefore an internal
+    /// invariant violation and panics after mutation, rather than returning an
     /// error that would imply the half-applied document is usable.
     pub(super) fn apply_prepared_changes(
         &mut self,
@@ -199,7 +202,8 @@ impl Automerge {
 
         // Preflight: align the batch and log with the incoming doc, taking a
         // snapshot of the mask before the op set mutation. This is the only
-        // fallible log operation; nothing has been mutated yet.
+        // fallible log operation; the document has not been mutated yet (the
+        // log itself may record a view transition on success).
         log.transition_to(self, |d| d.visible_current())?;
         const ALIGNED: &str =
             "patch log aligned by preflight stays compatible while the actor table only grows";

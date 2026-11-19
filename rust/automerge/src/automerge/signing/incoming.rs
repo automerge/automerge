@@ -66,8 +66,8 @@ pub(super) struct PendingGroups {
 }
 
 impl PendingGroups {
-    pub(super) fn is_empty(&self) -> bool {
-        self.groups.is_empty()
+    pub(super) fn len(&self) -> usize {
+        self.groups.len()
     }
 
     pub(super) fn queued_changes(&self) -> impl Iterator<Item = &Change> {

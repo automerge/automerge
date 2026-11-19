@@ -119,9 +119,14 @@ impl SigningState {
     }
 
     pub(super) fn has_pending_groups(&self) -> bool {
+        self.pending_group_count() > 0
+    }
+
+    /// Number of retained incoming groups still waiting for causal context.
+    pub(super) fn pending_group_count(&self) -> usize {
         match self {
-            Self::Unsigned => false,
-            Self::Required(signing) => !signing.pending.is_empty(),
+            Self::Unsigned => 0,
+            Self::Required(signing) => signing.pending.len(),
         }
     }
 

@@ -421,10 +421,12 @@ fn simultaneously_admissible_pending_equivocation_fails_publication_but_retains_
 
 #[test]
 fn published_frontier_with_reclaimed_signature_does_not_prove_a_new_candidate() {
-    // Published F = {a} (loose, level 0) whose own signature has been reclaimed
-    // by a published cover G = {a, c} ⊢ b. A later hard fragment H headed by d
-    // with frontiers {d, x} where x is an unsigned local loose change in a
-    // *different* actor must not publish just because a is accepted.
+    // Published loose a (actor 1) whose own signature has been reclaimed by
+    // the published same-actor cover G = {a, c}. A different actor's level-1
+    // d built at [a] (not c) has canonical H = {a, d} with frontiers {a, d}:
+    // a is published but carries no signature, so H must stay unproved until
+    // the exact sig(a) is supplied, even though every frontier is applied and
+    // a is accepted.
     let ka = key(7);
     let kb = key(8);
     let mut doc = Automerge::signing(author(&ka))
@@ -432,41 +434,112 @@ fn published_frontier_with_reclaimed_signature_does_not_prove_a_new_candidate() 
         .with_actor(ActorId::from([1]));
     let a = append_at_level(&mut doc, None, 1, 0);
     sign_doc(&mut doc, a, &ka);
-    doc.set_author(Some(author(&kb))).unwrap();
-    doc.set_actor(ActorId::from([2]));
-    let b = append_at_level(&mut doc, Some(&[]), 2, 1);
-    doc.set_author(Some(author(&ka))).unwrap();
-    doc.set_actor(ActorId::from([1]));
-    let c = append_at_level(&mut doc, Some(&[a, b]), 3, 1);
+    assert!(is_accepted(&mut doc, &a));
+    let c = append_at_level(&mut doc, Some(&[a]), 2, 1);
+    let g = doc.change_graph.get_historical_fragment(c).unwrap();
+    assert_eq!(sorted(&g.members), sorted(&[a, c]));
     sign_doc(&mut doc, c, &ka);
-    sign_doc(&mut doc, b, &kb);
     assert!(is_accepted(&mut doc, &c));
     assert_eq!(signature_count(&mut doc, &a), 0, "a's proof was reclaimed");
 
-    // New incomplete candidate: x (actor 2, loose, unsigned) then d (actor 1,
-    // level 1) depending on [c, x]. H = {d, x} needs sig(d) and sig(x).
     doc.set_author(Some(author(&kb))).unwrap();
     doc.set_actor(ActorId::from([2]));
-    let x = append_at_level(&mut doc, Some(&[b]), 4, 0);
-    doc.set_author(Some(author(&ka))).unwrap();
-    doc.set_actor(ActorId::from([1]));
-    let d = append_at_level(&mut doc, Some(&[c, x]), 5, 1);
+    let d = append_at_level(&mut doc, Some(&[a]), 3, 1);
     let h = doc.change_graph.get_historical_fragment(d).unwrap();
-    assert!(h.members.contains(&x));
+    assert_eq!(sorted(&h.members), sorted(&[a, d]));
+    let frontiers: Vec<ChangeHash> = doc
+        .change_graph
+        .fragment_requirements(d)
+        .unwrap()
+        .hashes()
+        .copied()
+        .collect();
+    assert_eq!(sorted(&frontiers), sorted(&[a, d]));
 
-    let outcome = doc.insert_signatures([(d, sig(&ka, &d))]);
+    let outcome = doc.insert_signatures([(d, sig(&kb, &d))]);
     assert!(matches!(insertions(&outcome)[0].result, Ok(Insert::Stored)));
     assert!(
         !is_accepted(&mut doc, &d),
-        "unproved group must not publish"
+        "published membership of frontier a is not proof for H"
     );
-    assert!(!is_accepted(&mut doc, &x));
     assert!(doc.get_fragment(d).is_none());
-    // Supplying x's exact frontier signature completes H.
-    let outcome = doc.insert_signatures([(x, sig(&kb, &x))]);
+
+    // Supplying a's exact frontier signature again completes H.
+    let outcome = doc.insert_signatures([(a, sig(&ka, &a))]);
     assert!(matches!(insertions(&outcome)[0].result, Ok(Insert::Stored)));
     assert!(is_accepted(&mut doc, &d));
-    assert!(is_accepted(&mut doc, &x));
+}
+
+#[test]
+fn completion_continues_after_publication_only_progress_of_pending_group() {
+    // l (actor 1, k1) is local and unpublished. a (actor 2, k2) was committed
+    // locally on this document too, so its contents are applied; the same a
+    // then arrives as a signed incoming group, which stays pending on l. c
+    // (actor 1, k1) depends on a and already has its own signature retained.
+    // Signing l publishes l, then the retry publishes pending a without
+    // appending any graph node, which in turn enables c: all of this must
+    // happen in one call.
+    let k1 = key(1);
+    let k2 = key(2);
+    let mut doc = Automerge::signing(author(&k1))
+        .unwrap()
+        .with_actor(ActorId::from([1]));
+    let l = append_at_level(&mut doc, None, 1, 0);
+    doc.set_author(Some(author(&k2))).unwrap();
+    doc.set_actor(ActorId::from([2]));
+    let a = append_at_level(&mut doc, Some(&[l]), 2, 0);
+    doc.set_author(Some(author(&k1))).unwrap();
+    doc.set_actor(ActorId::from([1]));
+    let c = append_at_level(&mut doc, Some(&[a]), 3, 0);
+
+    let a_bytes = attach(
+        doc.get_change_by_hash(&a).unwrap().raw_bytes(),
+        [(a, Signature::ed25519(sig(&k2, &a)))],
+    );
+    assert_eq!(doc.load_incremental(&a_bytes).unwrap(), 0);
+    assert_eq!(
+        doc.signing
+            .queued_changes()
+            .map(Change::hash)
+            .collect::<Vec<_>>(),
+        [a],
+        "a's contents are applied but its proof waits on l"
+    );
+    let outcome = doc.insert_signatures([(c, sig(&k1, &c))]);
+    assert!(matches!(insertions(&outcome)[0].result, Ok(Insert::Stored)));
+    assert!(!is_accepted(&mut doc, &c));
+    // a was committed on this document too, so it is tracked alongside l and c.
+    assert_eq!(doc.try_signing().unwrap().state.local_unsigned, [l, a, c]);
+    let graph_len = doc.change_graph.len();
+
+    let mut log = PatchLog::active();
+    let outcome = doc.insert_signatures_log_patches([(l, sig(&k1, &l))], &mut log);
+    assert!(matches!(outcome, SignatureBatchOutcome::Completed { .. }));
+    assert!(is_accepted(&mut doc, &l));
+    assert!(is_accepted(&mut doc, &a));
+    assert!(
+        is_accepted(&mut doc, &c),
+        "c is enabled by a's publication within the same call"
+    );
+    assert_eq!(doc.change_graph.len(), graph_len, "no new history applied");
+    assert!(!doc.signing.has_pending_groups());
+    assert!(
+        doc.try_signing().unwrap().state.local_unsigned.is_empty(),
+        "published local tracking retired in the same call"
+    );
+    assert!(doc.make_patches(&mut log).is_empty());
+
+    // Stable: an empty follow-up changes nothing.
+    let saved = doc.save_nocompress();
+    let outcome = doc.insert_signatures(std::iter::empty());
+    assert!(matches!(outcome, SignatureBatchOutcome::Completed { .. }));
+    assert_eq!(doc.save_nocompress(), saved);
+}
+
+fn sorted(hashes: &[ChangeHash]) -> Vec<ChangeHash> {
+    let mut hashes = hashes.to_vec();
+    hashes.sort();
+    hashes
 }
 
 fn signature_count(doc: &mut Automerge, hash: &ChangeHash) -> usize {

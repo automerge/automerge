@@ -130,8 +130,15 @@ impl Automerge {
         Ok(())
     }
 
-    /// Publish newly proved local history and apply pending groups enabled by
-    /// it, repeating only while incoming application changes applied history.
+    /// Publish newly proved local history and admit pending groups enabled by
+    /// it, repeating only while the retry settles a retained group.
+    ///
+    /// A retry with no new input can only make progress by selecting a pending
+    /// group, and every selected group leaves the pending set whether it
+    /// applied new history, merely merged proof for already-applied contents
+    /// or only advanced publication. Any of those can enable a further local
+    /// publication, so another local pass follows. The pending set is finite
+    /// and strictly shrinks on each continued iteration, bounding the loop.
     ///
     /// Local publication is attempted first and always retained. Incoming
     /// retry failures surface as [`PublicationError`] with everything done so
@@ -144,10 +151,13 @@ impl Automerge {
             self.try_signing()
                 .expect("completion runs on a required-mode document")
                 .publish_local();
-            let before = self.change_graph.len();
+            let before = self.signing.pending_group_count();
+            if before == 0 {
+                return Ok(());
+            }
             self.retry_pending_groups(log)
                 .map_err(PublicationError::Admission)?;
-            if self.change_graph.len() == before {
+            if self.signing.pending_group_count() == before {
                 return Ok(());
             }
         }
