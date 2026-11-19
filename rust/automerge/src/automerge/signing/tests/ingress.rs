@@ -234,3 +234,55 @@ fn inspectors_expose_applied_drafts_but_transfers_do_not() {
     assert!(source.get_fragment(d).is_none());
     assert_eq!(source.bundle_fragments(source.fragments(..)).len(), 1);
 }
+
+#[test]
+fn anonymize_yields_a_new_unsigned_diagnostic_history_without_proofs_or_drafts() {
+    let k = key(1);
+    let mut source = Automerge::signing(author(&k))
+        .unwrap()
+        .with_actor(ActorId::from([1]));
+    let a = append_at_level(&mut source, None, 1, 0);
+    sign_doc(&mut source, a, &k);
+    let d = append_at_level(&mut source, None, 2, 0);
+    let before = source.save();
+
+    let mut anonymous = source.anonymize().unwrap();
+    // Diagnostic copy: rewritten hashes, unsigned mode, no author identity,
+    // no signatures, no local drafts. Structural shape (two changes) kept.
+    assert!(!anonymous.signing.is_required());
+    assert_eq!(anonymous.get_changes(&[]).len(), 2);
+    assert!(anonymous.get_change_by_hash(&a).is_none());
+    assert!(anonymous.get_change_by_hash(&d).is_none());
+    assert!(anonymous.get_authors().is_empty());
+    assert!(anonymous.get_author().is_none());
+    assert!(!anonymous.has_unpublished_changes());
+    assert!(anonymous.request_signatures().is_err());
+    // Exports carry no proof: each is a bare change/bundle chunk, and an
+    // unsigned load of the whole save succeeds (it would reject any attached
+    // signatures chunk).
+    let exports = anonymous.bundle_fragments(anonymous.fragments(..));
+    assert_eq!(exports.len(), 2);
+    for bytes in &exports {
+        let (rest, chunk) = crate::storage::Chunk::parse(crate::storage::parse::Input::new(bytes))
+            .expect("valid chunk");
+        assert!(
+            !matches!(chunk, crate::storage::Chunk::Signatures(_)) && rest.is_empty(),
+            "single bare chunk without a trailing signatures chunk"
+        );
+    }
+    assert!(Automerge::load(&anonymous.save()).is_ok());
+    // It cannot flow back into required-mode documents, and the source is
+    // unchanged (still signed, draft still live).
+    assert!(matches!(
+        source.merge(&mut anonymous),
+        Err(AutomergeError::Signing(SigningError::MergeModeMismatch))
+    ));
+    assert!(Automerge::load_with_options(
+        &anonymous.save(),
+        LoadOptions::new().signing().author(author(&key(3))),
+    )
+    .is_err());
+    assert_eq!(source.save(), before);
+    assert_eq!(source.get_heads(), [d]);
+    assert!(source.has_unpublished_changes());
+}

@@ -21,7 +21,14 @@ Changes since 3.4.1.
   `hasUnpublishedChanges` reports publication status. `save` writes only
   published history with its proofs; `merge` between signing documents moves
   published history only and mixed-mode merges throw. Signed documents reject
-  `generateSyncMessage`/`receiveSyncMessage` and historical clones.
+  `generateSyncMessage`/`receiveSyncMessage` and historical clones. A
+  signing document never writes through an actor bound to another author:
+  `load`/`clone` with such an `actor` throw a `RangeError` before copying, and
+  a change on a document whose configured actor was later bound by an import
+  throws before applying anything. `anonymize` of a signing document is a new
+  unsigned diagnostic copy with no proofs, drafts or publication state.
+  Malformed `insertSignatures` entries are rejected by length before their
+  bytes are copied.
 
 ### Changed
 

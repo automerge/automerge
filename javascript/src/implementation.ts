@@ -212,7 +212,13 @@ export function use(api: API) {
  * @typeParam T - The type of the value the document contains
  */
 export type InitOptions<T> = {
-  /** The actor ID to use for this document, a random one will be generated if `null` is passed */
+  /**
+   * The actor ID to use for this document, a random one will be generated if
+   * `null` is passed. In signing mode an actor already bound to a different
+   * author than `author` is rejected with a `RangeError` (on `load` and
+   * `clone`); a signing document only writes through actors its fixed author
+   * owns.
+   */
   actor?: ActorId
   /** The author for this document. Required when `signing` is enabled. */
   author?: Author
@@ -342,6 +348,12 @@ export function view<T>(doc: Doc<T>, heads: Heads): Doc<T> {
  * the actor ID which is generated you can pass the actor ID as the second
  * argument
  *
+ * In signing mode the local author is fixed per document and the requested
+ * actor is checked against it: an actor whose history was recorded under a
+ * different author is rejected with a `RangeError` before the copy is made,
+ * so one author can never continue another author's chain. Actors already
+ * owned by the same author, and brand-new actors, are accepted as before.
+ *
  * @typeParam T - The type of the value contained in the document
  * @param doc - The document to clone
  * @param _opts - Either an actor ID to use for the new doc or an {@link InitOptions}
@@ -399,6 +411,13 @@ export function clone<T>(
  *
  * The returned document has an unknown schema because its map keys and values
  * no longer correspond to those of the input document.
+ *
+ * This is a diagnostic transformation, not a mode conversion. The copy is
+ * always a new **unsigned** document: its change hashes are rewritten, and it
+ * carries no authors, signatures, publication state or signing requests, even
+ * when `doc` is a signing document. It therefore has no signature or
+ * publication guarantee and cannot be merged or loaded into a signing
+ * document. `doc` itself is unchanged, unpublished drafts included.
  */
 export function anonymize<T>(doc: Doc<T>): Doc<Record<string, unknown>> {
   const state = _state(doc)
@@ -2264,24 +2283,30 @@ export function requestSignatures<T>(doc: Doc<T>): SigningRequest[] {
  *
  * @example Shutdown: stop editing, finish signing, then wait with your own
  * timeout before saving. {@link save} only returns bytes; durability is the
- * application's job, and unpublished drafts are not in the saved bytes, so
- * saving while {@link hasUnpublishedChanges} is `true` loses those drafts.
+ * application's job. The saved bytes contain published history only:
+ * unpublished drafts stay in the live document and are still editable and
+ * signable afterwards, but they are not recoverable from the bytes once the
+ * process exits. So a save while {@link hasUnpublishedChanges} is `true` is
+ * fine as a checkpoint, and only exiting afterwards loses the drafts.
  * No requests plus unpublished history means publication is blocked on
  * peers (for example a dependency they still have to sign), which only
  * external progress can unblock: wait for it within the deadline, and
- * decide explicitly what to do if the deadline passes.
+ * decide explicitly what to do if the deadline passes. The application
+ * owns the signer's timeout as well: Automerge never waits, so a signer
+ * that ignores `remaining` can block the shutdown past the deadline.
  * ```ts
  * const deadline = Date.now() + 5_000
  * while (Automerge.hasUnpublishedChanges(doc)) {
  *   const remaining = deadline - Date.now()
  *   if (remaining <= 0) {
- *     // Still unpublished: saving now would drop the drafts. Abort the
- *     // shutdown (or deliberately accept the loss) instead of saving.
+ *     // Still unpublished: exiting now would drop the drafts. Abort the
+ *     // shutdown (or deliberately accept the loss) instead of exiting.
  *     throw new Error("shutdown timed out with unpublished changes")
  *   }
  *   const requests = Automerge.requestSignatures(doc)
  *   if (requests.length > 0) {
- *     const inputs = await signAll(requests) // external signer
+ *     // External signer, bounded by the application's own deadline.
+ *     const inputs = await signAll(requests, { timeoutMs: remaining })
  *     ;({ doc } = Automerge.insertSignatures(doc, inputs))
  *   } else {
  *     // Blocked on peers: let the network deliver their signatures, then

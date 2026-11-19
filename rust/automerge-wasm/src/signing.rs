@@ -9,7 +9,7 @@
 
 use automerge as am;
 use automerge::signature::ed25519;
-use automerge::signature::Insert;
+use automerge::signature::{Insert, SIGNING_MESSAGE_LEN};
 use automerge::{ChangeHash, SignatureBatchOutcome, SignatureInsertOutcome, SigningRequest};
 use js_sys::{Array, Object, Uint8Array};
 use wasm_bindgen::{JsCast, JsValue};
@@ -70,10 +70,16 @@ fn parse_input(entry: &JsValue) -> Result<SignatureInput, BadInput> {
     }
     let message = bytes_prop(entry, "message").ok_or(BadInput::MessageNotBytes)?;
     let signature = bytes_prop(entry, "signature").ok_or(BadInput::SignatureNotBytes)?;
+    // Lengths are checked on the JS views before any bytes are copied, so a
+    // malformed oversized buffer costs nothing to reject.
+    let message = sized_copy(&message, SIGNING_MESSAGE_LEN).map_err(|actual| {
+        BadInput::Message(am::signature::error::SigningMessage::InvalidHashLength {
+            actual: actual.saturating_sub(SIGNING_PREFIX_LEN),
+        })
+    })?;
+    let signature = sized_copy(&signature, 64).map_err(BadInput::SignatureLength)?;
     let hash = am::signature::parse_signing_message(&message)?;
-    let signature: [u8; 64] = signature
-        .try_into()
-        .map_err(|bytes: Vec<u8>| BadInput::SignatureLength(bytes.len()))?;
+    let signature: [u8; 64] = signature.try_into().expect("length checked before copying");
     Ok(SignatureInput {
         hash,
         message,
@@ -81,9 +87,21 @@ fn parse_input(entry: &JsValue) -> Result<SignatureInput, BadInput> {
     })
 }
 
-fn bytes_prop(entry: &JsValue, name: &str) -> Option<Vec<u8>> {
+const SIGNING_PREFIX_LEN: usize = SIGNING_MESSAGE_LEN - 32;
+
+fn bytes_prop(entry: &JsValue, name: &str) -> Option<Uint8Array> {
     let value = js_get(entry, name).ok()?.0;
-    Some(value.dyn_ref::<Uint8Array>()?.to_vec())
+    value.dyn_into::<Uint8Array>().ok()
+}
+
+/// Copy `bytes` only if the view holds exactly `expected` bytes, otherwise
+/// return the actual length.
+fn sized_copy(bytes: &Uint8Array, expected: usize) -> Result<Vec<u8>, usize> {
+    let actual = bytes.length() as usize;
+    if actual != expected {
+        return Err(actual);
+    }
+    Ok(bytes.to_vec())
 }
 
 /// `{status: "rejected", reason}` for a malformed batch.

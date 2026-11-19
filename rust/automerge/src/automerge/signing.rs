@@ -13,7 +13,52 @@
 //! A required-mode document always has a current [`Author`] whose bytes form a
 //! usable Ed25519 verifying key. The author is fixed at construction and
 //! validated before any state exists; a new-author fork validates its author
-//! first; see [`crate::SigningAuthorError`].
+//! first; see [`crate::SigningAuthorError`]. The fixed author writes only
+//! through actors it owns: [`Automerge::try_set_actor`] rejects an actor bound
+//! to another author, and a transaction on such an actor fails before any
+//! operation is applied.
+//!
+//! # Workflow
+//!
+//! 1. Create with [`Automerge::signing`] (or [`crate::AutoCommit::signing`])
+//!    using the public key bytes as the author; the private key never enters
+//!    Automerge. Load published bytes with [`crate::LoadOptions::signing`].
+//! 2. Commit locally as usual. Local commits are immediately readable and
+//!    become *drafts*: unpublished history only this author can prove.
+//! 3. Call [`Automerge::request_signatures`] for an owned [`SigningRequests`]
+//!    snapshot. Sign each [`SigningRequest::message`] (exactly those bytes;
+//!    see [`crate::signature::signing_message`]) with the key for
+//!    [`SigningRequest::author`] outside Automerge.
+//! 4. Submit `(hash, signature)` pairs with [`Automerge::insert_signatures`].
+//!    Every entry gets an owned result; invalid or stale entries do not stop
+//!    the rest. [`SignatureBatchOutcome::Completed`] means the batch was
+//!    processed and completion ran once, **not** that everything is
+//!    published: history blocked behind dependencies other authors still
+//!    have to publish waits. [`SignatureBatchOutcome::PublicationFailed`]
+//!    keeps all inserted evidence and completed local publication.
+//! 5. To shut down: stop editing, commit, process signing, then wait for
+//!    [`Automerge::has_unpublished_changes`] to return `false` with the
+//!    application's own timeout. The library has no worker or timer, and a
+//!    timeout never relaxes proof requirements. Empty requests with
+//!    unpublished history means publication is blocked on peers.
+//!    [`Automerge::save`] returns bytes only (durability is the caller's job)
+//!    and contains published history with its proofs; drafts stay live in
+//!    the document but are not recoverable from the bytes after exit.
+//!
+//! # Limits
+//!
+//! - Unsupported in required mode, with checked errors: `fork_at` (signed
+//!   historical views), the sync protocol, and merging with an unsigned
+//!   document in either direction. Transfer published history with
+//!   save/load, incremental saves or merge between signing documents.
+//! - Raw inspectors (`get_changes`, `get_change_by_hash`, `fragments`) show
+//!   applied drafts; they are not authenticated transport. Only signed groups
+//!   with complete proof are accepted on ingress.
+//! - Retained incoming groups are bounded per group, not in total; the
+//!   absence of a total pending budget is a resource limitation, not a
+//!   security bound. There is no state recovery after panic or crash.
+//! - [`Automerge::anonymize`] of a signing document is a new unsigned
+//!   diagnostic copy without proofs or drafts.
 
 use std::collections::HashSet;
 use std::ops::RangeBounds;

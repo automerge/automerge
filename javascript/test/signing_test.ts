@@ -930,6 +930,102 @@ describe("fragment signing API", () => {
     assert.equal(sameAuthorView.counter, 1)
   })
 
+  it("never lets a fixed author adopt an actor bound to another author, and anonymize yields an unsigned diagnostic copy", async () => {
+    const alice = await makeSigner()
+    const bob = await makeSigner()
+    let doc = Automerge.init<CounterDoc>({
+      author: alice.author,
+      signing: true,
+      actor: "01",
+    })
+    doc = Automerge.change(doc, d => {
+      d.title = "a"
+    })
+    const [a] = Automerge.getHeads(doc)
+    doc = await publishAll(doc, alice.sign)
+    const bytes = Automerge.save(doc)
+
+    // Bob cannot continue Alice's actor chain through any entry point.
+    const bound = /belongs to a different author/
+    assert.throws(
+      () => Automerge.clone(doc, { author: bob.author, actor: "01" }),
+      bound,
+    )
+    assert.throws(
+      () =>
+        Automerge.load<CounterDoc>(bytes, {
+          signing: true,
+          author: bob.author,
+          actor: "01",
+        }),
+      bound,
+    )
+    const bobs = Automerge.clone(doc, { author: bob.author })
+    assert.throws(() => Automerge.clone(bobs, "01"), bound)
+    assert.throws(() => Automerge.clone(bobs, { actor: "01" }), bound)
+    // The source is unaffected and remains Alice's.
+    assert.equal(Automerge.getAuthor(doc), alice.author)
+    assert.equal(Automerge.getActorId(doc), "01")
+    // Same author or a fresh actor is fine, as are unsigned documents.
+    assert.equal(
+      Automerge.getActorId(
+        Automerge.clone(doc, { author: alice.author, actor: "01" }),
+      ),
+      "01",
+    )
+    assert.equal(Automerge.getActorId(Automerge.clone(bobs, "02")), "02")
+    let unsigned = Automerge.init<CounterDoc>({ author: "aa", actor: "01" })
+    unsigned = Automerge.change(unsigned, d => {
+      d.counter = 1
+    })
+    assert.equal(
+      Automerge.getActorId(
+        Automerge.clone(unsigned, { author: "bb", actor: "01" }),
+      ),
+      "01",
+    )
+
+    // Bob configured actor 01 before importing Alice's published chain. The
+    // first local change fails before any operation is applied.
+    let late = Automerge.init<CounterDoc>({
+      author: bob.author,
+      signing: true,
+      actor: "01",
+    })
+    late = Automerge.loadIncremental(late, bytes)
+    assert.deepEqual(Automerge.getHeads(late), [a])
+    assert.throws(() =>
+      Automerge.change(late, d => {
+        d.title = "b"
+      }),
+    )
+    assert.deepEqual(Automerge.getHeads(late), [a])
+    assert.equal(Automerge.hasUnpublishedChanges(late), false)
+    assert.deepEqual(Automerge.requestSignatures(late), [])
+
+    // anonymize: new unsigned diagnostic history, no proof, cannot re-enter
+    // required mode, source untouched (draft included).
+    doc = Automerge.change(doc, d => {
+      d.title = "draft"
+    })
+    const anon = Automerge.anonymize(doc)
+    assert.equal(Automerge.getAllChanges(anon).length, 2)
+    assert.equal(Automerge.hasUnpublishedChanges(anon), false)
+    assert.throws(() => Automerge.requestSignatures(anon), RangeError)
+    assert.equal(Automerge.getAuthor(anon), null)
+    assert.ok(Automerge.load(Automerge.save(anon)))
+    assert.throws(() =>
+      Automerge.load(Automerge.save(anon), {
+        signing: true,
+        author: bob.author,
+      }),
+    )
+    assert.throws(() => Automerge.merge(Automerge.clone(doc), anon), /mode/)
+    assert.equal(doc.title, "draft")
+    assert.equal(Automerge.hasUnpublishedChanges(doc), true)
+    assert.equal(Automerge.requestSignatures(doc).length, 1)
+  })
+
   it("preserves attached proofs through commit/fragment transport and rejects forged metadata", async () => {
     const alice = await makeSigner()
     let doc = Automerge.init<CounterDoc>({

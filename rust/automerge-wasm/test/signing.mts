@@ -562,4 +562,77 @@ describe("Automerge Wasm fragment signing", function () {
     assert.equal(unsigned.forkWithAuthor(null).getAuthor(), null);
     assert.equal(create().getAuthor(), null);
   });
+
+  it("never lets a fixed author write through an actor bound to another author", async () => {
+    const alice = await makeSigner();
+    const bob = await makeSigner();
+    const doc = create({ signing: true, author: alice.author, actor: "01" });
+    doc.put("/", "x", 1);
+    const [a] = [doc.commit("a", 1)];
+    completed(doc.insertSignatures(await signAll(doc.requestSignatures(), alice.sign)));
+    assert.equal(doc.hasUnpublishedChanges(), false);
+
+    // Bob forks with Alice's actor: rejected up front, before the source
+    // transaction is touched.
+    const bound = /belongs to a different author/;
+    assert.throws(() => doc.forkWithAuthor(bob.author, "01"), bound);
+    assert.equal(doc.getAuthor(), alice.author);
+    const bobs = doc.forkWithAuthor(bob.author);
+    bobs.put("/", "pending", 1);
+    assert.throws(() => bobs.clone("01"), bound);
+    assert.throws(() => bobs.fork("01"), bound);
+    assert.equal(bobs.pendingOps(), 1, "rejected actor leaves the source untouched");
+    bobs.rollback();
+    const bytes = doc.save();
+    assert.throws(
+      () => load(bytes, { signing: true, author: bob.author, actor: "01" }),
+      bound,
+    );
+    // Same author, new actor, or an unsigned document: all unchanged.
+    assert.equal(doc.forkWithAuthor(alice.author, "01").getActorId(), "01");
+    assert.equal(bobs.clone("02").getActorId(), "02");
+    assert.equal(
+      load(bytes, { signing: true, author: alice.author, actor: "01" }).getActorId(),
+      "01",
+    );
+    const unsignedBytes = create({ author: "aa", actor: "01" }).save();
+    assert.equal(
+      load(unsignedBytes, { author: "bb", actor: "01" }).getActorId(),
+      "01",
+    );
+
+    // Bob configured actor 01 while unused; Alice's chain later binds it.
+    // A local change must fail before anything is applied.
+    const late = create({ signing: true, author: bob.author, actor: "01" });
+    late.loadIncremental(bytes);
+    assert.deepEqual(late.getHeads(), [a]);
+    assert.throws(() => late.put("/", "y", 2));
+    assert.deepEqual(late.getHeads(), [a]);
+    assert.equal(late.hasUnpublishedChanges(), false);
+    assert.deepEqual(late.requestSignatures(), []);
+  });
+
+  it("rejects oversized malformed buffers by length without copying them", async () => {
+    const alice = await makeSigner();
+    const doc = create({ signing: true, author: alice.author });
+    doc.put("/", "a", 1);
+    doc.commit("first", 1);
+    const [request] = doc.requestSignatures();
+    const good = { message: request.message, signature: await alice.sign(request.message) };
+    // Large typed arrays backed by a shared, untouched buffer: the parser
+    // must reject on length before materialising any copy.
+    const huge = new Uint8Array(1 << 28);
+    for (const bad of [
+      { message: huge, signature: good.signature },
+      { message: good.message, signature: huge },
+    ]) {
+      const outcome = doc.insertSignatures([good, bad]);
+      assert.equal(outcome.status, "rejected");
+      if (outcome.status === "rejected")
+        assert.match(outcome.reason, /index 1.*found 2684354\d\d$/);
+    }
+    assert.equal(doc.hasUnpublishedChanges(), true);
+    completed(doc.insertSignatures([good]));
+    assert.equal(doc.hasUnpublishedChanges(), false);
+  });
 });

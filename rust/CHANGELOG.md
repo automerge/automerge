@@ -54,6 +54,19 @@
   entry, and `has_unpublished_changes` reports publication status without
   committing. The signing handle (`SigningDocument`, `try_signing`) and its
   scalar `insert_signature`/`required_signatures` are internal.
+* A required-mode document only writes through actors its fixed author owns.
+  `Automerge::try_set_actor`/`AutoCommit::try_set_actor` reject an actor whose
+  history is recorded under another author with
+  `SigningError::ActorBoundToOtherAuthor` (the `AutoCommit` form decides
+  before closing the open transaction); the infallible `set_actor`/`with_actor`
+  keep their signatures and panic in that one case. A local transaction whose
+  configured actor was bound to another author by a later import fails before
+  any operation is applied. `check_actor_binding` exposes the read-only check.
+  Unsigned documents are unaffected. `signature::SIGNING_MESSAGE_LEN` is
+  public so untrusted candidate messages can be length-checked before copying.
+* `anonymize` documents its contract for signing documents: the copy is a new
+  unsigned diagnostic history (rewritten hashes, no authors, proofs, drafts or
+  publication) that cannot be merged or loaded into a required-mode document.
 * `AutoCommit::committed_heads` returns the heads of committed history
   without closing an open transaction (equal to `get_heads` when nothing is
   pending), for preflight snapshots before operations that may refuse to run.
