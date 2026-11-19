@@ -14146,3 +14146,219 @@ fn delta_searches_told() {
     assert_eq!(delta_place(&x), (0, 9, 0));
     assert_eq!(old_delta_place(&y), (0, 9, 0));
 }
+
+// ── Delta columns: the places of values, found by the column's index ────────
+
+/// A value type of a delta column whose numbers are told as `i128`s,
+/// which hold every number of every such type.
+trait DeltaFound: DeltaSought {
+    /// The number of a value, if it is not null.
+    fn wide(self) -> Option<i128>;
+}
+
+macro_rules! delta_found {
+    ($t:ty) => {
+        impl DeltaFound for $t {
+            fn wide(self) -> Option<i128> {
+                Some(self as i128)
+            }
+        }
+
+        impl DeltaFound for Option<$t> {
+            fn wide(self) -> Option<i128> {
+                self.map(|v| v as i128)
+            }
+        }
+    };
+}
+
+delta_found!(u32);
+delta_found!(u64);
+delta_found!(i32);
+delta_found!(i64);
+delta_found!(usize);
+
+/// The numbers within the bounds as a range of numbers that includes
+/// its start and not its end, which is what `DeltaColumn`'s
+/// `find_by_range` takes: a null is before every number.
+fn delta_bounds_wide<T: DeltaFound>(lo: &Bound<T>, hi: &Bound<T>) -> Range<i128> {
+    let big = 1i128 << 70;
+    let start = match lo {
+        Bound::Included(a) => a.wide().unwrap_or(-big),
+        Bound::Excluded(a) => a.wide().map_or(-big, |n| n + 1),
+        Bound::Unbounded => -big,
+    };
+    let end = match hi {
+        Bound::Included(b) => b.wide().map_or(-big, |n| n + 1),
+        Bound::Excluded(b) => b.wide().unwrap_or(-big),
+        Bound::Unbounded => big,
+    };
+    start..end
+}
+
+/// A delta column's finds are the places its specification says
+/// (`delta_finds`): those of the values that are the one looked for, or
+/// are within the bounds, in order, with no null among them; and they
+/// are what `DeltaColumn` finds.
+fn delta_finds<T: DeltaFound>(seed: u64, max_segments: Option<usize>) {
+    let mut rng = Rng(seed.wrapping_mul(0x3d_4d51_cb17).wrapping_add(17) | 1);
+    let n = match rng.below(5) {
+        0 => rng.below(4),
+        _ => rng.below(200),
+    };
+    let (new, old, model) = delta_pair::<T>(&mut rng, n, max_segments);
+    for _ in 0..12 {
+        let target = a_delta_target(&mut rng, &model);
+        // a null is found nowhere
+        let want: Vec<usize> = (0..model.len())
+            .filter(|&i| model[i] == target && target.number().is_some())
+            .collect();
+        let first = want.first().copied();
+        assert_eq!(
+            new.find_by_value(target).collect::<Vec<_>>(),
+            want,
+            "{target:?}"
+        );
+        assert_eq!(
+            old.find_by_value(target).collect::<Vec<_>>(),
+            want,
+            "{target:?}"
+        );
+        assert_eq!(new.find_first(target), first, "{target:?}");
+        assert_eq!(old.find_first(target), first, "{target:?}");
+        // a finder that has given every place gives no more
+        let mut finder = new.find_by_value(target);
+        assert_eq!(finder.by_ref().count(), want.len());
+        assert_eq!((finder.next(), finder.next()), (None, None));
+    }
+    for _ in 0..12 {
+        let (lo, hi) = delta_bounds(&mut rng, &model);
+        let want: Vec<usize> = (0..model.len())
+            .filter(|&i| delta_model_within(&lo, &hi, model[i]))
+            .collect();
+        assert_eq!(
+            new.find_by_range((lo, hi)).collect::<Vec<_>>(),
+            want,
+            "{lo:?} {hi:?}"
+        );
+        assert_eq!(
+            old.find_by_range(delta_bounds_wide(&lo, &hi))
+                .collect::<Vec<_>>(),
+            want,
+            "{lo:?} {hi:?}"
+        );
+        // one place at a time, each call going on from the last find
+        let mut finder = new.find_by_range((lo, hi));
+        for at in &want {
+            assert_eq!(finder.next(), Some(*at));
+        }
+        assert_eq!((finder.next(), finder.next()), (None, None));
+    }
+}
+
+/// A verified delta column and the old one find the same places of a
+/// value and of the values within bounds, which are the places the
+/// specification says: for every type of value, and with small slabs
+/// too.
+#[test]
+fn delta_finds_agree() {
+    for seed in 0..8 {
+        for max_segments in [None, Some(2), Some(5)] {
+            delta_finds::<u32>(seed, max_segments);
+            delta_finds::<u64>(seed, max_segments);
+            delta_finds::<i32>(seed, max_segments);
+            delta_finds::<i64>(seed, max_segments);
+            delta_finds::<usize>(seed, max_segments);
+            delta_finds::<Option<u32>>(seed, max_segments);
+            delta_finds::<Option<u64>>(seed, max_segments);
+            delta_finds::<Option<i32>>(seed, max_segments);
+            delta_finds::<Option<i64>>(seed, max_segments);
+            delta_finds::<Option<usize>>(seed, max_segments);
+        }
+    }
+}
+
+/// The finds of a delta column in cases told one by one: numbers at the
+/// ends of what a column holds, bounds beyond them and bounds the wrong
+/// way round, nulls, and a finder of no column.
+#[test]
+fn delta_finds_told() {
+    // a finder of no column
+    let mut none = hexane::verified::VerifiedFindByRange::<u64>::default();
+    assert_eq!((none.next(), none.next()), (None, None));
+
+    // numbers up to the greatest a column holds, and bounds above it
+    let top = i64::MAX as u64;
+    let values = [1, 5, 9, top];
+    let col = VerifiedDeltaColumn::<u64>::from_values(&values);
+    let old = DeltaColumn::<u64>::from_values(values.to_vec());
+    assert_eq!(
+        col.find_by_range(5..u64::MAX).collect::<Vec<_>>(),
+        [1, 2, 3]
+    );
+    assert_eq!(
+        old.find_by_range(5..u64::MAX).collect::<Vec<_>>(),
+        [1, 2, 3]
+    );
+    assert_eq!(col.find_by_range(..).collect::<Vec<_>>(), [0, 1, 2, 3]);
+    assert_eq!(col.find_by_range(top..=u64::MAX).collect::<Vec<_>>(), [3]);
+    assert_eq!(col.find_by_range(..top).collect::<Vec<_>>(), [0, 1, 2]);
+    assert_eq!(col.find_by_range(top + 1..).count(), 0);
+    let (start, end) = (u64::MAX, 5);
+    assert_eq!(col.find_by_range(start..end).count(), 0);
+    assert_eq!(old.find_by_range(start..end).count(), 0);
+    assert_eq!(col.find_first(top), Some(3));
+    assert_eq!(col.find_first(u64::MAX), None);
+    assert_eq!(old.find_first(u64::MAX), None);
+    assert_eq!(col.find_by_value(u64::MAX).next(), None);
+
+    // the least numbers
+    let values = [i64::MIN, i64::MIN + 1, -7, -1, -7];
+    let col = VerifiedDeltaColumn::<i64>::from_values(&values);
+    let old = DeltaColumn::<i64>::from_values(values.to_vec());
+    assert_eq!(col.find_by_range(i64::MIN..-7).collect::<Vec<_>>(), [0, 1]);
+    assert_eq!(old.find_by_range(i64::MIN..-7).collect::<Vec<_>>(), [0, 1]);
+    assert_eq!(
+        col.find_by_range(i64::MIN + 1..=i64::MAX)
+            .collect::<Vec<_>>(),
+        [1, 2, 3, 4]
+    );
+    let bounds = (Bound::Excluded(i64::MIN), Bound::Excluded(-1));
+    assert_eq!(col.find_by_range(bounds).collect::<Vec<_>>(), [1, 2, 4]);
+    assert_eq!(col.find_first(i64::MIN), Some(0));
+    assert_eq!(old.find_first(i64::MIN), Some(0));
+    assert_eq!(col.find_by_value(-7).collect::<Vec<_>>(), [2, 4]);
+    assert_eq!(old.find_by_value(-7).collect::<Vec<_>>(), [2, 4]);
+    assert_eq!(col.find_first(i64::MAX), None);
+
+    // nulls: found nowhere and within no bounds, though a bound may be
+    // one
+    let values = [None, Some(3), None, Some(-2), Some(3)];
+    let col = VerifiedDeltaColumn::<Option<i64>>::from_values(&values);
+    let old = DeltaColumn::<Option<i64>>::from_values(values.to_vec());
+    assert_eq!(col.find_first(None), None);
+    assert_eq!(old.find_first(None), None);
+    assert_eq!(col.find_by_value(None).count(), 0);
+    assert_eq!(old.find_by_value(None).count(), 0);
+    assert_eq!(col.find_by_range(..).collect::<Vec<_>>(), [1, 3, 4]);
+    assert_eq!(col.find_by_range(None..).collect::<Vec<_>>(), [1, 3, 4]);
+    assert_eq!(col.find_by_range(..=None).count(), 0);
+    assert_eq!(col.find_by_range(None..=None).count(), 0);
+    assert_eq!(col.find_by_range(None..Some(3)).collect::<Vec<_>>(), [3]);
+    assert_eq!(col.find_by_value(Some(3)).collect::<Vec<_>>(), [1, 4]);
+    assert_eq!(col.find_first(Some(3)), Some(1));
+    assert_eq!(old.find_first(Some(3)), Some(1));
+
+    // a finder looks no further than it is asked to: each call goes on
+    // from the last find
+    let mut finder = col.find_by_range(Some(-5)..Some(4));
+    assert_eq!(finder.next(), Some(1));
+    assert_eq!(finder.next(), Some(3));
+    assert_eq!(finder.next(), Some(4));
+    assert_eq!((finder.next(), finder.next()), (None, None));
+
+    // an empty column
+    let col = VerifiedDeltaColumn::<u32>::new();
+    assert_eq!(col.find_by_range(..).next(), None);
+    assert_eq!(col.find_first(0), None);
+}

@@ -2884,3 +2884,40 @@ fn delta_scans_and_searches() {
         4..4
     );
 }
+
+#[test]
+fn delta_finds() {
+    use hexane::verified::VerifiedFindByRange;
+    let values: [u64; 7] = [5, 3, 9, 3, 12, 3, 7];
+    let col: VerifiedDeltaColumn<u64> = verus_client::delta_built(&values);
+    assert_eq!(verus_client::delta_found_all(&col, 3), [1, 3, 5]);
+    assert!(verus_client::delta_found_all(&col, 4).is_empty());
+    assert_eq!(verus_client::delta_found_between(&col, 5, 12), [0, 2, 6]);
+    assert!(verus_client::delta_found_between(&col, 12, 5).is_empty());
+    assert_eq!(verus_client::delta_found_twice(&col, 3), (Some(1), Some(3)));
+    assert_eq!(verus_client::delta_found_twice(&col, 12), (Some(4), None));
+    assert_eq!(verus_client::delta_found_twice(&col, 0), (None, None));
+    assert_eq!(verus_client::delta_find_unfitting(&col), None);
+    let small: VerifiedDeltaColumn<Option<i32>> =
+        verus_client::delta_built(&[None, Some(8), None, Some(2), Some(-1)]);
+    assert_eq!(verus_client::delta_found_at_most(&small, 5), Some(3));
+    assert_eq!(verus_client::delta_found_at_most(&small, -2), None);
+    let nullable: VerifiedDeltaColumn<Option<u64>> =
+        verus_client::delta_built(&[None, Some(1), None]);
+    assert_eq!(verus_client::delta_find_null(&nullable), (None, None));
+    let signed: VerifiedDeltaColumn<i64> = verus_client::delta_built(&[-3, 0, 7, 7, -20]);
+    assert_eq!(verus_client::delta_find_first_number(&signed, 7), Some(2));
+    assert_eq!(verus_client::delta_find_first_number(&signed, 8), None);
+    assert_eq!(verus_client::delta_find_nothing(), None);
+
+    // each call by itself
+    let finder = verus_client::delta_told_by_find_by_range(&col, 4..=9);
+    assert_eq!(finder.collect::<Vec<_>>(), [0, 2, 6]);
+    let mut finder = verus_client::delta_told_by_find_by_value(&col, 3);
+    assert_eq!(verus_client::delta_told_by_find_next(&mut finder), Some(1));
+    assert_eq!(finder.collect::<Vec<_>>(), [3, 5]);
+    assert_eq!(verus_client::delta_told_by_find_first(&col, 9), Some(2));
+    assert_eq!(verus_client::delta_told_by_find_first(&col, 8), None);
+    let mut none: VerifiedFindByRange<'static, u64> = verus_client::delta_told_by_find_default();
+    assert_eq!(none.next(), None);
+}

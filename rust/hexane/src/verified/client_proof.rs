@@ -392,12 +392,13 @@
 //! This module exists only while Verus checks the crate.
 
 use super::{
-    accumulated, after_edit, after_edits, all_fit, below_at, bytes_below, delta_at, delta_prefix,
-    delta_run_fits, delta_run_in_range, delta_run_kept, delta_run_values, delta_runs_at,
-    delta_runs_fit, delta_runs_kept, delta_runs_values, delta_within, deltas, folded, head_len,
-    head_run, head_run_max, lemma_acc_cat, lemma_acc_range, lemma_acc_run, lemma_after_edits,
-    lemma_cancel, lemma_delta_run_at, lemma_delta_run_exact, lemma_delta_run_fits,
-    lemma_delta_runs_at, lemma_delta_runs_one, lemma_delta_runs_push, lemma_head_len,
+    accumulated, after_edit, after_edits, all_fit, below_at, bytes_below, delta_at, delta_finds,
+    delta_prefix, delta_run_fits, delta_run_in_range, delta_run_kept, delta_run_values,
+    delta_runs_at, delta_runs_fit, delta_runs_kept, delta_runs_values, delta_within, deltas,
+    folded, head_len, head_run, head_run_max, lemma_acc_cat, lemma_acc_range, lemma_acc_run,
+    lemma_after_edits, lemma_cancel, lemma_delta_finds, lemma_delta_finds_first,
+    lemma_delta_run_at, lemma_delta_run_exact, lemma_delta_run_fits, lemma_delta_runs_at,
+    lemma_delta_runs_one, lemma_delta_runs_push, lemma_delta_within_one, lemma_head_len,
     lemma_head_run_max, lemma_run_values_add, lemma_run_values_push, lemma_runs_first,
     lemma_runs_of_values, lemma_sorted, lemma_sum_bound, lemma_sum_mono, lemma_sum_range,
     lemma_sum_run, lemma_sums_fit, mapped, only, past, refused, run_values, runs_of, scan_of,
@@ -406,9 +407,9 @@ use super::{
     VCount, VDelta, VDeltaValue, VGet, VGroup, VIndex, VKeeps, VNewtype, VSpec, VSum, VSummed,
     VValue, VerifiedAccColumn, VerifiedAccIter, VerifiedAccIterState, VerifiedAccSeek,
     VerifiedAccValue, VerifiedColumn, VerifiedDecoder, VerifiedDeltaColumn, VerifiedDeltaIter,
-    VerifiedDeltaIterState, VerifiedDeltaRuns, VerifiedEncoder, VerifiedEncoderState, VerifiedIter,
-    VerifiedIterState, VerifiedPrefixColumn, VerifiedPrefixIter, VerifiedPrefixIterState,
-    VerifiedPrefixSeek, VerifiedPrefixedValue, VerifiedRuns,
+    VerifiedDeltaIterState, VerifiedDeltaRuns, VerifiedEncoder, VerifiedEncoderState,
+    VerifiedFindByRange, VerifiedIter, VerifiedIterState, VerifiedPrefixColumn, VerifiedPrefixIter,
+    VerifiedPrefixIterState, VerifiedPrefixSeek, VerifiedPrefixedValue, VerifiedRuns,
 };
 use crate::{DeltaRun, Leb128, LoadOpts, PackError, Run};
 use std::cmp::Ordering;
@@ -13272,6 +13273,288 @@ fn delta_told_by_scope_to_value<T: VDeltaValue<C>, C: VCodec>(
             start <= k < end ==> (r.start <= k < r.end) == (#[trigger] col@[k] == x),
 {
     col.scope_to_value(x, start, end)
+}
+
+// ── Delta columns: the places of values, found by the column's index ────────
+
+/// Every place of the number `x` in a delta column, found by the
+/// column's index: a `for` loop over a finder collects them. They come
+/// in rising order, each holds `x`, and no other place does. For every
+/// type and codec.
+#[allow(dead_code)]
+fn delta_found_all<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>, x: T) -> (out: Vec<usize>)
+    requires
+        x.dv() is Some,
+    ensures
+        forall|i: int, j: int| 0 <= i < j < out@.len() ==> out@[i] < out@[j],
+        forall|i: int| 0 <= i < out@.len() ==> out@[i] < col@.len() && col@[out@[i] as int] == x,
+        forall|k: int| 0 <= k < col@.len() && col@[k] == x ==> exists|i: int| 0 <= i < out@.len() && out@[i] == k,
+{
+    let _n = col.len();
+    let ghost fs = delta_finds::<T>(col@, Bound::Included(&x), Bound::Included(&x), 0);
+    let mut out: Vec<usize> = Vec::new();
+    for place in at: col.find_by_value(x)
+        invariant
+            at.seq() == fs,
+            out@ == fs.take(at.index()),
+    {
+        out.push(place);
+        proof {
+            assert(fs.take(at.index() + 1) =~= fs.take(at.index()).push(place));
+        }
+    }
+    proof {
+        assert(fs.take(fs.len() as int) =~= fs);
+        col.lemma_fits();
+        lemma_delta_finds::<T>(col@, Bound::Included(&x), Bound::Included(&x), 0);
+        assert forall|k: int| 0 <= k < col@.len() implies delta_within::<T>(
+            Bound::Included(&x),
+            Bound::Included(&x),
+            #[trigger] col@[k],
+        ) == (col@[k] == x) by {
+            lemma_delta_within_one::<T>(x, col@[k]);
+        }
+        assert forall|k: int| 0 <= k < col@.len() && col@[k] == x implies exists|i: int|
+            0 <= i < out@.len() && out@[i] == k by {
+            assert(fs.contains(k as usize));
+            let w = choose|w: int| 0 <= w < fs.len() && fs[w] == k as usize;
+            assert(out@[w] == k);
+        }
+    }
+    out
+}
+
+/// The places of a column's numbers from `lo` up to `hi`, the first
+/// included and the second not, said of the numbers alone: the bounds
+/// of a find, written as a range of Rust's, are plain inequalities for
+/// a column of plain numbers.
+#[allow(dead_code)]
+fn delta_found_between(col: &VerifiedDeltaColumn<u64>, lo: u64, hi: u64) -> (out: Vec<usize>)
+    ensures
+        forall|i: int, j: int| 0 <= i < j < out@.len() ==> out@[i] < out@[j],
+        forall|i: int| 0 <= i < out@.len() ==> out@[i] < col@.len() && lo <= col@[out@[i] as int] < hi,
+        forall|k: int|
+            0 <= k < col@.len() && lo <= (#[trigger] col@[k]) && col@[k] < hi ==> exists|i: int|
+                0 <= i < out@.len() && out@[i] == k,
+{
+    let _n = col.len();
+    let finder = col.find_by_range(lo..hi);
+    let ghost fs = delta_finds::<u64>(col@, Bound::Included(&lo), Bound::Excluded(&hi), 0);
+    assert(finder.finds() == fs);
+    let mut out: Vec<usize> = Vec::new();
+    for place in at: finder
+        invariant
+            at.seq() == fs,
+            out@ == fs.take(at.index()),
+    {
+        out.push(place);
+        proof {
+            assert(fs.take(at.index() + 1) =~= fs.take(at.index()).push(place));
+        }
+    }
+    proof {
+        assert(fs.take(fs.len() as int) =~= fs);
+        col.lemma_fits();
+        lemma_delta_finds::<u64>(col@, Bound::Included(&lo), Bound::Excluded(&hi), 0);
+        assert forall|k: int| 0 <= k < col@.len() && lo <= (#[trigger] col@[k]) && col@[k] < hi implies exists|i: int|
+            0 <= i < out@.len() && out@[i] == k by {
+            assert(fs.contains(k as usize));
+            let w = choose|w: int| 0 <= w < fs.len() && fs[w] == k as usize;
+            assert(out@[w] == k);
+        }
+    }
+    out
+}
+
+/// The first place of a number that is at most `hi` in a column that
+/// has nulls: a null is within no bounds, so no null is found though a
+/// null comes before every number.
+#[allow(dead_code)]
+fn delta_found_at_most(col: &VerifiedDeltaColumn<Option<i32>>, hi: i32) -> (r: Option<usize>)
+    ensures
+        match r {
+            Some(k) => {
+                &&& k < col@.len()
+                &&& col@[k as int] matches Some(n) && n <= hi
+                &&& forall|i: int| 0 <= i < k ==> ((#[trigger] col@[i]) matches Some(m) ==> m > hi)
+            },
+            None => forall|i: int| 0 <= i < col@.len() ==> ((#[trigger] col@[i]) matches Some(m) ==> m > hi),
+        },
+{
+    let _n = col.len();
+    let top = Some(hi);
+    let mut finder = col.find_by_range(..=top);
+    let r = finder.next();
+    proof {
+        col.lemma_fits();
+        lemma_delta_finds_first::<Option<i32>>(col@, Bound::Unbounded, Bound::Included(&top), 0);
+    }
+    r
+}
+
+/// The first two places of the number `x` in a delta column, by two
+/// calls of a finder: the second call goes on from where the first one
+/// found `x`. For every type and codec.
+#[allow(dead_code)]
+fn delta_found_twice<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>, x: T) -> (r: (
+    Option<usize>,
+    Option<usize>,
+))
+    requires
+        x.dv() is Some,
+    ensures
+        match r.0 {
+            Some(a) => {
+                &&& a < col@.len()
+                &&& col@[a as int] == x
+                &&& forall|j: int| 0 <= j < a ==> col@[j] != x
+                &&& match r.1 {
+                    Some(b) => {
+                        &&& a < b < col@.len()
+                        &&& col@[b as int] == x
+                        &&& forall|j: int| a < j < b ==> col@[j] != x
+                    },
+                    None => forall|j: int| a < j < col@.len() ==> col@[j] != x,
+                }
+            },
+            None => r.1 is None && forall|j: int| 0 <= j < col@.len() ==> col@[j] != x,
+        },
+{
+    let _n = col.len();
+    let mut finder = col.find_by_value(x);
+    let ghost fs = finder.finds();
+    let a = finder.next();
+    let b = finder.next();
+    proof {
+        col.lemma_fits();
+        assert forall|k: int| 0 <= k < col@.len() implies delta_within::<T>(
+            Bound::Included(&x),
+            Bound::Included(&x),
+            #[trigger] col@[k],
+        ) == (col@[k] == x) by {
+            lemma_delta_within_one::<T>(x, col@[k]);
+        }
+        lemma_delta_finds_first::<T>(col@, Bound::Included(&x), Bound::Included(&x), 0);
+        if fs.len() > 0 {
+            lemma_delta_finds_first::<T>(col@, Bound::Included(&x), Bound::Included(&x), fs[0] + 1);
+        }
+    }
+    (a, b)
+}
+
+/// A null is found nowhere, though the column may hold nulls: neither
+/// by `find_first` nor by a finder.
+#[allow(dead_code)]
+fn delta_find_null(col: &VerifiedDeltaColumn<Option<u64>>) -> (r: (Option<usize>, Option<usize>))
+    ensures
+        r.0 is None,
+        r.1 is None,
+{
+    let _n = col.len();
+    let first = col.find_first(None);
+    let mut finder = col.find_by_value(None);
+    let next = finder.next();
+    proof {
+        let null: Option<u64> = None;
+        col.lemma_fits();
+        lemma_delta_finds_first::<Option<u64>>(col@, Bound::Included(&null), Bound::Included(&null), 0);
+    }
+    (first, next)
+}
+
+/// A number no delta column can hold is found nowhere.
+#[allow(dead_code)]
+fn delta_find_unfitting(col: &VerifiedDeltaColumn<u64>) -> (r: Option<usize>)
+    ensures
+        r is None,
+{
+    let r = col.find_first(u64::MAX);
+    proof {
+        col.lemma_fits();
+    }
+    r
+}
+
+/// The first place of `x` in a delta column of plain numbers, said of
+/// the numbers alone.
+#[allow(dead_code)]
+fn delta_find_first_number(col: &VerifiedDeltaColumn<i64>, x: i64) -> (r: Option<usize>)
+    ensures
+        match r {
+            Some(k) => k < col@.len() && col@[k as int] == x && forall|i: int| 0 <= i < k ==> col@[i] != x,
+            None => forall|i: int| 0 <= i < col@.len() ==> col@[i] != x,
+        },
+{
+    col.find_first(x)
+}
+
+/// A finder made by `default` has nothing to give.
+#[allow(dead_code)]
+fn delta_find_nothing() -> (r: Option<usize>)
+    ensures
+        r is None,
+{
+    let mut finder: VerifiedFindByRange<'static, u64> = VerifiedFindByRange::default();
+    finder.next()
+}
+
+/// What `find_by_range` says by itself of a delta column and any
+/// bounds.
+#[allow(dead_code)]
+fn delta_told_by_find_by_range<T: VDeltaValue<C>, C: VCodec, R: RangeBounds<T>>(
+    col: &VerifiedDeltaColumn<T, C>,
+    range: R,
+) -> (r: VerifiedFindByRange<'_, T, C>)
+    ensures
+        r.finds() == delta_finds::<T>(col@, range.spec_start_bound(), range.spec_end_bound(), 0),
+{
+    col.find_by_range(range)
+}
+
+/// What `find_by_value` says by itself of a delta column.
+#[allow(dead_code)]
+fn delta_told_by_find_by_value<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>, x: T) -> (r:
+    VerifiedFindByRange<'_, T, C>)
+    ensures
+        r.finds() == delta_finds::<T>(col@, Bound::Included(&x), Bound::Included(&x), 0),
+{
+    col.find_by_value(x)
+}
+
+/// What `find_first` says by itself of a delta column, each thing asked
+/// for on its own and with no lemma.
+#[allow(dead_code)]
+fn delta_told_by_find_first<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>, x: T) -> (r: Option<usize>)
+    ensures
+        r matches Some(k) ==> k < col@.len(),
+        r matches Some(k) ==> col@[k as int] == x,
+        r matches Some(_) ==> x.dv() is Some,
+        r matches Some(k) ==> forall|j: int| 0 <= j < k ==> col@[j] != x,
+        r is None && x.dv() is Some ==> forall|j: int| 0 <= j < col@.len() ==> col@[j] != x,
+{
+    col.find_first(x)
+}
+
+/// What a finder's `next` says by itself: the first of the places it
+/// had left, which leaves the rest; and nothing where none was left.
+#[allow(dead_code)]
+fn delta_told_by_find_next<T: VDeltaValue<C>, C: VCodec>(finder: &mut VerifiedFindByRange<'_, T, C>) -> (r: Option<usize>)
+    ensures
+        old(finder).finds().len() > 0 ==> r == Some(old(finder).finds()[0]),
+        old(finder).finds().len() > 0 ==> final(finder).finds() == old(finder).finds().drop_first(),
+        old(finder).finds().len() == 0 ==> r is None,
+        old(finder).finds().len() == 0 ==> final(finder).finds() == old(finder).finds(),
+{
+    finder.next()
+}
+
+/// What `default` says by itself of a finder.
+#[allow(dead_code)]
+fn delta_told_by_find_default<T: VDeltaValue<C>, C: VCodec>() -> (r: VerifiedFindByRange<'static, T, C>)
+    ensures
+        r.finds() == Seq::<usize>::empty(),
+{
+    VerifiedFindByRange::default()
 }
 
 } // verus!

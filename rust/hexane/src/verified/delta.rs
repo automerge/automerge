@@ -8,12 +8,16 @@
 
 #[cfg(verus_keep_ghost)]
 mod diffs;
+mod find;
 mod iter;
 
 #[cfg(verus_keep_ghost)]
 pub use diffs::{
     delta_at, delta_prefix, delta_runs_at, deltas, lemma_delta_run_at, lemma_delta_runs_at,
 };
+pub use find::VerifiedFindByRange;
+#[cfg(verus_keep_ghost)]
+pub use find::{delta_finds, lemma_delta_finds, lemma_delta_finds_first, lemma_delta_within_one};
 pub use iter::{VerifiedDeltaIter, VerifiedDeltaIterState, VerifiedDeltaRuns};
 
 #[cfg(verus_keep_ghost)]

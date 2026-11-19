@@ -90,7 +90,7 @@ proof fn lemma_kept_at<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>
 
 /// Whether what a column keeps at a place, `d`, is a number from `lo`
 /// to `hi`.
-spec fn kept_in(d: Option<i64>, lo: i64, hi: i64) -> bool {
+pub(super) open spec fn kept_in(d: Option<i64>, lo: i64, hi: i64) -> bool {
     match d {
         Some(n) => lo <= n <= hi,
         None => false,
@@ -117,7 +117,7 @@ proof fn lemma_kept_rv<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>
 
 /// What a scan of the differences takes for a number from `lo` to `hi`
 /// at `i` (`col_hit`) is what the column keeps as one there.
-proof fn lemma_kept_hit<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
+pub(super) proof fn lemma_kept_hit<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
     s: Seq<Slab<X::Tail>>,
     lo: i64,
     hi: i64,

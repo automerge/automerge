@@ -796,9 +796,15 @@ proof fn lemma_found_in_slab<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::
     ensures
         col_hit::<X, B>(s, lo, hi, i),
         forall|j: int| f0 <= j < i ==> !#[trigger] col_hit::<X, B>(s, lo, hi, j),
+        i < total(slab_lens(s)),
 {
     let st = sum(slab_lens(s), 0, k);
     lemma_slab_hits::<X, B>(ws, s, lo, hi, k);
+    // the slab ends in the column
+    lemma_sum_split(slab_lens(s), 0, k, k + 1);
+    lemma_sum_one(slab_lens(s), k);
+    assert(X::vals(s[k]).len() == s[k].len);
+    lemma_sum_le(slab_lens(s), 0, k + 1, 0, s.len() as int);
     assert(hit::<_, B>(X::vals(s[k]), pre_at(ws, k) as int, lo, hi, i - st));
     assert forall|j: int| f0 <= j < i implies !#[trigger] col_hit::<X, B>(s, lo, hi, j) by {
         if j >= f {
@@ -970,6 +976,8 @@ pub(crate) fn d_find_new<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item
     ensures
         find_ok::<X, B>(fd, slabs@, fd.from@),
         fd.from@ == 0,
+        fd.lo == lo,
+        fd.hi == hi,
 {
     let ghost s = slabs@;
     proof {
@@ -994,10 +1002,12 @@ pub(crate) fn d_find_next<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Ite
         find_ok::<X, B>(*old(fd), slabs@, old(fd).from@),
     ensures
         find_ok::<X, B>(*final(fd), slabs@, final(fd).from@),
+        final(fd).lo == old(fd).lo,
+        final(fd).hi == old(fd).hi,
         match r {
             Some(i) => {
                 let f0 = old(fd).from@;
-                &&& f0 <= i
+                &&& f0 <= i < total(slab_lens(slabs@))
                 &&& col_hit::<X, B>(slabs@, old(fd).lo as int, old(fd).hi as int, i as int)
                 &&& forall|j: int| f0 <= j < i ==> !#[trigger] col_hit::<X, B>(
                     slabs@,
