@@ -29,6 +29,26 @@ use std::ops::Range;
 
 // ── RLE Encoder ─────────────────────────────────────────────────────────────
 
+/// An encoder's count of values after `n` more. Checked before anything
+/// is written: every run's count is at most the encoder's, so none wraps.
+///
+/// # Panics
+///
+/// Past `usize::MAX` values, which no column can hold.
+#[inline(always)]
+fn count_after(len: usize, n: usize) -> usize {
+    match len.checked_add(n) {
+        Some(len) => len,
+        None => too_many_values(),
+    }
+}
+
+#[cold]
+#[inline(never)]
+fn too_many_values() -> ! {
+    panic!("encoder too long to append to")
+}
+
 /// State half of [`RleEncoder`] — owns the run/flush bookkeeping but **not**
 /// the output buffer.  Every mutating method takes a `&mut Vec<u8>` so the
 /// caller decides where bytes land.
@@ -67,23 +87,27 @@ impl<'a, T: RleValue, C: Codec> RleEncoderState<'a, T, C> {
     }
 
     pub fn append(&mut self, buf: &mut Vec<u8>, value: T::Get<'a>) {
+        let len = count_after(self.len, 1);
         self.flush += self.state.append(buf, RleCow::Ref(value));
-        self.len += 1;
+        self.len = len;
     }
 
     pub fn append_owned(&mut self, buf: &mut Vec<u8>, value: T) {
+        let len = count_after(self.len, 1);
         self.flush += self.state.append(buf, value);
-        self.len += 1;
+        self.len = len;
     }
 
     pub fn append_n(&mut self, buf: &mut Vec<u8>, value: T::Get<'a>, n: usize) {
+        let len = count_after(self.len, n);
         self.flush += self.state.append_n(buf, RleCow::Ref(value), n);
-        self.len += n;
+        self.len = len;
     }
 
     pub fn append_n_owned(&mut self, buf: &mut Vec<u8>, value: T, n: usize) {
+        let len = count_after(self.len, n);
         self.flush += self.state.append_n(buf, value, n);
-        self.len += n;
+        self.len = len;
     }
 
     pub fn extend(&mut self, buf: &mut Vec<u8>, iter: impl IntoIterator<Item = T::Get<'a>>) {
@@ -529,6 +553,7 @@ impl<C: Codec> BoolEncoderState<C> {
     }
 
     pub fn append(&mut self, buf: &mut Vec<u8>, value: bool) {
+        let len = count_after(self.len, 1);
         if value == self.cur_value {
             self.cur_count += 1;
         } else {
@@ -536,13 +561,14 @@ impl<C: Codec> BoolEncoderState<C> {
             self.cur_value = value;
             self.cur_count = 1;
         }
-        self.len += 1;
+        self.len = len;
     }
 
     pub fn append_n(&mut self, buf: &mut Vec<u8>, value: bool, n: usize) {
         if n == 0 {
             return;
         }
+        let len = count_after(self.len, n);
         if value == self.cur_value {
             self.cur_count += n;
         } else {
@@ -550,7 +576,7 @@ impl<C: Codec> BoolEncoderState<C> {
             self.cur_value = value;
             self.cur_count = n;
         }
-        self.len += n;
+        self.len = len;
     }
 
     pub fn extend(&mut self, buf: &mut Vec<u8>, iter: impl IntoIterator<Item = bool>) {
