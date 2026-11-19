@@ -403,19 +403,34 @@ impl<T: RleValue> AsColumnRef<Option<T>> for Option<T> {
     }
 }
 
+/// A nullable column of `T`s. `T` itself can't be nullable: a column has one
+/// null, so a column of nested options couldn't tell `None` from
+/// `Some(None)`, and it doesn't compile:
+///
+/// ```compile_fail
+/// let col = hexane::Column::<Option<Option<u64>>>::from_values(vec![Some(None), None]);
+/// ```
+///
+/// ```
+/// let col = hexane::Column::<Option<u64>>::from_values(vec![Some(1), None]);
+/// assert_eq!(col.iter().collect::<Vec<_>>(), vec![Some(1), None]);
+/// ```
 impl<T: RleValue> RleValue for Option<T> {
     const NULLABLE: bool = true;
 
     fn value_len<C: Codec>(data: &[u8]) -> Option<usize> {
+        not_nested::<T>();
         T::value_len::<C>(data)
     }
 
     fn try_unpack<C: Codec>(data: &[u8]) -> Result<(usize, Option<T::Get<'_>>), PackError> {
+        not_nested::<T>();
         let (n, v) = T::try_unpack::<C>(data)?;
         Ok((n, Some(v)))
     }
 
     fn unpack<C: Codec>(data: &[u8]) -> (usize, Option<T::Get<'_>>) {
+        not_nested::<T>();
         let (n, v) = T::unpack::<C>(data);
         (n, Some(v))
     }
@@ -429,10 +444,23 @@ impl<T: RleValue> RleValue for Option<T> {
     }
 
     fn pack<C: Codec>(value: Option<T::Get<'_>>, out: &mut Vec<u8>) -> bool {
+        not_nested::<T>();
         match value {
             Some(v) => T::pack::<C>(v, out),
             None => false,
         }
+    }
+}
+
+/// Fail to compile where `Option<T>` is used as a column type for a `T`
+/// that is nullable itself (see its `RleValue` impl).
+#[inline(always)]
+fn not_nested<T: RleValue>() {
+    const {
+        assert!(
+            !T::NULLABLE,
+            "a column of a nullable type's options can't tell `None` from `Some(None)`"
+        )
     }
 }
 
