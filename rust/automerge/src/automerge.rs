@@ -1314,13 +1314,26 @@ impl Automerge {
     /// Best-effort rescue for documents which fail strict loading.
     ///
     /// This returns only the current hydrated value and does not preserve the original change graph.
+    ///
+    /// Rescue is an unsigned diagnostic: it has no author and performs no
+    /// proof validation, so it refuses bytes carrying attached signatures
+    /// with [`SigningError::RescueNotSupported`] rather than presenting
+    /// signed history as if it had been loaded without its guarantees. Load
+    /// such bytes with [`LoadOptions::signing`] instead.
+    ///
+    /// [`SigningError::RescueNotSupported`]: crate::signature::error::SigningError::RescueNotSupported
     pub fn rescue(data: &[u8]) -> Result<hydrate::Value, AutomergeError> {
-        Ok(Self::load_with_options_and_mark_validation(
+        match Self::load_with_options_and_mark_validation(
             data,
             Default::default(),
             load::MarkOrderValidation::AllowInvalid,
-        )?
-        .hydrate(None))
+        ) {
+            Ok(doc) => Ok(doc.hydrate(None)),
+            Err(AutomergeError::Load(load::Error::SignedContent)) => {
+                Err(crate::signature::error::SigningError::RescueNotSupported.into())
+            }
+            Err(error) => Err(error),
+        }
     }
 
     fn load_with_options_and_mark_validation(
@@ -1447,8 +1460,14 @@ impl Automerge {
                     kind,
                     ..
                 } => {
+                    // Damaged proof and unrecognised chunk types are never
+                    // skippable in a signed stream: an unknown chunk may be
+                    // evidence this loader cannot evaluate.
                     if options.on_partial_load == OnPartialLoad::Error
-                        || kind == load::FailureKind::Signatures
+                        || matches!(
+                            kind,
+                            load::FailureKind::Signatures | load::FailureKind::UnknownChunkType
+                        )
                     {
                         return Err(error.into());
                     }
@@ -1745,12 +1764,28 @@ impl Automerge {
     /// the same compression tricks as the document encoding we use in
     /// [`Automerge::save`].
     ///
+    /// Unsigned documents bundle any applied set. In required signing mode a
+    /// bundle is authenticated transport, so `hashes` must be exactly one
+    /// canonical fragment whose complete frontier proof is resident; the
+    /// returned [`Bundle::bytes`] then carry the bundle chunk followed by its
+    /// signatures chunk (the same encoding as [`Self::bundle_fragments`]).
+    /// Proved-but-unpublished (causally blocked) groups may be bundled, as
+    /// with fragment export. Noncanonical sets fail with
+    /// [`SigningError::InvalidFragment`] and unproved canonical groups with
+    /// [`SigningError::InvalidProof`]; no unauthenticated bytes are produced.
+    ///
     /// This is an experimental API, the bundle format is still subject to change
     /// and so should not be used in production just yet.
+    ///
+    /// [`SigningError::InvalidFragment`]: crate::signature::error::SigningError::InvalidFragment
+    /// [`SigningError::InvalidProof`]: crate::signature::error::SigningError::InvalidProof
     pub fn bundle<I>(&self, hashes: I) -> Result<Bundle, AutomergeError>
     where
         I: IntoIterator<Item = ChangeHash>,
     {
+        if self.signing.is_required() {
+            return self.bundle_authenticated(hashes.into_iter().collect());
+        }
         Bundle::for_hashes(&self.ops, &self.change_graph, hashes)
     }
 
@@ -1870,9 +1905,12 @@ impl Automerge {
             if group.changes.len() == 1 && group.fragment.head.fragment_level() == 0 {
                 bytes.extend_from_slice(&group.changes[0].bytes());
             } else {
-                let bundle = self
-                    .bundle(group.fragment.members.iter().copied())
-                    .expect("published members are applied");
+                let bundle = Bundle::for_hashes(
+                    &self.ops,
+                    &self.change_graph,
+                    group.fragment.members.iter().copied(),
+                )
+                .expect("published members are applied");
                 bytes.extend_from_slice(bundle.bytes());
             }
             bytes.extend_from_slice(
@@ -2299,7 +2337,12 @@ impl Automerge {
                 let mut bytes = if f.head.fragment_level() == 0 && f.members.len() == 1 {
                     self.get_change_by_hash(&f.head)?.bytes().to_vec()
                 } else {
-                    self.bundle(f.members).ok()?.bytes().to_vec()
+                    // The proof (if any) is appended below; encode the bare
+                    // chunk rather than going through the public `bundle`.
+                    Bundle::for_hashes(&self.ops, &self.change_graph, f.members)
+                        .ok()?
+                        .bytes()
+                        .to_vec()
                 };
                 if let Some(proof) = proof {
                     bytes.extend_from_slice(proof.bytes());
@@ -2316,6 +2359,15 @@ impl Automerge {
         deps
     }
 
+    /// Get every applied change that is not a transitive dependency of
+    /// `have_deps`.
+    ///
+    /// This is an *inspector*: it returns raw applied history, including
+    /// unpublished drafts in required signing mode, and carries no proof.
+    /// Raw changes are not authenticated transport and are rejected by a
+    /// required-mode receiver; transfer published history with
+    /// [`Self::save`]/[`Self::save_after`], [`Self::merge`] or
+    /// [`Self::bundle_fragments`] instead.
     pub fn get_changes(&self, have_deps: &[ChangeHash]) -> Vec<Change> {
         ChangeCollector::exclude_hashes(&self.ops, &self.change_graph, have_deps)
     }

@@ -1536,7 +1536,10 @@ struct SyncWrapper<'a> {
 }
 
 impl SyncDoc for SyncWrapper<'_> {
-    fn generate_sync_message(&self, sync_state: &mut sync::State) -> Option<sync::Message> {
+    fn generate_sync_message(
+        &self,
+        sync_state: &mut sync::State,
+    ) -> Result<Option<sync::Message>, AutomergeError> {
         self.inner.doc.generate_sync_message(sync_state)
     }
 

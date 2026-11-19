@@ -34,6 +34,9 @@ pub(crate) use storage::BundleStorage;
 #[derive(Debug)]
 pub struct Bundle {
     pub(crate) storage: BundleStorage<'static, Verified>,
+    /// Encoded bundle chunk followed by the group's complete signatures
+    /// chunk, present only for bundles produced by a required-mode document.
+    authenticated: Option<Vec<u8>>,
 }
 
 impl Bundle {
@@ -49,6 +52,33 @@ impl Bundle {
             .get_bundle_metadata(hashes)
             .collect::<Result<_, _>>()?;
         Ok(Self::from_meta(op_set, changes))
+    }
+
+    pub(crate) fn from_storage(storage: BundleStorage<'static, Verified>) -> Self {
+        Self {
+            storage,
+            authenticated: None,
+        }
+    }
+
+    /// Attach the complete proof of this bundle's canonical group so that
+    /// [`Self::bytes`] is one self-contained authenticated delivery.
+    pub(crate) fn with_proof(
+        mut self,
+        proof: &crate::storage::signatures::SignaturesChunk<'_>,
+    ) -> Self {
+        let mut bytes = self.chunk_bytes().to_vec();
+        bytes.extend_from_slice(proof.bytes());
+        self.authenticated = Some(bytes);
+        self
+    }
+
+    /// The bundle chunk alone, without any attached proof.
+    fn chunk_bytes(&self) -> &[u8] {
+        match &self.storage.compressed_bytes {
+            Some(c) => c,
+            None => &self.storage.bytes,
+        }
     }
 
     fn from_meta(op_set: &OpSet, changes: Vec<BundleMetadata<'_>>) -> Bundle {
@@ -81,6 +111,7 @@ impl Bundle {
     ) -> Result<Self, ParseError> {
         Ok(Self {
             storage: stored.verify()?,
+            authenticated: None,
         })
     }
 
@@ -107,10 +138,14 @@ impl Bundle {
     /// uncompressed buffer for bundles whose construction predates the
     /// per-column compression pass (or that were parsed from input with no
     /// compressed columns).
+    ///
+    /// A bundle produced by a required-mode document is followed by the
+    /// signatures chunk proving its canonical group, so the bytes form one
+    /// complete authenticated delivery for `load_incremental`/`apply_changes`.
     pub fn bytes(&self) -> &[u8] {
-        match &self.storage.compressed_bytes {
-            Some(c) => c,
-            None => &self.storage.bytes,
+        match &self.authenticated {
+            Some(bytes) => bytes,
+            None => self.chunk_bytes(),
         }
     }
 
@@ -162,6 +197,7 @@ impl<'a> TryFrom<&'a [u8]> for Bundle {
             .map_err(|e| InvalidBundle(format!("unable to verify ops: {}", e)))?;
         Ok(Self {
             storage: verified.into_owned(),
+            authenticated: None,
         })
     }
 }

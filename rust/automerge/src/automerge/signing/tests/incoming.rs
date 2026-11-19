@@ -203,7 +203,13 @@ fn missing_malformed_or_invalid_proofs_do_not_mutate_state() {
     let encoded = sender.bundle_fragments(sender.fragments(..));
     let valid_f = &encoded[0];
     let change_a2 = sender.get_change_by_hash(&a2).unwrap();
-    let bundle_a2 = sender.bundle([a2]).unwrap();
+    // Bare fixtures come from an unsigned replica: a required-mode document
+    // never emits an unauthenticated bundle.
+    let mut unsigned_sender = Automerge::new();
+    unsigned_sender
+        .apply_changes(sender.get_changes(&[]))
+        .unwrap();
+    let bundle_a2 = unsigned_sender.bundle([a2]).unwrap();
 
     for bad_stream in [
         [valid_f.as_slice(), bundle_a2.bytes()].concat(),
@@ -277,13 +283,18 @@ fn neither_other_groups_nor_resident_evidence_repairs_an_incomplete_proof() {
     let b1 = append_at_level(&mut sender, None, "b", 2, 1);
     sender.set_actor(ActorId::from([1]));
     let a2 = append_at_level(&mut sender, None, "c", 3, 1);
+    // Hand-rolled proofs need bare bundles, which only unsigned documents emit.
+    let mut unsigned_sender = Automerge::new();
+    unsigned_sender
+        .apply_changes(sender.get_changes(&[]))
+        .unwrap();
 
     let f_incomplete = attach_signatures(
-        sender.bundle([a1, b1]).unwrap().bytes(),
+        unsigned_sender.bundle([a1, b1]).unwrap().bytes(),
         [(b1, sig(&k1, b1))],
     );
     let g_with_extra = attach_signatures(
-        sender.bundle([a2]).unwrap().bytes(),
+        unsigned_sender.bundle([a2]).unwrap().bytes(),
         [(a1, sig(&k1, a1)), (a2, sig(&k1, a2))],
     );
 
@@ -534,13 +545,15 @@ fn overlaps_forged_orphans_local_boundaries_partial_tails_and_bypasses() {
     let mut peer_state = sync::State::new();
     let msg = unsigned_peer
         .generate_sync_message(&mut peer_state)
+        .unwrap()
         .unwrap();
     let mut target_state = sync::State::new();
-    assert!(target.generate_sync_message(&mut target_state).is_none());
+    assert!(matches!(
+        target.generate_sync_message(&mut target_state),
+        Err(AutomergeError::Signing(SigningError::SyncNotSupported))
+    ));
     assert!(matches!(
         target.receive_sync_message(&mut target_state, msg),
-        Err(AutomergeError::Signing(
-            SigningError::UnauthenticatedChanges
-        ))
+        Err(AutomergeError::Signing(SigningError::SyncNotSupported))
     ));
 }

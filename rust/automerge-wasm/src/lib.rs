@@ -1689,13 +1689,16 @@ impl Automerge {
     }
 
     #[wasm_bindgen(js_name = generateSyncMessage, unchecked_return_type = "SyncMessage | null")]
-    pub fn generate_sync_message(&mut self, state: &mut SyncState) -> JsValue {
-        if let Some(message) = self.doc.sync().generate_sync_message(&mut state.0) {
+    pub fn generate_sync_message(
+        &mut self,
+        state: &mut SyncState,
+    ) -> Result<JsValue, error::GenerateSyncMessage> {
+        if let Some(message) = self.doc.sync().generate_sync_message(&mut state.0)? {
             let message = message.encode();
             //am::log!("generate sync message: {:?}", message.as_slice());
-            Uint8Array::from(message.as_slice()).into()
+            Ok(Uint8Array::from(message.as_slice()).into())
         } else {
-            JsValue::null()
+            Ok(JsValue::null())
         }
     }
 
@@ -3061,6 +3064,16 @@ pub mod error {
 
     impl From<Cursor> for JsValue {
         fn from(e: Cursor) -> Self {
+            RangeError::new(&e.to_string()).into()
+        }
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    #[error(transparent)]
+    pub struct GenerateSyncMessage(#[from] AutomergeError);
+
+    impl From<GenerateSyncMessage> for JsValue {
+        fn from(e: GenerateSyncMessage) -> Self {
             RangeError::new(&e.to_string()).into()
         }
     }

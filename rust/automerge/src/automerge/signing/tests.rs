@@ -13,9 +13,11 @@ mod batch;
 mod fork;
 mod fragments;
 mod incoming;
+mod ingress;
 mod merge;
 mod persistence;
 mod requests;
+mod sync;
 
 fn key(seed: u8) -> SigningKey {
     SigningKey::from_bytes(&[seed; 32])

@@ -43,6 +43,19 @@ fn framed(chunk_type: ChunkType, body: &[u8]) -> Vec<u8> {
     bytes
 }
 
+/// A correctly checksummed chunk with an arbitrary (possibly unknown) type tag.
+fn framed_raw(tag: u8, body: &[u8]) -> Vec<u8> {
+    use sha2::{Digest, Sha256};
+    let mut hashed = vec![tag];
+    leb128::write::unsigned(&mut hashed, body.len() as u64).unwrap();
+    hashed.extend_from_slice(body);
+    let hash = Sha256::digest(&hashed);
+    let mut bytes = vec![0x85, 0x6f, 0x4a, 0x83];
+    bytes.extend_from_slice(&hash[..4]);
+    bytes.extend_from_slice(&hashed);
+    bytes
+}
+
 #[test]
 fn signed_save_retains_only_published_history_with_proof() {
     let k = key(1);
@@ -821,8 +834,11 @@ fn malformed_or_unknown_chunks_in_signed_streams_fail_without_mutation() {
     let group = source.save_after(&[a]);
 
     let unknown = framed(ChunkType::Signatures, &[0]);
-    let mut unknown_type = unknown.clone();
-    unknown_type[8] = 9; // unknown chunk type with a now-bad checksum
+    // Valid framing (magic, checksum over type+length+body) with an
+    // unrecognised type, so the failure is the type itself, not a checksum.
+    let unknown_type = framed_raw(9, &[]);
+    let mut bad_checksum = framed(ChunkType::Signatures, &[0]);
+    bad_checksum[4] ^= 0xff;
     let truncated_sigs = &group[..group.len() - 1];
     let cases: Vec<(&str, Vec<u8>)> = vec![
         ("truncated signatures", truncated_sigs.to_vec()),
@@ -835,26 +851,37 @@ fn malformed_or_unknown_chunks_in_signed_streams_fail_without_mutation() {
             [group.as_slice(), &unknown_type].concat(),
         ),
         (
+            "bad checksum after snapshot",
+            [snapshot.as_slice(), &bad_checksum].concat(),
+        ),
+        (
             "bare group prefix",
             group[..group.len() - unknown.len()].to_vec(),
         ),
     ];
     for (label, bytes) in &cases {
         for policy in [OnPartialLoad::Error, OnPartialLoad::Ignore] {
-            let result =
-                Automerge::load_with_options(bytes, load_opts(200).on_partial_load(policy));
-            match result {
-                Err(_) => {}
-                Ok(doc) => assert!(
-                    doc.get_heads().is_empty() || doc.get_heads() == [a],
-                    "{label} {policy:?}: bare or damaged content must not be admitted"
-                ),
-            }
-            if *label == "bare group prefix" {
+            let error = Automerge::load_with_options(bytes, load_opts(200).on_partial_load(policy))
+                .err()
+                .unwrap_or_else(|| {
+                    panic!("{label} {policy:?}: damaged signed stream must not load")
+                });
+            if label.starts_with("unknown chunk") {
                 assert!(
-                    Automerge::load_with_options(bytes, load_opts(200).on_partial_load(policy))
-                        .is_err(),
-                    "{label}: a bare change is never admitted"
+                    matches!(
+                        &error,
+                        AutomergeError::Load(crate::storage::load::Error::UnknownChunkType(9))
+                    ),
+                    "{label} {policy:?}: {error}"
+                );
+            }
+            if label.starts_with("bad checksum") {
+                assert!(
+                    matches!(
+                        &error,
+                        AutomergeError::Load(crate::storage::load::Error::BadChecksum)
+                    ),
+                    "{label} {policy:?}: {error}"
                 );
             }
         }

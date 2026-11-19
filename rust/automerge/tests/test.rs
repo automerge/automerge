@@ -3123,14 +3123,22 @@ fn has_our_changes() {
 
     while !left.has_our_changes(&left_to_right) || !right.has_our_changes(&right_to_left) {
         let mut quiet = true;
-        if let Some(msg) = left.sync().generate_sync_message(&mut left_to_right) {
+        if let Some(msg) = left
+            .sync()
+            .generate_sync_message(&mut left_to_right)
+            .unwrap()
+        {
             quiet = false;
             right
                 .sync()
                 .receive_sync_message(&mut right_to_left, msg)
                 .unwrap();
         }
-        if let Some(msg) = right.sync().generate_sync_message(&mut right_to_left) {
+        if let Some(msg) = right
+            .sync()
+            .generate_sync_message(&mut right_to_left)
+            .unwrap()
+        {
             quiet = false;
             left.sync()
                 .receive_sync_message(&mut left_to_right, msg)
@@ -3807,7 +3815,10 @@ fn queued_orphan_need_does_not_block_unrelated_sync_response() {
     right_state.their_need = Some(vec![missing]);
     right_state.their_have = Some(vec![]);
 
-    let message = right.sync().generate_sync_message(&mut right_state);
+    let message = right
+        .sync()
+        .generate_sync_message(&mut right_state)
+        .unwrap();
     assert_eq!(
         message.map(|message| message.heads),
         Some(right.get_heads()),
@@ -4349,12 +4360,12 @@ fn diff_to_isolated_batch_created_text_applies_to_hydrated_value_from_fuzz_trace
     let mut local_sync = State::new();
     let mut peer_sync = State::new();
     for _ in 0..7 {
-        if let Some(message) = doc.sync().generate_sync_message(&mut local_sync) {
+        if let Some(message) = doc.sync().generate_sync_message(&mut local_sync).unwrap() {
             peer.sync()
                 .receive_sync_message(&mut peer_sync, message)
                 .unwrap();
         }
-        if let Some(message) = peer.sync().generate_sync_message(&mut peer_sync) {
+        if let Some(message) = peer.sync().generate_sync_message(&mut peer_sync).unwrap() {
             doc.sync()
                 .receive_sync_message(&mut local_sync, message)
                 .unwrap();

@@ -265,7 +265,13 @@ pub(crate) enum FailureKind {
     Signatures,
     /// Input ended before the next chunk's type could be identified.
     IncompletePrefix,
-    /// A body chunk, unknown chunk type, or invalid magic failed after any preceding group closed.
+    /// A well-framed chunk whose type tag is not recognised.
+    ///
+    /// Signed streams must never skip such a chunk: it may be a proof format
+    /// the receiver does not understand. Unsigned loaders may still recover
+    /// the preceding groups under a permissive partial-load policy.
+    UnknownChunkType,
+    /// A body chunk or invalid magic failed after any preceding group closed.
     Body,
 }
 
@@ -602,14 +608,20 @@ impl<'a> ChunkReader<'a> {
                     &error,
                     parse::ParseError::Error(chunk::error::Header::InvalidMagicBytes)
                 );
-                let kind = if matches!(&error, parse::ParseError::Incomplete(_)) {
-                    FailureKind::IncompletePrefix
-                } else {
-                    FailureKind::Body
+                let (kind, error) = match error {
+                    parse::ParseError::Incomplete(_) => (
+                        FailureKind::IncompletePrefix,
+                        LoadError::Parse(error.into()),
+                    ),
+                    parse::ParseError::Error(chunk::error::Header::UnknownChunkType(tag)) => (
+                        FailureKind::UnknownChunkType,
+                        LoadError::UnknownChunkType(tag),
+                    ),
+                    _ => (FailureKind::Body, LoadError::Parse(error.into())),
                 };
                 let failure = Error {
                     remaining: start,
-                    error: LoadError::Parse(error.into()),
+                    error,
                     kind,
                 };
                 // Preserve the diagnostic category. Neither kind identifies

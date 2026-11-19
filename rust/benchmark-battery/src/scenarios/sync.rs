@@ -68,12 +68,20 @@ struct DocWithSync {
 
 impl DocWithSync {
     fn sync(&mut self, other: &mut DocWithSync) {
-        while let Some(message1) = self.doc.generate_sync_message(&mut self.peer_state) {
+        while let Some(message1) = self
+            .doc
+            .generate_sync_message(&mut self.peer_state)
+            .unwrap()
+        {
             other
                 .doc
                 .receive_sync_message(&mut other.peer_state, message1)
                 .unwrap();
-            if let Some(message2) = other.doc.generate_sync_message(&mut other.peer_state) {
+            if let Some(message2) = other
+                .doc
+                .generate_sync_message(&mut other.peer_state)
+                .unwrap()
+            {
                 self.doc
                     .receive_sync_message(&mut self.peer_state, message2)
                     .unwrap()

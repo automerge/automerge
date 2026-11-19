@@ -47,6 +47,8 @@ pub enum Error {
     InflateDocument(Box<dyn std::error::Error + Send + Sync + 'static>),
     #[error("bad checksum")]
     BadChecksum,
+    #[error("unknown chunk type: {0}")]
+    UnknownChunkType(u8),
     #[error("a signatures chunk has no preceding change, bundle, or document")]
     OrphanSignatures,
     #[error("a change, bundle, or document must only have one attached signatures chunk")]

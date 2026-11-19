@@ -167,16 +167,16 @@ fn public_signing_documents_reject_bare_snapshots_and_unauthenticated_entry_poin
     let mut peer_state = sync::State::new();
     let msg = unsigned_peer
         .generate_sync_message(&mut peer_state)
+        .unwrap()
         .unwrap();
     let mut receiver_state = sync::State::new();
-    assert!(receiver
-        .generate_sync_message(&mut receiver_state)
-        .is_none());
+    assert!(matches!(
+        receiver.generate_sync_message(&mut receiver_state),
+        Err(AutomergeError::Signing(SigningError::SyncNotSupported))
+    ));
     assert!(matches!(
         receiver.receive_sync_message(&mut receiver_state, msg),
-        Err(AutomergeError::Signing(
-            SigningError::UnauthenticatedChanges
-        ))
+        Err(AutomergeError::Signing(SigningError::SyncNotSupported))
     ));
 }
 

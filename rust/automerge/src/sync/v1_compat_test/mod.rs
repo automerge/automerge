@@ -570,7 +570,7 @@ fn sync_v1_to_v2(
             tracing::debug!(decoded=?decoded, "receiving decoded message on v2");
             v2.receive_sync_message(b_sync_state, decoded).unwrap()
         }
-        let b_to_a = v2.generate_sync_message(b_sync_state);
+        let b_to_a = v2.generate_sync_message(b_sync_state).unwrap();
         let b_to_a_is_none = b_to_a.is_none();
         if let Some(msg) = b_to_a {
             tracing::debug!(msg=?msg, "sending message from v2 to v1");
@@ -598,7 +598,7 @@ fn sync_v2_to_v1(
     let mut iterations = 0;
 
     loop {
-        let a_to_b = v2.generate_sync_message(v2_sync_state);
+        let a_to_b = v2.generate_sync_message(v2_sync_state).unwrap();
         let a_to_b_is_none = a_to_b.is_none();
         if iterations > MAX_ITER {
             panic!("failed to sync in {} iterations", MAX_ITER);

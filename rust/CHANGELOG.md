@@ -46,6 +46,15 @@
   preserving receiver drafts. Merging an unsigned document with a required-mode
   document in either direction fails with `SigningError::MergeModeMismatch`
   before any mutation.
+* `SyncDoc::generate_sync_message` now returns
+  `Result<Option<Message>, AutomergeError>`. Required-mode documents fail
+  with `SigningError::SyncNotSupported` when generating or receiving sync
+  messages instead of silently producing no message; unsigned behaviour is
+  unchanged. `Automerge::rescue` refuses signed bytes with
+  `SigningError::RescueNotSupported`. `Automerge::bundle` in required mode
+  accepts only one proved canonical fragment and returns bytes that include
+  its signatures chunk. Signed loads reject unknown chunk types under both
+  partial-load policies (`storage::load::Error::UnknownChunkType`).
 * Author assignments are stored in the extra bytes of an actor's first change
   and preserved through merging and saving/loading. `Change::author` reads an
   assignment from an individual change; subsequent changes from the same actor

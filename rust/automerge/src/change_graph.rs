@@ -1201,7 +1201,7 @@ impl ChangeGraphCols {
 
 #[derive(Debug, thiserror::Error)]
 #[error("attempted to derive a clock for a change with dependencies we don't have")]
-pub struct MissingDep(ChangeHash);
+pub struct MissingDep(pub(crate) ChangeHash);
 
 #[cfg(test)]
 mod tests {

@@ -21,12 +21,13 @@
 use std::collections::{BTreeSet, HashSet};
 
 use crate::admission::{select_fragments, AcceptedHistory};
-use crate::change_graph::ChangeGraph;
-use crate::signature::error::{ProofError, SigningError};
+use crate::change_graph::{ChangeGraph, MissingDep};
+use crate::signature::error::{InvalidFragment, ProofError, SigningError};
 use crate::signature::{FragmentRequirements, Signature, SignatureStore};
 use crate::storage::document::{CompressConfig, ReconstructError};
 use crate::storage::load::{LoadedGroup, LoadedGroupBody};
 use crate::storage::signatures::{HashEntries, SignaturesChunk};
+use crate::storage::Bundle;
 use crate::storage::Document;
 use crate::{Author, Automerge, AutomergeError, Change, ChangeHash, Fragment, VerificationMode};
 
@@ -174,6 +175,45 @@ impl Automerge {
             .collect()
     }
 
+    /// Encode exactly one proved canonical fragment as an authenticated bundle.
+    ///
+    /// Backs [`Automerge::bundle`] in required mode: `members` must be the
+    /// full membership of one canonical historical fragment and its complete
+    /// frontier proof must be resident. The returned bundle's bytes end with
+    /// the signatures chunk. Unknown hashes fail with [`MissingDep`], a
+    /// non-canonical set with [`InvalidFragment`], and a missing proof names
+    /// the first unproved frontier.
+    pub(crate) fn bundle_authenticated(
+        &self,
+        members: Vec<ChangeHash>,
+    ) -> Result<Bundle, AutomergeError> {
+        let SigningState::Required(signing) = &self.signing else {
+            unreachable!("authenticated bundles require signing mode");
+        };
+        let fragment = canonical_fragment_for_members(&self.change_graph, &members)?;
+        let proof = signing
+            .fragment_proof(&self.change_graph, &self.authors, &fragment)
+            .ok_or_else(|| {
+                let missing = self
+                    .change_graph
+                    .fragment_requirements(fragment.head)
+                    .and_then(|requirements| {
+                        requirements.hashes().copied().find(|hash| {
+                            !has_signature(
+                                &self.change_graph,
+                                &self.authors,
+                                &signing.signatures,
+                                hash,
+                            )
+                        })
+                    })
+                    .unwrap_or(fragment.head);
+                SigningError::from(ProofError::MissingSignature(missing))
+            })?;
+        let bundle = Bundle::for_hashes(&self.ops, &self.change_graph, fragment.members)?;
+        Ok(bundle.with_proof(&proof))
+    }
+
     /// Heads of the published projection (the heads of the accepted subgraph).
     pub(crate) fn published_heads(&self) -> Vec<ChangeHash> {
         let SigningState::Required(signing) = &self.signing else {
@@ -244,6 +284,44 @@ impl Automerge {
         bytes.extend_from_slice(SignaturesChunk::encode(entries).bytes());
         bytes
     }
+}
+
+/// The canonical historical fragment whose membership is exactly `members`,
+/// or the structural reason there is none.
+fn canonical_fragment_for_members(
+    graph: &ChangeGraph,
+    members: &[ChangeHash],
+) -> Result<Fragment, AutomergeError> {
+    if members.is_empty() {
+        return Err(SigningError::from(InvalidFragment::Empty).into());
+    }
+    let mut unique: HashSet<ChangeHash> = HashSet::with_capacity(members.len());
+    for member in members {
+        if !graph.has_change(member) {
+            // Same error as unsigned bundling of an unknown hash.
+            return Err(MissingDep(*member).into());
+        }
+        if !unique.insert(*member) {
+            return Err(SigningError::from(InvalidFragment::DuplicateMember(*member)).into());
+        }
+    }
+    let mut has_dependent: HashSet<ChangeHash> = HashSet::new();
+    for member in members {
+        has_dependent.extend(graph.deps(member).filter(|dep| unique.contains(dep)));
+    }
+    let mut heads = members.iter().filter(|m| !has_dependent.contains(m));
+    let (Some(&head), None) = (heads.next(), heads.next()) else {
+        return Err(SigningError::from(InvalidFragment::NotSingleHeaded).into());
+    };
+    let canonical = graph
+        .get_historical_fragment(head)
+        .ok_or_else(|| SigningError::from(InvalidFragment::NonCanonicalMembership(head)))?;
+    let same_members = canonical.members.len() == unique.len()
+        && canonical.members.iter().all(|m| unique.contains(m));
+    if !same_members {
+        return Err(SigningError::from(InvalidFragment::NonCanonicalMembership(head)).into());
+    }
+    Ok(canonical)
 }
 
 /// A snapshot whose history and attached proof have been validated, ready for

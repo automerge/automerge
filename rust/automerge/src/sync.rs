@@ -32,7 +32,7 @@
 //! // Create a state to track our sync with peer2
 //! let mut peer1_state = sync::State::new();
 //! // Generate the initial message to send to peer2, unwrap for brevity
-//! let message1to2 = peer1.sync().generate_sync_message(&mut peer1_state).unwrap();
+//! let message1to2 = peer1.sync().generate_sync_message(&mut peer1_state)?.unwrap();
 //!
 //! // We receive the message on peer2. We don't have a document at all yet
 //! // so we create one
@@ -46,12 +46,12 @@
 //! // neither has anything new to send
 //!
 //! loop {
-//!     let two_to_one = peer2.sync().generate_sync_message(&mut peer2_state);
+//!     let two_to_one = peer2.sync().generate_sync_message(&mut peer2_state)?;
 //!     if let Some(message) = two_to_one.as_ref() {
 //!         println!("two to one");
 //!         peer1.sync().receive_sync_message(&mut peer1_state, message.clone())?;
 //!     }
-//!     let one_to_two = peer1.sync().generate_sync_message(&mut peer1_state);
+//!     let one_to_two = peer1.sync().generate_sync_message(&mut peer1_state)?;
 //!     if let Some(message) = one_to_two.as_ref() {
 //!         println!("one to two");
 //!         peer2.sync().receive_sync_message(&mut peer2_state, message.clone())?;
@@ -93,22 +93,34 @@ pub use state::{Have, State};
 
 /// A document which can take part in the sync protocol
 ///
-/// Note: sync messages do not carry detached proof chunks. Documents in
-/// required signing mode produce no sync messages and reject received sync
-/// messages with [`crate::signature::error::SigningError::UnauthenticatedChanges`].
+/// Note: sync messages do not carry detached proof chunks, so the protocol
+/// is not supported in required signing mode. Both generating and receiving
+/// fail with [`SigningError::SyncNotSupported`] before any state changes;
+/// use `save`/`load_incremental` or `merge` to transfer published history.
 ///
 /// See the [module level documentation](crate::sync) for more details.
+///
+/// [`SigningError::SyncNotSupported`]: crate::signature::error::SigningError::SyncNotSupported
 pub trait SyncDoc {
     /// Generate a sync message for the remote peer represented by `sync_state`
     ///
-    /// If this returns [`None`] then there are no new messages to send, either because we are
+    /// If this returns `Ok(None)` then there are no new messages to send, either because we are
     /// waiting for an acknolwedgement of an in-flight message, or because the remote is up to
     /// date.
     ///
+    /// # Errors
+    ///
+    /// Documents in required signing mode cannot take part in the sync protocol
+    /// and fail with [`SigningError::SyncNotSupported`] without touching
+    /// `sync_state`. Unsigned documents never fail.
+    ///
     /// * `sync_state` - The [`State`] for this document and the remote peer
-    /// * `message` - The [`Message`] to receive
-    /// * `patch_log` - A [`PatchLog`] which will be updated with any changes that are made to the current state of the document due to the received sync message
-    fn generate_sync_message(&self, sync_state: &mut State) -> Option<Message>;
+    ///
+    /// [`SigningError::SyncNotSupported`]: crate::signature::error::SigningError::SyncNotSupported
+    fn generate_sync_message(
+        &self,
+        sync_state: &mut State,
+    ) -> Result<Option<Message>, AutomergeError>;
 
     /// Apply a received sync message to this document and `sync_state`
     fn receive_sync_message(
@@ -168,10 +180,37 @@ impl MessageVersion {
 }
 
 impl SyncDoc for Automerge {
-    fn generate_sync_message(&self, sync_state: &mut State) -> Option<Message> {
-        if self.signing.is_required() {
-            return None;
-        }
+    fn generate_sync_message(
+        &self,
+        sync_state: &mut State,
+    ) -> Result<Option<Message>, AutomergeError> {
+        self.signing
+            .with_required(|| Err(crate::signature::error::SigningError::SyncNotSupported))?;
+        Ok(self.generate_unsigned_sync_message(sync_state))
+    }
+
+    fn receive_sync_message(
+        &mut self,
+        sync_state: &mut State,
+        message: Message,
+    ) -> Result<(), AutomergeError> {
+        let mut patch_log = PatchLog::inactive();
+        self.receive_sync_message_inner(sync_state, message, &mut patch_log)
+    }
+
+    fn receive_sync_message_log_patches(
+        &mut self,
+        sync_state: &mut State,
+        message: Message,
+        patch_log: &mut PatchLog,
+    ) -> Result<(), AutomergeError> {
+        self.receive_sync_message_inner(sync_state, message, patch_log)
+    }
+}
+
+impl Automerge {
+    /// The unsigned sync protocol step; callers have already checked the mode.
+    fn generate_unsigned_sync_message(&self, sync_state: &mut State) -> Option<Message> {
         let our_heads = self.get_heads();
 
         let our_need = if sync_state.read_only {
@@ -294,26 +333,6 @@ impl SyncDoc for Automerge {
         Some(sync_message)
     }
 
-    fn receive_sync_message(
-        &mut self,
-        sync_state: &mut State,
-        message: Message,
-    ) -> Result<(), AutomergeError> {
-        let mut patch_log = PatchLog::inactive();
-        self.receive_sync_message_inner(sync_state, message, &mut patch_log)
-    }
-
-    fn receive_sync_message_log_patches(
-        &mut self,
-        sync_state: &mut State,
-        message: Message,
-        patch_log: &mut PatchLog,
-    ) -> Result<(), AutomergeError> {
-        self.receive_sync_message_inner(sync_state, message, patch_log)
-    }
-}
-
-impl Automerge {
     fn make_bloom_filter(&self, last_sync: Vec<ChangeHash>) -> Have {
         let hashes = self.change_graph.get_hashes(&last_sync);
         Have {
@@ -396,9 +415,8 @@ impl Automerge {
         message: Message,
         patch_log: &mut PatchLog,
     ) -> Result<(), AutomergeError> {
-        if self.signing.is_required() {
-            return Err(crate::signature::error::SigningError::UnauthenticatedChanges.into());
-        }
+        self.signing
+            .with_required(|| Err(crate::signature::error::SigningError::SyncNotSupported))?;
         sync_state.in_flight = false;
         let before_heads = self.get_heads();
 
@@ -983,8 +1001,16 @@ mod tests {
         doc.put(crate::ROOT, "key", "value").unwrap();
         let mut sync_state = State::new();
 
-        assert!(doc.sync().generate_sync_message(&mut sync_state).is_some());
-        assert!(doc.sync().generate_sync_message(&mut sync_state).is_none());
+        assert!(doc
+            .sync()
+            .generate_sync_message(&mut sync_state)
+            .unwrap()
+            .is_some());
+        assert!(doc
+            .sync()
+            .generate_sync_message(&mut sync_state)
+            .unwrap()
+            .is_none());
     }
 
     #[test]
@@ -1002,6 +1028,7 @@ mod tests {
         let m1 = doc1
             .sync()
             .generate_sync_message(&mut s1)
+            .unwrap()
             .expect("message was none");
 
         doc2.sync().receive_sync_message(&mut s2, m1).unwrap();
@@ -1009,6 +1036,7 @@ mod tests {
         let _m2 = doc2
             .sync()
             .generate_sync_message(&mut s2)
+            .unwrap()
             .expect("response was none");
     }
 
@@ -1021,18 +1049,20 @@ mod tests {
         let m1 = doc1
             .sync()
             .generate_sync_message(&mut s1)
+            .unwrap()
             .expect("message was none");
 
         doc2.sync().receive_sync_message(&mut s2, m1).unwrap();
         let _m2 = doc2
             .sync()
             .generate_sync_message(&mut s2)
+            .unwrap()
             .expect("first round message was none");
 
-        let m1 = doc1.sync().generate_sync_message(&mut s1);
+        let m1 = doc1.sync().generate_sync_message(&mut s1).unwrap();
         assert!(m1.is_none());
 
-        let m2 = doc2.sync().generate_sync_message(&mut s2);
+        let m2 = doc2.sync().generate_sync_message(&mut s2).unwrap();
         assert!(m2.is_none());
     }
 
@@ -1058,10 +1088,12 @@ mod tests {
         let msg1to2 = doc1
             .sync()
             .generate_sync_message(&mut s1)
+            .unwrap()
             .expect("initial sync from 1 to 2 was None");
         let msg2to1 = doc2
             .sync()
             .generate_sync_message(&mut s2)
+            .unwrap()
             .expect("initial sync message from 2 to 1 was None");
         let Message {
             changes: changes1to2,
@@ -1085,6 +1117,7 @@ mod tests {
         let msg1to2 = doc1
             .sync()
             .generate_sync_message(&mut s1)
+            .unwrap()
             .expect("first reply from 1 to 2 was None");
         let Message {
             changes: changes1to2,
@@ -1095,6 +1128,7 @@ mod tests {
         let msg2to1 = doc2
             .sync()
             .generate_sync_message(&mut s2)
+            .unwrap()
             .expect("first reply from 2 to 1 was None");
         let Message {
             changes: changes2to1,
@@ -1113,6 +1147,7 @@ mod tests {
         let msg1to2 = doc1
             .sync()
             .generate_sync_message(&mut s1)
+            .unwrap()
             .expect("second reply from 1 to 2 was None");
         let Message {
             changes: changes1to2,
@@ -1122,6 +1157,7 @@ mod tests {
         let msg2to1 = doc2
             .sync()
             .generate_sync_message(&mut s2)
+            .unwrap()
             .expect("second reply from 2 to 1 was None");
         let Message {
             changes: changes2to1,
@@ -1136,8 +1172,16 @@ mod tests {
         assert_eq!(s1.shared_heads, s2.shared_heads);
 
         //// We're in sync, no more messages required
-        assert!(doc1.sync().generate_sync_message(&mut s1).is_none());
-        assert!(doc2.sync().generate_sync_message(&mut s2).is_none());
+        assert!(doc1
+            .sync()
+            .generate_sync_message(&mut s1)
+            .unwrap()
+            .is_none());
+        assert!(doc2
+            .sync()
+            .generate_sync_message(&mut s2)
+            .unwrap()
+            .is_none());
 
         //// If we make one more change and start another sync then its lastSync should be updated
         doc1.put(crate::ROOT, "x", 5).unwrap();
@@ -1145,6 +1189,7 @@ mod tests {
         let msg1to2 = doc1
             .sync()
             .generate_sync_message(&mut s1)
+            .unwrap()
             .expect("third reply from 1 to 2 was None");
         let mut expected_heads = vec![head1, head2];
         expected_heads.sort();
@@ -1345,7 +1390,7 @@ mod tests {
 
             // generate a sync message containing the change (this should
             // alwasy be Some because we have generated new local changes)
-            let msg = doc2.sync().generate_sync_message(&mut s2).unwrap();
+            let msg = doc2.sync().generate_sync_message(&mut s2).unwrap().unwrap();
             // Receive that sync message on doc1
             doc1.sync().receive_sync_message(&mut s1, msg).unwrap();
 
@@ -1372,8 +1417,8 @@ mod tests {
         let mut iterations = 0;
 
         loop {
-            let a_to_b = a.sync().generate_sync_message(a_sync_state);
-            let b_to_a = b.sync().generate_sync_message(b_sync_state);
+            let a_to_b = a.sync().generate_sync_message(a_sync_state).unwrap();
+            let b_to_a = b.sync().generate_sync_message(b_sync_state).unwrap();
             if a_to_b.is_none() && b_to_a.is_none() {
                 break;
             }
@@ -1402,6 +1447,7 @@ mod tests {
         let outgoing = doc1
             .sync()
             .generate_sync_message(&mut s1)
+            .unwrap()
             .expect("message was none");
 
         doc2.sync().receive_sync_message(&mut s2, outgoing).unwrap();
@@ -1409,6 +1455,7 @@ mod tests {
         let response = doc2
             .sync()
             .generate_sync_message(&mut s2)
+            .unwrap()
             .expect("response was none");
 
         let Message { changes, .. } = response;
@@ -1521,8 +1568,16 @@ mod tests {
         sync(&mut doc1, &mut doc2, &mut s1, &mut s2);
 
         // After sync, both must return None — no infinite loop
-        assert!(doc1.sync().generate_sync_message(&mut s1).is_none());
-        assert!(doc2.sync().generate_sync_message(&mut s2).is_none());
+        assert!(doc1
+            .sync()
+            .generate_sync_message(&mut s1)
+            .unwrap()
+            .is_none());
+        assert!(doc2
+            .sync()
+            .generate_sync_message(&mut s2)
+            .unwrap()
+            .is_none());
 
         // Both discover the other is read-only
         assert!(s1.is_peer_read_only());
@@ -1568,8 +1623,16 @@ mod tests {
         assert!(doc2.get(crate::ROOT, "key").unwrap().is_none());
 
         // Must converge
-        assert!(doc1.sync().generate_sync_message(&mut s1).is_none());
-        assert!(doc2.sync().generate_sync_message(&mut s2).is_none());
+        assert!(doc1
+            .sync()
+            .generate_sync_message(&mut s1)
+            .unwrap()
+            .is_none());
+        assert!(doc2
+            .sync()
+            .generate_sync_message(&mut s2)
+            .unwrap()
+            .is_none());
     }
 
     #[test]
@@ -1619,11 +1682,17 @@ mod tests {
 
             // Must be fully converged
             assert!(
-                doc1.sync().generate_sync_message(&mut s1).is_none(),
+                doc1.sync()
+                    .generate_sync_message(&mut s1)
+                    .unwrap()
+                    .is_none(),
                 "round {round}: doc1 should have nothing more to send"
             );
             assert!(
-                doc2.sync().generate_sync_message(&mut s2).is_none(),
+                doc2.sync()
+                    .generate_sync_message(&mut s2)
+                    .unwrap()
+                    .is_none(),
                 "round {round}: doc2 should have nothing more to send"
             );
         }
@@ -1661,8 +1730,16 @@ mod tests {
             sync(&mut doc1, &mut doc2, &mut s1, &mut s2);
 
             // Must be fully converged
-            assert!(doc1.sync().generate_sync_message(&mut s1).is_none());
-            assert!(doc2.sync().generate_sync_message(&mut s2).is_none());
+            assert!(doc1
+                .sync()
+                .generate_sync_message(&mut s1)
+                .unwrap()
+                .is_none());
+            assert!(doc2
+                .sync()
+                .generate_sync_message(&mut s2)
+                .unwrap()
+                .is_none());
 
             // Neither has the other's data
             assert!(doc1.get(crate::ROOT, "y").unwrap().is_none());
@@ -1751,7 +1828,7 @@ mod tests {
             doc2.put(crate::ROOT, "x", 0).unwrap();
 
             // generate + receive one message from doc2 to doc1
-            let msg = doc2.sync().generate_sync_message(&mut s2).unwrap();
+            let msg = doc2.sync().generate_sync_message(&mut s2).unwrap().unwrap();
             doc1.sync().receive_sync_message(&mut s1, msg).unwrap();
 
             // before sending anything back, doc1 (read-only) makes a local change
@@ -2187,7 +2264,7 @@ mod tests {
         assert!(!sb.is_peer_read_only());
 
         // A generates a message (includes ReadOnly capability)
-        let msg = a.sync().generate_sync_message(&mut sa).unwrap();
+        let msg = a.sync().generate_sync_message(&mut sa).unwrap().unwrap();
 
         // B receives it and discovers A is read-only
         b.sync().receive_sync_message(&mut sb, msg).unwrap();
@@ -2201,7 +2278,7 @@ mod tests {
         sa.set_read_only(false);
 
         // After exchanging messages, B discovers A is no longer read-only
-        let msg = a.sync().generate_sync_message(&mut sa).unwrap();
+        let msg = a.sync().generate_sync_message(&mut sa).unwrap().unwrap();
         b.sync().receive_sync_message(&mut sb, msg).unwrap();
         assert!(!sb.is_peer_read_only());
     }
@@ -2220,12 +2297,12 @@ mod tests {
         let mut sb = State::new();
 
         // Exchange initial messages so B discovers A is read-only
-        let msg_a = a.sync().generate_sync_message(&mut sa).unwrap();
+        let msg_a = a.sync().generate_sync_message(&mut sa).unwrap().unwrap();
         b.sync().receive_sync_message(&mut sb, msg_a).unwrap();
         assert!(sb.is_peer_read_only());
 
         // B generates a response — should have no changes since A is read-only
-        let msg_b = b.sync().generate_sync_message(&mut sb).unwrap();
+        let msg_b = b.sync().generate_sync_message(&mut sb).unwrap().unwrap();
         assert!(msg_b.changes.is_empty());
 
         // Complete the sync
@@ -2266,11 +2343,11 @@ mod tests {
         // B makes a new change and sends it to A
         b.put(crate::ROOT, "new_from_b", "secret").unwrap();
         b.commit();
-        let msg_b = b.sync().generate_sync_message(&mut sb).unwrap();
+        let msg_b = b.sync().generate_sync_message(&mut sb).unwrap().unwrap();
         a.sync().receive_sync_message(&mut sa, msg_b).unwrap();
 
         // A generates a response (sets in_flight=true)
-        let msg = a.sync().generate_sync_message(&mut sa);
+        let msg = a.sync().generate_sync_message(&mut sa).unwrap();
         assert!(msg.is_some());
         assert!(sa.in_flight);
 
@@ -2278,7 +2355,7 @@ mod tests {
         sa.set_read_only(true);
 
         // A must be able to generate another message to advertise ReadOnly
-        let msg = a.sync().generate_sync_message(&mut sa);
+        let msg = a.sync().generate_sync_message(&mut sa).unwrap();
         assert!(
             msg.is_some(),
             "should generate message after set_read_only even with prior in_flight"
@@ -2309,17 +2386,17 @@ mod tests {
         b.commit();
 
         // A generates (sets in_flight)
-        let _msg = a.sync().generate_sync_message(&mut sa);
+        let _msg = a.sync().generate_sync_message(&mut sa).unwrap();
         // Force some state by receiving a message
-        let msg_b = b.sync().generate_sync_message(&mut sb).unwrap();
+        let msg_b = b.sync().generate_sync_message(&mut sb).unwrap().unwrap();
         a.sync().receive_sync_message(&mut sa, msg_b).unwrap();
-        let _ = a.sync().generate_sync_message(&mut sa);
+        let _ = a.sync().generate_sync_message(&mut sa).unwrap();
 
         // Now switch to read-write
         sa.set_read_only(false);
 
         // Must generate a message with SyncReset
-        let msg = a.sync().generate_sync_message(&mut sa);
+        let msg = a.sync().generate_sync_message(&mut sa).unwrap();
         assert!(
             msg.is_some(),
             "should generate message after switching to read-write"
@@ -2487,7 +2564,7 @@ mod tests {
         sa.their_capabilities = None;
 
         // The first message should have empty heads (old peer fallback)
-        let msg = a.sync().generate_sync_message(&mut sa).unwrap();
+        let msg = a.sync().generate_sync_message(&mut sa).unwrap().unwrap();
         assert!(msg.heads.is_empty(), "should send empty heads for old peer");
         assert!(
             !msg.flags.unwrap().contains(MessageFlags::SYNC_RESET),

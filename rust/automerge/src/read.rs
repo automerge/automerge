@@ -302,6 +302,10 @@ pub trait ReadDoc {
     fn get_missing_deps(&self, heads: &[ChangeHash]) -> Vec<ChangeHash>;
 
     /// Get a change by its hash.
+    ///
+    /// An inspector over applied history (drafts included in required
+    /// signing mode); the returned change carries no proof and is not
+    /// authenticated transport.
     fn get_change_by_hash(&self, hash: &ChangeHash) -> Option<Change>;
 
     /// Return some statistics about the document

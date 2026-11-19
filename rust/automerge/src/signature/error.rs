@@ -69,6 +69,10 @@ pub enum SigningError {
     ForkAtNotSupported,
     #[error("merge requires both documents to be in the same signing mode")]
     MergeModeMismatch,
+    #[error("the sync protocol is not supported in signing mode; transfer published history with save/load or merge")]
+    SyncNotSupported,
+    #[error("rescue cannot evaluate signed data; load it in signing mode instead")]
+    RescueNotSupported,
     #[error("local changes are still unpublished; publish or keep the current author before forking with a different author")]
     UnpublishedLocalChanges,
     #[error("incoming group is not a canonical fragment: {0}")]
