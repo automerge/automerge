@@ -2434,3 +2434,37 @@ fn delta_columns() {
     }
     assert_eq!(verus_client::delta_values(&opts), nums.to_vec());
 }
+
+#[test]
+fn delta_simple_edits() {
+    let mut col: VerifiedDeltaColumn<i64> = verus_client::delta_small_slabs(&[5, 6, 7, -9, -9, 40]);
+    assert_eq!(verus_client::delta_push_pop(&mut col, 41), Some(41));
+    verus_client::delta_insert_remove(&mut col, 3, 1 << 50);
+    assert_eq!(verus_client::delta_inserted(&mut col, 0, 4, 1), Some(5));
+    verus_client::delta_remove_past(&mut col);
+    assert_eq!(
+        verus_client::delta_round_trip::<i64, Leb128>(&[4, 5, 6, 7, -9, -9, 40]),
+        col.to_vec()
+    );
+    assert_eq!(verus_client::delta_ends(&col), (Some(4), Some(40)));
+    assert!(verus_client::delta_all(&col, 6));
+    verus_client::delta_remove_range(&mut col, 1, 3);
+    assert_eq!(verus_client::delta_truncated(&mut col, 3, 2), Some(-9));
+    let other = verus_client::delta_cloned(&col, 8);
+    assert_eq!(verus_client::delta_values(&other), vec![4, -9, -9, 8]);
+    assert_eq!(verus_client::delta_values(&col), vec![4, -9, -9]);
+
+    let mut to: VerifiedDeltaColumn<i64> = verus_client::delta_default();
+    verus_client::delta_move_last(&mut col, &mut to);
+    verus_client::delta_move_last(&mut col, &mut to);
+    assert_eq!(verus_client::delta_values(&to), vec![-9, -9]);
+    verus_client::delta_clear_counts(&mut to);
+    verus_client::delta_move_last(&mut to, &mut col);
+    assert_eq!(verus_client::delta_values(&col), vec![4]);
+    verus_client::delta_cleared(&mut col, &[1, 2]);
+    assert_eq!(verus_client::delta_values(&col), vec![1, 2]);
+    verus_client::delta_splice_counts(&mut col, 1, 1, &[9, 9]);
+    verus_client::delta_splice_counts(&mut col, 0, 0, &[]);
+    assert_eq!(verus_client::delta_values(&col), vec![1, 9, 9]);
+    assert_eq!(verus_client::delta_pop_empty::<Option<u32>, Leb128>(), None);
+}

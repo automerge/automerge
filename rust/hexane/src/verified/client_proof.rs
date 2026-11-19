@@ -10260,4 +10260,259 @@ fn delta_default<T: VDeltaValue<C>, C: VCodec>() -> (r: VerifiedDeltaColumn<T, C
     Default::default()
 }
 
+// ── A delta column: its simple edits and reads ──────────────────────────────
+
+/// A value pushed onto a delta column and popped again comes back, and
+/// leaves the column's values as they were. The column counts two edits.
+#[allow(dead_code)]
+fn delta_push_pop<T: VDeltaValue<C>, C: VCodec>(col: &mut VerifiedDeltaColumn<T, C>, v: T) -> (r: Option<T>)
+    requires
+        v.fits(),
+    ensures
+        r == Some(v),
+        final(col)@ == old(col)@,
+        final(col).edits() == after_edits(old(col).edits(), 2),
+        final(col).edits() != old(col).edits(),
+{
+    col.push(v);
+    let r = col.pop();
+    proof {
+        assert(old(col)@.push(v).drop_last() =~= old(col)@);
+        assert(col.edits() == after_edits(old(col).edits(), 2)) by {
+            reveal_with_fuel(after_edits, 3);
+        }
+        lemma_after_edits(old(col).edits(), 2);
+    }
+    r
+}
+
+/// A pop of an empty delta column gives nothing and is no edit.
+#[allow(dead_code)]
+fn delta_pop_empty<T: VDeltaValue<C>, C: VCodec>() -> (r: Option<T>)
+    ensures
+        r is None,
+{
+    let mut col = VerifiedDeltaColumn::<T, C>::new();
+    let ghost e = col.edits();
+    let r = col.pop();
+    assert(col.edits() == e);
+    r
+}
+
+/// A value inserted and then removed where it was put leaves the column
+/// as it was, but for the two edits it counts.
+#[allow(dead_code)]
+fn delta_insert_remove<T: VDeltaValue<C>, C: VCodec>(col: &mut VerifiedDeltaColumn<T, C>, at: usize, v: T)
+    requires
+        at <= old(col)@.len(),
+        v.fits(),
+    ensures
+        final(col)@ == old(col)@,
+        final(col).edits() == after_edits(old(col).edits(), 2),
+{
+    col.insert(at, v);
+    assert(col@[at as int] == v);
+    col.remove(at);
+    assert(old(col)@.insert(at as int, v).remove(at as int) =~= old(col)@);
+    assert(col.edits() == after_edits(old(col).edits(), 2)) by {
+        reveal_with_fuel(after_edits, 3);
+    }
+}
+
+/// A value inserted is read where it was put, and the values after it
+/// are read one further on.
+#[allow(dead_code)]
+fn delta_inserted<T: VDeltaValue<C>, C: VCodec>(col: &mut VerifiedDeltaColumn<T, C>, at: usize, v: T, i: usize) -> (r:
+    Option<T>)
+    requires
+        at <= old(col)@.len(),
+        v.fits(),
+    ensures
+        i == at ==> r == Some(v),
+        at < i <= old(col)@.len() ==> r == Some(old(col)@[i - 1]),
+        i < at ==> r == Some(old(col)@[i as int]),
+        i > old(col)@.len() ==> r is None,
+        final(col).edits() == after_edit(old(col).edits()),
+{
+    col.insert(at, v);
+    col.get(i)
+}
+
+/// To remove past the end of a delta column does nothing, and is no
+/// edit: a suspended reader of the column would still be good.
+#[allow(dead_code)]
+fn delta_remove_past<T: VDeltaValue<C>, C: VCodec>(col: &mut VerifiedDeltaColumn<T, C>)
+    ensures
+        final(col)@ == old(col)@,
+        final(col).edits() == old(col).edits(),
+{
+    let n = col.len();
+    col.remove(n);
+}
+
+/// A delta column truncated is no longer than asked, and keeps its
+/// first values.
+#[allow(dead_code)]
+fn delta_truncated<T: VDeltaValue<C>, C: VCodec>(col: &mut VerifiedDeltaColumn<T, C>, len: usize, i: usize) -> (r:
+    Option<T>)
+    ensures
+        final(col)@.len() <= len,
+        final(col)@.len() <= old(col)@.len(),
+        i < len && i < old(col)@.len() ==> r == Some(old(col)@[i as int]),
+        i >= len ==> r is None,
+        len < old(col)@.len() ==> final(col).edits() == after_edit(old(col).edits()),
+        len >= old(col)@.len() ==> final(col).edits() == old(col).edits() && final(col)@ == old(col)@,
+{
+    col.truncate(len);
+    col.get(i)
+}
+
+/// A range removed from a delta column: what was after it follows what
+/// was before it.
+#[allow(dead_code)]
+fn delta_remove_range<T: VDeltaValue<C>, C: VCodec>(col: &mut VerifiedDeltaColumn<T, C>, at: usize, n: usize)
+    requires
+        at <= old(col)@.len(),
+        n <= old(col)@.len() - at,
+    ensures
+        final(col)@.len() == old(col)@.len() - n,
+        forall|i: int| 0 <= i < at ==> final(col)@[i] == old(col)@[i],
+        forall|i: int| at <= i < final(col)@.len() ==> final(col)@[i] == old(col)@[i + n],
+        n > 0 ==> final(col).edits() == after_edit(old(col).edits()),
+        n == 0 ==> final(col).edits() == old(col).edits(),
+{
+    col.remove_n(at, n);
+}
+
+/// A splice of a delta column that deletes nothing and inserts nothing
+/// is no edit, and any other is one: the column no longer counts what it
+/// did.
+#[allow(dead_code)]
+fn delta_splice_counts<T: VDeltaValue<C>, C: VCodec>(
+    col: &mut VerifiedDeltaColumn<T, C>,
+    at: usize,
+    del: usize,
+    values: &[T],
+)
+    requires
+        at <= old(col)@.len(),
+        del <= old(col)@.len() - at,
+        all_fit(values@),
+    ensures
+        del == 0 && values@.len() == 0 ==> final(col).edits() == old(col).edits(),
+        del > 0 || values@.len() > 0 ==> final(col).edits() != old(col).edits(),
+{
+    col.splice(at, del, values);
+}
+
+/// A delta column cleared is empty and can be filled again.
+#[allow(dead_code)]
+fn delta_cleared<T: VDeltaValue<C>, C: VCodec>(col: &mut VerifiedDeltaColumn<T, C>, values: &[T])
+    requires
+        all_fit(values@),
+    ensures
+        final(col)@ == values@,
+{
+    col.clear();
+    col.splice(0, 0, values);
+    assert(Seq::<T>::empty().take(0) + values@ + Seq::<T>::empty().skip(0) =~= values@);
+}
+
+/// To clear a delta column is an edit of one that has values, and none
+/// of an empty one.
+#[allow(dead_code)]
+fn delta_clear_counts<T: VDeltaValue<C>, C: VCodec>(col: &mut VerifiedDeltaColumn<T, C>)
+    ensures
+        old(col)@.len() > 0 ==> final(col).edits() != old(col).edits(),
+        old(col)@.len() == 0 ==> final(col).edits() == old(col).edits(),
+{
+    col.clear();
+}
+
+/// The first and the last value of a delta column are the ones read at
+/// its ends.
+#[allow(dead_code)]
+fn delta_ends<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>) -> (r: (Option<T>, Option<T>))
+    ensures
+        col@.len() == 0 ==> r.0 is None && r.1 is None,
+        col@.len() > 0 ==> r.0 == Some(col@[0]) && r.1 == Some(col@[col@.len() - 1]),
+{
+    (col.first(), col.last())
+}
+
+/// All the values of a delta column at once are the values read one by
+/// one.
+#[allow(dead_code)]
+fn delta_all<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>, i: usize) -> (r: bool)
+    requires
+        i < col@.len(),
+    ensures
+        r,
+{
+    let all = col.to_vec();
+    let one = col.get(i);
+    all.len() == col.len() && one.is_some()
+}
+
+/// A column built from values gives those values back.
+#[allow(dead_code)]
+fn delta_round_trip<T: VDeltaValue<C>, C: VCodec>(values: &[T]) -> (r: Vec<T>)
+    requires
+        all_fit(values@),
+    ensures
+        r@ == values@,
+{
+    let col = VerifiedDeltaColumn::<T, C>::from_values(values);
+    col.to_vec()
+}
+
+/// A clone of a delta column has its values and counts its edits, and
+/// an edit of the clone is none of the column.
+#[allow(dead_code)]
+fn delta_cloned<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>, v: T) -> (r: VerifiedDeltaColumn<T, C>)
+    requires
+        v.fits(),
+    ensures
+        r@ == col@.push(v),
+        r.edits() == after_edit(col.edits()),
+{
+    let mut other = col.clone();
+    other.push(v);
+    other
+}
+
+/// A delta column of small slabs holds what one of the usual slabs
+/// does.
+#[allow(dead_code)]
+fn delta_small_slabs<T: VDeltaValue<C>, C: VCodec>(values: &[T]) -> (r: VerifiedDeltaColumn<T, C>)
+    requires
+        all_fit(values@),
+    ensures
+        r@ == values@,
+{
+    let mut col = VerifiedDeltaColumn::<T, C>::with_max_segments(2);
+    col.splice(0, 0, values);
+    assert(Seq::<T>::empty().take(0) + values@ + Seq::<T>::empty().skip(0) =~= values@);
+    col
+}
+
+/// The last value of one delta column moved to the end of another: what
+/// a column gives is a value a column can hold.
+#[allow(dead_code)]
+fn delta_move_last<T: VDeltaValue<C>, C: VCodec>(a: &mut VerifiedDeltaColumn<T, C>, b: &mut VerifiedDeltaColumn<T, C>)
+    ensures
+        old(a)@.len() == 0 ==> final(a)@ == old(a)@ && final(b)@ == old(b)@,
+        old(a)@.len() > 0 ==> final(a)@ == old(a)@.drop_last() && final(b)@ == old(b)@.push(old(a)@.last()),
+{
+    proof {
+        a.lemma_fits();
+    }
+    match a.pop() {
+        Some(v) => {
+            b.push(v);
+        },
+        None => {},
+    }
+}
+
 } // verus!

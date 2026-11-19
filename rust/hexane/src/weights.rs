@@ -40,11 +40,12 @@ use crate::cursor::{ReadsAgree, Slabs, Weigh};
 #[cfg(verus_keep_ghost)]
 use crate::delta::agg::{agg_of, deltas_of, pdiff, psum, reps, steps_fit};
 use crate::delta::agg::{agg_run, slab_agg, DeltaOps, DomainWalk};
-use crate::delta::ddomain::slabs_fit;
 #[cfg(verus_keep_ghost)]
 use crate::delta::ddomain::{
-    dslabs, lemma_dslabs_cat, lemma_dslabs_len, lemma_dslabs_unit, lemma_walk_steps,
+    dslabs, lemma_dslabs_cat, lemma_dslabs_len, lemma_dslabs_own, lemma_dslabs_unit,
+    lemma_walk_steps,
 };
+use crate::delta::ddomain::{slabs_fit, DeltaWrite};
 #[cfg(verus_keep_ghost)]
 use crate::delta::diter::{crop, lemma_crop};
 #[cfg(verus_keep_ghost)]
@@ -529,6 +530,45 @@ impl<E, X, B> Weigh<E, SlabAgg> for DeltaModel<X, B> where
         assert forall|i: int, j: int| 0 <= i <= j <= d.len() implies in_i64(#[trigger] pdiff(d, i, j)) by {
             assert(d.take(0) =~= Seq::<Option<i64>>::empty());
         }
+    }
+}
+
+/// A copy of a delta column's slabs keeps their weights and their
+/// domain: a slab's deltas are those of its owned values
+/// (`DeltaWrite::axiom_own`), which a copy holds too.
+impl<E, X, B> CopyWeigh<E, SlabAgg> for DeltaModel<X, B> where
+    E: Slabs + for<'a> ReadsAgree<'a, X>,
+    X: for<'a> Decoders<'a, Tail = E::Tail>,
+    B: for<'a> DeltaWrite<'a, E, X>,
+ {
+    proof fn lemma_copy_weight() {
+    }
+
+    proof fn lemma_copy_wrel(w: SlabAgg, a: Slab<E::Tail>, b: Slab<E::Tail>) {
+        E::lemma_copy(a, b);
+        <E as ReadsAgree<'static, X>>::lemma_reads(a);
+        <E as ReadsAgree<'static, X>>::lemma_reads(b);
+        let xa = <X as Decoders<'static>>::vals(a);
+        let xb = <X as Decoders<'static>>::vals(b);
+        let da = deltas_of::<_, B>(xa);
+        let db = deltas_of::<_, B>(xb);
+        assert forall|i: int| 0 <= i < da.len() implies (#[trigger] da[i]) == db[i] by {
+            <B as DeltaWrite<'static, E, X>>::axiom_own(xa[i]);
+            <B as DeltaWrite<'static, E, X>>::axiom_own(xb[i]);
+            assert(E::vals(a)[i] == <E as ReadsAgree<'static, X>>::own(xa[i]));
+            assert(E::vals(b)[i] == <E as ReadsAgree<'static, X>>::own(xb[i]));
+        }
+        assert(da =~= db);
+    }
+
+    proof fn lemma_copy_dom(s: Seq<Slab<E::Tail>>, t: Seq<Slab<E::Tail>>) {
+        let f = |x: Slab<E::Tail>| E::vals(x);
+        assert forall|j: int| 0 <= j < t.len() implies E::ok(#[trigger] t[j]) && f(t[j]) == f(s[j]) by {
+            E::lemma_copy(s[j], t[j]);
+        }
+        assert(t.map_values(f) =~= s.map_values(f));
+        lemma_dslabs_own::<E, X, B>(s);
+        lemma_dslabs_own::<E, X, B>(t);
     }
 }
 

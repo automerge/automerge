@@ -11686,3 +11686,146 @@ fn delta_columns_agree() {
         delta_edits::<Option<usize>>(seed);
     }
 }
+
+/// The simple edits and reads of a delta column, done to a verified
+/// column and to the old one: both hold the same values after each, and
+/// lay them out in as many slabs.
+fn delta_simple_edits<T: Deltad>(seed: u64, max_segments: Option<usize>) {
+    let mut rng = Rng(seed.wrapping_mul(0x9e37_79b9).wrapping_add(7) | 1);
+    let mut last = 0;
+    let (mut new, mut old) = match max_segments {
+        Some(m) => (
+            VerifiedDeltaColumn::<T>::with_max_segments(m),
+            DeltaColumn::<T>::with_max_segments(m),
+        ),
+        None => (
+            VerifiedDeltaColumn::<T>::default(),
+            DeltaColumn::<T>::default(),
+        ),
+    };
+    for _ in 0..300 {
+        let len = old.len();
+        match rng.below(16) {
+            0..=5 => {
+                let (v, l) = T::near(&mut rng, last);
+                last = l;
+                new.push(v);
+                old.push(v);
+            }
+            6..=8 => {
+                let at = rng.below(len + 1);
+                let (v, l) = T::near(&mut rng, last);
+                last = l;
+                new.insert(at, v);
+                old.insert(at, v);
+            }
+            9 => {
+                // now and then past the end, where there is nothing
+                let at = rng.below(len + 3);
+                new.remove(at);
+                old.remove(at);
+            }
+            10 => {
+                let at = rng.below(len + 1);
+                let n = rng.below((len - at).min(5) + 1);
+                new.remove_n(at, n);
+                old.remove_n(at, n);
+            }
+            11 => {
+                let keep = rng.below(len + 4);
+                new.truncate(keep);
+                old.truncate(keep);
+            }
+            12..=13 => assert_eq!(new.pop(), old.pop()),
+            14 => {
+                if rng.below(8) == 0 {
+                    new.clear();
+                    old.clear();
+                }
+            }
+            _ => {
+                // go on with a clone, and leave the column it was made of
+                let other = new.clone();
+                assert_eq!(new.to_vec(), other.to_vec());
+                new = other;
+            }
+        }
+        assert_eq!(new.to_vec(), old.to_vec());
+        assert_eq!(new.len(), old.len());
+        assert_eq!(new.first(), old.first());
+        assert_eq!(new.last(), old.last());
+        // the same slabs, and so the same of what is printed: but for a
+        // cleared column, which has no slab where `DeltaColumn` keeps an
+        // empty one
+        if new.is_empty() {
+            assert!(new.slab_count() <= old.slab_count() && old.slab_count() <= 1);
+        } else {
+            assert_eq!(new.slab_count(), old.slab_count());
+            assert_eq!(
+                format!("{new:?}"),
+                format!("{old:?}").replace("DeltaColumn", "VerifiedDeltaColumn")
+            );
+        }
+    }
+    delta_agrees(&new, &old);
+}
+
+/// A verified delta column and the old one agree after the same simple
+/// edits (`push`, `insert`, `remove`, `remove_n`, `truncate`, `pop`,
+/// `clear`), for every type of value and with small slabs too.
+#[test]
+fn delta_simple_edits_agree() {
+    for seed in 0..6 {
+        for max_segments in [None, Some(2), Some(5)] {
+            delta_simple_edits::<u32>(seed, max_segments);
+            delta_simple_edits::<u64>(seed, max_segments);
+            delta_simple_edits::<i32>(seed, max_segments);
+            delta_simple_edits::<i64>(seed, max_segments);
+            delta_simple_edits::<usize>(seed, max_segments);
+            delta_simple_edits::<Option<u32>>(seed, max_segments);
+            delta_simple_edits::<Option<u64>>(seed, max_segments);
+            delta_simple_edits::<Option<i32>>(seed, max_segments);
+            delta_simple_edits::<Option<i64>>(seed, max_segments);
+            delta_simple_edits::<Option<usize>>(seed, max_segments);
+        }
+    }
+}
+
+/// The ends of a delta column: nothing to read or to pop of an empty
+/// one, and a removal past the end changes nothing.
+#[test]
+fn delta_column_ends() {
+    let mut col = VerifiedDeltaColumn::<Option<i64>>::new();
+    assert_eq!(col.first(), None);
+    assert_eq!(col.last(), None);
+    assert_eq!(col.pop(), None);
+    assert_eq!(col.to_vec(), vec![]);
+    col.remove(0);
+    col.remove_n(9, 0);
+    col.truncate(3);
+    col.clear();
+    assert!(col.is_empty());
+    for v in [Some(i64::MIN / 4), None, None, Some(-1), Some(i64::MAX / 4)] {
+        col.push(v);
+    }
+    assert_eq!(col.first(), Some(Some(i64::MIN / 4)));
+    assert_eq!(col.last(), Some(Some(i64::MAX / 4)));
+    col.remove(5);
+    assert_eq!(col.len(), 5);
+    col.remove(1);
+    assert_eq!(
+        col.to_vec(),
+        vec![Some(i64::MIN / 4), None, Some(-1), Some(i64::MAX / 4)]
+    );
+    assert_eq!(col.pop(), Some(Some(i64::MAX / 4)));
+    col.truncate(1);
+    assert_eq!(col.to_vec(), vec![Some(i64::MIN / 4)]);
+    let other = col.clone();
+    col.clear();
+    assert!(col.is_empty());
+    assert_eq!(other.to_vec(), vec![Some(i64::MIN / 4)]);
+    assert_eq!(
+        format!("{other:?}"),
+        "VerifiedDeltaColumn { len: 1, slabs: 1 }"
+    );
+}

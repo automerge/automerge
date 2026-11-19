@@ -1,12 +1,12 @@
-//! Delta columns of the verified public API, first part: the numbers a
-//! delta column holds ([`VDelta`]), how the values of the column
-//! underneath are deltas (`VDeltas`, in place of the old API's trusted
-//! `delta::indexed::DB`), and sources of values that say what they give
+//! Delta columns of the verified public API: the numbers a delta
+//! column holds ([`VDelta`]), how the values of the column underneath
+//! are deltas (`VDeltas`, in place of the old API's trusted
+//! `delta::indexed::DB`), sources of values that say what they give
 //! (`SliceValues`, `SliceItems`), so that what the verified cores build
-//! from them is known.
+//! from them is known, and the column ([`VerifiedDeltaColumn`]).
 
-// until the column that uses these is here
-
+#[cfg(verus_keep_ghost)]
+use super::after_edit;
 use super::codec::VCodec;
 use super::model::Model;
 use super::seal;
@@ -19,7 +19,7 @@ use crate::delta::agg::DeltaOps;
 use crate::delta::ddomain::{item_vals, items_vals, rvals};
 use crate::delta::ddomain::{DeltaWrite, SpliceItem, SpliceItems, ValueItems};
 #[cfg(verus_keep_ghost)]
-use crate::delta::diter::{crop, lemma_wrapping_add};
+use crate::delta::diter::{crop, lemma_crop_add, lemma_wrapping_add};
 use crate::rle::dec::RleReads;
 use crate::rle::edit::{null_in_column, ReadIns, RleModel};
 use crate::weights::DeltaModel;
@@ -896,12 +896,31 @@ impl<T: VDeltaValue<C>, C: VCodec> VerifiedDeltaColumn<T, C> {
         all_dom::<T>(self.kept())
     }
 
+    /// The count of the column's edits. Each method that changes the
+    /// column says what it is after the call: one more (`after_edit`)
+    /// where the call was an edit, and what it was where the call was
+    /// none.
+    pub closed spec fn edits(&self) -> usize {
+        self.core.count()
+    }
+
     /// An empty column.
     pub fn new() -> (r: Self)
         ensures
             r@ == Seq::<T>::empty(),
     {
-        let core: DCore<T, C> = ColumnCore::with_budget(MAX_SEG);
+        Self::with_max_segments(MAX_SEG)
+    }
+
+    /// An empty column whose slabs hold at most `max_segments` runs
+    /// each.
+    pub fn with_max_segments(max_segments: usize) -> (r: Self)
+        requires
+            max_segments >= 2,
+        ensures
+            r@ == Seq::<T>::empty(),
+    {
+        let core: DCore<T, C> = ColumnCore::with_budget(max_segments);
         proof {
             assert(rvals::<DE<T, C>, DX<T, C>, <T as DKind<C>>::B>(core@) =~= Seq::empty());
             assert(vals::<T>(Seq::empty()) =~= Seq::<T>::empty());
@@ -960,6 +979,9 @@ impl<T: VDeltaValue<C>, C: VCodec> VerifiedDeltaColumn<T, C> {
     /// Remove `del` values from index `at` on and put `values` in their
     /// place.
     ///
+    /// The column counts an edit more (`after_edit` of its `edits()`),
+    /// unless the call deletes no value and inserts none.
+    ///
     /// # Panics
     ///
     /// Panics if two of the column's values would lie 2^63 or more
@@ -971,6 +993,11 @@ impl<T: VDeltaValue<C>, C: VCodec> VerifiedDeltaColumn<T, C> {
             all_fit(values@),
         ensures
             final(self)@ == old(self)@.take(at as int) + values@ + old(self)@.skip(at + del),
+            final(self).edits() == if del > 0 || values@.len() > 0 {
+                after_edit(old(self).edits())
+            } else {
+                old(self).edits()
+            },
     {
         proof {
             use_type_invariant(&*self);
@@ -981,8 +1008,18 @@ impl<T: VDeltaValue<C>, C: VCodec> VerifiedDeltaColumn<T, C> {
         let mut me = Self::new();
         core::mem::swap(self, &mut me);
         let mut core = me.core;
+        let before = core.counter();
         let mut f = <DE<T, C> as Model<DX<T, C>>>::blind();
         let _taken = core.splice_delta(at, del, Some(SliceItems::new(values)), T::lo(), T::hi(), &mut f);
+        // the shared cursor moves the count as it writes, by a number
+        // that depends on the edit: this makes it one an edit
+        core.set_counter(
+            if del > 0 || values.len() > 0 {
+                before.wrapping_add(1)
+            } else {
+                before
+            },
+        );
         proof {
             let ds = dvs(values@);
             lemma_value_items(ds);
@@ -1045,6 +1082,336 @@ impl<T: VDeltaValue<C>, C: VCodec> VerifiedDeltaColumn<T, C> {
             None => None,
         }
     }
+
+    /// How many slabs hold the column. That is a fact of how the column
+    /// lies in memory and not of its values: nothing is specified of it.
+    pub fn slab_count(&self) -> usize {
+        self.core.slabs().len()
+    }
+
+    /// Delete `del` values at `at`: a splice that puts nothing in their
+    /// place.
+    fn delete(&mut self, at: usize, del: usize)
+        requires
+            at <= old(self)@.len(),
+            del <= old(self)@.len() - at,
+        ensures
+            final(self)@ == old(self)@.take(at as int) + old(self)@.skip(at + del),
+            final(self).edits() == if del > 0 {
+                after_edit(old(self).edits())
+            } else {
+                old(self).edits()
+            },
+    {
+        let none: Vec<T> = Vec::new();
+        self.splice(at, del, none.as_slice());
+        proof {
+            let (a, b) = (old(self)@.take(at as int), old(self)@.skip(at + del));
+            assert(a + none@ + b =~= a + b);
+        }
+    }
+
+    /// Insert `value` before the value at `at`. The column counts an
+    /// edit more.
+    ///
+    /// # Panics
+    ///
+    /// Panics if two of the column's values would lie 2^63 or more
+    /// apart.
+    pub fn insert(&mut self, at: usize, value: T)
+        requires
+            at <= old(self)@.len(),
+            value.fits(),
+        ensures
+            final(self)@ == old(self)@.insert(at as int, value),
+            final(self).edits() == after_edit(old(self).edits()),
+    {
+        let one = [value];
+        proof {
+            assert(one@ =~= seq![value]);
+        }
+        self.splice(at, 0, one.as_slice());
+        proof {
+            assert(self@ =~= old(self)@.insert(at as int, value));
+        }
+    }
+
+    /// Add `value` at the end. The column counts an edit more.
+    ///
+    /// # Panics
+    ///
+    /// Panics if two of the column's values would lie 2^63 or more
+    /// apart.
+    pub fn push(&mut self, value: T)
+        requires
+            value.fits(),
+        ensures
+            final(self)@ == old(self)@.push(value),
+            final(self).edits() == after_edit(old(self).edits()),
+    {
+        let at = self.len();
+        self.insert(at, value);
+        proof {
+            assert(self@ =~= old(self)@.push(value));
+        }
+    }
+
+    /// Delete the value at `at`, where there is one: then the column
+    /// counts an edit more. Past the end there is nothing to delete, and
+    /// the call is no edit, as it is none of
+    /// [`DeltaColumn`](crate::DeltaColumn).
+    pub fn remove(&mut self, at: usize)
+        ensures
+            final(self)@ == if at < old(self)@.len() {
+                old(self)@.remove(at as int)
+            } else {
+                old(self)@
+            },
+            final(self).edits() == if at < old(self)@.len() {
+                after_edit(old(self).edits())
+            } else {
+                old(self).edits()
+            },
+    {
+        if at < self.len() {
+            self.delete(at, 1);
+            proof {
+                assert(self@ =~= old(self)@.remove(at as int));
+            }
+        }
+    }
+
+    /// Delete the `n` values at `at`. The column counts an edit more,
+    /// unless `n` is 0: then the call does nothing, wherever `at` is.
+    pub fn remove_n(&mut self, at: usize, n: usize)
+        requires
+            n > 0 ==> at <= old(self)@.len() && n <= old(self)@.len() - at,
+        ensures
+            final(self)@ == if n > 0 {
+                old(self)@.take(at as int) + old(self)@.skip(at + n)
+            } else {
+                old(self)@
+            },
+            final(self).edits() == if n > 0 {
+                after_edit(old(self).edits())
+            } else {
+                old(self).edits()
+            },
+    {
+        if n > 0 {
+            self.delete(at, n);
+        }
+    }
+
+    /// Keep the first `len` values, where there are more: then the
+    /// column counts an edit more, and where there are no more it counts
+    /// what it did.
+    pub fn truncate(&mut self, len: usize)
+        ensures
+            final(self)@ == if len < old(self)@.len() {
+                old(self)@.take(len as int)
+            } else {
+                old(self)@
+            },
+            final(self).edits() == if len < old(self)@.len() {
+                after_edit(old(self).edits())
+            } else {
+                old(self).edits()
+            },
+    {
+        let n = self.len();
+        if len < n {
+            self.delete(len, n - len);
+            proof {
+                assert(self@ =~= old(self)@.take(len as int));
+            }
+        }
+    }
+
+    /// Delete every value. The column keeps its segment budget.
+    ///
+    /// Of a column with no value this is no edit, as it is none of
+    /// [`DeltaColumn`](crate::DeltaColumn). Of any other the column
+    /// counts an edit more.
+    pub fn clear(&mut self)
+        ensures
+            final(self)@ == Seq::<T>::empty(),
+            final(self).edits() == if old(self)@.len() > 0 {
+                after_edit(old(self).edits())
+            } else {
+                old(self).edits()
+            },
+    {
+        if self.core.len() == 0 {
+            proof {
+                assert(self@ =~= Seq::<T>::empty());
+            }
+            return;
+        }
+        // a new column, and not a delete of every value, as the old
+        // API's. The edit counter goes on from where it is, as after any
+        // other edit.
+        self.core.lemma_column();
+        let mut core: DCore<T, C> = ColumnCore::with_budget(self.core.max_segments());
+        core.set_counter(self.core.counter().wrapping_add(1));
+        proof {
+            assert(rvals::<DE<T, C>, DX<T, C>, <T as DKind<C>>::B>(core@) =~= Seq::empty());
+            assert(vals::<T>(Seq::empty()) =~= Seq::<T>::empty());
+        }
+        *self = VerifiedDeltaColumn { core };
+    }
+
+    /// Take the last value off the column, if it has one: then the
+    /// column counts an edit more.
+    pub fn pop(&mut self) -> (r: Option<T>)
+        ensures
+            old(self)@.len() == 0 ==> {
+                &&& r is None
+                &&& final(self)@ == old(self)@
+                &&& final(self).edits() == old(self).edits()
+            },
+            old(self)@.len() > 0 ==> {
+                &&& r == Some(old(self)@.last())
+                &&& final(self)@ == old(self)@.drop_last()
+                &&& final(self).edits() == after_edit(old(self).edits())
+            },
+    {
+        let n = self.len();
+        if n == 0 {
+            return None;
+        }
+        let v = self.get(n - 1);
+        self.delete(n - 1, 1);
+        proof {
+            assert(self@ =~= old(self)@.drop_last());
+        }
+        v
+    }
+
+    /// The first value, or `None` of an empty column.
+    pub fn first(&self) -> (r: Option<T>)
+        ensures
+            self@.len() > 0 ==> r == Some(self@.first()),
+            self@.len() == 0 ==> r is None,
+    {
+        self.get(0)
+    }
+
+    /// The last value, or `None` of an empty column.
+    pub fn last(&self) -> (r: Option<T>)
+        ensures
+            self@.len() > 0 ==> r == Some(self@.last()),
+            self@.len() == 0 ==> r is None,
+    {
+        let n = self.len();
+        if n == 0 {
+            None
+        } else {
+            self.get(n - 1)
+        }
+    }
+
+    /// The values, in a `Vec`.
+    #[allow(clippy::while_let_loop)]  // a loop with its invariants
+    pub fn to_vec(&self) -> (r: Vec<T>)
+        ensures
+            r@ == self@,
+    {
+        proof {
+            use_type_invariant(self);
+        }
+        let len = self.core.len();
+        let ghost kept = self.kept();
+        let mut out: Vec<T> = Vec::with_capacity(len);
+        let mut src = self.core.dsrc();
+        src.shift(0..len);
+        proof {
+            assert(kept.take(0) =~= Seq::<Option<i64>>::empty());
+            assert(vals::<T>(Seq::empty()) =~= Seq::<T>::empty());
+        }
+        loop
+            invariant
+                src.inv(),
+                src.src() == kept,
+                src.end() == len,
+                kept.len() == len,
+                0 <= src.at() <= len,
+                all_dom::<T>(kept),
+                out@ == vals::<T>(kept.take(src.at())),
+            ensures
+                src.at() == len,
+            decreases len - src.at(),
+        {
+            let ghost at0 = src.at();
+            match src.next_run() {
+                Some((prefix, d, n)) => {
+                    // the run's values: each the one before it and the
+                    // run's delta, or each a null
+                    let ghost run = item_vals(SpliceItem::Run(prefix, d, n));
+                    let mut cur = prefix;
+                    let mut k: usize = 0;
+                    while k < n
+                        invariant
+                            k <= n,
+                            0 <= at0,
+                            at0 + n <= len,
+                            kept.len() == len,
+                            all_dom::<T>(kept),
+                            kept.subrange(at0, at0 + n) == run,
+                            run == item_vals(SpliceItem::Run(prefix, d, n)),
+                            d matches Some(x) ==> cur == crop(prefix + k * x),
+                            out@ == vals::<T>(kept.take(at0 + k)),
+                            src.inv(),
+                            src.src() == kept,
+                            src.end() == len,
+                            src.at() == at0 + n,
+                        decreases n - k,
+                    {
+                        let ghost here = kept[at0 + k];
+                        proof {
+                            assert(kept.subrange(at0, at0 + n)[k as int] == here);
+                            assert(in_dom::<T>(here));
+                        }
+                        let got = match d {
+                            Some(x) => {
+                                let next = cur.wrapping_add(x);
+                                proof {
+                                    lemma_wrapping_add(cur, x);
+                                    lemma_crop_add(prefix + k * x, x as int);
+                                    assert(prefix + k * x + x == prefix + (k + 1) * x) by (nonlinear_arith);
+                                    assert(run[k as int] == Some(crop(prefix + (k + 1) * x)));
+                                    assert(here == Some(next));
+                                }
+                                cur = next;
+                                Some(next)
+                            },
+                            None => {
+                                proof {
+                                    assert(run[k as int] == None::<i64>);
+                                }
+                                None
+                            },
+                        };
+                        out.push(T::from_i64(got));
+                        proof {
+                            assert(kept.take(at0 + k + 1) =~= kept.take(at0 + k).push(here));
+                            assert(vals::<T>(kept.take(at0 + k).push(here)) =~= vals::<T>(kept.take(at0 + k)).push(
+                                T::of(here),
+                            ));
+                        }
+                        k = k + 1;
+                    }
+                },
+                None => {
+                    break;
+                },
+            }
+        }
+        proof {
+            assert(kept.take(len as int) =~= kept);
+        }
+        out
+    }
 }
 
 impl<T: VDeltaValue<C>, C: VCodec> Default for VerifiedDeltaColumn<T, C> {
@@ -1057,7 +1424,34 @@ impl<T: VDeltaValue<C>, C: VCodec> Default for VerifiedDeltaColumn<T, C> {
     }
 }
 
+impl<T: VDeltaValue<C>, C: VCodec> Clone for VerifiedDeltaColumn<T, C> {
+    /// A column of its own with the same values, which counts the edits
+    /// this one does.
+    fn clone(&self) -> (r: Self)
+        ensures
+            r@ == self@,
+            r.edits() == self.edits(),
+    {
+        proof {
+            use_type_invariant(self);
+        }
+        VerifiedDeltaColumn { core: self.core.duplicate() }
+    }
+}
+
 } // verus!
+
+impl<T: VDeltaValue<C>, C: VCodec> std::fmt::Debug for VerifiedDeltaColumn<T, C> {
+    /// How many values and how many slabs, as `DeltaColumn` prints
+    /// itself.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("VerifiedDeltaColumn")
+            .field("len", &self.core.len())
+            .field("slabs", &self.core.slabs().len())
+            .finish()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{VDelta, VDeltaNum};
