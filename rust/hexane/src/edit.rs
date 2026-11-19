@@ -595,6 +595,10 @@ where
     fn reconcile(&mut self, range: Range<usize>) {
         if self.col.index.len() == self.col.slabs.len() && range.len() == 1 {
             let w = WF::compute(&self.col.slabs[range.start]);
+            if WF::CHECKS_TOTAL {
+                let new = std::slice::from_ref(&w);
+                WF::check_splice(&self.col.index, range.clone(), new, self.col.total_len);
+            }
             self.col.index.update_slab(range.start, w);
         } else {
             let new: Vec<WF::Weight> = self.col.slabs[range.clone()]
@@ -602,6 +606,10 @@ where
                 .map(WF::compute)
                 .collect();
             let old_end = range.end + self.col.index.len() - self.col.slabs.len();
+            if WF::CHECKS_TOTAL {
+                let old = range.start..old_end;
+                WF::check_splice(&self.col.index, old, &new, self.col.total_len);
+            }
             self.col.index.splice(range.start..old_end, new);
             debug_assert_eq!(self.col.index.len(), self.col.slabs.len());
         }
