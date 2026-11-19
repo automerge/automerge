@@ -8,6 +8,8 @@ hexane's src/verified/client_proof.rs word for word, but for what a
 crate outside hexane must say differently:
 
 * the imports name `hexane` instead of `super` and `crate`;
+* the crate has a feature `bijou64`, on by default, which asks for
+  hexane's and under which the clients of that codec are compiled;
 * the items are public, so that the tests can call them;
 * a direct `from_iter` call is written as `collect()` (Verus panics on
   the direct call when the `FromIterator` is of another verified crate).
@@ -39,9 +41,19 @@ imports = "#[cfg(verus_keep_ghost)]\nuse hexane::verified::{%s};\nuse hexane::ve
 t = t[: m.start()] + imports + t[m.end() :]
 assert t.count("use crate::{") == 1
 t = t.replace("use crate::{", "use hexane::{")
+# the modules that name a codec, and the second codec itself
+for a, b in [
+    ("use super::bijou;\n", "use hexane::verified::bijou;\n"),
+    ("use super::leb128;\n", "use hexane::verified::leb128;\n"),
+    ("use crate::Bijou64;\n", "use hexane::Bijou64;\n"),
+]:
+    assert t.count(a) == 1, a
+    t = t.replace(a, b)
 assert "super::" not in t and "crate::" not in t, "an import this script does not know"
 
-doc_end = t.index("\n#[cfg(verus_keep_ghost)]")
+# the module's documentation ends at the first empty line
+doc_end = t.index("\n\n") + 1
+assert all(line.startswith("//!") for line in t[:doc_end].splitlines())
 t = (
     "//! The acceptance clients of `hexane::verified` as a crate outside hexane\n"
     "//! (generated from hexane's src/verified/client_proof.rs; do not edit).\n"
@@ -85,6 +97,10 @@ publish = false
 [dependencies]
 hexane = { path = "%s" }
 vstd = "%s"
+
+[features]
+default = ["bijou64"]
+bijou64 = ["hexane/bijou64"]
 
 [package.metadata.verus]
 verify = true

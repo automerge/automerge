@@ -3298,3 +3298,134 @@ fn raw_cuts() {
     assert_eq!(other.save(), b"goodbye, world!");
     verus_client::raw_told_by_the_cuts(&other, 0, 7);
 }
+
+// ── The codecs ───────────────────────────────────────────────
+
+/// Numbers at the ends of the encodings' lengths, and two more.
+const CODEC_NUMBERS: [(u64, i64); 6] = [
+    (0, 0),
+    (127, -64),
+    (247, -124),
+    (248, 124),
+    (1 << 40, i64::MAX),
+    (u64::MAX, i64::MIN),
+];
+
+#[test]
+fn codecs() {
+    for (n, i) in CODEC_NUMBERS {
+        verus_client::codecs_leb128(n, i, b"rest", &[0x80, 0x80, 0x01]);
+        verus_client::codecs_leb128(n, i, b"", &[0x80]);
+        assert_eq!(
+            verus_client::a_number_written_and_read::<Leb128>(n, b"x"),
+            n
+        );
+        assert_eq!(
+            verus_client::a_signed_number_written_and_read::<Leb128>(i, b""),
+            i
+        );
+        assert_eq!(
+            verus_client::numbers_one_after_another::<Leb128>(n, i),
+            (n, i)
+        );
+        assert_eq!(verus_client::a_number_skipped::<Leb128>(i, n), n);
+        let mut buf = b"ab".to_vec();
+        verus_client::numbers_take_one_to_ten_bytes::<Leb128>(&mut buf, n, i);
+        assert!((4..=22).contains(&buf.len()));
+    }
+    for data in [&[][..], &[0x80], &[0x80, 0x00], &[0xff; 11], &[0x05, 0x06]] {
+        assert!(verus_client::readers_agree::<Leb128>(data));
+    }
+    let (col, bytes) = verus_client::leb128_by_its_import(7, 300);
+    assert_eq!(col.to_vec(), [7, 300]);
+    assert_eq!(bytes, [0x7e, 0x07, 0xac, 0x02]);
+}
+
+#[cfg(feature = "bijou64")]
+#[test]
+fn bijou64() {
+    use hexane::verified::bijou;
+    use hexane::Bijou64;
+    for (n, i) in CODEC_NUMBERS {
+        verus_client::codecs_bijou64(n, i, b"rest", &[0xf9, 0x00]);
+        verus_client::codecs_bijou64(n, i, b"", &[0xff; 9]);
+        assert_eq!(
+            verus_client::a_number_written_and_read::<Bijou64>(n, b"x"),
+            n
+        );
+        assert_eq!(
+            verus_client::a_signed_number_written_and_read::<Bijou64>(i, b""),
+            i
+        );
+        assert_eq!(
+            verus_client::numbers_one_after_another::<Bijou64>(n, i),
+            (n, i)
+        );
+        assert_eq!(verus_client::a_number_skipped::<Bijou64>(i, n), n);
+        let mut buf = b"ab".to_vec();
+        verus_client::numbers_take_one_to_ten_bytes::<Bijou64>(&mut buf, n, i);
+        assert!((4..=22).contains(&buf.len()));
+    }
+    for data in [&[][..], &[0xf8], &[0xf8, 0x00], &[0xff; 9], &[0x05, 0x06]] {
+        assert!(verus_client::readers_agree::<Bijou64>(data));
+    }
+
+    let input: Vec<u64> = (0..1000).map(|i| i / 3 * 100).collect();
+    let nullable = vec![Some(-1), None, None, Some(i64::MIN)];
+    let flags = vec![true, false, false];
+    let actions = vec![
+        Some(Action::Make),
+        None,
+        Some(Action::Set),
+        Some(Action::Set),
+    ];
+    let bytes = bijou::VerifiedColumn::<u64>::from_values(&input).save();
+    verus_client::columns_with_bijou64(
+        &input,
+        &nullable,
+        &flags,
+        &actions,
+        flags.clone(),
+        nullable.clone(),
+        &bytes,
+    );
+    let acts = bijou::VerifiedColumn::<Option<Action>>::from_values(&actions).save();
+    verus_client::columns_with_bijou64(&vec![], &vec![], &vec![], &vec![], vec![], vec![], &acts);
+    verus_client::strings_with_bijou64(&vec![&b"ab"[..], b"", b"ab"], &vec!["é", "", "x"]);
+
+    let sums = bijou::VerifiedPrefixColumn::<u64>::from_values(&[3, 0, 4]).save();
+    verus_client::sums_with_bijou64(&sums, 3);
+    verus_client::sums_with_bijou64(&[0xf9, 0x00], 0);
+
+    let values: Vec<i64> = vec![10, 11, 12, -500, i64::MAX >> 2];
+    let some = vec![Some(5u32), None, Some(u32::MAX), Some(0)];
+    let saved = bijou::VerifiedDeltaColumn::<i64>::from_values(&values).save();
+    verus_client::deltas_with_bijou64(&values, &some, values.clone(), &saved);
+    verus_client::deltas_with_bijou64(&vec![], &vec![], vec![], &[0xff; 9]);
+
+    // the codec named by an import: the same values, other bytes
+    let (col, bytes) = verus_client::bijou64_by_its_import(7, 300);
+    assert_eq!(col.to_vec(), [7, 300]);
+    assert_eq!(bytes, [0x03, 0x07, 0xf8, 0x34]);
+    let (leb, leb_bytes) = verus_client::leb128_by_its_import(7, 300);
+    assert_eq!(leb.to_vec(), col.to_vec());
+    assert_ne!(leb_bytes, bytes);
+
+    let old = VerifiedColumn::<Option<i64>>::from_values(&nullable);
+    let new = verus_client::from_one_codec_to_the_other(&old);
+    assert_eq!(new.to_vec(), nullable);
+    assert_eq!(
+        new.save(),
+        bijou::VerifiedColumn::<Option<i64>>::from_values(&nullable).save()
+    );
+    let old = VerifiedDeltaColumn::<i64>::from_values(&values);
+    let new = verus_client::deltas_from_one_codec_to_the_other(&old);
+    assert_eq!(new.to_vec(), values);
+    assert_eq!(new.save(), saved);
+
+    assert_eq!(verus_client::streamed_with_bijou64(7, 300), [7, 300]);
+    assert_eq!(
+        verus_client::deltas_streamed_with_bijou64(-7, 300),
+        [-7, 300]
+    );
+}

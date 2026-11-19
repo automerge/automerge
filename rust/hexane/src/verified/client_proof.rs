@@ -391,6 +391,9 @@
 //!
 //! This module exists only while Verus checks the crate.
 
+#[cfg(feature = "bijou64")]
+use super::bijou;
+use super::leb128;
 use super::{
     accumulated, after_edit, after_edits, all_fit, below_at, bytes_below, delta_at, delta_finds,
     delta_iter_fits, delta_near, delta_prefix, delta_run_fits, delta_run_in_range, delta_run_kept,
@@ -413,6 +416,8 @@ use super::{
     VerifiedPrefixColumn, VerifiedPrefixIter, VerifiedPrefixIterState, VerifiedPrefixSeek,
     VerifiedPrefixedValue, VerifiedRuns,
 };
+#[cfg(feature = "bijou64")]
+use crate::Bijou64;
 use crate::{DeltaRun, Leb128, LoadOpts, PackError, Run};
 use std::cmp::Ordering;
 use std::ops::{Bound, Range, RangeBounds};
@@ -15602,6 +15607,487 @@ fn raw_told_by_the_cuts(col: &RawColumn, start: usize, end: usize)
     proof {
         col.lemma_in_one_slab(start as int, end as int);
     }
+}
+
+// ── The codecs ───────────────────────────────────────────────
+
+/// A number a codec writes is the number it reads, whatever bytes come
+/// after it. For every codec.
+#[allow(dead_code)]
+fn a_number_written_and_read<C: VCodec>(n: u64, rest: &[u8]) -> (r: u64)
+    ensures
+        r == n,
+{
+    let mut buf: Vec<u8> = Vec::new();
+    C::put_u(n, &mut buf);
+    buf.extend_from_slice(rest);
+    let ghost s = buf@;
+    proof {
+        assert(s =~= C::enc_u(n) + rest@);
+        assert(s.subrange(0, C::enc_u(n).len() as int) =~= C::enc_u(n));
+        assert(C::enc_u(n).is_prefix_of(s));
+    }
+    match C::read_u(buf.as_slice()) {
+        Ok((len, v)) => {
+            proof {
+                assert(s =~= s.take(len as int) + s.skip(len as int));
+                C::lemma_u(v, n, s.skip(len as int), rest@);
+            }
+            v
+        },
+        Err(_) => {
+            // a codec reads what starts with a number's bytes
+            proof {
+                assert(false);
+            }
+            0
+        },
+    }
+}
+
+/// A signed number a codec writes is the number it reads, whatever bytes
+/// come after it. For every codec.
+#[allow(dead_code)]
+fn a_signed_number_written_and_read<C: VCodec>(n: i64, rest: &[u8]) -> (r: i64)
+    ensures
+        r == n,
+{
+    let mut buf: Vec<u8> = Vec::new();
+    C::put_i(n, &mut buf);
+    buf.extend_from_slice(rest);
+    let ghost s = buf@;
+    proof {
+        assert(s =~= C::enc_i(n) + rest@);
+        assert(s.subrange(0, C::enc_i(n).len() as int) =~= C::enc_i(n));
+        assert(C::enc_i(n).is_prefix_of(s));
+    }
+    match C::read_i_opt(buf.as_slice()) {
+        Some((len, v)) => {
+            proof {
+                assert(s =~= s.take(len as int) + s.skip(len as int));
+                C::lemma_i(v, n, s.skip(len as int), rest@);
+            }
+            v
+        },
+        None => {
+            proof {
+                assert(false);
+            }
+            0
+        },
+    }
+}
+
+/// Two numbers written one after the other are read one after the other:
+/// where the first one's bytes end is where the second one's begin. For
+/// every codec.
+#[allow(dead_code)]
+fn numbers_one_after_another<C: VCodec>(a: u64, b: i64) -> (r: (u64, i64))
+    ensures
+        r == (a, b),
+{
+    let mut buf: Vec<u8> = Vec::new();
+    C::put_u(a, &mut buf);
+    C::put_i(b, &mut buf);
+    let ghost s = buf@;
+    proof {
+        assert(s =~= C::enc_u(a) + C::enc_i(b));
+        assert(s.subrange(0, C::enc_u(a).len() as int) =~= C::enc_u(a));
+        assert(C::enc_u(a).is_prefix_of(s));
+    }
+    match C::read_u(buf.as_slice()) {
+        Ok((n, x)) => {
+            proof {
+                assert(s =~= s.take(n as int) + s.skip(n as int));
+                C::lemma_u(x, a, s.skip(n as int), C::enc_i(b));
+                assert(s.take(n as int).len() == n);
+                assert(s.skip(n as int) =~= C::enc_i(b));
+            }
+            let tail = slice_subrange(buf.as_slice(), n, buf.len());
+            proof {
+                assert(tail@ =~= C::enc_i(b));
+                assert(tail@.subrange(0, C::enc_i(b).len() as int) =~= C::enc_i(b));
+                assert(C::enc_i(b).is_prefix_of(tail@));
+            }
+            match C::read_i(tail) {
+                Ok((m, y)) => {
+                    proof {
+                        let t = tail@;
+                        assert(t =~= t.take(m as int) + t.skip(m as int));
+                        assert(C::enc_i(b) + Seq::<u8>::empty() =~= C::enc_i(b));
+                        C::lemma_i(y, b, t.skip(m as int), Seq::empty());
+                    }
+                    (x, y)
+                },
+                Err(_) => {
+                    proof {
+                        assert(false);
+                    }
+                    (0, 0)
+                },
+            }
+        },
+        Err(_) => {
+            proof {
+                assert(false);
+            }
+            (0, 0)
+        },
+    }
+}
+
+/// A number is passed over without being read: its length is found, and
+/// the number after it is read from there. For every codec.
+#[allow(dead_code)]
+fn a_number_skipped<C: VCodec>(a: i64, b: u64) -> (r: u64)
+    ensures
+        r == b,
+{
+    let mut buf: Vec<u8> = Vec::new();
+    C::put_i(a, &mut buf);
+    C::put_u(b, &mut buf);
+    let ghost s = buf@;
+    proof {
+        assert(s =~= C::enc_i(a) + C::enc_u(b));
+        assert(s.subrange(0, C::enc_i(a).len() as int) =~= C::enc_i(a));
+        assert(C::enc_i(a).is_prefix_of(s));
+        // a number's bytes are few, so their count is a `usize`
+        C::lemma_i(a, a, Seq::empty(), Seq::empty());
+    }
+    match C::len_i(buf.as_slice()) {
+        Some(n) => {
+            proof {
+                assert(n == C::enc_i(a).len());
+                assert(s.skip(n as int) =~= C::enc_u(b));
+            }
+            let tail = slice_subrange(buf.as_slice(), n, buf.len());
+            proof {
+                assert(tail@ =~= C::enc_u(b));
+                assert(tail@.subrange(0, C::enc_u(b).len() as int) =~= C::enc_u(b));
+                assert(C::enc_u(b).is_prefix_of(tail@));
+            }
+            match C::read_u_opt(tail) {
+                Some((m, y)) => {
+                    proof {
+                        let t = tail@;
+                        assert(t =~= t.take(m as int) + t.skip(m as int));
+                        assert(C::enc_u(b) + Seq::<u8>::empty() =~= C::enc_u(b));
+                        C::lemma_u(y, b, t.skip(m as int), Seq::empty());
+                    }
+                    y
+                },
+                None => {
+                    proof {
+                        assert(false);
+                    }
+                    0
+                },
+            }
+        },
+        None => {
+            proof {
+                assert(false);
+            }
+            0
+        },
+    }
+}
+
+/// A codec's ways of reading a number agree, of any bytes: `read_u`
+/// gives a number exactly where `read_u_opt` does, the same number of
+/// the same length, and that is the length `len_u` gives. For every
+/// codec.
+#[allow(dead_code)]
+fn readers_agree<C: VCodec>(data: &[u8]) -> (r: bool)
+    ensures
+        r,
+{
+    let quiet = C::read_u_opt(data);
+    let length = C::len_u(data);
+    let ghost d = data@;
+    match C::read_u(data) {
+        Ok((n, v)) => {
+            proof {
+                assert(d.take(n as int).len() == n);
+                assert(d.subrange(0, C::enc_u(v).len() as int) =~= C::enc_u(v));
+                assert(C::enc_u(v).is_prefix_of(d));
+            }
+            match quiet {
+                Some((m, w)) => {
+                    proof {
+                        assert(d =~= d.take(n as int) + d.skip(n as int));
+                        assert(d =~= d.take(m as int) + d.skip(m as int));
+                        C::lemma_u(v, w, d.skip(n as int), d.skip(m as int));
+                        assert(d.take(m as int).len() == m);
+                    }
+                    let same_length = match length {
+                        Some(k) => k == n,
+                        None => false,
+                    };
+                    n == m && v == w && same_length
+                },
+                None => false,
+            }
+        },
+        Err(_) => match quiet {
+            Some((m, w)) => {
+                proof {
+                    assert(d.take(m as int).len() == m);
+                    assert(d.subrange(0, C::enc_u(w).len() as int) =~= C::enc_u(w));
+                    assert(C::enc_u(w).is_prefix_of(d));
+                }
+                false
+            },
+            None => true,
+        },
+    }
+}
+
+/// Two numbers put in a buffer, one unsigned and one signed, make it
+/// longer by two to twenty bytes: each number takes one to ten. For
+/// every codec.
+#[allow(dead_code)]
+fn numbers_take_one_to_ten_bytes<C: VCodec>(buf: &mut Vec<u8>, a: u64, b: i64)
+    ensures
+        old(buf)@.len() + 2 <= final(buf)@.len() <= old(buf)@.len() + 20,
+{
+    C::put_u(a, buf);
+    C::put_i(b, buf);
+    proof {
+        C::lemma_u(a, a, Seq::empty(), Seq::empty());
+        C::lemma_i(b, b, Seq::empty(), Seq::empty());
+    }
+}
+
+/// What is proved of every codec, of LEB128.
+#[allow(dead_code)]
+fn codecs_leb128(n: u64, i: i64, rest: &[u8], data: &[u8]) {
+    let a = a_number_written_and_read::<Leb128>(n, rest);
+    let b = a_signed_number_written_and_read::<Leb128>(i, rest);
+    let c = numbers_one_after_another::<Leb128>(n, i);
+    let d = a_number_skipped::<Leb128>(i, n);
+    let e = readers_agree::<Leb128>(data);
+    assert(a == n && b == i && c == (n, i) && d == n && e);
+}
+
+/// What is proved of every codec, of bijou64.
+#[cfg(feature = "bijou64")]
+#[allow(dead_code)]
+fn codecs_bijou64(n: u64, i: i64, rest: &[u8], data: &[u8]) {
+    let a = a_number_written_and_read::<Bijou64>(n, rest);
+    let b = a_signed_number_written_and_read::<Bijou64>(i, rest);
+    let c = numbers_one_after_another::<Bijou64>(n, i);
+    let d = a_number_skipped::<Bijou64>(i, n);
+    let e = readers_agree::<Bijou64>(data);
+    assert(a == n && b == i && c == (n, i) && d == n && e);
+}
+
+// ── Columns written with bijou64 ─────────────────────────────
+
+/// What is proved of a column whatever its codec, of columns written
+/// with bijou64: of numbers, of numbers that may be absent, of
+/// booleans and of the client's own type.
+#[cfg(feature = "bijou64")]
+#[allow(dead_code)]
+fn columns_with_bijou64(
+    input: &Vec<u64>,
+    nullable: &Vec<Option<i64>>,
+    flags: &Vec<bool>,
+    actions: &Vec<Option<Action>>,
+    owned: Vec<bool>,
+    more: Vec<Option<i64>>,
+    bytes: &[u8],
+)
+    requires
+        input@.len() < 1_000_000,
+        nullable@.len() < 1_000_000,
+        flags@.len() < 1_000_000,
+        actions@.len() < 1_000_000,
+        owned@.len() < 1_000_000,
+{
+    round_trip::<u64, Bijou64, LenIndex>(input);
+    round_trip::<Option<i64>, Bijou64, LenIndex>(nullable);
+    round_trip::<bool, Bijou64, LenIndex>(flags);
+    round_trip::<Option<Action>, Bijou64, LenIndex>(actions);
+    load_then_save::<u64, Bijou64, LenIndex>(bytes);
+    load_then_save::<Option<Action>, Bijou64, LenIndex>(bytes);
+    two_in_one_buffer::<Option<i64>, Bijou64>(nullable, nullable);
+    one_value_only::<Action, Bijou64>(Action::Set, Action::Delete);
+    one_value_only::<Option<u64>, Bijou64>(None, Some(0));
+    one_value_only::<bool, Bijou64>(false, true);
+    slabs_and_validation::<u64, Bijou64, LenIndex>(input);
+    let col = encode_then_load::<u64, Bijou64>(input);
+    assert(col@ == input@);
+    let ghost flags_owned = owned@;
+    let col = stream_then_load::<bool, Bijou64>(owned);
+    assert(col@ == flags_owned);
+    let ghost more_owned = more@;
+    let saved = one_encoding_four_ways::<Option<i64>, Bijou64>(more);
+    assert(saved@ == VerifiedColumn::<Option<i64>, Bijou64>::encoding(more_owned));
+    let same = encoded_then_decoded::<u64, Bijou64>(input);
+    let also = decoded_or_loaded::<Option<Action>, Bijou64>(bytes);
+    assert(same && also);
+}
+
+/// Byte strings and strings in columns written with bijou64: their
+/// lengths are numbers of that codec.
+#[cfg(feature = "bijou64")]
+#[allow(dead_code)]
+fn strings_with_bijou64(input: &Vec<&[u8]>, text: &Vec<&str>)
+    requires
+        input@.len() <= 1000,
+        forall|i: int| 0 <= i < input@.len() ==> (#[trigger] input@[i])@.len() <= 1000,
+        text@.len() <= 1000,
+        forall|i: int| 0 <= i < text@.len() ==> encode_utf8((#[trigger] text@[i])@).len() <= 1000,
+{
+    proof {
+        <&[u8] as VGet>::lemma_svs(input@);
+        lemma_total(<&[u8] as VGet>::svs(input@), 1000);
+        <&str as VGet>::lemma_svs(text@);
+        lemma_total_str(<&str as VGet>::svs(text@), 1000);
+    }
+    round_trip::<Vec<u8>, Bijou64, LenIndex>(input);
+    round_trip::<String, Bijou64, LenIndex>(text);
+}
+
+/// Columns that keep sums, written with bijou64.
+#[cfg(feature = "bijou64")]
+#[allow(dead_code)]
+fn sums_with_bijou64(bytes: &[u8], target: u128) {
+    if let Some(col) = load_short_sums::<u64, Bijou64>(bytes) {
+        let at = the_place_of_a_sum::<u64, Bijou64>(&col, target);
+        let sums = running_sums::<u64, Bijou64>(&col);
+        assert(sums@.len() == col@.len());
+        assert(at matches Some(i) ==> i <= col@.len());
+    }
+}
+
+/// Delta columns written with bijou64: the differences are numbers of
+/// that codec.
+#[cfg(feature = "bijou64")]
+#[allow(dead_code)]
+fn deltas_with_bijou64(values: &Vec<i64>, nullable: &Vec<Option<u32>>, owned: Vec<i64>, bytes: &[u8]) {
+    assert(all_fit(values@));
+    assert(all_fit(nullable@));
+    assert(all_fit(owned@));
+    let back = delta_round_trip::<i64, Bijou64>(values.as_slice());
+    assert(back@ == values@);
+    let back = delta_round_trip::<Option<u32>, Bijou64>(nullable.as_slice());
+    assert(back@ == nullable@);
+    delta_load_then_save::<i64, Bijou64>(bytes);
+    if let Some(col) = delta_encode_then_load::<Option<u32>, Bijou64>(nullable) {
+        assert(col@ == nullable@);
+        if let Some(again) = delta_save_then_load::<Option<u32>, Bijou64>(&col) {
+            assert(again@ == nullable@);
+        }
+    }
+    let ghost owned_values = owned@;
+    let saved = delta_one_encoding_four_ways::<i64, Bijou64>(owned);
+    assert(saved@ == VerifiedDeltaColumn::<i64, Bijou64>::encoding(owned_values));
+    let out = delta_encoded_then_decoded::<i64, Bijou64>(values);
+    assert(out@ == values@);
+    if let Some(p) = delta_decoded_or_loaded::<i64, Bijou64>(bytes) {
+        assert(p.1@ == p.0@);
+    }
+}
+
+// ── A codec named by an import ───────────────────────────────
+
+/// The module `leb128` names the column types with LEB128 as their
+/// codec: they are the types that name no codec.
+#[allow(dead_code)]
+fn leb128_by_its_import(a: u64, b: u64) -> (r: (VerifiedColumn<u64>, Vec<u8>))
+    ensures
+        r.0@ == seq![a, b],
+        r.1@ == VerifiedColumn::<u64, Leb128>::encoding(seq![a, b]),
+{
+    let mut col = leb128::VerifiedColumn::<u64>::new();
+    col.push(a);
+    col.push(b);
+    assert(col@ =~= seq![a, b]);
+    let bytes = col.save();
+    (col, bytes)
+}
+
+/// The module `bijou` names the column types with bijou64 as their
+/// codec.
+#[cfg(feature = "bijou64")]
+#[allow(dead_code)]
+fn bijou64_by_its_import(a: u64, b: u64) -> (r: (VerifiedColumn<u64, Bijou64>, Vec<u8>))
+    ensures
+        r.0@ == seq![a, b],
+        r.1@ == VerifiedColumn::<u64, Bijou64>::encoding(seq![a, b]),
+{
+    let mut col = bijou::VerifiedColumn::<u64>::new();
+    col.push(a);
+    col.push(b);
+    assert(col@ =~= seq![a, b]);
+    let bytes = col.save();
+    (col, bytes)
+}
+
+/// A column written with one codec, written anew with the other: a
+/// column of the same values. The two modules are imported side by
+/// side and each type is named with its codec's.
+#[cfg(feature = "bijou64")]
+#[allow(dead_code)]
+fn from_one_codec_to_the_other(col: &leb128::VerifiedColumn<Option<i64>>) -> (r: bijou::VerifiedColumn<Option<i64>>)
+    ensures
+        r@ == col@,
+{
+    let values = col.to_vec();
+    bijou::VerifiedColumn::<Option<i64>>::from_values(values.as_slice())
+}
+
+/// A delta column written with one codec, written anew with the other.
+#[cfg(feature = "bijou64")]
+#[allow(dead_code)]
+fn deltas_from_one_codec_to_the_other(col: &leb128::VerifiedDeltaColumn<i64>) -> (r: bijou::VerifiedDeltaColumn<i64>)
+    ensures
+        r@ == col@,
+{
+    let values = col.to_vec();
+    assert(all_fit(values@));
+    bijou::VerifiedDeltaColumn::<i64>::from_values(values.as_slice())
+}
+
+/// The streaming types named by a codec's module: an encoder given two
+/// numbers saves them, and a decoder made of what it saved gives the
+/// two.
+#[cfg(feature = "bijou64")]
+#[allow(dead_code)]
+fn streamed_with_bijou64(a: u64, b: u64) -> (r: Vec<u64>)
+    ensures
+        r@ == seq![a, b],
+{
+    let mut enc = bijou::VerifiedEncoder::<u64>::new();
+    enc.append(a);
+    enc.append(b);
+    assert(enc@ =~= seq![a, b]);
+    let bytes = enc.save();
+    let dec = bijou::VerifiedDecoder::<u64>::new(bytes.as_slice());
+    let out = read_all(dec);
+    proof {
+        <u64 as VGet>::lemma_svs(out@);
+        assert(out@ =~= <u64 as VGet>::svs(out@));
+    }
+    out
+}
+
+/// The streaming types of delta columns named by a codec's module.
+#[cfg(feature = "bijou64")]
+#[allow(dead_code)]
+fn deltas_streamed_with_bijou64(a: i64, b: i64) -> (r: Vec<i64>)
+    ensures
+        r@ == seq![a, b],
+{
+    let mut enc = bijou::VerifiedDeltaEncoder::<i64>::new();
+    enc.append(a);
+    enc.append(b);
+    assert(enc@ =~= seq![a, b]);
+    let bytes = enc.save();
+    let dec = bijou::VerifiedDeltaDecoder::<i64>::new(bytes.as_slice());
+    delta_read_all(dec)
 }
 
 } // verus!

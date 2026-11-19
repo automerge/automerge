@@ -355,6 +355,7 @@ pub proof fn lemma_be_padded(s: Seq<u8>, a: Seq<u8>, t: nat)
 #[inline(always)]
 fn be8(b: [u8; 8]) -> (r: u64)
     ensures r as nat == be_at(b@, 0, 8),
+    no_unwind
 {
     proof {
         reveal_with_fuel(be_at, 9);
@@ -391,6 +392,7 @@ pub open spec fn decode_ok(buf: Seq<u8>, r: Result<(u64, usize), DecodeError>) -
 #[verifier::spinoff_prover]
 pub fn decode(buf: &[u8]) -> (r: Result<(u64, usize), DecodeError>)
     ensures decode_ok(buf@, r),
+    no_unwind
 {
     proof { lemma_constants(); }
     let n = buf.len();
@@ -814,6 +816,7 @@ pub fn encoded_len_at(data: &[u8]) -> (r: Option<usize>)
             Some((_, n)) => Some(n as usize),
             None => None::<usize>,
         }),
+    no_unwind
 {
     let b = match data.split_first() {
         Some((&b, _)) => b,
@@ -861,6 +864,7 @@ pub fn zigzag(n: i64) -> (r: u64)
 #[inline]
 pub fn unzigzag(u: u64) -> (r: i64)
     ensures spec_zigzag(r as int) == u as nat,
+    no_unwind
 {
     assert(u >> 1 <= 0x7FFF_FFFF_FFFF_FFFFu64 && u & 1 <= 1) by (bit_vector);
     assert(u >> 1 == u / 2 && u & 1 == u % 2) by (bit_vector);
@@ -901,6 +905,7 @@ pub fn decode_signed(buf: &[u8]) -> (r: Result<(i64, usize), DecodeError>)
             Err(DecodeError::Overflow) => spec_decode(buf@) is Some
                 && spec_decode(buf@).unwrap().0 > u64::MAX,
         },
+    no_unwind
 {
     match decode(buf) {
         Ok((value, consumed)) => Ok((unzigzag(value), consumed)),

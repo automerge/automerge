@@ -76,7 +76,9 @@
 //!
 //! The second parameter of `VerifiedColumn<V, C>` is the codec the
 //! column's numbers are written with, a [`VCodec`]. It is [`Leb128`]
-//! where none is named, which is for now the only one.
+//! where none is named. The other is `Bijou64`, behind the feature
+//! `bijou64`. The modules [`leb128`] and `bijou` give every column
+//! type with its codec named, so that one import picks the codec.
 //!
 //! # Prefix columns
 //!
@@ -553,6 +555,8 @@
 
 mod acc;
 mod acc_iter;
+#[cfg(feature = "bijou64")]
+pub mod bijou;
 pub(crate) mod bytes;
 #[cfg(verus_keep_ghost)]
 mod client_proof;
@@ -562,6 +566,7 @@ mod decoder;
 mod delta;
 mod encoder;
 pub(crate) mod kind;
+pub mod leb128;
 pub(crate) mod model;
 mod prefix;
 mod prefix_iter;

@@ -15398,3 +15398,713 @@ fn raw_cuts_follow_splices() {
         raw_cut_edits(seed, [1, 2, 4, 16, 64, 4096][seed as usize % 6]);
     }
 }
+
+// ── The second codec, bijou64 ────────────────────────────────
+
+/// The modules that name the codec at the import give the types of
+/// `hexane::verified` themselves, with LEB128 as their codec.
+#[test]
+fn codec_named_at_the_import() {
+    use hexane::verified::leb128 as l;
+    let col: l::VerifiedColumn<u64> = VerifiedColumn::<u64>::from_values(&[1, 2]);
+    let bytes = col.save();
+    let _: l::VerifiedPrefixColumn<u64> = VerifiedPrefixColumn::<u64>::new();
+    let _: l::VerifiedAccColumn<Mark> = VerifiedAccColumn::<Mark>::new();
+    let deltas: l::VerifiedDeltaColumn<i64> = VerifiedDeltaColumn::<i64>::from_values(&[5, 6]);
+    let delta_bytes = deltas.save();
+    let mut e: l::VerifiedEncoder<'_, u64> = VerifiedEncoder::<u64>::new();
+    e.append(1);
+    e.append(2);
+    assert_eq!(e.save(), bytes);
+    let d: l::VerifiedDecoder<'_, u64> = VerifiedDecoder::<u64>::new(&bytes);
+    assert_eq!(d.collect::<Vec<u64>>(), [1, 2]);
+    let mut e: l::VerifiedDeltaEncoder<'_, i64> = VerifiedDeltaEncoder::<i64>::new();
+    e.append(5);
+    e.append(6);
+    assert_eq!(e.save(), delta_bytes);
+    let d: l::VerifiedDeltaDecoder<'_, i64> = VerifiedDeltaDecoder::<i64>::new(&delta_bytes);
+    assert_eq!(d.collect::<Vec<i64>>(), [5, 6]);
+}
+
+/// The numbers of a codec of the verified API are those of the same codec
+/// of the old API: written to the same bytes, read from any bytes to the
+/// same value or refused in the same words, and of the same length.
+fn codec_reads<C: hexane::verified::VCodec + Codec>(data: &[u8]) {
+    let (new, old) = (C::read_u(data), C::try_read_unsigned(data));
+    match (&new, &old) {
+        (Ok(a), Ok(b)) => assert_eq!(a, b, "{data:?}"),
+        (Err(a), Err(b)) => assert_eq!(a.to_string(), b.to_string(), "{data:?}"),
+        _ => panic!("{new:?} but {old:?} of {data:?}"),
+    }
+    assert_eq!(C::read_u_opt(data), new.as_ref().ok().copied(), "{data:?}");
+    assert_eq!(C::read_u_opt(data), C::read_unsigned(data), "{data:?}");
+    assert_eq!(C::len_u(data), C::unsigned_len(data), "{data:?}");
+    if let Ok((n, _)) = new {
+        assert_eq!(C::len_u(data), Some(n), "{data:?}");
+    }
+
+    let (new, old) = (C::read_i(data), C::try_read_signed(data));
+    match (&new, &old) {
+        (Ok(a), Ok(b)) => assert_eq!(a, b, "{data:?}"),
+        (Err(a), Err(b)) => assert_eq!(a.to_string(), b.to_string(), "{data:?}"),
+        _ => panic!("{new:?} but {old:?} of {data:?}"),
+    }
+    assert_eq!(C::read_i_opt(data), new.as_ref().ok().copied(), "{data:?}");
+    assert_eq!(C::read_i_opt(data), C::read_signed(data), "{data:?}");
+    assert_eq!(C::len_i(data), C::signed_len(data), "{data:?}");
+    if let Ok((n, _)) = new {
+        assert_eq!(C::len_i(data), Some(n), "{data:?}");
+    }
+}
+
+fn codec_numbers<C: hexane::verified::VCodec + Codec>() {
+    let mut rng = Rng(0xc0_dec5);
+    for round in 0..4000 {
+        let n = rng.number();
+        let i = rng.number() as i64;
+        let rest: Vec<u8> = (0..rng.below(4)).map(|_| rng.next() as u8).collect();
+
+        // written as the old API writes it, after what the buffer holds
+        let mut unsigned = vec![0xAA];
+        C::put_u(n, &mut unsigned);
+        assert_eq!(unsigned[0], 0xAA);
+        unsigned.remove(0);
+        assert_eq!(unsigned, C::encode_unsigned(n).as_bytes(), "{n}");
+        let mut signed = vec![0xAA];
+        C::put_i(i, &mut signed);
+        assert_eq!(signed[0], 0xAA);
+        signed.remove(0);
+        assert_eq!(signed, C::encode_signed(i).as_bytes(), "{i}");
+
+        // read back, whatever comes after
+        let data = [&unsigned[..], &rest[..]].concat();
+        assert_eq!(C::read_u(&data).unwrap(), (unsigned.len(), n));
+        assert_eq!(C::read_u_opt(&data), Some((unsigned.len(), n)));
+        assert_eq!(C::len_u(&data), Some(unsigned.len()));
+        codec_reads::<C>(&data);
+        let data = [&signed[..], &rest[..]].concat();
+        assert_eq!(C::read_i(&data).unwrap(), (signed.len(), i));
+        assert_eq!(C::read_i_opt(&data), Some((signed.len(), i)));
+        assert_eq!(C::len_i(&data), Some(signed.len()));
+        codec_reads::<C>(&data);
+
+        // and what is no number, or not all of one: a number cut short,
+        // bytes at random, and bytes that say a number is long
+        let mut data = if round % 2 == 0 { unsigned } else { signed };
+        match rng.below(4) {
+            0 => data.truncate(rng.below(data.len() + 1)),
+            1 => data = (0..rng.below(12)).map(|_| rng.next() as u8).collect(),
+            2 => data = vec![0xFF - rng.below(3) as u8; rng.below(12)],
+            _ => {
+                let at = rng.below(data.len());
+                data[at] = rng.next() as u8;
+                data.truncate(at + 1 + rng.below(3));
+            }
+        }
+        codec_reads::<C>(&data);
+    }
+}
+
+/// The count that heads a run of unlike values, rewritten in place by the
+/// verified API's codec as by the old one's: the bytes before it and after
+/// it stay, and the buffer grows or shrinks by what is returned.
+fn codec_headers<C: hexane::verified::VCodec + Codec>() {
+    let mut rng = Rng(0x04ea_de25);
+    for _ in 0..1500 {
+        let before: Vec<u8> = (0..rng.below(5)).map(|_| rng.next() as u8).collect();
+        let after: Vec<u8> = (0..rng.below(5)).map(|_| rng.next() as u8).collect();
+        let was = rng.number() as i64;
+        let total = ((rng.number() >> 1) as usize).max(1);
+        let mut buf = before.clone();
+        C::put_i(was, &mut buf);
+        buf.extend_from_slice(&after);
+        let len = buf.len() as i64;
+        let mut old_buf = buf.clone();
+        let grew = C::rewrite_header(&mut buf, before.len(), total);
+        let old_grew = C::rewrite_lit_header(&mut old_buf, before.len(), total);
+        let mut want = before.clone();
+        C::put_i(-(total as i64), &mut want);
+        want.extend_from_slice(&after);
+        assert_eq!(buf, want, "{was} to {total}");
+        assert_eq!(old_buf, want, "{was} to {total}");
+        assert_eq!(
+            (grew, old_grew),
+            (want.len() as i64 - len, want.len() as i64 - len)
+        );
+    }
+}
+
+#[test]
+fn codecs_agree_leb128() {
+    codec_numbers::<Leb128>();
+    codec_headers::<Leb128>();
+}
+
+/// The verified API with bijou64 as its codec (`hexane::verified::bijou`)
+/// against the old API with the same (`hexane::bijou`).
+#[cfg(feature = "bijou64")]
+mod bijou {
+    use super::*;
+    use hexane::verified::{bijou as vb, VCodec};
+    use hexane::{bijou as ob, Bijou64};
+
+    /// A value type of both APIs' columns, whichever the codec.
+    trait BKind: Kind + VValue<Bijou64> {}
+
+    impl<T: Kind + VValue<Bijou64>> BKind for T {}
+
+    fn new_vals<T: BKind>(v: &vb::VerifiedColumn<T>) -> Vec<T> {
+        v.to_vec().into_iter().map(T::keep).collect()
+    }
+
+    fn old_vals<T: BKind>(c: &ob::Column<T>) -> Vec<T> {
+        c.to_vec().into_iter().map(old).collect()
+    }
+
+    #[test]
+    fn codecs_agree() {
+        codec_numbers::<Bijou64>();
+        codec_headers::<Bijou64>();
+    }
+
+    /// A number cut short and a number too great for a `u64` are refused
+    /// in the old API's words, by the codec and by a load.
+    #[test]
+    fn refusals_in_the_old_words() {
+        let short: &[u8] = &[0xF9, 0x00];
+        let over: &[u8] = &[0xFF; 9];
+        for (data, why) in [
+            (short, "buffer too short for bijou64 encoding"),
+            (over, "bijou64 tier 8 payload overflows u64"),
+        ] {
+            let new = <Bijou64 as VCodec>::read_u(data).unwrap_err().to_string();
+            let old = Bijou64::try_read_unsigned(data).unwrap_err().to_string();
+            assert_eq!(new, old);
+            assert!(new.contains(&format!("bijou64: {why}")), "{new}");
+            let new = <Bijou64 as VCodec>::read_i(data).unwrap_err().to_string();
+            let old = Bijou64::try_read_signed(data).unwrap_err().to_string();
+            assert_eq!(new, old);
+            assert!(new.contains(&format!("bijou64s: {why}")), "{new}");
+
+            // as the count of a run, and as the value of a run of two
+            assert!(!same_load::<u64>(data));
+            let run = [&[0x04][..], data].concat();
+            assert!(!same_load::<u64>(&run));
+            let new = vb::VerifiedColumn::<u64>::load(&run)
+                .unwrap_err()
+                .to_string();
+            assert!(new.contains(why), "{new}");
+        }
+    }
+
+    /// What a column saves with bijou64, byte for byte, beside what it
+    /// saves with LEB128.
+    #[test]
+    fn bytes_are_bijou64() {
+        fn saved<T: BKind>(values: &[T]) -> (Vec<u8>, Vec<u8>) {
+            let bytes = vb::VerifiedColumn::<T>::from_values(&lent(values)).save();
+            assert_eq!(bytes, ob::Column::<T>::from_values(values.to_vec()).save());
+            let leb = VerifiedColumn::<T>::from_values(&lent(values)).save();
+            assert_eq!(leb, Column::<T>::from_values(values.to_vec()).save());
+            (bytes, leb)
+        }
+        // one value: a run of one unlike value, counted below zero
+        assert_eq!(saved(&[200u64]), (vec![0x01, 0xC8], vec![0x7F, 0xC8, 0x01]));
+        assert_eq!(saved(&[-3i64]), (vec![0x01, 0x05], vec![0x7F, 0x7D]));
+        // a run of three; a run of two nulls, which the codecs write alike
+        assert_eq!(saved(&[7u64; 3]), (vec![0x06, 0x07], vec![0x03, 0x07]));
+        assert_eq!(
+            saved(&[None::<u64>; 2]),
+            (vec![0x00, 0x02], vec![0x00, 0x02])
+        );
+        // the greatest number of one byte, and the least of two
+        assert_eq!(saved(&[247u64]).0, [0x01, 0xF7]);
+        assert_eq!(saved(&[248u64]).0, [0x01, 0xF8, 0x00]);
+        assert_eq!(saved(&[u64::MAX]).0.len(), 10);
+        assert_eq!(saved::<u64>(&[]), (vec![], vec![]));
+    }
+
+    /// Both columns hold `model`, read alike, lie in as many slabs and save
+    /// the same bytes.
+    fn agree<T: BKind>(v: &vb::VerifiedColumn<T>, c: &ob::Column<T>, model: &[T], ctx: &str) {
+        assert_eq!(
+            (v.len(), v.is_empty()),
+            (model.len(), model.is_empty()),
+            "{ctx}"
+        );
+        assert_eq!(
+            (c.len(), c.is_empty()),
+            (model.len(), model.is_empty()),
+            "{ctx}"
+        );
+        assert_eq!(new_vals(v), model, "{ctx}");
+        assert_eq!(old_vals(c), model, "{ctx}");
+        let mut it = v.iter();
+        for m in model {
+            assert_eq!(it.next().map(T::keep).as_ref(), Some(m), "{ctx}");
+        }
+        assert!(it.next().is_none(), "{ctx}");
+        assert!(v.get(model.len()).is_none(), "{ctx}");
+        assert_eq!(v.save(), c.save(), "{ctx}");
+        assert_eq!(v.slab_count(), c.slab_count(), "{ctx}");
+    }
+
+    /// Whether both APIs load `bytes`, into columns that are alike; if not,
+    /// both refuse them, and in the same words. The checked decoders take
+    /// what the loads take, and read it alike.
+    fn same_load<T: BKind>(bytes: &[u8]) -> bool {
+        let x = vb::VerifiedDecoder::<T>::try_new(bytes);
+        let y = ob::try_decoder::<T>(bytes);
+        let decodes = match (x, y) {
+            (Ok(x), Ok(y)) => {
+                // a spoilt count can be of more values than there is time for
+                let (x, y) = (x.take(3000).map(T::keep), y.take(3000).map(old));
+                assert!(x.eq(y), "the decoders read {bytes:?} differently");
+                true
+            }
+            (Err(x), Err(y)) => {
+                assert_eq!(x.to_string(), y.to_string(), "{bytes:?}");
+                false
+            }
+            (x, y) => panic!("a decoder: {} but {} of {bytes:?}", x.is_ok(), y.is_ok()),
+        };
+        let v = vb::VerifiedColumn::<T>::load(bytes);
+        let c = ob::Column::<T>::load(bytes);
+        match (v, c) {
+            (Ok(v), Ok(c)) => {
+                assert!(decodes, "no decoder of {bytes:?}, which load");
+                assert_eq!(v.len(), c.len());
+                if v.len() <= 20_000 {
+                    assert_eq!(new_vals(&v), old_vals(&c));
+                } else {
+                    for i in [0, 1, v.len() / 2, v.len() - 1] {
+                        assert_eq!(v.get(i).map(T::keep), c.get(i).map(old));
+                    }
+                }
+                // what loads is canonical: it is what its values save to
+                assert_eq!(v.save(), bytes);
+                assert_eq!(c.save(), bytes);
+                true
+            }
+            (Err(v), Err(c)) => {
+                assert_eq!(v.to_string(), c.to_string(), "{bytes:?}");
+                false
+            }
+            (v, c) => panic!(
+                "the loaders disagree on {bytes:?}: {:?}, {:?}",
+                v.map(|v| v.len()),
+                c.map(|c| c.len())
+            ),
+        }
+    }
+
+    /// What the columns save is what the verified API's encoder writes,
+    /// given the values at once or one by one; both APIs load it and both
+    /// decoders read it.
+    fn streams<T: BKind>(v: &vb::VerifiedColumn<T>, model: &[T], ctx: &str) {
+        let bytes = v.save();
+        assert!(same_load::<T>(&bytes), "{ctx}");
+        let loaded = vb::VerifiedColumn::<T>::load(&bytes).unwrap();
+        assert_eq!(new_vals(&loaded), model, "{ctx}");
+        let built = vb::VerifiedColumn::<T>::from_values(&lent(model));
+        assert_eq!(built.save(), bytes, "{ctx}");
+        assert_eq!(
+            vb::VerifiedEncoder::<T>::encode(lent(model)),
+            bytes,
+            "{ctx}"
+        );
+        let mut e = vb::VerifiedEncoder::<T>::new();
+        for m in model {
+            e.append(m.lend());
+        }
+        assert_eq!(e.len(), model.len(), "{ctx}");
+        assert_eq!(e.save(), bytes, "{ctx}");
+        let read: Vec<T> = vb::VerifiedDecoder::<T>::new(&bytes).map(T::keep).collect();
+        assert_eq!(read, model, "{ctx}");
+        let read: Vec<T> = ob::decoder::<T>(&bytes).map(old).collect();
+        assert_eq!(read, model, "{ctx}");
+    }
+
+    fn columns<T: BKind>() {
+        for seed in 1..=4u64 {
+            let mut rng = Rng(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) ^ 0xb170);
+            let budget = [2, 4, 64][rng.below(3)];
+            let mut v = vb::VerifiedColumn::<T>::with_max_segments(budget);
+            let mut c = ob::Column::<T>::with_max_segments(budget);
+            let mut model: Vec<T> = vec![];
+            for step in 0..50 {
+                let ctx = format!("seed {seed} step {step}");
+                match rng.below(8) {
+                    0..=3 => {
+                        let at = rng.below(model.len() + 1);
+                        let del = rng.below((model.len() - at).min(12) + 1);
+                        let ins: Vec<T> = rng.values(30);
+                        v.splice(at, del, &lent(&ins));
+                        c.splice(at, del, ins.iter().cloned());
+                        model.splice(at..at + del, ins);
+                    }
+                    4 => {
+                        let at = rng.below(model.len() + 1);
+                        let x = T::fresh(&mut rng);
+                        v.insert(at, x.lend());
+                        c.insert(at, x.clone());
+                        model.insert(at, x);
+                    }
+                    5 => {
+                        let x = match model.last() {
+                            Some(last) => rng.value(last),
+                            None => T::fresh(&mut rng),
+                        };
+                        v.push(x.lend());
+                        c.push(x.clone());
+                        model.push(x);
+                    }
+                    6 => {
+                        if !model.is_empty() {
+                            let at = rng.below(model.len());
+                            v.remove(at);
+                            c.remove(at);
+                            model.remove(at);
+                        }
+                    }
+                    _ => {
+                        let at = rng.below(model.len() + 1);
+                        let n = rng.below((model.len() - at).min(20) + 1);
+                        v.remove_n(at, n);
+                        c.remove_n(at, n);
+                        model.drain(at..at + n);
+                    }
+                }
+                agree(&v, &c, &model, &ctx);
+                if !model.is_empty() {
+                    let i = rng.below(model.len());
+                    assert_eq!(v.get(i).map(T::keep).as_ref(), Some(&model[i]), "{ctx}");
+                    assert_eq!(c.get(i).map(old).as_ref(), Some(&model[i]), "{ctx}");
+                }
+                if step % 10 == 9 {
+                    streams(&v, &model, &ctx);
+                }
+            }
+        }
+    }
+
+    /// The columns of the two APIs, with bijou64 as their codec, are alike
+    /// under the same edits, for every type of value.
+    #[test]
+    fn columns_agree() {
+        for_each_kind!(columns);
+    }
+
+    fn spoilt<T: BKind>() {
+        let mut rng = Rng(0xb1_7064);
+        let (mut taken, mut refused) = (0, 0);
+        for _ in 0..80 {
+            let model: Vec<T> = rng.values(30);
+            let mut bytes = ob::Column::<T>::from_values(model).save();
+            match rng.below(5) {
+                0 => bytes.truncate(rng.below(bytes.len() + 1)),
+                1 => bytes = (0..rng.below(12)).map(|_| rng.next() as u8).collect(),
+                2 => {
+                    let at = rng.below(bytes.len() + 1);
+                    bytes.insert(at, rng.next() as u8);
+                }
+                3 => {
+                    let at = rng.below(bytes.len() + 1);
+                    bytes.insert(at, 0xFF - rng.below(8) as u8);
+                }
+                _ => {
+                    if !bytes.is_empty() {
+                        let at = rng.below(bytes.len());
+                        bytes[at] = rng.next() as u8;
+                    }
+                }
+            }
+            if same_load::<T>(&bytes) {
+                taken += 1;
+            } else {
+                refused += 1;
+            }
+        }
+        assert!(taken > 0 && refused > 0, "{taken} taken, {refused} refused");
+    }
+
+    /// Bytes a column saved and then spoilt, and bytes at random: both
+    /// APIs take the same of them, and refuse the rest in the same words.
+    #[test]
+    fn loads_agree() {
+        for_each_kind!(spoilt);
+    }
+
+    /// The same values kept with either codec: what one column gives, the
+    /// other is made of; and the bytes of one codec are no column of the
+    /// other, or are one that both APIs load alike.
+    fn across<T: BKind>() {
+        let mut rng = Rng(0xac_2055);
+        for _ in 0..12 {
+            let model: Vec<T> = rng.values(40);
+            let leb = VerifiedColumn::<T>::from_values(&lent(&model));
+            let bij = vb::VerifiedColumn::<T>::from_values(&leb.to_vec());
+            assert_eq!(new_vals(&bij), model);
+            let back = VerifiedColumn::<T>::from_values(&bij.to_vec());
+            assert_eq!(back.save(), leb.save());
+            same_load::<T>(&leb.save());
+            check_same_load::<T>(&bij.save());
+        }
+    }
+
+    #[test]
+    fn one_codec_to_the_other() {
+        for_each_kind!(across);
+    }
+
+    /// The types of `hexane::verified::bijou` are those of
+    /// `hexane::verified` with the codec named.
+    #[test]
+    fn named_at_the_import() {
+        use hexane::verified as v;
+        let bytes = [];
+        let _: vb::VerifiedColumn<u64> = v::VerifiedColumn::<u64, Bijou64>::new();
+        let _: vb::VerifiedPrefixColumn<u64> = v::VerifiedPrefixColumn::<u64, Bijou64>::new();
+        let _: vb::VerifiedAccColumn<Mark> = v::VerifiedAccColumn::<Mark, Bijou64>::new();
+        let _: vb::VerifiedDeltaColumn<i64> = v::VerifiedDeltaColumn::<i64, Bijou64>::new();
+        let _: vb::VerifiedEncoder<'_, u64> = v::VerifiedEncoder::<u64, Bijou64>::new();
+        let _: vb::VerifiedDecoder<'_, u64> = v::VerifiedDecoder::<u64, Bijou64>::new(&bytes);
+        let _: vb::VerifiedDeltaEncoder<'_, i64> = v::VerifiedDeltaEncoder::<i64, Bijou64>::new();
+        let _: vb::VerifiedDeltaDecoder<'_, i64> =
+            v::VerifiedDeltaDecoder::<i64, Bijou64>::new(&bytes);
+    }
+
+    /// A prefix column with bijou64 as its codec answers from its sums what
+    /// its values add up to and what the old API's answers, and saves the
+    /// old one's bytes.
+    fn sums<T: Totalled + VValue<Bijou64>>() {
+        let mut rng = Rng(0x50f5_b170);
+        for round in 0..6 {
+            let mut model: Vec<T> = rng.values(60);
+            let mut p = vb::VerifiedPrefixColumn::<T>::from_values(&lent(&model));
+            let mut c = ob::PrefixColumn::<T>::from_values(model.clone());
+            for step in 0..6 {
+                let ctx = format!("round {round} step {step}");
+                let at = rng.below(model.len() + 1);
+                let del = rng.below((model.len() - at).min(8) + 1);
+                let ins: Vec<T> = rng.values(12);
+                p.splice(at, del, &lent(&ins));
+                c.splice(at, del, ins.iter().cloned());
+                model.splice(at..at + del, ins);
+
+                assert_eq!(p.save(), c.save(), "{ctx}");
+                let kept: Vec<T> = p.to_vec().into_iter().map(T::keep).collect();
+                assert_eq!(kept, model, "{ctx}");
+                let before = sums_before(&model);
+                let at = |i: usize| before[i.min(model.len())];
+                for i in 0..model.len() + 2 {
+                    assert_eq!(T::new_sum(p.get_prefix(i)), at(i), "{ctx}");
+                    assert_eq!(T::old_sum(c.get_prefix(i)), at(i), "{ctx}");
+                    assert_eq!(T::new_sum(p.get_total(i)), at(i + 1), "{ctx}");
+                    assert_eq!(T::old_sum(c.get_total(i)), at(i + 1), "{ctx}");
+                }
+                for _ in 0..8 {
+                    let start = rng.below(model.len() + 2);
+                    let end = rng.below(model.len() + 2);
+                    let want = if start < end { at(end) - at(start) } else { 0 };
+                    assert_eq!(T::new_sum(p.sum_range(start, end)), want, "{ctx}");
+                    assert_eq!(T::old_sum(c.sum_range(start..end)), want, "{ctx}");
+                }
+            }
+            let loaded = vb::VerifiedPrefixColumn::<T>::load(&c.save()).unwrap();
+            assert_eq!(loaded.save(), p.save());
+            let last = model.len();
+            assert_eq!(
+                T::new_sum(loaded.get_prefix(last)),
+                sums_before(&model)[last]
+            );
+        }
+    }
+
+    #[test]
+    fn sums_agree() {
+        sums::<u64>();
+        sums::<i64>();
+        sums::<u32>();
+        sums::<NonZeroU32>();
+        sums::<bool>();
+        sums::<Option<u64>>();
+        sums::<Option<i64>>();
+        sums::<Option<u32>>();
+        sums::<Option<NonZeroU32>>();
+    }
+
+    /// A prefix column with bijou64 as its codec is searched by sum as the
+    /// old API's is.
+    #[test]
+    fn sums_are_searched() {
+        let mut rng = Rng(0x005e_a2c4);
+        for _ in 0..20 {
+            let model: Vec<u64> = (0..rng.below(80)).map(|_| rng.next() % 5).collect();
+            let p = vb::VerifiedPrefixColumn::<u64>::from_values(&model);
+            let c = ob::PrefixColumn::<u64>::from_values(model.clone());
+            let all: u128 = model.iter().map(|&m| m as u128).sum();
+            for t in 0..all + 3 {
+                assert_eq!(p.get_index_for_prefix(t), c.get_index_for_prefix(t));
+                assert_eq!(p.get_index_for_total(t), c.get_index_for_total(t));
+            }
+        }
+    }
+
+    /// An accumulator column with bijou64 as its codec gives what the same
+    /// values give with LEB128, and saves what a plain column of them
+    /// saves with bijou64.
+    fn accs<T: Accd + VValue<Bijou64>>() {
+        let mut rng = Rng(0xacc5_b170);
+        for _ in 0..6 {
+            let model: Vec<T> = rng.values(60);
+            let a = vb::VerifiedAccColumn::<T>::from_values(&lent(&model));
+            let l = VerifiedAccColumn::<T>::from_values(&lent(&model));
+            let plain = vb::VerifiedColumn::<T>::from_values(&lent(&model));
+            assert_eq!(a.save(), plain.save());
+            let kept: Vec<T> = a.to_vec().into_iter().map(T::keep).collect();
+            assert_eq!(kept, model);
+            for i in 0..model.len() + 2 {
+                assert!(a.get_prefix(i) == l.get_prefix(i));
+                assert!(a.get_total(i) == l.get_total(i));
+                let end = i + rng.below(model.len() + 1);
+                assert!(a.sum_range(i, end) == l.sum_range(i, end));
+            }
+            let loaded = vb::VerifiedAccColumn::<T>::load(&a.save()).unwrap();
+            assert!(loaded.get_prefix(model.len()) == l.get_prefix(model.len()));
+        }
+    }
+
+    #[test]
+    fn accumulators_agree() {
+        accs::<Mark>();
+        accs::<Option<Mark>>();
+        accs::<Step>();
+        accs::<Option<Step>>();
+    }
+
+    /// A value type of both APIs' delta columns, whichever the codec.
+    trait BDelta: Deltad + VDeltaValue<Bijou64> {}
+
+    impl<T: Deltad + VDeltaValue<Bijou64>> BDelta for T {}
+
+    /// Whether both APIs load `bytes` as a delta column, into columns that
+    /// are alike, and make checked decoders of them that read alike; if
+    /// not, they refuse them in the same words.
+    fn same_delta_load<T: BDelta>(bytes: &[u8]) -> bool {
+        let x = vb::VerifiedDeltaDecoder::<T>::try_new(bytes);
+        let y = ob::DeltaDecoder::<T>::try_new(bytes);
+        match (x, y) {
+            (Ok(x), Ok(y)) => assert!(x.take(3000).eq(y.take(3000)), "{bytes:?}"),
+            (Err(x), Err(y)) => assert_eq!(x.to_string(), y.to_string(), "{bytes:?}"),
+            (x, y) => panic!("a decoder: {} but {} of {bytes:?}", x.is_ok(), y.is_ok()),
+        }
+        let new = vb::VerifiedDeltaColumn::<T>::load(bytes);
+        let old = ob::DeltaColumn::<T>::load(bytes);
+        match (new, old) {
+            (Ok(new), Ok(old)) => {
+                assert_eq!(new.len(), old.len(), "{bytes:?}");
+                let len = new.len();
+                for i in [0, 1, 2, len / 2, len.saturating_sub(1), len] {
+                    assert_eq!(new.get(i), old.get(i), "{bytes:?}");
+                }
+                true
+            }
+            (Err(new), Err(old)) => {
+                assert_eq!(new.to_string(), old.to_string(), "{bytes:?}");
+                false
+            }
+            (new, old) => panic!("a load: {} but {} of {bytes:?}", new.is_ok(), old.is_ok()),
+        }
+    }
+
+    fn deltas<T: BDelta>(seed: u64) {
+        let mut rng = Rng(seed.wrapping_mul(0x9e37_79b9).wrapping_add(0xde17) | 1);
+        let mut last = 0;
+        let mut some = |rng: &mut Rng, n: usize| -> Vec<T> {
+            (0..n)
+                .map(|_| {
+                    let (v, l) = T::near(rng, last);
+                    last = l;
+                    v
+                })
+                .collect()
+        };
+        let n = rng.below(120);
+        let mut model = some(&mut rng, n);
+        let mut new = vb::VerifiedDeltaColumn::<T>::from_values(&model);
+        let mut old = ob::DeltaColumn::<T>::from_values(model.clone());
+        for step in 0..20 {
+            let ctx = format!("seed {seed} step {step}");
+            let at = rng.below(model.len() + 1);
+            let del = rng.below((model.len() - at).min(6) + 1);
+            let n = rng.below(9);
+            let values = some(&mut rng, n);
+            new.splice(at, del, &values);
+            old.splice(at, del, values.clone());
+            model.splice(at..at + del, values);
+            assert_eq!((new.len(), old.len()), (model.len(), model.len()), "{ctx}");
+            assert_eq!(new.to_vec(), model, "{ctx}");
+            for i in 0..model.len() + 2 {
+                assert_eq!(new.get(i), old.get(i), "{ctx}");
+            }
+            assert_eq!(new.save(), old.save(), "{ctx}");
+        }
+
+        // what the columns save: loaded, written by the encoder at once
+        // and value by value, and read by both decoders
+        let bytes = new.save();
+        assert!(same_delta_load::<T>(&bytes));
+        let loaded = vb::VerifiedDeltaColumn::<T>::load(&bytes).unwrap();
+        assert_eq!(loaded.to_vec(), model);
+        assert_eq!(vb::VerifiedDeltaEncoder::<T>::encode(model.clone()), bytes);
+        let mut e = vb::VerifiedDeltaEncoder::<T>::new();
+        for &m in &model {
+            e.append(m);
+        }
+        assert_eq!(e.save(), bytes);
+        let read: Vec<T> = vb::VerifiedDeltaDecoder::<T>::new(&bytes).collect();
+        assert_eq!(read, model);
+        let read: Vec<T> = ob::DeltaDecoder::<T>::new(&bytes).collect();
+        assert_eq!(read, model);
+
+        // and spoilt
+        for _ in 0..12 {
+            let mut bad = bytes.clone();
+            match rng.below(4) {
+                0 => bad.truncate(rng.below(bad.len() + 1)),
+                1 => bad = (0..rng.below(10)).map(|_| rng.next() as u8).collect(),
+                2 => {
+                    let at = rng.below(bad.len() + 1);
+                    bad.insert(at, 0xFF - rng.below(8) as u8);
+                }
+                _ => {
+                    if !bad.is_empty() {
+                        let at = rng.below(bad.len());
+                        bad[at] = rng.next() as u8;
+                    }
+                }
+            }
+            same_delta_load::<T>(&bad);
+        }
+    }
+
+    /// The delta columns of the two APIs, with bijou64 as their codec, are
+    /// alike under the same edits, save the same bytes, and take and
+    /// refuse the same bytes, for every type of value.
+    #[test]
+    fn deltas_agree() {
+        for seed in 0..6 {
+            deltas::<u32>(seed);
+            deltas::<u64>(seed);
+            deltas::<i32>(seed);
+            deltas::<i64>(seed);
+            deltas::<usize>(seed);
+            deltas::<Option<u32>>(seed);
+            deltas::<Option<u64>>(seed);
+            deltas::<Option<i32>>(seed);
+            deltas::<Option<i64>>(seed);
+            deltas::<Option<usize>>(seed);
+        }
+    }
+}

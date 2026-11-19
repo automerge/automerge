@@ -28,7 +28,8 @@ from this directory:
 
 `gen.py` writes the crate to `rust/target/verus-client` (or to the
 directory it is given). The first command after it verifies hexane
-(without `bijou64`) and then the clients. It prints a line
+(with `bijou64`, which the crate's default feature of that name asks
+for) and then the clients. It prints a line
 `verification results:: N verified, 0 errors` for each crate it
 verifies: `vstd` and hexane the first time, and after that only what
 has changed since. The last such line is the clients'. The second
@@ -52,7 +53,9 @@ clients.
   one.
 * `Cargo.toml` depends on hexane by path and on the same `vstd`, and
   declares a workspace of its own, so that the crate is not taken for a
-  member of the workspace it lies in.
+  member of the workspace it lies in. Its feature `bijou64` is hexane's:
+  the clients of the second codec are compiled and verified with it,
+  and it is on unless `--no-default-features` is given.
 
 ## What only this check has found
 
