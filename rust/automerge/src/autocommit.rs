@@ -667,7 +667,12 @@ impl AutoCommit {
     }
 
     /// Takes all the changes in `other` which are not in `self` and applies them
+    ///
+    /// See [`Automerge::merge_and_log_patches`] for the signing-mode contract.
+    /// A mode mismatch is rejected before either document's open transaction
+    /// is closed, so pending edits on both sides are left as they were.
     pub fn merge(&mut self, other: &mut AutoCommit) -> Result<Vec<ChangeHash>, AutomergeError> {
+        Automerge::check_merge_modes(&self.doc, &other.doc)?;
         other.ensure_transaction_closed();
         self.with_patch_log(|doc, log| doc.merge_and_log_patches(&mut other.doc, log))
     }

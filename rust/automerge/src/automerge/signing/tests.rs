@@ -13,6 +13,7 @@ mod batch;
 mod fork;
 mod fragments;
 mod incoming;
+mod merge;
 mod persistence;
 mod requests;
 

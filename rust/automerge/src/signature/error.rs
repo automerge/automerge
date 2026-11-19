@@ -67,6 +67,8 @@ pub enum SigningError {
     UnauthenticatedChanges,
     #[error("fork_at is not supported in signing mode")]
     ForkAtNotSupported,
+    #[error("merge requires both documents to be in the same signing mode")]
+    MergeModeMismatch,
     #[error("local changes are still unpublished; publish or keep the current author before forking with a different author")]
     UnpublishedLocalChanges,
     #[error("incoming group is not a canonical fragment: {0}")]

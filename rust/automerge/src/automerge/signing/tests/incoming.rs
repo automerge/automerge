@@ -490,8 +490,9 @@ fn overlaps_forged_orphans_local_boundaries_partial_tails_and_bypasses() {
     .unwrap();
     assert!(recovered.get_heads().is_empty());
 
-    // Entry-point bypasses: bare snapshots, apply_changes, merge, and sync all
-    // reject. The signed snapshot of the same history loads.
+    // Entry-point bypasses: bare snapshots, apply_changes, and sync all
+    // reject; merge transfers published history only through admission. The
+    // signed snapshot of the same history loads.
     let signed_snapshot = source.save();
     let from_snapshot = Automerge::load_with_options(&signed_snapshot, signing_load()).unwrap();
     assert_eq!(from_snapshot.get_heads(), source.get_heads());
@@ -519,11 +520,14 @@ fn overlaps_forged_orphans_local_boundaries_partial_tails_and_bypasses() {
             SigningError::UnauthenticatedChanges
         ))
     ));
+    let mut unpublished = source.clone();
+    unpublished.set_actor(ActorId::from([4]));
+    let draft = append_at_level(&mut unpublished, None, "draft", 9, 0);
+    assert_eq!(target.merge(&mut unpublished).unwrap(), source.get_heads());
+    assert!(!target.has_change(&draft));
     assert!(matches!(
-        target.merge(&mut source),
-        Err(AutomergeError::Signing(
-            SigningError::UnauthenticatedChanges
-        ))
+        target.merge(&mut unsigned_copy),
+        Err(AutomergeError::Signing(SigningError::MergeModeMismatch))
     ));
     let mut unsigned_peer = Automerge::new().with_actor(ActorId::from([9]));
     append_at_level(&mut unsigned_peer, None, "p", 1, 0);

@@ -1663,19 +1663,49 @@ impl Automerge {
     }
 
     /// Takes all the changes in `other` which are not in `self` and applies them
+    ///
+    /// Both documents must share a signing mode; see
+    /// [`Self::merge_and_log_patches`] for the required-mode contract.
     pub fn merge(&mut self, other: &mut Self) -> Result<Vec<ChangeHash>, AutomergeError> {
         self.merge_and_log_patches(other, &mut PatchLog::inactive())
     }
 
     /// Takes all the changes in `other` which are not in `self` and applies them whilst logging
     /// the resulting changes to the current state of the document to `patch_log`
+    ///
+    /// Unsigned documents merge all applied history as before. When both
+    /// documents are in required signing mode, only the source's *published*
+    /// history is transferred, as complete canonical groups with their proofs,
+    /// through the same admission as [`Self::apply_changes`]: the source's
+    /// unpublished drafts and retained pending groups are left out without
+    /// rejecting the merge, publication is re-derived by the receiver (never
+    /// copied), and the receiver's own drafts and signing eligibility are
+    /// untouched. A merge can publish history the receiver already holds as a
+    /// draft when the source supplies the proof.
+    ///
+    /// The returned heads are the receiver's applied heads, so in required
+    /// mode they may include receiver drafts that are not yet published.
+    ///
+    /// # Errors
+    ///
+    /// Mixing an unsigned document with a required-mode document in either
+    /// direction fails with [`SigningError::MergeModeMismatch`] before any
+    /// document or log mutation, even when both documents are empty.
+    ///
+    /// [`SigningError::MergeModeMismatch`]: crate::signature::error::SigningError::MergeModeMismatch
     pub fn merge_and_log_patches(
         &mut self,
         other: &mut Self,
         patch_log: &mut PatchLog,
     ) -> Result<Vec<ChangeHash>, AutomergeError> {
+        Self::check_merge_modes(self, other)?;
         if self.signing.is_required() {
-            return Err(crate::signature::error::SigningError::UnauthenticatedChanges.into());
+            let mut groups = other.published_groups(&self.published_heads());
+            // Oldest first so admission resolves causal context in one pass.
+            groups.reverse();
+            let groups = groups.into_iter().map(crate::LoadedGroup::from).collect();
+            self.admit_loaded_groups(groups, patch_log)?;
+            return Ok(self.get_heads());
         }
         // TODO: Make this fallible and figure out how to do this transactionally
         let changes = self.get_changes_added(other);
@@ -1696,6 +1726,17 @@ impl Automerge {
         tracing::trace!(changes=?changes.iter().map(|c| c.hash()).collect::<Vec<_>>(), "merging new changes");
         self.apply_changes_with_fragments_log_patches(changes, fragments, patch_log)?;
         Ok(self.get_heads())
+    }
+
+    /// Reject a merge between documents of different signing modes.
+    ///
+    /// Shared with [`crate::AutoCommit`], which must decide before closing
+    /// either document's open transaction.
+    pub(crate) fn check_merge_modes(receiver: &Self, source: &Self) -> Result<(), AutomergeError> {
+        if receiver.signing.is_required() != source.signing.is_required() {
+            return Err(crate::signature::error::SigningError::MergeModeMismatch.into());
+        }
+        Ok(())
     }
 
     /// EXPERIMENTAL: Write the set of changes in `hashes` to a "bundle"

@@ -40,6 +40,12 @@
   loaders (`load`, `load_incremental`, `apply_changes`) reject any delivery
   containing signed groups instead of discarding their signatures, even under
   `OnPartialLoad::Ignore`.
+* `merge` between two required-mode documents transfers the source's
+  published history (complete canonical groups with proofs) through ordinary
+  receiver admission, leaving source drafts and pending groups behind and
+  preserving receiver drafts. Merging an unsigned document with a required-mode
+  document in either direction fails with `SigningError::MergeModeMismatch`
+  before any mutation.
 * Author assignments are stored in the extra bytes of an actor's first change
   and preserved through merging and saving/loading. `Change::author` reads an
   assignment from an individual change; subsequent changes from the same actor

@@ -138,12 +138,21 @@ fn public_signing_documents_reject_bare_snapshots_and_unauthenticated_entry_poin
             SigningError::UnauthenticatedChanges
         ))
     ));
+    // Merge is the authenticated transport between required-mode documents:
+    // it moves the published history with its proof. Mixing modes is
+    // rejected in both directions.
     assert!(matches!(
-        receiver.merge(&mut source),
-        Err(AutomergeError::Signing(
-            SigningError::UnauthenticatedChanges
-        ))
+        receiver.merge(&mut unsigned_copy),
+        Err(AutomergeError::Signing(SigningError::MergeModeMismatch))
     ));
+    assert!(matches!(
+        unsigned_copy.merge(&mut source),
+        Err(AutomergeError::Signing(SigningError::MergeModeMismatch))
+    ));
+    assert!(receiver.get_heads().is_empty());
+    assert_eq!(receiver.merge(&mut source).unwrap(), vec![hash]);
+    assert!(receiver.try_signing().unwrap().is_accepted(&hash));
+    assert!(receiver.request_signatures().unwrap().is_empty());
     assert!(matches!(
         source.fork_at(&[hash]),
         Err(AutomergeError::Signing(SigningError::ForkAtNotSupported))
