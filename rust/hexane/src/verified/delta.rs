@@ -25,8 +25,8 @@ use super::model::Model;
 #[cfg(verus_keep_ghost)]
 use super::only;
 use super::seal;
-use super::value::{VOps, VOptOps, VOptWrite, VWrite};
-use super::{VValue, MAX_SEG};
+use super::value::{VOps, VOptOps, VOptWrite, VPack, VWrite};
+use super::{VSpec, VValue, MAX_SEG};
 use crate::attrib::weigh_run;
 use crate::btree::{SlabAgg, SlabBTree};
 use crate::column_core::ColumnCore;
@@ -54,7 +54,7 @@ use crate::rle::edit::{null_in_column, ReadIns, RleModel};
 use crate::weights::{DeltaModel, LoadWeigh};
 use crate::{DeltaRun, Leb128, LoadOpts, MaybeFill, PackError};
 use std::marker::PhantomData;
-use std::ops::Range;
+use std::ops::{Bound, Range};
 use vstd::prelude::*;
 
 verus! {
@@ -65,7 +65,7 @@ verus! {
 /// `usize`. A delta column keeps its values' running sums as `i64`s, so
 /// of the wider types it holds the numbers up to `i64::MAX` only
 /// (`fits`).
-pub trait VDeltaNum: Copy + seal::DeltaSeal {
+pub trait VDeltaNum: VPack + seal::DeltaSeal {
     /// Whether a delta column can hold the number: always, but for a
     /// `u64` or a `usize` above `i64::MAX`.
     spec fn fits(self) -> bool;
@@ -102,6 +102,26 @@ pub trait VDeltaNum: Copy + seal::DeltaSeal {
             self.fits(),
         ensures
             r == self.n64(),
+    ;
+
+    /// A number that fits is ordered (`VPack::num`) as the `i64` it is
+    /// kept as, and one that does not fit comes after all that do.
+    #[doc(hidden)]
+    proof fn lemma_fit_order(v: Self)
+        ensures
+            v.fits() ==> Self::num(v) == v.n64(),
+            !v.fits() ==> Self::num(v) > i64::MAX,
+    ;
+
+    /// The number as an `i64`, if it fits.
+    #[doc(hidden)]
+    fn try_to_i64(self) -> (r: Option<i64>)
+        ensures
+            r == if self.fits() {
+                Some(self.n64())
+            } else {
+                None::<i64>
+            },
     ;
 
     #[doc(hidden)]
@@ -153,6 +173,14 @@ impl VDeltaNum for u32 {
     proof fn lemma_num(v: u32, n: i64) {
     }
 
+    proof fn lemma_fit_order(v: u32) {
+    }
+
+    #[inline(always)]
+    fn try_to_i64(self) -> Option<i64> {
+        Some(self as i64)
+    }
+
     #[inline(always)]
     fn to_i64(self) -> i64 {
         self as i64
@@ -200,6 +228,18 @@ impl VDeltaNum for u64 {
     }
 
     proof fn lemma_num(v: u64, n: i64) {
+    }
+
+    proof fn lemma_fit_order(v: u64) {
+    }
+
+    #[inline(always)]
+    fn try_to_i64(self) -> Option<i64> {
+        if self <= 0x7fff_ffff_ffff_ffff {
+            Some(self as i64)
+        } else {
+            None
+        }
     }
 
     #[inline(always)]
@@ -251,6 +291,14 @@ impl VDeltaNum for i32 {
     proof fn lemma_num(v: i32, n: i64) {
     }
 
+    proof fn lemma_fit_order(v: i32) {
+    }
+
+    #[inline(always)]
+    fn try_to_i64(self) -> Option<i64> {
+        Some(self as i64)
+    }
+
     #[inline(always)]
     fn to_i64(self) -> i64 {
         self as i64
@@ -298,6 +346,14 @@ impl VDeltaNum for i64 {
     }
 
     proof fn lemma_num(v: i64, n: i64) {
+    }
+
+    proof fn lemma_fit_order(v: i64) {
+    }
+
+    #[inline(always)]
+    fn try_to_i64(self) -> Option<i64> {
+        Some(self)
     }
 
     #[inline(always)]
@@ -354,6 +410,18 @@ impl VDeltaNum for usize {
     proof fn lemma_num(v: usize, n: i64) {
     }
 
+    proof fn lemma_fit_order(v: usize) {
+    }
+
+    #[inline(always)]
+    fn try_to_i64(self) -> Option<i64> {
+        if self as u64 <= 0x7fff_ffff_ffff_ffff {
+            Some(self as i64)
+        } else {
+            None
+        }
+    }
+
     #[inline(always)]
     fn to_i64(self) -> i64 {
         self as i64
@@ -393,7 +461,7 @@ pub open spec fn dom(d: Option<i64>, least: i64, most: i64, nullable: bool) -> b
 
 /// A value type of a delta column: a number ([`VDeltaNum`]) or an
 /// `Option` of one, `None` the null.
-pub trait VDelta: Copy + seal::DeltaValSeal {
+pub trait VDelta: VSpec<S = Self> + Copy + seal::DeltaValSeal {
     /// What a load fills a delta column of the type with
     /// ([`VerifiedDeltaColumn::load_with`]): the difference between
     /// each value and the one before it, an `i64`; for a type with a
@@ -443,6 +511,27 @@ pub trait VDelta: Copy + seal::DeltaValSeal {
             r == self.dv(),
     ;
 
+    /// Values that fit are in the order (`VSpec::below`) of what the
+    /// column keeps them as ([`delta_below`]), and each comes before
+    /// every value that does not fit.
+    #[doc(hidden)]
+    proof fn lemma_order(a: Self, b: Self)
+        ensures
+            a.fits() && b.fits() ==> Self::below(a, b) == delta_below(a.dv(), b.dv()),
+            a.fits() && !b.fits() ==> Self::below(a, b),
+    ;
+
+    /// The value as the column keeps it, if it fits.
+    #[doc(hidden)]
+    fn try_i64(self) -> (r: Option<Option<i64>>)
+        ensures
+            r == if self.fits() {
+                Some(self.dv())
+            } else {
+                None::<Option<i64>>
+            },
+    ;
+
     #[doc(hidden)]
     fn from_i64(d: Option<i64>) -> (r: Self)
         requires
@@ -481,6 +570,211 @@ pub open spec fn in_dom<T: VDelta>(d: Option<i64>) -> bool {
     dom(d, T::least(), T::most(), T::nullable())
 }
 
+/// Whether `a` comes before `b`, of what a delta column keeps: numbers
+/// in their order, and a null before every number.
+#[doc(hidden)]
+pub open spec fn delta_below(a: Option<i64>, b: Option<i64>) -> bool {
+    match (a, b) {
+        (None, Some(_)) => true,
+        (Some(x), Some(y)) => x < y,
+        _ => false,
+    }
+}
+
+/// Whether the value `v` of a delta column is within the bounds `lo`
+/// and `hi`: a number, not a null, that comes at `lo` or after it and
+/// at `hi` or before it in the order of the type's values
+/// (`VSpec::below`); not at a bound that is `Excluded`, and with no
+/// limit where one is `Unbounded`. A bound can be any value of the
+/// type: a null, which comes before every number, and a number too
+/// large for a delta column, which comes after all it keeps.
+pub open spec fn delta_within<T: VDelta>(lo: Bound<&T>, hi: Bound<&T>, v: T) -> bool {
+    &&& v.dv() is Some
+    &&& match lo {
+        Bound::Included(a) => !T::below(v, *a),
+        Bound::Excluded(a) => T::below(*a, v),
+        Bound::Unbounded => true,
+    }
+    &&& match hi {
+        Bound::Included(b) => !T::below(*b, v),
+        Bound::Excluded(b) => T::below(v, *b),
+        Bound::Unbounded => true,
+    }
+}
+
+/// The value a column keeps as `d` is ordered against a value `v` as
+/// `d` is against what `v` is kept as, and comes before a `v` that does
+/// not fit.
+pub(crate) proof fn lemma_bound<T: VDelta>(v: T, d: Option<i64>)
+    requires
+        in_dom::<T>(d),
+    ensures
+        T::of(d).fits(),
+        T::of(d).dv() == d,
+        v.fits() ==> {
+            &&& T::below(T::of(d), v) == delta_below(d, v.dv())
+            &&& T::below(v, T::of(d)) == delta_below(v.dv(), d)
+            &&& (T::of(d) == v) == (d == v.dv())
+        },
+        !v.fits() ==> T::below(T::of(d), v) && !T::below(v, T::of(d)) && T::of(d) != v,
+{
+    let w = T::of(d);
+    T::lemma_delta(w, d);
+    T::lemma_delta(v, d);
+    T::lemma_order(w, v);
+    T::lemma_order(v, w);
+    T::lemma_below(w, v, w);
+}
+
+/// Whether `v` is at the lower bound `lo` or after it.
+spec fn above_low<T: VDelta>(lo: Bound<&T>, v: T) -> bool {
+    match lo {
+        Bound::Included(a) => !T::below(v, *a),
+        Bound::Excluded(a) => T::below(*a, v),
+        Bound::Unbounded => true,
+    }
+}
+
+/// Whether `v` is at the upper bound `hi` or before it.
+spec fn below_high<T: VDelta>(hi: Bound<&T>, v: T) -> bool {
+    match hi {
+        Bound::Included(b) => !T::below(*b, v),
+        Bound::Excluded(b) => T::below(v, *b),
+        Bound::Unbounded => true,
+    }
+}
+
+/// The least number the lower bound `lo` lets in, of those a delta
+/// column of `T` keeps; none if it lets none of them in.
+fn low_of<T: VDelta>(lo: Bound<&T>) -> (r: Option<i64>)
+    ensures
+        forall|n: i64|
+            #![trigger T::of(Some(n))]
+            in_dom::<T>(Some(n)) ==> above_low::<T>(lo, T::of(Some(n))) == match r {
+                Some(x) => x <= n,
+                None => false,
+            },
+{
+    let r = match lo {
+        Bound::Unbounded => Some(T::lo()),
+        Bound::Included(a) => match (*a).try_i64() {
+            Some(Some(x)) => Some(x),
+            // a null: every number comes after it
+            Some(None) => Some(T::lo()),
+            // too large for the column: no number it keeps reaches it
+            None => None,
+        },
+        Bound::Excluded(a) => match (*a).try_i64() {
+            Some(Some(x)) => if x < i64::MAX {
+                Some(x + 1)
+            } else {
+                None
+            },
+            Some(None) => Some(T::lo()),
+            None => None,
+        },
+    };
+    proof {
+        assert forall|n: i64| #![trigger T::of(Some(n))] in_dom::<T>(Some(n)) implies above_low::<T>(
+            lo,
+            T::of(Some(n)),
+        ) == match r {
+            Some(x) => x <= n,
+            None => false,
+        } by {
+            match lo {
+                Bound::Included(a) => lemma_bound::<T>(*a, Some(n)),
+                Bound::Excluded(a) => lemma_bound::<T>(*a, Some(n)),
+                Bound::Unbounded => {},
+            }
+        }
+    }
+    r
+}
+
+/// The greatest number the upper bound `hi` lets in, of those a delta
+/// column of `T` keeps; none if it lets none of them in.
+fn high_of<T: VDelta>(hi: Bound<&T>) -> (r: Option<i64>)
+    ensures
+        forall|n: i64|
+            #![trigger T::of(Some(n))]
+            in_dom::<T>(Some(n)) ==> below_high::<T>(hi, T::of(Some(n))) == match r {
+                Some(x) => n <= x,
+                None => false,
+            },
+{
+    let r = match hi {
+        Bound::Unbounded => Some(T::hi()),
+        Bound::Included(b) => match (*b).try_i64() {
+            Some(Some(x)) => Some(x),
+            // a null: no number comes before it
+            Some(None) => None,
+            // too large for the column: every number it keeps is below
+            None => Some(T::hi()),
+        },
+        Bound::Excluded(b) => match (*b).try_i64() {
+            Some(Some(x)) => if x > i64::MIN {
+                Some(x - 1)
+            } else {
+                None
+            },
+            Some(None) => None,
+            None => Some(T::hi()),
+        },
+    };
+    proof {
+        assert forall|n: i64| #![trigger T::of(Some(n))] in_dom::<T>(Some(n)) implies below_high::<T>(
+            hi,
+            T::of(Some(n)),
+        ) == match r {
+            Some(x) => n <= x,
+            None => false,
+        } by {
+            match hi {
+                Bound::Included(b) => lemma_bound::<T>(*b, Some(n)),
+                Bound::Excluded(b) => lemma_bound::<T>(*b, Some(n)),
+                Bound::Unbounded => {},
+            }
+        }
+    }
+    r
+}
+
+/// The bounds `lo` and `hi` as the least and the greatest of the
+/// numbers within them that a delta column of `T` keeps; none if it
+/// keeps none within them.
+pub(crate) fn bounds_of<T: VDelta>(lo: Bound<&T>, hi: Bound<&T>) -> (r: Option<(i64, i64)>)
+    ensures
+        forall|d: Option<i64>|
+            #![trigger T::of(d)]
+            in_dom::<T>(d) ==> delta_within::<T>(lo, hi, T::of(d)) == match (r, d) {
+                (Some((a, b)), Some(n)) => a <= n <= b,
+                _ => false,
+            },
+{
+    let r = match (low_of::<T>(lo), high_of::<T>(hi)) {
+        (Some(a), Some(b)) => if a <= b {
+            Some((a, b))
+        } else {
+            None
+        },
+        _ => None,
+    };
+    proof {
+        assert forall|d: Option<i64>| #![trigger T::of(d)] in_dom::<T>(d) implies delta_within::<T>(lo, hi, T::of(d))
+            == match (r, d) {
+            (Some((a, b)), Some(n)) => a <= n <= b,
+            _ => false,
+        } by {
+            T::lemma_delta(T::of(d), d);
+            if let Some(n) = d {
+                assert(T::of(d) == T::of(Some(n)));
+            }
+        }
+    }
+    r
+}
+
 impl<T: VDeltaNum> seal::DeltaValSeal for T {
 
 }
@@ -516,15 +810,29 @@ impl<T: VDeltaNum> VDelta for T {
     }
 
     proof fn lemma_delta(v: T, d: Option<i64>) {
-        T::lemma_num(v, 0);
+        <T as VDeltaNum>::lemma_num(v, 0);
         if d is Some {
-            T::lemma_num(v, d->0);
+            <T as VDeltaNum>::lemma_num(v, d->0);
         }
     }
 
     #[inline(always)]
     fn to_i64(self) -> Option<i64> {
         Some(<T as VDeltaNum>::to_i64(self))
+    }
+
+    proof fn lemma_order(a: T, b: T) {
+        T::lemma_fit_order(a);
+        T::lemma_fit_order(b);
+    }
+
+    #[inline(always)]
+    #[allow(clippy::manual_map)]  // a match is what the proof follows
+    fn try_i64(self) -> Option<Option<i64>> {
+        match <T as VDeltaNum>::try_to_i64(self) {
+            Some(n) => Some(Some(n)),
+            None => None,
+        }
     }
 
     #[inline(always)]
@@ -534,7 +842,7 @@ impl<T: VDeltaNum> VDelta for T {
             None => {
                 // not reached: the type has no null
                 proof {
-                    T::lemma_num(<T as VDeltaNum>::of64(0), 0);
+                    <T as VDeltaNum>::lemma_num(<T as VDeltaNum>::of64(0), 0);
                 }
                 <T as VDeltaNum>::from_i64(0)
             },
@@ -603,12 +911,12 @@ impl<T: VDeltaNum> VDelta for Option<T> {
 
     proof fn lemma_delta(v: Option<T>, d: Option<i64>) {
         if v is Some {
-            T::lemma_num(v->0, 0);
+            <T as VDeltaNum>::lemma_num(v->0, 0);
         }
         if d is Some {
-            T::lemma_num(T::of64(0), d->0);
+            <T as VDeltaNum>::lemma_num(T::of64(0), d->0);
         } else {
-            T::lemma_num(T::of64(0), 0);
+            <T as VDeltaNum>::lemma_num(T::of64(0), 0);
         }
     }
 
@@ -618,6 +926,27 @@ impl<T: VDeltaNum> VDelta for Option<T> {
         match self {
             Some(v) => Some(<T as VDeltaNum>::to_i64(v)),
             None => None,
+        }
+    }
+
+    proof fn lemma_order(a: Option<T>, b: Option<T>) {
+        if a is Some {
+            T::lemma_fit_order(a->0);
+        }
+        if b is Some {
+            T::lemma_fit_order(b->0);
+        }
+    }
+
+    #[inline(always)]
+    #[allow(clippy::manual_map)]  // a match is what the proof follows
+    fn try_i64(self) -> Option<Option<i64>> {
+        match self {
+            Some(v) => match <T as VDeltaNum>::try_to_i64(v) {
+                Some(n) => Some(Some(n)),
+                None => None,
+            },
+            None => Some(None),
         }
     }
 

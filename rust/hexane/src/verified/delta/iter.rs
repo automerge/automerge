@@ -26,10 +26,12 @@
 use super::diffs::{lemma_deltas_kept, lemma_vals_fit};
 #[cfg(verus_keep_ghost)]
 use super::{
-    all_dom, delta_at, delta_prefix, delta_run_fits, delta_run_values, delta_runs_at, deltas,
-    in_dom, lemma_delta_run_at, vals,
+    all_dom, delta_at, delta_prefix, delta_run_fits, delta_run_values, delta_runs_at, delta_within,
+    deltas, in_dom, lemma_bound, lemma_delta_run_at, vals,
 };
-use super::{DCore, DIt, DKind, VDeltaValue, VerifiedDeltaColumn, DE, DX};
+use super::{bounds_of, DCore, DIt, DKind, VDeltaValue, VerifiedDeltaColumn, DE, DX};
+#[cfg(verus_keep_ghost)]
+use crate::btree::in_i64;
 use crate::btree::{SlabAgg, SlabBTree};
 use crate::column::Slab;
 #[cfg(verus_keep_ghost)]
@@ -43,8 +45,16 @@ use crate::delta::ddomain::{dslabs, lemma_dslabs_own};
 #[cfg(verus_keep_ghost)]
 use crate::delta::dedit::rz;
 #[cfg(verus_keep_ghost)]
+use crate::delta::dfind::col_hit;
+#[cfg(verus_keep_ghost)]
 use crate::delta::diter::{at_run, dbefore, dindex_ok, dval_at, lemma_crop, lemma_realized_window};
 use crate::delta::diter::{d_next, d_run, d_step};
+#[cfg(verus_keep_ghost)]
+use crate::delta::dscan::lemma_dval_rv;
+use crate::delta::dscan::{d_scan, d_scan_null};
+#[cfg(verus_keep_ghost)]
+use crate::delta::dseek::{all_fit, below as dbelow, dfound, dsorted, lemma_search_start, rv};
+use crate::delta::dseek::{d_seek, d_seek_null};
 #[cfg(verus_keep_ghost)]
 use crate::fenwick::total;
 #[cfg(verus_keep_ghost)]
@@ -52,11 +62,13 @@ use crate::iter_core::{lemma_window_past, past, resumes, vals_of, window, Decode
 use crate::iter_core::{Decoders, ICore};
 use crate::verified::codec::VCodec;
 #[cfg(verus_keep_ghost)]
-use crate::verified::{head_run, lemma_runs_of, runs_of};
+use crate::verified::{head_run, lemma_runs_of, runs_of, sorted};
 use crate::verified::{invalid_resume, VerifiedIterState};
 use crate::{DeltaRun, Leb128, PackError};
-use std::ops::Range;
+use std::ops::{Range, RangeBounds};
 use vstd::prelude::*;
+#[cfg(verus_keep_ghost)]
+use vstd::std_specs::range::RangeBoundsSpec;
 
 verus! {
 
@@ -75,6 +87,51 @@ proof fn lemma_kept_at<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>
     let ds = dslabs::<X, B>(s);
     assert(ds.take(i) =~= dbefore::<X, B>(s, i));
 }
+
+/// Whether what a column keeps at a place, `d`, is a number from `lo`
+/// to `hi`.
+spec fn kept_in(d: Option<i64>, lo: i64, hi: i64) -> bool {
+    match d {
+        Some(n) => lo <= n <= hi,
+        None => false,
+    }
+}
+
+/// What a column of slabs `s` keeps at `i` is what the searches of its
+/// differences say is there (`rv`): the same number, or a null.
+proof fn lemma_kept_rv<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(s: Seq<Slab<X::Tail>>, i: int)
+    requires
+        0 <= i < vals_of::<X>(s).len(),
+        all_fit::<X, B>(s),
+    ensures
+        rz(0, dslabs::<X, B>(s)).len() == vals_of::<X>(s).len(),
+        match rv::<X, B>(s, i) {
+            Some(n) => in_i64(n) && rz(0, dslabs::<X, B>(s))[i] == Some(n as i64),
+            None => rz(0, dslabs::<X, B>(s))[i] is None,
+        },
+        (B::dv(vals_of::<X>(s)[i]) is Some) == (rz(0, dslabs::<X, B>(s))[i] is Some),
+{
+    lemma_kept_at::<X, B>(s, i);
+    lemma_dval_rv::<X, B>(s, i);
+}
+
+/// What a scan of the differences takes for a number from `lo` to `hi`
+/// at `i` (`col_hit`) is what the column keeps as one there.
+proof fn lemma_kept_hit<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
+    s: Seq<Slab<X::Tail>>,
+    lo: i64,
+    hi: i64,
+    i: int,
+)
+    requires
+        0 <= i < vals_of::<X>(s).len(),
+        all_fit::<X, B>(s),
+    ensures
+        col_hit::<X, B>(s, lo as int, hi as int, i) == kept_in(rz(0, dslabs::<X, B>(s))[i], lo, hi),
+{
+    lemma_kept_rv::<X, B>(s, i);
+}
+
 
 /// An iterator over the values of a [`VerifiedDeltaColumn`], or over
 /// those in a range of it.
@@ -629,6 +686,552 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaIter<'a, T, C> {
             inner: VerifiedIterState { counter, num_slabs: self.slabs.len(), slab_idx, pos, items_left, slab_consumed },
         }
     }
+
+    /// What the iterator has left, value by value: each is what the
+    /// column keeps at its place, as the type's value.
+    proof fn lemma_rest(&self)
+        requires
+            self.it.wf::<DX<T, C>>(self.slabs@),
+            self.it.pos <= total(slab_lens(self.slabs@)),
+        ensures
+            self.column().len() == self.kept().len(),
+            self.it.pos + self.rest().len() <= self.kept().len(),
+            forall|j: int|
+                0 <= j < self.rest().len() ==> #[trigger] self.rest()[j] == T::of(self.kept()[self.it.pos + j]),
+    {
+        self.lemma_window();
+        assert forall|j: int| 0 <= j < self.rest().len() implies #[trigger] self.rest()[j] == T::of(
+            self.kept()[self.it.pos + j],
+        ) by {
+            assert(self.rest()[j] == self.column()[self.it.pos + j]);
+        }
+    }
+
+    /// Move on to the first of the values left that the column keeps as
+    /// a number from `lo` to `hi`, and past it: given are its index in
+    /// the column and the number. If there is none, the iterator gives
+    /// all it has.
+    fn scan(&mut self, lo: i64, hi: i64) -> (r: Option<(usize, i64)>)
+        ensures
+            final(self).column() == old(self).column(),
+            final(self).source() == old(self).source(),
+            match r {
+                Some((at, v)) => {
+                    &&& old(self).pos() <= at < old(self).pos() + old(self).rest().len()
+                    &&& old(self).kept()[at as int] == Some(v)
+                    &&& lo <= v <= hi
+                    &&& forall|i: int| old(self).pos() <= i < at ==> !kept_in(#[trigger] old(self).kept()[i], lo, hi)
+                    &&& final(self).rest() == old(self).rest().skip(at - old(self).pos() + 1)
+                    &&& final(self).pos() == at + 1
+                    &&& final(self).end_pos() == old(self).end_pos()
+                },
+                None => {
+                    &&& forall|i: int|
+                        old(self).pos() <= i < old(self).pos() + old(self).rest().len() ==> !kept_in(
+                            #[trigger] old(self).kept()[i],
+                            lo,
+                            hi,
+                        )
+                    &&& final(self).rest().len() == 0
+                    &&& final(self).pos() == old(self).pos() + old(self).rest().len()
+                    &&& final(self).end_pos() == final(self).pos()
+                },
+            },
+    {
+        let ghost me = *self;
+        proof {
+            use_type_invariant(&*self);
+            me.lemma_window();
+            me.it.lemma_out_window::<DX<T, C>>(me.slabs@);
+            lemma_search_start::<DX<T, C>, DB<T, C>>(me.it, me.ix, me.slabs@);
+        }
+        // the reader and the sum move together, and are written back
+        // together
+        let mut it = self.it.dup();
+        let mut running = self.running;
+        let r = d_scan::<DX<T, C>, DB<T, C>>(&mut it, self.slabs, self.ix, &mut running, lo, hi);
+        *self = VerifiedDeltaIter { it, slabs: self.slabs, running, ix: self.ix, col: self.col };
+        proof {
+            let s = me.slabs@;
+            let (p, e) = (me.it.pos as int, me.it.pos + me.it.items_left);
+            self.lemma_window();
+            match r {
+                Some((h, v)) => {
+                    lemma_kept_rv::<DX<T, C>, DB<T, C>>(s, h as int);
+                    lemma_kept_hit::<DX<T, C>, DB<T, C>>(s, lo, hi, h as int);
+                    assert forall|i: int| p <= i < h implies !kept_in(#[trigger] me.kept()[i], lo, hi) by {
+                        lemma_kept_hit::<DX<T, C>, DB<T, C>>(s, lo, hi, i);
+                    }
+                    lemma_window_past(me.column(), p, e, h + 1 - p);
+                    assert(self.rest() =~= me.rest().skip(h - p + 1));
+                },
+                None => {
+                    assert forall|i: int| p <= i < p + me.rest().len() implies !kept_in(
+                        #[trigger] me.kept()[i],
+                        lo,
+                        hi,
+                    ) by {
+                        lemma_kept_hit::<DX<T, C>, DB<T, C>>(s, lo, hi, i);
+                    }
+                },
+            }
+        }
+        r
+    }
+
+    /// Move on to the first null of the values left, and past it: its
+    /// index in the column is given. If there is none, the iterator
+    /// gives all it has.
+    fn scan_null(&mut self) -> (r: Option<usize>)
+        ensures
+            final(self).column() == old(self).column(),
+            final(self).source() == old(self).source(),
+            match r {
+                Some(at) => {
+                    &&& old(self).pos() <= at < old(self).pos() + old(self).rest().len()
+                    &&& old(self).kept()[at as int] is None
+                    &&& forall|i: int| old(self).pos() <= i < at ==> (#[trigger] old(self).kept()[i]) is Some
+                    &&& final(self).rest() == old(self).rest().skip(at - old(self).pos() + 1)
+                    &&& final(self).pos() == at + 1
+                    &&& final(self).end_pos() == old(self).end_pos()
+                },
+                None => {
+                    &&& forall|i: int|
+                        old(self).pos() <= i < old(self).pos() + old(self).rest().len() ==> (
+                        #[trigger] old(self).kept()[i]) is Some
+                    &&& final(self).rest().len() == 0
+                    &&& final(self).pos() == old(self).pos() + old(self).rest().len()
+                    &&& final(self).end_pos() == final(self).pos()
+                },
+            },
+    {
+        let ghost me = *self;
+        proof {
+            use_type_invariant(&*self);
+            me.lemma_window();
+            me.it.lemma_out_window::<DX<T, C>>(me.slabs@);
+            lemma_search_start::<DX<T, C>, DB<T, C>>(me.it, me.ix, me.slabs@);
+        }
+        let mut it = self.it.dup();
+        let mut running = self.running;
+        let r = d_scan_null::<DX<T, C>, DB<T, C>>(&mut it, self.slabs, self.ix, &mut running);
+        *self = VerifiedDeltaIter { it, slabs: self.slabs, running, ix: self.ix, col: self.col };
+        proof {
+            let s = me.slabs@;
+            let (p, e) = (me.it.pos as int, me.it.pos + me.it.items_left);
+            self.lemma_window();
+            match r {
+                Some(h) => {
+                    lemma_kept_rv::<DX<T, C>, DB<T, C>>(s, h as int);
+                    assert forall|i: int| p <= i < h implies (#[trigger] me.kept()[i]) is Some by {
+                        lemma_kept_rv::<DX<T, C>, DB<T, C>>(s, i);
+                    }
+                    lemma_window_past(me.column(), p, e, h + 1 - p);
+                    assert(self.rest() =~= me.rest().skip(h - p + 1));
+                },
+                None => {
+                    assert forall|i: int| p <= i < p + me.rest().len() implies (#[trigger] me.kept()[i]) is Some by {
+                        lemma_kept_rv::<DX<T, C>, DB<T, C>>(s, i);
+                    }
+                },
+            }
+        }
+        r
+    }
+
+    /// Move on to the first of the values left that is `target`, and
+    /// past it: its index in the column is given. If none of them is
+    /// `target`, the iterator gives all it has, as
+    /// [`advance_to`](Self::advance_to) leaves it then.
+    ///
+    /// The values need not be in order. Few of them are looked at where
+    /// the column's index can tell that a part of the column holds no
+    /// `target`; a search for the null reads the values a run at a
+    /// time.
+    #[allow(clippy::manual_map)]  // a match is what the proof follows
+    pub fn scan_to_value(&mut self, target: T) -> (r: Option<usize>)
+        ensures
+            final(self).column() == old(self).column(),
+            final(self).source() == old(self).source(),
+            match r {
+                Some(at) => {
+                    &&& old(self).pos() <= at < old(self).pos() + old(self).rest().len()
+                    &&& old(self).rest()[at - old(self).pos()] == target
+                    &&& forall|i: int| 0 <= i < at - old(self).pos() ==> #[trigger] old(self).rest()[i] != target
+                    &&& final(self).rest() == old(self).rest().skip(at - old(self).pos() + 1)
+                    &&& final(self).pos() == at + 1
+                    &&& final(self).end_pos() == old(self).end_pos()
+                },
+                None => {
+                    &&& forall|i: int| 0 <= i < old(self).rest().len() ==> #[trigger] old(self).rest()[i] != target
+                    &&& final(self).rest().len() == 0
+                    &&& final(self).pos() == old(self).pos() + old(self).rest().len()
+                    &&& final(self).end_pos() == final(self).pos()
+                },
+            },
+    {
+        let ghost me = *self;
+        let ghost p = self.it.pos as int;
+        proof {
+            use_type_invariant(&*self);
+            me.lemma_rest();
+            // how each value left stands to `target`
+            assert forall|i: int| 0 <= i < me.rest().len() implies (#[trigger] me.rest()[i] == target) == (
+            target.fits() && me.kept()[p + i] == target.dv()) by {
+                lemma_bound::<T>(target, me.kept()[p + i]);
+            }
+        }
+        match target.try_i64() {
+            None => {
+                // a column keeps no value that does not fit
+                let end = self.end_pos();
+                self.advance_to(end);
+                None
+            },
+            Some(None) => self.scan_null(),
+            Some(Some(t)) => match self.scan(t, t) {
+                Some((at, _)) => Some(at),
+                None => None,
+            },
+        }
+    }
+
+    /// Move on to the first of the values left that is within the
+    /// bounds of `range`, and past it: given are its index in the
+    /// column and the value. If none of them is, the iterator gives
+    /// all it has, as [`advance_to`](Self::advance_to) leaves it then.
+    ///
+    /// The bounds are in the order of the type's values
+    /// (`VSpec::below`), and a null is within no bounds
+    /// (`delta_within`). A bound can be any value of the type, also
+    /// one that no delta column holds: a null as a bound comes before
+    /// every number, and a number that does not fit comes after every
+    /// value a column holds.
+    ///
+    /// The values need not be in order. Few of them are looked at where
+    /// the column's index can tell that a part of the column holds
+    /// none within the bounds.
+    pub fn scan_to_range<R: RangeBounds<T>>(&mut self, range: R) -> (r: Option<(usize, T)>)
+        ensures
+            final(self).column() == old(self).column(),
+            final(self).source() == old(self).source(),
+            ({
+                let (lo, hi) = (range.spec_start_bound(), range.spec_end_bound());
+                match r {
+                    Some((at, v)) => {
+                        &&& old(self).pos() <= at < old(self).pos() + old(self).rest().len()
+                        &&& old(self).rest()[at - old(self).pos()] == v
+                        &&& delta_within::<T>(lo, hi, v)
+                        &&& forall|i: int|
+                            0 <= i < at - old(self).pos() ==> !delta_within::<T>(lo, hi, #[trigger] old(self).rest()[i])
+                        &&& final(self).rest() == old(self).rest().skip(at - old(self).pos() + 1)
+                        &&& final(self).pos() == at + 1
+                        &&& final(self).end_pos() == old(self).end_pos()
+                    },
+                    None => {
+                        &&& forall|i: int|
+                            0 <= i < old(self).rest().len() ==> !delta_within::<T>(lo, hi, #[trigger] old(self).rest()[i])
+                        &&& final(self).rest().len() == 0
+                        &&& final(self).pos() == old(self).pos() + old(self).rest().len()
+                        &&& final(self).end_pos() == final(self).pos()
+                    },
+                }
+            }),
+    {
+        let ghost me = *self;
+        let ghost p = self.it.pos as int;
+        let ghost (lo, hi) = (range.spec_start_bound(), range.spec_end_bound());
+        proof {
+            use_type_invariant(&*self);
+            me.lemma_rest();
+        }
+        let b = bounds_of::<T>(range.start_bound(), range.end_bound());
+        proof {
+            // whether each value left is within the bounds
+            assert forall|i: int| 0 <= i < me.rest().len() implies delta_within::<T>(lo, hi, #[trigger] me.rest()[i])
+                == match b {
+                Some((x, y)) => kept_in(me.kept()[p + i], x, y),
+                None => false,
+            } by {
+                assert(in_dom::<T>(me.kept()[p + i]));
+                assert(me.rest()[i] == T::of(me.kept()[p + i]));
+            }
+        }
+        match b {
+            None => {
+                // no value of a column is within the bounds
+                let end = self.end_pos();
+                self.advance_to(end);
+                None
+            },
+            Some((x, y)) => match self.scan(x, y) {
+                Some((at, v)) => {
+                    proof {
+                        assert(in_dom::<T>(me.kept()[at as int]));
+                        assert(me.rest()[at - p] == T::of(me.kept()[p + (at - p)]));
+                    }
+                    Some((at, T::from_i64(Some(v))))
+                },
+                None => None,
+            },
+        }
+    }
+
+    /// A search of the differences for what `target` is kept as, over
+    /// what the iterator has left, found `a..b` if the sums there are
+    /// in order; then a search of the values for `target` finds `a..b`
+    /// if they are in order.
+    proof fn lemma_sought(&self, target: T, a: int, b: int)
+        requires
+            self.it.wf::<DX<T, C>>(self.slabs@),
+            self.it.pos <= total(slab_lens(self.slabs@)),
+            all_dom::<T>(self.kept()),
+            all_fit::<DX<T, C>, DB<T, C>>(self.slabs@),
+            target.fits(),
+            ({
+                let (s, p) = (self.slabs@, self.it.pos as int);
+                let t = match target.dv() {
+                    Some(t) => Some(t as int),
+                    None => None::<int>,
+                };
+                dsorted::<DX<T, C>, DB<T, C>>(s, p, p + self.rest().len()) ==> dfound::<DX<T, C>, DB<T, C>>(
+                    s,
+                    p,
+                    p + self.rest().len(),
+                    t,
+                    a,
+                    b,
+                )
+            }),
+        ensures
+            ({
+                let (p, o) = (self.it.pos as int, self.rest());
+                sorted::<T>(o) ==> forall|j: int|
+                    0 <= j < o.len() ==> {
+                        &&& (p + j < a) == T::below(#[trigger] o[j], target)
+                        &&& (p + j < b) == !T::below(target, o[j])
+                        &&& (a <= p + j < b) == (o[j] == target)
+                    }
+            }),
+    {
+        let (s, p, o, k) = (self.slabs@, self.it.pos as int, self.rest(), self.kept());
+        let e = p + o.len();
+        self.lemma_window();
+        self.lemma_rest();
+        if sorted::<T>(o) {
+            // values in order are kept as sums in order
+            assert forall|i: int, j: int| p <= i <= j < e implies !dbelow(
+                #[trigger] rv::<DX<T, C>, DB<T, C>>(s, j),
+                #[trigger] rv::<DX<T, C>, DB<T, C>>(s, i),
+            ) by {
+                lemma_kept_rv::<DX<T, C>, DB<T, C>>(s, i);
+                lemma_kept_rv::<DX<T, C>, DB<T, C>>(s, j);
+                assert(o[i - p] == T::of(k[p + (i - p)]));
+                assert(o[j - p] == T::of(k[p + (j - p)]));
+                lemma_bound::<T>(target, k[i]);
+                lemma_bound::<T>(o[i - p], k[j]);
+                assert(!T::below(o[j - p], o[i - p]));
+            }
+            assert(dsorted::<DX<T, C>, DB<T, C>>(s, p, e));
+            assert forall|j: int| 0 <= j < o.len() implies {
+                &&& (p + j < a) == T::below(#[trigger] o[j], target)
+                &&& (p + j < b) == !T::below(target, o[j])
+                &&& (a <= p + j < b) == (o[j] == target)
+            } by {
+                lemma_kept_rv::<DX<T, C>, DB<T, C>>(s, p + j);
+                lemma_bound::<T>(target, k[p + j]);
+                assert(o[j] == T::of(k[p + j]));
+            }
+        }
+    }
+
+    /// Search the values left for `target`, where they are in order,
+    /// and move on to it: given are the first place in the column that
+    /// holds it and the place after the last, and the iterator stands
+    /// at the first. For a `target` that does not fit, which is after
+    /// every value of a column, the iterator gives all it has.
+    fn seek_rest(&mut self, target: T) -> (r: (usize, usize))
+        ensures
+            final(self).column() == old(self).column(),
+            final(self).source() == old(self).source(),
+            ({
+                let (p, o) = (old(self).pos() as int, old(self).rest());
+                &&& p <= r.0 <= r.1 <= p + o.len()
+                &&& final(self).pos() == r.0
+                &&& final(self).rest() == o.skip(r.0 - p)
+                &&& final(self).end_pos() == if target.fits() {
+                    old(self).end_pos()
+                } else {
+                    final(self).pos()
+                }
+                &&& sorted::<T>(o) ==> forall|j: int|
+                    0 <= j < o.len() ==> {
+                        &&& (p + j < r.0) == T::below(#[trigger] o[j], target)
+                        &&& (p + j < r.1) == !T::below(target, o[j])
+                        &&& (r.0 <= p + j < r.1) == (o[j] == target)
+                    }
+            }),
+    {
+        let ghost me = *self;
+        let ghost p = self.it.pos as int;
+        proof {
+            use_type_invariant(&*self);
+            me.lemma_window();
+            me.lemma_rest();
+            me.it.lemma_out_window::<DX<T, C>>(me.slabs@);
+            lemma_search_start::<DX<T, C>, DB<T, C>>(me.it, me.ix, me.slabs@);
+            assert(me.rest().skip(0) =~= me.rest());
+        }
+        let here = self.it.pos;
+        match target.try_i64() {
+            None => {
+                // after every value a column keeps
+                let end = self.end_pos();
+                self.advance_to(end);
+                let at = self.pos();
+                proof {
+                    assert(self.rest() =~= me.rest().skip(at - p));
+                    assert forall|j: int| 0 <= j < me.rest().len() implies {
+                        &&& T::below(#[trigger] me.rest()[j], target)
+                        &&& !T::below(target, me.rest()[j])
+                        &&& me.rest()[j] != target
+                    } by {
+                        assert(in_dom::<T>(me.kept()[p + j]));
+                        lemma_bound::<T>(target, me.kept()[p + j]);
+                    }
+                }
+                (at, at)
+            },
+            Some(None) => {
+                let run_end = d_seek_null::<DX<T, C>, DB<T, C>>(&self.it, self.slabs);
+                proof {
+                    me.lemma_sought(target, p, run_end as int);
+                }
+                (here, run_end)
+            },
+            Some(Some(t)) => {
+                let mut it = self.it.dup();
+                let mut running = self.running;
+                let r = d_seek::<DX<T, C>, DB<T, C>>(&mut it, self.slabs, self.ix, &mut running, t);
+                *self = VerifiedDeltaIter { it, slabs: self.slabs, running, ix: self.ix, col: self.col };
+                proof {
+                    self.lemma_window();
+                    me.lemma_sought(target, r.0 as int, r.1 as int);
+                    lemma_window_past(me.column(), p, me.it.pos + me.it.items_left, r.0 - p);
+                    assert(self.rest() =~= me.rest().skip(r.0 - p));
+                }
+                r
+            },
+        }
+    }
+
+    /// Search the values of the column in `range` for `target`, where
+    /// they are in order, and move on to it: given is the range of the
+    /// places that hold it, and the iterator gives the first of them
+    /// next. If no value there is `target`, the range is the empty one
+    /// at the place where it would stand, and the iterator stands
+    /// there.
+    ///
+    /// The search is over `range` as far as that lies ahead of the
+    /// iterator and in the column. The window is made to end where
+    /// `range` ends ([`set_max`](Self::set_max)), whether that is
+    /// before its end or after it, and the iterator moves on to where
+    /// `range` starts ([`advance_to`](Self::advance_to)); a `range`
+    /// that starts past its end is taken as the empty one at its
+    /// start. `0..usize::MAX` is all the column has ahead of the
+    /// iterator.
+    ///
+    /// Few of the values are looked at: the column's index tells the
+    /// part of the column to look in. The values searched are taken to
+    /// be in order (`sorted`); where they are not, the range is some
+    /// range of the places searched. A `target` that does not fit comes
+    /// after every value of a column: the iterator then gives all it
+    /// has, and its window ends where it stands.
+    pub fn seek_to_value(&mut self, target: T, range: Range<usize>) -> (r: Range<usize>)
+        ensures
+            final(self).column() == old(self).column(),
+            final(self).source() == old(self).source(),
+            ({
+                let (p, c) = (old(self).pos() as int, old(self).column());
+                // where the window is made to end
+                let e = if range.start <= range.end {
+                    range.end as int
+                } else {
+                    range.start as int
+                };
+                // the places searched are `s..t` of the column
+                let t = if e <= p {
+                    p
+                } else if e <= c.len() {
+                    e
+                } else {
+                    c.len() as int
+                };
+                let s = if range.start <= p {
+                    p
+                } else if range.start <= t {
+                    range.start as int
+                } else {
+                    t
+                };
+                &&& p <= s <= r.start <= r.end <= t <= c.len()
+                &&& final(self).pos() == r.start
+                &&& final(self).rest() == c.subrange(r.start as int, t)
+                &&& final(self).end_pos() == if range.start > t || !target.fits() {
+                    r.start as int
+                } else if e >= p {
+                    e
+                } else {
+                    p
+                }
+                &&& sorted::<T>(c.subrange(s, t)) ==> forall|k: int|
+                    s <= k < t ==> {
+                        &&& (k < r.start) == T::below(#[trigger] c[k], target)
+                        &&& (k < r.end) == !T::below(target, c[k])
+                        &&& (r.start <= k < r.end) == (c[k] == target)
+                    }
+            }),
+    {
+        let ghost (p, c) = (self.pos() as int, self.column());
+        proof {
+            use_type_invariant(&*self);
+            self.lemma_window();
+        }
+        let (start, end) = if range.start <= range.end {
+            (range.start, range.end)
+        } else {
+            (range.start, range.start)
+        };
+        self.set_max(end);
+        let ghost o = self.rest();
+        if start > self.pos() {
+            self.advance_to(start);
+        }
+        let here = self.pos();
+        let ghost w = self.rest();
+        let ghost t = p + o.len();
+        proof {
+            assert(o =~= c.subrange(p, t));
+            assert(w =~= c.subrange(here as int, t));
+        }
+        if here >= end {
+            return here..here;
+        }
+        let r = self.seek_rest(target);
+        proof {
+            assert(self.rest() =~= c.subrange(r.0 as int, t));
+            if sorted::<T>(c.subrange(here as int, t)) {
+                assert forall|k: int| here <= k < t implies {
+                    &&& (k < r.0) == T::below(#[trigger] c[k], target)
+                    &&& (k < r.1) == !T::below(target, c[k])
+                    &&& (r.0 <= k < r.1) == (c[k] == target)
+                } by {
+                    assert(w[k - here] == c[k]);
+                }
+            }
+        }
+        r.0..r.1
+    }
 }
 
 #[cfg(verus_keep_ghost)]
@@ -911,6 +1514,32 @@ impl<T: VDeltaValue<C>, C: VCodec> VerifiedDeltaColumn<T, C> {
             assert(it.rest() =~= self@.subrange(start as int, end as int));
         }
         it
+    }
+
+    /// The range of the places in `start..end` that hold `value`, where
+    /// the values there are in order: the first such place and the
+    /// place after the last. If no value there is `value`, the range is
+    /// the empty one at the place where it would stand.
+    ///
+    /// Few of the values are looked at: the column's index tells the
+    /// part of the column to look in. The values of `start..end` are
+    /// taken to be in order (`sorted`); where they are not, the range is
+    /// some range of the places in `start..end`. A `value` that does not
+    /// fit comes after every value of a column.
+    pub fn scope_to_value(&self, value: T, start: usize, end: usize) -> (r: Range<usize>)
+        requires
+            start <= end <= self@.len(),
+        ensures
+            start <= r.start <= r.end <= end,
+            sorted::<T>(self@.subrange(start as int, end as int)) ==> forall|k: int|
+                start <= k < end ==> {
+                    &&& (k < r.start) == T::below(#[trigger] self@[k], value)
+                    &&& (k < r.end) == !T::below(value, self@[k])
+                    &&& (r.start <= k < r.end) == (self@[k] == value)
+                },
+    {
+        let mut it = self.iter();
+        it.seek_to_value(value, start..end)
     }
 }
 

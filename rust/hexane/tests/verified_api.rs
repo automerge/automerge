@@ -31,7 +31,7 @@ use std::cell::{Cell, RefCell};
 use std::cmp::Ordering;
 use std::fmt::Debug;
 use std::num::NonZeroU32;
-use std::ops::{Add, AddAssign, Range, Sub, SubAssign};
+use std::ops::{Add, AddAssign, Bound, Range, Sub, SubAssign};
 
 /// A small deterministic generator (xorshift64*).
 struct Rng(u64);
@@ -13542,4 +13542,607 @@ fn delta_runs_and_states_told() {
         s0.try_resume(&none),
         Err(PackError::InvalidResume)
     ));
+}
+
+// ── Delta columns: values found by a scan, and by a search of sorted ones ───
+
+/// A value type of a delta column in the order its values are searched
+/// in, which is `Ord`'s: numbers as they are counted, and a null before
+/// every number.
+trait DeltaSought: DeltaStepped + Ord {
+    /// A number of the type that no delta column holds, if it has one.
+    fn unfitting(rng: &mut Rng) -> Option<Self>;
+    /// Whether a delta column can hold the value.
+    fn storable(&self) -> bool;
+    /// The least number of the type, and the greatest that a delta
+    /// column holds.
+    fn ends() -> [Self; 2];
+}
+
+macro_rules! delta_sought {
+    ($t:ty) => {
+        impl DeltaSought for $t {
+            fn unfitting(rng: &mut Rng) -> Option<Self> {
+                if <$t>::BITS < 64 || <$t>::MIN != 0 {
+                    return None;
+                }
+                let least = (i64::MAX as u64 + 1) as $t;
+                Some(match rng.below(2) {
+                    0 => least + rng.below(3) as $t,
+                    _ => <$t>::MAX - rng.below(3) as $t,
+                })
+            }
+            fn storable(&self) -> bool {
+                (*self as i128) <= i64::MAX as i128
+            }
+            fn ends() -> [Self; 2] {
+                if <$t>::BITS < 64 || <$t>::MIN != 0 {
+                    [<$t>::MIN, <$t>::MAX]
+                } else {
+                    [<$t>::MIN, i64::MAX as $t]
+                }
+            }
+        }
+
+        impl DeltaSought for Option<$t> {
+            fn unfitting(rng: &mut Rng) -> Option<Self> {
+                <$t as DeltaSought>::unfitting(rng).map(Some)
+            }
+            fn storable(&self) -> bool {
+                self.is_none_or(|v| DeltaSought::storable(&v))
+            }
+            fn ends() -> [Self; 2] {
+                <$t as DeltaSought>::ends().map(Some)
+            }
+        }
+    };
+}
+
+delta_sought!(u32);
+delta_sought!(u64);
+delta_sought!(i32);
+delta_sought!(i64);
+delta_sought!(usize);
+
+/// A value to look for in a column of the values `model`: one near one
+/// of them, the null, an end of the type's numbers, or a number that no
+/// column holds.
+fn a_delta_target<T: DeltaSought>(rng: &mut Rng, model: &[T]) -> T {
+    match rng.below(12) {
+        0 | 1 => {
+            if let Some(null) = T::null() {
+                return null;
+            }
+        }
+        2 => {
+            if let Some(v) = T::unfitting(rng) {
+                return v;
+            }
+        }
+        3 => return T::ends()[rng.below(2)],
+        _ => {}
+    }
+    let (lo, hi) = T::bounds();
+    let near = if model.is_empty() {
+        0
+    } else {
+        model[rng.below(model.len())].number().unwrap_or(0)
+    };
+    T::numbered(near.saturating_add(rng.below(5) as i64 - 2).clamp(lo, hi))
+}
+
+/// Bounds for a scan of a column of the values `model`: each at such a
+/// value as is looked for, or none; the upper one now and then a little
+/// above the lower, so that some numbers are within them.
+fn delta_bounds<T: DeltaSought>(rng: &mut Rng, model: &[T]) -> (Bound<T>, Bound<T>) {
+    let (lo, hi) = T::bounds();
+    let a = a_delta_target(rng, model);
+    let b = match (rng.below(3), a.number()) {
+        (0, Some(n)) if a.storable() => {
+            T::numbered(n.saturating_add(rng.below(40) as i64).clamp(lo, hi))
+        }
+        _ => a_delta_target(rng, model),
+    };
+    let bound = |rng: &mut Rng, v: T| match rng.below(5) {
+        0 => Bound::Unbounded,
+        1 | 2 => Bound::Excluded(v),
+        _ => Bound::Included(v),
+    };
+    (bound(rng, a), bound(rng, b))
+}
+
+/// Whether `v` is within the bounds, as the specification says
+/// (`delta_within`): a number, not a null, at the lower bound or after
+/// it and at the upper one or before it in the order of the type's
+/// values.
+fn delta_model_within<T: DeltaSought>(lo: &Bound<T>, hi: &Bound<T>, v: T) -> bool {
+    v.number().is_some()
+        && match lo {
+            Bound::Included(a) => v >= *a,
+            Bound::Excluded(a) => v > *a,
+            Bound::Unbounded => true,
+        }
+        && match hi {
+            Bound::Included(b) => v <= *b,
+            Bound::Excluded(b) => v < *b,
+            Bound::Unbounded => true,
+        }
+}
+
+/// What the specification says of a scan for the values that `is`
+/// holds of: the place of the first of those left and the value, the
+/// walk moving past it; or nothing, the walk giving all it has.
+fn delta_walk_scan<T: Deltad>(
+    m: &mut DeltaWalk<'_, T>,
+    is: impl Fn(T) -> bool,
+) -> Option<(usize, T)> {
+    let left = m.left();
+    match m.model[m.pos..m.pos + left].iter().position(|v| is(*v)) {
+        Some(i) => {
+            let at = m.pos + i;
+            m.pos = at + 1;
+            Some((at, m.model[at]))
+        }
+        None => {
+            m.pos += left;
+            m.end = m.pos;
+            None
+        }
+    }
+}
+
+/// A delta column's iterator finds by a scan what its specification
+/// says, the first value left that is the one looked for or is within
+/// the bounds, and stands where it says afterwards, as `DeltaColumn`'s
+/// iterator does: the two are asked the same at each step, among other
+/// moves, with a walk of the values that follows the specification.
+fn delta_scans<T: DeltaSought>(seed: u64, max_segments: Option<usize>) {
+    let mut rng = Rng(seed.wrapping_mul(0x2f_9be6_cc27).wrapping_add(13) | 1);
+    let n = match rng.below(5) {
+        0 => rng.below(4),
+        _ => rng.below(200),
+    };
+    let (new, old, model) = delta_pair::<T>(&mut rng, n, max_segments);
+    let len = model.len();
+    for _ in 0..8 {
+        // over all of the column, or over a part of it
+        let (start, end) = match rng.below(2) {
+            0 => (0, len),
+            _ => {
+                let start = rng.below(len + 1);
+                (start, start + rng.below(len - start + 1))
+            }
+        };
+        let mut x = new.iter_range(start, end);
+        let mut y = old.iter_range(start..end);
+        let mut m = DeltaWalk {
+            model: &model,
+            pos: start,
+            end,
+        };
+        for _ in 0..24 {
+            match rng.below(5) {
+                0 => {
+                    let mv = a_delta_move(&mut rng, &m);
+                    let want = m.does(&mv);
+                    assert_eq!(new_delta_does(&mut x, &mv), want, "{mv:?}");
+                    assert_eq!(old_delta_does(&mut y, &mv), want, "{mv:?}");
+                }
+                1 | 2 => {
+                    let target = a_delta_target(&mut rng, &model);
+                    let want = delta_walk_scan(&mut m, |v| v == target).map(|(at, _)| at);
+                    assert_eq!(x.scan_to_value(target), want, "{target:?}");
+                    assert_eq!(y.scan_to_value(target), want, "{target:?}");
+                }
+                _ => {
+                    let (lo, hi) = delta_bounds(&mut rng, &model);
+                    let want = delta_walk_scan(&mut m, |v| delta_model_within(&lo, &hi, v));
+                    assert_eq!(x.scan_to_range((lo, hi)), want, "{lo:?} {hi:?}");
+                    assert_eq!(y.scan_to_range((lo, hi)), want, "{lo:?} {hi:?}");
+                }
+            }
+            assert_eq!(delta_place(&x), m.place());
+            assert_eq!(old_delta_place(&y), m.place());
+            assert_eq!(
+                format!("{x:?}"),
+                format!("{y:?}").replace("DeltaIter", "VerifiedDeltaIter")
+            );
+        }
+    }
+}
+
+/// A verified delta column's iterator and the old one's find the same
+/// by a scan for a value and by a scan for a value within bounds, and
+/// stand in the same places afterwards, which is what the specification
+/// says: for every type of value, and with small slabs too.
+#[test]
+fn delta_scans_agree() {
+    for seed in 0..8 {
+        for max_segments in [None, Some(2), Some(5)] {
+            delta_scans::<u32>(seed, max_segments);
+            delta_scans::<u64>(seed, max_segments);
+            delta_scans::<i32>(seed, max_segments);
+            delta_scans::<i64>(seed, max_segments);
+            delta_scans::<usize>(seed, max_segments);
+            delta_scans::<Option<u32>>(seed, max_segments);
+            delta_scans::<Option<u64>>(seed, max_segments);
+            delta_scans::<Option<i32>>(seed, max_segments);
+            delta_scans::<Option<i64>>(seed, max_segments);
+            delta_scans::<Option<usize>>(seed, max_segments);
+        }
+    }
+}
+
+/// A verified delta column and the old one of the same `n` values in
+/// their order, laid out in the same slabs, with the values.
+fn delta_sorted_pair<T: DeltaSought>(
+    rng: &mut Rng,
+    n: usize,
+    max_segments: Option<usize>,
+) -> (VerifiedDeltaColumn<T>, DeltaColumn<T>, Vec<T>) {
+    let (mut new, mut old) = match max_segments {
+        Some(m) => (
+            VerifiedDeltaColumn::<T>::with_max_segments(m),
+            DeltaColumn::<T>::with_max_segments(m),
+        ),
+        None => (
+            VerifiedDeltaColumn::<T>::default(),
+            DeltaColumn::<T>::default(),
+        ),
+    };
+    let mut last = 0;
+    let mut model = Vec::new();
+    for _ in 0..n {
+        let (v, l) = T::near(rng, last);
+        last = l;
+        model.push(v);
+    }
+    model.sort();
+    // most of them one after the other, and then the others at their
+    // places, so that slabs are cut
+    let mut held = Vec::new();
+    let mut later = Vec::new();
+    for v in &model {
+        if rng.below(5) == 0 {
+            later.push(*v);
+        } else {
+            new.insert(held.len(), *v);
+            old.insert(held.len(), *v);
+            held.push(*v);
+        }
+    }
+    for v in later {
+        let at = held.partition_point(|h| *h < v);
+        new.insert(at, v);
+        old.insert(at, v);
+        held.insert(at, v);
+    }
+    assert_eq!(held, model);
+    assert_eq!(new.slab_count(), old.slab_count());
+    (new, old, model)
+}
+
+/// A range to search for an iterator that stands as `m` does: mostly
+/// ahead of it and in the column, sometimes any range.
+fn a_delta_range<T: Deltad>(rng: &mut Rng, m: &DeltaWalk<'_, T>) -> Range<usize> {
+    let len = m.model.len();
+    match rng.below(8) {
+        0 => 0..usize::MAX,
+        1 => 0..m.end,
+        // any range: one behind the iterator, one that ends before it
+        // starts
+        2 | 3 => a_place(rng, len)..a_place(rng, len),
+        _ => {
+            let start = m.pos + rng.below(len - m.pos + 1);
+            start..start + rng.below(len - start + 2)
+        }
+    }
+}
+
+/// Where the specification of `seek_to_value` leaves an iterator that
+/// stands as `m` does and gives `r`, whatever the values are; `r` is
+/// checked to lie in the places searched, which are given.
+fn delta_walk_sought<T: DeltaSought>(
+    m: &mut DeltaWalk<'_, T>,
+    target: T,
+    range: &Range<usize>,
+    r: &Range<usize>,
+) -> Range<usize> {
+    let (p, len) = (m.pos, m.model.len());
+    // where the window is made to end
+    let e = range.end.max(range.start);
+    // the places searched
+    let t = if e <= p { p } else { e.min(len) };
+    let s = if range.start <= p {
+        p
+    } else {
+        range.start.min(t)
+    };
+    assert!(s <= r.start && r.end <= t, "{range:?} {r:?}");
+    m.pos = r.start;
+    m.end = if range.start > t || !target.storable() {
+        r.start
+    } else {
+        e.max(p)
+    };
+    s..t
+}
+
+/// `r` is what the specifications say of a search for `value` among the
+/// values of `model` at the places `searched`: a range of those places;
+/// and, where the values there are in order, the places of those that
+/// are `value`, or the empty range where it would stand.
+fn delta_sought_rightly<T: DeltaSought>(
+    model: &[T],
+    value: T,
+    searched: Range<usize>,
+    r: &Range<usize>,
+) {
+    assert!(searched.start <= r.start && r.start <= r.end && r.end <= searched.end);
+    let part = &model[searched.clone()];
+    if part.windows(2).all(|w| w[0] <= w[1]) {
+        let first = searched.start + part.partition_point(|v| *v < value);
+        let after = searched.start + part.partition_point(|v| *v <= value);
+        assert_eq!(*r, first..after, "{value:?} in {searched:?}");
+    }
+}
+
+/// A delta column and its iterator search values for one of them as
+/// their specifications say, and the iterator stands where its own
+/// says afterwards, as `DeltaColumn` and its iterator do: for values in
+/// their order (`in_order`), where the range found is the one of the
+/// places that hold the value, and for values in no order, where it is
+/// some range of the places searched.
+fn delta_seeks<T: DeltaSought>(seed: u64, max_segments: Option<usize>, in_order: bool) {
+    let mut rng = Rng(seed.wrapping_mul(0x63_d1a5_4e0b).wrapping_add(17) | 1);
+    let n = match rng.below(5) {
+        0 => rng.below(4),
+        _ => rng.below(200),
+    };
+    let (new, old, model) = if in_order {
+        delta_sorted_pair::<T>(&mut rng, n, max_segments)
+    } else {
+        delta_pair::<T>(&mut rng, n, max_segments)
+    };
+    let len = model.len();
+    // the column's own search
+    for _ in 0..12 {
+        let start = rng.below(len + 1);
+        let end = start + rng.below(len - start + 1);
+        let value = a_delta_target(&mut rng, &model);
+        let r = new.scope_to_value(value, start, end);
+        assert_eq!(old.scope_to_value(value, start..end), r, "{value:?}");
+        delta_sought_rightly(&model, value, start..end, &r);
+    }
+    // the iterator's, among other moves
+    for _ in 0..10 {
+        let mut x = new.iter();
+        let mut y = old.iter();
+        let mut m = DeltaWalk {
+            model: &model,
+            pos: 0,
+            end: len,
+        };
+        for _ in 0..10 {
+            match rng.below(3) {
+                0 => {
+                    let mv = a_delta_move(&mut rng, &m);
+                    let want = m.does(&mv);
+                    assert_eq!(new_delta_does(&mut x, &mv), want, "{mv:?}");
+                    assert_eq!(old_delta_does(&mut y, &mv), want, "{mv:?}");
+                }
+                _ => {
+                    let target = a_delta_target(&mut rng, &model);
+                    let range = a_delta_range(&mut rng, &m);
+                    let r = x.seek_to_value(target, range.clone());
+                    assert_eq!(
+                        y.seek_to_value(target, range.clone()),
+                        r,
+                        "{target:?} {range:?}"
+                    );
+                    let searched = delta_walk_sought(&mut m, target, &range, &r);
+                    delta_sought_rightly(&model, target, searched, &r);
+                }
+            }
+            assert_eq!(delta_place(&x), m.place());
+            assert_eq!(old_delta_place(&y), m.place());
+            assert_eq!(
+                format!("{x:?}"),
+                format!("{y:?}").replace("DeltaIter", "VerifiedDeltaIter")
+            );
+        }
+    }
+}
+
+/// A verified delta column and the old one, and their iterators, find
+/// the same by a search for a value, and the iterators stand in the
+/// same places afterwards, which is what the specifications say: for
+/// values in their order and in no order, for every type of value, and
+/// with small slabs too.
+#[test]
+fn delta_seeks_agree() {
+    for seed in 0..8 {
+        for max_segments in [None, Some(2), Some(5)] {
+            for in_order in [true, false] {
+                delta_seeks::<u32>(seed, max_segments, in_order);
+                delta_seeks::<u64>(seed, max_segments, in_order);
+                delta_seeks::<i32>(seed, max_segments, in_order);
+                delta_seeks::<i64>(seed, max_segments, in_order);
+                delta_seeks::<usize>(seed, max_segments, in_order);
+                delta_seeks::<Option<u32>>(seed, max_segments, in_order);
+                delta_seeks::<Option<u64>>(seed, max_segments, in_order);
+                delta_seeks::<Option<i32>>(seed, max_segments, in_order);
+                delta_seeks::<Option<i64>>(seed, max_segments, in_order);
+                delta_seeks::<Option<usize>>(seed, max_segments, in_order);
+            }
+        }
+    }
+}
+
+/// The scans and the search of a delta column's iterator at their
+/// edges, each written out: a value no column holds, bounds that hold
+/// nothing, the null as a value and as a bound, a range that starts
+/// past its end, values in no order, and an iterator of no column. The
+/// old iterator is asked the same.
+#[test]
+fn delta_searches_told() {
+    let values: [u64; 6] = [1, 3, 3, 3, 7, 9];
+    let mut new = VerifiedDeltaColumn::<u64>::default();
+    let mut old = DeltaColumn::<u64>::default();
+    for (i, v) in values.iter().enumerate() {
+        new.insert(i, *v);
+        old.insert(i, *v);
+    }
+    let unfitting = i64::MAX as u64 + 1;
+
+    // a scan for a value gives each place of it in turn, and then all
+    // the iterator has
+    let (mut x, mut y) = (new.iter(), old.iter());
+    for want in [Some(1), Some(2), Some(3), None, None] {
+        assert_eq!(x.scan_to_value(3), want);
+        assert_eq!(y.scan_to_value(3), want);
+    }
+    assert_eq!(delta_place(&x), (6, 6, 0));
+    assert_eq!(old_delta_place(&y), (6, 6, 0));
+    // a value no column holds is found nowhere
+    let (mut x, mut y) = (new.iter_range(2, 5), old.iter_range(2..5));
+    assert_eq!(x.scan_to_value(unfitting), None);
+    assert_eq!(y.scan_to_value(unfitting), None);
+    assert_eq!(delta_place(&x), (5, 5, 0));
+    assert_eq!(old_delta_place(&y), (5, 5, 0));
+
+    // bounds of every kind
+    let (mut x, mut y) = (new.iter(), old.iter());
+    assert_eq!(x.scan_to_range(3..8), Some((1, 3)));
+    assert_eq!(y.scan_to_range(3..8), Some((1, 3)));
+    let above = (Bound::Excluded(3), Bound::Unbounded);
+    assert_eq!(x.scan_to_range(above), Some((4, 7)));
+    assert_eq!(y.scan_to_range(above), Some((4, 7)));
+    assert_eq!(x.scan_to_range(..=unfitting), Some((5, 9)));
+    assert_eq!(y.scan_to_range(..=unfitting), Some((5, 9)));
+    assert_eq!(delta_place(&x), (6, 6, 0));
+    assert_eq!(old_delta_place(&y), (6, 6, 0));
+    // bounds that hold nothing: the upper one below the lower, the
+    // lower one a value no column holds, and one that leaves out the
+    // only number there could be
+    let (lo, hi) = (8u64, 2u64);
+    let nothing = [
+        (Bound::Included(lo), Bound::Included(hi)),
+        (Bound::Included(unfitting), Bound::Unbounded),
+        (Bound::Excluded(i64::MAX as u64), Bound::Unbounded),
+        (Bound::Unbounded, Bound::Excluded(0)),
+    ];
+    for bounds in nothing {
+        let (mut x, mut y) = (new.iter(), old.iter());
+        assert_eq!(x.scan_to_range(bounds), None, "{bounds:?}");
+        assert_eq!(y.scan_to_range(bounds), None, "{bounds:?}");
+        assert_eq!(delta_place(&x), (6, 6, 0), "{bounds:?}");
+        assert_eq!(old_delta_place(&y), (6, 6, 0), "{bounds:?}");
+    }
+
+    // a search gives the places of the value, and the iterator the
+    // first of them next; the window ends where the range does
+    let (mut x, mut y) = (new.iter(), old.iter());
+    assert_eq!(x.seek_to_value(3, 0..usize::MAX), 1..4);
+    assert_eq!(y.seek_to_value(3, 0..usize::MAX), 1..4);
+    assert_eq!(delta_place(&x), (1, usize::MAX, 5));
+    assert_eq!(old_delta_place(&y), (1, usize::MAX, 5));
+    assert_eq!((x.next(), y.next()), (Some(3), Some(3)));
+    // a value that is not there: where it would stand
+    assert_eq!(x.seek_to_value(4, 0..5), 4..4);
+    assert_eq!(y.seek_to_value(4, 0..5), 4..4);
+    assert_eq!(delta_place(&x), (4, 5, 1));
+    assert_eq!(old_delta_place(&y), (4, 5, 1));
+    assert_eq!((x.next(), y.next()), (Some(7), Some(7)));
+    // a value no column holds comes after them all, and the window
+    // ends there
+    let (mut x, mut y) = (new.iter(), old.iter());
+    assert_eq!(x.seek_to_value(unfitting, 0..usize::MAX), 6..6);
+    assert_eq!(y.seek_to_value(unfitting, 0..usize::MAX), 6..6);
+    assert_eq!(delta_place(&x), (6, 6, 0));
+    assert_eq!(old_delta_place(&y), (6, 6, 0));
+    // a range that starts past its end is the empty one at its start
+    let (start, end) = (5, 2);
+    let (mut x, mut y) = (new.iter(), old.iter());
+    assert_eq!(x.seek_to_value(3, start..end), 5..5);
+    assert_eq!(y.seek_to_value(3, start..end), 5..5);
+    assert_eq!(delta_place(&x), (5, 5, 0));
+    assert_eq!(old_delta_place(&y), (5, 5, 0));
+    // the column's own search
+    assert_eq!(new.scope_to_value(3, 0, 6), 1..4);
+    assert_eq!(new.scope_to_value(3, 2, 3), 2..3);
+    assert_eq!(new.scope_to_value(8, 0, 6), 5..5);
+    assert_eq!(new.scope_to_value(unfitting, 0, 4), 4..4);
+    assert_eq!(new.scope_to_value(3, 6, 6), 6..6);
+
+    // nulls come before every number, are found by a scan for the
+    // null, and are within no bounds; a null as a lower bound is below
+    // every number, and as an upper one above none
+    let values = [None, None, Some(-5i64), Some(2), Some(2)];
+    let mut new = VerifiedDeltaColumn::<Option<i64>>::default();
+    let mut old = DeltaColumn::<Option<i64>>::default();
+    for (i, v) in values.iter().enumerate() {
+        new.insert(i, *v);
+        old.insert(i, *v);
+    }
+    let (mut x, mut y) = (new.iter(), old.iter());
+    assert_eq!(x.seek_to_value(None, 0..5), 0..2);
+    assert_eq!(y.seek_to_value(None, 0..5), 0..2);
+    assert_eq!(x.seek_to_value(Some(2), 0..5), 3..5);
+    assert_eq!(y.seek_to_value(Some(2), 0..5), 3..5);
+    assert_eq!(new.scope_to_value(None, 1, 5), 1..2);
+    assert_eq!(new.scope_to_value(Some(-9), 0, 5), 2..2);
+    let (mut x, mut y) = (new.iter(), old.iter());
+    for want in [Some(0), Some(1), None] {
+        assert_eq!(x.scan_to_value(None), want);
+        assert_eq!(y.scan_to_value(None), want);
+    }
+    let (mut x, mut y) = (new.iter(), old.iter());
+    assert_eq!(x.scan_to_range(None..), Some((2, Some(-5))));
+    assert_eq!(y.scan_to_range(None..), Some((2, Some(-5))));
+    assert_eq!(x.scan_to_range(..), Some((3, Some(2))));
+    assert_eq!(y.scan_to_range(..), Some((3, Some(2))));
+    let (mut x, mut y) = (new.iter(), old.iter());
+    assert_eq!(x.scan_to_range(None..=None), None);
+    assert_eq!(y.scan_to_range(None..=None), None);
+    assert_eq!(delta_place(&x), (5, 5, 0));
+    assert_eq!(old_delta_place(&y), (5, 5, 0));
+    let (mut x, mut y) = (new.iter(), old.iter());
+    assert_eq!(x.scan_to_range(..=None), None);
+    assert_eq!(y.scan_to_range(..=None), None);
+
+    // values in no order: some range of the places searched, the same
+    // of both
+    let values: [u32; 6] = [5, 1, 5, 1, 9, 0];
+    let mut new = VerifiedDeltaColumn::<u32>::default();
+    let mut old = DeltaColumn::<u32>::default();
+    for (i, v) in values.iter().enumerate() {
+        new.insert(i, *v);
+        old.insert(i, *v);
+    }
+    for value in [0, 1, 5, 9, 10] {
+        let r = new.scope_to_value(value, 1, 6);
+        assert_eq!(old.scope_to_value(value, 1..6), r);
+        assert!(1 <= r.start && r.start <= r.end && r.end <= 6);
+    }
+
+    // an iterator of no column finds nothing
+    let mut x = hexane::verified::VerifiedDeltaIter::<Option<i64>>::default();
+    let mut y = hexane::DeltaIter::<Option<i64>>::default();
+    assert_eq!(x.scan_to_value(Some(1)), None);
+    assert_eq!(y.scan_to_value(Some(1)), None);
+    assert_eq!(x.scan_to_value(None), None);
+    assert_eq!(y.scan_to_value(None), None);
+    assert_eq!(x.scan_to_range(..), None);
+    assert_eq!(y.scan_to_range(..), None);
+    assert_eq!(delta_place(&x), (0, 0, 0));
+    assert_eq!(old_delta_place(&y), (0, 0, 0));
+    assert_eq!(x.seek_to_value(Some(1), 3..9), 0..0);
+    assert_eq!(y.seek_to_value(Some(1), 3..9), 0..0);
+    assert_eq!(delta_place(&x), (0, 0, 0));
+    assert_eq!(old_delta_place(&y), (0, 0, 0));
+    assert_eq!(x.seek_to_value(None, 0..9), 0..0);
+    assert_eq!(y.seek_to_value(None, 0..9), 0..0);
+    assert_eq!(delta_place(&x), (0, 9, 0));
+    assert_eq!(old_delta_place(&y), (0, 9, 0));
 }

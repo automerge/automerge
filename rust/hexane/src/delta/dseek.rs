@@ -1052,6 +1052,7 @@ pub(crate) fn d_seek<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
             &&& p <= r.0 <= r.1 <= e
             &&& final(core).pos == r.0
             &&& final(core).out::<X>(slabs@) == o.skip(r.0 - p)
+            &&& final(core).items_left == old(core).items_left - (r.0 - p)
             &&& dsorted::<X, B>(slabs@, p, e) ==> dfound::<X, B>(slabs@, p, e, Some(t as int), r.0 as int, r.1 as int)
         }),
 {

@@ -33,14 +33,14 @@ use crate::delta::dfind::{col_hit, kth, lemma_skipped};
 use crate::delta::diter::d_nth;
 #[cfg(verus_keep_ghost)]
 use crate::delta::diter::{
-    at_run, crop, dbefore, dindex_ok, dix_ok, lemma_crop, lemma_found, lemma_psum_cat, realize,
-    realized_at,
+    at_run, crop, dbefore, dindex_ok, dix_ok, dval_at, lemma_crop, lemma_found, lemma_psum_cat,
+    realize, realized_at,
 };
 use crate::delta::dseek::d_step;
 #[cfg(verus_keep_ghost)]
 use crate::delta::dseek::{
     all_fit, lemma_dup, lemma_out_skip, lemma_run_rv, lemma_search_start, lemma_sums_fit,
-    lemma_vals_len, lemma_window, probe_at, rsum,
+    lemma_vals_len, lemma_window, probe_at, rsum, rv,
 };
 #[cfg(verus_keep_ghost)]
 use crate::fenwick::{lemma_sum_le, lemma_sum_one, lemma_sum_split, sum, total};
@@ -114,6 +114,34 @@ proof fn lemma_rsum_split<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Ite
     assert(vv.take(b) =~= vv.take(a) + vv.subrange(a, b));
     assert(deltas_of::<_, B>(vv.take(b)) =~= deltas_of::<_, B>(vv.take(a)) + deltas_of::<_, B>(vv.subrange(a, b)));
     lemma_psum_cat(deltas_of::<_, B>(vv.take(a)), deltas_of::<_, B>(vv.subrange(a, b)));
+}
+
+/// What a delta column's readers give at item `i` (`dval_at`) is what
+/// the item realizes (`rv`): the running sum through it, an `i64`, or
+/// null.
+pub(crate) proof fn lemma_dval_rv<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
+    s: Seq<Slab<X::Tail>>,
+    i: int,
+)
+    requires
+        0 <= i < vals_of::<X>(s).len(),
+        all_fit::<X, B>(s),
+    ensures
+        match rv::<X, B>(s, i) {
+            Some(n) => in_i64(n) && dval_at::<X, B>(s, i) == Some(n as i64),
+            None => dval_at::<X, B>(s, i) is None,
+        },
+{
+    let vv = vals_of::<X>(s);
+    lemma_rsum_split::<X, B>(s, i, i + 1);
+    assert(vv.subrange(i, i + 1) =~= seq![vv[i]]);
+    assert(deltas_of::<_, B>(vv.subrange(i, i + 1)) =~= seq![B::dv(vv[i])]);
+    assert(seq![B::dv(vv[i])].drop_last() =~= Seq::<Option<i64>>::empty());
+    assert(psum(Seq::<Option<i64>>::empty()) == 0);
+    assert(psum(seq![B::dv(vv[i])]) == dval(B::dv(vv[i])));
+    assert(rsum::<X, B>(s, i) == psum(dbefore::<X, B>(s, i)));
+    assert(in_i64(rsum::<X, B>(s, i + 1)));
+    lemma_crop(rsum::<X, B>(s, i + 1));
 }
 
 /// A run of `c` copies of `x` from item `pos` of a column whose running
@@ -387,6 +415,10 @@ fn d_park<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
     ensures
         at_run::<X, B>(*final(core), *final(running), slabs@),
         final(core).out::<X>(slabs@).len() == 0,
+        final(core).items_left == 0,
+        old(core).pos <= total(slab_lens(slabs@)) ==> final(core).pos == old(core).pos + old(core).out::<X>(
+            slabs@,
+        ).len(),
 {
     proof {
         lemma_window::<X::D, X>(*core, slabs@);
@@ -493,10 +525,13 @@ pub(crate) fn d_scan<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
                     &&& clear::<X, B>(slabs@, lo as int, hi as int, p, h as int)
                     &&& final(core).pos == h + 1
                     &&& final(core).out::<X>(slabs@) == o.skip(h + 1 - p)
+                    &&& final(core).items_left == old(core).items_left - (h + 1 - p)
                 },
                 None => {
                     &&& clear::<X, B>(slabs@, lo as int, hi as int, p, e)
                     &&& final(core).out::<X>(slabs@).len() == 0
+                    &&& final(core).items_left == 0
+                    &&& p <= total(slab_lens(slabs@)) ==> final(core).pos == e
                 },
             }
         }),
@@ -551,6 +586,7 @@ pub(crate) fn d_scan<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
             all_fit::<X, B>(s),
             probe_at::<X, B>(*core, *running, s, o, p, core.pos as int),
             core.pos + core.items_left == end,
+            end == p + old(core).items_left,
             p <= core.pos <= e,
             clear::<X, B>(s, lo as int, hi as int, p, core.pos as int),
             search.inv(),
@@ -631,6 +667,7 @@ pub(crate) fn d_scan<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
                 all_fit::<X, B>(s),
                 probe_at::<X, B>(*core, *running, s, o, p, core.pos as int),
                 core.pos + core.items_left == end,
+                end == p + old(core).items_left,
                 p <= core.pos <= e,
                 q0 <= q <= e,
                 clear::<X, B>(s, lo as int, hi as int, p, q),
@@ -763,10 +800,13 @@ pub(crate) fn d_scan_null<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Ite
                     &&& forall|j: int| p <= j < h ==> B::dv(#[trigger] vv[j]) is Some
                     &&& final(core).pos == h + 1
                     &&& final(core).out::<X>(slabs@) == o.skip(h + 1 - p)
+                    &&& final(core).items_left == old(core).items_left - (h + 1 - p)
                 },
                 None => {
                     &&& forall|j: int| p <= j < e ==> B::dv(#[trigger] vv[j]) is Some
                     &&& final(core).out::<X>(slabs@).len() == 0
+                    &&& final(core).items_left == 0
+                    &&& p <= total(slab_lens(slabs@)) ==> final(core).pos == e
                 },
             }
         }),

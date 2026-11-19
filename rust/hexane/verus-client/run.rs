@@ -2763,3 +2763,124 @@ fn delta_runs_and_states() {
     assert_eq!(verus_client::delta_resumed_elsewhere(&s, &edited), None);
     assert!(verus_client::delta_told_by_try_resume(&s, &edited).is_err());
 }
+
+#[test]
+fn delta_scans_and_searches() {
+    use std::ops::Bound;
+    // values in no order: scans
+    let values: [u64; 7] = [5, 3, 9, 3, 12, 3, 7];
+    let col: VerifiedDeltaColumn<u64> = verus_client::delta_built(&values);
+    assert_eq!(verus_client::delta_first_place_in(&col, 3, 0, 7), Some(1));
+    assert_eq!(verus_client::delta_first_place_in(&col, 3, 2, 7), Some(3));
+    assert_eq!(verus_client::delta_first_place_in(&col, 3, 6, 7), None);
+    assert_eq!(verus_client::delta_all_places(&col, 3), [1, 3, 5]);
+    assert!(verus_client::delta_all_places(&col, 4).is_empty());
+    assert_eq!(verus_client::delta_scan_unfitting(&col), None);
+    assert_eq!(
+        verus_client::delta_first_in_bounds(&col, 8, 20),
+        Some((2, 9))
+    );
+    assert_eq!(
+        verus_client::delta_first_in_bounds(&col, 13, u64::MAX),
+        None
+    );
+    let signed: VerifiedDeltaColumn<i64> = verus_client::delta_built(&[-3, 0, 7, 7, -20]);
+    assert_eq!(verus_client::delta_first_at_least(&signed, 1), Some((2, 7)));
+    assert_eq!(verus_client::delta_first_at_least(&signed, 8), None);
+    let small: VerifiedDeltaColumn<i32> = verus_client::delta_built(&[4, -1, 6, 5]);
+    assert_eq!(
+        verus_client::delta_first_between(&small, 4, 6),
+        Some((2, 6))
+    );
+    assert_eq!(verus_client::delta_first_between(&small, 6, 4), None);
+    let nullable: VerifiedDeltaColumn<Option<u32>> =
+        verus_client::delta_built(&[None, Some(8), None, Some(2)]);
+    assert_eq!(verus_client::delta_first_below(&nullable, 5), Some((3, 2)));
+    assert_eq!(verus_client::delta_first_below(&nullable, 0), None);
+    let numbers: VerifiedDeltaColumn<Option<i64>> =
+        verus_client::delta_built(&[None, None, Some(-4), None]);
+    assert_eq!(verus_client::delta_first_null(&numbers), Some(0));
+    assert_eq!(
+        verus_client::delta_any_number(&numbers),
+        Some((2, Some(-4)))
+    );
+    let big: VerifiedDeltaColumn<Option<u64>> = verus_client::delta_built(&[None, Some(1), None]);
+    assert_eq!(verus_client::delta_null_in_no_bounds(&big), None);
+
+    // values in order: searches
+    let sorted: [u64; 7] = [1, 3, 3, 3, 7, 9, 9];
+    let col: VerifiedDeltaColumn<u64> = verus_client::delta_built(&sorted);
+    assert_eq!(verus_client::delta_seek_then_read(&col, 3), 1..4);
+    assert_eq!(verus_client::delta_seek_then_read(&col, 4), 4..4);
+    assert_eq!(verus_client::delta_seek_then_read(&col, 0), 0..0);
+    assert_eq!(verus_client::delta_seek_then_read(&col, 10), 7..7);
+    assert_eq!(verus_client::delta_seek_unfitting(&col), 7..7);
+    assert_eq!(verus_client::delta_sought_between(&col, 9, 2, 6), 5..6);
+    assert_eq!(verus_client::delta_sought_between(&col, 1, 2, 6), 2..2);
+    let mut it = col.iter_range(1, 6);
+    assert_eq!(verus_client::delta_find_in_the_rest(&mut it, 7), 4..5);
+    assert_eq!((it.pos(), it.end_pos()), (4, 6));
+    assert_eq!(it.next(), Some(7));
+    assert_eq!(verus_client::delta_find_in_the_rest(&mut it, 2), 5..5);
+    assert_eq!(it.next(), Some(9));
+    let first: VerifiedDeltaColumn<Option<u64>> =
+        verus_client::delta_built(&[None, None, None, Some(0), Some(6)]);
+    assert_eq!(verus_client::delta_seek_nulls_first(&first), 0..3);
+    let mut it = col.iter();
+    assert_eq!(
+        verus_client::delta_sought_unfitting(&mut it, u64::MAX, 2..5),
+        5..5
+    );
+    assert_eq!((it.pos(), it.end_pos(), it.next()), (5, 5, None));
+    let mut it = col.iter();
+    let (start, end) = (4, 1);
+    assert_eq!(
+        verus_client::delta_sought_backwards(&mut it, 3, start..end),
+        4..4
+    );
+    assert_eq!((it.pos(), it.next()), (4, None));
+    let mut it = col.iter();
+    let (start, end) = (40, 1);
+    assert_eq!(
+        verus_client::delta_sought_backwards(&mut it, 3, start..end),
+        7..7
+    );
+
+    // each call by itself
+    let col: VerifiedDeltaColumn<u64> = verus_client::delta_built(&values);
+    let mut it = col.iter();
+    assert_eq!(
+        verus_client::delta_told_by_scan_to_value(&mut it, 3),
+        Some(1)
+    );
+    assert_eq!(
+        verus_client::delta_told_by_scan_to_value(&mut it, 3),
+        Some(3)
+    );
+    assert_eq!(
+        verus_client::delta_told_by_scan_to_range(&mut it, 10..),
+        Some((4, 12))
+    );
+    let bounds = (Bound::Excluded(3), Bound::Included(7));
+    assert_eq!(
+        verus_client::delta_told_by_scan_to_range(&mut it, bounds),
+        Some((6, 7))
+    );
+    assert_eq!(verus_client::delta_told_by_scan_to_range(&mut it, ..), None);
+    assert_eq!(verus_client::delta_told_by_scan_to_value(&mut it, 3), None);
+    let col: VerifiedDeltaColumn<u64> = verus_client::delta_built(&sorted);
+    let mut it = col.iter();
+    assert_eq!(
+        verus_client::delta_told_by_seek_to_value(&mut it, 9, 0..usize::MAX),
+        5..7
+    );
+    assert_eq!(it.next(), Some(9));
+    assert_eq!(
+        verus_client::delta_told_by_scope_to_value(&col, 3, 0, 7),
+        1..4
+    );
+    assert_eq!(
+        verus_client::delta_told_by_scope_to_value(&col, 5, 2, 7),
+        4..4
+    );
+}

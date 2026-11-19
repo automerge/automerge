@@ -394,26 +394,28 @@
 use super::{
     accumulated, after_edit, after_edits, all_fit, below_at, bytes_below, delta_at, delta_prefix,
     delta_run_fits, delta_run_in_range, delta_run_kept, delta_run_values, delta_runs_at,
-    delta_runs_fit, delta_runs_kept, delta_runs_values, deltas, folded, head_len, head_run,
-    head_run_max, lemma_acc_cat, lemma_acc_range, lemma_acc_run, lemma_after_edits, lemma_cancel,
-    lemma_delta_run_at, lemma_delta_run_exact, lemma_delta_run_fits, lemma_delta_runs_at,
-    lemma_delta_runs_one, lemma_delta_runs_push, lemma_head_len, lemma_head_run_max,
-    lemma_run_values_add, lemma_run_values_push, lemma_runs_first, lemma_runs_of_values,
-    lemma_sorted, lemma_sum_bound, lemma_sum_mono, lemma_sum_range, lemma_sum_run, lemma_sums_fit,
-    mapped, only, past, refused, run_values, runs_of, scan_of, scan_taken, sorted, sorted_for,
-    sum_of, summed, sums_fit, times, total_len, total_str_len, window, AccIndex, Get, LenIndex,
-    SumIndex, VAccum, VAccumulated, VAdds, VAmount, VCodec, VCount, VDelta, VDeltaValue, VGet,
-    VGroup, VIndex, VKeeps, VNewtype, VSpec, VSum, VSummed, VValue, VerifiedAccColumn,
-    VerifiedAccIter, VerifiedAccIterState, VerifiedAccSeek, VerifiedAccValue, VerifiedColumn,
-    VerifiedDecoder, VerifiedDeltaColumn, VerifiedDeltaIter, VerifiedDeltaIterState,
-    VerifiedDeltaRuns, VerifiedEncoder, VerifiedEncoderState, VerifiedIter, VerifiedIterState,
-    VerifiedPrefixColumn, VerifiedPrefixIter, VerifiedPrefixIterState, VerifiedPrefixSeek,
-    VerifiedPrefixedValue, VerifiedRuns,
+    delta_runs_fit, delta_runs_kept, delta_runs_values, delta_within, deltas, folded, head_len,
+    head_run, head_run_max, lemma_acc_cat, lemma_acc_range, lemma_acc_run, lemma_after_edits,
+    lemma_cancel, lemma_delta_run_at, lemma_delta_run_exact, lemma_delta_run_fits,
+    lemma_delta_runs_at, lemma_delta_runs_one, lemma_delta_runs_push, lemma_head_len,
+    lemma_head_run_max, lemma_run_values_add, lemma_run_values_push, lemma_runs_first,
+    lemma_runs_of_values, lemma_sorted, lemma_sum_bound, lemma_sum_mono, lemma_sum_range,
+    lemma_sum_run, lemma_sums_fit, mapped, only, past, refused, run_values, runs_of, scan_of,
+    scan_taken, sorted, sorted_for, sum_of, summed, sums_fit, times, total_len, total_str_len,
+    window, AccIndex, Get, LenIndex, SumIndex, VAccum, VAccumulated, VAdds, VAmount, VCodec,
+    VCount, VDelta, VDeltaValue, VGet, VGroup, VIndex, VKeeps, VNewtype, VSpec, VSum, VSummed,
+    VValue, VerifiedAccColumn, VerifiedAccIter, VerifiedAccIterState, VerifiedAccSeek,
+    VerifiedAccValue, VerifiedColumn, VerifiedDecoder, VerifiedDeltaColumn, VerifiedDeltaIter,
+    VerifiedDeltaIterState, VerifiedDeltaRuns, VerifiedEncoder, VerifiedEncoderState, VerifiedIter,
+    VerifiedIterState, VerifiedPrefixColumn, VerifiedPrefixIter, VerifiedPrefixIterState,
+    VerifiedPrefixSeek, VerifiedPrefixedValue, VerifiedRuns,
 };
 use crate::{DeltaRun, Leb128, LoadOpts, PackError, Run};
 use std::cmp::Ordering;
-use std::ops::Range;
+use std::ops::{Bound, Range, RangeBounds};
 use vstd::prelude::*;
+#[cfg(verus_keep_ghost)]
+use vstd::std_specs::range::RangeBoundsSpec;
 #[cfg(verus_keep_ghost)]
 use vstd::utf8::{encode_utf8, is_ascii_chars_encode_utf8};
 
@@ -12646,6 +12648,630 @@ proof fn delta_told_by_a_states_fit<T: VDeltaValue<C>, C: VCodec>(
         s.edits() == col.edits(),
 {
     s.lemma_fits(col);
+}
+
+// ── Delta columns: values found by a scan, and by a search of sorted ones ───
+
+/// The first place of `x` among the values `a..b` of a delta column,
+/// said of the column's values alone: a scan of an iterator over that
+/// window. For every type and codec.
+#[allow(dead_code)]
+fn delta_first_place_in<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>, x: T, a: usize, b: usize) -> (r:
+    Option<usize>)
+    requires
+        a <= b <= col@.len(),
+    ensures
+        match r {
+            Some(k) => a <= k < b && col@[k as int] == x && forall|i: int| a <= i < k ==> col@[i] != x,
+            None => forall|i: int| a <= i < b ==> col@[i] != x,
+        },
+{
+    let mut it = col.iter_range(a, b);
+    let ghost o = it.rest();
+    let r = it.scan_to_value(x);
+    proof {
+        match r {
+            Some(k) => {
+                assert(col@[k as int] == o[k - a]);
+                assert forall|i: int| a <= i < k implies col@[i] != x by {
+                    assert(col@[i] == o[i - a]);
+                }
+            },
+            None => {
+                assert forall|i: int| a <= i < b implies col@[i] != x by {
+                    assert(col@[i] == o[i - a]);
+                }
+            },
+        }
+    }
+    r
+}
+
+/// Every place of `x` in a delta column, by scans that each go on from
+/// where the last one stopped: the places come in rising order, each
+/// holds `x`, and no other place does. For every type and codec.
+#[allow(dead_code)]
+fn delta_all_places<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>, x: T) -> (out: Vec<usize>)
+    ensures
+        forall|i: int, j: int| 0 <= i < j < out@.len() ==> out@[i] < out@[j],
+        forall|i: int| 0 <= i < out@.len() ==> out@[i] < col@.len() && col@[out@[i] as int] == x,
+        forall|k: int| 0 <= k < col@.len() && col@[k] == x ==> exists|i: int| 0 <= i < out@.len() && out@[i] == k,
+{
+    let mut out: Vec<usize> = Vec::new();
+    let mut it = col.iter();
+    assert(it.rest() =~= col@.skip(0));
+    loop
+        invariant
+            it.column() == col@,
+            it.pos() <= col@.len(),
+            it.rest() == col@.skip(it.pos() as int),
+            forall|i: int, j: int| 0 <= i < j < out@.len() ==> out@[i] < out@[j],
+            forall|i: int| 0 <= i < out@.len() ==> out@[i] < it.pos() && col@[out@[i] as int] == x,
+            forall|k: int| 0 <= k < it.pos() && col@[k] == x ==> exists|i: int| 0 <= i < out@.len() && out@[i] == k,
+        ensures
+            forall|i: int, j: int| 0 <= i < j < out@.len() ==> out@[i] < out@[j],
+            forall|i: int| 0 <= i < out@.len() ==> out@[i] < col@.len() && col@[out@[i] as int] == x,
+            forall|k: int|
+                0 <= k < col@.len() && col@[k] == x ==> exists|i: int| 0 <= i < out@.len() && out@[i] == k,
+        decreases col@.len() - it.pos(),
+    {
+        let ghost p = it.pos() as int;
+        let ghost o = it.rest();
+        let ghost before = out@;
+        match it.scan_to_value(x) {
+            Some(k) => {
+                out.push(k);
+                proof {
+                    assert(col@[k as int] == o[k - p]);
+                    assert(it.rest() =~= col@.skip(k + 1));
+                    assert forall|j: int| 0 <= j < it.pos() && col@[j] == x implies exists|i: int|
+                        0 <= i < out@.len() && out@[i] == j by {
+                        if j < p {
+                            let i = choose|i: int| 0 <= i < before.len() && before[i] == j;
+                            assert(out@[i] == j);
+                        } else if j < k {
+                            assert(col@[j] == o[j - p]);
+                        } else {
+                            assert(out@[before.len() as int] == j);
+                        }
+                    }
+                }
+            },
+            None => {
+                proof {
+                    assert forall|j: int| 0 <= j < col@.len() && col@[j] == x implies exists|i: int|
+                        0 <= i < out@.len() && out@[i] == j by {
+                        if j >= p {
+                            assert(col@[j] == o[j - p]);
+                        }
+                    }
+                }
+                break ;
+            },
+        }
+    }
+    out
+}
+
+/// A number too large for a delta column is at no place of one: a scan
+/// for it finds nothing, whatever the column holds.
+#[allow(dead_code)]
+fn delta_scan_unfitting(col: &VerifiedDeltaColumn<u64>) -> (r: Option<usize>)
+    ensures
+        r is None,
+{
+    proof {
+        col.lemma_fits();
+    }
+    let mut it = col.iter();
+    let r = it.scan_to_value(u64::MAX);
+    proof {
+        if let Some(k) = r {
+            assert(col@[k as int].fits());
+        }
+    }
+    r
+}
+
+/// The first null of a column that has nulls: a scan for the null
+/// value.
+#[allow(dead_code)]
+fn delta_first_null(col: &VerifiedDeltaColumn<Option<i64>>) -> (r: Option<usize>)
+    ensures
+        match r {
+            Some(k) => k < col@.len() && col@[k as int] is None && forall|i: int| 0 <= i < k ==> col@[i] is Some,
+            None => forall|i: int| 0 <= i < col@.len() ==> col@[i] is Some,
+        },
+{
+    let mut it = col.iter();
+    it.scan_to_value(None)
+}
+
+/// The first of a column's numbers from `lo` to `hi`, both included,
+/// said of the numbers alone: the bounds of a scan, written as a range
+/// of Rust's, are plain inequalities for a column of plain numbers.
+#[allow(dead_code)]
+fn delta_first_in_bounds(col: &VerifiedDeltaColumn<u64>, lo: u64, hi: u64) -> (r: Option<(usize, u64)>)
+    ensures
+        match r {
+            Some((k, v)) => {
+                &&& k < col@.len()
+                &&& col@[k as int] == v
+                &&& lo <= v <= hi
+                &&& forall|i: int| 0 <= i < k ==> (col@[i] < lo || col@[i] > hi)
+            },
+            None => forall|i: int| 0 <= i < col@.len() ==> (col@[i] < lo || col@[i] > hi),
+        },
+{
+    let mut it = col.iter();
+    it.scan_to_range(lo..=hi)
+}
+
+/// The first of a column's numbers that is at least `lo`: a range with
+/// no upper bound, of signed numbers.
+#[allow(dead_code)]
+fn delta_first_at_least(col: &VerifiedDeltaColumn<i64>, lo: i64) -> (r: Option<(usize, i64)>)
+    ensures
+        match r {
+            Some((k, v)) => k < col@.len() && col@[k as int] == v && v >= lo && forall|i: int| 0 <= i < k ==> col@[i] < lo,
+            None => forall|i: int| 0 <= i < col@.len() ==> col@[i] < lo,
+        },
+{
+    let mut it = col.iter();
+    it.scan_to_range(lo..)
+}
+
+/// The first of a column's numbers greater than `a` and at most `b`:
+/// bounds given as a pair, the lower one excluded.
+#[allow(dead_code)]
+fn delta_first_between(col: &VerifiedDeltaColumn<i32>, a: i32, b: i32) -> (r: Option<(usize, i32)>)
+    ensures
+        match r {
+            Some((k, v)) => {
+                &&& k < col@.len()
+                &&& col@[k as int] == v
+                &&& a < v <= b
+                &&& forall|i: int| 0 <= i < k ==> (col@[i] <= a || col@[i] > b)
+            },
+            None => forall|i: int| 0 <= i < col@.len() ==> (col@[i] <= a || col@[i] > b),
+        },
+{
+    let mut it = col.iter();
+    it.scan_to_range((Bound::Excluded(a), Bound::Included(b)))
+}
+
+/// The first number below `hi` of a column that has nulls: a null is
+/// within no bounds, so the scan passes over the nulls though a null
+/// comes before every number.
+#[allow(dead_code)]
+fn delta_first_below(col: &VerifiedDeltaColumn<Option<u32>>, hi: u32) -> (r: Option<(usize, u32)>)
+    ensures
+        match r {
+            Some((k, n)) => {
+                &&& k < col@.len()
+                &&& col@[k as int] == Some(n)
+                &&& n < hi
+                &&& forall|i: int| 0 <= i < k ==> ((#[trigger] col@[i]) matches Some(m) ==> m >= hi)
+            },
+            None => forall|i: int| 0 <= i < col@.len() ==> ((#[trigger] col@[i]) matches Some(m) ==> m >= hi),
+        },
+{
+    let mut it = col.iter();
+    match it.scan_to_range(..Some(hi)) {
+        Some((k, Some(n))) => Some((k, n)),
+        Some((_, None)) => {
+            // no null is within bounds
+            assert(false);
+            None
+        },
+        None => None,
+    }
+}
+
+/// The first number of a column that has nulls: every number is within
+/// the bounds of the range that has none, and no null is.
+#[allow(dead_code)]
+fn delta_any_number(col: &VerifiedDeltaColumn<Option<i64>>) -> (r: Option<(usize, Option<i64>)>)
+    ensures
+        match r {
+            Some((k, v)) => {
+                &&& k < col@.len()
+                &&& col@[k as int] == v
+                &&& v is Some
+                &&& forall|i: int| 0 <= i < k ==> col@[i] is None
+            },
+            None => forall|i: int| 0 <= i < col@.len() ==> col@[i] is None,
+        },
+{
+    let mut it = col.iter();
+    it.scan_to_range(..)
+}
+
+/// A null is within no bounds, not even those that are the null value
+/// at both ends: such a scan finds nothing, whatever the column holds.
+#[allow(dead_code)]
+fn delta_null_in_no_bounds(col: &VerifiedDeltaColumn<Option<u64>>) -> (r: Option<(usize, Option<u64>)>)
+    ensures
+        r is None,
+{
+    let mut it = col.iter();
+    it.scan_to_range(None..=None)
+}
+
+/// Numbers in order, sought by an iterator: the range is the one the
+/// column's own search gives, the lesser numbers are before it and the
+/// greater ones after, and the iterator then gives the first `x`, if
+/// the column has one.
+#[allow(dead_code)]
+fn delta_seek_then_read(col: &VerifiedDeltaColumn<u64>, x: u64) -> (r: Range<usize>)
+    requires
+        forall|i: int, j: int| 0 <= i <= j < col@.len() ==> col@[i] <= col@[j],
+    ensures
+        r.start <= r.end <= col@.len(),
+        forall|k: int| 0 <= k < r.start ==> col@[k] < x,
+        forall|k: int| r.start <= k < r.end ==> col@[k] == x,
+        forall|k: int| r.end <= k < col@.len() ==> col@[k] > x,
+{
+    let n = col.len();
+    proof {
+        assert(col@.subrange(0, n as int) =~= col@);
+        assert(sorted::<u64>(col@));
+    }
+    let mut it = col.iter();
+    let r = it.seek_to_value(x, 0..n);
+    let s = col.scope_to_value(x, 0, n);
+    assert(r.start == s.start && r.end == s.end) by {
+        if r.start != s.start {
+            let k = if r.start < s.start { r.start as int } else { s.start as int };
+            assert((k < r.start) == (col@[k] < x));
+        }
+        if r.end != s.end {
+            let k = if r.end < s.end { r.end as int } else { s.end as int };
+            assert((k < r.end) == !(x < col@[k]));
+        }
+    }
+    let v = it.next();
+    assert(r.start < r.end ==> v == Some(x)) by {
+        if r.start < r.end {
+            assert(col@.subrange(r.start as int, n as int)[0] == col@[r.start as int]);
+        }
+    }
+    assert(r.start == n ==> v is None);
+    r
+}
+
+/// Where `x` stands among the values `a..b` of a delta column, which
+/// are in order: the search of an iterator and the column's own give
+/// the same range, and the iterator is left at its start with the
+/// values up to `b` to give. For every type and codec.
+#[allow(dead_code)]
+fn delta_sought_between<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>, x: T, a: usize, b: usize) -> (r:
+    Range<usize>)
+    requires
+        a <= b <= col@.len(),
+        sorted::<T>(col@.subrange(a as int, b as int)),
+    ensures
+        a <= r.start <= r.end <= b,
+        forall|k: int| a <= k < r.start ==> T::below(col@[k], x),
+        forall|k: int| r.start <= k < r.end ==> col@[k] == x,
+        forall|k: int| r.end <= k < b ==> T::below(x, col@[k]),
+{
+    let mut it = col.iter();
+    let r = it.seek_to_value(x, a..b);
+    let s = col.scope_to_value(x, a, b);
+    assert(r.start == s.start && r.end == s.end) by {
+        if r.start != s.start {
+            let k = if r.start < s.start { r.start as int } else { s.start as int };
+            assert((k < r.start) == T::below(col@[k], x));
+        }
+        if r.end != s.end {
+            let k = if r.end < s.end { r.end as int } else { s.end as int };
+            assert((k < r.end) == !T::below(x, col@[k]));
+        }
+    }
+    assert(it.pos() == r.start);
+    assert(it.rest() == col@.subrange(r.start as int, b as int));
+    r
+}
+
+/// Where `x` stands among all the values a delta column's iterator has
+/// left, which are in order: a search up to the window's end is over
+/// all of them. The iterator is left at the first place of `x`, or
+/// where `x` would stand; and, for an `x` a delta column can hold, with
+/// the same end to its window. For every type and codec.
+#[allow(dead_code)]
+fn delta_find_in_the_rest<T: VDeltaValue<C>, C: VCodec>(it: &mut VerifiedDeltaIter<'_, T, C>, x: T) -> (r: Range<usize>)
+    requires
+        sorted::<T>(old(it).rest()),
+    ensures
+        final(it).column() == old(it).column(),
+        old(it).pos() <= r.start <= r.end <= old(it).pos() + old(it).rest().len(),
+        forall|j: int|
+            0 <= j < old(it).rest().len() ==> {
+                &&& (old(it).pos() + j < r.start) == T::below(#[trigger] old(it).rest()[j], x)
+                &&& (old(it).pos() + j < r.end) == !T::below(x, old(it).rest()[j])
+                &&& (r.start <= old(it).pos() + j < r.end) == (old(it).rest()[j] == x)
+            },
+        final(it).pos() == r.start,
+        final(it).rest() == old(it).rest().skip(r.start - old(it).pos()),
+        x.fits() ==> final(it).end_pos() == old(it).end_pos(),
+{
+    let ghost (p, c, o) = (it.pos() as int, it.column(), it.rest());
+    let end = it.end_pos();
+    let ghost t = p + o.len();
+    assert(o =~= c.subrange(p, t));
+    let r = it.seek_to_value(x, 0..end);
+    proof {
+        assert forall|j: int| 0 <= j < o.len() implies {
+            &&& (p + j < r.start) == T::below(#[trigger] o[j], x)
+            &&& (p + j < r.end) == !T::below(x, o[j])
+            &&& (r.start <= p + j < r.end) == (o[j] == x)
+        } by {
+            assert(o[j] == c[p + j]);
+        }
+        assert(it.rest() =~= o.skip(r.start - p));
+    }
+    r
+}
+
+/// The nulls of a column in order are its first values: the search for
+/// the null value gives the range of them, which starts the column.
+#[allow(dead_code)]
+fn delta_seek_nulls_first(col: &VerifiedDeltaColumn<Option<u64>>) -> (r: Range<usize>)
+    requires
+        sorted::<Option<u64>>(col@),
+    ensures
+        r.start == 0,
+        r.end <= col@.len(),
+        forall|k: int| 0 <= k < r.end ==> col@[k] is None,
+        forall|k: int| r.end <= k < col@.len() ==> col@[k] is Some,
+{
+    let n = col.len();
+    assert(col@.subrange(0, n as int) =~= col@);
+    let r = col.scope_to_value(None, 0, n);
+    proof {
+        if n > 0 {
+            assert((0 < r.start) == <Option<u64> as VSpec>::below(col@[0], None));
+        }
+        assert forall|k: int| 0 <= k < col@.len() implies (k < r.end) == (col@[k] is None) by {
+            assert((r.start <= k < r.end) == (col@[k] == None::<u64>));
+        }
+    }
+    r
+}
+
+/// A number too large for a delta column comes after all the numbers
+/// of one: the search for it among numbers in order gives the empty
+/// range at their end.
+#[allow(dead_code)]
+fn delta_seek_unfitting(col: &VerifiedDeltaColumn<u64>) -> (r: Range<usize>)
+    requires
+        forall|i: int, j: int| 0 <= i <= j < col@.len() ==> col@[i] <= col@[j],
+    ensures
+        r.start == col@.len(),
+        r.end == col@.len(),
+{
+    let n = col.len();
+    proof {
+        col.lemma_fits();
+        assert(col@.subrange(0, n as int) =~= col@);
+        assert(sorted::<u64>(col@));
+    }
+    let r = col.scope_to_value(u64::MAX, 0, n);
+    proof {
+        if n > 0 {
+            assert(col@[n - 1].fits());
+            assert((n - 1 < r.start) == (col@[n - 1] < u64::MAX));
+        }
+    }
+    r
+}
+
+/// A value too large for a delta column is found nowhere by an
+/// iterator's search, in order or not: the iterator is left where the
+/// search ends, with nothing to give. For every type and codec.
+#[allow(dead_code)]
+fn delta_sought_unfitting<T: VDeltaValue<C>, C: VCodec>(it: &mut VerifiedDeltaIter<'_, T, C>, x: T, range: Range<usize>) -> (r:
+    Range<usize>)
+    requires
+        !x.fits(),
+    ensures
+        r.start == r.end,
+        final(it).pos() == r.start,
+        final(it).end_pos() == r.start,
+        final(it).rest().len() == 0,
+{
+    let ghost (p, c) = (it.pos() as int, it.column());
+    let r = it.seek_to_value(x, range);
+    // asked for what it says of the window
+    let _ = it.pos();
+    proof {
+        // nothing is left of the places searched
+        let t = delta_sought_to(p, c.len() as int, range);
+        assert(it.rest() == c.subrange(r.start as int, t));
+        assert(c.subrange(r.start as int, t).len() == t - r.start);
+    }
+    r
+}
+
+/// A range that starts past its end is the empty one at its start: the
+/// search moves the iterator there, if that is ahead of it and in the
+/// column, and finds nothing. For every type and codec.
+#[allow(dead_code)]
+fn delta_sought_backwards<T: VDeltaValue<C>, C: VCodec>(it: &mut VerifiedDeltaIter<'_, T, C>, x: T, range: Range<usize>) -> (r:
+    Range<usize>)
+    requires
+        range.start > range.end,
+    ensures
+        r.start == r.end,
+        r.start == if range.start <= old(it).pos() {
+            old(it).pos() as int
+        } else if range.start <= old(it).column().len() {
+            range.start as int
+        } else {
+            old(it).column().len() as int
+        },
+        final(it).pos() == r.start,
+        final(it).rest().len() == 0,
+{
+    it.seek_to_value(x, range)
+}
+
+/// What `scan_to_value` says by itself of a delta column's iterator,
+/// each thing asked for on its own and with no lemma.
+#[allow(dead_code)]
+fn delta_told_by_scan_to_value<T: VDeltaValue<C>, C: VCodec>(it: &mut VerifiedDeltaIter<'_, T, C>, x: T) -> (r: Option<usize>)
+    ensures
+        final(it).column() == old(it).column(),
+        final(it).source() == old(it).source(),
+        r matches Some(at) ==> old(it).pos() <= at < old(it).pos() + old(it).rest().len(),
+        r matches Some(at) ==> old(it).rest()[at - old(it).pos()] == x,
+        r matches Some(at) ==> forall|i: int| 0 <= i < at - old(it).pos() ==> old(it).rest()[i] != x,
+        r matches Some(at) ==> final(it).rest() == old(it).rest().skip(at - old(it).pos() + 1),
+        r matches Some(at) ==> final(it).pos() == at + 1,
+        r matches Some(_) ==> final(it).end_pos() == old(it).end_pos(),
+        r is None ==> forall|i: int| 0 <= i < old(it).rest().len() ==> old(it).rest()[i] != x,
+        r is None ==> final(it).rest().len() == 0,
+        r is None ==> final(it).pos() == old(it).pos() + old(it).rest().len(),
+        r is None ==> final(it).end_pos() == final(it).pos(),
+{
+    it.scan_to_value(x)
+}
+
+/// What `scan_to_range` says by itself of a delta column's iterator and
+/// any bounds, each thing asked for on its own and with no lemma.
+#[allow(dead_code)]
+fn delta_told_by_scan_to_range<T: VDeltaValue<C>, C: VCodec, R: RangeBounds<T>>(
+    it: &mut VerifiedDeltaIter<'_, T, C>,
+    range: R,
+) -> (r: Option<(usize, T)>)
+    ensures
+        final(it).column() == old(it).column(),
+        final(it).source() == old(it).source(),
+        r matches Some((at, _)) ==> old(it).pos() <= at < old(it).pos() + old(it).rest().len(),
+        r matches Some((at, v)) ==> old(it).rest()[at - old(it).pos()] == v,
+        r matches Some((_, v)) ==> delta_within::<T>(range.spec_start_bound(), range.spec_end_bound(), v),
+        r matches Some((at, _)) ==> forall|i: int|
+            0 <= i < at - old(it).pos() ==> !delta_within::<T>(
+                range.spec_start_bound(),
+                range.spec_end_bound(),
+                #[trigger] old(it).rest()[i],
+            ),
+        r matches Some((at, _)) ==> final(it).rest() == old(it).rest().skip(at - old(it).pos() + 1),
+        r matches Some((at, _)) ==> final(it).pos() == at + 1,
+        r matches Some(_) ==> final(it).end_pos() == old(it).end_pos(),
+        r is None ==> forall|i: int|
+            0 <= i < old(it).rest().len() ==> !delta_within::<T>(
+                range.spec_start_bound(),
+                range.spec_end_bound(),
+                #[trigger] old(it).rest()[i],
+            ),
+        r is None ==> final(it).rest().len() == 0,
+        r is None ==> final(it).pos() == old(it).pos() + old(it).rest().len(),
+        r is None ==> final(it).end_pos() == final(it).pos(),
+{
+    it.scan_to_range(range)
+}
+
+/// Where a search of a delta column's iterator is asked to end: where
+/// `range` ends, or where it starts if that is past its end.
+spec fn delta_sought_end(range: Range<usize>) -> int {
+    if range.start <= range.end { range.end as int } else { range.start as int }
+}
+
+/// Where the places end that such a search goes over, by an iterator
+/// that stands at `p` of a column of `n` values.
+spec fn delta_sought_to(p: int, n: int, range: Range<usize>) -> int {
+    let e = delta_sought_end(range);
+    if e <= p { p } else if e <= n { e } else { n }
+}
+
+/// Where those places start.
+spec fn delta_sought_from(p: int, n: int, range: Range<usize>) -> int {
+    let t = delta_sought_to(p, n, range);
+    if range.start <= p { p } else if range.start <= t { range.start as int } else { t }
+}
+
+/// What `seek_to_value` says by itself of a delta column's iterator and
+/// any range, each thing asked for on its own and with no lemma: which
+/// places of the column are searched, where `x` stands among their
+/// values if those are in order, and where that leaves the iterator.
+#[allow(dead_code)]
+fn delta_told_by_seek_to_value<T: VDeltaValue<C>, C: VCodec>(
+    it: &mut VerifiedDeltaIter<'_, T, C>,
+    x: T,
+    range: Range<usize>,
+) -> (r: Range<usize>)
+    ensures
+        final(it).column() == old(it).column(),
+        final(it).source() == old(it).source(),
+        old(it).pos() <= delta_sought_from(old(it).pos() as int, old(it).column().len() as int, range),
+        delta_sought_from(old(it).pos() as int, old(it).column().len() as int, range) <= r.start,
+        r.start <= r.end,
+        r.end <= delta_sought_to(old(it).pos() as int, old(it).column().len() as int, range),
+        delta_sought_to(old(it).pos() as int, old(it).column().len() as int, range) <= old(it).column().len(),
+        final(it).pos() == r.start,
+        final(it).rest() == old(it).column().subrange(
+            r.start as int,
+            delta_sought_to(old(it).pos() as int, old(it).column().len() as int, range),
+        ),
+        final(it).end_pos() == if range.start > delta_sought_to(
+            old(it).pos() as int,
+            old(it).column().len() as int,
+            range,
+        ) || !x.fits() {
+            r.start as int
+        } else if delta_sought_end(range) >= old(it).pos() {
+            delta_sought_end(range)
+        } else {
+            old(it).pos() as int
+        },
+        ({
+            let c = old(it).column();
+            let s = delta_sought_from(old(it).pos() as int, c.len() as int, range);
+            let t = delta_sought_to(old(it).pos() as int, c.len() as int, range);
+            sorted::<T>(c.subrange(s, t)) ==> forall|k: int| s <= k < t ==> (k < r.start) == T::below(#[trigger] c[k], x)
+        }),
+        ({
+            let c = old(it).column();
+            let s = delta_sought_from(old(it).pos() as int, c.len() as int, range);
+            let t = delta_sought_to(old(it).pos() as int, c.len() as int, range);
+            sorted::<T>(c.subrange(s, t)) ==> forall|k: int| s <= k < t ==> (k < r.end) == !T::below(x, #[trigger] c[k])
+        }),
+        ({
+            let c = old(it).column();
+            let s = delta_sought_from(old(it).pos() as int, c.len() as int, range);
+            let t = delta_sought_to(old(it).pos() as int, c.len() as int, range);
+            sorted::<T>(c.subrange(s, t)) ==> forall|k: int|
+                s <= k < t ==> (r.start <= k < r.end) == (#[trigger] c[k] == x)
+        }),
+{
+    it.seek_to_value(x, range)
+}
+
+/// What `scope_to_value` says by itself of a delta column, each thing
+/// asked for on its own and with no lemma.
+#[allow(dead_code)]
+fn delta_told_by_scope_to_value<T: VDeltaValue<C>, C: VCodec>(
+    col: &VerifiedDeltaColumn<T, C>,
+    x: T,
+    start: usize,
+    end: usize,
+) -> (r: Range<usize>)
+    requires
+        start <= end <= col@.len(),
+    ensures
+        start <= r.start,
+        r.start <= r.end,
+        r.end <= end,
+        sorted::<T>(col@.subrange(start as int, end as int)) ==> forall|k: int|
+            start <= k < end ==> (k < r.start) == T::below(#[trigger] col@[k], x),
+        sorted::<T>(col@.subrange(start as int, end as int)) ==> forall|k: int|
+            start <= k < end ==> (k < r.end) == !T::below(x, #[trigger] col@[k]),
+        sorted::<T>(col@.subrange(start as int, end as int)) ==> forall|k: int|
+            start <= k < end ==> (r.start <= k < r.end) == (#[trigger] col@[k] == x),
+{
+    col.scope_to_value(x, start, end)
 }
 
 } // verus!
