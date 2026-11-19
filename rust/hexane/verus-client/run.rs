@@ -2673,3 +2673,93 @@ fn delta_iterators() {
     let mut none: VerifiedDeltaIter<'_, u64> = verus_client::delta_told_by_an_iters_default();
     assert_eq!(none.next(), None);
 }
+
+#[test]
+fn delta_runs_and_states() {
+    use hexane::DeltaRun;
+    let run = |prefix, delta, count| DeltaRun {
+        prefix,
+        delta,
+        count,
+    };
+    let values: [u64; 4] = [5, 7, 9, 9];
+    let col: VerifiedDeltaColumn<u64> = verus_client::delta_built(&values);
+    assert_eq!(
+        verus_client::delta_in_runs(&col),
+        vec![run(0, Some(5), 1), run(5, Some(2), 2), run(9, Some(0), 1)]
+    );
+    let copy = verus_client::delta_copied_by_runs(&col);
+    assert_eq!(verus_client::delta_values(&copy), values);
+    let copy = verus_client::delta_copied_run_by_run(&col);
+    assert_eq!(verus_client::delta_values(&copy), values);
+    let mut dst: VerifiedDeltaColumn<u64> = verus_client::delta_built(&[1, 100]);
+    verus_client::delta_moved_by_runs(&col, 1, 3, &mut dst, 1);
+    assert_eq!(verus_client::delta_values(&dst), [1, 7, 9, 100]);
+    verus_client::delta_runs_of_four(&col);
+    let nulls: VerifiedDeltaColumn<Option<u32>> = verus_client::delta_built(&[None, None, Some(3)]);
+    verus_client::delta_nulls_in_a_run(&nulls);
+    assert_eq!(
+        verus_client::delta_in_runs(&nulls),
+        vec![run(0, None, 2), run(0, Some(3), 1)]
+    );
+    let signed: VerifiedDeltaColumn<i64> = verus_client::delta_built(&[-3, 0, 7, 7, -20]);
+    assert_eq!(
+        verus_client::delta_the_number_before(&signed, 0),
+        Some(run(0, Some(-3), 1))
+    );
+    assert_eq!(
+        verus_client::delta_the_number_before(&signed, 4),
+        Some(run(7, Some(-27), 1))
+    );
+    let mut it = col.iter();
+    assert_eq!(
+        verus_client::delta_two_runs_differ(&mut it),
+        (Some(run(0, Some(5), 1)), Some(run(5, Some(2), 2)))
+    );
+    assert_eq!(
+        verus_client::delta_two_runs_differ(&mut it),
+        (Some(run(9, Some(0), 1)), None)
+    );
+
+    // a suspended iterator
+    assert_eq!(verus_client::delta_read_in_two_goes(&col, 2), values);
+    assert_eq!(verus_client::delta_read_in_two_goes(&col, 9), values);
+    let it = verus_client::delta_resumed(&col, 1, 3).unwrap();
+    assert_eq!(it.collect::<Vec<u64>>(), vec![7, 9]);
+    verus_client::delta_resumed_at_the_end(&col, 1, 3);
+    let mut edited: VerifiedDeltaColumn<u64> = verus_client::delta_built(&values);
+    assert!(!verus_client::delta_ended_by_an_edit(&mut edited, 12));
+    assert!(!verus_client::delta_ended_by_many(&mut edited, 12, 3));
+    assert_eq!(
+        verus_client::delta_values(&edited),
+        [5, 7, 9, 9, 12, 12, 12, 12]
+    );
+    assert_eq!(verus_client::delta_a_copy_edited(&col, 1), (false, true));
+
+    // each call by itself
+    let mut it = col.iter_range(1, 4);
+    assert_eq!(
+        verus_client::delta_told_by_next_run(&mut it),
+        Some(run(5, Some(2), 2))
+    );
+    let s = verus_client::delta_told_by_suspend(&it, &col);
+    let mut runs = verus_client::delta_told_by_runs(it);
+    assert_eq!(
+        verus_client::delta_told_by_a_runs_next(&mut runs),
+        Some(run(9, Some(0), 1))
+    );
+    assert_eq!(verus_client::delta_told_by_a_runs_next(&mut runs), None);
+    let mut it = verus_client::delta_told_by_try_resume(&s, &col).unwrap();
+    assert_eq!(it.pos(), 3);
+    assert_eq!(it.next(), Some(9));
+    assert_eq!(it.next(), None);
+    // the state is a place in a copy of the column, which has not been
+    // edited, and in no column that has been
+    let same = col.clone();
+    assert_eq!(
+        verus_client::delta_resumed_elsewhere(&s, &same),
+        Some(vec![9])
+    );
+    assert_eq!(verus_client::delta_resumed_elsewhere(&s, &edited), None);
+    assert!(verus_client::delta_told_by_try_resume(&s, &edited).is_err());
+}

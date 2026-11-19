@@ -6,9 +6,15 @@
 //! from them is known, and the column ([`VerifiedDeltaColumn`]). The
 //! column's iterator ([`VerifiedDeltaIter`]) is in `delta/iter.rs`.
 
+#[cfg(verus_keep_ghost)]
+mod diffs;
 mod iter;
 
-pub use iter::VerifiedDeltaIter;
+#[cfg(verus_keep_ghost)]
+pub use diffs::{
+    delta_at, delta_prefix, delta_runs_at, deltas, lemma_delta_run_at, lemma_delta_runs_at,
+};
+pub use iter::{VerifiedDeltaIter, VerifiedDeltaIterState, VerifiedDeltaRuns};
 
 #[cfg(verus_keep_ghost)]
 use super::after_edit;
@@ -1252,6 +1258,14 @@ pub(crate) trait DKind<C: VCodec>: VDelta {
             !Self::nullable() ==> <Self::B as DeltaWrite<'static, DE<Self, C>, DX<Self, C>>>::dvo(a) is Some,
     ;
 
+    /// Two values of the column underneath, as they are read, are two
+    /// deltas.
+    proof fn lemma_item<'a>(a: DIt<'a, Self, C>, b: DIt<'a, Self, C>)
+        ensures
+            <Self::B as DeltaOps<DIt<'a, Self, C>>>::dv(a) == <Self::B as DeltaOps<DIt<'a, Self, C>>>::dv(b) ==> a
+                == b,
+    ;
+
     /// A fill as a value of the column underneath: the one whose delta
     /// it is.
     fn fill_item(f: <Self as VDelta>::Fill) -> (r: DItem<Self, C>)
@@ -1268,6 +1282,9 @@ impl<T: VDeltaNum, C: VCodec> DKind<C> for T {
     proof fn lemma_kind(a: i64, b: i64) {
     }
 
+    proof fn lemma_item<'a>(a: i64, b: i64) {
+    }
+
     #[inline(always)]
     fn fill_item(f: i64) -> i64 {
         f
@@ -1280,6 +1297,9 @@ impl<T: VDeltaNum, C: VCodec> DKind<C> for Option<T> {
     type B = VDeltas<Option<i64>, C>;
 
     proof fn lemma_kind(a: Option<i64>, b: Option<i64>) {
+    }
+
+    proof fn lemma_item<'a>(a: Option<i64>, b: Option<i64>) {
     }
 
     #[inline(always)]
@@ -1307,6 +1327,10 @@ type DX<T, C> = <<T as DKind<C>>::I as seal::Sealed<C>>::X;
 
 /// A value of the column underneath, as it is read.
 type DItem<T, C> = <<DX<T, C> as Decoders<'static>>::D as Decode>::Item;
+
+/// A value of the column underneath, as a reader that borrows the
+/// column for `'a` gives it.
+type DIt<'a, T, C> = <<DX<T, C> as Decoders<'a>>::D as Decode>::Item;
 
 /// The verified core of a delta column.
 type DCore<T, C> = ColumnCore<DE<T, C>, SlabAgg, SlabBTree<SlabAgg>, DeltaModel<DX<T, C>, <T as DKind<C>>::B>>;

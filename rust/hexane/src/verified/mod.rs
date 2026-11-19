@@ -559,11 +559,15 @@ pub use decoder::{
 };
 #[cfg(verus_keep_ghost)]
 pub use delta::{
-    all_dom, all_fit, delta_run_fits, delta_run_in_range, delta_run_kept, delta_run_values,
-    delta_runs_fit, delta_runs_kept, delta_runs_values, dom, dvs, in_dom, lemma_delta_run_exact,
-    lemma_delta_run_fits, lemma_delta_runs_one, lemma_delta_runs_push, vals,
+    all_dom, all_fit, delta_at, delta_prefix, delta_run_fits, delta_run_in_range, delta_run_kept,
+    delta_run_values, delta_runs_at, delta_runs_fit, delta_runs_kept, delta_runs_values, deltas,
+    dom, dvs, in_dom, lemma_delta_run_at, lemma_delta_run_exact, lemma_delta_run_fits,
+    lemma_delta_runs_at, lemma_delta_runs_one, lemma_delta_runs_push, vals,
 };
-pub use delta::{VDelta, VDeltaNum, VDeltaValue, VerifiedDeltaColumn, VerifiedDeltaIter};
+pub use delta::{
+    VDelta, VDeltaNum, VDeltaValue, VerifiedDeltaColumn, VerifiedDeltaIter, VerifiedDeltaIterState,
+    VerifiedDeltaRuns,
+};
 pub use encoder::{VerifiedEncoder, VerifiedEncoderState};
 pub use kind::{LenIndex, VIndex, VKeeps};
 pub use prefix::{SumIndex, VerifiedPrefixColumn};

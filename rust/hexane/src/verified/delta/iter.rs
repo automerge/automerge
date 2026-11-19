@@ -23,29 +23,38 @@
 //! column: no value is checked as it is read.
 
 #[cfg(verus_keep_ghost)]
-use super::{all_dom, in_dom, vals};
-use super::{DCore, DKind, VDeltaValue, VerifiedDeltaColumn, DE, DX};
+use super::diffs::{lemma_deltas_kept, lemma_vals_fit};
+#[cfg(verus_keep_ghost)]
+use super::{
+    all_dom, delta_at, delta_prefix, delta_run_fits, delta_run_values, delta_runs_at, deltas,
+    in_dom, lemma_delta_run_at, vals,
+};
+use super::{DCore, DIt, DKind, VDeltaValue, VerifiedDeltaColumn, DE, DX};
 use crate::btree::{SlabAgg, SlabBTree};
 use crate::column::Slab;
 #[cfg(verus_keep_ghost)]
 use crate::cursor::slab_lens;
 use crate::cursor::Slabs;
 #[cfg(verus_keep_ghost)]
-use crate::delta::agg::{psum, DeltaOps};
+use crate::delta::agg::psum;
+use crate::delta::agg::DeltaOps;
 #[cfg(verus_keep_ghost)]
 use crate::delta::ddomain::{dslabs, lemma_dslabs_own};
 #[cfg(verus_keep_ghost)]
 use crate::delta::dedit::rz;
 #[cfg(verus_keep_ghost)]
 use crate::delta::diter::{at_run, dbefore, dindex_ok, dval_at, lemma_crop, lemma_realized_window};
-use crate::delta::diter::{d_next, d_step};
+use crate::delta::diter::{d_next, d_run, d_step};
 #[cfg(verus_keep_ghost)]
 use crate::fenwick::total;
 #[cfg(verus_keep_ghost)]
-use crate::iter_core::{lemma_window_past, past, vals_of, window, Decode};
+use crate::iter_core::{lemma_window_past, past, resumes, vals_of, window, Decode};
 use crate::iter_core::{Decoders, ICore};
 use crate::verified::codec::VCodec;
-use crate::Leb128;
+#[cfg(verus_keep_ghost)]
+use crate::verified::{head_run, lemma_runs_of, runs_of};
+use crate::verified::{invalid_resume, VerifiedIterState};
+use crate::{DeltaRun, Leb128, PackError};
 use std::ops::Range;
 use vstd::prelude::*;
 
@@ -476,6 +485,150 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaIter<'a, T, C> {
             None => None,
         }
     }
+
+    /// The next run of the differences the column keeps: how much the
+    /// value the iterator gives next differs from the number before it
+    /// (`delta`), how many values in a row differ by that much each from
+    /// the one before (`count`), and the number before the first of
+    /// them (`prefix`). A run of nulls has no difference. The iterator
+    /// moves past the whole run.
+    ///
+    /// The run says which values the iterator moved past
+    /// (`delta_run_values`), and they are the type's
+    /// (`delta_run_fits`): it is what
+    /// [`splice_runs`](VerifiedDeltaColumn::splice_runs) takes.
+    ///
+    /// A run is as long as the differences make it, up to the window's
+    /// end: how the column lies in memory does not cut it short.
+    pub fn next_run(&mut self) -> (r: Option<DeltaRun>)
+        ensures
+            final(self).column() == old(self).column(),
+            final(self).source() == old(self).source(),
+            match r {
+                Some(run) => {
+                    &&& head_run(
+                        window(deltas(old(self).column()), old(self).pos() as int, old(self).end_pos() as int),
+                        run.delta,
+                        run.count as int,
+                    )
+                    &&& run.prefix == delta_prefix(old(self).column(), old(self).pos() as int)
+                    &&& delta_run_values::<T>(run) == old(self).rest().take(run.count as int)
+                    &&& delta_run_fits::<T>(run)
+                    &&& final(self).rest() == old(self).rest().skip(run.count as int)
+                    &&& final(self).pos() == old(self).pos() + run.count
+                    &&& final(self).end_pos() == old(self).end_pos()
+                },
+                None => {
+                    &&& old(self).rest().len() == 0
+                    &&& final(self).rest().len() == 0
+                    &&& final(self).pos() == old(self).pos()
+                    &&& final(self).end_pos() == old(self).pos()
+                },
+            },
+    {
+        let ghost me = *self;
+        proof {
+            use_type_invariant(&*self);
+            me.lemma_window();
+            me.it.lemma_out_window::<DX<T, C>>(me.slabs@);
+        }
+        // the reader and the sum move together, and are written back
+        // together
+        let mut it = self.it.dup();
+        let mut running = self.running;
+        let r = d_run::<DX<T, C>, DB<T, C>>(&mut it, self.slabs, &mut running);
+        *self = VerifiedDeltaIter { it, slabs: self.slabs, running, ix: self.ix, col: self.col };
+        match r {
+            Some((prefix, run)) => {
+                let delta = <DB<T, C> as DeltaOps<DIt<'a, T, C>>>::to_opt(run.value);
+                proof {
+                    let s = me.slabs@;
+                    let (p, e) = (me.it.pos as int, me.it.pos + me.it.items_left);
+                    let n = run.count as int;
+                    let o = me.it.out::<DX<T, C>>(s);
+                    let v = vals_of::<DX<T, C>>(s);
+                    let ds = dslabs::<DX<T, C>, DB<T, C>>(s);
+                    let col = me.column();
+                    self.lemma_window();
+                    // the sum before the run is the number before it
+                    assert(ds.take(p) =~= dbefore::<DX<T, C>, DB<T, C>>(s, p));
+                    lemma_deltas_kept::<T>(ds, p);
+                    assert(prefix == delta_prefix(col, p));
+                    // what the reader gives of the run are the column's
+                    // differences there, and the one after it is another
+                    let w = window(deltas(col), p, e);
+                    assert(w.len() == o.len());
+                    assert forall|k: int| 0 <= k < n implies #[trigger] w[k] == delta by {
+                        lemma_deltas_kept::<T>(ds, p + k);
+                        assert(o.take(n)[k] == run.value);
+                        assert(o[k] == v[p + k]);
+                    }
+                    if n < w.len() {
+                        lemma_deltas_kept::<T>(ds, p + n);
+                        assert(o[n] == v[p + n]);
+                        T::lemma_item(o[n], run.value);
+                    }
+                    // so the run's values are the column's there
+                    lemma_vals_fit::<T>(me.kept());
+                    assert forall|j: int| p <= j < p + n implies delta_at(col, j) == delta by {
+                        assert(w[j - p] == delta);
+                        assert(w[j - p] == deltas(col)[j]);
+                    }
+                    lemma_delta_run_at::<T>(col, p, run.count, delta);
+                    assert(col.subrange(p, p + n) =~= me.rest().take(n));
+                    lemma_window_past(col, p, e, n);
+                }
+                Some(DeltaRun { prefix, delta, count: run.count })
+            },
+            None => {
+                proof {
+                    self.lemma_window();
+                }
+                None
+            },
+        }
+    }
+
+    /// An iterator of the runs of differences the iterator has left to
+    /// give ([`next_run`](Self::next_run)): what
+    /// [`splice_runs`](VerifiedDeltaColumn::splice_runs) takes.
+    pub fn runs(self) -> (r: VerifiedDeltaRuns<'a, T, C>)
+        ensures
+            r.iter() == self,
+    {
+        VerifiedDeltaRuns(self)
+    }
+
+    /// Where the iterator stands and where its window ends, to keep
+    /// without the borrow of the column:
+    /// [`VerifiedDeltaIterState::try_resume`] gives an iterator from it.
+    ///
+    /// The state fits the column the iterator reads: resumed on that
+    /// column, as it is, it gives an iterator that stands where this one
+    /// does and has the same values left.
+    pub fn suspend(&self) -> (s: VerifiedDeltaIterState)
+        ensures
+            s.pos() == self.pos(),
+            s.end_pos() == self.end_pos(),
+            self.rest() == window(self.column(), s.pos() as int, s.end_pos() as int),
+            match self.source() {
+                Some(c) => s.fits(&c),
+                None => true,
+            },
+    {
+        proof {
+            use_type_invariant(self);
+            self.lemma_window();
+        }
+        let (slab_idx, slab_consumed, pos, items_left) = self.it.suspended::<DX<T, C>>(self.slabs);
+        let counter = match self.col {
+            Some(c) => c.counter(),
+            None => 0,
+        };
+        VerifiedDeltaIterState {
+            inner: VerifiedIterState { counter, num_slabs: self.slabs.len(), slab_idx, pos, items_left, slab_consumed },
+        }
+    }
 }
 
 #[cfg(verus_keep_ghost)]
@@ -780,7 +933,260 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> IntoIterator for &'a VerifiedDeltaColumn<
     }
 }
 
+/// An iterator of the runs of differences of a delta column's values,
+/// which [`VerifiedDeltaIter::runs`] gives: each run is of as many
+/// equal differences as lie together in what the iterator had left
+/// (`delta_runs_at` of their `runs_of`), with the number before it.
+pub struct VerifiedDeltaRuns<'a, T: VDeltaValue<C>, C: VCodec = Leb128>(VerifiedDeltaIter<'a, T, C>);
+
+impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaRuns<'a, T, C> {
+    /// The iterator of values whose runs these are, where it stands now.
+    pub closed spec fn iter(&self) -> VerifiedDeltaIter<'a, T, C> {
+        self.0
+    }
+}
+
+#[cfg(verus_keep_ghost)]
+impl<'a, T: VDeltaValue<C>, C: VCodec> vstd::std_specs::iter::IteratorSpecImpl for VerifiedDeltaRuns<'a, T, C> {
+    /// The iterator keeps to what Verus asks of an iterator: `next` gives
+    /// `remaining()`, one run after another, and then `None`.
+    open spec fn obeys_prophetic_iter_laws(&self) -> bool {
+        true
+    }
+
+    open spec fn remaining(&self) -> Seq<DeltaRun> {
+        delta_runs_at(
+            self.iter().column(),
+            self.iter().pos() as int,
+            runs_of(window(deltas(self.iter().column()), self.iter().pos() as int, self.iter().end_pos() as int)),
+        )
+    }
+
+    open spec fn will_return_none(&self) -> bool {
+        true
+    }
+
+    open spec fn decrease(&self) -> Option<nat> {
+        Some(self.iter().rest().len())
+    }
+
+    open spec fn peek(&self, index: int) -> Option<DeltaRun> {
+        let rs = delta_runs_at(
+            self.iter().column(),
+            self.iter().pos() as int,
+            runs_of(window(deltas(self.iter().column()), self.iter().pos() as int, self.iter().end_pos() as int)),
+        );
+        if 0 <= index < rs.len() {
+            Some(rs[index])
+        } else {
+            None
+        }
+    }
+}
+
+impl<'a, T: VDeltaValue<C>, C: VCodec> Iterator for VerifiedDeltaRuns<'a, T, C> {
+    type Item = DeltaRun;
+
+    /// The next run, if one is left ([`VerifiedDeltaIter::next_run`]).
+    #[inline(always)]
+    fn next(&mut self) -> (r: Option<DeltaRun>)
+        ensures
+            final(self).iter().column() == old(self).iter().column(),
+            final(self).iter().source() == old(self).iter().source(),
+            match r {
+                Some(run) => {
+                    &&& head_run(
+                        window(
+                            deltas(old(self).iter().column()),
+                            old(self).iter().pos() as int,
+                            old(self).iter().end_pos() as int,
+                        ),
+                        run.delta,
+                        run.count as int,
+                    )
+                    &&& run.prefix == delta_prefix(old(self).iter().column(), old(self).iter().pos() as int)
+                    &&& delta_run_values::<T>(run) == old(self).iter().rest().take(run.count as int)
+                    &&& delta_run_fits::<T>(run)
+                    &&& final(self).iter().rest() == old(self).iter().rest().skip(run.count as int)
+                    &&& final(self).iter().pos() == old(self).iter().pos() + run.count
+                    &&& final(self).iter().end_pos() == old(self).iter().end_pos()
+                },
+                None => {
+                    &&& old(self).iter().rest().len() == 0
+                    &&& final(self).iter().rest().len() == 0
+                    &&& final(self).iter().pos() == old(self).iter().pos()
+                    &&& final(self).iter().end_pos() == old(self).iter().pos()
+                },
+            },
+    {
+        let ghost (col, p, e) = (self.0.column(), self.0.pos() as int, self.0.end_pos() as int);
+        let ghost w = window(deltas(col), p, e);
+        let r = self.0.next_run();
+        proof {
+            match r {
+                Some(run) => {
+                    // the runs left were this one and those left now
+                    let n = run.count as int;
+                    let w2 = window(deltas(col), p + n, e);
+                    lemma_runs_of(w, run.delta, run.count);
+                    lemma_window_past(deltas(col), p, e, n);
+                    assert(w.skip(n) == w2);
+                    assert(runs_of(w).drop_first() =~= runs_of(w2));
+                    let before = delta_runs_at(col, p, runs_of(w));
+                    let after = delta_runs_at(col, p + n, runs_of(w2));
+                    assert(before =~= seq![run] + after);
+                    assert(before.drop_first() =~= after);
+                },
+                None => {
+                    assert(w.len() == 0);
+                    assert(window(deltas(col), p, p).len() == 0);
+                },
+            }
+        }
+        r
+    }
+}
+
+/// Where a [`VerifiedDeltaIter`] stood and where its window ended, kept
+/// without the borrow of the column: [`VerifiedDeltaIter::suspend`]
+/// gives it, and [`try_resume`](Self::try_resume) an iterator from it.
+///
+/// It holds the iterator's place in the column's slabs, and how many
+/// slabs and edits the column counted then, as a
+/// [`VerifiedIterState`] does. It does not hold the sum of the
+/// differences before the place: `try_resume` takes that from the
+/// column it resumes on. It is of no value type: a state fits any delta
+/// column whose slabs it is a place in.
+pub struct VerifiedDeltaIterState {
+    inner: VerifiedIterState,
+}
+
+impl VerifiedDeltaIterState {
+    /// Where the iterator stood: its `pos()`.
+    pub closed spec fn pos(&self) -> usize {
+        self.inner.pos
+    }
+
+    /// Where the iterator's window ended: its `end_pos()`.
+    pub closed spec fn end_pos(&self) -> usize {
+        (self.inner.pos + self.inner.items_left) as usize
+    }
+
+    /// The count of edits of the column the state was taken of
+    /// (`VerifiedDeltaColumn::edits`).
+    pub closed spec fn edits(&self) -> usize {
+        self.inner.counter
+    }
+
+    /// The state is a place in `column` as it is: the column counts the
+    /// edits and the slabs that the state does, the state's place is one
+    /// in those slabs, and it is in the column or at its end.
+    /// [`try_resume`](Self::try_resume) gives an iterator exactly then.
+    pub closed spec fn fits<T: VDeltaValue<C>, C: VCodec>(&self, column: &VerifiedDeltaColumn<T, C>) -> bool {
+        let lens = slab_lens(column.core.slabs_spec());
+        &&& self.inner.counter == column.core.count()
+        &&& self.inner.num_slabs == lens.len()
+        &&& resumes(lens, self.inner.slab_idx, self.inner.slab_consumed, self.inner.pos, self.inner.items_left)
+        &&& self.inner.pos <= total(lens)
+    }
+
+    /// A state fits only a column that counts the edits it does. A
+    /// column that has been edited since counts others
+    /// (`lemma_after_edits`), so the state does not fit it, and
+    /// [`try_resume`](Self::try_resume) refuses it.
+    pub proof fn lemma_fits<T: VDeltaValue<C>, C: VCodec>(&self, column: &VerifiedDeltaColumn<T, C>)
+        requires
+            self.fits(column),
+        ensures
+            self.edits() == column.edits(),
+    {
+    }
+
+    /// An iterator of `column` that stands where the suspended one stood,
+    /// with its window, if the state fits the column (`fits`); an error
+    /// ([`PackError::InvalidResume`]) if it does not.
+    ///
+    /// A state fits the column it was taken of, as long as that is not
+    /// edited ([`VerifiedDeltaIter::suspend`]). The iterator given is
+    /// one of `column` whatever column the state was taken of: it gives
+    /// the values of `column` in the state's window, and the sum it
+    /// keeps is of that column's differences. Where the state stands at
+    /// the column's end, the iterator's window ends there.
+    ///
+    /// An edit moves the column's count of edits
+    /// (`VerifiedDeltaColumn::edits`), as each method that edits says,
+    /// so a state taken before an edit is refused after it
+    /// (`lemma_fits`), and after more edits unless they are
+    /// `usize::MAX + 1` or more (`lemma_after_edits`).
+    ///
+    /// The sum of the differences before the place is found as
+    /// [`advance_by`](VerifiedDeltaIter::advance_by) finds it, with the
+    /// column's index.
+    pub fn try_resume<'a, T: VDeltaValue<C>, C: VCodec>(&self, column: &'a VerifiedDeltaColumn<T, C>) -> (r: Result<
+        VerifiedDeltaIter<'a, T, C>,
+        PackError,
+    >)
+        ensures
+            r is Ok <==> self.fits(column),
+            r is Ok ==> self.edits() == column.edits(),
+            r matches Ok(it) ==> {
+                &&& it.source() == Some(*column)
+                &&& it.column() == column@
+                &&& it.pos() == self.pos()
+                &&& it.rest() == window(column@, self.pos() as int, self.end_pos() as int)
+                &&& it.end_pos() == self.end_pos() || (self.pos() == column@.len() && it.end_pos() == self.pos())
+            },
+    {
+        proof {
+            use_type_invariant(column);
+        }
+        if self.inner.counter != column.core.counter() {
+            return Err(invalid_resume());
+        }
+        let (slabs, ix) = column.core.delta_parts();
+        if self.inner.num_slabs != slabs.len() {
+            return Err(invalid_resume());
+        }
+        if self.inner.pos > column.core.len() {
+            return Err(invalid_resume());
+        }
+        let it = match column.core.resume::<DX<T, C>>(
+            self.inner.slab_idx,
+            self.inner.slab_consumed,
+            self.inner.pos,
+            self.inner.items_left,
+        ) {
+            Some(it) => it,
+            None => {
+                return Err(invalid_resume());
+            },
+        };
+        // the sum of the differences before the place is this column's:
+        // a state taken of another column would have another's
+        let mut before = column.iter();
+        before.advance_by(self.inner.pos);
+        column.core.lemma_column();
+        proof {
+            use_type_invariant(&before);
+            // what the reader will give is what the column keeps
+            lemma_dslabs_own::<DE<T, C>, DX<T, C>, DB<T, C>>(column.core.slabs_spec());
+        }
+        let r = VerifiedDeltaIter { it, slabs, running: before.running, ix: Some(ix), col: Some(&column.core) };
+        proof {
+            r.lemma_window();
+            assert(r.rest() =~= window(column@, self.pos() as int, self.end_pos() as int));
+        }
+        Ok(r)
+    }
+}
+
 } // verus!
+
+impl<T: VDeltaValue<C>, C: VCodec> std::fmt::Debug for VerifiedDeltaRuns<'_, T, C> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("VerifiedDeltaRuns").field(&self.0).finish()
+    }
+}
 
 impl<T: VDeltaValue<C>, C: VCodec> std::fmt::Debug for VerifiedDeltaIter<'_, T, C> {
     /// Where the iterator stands, the sum it keeps and how many values

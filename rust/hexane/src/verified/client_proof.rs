@@ -392,10 +392,11 @@
 //! This module exists only while Verus checks the crate.
 
 use super::{
-    accumulated, after_edit, after_edits, all_fit, below_at, bytes_below, delta_run_fits,
-    delta_run_in_range, delta_run_kept, delta_run_values, delta_runs_fit, delta_runs_kept,
-    delta_runs_values, folded, head_len, head_run, head_run_max, lemma_acc_cat, lemma_acc_range,
-    lemma_acc_run, lemma_after_edits, lemma_cancel, lemma_delta_run_exact, lemma_delta_run_fits,
+    accumulated, after_edit, after_edits, all_fit, below_at, bytes_below, delta_at, delta_prefix,
+    delta_run_fits, delta_run_in_range, delta_run_kept, delta_run_values, delta_runs_at,
+    delta_runs_fit, delta_runs_kept, delta_runs_values, deltas, folded, head_len, head_run,
+    head_run_max, lemma_acc_cat, lemma_acc_range, lemma_acc_run, lemma_after_edits, lemma_cancel,
+    lemma_delta_run_at, lemma_delta_run_exact, lemma_delta_run_fits, lemma_delta_runs_at,
     lemma_delta_runs_one, lemma_delta_runs_push, lemma_head_len, lemma_head_run_max,
     lemma_run_values_add, lemma_run_values_push, lemma_runs_first, lemma_runs_of_values,
     lemma_sorted, lemma_sum_bound, lemma_sum_mono, lemma_sum_range, lemma_sum_run, lemma_sums_fit,
@@ -404,9 +405,10 @@ use super::{
     SumIndex, VAccum, VAccumulated, VAdds, VAmount, VCodec, VCount, VDelta, VDeltaValue, VGet,
     VGroup, VIndex, VKeeps, VNewtype, VSpec, VSum, VSummed, VValue, VerifiedAccColumn,
     VerifiedAccIter, VerifiedAccIterState, VerifiedAccSeek, VerifiedAccValue, VerifiedColumn,
-    VerifiedDecoder, VerifiedDeltaColumn, VerifiedDeltaIter, VerifiedEncoder, VerifiedEncoderState,
-    VerifiedIter, VerifiedIterState, VerifiedPrefixColumn, VerifiedPrefixIter,
-    VerifiedPrefixIterState, VerifiedPrefixSeek, VerifiedPrefixedValue, VerifiedRuns,
+    VerifiedDecoder, VerifiedDeltaColumn, VerifiedDeltaIter, VerifiedDeltaIterState,
+    VerifiedDeltaRuns, VerifiedEncoder, VerifiedEncoderState, VerifiedIter, VerifiedIterState,
+    VerifiedPrefixColumn, VerifiedPrefixIter, VerifiedPrefixIterState, VerifiedPrefixSeek,
+    VerifiedPrefixedValue, VerifiedRuns,
 };
 use crate::{DeltaRun, Leb128, LoadOpts, PackError, Run};
 use std::cmp::Ordering;
@@ -11916,6 +11918,734 @@ fn delta_told_by_an_iters_default<'a, T: VDeltaValue<C>, C: VCodec>() -> (r: Ver
         r.end_pos() == 0,
 {
     VerifiedDeltaIter::default()
+}
+
+// ── Delta columns: runs of differences, and a suspended iterator ────────────
+
+/// A delta column's values as the runs it keeps them in: a `for` loop
+/// over the runs of its iterator collects them. They are the runs of
+/// the column's differences; their values are the column's; and each is
+/// a run the column's type can keep. For every type and codec.
+#[allow(dead_code)]
+fn delta_in_runs<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>) -> (out: Vec<DeltaRun>)
+    ensures
+        out@ == delta_runs_at(col@, 0, runs_of(deltas(col@))),
+        delta_runs_values::<T>(out@) == col@,
+        delta_runs_fit::<T>(out@),
+{
+    let n = col.len();
+    let ghost rs = delta_runs_at(col@, 0, runs_of(window(deltas(col@), 0, n as int)));
+    let mut out: Vec<DeltaRun> = Vec::new();
+    for run in at: col.iter().runs()
+        invariant
+            at.seq() == rs,
+            out@ == rs.take(at.index()),
+    {
+        out.push(run);
+        proof {
+            assert(rs.take(at.index() + 1) =~= rs.take(at.index()).push(run));
+        }
+    }
+    proof {
+        assert(rs.take(rs.len() as int) =~= rs);
+        col.lemma_fits();
+        lemma_delta_runs_at::<T>(col@, 0, n as int);
+        assert(window(col@, 0, n as int) =~= col@);
+        assert(window(deltas(col@), 0, n as int) =~= deltas(col@));
+    }
+    out
+}
+
+/// A delta column copied by its runs: what `runs()` gives is what
+/// `splice_runs` takes, and the copy holds the column's values.
+#[allow(dead_code)]
+fn delta_copied_by_runs<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>) -> (r: VerifiedDeltaColumn<T, C>)
+    ensures
+        r@ == col@,
+{
+    let runs = delta_in_runs(col);
+    let mut r: VerifiedDeltaColumn<T, C> = VerifiedDeltaColumn::new();
+    r.splice_runs(0, 0, runs.as_slice());
+    assert(r@ =~= col@);
+    r
+}
+
+/// The same copy made a run at a time, with `next_run`: each run goes
+/// in at the copy's end as the iterator gives it. A run holds the
+/// values the iterator moved past, it is one the type can keep, and it
+/// is at least one value long, so the loop ends.
+#[allow(dead_code)]
+fn delta_copied_run_by_run<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>) -> (r: VerifiedDeltaColumn<
+    T,
+    C,
+>)
+    ensures
+        r@ == col@,
+{
+    let mut r: VerifiedDeltaColumn<T, C> = VerifiedDeltaColumn::new();
+    let mut it = col.iter();
+    assert(r@ + it.rest() =~= col@);
+    loop
+        invariant
+            r@ + it.rest() == col@,
+        ensures
+            r@ == col@,
+        decreases it.rest().len(),
+    {
+        let ghost left = it.rest();
+        let ghost (c, p, e) = (it.column(), it.pos() as int, it.end_pos() as int);
+        match it.next_run() {
+            Some(run) => {
+                let n = r.len();
+                let ghost before = r@;
+                let mut one: Vec<DeltaRun> = Vec::new();
+                one.push(run);
+                proof {
+                    lemma_delta_runs_one::<T>(run);
+                    assert(one@ =~= seq![run]);
+                    // the run is no longer than what was left
+                    assert(window(deltas(c), p, e).len() == left.len());
+                }
+                r.splice_runs(n, 0, one.as_slice());
+                proof {
+                    assert(r@ =~= before + left.take(run.count as int));
+                    assert(left.take(run.count as int) + left.skip(run.count as int) =~= left);
+                    assert(r@ + it.rest() =~= col@);
+                }
+            },
+            None => {
+                assert(r@ + it.rest() =~= r@);
+                break ;
+            },
+        }
+    }
+    r
+}
+
+/// The values of a column from `a` to `b` put into another by their
+/// runs, at index `at` of it: the runs of a part of one column are runs
+/// of any column of the type, since a run says what its values are and
+/// not where they came from.
+#[allow(dead_code)]
+fn delta_moved_by_runs<T: VDeltaValue<C>, C: VCodec>(
+    src: &VerifiedDeltaColumn<T, C>,
+    a: usize,
+    b: usize,
+    dst: &mut VerifiedDeltaColumn<T, C>,
+    at: usize,
+)
+    requires
+        a <= b <= src@.len(),
+        at <= old(dst)@.len(),
+    ensures
+        final(dst)@ == old(dst)@.take(at as int) + src@.subrange(a as int, b as int) + old(dst)@.skip(at as int),
+{
+    let _n = src.len();
+    let ghost rs = delta_runs_at(src@, a as int, runs_of(window(deltas(src@), a as int, b as int)));
+    let mut runs: Vec<DeltaRun> = Vec::new();
+    for run in at: src.iter_range(a, b).runs()
+        invariant
+            at.seq() == rs,
+            runs@ == rs.take(at.index()),
+    {
+        runs.push(run);
+        proof {
+            assert(rs.take(at.index() + 1) =~= rs.take(at.index()).push(run));
+        }
+    }
+    proof {
+        assert(rs.take(rs.len() as int) =~= rs);
+        src.lemma_fits();
+        lemma_delta_runs_at::<T>(src@, a as int, b as int);
+        assert(window(src@, a as int, b as int) =~= src@.subrange(a as int, b as int));
+    }
+    dst.splice_runs(at, 0, runs.as_slice());
+}
+
+/// The differences that the values 5, 7, 9 and 9 are kept as: the first
+/// from 0, each of the others from the value before it. And the number
+/// before each, which a run that begins there has for its `prefix`.
+#[allow(dead_code)]
+proof fn delta_diffs_of_four()
+    ensures
+        deltas(seq![5u64, 7u64, 9u64, 9u64]) == seq![Some(5i64), Some(2i64), Some(2i64), Some(0i64)],
+        delta_prefix(seq![5u64, 7u64, 9u64, 9u64], 0) == 0,
+        delta_prefix(seq![5u64, 7u64, 9u64, 9u64], 1) == 5,
+        delta_prefix(seq![5u64, 7u64, 9u64, 9u64], 3) == 9,
+        delta_prefix(seq![5u64, 7u64, 9u64, 9u64], 4) == 9,
+{
+    let vs = seq![5u64, 7u64, 9u64, 9u64];
+    assert(delta_prefix(vs, 0) == 0);
+    assert(delta_prefix(vs, 1) == 5);
+    assert(delta_prefix(vs, 2) == 7);
+    assert(delta_prefix(vs, 3) == 9);
+    assert(delta_prefix(vs, 4) == 9);
+    assert(delta_at(vs, 0) == Some(5i64));
+    assert(delta_at(vs, 1) == Some(2i64));
+    assert(delta_at(vs, 2) == Some(2i64));
+    assert(delta_at(vs, 3) == Some(0i64));
+    assert(deltas(vs) =~= seq![Some(5i64), Some(2i64), Some(2i64), Some(0i64)]);
+}
+
+/// The differences where a value is null: a null has none, and the
+/// number before the value after it is the last number before the null.
+/// A difference may be less than nothing.
+#[allow(dead_code)]
+proof fn delta_diffs_with_a_null()
+    ensures
+        deltas(seq![Some(3u32), None, Some(1u32)]) == seq![Some(3i64), None, Some(-2i64)],
+        delta_prefix(seq![Some(3u32), None, Some(1u32)], 2) == 3,
+        delta_prefix(seq![Some(3u32), None, Some(1u32)], 3) == 1,
+{
+    let vs = seq![Some(3u32), None, Some(1u32)];
+    assert(delta_prefix(vs, 0) == 0);
+    assert(delta_prefix(vs, 1) == 3);
+    assert(delta_prefix(vs, 2) == 3);
+    assert(delta_prefix(vs, 3) == 1);
+    assert(delta_at(vs, 0) == Some(3i64));
+    assert(delta_at(vs, 1) is None);
+    assert(delta_at(vs, 2) == Some(-2i64));
+    assert(deltas(vs) =~= seq![Some(3i64), None, Some(-2i64)]);
+}
+
+/// The runs of a column of 5, 7, 9 and 9, as `next_run` gives them: 5
+/// alone, from 0; then two values each 2 more than the one before, from
+/// 5; then one value the same as the one before it, 9; and then none.
+#[allow(dead_code)]
+fn delta_runs_of_four(col: &VerifiedDeltaColumn<u64>)
+    requires
+        col@ == seq![5u64, 7u64, 9u64, 9u64],
+{
+    proof {
+        delta_diffs_of_four();
+    }
+    let ghost ds = deltas(col@);
+    let mut it = col.iter();
+    let a = it.next_run();
+    assert(a == Some(DeltaRun { prefix: 0, delta: Some(5i64), count: 1 })) by {
+        let w = window(ds, 0, 4);
+        assert(w =~= ds);
+        assert(a is Some);
+        if a->0.count > 1 {
+            assert(w[1] == a->0.delta);
+        }
+    }
+    let b = it.next_run();
+    assert(b == Some(DeltaRun { prefix: 5, delta: Some(2i64), count: 2 })) by {
+        let w = window(ds, 1, 4);
+        assert(w =~= ds.subrange(1, 4));
+        assert(b is Some);
+        assert(w[0] == b->0.delta);
+        if b->0.count > 2 {
+            assert(w[2] == b->0.delta);
+        }
+        if b->0.count < 2 {
+            assert(w[1] != b->0.delta);
+        }
+    }
+    let c = it.next_run();
+    assert(c == Some(DeltaRun { prefix: 9, delta: Some(0i64), count: 1 })) by {
+        let w = window(ds, 3, 4);
+        assert(w =~= ds.subrange(3, 4));
+        assert(c is Some);
+        assert(w[0] == c->0.delta);
+    }
+    let d = it.next_run();
+    assert(d is None);
+    assert(it.pos() == 4 && it.rest().len() == 0);
+}
+
+/// Nulls lie in a run of their own, which has no difference, and the
+/// run after it counts from the last number before them: here from
+/// none, so from 0.
+#[allow(dead_code)]
+fn delta_nulls_in_a_run(col: &VerifiedDeltaColumn<Option<u32>>)
+    requires
+        col@ == seq![None, None, Some(3u32)],
+{
+    let ghost ds = deltas(col@);
+    proof {
+        assert(delta_prefix(col@, 0) == 0);
+        assert(delta_prefix(col@, 1) == 0);
+        assert(delta_prefix(col@, 2) == 0);
+        assert(delta_at(col@, 0) is None);
+        assert(delta_at(col@, 1) is None);
+        assert(delta_at(col@, 2) == Some(3i64));
+        assert(ds =~= seq![None, None, Some(3i64)]);
+    }
+    let mut it = col.iter();
+    let a = it.next_run();
+    assert(a == Some(DeltaRun { prefix: 0, delta: None, count: 2 })) by {
+        let w = window(ds, 0, 3);
+        assert(w =~= ds);
+        assert(a is Some);
+        assert(w[0] == a->0.delta);
+        if a->0.count > 2 {
+            assert(w[2] == a->0.delta);
+        }
+        if a->0.count < 2 {
+            assert(w[1] != a->0.delta);
+        }
+    }
+    let b = it.next_run();
+    assert(b == Some(DeltaRun { prefix: 0, delta: Some(3i64), count: 1 })) by {
+        let w = window(ds, 2, 3);
+        assert(w =~= ds.subrange(2, 3));
+        assert(b is Some);
+        assert(w[0] == b->0.delta);
+    }
+}
+
+/// The number before a run is the value before it: a run read from the
+/// `i`-th value on of a column of `i64` has the value before that for
+/// its `prefix`, or 0 where there is none; and its `delta` is how much
+/// the `i`-th value is more, as an `i64`.
+#[allow(dead_code)]
+fn delta_the_number_before(col: &VerifiedDeltaColumn<i64>, i: usize) -> (r: Option<DeltaRun>)
+    requires
+        i < col@.len(),
+    ensures
+        r matches Some(run) && run.prefix == (if i == 0 {
+            0
+        } else {
+            col@[i - 1]
+        }) && run.delta == Some(vstd::wrapping::i64_specs::signed_crop(col@[i as int] - run.prefix)),
+{
+    let n = col.len();
+    let mut it = col.iter_range(i, n);
+    let r = it.next_run();
+    proof {
+        let w = window(deltas(col@), i as int, n as int);
+        assert(delta_prefix(col@, i as int) == (if i == 0 {
+            0
+        } else {
+            col@[i - 1]
+        }));
+        assert(r is Some);
+        assert(w[0] == r->0.delta);
+        assert(w[0] == delta_at(col@, i as int));
+    }
+    r
+}
+
+/// No two runs that follow one another are of one difference: a run
+/// ends where the difference changes or the window does. And the second
+/// run's number before it is the one at the place where the first
+/// ended.
+#[allow(dead_code)]
+fn delta_two_runs_differ<T: VDeltaValue<C>, C: VCodec>(it: &mut VerifiedDeltaIter<'_, T, C>) -> (r: (
+    Option<DeltaRun>,
+    Option<DeltaRun>,
+))
+    ensures
+        r.0 is Some && r.1 is Some ==> r.0->0.delta != r.1->0.delta && r.1->0.prefix == delta_prefix(
+            old(it).column(),
+            old(it).pos() + r.0->0.count,
+        ),
+        r.0 is None ==> r.1 is None,
+{
+    let ghost (c, p, e) = (it.column(), it.pos() as int, it.end_pos() as int);
+    let a = it.next_run();
+    let b = it.next_run();
+    proof {
+        if a is Some && b is Some {
+            let n = a->0.count as int;
+            let w = window(deltas(c), p, e);
+            let w2 = window(deltas(c), p + n, e);
+            assert(w2[0] == b->0.delta);
+            assert(w2[0] == w[n]);
+        }
+    }
+    (a, b)
+}
+
+/// `lemma_delta_run_at` for any values and any place: where `n` values
+/// from index `a` on each differ by `d` from the one before, the run of
+/// `n` differences `d` with the number before index `a` has those
+/// values, and is one the type can keep.
+#[allow(dead_code)]
+proof fn delta_a_run_between<T: VDelta>(vs: Seq<T>, a: int, n: usize, d: Option<i64>)
+    requires
+        all_fit(vs),
+        0 <= a,
+        a + n <= vs.len(),
+        forall|j: int| a <= j < a + n ==> delta_at(vs, j) == d,
+    ensures
+        delta_run_values::<T>(DeltaRun { prefix: delta_prefix(vs, a), delta: d, count: n }) == vs.subrange(a, a + n),
+        delta_run_fits::<T>(DeltaRun { prefix: delta_prefix(vs, a), delta: d, count: n }),
+{
+    lemma_delta_run_at::<T>(vs, a, n, d);
+}
+
+/// `lemma_delta_runs_at` for any values and any part of them: the runs
+/// of the differences from `a` to `b`, each with the number before it,
+/// have the values from `a` to `b`, and the type can keep them.
+#[allow(dead_code)]
+proof fn delta_runs_between<T: VDelta>(vs: Seq<T>, a: int, b: int)
+    requires
+        all_fit(vs),
+        0 <= a <= b <= vs.len(),
+        vs.len() <= usize::MAX,
+    ensures
+        delta_runs_values::<T>(delta_runs_at(vs, a, runs_of(deltas(vs).subrange(a, b)))) == vs.subrange(a, b),
+        delta_runs_fit::<T>(delta_runs_at(vs, a, runs_of(deltas(vs).subrange(a, b)))),
+{
+    lemma_delta_runs_at::<T>(vs, a, b);
+    assert(window(vs, a, b) =~= vs.subrange(a, b));
+    assert(window(deltas(vs), a, b) =~= deltas(vs).subrange(a, b));
+}
+
+/// The runs of some differences, with the numbers before them: none of
+/// none, and of one run and more that run, with the number before index
+/// `a`, and then the others from where it ends.
+#[allow(dead_code)]
+proof fn delta_runs_from<T: VDelta>(vs: Seq<T>, a: int, r: Run<Option<i64>>, rs: Seq<Run<Option<i64>>>)
+    ensures
+        delta_runs_at(vs, a, Seq::empty()) == Seq::<DeltaRun>::empty(),
+        delta_runs_at(vs, a, seq![r] + rs) == seq![
+            DeltaRun { prefix: delta_prefix(vs, a), delta: r.value, count: r.count },
+        ] + delta_runs_at(vs, a + r.count, rs),
+{
+    let all = seq![r] + rs;
+    assert(all[0] == r);
+    assert(all.drop_first() =~= rs);
+}
+
+/// A delta column read in two goes: up to `k` values, then the iterator
+/// is put away as a state, which borrows nothing, and an iterator
+/// resumed from the state gives the rest. Nothing edits the column
+/// between, so the state is one the column takes.
+#[allow(dead_code)]
+fn delta_read_in_two_goes<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>, k: usize) -> (out: Vec<T>)
+    ensures
+        out@ == col@,
+{
+    let mut out: Vec<T> = Vec::new();
+    let mut it = col.iter();
+    let mut i: usize = 0;
+    assert(out@ + it.rest() =~= col@);
+    while i < k
+        invariant
+            out@ + it.rest() == col@,
+            it.source() == Some(*col),
+            it.column() == col@,
+        decreases k - i,
+    {
+        let ghost (had, left) = (out@, it.rest());
+        match it.next() {
+            Some(x) => {
+                out.push(x);
+                assert(out@ + it.rest() =~= had + left);
+            },
+            None => {},
+        }
+        i += 1;
+    }
+    let s = it.suspend();
+    let ghost had = out@;
+    let ghost left = it.rest();
+    match s.try_resume(col) {
+        Ok(rest) => {
+            for x in at: rest
+                invariant
+                    at.seq() == left,
+                    out@ == had + left.take(at.index()),
+            {
+                out.push(x);
+                proof {
+                    assert(left.take(at.index() + 1) =~= left.take(at.index()).push(x));
+                }
+            }
+            proof {
+                assert(left.take(left.len() as int) =~= left);
+            }
+        },
+        Err(_) => {
+            assert(false);
+        },
+    }
+    out
+}
+
+/// An iterator of a part of a delta column, suspended and resumed on
+/// the column: the one resumed stands where the suspended one stood,
+/// reads the same column, and has the values left that it had.
+#[allow(dead_code)]
+fn delta_resumed<'a, T: VDeltaValue<C>, C: VCodec>(col: &'a VerifiedDeltaColumn<T, C>, a: usize, b: usize) -> (r:
+    Option<VerifiedDeltaIter<'a, T, C>>)
+    requires
+        a <= b <= col@.len(),
+    ensures
+        r matches Some(it) && it.pos() == a && it.end_pos() == b && it.rest() == col@.subrange(a as int, b as int)
+            && it.source() == Some(*col),
+{
+    let it = col.iter_range(a, b);
+    let s = it.suspend();
+    match s.try_resume(col) {
+        Ok(r) => {
+            assert(r.rest() =~= col@.subrange(a as int, b as int));
+            Some(r)
+        },
+        Err(_) => None,
+    }
+}
+
+/// A state is refused once the column is edited: the column counts an
+/// edit more, and a state fits only a column that counts the edits it
+/// does (`lemma_fits`).
+#[allow(dead_code)]
+fn delta_ended_by_an_edit<T: VDeltaValue<C>, C: VCodec>(col: &mut VerifiedDeltaColumn<T, C>, v: T) -> (r: bool)
+    requires
+        v.fits(),
+    ensures
+        !r,
+        final(col)@ == old(col)@.push(v),
+{
+    let s = col.iter().suspend();
+    proof {
+        s.lemma_fits(&*col);
+    }
+    col.push(v);
+    s.try_resume(col).is_ok()
+}
+
+/// And after more edits than one: here after `k` pushes, for any `k`
+/// but 0. The column's count after `k` edits, for any `k` a `usize`
+/// holds, is not what it was (`lemma_after_edits`).
+#[allow(dead_code)]
+fn delta_ended_by_many<T: VDeltaValue<C>, C: VCodec>(col: &mut VerifiedDeltaColumn<T, C>, v: T, k: usize) -> (r: bool)
+    requires
+        v.fits(),
+        k > 0,
+    ensures
+        !r,
+        final(col)@.len() == old(col)@.len() + k,
+{
+    let s = col.iter().suspend();
+    proof {
+        s.lemma_fits(&*col);
+    }
+    let ghost e = col.edits();
+    let mut i: usize = 0;
+    while i < k
+        invariant
+            i <= k,
+            v.fits(),
+            col.edits() == after_edits(e, i as nat),
+            col@.len() == old(col)@.len() + i,
+        decreases k - i,
+    {
+        col.push(v);
+        i += 1;
+    }
+    proof {
+        lemma_after_edits(e, k as nat);
+    }
+    s.try_resume(col).is_ok()
+}
+
+/// A copy of a column counts the edits the column does, and each counts
+/// its own from there: after an edit of the copy, the copy refuses a
+/// state of the column, and the column, which nothing has edited, gives
+/// an iterator for it still.
+#[allow(dead_code)]
+fn delta_a_copy_edited<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>, v: T) -> (r: (bool, bool))
+    requires
+        v.fits(),
+    ensures
+        !r.0,
+        r.1,
+{
+    let s = col.iter().suspend();
+    proof {
+        s.lemma_fits(col);
+    }
+    let mut copy = col.clone();
+    copy.push(v);
+    let of_copy = s.try_resume(&copy).is_ok();
+    let of_col = s.try_resume(col).is_ok();
+    (of_copy, of_col)
+}
+
+/// A state resumed on another column than the one it was taken of,
+/// where that one takes it: the iterator is the other column's, and
+/// gives that column's values in the state's window. For every type and
+/// codec.
+#[allow(dead_code)]
+fn delta_resumed_elsewhere<T: VDeltaValue<C>, C: VCodec>(
+    s: &VerifiedDeltaIterState,
+    other: &VerifiedDeltaColumn<T, C>,
+) -> (r: Option<Vec<T>>)
+    ensures
+        r is Some <==> s.fits(other),
+        r matches Some(v) ==> v@ == window(other@, s.pos() as int, s.end_pos() as int),
+{
+    match s.try_resume(other) {
+        Ok(it) => {
+            let ghost all = it.rest();
+            let mut out: Vec<T> = Vec::new();
+            for x in at: it
+                invariant
+                    at.seq() == all,
+                    out@ == all.take(at.index()),
+            {
+                out.push(x);
+                proof {
+                    assert(all.take(at.index() + 1) =~= all.take(at.index()).push(x));
+                }
+            }
+            proof {
+                assert(all.take(all.len() as int) =~= all);
+            }
+            Some(out)
+        },
+        Err(_) => None,
+    }
+}
+
+/// An iterator that has given all its window, suspended and resumed:
+/// the one resumed has none left either, and its window ends where it
+/// stands.
+#[allow(dead_code)]
+fn delta_resumed_at_the_end<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>, a: usize, b: usize)
+    requires
+        a <= b <= col@.len(),
+{
+    let mut it = col.iter_range(a, b);
+    it.advance_to(b);
+    assert(it.pos() == b && it.rest().len() == 0);
+    let s = it.suspend();
+    match s.try_resume(col) {
+        Ok(r) => {
+            assert(r.pos() == b && r.end_pos() == b);
+            assert(r.rest().len() == 0);
+        },
+        Err(_) => {
+            assert(false);
+        },
+    }
+}
+
+/// What `next_run` says by itself of a delta column's iterator, each
+/// thing asked for on its own and with no lemma.
+#[allow(dead_code)]
+fn delta_told_by_next_run<T: VDeltaValue<C>, C: VCodec>(it: &mut VerifiedDeltaIter<'_, T, C>) -> (r: Option<DeltaRun>)
+    ensures
+        final(it).column() == old(it).column(),
+        final(it).source() == old(it).source(),
+        r matches Some(run) ==> head_run(
+            window(deltas(old(it).column()), old(it).pos() as int, old(it).end_pos() as int),
+            run.delta,
+            run.count as int,
+        ),
+        r matches Some(run) ==> run.prefix == delta_prefix(old(it).column(), old(it).pos() as int),
+        r matches Some(run) ==> delta_run_values::<T>(run) == old(it).rest().take(run.count as int),
+        r matches Some(run) ==> delta_run_fits::<T>(run),
+        r matches Some(run) ==> final(it).rest() == old(it).rest().skip(run.count as int),
+        r matches Some(run) ==> final(it).pos() == old(it).pos() + run.count,
+        r matches Some(run) ==> final(it).end_pos() == old(it).end_pos(),
+        r is None ==> old(it).rest().len() == 0,
+        r is None ==> final(it).rest().len() == 0,
+        r is None ==> final(it).pos() == old(it).pos(),
+        r is None ==> final(it).end_pos() == old(it).pos(),
+{
+    it.next_run()
+}
+
+/// What `runs` says by itself: the iterator of runs is of the iterator
+/// it was made of, as that stood.
+#[allow(dead_code)]
+fn delta_told_by_runs<'a, T: VDeltaValue<C>, C: VCodec>(it: VerifiedDeltaIter<'a, T, C>) -> (r: VerifiedDeltaRuns<
+    'a,
+    T,
+    C,
+>)
+    ensures
+        r.iter() == it,
+{
+    it.runs()
+}
+
+/// What `next` says by itself of an iterator of a delta column's runs:
+/// what `next_run` says of the iterator of values it is of.
+#[allow(dead_code)]
+fn delta_told_by_a_runs_next<T: VDeltaValue<C>, C: VCodec>(rs: &mut VerifiedDeltaRuns<'_, T, C>) -> (r: Option<
+    DeltaRun,
+>)
+    ensures
+        final(rs).iter().column() == old(rs).iter().column(),
+        final(rs).iter().source() == old(rs).iter().source(),
+        r matches Some(run) ==> head_run(
+            window(deltas(old(rs).iter().column()), old(rs).iter().pos() as int, old(rs).iter().end_pos() as int),
+            run.delta,
+            run.count as int,
+        ),
+        r matches Some(run) ==> run.prefix == delta_prefix(old(rs).iter().column(), old(rs).iter().pos() as int),
+        r matches Some(run) ==> delta_run_values::<T>(run) == old(rs).iter().rest().take(run.count as int),
+        r matches Some(run) ==> delta_run_fits::<T>(run),
+        r matches Some(run) ==> final(rs).iter().rest() == old(rs).iter().rest().skip(run.count as int),
+        r matches Some(run) ==> final(rs).iter().pos() == old(rs).iter().pos() + run.count,
+        r matches Some(run) ==> final(rs).iter().end_pos() == old(rs).iter().end_pos(),
+        r is None ==> old(rs).iter().rest().len() == 0,
+        r is None ==> final(rs).iter().rest().len() == 0,
+        r is None ==> final(rs).iter().pos() == old(rs).iter().pos(),
+        r is None ==> final(rs).iter().end_pos() == old(rs).iter().pos(),
+{
+    rs.next()
+}
+
+/// What `suspend` says by itself: the state has the iterator's place
+/// and its window's end, the iterator's values left are its column's
+/// between the two, and the state fits the column the iterator reads.
+#[allow(dead_code)]
+fn delta_told_by_suspend<T: VDeltaValue<C>, C: VCodec>(
+    it: &VerifiedDeltaIter<'_, T, C>,
+    col: &VerifiedDeltaColumn<T, C>,
+) -> (s: VerifiedDeltaIterState)
+    ensures
+        s.pos() == it.pos(),
+        s.end_pos() == it.end_pos(),
+        it.rest() == window(it.column(), s.pos() as int, s.end_pos() as int),
+        it.source() == Some(*col) ==> s.fits(col),
+{
+    it.suspend()
+}
+
+/// What `try_resume` says by itself: it gives an iterator exactly where
+/// the state fits the column, and then one of that column, at the
+/// state's place, with that column's values in the state's window left;
+/// its window ends where the state's does, or, at the column's end,
+/// where it stands.
+#[allow(dead_code)]
+fn delta_told_by_try_resume<'a, T: VDeltaValue<C>, C: VCodec>(
+    s: &VerifiedDeltaIterState,
+    col: &'a VerifiedDeltaColumn<T, C>,
+) -> (r: Result<VerifiedDeltaIter<'a, T, C>, PackError>)
+    ensures
+        r is Ok <==> s.fits(col),
+        r is Ok ==> s.edits() == col.edits(),
+        r matches Ok(it) ==> it.source() == Some(*col),
+        r matches Ok(it) ==> it.column() == col@,
+        r matches Ok(it) ==> it.pos() == s.pos(),
+        r matches Ok(it) ==> it.rest() == window(col@, s.pos() as int, s.end_pos() as int),
+        r matches Ok(it) ==> it.end_pos() == s.end_pos() || (s.pos() == col@.len() && it.end_pos() == s.pos()),
+{
+    s.try_resume(col)
+}
+
+/// What `lemma_fits` says by itself of a state: one that fits a column
+/// counts the edits the column does.
+#[allow(dead_code)]
+proof fn delta_told_by_a_states_fit<T: VDeltaValue<C>, C: VCodec>(
+    s: &VerifiedDeltaIterState,
+    col: &VerifiedDeltaColumn<T, C>,
+)
+    requires
+        s.fits(col),
+    ensures
+        s.edits() == col.edits(),
+{
+    s.lemma_fits(col);
 }
 
 } // verus!

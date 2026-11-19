@@ -12986,3 +12986,560 @@ fn delta_iter_ends() {
         "VerifiedDeltaIter { pos: 5, running: 2, items_left: 0 }"
     );
 }
+
+// ── Delta columns: runs of differences, and a suspended iterator ────────────
+
+/// A value type of a delta column, with the number kept for each value.
+trait DeltaStepped: Deltad {
+    /// The number of a value, if it is not null.
+    fn number(self) -> Option<i64>;
+    /// The value of a number.
+    fn numbered(n: i64) -> Self;
+    /// The null of the type, if it has one.
+    fn null() -> Option<Self>;
+    /// The least and the greatest number the tests give the type.
+    fn bounds() -> (i64, i64);
+}
+
+macro_rules! delta_stepped {
+    ($t:ty, $lo:expr, $hi:expr) => {
+        impl DeltaStepped for $t {
+            fn number(self) -> Option<i64> {
+                Some(self as i64)
+            }
+            fn numbered(n: i64) -> Self {
+                n as $t
+            }
+            fn null() -> Option<Self> {
+                None
+            }
+            fn bounds() -> (i64, i64) {
+                ($lo, $hi)
+            }
+        }
+
+        impl DeltaStepped for Option<$t> {
+            fn number(self) -> Option<i64> {
+                self.map(|v| v as i64)
+            }
+            fn numbered(n: i64) -> Self {
+                Some(n as $t)
+            }
+            fn null() -> Option<Self> {
+                Some(None)
+            }
+            fn bounds() -> (i64, i64) {
+                ($lo, $hi)
+            }
+        }
+    };
+}
+
+delta_stepped!(u32, 0, u32::MAX as i64);
+delta_stepped!(u64, 0, i64::MAX >> 2);
+delta_stepped!(i32, i32::MIN as i64, i32::MAX as i64);
+delta_stepped!(i64, i64::MIN >> 2, i64::MAX >> 2);
+delta_stepped!(usize, 0, i64::MAX >> 2);
+
+/// A verified delta column and the old one of the same values, laid out
+/// in the same slabs, with the values: `n` of them or a few more, in
+/// stretches of equal steps and of nulls among single values, so that
+/// the runs of differences are of many lengths.
+fn delta_run_pair<T: DeltaStepped>(
+    rng: &mut Rng,
+    n: usize,
+    max_segments: Option<usize>,
+) -> (VerifiedDeltaColumn<T>, DeltaColumn<T>, Vec<T>) {
+    let (mut new, mut old) = match max_segments {
+        Some(m) => (
+            VerifiedDeltaColumn::<T>::with_max_segments(m),
+            DeltaColumn::<T>::with_max_segments(m),
+        ),
+        None => (
+            VerifiedDeltaColumn::<T>::default(),
+            DeltaColumn::<T>::default(),
+        ),
+    };
+    let (lo, hi) = T::bounds();
+    let mut last = 0;
+    let mut model = Vec::new();
+    while model.len() < n {
+        let mut some = Vec::new();
+        let count = 1 + rng.below(6);
+        match rng.below(4) {
+            0 => {
+                // equal steps, as far as the type's numbers go
+                let step = rng.below(9) as i64 - 4;
+                for _ in 0..count {
+                    if (lo..=hi).contains(&(last + step)) {
+                        last += step;
+                        some.push(T::numbered(last));
+                    }
+                }
+            }
+            1 => {
+                if let Some(null) = T::null() {
+                    some.resize(count, null);
+                }
+            }
+            _ => {
+                let (v, l) = T::near(rng, last);
+                last = l;
+                some.push(v);
+            }
+        }
+        // now and then at a place before the end, so that slabs are cut
+        let at = match rng.below(6) {
+            0 => rng.below(model.len() + 1),
+            _ => model.len(),
+        };
+        for (i, v) in some.into_iter().enumerate() {
+            new.insert(at + i, v);
+            old.insert(at + i, v);
+            model.insert(at + i, v);
+        }
+    }
+    assert_eq!(new.slab_count(), old.slab_count());
+    (new, old, model)
+}
+
+/// The runs of differences of `model[start..end]`, as the specification
+/// has them (`delta_runs_at` of the `runs_of` that window of `deltas`):
+/// the difference of a value is its number less the number before it,
+/// which is the last that is not null, or 0 where there is none; a null
+/// has none; a run is of the equal differences that lie together in the
+/// window, with the number before its first.
+fn delta_runs_model<T: DeltaStepped>(
+    model: &[T],
+    start: usize,
+    end: usize,
+) -> Vec<hexane::DeltaRun> {
+    let mut before = 0i64;
+    for v in &model[..start] {
+        before = v.number().unwrap_or(before);
+    }
+    let mut runs: Vec<hexane::DeltaRun> = Vec::new();
+    for v in &model[start..end] {
+        let delta = v.number().map(|n| n.wrapping_sub(before));
+        match runs.last_mut() {
+            Some(run) if run.delta == delta => run.count += 1,
+            _ => runs.push(hexane::DeltaRun {
+                prefix: before,
+                delta,
+                count: 1,
+            }),
+        }
+        before = v.number().unwrap_or(before);
+    }
+    runs
+}
+
+/// What `next_run` gives an iterator that stands as `m` does, by the
+/// specification: the first run of what it has left, which it passes;
+/// or nothing, with its window closed where it stands.
+fn delta_walk_run<T: DeltaStepped>(m: &mut DeltaWalk<'_, T>) -> Option<hexane::DeltaRun> {
+    let run = delta_runs_model(m.model, m.pos, m.pos + m.left())
+        .first()
+        .copied();
+    match run {
+        Some(run) => m.pos += run.count,
+        None => m.end = m.pos,
+    }
+    run
+}
+
+/// A delta column's iterator gives the runs of differences that its
+/// specification says, as `DeltaColumn`'s iterator does: of the whole
+/// column, of a range (the runs cut where the range is), and run by run
+/// among other moves, the two being asked the same at each step.
+fn delta_run_reads<T: DeltaStepped>(seed: u64, max_segments: Option<usize>) {
+    let mut rng = Rng(seed.wrapping_mul(0x2545_f491_4f6c).wrapping_add(13) | 1);
+    let n = match rng.below(5) {
+        0 => rng.below(4),
+        _ => rng.below(200),
+    };
+    let (new, old, model) = delta_run_pair::<T>(&mut rng, n, max_segments);
+    let len = model.len();
+    // all the runs
+    let want = delta_runs_model(&model, 0, len);
+    assert_eq!(new.iter().runs().collect::<Vec<_>>(), want);
+    assert_eq!(old.iter().runs().collect::<Vec<_>>(), want);
+    assert_eq!(
+        format!("{:?}", new.iter().runs()),
+        format!("{:?}", old.iter().runs()).replace("Delta", "VerifiedDelta")
+    );
+    // the runs of a range, which `splice_runs` takes: they are the
+    // range's values
+    for _ in 0..4 {
+        let start = rng.below(len + 1);
+        let end = start + rng.below(len - start + 1);
+        let want = delta_runs_model(&model, start, end);
+        let runs = new.iter_range(start, end).runs().collect::<Vec<_>>();
+        assert_eq!(runs, want);
+        assert_eq!(old.iter_range(start..end).runs().collect::<Vec<_>>(), want);
+        let mut copy = VerifiedDeltaColumn::<T>::new();
+        copy.splice_runs(0, 0, &runs);
+        assert_eq!(copy.to_vec(), model[start..end]);
+    }
+    // run by run, among other moves
+    for _ in 0..6 {
+        let start = rng.below(len + 1);
+        let end = start + rng.below(len - start + 1);
+        let mut x = new.iter_range(start, end);
+        let mut y = old.iter_range(start..end);
+        let mut m = DeltaWalk {
+            model: &model,
+            pos: start,
+            end,
+        };
+        for _ in 0..40 {
+            if rng.below(2) == 0 {
+                let mv = a_delta_move(&mut rng, &m);
+                let want = m.does(&mv);
+                assert_eq!(new_delta_does(&mut x, &mv), want, "{mv:?}");
+                assert_eq!(old_delta_does(&mut y, &mv), want, "{mv:?}");
+            } else {
+                let want = delta_walk_run(&mut m);
+                assert_eq!(x.next_run(), want);
+                assert_eq!(y.next_run(), want);
+            }
+            assert_eq!(delta_place(&x), m.place());
+            assert_eq!(old_delta_place(&y), m.place());
+            assert_eq!(
+                format!("{x:?}"),
+                format!("{y:?}").replace("DeltaIter", "VerifiedDeltaIter")
+            );
+        }
+    }
+}
+
+/// A verified delta column's iterator and the old one's give the same
+/// runs of differences, which are the runs the specification says: for
+/// every type of value, and with small slabs too.
+#[test]
+fn delta_runs_agree() {
+    for seed in 0..8 {
+        for max_segments in [None, Some(2), Some(5)] {
+            delta_run_reads::<u32>(seed, max_segments);
+            delta_run_reads::<u64>(seed, max_segments);
+            delta_run_reads::<i32>(seed, max_segments);
+            delta_run_reads::<i64>(seed, max_segments);
+            delta_run_reads::<usize>(seed, max_segments);
+            delta_run_reads::<Option<u32>>(seed, max_segments);
+            delta_run_reads::<Option<u64>>(seed, max_segments);
+            delta_run_reads::<Option<i32>>(seed, max_segments);
+            delta_run_reads::<Option<i64>>(seed, max_segments);
+            delta_run_reads::<Option<usize>>(seed, max_segments);
+        }
+    }
+}
+
+/// A suspended iterator's state tried on a column, in both APIs: both
+/// refuse it, or both give an iterator of that column, the two standing
+/// in the same place with the same sum and the same values left, which
+/// are the column's there. Says whether the state was taken.
+fn delta_resumes_alike<T: DeltaStepped>(
+    s: &hexane::verified::VerifiedDeltaIterState,
+    t: &hexane::DeltaIterState,
+    new: &VerifiedDeltaColumn<T>,
+    old: &DeltaColumn<T>,
+    model: &[T],
+) -> bool {
+    match (s.try_resume(new), t.try_resume(old)) {
+        (Ok(x), Ok(y)) => {
+            assert_eq!(
+                format!("{x:?}"),
+                format!("{y:?}").replace("DeltaIter", "VerifiedDeltaIter")
+            );
+            assert_eq!(delta_place(&x), old_delta_place(&y));
+            let (pos, left) = (x.pos(), x.len());
+            assert_eq!(x.collect::<Vec<T>>(), model[pos..pos + left]);
+            assert_eq!(y.collect::<Vec<T>>(), model[pos..pos + left]);
+            true
+        }
+        (Err(e), Err(f)) => {
+            assert!(matches!(e, PackError::InvalidResume), "{e:?}");
+            assert!(matches!(f, PackError::InvalidResume), "{f:?}");
+            false
+        }
+        (x, y) => panic!("the new API: {}, the old: {}", x.is_ok(), y.is_ok()),
+    }
+}
+
+/// A suspended iterator's state tried on a column other than the one it
+/// was taken of. Here the two APIs need not agree whether it is taken: a
+/// state holds its column's count of edits, and the two count
+/// differently (the verified column one for each edit, the old one by
+/// what the edit wrote), so two columns can have counted the same in one
+/// API and not in the other. Where both take it or both refuse it, they
+/// do so alike (`delta_resumes_alike`); where only the verified one
+/// takes it, its iterator gives that column's values in the state's
+/// window, as its specification says. Says whether the verified one took
+/// it.
+fn delta_resumes_elsewhere<T: DeltaStepped>(
+    s: &hexane::verified::VerifiedDeltaIterState,
+    t: &hexane::DeltaIterState,
+    new: &VerifiedDeltaColumn<T>,
+    old: &DeltaColumn<T>,
+    model: &[T],
+) -> bool {
+    match (s.try_resume(new), t.try_resume(old)) {
+        (Ok(x), Err(f)) => {
+            assert!(matches!(f, PackError::InvalidResume), "{f:?}");
+            let (pos, left) = (x.pos(), x.len());
+            assert_eq!(x.collect::<Vec<T>>(), model[pos..pos + left]);
+            true
+        }
+        (Err(e), Ok(_)) => {
+            assert!(matches!(e, PackError::InvalidResume), "{e:?}");
+            false
+        }
+        _ => delta_resumes_alike(s, t, new, old, model),
+    }
+}
+
+/// A suspended iterator of a delta column is resumed where it stood,
+/// with the sum and the window it had, on the column and on a copy of
+/// it, and after an edit of the column its state is refused: as its
+/// specification says, and as `DeltaColumn`'s iterator and its state do.
+/// On another column it is refused or gives that column's values
+/// (`delta_resumes_elsewhere`).
+fn delta_suspends<T: DeltaStepped>(seed: u64, max_segments: Option<usize>) {
+    let mut rng = Rng(seed.wrapping_mul(0x9e37_79b9_7f4a).wrapping_add(17) | 1);
+    let n = match rng.below(5) {
+        0 => rng.below(4),
+        _ => rng.below(120),
+    };
+    let (mut new, mut old, mut model) = delta_run_pair::<T>(&mut rng, n, max_segments);
+    let n = rng.below(40);
+    let (other_new, other_old, other_model) = delta_run_pair::<T>(&mut rng, n, max_segments);
+    for _ in 0..6 {
+        let len = model.len();
+        // an iterator moved about, and its state
+        let (s, t) = {
+            let mut x = new.iter();
+            let mut y = old.iter();
+            let mut m = DeltaWalk {
+                model: &model,
+                pos: 0,
+                end: len,
+            };
+            for _ in 0..rng.below(6) {
+                if rng.below(4) == 0 {
+                    let want = delta_walk_run(&mut m);
+                    assert_eq!(x.next_run(), want);
+                    assert_eq!(y.next_run(), want);
+                } else {
+                    let mv = a_delta_move(&mut rng, &m);
+                    let want = m.does(&mv);
+                    assert_eq!(new_delta_does(&mut x, &mv), want, "{mv:?}");
+                    assert_eq!(old_delta_does(&mut y, &mv), want, "{mv:?}");
+                }
+            }
+            let (s, t) = (x.suspend(), y.suspend());
+            // resumed: where the suspended one stood, with its sum and the
+            // values it had left; its window ends where that one's did, or
+            // at the column's end if it stood there
+            let x2 = s.try_resume(&new).unwrap();
+            assert_eq!(format!("{x2:?}"), format!("{x:?}"));
+            let (pos, end, left) = m.place();
+            assert_eq!((x2.pos(), x2.len()), (pos, left));
+            assert!(x2.end_pos() == end || (pos == len && x2.end_pos() == pos));
+            assert_eq!(x2.collect::<Vec<T>>(), model[pos..pos + left]);
+            (s, t)
+        };
+        assert!(delta_resumes_alike(&s, &t, &new, &old, &model));
+        // on a copy of the column too
+        let (new_copy, old_copy) = (new.clone(), old.clone());
+        assert!(delta_resumes_alike(&s, &t, &new_copy, &old_copy, &model));
+        // on another column, and the state of an iterator of no column
+        delta_resumes_elsewhere(&s, &t, &other_new, &other_old, &other_model);
+        let s0 = hexane::verified::VerifiedDeltaIter::<T>::default().suspend();
+        let t0 = hexane::DeltaIter::<T>::default().suspend();
+        delta_resumes_elsewhere(&s0, &t0, &new, &old, &model);
+        // an edit, and the column refuses the state; the copy still
+        // takes it
+        let copy_model = model.clone();
+        if len > 0 && rng.below(3) == 0 {
+            let at = rng.below(len);
+            new.remove(at);
+            old.remove(at);
+            model.remove(at);
+        } else {
+            let (v, _) = T::near(&mut rng, 0);
+            let at = rng.below(len + 1);
+            new.insert(at, v);
+            old.insert(at, v);
+            model.insert(at, v);
+        }
+        assert!(!delta_resumes_alike(&s, &t, &new, &old, &model));
+        assert!(delta_resumes_alike(
+            &s,
+            &t,
+            &new_copy,
+            &old_copy,
+            &copy_model
+        ));
+    }
+    // two columns of as many values, each pushed: where they are laid out
+    // alike, a state of one is a place in the other (a verified column
+    // counts one edit a push), and the iterator resumed there gives the
+    // other's values, with the sum of the other's differences
+    let count = 1 + rng.below(12);
+    let (mut a_new, mut a_old) = (VerifiedDeltaColumn::<T>::new(), DeltaColumn::<T>::new());
+    let (mut b_new, mut b_old) = (VerifiedDeltaColumn::<T>::new(), DeltaColumn::<T>::new());
+    let mut b_model = Vec::new();
+    let (mut a_last, mut b_last) = (0, 0);
+    for _ in 0..count {
+        let (v, l) = T::near(&mut rng, a_last);
+        a_last = l;
+        a_new.push(v);
+        a_old.push(v);
+        let (v, l) = T::near(&mut rng, b_last);
+        b_last = l;
+        b_new.push(v);
+        b_old.push(v);
+        b_model.push(v);
+    }
+    let start = rng.below(count + 1);
+    let end = start + rng.below(count - start + 1);
+    let s = a_new.iter_range(start, end).suspend();
+    let t = a_old.iter_range(start..end).suspend();
+    let taken = delta_resumes_elsewhere(&s, &t, &b_new, &b_old, &b_model);
+    if a_new.slab_count() == 1 && b_new.slab_count() == 1 {
+        assert!(taken);
+        let x = s.try_resume(&b_new).unwrap();
+        assert_eq!(x.pos(), start);
+        assert_eq!(x.collect::<Vec<T>>(), b_model[start..end]);
+    }
+}
+
+/// A verified delta column's suspended iterators and the old one's are
+/// resumed and refused alike on their own columns, and as the
+/// specification says on any: for every type of value, and with small
+/// slabs too.
+#[test]
+fn delta_states_agree() {
+    for seed in 0..8 {
+        for max_segments in [None, Some(2), Some(5)] {
+            delta_suspends::<u32>(seed, max_segments);
+            delta_suspends::<u64>(seed, max_segments);
+            delta_suspends::<i32>(seed, max_segments);
+            delta_suspends::<i64>(seed, max_segments);
+            delta_suspends::<usize>(seed, max_segments);
+            delta_suspends::<Option<u32>>(seed, max_segments);
+            delta_suspends::<Option<u64>>(seed, max_segments);
+            delta_suspends::<Option<i32>>(seed, max_segments);
+            delta_suspends::<Option<i64>>(seed, max_segments);
+            delta_suspends::<Option<usize>>(seed, max_segments);
+        }
+    }
+}
+
+/// The runs of some small delta columns, and a state resumed on a column
+/// of another type of value: said out in full.
+#[test]
+fn delta_runs_and_states_told() {
+    let run = |prefix, delta, count| hexane::DeltaRun {
+        prefix,
+        delta,
+        count,
+    };
+    let col = VerifiedDeltaColumn::<u64>::from_values(&[5, 7, 9, 9]);
+    assert_eq!(
+        col.iter().runs().collect::<Vec<_>>(),
+        vec![run(0, Some(5), 1), run(5, Some(2), 2), run(9, Some(0), 1)]
+    );
+    // a run cut by the range: the number before it is the one before
+    // the range
+    assert_eq!(
+        col.iter_range(2, 4).runs().collect::<Vec<_>>(),
+        vec![run(7, Some(2), 1), run(9, Some(0), 1)]
+    );
+    assert_eq!(
+        format!("{:?}", col.iter_range(1, 3).runs()),
+        "VerifiedDeltaRuns(VerifiedDeltaIter { pos: 1, running: 5, items_left: 2 })"
+    );
+    let mut it = col.iter();
+    assert_eq!(it.next(), Some(5));
+    assert_eq!(it.next_run(), Some(run(5, Some(2), 2)));
+    assert_eq!((it.pos(), it.end_pos(), it.len()), (3, 4, 1));
+    assert_eq!(it.next_run(), Some(run(9, Some(0), 1)));
+    assert_eq!(it.next_run(), None);
+    assert_eq!((it.pos(), it.end_pos(), it.len()), (4, 4, 0));
+    // nulls make a run of no difference, and the number before the next
+    // value is the last that was not null
+    let nulls =
+        VerifiedDeltaColumn::<Option<u32>>::from_values(&[None, None, Some(3), None, Some(1)]);
+    assert_eq!(
+        nulls.iter().runs().collect::<Vec<_>>(),
+        vec![
+            run(0, None, 2),
+            run(0, Some(3), 1),
+            run(3, None, 1),
+            run(3, Some(-2), 1)
+        ]
+    );
+    // a state is of no type of value: one of a column of `u32`s is a
+    // place in a column of as many `Option<i64>`s laid out alike
+    let mut a = VerifiedDeltaColumn::<u32>::new();
+    let mut b = VerifiedDeltaColumn::<Option<i64>>::new();
+    let mut c = DeltaColumn::<u32>::new();
+    let mut d = DeltaColumn::<Option<i64>>::new();
+    for (v, w) in [(4, Some(-5)), (6, None), (7, Some(9))] {
+        a.push(v);
+        b.push(w);
+        c.push(v);
+        d.push(w);
+    }
+    let mut it = a.iter();
+    assert_eq!(it.next(), Some(4));
+    let s = it.suspend();
+    let mut it = c.iter();
+    assert_eq!(it.next(), Some(4));
+    let t = it.suspend();
+    let x = s.try_resume(&b).unwrap();
+    assert_eq!(
+        format!("{x:?}"),
+        "VerifiedDeltaIter { pos: 1, running: -5, items_left: 2 }"
+    );
+    // the old API's iterator is the same, where its columns have counted
+    // the same (its count of edits is not one for each)
+    if let Ok(y) = t.try_resume(&d) {
+        assert_eq!(
+            format!("{x:?}"),
+            format!("{y:?}").replace("DeltaIter", "VerifiedDeltaIter")
+        );
+        assert_eq!(y.collect::<Vec<_>>(), vec![None, Some(9)]);
+    }
+    assert_eq!(x.collect::<Vec<_>>(), vec![None, Some(9)]);
+    // and an edit of either column ends it
+    b.push(None);
+    assert!(matches!(s.try_resume(&b), Err(PackError::InvalidResume)));
+    assert!(s.try_resume(&a).is_ok());
+    a.remove(0);
+    assert!(matches!(s.try_resume(&a), Err(PackError::InvalidResume)));
+    // the state of an iterator of no column is a place in a new column,
+    // which has no slab and has counted no edit, in both APIs; and in no
+    // column that has counted one
+    let s0 = hexane::verified::VerifiedDeltaIter::<u32>::default().suspend();
+    let t0 = hexane::DeltaIter::<u32>::default().suspend();
+    let mut none = VerifiedDeltaColumn::<u32>::new();
+    let old_none = DeltaColumn::<u32>::new();
+    {
+        let x = s0.try_resume(&none).unwrap();
+        let y = t0.try_resume(&old_none).unwrap();
+        assert_eq!((x.pos(), x.end_pos(), x.len()), (0, 0, 0));
+        assert_eq!(
+            format!("{x:?}"),
+            format!("{y:?}").replace("DeltaIter", "VerifiedDeltaIter")
+        );
+    }
+    none.push(1);
+    none.clear();
+    assert_eq!(none.slab_count(), 0);
+    assert!(matches!(
+        s0.try_resume(&none),
+        Err(PackError::InvalidResume)
+    ));
+}
