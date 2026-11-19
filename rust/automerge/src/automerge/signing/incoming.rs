@@ -269,7 +269,9 @@ impl Automerge {
         prepared_keys: &mut HashMap<Author<'static>, ed25519::VerifyingAuthor<'static>>,
     ) -> Result<PendingGroup, AutomergeError> {
         let changes = match group.body {
-            LoadedGroupBody::Document => return Err(SigningError::SnapshotNotSupported.into()),
+            // Signed snapshots are expanded into verified canonical groups
+            // before admission; a snapshot reaching this point is bare.
+            LoadedGroupBody::Document(_) => return Err(SigningError::UnauthenticatedChanges.into()),
             LoadedGroupBody::Changes(changes) => changes,
         };
         if changes.is_empty() {

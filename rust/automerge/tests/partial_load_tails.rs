@@ -39,18 +39,29 @@ fn framed(tag: u8, body: &[u8]) -> Vec<u8> {
     bytes
 }
 
-fn with_optional_signatures(tails: Vec<(String, Vec<u8>)>) -> Vec<(String, Vec<u8>)> {
+/// Each tail preceded by an empty signatures chunk attached to the content.
+///
+/// Unsigned loaders reject signed content rather than discarding its proof,
+/// so these variants probe that the rejection holds under both policies.
+fn with_signatures(tails: &[(String, Vec<u8>)]) -> Vec<(String, Vec<u8>)> {
     let signatures = framed(4, &[0]);
     tails
-        .into_iter()
-        .flat_map(|(label, tail)| {
-            let signed_tail = [signatures.as_slice(), tail.as_slice()].concat();
-            [
-                (format!("without signatures, {label}"), tail),
-                (format!("with signatures, {label}"), signed_tail),
-            ]
+        .iter()
+        .map(|(label, tail)| {
+            (
+                format!("with signatures, {label}"),
+                [signatures.as_slice(), tail.as_slice()].concat(),
+            )
         })
         .collect()
+}
+
+fn is_signed_content(error: &automerge::AutomergeError) -> bool {
+    // The storage load error type is crate-private; its message is stable.
+    matches!(error, automerge::AutomergeError::Load(_))
+        && error
+            .to_string()
+            .contains("attached signatures require loading in signing mode")
 }
 
 fn signature_chunk(hash: automerge::ChangeHash) -> Vec<u8> {
@@ -82,8 +93,17 @@ fn unknown_chunks() -> Vec<(String, Vec<u8>)> {
 fn assert_snapshot_recovery(tails: Vec<(String, Vec<u8>)>) {
     let doc = document(1, "snapshot");
     let snapshot = doc.save();
+    for (label, tail) in with_signatures(&tails) {
+        let stream = [snapshot.as_slice(), tail.as_slice()].concat();
+        for policy in [OnPartialLoad::Error, OnPartialLoad::Ignore] {
+            let error =
+                Automerge::load_with_options(&stream, LoadOptions::new().on_partial_load(policy))
+                    .expect_err("unsigned loading must reject signed content");
+            assert!(is_signed_content(&error), "{label}, {policy:?}: {error}");
+        }
+    }
     let mut failures = Vec::new();
-    for (label, tail) in with_optional_signatures(tails) {
+    for (label, tail) in tails {
         let stream = [snapshot.as_slice(), tail.as_slice()].concat();
         assert!(
             Automerge::load_with_options(
@@ -118,8 +138,18 @@ fn assert_snapshot_recovery(tails: Vec<(String, Vec<u8>)>) {
 fn assert_incremental_recovery(tails: Vec<(String, Vec<u8>)>) {
     let source = document(2, "incoming");
     let incoming = source.get_last_local_change().unwrap();
+    for (label, tail) in with_signatures(&tails) {
+        let mut target = document(1, "existing");
+        let heads = target.get_heads();
+        let stream = [incoming.raw_bytes(), tail.as_slice()].concat();
+        let error = target
+            .load_incremental(&stream)
+            .expect_err("unsigned incremental loading must reject signed content");
+        assert!(is_signed_content(&error), "{label}: {error}");
+        assert_eq!(target.get_heads(), heads, "{label}");
+    }
     let mut failures = Vec::new();
-    for (label, tail) in with_optional_signatures(tails) {
+    for (label, tail) in tails {
         // A nonempty target exercises the incremental adapter, not initial load.
         let mut target = document(1, "existing");
         let stream = [incoming.raw_bytes(), tail.as_slice()].concat();
@@ -156,12 +186,11 @@ fn identified_truncated_signatures_invalidate_snapshot_under_both_policies() {
     let doc = document(1, "snapshot");
     let snapshot = doc.save();
     let signatures = signature_chunk(doc.get_heads()[0]);
-    // Pin that the complete fixture is structurally valid before truncating it.
+    // Pin that the complete fixture is structurally valid before truncating
+    // it: the unsigned loader reaches the signed-content policy rather than
+    // a parse error.
     let complete = [snapshot.as_slice(), signatures.as_slice()].concat();
-    assert_eq!(
-        Automerge::load(&complete).unwrap().get_heads(),
-        doc.get_heads()
-    );
+    assert!(is_signed_content(&Automerge::load(&complete).unwrap_err()));
 
     for (label, truncated) in identified_truncations(&signatures) {
         let stream = [snapshot.as_slice(), truncated].concat();
@@ -182,8 +211,10 @@ fn identified_truncated_signatures_withhold_incremental_change() {
     let signatures = signature_chunk(incoming.hash());
     let mut control = document(1, "existing");
     let complete = [incoming.raw_bytes(), signatures.as_slice()].concat();
-    assert_eq!(control.load_incremental(&complete).unwrap(), 1);
-    assert!(control.get_change_by_hash(&incoming.hash()).is_some());
+    assert!(is_signed_content(
+        &control.load_incremental(&complete).unwrap_err()
+    ));
+    assert!(control.get_change_by_hash(&incoming.hash()).is_none());
 
     for (label, truncated) in identified_truncations(&signatures) {
         let mut target = document(1, "existing");

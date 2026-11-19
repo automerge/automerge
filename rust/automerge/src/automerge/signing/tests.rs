@@ -13,6 +13,7 @@ mod batch;
 mod fork;
 mod fragments;
 mod incoming;
+mod persistence;
 mod requests;
 
 fn key(seed: u8) -> SigningKey {

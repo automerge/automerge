@@ -89,7 +89,7 @@ fn public_automerge_and_autocommit_signing_workflow_roundtrips_authenticated_fra
 }
 
 #[test]
-fn public_signing_documents_reject_snapshots_and_unauthenticated_entry_points() {
+fn public_signing_documents_reject_bare_snapshots_and_unauthenticated_entry_points() {
     let (key, author) = key_and_author(33);
     let mut source = Automerge::signing(author)
         .unwrap()
@@ -105,17 +105,33 @@ fn public_signing_documents_reject_snapshots_and_unauthenticated_entry_points() 
         .insert_signature(&hash, &sig)
         .unwrap();
 
-    let snapshot = source.save();
+    // A required-mode save is a signed snapshot that reloads in required mode;
+    // a bare snapshot of the same history is rejected without silent adoption.
+    let signed_snapshot = source.save();
+    let mut from_snapshot = Automerge::load_with_options(&signed_snapshot, signing_load()).unwrap();
+    assert_eq!(from_snapshot.get_heads(), vec![hash]);
+    assert!(from_snapshot.try_signing().unwrap().is_accepted(&hash));
+    assert!(Automerge::load(&signed_snapshot).is_err());
+    let mut unsigned_copy = Automerge::new();
+    unsigned_copy
+        .apply_changes(source.get_changes(&[]))
+        .unwrap();
+    let bare_snapshot = unsigned_copy.save();
     assert!(matches!(
-        Automerge::load_with_options(&snapshot, signing_load()),
-        Err(AutomergeError::Signing(SigningError::SnapshotNotSupported))
+        Automerge::load_with_options(&bare_snapshot, signing_load()),
+        Err(AutomergeError::Signing(
+            SigningError::UnauthenticatedChanges
+        ))
     ));
 
     let mut receiver = Automerge::signing(receiver_author()).unwrap();
     assert!(matches!(
-        receiver.load_incremental(&snapshot),
-        Err(AutomergeError::Signing(SigningError::SnapshotNotSupported))
+        receiver.load_incremental(&bare_snapshot),
+        Err(AutomergeError::Signing(
+            SigningError::UnauthenticatedChanges
+        ))
     ));
+    assert!(receiver.get_heads().is_empty());
     assert!(matches!(
         receiver.apply_changes(source.get_changes(&[])),
         Err(AutomergeError::Signing(

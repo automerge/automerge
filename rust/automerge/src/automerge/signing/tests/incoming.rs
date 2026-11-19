@@ -490,16 +490,28 @@ fn overlaps_forged_orphans_local_boundaries_partial_tails_and_bypasses() {
     .unwrap();
     assert!(recovered.get_heads().is_empty());
 
-    // Entry-point bypasses: snapshots, apply_changes, merge, and sync all reject.
-    let snapshot = source.save();
+    // Entry-point bypasses: bare snapshots, apply_changes, merge, and sync all
+    // reject. The signed snapshot of the same history loads.
+    let signed_snapshot = source.save();
+    let from_snapshot = Automerge::load_with_options(&signed_snapshot, signing_load()).unwrap();
+    assert_eq!(from_snapshot.get_heads(), source.get_heads());
+    let mut unsigned_copy = Automerge::new();
+    unsigned_copy
+        .apply_changes(source.get_changes(&[]))
+        .unwrap();
+    let bare_snapshot = unsigned_copy.save();
     assert!(matches!(
-        Automerge::load_with_options(&snapshot, signing_load()),
-        Err(AutomergeError::Signing(SigningError::SnapshotNotSupported))
+        Automerge::load_with_options(&bare_snapshot, signing_load()),
+        Err(AutomergeError::Signing(
+            SigningError::UnauthenticatedChanges
+        ))
     ));
     let mut target = new_receiver();
     assert!(matches!(
-        target.load_incremental(&snapshot),
-        Err(AutomergeError::Signing(SigningError::SnapshotNotSupported))
+        target.load_incremental(&bare_snapshot),
+        Err(AutomergeError::Signing(
+            SigningError::UnauthenticatedChanges
+        ))
     ));
     assert!(matches!(
         target.apply_changes(source.get_changes(&[])),

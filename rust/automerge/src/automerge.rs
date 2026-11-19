@@ -214,7 +214,10 @@ impl<'a> LoadOptions<'a> {
     /// Load the stream in required signing mode, admitting only canonical
     /// fragments and loose changes with valid attached proofs.
     ///
-    /// Document snapshot chunks are rejected in signing mode.
+    /// Document snapshots are accepted only with their attached signatures
+    /// chunk (as written by a required-mode [`Automerge::save`]); the
+    /// snapshot's history is reconstructed and its canonical groups verified
+    /// before anything is adopted. Bare snapshots are rejected.
     pub fn signing(self) -> Self {
         Self {
             signing: true,
@@ -1415,6 +1418,7 @@ impl Automerge {
             let reader = storage::load::ChunkGroupReader::new(parse::Input::new(data));
             match reader.load_groups() {
                 load::LoadedGroups::Complete(groups) => {
+                    let groups = document.expand_signed_snapshots(groups)?;
                     document.admit_loaded_groups(groups, &mut PatchLog::inactive())?;
                     if document.signing.has_pending_groups()
                         && options.on_partial_load == OnPartialLoad::Error
@@ -1437,13 +1441,13 @@ impl Automerge {
                     // signatures chunk before its type was identifiable. Never treat
                     // bare content before that boundary as authenticated.
                     if kind == load::FailureKind::IncompletePrefix
-                        && loaded.last().is_some_and(|group| {
-                            matches!(group.body, load::LoadedGroupBody::Changes(_))
-                                && group.signatures.is_none()
-                        })
+                        && loaded
+                            .last()
+                            .is_some_and(|group| group.signatures.is_none())
                     {
                         loaded.pop();
                     }
+                    let loaded = document.expand_signed_snapshots(loaded)?;
                     document.admit_loaded_groups(loaded, &mut PatchLog::inactive())?;
                 }
             }
@@ -1507,6 +1511,7 @@ impl Automerge {
                     load::LoadedGroups::Complete(groups) => groups,
                     load::LoadedGroups::Partial { error, .. } => return Err(error.into()),
                 };
+            let groups = self.expand_signed_snapshots(groups)?;
             let start = self.ops.len();
             self.admit_loaded_groups(groups, patch_log)?;
             return Ok(self.ops.len() - start);
@@ -1542,6 +1547,12 @@ impl Automerge {
                 load::MarkOrderValidation::Validate,
             ) {
             load::LoadedChanges::Complete(c) => c,
+            // Signed content is a deliberate rejection, not a damaged tail to
+            // recover from: nothing in the delivery is applied.
+            load::LoadedChanges::Partial {
+                error: error @ load::Error::SignedContent,
+                ..
+            } => return Err(error.into()),
             load::LoadedChanges::Partial { error, loaded, .. } => {
                 tracing::warn!(successful_chunks=loaded.len(), err=?error, "partial load");
                 loaded
@@ -1687,8 +1698,16 @@ impl Automerge {
     }
 
     /// Save the entirety of this document in a compact form.
+    ///
+    /// In required signing mode only *published* history is saved, as a
+    /// snapshot followed by the signatures chunk proving it; local drafts and
+    /// pending incoming groups stay in the live document. See
+    /// [`Self::save`].
     pub fn save_with_options(&self, options: SaveOptions) -> Vec<u8> {
         self.assert_no_unused_actors(true);
+        if self.signing.is_required() {
+            return self.save_published(options.compress());
+        }
 
         let doc = Document::new(&self.ops, &self.change_graph, options.compress());
         let mut bytes = doc.into_bytes();
@@ -1708,19 +1727,45 @@ impl Automerge {
 
     /// Save the entirety of this document in a compact form.
     ///
-    /// Note that document snapshots do not carry detached proof chunks and are
-    /// rejected when loading in required signing mode; use
-    /// [`Automerge::fragments`] and [`Automerge::bundle_fragments`] to export
-    /// proof-bearing fragments.
+    /// Unsigned documents produce a plain snapshot. Required-mode documents
+    /// produce a snapshot of the published projection plus one trailing
+    /// signatures chunk carrying the complete proof of a published cover
+    /// (an empty signatures chunk for an empty document). Unpublished drafts
+    /// and pending groups are not saved and remain in the live document; use
+    /// [`Self::has_unpublished_changes`] before shutdown. Neither the signing
+    /// mode nor the accepted clock is serialized: load with
+    /// [`LoadOptions::signing`] and a local author, and the loader re-derives
+    /// publication from the proof. Unsigned loaders reject signed bytes.
     pub fn save(&self) -> Vec<u8> {
         self.save_with_options(SaveOptions::default())
     }
 
     /// Save the document and attempt to load it before returning - slow!
+    ///
+    /// In required mode this verifies the published projection with a
+    /// required-mode load, not an unsigned one.
     pub fn save_and_verify(&self) -> Result<Vec<u8>, AutomergeError> {
         let bytes = self.save();
-        Self::load(&bytes)?;
+        self.verify_saved(&bytes)?;
         Ok(bytes)
+    }
+
+    pub(crate) fn verify_saved(&self, bytes: &[u8]) -> Result<(), AutomergeError> {
+        match self.get_author() {
+            Some(author) if self.signing.is_required() => {
+                Self::load_with_options(
+                    bytes,
+                    LoadOptions::new()
+                        .signing()
+                        .author(author.clone())
+                        .text_encoding(self.text_encoding()),
+                )?;
+            }
+            _ => {
+                Self::load(bytes)?;
+            }
+        }
+        Ok(())
     }
 
     /// Save this document, but don't run it through `DEFLATE` afterwards
@@ -1737,11 +1782,45 @@ impl Automerge {
     /// changes. This is useful if you know you have only made a small change since the last
     /// [`Self::save()`] and you want to immediately send it somewhere (e.g. you've inserted a
     /// single character in a text object).
+    ///
+    /// In required signing mode the output contains only *published* history,
+    /// as complete canonical groups (a change or bundle chunk followed by its
+    /// signatures chunk). A group is emitted whole whenever any of its members
+    /// lies outside the causal past of `heads`, so already-known members and
+    /// proofs may be resent; receivers ignore duplicates. Unpublished drafts
+    /// are never emitted.
     pub fn save_after(&self, heads: &[ChangeHash]) -> Vec<u8> {
+        if self.signing.is_required() {
+            let mut groups = self.published_groups(heads);
+            // Oldest first so a receiver can apply in one pass.
+            groups.reverse();
+            return self.encode_published_groups(groups);
+        }
         let changes = self.get_changes(heads);
         let mut bytes = vec![];
         for c in changes {
             bytes.extend(c.raw_bytes());
+        }
+        bytes
+    }
+
+    fn encode_published_groups(
+        &self,
+        groups: Vec<signing::persistence::PublishedGroup>,
+    ) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        for mut group in groups {
+            if group.changes.len() == 1 && group.fragment.head.fragment_level() == 0 {
+                bytes.extend_from_slice(&group.changes[0].bytes());
+            } else {
+                let bundle = self
+                    .bundle(group.fragment.members.iter().copied())
+                    .expect("published members are applied");
+                bytes.extend_from_slice(bundle.bytes());
+            }
+            bytes.extend_from_slice(
+                storage::signatures::SignaturesChunk::encode(group.signatures).bytes(),
+            );
         }
         bytes
     }

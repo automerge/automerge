@@ -51,6 +51,8 @@ pub enum Error {
     OrphanSignatures,
     #[error("a change, bundle, or document must only have one attached signatures chunk")]
     DuplicateSignatures,
+    #[error("attached signatures require loading in signing mode")]
+    SignedContent,
 }
 
 pub(crate) enum LoadedChanges<'a> {
@@ -69,9 +71,12 @@ pub(crate) enum LoadedChanges<'a> {
 }
 
 /// Content of a decoded chunk group prior to authentication or staging.
+///
+/// A snapshot keeps its storage representation so that required-mode loading
+/// can reconstruct and validate its history before adopting it.
 #[derive(Clone, Debug)]
 pub(crate) enum LoadedGroupBody {
-    Document,
+    Document(Box<super::Document<'static>>),
     Changes(Vec<Change>),
 }
 
@@ -94,7 +99,7 @@ impl LoadedGroup {
         match &self.body {
             LoadedGroupBody::Changes(changes) => changes,
             // Snapshot groups are only constructed by the internal stream loader.
-            LoadedGroupBody::Document => &[],
+            LoadedGroupBody::Document(_) => &[],
         }
     }
 }
@@ -210,7 +215,7 @@ mod tests {
     }
 
     #[test]
-    fn initial_document_with_signatures_preserves_snapshot_and_following_changes() {
+    fn unsigned_load_rejects_a_signed_snapshot_instead_of_discarding_its_proof() {
         let mut doc = Automerge::new().with_actor(ActorId::from(vec![1]));
         let mut tx = doc.transaction();
         tx.put(ROOT, "snapshot", 1).unwrap();
@@ -232,21 +237,30 @@ mod tests {
             later.raw_bytes(),
         ]
         .concat();
-        let loaded = Automerge::load(&stream).expect("snapshot and paired signatures load");
+        for policy in [OnPartialLoad::Error, OnPartialLoad::Ignore] {
+            let error =
+                Automerge::load_with_options(&stream, LoadOptions::new().on_partial_load(policy))
+                    .unwrap_err();
+            assert!(
+                matches!(error, AutomergeError::Load(Error::SignedContent)),
+                "unexpected error: {error:?}"
+            );
+        }
+        let mut incremental = Automerge::new();
+        incremental.apply_changes([change(3)]).unwrap();
+        let before = incremental.get_heads();
+        assert!(matches!(
+            incremental.load_incremental(&stream),
+            Err(AutomergeError::Load(Error::SignedContent))
+        ));
+        assert_eq!(incremental.get_heads(), before);
+        // Plain unsigned bytes still load as before.
+        let loaded = Automerge::load(&[snapshot.as_slice(), later.raw_bytes()].concat()).unwrap();
         assert_eq!(loaded.get_heads(), vec![head]);
-        assert_eq!(loaded.get_changes(&[]).len(), 2);
-        assert_eq!(
-            loaded.get(ROOT, "snapshot").unwrap().unwrap().0.as_i64(),
-            Some(1)
-        );
-        assert_eq!(
-            loaded.get(ROOT, "later").unwrap().unwrap().0.as_i64(),
-            Some(2)
-        );
     }
 
     #[test]
-    fn bundle_with_signatures_loads_through_initial_and_incremental_paths() {
+    fn signed_bundle_and_compressed_change_are_decoded_as_groups_but_not_loaded_unsigned() {
         let first = change(1);
         let second = change(2);
         let mut doc = Automerge::new();
@@ -258,34 +272,30 @@ mod tests {
             Chunk::Bundle(_)
         ));
         let stream = [bytes, framed(ChunkType::Signatures, &[0]).as_slice()].concat();
-        let LoadedChanges::Complete(changes) = load_stream(&stream) else {
-            panic!("bundle and signatures must load");
+        // Pure codec decoding keeps the group and its proof.
+        let LoadedGroups::Complete(groups) =
+            ChunkGroupReader::new(Input::new(&stream)).load_groups()
+        else {
+            panic!("bundle and signatures must decode");
         };
-        let mut hashes: Vec<_> = changes.iter().map(Change::hash).collect();
+        assert_eq!(groups.len(), 1);
+        assert!(groups[0].signatures.is_some());
+        let mut hashes: Vec<_> = groups[0].changes().iter().map(Change::hash).collect();
         hashes.sort();
         let mut expected = vec![first.hash(), second.hash()];
         expected.sort();
         assert_eq!(hashes, expected);
-        assert_eq!(Automerge::load(&stream).unwrap().get_changes(&[]).len(), 2);
+        // Unsigned loading refuses to strip the proof.
+        let LoadedChanges::Partial { loaded, error, .. } = load_stream(&stream) else {
+            panic!("signed group must not load unsigned");
+        };
+        assert!(loaded.is_empty());
+        assert!(matches!(error, Error::SignedContent));
+        assert!(matches!(
+            Automerge::load(&stream),
+            Err(AutomergeError::Load(Error::SignedContent))
+        ));
 
-        let existing = change(3);
-        let mut target = Automerge::new();
-        target.apply_changes([existing.clone()]).unwrap();
-        target.load_incremental(&stream).unwrap();
-        for change in [first, second, existing] {
-            assert_eq!(
-                target
-                    .get_change_by_hash(&change.hash())
-                    .unwrap()
-                    .raw_bytes(),
-                change.raw_bytes()
-            );
-        }
-    }
-
-    #[test]
-    fn compressed_change_with_signatures_preserves_change_bytes() {
-        let mut doc = Automerge::new();
         let mut tx = doc.transaction();
         tx.put(ROOT, "text", "compressible".repeat(1000)).unwrap();
         let hash = tx.commit().0.unwrap();
@@ -300,46 +310,51 @@ mod tests {
             framed(ChunkType::Signatures, &[0]).as_slice(),
         ]
         .concat();
-        let LoadedChanges::Complete(mut changes) = load_stream(&stream) else {
-            panic!("compressed change and signatures must load");
+        let LoadedGroups::Complete(groups) =
+            ChunkGroupReader::new(Input::new(&stream)).load_groups()
+        else {
+            panic!("compressed change and signatures must decode");
         };
-        assert_eq!(changes.len(), 1);
-        assert_eq!(changes[0].raw_bytes(), change.raw_bytes());
-        assert_eq!(changes[0].bytes().as_ref(), compressed.as_slice());
-        let loaded = Automerge::load(&stream).unwrap();
-        assert_eq!(loaded.get_heads(), vec![hash]);
-        assert_eq!(
-            loaded.get_change_by_hash(&hash).unwrap().raw_bytes(),
-            change.raw_bytes()
-        );
+        assert_eq!(groups[0].changes()[0].raw_bytes(), change.raw_bytes());
+        assert!(matches!(
+            Automerge::load(&stream),
+            Err(AutomergeError::Load(Error::SignedContent))
+        ));
     }
 
     #[test]
     fn invalid_magic_tail_respects_partial_load_policy_after_snapshot() {
         let mut doc = Automerge::new();
         doc.apply_changes([change(1)]).unwrap();
-        for signed in [false, true] {
-            let mut stream = doc.save();
-            if signed {
-                stream.extend(framed(ChunkType::Signatures, &[0]));
-            }
-            stream.extend_from_slice(&[1, 2, 3, 4]);
-            let error = Automerge::load_with_options(
-                &stream,
-                LoadOptions::new().on_partial_load(OnPartialLoad::Error),
-            )
-            .unwrap_err();
-            assert!(matches!(error, AutomergeError::Load(Error::Parse(_))));
-            let recovered = Automerge::load_with_options(
-                &stream,
-                LoadOptions::new().on_partial_load(OnPartialLoad::Ignore),
-            )
-            .expect("ignore policy recovers complete snapshot");
-            assert_eq!(recovered.get_heads(), doc.get_heads());
-            assert_eq!(
-                recovered.get(ROOT, "a").unwrap().unwrap().0.as_i64(),
-                Some(1)
-            );
+        let mut stream = doc.save();
+        stream.extend_from_slice(&[1, 2, 3, 4]);
+        let error = Automerge::load_with_options(
+            &stream,
+            LoadOptions::new().on_partial_load(OnPartialLoad::Error),
+        )
+        .unwrap_err();
+        assert!(matches!(error, AutomergeError::Load(Error::Parse(_))));
+        let recovered = Automerge::load_with_options(
+            &stream,
+            LoadOptions::new().on_partial_load(OnPartialLoad::Ignore),
+        )
+        .expect("ignore policy recovers complete snapshot");
+        assert_eq!(recovered.get_heads(), doc.get_heads());
+        assert_eq!(
+            recovered.get(ROOT, "a").unwrap().unwrap().0.as_i64(),
+            Some(1)
+        );
+
+        // A signed snapshot with an invalid tail is rejected under both
+        // policies by the unsigned loader: the proof is not stripped.
+        let mut signed = doc.save();
+        signed.extend(framed(ChunkType::Signatures, &[0]));
+        signed.extend_from_slice(&[1, 2, 3, 4]);
+        for policy in [OnPartialLoad::Error, OnPartialLoad::Ignore] {
+            assert!(matches!(
+                Automerge::load_with_options(&signed, LoadOptions::new().on_partial_load(policy)),
+                Err(AutomergeError::Load(Error::SignedContent))
+            ));
         }
     }
 
@@ -360,15 +375,24 @@ mod tests {
     }
 
     #[test]
-    fn load_changes_accepts_a_change_with_trailing_signatures() {
-        let change = change(1);
+    fn load_changes_rejects_a_change_with_trailing_signatures_at_its_start() {
+        let first = change(1);
+        let signed = change(2);
         let signatures = framed(ChunkType::Signatures, &[0]);
-        let stream = [change.raw_bytes(), signatures.as_slice()].concat();
-        let LoadedChanges::Complete(changes) = load_stream(&stream) else {
-            panic!("expected complete paired group");
+        let signed_group = [signed.raw_bytes(), signatures.as_slice()].concat();
+        let stream = [first.raw_bytes(), signed_group.as_slice()].concat();
+        let LoadedChanges::Partial {
+            loaded,
+            remaining,
+            error,
+        } = load_stream(&stream)
+        else {
+            panic!("signed group must not load unsigned");
         };
-        assert_eq!(changes.len(), 1);
-        assert_eq!(changes[0].raw_bytes(), change.raw_bytes());
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].raw_bytes(), first.raw_bytes());
+        assert_eq!(remaining.unconsumed_bytes(), signed_group.as_slice());
+        assert!(matches!(error, Error::SignedContent));
     }
 
     #[test]
@@ -458,7 +482,7 @@ mod tests {
     }
 
     #[test]
-    fn trailing_signatures_after_change_load_successfully() {
+    fn trailing_signatures_after_change_are_rejected_by_unsigned_initial_load() {
         let mut doc = Automerge::new();
         let mut tx = doc.transaction();
         tx.put(ROOT, "a", 1).unwrap();
@@ -470,14 +494,13 @@ mod tests {
         Header::new(ChunkType::Signatures, &body).write(&mut bytes);
         bytes.extend_from_slice(&body);
 
-        let loaded = Automerge::load(&bytes).expect("paired signatures must load");
+        assert!(matches!(
+            Automerge::load(&bytes),
+            Err(AutomergeError::Load(Error::SignedContent))
+        ));
+        // The same change without its proof chunk loads normally.
+        let loaded = Automerge::load(change.raw_bytes()).unwrap();
         assert_eq!(loaded.get_heads(), vec![hash]);
-        assert_eq!(loaded.get_changes(&[]).len(), 1);
-        assert_eq!(loaded.get(ROOT, "a").unwrap().unwrap().0.as_i64(), Some(1));
-        assert_eq!(
-            loaded.get_change_by_hash(&hash).unwrap().raw_bytes(),
-            change.raw_bytes()
-        );
     }
 
     #[test]

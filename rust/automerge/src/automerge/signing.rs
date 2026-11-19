@@ -28,6 +28,7 @@ use super::Automerge;
 
 mod batch;
 mod incoming;
+pub(crate) mod persistence;
 mod readiness;
 mod requests;
 
@@ -361,7 +362,7 @@ impl RequiredSigning {
     }
 }
 
-fn signature_for<'a>(
+pub(super) fn signature_for<'a>(
     graph: &ChangeGraph,
     authors: &Authors,
     signatures: &'a SignatureStore,

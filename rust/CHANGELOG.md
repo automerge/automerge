@@ -31,6 +31,13 @@
   immutable; `fork_with_author` creates a full copy for another author with a
   fresh actor ID (in required signing mode only once every local draft is
   published).
+* Required signing mode persists published history: `save` writes a snapshot
+  of the published projection followed by a signatures chunk proving it, and
+  `save_after`/`save_incremental` emit complete canonical groups with their
+  proofs. Drafts and pending groups stay in the live document, and the
+  `AutoCommit` incremental cursor tracks what was actually emitted. Loading
+  with `LoadOptions::signing` re-derives publication from the proof; unsigned
+  loaders reject signed bytes instead of discarding their signatures.
 * Author assignments are stored in the extra bytes of an actor's first change
   and preserved through merging and saving/loading. `Change::author` reads an
   assignment from an individual change; subsequent changes from the same actor

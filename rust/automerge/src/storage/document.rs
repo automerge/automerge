@@ -300,6 +300,21 @@ impl<'a> Document<'a> {
         self.header.checksum_valid()
     }
 
+    /// Detach the parsed snapshot from its input buffer.
+    pub(crate) fn into_owned(self) -> Document<'static> {
+        Document {
+            bytes: Cow::Owned(self.bytes.into_owned()),
+            compressed_bytes: self.compressed_bytes.map(|c| Cow::Owned(c.into_owned())),
+            header: self.header,
+            actors: self.actors,
+            heads: self.heads,
+            op_metadata: self.op_metadata,
+            op_bytes: self.op_bytes,
+            change_metadata: self.change_metadata,
+            change_bytes: self.change_bytes,
+        }
+    }
+
     /// The document's actor list, in the order it was stored.
     pub(crate) fn actors(&self) -> &ActorList {
         &self.actors

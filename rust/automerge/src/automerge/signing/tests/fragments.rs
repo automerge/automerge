@@ -447,7 +447,10 @@ fn bundle_fragments_validates_descriptors_and_preserves_unsigned_encoding() {
     assert_eq!(doc.bundle_fragments([reordered]).len(), 1);
 
     // Unsigned documents continue to emit bare content chunks without proofs.
-    let unsigned = Automerge::load(&doc.save()).unwrap();
+    // (A signed save is rejected by the unsigned loader, so copy the history.)
+    assert!(Automerge::load(&doc.save()).is_err());
+    let mut unsigned = Automerge::new();
+    unsigned.apply_changes(doc.get_changes(&[])).unwrap();
     for bytes in unsigned.bundle_fragments(unsigned.fragments(..)) {
         let (remaining, content) = Chunk::parse(Input::new(&bytes)).unwrap();
         assert!(content.checksum_valid());

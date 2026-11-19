@@ -677,20 +677,26 @@ impl AutoCommit {
         self.save_with_options(SaveOptions::default())
     }
 
+    /// See [`Automerge::save_with_options`]. In required signing mode the
+    /// incremental cursor advances to the published heads actually emitted,
+    /// not to the document heads.
     pub fn save_with_options(&mut self, options: SaveOptions) -> Vec<u8> {
         self.ensure_transaction_closed();
         self.doc.remove_unused_actors(true);
         let bytes = self.doc.save_with_options(options);
         if !bytes.is_empty() {
-            self.save_cursor = self.doc.get_heads()
+            self.save_cursor = self.doc.published_heads()
         }
         bytes
     }
 
     /// Save the document and attempt to load it before returning - slow!
+    ///
+    /// See [`Automerge::save_and_verify`]: required-mode output is verified
+    /// by a required-mode load of the published projection.
     pub fn save_and_verify(&mut self) -> Result<Vec<u8>, AutomergeError> {
         let bytes = self.save();
-        Self::load(&bytes)?;
+        self.doc.verify_saved(&bytes)?;
         Ok(bytes)
     }
 
@@ -733,11 +739,16 @@ impl AutoCommit {
     /// changes. This is useful if you know you have only made a small change since the last [`Self::save()`]
     /// and you want to immediately send it somewhere (e.g. you've inserted a single character in a
     /// text object).
+    ///
+    /// In required signing mode only published history is emitted (see
+    /// [`Automerge::save_after`]) and the cursor records the published heads
+    /// that were actually emitted, so drafts published later are still
+    /// included by a subsequent call.
     pub fn save_incremental(&mut self) -> Vec<u8> {
         self.ensure_transaction_closed();
         let bytes = self.doc.save_after(&self.save_cursor);
         if !bytes.is_empty() {
-            self.save_cursor = self.doc.get_heads()
+            self.save_cursor = self.doc.published_heads()
         }
         bytes
     }
