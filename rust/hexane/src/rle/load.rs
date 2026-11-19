@@ -16,7 +16,7 @@ pub(crate) fn rle_validate_encoding<T: RleValue, C: Codec>(
     slab: &[u8],
 ) -> Result<SlabInfo<RleTail>, PackError> {
     let mut decoder = RleDecoder::<T, C>::new(slab);
-    let mut len = 0;
+    let mut len = 0usize;
     let mut segments = 0;
     let mut tail = RleTail::default();
     let mut prev: Option<RleSegment<'_, T>> = None;
@@ -30,29 +30,23 @@ pub(crate) fn rle_validate_encoding<T: RleValue, C: Codec>(
         match segment {
             RleSegment::LitHead { bytes, .. } => {
                 prev_lit = None;
-                tail.bytes = bytes as u32;
+                tail.bytes = u32::try_from(bytes).map_err(|_| PackError::BadFormat)?;
             }
             RleSegment::Lit { value, bytes } => {
                 prev_lit = Some(value);
                 prev = Some(segment);
-                len += 1;
+                len = len.checked_add(1).ok_or(PackError::BadFormat)?;
                 segments += 1;
-                tail.lit_tail = NonZeroU32::new(bytes as u32);
-                tail.bytes += bytes as u32;
+                let bytes = u32::try_from(bytes).map_err(|_| PackError::BadFormat)?;
+                tail.lit_tail = NonZeroU32::new(bytes);
+                tail.bytes = tail.bytes.checked_add(bytes).ok_or(PackError::BadFormat)?;
             }
-            RleSegment::Run { count, bytes, .. } => {
+            RleSegment::Run { count, bytes, .. } | RleSegment::Null { count, bytes } => {
                 prev = Some(segment);
-                len += count;
+                len = len.checked_add(count).ok_or(PackError::BadFormat)?;
                 segments += 1;
                 tail.lit_tail = None;
-                tail.bytes = bytes as u32;
-            }
-            RleSegment::Null { count, bytes } => {
-                prev = Some(segment);
-                len += count;
-                segments += 1;
-                tail.lit_tail = None;
-                tail.bytes = bytes as u32;
+                tail.bytes = u32::try_from(bytes).map_err(|_| PackError::BadFormat)?;
             }
         }
     }
@@ -111,28 +105,34 @@ impl CutState {
     /// `#[inline(always)]` so a caller that discards the run compiles down
     /// to the bare bookkeeping. Callers run `validate_after` (which
     /// rejects nulls in non-nullable columns, among other things)
-    /// *before* tracking — keeping this infallible lets the discard
-    /// path fold completely.
+    /// *before* tracking. Check lengths before yielding a run: a consumer
+    /// cannot protect this bookkeeping by checking the returned count.
     #[inline(always)]
     fn track<'a, T: RleValue>(
         &mut self,
         segment: RleSegment<'a, T>,
-    ) -> Option<crate::Run<T::Get<'a>>> {
-        match segment {
+    ) -> Result<Option<crate::Run<T::Get<'a>>>, PackError> {
+        Ok(match segment {
             RleSegment::LitHead { count, bytes } => {
                 if self.last_lit_count < self.lit_count {
                     self.pending_header = self.lit_count;
                 }
-                self.slab.tail.bytes = bytes as u32;
+                self.slab.tail.bytes = u32::try_from(bytes).map_err(|_| PackError::BadFormat)?;
                 self.last_lit_count = count;
                 self.lit_count = 0;
                 None
             }
             RleSegment::Lit { value, bytes } => {
-                self.slab.len += 1;
+                self.slab.len = self.slab.len.checked_add(1).ok_or(PackError::BadFormat)?;
                 self.slab.segments += 1;
-                self.slab.tail.lit_tail = NonZeroU32::new(bytes as u32);
-                self.slab.tail.bytes += bytes as u32;
+                let bytes = u32::try_from(bytes).map_err(|_| PackError::BadFormat)?;
+                self.slab.tail.lit_tail = NonZeroU32::new(bytes);
+                self.slab.tail.bytes = self
+                    .slab
+                    .tail
+                    .bytes
+                    .checked_add(bytes)
+                    .ok_or(PackError::BadFormat)?;
                 self.lit_count += 1;
                 Some(crate::Run { count: 1, value })
             }
@@ -141,39 +141,48 @@ impl CutState {
                 value,
                 bytes,
             } => {
-                self.slab.len += count;
+                self.slab.len = self
+                    .slab
+                    .len
+                    .checked_add(count)
+                    .ok_or(PackError::BadFormat)?;
                 self.slab.segments += 1;
                 self.slab.tail.lit_tail = None;
-                self.slab.tail.bytes = bytes as u32;
+                self.slab.tail.bytes = u32::try_from(bytes).map_err(|_| PackError::BadFormat)?;
                 (count > 0).then_some(crate::Run { count, value })
             }
             RleSegment::Null { count, bytes } => {
-                self.slab.len += count;
+                self.slab.len = self
+                    .slab
+                    .len
+                    .checked_add(count)
+                    .ok_or(PackError::BadFormat)?;
                 self.slab.segments += 1;
                 self.slab.tail.lit_tail = None;
-                self.slab.tail.bytes = bytes as u32;
+                self.slab.tail.bytes = u32::try_from(bytes).map_err(|_| PackError::BadFormat)?;
                 (count > 0).then_some(crate::Run {
                     count,
                     value: T::get_null(),
                 })
             }
-        }
+        })
     }
 
     /// Cut a slab at byte position `pos` (the block loader's split,
     /// byte-for-byte).
-    fn cut_slab<C: Codec>(&mut self, input: &[u8], pos: usize) {
+    fn cut_slab<C: Codec>(&mut self, input: &[u8], pos: usize) -> Result<(), PackError> {
         self.slab.copy_from::<C>(
             &input[self.start..pos],
             self.pending_header,
             self.lit_count,
             self.last_lit_count,
-        );
+        )?;
         self.slabs.push(std::mem::take(&mut self.slab));
         self.pending_header = 0;
         self.last_lit_count = 0;
         self.lit_count = 0;
         self.start = pos;
+        Ok(())
     }
 }
 
@@ -216,9 +225,9 @@ impl<'a, T: RleValue, C: Codec> RleLoadIter<'a, T, C> {
                 }
                 _ => self.prev = Some(segment),
             }
-            let out = self.cut.track::<T>(segment);
+            let out = self.cut.track::<T>(segment)?;
             if self.cut.slab.segments == self.target_segments {
-                self.cut.cut_slab::<C>(self.input, self.decoder.pos());
+                self.cut.cut_slab::<C>(self.input, self.decoder.pos())?;
             }
             if let Some(run) = out {
                 return Ok(Some(run));
@@ -251,13 +260,13 @@ impl<'a, T: RleValue, C: Codec> RleLoadIter<'a, T, C> {
                 }
                 _ => prev = Some(segment),
             }
-            let _ = cut.track::<T>(segment);
+            let _ = cut.track::<T>(segment)?;
             if cut.slab.segments == target_segments {
-                cut.cut_slab::<C>(input, decoder.pos());
+                cut.cut_slab::<C>(input, decoder.pos())?;
             }
         }
         if cut.slab.segments > 0 {
-            cut.cut_slab::<C>(input, decoder.pos());
+            cut.cut_slab::<C>(input, decoder.pos())?;
         }
         Ok(cut.slabs)
     }
@@ -294,17 +303,23 @@ impl Slab {
         pending_header: usize,
         lit_count: usize,
         last_lit_count: usize,
-    ) {
+    ) -> Result<(), PackError> {
         if pending_header > 0 {
             // we split a lit run but it terminated
-            let hdr = C::encode_signed(-(pending_header as i64));
+            let count = i64::try_from(pending_header).map_err(|_| PackError::BadFormat)?;
+            let hdr = C::encode_signed(-count);
             self.data.extend_from_slice(hdr.as_bytes());
         } else if lit_count > last_lit_count && last_lit_count == 0 {
             // we split a lit run and its ongoing
-            let hdr = C::encode_signed(-(lit_count as i64));
+            let count = i64::try_from(lit_count).map_err(|_| PackError::BadFormat)?;
+            let hdr = C::encode_signed(-count);
             if self.tail.lit_tail.is_some() {
                 // header and tail
-                self.tail.bytes += hdr.len() as u32;
+                self.tail.bytes = self
+                    .tail
+                    .bytes
+                    .checked_add(hdr.len() as u32)
+                    .ok_or(PackError::BadFormat)?;
             }
             self.data.extend_from_slice(hdr.as_bytes());
         }
@@ -312,8 +327,241 @@ impl Slab {
         if lit_count < last_lit_count {
             let header_pos = self.data.len() - self.tail.bytes as usize;
             let delta = C::rewrite_lit_header(&mut self.data, header_pos, lit_count);
-            self.tail.bytes = (self.tail.bytes as i64 + delta) as u32;
+            self.tail.bytes =
+                u32::try_from(self.tail.bytes as i64 + delta).map_err(|_| PackError::BadFormat)?;
         }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod arithmetic_tests {
+    use super::*;
+
+    // Keep all runs in one slab so its decoded length must be checked.
+    const MAX_SEGMENTS: usize = 16;
+
+    fn repeat_overflow_input() -> (Vec<u8>, usize) {
+        let count = usize::MAX / 2;
+        let mut data = Vec::new();
+        // Distinct values make these canonical, non-mergeable repeat runs.
+        // Each count fits both usize and i64, but their sum is usize::MAX + 1.
+        for (count, value) in [(count, 1), (count, 2), (2, 3)] {
+            data.extend(Leb128::encode_signed(count as i64));
+            data.extend(Leb128::encode_unsigned(value));
+        }
+        (data, count)
+    }
+
+    fn null_overflow_input() -> Vec<u8> {
+        let mut data = Vec::new();
+        data.extend(Leb128::encode_signed(2));
+        data.extend(Leb128::encode_unsigned(7));
+        // A null run after the repeat is canonical but overflows the slab length.
+        data.push(0);
+        data.extend(Leb128::encode_unsigned(usize::MAX as u64));
+        data
+    }
+
+    fn literal_overflow_input() -> Vec<u8> {
+        let mut data = vec![0];
+        data.extend(Leb128::encode_unsigned(usize::MAX as u64));
+        data.extend(Leb128::encode_signed(-1));
+        data.extend(Leb128::encode_unsigned(7));
+        data
+    }
+
+    #[test]
+    fn try_next_run_rejects_literal_length_overflow() {
+        let data = literal_overflow_input();
+        let mut loader = RleLoadIter::<Option<u64>>::new(&data, MAX_SEGMENTS);
+        let run = loader.try_next_run().unwrap().unwrap();
+        assert_eq!((run.count, run.value), (usize::MAX, None));
+        assert!(loader.try_next_run().is_err());
+    }
+
+    #[test]
+    fn finalize_rejects_literal_length_overflow_after_partial_pull() {
+        let data = literal_overflow_input();
+        let mut loader = RleLoadIter::<Option<u64>>::new(&data, MAX_SEGMENTS);
+        loader.try_next_run().unwrap().unwrap();
+        assert!(loader.finalize().is_err());
+    }
+
+    #[test]
+    fn validate_rejects_repeat_length_overflow() {
+        let (data, _) = repeat_overflow_input();
+        assert!(rle_validate_encoding::<u64, Leb128>(&data).is_err());
+    }
+
+    #[test]
+    fn validate_rejects_null_length_overflow() {
+        assert!(rle_validate_encoding::<Option<u64>, Leb128>(&null_overflow_input()).is_err());
+    }
+
+    #[test]
+    fn validate_rejects_literal_length_overflow() {
+        assert!(rle_validate_encoding::<Option<u64>, Leb128>(&literal_overflow_input()).is_err());
+    }
+
+    #[test]
+    fn column_rejects_cross_slab_length_overflow() {
+        let (data, _) = repeat_overflow_input();
+        // Each run fits in its own slab; only the column's total overflows.
+        let opts = crate::LoadOpts::new().with_max_segments(2);
+        assert!(crate::Column::<u64>::load_with(&data, opts).is_err());
+    }
+
+    #[test]
+    fn column_rejects_cross_slab_length_overflow_after_partial_pull() {
+        let (data, _) = repeat_overflow_input();
+        let opts = crate::LoadOpts::new().with_max_segments(2);
+        let mut loader = crate::Column::<u64>::load_iter(&data, opts);
+        loader.try_next_run().unwrap().unwrap();
+        assert!(loader.finalize().is_err());
+    }
+
+    #[test]
+    fn rejects_literal_tail_byte_overflow() {
+        // Synthetic segments exercise the metadata limit without allocating 4 GiB.
+        let mut cut = CutState::default();
+        cut.track::<u64>(RleSegment::LitHead { count: 2, bytes: 1 })
+            .unwrap();
+        cut.track::<u64>(RleSegment::Lit {
+            value: 7,
+            bytes: u32::MAX as usize - 1,
+        })
+        .unwrap();
+        assert_eq!(cut.slab.tail.bytes, u32::MAX);
+        assert!(cut
+            .track::<u64>(RleSegment::Lit { value: 8, bytes: 1 })
+            .is_err());
+    }
+
+    #[cfg(target_pointer_width = "64")]
+    #[test]
+    fn rejects_segment_bytes_exceeding_tail_capacity() {
+        let bytes = u32::MAX as usize + 1;
+        for segment in [
+            RleSegment::LitHead { count: 1, bytes },
+            RleSegment::Lit {
+                value: Some(7),
+                bytes,
+            },
+            RleSegment::Run {
+                count: 2,
+                value: Some(7),
+                bytes,
+            },
+            RleSegment::Null { count: 2, bytes },
+        ] {
+            assert!(CutState::default().track::<Option<u64>>(segment).is_err());
+        }
+    }
+
+    #[test]
+    fn rejects_reconstructed_literal_header_byte_overflow() {
+        let mut slab = Slab::default();
+        slab.tail.bytes = u32::MAX;
+        slab.tail.lit_tail = NonZeroU32::new(1);
+        assert!(slab.copy_from::<Leb128>(&[], 0, 1, 0).is_err());
+    }
+
+    #[test]
+    fn accepts_maximum_representable_repeat_count() {
+        let count = usize::try_from(i64::MAX).unwrap_or(usize::MAX);
+        let mut data = Leb128::encode_signed(count as i64).as_bytes().to_vec();
+        data.extend(Leb128::encode_unsigned(7));
+        assert_eq!(
+            rle_validate_encoding::<u64, Leb128>(&data).unwrap().len,
+            count
+        );
+        let mut loader = RleLoadIter::<u64>::new(&data, MAX_SEGMENTS);
+        let run = loader.try_next_run().unwrap().unwrap();
+        assert_eq!((run.count, run.value), (count, 7));
+        assert!(loader.try_next_run().unwrap().is_none());
+        assert_eq!(loader.finalize().unwrap()[0].len, count);
+    }
+
+    #[test]
+    fn accepts_maximum_column_length() {
+        // Both a single null run and a mixed, possibly split column may
+        // reach usize::MAX exactly. Never expand these runs into values.
+        let mut null = vec![0];
+        null.extend(Leb128::encode_unsigned(usize::MAX as u64));
+        let mut mixed = Vec::new();
+        for value in [1, 2] {
+            mixed.extend(Leb128::encode_signed((usize::MAX / 2) as i64));
+            mixed.extend(Leb128::encode_unsigned(value));
+        }
+        mixed.extend(Leb128::encode_signed(-1));
+        mixed.extend(Leb128::encode_unsigned(3));
+        for data in [null, mixed] {
+            assert_eq!(
+                rle_validate_encoding::<Option<u64>, Leb128>(&data)
+                    .unwrap()
+                    .len,
+                usize::MAX
+            );
+            for max_segments in [2, MAX_SEGMENTS] {
+                let opts = crate::LoadOpts::new()
+                    .with_max_segments(max_segments)
+                    .with_length(usize::MAX);
+                let col = crate::Column::<Option<u64>>::load_with(&data, opts).unwrap();
+                assert_eq!(col.len(), usize::MAX);
+            }
+        }
+    }
+
+    #[test]
+    fn try_next_run_rejects_min_literal_count() {
+        let mut data = Leb128::encode_signed(i64::MIN).as_bytes().to_vec();
+        // Include a value so wrapping the header cannot be masked by an EOF error.
+        data.extend(Leb128::encode_unsigned(7));
+        let mut loader = RleLoadIter::<u64>::new(&data, MAX_SEGMENTS);
+        assert!(loader.try_next_run().is_err());
+    }
+
+    #[test]
+    fn finalize_rejects_min_literal_count() {
+        let data = Leb128::encode_signed(i64::MIN);
+        let loader = RleLoadIter::<u64>::new(data.as_bytes(), MAX_SEGMENTS);
+        assert!(loader.finalize().is_err());
+    }
+
+    #[test]
+    fn try_next_run_rejects_repeat_length_overflow() {
+        let (data, count) = repeat_overflow_input();
+        let mut loader = RleLoadIter::<u64>::new(&data, MAX_SEGMENTS);
+        for value in [1, 2] {
+            let run = loader.try_next_run().unwrap().unwrap();
+            assert_eq!((run.count, run.value), (count, value));
+        }
+        // Reject before returning the run whose addition would overflow.
+        assert!(loader.try_next_run().is_err());
+    }
+
+    #[test]
+    fn finalize_rejects_repeat_length_overflow() {
+        let (data, _) = repeat_overflow_input();
+        let loader = RleLoadIter::<u64>::new(&data, MAX_SEGMENTS);
+        assert!(loader.finalize().is_err());
+    }
+
+    #[test]
+    fn try_next_run_rejects_null_length_overflow() {
+        let data = null_overflow_input();
+        let mut loader = RleLoadIter::<Option<u64>>::new(&data, MAX_SEGMENTS);
+        let run = loader.try_next_run().unwrap().unwrap();
+        assert_eq!((run.count, run.value), (2, Some(7)));
+        assert!(loader.try_next_run().is_err());
+    }
+
+    #[test]
+    fn finalize_rejects_null_length_overflow() {
+        let data = null_overflow_input();
+        let loader = RleLoadIter::<Option<u64>>::new(&data, MAX_SEGMENTS);
+        assert!(loader.finalize().is_err());
     }
 }
 
