@@ -447,3 +447,146 @@ fn requests_are_deterministic_hash_ordered_and_deduplicated() {
     let unique: BTreeSet<_> = requests.iter().copied().collect();
     assert_eq!(unique.len(), requests.len());
 }
+
+#[test]
+fn one_author_two_actors_overlapping_fragments_with_local_boundary() {
+    // Both actors sign as the same fixed author. Actor 1 commits loose `a`;
+    // actor 2 commits loose `b` and hard `c` on top, so C = {a, b, c} spans
+    // two actors and has two frontier changes, `a` and `c`. Actor 1
+    // concurrently commits loose `d` and hard `a1` at `[d]`, so
+    // A1 = {a, d, a1} has frontier `a1` only, but overlaps C in `a`. Actor 2
+    // then commits hard `e` at `[c, a1]`: E = {e} depends on both through its
+    // boundary. Every frontier is requested exactly once, `a` being shared,
+    // and publication progresses one fragment at a time.
+    let k = key(7);
+    let actor1 = ActorId::from([1]);
+    let actor2 = ActorId::from([2]);
+    let mut doc = Automerge::signing(author(&k))
+        .unwrap()
+        .with_actor(actor1.clone());
+    let a = append_at_level(&mut doc, None, 1, 0);
+
+    doc.set_actor(actor2.clone());
+    let b = append_at_level(&mut doc, Some(&[a]), 2, 0);
+    let c = append_at_level(&mut doc, Some(&[b]), 3, 1);
+
+    doc.set_actor(actor1.clone());
+    let d = append_at_level(&mut doc, Some(&[a]), 4, 0);
+    let a1 = append_at_level(&mut doc, Some(&[d]), 5, 1);
+
+    doc.set_actor(actor2.clone());
+    let e = append_at_level(&mut doc, Some(&[c, a1]), 6, 1);
+
+    let sorted = |hashes: &[ChangeHash]| {
+        let mut hashes = hashes.to_vec();
+        hashes.sort_unstable();
+        hashes
+    };
+    let shape = |doc: &Automerge, head: ChangeHash| {
+        let fragment = doc.change_graph.get_historical_fragment(head).unwrap();
+        let members: BTreeSet<_> = fragment.members.iter().copied().collect();
+        let frontier = sorted(
+            &doc.change_graph
+                .fragment_requirements(head)
+                .unwrap()
+                .hashes()
+                .copied()
+                .collect::<Vec<_>>(),
+        );
+        (members, sorted(&fragment.boundary), frontier)
+    };
+    assert_eq!(shape(&doc, c), ([a, b, c].into(), vec![], sorted(&[a, c])));
+    assert_eq!(shape(&doc, a1), ([a, d, a1].into(), vec![], vec![a1]));
+    assert_eq!(shape(&doc, e), ([e].into(), sorted(&[c, a1]), vec![e]));
+    for hash in [a, d, a1] {
+        assert_eq!(doc.get_change_by_hash(&hash).unwrap().actor_id(), &actor1);
+    }
+    for hash in [b, c, e] {
+        assert_eq!(doc.get_change_by_hash(&hash).unwrap().actor_id(), &actor2);
+    }
+    assert_eq!(drafts(&mut doc), [a, b, c, d, a1, e]);
+
+    // What-if planning treats signable C and A1 as proved, so E is
+    // selectable in the same round. Interior `b` and `d` are never
+    // requested; shared frontier `a` appears once.
+    let requests = doc.request_signatures().unwrap();
+    assert_eq!(
+        requests.iter().map(|r| r.hash()).collect::<Vec<_>>(),
+        sorted(&[a, c, a1, e])
+    );
+    for request in requests.iter() {
+        assert_eq!(request.author(), &author(&k));
+    }
+
+    // Partial response: C's own frontier `c` alone does not prove C because
+    // `a` is still unsigned; `a` and `c` together publish C.
+    doc.insert_signatures([(c, sig(&k, &c))]);
+    assert!(!is_accepted(&mut doc, &c));
+    assert_eq!(requested(&mut doc), sorted(&[a, a1, e]));
+    doc.insert_signatures([(a, sig(&k, &a))]);
+    for hash in [a, b, c] {
+        assert!(is_accepted(&mut doc, &hash));
+    }
+    for hash in [d, a1, e] {
+        assert!(!is_accepted(&mut doc, &hash));
+    }
+    assert_eq!(drafts(&mut doc), [d, a1, e]);
+    assert_eq!(requested(&mut doc), sorted(&[a1, e]));
+    assert!(doc.has_unpublished_changes());
+
+    // Signing E alone cannot publish it while A1 is unpublished.
+    doc.insert_signatures([(e, sig(&k, &e))]);
+    assert!(!is_accepted(&mut doc, &e));
+    assert_eq!(requested(&mut doc), [a1]);
+
+    // A1 completes from the original snapshot; E follows at once.
+    doc.insert_signatures([(a1, sig(&k, &a1))]);
+    for hash in [d, a1, e] {
+        assert!(is_accepted(&mut doc, &hash));
+    }
+    assert!(drafts(&mut doc).is_empty());
+    assert!(requested(&mut doc).is_empty());
+    assert!(!doc.has_unpublished_changes());
+}
+
+#[test]
+fn masking_the_local_author_does_not_change_status_or_requests() {
+    // Visibility masks hide ops; they are not publication. Hiding our own
+    // unpublished drafts leaves status true and requests unchanged, and the
+    // queries themselves mutate neither drafts nor visibility.
+    let k = key(7);
+    let mut doc = Automerge::signing(author(&k))
+        .unwrap()
+        .with_actor(ActorId::from([1]));
+    let a = append_at_level(&mut doc, None, 1, 0);
+    let a1 = append_at_level(&mut doc, None, 2, 1);
+    assert_eq!(doc.get(ROOT, "value").unwrap().unwrap().0.as_i64(), Some(2));
+    let before = doc.request_signatures().unwrap();
+    assert_eq!(before.iter().map(|r| r.hash()).collect::<Vec<_>>(), [a1]);
+
+    doc.mask_author(author(&k), &[], &mut PatchLog::inactive())
+        .unwrap();
+    assert!(doc.get(ROOT, "value").unwrap().is_none(), "ops hidden");
+    let mask = format!("{:?}", doc.visibility.mask());
+
+    assert!(doc.has_unpublished_changes());
+    assert_eq!(doc.request_signatures().unwrap(), before);
+    assert_eq!(doc.request_signatures().unwrap(), before);
+    assert_eq!(drafts(&mut doc), [a, a1]);
+    assert_eq!(
+        format!("{:?}", doc.visibility.mask()),
+        mask,
+        "queries do not republish"
+    );
+    assert!(doc.get(ROOT, "value").unwrap().is_none());
+
+    sign_requests(&mut doc, &before, &k);
+    assert!(!doc.has_unpublished_changes());
+    assert!(drafts(&mut doc).is_empty());
+    assert!(doc.get(ROOT, "value").unwrap().is_none(), "still masked");
+
+    doc.reveal_author(&author(&k), &mut PatchLog::inactive())
+        .unwrap();
+    assert_eq!(doc.get(ROOT, "value").unwrap().unwrap().0.as_i64(), Some(2));
+    assert!(!doc.has_unpublished_changes());
+}

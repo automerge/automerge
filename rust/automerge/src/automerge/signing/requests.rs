@@ -2,7 +2,10 @@
 //!
 //! [`LocalDrafts`] records the exact hashes of changes committed locally on
 //! this document that are not yet published. Only a successful local commit
-//! adds an entry; imports, loads and clones never do. Receiving a signature
+//! makes a change eligible; imports and loads never do. Cloning a document
+//! copies its exact draft list along with the rest of the signing state, so a
+//! same-author clone may request the drafts it inherited, but it gains no
+//! eligibility beyond what the original already had. Receiving a signature
 //! or discovering requests leaves entries in place; publication (through
 //! local completion or incoming admission) removes them.
 //!
@@ -19,7 +22,8 @@
 
 use std::collections::HashSet;
 
-use crate::admission::{self, AcceptedHistory};
+use crate::admission;
+use crate::admission::AcceptedHistory;
 use crate::signature::{signing_message, SIGNING_MESSAGE_LEN};
 use crate::{Author, ChangeHash, Fragment};
 
@@ -89,14 +93,18 @@ impl SigningRequest {
 pub struct SigningRequests(Vec<SigningRequest>);
 
 impl SigningRequests {
+    /// Borrow the requests in hash order, e.g. to sign each message in turn.
     pub fn iter(&self) -> impl ExactSizeIterator<Item = &SigningRequest> {
         self.0.iter()
     }
 
+    /// Number of distinct signatures requested.
     pub fn len(&self) -> usize {
         self.0.len()
     }
 
+    /// Whether nothing is requested; see the module docs, this does not mean
+    /// everything is published.
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
