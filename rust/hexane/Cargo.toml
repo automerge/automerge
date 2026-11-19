@@ -18,6 +18,9 @@ slow_path_assertions = []
 # Deep/expensive fuzz tests, skipped by default so `cargo test` stays fast.
 deep_fuzz = []
 bijou64 = ["dep:bijoux"]
+# `raw::counters` and `RawColumn::heap_bytes`, for tests that pin how many
+# bytes a splice copies and keeps.
+raw-counters = []
 
 
 [dependencies]
