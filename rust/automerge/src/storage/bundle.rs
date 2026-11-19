@@ -29,6 +29,12 @@ pub(crate) use storage::BundleStorage;
 /// also be loaded using `TryFrom<&[u8]>` in order to examine the contents of
 /// the bundle.
 ///
+/// A bundle produced by a required-mode document additionally caches its
+/// encoded authenticated bytes (bundle chunk plus the group's complete
+/// signatures chunk) so that [`Self::bytes`] is one self-contained delivery.
+/// This doubles the bundle's resident size while it is held; it is an
+/// accepted trade-off of the initial API, not a borrow workaround.
+///
 /// This feature is experimental, the file format for bundles may still change
 /// so do not use this feature in systems where you expect data to stick around
 #[derive(Debug)]

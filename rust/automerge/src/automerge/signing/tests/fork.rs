@@ -297,11 +297,22 @@ fn required_fork_at_remains_unsupported_in_both_apis() {
         doc.fork_at(&[a]),
         Err(AutomergeError::Signing(SigningError::ForkAtNotSupported))
     ));
+    // AutoCommit rejects before closing its pending transaction.
     let mut auto = AutoCommit::signing(author(&k)).unwrap();
+    auto.put(ROOT, "pending", 1).unwrap();
     assert!(matches!(
         auto.fork_at(&[]),
         Err(AutomergeError::Signing(SigningError::ForkAtNotSupported))
     ));
+    assert_eq!(auto.pending_ops(), 1, "transaction stays open");
+    assert!(!auto.has_unpublished_changes(), "nothing was committed");
+    // Unsigned fork_at still commits pending edits first.
+    let mut unsigned = AutoCommit::new();
+    unsigned.put(ROOT, "pending", 1).unwrap();
+    let mut fork = unsigned.fork_at(&[]).unwrap();
+    assert_eq!(unsigned.pending_ops(), 0);
+    assert_eq!(unsigned.get_heads().len(), 1);
+    assert!(fork.get_heads().is_empty());
 }
 
 #[test]

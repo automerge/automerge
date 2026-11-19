@@ -39,9 +39,10 @@ fn required_sync_is_a_checked_error_even_with_nothing_to_send() {
     assert_eq!(doc.get_heads(), [a]);
     assert!(state.their_heads.is_none());
 
-    // AutoCommit's wrapper reports the same error. `sync()` closes the open
-    // transaction as documented (for every mode), which is an ordinary local
-    // commit: the result is a draft, never a sync-driven mutation.
+    // AutoCommit's wrapper reports the same error. Because every signed sync
+    // operation is rejected, `sync()` does not close the open transaction in
+    // required mode: the rejection happens before any mutation, so pending
+    // edits stay pending on both generation and receipt.
     let mut auto = AutoCommit::signing(author(&k)).unwrap();
     auto.put(ROOT, "x", 1).unwrap();
     let mut auto_state = sync::State::new();
@@ -49,14 +50,29 @@ fn required_sync_is_a_checked_error_even_with_nothing_to_send() {
         auto.sync().generate_sync_message(&mut auto_state),
         Err(AutomergeError::Signing(SigningError::SyncNotSupported))
     ));
+    assert_eq!(
+        auto.pending_ops(),
+        1,
+        "generate leaves the transaction open"
+    );
     assert!(matches!(
         auto.sync().receive_sync_message(&mut auto_state, msg),
         Err(AutomergeError::Signing(SigningError::SyncNotSupported))
     ));
-    assert_eq!(auto.pending_ops(), 0);
-    assert_eq!(auto.get_heads().len(), 1);
-    assert!(auto.has_unpublished_changes());
+    assert_eq!(auto.pending_ops(), 1, "receive leaves the transaction open");
+    assert!(!auto.has_unpublished_changes(), "nothing was committed");
     assert!(!auto_state.in_flight && auto_state.their_heads.is_none());
+    // Unsigned `sync()` keeps closing the pending transaction.
+    let mut unsigned = AutoCommit::new();
+    unsigned.put(ROOT, "x", 1).unwrap();
+    let mut unsigned_state = sync::State::new();
+    assert!(unsigned
+        .sync()
+        .generate_sync_message(&mut unsigned_state)
+        .unwrap()
+        .is_some());
+    assert_eq!(unsigned.pending_ops(), 0);
+    assert_eq!(unsigned.get_heads().len(), 1);
 }
 
 #[test]

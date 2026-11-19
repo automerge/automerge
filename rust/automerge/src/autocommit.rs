@@ -445,7 +445,17 @@ impl AutoCommit {
         })
     }
 
+    /// Fork this document at the given heads, committing pending edits first.
+    ///
+    /// Not supported in required signing mode: the request is rejected with
+    /// [`SigningError::ForkAtNotSupported`] before the open transaction is
+    /// closed, so pending edits stay pending.
+    ///
+    /// [`SigningError::ForkAtNotSupported`]: crate::signature::error::SigningError::ForkAtNotSupported
     pub fn fork_at(&mut self, heads: &[ChangeHash]) -> Result<Self, AutomergeError> {
+        self.doc
+            .signing
+            .with_required(|| Err(crate::signature::error::SigningError::ForkAtNotSupported))?;
         self.ensure_transaction_closed();
         Ok(Self {
             doc: self.doc.fork_at(heads)?,
@@ -951,9 +961,17 @@ impl AutoCommit {
     /// An implementation of [`crate::sync::SyncDoc`] for this autocommit
     ///
     /// This ensures that any outstanding transactions for this document are committed before
-    /// taking part in the sync protocol
+    /// taking part in the sync protocol.
+    ///
+    /// In required signing mode every sync operation is rejected with
+    /// [`SigningError::SyncNotSupported`], so the open transaction is left
+    /// untouched: pending edits stay pending across the rejected call.
+    ///
+    /// [`SigningError::SyncNotSupported`]: crate::signature::error::SigningError::SyncNotSupported
     pub fn sync(&mut self) -> impl SyncDoc + '_ {
-        self.ensure_transaction_closed();
+        if !self.doc.signing.is_required() {
+            self.ensure_transaction_closed();
+        }
         SyncWrapper { inner: self }
     }
 
@@ -1548,6 +1566,13 @@ impl SyncDoc for SyncWrapper<'_> {
         sync_state: &mut sync::State,
         message: sync::Message,
     ) -> Result<(), AutomergeError> {
+        // Preflight before `with_patch_log` closes the open transaction: a
+        // required-mode document rejects every sync message, so pending
+        // edits must survive the rejection.
+        self.inner
+            .doc
+            .signing
+            .with_required(|| Err(crate::signature::error::SigningError::SyncNotSupported))?;
         self.inner.with_patch_log(|doc, log| {
             doc.receive_sync_message_log_patches(sync_state, message, log)
         })

@@ -1697,10 +1697,18 @@ impl Automerge {
     /// history is transferred, as complete canonical groups with their proofs,
     /// through the same admission as [`Self::apply_changes`]: the source's
     /// unpublished drafts and retained pending groups are left out without
-    /// rejecting the merge, publication is re-derived by the receiver (never
-    /// copied), and the receiver's own drafts and signing eligibility are
-    /// untouched. A merge can publish history the receiver already holds as a
-    /// draft when the source supplies the proof.
+    /// rejecting the merge, and publication is re-derived by the receiver
+    /// (never copied). Receiver drafts unrelated to the imported groups are
+    /// retained as drafts. A merge can publish history the receiver already
+    /// holds as a draft when the source supplies the proof; on such an actual
+    /// publication the receiver's existing local provenance for that history
+    /// is retired, exactly as a locally completed group would retire it. No
+    /// provenance is imported from the source.
+    ///
+    /// A required-mode merge copies the selected source groups (changes and
+    /// proofs) before admitting them, so its peak memory is bounded by the
+    /// published history being transferred. This is a known limitation of
+    /// the current implementation, recorded rather than optimised.
     ///
     /// The returned heads are the receiver's applied heads, so in required
     /// mode they may include receiver drafts that are not yet published.
