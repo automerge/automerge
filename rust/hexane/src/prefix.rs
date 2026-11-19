@@ -1002,7 +1002,8 @@ where
         // but doing so would require an O(slab) lookup on each slab change
         // unless we had an Iterator<Item=(slab,prefix)> instead of doing a slab_index +=1
         // currently this isnt a bottleneck anywhere so not a big deal
-        let col = self.col.expect("advance_prefix on default PrefixIter");
+        // a default iterator has no column: it is empty, as for `next`
+        let col = self.col?;
         // get_index_for_total works in absolute prefixes: undo any
         // reset_prefix offset before seeking the tree
         let target = self.total + self.base + n;
