@@ -98,7 +98,8 @@ impl<I: DeltaInner, C: Codec> WeightFn<I, C> for IndexedDeltaWeightFn {
 /// `partial + count·v`.  Min/max are at the endpoints — no need to
 /// visit each intermediate item.
 fn compute_slab_agg<I: DeltaInner, C: Codec>(data: &[u8]) -> SlabAgg {
-    let mut decoder = <I as ColumnValueRef>::Encoding::<C>::decoder(data);
+    let mut decoder =
+        <I as ColumnValueRef>::Encoding::<C>::slab_decoder(data, crate::sealed::Trusted(()));
     let mut partial = 0i64;
     let mut min_off = i64::MAX;
     let mut max_off = i64::MIN;
@@ -258,7 +259,7 @@ struct SlabScan<'a, C: Codec> {
 impl<'a, C: Codec> SlabScan<'a, C> {
     fn new(data: &'a [u8], lo: i64, hi: i64, items_before: usize, prefix_before: i64) -> Self {
         Self {
-            decoder: OptI64Encoding::<C>::decoder(data),
+            decoder: OptI64Encoding::<C>::slab_decoder(data, crate::sealed::Trusted(())),
             lo,
             hi,
             items_before,

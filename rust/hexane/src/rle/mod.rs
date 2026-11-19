@@ -175,7 +175,7 @@ where
         }
         // Decode just the last segment using the tail metadata.
         // The tail gives us the byte offset of the last segment.
-        let mut dec = Self::decoder(&slab.data);
+        let mut dec = Self::slab_decoder(&slab.data, crate::sealed::Trusted(()));
         let mut last_val = None;
         let mut last_count = 0;
         while let Some(run) = dec.next_run() {
@@ -220,6 +220,17 @@ where
     type Decoder<'a> = RleDecoder<'a, T, C>;
 
     fn decoder(slab: &[u8]) -> RleDecoder<'_, T, C> {
+        // bytes from outside a column: where decoding them unchecked could
+        // break memory safety (a `str` that isn't UTF-8), check them first
+        if T::UNPACK_TRUSTS_INPUT {
+            if let Err(e) = rle_validate_encoding::<T, C>(slab) {
+                panic!("decoder: the bytes are not a valid column: {e}");
+            }
+        }
+        RleDecoder::new(slab)
+    }
+
+    fn slab_decoder(slab: &[u8], _: crate::sealed::Trusted) -> RleDecoder<'_, T, C> {
         RleDecoder::new(slab)
     }
 
