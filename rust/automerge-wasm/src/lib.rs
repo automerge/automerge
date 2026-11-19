@@ -646,9 +646,16 @@ impl Automerge {
             .map(|s| hex::decode(s).map(automerge::ActorId::from))
             .transpose()
             .map_err(error::BadActorId::from)?;
-        // The actor check runs on the fork: a different author with pending
-        // edits is already rejected before closure, and a same-author fork
-        // may reuse its own actors, so no source transaction is lost here.
+        // Preflight the actor against the requested author before the source
+        // fork closes the pending transaction. The fork inherits the source's
+        // bindings, so for the same author the source check is exact; for a
+        // different author with pending edits the native gate rejects first,
+        // and without pending edits nothing is lost by checking on the fork.
+        if let Some(actor) = &actor {
+            if author.as_ref() == self.doc.get_author() {
+                self.doc.check_actor_binding(actor)?;
+            }
+        }
         let mut automerge = Automerge {
             doc: self.doc.fork_with_author(author)?,
             freeze: self.freeze,

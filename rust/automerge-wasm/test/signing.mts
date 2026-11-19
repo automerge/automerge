@@ -288,7 +288,7 @@ describe("Automerge Wasm fragment signing", function () {
     });
   });
 
-  it("stages out-of-order fragments and rejects snapshots, unauthenticated entry points, and signed sync without mutating state", async () => {
+  it("stages out-of-order fragments and rejects bare snapshots, unauthenticated entry points, and signed sync without mutating state", async () => {
     const alice = await makeSigner();
     const mallory = await makeSigner();
     const doc = create({ signing: true, author: alice.author });
@@ -581,6 +581,9 @@ describe("Automerge Wasm fragment signing", function () {
     bobs.put("/", "pending", 1);
     assert.throws(() => bobs.clone("01"), bound);
     assert.throws(() => bobs.fork("01"), bound);
+    // A same-author fork may also name a foreign actor: rejected before the
+    // source's open transaction is closed.
+    assert.throws(() => bobs.forkWithAuthor(bob.author, "01"), bound);
     assert.equal(bobs.pendingOps(), 1, "rejected actor leaves the source untouched");
     bobs.rollback();
     const bytes = doc.save();
@@ -619,17 +622,19 @@ describe("Automerge Wasm fragment signing", function () {
     doc.commit("first", 1);
     const [request] = doc.requestSignatures();
     const good = { message: request.message, signature: await alice.sign(request.message) };
-    // Large typed arrays backed by a shared, untouched buffer: the parser
-    // must reject on length before materialising any copy.
-    const huge = new Uint8Array(1 << 28);
-    for (const bad of [
-      { message: huge, signature: good.signature },
-      { message: good.message, signature: huge },
-    ]) {
+    // Over-length buffers are rejected by their reported length before any
+    // copy is made; a small buffer is enough to exercise that path.
+    const huge = new Uint8Array(4096);
+    const prefix = good.message.length - 32;
+    for (const [bad, found] of [
+      // The message error reports the hash-suffix length past the prefix.
+      [{ message: huge, signature: good.signature }, 4096 - prefix],
+      [{ message: good.message, signature: huge }, 4096],
+    ] as const) {
       const outcome = doc.insertSignatures([good, bad]);
       assert.equal(outcome.status, "rejected");
       if (outcome.status === "rejected")
-        assert.match(outcome.reason, /index 1.*found 2684354\d\d$/);
+        assert.match(outcome.reason, new RegExp(`index 1.*found ${found}$`));
     }
     assert.equal(doc.hasUnpublishedChanges(), true);
     completed(doc.insertSignatures([good]));

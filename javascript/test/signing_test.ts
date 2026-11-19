@@ -963,6 +963,10 @@ describe("fragment signing API", () => {
     const bobs = Automerge.clone(doc, { author: bob.author })
     assert.throws(() => Automerge.clone(bobs, "01"), bound)
     assert.throws(() => Automerge.clone(bobs, { actor: "01" }), bound)
+    assert.throws(
+      () => Automerge.clone(bobs, { author: bob.author, actor: "01" }),
+      bound,
+    )
     // The source is unaffected and remains Alice's.
     assert.equal(Automerge.getAuthor(doc), alice.author)
     assert.equal(Automerge.getActorId(doc), "01")

@@ -9,6 +9,7 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use crate::signature::error::SigningError;
 use crate::{AutoCommit, AutomergeError, LoadOptions};
 
+use super::super::{RequiredSigning, SigningState};
 use super::*;
 
 fn drafts(doc: &mut Automerge) -> Vec<ChangeHash> {
@@ -183,4 +184,31 @@ fn imported_collision_on_an_unused_configured_actor_fails_before_any_mutation() 
             SigningError::ActorBoundToOtherAuthor { .. }
         ))
     ));
+}
+
+#[test]
+fn authorless_applied_history_is_not_the_fixed_authors_to_continue() {
+    // Valid required-mode ingress always records an author, so reach this
+    // state by injection: unsigned history under actors [1] and [2] with no
+    // recorded author, then the document is switched to required mode.
+    let mut doc = Automerge::new().with_actor(ActorId::from([1]));
+    append_at_level(&mut doc, None, 1, 0);
+    doc.set_actor(ActorId::from([2]));
+    doc.author = Some(author(&key(7)));
+    doc.signing = SigningState::Required(RequiredSigning::new(doc.actors()));
+    assert_eq!(doc.get_author_for_actor(&ActorId::from([1])), None);
+
+    // Applied history without an author is not ours to continue.
+    assert!(matches!(
+        doc.check_actor_binding(&ActorId::from([1])),
+        Err(AutomergeError::Signing(SigningError::ActorBoundToOtherAuthor { actor })) if actor == ActorId::from([1])
+    ));
+    assert!(doc.try_set_actor(ActorId::from([1])).is_err());
+    assert_eq!(doc.get_actor(), &ActorId::from([2]));
+
+    // An unused actor slot in the table (no applied history) is still free.
+    assert_eq!(doc.get_author_for_actor(&ActorId::from([2])), None);
+    doc.check_actor_binding(&ActorId::from([2])).unwrap();
+    doc.try_set_actor(ActorId::from([2])).unwrap();
+    doc.try_set_actor(ActorId::from([3])).unwrap();
 }

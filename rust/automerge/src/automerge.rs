@@ -597,16 +597,22 @@ impl Automerge {
         }
     }
 
-    /// In required mode, fail if the actor at `index` is recorded under an
-    /// author other than the fixed local author.
+    /// In required mode, fail unless the actor at `index` may be continued by
+    /// the fixed local author.
     ///
-    /// An actor with no recorded author (no history yet, or an authorless
-    /// import) is not bound and passes.
+    /// An actor recorded under another author is rejected. An actor with
+    /// applied history must additionally be recorded under the fixed author:
+    /// authorless applied history (which valid required-mode ingress never
+    /// produces) is not ours to continue. An unused slot with no recorded
+    /// author passes.
     fn check_actor_author(&self, index: usize) -> Result<(), AutomergeError> {
         self.signing.with_required(|| {
             let bound = self.authors.get_author_for_actor(index);
             let local = self.author.as_ref().map(Author::as_bytes);
-            if bound.is_some() && bound.as_ref().map(Author::as_bytes) != local {
+            let bound = bound.as_ref().map(Author::as_bytes);
+            let foreign = bound.is_some() && bound != local;
+            let authorless_history = bound.is_none() && self.change_graph.seq_for_actor(index) > 0;
+            if foreign || authorless_history {
                 return Err(
                     crate::signature::error::SigningError::ActorBoundToOtherAuthor {
                         actor: self.ops.actors[index].clone(),

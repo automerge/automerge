@@ -628,7 +628,7 @@ fn fully_published_multi_actor_snapshot_round_trips_metadata_and_masks() {
     .unwrap();
     assert_eq!(loaded.get_heads(), alice.get_heads());
     assert_eq!(
-        loaded.get_change_by_hash(&a2).unwrap().message().as_deref(),
+        loaded.get_change_by_hash(&a2).unwrap().message(),
         Some("with a message")
     );
     assert_eq!(loaded.get_change_by_hash(&a3).unwrap().timestamp(), 5);

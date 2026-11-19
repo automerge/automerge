@@ -51,11 +51,16 @@
 //!   historical views), the sync protocol, and merging with an unsigned
 //!   document in either direction. Transfer published history with
 //!   save/load, incremental saves or merge between signing documents.
-//! - Raw inspectors (`get_changes`, `get_change_by_hash`, `fragments`) show
-//!   applied drafts; they are not authenticated transport. Only signed groups
-//!   with complete proof are accepted on ingress.
-//! - Retained incoming groups are bounded per group, not in total; the
-//!   absence of a total pending budget is a resource limitation, not a
+//! - Raw inspectors (`get_changes`, `get_change_by_hash`) show applied
+//!   drafts and are not authenticated transport. `fragments` exports
+//!   proof-ready descriptors (possibly not yet published, never a bare
+//!   unsignable draft); only `bundle_fragments` bytes are authenticated
+//!   delivery, and only signed groups with complete proof are accepted on
+//!   ingress.
+//! - Ingress enforces the existing per-hash byte and signature-entry limits
+//!   on the wire; these do not cap a group's contents or total memory. Each
+//!   retained incoming group owns its own copy of duplicated data, and there
+//!   is no document-wide pending budget: a resource limitation, not a
 //!   security bound. There is no state recovery after panic or crash.
 //! - [`Automerge::anonymize`] of a signing document is a new unsigned
 //!   diagnostic copy without proofs or drafts.

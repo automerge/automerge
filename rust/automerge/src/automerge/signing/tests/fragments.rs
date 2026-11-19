@@ -349,7 +349,7 @@ fn supersession_and_branch_gc_reclaim_covered_candidates_and_signatures() {
 
     sign_doc(&mut doc, new, &k);
     let replacement = doc.get_fragment(new).unwrap();
-    assert_eq!(doc.fragments(..), [replacement.clone()]);
+    assert_eq!(doc.fragments(..), std::slice::from_ref(&replacement));
     assert!(doc.fragments(0..=1).is_empty());
     assert_eq!(
         doc.change_graph.get_historical_fragment(old),
