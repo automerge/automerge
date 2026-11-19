@@ -403,19 +403,21 @@ use super::{
     lemma_runs_first, lemma_runs_of_values, lemma_sorted, lemma_sum_bound, lemma_sum_mono,
     lemma_sum_range, lemma_sum_run, lemma_sums_fit, mapped, only, past, refused, run_values,
     runs_of, scan_of, scan_taken, sorted, sorted_for, sum_of, summed, sums_fit, times, total_len,
-    total_str_len, window, AccIndex, Get, LenIndex, SumIndex, VAccum, VAccumulated, VAdds, VAmount,
-    VCodec, VCount, VDelta, VDeltaValue, VGet, VGroup, VIndex, VKeeps, VNewtype, VSpec, VSum,
-    VSummed, VValue, VerifiedAccColumn, VerifiedAccIter, VerifiedAccIterState, VerifiedAccSeek,
-    VerifiedAccValue, VerifiedColumn, VerifiedDecoder, VerifiedDeltaColumn, VerifiedDeltaDecoder,
-    VerifiedDeltaEncoder, VerifiedDeltaEncoderState, VerifiedDeltaIter, VerifiedDeltaIterState,
-    VerifiedDeltaRuns, VerifiedEncoder, VerifiedEncoderState, VerifiedFindByRange, VerifiedIter,
-    VerifiedIterState, VerifiedPrefixColumn, VerifiedPrefixIter, VerifiedPrefixIterState,
-    VerifiedPrefixSeek, VerifiedPrefixedValue, VerifiedRuns,
+    total_str_len, window, AccIndex, Get, LenIndex, RawColumn, RawColumnIter, SumIndex, VAccum,
+    VAccumulated, VAdds, VAmount, VCodec, VCount, VDelta, VDeltaValue, VGet, VGroup, VIndex,
+    VKeeps, VNewtype, VSpec, VSum, VSummed, VValue, VerifiedAccColumn, VerifiedAccIter,
+    VerifiedAccIterState, VerifiedAccSeek, VerifiedAccValue, VerifiedColumn, VerifiedDecoder,
+    VerifiedDeltaColumn, VerifiedDeltaDecoder, VerifiedDeltaEncoder, VerifiedDeltaEncoderState,
+    VerifiedDeltaIter, VerifiedDeltaIterState, VerifiedDeltaRuns, VerifiedEncoder,
+    VerifiedEncoderState, VerifiedFindByRange, VerifiedIter, VerifiedIterState,
+    VerifiedPrefixColumn, VerifiedPrefixIter, VerifiedPrefixIterState, VerifiedPrefixSeek,
+    VerifiedPrefixedValue, VerifiedRuns,
 };
 use crate::{DeltaRun, Leb128, LoadOpts, PackError, Run};
 use std::cmp::Ordering;
 use std::ops::{Bound, Range, RangeBounds};
 use vstd::prelude::*;
+use vstd::slice::slice_subrange;
 #[cfg(verus_keep_ghost)]
 use vstd::std_specs::iter::IteratorSpec;
 #[cfg(verus_keep_ghost)]
@@ -14692,6 +14694,477 @@ fn delta_first_run_rebuilt<'a, T: VDeltaValue<C>, C: VCodec>(bytes: &'a [u8]) ->
         },
     }
     col
+}
+
+// ── Raw columns ───────────────────────────────────────────────────────────────
+
+/// A raw column made of two byte strings, the second spliced in after
+/// the first, holds the first and then the second.
+#[allow(dead_code)]
+fn raw_built(a: &[u8], b: &[u8]) -> (col: RawColumn)
+    requires
+        a@.len() + b@.len() <= usize::MAX,
+    ensures
+        col.wf(),
+        col@ == a@ + b@,
+{
+    let mut col = RawColumn::new();
+    let first = col.try_splice_slice(0, 0, a);
+    assert(first is Ok);
+    let n = col.len();
+    let second = col.try_splice_slice(n, 0, b);
+    assert(second is Ok);
+    proof {
+        assert(col@ =~= a@ + b@);
+    }
+    col
+}
+
+/// A range of a raw column replaced by other bytes: the column is as
+/// long as that makes it, and the bytes before the range and after it
+/// are the ones it had.
+#[allow(dead_code)]
+fn raw_replaced(col: &mut RawColumn, start: usize, end: usize, with: &[u8])
+    requires
+        old(col).wf(),
+        start <= end <= old(col)@.len(),
+        old(col)@.len() - (end - start) + with@.len() <= usize::MAX,
+    ensures
+        final(col).wf(),
+        final(col)@.len() == old(col)@.len() - (end - start) + with@.len(),
+        final(col)@.subrange(start as int, start + with@.len()) == with@,
+        forall|i: int| 0 <= i < start ==> final(col)@[i] == old(col)@[i],
+        forall|i: int| end <= i < old(col)@.len() ==> final(col)@[i - (end - start) + with@.len()] == old(col)@[i],
+{
+    let r = col.try_splice_slice(start, end - start, with);
+    assert(r is Ok);
+    proof {
+        assert(col@.subrange(start as int, start + with@.len()) =~= with@);
+    }
+}
+
+/// Bytes cut out of a raw column and put back where they were leave the
+/// column's bytes as they were.
+#[allow(dead_code)]
+fn raw_cut_and_pasted(col: &mut RawColumn, start: usize, end: usize)
+    requires
+        old(col).wf(),
+        start <= end <= old(col)@.len(),
+    ensures
+        final(col).wf(),
+        final(col)@ == old(col)@,
+{
+    // a column is no longer than a `usize` can say, which `len` tells
+    let _n = col.len();
+    let all = col.save();
+    let part = slice_subrange(all.as_slice(), start, end);
+    let cut = col.try_splice_slice(start, end - start, &[]);
+    assert(cut is Ok);
+    let pasted = col.try_splice_slice(start, 0, part);
+    assert(pasted is Ok);
+    proof {
+        assert(col@ =~= old(col)@);
+    }
+}
+
+/// A raw column emptied by one splice holds nothing.
+#[allow(dead_code)]
+fn raw_emptied(col: &mut RawColumn)
+    requires
+        old(col).wf(),
+    ensures
+        final(col).wf(),
+        final(col)@.len() == 0,
+{
+    let n = col.len();
+    let r = col.try_splice_slice(0, n, &[]);
+    assert(r is Ok);
+    let empty = col.is_empty();
+    assert(empty);
+}
+
+/// Any bytes at all load as a raw column, which saves to those bytes.
+#[allow(dead_code)]
+fn raw_round_trip(data: &[u8]) -> (out: Vec<u8>)
+    ensures
+        out@ == data@,
+{
+    match RawColumn::load(data) {
+        Ok(col) => col.save(),
+        Err(_) => {
+            assert(false);
+            Vec::new()
+        },
+    }
+}
+
+/// A raw column loaded from what another saved holds the same bytes.
+#[allow(dead_code)]
+fn raw_saved_then_loaded(col: &RawColumn) -> (out: RawColumn)
+    requires
+        col.wf(),
+    ensures
+        out.wf(),
+        out@ == col@,
+{
+    let bytes = col.save();
+    match RawColumn::load(bytes.as_slice()) {
+        Ok(out) => out,
+        Err(_) => {
+            assert(false);
+            RawColumn::new()
+        },
+    }
+}
+
+/// Two raw columns saved into one buffer, one after the other: each is
+/// where its range says.
+#[allow(dead_code)]
+fn raw_two_in_one_buffer(a: &RawColumn, b: &RawColumn) -> (out: (Vec<u8>, Range<usize>, Range<usize>))
+    ensures
+        out.1.start <= out.1.end == out.2.start <= out.2.end == out.0@.len(),
+        out.0@.subrange(out.1.start as int, out.1.end as int) == a@,
+        out.0@.subrange(out.2.start as int, out.2.end as int) == b@,
+{
+    let mut buf: Vec<u8> = Vec::new();
+    let first = a.save_to(&mut buf);
+    let second = b.save_to(&mut buf);
+    proof {
+        assert(buf@.subrange(first.start as int, first.end as int) =~= a@);
+        assert(buf@.subrange(second.start as int, second.end as int) =~= b@);
+    }
+    (buf, first, second)
+}
+
+/// A range read from a raw column, where the column can give it: the
+/// bytes of that range. A range of no bytes within the column is always
+/// given.
+#[allow(dead_code)]
+fn raw_read<'a>(col: &'a RawColumn, start: usize, end: usize) -> (out: Option<&'a [u8]>)
+    requires
+        col.wf(),
+    ensures
+        out matches Some(s) ==> start <= end <= col@.len() && s@ == col@.subrange(start as int, end as int),
+        start == end && end <= col@.len() ==> out is Some,
+{
+    match col.try_get(start..end) {
+        Ok(s) => Some(s),
+        Err(_) => None,
+    }
+}
+
+/// A range that `try_get` gave is one `get` gives: the call is proved
+/// not to panic, and the two slices hold the same bytes.
+#[allow(dead_code)]
+fn raw_read_again<'a>(col: &'a RawColumn, start: usize, end: usize) -> (out: Option<(&'a [u8], &'a [u8])>)
+    requires
+        col.wf(),
+    ensures
+        out matches Some(p) ==> p.0@ == p.1@ && p.0@ == col@.subrange(start as int, end as int),
+{
+    match col.try_get(start..end) {
+        Ok(first) => {
+            let second = col.get(start..end);
+            Some((first, second))
+        },
+        Err(_) => None,
+    }
+}
+
+/// Two values read from the front of a raw column, one after the other:
+/// together they are the column's first bytes.
+#[allow(dead_code)]
+fn raw_two_values<'a>(col: &'a RawColumn, n1: usize, n2: usize) -> (out: (&'a [u8], &'a [u8]))
+    requires
+        col.wf(),
+    ensures
+        n1 + n2 <= col@.len(),
+        out.0@ + out.1@ == col@.take(n1 + n2),
+{
+    let mut it = col.iter();
+    let a = it.take(n1);
+    let b = it.take(n2);
+    proof {
+        assert(a@ + b@ =~= col@.take(n1 + n2));
+    }
+    (a, b)
+}
+
+/// The bytes at a place of a raw column, read by an iterator made there.
+#[allow(dead_code)]
+fn raw_taken_at<'a>(col: &'a RawColumn, pos: usize, n: usize) -> (out: &'a [u8])
+    requires
+        col.wf(),
+    ensures
+        pos + n <= col@.len(),
+        out@ == col@.subrange(pos as int, pos + n),
+{
+    let mut it = col.iter_at(pos);
+    it.take(n)
+}
+
+/// An iterator moved over some bytes reads what follows them, and says
+/// where it is.
+#[allow(dead_code)]
+fn raw_skipped<'a>(col: &'a RawColumn, k: usize, n: usize) -> (out: (&'a [u8], usize))
+    requires
+        col.wf(),
+    ensures
+        out.0@ == col@.subrange(k as int, k + n),
+        out.1 == k + n,
+        k + n <= col@.len(),
+{
+    let mut it = col.iter();
+    it.skip(k);
+    let s = it.take(n);
+    (s, it.pos())
+}
+
+/// An iterator moved on to a place reads the bytes there; it only moves
+/// on.
+#[allow(dead_code)]
+fn raw_sought<'a>(col: &'a RawColumn, from: usize, to: usize, n: usize) -> (out: &'a [u8])
+    requires
+        col.wf(),
+    ensures
+        from <= to,
+        to + n <= col@.len(),
+        out@ == col@.subrange(to as int, to + n),
+{
+    let mut it = col.iter_at(from);
+    it.seek_to(to);
+    it.take(n)
+}
+
+/// A clone of a raw column is a column of its own: bytes given to it
+/// leave the one it was made of as it was.
+#[allow(dead_code)]
+fn raw_clone_then_diverge(col: &RawColumn, more: &[u8]) -> (out: RawColumn)
+    requires
+        col.wf(),
+        col@.len() + more@.len() <= usize::MAX,
+    ensures
+        out.wf(),
+        out@ == col@ + more@,
+{
+    let mut out = col.clone();
+    let n = out.len();
+    let r = out.try_splice_slice(n, 0, more);
+    assert(r is Ok);
+    proof {
+        assert(out@ =~= col@ + more@);
+    }
+    out
+}
+
+/// A clone of an iterator reads what the iterator does.
+#[allow(dead_code)]
+fn raw_read_twice<'a>(col: &'a RawColumn, pos: usize, n: usize) -> (out: (&'a [u8], &'a [u8]))
+    requires
+        col.wf(),
+    ensures
+        out.0@ == out.1@,
+        out.0@ == col@.subrange(pos as int, pos + n),
+{
+    let mut a = col.iter_at(pos);
+    let mut b = a.clone();
+    let x = a.take(n);
+    let y = b.take(n);
+    (x, y)
+}
+
+/// What `new`, `with_max_segments` and `default` say.
+#[allow(dead_code)]
+fn raw_told_by_new(max: usize) -> (out: (RawColumn, RawColumn, RawColumn))
+    ensures
+        out.0.wf() && out.1.wf() && out.2.wf(),
+        out.0@ == Seq::<u8>::empty(),
+        out.1@ == Seq::<u8>::empty(),
+        out.2@ == Seq::<u8>::empty(),
+{
+    (RawColumn::new(), RawColumn::with_max_segments(max), RawColumn::default())
+}
+
+/// What `len` and `is_empty` say.
+#[allow(dead_code)]
+fn raw_told_by_len(col: &RawColumn) -> (out: (usize, bool))
+    requires
+        col.wf(),
+    ensures
+        out.0 == col@.len(),
+        out.1 == (col@.len() == 0),
+{
+    (col.len(), col.is_empty())
+}
+
+/// What `try_splice_slice` says.
+#[allow(dead_code)]
+fn raw_told_by_try_splice_slice(col: &mut RawColumn, index: usize, del: usize, bytes: &[u8]) -> (r: Result<
+    (),
+    PackError,
+>)
+    requires
+        old(col).wf(),
+    ensures
+        final(col).wf(),
+        r is Ok <==> index + del <= old(col)@.len() && old(col)@.len() - del + bytes@.len() <= usize::MAX,
+        r is Ok ==> final(col)@ == old(col)@.take(index as int) + bytes@ + old(col)@.skip(index + del),
+        r is Err ==> final(col)@ == old(col)@,
+{
+    col.try_splice_slice(index, del, bytes)
+}
+
+/// What `splice_slice` says, of a call that returns.
+#[allow(dead_code)]
+fn raw_told_by_splice_slice(col: &mut RawColumn, index: usize, del: usize, bytes: &[u8])
+    requires
+        old(col).wf(),
+    ensures
+        final(col).wf(),
+        final(col)@ == old(col)@.take(index as int) + bytes@ + old(col)@.skip(index + del),
+{
+    col.splice_slice(index, del, bytes)
+}
+
+/// What `try_get` says.
+#[allow(dead_code)]
+fn raw_told_by_try_get<'a>(col: &'a RawColumn, range: Range<usize>) -> (r: Result<&'a [u8], PackError>)
+    requires
+        col.wf(),
+    ensures
+        r is Ok <==> range.start <= range.end <= col@.len() && (range.start == range.end || col.in_one_slab(
+            range.start as int,
+            range.end as int,
+        )),
+        r is Ok ==> r->Ok_0@ == col@.subrange(range.start as int, range.end as int),
+{
+    col.try_get(range)
+}
+
+/// What `get` says.
+#[allow(dead_code)]
+fn raw_told_by_get<'a>(col: &'a RawColumn, range: Range<usize>) -> (out: &'a [u8])
+    requires
+        col.wf(),
+        range.start <= range.end <= col@.len(),
+        range.start == range.end || col.in_one_slab(range.start as int, range.end as int),
+    ensures
+        out@ == col@.subrange(range.start as int, range.end as int),
+{
+    col.get(range)
+}
+
+/// What `iter` and `iter_at` say.
+#[allow(dead_code)]
+fn raw_told_by_iter<'a>(col: &'a RawColumn, pos: usize) -> (out: (RawColumnIter<'a>, RawColumnIter<'a>))
+    requires
+        col.wf(),
+    ensures
+        out.0.wf() && out.1.wf(),
+        out.0.bytes() == col@,
+        out.1.bytes() == col@,
+        out.0.spec_pos() == 0,
+        out.1.spec_pos() == pos,
+        pos <= col@.len(),
+{
+    (col.iter(), col.iter_at(pos))
+}
+
+/// What `save` and `save_to` say.
+#[allow(dead_code)]
+fn raw_told_by_save(col: &RawColumn, out: &mut Vec<u8>) -> (r: (Vec<u8>, Range<usize>))
+    requires
+        col.wf(),
+    ensures
+        r.0@ == col@,
+        final(out)@ == old(out)@ + col@,
+        r.1.start == old(out)@.len(),
+        r.1.end == final(out)@.len(),
+{
+    let saved = col.save();
+    let range = col.save_to(out);
+    (saved, range)
+}
+
+/// What `load` and `load_with_max_segments` say.
+#[allow(dead_code)]
+fn raw_told_by_load(data: &[u8], max: usize) -> (out: (Result<RawColumn, PackError>, Result<RawColumn, PackError>))
+    ensures
+        out.0 is Ok && out.1 is Ok,
+        out.0->Ok_0.wf() && out.1->Ok_0.wf(),
+        out.0->Ok_0@ == data@,
+        out.1->Ok_0@ == data@,
+{
+    (RawColumn::load(data), RawColumn::load_with_max_segments(data, max))
+}
+
+/// What `clone` says.
+#[allow(dead_code)]
+fn raw_told_by_clone(col: &RawColumn) -> (out: RawColumn)
+    ensures
+        out@ == col@,
+        col.wf() ==> out.wf(),
+{
+    col.clone()
+}
+
+/// What an iterator's `pos` and `take` say.
+#[allow(dead_code)]
+fn raw_told_by_take<'a>(it: &mut RawColumnIter<'a>, n: usize) -> (out: (usize, &'a [u8]))
+    requires
+        old(it).wf(),
+    ensures
+        out.0 == old(it).spec_pos(),
+        old(it).fits(n as nat),
+        final(it).wf(),
+        final(it).bytes() == old(it).bytes(),
+        old(it).spec_pos() + n <= old(it).bytes().len(),
+        final(it).spec_pos() == old(it).spec_pos() + n,
+        out.1@ == old(it).bytes().subrange(old(it).spec_pos() as int, old(it).spec_pos() + n),
+{
+    let p = it.pos();
+    let s = it.take(n);
+    (p, s)
+}
+
+/// What an iterator's `skip` says.
+#[allow(dead_code)]
+fn raw_told_by_skip<'a>(it: &mut RawColumnIter<'a>, n: usize)
+    requires
+        old(it).wf(),
+    ensures
+        final(it).wf(),
+        final(it).bytes() == old(it).bytes(),
+        old(it).spec_pos() + n <= old(it).bytes().len(),
+        final(it).spec_pos() == old(it).spec_pos() + n,
+{
+    it.skip(n)
+}
+
+/// What an iterator's `seek_to` says.
+#[allow(dead_code)]
+fn raw_told_by_seek_to<'a>(it: &mut RawColumnIter<'a>, target: usize)
+    requires
+        old(it).wf(),
+    ensures
+        final(it).wf(),
+        final(it).bytes() == old(it).bytes(),
+        old(it).spec_pos() <= target <= old(it).bytes().len(),
+        final(it).spec_pos() == target,
+{
+    it.seek_to(target)
+}
+
+/// What an iterator's `clone` and `default` say.
+#[allow(dead_code)]
+fn raw_told_by_an_iterators_clone<'a>(it: &RawColumnIter<'a>) -> (out: (RawColumnIter<'a>, RawColumnIter<'a>))
+    ensures
+        out.0 == *it,
+        out.1.wf(),
+        out.1.bytes() == Seq::<u8>::empty(),
+        out.1.spec_pos() == 0,
+{
+    (it.clone(), RawColumnIter::default())
 }
 
 } // verus!

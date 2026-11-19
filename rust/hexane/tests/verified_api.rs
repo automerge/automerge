@@ -16,11 +16,11 @@ use hexane::delta::DeltaEncoderState;
 use hexane::encoder::{BoolEncoder, BoolEncoderState, RleEncoder, RleEncoderState};
 use hexane::prefix::{PrefixSeek, PrefixWeightFn};
 use hexane::verified::{
-    refused, AccIndex, Get, LenIndex, SumIndex, VAccum, VAccumulated, VAdds, VAmount, VDeltaValue,
-    VGroup, VNewtype, VSummed, VValue, VerifiedAccColumn, VerifiedAccIter, VerifiedAccIterState,
-    VerifiedAccSeek, VerifiedAccValue, VerifiedColumn, VerifiedDecoder, VerifiedDeltaColumn,
-    VerifiedDeltaDecoder, VerifiedDeltaEncoder, VerifiedDeltaEncoderState, VerifiedEncoder,
-    VerifiedEncoderState, VerifiedIter, VerifiedIterState, VerifiedPrefixColumn,
+    refused, AccIndex, Get, LenIndex, RawColumn, SumIndex, VAccum, VAccumulated, VAdds, VAmount,
+    VDeltaValue, VGroup, VNewtype, VSummed, VValue, VerifiedAccColumn, VerifiedAccIter,
+    VerifiedAccIterState, VerifiedAccSeek, VerifiedAccValue, VerifiedColumn, VerifiedDecoder,
+    VerifiedDeltaColumn, VerifiedDeltaDecoder, VerifiedDeltaEncoder, VerifiedDeltaEncoderState,
+    VerifiedEncoder, VerifiedEncoderState, VerifiedIter, VerifiedIterState, VerifiedPrefixColumn,
     VerifiedPrefixIter, VerifiedPrefixIterState, VerifiedPrefixSeek, VerifiedPrefixedValue,
     VerifiedRuns,
 };
@@ -15065,4 +15065,256 @@ fn delta_decoders_told() {
         DeltaDecoder::<i64>::new(&wrap).collect::<Vec<_>>(),
         [i64::MAX, i64::MIN]
     );
+}
+
+// ── Raw columns ──────────────────────────────────────────────
+
+/// `hexane::verified` gives the raw column of the old API, the one type
+/// the two APIs share: both paths name it, and its iterator.
+#[test]
+fn raw_one_type() {
+    let mut col: hexane::verified::RawColumn = hexane::RawColumn::new();
+    col.splice_slice(0, 0, b"abc");
+    let it: hexane::verified::RawColumnIter<'_> = hexane::RawColumn::iter(&col);
+    let mut it: hexane::RawColumnIter<'_> = it;
+    assert_eq!(it.take(3), b"abc");
+    let none: hexane::RawColumnIter<'_> = hexane::verified::RawColumnIter::default();
+    assert_eq!(none.pos(), 0);
+}
+
+/// Where the slabs of a raw column meet: the places it gives no range
+/// across.
+fn raw_cuts(col: &RawColumn) -> Vec<usize> {
+    (1..col.len())
+        .filter(|&i| col.try_get(i - 1..i + 1).is_err())
+        .collect()
+}
+
+/// A raw column edited at random, and a `Vec<u8>` given the same edits:
+/// after each one, every way of reading the column gives the bytes of the
+/// `Vec`. A clone given the edits the column is given from then on stays
+/// its like, slab for slab.
+fn raw_edits(seed: u64, max_segments: usize) {
+    let mut rng = Rng(seed.wrapping_mul(0x9e37_79b9).wrapping_add(31) | 1);
+    let mut col = RawColumn::with_max_segments(max_segments);
+    let mut shadow = col.clone();
+    let mut model: Vec<u8> = Vec::new();
+    for step in 0..40 {
+        let ctx = format!("seed {seed} step {step}");
+        let index = rng.below(model.len() + 1);
+        let del = rng.below((model.len() - index).min(12) + 1);
+        let n = rng.below(20);
+        let bytes: Vec<u8> = (0..n).map(|_| rng.next() as u8).collect();
+
+        // an edit the column refuses changes nothing
+        if rng.below(6) == 0 {
+            let past = model.len() + 1 + rng.below(3);
+            assert!(col.try_splice_slice(past, 0, &bytes).is_err(), "{ctx}");
+            let too_many = model.len() - index + 1 + rng.below(3);
+            assert!(
+                col.try_splice_slice(index, too_many, &bytes).is_err(),
+                "{ctx}"
+            );
+            assert_eq!(col.save(), model, "{ctx}");
+        }
+        if rng.below(4) == 0 {
+            shadow = col.clone();
+        }
+        if rng.below(2) == 0 {
+            col.splice_slice(index, del, &bytes);
+        } else {
+            col.try_splice_slice(index, del, &bytes).unwrap();
+        }
+        shadow.splice_slice(index, del, &bytes);
+        model.splice(index..index + del, bytes.iter().copied());
+        let len = model.len();
+        assert_eq!(shadow.save(), model, "{ctx}");
+        assert_eq!(raw_cuts(&shadow), raw_cuts(&col), "{ctx}");
+
+        assert_eq!((col.len(), col.is_empty()), (len, len == 0), "{ctx}");
+        assert_eq!(col.save(), model, "{ctx}");
+        let mut buf = vec![7u8; 3];
+        let range = col.save_to(&mut buf);
+        assert_eq!(range, 3..3 + len, "{ctx}");
+        assert_eq!((&buf[..3], &buf[3..]), (&[7u8; 3][..], &model[..]), "{ctx}");
+
+        // a range the column gives is the model's, and `get` gives it too;
+        // a range of no bytes within the column is always given, and so is
+        // one byte; a range that leaves the column never is
+        for _ in 0..8 {
+            let start = rng.below(len + 2);
+            let end = start + rng.below(6);
+            let got = col.try_get(start..end);
+            if let Ok(s) = got {
+                assert_eq!(s, &model[start..end], "{ctx}");
+                assert_eq!(col.get(start..end), s, "{ctx}");
+            }
+            if end > len {
+                assert!(got.is_err(), "{ctx}");
+            } else if end - start <= 1 {
+                assert!(got.is_ok(), "{ctx}");
+            }
+        }
+        assert!(col.try_get(len + 1..len).is_err(), "{ctx}");
+
+        // a clone is a column of its own
+        let mut twin = col.clone();
+        assert_eq!(twin.save(), model, "{ctx}");
+        twin.splice_slice(0, 0, b"x");
+        assert_eq!((col.save(), twin.len()), (model.clone(), len + 1), "{ctx}");
+
+        // what the column saved loads, however small the slabs
+        let loaded = RawColumn::load(&model).unwrap();
+        assert_eq!((loaded.len(), loaded.save()), (len, model.clone()), "{ctx}");
+        let loaded = RawColumn::load_with_max_segments(&model, max_segments).unwrap();
+        assert_eq!((loaded.len(), loaded.save()), (len, model.clone()), "{ctx}");
+
+        // an iterator: made at a place, moved on, and read a byte at a time
+        let mut it = col.iter();
+        let mut read = Vec::new();
+        while it.pos() < len {
+            assert!(it.take(0).is_empty(), "{ctx}");
+            read.extend_from_slice(it.take(1));
+        }
+        assert_eq!(read, model, "{ctx}");
+        let from = rng.below(len + 1);
+        let mut it = col.iter_at(from);
+        assert_eq!(it.pos(), from, "{ctx}");
+        let k = rng.below(len - from + 1);
+        it.skip(k);
+        assert_eq!(it.pos(), from + k, "{ctx}");
+        let to = from + k + rng.below(len - from - k + 1);
+        it.seek_to(to);
+        assert_eq!(it.pos(), to, "{ctx}");
+        let mut other = it.clone();
+        if to < len {
+            assert_eq!(it.take(1), &model[to..to + 1], "{ctx}");
+            assert_eq!(other.take(1), &model[to..to + 1], "{ctx}");
+            assert_eq!((it.pos(), other.pos()), (to + 1, to + 1), "{ctx}");
+        }
+    }
+}
+
+#[test]
+fn raw_columns_against_a_model() {
+    for seed in 0..48 {
+        raw_edits(seed, [1, 2, 4, 16, 64, 4096][seed as usize % 6]);
+    }
+}
+
+/// `new`, `default` and `load` make columns that lay their bytes out
+/// alike: given the same bytes and then the same edits, their slabs meet
+/// at the same places.
+#[test]
+fn raw_made_alike() {
+    for seed in 0..8u64 {
+        let mut rng = Rng(seed.wrapping_mul(0xc2b2_ae35).wrapping_add(41) | 1);
+        let n = if seed == 0 { 0 } else { rng.below(40) };
+        let first: Vec<u8> = (0..n).map(|_| rng.next() as u8).collect();
+        let mut cols = [
+            RawColumn::new(),
+            RawColumn::default(),
+            RawColumn::load(&first).unwrap(),
+        ];
+        cols[0].splice_slice(0, 0, &first);
+        cols[1].splice_slice(0, 0, &first);
+        let mut len = first.len();
+        for step in 0..60 {
+            let index = rng.below(len + 1);
+            let del = rng.below((len - index).min(6) + 1);
+            let bytes: Vec<u8> = (0..rng.below(12)).map(|_| rng.next() as u8).collect();
+            for col in &mut cols {
+                col.splice_slice(index, del, &bytes);
+            }
+            len = len - del + bytes.len();
+            let cuts = raw_cuts(&cols[0]);
+            assert_eq!(raw_cuts(&cols[1]), cuts, "seed {seed} step {step}");
+            assert_eq!(raw_cuts(&cols[2]), cuts, "seed {seed} step {step}");
+            assert_eq!(cols[2].len(), len, "seed {seed} step {step}");
+        }
+    }
+}
+
+/// Values put into a raw column whole and taken out of it whole are read
+/// whole, however small the slabs are asked to be: no value comes to lie
+/// across two slabs, whether values go in one to a splice, as the chunks
+/// of one splice, or run together in one slice.
+fn raw_values(seed: u64, max_segments: usize) {
+    let mut rng = Rng(seed.wrapping_mul(0x85eb_ca6b).wrapping_add(37) | 1);
+    let mut col = RawColumn::with_max_segments(max_segments);
+    let mut model: Vec<Vec<u8>> = Vec::new();
+    for step in 0..60 {
+        let ctx = format!("seed {seed} step {step}");
+        let at = rng.below(model.len() + 1);
+        let del = rng.below((model.len() - at).min(3) + 1);
+        let new: Vec<Vec<u8>> = (0..rng.below(4))
+            .map(|_| (0..rng.below(9)).map(|_| rng.next() as u8).collect())
+            .collect();
+        let index: usize = model[..at].iter().map(Vec::len).sum();
+        let gone: usize = model[at..at + del].iter().map(Vec::len).sum();
+        match rng.below(3) {
+            0 => col.splice(index, gone, new.iter()),
+            1 => col.splice_slice(index, gone, &new.concat()),
+            _ => {
+                col.splice_slice(index, gone, &[]);
+                let mut place = index;
+                for v in &new {
+                    col.splice_slice(place, 0, v);
+                    place += v.len();
+                }
+            }
+        }
+        model.splice(at..at + del, new);
+
+        assert_eq!(col.save(), model.concat(), "{ctx}");
+        let mut it = col.iter();
+        let mut start = 0;
+        for v in &model {
+            assert_eq!(it.take(v.len()), &v[..], "{ctx}");
+            assert_eq!(col.get(start..start + v.len()), &v[..], "{ctx}");
+            assert_eq!(col.iter_at(start).take(v.len()), &v[..], "{ctx}");
+            start += v.len();
+            assert_eq!(it.pos(), start, "{ctx}");
+        }
+    }
+}
+
+#[test]
+fn raw_values_stay_whole() {
+    for seed in 0..48 {
+        raw_values(seed, [1, 2, 4, 16, 64, 4096][seed as usize % 6]);
+    }
+}
+
+/// `get` panics of exactly the ranges `try_get` refuses, and says why:
+/// those are the ranges its `requires` has a verified caller rule out.
+#[cfg(any(target_pointer_width = "64", panic = "unwind"))]
+#[test]
+fn raw_get_panics_where_try_get_refuses() {
+    let mut col = RawColumn::with_max_segments(2);
+    for i in 0..3u8 {
+        col.splice_slice(col.len(), 0, &[i; 3]);
+    }
+    let len = col.len();
+    // the three values are a slab each: no range across two is given
+    assert!(col.try_get(0..len).is_err() && col.try_get(2..4).is_err());
+    let (mut given, mut refused) = (0, 0);
+    for start in 0..len + 2 {
+        for end in 0..len + 2 {
+            #[allow(clippy::reversed_empty_ranges)]
+            let wanted = col.try_get(start..end).map(|s| s.to_vec());
+            let got = panic_of(std::panic::AssertUnwindSafe(|| {
+                col.get(start..end).to_vec()
+            }));
+            match (wanted, got) {
+                (Ok(_), None) => given += 1,
+                (Err(_), Some(text)) => {
+                    assert!(text.contains("raw get: OOB or cross-slab range"), "{text}");
+                    refused += 1;
+                }
+                (wanted, got) => panic!("{start}..{end}: {wanted:?}, {got:?}"),
+            }
+        }
+    }
+    assert!(given > 0 && refused > 0);
 }

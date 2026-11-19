@@ -20,9 +20,11 @@
 //! is empty.  [`try_splice_slice`](RawColumn::try_splice_slice) is proved to
 //! be exactly a splice of that byte sequence, and the reads (`try_get`,
 //! `iter_at`, [`RawColumnIter`]'s `take` and `skip`, `save_to`) and `load`
-//! to return exactly its bytes.  Unverified are only the `IntoIterator`
-//! plumbing of `try_splice` and `copy_ranges` (which splices through the
-//! verified path).
+//! to return exactly its bytes.  [`get`](RawColumn::get) asks of a verified
+//! caller the range that `try_get` takes, where it panics for another;
+//! a clone is a column of the same bytes.  Unverified are only the
+//! `IntoIterator` plumbing of `try_splice` and `copy_ranges` (which
+//! splices through the verified path).
 
 // Verus has no specs for `Vec::is_empty`, `usize::abs_diff` or `vec![x]`.
 #![allow(clippy::len_zero, clippy::manual_abs_diff, clippy::vec_init_then_push)]
@@ -55,18 +57,35 @@ verus! {
 /// [`RawColumn::with_max_segments`].
 const DEFAULT_MAX_SEGMENTS: usize = 4_096;
 
-#[derive(Debug, Clone)]
-#[verifier::allow(autoderive_clone_without_spec)]
+#[derive(Debug)]
 struct RawSlab {
     data: Vec<u8>,
+}
+
+impl View for RawSlab {
+    type V = Seq<u8>;
+
+    closed spec fn view(&self) -> Seq<u8> {
+        self.data@
+    }
+}
+
+impl Clone for RawSlab {
+    fn clone(&self) -> (r: Self)
+        ensures
+            r@ == self@,
+    {
+        let r = RawSlab { data: self.data.clone() };
+        assert(r.data@ =~= self.data@);
+        r
+    }
 }
 
 /// A byte arena with O(log S) random splices.
 ///
 /// See the module docs for the invariant around splice points and slab
 /// boundaries.
-#[derive(Debug, Clone)]
-#[verifier::allow(autoderive_clone_without_spec)]
+#[derive(Debug)]
 pub struct RawColumn {
     slabs: Vec<RawSlab>,
     /// Fenwick tree of slab byte lengths, 1-indexed.  `bit[0]` is unused,
@@ -76,6 +95,28 @@ pub struct RawColumn {
     /// Target per-slab byte budget (not a hard cap — single blobs larger
     /// than this live in their own oversize slab).
     max_segments: usize,
+}
+
+impl Clone for RawColumn {
+    /// A column of its own, with the same bytes.
+    fn clone(&self) -> (r: Self)
+        ensures
+            r@ == self@,
+            self.wf() ==> r.wf(),
+    {
+        let r = RawColumn {
+            slabs: self.slabs.clone(),
+            bit: self.bit.clone(),
+            total_len: self.total_len,
+            max_segments: self.max_segments,
+        };
+        proof {
+            assert(datas(r.slabs@) =~= datas(self.slabs@));
+            assert(sizes(r.slabs@) =~= sizes(self.slabs@));
+            assert(r.bit@ =~= self.bit@);
+        }
+        r
+    }
 }
 
 // ── Model ───────────────────────────────────────────────────────────────────
@@ -1709,8 +1750,7 @@ proof fn lemma_fits_here(it: RawColumnIter, n: nat)
 ///
 /// [`take`]: RawColumnIter::take
 /// [`skip`]: RawColumnIter::skip
-#[derive(Debug, Clone, Default)]
-#[verifier::allow(autoderive_clone_without_spec)]
+#[derive(Debug)]
 pub struct RawColumnIter<'a> {
     slabs: &'a [RawSlab],
     slab_idx: usize,
@@ -1718,6 +1758,41 @@ pub struct RawColumnIter<'a> {
     /// Absolute byte position — `slab_idx` and `offset_in_slab` are the
     /// physical derivation; this mirrors them for `pos()` and `seek_to`.
     pos: usize,
+}
+
+impl<'a> Clone for RawColumnIter<'a> {
+    /// An iterator at the same place of the same column.
+    fn clone(&self) -> (r: Self)
+        ensures
+            r == *self,
+    {
+        RawColumnIter {
+            slabs: self.slabs,
+            slab_idx: self.slab_idx,
+            offset_in_slab: self.offset_in_slab,
+            pos: self.pos,
+        }
+    }
+}
+
+impl<'a> Default for RawColumnIter<'a> {
+    /// The iterator of a column with no bytes.
+    fn default() -> (r: Self)
+        ensures
+            r.wf(),
+            r.bytes() == Seq::<u8>::empty(),
+            r.spec_pos() == 0,
+    {
+        let slabs: &'a [RawSlab] = &[];
+        let r = RawColumnIter { slabs, slab_idx: 0, offset_in_slab: 0, pos: 0 };
+        proof {
+            assert(r.slabs@ =~= Seq::<RawSlab>::empty());
+            assert(datas(r.slabs@) =~= Seq::<Seq<u8>>::empty());
+            assert(sizes(r.slabs@) =~= Seq::<nat>::empty());
+            lemma_flat_total(r.slabs@);
+        }
+        r
+    }
 }
 
 impl<'a> RawColumnIter<'a> {
@@ -1908,13 +1983,76 @@ impl<'a> RawColumnIter<'a> {
     }
 }
 
-} // verus!
-
 impl Default for RawColumn {
-    fn default() -> Self {
+    /// A column with no bytes.
+    fn default() -> (r: Self)
+        ensures
+            r.wf(),
+            r@ == Seq::<u8>::empty(),
+    {
         Self::new()
     }
 }
+
+impl RawColumn {
+    // ── Range read ──────────────────────────────────────────────────────────
+
+    /// Return a contiguous slice for `range`.
+    /// Panics if `range` is out of bounds or crosses a slab boundary.
+    ///
+    /// A verified caller shows that it is neither: the `requires` is what
+    /// [`try_get`](Self::try_get) gives `Ok` for.
+    pub fn get(&self, range: Range<usize>) -> (out: &[u8])
+        requires
+            self.wf(),
+            range.start <= range.end <= self@.len(),
+            range.start == range.end || self.in_one_slab(range.start as int, range.end as int),
+        ensures
+            out@ == self@.subrange(range.start as int, range.end as int),
+    {
+        self.try_get(range).expect("raw get: OOB or cross-slab range")
+    }
+
+    /// Non-panicking variant of [`get`](Self::get).
+    pub fn try_get(&self, range: Range<usize>) -> (r: Result<&[u8], PackError>)
+        requires
+            self.wf(),
+        ensures
+            r is Ok <==> range.start <= range.end <= self@.len() && (range.start == range.end
+                || self.in_one_slab(range.start as int, range.end as int)),
+            r is Ok ==> r->Ok_0@ == self@.subrange(range.start as int, range.end as int),
+    {
+        self.get_span(range.start, range.end)
+    }
+
+    // ── Wire format ─────────────────────────────────────────────────────────
+
+    /// Append the column's bytes to `out`; returns where they are.
+    pub fn save_to(&self, out: &mut Vec<u8>) -> (r: Range<usize>)
+        ensures
+            final(out)@ == old(out)@ + self@,
+            r.start == old(out)@.len(),
+            r.end == final(out)@.len(),
+    {
+        let start = out.len();
+        self.append_to(out);
+        start..out.len()
+    }
+
+    /// Deserialize from `data`.  Everything lands in a single slab — the
+    /// caller knows where value boundaries are and can splice further if
+    /// they want splits.
+    pub fn load(data: &[u8]) -> (r: Result<Self, PackError>)
+        ensures
+            r is Ok,
+            r->Ok_0.wf(),
+            r->Ok_0@ == data@,
+    {
+        Self::load_with_max_segments(data, DEFAULT_MAX_SEGMENTS)
+    }
+}
+
+} // verus!
 
 impl RawColumn {
     /// Insert / delete / replace bytes at `index`, taking a stream of byte
@@ -2001,35 +2139,6 @@ impl RawColumn {
         // range spliced a chunk per source slab, the column becomes the
         // splices applied one by one
         self.copy_from(&src, &splices);
-    }
-
-    // ── Range read ──────────────────────────────────────────────────────────
-
-    /// Return a contiguous slice for `range`.
-    /// Panics if `range` is out of bounds or crosses a slab boundary.
-    pub fn get(&self, range: Range<usize>) -> &[u8] {
-        self.try_get(range)
-            .expect("raw get: OOB or cross-slab range")
-    }
-
-    /// Non-panicking variant of [`get`](Self::get).
-    pub fn try_get(&self, range: Range<usize>) -> Result<&[u8], PackError> {
-        self.get_span(range.start, range.end)
-    }
-
-    // ── Wire format ─────────────────────────────────────────────────────────
-
-    pub fn save_to(&self, out: &mut Vec<u8>) -> Range<usize> {
-        let start = out.len();
-        self.append_to(out);
-        start..out.len()
-    }
-
-    /// Deserialize from `data`.  Everything lands in a single slab — the
-    /// caller knows where value boundaries are and can splice further if
-    /// they want splits.
-    pub fn load(data: &[u8]) -> Result<Self, PackError> {
-        Self::load_with_max_segments(data, DEFAULT_MAX_SEGMENTS)
     }
 }
 

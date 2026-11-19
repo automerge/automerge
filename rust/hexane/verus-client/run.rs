@@ -3160,3 +3160,82 @@ fn delta_decoders() {
     let none: VerifiedDeltaColumn<u32> = verus_client::delta_first_run_rebuilt(&[]);
     assert!(none.to_vec().is_empty());
 }
+
+#[test]
+fn raw_columns() {
+    use hexane::verified::{RawColumn, RawColumnIter};
+    let text = b"goodbye, world";
+    let mut col: RawColumn = verus_client::raw_built(b"hello, ", b"world");
+    assert_eq!(col.save(), b"hello, world");
+    verus_client::raw_replaced(&mut col, 0, 5, b"goodbye");
+    assert_eq!(col.save(), text);
+    verus_client::raw_cut_and_pasted(&mut col, 3, 9);
+    assert_eq!(col.save(), text);
+    assert_eq!(verus_client::raw_round_trip(b"any bytes"), b"any bytes");
+
+    // a column loaded from what another saved; the two in one buffer
+    let twin: RawColumn = verus_client::raw_saved_then_loaded(&col);
+    assert_eq!(twin.save(), text);
+    let (buf, first, second) = verus_client::raw_two_in_one_buffer(&col, &twin);
+    assert_eq!((&buf[first], &buf[second]), (&text[..], &text[..]));
+
+    // reads of a range, and by an iterator
+    assert_eq!(verus_client::raw_read(&twin, 3, 7), Some(&b"dbye"[..]));
+    assert_eq!(verus_client::raw_read(&twin, 3, 3), Some(&b""[..]));
+    assert_eq!(verus_client::raw_read(&twin, 3, 99), None);
+    let both = verus_client::raw_read_again(&twin, 0, 7).unwrap();
+    assert_eq!(both, (&b"goodbye"[..], &b"goodbye"[..]));
+    assert!(verus_client::raw_read_again(&twin, 9, 99).is_none());
+    let (x, y) = verus_client::raw_two_values(&twin, 7, 2);
+    assert_eq!((x, y), (&b"goodbye"[..], &b", "[..]));
+    assert_eq!(verus_client::raw_taken_at(&twin, 9, 5), b"world");
+    assert_eq!(verus_client::raw_skipped(&twin, 9, 5), (&b"world"[..], 14));
+    assert_eq!(verus_client::raw_sought(&twin, 2, 9, 5), b"world");
+    let (x, y) = verus_client::raw_read_twice(&twin, 0, 7);
+    assert_eq!((x, y), (&b"goodbye"[..], &b"goodbye"[..]));
+
+    // a clone is a column of its own
+    let more = verus_client::raw_clone_then_diverge(&twin, b"!");
+    assert_eq!(more.save(), b"goodbye, world!");
+    assert_eq!(twin.save(), text);
+
+    // each call by itself
+    let (new, with, default) = verus_client::raw_told_by_new(8);
+    assert!(new.is_empty() && with.is_empty() && default.is_empty());
+    assert_eq!(verus_client::raw_told_by_len(&twin), (14, false));
+    let mut other = verus_client::raw_told_by_clone(&twin);
+    assert!(verus_client::raw_told_by_try_splice_slice(&mut other, 15, 0, b"x").is_err());
+    assert!(verus_client::raw_told_by_try_splice_slice(&mut other, 14, 0, b"?").is_ok());
+    verus_client::raw_told_by_splice_slice(&mut other, 0, 7, b"hello");
+    assert_eq!(other.save(), b"hello, world?");
+    assert_eq!(
+        verus_client::raw_told_by_try_get(&twin, 9..14).unwrap(),
+        b"world"
+    );
+    assert!(verus_client::raw_told_by_try_get(&twin, 9..15).is_err());
+    assert_eq!(verus_client::raw_told_by_get(&twin, 0..7), b"goodbye");
+    let mut out = vec![1u8];
+    let (saved, range) = verus_client::raw_told_by_save(&twin, &mut out);
+    assert_eq!(
+        (&saved[..], range, &out[1..]),
+        (&text[..], 1..15, &text[..])
+    );
+    let (plain, small) = verus_client::raw_told_by_load(b"abc", 2);
+    assert_eq!(plain.unwrap().save(), b"abc");
+    assert_eq!(small.unwrap().save(), b"abc");
+
+    // an iterator's calls
+    let (start, mut it) = verus_client::raw_told_by_iter(&twin, 9);
+    assert_eq!((start.pos(), it.pos()), (0, 9));
+    assert_eq!(verus_client::raw_told_by_take(&mut it, 2), (9, &b"wo"[..]));
+    verus_client::raw_told_by_skip(&mut it, 1);
+    assert_eq!(it.pos(), 12);
+    verus_client::raw_told_by_seek_to(&mut it, 13);
+    let (mut same, none): (RawColumnIter<'_>, RawColumnIter<'_>) =
+        verus_client::raw_told_by_an_iterators_clone(&it);
+    assert_eq!((same.pos(), none.pos()), (13, 0));
+    assert_eq!((same.take(1), it.take(1)), (&b"d"[..], &b"d"[..]));
+
+    verus_client::raw_emptied(&mut col);
+    assert!(col.is_empty());
+}

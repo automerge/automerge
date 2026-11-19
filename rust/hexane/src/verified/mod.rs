@@ -189,6 +189,25 @@
 //! column answers is proved from them: Verus checks a client's
 //! accumulator when it is run on the client's crate.
 //!
+//! # Raw columns
+//!
+//! [`RawColumn`] is the one column type the two APIs share: it is
+//! [`hexane::RawColumn`](crate::RawColumn), whose module is verified as
+//! it stands, given here with its specifications. A raw column is a
+//! sequence of bytes and no more (its view): a splice is a splice of
+//! that sequence, a read gives its bytes, it saves as its bytes and
+//! loads from any. It does not know where a value begins or ends. A
+//! read gives a slice of the column's own memory, which is kept in
+//! slabs, and so can give only bytes that lie within one slab
+//! (`in_one_slab`; `fits` for a [`RawColumnIter`]).
+//!
+//! Its methods say what they do of every input: where one panics, as
+//! `splice_slice` does out of range, its specification is of the calls
+//! that return. `get` alone has a `requires` in its place. The two
+//! methods that take an iterator, `splice` of chunks and `copy_ranges`,
+//! are not verified code and cannot be called from it; `splice_slice`
+//! does what `splice` does with the chunks put together.
+//!
 //! # What is proved
 //!
 //! Of every method, its `ensures`, for every input that meets its
@@ -545,6 +564,7 @@ pub(crate) mod value;
 // spec functions exist only when Verus compiles the crate
 #[cfg(verus_keep_ghost)]
 pub use crate::iter_core::{past, window};
+pub use crate::raw::{RawColumn, RawColumnIter};
 #[cfg(verus_keep_ghost)]
 pub use acc::{accumulated, lemma_acc_cat, lemma_acc_range, lemma_acc_run, lemma_cancel, times};
 pub use acc::{AccIndex, VAccum, VAccumulated, VAdds, VGroup, VerifiedAccColumn};
