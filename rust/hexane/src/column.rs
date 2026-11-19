@@ -143,6 +143,7 @@ impl SlabWeight for usize {
     proof fn lemma_weight_len(&self)
         where Self: crate::btree::SlabAggregate
     {
+        crate::btree::lemma_count_len(*self);
     }
 
     #[inline]

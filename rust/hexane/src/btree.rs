@@ -332,6 +332,20 @@ pub proof fn axiom_prefix_add<P>(a: P, b: P, c: P)
 {
 }
 
+/// A count's length, as an aggregate: the count.
+///
+/// `SlabWeight::lemma_weight_len` of `usize` calls this and does not prove it in place.
+/// There `Self: SlabAggregate` is a bound the method is given, so that `spec_len` is read
+/// as the trait's and not as the implementation's above, and nothing puts that
+/// implementation's definition before the method's proof: whether Verus had it at hand
+/// came of the order of the crate's other definitions. A call of this lemma, in which
+/// `spec_len` is the implementation's, puts it there.
+pub(crate) proof fn lemma_count_len(w: usize)
+    ensures
+        w.spec_len() == w as nat,
+{
+}
+
 /// A prefix weight's length, as an aggregate: its item count.
 pub(crate) proof fn lemma_prefix_len<P: Clone + Default + std::fmt::Debug + AddAssign + SubAssign>(w: PrefixSlabWeight<P>)
     ensures
