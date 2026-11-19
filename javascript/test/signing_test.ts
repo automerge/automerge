@@ -440,6 +440,172 @@ describe("fragment signing API", () => {
     assert.equal(unsigned.counter, 43)
   })
 
+  it("preflights rejected batches and merge mismatches without closing pending operations", async () => {
+    // Ordinary JS workflows commit before these wrappers run, but the
+    // promise is stronger: a rejected batch or a mode mismatch must not
+    // touch the handle at all, not even by closing its pending transaction.
+    const alice = await makeSigner()
+    let signed = Automerge.init<CounterDoc>({
+      author: alice.author,
+      signing: true,
+      actor: "01",
+    })
+    signed = Automerge.change(signed, d => {
+      d.counter = 1
+    })
+    const [h1] = Automerge.getHeads(signed)
+    const [request] = Automerge.requestSignatures(signed)
+    const good = {
+      message: request.message,
+      signature: await alice.sign(request.message),
+    }
+    let unsigned = Automerge.init<CounterDoc>({ actor: "09" })
+    unsigned = Automerge.change(unsigned, d => {
+      d.counter = 9
+    })
+
+    const handle = Automerge.getBackend(signed)
+    handle.put("/", "title", "pending")
+    assert.equal(handle.pendingOps(), 1)
+
+    const rejected = Automerge.insertSignatures(signed, [
+      good,
+      { message: new Uint8Array(61), signature: good.signature },
+    ])
+    assert.equal(rejected.outcome.status, "rejected")
+    assert.strictEqual(rejected.doc, signed)
+    assert.equal(handle.pendingOps(), 1, "rejection left the transaction open")
+    assert.equal(handle.getCommittedHeads()[0], h1)
+    assert.throws(() => Automerge.merge(signed, unsigned), RangeError)
+    assert.equal(handle.pendingOps(), 1, "mismatch left the transaction open")
+    // The pending operation never became committed history.
+    assert.equal(Automerge.hasUnpublishedChanges(signed), true)
+    assert.deepEqual(handle.getCommittedHeads(), [h1])
+    assert.equal(handle.pendingOps(), 1)
+
+    const unsignedHandle = Automerge.getBackend(unsigned)
+    unsignedHandle.put("/", "title", "pending")
+    assert.equal(unsignedHandle.pendingOps(), 1)
+    const wrongMode = Automerge.insertSignatures(unsigned, [good])
+    assert.equal(wrongMode.outcome.status, "rejected")
+    assert.strictEqual(wrongMode.doc, unsigned)
+    assert.equal(unsignedHandle.pendingOps(), 1)
+    assert.throws(() => Automerge.merge(unsigned, signed), RangeError)
+    assert.equal(unsignedHandle.pendingOps(), 1)
+
+    // Documents remain current: the pending edit is committed by the next
+    // regular operation, then the good signature publishes normally.
+    handle.rollback()
+    unsignedHandle.rollback()
+    const { doc: next, outcome } = Automerge.insertSignatures(signed, [good])
+    assert.deepEqual(completed(outcome)[0].result, {
+      ok: true,
+      insert: "stored",
+    })
+    assert.equal(Automerge.hasUnpublishedChanges(next), false)
+    assert.equal(next.title, undefined)
+  })
+
+  it("reports publicationFailed when local publication enables equivocating pending groups and keeps the document consistent", async () => {
+    // Source holds unpublished draft `a`. Two same-author clones share the
+    // SAME remote actor and each commit a different successor of `a`; both
+    // signed level-0 groups wait behind `a` and conflict once it publishes.
+    const alice = await makeSigner()
+    let source = Automerge.init<CounterDoc>({
+      author: alice.author,
+      signing: true,
+      actor: "01",
+    })
+    source = Automerge.change(source, d => {
+      d.counter = 1
+    })
+    const [a] = Automerge.getHeads(source)
+
+    const branch = async (value: string) => {
+      let clone = Automerge.clone(source, { author: alice.author, actor: "02" })
+      clone = Automerge.change(clone, d => {
+        d.title = value
+      })
+      const [b] = Automerge.getHeads(clone)
+      // The same-author clone is asked for `a` too; sign only `b`.
+      const onlyB = Automerge.requestSignatures(clone).filter(r => r.hash === b)
+      assert.equal(onlyB.length, 1)
+      const inserted = Automerge.insertSignatures(
+        clone,
+        await signRequests(onlyB, alice.sign),
+      )
+      completed(inserted.outcome)
+      clone = inserted.doc
+      const meta = Automerge.getFragmentMeta(clone, b)
+      assert.ok(meta)
+      const [wire] = Automerge.bundleFragmentMetadata(clone, [meta])
+      assert.ok(wire)
+      assert.equal(Automerge.hasUnpublishedChanges(clone), true)
+      return { clone, b, wire }
+    }
+    const left = await branch("left")
+    const right = await branch("right")
+    assert.notEqual(left.b, right.b)
+
+    // Receiver retains both groups pending behind its unpublished `a`.
+    source = Automerge.loadIncremental(source, left.wire)
+    source = Automerge.loadIncremental(source, right.wire)
+    assert.deepEqual(Automerge.getHeads(source), [a])
+    const requests = Automerge.requestSignatures(source)
+    assert.deepEqual(
+      requests.map(r => r.hash),
+      [a],
+    )
+
+    const seen: Automerge.PatchSource[] = []
+    const before = source
+    const { doc: after, outcome } = Automerge.insertSignatures(
+      source,
+      await signRequests(requests, alice.sign),
+      { patchCallback: (_p, info) => seen.push(info.source) },
+    )
+    assert.equal(outcome.status, "publicationFailed", JSON.stringify(outcome))
+    if (outcome.status !== "publicationFailed") throw new Error("unreachable")
+    assert.equal(outcome.insertions.length, 1)
+    assert.equal(outcome.insertions[0].hash, a)
+    assert.deepEqual(outcome.insertions[0].result, {
+      ok: true,
+      insert: "stored",
+    })
+    assert.match(outcome.error, /admission/)
+    // No conflict was applied, so there is nothing to report via patches.
+    assert.deepEqual(seen, [])
+
+    // The returned doc supersedes the input like a completed batch does.
+    assert.notStrictEqual(after, before)
+    assert.throws(
+      () => Automerge.change(before, d => void (d.counter = 2)),
+      /out of date|outdated/,
+    )
+    assert.equal(Automerge.hasUnpublishedChanges(after), false)
+    assert.deepEqual(Automerge.getHeads(after), [a])
+    assert.equal(after.counter, 1)
+    assert.equal(after.title, undefined)
+    assert.deepEqual(Automerge.requestSignatures(after), [])
+    const reloaded = Automerge.load<CounterDoc>(Automerge.save(after), RECEIVER)
+    assert.deepEqual(Automerge.getHeads(reloaded), [a])
+
+    // Retrying without new evidence fails stably and still picks no winner.
+    const retry = Automerge.insertSignatures(after, [])
+    assert.equal(retry.outcome.status, "publicationFailed")
+    assert.deepEqual(Automerge.getHeads(retry.doc), [a])
+    source = Automerge.change(retry.doc, d => {
+      d.counter = 2
+    })
+    assert.equal(source.counter, 2)
+
+    // Branch documents are untouched.
+    assert.deepEqual(Automerge.getHeads(left.clone), [left.b])
+    assert.deepEqual(Automerge.getHeads(right.clone), [right.b])
+    assert.equal(left.clone.title, "left")
+    assert.equal(right.clone.title, "right")
+  })
+
   it("delivers incoming patches from completion and keeps status pure", async () => {
     const alice = await makeSigner()
     const bob = await makeSigner()

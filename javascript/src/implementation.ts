@@ -997,7 +997,9 @@ export function merge<T>(local: Doc<T>, remote: Doc<T>): Doc<T> {
       "Attempting to change an out of date document - set at: " + _trace(local),
     )
   }
-  const heads = localState.handle.getHeads()
+  // Snapshot heads without committing: the native merge rejects a mode
+  // mismatch before touching either handle, and so must this wrapper.
+  const heads = localState.handle.getCommittedHeads()
   const remoteState = _state(remote)
   localState.handle.merge(remoteState.handle)
   return progressDocument(local, "merge", heads, localState.patchCallback)
@@ -2262,16 +2264,32 @@ export function requestSignatures<T>(doc: Doc<T>): SigningRequest[] {
  *
  * @example Shutdown: stop editing, finish signing, then wait with your own
  * timeout before saving. {@link save} only returns bytes; durability is the
- * application's job, and unpublished drafts are not in the saved bytes.
+ * application's job, and unpublished drafts are not in the saved bytes, so
+ * saving while {@link hasUnpublishedChanges} is `true` loses those drafts.
+ * No requests plus unpublished history means publication is blocked on
+ * peers (for example a dependency they still have to sign), which only
+ * external progress can unblock: wait for it within the deadline, and
+ * decide explicitly what to do if the deadline passes.
  * ```ts
  * const deadline = Date.now() + 5_000
- * while (Automerge.hasUnpublishedChanges(doc) && Date.now() < deadline) {
+ * while (Automerge.hasUnpublishedChanges(doc)) {
+ *   const remaining = deadline - Date.now()
+ *   if (remaining <= 0) {
+ *     // Still unpublished: saving now would drop the drafts. Abort the
+ *     // shutdown (or deliberately accept the loss) instead of saving.
+ *     throw new Error("shutdown timed out with unpublished changes")
+ *   }
  *   const requests = Automerge.requestSignatures(doc)
- *   if (requests.length === 0) break // blocked on peers, nothing to sign
- *   const inputs = await signAll(requests)
- *   ;({ doc } = Automerge.insertSignatures(doc, inputs))
+ *   if (requests.length > 0) {
+ *     const inputs = await signAll(requests) // external signer
+ *     ;({ doc } = Automerge.insertSignatures(doc, inputs))
+ *   } else {
+ *     // Blocked on peers: let the network deliver their signatures, then
+ *     // re-check, bounded by what is left of the deadline.
+ *     doc = await waitForPeerProgress(doc, Math.min(remaining, 250))
+ *   }
  * }
- * await storage.write(Automerge.save(doc)) // published history only
+ * await storage.write(Automerge.save(doc)) // complete: nothing unpublished
  * ```
  *
  * @experimental
@@ -2290,7 +2308,9 @@ export function insertSignatures<T>(
   if (_is_proxy(doc)) {
     throw new RangeError("Calls to Automerge.change cannot be nested")
   }
-  const heads = state.handle.getHeads()
+  // Snapshot heads without committing: a rejected batch must leave the
+  // handle untouched, pending operations included.
+  const heads = state.handle.getCommittedHeads()
   const outcome = state.handle.insertSignatures(inputs)
   if (outcome.status === "rejected") {
     // Nothing was processed or mutated: the input document stays current.
