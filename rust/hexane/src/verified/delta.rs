@@ -6,12 +6,14 @@
 //! from them is known, and the column ([`VerifiedDeltaColumn`]). The
 //! column's iterator ([`VerifiedDeltaIter`]) is in `delta/iter.rs`.
 
+mod dec;
 #[cfg(verus_keep_ghost)]
 mod diffs;
 mod enc;
 mod find;
 mod iter;
 
+pub use dec::VerifiedDeltaDecoder;
 #[cfg(verus_keep_ghost)]
 pub use diffs::{
     delta_at, delta_prefix, delta_runs_at, deltas, lemma_delta_run_at, lemma_delta_runs_at,

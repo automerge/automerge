@@ -3063,3 +3063,100 @@ fn delta_encoders() {
 fn delta_encoder_stops_at_a_span_too_wide() {
     verus_client::delta_too_wide_never_saved();
 }
+
+#[test]
+fn delta_decoders() {
+    use hexane::verified::VerifiedDeltaDecoder;
+    fn run(count: usize, value: Option<i64>) -> Option<Run<Option<i64>>> {
+        Some(Run { count, value })
+    }
+    // the differences are 4, 4, 4, two nulls, -21 and `i64::MAX - 11`
+    let last = i64::MAX - 20;
+    let input = vec![Some(4), Some(8), Some(12), None, None, Some(-9), Some(last)];
+    let col: VerifiedDeltaColumn<Option<i64>> = verus_client::delta_built(&input);
+    let bytes = col.save();
+
+    // the values of a saved column, whichever way they are read
+    let dec = VerifiedDeltaDecoder::<Option<i64>>::new(&bytes);
+    assert_eq!(verus_client::delta_read_all(dec), input);
+    assert_eq!(
+        verus_client::delta_decode_all::<Option<i64>, Leb128>(&bytes),
+        input
+    );
+    assert_eq!(verus_client::delta_decoded_as_held(&col), input);
+    assert_eq!(
+        verus_client::delta_encoded_then_decoded::<_, Leb128>(&input),
+        input
+    );
+    assert_eq!(
+        verus_client::delta_decode_unknown::<Option<i64>, Leb128>(&bytes),
+        Some(input.clone())
+    );
+    assert_eq!(
+        verus_client::delta_decode_unknown::<u32, Leb128>(&bytes),
+        None
+    );
+    let (loaded, read) =
+        verus_client::delta_decoded_or_loaded::<Option<i64>, Leb128>(&bytes).unwrap();
+    assert_eq!((loaded.to_vec(), read), (input.clone(), input.clone()));
+    assert!(verus_client::delta_decoded_or_loaded::<i64, Leb128>(&bytes).is_none());
+
+    // each call of the decoder by itself
+    let mut dec: VerifiedDeltaDecoder<'_, Option<i64>> =
+        verus_client::delta_told_by_a_decoder(&bytes);
+    assert!(verus_client::delta_told_by_a_checked_decoder::<u32, Leb128>(&bytes).is_err());
+    let mut other =
+        verus_client::delta_told_by_a_checked_decoder::<Option<i64>, Leb128>(&bytes).unwrap();
+    assert_eq!(
+        verus_client::delta_told_by_a_decoders_next(&mut dec),
+        Some(Some(4))
+    );
+    assert_eq!(
+        verus_client::delta_told_by_a_decoders_nth(&mut dec, 1),
+        Some(Some(12))
+    );
+    verus_client::delta_told_by_a_decoders_advance(&mut dec, 1);
+    let copy = verus_client::delta_told_by_a_decoders_copy(&dec);
+    assert_eq!(copy.collect::<Vec<_>>(), input[4..]);
+    assert_eq!(verus_client::delta_peek_ahead(&dec, 1), Some(Some(-9)));
+    assert_eq!(verus_client::delta_peek_ahead(&dec, 3), None);
+    assert_eq!(
+        verus_client::delta_told_by_a_decoders_nth(&mut dec, 9),
+        None
+    );
+    assert_eq!(verus_client::delta_told_by_a_decoders_next(&mut dec), None);
+
+    // runs of differences: of one difference, no longer than asked for,
+    // each standing for the values it passes over
+    assert_eq!(
+        verus_client::delta_told_by_a_decoders_run(&mut other, 2),
+        run(2, Some(4))
+    );
+    assert_eq!(
+        verus_client::delta_told_by_a_decoders_run(&mut other, 0),
+        None
+    );
+    assert_eq!(
+        verus_client::delta_run_stands_for(&mut other, 9),
+        run(1, Some(4))
+    );
+    assert_eq!(
+        verus_client::delta_run_then_next(&mut other, 9),
+        Some((2, Some(-9)))
+    );
+    assert_eq!(
+        verus_client::delta_run_stands_for(&mut other, 9),
+        run(1, Some(i64::MAX - 11))
+    );
+    assert_eq!(
+        verus_client::delta_told_by_a_decoders_run(&mut other, 9),
+        None
+    );
+    assert_eq!(verus_client::delta_run_then_next(&mut other, 9), None);
+
+    // a decoder's first run, given to a column
+    let first: VerifiedDeltaColumn<Option<i64>> = verus_client::delta_first_run_rebuilt(&bytes);
+    assert_eq!(first.to_vec(), input[..3]);
+    let none: VerifiedDeltaColumn<u32> = verus_client::delta_first_run_rebuilt(&[]);
+    assert!(none.to_vec().is_empty());
+}

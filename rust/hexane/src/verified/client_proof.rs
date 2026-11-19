@@ -406,11 +406,11 @@ use super::{
     total_str_len, window, AccIndex, Get, LenIndex, SumIndex, VAccum, VAccumulated, VAdds, VAmount,
     VCodec, VCount, VDelta, VDeltaValue, VGet, VGroup, VIndex, VKeeps, VNewtype, VSpec, VSum,
     VSummed, VValue, VerifiedAccColumn, VerifiedAccIter, VerifiedAccIterState, VerifiedAccSeek,
-    VerifiedAccValue, VerifiedColumn, VerifiedDecoder, VerifiedDeltaColumn, VerifiedDeltaEncoder,
-    VerifiedDeltaEncoderState, VerifiedDeltaIter, VerifiedDeltaIterState, VerifiedDeltaRuns,
-    VerifiedEncoder, VerifiedEncoderState, VerifiedFindByRange, VerifiedIter, VerifiedIterState,
-    VerifiedPrefixColumn, VerifiedPrefixIter, VerifiedPrefixIterState, VerifiedPrefixSeek,
-    VerifiedPrefixedValue, VerifiedRuns,
+    VerifiedAccValue, VerifiedColumn, VerifiedDecoder, VerifiedDeltaColumn, VerifiedDeltaDecoder,
+    VerifiedDeltaEncoder, VerifiedDeltaEncoderState, VerifiedDeltaIter, VerifiedDeltaIterState,
+    VerifiedDeltaRuns, VerifiedEncoder, VerifiedEncoderState, VerifiedFindByRange, VerifiedIter,
+    VerifiedIterState, VerifiedPrefixColumn, VerifiedPrefixIter, VerifiedPrefixIterState,
+    VerifiedPrefixSeek, VerifiedPrefixedValue, VerifiedRuns,
 };
 use crate::{DeltaRun, Leb128, LoadOpts, PackError, Run};
 use std::cmp::Ordering;
@@ -14325,6 +14325,373 @@ fn delta_uniform_until_another(buf: &mut Vec<u8>) -> (r: (bool, bool, bool, bool
     let n = s.len();
     s.finish(buf);
     (a, b, c, d, n)
+}
+
+// ── Delta columns: the decoder ──────────────────────────────────────────
+
+/// A delta decoder read to its end by a `for` loop: the `Vec` holds the
+/// values the decoder had left, in order.
+#[allow(dead_code)]
+fn delta_read_all<'a, T: VDeltaValue<C>, C: VCodec>(dec: VerifiedDeltaDecoder<'a, T, C>) -> (out: Vec<T>)
+    ensures
+        out@ == dec.rest(),
+{
+    let ghost all = dec.rest();
+    let mut out: Vec<T> = Vec::new();
+    for x in at: dec
+        invariant
+            at.seq() == all,
+            out@ == all.take(at.index()),
+    {
+        out.push(x);
+        proof {
+            assert(all.take(at.index() + 1) =~= all.take(at.index()).push(x));
+        }
+    }
+    proof {
+        assert(all.take(all.len() as int) =~= all);
+    }
+    out
+}
+
+/// A decoder gives the values of a saved delta column from its bytes,
+/// with no column built: the values the bytes are the saved column of.
+/// For every value type and codec.
+#[allow(dead_code)]
+fn delta_decode_all<'a, T: VDeltaValue<C>, C: VCodec>(bytes: &'a [u8]) -> (out: Vec<T>)
+    requires
+        VerifiedDeltaColumn::<T, C>::valid(bytes@),
+    ensures
+        out@ == VerifiedDeltaColumn::<T, C>::values(bytes@),
+{
+    delta_read_all(VerifiedDeltaDecoder::<T, C>::new(bytes))
+}
+
+/// What a delta column saves, a decoder gives back: the column's
+/// values.
+#[allow(dead_code)]
+fn delta_decoded_as_held<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>) -> (out: Vec<T>)
+    ensures
+        out@ == col@,
+{
+    let bytes = col.save();
+    delta_decode_all::<T, C>(bytes.as_slice())
+}
+
+/// What a delta encoder saves, a decoder gives back: the values the
+/// encoder was given, with no column between the two.
+#[allow(dead_code)]
+fn delta_encoded_then_decoded<T: VDeltaValue<C>, C: VCodec>(input: &Vec<T>) -> (out: Vec<T>)
+    requires
+        all_fit(input@),
+    ensures
+        out@ == input@,
+{
+    let bytes = delta_encoded_as_saved::<T, C>(input);
+    delta_decode_all::<T, C>(bytes.as_slice())
+}
+
+/// Bytes of which nothing is known: `try_new` checks them, and where it
+/// gives a decoder the bytes are a saved delta column, and the decoder
+/// gives its values.
+#[allow(dead_code)]
+fn delta_decode_unknown<'a, T: VDeltaValue<C>, C: VCodec>(bytes: &'a [u8]) -> (r: Option<Vec<T>>)
+    ensures
+        r matches Some(out) ==> {
+            &&& VerifiedDeltaColumn::<T, C>::valid(bytes@)
+            &&& out@ == VerifiedDeltaColumn::<T, C>::values(bytes@)
+        },
+{
+    match VerifiedDeltaDecoder::<T, C>::try_new(bytes) {
+        Ok(dec) => Some(delta_read_all(dec)),
+        Err(_) => None,
+    }
+}
+
+/// Bytes a load takes are bytes a decoder may read with no check of its
+/// own, and it gives the values of the column loaded.
+#[allow(dead_code)]
+fn delta_decoded_or_loaded<T: VDeltaValue<C>, C: VCodec>(bytes: &[u8]) -> (r: Option<
+    (VerifiedDeltaColumn<T, C>, Vec<T>),
+>)
+    ensures
+        r matches Some(p) ==> p.1@ == p.0@,
+{
+    match VerifiedDeltaColumn::<T, C>::load(bytes) {
+        Ok(col) => {
+            let out = delta_decode_all::<T, C>(bytes);
+            Some((col, out))
+        },
+        Err(_) => None,
+    }
+}
+
+/// What `new` says of the decoder it gives: it is of the column the
+/// bytes are the saved one of, at its first value, with every value
+/// left to give.
+#[allow(dead_code)]
+fn delta_told_by_a_decoder<'a, T: VDeltaValue<C>, C: VCodec>(bytes: &'a [u8]) -> (r: VerifiedDeltaDecoder<'a, T, C>)
+    requires
+        VerifiedDeltaColumn::<T, C>::valid(bytes@),
+    ensures
+        r.column() == VerifiedDeltaColumn::<T, C>::values(bytes@),
+        r.pos() == 0,
+        r.rest() == VerifiedDeltaColumn::<T, C>::values(bytes@),
+{
+    VerifiedDeltaDecoder::<T, C>::new(bytes)
+}
+
+/// What `try_new` says: where it gives a decoder, the bytes are a saved
+/// delta column, and the decoder is the one `new` gives.
+#[allow(dead_code)]
+fn delta_told_by_a_checked_decoder<'a, T: VDeltaValue<C>, C: VCodec>(bytes: &'a [u8]) -> (r: Result<
+    VerifiedDeltaDecoder<'a, T, C>,
+    PackError,
+>)
+    ensures
+        r matches Ok(d) ==> {
+            &&& VerifiedDeltaColumn::<T, C>::valid(bytes@)
+            &&& d.column() == VerifiedDeltaColumn::<T, C>::values(bytes@)
+            &&& d.pos() == 0
+            &&& d.rest() == VerifiedDeltaColumn::<T, C>::values(bytes@)
+        },
+{
+    VerifiedDeltaDecoder::<T, C>::try_new(bytes)
+}
+
+/// What `next` says, in the places of the column: the value at `pos()`,
+/// and the decoder one place on; or, at the end, none, and the decoder
+/// where it was.
+#[allow(dead_code)]
+fn delta_told_by_a_decoders_next<'a, T: VDeltaValue<C>, C: VCodec>(dec: &mut VerifiedDeltaDecoder<'a, T, C>) -> (r:
+    Option<T>)
+    ensures
+        final(dec).column() == old(dec).column(),
+        match r {
+            Some(v) => {
+                &&& old(dec).pos() < old(dec).column().len()
+                &&& v == old(dec).column()[old(dec).pos() as int]
+                &&& final(dec).pos() == old(dec).pos() + 1
+                &&& final(dec).rest() == old(dec).rest().skip(1)
+            },
+            None => {
+                &&& old(dec).pos() == old(dec).column().len()
+                &&& final(dec).pos() == old(dec).pos()
+            },
+        },
+{
+    proof {
+        dec.lemma_column();
+    }
+    dec.next()
+}
+
+/// What `nth` says, in the places of the column: the value `n` places
+/// on, and the decoder past it; or, where the column ends before that,
+/// none, and the decoder at the end.
+#[allow(dead_code)]
+fn delta_told_by_a_decoders_nth<'a, T: VDeltaValue<C>, C: VCodec>(
+    dec: &mut VerifiedDeltaDecoder<'a, T, C>,
+    n: usize,
+) -> (r: Option<T>)
+    ensures
+        final(dec).column() == old(dec).column(),
+        old(dec).pos() + n < old(dec).column().len() ==> {
+            &&& r == Some(old(dec).column()[old(dec).pos() + n])
+            &&& final(dec).pos() == old(dec).pos() + n + 1
+        },
+        old(dec).pos() + n >= old(dec).column().len() ==> {
+            &&& r is None
+            &&& final(dec).pos() == old(dec).column().len()
+        },
+{
+    proof {
+        dec.lemma_column();
+    }
+    dec.nth(n)
+}
+
+/// What `advance_by` says: the decoder is `n` places on, or at the end
+/// of the column where that comes first, and what it has left is what
+/// it had `past` the first `n`.
+#[allow(dead_code)]
+fn delta_told_by_a_decoders_advance<'a, T: VDeltaValue<C>, C: VCodec>(
+    dec: &mut VerifiedDeltaDecoder<'a, T, C>,
+    n: usize,
+)
+    ensures
+        final(dec).column() == old(dec).column(),
+        final(dec).rest() == past(old(dec).rest(), n as int),
+        old(dec).pos() + n <= old(dec).column().len() ==> final(dec).pos() == old(dec).pos() + n,
+        old(dec).pos() + n > old(dec).column().len() ==> final(dec).pos() == old(dec).column().len(),
+{
+    dec.advance_by(n)
+}
+
+/// What `clone` says: a decoder of the same column, at the same place.
+#[allow(dead_code)]
+fn delta_told_by_a_decoders_copy<'a, T: VDeltaValue<C>, C: VCodec>(dec: &VerifiedDeltaDecoder<'a, T, C>) -> (r:
+    VerifiedDeltaDecoder<'a, T, C>)
+    ensures
+        r.column() == dec.column(),
+        r.pos() == dec.pos(),
+        r.rest() == dec.rest(),
+{
+    dec.clone()
+}
+
+/// What `next_delta_run_max` says: a run of the column's differences
+/// (`deltas`) from `pos()` on, as long as it can be within `max`, and
+/// the decoder past it; or none, where `max` is 0 or the decoder is at
+/// the end, and the decoder where it was.
+#[allow(dead_code)]
+fn delta_told_by_a_decoders_run<'a, T: VDeltaValue<C>, C: VCodec>(
+    dec: &mut VerifiedDeltaDecoder<'a, T, C>,
+    max: usize,
+) -> (r: Option<Run<Option<i64>>>)
+    ensures
+        final(dec).column() == old(dec).column(),
+        match r {
+            Some(run) => {
+                &&& head_run_max(
+                    deltas(old(dec).column()).skip(old(dec).pos() as int),
+                    run.value,
+                    run.count as int,
+                    max as int,
+                )
+                &&& final(dec).pos() == old(dec).pos() + run.count
+                &&& final(dec).rest() == old(dec).rest().skip(run.count as int)
+            },
+            None => {
+                &&& max == 0 || old(dec).pos() == old(dec).column().len()
+                &&& final(dec).pos() == old(dec).pos()
+            },
+        },
+{
+    proof {
+        dec.lemma_column();
+    }
+    dec.next_delta_run_max(max)
+}
+
+/// A run of differences a decoder reads stands for the values it passes
+/// over: as a `DeltaRun` after the number before it (`delta_prefix`),
+/// it is one a column takes (`delta_run_fits`), and its values are the
+/// column's at those places, the first of those the decoder had left.
+#[allow(dead_code)]
+fn delta_run_stands_for<'a, T: VDeltaValue<C>, C: VCodec>(dec: &mut VerifiedDeltaDecoder<'a, T, C>, max: usize) -> (r:
+    Option<Run<Option<i64>>>)
+    ensures
+        final(dec).column() == old(dec).column(),
+        r matches Some(run) ==> {
+            let (col, p) = (old(dec).column(), old(dec).pos() as int);
+            let dr = DeltaRun { prefix: delta_prefix(col, p), delta: run.value, count: run.count };
+            &&& p + run.count <= col.len()
+            &&& final(dec).pos() == p + run.count
+            &&& delta_run_fits::<T>(dr)
+            &&& delta_run_values::<T>(dr) == col.subrange(p, p + run.count)
+            &&& delta_run_values::<T>(dr) == old(dec).rest().take(run.count as int)
+        },
+{
+    let ghost (col, p) = (dec.column(), dec.pos() as int);
+    proof {
+        dec.lemma_column();
+    }
+    let r = dec.next_delta_run_max(max);
+    proof {
+        if let Some(run) = r {
+            assert forall|j: int| p <= j < p + run.count implies delta_at(col, j) == run.value by {
+                assert(deltas(col).skip(p)[j - p] == run.value);
+            }
+            lemma_delta_run_at::<T>(col, p, run.count, run.value);
+            assert(col.subrange(p, p + run.count) =~= col.skip(p).take(run.count as int));
+        }
+    }
+    r
+}
+
+/// A run passed over and then a value read: the value is the column's
+/// at the place after the run.
+#[allow(dead_code)]
+fn delta_run_then_next<'a, T: VDeltaValue<C>, C: VCodec>(dec: &mut VerifiedDeltaDecoder<'a, T, C>, max: usize) -> (r:
+    Option<(usize, T)>)
+    ensures
+        r matches Some(p) ==> {
+            &&& old(dec).pos() + p.0 < old(dec).column().len()
+            &&& p.1 == old(dec).column()[old(dec).pos() + p.0]
+        },
+{
+    match dec.next_delta_run_max(max) {
+        Some(run) => {
+            proof {
+                dec.lemma_column();
+            }
+            match dec.next() {
+                Some(v) => Some((run.count, v)),
+                None => None,
+            }
+        },
+        None => None,
+    }
+}
+
+/// The value `n` places on, read by a copy of the decoder moved there:
+/// the decoder itself stays where it is.
+#[allow(dead_code)]
+fn delta_peek_ahead<'a, T: VDeltaValue<C>, C: VCodec>(dec: &VerifiedDeltaDecoder<'a, T, C>, n: usize) -> (r: Option<T>)
+    ensures
+        dec.pos() + n < dec.column().len() ==> r == Some(dec.column()[dec.pos() + n]),
+        dec.pos() + n >= dec.column().len() ==> r is None,
+{
+    let mut ahead = dec.clone();
+    proof {
+        dec.lemma_column();
+    }
+    ahead.advance_by(n);
+    ahead.next()
+}
+
+/// The first run of differences read from saved bytes, spliced into an
+/// empty column as a run after 0: that column holds the first values of
+/// the saved one. So a decoder's runs are runs a column takes.
+#[allow(dead_code)]
+fn delta_first_run_rebuilt<'a, T: VDeltaValue<C>, C: VCodec>(bytes: &'a [u8]) -> (col: VerifiedDeltaColumn<T, C>)
+    requires
+        VerifiedDeltaColumn::<T, C>::valid(bytes@),
+    ensures
+        col@.len() <= VerifiedDeltaColumn::<T, C>::values(bytes@).len(),
+        col@ == VerifiedDeltaColumn::<T, C>::values(bytes@).take(col@.len() as int),
+{
+    let mut dec = VerifiedDeltaDecoder::<T, C>::new(bytes);
+    let ghost vs = dec.column();
+    let mut col = VerifiedDeltaColumn::<T, C>::new();
+    proof {
+        dec.lemma_column();
+    }
+    match dec.next_delta_run_max(usize::MAX) {
+        Some(run) => {
+            let r = DeltaRun { prefix: 0, delta: run.value, count: run.count };
+            let mut runs: Vec<DeltaRun> = Vec::new();
+            runs.push(r);
+            proof {
+                assert forall|j: int| 0 <= j < run.count implies delta_at(vs, j) == run.value by {
+                    assert(deltas(vs).skip(0)[j] == run.value);
+                }
+                lemma_delta_run_at::<T>(vs, 0, run.count, run.value);
+                lemma_delta_runs_one::<T>(r);
+                assert(runs@ =~= seq![r]);
+            }
+            col.splice_runs(0, 0, runs.as_slice());
+            proof {
+                assert(col@ =~= vs.subrange(0, run.count as int));
+                assert(vs.subrange(0, run.count as int) =~= vs.take(run.count as int));
+            }
+        },
+        None => {
+            assert(col@ =~= vs.take(0));
+        },
+    }
+    col
 }
 
 } // verus!

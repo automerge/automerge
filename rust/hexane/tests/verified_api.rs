@@ -19,14 +19,16 @@ use hexane::verified::{
     refused, AccIndex, Get, LenIndex, SumIndex, VAccum, VAccumulated, VAdds, VAmount, VDeltaValue,
     VGroup, VNewtype, VSummed, VValue, VerifiedAccColumn, VerifiedAccIter, VerifiedAccIterState,
     VerifiedAccSeek, VerifiedAccValue, VerifiedColumn, VerifiedDecoder, VerifiedDeltaColumn,
-    VerifiedDeltaEncoder, VerifiedDeltaEncoderState, VerifiedEncoder, VerifiedEncoderState,
-    VerifiedIter, VerifiedIterState, VerifiedPrefixColumn, VerifiedPrefixIter,
-    VerifiedPrefixIterState, VerifiedPrefixSeek, VerifiedPrefixedValue, VerifiedRuns,
+    VerifiedDeltaDecoder, VerifiedDeltaEncoder, VerifiedDeltaEncoderState, VerifiedEncoder,
+    VerifiedEncoderState, VerifiedIter, VerifiedIterState, VerifiedPrefixColumn,
+    VerifiedPrefixIter, VerifiedPrefixIterState, VerifiedPrefixSeek, VerifiedPrefixedValue,
+    VerifiedRuns,
 };
 use hexane::{
-    Codec, Column, ColumnEncoding, ColumnValue, ColumnValueRef, DeltaColumn, DeltaEncoder,
-    DeltaValue, Encoder, EncoderApi, IterState, Leb128, LoadOpts, MaybeFill, NoFill, PackError,
-    PrefixColumn, PrefixIter, PrefixValue, PrefixedValue, RleEncoding, RleValue, Run, RunDecoder,
+    Codec, Column, ColumnEncoding, ColumnValue, ColumnValueRef, DeltaColumn, DeltaDecoder,
+    DeltaEncoder, DeltaValue, Encoder, EncoderApi, IterState, Leb128, LoadOpts, MaybeFill, NoFill,
+    PackError, PrefixColumn, PrefixIter, PrefixValue, PrefixedValue, RleEncoding, RleValue, Run,
+    RunDecoder,
 };
 use std::cell::{Cell, RefCell};
 use std::cmp::Ordering;
@@ -14749,4 +14751,318 @@ fn delta_encoders_stop_at_values_too_far_apart() {
     assert_eq!(new, told);
     let old = panic_of(move || DeltaEncoder::<Option<i64>>::encode(values));
     assert_eq!(old, told);
+}
+
+// ── Delta columns: the decoder ───────────────────────────────
+
+/// The differences a delta column of `values` keeps: a model. A null
+/// keeps none and moves no sum.
+fn delta_diffs<T: Deltad>(values: &[T]) -> Vec<Option<i64>> {
+    let mut last = 0i64;
+    values
+        .iter()
+        .map(|&v| {
+            let n = <T as DeltaValue>::to_i64(v)?;
+            let d = n.wrapping_sub(last);
+            last = n;
+            Some(d)
+        })
+        .collect()
+}
+
+/// The run of one difference at the head of `diffs`, of `max` at most:
+/// a model of what a decoder's next run is.
+fn delta_head_run(diffs: &[Option<i64>], max: usize) -> Option<Run<Option<i64>>> {
+    let value = *diffs.first()?;
+    let count = diffs.iter().take(max).take_while(|d| **d == value).count();
+    (count > 0).then_some(Run { count, value })
+}
+
+/// A decoder of each API over one saved column: read whole, and then
+/// moved alike, step by step, and compared with each other and with a
+/// model of the values and of their differences.
+fn delta_decodes<T: Deltad>(seed: u64) {
+    let mut rng = Rng(seed.wrapping_mul(0x51_7cc1_b727).wrapping_add(29) | 1);
+    let feed = delta_feed::<T>(&mut rng);
+    let values: Vec<T> = feed
+        .iter()
+        .flat_map(|&(v, n)| std::iter::repeat_n(v, n))
+        .collect();
+    let bytes = delta_bytes(&values);
+    let diffs = delta_diffs(&values);
+
+    // read whole, whichever way the decoder is made
+    let new = VerifiedDeltaDecoder::<T>::new(&bytes);
+    let old = DeltaDecoder::<T>::new(&bytes);
+    assert_eq!(format!("{new:?}"), format!("Verified{old:?}"));
+    assert_eq!(new.collect::<Vec<T>>(), values, "seed {seed}");
+    assert_eq!(old.collect::<Vec<T>>(), values, "seed {seed}");
+    let mut new = VerifiedDeltaDecoder::<T>::try_new(&bytes).unwrap();
+    let mut old = DeltaDecoder::<T>::try_new(&bytes).unwrap();
+    assert_eq!(new.clone().collect::<Vec<T>>(), values, "seed {seed}");
+
+    // and moved step by step; `at` is how many values are behind
+    let mut at = 0;
+    for step in 0..80 {
+        match rng.below(6) {
+            0 | 1 => {
+                let v = new.next();
+                assert_eq!(v, old.next(), "seed {seed} step {step}");
+                assert_eq!(v, values.get(at).copied(), "seed {seed} step {step}");
+                at = (at + 1).min(values.len());
+            }
+            2 => {
+                let n = rng.below(30);
+                let v = new.nth(n);
+                assert_eq!(v, old.nth(n), "seed {seed} step {step}");
+                assert_eq!(v, values.get(at + n).copied(), "seed {seed} step {step}");
+                at = (at + n + 1).min(values.len());
+            }
+            3 => {
+                let n = rng.below(30);
+                new.advance_by(n);
+                old.advance_by(n);
+                at = (at + n).min(values.len());
+            }
+            4 => {
+                // a run of no values is no run, and moves nothing
+                assert_eq!(new.next_delta_run_max(0), None);
+            }
+            _ => {
+                let max = match rng.below(3) {
+                    0 => usize::MAX,
+                    _ => 1 + rng.below(40),
+                };
+                let run = new.next_delta_run_max(max);
+                assert_eq!(run, old.next_delta_run_max(max), "seed {seed} step {step}");
+                assert_eq!(
+                    run,
+                    delta_head_run(&diffs[at..], max),
+                    "seed {seed} step {step}"
+                );
+                at += run.map_or(0, |r| r.count);
+            }
+        }
+        assert_eq!(
+            format!("{new:?}"),
+            format!("Verified{old:?}"),
+            "seed {seed} step {step}"
+        );
+        if rng.below(6) == 0 {
+            // a copy reads on from where its decoder is, by itself
+            assert_eq!(new.clone().collect::<Vec<T>>(), values[at..]);
+            assert_eq!(old.clone().collect::<Vec<T>>(), values[at..]);
+        }
+    }
+    assert_eq!(new.collect::<Vec<T>>(), values[at..], "seed {seed}");
+    assert_eq!(old.collect::<Vec<T>>(), values[at..], "seed {seed}");
+}
+
+/// Decoders of both APIs read saved columns alike, for the ten types.
+#[test]
+fn delta_decoders_agree() {
+    for seed in 0..16 {
+        delta_decodes::<u32>(seed);
+        delta_decodes::<u64>(seed);
+        delta_decodes::<i32>(seed);
+        delta_decodes::<i64>(seed);
+        delta_decodes::<usize>(seed);
+        delta_decodes::<Option<u32>>(seed);
+        delta_decodes::<Option<u64>>(seed);
+        delta_decodes::<Option<i32>>(seed);
+        delta_decodes::<Option<i64>>(seed);
+        delta_decodes::<Option<usize>>(seed);
+    }
+}
+
+/// Whether both APIs make a checked decoder of `bytes`, which then read
+/// alike; if not, both refuse them, and in the same words.
+fn delta_same_try_new<T: Deltad>(bytes: &[u8]) -> bool {
+    let new = VerifiedDeltaDecoder::<T>::try_new(bytes);
+    let old = DeltaDecoder::<T>::try_new(bytes);
+    match (new, old) {
+        (Ok(new), Ok(old)) => {
+            // a spoilt count can be of more values than there is time for
+            assert!(new.take(5000).eq(old.take(5000)), "{bytes:?}");
+            true
+        }
+        (Err(new), Err(old)) => {
+            assert_eq!(new.to_string(), old.to_string(), "{bytes:?}");
+            false
+        }
+        (new, old) => panic!("{} but {} of {bytes:?}", new.is_ok(), old.is_ok()),
+    }
+}
+
+/// `delta_same_try_new` for the ten types.
+fn delta_checked_decoders(bytes: &[u8]) -> [bool; 10] {
+    [
+        delta_same_try_new::<u32>(bytes),
+        delta_same_try_new::<u64>(bytes),
+        delta_same_try_new::<i32>(bytes),
+        delta_same_try_new::<i64>(bytes),
+        delta_same_try_new::<usize>(bytes),
+        delta_same_try_new::<Option<u32>>(bytes),
+        delta_same_try_new::<Option<u64>>(bytes),
+        delta_same_try_new::<Option<i32>>(bytes),
+        delta_same_try_new::<Option<i64>>(bytes),
+        delta_same_try_new::<Option<usize>>(bytes),
+    ]
+}
+
+/// Saved delta columns with a byte changed, cut short or with bytes
+/// added: `try_new` of both APIs takes the same of them, as decoders
+/// that read alike, and refuses the others with the same error. A
+/// decoder is made of any bytes a column loads from.
+#[test]
+fn delta_checked_decoders_agree_on_any_bytes() {
+    let mut taken = 0;
+    let mut refused = 0;
+    for seed in 0..40u64 {
+        let mut rng = Rng(seed.wrapping_mul(0x2f_9be5).wrapping_add(31) | 1);
+        let mut last = 0;
+        let n = rng.below(60);
+        let values: Vec<Option<i64>> = (0..n)
+            .map(|_| {
+                let (v, l) = <Option<i64> as Deltad>::near(&mut rng, last);
+                last = l;
+                // nulls in some columns only
+                if seed % 2 == 0 {
+                    v.or(Some(l))
+                } else {
+                    v
+                }
+            })
+            .collect();
+        let bytes = delta_bytes(&values);
+        for _ in 0..40 {
+            let mut b = bytes.clone();
+            match rng.below(4) {
+                0 if !b.is_empty() => {
+                    let i = rng.below(b.len());
+                    b[i] ^= 1 << rng.below(8);
+                }
+                1 if !b.is_empty() => {
+                    let i = rng.below(b.len());
+                    b[i] = rng.next() as u8;
+                }
+                2 => b.truncate(rng.below(b.len() + 1)),
+                _ => {
+                    for _ in 0..rng.below(4) + 1 {
+                        b.push(rng.next() as u8);
+                    }
+                }
+            }
+            let made = delta_checked_decoders(&b);
+            for (made, loaded) in made.iter().zip(delta_loads(&b)) {
+                assert!(*made || !loaded, "{b:?}");
+            }
+            for ok in made {
+                if ok {
+                    taken += 1;
+                } else {
+                    refused += 1;
+                }
+            }
+        }
+    }
+    assert!(taken > 1000, "{taken} taken");
+    assert!(refused > 1000, "{refused} refused");
+}
+
+/// Small cases of the decoder, written out.
+#[test]
+fn delta_decoders_told() {
+    fn run(count: usize, d: i64) -> Option<Run<Option<i64>>> {
+        Some(Run {
+            count,
+            value: Some(d),
+        })
+    }
+
+    // nothing saved, nothing read
+    let mut dec = VerifiedDeltaDecoder::<u32>::new(&[]);
+    assert_eq!(dec.next_delta_run_max(usize::MAX), None);
+    assert_eq!(dec.next(), None);
+    assert_eq!(dec.nth(3), None);
+    dec.advance_by(2);
+    assert_eq!(format!("{dec:?}"), "VerifiedDeltaDecoder { running: 0 }");
+
+    // the differences of 3, 5, 7, 7 are 3, 2, 2 and 0: a run is of one
+    // difference, and of no more values than asked for
+    let bytes = delta_bytes::<u32>(&[3, 5, 7, 7]);
+    let mut dec = VerifiedDeltaDecoder::<u32>::new(&bytes);
+    assert_eq!(dec.next_delta_run_max(0), None);
+    assert_eq!(dec.next_delta_run_max(9), run(1, 3));
+    assert_eq!(dec.next_delta_run_max(1), run(1, 2));
+    assert_eq!(format!("{dec:?}"), "VerifiedDeltaDecoder { running: 5 }");
+    assert_eq!(dec.clone().collect::<Vec<_>>(), [7, 7]);
+    assert_eq!(dec.next_delta_run_max(9), run(1, 2));
+    assert_eq!(dec.next_delta_run_max(9), run(1, 0));
+    assert_eq!(dec.next_delta_run_max(9), None);
+    assert_eq!(format!("{dec:?}"), "VerifiedDeltaDecoder { running: 7 }");
+    let mut dec = VerifiedDeltaDecoder::<u32>::new(&bytes);
+    assert_eq!(dec.nth(0), Some(3));
+    assert_eq!(dec.next_delta_run_max(usize::MAX), run(2, 2));
+    assert_eq!(dec.nth(1), None);
+    assert_eq!(dec.next(), None);
+
+    // nulls are runs of their own, and move no sum
+    let values = [None, None, Some(-4), None, Some(-4), Some(-8)];
+    let bytes = delta_bytes::<Option<i64>>(&values);
+    let mut dec = VerifiedDeltaDecoder::<Option<i64>>::new(&bytes);
+    let nulls = Some(Run {
+        count: 2,
+        value: None,
+    });
+    assert_eq!(dec.next_delta_run_max(5), nulls);
+    assert_eq!(format!("{dec:?}"), "VerifiedDeltaDecoder { running: 0 }");
+    assert_eq!(dec.next(), Some(Some(-4)));
+    assert_eq!(dec.nth(1), Some(Some(-4)));
+    assert_eq!(format!("{dec:?}"), "VerifiedDeltaDecoder { running: -4 }");
+    dec.advance_by(7);
+    assert_eq!(dec.next(), None);
+    assert_eq!(format!("{dec:?}"), "VerifiedDeltaDecoder { running: -8 }");
+    let mut dec = VerifiedDeltaDecoder::<Option<i64>>::new(&bytes);
+    dec.advance_by(3);
+    assert_eq!(dec.clone().collect::<Vec<_>>(), values[3..]);
+    dec.advance_by(0);
+    assert_eq!(dec.collect::<Vec<_>>(), values[3..]);
+
+    // A column of `i64` is not one of `u32` where a value is negative:
+    // the checked decoder says so as the load does.
+    let bytes = delta_bytes::<i64>(&[3, -1, 5]);
+    assert_eq!(
+        delta_checked_decoders(&bytes),
+        [false, false, true, true, false, false, false, true, true, false]
+    );
+    let err = VerifiedDeltaDecoder::<u32>::try_new(&bytes).unwrap_err();
+    assert!(
+        err.to_string().contains("delta value out of domain"),
+        "{err}"
+    );
+    // and a null is a value only of the options
+    let bytes = delta_bytes::<Option<i64>>(&[Some(1), None]);
+    assert_eq!(
+        delta_checked_decoders(&bytes),
+        [false, false, false, false, false, true, true, true, true, true]
+    );
+
+    // Bytes that no column saves: the differences `i64::MAX` and 1. The
+    // exact sum of them is no `i64`, and the checked decoders of both
+    // APIs refuse the bytes, as the loads do. Read with sums that wrap
+    // they are the values `i64::MAX` and `i64::MIN`, and that is how
+    // the specification reads them: `new` gives a decoder of those.
+    // (The old `new` adds without wrapping, so it does the same only
+    // where overflow is not checked.)
+    let wrap = VerifiedColumn::<i64>::from_values(&[i64::MAX, 1]).save();
+    assert!(!delta_same_try_new::<i64>(&wrap));
+    assert!(!delta_same_load::<i64>(&wrap));
+    let dec = VerifiedDeltaDecoder::<i64>::new(&wrap);
+    assert_eq!(dec.collect::<Vec<_>>(), [i64::MAX, i64::MIN]);
+    #[cfg(not(debug_assertions))]
+    assert_eq!(
+        DeltaDecoder::<i64>::new(&wrap).collect::<Vec<_>>(),
+        [i64::MAX, i64::MIN]
+    );
 }

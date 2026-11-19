@@ -102,7 +102,7 @@ fn delta_sum_overflows() -> PackError {
 /// The error a load reports for a delta value outside its type's domain.
 #[verifier::external_body]
 #[cold]
-fn delta_out_of_domain() -> PackError {
+pub(crate) fn delta_out_of_domain() -> PackError {
     PackError::InvalidValue("delta value out of domain".into())
 }
 

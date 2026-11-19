@@ -567,9 +567,9 @@ pub use delta::{
     lemma_delta_runs_push, lemma_delta_within_one, vals,
 };
 pub use delta::{
-    VDelta, VDeltaNum, VDeltaValue, VerifiedDeltaColumn, VerifiedDeltaEncoder,
-    VerifiedDeltaEncoderState, VerifiedDeltaIter, VerifiedDeltaIterState, VerifiedDeltaRuns,
-    VerifiedFindByRange,
+    VDelta, VDeltaNum, VDeltaValue, VerifiedDeltaColumn, VerifiedDeltaDecoder,
+    VerifiedDeltaEncoder, VerifiedDeltaEncoderState, VerifiedDeltaIter, VerifiedDeltaIterState,
+    VerifiedDeltaRuns, VerifiedFindByRange,
 };
 pub use encoder::{VerifiedEncoder, VerifiedEncoderState};
 pub use kind::{LenIndex, VIndex, VKeeps};
