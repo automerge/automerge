@@ -1146,7 +1146,7 @@ pub(crate) fn import_scalar(
             } else if BigInt::is_type_of(value) {
                 Some(bigint_to_scalar(BigInt::from(value.clone()))?)
             } else if let Some(n) = value.as_f64() {
-                if (n.round() >= 1.0) && (n.round() - n).abs() < f64::EPSILON {
+                if n >= 1.0 && n.fract() == 0.0 {
                     Some(am::ScalarValue::Int(n as i64))
                 } else {
                     Some(am::ScalarValue::F64(n))
