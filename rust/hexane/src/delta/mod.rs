@@ -722,16 +722,33 @@ impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
         // exact when a hostile slab would wrap them.
         let (lo, hi) = (T::MIN_I64 as i128, T::MAX_I64 as i128);
         let mut running: i128 = 0;
+        // the range the values could span: nulls hold the running value,
+        // so it can include a 0 that is no value
+        let (mut low, mut high) = (i128::MAX, i128::MIN);
         let col = iter.finalize_with(|w| {
             if w.len == 0 {
                 return Ok(());
             }
-            if running + (w.min_offset as i128) < lo || running + (w.max_offset as i128) > hi {
+            let (min, max) = (
+                running + w.min_offset as i128,
+                running + w.max_offset as i128,
+            );
+            if min < lo || max > hi {
                 return Err(PackError::InvalidValue("delta value out of domain".into()));
             }
+            (low, high) = (low.min(min), high.max(max));
             running += w.total as i128;
             Ok(())
         })?;
+        // The values must also lie within a 2^63-wide range, so that a
+        // delete can store the difference of any two (see `DeltaValue`).
+        // Only `i64`'s domain is wider than that. Where the slabs' bound
+        // on the range is too wide, measure the range itself.
+        if low <= high && high - low > i64::MAX as i128 && !within_2_63::<T, C>(data) {
+            return Err(PackError::InvalidValue(
+                "delta values out of domain: they span 2^63 or more".into(),
+            ));
+        }
         Ok(Self {
             col,
             _phantom: PhantomData,
@@ -1454,6 +1471,27 @@ pub struct DeltaRun {
 }
 
 // ── DeltaIter ──────────────────────────────────────────────────────────────
+
+/// Whether the delta column `data`, which has loaded, holds values that
+/// lie within a 2^63-wide range. Only nulls make this differ from the
+/// bound `DeltaColumn::load_with` keeps; they are rare near the limit, so
+/// this walk is too.
+fn within_2_63<T: DeltaValue, C: Codec>(data: &[u8]) -> bool {
+    use crate::encoding::RunDecoder;
+    let mut decoder = crate::decoder_in::<T::Inner, C>(data);
+    let mut running: i128 = 0;
+    let (mut low, mut high) = (i128::MAX, i128::MIN);
+    while let Some(run) = decoder.next_run() {
+        if let Some(d) = T::Inner::to_opt(run.value) {
+            // a run's values move one way, so its ends bound them
+            let first = running + d as i128;
+            let last = running + d as i128 * run.count as i128;
+            (low, high) = (low.min(first.min(last)), high.max(first.max(last)));
+            running = last;
+        }
+    }
+    low > high || high - low <= i64::MAX as i128
+}
 
 type InnerColumn<T, C = Leb128> = Column<<T as DeltaValue>::Inner, C, IndexedDeltaWeightFn>;
 
