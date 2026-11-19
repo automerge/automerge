@@ -164,9 +164,9 @@ fn ready_but_unpublished_cover_keeps_published_fallback_proof() {
 
 #[test]
 fn candidate_subscriptions_survive_until_replacement_publishes() {
-    // Two level-1 fallbacks: F1 = {a1} proved and published; F2 = {a2} is a
-    // registered candidate whose frontier is a2. G = {a1, a2, c} covers both
-    // but waits on unpublished boundary b. Neither candidate may be forgotten
+    // Hard fallback F1 = {a1} (level 1) is proved and published; a2 is a loose
+    // level-0 member with no candidate of its own. G = {a1, a2, c} covers both
+    // but waits on unpublished boundary b. Candidate a1 may not be forgotten
     // while G is only ready, and publication-only progress on b must clean up
     // both the tracker and the store.
     let ka = key(7);

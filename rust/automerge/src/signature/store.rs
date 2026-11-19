@@ -510,7 +510,7 @@ pub(crate) enum AssociationError {
     AuthorConflict { change: ChangeHash },
 }
 
-/// Failure to insert evidence through [`SignatureStore::insert_ed25519`].
+/// Failure to insert verified Ed25519 evidence into a signature store.
 ///
 /// The witness's author conflicts with the change's expected author.
 /// The store is left unchanged.

@@ -170,13 +170,38 @@ impl Automerge {
         }
 
         let validated_incoming = self.validate_incoming_batch(groups)?;
+        self.admit_with_pending(validated_incoming, log)
+    }
 
+    /// Re-run admission over retained pending groups with no new input.
+    ///
+    /// Used after local publication so groups that were only causally blocked
+    /// on local history apply without redelivery. Groups that remain blocked
+    /// stay pending; groups disproved by now-established context are dropped
+    /// (traced). Planning conflicts are returned with the pending set restored.
+    pub(super) fn retry_pending_groups(
+        &mut self,
+        log: &mut PatchLog,
+    ) -> Result<(), AutomergeError> {
+        if !self.signing.has_pending_groups() {
+            return Ok(());
+        }
+        self.admit_with_pending(Vec::new(), log)
+    }
+
+    /// Shared admission: evaluate retained pending groups together with
+    /// `incoming`, restoring the pending owner on any returned error.
+    fn admit_with_pending(
+        &mut self,
+        incoming: Vec<PendingGroup>,
+        log: &mut PatchLog,
+    ) -> Result<(), AutomergeError> {
         let SigningState::Required(signing) = &mut self.signing else {
-            unreachable!("admit_loaded_groups requires signing mode");
+            unreachable!("admission requires signing mode");
         };
         let existing_pending = std::mem::take(&mut signing.pending.groups);
 
-        match self.resolve_and_apply_groups(existing_pending.clone(), validated_incoming, log) {
+        match self.resolve_and_apply_groups(existing_pending.clone(), incoming, log) {
             Ok(()) => Ok(()),
             Err(error) => {
                 if let SigningState::Required(signing) = &mut self.signing {
@@ -657,7 +682,14 @@ impl Automerge {
                 }
                 Err(error) => match candidate.origin {
                     Origin::IncomingBatch => return Err(error),
-                    Origin::ExistingPending => continue,
+                    Origin::ExistingPending => {
+                        tracing::debug!(
+                            head = %candidate.group.head,
+                            reason = %error,
+                            "dropping disproved pending group"
+                        );
+                        continue;
+                    }
                 },
             }
         }

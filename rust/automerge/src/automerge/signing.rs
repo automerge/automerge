@@ -25,9 +25,14 @@ use crate::{Author, Change, ChangeHash, Fragment, SigningAuthorError, TextEncodi
 
 use super::Automerge;
 
+mod batch;
 mod incoming;
 mod readiness;
 
+pub use batch::{
+    PublicationError, SignatureBatchOutcome, SignatureInsertError, SignatureInsertOutcome,
+    SignatureRejection,
+};
 use incoming::PendingGroups;
 use readiness::{FragmentReadiness, OutgoingSelection};
 
@@ -98,6 +103,18 @@ impl SigningState {
         match self {
             Self::Unsigned => Ok(()),
             Self::Required(_) => prepare_author(author).map(drop),
+        }
+    }
+
+    /// Run `f` only when signing is required, propagating its result.
+    ///
+    /// Unsigned documents skip the check and succeed; required-mode documents
+    /// call `f` exactly once. Use this for validation that only applies to
+    /// signed history.
+    pub(crate) fn with_required<E>(&self, f: impl FnOnce() -> Result<(), E>) -> Result<(), E> {
+        match self {
+            Self::Unsigned => Ok(()),
+            Self::Required(_) => f(),
         }
     }
 
@@ -343,60 +360,21 @@ pub struct SigningDocument<'a> {
 }
 
 impl<'a> SigningDocument<'a> {
-    /// Verify and insert an Ed25519 signature for an already-applied change.
+    /// Verify and insert one Ed25519 signature for an already-applied change.
     ///
-    /// Uses the change's recorded author, not the current local author.
-    /// Updates outgoing fragment readiness, accepts any local history made
-    /// causally admissible by the new proof, and reclaims superseded signatures.
+    /// Temporary scalar adapter over the batch receipt in
+    /// [`Automerge::insert_signatures`]: it verifies under the change's
+    /// historical author and then runs the same local publication and
+    /// reclamation step. Incoming pending groups enabled by that publication
+    /// are retried on the next batch call, since this handle cannot apply
+    /// operations. Scheduled for removal once bindings use the batch API.
     pub fn insert_signature(
         &mut self,
         hash: &ChangeHash,
         signature: &ed25519::Signature,
     ) -> Result<Insert, error::InsertSignature> {
-        let (actor, _) = self
-            .graph
-            .actor_seq_for_hash(hash)
-            .ok_or(error::InsertSignature::UnknownChange { change: *hash })?;
-        let actor_id = &self.ops.actors[actor];
-        let author = self.authors.get_author_for_actor(actor).ok_or_else(|| {
-            error::InsertSignature::MissingAuthor {
-                change: *hash,
-                actor: actor_id.clone(),
-            }
-        })?;
-        let verifier = ed25519::VerifyingAuthor::new(author).map_err(|e| {
-            error::InsertSignature::InvalidAuthorKey {
-                change: *hash,
-                actor: actor_id.clone(),
-                source: e,
-            }
-        })?;
-        let witness = verifier.verify_hash(hash, signature).map_err(|e| {
-            error::InsertSignature::Verification {
-                change: *hash,
-                source: e,
-            }
-        })?;
-        let had_evidence = has_signature(self.graph, self.authors, &self.state.signatures, hash);
-        let inserted = self.state.signatures.insert_ed25519(witness).map_err(|e| {
-            error::InsertSignature::Store {
-                change: *hash,
-                source: e,
-            }
-        })?;
-        if !had_evidence && has_signature(self.graph, self.authors, &self.state.signatures, hash) {
-            self.state.fragment_readiness.signature_added(hash);
-            self.accept_local();
-            self.state.reclaim_covered(self.graph);
-        }
-        let graph = self.graph;
-        let accepted = &self.state.accepted;
-        self.state.local_unsigned.retain(|pending| {
-            pending != hash
-                && !graph
-                    .actor_seq_for_hash(pending)
-                    .is_some_and(|(actor, seq)| accepted.is_accepted_actor_seq(actor, seq))
-        });
+        let inserted = self.receive_signature(hash, signature)?;
+        self.publish_local();
         Ok(inserted)
     }
 
@@ -411,7 +389,9 @@ impl<'a> SigningDocument<'a> {
     /// its current [`Author`] and still need a signature, in commit order.
     ///
     /// Only commits created locally on this document are tracked here; changes
-    /// imported from outside the document are never returned.
+    /// imported from outside the document are never returned. Signed but not
+    /// yet published commits stay tracked, but their existing evidence
+    /// suppresses a redundant request.
     pub fn required_signatures(&self) -> Vec<ChangeHash> {
         let current_author = self.author.author().as_borrowed();
         self.state
@@ -424,6 +404,7 @@ impl<'a> SigningDocument<'a> {
                     .and_then(|(actor, _)| self.authors.get_author_for_actor(actor))
                     .is_some_and(|author| author == current_author)
             })
+            .filter(|hash| !has_signature(self.graph, self.authors, &self.state.signatures, hash))
             .collect()
     }
 
@@ -443,6 +424,11 @@ impl<'a> SigningDocument<'a> {
     /// Every fragment requires a signature on its own head (the maximum sequence
     /// for the head's actor), so scanning `verified_hashes` visits only live
     /// signed heads rather than every applied change in the document.
+    ///
+    /// Each required frontier must carry its own exact signature. Published
+    /// membership of a frontier is not proof: a published change's evidence
+    /// may have been reclaimed by a published cover, and that cover supports
+    /// the previously published contents, not a new candidate including them.
     fn local_candidate_fragments(&self) -> Vec<Fragment> {
         let mut candidates = Vec::new();
         for &head in self.state.signatures.verified_hashes() {
@@ -459,8 +445,7 @@ impl<'a> SigningDocument<'a> {
                 continue;
             };
             if requirements.is_satisfied_by(|hash| {
-                self.is_accepted(hash)
-                    || has_signature(self.graph, self.authors, &self.state.signatures, hash)
+                has_signature(self.graph, self.authors, &self.state.signatures, hash)
             }) {
                 let fragment = self
                     .graph

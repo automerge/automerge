@@ -9,6 +9,7 @@ use crate::{ActorId, Author, Automerge, Change, ChangeHash, PatchLog, ReadDoc, R
 use super::error;
 
 mod author_invariant;
+mod batch;
 mod fragments;
 mod incoming;
 
@@ -273,4 +274,38 @@ fn required_signatures_never_returns_non_local_changes_even_with_matching_author
     );
     sign_doc(&mut doc, local_hash, &k1);
     assert!(doc.try_signing().unwrap().required_signatures().is_empty());
+}
+
+#[test]
+fn with_required_skips_unsigned_and_propagates_required_results() {
+    use std::cell::Cell;
+
+    let unsigned = Automerge::new();
+    let calls = Cell::new(0);
+    assert_eq!(
+        unsigned.signing.with_required(|| {
+            calls.set(calls.get() + 1);
+            Err::<(), &str>("never evaluated")
+        }),
+        Ok(())
+    );
+    assert_eq!(calls.get(), 0);
+
+    let required = Automerge::signing(author(&key(7))).unwrap();
+    assert_eq!(
+        required.signing.with_required(|| {
+            calls.set(calls.get() + 1);
+            Ok::<(), &str>(())
+        }),
+        Ok(())
+    );
+    assert_eq!(calls.get(), 1);
+    assert_eq!(
+        required.signing.with_required(|| {
+            calls.set(calls.get() + 1);
+            Err::<(), &str>("rejected")
+        }),
+        Err("rejected")
+    );
+    assert_eq!(calls.get(), 2);
 }

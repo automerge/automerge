@@ -13,6 +13,7 @@ use crate::patches::PatchLog;
 use crate::sync::SyncDoc;
 use crate::transaction::{CommitOptions, Transactable};
 use crate::types::ObjMeta;
+use crate::SignatureBatchOutcome;
 use crate::{hydrate, AnonymizeError, Bundle, Fragment, OnPartialLoad, TextEncoding};
 use crate::{sync, ObjType, Patch, ReadDoc, ScalarValue, ROOT};
 use crate::{
@@ -127,6 +128,28 @@ impl AutoCommit {
             save_cursor: Vec::new(),
             isolation: None,
         })
+    }
+
+    /// Verify and insert signatures for applied changes, then complete
+    /// publication once. See [`Automerge::insert_signatures`].
+    ///
+    /// The required-mode check runs first: an unsigned document returns
+    /// [`SignatureBatchOutcome::Rejected`] with its pending transaction left
+    /// open. In required mode the pending transaction is committed, then the
+    /// batch runs with this document's patch collection.
+    pub fn insert_signatures(
+        &mut self,
+        inputs: impl IntoIterator<Item = (ChangeHash, crate::signature::ed25519::Signature)>,
+    ) -> SignatureBatchOutcome {
+        if let Err(error) = self.doc.try_signing() {
+            return SignatureBatchOutcome::Rejected {
+                error: error.into(),
+            };
+        }
+        self.with_patch_log(|doc, log| {
+            Ok::<_, std::convert::Infallible>(doc.insert_signatures_log_patches(inputs, log))
+        })
+        .unwrap_or_else(|never| match never {})
     }
 
     /// Borrow this document's [`crate::signing::SigningDocument`] handle.

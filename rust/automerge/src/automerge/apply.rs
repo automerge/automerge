@@ -88,9 +88,10 @@ impl Automerge {
         grouping: Grouping,
         log: &mut PatchLog,
     ) -> Result<(), AutomergeError> {
-        if self.signing.is_required() {
-            return Err(SigningError::UnauthenticatedChanges.into());
-        }
+        // Unclassified or bundle-grouped contents carry no proofs, so required
+        // mode rejects them outright; unsigned mode skips the check.
+        self.signing
+            .with_required(|| Err(SigningError::UnauthenticatedChanges))?;
         // Validate the observer before staging or applying incoming changes.
         // A rejected log leaves existing staged history and recorded events
         // available for retry. Once validation passes, actor-table growth during
@@ -177,6 +178,18 @@ impl Automerge {
 
     /// Apply causally ordered, validated changes to actors, authors, history,
     /// operations, visibility, and `log`.
+    ///
+    /// # Errors
+    ///
+    /// Fails only if `log` is incompatible with this document, and only before
+    /// any actor, history, operation, or visibility mutation. Once that
+    /// preflight succeeds the log's actors equal the document's; every later
+    /// log operation in this method sees a document whose actor table either
+    /// grew (a superset migrates infallibly) or is unchanged. The debug
+    /// assertion ahead of `remove_unused` guarantees that cleanup cannot drop
+    /// an actor the log already knows. A failure after preflight is therefore
+    /// an internal invariant violation and panics, rather than returning an
+    /// error that would imply the half-applied document is usable.
     pub(super) fn apply_prepared_changes(
         &mut self,
         changes: Vec<&Change>,
@@ -184,9 +197,12 @@ impl Automerge {
     ) -> Result<(), PatchLogMismatch> {
         let mut batch = BatchApply::new(changes);
 
-        // Align the batch and log with the incoming doc, taking a snapshot of
-        // the mask before the op set mutation.
+        // Preflight: align the batch and log with the incoming doc, taking a
+        // snapshot of the mask before the op set mutation. This is the only
+        // fallible log operation; nothing has been mutated yet.
         log.transition_to(self, |d| d.visible_current())?;
+        const ALIGNED: &str =
+            "patch log aligned by preflight stays compatible while the actor table only grows";
 
         {
             let changes: &[&Change] = batch.changes();
@@ -272,7 +288,9 @@ impl Automerge {
             "no actor renumbering between the mask snapshot and the walk"
         );
 
-        let updates = batch.walk_and_record(self, log, mask0.as_ref())?;
+        let updates = batch
+            .walk_and_record(self, log, mask0.as_ref())
+            .expect(ALIGNED);
         batch.install(&mut self.ops, updates);
 
         // If the batch witnessed a pending write-frontier boundary, publish the
@@ -280,7 +298,8 @@ impl Automerge {
         // internally consistent op-set states.
         if resolved {
             // Finish recording under the previous visibility.
-            log.transition_to(self, |doc| doc.visible_current())?;
+            log.transition_to(self, |doc| doc.visible_current())
+                .expect(ALIGNED);
 
             let changed = self.visibility.refresh(
                 &self.write_frontier,
@@ -292,7 +311,7 @@ impl Automerge {
             if changed {
                 let after = self.visible_current();
                 self.ops.recompute_indexes(after.clock());
-                log.transition_to(self, |_| after)?;
+                log.transition_to(self, |_| after).expect(ALIGNED);
             }
         }
 
