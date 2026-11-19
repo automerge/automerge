@@ -38,3 +38,94 @@ fn simple_hydrate() -> Result<(), AutomergeError> {
     assert_eq!(String::from(val), "hello big bad world".to_string(),);
     Ok(())
 }
+
+/// A document of `n` small maps under `children`, each of two keys.
+fn many_small_maps(n: usize) -> (AutoCommit, Vec<ExId>) {
+    let mut doc = AutoCommit::new().with_actor(ActorId::from(b"small maps".as_slice()));
+    let children = doc
+        .put_object(&ObjId::Root, "children", ObjType::Map)
+        .unwrap();
+    let mut ids = Vec::with_capacity(n);
+    for i in 0..n {
+        let child = doc
+            .put_object(&children, format!("c{i:05}"), ObjType::Map)
+            .unwrap();
+        doc.put(&child, "at", i as i64).unwrap();
+        doc.put(&child, "kind", "leaf").unwrap();
+        ids.push(child);
+    }
+    doc.commit();
+    (doc, ids)
+}
+
+/// `hydrate` seeks every op column to each object it reads, so reading a
+/// document of many small maps seeks once per map, whether the whole
+/// document or each map in turn. The one-pass read seeks once.
+#[test]
+fn reading_many_small_maps_in_one_pass_seeks_once() {
+    use crate::seek_counters::{reset, top_ops_seeks};
+
+    let (doc, ids) = many_small_maps(1000);
+
+    reset();
+    let whole = doc.hydrate(&ObjId::Root, None).unwrap();
+    // The root, `children` and each of its maps.
+    assert_eq!(top_ops_seeks(), 1002);
+    reset();
+    assert_eq!(doc.hydrate_in_one_pass(), whole);
+    let one_pass = top_ops_seeks();
+    // Before the one-pass read: 1002 seeks (`hydrate`); after: 1. The gate
+    // is a tenth of the way from after to before.
+    assert!(
+        one_pass <= 101,
+        "{one_pass} seeks to read the whole document"
+    );
+
+    reset();
+    let each: Vec<_> = ids
+        .iter()
+        .map(|id| doc.hydrate(id, None).unwrap())
+        .collect();
+    assert_eq!(top_ops_seeks(), 1000);
+    reset();
+    let mut gathered = doc.gather_in_one_pass();
+    let built: Vec<_> = ids
+        .iter()
+        .map(|id| doc.hydrate_gathered(&mut gathered, id).unwrap())
+        .collect();
+    let one_pass = top_ops_seeks();
+    assert_eq!(built, each);
+    // Before: 1000 seeks (`hydrate` for each map); after: 1. The gate is a
+    // tenth of the way from after to before.
+    assert!(one_pass <= 100, "{one_pass} seeks to read each map");
+}
+
+/// The one-pass gather keeps each top op's object, id, key, action and
+/// value, and a counter's successors, to add up its increments; it need not
+/// decode the insert or mark columns, nor other ops' successors, nor build
+/// each top op as a whole op.
+#[test]
+fn gathering_decodes_only_the_columns_it_keeps() {
+    use crate::decode_counters::{op_columns_decoded, reset};
+
+    let (mut doc, ids) = many_small_maps(1000);
+    // A counter in every tenth map, every other one incremented.
+    for (i, id) in ids.iter().enumerate().step_by(10) {
+        doc.put(id, "n", ScalarValue::counter(i as i64)).unwrap();
+        if i % 20 == 0 {
+            doc.increment(id, "n", 1).unwrap();
+        }
+    }
+    doc.commit();
+    reset();
+    let gathered = doc.gather_in_one_pass();
+    let decoded = op_columns_decoded();
+    // The root, `children` and each of its maps.
+    assert_eq!(gathered.len(), 1002);
+    // 3,101 top ops: the root's, `children`'s, two in each map and 100
+    // counters. Before this read only the columns it keeps, it built each as
+    // a whole op: 24,808 columns (eight each); after: 15,605 (five each, and
+    // the successors of each counter). The gate is a tenth of the way from
+    // after to before.
+    assert!(decoded <= 16_525, "{decoded} op columns decoded to gather");
+}

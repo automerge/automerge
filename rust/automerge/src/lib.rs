@@ -271,6 +271,8 @@ mod clock;
 mod columnar;
 mod convert;
 mod cursor;
+#[cfg(any(test, feature = "decode-counters"))]
+pub mod decode_counters;
 pub mod error;
 mod exid;
 pub mod hydrate;
@@ -283,6 +285,8 @@ pub mod marks;
 pub mod op_set2;
 pub mod patches;
 mod read;
+#[cfg(any(test, feature = "seek-counters"))]
+pub mod seek_counters;
 mod sequence_tree;
 mod staging;
 mod storage;
