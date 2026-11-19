@@ -668,7 +668,8 @@ impl<T: PrefixValue, C: Codec> PrefixColumn<T, C> {
     /// Iterator over `range` yielding `(inclusive_prefix, value)`.
     pub fn iter_range(&self, range: std::ops::Range<usize>) -> PrefixIter<'_, T, C> {
         let start = range.start.min(self.col.len());
-        let end = range.end.min(self.col.len());
+        // a reversed range is empty at `start`, as for `Column::iter_range`
+        let end = range.end.min(self.col.len()).max(start);
         let mut iter = self.iter();
         iter.set_max(end);
         iter.advance_by(start);

@@ -827,7 +827,8 @@ impl<T: DeltaValue, C: Codec> DeltaColumn<T, C> {
 
     pub fn iter_range(&self, range: Range<usize>) -> DeltaIter<'_, T, C> {
         let start = range.start.min(self.col.len());
-        let end = range.end.min(self.col.len());
+        // a reversed range is empty at `start`, as for `Column::iter_range`
+        let end = range.end.min(self.col.len()).max(start);
         let mut iter = self.iter();
         iter.set_max(end);
         iter.advance_by(start);
