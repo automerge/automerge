@@ -35,21 +35,21 @@ pub(crate) fn rle_validate_encoding<T: RleValue, C: Codec>(
             RleSegment::Lit { value, bytes } => {
                 prev_lit = Some(value);
                 prev = Some(segment);
-                len += 1;
+                len = add_len(len, 1)?;
                 segments += 1;
                 tail.lit_tail = NonZeroU32::new(bytes as u32);
                 tail.bytes += bytes as u32;
             }
             RleSegment::Run { count, bytes, .. } => {
                 prev = Some(segment);
-                len += count;
+                len = add_len(len, count)?;
                 segments += 1;
                 tail.lit_tail = None;
                 tail.bytes = bytes as u32;
             }
             RleSegment::Null { count, bytes } => {
                 prev = Some(segment);
-                len += count;
+                len = add_len(len, count)?;
                 segments += 1;
                 tail.lit_tail = None;
                 tail.bytes = bytes as u32;
@@ -61,6 +61,22 @@ pub(crate) fn rle_validate_encoding<T: RleValue, C: Codec>(
         len,
         tail,
     })
+}
+
+/// `len + count`, or an error if the column would be longer than a `usize`
+/// can count (the counts come from untrusted bytes).
+fn add_len(len: usize, count: usize) -> Result<usize, PackError> {
+    len.checked_add(count)
+        .ok_or_else(|| PackError::InvalidValue("column length overflows usize".to_string()))
+}
+
+/// The number of values a segment holds.
+fn segment_len<T: RleValue>(segment: &RleSegment<'_, T>) -> usize {
+    match segment {
+        RleSegment::LitHead { .. } => 0,
+        RleSegment::Lit { .. } => 1,
+        RleSegment::Run { count, .. } | RleSegment::Null { count, .. } => *count,
+    }
 }
 
 // ── Load iterator ──────────────────────────────────────────────────────────
@@ -88,6 +104,8 @@ pub struct RleLoadIter<'a, T: RleValue, C: Codec = Leb128> {
     /// count-1 repeats) is a load error
     prev: Option<RleSegment<'a, T>>,
     prev_lit: Option<T::Get<'a>>,
+    /// values read so far, which bounds every slab's `len`
+    len: usize,
     cut: CutState,
     target_segments: usize,
 }
@@ -189,6 +207,7 @@ impl<'a, T: RleValue, C: Codec> RleLoadIter<'a, T, C> {
             input: data,
             prev: None,
             prev_lit: None,
+            len: 0,
             cut: CutState::default(),
             target_segments: max_segments / 2,
         }
@@ -208,6 +227,7 @@ impl<'a, T: RleValue, C: Codec> RleLoadIter<'a, T, C> {
             segment
                 .validate_after(&self.prev, self.prev_lit)
                 .map_err(|e| PackError::InvalidValue(e.to_string()))?;
+            self.len = add_len(self.len, segment_len(&segment))?;
             match segment {
                 RleSegment::LitHead { .. } => self.prev_lit = None,
                 RleSegment::Lit { value, .. } => {
@@ -238,11 +258,13 @@ impl<'a, T: RleValue, C: Codec> RleLoadIter<'a, T, C> {
         let mut decoder = self.decoder;
         let mut prev = self.prev;
         let mut prev_lit = self.prev_lit;
+        let mut len = self.len;
 
         while let Some(segment) = decoder.try_next_segment()? {
             segment
                 .validate_after(&prev, prev_lit)
                 .map_err(|e| PackError::InvalidValue(e.to_string()))?;
+            len = add_len(len, segment_len(&segment))?;
             match segment {
                 RleSegment::LitHead { .. } => prev_lit = None,
                 RleSegment::Lit { value, .. } => {
