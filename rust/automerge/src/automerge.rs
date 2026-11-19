@@ -303,7 +303,7 @@ impl std::default::Default for LoadOptions<'static> {
 /// ```rust
 /// # use automerge::{Author, Automerge, AutomergeError, ROOT, transaction::Transactable};
 /// let author = Author::from(vec![1,2,3]);
-/// let mut doc = Automerge::new().with_author(Some(author.clone())).unwrap();
+/// let mut doc = Automerge::new_with_author(Some(author.clone()));
 /// doc.transact(|tx| {
 ///     tx.put(ROOT, "foo", "bar")?;
 ///     Ok::<_, AutomergeError>(())
@@ -321,6 +321,15 @@ impl std::default::Default for LoadOptions<'static> {
 /// Prior to the introduction of author IDs, actor IDs were often used in applications to determine
 /// authorship. New code should migrate to using author IDs. If you do need to map from an actor ID
 /// to an author ID you can use [`Automerge::get_author_for_actor`].
+///
+/// ### Immutable instance author
+///
+/// The local author is fixed when the instance is created: by
+/// [`Automerge::new_with_author`] (unsigned, any author or none),
+/// [`Automerge::signing`] (required mode, validated Ed25519 author) or
+/// [`LoadOptions::author`]. There is no setter. To write under a different
+/// author create a new instance with [`Automerge::fork_with_author`], which in
+/// required mode is only allowed once every local draft has been published.
 #[derive(Debug, Clone)]
 pub struct Automerge {
     /// Unapplied change contents held for possible application.
@@ -353,6 +362,26 @@ impl Automerge {
     /// Create a new document with a random actor id.
     pub fn new() -> Self {
         Self::new_with_encoding(TextEncoding::platform_default())
+    }
+
+    /// Create a new unsigned document whose local author is fixed to `author`.
+    ///
+    /// Unsigned documents accept any author bytes, or `None` for anonymous
+    /// commits. The author is recorded on each actor's first change and cannot
+    /// be changed on this instance; see [`Self::fork_with_author`]. For
+    /// required signing mode use [`Self::signing`].
+    pub fn new_with_author(author: Option<Author<'static>>) -> Self {
+        Self::new_with_author_and_encoding(author, TextEncoding::platform_default())
+    }
+
+    /// [`Self::new_with_author`] with an explicit text encoding.
+    pub fn new_with_author_and_encoding(
+        author: Option<Author<'static>>,
+        encoding: TextEncoding,
+    ) -> Self {
+        let mut doc = Self::new_with_encoding(encoding);
+        doc.author = author;
+        doc
     }
 
     /// Return a copy of this document with its data anonymized using a fresh random seed.
@@ -540,47 +569,10 @@ impl Automerge {
         self.republish_mask(log, |policy| *policy = WriteFrontier::from(write_frontier))
     }
 
-    /// Set the author, consuming the document.
-    ///
-    /// Uses the same rules as [`Self::set_author`]. On error the consumed
-    /// document is not returned; use the mutable setter to retain ownership on
-    /// rejection.
-    pub fn with_author(
-        mut self,
-        author: Option<Author<'static>>,
-    ) -> Result<Self, crate::SigningAuthorError> {
-        self.set_author(author)?;
-        Ok(self)
-    }
-
-    /// Set the author for this document.
-    ///
-    /// The [`Author`] is only changed, if `author` differs from
-    /// [`Automerge::get_author`]. If the author does change then a new
-    /// [`ActorId`] is generated for that author. Notably, this could be a
-    /// different [`ActorId`] compared to previous edits for the same author.
-    ///
-    /// If you are using authors *never* manually manage the [`ActorId`].
-    ///
-    /// # Errors
-    ///
-    /// In required signing mode, rejects a missing author or one that cannot
-    /// supply a usable Ed25519 key, leaving author and actor unchanged.
-    /// Unsigned mode accepts any author.
-    pub fn set_author(
-        &mut self,
-        author: Option<Author<'static>>,
-    ) -> Result<&mut Self, crate::SigningAuthorError> {
-        self.validate_author(author.as_ref())?;
-        if author.as_ref() != self.get_author() {
-            self.author = author;
-            // TODO: re-use old actors
-            self.actor = Actor::Unused(ActorId::random());
-        }
-        Ok(self)
-    }
-
     /// Get the current author of this document.
+    ///
+    /// The author is fixed for the lifetime of the instance; see
+    /// [`Self::fork_with_author`] to obtain an instance with another author.
     pub fn get_author(&self) -> Option<&Author<'static>> {
         self.author.as_ref()
     }
@@ -1059,6 +1051,59 @@ impl Automerge {
         f
     }
 
+    /// Fork this document at the current point for use by `author`.
+    ///
+    /// The fork is a full copy with a fresh actor, like [`Self::fork`], whose
+    /// local author is `author` instead of this document's. Unsigned documents
+    /// accept any author, including `None`. Historical authors, proofs and the
+    /// source document are never changed, and the fork inherits no signing
+    /// eligibility it would not otherwise have.
+    ///
+    /// Requesting the same author as this document behaves exactly like
+    /// [`Self::fork`].
+    ///
+    /// # Errors
+    ///
+    /// In required signing mode the new author must be a usable Ed25519 key
+    /// ([`SigningAuthorError`]), and switching to a *different* author is only
+    /// allowed once no local draft remains unpublished
+    /// ([`SigningError::UnpublishedLocalChanges`]). Signed-but-unpublished
+    /// drafts still block; retained incoming groups do not. Publish the drafts
+    /// first (see [`Self::request_signatures`]) or keep the current author.
+    ///
+    /// [`SigningAuthorError`]: crate::SigningAuthorError
+    /// [`SigningError::UnpublishedLocalChanges`]: crate::signature::error::SigningError::UnpublishedLocalChanges
+    pub fn fork_with_author(
+        &self,
+        author: Option<Author<'static>>,
+    ) -> Result<Self, AutomergeError> {
+        self.check_fork_with_author(author.as_ref())?;
+        let mut f = self.fork();
+        f.author = author;
+        Ok(f)
+    }
+
+    /// Validate a [`Self::fork_with_author`] request without creating the fork.
+    ///
+    /// Shared with [`crate::AutoCommit`], which must decide before closing its
+    /// open transaction.
+    pub(crate) fn check_fork_with_author(
+        &self,
+        author: Option<&Author<'static>>,
+    ) -> Result<(), AutomergeError> {
+        self.signing.validate_author(author)?;
+        if author != self.get_author() {
+            self.signing.with_required(|| {
+                if self.signing.has_local_drafts() {
+                    Err(crate::signature::error::SigningError::UnpublishedLocalChanges)
+                } else {
+                    Ok(())
+                }
+            })?;
+        }
+        Ok(())
+    }
+
     /// Fork this document at the given heads
     ///
     /// This will create a new actor ID for the forked document.
@@ -1276,8 +1321,7 @@ impl Automerge {
         }
         if data.is_empty() {
             tracing::trace!("no data, initializing empty document");
-            let mut doc =
-                Self::new_with_encoding(options.text_encoding).with_author(options.author)?;
+            let mut doc = Self::new_with_author_and_encoding(options.author, options.text_encoding);
             if !options.write_frontier.is_empty() {
                 doc.set_write_frontier(options.write_frontier);
             }
@@ -1355,7 +1399,8 @@ impl Automerge {
                 document.log_current_state(ObjMeta::root(), patch_log, true);
             }
         }
-        Ok(document.with_author(options.author)?)
+        document.author = options.author;
+        Ok(document)
     }
 
     fn load_signing_with_options(
@@ -1476,7 +1521,7 @@ impl Automerge {
             )?;
             // Ensure that the author, actor, and write-frontier state are carried
             // over for an empty document.
-            doc.set_author(self.get_author().cloned())?;
+            doc.author = self.author.clone();
             doc = doc.with_actor(self.actor_id().clone());
             doc.set_write_frontier(self.get_write_frontier());
             // Finish the log's pending segment against the OLD document

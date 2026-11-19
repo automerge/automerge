@@ -25,6 +25,8 @@ fn append(doc: &mut Automerge, heads: Option<&[ChangeHash]>, level: usize) -> Ch
     append_at_level(doc, heads, value, level)
 }
 
+/// Commit `prop = value` on `heads` at a precomputed `time` chosen so the
+/// change hash reaches fragment level 2 for that deterministic fixture.
 fn commit_with_time(
     doc: &mut Automerge,
     heads: Option<&[ChangeHash]>,
@@ -87,30 +89,26 @@ fn is_candidate(doc: &mut Automerge, head: &ChangeHash) -> bool {
 }
 
 /// Build the probe history: published loose `a` (level 0), an independent
-/// unpublished level-1 `b` by another author, and `c` (level 1) depending on
+/// unpublished level-1 `b` by another actor, and `c` (level 1) depending on
 /// both, so that `G = {a, c}` has boundary `{b}` and `F = {a}` is its fallback.
-fn fallback_and_blocked_cover() -> (Automerge, SigningKey, SigningKey, [ChangeHash; 3]) {
+fn fallback_and_blocked_cover() -> (Automerge, SigningKey, [ChangeHash; 3]) {
     let ka = key(7);
-    let kb = key(8);
     let mut doc = Automerge::signing(author(&ka))
         .unwrap()
         .with_actor(ActorId::from([1]));
     let a = append_at_level(&mut doc, None, 1, 0);
     sign_doc(&mut doc, a, &ka);
     assert!(doc.try_signing().unwrap().is_accepted(&a));
-
-    doc.set_author(Some(author(&kb))).unwrap();
     doc.set_actor(ActorId::from([2]));
     let b = append_at_level(&mut doc, Some(&[]), 2, 1);
-    doc.set_author(Some(author(&ka))).unwrap();
     doc.set_actor(ActorId::from([1]));
     let c = append_at_level(&mut doc, Some(&[a, b]), 3, 1);
-    (doc, ka, kb, [a, b, c])
+    (doc, ka, [a, b, c])
 }
 
 #[test]
 fn ready_but_unpublished_cover_keeps_published_fallback_proof() {
-    let (mut doc, ka, kb, [a, b, c]) = fallback_and_blocked_cover();
+    let (mut doc, ka, [a, b, c]) = fallback_and_blocked_cover();
     let fallback = doc.get_fragment(a).unwrap();
     assert_eq!(fallback.members, [a]);
     assert_eq!(doc.bundle_fragments([fallback.clone()]).len(), 1);
@@ -144,7 +142,7 @@ fn ready_but_unpublished_cover_keeps_published_fallback_proof() {
 
     // Publishing b publishes G, which then retires F's redundant proof without
     // any signature being re-inserted for c.
-    sign_doc(&mut doc, b, &kb);
+    sign_doc(&mut doc, b, &ka);
     {
         let signing = doc.try_signing().unwrap();
         assert!(signing.is_accepted(&a));
@@ -170,23 +168,18 @@ fn candidate_subscriptions_survive_until_replacement_publishes() {
     // while G is only ready, and publication-only progress on b must clean up
     // both the tracker and the store.
     let ka = key(7);
-    let kb = key(8);
     let mut doc = Automerge::signing(author(&ka))
         .unwrap()
         .with_actor(ActorId::from([1]));
     let a1 = append_at_level(&mut doc, None, 1, 1);
     sign_doc(&mut doc, a1, &ka);
     assert!(doc.try_signing().unwrap().is_accepted(&a1));
-
-    doc.set_author(Some(author(&kb))).unwrap();
     doc.set_actor(ActorId::from([2]));
-    // Precomputed level-2 commit timestamps for this deterministic fixture.
-    let b = commit_with_time(&mut doc, Some(&[]), "value", 2, 23_934);
+    let b = commit_with_time(&mut doc, Some(&[]), "value", 2, 67_577);
     assert_eq!(b.fragment_level(), 2);
-    doc.set_author(Some(author(&ka))).unwrap();
     doc.set_actor(ActorId::from([1]));
     let a2 = append_at_level(&mut doc, Some(&[a1]), 3, 0);
-    let c = commit_with_time(&mut doc, Some(&[a2, b]), "value", 4, 145_339);
+    let c = commit_with_time(&mut doc, Some(&[a2, b]), "value", 4, 21_539);
     assert_eq!(c.fragment_level(), 2);
     let covering = doc.change_graph.get_historical_fragment(c).unwrap();
     assert_eq!(covering.boundary, [b]);
@@ -203,7 +196,7 @@ fn candidate_subscriptions_survive_until_replacement_publishes() {
     );
     assert_readiness_matches_graph(&mut doc);
 
-    sign_doc(&mut doc, b, &kb);
+    sign_doc(&mut doc, b, &ka);
     assert!(doc.try_signing().unwrap().is_accepted(&c));
     assert!(!is_candidate(&mut doc, &a1));
     assert_eq!(signature_count(&mut doc, &a1), 0);
@@ -347,7 +340,6 @@ fn supersession_and_branch_gc_reclaim_covered_candidates_and_signatures() {
     let before = doc.fragments(..);
     assert_eq!(before.len(), 2);
 
-    // Precomputed level-2 commit timestamp for this deterministic fixture.
     let new = commit_with_time(&mut doc, None, "value", 4, 45_260);
     assert_eq!(new.fragment_level(), 2);
     assert!(doc.change_graph.get_fragment(old).is_none());
@@ -371,31 +363,24 @@ fn supersession_and_branch_gc_reclaim_covered_candidates_and_signatures() {
     // 2. Shared frontier a1 stays alive across an incomplete sibling branch c1
     //    until c1 is also covered!
     let k1 = key(1);
-    let k2 = key(2);
-    let k3 = key(3);
     let mut branched = Automerge::signing(author(&k1))
         .unwrap()
         .with_actor(ActorId::from([1]));
     let a1 = append_at_level(&mut branched, None, 1, 0);
-    branched.set_author(Some(author(&k2))).unwrap();
     branched.set_actor(ActorId::from([2]));
     let b1 = append_at_level(&mut branched, Some(&[a1]), 2, 1);
-    branched.set_author(Some(author(&k3))).unwrap();
     branched.set_actor(ActorId::from([3]));
     let c1 = append_at_level(&mut branched, Some(&[a1]), 3, 1);
 
     sign_doc(&mut branched, a1, &k1);
-    sign_doc(&mut branched, b1, &k2);
-
-    branched.set_author(Some(author(&k1))).unwrap();
+    sign_doc(&mut branched, b1, &k1);
     branched.set_actor(ActorId::from([1]));
     let a2 = append_at_level(&mut branched, Some(&[b1]), 4, 0);
-    branched.set_author(Some(author(&k2))).unwrap();
     branched.set_actor(ActorId::from([2]));
-    let b2 = commit_with_time(&mut branched, Some(&[a2]), "b2", 5, 7_197);
+    let b2 = commit_with_time(&mut branched, Some(&[a2]), "b2", 5, 160_300);
     assert_eq!(b2.fragment_level(), 2);
     sign_doc(&mut branched, a2, &k1);
-    sign_doc(&mut branched, b2, &k2);
+    sign_doc(&mut branched, b2, &k1);
 
     assert_eq!(
         branched
@@ -408,16 +393,15 @@ fn supersession_and_branch_gc_reclaim_covered_candidates_and_signatures() {
         1,
         "shared frontier a1 must stay retained for incomplete branch c1",
     );
-    sign_doc(&mut branched, c1, &k3);
+    sign_doc(&mut branched, c1, &k1);
     assert!(branched.get_fragment(c1).is_some());
 
     // Joining above b2 and c1 at level 2 covers c1 via b2's causal past and
     // drops the last obligation on a1!
-    branched.set_author(Some(author(&k3))).unwrap();
     branched.set_actor(ActorId::from([3]));
-    let c2 = commit_with_time(&mut branched, Some(&[b2, c1]), "c2", 6, 32_269);
+    let c2 = commit_with_time(&mut branched, Some(&[b2, c1]), "c2", 6, 123_801);
     assert_eq!(c2.fragment_level(), 2);
-    sign_doc(&mut branched, c2, &k3);
+    sign_doc(&mut branched, c2, &k1);
     assert_eq!(
         branched
             .try_signing()

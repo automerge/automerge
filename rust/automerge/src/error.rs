@@ -12,8 +12,10 @@ pub struct PatchLogMismatch;
 
 /// A signing-mode current author is absent or cannot supply a usable Ed25519 key.
 ///
-/// Returned by author setters and signing-mode construction. Rejection leaves
-/// the previous author and actor unchanged. No signing key is required.
+/// Returned by signing-mode construction, loading and [`Automerge::fork_with_author`].
+/// Rejection leaves the source document unchanged. No signing key is required.
+///
+/// [`Automerge::fork_with_author`]: crate::Automerge::fork_with_author
 #[derive(Error, Debug)]
 #[error("{0}")]
 pub struct SigningAuthorError(#[source] pub(crate) SigningAuthorErrorInner);

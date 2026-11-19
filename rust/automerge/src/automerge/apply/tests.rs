@@ -273,10 +273,8 @@ fn compatible_log_survives_actor_insertion_and_visibility_transition() {
 
     let author_a = Author::from(vec![0xaa]);
     let author_b = Author::from(vec![0xbb]);
-    let mut source = Automerge::new()
-        .with_author(Some(author_a.clone()))
-        .unwrap()
-        .with_actor(ActorId::from([1]));
+    let mut source =
+        Automerge::new_with_author(Some(author_a.clone())).with_actor(ActorId::from([1]));
     let a1 = at_level(&mut source, 1, 0);
 
     // Receiver has only actor 1 applied; its log was bound before actor 2 existed.
@@ -292,12 +290,12 @@ fn compatible_log_survives_actor_insertion_and_visibility_transition() {
         .unwrap();
 
     source = source
-        .with_author(Some(author_b))
+        .fork_with_author(Some(author_b))
         .unwrap()
         .with_actor(ActorId::from([2]));
     let b1 = at_level(&mut source, 2, 0);
     source = source
-        .with_author(Some(author_a))
+        .fork_with_author(Some(author_a))
         .unwrap()
         .with_actor(ActorId::from([1]));
     let a2 = at_level(&mut source, 3, 0);

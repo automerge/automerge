@@ -19,9 +19,7 @@ fn masked_author() -> Author<'static> {
 
 fn source_doc() -> AutoCommit {
     // Setting an author generates a new actor, so set the deterministic actor last.
-    AutoCommit::new_with_encoding(ENCODING)
-        .with_author(Some(good_author()))
-        .unwrap()
+    AutoCommit::new_with_author_and_encoding(Some(good_author()), ENCODING)
         .with_actor(ActorId::from(vec![0x10]))
 }
 
@@ -44,13 +42,13 @@ fn masked_incoming_list_insert_does_not_advance_patch_index() {
     let mut target = source.clone();
 
     source = source
-        .with_author(Some(masked_author()))
+        .fork_with_author(Some(masked_author()))
         .unwrap()
         .with_actor(ActorId::from(vec![0x20]));
     source.insert(&list, 0, "X").unwrap(); // XR
     source.commit();
     source = source
-        .with_author(Some(good_author()))
+        .fork_with_author(Some(good_author()))
         .unwrap()
         .with_actor(ActorId::from(vec![0x30]));
     // Y is anchored after X, but X must occupy no space in the receiver's view.
@@ -88,7 +86,7 @@ fn masked_existing_list_insert_does_not_advance_patch_index() {
 
     // The masked author inserts X ahead of R.
     source = source
-        .with_author(Some(masked_author()))
+        .fork_with_author(Some(masked_author()))
         .unwrap()
         .with_actor(ActorId::from(vec![0x20]));
     source.insert(&list, 0, "X").unwrap(); // XR
@@ -105,7 +103,7 @@ fn masked_existing_list_insert_does_not_advance_patch_index() {
     // A later good-authored insert, anchored after the (hidden) X, arrives in
     // the batch on its own. X occupies no space in the receiver's view.
     source = source
-        .with_author(Some(good_author()))
+        .fork_with_author(Some(good_author()))
         .unwrap()
         .with_actor(ActorId::from(vec![0x30]));
     source.insert(&list, 1, "Y").unwrap(); // XYR
@@ -133,13 +131,13 @@ fn masked_incoming_text_insert_does_not_advance_patch_index() {
     let mut target = source.clone();
 
     source = source
-        .with_author(Some(masked_author()))
+        .fork_with_author(Some(masked_author()))
         .unwrap()
         .with_actor(ActorId::from(vec![0x20]));
     source.splice_text(&text, 0, 0, "X").unwrap();
     source.commit();
     source = source
-        .with_author(Some(good_author()))
+        .fork_with_author(Some(good_author()))
         .unwrap()
         .with_actor(ActorId::from(vec![0x30]));
     source.splice_text(&text, 1, 0, "Y").unwrap();
@@ -168,7 +166,7 @@ fn masked_incoming_replacement_does_not_displace_visible_insert_patch() {
     source.insert(&list, 0, "Y").unwrap();
     source.commit();
     source = source
-        .with_author(Some(masked_author()))
+        .fork_with_author(Some(masked_author()))
         .unwrap()
         .with_actor(ActorId::from(vec![0x20]));
     source.put(&list, 0, "X").unwrap();
@@ -198,7 +196,7 @@ fn assert_masked_marks_not_patched(import_marks_first: bool) {
     let mut target = source.clone();
 
     source = source
-        .with_author(Some(masked_author()))
+        .fork_with_author(Some(masked_author()))
         .unwrap()
         .with_actor(ActorId::from(vec![0x20]));
     source
@@ -211,7 +209,7 @@ fn assert_masked_marks_not_patched(import_marks_first: bool) {
     source.commit();
     let mark_change = source.get_last_local_change().unwrap();
     source = source
-        .with_author(Some(good_author()))
+        .fork_with_author(Some(good_author()))
         .unwrap()
         .with_actor(ActorId::from(vec![0x30]));
     source.splice_text(&text, 1, 0, "X").unwrap();
@@ -272,9 +270,7 @@ fn already_imported_masked_marks_do_not_leak_into_allowed_insertion_patches() {
 /// (post-boundary), plus the boundary hash.
 fn alice_changes() -> (AutoCommit, ChangeHash, Author<'static>) {
     let alice = Author::try_from("aaaa").unwrap();
-    let mut a = AutoCommit::new_with_encoding(ENCODING)
-        .with_author(Some(alice.clone()))
-        .unwrap()
+    let mut a = AutoCommit::new_with_author_and_encoding(Some(alice.clone()), ENCODING)
         .with_actor(ActorId::from(vec![0xA0]));
     a.put(ROOT, "a1", 1).unwrap();
     a.commit();
@@ -347,9 +343,7 @@ fn boundary_in_batch_every_order() {
 fn boundary_in_batch_with_concurrent_winner_every_order() {
     let (mut a, h, alice) = alice_changes();
     let bob = Author::try_from("bbbb").unwrap();
-    let mut b = AutoCommit::new_with_encoding(ENCODING)
-        .with_author(Some(bob))
-        .unwrap()
+    let mut b = AutoCommit::new_with_author_and_encoding(Some(bob), ENCODING)
         .with_actor(ActorId::from(vec![0xB0]));
     b.put(ROOT, "a2", 99).unwrap();
     b.commit();
@@ -418,9 +412,7 @@ fn mismatched_write_frontier_logs_leave_visibility_and_log_unchanged() {
             let expected_patches = source.make_patches(&mut log);
 
             let author = Author::try_from("aaaa").unwrap();
-            let mut target = Automerge::new()
-                .with_author(Some(author.clone()))
-                .unwrap()
+            let mut target = Automerge::new_with_author(Some(author.clone()))
                 .with_actor(ActorId::from(vec![0x80]));
             if !empty_target {
                 let mut tx = target.transaction();
@@ -488,14 +480,14 @@ fn patch_log_mismatch_preserves_previously_queued_changes() {
 fn batch_insert_after_value_restored_by_mask() {
     let good = Author::try_from("900d").unwrap();
     let bad = Author::try_from("badd").unwrap();
-    let mut g = AutoCommit::new().with_author(Some(good)).unwrap();
+    let mut g = AutoCommit::new_with_author(Some(good));
     let list = g.put_object(ROOT, "list", ObjType::List).unwrap();
     g.insert(&list, 0, "a").unwrap();
     g.insert(&list, 1, "b").unwrap();
     g.commit();
 
     // Bad author deletes "a" on a fork.
-    let mut b = g.fork().with_author(Some(bad.clone())).unwrap();
+    let mut b = g.fork_with_author(Some(bad.clone())).unwrap();
     b.delete(&list, 0).unwrap();
     b.commit();
 

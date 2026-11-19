@@ -69,9 +69,7 @@ fn status_reports_any_applied_unpublished_history_in_required_mode_only() {
     // An applied but unpublished *imported* change counts even though it is
     // not a local draft; a pending (unapplied) group does not.
     let k2 = key(2);
-    let mut remote = doc.clone();
-    remote.set_author(Some(author(&k2))).unwrap();
-    remote.set_actor(ActorId::from([2]));
+    let mut remote = replica(&doc, author(&k2), ActorId::from([2]));
     let b = append_at_level(&mut remote, Some(&[a]), 2, 0);
     let c = append_at_level(&mut remote, Some(&[b]), 3, 0);
     let c_bytes = attach(
@@ -269,9 +267,7 @@ fn blocked_cover_with_fallback() -> (Automerge, SigningKey, SigningKey, [ChangeH
 
     // `b` is authored by another author on a clone and injected as applied
     // history without proof: it is unpublished and not locally signable.
-    let mut remote = doc.clone();
-    remote.set_author(Some(author(&kb))).unwrap();
-    remote.set_actor(ActorId::from([2]));
+    let mut remote = replica(&doc, author(&kb), ActorId::from([2]));
     let b = append_at_level(&mut remote, Some(&[]), 2, 1);
     let b_change = remote.get_change_by_hash(&b).unwrap();
     doc.put_actor(ActorId::from([2]));
@@ -398,9 +394,7 @@ fn covered_feasible_candidate_is_removed_only_when_its_cover_can_progress() {
     sign_requests(&mut unblocked, &snapshot, &ka);
     assert!(!unblocked.has_unpublished_changes());
 
-    let mut remote = doc.clone();
-    remote.set_author(Some(author(&kb))).unwrap();
-    remote.set_actor(ActorId::from([2]));
+    let mut remote = replica(&doc, author(&kb), ActorId::from([2]));
     let b = commit_at_level_two(&mut remote, &[], 4);
     let b_change = remote.get_change_by_hash(&b).unwrap();
     doc.put_actor(ActorId::from([2]));

@@ -259,15 +259,16 @@ describe("Automerge Wasm fragment signing", () => {
       alice.author,
     );
 
-    // Author updates follow the same rule and leave the document unchanged.
-    assert.throws(() => doc.setAuthor(null), RangeError);
-    assert.throws(() => doc.setAuthor("010203"), RangeError);
+    // The author is fixed per instance; a new-author fork follows the same
+    // rule and leaves the source document unchanged.
+    assert.throws(() => doc.forkWithAuthor(null), RangeError);
+    assert.throws(() => doc.forkWithAuthor("010203"), RangeError);
     assert.equal(doc.getAuthor(), alice.author);
 
     // Unsigned documents stay permissive.
-    const unsigned = create();
-    unsigned.setAuthor("010203");
-    unsigned.setAuthor(null);
-    assert.equal(unsigned.getAuthor(), null);
+    const unsigned = create({ author: "010203" });
+    assert.equal(unsigned.getAuthor(), "010203");
+    assert.equal(unsigned.forkWithAuthor(null).getAuthor(), null);
+    assert.equal(create().getAuthor(), null);
   });
 });

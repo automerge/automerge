@@ -11,14 +11,13 @@ const ENCODING: TextEncoding = TextEncoding::UnicodeCodePoint;
 
 fn historical_and_incremental_diffs_are_distinct(isolated: bool) {
     let author = Author::try_from("aaaa").unwrap();
-    let mut doc = AutoCommit::new_with_encoding(ENCODING)
-        .with_author(Some(author.clone()))
-        .unwrap();
+    let mut doc = AutoCommit::new_with_author_and_encoding(Some(author.clone()), ENCODING);
     doc.put(ROOT, "x", 1).unwrap();
     let before = doc.get_heads();
 
     if isolated {
-        doc.set_author(Some(Author::try_from("bbbb").unwrap()))
+        doc = doc
+            .fork_with_author(Some(Author::try_from("bbbb").unwrap()))
             .unwrap();
         doc.put(ROOT, "y", 2).unwrap();
         let after = doc.get_heads();
@@ -31,11 +30,13 @@ fn historical_and_incremental_diffs_are_distinct(isolated: bool) {
         doc.isolate(&after);
         check_diffs(&mut doc, &before, &after, &mut view);
     } else {
+        // Fork first: the diff cursor belongs to the instance that observes.
+        doc = doc
+            .fork_with_author(Some(Author::try_from("bbbb").unwrap()))
+            .unwrap();
         doc.update_diff_cursor();
         let mut view = doc.hydrate(ROOT, None).unwrap();
         doc.mask_author(author, &[]);
-        doc.set_author(Some(Author::try_from("bbbb").unwrap()))
-            .unwrap();
         doc.put(ROOT, "y", 2).unwrap();
         let after = doc.get_heads();
         check_diffs(&mut doc, &before, &after, &mut view);
@@ -100,7 +101,7 @@ fn historical_object_diff_respects_object_and_recursive_scope() {
         .put_object(&map, "child", automerge::ObjType::Map)
         .unwrap();
     let epoch = doc.get_heads();
-    doc.set_author(Some(author.clone())).unwrap();
+    doc = doc.fork_with_author(Some(author.clone())).unwrap();
     doc.put(&map, "x", 1).unwrap();
     doc.put(&child, "x", 1).unwrap();
     let before = doc.get_heads();
@@ -108,7 +109,8 @@ fn historical_object_diff_respects_object_and_recursive_scope() {
     doc.update_diff_cursor();
 
     doc.mask_author(author, &epoch);
-    doc.set_author(Some(Author::try_from("bbbb").unwrap()))
+    doc = doc
+        .fork_with_author(Some(Author::try_from("bbbb").unwrap()))
         .unwrap();
     doc.put(&map, "y", 2).unwrap();
     doc.put(&child, "y", 2).unwrap();
@@ -146,15 +148,14 @@ fn historical_object_diff_respects_object_and_recursive_scope() {
 
 fn authored_doc() -> (Automerge, Author<'static>) {
     let author = Author::try_from("aaaa").unwrap();
-    let doc = Automerge::new_with_encoding(ENCODING)
-        .with_author(Some(author.clone()))
-        .unwrap()
+    let doc = Automerge::new_with_author_and_encoding(Some(author.clone()), ENCODING)
         .with_actor(ActorId::from(vec![0x80]));
     (doc, author)
 }
 
 fn other_author(doc: &mut Automerge) {
-    doc.set_author(Some(Author::try_from("bbbb").unwrap()))
+    *doc = doc
+        .fork_with_author(Some(Author::try_from("bbbb").unwrap()))
         .unwrap();
     doc.set_actor(ActorId::from(vec![0x10]));
 }

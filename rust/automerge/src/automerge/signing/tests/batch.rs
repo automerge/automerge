@@ -35,9 +35,7 @@ fn local_a_with_pending_b() -> (Automerge, SigningKey, [ChangeHash; 2]) {
         .with_actor(ActorId::from([1]));
     let a = append_at_level(&mut doc, None, 1, 0);
 
-    let mut remote = doc.clone();
-    remote.set_author(Some(author(&k2))).unwrap();
-    remote.set_actor(ActorId::from([2]));
+    let mut remote = replica(&doc, author(&k2), ActorId::from([2]));
     let b = append_at_level(&mut remote, Some(&[a]), 2, 0);
     let b_bytes = attach(
         remote.get_change_by_hash(&b).unwrap().raw_bytes(),
@@ -308,21 +306,37 @@ fn historical_author_is_verified_not_current_author() {
         .unwrap()
         .with_actor(ActorId::from([1]));
     let a = append_at_level(&mut doc, None, 1, 0);
-    doc.set_author(Some(author(&k2))).unwrap();
-    doc.set_actor(ActorId::from([2]));
-    let b = append_at_level(&mut doc, None, 2, 0);
+    doc.insert_signatures([(a, sig(&k1, &a))]);
+    assert!(is_accepted(&mut doc, &a));
 
-    // Current author is k2; a was authored by k1 and must verify under k1 only.
-    let outcome = doc.insert_signatures([(a, sig(&k2, &a)), (a, sig(&k1, &a)), (b, sig(&k2, &b))]);
+    // Once fully published the history is forked for author k2, whose change
+    // `b` is independent of `a`. Its signature was dropped in transit and is
+    // supplied afterwards.
+    let mut doc = doc.fork_with_author(Some(author(&k2))).unwrap();
+    doc.set_actor(ActorId::from([2]));
+    let b = append_at_level(&mut doc, Some(&[]), 2, 0);
+    // Keep only `b` published-pending: `a` is already accepted.
+    let c = append_at_level(&mut doc, Some(&[a]), 3, 0);
+
+    // Current author is k2; a was authored by k1 and must verify under k1 only,
+    // and k2's own changes verify under k2 only.
+    let outcome = doc.insert_signatures([(c, sig(&k1, &c)), (b, sig(&k2, &b)), (c, sig(&k2, &c))]);
     let results = insertions(&outcome);
     assert!(matches!(
         results[0].result,
-        Err(SignatureInsertError::Verification { change, .. }) if change == a
+        Err(SignatureInsertError::Verification { change, .. }) if change == c
     ));
     assert!(matches!(results[1].result, Ok(Insert::Stored)));
     assert!(matches!(results[2].result, Ok(Insert::Stored)));
     assert!(is_accepted(&mut doc, &a));
     assert!(is_accepted(&mut doc, &b));
+    assert!(is_accepted(&mut doc, &c));
+    // Historical `a` is still bound to k1: a k2 signature for it is rejected.
+    let outcome = doc.insert_signatures([(a, sig(&k2, &a))]);
+    assert!(matches!(
+        insertions(&outcome)[0].result,
+        Err(SignatureInsertError::Verification { change, .. }) if change == a
+    ));
 }
 
 #[test]
@@ -335,9 +349,7 @@ fn missing_or_invalid_historical_author_is_a_per_entry_error() {
 
     let mut authorless = Automerge::new().with_actor(ActorId::from([3]));
     let none = append_at_level(&mut authorless, None, 2, 0);
-    let mut bad_key = Automerge::new()
-        .with_author(Some(Author::from(vec![1, 2, 3])))
-        .unwrap()
+    let mut bad_key = Automerge::new_with_author(Some(Author::from(vec![1, 2, 3])))
         .with_actor(ActorId::from([4]));
     let bad = append_at_level(&mut bad_key, None, 3, 0);
     for (doc, hash) in [(&authorless, none), (&bad_key, bad)] {
@@ -386,10 +398,8 @@ fn simultaneously_admissible_pending_equivocation_fails_publication_but_retains_
         .with_actor(ActorId::from([1]));
     let a = append_at_level(&mut doc, None, 1, 0);
 
-    let mut branch = |value: i64| {
-        let mut remote = doc.clone();
-        remote.set_author(Some(author(&k2))).unwrap();
-        remote.set_actor(ActorId::from([2]));
+    let branch = |value: i64| {
+        let mut remote = replica(&doc, author(&k2), ActorId::from([2]));
         let h = append_at_level(&mut remote, Some(&[a]), value, 0);
         attach(
             remote.get_change_by_hash(&h).unwrap().raw_bytes(),
@@ -436,7 +446,6 @@ fn published_frontier_with_reclaimed_signature_does_not_prove_a_new_candidate() 
     // the exact sig(a) is supplied, even though every frontier is applied and
     // a is accepted.
     let ka = key(7);
-    let kb = key(8);
     let mut doc = Automerge::signing(author(&ka))
         .unwrap()
         .with_actor(ActorId::from([1]));
@@ -450,7 +459,6 @@ fn published_frontier_with_reclaimed_signature_does_not_prove_a_new_candidate() 
     assert!(is_accepted(&mut doc, &c));
     assert_eq!(signature_count(&mut doc, &a), 0, "a's proof was reclaimed");
 
-    doc.set_author(Some(author(&kb))).unwrap();
     doc.set_actor(ActorId::from([2]));
     let d = append_at_level(&mut doc, Some(&[a]), 3, 1);
     let h = doc.change_graph.get_historical_fragment(d).unwrap();
@@ -464,7 +472,7 @@ fn published_frontier_with_reclaimed_signature_does_not_prove_a_new_candidate() 
         .collect();
     assert_eq!(sorted(&frontiers), sorted(&[a, d]));
 
-    let outcome = doc.insert_signatures([(d, sig(&kb, &d))]);
+    let outcome = doc.insert_signatures([(d, sig(&ka, &d))]);
     assert!(matches!(insertions(&outcome)[0].result, Ok(Insert::Stored)));
     assert!(
         !is_accepted(&mut doc, &d),
@@ -480,29 +488,26 @@ fn published_frontier_with_reclaimed_signature_does_not_prove_a_new_candidate() 
 
 #[test]
 fn completion_continues_after_publication_only_progress_of_pending_group() {
-    // l (actor 1, k1) is local and unpublished. a (actor 2, k2) was committed
+    // l (actor 1) is local and unpublished. a (actor 2, same author) was committed
     // locally on this document too, so its contents are applied; the same a
     // then arrives as a signed incoming group, which stays pending on l. c
-    // (actor 1, k1) depends on a and already has its own signature retained.
+    // (actor 1) depends on a and already has its own signature retained.
     // Signing l publishes l, then the retry publishes pending a without
     // appending any graph node, which in turn enables c: all of this must
     // happen in one call.
     let k1 = key(1);
-    let k2 = key(2);
     let mut doc = Automerge::signing(author(&k1))
         .unwrap()
         .with_actor(ActorId::from([1]));
     let l = append_at_level(&mut doc, None, 1, 0);
-    doc.set_author(Some(author(&k2))).unwrap();
     doc.set_actor(ActorId::from([2]));
     let a = append_at_level(&mut doc, Some(&[l]), 2, 0);
-    doc.set_author(Some(author(&k1))).unwrap();
     doc.set_actor(ActorId::from([1]));
     let c = append_at_level(&mut doc, Some(&[a]), 3, 0);
 
     let a_bytes = attach(
         doc.get_change_by_hash(&a).unwrap().raw_bytes(),
-        [(a, Signature::ed25519(sig(&k2, &a)))],
+        [(a, Signature::ed25519(sig(&k1, &a)))],
     );
     assert_eq!(doc.load_incremental(&a_bytes).unwrap(), 0);
     assert_eq!(

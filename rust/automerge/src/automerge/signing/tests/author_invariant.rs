@@ -96,7 +96,7 @@ fn required_construction_requires_a_usable_author_without_creating_history() {
 }
 
 #[test]
-fn rejected_required_author_changes_preserve_actor_history_and_evidence() {
+fn rejected_required_author_forks_preserve_actor_history_and_evidence() {
     let key = SigningKey::from_bytes(&[7; 32]);
     let mut doc = Automerge::signing(author(7))
         .unwrap()
@@ -115,19 +115,20 @@ fn rejected_required_author_changes_preserve_actor_history_and_evidence() {
     candidates.extend(invalid_authors().into_iter().map(Some));
     for candidate in candidates {
         let before = format!("{doc:?}");
-        assert!(doc.set_author(candidate).is_err());
+        assert!(matches!(
+            doc.fork_with_author(candidate),
+            Err(crate::AutomergeError::SigningAuthor(_))
+        ));
         assert_eq!(format!("{doc:?}"), before);
     }
 }
 
 #[test]
-fn valid_switches_rotate_actors_but_same_author_and_later_commits_preserve_identity() {
+fn same_author_forks_keep_identity_and_later_commits_omit_the_author_footer() {
     let alice = author(7);
     let bob = author(8);
     let mut doc = Automerge::signing(alice.clone()).unwrap();
     let actor = doc.get_actor().clone();
-    doc.set_author(Some(alice.clone())).unwrap();
-    assert_eq!(doc.get_actor(), &actor);
     let mut tx = doc.transaction();
     tx.put(ROOT, "first", 1).unwrap();
     let (first, _) = tx.commit();
@@ -140,44 +141,52 @@ fn valid_switches_rotate_actors_but_same_author_and_later_commits_preserve_ident
     assert!(second.author().is_none());
     assert_eq!(doc.get_author(), Some(&alice));
     assert_eq!(doc.try_signing().unwrap().author.author(), &alice);
+
+    // A same-author fork is a normal fork: fresh actor, same author and the
+    // old actor's binding intact; the source is untouched.
     let before = format!("{doc:?}");
-    doc.set_author(Some(alice.clone())).unwrap();
+    let mut fork = doc.fork_with_author(Some(alice.clone())).unwrap();
     assert_eq!(format!("{doc:?}"), before);
-    doc.set_author(Some(bob.clone())).unwrap();
-    assert_ne!(doc.get_actor(), &actor);
-    assert_eq!(doc.try_signing().unwrap().author.author(), &bob);
-    assert_eq!(doc.get_author_for_actor(&actor).as_ref(), Some(&alice));
+    assert_ne!(fork.get_actor(), &actor);
+    assert_eq!(fork.try_signing().unwrap().author.author(), &alice);
+    assert_eq!(fork.get_author_for_actor(&actor).as_ref(), Some(&alice));
     let old_signature = ed25519::Signature::from_bytes(
         SigningKey::from_bytes(&[7; 32])
             .sign(&signing_message(&first.hash()))
             .to_bytes(),
     );
-    doc.try_signing()
+    fork.try_signing()
         .unwrap()
         .insert_signature(&first.hash(), &old_signature)
         .unwrap();
+    // Drafts remain, so Bob cannot take over this history yet.
+    assert!(matches!(
+        fork.fork_with_author(Some(bob)),
+        Err(crate::AutomergeError::Signing(
+            crate::signature::error::SigningError::UnpublishedLocalChanges
+        ))
+    ));
 }
 
 #[test]
-fn builder_uses_the_same_mode_specific_author_rules() {
+fn constructors_use_the_same_mode_specific_author_rules() {
     for candidate in [None, Some(Author::from(vec![1, 2, 3]))] {
-        let unsigned = Automerge::new().with_author(candidate.clone()).unwrap();
+        let unsigned = Automerge::new_with_author(candidate.clone());
         assert_eq!(unsigned.get_author(), candidate.as_ref());
         assert!(Automerge::signing(author(7))
             .unwrap()
-            .with_author(candidate)
+            .fork_with_author(candidate)
             .is_err());
     }
     let doc = Automerge::signing(author(7))
         .unwrap()
-        .with_author(Some(author(8)))
+        .fork_with_author(Some(author(8)))
         .unwrap();
     assert_eq!(doc.get_author(), Some(&author(8)));
-    let mut unsigned = Automerge::new();
     let arbitrary = Author::from(vec![1, 2, 3]);
-    unsigned.set_author(Some(arbitrary.clone())).unwrap();
+    let unsigned = Automerge::new_with_author(Some(arbitrary.clone()));
     assert_eq!(unsigned.get_author(), Some(&arbitrary));
-    unsigned.set_author(None).unwrap();
+    let unsigned = unsigned.fork_with_author(None).unwrap();
     assert!(unsigned.get_author().is_none());
 }
 

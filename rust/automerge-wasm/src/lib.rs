@@ -299,6 +299,10 @@ export type Mark = {
 interface Automerge {
 
     fork(actor?: string, heads?: Heads): Automerge;
+    // Full fork writing as `author` (null removes the author in unsigned
+    // documents). In required signing mode a different author is accepted
+    // only once every local draft is published.
+    forkWithAuthor(author: string | null, actor?: string): Automerge;
 
     put(obj: ObjID, prop: Prop, value: Value, datatype?: Datatype): void;
     get(obj: ObjID, prop: Prop, heads?: Heads): Value | undefined;
@@ -372,6 +376,7 @@ export type LoadOptions = {
   convertImmutableStringsToText?: boolean;
   // Load in required signing mode. Requires `author`.
   signing?: boolean;
+  // The fixed local author of the loaded document.
   author?: Author;
 };
 
@@ -384,6 +389,7 @@ export type InitOptions = {
   actor?: Actor;
   // Create in required signing mode. Requires `author`.
   signing?: boolean;
+  // The fixed local author of the new document.
   author?: Author;
 };
 
@@ -459,17 +465,21 @@ pub struct Automerge {
 #[wasm_bindgen]
 impl Automerge {
     pub fn new(actor: Option<String>) -> Result<Automerge, error::Create> {
-        Self::new_with_signing(actor, None)
+        Self::new_with_author(actor, DocumentAuthor::Unsigned(None))
     }
 
-    /// Create a document, in required signing mode when `signing_author` is given.
-    fn new_with_signing(
+    /// Create a document with the given fixed author and signing mode.
+    fn new_with_author(
         actor: Option<String>,
-        signing_author: Option<Author<'static>>,
+        author: DocumentAuthor,
     ) -> Result<Automerge, error::Create> {
-        let mut doc = match signing_author {
-            Some(author) => AutoCommit::signing_with_encoding(author, TextEncoding::Utf16CodeUnit)?,
-            None => AutoCommit::new_with_encoding(TextEncoding::Utf16CodeUnit),
+        let mut doc = match author {
+            DocumentAuthor::Signing(author) => {
+                AutoCommit::signing_with_encoding(author, TextEncoding::Utf16CodeUnit)?
+            }
+            DocumentAuthor::Unsigned(author) => {
+                AutoCommit::new_with_author_and_encoding(author, TextEncoding::Utf16CodeUnit)
+            }
         };
         if let Some(a) = actor {
             let a =
@@ -539,6 +549,30 @@ impl Automerge {
         };
         let mut automerge = Automerge {
             doc,
+            freeze: self.freeze,
+            external_types: self.external_types.clone(),
+        };
+        if let Some(s) = actor {
+            let actor =
+                automerge::ActorId::from(hex::decode(s).map_err(error::BadActorId::from)?.to_vec());
+            automerge.doc.set_actor(actor);
+        }
+        Ok(automerge)
+    }
+
+    // Typed in the `interface Automerge` custom section above.
+    #[wasm_bindgen(js_name = forkWithAuthor, skip_typescript)]
+    pub fn fork_with_author(
+        &mut self,
+        author: Option<String>,
+        actor: Option<String>,
+    ) -> Result<Automerge, error::Fork> {
+        let author = author
+            .map(Author::try_from)
+            .transpose()
+            .map_err(error::BadAuthor::from)?;
+        let mut automerge = Automerge {
+            doc: self.doc.fork_with_author(author)?,
             freeze: self.freeze,
             external_types: self.external_types.clone(),
         };
@@ -1614,18 +1648,6 @@ impl Automerge {
             .collect())
     }
 
-    #[wasm_bindgen(js_name = setAuthor)]
-    pub fn set_author(&mut self, author: Option<String>) -> Result<(), JsValue> {
-        let author = author
-            .map(Author::try_from)
-            .transpose()
-            .map_err(error::BadAuthor::from)?;
-        self.doc
-            .set_author(author)
-            .map_err(error::SigningAuthor::from)?;
-        Ok(())
-    }
-
     #[wasm_bindgen(js_name = getLastLocalChange, unchecked_return_type="Change | null")]
     pub fn get_last_local_change(&mut self) -> JsValue {
         if let Some(change) = self.doc.get_last_local_change() {
@@ -1962,22 +1984,31 @@ fn signing_option(options: &JsValue) -> Result<bool, error::BadSigningOption> {
     value.0.as_bool().ok_or(error::BadSigningOption)
 }
 
-/// Resolve the author a signing document is created with.
+/// The fixed author and signing mode requested by `create`/`load` options.
+enum DocumentAuthor {
+    Unsigned(Option<Author<'static>>),
+    Signing(Author<'static>),
+}
+
+/// Resolve the author a document is created or loaded with.
 ///
-/// Returns `None` when `signing` is off. In signing mode an `author` option is
-/// required, and the author's bytes must form a usable Ed25519 key.
-fn signing_author(options: &JsValue) -> Result<Option<Author<'static>>, error::SigningAuthor> {
-    if !signing_option(options)? {
-        return Ok(None);
-    }
+/// Unsigned documents take any `author` option, or none. In signing mode an
+/// `author` option is required, and the author's bytes must form a usable
+/// Ed25519 key.
+fn document_author(options: &JsValue) -> Result<DocumentAuthor, error::SigningAuthor> {
+    let signing = signing_option(options)?;
     let author = js_get(options, "author")
         .ok()
         .and_then(|a| a.as_string())
         .map(Author::try_from)
         .transpose()
         .map_err(error::BadAuthor::from)?;
-    let author = author.ok_or(error::SigningAuthor::Missing)?;
-    Ok(Some(author))
+    if !signing {
+        return Ok(DocumentAuthor::Unsigned(author));
+    }
+    Ok(DocumentAuthor::Signing(
+        author.ok_or(error::SigningAuthor::Missing)?,
+    ))
 }
 
 // skip_typescript as the definition requires an optional argument so we define
@@ -1985,8 +2016,8 @@ fn signing_author(options: &JsValue) -> Result<Option<Author<'static>>, error::S
 #[wasm_bindgen(js_name = create, skip_typescript)]
 pub fn init(options: JsValue) -> Result<Automerge, error::Create> {
     let actor = js_get(&options, "actor").ok().and_then(|a| a.as_string());
-    let signing_author = signing_author(&options)?;
-    Automerge::new_with_signing(actor, signing_author)
+    let author = document_author(&options)?;
+    Automerge::new_with_author(actor, author)
 }
 
 // skip_typescript as the options argument is optional which can only be typed
@@ -1995,7 +2026,7 @@ pub fn init(options: JsValue) -> Result<Automerge, error::Create> {
 pub fn load(data: Uint8Array, options: JsValue) -> Result<Automerge, error::Load> {
     let data = data.to_vec();
     let actor = js_get(&options, "actor").ok().and_then(|a| a.as_string());
-    let signing_author = signing_author(&options)?;
+    let author = document_author(&options)?;
     let unchecked = js_get(&options, "unchecked")
         .ok()
         .and_then(|v1| v1.as_bool())
@@ -2028,9 +2059,11 @@ pub fn load(data: Uint8Array, options: JsValue) -> Result<Automerge, error::Load
         .verification_mode(verification_mode)
         .migrate_strings(string_migration)
         .text_encoding(TextEncoding::Utf16CodeUnit);
-    if let Some(author) = signing_author {
-        load_options = load_options.signing().author(author);
-    }
+    load_options = match author {
+        DocumentAuthor::Signing(author) => load_options.signing().author(author),
+        DocumentAuthor::Unsigned(Some(author)) => load_options.author(author),
+        DocumentAuthor::Unsigned(None) => load_options,
+    };
     let mut doc = am::AutoCommit::load_with_options(&data, load_options)?;
     if let Some(s) = actor {
         let actor =
@@ -2676,6 +2709,8 @@ pub mod error {
     pub enum Fork {
         #[error(transparent)]
         BadActor(#[from] BadActorId),
+        #[error(transparent)]
+        BadAuthor(#[from] BadAuthor),
         #[error(transparent)]
         Automerge(#[from] AutomergeError),
         #[error(transparent)]

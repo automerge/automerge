@@ -356,11 +356,9 @@ impl Runner {
         let alice = Author::try_from("aaaa").unwrap();
         let bob = Author::try_from("bbbb").unwrap();
         let carol = Author::try_from("cccc").unwrap();
-        // Set the author before the actor: `set_author` regenerates the
+        // Set the author before the actor: `fork_with_author` generates a fresh
         // actor id.
-        let mut main = AutoCommit::new_with_encoding(ENCODING)
-            .with_author(Some(carol.clone()))
-            .unwrap()
+        let mut main = AutoCommit::new_with_author_and_encoding(Some(carol.clone()), ENCODING)
             .with_actor(ActorId::from(vec![0x01]));
         // A shared init commit creates the sequence objects, so peer and
         // local write-frontier boundaries (all at or after these heads) never
@@ -370,8 +368,7 @@ impl Runner {
         main.commit();
         let init_heads = main.get_heads();
         let peer = |main: &mut AutoCommit, author: &Author<'static>, actor: u8| {
-            main.fork()
-                .with_author(Some(author.clone()))
+            main.fork_with_author(Some(author.clone()))
                 .unwrap()
                 .with_actor(ActorId::from(vec![actor]))
         };
@@ -938,16 +935,12 @@ fn run(ops: Vec<Op>, coverage: &RefCell<BTreeMap<&'static str, u64>>) -> Result<
 fn regression_masked_overwrite_keeps_doc_op_a_conflict_candidate() {
     let alice = Author::try_from("aaaa").unwrap();
     let bob = Author::try_from("bbbb").unwrap();
-    let mut a = AutoCommit::new_with_encoding(ENCODING)
-        .with_author(Some(alice))
-        .unwrap()
+    let mut a = AutoCommit::new_with_author_and_encoding(Some(alice), ENCODING)
         .with_actor(ActorId::from(vec![0xA0]));
     let child = a.put_object(ROOT, "k3", ObjType::Map).unwrap();
     a.put(&child, "c0", 0).unwrap();
     a.commit();
-    let mut b = AutoCommit::new_with_encoding(ENCODING)
-        .with_author(Some(bob.clone()))
-        .unwrap()
+    let mut b = AutoCommit::new_with_author_and_encoding(Some(bob.clone()), ENCODING)
         .with_actor(ActorId::from(vec![0xB0]));
     b.put(ROOT, "k3", 0).unwrap();
     b.commit();
@@ -1014,8 +1007,7 @@ proptest! {
     ) {
         let alice = Author::try_from("aaaa").unwrap();
         let bob = Author::try_from("bbbb").unwrap();
-        let mut a = AutoCommit::new_with_encoding(ENCODING)
-            .with_author(Some(alice.clone())).unwrap()
+        let mut a = AutoCommit::new_with_author_and_encoding(Some(alice.clone()), ENCODING)
             .with_actor(ActorId::from(vec![0xA0]));
         for (i, val) in alice_vals.iter().enumerate() {
             a.put(ROOT, key_name(i as u8), *val).unwrap();
@@ -1024,8 +1016,7 @@ proptest! {
         // Alice's last change: she has no ops after this boundary.
         let boundary = a.get_heads();
         let mut b = a
-            .fork()
-            .with_author(Some(bob)).unwrap()
+            .fork_with_author(Some(bob)).unwrap()
             .with_actor(ActorId::from(vec![0xB0]));
         for (i, val) in bob_vals.iter().enumerate() {
             b.put(ROOT, key_name(i as u8), *val).unwrap();
@@ -1115,9 +1106,7 @@ fn regression_shrunk_reveal_sequence_replays() {
 fn regression_reveal_under_visible_mark_carries_the_mark() {
     let alice = Author::try_from("aaaa").unwrap();
     let carol = Author::try_from("cccc").unwrap();
-    let mut main = AutoCommit::new_with_encoding(ENCODING)
-        .with_author(Some(carol.clone()))
-        .unwrap()
+    let mut main = AutoCommit::new_with_author_and_encoding(Some(carol.clone()), ENCODING)
         .with_actor(ActorId::from(vec![0x01]));
     let text = main.put_object(ROOT, "text", ObjType::Text).unwrap();
     main.commit();
@@ -1126,8 +1115,7 @@ fn regression_reveal_under_visible_mark_carries_the_mark() {
     main.commit();
     // alice marks the middle character; her mark is never masked.
     let mut peer = main
-        .fork()
-        .with_author(Some(alice.clone()))
+        .fork_with_author(Some(alice.clone()))
         .unwrap()
         .with_actor(ActorId::from(vec![0xA0]));
     peer.mark(

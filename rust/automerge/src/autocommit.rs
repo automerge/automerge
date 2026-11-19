@@ -97,7 +97,25 @@ impl AutoCommit {
     }
 
     pub fn new_with_encoding(encoding: TextEncoding) -> AutoCommit {
-        let doc = Automerge::new_with_encoding(encoding);
+        Self::from_document(Automerge::new_with_encoding(encoding))
+    }
+
+    /// Create a new unsigned document whose local author is fixed to `author`.
+    /// See [`Automerge::new_with_author`].
+    pub fn new_with_author(author: Option<Author<'static>>) -> AutoCommit {
+        Self::from_document(Automerge::new_with_author(author))
+    }
+
+    /// [`Self::new_with_author`] with an explicit text encoding.
+    pub fn new_with_author_and_encoding(
+        author: Option<Author<'static>>,
+        encoding: TextEncoding,
+    ) -> AutoCommit {
+        Self::from_document(Automerge::new_with_author_and_encoding(author, encoding))
+    }
+
+    /// Wrap a fresh document with no transaction, patches or cursors.
+    fn from_document(doc: Automerge) -> AutoCommit {
         AutoCommit {
             doc,
             transaction: None,
@@ -120,14 +138,9 @@ impl AutoCommit {
         author: Author<'static>,
         encoding: TextEncoding,
     ) -> Result<AutoCommit, crate::SigningAuthorError> {
-        Ok(AutoCommit {
-            doc: Automerge::signing_with_encoding(author, encoding)?,
-            transaction: None,
-            patch_log: PatchLog::inactive(),
-            diff_cursor: Vec::new(),
-            save_cursor: Vec::new(),
-            isolation: None,
-        })
+        Ok(Self::from_document(Automerge::signing_with_encoding(
+            author, encoding,
+        )?))
     }
 
     /// Verify and insert signatures for applied changes, then complete
@@ -401,6 +414,37 @@ impl AutoCommit {
         }
     }
 
+    /// Fork this document for use by `author`. See
+    /// [`Automerge::fork_with_author`].
+    ///
+    /// # Errors
+    ///
+    /// Eligibility is decided before the open transaction is closed: a
+    /// rejected different-author fork leaves pending edits, author and actor
+    /// untouched. Uncommitted edits count as unpublished local changes in
+    /// required mode. An accepted fork first commits pending edits into this
+    /// document, as [`Self::fork`] does.
+    pub fn fork_with_author(
+        &mut self,
+        author: Option<Author<'static>>,
+    ) -> Result<Self, AutomergeError> {
+        self.doc.check_fork_with_author(author.as_ref())?;
+        if author.as_ref() != self.doc.get_author() && self.pending_ops() > 0 {
+            self.doc.signing.with_required(|| {
+                Err(crate::signature::error::SigningError::UnpublishedLocalChanges)
+            })?;
+        }
+        self.ensure_transaction_closed();
+        Ok(Self {
+            doc: self.doc.fork_with_author(author)?,
+            transaction: self.transaction.clone(),
+            patch_log: PatchLog::inactive(),
+            diff_cursor: vec![],
+            save_cursor: vec![],
+            isolation: None,
+        })
+    }
+
     pub fn fork_at(&mut self, heads: &[ChangeHash]) -> Result<Self, AutomergeError> {
         self.ensure_transaction_closed();
         Ok(Self {
@@ -430,35 +474,6 @@ impl AutoCommit {
         self.ensure_transaction_closed();
         self.doc.set_actor(actor);
         self
-    }
-
-    /// Set the author using [`Self::set_author`], consuming this document.
-    ///
-    /// On error the consumed document is not returned. Use the mutable setter
-    /// when ownership must be preserved after rejection.
-    pub fn with_author(
-        mut self,
-        author: Option<Author<'static>>,
-    ) -> Result<Self, crate::SigningAuthorError> {
-        self.set_author(author)?;
-        Ok(self)
-    }
-
-    /// Set the current author, committing pending edits under the previous author.
-    ///
-    /// # Errors
-    ///
-    /// Required-mode validation happens before closing an open transaction, so
-    /// rejection leaves pending edits, author, actor and patch state unchanged.
-    /// Unsigned mode accepts any author, including `None`.
-    pub fn set_author(
-        &mut self,
-        author: Option<Author<'static>>,
-    ) -> Result<&mut Self, crate::SigningAuthorError> {
-        self.doc.validate_author(author.as_ref())?;
-        self.ensure_transaction_closed();
-        self.doc.set_author(author)?;
-        Ok(self)
     }
 
     pub fn get_actor(&self) -> &ActorId {

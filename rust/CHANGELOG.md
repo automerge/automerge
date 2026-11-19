@@ -24,10 +24,13 @@
 
 * Author IDs identify authors independently of actor IDs. The new `Author` type
   holds opaque bytes and supports hexadecimal parsing, formatting, and serde
-  serialization. `Automerge` and `AutoCommit` now provide `with_author`,
-  `set_author`, `get_author`, `get_authors`, `get_actors_for_author`, and
-  `get_author_for_actor`; `LoadOptions::author` sets the author for subsequent
-  edits when loading a document. Changing the author generates a fresh actor ID.
+  serialization. `Automerge` and `AutoCommit` now provide `new_with_author`,
+  `new_with_author_and_encoding`, `get_author`, `get_authors`,
+  `get_actors_for_author`, and `get_author_for_actor`; `LoadOptions::author`
+  fixes the author of the loaded document. The author of an instance is
+  immutable; `fork_with_author` creates a full copy for another author with a
+  fresh actor ID (in required signing mode only once every local draft is
+  published).
 * Author assignments are stored in the extra bytes of an actor's first change
   and preserved through merging and saving/loading. `Change::author` reads an
   assignment from an individual change; subsequent changes from the same actor

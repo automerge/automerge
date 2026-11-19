@@ -44,7 +44,7 @@ pub fn benchmarks() -> Vec<Benchmark> {
                 let actor = actor_id(0);
                 Box::new(move || {
                     black_box(build_deep_history(
-                        Automerge::new(),
+                        Automerge::new_with_author(Some(author.clone())),
                         &actor,
                         &author,
                         BUILD_COMMITS,
@@ -80,8 +80,12 @@ pub fn benchmarks() -> Vec<Benchmark> {
             || {
                 let (key, author) = actor_credentials(0);
                 let actor = actor_id(0);
-                let reference =
-                    build_deep_history(Automerge::new(), &actor, &author, BUILD_COMMITS);
+                let reference = build_deep_history(
+                    Automerge::new_with_author(Some(author.clone())),
+                    &actor,
+                    &author,
+                    BUILD_COMMITS,
+                );
                 let frontier_sigs: Vec<(ChangeHash, ed25519::Signature)> =
                     required_frontiers(&reference)
                         .into_iter()
@@ -391,13 +395,14 @@ fn sign_hash(key: &SigningKey, hash: &ChangeHash) -> ed25519::Signature {
     ed25519::Signature::from_bytes(key.sign(&signing_message(hash)).to_bytes())
 }
 
+/// `doc` must already carry `author` as its fixed author.
 fn build_deep_history(
     mut doc: Automerge,
     actor: &ActorId,
     author: &Author<'static>,
     commits: u64,
 ) -> Automerge {
-    doc.set_author(Some(author.clone())).unwrap();
+    assert_eq!(doc.get_author(), Some(author));
     doc.set_actor(actor.clone());
     for step in 0..commits {
         let mut tx = doc.transaction();
@@ -439,7 +444,12 @@ fn required_frontiers(doc: &Automerge) -> Vec<ChangeHash> {
 fn prepared_deep_history_pair(commits: u64) -> (Automerge, Automerge) {
     let (key, author) = actor_credentials(0);
     let actor = actor_id(0);
-    let unsigned = build_deep_history(Automerge::new(), &actor, &author, commits);
+    let unsigned = build_deep_history(
+        Automerge::new_with_author(Some(author.clone())),
+        &actor,
+        &author,
+        commits,
+    );
     let mut signed = build_deep_history(signing_doc(&author), &actor, &author, commits);
     {
         let mut handle = signed.try_signing().unwrap();
@@ -455,20 +465,13 @@ fn prepared_deep_history_pair(commits: u64) -> (Automerge, Automerge) {
 }
 
 fn prepared_multi_actor_pair(actor_count: usize, total_commits: usize) -> (Automerge, Automerge) {
-    let creds: Vec<(ActorId, SigningKey, Author<'static>)> = (0..actor_count)
-        .map(|i| {
-            let (k, a) = actor_credentials(i);
-            (actor_id(i), k, a)
-        })
-        .collect();
-    let keys_by_actor: HashMap<ActorId, &SigningKey> =
-        creds.iter().map(|(id, k, _)| (id.clone(), k)).collect();
+    // One fixed author writing through several actors.
+    let (key, author) = actor_credentials(0);
+    let actors: Vec<ActorId> = (0..actor_count).map(actor_id).collect();
 
     let build = |mut doc: Automerge| -> Automerge {
         for step in 0..total_commits {
-            let (ref actor, _, ref author) = creds[step % actor_count];
-            doc.set_author(Some(author.clone())).unwrap();
-            doc.set_actor(actor.clone());
+            doc.set_actor(actors[step % actor_count].clone());
             let mut tx = doc.transaction();
             tx.put(ROOT, format!("k{}", step % 32), step as i64)
                 .unwrap();
@@ -477,19 +480,13 @@ fn prepared_multi_actor_pair(actor_count: usize, total_commits: usize) -> (Autom
         doc
     };
 
-    let unsigned = build(Automerge::new());
-    let mut signed = build(signing_doc(&creds[0].2));
-    let actor_of_hash: HashMap<ChangeHash, ActorId> = unsigned
-        .get_changes(&[])
-        .into_iter()
-        .map(|c| (c.hash(), c.actor_id().clone()))
-        .collect();
+    let unsigned = build(Automerge::new_with_author(Some(author.clone())));
+    let mut signed = build(signing_doc(&author));
     {
         let mut handle = signed.try_signing().unwrap();
         for hash in required_frontiers(&unsigned) {
-            let key = keys_by_actor[&actor_of_hash[&hash]];
             handle
-                .insert_signature(&hash, &sign_hash(key, &hash))
+                .insert_signature(&hash, &sign_hash(&key, &hash))
                 .unwrap();
         }
     }
@@ -523,7 +520,7 @@ fn incremental_series(signed: bool) -> Box<dyn FnMut(usize)> {
     let make_base = |mut doc: Automerge,
                      rng: &mut StdRng|
      -> (Automerge, benchmark_battery::automerge::ObjId) {
-        doc.set_author(Some(author.clone())).unwrap();
+        assert_eq!(doc.get_author(), Some(&author));
         doc.set_actor(actor.clone());
         let text = {
             let mut tx = doc.transaction();
@@ -580,7 +577,7 @@ fn incremental_series(signed: bool) -> Box<dyn FnMut(usize)> {
         if signed {
             signing_doc(&author)
         } else {
-            Automerge::new()
+            Automerge::new_with_author(Some(author.clone()))
         },
         &mut rng,
     );

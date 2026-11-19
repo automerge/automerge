@@ -53,7 +53,6 @@ impl LocalDrafts {
         self.0.iter().copied()
     }
 
-    #[cfg(test)]
     pub(super) fn is_empty(&self) -> bool {
         self.0.is_empty()
     }

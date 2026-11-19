@@ -6,8 +6,9 @@
 //! its accepted clock, pending groups, and required signatures between borrows.
 //!
 //! A required-mode document always has a current [`Author`] whose bytes form a
-//! usable Ed25519 verifying key. Construction and author setters validate this
-//! before changing any state; see [`crate::SigningAuthorError`].
+//! usable Ed25519 verifying key. The author is fixed at construction and
+//! validated before any state exists; a new-author fork validates its author
+//! first; see [`crate::SigningAuthorError`].
 
 use std::collections::HashSet;
 use std::ops::RangeBounds;
@@ -95,7 +96,7 @@ impl SigningState {
         matches!(self, Self::Required(_))
     }
 
-    /// Check that `author` may become the document's current author in this mode.
+    /// Check that `author` may be the local author of a document in this mode.
     ///
     /// Unsigned mode accepts anything, including `None`. Required mode needs an
     /// author whose bytes form a usable Ed25519 verifying key.
@@ -151,6 +152,17 @@ impl SigningState {
     pub(super) fn remove_actor(&mut self, actor: &ActorRemoval) {
         if let Self::Required(signing) = self {
             signing.accepted.remove_actor(actor);
+        }
+    }
+
+    /// Whether any locally committed change is still unpublished.
+    ///
+    /// Signed-but-unpublished drafts count; retained incoming groups do not.
+    /// Unsigned documents have no drafts.
+    pub(super) fn has_local_drafts(&self) -> bool {
+        match self {
+            Self::Unsigned => false,
+            Self::Required(signing) => !signing.local_drafts.is_empty(),
         }
     }
 
@@ -497,20 +509,9 @@ impl Automerge {
         encoding: TextEncoding,
     ) -> Result<Self, SigningAuthorError> {
         prepare_author(Some(&author))?;
-        let mut doc = Self::new_with_encoding(encoding);
+        let mut doc = Self::new_with_author_and_encoding(Some(author), encoding);
         doc.signing = SigningState::Required(RequiredSigning::new(doc.actors()));
-        doc.author = Some(author);
         Ok(doc)
-    }
-
-    /// Check that `author` may become this document's current author.
-    ///
-    /// See [`SigningState::validate_author`].
-    pub(crate) fn validate_author(
-        &self,
-        author: Option<&Author<'static>>,
-    ) -> Result<(), SigningAuthorError> {
-        self.signing.validate_author(author)
     }
 
     /// Borrow this document's [`SigningDocument`] handle.
@@ -519,7 +520,7 @@ impl Automerge {
     ///
     /// Fails if the document is not in required signing mode, or if its current
     /// author is missing or unusable. The latter indicates the author invariant
-    /// was bypassed; constructors and setters never produce it.
+    /// was bypassed; constructors, loads and forks never produce it.
     pub fn try_signing(&mut self) -> Result<SigningDocument<'_>, error::SigningAccess> {
         let state = self.signing.required_mut()?;
         let author = prepare_author(self.author.as_ref())?;

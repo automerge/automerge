@@ -281,21 +281,12 @@ export function init<T>(_opts?: ActorId | InitOptions<T>): Doc<T> {
   const freeze = !!opts.freeze
   const patchCallback = opts.patchCallback
   const actor = opts.actor
-  // In signing mode the author is part of construction; otherwise it is set
-  // afterwards so that an invalid author does not leak the handle.
+  // The author is fixed at construction in both modes.
   const handle = ApiHandler.create({
     actor,
     signing: opts.signing,
-    author: opts.signing ? opts.author : undefined,
+    author: opts.author,
   })
-  if (!opts.signing && typeof opts.author == "string") {
-    try {
-      handle.setAuthor(opts.author)
-    } catch (e) {
-      handle.free()
-      throw e
-    }
-  }
   handle.enableFreeze(!!opts.freeze)
   registerDatatypes(handle)
   const doc = handle.materialize("/", undefined, {
@@ -359,14 +350,18 @@ export function clone<T>(
       "The signing mode is fixed when a document is created and inherited by clones",
     )
   }
-  const handle = state.handle.fork(opts.actor, heads)
+  // A clone inherits the author unless one is requested; in signing mode a
+  // different author is accepted only when no local change is unpublished.
+  let handle
   if (typeof opts.author == "string") {
-    try {
-      handle.setAuthor(opts.author)
-    } catch (e) {
-      handle.free()
-      throw e
+    if (heads !== undefined) {
+      throw new RangeError(
+        "A view cannot be cloned with a different author; clone the full document instead",
+      )
     }
+    handle = state.handle.forkWithAuthor(opts.author, opts.actor)
+  } else {
+    handle = state.handle.fork(opts.actor, heads)
   }
   handle.updateDiffCursor()
 
@@ -798,16 +793,8 @@ export function load<T>(
     allowMissingDeps,
     convertImmutableStringsToText,
     signing: opts.signing,
-    author: opts.signing ? opts.author : undefined,
+    author: opts.author,
   })
-  if (!opts.signing && typeof opts.author == "string") {
-    try {
-      handle.setAuthor(opts.author)
-    } catch (e) {
-      handle.free()
-      throw e
-    }
-  }
   handle.enableFreeze(!!opts.freeze)
   registerDatatypes(handle)
   const doc = handle.materialize("/", undefined, {

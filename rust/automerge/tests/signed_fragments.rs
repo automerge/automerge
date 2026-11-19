@@ -53,14 +53,15 @@ fn public_automerge_and_autocommit_signing_workflow_roundtrips_authenticated_fra
 
     let alice_wire = alice.bundle_fragments(alice.fragments(..)).concat();
 
-    let mut bob = AutoCommit::load_with_options(&alice_wire, signing_load()).unwrap();
+    let mut bob =
+        AutoCommit::load_with_options(&alice_wire, LoadOptions::new().signing().author(bob_author))
+            .unwrap();
     assert!(bob.try_signing().unwrap().is_accepted(&a1));
     assert_eq!(
         bob.get(ROOT, "title").unwrap().unwrap().0.as_str(),
         Some("fragments")
     );
 
-    bob.set_author(Some(bob_author)).unwrap();
     bob.set_actor(ActorId::from([2]));
     bob.put(ROOT, "count", 2_i64).unwrap();
     let b1 = bob.commit().unwrap();
@@ -155,7 +156,7 @@ fn public_signing_documents_reject_snapshots_and_unauthenticated_entry_points() 
 }
 
 #[test]
-fn required_signatures_tracks_locally_authored_commits_and_filters_to_current_author() {
+fn required_signatures_tracks_locally_authored_commits_under_the_fixed_author() {
     let (alice_key, alice_author) = key_and_author(44);
     let (bob_key, bob_author) = key_and_author(55);
 
@@ -210,21 +211,33 @@ fn required_signatures_tracks_locally_authored_commits_and_filters_to_current_au
     );
 
     let wire = alice.bundle_fragments(alice.fragments(..)).concat();
-    let mut bob = AutoCommit::load_with_options(&wire, signing_load()).unwrap();
+    let mut bob = AutoCommit::load_with_options(
+        &wire,
+        LoadOptions::new().signing().author(bob_author.clone()),
+    )
+    .unwrap();
     assert!(bob.try_signing().unwrap().required_signatures().is_empty());
 
-    bob.set_author(Some(bob_author)).unwrap();
     bob.set_actor(ActorId::from([2]));
     bob.put(ROOT, "bob", 1_i64).unwrap();
     let b1 = bob.commit().unwrap();
     assert_eq!(bob.try_signing().unwrap().required_signatures(), vec![b1]);
 
-    // Switching the document's current author hides unsigned commits from other authors.
-    bob.set_author(Some(alice_author)).unwrap();
-    assert!(bob.try_signing().unwrap().required_signatures().is_empty());
-    // A signing document always needs a current author.
-    assert!(bob.set_author(None).is_err());
-    assert!(bob.try_signing().unwrap().required_signatures().is_empty());
+    // The author is fixed per instance: while Bob's draft is unpublished no
+    // other author may take over this history, and a signing document always
+    // needs a current author.
+    assert!(matches!(
+        bob.fork_with_author(Some(alice_author)),
+        Err(AutomergeError::Signing(
+            SigningError::UnpublishedLocalChanges
+        ))
+    ));
+    assert!(matches!(
+        bob.fork_with_author(None),
+        Err(AutomergeError::SigningAuthor(_))
+    ));
+    assert_eq!(bob.get_author(), Some(&bob_author));
+    assert_eq!(bob.try_signing().unwrap().required_signatures(), vec![b1]);
 
     let sig_b1 = ed25519::Signature::from_bytes(bob_key.sign(&signing_message(&b1)).to_bytes());
     bob.try_signing()

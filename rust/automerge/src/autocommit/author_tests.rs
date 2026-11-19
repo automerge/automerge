@@ -1,9 +1,10 @@
-//! Author validation must precede AutoCommit's implicit transaction closure.
+//! AutoCommit authors are fixed at construction; forks decide before closing edits.
 
 use ed25519_dalek::SigningKey;
 
+use crate::signature::error::SigningError;
 use crate::transaction::Transactable;
-use crate::{Author, Automerge, ReadDoc, ROOT};
+use crate::{Author, AutomergeError, ReadDoc, ROOT};
 
 use super::AutoCommit;
 
@@ -16,30 +17,29 @@ fn author(seed: u8) -> Author<'static> {
     )
 }
 
-fn required() -> AutoCommit {
-    // No new constructor/public testing hook: use the existing private fields
-    // to place a checked signing document inside an otherwise fresh AutoCommit.
-    AutoCommit {
-        doc: Automerge::signing(author(7)).unwrap(),
-        ..AutoCommit::new()
-    }
-}
-
 #[test]
-fn rejected_author_update_does_not_close_an_open_transaction() {
+fn rejected_author_fork_does_not_close_an_open_transaction() {
     let mut weak = vec![0; 32];
     weak[0] = 1;
     for proposed in [
         None,
         Some(Author::from(vec![1, 2, 3])),
         Some(Author::from(weak)),
+        Some(author(8)),
     ] {
-        let mut doc = required();
+        let mut doc = AutoCommit::signing(author(7)).unwrap();
         doc.put(ROOT, "pending", 1).unwrap();
         assert!(doc.transaction.is_some());
         assert!(doc.doc.get_heads().is_empty());
         let before = format!("{doc:?}");
-        assert!(doc.set_author(proposed).is_err());
+        let error = doc.fork_with_author(proposed.clone()).unwrap_err();
+        match proposed {
+            Some(candidate) if candidate == author(8) => assert!(matches!(
+                error,
+                AutomergeError::Signing(SigningError::UnpublishedLocalChanges)
+            )),
+            _ => assert!(matches!(error, AutomergeError::SigningAuthor(_))),
+        }
         assert_eq!(format!("{doc:?}"), before);
         assert_eq!(doc.rollback(), 1);
         assert!(doc.doc.get_heads().is_empty());
@@ -48,59 +48,41 @@ fn rejected_author_update_does_not_close_an_open_transaction() {
 }
 
 #[test]
-fn valid_switch_commits_pending_work_under_the_old_author_then_rotates_actor() {
-    let mut doc = required();
-    doc.put(ROOT, "old", 1).unwrap();
+fn same_author_fork_commits_pending_work_and_rotates_only_the_fork_actor() {
+    let mut doc = AutoCommit::signing(author(7)).unwrap();
+    doc.put(ROOT, "pending", 1).unwrap();
     let actor = doc.doc.get_actor().clone();
-    assert!(doc.doc.get_heads().is_empty());
-    doc.set_author(Some(author(8))).unwrap();
+    let fork = doc.fork_with_author(Some(author(7))).unwrap();
     assert!(doc.transaction.is_none());
-    assert_ne!(doc.doc.get_actor(), &actor);
+    assert_eq!(doc.doc.get_actor(), &actor);
+    assert_ne!(fork.doc.get_actor(), &actor);
     let changes = doc.doc.get_changes(&[]);
     assert_eq!(changes.len(), 1);
     assert_eq!(changes[0].actor_id(), &actor);
     assert_eq!(changes[0].author(), Some(author(7)));
-    assert_eq!(doc.get_author(), Some(&author(8)));
-    doc.put(ROOT, "new", 2).unwrap();
-    let hash = doc.commit().unwrap();
-    assert_eq!(
-        doc.doc.get_change_by_hash(&hash).unwrap().author(),
-        Some(author(8))
-    );
+    assert_eq!(fork.doc.get_changes(&[]).len(), 1);
 }
 
 #[test]
-fn same_author_closes_pending_transaction_without_rotating_actor() {
-    let mut doc = required();
-    doc.put(ROOT, "pending", 1).unwrap();
-    let actor = doc.doc.get_actor().clone();
-    doc.set_author(Some(author(7))).unwrap();
-    assert!(doc.transaction.is_none());
-    assert_eq!(doc.doc.get_actor(), &actor);
-    assert_eq!(doc.doc.get_changes(&[]).len(), 1);
-}
-
-#[test]
-fn unsigned_setters_and_builders_remain_permissive() {
+fn unsigned_constructors_and_forks_remain_permissive() {
     let arbitrary = Author::from(vec![1, 2, 3]);
-    let mut doc = AutoCommit::new()
-        .with_author(Some(arbitrary.clone()))
-        .unwrap();
+    let mut doc = AutoCommit::new_with_author(Some(arbitrary.clone()));
     doc.put(ROOT, "pending", 1).unwrap();
-    doc.set_author(None).unwrap();
+    let fork = doc.fork_with_author(None).unwrap();
     assert!(doc.transaction.is_none());
-    assert_eq!(doc.doc.get_changes(&[])[0].author(), Some(arbitrary));
-    assert!(doc.get_author().is_none());
-    let doc = AutoCommit::new().with_author(None).unwrap();
+    assert_eq!(
+        doc.doc.get_changes(&[])[0].author(),
+        Some(arbitrary.clone())
+    );
+    assert_eq!(doc.get_author(), Some(&arbitrary));
+    assert!(fork.get_author().is_none());
+    let doc = AutoCommit::new_with_author(None);
     assert!(doc.get_author().is_none());
 }
 
 #[test]
-fn required_builder_rejects_missing_or_unusable_authors() {
-    assert!(required().with_author(None).is_err());
-    assert!(required()
-        .with_author(Some(Author::from(vec![1, 2, 3])))
-        .is_err());
-    let doc = required().with_author(Some(author(8))).unwrap();
+fn required_constructor_rejects_missing_or_unusable_authors() {
+    assert!(AutoCommit::signing(Author::from(vec![1, 2, 3])).is_err());
+    let doc = AutoCommit::signing(author(8)).unwrap();
     assert_eq!(doc.get_author(), Some(&author(8)));
 }

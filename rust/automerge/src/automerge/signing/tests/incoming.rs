@@ -86,20 +86,17 @@ fn framed(chunk_type: ChunkType, body: &[u8]) -> Vec<u8> {
 #[test]
 fn signed_fragment_stream_loads_reexports_and_reclaims_superseded_signatures() {
     let k1 = key(1);
-    let k2 = key(2);
     let mut sender = Automerge::signing(author(&k1))
         .unwrap()
         .with_actor(ActorId::from([1]));
     let a1 = append_at_level(&mut sender, None, "a", 1, 0);
-    sender.set_author(Some(author(&k2))).unwrap();
     sender.set_actor(ActorId::from([2]));
     let b1 = append_at_level(&mut sender, None, "b", 2, 1);
-    sender.set_author(Some(author(&k1))).unwrap();
     sender.set_actor(ActorId::from([1]));
     let a2 = append_at_level(&mut sender, None, "c", 3, 0);
 
     sign_doc(&mut sender, a1, &k1);
-    sign_doc(&mut sender, b1, &k2);
+    sign_doc(&mut sender, b1, &k1);
     sign_doc(&mut sender, a2, &k1);
 
     let fragments = sender.fragments(..);
@@ -147,19 +144,17 @@ fn signed_fragment_stream_loads_reexports_and_reclaims_superseded_signatures() {
 #[test]
 fn out_of_order_groups_wait_for_causal_dependencies_and_author_bindings() {
     let k1 = key(1);
-    let k2 = key(2);
     let mut sender = Automerge::signing(author(&k1))
         .unwrap()
         .with_actor(ActorId::from([1]));
     let a1 = append_at_level(&mut sender, None, "a", 1, 0);
-    sender.set_author(Some(author(&k2))).unwrap();
     sender.set_actor(ActorId::from([2]));
     let b1 = append_at_level(&mut sender, None, "b", 2, 1);
     let b2 = append_at_level(&mut sender, None, "b2", 3, 1);
 
     sign_doc(&mut sender, a1, &k1);
-    sign_doc(&mut sender, b1, &k2);
-    sign_doc(&mut sender, b2, &k2);
+    sign_doc(&mut sender, b1, &k1);
+    sign_doc(&mut sender, b2, &k1);
 
     let encoded = sender.bundle_fragments(sender.fragments(..));
     let (f_bytes, g_bytes) = (&encoded[0], &encoded[1]);
@@ -259,9 +254,7 @@ fn missing_malformed_or_invalid_proofs_do_not_mutate_state() {
         ))) if h == h_none
     ));
 
-    let mut bad_author = Automerge::new()
-        .with_author(Some(Author::from(vec![1, 2, 3])))
-        .unwrap()
+    let mut bad_author = Automerge::new_with_author(Some(Author::from(vec![1, 2, 3])))
         .with_actor(ActorId::from([4]));
     let h_bad = append_at_level(&mut bad_author, None, "y", 1, 0);
     let raw_bad = bad_author.get_change_by_hash(&h_bad).unwrap();
@@ -276,21 +269,18 @@ fn missing_malformed_or_invalid_proofs_do_not_mutate_state() {
 #[test]
 fn neither_other_groups_nor_resident_evidence_repairs_an_incomplete_proof() {
     let k1 = key(1);
-    let k2 = key(2);
     let mut sender = Automerge::signing(author(&k1))
         .unwrap()
         .with_actor(ActorId::from([1]));
     let a1 = append_at_level(&mut sender, None, "a", 1, 0);
-    sender.set_author(Some(author(&k2))).unwrap();
     sender.set_actor(ActorId::from([2]));
     let b1 = append_at_level(&mut sender, None, "b", 2, 1);
-    sender.set_author(Some(author(&k1))).unwrap();
     sender.set_actor(ActorId::from([1]));
     let a2 = append_at_level(&mut sender, None, "c", 3, 1);
 
     let f_incomplete = attach_signatures(
         sender.bundle([a1, b1]).unwrap().bytes(),
-        [(b1, sig(&k2, b1))],
+        [(b1, sig(&k1, b1))],
     );
     let g_with_extra = attach_signatures(
         sender.bundle([a2]).unwrap().bytes(),
@@ -342,15 +332,13 @@ fn canonical_membership_diamond_boundaries_and_broken_chains_are_enforced() {
     let k3 = key(3);
 
     // 1. Non-diamond: independent a1 (L0) and b1 (L1); c1 (L1) depends on [a1, b1].
-    let mut non_diamond = Automerge::new()
-        .with_author(Some(author(&k1)))
-        .unwrap()
-        .with_actor(ActorId::from([1]));
+    let mut non_diamond =
+        Automerge::new_with_author(Some(author(&k1))).with_actor(ActorId::from([1]));
     let a1 = append_at_level(&mut non_diamond, None, "a", 1, 0);
-    non_diamond.set_author(Some(author(&k2))).unwrap();
+    non_diamond = non_diamond.fork_with_author(Some(author(&k2))).unwrap();
     non_diamond.set_actor(ActorId::from([2]));
     let b1 = append_at_level(&mut non_diamond, Some(&[]), "b", 2, 1);
-    non_diamond.set_author(Some(author(&k3))).unwrap();
+    non_diamond = non_diamond.fork_with_author(Some(author(&k3))).unwrap();
     non_diamond.set_actor(ActorId::from([3]));
     let c1 = append_at_level(&mut non_diamond, Some(&[a1, b1]), "c", 3, 1);
 
@@ -380,15 +368,12 @@ fn canonical_membership_diamond_boundaries_and_broken_chains_are_enforced() {
     ));
 
     // 2. Honest diamond: db1 (L1) depends on da1 (L0); dc1 (L1) depends on [da1, db1].
-    let mut diamond = Automerge::new()
-        .with_author(Some(author(&k1)))
-        .unwrap()
-        .with_actor(ActorId::from([1]));
+    let mut diamond = Automerge::new_with_author(Some(author(&k1))).with_actor(ActorId::from([1]));
     let da1 = append_at_level(&mut diamond, None, "a", 1, 0);
-    diamond.set_author(Some(author(&k2))).unwrap();
+    diamond = diamond.fork_with_author(Some(author(&k2))).unwrap();
     diamond.set_actor(ActorId::from([2]));
     let db1 = append_at_level(&mut diamond, Some(&[da1]), "b", 2, 1);
-    diamond.set_author(Some(author(&k3))).unwrap();
+    diamond = diamond.fork_with_author(Some(author(&k3))).unwrap();
     diamond.set_actor(ActorId::from([3]));
     let dc1 = append_at_level(&mut diamond, Some(&[da1, db1]), "c", 3, 1);
 
@@ -421,7 +406,7 @@ fn canonical_membership_diamond_boundaries_and_broken_chains_are_enforced() {
     ));
 
     // 3. Cross-group broken actor chain (X:2 missing direct X:1 predecessor edge).
-    diamond.set_author(Some(author(&k1))).unwrap();
+    diamond = diamond.fork_with_author(Some(author(&k1))).unwrap();
     diamond.set_actor(ActorId::from([1]));
     let dx2 = append_at_level(&mut diamond, Some(&[db1]), "x2", 4, 0);
     let mut expanded = ExpandedChange::from(&diamond.get_change_by_hash(&dx2).unwrap());
@@ -446,8 +431,6 @@ fn canonical_membership_diamond_boundaries_and_broken_chains_are_enforced() {
 #[test]
 fn overlaps_forged_orphans_local_boundaries_partial_tails_and_bypasses() {
     let k1 = key(1);
-    let k2 = key(2);
-    let k3 = key(3);
     let malloy = key(99);
 
     let mut source = Automerge::signing(author(&k1))
@@ -455,13 +438,11 @@ fn overlaps_forged_orphans_local_boundaries_partial_tails_and_bypasses() {
         .with_actor(ActorId::from([1]));
     let root = append_at_level(&mut source, None, "root", 0, 1);
     let a1 = append_at_level(&mut source, None, "a1", 1, 0);
-    source.set_author(Some(author(&k2))).unwrap();
     source.set_actor(ActorId::from([2]));
     let b1 = append_at_level(&mut source, Some(&[a1]), "b1", 2, 1);
-    source.set_author(Some(author(&k3))).unwrap();
     source.set_actor(ActorId::from([3]));
     let c1 = append_at_level(&mut source, Some(&[a1]), "c1", 3, 1);
-    for (h, k) in [(root, &k1), (a1, &k1), (b1, &k2), (c1, &k3)] {
+    for (h, k) in [(root, &k1), (a1, &k1), (b1, &k1), (c1, &k1)] {
         sign_doc(&mut source, h, k);
     }
 
@@ -472,10 +453,8 @@ fn overlaps_forged_orphans_local_boundaries_partial_tails_and_bypasses() {
     let mut receiver = new_receiver();
 
     // Forged orphan claiming unknown Actor 2 seq 2 is purged once real Actor 2 arrives.
-    let mut forged = Automerge::new()
-        .with_author(Some(author(&malloy)))
-        .unwrap()
-        .with_actor(ActorId::from([2]));
+    let mut forged =
+        Automerge::new_with_author(Some(author(&malloy))).with_actor(ActorId::from([2]));
     append_at_level(&mut forged, None, "f1", 1, 0);
     let forged_seq2 = append_at_level(&mut forged, None, "f2", 2, 0);
     let forged_orphan = attach_signatures(
