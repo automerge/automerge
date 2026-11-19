@@ -392,21 +392,23 @@
 //! This module exists only while Verus checks the crate.
 
 use super::{
-    accumulated, after_edit, after_edits, all_fit, below_at, bytes_below, folded, head_len,
-    head_run, head_run_max, lemma_acc_cat, lemma_acc_range, lemma_acc_run, lemma_after_edits,
-    lemma_cancel, lemma_head_len, lemma_head_run_max, lemma_run_values_add, lemma_run_values_push,
-    lemma_runs_first, lemma_runs_of_values, lemma_sorted, lemma_sum_bound, lemma_sum_mono,
-    lemma_sum_range, lemma_sum_run, lemma_sums_fit, mapped, only, past, refused, run_values,
-    runs_of, scan_of, scan_taken, sorted, sorted_for, sum_of, summed, sums_fit, times, total_len,
-    total_str_len, window, AccIndex, Get, LenIndex, SumIndex, VAccum, VAccumulated, VAdds, VAmount,
-    VCodec, VCount, VDeltaValue, VGet, VGroup, VIndex, VKeeps, VNewtype, VSpec, VSum, VSummed,
-    VValue, VerifiedAccColumn, VerifiedAccIter, VerifiedAccIterState, VerifiedAccSeek,
-    VerifiedAccValue, VerifiedColumn, VerifiedDecoder, VerifiedDeltaColumn, VerifiedEncoder,
-    VerifiedEncoderState, VerifiedIter, VerifiedIterState, VerifiedPrefixColumn,
-    VerifiedPrefixIter, VerifiedPrefixIterState, VerifiedPrefixSeek, VerifiedPrefixedValue,
-    VerifiedRuns,
+    accumulated, after_edit, after_edits, all_fit, below_at, bytes_below, delta_run_fits,
+    delta_run_in_range, delta_run_kept, delta_run_values, delta_runs_fit, delta_runs_kept,
+    delta_runs_values, folded, head_len, head_run, head_run_max, lemma_acc_cat, lemma_acc_range,
+    lemma_acc_run, lemma_after_edits, lemma_cancel, lemma_delta_run_exact, lemma_delta_run_fits,
+    lemma_delta_runs_one, lemma_delta_runs_push, lemma_head_len, lemma_head_run_max,
+    lemma_run_values_add, lemma_run_values_push, lemma_runs_first, lemma_runs_of_values,
+    lemma_sorted, lemma_sum_bound, lemma_sum_mono, lemma_sum_range, lemma_sum_run, lemma_sums_fit,
+    mapped, only, past, refused, run_values, runs_of, scan_of, scan_taken, sorted, sorted_for,
+    sum_of, summed, sums_fit, times, total_len, total_str_len, window, AccIndex, Get, LenIndex,
+    SumIndex, VAccum, VAccumulated, VAdds, VAmount, VCodec, VCount, VDelta, VDeltaValue, VGet,
+    VGroup, VIndex, VKeeps, VNewtype, VSpec, VSum, VSummed, VValue, VerifiedAccColumn,
+    VerifiedAccIter, VerifiedAccIterState, VerifiedAccSeek, VerifiedAccValue, VerifiedColumn,
+    VerifiedDecoder, VerifiedDeltaColumn, VerifiedEncoder, VerifiedEncoderState, VerifiedIter,
+    VerifiedIterState, VerifiedPrefixColumn, VerifiedPrefixIter, VerifiedPrefixIterState,
+    VerifiedPrefixSeek, VerifiedPrefixedValue, VerifiedRuns,
 };
-use crate::{Leb128, LoadOpts, PackError, Run};
+use crate::{DeltaRun, Leb128, LoadOpts, PackError, Run};
 use std::cmp::Ordering;
 use std::ops::Range;
 use vstd::prelude::*;
@@ -10774,6 +10776,380 @@ fn delta_loaded_edits<T: VDeltaValue<C>, C: VCodec>(bytes: &[u8]) -> (r: Option<
         },
         Err(_) => None,
     }
+}
+
+// ── Delta columns: runs, and a load with options ────────────────────────────
+
+/// A run put at the end of a column of `u32`: three numbers after 10,
+/// each two more than the one before it. And the column counts an edit.
+#[allow(dead_code)]
+fn delta_run_of_three<C: VCodec>(col: &mut VerifiedDeltaColumn<u32, C>)
+    ensures
+        final(col)@ == old(col)@ + seq![12u32, 14u32, 16u32],
+        final(col).edits() == after_edit(old(col).edits()),
+{
+    let run = DeltaRun { prefix: 10, delta: Some(2), count: 3 };
+    let n = col.len();
+    let mut runs: Vec<DeltaRun> = Vec::new();
+    runs.push(run);
+    proof {
+        lemma_delta_run_exact(run, 0);
+        lemma_delta_run_exact(run, 1);
+        lemma_delta_run_exact(run, 2);
+        assert(delta_run_values::<u32>(run) =~= seq![12u32, 14u32, 16u32]);
+        lemma_delta_run_fits::<u32>(run);
+        lemma_delta_runs_one::<u32>(run);
+        assert(runs@ =~= seq![run]);
+    }
+    col.splice_runs(n, 0, runs.as_slice());
+    assert(col@ =~= old(col)@ + seq![12u32, 14u32, 16u32]);
+}
+
+/// A run that falls, at the front of a column of `i32`: -5 and then -10.
+#[allow(dead_code)]
+fn delta_run_falls(col: &mut VerifiedDeltaColumn<i32>)
+    ensures
+        final(col)@ == seq![-5i32, -10i32] + old(col)@,
+{
+    let run = DeltaRun { prefix: 0, delta: Some(-5), count: 2 };
+    let mut runs: Vec<DeltaRun> = Vec::new();
+    runs.push(run);
+    proof {
+        lemma_delta_run_exact(run, 0);
+        lemma_delta_run_exact(run, 1);
+        assert(delta_run_values::<i32>(run) =~= seq![-5i32, -10i32]);
+        lemma_delta_run_fits::<i32>(run);
+        lemma_delta_runs_one::<i32>(run);
+        assert(runs@ =~= seq![run]);
+    }
+    col.splice_runs(0, 0, runs.as_slice());
+    assert(col@ =~= seq![-5i32, -10i32] + old(col)@);
+}
+
+/// A run checked as it comes, for every type and codec: one that passes
+/// the check of the old API goes into the column, and its values are
+/// the run's; another is left out, and the column is what it was.
+#[allow(dead_code)]
+fn delta_run_checked<T: VDeltaValue<C>, C: VCodec>(
+    col: &mut VerifiedDeltaColumn<T, C>,
+    at: usize,
+    run: DeltaRun,
+) -> (r: bool)
+    requires
+        at <= old(col)@.len(),
+    ensures
+        r == delta_run_in_range::<T>(run),
+        r ==> final(col)@ == old(col)@.take(at as int) + delta_run_values::<T>(run) + old(col)@.skip(at as int),
+        !r ==> final(col)@ == old(col)@,
+{
+    if VerifiedDeltaColumn::<T, C>::run_fits(&run) {
+        let mut runs: Vec<DeltaRun> = Vec::new();
+        runs.push(run);
+        proof {
+            lemma_delta_runs_one::<T>(run);
+            assert(runs@ =~= seq![run]);
+        }
+        col.splice_runs(at, 0, runs.as_slice());
+        true
+    } else {
+        false
+    }
+}
+
+/// Two runs put in at once, in place of `del` values: the values of the
+/// first and then those of the second.
+#[allow(dead_code)]
+fn delta_two_runs<T: VDeltaValue<C>, C: VCodec>(
+    col: &mut VerifiedDeltaColumn<T, C>,
+    at: usize,
+    del: usize,
+    a: DeltaRun,
+    b: DeltaRun,
+)
+    requires
+        at <= old(col)@.len(),
+        del <= old(col)@.len() - at,
+        delta_run_fits::<T>(a),
+        delta_run_fits::<T>(b),
+    ensures
+        final(col)@ == old(col)@.take(at as int) + delta_run_values::<T>(a) + delta_run_values::<T>(b) + old(
+            col,
+        )@.skip(at + del),
+{
+    let mut runs: Vec<DeltaRun> = Vec::new();
+    runs.push(a);
+    runs.push(b);
+    proof {
+        lemma_delta_runs_one::<T>(a);
+        lemma_delta_runs_push::<T>(seq![a], b);
+        assert(runs@ =~= seq![a].push(b));
+    }
+    col.splice_runs(at, del, runs.as_slice());
+    assert(col@ =~= old(col)@.take(at as int) + delta_run_values::<T>(a) + delta_run_values::<T>(b) + old(col)@.skip(
+        at + del,
+    ));
+}
+
+/// No runs, and a run of no values, add nothing: so where nothing is
+/// deleted either, the column is what it was and counts no edit. A run
+/// of no values passes the check whatever it is of.
+#[allow(dead_code)]
+fn delta_no_runs<T: VDeltaValue<C>, C: VCodec>(
+    col: &mut VerifiedDeltaColumn<T, C>,
+    at: usize,
+    prefix: i64,
+    delta: Option<i64>,
+)
+    requires
+        at <= old(col)@.len(),
+    ensures
+        final(col)@ == old(col)@,
+        final(col).edits() == old(col).edits(),
+{
+    let run = DeltaRun { prefix, delta, count: 0 };
+    let none: Vec<DeltaRun> = Vec::new();
+    proof {
+        lemma_delta_runs_one::<T>(run);
+        assert(none@ =~= Seq::<DeltaRun>::empty());
+    }
+    col.splice_runs(at, 0, none.as_slice());
+    assert(col@ =~= old(col)@);
+
+    let ok = VerifiedDeltaColumn::<T, C>::run_fits(&run);
+    assert(ok);
+    let mut runs: Vec<DeltaRun> = Vec::new();
+    runs.push(run);
+    proof {
+        assert(runs@ =~= seq![run]);
+        assert(delta_run_values::<T>(run) =~= Seq::<T>::empty());
+    }
+    col.splice_runs(at, 0, runs.as_slice());
+    assert(col@ =~= old(col)@);
+}
+
+/// A run of nulls at the front of a column of `Option<i64>`: that many
+/// nulls, whatever its prefix. A column of `i64` has no null, and the
+/// check refuses the run for it.
+#[allow(dead_code)]
+fn delta_null_run(col: &mut VerifiedDeltaColumn<Option<i64>>, prefix: i64)
+    ensures
+        final(col)@ == seq![None::<i64>, None] + old(col)@,
+{
+    let run = DeltaRun { prefix, delta: None, count: 2 };
+    let ok = VerifiedDeltaColumn::<Option<i64>>::run_fits(&run);
+    assert(ok);
+    let no = VerifiedDeltaColumn::<i64>::run_fits(&run);
+    assert(!no);
+    let mut runs: Vec<DeltaRun> = Vec::new();
+    runs.push(run);
+    proof {
+        lemma_delta_runs_one::<Option<i64>>(run);
+        assert(runs@ =~= seq![run]);
+        assert(delta_run_values::<Option<i64>>(run) =~= seq![None::<i64>, None]);
+    }
+    col.splice_runs(0, 0, runs.as_slice());
+    assert(col@ =~= seq![None::<i64>, None] + old(col)@);
+}
+
+/// A run of a column of `i64` wraps as an `i64` does, as it does in the
+/// old API: the number after the greatest is the least. The check passes
+/// every run of numbers for such a column.
+#[allow(dead_code)]
+fn delta_run_wraps(col: &mut VerifiedDeltaColumn<i64>, run: DeltaRun) -> (r: bool)
+    ensures
+        r == (run.delta is Some || run.count == 0),
+        run == (DeltaRun { prefix: i64::MAX, delta: Some(1), count: 1 }) ==> final(col)@ == old(col)@.push(i64::MIN),
+        !r ==> final(col)@ == old(col)@,
+{
+    let n = col.len();
+    if VerifiedDeltaColumn::<i64>::run_fits(&run) {
+        let mut runs: Vec<DeltaRun> = Vec::new();
+        runs.push(run);
+        proof {
+            lemma_delta_runs_one::<i64>(run);
+            assert(runs@ =~= seq![run]);
+            if run == (DeltaRun { prefix: i64::MAX, delta: Some(1), count: 1 }) {
+                assert(delta_run_values::<i64>(run) =~= seq![i64::MIN]);
+            }
+        }
+        col.splice_runs(n, 0, runs.as_slice());
+        proof {
+            if run == (DeltaRun { prefix: i64::MAX, delta: Some(1), count: 1 }) {
+                assert(col@ =~= old(col)@.push(i64::MIN));
+            }
+        }
+        true
+    } else {
+        false
+    }
+}
+
+/// No bytes loaded with a length and a fill, as a column of `u64`: the
+/// fill is the difference between neighbours, so with the fill 2 three
+/// values are 2, 4 and 6. (That the load succeeds is not said: what it
+/// is, where it does.)
+#[allow(dead_code)]
+fn delta_load_a_fill<C: VCodec>() -> (r: Option<VerifiedDeltaColumn<u64, C>>)
+    ensures
+        r matches Some(c) ==> c@ == seq![2u64, 4, 6],
+{
+    let none: Vec<u8> = Vec::new();
+    let ghost run = DeltaRun { prefix: 0, delta: Some(2), count: 3 };
+    proof {
+        lemma_delta_run_exact(run, 0);
+        lemma_delta_run_exact(run, 1);
+        lemma_delta_run_exact(run, 2);
+        assert(delta_run_values::<u64>(run) =~= seq![2u64, 4, 6]);
+    }
+    match VerifiedDeltaColumn::<u64, C>::load_with(none.as_slice(), LoadOpts::new().with_length(3).with_fill(2i64)) {
+        Ok(c) => Some(c),
+        Err(_) => None,
+    }
+}
+
+/// A fill of nulls, for a type that has them: no bytes load as that
+/// many nulls.
+#[allow(dead_code)]
+fn delta_load_null_fill() -> (r: Option<VerifiedDeltaColumn<Option<u32>>>)
+    ensures
+        r matches Some(c) ==> c@ == seq![None::<u32>, None, None],
+{
+    let none: Vec<u8> = Vec::new();
+    let ghost run = DeltaRun { prefix: 0, delta: None, count: 3 };
+    proof {
+        assert(delta_run_values::<Option<u32>>(run) =~= seq![None::<u32>, None, None]);
+    }
+    match VerifiedDeltaColumn::<Option<u32>>::load_with(
+        none.as_slice(),
+        LoadOpts::new().with_max_segments(4).with_length(3).with_fill(None::<i64>),
+    ) {
+        Ok(c) => Some(c),
+        Err(_) => None,
+    }
+}
+
+/// Loads with a length, for every type and codec. Without a fill, what
+/// loads is what the bytes hold, and has the length. With a fill it has
+/// the length too, and is what the bytes hold unless they are empty.
+#[allow(dead_code)]
+fn delta_load_with_length<T: VDeltaValue<C>, C: VCodec>(bytes: &[u8], len: usize, fill: T::Fill) -> (r: (
+    Option<VerifiedDeltaColumn<T, C>>,
+    Option<VerifiedDeltaColumn<T, C>>,
+))
+    ensures
+        r.0 matches Some(c) ==> VerifiedDeltaColumn::<T, C>::valid(bytes@) && c@ == VerifiedDeltaColumn::<T, C>::values(
+            bytes@,
+        ) && c@.len() == len,
+        r.1 matches Some(c) ==> c@.len() == len,
+        r.1 matches Some(c) ==> bytes@.len() > 0 ==> c@ == VerifiedDeltaColumn::<T, C>::values(bytes@),
+{
+    let a = match VerifiedDeltaColumn::<T, C>::load_with(bytes, LoadOpts::new().with_length(len)) {
+        Ok(c) => Some(c),
+        Err(_) => None,
+    };
+    let b = match VerifiedDeltaColumn::<T, C>::load_with(bytes, LoadOpts::new().with_length(len).with_fill(fill)) {
+        Ok(c) => Some(c),
+        Err(_) => None,
+    };
+    (a, b)
+}
+
+/// A load with the options a `LoadOpts` starts with says what a load
+/// says; and no bytes load, where they do, as the length 0 alone unless
+/// there is a fill.
+#[allow(dead_code)]
+fn delta_load_with_defaults<T: VDeltaValue<C>, C: VCodec>(bytes: &[u8], len: usize) -> (r: Option<
+    VerifiedDeltaColumn<T, C>,
+>)
+    ensures
+        r matches Some(c) ==> VerifiedDeltaColumn::<T, C>::valid(bytes@) && c@ == VerifiedDeltaColumn::<T, C>::values(
+            bytes@,
+        ),
+{
+    let none: Vec<u8> = Vec::new();
+    proof {
+        VerifiedDeltaColumn::<T, C>::lemma_no_bytes();
+    }
+    let r = VerifiedDeltaColumn::<T, C>::load_with(none.as_slice(), LoadOpts::new().with_length(len));
+    assert(r is Ok ==> len == 0);
+    match VerifiedDeltaColumn::<T, C>::load_with(bytes, LoadOpts::new()) {
+        Ok(c) => Some(c),
+        Err(_) => None,
+    }
+}
+
+/// What a fill loads as is the run of it, put into a new column: both
+/// columns, where the run passes the check and the fill loads.
+#[allow(dead_code)]
+fn delta_fill_is_a_run(len: usize, d: i64) -> (r: Option<(VerifiedDeltaColumn<u64>, VerifiedDeltaColumn<u64>)>)
+    ensures
+        r matches Some((a, b)) ==> a@ == b@ && a@.len() == len,
+{
+    let none: Vec<u8> = Vec::new();
+    let run = DeltaRun { prefix: 0, delta: Some(d), count: len };
+    if len as u64 <= i64::MAX as u64 && len <= usize::MAX - 3 && VerifiedDeltaColumn::<u64>::run_fits(&run) {
+        match VerifiedDeltaColumn::<u64>::load_with(none.as_slice(), LoadOpts::new().with_length(len).with_fill(d)) {
+            Ok(c) => {
+                let mut col = VerifiedDeltaColumn::<u64>::new();
+                let mut runs: Vec<DeltaRun> = Vec::new();
+                runs.push(run);
+                proof {
+                    lemma_delta_runs_one::<u64>(run);
+                    assert(runs@ =~= seq![run]);
+                }
+                col.splice_runs(0, 0, runs.as_slice());
+                assert(col@ =~= c@);
+                Some((col, c))
+            },
+            Err(_) => None,
+        }
+    } else {
+        None
+    }
+}
+
+/// Any run whose first and last values lie between two `i64`s: its `k`-th
+/// value is worked out with no wrapping, and lies between them too.
+#[allow(dead_code)]
+proof fn delta_run_kth(r: DeltaRun, k: int, lo: int, hi: int)
+    requires
+        0 <= k < r.count,
+        r.delta is Some,
+        i64::MIN <= lo <= r.prefix + r.delta->0 <= hi <= i64::MAX,
+        lo <= r.prefix + r.delta->0 * r.count <= hi,
+    ensures
+        delta_run_kept(r)[k] matches Some(x) && x == r.prefix + (k + 1) * r.delta->0 && lo <= x <= hi,
+{
+    lemma_delta_run_exact(r, k);
+}
+
+/// One more run after any runs: its values come after theirs, in what is
+/// kept and in what is read, and where they all fit so do the runs
+/// together.
+#[allow(dead_code)]
+proof fn delta_runs_more<T: VDelta>(rs: Seq<DeltaRun>, r: DeltaRun)
+    requires
+        delta_runs_fit::<T>(rs),
+        delta_run_fits::<T>(r),
+    ensures
+        delta_runs_kept(rs.push(r)) == delta_runs_kept(rs) + delta_run_kept(r),
+        delta_runs_values::<T>(rs.push(r)) == delta_runs_values::<T>(rs) + delta_run_values::<T>(r),
+        delta_runs_fit::<T>(rs.push(r)),
+{
+    lemma_delta_runs_push::<T>(rs, r);
+}
+
+/// One run alone has its own values and fits as it does; no runs have no
+/// values, and fit.
+#[allow(dead_code)]
+proof fn delta_runs_ends<T: VDelta>(r: DeltaRun)
+    ensures
+        delta_runs_values::<T>(seq![r]) == delta_run_values::<T>(r),
+        delta_runs_values::<T>(Seq::<DeltaRun>::empty()) == Seq::<T>::empty(),
+        delta_runs_fit::<T>(seq![r]) == delta_run_fits::<T>(r),
+        delta_runs_fit::<T>(Seq::<DeltaRun>::empty()),
+{
+    lemma_delta_runs_one::<T>(r);
 }
 
 } // verus!

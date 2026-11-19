@@ -12127,3 +12127,495 @@ fn delta_loads_agree_on_any_bytes() {
     assert!(loaded > 1000, "{loaded} loaded");
     assert!(refused > 1000, "{refused} refused");
 }
+
+/// Whether a run passes the check that the old API makes of a run put
+/// into a column of `T`, and is no run of nulls where `T` has no null:
+/// worked out here, apart from either API.
+fn delta_run_passes<T: Deltad>(r: &hexane::DeltaRun) -> bool {
+    if r.count == 0 {
+        return true;
+    }
+    let Some(d) = r.delta else {
+        return T::NULLABLE;
+    };
+    if T::MIN_I64 == i64::MIN && T::MAX_I64 == i64::MAX {
+        return true;
+    }
+    let first = r.prefix as i128 + d as i128;
+    let last = r.prefix as i128 + d as i128 * r.count as i128;
+    let within = |x: i128| T::MIN_I64 as i128 <= x && x <= T::MAX_I64 as i128;
+    within(first) && within(last)
+}
+
+/// Whether a run has a value outside the type: its first or its last,
+/// worked out with no wrapping, where neither leaves `i64`.
+fn delta_run_leaves<T: Deltad>(r: &hexane::DeltaRun) -> bool {
+    let Some(d) = r.delta else {
+        return false;
+    };
+    if r.count == 0 {
+        return false;
+    }
+    let first = r.prefix as i128 + d as i128;
+    let last = r.prefix as i128 + d as i128 * r.count as i128;
+    let wide = |x: i128| i64::MIN as i128 <= x && x <= i64::MAX as i128;
+    let within = |x: i128| T::MIN_I64 as i128 <= x && x <= T::MAX_I64 as i128;
+    wide(first) && wide(last) && !(within(first) && within(last))
+}
+
+/// The old API panics at a run it refuses. So does the verified one at a
+/// run with a value outside the type, where its `requires` is not met: a
+/// caller that is not verified is stopped all the same.
+#[cfg(any(target_pointer_width = "64", panic = "unwind"))]
+fn delta_run_refused<T: Deltad>(run: hexane::DeltaRun) {
+    let old = panic_of(move || {
+        let mut old = DeltaColumn::<T>::new();
+        old.splice_runs(0, 0, [run]);
+    });
+    assert!(old.is_some(), "the old API takes {run:?}");
+    if run.count <= 9 && delta_run_leaves::<T>(&run) {
+        let new = panic_of(move || {
+            let mut new = VerifiedDeltaColumn::<T>::new();
+            new.splice_runs(0, 0, &[run]);
+        });
+        assert!(new.is_some(), "the verified API takes {run:?}");
+    }
+}
+
+#[cfg(not(any(target_pointer_width = "64", panic = "unwind")))]
+fn delta_run_refused<T: Deltad>(_run: hexane::DeltaRun) {}
+
+/// Whether the values of a run, put into an empty column, lie 2^63 or
+/// more apart as the column sums them: each the first and so many times
+/// the delta, with no wrapping.
+fn delta_run_spans(r: &hexane::DeltaRun) -> bool {
+    let Some(d) = r.delta else {
+        return false;
+    };
+    if r.count == 0 {
+        return false;
+    }
+    let first = r.prefix.wrapping_add(d) as i128;
+    let last = first + d as i128 * (r.count - 1) as i128;
+    let within = |x: i128| i64::MIN as i128 <= x && x <= i64::MAX as i128;
+    !within(last) || (last - first).abs() > i64::MAX as i128
+}
+
+/// Both APIs panic alike at a run whose values lie 2^63 or more apart.
+#[cfg(any(target_pointer_width = "64", panic = "unwind"))]
+fn delta_run_too_wide<T: Deltad>(run: hexane::DeltaRun) {
+    let new = panic_of(move || {
+        let mut new = VerifiedDeltaColumn::<T>::new();
+        new.splice_runs(0, 0, &[run]);
+    });
+    let old = panic_of(move || {
+        let mut old = DeltaColumn::<T>::new();
+        old.splice_runs(0, 0, [run]);
+    });
+    assert!(new.is_some(), "the verified API takes {run:?}");
+    assert_eq!(new, old, "{run:?}");
+}
+
+#[cfg(not(any(target_pointer_width = "64", panic = "unwind")))]
+fn delta_run_too_wide<T: Deltad>(_run: hexane::DeltaRun) {}
+
+/// `run_fits` of a verified delta column is the old API's check, for the
+/// runs of a table: what it passes both APIs take alike, or panic at
+/// alike where its values lie too far apart, and what it refuses the old
+/// API panics at.
+fn delta_run_checks<T: Deltad>() {
+    let (lo, hi) = (T::MIN_I64, T::MAX_I64);
+    let prefixes = [
+        0,
+        1,
+        -1,
+        10,
+        lo,
+        hi,
+        lo.saturating_add(3),
+        hi.saturating_sub(3),
+        i64::MAX,
+        i64::MIN,
+    ];
+    let deltas = [
+        None,
+        Some(0),
+        Some(1),
+        Some(-1),
+        Some(3),
+        Some(-3),
+        Some(1 << 31),
+        Some(-(1 << 31)),
+        Some(i64::MAX),
+        Some(i64::MIN),
+    ];
+    let counts = [0, 1, 2, 3, 9, usize::MAX / 2, usize::MAX];
+    let (mut passed, mut refused, mut wide) = (0, 0, 0);
+    for prefix in prefixes {
+        for delta in deltas {
+            for count in counts {
+                let run = hexane::DeltaRun {
+                    prefix,
+                    delta,
+                    count,
+                };
+                let fits = VerifiedDeltaColumn::<T>::run_fits(&run);
+                assert_eq!(fits, delta_run_passes::<T>(&run), "{run:?}");
+                if !fits {
+                    refused += 1;
+                    delta_run_refused::<T>(run);
+                } else if count <= 9 && delta_run_spans(&run) {
+                    wide += 1;
+                    delta_run_too_wide::<T>(run);
+                } else if count <= 9 {
+                    passed += 1;
+                    let mut new = VerifiedDeltaColumn::<T>::new();
+                    let mut old = DeltaColumn::<T>::new();
+                    new.splice_runs(0, 0, &[run]);
+                    old.splice_runs(0, 0, [run]);
+                    delta_agrees(&new, &old);
+                    assert_eq!(new.len(), count);
+                    assert_eq!(new.save(), old.save());
+                }
+            }
+        }
+    }
+    assert!(passed > 100);
+    // values that lie too far apart are of the widest types alone
+    assert_eq!(wide > 0, lo == i64::MIN && hi == i64::MAX);
+    // a type with a null and every `i64` takes every run
+    assert_eq!(
+        refused == 0,
+        T::NULLABLE && lo == i64::MIN && hi == i64::MAX
+    );
+}
+
+/// A run is checked by a verified delta column as by the old one, for
+/// every type of value.
+#[test]
+fn delta_run_checks_agree() {
+    delta_run_checks::<u32>();
+    delta_run_checks::<u64>();
+    delta_run_checks::<i32>();
+    delta_run_checks::<i64>();
+    delta_run_checks::<usize>();
+    delta_run_checks::<Option<u32>>();
+    delta_run_checks::<Option<u64>>();
+    delta_run_checks::<Option<i32>>();
+    delta_run_checks::<Option<i64>>();
+    delta_run_checks::<Option<usize>>();
+}
+
+/// Runs spliced into a verified delta column and into the old one: the
+/// runs another column lays its values out in, and runs made up. Both
+/// hold the same values after each splice, in as many slabs, and save to
+/// the same bytes; and a splice of nothing changes neither.
+fn delta_run_splices<T: Deltad>(seed: u64, max_segments: Option<usize>) {
+    let mut rng = Rng(seed.wrapping_mul(0x2545_f491).wrapping_add(5) | 1);
+    let mut last = 0;
+    let mut some = |rng: &mut Rng, n: usize| -> Vec<T> {
+        (0..n)
+            .map(|_| {
+                let (v, l) = T::near(rng, last);
+                last = l;
+                v
+            })
+            .collect()
+    };
+    let (mut new, mut old) = match max_segments {
+        Some(m) => (
+            VerifiedDeltaColumn::<T>::with_max_segments(m),
+            DeltaColumn::<T>::with_max_segments(m),
+        ),
+        None => (
+            VerifiedDeltaColumn::<T>::default(),
+            DeltaColumn::<T>::default(),
+        ),
+    };
+    let n = rng.below(40);
+    let start = some(&mut rng, n);
+    new.splice(0, 0, &start);
+    old.splice(0, 0, start);
+    let mut spliced = 0;
+    for _ in 0..40 {
+        let at = rng.below(old.len() + 1);
+        let del = rng.below((old.len() - at).min(6) + 1);
+        let runs: Vec<hexane::DeltaRun> = if rng.below(2) == 0 {
+            let n = rng.below(30);
+            let src = DeltaColumn::<T>::from_values(some(&mut rng, n));
+            let runs = src.iter().runs().collect();
+            runs
+        } else {
+            (0..rng.below(4))
+                .map(|_| {
+                    let (_, prefix) = T::near(&mut rng, 0);
+                    let delta = match rng.below(6) {
+                        0 => None,
+                        _ => Some(rng.below(9) as i64 - 4),
+                    };
+                    let count = rng.below(6);
+                    hexane::DeltaRun {
+                        prefix,
+                        delta,
+                        count,
+                    }
+                })
+                .filter(VerifiedDeltaColumn::<T>::run_fits)
+                .collect()
+        };
+        for run in &runs {
+            assert!(VerifiedDeltaColumn::<T>::run_fits(run), "{run:?}");
+            assert!(delta_run_passes::<T>(run), "{run:?}");
+        }
+        let len = old.len();
+        let added: usize = runs.iter().map(|r| r.count).sum();
+        spliced += added;
+        new.splice_runs(at, del, &runs);
+        old.splice_runs(at, del, runs.iter().copied());
+        delta_agrees(&new, &old);
+        assert_eq!(new.len(), len - del + added);
+        assert_eq!(new.save(), old.save());
+        if !old.is_empty() {
+            assert_eq!(new.slab_count(), old.slab_count(), "{runs:?}");
+        }
+        // a splice of nothing leaves both as they are
+        let at = rng.below(old.len() + 1);
+        let slabs = new.slab_count();
+        new.splice(at, 0, &[]);
+        old.splice(at, 0, Vec::<T>::new());
+        assert_eq!(new.slab_count(), slabs);
+        if !old.is_empty() {
+            assert_eq!(new.slab_count(), old.slab_count());
+        }
+    }
+    assert!(spliced > 0);
+}
+
+/// A verified delta column and the old one take runs alike, for every
+/// type of value and in slabs of several sizes.
+#[test]
+fn delta_columns_take_runs() {
+    for seed in 0..9 {
+        let m = [None, Some(2), Some(5)][seed as usize % 3];
+        delta_run_splices::<u32>(seed, m);
+        delta_run_splices::<u64>(seed, m);
+        delta_run_splices::<i32>(seed, m);
+        delta_run_splices::<i64>(seed, m);
+        delta_run_splices::<usize>(seed, m);
+        delta_run_splices::<Option<u32>>(seed, m);
+        delta_run_splices::<Option<u64>>(seed, m);
+        delta_run_splices::<Option<i32>>(seed, m);
+        delta_run_splices::<Option<i64>>(seed, m);
+        delta_run_splices::<Option<usize>>(seed, m);
+    }
+}
+
+/// Bytes loaded with options by both APIs, as a delta column of the
+/// type: they load in both or in neither, as the same values in as many
+/// slabs, and are refused with the same error. Whether they load.
+macro_rules! delta_same_load_with {
+    ($t:ty, $bytes:expr, $opts:expr) => {{
+        let bytes: &[u8] = $bytes;
+        match (
+            VerifiedDeltaColumn::<$t>::load_with(bytes, $opts),
+            DeltaColumn::<$t>::load_with(bytes, $opts),
+        ) {
+            (Ok(v), Ok(c)) => {
+                assert_eq!(v.len(), c.len());
+                // a fill can be a run of billions: read those in places
+                if v.len() <= 10_000 {
+                    assert_eq!(v.to_vec(), c.to_vec());
+                } else {
+                    for i in [0, 1, v.len() / 2, v.len() - 1] {
+                        assert_eq!(v.get(i), c.get(i));
+                    }
+                }
+                assert_eq!(v.save(), c.save());
+                if !c.is_empty() {
+                    assert_eq!(v.slab_count(), c.slab_count());
+                }
+                Some(v)
+            }
+            (Err(v), Err(c)) => {
+                assert_eq!(v.to_string(), c.to_string());
+                None
+            }
+            (v, c) => panic!(
+                "only one API loads {bytes:?}: the verified one {}, the old one {}",
+                v.is_ok(),
+                c.is_ok()
+            ),
+        }
+    }};
+}
+
+/// No bytes loaded with a length and a fill, and with one of the two,
+/// by both APIs, in slabs of several sizes. How many of the loads load.
+///
+/// Each type's loads are a function of their own: all of them in one
+/// are more than a WebAssembly engine takes in a function.
+macro_rules! delta_fills {
+    ($t:ty, $f:ty, $fills:expr) => {{
+        fn fills(fills: &[$f]) -> usize {
+            let lens = [
+                0,
+                1,
+                2,
+                3,
+                1000,
+                20_000,
+                usize::MAX / 7,
+                usize::MAX / 2,
+                usize::MAX / 2 + 1,
+                usize::MAX - 3,
+                usize::MAX - 2,
+                usize::MAX,
+            ];
+            let mut loads = 0;
+            for &fill in fills {
+                for len in lens {
+                    for m in [2, 5, 64] {
+                        let opts = || LoadOpts::new().with_max_segments(m).with_length(len);
+                        if let Some(v) = delta_same_load_with!($t, &[], opts().with_fill(fill)) {
+                            assert_eq!(v.len(), len);
+                            loads += 1;
+                        }
+                        // a length alone is no fill, and a fill alone fills nothing
+                        let v = delta_same_load_with!($t, &[], opts());
+                        assert_eq!(v.is_some(), len == 0);
+                        let v = delta_same_load_with!($t, &[], LoadOpts::new().with_fill(fill));
+                        assert!(v.is_some_and(|v| v.is_empty()));
+                    }
+                }
+            }
+            loads
+        }
+        fills(&$fills)
+    }};
+}
+
+/// A fill loads in a verified delta column as in the old one, for every
+/// type of value: as the same values, or refused alike.
+#[test]
+fn delta_fills_agree() {
+    let nums = [
+        0,
+        1,
+        -1,
+        7,
+        -7,
+        1 << 20,
+        u32::MAX as i64,
+        i64::MAX / 3,
+        i64::MAX,
+        i64::MIN,
+    ];
+    let opts = [
+        None,
+        Some(0),
+        Some(1),
+        Some(-1),
+        Some(7),
+        Some(1 << 20),
+        Some(i64::MAX),
+        Some(i64::MIN),
+    ];
+    let mut loads = 0;
+    loads += delta_fills!(u32, i64, nums);
+    loads += delta_fills!(u64, i64, nums);
+    loads += delta_fills!(i32, i64, nums);
+    loads += delta_fills!(i64, i64, nums);
+    loads += delta_fills!(usize, i64, nums);
+    loads += delta_fills!(Option<u32>, Option<i64>, opts);
+    loads += delta_fills!(Option<u64>, Option<i64>, opts);
+    loads += delta_fills!(Option<i32>, Option<i64>, opts);
+    loads += delta_fills!(Option<i64>, Option<i64>, opts);
+    loads += delta_fills!(Option<usize>, Option<i64>, opts);
+    assert!(loads > 500);
+
+    // the fill is the difference between neighbours
+    let col =
+        VerifiedDeltaColumn::<u64>::load_with(&[], LoadOpts::new().with_length(3).with_fill(2));
+    assert_eq!(col.unwrap().to_vec(), vec![2, 4, 6]);
+    let col = VerifiedDeltaColumn::<Option<i32>>::load_with(
+        &[],
+        LoadOpts::new().with_length(3).with_fill(Some(-5)),
+    );
+    assert_eq!(col.unwrap().to_vec(), vec![Some(-5), Some(-10), Some(-15)]);
+    let col = VerifiedDeltaColumn::<Option<u32>>::load_with(
+        &[],
+        LoadOpts::new().with_length(2).with_fill(None),
+    );
+    assert_eq!(col.unwrap().to_vec(), vec![None, None]);
+    // and a fill that leaves the type is refused
+    let col =
+        VerifiedDeltaColumn::<u32>::load_with(&[], LoadOpts::new().with_length(3).with_fill(-1));
+    assert!(col.is_err());
+    let col = VerifiedDeltaColumn::<u32>::load_with(
+        &[],
+        LoadOpts::new().with_length(3).with_fill(1 << 31),
+    );
+    assert!(col.is_err());
+}
+
+/// A saved delta column loaded with options by both APIs: with its
+/// length and with another, with a fill and without, in slabs of several
+/// sizes. Each type's loads are a function of their own, as a fill's.
+macro_rules! delta_loads_with {
+    ($t:ty, $seed:expr, $fill:expr) => {{
+        fn loads(seed: u64) {
+            let mut rng = Rng(seed.wrapping_mul(0x6c07_8965).wrapping_add(3) | 1);
+            let mut last = 0;
+            let n = 1 + rng.below(200);
+            let values: Vec<$t> = (0..n)
+                .map(|_| {
+                    let (v, l) = <$t as Deltad>::near(&mut rng, last);
+                    last = l;
+                    v
+                })
+                .collect();
+            let bytes = delta_bytes::<$t>(&values);
+            for m in [2, 3, 64] {
+                let opts = || LoadOpts::new().with_max_segments(m);
+                let v = delta_same_load_with!($t, &bytes, opts());
+                assert_eq!(v.unwrap().to_vec(), values);
+                let v = delta_same_load_with!($t, &bytes, opts().with_length(n));
+                assert_eq!(v.unwrap().to_vec(), values);
+                // bytes are read whatever the fill
+                let v = delta_same_load_with!($t, &bytes, opts().with_length(n).with_fill($fill));
+                assert_eq!(v.unwrap().to_vec(), values);
+                let v = delta_same_load_with!($t, &bytes, opts().with_fill($fill));
+                assert_eq!(v.unwrap().to_vec(), values);
+                for other in [0, n - 1, n + 1] {
+                    let v = delta_same_load_with!($t, &bytes, opts().with_length(other));
+                    assert!(v.is_none());
+                    let v = delta_same_load_with!(
+                        $t,
+                        &bytes,
+                        opts().with_length(other).with_fill($fill)
+                    );
+                    assert!(v.is_none());
+                }
+            }
+        }
+        loads($seed as u64)
+    }};
+}
+
+/// A saved delta column loads with options in a verified delta column
+/// as in the old one, for every type of value.
+#[test]
+fn delta_columns_load_with_options() {
+    for seed in 0..6 {
+        delta_loads_with!(u32, seed, 1);
+        delta_loads_with!(u64, seed, 1);
+        delta_loads_with!(i32, seed, -1);
+        delta_loads_with!(i64, seed, 0);
+        delta_loads_with!(usize, seed, 2);
+        delta_loads_with!(Option<u32>, seed, Some(1));
+        delta_loads_with!(Option<u64>, seed, None);
+        delta_loads_with!(Option<i32>, seed, Some(-1));
+        delta_loads_with!(Option<i64>, seed, None);
+        delta_loads_with!(Option<usize>, seed, Some(0));
+    }
+}

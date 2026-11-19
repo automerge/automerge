@@ -8,32 +8,40 @@
 #[cfg(verus_keep_ghost)]
 use super::after_edit;
 use super::codec::VCodec;
+#[cfg(verus_keep_ghost)]
+use super::fill_of;
 use super::model::Model;
 #[cfg(verus_keep_ghost)]
 use super::only;
 use super::seal;
 use super::value::{VOps, VOptOps, VOptWrite, VWrite};
 use super::{VValue, MAX_SEG};
+use crate::attrib::weigh_run;
 use crate::btree::{SlabAgg, SlabBTree};
 use crate::column_core::ColumnCore;
 #[cfg(verus_keep_ghost)]
-use crate::cursor::Slabs;
-#[cfg(verus_keep_ghost)]
-use crate::delta::agg::psum;
+use crate::cursor::{slab_lens, ReadsAgree, Slabs};
 use crate::delta::agg::DeltaOps;
+#[cfg(verus_keep_ghost)]
+use crate::delta::agg::{deltas_of, psum, reps};
 #[cfg(verus_keep_ghost)]
 use crate::delta::dbound::in_bound;
 #[cfg(verus_keep_ghost)]
-use crate::delta::ddomain::{dslabs, item_vals, items_vals, lemma_dslabs_own, rvals};
+use crate::delta::ddomain::{
+    dslabs, item_vals, items_vals, lemma_dslabs_own, lemma_dslabs_unit, rvals,
+};
 use crate::delta::ddomain::{DeltaWrite, SpliceItem, SpliceItems, ValueItems};
 #[cfg(verus_keep_ghost)]
-use crate::delta::dedit::rz;
+use crate::delta::dedit::{lemma_rz_nulls, lemma_rz_run, rz};
 #[cfg(verus_keep_ghost)]
 use crate::delta::diter::{crop, lemma_crop, lemma_crop_add, lemma_wrapping_add};
+#[cfg(verus_keep_ghost)]
+use crate::fenwick::lemma_sum_one;
+use crate::iter_core::{Decode, Decoders};
 use crate::rle::dec::RleReads;
 use crate::rle::edit::{null_in_column, ReadIns, RleModel};
-use crate::weights::DeltaModel;
-use crate::{Leb128, PackError};
+use crate::weights::{DeltaModel, LoadWeigh};
+use crate::{DeltaRun, Leb128, LoadOpts, MaybeFill, PackError};
 use std::marker::PhantomData;
 use std::ops::Range;
 use vstd::prelude::*;
@@ -375,6 +383,12 @@ pub open spec fn dom(d: Option<i64>, least: i64, most: i64, nullable: bool) -> b
 /// A value type of a delta column: a number ([`VDeltaNum`]) or an
 /// `Option` of one, `None` the null.
 pub trait VDelta: Copy + seal::DeltaValSeal {
+    /// What a load fills a delta column of the type with
+    /// ([`VerifiedDeltaColumn::load_with`]): the difference between
+    /// each value and the one before it, an `i64`; for a type with a
+    /// null an `Option<i64>`, of which none fills with nulls.
+    type Fill: Copy;
+
     /// Whether a delta column can hold the value: a null, or a number
     /// that fits ([`VDeltaNum::fits`]).
     spec fn fits(self) -> bool;
@@ -437,6 +451,16 @@ pub trait VDelta: Copy + seal::DeltaValSeal {
         ensures
             r == Self::most(),
     ;
+
+    /// A fill as the difference it is, or none for nulls.
+    #[doc(hidden)]
+    spec fn fill_delta(f: Self::Fill) -> Option<i64>;
+
+    #[doc(hidden)]
+    fn has_null() -> (r: bool)
+        ensures
+            r == Self::nullable(),
+    ;
 }
 
 /// What a delta column of `T` can keep: a number from the least to the
@@ -451,6 +475,8 @@ impl<T: VDeltaNum> seal::DeltaValSeal for T {
 }
 
 impl<T: VDeltaNum> VDelta for T {
+    type Fill = i64;
+
     open spec fn fits(self) -> bool {
         <T as VDeltaNum>::fits(self)
     }
@@ -513,6 +539,15 @@ impl<T: VDeltaNum> VDelta for T {
     fn hi() -> i64 {
         <T as VDeltaNum>::hi()
     }
+
+    open spec fn fill_delta(f: i64) -> Option<i64> {
+        Some(f)
+    }
+
+    #[inline(always)]
+    fn has_null() -> bool {
+        false
+    }
 }
 
 impl<T: VDeltaNum> seal::DeltaValSeal for Option<T> {
@@ -520,6 +555,8 @@ impl<T: VDeltaNum> seal::DeltaValSeal for Option<T> {
 }
 
 impl<T: VDeltaNum> VDelta for Option<T> {
+    type Fill = Option<i64>;
+
     open spec fn fits(self) -> bool {
         match self {
             Some(v) => v.fits(),
@@ -590,6 +627,15 @@ impl<T: VDeltaNum> VDelta for Option<T> {
     #[inline(always)]
     fn hi() -> i64 {
         <T as VDeltaNum>::hi()
+    }
+
+    open spec fn fill_delta(f: Option<i64>) -> Option<i64> {
+        f
+    }
+
+    #[inline(always)]
+    fn has_null() -> bool {
+        true
     }
 }
 
@@ -807,6 +853,377 @@ impl<'v, T: VDelta> SpliceItems for SliceItems<'v, T> {
     }
 }
 
+// ── Runs of a delta column ──────────────────────────────────────────────────
+
+/// [`DeltaRun`], as the proofs see it: its three fields.
+#[verifier::external_type_specification]
+#[allow(dead_code)]
+pub struct ExDeltaRun(DeltaRun);
+
+/// What a delta column keeps for the run `r`: `r.count` numbers, the
+/// first `r.prefix + r.delta` and each of the others `r.delta` more
+/// than the one before it (wrapping, as an `i64` does); or `r.count`
+/// nulls, where `r.delta` is none.
+#[doc(hidden)]
+pub open spec fn delta_run_kept(r: DeltaRun) -> Seq<Option<i64>> {
+    Seq::new(
+        r.count as nat,
+        |k: int|
+            match r.delta {
+                Some(d) => Some(vstd::wrapping::i64_specs::signed_crop(r.prefix + (k + 1) * d)),
+                None => None,
+            },
+    )
+}
+
+/// What a delta column keeps for the runs `rs`: one run's values
+/// after another's.
+#[doc(hidden)]
+pub open spec fn delta_runs_kept(rs: Seq<DeltaRun>) -> Seq<Option<i64>>
+    decreases rs.len(),
+{
+    if rs.len() == 0 {
+        Seq::empty()
+    } else {
+        delta_runs_kept(rs.drop_last()) + delta_run_kept(rs.last())
+    }
+}
+
+/// The values of the run `r` in a delta column of `T`: `r.count` of
+/// them, the first `r.prefix + r.delta` and each of the others
+/// `r.delta` more than the one before it; or `r.count` nulls, where
+/// `r.delta` is none. (`lemma_delta_run_exact` says which numbers they
+/// are.)
+pub open spec fn delta_run_values<T: VDelta>(r: DeltaRun) -> Seq<T> {
+    vals::<T>(delta_run_kept(r))
+}
+
+/// The values of the runs `rs` in a delta column of `T`: one run's
+/// after another's.
+pub open spec fn delta_runs_values<T: VDelta>(rs: Seq<DeltaRun>) -> Seq<T> {
+    vals::<T>(delta_runs_kept(rs))
+}
+
+/// Every value of the run `r` is one a delta column of `T` can keep.
+pub open spec fn delta_run_fits<T: VDelta>(r: DeltaRun) -> bool {
+    all_dom::<T>(delta_run_kept(r))
+}
+
+/// Every value of each of the runs `rs` is one a delta column of `T`
+/// can keep.
+pub open spec fn delta_runs_fit<T: VDelta>(rs: Seq<DeltaRun>) -> bool {
+    forall|i: int| 0 <= i < rs.len() ==> delta_run_fits::<T>(#[trigger] rs[i])
+}
+
+/// The check [`DeltaColumn::splice_runs`](crate::DeltaColumn::splice_runs)
+/// makes of a run, and a null run only where `T` has a null: a run of
+/// numbers passes where `T` holds every `i64`, or where its first value
+/// and its last, taken as integers, are numbers of `T`. (The values
+/// of a run go one way, so its ends bound them.)
+pub open spec fn delta_run_in_range<T: VDelta>(r: DeltaRun) -> bool {
+    r.count == 0 || match r.delta {
+        Some(d) => (T::least() == i64::MIN && T::most() == i64::MAX) || {
+            &&& T::least() <= r.prefix + d <= T::most()
+            &&& T::least() <= r.prefix + d * r.count <= T::most()
+        },
+        None => T::nullable(),
+    }
+}
+
+/// A run's values, where its first and its last are `i64`s as integers:
+/// the `k`-th is `r.prefix` and `k + 1` times `r.delta`, an `i64` too.
+pub proof fn lemma_delta_run_exact(r: DeltaRun, k: int)
+    requires
+        0 <= k < r.count,
+        r.delta matches Some(d) && i64::MIN <= r.prefix + d <= i64::MAX && i64::MIN <= r.prefix + d * r.count
+            <= i64::MAX,
+    ensures
+        i64::MIN <= r.prefix + (k + 1) * r.delta->0 <= i64::MAX,
+        delta_run_kept(r)[k] == Some((r.prefix + (k + 1) * r.delta->0) as i64),
+        r.delta->0 >= 0 ==> r.prefix + r.delta->0 <= r.prefix + (k + 1) * r.delta->0 <= r.prefix + r.delta->0
+            * r.count,
+        r.delta->0 <= 0 ==> r.prefix + r.delta->0 * r.count <= r.prefix + (k + 1) * r.delta->0 <= r.prefix
+            + r.delta->0,
+{
+    let d = r.delta->0 as int;
+    let n = r.count as int;
+    let x = r.prefix + (k + 1) * d;
+    if d >= 0 {
+        assert(d <= (k + 1) * d <= d * n) by (nonlinear_arith)
+            requires
+                0 <= k < n,
+                d >= 0,
+        ;
+    }
+    if d <= 0 {
+        assert(d * n <= (k + 1) * d <= d) by (nonlinear_arith)
+            requires
+                0 <= k < n,
+                d <= 0,
+        ;
+    }
+    lemma_crop(x);
+    assert(crop(x) == x);
+}
+
+/// A run that passes the check holds only values a delta column of `T`
+/// can keep.
+pub proof fn lemma_delta_run_fits<T: VDelta>(r: DeltaRun)
+    requires
+        delta_run_in_range::<T>(r),
+    ensures
+        delta_run_fits::<T>(r),
+{
+    let ks = delta_run_kept(r);
+    assert forall|k: int| 0 <= k < ks.len() implies in_dom::<T>(#[trigger] ks[k]) by {
+        match r.delta {
+            Some(d) => {
+                if !(T::least() == i64::MIN && T::most() == i64::MAX) {
+                    lemma_delta_run_exact(r, k);
+                }
+            },
+            None => {},
+        }
+    }
+}
+
+/// One more run adds its values.
+pub proof fn lemma_delta_runs_push<T: VDelta>(rs: Seq<DeltaRun>, r: DeltaRun)
+    ensures
+        delta_runs_kept(rs.push(r)) == delta_runs_kept(rs) + delta_run_kept(r),
+        delta_runs_values::<T>(rs.push(r)) == delta_runs_values::<T>(rs) + delta_run_values::<T>(r),
+        delta_runs_fit::<T>(rs) && delta_run_fits::<T>(r) ==> delta_runs_fit::<T>(rs.push(r)),
+{
+    assert(rs.push(r).drop_last() =~= rs);
+    assert(vals::<T>(delta_runs_kept(rs) + delta_run_kept(r)) =~= vals::<T>(delta_runs_kept(rs)) + vals::<T>(
+        delta_run_kept(r),
+    ));
+}
+
+/// The values of one run alone are its own, and no runs have none.
+pub proof fn lemma_delta_runs_one<T: VDelta>(r: DeltaRun)
+    ensures
+        delta_runs_values::<T>(seq![r]) == delta_run_values::<T>(r),
+        delta_runs_values::<T>(Seq::empty()) == Seq::<T>::empty(),
+        delta_runs_fit::<T>(seq![r]) == delta_run_fits::<T>(r),
+        delta_runs_fit::<T>(Seq::empty()),
+{
+    let none = Seq::<DeltaRun>::empty();
+    assert(seq![r] =~= none.push(r));
+    lemma_delta_runs_push::<T>(none, r);
+    assert(delta_runs_kept(none) + delta_run_kept(r) =~= delta_run_kept(r));
+    assert(vals::<T>(delta_runs_kept(none)) =~= Seq::<T>::empty());
+    assert(seq![r][0] == r);
+}
+
+/// Runs that each hold only values a delta column of `T` can keep hold
+/// only such values together.
+pub(crate) proof fn lemma_delta_runs_dom<T: VDelta>(rs: Seq<DeltaRun>)
+    requires
+        delta_runs_fit::<T>(rs),
+    ensures
+        all_dom::<T>(delta_runs_kept(rs)),
+    decreases rs.len(),
+{
+    if rs.len() > 0 {
+        assert forall|i: int| 0 <= i < rs.drop_last().len() implies delta_run_fits::<T>(#[trigger] rs.drop_last()[i]) by {
+            assert(rs.drop_last()[i] == rs[i]);
+        }
+        lemma_delta_runs_dom::<T>(rs.drop_last());
+        let a = delta_runs_kept(rs.drop_last());
+        let b = delta_run_kept(rs.last());
+        assert(delta_run_fits::<T>(rs[rs.len() - 1]));
+        assert forall|i: int| 0 <= i < (a + b).len() implies in_dom::<T>(#[trigger] (a + b)[i]) by {
+            if i < a.len() {
+                assert((a + b)[i] == a[i]);
+            } else {
+                assert((a + b)[i] == b[i - a.len()]);
+            }
+        }
+    }
+}
+
+/// Runs of no values hold none together.
+pub(crate) proof fn lemma_delta_runs_none(rs: Seq<DeltaRun>)
+    requires
+        forall|i: int| 0 <= i < rs.len() ==> (#[trigger] rs[i]).count == 0,
+    ensures
+        delta_runs_kept(rs) == Seq::<Option<i64>>::empty(),
+    decreases rs.len(),
+{
+    if rs.len() > 0 {
+        assert forall|i: int| 0 <= i < rs.drop_last().len() implies (#[trigger] rs.drop_last()[i]).count == 0 by {
+            assert(rs.drop_last()[i] == rs[i]);
+        }
+        lemma_delta_runs_none(rs.drop_last());
+        assert(rs[rs.len() - 1].count == 0);
+        assert(delta_run_kept(rs.last()) =~= Seq::<Option<i64>>::empty());
+        assert(delta_runs_kept(rs) =~= Seq::<Option<i64>>::empty());
+    }
+}
+
+/// A run as a splice's item: none, where it holds no value.
+pub(crate) open spec fn run_item(r: DeltaRun) -> Seq<SpliceItem> {
+    if r.count == 0 {
+        Seq::empty()
+    } else {
+        seq![SpliceItem::Run(r.prefix, r.delta, r.count)]
+    }
+}
+
+/// Runs `rs` as a splice's items: each that holds a value an item, in
+/// their order.
+pub(crate) open spec fn run_items(rs: Seq<DeltaRun>) -> Seq<SpliceItem>
+    decreases rs.len(),
+{
+    if rs.len() == 0 {
+        Seq::empty()
+    } else {
+        run_items(rs.drop_last()) + run_item(rs.last())
+    }
+}
+
+/// The items of runs are the first run's and then the others'.
+pub(crate) proof fn lemma_run_items_front(s: Seq<DeltaRun>)
+    requires
+        s.len() > 0,
+    ensures
+        run_items(s) == run_item(s[0]) + run_items(s.skip(1)),
+    decreases s.len(),
+{
+    if s.len() == 1 {
+        assert(run_items(s.drop_last()) =~= Seq::<SpliceItem>::empty());
+        assert(run_items(s.skip(1)) =~= Seq::<SpliceItem>::empty());
+        assert(run_items(s) =~= run_item(s[0]) + run_items(s.skip(1)));
+    } else {
+        lemma_run_items_front(s.drop_last());
+        assert(s.skip(1).drop_last() =~= s.drop_last().skip(1));
+        assert(s.skip(1).last() == s.last());
+        assert(run_items(s) =~= run_item(s[0]) + run_items(s.skip(1)));
+    }
+}
+
+/// Items and then more stand for the values of each.
+pub(crate) proof fn lemma_items_cat(a: Seq<SpliceItem>, b: Seq<SpliceItem>)
+    ensures
+        items_vals(a + b) == items_vals(a) + items_vals(b),
+    decreases b.len(),
+{
+    if b.len() == 0 {
+        assert(a + b =~= a);
+        assert(items_vals(a) + items_vals(b) =~= items_vals(a));
+    } else {
+        lemma_items_cat(a, b.drop_last());
+        assert((a + b).drop_last() =~= a + b.drop_last());
+        assert((a + b).last() == b.last());
+        assert(items_vals(a + b) =~= items_vals(a) + items_vals(b));
+    }
+}
+
+/// A run's item stands for what a delta column keeps for the run.
+pub(crate) proof fn lemma_run_item(r: DeltaRun)
+    ensures
+        items_vals(run_item(r)) == delta_run_kept(r),
+{
+    if r.count == 0 {
+        assert(delta_run_kept(r) =~= Seq::<Option<i64>>::empty());
+        assert(items_vals(run_item(r)) =~= Seq::<Option<i64>>::empty());
+    } else {
+        let it = SpliceItem::Run(r.prefix, r.delta, r.count);
+        assert(items_vals(seq![it].drop_last()) =~= Seq::<Option<i64>>::empty());
+        assert(item_vals(it) =~= delta_run_kept(r));
+        assert(items_vals(seq![it]) =~= delta_run_kept(r));
+    }
+}
+
+/// And so do the items of runs, for the runs.
+pub(crate) proof fn lemma_run_items(rs: Seq<DeltaRun>)
+    ensures
+        items_vals(run_items(rs)) == delta_runs_kept(rs),
+    decreases rs.len(),
+{
+    if rs.len() == 0 {
+        assert(items_vals(run_items(rs)) =~= Seq::<Option<i64>>::empty());
+    } else {
+        lemma_run_items(rs.drop_last());
+        lemma_run_item(rs.last());
+        lemma_items_cat(run_items(rs.drop_last()), run_item(rs.last()));
+    }
+}
+
+/// The runs of a slice, for a delta column's splice
+/// (`ColumnCore::splice_delta`): each that holds a value an item, in
+/// the slice's order.
+pub(crate) struct RunItems<'v> {
+    pub(crate) rs: &'v [DeltaRun],
+    pub(crate) at: usize,
+}
+
+impl<'v> RunItems<'v> {
+    /// The source is within its slice.
+    #[verifier::type_invariant]
+    pub(crate) open spec fn inv(&self) -> bool {
+        self.at <= self.rs@.len()
+    }
+
+    pub(crate) fn new(rs: &'v [DeltaRun]) -> (r: Self)
+        ensures
+            r.left() == Some(run_items(rs@)),
+    {
+        proof {
+            assert(rs@.skip(0) =~= rs@);
+        }
+        RunItems { rs, at: 0 }
+    }
+}
+
+impl<'v> SpliceItems for RunItems<'v> {
+    open spec fn left(&self) -> Option<Seq<SpliceItem>> {
+        Some(run_items(self.rs@.skip(self.at as int)))
+    }
+
+    #[inline]
+    fn next_item(&mut self) -> (r: Option<SpliceItem>) {
+        proof {
+            use_type_invariant(&*self);
+        }
+        let ghost l0 = run_items(self.rs@.skip(self.at as int));
+        // a run of no values is no item
+        while self.at < self.rs.len()
+            invariant
+                self.at <= self.rs@.len(),
+                old(self).left() == Some(l0),
+                self.left() == Some(l0),
+            decreases self.rs@.len() - self.at,
+        {
+            let run = &self.rs[self.at];
+            let (prefix, delta, count) = (run.prefix, run.delta, run.count);
+            proof {
+                let s = self.rs@.skip(self.at as int);
+                lemma_run_items_front(s);
+                assert(s[0] == self.rs@[self.at as int]);
+                assert(s.skip(1) =~= self.rs@.skip(self.at + 1));
+            }
+            self.at = self.at + 1;
+            if count > 0 {
+                let item = SpliceItem::Run(prefix, delta, count);
+                proof {
+                    assert(l0[0] == item);
+                    assert(l0.skip(1) =~= run_items(self.rs@.skip(self.at as int)));
+                }
+                return Some(item);
+            }
+            proof {
+                assert(l0 =~= run_items(self.rs@.skip(self.at as int)));
+            }
+        }
+        proof {
+            assert(self.rs@.skip(self.at as int).len() == 0);
+        }
+        None
+    }
+}
+
 // ── The column ──────────────────────────────────────────────────────────────
 
 /// How a delta column of the type is kept: the column underneath, of
@@ -829,6 +1246,13 @@ pub(crate) trait DKind<C: VCodec>: VDelta {
             >>::dvo(b) ==> a == b,
             !Self::nullable() ==> <Self::B as DeltaWrite<'static, DE<Self, C>, DX<Self, C>>>::dvo(a) is Some,
     ;
+
+    /// A fill as a value of the column underneath: the one whose delta
+    /// it is.
+    fn fill_item(f: <Self as VDelta>::Fill) -> (r: DItem<Self, C>)
+        ensures
+            <Self::B as DeltaOps<DItem<Self, C>>>::dv(r) == Self::fill_delta(f),
+    ;
 }
 
 impl<T: VDeltaNum, C: VCodec> DKind<C> for T {
@@ -838,6 +1262,11 @@ impl<T: VDeltaNum, C: VCodec> DKind<C> for T {
 
     proof fn lemma_kind(a: i64, b: i64) {
     }
+
+    #[inline(always)]
+    fn fill_item(f: i64) -> i64 {
+        f
+    }
 }
 
 impl<T: VDeltaNum, C: VCodec> DKind<C> for Option<T> {
@@ -846,6 +1275,11 @@ impl<T: VDeltaNum, C: VCodec> DKind<C> for Option<T> {
     type B = VDeltas<Option<i64>, C>;
 
     proof fn lemma_kind(a: Option<i64>, b: Option<i64>) {
+    }
+
+    #[inline(always)]
+    fn fill_item(f: Option<i64>) -> Option<i64> {
+        f
     }
 }
 
@@ -865,6 +1299,9 @@ type DE<T, C> = <<T as DKind<C>>::I as seal::Sealed<C>>::E;
 
 /// How the column underneath is read.
 type DX<T, C> = <<T as DKind<C>>::I as seal::Sealed<C>>::X;
+
+/// A value of the column underneath, as it is read.
+type DItem<T, C> = <<DX<T, C> as Decoders<'static>>::D as Decode>::Item;
 
 /// The verified core of a delta column.
 type DCore<T, C> = ColumnCore<DE<T, C>, SlabAgg, SlabBTree<SlabAgg>, DeltaModel<DX<T, C>, <T as DKind<C>>::B>>;
@@ -1031,6 +1468,14 @@ impl<T: VDeltaValue<C>, C: VCodec> VerifiedDeltaColumn<T, C> {
         proof {
             use_type_invariant(&*self);
         }
+        if del == 0 && values.len() == 0 {
+            // nothing to do: the column is left as it is, as by the old
+            // API
+            proof {
+                assert(self@ =~= self@.take(at as int) + values@ + self@.skip(at as int));
+            }
+            return;
+        }
         let ghost k0 = self.kept();
         // the column's values are kept in bounds while it is whole: a
         // panic part way leaves an empty one
@@ -1056,6 +1501,132 @@ impl<T: VDeltaValue<C>, C: VCodec> VerifiedDeltaColumn<T, C> {
             let k1 = rvals::<DE<T, C>, DX<T, C>, <T as DKind<C>>::B>(core@);
             assert(k1 == k0.take(at as int) + ds + k0.skip(at + del));
             assert(vals::<T>(k1) =~= vals::<T>(k0).take(at as int) + values@ + vals::<T>(k0).skip(at + del));
+        }
+        *self = VerifiedDeltaColumn { core };
+    }
+
+    /// Whether the run `run` passes the check
+    /// [`DeltaColumn::splice_runs`](crate::DeltaColumn::splice_runs)
+    /// makes of its runs (`delta_run_in_range`), a null run passing
+    /// only where `T` has a null. A run that does holds only values a
+    /// delta column of `T` can keep, and
+    /// [`splice_runs`](Self::splice_runs) takes it.
+    pub fn run_fits(run: &DeltaRun) -> (r: bool)
+        ensures
+            r == delta_run_in_range::<T>(*run),
+            r ==> delta_run_fits::<T>(*run),
+    {
+        proof {
+            if delta_run_in_range::<T>(*run) {
+                lemma_delta_run_fits::<T>(*run);
+            }
+        }
+        if run.count == 0 {
+            return true;
+        }
+        match run.delta {
+            None => T::has_null(),
+            Some(d) => {
+                let (lo, hi) = (T::lo(), T::hi());
+                if lo == i64::MIN && hi == i64::MAX {
+                    return true;
+                }
+                // the run's ends, as integers: an `i128` holds them
+                let n = run.count as i128;
+                proof {
+                    let m = 0xffff_ffff_ffff_ffffint;
+                    assert(-0x8000_0000_0000_0000 * m <= (d as int) * (n as int) <= 0x7fff_ffff_ffff_ffff * m)
+                        by (nonlinear_arith)
+                        requires
+                            -0x8000_0000_0000_0000 <= d as int <= 0x7fff_ffff_ffff_ffff,
+                            0 <= n as int <= m,
+                            m == 0xffff_ffff_ffff_ffff,
+                    ;
+                }
+                let first = run.prefix as i128 + d as i128;
+                let last = run.prefix as i128 + d as i128 * n;
+                lo as i128 <= first && first <= hi as i128 && lo as i128 <= last && last <= hi as i128
+            },
+        }
+    }
+
+    /// Remove `del` values from index `at` on and put the values of
+    /// the runs `runs` in their place (`delta_runs_values`): of each
+    /// run its `count` values, the first `prefix + delta` and each of
+    /// the others `delta` more than the one before it, or `count` nulls
+    /// where `delta` is none. A run of no values adds none.
+    ///
+    /// Every value of the runs must be one the column can keep
+    /// (`delta_runs_fit`): [`run_fits`](Self::run_fits) checks a run as
+    /// [`DeltaColumn::splice_runs`](crate::DeltaColumn::splice_runs)
+    /// does, which panics where this method has a `requires`.
+    ///
+    /// The column counts an edit more (`after_edit` of its `edits()`),
+    /// unless the call deletes no value and its length is what it was.
+    ///
+    /// # Panics
+    ///
+    /// Panics if two of the column's values would lie 2^63 or more
+    /// apart.
+    pub fn splice_runs(&mut self, at: usize, del: usize, runs: &[DeltaRun])
+        requires
+            at <= old(self)@.len(),
+            del <= old(self)@.len() - at,
+            delta_runs_fit::<T>(runs@),
+        ensures
+            final(self)@ == old(self)@.take(at as int) + delta_runs_values::<T>(runs@) + old(self)@.skip(at + del),
+            final(self).edits() == if del > 0 || final(self)@.len() != old(self)@.len() {
+                after_edit(old(self).edits())
+            } else {
+                old(self).edits()
+            },
+    {
+        proof {
+            use_type_invariant(&*self);
+        }
+        if del == 0 {
+            // runs of no values, and none deleted: the column is left as
+            // it is, as by the old API
+            let mut i: usize = 0;
+            while i < runs.len() && runs[i].count == 0
+                invariant
+                    i <= runs@.len(),
+                    forall|j: int| 0 <= j < i ==> (#[trigger] runs@[j]).count == 0,
+                decreases runs@.len() - i,
+            {
+                i = i + 1;
+            }
+            if i == runs.len() {
+                proof {
+                    lemma_delta_runs_none(runs@);
+                    assert(delta_runs_values::<T>(runs@) =~= Seq::<T>::empty());
+                    assert(self@ =~= self@.take(at as int) + Seq::<T>::empty() + self@.skip(at as int));
+                }
+                return;
+            }
+        }
+        let ghost k0 = self.kept();
+        let mut me = Self::new();
+        core::mem::swap(self, &mut me);
+        let mut core = me.core;
+        let before = core.counter();
+        let len = core.len();
+        let mut f = <DE<T, C> as Model<DX<T, C>>>::blind();
+        let _taken = core.splice_delta(at, del, Some(RunItems::new(runs)), T::lo(), T::hi(), &mut f);
+        core.set_counter(
+            if del > 0 || core.len() != len {
+                before.wrapping_add(1)
+            } else {
+                before
+            },
+        );
+        proof {
+            let ds = delta_runs_kept(runs@);
+            lemma_run_items(runs@);
+            lemma_delta_runs_dom::<T>(runs@);
+            let k1 = rvals::<DE<T, C>, DX<T, C>, <T as DKind<C>>::B>(core@);
+            assert(k1 == k0.take(at as int) + ds + k0.skip(at + del));
+            assert(vals::<T>(k1) =~= vals::<T>(k0).take(at as int) + vals::<T>(ds) + vals::<T>(k0).skip(at + del));
         }
         *self = VerifiedDeltaColumn { core };
     }
@@ -1798,10 +2369,165 @@ impl<T: VDeltaValue<C>, C: VCodec> VerifiedDeltaColumn<T, C> {
         ensures
             r matches Ok(c) ==> Self::valid(bytes@) && c@ == Self::values(bytes@),
     {
+        Self::load_in(bytes, MAX_SEG, None)
+    }
+
+    /// [`load`](Self::load) with options ([`LoadOpts`]): how many
+    /// values the column is to have, what to fill it with, and how many
+    /// runs a slab may hold.
+    ///
+    /// The fill of a delta column is a difference
+    /// ([`VDelta::Fill`]: an `i64`, and an `Option` of one for a type
+    /// with a null), as it is for
+    /// [`DeltaColumn::load_with`](crate::DeltaColumn::load_with). With
+    /// a length and a fill, empty `bytes` load as the run of that many
+    /// values after 0, each the fill more than the one before it (for
+    /// the fill `d` the values `d`, `2d`, `3d`, …; for no number, that
+    /// many nulls: `delta_run_values`), if a column can be that long
+    /// (`fill_of`). If it cannot, or with no fill, `bytes` load as what
+    /// they are; and a column of another length than the one asked for
+    /// is an error, as empty `bytes` are for every length but 0.
+    ///
+    /// What is not said: that the load succeeds. A fill is an error
+    /// where its values are not all the type's, or as integers leave
+    /// `i64`; and of `bytes` the same is said as [`load`](Self::load)
+    /// says.
+    pub fn load_with<F: MaybeFill<T::Fill>>(bytes: &[u8], opts: LoadOpts<F>) -> (r: Result<Self, PackError>)
+        requires
+            opts.max_segments() >= 2,
+        ensures
+            match fill_of(bytes@, opts.length(), opts.fill().value()) {
+                Some((len, d)) => r matches Ok(c) ==> c@ == delta_run_values::<T>(
+                    DeltaRun { prefix: 0, delta: T::fill_delta(d), count: len },
+                ),
+                None => r matches Ok(c) ==> {
+                    &&& Self::valid(bytes@)
+                    &&& c@ == Self::values(bytes@)
+                    &&& opts.length() matches Some(len) ==> c@.len() == len
+                },
+            },
+    {
+        let (length, fill, max_segments) = opts.parts();
+        if bytes.len() == 0 {
+            if let Some(len) = length {
+                if len as u64 <= i64::MAX as u64 && len <= usize::MAX - 3 {
+                    if let Some(d) = fill.fill_value() {
+                        return Self::filled(len, d, max_segments);
+                    }
+                }
+            }
+        }
+        Self::load_in(bytes, max_segments, length)
+    }
+
+    /// The column a load fills: `len` values after 0, each `fill` more
+    /// than the one before it, or `len` nulls. Built as
+    /// [`DeltaColumn`](crate::DeltaColumn) builds it: one slab of the
+    /// fill, weighed and checked as a loaded slab is.
+    fn filled(len: usize, fill: T::Fill, max_segments: usize) -> (r: Result<Self, PackError>)
+        requires
+            len <= i64::MAX,
+            len <= usize::MAX - 3,
+            max_segments >= 2,
+        ensures
+            r matches Ok(c) ==> c@ == delta_run_values::<T>(
+                DeltaRun { prefix: 0, delta: T::fill_delta(fill), count: len },
+            ),
+    {
+        let ghost run = DeltaRun { prefix: 0, delta: T::fill_delta(fill), count: len };
+        if len == 0 {
+            let r = Self::with_max_segments(max_segments);
+            proof {
+                assert(r@ =~= delta_run_values::<T>(run));
+            }
+            return Ok(r);
+        }
+        let it = T::fill_item(fill);
+        let slab = <DE<T, C> as Model<DX<T, C>>>::fill(len, it);
+        let w = match weigh_run::<_, SlabAgg, DeltaModel<DX<T, C>, <T as DKind<C>>::B>>(len, it) {
+            Ok(w) => w,
+            Err(e) => {
+                return Err(e);
+            },
+        };
+        let ghost s = slab;
+        let mut slabs = Vec::with_capacity(1);
+        slabs.push(slab);
+        let mut ws = Vec::with_capacity(1);
+        ws.push(w);
+        proof {
+            assert(slabs@ =~= seq![s]);
+            assert(ws@ =~= seq![w]);
+            // the slab's values are the fill, and its deltas the fill's
+            <DE<T, C> as ReadsAgree<'static, DX<T, C>>>::lemma_reads(s);
+            let xs = <DX<T, C> as Decoders<'static>>::vals(s);
+            let dl = T::fill_delta(fill);
+            <<T as DKind<C>>::B as DeltaWrite<'static, DE<T, C>, DX<T, C>>>::axiom_own(it);
+            assert forall|i: int| 0 <= i < xs.len() implies <<T as DKind<C>>::B as DeltaOps<DItem<T, C>>>::dv(
+                #[trigger] xs[i],
+            ) == dl by {
+                <<T as DKind<C>>::B as DeltaWrite<'static, DE<T, C>, DX<T, C>>>::axiom_own(xs[i]);
+                assert(<DE<T, C> as Slabs>::vals(s)[i] == <DE<T, C> as ReadsAgree<'static, DX<T, C>>>::own(xs[i]));
+                assert(<DE<T, C> as Slabs>::vals(s)[i] == <DE<T, C> as ReadsAgree<'static, DX<T, C>>>::own(it));
+            }
+            assert(deltas_of::<_, <T as DKind<C>>::B>(xs) =~= reps(len as nat, dl));
+            assert(deltas_of::<_, <T as DKind<C>>::B>(Seq::new(len as nat, |_i: int| it)) =~= reps(len as nat, dl));
+            lemma_sum_one(slab_lens(slabs@), 0);
+        }
+        match <DeltaModel<DX<T, C>, <T as DKind<C>>::B> as LoadWeigh<'static, DE<T, C>, DX<T, C>, SlabAgg>>::load_check(
+            ws.as_slice(),
+            slabs.as_slice(),
+            len,
+            T::lo(),
+            T::hi(),
+        ) {
+            Ok(()) => {},
+            Err(e) => {
+                return Err(e);
+            },
+        }
+        let core = DCore::<T, C>::from_cut(slabs, max_segments);
+        proof {
+            // what the column keeps is the run realized, and the check's
+            // bound is on it
+            let dl = T::fill_delta(fill);
+            lemma_dslabs_own::<DE<T, C>, DX<T, C>, <T as DKind<C>>::B>(seq![s]);
+            lemma_dslabs_unit::<DX<T, C>, <T as DKind<C>>::B>(s);
+            let k = rvals::<DE<T, C>, DX<T, C>, <T as DKind<C>>::B>(core@);
+            assert(k == rz(0, reps(len as nat, dl)));
+            match dl {
+                Some(d) => {
+                    lemma_rz_run(0, d, len as nat);
+                },
+                None => {
+                    lemma_rz_nulls(0, len as nat);
+                },
+            }
+            assert(k =~= delta_run_kept(run));
+            assert(in_bound(k, T::least() as int, T::most() as int));
+            assert forall|i: int| 0 <= i < k.len() implies in_dom::<T>(#[trigger] k[i]) by {
+                T::lemma_kind(core@[i], core@[i]);
+            }
+        }
+        Ok(VerifiedDeltaColumn { core })
+    }
+
+    /// [`load`](Self::load), in slabs of at most `max_segments` runs,
+    /// and of a column of `expected` values where a number is given.
+    fn load_in(bytes: &[u8], max_segments: usize, expected: Option<usize>) -> (r: Result<Self, PackError>)
+        requires
+            max_segments >= 2,
+        ensures
+            r matches Ok(c) ==> {
+                &&& Self::valid(bytes@)
+                &&& c@ == Self::values(bytes@)
+                &&& expected matches Some(len) ==> c@.len() == len
+            },
+    {
         match <DE<T, C> as Model<DX<T, C>>>::load::<SlabAgg, DeltaModel<DX<T, C>, <T as DKind<C>>::B>>(
             bytes,
-            MAX_SEG,
-            None,
+            max_segments,
+            expected,
             T::lo(),
             T::hi(),
         ) {
@@ -1819,6 +2545,7 @@ impl<T: VDeltaValue<C>, C: VCodec> VerifiedDeltaColumn<T, C> {
                         // and a null is kept only by a kind that has them
                         T::lemma_kind(core@[i], core@[i]);
                     }
+                    assert(vals::<T>(k).len() == core@.len());
                 }
                 Ok(VerifiedDeltaColumn { core })
             },

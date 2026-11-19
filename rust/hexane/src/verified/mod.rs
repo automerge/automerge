@@ -558,7 +558,11 @@ pub use decoder::{
     head_len, head_run_max, lemma_head_len, lemma_head_run_max, scan_of, scan_taken,
 };
 #[cfg(verus_keep_ghost)]
-pub use delta::{all_dom, all_fit, dom, dvs, in_dom, vals};
+pub use delta::{
+    all_dom, all_fit, delta_run_fits, delta_run_in_range, delta_run_kept, delta_run_values,
+    delta_runs_fit, delta_runs_kept, delta_runs_values, dom, dvs, in_dom, lemma_delta_run_exact,
+    lemma_delta_run_fits, lemma_delta_runs_one, lemma_delta_runs_push, vals,
+};
 pub use delta::{VDelta, VDeltaNum, VDeltaValue, VerifiedDeltaColumn};
 pub use encoder::{VerifiedEncoder, VerifiedEncoderState};
 pub use kind::{LenIndex, VIndex, VKeeps};

@@ -2514,3 +2514,89 @@ fn delta_saved_and_loaded() {
         vec![5, 6, 7, -9, -9, 40]
     );
 }
+
+#[test]
+fn delta_runs_and_fills() {
+    use hexane::DeltaRun;
+    let mut col: VerifiedDeltaColumn<u32> = verus_client::delta_built(&[1, 2]);
+    verus_client::delta_run_of_three(&mut col);
+    assert_eq!(verus_client::delta_values(&col), vec![1, 2, 12, 14, 16]);
+    let mut col: VerifiedDeltaColumn<i32> = verus_client::delta_built(&[7]);
+    verus_client::delta_run_falls(&mut col);
+    assert_eq!(verus_client::delta_values(&col), vec![-5, -10, 7]);
+
+    // a run of `u32`s that falls below 0 is refused, and one that stops
+    // short of it is taken
+    let mut col: VerifiedDeltaColumn<u32> = verus_client::delta_built(&[1, 2]);
+    let low = DeltaRun {
+        prefix: 5,
+        delta: Some(-3),
+        count: 2,
+    };
+    assert!(!verus_client::delta_run_checked(&mut col, 1, low));
+    let run = DeltaRun {
+        prefix: 5,
+        delta: Some(-2),
+        count: 2,
+    };
+    assert!(verus_client::delta_run_checked(&mut col, 1, run));
+    assert_eq!(verus_client::delta_values(&col), vec![1, 3, 1, 2]);
+
+    let mut col: VerifiedDeltaColumn<Option<u64>> =
+        verus_client::delta_built(&[Some(1), None, Some(9)]);
+    let a = DeltaRun {
+        prefix: 100,
+        delta: Some(0),
+        count: 2,
+    };
+    let b = DeltaRun {
+        prefix: 0,
+        delta: None,
+        count: 1,
+    };
+    verus_client::delta_two_runs(&mut col, 1, 1, a, b);
+    let values = vec![Some(1), Some(100), Some(100), None, Some(9)];
+    assert_eq!(verus_client::delta_values(&col), values);
+    verus_client::delta_no_runs(&mut col, 2, -7, Some(3));
+    assert_eq!(verus_client::delta_values(&col), values);
+
+    let mut col: VerifiedDeltaColumn<Option<i64>> = verus_client::delta_built(&[Some(4)]);
+    verus_client::delta_null_run(&mut col, 99);
+    assert_eq!(verus_client::delta_values(&col), vec![None, None, Some(4)]);
+    let mut col: VerifiedDeltaColumn<i64> = verus_client::delta_built(&[-5]);
+    let over = DeltaRun {
+        prefix: i64::MAX,
+        delta: Some(1),
+        count: 1,
+    };
+    assert!(verus_client::delta_run_wraps(&mut col, over));
+    assert_eq!(verus_client::delta_values(&col), vec![-5, i64::MIN]);
+    let nulls = DeltaRun {
+        prefix: 0,
+        delta: None,
+        count: 3,
+    };
+    assert!(!verus_client::delta_run_wraps(&mut col, nulls));
+    assert_eq!(verus_client::delta_values(&col), vec![-5, i64::MIN]);
+
+    let filled = verus_client::delta_load_a_fill::<Leb128>().unwrap();
+    assert_eq!(verus_client::delta_values(&filled), vec![2, 4, 6]);
+    let nulls = verus_client::delta_load_null_fill().unwrap();
+    assert_eq!(verus_client::delta_values(&nulls), vec![None, None, None]);
+    let bytes = verus_client::delta_saved(&filled);
+    let (a, b) = verus_client::delta_load_with_length::<u64, Leb128>(&bytes, 3, 9);
+    assert_eq!(verus_client::delta_values(&a.unwrap()), vec![2, 4, 6]);
+    assert_eq!(verus_client::delta_values(&b.unwrap()), vec![2, 4, 6]);
+    let (a, b) = verus_client::delta_load_with_length::<u64, Leb128>(&bytes, 4, 9);
+    assert!(a.is_none() && b.is_none());
+    let (a, b) = verus_client::delta_load_with_length::<u64, Leb128>(&[], 4, 9);
+    assert!(a.is_none());
+    assert_eq!(verus_client::delta_values(&b.unwrap()), vec![9, 18, 27, 36]);
+    let back = verus_client::delta_load_with_defaults::<u64, Leb128>(&bytes, 2).unwrap();
+    assert_eq!(verus_client::delta_values(&back), vec![2, 4, 6]);
+    let (a, b) = verus_client::delta_fill_is_a_run(5, 3).unwrap();
+    assert_eq!(verus_client::delta_values(&a), vec![3, 6, 9, 12, 15]);
+    assert_eq!(verus_client::delta_values(&b), vec![3, 6, 9, 12, 15]);
+    // a fill that falls is no column of `u64`
+    assert!(verus_client::delta_fill_is_a_run(5, -3).is_none());
+}
