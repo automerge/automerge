@@ -283,6 +283,8 @@ pub mod marks;
 pub mod op_set2;
 pub mod patches;
 mod read;
+#[cfg(any(test, feature = "seek-counters"))]
+pub mod seek_counters;
 mod sequence_tree;
 mod staging;
 mod storage;

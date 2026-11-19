@@ -15,6 +15,9 @@ utf16-indexing = []
 # Whether to enable "slow path" assertions which check that various invariants hold
 # should only be enabled when running tests
 slow_path_assertions = ["hexane/slow_path_assertions"]
+# Count how often reads seek the op columns to an object (see the
+# `seek_counters` module); for tests and measurement only
+seek-counters = []
 
 [dependencies]
 cfg-if = "1.0"
