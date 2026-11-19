@@ -4,6 +4,7 @@ pub mod build;
 pub mod diff;
 pub mod edit_trace;
 pub mod egwalker_paper;
+pub mod from;
 pub mod length;
 pub mod list;
 pub mod load_save;
@@ -261,6 +262,7 @@ pub fn benchmarks() -> Vec<Benchmark> {
     benchmarks.extend(build::benchmarks().into_iter().map(Into::into));
     benchmarks.extend(diff::benchmarks().into_iter().map(Into::into));
     benchmarks.extend(edit_trace::benchmarks().into_iter().map(Into::into));
+    benchmarks.extend(from::benchmarks());
     benchmarks.extend(egwalker_paper::benchmarks().into_iter().map(Into::into));
     benchmarks.extend(length::benchmarks().into_iter().map(Into::into));
     benchmarks.extend(list::benchmarks().into_iter().map(Into::into));
