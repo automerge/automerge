@@ -189,7 +189,12 @@ impl AutoCommit {
         self.doc.has_unpublished_changes()
     }
 
-    /// Return a copy of this document with its data anonymized.
+    /// Return a copy of this document with its data anonymized, committing
+    /// pending edits first.
+    ///
+    /// The copy is always a new unsigned diagnostic document with rewritten
+    /// hashes and no proofs, drafts or publication state; see
+    /// [`Automerge::anonymize`].
     pub fn anonymize(&mut self) -> Result<Self, AnonymizeError> {
         self.ensure_transaction_closed();
         Ok(Self {
@@ -466,16 +471,32 @@ impl AutoCommit {
         &self.doc
     }
 
+    /// Set the actor id, committing pending edits first. See
+    /// [`Automerge::set_actor`] for the required-mode panic condition.
     pub fn with_actor(mut self, actor: ActorId) -> Self {
-        self.ensure_transaction_closed();
-        self.doc.set_actor(actor);
+        self.set_actor(actor);
         self
     }
 
+    /// Set the actor id, committing pending edits first.
+    ///
+    /// # Panics
+    ///
+    /// Panics in required signing mode if `actor` is bound to another author;
+    /// see [`Automerge::set_actor`]. Use [`Self::try_set_actor`] to check.
     pub fn set_actor(&mut self, actor: ActorId) -> &mut Self {
+        self.try_set_actor(actor)
+            .expect("actor must not be bound to another author in signing mode")
+    }
+
+    /// Set the actor id, checking the fixed-author binding before the open
+    /// transaction is closed so a rejected request leaves pending edits
+    /// pending. See [`Automerge::try_set_actor`].
+    pub fn try_set_actor(&mut self, actor: ActorId) -> Result<&mut Self, AutomergeError> {
+        self.check_actor_binding(&actor)?;
         self.ensure_transaction_closed();
-        self.doc.set_actor(actor);
-        self
+        self.doc.try_set_actor(actor)?;
+        Ok(self)
     }
 
     pub fn get_actor(&self) -> &ActorId {
@@ -484,6 +505,13 @@ impl AutoCommit {
 
     pub fn get_actors_for_author(&self, author: &Author<'_>) -> Vec<ActorId> {
         self.doc.get_actors_for_author(author)
+    }
+
+    /// Read-only check that `actor` may be used by this document's fixed
+    /// author; see [`Automerge::check_actor_binding`]. Does not close the
+    /// open transaction.
+    pub fn check_actor_binding(&self, actor: &ActorId) -> Result<(), AutomergeError> {
+        self.doc.check_actor_binding(actor)
     }
 
     pub fn get_author_for_actor(&self, actor: &ActorId) -> Option<Author<'_>> {

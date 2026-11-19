@@ -398,6 +398,14 @@ impl Automerge {
 
     /// Return a copy of this document with its data anonymized using a fresh random seed.
     ///
+    /// The result is a diagnostic transformation, not a mode conversion: it is
+    /// always a new **unsigned** document with rewritten change hashes and no
+    /// authors, signatures, publication state or local drafts, regardless of
+    /// whether `self` is in required signing mode. It therefore carries no
+    /// signature or publication guarantee and cannot be merged or loaded into
+    /// a required-mode document. `self` is left unchanged, including any
+    /// unpublished drafts and pending incoming groups.
+    ///
     // Anonymization replaces actor IDs, map keys, mark names, scalar values, change metadata, and
     // extra bytes. It retains the change graph, operation and object types, sequence positions,
     // scalar string and byte-value lengths, and the UTF-8/UTF-16 width of each character. The
@@ -530,18 +538,84 @@ impl Automerge {
     }
 
     /// Set the actor id for this document.
+    ///
+    /// # Panics
+    ///
+    /// Like [`Self::set_actor`], panics if a required-mode document is given an
+    /// actor already bound to a different author.
     pub fn with_actor(mut self, actor: ActorId) -> Self {
         self.set_actor(actor);
         self
     }
 
     /// Set the actor id for this document.
+    ///
+    /// Unsigned documents accept any actor. In required signing mode the
+    /// local author is fixed, so an actor whose history was recorded under a
+    /// different author cannot be reused; use [`Self::try_set_actor`] to
+    /// handle that case without panicking.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the document is in required signing mode and `actor` is
+    /// bound to another author ([`SigningError::ActorBoundToOtherAuthor`]).
+    ///
+    /// [`SigningError::ActorBoundToOtherAuthor`]: crate::signature::error::SigningError::ActorBoundToOtherAuthor
     pub fn set_actor(&mut self, actor: ActorId) -> &mut Self {
+        self.try_set_actor(actor)
+            .expect("actor must not be bound to another author in signing mode")
+    }
+
+    /// Set the actor id for this document, checking the fixed-author binding.
+    ///
+    /// # Errors
+    ///
+    /// In required signing mode, returns
+    /// [`SigningError::ActorBoundToOtherAuthor`] when `actor` already has
+    /// history recorded under a different author; the current actor is left
+    /// unchanged. Unsigned documents never fail.
+    ///
+    /// [`SigningError::ActorBoundToOtherAuthor`]: crate::signature::error::SigningError::ActorBoundToOtherAuthor
+    pub fn try_set_actor(&mut self, actor: ActorId) -> Result<&mut Self, AutomergeError> {
         match self.ops.lookup_actor(&actor) {
-            Some(idx) => self.actor = Actor::Cached(idx),
+            Some(idx) => {
+                self.check_actor_author(idx)?;
+                self.actor = Actor::Cached(idx);
+            }
             None => self.actor = Actor::Unused(actor),
         }
-        self
+        Ok(self)
+    }
+
+    /// [`Self::try_set_actor`]'s check without assignment, for callers that
+    /// must decide before other side effects (for example before a fork
+    /// commits pending edits). Read-only; unsigned documents always pass.
+    pub fn check_actor_binding(&self, actor: &ActorId) -> Result<(), AutomergeError> {
+        match self.ops.lookup_actor(actor) {
+            Some(index) => self.check_actor_author(index),
+            None => Ok(()),
+        }
+    }
+
+    /// In required mode, fail if the actor at `index` is recorded under an
+    /// author other than the fixed local author.
+    ///
+    /// An actor with no recorded author (no history yet, or an authorless
+    /// import) is not bound and passes.
+    fn check_actor_author(&self, index: usize) -> Result<(), AutomergeError> {
+        self.signing.with_required(|| {
+            let bound = self.authors.get_author_for_actor(index);
+            let local = self.author.as_ref().map(Author::as_bytes);
+            if bound.is_some() && bound.as_ref().map(Author::as_bytes) != local {
+                return Err(
+                    crate::signature::error::SigningError::ActorBoundToOtherAuthor {
+                        actor: self.ops.actors[index].clone(),
+                    },
+                );
+            }
+            Ok(())
+        })?;
+        Ok(())
     }
 
     /// Set the write-frontier for this document.
@@ -895,6 +969,12 @@ impl Automerge {
                 scope = None;
             }
         }
+
+        // A previously configured actor may have been bound to another author
+        // by an import since it was chosen; a local change must never
+        // continue that author's chain. Checked before any mutation below.
+        self.check_actor_author(actor_index)
+            .expect("local actor must not be bound to another author in signing mode");
 
         if seq > 1 {
             let last_hash = self.get_hash(actor_index, seq - 1).unwrap();

@@ -541,7 +541,7 @@ impl Automerge {
         if let Some(a) = actor {
             let a =
                 automerge::ActorId::from(hex::decode(a).map_err(error::BadActorId::from)?.to_vec());
-            doc.set_actor(a);
+            doc.try_set_actor(a)?;
         }
         Ok(Automerge {
             doc,
@@ -577,15 +577,20 @@ impl Automerge {
     }
 
     #[allow(clippy::should_implement_trait)]
-    pub fn clone(&mut self, actor: Option<String>) -> Result<Automerge, error::BadActorId> {
+    pub fn clone(&mut self, actor: Option<String>) -> Result<Automerge, error::Fork> {
+        // Parse and check the actor before cloning: in signing mode an actor
+        // bound to another author is rejected without touching the source.
+        let actor = actor
+            .map(|s| hex::decode(s).map(automerge::ActorId::from))
+            .transpose()
+            .map_err(error::BadActorId::from)?;
         let mut automerge = Automerge {
             doc: self.doc.clone(),
             freeze: self.freeze,
             external_types: self.external_types.clone(),
         };
-        if let Some(s) = actor {
-            let actor = automerge::ActorId::from(hex::decode(s)?.to_vec());
-            automerge.doc.set_actor(actor);
+        if let Some(actor) = actor {
+            automerge.doc.try_set_actor(actor)?;
         }
         Ok(automerge)
     }
@@ -598,6 +603,15 @@ impl Automerge {
         actor: Option<String>,
         heads: JsValue,
     ) -> Result<Automerge, error::Fork> {
+        let actor = actor
+            .map(|s| hex::decode(s).map(automerge::ActorId::from))
+            .transpose()
+            .map_err(error::BadActorId::from)?;
+        if let Some(actor) = &actor {
+            // The fork shares the source's author bindings, so decide before
+            // the source's pending transaction is committed by the fork.
+            self.doc.check_actor_binding(actor)?;
+        }
         let heads: Result<Vec<am::ChangeHash>, _> = JS(heads).try_into();
         let doc = if let Ok(heads) = heads {
             self.doc.fork_at(&heads)?
@@ -609,10 +623,8 @@ impl Automerge {
             freeze: self.freeze,
             external_types: self.external_types.clone(),
         };
-        if let Some(s) = actor {
-            let actor =
-                automerge::ActorId::from(hex::decode(s).map_err(error::BadActorId::from)?.to_vec());
-            automerge.doc.set_actor(actor);
+        if let Some(actor) = actor {
+            automerge.doc.try_set_actor(actor)?;
         }
         Ok(automerge)
     }
@@ -634,13 +646,16 @@ impl Automerge {
             .map(|s| hex::decode(s).map(automerge::ActorId::from))
             .transpose()
             .map_err(error::BadActorId::from)?;
+        // The actor check runs on the fork: a different author with pending
+        // edits is already rejected before closure, and a same-author fork
+        // may reuse its own actors, so no source transaction is lost here.
         let mut automerge = Automerge {
             doc: self.doc.fork_with_author(author)?,
             freeze: self.freeze,
             external_types: self.external_types.clone(),
         };
         if let Some(actor) = actor {
-            automerge.doc.set_actor(actor);
+            automerge.doc.try_set_actor(actor)?;
         }
         Ok(automerge)
     }
@@ -2150,7 +2165,7 @@ pub fn load(data: Uint8Array, options: JsValue) -> Result<Automerge, error::Load
     if let Some(s) = actor {
         let actor =
             automerge::ActorId::from(hex::decode(s).map_err(error::BadActorId::from)?.to_vec());
-        doc.set_actor(actor);
+        doc.try_set_actor(actor)?;
     }
     Ok(Automerge {
         doc,
@@ -2663,6 +2678,9 @@ pub mod error {
         BadActor(#[from] BadActorId),
         #[error(transparent)]
         SigningAuthor(#[from] SigningAuthor),
+        /// The configured actor is bound to another author in signing mode.
+        #[error(transparent)]
+        Actor(#[from] AutomergeError),
     }
 
     impl From<automerge::SigningAuthorError> for Create {

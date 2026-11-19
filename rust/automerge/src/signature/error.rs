@@ -75,6 +75,12 @@ pub enum SigningError {
     RescueNotSupported,
     #[error("local changes are still unpublished; publish or keep the current author before forking with a different author")]
     UnpublishedLocalChanges,
+    /// The requested local actor already has history recorded under another
+    /// author, so the fixed local author cannot continue its chain.
+    #[error(
+        "actor {actor} belongs to a different author than this signing document's fixed author"
+    )]
+    ActorBoundToOtherAuthor { actor: crate::ActorId },
     #[error("incoming group is not a canonical fragment: {0}")]
     InvalidFragment(#[from] InvalidFragment),
     #[error("incoming group has an invalid or incomplete proof: {0}")]

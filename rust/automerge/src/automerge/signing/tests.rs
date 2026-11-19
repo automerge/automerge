@@ -11,6 +11,7 @@ use crate::{
 
 use super::error;
 
+mod actor_binding;
 mod author_invariant;
 mod batch;
 mod fork;
