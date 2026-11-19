@@ -393,28 +393,31 @@
 
 use super::{
     accumulated, after_edit, after_edits, all_fit, below_at, bytes_below, delta_at, delta_finds,
-    delta_prefix, delta_run_fits, delta_run_in_range, delta_run_kept, delta_run_values,
-    delta_runs_at, delta_runs_fit, delta_runs_kept, delta_runs_values, delta_within, deltas,
-    folded, head_len, head_run, head_run_max, lemma_acc_cat, lemma_acc_range, lemma_acc_run,
-    lemma_after_edits, lemma_cancel, lemma_delta_finds, lemma_delta_finds_first,
-    lemma_delta_run_at, lemma_delta_run_exact, lemma_delta_run_fits, lemma_delta_runs_at,
-    lemma_delta_runs_one, lemma_delta_runs_push, lemma_delta_within_one, lemma_head_len,
-    lemma_head_run_max, lemma_run_values_add, lemma_run_values_push, lemma_runs_first,
-    lemma_runs_of_values, lemma_sorted, lemma_sum_bound, lemma_sum_mono, lemma_sum_range,
-    lemma_sum_run, lemma_sums_fit, mapped, only, past, refused, run_values, runs_of, scan_of,
-    scan_taken, sorted, sorted_for, sum_of, summed, sums_fit, times, total_len, total_str_len,
-    window, AccIndex, Get, LenIndex, SumIndex, VAccum, VAccumulated, VAdds, VAmount, VCodec,
-    VCount, VDelta, VDeltaValue, VGet, VGroup, VIndex, VKeeps, VNewtype, VSpec, VSum, VSummed,
-    VValue, VerifiedAccColumn, VerifiedAccIter, VerifiedAccIterState, VerifiedAccSeek,
-    VerifiedAccValue, VerifiedColumn, VerifiedDecoder, VerifiedDeltaColumn, VerifiedDeltaIter,
-    VerifiedDeltaIterState, VerifiedDeltaRuns, VerifiedEncoder, VerifiedEncoderState,
-    VerifiedFindByRange, VerifiedIter, VerifiedIterState, VerifiedPrefixColumn, VerifiedPrefixIter,
-    VerifiedPrefixIterState, VerifiedPrefixSeek, VerifiedPrefixedValue, VerifiedRuns,
+    delta_iter_fits, delta_near, delta_prefix, delta_run_fits, delta_run_in_range, delta_run_kept,
+    delta_run_values, delta_runs_at, delta_runs_fit, delta_runs_kept, delta_runs_values,
+    delta_span_ok, delta_within, deltas, folded, head_len, head_run, head_run_max, lemma_acc_cat,
+    lemma_acc_range, lemma_acc_run, lemma_after_edits, lemma_cancel, lemma_delta_finds,
+    lemma_delta_finds_first, lemma_delta_run_at, lemma_delta_run_exact, lemma_delta_run_fits,
+    lemma_delta_runs_at, lemma_delta_runs_one, lemma_delta_runs_push, lemma_delta_within_one,
+    lemma_head_len, lemma_head_run_max, lemma_run_values_add, lemma_run_values_push,
+    lemma_runs_first, lemma_runs_of_values, lemma_sorted, lemma_sum_bound, lemma_sum_mono,
+    lemma_sum_range, lemma_sum_run, lemma_sums_fit, mapped, only, past, refused, run_values,
+    runs_of, scan_of, scan_taken, sorted, sorted_for, sum_of, summed, sums_fit, times, total_len,
+    total_str_len, window, AccIndex, Get, LenIndex, SumIndex, VAccum, VAccumulated, VAdds, VAmount,
+    VCodec, VCount, VDelta, VDeltaValue, VGet, VGroup, VIndex, VKeeps, VNewtype, VSpec, VSum,
+    VSummed, VValue, VerifiedAccColumn, VerifiedAccIter, VerifiedAccIterState, VerifiedAccSeek,
+    VerifiedAccValue, VerifiedColumn, VerifiedDecoder, VerifiedDeltaColumn, VerifiedDeltaEncoder,
+    VerifiedDeltaEncoderState, VerifiedDeltaIter, VerifiedDeltaIterState, VerifiedDeltaRuns,
+    VerifiedEncoder, VerifiedEncoderState, VerifiedFindByRange, VerifiedIter, VerifiedIterState,
+    VerifiedPrefixColumn, VerifiedPrefixIter, VerifiedPrefixIterState, VerifiedPrefixSeek,
+    VerifiedPrefixedValue, VerifiedRuns,
 };
 use crate::{DeltaRun, Leb128, LoadOpts, PackError, Run};
 use std::cmp::Ordering;
 use std::ops::{Bound, Range, RangeBounds};
 use vstd::prelude::*;
+#[cfg(verus_keep_ghost)]
+use vstd::std_specs::iter::IteratorSpec;
 #[cfg(verus_keep_ghost)]
 use vstd::std_specs::range::RangeBoundsSpec;
 #[cfg(verus_keep_ghost)]
@@ -13555,6 +13558,773 @@ fn delta_told_by_find_default<T: VDeltaValue<C>, C: VCodec>() -> (r: VerifiedFin
         r.finds() == Seq::<usize>::empty(),
 {
     VerifiedFindByRange::default()
+}
+
+
+// ── Delta columns: the encoder ──────────────────────────────────────────────
+
+/// What `new` and `default` say of the delta encoder they give: it is
+/// one to use (`wf`), and was given nothing.
+#[allow(dead_code)]
+fn delta_told_by_a_new_encoder<'a, T: VDeltaValue<C>, C: VCodec>() -> (r: (
+    VerifiedDeltaEncoder<'a, T, C>,
+    VerifiedDeltaEncoder<'a, T, C>,
+))
+    ensures
+        r.0.wf(),
+        r.1.wf(),
+        r.0@.len() == 0,
+        r.1@.len() == 0,
+{
+    let a = VerifiedDeltaEncoder::<T, C>::new();
+    let b = VerifiedDeltaEncoder::<T, C>::default();
+    (a, b)
+}
+
+/// What a delta encoder's `len` and `is_empty` say: the number of
+/// values it was given.
+#[allow(dead_code)]
+fn delta_told_by_an_encoders_count<'a, T: VDeltaValue<C>, C: VCodec>(enc: &VerifiedDeltaEncoder<'a, T, C>) -> (r: (
+    usize,
+    bool,
+))
+    requires
+        enc.wf(),
+    ensures
+        r.0 == enc@.len(),
+        r.1 == (enc@.len() == 0),
+{
+    (enc.len(), enc.is_empty())
+}
+
+/// What `append`, `append_owned` and `append_n` say: the values, after
+/// those the encoder had, which is still one to use. Each value given
+/// must be one a delta column holds (`fits`).
+#[allow(dead_code)]
+fn delta_told_by_an_encoders_appends<'a, T: VDeltaValue<C>, C: VCodec>(
+    enc: &mut VerifiedDeltaEncoder<'a, T, C>,
+    v: T,
+    w: T,
+    n: usize,
+)
+    requires
+        old(enc).wf(),
+        v.fits(),
+        w.fits(),
+    ensures
+        final(enc).wf(),
+        final(enc)@.len() == old(enc)@.len() + 2 + n,
+        final(enc)@.take(old(enc)@.len() as int) == old(enc)@,
+        final(enc)@[old(enc)@.len() as int] == v,
+        final(enc)@[old(enc)@.len() as int + 1] == w,
+        forall|i: int| old(enc)@.len() + 2 <= i < final(enc)@.len() ==> final(enc)@[i] == v,
+{
+    enc.append(v);
+    enc.append_owned(w);
+    enc.append_n(v, n);
+    assert(enc@.take(old(enc)@.len() as int) =~= old(enc)@);
+}
+
+/// What a delta encoder's `extend` says of a vector handed over, whose
+/// values fit: its values, after those the encoder had.
+#[allow(dead_code)]
+fn delta_told_by_an_encoders_extend<'a, T: VDeltaValue<C>, C: VCodec>(
+    enc: &mut VerifiedDeltaEncoder<'a, T, C>,
+    vs: Vec<T>,
+)
+    requires
+        old(enc).wf(),
+        all_fit(vs@),
+    ensures
+        final(enc).wf(),
+        final(enc)@ == old(enc)@ + vs@,
+{
+    enc.extend(vs);
+}
+
+/// What `extend` asks of any iterator, and says of it: that its values
+/// are known to fit (`delta_iter_fits`), and, of one that keeps the
+/// laws Verus has for an iterator, that what it had to give was given.
+#[allow(dead_code)]
+fn delta_told_by_an_extend_of_any<'a, T: VDeltaValue<C>, C: VCodec, I: Iterator<Item = T>>(
+    enc: &mut VerifiedDeltaEncoder<'a, T, C>,
+    iter: I,
+)
+    requires
+        old(enc).wf(),
+        delta_iter_fits(iter),
+    ensures
+        final(enc).wf(),
+        iter.obeys_prophetic_iter_laws() ==> final(enc)@ == old(enc)@ + iter.remaining(),
+{
+    enc.extend(iter);
+}
+
+/// What a delta encoder's `save` says: the bytes are a saved delta
+/// column, of the values given, and the one encoding of them; and no
+/// two numbers given are 2^63 or more apart, the encoder panicking for
+/// such.
+#[allow(dead_code)]
+fn delta_told_by_an_encoders_save<'a, T: VDeltaValue<C>, C: VCodec>(enc: VerifiedDeltaEncoder<'a, T, C>) -> (r: Vec<u8>)
+    requires
+        enc.wf(),
+    ensures
+        VerifiedDeltaColumn::<T, C>::valid(r@),
+        VerifiedDeltaColumn::<T, C>::values(r@) == enc@,
+        r@ == VerifiedDeltaColumn::<T, C>::encoding(enc@),
+        delta_span_ok(enc@),
+{
+    enc.save()
+}
+
+/// What a delta encoder's `save_to` says: the buffer is what it was and
+/// then the encoding of the values given, which is a saved delta column
+/// of them, and the range returned is where.
+#[allow(dead_code)]
+fn delta_told_by_an_encoders_save_to<'a, T: VDeltaValue<C>, C: VCodec>(
+    enc: VerifiedDeltaEncoder<'a, T, C>,
+    out: &mut Vec<u8>,
+) -> (r: Range<usize>)
+    requires
+        enc.wf(),
+    ensures
+        final(out)@ == old(out)@ + VerifiedDeltaColumn::<T, C>::encoding(enc@),
+        VerifiedDeltaColumn::<T, C>::valid(VerifiedDeltaColumn::<T, C>::encoding(enc@)),
+        VerifiedDeltaColumn::<T, C>::values(VerifiedDeltaColumn::<T, C>::encoding(enc@)) == enc@,
+        delta_span_ok(enc@),
+        r.start == old(out)@.len(),
+        r.end == final(out)@.len(),
+        final(out)@.subrange(r.start as int, r.end as int) == VerifiedDeltaColumn::<T, C>::encoding(enc@),
+{
+    let ghost d = VerifiedDeltaColumn::<T, C>::encoding(enc@);
+    let r = enc.save_to(out);
+    assert(out@.subrange(r.start as int, r.end as int) =~= d);
+    r
+}
+
+/// What a delta encoder's `save_to_unless` says: nothing is written
+/// where every value given is `v`, as where none was given; and what
+/// `save_to` writes is, where one is not. The value need not fit: none
+/// given is one that does not.
+#[allow(dead_code)]
+fn delta_told_by_an_encoders_save_to_unless<'a, T: VDeltaValue<C>, C: VCodec>(
+    enc: VerifiedDeltaEncoder<'a, T, C>,
+    out: &mut Vec<u8>,
+    v: T,
+) -> (r: Range<usize>)
+    requires
+        enc.wf(),
+    ensures
+        (forall|i: int| 0 <= i < enc@.len() ==> enc@[i] == v) ==> final(out)@ == old(out)@,
+        (exists|i: int| 0 <= i < enc@.len() && enc@[i] != v) ==> {
+            &&& final(out)@ == old(out)@ + VerifiedDeltaColumn::<T, C>::encoding(enc@)
+            &&& VerifiedDeltaColumn::<T, C>::valid(VerifiedDeltaColumn::<T, C>::encoding(enc@))
+            &&& VerifiedDeltaColumn::<T, C>::values(VerifiedDeltaColumn::<T, C>::encoding(enc@)) == enc@
+            &&& delta_span_ok(enc@)
+        },
+        r.start == old(out)@.len(),
+        r.end == final(out)@.len(),
+{
+    enc.save_to_unless(out, v)
+}
+
+/// What `lemma_fits` says of a delta encoder: every value given is one
+/// a delta column holds. So a value that is not is none of them, and
+/// `save_to_unless` of such a value writes what an encoder has, if it
+/// was given anything.
+#[allow(dead_code)]
+fn delta_unless_a_misfit<'a, T: VDeltaValue<C>, C: VCodec>(
+    enc: VerifiedDeltaEncoder<'a, T, C>,
+    out: &mut Vec<u8>,
+    v: T,
+) -> (r: Range<usize>)
+    requires
+        enc.wf(),
+        !v.fits(),
+        enc@.len() > 0,
+    ensures
+        all_fit(enc@),
+        final(out)@ == old(out)@ + VerifiedDeltaColumn::<T, C>::encoding(enc@),
+{
+    let ghost vs = enc@;
+    proof {
+        enc.lemma_fits();
+        assert(vs[0].fits());
+        assert(!only(vs, v));
+    }
+    enc.save_to_unless(out, v)
+}
+
+/// Values appended one by one are saved as a delta column of them: the
+/// bytes are a saved column, of those values, and the one encoding of
+/// them. The loop carries `enc.wf()`, and what the encoder has been
+/// given so far.
+#[allow(dead_code)]
+fn delta_encoded_as_saved<T: VDeltaValue<C>, C: VCodec>(input: &Vec<T>) -> (r: Vec<u8>)
+    requires
+        all_fit(input@),
+    ensures
+        VerifiedDeltaColumn::<T, C>::valid(r@),
+        VerifiedDeltaColumn::<T, C>::values(r@) == input@,
+        r@ == VerifiedDeltaColumn::<T, C>::encoding(input@),
+        delta_span_ok(input@),
+{
+    let mut enc = VerifiedDeltaEncoder::<T, C>::new();
+    let mut i: usize = 0;
+    proof {
+        assert(enc@ =~= input@.take(0));
+    }
+    while i < input.len()
+        invariant
+            enc.wf(),
+            i <= input@.len(),
+            all_fit(input@),
+            enc@ == input@.take(i as int),
+        decreases input@.len() - i,
+    {
+        enc.append(input[i]);
+        proof {
+            assert(enc@ =~= input@.take(i + 1));
+        }
+        i += 1;
+    }
+    proof {
+        assert(input@.take(i as int) =~= input@);
+    }
+    enc.save()
+}
+
+/// A delta encoder and a delta column save the same bytes for the same
+/// values.
+#[allow(dead_code)]
+fn delta_encoder_or_column<T: VDeltaValue<C>, C: VCodec>(input: &Vec<T>)
+    requires
+        all_fit(input@),
+{
+    let a = delta_encoded_as_saved::<T, C>(input);
+    let col = VerifiedDeltaColumn::<T, C>::from_values(input.as_slice());
+    let b = col.save();
+    assert(a@ == b@);
+}
+
+/// What a delta encoder saves, loaded: where it loads, it is a column
+/// of the values given. (Of a delta load it is proved that what it
+/// gives is right, not that it takes whatever was saved.)
+#[allow(dead_code)]
+fn delta_encode_then_load<T: VDeltaValue<C>, C: VCodec>(input: &Vec<T>) -> (r: Option<VerifiedDeltaColumn<T, C>>)
+    requires
+        all_fit(input@),
+    ensures
+        r matches Some(col) ==> col@ == input@,
+{
+    let bytes = delta_encoded_as_saved::<T, C>(input);
+    match VerifiedDeltaColumn::<T, C>::load(bytes.as_slice()) {
+        Ok(col) => Some(col),
+        Err(_) => None,
+    }
+}
+
+/// A delta column's values, given to an encoder by the column's
+/// iterator, are saved as the column saves them. What the iterator has
+/// to give fits, the column having held it (`lemma_fits`).
+#[allow(dead_code)]
+fn delta_reencoded<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>) -> (r: Vec<u8>)
+    ensures
+        r@ == VerifiedDeltaColumn::<T, C>::encoding(col@),
+{
+    let mut enc = VerifiedDeltaEncoder::<T, C>::new();
+    proof {
+        col.lemma_fits();
+    }
+    enc.extend(col.iter());
+    let bytes = col.save();
+    let r = enc.save();
+    assert(r@ == bytes@);
+    r
+}
+
+/// The same by a `for` loop over the column, each value appended as it
+/// comes.
+#[allow(dead_code)]
+fn delta_reencoded_in_a_loop<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>) -> (r: Vec<u8>)
+    ensures
+        r@ == VerifiedDeltaColumn::<T, C>::encoding(col@),
+{
+    let mut enc = VerifiedDeltaEncoder::<T, C>::new();
+    proof {
+        col.lemma_fits();
+        assert(enc@ =~= col@.take(0));
+    }
+    for x in at: col
+        invariant
+            at.seq() == col@,
+            all_fit(col@),
+            enc.wf(),
+            enc@ == col@.take(at.index()),
+    {
+        enc.append(x);
+        proof {
+            assert(col@.take(at.index() + 1) =~= col@.take(at.index()).push(x));
+        }
+    }
+    proof {
+        assert(col@.take(col@.len() as int) =~= col@);
+    }
+    let bytes = col.save();
+    let r = enc.save();
+    assert(r@ == bytes@);
+    r
+}
+
+/// What `encode` says of a vector whose values fit: the bytes of a
+/// delta column of them.
+#[allow(dead_code)]
+fn delta_told_by_encode<T: VDeltaValue<C>, C: VCodec>(vs: Vec<T>) -> (r: Vec<u8>)
+    requires
+        all_fit(vs@),
+    ensures
+        VerifiedDeltaColumn::<T, C>::valid(r@),
+        VerifiedDeltaColumn::<T, C>::values(r@) == vs@,
+        r@ == VerifiedDeltaColumn::<T, C>::encoding(vs@),
+        delta_span_ok(vs@),
+{
+    VerifiedDeltaEncoder::<T, C>::encode(vs)
+}
+
+/// What `encode_to` says of a vector whose values fit: the buffer is
+/// what it was and then the encoding of the values, and the range
+/// returned is where.
+#[allow(dead_code)]
+fn delta_told_by_encode_to<T: VDeltaValue<C>, C: VCodec>(out: &mut Vec<u8>, vs: Vec<T>) -> (r: Range<usize>)
+    requires
+        all_fit(vs@),
+    ensures
+        final(out)@ == old(out)@ + VerifiedDeltaColumn::<T, C>::encoding(vs@),
+        VerifiedDeltaColumn::<T, C>::valid(VerifiedDeltaColumn::<T, C>::encoding(vs@)),
+        VerifiedDeltaColumn::<T, C>::values(VerifiedDeltaColumn::<T, C>::encoding(vs@)) == vs@,
+        delta_span_ok(vs@),
+        r.start == old(out)@.len(),
+        r.end == final(out)@.len(),
+{
+    VerifiedDeltaEncoder::<T, C>::encode_to(out, vs)
+}
+
+/// What `encode_to_unless` says of a vector whose values fit: the
+/// buffer is left as it was where every value is `v`, and only there;
+/// and holds the encoding of the values after what it held, where one
+/// is not.
+#[allow(dead_code)]
+fn delta_told_by_encode_to_unless<T: VDeltaValue<C>, C: VCodec>(
+    out: &mut Vec<u8>,
+    vs: Vec<T>,
+    v: T,
+) -> (r: Range<usize>)
+    requires
+        all_fit(vs@),
+    ensures
+        (final(out)@ == old(out)@) == only(vs@, v),
+        !only(vs@, v) ==> {
+            &&& final(out)@ == old(out)@ + VerifiedDeltaColumn::<T, C>::encoding(vs@)
+            &&& VerifiedDeltaColumn::<T, C>::valid(VerifiedDeltaColumn::<T, C>::encoding(vs@))
+            &&& VerifiedDeltaColumn::<T, C>::values(VerifiedDeltaColumn::<T, C>::encoding(vs@)) == vs@
+            &&& delta_span_ok(vs@)
+        },
+        r.start == old(out)@.len(),
+        r.end == final(out)@.len(),
+{
+    VerifiedDeltaEncoder::<T, C>::encode_to_unless(out, vs, v)
+}
+
+/// Any iterator over `u32`s can be encoded, whatever is known of it:
+/// every `u32` is a value a delta column holds. What is then known of
+/// the bytes is that they are a saved delta column, the one encoding of
+/// its values.
+#[allow(dead_code)]
+fn delta_encode_any_iterator<I: Iterator<Item = u32>>(iter: I) -> (r: Vec<u8>)
+    ensures
+        VerifiedDeltaColumn::<u32>::valid(r@),
+        r@ == VerifiedDeltaColumn::<u32>::encoding(VerifiedDeltaColumn::<u32>::values(r@)),
+{
+    VerifiedDeltaEncoder::<u32>::encode(iter)
+}
+
+/// `u64`s with nulls, some perhaps too great for a delta column: each
+/// is checked as it goes to the encoder, and so nothing need be known
+/// of them beforehand. Bytes come back where every number is at most
+/// `i64::MAX`, and only there, and are the encoding of the values.
+#[allow(dead_code)]
+fn delta_encode_checked(vs: &Vec<Option<u64>>) -> (r: Option<Vec<u8>>)
+    ensures
+        r matches Some(bytes) ==> bytes@ == VerifiedDeltaColumn::<Option<u64>>::encoding(vs@),
+        r is Some ==> forall|i: int| 0 <= i < vs@.len() && (#[trigger] vs@[i]) is Some ==> vs@[i]->Some_0 <= i64::MAX,
+        r is None ==> exists|i: int| 0 <= i < vs@.len() && (#[trigger] vs@[i]) is Some && vs@[i]->Some_0 > i64::MAX,
+{
+    let mut enc = VerifiedDeltaEncoder::<Option<u64>>::new();
+    let mut i: usize = 0;
+    proof {
+        assert(enc@ =~= vs@.take(0));
+    }
+    while i < vs.len()
+        invariant
+            enc.wf(),
+            i <= vs@.len(),
+            enc@ == vs@.take(i as int),
+            forall|k: int| 0 <= k < i && (#[trigger] vs@[k]) is Some ==> vs@[k]->Some_0 <= i64::MAX,
+        decreases vs@.len() - i,
+    {
+        let v = vs[i];
+        if let Some(n) = v {
+            if n > i64::MAX as u64 {
+                proof {
+                    assert(vs@[i as int] is Some && vs@[i as int]->Some_0 > i64::MAX);
+                }
+                return None;
+            }
+        }
+        enc.append(v);
+        proof {
+            assert(enc@ =~= vs@.take(i + 1));
+        }
+        i += 1;
+    }
+    proof {
+        assert(vs@.take(i as int) =~= vs@);
+    }
+    Some(enc.save())
+}
+
+/// Two numbers an encoder of `i64`s has saved are less than 2^63 apart,
+/// whichever two: so `save` says, having returned.
+#[allow(dead_code)]
+fn delta_saved_within_a_span<'a>(enc: VerifiedDeltaEncoder<'a, i64>, i: usize, j: usize) -> (r: Vec<u8>)
+    requires
+        enc.wf(),
+        i < enc@.len(),
+        j < enc@.len(),
+    ensures
+        enc@[j as int] - enc@[i as int] <= i64::MAX,
+{
+    let ghost vs = enc@;
+    let r = enc.save();
+    assert(delta_near(vs[i as int], vs[j as int]));
+    r
+}
+
+/// Numbers 2^63 apart are no delta column's. An encoder takes them, each
+/// being a value that fits, and panics when it is to save them: what
+/// comes after its `save` is never reached, and the proof knows it.
+#[allow(dead_code)]
+fn delta_too_wide_never_saved() -> (r: Vec<u8>)
+    ensures
+        false,
+{
+    let mut enc = VerifiedDeltaEncoder::<i64>::new();
+    enc.append(i64::MIN);
+    enc.append(0);
+    let ghost vs = enc@;
+    let r = enc.save();
+    assert(delta_near(vs[0], vs[1]));
+    r
+}
+
+// ── Delta columns: the state that writes into its caller's buffer ───────────
+
+/// What `new` and `default` say of the delta state they give: it was
+/// given nothing, and may start on any buffer, all of which is then
+/// what was there before it.
+#[allow(dead_code)]
+fn delta_told_by_a_new_state<'a, T: VDeltaValue<C>, C: VCodec>() -> (r: (
+    VerifiedDeltaEncoderState<'a, T, C>,
+    VerifiedDeltaEncoderState<'a, T, C>,
+))
+    ensures
+        r.0@.len() == 0,
+        r.1@.len() == 0,
+        forall|buf: Seq<u8>| #[trigger] r.0.on(buf),
+        forall|buf: Seq<u8>| #[trigger] r.0.before(buf) == buf,
+        forall|buf: Seq<u8>| #[trigger] r.1.on(buf),
+        forall|buf: Seq<u8>| #[trigger] r.1.before(buf) == buf,
+{
+    let a = VerifiedDeltaEncoderState::<T, C>::new();
+    let b = VerifiedDeltaEncoderState::<T, C>::default();
+    (a, b)
+}
+
+/// What a delta state's `len` and `is_empty` say: the number of values
+/// it was given. They take no buffer, and require that there is one the
+/// state is on.
+#[allow(dead_code)]
+fn delta_told_by_a_states_count<'a, T: VDeltaValue<C>, C: VCodec>(
+    s: &VerifiedDeltaEncoderState<'a, T, C>,
+    buf: &Vec<u8>,
+) -> (r: (usize, bool))
+    requires
+        s.on(buf@),
+    ensures
+        r.0 == s@.len(),
+        r.1 == (s@.len() == 0),
+{
+    (s.len(), s.is_empty())
+}
+
+/// What a delta state's `append` says: the value, after those the state
+/// had; the buffer is still the state's, and what was there before the
+/// state is what was.
+#[allow(dead_code)]
+fn delta_told_by_a_states_append<'a, T: VDeltaValue<C>, C: VCodec>(
+    s: &mut VerifiedDeltaEncoderState<'a, T, C>,
+    buf: &mut Vec<u8>,
+    v: T,
+)
+    requires
+        old(s).on(old(buf)@),
+        v.fits(),
+    ensures
+        final(s).on(final(buf)@),
+        final(s).before(final(buf)@) == old(s).before(old(buf)@),
+        final(s)@.len() == old(s)@.len() + 1,
+        final(s)@.last() == v,
+        final(s)@.drop_last() == old(s)@,
+{
+    s.append(buf, v);
+    assert(s@.drop_last() =~= old(s)@);
+}
+
+/// What a delta state's `append_n` says: the value `n` times, after
+/// those the state had.
+#[allow(dead_code)]
+fn delta_told_by_a_states_append_n<'a, T: VDeltaValue<C>, C: VCodec>(
+    s: &mut VerifiedDeltaEncoderState<'a, T, C>,
+    buf: &mut Vec<u8>,
+    v: T,
+    n: usize,
+)
+    requires
+        old(s).on(old(buf)@),
+        v.fits(),
+    ensures
+        final(s).on(final(buf)@),
+        final(s).before(final(buf)@) == old(s).before(old(buf)@),
+        final(s)@.len() == old(s)@.len() + n,
+        final(s)@.take(old(s)@.len() as int) == old(s)@,
+        forall|i: int| old(s)@.len() <= i < final(s)@.len() ==> final(s)@[i] == v,
+{
+    s.append_n(buf, v, n);
+    assert(s@.take(old(s)@.len() as int) =~= old(s)@);
+}
+
+/// What a delta state's `extend` says of a vector handed over, whose
+/// values fit: its values, after those the state had.
+#[allow(dead_code)]
+fn delta_told_by_a_states_extend<'a, T: VDeltaValue<C>, C: VCodec>(
+    s: &mut VerifiedDeltaEncoderState<'a, T, C>,
+    buf: &mut Vec<u8>,
+    vs: Vec<T>,
+)
+    requires
+        old(s).on(old(buf)@),
+        all_fit(vs@),
+    ensures
+        final(s).on(final(buf)@),
+        final(s).before(final(buf)@) == old(s).before(old(buf)@),
+        final(s)@ == old(s)@ + vs@,
+{
+    s.extend(buf, vs);
+}
+
+/// What a delta state's `lemma_fits` says: every value given is one a
+/// delta column holds.
+#[allow(dead_code)]
+proof fn delta_told_by_an_encoder_states_fit<'a, T: VDeltaValue<C>, C: VCodec>(
+    s: VerifiedDeltaEncoderState<'a, T, C>,
+    buf: Seq<u8>,
+    i: int,
+)
+    requires
+        s.on(buf),
+        0 <= i < s@.len(),
+    ensures
+        s@[i].fits(),
+{
+    s.lemma_fits(buf);
+}
+
+/// What `is_uniform` says: whether every value given is the one asked
+/// for, either way.
+#[allow(dead_code)]
+fn delta_told_by_is_uniform<'a, T: VDeltaValue<C>, C: VCodec>(
+    s: &VerifiedDeltaEncoderState<'a, T, C>,
+    buf: &Vec<u8>,
+    v: T,
+) -> (r: bool)
+    requires
+        s.on(buf@),
+    ensures
+        r ==> forall|i: int| 0 <= i < s@.len() ==> s@[i] == v,
+        !r ==> exists|i: int| 0 <= i < s@.len() && s@[i] != v,
+{
+    s.is_uniform(v)
+}
+
+/// What a delta state's `finish` says: the buffer is what was there
+/// before the state and then the encoding of the values given, which is
+/// a saved delta column of them; and no two numbers given are 2^63 or
+/// more apart.
+#[allow(dead_code)]
+fn delta_told_by_a_finish<'a, T: VDeltaValue<C>, C: VCodec>(s: VerifiedDeltaEncoderState<'a, T, C>, buf: &mut Vec<u8>)
+    requires
+        s.on(old(buf)@),
+    ensures
+        final(buf)@ == s.before(old(buf)@) + VerifiedDeltaColumn::<T, C>::encoding(s@),
+        VerifiedDeltaColumn::<T, C>::valid(VerifiedDeltaColumn::<T, C>::encoding(s@)),
+        VerifiedDeltaColumn::<T, C>::values(VerifiedDeltaColumn::<T, C>::encoding(s@)) == s@,
+        delta_span_ok(s@),
+{
+    s.finish(buf);
+}
+
+/// What a delta state's `lemma_before` says: what was in the buffer
+/// before the state is still its start.
+#[allow(dead_code)]
+proof fn delta_told_by_the_bytes_before<'a, T: VDeltaValue<C>, C: VCodec>(
+    s: VerifiedDeltaEncoderState<'a, T, C>,
+    buf: Seq<u8>,
+)
+    requires
+        s.on(buf),
+    ensures
+        s.before(buf).len() <= buf.len(),
+        forall|i: int| 0 <= i < s.before(buf).len() ==> buf[i] == s.before(buf)[i],
+{
+    s.lemma_before(buf);
+    assert forall|i: int| 0 <= i < s.before(buf).len() implies buf[i] == s.before(buf)[i] by {
+        assert(buf.take(s.before(buf).len() as int)[i] == buf[i]);
+    }
+}
+
+/// Values given one by one to a delta state are written as a delta
+/// column of them: the buffer is what it was and then the one encoding
+/// of the values. The loop carries that the buffer is the state's
+/// (`on`), what was there before the state, and what the state has been
+/// given so far.
+#[allow(dead_code)]
+fn delta_streamed_as_saved<T: VDeltaValue<C>, C: VCodec>(input: &Vec<T>, buf: &mut Vec<u8>) -> (r: Range<usize>)
+    requires
+        all_fit(input@),
+    ensures
+        final(buf)@ == old(buf)@ + VerifiedDeltaColumn::<T, C>::encoding(input@),
+        r.start == old(buf)@.len(),
+        r.end == final(buf)@.len(),
+        VerifiedDeltaColumn::<T, C>::valid(final(buf)@.subrange(r.start as int, r.end as int)),
+        VerifiedDeltaColumn::<T, C>::values(final(buf)@.subrange(r.start as int, r.end as int)) == input@,
+        delta_span_ok(input@),
+{
+    let start = buf.len();
+    let mut s = VerifiedDeltaEncoderState::<T, C>::new();
+    let mut i: usize = 0;
+    proof {
+        assert(s@ =~= input@.take(0));
+    }
+    while i < input.len()
+        invariant
+            s.on(buf@),
+            s.before(buf@) == old(buf)@,
+            i <= input@.len(),
+            all_fit(input@),
+            s@ == input@.take(i as int),
+        decreases input@.len() - i,
+    {
+        s.append(buf, input[i]);
+        proof {
+            assert(s@ =~= input@.take(i + 1));
+        }
+        i += 1;
+    }
+    proof {
+        assert(input@.take(i as int) =~= input@);
+    }
+    s.finish(buf);
+    proof {
+        let d = VerifiedDeltaColumn::<T, C>::encoding(input@);
+        assert(buf@.subrange(start as int, buf@.len() as int) =~= d);
+    }
+    start..buf.len()
+}
+
+/// A delta state, a delta encoder, a delta column and `encode` give the
+/// same bytes for the same values.
+#[allow(dead_code)]
+fn delta_one_encoding_four_ways<T: VDeltaValue<C>, C: VCodec>(input: Vec<T>) -> (r: Vec<u8>)
+    requires
+        all_fit(input@),
+    ensures
+        r@ == VerifiedDeltaColumn::<T, C>::encoding(input@),
+{
+    let mut a: Vec<u8> = Vec::new();
+    delta_streamed_as_saved::<T, C>(&input, &mut a);
+    let b = delta_encoded_as_saved::<T, C>(&input);
+    let col = VerifiedDeltaColumn::<T, C>::from_values(input.as_slice());
+    let c = col.save();
+    let d = VerifiedDeltaEncoder::<T, C>::encode(input);
+    assert(a@ =~= b@);
+    assert(b@ == c@);
+    assert(c@ == d@);
+    d
+}
+
+/// Numbers, and then numbers with nulls, through two delta states one
+/// after the other into one buffer: it holds what it did, then the
+/// first column, then the second.
+#[allow(dead_code)]
+fn delta_two_streamed(buf: &mut Vec<u8>) -> (r: usize)
+    ensures
+        final(buf)@ == old(buf)@ + VerifiedDeltaColumn::<u32>::encoding(seq![7u32, 7, 9]) + VerifiedDeltaColumn::<
+            Option<i64>,
+        >::encoding(seq![Some(-5i64), None, None, Some(i64::MIN)]),
+        r == old(buf)@.len() + VerifiedDeltaColumn::<u32>::encoding(seq![7u32, 7, 9]).len(),
+{
+    let mut x = VerifiedDeltaEncoderState::<u32>::new();
+    x.append_n(buf, 7, 2);
+    x.append(buf, 9);
+    assert(x@ =~= seq![7u32, 7, 9]);
+    x.finish(buf);
+    let mid = buf.len();
+    let mut y = VerifiedDeltaEncoderState::<Option<i64>>::new();
+    y.append(buf, Some(-5));
+    y.append_n(buf, None, 2);
+    y.append(buf, Some(i64::MIN));
+    assert(y@ =~= seq![Some(-5i64), None, None, Some(i64::MIN)]);
+    y.finish(buf);
+    mid
+}
+
+/// A delta state knows whether all it was given is one value: so it is
+/// of a state that was given nothing, whatever the value, and of one
+/// run, and no longer once another value came. And it counts what it
+/// was given.
+#[allow(dead_code)]
+fn delta_uniform_until_another(buf: &mut Vec<u8>) -> (r: (bool, bool, bool, bool, usize))
+    ensures
+        r.0,
+        r.1,
+        !r.2,
+        !r.3,
+        r.4 == 4,
+{
+    let mut s = VerifiedDeltaEncoderState::<Option<u64>>::new();
+    assert(s.on(buf@));
+    let a = s.is_uniform(Some(3));
+    s.append_n(buf, Some(3), 3);
+    let b = s.is_uniform(Some(3));
+    // a number that does not fit is none the state was given
+    let c = s.is_uniform(Some(u64::MAX));
+    assert(s@[0] == Some(3u64));
+    s.append(buf, None);
+    let d = s.is_uniform(Some(3));
+    assert(s@[3] == None::<u64>);
+    let n = s.len();
+    s.finish(buf);
+    (a, b, c, d, n)
 }
 
 } // verus!

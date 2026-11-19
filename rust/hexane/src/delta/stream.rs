@@ -103,7 +103,7 @@ pub open spec fn span_ok(vs: Seq<Option<i64>>) -> bool {
 }
 
 /// A run of `n` copies of `v` after `vs`.
-proof fn lemma_vals_run(vs: Seq<Option<i64>>, n: nat, v: Option<i64>)
+pub(crate) proof fn lemma_vals_run(vs: Seq<Option<i64>>, n: nat, v: Option<i64>)
     requires n >= 1,
     ensures ({
         let r = vs + copies(n, v);
@@ -266,7 +266,7 @@ proof fn lemma_append_nulls(vs: Seq<Option<i64>>, ds: Seq<Option<i64>>, all: Seq
 #[verifier::external_body]
 #[cold]
 #[inline(never)]
-fn values_too_wide(Ghost(why): Ghost<bool>)
+pub(crate) fn values_too_wide(Ghost(why): Ghost<bool>)
     requires
         why,
     ensures

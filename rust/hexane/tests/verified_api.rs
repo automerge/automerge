@@ -12,20 +12,21 @@
 // `nth(0)` is here for what `nth` does, which is under test
 #![allow(clippy::iter_nth_zero)]
 
+use hexane::delta::DeltaEncoderState;
 use hexane::encoder::{BoolEncoder, BoolEncoderState, RleEncoder, RleEncoderState};
 use hexane::prefix::{PrefixSeek, PrefixWeightFn};
 use hexane::verified::{
     refused, AccIndex, Get, LenIndex, SumIndex, VAccum, VAccumulated, VAdds, VAmount, VDeltaValue,
     VGroup, VNewtype, VSummed, VValue, VerifiedAccColumn, VerifiedAccIter, VerifiedAccIterState,
     VerifiedAccSeek, VerifiedAccValue, VerifiedColumn, VerifiedDecoder, VerifiedDeltaColumn,
-    VerifiedEncoder, VerifiedEncoderState, VerifiedIter, VerifiedIterState, VerifiedPrefixColumn,
-    VerifiedPrefixIter, VerifiedPrefixIterState, VerifiedPrefixSeek, VerifiedPrefixedValue,
-    VerifiedRuns,
+    VerifiedDeltaEncoder, VerifiedDeltaEncoderState, VerifiedEncoder, VerifiedEncoderState,
+    VerifiedIter, VerifiedIterState, VerifiedPrefixColumn, VerifiedPrefixIter,
+    VerifiedPrefixIterState, VerifiedPrefixSeek, VerifiedPrefixedValue, VerifiedRuns,
 };
 use hexane::{
-    Codec, Column, ColumnEncoding, ColumnValue, ColumnValueRef, DeltaColumn, DeltaValue, Encoder,
-    EncoderApi, IterState, Leb128, LoadOpts, MaybeFill, NoFill, PackError, PrefixColumn,
-    PrefixIter, PrefixValue, PrefixedValue, RleEncoding, RleValue, Run, RunDecoder,
+    Codec, Column, ColumnEncoding, ColumnValue, ColumnValueRef, DeltaColumn, DeltaEncoder,
+    DeltaValue, Encoder, EncoderApi, IterState, Leb128, LoadOpts, MaybeFill, NoFill, PackError,
+    PrefixColumn, PrefixIter, PrefixValue, PrefixedValue, RleEncoding, RleValue, Run, RunDecoder,
 };
 use std::cell::{Cell, RefCell};
 use std::cmp::Ordering;
@@ -14361,4 +14362,391 @@ fn delta_finds_told() {
     let col = VerifiedDeltaColumn::<u32>::new();
     assert_eq!(col.find_by_range(..).next(), None);
     assert_eq!(col.find_first(0), None);
+}
+
+// ── Delta columns: the encoder ──────────────────────────────────────────
+
+/// What an encoder is given, as steps: a value and how many times over.
+/// Now and then a count is nought or large, a value is the one before
+/// it, and one feed in four is of one value alone.
+fn delta_feed<T: Deltad>(rng: &mut Rng) -> Vec<(T, usize)> {
+    let steps = match rng.below(6) {
+        0 => rng.below(3),
+        _ => rng.below(60),
+    };
+    let one = rng.below(4) == 0;
+    let mut last = 0;
+    let mut feed: Vec<(T, usize)> = Vec::new();
+    for _ in 0..steps {
+        let v = match feed.last() {
+            Some(&(v, _)) if one || rng.below(4) == 0 => v,
+            _ => {
+                let (v, l) = T::near(rng, last);
+                last = l;
+                v
+            }
+        };
+        let n = match rng.below(10) {
+            0 => 0,
+            1 => 2 + rng.below(70),
+            2 => 300,
+            _ => 1,
+        };
+        feed.push((v, n));
+    }
+    feed
+}
+
+/// An encoder of each API, given a feed.
+fn delta_fed<'a, T: Deltad>(
+    feed: &[(T, usize)],
+) -> (VerifiedDeltaEncoder<'a, T>, DeltaEncoder<'a, T>) {
+    let mut new = VerifiedDeltaEncoder::<T>::new();
+    let mut old = DeltaEncoder::<T>::new();
+    for &(v, n) in feed {
+        new.append_n(v, n);
+        old.append_n(v, n);
+    }
+    (new, old)
+}
+
+/// `bytes` after `prefix`.
+fn after(prefix: &[u8], bytes: &[u8]) -> Vec<u8> {
+    [prefix, bytes].concat()
+}
+
+/// A verified delta encoder and the old one, given the same values in
+/// the same way, count them alike and write the same bytes, by every
+/// way of saving: the bytes a column of those values saves, which load
+/// as the values. So do the two states that write into a buffer of the
+/// caller's, which also keep what the buffer held and tell alike
+/// whether every value is a given one.
+fn delta_encodes<T: Deltad>(seed: u64) {
+    let mut rng = Rng(seed.wrapping_mul(0x2f_9be6_cd31).wrapping_add(23) | 1);
+    let feed = delta_feed::<T>(&mut rng);
+    let values: Vec<T> = feed
+        .iter()
+        .flat_map(|&(v, n)| std::iter::repeat_n(v, n))
+        .collect();
+    let bytes = delta_bytes(&values);
+    // values to compare with: some the encoder is given, some it may
+    // not be
+    let mut others = vec![T::near(&mut rng, 0).0, T::near(&mut rng, 0).0];
+    others.extend(values.first().copied());
+    others.extend(values.last().copied());
+    let only = |other: T| values.iter().all(|v| *v == other);
+    let prefix: Vec<u8> = (0..rng.below(4)).map(|_| rng.next() as u8).collect();
+
+    // the encoders that own their bytes, given the values in every way
+    let mut new = VerifiedDeltaEncoder::<T>::new();
+    let mut old = DeltaEncoder::<T>::new();
+    assert_eq!((new.len(), new.is_empty()), (0, true));
+    assert_eq!(format!("{new:?}"), format!("Verified{old:?}"));
+    for &(v, n) in &feed {
+        match rng.below(4) {
+            0 if n == 1 => {
+                new.append(v);
+                old.append(v);
+            }
+            1 if n == 1 => {
+                new.append_owned(v);
+                old.append_owned(v);
+            }
+            2 => {
+                new.extend(std::iter::repeat_n(v, n));
+                old.extend(std::iter::repeat_n(v, n));
+            }
+            _ => {
+                new.append_n(v, n);
+                old.append_n(v, n);
+            }
+        }
+        assert_eq!((new.len(), new.is_empty()), (old.len(), old.is_empty()));
+        assert_eq!(format!("{new:?}"), format!("Verified{old:?}"));
+    }
+    assert_eq!(new.len(), values.len());
+    let saved = new.save();
+    assert_eq!(saved, old.save());
+    assert_eq!(saved, bytes);
+    assert!(delta_same_load::<T>(&saved));
+    let loaded = VerifiedDeltaColumn::<T>::load(&saved).unwrap();
+    assert_eq!(loaded.to_vec(), values);
+
+    // saved after what a buffer holds, or not at all
+    let (new, old) = delta_fed(&feed);
+    let (mut out, mut out_old) = (prefix.clone(), prefix.clone());
+    let r = new.save_to(&mut out);
+    assert_eq!(r, old.save_to(&mut out_old));
+    assert_eq!(r, prefix.len()..prefix.len() + bytes.len());
+    assert_eq!(out, out_old);
+    assert_eq!(out, after(&prefix, &bytes));
+    for &other in &others {
+        let kept = if only(other) { &[][..] } else { &bytes[..] };
+        let (new, old) = delta_fed(&feed);
+        let (mut out, mut out_old) = (prefix.clone(), prefix.clone());
+        let r = new.save_to_unless(&mut out, other);
+        assert_eq!(r, old.save_to_unless(&mut out_old, other));
+        assert_eq!(r, prefix.len()..prefix.len() + kept.len());
+        assert_eq!(out, out_old);
+        assert_eq!(out, after(&prefix, kept), "{other:?}");
+    }
+
+    // encoded in one call
+    assert_eq!(VerifiedDeltaEncoder::<T>::encode(values.clone()), bytes);
+    assert_eq!(DeltaEncoder::<T>::encode(values.clone()), bytes);
+    let (mut out, mut out_old) = (prefix.clone(), prefix.clone());
+    let r = VerifiedDeltaEncoder::<T>::encode_to(&mut out, values.iter().copied());
+    let r_old = DeltaEncoder::<T>::encode_to(&mut out_old, values.iter().copied());
+    assert_eq!(r, r_old);
+    assert_eq!(r, prefix.len()..prefix.len() + bytes.len());
+    assert_eq!(out, out_old);
+    assert_eq!(out, after(&prefix, &bytes));
+    for &other in &others {
+        let kept = if only(other) { &[][..] } else { &bytes[..] };
+        let (mut out, mut out_old) = (prefix.clone(), prefix.clone());
+        let r = VerifiedDeltaEncoder::<T>::encode_to_unless(&mut out, values.clone(), other);
+        let r_old = DeltaEncoder::<T>::encode_to_unless(&mut out_old, values.clone(), other);
+        assert_eq!(r, r_old);
+        assert_eq!(r, prefix.len()..prefix.len() + kept.len());
+        assert_eq!(out, out_old);
+        assert_eq!(out, after(&prefix, kept), "{other:?}");
+    }
+
+    // the states that write into the caller's buffer
+    let mut new = VerifiedDeltaEncoderState::<T>::new();
+    let mut old = DeltaEncoderState::<T>::new();
+    let (mut buf, mut buf_old) = (prefix.clone(), prefix.clone());
+    let mut given: Vec<T> = Vec::new();
+    for &(v, n) in &feed {
+        match rng.below(3) {
+            0 if n == 1 => {
+                new.append(&mut buf, v);
+                old.append(&mut buf_old, v);
+            }
+            1 => {
+                new.extend(&mut buf, std::iter::repeat_n(v, n));
+                old.extend(&mut buf_old, std::iter::repeat_n(v, n));
+            }
+            _ => {
+                new.append_n(&mut buf, v, n);
+                old.append_n(&mut buf_old, v, n);
+            }
+        }
+        given.extend(std::iter::repeat_n(v, n));
+        assert_eq!((new.len(), new.is_empty()), (given.len(), given.is_empty()));
+        assert_eq!((old.len(), old.is_empty()), (given.len(), given.is_empty()));
+        // what the buffer held is kept
+        assert_eq!(buf[..prefix.len()], prefix[..]);
+        assert_eq!(buf, buf_old);
+        for &other in &others {
+            let uniform = given.iter().all(|x| *x == other);
+            assert_eq!(new.is_uniform(other), uniform, "{other:?}");
+            assert_eq!(old.is_uniform(other), uniform, "{other:?}");
+        }
+    }
+    new.finish(&mut buf);
+    old.finish(&mut buf_old);
+    assert_eq!(buf, buf_old);
+    assert_eq!(buf, after(&prefix, &bytes));
+}
+
+/// A verified delta encoder writes what the old one writes, which is
+/// what a column of the same values saves: for every type of value, by
+/// every way of giving it values and every way of saving, and through
+/// the state that writes into a buffer of the caller's too.
+#[test]
+fn delta_encoders_agree() {
+    for seed in 0..24 {
+        delta_encodes::<u32>(seed);
+        delta_encodes::<u64>(seed);
+        delta_encodes::<i32>(seed);
+        delta_encodes::<i64>(seed);
+        delta_encodes::<usize>(seed);
+        delta_encodes::<Option<u32>>(seed);
+        delta_encodes::<Option<u64>>(seed);
+        delta_encodes::<Option<i32>>(seed);
+        delta_encodes::<Option<i64>>(seed);
+        delta_encodes::<Option<usize>>(seed);
+    }
+}
+
+/// What a delta encoder writes in cases told one by one: nothing for no
+/// values, the bytes of a small column, values as far apart as a column
+/// holds, runs of billions, values that fit no column asked after, and
+/// two states writing one after the other into one buffer.
+#[test]
+fn delta_encoders_told() {
+    // no values: no bytes
+    assert!(VerifiedDeltaEncoder::<u32>::new().save().is_empty());
+    assert!(VerifiedDeltaEncoder::<Option<i64>>::default()
+        .save()
+        .is_empty());
+    assert!(VerifiedDeltaEncoder::<u64>::encode([]).is_empty());
+    let mut out = vec![9];
+    let none = VerifiedDeltaEncoder::<i32>::new();
+    assert_eq!(none.save_to_unless(&mut out, 5), 1..1);
+    assert_eq!(VerifiedDeltaEncoder::<i32>::new().save_to(&mut out), 1..1);
+    assert_eq!(out, [9]);
+    let state = VerifiedDeltaEncoderState::<Option<u32>>::default();
+    assert_eq!((state.len(), state.is_empty()), (0, true));
+    assert!(state.is_uniform(None) && state.is_uniform(Some(4)));
+    state.finish(&mut out);
+    assert_eq!(out, [9]);
+
+    // a run of three steps of one: a count and the difference
+    assert_eq!(VerifiedDeltaEncoder::<u32>::encode([1, 2, 3]), [3, 1]);
+    assert_eq!(DeltaEncoder::<u32>::encode([1, 2, 3]), [3, 1]);
+    // nulls alone: a nought and their count
+    let nulls = [None::<i64>; 2];
+    assert_eq!(VerifiedDeltaEncoder::<Option<i64>>::encode(nulls), [0, 2]);
+    assert_eq!(DeltaEncoder::<Option<i64>>::encode(nulls), [0, 2]);
+
+    // numbers as far apart as a column holds: 2^63 - 1
+    for values in [
+        [i64::MIN, -1],
+        [-1, i64::MIN],
+        [0, i64::MAX],
+        [i64::MAX, 0],
+        [i64::MIN + 1, 0],
+        [-2, i64::MAX - 2],
+    ] {
+        let bytes = VerifiedDeltaEncoder::<i64>::encode(values);
+        assert_eq!(bytes, DeltaEncoder::<i64>::encode(values), "{values:?}");
+        assert_eq!(bytes, delta_bytes(&values), "{values:?}");
+        assert!(delta_same_load::<i64>(&bytes), "{values:?}");
+        let loaded = VerifiedDeltaColumn::<i64>::load(&bytes).unwrap();
+        assert_eq!(loaded.to_vec(), values);
+    }
+    let top = i64::MAX as u64;
+    let values = [Some(top), None, Some(0), Some(top)];
+    let bytes = VerifiedDeltaEncoder::<Option<u64>>::encode(values);
+    assert_eq!(bytes, DeltaEncoder::<Option<u64>>::encode(values));
+    assert_eq!(bytes, delta_bytes(&values));
+    assert!(delta_same_load::<Option<u64>>(&bytes));
+
+    // runs longer than any memory holds, in a few bytes
+    let long = usize::MAX / 4;
+    let mut new = VerifiedDeltaEncoder::<Option<u32>>::new();
+    let mut old = DeltaEncoder::<Option<u32>>::new();
+    for value in [Some(7), None, Some(7)] {
+        new.append_n(value, long);
+        old.append_n(value, long);
+        assert_eq!(new.len(), old.len());
+    }
+    assert_eq!(new.len(), 3 * long);
+    assert_eq!(format!("{new:?}"), format!("Verified{old:?}"));
+    let bytes = new.save();
+    assert_eq!(bytes, old.save());
+    assert!(bytes.len() < 40);
+    // whether bytes of so many values load, the two APIs agree
+    delta_same_load::<Option<u32>>(&bytes);
+
+    // a number no column holds is none of an encoder's values: to ask
+    // after it is no error, in either API
+    let misfit = Some(u64::MAX);
+    let mut new = VerifiedDeltaEncoderState::<Option<u64>>::new();
+    let mut old = DeltaEncoderState::<Option<u64>>::new();
+    let (mut buf, mut buf_old) = (vec![], vec![]);
+    assert!(new.is_uniform(misfit) && old.is_uniform(misfit));
+    new.append(&mut buf, Some(3));
+    old.append(&mut buf_old, Some(3));
+    assert!(new.is_uniform(Some(3)) && old.is_uniform(Some(3)));
+    assert!(!new.is_uniform(misfit) && !old.is_uniform(misfit));
+    assert!(!new.is_uniform(None) && !old.is_uniform(None));
+    let threes = [Some(3u64); 4];
+    let bytes = delta_bytes(&threes);
+    let n = bytes.len();
+    let mut out = vec![1, 2];
+    let (new, old) = delta_fed(&[(Some(3u64), 4)]);
+    assert_eq!(new.save_to_unless(&mut out, misfit), 2..2 + n);
+    assert_eq!(old.save_to_unless(&mut out, misfit), 2 + n..2 + 2 * n);
+    assert_eq!(out, [&[1, 2][..], &bytes[..], &bytes[..]].concat());
+    type New = VerifiedDeltaEncoder<'static, Option<u64>>;
+    let r = New::encode_to_unless(&mut out, threes, Some(3));
+    assert_eq!(r, 2 + 2 * n..2 + 2 * n);
+    let r = New::encode_to_unless(&mut out, threes, misfit);
+    assert_eq!(r, 2 + 2 * n..2 + 3 * n);
+    assert_eq!(out[2 + 2 * n..], bytes[..]);
+
+    // two states, one after the other, into one buffer: each keeps what
+    // is before it and writes its own column after
+    let mut buf = vec![0xee];
+    let mut first = VerifiedDeltaEncoderState::<u32>::new();
+    first.append_n(&mut buf, 7, 2);
+    first.append(&mut buf, 9);
+    assert!(!first.is_uniform(7));
+    first.finish(&mut buf);
+    let mid = buf.len();
+    let mut second = VerifiedDeltaEncoderState::<Option<i64>>::new();
+    second.append(&mut buf, Some(-5));
+    second.append_n(&mut buf, None, 2);
+    second.extend(&mut buf, [Some(i64::MIN)]);
+    assert_eq!(second.len(), 4);
+    second.finish(&mut buf);
+    assert_eq!(buf[0], 0xee);
+    assert_eq!(buf[1..mid], delta_bytes::<u32>(&[7, 7, 9]));
+    let values = [Some(-5), None, None, Some(i64::MIN)];
+    assert_eq!(buf[mid..], delta_bytes(&values));
+}
+
+/// Values 2^63 or more apart are those of no column, and neither API
+/// writes them: each encoder takes them and panics, with the same
+/// words, when asked for the bytes. Until then nothing panics, and to
+/// ask whether the values are all one is no error.
+#[cfg(any(target_pointer_width = "64", panic = "unwind"))]
+#[test]
+fn delta_encoders_stop_at_values_too_far_apart() {
+    let told = Some("delta values out of domain: they span 2^63 or more".to_string());
+    for values in [
+        [i64::MIN, 0],
+        [0, i64::MIN],
+        [-1, i64::MAX],
+        [i64::MAX, -1],
+        [i64::MIN, i64::MAX],
+    ] {
+        let new = panic_of(move || VerifiedDeltaEncoder::<i64>::encode(values));
+        assert_eq!(new, told, "{values:?}");
+        let old = panic_of(move || DeltaEncoder::<i64>::encode(values));
+        assert_eq!(old, told, "{values:?}");
+
+        let feed = [(values[0], 3), (values[1], 1)];
+        let (new, old) = delta_fed(&feed);
+        assert_eq!((new.len(), old.len()), (4, 4));
+        assert_eq!(panic_of(move || new.save()), told);
+        assert_eq!(panic_of(move || old.save()), told);
+        let (new, old) = delta_fed(&feed);
+        assert_eq!(panic_of(move || new.save_to(&mut vec![1])), told);
+        assert_eq!(panic_of(move || old.save_to(&mut vec![1])), told);
+        let (new, old) = delta_fed(&feed);
+        assert_eq!(panic_of(move || new.save_to_unless(&mut vec![], 7)), told);
+        assert_eq!(panic_of(move || old.save_to_unless(&mut vec![], 7)), told);
+        let new = panic_of(move || VerifiedDeltaEncoder::<i64>::encode_to(&mut vec![], values));
+        assert_eq!(new, told);
+        let old = panic_of(move || DeltaEncoder::<i64>::encode_to(&mut vec![], values));
+        assert_eq!(old, told);
+        let new = panic_of(move || {
+            VerifiedDeltaEncoder::<i64>::encode_to_unless(&mut vec![], values, values[0])
+        });
+        assert_eq!(new, told);
+        let old =
+            panic_of(move || DeltaEncoder::<i64>::encode_to_unless(&mut vec![], values, values[0]));
+        assert_eq!(old, told);
+
+        let mut new = VerifiedDeltaEncoderState::<i64>::new();
+        let mut old = DeltaEncoderState::<i64>::new();
+        let (mut buf, mut buf_old) = (vec![], vec![]);
+        new.extend(&mut buf, values);
+        old.extend(&mut buf_old, values);
+        assert_eq!((new.len(), old.len()), (2, 2));
+        assert!(!new.is_uniform(values[0]) && !old.is_uniform(values[0]));
+        assert_eq!(panic_of(move || new.finish(&mut buf)), told);
+        assert_eq!(panic_of(move || old.finish(&mut buf_old)), told);
+    }
+
+    // with nulls between, and of a type that has them
+    let values = [Some(i64::MIN), None, Some(5), None];
+    let new = panic_of(move || VerifiedDeltaEncoder::<Option<i64>>::encode(values));
+    assert_eq!(new, told);
+    let old = panic_of(move || DeltaEncoder::<Option<i64>>::encode(values));
+    assert_eq!(old, told);
 }

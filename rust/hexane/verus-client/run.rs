@@ -2921,3 +2921,145 @@ fn delta_finds() {
     let mut none: VerifiedFindByRange<'static, u64> = verus_client::delta_told_by_find_default();
     assert_eq!(none.next(), None);
 }
+
+#[test]
+fn delta_encoders() {
+    use hexane::verified::{VerifiedDeltaEncoder, VerifiedDeltaEncoderState};
+    let input: Vec<Option<i64>> = vec![Some(4), Some(4), None, Some(-9), Some(i64::MAX - 20)];
+    let col: VerifiedDeltaColumn<Option<i64>> = verus_client::delta_built(&input);
+    let bytes = col.save();
+
+    // one encoding, whichever way it is made
+    assert_eq!(
+        verus_client::delta_encoded_as_saved::<_, Leb128>(&input),
+        bytes
+    );
+    verus_client::delta_encoder_or_column::<_, Leb128>(&input);
+    let back = verus_client::delta_encode_then_load::<_, Leb128>(&input).unwrap();
+    assert_eq!(back.to_vec(), input);
+    assert_eq!(verus_client::delta_reencoded(&col), bytes);
+    assert_eq!(verus_client::delta_reencoded_in_a_loop(&col), bytes);
+    assert_eq!(
+        verus_client::delta_one_encoding_four_ways::<_, Leb128>(input.clone()),
+        bytes
+    );
+    let mut buf = vec![7, 7];
+    let r = verus_client::delta_streamed_as_saved::<_, Leb128>(&input, &mut buf);
+    assert_eq!(r, 2..2 + bytes.len());
+    assert_eq!(buf[r], bytes[..]);
+    assert_eq!(
+        verus_client::delta_told_by_encode::<_, Leb128>(input.clone()),
+        bytes
+    );
+    let r = verus_client::delta_told_by_encode_to::<_, Leb128>(&mut buf, input.clone());
+    assert_eq!(buf[r], bytes[..]);
+    let n = buf.len();
+    let r = verus_client::delta_told_by_encode_to_unless::<_, Leb128>(
+        &mut buf,
+        vec![Some(6i64); 3],
+        Some(6),
+    );
+    assert_eq!((r, buf.len()), (n..n, n));
+    let r =
+        verus_client::delta_told_by_encode_to_unless::<_, Leb128>(&mut buf, input.clone(), Some(4));
+    assert_eq!(buf[r], bytes[..]);
+
+    // any iterator of a type whose every value fits; and one of numbers
+    // that may not, checked as they are given
+    let small: VerifiedDeltaColumn<u32> = verus_client::delta_built(&[3, 4, 5]);
+    assert_eq!(
+        verus_client::delta_encode_any_iterator([3u32, 4, 5].into_iter()),
+        small.save()
+    );
+    let misfit = vec![Some(1), None, Some(u64::MAX)];
+    assert_eq!(verus_client::delta_encode_checked(&misfit), None);
+    let fit = vec![Some(1), None, Some(i64::MAX as u64)];
+    let wide: VerifiedDeltaColumn<Option<u64>> = verus_client::delta_built(&fit);
+    assert_eq!(verus_client::delta_encode_checked(&fit), Some(wide.save()));
+
+    // each call of the encoder by itself
+    let (mut enc, other): (VerifiedDeltaEncoder<'_, Option<i64>>, _) =
+        verus_client::delta_told_by_a_new_encoder();
+    assert_eq!(
+        verus_client::delta_told_by_an_encoders_count(&other),
+        (0, true)
+    );
+    assert!(verus_client::delta_told_by_an_encoders_save(other).is_empty());
+    verus_client::delta_told_by_an_encoders_appends(&mut enc, Some(4), Some(4), 0);
+    verus_client::delta_told_by_an_encoders_extend(&mut enc, vec![None]);
+    verus_client::delta_told_by_an_extend_of_any(&mut enc, input[3..].iter().copied());
+    assert_eq!(
+        verus_client::delta_told_by_an_encoders_count(&enc),
+        (5, false)
+    );
+    let mut out = vec![1];
+    let r = verus_client::delta_told_by_an_encoders_save_to(enc, &mut out);
+    assert_eq!((r.clone(), &out[r]), (1..1 + bytes.len(), &bytes[..]));
+    let mut ones = VerifiedDeltaEncoder::<i64>::new();
+    ones.append_n(1, 5);
+    let r = verus_client::delta_told_by_an_encoders_save_to_unless(ones, &mut out, 1);
+    assert_eq!(
+        (r, out.len()),
+        (1 + bytes.len()..1 + bytes.len(), 1 + bytes.len())
+    );
+    let mut ones = VerifiedDeltaEncoder::<u64>::new();
+    ones.append_n(1, 5);
+    let mut out = vec![];
+    verus_client::delta_unless_a_misfit(ones, &mut out, u64::MAX);
+    assert_eq!(out, VerifiedDeltaEncoder::<u64>::encode([1; 5]));
+    let mut far = VerifiedDeltaEncoder::<i64>::new();
+    far.extend([i64::MIN, -1]);
+    let saved = verus_client::delta_saved_within_a_span(far, 0, 1);
+    assert_eq!(saved, VerifiedDeltaEncoder::<i64>::encode([i64::MIN, -1]));
+
+    // and of the state that writes into its caller's buffer
+    let (mut state, other): (VerifiedDeltaEncoderState<'_, Option<i64>>, _) =
+        verus_client::delta_told_by_a_new_state();
+    let mut buf = vec![9];
+    assert_eq!(
+        verus_client::delta_told_by_a_states_count(&other, &buf),
+        (0, true)
+    );
+    verus_client::delta_told_by_a_finish(other, &mut buf);
+    assert_eq!(buf, [9]);
+    verus_client::delta_told_by_a_states_append(&mut state, &mut buf, Some(4));
+    assert!(verus_client::delta_told_by_is_uniform(
+        &state,
+        &buf,
+        Some(4)
+    ));
+    verus_client::delta_told_by_a_states_append_n(&mut state, &mut buf, Some(4), 1);
+    verus_client::delta_told_by_a_states_extend(&mut state, &mut buf, input[2..].to_vec());
+    assert!(!verus_client::delta_told_by_is_uniform(
+        &state,
+        &buf,
+        Some(4)
+    ));
+    assert_eq!(
+        verus_client::delta_told_by_a_states_count(&state, &buf),
+        (5, false)
+    );
+    verus_client::delta_told_by_a_finish(state, &mut buf);
+    assert_eq!((buf[0], &buf[1..]), (9, &bytes[..]));
+
+    // two states into one buffer, and a state's word on its one value
+    let mut buf = vec![1];
+    let mid = verus_client::delta_two_streamed(&mut buf);
+    let first: VerifiedDeltaColumn<u32> = verus_client::delta_built(&[7, 7, 9]);
+    let second: VerifiedDeltaColumn<Option<i64>> =
+        verus_client::delta_built(&[Some(-5), None, None, Some(i64::MIN)]);
+    assert_eq!(buf[1..mid], first.save()[..]);
+    assert_eq!(buf[mid..], second.save()[..]);
+    assert_eq!(
+        verus_client::delta_uniform_until_another(&mut vec![]),
+        (true, true, false, false, 4)
+    );
+}
+
+/// The client that proves a save of numbers 2^63 apart never returns:
+/// it panics instead.
+#[test]
+#[should_panic(expected = "delta values out of domain: they span 2^63 or more")]
+fn delta_encoder_stops_at_a_span_too_wide() {
+    verus_client::delta_too_wide_never_saved();
+}

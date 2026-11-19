@@ -8,6 +8,7 @@
 
 #[cfg(verus_keep_ghost)]
 mod diffs;
+mod enc;
 mod find;
 mod iter;
 
@@ -15,6 +16,9 @@ mod iter;
 pub use diffs::{
     delta_at, delta_prefix, delta_runs_at, deltas, lemma_delta_run_at, lemma_delta_runs_at,
 };
+#[cfg(verus_keep_ghost)]
+pub use enc::{delta_iter_fits, delta_near, delta_span_ok};
+pub use enc::{VerifiedDeltaEncoder, VerifiedDeltaEncoderState};
 pub use find::VerifiedFindByRange;
 #[cfg(verus_keep_ghost)]
 pub use find::{delta_finds, lemma_delta_finds, lemma_delta_finds_first, lemma_delta_within_one};
@@ -30,6 +34,8 @@ use super::model::Model;
 use super::only;
 use super::seal;
 use super::value::{VOps, VOptOps, VOptWrite, VPack, VWrite};
+#[cfg(verus_keep_ghost)]
+use super::VGet;
 use super::{VSpec, VValue, MAX_SEG};
 use crate::attrib::weigh_run;
 use crate::btree::{SlabAgg, SlabBTree};
@@ -1605,6 +1611,26 @@ pub(crate) trait DKind<C: VCodec>: VDelta {
         ensures
             <Self::B as DeltaOps<DItem<Self, C>>>::dv(r) == Self::fill_delta(f),
     ;
+
+    /// A value of the column underneath, as a specification has it, as
+    /// the delta it is.
+    spec fn d_of(s: <Self::I as VSpec>::S) -> Option<i64>;
+
+    /// That is the delta of the value as the column holds it.
+    proof fn lemma_d_of(o: <DE<Self, C> as Slabs>::V)
+        ensures
+            <Self::B as DeltaWrite<'static, DE<Self, C>, DX<Self, C>>>::dvo(o) == Self::d_of(
+                <<DE<Self, C> as Slabs>::V as VGet>::sv(o),
+            ),
+    ;
+
+    /// A delta as a value of the column underneath.
+    fn item(d: Option<i64>) -> (r: Self::I)
+        requires
+            !Self::nullable() ==> d is Some,
+        ensures
+            Self::d_of(<Self::I as VSpec>::sv_of(r)) == d,
+    ;
 }
 
 impl<T: VDeltaNum, C: VCodec> DKind<C> for T {
@@ -1622,6 +1648,22 @@ impl<T: VDeltaNum, C: VCodec> DKind<C> for T {
     fn fill_item(f: i64) -> i64 {
         f
     }
+
+    open spec fn d_of(s: i64) -> Option<i64> {
+        Some(s)
+    }
+
+    proof fn lemma_d_of(o: i64) {
+    }
+
+    #[inline(always)]
+    #[allow(clippy::manual_unwrap_or_default, clippy::manual_unwrap_or)]
+    fn item(d: Option<i64>) -> i64 {
+        match d {
+            Some(n) => n,
+            None => 0,
+        }
+    }
 }
 
 impl<T: VDeltaNum, C: VCodec> DKind<C> for Option<T> {
@@ -1638,6 +1680,18 @@ impl<T: VDeltaNum, C: VCodec> DKind<C> for Option<T> {
     #[inline(always)]
     fn fill_item(f: Option<i64>) -> Option<i64> {
         f
+    }
+
+    open spec fn d_of(s: Option<i64>) -> Option<i64> {
+        s
+    }
+
+    proof fn lemma_d_of(o: Option<i64>) {
+    }
+
+    #[inline(always)]
+    fn item(d: Option<i64>) -> Option<i64> {
+        d
     }
 }
 

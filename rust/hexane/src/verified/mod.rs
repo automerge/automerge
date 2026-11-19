@@ -559,15 +559,17 @@ pub use decoder::{
 };
 #[cfg(verus_keep_ghost)]
 pub use delta::{
-    all_dom, all_fit, delta_at, delta_below, delta_finds, delta_prefix, delta_run_fits,
-    delta_run_in_range, delta_run_kept, delta_run_values, delta_runs_at, delta_runs_fit,
-    delta_runs_kept, delta_runs_values, delta_within, deltas, dom, dvs, in_dom, lemma_delta_finds,
-    lemma_delta_finds_first, lemma_delta_run_at, lemma_delta_run_exact, lemma_delta_run_fits,
-    lemma_delta_runs_at, lemma_delta_runs_one, lemma_delta_runs_push, lemma_delta_within_one, vals,
+    all_dom, all_fit, delta_at, delta_below, delta_finds, delta_iter_fits, delta_near,
+    delta_prefix, delta_run_fits, delta_run_in_range, delta_run_kept, delta_run_values,
+    delta_runs_at, delta_runs_fit, delta_runs_kept, delta_runs_values, delta_span_ok, delta_within,
+    deltas, dom, dvs, in_dom, lemma_delta_finds, lemma_delta_finds_first, lemma_delta_run_at,
+    lemma_delta_run_exact, lemma_delta_run_fits, lemma_delta_runs_at, lemma_delta_runs_one,
+    lemma_delta_runs_push, lemma_delta_within_one, vals,
 };
 pub use delta::{
-    VDelta, VDeltaNum, VDeltaValue, VerifiedDeltaColumn, VerifiedDeltaIter, VerifiedDeltaIterState,
-    VerifiedDeltaRuns, VerifiedFindByRange,
+    VDelta, VDeltaNum, VDeltaValue, VerifiedDeltaColumn, VerifiedDeltaEncoder,
+    VerifiedDeltaEncoderState, VerifiedDeltaIter, VerifiedDeltaIterState, VerifiedDeltaRuns,
+    VerifiedFindByRange,
 };
 pub use encoder::{VerifiedEncoder, VerifiedEncoderState};
 pub use kind::{LenIndex, VIndex, VKeeps};
