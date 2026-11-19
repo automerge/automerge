@@ -180,6 +180,11 @@ impl<'a> LoadOptions<'a> {
     /// library for convenience. The way this works is that after loading the document we iterate
     /// through all visible [`ScalarValue::Str`] values and emit a change which creates a new
     /// [`ObjType::Text`] at the same path with the same content.
+    ///
+    /// Under [`LoadOptions::signing`] the migration change is ordinary new
+    /// local work authored by the configured [`LoadOptions::author`]: it is
+    /// an unpublished draft with a signing request, is omitted from saves
+    /// until signed, and the loaded history remains published.
     pub fn migrate_strings(self, migration: StringMigration) -> Self {
         Self {
             string_migration: migration,
@@ -218,6 +223,10 @@ impl<'a> LoadOptions<'a> {
     /// chunk (as written by a required-mode [`Automerge::save`]); the
     /// snapshot's history is reconstructed and its canonical groups verified
     /// before anything is adopted. Bare snapshots are rejected.
+    ///
+    /// Conversely, loading without this option rejects any stream containing
+    /// a signed group (`load::Error::SignedContent`) under either
+    /// [`OnPartialLoad`] policy; signatures are never silently stripped.
     pub fn signing(self) -> Self {
         Self {
             signing: true,
@@ -1380,6 +1389,12 @@ impl Automerge {
                     return Err(AutomergeError::MissingDeps);
                 }
             }
+            // Signed content anywhere in an unsigned load is a mode mismatch,
+            // not a damaged tail: never recover the unsigned prefix around it.
+            load::LoadedChanges::Partial {
+                error: error @ load::Error::SignedContent,
+                ..
+            } => return Err(error.into()),
             load::LoadedChanges::Partial { error, .. } => {
                 if options.on_partial_load == OnPartialLoad::Error {
                     return Err(error.into());
@@ -1603,7 +1618,8 @@ impl Automerge {
     /// a document snapshot.
     ///
     /// In signing mode each group must carry its own valid proof; bare changes
-    /// are rejected. In unsigned mode attached signatures are ignored.
+    /// are rejected. In unsigned mode any group carrying attached signatures
+    /// is rejected with a load error rather than silently stripped.
     /// All inputs are converted before any history is applied, so a conversion
     /// error leaves the document unchanged. Already-applied changes are ignored.
     ///

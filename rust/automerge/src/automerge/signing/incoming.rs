@@ -20,7 +20,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 
-use crate::admission::{self, AcceptedHistory};
+use crate::admission::{select_fragments, AcceptedHistory};
 use crate::change_graph::ChangeGraph;
 use crate::signature::error::{InvalidFragment, ProofError, SigningError};
 use crate::signature::{
@@ -977,7 +977,7 @@ impl Automerge {
             graph: &self.change_graph,
             signing,
         };
-        let selection = admission::select_fragments(&accepted_view, &fragments);
+        let selection = select_fragments(&accepted_view, &fragments);
         let selected_verified_indices: Vec<usize> = selection.selected_indices().collect();
 
         let mut selected_unapplied: HashSet<ChangeHash> = HashSet::new();

@@ -236,6 +236,269 @@ fn tampered_or_missing_required_proof_fails_but_bad_extras_are_ignored() {
     .is_err());
 }
 
+/// Encode `doc`'s applied history as an unsigned snapshot followed by one
+/// signatures chunk holding `entries`.
+fn snapshot_with_entries(
+    doc: &Automerge,
+    entries: impl IntoIterator<Item = (ChangeHash, Signature)>,
+) -> Vec<u8> {
+    let document = crate::storage::Document::new(
+        &doc.ops,
+        &doc.change_graph,
+        crate::storage::document::CompressConfig::None,
+    );
+    let mut bytes = document.into_bytes();
+    bytes.extend_from_slice(
+        SignaturesChunk::encode(HashEntries::canonicalize(entries).unwrap()).bytes(),
+    );
+    bytes
+}
+
+/// A snapshot whose history violates the actor-chain rule (X:2 omits its
+/// direct X:1 predecessor edge) is rejected even when every frontier is
+/// signed by its author and even under `VerificationMode::DontCheck`: legacy
+/// chain-incomplete history is loadable unsigned, never as signed trust.
+#[test]
+fn chain_incomplete_snapshot_signed_at_frontier_is_rejected_even_with_dont_check() {
+    let kx = key(1);
+    let ky = key(2);
+    let mut doc = Automerge::new_with_author(Some(author(&kx))).with_actor(ActorId::from([1]));
+    let x1 = append_at_level(&mut doc, None, 1, 0);
+    let mut other = doc.fork_with_author(Some(author(&ky))).unwrap();
+    other.set_actor(ActorId::from([2]));
+    let y1 = append_at_level(&mut other, None, 2, 0);
+    doc.merge(&mut other).unwrap();
+    let x2 = append_at_level(&mut doc, Some(&[y1]), 3, 0);
+    // Legacy producer shape: X:2 depends on Y:1 (which depends on X:1) only.
+    let mut expanded = crate::ExpandedChange::from(&doc.get_change_by_hash(&x2).unwrap());
+    expanded.deps = vec![y1];
+    expanded.hash = None;
+    let legacy_x2 = Change::from(expanded);
+    let legacy_bytes = [
+        doc.get_change_by_hash(&x1).unwrap().raw_bytes(),
+        doc.get_change_by_hash(&y1).unwrap().raw_bytes(),
+        legacy_x2.raw_bytes(),
+    ]
+    .concat();
+    // Unsigned loading of the legacy history is unchanged.
+    let legacy = Automerge::load(&legacy_bytes).unwrap();
+    assert_eq!(legacy.get_heads(), [legacy_x2.hash()]);
+
+    // Every loose frontier signed by its author: the only defect is the chain.
+    let lx2 = legacy_x2.hash();
+    let bytes = snapshot_with_entries(
+        &legacy,
+        [
+            (x1, Signature::ed25519(sig(&kx, &x1))),
+            (y1, Signature::ed25519(sig(&ky, &y1))),
+            (lx2, Signature::ed25519(sig(&kx, &lx2))),
+        ],
+    );
+    for mode in [
+        crate::VerificationMode::Check,
+        crate::VerificationMode::DontCheck,
+    ] {
+        let error = Automerge::load_with_options(&bytes, load_opts(200).verification_mode(mode))
+            .expect_err("chain-incomplete signed snapshot must be rejected");
+        assert!(
+            matches!(
+                error,
+                AutomergeError::Signing(SigningError::InvalidFragment(
+                    crate::signature::error::InvalidFragment::BrokenActorChain(h)
+                )) if h == lx2
+            ),
+            "{mode:?}: {error:?}"
+        );
+        let mut receiver = Automerge::signing(author(&key(200))).unwrap();
+        assert!(receiver.load_incremental(&bytes).is_err());
+        assert!(receiver.get_heads().is_empty());
+    }
+}
+
+/// Author tampering inside a snapshot is caught before any receiver mutation:
+/// a signature from a key other than the bound author, a swapped author
+/// footer on `seq == 1` (hash mismatch at reconstruction), and an author
+/// footer on `seq > 1` (reconstruction rule) all fail, in initial and
+/// incremental signed loads.
+#[test]
+fn snapshot_author_tampering_is_rejected_before_receiver_mutation() {
+    let k = key(1);
+    let mallory = key(9);
+    let mut doc = Automerge::signing(author(&k))
+        .unwrap()
+        .with_actor(ActorId::from([1]));
+    let a = append_at_level(&mut doc, None, 1, 0);
+    let b = append_at_level(&mut doc, None, 2, 0);
+    sign_doc(&mut doc, a, &k);
+    sign_doc(&mut doc, b, &k);
+    let honest = doc.save();
+    let (rest, Chunk::Document(_)) = Chunk::parse(Input::new(&honest)).unwrap() else {
+        panic!("expected document");
+    };
+    let document = &honest[..honest.len() - rest.unconsumed_bytes().len()];
+
+    // 1. Proof for the head produced by a key that is not the bound author.
+    let foreign_proof = [
+        document,
+        SignaturesChunk::encode(
+            HashEntries::canonicalize([
+                (a, Signature::ed25519(sig(&k, &a))),
+                (b, Signature::ed25519(sig(&mallory, &b))),
+            ])
+            .unwrap(),
+        )
+        .bytes(),
+    ]
+    .concat();
+
+    // 2. Author footer swapped on seq 1 while the snapshot still claims the
+    //    honest hashes: reconstruction detects the mismatch; Mallory's proof
+    //    for the claimed hash cannot repair it.
+    let mut expanded = crate::ExpandedChange::from(&doc.get_change_by_hash(&a).unwrap());
+    expanded.extra_bytes = crate::change::encode_author_footer(&Some(author(&mallory))).to_vec();
+    expanded.hash = None;
+    let forged_a = Change::from(expanded);
+    let mut single = Automerge::signing(author(&k))
+        .unwrap()
+        .with_actor(ActorId::from([1]));
+    let only = append_at_level(&mut single, None, 1, 0);
+    assert_eq!(only, a, "same deterministic first change");
+    single
+        .change_graph
+        .forge_head_extra_bytes_for_test(&a, &forged_a, false);
+    let swapped_bytes =
+        snapshot_with_entries(&single, [(a, Signature::ed25519(sig(&mallory, &a)))]);
+
+    // 3. Author footer on seq 2 reconstructed from a snapshot.
+    let mut expanded = crate::ExpandedChange::from(&doc.get_change_by_hash(&b).unwrap());
+    expanded.extra_bytes = crate::change::encode_author_footer(&Some(author(&k))).to_vec();
+    expanded.hash = None;
+    let forged_b = Change::from(expanded);
+    assert_eq!(forged_b.seq(), 2);
+    assert!(forged_b.author().is_some());
+    let mut forged_doc = doc.clone();
+    forged_doc
+        .change_graph
+        .forge_head_extra_bytes_for_test(&b, &forged_b, true);
+    let fb = forged_b.hash();
+    let seq2_author_bytes = snapshot_with_entries(
+        &forged_doc,
+        [
+            (a, Signature::ed25519(sig(&k, &a))),
+            (fb, Signature::ed25519(sig(&k, &fb))),
+        ],
+    );
+
+    for (label, bytes) in [
+        ("foreign proof", foreign_proof),
+        ("swapped seq-1 author", swapped_bytes),
+        ("author on seq 2", seq2_author_bytes),
+    ] {
+        let error = Automerge::load_with_options(&bytes, load_opts(200))
+            .err()
+            .unwrap_or_else(|| panic!("{label}: tampered snapshot must be rejected"));
+        if label == "author on seq 2" {
+            assert!(
+                matches!(error, AutomergeError::AuthorOnNonInitialSeq(2, _)),
+                "{label}: {error:?}"
+            );
+        }
+        // Incremental into a receiver holding the honest history and a draft:
+        // nothing changes.
+        let mut receiver = Automerge::load_with_options(&honest, load_opts(200)).unwrap();
+        receiver.set_actor(ActorId::from([200]));
+        let draft = append_at_level(&mut receiver, None, 7, 0);
+        let heads_before = receiver.get_heads();
+        let accepted_before = is_accepted(&mut receiver, &b);
+        let mut log = PatchLog::active();
+        assert!(
+            receiver
+                .load_incremental_log_patches(&bytes, &mut log)
+                .is_err(),
+            "{label}"
+        );
+        assert_eq!(receiver.get_heads(), heads_before, "{label}");
+        assert_eq!(is_accepted(&mut receiver, &b), accepted_before, "{label}");
+        assert!(!is_accepted(&mut receiver, &draft), "{label}");
+        assert!(receiver.make_patches(&mut log).is_empty(), "{label}");
+        assert!(receiver.get_change_by_hash(&fb).is_none(), "{label}");
+        assert!(receiver.get_author_for_actor(&ActorId::from([1])) == Some(author(&k)));
+    }
+    // The honest snapshot still loads, pinning that only the tampering failed.
+    assert_eq!(
+        Automerge::load_with_options(&honest, load_opts(200))
+            .unwrap()
+            .get_heads(),
+        [b]
+    );
+}
+
+/// `StringMigration::ConvertToText` under a signing load creates new local
+/// work: an unpublished draft with a request for the configured author. The
+/// loaded history stays published and saves omit the migration until signed.
+#[test]
+fn string_migration_under_signing_load_is_new_local_unpublished_work() {
+    let k = key(1);
+    let mut doc = Automerge::signing(author(&k))
+        .unwrap()
+        .with_actor(ActorId::from([1]));
+    let mut tx = doc.transaction();
+    tx.put(ROOT, "s", "hello").unwrap();
+    let a = tx.commit().0.unwrap();
+    sign_doc(&mut doc, a, &k);
+    let bytes = doc.save();
+
+    let loader = key(200);
+    let mut loaded = Automerge::load_with_options(
+        &bytes,
+        load_opts(200).migrate_strings(crate::StringMigration::ConvertToText),
+    )
+    .unwrap();
+    // The migration is a new local change by the loader, not loaded history.
+    let heads = loaded.get_heads();
+    assert_eq!(heads.len(), 1);
+    let migration = heads[0];
+    assert_ne!(migration, a);
+    assert!(is_accepted(&mut loaded, &a));
+    assert!(!is_accepted(&mut loaded, &migration));
+    assert!(loaded.has_unpublished_changes());
+    let requests = loaded.request_signatures().unwrap();
+    assert_eq!(
+        requests
+            .iter()
+            .map(SigningRequest::hash)
+            .collect::<Vec<_>>(),
+        [migration]
+    );
+    assert_eq!(
+        loaded.get_change_by_hash(&migration).unwrap().author(),
+        Some(author(&loader))
+    );
+    let (value, _) = loaded.get(ROOT, "s").unwrap().unwrap();
+    assert!(matches!(value, crate::Value::Object(crate::ObjType::Text)));
+
+    // Saving omits the unsigned migration; the original history is intact.
+    let resaved = loaded.save();
+    let mut reloaded = Automerge::load_with_options(&resaved, load_opts(201)).unwrap();
+    assert_eq!(reloaded.get_heads(), [a]);
+    assert!(is_accepted(&mut reloaded, &a));
+    assert_eq!(
+        reloaded.get(ROOT, "s").unwrap().unwrap().0,
+        crate::Value::Scalar(std::borrow::Cow::Owned("hello".into()))
+    );
+
+    // Once signed, the migration is published and persists.
+    sign_doc(&mut loaded, migration, &loader);
+    assert!(!loaded.has_unpublished_changes());
+    let published = Automerge::load_with_options(&loaded.save(), load_opts(202)).unwrap();
+    assert_eq!(published.get_heads(), [migration]);
+
+    // Without migration configured no local work is manufactured.
+    let plain = Automerge::load_with_options(&bytes, load_opts(200)).unwrap();
+    assert!(!plain.has_unpublished_changes());
+    assert_eq!(plain.get_heads(), [a]);
+}
+
 #[test]
 fn autocommit_incremental_cursor_tracks_published_emission_only() {
     let k = key(1);
@@ -409,6 +672,61 @@ fn speculative_pending_groups_are_not_persisted() {
     assert!(
         doc.signing.has_pending_groups(),
         "save did not disturb pending"
+    );
+}
+
+/// Published history without resident proof is an internal inconsistency.
+/// Save must fail loudly in every build instead of emitting a snapshot whose
+/// attached proof cannot cover it (bytes no required-mode loader accepts).
+#[test]
+fn save_panics_in_all_builds_when_published_history_lacks_resident_proof() {
+    use std::panic::{catch_unwind, AssertUnwindSafe};
+
+    let k = key(1);
+    let mut doc = Automerge::signing(author(&k))
+        .unwrap()
+        .with_actor(ActorId::from([1]));
+    let a = append_at_level(&mut doc, None, 1, 0);
+    let b = append_at_level(&mut doc, None, 2, 0);
+    sign_doc(&mut doc, a, &k);
+    sign_doc(&mut doc, b, &k);
+    assert!(is_accepted(&mut doc, &b));
+    let honest = doc.save();
+    let honest_groups = doc.published_groups(&[]).len();
+
+    // Corrupt internal state: forget b's proof while b stays published.
+    let crate::automerge::signing::SigningState::Required(signing) = &mut doc.signing else {
+        panic!("required mode");
+    };
+    signing.signatures.retain_hashes(|hash| *hash != b);
+    assert!(is_accepted(&mut doc, &b));
+
+    let save = catch_unwind(AssertUnwindSafe(|| doc.save()));
+    let groups = catch_unwind(AssertUnwindSafe(|| doc.published_groups(&[])));
+    let incremental = catch_unwind(AssertUnwindSafe(|| doc.save_after(&[])));
+    for (label, outcome) in [
+        ("save", save.as_ref().map(|_| ())),
+        ("published_groups", groups.as_ref().map(|_| ())),
+        ("save_after", incremental.as_ref().map(|_| ())),
+    ] {
+        let error = outcome.expect_err(label);
+        let message = error
+            .downcast_ref::<String>()
+            .cloned()
+            .or_else(|| error.downcast_ref::<&str>().map(|s| s.to_string()))
+            .unwrap_or_default();
+        assert!(
+            message.contains("published") && message.contains("proof"),
+            "{label}: inconsistency must be explained, got {message:?}"
+        );
+    }
+    // The untouched document produced a complete, loadable snapshot.
+    assert!(honest_groups >= 1);
+    assert_eq!(
+        Automerge::load_with_options(&honest, load_opts(200))
+            .unwrap()
+            .get_heads(),
+        [b]
     );
 }
 

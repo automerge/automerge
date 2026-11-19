@@ -58,6 +58,11 @@ impl Automerge {
             }
             self.admit_loaded_groups(groups, log)
         } else {
+            // Unsigned mode never strips a proof: decoded, parsed and encoded
+            // inputs alike are rejected whole before any member is applied.
+            if groups.iter().any(|group| group.signatures.is_some()) {
+                return Err(crate::storage::load::Error::SignedContent.into());
+            }
             let changes = groups.into_iter().flat_map(|group| match group.body {
                 LoadedGroupBody::Changes(changes) => changes,
                 LoadedGroupBody::Document(_) => {

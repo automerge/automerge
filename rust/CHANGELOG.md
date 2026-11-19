@@ -37,7 +37,9 @@
   proofs. Drafts and pending groups stay in the live document, and the
   `AutoCommit` incremental cursor tracks what was actually emitted. Loading
   with `LoadOptions::signing` re-derives publication from the proof; unsigned
-  loaders reject signed bytes instead of discarding their signatures.
+  loaders (`load`, `load_incremental`, `apply_changes`) reject any delivery
+  containing signed groups instead of discarding their signatures, even under
+  `OnPartialLoad::Ignore`.
 * Author assignments are stored in the extra bytes of an actor's first change
   and preserved through merging and saving/loading. `Change::author` reads an
   assignment from an individual change; subsequent changes from the same actor

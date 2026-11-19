@@ -185,8 +185,8 @@ mod tests {
     use crate::storage::{Chunk, ChunkType, Header};
     use crate::transaction::Transactable;
     use crate::{
-        ActorId, Automerge, AutomergeError, Change, LoadOptions, OnPartialLoad, ReadDoc,
-        TextEncoding, ROOT,
+        ActorId, Automerge, AutomergeError, Change, LoadOptions, LoadedGroup, OnPartialLoad,
+        ReadDoc, TextEncoding, ROOT,
     };
 
     fn change(actor: u8) -> Change {
@@ -320,6 +320,107 @@ mod tests {
             Automerge::load(&stream),
             Err(AutomergeError::Load(Error::SignedContent))
         ));
+    }
+
+    /// An unsigned prefix followed by a signed group is a mode mismatch for
+    /// the whole delivery, not a damaged tail: `OnPartialLoad::Ignore` must
+    /// not recover the prefix and silently drop the signed group.
+    #[test]
+    fn unsigned_prefix_followed_by_signed_group_is_rejected_under_ignore() {
+        let mut doc = Automerge::new().with_actor(ActorId::from(vec![1]));
+        let mut tx = doc.transaction();
+        tx.put(ROOT, "first", 1).unwrap();
+        let first = tx.commit().0.unwrap();
+        let snapshot = doc.save();
+        let loose = doc.get_change_by_hash(&first).unwrap();
+        let mut tx = doc.transaction();
+        tx.put(ROOT, "later", 2).unwrap();
+        let later_hash = tx.commit().0.unwrap();
+        let later = doc.get_change_by_hash(&later_hash).unwrap();
+        let signed_later = [
+            later.raw_bytes(),
+            framed(ChunkType::Signatures, &[0]).as_slice(),
+        ]
+        .concat();
+        let streams = [
+            [snapshot.as_slice(), signed_later.as_slice()].concat(),
+            [loose.raw_bytes(), signed_later.as_slice()].concat(),
+        ];
+        for stream in &streams {
+            for policy in [OnPartialLoad::Error, OnPartialLoad::Ignore] {
+                let error = Automerge::load_with_options(
+                    stream,
+                    LoadOptions::new().on_partial_load(policy),
+                )
+                .expect_err("signed group after unsigned prefix must be rejected");
+                assert!(
+                    matches!(error, AutomergeError::Load(Error::SignedContent)),
+                    "{policy:?}: {error:?}"
+                );
+            }
+            // Empty and nonempty incremental targets alike reject the delivery whole.
+            let mut empty = Automerge::new();
+            assert!(matches!(
+                empty.load_incremental(stream),
+                Err(AutomergeError::Load(Error::SignedContent))
+            ));
+            assert!(empty.get_heads().is_empty());
+            let mut nonempty = Automerge::new();
+            nonempty.apply_changes([change(3)]).unwrap();
+            let before = nonempty.get_heads();
+            assert!(matches!(
+                nonempty.load_incremental(stream),
+                Err(AutomergeError::Load(Error::SignedContent))
+            ));
+            assert_eq!(nonempty.get_heads(), before);
+        }
+        // Ordinary unsigned partial recovery is unchanged.
+        let damaged = [snapshot.as_slice(), &[1, 2, 3, 4]].concat();
+        let recovered = Automerge::load_with_options(
+            &damaged,
+            LoadOptions::new().on_partial_load(OnPartialLoad::Ignore),
+        )
+        .unwrap();
+        assert_eq!(recovered.get_heads(), vec![first]);
+    }
+
+    /// Unsigned `apply_changes` never strips an attached proof, whatever the
+    /// input form, and converts the whole batch before applying anything.
+    #[test]
+    fn unsigned_apply_rejects_decoded_groups_carrying_signatures() {
+        let plain = change(1);
+        let signed = change(2);
+        let bytes = [
+            signed.raw_bytes(),
+            framed(ChunkType::Signatures, &[0]).as_slice(),
+        ]
+        .concat();
+        let decoded = LoadedGroup::try_from(bytes.as_slice()).unwrap();
+        assert!(decoded.signatures.is_some());
+        let parsed = Change::parse_with_signatures(&bytes).unwrap();
+        assert!(parsed.signatures.is_some());
+
+        let mut doc = Automerge::new();
+        assert!(matches!(
+            doc.apply_changes([LoadedGroup::from(plain.clone()), decoded]),
+            Err(AutomergeError::Load(Error::SignedContent))
+        ));
+        assert!(doc.get_heads().is_empty(), "whole delivery left unapplied");
+        assert!(matches!(
+            doc.apply_changes([parsed]),
+            Err(AutomergeError::Load(Error::SignedContent))
+        ));
+        assert!(matches!(
+            doc.apply_changes([bytes]),
+            Err(AutomergeError::Load(Error::SignedContent))
+        ));
+        assert!(doc.get_heads().is_empty());
+        doc.apply_changes([plain.clone(), signed.clone()]).unwrap();
+        let mut heads = doc.get_heads();
+        heads.sort();
+        let mut expected = vec![plain.hash(), signed.hash()];
+        expected.sort();
+        assert_eq!(heads, expected);
     }
 
     #[test]

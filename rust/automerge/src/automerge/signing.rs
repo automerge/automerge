@@ -14,7 +14,7 @@ use std::collections::HashSet;
 use std::ops::RangeBounds;
 
 use crate::actor::{ActorRemoval, ActorShift, ActorTable};
-use crate::admission::{self, AcceptedHistory};
+use crate::admission::{select_fragments, AcceptedHistory};
 use crate::author::Authors;
 use crate::change_graph::ChangeGraph;
 use crate::clock::SeqClock;
@@ -437,7 +437,7 @@ impl<'a> SigningDocument<'a> {
 
     fn accept_local(&mut self) {
         let fragments = self.local_candidate_fragments();
-        let selection = admission::select_fragments(&*self, &fragments);
+        let selection = select_fragments(&*self, &fragments);
         self.state.accepted.include_hashes(
             self.graph,
             selection

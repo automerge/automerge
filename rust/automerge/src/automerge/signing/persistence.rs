@@ -20,7 +20,7 @@
 
 use std::collections::{BTreeSet, HashSet};
 
-use crate::admission::{self, AcceptedHistory};
+use crate::admission::{select_fragments, AcceptedHistory};
 use crate::change_graph::ChangeGraph;
 use crate::signature::error::{ProofError, SigningError};
 use crate::signature::{FragmentRequirements, Signature, SignatureStore};
@@ -35,8 +35,11 @@ use super::{has_signature, RequiredSigning, SigningState};
 /// A complete canonical group of published history with its own proof.
 ///
 /// Members are the exact original changes (bytes and hashes preserved), and
-/// `signatures` holds every required frontier signature for the group, so the
-/// group verifies on an empty required peer without resident evidence.
+/// `signatures` holds every required frontier signature for the group. The
+/// group carries complete proof of its own members; verifying it may still
+/// need causal context (author bindings established by earlier groups), so
+/// the *collection* of published groups, delivered oldest first, transfers to
+/// an empty required peer.
 #[derive(Clone, Debug)]
 pub(crate) struct PublishedGroup {
     pub(crate) fragment: Fragment,
@@ -76,7 +79,8 @@ fn published_hashes(graph: &ChangeGraph, signing: &RequiredSigning) -> HashSet<C
 }
 
 /// Canonical candidates (historical hard fragments and loose commits) whose
-/// members all lie in `published`, newest first.
+/// members all lie in `published`, ordered by descending node rank of the
+/// head (most recently applied head first; size plays no part).
 fn published_candidates(graph: &ChangeGraph, published: &HashSet<ChangeHash>) -> Vec<Fragment> {
     let mut heads: Vec<ChangeHash> = published.iter().copied().collect();
     heads.sort_unstable_by_key(|head| std::cmp::Reverse(graph.node_rank(head).unwrap()));
@@ -87,11 +91,22 @@ fn published_candidates(graph: &ChangeGraph, published: &HashSet<ChangeHash>) ->
         .collect()
 }
 
-/// Greedy cover of `published` by proved candidates, largest/newest first.
+/// Greedy cover of `published` by proved candidates in
+/// [`published_candidates`] order: a candidate is taken when it represents a
+/// not-yet-represented member and its complete proof is resident.
 ///
 /// Candidates are filtered to published membership *before* selection, so an
 /// unpublished (merely ready) cover can never hide a published fallback. Every
 /// returned fragment has a complete resident proof.
+///
+/// # Panics
+///
+/// Publication only ever happens through a proved cover, and reclamation keeps
+/// a published loose proof until a published cover represents it, so every
+/// published hash is represented. A published hash without a proved candidate
+/// is an internal inconsistency; the output would be a snapshot whose attached
+/// proof cannot cover it, which no required-mode loader accepts. This is
+/// checked in all builds and panics instead of emitting such bytes.
 fn published_cover(
     graph: &ChangeGraph,
     authors: &crate::author::Authors,
@@ -115,10 +130,13 @@ fn published_cover(
         represented.extend(fragment.members.iter().copied());
         cover.push(fragment);
     }
-    debug_assert!(
-        published.iter().all(|hash| represented.contains(hash)),
-        "published history is always covered by proved candidates"
-    );
+    if let Some(uncovered) = published.iter().find(|hash| !represented.contains(hash)) {
+        panic!(
+            "published change {uncovered} has no canonical candidate with complete resident \
+             proof; publication always retains the proof of a covering fragment, so the \
+             signature store and accepted clock are inconsistent"
+        );
+    }
     cover
 }
 
@@ -307,7 +325,7 @@ pub(super) fn verify_snapshot(
     }
     let fragments: Vec<Fragment> = verified.iter().map(|(f, _)| f.clone()).collect();
     let empty = HashSet::new();
-    let selection = admission::select_fragments(&AcceptedSet(&empty), &fragments);
+    let selection = select_fragments(&AcceptedSet(&empty), &fragments);
     let published: HashSet<ChangeHash> = selection
         .selected()
         .flat_map(|fragment| fragment.members.iter().copied())

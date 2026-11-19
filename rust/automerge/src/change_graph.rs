@@ -551,6 +551,48 @@ impl ChangeGraph {
             .copied()
     }
 
+    /// Overwrite the stored extra bytes of the applied head `old` with those of
+    /// `forged`, which must differ only in its extra bytes (and therefore its
+    /// hash). With `rename` the recorded hash is updated to `forged.hash()`;
+    /// without it the snapshot keeps claiming `old` for a body that no longer
+    /// hashes to it. For forging snapshot fixtures that no honest encoder
+    /// produces. `old` must be a head so no dependency edge names it.
+    #[cfg(test)]
+    pub(crate) fn forge_head_extra_bytes_for_test(
+        &mut self,
+        old: &ChangeHash,
+        forged: &Change,
+        rename: bool,
+    ) {
+        let index = self.hash_to_index(old).expect("hash is applied");
+        assert!(self.heads.contains(old), "only heads can be forged");
+        let extra = forged.extra_bytes();
+        let new_hash = forged.hash();
+        let mut raw = Vec::with_capacity(self.extra_bytes_raw.len() + extra.len());
+        let mut meta = hexane::PrefixColumn::<ValueMeta>::new();
+        for i in 0..self.extra_bytes_meta.len() {
+            let current = self.extra_bytes_meta.get(i).unwrap();
+            let range = current.prefix() as usize..current.total() as usize;
+            let bytes: &[u8] = if i == index {
+                extra
+            } else {
+                &self.extra_bytes_raw[range]
+            };
+            meta.push(ValueMeta::from(bytes));
+            raw.extend_from_slice(bytes);
+        }
+        self.extra_bytes_meta = meta;
+        self.extra_bytes_raw = raw;
+        if !rename {
+            return;
+        }
+        self.hashes[index] = new_hash;
+        let node = self.nodes_by_hash.remove(old).unwrap();
+        self.nodes_by_hash.insert(new_hash, node);
+        self.heads.remove(old);
+        self.heads.insert(new_hash);
+    }
+
     fn update_heads(&mut self, change: &Change) {
         for d in change.deps() {
             self.heads.remove(d);
