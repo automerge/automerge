@@ -334,8 +334,14 @@ pub(crate) fn d_next<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
                 &&& x == realize(psum(dbefore::<X, B>(slabs@, old(core).pos as int)), B::dv(o[0]))
                 &&& final(core).out::<X>(slabs@) == o.skip(1)
                 &&& final(core).pos == old(core).pos + 1
+                &&& final(core).items_left == old(core).items_left - 1
             },
-            None => old(core).out::<X>(slabs@).len() == 0 && final(core).out::<X>(slabs@).len() == 0,
+            None => {
+                &&& old(core).out::<X>(slabs@).len() == 0
+                &&& final(core).out::<X>(slabs@).len() == 0
+                &&& final(core).pos == old(core).pos
+                &&& final(core).items_left == 0
+            },
         },
 {
     let ghost c0 = *core;
@@ -378,9 +384,18 @@ pub(crate) fn d_next_run<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item
                 &&& o.take(run.count as int) == Seq::new(run.count as nat, |_i: int| run.value)
                 &&& final(core).out::<X>(slabs@) == o.skip(run.count as int)
                 &&& final(core).pos == old(core).pos + run.count
+                &&& final(core).items_left == old(core).items_left - run.count
                 &&& run.count < max && run.count < o.len() ==> o[run.count as int] != run.value
             },
-            None => (max == 0 || old(core).out::<X>(slabs@).len() == 0) && final(core).pos == old(core).pos,
+            None => {
+                &&& max == 0 || old(core).out::<X>(slabs@).len() == 0
+                &&& final(core).pos == old(core).pos
+                &&& final(core).items_left == if max == 0 {
+                    old(core).items_left
+                } else {
+                    0
+                }
+            },
         },
 {
     let ghost c0 = *core;
@@ -563,6 +578,7 @@ fn d_take_nth<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
         ),
         final(core).out::<X>(slabs@) == old(core).out::<X>(slabs@).skip(n + 1),
         final(core).pos == old(core).pos + n + 1,
+        final(core).items_left == old(core).items_left - (n + 1),
 {
     hide(ICore::wf);
     hide(ICore::out);
@@ -593,6 +609,7 @@ fn d_take_nth<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
             m <= n,
             core.out::<X>(s) == o0.skip(n - m),
             core.pos == c0.pos + (n - m),
+            core.items_left == c0.items_left - (n - m),
             psum(dbefore::<X, B>(s, core.pos as int)) == p0 + psum(deltas_of::<_, B>(o0.take(n - m))),
         decreases m,
     {
@@ -671,7 +688,9 @@ pub(crate) proof fn lemma_found<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode
 /// The slab the index finds for the item `n` on from the iterator, when
 /// that is past the slab the iterator stands in: the iterator can jump to
 /// its start `start`, the index's prefix is the running sum there, and the
-/// item is in it. Past the last slab, the item is past the window.
+/// item is in it. Past the last slab, the item is past the window, and
+/// `start` is the column's end: where the window of an iterator in the
+/// column ends.
 proof fn lemma_jump<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
     c0: ICore<X::D>,
     ws: Seq<SlabAgg>,
@@ -696,10 +715,15 @@ proof fn lemma_jump<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
             &&& start - c0.pos <= c0.items_left
             &&& c0.pos + n - start < s[k].len
         },
-        k == s.len() ==> start >= total(slab_lens(s)) && n >= c0.out::<X>(s).len(),
+        k == s.len() ==> {
+            &&& start >= total(slab_lens(s))
+            &&& n >= c0.out::<X>(s).len()
+            &&& c0.pos <= total(slab_lens(s)) ==> start == c0.pos + c0.out::<X>(s).len()
+        },
 {
     let lens = slab_lens(s);
     c0.lemma_here::<X>(s);
+    c0.lemma_out_len::<X>(s);
     lemma_found::<X, B>(ws, s, k);
     lemma_dfold::<X, B>(ws, s, s.len() as int);
     assert(ws.subrange(0, s.len() as int) =~= ws);
@@ -786,8 +810,16 @@ fn d_nth_in<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
             ))
             &&& final(core).out::<X>(slabs@) == old(core).out::<X>(slabs@).skip(n + 1)
             &&& final(core).pos == old(core).pos + n + 1
+            &&& final(core).items_left == old(core).items_left - (n + 1)
         },
-        n >= old(core).out::<X>(slabs@).len() ==> r is None && final(core).out::<X>(slabs@).len() == 0,
+        n >= old(core).out::<X>(slabs@).len() ==> {
+            &&& r is None
+            &&& final(core).out::<X>(slabs@).len() == 0
+            &&& final(core).items_left == 0
+            &&& old(core).pos <= total(slab_lens(slabs@)) ==> final(core).pos == old(core).pos + old(core).out::<X>(
+                slabs@,
+            ).len()
+        },
 {
     let ghost s = slabs@;
     let ghost c0 = *core;
@@ -804,6 +836,10 @@ fn d_nth_in<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
         None => {
             // a default iterator: no column, no slabs
             core.advance_to_slab::<X>(slabs, slabs.len(), 0);
+            proof {
+                assert(slab_lens(s) =~= Seq::<nat>::empty());
+                assert(total(slab_lens(s)) == 0);
+            }
             return None;
         },
     };
@@ -853,8 +889,16 @@ pub(crate) fn d_nth<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
             ))
             &&& final(core).out::<X>(slabs@) == old(core).out::<X>(slabs@).skip(n + 1)
             &&& final(core).pos == old(core).pos + n + 1
+            &&& final(core).items_left == old(core).items_left - (n + 1)
         },
-        n >= old(core).out::<X>(slabs@).len() ==> r is None && final(core).out::<X>(slabs@).len() == 0,
+        n >= old(core).out::<X>(slabs@).len() ==> {
+            &&& r is None
+            &&& final(core).out::<X>(slabs@).len() == 0
+            &&& final(core).items_left == 0
+            &&& old(core).pos <= total(slab_lens(slabs@)) ==> final(core).pos == old(core).pos + old(core).out::<X>(
+                slabs@,
+            ).len()
+        },
 {
     if n >= core.items_left {
         proof {
@@ -867,6 +911,7 @@ pub(crate) fn d_nth<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
             proof {
                 if k < c0.out::<X>(slabs@).len() {
                     assert(c0.out::<X>(slabs@).skip(k + 1).len() == 0);
+                    assert(c0.out::<X>(slabs@).len() == c0.items_left);
                 }
             }
         }
@@ -886,7 +931,7 @@ pub(crate) open spec fn dval_at<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode
 
 /// Read from the window's start, the value at offset `k` is the one at
 /// item `a + k`.
-proof fn lemma_realized_window<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
+pub(crate) proof fn lemma_realized_window<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
     s: Seq<Slab<X::Tail>>,
     a: int,
     b: int,
@@ -931,8 +976,16 @@ pub(crate) fn d_step<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
             ))
             &&& final(core).out::<X>(slabs@) == old(core).out::<X>(slabs@).skip(n + 1)
             &&& final(core).pos == old(core).pos + n + 1
+            &&& final(core).items_left == old(core).items_left - (n + 1)
         },
-        n >= old(core).out::<X>(slabs@).len() ==> r is None && final(core).out::<X>(slabs@).len() == 0,
+        n >= old(core).out::<X>(slabs@).len() ==> {
+            &&& r is None
+            &&& final(core).out::<X>(slabs@).len() == 0
+            &&& final(core).items_left == 0
+            &&& old(core).pos <= total(slab_lens(slabs@)) ==> final(core).pos == old(core).pos + old(core).out::<X>(
+                slabs@,
+            ).len()
+        },
 {
     if n == 0 {
         proof {
@@ -1184,7 +1237,9 @@ pub(crate) fn d_run<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
                 &&& p == *old(running)
                 &&& final(core).out::<X>(slabs@) == o.skip(run.count as int)
                 &&& final(core).pos == old(core).pos + run.count
+                &&& final(core).items_left == old(core).items_left - run.count
             }
+            &&& r is None ==> final(core).pos == old(core).pos && final(core).items_left == 0
         }),
 {
     let prefix = *running;

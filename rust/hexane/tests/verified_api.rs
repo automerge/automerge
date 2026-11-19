@@ -12619,3 +12619,370 @@ fn delta_columns_load_with_options() {
         delta_loads_with!(Option<usize>, seed, Some(0));
     }
 }
+
+// ── Delta columns: the iterator ─────────────────────────────────────────────
+
+/// A move of a delta column's iterator.
+#[derive(Clone, Debug)]
+enum DeltaMove {
+    Next,
+    Nth(usize),
+    SetMax(usize),
+    AdvanceBy(usize),
+    AdvanceTo(usize),
+    Shift(Range<usize>),
+    ShiftNext(Range<usize>),
+    Copy(usize),
+}
+
+/// What the specification of `VerifiedDeltaIter` says of an iterator
+/// over `model`: where it stands and where its window ends, with the
+/// values of `model` between the two left to give.
+struct DeltaWalk<'a, T> {
+    model: &'a [T],
+    pos: usize,
+    end: usize,
+}
+
+impl<T: Deltad> DeltaWalk<'_, T> {
+    /// How many values the iterator has left.
+    fn left(&self) -> usize {
+        self.end.min(self.model.len()).saturating_sub(self.pos)
+    }
+
+    /// Where the iterator stands, where its window ends and how many
+    /// values it has left.
+    fn place(&self) -> (usize, usize, usize) {
+        (self.pos, self.end, self.left())
+    }
+
+    /// A window that ends at `end` and has no value for the iterator
+    /// leaves it there, if that is ahead of it and in the column, with
+    /// its window closed.
+    fn closed_at(&mut self, end: usize) {
+        self.pos = end.clamp(self.pos, self.model.len());
+        self.end = self.pos;
+    }
+
+    fn nth(&mut self, n: usize) -> Option<T> {
+        if n < self.left() {
+            let v = self.model[self.pos + n];
+            self.pos += n + 1;
+            Some(v)
+        } else {
+            self.pos += self.left();
+            self.end = self.pos;
+            None
+        }
+    }
+
+    fn advance_by(&mut self, amount: usize) {
+        if amount <= self.left() {
+            self.pos += amount;
+        } else {
+            self.pos += self.left();
+            self.end = self.pos;
+        }
+    }
+
+    /// What a move gives, and where it leaves the iterator.
+    fn does(&mut self, mv: &DeltaMove) -> Option<T> {
+        let len = self.model.len();
+        match mv.clone() {
+            DeltaMove::Next => return self.nth(0),
+            DeltaMove::Nth(n) => return self.nth(n),
+            DeltaMove::SetMax(end) => self.end = end.max(self.pos),
+            DeltaMove::AdvanceBy(amount) => self.advance_by(amount),
+            DeltaMove::AdvanceTo(target) => self.advance_by(target.saturating_sub(self.pos)),
+            DeltaMove::Shift(range) => {
+                if range.start <= self.pos {
+                    self.end = range.end.max(self.pos);
+                } else if range.start <= range.end && range.start <= len {
+                    self.pos = range.start;
+                    self.end = range.end;
+                } else {
+                    self.closed_at(range.end);
+                }
+            }
+            DeltaMove::ShiftNext(range) => {
+                if range.start < range.end.min(len) {
+                    self.pos = range.start + 1;
+                    self.end = range.end;
+                    return Some(self.model[range.start]);
+                }
+                self.closed_at(range.end);
+            }
+            DeltaMove::Copy(n) => {
+                let mut copy = DeltaWalk {
+                    model: self.model,
+                    pos: self.pos,
+                    end: self.end,
+                };
+                return copy.nth(n);
+            }
+        }
+        None
+    }
+}
+
+/// The move made of a verified delta column's iterator.
+fn new_delta_does<T: Deltad>(
+    x: &mut hexane::verified::VerifiedDeltaIter<'_, T>,
+    mv: &DeltaMove,
+) -> Option<T> {
+    match mv.clone() {
+        DeltaMove::Next => return x.next(),
+        DeltaMove::Nth(n) => return x.nth(n),
+        DeltaMove::SetMax(end) => x.set_max(end),
+        DeltaMove::AdvanceBy(amount) => x.advance_by(amount),
+        DeltaMove::AdvanceTo(target) => x.advance_to(target),
+        DeltaMove::Shift(range) => x.shift(range),
+        DeltaMove::ShiftNext(range) => return x.shift_next(range),
+        DeltaMove::Copy(n) => {
+            let mut copy = x.clone();
+            assert_eq!(format!("{copy:?}"), format!("{x:?}"));
+            return copy.nth(n);
+        }
+    }
+    None
+}
+
+/// The move made of `DeltaColumn`'s iterator.
+fn old_delta_does<T: Deltad>(y: &mut hexane::DeltaIter<'_, T>, mv: &DeltaMove) -> Option<T> {
+    match mv.clone() {
+        DeltaMove::Next => return y.next(),
+        DeltaMove::Nth(n) => return y.nth(n),
+        DeltaMove::SetMax(end) => y.set_max(end),
+        DeltaMove::AdvanceBy(amount) => y.advance_by(amount),
+        DeltaMove::AdvanceTo(target) => y.advance_to(target),
+        DeltaMove::Shift(range) => y.shift(range),
+        DeltaMove::ShiftNext(range) => return y.shift_next(range),
+        DeltaMove::Copy(n) => return y.clone().nth(n),
+    }
+    None
+}
+
+/// A move for an iterator that stands as `m` does: mostly within what it
+/// has left, sometimes past it.
+fn a_delta_move<T: Deltad>(rng: &mut Rng, m: &DeltaWalk<'_, T>) -> DeltaMove {
+    let len = m.model.len();
+    // how many values to pass over
+    let count = |rng: &mut Rng| match rng.below(4) {
+        0 => a_place(rng, len),
+        _ => rng.below(m.left() + 2),
+    };
+    match rng.below(14) {
+        0..=2 => DeltaMove::Next,
+        3 | 4 => DeltaMove::Nth(count(rng)),
+        5 | 6 => DeltaMove::SetMax(a_place(rng, len)),
+        7 => DeltaMove::AdvanceBy(a_place(rng, len - m.pos)),
+        8 => DeltaMove::AdvanceTo(a_place(rng, len)),
+        // any range: one that starts behind the iterator, one that ends
+        // before it starts
+        9 | 10 => DeltaMove::Shift(a_place(rng, len)..a_place(rng, len)),
+        11 | 12 => {
+            // a range that starts at the iterator or after it
+            let start = m.pos + a_place(rng, len - m.pos).min(usize::MAX - m.pos);
+            DeltaMove::ShiftNext(start..a_place(rng, len))
+        }
+        _ => DeltaMove::Copy(rng.below(3)),
+    }
+}
+
+/// Where a verified delta column's iterator stands, where its window
+/// ends and how many values it has left: asked each way there is.
+fn delta_place<T: Deltad>(x: &hexane::verified::VerifiedDeltaIter<'_, T>) -> (usize, usize, usize) {
+    assert_eq!(x.size_hint(), (x.len(), Some(x.len())));
+    (x.pos(), x.end_pos(), x.len())
+}
+
+/// The same of `DeltaColumn`'s iterator.
+fn old_delta_place<T: Deltad>(y: &hexane::DeltaIter<'_, T>) -> (usize, usize, usize) {
+    (y.pos(), y.end_pos(), y.len())
+}
+
+/// A verified delta column and the old one of the same `n` values, laid
+/// out in the same slabs, with the values.
+fn delta_pair<T: Deltad>(
+    rng: &mut Rng,
+    n: usize,
+    max_segments: Option<usize>,
+) -> (VerifiedDeltaColumn<T>, DeltaColumn<T>, Vec<T>) {
+    let (mut new, mut old) = match max_segments {
+        Some(m) => (
+            VerifiedDeltaColumn::<T>::with_max_segments(m),
+            DeltaColumn::<T>::with_max_segments(m),
+        ),
+        None => (
+            VerifiedDeltaColumn::<T>::default(),
+            DeltaColumn::<T>::default(),
+        ),
+    };
+    let mut last = 0;
+    let mut model = Vec::new();
+    for _ in 0..n {
+        let (v, l) = T::near(rng, last);
+        last = l;
+        // now and then at a place before the end, so that slabs are cut
+        let at = match rng.below(6) {
+            0 => rng.below(model.len() + 1),
+            _ => model.len(),
+        };
+        new.insert(at, v);
+        old.insert(at, v);
+        model.insert(at, v);
+    }
+    assert_eq!(new.slab_count(), old.slab_count());
+    (new, old, model)
+}
+
+/// A delta column's iterator gives the column's values in order and
+/// stands where its specification says under every move, as
+/// `DeltaColumn`'s iterator does: the two are asked the same at each
+/// step, with a walk of the values that follows the specification.
+fn delta_iters<T: Deltad>(seed: u64, max_segments: Option<usize>) {
+    let mut rng = Rng(seed.wrapping_mul(0x51_7cc1_b727).wrapping_add(11) | 1);
+    let n = match rng.below(5) {
+        0 => rng.below(4),
+        _ => rng.below(200),
+    };
+    let (new, old, model) = delta_pair::<T>(&mut rng, n, max_segments);
+    let len = model.len();
+    // all of it: in a `for` loop over the column and over its iterator,
+    // and by the standard library's functions
+    let mut seen = Vec::new();
+    for v in &new {
+        seen.push(v);
+    }
+    assert_eq!(seen, model);
+    assert_eq!(new.iter().collect::<Vec<T>>(), model);
+    assert_eq!(new.iter().count(), len);
+    assert_eq!(new.iter().last(), model.last().copied());
+    assert_eq!(new.iter().len(), old.iter().len());
+    assert_eq!(
+        format!("{:?}", new.iter()),
+        format!("{:?}", old.iter()).replace("DeltaIter", "VerifiedDeltaIter")
+    );
+    // the values of a range
+    for _ in 0..4 {
+        let start = rng.below(len + 1);
+        let end = start + rng.below(len - start + 1);
+        let x = new.iter_range(start, end);
+        let y = old.iter_range(start..end);
+        assert_eq!(delta_place(&x), (start, end, end - start));
+        assert_eq!(delta_place(&x), old_delta_place(&y));
+        assert_eq!(x.collect::<Vec<T>>(), model[start..end]);
+        assert_eq!(y.collect::<Vec<T>>(), model[start..end]);
+    }
+    // any moves
+    for _ in 0..6 {
+        let mut x = new.iter();
+        let mut y = old.iter();
+        let mut m = DeltaWalk {
+            model: &model,
+            pos: 0,
+            end: len,
+        };
+        for _ in 0..40 {
+            let mv = a_delta_move(&mut rng, &m);
+            let want = m.does(&mv);
+            assert_eq!(new_delta_does(&mut x, &mv), want, "{mv:?}");
+            assert_eq!(old_delta_does(&mut y, &mv), want, "{mv:?}");
+            assert_eq!(delta_place(&x), m.place(), "{mv:?}");
+            assert_eq!(old_delta_place(&y), m.place(), "{mv:?}");
+            assert_eq!(
+                format!("{x:?}"),
+                format!("{y:?}").replace("DeltaIter", "VerifiedDeltaIter"),
+                "{mv:?}"
+            );
+        }
+    }
+}
+
+/// A verified delta column's iterator and the old one's give the same
+/// values and stand in the same places under the same moves, which are
+/// the places the specification says: for every type of value, and with
+/// small slabs too.
+#[test]
+fn delta_iters_agree() {
+    for seed in 0..8 {
+        for max_segments in [None, Some(2), Some(5)] {
+            delta_iters::<u32>(seed, max_segments);
+            delta_iters::<u64>(seed, max_segments);
+            delta_iters::<i32>(seed, max_segments);
+            delta_iters::<i64>(seed, max_segments);
+            delta_iters::<usize>(seed, max_segments);
+            delta_iters::<Option<u32>>(seed, max_segments);
+            delta_iters::<Option<u64>>(seed, max_segments);
+            delta_iters::<Option<i32>>(seed, max_segments);
+            delta_iters::<Option<i64>>(seed, max_segments);
+            delta_iters::<Option<usize>>(seed, max_segments);
+        }
+    }
+}
+
+/// The ends of a delta column's iterator: one of no column and one of an
+/// empty column give nothing wherever they are moved, as `DeltaColumn`'s
+/// do, and a read to the end closes the window where it stops.
+#[test]
+fn delta_iter_ends() {
+    let mut x = hexane::verified::VerifiedDeltaIter::<Option<i64>>::default();
+    let mut y = hexane::DeltaIter::<Option<i64>>::default();
+    // (a range that ends before it starts, which is no slip here)
+    let (from, to) = (5, 1);
+    let moves = [
+        DeltaMove::Next,
+        DeltaMove::SetMax(4),
+        DeltaMove::Nth(2),
+        DeltaMove::AdvanceBy(3),
+        DeltaMove::AdvanceTo(7),
+        DeltaMove::Shift(2..9),
+        DeltaMove::ShiftNext(0..3),
+        DeltaMove::Shift(from..to),
+        DeltaMove::Copy(0),
+        DeltaMove::SetMax(usize::MAX),
+        DeltaMove::Nth(usize::MAX),
+        DeltaMove::AdvanceBy(usize::MAX),
+    ];
+    let mut m = DeltaWalk::<Option<i64>> {
+        model: &[],
+        pos: 0,
+        end: 0,
+    };
+    assert_eq!(delta_place(&x), (0, 0, 0));
+    assert_eq!(old_delta_place(&y), (0, 0, 0));
+    for mv in &moves {
+        assert_eq!(m.does(mv), None);
+        assert_eq!(new_delta_does(&mut x, mv), None, "{mv:?}");
+        assert_eq!(old_delta_does(&mut y, mv), None, "{mv:?}");
+        assert_eq!(delta_place(&x), m.place(), "{mv:?}");
+        assert_eq!(old_delta_place(&y), m.place(), "{mv:?}");
+    }
+    let new = VerifiedDeltaColumn::<Option<i64>>::new();
+    let old = DeltaColumn::<Option<i64>>::new();
+    let (mut x, mut y) = (new.iter(), old.iter());
+    m.end = 0;
+    for mv in &moves {
+        assert_eq!(m.does(mv), None);
+        assert_eq!(new_delta_does(&mut x, mv), None, "{mv:?}");
+        assert_eq!(old_delta_does(&mut y, mv), None, "{mv:?}");
+        assert_eq!(delta_place(&x), m.place(), "{mv:?}");
+        assert_eq!(old_delta_place(&y), m.place(), "{mv:?}");
+    }
+
+    let new = VerifiedDeltaColumn::<u64>::from_values(&[3, 5, 5, 9, 2]);
+    let mut it = new.iter_range(1, 4);
+    assert_eq!(it.by_ref().collect::<Vec<u64>>(), vec![5, 5, 9]);
+    assert_eq!((it.pos(), it.end_pos(), it.len()), (4, 4, 0));
+    assert_eq!(it.next(), None);
+    // the window opened again: on from where the iterator stands
+    it.set_max(9);
+    assert_eq!((it.pos(), it.end_pos(), it.len()), (4, 9, 1));
+    assert_eq!(it.next(), Some(2));
+    assert_eq!(it.next(), None);
+    assert_eq!((it.pos(), it.end_pos(), it.len()), (5, 5, 0));
+    assert_eq!(
+        format!("{it:?}"),
+        "VerifiedDeltaIter { pos: 5, running: 2, items_left: 0 }"
+    );
+}

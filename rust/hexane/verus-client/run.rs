@@ -2600,3 +2600,76 @@ fn delta_runs_and_fills() {
     // a fill that falls is no column of `u64`
     assert!(verus_client::delta_fill_is_a_run(5, -3).is_none());
 }
+
+#[test]
+fn delta_iterators() {
+    use hexane::verified::VerifiedDeltaIter;
+    let values: [u64; 10] = [1, 2, 2, 5, 9, 9, 12, 20, 21, 30];
+    let col: VerifiedDeltaColumn<u64> = verus_client::delta_built(&values);
+    assert_eq!(verus_client::delta_read_in_a_loop(&col), values);
+    assert!(verus_client::delta_ascending(&col));
+    let falls: VerifiedDeltaColumn<u64> = verus_client::delta_built(&[1, 4, 3]);
+    assert!(!verus_client::delta_ascending(&falls));
+    let copy = verus_client::delta_copied_by_iter(&col);
+    assert_eq!(verus_client::delta_values(&copy), values);
+    assert_eq!(verus_client::delta_the_third(&col), Some(2));
+    assert_eq!(verus_client::delta_the_third(&falls), Some(3));
+    let short: VerifiedDeltaColumn<Option<i32>> = verus_client::delta_built(&[None, Some(-4)]);
+    assert_eq!(verus_client::delta_the_third(&short), None);
+    assert_eq!(
+        verus_client::delta_read_in_a_loop(&short),
+        vec![None, Some(-4)]
+    );
+    assert_eq!(
+        verus_client::delta_in_the_range(&col, 3, 7),
+        vec![5, 9, 9, 12]
+    );
+    assert_eq!(
+        verus_client::delta_in_the_range(&col, 4, 4),
+        Vec::<u64>::new()
+    );
+    assert_eq!(verus_client::delta_read_out(&col, 2, 6), (4, 6, 6));
+    assert_eq!(verus_client::delta_read_out(&col, 7, 40), (3, 10, 10));
+    assert_eq!(verus_client::delta_at_two_places(&col, 1, 4, 3), (2, 9, 2));
+    verus_client::delta_where_it_stands(&col);
+    verus_client::delta_moved_past(&col);
+    verus_client::delta_told_by_the_call(&col);
+    verus_client::delta_two_readers(&falls);
+
+    let a: VerifiedDeltaColumn<i64> = verus_client::delta_built(&[-3, 0, 7, 7, -20]);
+    let b: VerifiedDeltaColumn<i64> = verus_client::delta_built(&[-3, 0, 7, 8, -20]);
+    assert!(verus_client::delta_agree(&a, &a));
+    assert!(!verus_client::delta_agree(&a, &b));
+    verus_client::delta_every_other(&a);
+
+    // each call by itself
+    let mut it = verus_client::delta_told_by_iter(&col);
+    assert_eq!(verus_client::delta_told_by_next(&mut it), Some(1));
+    assert_eq!(verus_client::delta_told_by_nth(&mut it, 2), Some(5));
+    assert_eq!(verus_client::delta_told_by_an_iters_place(&it), 4);
+    assert_eq!(verus_client::delta_told_by_an_iters_end(&it), 10);
+    assert_eq!(verus_client::delta_told_by_an_iters_len(&it), 6);
+    assert_eq!(verus_client::delta_told_by_a_size_hint(&it), (6, Some(6)));
+    assert_eq!(verus_client::delta_window_len(&it), 6);
+    verus_client::delta_told_by_the_source(&it, &col);
+    verus_client::delta_told_by_set_max(&mut it, 8);
+    assert_eq!(verus_client::delta_window_len(&it), 4);
+    verus_client::delta_told_by_advance_to(&mut it, 5);
+    verus_client::delta_told_by_advance_by(&mut it, 1);
+    let mut copy = verus_client::delta_told_by_an_iters_clone(&it);
+    assert_eq!(copy.next(), Some(12));
+    assert_eq!(it.next(), Some(12));
+    verus_client::delta_told_by_shift(&mut it, 8..10);
+    assert_eq!(it.next(), Some(21));
+    assert_eq!(
+        verus_client::delta_told_by_shift_next(&mut it, 9..10),
+        Some(30)
+    );
+    assert_eq!(verus_client::delta_told_by_next(&mut it), None);
+    let mut it = verus_client::delta_told_by_iter_range(&col, 2, 5);
+    assert_eq!(it.by_ref().collect::<Vec<u64>>(), vec![2, 5, 9]);
+    let it = verus_client::delta_told_by_into_iter(&col);
+    assert_eq!(it.len(), 10);
+    let mut none: VerifiedDeltaIter<'_, u64> = verus_client::delta_told_by_an_iters_default();
+    assert_eq!(none.next(), None);
+}

@@ -563,7 +563,7 @@ pub use delta::{
     delta_runs_fit, delta_runs_kept, delta_runs_values, dom, dvs, in_dom, lemma_delta_run_exact,
     lemma_delta_run_fits, lemma_delta_runs_one, lemma_delta_runs_push, vals,
 };
-pub use delta::{VDelta, VDeltaNum, VDeltaValue, VerifiedDeltaColumn};
+pub use delta::{VDelta, VDeltaNum, VDeltaValue, VerifiedDeltaColumn, VerifiedDeltaIter};
 pub use encoder::{VerifiedEncoder, VerifiedEncoderState};
 pub use kind::{LenIndex, VIndex, VKeeps};
 pub use prefix::{SumIndex, VerifiedPrefixColumn};

@@ -404,9 +404,9 @@ use super::{
     SumIndex, VAccum, VAccumulated, VAdds, VAmount, VCodec, VCount, VDelta, VDeltaValue, VGet,
     VGroup, VIndex, VKeeps, VNewtype, VSpec, VSum, VSummed, VValue, VerifiedAccColumn,
     VerifiedAccIter, VerifiedAccIterState, VerifiedAccSeek, VerifiedAccValue, VerifiedColumn,
-    VerifiedDecoder, VerifiedDeltaColumn, VerifiedEncoder, VerifiedEncoderState, VerifiedIter,
-    VerifiedIterState, VerifiedPrefixColumn, VerifiedPrefixIter, VerifiedPrefixIterState,
-    VerifiedPrefixSeek, VerifiedPrefixedValue, VerifiedRuns,
+    VerifiedDecoder, VerifiedDeltaColumn, VerifiedDeltaIter, VerifiedEncoder, VerifiedEncoderState,
+    VerifiedIter, VerifiedIterState, VerifiedPrefixColumn, VerifiedPrefixIter,
+    VerifiedPrefixIterState, VerifiedPrefixSeek, VerifiedPrefixedValue, VerifiedRuns,
 };
 use crate::{DeltaRun, Leb128, LoadOpts, PackError, Run};
 use std::cmp::Ordering;
@@ -11150,6 +11150,772 @@ proof fn delta_runs_ends<T: VDelta>(r: DeltaRun)
         delta_runs_fit::<T>(Seq::<DeltaRun>::empty()),
 {
     lemma_delta_runs_one::<T>(r);
+}
+
+// ── Delta columns: the iterator ─────────────────────────────────────────────
+
+/// A `for` loop over a delta column's iterator gives the column's
+/// values, in order: here each goes into a `Vec`, which then holds what
+/// the column does. For every type a delta column holds, and every codec.
+#[allow(dead_code)]
+fn delta_read_in_a_loop<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>) -> (out: Vec<T>)
+    ensures
+        out@ == col@,
+{
+    let it = col.iter();
+    let ghost all = it.rest();
+    let mut out: Vec<T> = Vec::new();
+    for x in at: it
+        invariant
+            at.seq() == all,
+            out@ == all.take(at.index()),
+    {
+        out.push(x);
+        proof {
+            assert(all.take(at.index() + 1) =~= all.take(at.index()).push(x));
+        }
+    }
+    proof {
+        assert(all.take(all.len() as int) =~= all);
+    }
+    out
+}
+
+/// A `for` loop over a delta column itself: whether its numbers are in
+/// order, none less than one before it.
+#[allow(dead_code)]
+fn delta_ascending(col: &VerifiedDeltaColumn<u64>) -> (r: bool)
+    ensures
+        r == forall|i: int, j: int| 0 <= i <= j < col@.len() ==> col@[i] <= col@[j],
+{
+    let mut r = true;
+    let mut prev: Option<u64> = None;
+    for x in at: col
+        invariant
+            at.seq() == col@,
+            prev == if at.index() > 0 {
+                Some(col@[at.index() - 1])
+            } else {
+                None
+            },
+            r == forall|i: int, j: int| 0 <= i <= j < at.index() ==> col@[i] <= col@[j],
+    {
+        if let Some(p) = prev {
+            if x < p {
+                r = false;
+            }
+        }
+        prev = Some(x);
+    }
+    r
+}
+
+/// Two delta columns read side by side, with the standard library's
+/// `zip`: whether they hold the same numbers.
+#[allow(dead_code)]
+fn delta_agree(a: &VerifiedDeltaColumn<i64>, b: &VerifiedDeltaColumn<i64>) -> (r: bool)
+    requires
+        a@.len() == b@.len(),
+    ensures
+        r == (a@ == b@),
+{
+    let mut same = true;
+    for pair in at: a.iter().zip(b.iter())
+        invariant
+            a@.len() == b@.len(),
+            at.seq() == a@.zip_with(b@),
+            same == forall|i: int| 0 <= i < at.index() ==> a@[i] == b@[i],
+    {
+        if pair.0 != pair.1 {
+            same = false;
+        }
+    }
+    proof {
+        if same {
+            assert(a@ =~= b@);
+        }
+    }
+    same
+}
+
+/// A delta column copied value by value. What its iterator gives is what
+/// a delta column takes, since each is a value the column held: for
+/// every type and codec.
+#[allow(dead_code)]
+fn delta_copied_by_iter<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>) -> (r: VerifiedDeltaColumn<T, C>)
+    ensures
+        r@ == col@,
+{
+    let mut r: VerifiedDeltaColumn<T, C> = VerifiedDeltaColumn::new();
+    proof {
+        col.lemma_fits();
+        assert(r@ =~= col@.take(0));
+    }
+    for x in at: col
+        invariant
+            at.seq() == col@,
+            all_fit(col@),
+            r@ == col@.take(at.index()),
+    {
+        r.push(x);
+        proof {
+            assert(col@.take(at.index() + 1) =~= col@.take(at.index()).push(x));
+        }
+    }
+    proof {
+        assert(col@.take(col@.len() as int) =~= col@);
+    }
+    r
+}
+
+/// Steps over the values of a delta column: `nth` gives the value that
+/// many places on and leaves the iterator behind it, and an iterator
+/// knows how many values it has left.
+#[allow(dead_code)]
+fn delta_every_other(col: &VerifiedDeltaColumn<i64>)
+    requires
+        col@.len() == 5,
+{
+    let mut it = col.iter();
+    let n = it.len();
+    assert(n == 5);
+    let a = it.nth(1);
+    assert(a == Some(col@[1]));
+    let h = it.size_hint();
+    assert(h == (3usize, Some(3usize)));
+    let b = it.nth(1);
+    assert(b == Some(col@[3]));
+    let c = it.next();
+    assert(c == Some(col@[4]));
+    let d = it.nth(0);
+    assert(d is None);
+    let m = it.len();
+    assert(m == 0);
+}
+
+/// The value two places on, if a delta column is that long: for every
+/// type and codec.
+#[allow(dead_code)]
+fn delta_the_third<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>) -> (r: Option<T>)
+    ensures
+        match r {
+            Some(v) => col@.len() > 2 && v == col@[2],
+            None => col@.len() <= 2,
+        },
+{
+    let mut it = col.iter();
+    it.nth(2)
+}
+
+/// A copy of a delta column's iterator goes on from where the iterator
+/// is, and each then goes its own way; and an iterator of no column
+/// gives nothing. For every type and codec.
+#[allow(dead_code)]
+fn delta_two_readers<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>)
+    requires
+        col@.len() == 3,
+{
+    let mut a = col.iter();
+    let first = a.next();
+    assert(first == Some(col@[0]));
+    let mut b = a.clone();
+    let x = a.next();
+    let y = b.next();
+    assert(x == Some(col@[1]) && y == x);
+    let z = a.next();
+    assert(z == Some(col@[2]));
+    let left_a = a.len();
+    let left_b = b.len();
+    assert(left_a == 0 && left_b == 1);
+    let mut none = VerifiedDeltaIter::<T, C>::default();
+    let n = none.next();
+    assert(n is None);
+}
+
+/// The window of a delta column's iterator moved to a range of the
+/// column: a `for` loop then reads the column's values there. For every
+/// type and codec.
+#[allow(dead_code)]
+fn delta_in_the_range<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>, a: usize, b: usize) -> (out: Vec<T>)
+    requires
+        a <= b <= col@.len(),
+    ensures
+        out@ == col@.subrange(a as int, b as int),
+{
+    let mut it = col.iter();
+    it.shift(a..b);
+    proof {
+        assert(window(col@, a as int, b as int) =~= col@.subrange(a as int, b as int));
+    }
+    let ghost all = it.rest();
+    let mut out: Vec<T> = Vec::new();
+    for x in at: it
+        invariant
+            at.seq() == all,
+            out@ == all.take(at.index()),
+    {
+        out.push(x);
+        proof {
+            assert(all.take(at.index() + 1) =~= all.take(at.index()).push(x));
+        }
+    }
+    proof {
+        assert(all.take(all.len() as int) =~= all);
+    }
+    out
+}
+
+/// Where a delta column's iterator stands and where its window ends: a
+/// step moves the one, `set_max` the other, and what is left is the
+/// column's values between the two.
+#[allow(dead_code)]
+fn delta_where_it_stands(col: &VerifiedDeltaColumn<u64>)
+    requires
+        col@.len() == 10,
+{
+    let mut it = col.iter_range(2, 8);
+    let (p, e) = (it.pos(), it.end_pos());
+    assert(p == 2 && e == 8);
+    let a = it.next();
+    assert(a == Some(col@[2]));
+    it.advance_by(2);
+    let p = it.pos();
+    assert(p == 5);
+    // a place behind the iterator: it stays
+    it.advance_to(4);
+    let (p, n) = (it.pos(), it.len());
+    assert(p == 5 && n == 3);
+    // a wider window, which ends past the column: what the column has
+    it.set_max(20);
+    let (e, n) = (it.end_pos(), it.len());
+    assert(e == 20 && n == 5);
+    let b = it.next();
+    assert(b == Some(col@[5]));
+    // a window that ends behind the iterator: nothing, and the window
+    // then ends where the iterator stands
+    it.set_max(3);
+    let c = it.next();
+    let (p, e) = (it.pos(), it.end_pos());
+    assert(c is None && p == 6 && e == 6);
+}
+
+/// A delta column's iterator read until it gives nothing stands at the
+/// end of what it gave, and its window ends there: where the range
+/// ended, or the column if that came first. For every type and codec.
+#[allow(dead_code)]
+fn delta_read_out<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>, a: usize, b: usize) -> (r: (usize, usize, usize))
+    requires
+        a <= b,
+        a <= col@.len(),
+    ensures
+        // how many values it gave, where it then stands, and where its
+        // window ends
+        r.0 == r.1 - a,
+        r.1 == if b <= col@.len() {
+            b
+        } else {
+            col@.len() as usize
+        },
+        r.2 == r.1,
+{
+    let mut it = col.iter();
+    it.shift(a..b);
+    let mut n: usize = 0;
+    loop
+        invariant_except_break
+            it.end_pos() == b,
+        invariant
+            it.column() == col@,
+            it.pos() == a + n,
+        ensures
+            it.end_pos() == it.pos(),
+            b <= col@.len() ==> it.pos() == b,
+            b > col@.len() ==> it.pos() == col@.len(),
+        decreases it.rest().len(),
+    {
+        // the iterator stands in its column
+        let _ = it.pos();
+        match it.next() {
+            Some(_) => {
+                n += 1;
+            },
+            None => {
+                break ;
+            },
+        }
+    }
+    (n, it.pos(), it.end_pos())
+}
+
+/// The values of a delta column at two places, read with one iterator
+/// whose window moves from the one to the other, and how many values the
+/// second window then has left: for every type and codec.
+#[allow(dead_code)]
+fn delta_at_two_places<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>, i: usize, j: usize, n: usize) -> (r: (
+    T,
+    T,
+    usize,
+))
+    requires
+        i < j,
+        0 < n,
+        j + n <= col@.len(),
+    ensures
+        r.0 == col@[i as int],
+        r.1 == col@[j as int],
+        r.2 == n - 1,
+{
+    // a column is no longer than a `usize` counts
+    let _ = col.len();
+    let mut it = col.iter();
+    let x = it.shift_next(i..i + 1);
+    let y = it.shift_next(j..j + n);
+    let left = it.len();
+    let p = it.pos();
+    assert(p == j + 1);
+    (x.unwrap(), y.unwrap(), left)
+}
+
+/// How long the window of a delta column's iterator is: that many values
+/// it has left, unless the window ends past the column and it has fewer.
+#[allow(dead_code)]
+fn delta_window_len<T: VDeltaValue<C>, C: VCodec>(it: &VerifiedDeltaIter<'_, T, C>) -> (r: usize)
+    ensures
+        r >= it.rest().len(),
+        it.end_pos() <= it.column().len() ==> r == it.rest().len(),
+{
+    let (p, e) = (it.pos(), it.end_pos());
+    e - p
+}
+
+/// Where each move leaves a delta column's iterator and its window, when
+/// it moves past what the iterator has, to a window with no value, or
+/// not at all; and where a copy, an iterator over a whole column and an
+/// iterator of no column stand.
+#[allow(dead_code)]
+fn delta_moved_past(col: &VerifiedDeltaColumn<u64>)
+    requires
+        col@.len() == 10,
+{
+    // past the window's end: the iterator stands there with nothing left
+    let mut it = col.iter_range(2, 8);
+    it.advance_by(7);
+    let (p, e, n) = (it.pos(), it.end_pos(), it.len());
+    assert(p == 8 && e == 8 && n == 0);
+    // a copy stands where the iterator does, and then moves on its own
+    let mut it = col.iter_range(2, 8);
+    let _ = it.next();
+    let mut b = it.clone();
+    let (p, e) = (b.pos(), b.end_pos());
+    assert(p == 3 && e == 8);
+    b.advance_to(9);
+    let (p, e) = (b.pos(), b.end_pos());
+    assert(p == 8 && e == 8);
+    it.advance_to(5);
+    let (p, e) = (it.pos(), it.end_pos());
+    assert(p == 5 && e == 8);
+    let v = it.next();
+    assert(v == Some(col@[5]));
+    // `nth`: past the value it gives, or at the end of what there was
+    let mut it = col.into_iter();
+    let (p, e) = (it.pos(), it.end_pos());
+    assert(p == 0 && e == 10);
+    let v = it.nth(3);
+    let (p, e, n) = (it.pos(), it.end_pos(), it.len());
+    assert(v == Some(col@[3]) && p == 4 && e == 10 && n == 6);
+    let v = it.nth(6);
+    let (p, e) = (it.pos(), it.end_pos());
+    assert(v is None && p == 10 && e == 10);
+    // a window past the column: the iterator stands at the column's end
+    let mut it = col.iter_range(0, 5);
+    it.shift(12..15);
+    let (p, e, n) = (it.pos(), it.end_pos(), it.len());
+    assert(p == 10 && e == 10 && n == 0);
+    // a window that starts past its own end: where that end is, if ahead
+    let mut it = col.iter_range(1, 5);
+    it.shift(7..4);
+    let (p, e) = (it.pos(), it.end_pos());
+    assert(p == 4 && e == 4);
+    it.shift(9..2);
+    let (p, e) = (it.pos(), it.end_pos());
+    assert(p == 4 && e == 4);
+    // a window behind the iterator: from where the iterator stands
+    let mut it = col.iter_range(6, 10);
+    it.shift(2..8);
+    let (p, e, n) = (it.pos(), it.end_pos(), it.len());
+    assert(p == 6 && e == 8 && n == 2);
+    // `shift_next` to a window with no value
+    let mut it = col.iter();
+    let v = it.shift_next(3..3);
+    let (p, e) = (it.pos(), it.end_pos());
+    assert(v is None && p == 3 && e == 3);
+    let v = it.shift_next(11..14);
+    let (p, e, n) = (it.pos(), it.end_pos(), it.len());
+    assert(v is None && p == 10 && e == 10 && n == 0);
+    // an iterator of no column
+    let mut d = VerifiedDeltaIter::<u64>::default();
+    let (p, e) = (d.pos(), d.end_pos());
+    assert(p == 0 && e == 0);
+    d.set_max(4);
+    let (p, e, n) = (d.pos(), d.end_pos(), d.len());
+    assert(p == 0 && e == 4 && n == 0);
+}
+
+/// What a call says by itself, with no question put to the iterator:
+/// which column a new iterator or a copy reads, where it stands and
+/// where its window ends, and what a move leaves it to give.
+#[allow(dead_code)]
+fn delta_told_by_the_call(col: &VerifiedDeltaColumn<u64>)
+    requires
+        col@.len() == 10,
+{
+    // an iterator over a whole column
+    let mut it = col.into_iter();
+    assert(it.pos() == 0 && it.end_pos() == 10 && it.column() == col@);
+    // a copy, of an iterator that has moved and whose window ends past
+    // the column
+    let _ = it.next();
+    it.set_max(20);
+    let b = it.clone();
+    assert(b.pos() == 1 && b.end_pos() == 20 && b.column() == col@);
+    assert(b.source() == it.source());
+    // an iterator of no column
+    let d = VerifiedDeltaIter::<u64>::default();
+    assert(d.pos() == 0 && d.end_pos() == 0);
+    // a move on, and two moves of the window: to one with values, and
+    // to one with none
+    let mut it = col.iter_range(2, 8);
+    it.advance_by(2);
+    assert(it.rest() =~= col@.subrange(4, 8));
+    let v = it.shift_next(5..7);
+    assert(v == Some(col@[5]) && it.end_pos() == 7);
+    assert(it.rest() =~= col@.subrange(6, 7));
+    let v = it.shift_next(7..7);
+    assert(v is None && it.rest().len() == 0);
+}
+
+/// What the column an iterator reads says of the iterator's values: an
+/// iterator that reads a column has that column's values for its own,
+/// and one that reads none has none.
+#[allow(dead_code)]
+fn delta_told_by_the_source<T: VDeltaValue<C>, C: VCodec>(it: &VerifiedDeltaIter<'_, T, C>, col: &VerifiedDeltaColumn<T, C>)
+    ensures
+        it.source() == Some(*col) ==> it.column() == col@,
+        it.source() is None ==> it.column().len() == 0,
+{
+    proof {
+        it.lemma_source();
+    }
+}
+
+/// What `iter` says by itself of a delta column: the iterator has all
+/// the column's values left, and stands at its start.
+#[allow(dead_code)]
+fn delta_told_by_iter<'a, T: VDeltaValue<C>, C: VCodec>(col: &'a VerifiedDeltaColumn<T, C>) -> (it: VerifiedDeltaIter<'a, T, C>)
+    ensures
+        it.rest() == col@,
+        it.column() == col@,
+        it.source() == Some(*col),
+        it.pos() == 0,
+        it.end_pos() == col@.len(),
+{
+    col.iter()
+}
+
+/// What a `for` loop over a delta column starts from: the same.
+#[allow(dead_code)]
+fn delta_told_by_into_iter<'a, T: VDeltaValue<C>, C: VCodec>(col: &'a VerifiedDeltaColumn<T, C>) -> (it: VerifiedDeltaIter<'a, T, C>)
+    ensures
+        it.rest() == col@,
+        it.column() == col@,
+        it.source() == Some(*col),
+        it.pos() == 0,
+        it.end_pos() == col@.len(),
+{
+    col.into_iter()
+}
+
+/// What `iter_range` says by itself: the iterator has the values of the
+/// range left, and its window is the range.
+#[allow(dead_code)]
+fn delta_told_by_iter_range<'a, T: VDeltaValue<C>, C: VCodec>(col: &'a VerifiedDeltaColumn<T, C>, start: usize, end: usize) -> (it:
+    VerifiedDeltaIter<'a, T, C>)
+    requires
+        start <= end <= col@.len(),
+    ensures
+        it.rest() == col@.subrange(start as int, end as int),
+        it.column() == col@,
+        it.source() == Some(*col),
+        it.pos() == start,
+        it.end_pos() == end,
+{
+    col.iter_range(start, end)
+}
+
+/// What `next` says by itself of a delta column's iterator: in the words
+/// of the iterator's own specification, and in those of Verus's
+/// specification of an iterator.
+#[allow(dead_code)]
+fn delta_told_by_next<T: VDeltaValue<C>, C: VCodec>(it: &mut VerifiedDeltaIter<'_, T, C>) -> (r: Option<T>)
+    ensures
+        match r {
+            Some(v) => {
+                &&& old(it).rest().len() > 0
+                &&& v == old(it).rest()[0]
+                &&& final(it).rest() == old(it).rest().skip(1)
+                &&& final(it).pos() == old(it).pos() + 1
+                &&& final(it).end_pos() == old(it).end_pos()
+            },
+            None => {
+                &&& old(it).rest().len() == 0
+                &&& final(it).rest().len() == 0
+                &&& final(it).pos() == old(it).pos()
+                &&& final(it).end_pos() == old(it).pos()
+            },
+        },
+        final(it).column() == old(it).column(),
+        final(it).source() == old(it).source(),
+        old(it).rest().len() > 0 ==> r == Some(old(it).rest()[0]) && final(it).rest() == old(it).rest().drop_first(),
+        old(it).rest().len() == 0 ==> r is None && final(it).rest() == old(it).rest(),
+{
+    it.next()
+}
+
+/// What `nth` says by itself of a delta column's iterator.
+#[allow(dead_code)]
+fn delta_told_by_nth<T: VDeltaValue<C>, C: VCodec>(it: &mut VerifiedDeltaIter<'_, T, C>, n: usize) -> (r: Option<T>)
+    ensures
+        n < old(it).rest().len() ==> {
+            &&& r == Some(old(it).rest()[n as int])
+            &&& final(it).rest() == old(it).rest().skip(n + 1)
+            &&& final(it).pos() == old(it).pos() + n + 1
+            &&& final(it).end_pos() == old(it).end_pos()
+        },
+        n >= old(it).rest().len() ==> {
+            &&& r is None
+            &&& final(it).rest().len() == 0
+            &&& final(it).pos() == old(it).pos() + old(it).rest().len()
+            &&& final(it).end_pos() == final(it).pos()
+        },
+        final(it).column() == old(it).column(),
+        final(it).source() == old(it).source(),
+{
+    it.nth(n)
+}
+
+/// What the questions put to a delta column's iterator say by
+/// themselves. Asked where it stands, it says where: within its window
+/// and in its column, with the column's values between there and the
+/// window's end left.
+#[allow(dead_code)]
+fn delta_told_by_an_iters_place<T: VDeltaValue<C>, C: VCodec>(it: &VerifiedDeltaIter<'_, T, C>) -> (r: usize)
+    ensures
+        r == it.pos(),
+        it.pos() <= it.end_pos(),
+        it.pos() <= it.column().len(),
+        it.rest() == window(it.column(), it.pos() as int, it.end_pos() as int),
+{
+    it.pos()
+}
+
+/// Asked for the window's end alone, an iterator says as much.
+#[allow(dead_code)]
+fn delta_told_by_an_iters_end<T: VDeltaValue<C>, C: VCodec>(it: &VerifiedDeltaIter<'_, T, C>) -> (r: usize)
+    ensures
+        r == it.end_pos(),
+        it.pos() <= it.end_pos(),
+        it.pos() <= it.column().len(),
+        it.rest() == window(it.column(), it.pos() as int, it.end_pos() as int),
+{
+    it.end_pos()
+}
+
+/// Asked how many values it has left, an iterator says how many.
+#[allow(dead_code)]
+fn delta_told_by_an_iters_len<T: VDeltaValue<C>, C: VCodec>(it: &VerifiedDeltaIter<'_, T, C>) -> (r: usize)
+    ensures
+        r == it.rest().len(),
+{
+    it.len()
+}
+
+/// Asked how many values it may yet give, an iterator says exactly how
+/// many it has left, as its least and as its most.
+#[allow(dead_code)]
+fn delta_told_by_a_size_hint<T: VDeltaValue<C>, C: VCodec>(it: &VerifiedDeltaIter<'_, T, C>) -> (r: (usize, Option<usize>))
+    ensures
+        r.0 == it.rest().len(),
+        r.1 == Some(r.0),
+{
+    it.size_hint()
+}
+
+/// What `set_max` says by itself: the iterator stays, and its window
+/// ends where asked, or where the iterator stands if that is further on.
+#[allow(dead_code)]
+fn delta_told_by_set_max<T: VDeltaValue<C>, C: VCodec>(it: &mut VerifiedDeltaIter<'_, T, C>, end: usize)
+    ensures
+        final(it).column() == old(it).column(),
+        final(it).source() == old(it).source(),
+        final(it).pos() == old(it).pos(),
+        final(it).end_pos() == if end >= old(it).pos() {
+            end
+        } else {
+            old(it).pos()
+        },
+        final(it).rest() == window(old(it).column(), old(it).pos() as int, end as int),
+{
+    it.set_max(end)
+}
+
+/// What `advance_to` says by itself: of a place behind the iterator, in
+/// what it has left, and past it.
+#[allow(dead_code)]
+fn delta_told_by_advance_to<T: VDeltaValue<C>, C: VCodec>(it: &mut VerifiedDeltaIter<'_, T, C>, target: usize)
+    ensures
+        final(it).column() == old(it).column(),
+        final(it).source() == old(it).source(),
+        final(it).rest() == past(old(it).rest(), target - old(it).pos()),
+        target <= old(it).pos() ==> {
+            &&& final(it).pos() == old(it).pos()
+            &&& final(it).end_pos() == old(it).end_pos()
+        },
+        old(it).pos() < target <= old(it).pos() + old(it).rest().len() ==> {
+            &&& final(it).pos() == target
+            &&& final(it).end_pos() == old(it).end_pos()
+        },
+        target > old(it).pos() + old(it).rest().len() ==> {
+            &&& final(it).pos() == old(it).pos() + old(it).rest().len()
+            &&& final(it).end_pos() == final(it).pos()
+        },
+{
+    it.advance_to(target)
+}
+
+/// What `advance_by` says by itself: of no more values than the iterator
+/// has left, and of more.
+#[allow(dead_code)]
+fn delta_told_by_advance_by<T: VDeltaValue<C>, C: VCodec>(it: &mut VerifiedDeltaIter<'_, T, C>, amount: usize)
+    ensures
+        final(it).column() == old(it).column(),
+        final(it).source() == old(it).source(),
+        final(it).rest() == past(old(it).rest(), amount as int),
+        amount <= old(it).rest().len() ==> {
+            &&& final(it).pos() == old(it).pos() + amount
+            &&& final(it).end_pos() == old(it).end_pos()
+        },
+        amount > old(it).rest().len() ==> {
+            &&& final(it).pos() == old(it).pos() + old(it).rest().len()
+            &&& final(it).end_pos() == final(it).pos()
+        },
+{
+    it.advance_by(amount)
+}
+
+/// What `shift` says by itself: of a range that starts behind the
+/// iterator, of one ahead of it in the column, and of one that starts
+/// past its own end or the column's.
+#[allow(dead_code)]
+fn delta_told_by_shift<T: VDeltaValue<C>, C: VCodec>(it: &mut VerifiedDeltaIter<'_, T, C>, range: Range<usize>)
+    ensures
+        final(it).column() == old(it).column(),
+        final(it).source() == old(it).source(),
+        final(it).rest() == window(
+            old(it).column(),
+            if range.start <= old(it).pos() {
+                old(it).pos() as int
+            } else {
+                range.start as int
+            },
+            range.end as int,
+        ),
+        range.start <= old(it).pos() ==> {
+            &&& final(it).pos() == old(it).pos()
+            &&& final(it).end_pos() == if range.end >= old(it).pos() {
+                range.end
+            } else {
+                old(it).pos()
+            }
+        },
+        old(it).pos() < range.start <= range.end && range.start <= old(it).column().len() ==> {
+            &&& final(it).pos() == range.start
+            &&& final(it).end_pos() == range.end
+        },
+        old(it).pos() < range.start && (range.start > range.end || range.start > old(it).column().len()) ==> {
+            &&& final(it).pos() == if range.end <= old(it).pos() {
+                old(it).pos() as int
+            } else if range.end <= old(it).column().len() {
+                range.end as int
+            } else {
+                old(it).column().len() as int
+            }
+            &&& final(it).end_pos() == final(it).pos()
+        },
+{
+    it.shift(range)
+}
+
+/// What `shift_next` says by itself: of a window with a value, and of
+/// one with none.
+#[allow(dead_code)]
+fn delta_told_by_shift_next<T: VDeltaValue<C>, C: VCodec>(it: &mut VerifiedDeltaIter<'_, T, C>, range: Range<usize>) -> (r: Option<T>)
+    requires
+        range.start >= old(it).pos(),
+    ensures
+        final(it).column() == old(it).column(),
+        final(it).source() == old(it).source(),
+        ({
+            let w = window(old(it).column(), range.start as int, range.end as int);
+            &&& w.len() > 0 ==> {
+                &&& r == Some(w[0])
+                &&& final(it).rest() == w.skip(1)
+                &&& final(it).pos() == range.start + 1
+                &&& final(it).end_pos() == range.end
+            }
+            &&& w.len() == 0 ==> {
+                &&& r is None
+                &&& final(it).rest().len() == 0
+                &&& final(it).pos() == if range.end <= old(it).pos() {
+                    old(it).pos() as int
+                } else if range.end <= old(it).column().len() {
+                    range.end as int
+                } else {
+                    old(it).column().len() as int
+                }
+                &&& final(it).end_pos() == final(it).pos()
+            }
+        }),
+{
+    it.shift_next(range)
+}
+
+/// What `clone` says by itself of a delta column's iterator: the copy
+/// reads the same column, stands at the same place, and has the same
+/// values left.
+#[allow(dead_code)]
+fn delta_told_by_an_iters_clone<'a, T: VDeltaValue<C>, C: VCodec>(it: &VerifiedDeltaIter<'a, T, C>) -> (r: VerifiedDeltaIter<'a, T, C>)
+    ensures
+        r.rest() == it.rest(),
+        r.column() == it.column(),
+        r.source() == it.source(),
+        r.pos() == it.pos(),
+        r.end_pos() == it.end_pos(),
+{
+    it.clone()
+}
+
+/// What `default` says by itself: an iterator of no column, with nothing
+/// to give.
+#[allow(dead_code)]
+fn delta_told_by_an_iters_default<'a, T: VDeltaValue<C>, C: VCodec>() -> (r: VerifiedDeltaIter<'a, T, C>)
+    ensures
+        r.rest().len() == 0,
+        r.column().len() == 0,
+        r.source() is None,
+        r.pos() == 0,
+        r.end_pos() == 0,
+{
+    VerifiedDeltaIter::default()
 }
 
 } // verus!

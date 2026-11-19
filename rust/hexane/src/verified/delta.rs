@@ -3,7 +3,12 @@
 //! are deltas (`VDeltas`, in place of the old API's trusted
 //! `delta::indexed::DB`), sources of values that say what they give
 //! (`SliceValues`, `SliceItems`), so that what the verified cores build
-//! from them is known, and the column ([`VerifiedDeltaColumn`]).
+//! from them is known, and the column ([`VerifiedDeltaColumn`]). The
+//! column's iterator ([`VerifiedDeltaIter`]) is in `delta/iter.rs`.
+
+mod iter;
+
+pub use iter::VerifiedDeltaIter;
 
 #[cfg(verus_keep_ghost)]
 use super::after_edit;
