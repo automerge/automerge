@@ -7,6 +7,7 @@
 * `ReadDoc::get_marks` uses the same units as `length`, `marks`, and `get`
   rather than disagreeing under some text encodings.
 * `ReadDoc::list_range` on a text no longer yields marks as elements.
+* `ReadDoc::values` on a text no longer yields marks as values.
 
 ## 0.12.0
 
