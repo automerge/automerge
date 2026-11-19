@@ -822,7 +822,12 @@ impl<'a, T: PrefixValue, C: Codec> Iterator for PrefixIter<'a, T, C> {
 
         let target_pos = self.inner.pos + n;
 
-        let found = self.col.unwrap().col.index.find_slab_at_item(target_pos);
+        let Some(col) = self.col else {
+            // a default iterator: no column, no values
+            self.inner.nth(n);
+            return None;
+        };
+        let found = col.col.index.find_slab_at_item(target_pos);
 
         if !self.inner.advance_to_slab(found.index, found.pos) {
             return None;

@@ -426,8 +426,11 @@ impl<'a, T: ColumnValueRef, C: Codec> Iterator for Iter<'a, T, C> {
 
         // Use the column's index for O(log S) slab lookup.
         let target_pos = self.pos + n;
-        let col = self.col.unwrap();
-        let (si, offset) = col.find_slab(target_pos);
+        let (si, offset) = match self.col {
+            Some(col) => col.find_slab(target_pos),
+            // a default iterator: no column, no slabs
+            None => (0, target_pos),
+        };
         if !self.advance_to_slab(si, target_pos - offset) {
             return None;
         }
