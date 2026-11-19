@@ -22,7 +22,11 @@
 //! `iter_at`, [`RawColumnIter`]'s `take` and `skip`, `save_to`) and `load`
 //! to return exactly its bytes.  [`get`](RawColumn::get) asks of a verified
 //! caller the range that `try_get` takes, where it panics for another;
-//! a clone is a column of the same bytes.  Unverified are only the
+//! a clone is a column of the same bytes.  The promise above is proved
+//! as well: `cuts` are the places where slabs meet, a splice leaves a
+//! cut only where one was or at an end of the bytes it puts in
+//! (`spliced_cut`), and bytes lie within one slab exactly when no cut is
+//! strictly between them (`lemma_in_one_slab`).  Unverified are only the
 //! `IntoIterator` plumbing of `try_splice` and `copy_ranges` (which
 //! splices through the verified path).
 
@@ -103,6 +107,7 @@ impl Clone for RawColumn {
         ensures
             r@ == self@,
             self.wf() ==> r.wf(),
+            r.cuts() == self.cuts(),
     {
         let r = RawColumn {
             slabs: self.slabs.clone(),
@@ -114,6 +119,7 @@ impl Clone for RawColumn {
             assert(datas(r.slabs@) =~= datas(self.slabs@));
             assert(sizes(r.slabs@) =~= sizes(self.slabs@));
             assert(r.bit@ =~= self.bit@);
+            lemma_edges_same(r.slabs@, self.slabs@);
         }
         r
     }
@@ -149,6 +155,29 @@ spec fn full_outside(slabs: Seq<RawSlab>, start: int, end: int) -> bool {
 /// The weight function [`fenwick::build`] is given.
 spec fn size_of(s: RawSlab) -> nat {
     s.data@.len()
+}
+
+/// Where slab `i` begins: how many bytes the slabs before it hold. For
+/// `i` the number of slabs, where the last one ends.
+spec fn edge(s: Seq<RawSlab>, i: int) -> int {
+    flat(s.take(i)).len() as int
+}
+
+/// The places where slabs meet, and the two ends of their bytes.
+spec fn edges(s: Seq<RawSlab>) -> ISet<int> {
+    ISet::new(|x: int| exists|i: int| 0 <= i <= s.len() && x == #[trigger] edge(s, i))
+}
+
+/// Whether `x` may be a cut of a column in which `del` bytes at `index`
+/// were replaced by `n`, and whose cuts were `cuts`: it is a cut that
+/// was there before the splice, or one that was after it, moved as the
+/// bytes after it are, or an end of the bytes put in. See
+/// [`RawColumn::try_splice_slice`].
+pub open spec fn spliced_cut(cuts: ISet<int>, index: int, del: int, n: int, x: int) -> bool {
+    ||| x <= index && cuts.contains(x)
+    ||| x >= index + n && cuts.contains(x - n + del)
+    ||| x == index
+    ||| x == index + n
 }
 
 proof fn lemma_concat_append<V>(a: Seq<Seq<V>>, b: Seq<Seq<V>>)
@@ -239,6 +268,401 @@ proof fn lemma_flat_total(s: Seq<RawSlab>)
 {
     lemma_flat_len(s, s.len() as int);
     assert(s.take(s.len() as int) =~= s);
+}
+
+// ── Where slabs meet ────────────────────────────────────────────────────────
+
+/// Each slab ends where the next begins.
+proof fn lemma_edge_step(s: Seq<RawSlab>, i: int)
+    requires
+        0 <= i < s.len(),
+    ensures
+        edge(s, i + 1) == edge(s, i) + s[i].data@.len(),
+{
+    assert(s.take(i + 1) =~= s.take(i) + seq![s[i]]);
+    lemma_flat_cat(s.take(i), seq![s[i]]);
+    lemma_flat_unit(s[i]);
+}
+
+/// The first edge is where the bytes begin, the last where they end.
+proof fn lemma_edge_ends(s: Seq<RawSlab>)
+    ensures
+        edge(s, 0) == 0,
+        edge(s, s.len() as int) == flat(s).len(),
+{
+    lemma_flat_none(s.take(0));
+    assert(s.take(s.len() as int) =~= s);
+}
+
+/// Edges come in order.
+proof fn lemma_edge_le(s: Seq<RawSlab>, i: int, j: int)
+    requires
+        0 <= i <= j <= s.len(),
+    ensures
+        edge(s, i) <= edge(s, j),
+    decreases j - i,
+{
+    if i < j {
+        lemma_edge_le(s, i, j - 1);
+        lemma_edge_step(s, j - 1);
+    }
+}
+
+/// Slabs that are alike before `k` have the same edges up to it.
+proof fn lemma_edge_prefix(s: Seq<RawSlab>, t: Seq<RawSlab>, k: int, i: int)
+    requires
+        0 <= i <= k,
+        k <= s.len(),
+        k <= t.len(),
+        s.take(k) == t.take(k),
+    ensures
+        edge(s, i) == edge(t, i),
+{
+    assert(s.take(i) =~= s.take(k).take(i));
+    assert(t.take(i) =~= t.take(k).take(i));
+}
+
+/// Slabs that are alike from `a` of the ones and from `b` of the others
+/// on have their edges as far beyond those two.
+proof fn lemma_edge_suffix(s: Seq<RawSlab>, t: Seq<RawSlab>, a: int, b: int, m: int)
+    requires
+        0 <= a <= s.len(),
+        0 <= b <= t.len(),
+        s.skip(a) == t.skip(b),
+        0 <= m <= s.len() - a,
+    ensures
+        edge(s, a + m) - edge(s, a) == edge(t, b + m) - edge(t, b),
+{
+    assert(s.skip(a).len() == s.len() - a);
+    assert(t.skip(b).len() == t.len() - b);
+    assert(b + m <= t.len());
+    lemma_flat_split(s.take(a + m), a);
+    lemma_flat_split(t.take(b + m), b);
+    assert(s.take(a + m).take(a) =~= s.take(a));
+    assert(t.take(b + m).take(b) =~= t.take(b));
+    assert(s.take(a + m).skip(a) =~= s.skip(a).take(m));
+    assert(t.take(b + m).skip(b) =~= t.skip(b).take(m));
+}
+
+/// Edges are of the slabs' bytes alone.
+proof fn lemma_edges_same(s: Seq<RawSlab>, t: Seq<RawSlab>)
+    requires
+        datas(s) == datas(t),
+    ensures
+        edges(s) == edges(t),
+{
+    assert(datas(s).len() == s.len() && datas(t).len() == t.len());
+    assert forall|i: int|
+        #![trigger edge(s, i)]
+        #![trigger edge(t, i)]
+        0 <= i <= s.len() implies edge(s, i) == edge(t, i) by {
+        assert(datas(s.take(i)) =~= datas(s).take(i));
+        assert(datas(t.take(i)) =~= datas(t).take(i));
+    }
+    assert(edges(s) =~= edges(t));
+}
+
+/// The edges of no slabs, or of one: the ends of its bytes.
+proof fn lemma_edges_few(s: Seq<RawSlab>)
+    requires
+        s.len() <= 1,
+    ensures
+        forall|x: int| #[trigger] edges(s).contains(x) ==> x == 0 || x == flat(s).len(),
+{
+    lemma_edge_ends(s);
+    assert forall|x: int| #[trigger] edges(s).contains(x) implies x == 0 || x == flat(s).len() by {
+        let j = choose|j: int| 0 <= j <= s.len() && x == #[trigger] edge(s, j);
+        assert(j == 0 || j == s.len());
+    }
+}
+
+/// The slab that holds byte `x`, looked for from slab `k` on.
+proof fn lemma_edge_find(s: Seq<RawSlab>, x: int, k: int) -> (i: int)
+    requires
+        0 <= k < s.len(),
+        edge(s, k) <= x < edge(s, s.len() as int),
+    ensures
+        k <= i < s.len(),
+        edge(s, i) <= x < edge(s, i + 1),
+    decreases s.len() - k,
+{
+    if x < edge(s, k + 1) {
+        k
+    } else {
+        lemma_edge_find(s, x, k + 1)
+    }
+}
+
+/// Whether bytes `[start, end)` of the slabs lie within slab `i`.
+spec fn held_by(s: Seq<RawSlab>, i: int, start: int, end: int) -> bool {
+    0 <= i < s.len() && edge(s, i) <= start && end <= edge(s, i + 1)
+}
+
+/// Bytes `[start, end)` of the slabs lie within one of them exactly when
+/// no edge is strictly between `start` and `end`.
+proof fn lemma_edges_between(s: Seq<RawSlab>, start: int, end: int)
+    requires
+        0 <= start < end <= flat(s).len(),
+    ensures
+        (exists|i: int| #[trigger] held_by(s, i, start, end)) <==> (forall|x: int|
+            start < x < end ==> !#[trigger] edges(s).contains(x)),
+{
+    lemma_edge_ends(s);
+    if exists|i: int| #[trigger] held_by(s, i, start, end) {
+        let i = choose|i: int| #[trigger] held_by(s, i, start, end);
+        assert forall|x: int| start < x < end implies !#[trigger] edges(s).contains(x) by {
+            if edges(s).contains(x) {
+                let j = choose|j: int| 0 <= j <= s.len() && x == #[trigger] edge(s, j);
+                if j <= i {
+                    lemma_edge_le(s, j, i);
+                } else {
+                    lemma_edge_le(s, i + 1, j);
+                }
+            }
+        }
+    }
+    if forall|x: int| start < x < end ==> !#[trigger] edges(s).contains(x) {
+        let i = lemma_edge_find(s, start, 0);
+        assert(edges(s).contains(edge(s, i + 1)));
+        assert(held_by(s, i, start, end));
+    }
+}
+
+/// The edges after a splice at `offset` in slab `si` of `s0` that leaves
+/// slabs `si..end` of `s1` in its place: those before the slab, the ends
+/// of the bytes put in (where the slab was split, it was at one of
+/// them), and those after the slab, moved as the bytes after it are.
+proof fn lemma_edges_at(
+    s0: Seq<RawSlab>,
+    s1: Seq<RawSlab>,
+    si: int,
+    end: int,
+    offset: int,
+    ld: int,
+    bytes: Seq<u8>,
+)
+    requires
+        0 <= si < s0.len(),
+        0 <= offset,
+        0 <= ld,
+        offset + ld <= s0[si].data@.len(),
+        end == si + 1 || end == si + 2,
+        end <= s1.len(),
+        s1.take(si) == s0.take(si),
+        s1.skip(end) == s0.skip(si + 1),
+        flat(s1.subrange(si, end)) == s0[si].data@.take(offset) + bytes + s0[si].data@.skip(offset + ld),
+        end == si + 2 ==> s1[si].data@.len() == offset || s1[si].data@.len() == offset + bytes.len(),
+    ensures
+        edge(s0, si + 1) == edge(s0, si) + s0[si].data@.len(),
+        edge(s1, end) == edge(s0, si + 1) - ld + bytes.len(),
+        forall|x: int| #[trigger]
+            edges(s1).contains(x) ==> {
+                ||| x <= edge(s0, si) && edges(s0).contains(x)
+                ||| x == edge(s0, si) + offset
+                ||| x == edge(s0, si) + offset + bytes.len()
+                ||| x >= edge(s1, end) && edges(s0).contains(x + ld - bytes.len())
+            },
+{
+    let p = edge(s0, si);
+    let n = bytes.len() as int;
+    lemma_edge_step(s0, si);
+    lemma_edge_prefix(s1, s0, si, si);
+    // the slabs left in the slab's place hold its bytes, spliced
+    lemma_flat_split(s1.take(end), si);
+    assert(s1.take(end).take(si) =~= s1.take(si));
+    assert(s1.take(end).skip(si) =~= s1.subrange(si, end));
+    assert(edge(s1, end) == p + (offset + n + (s0[si].data@.len() - offset - ld)));
+    assert(s1.skip(end).len() == s1.len() - end);
+    assert(s0.skip(si + 1).len() == s0.len() - (si + 1));
+    assert forall|x: int| #[trigger] edges(s1).contains(x) implies {
+        ||| x <= p && edges(s0).contains(x)
+        ||| x == p + offset
+        ||| x == p + offset + n
+        ||| x >= edge(s1, end) && edges(s0).contains(x + ld - n)
+    } by {
+        let j = choose|j: int| 0 <= j <= s1.len() && x == #[trigger] edge(s1, j);
+        if j <= si {
+            lemma_edge_prefix(s1, s0, si, j);
+            lemma_edge_le(s0, j, si);
+            assert(x == edge(s0, j));
+            assert(edges(s0).contains(x));
+        } else if j < end {
+            // the slab was split, and this is where
+            lemma_edge_step(s1, si);
+            assert(x == p + offset || x == p + offset + n);
+        } else {
+            lemma_edge_suffix(s1, s0, end, si + 1, j - end);
+            lemma_edge_le(s1, end, j);
+            assert(x + ld - n == edge(s0, si + 1 + (j - end)));
+            assert(edges(s0).contains(x + ld - n));
+        }
+    }
+}
+
+/// The edges after the first `del` bytes of the slabs from `start` on
+/// are deleted, slabs `start..end` whole and then, if `partial`, the
+/// start of slab `end`: those up to the deletion, and those after it,
+/// `del` earlier.
+proof fn lemma_edges_drained(
+    s0: Seq<RawSlab>,
+    s3: Seq<RawSlab>,
+    sf: Seq<RawSlab>,
+    start: int,
+    end: int,
+    del: int,
+    partial: bool,
+)
+    requires
+        0 <= start <= end <= s0.len(),
+        s3.len() == s0.len(),
+        !partial ==> s3 == s0 && edge(s0, end) - edge(s0, start) == del,
+        partial ==> {
+            &&& end < s0.len()
+            &&& s3 == s0.update(end, s3[end])
+            &&& edge(s0, end) - edge(s0, start) + (s0[end].data@.len() - s3[end].data@.len()) == del
+        },
+        sf.len() == s3.len() - (end - start),
+        sf.take(start) == s3.take(start),
+        sf.skip(start) == s3.skip(end),
+    ensures
+        forall|x: int| #[trigger]
+            edges(sf).contains(x) ==> {
+                ||| x <= edge(s0, start) && edges(s0).contains(x)
+                ||| x >= edge(s0, start) && edges(s0).contains(x + del)
+            },
+{
+    let b = edge(s0, start);
+    assert(s3.take(end) =~= s0.take(end));
+    assert(s3.take(start) =~= s0.take(start));
+    assert forall|x: int| #[trigger] edges(sf).contains(x) implies {
+        ||| x <= b && edges(s0).contains(x)
+        ||| x >= b && edges(s0).contains(x + del)
+    } by {
+        let j = choose|j: int| 0 <= j <= sf.len() && x == #[trigger] edge(sf, j);
+        if j <= start {
+            lemma_edge_prefix(sf, s0, start, j);
+            lemma_edge_le(s0, j, start);
+            assert(x == edge(s0, j));
+        } else {
+            // the slab `j` was before the whole ones went
+            let k = j + (end - start);
+            lemma_edge_prefix(sf, s0, start, start);
+            lemma_edge_suffix(sf, s3, start, end, j - start);
+            lemma_edge_prefix(s3, s0, end, end);
+            lemma_edge_le(s3, end, k);
+            if partial {
+                lemma_edge_step(s3, end);
+                lemma_edge_step(s0, end);
+                assert(s3.skip(end + 1) =~= s0.skip(end + 1));
+                lemma_edge_suffix(s3, s0, end + 1, end + 1, k - (end + 1));
+            }
+            assert(x + del == edge(s0, k));
+        }
+    }
+}
+
+/// A splice at `offset` in the slab of `len` bytes at `p`, which leaves
+/// the edges `e1` and the slabs it touched ending at `b`, and then the
+/// rest of the deletion after them, which leaves `e2`: every edge left
+/// is one that a splice of `del` bytes at `p + offset` for `n` may leave.
+proof fn lemma_edges_spliced(
+    e0: ISet<int>,
+    e1: ISet<int>,
+    e2: ISet<int>,
+    p: int,
+    len: int,
+    offset: int,
+    del: int,
+    n: int,
+    b: int,
+)
+    requires
+        0 <= offset <= len,
+        0 <= del,
+        0 <= n,
+        b == p + len - local_del(len, offset, del) + n,
+        forall|x: int| #[trigger]
+            e1.contains(x) ==> {
+                ||| x <= p && e0.contains(x)
+                ||| x == p + offset
+                ||| x == p + offset + n
+                ||| x >= b && e0.contains(x + local_del(len, offset, del) - n)
+            },
+        forall|x: int| #[trigger]
+            e2.contains(x) ==> {
+                ||| x <= b && e1.contains(x)
+                ||| x >= b && e1.contains(x + (del - local_del(len, offset, del)))
+            },
+    ensures
+        forall|x: int| #[trigger] e2.contains(x) ==> spliced_cut(e0, p + offset, del, n, x),
+{
+    let ld = local_del(len, offset, del);
+    assert forall|x: int| #[trigger] e2.contains(x) implies spliced_cut(e0, p + offset, del, n, x) by {
+        if x <= b && e1.contains(x) {
+            if x >= b && e0.contains(x + ld - n) && ld == del {
+                assert(x - n + del == x + ld - n);
+            }
+        } else {
+            let y = x + (del - ld);
+            assert(e1.contains(y));
+            if y >= b && e0.contains(y + ld - n) {
+                assert(x - n + del == y + ld - n);
+            }
+        }
+    }
+}
+
+/// Slab `a + 1` merged into slab `a` leaves no edge that was not one.
+proof fn lemma_edges_merged(s0: Seq<RawSlab>, s1: Seq<RawSlab>, a: int)
+    requires
+        0 <= a,
+        a + 1 < s0.len(),
+        s1.len() == s0.len() - 1,
+        s1.take(a) == s0.take(a),
+        s1.skip(a + 1) == s0.skip(a + 2),
+        s1[a].data@ == s0[a].data@ + s0[a + 1].data@,
+    ensures
+        forall|x: int| #[trigger] edges(s1).contains(x) ==> edges(s0).contains(x),
+{
+    assert forall|x: int| #[trigger] edges(s1).contains(x) implies edges(s0).contains(x) by {
+        let j = choose|j: int| 0 <= j <= s1.len() && x == #[trigger] edge(s1, j);
+        if j <= a {
+            lemma_edge_prefix(s1, s0, a, j);
+            assert(x == edge(s0, j));
+        } else {
+            lemma_edge_prefix(s1, s0, a, a);
+            lemma_edge_step(s1, a);
+            lemma_edge_step(s0, a);
+            lemma_edge_step(s0, a + 1);
+            lemma_edge_suffix(s1, s0, a + 1, a + 2, j - (a + 1));
+            assert(x == edge(s0, j + 1));
+        }
+    }
+}
+
+/// An empty slab dropped leaves no edge that was not one.
+proof fn lemma_edges_dropped(s: Seq<RawSlab>, k: int)
+    requires
+        0 <= k < s.len(),
+        s[k].data@.len() == 0,
+    ensures
+        forall|x: int| #[trigger] edges(s.remove(k)).contains(x) ==> edges(s).contains(x),
+{
+    let t = s.remove(k);
+    assert(t.take(k) =~= s.take(k));
+    assert(t.skip(k) =~= s.skip(k + 1));
+    assert forall|x: int| #[trigger] edges(t).contains(x) implies edges(s).contains(x) by {
+        let j = choose|j: int| 0 <= j <= t.len() && x == #[trigger] edge(t, j);
+        if j <= k {
+            lemma_edge_prefix(t, s, k, j);
+            assert(x == edge(s, j));
+        } else {
+            lemma_edge_prefix(t, s, k, k);
+            lemma_edge_step(s, k);
+            lemma_edge_suffix(t, s, k, k + 1, j - k);
+            assert(x == edge(s, j + 1));
+        }
+    }
 }
 
 /// Bytes `off..off + take` of slab `i` are the column's bytes from the
@@ -470,6 +894,69 @@ impl RawColumn {
             )
     }
 
+    /// Where the column's slabs meet, and its two ends. Bytes lie within
+    /// one slab, which is where [`get`](Self::get) can give them, exactly
+    /// when no cut is strictly between them (`lemma_in_one_slab`); and a
+    /// splice leaves a cut only where one was, or at an end of the bytes
+    /// it puts in (`spliced_cut`). So bytes spliced in as one, and never
+    /// spliced into, stay within one slab.
+    pub closed spec fn cuts(&self) -> ISet<int> {
+        edges(self.slabs@)
+    }
+
+    /// Bytes `[start, end)` of the column lie within one slab exactly when
+    /// no cut is strictly between `start` and `end`.
+    pub proof fn lemma_in_one_slab(&self, start: int, end: int)
+        requires
+            0 <= start < end <= self@.len(),
+        ensures
+            self.in_one_slab(start, end) <==> forall|x: int|
+                start < x < end ==> !#[trigger] self.cuts().contains(x),
+    {
+        // what the edges are, and what lying in one slab is, are the
+        // lemmas' to know
+        hide(edges);
+        hide(RawColumn::in_one_slab);
+        let s = self.slabs@;
+        assert(self.cuts() == edges(s));
+        lemma_edges_between(s, start, end);
+        if self.in_one_slab(start, end) {
+            self.lemma_one_slab_held(start, end);
+        }
+        if exists|i: int| #[trigger] held_by(s, i, start, end) {
+            let i = choose|i: int| #[trigger] held_by(s, i, start, end);
+            self.lemma_held_one_slab(i, start, end);
+        }
+    }
+
+    /// Bytes that lie within one slab are held by one.
+    proof fn lemma_one_slab_held(&self, start: int, end: int)
+        requires
+            self.in_one_slab(start, end),
+        ensures
+            exists|i: int| #[trigger] held_by(self.slabs@, i, start, end),
+    {
+        let s = self.slabs@;
+        let i = choose|i: int|
+            0 <= i < s.len() && #[trigger] sum(sizes(s), 0, i) <= start && end <= sum(sizes(s), 0, i + 1);
+        lemma_flat_len(s, i);
+        lemma_flat_len(s, i + 1);
+        assert(held_by(s, i, start, end));
+    }
+
+    /// Bytes that a slab holds lie within one slab.
+    proof fn lemma_held_one_slab(&self, i: int, start: int, end: int)
+        requires
+            held_by(self.slabs@, i, start, end),
+        ensures
+            self.in_one_slab(start, end),
+    {
+        let s = self.slabs@;
+        lemma_flat_len(s, i);
+        lemma_flat_len(s, i + 1);
+        assert(sum(sizes(s), 0, i) <= start && end <= sum(sizes(s), 0, i + 1));
+    }
+
     /// A column's length is its slabs' sizes together, and a column that
     /// holds a byte has a slab.
     proof fn lemma_len(&self)
@@ -490,6 +977,7 @@ impl RawColumn {
         ensures
             r.wf(),
             r@ == Seq::<u8>::empty(),
+            forall|x: int| #[trigger] r.cuts().contains(x) ==> x == 0,
     {
         Self::with_max_segments(DEFAULT_MAX_SEGMENTS)
     }
@@ -498,6 +986,7 @@ impl RawColumn {
         ensures
             r.wf(),
             r@ == Seq::<u8>::empty(),
+            forall|x: int| #[trigger] r.cuts().contains(x) ==> x == 0,
     {
         if max_segments == 0 {
             fail("max_segments must be non-zero", Ghost(max_segments == 0));
@@ -507,6 +996,7 @@ impl RawColumn {
             assert(r.slabs@ =~= Seq::<RawSlab>::empty());
             assert(datas(r.slabs@) =~= Seq::<Seq<u8>>::empty());
             assert(sizes(r.slabs@) =~= Seq::<nat>::empty());
+            lemma_edges_few(r.slabs@);
         }
         r
     }
@@ -559,6 +1049,15 @@ impl RawColumn {
                 index + del,
             ),
             r is Err ==> final(self)@ == old(self)@,
+            r is Ok ==> forall|x: int| #[trigger]
+                final(self).cuts().contains(x) ==> spliced_cut(
+                    old(self).cuts(),
+                    index as int,
+                    del as int,
+                    bytes@.len() as int,
+                    x,
+                ),
+            r is Err ==> final(self).cuts() == old(self).cuts(),
     {
         proof {
             lemma_flat_total(self.slabs@);
@@ -589,6 +1088,7 @@ impl RawColumn {
                 assert(sum(sizes(self.slabs@), 0, 0) == 0);
                 assert(sizes(self.slabs@) =~= seq![bytes@.len()]);
                 lemma_sum_one(sizes(self.slabs@), 0);
+                lemma_edges_few(self.slabs@);
             }
             return Ok(());
         }
@@ -605,7 +1105,7 @@ impl RawColumn {
         self.total_len = self.total_len - del + bytes.len();
         let ghost s1 = self.slabs@;
         let (start, end, merged) = merge_around(
-            &RawMerge { max_segments: self.max_segments },
+            &RawMerge { max_segments: self.max_segments, base: Ghost(edges(s1)) },
             &mut self.slabs,
             si,
             end_spliced,
@@ -668,6 +1168,14 @@ impl RawColumn {
         ensures
             final(self).wf(),
             final(self)@ == old(self)@.take(index as int) + bytes@ + old(self)@.skip(index + del),
+            forall|x: int| #[trigger]
+                final(self).cuts().contains(x) ==> spliced_cut(
+                    old(self).cuts(),
+                    index as int,
+                    del as int,
+                    bytes@.len() as int,
+                    x,
+                ),
     {
         if let Err(e) = self.try_splice_slice(index, del, bytes) {
             splice_failed(e);
@@ -999,6 +1507,7 @@ impl RawColumn {
             r is Ok,
             r->Ok_0.wf(),
             r->Ok_0@ == data@,
+            forall|x: int| #[trigger] r->Ok_0.cuts().contains(x) ==> x == 0 || x == data@.len(),
     {
         if max_segments == 0 {
             fail("max_segments must be non-zero", Ghost(max_segments == 0));
@@ -1018,6 +1527,7 @@ impl RawColumn {
             assert(sizes(r.slabs@) =~= seq![data@.len()]);
             lemma_sum_one(sizes(r.slabs@), 0);
             assert(sum(sizes(r.slabs@), 0, 0) == 0);
+            lemma_edges_few(r.slabs@);
         }
         r.rebuild_bit();
         Ok(r)
@@ -1199,6 +1709,14 @@ fn splice_in(
             si as int,
             final(slabs)@[si as int],
         ),
+        forall|x: int| #[trigger]
+            edges(final(slabs)@).contains(x) ==> spliced_cut(
+                edges(old(slabs)@),
+                edge(old(slabs)@, si as int) + offset,
+                del as int,
+                bytes@.len() as int,
+                x,
+            ),
 {
     hide(flat);
     let ghost s0 = slabs@;
@@ -1215,6 +1733,19 @@ fn splice_in(
     proof {
         lemma_spliced_in(s0, s1, slabs@, si as int, end as int, offset as int, del as int, bytes@);
         lemma_full_around(s0, s1, slabs@, si as int, end as int, end + if partial { 1int } else { 0 });
+        let len0 = s0[si as int].data@.len() as int;
+        lemma_edges_at(s0, s1, si as int, end as int, offset as int, local_del(len0, offset as int, del as int), bytes@);
+        lemma_edges_spliced(
+            edges(s0),
+            edges(s1),
+            edges(slabs@),
+            edge(s0, si as int),
+            len0,
+            offset as int,
+            del as int,
+            bytes@.len() as int,
+            edge(s1, end as int),
+        );
     }
     let changed = end > si + 1 || partial || drained;
     let end = if partial { end + 1 } else { end };
@@ -1252,6 +1783,8 @@ fn splice_at(
         final(slabs)@.take(si as int) == old(slabs)@.take(si as int),
         final(slabs)@.skip(r.0 as int) == old(slabs)@.skip(si + 1),
         r.0 == si + 1 ==> final(slabs)@ == old(slabs)@.update(si as int, final(slabs)@[si as int]),
+        r.0 == si + 2 ==> final(slabs)@[si as int].data@.len() == offset || final(slabs)@[si as int].data@.len()
+            == offset + bytes@.len(),
 {
     let ghost s0 = slabs@;
     let _ = slabs.len();
@@ -1349,6 +1882,11 @@ fn drain_after(slabs: &mut Vec<RawSlab>, start: usize, del: usize) -> (r: (bool,
         forall|i: int| start <= i < final(slabs)@.len() ==> #[trigger] final(slabs)@[i].data@.len() > 0,
         r.0 ==> start < final(slabs)@.len(),
         !r.0 && !r.1 ==> final(slabs)@ == old(slabs)@,
+        forall|x: int| #[trigger]
+            edges(final(slabs)@).contains(x) ==> {
+                ||| x <= edge(old(slabs)@, start as int) && edges(old(slabs)@).contains(x)
+                ||| x >= edge(old(slabs)@, start as int) && edges(old(slabs)@).contains(x + del)
+            },
 {
     hide(flat);
     let ghost s0 = slabs@;
@@ -1363,6 +1901,12 @@ fn drain_after(slabs: &mut Vec<RawSlab>, start: usize, del: usize) -> (r: (bool,
             forall|i: int| end <= i < slabs@.len() ==> #[trigger] slabs@[i].data@.len() > 0,
             partial ==> remaining == 0 && end < slabs@.len(),
             !partial ==> slabs@ == s0,
+            !partial ==> edge(s0, end as int) - edge(s0, start as int) + remaining == del,
+            partial ==> {
+                &&& slabs@ == s0.update(end as int, slabs@[end as int])
+                &&& edge(s0, end as int) - edge(s0, start as int) + (s0[end as int].data@.len()
+                    - slabs@[end as int].data@.len()) == del
+            },
             flat(s0.skip(start as int)).skip(del as int) == flat(slabs@.skip(end as int)).skip(
                 remaining as int,
             ),
@@ -1374,6 +1918,7 @@ fn drain_after(slabs: &mut Vec<RawSlab>, start: usize, del: usize) -> (r: (bool,
         if remaining >= slab_len {
             proof {
                 lemma_drain_whole(s1, end as int, remaining as int);
+                lemma_edge_step(s0, end as int);
             }
             remaining -= slab_len;
             end += 1;
@@ -1389,6 +1934,7 @@ fn drain_after(slabs: &mut Vec<RawSlab>, start: usize, del: usize) -> (r: (bool,
                 lemma_drain_part(s1, s2, end as int, remaining as int);
                 assert(flat(s2.skip(end as int)).skip(0) =~= flat(s2.skip(end as int)));
                 assert(s2.take(end as int) =~= s0.take(end as int));
+                assert(s2 =~= s0.update(end as int, s2[end as int]));
             }
             remaining = 0;
             partial = true;
@@ -1416,6 +1962,7 @@ fn drain_after(slabs: &mut Vec<RawSlab>, start: usize, del: usize) -> (r: (bool,
                 assert(slabs@[i] == s3[i + (end - start)]);
             }
         }
+        lemma_edges_drained(s0, s3, slabs@, start as int, end as int, del as int, partial);
     }
     (partial, drained)
 }
@@ -1459,6 +2006,7 @@ fn splice_slab(
                 Seq::empty()
             }) == old(slab).data@.take(index as int) + values@ + old(slab).data@.skip(index + ld)
         }),
+        r.0 is Some ==> final(slab).data@.len() == index || final(slab).data@.len() == index + values@.len(),
 {
     let slab_len = slab.data.len();
     let local_del = if del <= slab_len - index {
@@ -1601,6 +2149,9 @@ proof fn lemma_pair_merged(s0: Seq<RawSlab>, s1: Seq<RawSlab>, a: int)
 /// [`merge_around`].
 struct RawMerge {
     max_segments: usize,
+    /// Every edge of the slabs is one of these: a merge makes no new one.
+    #[allow(dead_code)]
+    base: Ghost<ISet<int>>,
 }
 
 impl Merger<RawSlab> for RawMerge {
@@ -1611,7 +2162,8 @@ impl Merger<RawSlab> for RawMerge {
     }
 
     closed spec fn inv(&self, s: Seq<RawSlab>) -> bool {
-        flat(s).len() <= usize::MAX
+        &&& flat(s).len() <= usize::MAX
+        &&& forall|x: int| #[trigger] edges(s).contains(x) ==> self.base@.contains(x)
     }
 
     #[verifier::spinoff_prover]
@@ -1637,6 +2189,7 @@ impl Merger<RawSlab> for RawMerge {
                 assert(s1.skip(a + 1) =~= s0.skip(a + 2));
                 assert(s1[a as int].data@ =~= s0[a as int].data@ + s0[a + 1].data@);
                 lemma_pair_merged(s0, s1, a as int);
+                lemma_edges_merged(s0, s1, a as int);
             }
             true
         } else {
@@ -1674,6 +2227,7 @@ fn drop_empty(slabs: &mut Vec<RawSlab>, start: usize, end: usize) -> (removed: b
         flat(final(slabs)@) == flat(old(slabs)@),
         full(final(slabs)@),
         !removed ==> final(slabs)@ == old(slabs)@,
+        forall|x: int| #[trigger] edges(final(slabs)@).contains(x) ==> edges(old(slabs)@).contains(x),
 {
     // A delete can leave an empty slab behind, for example when a tiny
     // value is inserted at the front of a loaded oversize slab and then
@@ -1690,11 +2244,13 @@ fn drop_empty(slabs: &mut Vec<RawSlab>, start: usize, end: usize) -> (removed: b
             flat(slabs@) == flat(s0),
             forall|i: int| 0 <= i < slabs@.len() && !(k <= i < end) ==> #[trigger] slabs@[i].data@.len() > 0,
             !removed ==> slabs@ == s0,
+            forall|x: int| #[trigger] edges(slabs@).contains(x) ==> edges(s0).contains(x),
         decreases end - k,
     {
         if slabs[k].data.len() == 0 {
             proof {
                 lemma_flat_drop_empty(slabs@, k as int);
+                lemma_edges_dropped(slabs@, k as int);
             }
             slabs.remove(k);
             end -= 1;
@@ -1989,6 +2545,7 @@ impl Default for RawColumn {
         ensures
             r.wf(),
             r@ == Seq::<u8>::empty(),
+            forall|x: int| #[trigger] r.cuts().contains(x) ==> x == 0,
     {
         Self::new()
     }
@@ -2047,6 +2604,7 @@ impl RawColumn {
             r is Ok,
             r->Ok_0.wf(),
             r->Ok_0@ == data@,
+            forall|x: int| #[trigger] r->Ok_0.cuts().contains(x) ==> x == 0 || x == data@.len(),
     {
         Self::load_with_max_segments(data, DEFAULT_MAX_SEGMENTS)
     }

@@ -3239,3 +3239,62 @@ fn raw_columns() {
     verus_client::raw_emptied(&mut col);
     assert!(col.is_empty());
 }
+
+#[test]
+fn raw_cuts() {
+    use hexane::verified::RawColumn;
+    let mut col = RawColumn::with_max_segments(2);
+    assert_eq!(
+        verus_client::raw_put_then_read(&mut col, 0, b"world"),
+        b"world"
+    );
+    assert_eq!(
+        verus_client::raw_put_then_read(&mut col, 0, b"hello, "),
+        b"hello, "
+    );
+    assert_eq!(col.save(), b"hello, world");
+    let (two, a, b) = verus_client::raw_two_values_put(b"left", b"right");
+    assert_eq!(two.save(), b"leftright");
+    assert_eq!((&a[..], &b[..]), (&b"left"[..], &b"right"[..]));
+    assert_eq!(
+        verus_client::raw_loaded_value_read(b"any bytes"),
+        b"any bytes"
+    );
+    let (x, y) = verus_client::raw_clone_reads_alike(&col, 7, 12);
+    assert_eq!((&x[..], &y[..]), (&b"world"[..], &b"world"[..]));
+
+    // a column that holds values, their lengths kept beside it: each is
+    // read whole, however small the slabs
+    let mut vals = RawColumn::with_max_segments(1);
+    let mut lens: Vec<usize> = Vec::new();
+    verus_client::raw_value_put(&mut vals, &mut lens, 0, 0, b"bb");
+    verus_client::raw_value_put(&mut vals, &mut lens, 0, 0, b"a");
+    verus_client::raw_value_put(&mut vals, &mut lens, 2, 3, b"dddd");
+    verus_client::raw_value_put(&mut vals, &mut lens, 2, 3, b"");
+    verus_client::raw_value_put(&mut vals, &mut lens, 2, 3, b"ccc");
+    assert_eq!(vals.save(), b"abbcccdddd");
+    assert_eq!(lens, [1, 2, 3, 0, 4]);
+    let wanted: [&[u8]; 5] = [b"a", b"bb", b"ccc", b"", b"dddd"];
+    let mut start = 0;
+    for (i, want) in wanted.into_iter().enumerate() {
+        assert_eq!(verus_client::raw_value_read(&vals, &lens, i, start), want);
+        start += lens[i];
+    }
+    verus_client::raw_value_taken_out(&mut vals, &mut lens, 1, 1);
+    assert_eq!(vals.save(), b"acccdddd");
+    assert_eq!(lens, [1, 3, 0, 4]);
+    assert_eq!(verus_client::raw_value_read(&vals, &lens, 1, 1), b"ccc");
+    assert_eq!(verus_client::raw_value_read(&vals, &lens, 3, 4), b"dddd");
+
+    // each call by itself
+    let (new, with, default) = verus_client::raw_cuts_told_by_new(8);
+    assert!(new.is_empty() && with.is_empty() && default.is_empty());
+    let (plain, small) = verus_client::raw_cuts_told_by_load(b"abc", 2);
+    assert!(plain.try_get(0..3).is_ok() && small.try_get(0..3).is_ok());
+    let mut other = verus_client::raw_cuts_told_by_clone(&col);
+    assert!(verus_client::raw_cuts_told_by_try_splice_slice(&mut other, 13, 0, b"x").is_err());
+    assert!(verus_client::raw_cuts_told_by_try_splice_slice(&mut other, 12, 0, b"!").is_ok());
+    verus_client::raw_cuts_told_by_splice_slice(&mut other, 0, 5, b"goodbye");
+    assert_eq!(other.save(), b"goodbye, world!");
+    verus_client::raw_told_by_the_cuts(&other, 0, 7);
+}

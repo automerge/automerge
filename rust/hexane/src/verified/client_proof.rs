@@ -402,10 +402,10 @@ use super::{
     lemma_head_len, lemma_head_run_max, lemma_run_values_add, lemma_run_values_push,
     lemma_runs_first, lemma_runs_of_values, lemma_sorted, lemma_sum_bound, lemma_sum_mono,
     lemma_sum_range, lemma_sum_run, lemma_sums_fit, mapped, only, past, refused, run_values,
-    runs_of, scan_of, scan_taken, sorted, sorted_for, sum_of, summed, sums_fit, times, total_len,
-    total_str_len, window, AccIndex, Get, LenIndex, RawColumn, RawColumnIter, SumIndex, VAccum,
-    VAccumulated, VAdds, VAmount, VCodec, VCount, VDelta, VDeltaValue, VGet, VGroup, VIndex,
-    VKeeps, VNewtype, VSpec, VSum, VSummed, VValue, VerifiedAccColumn, VerifiedAccIter,
+    runs_of, scan_of, scan_taken, sorted, sorted_for, spliced_cut, sum_of, summed, sums_fit, times,
+    total_len, total_str_len, window, AccIndex, Get, LenIndex, RawColumn, RawColumnIter, SumIndex,
+    VAccum, VAccumulated, VAdds, VAmount, VCodec, VCount, VDelta, VDeltaValue, VGet, VGroup,
+    VIndex, VKeeps, VNewtype, VSpec, VSum, VSummed, VValue, VerifiedAccColumn, VerifiedAccIter,
     VerifiedAccIterState, VerifiedAccSeek, VerifiedAccValue, VerifiedColumn, VerifiedDecoder,
     VerifiedDeltaColumn, VerifiedDeltaDecoder, VerifiedDeltaEncoder, VerifiedDeltaEncoderState,
     VerifiedDeltaIter, VerifiedDeltaIterState, VerifiedDeltaRuns, VerifiedEncoder,
@@ -417,7 +417,7 @@ use crate::{DeltaRun, Leb128, LoadOpts, PackError, Run};
 use std::cmp::Ordering;
 use std::ops::{Bound, Range, RangeBounds};
 use vstd::prelude::*;
-use vstd::slice::slice_subrange;
+use vstd::slice::{slice_subrange, slice_to_vec};
 #[cfg(verus_keep_ghost)]
 use vstd::std_specs::iter::IteratorSpec;
 #[cfg(verus_keep_ghost)]
@@ -15165,6 +15165,443 @@ fn raw_told_by_an_iterators_clone<'a>(it: &RawColumnIter<'a>) -> (out: (RawColum
         out.1.spec_pos() == 0,
 {
     (it.clone(), RawColumnIter::default())
+}
+
+// ── Where a raw column's slabs meet ────────────────────────────────
+
+/// A value put into a raw column by one splice is read back whole by
+/// `get`: no two slabs meet strictly inside the bytes one splice puts
+/// in, so the read is proved not to panic.
+#[allow(dead_code)]
+fn raw_put_then_read(col: &mut RawColumn, index: usize, value: &[u8]) -> (out: Vec<u8>)
+    requires
+        old(col).wf(),
+        index <= old(col)@.len(),
+        old(col)@.len() + value@.len() <= usize::MAX,
+    ensures
+        final(col).wf(),
+        final(col)@ == old(col)@.take(index as int) + value@ + old(col)@.skip(index as int),
+        out@ == value@,
+{
+    let r = col.try_splice_slice(index, 0, value);
+    assert(r is Ok);
+    let end = index + value.len();
+    proof {
+        if index < end {
+            col.lemma_in_one_slab(index as int, end as int);
+        }
+        assert(col@.subrange(index as int, end as int) =~= value@);
+    }
+    let s = col.get(index..end);
+    slice_to_vec(s)
+}
+
+/// Two values put into a new raw column one after the other, and each
+/// read back whole by `get`: neither read can panic.
+#[allow(dead_code)]
+fn raw_two_values_put(a: &[u8], b: &[u8]) -> (out: (RawColumn, Vec<u8>, Vec<u8>))
+    requires
+        a@.len() + b@.len() <= usize::MAX,
+    ensures
+        out.0.wf(),
+        out.0@ == a@ + b@,
+        out.1@ == a@,
+        out.2@ == b@,
+{
+    let mut col = RawColumn::new();
+    let first = col.try_splice_slice(0, 0, a);
+    assert(first is Ok);
+    let ghost one = col;
+    let la = a.len();
+    let second = col.try_splice_slice(la, 0, b);
+    assert(second is Ok);
+    let end = la + b.len();
+    proof {
+        assert(col@ =~= a@ + b@);
+        // the slabs meet at most where the two values do
+        assert forall|x: int| #[trigger] one.cuts().contains(x) implies x == 0 || x == la by {}
+        assert forall|x: int| #[trigger] col.cuts().contains(x) implies x == 0 || x == la || x == end by {
+            if x >= end && one.cuts().contains(x - b@.len()) {
+                assert(x - b@.len() == la);
+            }
+        }
+        if 0 < la {
+            col.lemma_in_one_slab(0, la as int);
+        }
+        if la < end {
+            col.lemma_in_one_slab(la as int, end as int);
+        }
+        assert(col@.subrange(0, la as int) =~= a@);
+        assert(col@.subrange(la as int, end as int) =~= b@);
+    }
+    let x = slice_to_vec(col.get(0..la));
+    let y = slice_to_vec(col.get(la..end));
+    (col, x, y)
+}
+
+/// The bytes a raw column was loaded from are read back by one `get`,
+/// however many they are: a loaded column is one slab.
+#[allow(dead_code)]
+fn raw_loaded_value_read(data: &[u8]) -> (out: Vec<u8>)
+    ensures
+        out@ == data@,
+{
+    let r = RawColumn::load(data);
+    let col = r.unwrap();
+    let n = data.len();
+    proof {
+        if 0 < n {
+            col.lemma_in_one_slab(0, n as int);
+        }
+        assert(col@.subrange(0, n as int) =~= data@);
+    }
+    slice_to_vec(col.get(0..n))
+}
+
+/// A range that one raw column gives by `get`, its clone gives too: the
+/// slabs of a clone meet where the column's do.
+#[allow(dead_code)]
+fn raw_clone_reads_alike(col: &RawColumn, start: usize, end: usize) -> (out: (Vec<u8>, Vec<u8>))
+    requires
+        col.wf(),
+        start < end <= col@.len(),
+        col.in_one_slab(start as int, end as int),
+    ensures
+        out.0@ == out.1@,
+        out.0@ == col@.subrange(start as int, end as int),
+{
+    let twin = col.clone();
+    proof {
+        col.lemma_in_one_slab(start as int, end as int);
+        twin.lemma_in_one_slab(start as int, end as int);
+    }
+    let x = slice_to_vec(col.get(start..end));
+    let y = slice_to_vec(twin.get(start..end));
+    (x, y)
+}
+
+/// Where value `i` begins, of values of these lengths kept one after
+/// another.
+spec fn raw_start(lens: Seq<usize>, i: int) -> int
+    decreases i,
+{
+    if i <= 0 {
+        0
+    } else {
+        raw_start(lens, i - 1) + lens[i - 1]
+    }
+}
+
+/// A raw column that holds values of these lengths one after another,
+/// each of them whole: its slabs meet only where two values do. This is
+/// what a caller that keeps the lengths beside the column, as Automerge
+/// does, has to keep true; the clients below show that it can.
+spec fn raw_holds(col: RawColumn, lens: Seq<usize>) -> bool {
+    &&& col.wf()
+    &&& col@.len() == raw_start(lens, lens.len() as int)
+    &&& forall|x: int| #[trigger]
+        col.cuts().contains(x) ==> exists|j: int| 0 <= j <= lens.len() && x == #[trigger] raw_start(lens, j)
+}
+
+/// Values begin in order.
+proof fn lemma_raw_start_le(lens: Seq<usize>, i: int, j: int)
+    requires
+        0 <= i <= j <= lens.len(),
+    ensures
+        raw_start(lens, i) <= raw_start(lens, j),
+    decreases j - i,
+{
+    if i < j {
+        lemma_raw_start_le(lens, i, j - 1);
+    }
+}
+
+/// Lengths that are alike before `k` have their values begin alike up
+/// to it.
+proof fn lemma_raw_start_same(a: Seq<usize>, b: Seq<usize>, k: int, i: int)
+    requires
+        0 <= i <= k,
+        k <= a.len(),
+        k <= b.len(),
+        forall|j: int| 0 <= j < k ==> a[j] == b[j],
+    ensures
+        raw_start(a, i) == raw_start(b, i),
+    decreases i,
+{
+    if i > 0 {
+        lemma_raw_start_same(a, b, k, i - 1);
+    }
+}
+
+/// A value of `n` bytes put in as value `i` has the values after it
+/// begin `n` later.
+proof fn lemma_raw_start_inserted(lens: Seq<usize>, i: int, n: usize, j: int)
+    requires
+        0 <= i <= lens.len(),
+        i < j <= lens.len() + 1,
+    ensures
+        raw_start(lens.insert(i, n), j) == raw_start(lens, j - 1) + n,
+    decreases j,
+{
+    let new = lens.insert(i, n);
+    if j == i + 1 {
+        lemma_raw_start_same(new, lens, i, i);
+    } else {
+        lemma_raw_start_inserted(lens, i, n, j - 1);
+        assert(new[j - 1] == lens[j - 2]);
+    }
+}
+
+/// Value `i` taken out has the values after it begin its length sooner.
+proof fn lemma_raw_start_removed(lens: Seq<usize>, i: int, j: int)
+    requires
+        0 <= i < lens.len(),
+        i <= j <= lens.len() - 1,
+    ensures
+        raw_start(lens.remove(i), j) == raw_start(lens, j + 1) - lens[i],
+    decreases j,
+{
+    let new = lens.remove(i);
+    if j == i {
+        lemma_raw_start_same(new, lens, i, i);
+    } else {
+        lemma_raw_start_removed(lens, i, j - 1);
+        assert(new[j - 1] == lens[j]);
+    }
+}
+
+/// A value read whole from a raw column that holds values: `get` is
+/// proved not to panic, because no two slabs meet inside a value.
+#[allow(dead_code)]
+fn raw_value_read<'a>(col: &'a RawColumn, lens: &Vec<usize>, i: usize, start: usize) -> (out: &'a [u8])
+    requires
+        raw_holds(*col, lens@),
+        i < lens@.len(),
+        start == raw_start(lens@, i as int),
+    ensures
+        out@ == col@.subrange(start as int, start + lens@[i as int]),
+{
+    let n = lens[i];
+    let _len = col.len();
+    proof {
+        lemma_raw_start_le(lens@, i + 1, lens@.len() as int);
+        assert(raw_start(lens@, i + 1) == start + n);
+        if n > 0 {
+            assert forall|x: int| start < x < start + n implies !#[trigger] col.cuts().contains(x) by {
+                if col.cuts().contains(x) {
+                    let j = choose|j: int| 0 <= j <= lens@.len() && x == #[trigger] raw_start(lens@, j);
+                    if j <= i {
+                        lemma_raw_start_le(lens@, j, i as int);
+                    } else {
+                        lemma_raw_start_le(lens@, i + 1, j);
+                    }
+                }
+            }
+            col.lemma_in_one_slab(start as int, start + n);
+        }
+    }
+    col.get(start..start + n)
+}
+
+/// A value put into a raw column that holds values, as value `i` of
+/// them: the column holds its values still, the new one among them. So
+/// after any number of such splices each value is read whole.
+#[allow(dead_code)]
+fn raw_value_put(col: &mut RawColumn, lens: &mut Vec<usize>, i: usize, start: usize, value: &[u8])
+    requires
+        raw_holds(*old(col), old(lens)@),
+        i <= old(lens)@.len(),
+        start == raw_start(old(lens)@, i as int),
+        old(col)@.len() + value@.len() <= usize::MAX,
+    ensures
+        raw_holds(*final(col), final(lens)@),
+        final(lens)@ == old(lens)@.insert(i as int, value@.len() as usize),
+        final(col)@ == old(col)@.take(start as int) + value@ + old(col)@.skip(start as int),
+        start == raw_start(final(lens)@, i as int),
+{
+    let ghost a = lens@;
+    proof {
+        lemma_raw_start_le(a, i as int, a.len() as int);
+    }
+    let r = col.try_splice_slice(start, 0, value);
+    assert(r is Ok);
+    let n = value.len();
+    lens.insert(i, n);
+    proof {
+        let b = lens@;
+        lemma_raw_start_inserted(a, i as int, n, a.len() as int + 1);
+        lemma_raw_start_inserted(a, i as int, n, i + 1);
+        lemma_raw_start_same(b, a, i as int, i as int);
+        assert forall|x: int| #[trigger] col.cuts().contains(x) implies exists|j: int|
+            0 <= j <= b.len() && x == #[trigger] raw_start(b, j) by {
+            if x <= start && old(col).cuts().contains(x) {
+                let j = choose|j: int| 0 <= j <= a.len() && x == #[trigger] raw_start(a, j);
+                if j <= i {
+                    lemma_raw_start_same(b, a, i as int, j);
+                    assert(x == raw_start(b, j));
+                } else {
+                    lemma_raw_start_le(a, i as int, j);
+                    assert(x == raw_start(b, i as int));
+                }
+            } else if x >= start + n && old(col).cuts().contains(x - n) {
+                let j = choose|j: int| 0 <= j <= a.len() && x - n == #[trigger] raw_start(a, j);
+                if j >= i {
+                    lemma_raw_start_inserted(a, i as int, n, j + 1);
+                    assert(x == raw_start(b, j + 1));
+                } else {
+                    lemma_raw_start_le(a, j, i as int);
+                    assert(x == raw_start(b, i + 1));
+                }
+            } else {
+                assert(x == raw_start(b, i as int) || x == raw_start(b, i + 1));
+            }
+        }
+    }
+}
+
+/// Value `i` taken out of a raw column that holds values: the column
+/// holds the others still, each whole.
+#[allow(dead_code)]
+fn raw_value_taken_out(col: &mut RawColumn, lens: &mut Vec<usize>, i: usize, start: usize)
+    requires
+        raw_holds(*old(col), old(lens)@),
+        i < old(lens)@.len(),
+        start == raw_start(old(lens)@, i as int),
+    ensures
+        raw_holds(*final(col), final(lens)@),
+        final(lens)@ == old(lens)@.remove(i as int),
+        final(col)@ == old(col)@.take(start as int) + old(col)@.skip(start + old(lens)@[i as int]),
+{
+    let ghost a = lens@;
+    let n = lens[i];
+    let _len = col.len();
+    proof {
+        lemma_raw_start_le(a, i + 1, a.len() as int);
+        assert(raw_start(a, i + 1) == start + n);
+    }
+    let r = col.try_splice_slice(start, n, &[]);
+    assert(r is Ok);
+    lens.remove(i);
+    proof {
+        let b = lens@;
+        assert(col@ =~= old(col)@.take(start as int) + old(col)@.skip(start + n));
+        lemma_raw_start_removed(a, i as int, a.len() - 1);
+        lemma_raw_start_same(b, a, i as int, i as int);
+        assert forall|x: int| #[trigger] col.cuts().contains(x) implies exists|j: int|
+            0 <= j <= b.len() && x == #[trigger] raw_start(b, j) by {
+            if x <= start && old(col).cuts().contains(x) {
+                let j = choose|j: int| 0 <= j <= a.len() && x == #[trigger] raw_start(a, j);
+                if j <= i {
+                    lemma_raw_start_same(b, a, i as int, j);
+                    assert(x == raw_start(b, j));
+                } else {
+                    lemma_raw_start_le(a, i as int, j);
+                    assert(x == raw_start(b, i as int));
+                }
+            } else if x >= start && old(col).cuts().contains(x + n) {
+                let j = choose|j: int| 0 <= j <= a.len() && x + n == #[trigger] raw_start(a, j);
+                if j >= i + 1 {
+                    lemma_raw_start_removed(a, i as int, j - 1);
+                    assert(x == raw_start(b, j - 1));
+                } else {
+                    lemma_raw_start_le(a, j, i as int);
+                    assert(x == raw_start(b, i as int));
+                }
+            } else {
+                assert(x == raw_start(b, i as int));
+            }
+        }
+    }
+}
+
+/// What `new`, `with_max_segments` and `default` say of the cuts: a new
+/// column has none but its start.
+#[allow(dead_code)]
+fn raw_cuts_told_by_new(max: usize) -> (out: (RawColumn, RawColumn, RawColumn))
+    ensures
+        forall|x: int| #[trigger] out.0.cuts().contains(x) ==> x == 0,
+        forall|x: int| #[trigger] out.1.cuts().contains(x) ==> x == 0,
+        forall|x: int| #[trigger] out.2.cuts().contains(x) ==> x == 0,
+{
+    (RawColumn::new(), RawColumn::with_max_segments(max), RawColumn::default())
+}
+
+/// What the loads say of the cuts: a loaded column has none but its
+/// two ends.
+#[allow(dead_code)]
+fn raw_cuts_told_by_load(data: &[u8], max: usize) -> (out: (RawColumn, RawColumn))
+    ensures
+        out.0@ == data@,
+        forall|x: int| #[trigger] out.0.cuts().contains(x) ==> x == 0 || x == data@.len(),
+        forall|x: int| #[trigger] out.1.cuts().contains(x) ==> x == 0 || x == data@.len(),
+{
+    let a = RawColumn::load(data);
+    let b = RawColumn::load_with_max_segments(data, max);
+    (a.unwrap(), b.unwrap())
+}
+
+/// What `clone` says of the cuts.
+#[allow(dead_code)]
+fn raw_cuts_told_by_clone(col: &RawColumn) -> (out: RawColumn)
+    ensures
+        out.cuts() == col.cuts(),
+{
+    col.clone()
+}
+
+/// What `try_splice_slice` says of the cuts.
+#[allow(dead_code)]
+fn raw_cuts_told_by_try_splice_slice(col: &mut RawColumn, index: usize, del: usize, bytes: &[u8]) -> (r: Result<
+    (),
+    PackError,
+>)
+    requires
+        old(col).wf(),
+    ensures
+        r is Ok ==> forall|x: int| #[trigger]
+            final(col).cuts().contains(x) ==> spliced_cut(
+                old(col).cuts(),
+                index as int,
+                del as int,
+                bytes@.len() as int,
+                x,
+            ),
+        r is Err ==> final(col).cuts() == old(col).cuts(),
+{
+    col.try_splice_slice(index, del, bytes)
+}
+
+/// What `splice_slice` says of the cuts, of a call that returns.
+#[allow(dead_code)]
+fn raw_cuts_told_by_splice_slice(col: &mut RawColumn, index: usize, del: usize, bytes: &[u8])
+    requires
+        old(col).wf(),
+    ensures
+        forall|x: int| #[trigger]
+            final(col).cuts().contains(x) ==> spliced_cut(
+                old(col).cuts(),
+                index as int,
+                del as int,
+                bytes@.len() as int,
+                x,
+            ),
+{
+    col.splice_slice(index, del, bytes)
+}
+
+/// What `lemma_in_one_slab` says: bytes lie within one slab exactly when
+/// no cut is strictly between them.
+#[allow(dead_code)]
+fn raw_told_by_the_cuts(col: &RawColumn, start: usize, end: usize)
+    requires
+        start < end <= col@.len(),
+    ensures
+        col.in_one_slab(start as int, end as int) <==> forall|x: int|
+            start < x < end ==> !#[trigger] col.cuts().contains(x),
+{
+    proof {
+        col.lemma_in_one_slab(start as int, end as int);
+    }
 }
 
 } // verus!

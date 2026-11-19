@@ -15318,3 +15318,83 @@ fn raw_get_panics_where_try_get_refuses() {
     }
     assert!(given > 0 && refused > 0);
 }
+
+// ── Where a raw column's slabs meet ──────────────────────────
+
+/// What `spliced_cut` says, for the tests: whether `x` may be a cut of a
+/// column in which `del` bytes at `index` were replaced by `n`, and whose
+/// cuts were `cuts`.
+fn raw_spliced_cut(cuts: &[usize], index: usize, del: usize, n: usize, x: usize) -> bool {
+    (x <= index && cuts.contains(&x))
+        || (x >= index + n && cuts.contains(&(x - n + del)))
+        || x == index
+        || x == index + n
+}
+
+/// All the cuts of a raw column: its start, where its slabs meet, and
+/// its end.
+fn raw_all_cuts(col: &RawColumn) -> Vec<usize> {
+    let mut cuts = vec![0];
+    cuts.extend(raw_cuts(col));
+    cuts.push(col.len());
+    cuts
+}
+
+/// The slabs of a raw column meet only where its specification lets
+/// them. After each splice every cut is one that `spliced_cut` allows of
+/// the cuts before it, and a splice refused leaves them; a range is
+/// given exactly when no cut is strictly inside it; a clone has the
+/// column's cuts, and a loaded column none but its ends.
+fn raw_cut_edits(seed: u64, max_segments: usize) {
+    let mut rng = Rng(seed.wrapping_mul(0xa24b_aed4).wrapping_add(43) | 1);
+    let mut col = RawColumn::with_max_segments(max_segments);
+    assert_eq!(raw_all_cuts(&col), [0, 0]);
+    let mut len = 0;
+    for step in 0..60 {
+        let ctx = format!("seed {seed} step {step}");
+        let index = rng.below(len + 1);
+        let del = rng.below((len - index).min(12) + 1);
+        let n = rng.below(20);
+        let bytes: Vec<u8> = (0..n).map(|_| rng.next() as u8).collect();
+        let before = raw_all_cuts(&col);
+        let too_many = len - index + 1;
+        assert!(
+            col.try_splice_slice(index, too_many, &bytes).is_err(),
+            "{ctx}"
+        );
+        assert_eq!(raw_all_cuts(&col), before, "{ctx}");
+        if rng.below(2) == 0 {
+            col.splice_slice(index, del, &bytes);
+        } else {
+            col.try_splice_slice(index, del, &bytes).unwrap();
+        }
+        len = len - del + n;
+        let after = raw_all_cuts(&col);
+        for &x in &after {
+            assert!(
+                raw_spliced_cut(&before, index, del, n, x),
+                "{ctx}: cut {x} of {after:?}, which were {before:?}"
+            );
+        }
+        for _ in 0..12 {
+            let start = rng.below(len + 1);
+            let end = start + rng.below(len - start + 1);
+            let whole = !after.iter().any(|&c| start < c && c < end);
+            assert_eq!(
+                col.try_get(start..end).is_ok(),
+                whole,
+                "{ctx}: {start}..{end}"
+            );
+        }
+        assert_eq!(raw_all_cuts(&col.clone()), after, "{ctx}");
+        let loaded = RawColumn::load_with_max_segments(&col.save(), max_segments).unwrap();
+        assert_eq!(raw_all_cuts(&loaded), [0, len], "{ctx}");
+    }
+}
+
+#[test]
+fn raw_cuts_follow_splices() {
+    for seed in 0..48 {
+        raw_cut_edits(seed, [1, 2, 4, 16, 64, 4096][seed as usize % 6]);
+    }
+}

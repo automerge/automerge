@@ -201,6 +201,14 @@
 //! slabs, and so can give only bytes that lie within one slab
 //! (`in_one_slab`; `fits` for a [`RawColumnIter`]).
 //!
+//! Where the slabs meet is specified too (`cuts`). A new column has no
+//! cut within it, nor has a loaded one, and a splice leaves a cut only
+//! where one was or at an end of the bytes it puts in (`spliced_cut`);
+//! and bytes lie within one slab exactly when no cut is strictly
+//! between them (`lemma_in_one_slab`). So a caller that splices only
+//! where its values meet can prove that each value lies within one
+//! slab, and that `get` gives it without a panic.
+//!
 //! Its methods say what they do of every input: where one panics, as
 //! `splice_slice` does out of range, its specification is of the calls
 //! that return. `get` alone has a `requires` in its place. The two
@@ -564,6 +572,8 @@ pub(crate) mod value;
 // spec functions exist only when Verus compiles the crate
 #[cfg(verus_keep_ghost)]
 pub use crate::iter_core::{past, window};
+#[cfg(verus_keep_ghost)]
+pub use crate::raw::spliced_cut;
 pub use crate::raw::{RawColumn, RawColumnIter};
 #[cfg(verus_keep_ghost)]
 pub use acc::{accumulated, lemma_acc_cat, lemma_acc_range, lemma_acc_run, lemma_cancel, times};
