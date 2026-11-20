@@ -1630,9 +1630,6 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
     }
 }
 
-impl<'a, V: VAccumulated + VValue<C>, C: VCodec> super::seal::ShiftSeal for VerifiedAccIter<'a, V, C> {
-
-}
 
 /// The iterator repositioned as any of the verified ones is: its model
 /// is each value of the column with what the values accumulate to

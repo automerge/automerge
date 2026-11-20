@@ -1846,9 +1846,6 @@ impl VerifiedDeltaIterState {
 
 // ── Repositioning (`VShiftable`) ───────────────────────────────────────────
 
-impl<'a, T: VDeltaValue<C>, C: VCodec> crate::verified::seal::ShiftSeal for VerifiedDeltaIter<'a, T, C> {
-
-}
 
 /// The iterator repositioned as any of the verified ones is: its model is
 /// its column's values, from where it stands to the end of its window,
@@ -2011,9 +2008,6 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaIter<'a, T, C> {
 
 // ── The runs of a delta column, repositioned ───────────────────────────────
 
-impl<'a, T: VDeltaValue<C>, C: VCodec> crate::verified::seal::ShiftSeal for VerifiedDeltaRuns<'a, T, C> {
-
-}
 
 impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaRuns<'a, T, C> {
     /// The first run of what is left, and the values it stands for.

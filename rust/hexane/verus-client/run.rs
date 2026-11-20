@@ -4305,3 +4305,16 @@ fn loaded_by_runs() {
     assert_eq!(run.map(|r| (r.count, r.value)), Some((4, 9)));
     assert_eq!(c.unwrap().to_vec(), [9; 4]);
 }
+
+// ── A client's own repositionable iterator ─────────────────────────────────
+
+#[test]
+fn a_clients_own_iterator_repositions() {
+    let v = [5u64, 6, 7, 8, 9];
+    assert_eq!(
+        verus_client::numbers_over_ranges(&v, &[1..3, 4..9]),
+        [6, 7, 9]
+    );
+    assert_eq!(verus_client::first_number_of_range(&v, 2, 4), Some(7));
+    assert_eq!(verus_client::first_number_of_range(&v, 5, 9), None);
+}

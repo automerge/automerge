@@ -404,20 +404,20 @@ use super::{
     lemma_delta_finds_first, lemma_delta_run_at, lemma_delta_run_exact, lemma_delta_run_fits,
     lemma_delta_runs_at, lemma_delta_runs_one, lemma_delta_runs_push, lemma_delta_within_one,
     lemma_head_len, lemma_head_run_max, lemma_run_values_add, lemma_run_values_push,
-    lemma_runs_first, lemma_runs_of_values, lemma_sorted, lemma_sum_bound, lemma_sum_mono,
-    lemma_sum_range, lemma_sum_run, lemma_sums_fit, lemma_svs_windows, mapped, min_i, only, past,
-    produced, ranges_ascend, refused, run_units, run_values, runs_of, scan_of, scan_taken, sorted,
-    sorted_for, splice_does, spliced_cut, splices_do, sum_of, summed, sums_fit, times, total_len,
-    total_str_len, unit_runs, window, windows, AccIndex, Get, LenIndex, RawColumn, RawColumnIter,
-    SumIndex, VAccum, VAccumulated, VAdds, VAmount, VCodec, VCount, VDelta, VDeltaValue, VGet,
-    VGroup, VIndex, VKeeps, VNewtype, VShiftable, VSpec, VSum, VSummed, VValue, VerifiedAccColumn,
-    VerifiedAccIter, VerifiedAccIterState, VerifiedAccSeek, VerifiedAccValue, VerifiedColumn,
-    VerifiedDecoder, VerifiedDeltaColumn, VerifiedDeltaDecoder, VerifiedDeltaEdit,
-    VerifiedDeltaEncoder, VerifiedDeltaEncoderState, VerifiedDeltaIter, VerifiedDeltaIterState,
-    VerifiedDeltaRuns, VerifiedEdit, VerifiedEncoder, VerifiedEncoderState, VerifiedFindByRange,
-    VerifiedIter, VerifiedIterState, VerifiedLoadIter, VerifiedPrefixColumn, VerifiedPrefixIter,
-    VerifiedPrefixIterState, VerifiedPrefixSeek, VerifiedPrefixedValue, VerifiedRanges,
-    VerifiedRuns, VerifiedUnshift,
+    lemma_runs_first, lemma_runs_of_values, lemma_singles, lemma_sorted, lemma_sum_bound,
+    lemma_sum_mono, lemma_sum_range, lemma_sum_run, lemma_sums_fit, lemma_svs_windows, mapped,
+    min_i, only, past, produced, ranges_ascend, refused, run_units, run_values, runs_of, scan_of,
+    scan_taken, sorted, sorted_for, splice_does, spliced_cut, splices_do, sum_of, summed, sums_fit,
+    times, total_len, total_str_len, unit_runs, window, windows, AccIndex, Get, LenIndex,
+    RawColumn, RawColumnIter, SumIndex, VAccum, VAccumulated, VAdds, VAmount, VCodec, VCount,
+    VDelta, VDeltaValue, VGet, VGroup, VIndex, VKeeps, VNewtype, VShiftable, VSpec, VSum, VSummed,
+    VValue, VerifiedAccColumn, VerifiedAccIter, VerifiedAccIterState, VerifiedAccSeek,
+    VerifiedAccValue, VerifiedColumn, VerifiedDecoder, VerifiedDeltaColumn, VerifiedDeltaDecoder,
+    VerifiedDeltaEdit, VerifiedDeltaEncoder, VerifiedDeltaEncoderState, VerifiedDeltaIter,
+    VerifiedDeltaIterState, VerifiedDeltaRuns, VerifiedEdit, VerifiedEncoder, VerifiedEncoderState,
+    VerifiedFindByRange, VerifiedIter, VerifiedIterState, VerifiedLoadIter, VerifiedPrefixColumn,
+    VerifiedPrefixIter, VerifiedPrefixIterState, VerifiedPrefixSeek, VerifiedPrefixedValue,
+    VerifiedRanges, VerifiedRuns, VerifiedUnshift,
 };
 #[cfg(feature = "bijou64")]
 use crate::Bijou64;
@@ -19185,6 +19185,337 @@ fn told_by_load_finalize<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(it: Verif
         },
 {
     it.finalize()
+}
+
+// ── A client's own repositionable iterator ─────────────────────────────────
+
+/// A client's own iterator that repositions as hexane's do
+/// ([`VShiftable`]): the numbers of a slice, from where it stands up to
+/// the end of its window (or of the slice). Its fields are open: what
+/// is said of it holds whatever they are.
+pub struct SliceNumbers<'s> {
+    pub v: &'s [u64],
+    pub pos: usize,
+    pub end: usize,
+}
+
+/// Where a window `pos..end` over `len` numbers ends in fact.
+pub open spec fn lim_of(len: int, end: int) -> int {
+    if end <= len {
+        end
+    } else {
+        len
+    }
+}
+
+impl<'s> SliceNumbers<'s> {
+    /// The numbers of `v`, all of them.
+    pub fn new(v: &'s [u64]) -> (r: Self)
+        ensures
+            r.shift_vals() == v@,
+            r.shift_at() == 0,
+            r.shift_end() == v@.len(),
+            r.shift_left() == v@,
+    {
+        let r = SliceNumbers { v, pos: 0, end: v.len() };
+        proof {
+            assert(window(v@, 0, v@.len() as int) =~= v@);
+        }
+        r
+    }
+
+    /// Where the window ends in fact: at its end, or the slice's.
+    fn lim(&self) -> (r: usize)
+        ensures
+            r == lim_of(self.v@.len() as int, self.end as int),
+    {
+        if self.end <= self.v.len() {
+            self.end
+        } else {
+            self.v.len()
+        }
+    }
+}
+
+#[cfg(verus_keep_ghost)]
+impl<'s> vstd::std_specs::iter::IteratorSpecImpl for SliceNumbers<'s> {
+    open spec fn obeys_prophetic_iter_laws(&self) -> bool {
+        true
+    }
+
+    open spec fn remaining(&self) -> Seq<u64> {
+        window(self.v@, self.pos as int, self.end as int)
+    }
+
+    open spec fn will_return_none(&self) -> bool {
+        true
+    }
+
+    open spec fn decrease(&self) -> Option<nat> {
+        Some(window(self.v@, self.pos as int, self.end as int).len())
+    }
+
+    open spec fn peek(&self, index: int) -> Option<u64> {
+        let w = window(self.v@, self.pos as int, self.end as int);
+        if 0 <= index < w.len() {
+            Some(w[index])
+        } else {
+            None
+        }
+    }
+}
+
+impl<'s> Iterator for SliceNumbers<'s> {
+    type Item = u64;
+
+    fn next(&mut self) -> (r: Option<u64>)
+        ensures
+            final(self).v == old(self).v,
+            final(self).end == old(self).end,
+            match r {
+                Some(x) => {
+                    &&& old(self).shift_left().len() > 0
+                    &&& x == old(self).shift_left()[0]
+                    &&& final(self).shift_left() == old(self).shift_left().skip(1)
+                    &&& final(self).pos == old(self).pos + 1
+                },
+                None => old(self).shift_left().len() == 0 && final(self).shift_left().len() == 0
+                    && final(self).pos == old(self).pos,
+            },
+    {
+        if self.pos < self.lim() {
+            let x = self.v[self.pos];
+            self.pos = self.pos + 1;
+            proof {
+                let o = window(old(self).v@, old(self).pos as int, old(self).end as int);
+                assert(window(self.v@, self.pos as int, self.end as int) =~= o.skip(1));
+                assert(window(self.v@, self.pos as int, self.end as int) =~= o.drop_first());
+            }
+            Some(x)
+        } else {
+            None
+        }
+    }
+}
+
+impl<'s> VShiftable for SliceNumbers<'s> {
+    open spec fn shift_vals(&self) -> Seq<u64> {
+        self.v@
+    }
+
+    open spec fn shift_at(&self) -> int {
+        self.pos as int
+    }
+
+    open spec fn shift_end(&self) -> int {
+        self.end as int
+    }
+
+    open spec fn shift_left(&self) -> Seq<u64> {
+        window(self.v@, self.pos as int, self.end as int)
+    }
+
+    open spec fn shift_items(&self) -> Seq<u64> {
+        window(self.v@, self.pos as int, self.end as int)
+    }
+
+    open spec fn shift_spans(x: u64) -> Seq<u64> {
+        seq![x]
+    }
+
+    open spec fn shift_unit() -> bool {
+        true
+    }
+
+    proof fn lemma_shift(&self) {
+        let xs = self.shift_items();
+        lemma_singles(xs);
+        assert(xs.map_values(|x: u64| Self::shift_spans(x)) =~= xs.map_values(|x: u64| seq![x]));
+    }
+
+    proof fn lemma_shift_unit(x: u64) {
+    }
+
+    fn shift_step(&mut self) -> (r: Option<u64>) {
+        self.next()
+    }
+
+    fn shift_nth(&mut self, n: usize) -> (r: Option<u64>) {
+        let lim = self.lim();
+        let left = if self.pos < lim {
+            lim - self.pos
+        } else {
+            0
+        };
+        if n < left {
+            let ghost o = self.shift_items();
+            self.pos = self.pos + n;
+            let r = self.next();
+            proof {
+                let xs = o.take(n + 1);
+                lemma_singles(xs);
+                assert(xs.map_values(|x: u64| Self::shift_spans(x)) =~= xs.map_values(|x: u64| seq![x]));
+                assert(window(self.v@, self.pos as int, self.end as int) =~= o.skip(n + 1));
+            }
+            r
+        } else {
+            if self.pos < lim {
+                self.pos = lim;
+            }
+            None
+        }
+    }
+
+    fn dup(&self) -> (r: Self) {
+        SliceNumbers { v: self.v, pos: self.pos, end: self.end }
+    }
+
+    fn get_pos(&self) -> (r: usize) {
+        self.pos
+    }
+
+    fn get_max(&self) -> (r: usize) {
+        self.end
+    }
+
+    fn set_max(&mut self, end: usize) {
+        if end >= self.pos {
+            self.end = end;
+        } else {
+            self.end = self.pos;
+        }
+    }
+
+    fn advance_to(&mut self, target: usize) {
+        if target > self.pos {
+            let lim = self.lim();
+            if target <= lim {
+                self.pos = target;
+            } else if self.pos < lim {
+                self.pos = lim;
+            }
+        }
+    }
+
+    fn advance_by(&mut self, amount: usize) {
+        let lim = self.lim();
+        let left = if self.pos < lim {
+            lim - self.pos
+        } else {
+            0
+        };
+        if amount <= left {
+            self.pos = self.pos + amount;
+        } else if self.pos < lim {
+            self.pos = lim;
+        }
+    }
+
+    fn seek_to(&mut self, at: usize) -> (r: Option<u64>) {
+        if at < self.pos {
+            return None;
+        }
+        let k = at - self.pos;
+        let r = self.shift_nth(k);
+        proof {
+            let o = old(self).shift_left();
+            if k < o.len() {
+                assert(o.skip(k as int).take(1) =~= seq![o[k as int]]);
+                let xs = o.take(k + 1);
+                lemma_singles(xs);
+                assert(xs.map_values(|x: u64| Self::shift_spans(x)) =~= xs.map_values(|x: u64| seq![x]));
+            }
+        }
+        r
+    }
+
+    fn shift(&mut self, range: Range<usize>) {
+        // the window's end, and then its start
+        VShiftable::set_max(self, range.end);
+        VShiftable::advance_to(self, range.start);
+    }
+
+    fn shift_next(&mut self, range: Range<usize>) -> (r: Option<u64>) {
+        let ghost (s, e) = (range.start as int, range.end as int);
+        let ghost (v, p) = (self.shift_vals(), self.shift_at());
+        VShiftable::set_max(self, range.end);
+        let q = VShiftable::get_pos(self);
+        let ghost o = self.shift_items();
+        let r = VShiftable::shift_nth(self, range.start - q);
+        proof {
+            let w = window(v, s, e);
+            let k = s - p;
+            if w.len() > 0 {
+                assert(o[k] == w[0]);
+                let xs = o.take(k + 1);
+                lemma_singles(xs);
+                assert(xs.map_values(|x: u64| Self::shift_spans(x)) =~= xs.map_values(|x: u64| seq![x]));
+            }
+        }
+        r
+    }
+}
+
+/// The numbers of several ranges of a slice, walked by hexane's
+/// [`VerifiedRanges`] over a client's own iterator.
+#[allow(dead_code)]
+fn numbers_over_ranges<'s, 'r>(v: &'s [u64], rs: &'r [Range<usize>]) -> (out: Vec<u64>)
+    ensures
+        out@ == windows(v@, rs@),
+{
+    let it = SliceNumbers::new(v);
+    let mut walk = VerifiedRanges::new(it, rs);
+    let ghost all = walk.ranges_left();
+    let mut out: Vec<u64> = Vec::new();
+    loop
+        invariant
+            out@ + walk.ranges_left() == all,
+            all == windows(v@, rs@),
+        ensures
+            out@ == all,
+        decreases walk.ranges_left().len(),
+    {
+        let ghost g = walk.ranges_left();
+        match walk.next() {
+            Some(x) => {
+                proof {
+                    assert(SliceNumbers::shift_spans(x) == seq![x]);
+                    assert(g.take(1)[0] == g[0]);
+                    assert(out@.push(x) + g.skip(1) =~= out@ + g);
+                }
+                out.push(x);
+            },
+            None => {
+                proof {
+                    assert(out@ + g =~= out@);
+                }
+                break ;
+            },
+        }
+    }
+    out
+}
+
+/// The first number of a range of a slice, through hexane's lookahead
+/// over a client's own iterator, moved there.
+#[allow(dead_code)]
+fn first_number_of_range(v: &[u64], a: usize, b: usize) -> (r: Option<u64>)
+    ensures
+        match r {
+            Some(x) => a < b && a < v@.len() && x == v@[a as int],
+            None => !(a < b && a < v@.len()),
+        },
+{
+    let it = SliceNumbers::new(v);
+    let mut u = VerifiedUnshift::new(it);
+    u.shift(a..b);
+    let r = u.next();
+    proof {
+        if r is Some {
+            assert(window(v@, a as int, b as int)[0] == v@[a as int]);
+        }
+    }
+    r
 }
 
 } // verus!

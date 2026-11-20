@@ -650,7 +650,7 @@ pub use prefix_iter::{
     VerifiedPrefixIter, VerifiedPrefixIterState, VerifiedPrefixSeek, VerifiedPrefixedValue,
 };
 #[cfg(verus_keep_ghost)]
-pub use shift::{lemma_svs_windows, run_units, unit_runs, units_of_runs};
+pub use shift::{lemma_singles, lemma_svs_windows, run_units, unit_runs, units_of_runs};
 pub use shift::{VShiftable, VerifiedRanges, VerifiedUnshift};
 #[cfg(verus_keep_ghost)]
 pub use sums::{
@@ -722,12 +722,6 @@ mod seal {
     /// A number a delta column can hold is one of this crate's: no
     /// other can name this trait.
     pub trait DeltaSeal {
-
-    }
-
-    /// An iterator that can be repositioned is one of this crate's: no
-    /// other can name this trait.
-    pub trait ShiftSeal {
 
     }
 

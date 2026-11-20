@@ -1751,9 +1751,6 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> VerifiedPrefixIter<'a, V, C> {
     }
 }
 
-impl<'a, V: VSummed + VValue<C>, C: VCodec> super::seal::ShiftSeal for VerifiedPrefixIter<'a, V, C> {
-
-}
 
 /// The iterator repositioned as any of the verified ones is: its model
 /// is each value of the column with the running sum through it, each an

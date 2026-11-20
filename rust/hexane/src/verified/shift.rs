@@ -15,7 +15,7 @@
 use super::{lemma_runs_of, runs_of};
 #[cfg(verus_keep_ghost)]
 use super::{lemma_svs_add, lemma_svs_sub, lemma_svs_window, VGet};
-use super::{seal, Get, VCodec, VIndex, VValue, VerifiedIter, VerifiedRuns};
+use super::{Get, VCodec, VIndex, VValue, VerifiedIter, VerifiedRuns};
 #[cfg(verus_keep_ghost)]
 use crate::cursor::lemma_concat_append;
 #[cfg(verus_keep_ghost)]
@@ -34,8 +34,12 @@ use vstd::prelude::*;
 verus! {
 
 /// A verified iterator that can be repositioned, as the old API's
-/// [`Shiftable`](crate::Shiftable) can. Hexane's verified iterators are
-/// (and no other type: the trait is sealed).
+/// [`Shiftable`](crate::Shiftable) can. Hexane's verified iterators are;
+/// and a client's own iterator may be, as it may implement `Shiftable`.
+/// Its laws are this trait's: a client checked by Verus proves them, and
+/// a client in plain Rust promises them, as it does an old API trait's
+/// documented contract. Hexane's adapters ([`VerifiedUnshift`],
+/// [`VerifiedRanges`]) are proved of any iterator that keeps them.
 ///
 /// What a specification says of one: it ranges over values, one per
 /// position (`shift_vals`), as the items it gives; it stands at a
@@ -48,7 +52,7 @@ verus! {
 ///
 /// The moves only go forward: a window starting before the iterator
 /// starts where it stands.
-pub trait VShiftable: Iterator + Sized + seal::ShiftSeal {
+pub trait VShiftable: Iterator + Sized {
     /// The values the iterator ranges over, one per position.
     spec fn shift_vals(&self) -> Seq<Self::Item>;
 
@@ -835,7 +839,7 @@ proof fn lemma_svs_past<T: VGet>(o: Seq<T>, k: int)
 
 /// Items that each stand for themselves alone are the values they stand
 /// for.
-pub(crate) proof fn lemma_singles<T>(xs: Seq<T>)
+pub proof fn lemma_singles<T>(xs: Seq<T>)
     ensures
         concat(xs.map_values(|x: T| seq![x])) == xs,
     decreases xs.len(),
@@ -853,9 +857,6 @@ pub(crate) proof fn lemma_singles<T>(xs: Seq<T>)
     }
 }
 
-impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> seal::ShiftSeal for VerifiedIter<'a, V, C, K> {
-
-}
 
 impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VShiftable for VerifiedIter<'a, V, C, K> {
     closed spec fn shift_vals(&self) -> Seq<Get<'a, V>> {
@@ -1162,9 +1163,6 @@ pub(crate) proof fn lemma_run_units<T>(xs: Seq<T>)
     }
 }
 
-impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> seal::ShiftSeal for VerifiedRuns<'a, V, C, K> {
-
-}
 
 impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedRuns<'a, V, C, K> {
     /// The first run of what is left, and the values it stands for.
