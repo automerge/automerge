@@ -62,8 +62,13 @@ use crate::iter_core::{lemma_window_past, past, resumes, vals_of, window, Decode
 use crate::iter_core::{Decoders, ICore};
 use crate::verified::codec::VCodec;
 #[cfg(verus_keep_ghost)]
+use crate::verified::shift::lemma_singles;
+#[cfg(verus_keep_ghost)]
 use crate::verified::{head_run, lemma_runs_of, runs_of, sorted};
 use crate::verified::{invalid_resume, VerifiedIterState};
+use crate::verified::{VShiftable, VerifiedRanges, VerifiedUnshift};
+#[cfg(verus_keep_ghost)]
+use crate::window::windows;
 use crate::{DeltaRun, Leb128, PackError};
 use std::ops::{Range, RangeBounds};
 use vstd::prelude::*;
@@ -1830,6 +1835,172 @@ impl VerifiedDeltaIterState {
             assert(r.rest() =~= window(column@, self.pos() as int, self.end_pos() as int));
         }
         Ok(r)
+    }
+}
+
+
+// ── Repositioning (`VShiftable`) ───────────────────────────────────────────
+
+impl<'a, T: VDeltaValue<C>, C: VCodec> crate::verified::seal::ShiftSeal for VerifiedDeltaIter<'a, T, C> {
+
+}
+
+/// The iterator repositioned as any of the verified ones is: its model is
+/// its column's values, from where it stands to the end of its window,
+/// each value an item.
+impl<'a, T: VDeltaValue<C>, C: VCodec> VShiftable for VerifiedDeltaIter<'a, T, C> {
+    closed spec fn shift_vals(&self) -> Seq<T> {
+        self.column()
+    }
+
+    closed spec fn shift_at(&self) -> int {
+        self.spec_pos() as int
+    }
+
+    closed spec fn shift_end(&self) -> int {
+        self.spec_end_pos() as int
+    }
+
+    closed spec fn shift_left(&self) -> Seq<T> {
+        self.rest()
+    }
+
+    closed spec fn shift_items(&self) -> Seq<T> {
+        self.rest()
+    }
+
+    open spec fn shift_spans(x: T) -> Seq<T> {
+        seq![x]
+    }
+
+    open spec fn shift_unit() -> bool {
+        true
+    }
+
+    proof fn lemma_shift(&self) {
+        let xs = self.rest();
+        lemma_singles(xs);
+        assert(xs.map_values(|x: T| Self::shift_spans(x)) =~= xs.map_values(|x: T| seq![x]));
+    }
+
+    proof fn lemma_shift_unit(x: T) {
+    }
+
+    #[inline(always)]
+    fn shift_step(&mut self) -> (r: Option<T>) {
+        self.nth(0)
+    }
+
+    #[inline(always)]
+    fn shift_nth(&mut self, n: usize) -> (r: Option<T>) {
+        let r = self.nth(n);
+        proof {
+            if n < old(self).rest().len() {
+                let xs = old(self).rest().take(n + 1);
+                lemma_singles(xs);
+                assert(xs.map_values(|x: T| Self::shift_spans(x)) =~= xs.map_values(|x: T| seq![x]));
+            }
+        }
+        r
+    }
+
+    #[inline(always)]
+    fn dup(&self) -> (r: Self) {
+        proof {
+            use_type_invariant(self);
+        }
+        VerifiedDeltaIter { it: self.it.dup(), slabs: self.slabs, running: self.running, ix: self.ix, col: self.col }
+    }
+
+    #[inline(always)]
+    fn get_pos(&self) -> (r: usize) {
+        self.pos()
+    }
+
+    #[inline(always)]
+    fn get_max(&self) -> (r: usize) {
+        self.end_pos()
+    }
+
+    #[inline(always)]
+    fn set_max(&mut self, end: usize) {
+        VerifiedDeltaIter::set_max(self, end)
+    }
+
+    #[inline(always)]
+    fn advance_to(&mut self, target: usize) {
+        VerifiedDeltaIter::advance_to(self, target)
+    }
+
+    #[inline(always)]
+    fn advance_by(&mut self, amount: usize) {
+        VerifiedDeltaIter::advance_by(self, amount)
+    }
+
+    #[inline(always)]
+    fn seek_to(&mut self, at: usize) -> (r: Option<T>) {
+        let p = self.pos();
+        if at >= p {
+            self.nth(at - p)
+        } else {
+            None
+        }
+    }
+
+    #[inline(always)]
+    fn shift(&mut self, range: Range<usize>) {
+        VerifiedDeltaIter::shift(self, range)
+    }
+
+    #[inline(always)]
+    fn shift_next(&mut self, range: Range<usize>) -> (r: Option<T>) {
+        VerifiedDeltaIter::shift_next(self, range)
+    }
+}
+
+impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaIter<'a, T, C> {
+    /// The iterator's repositioning model ([`VShiftable`]) in the terms
+    /// of its own specification: the values it ranges over are its
+    /// column's; it stands at `pos()`; what it has left is `rest()`,
+    /// each item a value.
+    pub proof fn lemma_shift_model(&self)
+        ensures
+            self.shift_vals() == self.column(),
+            self.shift_at() == self.pos(),
+            self.shift_items() == self.rest(),
+            self.shift_left() == self.rest(),
+            Self::shift_unit(),
+    {
+    }
+
+    /// A lookahead: the iterator wrapped so that the value it gives next
+    /// can be looked at first ([`VerifiedUnshift::peek`]), as the old
+    /// API's `Shiftable::unshift` gives.
+    #[inline(always)]
+    pub fn unshift(self) -> (r: VerifiedUnshift<Self>)
+        ensures
+            r.unshift_vals() == self.column(),
+            r.unshift_left() == self.rest(),
+    {
+        VerifiedUnshift::new(self)
+    }
+
+    /// The values of each of `ranges` of the column, one range after
+    /// another, as the old API's `Shiftable::ranges` gives them (what is
+    /// left of the iterator's own window is dropped). The ranges ascend
+    /// and do not overlap (they may touch), and start where the iterator
+    /// stands or later.
+    ///
+    /// # Panics
+    ///
+    /// When it comes to a range that starts before where it stands.
+    #[inline(always)]
+    pub fn ranges<'r>(self, ranges: &'r [Range<usize>]) -> (r: VerifiedRanges<'r, Self>)
+        ensures
+            r.ranges_vals() == self.column(),
+            r.ranges_left() == windows(self.column(), ranges@),
+    {
+        VerifiedRanges::new(self, ranges)
     }
 }
 

@@ -4168,3 +4168,71 @@ fn repositioned() {
     assert_eq!(verus_client::told_by_ranges_next(&mut r), Some(2));
     assert_eq!(r.collect::<Vec<_>>(), [3, 6, 7]);
 }
+
+// ── Repositioning the prefix, accumulator and delta iterators ──────────────
+
+#[test]
+fn repositioned_others() {
+    let col = VerifiedDeltaColumn::<i64>::from_values(&[10, 20, 30, 40, 50]);
+    assert_eq!(
+        verus_client::delta_kept_over_ranges(&col, &[1..3, 4..9]),
+        [20, 30, 50]
+    );
+    assert_eq!(verus_client::delta_first_by_lookahead(&col, 3, 4), Some(40));
+    assert_eq!(verus_client::delta_first_by_lookahead(&col, 3, 3), None);
+    assert_eq!(
+        verus_client::delta_two_of_range(&col, 3, 9),
+        (Some(40), Some(50))
+    );
+    assert_eq!(
+        verus_client::delta_two_of_range(&col, 4, 9),
+        (Some(50), None)
+    );
+    let (mut u, r) = verus_client::delta_told_by_adapters(col.iter(), col.iter(), &[1..3]);
+    assert_eq!(u.next(), Some(10));
+    assert_eq!(r.collect::<Vec<_>>(), [20, 30]);
+
+    let p = VerifiedPrefixColumn::<u64>::from_values(&[1, 2, 3, 4]);
+    for f in [
+        verus_client::prefix_first_by_lookahead,
+        verus_client::prefix_first_over_ranges,
+    ] {
+        let pv = f(&p, 2, 4).unwrap();
+        assert_eq!((pv.value, pv.total()), (3, 6));
+        assert!(f(&p, 4, 9).is_none());
+    }
+    let (x, y) = verus_client::prefix_two_of_range(&p, 1, 3);
+    assert_eq!((x.unwrap().total(), y.unwrap().total()), (3, 6));
+    let (x, y) = verus_client::prefix_two_of_range(&p, 3, 9);
+    assert_eq!((x.unwrap().total(), y), (10, None));
+    let (mut u, r) =
+        verus_client::prefix_told_by_adapters(p.prefix_iter(), p.prefix_iter(), &[1..2]);
+    assert_eq!(u.next().unwrap().total(), 1);
+    assert_eq!(r.map(|pv| pv.total()).collect::<Vec<_>>(), [3]);
+
+    let marks: Vec<Mark> = (0..20).map(|i| Mark(i % 3 * 13)).collect();
+    let acc = VerifiedAccColumn::<Mark>::from_values(&marks);
+    for f in [
+        verus_client::acc_first_by_lookahead,
+        verus_client::acc_first_over_ranges,
+    ] {
+        let av = f(&acc, 5, 9).unwrap();
+        assert_eq!(
+            (av.value.0, av.total.0),
+            (marks[5].0, flags_of(&marks[..6]))
+        );
+        assert!(f(&acc, 9, 9).is_none());
+    }
+    let (x, y) = verus_client::acc_two_of_range(&acc, 18, 25);
+    assert_eq!(
+        (x.unwrap().total.0, y.unwrap().total.0),
+        (flags_of(&marks[..19]), flags_of(&marks[..20]))
+    );
+    let (mut u, r) =
+        verus_client::acc_told_by_adapters(acc.prefix_iter(), acc.prefix_iter(), &[1..2]);
+    assert_eq!(u.next().unwrap().total.0, flags_of(&marks[..1]));
+    assert_eq!(
+        r.map(|av| av.total.0).collect::<Vec<_>>(),
+        [flags_of(&marks[..2])]
+    );
+}

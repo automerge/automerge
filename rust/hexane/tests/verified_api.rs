@@ -17679,3 +17679,154 @@ fn ranges_out_of_order_panic() {
     );
     assert_eq!(new, old_);
 }
+
+// ── Repositioning the prefix, accumulator and delta iterators ──────────────
+
+fn prefix_shifted<T: Totalled>() {
+    for seed in 1..=4u64 {
+        let mut rng = Rng(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) ^ 0x5418);
+        let budget = [2, 3, 8, 64][rng.below(4)];
+        let mut p = VerifiedPrefixColumn::<T>::with_max_segments(budget);
+        let mut c = PrefixColumn::<T>::with_max_segments(budget);
+        let model: Vec<T> = rng.values(120);
+        p.splice(0, 0, &lent(&model));
+        c.splice(0, 0, model.iter().cloned());
+        let len = model.len();
+        for _ in 0..15 {
+            let a = rng.below(len + 2);
+            let rs = some_ranges(&mut rng, a, len);
+            let mut x = p.prefix_iter();
+            let mut y = c.iter();
+            VShiftable::advance_to(&mut x, a);
+            Shiftable::advance_to(&mut y, a);
+            let new: Vec<Item<T>> = x.ranges(&rs).map(|pv| new_item(Some(pv))).collect();
+            let old_: Vec<Item<T>> = y.ranges(rs.clone()).map(|pv| old_item(Some(pv))).collect();
+            assert_eq!(new, old_, "{rs:?}");
+
+            let (s, e) = (rng.below(len + 2), rng.below(len + 10));
+            let mut u = p.prefix_iter().unshift();
+            let mut w = c.iter().unshift();
+            if rng.below(2) == 0 {
+                u.shift(s..e);
+                w.shift(s..e);
+            }
+            for _ in 0..8 {
+                match rng.below(3) {
+                    0 => assert_eq!(new_item(u.peek().cloned()), old_item(w.peek().cloned())),
+                    1 => assert_eq!(new_item(u.next()), old_item(w.next())),
+                    _ => {
+                        let n = rng.below(5);
+                        assert_eq!(new_item(u.nth(n)), old_item(w.nth(n)));
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// A prefix iterator repositions as `PrefixColumn`'s does: the values
+/// with their sums, of several ranges in turn and through a lookahead.
+#[test]
+fn a_prefix_iterator_repositions_as_the_old_one_does() {
+    for_each_sum!(prefix_shifted);
+}
+
+fn acc_shifted<T: Accd>() {
+    for seed in 1..=4u64 {
+        let mut rng = Rng(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) ^ 0x5419);
+        let budget = [2, 3, 8, 64][rng.below(4)];
+        let mut p = VerifiedAccColumn::<T>::with_max_segments(budget);
+        let model: Vec<T> = rng.values(120);
+        p.splice(0, 0, &lent(&model));
+        let len = model.len();
+        // every value with what it accumulates to, as the iterator walks
+        // them all
+        let all: Vec<AccItem<T>> = p.prefix_iter().map(|av| acc_item(Some(av))).collect();
+        // the items of some ranges, by their places (they are not `Clone`)
+        let places: Vec<usize> = (0..len).collect();
+        let of = |rs: &[Range<usize>]| -> Vec<&AccItem<T>> {
+            ranges_of(&places, rs).iter().map(|&i| &all[i]).collect()
+        };
+        for _ in 0..15 {
+            let a = rng.below(len + 2);
+            let rs = some_ranges(&mut rng, a, len);
+            let mut x = p.prefix_iter();
+            VShiftable::advance_to(&mut x, a);
+            let new: Vec<AccItem<T>> = x.ranges(&rs).map(|av| acc_item(Some(av))).collect();
+            assert_eq!(new.iter().collect::<Vec<_>>(), of(&rs), "{rs:?}");
+
+            let (s, e) = (rng.below(len + 2), rng.below(len + 10));
+            let mut u = p.prefix_iter().unshift();
+            u.shift(s..e);
+            let got: Vec<AccItem<T>> = u.map(|av| acc_item(Some(av))).collect();
+            assert_eq!(
+                got.iter().collect::<Vec<_>>(),
+                of(std::slice::from_ref(&(s..e)))
+            );
+        }
+    }
+}
+
+/// An accumulator iterator repositions as a list of its items would: the
+/// values with what they accumulate to, of several ranges in turn and
+/// through a lookahead moved to a range.
+#[test]
+fn an_accumulator_iterator_repositions() {
+    for_each_acc!(acc_shifted);
+}
+
+fn delta_shifted<T: Deltad>(seed: u64) {
+    let mut rng = Rng(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) ^ 0x541a);
+    let mut last = 0;
+    let mut model: Vec<T> = vec![];
+    for _ in 0..rng.below(150) {
+        let (x, l) = T::near(&mut rng, last);
+        last = l;
+        model.push(x);
+    }
+    let v = VerifiedDeltaColumn::<T>::from_values(&model);
+    let c = DeltaColumn::<T>::from_values(model.clone());
+    let len = model.len();
+    for _ in 0..15 {
+        let a = rng.below(len + 2);
+        let rs = some_ranges(&mut rng, a, len);
+        let mut x = v.iter();
+        let mut y = c.iter();
+        VShiftable::advance_to(&mut x, a);
+        Shiftable::advance_to(&mut y, a);
+        let new: Vec<T> = x.ranges(&rs).collect();
+        let old_: Vec<T> = y.ranges(rs.clone()).collect();
+        assert_eq!(new, ranges_of(&model, &rs), "{rs:?}");
+        assert_eq!(old_, new);
+
+        let (s, e) = (rng.below(len + 2), rng.below(len + 10));
+        let mut u = v.iter().unshift();
+        let mut w = c.iter().unshift();
+        if rng.below(2) == 0 {
+            u.shift(s..e);
+            w.shift(s..e);
+        }
+        for _ in 0..8 {
+            match rng.below(3) {
+                0 => assert_eq!(u.peek().copied(), w.peek().copied()),
+                1 => assert_eq!(u.next(), w.next()),
+                _ => {
+                    let n = rng.below(5);
+                    assert_eq!(u.nth(n), w.nth(n));
+                }
+            }
+        }
+    }
+}
+
+/// A delta iterator repositions as `DeltaColumn`'s does: the values of
+/// several ranges in turn, and through a lookahead.
+#[test]
+fn a_delta_iterator_repositions_as_the_old_one_does() {
+    for seed in 0..4 {
+        delta_shifted::<u32>(seed);
+        delta_shifted::<i64>(seed);
+        delta_shifted::<Option<i32>>(seed);
+        delta_shifted::<Option<u64>>(seed);
+    }
+}

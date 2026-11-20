@@ -792,7 +792,7 @@ pub proof fn lemma_svs_windows<T: VGet>(v: Seq<T>, rs: Seq<Range<usize>>)
 }
 
 /// Values that are the same in a specification are the same.
-proof fn lemma_svs_inj<T: VGet>(a: Seq<T>, b: Seq<T>)
+pub(crate) proof fn lemma_svs_inj<T: VGet>(a: Seq<T>, b: Seq<T>)
     requires
         T::svs(a) == T::svs(b),
     ensures
@@ -826,7 +826,7 @@ proof fn lemma_svs_past<T: VGet>(o: Seq<T>, k: int)
 
 /// Items that each stand for themselves alone are the values they stand
 /// for.
-proof fn lemma_singles<T>(xs: Seq<T>)
+pub(crate) proof fn lemma_singles<T>(xs: Seq<T>)
     ensures
         concat(xs.map_values(|x: T| seq![x])) == xs,
     decreases xs.len(),

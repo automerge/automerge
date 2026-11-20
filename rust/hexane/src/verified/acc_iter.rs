@@ -40,10 +40,13 @@ use super::acc::{
     VGroup,
 };
 use super::acc::{AccIndex, AccOf, AccWeight, VAccum, VAccumulated};
+#[cfg(verus_keep_ghost)]
+use super::shift::{lemma_singles, lemma_svs_inj};
 use super::Get;
 #[cfg(verus_keep_ghost)]
 use super::{head_run, lemma_svs_sub, VGet, VSpec};
 use super::{VCodec, VValue, VerifiedColumn, VerifiedIter, VerifiedIterState, VerifiedRuns};
+use super::{VShiftable, VerifiedRanges, VerifiedUnshift};
 use crate::btree::SlabBTree;
 #[cfg(verus_keep_ghost)]
 use crate::column::Slab;
@@ -57,6 +60,8 @@ use crate::iter_core::{past, vals_of, window};
 #[cfg(verus_keep_ghost)]
 use crate::prefix_core::{at_sum, before, index_ok, vsum};
 use crate::prefix_core::{p_delta_nth, p_next, p_next_run_from, p_nth, p_reset};
+#[cfg(verus_keep_ghost)]
+use crate::window::windows;
 use crate::{Leb128, PackError, Run};
 use std::marker::PhantomData;
 use std::ops::Range;
@@ -1588,6 +1593,317 @@ impl<V: VAccumulated + VValue<C>, C: VCodec> VerifiedColumn<V, C, AccIndex> {
             }
         }
         r
+    }
+}
+
+
+// ── Repositioning (`VShiftable`) ───────────────────────────────────────────
+
+impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
+    /// The items the iterator ranges over: at each place of the column,
+    /// the value there with what the values accumulate to through
+    /// it (from `base_pos()`).
+    pub closed spec fn accumulated_items(&self) -> Seq<VerifiedAccValue<'a, V>> {
+        let o = vals_of::<V::X>(self.inner.slabs@);
+        Seq::new(o.len(), |p: int| VerifiedAccValue { value: o[p], total: self.acc_to(p + 1) })
+    }
+
+    /// What the iterator has left is a window of those.
+    proof fn lemma_accumulated_items(&self)
+        ensures
+            self.items() == window(self.accumulated_items(), self.inner.it.pos as int, self.inner.it.pos + self.inner.it.items_left),
+    {
+        assert(self.items() =~= window(self.accumulated_items(), self.inner.it.pos as int, self.inner.it.pos + self.inner.it.items_left));
+    }
+
+    /// A move that keeps the column and where the sums start keeps what
+    /// the iterator ranges over.
+    proof fn lemma_same_accumulated_items(&self, o: Self)
+        requires
+            self.column() == o.column(),
+            self.base_pos() == o.base_pos(),
+        ensures
+            self.accumulated_items() == o.accumulated_items(),
+    {
+        lemma_svs_inj(vals_of::<V::X>(self.inner.slabs@), vals_of::<V::X>(o.inner.slabs@));
+        assert(self.accumulated_items() =~= o.accumulated_items());
+    }
+}
+
+impl<'a, V: VAccumulated + VValue<C>, C: VCodec> super::seal::ShiftSeal for VerifiedAccIter<'a, V, C> {
+
+}
+
+/// The iterator repositioned as any of the verified ones is: its model
+/// is each value of the column with what the values accumulate to
+/// through it, each an item.
+impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VShiftable for VerifiedAccIter<'a, V, C> {
+    closed spec fn shift_vals(&self) -> Seq<VerifiedAccValue<'a, V>> {
+        self.accumulated_items()
+    }
+
+    closed spec fn shift_at(&self) -> int {
+        self.inner.it.pos as int
+    }
+
+    closed spec fn shift_end(&self) -> int {
+        self.inner.it.pos + self.inner.it.items_left
+    }
+
+    closed spec fn shift_left(&self) -> Seq<VerifiedAccValue<'a, V>> {
+        self.items()
+    }
+
+    closed spec fn shift_items(&self) -> Seq<VerifiedAccValue<'a, V>> {
+        self.items()
+    }
+
+    open spec fn shift_spans(x: VerifiedAccValue<'a, V>) -> Seq<VerifiedAccValue<'a, V>> {
+        seq![x]
+    }
+
+    open spec fn shift_unit() -> bool {
+        true
+    }
+
+    proof fn lemma_shift(&self) {
+        let xs = self.items();
+        lemma_singles(xs);
+        assert(xs.map_values(|x: VerifiedAccValue<'a, V>| Self::shift_spans(x)) =~= xs.map_values(
+            |x: VerifiedAccValue<'a, V>| seq![x],
+        ));
+    }
+
+    proof fn lemma_shift_unit(x: VerifiedAccValue<'a, V>) {
+    }
+
+    #[inline(always)]
+    fn shift_step(&mut self) -> (r: Option<VerifiedAccValue<'a, V>>) {
+        proof {
+            use_type_invariant(&*self);
+            self.lemma_sums();
+        }
+        let r = self.nth(0);
+        proof {
+            use_type_invariant(&*self);
+            self.lemma_sums();
+            self.lemma_same_accumulated_items(*old(self));
+        }
+        r
+    }
+
+    #[inline(always)]
+    fn shift_nth(&mut self, n: usize) -> (r: Option<VerifiedAccValue<'a, V>>) {
+        proof {
+            use_type_invariant(&*self);
+            self.lemma_sums();
+        }
+        let r = self.nth(n);
+        proof {
+            use_type_invariant(&*self);
+            self.lemma_sums();
+            self.lemma_same_accumulated_items(*old(self));
+            if n < old(self).items().len() {
+                let xs = old(self).items().take(n + 1);
+                lemma_singles(xs);
+                assert(xs.map_values(|x: VerifiedAccValue<'a, V>| Self::shift_spans(x)) =~= xs.map_values(
+                    |x: VerifiedAccValue<'a, V>| seq![x],
+                ));
+            }
+        }
+        r
+    }
+
+    #[inline(always)]
+    fn dup(&self) -> (r: Self) {
+        proof {
+            use_type_invariant(self);
+            use_type_invariant(&self.inner);
+        }
+        let inner = VerifiedIter { it: self.inner.it.dup(), slabs: self.inner.slabs, col: self.inner.col };
+        VerifiedAccIter { ix: self.ix, inner, total: self.total.dup(), base: self.base.dup(), base_at: self.base_at }
+    }
+
+    #[inline(always)]
+    fn get_pos(&self) -> (r: usize) {
+        proof {
+            use_type_invariant(self);
+            self.lemma_sums();
+        }
+        self.pos()
+    }
+
+    #[inline(always)]
+    fn get_max(&self) -> (r: usize) {
+        proof {
+            use_type_invariant(self);
+            self.lemma_sums();
+        }
+        self.end_pos()
+    }
+
+    #[inline(always)]
+    fn set_max(&mut self, end: usize) {
+        proof {
+            use_type_invariant(&*self);
+            self.lemma_sums();
+        }
+        VerifiedAccIter::set_max(self, end);
+        proof {
+            use_type_invariant(&*self);
+            self.lemma_sums();
+            self.lemma_same_accumulated_items(*old(self));
+        }
+    }
+
+    #[inline(always)]
+    fn advance_to(&mut self, target: usize) {
+        proof {
+            use_type_invariant(&*self);
+            self.lemma_sums();
+            self.lemma_accumulated_items();
+        }
+        VerifiedAccIter::advance_to(self, target);
+        proof {
+            use_type_invariant(&*self);
+            self.lemma_sums();
+            self.lemma_accumulated_items();
+            self.lemma_same_accumulated_items(*old(self));
+        }
+    }
+
+    #[inline(always)]
+    fn advance_by(&mut self, amount: usize) {
+        proof {
+            use_type_invariant(&*self);
+            self.lemma_sums();
+            self.lemma_accumulated_items();
+        }
+        VerifiedAccIter::advance_by(self, amount);
+        proof {
+            use_type_invariant(&*self);
+            self.lemma_sums();
+            self.lemma_accumulated_items();
+            self.lemma_same_accumulated_items(*old(self));
+        }
+    }
+
+    #[inline(always)]
+    fn seek_to(&mut self, at: usize) -> (r: Option<VerifiedAccValue<'a, V>>) {
+        proof {
+            use_type_invariant(&*self);
+            self.lemma_sums();
+        }
+        let p = self.pos();
+        if at >= p {
+            let r = self.nth(at - p);
+            proof {
+                use_type_invariant(&*self);
+                self.lemma_sums();
+                self.lemma_same_accumulated_items(*old(self));
+            }
+            r
+        } else {
+            None
+        }
+    }
+
+    #[inline(always)]
+    fn shift(&mut self, range: Range<usize>) {
+        let ghost p = self.shift_at();
+        proof {
+            self.lemma_shift();
+        }
+        // the window's end, and then its start, as the iterator's own
+        // `shift` moves
+        VShiftable::set_max(self, range.end);
+        let ghost p1 = self.shift_at();
+        proof {
+            self.lemma_shift();
+        }
+        VShiftable::advance_to(self, range.start);
+        proof {
+            self.lemma_shift();
+            assert(p1 == p);
+        }
+    }
+
+    #[inline(always)]
+    fn shift_next(&mut self, range: Range<usize>) -> (r: Option<VerifiedAccValue<'a, V>>) {
+        let ghost (s, e) = (range.start as int, range.end as int);
+        let ghost (v, p) = (self.accumulated_items(), self.shift_at());
+        VShiftable::set_max(self, range.end);
+        proof {
+            self.lemma_shift();
+        }
+        let q = VShiftable::get_pos(self);
+        let ghost o = self.shift_items();
+        let r = VShiftable::shift_nth(self, range.start - q);
+        proof {
+            let w = window(v, s, e);
+            let k = s - p;
+            if w.len() > 0 {
+                assert(o[k] == w[0]);
+                let xs = o.take(k + 1);
+                lemma_singles(xs);
+                assert(xs.map_values(|x: VerifiedAccValue<'a, V>| Self::shift_spans(x)) =~= xs.map_values(
+                    |x: VerifiedAccValue<'a, V>| seq![x],
+                ));
+            }
+        }
+        r
+    }
+}
+
+impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
+    /// The iterator's repositioning model ([`VShiftable`]) in the terms
+    /// of its own specification: at each place of the column, its value
+    /// and what the values come to through it; it stands at `pos()`;
+    /// what it has left is `items()`, each item a value.
+    pub proof fn lemma_shift_model(&self)
+        ensures
+            self.shift_vals() == self.accumulated_items(),
+            self.accumulated_items().len() == self.column().len(),
+            forall|p: int| 0 <= p < self.column().len() ==> {
+                &&& (#[trigger] self.accumulated_items()[p]).value.sv() == self.column()[p]
+                &&& self.accumulated_items()[p].total == self.acc_to(p + 1)
+            },
+            self.shift_at() == self.pos(),
+            self.shift_items() == self.items(),
+            self.shift_left() == self.items(),
+            Self::shift_unit(),
+    {
+        <Get<'a, V> as VGet>::lemma_svs(vals_of::<V::X>(self.inner.slabs@));
+    }
+
+    /// A lookahead: the iterator wrapped so that the item it gives next
+    /// can be looked at first ([`VerifiedUnshift::peek`]), as the old
+    /// API's `Shiftable::unshift` gives.
+    #[inline(always)]
+    pub fn unshift(self) -> (r: VerifiedUnshift<Self>)
+        ensures
+            r.unshift_vals() == self.accumulated_items(),
+            r.unshift_left() == self.items(),
+    {
+        VerifiedUnshift::new(self)
+    }
+
+    /// The items of each of `ranges` of the column, one range after
+    /// another, as the old API's `Shiftable::ranges` gives them (what is
+    /// left of the iterator's own window is dropped). The ranges ascend
+    /// and do not overlap (they may touch), and start where the iterator
+    /// stands or later.
+    ///
+    /// # Panics
+    ///
+    /// When it comes to a range that starts before where it stands.
+    #[inline(always)]
+    pub fn ranges<'r>(self, ranges: &'r [Range<usize>]) -> (r: VerifiedRanges<'r, Self>)
+        ensures
+            r.ranges_vals() == self.accumulated_items(),
+            r.ranges_left() == windows(self.accumulated_items(), ranges@),
+    {
+        VerifiedRanges::new(self, ranges)
     }
 }
 

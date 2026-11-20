@@ -17951,7 +17951,7 @@ fn sought_then_advanced<I: VShiftable>(it: &mut I, a: usize, n: usize) -> (r: Op
         }),
 {
     let r = it.seek_to(a);
-    it.advance_by(n);
+    VShiftable::advance_by(it, n);
     r
 }
 
@@ -18187,6 +18187,394 @@ fn numbers_of_ranges() -> (r: Vec<u64>)
         assert(VGet::svs(out@) =~= out@);
     }
     out
+}
+
+// ── Repositioning the prefix, accumulator and delta iterators ──────────────
+
+/// The values of several ranges of a delta column, one range after
+/// another, walked with `ranges` and kept: the ranges' values. For every
+/// value type and codec.
+#[allow(dead_code)]
+fn delta_kept_over_ranges<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>, rs: &[Range<usize>]) -> (out:
+    Vec<T>)
+    ensures
+        out@ == windows(col@, rs@),
+{
+    let it = col.iter();
+    proof {
+        it.lemma_shift_model();
+    }
+    let mut r = it.ranges(rs);
+    let ghost all = r.ranges_left();
+    let mut out: Vec<T> = Vec::new();
+    loop
+        invariant
+            out@ + r.ranges_left() == all,
+        ensures
+            out@ == all,
+        decreases r.ranges_left().len(),
+    {
+        let ghost g = r.ranges_left();
+        match r.next() {
+            Some(x) => {
+                proof {
+                    assert(VerifiedDeltaIter::<'_, T, C>::shift_spans(x) == seq![x]);
+                    assert(g.take(1)[0] == g[0]);
+                    assert(out@.push(x) + g.skip(1) =~= out@ + g);
+                }
+                out.push(x);
+            },
+            None => {
+                proof {
+                    assert(out@ + g =~= out@);
+                }
+                break ;
+            },
+        }
+    }
+    out
+}
+
+/// The first value of a range of a delta column, through a lookahead
+/// moved there. For every value type and codec.
+#[allow(dead_code)]
+fn delta_first_by_lookahead<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>, a: usize, b: usize) -> (r: Option<
+    T,
+>)
+    ensures
+        match r {
+            Some(x) => a < b && a < col@.len() && x == col@[a as int],
+            None => !(a < b && a < col@.len()),
+        },
+{
+    let it = col.iter();
+    proof {
+        it.lemma_shift_model();
+    }
+    let mut u = it.unshift();
+    u.shift(a..b);
+    let r = u.next();
+    proof {
+        if r is Some {
+            assert(window(col@, a as int, b as int)[0] == col@[a as int]);
+        }
+    }
+    r
+}
+
+/// The first two values of a range of a delta column, the iterator moved
+/// to the range and stepped by `VShiftable`'s own moves. For every value
+/// type and codec.
+#[allow(dead_code)]
+fn delta_two_of_range<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>, a: usize, b: usize) -> (r: (
+    Option<T>,
+    Option<T>,
+))
+    ensures
+        r.0 is Some <==> a < b && a < col@.len(),
+        r.1 is Some <==> a + 1 < b && a + 1 < col@.len(),
+        r.0 matches Some(x) ==> x == col@[a as int],
+        r.1 matches Some(x) ==> x == col@[a + 1],
+{
+    let mut it = col.iter();
+    proof {
+        it.lemma_shift_model();
+    }
+    VShiftable::shift(&mut it, a..b);
+    proof {
+        it.lemma_shift_model();
+    }
+    let x = VShiftable::shift_step(&mut it);
+    let y = VShiftable::shift_step(&mut it);
+    proof {
+        let w = window(col@, a as int, b as int);
+        if a < b && a < col@.len() {
+            assert(w[0] == col@[a as int]);
+        }
+        if a + 1 < b && a + 1 < col@.len() {
+            assert(w.skip(1)[0] == col@[a + 1]);
+        }
+    }
+    (x, y)
+}
+
+/// What a delta iterator's lookahead and walk over ranges are, told
+/// back. For every value type and codec.
+#[allow(dead_code)]
+fn delta_told_by_adapters<'a, 'r, T: VDeltaValue<C>, C: VCodec>(
+    a: VerifiedDeltaIter<'a, T, C>,
+    b: VerifiedDeltaIter<'a, T, C>,
+    rs: &'r [Range<usize>],
+) -> (r: (VerifiedUnshift<VerifiedDeltaIter<'a, T, C>>, VerifiedRanges<'r, VerifiedDeltaIter<'a, T, C>>))
+    ensures
+        r.0.unshift_vals() == a.column(),
+        r.0.unshift_left() == a.rest(),
+        r.1.ranges_vals() == b.column(),
+        r.1.ranges_left() == windows(b.column(), rs@),
+{
+    (a.unshift(), b.ranges(rs))
+}
+
+/// The first value of a range of a prefix column, through a lookahead
+/// moved there: with the sum of the column's values up to and through
+/// it. For every value type and codec.
+#[allow(dead_code)]
+fn prefix_first_by_lookahead<'a, V: VSummed + VValue<C>, C: VCodec>(col: &'a VerifiedPrefixColumn<V, C>, a: usize, b: usize) -> (r:
+    Option<VerifiedPrefixedValue<'a, V>>)
+    ensures
+        match r {
+            Some(pv) => {
+                &&& a < b && a < col@.len()
+                &&& pv.value.sv() == col@[a as int]
+                &&& pv.total() == V::Sum::of_int(summed::<V>(col@.take(a + 1)))
+            },
+            None => !(a < b && a < col@.len()),
+        },
+{
+    let it = col.prefix_iter();
+    proof {
+        it.lemma_shift_model();
+    }
+    let mut u = it.unshift();
+    u.shift(a..b);
+    let r = u.next();
+    proof {
+        if r is Some {
+            let v = it.prefixed();
+            assert(window(v, a as int, b as int)[0] == v[a as int]);
+            assert(col@.subrange(it.base_pos() as int, a + 1) =~= col@.take(a + 1));
+        }
+    }
+    r
+}
+
+/// The first value of a range of a prefix column, through a walk over
+/// ranges: with the sum of the column's values up to and through it.
+#[allow(dead_code)]
+fn prefix_first_over_ranges<'a, V: VSummed + VValue<C>, C: VCodec>(col: &'a VerifiedPrefixColumn<V, C>, a: usize, b: usize) -> (r:
+    Option<VerifiedPrefixedValue<'a, V>>)
+    ensures
+        match r {
+            Some(pv) => {
+                &&& a < b && a < col@.len()
+                &&& pv.value.sv() == col@[a as int]
+                &&& pv.total() == V::Sum::of_int(summed::<V>(col@.take(a + 1)))
+            },
+            None => !(a < b && a < col@.len()),
+        },
+{
+    let it = col.prefix_iter();
+    proof {
+        it.lemma_shift_model();
+    }
+    let mut rs: Vec<Range<usize>> = Vec::new();
+    rs.push(a..b);
+    let mut walk = it.ranges(rs.as_slice());
+    let r = walk.next();
+    proof {
+        let v = it.prefixed();
+        let f = |r: Range<usize>| window(v, r.start as int, r.end as int);
+        assert(rs@ =~= seq![a..b]);
+        assert(rs@.map_values(f) =~= seq![window(v, a as int, b as int)]);
+        let m = rs@.map_values(f);
+        assert(m.drop_last() =~= Seq::<Seq<VerifiedPrefixedValue<'a, V>>>::empty());
+        assert(concat(m) == concat(m.drop_last()) + m.last());
+        assert(windows(v, rs@) =~= window(v, a as int, b as int));
+        if r is Some {
+            let x = r->Some_0;
+            assert(VerifiedPrefixIter::<'a, V, C>::shift_spans(x) == seq![x]);
+            assert(window(v, a as int, b as int)[0] == v[a as int]);
+            assert(col@.subrange(it.base_pos() as int, a + 1) =~= col@.take(a + 1));
+        }
+    }
+    r
+}
+
+/// The first two values of a range of a prefix column, the iterator
+/// moved to the range and stepped by `VShiftable`'s own moves: with the
+/// sums through them. For every value type and codec.
+#[allow(dead_code)]
+fn prefix_two_of_range<'a, V: VSummed + VValue<C>, C: VCodec>(col: &'a VerifiedPrefixColumn<V, C>, a: usize, b: usize) -> (r:
+    (Option<VerifiedPrefixedValue<'a, V>>, Option<VerifiedPrefixedValue<'a, V>>))
+    ensures
+        r.0 is Some <==> a < b && a < col@.len(),
+        r.1 is Some <==> a + 1 < b && a + 1 < col@.len(),
+        r.0 matches Some(pv) ==> pv.value.sv() == col@[a as int] && pv.total() == V::Sum::of_int(
+            summed::<V>(col@.take(a + 1)),
+        ),
+        r.1 matches Some(pv) ==> pv.value.sv() == col@[a + 1] && pv.total() == V::Sum::of_int(
+            summed::<V>(col@.take(a + 2)),
+        ),
+{
+    let mut it = col.prefix_iter();
+    proof {
+        it.lemma_shift_model();
+    }
+    let ghost (it0, v) = (it, it.prefixed());
+    VShiftable::shift(&mut it, a..b);
+    proof {
+        it.lemma_shift_model();
+    }
+    let x = VShiftable::shift_step(&mut it);
+    let y = VShiftable::shift_step(&mut it);
+    proof {
+        let w = window(v, a as int, b as int);
+        if a < b && a < col@.len() {
+            assert(w[0] == v[a as int]);
+            assert(col@.subrange(it0.base_pos() as int, a + 1) =~= col@.take(a + 1));
+        }
+        if a + 1 < b && a + 1 < col@.len() {
+            assert(w.skip(1)[0] == v[a + 1]);
+            assert(col@.subrange(it0.base_pos() as int, a + 2) =~= col@.take(a + 2));
+        }
+    }
+    (x, y)
+}
+
+/// What a prefix iterator's lookahead and walk over ranges are, told
+/// back. For every value type and codec.
+#[allow(dead_code)]
+fn prefix_told_by_adapters<'a, 'r, V: VSummed + VValue<C>, C: VCodec>(
+    a: VerifiedPrefixIter<'a, V, C>,
+    b: VerifiedPrefixIter<'a, V, C>,
+    rs: &'r [Range<usize>],
+) -> (r: (VerifiedUnshift<VerifiedPrefixIter<'a, V, C>>, VerifiedRanges<'r, VerifiedPrefixIter<'a, V, C>>))
+    ensures
+        r.0.unshift_vals() == a.prefixed(),
+        r.0.unshift_left() == a.items(),
+        r.1.ranges_vals() == b.prefixed(),
+        r.1.ranges_left() == windows(b.prefixed(), rs@),
+{
+    (a.unshift(), b.ranges(rs))
+}
+
+/// The first value of a range of an accumulator column, through a lookahead
+/// moved there: with what the column's values accumulate to
+/// through it. For every value type and codec.
+#[allow(dead_code)]
+fn acc_first_by_lookahead<'a, V: VAccumulated + VValue<C>, C: VCodec>(col: &'a VerifiedAccColumn<V, C>, a: usize, b: usize) -> (r:
+    Option<VerifiedAccValue<'a, V>>)
+    ensures
+        match r {
+            Some(pv) => {
+                &&& a < b && a < col@.len()
+                &&& pv.value.sv() == col@[a as int]
+                &&& pv.total == accumulated::<V>(col@.take(a + 1))
+            },
+            None => !(a < b && a < col@.len()),
+        },
+{
+    let it = col.prefix_iter();
+    proof {
+        it.lemma_shift_model();
+    }
+    let mut u = it.unshift();
+    u.shift(a..b);
+    let r = u.next();
+    proof {
+        if r is Some {
+            let v = it.accumulated_items();
+            assert(window(v, a as int, b as int)[0] == v[a as int]);
+            assert(col@.subrange(it.base_pos() as int, a + 1) =~= col@.take(a + 1));
+        }
+    }
+    r
+}
+
+/// The first value of a range of an accumulator column, through a walk over
+/// ranges: with what the column's values accumulate to through it.
+#[allow(dead_code)]
+fn acc_first_over_ranges<'a, V: VAccumulated + VValue<C>, C: VCodec>(col: &'a VerifiedAccColumn<V, C>, a: usize, b: usize) -> (r:
+    Option<VerifiedAccValue<'a, V>>)
+    ensures
+        match r {
+            Some(pv) => {
+                &&& a < b && a < col@.len()
+                &&& pv.value.sv() == col@[a as int]
+                &&& pv.total == accumulated::<V>(col@.take(a + 1))
+            },
+            None => !(a < b && a < col@.len()),
+        },
+{
+    let it = col.prefix_iter();
+    proof {
+        it.lemma_shift_model();
+    }
+    let mut rs: Vec<Range<usize>> = Vec::new();
+    rs.push(a..b);
+    let mut walk = it.ranges(rs.as_slice());
+    let r = walk.next();
+    proof {
+        let v = it.accumulated_items();
+        let f = |r: Range<usize>| window(v, r.start as int, r.end as int);
+        assert(rs@ =~= seq![a..b]);
+        assert(rs@.map_values(f) =~= seq![window(v, a as int, b as int)]);
+        let m = rs@.map_values(f);
+        assert(m.drop_last() =~= Seq::<Seq<VerifiedAccValue<'a, V>>>::empty());
+        assert(concat(m) == concat(m.drop_last()) + m.last());
+        assert(windows(v, rs@) =~= window(v, a as int, b as int));
+        if r is Some {
+            let x = r->Some_0;
+            assert(VerifiedAccIter::<'a, V, C>::shift_spans(x) == seq![x]);
+            assert(window(v, a as int, b as int)[0] == v[a as int]);
+            assert(col@.subrange(it.base_pos() as int, a + 1) =~= col@.take(a + 1));
+        }
+    }
+    r
+}
+
+/// The first two values of a range of an accumulator column, the iterator
+/// moved to the range and stepped by `VShiftable`'s own moves: with what
+/// the values accumulate to through them. For every value type and codec.
+#[allow(dead_code)]
+fn acc_two_of_range<'a, V: VAccumulated + VValue<C>, C: VCodec>(col: &'a VerifiedAccColumn<V, C>, a: usize, b: usize) -> (r:
+    (Option<VerifiedAccValue<'a, V>>, Option<VerifiedAccValue<'a, V>>))
+    ensures
+        r.0 is Some <==> a < b && a < col@.len(),
+        r.1 is Some <==> a + 1 < b && a + 1 < col@.len(),
+        r.0 matches Some(pv) ==> pv.value.sv() == col@[a as int] && pv.total == accumulated::<V>(col@.take(a + 1)),
+        r.1 matches Some(pv) ==> pv.value.sv() == col@[a + 1] && pv.total == accumulated::<V>(col@.take(a + 2)),
+{
+    let mut it = col.prefix_iter();
+    proof {
+        it.lemma_shift_model();
+    }
+    let ghost (it0, v) = (it, it.accumulated_items());
+    VShiftable::shift(&mut it, a..b);
+    proof {
+        it.lemma_shift_model();
+    }
+    let x = VShiftable::shift_step(&mut it);
+    let y = VShiftable::shift_step(&mut it);
+    proof {
+        let w = window(v, a as int, b as int);
+        if a < b && a < col@.len() {
+            assert(w[0] == v[a as int]);
+            assert(col@.subrange(it0.base_pos() as int, a + 1) =~= col@.take(a + 1));
+        }
+        if a + 1 < b && a + 1 < col@.len() {
+            assert(w.skip(1)[0] == v[a + 1]);
+            assert(col@.subrange(it0.base_pos() as int, a + 2) =~= col@.take(a + 2));
+        }
+    }
+    (x, y)
+}
+
+/// What an accumulator iterator's lookahead and walk over ranges are, told
+/// back. For every value type and codec.
+#[allow(dead_code)]
+fn acc_told_by_adapters<'a, 'r, V: VAccumulated + VValue<C>, C: VCodec>(
+    a: VerifiedAccIter<'a, V, C>,
+    b: VerifiedAccIter<'a, V, C>,
+    rs: &'r [Range<usize>],
+) -> (r: (VerifiedUnshift<VerifiedAccIter<'a, V, C>>, VerifiedRanges<'r, VerifiedAccIter<'a, V, C>>))
+    ensures
+        r.0.unshift_vals() == a.accumulated_items(),
+        r.0.unshift_left() == a.items(),
+        r.1.ranges_vals() == b.accumulated_items(),
+        r.1.ranges_left() == windows(b.accumulated_items(), rs@),
+{
+    (a.unshift(), b.ranges(rs))
 }
 
 } // verus!
