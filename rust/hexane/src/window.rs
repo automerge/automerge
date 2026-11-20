@@ -467,7 +467,7 @@ pub(crate) trait RangeList {
 }
 
 /// The values of each range of `rs`, in turn.
-pub(crate) open spec fn windows<V>(v: Seq<V>, rs: Seq<Range<usize>>) -> Seq<V> {
+pub open spec fn windows<V>(v: Seq<V>, rs: Seq<Range<usize>>) -> Seq<V> {
     concat(rs.map_values(|r: Range<usize>| window(v, r.start as int, r.end as int)))
 }
 
@@ -483,7 +483,7 @@ pub(crate) open spec fn ranges_give<W: Window, L: RangeList>(w: W, l0: L, l: L) 
 #[verifier::external_body]
 #[cold]
 #[inline(never)]
-fn ranges_out_of_order()
+pub(crate) fn ranges_out_of_order()
     ensures
         false,
 {

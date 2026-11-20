@@ -186,7 +186,7 @@ pub(crate) fn splice_bytes(vec: &mut Vec<u8>, index: usize, del: usize, bytes: &
 }
 
 /// The values of slabs one after another.
-pub(crate) open spec fn concat<V>(cs: Seq<Seq<V>>) -> Seq<V>
+pub open spec fn concat<V>(cs: Seq<Seq<V>>) -> Seq<V>
     decreases cs.len(),
 {
     if cs.len() == 0 { Seq::empty() } else { concat(cs.drop_last()) + cs.last() }

@@ -395,7 +395,7 @@
 use super::bijou;
 use super::leb128;
 use super::{
-    accumulated, after_edit, after_edits, all_fit, applied, below_at, bytes_below, copied,
+    accumulated, after_edit, after_edits, all_fit, applied, below_at, bytes_below, concat, copied,
     delta_at, delta_finds, delta_iter_fits, delta_near, delta_prefix, delta_run_fits,
     delta_run_in_range, delta_run_kept, delta_run_values, delta_runs_at, delta_runs_fit,
     delta_runs_kept, delta_runs_values, delta_span_ok, delta_within, deltas, folded, head_len,
@@ -405,17 +405,19 @@ use super::{
     lemma_delta_runs_one, lemma_delta_runs_push, lemma_delta_within_one, lemma_head_len,
     lemma_head_run_max, lemma_run_values_add, lemma_run_values_push, lemma_runs_first,
     lemma_runs_of_values, lemma_sorted, lemma_sum_bound, lemma_sum_mono, lemma_sum_range,
-    lemma_sum_run, lemma_sums_fit, mapped, min_i, only, past, produced, ranges_ascend, refused,
-    run_values, runs_of, scan_of, scan_taken, sorted, sorted_for, splice_does, spliced_cut,
-    splices_do, sum_of, summed, sums_fit, times, total_len, total_str_len, window, AccIndex, Get,
-    LenIndex, RawColumn, RawColumnIter, SumIndex, VAccum, VAccumulated, VAdds, VAmount, VCodec,
-    VCount, VDelta, VDeltaValue, VGet, VGroup, VIndex, VKeeps, VNewtype, VSpec, VSum, VSummed,
-    VValue, VerifiedAccColumn, VerifiedAccIter, VerifiedAccIterState, VerifiedAccSeek,
-    VerifiedAccValue, VerifiedColumn, VerifiedDecoder, VerifiedDeltaColumn, VerifiedDeltaDecoder,
-    VerifiedDeltaEdit, VerifiedDeltaEncoder, VerifiedDeltaEncoderState, VerifiedDeltaIter,
-    VerifiedDeltaIterState, VerifiedDeltaRuns, VerifiedEdit, VerifiedEncoder, VerifiedEncoderState,
-    VerifiedFindByRange, VerifiedIter, VerifiedIterState, VerifiedPrefixColumn, VerifiedPrefixIter,
-    VerifiedPrefixIterState, VerifiedPrefixSeek, VerifiedPrefixedValue, VerifiedRuns,
+    lemma_sum_run, lemma_sums_fit, lemma_svs_windows, mapped, min_i, only, past, produced,
+    ranges_ascend, refused, run_values, runs_of, scan_of, scan_taken, sorted, sorted_for,
+    splice_does, spliced_cut, splices_do, sum_of, summed, sums_fit, times, total_len,
+    total_str_len, window, windows, AccIndex, Get, LenIndex, RawColumn, RawColumnIter, SumIndex,
+    VAccum, VAccumulated, VAdds, VAmount, VCodec, VCount, VDelta, VDeltaValue, VGet, VGroup,
+    VIndex, VKeeps, VNewtype, VShiftable, VSpec, VSum, VSummed, VValue, VerifiedAccColumn,
+    VerifiedAccIter, VerifiedAccIterState, VerifiedAccSeek, VerifiedAccValue, VerifiedColumn,
+    VerifiedDecoder, VerifiedDeltaColumn, VerifiedDeltaDecoder, VerifiedDeltaEdit,
+    VerifiedDeltaEncoder, VerifiedDeltaEncoderState, VerifiedDeltaIter, VerifiedDeltaIterState,
+    VerifiedDeltaRuns, VerifiedEdit, VerifiedEncoder, VerifiedEncoderState, VerifiedFindByRange,
+    VerifiedIter, VerifiedIterState, VerifiedPrefixColumn, VerifiedPrefixIter,
+    VerifiedPrefixIterState, VerifiedPrefixSeek, VerifiedPrefixedValue, VerifiedRanges,
+    VerifiedRuns, VerifiedUnshift,
 };
 #[cfg(feature = "bijou64")]
 use crate::Bijou64;
@@ -17820,6 +17822,371 @@ fn timestamps_copied() -> (r: Vec<i64>)
         assert(applied(o, s, sps@) =~= seq![100i64, 6, 7, 300]);
     }
     dst.to_vec()
+}
+
+// ── Repositioning an iterator: VShiftable, Unshift, Ranges ──────────────────
+
+/// The values of several ranges of a column, one range after another,
+/// walked with `ranges` and kept: the ranges' values of the column. For
+/// every value type, codec and kind of index.
+#[allow(dead_code)]
+fn kept_over_ranges<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(
+    col: &'a VerifiedColumn<V, C, K>,
+    rs: &[Range<usize>],
+) -> (out: Vec<Get<'a, V>>)
+    ensures
+        VGet::svs(out@) == windows(col@, rs@),
+{
+    let it = col.iter();
+    proof {
+        it.lemma_shift_model();
+    }
+    let mut r = it.ranges(rs);
+    let ghost all = r.ranges_left();
+    let mut out: Vec<Get<'a, V>> = Vec::new();
+    loop
+        invariant
+            out@ + r.ranges_left() == all,
+            r.ranges_vals() == it.shift_vals(),
+        ensures
+            out@ == all,
+        decreases r.ranges_left().len(),
+    {
+        let ghost g = r.ranges_left();
+        match r.next() {
+            Some(x) => {
+                proof {
+                    assert(VerifiedIter::<'a, V, C, K>::shift_spans(x) == seq![x]);
+                    assert(g[0] == x);
+                    assert(out@.push(x) + g.skip(1) =~= out@ + g);
+                }
+                out.push(x);
+            },
+            None => {
+                proof {
+                    assert(out@ + g =~= out@);
+                }
+                break ;
+            },
+        }
+    }
+    proof {
+        lemma_svs_windows(it.shift_vals(), rs@);
+    }
+    out
+}
+
+/// A lookahead over a column's values: the value it shows first is the
+/// one it then gives, and the column's first. For every value type,
+/// codec and kind of index.
+#[allow(dead_code)]
+fn peeked_then_given<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &'a VerifiedColumn<V, C, K>) -> (r: (
+    Option<Get<'a, V>>,
+    Option<Get<'a, V>>,
+))
+    ensures
+        r.0 == r.1,
+        match r.1 {
+            Some(v) => col@.len() > 0 && v.sv() == col@[0],
+            None => col@.len() == 0,
+        },
+{
+    let it = col.iter();
+    proof {
+        it.lemma_shift_model();
+        <Get<'a, V> as VGet>::lemma_svs(it.items());
+    }
+    let mut u = it.unshift();
+    // (`VerifiedUnshift::peek`, not the `peek` of Verus's iterator model)
+    let seen = match VerifiedUnshift::peek(&u) {
+        Some(g) => Some(*g),
+        None => None,
+    };
+    let given = u.next();
+    (seen, given)
+}
+
+/// A lookahead moved to a range at once: what it gives then is the
+/// range's values of the column (it may start at the value it looks at).
+#[allow(dead_code)]
+fn unshifted_to<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &'a VerifiedColumn<V, C, K>, a: usize, b: usize) -> (r:
+    Option<Get<'a, V>>)
+    ensures
+        match r {
+            Some(v) => a < b && a < col@.len() && v.sv() == col@[a as int],
+            None => !(a < b && a < col@.len()),
+        },
+{
+    let it = col.iter();
+    proof {
+        it.lemma_shift_model();
+    }
+    let mut u = it.unshift();
+    u.shift(a..b);
+    let r = u.next();
+    proof {
+        let v = it.shift_vals();
+        <Get<'a, V> as VGet>::lemma_svs(v);
+        if r is Some {
+            assert(window(v, a as int, b as int)[0] == v[a as int]);
+        }
+    }
+    r
+}
+
+/// A seek and a move on, of any repositionable iterator: the seek gives
+/// the value at `a`, if it is left, and a move of `n` from there passes
+/// over the next `n` values left.
+#[allow(dead_code)]
+fn sought_then_advanced<I: VShiftable>(it: &mut I, a: usize, n: usize) -> (r: Option<I::Item>)
+    requires
+        I::shift_unit(),
+        old(it).shift_at() <= a,
+    ensures
+        final(it).shift_vals() == old(it).shift_vals(),
+        ({
+            let (o, k) = (old(it).shift_left(), a - old(it).shift_at());
+            &&& k < o.len() ==> r == Some(o[k]) && final(it).shift_left() == past(o.skip(k + 1), n as int)
+            &&& k >= o.len() ==> r is None && final(it).shift_left().len() == 0
+        }),
+{
+    let r = it.seek_to(a);
+    it.advance_by(n);
+    r
+}
+
+/// `VShiftable`'s contracts, each told back.
+#[allow(dead_code)]
+fn told_by_get_pos_and_max<I: VShiftable>(it: &I) -> (r: (usize, usize))
+    ensures
+        r.0 == it.shift_at(),
+        r.1 == it.shift_end(),
+{
+    (it.get_pos(), it.get_max())
+}
+
+#[allow(dead_code)]
+fn told_by_get_range<I: VShiftable>(it: &I) -> (r: Range<usize>)
+    ensures
+        r.start == it.shift_at(),
+        r.end == it.shift_end(),
+{
+    it.get_range()
+}
+
+#[allow(dead_code)]
+fn told_by_set_max<I: VShiftable>(it: &mut I, end: usize)
+    ensures
+        final(it).shift_vals() == old(it).shift_vals(),
+        final(it).shift_at() == old(it).shift_at(),
+        final(it).shift_end() == if end >= old(it).shift_at() {
+            end as int
+        } else {
+            old(it).shift_at()
+        },
+{
+    it.set_max(end);
+}
+
+#[allow(dead_code)]
+fn told_by_advance_to<I: VShiftable>(it: &mut I, target: usize)
+    ensures
+        final(it).shift_vals() == old(it).shift_vals(),
+        final(it).shift_left() == past(old(it).shift_left(), target - old(it).shift_at()),
+        target <= old(it).shift_at() ==> final(it).shift_at() == old(it).shift_at(),
+        old(it).shift_at() < target <= old(it).shift_at() + old(it).shift_left().len() ==> final(it).shift_at()
+            == target,
+{
+    it.advance_to(target);
+}
+
+#[allow(dead_code)]
+fn told_by_shift<I: VShiftable>(it: &mut I, a: usize, b: usize)
+    ensures
+        final(it).shift_vals() == old(it).shift_vals(),
+        final(it).shift_left() == window(
+            old(it).shift_vals(),
+            if a <= old(it).shift_at() {
+                old(it).shift_at()
+            } else {
+                a as int
+            },
+            b as int,
+        ),
+{
+    it.shift(a..b);
+}
+
+#[allow(dead_code)]
+fn told_by_shift_next<I: VShiftable>(it: &mut I, a: usize, b: usize) -> (r: Option<I::Item>)
+    requires
+        I::shift_unit(),
+        a >= old(it).shift_at(),
+    ensures
+        final(it).shift_vals() == old(it).shift_vals(),
+        ({
+            let w = window(old(it).shift_vals(), a as int, b as int);
+            &&& w.len() > 0 ==> r == Some(w[0]) && final(it).shift_left() == w.skip(1)
+            &&& w.len() == 0 ==> r is None && final(it).shift_left().len() == 0
+        }),
+{
+    let r = it.shift_next(a..b);
+    proof {
+        let w = window(old(it).shift_vals(), a as int, b as int);
+        if w.len() > 0 {
+            I::lemma_shift_unit(r->Some_0);
+            assert(w.take(1)[0] == w[0]);
+        }
+    }
+    r
+}
+
+#[allow(dead_code)]
+fn told_by_shift_dup<I: VShiftable>(it: &I) -> (r: I)
+    ensures
+        r.shift_vals() == it.shift_vals(),
+        r.shift_at() == it.shift_at(),
+        r.shift_end() == it.shift_end(),
+        r.shift_left() == it.shift_left(),
+        r.shift_items() == it.shift_items(),
+{
+    it.dup()
+}
+
+#[allow(dead_code)]
+fn told_by_shift_step<I: VShiftable>(it: &mut I) -> (r: Option<I::Item>)
+    ensures
+        final(it).shift_vals() == old(it).shift_vals(),
+        match r {
+            Some(x) => {
+                &&& old(it).shift_items().len() > 0
+                &&& x == old(it).shift_items()[0]
+                &&& final(it).shift_items() == old(it).shift_items().skip(1)
+            },
+            None => old(it).shift_items().len() == 0 && final(it).shift_items().len() == 0,
+        },
+{
+    it.shift_step()
+}
+
+#[allow(dead_code)]
+fn told_by_shift_nth<I: VShiftable>(it: &mut I, n: usize) -> (r: Option<I::Item>)
+    ensures
+        final(it).shift_vals() == old(it).shift_vals(),
+        n < old(it).shift_items().len() ==> {
+            &&& r == Some(old(it).shift_items()[n as int])
+            &&& final(it).shift_items() == old(it).shift_items().skip(n + 1)
+        },
+        n >= old(it).shift_items().len() ==> r is None && final(it).shift_items().len() == 0,
+{
+    it.shift_nth(n)
+}
+
+/// What a lookahead and a walk over ranges say, told back.
+#[allow(dead_code)]
+fn told_by_unshift<I: VShiftable>(it: I) -> (r: VerifiedUnshift<I>)
+    ensures
+        r.unshift_vals() == it.shift_vals(),
+        r.unshift_left() == it.shift_items(),
+{
+    VerifiedUnshift::new(it)
+}
+
+#[allow(dead_code)]
+fn told_by_unshift_peek_next<I: VShiftable>(u: &mut VerifiedUnshift<I>) -> (r: Option<I::Item>)
+    ensures
+        final(u).unshift_vals() == old(u).unshift_vals(),
+        match r {
+            Some(x) => {
+                &&& old(u).unshift_left().len() > 0
+                &&& x == old(u).unshift_left()[0]
+                &&& final(u).unshift_left() == old(u).unshift_left().skip(1)
+            },
+            None => old(u).unshift_left().len() == 0 && final(u).unshift_left().len() == 0,
+        },
+{
+    let _ = VerifiedUnshift::peek(&*u);
+    u.next()
+}
+
+#[allow(dead_code)]
+fn told_by_unshift_shift<I: VShiftable>(u: &mut VerifiedUnshift<I>, a: usize, b: usize)
+    requires
+        I::shift_unit(),
+    ensures
+        final(u).unshift_vals() == old(u).unshift_vals(),
+        final(u).unshift_left() == window(old(u).unshift_vals(), a as int, b as int),
+{
+    u.shift(a..b);
+}
+
+#[allow(dead_code)]
+fn told_by_ranges<'r, I: VShiftable>(it: I, rs: &'r [Range<usize>]) -> (r: VerifiedRanges<'r, I>)
+    ensures
+        r.ranges_vals() == it.shift_vals(),
+        r.ranges_left() == windows(it.shift_vals(), rs@),
+{
+    VerifiedRanges::new(it, rs)
+}
+
+#[allow(dead_code)]
+fn told_by_ranges_next<'r, I: VShiftable>(r: &mut VerifiedRanges<'r, I>) -> (x: Option<I::Item>)
+    ensures
+        final(r).ranges_vals() == old(r).ranges_vals(),
+        match x {
+            Some(x) => {
+                let (g, n) = (old(r).ranges_left(), I::shift_spans(x).len() as int);
+                &&& 0 < n <= g.len()
+                &&& I::shift_spans(x) == g.take(n)
+                &&& final(r).ranges_left() == g.skip(n)
+            },
+            None => old(r).ranges_left().len() == 0 && final(r).ranges_left().len() == 0,
+        },
+{
+    r.next()
+}
+
+/// Numbers of two ranges of a column, one range after the other.
+#[allow(dead_code)]
+fn numbers_of_ranges() -> (r: Vec<u64>)
+    ensures
+        r@ == seq![2u64, 3, 6, 7],
+{
+    let mut col = VerifiedColumn::<u64>::new();
+    let mut k: u64 = 1;
+    while k <= 8
+        invariant
+            1 <= k <= 9,
+            col@ == Seq::new((k - 1) as nat, |i: int| (i + 1) as u64),
+        decreases 9 - k,
+    {
+        col.push(k);
+        proof {
+            assert(col@ =~= Seq::new(k as nat, |i: int| (i + 1) as u64));
+        }
+        k += 1;
+    }
+    let mut rs: Vec<Range<usize>> = Vec::new();
+    rs.push(1..3);
+    rs.push(5..7);
+    let out = kept_over_ranges(&col, rs.as_slice());
+    proof {
+        let v = col@;
+        let f = |r: Range<usize>| window(v, r.start as int, r.end as int);
+        assert(rs@ =~= seq![1usize..3usize, 5usize..7usize]);
+        assert(rs@.map_values(f) =~= seq![window(v, 1, 3), window(v, 5, 7)]);
+        let m = rs@.map_values(f);
+        assert(m.drop_last() =~= seq![window(v, 1, 3)]);
+        assert(m.drop_last().drop_last() =~= Seq::<Seq<u64>>::empty());
+        assert(windows(v, rs@) == concat(m));
+        assert(concat(m) == concat(m.drop_last()) + m.last());
+        assert(concat(m.drop_last()) == concat(m.drop_last().drop_last()) + m.drop_last().last());
+        assert(window(v, 1, 3) =~= seq![2u64, 3]);
+        assert(window(v, 5, 7) =~= seq![6u64, 7]);
+        assert(windows(v, rs@) =~= seq![2u64, 3, 6, 7]);
+        assert(VGet::svs(out@) =~= out@);
+    }
+    out
 }
 
 } // verus!

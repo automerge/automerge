@@ -594,6 +594,7 @@ pub mod leb128;
 pub(crate) mod model;
 mod prefix;
 mod prefix_iter;
+mod shift;
 pub(crate) mod sums;
 pub(crate) mod text;
 pub(crate) mod value;
@@ -605,9 +606,13 @@ pub use crate::iter_core::{past, window};
 pub use crate::raw::spliced_cut;
 pub use crate::raw::{RawColumn, RawColumnIter};
 #[cfg(verus_keep_ghost)]
+pub use crate::rle::writer::concat;
+#[cfg(verus_keep_ghost)]
 pub use crate::splices::{
     applied, copied, end_of, in_order, min_i, produced, ranges_ascend, splice_does, splices_do,
 };
+#[cfg(verus_keep_ghost)]
+pub use crate::window::windows;
 #[cfg(verus_keep_ghost)]
 pub use acc::{accumulated, lemma_acc_cat, lemma_acc_range, lemma_acc_run, lemma_cancel, times};
 pub use acc::{AccIndex, VAccum, VAccumulated, VAdds, VGroup, VerifiedAccColumn};
@@ -641,6 +646,9 @@ pub use prefix::{SumIndex, VerifiedPrefixColumn};
 pub use prefix_iter::{
     VerifiedPrefixIter, VerifiedPrefixIterState, VerifiedPrefixSeek, VerifiedPrefixedValue,
 };
+#[cfg(verus_keep_ghost)]
+pub use shift::lemma_svs_windows;
+pub use shift::{VShiftable, VerifiedRanges, VerifiedUnshift};
 #[cfg(verus_keep_ghost)]
 pub use sums::{
     lemma_sum_bound, lemma_sum_cat, lemma_sum_mono, lemma_sum_range, lemma_sum_run, lemma_sums_fit,
@@ -711,6 +719,12 @@ mod seal {
     /// A number a delta column can hold is one of this crate's: no
     /// other can name this trait.
     pub trait DeltaSeal {
+
+    }
+
+    /// An iterator that can be repositioned is one of this crate's: no
+    /// other can name this trait.
+    pub trait ShiftSeal {
 
     }
 

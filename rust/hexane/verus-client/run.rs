@@ -4122,3 +4122,49 @@ fn delta_copies() {
 
     assert_eq!(verus_client::timestamps_copied(), [100, 6, 7, 300]);
 }
+
+// ── Repositioning an iterator: VShiftable, Unshift, Ranges ──────────────────
+
+#[test]
+fn repositioned() {
+    let numbers: Vec<u64> = (1..=8).collect();
+    let col = VerifiedColumn::<u64>::from_values(&numbers);
+    let ranges = [1..3, 5..7, 7..7, 9..12];
+    assert_eq!(verus_client::kept_over_ranges(&col, &ranges), [2, 3, 6, 7]);
+    assert_eq!(verus_client::numbers_of_ranges(), [2, 3, 6, 7]);
+    assert_eq!(verus_client::peeked_then_given(&col), (Some(1), Some(1)));
+    let empty = VerifiedColumn::<u64>::new();
+    assert_eq!(verus_client::peeked_then_given(&empty), (None, None));
+    assert_eq!(verus_client::unshifted_to(&col, 0, 2), Some(1));
+    assert_eq!(verus_client::unshifted_to(&col, 4, 9), Some(5));
+    assert_eq!(verus_client::unshifted_to(&col, 4, 4), None);
+    assert_eq!(verus_client::unshifted_to(&col, 8, 9), None);
+
+    let mut it = col.iter();
+    assert_eq!(verus_client::sought_then_advanced(&mut it, 2, 3), Some(3));
+    assert_eq!(it.next(), Some(7));
+    let mut it = col.iter();
+    assert_eq!(verus_client::told_by_get_pos_and_max(&it), (0, 8));
+    assert_eq!(verus_client::told_by_get_range(&it), 0..8);
+    verus_client::told_by_set_max(&mut it, 6);
+    verus_client::told_by_advance_to(&mut it, 2);
+    assert_eq!(verus_client::told_by_shift_step(&mut it), Some(3));
+    let copy = verus_client::told_by_shift_dup(&it);
+    assert_eq!(copy.collect::<Vec<_>>(), [4, 5, 6]);
+    verus_client::told_by_shift(&mut it, 1, 5);
+    assert_eq!(it.collect::<Vec<_>>(), [4, 5]);
+    let mut it = col.iter();
+    assert_eq!(verus_client::told_by_shift_nth(&mut it, 2), Some(3));
+    assert_eq!(it.next(), Some(4));
+    let mut it = col.iter();
+    assert_eq!(verus_client::told_by_shift_next(&mut it, 6, 20), Some(7));
+    assert_eq!(it.next(), Some(8));
+
+    let mut u = verus_client::told_by_unshift(col.iter());
+    assert_eq!(verus_client::told_by_unshift_peek_next(&mut u), Some(1));
+    verus_client::told_by_unshift_shift(&mut u, 3, 5);
+    assert_eq!(u.collect::<Vec<_>>(), [4, 5]);
+    let mut r = verus_client::told_by_ranges(col.iter(), &ranges);
+    assert_eq!(verus_client::told_by_ranges_next(&mut r), Some(2));
+    assert_eq!(r.collect::<Vec<_>>(), [3, 6, 7]);
+}

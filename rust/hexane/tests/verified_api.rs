@@ -17529,3 +17529,153 @@ fn delta_copies_panic_as_the_old_ones_do() {
     v.push(5);
     assert_eq!(v.to_vec(), [5]);
 }
+
+// ── Repositioning an iterator: VShiftable, Unshift, Ranges ──────────────────
+
+use hexane::verified::VShiftable;
+use hexane::Shiftable;
+
+/// Ranges for `ranges` of a column of `len` values, from `from` on:
+/// ascending and not overlapping, some touching, some empty, some past
+/// the end.
+fn some_ranges(rng: &mut Rng, from: usize, len: usize) -> Vec<Range<usize>> {
+    let mut out = vec![];
+    let mut at = from;
+    for _ in 0..rng.below(5) {
+        let start = at + rng.below(len.saturating_sub(at).min(20) + 3);
+        let end = match rng.below(5) {
+            0 => start,
+            1 => start + 100,
+            _ => start + rng.below(10),
+        };
+        out.push(start..end);
+        at = end;
+    }
+    out
+}
+
+/// The values of `ranges` of `model`, one range after another.
+fn ranges_of<T: Clone>(model: &[T], ranges: &[Range<usize>]) -> Vec<T> {
+    let mut out = vec![];
+    for r in ranges {
+        let (s, e) = (r.start.min(model.len()), r.end.min(model.len()));
+        if s < e {
+            out.extend_from_slice(&model[s..e]);
+        }
+    }
+    out
+}
+
+fn shifted<T: Kind>() {
+    for seed in 1..=6u64 {
+        let mut rng = Rng(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) ^ 0x5417);
+        let budget = [2, 3, 8, 64][rng.below(4)];
+        let model: Vec<T> = rng.values(120);
+        let (v, c) = both_with(&model, budget);
+        let len = model.len();
+        for _ in 0..20 {
+            // ranges, from a place the iterators have moved on to
+            let a = rng.below(len + 2);
+            let rs = some_ranges(&mut rng, a, len);
+            let mut x = v.iter();
+            let mut y = c.iter();
+            VShiftable::advance_to(&mut x, a);
+            Shiftable::advance_to(&mut y, a);
+            let new: Vec<T> = x.ranges(&rs).map(T::keep).collect();
+            let old_: Vec<T> = y.ranges(rs.clone()).map(old::<T>).collect();
+            let want = ranges_of(&model, &rs);
+            assert_eq!(new, want, "{rs:?}");
+            assert_eq!(old_, want, "{rs:?}");
+
+            // a lookahead, moved to a range at once, then looked at and
+            // walked
+            let (s, e) = (rng.below(len + 2), rng.below(len + 10));
+            let mut u = v.iter().unshift();
+            let mut w = c.iter().unshift();
+            if rng.below(2) == 0 {
+                u.shift(s..e);
+                w.shift(s..e);
+            }
+            for _ in 0..8 {
+                match rng.below(3) {
+                    0 => assert_eq!(
+                        u.peek().map(|g| T::keep(*g)),
+                        w.peek().map(|g| old::<T>(*g))
+                    ),
+                    1 => assert_eq!(u.next().map(T::keep), w.next().map(old::<T>)),
+                    _ => {
+                        let n = rng.below(5);
+                        assert_eq!(u.nth(n).map(T::keep), w.nth(n).map(old::<T>));
+                    }
+                }
+            }
+
+            // the moves of `VShiftable`, beside `Shiftable`'s
+            let mut x = v.iter();
+            let mut y = c.iter();
+            for _ in 0..6 {
+                let p = VShiftable::get_pos(&x);
+                assert_eq!(p, Shiftable::get_pos(&y));
+                assert_eq!(VShiftable::get_max(&x), Shiftable::get_max(&y));
+                assert_eq!(VShiftable::get_range(&x), Shiftable::get_range(&y));
+                let t = p + rng.below(15);
+                match rng.below(6) {
+                    0 => {
+                        VShiftable::set_max(&mut x, t);
+                        Shiftable::set_max(&mut y, t);
+                    }
+                    1 => {
+                        VShiftable::advance_to(&mut x, t);
+                        Shiftable::advance_to(&mut y, t);
+                    }
+                    2 => {
+                        VShiftable::advance_by(&mut x, t - p);
+                        Shiftable::advance_by(&mut y, t - p);
+                    }
+                    3 => {
+                        let r = t..t + rng.below(20);
+                        VShiftable::shift(&mut x, r.clone());
+                        Shiftable::shift(&mut y, r);
+                    }
+                    4 => {
+                        let r = t..t + rng.below(20);
+                        let a = VShiftable::shift_next(&mut x, r.clone()).map(T::keep);
+                        assert_eq!(a, Shiftable::shift_next(&mut y, r).map(old::<T>));
+                    }
+                    _ => {
+                        let a = VShiftable::seek_to(&mut x, t).map(T::keep);
+                        assert_eq!(a, Shiftable::seek_to(&mut y, t).map(old::<T>));
+                    }
+                }
+                assert_eq!(x.next().map(T::keep), y.next().map(old::<T>));
+            }
+        }
+    }
+}
+
+/// A verified iterator repositions as `Column`'s does: the values of
+/// several ranges in turn (`ranges`), a lookahead and its moves
+/// (`unshift`), and each move of `VShiftable` beside `Shiftable`'s.
+#[test]
+fn an_iterator_repositions_as_the_old_one_does() {
+    for_each_kind!(shifted);
+}
+
+/// Ranges out of order panic in both APIs, in the same words.
+#[cfg(panic = "unwind")]
+#[test]
+fn ranges_out_of_order_panic() {
+    let (v, c) = both::<u64>(&[1, 2, 3, 4, 5, 6]);
+    let bad = [3..4, 1..2];
+    let new = panic_of(std::panic::AssertUnwindSafe(|| {
+        v.iter().ranges(&bad).count()
+    }));
+    let old_ = panic_of(std::panic::AssertUnwindSafe(|| {
+        c.iter().ranges(bad.clone()).count()
+    }));
+    assert_eq!(
+        new.as_deref(),
+        Some("ranges must be ascending and non-overlapping")
+    );
+    assert_eq!(new, old_);
+}
