@@ -1200,6 +1200,37 @@ pub proof fn lemma_leaf_at<A: SlabAggregate>(view: Seq<A>, left: Seq<A>, aggs: S
     lemma_sum_len_concat(left + aggs, right);
 }
 
+/// A sequence is its first `k` items and then the rest.
+pub proof fn lemma_split_seq<T>(s: Seq<T>, k: int)
+    requires 0 <= k <= s.len(),
+    ensures s == s.subrange(0, k) + s.subrange(k, s.len() as int),
+{
+    assert(s =~= s.subrange(0, k) + s.subrange(k, s.len() as int));
+}
+
+/// The front of `a + b` as long as `a` is `a`.
+pub proof fn lemma_front_concat<T>(a: Seq<T>, b: Seq<T>)
+    ensures (a + b).subrange(0, a.len() as int) == a,
+{
+    assert((a + b).subrange(0, a.len() as int) =~= a);
+}
+
+/// Nothing lies between a place and itself.
+pub proof fn lemma_none_between<T>(s: Seq<T>, k: int)
+    requires 0 <= k <= s.len(),
+    ensures s.subrange(k, k) == Seq::<T>::empty(),
+{
+    assert(s.subrange(k, k) =~= Seq::<T>::empty());
+}
+
+/// Setting the first item is putting it before the rest.
+pub proof fn lemma_set_first<T>(s: Seq<T>, x: T)
+    requires s.len() > 0,
+    ensures s.update(0, x) == s.subrange(1, s.len() as int).insert(0, x),
+{
+    assert(s.update(0, x) =~= s.subrange(1, s.len() as int).insert(0, x));
+}
+
 /// A front of `s`, cut in two, gives two pieces of `s`.
 pub proof fn lemma_front_cut<T>(s: Seq<T>, a: int, b: int)
     requires 0 <= a <= b <= s.len(),
@@ -3417,11 +3448,11 @@ impl<A: SlabAggregate> SlabBTree<A> {
             reveal_with_fuel(SlabBTree::children_slabs, 1);
             reveal_with_fuel(SlabBTree::children_owned, 1);
             self.lemma_slots_nil(h);
-            assert(out@.subrange(num as int, num as int) =~= Seq::<ChildSlot<A>>::empty());
+            lemma_none_between(out@, num as int);
             assert forall|x: NodeId| #[trigger] owned_all.contains(x) implies old(self).node_spec(x) is Some by {
                 old(self).lemma_slots_live(all, hc, x);
             }
-            assert(all.subrange(chunk_at(num as int, b, r), n) =~= Seq::<ChildSlot<A>>::empty());
+            lemma_none_between(all, n);
         }
         let mut c = num;
         while c > 1
@@ -3531,15 +3562,15 @@ impl<A: SlabAggregate> SlabBTree<A> {
         let ghost first = children@;
         proof {
             lemma_chunk(num as int, b, r, 0);
-            assert(first =~= all.subrange(0, hi));
+            assert(first == all.subrange(0, hi));
             t0.lemma_slots_sub(all, 0, hi, hc);
             t0.lemma_slots_sub(all, hi, n, hc);
             t0.lemma_slots_apart(all, 0, hi, n, hc);
-            assert(all =~= first + rest);
+            lemma_split_seq(all, hi);
             t0.lemma_children_slabs_concat(first, rest, hc);
             t0.lemma_children_owned_concat(first, rest, hc);
             let p = t0.children_slabs(first, hc).len() as int;
-            assert(slabs_all.subrange(0, p) =~= t0.children_slabs(first, hc));
+            lemma_front_concat(t0.children_slabs(first, hc), t0.children_slabs(rest, hc));
             lemma_sum_len_sub(slabs_all, 0, p);
         }
         let ghost node = Internal { children: children };
@@ -3586,8 +3617,9 @@ impl<A: SlabAggregate> SlabBTree<A> {
                 assert(self.node_spec(x) == t0.node_spec(x));
             }
         }
+        let ghost o0 = out@;
         out.set(0, slot);
-        proof { assert(out@ =~= o.insert(0, slot)); }
+        proof { lemma_set_first(o0, slot); }
         out
     }
 
