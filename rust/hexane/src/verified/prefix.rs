@@ -65,6 +65,8 @@ impl<V: VSummed + VValue<C>, C: VCodec> VKeeps<V, C> for SumIndex {
 impl<V: VSummed + VValue<C>, C: VCodec> Kind<V, C> for SumIndex {
     type W = SumWeight<V::Sum>;
 
+    type I = SlabBTree<SumWeight<V::Sum>>;
+
     type G = SumModel<V, C>;
 
     proof fn lemma_refuses(vs: Seq<Held<V, C>>) {

@@ -7,7 +7,6 @@ use super::seal;
 #[cfg(verus_keep_ghost)]
 use super::{after_edit, lemma_held_runs, lemma_svs_add, lemma_svs_sub, run_values, Held, VGet};
 use super::{Get, LenIndex, RunsFeed, VCodec, VIndex, VValue, VerifiedColumn};
-use crate::btree::SlabBTree;
 #[cfg(verus_keep_ghost)]
 use crate::cursor::{Insertable, Slabs};
 use crate::cursor::{ReadsAgree, RunFeed};
@@ -25,7 +24,7 @@ verus! {
 type KEdit<V, C, K> = EditCore<
     <V as seal::Sealed<C>>::E,
     <K as Kind<V, C>>::W,
-    SlabBTree<<K as Kind<V, C>>::W>,
+    <K as Kind<V, C>>::I,
     <K as Kind<V, C>>::G,
 >;
 

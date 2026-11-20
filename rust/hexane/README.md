@@ -610,8 +610,9 @@ client checked by Verus can build on it (the acceptance clients show
 how): columns of every built-in value type (the numbers, `bool`,
 `NonZeroU32`, byte strings and strings, their options but
 `Option<String>`, and a client's types, stored as one of the numbers
-or as bytes of their own), plain, prefix
-(sums and accumulators) and delta columns; their loads (also run by
+or as bytes of their own), plain (with either of the old API's
+indexes, a B-tree or a Fenwick tree), prefix (sums and accumulators)
+and delta columns; their loads (also run by
 run), saves, splices, edit cursors and `copy_ranges`; their iterators,
 searches and runs; the streaming encoders and decoders; the raw
 column; both codecs, and a client's own (`VCodec`); and the

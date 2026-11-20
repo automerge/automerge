@@ -648,7 +648,7 @@ pub use delta::{
 };
 pub use edit::VerifiedEdit;
 pub use encoder::{VerifiedEncoder, VerifiedEncoderState};
-pub use kind::{LenIndex, VIndex, VKeeps};
+pub use kind::{LenBitIndex, LenIndex, VIndex, VKeeps};
 pub use load::VerifiedLoadIter;
 pub use prefix::{SumIndex, VerifiedPrefixColumn};
 pub use prefix_iter::{
@@ -669,7 +669,7 @@ pub use value::{refused, VNewtype, VPack};
 
 use crate::bool_edit::{BoolModel, BoolRecoder};
 use crate::bool_wire::BoolReads;
-use crate::btree::{SlabAggregate, SlabBTree};
+use crate::btree::SlabAggregate;
 use crate::column::Slab;
 use crate::copy::NoRuns;
 #[cfg(verus_keep_ghost)]
@@ -1471,16 +1471,16 @@ impl<'a, 't, V: VValue<C>, C: VCodec> Probe<Get<'a, V>> for VProbe<'t, V, C> {
 /// `target` can tell. Where they are not, some range of the places the
 /// cursor had left.
 #[inline(always)]
-fn seek_sorted<'a, 't, V: VValue<C>, C: VCodec, W: SlabAggregate>(
+fn seek_sorted<'a, 't, V: VValue<C>, C: VCodec, W: SlabAggregate, I: IndexOps<W>>(
     it: ICore<<V::X as Decoders<'a>>::D>,
     slabs: &'a [Slab<<V::E as Slabs>::Tail>],
-    index: &SlabBTree<W>,
+    index: &I,
     target: Get<'t, V>,
 ) -> (r: (usize, usize))
     requires
         it.wf::<V::X>(slabs@),
         index.ok(),
-        wlens::<W, SlabBTree<W>>(index.ws()) == slab_lens(slabs@),
+        wlens::<W, I>(index.ws()) == slab_lens(slabs@),
     ensures
         ({
             let w = <Get<'a, V> as VGet>::svs(it.out::<V::X>(slabs@));
@@ -1501,14 +1501,14 @@ fn seek_sorted<'a, 't, V: VValue<C>, C: VCodec, W: SlabAggregate>(
     let find = |t: usize| -> (r: (usize, usize))
         requires
             index.ok(),
-            wlens::<W, SlabBTree<W>>(index.ws()) == slab_lens(slabs@),
+            wlens::<W, I>(index.ws()) == slab_lens(slabs@),
         ensures
             find_ok(slabs@, t, r),
         {
             let r = index.ix_find(t);
             proof {
-                assert(index.ws().map_values(|w: W| <SlabBTree<W> as IndexOps<W>>::wlen(w))
-                    =~= wlens::<W, SlabBTree<W>>(index.ws()));
+                assert(index.ws().map_values(|w: W| I::wlen(w))
+                    =~= wlens::<W, I>(index.ws()));
             }
             // past the slabs, the whole position lies beyond them
             if r.0 >= slabs.len() {
@@ -1520,15 +1520,15 @@ fn seek_sorted<'a, 't, V: VValue<C>, C: VCodec, W: SlabAggregate>(
     let start_of = |i: usize| -> (n: usize)
         requires
             index.ok(),
-            wlens::<W, SlabBTree<W>>(index.ws()) == slab_lens(slabs@),
+            wlens::<W, I>(index.ws()) == slab_lens(slabs@),
             i <= slabs@.len(),
         ensures
             n == sum(slab_lens(slabs@), 0, i as int),
         {
             let n = index.ix_before(i);
             proof {
-                assert(index.ws().map_values(|w: W| <SlabBTree<W> as IndexOps<W>>::wlen(w))
-                    =~= wlens::<W, SlabBTree<W>>(index.ws()));
+                assert(index.ws().map_values(|w: W| I::wlen(w))
+                    =~= wlens::<W, I>(index.ws()));
             }
             n
         };
@@ -2129,7 +2129,9 @@ pub proof fn lemma_after_edits(n: usize, k: nat)
 /// loads too: `VerifiedColumn::<V>::new()` is a plain column, and where
 /// the type is known otherwise, `VerifiedColumn::new()` is of the kind
 /// it says. A column kept with a [`SumIndex`] is a prefix column
-/// ([`VerifiedPrefixColumn`]).
+/// ([`VerifiedPrefixColumn`]); one kept with a [`LenBitIndex`] is a
+/// plain column whose index is a Fenwick tree, as the old API's
+/// `Column<V, C, LenWeight, BitIndex<usize>>`.
 pub struct VerifiedColumn<V: VValue<C>, C: VCodec = Leb128, K: VIndex<V, C> = LenIndex> {
     core: KCore<V, C, K>,
 }
@@ -3136,7 +3138,7 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
         let it = self.reader(start, end);
         let ghost w = it.out::<V::X>(slabs@);
         let ghost sub = self@.subrange(start as int, end as int);
-        let r = seek_sorted::<V, C, K::W>(it, slabs, index, value);
+        let r = seek_sorted::<V, C, K::W, K::I>(it, slabs, index, value);
         proof {
             VGet::lemma_svs(w);
             assert(VGet::svs(w) == sub);
@@ -3351,7 +3353,7 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
                 K::lemma_refuses(vs);
             }
         }
-        match <V::E as Model<V::X>>::load::<K::W, K::G>(bytes, MAX_SEG, None, i64::MIN, i64::MAX) {
+        match <V::E as Model<V::X>>::load::<K::W, K::I, K::G>(bytes, MAX_SEG, None, i64::MIN, i64::MAX) {
             Ok(core) => Ok(VerifiedColumn { core }),
             Err(e) => Err(e),
         }
@@ -3407,7 +3409,7 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
                 K::lemma_refuses(vs);
             }
         }
-        match <V::E as Model<V::X>>::load::<K::W, K::G>(bytes, max_segments, length, i64::MIN, i64::MAX) {
+        match <V::E as Model<V::X>>::load::<K::W, K::I, K::G>(bytes, max_segments, length, i64::MIN, i64::MAX) {
             Ok(core) => Ok(VerifiedColumn { core }),
             Err(e) => Err(e),
         }
@@ -4204,7 +4206,7 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedIter<'a, V, C, K> {
             lemma_svs_window(vals_of::<V::X>(slabs@), here as int, here + it.items_left);
             assert(w =~= window(o, a, range.end - p));
         }
-        let r = seek_sorted::<V, C, K::W>(it, slabs, index, target);
+        let r = seek_sorted::<V, C, K::W, K::I>(it, slabs, index, target);
         self.advance_to(r.0);
         proof {
             assert forall|j: int| a <= j < a + w.len() implies w[j - a] == #[trigger] o[j] by {}
@@ -4232,8 +4234,8 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedIter<'a, V, C, K> {
                     Some(ix) => {
                         let r = ix.ix_find(t);
                         proof {
-                            assert(ix.ws().map_values(|w: K::W| <SlabBTree<K::W> as IndexOps<K::W>>::wlen(w))
-                                =~= wlens::<K::W, SlabBTree<K::W>>(ix.ws()));
+                            assert(ix.ws().map_values(|w: K::W| <K::I as IndexOps<K::W>>::wlen(w))
+                                =~= wlens::<K::W, K::I>(ix.ws()));
                         }
                         if r.0 >= n {
                             // past the slabs, the whole position lies

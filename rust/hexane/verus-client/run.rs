@@ -4364,3 +4364,20 @@ fn a_clients_own_codec() {
     assert_eq!(c.save(), want);
     assert!(VerifiedColumn::<u64, Fixed8>::load(&want[..20]).is_err());
 }
+
+// ── A plain column with a Fenwick index ────────────────────────────────────
+
+#[test]
+fn a_fenwick_index_keeps_a_plain_column() {
+    let nums: Vec<u64> = (0..1000).map(|i| i / 3).collect();
+    let actions: Vec<Option<Action>> = (0..1000)
+        .map(|i| match i % 3 {
+            0 => None,
+            1 => Some(Action::Set),
+            _ => Some(Action::Delete),
+        })
+        .collect();
+    let flags: Vec<bool> = (0..1000).map(|i| i % 5 < 2).collect();
+    verus_client::round_trip_bit_index(&nums, &actions, &flags);
+    verus_client::edit_bit_index(3, 4);
+}

@@ -3011,7 +3011,7 @@ impl<T: VDeltaValue<C>, C: VCodec> VerifiedDeltaColumn<T, C> {
                 &&& expected matches Some(len) ==> c@.len() == len
             },
     {
-        match <DE<T, C> as Model<DX<T, C>>>::load::<SlabAgg, DeltaModel<DX<T, C>, <T as DKind<C>>::B>>(
+        match <DE<T, C> as Model<DX<T, C>>>::load::<SlabAgg, SlabBTree<SlabAgg>, DeltaModel<DX<T, C>, <T as DKind<C>>::B>>(
             bytes,
             max_segments,
             expected,

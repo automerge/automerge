@@ -408,16 +408,16 @@ use super::{
     lemma_sum_mono, lemma_sum_range, lemma_sum_run, lemma_sums_fit, lemma_svs_windows, mapped,
     min_i, only, past, produced, ranges_ascend, refused, run_units, run_values, runs_of, scan_of,
     scan_taken, sorted, sorted_for, splice_does, spliced_cut, splices_do, sum_of, summed, sums_fit,
-    times, total_len, total_str_len, unit_runs, window, windows, AccIndex, Get, LenIndex,
-    RawColumn, RawColumnIter, SumIndex, VAccum, VAccumulated, VAdds, VAmount, VCodec, VCount,
-    VDelta, VDeltaValue, VGet, VGroup, VIndex, VKeeps, VNewtype, VPack, VShiftable, VSpec, VSum,
-    VSummed, VValue, VerifiedAccColumn, VerifiedAccIter, VerifiedAccIterState, VerifiedAccSeek,
-    VerifiedAccValue, VerifiedColumn, VerifiedDecoder, VerifiedDeltaColumn, VerifiedDeltaDecoder,
-    VerifiedDeltaEdit, VerifiedDeltaEncoder, VerifiedDeltaEncoderState, VerifiedDeltaIter,
-    VerifiedDeltaIterState, VerifiedDeltaRuns, VerifiedEdit, VerifiedEncoder, VerifiedEncoderState,
-    VerifiedFindByRange, VerifiedIter, VerifiedIterState, VerifiedLoadIter, VerifiedPrefixColumn,
-    VerifiedPrefixIter, VerifiedPrefixIterState, VerifiedPrefixSeek, VerifiedPrefixedValue,
-    VerifiedRanges, VerifiedRuns, VerifiedUnshift,
+    times, total_len, total_str_len, unit_runs, window, windows, AccIndex, Get, LenBitIndex,
+    LenIndex, RawColumn, RawColumnIter, SumIndex, VAccum, VAccumulated, VAdds, VAmount, VCodec,
+    VCount, VDelta, VDeltaValue, VGet, VGroup, VIndex, VKeeps, VNewtype, VPack, VShiftable, VSpec,
+    VSum, VSummed, VValue, VerifiedAccColumn, VerifiedAccIter, VerifiedAccIterState,
+    VerifiedAccSeek, VerifiedAccValue, VerifiedColumn, VerifiedDecoder, VerifiedDeltaColumn,
+    VerifiedDeltaDecoder, VerifiedDeltaEdit, VerifiedDeltaEncoder, VerifiedDeltaEncoderState,
+    VerifiedDeltaIter, VerifiedDeltaIterState, VerifiedDeltaRuns, VerifiedEdit, VerifiedEncoder,
+    VerifiedEncoderState, VerifiedFindByRange, VerifiedIter, VerifiedIterState, VerifiedLoadIter,
+    VerifiedPrefixColumn, VerifiedPrefixIter, VerifiedPrefixIterState, VerifiedPrefixSeek,
+    VerifiedPrefixedValue, VerifiedRanges, VerifiedRuns, VerifiedUnshift,
 };
 #[cfg(feature = "bijou64")]
 use crate::Bijou64;
@@ -19911,6 +19911,40 @@ fn round_trip_fixed8(nums: &Vec<u64>, nullable: &Vec<Option<i64>>, flags: &Vec<b
     round_trip::<u64, Fixed8, LenIndex>(nums);
     round_trip::<Option<i64>, Fixed8, LenIndex>(nullable);
     round_trip::<bool, Fixed8, LenIndex>(flags);
+}
+
+// ── A plain column with a Fenwick index ────────────────────────────────────
+
+/// A column kept with a Fenwick tree of its slabs' counts
+/// ([`LenBitIndex`]) is specified as one with the B-tree index: what it
+/// saves loads back, of every kind of value.
+#[allow(dead_code)]
+fn round_trip_bit_index(nums: &Vec<u64>, actions: &Vec<Option<Action>>, flags: &Vec<bool>)
+    requires
+        nums@.len() < 1_000_000,
+        actions@.len() < 1_000_000,
+        flags@.len() < 1_000_000,
+{
+    round_trip::<u64, Leb128, LenBitIndex>(nums);
+    round_trip::<Option<Action>, Leb128, LenBitIndex>(actions);
+    round_trip::<bool, Leb128, LenBitIndex>(flags);
+}
+
+/// What a client reads of a column with a Fenwick index is what it
+/// wrote, as of a plain column: edits, then a read of each value.
+#[allow(dead_code)]
+fn edit_bit_index(a: u64, b: u64) {
+    let mut col = VerifiedColumn::<u64, Leb128, LenBitIndex>::new();
+    col.push(a);
+    col.push(b);
+    col.insert(1, a);
+    assert(col@ == seq![a, a, b]);
+    let x = col.get(2);
+    let y = col.get(3);
+    assert(x == Some(b));
+    assert(y is None);
+    col.remove(0);
+    assert(col@ == seq![a, b]);
 }
 
 } // verus!

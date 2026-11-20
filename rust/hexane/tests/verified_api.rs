@@ -12,17 +12,19 @@
 // `nth(0)` is here for what `nth` does, which is under test
 #![allow(clippy::iter_nth_zero)]
 
+use hexane::column::LenWeight;
 use hexane::delta::DeltaEncoderState;
 use hexane::encoder::{BoolEncoder, BoolEncoderState, RleEncoder, RleEncoderState};
+use hexane::index::BitIndex;
 use hexane::prefix::{PrefixSeek, PrefixWeightFn};
 use hexane::verified::{
-    refused, AccIndex, Get, LenIndex, RawColumn, SumIndex, VAccum, VAccumulated, VAdds, VAmount,
-    VCodec, VDeltaValue, VGroup, VNewtype, VPack, VSummed, VValue, VerifiedAccColumn,
-    VerifiedAccIter, VerifiedAccIterState, VerifiedAccSeek, VerifiedAccValue, VerifiedColumn,
-    VerifiedDecoder, VerifiedDeltaColumn, VerifiedDeltaDecoder, VerifiedDeltaEncoder,
-    VerifiedDeltaEncoderState, VerifiedEncoder, VerifiedEncoderState, VerifiedIter,
-    VerifiedIterState, VerifiedPrefixColumn, VerifiedPrefixIter, VerifiedPrefixIterState,
-    VerifiedPrefixSeek, VerifiedPrefixedValue, VerifiedRuns,
+    refused, AccIndex, Get, LenBitIndex, LenIndex, RawColumn, SumIndex, VAccum, VAccumulated,
+    VAdds, VAmount, VCodec, VDeltaValue, VGroup, VNewtype, VPack, VSummed, VValue,
+    VerifiedAccColumn, VerifiedAccIter, VerifiedAccIterState, VerifiedAccSeek, VerifiedAccValue,
+    VerifiedColumn, VerifiedDecoder, VerifiedDeltaColumn, VerifiedDeltaDecoder,
+    VerifiedDeltaEncoder, VerifiedDeltaEncoderState, VerifiedEncoder, VerifiedEncoderState,
+    VerifiedIter, VerifiedIterState, VerifiedPrefixColumn, VerifiedPrefixIter,
+    VerifiedPrefixIterState, VerifiedPrefixSeek, VerifiedPrefixedValue, VerifiedRuns,
 };
 use hexane::{
     Codec, Column, ColumnEncoding, ColumnValue, ColumnValueRef, DeltaColumn, DeltaDecoder,
@@ -18451,4 +18453,51 @@ fn a_clients_own_codec() {
         fixed8_agree::<Option<Vec<u8>>>(&rng.values(40));
         fixed8_agree::<String>(&rng.values(40));
     }
+}
+
+// ── A plain column with a Fenwick index ────────────────────────────────────
+
+/// A column kept with a Fenwick tree of its slabs' counts, in each API,
+/// and a plain column: the same values after every edit, saved to the
+/// same bytes, read the same at places and loaded back the same.
+fn bit_index_agrees<T: Kind>() {
+    let mut rng = Rng(0xb17);
+    let mut v = VerifiedColumn::<T, Leb128, LenBitIndex>::new();
+    let mut c = Column::<T, Leb128, LenWeight, BitIndex<usize>>::new();
+    let mut plain = VerifiedColumn::<T>::new();
+    let mut model: Vec<T> = vec![];
+    for _ in 0..150 {
+        let at = rng.below(model.len() + 1);
+        let del = rng.below(model.len() - at + 1).min(6);
+        let n = rng.below(40);
+        let ins = rng.values::<T>(n);
+        v.splice(at, del, &lent(&ins));
+        c.splice(at, del, ins.iter().cloned());
+        plain.splice(at, del, &lent(&ins));
+        model.splice(at..at + del, ins);
+        let bytes = v.save();
+        assert_eq!(c.save(), bytes);
+        assert_eq!(plain.save(), bytes);
+        assert_eq!(v.len(), model.len());
+        assert_eq!(v.slab_count(), plain.slab_count());
+        for i in [
+            0,
+            model.len() / 3,
+            model.len() / 2,
+            model.len().saturating_sub(1),
+        ] {
+            assert_eq!(v.get(i).map(T::keep), model.get(i).cloned());
+            assert_eq!(c.get(i).map(old), model.get(i).cloned());
+        }
+    }
+    let got: Vec<T> = v.to_vec().into_iter().map(T::keep).collect();
+    assert_eq!(got, model);
+    let back = VerifiedColumn::<T, Leb128, LenBitIndex>::load(&v.save()).unwrap();
+    let back: Vec<T> = back.to_vec().into_iter().map(T::keep).collect();
+    assert_eq!(back, model);
+}
+
+#[test]
+fn a_fenwick_index_keeps_a_plain_column() {
+    for_each_kind!(bit_index_agrees);
 }

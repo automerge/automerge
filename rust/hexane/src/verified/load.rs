@@ -10,7 +10,6 @@ use super::LenIndex;
 #[cfg(verus_keep_ghost)]
 use super::{fill_of, lemma_held, Held, VGet};
 use super::{Get, VCodec, VValue, VerifiedColumn};
-use crate::btree::SlabBTree;
 #[cfg(verus_keep_ghost)]
 use crate::cursor::ReadsAgree;
 #[cfg(verus_keep_ghost)]
@@ -186,7 +185,7 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedLoadIter<'a, V, C, K>
                 K::lemma_refuses(vs);
             }
         }
-        match self.core.finish::<SlabBTree<K::W>>(self.max_segments, self.length, i64::MIN, i64::MAX) {
+        match self.core.finish::<K::I>(self.max_segments, self.length, i64::MIN, i64::MAX) {
             Ok(core) => {
                 let c = VerifiedColumn { core };
                 proof {

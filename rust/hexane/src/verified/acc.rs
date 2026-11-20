@@ -784,6 +784,8 @@ impl<V: VAccumulated + VValue<C>, C: VCodec> VKeeps<V, C> for AccIndex {
 impl<V: VAccumulated + VValue<C>, C: VCodec> Kind<V, C> for AccIndex {
     type W = AccWeight<V::Acc>;
 
+    type I = SlabBTree<AccWeight<V::Acc>>;
+
     type G = AccModel<V, C>;
 
     proof fn lemma_refuses(vs: Seq<Held<V, C>>) {

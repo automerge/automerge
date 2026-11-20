@@ -9,8 +9,10 @@
 //!
 //! The kind is the third parameter of a column's type. A plain column's
 //! is [`LenIndex`], which is the parameter's default: `VerifiedColumn<V>`
-//! and `VerifiedColumn<V, C>` are plain columns. What a column says of
-//! its values does not depend on the kind, nor do its bytes when saved.
+//! and `VerifiedColumn<V, C>` are plain columns. [`LenBitIndex`] keeps
+//! the same counts in a Fenwick tree in place of a B-tree. What a column
+//! says of its values does not depend on the kind, nor do its bytes when
+//! saved.
 //! What does is which columns there are: an index is kept for the
 //! columns whose weights it can hold ([`VKeeps::keeps`]), which for a
 //! plain column is every one.
@@ -25,6 +27,7 @@ use crate::column::Slab;
 use crate::column_core::ColumnCore;
 #[cfg(verus_keep_ghost)]
 use crate::cursor::{all_ok, vals_of, Slabs, Weigh};
+use crate::index::{BitIndex, IndexOps};
 use crate::weights::{CopyWeigh, LenModel, LoadWeigh};
 use crate::Leb128;
 use vstd::prelude::*;
@@ -35,7 +38,7 @@ verus! {
 pub(crate) type KCore<V, C, K> = ColumnCore<
     <V as seal::Sealed<C>>::E,
     <K as Kind<V, C>>::W,
-    SlabBTree<<K as Kind<V, C>>::W>,
+    <K as Kind<V, C>>::I,
     <K as Kind<V, C>>::G,
 >;
 
@@ -54,6 +57,9 @@ pub trait VKeeps<V: VValue<C>, C: VCodec = Leb128>: Sized {
 pub(crate) trait Kind<V: VValue<C>, C: VCodec>: VKeeps<V, C> {
     /// What the index holds of a slab.
     type W: SlabAggregate;
+
+    /// The index of those: a B-tree of them, or a Fenwick tree.
+    type I: IndexOps<Self::W>;
 
     /// How a slab is weighed, and what the weights say of a column.
     type G: CopyWeigh<V::E, Self::W> + for <'a>LoadWeigh<'a, V::E, V::X, Self::W>;
@@ -97,6 +103,8 @@ impl<V: VValue<C>, C: VCodec> VKeeps<V, C> for LenIndex {
 impl<V: VValue<C>, C: VCodec> Kind<V, C> for LenIndex {
     type W = usize;
 
+    type I = SlabBTree<usize>;
+
     type G = LenModel;
 
     proof fn lemma_refuses(vs: Seq<Held<V, C>>) {
@@ -107,6 +115,38 @@ impl<V: VValue<C>, C: VCodec> Kind<V, C> for LenIndex {
 }
 
 impl<V: VValue<C>, C: VCodec> VIndex<V, C> for LenIndex {
+
+}
+
+/// The index of a plain column kept as a Fenwick tree (a binary indexed
+/// tree) of the slabs' counts, as the old API's
+/// [`BitIndex`](crate::index::BitIndex)`<usize>` keeps it, in place of
+/// the B-tree of [`LenIndex`]. A column says the same of its values with
+/// either, and saves the same bytes.
+pub struct LenBitIndex;
+
+impl<V: VValue<C>, C: VCodec> VKeeps<V, C> for LenBitIndex {
+    /// Every column, as for [`LenIndex`].
+    open spec fn keeps(vs: Seq<V::S>) -> bool {
+        true
+    }
+}
+
+impl<V: VValue<C>, C: VCodec> Kind<V, C> for LenBitIndex {
+    type W = usize;
+
+    type I = BitIndex<usize>;
+
+    type G = LenModel;
+
+    proof fn lemma_refuses(vs: Seq<Held<V, C>>) {
+    }
+
+    proof fn lemma_kept(s: Seq<Slab<<V::E as Slabs>::Tail>>) {
+    }
+}
+
+impl<V: VValue<C>, C: VCodec> VIndex<V, C> for LenBitIndex {
 
 }
 
