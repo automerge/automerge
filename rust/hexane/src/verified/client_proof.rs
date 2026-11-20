@@ -411,7 +411,7 @@ use super::{
     VIndex, VKeeps, VNewtype, VSpec, VSum, VSummed, VValue, VerifiedAccColumn, VerifiedAccIter,
     VerifiedAccIterState, VerifiedAccSeek, VerifiedAccValue, VerifiedColumn, VerifiedDecoder,
     VerifiedDeltaColumn, VerifiedDeltaDecoder, VerifiedDeltaEncoder, VerifiedDeltaEncoderState,
-    VerifiedDeltaIter, VerifiedDeltaIterState, VerifiedDeltaRuns, VerifiedEncoder,
+    VerifiedDeltaIter, VerifiedDeltaIterState, VerifiedDeltaRuns, VerifiedEdit, VerifiedEncoder,
     VerifiedEncoderState, VerifiedFindByRange, VerifiedIter, VerifiedIterState,
     VerifiedPrefixColumn, VerifiedPrefixIter, VerifiedPrefixIterState, VerifiedPrefixSeek,
     VerifiedPrefixedValue, VerifiedRuns,
@@ -16088,6 +16088,700 @@ fn deltas_streamed_with_bijou64(a: i64, b: i64) -> (r: Vec<i64>)
     let bytes = enc.save();
     let dec = bijou::VerifiedDeltaDecoder::<i64>::new(bytes.as_slice());
     delta_read_all(dec)
+}
+
+// ── The edit cursor ──────────────────────────────────────
+
+/// The steps of a cursor, one after another, do what a splice does: the
+/// values before `at` kept, `del` dropped, `v` put in, the rest kept;
+/// and the column counts one edit more. For every value type, codec and
+/// kind of index.
+#[allow(dead_code)]
+fn edit_like_a_splice<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(
+    col: &mut VerifiedColumn<V, C, K>,
+    at: usize,
+    del: usize,
+    v: Get<'_, V>,
+)
+    requires
+        at <= old(col)@.len(),
+        del <= old(col)@.len() - at,
+    ensures
+        final(col)@ == old(col)@.take(at as int) + seq![v.sv()] + old(col)@.skip(at + del),
+        final(col).edits() == after_edit(old(col).edits()),
+{
+    let mut e = col.edit();
+    e.seek(at).delete(del).insert(v);
+    e.finish();
+    proof {
+        let o = old(col)@;
+        assert(o.subrange(0, at as int).push(v.sv()) + o.skip(at + del) =~= o.take(at as int) + seq![v.sv()] + o.skip(
+            at + del,
+        ));
+    }
+}
+
+/// The example of the module's documentation, proved: the column a
+/// chain of steps leaves.
+#[allow(dead_code)]
+fn edit_as_documented() -> (r: Vec<u64>)
+    ensures
+        r@ == seq![1u64, 9, 4, 7],
+{
+    let mut input: Vec<u64> = Vec::new();
+    input.push(1);
+    input.push(2);
+    input.push(3);
+    input.push(4);
+    input.push(5);
+    let mut col = VerifiedColumn::<u64>::from_values(input.as_slice());
+    assert(col@ =~= seq![1u64, 2, 3, 4, 5]);
+    let mut e = col.edit();
+    e.seek(1).delete(2).insert(9).seek(4).replace_with(7);
+    e.finish();
+    assert(col@ =~= seq![1u64, 9, 4, 7]);
+    col.to_vec()
+}
+
+/// A cursor opened at a place stands there, with the values before it
+/// written; an insertion moves its place in the column being written,
+/// a deletion its place among the original values.
+#[allow(dead_code)]
+fn places_of_a_cursor<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(
+    col: &mut VerifiedColumn<V, C, K>,
+    at: usize,
+    v: Get<'_, V>,
+) -> (r: (usize, usize, usize, usize))
+    requires
+        at < old(col)@.len(),
+    ensures
+        r.0 == at,
+        r.1 == at,
+        r.2 == at + 1,
+        r.3 == at + 2,
+        final(col)@ == old(col)@.take(at as int) + seq![v.sv(), v.sv()] + old(col)@.skip(at + 1),
+{
+    let mut e = col.edit_at(at);
+    let p0 = e.pos();
+    let q0 = e.out_pos();
+    e.insert_run(v, 2).delete(1);
+    let p1 = e.pos();
+    let q1 = e.out_pos();
+    e.finish();
+    proof {
+        let o = old(col)@;
+        assert(o.take(at as int) + Seq::new(2, |_i: int| v.sv()) =~= o.take(at as int) + seq![v.sv(), v.sv()]);
+    }
+    (p0, q0, p1, q1)
+}
+
+/// Two values put in at two places by one cursor, in one pass: the
+/// column counts one edit, where two splices count two.
+#[allow(dead_code)]
+fn two_places_one_edit<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(
+    col: &mut VerifiedColumn<V, C, K>,
+    a: usize,
+    b: usize,
+    x: Get<'_, V>,
+    y: Get<'_, V>,
+)
+    requires
+        a <= b <= old(col)@.len(),
+    ensures
+        final(col)@ == old(col)@.take(a as int) + seq![x.sv()] + old(col)@.subrange(a as int, b as int) + seq![y.sv()]
+            + old(col)@.skip(b as int),
+        final(col).edits() == after_edit(old(col).edits()),
+{
+    let mut e = col.edit();
+    e.seek(a).insert(x).seek(b).insert(y);
+    e.finish();
+    proof {
+        let o = old(col)@;
+        assert((o.subrange(0, a as int).push(x.sv()) + o.subrange(a as int, b as int)).push(y.sv()) + o.skip(b as int)
+            =~= o.take(a as int) + seq![x.sv()] + o.subrange(a as int, b as int) + seq![y.sv()] + o.skip(b as int));
+    }
+}
+
+/// A cursor that only passes over values gives the column it was
+/// opened on, and the column counts no edit.
+#[allow(dead_code)]
+fn only_passed_over<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(
+    col: &mut VerifiedColumn<V, C, K>,
+    a: usize,
+    b: usize,
+    n: usize,
+)
+    requires
+        a <= b,
+    ensures
+        final(col)@ == old(col)@,
+        final(col).edits() == old(col).edits(),
+{
+    let mut e = col.edit();
+    e.seek(a).seek(b).advance(n);
+    let ghost (w, at) = (e.written(), e.at());
+    e.finish();
+    proof {
+        let o = old(col)@;
+        assert(w =~= o.take(at));
+        assert(o.take(at) + o.skip(at) =~= o);
+    }
+}
+
+/// A seek past the end stands at the end, where an insertion is a push.
+#[allow(dead_code)]
+fn pushed_by_a_cursor<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &mut VerifiedColumn<V, C, K>, v: Get<'_, V>)
+    ensures
+        final(col)@ == old(col)@.push(v.sv()),
+        final(col).edits() == after_edit(old(col).edits()),
+{
+    let mut e = col.edit();
+    proof {
+        e.lemma_at();
+    }
+    e.seek(usize::MAX).insert(v);
+    e.finish();
+    proof {
+        let o = old(col)@;
+        assert(o.subrange(0, o.len() as int).push(v.sv()) + o.skip(o.len() as int) =~= o.push(v.sv()));
+    }
+}
+
+/// A deletion of more values than are left drops those that are: the
+/// column cut short at `at`, and an edit counted only if a value went.
+#[allow(dead_code)]
+fn cut_short<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &mut VerifiedColumn<V, C, K>, at: usize)
+    ensures
+        final(col)@ == if at <= old(col)@.len() {
+            old(col)@.take(at as int)
+        } else {
+            old(col)@
+        },
+        final(col).edits() == if at < old(col)@.len() {
+            after_edit(old(col).edits())
+        } else {
+            old(col).edits()
+        },
+{
+    let mut e = col.edit();
+    proof {
+        e.lemma_at();
+    }
+    e.seek(at).delete(usize::MAX);
+    e.finish();
+    proof {
+        let o = old(col)@;
+        if at <= o.len() {
+            assert(o.subrange(0, at as int) + o.skip(o.len() as int) =~= o.take(at as int));
+        } else {
+            assert(o.subrange(0, o.len() as int) + o.skip(o.len() as int) =~= o);
+        }
+    }
+}
+
+/// Runs put in by a cursor: `n` copies of a value, none where `n` is 0,
+/// and then the runs an iterator gives, a run of count 0 being no
+/// value.
+#[allow(dead_code)]
+fn runs_by_a_cursor<'v, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(
+    col: &mut VerifiedColumn<V, C, K>,
+    at: usize,
+    a: Get<'v, V>,
+    b: Get<'v, V>,
+    n: usize,
+)
+    requires
+        at <= old(col)@.len(),
+    ensures
+        final(col)@ == old(col)@.take(at as int) + Seq::new(n as nat, |_i: int| a.sv()) + seq![b.sv(), b.sv(), a.sv()]
+            + old(col)@.skip(at as int),
+        final(col).edits() == after_edit(old(col).edits()),
+{
+    let mut runs: Vec<Run<Get<'v, V>>> = Vec::new();
+    runs.push(Run { count: 2, value: b });
+    runs.push(Run { count: 0, value: a });
+    runs.push(Run { count: 1, value: a });
+    let ghost rs = runs@;
+    proof {
+        let none = Seq::<Run<Get<'v, V>>>::empty();
+        lemma_run_values_push(none, rs[0]);
+        lemma_run_values_push(none.push(rs[0]), rs[1]);
+        lemma_run_values_push(none.push(rs[0]).push(rs[1]), rs[2]);
+        assert(rs =~= none.push(rs[0]).push(rs[1]).push(rs[2]));
+        assert(run_values(rs) =~= seq![b.sv(), b.sv(), a.sv()]);
+    }
+    let mut e = col.edit_at(at);
+    e.insert_run(a, n).insert_runs(runs);
+    e.finish();
+}
+
+/// A caller's runs, whatever they are and from any iterator that keeps
+/// the laws of iterators, put in by a cursor: the column holds their
+/// values there, and counts an edit if they have a value.
+#[allow(dead_code)]
+fn any_runs_by_a_cursor<'v, V: VValue<C>, C: VCodec, K: VIndex<V, C>, I: Iterator<Item = Run<Get<'v, V>>>>(
+    col: &mut VerifiedColumn<V, C, K>,
+    at: usize,
+    runs: I,
+)
+    requires
+        at <= old(col)@.len(),
+        runs.obeys_prophetic_iter_laws(),
+    ensures
+        final(col)@ == old(col)@.take(at as int) + run_values(runs.remaining()) + old(col)@.skip(at as int),
+        final(col).edits() == if run_values(runs.remaining()).len() > 0 {
+            after_edit(old(col).edits())
+        } else {
+            old(col).edits()
+        },
+{
+    let mut e = col.edit_at(at);
+    e.insert_runs(runs);
+    e.finish();
+}
+
+/// The value a cursor stands at, compared with a caller's: the cursor
+/// only looks, so the column is as it was and counts no edit. For
+/// every value type.
+#[allow(dead_code)]
+fn is_it_there<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &mut VerifiedColumn<V, C, K>, at: usize, v: Get<'_, V>) -> (r:
+    bool)
+    requires
+        at <= old(col)@.len(),
+    ensures
+        r == (at < old(col)@.len() && old(col)@[at as int] == v.sv()),
+        final(col)@ == old(col)@,
+        final(col).edits() == old(col).edits(),
+{
+    let mut e = col.edit_at(at);
+    let r = match e.peek() {
+        Some(g) => V::same(g, v),
+        None => false,
+    };
+    e.finish();
+    proof {
+        let o = old(col)@;
+        assert(o.take(at as int) + o.skip(at as int) =~= o);
+    }
+    r
+}
+
+/// A byte string a cursor stands at is the slab's own bytes, lent: here
+/// they are copied out before the cursor goes on, and the byte string
+/// is then deleted.
+#[allow(dead_code)]
+fn bytes_taken_out(col: &mut VerifiedColumn<Vec<u8>>, at: usize) -> (r: Option<Vec<u8>>)
+    requires
+        at <= old(col)@.len(),
+    ensures
+        match r {
+            Some(b) => at < old(col)@.len() && b@ == old(col)@[at as int] && final(col)@ == old(col)@.remove(at as int),
+            None => at == old(col)@.len() && final(col)@ == old(col)@,
+        },
+{
+    let mut e = col.edit_at(at);
+    let r = match e.peek() {
+        Some(g) => Some(slice_to_vec(g)),
+        None => None,
+    };
+    e.delete(1);
+    e.finish();
+    proof {
+        let o = old(col)@;
+        if at < o.len() {
+            assert(o.take(at as int) + o.skip(at + 1) =~= o.remove(at as int));
+        } else {
+            assert(o.take(at as int) + o.skip(at as int) =~= o);
+        }
+    }
+    r
+}
+
+/// A flag a cursor stands at, turned over.
+#[allow(dead_code)]
+fn flag_turned(col: &mut VerifiedColumn<bool>, at: usize)
+    requires
+        at < old(col)@.len(),
+    ensures
+        final(col)@ == old(col)@.update(at as int, !old(col)@[at as int]),
+        final(col).edits() == after_edit(old(col).edits()),
+{
+    let mut e = col.edit_at(at);
+    match e.peek() {
+        Some(f) => {
+            e.replace_with(!f);
+        },
+        None => {},
+    }
+    e.finish();
+    proof {
+        let o = old(col)@;
+        assert(o.take(at as int).push(!o[at as int]) + o.skip(at + 1) =~= o.update(at as int, !o[at as int]));
+    }
+}
+
+/// A value put in the place of another; where it is the value that was
+/// there, the column counts no edit.
+#[allow(dead_code)]
+fn put_in_its_place<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &mut VerifiedColumn<V, C, K>, at: usize, v: Get<'_, V>)
+    requires
+        at < old(col)@.len(),
+    ensures
+        final(col)@ == old(col)@.update(at as int, v.sv()),
+        final(col).edits() == if old(col)@[at as int] == v.sv() {
+            old(col).edits()
+        } else {
+            after_edit(old(col).edits())
+        },
+{
+    let mut e = col.edit_at(at);
+    e.replace_with(v);
+    e.finish();
+    proof {
+        let o = old(col)@;
+        assert(o.take(at as int).push(v.sv()) + o.skip(at + 1) =~= o.update(at as int, v.sv()));
+    }
+}
+
+/// A cursor walked over a whole column in a loop, each number looked at
+/// and made one more: one pass, and one edit counted.
+#[allow(dead_code)]
+fn each_one_more(col: &mut VerifiedColumn<u64>)
+    requires
+        forall|i: int| 0 <= i < old(col)@.len() ==> old(col)@[i] < u64::MAX,
+    ensures
+        final(col)@.len() == old(col)@.len(),
+        forall|i: int| 0 <= i < old(col)@.len() ==> final(col)@[i] == old(col)@[i] + 1,
+{
+    let ghost o = col@;
+    let mut e = col.edit();
+    // the column the cursor will give: said once, before the loop
+    let ghost given = e.result();
+    proof {
+        e.lemma_at();
+    }
+    loop
+        invariant
+            e.wf(),
+            e.orig() == o,
+            e.result() == given,
+            0 <= e.at() <= o.len(),
+            e.written().len() == e.at(),
+            forall|i: int| 0 <= i < e.at() ==> e.written()[i] == o[i] + 1,
+            forall|i: int| 0 <= i < o.len() ==> o[i] < u64::MAX,
+        ensures
+            e.at() == o.len(),
+        decreases o.len() - e.at(),
+    {
+        match e.peek() {
+            None => {
+                break ;
+            },
+            Some(x) => {
+                e.replace_with(x + 1);
+            },
+        }
+    }
+    e.finish();
+}
+
+/// Numbers that may be absent, walked over in a loop: the absent ones
+/// dropped, the others kept. The column that is left has no absent
+/// one, and is no longer than it was.
+#[allow(dead_code)]
+fn absent_ones_dropped(col: &mut VerifiedColumn<Option<u64>>)
+    ensures
+        final(col)@.len() <= old(col)@.len(),
+        forall|i: int| 0 <= i < final(col)@.len() ==> (#[trigger] final(col)@[i]) is Some,
+{
+    let ghost o = col@;
+    let mut e = col.edit();
+    // the column the cursor will give: said once, before the loop
+    let ghost given = e.result();
+    proof {
+        e.lemma_at();
+    }
+    loop
+        invariant
+            e.wf(),
+            e.orig() == o,
+            e.result() == given,
+            0 <= e.at() <= o.len(),
+            e.written().len() <= e.at(),
+            forall|i: int| 0 <= i < e.written().len() ==> (#[trigger] e.written()[i]) is Some,
+        ensures
+            e.at() == o.len(),
+        decreases o.len() - e.at(),
+    {
+        match e.peek() {
+            None => {
+                break ;
+            },
+            Some(None) => {
+                e.delete(1);
+            },
+            Some(Some(_x)) => {
+                e.advance(1);
+            },
+        }
+    }
+    e.finish();
+}
+
+/// A column kept with its sums, edited by a cursor: it is still a
+/// column whose sums fit, as every column of its kind is.
+#[allow(dead_code)]
+fn sums_after_a_cursor(col: &mut VerifiedPrefixColumn<u64>, at: usize, v: u64)
+    requires
+        at <= old(col)@.len(),
+    ensures
+        final(col)@ == old(col)@.take(at as int) + seq![v] + old(col)@.skip(at as int),
+        sums_fit::<u64>(final(col)@),
+{
+    let mut e = col.edit_at(at);
+    e.insert(v);
+    e.finish();
+    proof {
+        let o = old(col)@;
+        assert(o.take(at as int).push(v) + o.skip(at as int) =~= o.take(at as int) + seq![v] + o.skip(at as int));
+        col.lemma_kept();
+    }
+}
+
+/// What each step of a cursor says, asked for on its own. A cursor
+/// opened: at the front, nothing written, nothing changed.
+#[allow(dead_code)]
+fn told_by_an_edit<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &mut VerifiedColumn<V, C, K>) -> (e: VerifiedEdit<
+    '_,
+    V,
+    C,
+    K,
+>)
+    ensures
+        e.wf(),
+        e.orig() == old(col)@,
+        e.at() == 0,
+        e.written() == Seq::<V::S>::empty(),
+        !e.changed(),
+        e.began() == old(col).edits(),
+        e.result() == *final(col),
+{
+    col.edit()
+}
+
+/// A cursor opened at a place: the values before it written.
+#[allow(dead_code)]
+fn told_by_an_edit_at<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &mut VerifiedColumn<V, C, K>, at: usize) -> (e:
+    VerifiedEdit<'_, V, C, K>)
+    requires
+        at <= old(col)@.len(),
+    ensures
+        e.wf(),
+        e.orig() == old(col)@,
+        e.at() == at,
+        e.written() == old(col)@.take(at as int),
+        !e.changed(),
+        e.began() == old(col).edits(),
+        e.result() == *final(col),
+{
+    col.edit_at(at)
+}
+
+/// A cursor is among its original values, and says where it is.
+#[allow(dead_code)]
+fn told_by_a_cursors_places<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(e: &VerifiedEdit<'_, V, C, K>) -> (r: (usize, usize))
+    requires
+        e.wf(),
+    ensures
+        r.0 == e.at(),
+        r.1 == e.written().len(),
+        0 <= e.at() <= e.orig().len(),
+        e.now() == e.written() + e.orig().skip(e.at()),
+{
+    proof {
+        e.lemma_at();
+    }
+    (e.pos(), e.out_pos())
+}
+
+/// Values passed over are written as they are.
+#[allow(dead_code)]
+fn told_by_a_cursors_advance<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(e: &mut VerifiedEdit<'_, V, C, K>, n: usize)
+    requires
+        old(e).wf(),
+    ensures
+        final(e).kept(*old(e)),
+        final(e).at() == old(e).at() + old(e).step(n),
+        final(e).written() == old(e).written() + old(e).orig().subrange(old(e).at(), old(e).at() + old(e).step(n)),
+        final(e).changed() == old(e).changed(),
+        old(e).step(n) == if n <= old(e).orig().len() - old(e).at() {
+            n as int
+        } else {
+            old(e).orig().len() - old(e).at()
+        },
+{
+    e.advance(n);
+}
+
+/// A seek goes to its place, or to the end where the place is past it.
+#[allow(dead_code)]
+fn told_by_a_cursors_seek<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(e: &mut VerifiedEdit<'_, V, C, K>, to: usize)
+    requires
+        old(e).wf(),
+        old(e).at() <= to,
+    ensures
+        final(e).kept(*old(e)),
+        final(e).at() == if to <= old(e).orig().len() {
+            to as int
+        } else {
+            old(e).orig().len() as int
+        },
+        final(e).written() == old(e).written() + old(e).orig().subrange(old(e).at(), final(e).at()),
+        final(e).changed() == old(e).changed(),
+{
+    e.seek(to);
+}
+
+/// A value put in is written, and the cursor stays where it is.
+#[allow(dead_code)]
+fn told_by_a_cursors_insert<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(e: &mut VerifiedEdit<'_, V, C, K>, v: Get<'_, V>)
+    requires
+        old(e).wf(),
+    ensures
+        final(e).kept(*old(e)),
+        final(e).at() == old(e).at(),
+        final(e).written() == old(e).written().push(v.sv()),
+        final(e).changed(),
+{
+    e.insert(v);
+}
+
+/// A run put in is written whole; a run of no value changes nothing.
+#[allow(dead_code)]
+fn told_by_a_cursors_insert_run<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(e: &mut VerifiedEdit<'_, V, C, K>, v: Get<'_, V>, n: usize)
+    requires
+        old(e).wf(),
+    ensures
+        final(e).kept(*old(e)),
+        final(e).at() == old(e).at(),
+        final(e).written() == old(e).written() + Seq::new(n as nat, |_i: int| v.sv()),
+        final(e).changed() == (old(e).changed() || n > 0),
+{
+    e.insert_run(v, n);
+}
+
+/// Runs put in are written one after another, and change the column if
+/// they have a value.
+#[allow(dead_code)]
+fn told_by_a_cursors_insert_runs<'v, V: VValue<C>, C: VCodec, K: VIndex<V, C>, I: Iterator<Item = Run<Get<'v, V>>>>(
+    e: &mut VerifiedEdit<'_, V, C, K>,
+    runs: I,
+)
+    requires
+        old(e).wf(),
+        runs.obeys_prophetic_iter_laws(),
+    ensures
+        final(e).kept(*old(e)),
+        final(e).at() == old(e).at(),
+        final(e).written() == old(e).written() + run_values(runs.remaining()),
+        final(e).changed() == (old(e).changed() || run_values(runs.remaining()).len() > 0),
+{
+    e.insert_runs(runs);
+}
+
+/// A look at the value the cursor stands at leaves the cursor as it
+/// was.
+#[allow(dead_code)]
+fn told_by_a_cursors_peek<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(e: &mut VerifiedEdit<'_, V, C, K>, v: Get<'_, V>) -> (r: Option<
+    bool,
+>)
+    requires
+        old(e).wf(),
+    ensures
+        final(e).unmoved(*old(e)),
+        final(e).kept(*old(e)),
+        final(e).at() == old(e).at(),
+        final(e).written() == old(e).written(),
+        final(e).changed() == old(e).changed(),
+        match r {
+            Some(same) => old(e).at() < old(e).orig().len() && same == (old(e).orig()[old(e).at()] == v.sv()),
+            None => old(e).at() == old(e).orig().len(),
+        },
+{
+    match e.peek() {
+        Some(g) => Some(V::same(g, v)),
+        None => None,
+    }
+}
+
+/// A value put in another's place: the cursor passes over the place,
+/// and has changed the column unless the value was there. At the end
+/// there is no place, and nothing is done.
+#[allow(dead_code)]
+fn told_by_a_cursors_replace_with<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(e: &mut VerifiedEdit<'_, V, C, K>, v: Get<'_, V>)
+    requires
+        old(e).wf(),
+    ensures
+        final(e).kept(*old(e)),
+        if old(e).at() < old(e).orig().len() {
+            &&& final(e).at() == old(e).at() + 1
+            &&& final(e).written() == old(e).written().push(v.sv())
+            &&& final(e).changed() == (old(e).changed() || old(e).orig()[old(e).at()] != v.sv())
+        } else {
+            &&& final(e).at() == old(e).at()
+            &&& final(e).written() == old(e).written()
+            &&& final(e).changed() == old(e).changed()
+        },
+{
+    e.replace_with(v);
+}
+
+/// Values dropped are passed over and not written; the cursor has
+/// changed the column if there was one to drop.
+#[allow(dead_code)]
+fn told_by_a_cursors_delete<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(e: &mut VerifiedEdit<'_, V, C, K>, n: usize)
+    requires
+        old(e).wf(),
+    ensures
+        final(e).kept(*old(e)),
+        final(e).at() == old(e).at() + old(e).step(n),
+        final(e).written() == old(e).written(),
+        final(e).changed() == (old(e).changed() || old(e).step(n) > 0),
+{
+    e.delete(n);
+}
+
+/// What every step keeps: the cursor's original values, the count it
+/// began with, and the column it will give.
+#[allow(dead_code)]
+fn told_what_a_step_keeps<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(e: &mut VerifiedEdit<'_, V, C, K>, n: usize, v: Get<'_, V>)
+    requires
+        old(e).wf(),
+    ensures
+        final(e).wf(),
+        final(e).orig() == old(e).orig(),
+        final(e).began() == old(e).began(),
+        final(e).result() == old(e).result(),
+{
+    e.advance(n).insert(v).delete(n).insert_run(v, n).replace_with(v);
+}
+
+/// The end of an edit: the column holds what is written and then the
+/// rest of the original values, and counts an edit if a step changed
+/// it.
+#[allow(dead_code)]
+fn told_by_a_cursors_finish<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(e: VerifiedEdit<'_, V, C, K>)
+    requires
+        e.wf(),
+    ensures
+        e.result()@ == e.written() + e.orig().skip(e.at()),
+        e.result().edits() == if e.changed() {
+            after_edit(e.began())
+        } else {
+            e.began()
+        },
+{
+    e.finish();
 }
 
 } // verus!

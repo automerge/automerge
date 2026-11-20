@@ -24,6 +24,14 @@
 //! column's values one after another from its bytes, with no column in
 //! between either.
 //!
+//! [`VerifiedEdit`] is a cursor that edits a column in one pass from
+//! front to back ([`edit`](VerifiedColumn::edit),
+//! [`edit_at`](VerifiedColumn::edit_at)): it passes over values, puts
+//! values in and takes values out where it stands, and gives the
+//! column its values when it is finished
+//! ([`finish`](VerifiedEdit::finish)), as it must be. It edits a
+//! column of any kind of index.
+//!
 //! # Value types
 //!
 //! A `VerifiedColumn<V>` holds values of a type `V` that is a
@@ -361,7 +369,18 @@
 //!   [`scan_for`](VerifiedDecoder::scan_for) passes the runs that come
 //!   before a target and says how many values those were and how many
 //!   of the target follow (`scan_of`), and how far it has moved
-//!   (`scan_taken`).
+//!   (`scan_taken`);
+//! * a [`VerifiedEdit`] is specified by the values of the column it
+//!   was opened on (`orig()`), where it stands among them (`at()`) and
+//!   the values it has written (`written()`): each step says what it
+//!   adds to those written and how far it goes on, and
+//!   [`finish`](VerifiedEdit::finish) gives the column the values
+//!   written and then the original ones from where the cursor stands
+//!   (`now()`). A cursor asks of its client what an encoder does:
+//!   every method requires `wf()`, which opening it gives and every
+//!   step keeps. A seek goes forward only, which it requires; and a
+//!   cursor that is not finished leaves its column without its values,
+//!   as a panic in the middle of an edit does.
 //!
 //! `valid`, `values`, `encoding` and `loadable` are specification
 //! functions of a column type (`VerifiedColumn::<V>::valid(bytes)`),
@@ -423,7 +442,10 @@
 //! what the column counts after it: one more (`after_edit`) where the
 //! call was an edit, and what it counted before where it was none. A
 //! call is an edit if it deletes a value or inserts one, a value put in
-//! the place of its equal too, and a `remap` is one always. The count is
+//! the place of its equal too, and a `remap` is one always. A cursor is
+//! one edit, counted when it is finished, if a step of it deleted a
+//! value or inserted one; a value it replaced with its equal
+//! ([`replace_with`](VerifiedEdit::replace_with)) is none. The count is
 //! a `usize` that wraps around, as `Column`'s is: after one edit or
 //! more, and no more of them than `usize::MAX`, it is not what it was
 //! (`lemma_after_edits`), so a state taken before them is refused. The
@@ -564,6 +586,7 @@ pub(crate) mod codec;
 pub(crate) mod counts;
 mod decoder;
 mod delta;
+mod edit;
 mod encoder;
 pub(crate) mod kind;
 pub mod leb128;
@@ -606,6 +629,7 @@ pub use delta::{
     VerifiedDeltaEncoder, VerifiedDeltaEncoderState, VerifiedDeltaIter, VerifiedDeltaIterState,
     VerifiedDeltaRuns, VerifiedFindByRange,
 };
+pub use edit::VerifiedEdit;
 pub use encoder::{VerifiedEncoder, VerifiedEncoderState};
 pub use kind::{LenIndex, VIndex, VKeeps};
 pub use prefix::{SumIndex, VerifiedPrefixColumn};

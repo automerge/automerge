@@ -16108,3 +16108,547 @@ mod bijou {
         }
     }
 }
+
+// ── The edit cursor ──────────────────────────────────────────
+
+/// One step of an edit cursor.
+#[derive(Clone, Debug)]
+enum Stroke<T> {
+    Advance(usize),
+    /// to a place at or after the cursor's
+    Seek(usize),
+    Insert(T),
+    InsertRun(T, usize),
+    InsertRuns(Vec<(usize, T)>),
+    Replace(T),
+    Delete(usize),
+}
+
+/// What the steps of a cursor make of a column, told by lists: the values
+/// the column began with, the cursor's place among them, and the values
+/// written so far.
+struct Told<T> {
+    orig: Vec<T>,
+    at: usize,
+    out: Vec<T>,
+    changed: bool,
+}
+
+impl<T: Kind> Told<T> {
+    fn new(orig: &[T], at: usize) -> Self {
+        Told {
+            orig: orig.to_vec(),
+            at,
+            out: orig[..at].to_vec(),
+            changed: false,
+        }
+    }
+
+    fn left(&self) -> usize {
+        self.orig.len() - self.at
+    }
+
+    fn keep(&mut self, n: usize) {
+        let k = n.min(self.left());
+        self.out.extend_from_slice(&self.orig[self.at..self.at + k]);
+        self.at += k;
+    }
+
+    fn step(&mut self, m: &Stroke<T>) {
+        match m {
+            Stroke::Advance(n) => self.keep(*n),
+            Stroke::Seek(to) => self.keep(*to - self.at),
+            Stroke::Insert(x) => {
+                self.out.push(x.clone());
+                self.changed = true;
+            }
+            Stroke::InsertRun(x, n) => {
+                self.out.extend(std::iter::repeat_n(x, *n).cloned());
+                self.changed |= *n > 0;
+            }
+            Stroke::InsertRuns(runs) => {
+                let values = run_model(runs);
+                self.changed |= !values.is_empty();
+                self.out.extend(values);
+            }
+            Stroke::Replace(x) => {
+                if self.left() > 0 {
+                    self.changed |= self.orig[self.at] != *x;
+                    self.out.push(x.clone());
+                    self.at += 1;
+                }
+            }
+            Stroke::Delete(n) => {
+                let k = (*n).min(self.left());
+                self.changed |= k > 0;
+                self.at += k;
+            }
+        }
+    }
+
+    fn peek(&self) -> Option<&T> {
+        self.orig.get(self.at)
+    }
+
+    /// The column, were the edit finished now.
+    fn done(mut self) -> Vec<T> {
+        let rest = self.orig.split_off(self.at);
+        self.out.extend(rest);
+        self.out
+    }
+}
+
+/// Steps for a cursor at `at` of `model`: most within the values left,
+/// some of none, some to the end, and some past it, where a cursor stops.
+fn some_moves<T: Kind>(rng: &mut Rng, model: &[T], at: usize) -> Vec<Stroke<T>> {
+    let mut at = at;
+    let mut moves = vec![];
+    for _ in 0..rng.below(9) {
+        let left = model.len() - at;
+        let count = match rng.below(12) {
+            0 => 0,
+            1 => left,
+            2 => left + 1 + rng.below(3),
+            3 => usize::MAX,
+            _ => rng.below(left.min(30) + 1),
+        };
+        let x = match model.get(at) {
+            Some(x) => rng.value(x),
+            None => T::fresh(rng),
+        };
+        let m = match rng.below(13) {
+            0 | 1 => Stroke::Advance(count),
+            2 | 3 => Stroke::Seek(at.saturating_add(count)),
+            4 | 5 => Stroke::Insert(x),
+            6 => Stroke::InsertRun(x, [0, 1, 2, 9, 70][rng.below(5)]),
+            7 => Stroke::InsertRuns(some_runs(rng, 4)),
+            8 | 9 => Stroke::Replace(x),
+            // the value that is there, which is no change
+            10 => Stroke::Replace(model.get(at).cloned().unwrap_or(x)),
+            _ => Stroke::Delete(count),
+        };
+        at = match &m {
+            Stroke::Advance(n) | Stroke::Delete(n) => at + (*n).min(left),
+            Stroke::Seek(to) => (*to).min(model.len()),
+            Stroke::Replace(_) => at + left.min(1),
+            _ => at,
+        };
+        moves.push(m);
+    }
+    moves
+}
+
+/// Where a cursor of a column of `len` values is opened: often at an end.
+fn some_place(rng: &mut Rng, len: usize) -> usize {
+    match rng.below(5) {
+        0 => 0,
+        1 => len,
+        _ => rng.below(len + 1),
+    }
+}
+
+/// A step of a cursor of the verified API.
+macro_rules! new_move {
+    ($e:expr, $m:expr) => {
+        match $m {
+            Stroke::Advance(n) => {
+                $e.advance(*n);
+            }
+            Stroke::Seek(to) => {
+                $e.seek(*to);
+            }
+            Stroke::Insert(x) => {
+                $e.insert(x.lend());
+            }
+            Stroke::InsertRun(x, n) => {
+                $e.insert_run(x.lend(), *n);
+            }
+            Stroke::InsertRuns(runs) => {
+                $e.insert_runs(runs.iter().map(|(n, x)| Run {
+                    count: *n,
+                    value: x.lend(),
+                }));
+            }
+            Stroke::Replace(x) => {
+                $e.replace_with(x.lend());
+            }
+            Stroke::Delete(n) => {
+                $e.delete(*n);
+            }
+        }
+    };
+}
+
+/// The same step of a cursor of the old API, whose `replace` takes a
+/// function of the value that is there.
+macro_rules! old_move {
+    ($e:expr, $m:expr) => {
+        match $m {
+            Stroke::Advance(n) => {
+                $e.advance(*n);
+            }
+            Stroke::Seek(to) => {
+                $e.seek(*to);
+            }
+            Stroke::Insert(x) => {
+                $e.insert(x.clone());
+            }
+            Stroke::InsertRun(x, n) => {
+                $e.insert_run(x.clone(), *n);
+            }
+            Stroke::InsertRuns(runs) => {
+                $e.insert_runs(runs.iter().map(|(n, x)| Run {
+                    count: *n,
+                    value: x.clone(),
+                }));
+            }
+            Stroke::Replace(x) => {
+                $e.replace(|_| x.clone());
+            }
+            Stroke::Delete(n) => {
+                $e.delete(*n);
+            }
+        }
+    };
+}
+
+fn cursors<T: Kind>() {
+    for seed in 1..=8u64 {
+        let mut rng = Rng(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) ^ 0xed17);
+        let budget = [2, 3, 4, 8, 64][rng.below(5)];
+        let mut model: Vec<T> = rng.values(200);
+        let (mut v, mut c) = both_with(&model, budget);
+        for round in 0..40 {
+            let at = some_place(&mut rng, model.len());
+            let moves = some_moves(&mut rng, &model, at);
+            let mut told = Told::new(&model, at);
+            let (s, t) = (v.iter().suspend(), c.iter().suspend());
+            // `edit` is `edit_at(0)`
+            let first = at == 0 && round % 2 == 0;
+            let mut e = if first { v.edit() } else { v.edit_at(at) };
+            let mut o = if first { c.edit() } else { c.edit_at(at) };
+            assert_eq!((e.pos(), e.out_pos()), (at, at));
+            assert_eq!((o.pos(), o.out_pos()), (at, at));
+            for m in &moves {
+                new_move!(e, m);
+                old_move!(o, m);
+                told.step(m);
+                let place = (told.at, told.out.len());
+                assert_eq!((e.pos(), e.out_pos()), place, "{m:?}");
+                assert_eq!((o.pos(), o.out_pos()), place, "{m:?}");
+                assert_eq!(e.rebuilds(), o.rebuilds(), "{m:?}");
+                if rng.below(3) == 0 {
+                    // a look at the value there, which moves nothing
+                    assert_eq!(e.peek().map(T::keep).as_ref(), told.peek(), "{m:?}");
+                    assert_eq!(o.peek().map(old::<T>).as_ref(), told.peek(), "{m:?}");
+                    assert_eq!((e.pos(), e.out_pos()), place, "{m:?}");
+                    assert_eq!(e.rebuilds(), o.rebuilds(), "{m:?}");
+                }
+            }
+            e.finish();
+            // the old cursor is finished by the call or when it is dropped
+            if round % 3 == 0 {
+                o.finish();
+            }
+            drop(o);
+            let changed = told.changed;
+            model = told.done();
+            check(&v, &c, &model);
+            // an edit is counted exactly where a step put a value in or
+            // took one out: an iterator's state taken before resumes
+            // exactly where none did
+            assert_eq!(s.try_resume(&v).is_ok(), !changed, "{moves:?}");
+            assert_eq!(t.try_resume(&c).is_ok(), !changed, "{moves:?}");
+            if round % 10 == 9 {
+                check_loads(&v, &c, &model);
+            }
+        }
+        check_loads(&v, &c, &model);
+    }
+}
+
+/// An edit cursor of the verified API (`VerifiedEdit`) does what
+/// `Column`'s does: under the same steps both stand at the same places,
+/// see the same values, rebuild as many slabs, and leave the same values
+/// in the same slabs, whose bytes are the same. The places and the values
+/// are what the steps make of a list. And the column counts an edit
+/// exactly where a step changed it.
+#[test]
+fn a_cursor_edits_as_the_old_one_does() {
+    for_each_kind!(cursors);
+}
+
+fn sum_cursors<T: Totalled>() {
+    for seed in 1..=6u64 {
+        let mut rng = Rng(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) ^ 0xed18);
+        let budget = [2, 3, 4, 8, 64][rng.below(5)];
+        let mut p = VerifiedPrefixColumn::<T>::with_max_segments(budget);
+        let mut v = VerifiedColumn::<T>::with_max_segments(budget);
+        let mut c = PrefixColumn::<T>::with_max_segments(budget);
+        let mut model: Vec<T> = rng.values(200);
+        p.splice(0, 0, &lent(&model));
+        v.splice(0, 0, &lent(&model));
+        c.splice(0, 0, model.iter().cloned());
+        for round in 0..30 {
+            let at = some_place(&mut rng, model.len());
+            let moves = some_moves(&mut rng, &model, at);
+            let mut told = Told::new(&model, at);
+            let (mut e, mut f, mut o) = (p.edit_at(at), v.edit_at(at), c.edit_at(at));
+            for m in &moves {
+                new_move!(e, m);
+                new_move!(f, m);
+                old_move!(o, m);
+                told.step(m);
+                let place = (told.at, told.out.len());
+                assert_eq!((e.pos(), e.out_pos()), place, "{m:?}");
+                assert_eq!((f.pos(), f.out_pos()), place, "{m:?}");
+                assert_eq!((o.pos(), o.out_pos()), place, "{m:?}");
+                assert_eq!((e.rebuilds(), f.rebuilds()), (o.rebuilds(), o.rebuilds()));
+                assert_eq!(e.peek().map(T::keep).as_ref(), told.peek(), "{m:?}");
+            }
+            e.finish();
+            f.finish();
+            drop(o);
+            model = told.done();
+            check_sums(&p, &v, &c, &model, true);
+            check_sum_reads(&mut rng, &p, &v, &model);
+            check_prefix_reads(&mut rng, &p, &c, &model);
+            if round % 10 == 9 {
+                check_sum_loads(&p, &c, &model);
+            }
+        }
+        check_sum_loads(&p, &c, &model);
+    }
+}
+
+/// A cursor edits a prefix column as it edits a plain one, and as
+/// `PrefixColumn`'s cursor does: the same values in the same slabs, and
+/// an index that answers with the sums of the values as they are after
+/// the edit.
+#[test]
+fn a_cursor_of_a_prefix_column() {
+    for_each_sum!(sum_cursors);
+}
+
+fn acc_cursors<T: Accd>() {
+    for seed in 1..=6u64 {
+        let mut rng = Rng(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) ^ 0xed19);
+        let budget = [2, 3, 4, 8, 64][rng.below(5)];
+        let mut p = VerifiedAccColumn::<T>::with_max_segments(budget);
+        let mut v = VerifiedColumn::<T>::with_max_segments(budget);
+        let mut model: Vec<T> = rng.values(200);
+        p.splice(0, 0, &lent(&model));
+        v.splice(0, 0, &lent(&model));
+        for round in 0..30 {
+            let at = some_place(&mut rng, model.len());
+            let moves = some_moves(&mut rng, &model, at);
+            let mut told = Told::new(&model, at);
+            let (mut e, mut f) = (p.edit_at(at), v.edit_at(at));
+            for m in &moves {
+                new_move!(e, m);
+                new_move!(f, m);
+                told.step(m);
+                let place = (told.at, told.out.len());
+                assert_eq!((e.pos(), e.out_pos()), place, "{m:?}");
+                assert_eq!((f.pos(), f.out_pos()), place, "{m:?}");
+                assert_eq!(e.rebuilds(), f.rebuilds(), "{m:?}");
+                assert_eq!(e.peek().map(T::keep).as_ref(), told.peek(), "{m:?}");
+            }
+            e.finish();
+            f.finish();
+            model = told.done();
+            check_acc(&p, &v, &model, true);
+            check_acc_reads(&mut rng, &p, &model);
+            check_acc_plain_reads(&mut rng, &p, &v, &model);
+            T::check_old(&mut rng, &p, &model);
+            if round % 10 == 9 {
+                check_acc_loads(&mut rng, &p, &model);
+            }
+        }
+        check_acc_loads(&mut rng, &p, &model);
+    }
+}
+
+/// A cursor edits an accumulator column as it edits a plain one: the
+/// same values in the same slabs, and an index that answers with what
+/// the values add up to as they are after the edit.
+#[test]
+fn a_cursor_of_an_accumulator_column() {
+    for_each_acc!(acc_cursors);
+}
+
+/// The steps of a cursor one by one, on a column short enough to read.
+#[test]
+fn a_cursor_step_by_step() {
+    let mut v = VerifiedColumn::<u64>::from_values(&[1, 2, 3, 4, 5]);
+    let mut e = v.edit();
+    assert_eq!((e.pos(), e.out_pos(), e.peek()), (0, 0, Some(1)));
+    e.advance(1);
+    assert_eq!((e.pos(), e.out_pos(), e.peek()), (1, 1, Some(2)));
+    e.delete(2);
+    assert_eq!((e.pos(), e.out_pos(), e.peek()), (3, 1, Some(4)));
+    e.insert(9).insert_run(8, 2);
+    assert_eq!((e.pos(), e.out_pos(), e.peek()), (3, 4, Some(4)));
+    e.seek(4).replace_with(7);
+    assert_eq!((e.pos(), e.out_pos(), e.peek()), (5, 6, None));
+    // at the end there is nothing to replace, to delete or to pass over
+    e.replace_with(0)
+        .delete(3)
+        .advance(usize::MAX)
+        .seek(usize::MAX);
+    assert_eq!((e.pos(), e.out_pos(), e.peek()), (5, 6, None));
+    let runs = [Run { count: 2, value: 6 }, Run { count: 0, value: 5 }];
+    e.insert_runs(runs);
+    assert_eq!((e.pos(), e.out_pos()), (5, 8));
+    e.finish();
+    assert_eq!(v.to_vec(), [1, 9, 8, 8, 4, 7, 6, 6]);
+
+    // a cursor opened in the middle keeps what is before it
+    let mut e = v.edit_at(6);
+    assert_eq!((e.pos(), e.out_pos(), e.peek()), (6, 6, Some(6)));
+    e.delete(usize::MAX);
+    e.finish();
+    assert_eq!(v.to_vec(), [1, 9, 8, 8, 4, 7]);
+
+    // values that are lent: a look at one, and another in its place
+    let mut b = VerifiedColumn::<Vec<u8>>::from_values(&[&b"ab"[..], b"", b"c"]);
+    let mut e = b.edit();
+    assert_eq!(e.peek(), Some(&b"ab"[..]));
+    e.replace_with(b"xyz").replace_with(b"");
+    assert_eq!(e.peek(), Some(&b"c"[..]));
+    e.finish();
+    assert_eq!(b.to_vec(), [&b"xyz"[..], b"", b"c"]);
+}
+
+/// A cursor that is not finished does not give the column its values
+/// back: the column reads as an empty one, and an edit of it panics, as
+/// after a panic in the middle of an edit. `Column`'s cursor finishes
+/// when it is dropped; forgotten instead, it leaves the same.
+#[cfg(panic = "unwind")]
+#[test]
+fn a_cursor_dropped_unfinished() {
+    let lost = "column used after a panic during an edit";
+    let mut v = VerifiedColumn::<u64>::from_values(&[1, 2, 3]);
+    {
+        let mut e = v.edit();
+        e.seek(1).insert(9);
+    }
+    assert_eq!((v.len(), v.is_empty()), (0, true));
+    assert!(v.to_vec().is_empty());
+    assert!(v.iter().next().is_none());
+    assert_eq!(v.get(0), None);
+    let said = panic_of(std::panic::AssertUnwindSafe(|| v.push(4)));
+    assert_eq!(said.as_deref(), Some(lost));
+    let said = panic_of(std::panic::AssertUnwindSafe(|| v.edit().finish()));
+    assert_eq!(said.as_deref(), Some(lost));
+
+    let mut c = Column::<u64>::from_values(vec![1, 2, 3]);
+    {
+        let mut o = c.edit();
+        o.seek(1).insert(9);
+    }
+    assert_eq!(old_values(&c), [1, 9, 2, 3]);
+    let mut o = c.edit();
+    o.seek(1).insert(9);
+    std::mem::forget(o);
+    assert_eq!((c.len(), c.is_empty()), (0, true));
+    let said = panic_of(std::panic::AssertUnwindSafe(|| c.push(4)));
+    assert_eq!(said.as_deref(), Some(lost));
+}
+
+/// A cursor goes forward only: a seek to a place behind it panics, in
+/// both APIs, and leaves the column as any panic in the middle of an
+/// edit does. A cursor opened past the column's end panics too, and
+/// leaves the column as it was.
+#[cfg(panic = "unwind")]
+#[test]
+fn a_cursor_goes_forward_only() {
+    let (mut v, mut c) = both::<u64>(&[1, 2, 3, 4]);
+    let new = panic_of(std::panic::AssertUnwindSafe(|| v.edit_at(5).finish()));
+    let old = panic_of(std::panic::AssertUnwindSafe(|| c.edit_at(5).finish()));
+    assert!(new.is_some());
+    assert_eq!(new, old);
+    check(&v, &c, &[1, 2, 3, 4]);
+    // the end is a place
+    v.edit_at(4).finish();
+    c.edit_at(4).finish();
+    check(&v, &c, &[1, 2, 3, 4]);
+
+    let new = panic_of(std::panic::AssertUnwindSafe(|| {
+        let mut e = v.edit();
+        e.seek(3).seek(2);
+        e.finish();
+    }));
+    assert_eq!(new.as_deref(), Some("VerifiedEdit::seek is forward-only"));
+    let old = panic_of(std::panic::AssertUnwindSafe(|| {
+        c.edit().seek(3).seek(2);
+    }));
+    assert_eq!(old.as_deref(), Some("Edit::seek is forward-only"));
+    // a panic in the middle of an edit leaves either column without
+    // its values: the old cursor does not finish as a panic unwinds
+    assert_eq!((v.len(), v.is_empty()), (0, true));
+    assert_eq!((c.len(), c.is_empty()), (0, true));
+    let new = panic_of(std::panic::AssertUnwindSafe(|| v.push(9)));
+    let old = panic_of(std::panic::AssertUnwindSafe(|| c.push(9)));
+    assert_eq!(
+        new.as_deref(),
+        Some("column used after a panic during an edit")
+    );
+    assert_eq!(new, old);
+}
+
+#[cfg(feature = "bijou64")]
+mod bijou_cursors {
+    use super::*;
+    use hexane::bijou as ob;
+    use hexane::verified::bijou as vb;
+    use hexane::Bijou64;
+
+    fn cursors<T: Kind + VValue<Bijou64>>() {
+        for seed in 1..=4u64 {
+            let mut rng = Rng(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) ^ 0xed1a);
+            let budget = [2, 3, 8, 64][rng.below(4)];
+            let mut model: Vec<T> = rng.values(200);
+            let mut v = vb::VerifiedColumn::<T>::with_max_segments(budget);
+            let mut c = ob::Column::<T>::with_max_segments(budget);
+            v.splice(0, 0, &lent(&model));
+            c.splice(0, 0, model.iter().cloned());
+            for _ in 0..25 {
+                let at = some_place(&mut rng, model.len());
+                let moves = some_moves(&mut rng, &model, at);
+                let mut told = Told::new(&model, at);
+                let (mut e, mut o) = (v.edit_at(at), c.edit_at(at));
+                for m in &moves {
+                    new_move!(e, m);
+                    old_move!(o, m);
+                    told.step(m);
+                    let place = (told.at, told.out.len());
+                    assert_eq!((e.pos(), e.out_pos()), place, "{m:?}");
+                    assert_eq!((o.pos(), o.out_pos()), place, "{m:?}");
+                    assert_eq!(e.rebuilds(), o.rebuilds(), "{m:?}");
+                    assert_eq!(e.peek().map(T::keep).as_ref(), told.peek(), "{m:?}");
+                }
+                e.finish();
+                drop(o);
+                model = told.done();
+                let new: Vec<T> = v.to_vec().into_iter().map(T::keep).collect();
+                assert_eq!(new, model);
+                assert_eq!(v.save(), c.save());
+                assert_eq!(v.slab_count(), c.slab_count());
+            }
+        }
+    }
+
+    /// A cursor of a column whose numbers are written with bijou64 does
+    /// what the old API's does of such a column.
+    #[test]
+    fn a_cursor_with_bijou64() {
+        cursors::<u64>();
+        cursors::<i64>();
+        cursors::<Option<i64>>();
+        cursors::<Option<u32>>();
+        cursors::<bool>();
+        cursors::<Vec<u8>>();
+        cursors::<String>();
+    }
+}

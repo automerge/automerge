@@ -2777,6 +2777,19 @@ pub(crate) fn fill<C: CountsOf>(len: usize, value: bool) -> (s: BSlab)
     s
 }
 
+/// The value a reader of slab `s` stands at, which is not its end.
+#[inline(always)]
+pub(crate) fn peek_slab<C: CountsOf>(s: &BSlab, st: &BoolDecoderState, Ghost(k): Ghost<nat>) -> (v: bool)
+    requires
+        BoolModel::<C>::ok(*s),
+        BoolModel::<C>::st_at(s.data@, *st, k),
+        k < BoolModel::<C>::vals(*s).len(),
+    ensures
+        v == BoolModel::<C>::vals(*s)[k as int],
+{
+    crate::bool_wire::peek_at::<C::K>(s.data.as_slice(), st).unwrap()
+}
+
 impl<'a, C: CountsOf> crate::cursor::ReadsAgree<'a, crate::bool_wire::BoolReads<C>> for BoolModel<C> {
     open spec fn own(v: bool) -> bool {
         v

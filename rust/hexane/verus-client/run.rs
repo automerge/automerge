@@ -2,9 +2,9 @@
 //! `requires`, and the client's own run-time work (loading, saving,
 //! unwrapping) must not panic.
 use hexane::verified::{
-    AccIndex, LenIndex, SumIndex, VerifiedAccColumn, VerifiedAccIter, VerifiedAccValue,
-    VerifiedColumn, VerifiedDecoder, VerifiedDeltaColumn, VerifiedEncoder, VerifiedEncoderState,
-    VerifiedPrefixColumn,
+    AccIndex, Get, LenIndex, SumIndex, VCodec, VIndex, VValue, VerifiedAccColumn, VerifiedAccIter,
+    VerifiedAccValue, VerifiedColumn, VerifiedDecoder, VerifiedDeltaColumn, VerifiedEncoder,
+    VerifiedEncoderState, VerifiedPrefixColumn,
 };
 use hexane::{Leb128, Run};
 use verus_client::{Action, Board, Flags, Mark, Meta, Step};
@@ -3428,4 +3428,397 @@ fn bijou64() {
         verus_client::deltas_streamed_with_bijou64(-7, 300),
         [-7, 300]
     );
+}
+
+// ── The edit cursor ──────────────────────────────────────────
+
+/// A value as the cursor's clients take it, and as these tests compare
+/// it.
+trait Lent<C: VCodec>: VValue<C> + Clone {
+    type Seen: Clone + PartialEq + std::fmt::Debug;
+
+    fn lend(&self) -> Get<'_, Self>;
+
+    fn seen(v: Get<'_, Self>) -> Self::Seen;
+}
+
+impl<C: VCodec> Lent<C> for u64 {
+    type Seen = u64;
+
+    fn lend(&self) -> u64 {
+        *self
+    }
+
+    fn seen(v: u64) -> u64 {
+        v
+    }
+}
+
+impl<C: VCodec> Lent<C> for Option<i64> {
+    type Seen = Option<i64>;
+
+    fn lend(&self) -> Option<i64> {
+        *self
+    }
+
+    fn seen(v: Option<i64>) -> Option<i64> {
+        v
+    }
+}
+
+impl<C: VCodec> Lent<C> for bool {
+    type Seen = bool;
+
+    fn lend(&self) -> bool {
+        *self
+    }
+
+    fn seen(v: bool) -> bool {
+        v
+    }
+}
+
+impl<C: VCodec> Lent<C> for Vec<u8> {
+    type Seen = Vec<u8>;
+
+    fn lend(&self) -> &[u8] {
+        self
+    }
+
+    fn seen(v: &[u8]) -> Vec<u8> {
+        v.to_vec()
+    }
+}
+
+impl<C: VCodec> Lent<C> for String {
+    type Seen = String;
+
+    fn lend(&self) -> &str {
+        self
+    }
+
+    fn seen(v: &str) -> String {
+        v.to_string()
+    }
+}
+
+impl<C: VCodec> Lent<C> for Mark {
+    type Seen = u64;
+
+    fn lend(&self) -> Mark {
+        *self
+    }
+
+    fn seen(v: Mark) -> u64 {
+        v.0
+    }
+}
+
+/// What a column holds.
+fn seen<V: Lent<C>, C: VCodec, K: VIndex<V, C>>(col: &VerifiedColumn<V, C, K>) -> Vec<V::Seen> {
+    col.to_vec().into_iter().map(V::seen).collect()
+}
+
+/// The cursor's clients for every kind of column, on a column of
+/// `model`, which has four values or more, with two values of the
+/// caller's.
+fn cursor_clients<V: Lent<C>, C: VCodec, K: VIndex<V, C>>(model: &[V], x: &V, y: &V) {
+    let n = model.len();
+    assert!(n >= 4);
+    let lent: Vec<Get<'_, V>> = model.iter().map(V::lend).collect();
+    let fresh = || VerifiedColumn::<V, C, K>::from_values(&lent);
+    let was: Vec<V::Seen> = model.iter().map(|v| V::seen(v.lend())).collect();
+    let (sx, sy) = (V::seen(x.lend()), V::seen(y.lend()));
+
+    for (at, del) in [(0, 0), (1, 2), (n, 0), (0, n), (n - 1, 1)] {
+        let mut col = fresh();
+        verus_client::edit_like_a_splice(&mut col, at, del, x.lend());
+        let mut want = was.clone();
+        want.splice(at..at + del, [sx.clone()]);
+        assert_eq!(seen(&col), want);
+    }
+
+    for at in [0, n - 1] {
+        let mut col = fresh();
+        let places = verus_client::places_of_a_cursor(&mut col, at, y.lend());
+        assert_eq!(places, (at, at, at + 1, at + 2));
+        let mut want = was.clone();
+        want.splice(at..at + 1, [sy.clone(), sy.clone()]);
+        assert_eq!(seen(&col), want);
+    }
+
+    for (a, b) in [(0, 0), (1, 3), (0, n), (n, n)] {
+        let mut col = fresh();
+        verus_client::two_places_one_edit(&mut col, a, b, x.lend(), y.lend());
+        let mut want = was[..a].to_vec();
+        want.push(sx.clone());
+        want.extend_from_slice(&was[a..b]);
+        want.push(sy.clone());
+        want.extend_from_slice(&was[b..]);
+        assert_eq!(seen(&col), want);
+    }
+
+    for (a, b, k) in [
+        (0, 0, 0),
+        (1, 2, 1),
+        (2, usize::MAX, 5),
+        (n, n + 3, usize::MAX),
+    ] {
+        let mut col = fresh();
+        verus_client::only_passed_over(&mut col, a, b, k);
+        assert_eq!(seen(&col), was);
+    }
+
+    let mut col = fresh();
+    verus_client::pushed_by_a_cursor(&mut col, x.lend());
+    let mut want = was.clone();
+    want.push(sx.clone());
+    assert_eq!(seen(&col), want);
+
+    for at in [0, 2, n, n + 5, usize::MAX] {
+        let mut col = fresh();
+        verus_client::cut_short(&mut col, at);
+        assert_eq!(seen(&col), was[..at.min(n)]);
+    }
+
+    for (at, k) in [(0, 0), (2, 3), (n, 1)] {
+        let mut col = fresh();
+        verus_client::runs_by_a_cursor(&mut col, at, x.lend(), y.lend(), k);
+        let mut want = was[..at].to_vec();
+        want.extend(std::iter::repeat_n(sx.clone(), k));
+        want.extend([sy.clone(), sy.clone(), sx.clone()]);
+        want.extend_from_slice(&was[at..]);
+        assert_eq!(seen(&col), want);
+
+        let mut col = fresh();
+        let runs = vec![
+            Run {
+                count: 2,
+                value: x.lend(),
+            },
+            Run {
+                count: 0,
+                value: y.lend(),
+            },
+            Run {
+                count: k,
+                value: y.lend(),
+            },
+        ];
+        verus_client::any_runs_by_a_cursor(&mut col, at, runs.into_iter());
+        let mut want = was[..at].to_vec();
+        want.extend([sx.clone(), sx.clone()]);
+        want.extend(std::iter::repeat_n(sy.clone(), k));
+        want.extend_from_slice(&was[at..]);
+        assert_eq!(seen(&col), want);
+
+        let mut col = fresh();
+        let none: Vec<Run<Get<'_, V>>> = Vec::new();
+        verus_client::any_runs_by_a_cursor(&mut col, at, none.into_iter());
+        assert_eq!(seen(&col), was);
+    }
+
+    for at in 0..=n.min(6) {
+        let mut col = fresh();
+        let there = verus_client::is_it_there(&mut col, at, model[1].lend());
+        assert_eq!(there, at < n && was[at] == was[1]);
+        assert!(!verus_client::is_it_there(&mut col, n, x.lend()));
+        assert_eq!(seen(&col), was);
+    }
+
+    for at in [0, 1, n - 1] {
+        let mut col = fresh();
+        verus_client::put_in_its_place(&mut col, at, x.lend());
+        let mut want = was.clone();
+        want[at] = sx.clone();
+        assert_eq!(seen(&col), want);
+        verus_client::put_in_its_place(&mut col, at, x.lend());
+        assert_eq!(seen(&col), want);
+    }
+
+    // each step's contract, asked for on its own
+    let mut col = fresh();
+    let mut at = 0;
+    let mut out: Vec<V::Seen> = Vec::new();
+    {
+        let mut e = verus_client::told_by_an_edit(&mut col);
+        assert_eq!(verus_client::told_by_a_cursors_places(&e), (0, 0));
+        verus_client::told_by_a_cursors_advance(&mut e, 1);
+        out.extend_from_slice(&was[at..at + 1]);
+        at += 1;
+        verus_client::told_by_a_cursors_seek(&mut e, 2);
+        out.extend_from_slice(&was[at..2]);
+        at = 2;
+        verus_client::told_by_a_cursors_insert(&mut e, x.lend());
+        out.push(sx.clone());
+        verus_client::told_by_a_cursors_insert_run(&mut e, y.lend(), 3);
+        out.extend([sy.clone(), sy.clone(), sy.clone()]);
+        let runs = vec![Run {
+            count: 2,
+            value: x.lend(),
+        }];
+        verus_client::told_by_a_cursors_insert_runs(&mut e, runs.into_iter());
+        out.extend([sx.clone(), sx.clone()]);
+        assert_eq!(
+            verus_client::told_by_a_cursors_peek(&mut e, x.lend()),
+            Some(was[at] == sx)
+        );
+        verus_client::told_by_a_cursors_replace_with(&mut e, y.lend());
+        out.push(sy.clone());
+        at += 1;
+        verus_client::told_by_a_cursors_delete(&mut e, 1);
+        at += 1;
+        // an advance, an insertion, a deletion, a run and a replacement
+        verus_client::told_what_a_step_keeps(&mut e, 1, x.lend());
+        let k = 1.min(n - at);
+        out.extend_from_slice(&was[at..at + k]);
+        at += k;
+        out.push(sx.clone());
+        at += 1.min(n - at);
+        out.push(sx.clone());
+        if at < n {
+            out.push(sx.clone());
+            at += 1;
+        }
+        assert_eq!(verus_client::told_by_a_cursors_places(&e), (at, out.len()));
+        verus_client::told_by_a_cursors_finish(e);
+    }
+    out.extend_from_slice(&was[at..]);
+    assert_eq!(seen(&col), out);
+
+    // and at the end of a column, where a step finds nothing
+    let mut col = fresh();
+    {
+        let mut e = verus_client::told_by_an_edit_at(&mut col, n);
+        assert_eq!(verus_client::told_by_a_cursors_places(&e), (n, n));
+        assert_eq!(verus_client::told_by_a_cursors_peek(&mut e, x.lend()), None);
+        verus_client::told_by_a_cursors_replace_with(&mut e, x.lend());
+        verus_client::told_by_a_cursors_delete(&mut e, usize::MAX);
+        verus_client::told_by_a_cursors_advance(&mut e, usize::MAX);
+        verus_client::told_by_a_cursors_seek(&mut e, usize::MAX);
+        verus_client::told_by_a_cursors_insert_run(&mut e, x.lend(), 0);
+        assert_eq!(verus_client::told_by_a_cursors_places(&e), (n, n));
+        verus_client::told_by_a_cursors_finish(e);
+    }
+    assert_eq!(seen(&col), was);
+    {
+        let mut e = verus_client::told_by_an_edit_at(&mut col, 1);
+        assert_eq!(verus_client::told_by_a_cursors_places(&e), (1, 1));
+        verus_client::told_by_a_cursors_delete(&mut e, usize::MAX);
+        assert_eq!(verus_client::told_by_a_cursors_places(&e), (n, 1));
+        verus_client::told_by_a_cursors_finish(e);
+    }
+    assert_eq!(seen(&col), was[..1]);
+}
+
+#[test]
+fn edit_cursors() {
+    let numbers: Vec<u64> = vec![5, 5, 6, 7, 7, 7, 9];
+    let many: Vec<u64> = (0..1000).map(|i| i / 7 % 40).collect();
+    cursor_clients::<u64, Leb128, LenIndex>(&numbers, &1, &6);
+    cursor_clients::<u64, Leb128, LenIndex>(&many, &5, &0);
+    cursor_clients::<u64, Leb128, SumIndex>(&numbers, &7, &0);
+    cursor_clients::<u64, Leb128, SumIndex>(&many, &0, &3);
+    cursor_clients::<Option<i64>, Leb128, LenIndex>(
+        &[Some(-3), None, None, Some(i64::MAX), Some(-3)],
+        &None,
+        &Some(i64::MIN),
+    );
+    cursor_clients::<bool, Leb128, LenIndex>(&[true, true, false, true, false], &false, &true);
+    cursor_clients::<bool, Leb128, LenIndex>(&[false; 4], &true, &true);
+    let bytes = vec![b"ab".to_vec(), vec![], vec![], b"xyz".to_vec(), vec![0; 70]];
+    cursor_clients::<Vec<u8>, Leb128, LenIndex>(&bytes, &b"ab".to_vec(), &vec![]);
+    let words: Vec<String> = ["é", "", "x", "x", "long enough"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    cursor_clients::<String, Leb128, LenIndex>(&words, &"x".to_string(), &"ü".to_string());
+    let marks: Vec<Mark> = (0..300).map(|i| Mark(i / 7 % 5 * 13)).collect();
+    cursor_clients::<Mark, Leb128, AccIndex>(&marks, &Mark(13), &Mark(63));
+
+    assert_eq!(verus_client::edit_as_documented(), [1, 9, 4, 7]);
+
+    let lent: Vec<&[u8]> = bytes.iter().map(|b| &b[..]).collect();
+    for at in 0..=bytes.len() {
+        let mut col = VerifiedColumn::<Vec<u8>>::from_values(&lent);
+        let taken = verus_client::bytes_taken_out(&mut col, at);
+        assert_eq!(taken.as_ref(), bytes.get(at));
+        let mut want = lent.clone();
+        if at < want.len() {
+            want.remove(at);
+        }
+        assert_eq!(col.to_vec(), want);
+    }
+
+    let flags = [true, true, false, false, true];
+    for at in 0..flags.len() {
+        let mut col = VerifiedColumn::<bool>::from_values(&flags);
+        verus_client::flag_turned(&mut col, at);
+        let mut want = flags;
+        want[at] = !want[at];
+        assert_eq!(col.to_vec(), want);
+    }
+
+    for values in [vec![], vec![0], many.clone(), vec![u64::MAX - 1, 0, 0]] {
+        let mut col = VerifiedColumn::<u64>::from_values(&values);
+        verus_client::each_one_more(&mut col);
+        let want: Vec<u64> = values.iter().map(|v| v + 1).collect();
+        assert_eq!(col.to_vec(), want);
+    }
+
+    for values in [
+        vec![],
+        vec![None],
+        vec![None, None, Some(4), None, Some(4), Some(5), None],
+        many.iter().map(|&v| (v % 3 != 0).then_some(v)).collect(),
+        many.iter().map(|&v| Some(v)).collect(),
+    ] {
+        let mut col = VerifiedColumn::<Option<u64>>::from_values(&values);
+        verus_client::absent_ones_dropped(&mut col);
+        let want: Vec<Option<u64>> = values.iter().copied().filter(Option::is_some).collect();
+        assert_eq!(col.to_vec(), want);
+    }
+
+    for (values, at, v) in [
+        (vec![], 0, 9),
+        (vec![3, 0, 4], 1, u64::MAX >> 8),
+        (vec![3, 0, 4], 3, 0),
+        (many.clone(), 500, 77),
+    ] {
+        let mut col = VerifiedPrefixColumn::<u64>::from_values(&values);
+        verus_client::sums_after_a_cursor(&mut col, at, v);
+        let mut want = values.clone();
+        want.insert(at, v);
+        assert_eq!(col.to_vec(), want);
+        let again = VerifiedPrefixColumn::<u64>::from_values(&want);
+        for i in [0, at, at + 1, want.len()] {
+            assert_eq!(col.get_prefix(i), again.get_prefix(i));
+        }
+        assert_eq!(col.save(), again.save());
+    }
+}
+
+#[cfg(feature = "bijou64")]
+#[test]
+fn edit_cursors_with_bijou64() {
+    use hexane::Bijou64;
+    let numbers: Vec<u64> = vec![5, 5, 6, 7, 7, 7, 9, 248, u64::MAX];
+    cursor_clients::<u64, Bijou64, LenIndex>(&numbers, &1, &247);
+    cursor_clients::<u64, Bijou64, SumIndex>(&numbers[..8], &7, &0);
+    cursor_clients::<Option<i64>, Bijou64, LenIndex>(
+        &[Some(-3), None, None, Some(i64::MAX), Some(-3)],
+        &None,
+        &Some(i64::MIN),
+    );
+    cursor_clients::<bool, Bijou64, LenIndex>(&[true, true, false, true, false], &false, &true);
+    let bytes = vec![
+        b"ab".to_vec(),
+        vec![],
+        vec![],
+        b"xyz".to_vec(),
+        vec![0; 300],
+    ];
+    cursor_clients::<Vec<u8>, Bijou64, LenIndex>(&bytes, &b"ab".to_vec(), &vec![]);
+    let marks: Vec<Mark> = (0..300).map(|i| Mark(i / 7 % 5 * 13)).collect();
+    cursor_clients::<Mark, Bijou64, AccIndex>(&marks, &Mark(13), &Mark(63));
 }

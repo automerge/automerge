@@ -148,6 +148,19 @@ pub(crate) trait Model<X>: Slabs + Sized + for <'a>ReadsAgree<'a, X> where
             s.len == len,
     ;
 
+    /// The value a reader of the slab `s` stands at, where it stands at
+    /// the slab's `k`th value: as a read gives it, borrowing the slab.
+    fn peek<'s>(s: &'s Slab<Self::Tail>, st: &<Self as Slabs>::State, k: Ghost<nat>) -> (v: <<X as Decoders<
+        's,
+    >>::D as Decode>::Item)
+        requires
+            Self::ok(*s),
+            Self::st_at(s.data@, *st, k@),
+            k@ < Self::vals(*s).len(),
+        ensures
+            <Self as ReadsAgree<'s, X>>::own(v) == Self::vals(*s)[k@ as int],
+    ;
+
     /// The slabs' values, saved: appended to `out`. `total` is their
     /// item count.
     fn save(slabs: &[Slab<Self::Tail>], total: usize, out: &mut Vec<u8>)
@@ -426,6 +439,11 @@ impl<L, O> Model<RleReads<O>> for RleModel<L> where
     }
 
     #[inline(always)]
+    fn peek<'s>(s: &'s Slab<RleTail>, st: &crate::rle::dec::RleDecoderState, k: Ghost<nat>) -> (v: VOf<'s, L>) {
+        crate::rle::edit::peek_at::<L>(s, st, k)
+    }
+
+    #[inline(always)]
     fn save(slabs: &[Slab<RleTail>], total: usize, out: &mut Vec<u8>) {
         crate::rle::edit::save_slabs::<L>(slabs, total, out)
     }
@@ -581,6 +599,11 @@ impl<C: CountsOf> Model<BoolReads<C>> for BoolModel<C> {
     #[inline(always)]
     fn fill<'s>(len: usize, v: bool) -> (s: BSlab) {
         crate::bool_edit::fill::<C>(len, v)
+    }
+
+    #[inline(always)]
+    fn peek(s: &BSlab, st: &crate::bool_wire::BoolDecoderState, k: Ghost<nat>) -> (v: bool) {
+        crate::bool_edit::peek_slab::<C>(s, st, k)
     }
 
     #[inline(always)]
