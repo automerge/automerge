@@ -18310,3 +18310,145 @@ fn a_clients_own_encoding() {
         assert!(check_same_load::<Tag>(&v.save()));
     }
 }
+
+// ── A client's own codec ───────────────────────────────────────────────────
+
+/// A codec of a client's own, as a client compiled without Verus writes
+/// it for both APIs: every number as its eight bytes, the least
+/// significant first.
+#[derive(Debug)]
+struct Fixed8;
+
+impl Fixed8 {
+    fn eight(data: &[u8]) -> Option<[u8; 8]> {
+        data.get(..8)?.try_into().ok()
+    }
+}
+
+impl VCodec for Fixed8 {
+    fn put_u(n: u64, buf: &mut Vec<u8>) {
+        buf.extend_from_slice(&n.to_le_bytes());
+    }
+
+    fn put_i(n: i64, buf: &mut Vec<u8>) {
+        buf.extend_from_slice(&n.to_le_bytes());
+    }
+
+    fn read_u(data: &[u8]) -> Result<(usize, u64), PackError> {
+        <Fixed8 as VCodec>::read_u_opt(data).ok_or_else(|| refused("fewer than eight bytes"))
+    }
+
+    fn read_u_opt(data: &[u8]) -> Option<(usize, u64)> {
+        Some((8, u64::from_le_bytes(Fixed8::eight(data)?)))
+    }
+
+    fn read_i(data: &[u8]) -> Result<(usize, i64), PackError> {
+        <Fixed8 as VCodec>::read_i_opt(data).ok_or_else(|| refused("fewer than eight bytes"))
+    }
+
+    fn read_i_opt(data: &[u8]) -> Option<(usize, i64)> {
+        Some((8, i64::from_le_bytes(Fixed8::eight(data)?)))
+    }
+
+    fn len_u(_data: &[u8]) -> Option<usize> {
+        Some(8)
+    }
+
+    fn len_i(_data: &[u8]) -> Option<usize> {
+        Some(8)
+    }
+
+    fn rewrite_header(buf: &mut Vec<u8>, pos: usize, total: usize) -> i64 {
+        buf[pos..pos + 8].copy_from_slice(&(-(total as i64)).to_le_bytes());
+        0
+    }
+}
+
+impl Codec for Fixed8 {
+    fn encode_unsigned(n: u64) -> hexane::VarBuf {
+        let mut b = hexane::VarBuf::new();
+        n.to_le_bytes().into_iter().for_each(|x| b.push(x));
+        b
+    }
+
+    fn encode_signed(n: i64) -> hexane::VarBuf {
+        Fixed8::encode_unsigned(n as u64)
+    }
+
+    fn read_unsigned(data: &[u8]) -> Option<(usize, u64)> {
+        <Fixed8 as VCodec>::read_u_opt(data)
+    }
+
+    fn read_signed(data: &[u8]) -> Option<(usize, i64)> {
+        <Fixed8 as VCodec>::read_i_opt(data)
+    }
+
+    fn try_read_unsigned(data: &[u8]) -> Result<(usize, u64), PackError> {
+        <Fixed8 as VCodec>::read_u(data)
+    }
+
+    fn try_read_signed(data: &[u8]) -> Result<(usize, i64), PackError> {
+        <Fixed8 as VCodec>::read_i(data)
+    }
+}
+
+/// Columns of each API with the client's codec and the values `vals`
+/// save to the same bytes, which load back in both to `vals`; and each
+/// API's edits keep them the same.
+fn fixed8_agree<T>(vals: &[T])
+where
+    T: Kind + VValue<Fixed8>,
+{
+    let mut v = VerifiedColumn::<T, Fixed8>::new();
+    v.splice(0, 0, &lent(vals));
+    let mut c = Column::<T, Fixed8>::new();
+    c.splice(0, 0, vals.iter().cloned());
+    let bytes = v.save();
+    assert_eq!(c.save(), bytes);
+    let back = VerifiedColumn::<T, Fixed8>::load(&bytes).unwrap();
+    let back: Vec<T> = back.to_vec().into_iter().map(T::keep).collect();
+    assert_eq!(back, vals);
+    let old_back = Column::<T, Fixed8>::load(&bytes).unwrap();
+    let old_back: Vec<T> = old_back.to_vec().into_iter().map(old).collect();
+    assert_eq!(old_back, vals);
+    // a literal run grown and cut, by each API: its header rewritten
+    if vals.len() >= 2 {
+        let at = vals.len() / 2;
+        v.splice(at, 1, &lent(&vals[..2]));
+        c.splice(at, 1, vals[..2].iter().cloned());
+        assert_eq!(v.save(), c.save());
+        assert!(VerifiedColumn::<T, Fixed8>::load(&v.save()).is_ok());
+    }
+}
+
+/// A client's own codec: the numbers of a column are its bytes, in each
+/// API, for every kind of value; and bytes it has no number for are
+/// refused.
+#[test]
+fn a_clients_own_codec() {
+    // a literal run of two (a header of -2), then the numbers, eight
+    // bytes each
+    let v = VerifiedColumn::<u64, Fixed8>::from_values(&[5, 6]);
+    let mut want = (-2i64).to_le_bytes().to_vec();
+    want.extend(5u64.to_le_bytes());
+    want.extend(6u64.to_le_bytes());
+    assert_eq!(v.save(), want);
+    // a header cut short, or a number
+    assert!(VerifiedColumn::<u64, Fixed8>::load(&want[..5]).is_err());
+    assert!(VerifiedColumn::<u64, Fixed8>::load(&want[..20]).is_err());
+    assert!(Column::<u64, Fixed8>::load(&want[..20]).is_err());
+
+    let mut rng = Rng(0xf1c8);
+    for _ in 0..20 {
+        fixed8_agree::<u64>(&rng.values(40));
+        fixed8_agree::<i64>(&rng.values(40));
+        fixed8_agree::<Option<u32>>(&rng.values(40));
+        fixed8_agree::<bool>(&rng.values(40));
+        fixed8_agree::<Action>(&rng.values(40));
+        fixed8_agree::<Tag>(&rng.values(40));
+        fixed8_agree::<Option<Tag>>(&rng.values(40));
+        fixed8_agree::<Vec<u8>>(&rng.values(40));
+        fixed8_agree::<Option<Vec<u8>>>(&rng.values(40));
+        fixed8_agree::<String>(&rng.values(40));
+    }
+}

@@ -614,7 +614,8 @@ or as bytes of their own), plain, prefix
 (sums and accumulators) and delta columns; their loads (also run by
 run), saves, splices, edit cursors and `copy_ranges`; their iterators,
 searches and runs; the streaming encoders and decoders; the raw
-column; both codecs; and the repositioning of every iterator
+column; both codecs, and a client's own (`VCodec`); and the
+repositioning of every iterator
 (`VShiftable`, which a client's own iterator may implement, with a
 lookahead and a walk over ranges).
 
@@ -630,8 +631,8 @@ standard library:
 * for strings, the specification of `core::str::from_utf8`, and that two
   `str`s of the same characters are one;
 * of an iterator a function takes, the laws Verus asks of every
-  iterator; and of a client's own value type, encoding or
-  repositionable iterator, the laws of `VNewtype`, `VPack` or
+  iterator; and of a client's own value type, encoding, codec or
+  repositionable iterator, the laws of `VNewtype`, `VPack`, `VCodec` or
   `VShiftable` (a client checked by Verus proves them).
 
 That a splice ends is proved where it takes a slice (and so for

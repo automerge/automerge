@@ -30,10 +30,20 @@ verus! {
 pub struct ExLeb128(Leb128);
 
 /// A codec for the numbers of a [`VerifiedColumn`](super::VerifiedColumn),
-/// with what it does specified and proved.
+/// with what it does specified and proved. The codecs are this crate's
+/// ([`Leb128`](crate::Leb128), and `Bijou64` with the `bijou64`
+/// feature) and a client's own, as a client of the old API may write a
+/// [`Codec`](crate::Codec).
 ///
-/// The codecs are this crate's: no other crate can implement this trait.
-pub trait VCodec: super::seal::CodecSeal {
+/// The proofs about a column rest on what this trait's functions ensure,
+/// its laws. Verus checks them for a client it is run on. A client
+/// compiled without Verus writes only the functions, and it is then that
+/// client's duty that they keep them: that a number is one to ten bytes,
+/// and no number's bytes start another's; that a read reads the number
+/// whose bytes start `data`, and fails where none do; that a length is
+/// that of the number a read would read; and that `rewrite_header`
+/// replaces a header with another as it says.
+pub trait VCodec {
     /// The bytes of an unsigned number.
     spec fn enc_u(n: u64) -> Seq<u8>;
 
@@ -219,10 +229,6 @@ fn read_i64(data: &[u8]) -> (r: Result<(usize, i64), DecodeError>)
         },
         Err(e) => Err(e),
     }
-}
-
-impl super::seal::CodecSeal for Leb128 {
-
 }
 
 impl VCodec for Leb128 {

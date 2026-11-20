@@ -87,9 +87,11 @@
 //!
 //! The second parameter of `VerifiedColumn<V, C>` is the codec the
 //! column's numbers are written with, a [`VCodec`]. It is [`Leb128`]
-//! where none is named. The other is `Bijou64`, behind the feature
-//! `bijou64`. The modules [`leb128`] and `bijou` give every column
-//! type with its codec named, so that one import picks the codec.
+//! where none is named. The other of this crate's is `Bijou64`, behind
+//! the feature `bijou64`, and a client may write its own ([`VCodec`]
+//! says what it must keep). The modules [`leb128`] and `bijou` give
+//! every column type with its codec named, so that one import picks
+//! the codec.
 //!
 //! # Prefix columns
 //!
@@ -709,12 +711,6 @@ mod seal {
     use crate::iter_core::Decoders;
 
     vstd::prelude::verus! {
-
-    /// A codec of the verified public API is one of this crate's: no
-    /// other can name this trait.
-    pub trait CodecSeal {
-
-    }
 
     /// A type sums are kept in is one of this crate's: no other can
     /// name this trait.

@@ -19688,4 +19688,229 @@ fn find_tag(ints: usize, strs: usize)
     assert(r.start == 0 && r.end == ints);
 }
 
+// ── A client's own codec ───────────────────────────────────────────────────
+
+/// A codec of the client's own, as a client of the old API may write a
+/// `Codec`: every number as its eight bytes, the least significant
+/// first, and a signed number as the unsigned one of the same bits.
+/// Every eight bytes are one number's, so that no number's bytes start
+/// another's; and a header rewritten keeps its length.
+#[allow(dead_code)]
+pub struct Fixed8;
+
+/// The eight bytes of `n`, the least significant first.
+pub open spec fn bytes8(n: u64) -> Seq<u8> {
+    seq![
+        n as u8,
+        (n >> 8u64) as u8,
+        (n >> 16u64) as u8,
+        (n >> 24u64) as u8,
+        (n >> 32u64) as u8,
+        (n >> 40u64) as u8,
+        (n >> 48u64) as u8,
+        (n >> 56u64) as u8,
+    ]
+}
+
+/// No two numbers have the same eight bytes.
+pub proof fn lemma_bytes8(a: u64, b: u64)
+    requires
+        bytes8(a) =~= bytes8(b),
+    ensures
+        a == b,
+{
+    assert(bytes8(a)[1] == bytes8(b)[1]);
+    assert(bytes8(a)[2] == bytes8(b)[2]);
+    assert(bytes8(a)[3] == bytes8(b)[3]);
+    assert(bytes8(a)[4] == bytes8(b)[4]);
+    assert(bytes8(a)[5] == bytes8(b)[5]);
+    assert(bytes8(a)[6] == bytes8(b)[6]);
+    assert(a == b) by (bit_vector)
+        requires
+            a as u8 == b as u8,
+            (a >> 8u64) as u8 == (b >> 8u64) as u8,
+            (a >> 16u64) as u8 == (b >> 16u64) as u8,
+            (a >> 24u64) as u8 == (b >> 24u64) as u8,
+            (a >> 32u64) as u8 == (b >> 32u64) as u8,
+            (a >> 40u64) as u8 == (b >> 40u64) as u8,
+            (a >> 48u64) as u8 == (b >> 48u64) as u8,
+            (a >> 56u64) as u8 == (b >> 56u64) as u8,
+    ;
+}
+
+/// Eight bytes are those of one number, read the least significant
+/// first.
+pub proof fn lemma_of_bytes8(d: Seq<u8>, n: u64)
+    requires
+        d.len() >= 8,
+        n == d[0] as u64 | (d[1] as u64) << 8u64 | (d[2] as u64) << 16u64 | (d[3] as u64) << 24u64
+            | (d[4] as u64) << 32u64 | (d[5] as u64) << 40u64 | (d[6] as u64) << 48u64
+            | (d[7] as u64) << 56u64,
+    ensures
+        d.take(8) =~= bytes8(n),
+{
+    let (b0, b1, b2, b3, b4, b5, b6, b7) = (d[0], d[1], d[2], d[3], d[4], d[5], d[6], d[7]);
+    assert(n as u8 == b0 && (n >> 8u64) as u8 == b1 && (n >> 16u64) as u8 == b2 && (n >> 24u64)
+        as u8 == b3 && (n >> 32u64) as u8 == b4 && (n >> 40u64) as u8 == b5 && (n >> 48u64) as u8
+        == b6 && (n >> 56u64) as u8 == b7) by (bit_vector)
+        requires
+            n == b0 as u64 | (b1 as u64) << 8u64 | (b2 as u64) << 16u64 | (b3 as u64) << 24u64
+                | (b4 as u64) << 32u64 | (b5 as u64) << 40u64 | (b6 as u64) << 48u64
+                | (b7 as u64) << 56u64,
+    ;
+}
+
+/// A signed number's bits as an unsigned one, and back.
+pub proof fn lemma_bits(a: i64, b: i64, u: u64)
+    ensures
+        a as u64 == b as u64 ==> a == b,
+        (u as i64) as u64 == u,
+{
+    assert(a as u64 == b as u64 ==> a == b) by (bit_vector);
+    assert((u as i64) as u64 == u) by (bit_vector);
+}
+
+/// The number at the start of `data`, which has eight bytes or more.
+fn read8(data: &[u8]) -> (n: u64)
+    requires
+        data@.len() >= 8,
+    ensures
+        data@.take(8) == bytes8(n),
+    no_unwind
+{
+    let (b0, b1, b2, b3) = (data[0] as u64, data[1] as u64, data[2] as u64, data[3] as u64);
+    let (b4, b5, b6, b7) = (data[4] as u64, data[5] as u64, data[6] as u64, data[7] as u64);
+    let n = b0 | b1 << 8u64 | b2 << 16u64 | b3 << 24u64 | b4 << 32u64 | b5 << 40u64 | b6 << 48u64
+        | b7 << 56u64;
+    proof {
+        lemma_of_bytes8(data@, n);
+    }
+    n
+}
+
+impl VCodec for Fixed8 {
+    open spec fn enc_u(n: u64) -> Seq<u8> {
+        bytes8(n)
+    }
+
+    open spec fn enc_i(n: i64) -> Seq<u8> {
+        bytes8(n as u64)
+    }
+
+    proof fn lemma_u(a: u64, b: u64, s: Seq<u8>, t: Seq<u8>) {
+        if Self::enc_u(a) + s == Self::enc_u(b) + t {
+            assert(bytes8(a) =~= (bytes8(a) + s).take(8));
+            lemma_bytes8(a, b);
+        }
+    }
+
+    proof fn lemma_i(a: i64, b: i64, s: Seq<u8>, t: Seq<u8>) {
+        if Self::enc_i(a) + s == Self::enc_i(b) + t {
+            Self::lemma_u(a as u64, b as u64, s, t);
+            lemma_bits(a, b, 0);
+        }
+    }
+
+    fn put_u(n: u64, buf: &mut Vec<u8>) {
+        buf.push(n as u8);
+        buf.push((n >> 8u64) as u8);
+        buf.push((n >> 16u64) as u8);
+        buf.push((n >> 24u64) as u8);
+        buf.push((n >> 32u64) as u8);
+        buf.push((n >> 40u64) as u8);
+        buf.push((n >> 48u64) as u8);
+        buf.push((n >> 56u64) as u8);
+    }
+
+    fn put_i(n: i64, buf: &mut Vec<u8>) {
+        Self::put_u(n as u64, buf);
+    }
+
+    fn read_u(data: &[u8]) -> (r: Result<(usize, u64), PackError>) {
+        if data.len() < 8 {
+            return Err(refused("fewer than eight bytes"));
+        }
+        Ok((8, read8(data)))
+    }
+
+    fn read_u_opt(data: &[u8]) -> (r: Option<(usize, u64)>) {
+        if data.len() < 8 {
+            proof {
+                assert forall|v: u64| !(#[trigger] Self::enc_u(v)).is_prefix_of(data@) by {
+                    assert(Self::enc_u(v).len() == 8);
+                }
+            }
+            return None;
+        }
+        Some((8, read8(data)))
+    }
+
+    fn read_i(data: &[u8]) -> (r: Result<(usize, i64), PackError>) {
+        if data.len() < 8 {
+            proof {
+                assert forall|v: i64| !(#[trigger] Self::enc_i(v)).is_prefix_of(data@) by {
+                    assert(Self::enc_i(v).len() == 8);
+                }
+            }
+            return Err(refused("fewer than eight bytes"));
+        }
+        let n = read8(data);
+        proof {
+            lemma_bits(0, 0, n);
+        }
+        Ok((8, n as i64))
+    }
+
+    fn read_i_opt(data: &[u8]) -> (r: Option<(usize, i64)>) {
+        if data.len() < 8 {
+            proof {
+                assert forall|v: i64| !(#[trigger] Self::enc_i(v)).is_prefix_of(data@) by {
+                    assert(Self::enc_i(v).len() == 8);
+                }
+            }
+            return None;
+        }
+        let n = read8(data);
+        proof {
+            lemma_bits(0, 0, n);
+        }
+        Some((8, n as i64))
+    }
+
+    fn len_u(data: &[u8]) -> (r: Option<usize>) {
+        Some(8)
+    }
+
+    fn len_i(data: &[u8]) -> (r: Option<usize>) {
+        Some(8)
+    }
+
+    fn rewrite_header(buf: &mut Vec<u8>, pos: usize, total: usize) -> (d: i64) {
+        let u = (-(total as i64)) as u64;
+        buf.set(pos, u as u8);
+        buf.set(pos + 1, (u >> 8u64) as u8);
+        buf.set(pos + 2, (u >> 16u64) as u8);
+        buf.set(pos + 3, (u >> 24u64) as u8);
+        buf.set(pos + 4, (u >> 32u64) as u8);
+        buf.set(pos + 5, (u >> 40u64) as u8);
+        buf.set(pos + 6, (u >> 48u64) as u8);
+        buf.set(pos + 7, (u >> 56u64) as u8);
+        0
+    }
+}
+
+/// A column with the client's own codec: what it saves loads back, and
+/// a column of numbers takes eight bytes each in a literal run.
+#[allow(dead_code)]
+fn round_trip_fixed8(nums: &Vec<u64>, nullable: &Vec<Option<i64>>, flags: &Vec<bool>)
+    requires
+        nums@.len() < 1_000_000,
+        nullable@.len() < 1_000_000,
+        flags@.len() < 1_000_000,
+{
+    round_trip::<u64, Fixed8, LenIndex>(nums);
+    round_trip::<Option<i64>, Fixed8, LenIndex>(nullable);
+    round_trip::<bool, Fixed8, LenIndex>(flags);
+}
+
 } // verus!

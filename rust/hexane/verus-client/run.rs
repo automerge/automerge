@@ -4343,3 +4343,24 @@ fn a_clients_own_encoding() {
     assert!(VerifiedColumn::<Tag>::load(&[0x7f, 0x01]).is_err());
     assert!(VerifiedColumn::<Tag>::load(&[0x7f, 0x00]).is_ok());
 }
+
+// ── A client's own codec ───────────────────────────────────────────────────
+
+#[test]
+fn a_clients_own_codec() {
+    use verus_client::Fixed8;
+    let nums: Vec<u64> = (0..1000).map(|i| i / 3 * 1_000_003).collect();
+    let nullable: Vec<Option<i64>> = (0..1000)
+        .map(|i| if i % 4 == 0 { None } else { Some(-i) })
+        .collect();
+    let flags: Vec<bool> = (0..1000).map(|i| i % 7 < 3).collect();
+    verus_client::round_trip_fixed8(&nums, &nullable, &flags);
+    // a literal run of two (a header of -2), then the numbers, eight
+    // bytes each
+    let c = VerifiedColumn::<u64, Fixed8>::from_values(&[5, 6]);
+    let mut want = (-2i64).to_le_bytes().to_vec();
+    want.extend(5u64.to_le_bytes());
+    want.extend(6u64.to_le_bytes());
+    assert_eq!(c.save(), want);
+    assert!(VerifiedColumn::<u64, Fixed8>::load(&want[..20]).is_err());
+}

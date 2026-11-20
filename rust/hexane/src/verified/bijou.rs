@@ -146,10 +146,6 @@ fn read_i64(data: &[u8]) -> (r: Result<(usize, i64), DecodeError>)
     }
 }
 
-impl super::seal::CodecSeal for Bijou64 {
-
-}
-
 impl VCodec for Bijou64 {
     open spec fn enc_u(n: u64) -> Seq<u8> {
         spec_encode(n as nat)
