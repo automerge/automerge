@@ -12,8 +12,12 @@
 //! between the adapters and the iterator.
 
 #[cfg(verus_keep_ghost)]
+use super::{lemma_runs_of, runs_of};
+#[cfg(verus_keep_ghost)]
 use super::{lemma_svs_add, lemma_svs_sub, lemma_svs_window, VGet};
-use super::{seal, Get, VCodec, VIndex, VValue, VerifiedIter};
+use super::{seal, Get, VCodec, VIndex, VValue, VerifiedIter, VerifiedRuns};
+#[cfg(verus_keep_ghost)]
+use crate::cursor::lemma_concat_append;
 #[cfg(verus_keep_ghost)]
 use crate::iter_core::{past, vals_of, window};
 #[cfg(verus_keep_ghost)]
@@ -23,6 +27,7 @@ use crate::window::{
 };
 #[cfg(verus_keep_ghost)]
 use crate::window::{lemma_flat_first, u_inv, u_left, windows, Stream};
+use crate::Run;
 use std::ops::Range;
 use vstd::prelude::*;
 
@@ -168,22 +173,19 @@ pub trait VShiftable: Iterator + Sized + seal::ShiftSeal {
                 ==> final(self).shift_at() == target,
     ;
 
-    /// Move `amount` values on, where each item stands for one value.
+    /// Move `amount` values on.
     fn advance_by(&mut self, amount: usize)
-        requires
-            Self::shift_unit(),
         ensures
             final(self).shift_vals() == old(self).shift_vals(),
             final(self).shift_left() == past(old(self).shift_left(), amount as int),
             amount <= old(self).shift_left().len() ==> final(self).shift_at() == old(self).shift_at() + amount,
     ;
 
-    /// Move through the value at `at` and give it, where each item stands
-    /// for one value; at a place before the iterator, give nothing and
-    /// stay.
+    /// Move to the value at `at` and give the item from there, which
+    /// stands for it and for as many after it as it counts (an iterator
+    /// of runs gives the run from there); at a place before the iterator,
+    /// give nothing and stay.
     fn seek_to(&mut self, at: usize) -> (r: Option<Self::Item>)
-        requires
-            Self::shift_unit(),
         ensures
             final(self).shift_vals() == old(self).shift_vals(),
             at < old(self).shift_at() ==> {
@@ -193,7 +195,14 @@ pub trait VShiftable: Iterator + Sized + seal::ShiftSeal {
             },
             at >= old(self).shift_at() ==> {
                 let (o, k) = (old(self).shift_left(), at - old(self).shift_at());
-                &&& k < o.len() ==> {
+                &&& k < o.len() ==> (r matches Some(x) && {
+                    let n = Self::shift_spans(x).len() as int;
+                    &&& 0 < n <= o.len() - k
+                    &&& Self::shift_spans(x) == o.skip(k).take(n)
+                    &&& final(self).shift_left() == o.skip(k + n)
+                    &&& final(self).shift_at() == at + n
+                })
+                &&& k < o.len() && Self::shift_unit() ==> {
                     &&& r == Some(o[k])
                     &&& final(self).shift_left() == o.skip(k + 1)
                     &&& final(self).shift_at() == at + 1
@@ -981,6 +990,10 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VShiftable for VerifiedIter<'
             let r = self.nth(at - p);
             proof {
                 lemma_svs_inj(vals_of::<V::X>(self.slabs@), vals_of::<V::X>(old(self).slabs@));
+                let (o, k) = (old(self).shift_left(), at - p);
+                if k < o.len() {
+                    assert(o.skip(k).take(1) =~= seq![o[k]]);
+                }
             }
             r
         } else {
@@ -1066,6 +1079,317 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedIter<'a, V, C, K> {
     /// The values of each of `ranges` of the column, one range after
     /// another, as the old API's `Shiftable::ranges` gives them (what is
     /// left of the iterator's own window is dropped). The ranges ascend
+    /// and do not overlap (they may touch), and start where the iterator
+    /// stands or later.
+    ///
+    /// # Panics
+    ///
+    /// When it comes to a range that starts before where it stands.
+    #[inline(always)]
+    pub fn ranges<'r>(self, ranges: &'r [Range<usize>]) -> (r: VerifiedRanges<'r, Self>)
+        ensures
+            r.ranges_vals() == self.shift_vals(),
+            r.ranges_left() == windows(self.shift_vals(), ranges@),
+    {
+        VerifiedRanges::new(self, ranges)
+    }
+}
+
+// ── Runs, repositioned ─────────────────────────────────────────────────────
+
+/// Each of `xs` as a run of one: what an iterator of runs ranges over,
+/// value by value.
+pub open spec fn unit_runs<T>(xs: Seq<T>) -> Seq<Run<T>> {
+    Seq::new(xs.len(), |i: int| Run { count: 1, value: xs[i] })
+}
+
+/// The values the run `r` stands for, each a run of one.
+pub open spec fn run_units<T>(r: Run<T>) -> Seq<Run<T>> {
+    Seq::new(r.count as nat, |_i: int| Run { count: 1, value: r.value })
+}
+
+/// What each of the runs `rs` stands for.
+pub open spec fn units_of_runs<T>(rs: Seq<Run<T>>) -> Seq<Seq<Run<T>>> {
+    rs.map_values(|r: Run<T>| run_units(r))
+}
+
+/// One sequence, concatenated, is itself.
+proof fn lemma_concat_one<V>(x: Seq<V>)
+    ensures
+        concat(seq![x]) == x,
+{
+    assert(seq![x].drop_last() =~= Seq::<Seq<V>>::empty());
+    assert(concat(Seq::<Seq<V>>::empty()) =~= Seq::<V>::empty());
+    assert(concat(seq![x]) =~= x);
+}
+
+/// The runs of `xs` stand for its values, each run for some.
+proof fn lemma_run_units<T>(xs: Seq<T>)
+    requires
+        xs.len() <= usize::MAX,
+    ensures
+        concat(units_of_runs(runs_of(xs))) == unit_runs(xs),
+        forall|k: int| 0 <= k < runs_of(xs).len() ==> (#[trigger] runs_of(xs)[k]).count >= 1,
+    decreases xs.len(),
+{
+    if xs.len() == 0 {
+        assert(unit_runs(xs) =~= Seq::<Run<T>>::empty());
+    } else {
+        let d = xs.drop_first();
+        let r = runs_of(d);
+        lemma_run_units(d);
+        let one = Run { count: 1usize, value: xs[0] };
+        if r.len() > 0 && r[0].value == xs[0] {
+            let h = Run { count: (r[0].count + 1) as usize, value: xs[0] };
+            let rest = units_of_runs(r.drop_first());
+            assert(runs_of(xs) == seq![h] + r.drop_first());
+            assert(units_of_runs(seq![h] + r.drop_first()) =~= seq![run_units(h)] + rest);
+            assert(units_of_runs(r) =~= seq![run_units(r[0])] + rest);
+            lemma_concat_append(seq![run_units(h)], rest);
+            lemma_concat_append(seq![run_units(r[0])], rest);
+            lemma_concat_one(run_units(h));
+            lemma_concat_one(run_units(r[0]));
+            assert(run_units(h) + concat(rest) =~= seq![one] + (run_units(r[0]) + concat(rest)));
+            assert forall|k: int| 0 <= k < runs_of(xs).len() implies (#[trigger] runs_of(xs)[k]).count >= 1 by {}
+        } else {
+            let rest = units_of_runs(r);
+            assert(runs_of(xs) == seq![one] + r);
+            assert(units_of_runs(seq![one] + r) =~= seq![run_units(one)] + rest);
+            lemma_concat_append(seq![run_units(one)], rest);
+            lemma_concat_one(run_units(one));
+            assert forall|k: int| 0 <= k < runs_of(xs).len() implies (#[trigger] runs_of(xs)[k]).count >= 1 by {}
+        }
+    }
+}
+
+impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> seal::ShiftSeal for VerifiedRuns<'a, V, C, K> {
+
+}
+
+impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedRuns<'a, V, C, K> {
+    /// The first run of what is left, and the values it stands for.
+    fn take_run(&mut self) -> (r: Option<Run<Get<'a, V>>>)
+        ensures
+            final(self).shift_vals() == old(self).shift_vals(),
+            old(self).shift_left().len() > 0 ==> (r matches Some(x) && {
+                let n = x.count as int;
+                &&& 0 < n <= old(self).shift_left().len()
+                &&& old(self).shift_items().len() > 0
+                &&& x == old(self).shift_items()[0]
+                &&& final(self).shift_items() == old(self).shift_items().skip(1)
+                &&& Self::shift_spans(x) == old(self).shift_left().take(n)
+                &&& final(self).shift_left() == old(self).shift_left().skip(n)
+                &&& final(self).shift_at() == old(self).shift_at() + n
+            }),
+            old(self).shift_left().len() == 0 ==> {
+                &&& r is None
+                &&& old(self).shift_items().len() == 0
+                &&& final(self).shift_items().len() == 0
+                &&& final(self).shift_left().len() == 0
+            },
+    {
+        proof {
+            self.0.lemma_shift_model();
+        }
+        let ghost o = self.0.items();
+        let r = self.0.next_run();
+        proof {
+            self.0.lemma_shift_model();
+            lemma_svs_inj(self.0.shift_vals(), old(self).0.shift_vals());
+            if let Some(x) = r {
+                lemma_runs_of(o, x.value, x.count);
+            }
+        }
+        r
+    }
+}
+
+/// The runs of a column, repositioned as its values are: the model is
+/// each value as a run of one, and an item, a run, stands for as many of
+/// those as it counts.
+impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VShiftable for VerifiedRuns<'a, V, C, K> {
+    closed spec fn shift_vals(&self) -> Seq<Run<Get<'a, V>>> {
+        unit_runs(self.0.shift_vals())
+    }
+
+    closed spec fn shift_at(&self) -> int {
+        self.0.shift_at()
+    }
+
+    closed spec fn shift_end(&self) -> int {
+        self.0.shift_end()
+    }
+
+    closed spec fn shift_left(&self) -> Seq<Run<Get<'a, V>>> {
+        unit_runs(self.0.shift_left())
+    }
+
+    closed spec fn shift_items(&self) -> Seq<Run<Get<'a, V>>> {
+        runs_of(self.0.shift_left())
+    }
+
+    open spec fn shift_spans(x: Run<Get<'a, V>>) -> Seq<Run<Get<'a, V>>> {
+        run_units(x)
+    }
+
+    open spec fn shift_unit() -> bool {
+        false
+    }
+
+    proof fn lemma_shift(&self) {
+        self.0.lemma_shift();
+        self.0.lemma_shift_model();
+        lemma_run_units(self.0.shift_left());
+        assert(runs_of(self.0.shift_left()).map_values(|x: Run<Get<'a, V>>| Self::shift_spans(x)) =~= units_of_runs(
+            runs_of(self.0.shift_left()),
+        ));
+    }
+
+    proof fn lemma_shift_unit(x: Run<Get<'a, V>>) {
+    }
+
+    #[inline(always)]
+    fn shift_step(&mut self) -> (r: Option<Run<Get<'a, V>>>) {
+        self.take_run()
+    }
+
+    #[inline(always)]
+    fn shift_nth(&mut self, n: usize) -> (r: Option<Run<Get<'a, V>>>) {
+        let ghost (o, a) = (self.shift_items(), self.shift_at());
+        let mut i: usize = 0;
+        loop
+            invariant
+                self.shift_vals() == old(self).shift_vals(),
+                o == old(self).shift_items(),
+                a == old(self).shift_at(),
+                i <= n,
+                i <= o.len(),
+                self.shift_items() == o.skip(i as int),
+                self.shift_at() == a + concat(
+                    o.take(i as int).map_values(|x: Run<Get<'a, V>>| Self::shift_spans(x)),
+                ).len(),
+            decreases n - i,
+        {
+            let r = self.take_run();
+            match r {
+                Some(x) => {
+                    proof {
+                        let m = o.take(i as int).map_values(|x: Run<Get<'a, V>>| Self::shift_spans(x));
+                        let m1 = o.take(i + 1).map_values(|x: Run<Get<'a, V>>| Self::shift_spans(x));
+                        assert(m1.drop_last() =~= m);
+                        assert(o.skip(i as int).skip(1) =~= o.skip(i + 1));
+                    }
+                    if i == n {
+                        return Some(x);
+                    }
+                    i = i + 1;
+                },
+                None => {
+                    return None;
+                },
+            }
+        }
+    }
+
+    #[inline(always)]
+    fn dup(&self) -> (r: Self) {
+        VerifiedRuns(VShiftable::dup(&self.0))
+    }
+
+    #[inline(always)]
+    fn get_pos(&self) -> (r: usize) {
+        VShiftable::get_pos(&self.0)
+    }
+
+    #[inline(always)]
+    fn get_max(&self) -> (r: usize) {
+        VShiftable::get_max(&self.0)
+    }
+
+    #[inline(always)]
+    fn set_max(&mut self, end: usize) {
+        VShiftable::set_max(&mut self.0, end)
+    }
+
+    #[inline(always)]
+    fn advance_to(&mut self, target: usize) {
+        VShiftable::advance_to(&mut self.0, target)
+    }
+
+    #[inline(always)]
+    fn advance_by(&mut self, amount: usize) {
+        VShiftable::advance_by(&mut self.0, amount)
+    }
+
+    #[inline(always)]
+    fn seek_to(&mut self, at: usize) -> (r: Option<Run<Get<'a, V>>>) {
+        let p = VShiftable::get_pos(&self.0);
+        if at < p {
+            return None;
+        }
+        VShiftable::advance_to(&mut self.0, at);
+        let r = self.take_run();
+        proof {
+            let (o, k) = (old(self).shift_left(), at - p);
+            if k < o.len() {
+                assert(o.skip(k).skip(Self::shift_spans(r->Some_0).len() as int) =~= o.skip(
+                    k + Self::shift_spans(r->Some_0).len(),
+                ));
+            }
+        }
+        r
+    }
+
+    #[inline(always)]
+    fn shift(&mut self, range: Range<usize>) {
+        VShiftable::shift(&mut self.0, range)
+    }
+
+    #[inline(always)]
+    fn shift_next(&mut self, range: Range<usize>) -> (r: Option<Run<Get<'a, V>>>) {
+        VShiftable::shift(&mut self.0, range);
+        self.take_run()
+    }
+}
+
+impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedRuns<'a, V, C, K> {
+    /// The iterator's repositioning model ([`VShiftable`]) in the terms
+    /// of its own specification: the values it ranges over are its
+    /// column's, each a run of one; it stands where its iterator of
+    /// values does; its items are the runs of what that has left.
+    pub proof fn lemma_shift_model(&self)
+        ensures
+            self.shift_vals().len() == self.iter().column().len(),
+            forall|p: int|
+                0 <= p < self.iter().column().len() ==> {
+                    &&& (#[trigger] self.shift_vals()[p]).count == 1
+                    &&& self.shift_vals()[p].value.sv() == self.iter().column()[p]
+                },
+            self.shift_at() == self.iter().pos(),
+            self.shift_items() == runs_of(self.iter().items()),
+            self.shift_left() == unit_runs(self.iter().items()),
+            !Self::shift_unit(),
+    {
+        self.0.lemma_shift_model();
+        <Get<'a, V> as VGet>::lemma_svs(self.0.shift_vals());
+    }
+
+    /// A lookahead: the runs wrapped so that the run they give next can
+    /// be looked at first ([`VerifiedUnshift::peek`]), as the old API's
+    /// `Shiftable::unshift` gives. (It cannot be moved to a window: its
+    /// items are not each one value.)
+    #[inline(always)]
+    pub fn unshift(self) -> (r: VerifiedUnshift<Self>)
+        ensures
+            r.unshift_vals() == self.shift_vals(),
+            r.unshift_left() == self.shift_items(),
+    {
+        VerifiedUnshift::new(self)
+    }
+
+    /// The runs of each of `ranges` of the column, one range after
+    /// another, as the old API's `Shiftable::ranges` gives them: a run
+    /// that crosses the edge of a range is cut there. The ranges ascend
     /// and do not overlap (they may touch), and start where the iterator
     /// stands or later.
     ///

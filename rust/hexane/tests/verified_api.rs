@@ -17830,3 +17830,120 @@ fn a_delta_iterator_repositions_as_the_old_one_does() {
         delta_shifted::<Option<u64>>(seed);
     }
 }
+
+// ── Repositioning the runs of a column ─────────────────────────────────────
+
+fn runs_shifted<T: Kind>() {
+    for seed in 1..=4u64 {
+        let mut rng = Rng(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) ^ 0x541b);
+        let budget = [2, 3, 8, 64][rng.below(4)];
+        // values that lie together in runs
+        let base: Vec<T> = rng.values(40);
+        let mut model: Vec<T> = vec![];
+        for x in base {
+            for _ in 0..1 + rng.below(4) {
+                model.push(x.clone());
+            }
+        }
+        let (v, c) = both_with(&model, budget);
+        let len = model.len();
+        for _ in 0..20 {
+            // the runs of ranges, from a place the runs have moved on to
+            let a = rng.below(len + 2);
+            let rs = some_ranges(&mut rng, a, len);
+            let mut x = v.iter().runs();
+            let mut y = c.iter().runs();
+            VShiftable::advance_to(&mut x, a);
+            Shiftable::advance_to(&mut y, a);
+            let new: Vec<(usize, T)> = x.ranges(&rs).map(|r| (r.count, T::keep(r.value))).collect();
+            let old_: Vec<(usize, T)> = y
+                .ranges(rs.clone())
+                .map(|r| (r.count, old::<T>(r.value)))
+                .collect();
+            assert_eq!(new, old_, "{rs:?}");
+            let flat: Vec<T> = new
+                .iter()
+                .flat_map(|(n, x)| std::iter::repeat_n(x.clone(), *n))
+                .collect();
+            assert_eq!(flat, ranges_of(&model, &rs), "{rs:?}");
+
+            // a lookahead, looked at and walked
+            let mut u = v.iter().runs().unshift();
+            let mut w = c.iter().runs().unshift();
+            for _ in 0..6 {
+                match rng.below(3) {
+                    0 => assert_eq!(
+                        u.peek().map(|r| (r.count, T::keep(r.value))),
+                        w.peek().map(|r| (r.count, old::<T>(r.value)))
+                    ),
+                    1 => assert_eq!(
+                        u.next().map(|r| (r.count, T::keep(r.value))),
+                        w.next().map(|r| (r.count, old::<T>(r.value)))
+                    ),
+                    _ => {
+                        let n = rng.below(4);
+                        assert_eq!(
+                            u.nth(n).map(|r| (r.count, T::keep(r.value))),
+                            w.nth(n).map(|r| (r.count, old::<T>(r.value)))
+                        );
+                    }
+                }
+            }
+
+            // the moves of `VShiftable`, beside `Shiftable`'s
+            let mut x = v.iter().runs();
+            let mut y = c.iter().runs();
+            for _ in 0..6 {
+                let p = VShiftable::get_pos(&x);
+                assert_eq!(p, Shiftable::get_pos(&y));
+                assert_eq!(VShiftable::get_max(&x), Shiftable::get_max(&y));
+                assert_eq!(VShiftable::get_range(&x), Shiftable::get_range(&y));
+                let t = p + rng.below(15);
+                match rng.below(6) {
+                    0 => {
+                        VShiftable::set_max(&mut x, t);
+                        Shiftable::set_max(&mut y, t);
+                    }
+                    1 => {
+                        VShiftable::advance_to(&mut x, t);
+                        Shiftable::advance_to(&mut y, t);
+                    }
+                    2 => {
+                        VShiftable::advance_by(&mut x, t - p);
+                        Shiftable::advance_by(&mut y, t - p);
+                    }
+                    3 => {
+                        let r = t..t + rng.below(20);
+                        VShiftable::shift(&mut x, r.clone());
+                        Shiftable::shift(&mut y, r);
+                    }
+                    4 => {
+                        let r = t..t + rng.below(20);
+                        let a = VShiftable::shift_next(&mut x, r.clone())
+                            .map(|r| (r.count, T::keep(r.value)));
+                        let b =
+                            Shiftable::shift_next(&mut y, r).map(|r| (r.count, old::<T>(r.value)));
+                        assert_eq!(a, b);
+                    }
+                    _ => {
+                        let a = VShiftable::seek_to(&mut x, t).map(|r| (r.count, T::keep(r.value)));
+                        let b = Shiftable::seek_to(&mut y, t).map(|r| (r.count, old::<T>(r.value)));
+                        assert_eq!(a, b);
+                    }
+                }
+                assert_eq!(
+                    x.next().map(|r| (r.count, T::keep(r.value))),
+                    y.next().map(|r| (r.count, old::<T>(r.value)))
+                );
+            }
+        }
+    }
+}
+
+/// The runs of a verified column reposition as `Column`'s do: the runs
+/// of several ranges in turn (`ranges`), a lookahead (`unshift`), and
+/// each move of `VShiftable` beside `Shiftable`'s.
+#[test]
+fn runs_reposition_as_the_old_ones_do() {
+    for_each_kind!(runs_shifted);
+}

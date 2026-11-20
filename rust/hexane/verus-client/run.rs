@@ -4236,3 +4236,29 @@ fn repositioned_others() {
         [flags_of(&marks[..2])]
     );
 }
+
+// ── Repositioning the runs of a column ─────────────────────────────────────
+
+#[test]
+fn repositioned_runs() {
+    let col = VerifiedColumn::<u64>::from_values(&[7, 7, 7, 8, 8, 9]);
+    let r = verus_client::run_at_range(&col, 1, 5).unwrap();
+    assert_eq!((r.count, r.value), (2, 7));
+    assert!(verus_client::run_at_range(&col, 6, 9).is_none());
+    let r = verus_client::run_sought(&col, 3).unwrap();
+    assert_eq!((r.count, r.value), (2, 8));
+    assert!(verus_client::run_sought(&col, 6).is_none());
+    let r = verus_client::run_after(&col, 4).unwrap();
+    assert_eq!((r.count, r.value), (1, 8));
+    let r = verus_client::run_over_range(&col, 2, 4).unwrap();
+    assert_eq!((r.count, r.value), (1, 7));
+    let r = verus_client::run_peeked(&col).unwrap();
+    assert_eq!((r.count, r.value), (3, 7));
+    let (mut u, w) =
+        verus_client::runs_told_by_adapters(col.iter().runs(), col.iter().runs(), &[2..4]);
+    assert_eq!(u.next().map(|r| (r.count, r.value)), Some((3, 7)));
+    assert_eq!(
+        w.map(|r| (r.count, r.value)).collect::<Vec<_>>(),
+        [(1, 7), (1, 8)]
+    );
+}

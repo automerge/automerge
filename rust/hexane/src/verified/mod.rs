@@ -647,7 +647,7 @@ pub use prefix_iter::{
     VerifiedPrefixIter, VerifiedPrefixIterState, VerifiedPrefixSeek, VerifiedPrefixedValue,
 };
 #[cfg(verus_keep_ghost)]
-pub use shift::lemma_svs_windows;
+pub use shift::{lemma_svs_windows, run_units, unit_runs, units_of_runs};
 pub use shift::{VShiftable, VerifiedRanges, VerifiedUnshift};
 #[cfg(verus_keep_ghost)]
 pub use sums::{

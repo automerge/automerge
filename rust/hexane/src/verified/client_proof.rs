@@ -406,11 +406,11 @@ use super::{
     lemma_head_run_max, lemma_run_values_add, lemma_run_values_push, lemma_runs_first,
     lemma_runs_of_values, lemma_sorted, lemma_sum_bound, lemma_sum_mono, lemma_sum_range,
     lemma_sum_run, lemma_sums_fit, lemma_svs_windows, mapped, min_i, only, past, produced,
-    ranges_ascend, refused, run_values, runs_of, scan_of, scan_taken, sorted, sorted_for,
-    splice_does, spliced_cut, splices_do, sum_of, summed, sums_fit, times, total_len,
-    total_str_len, window, windows, AccIndex, Get, LenIndex, RawColumn, RawColumnIter, SumIndex,
-    VAccum, VAccumulated, VAdds, VAmount, VCodec, VCount, VDelta, VDeltaValue, VGet, VGroup,
-    VIndex, VKeeps, VNewtype, VShiftable, VSpec, VSum, VSummed, VValue, VerifiedAccColumn,
+    ranges_ascend, refused, run_units, run_values, runs_of, scan_of, scan_taken, sorted,
+    sorted_for, splice_does, spliced_cut, splices_do, sum_of, summed, sums_fit, times, total_len,
+    total_str_len, unit_runs, window, windows, AccIndex, Get, LenIndex, RawColumn, RawColumnIter,
+    SumIndex, VAccum, VAccumulated, VAdds, VAmount, VCodec, VCount, VDelta, VDeltaValue, VGet,
+    VGroup, VIndex, VKeeps, VNewtype, VShiftable, VSpec, VSum, VSummed, VValue, VerifiedAccColumn,
     VerifiedAccIter, VerifiedAccIterState, VerifiedAccSeek, VerifiedAccValue, VerifiedColumn,
     VerifiedDecoder, VerifiedDeltaColumn, VerifiedDeltaDecoder, VerifiedDeltaEdit,
     VerifiedDeltaEncoder, VerifiedDeltaEncoderState, VerifiedDeltaIter, VerifiedDeltaIterState,
@@ -18575,6 +18575,221 @@ fn acc_told_by_adapters<'a, 'r, V: VAccumulated + VValue<C>, C: VCodec>(
         r.1.ranges_left() == windows(b.accumulated_items(), rs@),
 {
     (a.unshift(), b.ranges(rs))
+}
+
+// ── Repositioning the runs of a column ─────────────────────────────────────
+
+/// The first run of a range of a column, the runs moved there by
+/// `VShiftable`'s own move: as many equal values as lie together from
+/// the range's start, inside it. For every value type and codec.
+#[allow(dead_code)]
+fn run_at_range<'a, V: VValue<C>, C: VCodec>(col: &'a VerifiedColumn<V, C>, a: usize, b: usize) -> (r: Option<
+    Run<Get<'a, V>>,
+>)
+    ensures
+        match r {
+            Some(run) => {
+                &&& a < b && a < col@.len()
+                &&& 1 <= run.count && a + run.count <= b && a + run.count <= col@.len()
+                &&& forall|i: int| a <= i < a + run.count ==> col@[i] == run.value.sv()
+            },
+            None => !(a < b && a < col@.len()),
+        },
+{
+    let mut runs = col.iter().runs();
+    proof {
+        runs.lemma_shift_model();
+    }
+    let ghost v = runs.shift_vals();
+    let r = VShiftable::shift_next(&mut runs, a..b);
+    proof {
+        if let Some(x) = r {
+            let w = window(v, a as int, b as int);
+            assert forall|i: int| a <= i < a + x.count implies col@[i] == x.value.sv() by {
+                assert(run_units(x)[i - a] == w[i - a]);
+            }
+        }
+    }
+    r
+}
+
+/// The run from a place of a column, the runs moved there: as many equal
+/// values as lie together from it. For every value type and codec.
+#[allow(dead_code)]
+fn run_sought<'a, V: VValue<C>, C: VCodec>(col: &'a VerifiedColumn<V, C>, at: usize) -> (r: Option<Run<Get<'a, V>>>)
+    ensures
+        r is Some <==> at < col@.len(),
+        r matches Some(run) ==> {
+            &&& 1 <= run.count && at + run.count <= col@.len()
+            &&& forall|i: int| at <= i < at + run.count ==> col@[i] == run.value.sv()
+        },
+{
+    let mut runs = col.iter().runs();
+    proof {
+        runs.lemma_shift_model();
+        <Get<'a, V> as VGet>::lemma_svs(runs.iter().items());
+    }
+    let ghost o = runs.shift_left();
+    let r = VShiftable::seek_to(&mut runs, at);
+    proof {
+        if let Some(x) = r {
+            assert forall|i: int| at <= i < at + x.count implies col@[i] == x.value.sv() by {
+                assert(run_units(x)[i - at] == o.skip(at as int)[i - at]);
+            }
+        }
+    }
+    r
+}
+
+/// The first run after some values, the runs moved on by them. For every
+/// value type and codec.
+#[allow(dead_code)]
+fn run_after<'a, V: VValue<C>, C: VCodec>(col: &'a VerifiedColumn<V, C>, n: usize) -> (r: Option<Run<Get<'a, V>>>)
+    ensures
+        r is Some <==> n < col@.len(),
+        r matches Some(run) ==> 1 <= run.count && n + run.count <= col@.len() && col@[n as int] == run.value.sv(),
+{
+    let mut runs = col.iter().runs();
+    proof {
+        runs.lemma_shift_model();
+        <Get<'a, V> as VGet>::lemma_svs(runs.iter().items());
+    }
+    let ghost (o, i0) = (runs.shift_left(), runs.iter().items());
+    VShiftable::advance_by(&mut runs, n);
+    let ghost i1 = runs.iter().items();
+    proof {
+        runs.lemma_shift_model();
+        runs.iter().lemma_items_len();
+        lemma_runs_first(i1);
+        assert(unit_runs(i1) == past(o, n as int));
+        assert(o.len() == col@.len());
+        assert(i1.len() == past(o, n as int).len());
+        if n < col@.len() {
+            assert(unit_runs(i1)[0] == o[n as int]);
+            assert(i1[0] == i0[n as int]);
+        }
+        assert(runs.shift_items() == runs_of(i1));
+    }
+    let r = VShiftable::shift_step(&mut runs);
+    proof {
+        if let Some(x) = r {
+            assert(x == runs_of(i1)[0]);
+        }
+    }
+    r
+}
+
+/// The first run of a range of a column, through a walk over ranges. For
+/// every value type and codec.
+#[allow(dead_code)]
+fn run_over_range<'a, V: VValue<C>, C: VCodec>(col: &'a VerifiedColumn<V, C>, a: usize, b: usize) -> (r: Option<
+    Run<Get<'a, V>>,
+>)
+    ensures
+        match r {
+            Some(run) => {
+                &&& a < b && a < col@.len()
+                &&& 1 <= run.count && a + run.count <= b && a + run.count <= col@.len()
+                &&& forall|i: int| a <= i < a + run.count ==> col@[i] == run.value.sv()
+            },
+            None => !(a < b && a < col@.len()),
+        },
+{
+    let runs = col.iter().runs();
+    proof {
+        runs.lemma_shift_model();
+    }
+    let ghost v = runs.shift_vals();
+    let mut rs: Vec<Range<usize>> = Vec::new();
+    rs.push(a..b);
+    let mut walk = runs.ranges(rs.as_slice());
+    let r = walk.next();
+    proof {
+        let f = |r: Range<usize>| window(v, r.start as int, r.end as int);
+        let w = window(v, a as int, b as int);
+        assert(rs@ =~= seq![a..b]);
+        assert(rs@.map_values(f) =~= seq![w]);
+        let m = rs@.map_values(f);
+        assert(m.drop_last() =~= Seq::<Seq<Run<Get<'a, V>>>>::empty());
+        assert(concat(m) == concat(m.drop_last()) + m.last());
+        assert(windows(v, rs@) =~= w);
+        if let Some(x) = r {
+            assert forall|i: int| a <= i < a + x.count implies col@[i] == x.value.sv() by {
+                assert(run_units(x)[i - a] == w[i - a]);
+            }
+        }
+    }
+    r
+}
+
+/// The first run of a column, looked at through a lookahead. For every
+/// value type and codec.
+#[allow(dead_code)]
+fn run_peeked<'a, V: VValue<C>, C: VCodec>(col: &'a VerifiedColumn<V, C>) -> (r: Option<Run<Get<'a, V>>>)
+    ensures
+        r is Some <==> col@.len() > 0,
+        r matches Some(run) ==> 1 <= run.count <= col@.len() && col@[0] == run.value.sv(),
+{
+    let runs = col.iter().runs();
+    proof {
+        runs.lemma_shift_model();
+        runs.iter().lemma_items_len();
+        lemma_runs_first(runs.iter().items());
+        <Get<'a, V> as VGet>::lemma_svs(runs.iter().items());
+    }
+    let u = runs.unshift();
+    match u.peek() {
+        Some(x) => Some(*x),
+        None => None,
+    }
+}
+
+/// What the lookahead and the walk over ranges of a column's runs are,
+/// told back. For every value type and codec.
+#[allow(dead_code)]
+fn runs_told_by_adapters<'a, 'r, V: VValue<C>, C: VCodec>(
+    a: VerifiedRuns<'a, V, C>,
+    b: VerifiedRuns<'a, V, C>,
+    rs: &'r [Range<usize>],
+) -> (r: (VerifiedUnshift<VerifiedRuns<'a, V, C>>, VerifiedRanges<'r, VerifiedRuns<'a, V, C>>))
+    ensures
+        r.0.unshift_vals() == a.shift_vals(),
+        r.0.unshift_left() == a.shift_items(),
+        r.1.ranges_vals() == b.shift_vals(),
+        r.1.ranges_left() == windows(b.shift_vals(), rs@),
+{
+    (a.unshift(), b.ranges(rs))
+}
+
+/// What a seek of any repositionable iterator does, told back: of the
+/// item from the place sought, and of one that stands for one value.
+#[allow(dead_code)]
+fn told_by_shift_seek<I: VShiftable>(it: &mut I, at: usize) -> (r: Option<I::Item>)
+    ensures
+        final(it).shift_vals() == old(it).shift_vals(),
+        at < old(it).shift_at() ==> {
+            &&& r is None
+            &&& final(it).shift_left() == old(it).shift_left()
+            &&& final(it).shift_at() == old(it).shift_at()
+        },
+        at >= old(it).shift_at() ==> {
+            let (o, k) = (old(it).shift_left(), at - old(it).shift_at());
+            &&& k < o.len() ==> (r matches Some(x) && {
+                let n = I::shift_spans(x).len() as int;
+                &&& 0 < n <= o.len() - k
+                &&& I::shift_spans(x) == o.skip(k).take(n)
+                &&& final(it).shift_left() == o.skip(k + n)
+                &&& final(it).shift_at() == at + n
+            })
+            &&& k < o.len() && I::shift_unit() ==> {
+                &&& r == Some(o[k])
+                &&& final(it).shift_left() == o.skip(k + 1)
+                &&& final(it).shift_at() == at + 1
+            }
+            &&& k >= o.len() ==> r is None && final(it).shift_left().len() == 0
+        },
+{
+    VShiftable::seek_to(it, at)
 }
 
 } // verus!
