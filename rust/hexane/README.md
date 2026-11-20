@@ -602,6 +602,45 @@ first and values outside the domain last.
   panic on, fails to load, and so does a delta column of more than
   `i64::MAX`.
 
+### The verified API
+
+`hexane::verified` offers what the old API offers, with a specification
+on every public function in terms of the column's values, so that a
+client checked by Verus can build on it (the acceptance clients show
+how): columns of every built-in value type (the numbers, `bool`,
+`NonZeroU32`, byte strings and strings, their options but
+`Option<String>`, and a client's types that wrap one), plain, prefix
+(sums and accumulators) and delta columns; their loads (also run by
+run), saves, splices, edit cursors and `copy_ranges`; their iterators,
+searches and runs; the streaming encoders and decoders; the raw
+column; both codecs; and the repositioning of every iterator
+(`VShiftable`, which a client's own iterator may implement, with a
+lookahead and a walk over ranges).
+
+What it trusts, besides Verus, Z3 and vstd's specifications of the
+standard library:
+
+* the helpers that panic, each only in that it does not return, and the
+  constructors of `PackError`;
+* three edits of a range of a `Vec` (`index::splice_vec`,
+  `rle::writer::splice_bytes`, the raw column's `drain_slabs`), whose
+  specifications are assumed, and four helpers that claim nothing
+  (`rle::writer::add`, `recycle`, `carry_budget`, `take_buf`);
+* for strings, the specification of `core::str::from_utf8`, and that two
+  `str`s of the same characters are one;
+* of an iterator a function takes, the laws Verus asks of every
+  iterator; and of a client's own repositionable iterator, the laws of
+  `VShiftable` (a client checked by Verus proves them).
+
+That a splice ends is proved where it takes a slice (and so for
+`from_values`, `insert`, `push` and the deletes); of a caller's
+iterator, and of a delta column's splices, it is not.
+
+Not mirrored: `Column::find_by_value` and `find_by_value_range`, which
+only the delta column's own index weight reaches (the delta column's
+`find_by_value` is verified), and `Option<String>`, which would need
+one more trusted line.
+
 ## Development
 
 ```bash
