@@ -17169,3 +17169,363 @@ mod bijou_delta_cursors {
         }
     }
 }
+
+// ── Ranges copied from one column into another ─────────────────────────────
+
+use hexane::Splice;
+
+/// Splices for `copy_ranges` of a source of `src_len` values into a
+/// column of `dst_len`: in order in both columns, some deleting, some
+/// copying nothing, some with a range past the source's end, reversed,
+/// or to `usize::MAX`.
+fn some_splices(rng: &mut Rng, dst_len: usize, src_len: usize) -> Vec<Splice> {
+    let mut out = vec![];
+    let (mut at, mut from) = (0usize, 0usize);
+    for _ in 0..rng.below(5) {
+        let pos = at + rng.below(dst_len - at + 1);
+        let delete = if rng.below(3) == 0 {
+            0
+        } else {
+            rng.below((dst_len - pos).min(5) + 1)
+        };
+        let start = from + rng.below(src_len.saturating_sub(from) + 2);
+        let end = match rng.below(6) {
+            0 => start,
+            1 => usize::MAX,
+            2 => start.saturating_sub(1).max(from),
+            _ => start + rng.below(20),
+        };
+        out.push(Splice {
+            pos,
+            delete,
+            range: start..end,
+        });
+        at = pos + delete;
+        from = from.max(end);
+        if end == usize::MAX {
+            break;
+        }
+    }
+    out
+}
+
+/// What `splices` make of `dst`, with the source `src`, as lists.
+fn applied_to<T: Clone>(dst: &[T], src: &[T], splices: &[Splice]) -> Vec<T> {
+    let mut out = vec![];
+    let mut at = 0;
+    for sp in splices {
+        out.extend_from_slice(&dst[at..sp.pos]);
+        let (s, e) = (sp.range.start.min(src.len()), sp.range.end.min(src.len()));
+        if s < e {
+            out.extend_from_slice(&src[s..e]);
+        }
+        at = sp.pos + sp.delete;
+    }
+    out.extend_from_slice(&dst[at..]);
+    out
+}
+
+/// Whether one of `splices` deletes a value or copies one.
+fn splices_change(splices: &[Splice], src_len: usize) -> bool {
+    splices
+        .iter()
+        .any(|sp| sp.delete > 0 || sp.range.start.min(src_len) < sp.range.end.min(src_len))
+}
+
+fn copies<T: Kind>()
+where
+    for<'b> <T as ColumnValueRef>::Get<'b>: hexane::AsColumnRef<T>,
+{
+    for seed in 1..=6u64 {
+        let mut rng = Rng(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) ^ 0xc097);
+        let budget = [2, 3, 8, 64][rng.below(4)];
+        let mut model: Vec<T> = rng.values(150);
+        let (mut v, mut c) = both_with(&model, budget);
+        for round in 0..12 {
+            // a source long enough, now and then, and in slabs of the
+            // same budget, for the copy to keep its slabs
+            let n = [0, 3, 40, 400][rng.below(4)];
+            let src: Vec<T> = rng.values(n);
+            let sb = if round % 3 == 0 { 64 } else { budget };
+            let (vs, cs) = both_with(&src, sb);
+            let splices = some_splices(&mut rng, model.len(), src.len());
+            let change = splices_change(&splices, src.len());
+            let (s, t) = (v.iter().suspend(), c.iter().suspend());
+            v.copy_ranges(vs, &splices);
+            c.copy_ranges(cs, splices.iter().cloned());
+            model = applied_to(&model, &src, &splices);
+            check(&v, &c, &model);
+            // an edit is counted exactly where a splice deletes a value or
+            // copies one
+            assert_eq!(s.try_resume(&v).is_ok(), !change, "{splices:?}");
+            assert_eq!(t.try_resume(&c).is_ok(), !change, "{splices:?}");
+        }
+        check_loads(&v, &c, &model);
+    }
+}
+
+/// `copy_ranges` of the verified API does what `Column`'s does: the same
+/// values, in the same slabs, saved as the same bytes, whichever way the
+/// copy runs; the values are what the splices make of lists; and an edit
+/// is counted exactly where a splice changes something.
+#[test]
+fn copies_as_the_old_api_does() {
+    for_each_kind!(copies);
+}
+
+fn sum_copies<T: Totalled>()
+where
+    for<'b> <T as ColumnValueRef>::Get<'b>: hexane::AsColumnRef<T>,
+{
+    for seed in 1..=4u64 {
+        let mut rng = Rng(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) ^ 0xc098);
+        let budget = [2, 3, 8, 64][rng.below(4)];
+        let mut p = VerifiedPrefixColumn::<T>::with_max_segments(budget);
+        let mut v = VerifiedColumn::<T>::with_max_segments(budget);
+        let mut c = PrefixColumn::<T>::with_max_segments(budget);
+        let mut model: Vec<T> = rng.values(150);
+        p.splice(0, 0, &lent(&model));
+        v.splice(0, 0, &lent(&model));
+        c.splice(0, 0, model.iter().cloned());
+        for _ in 0..10 {
+            let n = [0, 3, 40, 400][rng.below(4)];
+            let src: Vec<T> = rng.values(n);
+            let mut ps = VerifiedPrefixColumn::<T>::with_max_segments(budget);
+            let mut vs = VerifiedColumn::<T>::with_max_segments(budget);
+            let mut cs = PrefixColumn::<T>::with_max_segments(budget);
+            ps.splice(0, 0, &lent(&src));
+            vs.splice(0, 0, &lent(&src));
+            cs.splice(0, 0, src.iter().cloned());
+            let splices = some_splices(&mut rng, model.len(), src.len());
+            p.copy_ranges(ps, &splices);
+            v.copy_ranges(vs, &splices);
+            c.copy_ranges(cs, splices.iter().cloned());
+            model = applied_to(&model, &src, &splices);
+            check_sums(&p, &v, &c, &model, true);
+            check_sum_reads(&mut rng, &p, &v, &model);
+            check_prefix_reads(&mut rng, &p, &c, &model);
+        }
+        check_sum_loads(&p, &c, &model);
+    }
+}
+
+/// `copy_ranges` of a prefix column: the values of a plain column's, in
+/// the same slabs as `PrefixColumn`'s, and an index that answers with the
+/// sums of the values as they are after the copy.
+#[test]
+fn copies_of_a_prefix_column() {
+    for_each_sum!(sum_copies);
+}
+
+// a reversed range is one a splice may hold: it copies nothing
+#[allow(clippy::reversed_empty_ranges)]
+#[test]
+fn copies_step_by_step() {
+    let mut v = VerifiedColumn::<u64>::from_values(&[1, 2, 3]);
+    let src = VerifiedColumn::<u64>::from_values(&[7, 8, 9, 10]);
+    let splices = [
+        Splice {
+            pos: 1,
+            delete: 1,
+            range: 1..3,
+        },
+        Splice {
+            pos: 3,
+            delete: 0,
+            range: 3..100,
+        },
+    ];
+    v.copy_ranges(src, &splices);
+    assert_eq!(v.to_vec(), [1, 8, 9, 3, 10]);
+    // the default splice: all of the source, at the front
+    let src = VerifiedColumn::<u64>::from_values(&[5, 6]);
+    v.copy_ranges(src, &[Splice::default()]);
+    assert_eq!(v.to_vec(), [5, 6, 1, 8, 9, 3, 10]);
+    // no splices, and splices that change nothing
+    let src = VerifiedColumn::<u64>::from_values(&[4]);
+    v.copy_ranges(src, &[]);
+    let src = VerifiedColumn::<u64>::from_values(&[4]);
+    let none = [Splice {
+        pos: 2,
+        delete: 0,
+        range: 5..2,
+    }];
+    v.copy_ranges(src, &none);
+    assert_eq!(v.to_vec(), [5, 6, 1, 8, 9, 3, 10]);
+}
+
+/// Splices out of order or out of bounds panic, in both APIs, in the
+/// same words.
+#[cfg(panic = "unwind")]
+#[test]
+fn copies_out_of_order_panic() {
+    let bad: [&[Splice]; 3] = [
+        &[
+            Splice {
+                pos: 2,
+                delete: 1,
+                range: 0..1,
+            },
+            Splice {
+                pos: 1,
+                delete: 0,
+                range: 1..2,
+            },
+        ],
+        &[Splice {
+            pos: 3,
+            delete: 2,
+            range: 0..1,
+        }],
+        &[
+            Splice {
+                pos: 0,
+                delete: 0,
+                range: 2..4,
+            },
+            Splice {
+                pos: 1,
+                delete: 0,
+                range: 3..4,
+            },
+        ],
+    ];
+    for splices in bad {
+        let mut v = VerifiedColumn::<u64>::from_values(&[1, 2, 3, 4]);
+        let mut c = Column::<u64>::from_values(vec![1, 2, 3, 4]);
+        let vs = VerifiedColumn::<u64>::from_values(&[7, 8, 9, 10]);
+        let cs = Column::<u64>::from_values(vec![7, 8, 9, 10]);
+        let new = panic_of(std::panic::AssertUnwindSafe(|| v.copy_ranges(vs, splices)));
+        let old = panic_of(std::panic::AssertUnwindSafe(|| {
+            c.copy_ranges(cs, splices.iter().cloned())
+        }));
+        assert!(new.is_some(), "{splices:?}");
+        assert_eq!(new, old, "{splices:?}");
+    }
+}
+
+// ── Ranges copied from one delta column into another ────────────────────────
+
+fn delta_copies<T: Deltad>(seed: u64, max_segments: Option<usize>) {
+    let mut rng = Rng(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) ^ 0xdc09);
+    let mut last = 0;
+    let mut some = |rng: &mut Rng, n: usize| -> Vec<T> {
+        (0..n)
+            .map(|_| {
+                let (v, l) = T::near(rng, last);
+                last = l;
+                v
+            })
+            .collect()
+    };
+    let made = |values: &[T], m: Option<usize>| match m {
+        Some(m) => {
+            let mut v = VerifiedDeltaColumn::<T>::with_max_segments(m);
+            let mut c = DeltaColumn::<T>::with_max_segments(m);
+            v.splice(0, 0, values);
+            c.splice(0, 0, values.to_vec());
+            (v, c)
+        }
+        None => (
+            VerifiedDeltaColumn::<T>::from_values(values),
+            DeltaColumn::<T>::from_values(values.to_vec()),
+        ),
+    };
+    let n = rng.below(150);
+    let mut model = some(&mut rng, n);
+    let (mut v, mut c) = made(&model, max_segments);
+    for round in 0..12 {
+        let n = [0, 3, 40, 400][rng.below(4)];
+        let src = some(&mut rng, n);
+        // in slabs of the same budget now and then, for the copy to keep
+        // the source's slabs
+        let m = if round % 3 == 0 {
+            Some(64)
+        } else {
+            max_segments
+        };
+        let (vs, cs) = made(&src, m);
+        let splices = some_splices(&mut rng, model.len(), src.len());
+        let change = splices_change(&splices, src.len());
+        let (s, t) = (v.iter().suspend(), c.iter().suspend());
+        v.copy_ranges(vs, &splices);
+        c.copy_ranges(cs, splices.iter().cloned());
+        model = applied_to(&model, &src, &splices);
+        delta_cursor_check(&v, &c, &model);
+        assert_eq!(s.try_resume(&v).is_ok(), !change, "{splices:?}");
+        assert_eq!(t.try_resume(&c).is_ok(), !change, "{splices:?}");
+    }
+}
+
+/// `copy_ranges` of a verified delta column does what `DeltaColumn`'s
+/// does: the same values in the same slabs, saved as the same bytes,
+/// whichever way the copy runs; the values are what the splices make of
+/// lists; and an edit is counted exactly where a splice changes
+/// something.
+#[test]
+fn delta_copies_as_the_old_api_does() {
+    for seed in 0..6 {
+        let m = [None, Some(2), Some(5)][seed as usize % 3];
+        delta_copies::<u32>(seed, m);
+        delta_copies::<u64>(seed, m);
+        delta_copies::<i32>(seed, m);
+        delta_copies::<i64>(seed, m);
+        delta_copies::<usize>(seed, m);
+        delta_copies::<Option<u32>>(seed, m);
+        delta_copies::<Option<u64>>(seed, m);
+        delta_copies::<Option<i32>>(seed, m);
+        delta_copies::<Option<i64>>(seed, m);
+        delta_copies::<Option<usize>>(seed, m);
+    }
+}
+
+/// Splices out of order panic in both APIs, in the same words; values
+/// that would span 2^63 or more panic in both too, and leave the
+/// verified column an empty one, which can be used.
+#[cfg(panic = "unwind")]
+#[test]
+fn delta_copies_panic_as_the_old_ones_do() {
+    let bad = [
+        Splice {
+            pos: 2,
+            delete: 0,
+            range: 0..1,
+        },
+        Splice {
+            pos: 1,
+            delete: 0,
+            range: 1..2,
+        },
+    ];
+    let mut v = VerifiedDeltaColumn::<i64>::from_values(&[1, 2, 3]);
+    let mut c = DeltaColumn::<i64>::from_values(vec![1, 2, 3]);
+    let vs = VerifiedDeltaColumn::<i64>::from_values(&[7, 8]);
+    let cs = DeltaColumn::<i64>::from_values(vec![7, 8]);
+    let new = panic_of(std::panic::AssertUnwindSafe(|| v.copy_ranges(vs, &bad)));
+    let old = panic_of(std::panic::AssertUnwindSafe(|| {
+        c.copy_ranges(cs, bad.iter().cloned())
+    }));
+    assert!(new.is_some());
+    assert_eq!(new, old);
+
+    let mut v = VerifiedDeltaColumn::<i64>::from_values(&[i64::MIN]);
+    let mut c = DeltaColumn::<i64>::from_values(vec![i64::MIN]);
+    let vs = VerifiedDeltaColumn::<i64>::from_values(&[i64::MAX]);
+    let cs = DeltaColumn::<i64>::from_values(vec![i64::MAX]);
+    let onto = [Splice {
+        pos: 1,
+        ..Default::default()
+    }];
+    let new = panic_of(std::panic::AssertUnwindSafe(|| v.copy_ranges(vs, &onto)));
+    let old = panic_of(std::panic::AssertUnwindSafe(|| {
+        c.copy_ranges(cs, onto.iter().cloned())
+    }));
+    assert_eq!(
+        new.as_deref(),
+        Some("delta values out of domain: they would span 2^63 or more")
+    );
+    assert_eq!(new, old);
+    assert_eq!((v.len(), v.is_empty()), (0, true));
+    v.push(5);
+    assert_eq!(v.to_vec(), [5]);
+}

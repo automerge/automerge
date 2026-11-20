@@ -65,25 +65,25 @@ pub(crate) fn wrong_columns()
     panic!("splices normalized for columns of other lengths")
 }
 
-pub(crate) open spec fn min_i(a: int, b: int) -> int {
+pub open spec fn min_i(a: int, b: int) -> int {
     if a <= b { a } else { b }
 }
 
 /// The source items a splice's range copies: clamped to the source, and
 /// none for a reversed range.
-pub(crate) open spec fn copied<V>(src: Seq<V>, sp: Splice) -> Seq<V> {
+pub open spec fn copied<V>(src: Seq<V>, sp: Splice) -> Seq<V> {
     let s = min_i(sp.range.start as int, src.len() as int);
     let e = min_i(sp.range.end as int, src.len() as int);
     if s < e { src.subrange(s, e) } else { Seq::empty() }
 }
 
 /// Where the last of `sps` ends in the destination (0 for none).
-pub(crate) open spec fn end_of(sps: Seq<Splice>) -> int {
+pub open spec fn end_of(sps: Seq<Splice>) -> int {
     if sps.len() == 0 { 0 } else { sps.last().pos + sps.last().delete }
 }
 
 /// The destination's items up to where the last splice ends, edited.
-pub(crate) open spec fn produced<V>(dst: Seq<V>, src: Seq<V>, sps: Seq<Splice>) -> Seq<V>
+pub open spec fn produced<V>(dst: Seq<V>, src: Seq<V>, sps: Seq<Splice>) -> Seq<V>
     decreases sps.len(),
 {
     if sps.len() == 0 {
@@ -95,12 +95,12 @@ pub(crate) open spec fn produced<V>(dst: Seq<V>, src: Seq<V>, sps: Seq<Splice>) 
 }
 
 /// The destination with splices `sps` applied, one after another.
-pub(crate) open spec fn applied<V>(dst: Seq<V>, src: Seq<V>, sps: Seq<Splice>) -> Seq<V> {
+pub open spec fn applied<V>(dst: Seq<V>, src: Seq<V>, sps: Seq<Splice>) -> Seq<V> {
     produced(dst, src, sps) + dst.subrange(end_of(sps), dst.len() as int)
 }
 
 /// Splices ascending in the destination and inside it.
-pub(crate) open spec fn in_order(sps: Seq<Splice>, dst_len: int) -> bool {
+pub open spec fn in_order(sps: Seq<Splice>, dst_len: int) -> bool {
     &&& forall|i: int| 0 <= i < sps.len() ==> #[trigger] sps[i].pos + sps[i].delete <= dst_len
     &&& forall|i: int| 0 < i < sps.len() ==> sps[i - 1].pos + sps[i - 1].delete <= #[trigger] sps[i].pos
 }
@@ -113,6 +113,49 @@ pub(crate) open spec fn normal(sps: Seq<Splice>, src_len: int, dst_len: int) -> 
     &&& forall|i: int| 0 <= i < sps.len() ==> #[trigger] sps[i].range.start < sps[i].range.end
         || sps[i].delete > 0
     &&& forall|i: int| 0 < i < sps.len() ==> sps[i - 1].range.end <= #[trigger] sps[i].range.start
+}
+
+/// The ranges of the splices `sps` ascend in the source: each ends
+/// where the ones after it start, or before.
+pub open spec fn ranges_ascend(sps: Seq<Splice>) -> bool {
+    forall|i: int, j: int| #![trigger sps[i], sps[j]] 0 <= i < j < sps.len() ==> sps[i].range.end <= sps[j].range.start
+}
+
+/// What the splice `sp` does, with a source of `src_len` items: it
+/// deletes something, or copies something.
+pub open spec fn splice_does(sp: Splice, src_len: int) -> bool {
+    sp.delete > 0 || min_i(sp.range.start as int, src_len) < min_i(sp.range.end as int, src_len)
+}
+
+/// One of the splices `sps` does something (`splice_does`).
+pub open spec fn splices_do(sps: Seq<Splice>, src_len: int) -> bool {
+    exists|i: int| 0 <= i < sps.len() && splice_does(#[trigger] sps[i], src_len)
+}
+
+/// Whether one of the splices `sps` does something, with a source of
+/// `src_len` items.
+pub(crate) fn does_anything(sps: &[Splice], src_len: usize) -> (r: bool)
+    ensures
+        r == splices_do(sps@, src_len as int),
+{
+    let mut i: usize = 0;
+    while i < sps.len()
+        invariant
+            i <= sps.len(),
+            forall|j: int| 0 <= j < i ==> !splice_does(#[trigger] sps@[j], src_len as int),
+        decreases sps.len() - i,
+    {
+        let s = if sps[i].range.start < src_len { sps[i].range.start } else { src_len };
+        let e = if sps[i].range.end < src_len { sps[i].range.end } else { src_len };
+        if sps[i].delete > 0 || s < e {
+            proof {
+                assert(splice_does(sps@[i as int], src_len as int));
+            }
+            return true;
+        }
+        i += 1;
+    }
+    false
 }
 
 /// The columns of positions: `ids(n)` numbers a destination's items
@@ -169,7 +212,7 @@ proof fn lemma_produced_map<V, W>(d: Seq<V>, s: Seq<V>, sps: Seq<Splice>, f: spe
 }
 
 /// Splices in order make of mapped columns the mapped result.
-proof fn lemma_applied_map<V, W>(d: Seq<V>, s: Seq<V>, sps: Seq<Splice>, f: spec_fn(V) -> W)
+pub(crate) proof fn lemma_applied_map<V, W>(d: Seq<V>, s: Seq<V>, sps: Seq<Splice>, f: spec_fn(V) -> W)
     requires
         in_order(sps, d.len() as int),
     ensures
@@ -185,6 +228,72 @@ proof fn lemma_applied_map<V, W>(d: Seq<V>, s: Seq<V>, sps: Seq<Splice>, f: spec
     let x = produced(d, s, sps);
     let y = d.subrange(e, d.len() as int);
     assert((x + y).map_values(f) =~= x.map_values(f) + y.map_values(f));
+}
+
+/// Splices in order give only items that have a property every item of
+/// the destination and of the source has.
+pub(crate) proof fn lemma_applied_all<V>(d: Seq<V>, s: Seq<V>, sps: Seq<Splice>, p: spec_fn(V) -> bool)
+    requires
+        in_order(sps, d.len() as int),
+        forall|i: int| 0 <= i < d.len() ==> p(#[trigger] d[i]),
+        forall|i: int| 0 <= i < s.len() ==> p(#[trigger] s[i]),
+    ensures
+        forall|i: int| 0 <= i < applied(d, s, sps).len() ==> p(#[trigger] applied(d, s, sps)[i]),
+{
+    lemma_produced_all(d, s, sps, p);
+    let e = end_of(sps);
+    if sps.len() > 0 {
+        lemma_in_order_front(sps, d.len() as int);
+    }
+    assert(0 <= e <= d.len());
+    let x = produced(d, s, sps);
+    let y = d.subrange(e, d.len() as int);
+    assert forall|i: int| 0 <= i < (x + y).len() implies p(#[trigger] (x + y)[i]) by {
+        if i < x.len() {
+            assert((x + y)[i] == x[i]);
+        } else {
+            assert((x + y)[i] == y[i - x.len()]);
+            assert(y[i - x.len()] == d[e + i - x.len()]);
+        }
+    }
+    assert(applied(d, s, sps) == x + y);
+}
+
+/// The same, of the items up to where the last splice ends.
+proof fn lemma_produced_all<V>(d: Seq<V>, s: Seq<V>, sps: Seq<Splice>, p: spec_fn(V) -> bool)
+    requires
+        in_order(sps, d.len() as int),
+        forall|i: int| 0 <= i < d.len() ==> p(#[trigger] d[i]),
+        forall|i: int| 0 <= i < s.len() ==> p(#[trigger] s[i]),
+    ensures
+        forall|i: int| 0 <= i < produced(d, s, sps).len() ==> p(#[trigger] produced(d, s, sps)[i]),
+    decreases sps.len(),
+{
+    if sps.len() > 0 {
+        let q = sps.drop_last();
+        let l = sps.last();
+        lemma_in_order_front(sps, d.len() as int);
+        lemma_produced_all(d, s, q, p);
+        let x = produced(d, s, q);
+        let a = end_of(q);
+        let y = d.subrange(a, l.pos as int);
+        let z = copied(s, l);
+        let st = min_i(l.range.start as int, s.len() as int);
+        assert forall|i: int| 0 <= i < z.len() implies p(#[trigger] z[i]) by {
+            assert(z[i] == s[st + i]);
+        }
+        assert forall|i: int| 0 <= i < (x + y + z).len() implies p(#[trigger] (x + y + z)[i]) by {
+            if i < x.len() {
+                assert((x + y + z)[i] == x[i]);
+            } else if i < x.len() + y.len() {
+                assert((x + y + z)[i] == y[i - x.len()]);
+                assert(y[i - x.len()] == d[a + i - x.len()]);
+            } else {
+                assert((x + y + z)[i] == z[i - x.len() - y.len()]);
+            }
+        }
+        assert(produced(d, s, sps) == x + y + z);
+    }
 }
 
 /// What splices in order make of a destination and a source depends only
@@ -540,6 +649,7 @@ impl Normalize {
         ensures
             n.inv(),
             n.seen@.len() == 0,
+            n.src_pos == 0,
             n.src_len == src_len,
             n.dst_len == dst_len,
             n.dst@ == ids(dst_len as nat),
@@ -573,6 +683,11 @@ impl Normalize {
         ensures
             final(self).inv(),
             final(self).seen@ == old(self).seen@.push(sp),
+            final(self).src_pos == if sp.range.end > old(self).src_pos {
+                sp.range.end
+            } else {
+                old(self).src_pos
+            },
             final(self).src_len == old(self).src_len,
             final(self).dst_len == old(self).dst_len,
             final(self).dst == old(self).dst,
@@ -943,6 +1058,88 @@ pub(crate) fn normalize<S: SpliceList>(splices: &mut S, src_len: usize, dst_len:
     }
     let sps = n.finish();
     Normalized { sps, src_len, dst_len, seen: Ghost(taken) }
+}
+
+/// Before the splice at `i` of splices in order: the ones before it end
+/// in the destination where it starts or before, it ends within the
+/// destination, and the ranges after it start where its range ends or
+/// later.
+proof fn lemma_slice_at(sps: Seq<Splice>, i: int, dst_len: int)
+    requires
+        in_order(sps, dst_len),
+        ranges_ascend(sps),
+        0 <= i < sps.len(),
+    ensures
+        end_of(sps.take(i)) <= sps[i].pos,
+        sps[i].pos + sps[i].delete <= dst_len,
+        forall|j: int| i < j < sps.len() ==> sps[i].range.end <= #[trigger] sps[j].range.start,
+{
+    if i > 0 {
+        assert(sps.take(i).last() == sps[i - 1]);
+    }
+    assert forall|j: int| i < j < sps.len() implies sps[i].range.end <= #[trigger] sps[j].range.start by {
+        assert(sps[i].range.end <= sps[j].range.start);
+    }
+}
+
+/// Normalize the splices `sps`, which are in order in both columns, for
+/// a source of `src_len` items and a destination of `dst_len`: none of
+/// `Normalize`'s checks refuses one (shown before each is taken).
+pub(crate) fn normalize_slice(sps: &[Splice], src_len: usize, dst_len: usize) -> (r: Normalized)
+    requires
+        in_order(sps@, dst_len as int),
+        ranges_ascend(sps@),
+    ensures
+        r.src_count() == src_len,
+        r.dst_count() == dst_len,
+        r.seen() == sps@,
+{
+    hide(produced);
+    hide(copied);
+    hide(normal);
+    hide(applied);
+    hide(in_order);
+    hide(ranges_ascend);
+    hide(end_of);
+    let mut n = Normalize::new(src_len, dst_len);
+    let mut i: usize = 0;
+    proof {
+        assert(n.seen@ =~= sps@.take(0));
+    }
+    while i < sps.len()
+        invariant
+            i <= sps.len(),
+            n.inv(),
+            n.src_len == src_len,
+            n.dst_len == dst_len,
+            n.dst@ == ids(dst_len as nat),
+            n.src@ == negs(src_len as nat),
+            n.seen@ == sps@.take(i as int),
+            forall|j: int| i <= j < sps.len() ==> n.src_pos <= #[trigger] sps@[j].range.start,
+            in_order(sps@, dst_len as int),
+            ranges_ascend(sps@),
+        decreases sps.len() - i,
+    {
+        let sp = Splice { pos: sps[i].pos, delete: sps[i].delete, range: sps[i].range.start..sps[i].range.end };
+        proof {
+            assert(sp == sps@[i as int]);
+            lemma_slice_at(sps@, i as int, dst_len as int);
+            // what `Normalize::push` checks
+            assert(n.dst_pos <= sp.pos);
+            assert(sp.pos + sp.delete <= dst_len);
+            assert(n.src_pos <= sp.range.start);
+        }
+        n.push(sp);
+        proof {
+            assert(sps@.take(i + 1) =~= sps@.take(i as int).push(sp));
+        }
+        i += 1;
+    }
+    proof {
+        assert(sps@.take(sps@.len() as int) =~= sps@);
+    }
+    let out = n.finish();
+    Normalized { sps: out, src_len, dst_len, seen: Ghost(sps@) }
 }
 
 /// Cutting the gaps out of the source, back to front (`copy::cut_gaps`,

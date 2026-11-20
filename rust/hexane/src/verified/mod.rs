@@ -583,6 +583,7 @@ pub(crate) mod bytes;
 #[cfg(verus_keep_ghost)]
 mod client_proof;
 pub(crate) mod codec;
+mod copy;
 pub(crate) mod counts;
 mod decoder;
 mod delta;
@@ -603,6 +604,10 @@ pub use crate::iter_core::{past, window};
 #[cfg(verus_keep_ghost)]
 pub use crate::raw::spliced_cut;
 pub use crate::raw::{RawColumn, RawColumnIter};
+#[cfg(verus_keep_ghost)]
+pub use crate::splices::{
+    applied, copied, end_of, in_order, min_i, produced, ranges_ascend, splice_does, splices_do,
+};
 #[cfg(verus_keep_ghost)]
 pub use acc::{accumulated, lemma_acc_cat, lemma_acc_range, lemma_acc_run, lemma_cancel, times};
 pub use acc::{AccIndex, VAccum, VAccumulated, VAdds, VGroup, VerifiedAccColumn};

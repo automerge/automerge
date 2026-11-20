@@ -395,30 +395,31 @@
 use super::bijou;
 use super::leb128;
 use super::{
-    accumulated, after_edit, after_edits, all_fit, below_at, bytes_below, delta_at, delta_finds,
-    delta_iter_fits, delta_near, delta_prefix, delta_run_fits, delta_run_in_range, delta_run_kept,
-    delta_run_values, delta_runs_at, delta_runs_fit, delta_runs_kept, delta_runs_values,
-    delta_span_ok, delta_within, deltas, folded, head_len, head_run, head_run_max, lemma_acc_cat,
-    lemma_acc_range, lemma_acc_run, lemma_after_edits, lemma_cancel, lemma_delta_finds,
-    lemma_delta_finds_first, lemma_delta_run_at, lemma_delta_run_exact, lemma_delta_run_fits,
-    lemma_delta_runs_at, lemma_delta_runs_one, lemma_delta_runs_push, lemma_delta_within_one,
-    lemma_head_len, lemma_head_run_max, lemma_run_values_add, lemma_run_values_push,
-    lemma_runs_first, lemma_runs_of_values, lemma_sorted, lemma_sum_bound, lemma_sum_mono,
-    lemma_sum_range, lemma_sum_run, lemma_sums_fit, mapped, only, past, refused, run_values,
-    runs_of, scan_of, scan_taken, sorted, sorted_for, spliced_cut, sum_of, summed, sums_fit, times,
-    total_len, total_str_len, window, AccIndex, Get, LenIndex, RawColumn, RawColumnIter, SumIndex,
-    VAccum, VAccumulated, VAdds, VAmount, VCodec, VCount, VDelta, VDeltaValue, VGet, VGroup,
-    VIndex, VKeeps, VNewtype, VSpec, VSum, VSummed, VValue, VerifiedAccColumn, VerifiedAccIter,
-    VerifiedAccIterState, VerifiedAccSeek, VerifiedAccValue, VerifiedColumn, VerifiedDecoder,
-    VerifiedDeltaColumn, VerifiedDeltaDecoder, VerifiedDeltaEdit, VerifiedDeltaEncoder,
-    VerifiedDeltaEncoderState, VerifiedDeltaIter, VerifiedDeltaIterState, VerifiedDeltaRuns,
-    VerifiedEdit, VerifiedEncoder, VerifiedEncoderState, VerifiedFindByRange, VerifiedIter,
-    VerifiedIterState, VerifiedPrefixColumn, VerifiedPrefixIter, VerifiedPrefixIterState,
-    VerifiedPrefixSeek, VerifiedPrefixedValue, VerifiedRuns,
+    accumulated, after_edit, after_edits, all_fit, applied, below_at, bytes_below, copied,
+    delta_at, delta_finds, delta_iter_fits, delta_near, delta_prefix, delta_run_fits,
+    delta_run_in_range, delta_run_kept, delta_run_values, delta_runs_at, delta_runs_fit,
+    delta_runs_kept, delta_runs_values, delta_span_ok, delta_within, deltas, folded, head_len,
+    head_run, head_run_max, in_order, lemma_acc_cat, lemma_acc_range, lemma_acc_run,
+    lemma_after_edits, lemma_cancel, lemma_delta_finds, lemma_delta_finds_first,
+    lemma_delta_run_at, lemma_delta_run_exact, lemma_delta_run_fits, lemma_delta_runs_at,
+    lemma_delta_runs_one, lemma_delta_runs_push, lemma_delta_within_one, lemma_head_len,
+    lemma_head_run_max, lemma_run_values_add, lemma_run_values_push, lemma_runs_first,
+    lemma_runs_of_values, lemma_sorted, lemma_sum_bound, lemma_sum_mono, lemma_sum_range,
+    lemma_sum_run, lemma_sums_fit, mapped, min_i, only, past, produced, ranges_ascend, refused,
+    run_values, runs_of, scan_of, scan_taken, sorted, sorted_for, splice_does, spliced_cut,
+    splices_do, sum_of, summed, sums_fit, times, total_len, total_str_len, window, AccIndex, Get,
+    LenIndex, RawColumn, RawColumnIter, SumIndex, VAccum, VAccumulated, VAdds, VAmount, VCodec,
+    VCount, VDelta, VDeltaValue, VGet, VGroup, VIndex, VKeeps, VNewtype, VSpec, VSum, VSummed,
+    VValue, VerifiedAccColumn, VerifiedAccIter, VerifiedAccIterState, VerifiedAccSeek,
+    VerifiedAccValue, VerifiedColumn, VerifiedDecoder, VerifiedDeltaColumn, VerifiedDeltaDecoder,
+    VerifiedDeltaEdit, VerifiedDeltaEncoder, VerifiedDeltaEncoderState, VerifiedDeltaIter,
+    VerifiedDeltaIterState, VerifiedDeltaRuns, VerifiedEdit, VerifiedEncoder, VerifiedEncoderState,
+    VerifiedFindByRange, VerifiedIter, VerifiedIterState, VerifiedPrefixColumn, VerifiedPrefixIter,
+    VerifiedPrefixIterState, VerifiedPrefixSeek, VerifiedPrefixedValue, VerifiedRuns,
 };
 #[cfg(feature = "bijou64")]
 use crate::Bijou64;
-use crate::{DeltaRun, Leb128, LoadOpts, PackError, Run};
+use crate::{DeltaRun, Leb128, LoadOpts, PackError, Run, Splice};
 use std::cmp::Ordering;
 use std::ops::{Bound, Range, RangeBounds};
 use vstd::prelude::*;
@@ -17438,6 +17439,387 @@ fn told_by_a_delta_cursors_finish<T: VDeltaValue<C>, C: VCodec>(e: VerifiedDelta
         },
 {
     e.finish();
+}
+
+// ── Ranges copied from one column into another ─────────────────────────────
+
+/// A whole column copied onto the end of another: the destination's
+/// values, then the source's. For every value type, codec and kind of
+/// index.
+#[allow(dead_code)]
+fn copied_onto_the_end<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(
+    dst: &mut VerifiedColumn<V, C, K>,
+    src: VerifiedColumn<V, C, K>,
+)
+    ensures
+        final(dst)@ == old(dst)@ + src@,
+{
+    let ghost s = src@;
+    let n = dst.len();
+    // (the source is no longer than a `usize` counts)
+    let _m = src.len();
+    let mut sps: Vec<Splice> = Vec::new();
+    sps.push(Splice { pos: n, delete: 0, range: 0..usize::MAX });
+    let ghost sp = sps@[0];
+    proof {
+        assert(sps@.drop_last() =~= Seq::<Splice>::empty());
+    }
+    dst.copy_ranges(src, sps.as_slice());
+    proof {
+        let o = old(dst)@;
+        assert(produced(o, s, Seq::<Splice>::empty()) =~= Seq::<V::S>::empty());
+        assert(copied(s, sp) =~= s);
+        assert(applied(o, s, sps@) =~= o + s);
+    }
+}
+
+/// One splice: the values before `at` kept, `del` dropped, the values of
+/// `src` in `start..end` put in (as many of them as `src` has; none for
+/// a reversed range), the rest kept. The column counts an edit if a
+/// value went or came.
+#[allow(dead_code)]
+fn copied_in_place<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(
+    dst: &mut VerifiedColumn<V, C, K>,
+    src: VerifiedColumn<V, C, K>,
+    at: usize,
+    del: usize,
+    start: usize,
+    end: usize,
+)
+    requires
+        at <= old(dst)@.len(),
+        del <= old(dst)@.len() - at,
+    ensures
+        final(dst)@ == old(dst)@.take(at as int) + copied(src@, Splice { pos: at, delete: del, range: start..end })
+            + old(dst)@.skip(at + del),
+        final(dst).edits() == if del > 0 || min_i(start as int, src@.len() as int) < min_i(end as int, src@.len() as int) {
+            after_edit(old(dst).edits())
+        } else {
+            old(dst).edits()
+        },
+{
+    let ghost s = src@;
+    let mut sps: Vec<Splice> = Vec::new();
+    sps.push(Splice { pos: at, delete: del, range: start..end });
+    let ghost sp = sps@[0];
+    proof {
+        assert(sps@.drop_last() =~= Seq::<Splice>::empty());
+    }
+    dst.copy_ranges(src, sps.as_slice());
+    proof {
+        let o = old(dst)@;
+        assert(produced(o, s, Seq::<Splice>::empty()) =~= Seq::<V::S>::empty());
+        assert(Seq::<V::S>::empty() + o.subrange(0, at as int) =~= o.take(at as int));
+        if splice_does(sp, s.len() as int) {
+            assert(splices_do(sps@, s.len() as int));
+        } else {
+            assert forall|i: int| 0 <= i < sps@.len() implies !splice_does(#[trigger] sps@[i], s.len() as int) by {
+                assert(i == 0);
+            }
+        }
+    }
+}
+
+/// Two splices in one pass: at `a`, the values of `src` in `r..m`; at
+/// `b`, those in `m..t`, where `b` deletes one value. One edit counted.
+#[allow(dead_code)]
+fn copied_at_two_places<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(
+    dst: &mut VerifiedColumn<V, C, K>,
+    src: VerifiedColumn<V, C, K>,
+    a: usize,
+    b: usize,
+    r: usize,
+    m: usize,
+    t: usize,
+)
+    requires
+        a <= b < old(dst)@.len(),
+        r <= m <= t,
+    ensures
+        final(dst)@ == old(dst)@.take(a as int) + copied(src@, Splice { pos: a, delete: 0, range: r..m })
+            + old(dst)@.subrange(a as int, b as int) + copied(src@, Splice { pos: b, delete: 1, range: m..t })
+            + old(dst)@.skip(b + 1),
+        final(dst).edits() == after_edit(old(dst).edits()),
+{
+    let ghost s = src@;
+    let mut sps: Vec<Splice> = Vec::new();
+    sps.push(Splice { pos: a, delete: 0, range: r..m });
+    sps.push(Splice { pos: b, delete: 1, range: m..t });
+    let ghost (x, y) = (sps@[0], sps@[1]);
+    proof {
+        assert(sps@.drop_last() =~= seq![x]);
+        assert(seq![x].drop_last() =~= Seq::<Splice>::empty());
+        assert(sps@.last() == y);
+        assert(splice_does(sps@[1], s.len() as int));
+    }
+    dst.copy_ranges(src, sps.as_slice());
+    proof {
+        let o = old(dst)@;
+        let p1 = seq![x];
+        assert(produced(o, s, Seq::<Splice>::empty()) =~= Seq::<V::S>::empty());
+        assert(produced(o, s, p1) =~= o.take(a as int) + copied(s, x));
+        assert(produced(o, s, sps@) == produced(o, s, p1) + o.subrange(a as int, b as int) + copied(s, y));
+        assert(applied(o, s, sps@) =~= o.take(a as int) + copied(s, x) + o.subrange(a as int, b as int) + copied(
+            s,
+            y,
+        ) + o.skip(b + 1));
+    }
+}
+
+/// No splices, or splices that delete nothing and copy nothing: the
+/// column is as it was, and counts no edit.
+#[allow(dead_code)]
+fn copied_nothing<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(
+    dst: &mut VerifiedColumn<V, C, K>,
+    src: VerifiedColumn<V, C, K>,
+    at: usize,
+)
+    requires
+        at <= old(dst)@.len(),
+    ensures
+        final(dst)@ == old(dst)@,
+        final(dst).edits() == old(dst).edits(),
+{
+    let ghost s = src@;
+    let n = src.len();
+    let mut sps: Vec<Splice> = Vec::new();
+    // a range that starts past the source's end copies nothing
+    sps.push(Splice { pos: at, delete: 0, range: n..usize::MAX });
+    let ghost sp = sps@[0];
+    proof {
+        assert(sps@.drop_last() =~= Seq::<Splice>::empty());
+        assert forall|i: int| 0 <= i < sps@.len() implies !splice_does(#[trigger] sps@[i], s.len() as int) by {
+            assert(i == 0);
+        }
+    }
+    dst.copy_ranges(src, sps.as_slice());
+    proof {
+        let o = old(dst)@;
+        assert(produced(o, s, Seq::<Splice>::empty()) =~= Seq::<V::S>::empty());
+        assert(copied(s, sp) =~= Seq::<V::S>::empty());
+        assert(applied(o, s, sps@) =~= o);
+    }
+}
+
+/// `copy_ranges`'s contract, told back.
+#[allow(dead_code)]
+fn told_by_copy_ranges<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(
+    dst: &mut VerifiedColumn<V, C, K>,
+    src: VerifiedColumn<V, C, K>,
+    splices: &[Splice],
+)
+    requires
+        in_order(splices@, old(dst)@.len() as int),
+        ranges_ascend(splices@),
+    ensures
+        final(dst)@ == applied(old(dst)@, src@, splices@),
+        final(dst).edits() == if splices_do(splices@, src@.len() as int) {
+            after_edit(old(dst).edits())
+        } else {
+            old(dst).edits()
+        },
+{
+    dst.copy_ranges(src, splices);
+}
+
+/// Numbers copied from one column into another at two places: the
+/// second range runs past the source's end, and takes what is there.
+#[allow(dead_code)]
+fn numbers_copied() -> (r: Vec<u64>)
+    ensures
+        r@ == seq![1u64, 8, 9, 3, 10],
+{
+    let mut dst = VerifiedColumn::<u64>::new();
+    dst.push(1);
+    dst.push(2);
+    dst.push(3);
+    let mut src = VerifiedColumn::<u64>::new();
+    src.push(7);
+    src.push(8);
+    src.push(9);
+    src.push(10);
+    let ghost (o, s) = (dst@, src@);
+    assert(o =~= seq![1u64, 2, 3]);
+    assert(s =~= seq![7u64, 8, 9, 10]);
+    let mut sps: Vec<Splice> = Vec::new();
+    sps.push(Splice { pos: 1, delete: 1, range: 1..3 });
+    sps.push(Splice { pos: 3, delete: 0, range: 3..100 });
+    let ghost (x, y) = (sps@[0], sps@[1]);
+    proof {
+        assert(sps@.drop_last() =~= seq![x]);
+        assert(seq![x].drop_last() =~= Seq::<Splice>::empty());
+        assert(sps@.last() == y);
+    }
+    dst.copy_ranges(src, sps.as_slice());
+    proof {
+        let p1 = seq![x];
+        assert(produced(o, s, Seq::<Splice>::empty()) =~= Seq::<u64>::empty());
+        assert(copied(s, x) =~= seq![8u64, 9]);
+        assert(copied(s, y) =~= seq![10u64]);
+        assert(produced(o, s, p1) =~= seq![1u64, 8, 9]);
+        assert(produced(o, s, sps@) =~= seq![1u64, 8, 9, 3, 10]);
+        assert(applied(o, s, sps@) =~= seq![1u64, 8, 9, 3, 10]);
+    }
+    dst.to_vec()
+}
+
+/// A prefix column with a range of another copied in: it is still a
+/// column whose sums fit, as every column of its kind is.
+#[allow(dead_code)]
+fn sums_after_a_copy(dst: &mut VerifiedPrefixColumn<u64>, src: VerifiedPrefixColumn<u64>, at: usize)
+    requires
+        at <= old(dst)@.len(),
+    ensures
+        final(dst)@ == old(dst)@.take(at as int) + src@ + old(dst)@.skip(at as int),
+        sums_fit::<u64>(final(dst)@),
+{
+    let ghost s = src@;
+    // (the source is no longer than a `usize` counts)
+    let _m = src.len();
+    let mut sps: Vec<Splice> = Vec::new();
+    sps.push(Splice { pos: at, delete: 0, range: 0..usize::MAX });
+    let ghost sp = sps@[0];
+    proof {
+        assert(sps@.drop_last() =~= Seq::<Splice>::empty());
+    }
+    dst.copy_ranges(src, sps.as_slice());
+    proof {
+        let o = old(dst)@;
+        assert(produced(o, s, Seq::<Splice>::empty()) =~= Seq::<u64>::empty());
+        assert(copied(s, sp) =~= s);
+        assert(applied(o, s, sps@) =~= o.take(at as int) + s + o.skip(at as int));
+        dst.lemma_kept();
+    }
+}
+
+// ── Ranges copied from one delta column into another ────────────────────────
+
+/// A whole delta column copied onto the end of another: the
+/// destination's values, then the source's. For every value type and
+/// codec.
+#[allow(dead_code)]
+fn delta_copied_onto_the_end<T: VDeltaValue<C>, C: VCodec>(dst: &mut VerifiedDeltaColumn<T, C>, src: VerifiedDeltaColumn<T, C>)
+    ensures
+        final(dst)@ == old(dst)@ + src@,
+{
+    let ghost s = src@;
+    let n = dst.len();
+    // (the source is no longer than a `usize` counts)
+    let _m = src.len();
+    let mut sps: Vec<Splice> = Vec::new();
+    sps.push(Splice { pos: n, delete: 0, range: 0..usize::MAX });
+    let ghost sp = sps@[0];
+    proof {
+        assert(sps@.drop_last() =~= Seq::<Splice>::empty());
+    }
+    dst.copy_ranges(src, sps.as_slice());
+    proof {
+        let o = old(dst)@;
+        assert(produced(o, s, Seq::<Splice>::empty()) =~= Seq::<T>::empty());
+        assert(copied(s, sp) =~= s);
+        assert(applied(o, s, sps@) =~= o + s);
+    }
+}
+
+/// One splice of a delta column: the values before `at` kept, `del`
+/// dropped, the values of `src` in `start..end` put in (as many as `src`
+/// has; none for a reversed range), the rest kept; and an edit counted
+/// if a value went or came.
+#[allow(dead_code)]
+fn delta_copied_in_place<T: VDeltaValue<C>, C: VCodec>(
+    dst: &mut VerifiedDeltaColumn<T, C>,
+    src: VerifiedDeltaColumn<T, C>,
+    at: usize,
+    del: usize,
+    start: usize,
+    end: usize,
+)
+    requires
+        at <= old(dst)@.len(),
+        del <= old(dst)@.len() - at,
+    ensures
+        final(dst)@ == old(dst)@.take(at as int) + copied(src@, Splice { pos: at, delete: del, range: start..end })
+            + old(dst)@.skip(at + del),
+        final(dst).edits() == if del > 0 || min_i(start as int, src@.len() as int) < min_i(end as int, src@.len() as int) {
+            after_edit(old(dst).edits())
+        } else {
+            old(dst).edits()
+        },
+{
+    let ghost s = src@;
+    let mut sps: Vec<Splice> = Vec::new();
+    sps.push(Splice { pos: at, delete: del, range: start..end });
+    let ghost sp = sps@[0];
+    proof {
+        assert(sps@.drop_last() =~= Seq::<Splice>::empty());
+    }
+    dst.copy_ranges(src, sps.as_slice());
+    proof {
+        let o = old(dst)@;
+        assert(produced(o, s, Seq::<Splice>::empty()) =~= Seq::<T>::empty());
+        assert(Seq::<T>::empty() + o.subrange(0, at as int) =~= o.take(at as int));
+        if splice_does(sp, s.len() as int) {
+            assert(splices_do(sps@, s.len() as int));
+        } else {
+            assert forall|i: int| 0 <= i < sps@.len() implies !splice_does(#[trigger] sps@[i], s.len() as int) by {
+                assert(i == 0);
+            }
+        }
+    }
+}
+
+/// `copy_ranges`'s contract for delta columns, told back.
+#[allow(dead_code)]
+fn told_by_delta_copy_ranges<T: VDeltaValue<C>, C: VCodec>(
+    dst: &mut VerifiedDeltaColumn<T, C>,
+    src: VerifiedDeltaColumn<T, C>,
+    splices: &[Splice],
+)
+    requires
+        in_order(splices@, old(dst)@.len() as int),
+        ranges_ascend(splices@),
+    ensures
+        final(dst)@ == applied(old(dst)@, src@, splices@),
+        final(dst).edits() == if splices_do(splices@, src@.len() as int) {
+            after_edit(old(dst).edits())
+        } else {
+            old(dst).edits()
+        },
+{
+    dst.copy_ranges(src, splices);
+}
+
+/// Timestamps copied from one delta column into another: two of the
+/// source's in the place of one.
+#[allow(dead_code)]
+fn timestamps_copied() -> (r: Vec<i64>)
+    ensures
+        r@ == seq![100i64, 6, 7, 300],
+{
+    let mut dst = VerifiedDeltaColumn::<i64>::new();
+    dst.push(100);
+    dst.push(200);
+    dst.push(300);
+    let mut src = VerifiedDeltaColumn::<i64>::new();
+    src.push(5);
+    src.push(6);
+    src.push(7);
+    let ghost (o, s) = (dst@, src@);
+    assert(o =~= seq![100i64, 200, 300]);
+    assert(s =~= seq![5i64, 6, 7]);
+    let mut sps: Vec<Splice> = Vec::new();
+    sps.push(Splice { pos: 1, delete: 1, range: 1..3 });
+    let ghost x = sps@[0];
+    proof {
+        assert(sps@.drop_last() =~= Seq::<Splice>::empty());
+    }
+    dst.copy_ranges(src, sps.as_slice());
+    proof {
+        assert(produced(o, s, Seq::<Splice>::empty()) =~= Seq::<i64>::empty());
+        assert(copied(s, x) =~= seq![6i64, 7]);
+        assert(applied(o, s, sps@) =~= seq![100i64, 6, 7, 300]);
+    }
+    dst.to_vec()
 }
 
 } // verus!

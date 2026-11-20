@@ -261,7 +261,7 @@ impl<T> Visit<T> for Blind<T> {
 #[verifier::reject_recursive_types(L)]
 pub struct NoVisit<L: for <'t>Lift<'t, W = L>> {
     #[allow(dead_code)]
-    seen: Ghost<Seq<VOf<'static, L>>>,
+    pub(crate) seen: Ghost<Seq<VOf<'static, L>>>,
 }
 
 impl<L: for <'t>Lift<'t, W = L>> Visitor<RleModel<L>> for NoVisit<L> {

@@ -4024,3 +4024,101 @@ fn delta_edit_cursors_with_bijou64() {
         Some(7),
     );
 }
+
+// ── Ranges copied from one column into another ─────────────────────────────
+
+#[test]
+fn copies() {
+    let dst: Vec<u64> = vec![1, 2, 3, 4, 5];
+    let src: Vec<u64> = vec![7, 8, 9];
+
+    let mut col = VerifiedColumn::<u64>::from_values(&dst);
+    verus_client::copied_onto_the_end(&mut col, VerifiedColumn::<u64>::from_values(&src));
+    assert_eq!(col.to_vec(), [1, 2, 3, 4, 5, 7, 8, 9]);
+
+    for (at, del, start, end, want) in [
+        (1, 2, 0, 2, vec![1, 7, 8, 4, 5]),
+        (5, 0, 1, 100, vec![1, 2, 3, 4, 5, 8, 9]),
+        (0, 0, 2, 1, vec![1, 2, 3, 4, 5]),
+        (2, 3, 3, 3, vec![1, 2]),
+    ] {
+        let mut col = VerifiedColumn::<u64>::from_values(&dst);
+        let from = VerifiedColumn::<u64>::from_values(&src);
+        verus_client::copied_in_place(&mut col, from, at, del, start, end);
+        assert_eq!(col.to_vec(), want);
+    }
+
+    let mut col = VerifiedColumn::<u64>::from_values(&dst);
+    let from = VerifiedColumn::<u64>::from_values(&src);
+    verus_client::copied_at_two_places(&mut col, from, 1, 3, 0, 1, 3);
+    assert_eq!(col.to_vec(), [1, 7, 2, 3, 8, 9, 5]);
+
+    let mut col = VerifiedColumn::<u64>::from_values(&dst);
+    let from = VerifiedColumn::<u64>::from_values(&src);
+    verus_client::copied_nothing(&mut col, from, 2);
+    assert_eq!(col.to_vec(), dst);
+
+    let mut col = VerifiedColumn::<u64>::from_values(&dst);
+    let from = VerifiedColumn::<u64>::from_values(&src);
+    let splices = [
+        hexane::Splice {
+            pos: 0,
+            delete: 1,
+            range: 2..3,
+        },
+        hexane::Splice {
+            pos: 4,
+            delete: 0,
+            range: 3..9,
+        },
+    ];
+    verus_client::told_by_copy_ranges(&mut col, from, &splices);
+    assert_eq!(col.to_vec(), [9, 2, 3, 4, 5]);
+
+    assert_eq!(verus_client::numbers_copied(), [1, 8, 9, 3, 10]);
+
+    let mut col = VerifiedPrefixColumn::<u64>::from_values(&dst);
+    let from = VerifiedPrefixColumn::<u64>::from_values(&src);
+    verus_client::sums_after_a_copy(&mut col, from, 2);
+    assert_eq!(col.to_vec(), [1, 2, 7, 8, 9, 3, 4, 5]);
+    assert_eq!(col.get_total(7), 39);
+}
+
+// ── Ranges copied from one delta column into another ────────────────────────
+
+#[test]
+fn delta_copies() {
+    let dst: Vec<i64> = vec![10, 20, 30, 40];
+    let src: Vec<i64> = vec![-1, -2, -3];
+
+    let mut col = VerifiedDeltaColumn::<i64>::from_values(&dst);
+    verus_client::delta_copied_onto_the_end(
+        &mut col,
+        VerifiedDeltaColumn::<i64>::from_values(&src),
+    );
+    assert_eq!(col.to_vec(), [10, 20, 30, 40, -1, -2, -3]);
+
+    for (at, del, start, end, want) in [
+        (1, 2, 0, 2, vec![10, -1, -2, 40]),
+        (4, 0, 1, 100, vec![10, 20, 30, 40, -2, -3]),
+        (0, 0, 2, 1, vec![10, 20, 30, 40]),
+        (2, 2, 3, 3, vec![10, 20]),
+    ] {
+        let mut col = VerifiedDeltaColumn::<i64>::from_values(&dst);
+        let from = VerifiedDeltaColumn::<i64>::from_values(&src);
+        verus_client::delta_copied_in_place(&mut col, from, at, del, start, end);
+        assert_eq!(col.to_vec(), want);
+    }
+
+    let mut col = VerifiedDeltaColumn::<Option<u32>>::from_values(&[Some(1), None, Some(3)]);
+    let from = VerifiedDeltaColumn::<Option<u32>>::from_values(&[None, Some(9)]);
+    let splices = [hexane::Splice {
+        pos: 1,
+        delete: 1,
+        range: 0..2,
+    }];
+    verus_client::told_by_delta_copy_ranges(&mut col, from, &splices);
+    assert_eq!(col.to_vec(), [Some(1), None, Some(9), Some(3)]);
+
+    assert_eq!(verus_client::timestamps_copied(), [100, 6, 7, 300]);
+}

@@ -6,6 +6,7 @@
 //! from them is known, and the column ([`VerifiedDeltaColumn`]). The
 //! column's iterator ([`VerifiedDeltaIter`]) is in `delta/iter.rs`.
 
+mod copy;
 mod dec;
 #[cfg(verus_keep_ghost)]
 mod diffs;
