@@ -9,6 +9,7 @@
 mod dec;
 #[cfg(verus_keep_ghost)]
 mod diffs;
+mod edit;
 mod enc;
 mod find;
 mod iter;
@@ -18,6 +19,7 @@ pub use dec::VerifiedDeltaDecoder;
 pub use diffs::{
     delta_at, delta_prefix, delta_runs_at, deltas, lemma_delta_run_at, lemma_delta_runs_at,
 };
+pub use edit::VerifiedDeltaEdit;
 #[cfg(verus_keep_ghost)]
 pub use enc::{delta_iter_fits, delta_near, delta_span_ok};
 pub use enc::{VerifiedDeltaEncoder, VerifiedDeltaEncoderState};
@@ -56,6 +58,7 @@ use crate::delta::ddomain::{
 use crate::delta::ddomain::{DeltaWrite, SpliceItem, SpliceItems, ValueItems};
 #[cfg(verus_keep_ghost)]
 use crate::delta::dedit::{lemma_rz_nulls, lemma_rz_run, rz};
+use crate::delta::dedit_core::DCol;
 #[cfg(verus_keep_ghost)]
 use crate::delta::diter::{crop, lemma_crop, lemma_crop_add, lemma_wrapping_add};
 #[cfg(verus_keep_ghost)]
@@ -63,6 +66,8 @@ use crate::fenwick::lemma_sum_one;
 use crate::iter_core::{Decode, Decoders};
 use crate::rle::dec::RleReads;
 use crate::rle::edit::{null_in_column, ReadIns, RleModel};
+use crate::rle::lift::Lift;
+use crate::rle::model::{RleOps, WriteOps};
 use crate::weights::{DeltaModel, LoadWeigh};
 use crate::{DeltaRun, Leb128, LoadOpts, MaybeFill, PackError};
 use std::marker::PhantomData;
@@ -1587,6 +1592,33 @@ pub(crate) trait DKind<C: VCodec>: VDelta {
     /// Its values as deltas.
     type B: for <'a>DeltaWrite<'a, <Self::I as seal::Sealed<C>>::E, <Self::I as seal::Sealed<C>>::X>;
 
+    /// The column underneath by the names its edit cursor's core has
+    /// for it: how it writes its values (`L`), how it reads them (`O`)
+    /// and its values as deltas (`W`). They name what `I` and `B` do:
+    /// `to_edit` and `of_edit` say so.
+    type L: for <'t>Lift<'t, W = Self::L> + for <'t>WriteOps<'t, R = Self::O>;
+
+    type O: for <'b>RleOps<'b>;
+
+    type W: for <'a>DeltaWrite<'a, RleModel<Self::L>, RleReads<Self::O>>;
+
+    /// A column's core as its edit cursor's core takes it: the same
+    /// core, of the same values.
+    fn to_edit(core: DCore<Self, C>) -> (r: ECore<Self, C>)
+        ensures
+            rvals::<RleModel<Self::L>, RleReads<Self::O>, Self::W>(r@) == rvals::<DE<Self, C>, DX<Self, C>, Self::B>(
+                core@,
+            ),
+    ;
+
+    /// And the core the cursor's gives back, as the column's.
+    fn of_edit(core: ECore<Self, C>) -> (r: DCore<Self, C>)
+        ensures
+            rvals::<DE<Self, C>, DX<Self, C>, Self::B>(r@) == rvals::<RleModel<Self::L>, RleReads<Self::O>, Self::W>(
+                core@,
+            ),
+    ;
+
     /// Two values of the column underneath are two deltas, and none of
     /// them is a null where the type has none.
     proof fn lemma_kind(a: <DE<Self, C> as Slabs>::V, b: <DE<Self, C> as Slabs>::V)
@@ -1640,6 +1672,22 @@ impl<T: VDeltaNum, C: VCodec> DKind<C> for T {
 
     type B = VDeltas<i64, C>;
 
+    type L = VWrite<i64, C>;
+
+    type O = VOps<i64, C>;
+
+    type W = VDeltas<i64, C>;
+
+    #[inline(always)]
+    fn to_edit(core: DCore<T, C>) -> ECore<T, C> {
+        core
+    }
+
+    #[inline(always)]
+    fn of_edit(core: ECore<T, C>) -> DCore<T, C> {
+        core
+    }
+
     proof fn lemma_kind(a: i64, b: i64) {
     }
 
@@ -1672,6 +1720,22 @@ impl<T: VDeltaNum, C: VCodec> DKind<C> for Option<T> {
     type I = Option<i64>;
 
     type B = VDeltas<Option<i64>, C>;
+
+    type L = VOptWrite<i64, C>;
+
+    type O = VOptOps<i64, C>;
+
+    type W = VDeltas<Option<i64>, C>;
+
+    #[inline(always)]
+    fn to_edit(core: DCore<Option<T>, C>) -> ECore<Option<T>, C> {
+        core
+    }
+
+    #[inline(always)]
+    fn of_edit(core: ECore<Option<T>, C>) -> DCore<Option<T>, C> {
+        core
+    }
 
     proof fn lemma_kind(a: Option<i64>, b: Option<i64>) {
     }
@@ -1723,6 +1787,9 @@ type DIt<'a, T, C> = <<DX<T, C> as Decoders<'a>>::D as Decode>::Item;
 
 /// The verified core of a delta column.
 type DCore<T, C> = ColumnCore<DE<T, C>, SlabAgg, SlabBTree<SlabAgg>, DeltaModel<DX<T, C>, <T as DKind<C>>::B>>;
+
+/// The same core, as the edit cursor's core takes it (`DKind::to_edit`).
+type ECore<T, C> = DCol<<T as DKind<C>>::L, <T as DKind<C>>::O, <T as DKind<C>>::W>;
 
 /// A delta column of the verified public API: a column of numbers, or
 /// of `Option`s of them, kept as each one's difference from the one

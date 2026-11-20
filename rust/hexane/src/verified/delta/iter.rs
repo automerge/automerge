@@ -1220,17 +1220,41 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaIter<'a, T, C> {
         let r = self.seek_rest(target);
         proof {
             assert(self.rest() =~= c.subrange(r.0 as int, t));
-            if sorted::<T>(c.subrange(here as int, t)) {
-                assert forall|k: int| here <= k < t implies {
-                    &&& (k < r.0) == T::below(#[trigger] c[k], target)
-                    &&& (k < r.1) == !T::below(target, c[k])
-                    &&& (r.0 <= k < r.1) == (c[k] == target)
-                } by {
-                    assert(w[k - here] == c[k]);
-                }
-            }
+            lemma_found_in_column::<T, C>(c, here as int, t, r.0 as int, r.1 as int, target);
         }
         r.0..r.1
+    }
+}
+
+/// What a search of the column `c` from `here` to `t` found, said of
+/// the search's own values (`c.subrange(here, t)`), said of the
+/// column's places.
+proof fn lemma_found_in_column<T: VDeltaValue<C>, C: VCodec>(c: Seq<T>, here: int, t: int, r0: int, r1: int, target: T)
+    requires
+        0 <= here <= t <= c.len(),
+        sorted::<T>(c.subrange(here, t)) ==> forall|j: int|
+            0 <= j < c.subrange(here, t).len() ==> {
+                &&& (here + j < r0) == T::below(#[trigger] c.subrange(here, t)[j], target)
+                &&& (here + j < r1) == !T::below(target, c.subrange(here, t)[j])
+                &&& (r0 <= here + j < r1) == (c.subrange(here, t)[j] == target)
+            },
+    ensures
+        sorted::<T>(c.subrange(here, t)) ==> forall|k: int|
+            here <= k < t ==> {
+                &&& (k < r0) == T::below(#[trigger] c[k], target)
+                &&& (k < r1) == !T::below(target, c[k])
+                &&& (r0 <= k < r1) == (c[k] == target)
+            },
+{
+    let w = c.subrange(here, t);
+    if sorted::<T>(w) {
+        assert forall|k: int| here <= k < t implies {
+            &&& (k < r0) == T::below(#[trigger] c[k], target)
+            &&& (k < r1) == !T::below(target, c[k])
+            &&& (r0 <= k < r1) == (c[k] == target)
+        } by {
+            assert(w[k - here] == c[k]);
+        }
     }
 }
 

@@ -2,11 +2,11 @@
 //! `requires`, and the client's own run-time work (loading, saving,
 //! unwrapping) must not panic.
 use hexane::verified::{
-    AccIndex, Get, LenIndex, SumIndex, VCodec, VIndex, VValue, VerifiedAccColumn, VerifiedAccIter,
-    VerifiedAccValue, VerifiedColumn, VerifiedDecoder, VerifiedDeltaColumn, VerifiedEncoder,
-    VerifiedEncoderState, VerifiedPrefixColumn,
+    AccIndex, Get, LenIndex, SumIndex, VCodec, VDeltaValue, VIndex, VValue, VerifiedAccColumn,
+    VerifiedAccIter, VerifiedAccValue, VerifiedColumn, VerifiedDecoder, VerifiedDeltaColumn,
+    VerifiedEncoder, VerifiedEncoderState, VerifiedPrefixColumn,
 };
-use hexane::{Leb128, Run};
+use hexane::{DeltaRun, Leb128, Run};
 use verus_client::{Action, Board, Flags, Mark, Meta, Step};
 
 #[test]
@@ -3821,4 +3821,206 @@ fn edit_cursors_with_bijou64() {
     cursor_clients::<Vec<u8>, Bijou64, LenIndex>(&bytes, &b"ab".to_vec(), &vec![]);
     let marks: Vec<Mark> = (0..300).map(|i| Mark(i / 7 % 5 * 13)).collect();
     cursor_clients::<Mark, Bijou64, AccIndex>(&marks, &Mark(13), &Mark(63));
+}
+
+// ── The edit cursor of a delta column ───────────────────────────────────────
+
+/// The delta cursor's clients, on a column of `model`, which has six
+/// values or more, with two values of the caller's.
+fn delta_cursor_clients<T: VDeltaValue<C> + PartialEq + std::fmt::Debug, C: VCodec>(
+    model: &[T],
+    x: T,
+    y: T,
+) {
+    let n = model.len();
+    assert!(n >= 6);
+    let fresh = || VerifiedDeltaColumn::<T, C>::from_values(model);
+    let was = model.to_vec();
+
+    for (at, del) in [(0, 0), (1, 2), (n, 0), (0, n), (n - 1, 1)] {
+        let mut col = fresh();
+        verus_client::delta_edit_like_a_splice(&mut col, at, del, x);
+        let mut want = was.clone();
+        want.splice(at..at + del, [x]);
+        assert_eq!(col.to_vec(), want);
+    }
+
+    for at in [0, n - 1] {
+        let mut col = fresh();
+        let places = verus_client::delta_places_of_a_cursor(&mut col, at, y);
+        assert_eq!(places, (at, at, at + 1, at + 2));
+        let mut want = was.clone();
+        want.splice(at..at + 1, [y, y]);
+        assert_eq!(col.to_vec(), want);
+    }
+
+    for (a, b) in [(0, 0), (1, 3), (0, n), (n, n)] {
+        let mut col = fresh();
+        verus_client::delta_two_places_one_edit(&mut col, a, b, x, y);
+        let mut want = was[..a].to_vec();
+        want.push(x);
+        want.extend_from_slice(&was[a..b]);
+        want.push(y);
+        want.extend_from_slice(&was[b..]);
+        assert_eq!(col.to_vec(), want);
+    }
+
+    for (a, b, k) in [
+        (0, 0, 0),
+        (1, 2, 1),
+        (2, usize::MAX, 5),
+        (n, n + 3, usize::MAX),
+        (3, 1, 0),
+    ] {
+        let mut col = fresh();
+        verus_client::delta_only_passed_over(&mut col, a, b, k);
+        assert_eq!(col.to_vec(), was);
+    }
+
+    for (a, b) in [(0, 0), (3, 1), (n, 0)] {
+        let mut col = fresh();
+        verus_client::delta_seek_back_stays(&mut col, a, b, x);
+        let mut want = was.clone();
+        want.insert(a, x);
+        assert_eq!(col.to_vec(), want);
+    }
+
+    let mut col = fresh();
+    verus_client::delta_pushed_by_a_cursor(&mut col, x);
+    let mut want = was.clone();
+    want.push(x);
+    assert_eq!(col.to_vec(), want);
+
+    for at in [0, 2, n, n + 5, usize::MAX] {
+        let mut col = fresh();
+        verus_client::delta_cut_short(&mut col, at);
+        assert_eq!(col.to_vec(), was[..at.min(n)]);
+    }
+
+    for at in [0, 1, n] {
+        let mut col = fresh();
+        let there = verus_client::delta_what_is_there(&mut col, at);
+        assert_eq!(there, was.get(at).copied());
+        assert_eq!(col.to_vec(), was);
+    }
+
+    for at in [0, n - 1] {
+        for v in [x, was[at]] {
+            let mut col = fresh();
+            verus_client::delta_put_in_its_place(&mut col, at, v);
+            let mut want = was.clone();
+            want[at] = v;
+            assert_eq!(col.to_vec(), want);
+        }
+    }
+
+    // each step on its own, one after another
+    let mut col = fresh();
+    {
+        let mut e = verus_client::told_by_a_delta_edit(&mut col);
+        assert_eq!(verus_client::told_by_a_delta_cursors_places(&e), (0, 0));
+        verus_client::told_by_a_delta_cursors_advance(&mut e, 2);
+        verus_client::told_by_a_delta_cursors_seek(&mut e, 1);
+        assert_eq!(verus_client::told_by_a_delta_cursors_places(&e), (2, 2));
+        verus_client::told_by_a_delta_cursors_insert(&mut e, x);
+        verus_client::told_by_a_delta_cursors_insert_run(&mut e, y, 2);
+        assert_eq!(
+            verus_client::told_by_a_delta_cursors_peek(&mut e),
+            Some(was[2])
+        );
+        verus_client::told_by_a_delta_cursors_replace_with(&mut e, y);
+        verus_client::told_by_a_delta_cursors_delete(&mut e, 1);
+        verus_client::told_by_a_delta_cursors_insert_runs(&mut e, &[]);
+        verus_client::told_what_a_delta_step_keeps(&mut e, 0, x);
+        assert_eq!(verus_client::told_by_a_delta_cursors_places(&e), (5, 8));
+        verus_client::told_by_a_delta_cursors_finish(e);
+    }
+    let mut want = was[..2].to_vec();
+    want.extend([x, y, y, y, x, x]);
+    want.extend_from_slice(&was[5..]);
+    assert_eq!(col.to_vec(), want);
+    {
+        let mut e = verus_client::told_by_a_delta_edit_at(&mut col, 1);
+        assert_eq!(verus_client::told_by_a_delta_cursors_places(&e), (1, 1));
+        verus_client::told_by_a_delta_cursors_delete(&mut e, usize::MAX);
+        assert_eq!(
+            verus_client::told_by_a_delta_cursors_places(&e),
+            (want.len(), 1)
+        );
+        verus_client::told_by_a_delta_cursors_finish(e);
+    }
+    assert_eq!(col.to_vec(), want[..1]);
+}
+
+#[test]
+fn delta_edit_cursors() {
+    let numbers: Vec<u64> = vec![5, 5, 6, 7, 7, 7, 9];
+    let many: Vec<u64> = (0..1000).map(|i| i / 7 % 40).collect();
+    delta_cursor_clients::<u64, Leb128>(&numbers, 1, 6);
+    delta_cursor_clients::<u64, Leb128>(&many, 5, 0);
+    delta_cursor_clients::<i32, Leb128>(&[-3, 0, 0, 7, i32::MAX, i32::MIN], i32::MIN, 4);
+    delta_cursor_clients::<Option<i64>, Leb128>(
+        &[Some(-3), None, None, Some(1 << 40), Some(-3), None],
+        None,
+        Some(-(1 << 40)),
+    );
+    delta_cursor_clients::<Option<u32>, Leb128>(&[None; 6], Some(u32::MAX), None);
+
+    assert_eq!(verus_client::delta_edit_as_documented(), [10, 25, 40, 45]);
+
+    let mut col = VerifiedDeltaColumn::<u32>::from_values(&[1, 2]);
+    verus_client::delta_runs_by_a_cursor(&mut col, 1);
+    assert_eq!(col.to_vec(), [1, 12, 14, 16, 7, 9, 2]);
+
+    let mut col = VerifiedDeltaColumn::<i64>::from_values(&[-5, 0, 0, 1 << 50, -(1 << 50)]);
+    verus_client::delta_each_one_later(&mut col);
+    assert_eq!(col.to_vec(), [-4, 1, 1, (1 << 50) + 1, -(1 << 50) + 1]);
+
+    let mut col = VerifiedDeltaColumn::<Option<i32>>::from_values(&[
+        None,
+        Some(3),
+        None,
+        None,
+        Some(-1),
+        None,
+    ]);
+    verus_client::delta_nulls_dropped(&mut col);
+    assert_eq!(col.to_vec(), [Some(3), Some(-1)]);
+
+    // runs a caller made, put in where they pass the check: the run of
+    // nulls only where the type has a null
+    let runs = [
+        DeltaRun {
+            prefix: 10,
+            delta: Some(-1),
+            count: 2,
+        },
+        DeltaRun {
+            prefix: 0,
+            delta: None,
+            count: 1,
+        },
+    ];
+    let mut col = VerifiedDeltaColumn::<Option<u32>>::from_values(&[Some(1)]);
+    assert!(verus_client::delta_checked_runs_by_a_cursor(
+        &mut col, 0, &runs
+    ));
+    assert_eq!(col.to_vec(), [Some(9), Some(8), None, Some(1)]);
+    let mut col = VerifiedDeltaColumn::<u32>::from_values(&[1]);
+    assert!(!verus_client::delta_checked_runs_by_a_cursor(
+        &mut col, 0, &runs
+    ));
+    assert_eq!(col.to_vec(), [1]);
+}
+
+#[cfg(feature = "bijou64")]
+#[test]
+fn delta_edit_cursors_with_bijou64() {
+    use hexane::Bijou64;
+    delta_cursor_clients::<u64, Bijou64>(&[5, 5, 6, 7, 7, 7, 9, 248], 1, 247);
+    delta_cursor_clients::<Option<i64>, Bijou64>(
+        &[Some(-3), None, None, Some(1 << 40), Some(-3), None],
+        None,
+        Some(7),
+    );
 }

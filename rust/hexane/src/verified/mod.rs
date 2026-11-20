@@ -625,7 +625,7 @@ pub use delta::{
     lemma_delta_runs_push, lemma_delta_within_one, vals,
 };
 pub use delta::{
-    VDelta, VDeltaNum, VDeltaValue, VerifiedDeltaColumn, VerifiedDeltaDecoder,
+    VDelta, VDeltaNum, VDeltaValue, VerifiedDeltaColumn, VerifiedDeltaDecoder, VerifiedDeltaEdit,
     VerifiedDeltaEncoder, VerifiedDeltaEncoderState, VerifiedDeltaIter, VerifiedDeltaIterState,
     VerifiedDeltaRuns, VerifiedFindByRange,
 };

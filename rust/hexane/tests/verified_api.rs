@@ -16652,3 +16652,520 @@ mod bijou_cursors {
         cursors::<String>();
     }
 }
+
+// ── The edit cursor of a delta column ───────────────────────────────────────
+
+/// One step of a delta column's edit cursor.
+#[derive(Clone, Debug)]
+enum DStroke<T> {
+    Advance(usize),
+    /// to any place: one before the cursor leaves it where it stands
+    Seek(usize),
+    Insert(T),
+    InsertRun(T, usize),
+    InsertRuns(Vec<hexane::DeltaRun>),
+    Replace(T),
+    Delete(usize),
+}
+
+/// The values of runs `runs`, as the old API's delta column takes them.
+fn delta_runs_as_values<T: Deltad>(runs: &[hexane::DeltaRun]) -> Vec<T> {
+    let mut c = DeltaColumn::<T>::new();
+    c.splice_runs(0, 0, runs.iter().copied());
+    (0..c.len()).map(|i| c.get(i).unwrap()).collect()
+}
+
+/// What the steps of a delta cursor make of a column, told by lists: the
+/// values the column began with, the cursor's place among them, and the
+/// values written so far.
+struct DTold<T> {
+    orig: Vec<T>,
+    at: usize,
+    out: Vec<T>,
+    changed: bool,
+}
+
+impl<T: Deltad> DTold<T> {
+    fn new(orig: &[T], at: usize) -> Self {
+        DTold {
+            orig: orig.to_vec(),
+            at,
+            out: orig[..at].to_vec(),
+            changed: false,
+        }
+    }
+
+    fn left(&self) -> usize {
+        self.orig.len() - self.at
+    }
+
+    fn keep(&mut self, n: usize) {
+        let k = n.min(self.left());
+        self.out.extend_from_slice(&self.orig[self.at..self.at + k]);
+        self.at += k;
+    }
+
+    fn step(&mut self, m: &DStroke<T>) {
+        match m {
+            DStroke::Advance(n) => self.keep(*n),
+            DStroke::Seek(to) => self.keep(to.saturating_sub(self.at)),
+            DStroke::Insert(x) => {
+                self.out.push(*x);
+                self.changed = true;
+            }
+            DStroke::InsertRun(x, n) => {
+                self.out.extend(std::iter::repeat_n(*x, *n));
+                self.changed |= *n > 0;
+            }
+            DStroke::InsertRuns(runs) => {
+                let values = delta_runs_as_values::<T>(runs);
+                self.changed |= !values.is_empty();
+                self.out.extend(values);
+            }
+            DStroke::Replace(x) => {
+                if self.left() > 0 {
+                    self.changed |= self.orig[self.at] != *x;
+                    self.out.push(*x);
+                    self.at += 1;
+                }
+            }
+            DStroke::Delete(n) => {
+                let k = (*n).min(self.left());
+                self.changed |= k > 0;
+                self.at += k;
+            }
+        }
+    }
+
+    fn peek(&self) -> Option<T> {
+        self.orig.get(self.at).copied()
+    }
+
+    /// The column, were the edit finished now.
+    fn done(mut self) -> Vec<T> {
+        let rest = self.orig.split_off(self.at);
+        self.out.extend(rest);
+        self.out
+    }
+}
+
+/// Runs for a delta cursor to put in: those of a column of values near
+/// each other, or a few made up, which pass the check of `run_fits`.
+fn some_delta_runs<T: Deltad>(rng: &mut Rng) -> Vec<hexane::DeltaRun> {
+    if rng.below(2) == 0 {
+        let mut last = 0;
+        let mut values: Vec<T> = vec![];
+        for _ in 0..rng.below(30) {
+            let (v, l) = T::near(rng, last);
+            last = l;
+            values.push(v);
+        }
+        let src = DeltaColumn::<T>::from_values(values);
+        let runs = src.iter().runs().collect();
+        runs
+    } else {
+        let mut runs = vec![];
+        for _ in 0..rng.below(4) {
+            let (_, prefix) = T::near(rng, 0);
+            let delta = match rng.below(6) {
+                0 => None,
+                _ => Some(rng.below(9) as i64 - 4),
+            };
+            let count = rng.below(6);
+            runs.push(hexane::DeltaRun {
+                prefix,
+                delta,
+                count,
+            });
+        }
+        runs.retain(VerifiedDeltaColumn::<T>::run_fits);
+        runs
+    }
+}
+
+/// Steps for a delta cursor at `at` of `model`: most within the values
+/// left, some of none, some to the end, some past it, where a cursor
+/// stops, and some seeks back, where it stays.
+fn some_delta_moves<T: Deltad>(rng: &mut Rng, model: &[T], at: usize) -> Vec<DStroke<T>> {
+    let mut at = at;
+    let mut moves = vec![];
+    for _ in 0..rng.below(9) {
+        let left = model.len() - at;
+        let count = match rng.below(12) {
+            0 => 0,
+            1 => left,
+            2 => left + 1 + rng.below(3),
+            3 => usize::MAX,
+            _ => rng.below(left.min(30) + 1),
+        };
+        let (x, _) = T::near(rng, 0);
+        let m = match rng.below(14) {
+            0 | 1 => DStroke::Advance(count),
+            2 | 3 => DStroke::Seek(at.saturating_add(count)),
+            4 => DStroke::Seek(rng.below(at + 1)),
+            5 | 6 => DStroke::Insert(x),
+            7 => DStroke::InsertRun(x, [0, 1, 2, 9, 70][rng.below(5)]),
+            8 => DStroke::InsertRuns(some_delta_runs::<T>(rng)),
+            9 | 10 => DStroke::Replace(x),
+            // the value that is there, which is no change
+            11 => DStroke::Replace(model.get(at).copied().unwrap_or(x)),
+            _ => DStroke::Delete(count),
+        };
+        at = match &m {
+            DStroke::Advance(n) | DStroke::Delete(n) => at + (*n).min(left),
+            DStroke::Seek(to) => (*to).max(at).min(model.len()),
+            DStroke::Replace(_) => at + left.min(1),
+            _ => at,
+        };
+        moves.push(m);
+    }
+    moves
+}
+
+/// A step of a delta cursor of the verified API.
+macro_rules! new_delta_move {
+    ($e:expr, $m:expr) => {
+        match $m {
+            DStroke::Advance(n) => {
+                $e.advance(*n);
+            }
+            DStroke::Seek(to) => {
+                $e.seek(*to);
+            }
+            DStroke::Insert(x) => {
+                $e.insert(*x);
+            }
+            DStroke::InsertRun(x, n) => {
+                $e.insert_run(*x, *n);
+            }
+            DStroke::InsertRuns(runs) => {
+                $e.insert_runs(runs);
+            }
+            DStroke::Replace(x) => {
+                $e.replace_with(*x);
+            }
+            DStroke::Delete(n) => {
+                $e.delete(*n);
+            }
+        }
+    };
+}
+
+/// The same step of a delta cursor of the old API, whose `replace` takes
+/// a function of the value that is there.
+macro_rules! old_delta_move {
+    ($e:expr, $m:expr) => {
+        match $m {
+            DStroke::Advance(n) => {
+                $e.advance(*n);
+            }
+            DStroke::Seek(to) => {
+                $e.seek(*to);
+            }
+            DStroke::Insert(x) => {
+                $e.insert(*x);
+            }
+            DStroke::InsertRun(x, n) => {
+                $e.insert_run(*x, *n);
+            }
+            DStroke::InsertRuns(runs) => {
+                $e.insert_runs(runs.iter().copied());
+            }
+            DStroke::Replace(x) => {
+                $e.replace(|_| *x);
+            }
+            DStroke::Delete(n) => {
+                $e.delete(*n);
+            }
+        }
+    };
+}
+
+/// Both delta columns hold `model`, saved alike in as many slabs.
+fn delta_cursor_check<T: Deltad>(v: &VerifiedDeltaColumn<T>, c: &DeltaColumn<T>, model: &[T]) {
+    assert_eq!(v.to_vec(), model);
+    delta_agrees(v, c);
+    assert_eq!(v.save(), c.save());
+    if !model.is_empty() {
+        assert_eq!(v.slab_count(), c.slab_count());
+    }
+}
+
+fn delta_cursors<T: Deltad>(seed: u64, max_segments: Option<usize>) {
+    let mut rng = Rng(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) ^ 0xde1e);
+    let (mut v, mut c) = match max_segments {
+        Some(m) => (
+            VerifiedDeltaColumn::<T>::with_max_segments(m),
+            DeltaColumn::<T>::with_max_segments(m),
+        ),
+        None => (
+            VerifiedDeltaColumn::<T>::default(),
+            DeltaColumn::<T>::default(),
+        ),
+    };
+    let mut last = 0;
+    let mut model: Vec<T> = vec![];
+    for _ in 0..rng.below(200) {
+        let (x, l) = T::near(&mut rng, last);
+        last = l;
+        model.push(x);
+    }
+    v.splice(0, 0, &model);
+    c.splice(0, 0, model.clone());
+    for round in 0..30 {
+        let at = some_place(&mut rng, model.len());
+        let moves = some_delta_moves(&mut rng, &model, at);
+        let mut told = DTold::new(&model, at);
+        let (s, t) = (v.iter().suspend(), c.iter().suspend());
+        // `edit` is `edit_at(0)`
+        let first = at == 0 && round % 2 == 0;
+        let mut e = if first { v.edit() } else { v.edit_at(at) };
+        let mut o = if first { c.edit() } else { c.edit_at(at) };
+        assert_eq!((e.pos(), e.out_pos(), o.pos()), (at, at, at));
+        for m in &moves {
+            new_delta_move!(e, m);
+            old_delta_move!(o, m);
+            told.step(m);
+            let place = (told.at, told.out.len(), told.at);
+            assert_eq!((e.pos(), e.out_pos(), o.pos()), place, "{m:?}");
+            if rng.below(3) == 0 {
+                // a look at the value there, which moves nothing
+                assert_eq!(e.peek(), told.peek(), "{m:?}");
+                assert_eq!(o.peek(), told.peek(), "{m:?}");
+                assert_eq!((e.pos(), e.out_pos(), o.pos()), place, "{m:?}");
+            }
+        }
+        e.finish();
+        // the old cursor is finished by the call or when it is dropped
+        if round % 3 == 0 {
+            o.finish();
+        } else {
+            drop(o);
+        }
+        let changed = told.changed;
+        model = told.done();
+        delta_cursor_check(&v, &c, &model);
+        // an edit is counted exactly where a step put a value in or
+        // took one out: an iterator's state taken before resumes
+        // exactly where none did
+        assert_eq!(s.try_resume(&v).is_ok(), !changed, "{moves:?}");
+        assert_eq!(t.try_resume(&c).is_ok(), !changed, "{moves:?}");
+    }
+}
+
+/// An edit cursor of a delta column of the verified API
+/// (`VerifiedDeltaEdit`) does what `DeltaColumn`'s does: under the same
+/// steps both stand at the same places, see the same values, and leave
+/// the same values in the same slabs, whose bytes are the same. The
+/// places and the values are what the steps make of a list. And the
+/// column counts an edit exactly where a step changed it.
+#[test]
+fn a_delta_cursor_edits_as_the_old_one_does() {
+    for seed in 0..6 {
+        let m = [None, Some(2), Some(5)][seed as usize % 3];
+        delta_cursors::<u32>(seed, m);
+        delta_cursors::<u64>(seed, m);
+        delta_cursors::<i32>(seed, m);
+        delta_cursors::<i64>(seed, m);
+        delta_cursors::<usize>(seed, m);
+        delta_cursors::<Option<u32>>(seed, m);
+        delta_cursors::<Option<u64>>(seed, m);
+        delta_cursors::<Option<i32>>(seed, m);
+        delta_cursors::<Option<i64>>(seed, m);
+        delta_cursors::<Option<usize>>(seed, m);
+    }
+}
+
+#[test]
+fn a_delta_cursor_step_by_step() {
+    let mut v = VerifiedDeltaColumn::<u64>::from_values(&[10, 20, 30, 40, 50]);
+    let mut e = v.edit();
+    assert_eq!((e.pos(), e.out_pos(), e.peek()), (0, 0, Some(10)));
+    e.advance(1);
+    assert_eq!((e.pos(), e.out_pos(), e.peek()), (1, 1, Some(20)));
+    e.delete(2);
+    assert_eq!((e.pos(), e.out_pos(), e.peek()), (3, 1, Some(40)));
+    e.insert(25).insert_run(27, 2);
+    assert_eq!((e.pos(), e.out_pos(), e.peek()), (3, 4, Some(40)));
+    // a seek back stays where the cursor stands
+    e.seek(1);
+    assert_eq!((e.pos(), e.out_pos(), e.peek()), (3, 4, Some(40)));
+    e.seek(4).replace_with(45);
+    assert_eq!((e.pos(), e.out_pos(), e.peek()), (5, 6, None));
+    // at the end there is nothing to replace, to delete or to pass over
+    e.replace_with(0)
+        .delete(3)
+        .advance(usize::MAX)
+        .seek(usize::MAX);
+    assert_eq!((e.pos(), e.out_pos(), e.peek()), (5, 6, None));
+    // runs say their own values, whatever is before them
+    let runs = [
+        hexane::DeltaRun {
+            prefix: 3,
+            delta: Some(2),
+            count: 2,
+        },
+        hexane::DeltaRun {
+            prefix: 9,
+            delta: Some(1),
+            count: 0,
+        },
+        hexane::DeltaRun {
+            prefix: 100,
+            delta: Some(0),
+            count: 1,
+        },
+    ];
+    e.insert_runs(&runs);
+    assert_eq!((e.pos(), e.out_pos()), (5, 9));
+    e.finish();
+    assert_eq!(v.to_vec(), [10, 25, 27, 27, 40, 45, 5, 7, 100]);
+
+    // a cursor opened in the middle keeps what is before it
+    let mut e = v.edit_at(6);
+    assert_eq!((e.pos(), e.out_pos(), e.peek()), (6, 6, Some(5)));
+    e.delete(usize::MAX);
+    e.finish();
+    assert_eq!(v.to_vec(), [10, 25, 27, 27, 40, 45]);
+
+    // nulls: looked at, put in and replaced
+    let mut n = VerifiedDeltaColumn::<Option<i32>>::from_values(&[Some(-1), None, Some(4)]);
+    let mut e = n.edit();
+    assert_eq!(e.peek(), Some(Some(-1)));
+    e.replace_with(None).insert_run(None, 2);
+    assert_eq!(e.peek(), Some(None));
+    e.replace_with(Some(7));
+    assert_eq!(e.peek(), Some(Some(4)));
+    e.finish();
+    assert_eq!(n.to_vec(), [None, None, None, Some(7), Some(4)]);
+}
+
+/// A delta cursor that is not finished does not give the column its
+/// values back: the column is an empty one, which can be used.
+/// `DeltaColumn`'s cursor finishes when it is dropped.
+#[test]
+fn a_delta_cursor_dropped_unfinished() {
+    let mut v = VerifiedDeltaColumn::<u64>::from_values(&[1, 2, 3]);
+    {
+        let mut e = v.edit();
+        e.seek(1).insert(9);
+    }
+    assert_eq!((v.len(), v.is_empty()), (0, true));
+    assert!(v.to_vec().is_empty());
+    assert_eq!(v.get(0), None);
+    v.push(4);
+    let mut e = v.edit();
+    e.insert(3);
+    e.finish();
+    assert_eq!(v.to_vec(), [3, 4]);
+
+    let mut c = DeltaColumn::<u64>::from_values(vec![1, 2, 3]);
+    {
+        let mut o = c.edit();
+        o.seek(1).insert(9);
+    }
+    let old: Vec<u64> = (0..c.len()).map(|i| c.get(i).unwrap()).collect();
+    assert_eq!(old, [1, 9, 2, 3]);
+}
+
+/// A delta cursor opened past the column's end panics, in both APIs, and
+/// leaves the column as it was. One that leaves values that span 2^63 or
+/// more panics when it is finished, in both, and leaves the verified
+/// column an empty one, which can be used.
+#[cfg(panic = "unwind")]
+#[test]
+fn a_delta_cursor_panics_as_the_old_one_does() {
+    let mut v = VerifiedDeltaColumn::<u64>::from_values(&[1, 2, 3, 4]);
+    let mut c = DeltaColumn::<u64>::from_values(vec![1, 2, 3, 4]);
+    let new = panic_of(std::panic::AssertUnwindSafe(|| v.edit_at(5).finish()));
+    let old = panic_of(std::panic::AssertUnwindSafe(|| c.edit_at(5).finish()));
+    assert_eq!(new.as_deref(), Some("edit_at out of bounds"));
+    assert_eq!(new, old);
+    delta_cursor_check(&v, &c, &[1, 2, 3, 4]);
+    // the end is a place
+    v.edit_at(4).finish();
+    c.edit_at(4).finish();
+    delta_cursor_check(&v, &c, &[1, 2, 3, 4]);
+
+    let mut v = VerifiedDeltaColumn::<i64>::from_values(&[0]);
+    let mut c = DeltaColumn::<i64>::from_values(vec![0]);
+    let new = panic_of(std::panic::AssertUnwindSafe(|| {
+        let mut e = v.edit();
+        e.insert(i64::MIN).seek(1).insert(i64::MAX);
+        e.finish();
+    }));
+    let old = panic_of(std::panic::AssertUnwindSafe(|| {
+        c.edit().insert(i64::MIN).seek(1).insert(i64::MAX);
+    }));
+    assert_eq!(
+        new.as_deref(),
+        Some("delta values out of domain: they would span 2^63 or more")
+    );
+    assert_eq!(new, old);
+    assert_eq!((v.len(), v.is_empty()), (0, true));
+    v.push(5);
+    assert_eq!(v.to_vec(), [5]);
+}
+
+#[cfg(feature = "bijou64")]
+mod bijou_delta_cursors {
+    use super::*;
+    use hexane::bijou as ob;
+    use hexane::verified::bijou as vb;
+    use hexane::Bijou64;
+
+    fn cursors<T: Deltad + VDeltaValue<Bijou64>>(seed: u64)
+    where
+        T::Inner:
+            hexane::ColumnValueRef<Encoding<Bijou64> = hexane::RleEncoding<T::Inner, Bijou64>>,
+    {
+        let mut rng = Rng(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) ^ 0xde1a);
+        let budget = [2, 3, 8, 64][rng.below(4)];
+        let mut v = vb::VerifiedDeltaColumn::<T>::with_max_segments(budget);
+        let mut c = ob::DeltaColumn::<T>::with_max_segments(budget);
+        let mut last = 0;
+        let mut model: Vec<T> = vec![];
+        for _ in 0..rng.below(200) {
+            let (x, l) = T::near(&mut rng, last);
+            last = l;
+            model.push(x);
+        }
+        v.splice(0, 0, &model);
+        c.splice(0, 0, model.clone());
+        for _ in 0..20 {
+            let at = some_place(&mut rng, model.len());
+            let moves = some_delta_moves(&mut rng, &model, at);
+            let mut told = DTold::new(&model, at);
+            let (mut e, mut o) = (v.edit_at(at), c.edit_at(at));
+            for m in &moves {
+                new_delta_move!(e, m);
+                old_delta_move!(o, m);
+                told.step(m);
+                let place = (told.at, told.out.len(), told.at);
+                assert_eq!((e.pos(), e.out_pos(), o.pos()), place, "{m:?}");
+                assert_eq!(e.peek(), told.peek(), "{m:?}");
+            }
+            e.finish();
+            drop(o);
+            model = told.done();
+            assert_eq!(v.to_vec(), model);
+            assert_eq!(v.save(), c.save());
+            if !model.is_empty() {
+                assert_eq!(v.slab_count(), c.slab_count());
+            }
+        }
+    }
+
+    /// A cursor of a delta column whose numbers are written with bijou64
+    /// does what the old API's does of such a column.
+    #[test]
+    fn a_delta_cursor_with_bijou64() {
+        for seed in 0..3 {
+            cursors::<u64>(seed);
+            cursors::<i64>(seed);
+            cursors::<i32>(seed);
+            cursors::<Option<i64>>(seed);
+            cursors::<Option<u32>>(seed);
+        }
+    }
+}

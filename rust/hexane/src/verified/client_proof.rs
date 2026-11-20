@@ -410,11 +410,11 @@ use super::{
     VAccum, VAccumulated, VAdds, VAmount, VCodec, VCount, VDelta, VDeltaValue, VGet, VGroup,
     VIndex, VKeeps, VNewtype, VSpec, VSum, VSummed, VValue, VerifiedAccColumn, VerifiedAccIter,
     VerifiedAccIterState, VerifiedAccSeek, VerifiedAccValue, VerifiedColumn, VerifiedDecoder,
-    VerifiedDeltaColumn, VerifiedDeltaDecoder, VerifiedDeltaEncoder, VerifiedDeltaEncoderState,
-    VerifiedDeltaIter, VerifiedDeltaIterState, VerifiedDeltaRuns, VerifiedEdit, VerifiedEncoder,
-    VerifiedEncoderState, VerifiedFindByRange, VerifiedIter, VerifiedIterState,
-    VerifiedPrefixColumn, VerifiedPrefixIter, VerifiedPrefixIterState, VerifiedPrefixSeek,
-    VerifiedPrefixedValue, VerifiedRuns,
+    VerifiedDeltaColumn, VerifiedDeltaDecoder, VerifiedDeltaEdit, VerifiedDeltaEncoder,
+    VerifiedDeltaEncoderState, VerifiedDeltaIter, VerifiedDeltaIterState, VerifiedDeltaRuns,
+    VerifiedEdit, VerifiedEncoder, VerifiedEncoderState, VerifiedFindByRange, VerifiedIter,
+    VerifiedIterState, VerifiedPrefixColumn, VerifiedPrefixIter, VerifiedPrefixIterState,
+    VerifiedPrefixSeek, VerifiedPrefixedValue, VerifiedRuns,
 };
 #[cfg(feature = "bijou64")]
 use crate::Bijou64;
@@ -16771,6 +16771,662 @@ fn told_what_a_step_keeps<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(e: &mut Veri
 /// it.
 #[allow(dead_code)]
 fn told_by_a_cursors_finish<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(e: VerifiedEdit<'_, V, C, K>)
+    requires
+        e.wf(),
+    ensures
+        e.result()@ == e.written() + e.orig().skip(e.at()),
+        e.result().edits() == if e.changed() {
+            after_edit(e.began())
+        } else {
+            e.began()
+        },
+{
+    e.finish();
+}
+
+// ── The edit cursor of a delta column ───────────────────────────────────────
+
+/// The steps of a delta column's cursor, one after another, do what a
+/// splice does: the values before `at` kept, `del` dropped, `v` put in,
+/// the rest kept; and the column counts one edit more. For every value
+/// type and codec.
+#[allow(dead_code)]
+fn delta_edit_like_a_splice<T: VDeltaValue<C>, C: VCodec>(col: &mut VerifiedDeltaColumn<T, C>, at: usize, del: usize, v: T)
+    requires
+        at <= old(col)@.len(),
+        del <= old(col)@.len() - at,
+        v.fits(),
+    ensures
+        final(col)@ == old(col)@.take(at as int) + seq![v] + old(col)@.skip(at + del),
+        final(col).edits() == after_edit(old(col).edits()),
+{
+    let mut e = col.edit();
+    e.seek(at).delete(del).insert(v);
+    e.finish();
+    proof {
+        let o = old(col)@;
+        assert(o.subrange(0, at as int).push(v) + o.skip(at + del) =~= o.take(at as int) + seq![v] + o.skip(at + del));
+    }
+}
+
+/// The example of the delta cursor's documentation, proved: the column
+/// a chain of steps leaves.
+#[allow(dead_code)]
+fn delta_edit_as_documented() -> (r: Vec<u64>)
+    ensures
+        r@ == seq![10u64, 25, 40, 45],
+{
+    let mut col = VerifiedDeltaColumn::<u64>::new();
+    col.push(10);
+    col.push(20);
+    col.push(30);
+    col.push(40);
+    col.push(50);
+    assert(col@ =~= seq![10u64, 20, 30, 40, 50]);
+    let mut e = col.edit();
+    e.seek(1).delete(2).insert(25).seek(4).replace_with(45);
+    e.finish();
+    assert(col@ =~= seq![10u64, 25, 40, 45]);
+    col.to_vec()
+}
+
+/// A delta cursor opened at a place stands there, with the values
+/// before it written; an insertion moves its place in the column being
+/// written, a deletion its place among the original values.
+#[allow(dead_code)]
+fn delta_places_of_a_cursor<T: VDeltaValue<C>, C: VCodec>(col: &mut VerifiedDeltaColumn<T, C>, at: usize, v: T) -> (r: (
+    usize,
+    usize,
+    usize,
+    usize,
+))
+    requires
+        at < old(col)@.len(),
+        v.fits(),
+    ensures
+        r.0 == at,
+        r.1 == at,
+        r.2 == at + 1,
+        r.3 == at + 2,
+        final(col)@ == old(col)@.take(at as int) + seq![v, v] + old(col)@.skip(at + 1),
+{
+    let mut e = col.edit_at(at);
+    let p0 = e.pos();
+    let q0 = e.out_pos();
+    e.insert_run(v, 2).delete(1);
+    let p1 = e.pos();
+    let q1 = e.out_pos();
+    e.finish();
+    proof {
+        let o = old(col)@;
+        assert(o.take(at as int) + Seq::new(2, |_i: int| v) =~= o.take(at as int) + seq![v, v]);
+    }
+    (p0, q0, p1, q1)
+}
+
+/// Two values put in at two places by one delta cursor, in one pass: the
+/// column counts one edit, where two splices count two.
+#[allow(dead_code)]
+fn delta_two_places_one_edit<T: VDeltaValue<C>, C: VCodec>(col: &mut VerifiedDeltaColumn<T, C>, a: usize, b: usize, x: T, y: T)
+    requires
+        a <= b <= old(col)@.len(),
+        x.fits(),
+        y.fits(),
+    ensures
+        final(col)@ == old(col)@.take(a as int) + seq![x] + old(col)@.subrange(a as int, b as int) + seq![y] + old(
+            col,
+        )@.skip(b as int),
+        final(col).edits() == after_edit(old(col).edits()),
+{
+    let mut e = col.edit();
+    e.seek(a).insert(x).seek(b).insert(y);
+    e.finish();
+    proof {
+        let o = old(col)@;
+        assert((o.subrange(0, a as int).push(x) + o.subrange(a as int, b as int)).push(y) + o.skip(b as int) =~= o.take(
+            a as int,
+        ) + seq![x] + o.subrange(a as int, b as int) + seq![y] + o.skip(b as int));
+    }
+}
+
+/// A delta cursor that only passes over values gives the column it was
+/// opened on, and the column counts no edit. Its seeks go anywhere: one
+/// to before the cursor leaves it where it stands.
+#[allow(dead_code)]
+fn delta_only_passed_over<T: VDeltaValue<C>, C: VCodec>(col: &mut VerifiedDeltaColumn<T, C>, a: usize, b: usize, n: usize)
+    ensures
+        final(col)@ == old(col)@,
+        final(col).edits() == old(col).edits(),
+{
+    let mut e = col.edit();
+    e.seek(a).seek(b).advance(n);
+    let ghost (w, at) = (e.written(), e.at());
+    e.finish();
+    proof {
+        let o = old(col)@;
+        assert(w =~= o.take(at));
+        assert(o.take(at) + o.skip(at) =~= o);
+    }
+}
+
+/// A seek back to before the cursor is no step: the cursor stays where
+/// it stands, and a value put in then goes there.
+#[allow(dead_code)]
+fn delta_seek_back_stays<T: VDeltaValue<C>, C: VCodec>(col: &mut VerifiedDeltaColumn<T, C>, a: usize, b: usize, v: T)
+    requires
+        b <= a <= old(col)@.len(),
+        v.fits(),
+    ensures
+        final(col)@ == old(col)@.take(a as int) + seq![v] + old(col)@.skip(a as int),
+{
+    let mut e = col.edit_at(a);
+    e.seek(b).insert(v);
+    e.finish();
+    proof {
+        let o = old(col)@;
+        assert((o.take(a as int) + o.subrange(a as int, a as int)).push(v) + o.skip(a as int) =~= o.take(a as int)
+            + seq![v] + o.skip(a as int));
+    }
+}
+
+/// A seek past the end stands at the end, where an insertion is a push.
+#[allow(dead_code)]
+fn delta_pushed_by_a_cursor<T: VDeltaValue<C>, C: VCodec>(col: &mut VerifiedDeltaColumn<T, C>, v: T)
+    requires
+        v.fits(),
+    ensures
+        final(col)@ == old(col)@.push(v),
+        final(col).edits() == after_edit(old(col).edits()),
+{
+    let mut e = col.edit();
+    proof {
+        e.lemma_at();
+    }
+    e.seek(usize::MAX).insert(v);
+    e.finish();
+    proof {
+        let o = old(col)@;
+        assert(o.subrange(0, o.len() as int).push(v) + o.skip(o.len() as int) =~= o.push(v));
+    }
+}
+
+/// A deletion of more values than are left drops those that are: the
+/// column cut short at `at`, and an edit counted only if a value went.
+#[allow(dead_code)]
+fn delta_cut_short<T: VDeltaValue<C>, C: VCodec>(col: &mut VerifiedDeltaColumn<T, C>, at: usize)
+    ensures
+        final(col)@ == if at <= old(col)@.len() {
+            old(col)@.take(at as int)
+        } else {
+            old(col)@
+        },
+        final(col).edits() == if at < old(col)@.len() {
+            after_edit(old(col).edits())
+        } else {
+            old(col).edits()
+        },
+{
+    let mut e = col.edit();
+    proof {
+        e.lemma_at();
+    }
+    e.seek(at).delete(usize::MAX);
+    e.finish();
+    proof {
+        let o = old(col)@;
+        if at <= o.len() {
+            assert(o.subrange(0, at as int) + o.skip(o.len() as int) =~= o.take(at as int));
+        } else {
+            assert(o.subrange(0, o.len() as int) + o.skip(o.len() as int) =~= o);
+        }
+    }
+}
+
+/// Runs put in by a delta cursor, of a column of `u32`: three numbers
+/// after 10, each two more than the one before; a run of none; and two
+/// more numbers, 7 and 9, said by the run itself (its value before is
+/// 5), whatever the cursor stands after.
+#[allow(dead_code)]
+fn delta_runs_by_a_cursor<C: VCodec>(col: &mut VerifiedDeltaColumn<u32, C>, at: usize)
+    requires
+        at <= old(col)@.len(),
+    ensures
+        final(col)@ == old(col)@.take(at as int) + seq![12u32, 14u32, 16u32, 7u32, 9u32] + old(col)@.skip(at as int),
+        final(col).edits() == after_edit(old(col).edits()),
+{
+    let r0 = DeltaRun { prefix: 10, delta: Some(2), count: 3 };
+    let r1 = DeltaRun { prefix: 3, delta: Some(9), count: 0 };
+    let r2 = DeltaRun { prefix: 5, delta: Some(2), count: 2 };
+    let mut runs: Vec<DeltaRun> = Vec::new();
+    runs.push(r0);
+    runs.push(r1);
+    runs.push(r2);
+    proof {
+        lemma_delta_run_exact(r0, 0);
+        lemma_delta_run_exact(r0, 1);
+        lemma_delta_run_exact(r0, 2);
+        lemma_delta_run_exact(r2, 0);
+        lemma_delta_run_exact(r2, 1);
+        assert(delta_run_values::<u32>(r0) =~= seq![12u32, 14u32, 16u32]);
+        assert(delta_run_values::<u32>(r1) =~= Seq::<u32>::empty());
+        assert(delta_run_values::<u32>(r2) =~= seq![7u32, 9u32]);
+        lemma_delta_run_fits::<u32>(r0);
+        lemma_delta_run_fits::<u32>(r1);
+        lemma_delta_run_fits::<u32>(r2);
+        let none = Seq::<DeltaRun>::empty();
+        lemma_delta_runs_one::<u32>(r0);
+        lemma_delta_runs_push::<u32>(none.push(r0), r1);
+        lemma_delta_runs_push::<u32>(none.push(r0).push(r1), r2);
+        assert(seq![r0] =~= none.push(r0));
+        assert(runs@ =~= none.push(r0).push(r1).push(r2));
+        assert(delta_runs_values::<u32>(runs@) =~= seq![12u32, 14u32, 16u32, 7u32, 9u32]);
+    }
+    let mut e = col.edit_at(at);
+    e.insert_runs(runs.as_slice());
+    e.finish();
+}
+
+/// A caller's runs, whatever they are, put in by a delta cursor where
+/// each passes the check `run_fits`; the column holds their values
+/// there, and counts an edit if they have a value. Where one does not
+/// pass, nothing is put in.
+#[allow(dead_code)]
+fn delta_checked_runs_by_a_cursor<T: VDeltaValue<C>, C: VCodec>(
+    col: &mut VerifiedDeltaColumn<T, C>,
+    at: usize,
+    runs: &[DeltaRun],
+) -> (r: bool)
+    requires
+        at <= old(col)@.len(),
+    ensures
+        r ==> final(col)@ == old(col)@.take(at as int) + delta_runs_values::<T>(runs@) + old(col)@.skip(at as int),
+        !r ==> final(col)@ == old(col)@,
+{
+    let mut i: usize = 0;
+    while i < runs.len()
+        invariant
+            i <= runs.len(),
+            col@ == old(col)@,
+            forall|j: int| 0 <= j < i ==> delta_run_fits::<T>(#[trigger] runs@[j]),
+        decreases runs.len() - i,
+    {
+        if !VerifiedDeltaColumn::<T, C>::run_fits(&runs[i]) {
+            return false;
+        }
+        i += 1;
+    }
+    let mut e = col.edit_at(at);
+    e.insert_runs(runs);
+    e.finish();
+    true
+}
+
+/// The value a delta cursor stands at: the cursor only looks, so the
+/// column is as it was and counts no edit.
+#[allow(dead_code)]
+fn delta_what_is_there<T: VDeltaValue<C>, C: VCodec>(col: &mut VerifiedDeltaColumn<T, C>, at: usize) -> (r: Option<T>)
+    requires
+        at <= old(col)@.len(),
+    ensures
+        match r {
+            Some(v) => at < old(col)@.len() && v == old(col)@[at as int],
+            None => at == old(col)@.len(),
+        },
+        final(col)@ == old(col)@,
+        final(col).edits() == old(col).edits(),
+{
+    let mut e = col.edit_at(at);
+    let r = e.peek();
+    e.finish();
+    proof {
+        let o = old(col)@;
+        assert(o.take(at as int) + o.skip(at as int) =~= o);
+    }
+    r
+}
+
+/// A value put in the place of another; where it is the value that was
+/// there, the column counts no edit.
+#[allow(dead_code)]
+fn delta_put_in_its_place<T: VDeltaValue<C>, C: VCodec>(col: &mut VerifiedDeltaColumn<T, C>, at: usize, v: T)
+    requires
+        at < old(col)@.len(),
+        v.fits(),
+    ensures
+        final(col)@ == old(col)@.update(at as int, v),
+        final(col).edits() == if old(col)@[at as int] == v {
+            old(col).edits()
+        } else {
+            after_edit(old(col).edits())
+        },
+{
+    let mut e = col.edit_at(at);
+    e.replace_with(v);
+    e.finish();
+    proof {
+        let o = old(col)@;
+        assert(o.take(at as int).push(v) + o.skip(at + 1) =~= o.update(at as int, v));
+    }
+}
+
+/// A delta cursor walked over a whole column of timestamps in a loop,
+/// each one looked at and made a second later: one pass, and one edit
+/// counted.
+#[allow(dead_code)]
+fn delta_each_one_later(col: &mut VerifiedDeltaColumn<i64>)
+    requires
+        forall|i: int| 0 <= i < old(col)@.len() ==> old(col)@[i] < i64::MAX,
+    ensures
+        final(col)@.len() == old(col)@.len(),
+        forall|i: int| 0 <= i < old(col)@.len() ==> final(col)@[i] == old(col)@[i] + 1,
+{
+    let ghost o = col@;
+    let mut e = col.edit();
+    // the column the cursor will give: said once, before the loop
+    let ghost given = e.result();
+    proof {
+        e.lemma_at();
+    }
+    loop
+        invariant
+            e.wf(),
+            e.orig() == o,
+            e.result() == given,
+            0 <= e.at() <= o.len(),
+            e.written().len() == e.at(),
+            forall|i: int| 0 <= i < e.at() ==> e.written()[i] == o[i] + 1,
+            forall|i: int| 0 <= i < o.len() ==> o[i] < i64::MAX,
+        ensures
+            e.at() == o.len(),
+        decreases o.len() - e.at(),
+    {
+        match e.peek() {
+            None => {
+                break ;
+            },
+            Some(x) => {
+                e.replace_with(x + 1);
+            },
+        }
+    }
+    e.finish();
+}
+
+/// Numbers that may be null, walked over in a loop: the nulls dropped,
+/// the others kept. The column that is left has no null, and is no
+/// longer than it was.
+#[allow(dead_code)]
+fn delta_nulls_dropped(col: &mut VerifiedDeltaColumn<Option<i32>>)
+    ensures
+        final(col)@.len() <= old(col)@.len(),
+        forall|i: int| 0 <= i < final(col)@.len() ==> (#[trigger] final(col)@[i]) is Some,
+{
+    let ghost o = col@;
+    let mut e = col.edit();
+    // the column the cursor will give: said once, before the loop
+    let ghost given = e.result();
+    proof {
+        e.lemma_at();
+    }
+    loop
+        invariant
+            e.wf(),
+            e.orig() == o,
+            e.result() == given,
+            0 <= e.at() <= o.len(),
+            e.written().len() <= e.at(),
+            forall|i: int| 0 <= i < e.written().len() ==> (#[trigger] e.written()[i]) is Some,
+        ensures
+            e.at() == o.len(),
+        decreases o.len() - e.at(),
+    {
+        match e.peek() {
+            None => {
+                break ;
+            },
+            Some(None) => {
+                e.delete(1);
+            },
+            Some(Some(_x)) => {
+                e.advance(1);
+            },
+        }
+    }
+    e.finish();
+}
+
+/// What each step of a delta cursor says, asked for on its own. A
+/// cursor opened: at the front, nothing written, nothing changed.
+#[allow(dead_code)]
+fn told_by_a_delta_edit<T: VDeltaValue<C>, C: VCodec>(col: &mut VerifiedDeltaColumn<T, C>) -> (e: VerifiedDeltaEdit<
+    '_,
+    T,
+    C,
+>)
+    ensures
+        e.wf(),
+        e.orig() == old(col)@,
+        e.at() == 0,
+        e.written() == Seq::<T>::empty(),
+        !e.changed(),
+        e.began() == old(col).edits(),
+        e.result() == *final(col),
+{
+    col.edit()
+}
+
+/// A delta cursor opened at a place: the values before it written.
+#[allow(dead_code)]
+fn told_by_a_delta_edit_at<T: VDeltaValue<C>, C: VCodec>(col: &mut VerifiedDeltaColumn<T, C>, at: usize) -> (e:
+    VerifiedDeltaEdit<'_, T, C>)
+    requires
+        at <= old(col)@.len(),
+    ensures
+        e.wf(),
+        e.orig() == old(col)@,
+        e.at() == at,
+        e.written() == old(col)@.take(at as int),
+        !e.changed(),
+        e.began() == old(col).edits(),
+        e.result() == *final(col),
+{
+    col.edit_at(at)
+}
+
+/// A delta cursor is among its original values, and says where it is.
+#[allow(dead_code)]
+fn told_by_a_delta_cursors_places<T: VDeltaValue<C>, C: VCodec>(e: &VerifiedDeltaEdit<'_, T, C>) -> (r: (usize, usize))
+    requires
+        e.wf(),
+    ensures
+        r.0 == e.at(),
+        r.1 == e.written().len(),
+        0 <= e.at() <= e.orig().len(),
+        e.now() == e.written() + e.orig().skip(e.at()),
+{
+    proof {
+        e.lemma_at();
+    }
+    (e.pos(), e.out_pos())
+}
+
+/// Where a delta cursor can stand, told back: among its original
+/// values, which are no more than a `usize` counts.
+#[allow(dead_code)]
+proof fn told_by_a_delta_cursors_lemma_at<T: VDeltaValue<C>, C: VCodec>(e: &VerifiedDeltaEdit<'_, T, C>)
+    requires
+        e.wf(),
+    ensures
+        0 <= e.at() <= e.orig().len() <= usize::MAX,
+{
+    e.lemma_at();
+}
+
+/// Values passed over are written as they are.
+#[allow(dead_code)]
+fn told_by_a_delta_cursors_advance<T: VDeltaValue<C>, C: VCodec>(e: &mut VerifiedDeltaEdit<'_, T, C>, n: usize)
+    requires
+        old(e).wf(),
+    ensures
+        final(e).kept(*old(e)),
+        final(e).at() == old(e).at() + old(e).step(n),
+        final(e).written() == old(e).written() + old(e).orig().subrange(old(e).at(), old(e).at() + old(e).step(n)),
+        final(e).changed() == old(e).changed(),
+        old(e).step(n) == if n <= old(e).orig().len() - old(e).at() {
+            n as int
+        } else {
+            old(e).orig().len() - old(e).at()
+        },
+{
+    e.advance(n);
+}
+
+/// A seek goes to its place, or to the end where the place is past it,
+/// and stays where the place is before the cursor.
+#[allow(dead_code)]
+fn told_by_a_delta_cursors_seek<T: VDeltaValue<C>, C: VCodec>(e: &mut VerifiedDeltaEdit<'_, T, C>, to: usize)
+    requires
+        old(e).wf(),
+    ensures
+        final(e).kept(*old(e)),
+        final(e).at() == if to <= old(e).at() {
+            old(e).at()
+        } else if to <= old(e).orig().len() {
+            to as int
+        } else {
+            old(e).orig().len() as int
+        },
+        final(e).written() == old(e).written() + old(e).orig().subrange(old(e).at(), final(e).at()),
+        final(e).changed() == old(e).changed(),
+{
+    e.seek(to);
+}
+
+/// A value put in is written, and the cursor stays where it is.
+#[allow(dead_code)]
+fn told_by_a_delta_cursors_insert<T: VDeltaValue<C>, C: VCodec>(e: &mut VerifiedDeltaEdit<'_, T, C>, v: T)
+    requires
+        old(e).wf(),
+        v.fits(),
+    ensures
+        final(e).kept(*old(e)),
+        final(e).at() == old(e).at(),
+        final(e).written() == old(e).written().push(v),
+        final(e).changed(),
+{
+    e.insert(v);
+}
+
+/// A run put in is written whole; a run of no value changes nothing.
+#[allow(dead_code)]
+fn told_by_a_delta_cursors_insert_run<T: VDeltaValue<C>, C: VCodec>(e: &mut VerifiedDeltaEdit<'_, T, C>, v: T, n: usize)
+    requires
+        old(e).wf(),
+        v.fits(),
+    ensures
+        final(e).kept(*old(e)),
+        final(e).at() == old(e).at(),
+        final(e).written() == old(e).written() + Seq::new(n as nat, |_i: int| v),
+        final(e).changed() == (old(e).changed() || n > 0),
+{
+    e.insert_run(v, n);
+}
+
+/// Runs put in are written one after another, and change the column if
+/// they have a value.
+#[allow(dead_code)]
+fn told_by_a_delta_cursors_insert_runs<T: VDeltaValue<C>, C: VCodec>(e: &mut VerifiedDeltaEdit<'_, T, C>, runs: &[DeltaRun])
+    requires
+        old(e).wf(),
+        delta_runs_fit::<T>(runs@),
+    ensures
+        final(e).kept(*old(e)),
+        final(e).at() == old(e).at(),
+        final(e).written() == old(e).written() + delta_runs_values::<T>(runs@),
+        final(e).changed() == (old(e).changed() || delta_runs_values::<T>(runs@).len() > 0),
+{
+    e.insert_runs(runs);
+}
+
+/// A look at the value the cursor stands at leaves the cursor as it
+/// was.
+#[allow(dead_code)]
+fn told_by_a_delta_cursors_peek<T: VDeltaValue<C>, C: VCodec>(e: &mut VerifiedDeltaEdit<'_, T, C>) -> (r: Option<T>)
+    requires
+        old(e).wf(),
+    ensures
+        final(e).unmoved(*old(e)),
+        final(e).kept(*old(e)),
+        final(e).at() == old(e).at(),
+        final(e).written() == old(e).written(),
+        final(e).changed() == old(e).changed(),
+        match r {
+            Some(v) => old(e).at() < old(e).orig().len() && v == old(e).orig()[old(e).at()],
+            None => old(e).at() == old(e).orig().len(),
+        },
+{
+    e.peek()
+}
+
+/// A value put in another's place: the cursor passes over the place,
+/// and has changed the column unless the value was there. At the end
+/// there is no place, and nothing is done.
+#[allow(dead_code)]
+fn told_by_a_delta_cursors_replace_with<T: VDeltaValue<C>, C: VCodec>(e: &mut VerifiedDeltaEdit<'_, T, C>, v: T)
+    requires
+        old(e).wf(),
+        v.fits(),
+    ensures
+        final(e).kept(*old(e)),
+        if old(e).at() < old(e).orig().len() {
+            &&& final(e).at() == old(e).at() + 1
+            &&& final(e).written() == old(e).written().push(v)
+            &&& final(e).changed() == (old(e).changed() || old(e).orig()[old(e).at()] != v)
+        } else {
+            &&& final(e).at() == old(e).at()
+            &&& final(e).written() == old(e).written()
+            &&& final(e).changed() == old(e).changed()
+        },
+{
+    e.replace_with(v);
+}
+
+/// Values dropped are passed over and not written; the cursor has
+/// changed the column if there was one to drop.
+#[allow(dead_code)]
+fn told_by_a_delta_cursors_delete<T: VDeltaValue<C>, C: VCodec>(e: &mut VerifiedDeltaEdit<'_, T, C>, n: usize)
+    requires
+        old(e).wf(),
+    ensures
+        final(e).kept(*old(e)),
+        final(e).at() == old(e).at() + old(e).step(n),
+        final(e).written() == old(e).written(),
+        final(e).changed() == (old(e).changed() || old(e).step(n) > 0),
+{
+    e.delete(n);
+}
+
+/// What every step keeps: the cursor's original values, the count it
+/// began with, and the column it will give.
+#[allow(dead_code)]
+fn told_what_a_delta_step_keeps<T: VDeltaValue<C>, C: VCodec>(e: &mut VerifiedDeltaEdit<'_, T, C>, n: usize, v: T)
+    requires
+        old(e).wf(),
+        v.fits(),
+    ensures
+        final(e).wf(),
+        final(e).orig() == old(e).orig(),
+        final(e).began() == old(e).began(),
+        final(e).result() == old(e).result(),
+{
+    e.advance(n).insert(v).delete(n).insert_run(v, n).replace_with(v).seek(n);
+}
+
+/// The end of an edit: the column holds what is written and then the
+/// rest of the original values, and counts an edit if a step changed
+/// it.
+#[allow(dead_code)]
+fn told_by_a_delta_cursors_finish<T: VDeltaValue<C>, C: VCodec>(e: VerifiedDeltaEdit<'_, T, C>)
     requires
         e.wf(),
     ensures

@@ -3724,6 +3724,7 @@ fn postfix_at_group<'a, O: RleOps<'a>>(data: &'a [u8], pos: usize, Ghost(gi): Gh
 /// Repeat run `gi - 1`, whose value starts at `vat`: the value's
 /// encoding starts the bytes there, and the run ends at the slab's end
 /// exactly when no group follows it.
+#[verifier::spinoff_prover]
 proof fn lemma_in_run<'a, O: RleOps<'a>>(data: Seq<u8>, gi: int, vat: int)
     requires
         valid_slab::<O>(data), 1 <= gi <= slab_groups::<O>(data).len(),
