@@ -2862,6 +2862,111 @@ pub(crate) fn splice_feed<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>, F: Visito
     Ghost(ins)
 }
 
+/// A feed that says how many runs at most it is yet to give, and gives
+/// one fewer at each run: a slice's, and the empty one of a copy. A
+/// splice of one ends ([`splice_feed_bounded`]).
+pub(crate) trait BoundedFeed<E: Slabs>: RunFeed<E> {
+    /// How many runs at most the feed is yet to give.
+    spec fn bound(&self) -> nat;
+
+    /// [`RunFeed::next_run`], which lowers the bound.
+    fn next_bounded(&mut self) -> (r: Option<(Self::X, usize)>)
+        requires
+            old(self).inv(),
+        ensures
+            final(self).inv(),
+            final(self).key() == old(self).key(),
+            match r {
+                Some((x, n)) => {
+                    &&& final(self).given() == old(self).given() + Seq::new(n as nat, |_i: int| x.val())
+                    &&& final(self).bound() < old(self).bound()
+                },
+                None => final(self).given() == old(self).given() && final(self).ended(),
+            },
+    ;
+}
+
+/// [`splice_feed`], of a feed that says how many runs it is yet to give
+/// ([`BoundedFeed`]): it ends.
+#[inline(always)]
+pub(crate) fn splice_feed_bounded<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>, F: Visitor<E>, R: BoundedFeed<E>>(
+    slabs: &mut Vec<Slab<E::Tail>>,
+    index: &mut I,
+    total_len: &mut usize,
+    max_segments: usize,
+    counter: &mut usize,
+    at: usize,
+    del: usize,
+    f: &mut F,
+    feed: &mut R,
+) -> (ins: Ghost<Seq<E::V>>)
+    requires
+        col_ok::<E, W, I, G>(old(slabs)@, *old(index), *old(total_len), max_segments),
+        at <= *old(total_len),
+        del <= *old(total_len) - at,
+        *old(total_len) + 3 <= usize::MAX,
+        old(feed).inv(),
+    ensures
+        col_ok::<E, W, I, G>(final(slabs)@, *final(index), *final(total_len), max_segments),
+        *final(total_len) + 3 <= usize::MAX,
+        vals_of::<E>(final(slabs)@) == vals_of::<E>(old(slabs)@).take(at as int) + ins@
+            + vals_of::<E>(old(slabs)@).skip(at + del),
+        final(feed).given() == old(feed).given() + ins@,
+        final(feed).ended(),
+        final(feed).inv(),
+        final(feed).key() == old(feed).key(),
+{
+    let ghost o = vals_of::<E>(slabs@);
+    proof {
+        lemma_vals_total::<E>(slabs@);
+    }
+    let mut cur = Cursor::<E>::new::<W, I, G>(slabs, index, *total_len, Ghost(max_segments), at);
+    cur.delete_with::<W, I, G, F>(slabs, index, total_len, max_segments, counter, del, f);
+    let ghost mut ins: Seq<E::V> = Seq::empty();
+    let ghost g0 = feed.given();
+    let ghost k0 = feed.key();
+    loop
+        invariant
+            cur.ok::<W, I, G>(slabs@, *index, *total_len, max_segments),
+            cur.o@ == o,
+            cur.orig == at + del,
+            cur.p@ == o.take(at as int) + ins,
+            feed.given() == g0 + ins,
+            feed.inv(),
+            feed.key() == k0,
+        ensures
+            cur.ok::<W, I, G>(slabs@, *index, *total_len, max_segments),
+            cur.o@ == o,
+            cur.orig == at + del,
+            cur.p@ == o.take(at as int) + ins,
+            feed.given() == g0 + ins,
+            feed.ended(),
+            feed.inv(),
+            feed.key() == k0,
+        decreases feed.bound(),
+    {
+        match feed.next_bounded() {
+            None => break,
+            Some((x, n)) => {
+                let ghost xv = x.val();
+                cur.insert(slabs, max_segments, x, n);
+                proof {
+                    let run = Seq::new(n as nat, |_i: int| xv);
+                    assert(g0 + (ins + run) =~= (g0 + ins) + run);
+                    ins = ins + run;
+                    assert(cur.p@ =~= o.take(at as int) + ins);
+                }
+            },
+        }
+    }
+    cur.close::<W, I, G>(slabs, index, total_len, max_segments, counter);
+    proof {
+        cur.lemma_clean(slabs@);
+        lemma_vals_total::<E>(slabs@);
+    }
+    Ghost(ins)
+}
+
 } // verus!
 
 // ── Trusted bridges ────────────────────────────────────────────────────────

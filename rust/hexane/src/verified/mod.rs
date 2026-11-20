@@ -669,7 +669,7 @@ use crate::column::Slab;
 use crate::copy::NoRuns;
 #[cfg(verus_keep_ghost)]
 use crate::cursor::{lemma_lens_ok, lemma_vals_own, lemma_vals_unit, slab_lens, Weigh};
-use crate::cursor::{ReadsAgree, RunFeed, Slabs};
+use crate::cursor::{BoundedFeed, ReadsAgree, RunFeed, Slabs};
 #[cfg(verus_keep_ghost)]
 use crate::fenwick::{sum, total};
 #[cfg(verus_keep_ghost)]
@@ -1662,6 +1662,24 @@ impl<'a, 'v, V: VValue<C>, C: VCodec> RunFeed<V::E> for SliceFeed<'a, 'v, V, C> 
     }
 }
 
+impl<'a, 'v, V: VValue<C>, C: VCodec> BoundedFeed<V::E> for SliceFeed<'a, 'v, V, C> {
+    /// The values not given yet: each a run.
+    closed spec fn bound(&self) -> nat {
+        (self.values@.len() - self.pos) as nat
+    }
+
+    #[inline(always)]
+    fn next_bounded(&mut self) -> (r: Option<(<V::E as ReadsAgree<'v, V::X>>::Ins, usize)>) {
+        if self.pos < self.values.len() {
+            let v = self.values[self.pos];
+            self.pos = self.pos + 1;
+            Some((<V::E as ReadsAgree<'v, V::X>>::ins(v), 1))
+        } else {
+            None
+        }
+    }
+}
+
 /// The values a splice inserts, from a caller's iterator: each a run of
 /// one.
 #[verifier::reject_recursive_types(C)]
@@ -2479,7 +2497,7 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
         let counter = self.core.counter();
         let mut f = <V::E as Model<V::X>>::blind();
         let mut feed = SliceFeed::<V, C> { values, pos: 0, _c: PhantomData };
-        let _ins = self.core.splice(at, del, &mut f, &mut feed);
+        let _ins = self.core.splice_bounded(at, del, &mut f, &mut feed);
         proof {
             lemma_spliced::<V, C>(old(self).core@, at as int, del as int, values@, _ins@);
         }
@@ -2626,7 +2644,7 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
         let counter = self.core.counter();
         let mut f = <V::E as Model<V::X>>::blind();
         let mut feed = NoRuns::<<V::E as ReadsAgree<'static, V::X>>::Ins> { none: None };
-        let _ins = self.core.splice(at, del, &mut f, &mut feed);
+        let _ins = self.core.splice_bounded(at, del, &mut f, &mut feed);
         proof {
             let a = old(self).core@;
             let none = Seq::<Held<V, C>>::empty();
@@ -2680,7 +2698,7 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
         let values = one.as_slice();
         let mut f = <V::E as Model<V::X>>::blind();
         let mut feed = SliceFeed::<V, C> { values, pos: 0, _c: PhantomData };
-        let _ins = self.core.splice(at, 0, &mut f, &mut feed);
+        let _ins = self.core.splice_bounded(at, 0, &mut f, &mut feed);
         proof {
             lemma_spliced::<V, C>(old(self).core@, at as int, 0, values@, _ins@);
             assert(one@ =~= seq![value]);

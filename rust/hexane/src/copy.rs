@@ -30,7 +30,8 @@
 use crate::column::Slab;
 #[cfg(verus_keep_ghost)]
 use crate::cursor::{all_ok, col_ok, lemma_vals_own, lemma_vals_total, slab_lens, vals_of};
-use crate::cursor::{splice_feed, Cursor, Insertable, ReadsAgree, RunFeed, Slabs, Visitor, Weigh};
+use crate::cursor::{splice_feed_bounded, BoundedFeed, Cursor, Insertable, ReadsAgree, RunFeed};
+use crate::cursor::{Slabs, Visitor, Weigh};
 #[cfg(verus_keep_ghost)]
 use crate::fenwick::sum;
 #[cfg(verus_keep_ghost)]
@@ -129,6 +130,17 @@ impl<E: Slabs, X: Insertable<E>> RunFeed<E> for NoRuns<X> {
 
     #[inline(always)]
     fn next_run(&mut self) -> (r: Option<(X, usize)>) {
+        None
+    }
+}
+
+impl<E: Slabs, X: Insertable<E>> BoundedFeed<E> for NoRuns<X> {
+    open spec fn bound(&self) -> nat {
+        0
+    }
+
+    #[inline(always)]
+    fn next_bounded(&mut self) -> (r: Option<(X, usize)>) {
         None
     }
 }
@@ -445,7 +457,7 @@ fn cut_gaps<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>, F: Visitor<E>, X: Inser
                     lemma_vals_total::<E>(slabs@);
                 }
                 let mut none = NoRuns::<X> { none: None };
-                let _ins = splice_feed::<E, W, I, G, F, NoRuns<X>>(
+                let _ins = splice_feed_bounded::<E, W, I, G, F, NoRuns<X>>(
                     slabs,
                     index,
                     total_len,

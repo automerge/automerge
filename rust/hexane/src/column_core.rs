@@ -53,9 +53,10 @@ use crate::copy::RangeFeed;
 use crate::copy::{copy_direct, copy_invert, SrcFeed};
 #[cfg(verus_keep_ghost)]
 use crate::cursor::{all_ok, col_ok, lemma_vals_total, slab_lens, vals_of, ws_ok};
-use crate::cursor::{col_index, splice_feed, ReadsAgree, RunFeed, Slabs, Visitor, Weigh};
+use crate::cursor::{col_index, splice_feed, splice_feed_bounded, ReadsAgree, RunFeed, Slabs};
 #[cfg(verus_keep_ghost)]
 use crate::cursor::{lemma_lens_ok, lemma_vals_own};
+use crate::cursor::{BoundedFeed, Visitor, Weigh};
 #[cfg(verus_keep_ghost)]
 use crate::delta::agg::{agg_of, deltas_of, psum, reps, steps_fit};
 #[cfg(verus_keep_ghost)]
@@ -701,6 +702,52 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> ColumnCore<E, W, I, G> {
             lemma_vals_total::<E>(p.slabs@);
         }
         let ins = splice_feed::<E, W, I, G, F, R>(
+            &mut p.slabs,
+            &mut p.index,
+            &mut p.total_len,
+            max_segments,
+            &mut p.counter,
+            at,
+            del,
+            f,
+            feed,
+        );
+        if !G::dom_check(&p.slabs, p.total_len) {
+            out_of_domain();
+        }
+        self.restore(p);
+        ins
+    }
+
+    /// [`splice`](Self::splice), of a feed that says how many runs it is
+    /// yet to give (`cursor::BoundedFeed`): it ends.
+    #[inline(always)]
+    pub(crate) fn splice_bounded<F: Visitor<E>, R: BoundedFeed<E>>(
+        &mut self,
+        at: usize,
+        del: usize,
+        f: &mut F,
+        feed: &mut R,
+    ) -> (ins: Ghost<Seq<E::V>>)
+        requires
+            at <= old(self)@.len(),
+            del <= old(self)@.len() - at,
+            old(feed).inv(),
+        ensures
+            final(self)@ == old(self)@.take(at as int) + ins@ + old(self)@.skip(at + del),
+            final(feed).given() == old(feed).given() + ins@,
+            final(feed).ended(),
+            final(feed).inv(),
+            final(feed).key() == old(feed).key(),
+            final(self).budget() == old(self).budget(),
+            final(self).ready(),
+    {
+        let max_segments = self.max_segments;
+        let mut p = self.take_parts();
+        proof {
+            lemma_vals_total::<E>(p.slabs@);
+        }
+        let ins = splice_feed_bounded::<E, W, I, G, F, R>(
             &mut p.slabs,
             &mut p.index,
             &mut p.total_len,
