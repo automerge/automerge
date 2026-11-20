@@ -507,9 +507,10 @@
 //!   out of memory;
 //! * the constructors of [`PackError`], of which nothing is assumed
 //!   ([`refused`] is the one for a client's type);
-//! * two specifications of standard-library calls that Verus has none
+//! * three specifications of standard-library calls that Verus has none
 //!   for: replacing a range of a `Vec` of bytes (`rle::writer::splice_bytes`)
-//!   and of a `Vec` of slabs (`index::splice_vec`);
+//!   and of a `Vec` of slabs (`index::splice_vec`), and taking a range out
+//!   of a raw column's `Vec` of slabs (`raw::drain_slabs`);
 //! * for a column of strings, two more things that Verus does not say
 //!   (in `verified::text`). One is a specification of the standard
 //!   library's `core::str::from_utf8`: that the `str` it gives is of the
@@ -521,9 +522,10 @@
 //!   `from_utf8`, and cannot give one of its own. The other is that two
 //!   `str`s of the same characters are one `str` (`axiom_str_same`),
 //!   which Verus says of slices and not of `str`;
-//! * three helpers of which nothing is assumed: an addition of counts
+//! * four helpers of which nothing is assumed: an addition of counts
 //!   whose sum the proofs take as unknown (`rle::writer::add`), the reuse
-//!   of a buffer (`recycle`), and a constant (`carry_budget`).
+//!   of a buffer (`recycle`), the taking of one (`take_buf`), and a
+//!   constant (`carry_budget`).
 //!
 //! No value type's encoding is trusted, nor the codec's, and there is no
 //! unverified code between this API and the core: every other function on
@@ -555,23 +557,33 @@
 //!
 //! A client's own value type is checked with the client: Verus proves
 //! what [`VNewtype`] asks of it when it is run on the client's crate,
-//! and so what [`VAmount`] asks of one that a prefix column adds up, and
-//! what [`VGroup`], [`VAccum`] and [`VAdds`] ask of an accumulator and
-//! of the values added up in it. A client that is compiled without
-//! Verus has that to keep by itself, as it has every `requires` of this
-//! API.
+//! or [`VPack`] of one with an encoding of its own, and so what
+//! [`VAmount`] asks of one that a prefix column adds up, and what
+//! [`VGroup`], [`VAccum`] and [`VAdds`] ask of an accumulator and of the
+//! values added up in it. So too what [`VCodec`] asks of a client's own
+//! codec, and [`VShiftable`] of a client's own repositionable iterator.
+//! A client that is compiled without Verus has that to keep by itself,
+//! as it has every `requires` of this API.
 //!
-//! That a splice returns is not proved: it runs the core's loop over the
-//! values to insert, which Verus is not asked to show ends. It ends when
-//! the slice does, or the iterator: with an iterator that never ends,
+//! That a splice returns is proved where it takes a slice:
+//! [`splice`](VerifiedColumn::splice), `from_values`, `insert`, `push`,
+//! `remove`, `remove_n`, `truncate` and `clear` of every column but a
+//! delta column, and `copy_ranges` of every column. (Verus checks that
+//! each loop ends; that a function calls only functions that end, it
+//! does not: each loop on these paths has a measure.) A delta column's
+//! splices and deletes, and a splice of a caller's iterator or runs, run
+//! the core's loop over the values to insert, which Verus is not asked to
+//! show ends. It ends when the slice does, or the iterator: with an
+//! iterator that never ends,
 //! [`splice_iter`](VerifiedColumn::splice_iter),
 //! [`splice_runs`](VerifiedColumn::splice_runs), `extend` and `collect()`
 //! do not return (they run until memory is out, or a column's length is
-//! more than it can count, which panics). Nor is it proved that an
-//! encoder's [`extend`](VerifiedEncoder::extend) returns, or a
-//! state's ([`VerifiedEncoderState::extend`]), or a static form that
-//! is built on it: each is a loop over the client's iterator. Every
-//! other loop is proved to end.
+//! more than it can count, which panics). Nor is it proved that an edit
+//! cursor's [`insert_runs`](VerifiedEdit::insert_runs) returns, or an
+//! encoder's [`extend`](VerifiedEncoder::extend), or a state's
+//! ([`VerifiedEncoderState::extend`]), or a static form that is built on
+//! one: each is a loop over the client's iterator. Every other loop is
+//! proved to end.
 
 // Verus proofs read more plainly with `x = x + n`, and Verus has no
 // spec for `vec![x]`.
