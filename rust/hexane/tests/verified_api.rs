@@ -17,12 +17,12 @@ use hexane::encoder::{BoolEncoder, BoolEncoderState, RleEncoder, RleEncoderState
 use hexane::prefix::{PrefixSeek, PrefixWeightFn};
 use hexane::verified::{
     refused, AccIndex, Get, LenIndex, RawColumn, SumIndex, VAccum, VAccumulated, VAdds, VAmount,
-    VDeltaValue, VGroup, VNewtype, VSummed, VValue, VerifiedAccColumn, VerifiedAccIter,
-    VerifiedAccIterState, VerifiedAccSeek, VerifiedAccValue, VerifiedColumn, VerifiedDecoder,
-    VerifiedDeltaColumn, VerifiedDeltaDecoder, VerifiedDeltaEncoder, VerifiedDeltaEncoderState,
-    VerifiedEncoder, VerifiedEncoderState, VerifiedIter, VerifiedIterState, VerifiedPrefixColumn,
-    VerifiedPrefixIter, VerifiedPrefixIterState, VerifiedPrefixSeek, VerifiedPrefixedValue,
-    VerifiedRuns,
+    VCodec, VDeltaValue, VGroup, VNewtype, VPack, VSummed, VValue, VerifiedAccColumn,
+    VerifiedAccIter, VerifiedAccIterState, VerifiedAccSeek, VerifiedAccValue, VerifiedColumn,
+    VerifiedDecoder, VerifiedDeltaColumn, VerifiedDeltaDecoder, VerifiedDeltaEncoder,
+    VerifiedDeltaEncoderState, VerifiedEncoder, VerifiedEncoderState, VerifiedIter,
+    VerifiedIterState, VerifiedPrefixColumn, VerifiedPrefixIter, VerifiedPrefixIterState,
+    VerifiedPrefixSeek, VerifiedPrefixedValue, VerifiedRuns,
 };
 use hexane::{
     Codec, Column, ColumnEncoding, ColumnValue, ColumnValueRef, DeltaColumn, DeltaDecoder,
@@ -826,6 +826,7 @@ macro_rules! for_each_kind {
         $f::<NonZeroU32>($($arg),*);
         $f::<bool>($($arg),*);
         $f::<Action>($($arg),*);
+        $f::<Tag>($($arg),*);
         $f::<Option<u64>>($($arg),*);
         $f::<Option<i64>>($($arg),*);
         $f::<Option<u32>>($($arg),*);
@@ -833,6 +834,7 @@ macro_rules! for_each_kind {
         $f::<Option<usize>>($($arg),*);
         $f::<Option<NonZeroU32>>($($arg),*);
         $f::<Option<Action>>($($arg),*);
+        $f::<Option<Tag>>($($arg),*);
         $f::<Vec<u8>>($($arg),*);
         $f::<Option<Vec<u8>>>($($arg),*);
         $f::<String>($($arg),*);
@@ -3934,6 +3936,8 @@ fn loads_refuse_bad_runs() {
     refuses::<Option<i64>>(&bad);
     refuses::<Option<NonZeroU32>>(&bad);
     refuses::<Option<Action>>(&bad);
+    refuses::<Tag>(&bad);
+    refuses::<Option<Tag>>(&bad);
     refuses::<Vec<u8>>(&bad);
     refuses::<Option<Vec<u8>>>(&bad);
     refuses::<String>(&bad);
@@ -4177,6 +4181,8 @@ fn loads_of_another_types_bytes() {
             cross::<Option<usize>>(bytes);
             cross::<Option<NonZeroU32>>(bytes);
             cross::<Option<Action>>(bytes);
+            cross::<Tag>(bytes);
+            cross::<Option<Tag>>(bytes);
             cross::<Vec<u8>>(bytes);
             cross::<Option<Vec<u8>>>(bytes);
             cross::<String>(bytes);
@@ -5004,7 +5010,7 @@ fn dump_slabs_prints_each_slab() {
     for_each_kind!(layout_lines, &mut expected);
     // more slabs than columns: many of the columns have several
     let columns = expected.iter().filter(|l| l.starts_with("== ")).count();
-    assert_eq!(columns, 18 * 17);
+    assert_eq!(columns, 20 * 17);
     assert!(expected.len() > 20 * columns);
     for api in ["new", "old"] {
         let lines = printed(api);
@@ -18184,5 +18190,123 @@ fn a_fill_loads_by_runs_as_the_old_one_does() {
         assert_eq!(a, b);
         assert_eq!(x.finalize().unwrap().to_vec(), vec![7u64; n]);
         assert_eq!(y.finalize().unwrap().to_vec(), vec![7u64; n]);
+    }
+}
+
+// ── A client's own encoding ────────────────────────────────────────────────
+
+/// A value type of a client's own with an encoding of its own, as a
+/// client compiled without Verus writes it: a tag stored as one byte of
+/// the client's choosing, whatever the codec (`Int` as 0x00, `Str` as
+/// 0xff). Any other byte is no tag. The tags are declared in the order
+/// the client gives them, which is the order a column has them in.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+enum Tag {
+    Int,
+    Str,
+}
+
+impl Tag {
+    fn byte(self) -> u8 {
+        match self {
+            Tag::Int => 0x00,
+            Tag::Str => 0xff,
+        }
+    }
+
+    fn of_byte(data: &[u8]) -> Result<(usize, Tag), PackError> {
+        match data.first() {
+            Some(0x00) => Ok((1, Tag::Int)),
+            Some(0xff) => Ok((1, Tag::Str)),
+            _ => Err(refused("not a tag")),
+        }
+    }
+}
+
+impl VPack for Tag {
+    fn same(a: &Tag, b: &Tag) -> bool {
+        a == b
+    }
+
+    fn compare(a: &Tag, b: &Tag) -> Ordering {
+        a.cmp(b)
+    }
+
+    fn try_unpack<C: VCodec>(data: &[u8]) -> Result<(usize, Tag), PackError> {
+        Tag::of_byte(data)
+    }
+
+    fn unpack<C: VCodec>(data: &[u8]) -> (usize, Tag) {
+        Tag::of_byte(data).unwrap()
+    }
+
+    fn value_len<C: VCodec>(_data: &[u8]) -> Option<usize> {
+        Some(1)
+    }
+
+    fn pack<C: VCodec>(v: &Tag, buf: &mut Vec<u8>) -> usize {
+        buf.push(v.byte());
+        1
+    }
+}
+
+// the same type for `Column`, with the same bytes
+impl ColumnValue for Tag {
+    type Encoding<C: Codec> = RleEncoding<Tag, C>;
+}
+
+impl RleValue for Tag {
+    fn try_unpack<C: Codec>(data: &[u8]) -> Result<(usize, Tag), PackError> {
+        Tag::of_byte(data)
+    }
+
+    fn pack<C: Codec>(value: Tag, out: &mut Vec<u8>) -> bool {
+        out.push(value.byte());
+        true
+    }
+}
+
+plain_kind!(Tag, |rng| [Tag::Int, Tag::Str][rng.below(2)]);
+
+/// The tags are the bytes the client chose, whatever the codec, in a
+/// column of each API; a byte that is no tag's loads in neither, and
+/// with the client's error; and the order of a search is the client's.
+#[test]
+fn a_clients_own_encoding() {
+    let (v, c) = both::<Tag>(&[Tag::Int, Tag::Str, Tag::Str]);
+    // a literal run of one `Int` (a count of -1), then a run of two
+    // `Str`s; with bijou64 the counts are other bytes, the tags not
+    assert_eq!(v.save(), [0x7f, 0x00, 0x02, 0xff]);
+    assert_eq!(c.save(), v.save());
+    let (v, c) = both::<Option<Tag>>(&[Some(Tag::Str), None, None]);
+    assert_eq!(v.save(), [0x7f, 0xff, 0x00, 0x02]);
+    assert_eq!(c.save(), v.save());
+    #[cfg(feature = "bijou64")]
+    {
+        let w = hexane::verified::bijou::VerifiedColumn::<Tag>::from_values(&[
+            Tag::Int,
+            Tag::Str,
+            Tag::Str,
+        ]);
+        assert_eq!(w.save(), [0x01, 0x00, 0x04, 0xff]);
+    }
+
+    for bad in [&[0x7f, 0x01][..], &[0x02, 0x80], &[0x7e, 0x00, 0xfe]] {
+        assert_eq!(refusal::<Tag>(bad), "invalid value: not a tag");
+        assert_eq!(refusal::<Option<Tag>>(bad), "invalid value: not a tag");
+    }
+    assert!(check_same_load::<Tag>(&[0x7e, 0x00, 0xff]));
+    assert!(check_same_load::<Option<Tag>>(&[0x02, 0xff, 0x00, 0x03]));
+
+    let mut rng = Rng(0x7a6);
+    for _ in 0..50 {
+        let mut model = rng.values::<Tag>(40);
+        model.sort();
+        let (v, c) = both::<Tag>(&model);
+        for t in [Tag::Int, Tag::Str] {
+            let n = model.len();
+            assert_eq!(v.scope_to_value(t, 0, n), c.scope_to_value(t, 0..n));
+        }
+        assert!(check_same_load::<Tag>(&v.save()));
     }
 }

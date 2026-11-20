@@ -4318,3 +4318,28 @@ fn a_clients_own_iterator_repositions() {
     assert_eq!(verus_client::first_number_of_range(&v, 2, 4), Some(7));
     assert_eq!(verus_client::first_number_of_range(&v, 5, 9), None);
 }
+
+// ── A client's own encoding ────────────────────────────────────────────────
+
+#[test]
+fn a_clients_own_encoding() {
+    use verus_client::Tag;
+    let tags: Vec<Option<Tag>> = (0..1000)
+        .map(|i| match i % 5 {
+            0 => None,
+            1 | 2 => Some(Tag::Int),
+            _ => Some(Tag::Str),
+        })
+        .collect();
+    let plain: Vec<Tag> = tags.iter().flatten().copied().collect();
+    verus_client::round_trip_tag(&plain, &tags);
+    verus_client::find_tag(3, 4);
+    verus_client::find_tag(0, 2);
+    // a literal run of one `Int`, then a run of two `Str`s: the tags'
+    // own bytes
+    let c = VerifiedColumn::<Tag>::from_values(&[Tag::Int, Tag::Str, Tag::Str]);
+    assert_eq!(c.save(), [0x7f, 0x00, 0x02, 0xff]);
+    // a byte that is no tag's
+    assert!(VerifiedColumn::<Tag>::load(&[0x7f, 0x01]).is_err());
+    assert!(VerifiedColumn::<Tag>::load(&[0x7f, 0x00]).is_ok());
+}

@@ -410,8 +410,8 @@ use super::{
     scan_taken, sorted, sorted_for, splice_does, spliced_cut, splices_do, sum_of, summed, sums_fit,
     times, total_len, total_str_len, unit_runs, window, windows, AccIndex, Get, LenIndex,
     RawColumn, RawColumnIter, SumIndex, VAccum, VAccumulated, VAdds, VAmount, VCodec, VCount,
-    VDelta, VDeltaValue, VGet, VGroup, VIndex, VKeeps, VNewtype, VShiftable, VSpec, VSum, VSummed,
-    VValue, VerifiedAccColumn, VerifiedAccIter, VerifiedAccIterState, VerifiedAccSeek,
+    VDelta, VDeltaValue, VGet, VGroup, VIndex, VKeeps, VNewtype, VPack, VShiftable, VSpec, VSum,
+    VSummed, VValue, VerifiedAccColumn, VerifiedAccIter, VerifiedAccIterState, VerifiedAccSeek,
     VerifiedAccValue, VerifiedColumn, VerifiedDecoder, VerifiedDeltaColumn, VerifiedDeltaDecoder,
     VerifiedDeltaEdit, VerifiedDeltaEncoder, VerifiedDeltaEncoderState, VerifiedDeltaIter,
     VerifiedDeltaIterState, VerifiedDeltaRuns, VerifiedEdit, VerifiedEncoder, VerifiedEncoderState,
@@ -19516,6 +19516,176 @@ fn first_number_of_range(v: &[u64], a: usize, b: usize) -> (r: Option<u64>)
         }
     }
     r
+}
+
+// ── A client's own encoding ────────────────────────────────────────────────
+
+/// A value type of the client's own with an encoding of its own, as a
+/// client of the old API writes `RleValue::pack` for it: a tag that
+/// says what kind of thing a value is, stored as one byte of the
+/// client's choosing whatever the column's codec (`Int` as 0x00, `Str`
+/// as 0xff). Any other byte is no tag, and bytes that hold one do not
+/// load as a column of tags.
+#[derive(Clone, Copy)]
+#[allow(dead_code)]
+pub enum Tag {
+    Int,
+    Str,
+}
+
+/// The byte `v` is stored as.
+pub open spec fn tag_byte(v: Tag) -> u8 {
+    match v {
+        Tag::Int => 0x00,
+        Tag::Str => 0xff,
+    }
+}
+
+impl VPack for Tag {
+    open spec fn enc<C: VCodec>(v: Tag) -> Seq<u8> {
+        seq![tag_byte(v)]
+    }
+
+    proof fn lemma_enc<C: VCodec>(v: Tag, w: Tag, s: Seq<u8>, t: Seq<u8>) {
+        if Self::enc::<C>(v) + s == Self::enc::<C>(w) + t {
+            assert((Self::enc::<C>(v) + s)[0] == tag_byte(v));
+        }
+    }
+
+    /// The order of the tags is the client's to choose: `Int` first.
+    open spec fn num(v: Tag) -> int {
+        match v {
+            Tag::Int => 0,
+            Tag::Str => 1,
+        }
+    }
+
+    proof fn lemma_num(v: Tag, w: Tag) {
+    }
+
+    fn same(a: &Tag, b: &Tag) -> (r: bool) {
+        match (*a, *b) {
+            (Tag::Int, Tag::Int) => true,
+            (Tag::Str, Tag::Str) => true,
+            _ => false,
+        }
+    }
+
+    fn compare(a: &Tag, b: &Tag) -> (r: Ordering) {
+        match (*a, *b) {
+            (Tag::Int, Tag::Str) => Ordering::Less,
+            (Tag::Str, Tag::Int) => Ordering::Greater,
+            _ => Ordering::Equal,
+        }
+    }
+
+    fn try_unpack<C: VCodec>(data: &[u8]) -> (r: Result<(usize, Tag), PackError>) {
+        if data.len() == 0 || (data[0] != 0x00 && data[0] != 0xff) {
+            proof {
+                assert forall|v: Tag| !(#[trigger] Self::enc::<C>(v)).is_prefix_of(data@) by {
+                    if Self::enc::<C>(v).is_prefix_of(data@) {
+                        assert(data@[0] == Self::enc::<C>(v)[0]);
+                    }
+                }
+            }
+            return Err(refused("not a tag"));
+        }
+        let v = if data[0] == 0x00 {
+            Tag::Int
+        } else {
+            Tag::Str
+        };
+        Ok((1, v))
+    }
+
+    fn unpack<C: VCodec>(data: &[u8]) -> (r: (usize, Tag)) {
+        let v = if data[0] == 0x00 {
+            Tag::Int
+        } else {
+            Tag::Str
+        };
+        (1, v)
+    }
+
+    fn value_len<C: VCodec>(data: &[u8]) -> (r: Option<usize>) {
+        Some(1)
+    }
+
+    fn pack<C: VCodec>(v: &Tag, buf: &mut Vec<u8>) -> (n: usize) {
+        let b: u8 = match *v {
+            Tag::Int => 0x00,
+            Tag::Str => 0xff,
+        };
+        buf.push(b);
+        1
+    }
+}
+
+/// The client's own encoding, and nulls of it: what is saved loads back.
+#[allow(dead_code)]
+fn round_trip_tag(input: &Vec<Tag>, nullable: &Vec<Option<Tag>>)
+    requires
+        input@.len() < 1_000_000,
+        nullable@.len() < 1_000_000,
+{
+    round_trip::<Tag, Leb128, LenIndex>(input);
+    round_trip::<Option<Tag>, Leb128, LenIndex>(nullable);
+}
+
+/// The order of the tags is the client's ([`VPack::num`]), not their
+/// bytes': `Int` (0x00) before `Str` (0xff). In a column of some `Int`s
+/// and then some `Str`s, the search for `Str` gives the `Str`s, and that
+/// for `Int` the `Int`s.
+#[allow(dead_code)]
+fn find_tag(ints: usize, strs: usize)
+    requires
+        ints + strs <= 1000,
+{
+    let mut col = VerifiedColumn::<Tag>::new();
+    let mut i: usize = 0;
+    while i < ints
+        invariant
+            i <= ints,
+            col@.len() == i,
+            only(col@, Tag::Int),
+        decreases ints - i,
+    {
+        col.push(Tag::Int);
+        i += 1;
+    }
+    let mut j: usize = 0;
+    while j < strs
+        invariant
+            j <= strs,
+            col@.len() == ints + j,
+            forall|k: int| 0 <= k < ints ==> col@[k] == Tag::Int,
+            forall|k: int| ints <= k < ints + j ==> col@[k] == Tag::Str,
+        decreases strs - j,
+    {
+        col.push(Tag::Str);
+        j += 1;
+    }
+    let n = col.len();
+    let r = col.scope_to_value(Tag::Str, 0, n);
+    proof {
+        if strs > 0 {
+            assert(col@[ints as int] == Tag::Str);
+            assert(col@[n - 1] == Tag::Str);
+        }
+    }
+    assert(r.start == ints && r.end == n);
+
+    let r = col.scope_to_value(Tag::Int, 0, n);
+    proof {
+        if ints > 0 {
+            assert(col@[0] == Tag::Int);
+            assert(col@[ints - 1] == Tag::Int);
+        }
+        if strs > 0 {
+            assert(col@[ints as int] == Tag::Str);
+        }
+    }
+    assert(r.start == 0 && r.end == ints);
 }
 
 } // verus!

@@ -34,12 +34,22 @@ verus! {
 
 // ── Packing ─────────────────────────────────────────────────────────────────
 
-/// A value that is one number of a column's codec: how it packs, with
-/// that specified and proved.
+/// A value that packs as one to ten bytes: how, with that specified and
+/// proved. The types are this crate's numbers (`u64` and `i64`), those
+/// that say which of these they are ([`VNewtype`]), and a client's own
+/// with an encoding of its own, as a client of the old API writes
+/// [`RleValue`](crate::RleValue)'s `pack` and `try_unpack` for its type.
 ///
-/// The types are this crate's (`u64` and `i64`) and those that say which
-/// of these they are ([`VNewtype`]): no other can implement this trait.
-pub trait VPack: Copy + Sized + super::seal::PackSeal {
+/// The proofs about a column of the type rest on what this trait's
+/// functions ensure, its laws. Verus checks them for a client it is run
+/// on. A client compiled without Verus writes only the functions, and
+/// it is then that client's duty that they keep them: that `pack`
+/// writes one to ten bytes, and no value's bytes start another's; that
+/// `try_unpack` reads the value whose bytes start `data`, and fails
+/// where none do; that `unpack` and `value_len` agree with it; that
+/// `same` is `==`; and that `compare` is an order in which a value is
+/// equal to itself only.
+pub trait VPack: Copy + Sized {
     /// The bytes of `v`.
     spec fn enc<C: VCodec>(v: Self) -> Seq<u8>;
 
@@ -110,10 +120,6 @@ pub trait VPack: Copy + Sized + super::seal::PackSeal {
     ;
 }
 
-impl super::seal::PackSeal for u64 {
-
-}
-
 impl VPack for u64 {
     open spec fn enc<C: VCodec>(v: u64) -> Seq<u8> {
         C::enc_u(v)
@@ -170,10 +176,6 @@ impl VPack for u64 {
         C::put_u(*v, buf);
         buf.len() - pos
     }
-}
-
-impl super::seal::PackSeal for i64 {
-
 }
 
 impl VPack for i64 {
@@ -314,10 +316,6 @@ pub trait VNewtype: Copy + Sized {
             Err(_) => vstd::pervasive::unreached(),
         }
     }
-}
-
-impl<T: VNewtype> super::seal::PackSeal for T {
-
 }
 
 impl<T: VNewtype> VPack for T {

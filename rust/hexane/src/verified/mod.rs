@@ -42,6 +42,9 @@
 //! * a client's own type that is stored as one of those numbers
 //!   ([`VNewtype`]). The client says which number each value is, and a
 //!   load refuses bytes that hold a number that is none of its values;
+//! * a client's own type with an encoding of its own, of one to ten
+//!   bytes a value ([`VPack`]): the client writes and reads the bytes,
+//!   and proves that they keep the laws a column relies on;
 //! * a byte string: `Vec<u8>`;
 //! * `Option<T>` of a number, a client's type or a byte string `T`:
 //!   `None` is a column's null;
@@ -745,13 +748,6 @@ mod seal {
 
     }
 
-    /// A type that packs as one number of a codec is one of this
-    /// crate's, or says which of this crate's it is: no other can name
-    /// this trait.
-    pub trait PackSeal {
-
-    }
-
     /// A form a column gives its values in is one of this crate's: no
     /// other can name this trait.
     pub trait GetSeal {
@@ -1210,10 +1206,11 @@ pub(crate) trait Owned<C>: seal::Sealed<C> {
 /// A value type a [`VerifiedColumn`] can hold, its numbers written with
 /// codec `C`.
 ///
-/// These are `u64`, `i64`, `u32`, `i32`, `usize`, `NonZeroU32` and every
-/// type that says which of them it is stored as ([`VNewtype`]); byte
-/// strings (`Vec<u8>`); an `Option` of any of those, whose `None` is a
-/// column's null; strings (`String`); and `bool`.
+/// These are `u64`, `i64`, `u32`, `i32`, `usize`, `NonZeroU32`, every
+/// type that says which of them it is stored as ([`VNewtype`]) and every
+/// type with an encoding of its own ([`VPack`]); byte strings
+/// (`Vec<u8>`); an `Option` of any of those, whose `None` is a column's
+/// null; strings (`String`); and `bool`.
 #[allow(private_bounds)]
 pub trait VValue<C: VCodec = Leb128>: seal::Sealed<C> + Owned<C> {
     /// No column of the values `vs` saves to more bytes than this.
