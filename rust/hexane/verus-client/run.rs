@@ -4381,3 +4381,18 @@ fn a_fenwick_index_keeps_a_plain_column() {
     verus_client::round_trip_bit_index(&nums, &actions, &flags);
     verus_client::edit_bit_index(3, 4);
 }
+
+// ── The lengths of LEB128 numbers ──────────────────────────────────────────
+
+#[test]
+fn leb_sizes() {
+    assert_eq!(
+        verus_client::sized_write(300, -65),
+        (vec![0xac, 0x02, 0xbf, 0x7f], 4)
+    );
+    assert_eq!(
+        verus_client::sized_read(&[0xac, 0x02, 0x01]),
+        Some((300, 2))
+    );
+    assert_eq!(verus_client::sized_read(&[0x80]), None);
+}

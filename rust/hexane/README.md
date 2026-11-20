@@ -615,7 +615,8 @@ indexes, a B-tree or a Fenwick tree), prefix (sums and accumulators)
 and delta columns; their loads (also run by
 run), saves, splices, edit cursors and `copy_ranges`; their iterators,
 searches and runs; the streaming encoders and decoders; the raw
-column; both codecs, and a client's own (`VCodec`); and the
+column; both codecs, and a client's own (`VCodec`), with the sizes of
+LEB128 numbers (`lebsize`, `ulebsize`); and the
 repositioning of every iterator
 (`VShiftable`, which a client's own iterator may implement, with a
 lookahead and a walk over ranges).

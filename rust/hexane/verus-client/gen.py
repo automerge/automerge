@@ -31,7 +31,7 @@ t = open(os.path.join(hexane, "src", "verified", "client_proof.rs")).read()
 # `use super::{...}`: what is specification is imported for Verus only
 m = re.search(r"use super::\{(.*?)\};\n", t, re.S)
 names = [n.strip() for n in m.group(1).replace("\n", " ").split(",") if n.strip()]
-EXEC_FNS = {"refused"}  # the one lower-case name that is code, not specification
+EXEC_FNS = {"refused", "lebsize", "ulebsize"}  # lower-case names that are code, not specification
 ghost = [n for n in names if n[0].islower() and n not in EXEC_FNS]
 code = [n for n in names if n not in ghost]
 imports = "#[cfg(verus_keep_ghost)]\nuse hexane::verified::{%s};\nuse hexane::verified::{%s};\n" % (

@@ -91,7 +91,8 @@
 //! the feature `bijou64`, and a client may write its own ([`VCodec`]
 //! says what it must keep). The modules [`leb128`] and `bijou` give
 //! every column type with its codec named, so that one import picks
-//! the codec.
+//! the codec. [`ulebsize`] and [`lebsize`] say how many bytes a number
+//! takes in LEB128.
 //!
 //! # Prefix columns
 //!
@@ -625,7 +626,7 @@ pub use acc::{AccIndex, VAccum, VAccumulated, VAdds, VGroup, VerifiedAccColumn};
 pub use acc_iter::{VerifiedAccIter, VerifiedAccIterState, VerifiedAccSeek, VerifiedAccValue};
 #[cfg(verus_keep_ghost)]
 pub use bytes::{below_at, bytes_below, total_len, total_len_opt};
-pub use codec::VCodec;
+pub use codec::{lebsize, ulebsize, VCodec};
 pub use decoder::VerifiedDecoder;
 #[cfg(verus_keep_ghost)]
 pub use decoder::{

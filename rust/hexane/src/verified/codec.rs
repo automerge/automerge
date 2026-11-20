@@ -12,7 +12,10 @@
 // Verus proofs read more plainly with `x = x + n`.
 #![allow(clippy::len_zero, clippy::assign_op_pattern)]
 
-use crate::leb128_codec::{decode, decode_signed, encode_signed, encoded_len_at, DecodeError};
+use crate::leb128_codec::{
+    decode, decode_signed, encode_signed, encoded_len, encoded_len_at, encoded_len_signed,
+    DecodeError,
+};
 // spec functions and lemmas exist only when Verus compiles the crate
 #[cfg(verus_keep_ghost)]
 use crate::leb128_codec::{
@@ -357,6 +360,26 @@ impl VCodec for Leb128 {
         crate::rle::writer::splice_bytes(buf, pos, n, e.as_slice());
         m as i64 - n as i64
     }
+}
+
+/// The number of bytes of `n` as an unsigned LEB128 number: as many as
+/// [`Leb128`](crate::Leb128) writes of it. The old API's
+/// [`ulebsize`](crate::ulebsize).
+pub fn ulebsize(n: u64) -> (r: u64)
+    ensures
+        r == <Leb128 as VCodec>::enc_u(n).len(),
+{
+    encoded_len(n) as u64
+}
+
+/// The number of bytes of `n` as a signed LEB128 number: as many as
+/// [`Leb128`](crate::Leb128) writes of it. The old API's
+/// [`lebsize`](crate::lebsize).
+pub fn lebsize(n: i64) -> (r: u64)
+    ensures
+        r == <Leb128 as VCodec>::enc_i(n).len(),
+{
+    encoded_len_signed(n) as u64
 }
 
 } // verus!

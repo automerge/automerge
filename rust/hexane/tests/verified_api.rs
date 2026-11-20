@@ -18501,3 +18501,37 @@ fn bit_index_agrees<T: Kind>() {
 fn a_fenwick_index_keeps_a_plain_column() {
     for_each_kind!(bit_index_agrees);
 }
+
+// ── The lengths of LEB128 numbers ──────────────────────────────────────────
+
+/// The verified sizes are the old API's, and the lengths of what the
+/// codec writes: at every length's edges, and at random.
+#[test]
+fn leb_sizes_agree() {
+    let mut us: Vec<u64> = vec![0, u64::MAX];
+    let mut is: Vec<i64> = vec![0, -1, i64::MIN, i64::MAX];
+    for k in 1..64 {
+        us.extend([(1u64 << k) - 1, 1u64 << k]);
+    }
+    for k in 0..63 {
+        is.extend([(1i64 << k) - 1, 1i64 << k, -(1i64 << k), -(1i64 << k) - 1]);
+    }
+    let mut rng = Rng(0x1eb);
+    for _ in 0..1000 {
+        let n = rng.next() >> rng.below(64);
+        us.push(n);
+        is.push(n as i64);
+    }
+    for n in us {
+        let mut buf = vec![];
+        <Leb128 as hexane::verified::VCodec>::put_u(n, &mut buf);
+        assert_eq!(hexane::verified::ulebsize(n), buf.len() as u64, "{n}");
+        assert_eq!(hexane::verified::ulebsize(n), hexane::ulebsize(n), "{n}");
+    }
+    for i in is {
+        let mut buf = vec![];
+        <Leb128 as hexane::verified::VCodec>::put_i(i, &mut buf);
+        assert_eq!(hexane::verified::lebsize(i), buf.len() as u64, "{i}");
+        assert_eq!(hexane::verified::lebsize(i), hexane::lebsize(i), "{i}");
+    }
+}

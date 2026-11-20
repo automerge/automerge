@@ -399,7 +399,7 @@ use super::{
     delta_at, delta_finds, delta_iter_fits, delta_near, delta_prefix, delta_run_fits,
     delta_run_in_range, delta_run_kept, delta_run_units, delta_run_values, delta_runs_at,
     delta_runs_fit, delta_runs_kept, delta_runs_values, delta_span_ok, delta_units, delta_within,
-    deltas, fill_of, folded, head_len, head_run, head_run_max, in_order, lemma_acc_cat,
+    deltas, fill_of, folded, head_len, head_run, head_run_max, in_order, lebsize, lemma_acc_cat,
     lemma_acc_range, lemma_acc_run, lemma_after_edits, lemma_cancel, lemma_delta_finds,
     lemma_delta_finds_first, lemma_delta_run_at, lemma_delta_run_exact, lemma_delta_run_fits,
     lemma_delta_runs_at, lemma_delta_runs_one, lemma_delta_runs_push, lemma_delta_within_one,
@@ -408,16 +408,17 @@ use super::{
     lemma_sum_mono, lemma_sum_range, lemma_sum_run, lemma_sums_fit, lemma_svs_windows, mapped,
     min_i, only, past, produced, ranges_ascend, refused, run_units, run_values, runs_of, scan_of,
     scan_taken, sorted, sorted_for, splice_does, spliced_cut, splices_do, sum_of, summed, sums_fit,
-    times, total_len, total_str_len, unit_runs, window, windows, AccIndex, Get, LenBitIndex,
-    LenIndex, RawColumn, RawColumnIter, SumIndex, VAccum, VAccumulated, VAdds, VAmount, VCodec,
-    VCount, VDelta, VDeltaValue, VGet, VGroup, VIndex, VKeeps, VNewtype, VPack, VShiftable, VSpec,
-    VSum, VSummed, VValue, VerifiedAccColumn, VerifiedAccIter, VerifiedAccIterState,
-    VerifiedAccSeek, VerifiedAccValue, VerifiedColumn, VerifiedDecoder, VerifiedDeltaColumn,
-    VerifiedDeltaDecoder, VerifiedDeltaEdit, VerifiedDeltaEncoder, VerifiedDeltaEncoderState,
-    VerifiedDeltaIter, VerifiedDeltaIterState, VerifiedDeltaRuns, VerifiedEdit, VerifiedEncoder,
-    VerifiedEncoderState, VerifiedFindByRange, VerifiedIter, VerifiedIterState, VerifiedLoadIter,
-    VerifiedPrefixColumn, VerifiedPrefixIter, VerifiedPrefixIterState, VerifiedPrefixSeek,
-    VerifiedPrefixedValue, VerifiedRanges, VerifiedRuns, VerifiedUnshift,
+    times, total_len, total_str_len, ulebsize, unit_runs, window, windows, AccIndex, Get,
+    LenBitIndex, LenIndex, RawColumn, RawColumnIter, SumIndex, VAccum, VAccumulated, VAdds,
+    VAmount, VCodec, VCount, VDelta, VDeltaValue, VGet, VGroup, VIndex, VKeeps, VNewtype, VPack,
+    VShiftable, VSpec, VSum, VSummed, VValue, VerifiedAccColumn, VerifiedAccIter,
+    VerifiedAccIterState, VerifiedAccSeek, VerifiedAccValue, VerifiedColumn, VerifiedDecoder,
+    VerifiedDeltaColumn, VerifiedDeltaDecoder, VerifiedDeltaEdit, VerifiedDeltaEncoder,
+    VerifiedDeltaEncoderState, VerifiedDeltaIter, VerifiedDeltaIterState, VerifiedDeltaRuns,
+    VerifiedEdit, VerifiedEncoder, VerifiedEncoderState, VerifiedFindByRange, VerifiedIter,
+    VerifiedIterState, VerifiedLoadIter, VerifiedPrefixColumn, VerifiedPrefixIter,
+    VerifiedPrefixIterState, VerifiedPrefixSeek, VerifiedPrefixedValue, VerifiedRanges,
+    VerifiedRuns, VerifiedUnshift,
 };
 #[cfg(feature = "bijou64")]
 use crate::Bijou64;
@@ -19945,6 +19946,44 @@ fn edit_bit_index(a: u64, b: u64) {
     assert(y is None);
     col.remove(0);
     assert(col@ == seq![a, b]);
+}
+
+// ── The lengths of LEB128 numbers ──────────────────────────────────────────
+
+/// A client sizes a buffer before it writes to it, as Automerge sizes a
+/// value's metadata: what `ulebsize` and `lebsize` say two numbers take
+/// is what the codec writes of them, no more and no less.
+#[allow(dead_code)]
+fn sized_write(n: u64, i: i64) -> (r: (Vec<u8>, u64))
+    ensures
+        r.0@ == <Leb128 as VCodec>::enc_u(n) + <Leb128 as VCodec>::enc_i(i),
+        r.0@.len() == r.1,
+{
+    proof {
+        Leb128::lemma_u(n, n, seq![], seq![]);
+        Leb128::lemma_i(i, i, seq![], seq![]);
+    }
+    let size = ulebsize(n) + lebsize(i);
+    let mut buf: Vec<u8> = Vec::with_capacity(size as usize);
+    Leb128::put_u(n, &mut buf);
+    Leb128::put_i(i, &mut buf);
+    (buf, size)
+}
+
+/// The size of the number at the start of some bytes is how many of
+/// them it is.
+#[allow(dead_code)]
+fn sized_read(data: &[u8]) -> (r: Option<(u64, usize)>)
+    ensures
+        r matches Some((n, k)) ==> k <= data@.len() && <Leb128 as VCodec>::enc_u(n) == data@.take(k as int),
+{
+    match Leb128::read_u_opt(data) {
+        Some((_, n)) => {
+            let k = ulebsize(n);
+            Some((n, k as usize))
+        },
+        None => None,
+    }
 }
 
 } // verus!
