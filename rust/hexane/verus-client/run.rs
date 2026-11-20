@@ -4287,3 +4287,21 @@ fn repositioned_delta_runs() {
         [(41, Some(1), 1), (42, Some(8), 1)]
     );
 }
+
+// ── Loading a column run by run ────────────────────────────────────────────
+
+#[test]
+fn loaded_by_runs() {
+    let col = VerifiedColumn::<u64>::from_values(&[3, 3, 4, 5, 5, 5]);
+    let bytes = col.save();
+    let (run, c) = verus_client::first_run_and_column::<u64, Leb128>(&bytes).unwrap();
+    assert_eq!(run.map(|r| (r.count, r.value)), Some((2, 3)));
+    assert_eq!(c.to_vec(), [3, 3, 4, 5, 5, 5]);
+    let (runs, c) = verus_client::loaded_runs::<u64, Leb128, LenIndex>(&bytes).unwrap();
+    let runs: Vec<(usize, u64)> = runs.iter().map(|r| (r.count, r.value)).collect();
+    assert_eq!(runs, [(2, 3), (1, 4), (3, 5)]);
+    assert_eq!(c.to_vec(), [3, 3, 4, 5, 5, 5]);
+    let (run, c) = verus_client::filled_by_load::<u64, Leb128>(9, 4);
+    assert_eq!(run.map(|r| (r.count, r.value)), Some((4, 9)));
+    assert_eq!(c.unwrap().to_vec(), [9; 4]);
+}

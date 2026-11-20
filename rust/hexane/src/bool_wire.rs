@@ -1045,6 +1045,7 @@ impl<'a> BoolLoad<'a> {
     pub(crate) fn try_next_run<K: CountOps>(&mut self) -> (r: Result<Option<Run<bool>>, PackError>)
         requires old(self).inv::<K>(),
         ensures
+            old(self).at_end() ==> r matches Ok(None),
             final(self).data() == old(self).data(),
             r is Ok ==> final(self).inv::<K>(),
             r matches Ok(Some(run)) ==> run.count > 0
@@ -1070,9 +1071,17 @@ impl<'a> BoolLoad<'a> {
                 self.done_slabs() == old(self).done_slabs(),
                 self.left() <= l0,
                 l0 == old(self).left(),
+                old(self).at_end() ==> self.sc == old(self).sc,
             decreases self.data@.len() - self.sc.pos,
         {
             let ghost c0 = self.sc.cs@;
+            proof {
+                if old(self).at_end() {
+                    // the counts read are a parse of all the input
+                    assert(self.data@.take(self.sc.pos as int) =~= self.data@);
+                    lemma_counts::<K>(c0, self.data@);
+                }
+            }
             match read_seg::<K>(&mut self.sc, self.data, &mut self.slabs, self.target) {
                 Ok(None) => return Ok(None),
                 Ok(Some((count, value))) => {
@@ -1111,6 +1120,9 @@ impl<'a> BoolLoad<'a> {
                 &&& slabs@.take(old(self).done_slabs().len() as int) == old(self).done_slabs()
                 &&& old(self).at_end() ==> slabs@.len() <= old(self).done_slabs().len() + 1
                     && bslabs_values::<K>(slabs@) == old(self).values_read()
+                // what was read before comes first
+                &&& old(self).values_read().len() <= bslabs_values::<K>(slabs@).len()
+                &&& bslabs_values::<K>(slabs@).take(old(self).values_read().len() as int) == old(self).values_read()
             },
             r is Err ==> !bool_valid::<K>(old(self).data()),
     {
@@ -1129,7 +1141,11 @@ impl<'a> BoolLoad<'a> {
                 slabs@.len() >= d0.len(), slabs@.take(d0.len() as int) == d0,
                 end0 ==> sc == sc0 && slabs@ == d0,
                 end0 == (sc0.pos == data@.len()),
+                counts_values(sc0.cs@).len() <= counts_values(sc.cs@).len(),
+                counts_values(sc.cs@).take(counts_values(sc0.cs@).len() as int) == counts_values(sc0.cs@),
             ensures
+                counts_values(sc0.cs@).len() <= counts_values(sc.cs@).len(),
+                counts_values(sc.cs@).take(counts_values(sc0.cs@).len() as int) == counts_values(sc0.cs@),
                 scan_ok::<K>(sc, data@, slabs@, target), data@ == old(self).data@, sc.pos == data@.len(),
                 slabs@.len() >= d0.len(), slabs@.take(d0.len() as int) == d0,
                 end0 ==> sc == sc0 && slabs@ == d0,
@@ -1147,6 +1163,8 @@ impl<'a> BoolLoad<'a> {
                             assert(sc.pos > sc1.pos);
                         }
                         assert(slabs@.take(d0.len() as int) =~= s1.take(d0.len() as int));
+                        // the counts read only grow
+                        assert(sc.cs@.drop_last() =~= sc1.cs@);
                     }
                 },
                 Err(e) => return Err(e),

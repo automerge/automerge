@@ -18050,3 +18050,139 @@ fn delta_runs_reposition_as_the_old_ones_do() {
         delta_runs_shifted::<Option<u64>>(seed);
     }
 }
+
+// ── Loading a column run by run ────────────────────────────────────────────
+
+/// Pulls up to `k` runs from a load, and says what each step gave: the
+/// run, as owned values, or the error.
+fn pulled<T, F: FnMut() -> Result<Option<(usize, T)>, PackError>>(
+    k: usize,
+    mut f: F,
+) -> Vec<Result<Option<(usize, T)>, String>> {
+    let mut out = vec![];
+    for _ in 0..k {
+        let r = f().map_err(|e| format!("{e:?}"));
+        let stop = !matches!(r, Ok(Some(_)));
+        out.push(r);
+        if stop {
+            break;
+        }
+    }
+    out
+}
+
+fn loaded_by_runs<T: Kind>() {
+    for seed in 1..=6u64 {
+        let mut rng = Rng(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) ^ 0x541d);
+        let budget = [2, 3, 8, 64][rng.below(4)];
+        let n = rng.below(120);
+        let model: Vec<T> = rng.values(n);
+        let (v, _c) = both_with(&model, budget);
+        let mut bytes = v.save();
+        // now and then, bytes that are no column
+        if !bytes.is_empty() && rng.below(4) == 0 {
+            let i = rng.below(bytes.len());
+            bytes[i] ^= 1 << rng.below(8);
+        }
+        let opts = LoadOpts::new().with_max_segments(budget);
+        let k = rng.below(200);
+        let mut x = VerifiedColumn::<T>::load_iter(&bytes, opts);
+        let mut y = Column::<T>::load_iter(&bytes, opts);
+        let a = pulled(k, || {
+            x.try_next_run()
+                .map(|r| r.map(|r| (r.count, T::keep(r.value))))
+        });
+        let b = pulled(k, || {
+            y.try_next_run()
+                .map(|r| r.map(|r| (r.count, old::<T>(r.value))))
+        });
+        assert_eq!(a, b);
+        let xc = x
+            .finalize()
+            .map(|c| c.iter().map(T::keep).collect::<Vec<T>>())
+            .map_err(|e| format!("{e:?}"));
+        let yc = y
+            .finalize()
+            .map(|c| c.iter().map(old::<T>).collect::<Vec<T>>())
+            .map_err(|e| format!("{e:?}"));
+        assert_eq!(xc, yc);
+        if let Ok(vs) = &xc {
+            // the runs pulled are the first of the column's values
+            let given: Vec<T> = a
+                .iter()
+                .flat_map(|r| match r {
+                    Ok(Some((n, v))) => vec![v.clone(); *n],
+                    _ => vec![],
+                })
+                .collect();
+            assert_eq!(&vs[..given.len()], &given[..]);
+        }
+    }
+}
+
+/// A verified column loads run by run as `Column`'s does: the same runs,
+/// the same errors, the same column, which begins with the runs pulled.
+#[test]
+fn a_column_loads_by_runs_as_the_old_one_does() {
+    for_each_kind!(loaded_by_runs);
+}
+
+fn prefix_loaded_by_runs<T: Totalled>() {
+    for seed in 1..=4u64 {
+        let mut rng = Rng(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) ^ 0x541e);
+        let budget = [2, 3, 8, 64][rng.below(4)];
+        let n = rng.below(120);
+        let model: Vec<T> = rng.values(n);
+        let mut p = VerifiedPrefixColumn::<T>::with_max_segments(budget);
+        p.splice(0, 0, &lent(&model));
+        let bytes = p.save();
+        let opts = LoadOpts::new().with_max_segments(budget);
+        let k = rng.below(60);
+        let mut x = VerifiedPrefixColumn::<T>::load_iter(&bytes, opts);
+        let mut y = PrefixColumn::<T>::load_iter(&bytes, opts);
+        let a = pulled(k, || {
+            x.try_next_run()
+                .map(|r| r.map(|r| (r.count, T::keep(r.value))))
+        });
+        let b = pulled(k, || {
+            y.try_next_run()
+                .map(|r| r.map(|r| (r.count, old::<T>(r.value))))
+        });
+        assert_eq!(a, b);
+        let xc = x.finalize().unwrap();
+        let yc = y.finalize().unwrap();
+        let xs: Vec<i128> = (0..model.len())
+            .map(|i| T::new_sum(xc.get_total(i)))
+            .collect();
+        let ys: Vec<i128> = (0..model.len())
+            .map(|i| T::old_sum(yc.get_total(i)))
+            .collect();
+        assert_eq!(xs, ys);
+    }
+}
+
+/// A verified prefix column loads run by run as `PrefixColumn`'s does.
+#[test]
+fn a_prefix_column_loads_by_runs_as_the_old_one_does() {
+    for_each_sum!(prefix_loaded_by_runs);
+}
+
+/// No bytes, with a length and a fill value, load as one run of that
+/// many of the value, as `Column`'s do.
+#[test]
+fn a_fill_loads_by_runs_as_the_old_one_does() {
+    for n in [0usize, 1, 5, 1000] {
+        let opts = LoadOpts::new().with_length(n).with_fill(7u64);
+        let mut x = VerifiedColumn::<u64>::load_iter(&[], opts);
+        let mut y = Column::<u64>::load_iter(&[], opts);
+        let a = pulled(5, || {
+            x.try_next_run().map(|r| r.map(|r| (r.count, r.value)))
+        });
+        let b = pulled(5, || {
+            y.try_next_run().map(|r| r.map(|r| (r.count, r.value)))
+        });
+        assert_eq!(a, b);
+        assert_eq!(x.finalize().unwrap().to_vec(), vec![7u64; n]);
+        assert_eq!(y.finalize().unwrap().to_vec(), vec![7u64; n]);
+    }
+}

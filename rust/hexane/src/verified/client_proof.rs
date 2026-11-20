@@ -399,14 +399,14 @@ use super::{
     delta_at, delta_finds, delta_iter_fits, delta_near, delta_prefix, delta_run_fits,
     delta_run_in_range, delta_run_kept, delta_run_units, delta_run_values, delta_runs_at,
     delta_runs_fit, delta_runs_kept, delta_runs_values, delta_span_ok, delta_units, delta_within,
-    deltas, folded, head_len, head_run, head_run_max, in_order, lemma_acc_cat, lemma_acc_range,
-    lemma_acc_run, lemma_after_edits, lemma_cancel, lemma_delta_finds, lemma_delta_finds_first,
-    lemma_delta_run_at, lemma_delta_run_exact, lemma_delta_run_fits, lemma_delta_runs_at,
-    lemma_delta_runs_one, lemma_delta_runs_push, lemma_delta_within_one, lemma_head_len,
-    lemma_head_run_max, lemma_run_values_add, lemma_run_values_push, lemma_runs_first,
-    lemma_runs_of_values, lemma_sorted, lemma_sum_bound, lemma_sum_mono, lemma_sum_range,
-    lemma_sum_run, lemma_sums_fit, lemma_svs_windows, mapped, min_i, only, past, produced,
-    ranges_ascend, refused, run_units, run_values, runs_of, scan_of, scan_taken, sorted,
+    deltas, fill_of, folded, head_len, head_run, head_run_max, in_order, lemma_acc_cat,
+    lemma_acc_range, lemma_acc_run, lemma_after_edits, lemma_cancel, lemma_delta_finds,
+    lemma_delta_finds_first, lemma_delta_run_at, lemma_delta_run_exact, lemma_delta_run_fits,
+    lemma_delta_runs_at, lemma_delta_runs_one, lemma_delta_runs_push, lemma_delta_within_one,
+    lemma_head_len, lemma_head_run_max, lemma_run_values_add, lemma_run_values_push,
+    lemma_runs_first, lemma_runs_of_values, lemma_sorted, lemma_sum_bound, lemma_sum_mono,
+    lemma_sum_range, lemma_sum_run, lemma_sums_fit, lemma_svs_windows, mapped, min_i, only, past,
+    produced, ranges_ascend, refused, run_units, run_values, runs_of, scan_of, scan_taken, sorted,
     sorted_for, splice_does, spliced_cut, splices_do, sum_of, summed, sums_fit, times, total_len,
     total_str_len, unit_runs, window, windows, AccIndex, Get, LenIndex, RawColumn, RawColumnIter,
     SumIndex, VAccum, VAccumulated, VAdds, VAmount, VCodec, VCount, VDelta, VDeltaValue, VGet,
@@ -415,13 +415,13 @@ use super::{
     VerifiedDecoder, VerifiedDeltaColumn, VerifiedDeltaDecoder, VerifiedDeltaEdit,
     VerifiedDeltaEncoder, VerifiedDeltaEncoderState, VerifiedDeltaIter, VerifiedDeltaIterState,
     VerifiedDeltaRuns, VerifiedEdit, VerifiedEncoder, VerifiedEncoderState, VerifiedFindByRange,
-    VerifiedIter, VerifiedIterState, VerifiedPrefixColumn, VerifiedPrefixIter,
+    VerifiedIter, VerifiedIterState, VerifiedLoadIter, VerifiedPrefixColumn, VerifiedPrefixIter,
     VerifiedPrefixIterState, VerifiedPrefixSeek, VerifiedPrefixedValue, VerifiedRanges,
     VerifiedRuns, VerifiedUnshift,
 };
 #[cfg(feature = "bijou64")]
 use crate::Bijou64;
-use crate::{DeltaRun, Leb128, LoadOpts, PackError, Run, Splice};
+use crate::{DeltaRun, Leb128, LoadOpts, MaybeFill, PackError, Run, Splice};
 use std::cmp::Ordering;
 use std::ops::{Bound, Range, RangeBounds};
 use vstd::prelude::*;
@@ -18993,6 +18993,198 @@ fn delta_runs_told_by_adapters<'a, 'r, T: VDeltaValue<C>, C: VCodec>(
         r.1.ranges_left() == windows(b.shift_vals(), rs@),
 {
     (a.unshift(), b.ranges(rs))
+}
+
+// ── Loading a column run by run ────────────────────────────────────────────
+
+/// A saved column loaded run by run, its first run pulled: the column,
+/// which begins with that run, or is empty. For every value type and
+/// codec.
+#[allow(dead_code)]
+fn first_run_and_column<'a, V: VValue<C>, C: VCodec>(bytes: &'a [u8]) -> (r: Result<
+    (Option<Run<Get<'a, V>>>, VerifiedColumn<V, C>),
+    PackError,
+>)
+    ensures
+        r matches Ok((run, c)) ==> {
+            &&& c@ == VerifiedColumn::<V, C>::values(bytes@)
+            &&& run matches Some(x) ==> 1 <= x.count <= c@.len() && forall|i: int|
+                0 <= i < x.count ==> c@[i] == x.value.sv()
+            &&& run is None ==> c@.len() == 0
+        },
+{
+    let mut it = VerifiedColumn::<V, C>::load_iter(bytes, LoadOpts::new());
+    let run = match it.try_next_run() {
+        Ok(r) => r,
+        Err(e) => return Err(e),
+    };
+    let ghost g = it.given();
+    let c = match it.finalize() {
+        Ok(c) => c,
+        Err(e) => return Err(e),
+    };
+    proof {
+        if let Some(x) = run {
+            assert(g =~= Seq::new(x.count as nat, |_j: int| x.value.sv()));
+            assert forall|i: int| 0 <= i < x.count implies c@[i] == x.value.sv() by {
+                assert(c@.take(x.count as int)[i] == g[i]);
+            }
+        }
+    }
+    Ok((run, c))
+}
+
+/// A saved column loaded run by run, every run pulled: the runs, and
+/// the column they make, one after another. For every value type, codec
+/// and kind of index.
+#[allow(dead_code)]
+#[verifier::exec_allows_no_decreases_clause]
+fn loaded_runs<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(bytes: &'a [u8]) -> (r: Result<
+    (Vec<Run<Get<'a, V>>>, VerifiedColumn<V, C, K>),
+    PackError,
+>)
+    ensures
+        r matches Ok((runs, c)) ==> c@ == VerifiedColumn::<V, C>::values(bytes@) && run_values(runs@) == c@,
+{
+    let mut it = VerifiedColumn::<V, C, K>::load_iter(bytes, LoadOpts::new());
+    let mut runs: Vec<Run<Get<'a, V>>> = Vec::new();
+    proof {
+        assert(run_values(runs@) =~= Seq::<V::S>::empty());
+    }
+    loop
+        invariant
+            it.wf(),
+            it.bytes() == bytes@,
+            it.filling() is None,
+            run_values(runs@) == it.given(),
+        ensures
+            it.wf(),
+            it.bytes() == bytes@,
+            it.filling() is None,
+            run_values(runs@) == it.given(),
+            it.done(),
+    {
+        match it.try_next_run() {
+            Ok(Some(run)) => {
+                proof {
+                    lemma_run_values_push(runs@, run);
+                }
+                runs.push(run);
+            },
+            Ok(None) => break,
+            Err(e) => return Err(e),
+        }
+    }
+    match it.finalize() {
+        Ok(c) => Ok((runs, c)),
+        Err(e) => Err(e),
+    }
+}
+
+/// No bytes, loaded run by run with a length and a fill value: a run of
+/// the value, if any, and the column of that many of it. For every value
+/// type and codec.
+#[allow(dead_code)]
+fn filled_by_load<'a, V: VValue<C>, C: VCodec>(v: Get<'a, V>, n: usize) -> (r: (
+    Option<Run<Get<'a, V>>>,
+    Result<VerifiedColumn<V, C>, PackError>,
+))
+    requires
+        n <= i64::MAX,
+        n <= usize::MAX - 3,
+    ensures
+        r.0 matches Some(x) ==> x.count <= n && x.value.sv() == v.sv(),
+        r.1 matches Ok(c) && c@ == Seq::new(n as nat, |_i: int| v.sv()),
+{
+    let mut it = VerifiedColumn::<V, C>::load_iter(&[], LoadOpts::new().with_length(n).with_fill(v));
+    proof {
+        assert(it.filling() == Some((n, v)));
+    }
+    let run = match it.try_next_run() {
+        Ok(r) => r,
+        Err(_) => None,
+    };
+    let ghost g = it.given();
+    let c = it.finalize();
+    proof {
+        if let Some(x) = run {
+            let c = c->Ok_0;
+            assert(g =~= Seq::new(x.count as nat, |_j: int| x.value.sv()));
+            assert(c@.take(x.count as int)[0] == g[0]);
+        }
+    }
+    (run, c)
+}
+
+/// What a load run by run is, as it starts, told back. For every value
+/// type, codec and kind of index.
+#[allow(dead_code)]
+fn told_by_load_iter<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>, F: MaybeFill<Get<'a, V>>>(
+    bytes: &'a [u8],
+    opts: LoadOpts<F>,
+) -> (r: VerifiedLoadIter<'a, V, C, K>)
+    requires
+        opts.max_segments() >= 2,
+    ensures
+        r.wf(),
+        r.bytes() == bytes@,
+        r.length() == opts.length(),
+        r.filling() == fill_of(bytes@, opts.length(), opts.fill().value()),
+        r.given().len() == 0,
+        !r.failed(),
+{
+    VerifiedColumn::<V, C, K>::load_iter(bytes, opts)
+}
+
+/// What a step of a load run by run does, told back. For every value
+/// type, codec and kind of index.
+#[allow(dead_code)]
+fn told_by_try_next_run<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(it: &mut VerifiedLoadIter<'a, V, C, K>) -> (r:
+    Result<Option<Run<Get<'a, V>>>, PackError>)
+    requires
+        old(it).wf(),
+    ensures
+        final(it).wf(),
+        r is Ok ==> final(it).bytes() == old(it).bytes(),
+        final(it).length() == old(it).length(),
+        final(it).filling() == old(it).filling(),
+        r matches Ok(Some(run)) ==> run.count > 0 && final(it).given() == old(it).given() + Seq::new(
+            run.count as nat,
+            |_j: int| run.value.sv(),
+        ),
+        r matches Ok(None) ==> final(it).given() == old(it).given() && final(it).done(),
+        r is Ok ==> !old(it).failed() && !final(it).failed(),
+        r is Err ==> final(it).failed(),
+{
+    it.try_next_run()
+}
+
+/// What the end of a load run by run gives, told back. For every value
+/// type, codec and kind of index.
+#[allow(dead_code)]
+fn told_by_load_finalize<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(it: VerifiedLoadIter<'a, V, C, K>) -> (r:
+    Result<VerifiedColumn<V, C, K>, PackError>)
+    requires
+        it.wf(),
+    ensures
+        r matches Ok(c) ==> it.given().len() <= c@.len() && c@.take(it.given().len() as int) == it.given(),
+        it.done() ==> (r matches Ok(c) ==> c@ == it.given()),
+        match it.filling() {
+            Some((len, v)) => r matches Ok(c) && c@ == Seq::new(len as nat, |_i: int| v.sv()),
+            None => {
+                &&& r matches Ok(c) ==> {
+                    &&& VerifiedColumn::<V, C>::valid(it.bytes())
+                    &&& c@ == VerifiedColumn::<V, C>::values(it.bytes())
+                    &&& it.length() matches Some(len) ==> c@.len() == len
+                }
+                &&& !it.failed() && VerifiedColumn::<V, C>::loadable(it.bytes()) && K::keeps(
+                    VerifiedColumn::<V, C>::values(it.bytes()),
+                ) && (it.length() matches Some(len) ==> VerifiedColumn::<V, C>::values(it.bytes()).len() == len)
+                    ==> r is Ok
+            },
+        },
+{
+    it.finalize()
 }
 
 } // verus!

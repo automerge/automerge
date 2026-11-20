@@ -28,6 +28,8 @@ use super::model::*;
 #[cfg(verus_keep_ghost)]
 use super::postfix::lemma_canonical_concat;
 #[cfg(verus_keep_ghost)]
+use super::read::{lemma_end_parses, lemma_prefix_trans, lemma_read_grows, read_values};
+#[cfg(verus_keep_ghost)]
 use super::read::{lit_prefix_ok, lit_tail_of, next_post, read_bytes, tail_bytes_of};
 use super::read::{Reader, Seg};
 #[cfg(verus_keep_ghost)]
@@ -1982,7 +1984,7 @@ impl<'a, W: WriteOps<'a>> Load<'a, W> {
 
     /// The values of the runs read so far, which `try_next_run` returned.
     pub(crate) closed spec fn pulled(&self) -> Seq<VOf<'a, W>> {
-        groups_values(self.reader.groups(), <W::R as RleOps<'a>>::null()) + self.reader.lit_values()
+        read_values(self.reader)
     }
 
     /// The slabs cut so far hold the first of the values pulled.
@@ -2034,6 +2036,7 @@ impl<'a, W: WriteOps<'a>> Load<'a, W> {
     pub(crate) fn try_next_run(&mut self) -> (r: Result<Option<crate::Run<VOf<'a, W>>>, PackError>)
         requires old(self).inv(),
         ensures
+            old(self).at_end() ==> r matches Ok(None),
             r is Ok ==> final(self).inv() && final(self).data() == old(self).data(),
             r matches Ok(Some(run)) ==> run.count > 0
                 && final(self).pulled() == old(self).pulled() + Seq::new(run.count as nat, |_j: int| run.value),
@@ -2059,16 +2062,21 @@ impl<'a, W: WriteOps<'a>> Load<'a, W> {
                 self.done_slabs() == old(self).done_slabs(),
                 self.left() <= l0,
                 l0 == old(self).left(),
+                old(self).at_end() ==> self.reader == old(self).reader,
             decreases self.reader.data().len() - self.reader.spec_pos(),
         {
             let ghost r0 = self.reader;
             proof {
                 r0.lemma_inv();
+                if old(self).at_end() {
+                    lemma_end_parses(r0);
+                }
             }
             let segment = match self.reader.next() {
                 Ok(Some(s)) => {
                     proof {
                         assert(self.left() < r0.data().len() - r0.spec_pos());
+                        self.reader.lemma_inv();
                     }
                     s
                 },
@@ -2178,6 +2186,9 @@ impl<'a, W: WriteOps<'a>> Load<'a, W> {
                 &&& slabs@.take(self.done_slabs().len() as int) == self.done_slabs()
                 &&& self.at_end() ==> slabs@.len() <= self.done_slabs().len() + 1
                     && slabs_values::<W::R>(slabs@) == self.pulled()
+                // what was pulled before comes first
+                &&& self.pulled().len() <= slabs_values::<W::R>(slabs@).len()
+                &&& slabs_values::<W::R>(slabs@).take(self.pulled().len() as int) == self.pulled()
             },
             // only what is no canonical encoding fails, or is too long
             r is Err ==> !valid_slab::<W::R>(self.data()) || !small::<W::R>(self.data()),
@@ -2198,7 +2209,12 @@ impl<'a, W: WriteOps<'a>> Load<'a, W> {
                 data == self.data(),
                 cut.done_slabs().len() >= d0.len(), cut.done_slabs().take(d0.len() as int) == d0,
                 end0 ==> rd0.spec_pos() == rd0.data().len() && rd0.data() == data,
+                read_values(rd0).len() <= read_values(reader).len(),
+                read_values(reader).take(read_values(rd0).len() as int) == read_values(rd0),
             ensures
+                read_values(rd0).len() <= read_values(reader).len(),
+                read_values(reader).take(read_values(rd0).len() as int) == read_values(rd0),
+                read_values(reader) == groups_values(reader.groups(), <W::R as RleOps<'a>>::null()),
                 cut.ok(reader, target), input@ == reader.data(), data == input@,
                 parses::<W::R>(reader.groups(), data), !reader.in_lit(),
                 cut.done_slabs().len() >= d0.len(), cut.done_slabs().take(d0.len() as int) == d0,
@@ -2209,7 +2225,13 @@ impl<'a, W: WriteOps<'a>> Load<'a, W> {
             proof {
                 r0.lemma_inv();
             }
-            let segment = match reader.next() {
+            let step = reader.next();
+            proof {
+                if step is Ok {
+                    lemma_read_grows(r0, reader, step);
+                }
+            }
+            let segment = match step {
                 Ok(Some(s)) => s,
                 Ok(None) => {
                     proof {

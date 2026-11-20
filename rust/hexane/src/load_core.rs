@@ -103,6 +103,7 @@ pub(crate) trait Loads<'a, E: ReadsAgree<'a, X>, X: Decoders<'a, Tail = <E as Sl
             old(self).inv(),
         ensures
             r is Ok ==> final(self).inv(),
+            old(self).at_end() ==> r matches Ok(None),
             r matches Ok(Some(run)) ==> run.count > 0 && final(self).pulled() == old(self).pulled() + Seq::new(
                 run.count as nat,
                 |_j: int| run.value,
@@ -139,6 +140,8 @@ pub(crate) trait Loads<'a, E: ReadsAgree<'a, X>, X: Decoders<'a, Tail = <E as Sl
                 &&& slabs@.take(self.done_slabs().len() as int) == self.done_slabs()
                 &&& self.at_end() ==> slabs@.len() <= self.done_slabs().len() + 1 && vals_of::<X>(slabs@)
                     == self.pulled()
+                &&& self.pulled().len() <= vals_of::<X>(slabs@).len()
+                &&& vals_of::<X>(slabs@).take(self.pulled().len() as int) == self.pulled()
             },
             r is Ok ==> Self::valid(self.data()),
             r is Err ==> !Self::accepts(self.data()),
@@ -202,6 +205,7 @@ impl<'a, E, X, W, G, LD> LoadCore<'a, E, X, W, G, LD> where
             c.inv(),
             !c.failed,
             c.ld.data() == data@,
+            c.ld.pulled().len() == 0,
     {
         let ld = LD::start(data, max_segments);
         let attr = Attribution::new::<G>();
@@ -223,6 +227,11 @@ impl<'a, E, X, W, G, LD> LoadCore<'a, E, X, W, G, LD> where
             final(self).inv(),
             r is Ok ==> !old(self).failed && !final(self).failed,
             r matches Ok(None) ==> final(self).ld.at_end() && final(self).ld.pulled() == old(self).ld.pulled(),
+            r matches Ok(Some(run)) ==> run.count > 0 && final(self).ld.pulled() == old(self).ld.pulled() + Seq::new(
+                run.count as nat,
+                |_j: int| run.value,
+            ),
+            r is Err ==> final(self).failed,
             r matches Ok(Some(_)) ==> final(self).ld.left() < old(self).ld.left(),
             r is Ok ==> final(self).ld.data() == old(self).ld.data(),
     {
@@ -242,6 +251,12 @@ impl<'a, E, X, W, G, LD> LoadCore<'a, E, X, W, G, LD> where
             final(self).inv(),
             r is Ok ==> !final(self).failed,
             r matches Ok(None) ==> final(self).ld.at_end() && final(self).ld.pulled() == old(self).ld.pulled(),
+            r matches Ok(Some(run)) ==> run.count > 0 && final(self).ld.pulled() == old(self).ld.pulled() + Seq::new(
+                run.count as nat,
+                |_j: int| run.value,
+            ),
+            r is Err ==> final(self).failed,
+            old(self).ld.at_end() ==> r matches Ok(None),
             r matches Ok(Some(_)) ==> final(self).ld.left() < old(self).ld.left(),
             r is Ok ==> final(self).ld.data() == old(self).ld.data(),
             r is Err ==> !LD::accepts(old(self).ld.data()) || G::accumulates(),
@@ -310,6 +325,11 @@ impl<'a, E, X, W, G, LD> LoadCore<'a, E, X, W, G, LD> where
                 &&& LD::valid(self.ld.data())
                 &&& expected matches Some(e) ==> c@.len() == e
                 &&& G::bounded(c.slabs_spec(), lo, hi)
+                &&& self.ld.pulled().len() <= c@.len()
+                &&& c@.take(self.ld.pulled().len() as int) == self.ld.pulled().map_values(
+                    |v: <X::D as Decode>::Item| E::own(v),
+                )
+                &&& self.ld.at_end() ==> c@ == self.ld.pulled().map_values(|v: <X::D as Decode>::Item| E::own(v))
             },
             // a load fails only for one of these
             r is Err ==> {
@@ -325,6 +345,7 @@ impl<'a, E, X, W, G, LD> LoadCore<'a, E, X, W, G, LD> where
         }
         let ghost data = self.ld.data();
         let mut core = self;
+        let ghost p0 = self.ld.pulled();
         let acc = G::accumulates_exec();
         if acc {
             // the runs left must pass through the attribution too
@@ -335,11 +356,18 @@ impl<'a, E, X, W, G, LD> LoadCore<'a, E, X, W, G, LD> where
                     G::accumulates(),
                     core.ld.data() == data,
                     data == self.ld.data(),
+                    p0 == self.ld.pulled(),
+                    p0.len() <= core.ld.pulled().len(),
+                    core.ld.pulled().take(p0.len() as int) == p0,
+                    self.ld.at_end() ==> core.ld.at_end() && core.ld.pulled() == p0,
                 ensures
                     core.inv(),
                     !core.failed,
                     core.ld.at_end(),
                     core.ld.data() == data,
+                    p0.len() <= core.ld.pulled().len(),
+                    core.ld.pulled().take(p0.len() as int) == p0,
+                    self.ld.at_end() ==> core.ld.pulled() == p0,
                 decreases core.ld.left(),
             {
                 match core.step() {
@@ -465,6 +493,7 @@ impl<'a, E, X, W, G, LD> LoadCore<'a, E, X, W, G, LD> where
             lemma_vals_own::<E, X>(s);
             let owned = LD::values_of(data).map_values(|v: <X::D as Decode>::Item| E::own(v));
             assert(crate::cursor::vals_of::<E>(s) =~= owned);
+            // what was pulled first comes first
             // weights accumulated may count the items otherwise than the
             // slabs do: nothing is said of such a model's loads
             G::lemma_may_refuse(owned);

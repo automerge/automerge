@@ -1061,6 +1061,7 @@ impl<'a, O: RleOps<'a>> Reader<'a, O> {
         }
     }
 
+    #[verifier::spinoff_prover]
     fn next_run(&mut self, hn: usize, h: i64) -> (r: Result<Option<Seg<O::V>>, PackError>)
         requires
             old(self).inv(), !old(self).in_lit(), h > 0,
@@ -1558,6 +1559,73 @@ pub(crate) fn validate<'a, O: RleOps<'a>>(data: &'a [u8]) -> (r: Result<Summary,
             },
         }
     }
+}
+
+/// What a reader has read, value by value: the values of its groups, and
+/// those of the literal run it is inside.
+pub(crate) open spec fn read_values<'a, O: RleOps<'a>>(r: Reader<'a, O>) -> Seq<O::V> {
+    groups_values(r.groups(), O::null()) + r.lit_values()
+}
+
+/// A step of a reader only adds to what it has read; outside a literal
+/// run, what it has read is its groups' values.
+pub(crate) proof fn lemma_read_grows<'a, O: RleOps<'a>>(
+    r0: Reader<'a, O>,
+    r1: Reader<'a, O>,
+    r: Result<Option<Seg<O::V>>, PackError>,
+)
+    requires
+        r0.inv(),
+        r is Ok,
+        next_post(r0, r1, r),
+    ensures
+        read_values(r0).len() <= read_values(r1).len(),
+        read_values(r1).take(read_values(r0).len() as int) == read_values(r0),
+        !r1.in_lit() ==> read_values(r1) == groups_values(r1.groups(), O::null()),
+{
+    let (g0, g1) = (r0.groups(), r1.groups());
+    if let Ok(Some(seg)) = r {
+        match seg {
+            Seg::Run { .. } => {
+                assert(g1.drop_last() =~= g0);
+            },
+            Seg::Null { .. } => {
+                assert(g1.drop_last() =~= g0);
+            },
+            Seg::Lit { .. } => {
+                if !r1.in_lit() {
+                    assert(g1.drop_last() =~= g0);
+                }
+            },
+            Seg::LitHead { .. } => {},
+        }
+    }
+}
+
+/// A reader at the end of its data, outside a literal run, has read a
+/// parse of it.
+pub(crate) proof fn lemma_end_parses<'a, O: RleOps<'a>>(r: Reader<'a, O>)
+    requires
+        r.inv(),
+        r.spec_pos() == r.data().len(),
+        !r.in_lit(),
+    ensures
+        parses::<O>(r.groups(), r.data()),
+{
+    r.lemma_inv();
+    reveal(parses);
+    assert(r.data@.take(r.pos as int) =~= r.data@);
+}
+
+/// A prefix of a prefix is a prefix.
+pub(crate) proof fn lemma_prefix_trans<V>(a: Seq<V>, b: Seq<V>, c: Seq<V>)
+    requires
+        a.len() <= b.len() <= c.len(),
+        b.take(a.len() as int) == a,
+        c.take(b.len() as int) == b,
+    ensures
+        c.take(a.len() as int) == a,
+{
 }
 
 } // verus!

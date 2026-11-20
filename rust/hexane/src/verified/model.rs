@@ -41,7 +41,7 @@ use crate::column_core::ColumnCore;
 use crate::cursor::{all_ok, lemma_vals_total, lemma_vals_unit, slab_lens, vals_of};
 use crate::cursor::{ReadsAgree, Slabs, Visitor};
 use crate::iter_core::{Decode, Decoders};
-use crate::load_core::LoadCore;
+use crate::load_core::{LoadCore, Loads};
 use crate::remap::Encodes;
 use crate::rle::cut::Load;
 #[cfg(verus_keep_ghost)]
@@ -1210,6 +1210,55 @@ impl<'a, C: CountsOf> Flows<'a, BoolReads<C>> for BoolModel<C> {
         proof {
             assert(buf@.take(h.len() as int) =~= h);
         }
+    }
+}
+
+/// A model's loader, for input that lives for `'a`: it reads a saved
+/// column run by run, and cuts it into the model's slabs.
+pub(crate) trait Loading<'a, X>: Model<X> where
+    X: for <'b>Decoders<'b, Tail = <Self as Slabs>::Tail>,
+ {
+    type Ld: Loads<'a, Self, X>;
+
+    /// The loader reads saved columns as the model does: what it finds
+    /// valid is a saved column, it takes every saved column short of
+    /// 4 GiB by a header's length, and the values it reads are the
+    /// column's.
+    proof fn lemma_loader(d: Seq<u8>)
+        ensures
+            <Self::Ld as Loads<'a, Self, X>>::valid(d) ==> <Self as Model<X>>::valid(d),
+            <Self as Model<X>>::valid(d) && d.len() <= 0xffff_fff5 ==> <Self::Ld as Loads<'a, Self, X>>::accepts(d),
+            <Self::Ld as Loads<'a, Self, X>>::values_of(d).map_values(
+                |v: <<X as Decoders<'a>>::D as Decode>::Item| <Self as ReadsAgree<'a, X>>::own(v),
+            ) == <Self as Model<X>>::values(d),
+    ;
+}
+
+impl<'a, L, O> Loading<'a, RleReads<O>> for RleModel<L> where
+    L: Plain + for <'s>Lift<'s, W = L> + for <'s>WriteOps<'s, R = O>,
+    O: for <'b>RleOps<'b>,
+ {
+    type Ld = Load<'a, L>;
+
+    proof fn lemma_loader(d: Seq<u8>) {
+        if valid_slab::<O>(d) && d.len() <= 0xffff_fff5 {
+            L::lemma_heads();
+            assert(head_bound::<O>(10));
+            assert(small::<O>(d));
+        }
+        let o = slab_values::<O>(d);
+        let m = o.map_values(|v: <O as RleOps<'a>>::V| <RleModel<L> as ReadsAgree<'a, RleReads<O>>>::own(v));
+        assert forall|i: int| 0 <= i < o.len() implies m[i] == #[trigger] o[i] by {
+            L::lemma_plain(o[i]);
+        }
+        assert(m =~= o);
+    }
+}
+
+impl<'a, C: CountsOf> Loading<'a, BoolReads<C>> for BoolModel<C> {
+    type Ld = BoolLoader<'a, C>;
+
+    proof fn lemma_loader(d: Seq<u8>) {
     }
 }
 

@@ -591,6 +591,7 @@ mod edit;
 mod encoder;
 pub(crate) mod kind;
 pub mod leb128;
+mod load;
 pub(crate) mod model;
 mod prefix;
 mod prefix_iter;
@@ -643,6 +644,7 @@ pub use delta::{
 pub use edit::VerifiedEdit;
 pub use encoder::{VerifiedEncoder, VerifiedEncoderState};
 pub use kind::{LenIndex, VIndex, VKeeps};
+pub use load::VerifiedLoadIter;
 pub use prefix::{SumIndex, VerifiedPrefixColumn};
 pub use prefix_iter::{
     VerifiedPrefixIter, VerifiedPrefixIterState, VerifiedPrefixSeek, VerifiedPrefixedValue,
@@ -698,7 +700,7 @@ use vstd::prelude::*;
 use vstd::std_specs::iter::{FromIteratorSpecImpl, IteratorSpec};
 
 mod seal {
-    use super::model::{Flows, Model, Streams};
+    use super::model::{Flows, Loading, Model, Streams};
     use super::{Items, VForm, VGet, VSpec};
     use crate::cursor::Slabs;
     use crate::iter_core::Decoders;
@@ -781,7 +783,7 @@ mod seal {
         >;
 
         /// The slabs that hold them, and whose encoder takes them.
-        type E: Slabs<V: VGet<S = <Self as VSpec>::S>> + Model<Self::X> + for <'a>Streams<'a, Self::X> + for <'a>Flows<'a, Self::X>;
+        type E: Slabs<V: VGet<S = <Self as VSpec>::S>> + Model<Self::X> + for <'a>Streams<'a, Self::X> + for <'a>Flows<'a, Self::X> + for <'a>Loading<'a, Self::X>;
     }
 
     } // verus!
