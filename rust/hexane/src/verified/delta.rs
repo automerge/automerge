@@ -18,7 +18,8 @@ mod iter;
 pub use dec::VerifiedDeltaDecoder;
 #[cfg(verus_keep_ghost)]
 pub use diffs::{
-    delta_at, delta_prefix, delta_runs_at, deltas, lemma_delta_run_at, lemma_delta_runs_at,
+    delta_at, delta_prefix, delta_run_prefix, delta_run_units, delta_runs_at, delta_units,
+    delta_units_of_runs, deltas, lemma_delta_run_at, lemma_delta_runs_at,
 };
 pub use edit::VerifiedDeltaEdit;
 #[cfg(verus_keep_ghost)]

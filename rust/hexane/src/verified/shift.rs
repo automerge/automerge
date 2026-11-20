@@ -1114,7 +1114,7 @@ pub open spec fn units_of_runs<T>(rs: Seq<Run<T>>) -> Seq<Seq<Run<T>>> {
 }
 
 /// One sequence, concatenated, is itself.
-proof fn lemma_concat_one<V>(x: Seq<V>)
+pub(crate) proof fn lemma_concat_one<V>(x: Seq<V>)
     ensures
         concat(seq![x]) == x,
 {
@@ -1124,7 +1124,7 @@ proof fn lemma_concat_one<V>(x: Seq<V>)
 }
 
 /// The runs of `xs` stand for its values, each run for some.
-proof fn lemma_run_units<T>(xs: Seq<T>)
+pub(crate) proof fn lemma_run_units<T>(xs: Seq<T>)
     requires
         xs.len() <= usize::MAX,
     ensures

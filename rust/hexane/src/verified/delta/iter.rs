@@ -23,7 +23,10 @@
 //! column: no value is checked as it is read.
 
 #[cfg(verus_keep_ghost)]
-use super::diffs::{lemma_deltas_kept, lemma_vals_fit};
+use super::diffs::{
+    delta_run_units, delta_units, delta_units_of_runs, lemma_delta_runs_units, lemma_delta_take,
+    lemma_deltas_kept, lemma_vals_fit,
+};
 #[cfg(verus_keep_ghost)]
 use super::{
     all_dom, delta_at, delta_prefix, delta_run_fits, delta_run_values, delta_runs_at, delta_within,
@@ -60,9 +63,11 @@ use crate::fenwick::total;
 #[cfg(verus_keep_ghost)]
 use crate::iter_core::{lemma_window_past, past, resumes, vals_of, window, Decode};
 use crate::iter_core::{Decoders, ICore};
+#[cfg(verus_keep_ghost)]
+use crate::rle::writer::concat;
 use crate::verified::codec::VCodec;
 #[cfg(verus_keep_ghost)]
-use crate::verified::shift::lemma_singles;
+use crate::verified::shift::{lemma_run_units, lemma_singles};
 #[cfg(verus_keep_ghost)]
 use crate::verified::{head_run, lemma_runs_of, runs_of, sorted};
 use crate::verified::{invalid_resume, VerifiedIterState};
@@ -1999,6 +2004,252 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaIter<'a, T, C> {
         ensures
             r.ranges_vals() == self.column(),
             r.ranges_left() == windows(self.column(), ranges@),
+    {
+        VerifiedRanges::new(self, ranges)
+    }
+}
+
+// ── The runs of a delta column, repositioned ───────────────────────────────
+
+impl<'a, T: VDeltaValue<C>, C: VCodec> crate::verified::seal::ShiftSeal for VerifiedDeltaRuns<'a, T, C> {
+
+}
+
+impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaRuns<'a, T, C> {
+    /// The first run of what is left, and the values it stands for.
+    fn take_run(&mut self) -> (r: Option<DeltaRun>)
+        ensures
+            final(self).shift_vals() == old(self).shift_vals(),
+            old(self).shift_left().len() > 0 ==> (r matches Some(x) && {
+                let n = x.count as int;
+                &&& 0 < n <= old(self).shift_left().len()
+                &&& old(self).shift_items().len() > 0
+                &&& x == old(self).shift_items()[0]
+                &&& final(self).shift_items() == old(self).shift_items().skip(1)
+                &&& Self::shift_spans(x) == old(self).shift_left().take(n)
+                &&& final(self).shift_left() == old(self).shift_left().skip(n)
+                &&& final(self).shift_at() == old(self).shift_at() + n
+            }),
+            old(self).shift_left().len() == 0 ==> {
+                &&& r is None
+                &&& old(self).shift_items().len() == 0
+                &&& final(self).shift_items().len() == 0
+                &&& final(self).shift_left().len() == 0
+            },
+    {
+        let ghost (vs, a, e, l) = (self.0.column(), self.0.pos() as int, self.0.end_pos() as int, self.0.rest().len() as int);
+        let r = self.0.next_run();
+        proof {
+            if let Some(x) = r {
+                assert(window(deltas(vs), a, e) =~= deltas(vs).subrange(a, a + l));
+                lemma_delta_take(vs, a, l, x);
+            }
+        }
+        r
+    }
+}
+
+/// The runs of a delta column, repositioned as its values are: the model
+/// is each value as a delta run of one, with the number before it, and
+/// an item, a run, stands for as many of those as it counts.
+impl<'a, T: VDeltaValue<C>, C: VCodec> VShiftable for VerifiedDeltaRuns<'a, T, C> {
+    closed spec fn shift_vals(&self) -> Seq<DeltaRun> {
+        delta_units(self.0.column())
+    }
+
+    closed spec fn shift_at(&self) -> int {
+        self.0.spec_pos() as int
+    }
+
+    closed spec fn shift_end(&self) -> int {
+        self.0.spec_end_pos() as int
+    }
+
+    closed spec fn shift_left(&self) -> Seq<DeltaRun> {
+        window(delta_units(self.0.column()), self.0.spec_pos() as int, self.0.spec_pos() + self.0.rest().len())
+    }
+
+    closed spec fn shift_items(&self) -> Seq<DeltaRun> {
+        delta_runs_at(
+            self.0.column(),
+            self.0.spec_pos() as int,
+            runs_of(window(deltas(self.0.column()), self.0.spec_pos() as int, self.0.spec_pos() + self.0.rest().len())),
+        )
+    }
+
+    open spec fn shift_spans(x: DeltaRun) -> Seq<DeltaRun> {
+        delta_run_units(x)
+    }
+
+    open spec fn shift_unit() -> bool {
+        false
+    }
+
+    proof fn lemma_shift(&self) {
+        let (vs, a) = (self.0.column(), self.0.spec_pos() as int);
+        let b = if a + self.0.rest().len() <= vs.len() {
+            a + self.0.rest().len()
+        } else {
+            vs.len() as int
+        };
+        let w = window(deltas(vs), a, a + self.0.rest().len());
+        if a < vs.len() {
+            assert(w =~= deltas(vs).subrange(a, b));
+            lemma_run_units(w);
+            lemma_delta_runs_units(vs, a, b, runs_of(w));
+        }
+        assert(delta_runs_at(vs, a, runs_of(w)).map_values(|x: DeltaRun| Self::shift_spans(x)) =~= delta_units_of_runs(
+            delta_runs_at(vs, a, runs_of(w)),
+        ));
+    }
+
+    proof fn lemma_shift_unit(x: DeltaRun) {
+    }
+
+    #[inline(always)]
+    fn shift_step(&mut self) -> (r: Option<DeltaRun>) {
+        self.take_run()
+    }
+
+    #[inline(always)]
+    fn shift_nth(&mut self, n: usize) -> (r: Option<DeltaRun>) {
+        let ghost (o, a) = (self.shift_items(), self.shift_at());
+        let mut i: usize = 0;
+        loop
+            invariant
+                self.shift_vals() == old(self).shift_vals(),
+                o == old(self).shift_items(),
+                a == old(self).shift_at(),
+                i <= n,
+                i <= o.len(),
+                self.shift_items() == o.skip(i as int),
+                self.shift_at() == a + concat(o.take(i as int).map_values(|x: DeltaRun| Self::shift_spans(x))).len(),
+            decreases n - i,
+        {
+            let r = self.take_run();
+            match r {
+                Some(x) => {
+                    proof {
+                        let m = o.take(i as int).map_values(|x: DeltaRun| Self::shift_spans(x));
+                        let m1 = o.take(i + 1).map_values(|x: DeltaRun| Self::shift_spans(x));
+                        assert(m1.drop_last() =~= m);
+                    }
+                    if i == n {
+                        return Some(x);
+                    }
+                    i = i + 1;
+                },
+                None => {
+                    return None;
+                },
+            }
+        }
+    }
+
+    #[inline(always)]
+    fn dup(&self) -> (r: Self) {
+        VerifiedDeltaRuns(VShiftable::dup(&self.0))
+    }
+
+    #[inline(always)]
+    fn get_pos(&self) -> (r: usize) {
+        VShiftable::get_pos(&self.0)
+    }
+
+    #[inline(always)]
+    fn get_max(&self) -> (r: usize) {
+        VShiftable::get_max(&self.0)
+    }
+
+    #[inline(always)]
+    fn set_max(&mut self, end: usize) {
+        VShiftable::set_max(&mut self.0, end)
+    }
+
+    #[inline(always)]
+    fn advance_to(&mut self, target: usize) {
+        VShiftable::advance_to(&mut self.0, target)
+    }
+
+    #[inline(always)]
+    fn advance_by(&mut self, amount: usize) {
+        VShiftable::advance_by(&mut self.0, amount)
+    }
+
+    #[inline(always)]
+    fn seek_to(&mut self, at: usize) -> (r: Option<DeltaRun>) {
+        let p = VShiftable::get_pos(&self.0);
+        if at < p {
+            return None;
+        }
+        // the runs' own move, whose model is said of the runs
+        VShiftable::advance_to(self, at);
+        self.take_run()
+    }
+
+    #[inline(always)]
+    fn shift(&mut self, range: Range<usize>) {
+        VShiftable::shift(&mut self.0, range)
+    }
+
+    #[inline(always)]
+    fn shift_next(&mut self, range: Range<usize>) -> (r: Option<DeltaRun>) {
+        VShiftable::shift(self, range);
+        self.take_run()
+    }
+}
+
+impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaRuns<'a, T, C> {
+    /// The runs' repositioning model ([`VShiftable`]) in the terms of
+    /// their own specification: they range over the column's values, each
+    /// as a delta run of one; they stand where their iterator of values
+    /// does; their items are the runs of the differences that has left,
+    /// each with the number before it.
+    pub proof fn lemma_shift_model(&self)
+        ensures
+            self.shift_vals() == delta_units(self.iter().column()),
+            self.shift_at() == self.iter().pos(),
+            self.shift_items() == delta_runs_at(
+                self.iter().column(),
+                self.iter().pos() as int,
+                runs_of(window(deltas(self.iter().column()), self.iter().pos() as int, self.iter().end_pos() as int)),
+            ),
+            self.shift_left() == window(
+                delta_units(self.iter().column()),
+                self.iter().pos() as int,
+                self.iter().end_pos() as int,
+            ),
+            !Self::shift_unit(),
+    {
+    }
+
+    /// A lookahead: the runs wrapped so that the run they give next can
+    /// be looked at first ([`VerifiedUnshift::peek`]), as the old API's
+    /// `Shiftable::unshift` gives. (It cannot be moved to a window: its
+    /// items are not each one value.)
+    #[inline(always)]
+    pub fn unshift(self) -> (r: VerifiedUnshift<Self>)
+        ensures
+            r.unshift_vals() == self.shift_vals(),
+            r.unshift_left() == self.shift_items(),
+    {
+        VerifiedUnshift::new(self)
+    }
+
+    /// The runs of each of `ranges` of the column, one range after
+    /// another, as the old API's `Shiftable::ranges` gives them: a run
+    /// that crosses the edge of a range is cut there, and each says the
+    /// number before it. The ranges ascend and do not overlap (they may
+    /// touch), and start where the iterator stands or later.
+    ///
+    /// # Panics
+    ///
+    /// When it comes to a range that starts before where it stands.
+    #[inline(always)]
+    pub fn ranges<'r>(self, ranges: &'r [Range<usize>]) -> (r: VerifiedRanges<'r, Self>)
+        ensures
+            r.ranges_vals() == self.shift_vals(),
+            r.ranges_left() == windows(self.shift_vals(), ranges@),
     {
         VerifiedRanges::new(self, ranges)
     }

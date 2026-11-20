@@ -17,10 +17,13 @@ use super::{
     all_dom, all_fit, delta_run_fits, delta_run_kept, delta_run_values, delta_runs_fit,
     delta_runs_kept, delta_runs_values, dvs, in_dom, lemma_kept, vals, VDelta,
 };
+use crate::cursor::lemma_concat_append;
 use crate::delta::agg::psum;
 use crate::delta::dedit::rz;
 use crate::delta::diter::{crop, lemma_crop, lemma_crop_add, lemma_crop_eq};
 use crate::iter_core::{lemma_window_past, window};
+use crate::rle::writer::concat;
+use crate::verified::shift::{lemma_concat_one, run_units, unit_runs, units_of_runs};
 use crate::verified::{head_run, lemma_runs_first, lemma_runs_of, runs_of};
 use crate::{DeltaRun, Run};
 use vstd::prelude::*;
@@ -360,6 +363,156 @@ pub proof fn lemma_delta_runs_at<T: VDelta>(vs: Seq<T>, a: int, b: int)
         lemma_delta_runs_front::<T>(r, rest);
         assert(vs.subrange(a, a + n) + window(vs, a + n, b) =~= window(vs, a, b));
     }
+}
+
+// ── The runs of a delta column, value by value ─────────────────────────────
+
+/// Each value of `vs` as a delta run of one: the number before it and
+/// its difference.
+pub open spec fn delta_units<T: VDelta>(vs: Seq<T>) -> Seq<DeltaRun> {
+    Seq::new(vs.len(), |p: int| DeltaRun { prefix: delta_prefix(vs, p), delta: delta_at(vs, p), count: 1 })
+}
+
+/// The number before the value at `i` of the delta run `r`: the one
+/// before the run, moved on by the difference once for each value of the
+/// run before it (wrapping, as an `i64` does); a run of nulls does not
+/// move it.
+pub open spec fn delta_run_prefix(r: DeltaRun, i: int) -> i64 {
+    if i == 0 || r.delta is None {
+        r.prefix
+    } else {
+        vstd::wrapping::i64_specs::signed_crop(r.prefix + i * r.delta->Some_0)
+    }
+}
+
+/// The values the delta run `r` stands for, each a delta run of one.
+pub open spec fn delta_run_units(r: DeltaRun) -> Seq<DeltaRun> {
+    Seq::new(r.count as nat, |i: int| DeltaRun { prefix: delta_run_prefix(r, i), delta: r.delta, count: 1 })
+}
+
+/// What each of the delta runs `rs` stands for.
+pub open spec fn delta_units_of_runs(rs: Seq<DeltaRun>) -> Seq<Seq<DeltaRun>> {
+    rs.map_values(|r: DeltaRun| delta_run_units(r))
+}
+
+/// The number before index `a + k`, in a run of equal differences `d`
+/// that starts at `a`: the one before the run, moved on `k` times.
+proof fn lemma_delta_prefix_in_run<T: VDelta>(vs: Seq<T>, a: int, n: int, d: Option<i64>, k: int)
+    requires
+        0 <= a,
+        a + n <= vs.len(),
+        forall|j: int| a <= j < a + n ==> delta_at(vs, j) == d,
+        0 <= k < n,
+    ensures
+        delta_prefix(vs, a + k) == delta_run_prefix(DeltaRun { prefix: delta_prefix(vs, a), delta: d, count: 0 }, k),
+    decreases k,
+{
+    match d {
+        Some(x) => {
+            if k > 0 {
+                lemma_delta_run_kth(vs, a, n, x, k - 1);
+                assert(delta_at(vs, a + k - 1) == d);
+            }
+        },
+        None => {
+            if k > 0 {
+                lemma_delta_prefix_in_run(vs, a, n, d, k - 1);
+                assert(delta_at(vs, a + k - 1) == d);
+            }
+        },
+    }
+}
+
+/// A run of equal differences `d` at `a`, with the number before it,
+/// stands for the values there.
+pub(crate) proof fn lemma_delta_head<T: VDelta>(vs: Seq<T>, a: int, n: usize, d: Option<i64>)
+    requires
+        0 <= a,
+        a + n <= vs.len(),
+        forall|j: int| a <= j < a + n ==> delta_at(vs, j) == d,
+    ensures
+        delta_run_units(DeltaRun { prefix: delta_prefix(vs, a), delta: d, count: n }) == delta_units(vs).subrange(
+            a,
+            a + n,
+        ),
+{
+    let r = DeltaRun { prefix: delta_prefix(vs, a), delta: d, count: n };
+    assert forall|k: int| 0 <= k < n implies #[trigger] delta_run_units(r)[k] == delta_units(vs)[a + k] by {
+        lemma_delta_prefix_in_run(vs, a, n as int, d, k);
+    }
+}
+
+/// Runs `rs` of the differences of `vs` from `a` up to `b`, as runs of a
+/// delta column, stand for the values there, each as a delta run of one.
+pub(crate) proof fn lemma_delta_runs_units<T: VDelta>(vs: Seq<T>, a: int, b: int, rs: Seq<Run<Option<i64>>>)
+    requires
+        0 <= a <= b <= vs.len(),
+        concat(units_of_runs(rs)) == unit_runs(deltas(vs).subrange(a, b)),
+    ensures
+        concat(delta_units_of_runs(delta_runs_at(vs, a, rs))) == delta_units(vs).subrange(a, b),
+        delta_runs_at(vs, a, rs).len() == rs.len(),
+        forall|k: int|
+            0 <= k < rs.len() ==> (#[trigger] delta_runs_at(vs, a, rs)[k]).count == rs[k].count,
+    decreases rs.len(),
+{
+    if rs.len() == 0 {
+        assert(delta_units_of_runs(delta_runs_at(vs, a, rs)) =~= Seq::<Seq<DeltaRun>>::empty());
+        assert(delta_units(vs).subrange(a, b) =~= Seq::<DeltaRun>::empty());
+    } else {
+        let c = rs[0].count as int;
+        let rest = units_of_runs(rs.drop_first());
+        assert(units_of_runs(rs) =~= seq![run_units(rs[0])] + rest);
+        lemma_concat_append(seq![run_units(rs[0])], rest);
+        lemma_concat_one(run_units(rs[0]));
+        let w = deltas(vs).subrange(a, b);
+        assert(unit_runs(w).skip(c) =~= concat(rest));
+        assert forall|j: int| a <= j < a + c implies delta_at(vs, j) == rs[0].value by {
+            assert(unit_runs(w).take(c)[j - a] == run_units(rs[0])[j - a]);
+        }
+        assert(unit_runs(deltas(vs).subrange(a + c, b)) =~= unit_runs(w).skip(c));
+        lemma_delta_runs_units(vs, a + c, b, rs.drop_first());
+        lemma_delta_head(vs, a, rs[0].count, rs[0].value);
+        let h = DeltaRun { prefix: delta_prefix(vs, a), delta: rs[0].value, count: rs[0].count };
+        let drest = delta_units_of_runs(delta_runs_at(vs, a + c, rs.drop_first()));
+        assert(delta_units_of_runs(seq![h] + delta_runs_at(vs, a + c, rs.drop_first())) =~= seq![
+            delta_run_units(h),
+        ] + drest);
+        lemma_concat_append(seq![delta_run_units(h)], drest);
+        lemma_concat_one(delta_run_units(h));
+        assert forall|k: int| 0 <= k < rs.len() implies (#[trigger] delta_runs_at(vs, a, rs)[k]).count
+            == rs[k].count by {}
+    }
+}
+
+/// The run at the head of the `l` differences of `vs` from `a`, with the
+/// number before it: the first of their delta runs, which stands for the
+/// first of the values there as delta runs of one; and what is left
+/// after it.
+pub(crate) proof fn lemma_delta_take<T: VDelta>(vs: Seq<T>, a: int, l: int, x: DeltaRun)
+    requires
+        0 <= a,
+        0 <= l <= usize::MAX,
+        a + l <= vs.len(),
+        head_run(deltas(vs).subrange(a, a + l), x.delta, x.count as int),
+        x.prefix == delta_prefix(vs, a),
+    ensures
+        delta_runs_at(vs, a, runs_of(window(deltas(vs), a, a + l))) == seq![x] + delta_runs_at(
+            vs,
+            a + x.count,
+            runs_of(window(deltas(vs), a + x.count, a + l)),
+        ),
+        delta_run_units(x) == window(delta_units(vs), a, a + l).take(x.count as int),
+        window(delta_units(vs), a + x.count, a + l) == window(delta_units(vs), a, a + l).skip(x.count as int),
+{
+    let o = deltas(vs).subrange(a, a + l);
+    let n = x.count as int;
+    assert forall|j: int| a <= j < a + n implies delta_at(vs, j) == x.delta by {
+        assert(o[j - a] == x.delta);
+    }
+    lemma_runs_of(o, x.delta, x.count);
+    lemma_delta_head(vs, a, x.count, x.delta);
+    assert(o.skip(n) =~= window(deltas(vs), a + n, a + l));
+    assert(runs_of(o).drop_first() =~= runs_of(o.skip(n)));
 }
 
 } // verus!

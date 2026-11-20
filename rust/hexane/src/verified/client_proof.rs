@@ -397,10 +397,10 @@ use super::leb128;
 use super::{
     accumulated, after_edit, after_edits, all_fit, applied, below_at, bytes_below, concat, copied,
     delta_at, delta_finds, delta_iter_fits, delta_near, delta_prefix, delta_run_fits,
-    delta_run_in_range, delta_run_kept, delta_run_values, delta_runs_at, delta_runs_fit,
-    delta_runs_kept, delta_runs_values, delta_span_ok, delta_within, deltas, folded, head_len,
-    head_run, head_run_max, in_order, lemma_acc_cat, lemma_acc_range, lemma_acc_run,
-    lemma_after_edits, lemma_cancel, lemma_delta_finds, lemma_delta_finds_first,
+    delta_run_in_range, delta_run_kept, delta_run_units, delta_run_values, delta_runs_at,
+    delta_runs_fit, delta_runs_kept, delta_runs_values, delta_span_ok, delta_units, delta_within,
+    deltas, folded, head_len, head_run, head_run_max, in_order, lemma_acc_cat, lemma_acc_range,
+    lemma_acc_run, lemma_after_edits, lemma_cancel, lemma_delta_finds, lemma_delta_finds_first,
     lemma_delta_run_at, lemma_delta_run_exact, lemma_delta_run_fits, lemma_delta_runs_at,
     lemma_delta_runs_one, lemma_delta_runs_push, lemma_delta_within_one, lemma_head_len,
     lemma_head_run_max, lemma_run_values_add, lemma_run_values_push, lemma_runs_first,
@@ -18790,6 +18790,209 @@ fn told_by_shift_seek<I: VShiftable>(it: &mut I, at: usize) -> (r: Option<I::Ite
         },
 {
     VShiftable::seek_to(it, at)
+}
+
+// ── Repositioning the runs of a delta column ───────────────────────────────
+
+/// The first run of a range of a delta column, the runs moved there by
+/// `VShiftable`'s own move: it starts from the number before the range,
+/// and its difference is that of each value it stands for. For every
+/// value type and codec.
+#[allow(dead_code)]
+fn delta_run_at_range<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>, a: usize, b: usize) -> (r: Option<
+    DeltaRun,
+>)
+    ensures
+        match r {
+            Some(run) => {
+                &&& a < b && a < col@.len()
+                &&& 1 <= run.count && a + run.count <= b && a + run.count <= col@.len()
+                &&& run.prefix == delta_prefix(col@, a as int)
+                &&& forall|i: int| a <= i < a + run.count ==> delta_at(col@, i) == run.delta
+            },
+            None => !(a < b && a < col@.len()),
+        },
+{
+    let mut runs = col.iter().runs();
+    proof {
+        runs.lemma_shift_model();
+    }
+    let ghost v = runs.shift_vals();
+    let r = VShiftable::shift_next(&mut runs, a..b);
+    proof {
+        if let Some(x) = r {
+            let w = window(v, a as int, b as int);
+            assert(delta_run_units(x)[0] == w[0]);
+            assert forall|i: int| a <= i < a + x.count implies delta_at(col@, i) == x.delta by {
+                assert(delta_run_units(x)[i - a] == w[i - a]);
+            }
+        }
+    }
+    r
+}
+
+/// The run of a delta column from a place, the runs moved there. For
+/// every value type and codec.
+#[allow(dead_code)]
+fn delta_run_sought<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>, at: usize) -> (r: Option<DeltaRun>)
+    ensures
+        r is Some <==> at < col@.len(),
+        r matches Some(run) ==> {
+            &&& 1 <= run.count && at + run.count <= col@.len()
+            &&& run.prefix == delta_prefix(col@, at as int)
+            &&& forall|i: int| at <= i < at + run.count ==> delta_at(col@, i) == run.delta
+        },
+{
+    let mut runs = col.iter().runs();
+    proof {
+        runs.lemma_shift_model();
+    }
+    let ghost o = runs.shift_left();
+    let r = VShiftable::seek_to(&mut runs, at);
+    proof {
+        if let Some(x) = r {
+            assert(delta_run_units(x)[0] == o.skip(at as int)[0]);
+            assert forall|i: int| at <= i < at + x.count implies delta_at(col@, i) == x.delta by {
+                assert(delta_run_units(x)[i - at] == o.skip(at as int)[i - at]);
+            }
+        }
+    }
+    r
+}
+
+/// The first run of a delta column after some values, the runs moved on
+/// by them. For every value type and codec.
+#[allow(dead_code)]
+fn delta_run_after<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>, n: usize) -> (r: Option<DeltaRun>)
+    ensures
+        r is Some <==> n < col@.len(),
+        r matches Some(run) ==> {
+            &&& 1 <= run.count && n + run.count <= col@.len()
+            &&& run.prefix == delta_prefix(col@, n as int)
+            &&& run.delta == delta_at(col@, n as int)
+        },
+{
+    let mut runs = col.iter().runs();
+    proof {
+        runs.lemma_shift_model();
+    }
+    let ghost du = runs.shift_vals();
+    proof {
+        assert(runs.shift_left() =~= du);
+    }
+    VShiftable::advance_by(&mut runs, n);
+    proof {
+        runs.lemma_shift_model();
+        // the column the runs read now says the same numbers before and
+        // differences
+        let c = runs.iter().column();
+        let (p, e) = (runs.iter().pos() as int, runs.iter().end_pos() as int);
+        assert(delta_units(c) == du);
+        assert forall|j: int| 0 <= j < c.len() implies deltas(c)[j] == deltas(col@)[j] by {
+            assert(delta_units(c)[j].delta == du[j].delta);
+        }
+        assert(deltas(c) =~= deltas(col@));
+        let w = window(deltas(c), p, e);
+        if n < col@.len() {
+            assert(p == n);
+            assert(delta_units(c)[p].prefix == du[p].prefix);
+            assert(window(du, p, e).len() == col@.len() - n);
+            assert(w =~= deltas(col@).skip(n as int));
+            lemma_runs_first(w);
+        } else {
+            assert(window(du, p, e).len() == 0);
+            assert(w.len() == 0);
+        }
+    }
+    VShiftable::shift_step(&mut runs)
+}
+
+/// The first run of a range of a delta column, through a walk over
+/// ranges. For every value type and codec.
+#[allow(dead_code)]
+fn delta_run_over_range<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>, a: usize, b: usize) -> (r: Option<
+    DeltaRun,
+>)
+    ensures
+        match r {
+            Some(run) => {
+                &&& a < b && a < col@.len()
+                &&& 1 <= run.count && a + run.count <= b && a + run.count <= col@.len()
+                &&& run.prefix == delta_prefix(col@, a as int)
+                &&& forall|i: int| a <= i < a + run.count ==> delta_at(col@, i) == run.delta
+            },
+            None => !(a < b && a < col@.len()),
+        },
+{
+    let runs = col.iter().runs();
+    proof {
+        runs.lemma_shift_model();
+    }
+    let ghost v = runs.shift_vals();
+    let mut rs: Vec<Range<usize>> = Vec::new();
+    rs.push(a..b);
+    let mut walk = runs.ranges(rs.as_slice());
+    let r = walk.next();
+    proof {
+        let f = |r: Range<usize>| window(v, r.start as int, r.end as int);
+        let w = window(v, a as int, b as int);
+        assert(rs@ =~= seq![a..b]);
+        assert(rs@.map_values(f) =~= seq![w]);
+        let m = rs@.map_values(f);
+        assert(m.drop_last() =~= Seq::<Seq<DeltaRun>>::empty());
+        assert(concat(m) == concat(m.drop_last()) + m.last());
+        assert(windows(v, rs@) =~= w);
+        if let Some(x) = r {
+            assert(delta_run_units(x)[0] == w[0]);
+            assert forall|i: int| a <= i < a + x.count implies delta_at(col@, i) == x.delta by {
+                assert(delta_run_units(x)[i - a] == w[i - a]);
+            }
+        }
+    }
+    r
+}
+
+/// The first run of a delta column, looked at through a lookahead: from
+/// no number before it. For every value type and codec.
+#[allow(dead_code)]
+fn delta_run_peeked<T: VDeltaValue<C>, C: VCodec>(col: &VerifiedDeltaColumn<T, C>) -> (r: Option<DeltaRun>)
+    ensures
+        r is Some <==> col@.len() > 0,
+        r matches Some(run) ==> {
+            &&& 1 <= run.count <= col@.len()
+            &&& run.prefix == 0
+            &&& run.delta == delta_at(col@, 0)
+        },
+{
+    let runs = col.iter().runs();
+    proof {
+        runs.lemma_shift_model();
+        let w = window(deltas(col@), 0, col@.len() as int);
+        assert(w =~= deltas(col@));
+        lemma_runs_first(w);
+    }
+    let u = runs.unshift();
+    match u.peek() {
+        Some(x) => Some(*x),
+        None => None,
+    }
+}
+
+/// What the lookahead and the walk over ranges of a delta column's runs
+/// are, told back. For every value type and codec.
+#[allow(dead_code)]
+fn delta_runs_told_by_adapters<'a, 'r, T: VDeltaValue<C>, C: VCodec>(
+    a: VerifiedDeltaRuns<'a, T, C>,
+    b: VerifiedDeltaRuns<'a, T, C>,
+    rs: &'r [Range<usize>],
+) -> (r: (VerifiedUnshift<VerifiedDeltaRuns<'a, T, C>>, VerifiedRanges<'r, VerifiedDeltaRuns<'a, T, C>>))
+    ensures
+        r.0.unshift_vals() == a.shift_vals(),
+        r.0.unshift_left() == a.shift_items(),
+        r.1.ranges_vals() == b.shift_vals(),
+        r.1.ranges_left() == windows(b.shift_vals(), rs@),
+{
+    (a.unshift(), b.ranges(rs))
 }
 
 } // verus!

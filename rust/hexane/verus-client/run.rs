@@ -4262,3 +4262,28 @@ fn repositioned_runs() {
         [(1, 7), (1, 8)]
     );
 }
+
+// ── Repositioning the runs of a delta column ───────────────────────────────
+
+#[test]
+fn repositioned_delta_runs() {
+    let col = VerifiedDeltaColumn::<i64>::from_values(&[10, 20, 30, 40, 41, 42, 50]);
+    let r = verus_client::delta_run_at_range(&col, 1, 9).unwrap();
+    assert_eq!((r.prefix, r.delta, r.count), (10, Some(10), 3));
+    assert!(verus_client::delta_run_at_range(&col, 7, 9).is_none());
+    let r = verus_client::delta_run_sought(&col, 4).unwrap();
+    assert_eq!((r.prefix, r.delta, r.count), (40, Some(1), 2));
+    let r = verus_client::delta_run_after(&col, 2).unwrap();
+    assert_eq!((r.prefix, r.delta, r.count), (20, Some(10), 2));
+    let r = verus_client::delta_run_over_range(&col, 4, 5).unwrap();
+    assert_eq!((r.prefix, r.delta, r.count), (40, Some(1), 1));
+    let r = verus_client::delta_run_peeked(&col).unwrap();
+    assert_eq!((r.prefix, r.delta, r.count), (0, Some(10), 4));
+    let (mut u, w) =
+        verus_client::delta_runs_told_by_adapters(col.iter().runs(), col.iter().runs(), &[5..7]);
+    assert_eq!(u.next().map(|r| r.count), Some(4));
+    assert_eq!(
+        w.map(|r| (r.prefix, r.delta, r.count)).collect::<Vec<_>>(),
+        [(41, Some(1), 1), (42, Some(8), 1)]
+    );
+}

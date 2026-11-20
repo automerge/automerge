@@ -17947,3 +17947,106 @@ fn runs_shifted<T: Kind>() {
 fn runs_reposition_as_the_old_ones_do() {
     for_each_kind!(runs_shifted);
 }
+
+// ── Repositioning the runs of a delta column ───────────────────────────────
+
+use hexane::DeltaRun;
+
+fn delta_runs_shifted<T: Deltad>(seed: u64) {
+    let mut rng = Rng(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) ^ 0x541c);
+    // values in runs of equal differences: the same step, taken again
+    let mut last = 0;
+    let mut model: Vec<T> = vec![];
+    for _ in 0..rng.below(40) {
+        let state = rng.0;
+        for _ in 0..1 + rng.below(5) {
+            let (x, l) = T::near(&mut Rng(state), last);
+            last = l;
+            model.push(x);
+        }
+        rng.next();
+    }
+    let len = model.len();
+    let v = VerifiedDeltaColumn::<T>::from_values(&model);
+    let c = DeltaColumn::<T>::from_values(model);
+    for _ in 0..15 {
+        // the runs of ranges, from a place the runs have moved on to
+        let a = rng.below(len + 2);
+        let rs = some_ranges(&mut rng, a, len);
+        let mut x = v.iter().runs();
+        let mut y = c.iter().runs();
+        VShiftable::advance_to(&mut x, a);
+        Shiftable::advance_to(&mut y, a);
+        let new: Vec<DeltaRun> = x.ranges(&rs).collect();
+        let old_: Vec<DeltaRun> = y.ranges(rs.clone()).collect();
+        assert_eq!(new, old_, "{rs:?}");
+
+        // a lookahead, looked at and walked
+        let mut u = v.iter().runs().unshift();
+        let mut w = c.iter().runs().unshift();
+        for _ in 0..6 {
+            match rng.below(3) {
+                0 => assert_eq!(u.peek(), w.peek()),
+                1 => assert_eq!(u.next(), w.next()),
+                _ => {
+                    let n = rng.below(4);
+                    assert_eq!(u.nth(n), w.nth(n));
+                }
+            }
+        }
+
+        // the moves of `VShiftable`, beside `Shiftable`'s
+        let mut x = v.iter().runs();
+        let mut y = c.iter().runs();
+        for _ in 0..6 {
+            let p = VShiftable::get_pos(&x);
+            assert_eq!(p, Shiftable::get_pos(&y));
+            assert_eq!(VShiftable::get_max(&x), Shiftable::get_max(&y));
+            assert_eq!(VShiftable::get_range(&x), Shiftable::get_range(&y));
+            let t = p + rng.below(15);
+            match rng.below(6) {
+                0 => {
+                    VShiftable::set_max(&mut x, t);
+                    Shiftable::set_max(&mut y, t);
+                }
+                1 => {
+                    VShiftable::advance_to(&mut x, t);
+                    Shiftable::advance_to(&mut y, t);
+                }
+                2 => {
+                    VShiftable::advance_by(&mut x, t - p);
+                    Shiftable::advance_by(&mut y, t - p);
+                }
+                3 => {
+                    let r = t..t + rng.below(20);
+                    VShiftable::shift(&mut x, r.clone());
+                    Shiftable::shift(&mut y, r);
+                }
+                4 => {
+                    let r = t..t + rng.below(20);
+                    let a = VShiftable::shift_next(&mut x, r.clone());
+                    assert_eq!(a, Shiftable::shift_next(&mut y, r));
+                }
+                _ => {
+                    let a = VShiftable::seek_to(&mut x, t);
+                    assert_eq!(a, Shiftable::seek_to(&mut y, t));
+                }
+            }
+            assert_eq!(x.next(), y.next());
+        }
+    }
+}
+
+/// The runs of a verified delta column reposition as `DeltaColumn`'s do:
+/// the runs of several ranges in turn (`ranges`), each with the number
+/// before it, a lookahead (`unshift`), and each move of `VShiftable`
+/// beside `Shiftable`'s.
+#[test]
+fn delta_runs_reposition_as_the_old_ones_do() {
+    for seed in 0..6 {
+        delta_runs_shifted::<u32>(seed);
+        delta_runs_shifted::<i64>(seed);
+        delta_runs_shifted::<Option<i32>>(seed);
+        delta_runs_shifted::<Option<u64>>(seed);
+    }
+}
