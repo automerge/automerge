@@ -1102,6 +1102,7 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> VerifiedPrefixIter<'a, V, C> where V
     /// finds nothing, and its window is closed where it stands.
     /// ([`PrefixIter`](crate::PrefixIter)'s leaves the window of such
     /// an iterator as it is.)
+    #[verifier::spinoff_prover]
     pub fn advance_prefix(&mut self, n: V::Sum) -> (r: Option<VerifiedPrefixSeek<'a, V>>)
         ensures
             final(self).column() == old(self).column(),
