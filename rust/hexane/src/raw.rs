@@ -49,7 +49,17 @@ use std::ops::Range;
 #[allow(unused_imports)]
 use vstd::prelude::*;
 
+use crate::trusted::drain_slabs;
+use crate::trusted::fail;
+use crate::trusted::fail_seek;
+use crate::trusted::fail_take;
+use crate::trusted::get_cross;
+use crate::trusted::get_oob;
+use crate::trusted::splice_failed;
+use crate::trusted::splice_oob;
+use crate::trusted::splice_too_long;
 mod imp;
+pub(crate) use imp::RawSlab;
 #[allow(unused_imports)]
 use imp::*;
 
@@ -96,106 +106,14 @@ pub open spec fn spliced_cut(cuts: ISet<int>, index: int, del: int, n: int, x: i
     ||| x == index + n
 }
 
-// ── Failures ────────────────────────────────────────────────────────────────
 
-/// Panics with `msg`.  Trusted only in that a panic does not return.
-/// Every caller proves `why`: the condition its documentation gives for
-/// the panic, so none panics otherwise.
-#[verifier::external_body]
-#[cold]
-#[inline(never)]
-fn fail(msg: &str, Ghost(why): Ghost<bool>)
-    requires
-        why,
-    ensures
-        false,
-{
-    panic!("{msg}")
-}
 
-#[verifier::external_body]
-#[cold]
-#[inline(never)]
-fn fail_take(n: usize, available: usize, Ghost(why): Ghost<bool>)
-    requires
-        why,
-    ensures
-        false,
-{
-    panic!("RawColumnIter::take would cross slab boundary: want {n}, have {available}")
-}
 
-#[verifier::external_body]
-#[cold]
-#[inline(never)]
-fn fail_seek(pos: usize, target: usize, Ghost(why): Ghost<bool>)
-    requires
-        why,
-    ensures
-        false,
-{
-    panic!("RawColumnIter::seek_to is forward-only (at {pos} want {target})")
-}
 
-#[verifier::external_body]
-#[cold]
-#[inline(never)]
-fn splice_oob(index: usize, del: usize, len: usize) -> PackError {
-    PackError::InvalidValue(format!("raw splice out of bounds: index={index} del={del} len={len}"))
-}
 
-#[verifier::external_body]
-#[cold]
-#[inline(never)]
-fn splice_too_long(len: usize, del: usize, insert: usize) -> PackError {
-    PackError::InvalidValue(format!(
-        "raw splice too long: len={len} del={del} insert={insert} overflows usize"
-    ))
-}
 
-/// Panics: a splice out of bounds, or one that would leave the column
-/// more than `usize::MAX` bytes long.
-#[verifier::external_body]
-#[cold]
-#[inline(never)]
-fn splice_failed(e: PackError)
-    ensures
-        false,
-{
-    panic!("splice range out of bounds: {e:?}")
-}
 
-#[verifier::external_body]
-#[cold]
-#[inline(never)]
-fn get_oob(start: usize, end: usize, len: usize) -> PackError {
-    PackError::InvalidValue(format!(
-        "raw get out of bounds: range={:?} len={}",
-        start..end, len
-    ))
-}
 
-#[verifier::external_body]
-#[cold]
-#[inline(never)]
-fn get_cross(start: usize, end: usize, slab: usize, offset: usize, slab_len: usize) -> PackError {
-    PackError::InvalidValue(format!(
-        "raw get spans slab boundary: range={:?} slab={} offset={} slab_len={}",
-        start..end, slab, offset, slab_len,
-    ))
-}
-
-/// `v.drain(start..end)`.
-#[verifier::external_body]
-#[inline(always)]
-fn drain_slabs(v: &mut Vec<RawSlab>, start: usize, end: usize)
-    requires
-        start <= end <= old(v)@.len(),
-    ensures
-        final(v)@ == old(v)@.take(start as int) + old(v)@.skip(end as int),
-{
-    v.drain(start..end);
-}
 
 // ── RawColumn ───────────────────────────────────────────────────────────────
 

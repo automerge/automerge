@@ -41,15 +41,9 @@ use crate::PackError;
 #[allow(unused_imports)]
 use vstd::prelude::*;
 
+use crate::trusted::over_4gib;
 verus! {
 
-/// The error for a slab whose last run its tail record can't hold.
-#[verifier::external_body]
-#[cold]
-#[inline(never)]
-fn over_4gib() -> PackError {
-    PackError::InvalidValue("a run must stay under 4 GiB".to_string())
-}
 
 // ── The slab being cut, as groups ───────────────────────────────────────────
 

@@ -65,6 +65,7 @@ use std::marker::PhantomData;
 #[allow(unused_imports)]
 use vstd::prelude::*;
 
+use crate::trusted::cursor_too_long as too_long;
 verus! {
 
 // ── The encodings' slab operations ─────────────────────────────────────────
@@ -832,20 +833,6 @@ proof fn lemma_pair_merged<E: Slabs>(s0: Seq<Slab<E::Tail>>, s1: Seq<Slab<E::Tai
     lemma_vals_total::<E>(s1);
 }
 
-/// An insert would take the column past `usize::MAX - 3` items, which
-/// the rebuilds can't count.  Trusted only in that a panic does not
-/// return.
-#[verifier::external_body]
-#[cold]
-#[inline(never)]
-fn too_long(Ghost(why): Ghost<bool>)
-    requires
-        why,
-    ensures
-        false,
-{
-    panic!("column too long to edit")
-}
 
 /// A sum over a suffix is the suffix's total.
 proof fn lemma_sum_tail(s: Seq<nat>, k: int)

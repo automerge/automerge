@@ -70,6 +70,7 @@ pub trait ColumnIndex<W>: Sealed + Default + IndexOps<W> {
 
 // ── IndexOps: the verified interface ─────────────────────────────────────
 
+pub(crate) use crate::trusted::splice_vec;
 verus! {
 
 /// The item counts of weights `ws`, as index `I` measures them.
@@ -224,17 +225,6 @@ pub trait IndexOps<W>: Sized {
     ;
 }
 
-/// `v[start..end] = new`.
-#[verifier::external_body]
-#[inline(always)]
-pub(crate) fn splice_vec<T>(v: &mut Vec<T>, start: usize, end: usize, new: Vec<T>)
-    requires
-        start <= end <= old(v)@.len(),
-    ensures
-        final(v)@ == old(v)@.take(start as int) + new@ + old(v)@.skip(end as int),
-{
-    v.splice(start..end, new);
-}
 
 } // verus!
 

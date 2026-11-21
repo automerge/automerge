@@ -39,6 +39,8 @@ use crate::{PackError, Run};
 use std::marker::PhantomData;
 use vstd::prelude::*;
 
+use crate::trusted::load_failed;
+use crate::trusted::wrong_length;
 verus! {
 
 /// A loader: reads an encoded column run by run, validating it, and cuts
@@ -149,13 +151,6 @@ pub(crate) trait Loads<'a, E: ReadsAgree<'a, X>, X: Decoders<'a, Tail = <E as Sl
 }
 
 
-/// The error a load reports for a column of `len` items where it expected
-/// `expected`.
-#[verifier::external_body]
-#[cold]
-fn wrong_length(len: usize, expected: usize) -> PackError {
-    PackError::InvalidLength(len, expected)
-}
 
 /// A column's load in progress: the loader, and the weights of the slabs
 /// it cuts, accumulated as their runs stream past (where the weight model
@@ -168,12 +163,6 @@ pub(crate) struct LoadCore<'a, E, X: Decoders<'a>, W, G, LD> {
     pub(crate) _p: PhantomData<(E, G)>,
 }
 
-/// The error a load reports once an earlier step of it failed.
-#[verifier::external_body]
-#[cold]
-fn load_failed() -> PackError {
-    PackError::BadFormat
-}
 
 impl<'a, E, X, W, G, LD> LoadCore<'a, E, X, W, G, LD> where
     E: ReadsAgree<'a, X>,

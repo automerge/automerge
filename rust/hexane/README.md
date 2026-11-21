@@ -628,20 +628,21 @@ file's module `imp`. The module docs of `hexane::verified` ("Reviewing
 the specification") say which files to read and how.
 
 What it trusts, besides Verus, Z3 and vstd's specifications of the
-standard library:
+standard library, is all in one file, `src/trusted.rs`:
 
 * the helpers that panic, each only in that it does not return, and the
   constructors of `PackError`;
-* three edits of a range of a `Vec` (`index::splice_vec`,
-  `rle::writer::splice_bytes`, the raw column's `drain_slabs`), whose
+* three edits of a range of a `Vec` (`splice_vec`, `splice_bytes`,
+  the raw column's `drain_slabs`), whose
   specifications are assumed, and four helpers that claim nothing
-  (`rle::writer::add`, `recycle`, `carry_budget`, `take_buf`);
+  (`add`, `recycle_buf`, `carry_budget`, `take_buf`);
 * for strings, the specification of `core::str::from_utf8`, and that two
-  `str`s of the same characters are one;
-* of an iterator a function takes, the laws Verus asks of every
-  iterator; and of a client's own value type, encoding, codec or
-  repositionable iterator, the laws of `VNewtype`, `VPack`, `VCodec` or
-  `VShiftable` (a client checked by Verus proves them).
+  `str`s of the same characters are one.
+
+Of what a client hands it, it asks: of an iterator, the laws Verus asks
+of every iterator; and of a client's own value type, encoding, codec or
+repositionable iterator, the laws of `VNewtype`, `VPack`, `VCodec` or
+`VShiftable` (a client checked by Verus proves them).
 
 That a splice ends is proved where it takes a slice (and so for
 `from_values`, `insert`, `push` and the deletes), of every kind of

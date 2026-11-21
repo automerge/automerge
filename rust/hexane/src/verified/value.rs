@@ -32,6 +32,7 @@ use std::num::NonZeroU32;
 #[allow(unused_imports)]
 use vstd::prelude::*;
 
+pub use crate::trusted::refused;
 mod imp;
 #[allow(unused_imports)]
 use imp::*;
@@ -225,15 +226,6 @@ impl VPack for i64 {
     }
 }
 
-// ── A type that is another's values ─────────────────────────────────────────
-
-/// The error of a [`VNewtype::from_base`] for a base value its type has
-/// no value for. Nothing is assumed of it.
-#[verifier::external_body]
-#[cold]
-pub fn refused(msg: &'static str) -> PackError {
-    PackError::InvalidValue(msg.into())
-}
 
 /// A value type that is stored as another's values: each value as its
 /// own `Base` value, and not every `Base` value need be one.

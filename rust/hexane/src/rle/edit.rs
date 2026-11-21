@@ -48,6 +48,8 @@ use std::marker::PhantomData;
 use vstd::prelude::*;
 use vstd::slice::slice_subrange;
 
+pub(crate) use crate::trusted::null_in_column;
+use crate::trusted::slab_too_long;
 verus! {
 
 /// A range of a sequence, split.
@@ -525,17 +527,6 @@ pub struct RleRebuild<M: WriteOps<'static>> {
 /// module is not.
 pub struct RleModel<L>(PhantomData<L>);
 
-/// A slab too long for the format's byte arithmetic: no slab is, as a
-/// slab's bytes are bounded by its segment budget, but the specifications
-/// do not say so.
-#[cold]
-#[inline(never)]
-#[verifier::external_body]
-fn slab_too_long()
-    ensures false,
-{
-    panic!("RLE slab too long")
-}
 
 /// A canonical encoding of `vals`, whose recorded length, segments and
 /// tail match it, is a well-formed slab holding them.
@@ -790,19 +781,6 @@ pub(crate) fn save_slabs<L>(slabs: &[Slab], total: usize, out: &mut Vec<u8>)
     }
 }
 
-/// A null value in a column that isn't nullable: none of the value types
-/// has one.  Trusted only in that a panic does not return.
-#[verifier::external_body]
-#[cold]
-#[inline(never)]
-pub(crate) fn null_in_column(Ghost(why): Ghost<bool>)
-    requires
-        why,
-    ensures
-        false,
-{
-    panic!("null value in a column that is not nullable")
-}
 
 /// A concatenation, split after its first part.
 proof fn lemma_concat_first<V>(cs: Seq<Seq<V>>)
@@ -1002,10 +980,9 @@ impl<L> Slabs for RleModel<L> where L: for<'s> Lift<'s, W = L> {
         state_ok::<<L as WriteOps<'static>>::R>(data, st) && state_pos::<<L as WriteOps<'static>>::R>(data, st) == pos
     }
 
-    #[verifier::external_body]
     #[inline(always)]
     fn carry_budget() -> usize {
-        crate::edit::RUN_BUDGET
+        crate::trusted::carry_budget()
     }
 
     #[inline(always)]

@@ -768,12 +768,6 @@ pub open spec fn all_fit<T: VDelta>(vs: Seq<T>) -> bool {
     forall|i: int| 0 <= i < vs.len() ==> (#[trigger] vs[i]).fits()
 }
 
-// ── Runs of a delta column ──────────────────────────────────────────────────
-
-/// [`DeltaRun`], as the proofs see it: its three fields.
-#[verifier::external_type_specification]
-#[allow(dead_code)]
-pub struct ExDeltaRun(DeltaRun);
 
 /// What a delta column keeps for the run `r`: `r.count` numbers, the
 /// first `r.prefix + r.delta` and each of the others `r.delta` more

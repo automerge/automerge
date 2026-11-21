@@ -52,13 +52,7 @@ mod imp;
 #[allow(unused_imports)]
 use imp::*;
 
-verus! {
-
-#[verifier::external_type_specification]
-#[allow(dead_code)]
-pub struct ExBijou64(Bijou64);
-
-} // verus!
+verus! {} // verus!
 
 /// A [`VerifiedColumn`](super::VerifiedColumn) whose numbers are written
 /// with [`Bijou64`].

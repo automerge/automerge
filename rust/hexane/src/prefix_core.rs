@@ -51,6 +51,7 @@ use vstd::prelude::*;
 #[cfg(verus_keep_ghost)]
 use crate::index::lemma_plain_valid;
 
+use crate::trusted::prefix_core_past_window as past_window;
 verus! {
 
 /// `a - b` on a prefix type.
@@ -476,14 +477,6 @@ pub(crate) fn p_next_run<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Decode>::Ite
     r
 }
 
-/// Panics: `take_nth` ran out of values. Never: `n` is within the window.
-#[verifier::external_body]
-fn past_window()
-    requires
-        false,
-{
-    panic!("same_slab_nth called with n > slab len");
-}
 
 /// The `n`th value left in the window (0-based), consuming it and those
 /// before it run by run, adding them to the running total: for `n`

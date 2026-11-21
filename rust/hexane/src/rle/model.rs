@@ -32,14 +32,7 @@ use vstd::prelude::*;
 
 verus! {
 
-#[verifier::external_type_specification]
-#[verifier::external_body]
-#[allow(dead_code)]
-pub struct ExPackError(PackError);
 
-#[verifier::external_type_specification]
-#[allow(dead_code)]
-pub struct ExRun<V>(crate::Run<V>);
 
 /// What the RLE layer needs of a column's value type `V` and its varint
 /// codec, for slabs borrowed for `'a`.

@@ -19,22 +19,9 @@ use crate::bool_wire::*;
 #[allow(unused_imports)]
 use vstd::prelude::*;
 
+use crate::trusted::bool_enc_too_many_values as too_many_values;
 verus! {
 
-/// Appending would take an encoder past `usize::MAX - 3` values, or
-/// `usize::MAX` runs, which it can't count.  Trusted only in that a panic does not
-/// return.
-#[verifier::external_body]
-#[cold]
-#[inline(never)]
-fn too_many_values(Ghost(why): Ghost<bool>)
-    requires
-        why,
-    ensures
-        false,
-{
-    panic!("encoder too long to append to")
-}
 
 /// The bool encoder's run bookkeeping; the output buffer is the caller's.
 pub(crate) struct BEnc {

@@ -31,21 +31,9 @@ use crate::rle::Slab;
 #[allow(unused_imports)]
 use vstd::prelude::*;
 
+use crate::trusted::rle_enc_too_many_values as too_many_values;
 verus! {
 
-/// Appending would take an encoder past `usize::MAX - 2` values, which
-/// it can't count.  Trusted only in that a panic does not return.
-#[verifier::external_body]
-#[cold]
-#[inline(never)]
-fn too_many_values(Ghost(why): Ghost<bool>)
-    requires
-        why,
-    ensures
-        false,
-{
-    panic!("encoder too long to append to")
-}
 
 /// A state the writer may go on from: what it wrote from empty into
 /// `buf` from `base`, standing for `vals` and accounting `segs` segments.

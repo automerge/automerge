@@ -29,6 +29,9 @@ use crate::index::IndexOps;
 use std::marker::PhantomData;
 use vstd::prelude::*;
 
+use crate::trusted::edit_core_out_of_bounds as out_of_bounds;
+use crate::trusted::edit_core_out_of_domain as out_of_domain;
+use crate::trusted::edit_core_unreached as unreached;
 verus! {
 
 /// A column being edited: its parts and the cursor over them.
@@ -519,36 +522,7 @@ impl<E: Slabs, W, I: IndexOps<W>, G: Weigh<E, W>> EditCore<E, W, I, G> {
     }
 }
 
-/// Panics: an edit opened past the column's end.
-#[verifier::external_body]
-#[cold]
-#[inline(never)]
-fn out_of_bounds()
-    ensures
-        false,
-{
-    panic!("edit_at out of bounds")
-}
 
-/// Panics: an edit that left a delta column's values outside its domain.
-#[verifier::external_body]
-#[cold]
-#[inline(never)]
-fn out_of_domain()
-    ensures
-        false,
-{
-    panic!("delta values out of domain: they would span 2^63 or more")
-}
 
-/// Never returns: after a call that does not.
-#[verifier::external_body]
-#[inline(always)]
-fn unreached<A>() -> A
-    requires
-        false,
-{
-    unreachable!()
-}
 
 } // verus!

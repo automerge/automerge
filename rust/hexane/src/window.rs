@@ -40,6 +40,8 @@ use std::ops::Range;
 #[allow(unused_imports)]
 use vstd::prelude::*;
 
+pub(crate) use crate::trusted::ranges_out_of_order;
+use crate::trusted::shift_backwards;
 verus! {
 
 /// An iterator: it gives the items `items()`, each standing for one or
@@ -478,17 +480,6 @@ pub(crate) open spec fn ranges_give<W: Window, L: RangeList>(w: W, l0: L, l: L) 
     w.left() + windows(w.vals(), l.given().skip(l0.given().len() as int))
 }
 
-/// Panics: `Shiftable::ranges` was given a range starting behind the
-/// iterator.
-#[verifier::external_body]
-#[cold]
-#[inline(never)]
-pub(crate) fn ranges_out_of_order()
-    ensures
-        false,
-{
-    panic!("ranges must be ascending and non-overlapping")
-}
 
 /// `Ranges::next`: the next value of the window, or of the next range
 /// with any. With what it gives over the call (`ranges_give`, from the
@@ -809,15 +800,5 @@ pub(crate) fn u_shift<W: Window>(inner: &mut W, next: &mut Option<W::Item>, hidd
     }
 }
 
-/// Panics: `shift_next` to a range starting behind the iterator.
-#[verifier::external_body]
-#[cold]
-#[inline(never)]
-fn shift_backwards()
-    ensures
-        false,
-{
-    panic!("assertion failed: range.start >= self.get_pos()")
-}
 
 } // verus!

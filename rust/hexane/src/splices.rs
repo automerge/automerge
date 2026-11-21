@@ -36,34 +36,12 @@ use crate::Splice;
 use std::ops::Range;
 use vstd::prelude::*;
 
+use crate::trusted::bad_splices;
+pub(crate) use crate::trusted::wrong_columns;
 verus! {
 
-#[verifier::external_type_specification]
-#[allow(dead_code)]
-pub struct ExSplice(Splice);
 
-/// Panics: the splices are out of order or out of bounds.
-#[verifier::external_body]
-#[cold]
-#[inline(never)]
-fn bad_splices(why: &str)
-    ensures
-        false,
-{
-    panic!("{}", why)
-}
 
-/// Panics: a normalized list used for columns of other lengths than it
-/// was made for.
-#[verifier::external_body]
-#[cold]
-#[inline(never)]
-pub(crate) fn wrong_columns()
-    ensures
-        false,
-{
-    panic!("splices normalized for columns of other lengths")
-}
 
 pub open spec fn min_i(a: int, b: int) -> int {
     if a <= b { a } else { b }

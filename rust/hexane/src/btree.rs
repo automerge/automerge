@@ -57,6 +57,7 @@ use vstd::prelude::*;
 
 // ── SlabAggregate trait ─────────────────────────────────────────────────────
 
+use crate::trusted::out_of_node_ids;
 verus! {
 
 /// Branching factor.  Smaller = deeper tree + cheaper per-node rebalance;
@@ -658,16 +659,6 @@ pub(crate) struct FoundSlab<A: PrefixAggregate> {
     pub(crate) pos: usize,
 }
 
-// ── Nodes ───────────────────────────────────────────────────────────────────
-
-/// Panics: the arena has used every `NodeId`.  Trusted only in that a
-/// panic does not return.
-#[verifier::external_body]
-fn out_of_node_ids()
-    ensures false,
-{
-    panic!("SlabBTree: out of node ids")
-}
 
 type NodeId = u32;
 

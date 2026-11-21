@@ -24,6 +24,7 @@ use crate::rle::state::copies;
 #[allow(unused_imports)]
 use vstd::prelude::*;
 
+pub(crate) use crate::trusted::values_too_wide;
 verus! {
 
 /// A value as an integer.
@@ -261,19 +262,6 @@ proof fn lemma_append_nulls(vs: Seq<Option<i64>>, ds: Seq<Option<i64>>, all: Seq
     lemma_ivals_run(vs, n, None);
 }
 
-/// Values spanning 2^63 or more: not in the delta domain.  Trusted only
-/// in that a panic does not return.
-#[verifier::external_body]
-#[cold]
-#[inline(never)]
-pub(crate) fn values_too_wide(Ghost(why): Ghost<bool>)
-    requires
-        why,
-    ensures
-        false,
-{
-    panic!("delta values out of domain: they span 2^63 or more")
-}
 
 /// The delta encoder's state: the RLE stream of deltas, the last value
 /// (where the next delta counts from), and the least and greatest values

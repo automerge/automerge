@@ -37,13 +37,14 @@ use super::{seal, Owned, VForm, VGet, VSpec, VValue};
 use crate::rle::lift::Lift;
 #[cfg(verus_keep_ghost)]
 use crate::rle::model::{RleOps, WriteOps};
-use crate::PackError;
+
 use std::cmp::Ordering;
 #[allow(unused_imports)]
 use vstd::prelude::*;
 #[allow(unused_imports)]
 use vstd::slice::*;
 
+use crate::trusted::bytes_bad_format as bad_format;
 mod imp;
 #[allow(unused_imports)]
 use imp::*;
@@ -67,13 +68,6 @@ verus! {
 /// itself.
 pub open spec fn enc_bytes<C: VCodec>(b: Seq<u8>) -> Seq<u8> {
     C::enc_u(b.len() as u64) + b
-}
-
-/// The error for bytes that do not start with a byte string.
-#[verifier::external_body]
-#[cold]
-fn bad_format() -> PackError {
-    PackError::BadFormat
 }
 
 // ── The order of byte strings ───────────────────────────────────────────────

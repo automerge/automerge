@@ -18,12 +18,12 @@
 //! looks at each byte. That it finds them UTF-8 is proved, and the branch
 //! where it would not is proved not to be reached.
 //!
-//! # What is trusted here
+//! # What is trusted
 //!
-//! Besides vstd's specifications of `str`, `String` and UTF-8:
+//! Besides vstd's specifications of `str`, `String` and UTF-8, and in
+//! `src/trusted.rs` with the rest of what the verified API trusts:
 //!
-//! * the specification of `core::str::from_utf8` given here, which vstd
-//!   has none of: the `str` it gives has the bytes it was given, it
+//! * a specification of `core::str::from_utf8`, which vstd has none of: the `str` it gives has the bytes it was given, it
 //!   gives one for all bytes that are valid UTF-8 (vstd's `valid_utf8`),
 //!   and it does not panic;
 //! * `axiom_str_same`: two `str`s of the same characters are one `str`.
@@ -74,6 +74,7 @@ use super::{seal, Owned, VForm, VGet, VSpec, VValue};
 use crate::rle::lift::Lift;
 #[cfg(verus_keep_ghost)]
 use crate::rle::model::{RleOps, WriteOps};
+#[cfg(verus_keep_ghost)]
 use crate::PackError;
 use std::cmp::Ordering;
 #[allow(unused_imports)]
@@ -83,6 +84,9 @@ use vstd::string::*;
 #[cfg(verus_keep_ghost)]
 use vstd::utf8::{encode_utf8, valid_utf8};
 
+#[cfg(verus_keep_ghost)]
+use crate::trusted::axiom_str_same;
+use crate::trusted::bad_utf8;
 mod imp;
 #[allow(unused_imports)]
 use imp::*;
@@ -93,49 +97,6 @@ pub(crate) use imp::{lemma_opt_text_sizes, lemma_text_sizes};
 pub(crate) use imp::{TextCow, VOptTextOps, VOptTextWrite, VTextOps, VTextWrite};
 
 verus! {
-
-// ── What is trusted ─────────────────────────────────────────────────────────
-
-#[verifier::external_type_specification]
-#[verifier::external_body]
-#[allow(dead_code)]
-pub struct ExUtf8Error(core::str::Utf8Error);
-
-/// Trusted: what the standard library's `from_utf8` does. The `str` it
-/// gives is of the bytes it was given, it gives one wherever those are
-/// valid UTF-8, and it does not panic. (That it gives one only where
-/// they are valid UTF-8 is not assumed: the bytes of a `str` are, which
-/// vstd proves.)
-pub assume_specification<'a>[ core::str::from_utf8 ](v: &'a [u8]) -> (r: Result<
-    &'a str,
-    core::str::Utf8Error,
->)
-    ensures
-        match r {
-            Ok(s) => s.spec_bytes() == v@,
-            Err(_) => !valid_utf8(v@),
-        },
-    no_unwind
-;
-
-/// Trusted: two `str`s of the same characters are one `str`. A `str` is
-/// its characters and nothing more, as a slice is its elements (which
-/// vstd says, in `axiom_slice_ext_equal`; of `str` it does not).
-#[verifier::external_body]
-proof fn axiom_str_same(a: &str, b: &str)
-    requires
-        a@ == b@,
-    ensures
-        a == b,
-{
-}
-
-/// The error for bytes that are not UTF-8 where a string should be.
-#[verifier::external_body]
-#[cold]
-fn bad_utf8() -> PackError {
-    PackError::InvalidUtf8
-}
 
 /// The `str` of the characters `s`.
 pub open spec fn str_of(s: Seq<char>) -> &'static str {

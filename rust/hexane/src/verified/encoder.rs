@@ -28,13 +28,14 @@ use crate::iter_core::{Decode, Decoders};
 #[cfg(verus_keep_ghost)]
 use crate::remap::Encodes;
 use crate::Leb128;
-use crate::PackError;
+
 use std::ops::Range;
 #[allow(unused_imports)]
 use vstd::prelude::*;
 #[cfg(verus_keep_ghost)]
 use vstd::std_specs::iter::IteratorSpec;
 
+use crate::trusted::unloadable;
 mod imp;
 #[allow(unused_imports)]
 use imp::*;
@@ -508,24 +509,6 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedEncoder<'a, V, C> {
     {
         self.into_column_impl()
     }
-}
-
-/// Panics: what an encoder saved is no column that loads. A caller has
-/// to show that it is not one a load is sure to take
-/// ([`loadable`](VerifiedColumn::loadable)): that the values `vs` save
-/// to bytes too long for it, or are more than a column counts. The
-/// words are those of the `unwrap` in
-/// [`EncoderApi::into_column`](crate::EncoderApi::into_column).
-#[verifier::external_body]
-#[cold]
-#[inline(never)]
-fn unloadable<V: VValue<C>, C: VCodec>(e: PackError, Ghost(vs): Ghost<Seq<V::S>>) -> VerifiedColumn<V, C>
-    requires
-        VerifiedColumn::<V, C>::encoding(vs).len() > 0xffff_fff5 || vs.len() > usize::MAX - 3,
-    ensures
-        false,
-{
-    panic!("called `Result::unwrap()` on an `Err` value: {e:?}")
 }
 
 /// An encoder that writes into a buffer of its caller's, which is given

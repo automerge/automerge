@@ -32,6 +32,10 @@ use crate::rle::{RleTail, Slab};
 #[allow(unused_imports)]
 use vstd::prelude::*;
 
+pub(crate) use crate::trusted::add;
+use crate::trusted::recycle_buf;
+use crate::trusted::rle_writer_run_too_long as run_too_long;
+pub(crate) use crate::trusted::splice_bytes;
 verus! {
 
 /// A slab's bytes.
@@ -49,13 +53,6 @@ pub(crate) open spec fn slab_segments(s: Slab) -> usize {
     s.segments
 }
 
-/// Slab metadata arithmetic (lengths, segment counts): unspecified, and
-/// computed exactly as before.
-#[verifier::external_body]
-#[inline(always)]
-pub(crate) fn add(a: usize, b: usize) -> usize {
-    a + b
-}
 
 /// A slab's tail record.
 pub(crate) open spec fn slab_tail_of(s: Slab) -> RleTail {
@@ -72,16 +69,6 @@ pub(crate) open spec fn tail_l(t: RleTail) -> nat {
     t.lit_tail as nat
 }
 
-/// Panics: a run of `n` bytes, 4 GiB or more, which no tail record holds.
-#[verifier::external_body]
-#[cold]
-#[inline(never)]
-fn run_too_long(n: usize)
-    ensures
-        false,
-{
-    panic!("a run of {n} bytes is not encodable: a run must stay under 4 GiB")
-}
 
 /// The tail record of a last run `bytes` long whose last literal value
 /// is `lit` wide.
@@ -175,15 +162,6 @@ fn last_slab(mut data: Vec<u8>, tail_bytes: &[u8], len: usize, segments: usize, 
     Slab { data, len, segments, tail }
 }
 
-/// `vec[index..index + del] = bytes`.
-#[verifier::external_body]
-#[inline(always)]
-pub(crate) fn splice_bytes(vec: &mut Vec<u8>, index: usize, del: usize, bytes: &[u8])
-    requires index + del <= old(vec).len(),
-    ensures final(vec)@ == old(vec)@.take(index as int) + bytes@ + old(vec)@.skip(index + del),
-{
-    crate::column::splice_bytes(vec, index, del, bytes)
-}
 
 /// The values of slabs one after another.
 pub open spec fn concat<V>(cs: Seq<Seq<V>>) -> Seq<V>
@@ -468,12 +446,8 @@ impl<'a, W: WriteOps<'a>> Splice<'a, W> {
 
     /// Keep `bytes` as the write buffer if it holds more. Nothing is
     /// claimed: a rebuild reopens before it writes again.
-    #[verifier::external_body]
-    pub(crate) fn recycle(&mut self, mut bytes: Vec<u8>) {
-        if bytes.capacity() > self.buf.capacity() {
-            bytes.clear();
-            self.buf = bytes;
-        }
+    pub(crate) fn recycle(&mut self, bytes: Vec<u8>) {
+        recycle_buf(&mut self.buf, bytes)
     }
 
     /// The slab in hand holds no more values than were written.

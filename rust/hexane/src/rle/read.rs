@@ -17,13 +17,9 @@ use crate::PackError;
 #[allow(unused_imports)]
 use vstd::prelude::*;
 
+use crate::trusted::invalid;
 verus! {
 
-/// The error for input that decodes but is not canonical.
-#[verifier::external_body]
-fn invalid(msg: &'static str) -> PackError {
-    PackError::InvalidValue(msg.to_string())
-}
 
 /// The last value-bearing segment read, which the next is checked
 /// against: a repeat run's value, the last literal value read, a null

@@ -65,61 +65,21 @@ use std::marker::PhantomData;
 use std::ops::{AddAssign, SubAssign};
 use vstd::prelude::*;
 
+pub(crate) use crate::trusted::count_overflows;
+pub(crate) use crate::trusted::delta_out_of_domain;
+use crate::trusted::delta_sum_overflows;
+use crate::trusted::delta_too_long;
+use crate::trusted::delta_too_wide;
+pub(crate) use crate::trusted::prefix_sum_overflows;
+pub(crate) use crate::trusted::sum_overflows;
 verus! {
 
-/// Panics: a prefix sum that overflows its type.
-#[verifier::external_body]
-#[cold]
-#[inline(never)]
-pub(crate) fn sum_overflows()
-    ensures
-        false,
-{
-    panic!("prefix sum overflows its type")
-}
 
-/// The error a load reports for a slab whose item count overflows.
-#[verifier::external_body]
-#[cold]
-pub(crate) fn count_overflows() -> PackError {
-    PackError::BadFormat
-}
 
-/// The error a load reports for a prefix sum that overflows its type.
-#[verifier::external_body]
-#[cold]
-pub(crate) fn prefix_sum_overflows() -> PackError {
-    PackError::InvalidValue("prefix sum overflows its type".into())
-}
 
-/// The error a load reports for a delta running sum that overflows.
-#[verifier::external_body]
-#[cold]
-fn delta_sum_overflows() -> PackError {
-    PackError::InvalidValue("delta running sum overflows i64".into())
-}
 
-/// The error a load reports for a delta value outside its type's domain.
-#[verifier::external_body]
-#[cold]
-pub(crate) fn delta_out_of_domain() -> PackError {
-    PackError::InvalidValue("delta value out of domain".into())
-}
 
-/// The error a load reports for delta values spanning 2^63 or more.
-#[verifier::external_body]
-#[cold]
-fn delta_too_wide() -> PackError {
-    PackError::InvalidValue("delta values out of domain: they span 2^63 or more".into())
-}
 
-/// The error a load reports for a delta column of more than `i64::MAX`
-/// items.
-#[verifier::external_body]
-#[cold]
-fn delta_too_long(len: usize) -> PackError {
-    PackError::InvalidLength(len, i64::MAX as usize)
-}
 
 /// A weight model as a load uses it: weights accumulated as the runs
 /// stream past (`Accumulate`), each proved to be its slab's weight

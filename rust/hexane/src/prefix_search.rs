@@ -40,6 +40,7 @@ use vstd::prelude::*;
 #[cfg(verus_keep_ghost)]
 use crate::index::lemma_plain_valid;
 
+use crate::trusted::past_usize;
 verus! {
 
 /// An unsigned prefix type's arithmetic and order, as numbers: for the
@@ -644,15 +645,6 @@ proof fn lemma_found_in<'a, X: Decoders<'a>, B: PrefixOrd<<X::D as Decode>::Item
     lemma_nsum_in::<X, B>(s, k, j);
 }
 
-/// Panics: one past the end of a column of `usize::MAX` items has no
-/// index.
-#[verifier::external_body]
-fn past_usize()
-    ensures
-        false,
-{
-    panic!("get_index_for_prefix: one past a column of usize::MAX items has no index")
-}
 
 /// [`PrefixColumn::get_index_for_prefix`](crate::PrefixColumn::get_index_for_prefix):
 /// the first index whose prefix sum reaches `target`, or one past the end.

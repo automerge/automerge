@@ -139,30 +139,11 @@ impl<'a, T: RleValue, V: AsColumnRef<T>, C: Codec> WriteOps<'a> for WOps<T, V, C
 #[cfg(test)]
 pub(crate) type RleState<'a, T, V, C = Leb128> = State<'a, WOps<T, V, C>>;
 
+use crate::trusted::lit_too_long;
+use crate::trusted::rle_state_run_too_long as run_too_long;
 verus! {
 
-/// Panics: a repeat run longer than `i64::MAX` has no encoding.  Trusted
-/// only in that a panic does not return.
-#[verifier::external_body]
-#[cold]
-#[inline(never)]
-fn run_too_long(count: usize)
-    ensures false,
-{
-    panic!("a run of {count} equal values is not encodable")
-}
 
-/// Panics: a literal run of more than `i64::MAX` values has no encoding
-/// (nor the memory to hold one).  Trusted only in that a panic does not
-/// return.
-#[verifier::external_body]
-#[cold]
-#[inline(never)]
-fn lit_too_long()
-    ensures false,
-{
-    panic!("a literal run of more than i64::MAX values is not encodable")
-}
 
 /// A new repeat run of `n` values: panics if it has no encoding.
 #[inline(always)]

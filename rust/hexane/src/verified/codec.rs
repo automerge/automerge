@@ -17,22 +17,20 @@
 // Verus proofs read more plainly with `x = x + n`.
 #![allow(clippy::len_zero, clippy::assign_op_pattern)]
 
-use crate::leb128_codec::DecodeError;
 // spec functions and lemmas exist only when Verus compiles the crate
 
-use crate::{Leb128, PackError};
+#[cfg(verus_keep_ghost)]
+use crate::Leb128;
+use crate::PackError;
 #[allow(unused_imports)]
 use vstd::prelude::*;
 
+use crate::trusted::bad_number;
 mod imp;
 #[allow(unused_imports)]
 use imp::*;
 
 verus! {
-
-#[verifier::external_type_specification]
-#[allow(dead_code)]
-pub struct ExLeb128(Leb128);
 
 /// A codec for the numbers of a [`VerifiedColumn`](super::VerifiedColumn),
 /// with what it does specified and proved. The codecs are this crate's
@@ -153,15 +151,6 @@ pub trait VCodec {
                     + Self::enc_i(-(total as int) as i64)
                     + old(buf)@.skip(pos + Self::enc_i(h).len()),
     ;
-}
-
-// ── LEB128 ──────────────────────────────────────────────────────────────────
-
-/// The error for bytes that do not start with a canonical LEB128 number.
-#[verifier::external_body]
-#[cold]
-fn bad_number(e: DecodeError) -> PackError {
-    PackError::InvalidNumber(e)
 }
 
 /// The number of bytes of `n` as an unsigned LEB128 number: as many as

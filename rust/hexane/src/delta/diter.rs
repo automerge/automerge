@@ -47,6 +47,7 @@ use crate::Run;
 #[allow(unused_imports)]
 use vstd::prelude::*;
 
+use crate::trusted::diter_past_window as past_window;
 verus! {
 
 /// `x` as a wrapping `i64` holds it: its remainder modulo 2^64.
@@ -545,15 +546,6 @@ proof fn lemma_target_realized<V: Copy, B: DeltaOps<V>>(o0: Seq<V>, p0: int, q: 
     }
 }
 
-/// Panics: `d_take_nth` ran out of values. Never: `n` is within the
-/// window.
-#[verifier::external_body]
-fn past_window()
-    requires
-        false,
-{
-    panic!("d_take_nth called with n past the window");
-}
 
 /// The value the `n`th left in the window realizes (0-based), consuming
 /// it and those before it run by run: for `n` within the slab the

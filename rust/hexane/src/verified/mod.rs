@@ -48,8 +48,9 @@
 //! `edit.rs`, `load.rs` and `copy.rs`; `prefix.rs`, `prefix_iter.rs` and
 //! `sums.rs`, for prefix columns, and `acc.rs` and `acc_iter.rs`, for
 //! accumulator columns; `shift.rs`; and `delta.rs` and the files of
-//! `delta/`, for delta columns. Of the crate it is in `raw.rs` (the raw
-//! column), `load_opts.rs` (the options of a load), and a few definitions
+//! `delta/`, for delta columns. Of the crate it is in `trusted.rs` (all
+//! that is trusted), `raw.rs` (the raw column), `load_opts.rs` (the
+//! options of a load), and a few definitions
 //! that the specifications use: `window` and `past` (`iter_core.rs`),
 //! `concat` (`rle/writer.rs`), `windows` (`window.rs`) and those of
 //! `splices.rs` (for `copy_ranges`).
@@ -77,9 +78,7 @@
 //!   methods' contracts what it asks of the client, which Verus proves of
 //!   the client's implementation;
 //! * what is trusted, listed in [What is trusted](#what-is-trusted), is
-//!   marked so: `#[verifier::external_body]`, `assume_specification`, or
-//!   `#[verifier::external_trait_specification]` or
-//!   `#[verifier::external_type_specification]`.
+//!   in one file, `src/trusted.rs`, to be read whole.
 //!
 //! `client_proof.rs` is a client of this API and no part of it: it shows
 //! what a client can prove with the specification, and is checked again
@@ -526,14 +525,12 @@
 //!
 //! # What is trusted
 //!
-//! Every function that Verus takes on trust on a path of this API is
-//! marked in the source by one of `#[verifier::external_body]`,
-//! `assume_specification`, `#[verifier::external_trait_specification]`
-//! and `#[verifier::external_type_specification]`, so that a `grep` for
-//! those finds them. (Code outside `verus!` is not checked at all. Of
-//! that, this API runs only the functions named below as not checked;
-//! the old API's bridges to a value type's and a codec's own code, such
-//! as `rle::model::Ops` and `rle::state::WOps`, are on no path of it.)
+//! Every function that Verus takes on trust on a path of this API is in
+//! one file, `src/trusted.rs`, which says what each assumes. (Code
+//! outside `verus!` is not checked at all. Of that, this API runs only
+//! the functions named below as not checked. What the old API takes on
+//! trust besides, and no function of this API runs, is left where it
+//! is; `src/trusted.rs` says where.)
 //!
 //! Verus and its solver Z3, and Verus's specifications of the standard
 //! library: of `Vec` and slices, and for a column of `NonZeroU32` those
@@ -564,9 +561,9 @@
 //! strings it compares in code that is checked, which leans on that of
 //! the equality of two slices (`==`).
 //!
-//! Of this crate, the functions Verus is told to take as they are, which
-//! are few and small, and are those the verified core of
-//! [`Column`](crate::Column) has too:
+//! Of this crate, the functions Verus is told to take as they are (all in
+//! `src/trusted.rs`), which are few and small, and are those the verified
+//! core of [`Column`](crate::Column) has too:
 //!
 //! * the helpers that panic, which say why and do nothing else. A method
 //!   panics where a column would outgrow what its arithmetic can count
@@ -579,11 +576,11 @@
 //! * the constructors of [`PackError`], of which nothing is assumed
 //!   ([`refused`] is the one for a client's type);
 //! * three specifications of standard-library calls that Verus has none
-//!   for: replacing a range of a `Vec` of bytes (`rle::writer::splice_bytes`)
-//!   and of a `Vec` of slabs (`index::splice_vec`), and taking a range out
-//!   of a raw column's `Vec` of slabs (`raw::drain_slabs`);
-//! * for a column of strings, two more things that Verus does not say
-//!   (in `verified::text`). One is a specification of the standard
+//!   for: replacing a range of a `Vec` of bytes (`splice_bytes`) and of a
+//!   `Vec` of slabs (`splice_vec`), and taking a range out of a raw
+//!   column's `Vec` of slabs (`drain_slabs`);
+//! * for a column of strings, two more things that Verus does not say.
+//!   One is a specification of the standard
 //!   library's `core::str::from_utf8`: that the `str` it gives is of the
 //!   bytes it was given, that it gives one for all bytes that are UTF-8,
 //!   and that it does not panic. (With it goes the name of its error
@@ -594,9 +591,9 @@
 //!   `str`s of the same characters are one `str` (`axiom_str_same`),
 //!   which Verus says of slices and not of `str`;
 //! * four helpers of which nothing is assumed: an addition of counts
-//!   whose sum the proofs take as unknown (`rle::writer::add`), the reuse
-//!   of a buffer (`recycle`), the taking of one (`take_buf`), and a
-//!   constant (`carry_budget`).
+//!   whose sum the proofs take as unknown (`add`), the reuse of a buffer
+//!   (`recycle_buf`), the taking of one (`take_buf`), and a constant
+//!   (`carry_budget`).
 //!
 //! No value type's encoding is trusted, nor the codec's, and there is no
 //! unverified code between this API and the core: every other function on
@@ -858,6 +855,7 @@ mod seal {
     } // verus!
 }
 
+use crate::trusted::invalid_resume;
 mod imp;
 #[allow(unused_imports)]
 use imp::*;
@@ -1432,18 +1430,6 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> Clone for VerifiedColumn<V, C, K>
     }
 }
 
-/// What Verus is told of the standard library's `Extend`: that it is a
-/// trait with this method. Of an implementation it assumes nothing: what
-/// [`VerifiedColumn`]'s does is stated there, and proved. (Verus's
-/// library specifies `IntoIterator` and `FromIterator`, and not this
-/// trait.)
-#[verifier::external_trait_specification]
-#[doc(hidden)]
-pub trait ExExtend<A> {
-    type ExternalTraitSpecificationFor: core::iter::Extend<A>;
-
-    fn extend<T>(&mut self, iter: T) where T: IntoIterator<Item = A>;
-}
 
 impl<'v, V: VValue<C>, C: VCodec, K: VIndex<V, C>> Extend<Get<'v, V>> for VerifiedColumn<V, C, K> {
     /// Append the values that `iter` gives: what
@@ -2735,13 +2721,6 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> IntoIterator for &'a Verified
     }
 }
 
-/// The error of a [`VerifiedIterState::try_resume`] on a column that the
-/// state does not fit. Nothing is assumed of it.
-#[verifier::external_body]
-#[cold]
-fn invalid_resume() -> PackError {
-    PackError::InvalidResume
-}
 
 /// Where a [`VerifiedIter`] stood and where its window ended, kept
 /// without the borrow of the column: [`VerifiedIter::suspend`] gives it,

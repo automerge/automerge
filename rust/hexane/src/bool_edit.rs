@@ -30,6 +30,7 @@ use std::marker::PhantomData;
 #[allow(unused_imports)]
 use vstd::prelude::*;
 
+use crate::trusted::take_buf;
 verus! {
 
 /// The values of chunks of counts, in order.
@@ -2497,14 +2498,6 @@ pub struct BoolEdit<C = crate::Leb128> {
 /// this module is not.
 pub struct BoolModel<C>(PhantomData<C>);
 
-/// The rebuild's write buffer, to reuse: nothing is claimed of it, as
-/// opening a rebuild takes any buffer. (`mem::take` is what the
-/// original did; a swap with a new `Vec` compiles to a slower open.)
-#[verifier::external_body]
-#[inline(always)]
-fn take_buf(v: &mut Vec<u8>) -> Vec<u8> {
-    std::mem::take(v)
-}
 
 /// Slabs' values one after another are their values in order.
 proof fn lemma_concat_bslabs<C: CountsOf>(s: Seq<BSlab>)
@@ -2871,10 +2864,9 @@ impl<C: CountsOf> Slabs for BoolModel<C> {
         bstate_ok::<C::K>(data, st) && bstate_pos::<C::K>(data, st) == pos
     }
 
-    #[verifier::external_body]
     #[inline(always)]
     fn carry_budget() -> usize {
-        crate::edit::RUN_BUDGET
+        crate::trusted::carry_budget()
     }
 
     #[inline(always)]

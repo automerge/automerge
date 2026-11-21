@@ -101,78 +101,20 @@ use std::marker::PhantomData;
 use std::ops::{Add, AddAssign, Range, SubAssign};
 use vstd::prelude::*;
 
+use crate::trusted::budget_too_small;
+use crate::trusted::column_core_out_of_domain as out_of_domain;
+pub(crate) use crate::trusted::column_core_too_many_slabs as too_many_slabs;
+use crate::trusted::column_core_unreached as unreached;
+use crate::trusted::poisoned;
+use crate::trusted::too_many_deltas;
+use crate::trusted::too_many_items;
 verus! {
 
-/// Panics: a segment budget below 2, which no column can keep.
-#[verifier::external_body]
-#[cold]
-#[inline(never)]
-fn budget_too_small()
-    ensures
-        false,
-{
-    panic!("max_segments must be at least 2")
-}
 
-/// Panics: a column used after a panic in the middle of an edit, which
-/// left it without its parts.
-#[verifier::external_body]
-#[cold]
-#[inline(never)]
-fn poisoned()
-    ensures
-        false,
-{
-    panic!("column used after a panic during an edit")
-}
 
-/// Panics: a column of `usize::MAX` slabs, which no memory holds (each
-/// slab takes some), but which Verus does not rule out.
-#[verifier::external_body]
-#[cold]
-#[inline(never)]
-pub(crate) fn too_many_slabs()
-    ensures
-        false,
-{
-    panic!("a column of usize::MAX slabs")
-}
 
-/// Panics: an edit that left a column's values outside its domain (a
-/// delta column's spanning 2^63 or more), which no column can hold. The
-/// column is left without its parts.
-#[verifier::external_body]
-#[cold]
-#[inline(never)]
-fn out_of_domain()
-    ensures
-        false,
-{
-    panic!("delta values out of domain: they would span 2^63 or more")
-}
 
-/// Panics: a delta column of more than `i64::MAX` items, whose steps
-/// cannot all fit `i64`. The column is left without its parts.
-#[verifier::external_body]
-#[cold]
-#[inline(never)]
-fn too_many_deltas()
-    ensures
-        false,
-{
-    panic!("a delta column of more than i64::MAX items")
-}
 
-/// Panics: a column of more items than an edit can count.
-#[verifier::external_body]
-#[cold]
-#[inline(never)]
-fn too_many_items()
-    ensures
-        false,
-{
-    panic!("a column of more than usize::MAX - 3 items")
-}
 
 /// A column's parts: its slabs, the index over them, its item count and
 /// its edit counter.
@@ -1616,15 +1558,6 @@ impl<E, X, B> ColumnCore<E, SlabAgg, SlabBTree<SlabAgg>, DeltaModel<X, B>> where
     }
 }
 
-/// Never returns: after a call that does not.
-#[verifier::external_body]
-#[inline(always)]
-fn unreached<A>() -> A
-    requires
-        false,
-{
-    unreachable!()
-}
 
 /// The delta readers' invariant for slabs `s` indexed by `ix`, whose
 /// weights are the slabs' (as a column's are) and whose running sums'

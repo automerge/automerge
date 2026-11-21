@@ -151,6 +151,7 @@ pub(crate) mod remap;
 pub mod rle;
 pub mod shift;
 pub(crate) mod splices;
+pub(crate) mod trusted;
 pub mod verified;
 pub(crate) mod weights;
 pub(crate) mod window;

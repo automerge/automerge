@@ -73,6 +73,10 @@ use crate::weights::DeltaModel;
 use std::marker::PhantomData;
 use vstd::prelude::*;
 
+use crate::trusted::dedit_out_of_bounds as out_of_bounds;
+use crate::trusted::dedit_out_of_domain as out_of_domain;
+use crate::trusted::dedit_too_long as too_long;
+use crate::trusted::dedit_too_many_slabs as too_many_slabs;
 verus! {
 
 /// The deltas of the runs a walk shows it, summed, wrapping.
@@ -427,49 +431,9 @@ pub(crate) struct DeltaEditCore<L, O, B> where
     pub(crate) ledger: SpanLedger,
 }
 
-/// Panics: a column of `usize::MAX` slabs, which no memory holds.
-#[verifier::external_body]
-#[cold]
-#[inline(never)]
-fn too_many_slabs()
-    ensures
-        false,
-{
-    panic!("a column of usize::MAX slabs")
-}
 
-/// Panics: a delta column of more than `i64::MAX` items.
-#[verifier::external_body]
-#[cold]
-#[inline(never)]
-fn too_long()
-    ensures
-        false,
-{
-    panic!("a delta column of more than i64::MAX items")
-}
 
-/// Panics: an edit that left a delta column's values outside its domain.
-#[verifier::external_body]
-#[cold]
-#[inline(never)]
-fn out_of_domain()
-    ensures
-        false,
-{
-    panic!("delta values out of domain: they would span 2^63 or more")
-}
 
-/// Panics: a delta edit opened past the column's end.
-#[verifier::external_body]
-#[cold]
-#[inline(never)]
-fn out_of_bounds()
-    ensures
-        false,
-{
-    panic!("edit_at out of bounds")
-}
 
 impl<L, O, B> DeltaEditCore<L, O, B> where
     L: for<'t> Lift<'t, W = L> + for<'t> WriteOps<'t, R = O>,

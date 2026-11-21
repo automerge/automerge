@@ -38,7 +38,7 @@ verus! {
 pub(super) const DEFAULT_MAX_SEGMENTS: usize = 4_096;
 
 #[derive(Debug)]
-pub(super) struct RawSlab {
+pub(crate) struct RawSlab {
     pub(super) data: Vec<u8>,
 }
 

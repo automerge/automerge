@@ -26,6 +26,10 @@ use std::marker::PhantomData;
 #[allow(unused_imports)]
 use vstd::prelude::*;
 
+use crate::trusted::bool_wire_bad_format as bad_format;
+use crate::trusted::bool_wire_too_long as too_long;
+use crate::trusted::trailing_zero;
+use crate::trusted::zero_count;
 verus! {
 
 /// What the bool format needs of its varint codec (trusted, like the
@@ -363,25 +367,9 @@ pub struct BoolInfo {
     pub tail: u8,
 }
 
-#[verifier::external_body]
-fn bad_format() -> PackError {
-    PackError::BadFormat
-}
 
-#[verifier::external_body]
-fn zero_count(run_index: usize, value: bool) -> PackError {
-    PackError::InvalidValue(format!("run {run_index} (value={value}): zero count in non-first run"))
-}
 
-#[verifier::external_body]
-fn trailing_zero(run_index: usize, value: bool) -> PackError {
-    PackError::InvalidValue(format!("run {run_index} (value={value}): trailing zero-count run"))
-}
 
-#[verifier::external_body]
-fn too_long() -> PackError {
-    PackError::InvalidValue("length overflows usize".into())
-}
 
 /// Check that `data` is a canonical bool slab of at most `usize::MAX`
 /// values, and summarize it. An error means it is not one.
