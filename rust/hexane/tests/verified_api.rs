@@ -579,6 +579,72 @@ impl Kind for String {
     }
 }
 
+/// Strings that may be null: a null one time in three, and otherwise a
+/// string as for `String`.
+impl Kind for Option<String> {
+    type OldState<'a> = RleEncoderState<'a, Option<String>>;
+
+    fn fresh(rng: &mut Rng) -> Option<String> {
+        match rng.below(3) {
+            0 => None,
+            _ => Some(String::fresh(rng)),
+        }
+    }
+
+    fn lend(&self) -> Option<&str> {
+        self.as_deref()
+    }
+
+    fn keep(v: Option<&str>) -> Option<String> {
+        v.map(str::to_owned)
+    }
+
+    fn order(&self, other: &Option<String>) -> Ordering {
+        self.cmp(other)
+    }
+
+    fn old_scope(&self, c: &Column<Option<String>>, range: Range<usize>) -> Range<usize> {
+        c.scope_to_value(self.as_deref(), range)
+    }
+
+    fn old_seek(
+        &self,
+        it: &mut hexane::Iter<'_, Option<String>>,
+        range: Range<usize>,
+    ) -> Range<usize> {
+        it.seek_to_value(self.as_deref(), range)
+    }
+
+    fn old_scan(&self, it: &mut hexane::Iter<'_, Option<String>>) -> Option<usize> {
+        it.scan_to_value(self.as_deref())
+    }
+
+    fn old_scan_for<'a>(
+        &'a self,
+        d: &mut hexane::Decoder<'a, Option<String>>,
+        max: usize,
+    ) -> (usize, usize) {
+        d.scan_for(self.as_deref(), max)
+    }
+
+    fn old_remap(
+        e: Encoder<'_, Option<String>>,
+        out: &mut Vec<u8>,
+        f: &dyn Fn(Option<String>) -> Option<String>,
+    ) -> Option<Range<usize>> {
+        Some(e.save_to_and_remap(out, f))
+    }
+
+    fn old_remap_unless<'a>(
+        e: Encoder<'a, Option<String>>,
+        out: &mut Vec<u8>,
+        unless: &'a Option<String>,
+        f: &dyn Fn(Option<String>) -> Option<String>,
+    ) -> Option<Range<usize>> {
+        Some(e.save_to_unless_and_remap(out, unless.as_deref(), f))
+    }
+}
+
 /// A value type of a client's own, as a client compiled without Verus
 /// writes it: one of four actions, each stored as a number. Any other
 /// number is no action. The actions are declared in the order of their
@@ -840,6 +906,7 @@ macro_rules! for_each_kind {
         $f::<Vec<u8>>($($arg),*);
         $f::<Option<Vec<u8>>>($($arg),*);
         $f::<String>($($arg),*);
+        $f::<Option<String>>($($arg),*);
     };
 }
 
@@ -1032,6 +1099,10 @@ fn the_bytes_of_a_column() {
     assert_eq!(
         bytes::<Option<Vec<u8>>>(&[Some(s(b"x")), None, None, Some(s(b""))]),
         [0x7f, 1, b'x', 0, 2, 0x7f, 0]
+    );
+    assert_eq!(
+        bytes::<Option<String>>(&[Some("é".to_owned()), None, None, Some(String::new())]),
+        [0x7f, 2, 0xc3, 0xa9, 0, 2, 0x7f, 0]
     );
 }
 
@@ -3943,6 +4014,7 @@ fn loads_refuse_bad_runs() {
     refuses::<Vec<u8>>(&bad);
     refuses::<Option<Vec<u8>>>(&bad);
     refuses::<String>(&bad);
+    refuses::<Option<String>>(&bad);
 
     // `bool`: a run of none that is not the first; a truncated count; an
     // overlong one
@@ -4156,7 +4228,7 @@ fn loads_of_another_types_bytes() {
     }
     let mut rng = Rng(0xc405);
     for _ in 0..300 {
-        let all: [Vec<u8>; 9] = [
+        let all: [Vec<u8>; 10] = [
             both(&rng.values::<u64>(30)).0.save(),
             both(&rng.values::<i64>(30)).0.save(),
             both(&rng.values::<Option<u32>>(30)).0.save(),
@@ -4166,6 +4238,7 @@ fn loads_of_another_types_bytes() {
             both(&rng.values::<Vec<u8>>(30)).0.save(),
             both(&rng.values::<Option<Vec<u8>>>(30)).0.save(),
             both(&rng.values::<String>(30)).0.save(),
+            both(&rng.values::<Option<String>>(30)).0.save(),
         ];
         for bytes in &all {
             cross::<u64>(bytes);
@@ -4188,6 +4261,7 @@ fn loads_of_another_types_bytes() {
             cross::<Vec<u8>>(bytes);
             cross::<Option<Vec<u8>>>(bytes);
             cross::<String>(bytes);
+            cross::<Option<String>>(bytes);
         }
     }
 }
@@ -4426,8 +4500,12 @@ fn loads_refuse_bad_strings() {
     ];
     for b in not_utf8 {
         assert_eq!(refusal::<String>(b), invalid, "{b:?}");
+        assert_eq!(refusal::<Option<String>>(b), invalid, "{b:?}");
         assert!(check_same_load::<Vec<u8>>(b), "refused {b:?}");
+        assert!(check_same_load::<Option<Vec<u8>>>(b), "refused {b:?}");
     }
+    // a null and then a string that is not UTF-8
+    assert_eq!(refusal::<Option<String>>(&[0, 1, 0x7f, 1, 0xff]), invalid);
     // bytes with two faults: the loaders name the same one
     let twice: [&[u8]; 5] = [
         &[0x7f, 1, 0xff, 0x7f, 3, 1],
@@ -4438,6 +4516,7 @@ fn loads_refuse_bad_strings() {
     ];
     for b in twice {
         assert!(!check_same_load::<String>(b), "loaded {b:?}");
+        assert!(!check_same_load::<Option<String>>(b), "loaded {b:?}");
     }
     // the faults of byte strings are faults of strings: a length past
     // the data's end
@@ -5012,7 +5091,7 @@ fn dump_slabs_prints_each_slab() {
     for_each_kind!(layout_lines, &mut expected);
     // more slabs than columns: many of the columns have several
     let columns = expected.iter().filter(|l| l.starts_with("== ")).count();
-    assert_eq!(columns, 20 * 17);
+    assert_eq!(columns, 21 * 17);
     assert!(expected.len() > 20 * columns);
     for api in ["new", "old"] {
         let lines = printed(api);

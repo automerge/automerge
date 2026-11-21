@@ -70,9 +70,12 @@ pub trait RleOps<'a> {
             Self::enc(v).len() > 0,
             !Self::is_null(v) && !Self::is_null(w) && Self::enc(v) + s == Self::enc(w) + t ==> v == w;
 
-    /// In a nullable column, null is one value.
-    proof fn axiom_null(v: Self::V)
-        ensures Self::nullable() ==> (Self::is_null(v) == (v == Self::null()));
+    /// In a nullable column, the null value is a null. Other values may
+    /// be nulls too, in the words of `is_null`: values that no column can
+    /// hold, as a string too long to be in memory. A writer is never
+    /// handed one (`WriteOps::cow_is_null`).
+    proof fn axiom_null()
+        ensures Self::nullable() ==> Self::is_null(Self::null());
 
     /// The same, for the codec's signed integers.
     proof fn axiom_enc_signed(a: i64, b: i64, s: Seq<u8>, t: Seq<u8>)
@@ -174,8 +177,12 @@ pub trait WriteOps<'a> {
     fn cow_eq(a: &Self::Cow, b: &Self::Cow) -> (r: bool)
         ensures r == (Self::val(*a) == Self::val(*b));
 
+    /// Whether the value is a null; one that is, in a nullable column, is
+    /// the null value.
     fn cow_is_null(c: &Self::Cow) -> (r: bool)
-        ensures r == <Self::R as RleOps<'a>>::is_null(Self::val(*c));
+        ensures
+            r == <Self::R as RleOps<'a>>::is_null(Self::val(*c)),
+            r && <Self::R as RleOps<'a>>::nullable() ==> Self::val(*c) == <Self::R as RleOps<'a>>::null();
 
     /// Append the value's encoding; return its length.
     fn cow_pack(c: &Self::Cow, buf: &mut Vec<u8>) -> (n: usize)
@@ -251,7 +258,7 @@ impl<'a, T: RleValue, C: Codec> RleOps<'a> for Ops<T, C> {
     fn axiom_enc(_v: Self::V, _w: Self::V, _s: Seq<u8>, _t: Seq<u8>) {}
 
     #[cfg(verus_keep_ghost)]
-    fn axiom_null(_v: Self::V) {}
+    fn axiom_null() {}
 
     #[cfg(verus_keep_ghost)]
     fn axiom_enc_signed(_a: i64, _b: i64, _s: Seq<u8>, _t: Seq<u8>) {}

@@ -917,7 +917,7 @@ impl<'a, C: VCodec> RleOps<'a> for VBytesOps<C> {
         }
     }
 
-    proof fn axiom_null(v: &'a [u8]) {
+    proof fn axiom_null() {
     }
 
     proof fn axiom_enc_signed(a: i64, b: i64, s: Seq<u8>, t: Seq<u8>) {
@@ -1157,7 +1157,7 @@ impl<'a, C: VCodec> RleOps<'a> for VOptBytesOps<C> {
         }
     }
 
-    proof fn axiom_null(v: Option<&'a [u8]>) {
+    proof fn axiom_null() {
     }
 
     proof fn axiom_enc_signed(a: i64, b: i64, s: Seq<u8>, t: Seq<u8>) {

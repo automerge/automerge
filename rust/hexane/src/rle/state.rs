@@ -1649,6 +1649,7 @@ impl<'a, W: WriteOps<'a>> State<'a, W> {
                 State::Null(_) => <W::R as RleOps<'a>>::is_null(W::val(*value)),
                 State::Lit { .. } => false,
             },
+            r && *self is Null && <W::R as RleOps<'a>>::nullable() ==> W::val(*value) == <W::R as RleOps<'a>>::null(),
     {
         match self {
             State::Empty => true,
@@ -1833,7 +1834,7 @@ impl<'a, W: WriteOps<'a>> State<'a, W> {
         }
         if W::cow_is_null(&value) {
             proof {
-                <W::R as RleOps<'a>>::axiom_null(v);
+                <W::R as RleOps<'a>>::axiom_null();
             }
             return self.append_null_n(buf, n);
         }

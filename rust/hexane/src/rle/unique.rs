@@ -11,7 +11,7 @@
 //! save writes a valid slab of the column's values.
 //!
 //! Trusted: what `RleOps` assumes of the value type (`axiom_null`: in a
-//! nullable column, null is one value).
+//! nullable column, the null value is a null).
 
 #[cfg(verus_keep_ghost)]
 use crate::rle::dec::{
@@ -109,9 +109,7 @@ proof fn lemma_boundary_differs<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>)
     let x = last_val(gs[0], null);
     let y = group_values(gs[1], null)[0];
     // a null meets a value: they differ, as null is one value
-    O::axiom_null(x);
-    O::axiom_null(y);
-    O::axiom_null(null);
+    O::axiom_null();
     match gs[0] {
         Group::Run { count, value } => {
             assert(x == value);
@@ -171,7 +169,7 @@ proof fn lemma_null_runs<'a, O: RleOps<'a>>(a: Seq<Group<O::V>>, b: Seq<Group<O:
     assert(vs[c as int] == group_values(b[0], null)[c as int]);
     lemma_boundary_differs::<O>(a);
     assert(group_ok::<O>(b[0]));
-    O::axiom_null(null);
+    O::axiom_null();
 }
 
 /// A run of `c` copies of `x` and a run of `d > c` copies of it cannot
@@ -292,7 +290,7 @@ proof fn lemma_lit_end<'a, O: RleOps<'a>>(gs: Seq<Group<O::V>>, va: Seq<O::V>)
         lemma_canonical_at::<O>(gs, 1);
         lemma_boundary_differs::<O>(gs);
         assert(vs[l - 1] == group_values(gs[0], null)[l - 1]);
-        O::axiom_null(null);
+        O::axiom_null();
     }
 }
 
@@ -341,8 +339,7 @@ proof fn lemma_first_group<'a, O: RleOps<'a>>(a: Seq<Group<O::V>>, b: Seq<Group<
     assert(group_ok::<O>(a[0]) && group_ok::<O>(b[0]));
     assert(vs[0] == group_values(a[0], null)[0]);
     assert(vs[0] == group_values(b[0], null)[0]);
-    O::axiom_null(null);
-    O::axiom_null(vs[0]);
+    O::axiom_null();
     match (a[0], b[0]) {
         (Group::Null { count: c }, Group::Null { count: d }) => {
             if c < d {

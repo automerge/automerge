@@ -1098,6 +1098,114 @@ fn strings() {
 }
 
 #[test]
+fn strings_that_may_be_null() {
+    let words = vec![
+        Some("pear"),
+        None,
+        Some(""),
+        None,
+        None,
+        Some("größer"),
+        Some("🦀"),
+    ];
+    verus_client::round_trip_opt_text(&words);
+    verus_client::opt_text_in_text_out("größer");
+    verus_client::opt_text_in_text_out("");
+
+    // the order is `Option<&str>`'s: the null first, then the bytes
+    verus_client::find_opt_text("apple", "pear");
+    verus_client::find_opt_text("", "\0");
+    verus_client::find_opt_text("z", "é");
+    for a in &words {
+        for b in &words {
+            assert_eq!(verus_client::opt_text_compared(*a, *b), a.cmp(b));
+            let later = verus_client::later_of::<Option<String>, Leb128>(*a, *b);
+            assert_eq!(later, *std::cmp::max(a, b));
+        }
+    }
+    let mut sorted = VerifiedColumn::<Option<String>>::new();
+    for w in &words {
+        verus_client::insert_in_order(&mut sorted, *w);
+    }
+    let mut expect = words.clone();
+    expect.sort();
+    assert_eq!(sorted.to_vec(), expect);
+
+    let mut col = VerifiedColumn::<Option<String>>::new();
+    col.splice(0, 0, &words);
+    verus_client::opt_exclaimed(&mut col);
+    assert_eq!(
+        col.to_vec(),
+        vec![
+            Some("pear!"),
+            None,
+            Some("!"),
+            None,
+            None,
+            Some("größer!"),
+            Some("🦀!")
+        ]
+    );
+    let runs = verus_client::in_runs(&col);
+    assert_eq!(runs.len(), 6);
+    assert_eq!(
+        runs[3],
+        Run {
+            count: 2,
+            value: None
+        }
+    );
+
+    let bytes = verus_client::encode_opt_text("ab", "çd".to_string());
+    let back = VerifiedColumn::<Option<String>>::load(&bytes).unwrap();
+    assert_eq!(
+        back.to_vec(),
+        vec![Some("ab"), None, Some("çd"), None, None]
+    );
+    verus_client::load_opt_text(&bytes);
+    // a null, then one string of one byte that is not UTF-8: it does not
+    // load
+    verus_client::load_opt_text(&[0, 1, 0x7f, 1, 0xff]);
+    assert!(VerifiedColumn::<Option<String>>::load(&[0, 1, 0x7f, 1, 0xff]).is_err());
+    assert!(VerifiedColumn::<Option<Vec<u8>>>::load(&[0, 1, 0x7f, 1, 0xff]).is_ok());
+
+    // the clients that are for every value type, of strings that may be
+    // null
+    verus_client::round_trip::<Option<String>, Leb128, LenIndex>(&words);
+    verus_client::two_in_one_buffer::<Option<String>, Leb128>(&words, &vec![None]);
+    verus_client::one_value_only::<Option<String>, Leb128>(None, Some(""));
+    verus_client::clone_then_diverge::<Option<String>, Leb128, LenIndex>(&words, Some("c"));
+    verus_client::collect_then_extend::<Option<String>, Leb128, LenIndex>(
+        vec![None, None],
+        vec![],
+        vec![Some("é")],
+    );
+    verus_client::runs_in::<Option<String>, Leb128, LenIndex>(
+        Some("a"),
+        None,
+        Some("a"),
+        vec![Run {
+            count: 2,
+            value: None,
+        }],
+    );
+    verus_client::load_with_a_length::<Option<String>, Leb128>(&words, None, 3);
+    for n in [0, 1, 100, 70_000, usize::MAX - 3, usize::MAX] {
+        verus_client::load_a_fill::<Option<String>, Leb128>(None, n);
+        verus_client::load_a_fill::<Option<String>, Leb128>(Some("ab"), n);
+    }
+    verus_client::slabs_and_validation::<Option<String>, Leb128, LenIndex>(&words);
+    verus_client::load_then_validate::<Option<String>, Leb128, LenIndex>(&bytes);
+    verus_client::runs_in_a_window::<Option<String>, Leb128, LenIndex>(None, Some("é"));
+    let mut enc = VerifiedEncoder::<Option<String>>::new();
+    verus_client::told_by_an_append(&mut enc, Some("ab"));
+    verus_client::told_by_an_append(&mut enc, None);
+    verus_client::told_by_an_owned(&mut enc, Some("çd".to_string()));
+    verus_client::told_by_an_append_n(&mut enc, None, 2);
+    assert_eq!(enc.save(), bytes);
+}
+
+#[test]
 fn edits() {
     let v: Vec<u64> = (0..1000).map(|i| i / 3).collect();
     let mut col = VerifiedColumn::<u64>::new();

@@ -74,7 +74,7 @@ pub(crate) open spec fn tail_run<'a, O: RleOps<'a>>(data: Seq<u8>, at: int, coun
     &&& 0 <= i < gs.len()
     &&& match gs[i] {
         Group::Run { value: v, .. } => v == value,
-        Group::Null { .. } => O::is_null(value),
+        Group::Null { .. } => value == O::null(),
         Group::Lit { .. } => false,
     }
     &&& 1 <= count <= group_len(gs[i])
@@ -391,10 +391,6 @@ proof fn lemma_run_tail_values<'a, O: RleOps<'a>>(data: Seq<u8>, at: int, count:
     let a = groups_values(gs.take(i), O::null());
     let gv = group_values(g, O::null());
     let k = group_len(g) - count;
-    if g is Null {
-        O::axiom_null(value);
-        assert(value == O::null());
-    }
     assert(gv.skip(k) =~= copies(count, value));
     assert((a + gv + groups_values(gs.skip(i + 1), O::null())).skip(at)
         =~= gv.skip(k) + groups_values(gs.skip(i + 1), O::null()));
@@ -448,6 +444,8 @@ proof fn lemma_join_run<'a, O: RleOps<'a>>(a: Seq<Group<O::V>>, data: Seq<u8>, a
             // a null tail closes a null run
             assert(gs[i] is Null);
         } else {
+            // the null value of a null run is a null
+            O::axiom_null();
             assert(gs[i] is Run);
         }
         assert(adjacent_ok(a.last(), rest[0]));

@@ -608,8 +608,8 @@ first and values outside the domain last.
 on every public function in terms of the column's values, so that a
 client checked by Verus can build on it (the acceptance clients show
 how): columns of every built-in value type (the numbers, `bool`,
-`NonZeroU32`, byte strings and strings, their options but
-`Option<String>`, and a client's types, stored as one of the numbers
+`NonZeroU32`, byte strings and strings, their options, and a
+client's types, stored as one of the numbers
 or as bytes of their own), plain (with either of the old API's
 indexes, a B-tree or a Fenwick tree), prefix (sums and accumulators)
 and delta columns; their loads (also run by
@@ -643,8 +643,7 @@ column; of a caller's iterator it is not.
 
 Not mirrored: `Column::find_by_value` and `find_by_value_range`, which
 only the delta column's own index weight reaches (the delta column's
-`find_by_value` is verified), and `Option<String>`, which would need
-one more trusted line.
+`find_by_value` is verified).
 
 ## Development
 

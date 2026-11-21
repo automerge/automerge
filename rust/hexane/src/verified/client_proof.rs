@@ -408,10 +408,10 @@ use super::{
     lemma_sum_mono, lemma_sum_range, lemma_sum_run, lemma_sums_fit, lemma_svs_windows, mapped,
     min_i, only, past, produced, ranges_ascend, refused, run_units, run_values, runs_of, scan_of,
     scan_taken, sorted, sorted_for, splice_does, spliced_cut, splices_do, sum_of, summed, sums_fit,
-    times, total_len, total_str_len, ulebsize, unit_runs, window, windows, AccIndex, Get,
-    LenBitIndex, LenIndex, RawColumn, RawColumnIter, SumIndex, VAccum, VAccumulated, VAdds,
-    VAmount, VCodec, VCount, VDelta, VDeltaValue, VGet, VGroup, VIndex, VKeeps, VNewtype, VPack,
-    VShiftable, VSpec, VSum, VSummed, VValue, VerifiedAccColumn, VerifiedAccIter,
+    times, total_len, total_str_len, total_str_len_opt, ulebsize, unit_runs, window, windows,
+    AccIndex, Get, LenBitIndex, LenIndex, RawColumn, RawColumnIter, SumIndex, VAccum, VAccumulated,
+    VAdds, VAmount, VCodec, VCount, VDelta, VDeltaValue, VGet, VGroup, VIndex, VKeeps, VNewtype,
+    VPack, VShiftable, VSpec, VSum, VSummed, VValue, VerifiedAccColumn, VerifiedAccIter,
     VerifiedAccIterState, VerifiedAccSeek, VerifiedAccValue, VerifiedColumn, VerifiedDecoder,
     VerifiedDeltaColumn, VerifiedDeltaDecoder, VerifiedDeltaEdit, VerifiedDeltaEncoder,
     VerifiedDeltaEncoderState, VerifiedDeltaIter, VerifiedDeltaIterState, VerifiedDeltaRuns,
@@ -5114,6 +5114,188 @@ fn text_streamed<'a>(a: &'a str, b: String, buf: &mut Vec<u8>)
 #[allow(dead_code)]
 fn load_text(bytes: &[u8]) {
     load_then_save::<String, Leb128, LenIndex>(bytes);
+}
+
+// ── Strings that may be null ────────────────────────────────────────────────
+
+/// The bytes of strings that may be null, of at most `m` bytes each: a
+/// client's own induction over [`total_str_len_opt`], which it can read.
+proof fn lemma_total_str_opt(vs: Seq<Option<Seq<char>>>, m: nat)
+    requires
+        forall|i: int|
+            0 <= i < vs.len() ==> match #[trigger] vs[i] {
+                Some(s) => encode_utf8(s).len() <= m,
+                None => true,
+            },
+    ensures
+        total_str_len_opt(vs) <= m * vs.len(),
+    decreases vs.len(),
+{
+    if vs.len() > 0 {
+        lemma_total_str_opt(vs.drop_last(), m);
+        assert(m * (vs.len() - 1) + m == m * vs.len()) by (nonlinear_arith);
+    }
+}
+
+/// Strings that may be null. A column takes and gives each as an
+/// `Option<&str>`, and what a specification says of one is `None` or
+/// the characters of the string. A thousand of them of at most a
+/// thousand bytes each are few enough for `load`.
+#[allow(dead_code)]
+fn round_trip_opt_text(input: &Vec<Option<&str>>)
+    requires
+        input@.len() <= 1000,
+        forall|i: int|
+            0 <= i < input@.len() ==> match #[trigger] input@[i] {
+                Some(s) => encode_utf8(s@).len() <= 1000,
+                None => true,
+            },
+{
+    proof {
+        let vs = <Option<&str> as VGet>::svs(input@);
+        <Option<&str> as VGet>::lemma_svs(input@);
+        lemma_total_str_opt(vs, 1000);
+    }
+    round_trip::<Option<String>, Leb128, LenIndex>(input);
+}
+
+/// What a client reads of a column of strings that may be null is what
+/// it wrote: a null where it wrote one, and the characters of a string
+/// where it wrote that; from the column, and from one loaded from its
+/// saved bytes.
+#[allow(dead_code)]
+fn opt_text_in_text_out(a: &str)
+    requires
+        encode_utf8(a@).len() <= 1000,
+{
+    let mut col = VerifiedColumn::<Option<String>>::new();
+    col.push(Some(a));
+    col.push(None);
+    col.insert(1, Some(a));
+    assert(col@ == seq![Some(a@), Some(a@), None]);
+    let x = col.get(1);
+    let y = col.get(2);
+    let z = col.get(3);
+    assert(x matches Some(Some(v)) && v@ == a@);
+    assert(y matches Some(None));
+    assert(z is None);
+
+    let bytes = col.save();
+    proof {
+        lemma_total_str_opt(col@, 1000);
+    }
+    let back = VerifiedColumn::<Option<String>>::load(bytes.as_slice());
+    assert(back is Ok);
+    let back = back.unwrap();
+    let mut it = back.iter_range(1, 3);
+    let first = it.next();
+    let second = it.next();
+    let third = it.next();
+    assert(first matches Some(Some(v)) && v@ == a@);
+    assert(second matches Some(None));
+    assert(third is None);
+}
+
+/// Strings that may be null are in the order Rust has for
+/// `Option<&str>`: the null first, then the strings in the order of
+/// their UTF-8 bytes. Of the null and two strings in that order the
+/// search finds each at its place: the client proves that the column is
+/// in order from the order's definition and its laws, which it can read.
+#[allow(dead_code)]
+fn find_opt_text(a: &str, b: &str)
+    requires
+        bytes_below(encode_utf8(a@), encode_utf8(b@)),
+{
+    let mut col = VerifiedColumn::<Option<String>>::new();
+    col.push(None);
+    col.push(Some(a));
+    col.push(Some(b));
+    assert(col@ == seq![None, Some(a@), Some(b@)]);
+    proof {
+        <Option<String> as VSpec>::lemma_below(Some(a@), Some(b@), Some(a@));
+        <Option<String> as VSpec>::lemma_below(Some(b@), Some(b@), Some(b@));
+        <Option<String> as VSpec>::lemma_below(Some(a@), Some(a@), Some(a@));
+        assert(sorted::<Option<String>>(col@));
+        lemma_sorted::<Option<String>>(col@, Some(a@));
+        lemma_sorted::<Option<String>>(col@, Some(b@));
+        assert(col@.subrange(0, 3) =~= col@);
+    }
+    let r = col.scope_to_value(None, 0, 3);
+    assert(r.start == 0 && r.end == 1);
+    let r = col.scope_to_value(Some(a), 0, 3);
+    assert(r.start == 1 && r.end == 2);
+    let r = col.scope_to_value(Some(b), 0, 3);
+    assert(r.start == 2 && r.end == 3);
+}
+
+/// A client can ask how two strings that may be null stand in the
+/// order, and is told by their bytes.
+#[allow(dead_code)]
+fn opt_text_compared(a: Option<&str>, b: Option<&str>) -> (r: Ordering)
+    ensures
+        (r is Less) == match (a, b) {
+            (None, Some(_)) => true,
+            (Some(x), Some(y)) => bytes_below(encode_utf8(x@), encode_utf8(y@)),
+            _ => false,
+        },
+        (r is Equal) == (a.sv() == b.sv()),
+{
+    <Option<String> as VValue<Leb128>>::compare(a, b)
+}
+
+/// Strings that may be null, each string with a `!` at its end and each
+/// null left a null: the function is given a `String` of its own, and
+/// may hand back that one.
+#[allow(dead_code)]
+fn opt_exclaimed(col: &mut VerifiedColumn<Option<String>>)
+    ensures
+        final(col)@.len() == old(col)@.len(),
+        forall|i: int|
+            0 <= i < old(col)@.len() ==> final(col)@[i] == match old(col)@[i] {
+                Some(s) => Some(s.push('!')),
+                None => None,
+            },
+{
+    let f = |v: Option<String>| -> (w: Option<String>)
+        ensures
+            match v {
+                Some(s) => w matches Some(t) && t@ == s@.push('!'),
+                None => w is None,
+            },
+        {
+            match v {
+                Some(s) => {
+                    let mut s = s;
+                    s.push('!');
+                    Some(s)
+                },
+                None => None,
+            }
+        };
+    col.remap(f);
+}
+
+/// Strings that may be null, borrowed and owned, and nulls: an encoder
+/// takes each, and what is saved holds them.
+#[allow(dead_code)]
+fn encode_opt_text<'a>(a: &'a str, b: String) -> (r: Vec<u8>)
+    ensures
+        VerifiedColumn::<Option<String>>::values(r@) == seq![Some(a@), None, Some(b@), None, None],
+{
+    let mut x = VerifiedEncoder::<Option<String>>::new();
+    x.append(Some(a));
+    x.append(None);
+    x.append_owned(Some(b));
+    x.append_n(None, 2);
+    assert(x@ =~= seq![Some(a@), None, Some(b@), None, None]);
+    x.save()
+}
+
+/// What loads as strings that may be null, saves back to the bytes it
+/// was loaded from: for any bytes, of any provenance.
+#[allow(dead_code)]
+fn load_opt_text(bytes: &[u8]) {
+    load_then_save::<Option<String>, Leb128, LenIndex>(bytes);
 }
 
 /// An edit ends what was suspended. The state of an iterator fits the

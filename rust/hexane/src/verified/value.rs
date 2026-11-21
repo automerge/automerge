@@ -577,7 +577,7 @@ impl<'a, T: VPack, C: VCodec> RleOps<'a> for VOps<T, C> {
         T::lemma_enc::<C>(v, w, s, t);
     }
 
-    proof fn axiom_null(v: T) {
+    proof fn axiom_null() {
     }
 
     proof fn axiom_enc_signed(a: i64, b: i64, s: Seq<u8>, t: Seq<u8>) {
@@ -771,7 +771,7 @@ impl<'a, T: VPack, C: VCodec> RleOps<'a> for VOptOps<T, C> {
         }
     }
 
-    proof fn axiom_null(v: Option<T>) {
+    proof fn axiom_null() {
     }
 
     proof fn axiom_enc_signed(a: i64, b: i64, s: Seq<u8>, t: Seq<u8>) {

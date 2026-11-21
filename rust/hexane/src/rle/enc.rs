@@ -626,7 +626,7 @@ proof fn lemma_single_run<'a, W: WriteOps<'a>>(s: State<'a, W>, buf: Seq<u8>, ba
             State::Empty => true,
             State::Lone(v) => W::val(v) == W::val(value),
             State::Run(_, v) => W::val(v) == W::val(value),
-            State::Null(_) => <W::R as RleOps<'a>>::is_null(W::val(value)),
+            State::Null(_) => <W::R as RleOps<'a>>::nullable() ==> W::val(value) == <W::R as RleOps<'a>>::null(),
             State::Lit { .. } => false,
         },
     ensures vals == copies(vals.len(), W::val(value)),
@@ -649,9 +649,6 @@ proof fn lemma_single_run<'a, W: WriteOps<'a>>(s: State<'a, W>, buf: Seq<u8>, ba
         lemma_push::<W::R>(gs, g);
         assert(groups_values(gs, null) =~= Seq::<VOf<'a, W>>::empty());
         assert(group_ok::<W::R>(all_groups(s, gs, ws)[0]));
-        if s is Null {
-            <W::R as RleOps<'a>>::axiom_null(W::val(value));
-        }
     }
     assert(vals =~= copies(vals.len(), W::val(value)));
 }
@@ -698,8 +695,7 @@ proof fn lemma_single_run_only<'a, W: WriteOps<'a>>(s: State<'a, W>, buf: Seq<u8
             assert(x == w + z);
             assert(z.len() >= 1);
             assert(z.last() == vals[w.len() + z.len() - 1]);
-            <W::R as RleOps<'a>>::axiom_null(z.last());
-            <W::R as RleOps<'a>>::axiom_null(y[0]);
+            <W::R as RleOps<'a>>::axiom_null();
             assert(z.last() != y[0]);
             assert(false);
         }
@@ -715,7 +711,7 @@ proof fn lemma_single_run_only<'a, W: WriteOps<'a>>(s: State<'a, W>, buf: Seq<u8
                 assert(false);
             },
             State::Null(_) => {
-                <W::R as RleOps<'a>>::axiom_null(W::val(value));
+                <W::R as RleOps<'a>>::axiom_null();
             },
             _ => {},
         }

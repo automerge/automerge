@@ -156,7 +156,7 @@ pub(crate) proof fn lemma_boundary<'a, O: RleOps<'a>>(data: Seq<u8>, i: int)
         Group::Run { count: _, value: x } => {
             match b {
                 Group::Null { count: _ } => {
-                    O::axiom_null(x);
+                    O::axiom_null();
                 },
                 _ => {},
             }
@@ -164,7 +164,7 @@ pub(crate) proof fn lemma_boundary<'a, O: RleOps<'a>>(data: Seq<u8>, i: int)
         Group::Lit { values } => {
             match b {
                 Group::Null { count: _ } => {
-                    O::axiom_null(values.last());
+                    O::axiom_null();
                 },
                 _ => {},
             }
@@ -172,10 +172,10 @@ pub(crate) proof fn lemma_boundary<'a, O: RleOps<'a>>(data: Seq<u8>, i: int)
         Group::Null { count: _ } => {
             match b {
                 Group::Run { count: _, value: y } => {
-                    O::axiom_null(y);
+                    O::axiom_null();
                 },
                 Group::Lit { values } => {
-                    O::axiom_null(values[0]);
+                    O::axiom_null();
                 },
                 _ => {},
             }
@@ -3640,7 +3640,7 @@ proof fn lemma_postfix_null_group<'a, O: RleOps<'a>>(data: Seq<u8>, gi: int, pos
         data.skip(pos + hb) == payload::<O>(slab_groups::<O>(data)[gi]) + groups_bytes::<O>(slab_groups::<O>(data).skip(gi + 1)),
         0 <= cb <= data.len() - (pos + hb),
         data.skip(pos + hb).take(cb) == O::enc_unsigned(c),
-        O::is_null(value),
+        value == O::null(),
     ensures ({
         let gs = slab_groups::<O>(data);
         let p = Some(Postfix::Run { count: c as usize, value });

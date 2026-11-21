@@ -358,6 +358,7 @@ proof fn lemma_lift_tail_run<'s, L: Lift<'s>>(data: Seq<u8>, at: int, count: nat
     lemma_lift_at::<L>(gs, i);
     lemma_lift_at::<L>(gs, i + 1);
     L::axiom_lift(v);
+    L::axiom_lift_codec(0, 0);
     lemma_lift_group::<L>(gs[i]);
     lemma_slab_group::<L::R>(data, i);
 }

@@ -48,7 +48,8 @@
 //! * a byte string: `Vec<u8>`;
 //! * `Option<T>` of a number, a client's type or a byte string `T`:
 //!   `None` is a column's null;
-//! * a string: `String`. (There is no `Option<String>` yet.)
+//! * a string: `String`, and `Option<String>`, whose `None` is a
+//!   column's null.
 //!
 //! A column takes and gives a value in the type's form, [`Get<'a, V>`](Get).
 //! For a number, an `Option` of one or a `bool` that is the type itself.
@@ -56,7 +57,8 @@
 //! gives one as a slice borrowed from the column, with no copy; one of
 //! `Option<Vec<u8>>` takes and gives `Option<&[u8]>`. A column of
 //! `String` takes a string as a `&str` and gives one as a `&str`
-//! borrowed from the column, with no copy.
+//! borrowed from the column, with no copy; one of `Option<String>`
+//! takes and gives `Option<&str>`.
 //!
 //! A column of strings holds UTF-8, as a `str` does. On the wire a
 //! string is the byte string of its UTF-8, and a load refuses bytes
@@ -393,7 +395,8 @@
 //! `on` and `before` are of a state (`state.on(bytes)`),
 //! `size_bound` is one of a value type (for byte strings it counts their
 //! bytes, as `total_len` of them, and for strings their UTF-8 bytes, as
-//! `total_str_len`), `only`, `sorted`, `sorted_for`,
+//! `total_str_len`; `total_len_opt` and `total_str_len_opt` where they
+//! may be null), `only`, `sorted`, `sorted_for`,
 //! `bytes_below`, `mapped`, `folded`, `window`, `past`, `head_run`,
 //! `head_run_max`, `head_len`, `scan_of`, `scan_taken`,
 //! `runs_of`, `run_values`, `fill_of` and `sum_of` are of this module,
@@ -677,7 +680,7 @@ pub use sums::{
 };
 pub use sums::{VAmount, VCount, VSum, VSummed};
 #[cfg(verus_keep_ghost)]
-pub use text::total_str_len;
+pub use text::{total_str_len, total_str_len_opt};
 pub use value::{refused, VNewtype, VPack};
 
 use crate::bool_edit::{BoolModel, BoolRecoder};
@@ -940,7 +943,8 @@ pub trait VSpec: Sized + seal::SpecSeal {
 pub trait VForm<'a>: VSpec {
     /// The form: for a number, an `Option` of one or a `bool`, the
     /// type itself; for `Vec<u8>`, `&'a [u8]`; for `Option<Vec<u8>>`,
-    /// `Option<&'a [u8]>`; for `String`, `&'a str`.
+    /// `Option<&'a [u8]>`; for `String`, `&'a str`; for
+    /// `Option<String>`, `Option<&'a str>`.
     type Get: VGet<S = <Self as VSpec>::S>;
 }
 
@@ -1219,7 +1223,7 @@ pub(crate) trait Owned<C>: seal::Sealed<C> {
 /// type that says which of them it is stored as ([`VNewtype`]) and every
 /// type with an encoding of its own ([`VPack`]); byte strings
 /// (`Vec<u8>`); an `Option` of any of those, whose `None` is a column's
-/// null; strings (`String`); and `bool`.
+/// null; strings (`String`, and `Option<String>`); and `bool`.
 #[allow(private_bounds)]
 pub trait VValue<C: VCodec = Leb128>: seal::Sealed<C> + Owned<C> {
     /// No column of the values `vs` saves to more bytes than this.
