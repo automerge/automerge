@@ -316,7 +316,7 @@ impl<V: VSummed + VValue<C>, C: VCodec> VerifiedColumn<V, C, SumIndex> where V::
     pub fn get_index_for_prefix(&self, target: V::Sum) -> (r: usize)
         ensures
             r <= self@.len() + 1,
-            forall|i: int| 0 <= i < r && i <= self@.len() ==> summed::<V>(#[trigger] self@.take(i)) < target.as_int(),
+            forall|i: int| 0 <= i < r ==> summed::<V>(#[trigger] self@.take(i)) < target.as_int(),
             r <= self@.len() ==> target.as_int() <= summed::<V>(self@.take(r as int)),
     {
         match self.sum_index() {

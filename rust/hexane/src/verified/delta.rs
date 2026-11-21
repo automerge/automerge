@@ -30,8 +30,6 @@ pub use find::VerifiedFindByRange;
 pub use find::{delta_finds, lemma_delta_finds, lemma_delta_finds_first, lemma_delta_within_one};
 pub use iter::{VerifiedDeltaIter, VerifiedDeltaIterState, VerifiedDeltaRuns};
 
-#[cfg(verus_keep_ghost)]
-use super::after_edit;
 use super::codec::VCodec;
 #[cfg(verus_keep_ghost)]
 use super::fill_of;
@@ -42,6 +40,8 @@ use super::seal;
 use super::value::{VOps, VOptOps, VOptWrite, VPack, VWrite};
 #[cfg(verus_keep_ghost)]
 use super::VGet;
+#[cfg(verus_keep_ghost)]
+use super::{after_call, after_edit};
 use super::{VSpec, VValue, MAX_SEG};
 use crate::attrib::weigh_run;
 use crate::btree::{SlabAgg, SlabBTree};
@@ -1336,9 +1336,10 @@ pub open spec fn delta_runs_fit<T: VDelta>(rs: Seq<DeltaRun>) -> bool {
 
 /// The check [`DeltaColumn::splice_runs`](crate::DeltaColumn::splice_runs)
 /// makes of a run, and a null run only where `T` has a null: a run of
-/// numbers passes where `T` holds every `i64`, or where its first value
-/// and its last, taken as integers, are numbers of `T`. (The values
-/// of a run go one way, so its ends bound them.)
+/// no values passes; a run of numbers passes where `T` holds every
+/// `i64`, or where its first value and its last, taken as integers, are
+/// numbers of `T`. (The values of a run go one way, so its ends bound
+/// them.)
 pub open spec fn delta_run_in_range<T: VDelta>(r: DeltaRun) -> bool {
     r.count == 0 || match r.delta {
         Some(d) => (T::least() == i64::MIN && T::most() == i64::MAX) || {
@@ -2033,11 +2034,7 @@ impl<T: VDeltaValue<C>, C: VCodec> VerifiedDeltaColumn<T, C> {
             all_fit(values@),
         ensures
             final(self)@ == old(self)@.take(at as int) + values@ + old(self)@.skip(at + del),
-            final(self).edits() == if del > 0 || values@.len() > 0 {
-                after_edit(old(self).edits())
-            } else {
-                old(self).edits()
-            },
+            final(self).edits() == after_call(old(self).edits(), del > 0 || values@.len() > 0),
     {
         proof {
             use_type_invariant(&*self);
@@ -2149,11 +2146,7 @@ impl<T: VDeltaValue<C>, C: VCodec> VerifiedDeltaColumn<T, C> {
             delta_runs_fit::<T>(runs@),
         ensures
             final(self)@ == old(self)@.take(at as int) + delta_runs_values::<T>(runs@) + old(self)@.skip(at + del),
-            final(self).edits() == if del > 0 || final(self)@.len() != old(self)@.len() {
-                after_edit(old(self).edits())
-            } else {
-                old(self).edits()
-            },
+            final(self).edits() == after_call(old(self).edits(), del > 0 || final(self)@.len() != old(self)@.len()),
     {
         proof {
             use_type_invariant(&*self);
@@ -2271,11 +2264,7 @@ impl<T: VDeltaValue<C>, C: VCodec> VerifiedDeltaColumn<T, C> {
             del <= old(self)@.len() - at,
         ensures
             final(self)@ == old(self)@.take(at as int) + old(self)@.skip(at + del),
-            final(self).edits() == if del > 0 {
-                after_edit(old(self).edits())
-            } else {
-                old(self).edits()
-            },
+            final(self).edits() == after_call(old(self).edits(), del > 0),
     {
         let none: Vec<T> = Vec::new();
         self.splice(at, del, none.as_slice());
@@ -2341,11 +2330,7 @@ impl<T: VDeltaValue<C>, C: VCodec> VerifiedDeltaColumn<T, C> {
             } else {
                 old(self)@
             },
-            final(self).edits() == if at < old(self)@.len() {
-                after_edit(old(self).edits())
-            } else {
-                old(self).edits()
-            },
+            final(self).edits() == after_call(old(self).edits(), at < old(self)@.len()),
     {
         if at < self.len() {
             self.delete(at, 1);
@@ -2366,11 +2351,7 @@ impl<T: VDeltaValue<C>, C: VCodec> VerifiedDeltaColumn<T, C> {
             } else {
                 old(self)@
             },
-            final(self).edits() == if n > 0 {
-                after_edit(old(self).edits())
-            } else {
-                old(self).edits()
-            },
+            final(self).edits() == after_call(old(self).edits(), n > 0),
     {
         if n > 0 {
             self.delete(at, n);
@@ -2387,11 +2368,7 @@ impl<T: VDeltaValue<C>, C: VCodec> VerifiedDeltaColumn<T, C> {
             } else {
                 old(self)@
             },
-            final(self).edits() == if len < old(self)@.len() {
-                after_edit(old(self).edits())
-            } else {
-                old(self).edits()
-            },
+            final(self).edits() == after_call(old(self).edits(), len < old(self)@.len()),
     {
         let n = self.len();
         if len < n {
@@ -2410,11 +2387,7 @@ impl<T: VDeltaValue<C>, C: VCodec> VerifiedDeltaColumn<T, C> {
     pub fn clear(&mut self)
         ensures
             final(self)@ == Seq::<T>::empty(),
-            final(self).edits() == if old(self)@.len() > 0 {
-                after_edit(old(self).edits())
-            } else {
-                old(self).edits()
-            },
+            final(self).edits() == after_call(old(self).edits(), old(self)@.len() > 0),
     {
         if self.core.len() == 0 {
             proof {
@@ -2784,8 +2757,9 @@ impl<T: VDeltaValue<C>, C: VCodec> VerifiedDeltaColumn<T, C> {
         start..out.len()
     }
 
-    /// Whether every value of the column is `value`. So it is of an
-    /// empty column, whatever `value` is. The column's runs are read,
+    /// Whether every value of the column is `value`, which is to be a
+    /// value of the column's type (`fits`). So it is of an empty column.
+    /// The column's runs are read,
     /// not each of its values.
     #[allow(clippy::while_let_loop)]  // a loop with its invariants
     pub fn is_only(&self, value: T) -> (r: bool)
@@ -2907,8 +2881,8 @@ impl<T: VDeltaValue<C>, C: VCodec> VerifiedDeltaColumn<T, C> {
     }
 
     /// [`save_to`](Self::save_to), unless every value of the column is
-    /// `value`: then nothing is written, and the range is empty. So is
-    /// it for an empty column, whatever `value` is.
+    /// `value` (a value of the column's type, `fits`): then nothing is
+    /// written, and the range is empty. So is it for an empty column.
     pub fn save_to_unless(&self, out: &mut Vec<u8>, value: T) -> (r: Range<usize>)
         requires
             value.fits(),

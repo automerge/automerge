@@ -5,7 +5,7 @@ use super::kind::Kind;
 use super::model::Model;
 use super::seal;
 #[cfg(verus_keep_ghost)]
-use super::{after_edit, lemma_held_runs, lemma_svs_add, lemma_svs_sub, run_values, Held, VGet};
+use super::{after_call, lemma_held_runs, lemma_svs_add, lemma_svs_sub, run_values, Held, VGet};
 use super::{Get, LenIndex, RunsFeed, VCodec, VIndex, VValue, VerifiedColumn};
 #[cfg(verus_keep_ghost)]
 use crate::cursor::{Insertable, Slabs};
@@ -639,11 +639,7 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedEdit<'a, V, C, K> {
             self.wf(),
         ensures
             self.result()@ == self.now(),
-            self.result().edits() == if self.changed() {
-                after_edit(self.began())
-            } else {
-                self.began()
-            },
+            self.result().edits() == after_call(self.began(), self.changed()),
     {
         let VerifiedEdit { col: column, core: cursor, counter: before, changed: edit } = self;
         proof {

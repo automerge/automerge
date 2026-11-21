@@ -11,7 +11,7 @@ use crate::splices::{
 };
 use crate::splices::{does_anything, normalize_slice};
 #[cfg(verus_keep_ghost)]
-use crate::verified::after_edit;
+use crate::verified::after_call;
 use crate::verified::codec::VCodec;
 use crate::verified::model::NoVisit;
 use crate::Splice;
@@ -84,11 +84,7 @@ impl<T: VDeltaValue<C>, C: VCodec> VerifiedDeltaColumn<T, C> {
             ranges_ascend(splices@),
         ensures
             final(self)@ == applied(old(self)@, src@, splices@),
-            final(self).edits() == if splices_do(splices@, src@.len() as int) {
-                after_edit(old(self).edits())
-            } else {
-                old(self).edits()
-            },
+            final(self).edits() == after_call(old(self).edits(), splices_do(splices@, src@.len() as int)),
     {
         hide(applied);
         hide(in_order);

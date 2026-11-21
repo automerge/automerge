@@ -21,7 +21,7 @@ use crate::rle::edit::RleModel;
 use crate::rle::lift::Lift;
 use crate::rle::model::{RleOps, WriteOps};
 #[cfg(verus_keep_ghost)]
-use crate::verified::after_edit;
+use crate::verified::after_call;
 use crate::verified::codec::VCodec;
 use crate::{DeltaRun, Leb128};
 use vstd::prelude::*;
@@ -710,11 +710,7 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaEdit<'a, T, C> {
             self.wf(),
         ensures
             self.result()@ == self.now(),
-            self.result().edits() == if self.changed() {
-                after_edit(self.began())
-            } else {
-                self.began()
-            },
+            self.result().edits() == after_call(self.began(), self.changed()),
     {
         proof {
             self.lemma_lens();

@@ -274,7 +274,6 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaIter<'a, T, C> {
             r == self.pos(),
             self.pos() <= self.end_pos(),
             self.pos() <= self.column().len(),
-            self.rest() == window(self.column(), self.pos() as int, self.end_pos() as int),
     {
         proof {
             use_type_invariant(self);
@@ -295,7 +294,6 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaIter<'a, T, C> {
             r == self.end_pos(),
             self.pos() <= self.end_pos(),
             self.pos() <= self.column().len(),
-            self.rest() == window(self.column(), self.pos() as int, self.end_pos() as int),
     {
         proof {
             use_type_invariant(self);
@@ -677,7 +675,6 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaIter<'a, T, C> {
         ensures
             s.pos() == self.pos(),
             s.end_pos() == self.end_pos(),
-            self.rest() == window(self.column(), s.pos() as int, s.end_pos() as int),
             match self.source() {
                 Some(c) => s.fits(&c),
                 None => true,

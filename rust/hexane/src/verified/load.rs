@@ -39,8 +39,9 @@ type KLoad<'a, V, C, K> = LoadCore<
 /// underneath, and [`finalize`] reads the rest and gives the column.
 ///
 /// What it has given so far is `given()`; and the column `finalize`
-/// gives begins with it. An error ends the load: every later call, and
-/// `finalize`, fails too.
+/// gives begins with it. An error ends the load: every later call of
+/// `try_next_run` fails too, and `finalize` is then not sure to give a
+/// column.
 ///
 /// [`try_next_run`]: Self::try_next_run
 /// [`finalize`]: Self::finalize

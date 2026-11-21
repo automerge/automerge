@@ -227,9 +227,11 @@
 //! where its values meet can prove that each value lies within one
 //! slab, and that `get` gives it without a panic.
 //!
-//! Its methods say what they do of every input: where one panics, as
-//! `splice_slice` does out of range, its specification is of the calls
-//! that return. `get` alone has a `requires` in its place. The two
+//! Its methods say what they do of every input, of a raw column
+//! (`wf()`, which a raw column has when it is made and keeps): where one
+//! panics, as `splice_slice` does out of range, its specification is of
+//! the calls that return. Besides `wf()`, `get` alone has a `requires`
+//! in its place. The two
 //! methods that take an iterator, `splice` of chunks and `copy_ranges`,
 //! are not verified code and cannot be called from it; `splice_slice`
 //! does what `splice` does with the chunks put together.
@@ -449,7 +451,8 @@
 //! state fits only a column that counts the edits the state does
 //! (`edits()`, `lemma_fits`), and each method that changes a column says
 //! what the column counts after it: one more (`after_edit`) where the
-//! call was an edit, and what it counted before where it was none. A
+//! call was an edit, and what it counted before where it was none
+//! (`after_call` of the count and whether the call was an edit). A
 //! call is an edit if it deletes a value or inserts one, a value put in
 //! the place of its equal too, and a `remap` is one always. A cursor is
 //! one edit, counted when it is finished, if a step of it deleted a
@@ -2103,6 +2106,18 @@ pub open spec fn after_edit(n: usize) -> usize {
     }
 }
 
+/// What a column counts of edits after a call, where it counted `n`
+/// before: [`after_edit`] of `n` where the call was an edit (`edited`),
+/// and `n` where it was none. Each method that changes a column says
+/// what it counts after it so, and which calls are edits.
+pub open spec fn after_call(n: usize, edited: bool) -> usize {
+    if edited {
+        after_edit(n)
+    } else {
+        n
+    }
+}
+
 /// What a column counts of edits after `k` more, where it counted `n`.
 pub open spec fn after_edits(n: usize, k: nat) -> usize
     decreases k,
@@ -2207,11 +2222,7 @@ impl<'v, V: VValue<C>, C: VCodec, K: VIndex<V, C>> Extend<Get<'v, V>> for Verifi
                 (I::into_iter).ensures((iter,), it) && (it.obeys_prophetic_iter_laws() ==> final(self)@ == old(
                     self,
                 )@ + VGet::svs(it.remaining())),
-            final(self).edits() == if final(self)@.len() != old(self)@.len() {
-                after_edit(old(self).edits())
-            } else {
-                old(self).edits()
-            },
+            final(self).edits() == after_call(old(self).edits(), final(self)@.len() != old(self)@.len()),
     {
         let len = self.len();
         self.splice_iter(len, 0, iter);
@@ -2466,11 +2477,7 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
         ensures
             final(self)@ == old(self)@,
             final(self).core@ == old(self).core@,
-            final(self).edits() == if edit {
-                after_edit(before)
-            } else {
-                before
-            },
+            final(self).edits() == after_call(before, edit),
     {
         self.core.set_counter(
             if edit {
@@ -2491,11 +2498,7 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
             del <= old(self)@.len() - at,
         ensures
             final(self)@ == old(self)@.take(at as int) + VGet::svs(values@) + old(self)@.skip(at + del),
-            final(self).edits() == if del > 0 || values@.len() > 0 {
-                after_edit(old(self).edits())
-            } else {
-                old(self).edits()
-            },
+            final(self).edits() == after_call(old(self).edits(), del > 0 || values@.len() > 0),
     {
         proof {
             <Held<V, C> as VGet>::lemma_svs(self.core@);
@@ -2532,11 +2535,7 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
                 (I::into_iter).ensures((values,), it) && (it.obeys_prophetic_iter_laws() ==> final(self)@ == old(
                     self,
                 )@.take(at as int) + VGet::svs(it.remaining()) + old(self)@.skip(at + del)),
-            final(self).edits() == if del > 0 || final(self)@.len() != old(self)@.len() {
-                after_edit(old(self).edits())
-            } else {
-                old(self).edits()
-            },
+            final(self).edits() == after_call(old(self).edits(), del > 0 || final(self)@.len() != old(self)@.len()),
     {
         proof {
             <Held<V, C> as VGet>::lemma_svs(self.core@);
@@ -2592,11 +2591,7 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
                 (I::into_iter).ensures((runs,), it) && (it.obeys_prophetic_iter_laws() ==> final(self)@ == old(
                     self,
                 )@.take(at as int) + run_values(it.remaining()) + old(self)@.skip(at + del)),
-            final(self).edits() == if del > 0 || final(self)@.len() != old(self)@.len() {
-                after_edit(old(self).edits())
-            } else {
-                old(self).edits()
-            },
+            final(self).edits() == after_call(old(self).edits(), del > 0 || final(self)@.len() != old(self)@.len()),
     {
         proof {
             <Held<V, C> as VGet>::lemma_svs(self.core@);
@@ -2638,11 +2633,7 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
             del <= old(self)@.len() - at,
         ensures
             final(self)@ == old(self)@.take(at as int) + old(self)@.skip(at + del),
-            final(self).edits() == if del > 0 {
-                after_edit(old(self).edits())
-            } else {
-                old(self).edits()
-            },
+            final(self).edits() == after_call(old(self).edits(), del > 0),
     {
         proof {
             <Held<V, C> as VGet>::lemma_svs(self.core@);
@@ -2757,11 +2748,7 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
             } else {
                 old(self)@
             },
-            final(self).edits() == if len < old(self)@.len() {
-                after_edit(old(self).edits())
-            } else {
-                old(self).edits()
-            },
+            final(self).edits() == after_call(old(self).edits(), len < old(self)@.len()),
     {
         proof {
             <Held<V, C> as VGet>::lemma_svs(self.core@);
@@ -2784,11 +2771,7 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
             n <= old(self)@.len() - at,
         ensures
             final(self)@ == old(self)@.take(at as int) + old(self)@.skip(at + n),
-            final(self).edits() == if n > 0 {
-                after_edit(old(self).edits())
-            } else {
-                old(self).edits()
-            },
+            final(self).edits() == after_call(old(self).edits(), n > 0),
     {
         if n > 0 {
             self.delete(at, n);
@@ -2808,11 +2791,7 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
     pub fn clear(&mut self)
         ensures
             final(self)@ == Seq::<V::S>::empty(),
-            final(self).edits() == if old(self)@.len() > 0 {
-                after_edit(old(self).edits())
-            } else {
-                old(self).edits()
-            },
+            final(self).edits() == after_call(old(self).edits(), old(self)@.len() > 0),
     {
         if self.core.len() == 0 {
             proof {
@@ -4142,7 +4121,9 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedIter<'a, V, C, K> {
     /// that hold it, and the iterator gives the first of them next. If
     /// no value is `target`, the range is the empty one at the place
     /// where it would stand, and the iterator stands there. The window
-    /// keeps its end.
+    /// keeps its end, unless `range` starts after all that the iterator
+    /// has left: the iterator then moves to its end, and has nothing
+    /// left.
     ///
     /// The search is over `range` of the column, as far as that lies
     /// in what the iterator has left: the iterator moves on to where

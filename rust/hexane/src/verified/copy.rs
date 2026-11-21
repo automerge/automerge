@@ -3,7 +3,7 @@
 
 use super::model::Model;
 #[cfg(verus_keep_ghost)]
-use super::{after_edit, Held, VGet};
+use super::{after_call, Held, VGet};
 use super::{VCodec, VIndex, VValue, VerifiedColumn};
 #[cfg(verus_keep_ghost)]
 use crate::splices::{applied, in_order, lemma_applied_map, ranges_ascend, splices_do};
@@ -76,11 +76,7 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
             ranges_ascend(splices@),
         ensures
             final(self)@ == applied(old(self)@, src@, splices@),
-            final(self).edits() == if splices_do(splices@, src@.len() as int) {
-                after_edit(old(self).edits())
-            } else {
-                old(self).edits()
-            },
+            final(self).edits() == after_call(old(self).edits(), splices_do(splices@, src@.len() as int)),
     {
         hide(applied);
         hide(in_order);
