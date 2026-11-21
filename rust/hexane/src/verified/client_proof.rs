@@ -2113,7 +2113,9 @@ fn read_out<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(col: &VerifiedColumn<V, C,
         decreases it.rest().len(),
     {
         // what is left is the column's values in the window
-        let _ = it.pos();
+        proof {
+            it.lemma_rest();
+        }
         match it.next() {
             Some(_) => {
                 n += 1;
@@ -2163,6 +2165,9 @@ fn window_len<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(it: &VerifiedIter<'_, V,
         r >= it.rest().len(),
         it.end_pos() <= it.column().len() ==> r == it.rest().len(),
 {
+    proof {
+        it.lemma_rest();
+    }
     let (p, e) = (it.pos(), it.end_pos());
     e - p
 }
@@ -2286,6 +2291,9 @@ fn ends_within<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(it: &VerifiedIter<'_, V
         it.pos() <= it.end_pos(),
         it.pos() <= len,
 {
+    proof {
+        it.lemma_rest();
+    }
     it.end_pos() <= len
 }
 
@@ -2863,7 +2871,9 @@ fn find_in_the_rest<V: VValue<C>, C: VCodec, K: VIndex<V, C>>(it: &mut VerifiedI
         sorted::<V>(final(it).rest()),
 {
     // asked for what it says of the window
-    let _ = it.pos();
+    proof {
+        it.lemma_rest();
+    }
     proof {
         lemma_sorted::<V>(it.rest(), x.sv());
     }
@@ -7118,6 +7128,9 @@ fn first_over(col: &VerifiedPrefixColumn<u64>, limit: u128) -> (r: Option<usize>
         decreases it.rest().len(),
     {
         let i = it.pos();
+        proof {
+            it.lemma_rest();
+        }
         match it.next() {
             Some(pv) => {
                 if pv.total() > limit {
@@ -7412,6 +7425,9 @@ fn told_by_a_prefix_iters_place<V: VSummed + VValue<C>, C: VCodec>(it: &Verified
         it.pos() <= it.column().len(),
         it.rest() == window(it.column(), it.pos() as int, it.end_pos() as int),
 {
+    proof {
+        it.lemma_rest();
+    }
     it.pos()
 }
 
@@ -7455,6 +7471,9 @@ fn told_by_a_prefix_iters_end<V: VSummed + VValue<C>, C: VCodec>(it: &VerifiedPr
         it.pos() <= it.column().len(),
         it.rest() == window(it.column(), it.pos() as int, it.end_pos() as int),
 {
+    proof {
+        it.lemma_rest();
+    }
     it.end_pos()
 }
 
@@ -9540,6 +9559,9 @@ fn told_by_an_acc_iters_place<V: VAccumulated + VValue<C>, C: VCodec>(it: &Verif
         it.pos() <= it.column().len(),
         it.rest() == window(it.column(), it.pos() as int, it.end_pos() as int),
 {
+    proof {
+        it.lemma_rest();
+    }
     it.pos()
 }
 
@@ -9587,6 +9609,9 @@ fn told_by_an_acc_iters_end<V: VAccumulated + VValue<C>, C: VCodec>(it: &Verifie
         it.pos() <= it.column().len(),
         it.rest() == window(it.column(), it.pos() as int, it.end_pos() as int),
 {
+    proof {
+        it.lemma_rest();
+    }
     it.end_pos()
 }
 

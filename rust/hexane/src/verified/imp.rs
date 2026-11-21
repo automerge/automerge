@@ -914,10 +914,7 @@ pub(super) proof fn lemma_after_edits_impl(n: usize, k: nat)
 impl<'v, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
     pub(super) fn extend_impl<I: IntoIterator<Item = Get<'v, V>>>(&mut self, iter: I)
         ensures
-            exists|it: I::IntoIter| #[trigger]
-                (I::into_iter).ensures((iter,), it) && (it.obeys_prophetic_iter_laws() ==> final(self)@ == old(
-                    self,
-                )@ + VGet::svs(it.remaining())),
+            gives(iter, |xs: Seq<I::Item>| final(self)@ == old(self)@ + VGet::svs(xs)),
             final(self).edits() == after_call(old(self).edits(), final(self)@.len() != old(self)@.len()),
     {
         let len = self.len();
@@ -1147,10 +1144,7 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
             at <= old(self)@.len(),
             del <= old(self)@.len() - at,
         ensures
-            exists|it: I::IntoIter| #[trigger]
-                (I::into_iter).ensures((values,), it) && (it.obeys_prophetic_iter_laws() ==> final(self)@ == old(
-                    self,
-                )@.take(at as int) + VGet::svs(it.remaining()) + old(self)@.skip(at + del)),
+            gives(values, |xs: Seq<I::Item>| final(self)@ == old(self)@.take(at as int) + VGet::svs(xs) + old(self)@.skip(at + del)),
             final(self).edits() == after_call(old(self).edits(), del > 0 || final(self)@.len() != old(self)@.len()),
     {
         proof {
@@ -1191,10 +1185,7 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
             at <= old(self)@.len(),
             del <= old(self)@.len() - at,
         ensures
-            exists|it: I::IntoIter| #[trigger]
-                (I::into_iter).ensures((runs,), it) && (it.obeys_prophetic_iter_laws() ==> final(self)@ == old(
-                    self,
-                )@.take(at as int) + run_values(it.remaining()) + old(self)@.skip(at + del)),
+            gives(runs, |xs: Seq<I::Item>| final(self)@ == old(self)@.take(at as int) + run_values(xs) + old(self)@.skip(at + del)),
             final(self).edits() == after_call(old(self).edits(), del > 0 || final(self)@.len() != old(self)@.len()),
     {
         proof {
@@ -2090,13 +2081,20 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedIter<'a, V, C, K> {
         lemma_svs_window(vals_of::<V::X>(self.slabs@), self.it.pos as int, self.it.pos + self.it.items_left);
     }
 
+    pub(super) proof fn lemma_rest_impl(tracked &self)
+        ensures
+            self.pos() <= self.end_pos(),
+            self.pos() <= self.column().len(),
+            self.rest() == window(self.column(), self.pos() as int, self.end_pos() as int),
+    {
+        use_type_invariant(self);
+        self.lemma_window();
+    }
+
     #[inline]
     pub(super) fn pos_impl(&self) -> (r: usize)
         ensures
             r == self.pos(),
-            self.pos() <= self.end_pos(),
-            self.pos() <= self.column().len(),
-            self.rest() == window(self.column(), self.pos() as int, self.end_pos() as int),
     {
         proof {
             use_type_invariant(self);
@@ -2109,9 +2107,6 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedIter<'a, V, C, K> {
     pub(super) fn end_pos_impl(&self) -> (r: usize)
         ensures
             r == self.end_pos(),
-            self.pos() <= self.end_pos(),
-            self.pos() <= self.column().len(),
-            self.rest() == window(self.column(), self.pos() as int, self.end_pos() as int),
     {
         proof {
             use_type_invariant(self);
@@ -2408,8 +2403,14 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedIter<'a, V, C, K> {
                 },
             },
     {
+        proof {
+            self.lemma_rest_impl();
+        }
         let end = self.end_pos();
         let mut probe = self.clone();
+        proof {
+            probe.lemma_rest_impl();
+        }
         let mut pos = probe.pos();
         let ghost o = self.items();
         let ghost p0 = self.pos();
@@ -2498,6 +2499,9 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedIter<'a, V, C, K> {
                     }
             }),
     {
+        proof {
+            self.lemma_rest_impl();
+        }
         let ghost (p, o, c) = (self.pos() as int, self.rest(), self.column());
         // the iterator cannot leave its window, so neither can the search
         let end = range.end.min(self.end_pos());

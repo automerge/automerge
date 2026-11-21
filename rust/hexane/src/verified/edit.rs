@@ -10,7 +10,7 @@ use super::kind::Kind;
 use super::model::Model;
 use super::seal;
 #[cfg(verus_keep_ghost)]
-use super::{after_call, run_values, Held, VGet};
+use super::{after_call, gives, run_values, Held, VGet};
 use super::{Get, LenIndex, RunsFeed, VCodec, VIndex, VValue, VerifiedColumn};
 #[cfg(verus_keep_ghost)]
 use crate::cursor::{Insertable, Slabs};
@@ -332,10 +332,7 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedEdit<'a, V, C, K> {
             *final(self) == *final(r),
             r.kept(*old(self)),
             r.at() == old(self).at(),
-            exists|it: I::IntoIter| #[trigger]
-                (I::into_iter).ensures((runs,), it) && (it.obeys_prophetic_iter_laws() ==> r.written() == old(
-                    self,
-                ).written() + run_values(it.remaining())),
+            gives(runs, |xs: Seq<I::Item>| r.written() == old(self).written() + run_values(xs)),
             r.changed() == (old(self).changed() || r.written().len() != old(self).written().len()),
     {
         self.insert_runs_impl::<I>(runs)

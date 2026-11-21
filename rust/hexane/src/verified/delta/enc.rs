@@ -31,6 +31,8 @@ use crate::cursor::Slabs;
 use crate::delta::ddomain::DeltaWrite;
 use crate::verified::codec::VCodec;
 #[cfg(verus_keep_ghost)]
+use crate::verified::gives;
+#[cfg(verus_keep_ghost)]
 use crate::verified::model::Model;
 use crate::verified::VerifiedEncoderState;
 #[cfg(verus_keep_ghost)]
@@ -230,10 +232,7 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaEncoderState<'a, T, C> {
         ensures
             final(self).on(final(buf)@),
             final(self).before(final(buf)@) == old(self).before(old(buf)@),
-            exists|it: I::IntoIter| #[trigger]
-                (I::into_iter).ensures((iter,), it) && (it.obeys_prophetic_iter_laws() ==> final(self)@ == old(
-                    self,
-                )@ + it.remaining()),
+            gives(iter, |xs: Seq<I::Item>| final(self)@ == old(self)@ + xs),
     {
         self.extend_impl::<I>(buf, iter)
     }
@@ -400,10 +399,7 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaEncoder<'a, T, C> {
             forall|it: I::IntoIter| #[trigger] (I::into_iter).ensures((iter,), it) ==> delta_iter_fits(it),
         ensures
             final(self).wf(),
-            exists|it: I::IntoIter| #[trigger]
-                (I::into_iter).ensures((iter,), it) && (it.obeys_prophetic_iter_laws() ==> final(self)@ == old(
-                    self,
-                )@ + it.remaining()),
+            gives(iter, |xs: Seq<I::Item>| final(self)@ == old(self)@ + xs),
     {
         self.extend_impl::<I>(iter)
     }
@@ -479,11 +475,7 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaEncoder<'a, T, C> {
             VerifiedDeltaColumn::<T, C>::valid(r@),
             r@ == VerifiedDeltaColumn::<T, C>::encoding(VerifiedDeltaColumn::<T, C>::values(r@)),
             delta_span_ok(VerifiedDeltaColumn::<T, C>::values(r@)),
-            exists|it: I::IntoIter| #[trigger]
-                (I::into_iter).ensures((iter,), it) && (it.obeys_prophetic_iter_laws() ==> VerifiedDeltaColumn::<
-                    T,
-                    C,
-                >::values(r@) == it.remaining()),
+            gives(iter, |xs: Seq<I::Item>| VerifiedDeltaColumn::<T, C>::values(r@) == xs),
     {
         Self::encode_impl::<I>(iter)
     }
@@ -503,8 +495,7 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaEncoder<'a, T, C> {
                 &&& VerifiedDeltaColumn::<T, C>::valid(d)
                 &&& d == VerifiedDeltaColumn::<T, C>::encoding(w)
                 &&& delta_span_ok(w)
-                &&& exists|it: I::IntoIter| #[trigger]
-                    (I::into_iter).ensures((iter,), it) && (it.obeys_prophetic_iter_laws() ==> w == it.remaining())
+                &&& gives(iter, |xs: Seq<I::Item>| w == xs)
             }),
             r.start == old(out)@.len(),
             r.end == final(out)@.len(),
@@ -527,11 +518,13 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaEncoder<'a, T, C> {
                 &&& VerifiedDeltaColumn::<T, C>::valid(d)
                 &&& d == VerifiedDeltaColumn::<T, C>::encoding(w)
                 &&& delta_span_ok(w)
-                &&& exists|it: I::IntoIter| #[trigger]
-                    (I::into_iter).ensures((iter,), it) && (it.obeys_prophetic_iter_laws() ==> {
-                        &&& (final(out)@ == old(out)@) == only(it.remaining(), value)
-                        &&& !only(it.remaining(), value) ==> w == it.remaining()
-                    })
+                &&& gives(
+                    iter,
+                    |xs: Seq<I::Item>| {
+                        &&& (final(out)@ == old(out)@) == only(xs, value)
+                        &&& !only(xs, value) ==> w == xs
+                    },
+                )
             }),
             r.start == old(out)@.len(),
             r.end == final(out)@.len(),

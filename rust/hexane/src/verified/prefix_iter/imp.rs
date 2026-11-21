@@ -344,13 +344,20 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> VerifiedPrefixIter<'a, V, C> {
         };
     }
 
+    pub(super) proof fn lemma_rest_impl(tracked &self)
+        ensures
+            self.base_pos() <= self.pos() <= self.end_pos(),
+            self.pos() <= self.column().len(),
+            self.rest() == window(self.column(), self.pos() as int, self.end_pos() as int),
+    {
+        use_type_invariant(self);
+        self.lemma_sums();
+    }
+
     #[inline]
     pub(super) fn pos_impl(&self) -> (r: usize)
         ensures
             r == self.pos(),
-            self.base_pos() <= self.pos() <= self.end_pos(),
-            self.pos() <= self.column().len(),
-            self.rest() == window(self.column(), self.pos() as int, self.end_pos() as int),
     {
         proof {
             use_type_invariant(self);
@@ -363,9 +370,6 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> VerifiedPrefixIter<'a, V, C> {
     pub(super) fn end_pos_impl(&self) -> (r: usize)
         ensures
             r == self.end_pos(),
-            self.base_pos() <= self.pos() <= self.end_pos(),
-            self.pos() <= self.column().len(),
-            self.rest() == window(self.column(), self.pos() as int, self.end_pos() as int),
     {
         proof {
             use_type_invariant(self);

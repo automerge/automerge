@@ -320,10 +320,7 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedEdit<'a, V, C, K> {
             *final(self) == *final(r),
             r.kept(*old(self)),
             r.at() == old(self).at(),
-            exists|it: I::IntoIter| #[trigger]
-                (I::into_iter).ensures((runs,), it) && (it.obeys_prophetic_iter_laws() ==> r.written() == old(
-                    self,
-                ).written() + run_values(it.remaining())),
+            gives(runs, |xs: Seq<I::Item>| r.written() == old(self).written() + run_values(xs)),
             r.changed() == (old(self).changed() || r.written().len() != old(self).written().len()),
     {
         proof {

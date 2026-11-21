@@ -17,7 +17,7 @@
 use super::model::{Core, Flows, Streams};
 use super::VerifiedColumn;
 #[cfg(verus_keep_ghost)]
-use super::{held, mapped, only, Held, VGet, VSpec};
+use super::{gives, held, mapped, only, Held, VGet, VSpec};
 use super::{Get, Given, VCodec, VValue, MAX_SEG};
 #[cfg(verus_keep_ghost)]
 use crate::cursor::Slabs;
@@ -255,12 +255,10 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedEncoder<'a, V, C> {
 
     /// Give the encoder the values that `iter` gives, in their order.
     ///
-    /// The specification speaks of the iterator `iter` becomes (`it`),
-    /// and of what Verus says that one will give (`it.remaining()`), as
-    /// [`VerifiedColumn::splice_iter`]'s does. It holds for an iterator
-    /// that keeps to what Verus asks of every iterator
-    /// (`obeys_prophetic_iter_laws`); of another it says nothing but
-    /// that the encoder is still one.
+    /// The specification speaks of what the iterator gives (`gives`),
+    /// as [`VerifiedColumn::splice_iter`]'s does: of an iterator that
+    /// keeps to what Verus asks of every iterator. Of another it says
+    /// nothing but that the encoder is still one.
     ///
     /// That this returns is not proved: it does when the iterator ends.
     #[inline(always)]
@@ -270,10 +268,7 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedEncoder<'a, V, C> {
         ensures
             final(self).wf(),
             final(self).max_segments() == old(self).max_segments(),
-            exists|it: I::IntoIter| #[trigger]
-                (I::into_iter).ensures((iter,), it) && (it.obeys_prophetic_iter_laws() ==> final(self)@ == old(
-                    self,
-                )@ + VGet::svs(it.remaining())),
+            gives(iter, |xs: Seq<I::Item>| final(self)@ == old(self)@ + VGet::svs(xs)),
     {
         self.extend_impl::<I>(iter)
     }
@@ -353,9 +348,7 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedEncoder<'a, V, C> {
             VerifiedColumn::<V, C>::valid(r@),
             r@ == VerifiedColumn::<V, C>::encoding(VerifiedColumn::<V, C>::values(r@)),
             r@.len() <= V::size_bound(VerifiedColumn::<V, C>::values(r@)),
-            exists|it: I::IntoIter| #[trigger]
-                (I::into_iter).ensures((iter,), it) && (it.obeys_prophetic_iter_laws()
-                    ==> VerifiedColumn::<V, C>::values(r@) == VGet::svs(it.remaining())),
+            gives(iter, |xs: Seq<I::Item>| VerifiedColumn::<V, C>::values(r@) == VGet::svs(xs)),
     {
         Self::encode_impl::<I>(iter)
     }
@@ -375,10 +368,7 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedEncoder<'a, V, C> {
                 &&& VerifiedColumn::<V, C>::valid(d)
                 &&& d == VerifiedColumn::<V, C>::encoding(w)
                 &&& d.len() <= V::size_bound(w)
-                &&& exists|it: I::IntoIter| #[trigger]
-                    (I::into_iter).ensures((iter,), it) && (it.obeys_prophetic_iter_laws() ==> w == VGet::svs(
-                        it.remaining(),
-                    ))
+                &&& gives(iter, |xs: Seq<I::Item>| w == VGet::svs(xs))
             }),
             r.start == old(buf)@.len(),
             r.end == final(buf)@.len(),
@@ -403,12 +393,14 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedEncoder<'a, V, C> {
                 &&& VerifiedColumn::<V, C>::valid(d)
                 &&& d == VerifiedColumn::<V, C>::encoding(w)
                 &&& d.len() <= V::size_bound(w)
-                &&& exists|it: I::IntoIter| #[trigger]
-                    (I::into_iter).ensures((iter,), it) && (it.obeys_prophetic_iter_laws() ==> {
-                        let vs = VGet::svs(it.remaining());
+                &&& gives(
+                    iter,
+                    |xs: Seq<I::Item>| {
+                        let vs = VGet::svs(xs);
                         &&& (final(buf)@ == old(buf)@) == only(vs, unless.sv())
                         &&& !only(vs, unless.sv()) ==> w == vs
-                    })
+                    },
+                )
             }),
             r.start == old(buf)@.len(),
             r.end == final(buf)@.len(),
@@ -689,10 +681,7 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedEncoderState<'a, V, C> {
         ensures
             final(self).on(final(buf)@),
             final(self).before(final(buf)@) == old(self).before(old(buf)@),
-            exists|it: I::IntoIter| #[trigger]
-                (I::into_iter).ensures((iter,), it) && (it.obeys_prophetic_iter_laws() ==> final(self)@ == old(
-                    self,
-                )@ + VGet::svs(it.remaining())),
+            gives(iter, |xs: Seq<I::Item>| final(self)@ == old(self)@ + VGet::svs(xs)),
     {
         self.extend_impl::<I>(buf, iter)
     }

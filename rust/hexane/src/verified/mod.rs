@@ -455,13 +455,14 @@
 //! may be null), `only`, `sorted`, `sorted_for`,
 //! `bytes_below`, `mapped`, `folded`, `window`, `past`, `head_run`,
 //! `head_run_max`, `head_len`, `scan_of`, `scan_taken`,
-//! `runs_of`, `run_values`, `fill_of` and `sum_of` are of this module,
+//! `runs_of`, `run_values`, `gives`, `fill_of` and `sum_of` are of this
+//! module,
 //! and `lemma_save_unique`, `lemma_encoding`, `lemma_no_bytes`,
 //! `lemma_sorted`, `lemma_run_values_push`, `lemma_run_values_add`,
 //! `lemma_runs_first`, `lemma_runs_of`, `lemma_runs_of_values`,
 //! `lemma_head_run_max` and `lemma_head_len` are
 //! lemmas, as are `VSpec::lemma_below` (the order is a strict total
-//! order), `VerifiedIter::lemma_items_len`,
+//! order), `VerifiedIter::lemma_items_len`, `VerifiedIter::lemma_rest`,
 //! `VerifiedDecoder::lemma_items_len`,
 //! `VerifiedIter::lemma_source` and
 //! `VerifiedEncoderState::lemma_before`: they exist only for Verus, and
@@ -474,9 +475,10 @@
 //! the standard library does with one: of the values the iterator is to
 //! give (`remaining()`), for an iterator that keeps to Verus's laws of
 //! iterators (`obeys_prophetic_iter_laws`: what `next` returns is the
-//! first of what remains, and `None` when nothing does). Of an iterator
-//! that does not, a method promises nothing but that the column is still
-//! a column. What a client's iterator is to give, the client proves from
+//! first of what remains, and `None` when nothing does). `gives` says
+//! so once, and the contracts of those methods use it. Of an iterator
+//! that does not keep to the laws, a method promises nothing but that
+//! the column is still a column. What a client's iterator is to give, the client proves from
 //! the specification of that iterator: of a `Vec` handed over, that it
 //! gives the vector's items.
 //!
@@ -1245,6 +1247,19 @@ pub proof fn lemma_run_values_add<G: VGet>(a: Seq<Run<G>>, b: Seq<Run<G>>)
     imp::lemma_run_values_add_impl::<G>(a, b)
 }
 
+/// What an iterator `i` that a function is handed gives, as Verus says
+/// what the standard library does with one: `p` holds of the values that
+/// the iterator `i` becomes (`into_iter`) is to give (`remaining()`), if
+/// that iterator keeps to Verus's laws of iterators
+/// (`obeys_prophetic_iter_laws`: what `next` returns is the first of what
+/// remains, and `None` when nothing does). Of an iterator that does not,
+/// it says nothing.
+#[verifier::prophetic]
+pub open spec fn gives<I: IntoIterator>(i: I, p: spec_fn(Seq<I::Item>) -> bool) -> bool {
+    exists|it: I::IntoIter| #[trigger]
+        (I::into_iter).ensures((i,), it) && (it.obeys_prophetic_iter_laws() ==> p(it.remaining()))
+}
+
 /// The fill that a load makes of the saved bytes `d`, with the length
 /// and the fill value its options hold: its length and its value, where
 /// `d` is empty, both are given, and a column can be that long (a run
@@ -1438,10 +1453,7 @@ impl<'v, V: VValue<C>, C: VCodec, K: VIndex<V, C>> Extend<Get<'v, V>> for Verifi
     #[inline(always)]
     fn extend<I: IntoIterator<Item = Get<'v, V>>>(&mut self, iter: I)
         ensures
-            exists|it: I::IntoIter| #[trigger]
-                (I::into_iter).ensures((iter,), it) && (it.obeys_prophetic_iter_laws() ==> final(self)@ == old(
-                    self,
-                )@ + VGet::svs(it.remaining())),
+            gives(iter, |xs: Seq<I::Item>| final(self)@ == old(self)@ + VGet::svs(xs)),
             final(self).edits() == after_call(old(self).edits(), final(self)@.len() != old(self)@.len()),
     {
         self.extend_impl::<I>(iter)
@@ -1636,12 +1648,10 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
     /// Delete `del` values at `at` and insert there the values that
     /// `values` gives, as an iterator.
     ///
-    /// The specification speaks of the iterator `values` becomes (`it`),
-    /// and of what Verus says that one will give (`it.remaining()`). It
-    /// holds for an iterator that keeps to what Verus asks of every
-    /// iterator (`obeys_prophetic_iter_laws`), as those of the standard
-    /// library that Verus specifies do; of another it says nothing but
-    /// that `self` is a column, and what it counts.
+    /// The specification speaks of what the iterator gives (`gives`):
+    /// of an iterator that keeps to what Verus asks of every iterator, as
+    /// those of the standard library that Verus specifies do. Of another
+    /// it says nothing but that `self` is a column, and what it counts.
     ///
     /// The column counts an edit more unless the call deletes no value
     /// and inserts none, which is where `del` is 0 and the column is as
@@ -1652,10 +1662,7 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
             at <= old(self)@.len(),
             del <= old(self)@.len() - at,
         ensures
-            exists|it: I::IntoIter| #[trigger]
-                (I::into_iter).ensures((values,), it) && (it.obeys_prophetic_iter_laws() ==> final(self)@ == old(
-                    self,
-                )@.take(at as int) + VGet::svs(it.remaining()) + old(self)@.skip(at + del)),
+            gives(values, |xs: Seq<I::Item>| final(self)@ == old(self)@.take(at as int) + VGet::svs(xs) + old(self)@.skip(at + del)),
             final(self).edits() == after_call(old(self).edits(), del > 0 || final(self)@.len() != old(self)@.len()),
     {
         self.splice_iter_impl::<I>(at, del, values)
@@ -1679,10 +1686,7 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
             at <= old(self)@.len(),
             del <= old(self)@.len() - at,
         ensures
-            exists|it: I::IntoIter| #[trigger]
-                (I::into_iter).ensures((runs,), it) && (it.obeys_prophetic_iter_laws() ==> final(self)@ == old(
-                    self,
-                )@.take(at as int) + run_values(it.remaining()) + old(self)@.skip(at + del)),
+            gives(runs, |xs: Seq<I::Item>| final(self)@ == old(self)@.take(at as int) + run_values(xs) + old(self)@.skip(at + del)),
             final(self).edits() == after_call(old(self).edits(), del > 0 || final(self)@.len() != old(self)@.len()),
     {
         self.splice_runs_impl::<I>(at, del, runs)
@@ -2186,20 +2190,31 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedIter<'a, V, C, K> {
         self.lemma_source_impl()
     }
 
+    /// Where the iterator stands, and what it has left: its column's
+    /// values from [`pos`](Self::pos) up to [`end_pos`](Self::end_pos), as
+    /// far as the column goes (`window`). It stands in the column or at
+    /// its end.
+    pub proof fn lemma_rest(tracked &self)
+        ensures
+            self.pos() <= self.end_pos(),
+            self.pos() <= self.column().len(),
+            self.rest() == window(self.column(), self.pos() as int, self.end_pos() as int),
+    {
+        self.lemma_rest_impl()
+    }
+
     /// The index in the column of the value `next` gives, if it gives
     /// one.
     ///
     /// What the iterator has left is the column's values from here up to
     /// [`end_pos`](Self::end_pos), as far as the column goes. The
-    /// iterator stands in the column or at its end.
+    /// iterator stands in the column or at its end
+    /// (`lemma_rest`).
     #[verifier::when_used_as_spec(spec_pos)]
     #[inline(always)]
     pub fn pos(&self) -> (r: usize)
         ensures
             r == self.pos(),
-            self.pos() <= self.end_pos(),
-            self.pos() <= self.column().len(),
-            self.rest() == window(self.column(), self.pos() as int, self.end_pos() as int),
     {
         self.pos_impl()
     }
@@ -2214,9 +2229,6 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedIter<'a, V, C, K> {
     pub fn end_pos(&self) -> (r: usize)
         ensures
             r == self.end_pos(),
-            self.pos() <= self.end_pos(),
-            self.pos() <= self.column().len(),
-            self.rest() == window(self.column(), self.pos() as int, self.end_pos() as int),
     {
         self.end_pos_impl()
     }

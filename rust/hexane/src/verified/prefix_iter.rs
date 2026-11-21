@@ -316,21 +316,31 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> VerifiedPrefixIter<'a, V, C> {
         self.lemma_source_impl()
     }
 
+    /// Where the iterator stands, and what it has left: its column's
+    /// values from [`pos`](Self::pos) up to [`end_pos`](Self::end_pos), as
+    /// far as the column goes (`window`). It stands in the column or at
+    /// its end.
+    pub proof fn lemma_rest(tracked &self)
+        ensures
+            self.base_pos() <= self.pos() <= self.end_pos(),
+            self.pos() <= self.column().len(),
+            self.rest() == window(self.column(), self.pos() as int, self.end_pos() as int),
+    {
+        self.lemma_rest_impl()
+    }
+
     /// The index in the column of the value `next` gives, if it gives
     /// one.
     ///
     /// What the iterator has left is the column's values from here up to
     /// [`end_pos`](Self::end_pos), as far as the column goes. The
     /// iterator stands in the column or at its end, and at `base_pos()`
-    /// or after it.
+    /// or after it (`lemma_rest`).
     #[verifier::when_used_as_spec(spec_pos)]
     #[inline(always)]
     pub fn pos(&self) -> (r: usize)
         ensures
             r == self.pos(),
-            self.base_pos() <= self.pos() <= self.end_pos(),
-            self.pos() <= self.column().len(),
-            self.rest() == window(self.column(), self.pos() as int, self.end_pos() as int),
     {
         self.pos_impl()
     }
@@ -342,9 +352,6 @@ impl<'a, V: VSummed + VValue<C>, C: VCodec> VerifiedPrefixIter<'a, V, C> {
     pub fn end_pos(&self) -> (r: usize)
         ensures
             r == self.end_pos(),
-            self.base_pos() <= self.pos() <= self.end_pos(),
-            self.pos() <= self.column().len(),
-            self.rest() == window(self.column(), self.pos() as int, self.end_pos() as int),
     {
         self.end_pos_impl()
     }
