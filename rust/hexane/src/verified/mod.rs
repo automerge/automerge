@@ -567,14 +567,14 @@
 //!
 //! That a splice returns is proved where it takes a slice:
 //! [`splice`](VerifiedColumn::splice), `from_values`, `insert`, `push`,
-//! `remove`, `remove_n`, `truncate` and `clear` of every column but a
-//! delta column, and `copy_ranges` of every column. (Verus checks that
-//! each loop ends; that a function calls only functions that end, it
-//! does not: each loop on these paths has a measure.) A delta column's
-//! splices and deletes, and a splice of a caller's iterator or runs, run
-//! the core's loop over the values to insert, which Verus is not asked to
-//! show ends. It ends when the slice does, or the iterator: with an
-//! iterator that never ends,
+//! `remove`, `remove_n`, `truncate` and `clear` of every column, every
+//! splice of a delta column (which takes only slices), and
+//! `copy_ranges`. (Verus checks that each loop ends; that a function
+//! calls only functions that end, it does not: each loop on these paths
+//! has a measure.) A splice of a caller's iterator or runs runs the
+//! core's loop over the values to insert, which Verus is not asked to
+//! show ends. It ends when the iterator does: with an iterator that
+//! never ends,
 //! [`splice_iter`](VerifiedColumn::splice_iter),
 //! [`splice_runs`](VerifiedColumn::splice_runs), `extend` and `collect()`
 //! do not return (they run until memory is out, or a column's length is

@@ -18,7 +18,7 @@ use crate::btree::{SlabAgg, SlabBTree};
 use crate::column::{normalize_range_max, Dx, Iter, IterState};
 use crate::rle::state::WOps;
 use crate::{Codec, Leb128};
-use ddomain::{SpliceItem, SpliceItems, ValueItems};
+use ddomain::{SpliceDeltas, SpliceItem, SpliceItems, SpliceValues, ValueItems};
 use diter::{
     d_advance_by, d_advance_to, d_next, d_run, d_seek_run, d_seek_to, d_shift, d_shift_next,
     d_shift_run, d_step,
@@ -1853,6 +1853,10 @@ impl<It: Iterator<Item = Option<i64>>> ValueItems for It {
     }
 }
 
+/// A column built from the caller's iterator, in the cursor's loop over a
+/// feed (the trait's own function, which is verified).
+impl<It: Iterator<Item = Option<i64>>> SpliceValues for It {}
+
 /// The items a delta splice inserts, from the caller's iterator (glue):
 /// lone realized values (from `splice`) or whole [`DeltaRun`]s (from
 /// `splice_runs`).
@@ -1868,6 +1872,10 @@ impl<It: Iterator<Item = SpliceItem>> SpliceItems for It {
         self.next()
     }
 }
+
+/// A splice of the caller's iterator, in the cursor's loop over a feed
+/// (the trait's own function, which is verified).
+impl<It: Iterator<Item = SpliceItem>> SpliceDeltas for It {}
 
 // ── FromIterator / Extend / IntoIterator ────────────────────────────────────
 

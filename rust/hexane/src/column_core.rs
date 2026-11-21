@@ -69,7 +69,7 @@ use crate::delta::ddomain::{
     rvals,
 };
 use crate::delta::ddomain::{
-    slabs_fit, DeltaFeed, DeltaWrite, SpliceItem, SpliceItems, ValueItems, ValuesFeed,
+    slabs_fit, DeltaFeed, DeltaWrite, SpliceDeltas, SpliceItem, SpliceValues, ValuesFeed,
 };
 use crate::delta::dedit::d_boundaries;
 use crate::delta::diter::d_nth;
@@ -1393,7 +1393,7 @@ impl<E, X, B> ColumnCore<E, SlabAgg, SlabBTree<SlabAgg>, DeltaModel<X, B>> where
     /// bound on the values (`SpanPlan`), so the column is read again only
     /// where that bound is too wide.
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn splice_delta<F: Visitor<E>, S: SpliceItems>(
+    pub(crate) fn splice_delta<F: Visitor<E>, S: SpliceDeltas>(
         &mut self,
         at: usize,
         del: usize,
@@ -1465,7 +1465,7 @@ impl<E, X, B> ColumnCore<E, SlabAgg, SlabBTree<SlabAgg>, DeltaModel<X, B>> where
         proof {
             lemma_vals_total::<E>(p.slabs@);
         }
-        let _ins = splice_feed::<E, SlabAgg, SlabBTree<SlabAgg>, DeltaModel<X, B>, F, DeltaFeed<S, E, X, B>>(
+        let _ins = S::splice_deltas::<E, SlabAgg, SlabBTree<SlabAgg>, DeltaModel<X, B>, F, X, B>(
             &mut p.slabs,
             &mut p.index,
             &mut p.total_len,
@@ -1532,7 +1532,7 @@ impl<E, X, B> ColumnCore<E, SlabAgg, SlabBTree<SlabAgg>, DeltaModel<X, B>> where
     /// or number more than `i64::MAX`. The deltas keep a bound on the
     /// values (`ToDeltas`), so the column is read again only where that
     /// bound is too wide.
-    pub(crate) fn fill_delta<F: Visitor<E>, S: ValueItems>(
+    pub(crate) fn fill_delta<F: Visitor<E>, S: SpliceValues>(
         &mut self,
         items: S,
         min: i64,
@@ -1571,7 +1571,7 @@ impl<E, X, B> ColumnCore<E, SlabAgg, SlabBTree<SlabAgg>, DeltaModel<X, B>> where
         proof {
             lemma_vals_total::<E>(p.slabs@);
         }
-        let _ins = splice_feed::<E, SlabAgg, SlabBTree<SlabAgg>, DeltaModel<X, B>, F, ValuesFeed<S, E, X, B>>(
+        let _ins = S::splice_values::<E, SlabAgg, SlabBTree<SlabAgg>, DeltaModel<X, B>, F, X, B>(
             &mut p.slabs,
             &mut p.index,
             &mut p.total_len,

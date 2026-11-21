@@ -892,6 +892,7 @@ impl SpanPlan {
             final(self).fixed(*old(self)),
             final(self).p.phase is Values,
             final(self).p.pending is None,
+            (r is Some) == (old(self).p.pending is Some),
             final(self).p.wanted == old(self).p.wanted,
             final(self).p.emitted@ == old(self).p.emitted@ + match r {
                 Some((x, n)) => reps(n as nat, x),
@@ -1029,6 +1030,7 @@ impl SpanPlan {
             final(self).inv(),
             final(self).tracking == old(self).tracking,
             final(self).fixed(*old(self)),
+            final(self).p.phase is NullRun || final(self).p.phase is Done,
             final(self).p.emitted == old(self).p.emitted,
             final(self).p.wanted == old(self).p.wanted,
     {
@@ -1045,6 +1047,7 @@ impl SpanPlan {
             final(self).inv(),
             final(self).tracking == old(self).tracking,
             final(self).fixed(*old(self)),
+            final(self).p.phase is Boundary,
             final(self).p.wanted == old(self).p.wanted,
             final(self).p.emitted@ == old(self).p.emitted@ + match r {
                 Some((x, n)) => reps(n as nat, x),

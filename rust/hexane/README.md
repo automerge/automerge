@@ -638,8 +638,8 @@ standard library:
   `VShiftable` (a client checked by Verus proves them).
 
 That a splice ends is proved where it takes a slice (and so for
-`from_values`, `insert`, `push` and the deletes); of a caller's
-iterator, and of a delta column's splices, it is not.
+`from_values`, `insert`, `push` and the deletes), of every kind of
+column; of a caller's iterator it is not.
 
 Not mirrored: `Column::find_by_value` and `find_by_value_range`, which
 only the delta column's own index weight reaches (the delta column's

@@ -888,6 +888,7 @@ impl SplicePlan {
             final(self).inv(),
             final(self).phase is Values,
             final(self).pending is None,
+            (r is Some) == (old(self).pending is Some),
             final(self).wanted == old(self).wanted,
             final(self).prev == old(self).prev,
             final(self).skip == old(self).skip,

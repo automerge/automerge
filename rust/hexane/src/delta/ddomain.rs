@@ -46,8 +46,11 @@ use crate::column::Slab;
 #[cfg(verus_keep_ghost)]
 use crate::cursor::{all_ok, lemma_vals_own, lemma_vals_total, vals_of as cvals_of};
 #[cfg(verus_keep_ghost)]
-use crate::cursor::{lemma_concat_append, slab_lens};
-use crate::cursor::{Insertable, ReadsAgree, RunFeed, Slabs};
+use crate::cursor::{col_ok, lemma_concat_append, slab_lens};
+use crate::cursor::{
+    splice_feed, splice_feed_bounded, BoundedFeed, Insertable, ReadsAgree, RunFeed, Slabs, Visitor,
+    Weigh,
+};
 #[cfg(verus_keep_ghost)]
 use crate::delta::agg::{
     agg_of, deltas_of, lemma_merge, lemma_take_run, pdiff, pmax, pmin, psum, reps, steps_fit, vmax,
@@ -64,6 +67,7 @@ use crate::delta::dedit::{run_vals, rz};
 use crate::delta::diter::{dix_ok, lemma_psum_cat};
 #[cfg(verus_keep_ghost)]
 use crate::fenwick::{lemma_sum_le, lemma_sum_one, lemma_sum_split, sum, total};
+use crate::index::IndexOps;
 #[cfg(verus_keep_ghost)]
 use crate::iter_core::{each, lens_ok, vals_of};
 use crate::iter_core::{Decode, Decoders};
@@ -610,6 +614,78 @@ impl SpliceItems for NoItems {
     }
 }
 
+/// Items that a splice can take: in the cursor's loop over a feed
+/// (`splice_feed`), or, for a source that says what it has left
+/// ([`BoundedItems`]), in the loop that ends (`splice_feed_bounded`).
+pub(crate) trait SpliceDeltas: SpliceItems {
+    /// Splice in the runs `feed` gives of these items: in the cursor's
+    /// loop over a feed (`splice_feed`), or, for a source that says what
+    /// it has left ([`BoundedItems`]), in the loop that ends
+    /// (`splice_feed_bounded`).
+    #[allow(clippy::too_many_arguments)]
+    #[inline(always)]
+    fn splice_deltas<E, W, I: IndexOps<W>, G: Weigh<E, W>, F: Visitor<E>, M, B>(
+        slabs: &mut Vec<Slab<E::Tail>>,
+        index: &mut I,
+        total_len: &mut usize,
+        max_segments: usize,
+        counter: &mut usize,
+        at: usize,
+        del: usize,
+        f: &mut F,
+        feed: &mut DeltaFeed<Self, E, M, B>,
+    ) -> (ins: Ghost<Seq<E::V>>) where
+        Self: Sized,
+        E: Slabs + for<'a> ReadsAgree<'a, M>,
+        M: for<'a> Decoders<'a, Tail = E::Tail>,
+        B: for<'a> DeltaWrite<'a, E, M>,
+        requires
+            col_ok::<E, W, I, G>(old(slabs)@, *old(index), *old(total_len), max_segments),
+            at <= *old(total_len),
+            del <= *old(total_len) - at,
+            *old(total_len) + 3 <= usize::MAX,
+            old(feed).inv(),
+        ensures
+            col_ok::<E, W, I, G>(final(slabs)@, *final(index), *final(total_len), max_segments),
+            *final(total_len) + 3 <= usize::MAX,
+            cvals_of::<E>(final(slabs)@) == cvals_of::<E>(old(slabs)@).take(at as int) + ins@
+                + cvals_of::<E>(old(slabs)@).skip(at + del),
+            final(feed).given() == old(feed).given() + ins@,
+            final(feed).ended(),
+            final(feed).inv(),
+            final(feed).key() == old(feed).key(),
+    {
+        splice_feed::<E, W, I, G, F, DeltaFeed<Self, E, M, B>>(slabs, index, total_len, max_segments, counter, at, del, f, feed)
+    }
+}
+
+impl SpliceDeltas for NoItems {
+    #[inline(always)]
+    fn splice_deltas<E, W, I: IndexOps<W>, G: Weigh<E, W>, F: Visitor<E>, M, B>(
+        slabs: &mut Vec<Slab<E::Tail>>,
+        index: &mut I,
+        total_len: &mut usize,
+        max_segments: usize,
+        counter: &mut usize,
+        at: usize,
+        del: usize,
+        f: &mut F,
+        feed: &mut DeltaFeed<Self, E, M, B>,
+    ) -> (ins: Ghost<Seq<E::V>>) where
+        Self: Sized,
+        E: Slabs + for<'a> ReadsAgree<'a, M>,
+        M: for<'a> Decoders<'a, Tail = E::Tail>,
+        B: for<'a> DeltaWrite<'a, E, M>,
+    {
+        splice_feed_bounded::<E, W, I, G, F, DeltaFeed<Self, E, M, B>>(slabs, index, total_len, max_segments, counter, at, del, f, feed)
+    }
+}
+
+impl BoundedItems for NoItems {
+    proof fn lemma_told(&self) {
+    }
+}
+
 /// The values an item stands for: itself, or the values of a run after
 /// its `prefix` (`dedit::run_vals`), or nulls.
 pub(crate) open spec fn item_vals(it: SpliceItem) -> Seq<Option<i64>> {
@@ -654,6 +730,59 @@ pub(crate) trait ValueItems {
             } else {
                 r == Some(l[0]) && final(self).left() == Some(l.skip(1))
             },
+    ;
+}
+
+/// Values that a column can be built from: in the cursor's loop over a
+/// feed (`splice_feed`), or, for a source that says what it has left
+/// ([`BoundedValues`]), in the loop that ends (`splice_feed_bounded`).
+pub(crate) trait SpliceValues: ValueItems {
+    /// Splice in the runs `feed` gives of these values: in the cursor's
+    /// loop over a feed (`splice_feed`), or, for a source that says what
+    /// it has left ([`BoundedValues`]), in the loop that ends
+    /// (`splice_feed_bounded`).
+    #[allow(clippy::too_many_arguments)]
+    #[inline(always)]
+    fn splice_values<E, W, I: IndexOps<W>, G: Weigh<E, W>, F: Visitor<E>, M, B>(
+        slabs: &mut Vec<Slab<E::Tail>>,
+        index: &mut I,
+        total_len: &mut usize,
+        max_segments: usize,
+        counter: &mut usize,
+        at: usize,
+        del: usize,
+        f: &mut F,
+        feed: &mut ValuesFeed<Self, E, M, B>,
+    ) -> (ins: Ghost<Seq<E::V>>) where
+        Self: Sized,
+        E: Slabs + for<'a> ReadsAgree<'a, M>,
+        M: for<'a> Decoders<'a, Tail = E::Tail>,
+        B: for<'a> DeltaWrite<'a, E, M>,
+        requires
+            col_ok::<E, W, I, G>(old(slabs)@, *old(index), *old(total_len), max_segments),
+            at <= *old(total_len),
+            del <= *old(total_len) - at,
+            *old(total_len) + 3 <= usize::MAX,
+            old(feed).inv(),
+        ensures
+            col_ok::<E, W, I, G>(final(slabs)@, *final(index), *final(total_len), max_segments),
+            *final(total_len) + 3 <= usize::MAX,
+            cvals_of::<E>(final(slabs)@) == cvals_of::<E>(old(slabs)@).take(at as int) + ins@
+                + cvals_of::<E>(old(slabs)@).skip(at + del),
+            final(feed).given() == old(feed).given() + ins@,
+            final(feed).ended(),
+            final(feed).inv(),
+            final(feed).key() == old(feed).key(),
+    {
+        splice_feed::<E, W, I, G, F, ValuesFeed<Self, E, M, B>>(slabs, index, total_len, max_segments, counter, at, del, f, feed)
+    }
+}
+
+/// A source of values that says what it has left: a slice's.
+pub(crate) trait BoundedValues: ValueItems {
+    proof fn lemma_told(&self)
+        ensures
+            self.left() is Some,
     ;
 }
 
@@ -718,6 +847,39 @@ impl<S: ValueItems, E, M, B> RunFeed<E> for ValuesFeed<S, E, M, B> where
 
     #[inline(always)]
     fn next_run(&mut self) -> (r: Option<(Self::X, usize)>) {
+        self.take()
+    }
+}
+
+
+impl<S: ValueItems, E, M, B> ValuesFeed<S, E, M, B> where
+    E: Slabs + for<'a> ReadsAgree<'a, M>,
+    M: for<'a> Decoders<'a, Tail = E::Tail>,
+    B: for<'a> DeltaWrite<'a, E, M>,
+ {
+    /// How many values the items have left, where they say.
+    pub(crate) open spec fn to_go(&self) -> nat {
+        match self.items.left() {
+            Some(l) => l.len(),
+            None => 0,
+        }
+    }
+
+    /// `next_run`: a run of the next value, one fewer left where the
+    /// items say what they have left.
+    #[inline(always)]
+    fn take(&mut self) -> (r: Option<(<B as DeltaWrite<'static, E, M>>::Ins, usize)>)
+        requires
+            old(self).inv(),
+        ensures
+            final(self).inv(),
+            final(self).key() == old(self).key(),
+            match r {
+                Some((x, n)) => final(self).given() == old(self).given() + Seq::new(n as nat, |_i: int| x.val()),
+                None => final(self).given() == old(self).given() && final(self).ended(),
+            },
+            r is Some && old(self).items.left() is Some ==> final(self).to_go() < old(self).to_go(),
+    {
         let ghost left0 = self.items.left();
         match self.items.next_value() {
             Some(v) => {
@@ -746,6 +908,24 @@ impl<S: ValueItems, E, M, B> RunFeed<E> for ValuesFeed<S, E, M, B> where
                 None
             },
         }
+    }
+}
+
+impl<S: BoundedValues, E, M, B> BoundedFeed<E> for ValuesFeed<S, E, M, B> where
+    E: Slabs + for<'a> ReadsAgree<'a, M>,
+    M: for<'a> Decoders<'a, Tail = E::Tail>,
+    B: for<'a> DeltaWrite<'a, E, M>,
+ {
+    open spec fn bound(&self) -> nat {
+        self.to_go()
+    }
+
+    #[inline(always)]
+    fn next_bounded(&mut self) -> (r: Option<(Self::X, usize)>) {
+        proof {
+            self.items.lemma_told();
+        }
+        self.take()
     }
 }
 
@@ -856,95 +1036,205 @@ impl<S: SpliceItems, E, M, B> RunFeed<E> for DeltaFeed<S, E, M, B> where
     #[verifier::exec_allows_no_decreases_clause]
     #[inline(always)]
     fn next_run(&mut self) -> (r: Option<(Self::X, usize)>) {
-        let ghost e0 = self.plan.p.emitted@;
-        let ghost plan0 = self.plan;
+        let ghost k0 = self.key();
+        let ghost g0 = self.given();
         loop
             invariant
                 self.inv(),
-                self.plan.fixed(plan0),
-                self.plan.p.emitted@ == e0,
-                self.given == old(self).given,
-                (self.items is None) == (old(self).items is None),
-                self.all == old(self).all,
-                e0 == old(self).plan.p.emitted@,
-                plan0 == old(self).plan,
-                self.track == old(self).track,
+                self.key() == k0,
+                self.given() == g0,
+                k0 == old(self).key(),
+                g0 == old(self).given(),
         {
-            let (d, n) = match self.plan.p.phase {
-                SplicePhase::Values => match self.plan.take_pending() {
-                    Some(o) => o,
-                    None => {
-                        proof {
-                            assert(e0 + Seq::<Option<i64>>::empty() =~= e0);
+            if let Some(r) = self.step() {
+                return r;
+            }
+        }
+    }
+}
+
+
+/// What a source of items has left to give, where it says; none for no
+/// source.
+pub(crate) open spec fn items_left<S: SpliceItems>(items: Option<S>) -> nat {
+    match items {
+        Some(s) => match s.left() {
+            Some(l) => l.len(),
+            None => 0,
+        },
+        None => 0,
+    }
+}
+
+impl<S: SpliceItems, E, M, B> DeltaFeed<S, E, M, B> where
+    E: Slabs + for<'a> ReadsAgree<'a, M>,
+    M: for<'a> Decoders<'a, Tail = E::Tail>,
+    B: for<'a> DeltaWrite<'a, E, M>,
+ {
+    /// How far the feed is from its end, where its source says what it
+    /// has left: while the plan takes items, two for each item left and
+    /// one for a run pending, above the three steps after them (the nulls
+    /// carried over, the boundary, the end).
+    pub(crate) open spec fn to_go(&self) -> nat {
+        match self.plan.p.phase {
+            SplicePhase::Values => 3 + 2 * items_left::<S>(self.items) + if self.plan.p.pending is Some {
+                1nat
+            } else {
+                0nat
+            },
+            SplicePhase::NullRun => 2,
+            SplicePhase::Boundary => 1,
+            SplicePhase::Done => 0,
+        }
+    }
+
+    /// The source says what it has left, or there is none.
+    pub(crate) open spec fn told(&self) -> bool {
+        self.items matches Some(s) ==> s.left() is Some
+    }
+
+    /// One turn of `next_run`'s loop: a run, the end (`Some(None)`), or
+    /// neither yet (`None`). A run, or a turn that gives neither, is a
+    /// step nearer the end where the source says what it has left.
+    #[allow(clippy::type_complexity)]
+    #[inline(always)]
+    fn step(&mut self) -> (r: Option<Option<(<B as DeltaWrite<'static, E, M>>::Ins, usize)>>)
+        requires
+            old(self).inv(),
+        ensures
+            final(self).inv(),
+            final(self).key() == old(self).key(),
+            final(self).track == old(self).track,
+            match r {
+                Some(Some((x, n))) => final(self).given() == old(self).given() + Seq::new(
+                    n as nat,
+                    |_i: int| x.val(),
+                ),
+                Some(None) => final(self).given() == old(self).given() && final(self).ended(),
+                None => final(self).given() == old(self).given(),
+            },
+            !(r matches Some(None)) && old(self).told() ==> final(self).to_go() < old(self).to_go(),
+    {
+        let ghost e0 = self.plan.p.emitted@;
+        let (d, n) = match self.plan.p.phase {
+            SplicePhase::Values => match self.plan.take_pending() {
+                Some(o) => o,
+                None => {
+                    proof {
+                        assert(e0 + Seq::<Option<i64>>::empty() =~= e0);
+                    }
+                    let ghost left0 = if self.items is Some { self.items->0.left() } else { None };
+                    let ghost taken0 = self.taken@;
+                    let item = match &mut self.items {
+                        Some(items) => items.next_item(),
+                        None => None,
+                    };
+                    proof {
+                        // an item taken is the first of those left
+                        if self.all@ is Some && item is Some {
+                            let l = left0->0;
+                            assert(taken0.push(item->0) + l.skip(1) =~= taken0 + l);
                         }
-                        let ghost left0 = if self.items is Some { self.items->0.left() } else { None };
-                        let ghost taken0 = self.taken@;
-                        let item = match &mut self.items {
-                            Some(items) => items.next_item(),
-                            None => None,
-                        };
-                        proof {
-                            // an item taken is the first of those left
-                            if self.all@ is Some && item is Some {
-                                let l = left0->0;
-                                assert(taken0.push(item->0) + l.skip(1) =~= taken0 + l);
+                    }
+                    match item {
+                        Some(SpliceItem::Value(v)) => {
+                            proof {
+                                lemma_items_push(self.taken@, SpliceItem::Value(v));
+                                self.taken = Ghost(self.taken@.push(SpliceItem::Value(v)));
                             }
-                        }
-                        match item {
-                            Some(SpliceItem::Value(v)) => {
+                            let r = self.plan.value(v, self.track);
+                            proof {
+                                assert(self.plan.p.wanted@ =~= items_vals(self.taken@));
+                            }
+                            r
+                        },
+                        Some(SpliceItem::Run(prefix, delta, count)) => {
+                            proof {
+                                lemma_items_push(self.taken@, SpliceItem::Run(prefix, delta, count));
+                                self.taken = Ghost(self.taken@.push(SpliceItem::Run(prefix, delta, count)));
+                            }
+                            // an empty run inserts nothing
+                            if count == 0 {
                                 proof {
-                                    lemma_items_push(self.taken@, SpliceItem::Value(v));
-                                    self.taken = Ghost(self.taken@.push(SpliceItem::Value(v)));
-                                }
-                                let r = self.plan.value(v, self.track);
-                                proof {
+                                    assert(item_vals(SpliceItem::Run(prefix, delta, 0)) =~= Seq::<Option<i64>>::empty());
                                     assert(self.plan.p.wanted@ =~= items_vals(self.taken@));
                                 }
-                                r
-                            },
-                            Some(SpliceItem::Run(prefix, delta, count)) => {
-                                proof {
-                                    lemma_items_push(self.taken@, SpliceItem::Run(prefix, delta, count));
-                                    self.taken = Ghost(self.taken@.push(SpliceItem::Run(prefix, delta, count)));
-                                }
-                                // an empty run inserts nothing
-                                if count == 0 {
-                                    proof {
-                                        assert(item_vals(SpliceItem::Run(prefix, delta, 0)) =~= Seq::<Option<i64>>::empty());
-                                        assert(self.plan.p.wanted@ =~= items_vals(self.taken@));
-                                    }
-                                    continue;
-                                }
-                                self.plan.run(prefix, delta, count, self.track)
-                            },
-                            None => {
-                                self.plan.end_values();
-                                continue;
-                            },
-                        }
-                    },
+                                return None;
+                            }
+                            self.plan.run(prefix, delta, count, self.track)
+                        },
+                        None => {
+                            self.plan.end_values();
+                            return None;
+                        },
+                    }
                 },
-                SplicePhase::NullRun => match self.plan.nulls() {
-                    Some(o) => o,
-                    None => {
-                        proof {
-                            assert(e0 + Seq::<Option<i64>>::empty() =~= e0);
-                        }
-                        continue;
-                    },
+            },
+            SplicePhase::NullRun => match self.plan.nulls() {
+                Some(o) => o,
+                None => {
+                    proof {
+                        assert(e0 + Seq::<Option<i64>>::empty() =~= e0);
+                    }
+                    return None;
                 },
-                SplicePhase::Boundary => self.plan.boundary(),
-                SplicePhase::Done => return None,
-            };
-            let x = <B as DeltaWrite<'static, E, M>>::ins(d);
+            },
+            SplicePhase::Boundary => self.plan.boundary(),
+            SplicePhase::Done => return Some(None),
+        };
+        let x = <B as DeltaWrite<'static, E, M>>::ins(d);
+        proof {
+            let g0 = self.given@;
+            let run = Seq::new(n as nat, |_i: int| x.val());
+            let f = |o: E::V| <B as DeltaWrite<'static, E, M>>::dvo(o);
+            assert((g0 + run).map_values(f) =~= g0.map_values(f) + reps(n as nat, d));
+            self.given = Ghost(g0 + run);
+        }
+        Some(Some((x, n)))
+    }
+}
+
+/// A source of items that says what it has left: a slice's, or none.
+pub(crate) trait BoundedItems: SpliceItems {
+    proof fn lemma_told(&self)
+        ensures
+            self.left() is Some,
+    ;
+}
+
+impl<S: BoundedItems, E, M, B> BoundedFeed<E> for DeltaFeed<S, E, M, B> where
+    E: Slabs + for<'a> ReadsAgree<'a, M>,
+    M: for<'a> Decoders<'a, Tail = E::Tail>,
+    B: for<'a> DeltaWrite<'a, E, M>,
+ {
+    open spec fn bound(&self) -> nat {
+        self.to_go()
+    }
+
+    #[inline(always)]
+    fn next_bounded(&mut self) -> (r: Option<(Self::X, usize)>) {
+        let ghost k0 = self.key();
+        let ghost g0 = self.given();
+        let ghost b0 = self.to_go();
+        loop
+            invariant
+                self.inv(),
+                self.key() == k0,
+                self.given() == g0,
+                k0 == old(self).key(),
+                g0 == old(self).given(),
+                b0 == old(self).to_go(),
+                self.to_go() <= b0,
+            decreases self.to_go(),
+        {
             proof {
-                let g0 = self.given@;
-                let run = Seq::new(n as nat, |_i: int| x.val());
-                let f = |o: E::V| <B as DeltaWrite<'static, E, M>>::dvo(o);
-                assert((g0 + run).map_values(f) =~= g0.map_values(f) + reps(n as nat, d));
-                self.given = Ghost(g0 + run);
+                if self.items is Some {
+                    self.items->0.lemma_told();
+                }
             }
-            return Some((x, n));
+            if let Some(r) = self.step() {
+                return r;
+            }
         }
     }
 }

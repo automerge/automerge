@@ -45,9 +45,11 @@ use super::VGet;
 use super::{VSpec, VValue, MAX_SEG};
 use crate::attrib::weigh_run;
 use crate::btree::{SlabAgg, SlabBTree};
+use crate::column::Slab;
 use crate::column_core::ColumnCore;
 #[cfg(verus_keep_ghost)]
-use crate::cursor::{slab_lens, ReadsAgree, Slabs};
+use crate::cursor::slab_lens;
+use crate::cursor::{splice_feed_bounded, ReadsAgree, Slabs, Visitor, Weigh};
 use crate::delta::agg::DeltaOps;
 #[cfg(verus_keep_ghost)]
 use crate::delta::agg::{deltas_of, psum, reps};
@@ -57,7 +59,10 @@ use crate::delta::dbound::in_bound;
 use crate::delta::ddomain::{
     dslabs, item_vals, items_vals, lemma_dslabs_own, lemma_dslabs_unit, rvals,
 };
-use crate::delta::ddomain::{DeltaWrite, SpliceItem, SpliceItems, ValueItems};
+use crate::delta::ddomain::{
+    BoundedItems, BoundedValues, DeltaFeed, DeltaWrite, SpliceDeltas, SpliceItem, SpliceItems,
+    SpliceValues, ValueItems, ValuesFeed,
+};
 #[cfg(verus_keep_ghost)]
 use crate::delta::dedit::{lemma_rz_nulls, lemma_rz_run, rz};
 use crate::delta::dedit_core::DCol;
@@ -65,6 +70,7 @@ use crate::delta::dedit_core::DCol;
 use crate::delta::diter::{crop, lemma_crop, lemma_crop_add, lemma_wrapping_add};
 #[cfg(verus_keep_ghost)]
 use crate::fenwick::lemma_sum_one;
+use crate::index::IndexOps;
 use crate::iter_core::{Decode, Decoders};
 use crate::rle::dec::RleReads;
 use crate::rle::edit::{null_in_column, ReadIns, RleModel};
@@ -1141,6 +1147,33 @@ impl<'v, T: VDelta> ValueItems for SliceValues<'v, T> {
     }
 }
 
+impl<'v, T: VDelta> SpliceValues for SliceValues<'v, T> {
+    #[inline(always)]
+    fn splice_values<E, W, I: IndexOps<W>, G: Weigh<E, W>, F: Visitor<E>, M, B>(
+        slabs: &mut Vec<Slab<E::Tail>>,
+        index: &mut I,
+        total_len: &mut usize,
+        max_segments: usize,
+        counter: &mut usize,
+        at: usize,
+        del: usize,
+        f: &mut F,
+        feed: &mut ValuesFeed<Self, E, M, B>,
+    ) -> (ins: Ghost<Seq<E::V>>) where
+        Self: Sized,
+        E: Slabs + for<'a> ReadsAgree<'a, M>,
+        M: for<'a> Decoders<'a, Tail = E::Tail>,
+        B: for<'a> DeltaWrite<'a, E, M>,
+     {
+        splice_feed_bounded::<E, W, I, G, F, ValuesFeed<Self, E, M, B>>(slabs, index, total_len, max_segments, counter, at, del, f, feed)
+    }
+}
+
+impl<'v, T: VDelta> BoundedValues for SliceValues<'v, T> {
+    proof fn lemma_told(&self) {
+    }
+}
+
 /// Values `ds` as a splice's items, each an item of its own.
 pub(crate) open spec fn value_items(ds: Seq<Option<i64>>) -> Seq<SpliceItem> {
     ds.map_values(|d: Option<i64>| SpliceItem::Value(d))
@@ -1209,6 +1242,33 @@ impl<'v, T: VDelta> SpliceItems for SliceItems<'v, T> {
         } else {
             None
         }
+    }
+}
+
+impl<'v, T: VDelta> SpliceDeltas for SliceItems<'v, T> {
+    #[inline(always)]
+    fn splice_deltas<E, W, I: IndexOps<W>, G: Weigh<E, W>, F: Visitor<E>, M, B>(
+        slabs: &mut Vec<Slab<E::Tail>>,
+        index: &mut I,
+        total_len: &mut usize,
+        max_segments: usize,
+        counter: &mut usize,
+        at: usize,
+        del: usize,
+        f: &mut F,
+        feed: &mut DeltaFeed<Self, E, M, B>,
+    ) -> (ins: Ghost<Seq<E::V>>) where
+        Self: Sized,
+        E: Slabs + for<'a> ReadsAgree<'a, M>,
+        M: for<'a> Decoders<'a, Tail = E::Tail>,
+        B: for<'a> DeltaWrite<'a, E, M>,
+     {
+        splice_feed_bounded::<E, W, I, G, F, DeltaFeed<Self, E, M, B>>(slabs, index, total_len, max_segments, counter, at, del, f, feed)
+    }
+}
+
+impl<'v, T: VDelta> BoundedItems for SliceItems<'v, T> {
+    proof fn lemma_told(&self) {
     }
 }
 
@@ -1580,6 +1640,33 @@ impl<'v> SpliceItems for RunItems<'v> {
             assert(self.rs@.skip(self.at as int).len() == 0);
         }
         None
+    }
+}
+
+impl<'v> SpliceDeltas for RunItems<'v> {
+    #[inline(always)]
+    fn splice_deltas<E, W, I: IndexOps<W>, G: Weigh<E, W>, F: Visitor<E>, M, B>(
+        slabs: &mut Vec<Slab<E::Tail>>,
+        index: &mut I,
+        total_len: &mut usize,
+        max_segments: usize,
+        counter: &mut usize,
+        at: usize,
+        del: usize,
+        f: &mut F,
+        feed: &mut DeltaFeed<Self, E, M, B>,
+    ) -> (ins: Ghost<Seq<E::V>>) where
+        Self: Sized,
+        E: Slabs + for<'a> ReadsAgree<'a, M>,
+        M: for<'a> Decoders<'a, Tail = E::Tail>,
+        B: for<'a> DeltaWrite<'a, E, M>,
+     {
+        splice_feed_bounded::<E, W, I, G, F, DeltaFeed<Self, E, M, B>>(slabs, index, total_len, max_segments, counter, at, del, f, feed)
+    }
+}
+
+impl<'v> BoundedItems for RunItems<'v> {
+    proof fn lemma_told(&self) {
     }
 }
 
