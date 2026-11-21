@@ -16,31 +16,36 @@
 //! What does is which columns there are: an index is kept for the
 //! columns whose weights it can hold ([`VKeeps::keeps`]), which for a
 //! plain column is every one.
+//!
+//! This file is a specification, to be read as the guide to reviewing
+//! says ([`verified`](crate::verified#reviewing-the-specification)): each
+//! function's body is a call of one of `imp` (`kind/imp.rs`), which has
+//! its contract word for word and is proved there.
 
 use super::seal;
 #[cfg(verus_keep_ghost)]
 use super::{Held, VGet};
 use super::{VCodec, VValue};
-use crate::btree::{SlabAggregate, SlabBTree};
+#[cfg(verus_keep_ghost)]
+use crate::btree::SlabAggregate;
 #[cfg(verus_keep_ghost)]
 use crate::column::Slab;
-use crate::column_core::ColumnCore;
 #[cfg(verus_keep_ghost)]
-use crate::cursor::{all_ok, vals_of, Slabs, Weigh};
+use crate::cursor::{Slabs, Weigh};
+#[cfg(verus_keep_ghost)]
 use crate::index::{BitIndex, IndexOps};
-use crate::weights::{CopyWeigh, LenModel, LoadWeigh};
+#[cfg(verus_keep_ghost)]
+use crate::weights::{CopyWeigh, LoadWeigh};
 use crate::Leb128;
 use vstd::prelude::*;
 
-verus! {
+mod imp;
+#[allow(unused_imports)]
+use imp::*;
+#[allow(unused_imports)]
+pub(crate) use imp::{KCore, Kind};
 
-/// The core of a column of `V` kept with an index of kind `K`.
-pub(crate) type KCore<V, C, K> = ColumnCore<
-    <V as seal::Sealed<C>>::E,
-    <K as Kind<V, C>>::W,
-    <K as Kind<V, C>>::I,
-    <K as Kind<V, C>>::G,
->;
+verus! {
 
 /// The columns of `V` a kind of index is kept for.
 pub trait VKeeps<V: VValue<C>, C: VCodec = Leb128>: Sized {
@@ -50,36 +55,6 @@ pub trait VKeeps<V: VValue<C>, C: VCodec = Leb128>: Sized {
     /// column of other values; and an edit that would make a column of
     /// other values panics.
     spec fn keeps(vs: Seq<V::S>) -> bool;
-}
-
-/// What a kind of index is to the verified core, for columns of `V`
-/// under codec `C`.
-pub(crate) trait Kind<V: VValue<C>, C: VCodec>: VKeeps<V, C> {
-    /// What the index holds of a slab.
-    type W: SlabAggregate;
-
-    /// The index of those: a B-tree of them, or a Fenwick tree.
-    type I: IndexOps<Self::W>;
-
-    /// How a slab is weighed, and what the weights say of a column.
-    type G: CopyWeigh<V::E, Self::W> + for <'a>LoadWeigh<'a, V::E, V::X, Self::W>;
-
-    /// A load refuses no column the kind keeps.
-    proof fn lemma_refuses(vs: Seq<Held<V, C>>)
-        requires
-            Self::keeps(<Held<V, C> as VGet>::svs(vs)),
-        ensures
-            !<Self::G as LoadWeigh<'static, V::E, V::X, Self::W>>::may_refuse(vs),
-    ;
-
-    /// The columns the weights are kept for are columns the kind keeps.
-    proof fn lemma_kept(s: Seq<Slab<<V::E as Slabs>::Tail>>)
-        requires
-            all_ok::<V::E>(s),
-            <Self::G as Weigh<V::E, Self::W>>::dom_ok(s),
-        ensures
-            Self::keeps(<Held<V, C> as VGet>::svs(vals_of::<V::E>(s))),
-    ;
 }
 
 /// A kind of index that a [`VerifiedColumn`](super::VerifiedColumn) of
@@ -100,20 +75,6 @@ impl<V: VValue<C>, C: VCodec> VKeeps<V, C> for LenIndex {
     }
 }
 
-impl<V: VValue<C>, C: VCodec> Kind<V, C> for LenIndex {
-    type W = usize;
-
-    type I = SlabBTree<usize>;
-
-    type G = LenModel;
-
-    proof fn lemma_refuses(vs: Seq<Held<V, C>>) {
-    }
-
-    proof fn lemma_kept(s: Seq<Slab<<V::E as Slabs>::Tail>>) {
-    }
-}
-
 impl<V: VValue<C>, C: VCodec> VIndex<V, C> for LenIndex {
 
 }
@@ -129,20 +90,6 @@ impl<V: VValue<C>, C: VCodec> VKeeps<V, C> for LenBitIndex {
     /// Every column, as for [`LenIndex`].
     open spec fn keeps(vs: Seq<V::S>) -> bool {
         true
-    }
-}
-
-impl<V: VValue<C>, C: VCodec> Kind<V, C> for LenBitIndex {
-    type W = usize;
-
-    type I = BitIndex<usize>;
-
-    type G = LenModel;
-
-    proof fn lemma_refuses(vs: Seq<Held<V, C>>) {
-    }
-
-    proof fn lemma_kept(s: Seq<Slab<<V::E as Slabs>::Tail>>) {
     }
 }
 

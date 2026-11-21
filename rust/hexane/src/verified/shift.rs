@@ -10,26 +10,37 @@
 //! (`ShiftView`), whose model is the iterator's `VShiftable`
 //! specification, proved of each iterator here: nothing trusted stands
 //! between the adapters and the iterator.
+//!
+//! This file is a specification, to be read as the guide to reviewing
+//! says ([`verified`](crate::verified#reviewing-the-specification)): each
+//! function's body is a call of one of `imp` (`shift/imp.rs`), which has
+//! its contract word for word and is proved there.
 
 #[cfg(verus_keep_ghost)]
-use super::{lemma_runs_of, runs_of};
+use super::runs_of;
 #[cfg(verus_keep_ghost)]
-use super::{lemma_svs_add, lemma_svs_sub, lemma_svs_window, VGet};
+use super::VGet;
 use super::{Get, VCodec, VIndex, VValue, VerifiedIter, VerifiedRuns};
-#[cfg(verus_keep_ghost)]
-use crate::cursor::lemma_concat_append;
 #[cfg(verus_keep_ghost)]
 use crate::iter_core::{past, vals_of, window};
 #[cfg(verus_keep_ghost)]
 use crate::rle::writer::concat;
-use crate::window::{
-    empty_window, ranges_out_of_order, u_new, u_next, u_nth, u_peek, u_shift, Window,
-};
 #[cfg(verus_keep_ghost)]
-use crate::window::{lemma_flat_first, u_inv, u_left, windows, Stream};
+use crate::window::Window;
+#[cfg(verus_keep_ghost)]
+use crate::window::{u_left, windows, Stream};
 use crate::Run;
 use std::ops::Range;
 use vstd::prelude::*;
+
+mod imp;
+#[allow(unused_imports)]
+pub(crate) use imp::ShiftView;
+#[allow(unused_imports)]
+use imp::*;
+#[cfg(verus_keep_ghost)]
+#[allow(unused_imports)]
+pub(crate) use imp::{lemma_concat_one, lemma_run_units, lemma_svs_inj};
 
 verus! {
 
@@ -255,102 +266,6 @@ pub trait VShiftable: Iterator + Sized {
     ;
 }
 
-/// A verified iterator as `window.rs`'s model sees it: no iterator, so
-/// that its model is its `VShiftable` specification, which is proved.
-pub(crate) struct ShiftView<I>(pub(crate) I);
-
-impl<I: VShiftable> crate::window::Stream for ShiftView<I> {
-    type Item = I::Item;
-
-    open spec fn vals(&self) -> Seq<I::Item> {
-        self.0.shift_vals()
-    }
-
-    open spec fn at(&self) -> int {
-        self.0.shift_at()
-    }
-
-    open spec fn left(&self) -> Seq<I::Item> {
-        self.0.shift_left()
-    }
-
-    open spec fn items(&self) -> Seq<I::Item> {
-        self.0.shift_items()
-    }
-
-    open spec fn spans(x: I::Item) -> Seq<I::Item> {
-        I::shift_spans(x)
-    }
-
-    open spec fn unit() -> bool {
-        I::shift_unit()
-    }
-
-    proof fn lemma_left(&self) {
-        self.0.lemma_shift();
-    }
-
-    proof fn lemma_items(&self) {
-        self.0.lemma_shift();
-        let xs = self.0.shift_items();
-        assert(xs.map_values(|x: I::Item| Self::spans(x)) =~= xs.map_values(|x: I::Item| I::shift_spans(x)));
-    }
-
-    proof fn lemma_unit(x: I::Item) {
-        I::lemma_shift_unit(x);
-    }
-
-    #[inline(always)]
-    fn s_next(&mut self) -> (r: Option<I::Item>) {
-        self.0.shift_step()
-    }
-
-    #[inline(always)]
-    fn s_nth(&mut self, n: usize) -> (r: Option<I::Item>) {
-        let r = self.0.shift_nth(n);
-        proof {
-            let xs = old(self).0.shift_items().take(n + 1);
-            assert(xs.map_values(|x: I::Item| Self::spans(x)) =~= xs.map_values(|x: I::Item| I::shift_spans(x)));
-        }
-        r
-    }
-}
-
-impl<I: VShiftable> crate::window::Window for ShiftView<I> {
-    open spec fn end(&self) -> int {
-        self.0.shift_end()
-    }
-
-    proof fn lemma_window(&self) {
-        self.0.lemma_shift();
-    }
-
-    #[inline(always)]
-    fn w_pos(&self) -> (r: usize) {
-        self.0.get_pos()
-    }
-
-    #[inline(always)]
-    fn w_set_max(&mut self, end: usize) {
-        self.0.set_max(end)
-    }
-
-    #[inline(always)]
-    fn w_advance_to(&mut self, target: usize) {
-        self.0.advance_to(target)
-    }
-
-    #[inline(always)]
-    fn w_shift(&mut self, start: usize, end: usize) {
-        self.0.shift(start..end)
-    }
-
-    #[inline(always)]
-    fn w_shift_next(&mut self, start: usize, end: usize) -> (r: Option<I::Item>) {
-        self.0.shift_next(start..end)
-    }
-}
-
 // ── The adapters ───────────────────────────────────────────────────────────
 
 /// A verified iterator with a lookahead, as the old API's
@@ -367,13 +282,6 @@ pub struct VerifiedUnshift<I: VShiftable> {
 }
 
 impl<I: VShiftable> VerifiedUnshift<I> {
-    /// Its lookahead stands for the values just before its iterator's
-    /// position; with none, the iterator has nothing left.
-    #[verifier::type_invariant]
-    spec fn inv(&self) -> bool {
-        u_inv(self.inner, self.next, self.hidden)
-    }
-
     /// What it has left to give: its lookahead, then what its iterator
     /// has left.
     pub closed spec fn unshift_left(&self) -> Seq<I::Item> {
@@ -392,37 +300,7 @@ impl<I: VShiftable> VerifiedUnshift<I> {
             r.unshift_vals() == iter.shift_vals(),
             r.unshift_left() == iter.shift_items(),
     {
-        let mut inner = ShiftView(iter);
-        let next = u_new(&mut inner);
-        VerifiedUnshift { inner, next, hidden: false }
-    }
-
-    /// Its state, taken out: it is left an empty one.
-    #[inline(always)]
-    fn take(&mut self) -> (r: (ShiftView<I>, Option<I::Item>, bool))
-        ensures
-            u_inv(r.0, r.1, r.2),
-            r.0 == old(self).inner,
-            r.1 == old(self).next,
-            r.2 == old(self).hidden,
-            final(self).unshift_vals() == old(self).unshift_vals(),
-    {
-        proof {
-            use_type_invariant(&*self);
-        }
-        let mut empty = ShiftView(self.inner.0.dup());
-        empty_window(&mut empty);
-        proof {
-            empty.lemma_items();
-            assert(empty.0.shift_items().map_values(|x: I::Item| ShiftView::<I>::spans(x)).len() == 0);
-        }
-        let mut st = VerifiedUnshift { inner: empty, next: None, hidden: false };
-        core::mem::swap(self, &mut st);
-        proof {
-            use_type_invariant(&st);
-        }
-        let VerifiedUnshift { inner: i, next: n, hidden: h } = st;
-        (i, n, h)
+        Self::new_impl(iter)
     }
 
     /// The item it gives next, without giving it.
@@ -432,10 +310,7 @@ impl<I: VShiftable> VerifiedUnshift<I> {
             self.unshift_left().len() > 0 ==> r == Some(&self.unshift_left()[0]),
             self.unshift_left().len() == 0 ==> r is None,
     {
-        proof {
-            use_type_invariant(self);
-        }
-        u_peek(&self.inner, &self.next, self.hidden)
+        self.peek_impl()
     }
 
     /// Move to `range`, at its iterator or after it, where each item
@@ -453,13 +328,7 @@ impl<I: VShiftable> VerifiedUnshift<I> {
             final(self).unshift_vals() == old(self).unshift_vals(),
             final(self).unshift_left() == window(old(self).unshift_vals(), range.start as int, range.end as int),
     {
-        proof {
-            use_type_invariant(&*self);
-        }
-        // the state is taken out, moved on, and put back whole
-        let (mut inner, mut next, mut hidden) = self.take();
-        u_shift(&mut inner, &mut next, &mut hidden, range.start, range.end);
-        *self = VerifiedUnshift { inner, next, hidden };
+        self.shift_impl(range)
     }
 }
 
@@ -509,19 +378,7 @@ impl<I: VShiftable> Iterator for VerifiedUnshift<I> {
                 None => old(self).unshift_left().len() == 0 && final(self).unshift_left().len() == 0,
             },
     {
-        proof {
-            use_type_invariant(&*self);
-        }
-        let (mut inner, mut next, hidden) = self.take();
-        let r = u_next(&mut inner, &mut next, hidden);
-        *self = VerifiedUnshift { inner, next, hidden };
-        proof {
-            let g = old(self).unshift_left();
-            if g.len() > 0 {
-                assert(g.skip(1) =~= g.drop_first());
-            }
-        }
-        r
+        self.next_impl()
     }
 
     /// The `n`-th item left, giving it and those before it.
@@ -535,13 +392,7 @@ impl<I: VShiftable> Iterator for VerifiedUnshift<I> {
             },
             n >= old(self).unshift_left().len() ==> r is None && final(self).unshift_left().len() == 0,
     {
-        proof {
-            use_type_invariant(&*self);
-        }
-        let (mut inner, mut next, hidden) = self.take();
-        let r = u_nth(&mut inner, &mut next, hidden, n);
-        *self = VerifiedUnshift { inner, next, hidden };
-        r
+        self.nth_impl(n)
     }
 }
 
@@ -560,11 +411,6 @@ pub struct VerifiedRanges<'r, I: VShiftable> {
 }
 
 impl<'r, I: VShiftable> VerifiedRanges<'r, I> {
-    #[verifier::type_invariant]
-    spec fn inv(&self) -> bool {
-        self.i <= self.ranges@.len()
-    }
-
     /// What it has left to give, value by value.
     pub closed spec fn ranges_left(&self) -> Seq<I::Item> {
         self.view.0.shift_left() + windows(self.view.0.shift_vals(), self.ranges@.skip(self.i as int))
@@ -590,113 +436,7 @@ impl<'r, I: VShiftable> VerifiedRanges<'r, I> {
             r.ranges_vals() == iter.shift_vals(),
             r.ranges_left() == windows(iter.shift_vals(), ranges@),
     {
-        let mut view = ShiftView(iter);
-        empty_window(&mut view);
-        proof {
-            assert(ranges@.skip(0) =~= ranges@);
-            assert(view.0.shift_left() =~= Seq::<I::Item>::empty());
-            assert(view.0.shift_left() + windows(view.0.shift_vals(), ranges@.skip(0)) =~= windows(
-                view.0.shift_vals(),
-                ranges@,
-            ));
-        }
-        VerifiedRanges { view, ranges, i: 0 }
-    }
-}
-
-/// The values of each range of `rs` from the `i`-th on: the first of
-/// them, and the rest.
-proof fn lemma_windows_front<T>(v: Seq<T>, rs: Seq<Range<usize>>, i: int)
-    requires
-        0 <= i < rs.len(),
-    ensures
-        windows(v, rs.skip(i)) == window(v, rs[i].start as int, rs[i].end as int) + windows(v, rs.skip(i + 1)),
-{
-    let f = |r: Range<usize>| window(v, r.start as int, r.end as int);
-    let m = rs.skip(i).map_values(f);
-    assert(m =~= seq![f(rs[i])] + rs.skip(i + 1).map_values(f));
-    crate::cursor::lemma_concat_append(seq![f(rs[i])], rs.skip(i + 1).map_values(f));
-    let one = seq![f(rs[i])];
-    assert(one.drop_last() =~= Seq::<Seq<T>>::empty());
-    assert(concat(one) == concat(one.drop_last()) + one.last());
-    assert(concat(one) =~= f(rs[i]));
-}
-
-/// `VerifiedRanges::next`: the next value of the window, or of the next
-/// range with any.
-fn ranges_step<W: Window>(w: &mut W, rs: &[Range<usize>], i: &mut usize) -> (r: Option<W::Item>)
-    requires
-        *old(i) <= rs.len(),
-    ensures
-        *final(i) <= rs.len(),
-        final(w).vals() == old(w).vals(),
-        ({
-            let g = old(w).left() + windows(old(w).vals(), rs@.skip(*old(i) as int));
-            let g1 = final(w).left() + windows(final(w).vals(), rs@.skip(*final(i) as int));
-            match r {
-                Some(x) => {
-                    let n = W::spans(x).len() as int;
-                    &&& 0 < n <= g.len()
-                    &&& W::spans(x) == g.take(n)
-                    &&& g1 == g.skip(n)
-                },
-                None => g.len() == 0 && g1.len() == 0,
-            }
-        }),
-{
-    let ghost (w0, i0) = (*w, *i);
-    loop
-        invariant
-            w0 == *old(w),
-            i0 == *old(i),
-            *i <= rs.len(),
-            w.vals() == w0.vals(),
-            w.left() + windows(w.vals(), rs@.skip(*i as int)) == w0.left() + windows(w0.vals(), rs@.skip(i0 as int)),
-        decreases rs.len() - *i,
-    {
-        let ghost (w1, i1) = (*w, *i);
-        proof {
-            w1.lemma_items();
-        }
-        if let Some(x) = w.s_next() {
-            proof {
-                w.lemma_items();
-                lemma_flat_first::<W>(w1.items());
-                assert(w1.items().skip(1) == w.items());
-                assert(W::spans(x).len() > 0) by {
-                    assert(x == w1.items()[0]);
-                }
-                let rest = windows(w.vals(), rs@.skip(i1 as int));
-                assert(w1.left() + rest =~= W::spans(x) + (w.left() + rest));
-            }
-            return Some(x);
-        }
-        proof {
-            w.lemma_items();
-            assert(w1.items().map_values(|x: W::Item| W::spans(x)) =~= Seq::<Seq<W::Item>>::empty());
-            assert(w.items().map_values(|x: W::Item| W::spans(x)) =~= Seq::<Seq<W::Item>>::empty());
-        }
-        if *i >= rs.len() {
-            proof {
-                assert(rs@.skip(i1 as int).map_values(|r: Range<usize>| window(w.vals(), r.start as int, r.end as int))
-                    =~= Seq::<Seq<W::Item>>::empty());
-                assert(w.left() + windows(w.vals(), rs@.skip(i1 as int)) =~= Seq::<W::Item>::empty());
-            }
-            return None;
-        }
-        let start = rs[*i].start;
-        let end = rs[*i].end;
-        if start < w.w_pos() {
-            ranges_out_of_order();
-        }
-        w.w_shift(start, end);
-        *i = *i + 1;
-        proof {
-            let v = w0.vals();
-            lemma_windows_front(v, rs@, i1 as int);
-            assert(w1.left() =~= Seq::<W::Item>::empty());
-            assert(w.left() + windows(v, rs@.skip(i1 + 1)) =~= w1.left() + windows(v, rs@.skip(i1 as int)));
-        }
+        Self::new_impl(iter, ranges)
     }
 }
 
@@ -748,27 +488,7 @@ impl<'r, I: VShiftable> Iterator for VerifiedRanges<'r, I> {
                 None => old(self).ranges_left().len() == 0 && final(self).ranges_left().len() == 0,
             },
     {
-        proof {
-            use_type_invariant(&*self);
-        }
-        let mut view = ShiftView(self.view.0.dup());
-        let mut i = self.i;
-        let r = ranges_step(&mut view, self.ranges, &mut i);
-        *self = VerifiedRanges { view, ranges: self.ranges, i };
-        proof {
-            if I::shift_unit() && r is Some {
-                {
-                    let x = r->Some_0;
-                    I::lemma_shift_unit(x);
-                    let g = old(self).ranges_left();
-                    assert(g.take(1) == seq![x]);
-                    assert(seq![x][0] == x);
-                    assert(g.take(1)[0] == g[0]);
-                    assert(g.skip(1) =~= g.drop_first());
-                }
-            }
-        }
-        r
+        self.next_impl()
     }
 }
 
@@ -781,60 +501,7 @@ pub proof fn lemma_svs_windows<T: VGet>(v: Seq<T>, rs: Seq<Range<usize>>)
         T::svs(windows(v, rs)) == windows(T::svs(v), rs),
     decreases rs.len(),
 {
-    T::lemma_svs(v);
-    if rs.len() == 0 {
-        let f = |r: Range<usize>| window(v, r.start as int, r.end as int);
-        let g = |r: Range<usize>| window(T::svs(v), r.start as int, r.end as int);
-        assert(rs.map_values(f) =~= Seq::<Seq<T>>::empty());
-        assert(rs.map_values(g) =~= Seq::<Seq<T::S>>::empty());
-        T::lemma_svs(Seq::<T>::empty());
-        assert(T::svs(Seq::<T>::empty()) =~= Seq::<T::S>::empty());
-    } else {
-        let p = rs.drop_last();
-        let r = rs.last();
-        let f = |r: Range<usize>| window(v, r.start as int, r.end as int);
-        let g = |r: Range<usize>| window(T::svs(v), r.start as int, r.end as int);
-        lemma_svs_windows(v, p);
-        assert(rs.map_values(f).drop_last() =~= p.map_values(f));
-        assert(rs.map_values(g).drop_last() =~= p.map_values(g));
-        assert(windows(v, rs) == windows(v, p) + window(v, r.start as int, r.end as int));
-        assert(windows(T::svs(v), rs) == windows(T::svs(v), p) + window(T::svs(v), r.start as int, r.end as int));
-        lemma_svs_add(windows(v, p), window(v, r.start as int, r.end as int));
-        lemma_svs_window(v, r.start as int, r.end as int);
-    }
-}
-
-/// Values that are the same in a specification are the same.
-pub(crate) proof fn lemma_svs_inj<T: VGet>(a: Seq<T>, b: Seq<T>)
-    requires
-        T::svs(a) == T::svs(b),
-    ensures
-        a == b,
-{
-    T::lemma_svs(a);
-    T::lemma_svs(b);
-    assert forall|i: int| 0 <= i < a.len() implies a[i] == b[i] by {
-        assert(a.len() == b.len());
-        assert(T::svs(a)[i] == a[i].sv());
-        assert(T::svs(b)[i] == b[i].sv());
-        T::lemma_sv_inj(a[i], b[i]);
-    }
-    assert(a =~= b);
-}
-
-/// What is left after moving on, as a specification has it, is the same
-/// move of the values as it has them.
-proof fn lemma_svs_past<T: VGet>(o: Seq<T>, k: int)
-    ensures
-        T::svs(past(o, k)) == past(T::svs(o), k),
-{
-    T::lemma_svs(o);
-    if 0 < k <= o.len() {
-        lemma_svs_sub(o, k, o.len() as int);
-    } else if k > o.len() {
-        T::lemma_svs(Seq::<T>::empty());
-        assert(T::svs(Seq::<T>::empty()) =~= Seq::<T::S>::empty());
-    }
+    imp::lemma_svs_windows_impl::<T>(v, rs)
 }
 
 /// Items that each stand for themselves alone are the values they stand
@@ -844,19 +511,8 @@ pub proof fn lemma_singles<T>(xs: Seq<T>)
         concat(xs.map_values(|x: T| seq![x])) == xs,
     decreases xs.len(),
 {
-    if xs.len() > 0 {
-        let p = xs.drop_last();
-        lemma_singles(p);
-        let m = xs.map_values(|x: T| seq![x]);
-        assert(m.drop_last() =~= p.map_values(|x: T| seq![x]));
-        assert(m.last() == seq![xs.last()]);
-        assert(concat(m) == concat(m.drop_last()) + m.last());
-        assert(xs =~= p + seq![xs.last()]);
-    } else {
-        assert(xs.map_values(|x: T| seq![x]) =~= Seq::<Seq<T>>::empty());
-    }
+    imp::lemma_singles_impl::<T>(xs)
 }
-
 
 impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VShiftable for VerifiedIter<'a, V, C, K> {
     closed spec fn shift_vals(&self) -> Seq<Get<'a, V>> {
@@ -888,10 +544,7 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VShiftable for VerifiedIter<'
     }
 
     proof fn lemma_shift(&self) {
-        self.it.lemma_out_window::<V::X>(self.slabs@);
-        let xs = self.it.out::<V::X>(self.slabs@);
-        lemma_singles(xs);
-        assert(xs.map_values(|x: Get<'a, V>| Self::shift_spans(x)) =~= xs.map_values(|x: Get<'a, V>| seq![x]));
+        self.lemma_shift_impl()
     }
 
     proof fn lemma_shift_unit(x: Get<'a, V>) {
@@ -899,33 +552,17 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VShiftable for VerifiedIter<'
 
     #[inline(always)]
     fn shift_step(&mut self) -> (r: Option<Get<'a, V>>) {
-        let r = self.nth(0);
-        proof {
-            lemma_svs_inj(vals_of::<V::X>(self.slabs@), vals_of::<V::X>(old(self).slabs@));
-        }
-        r
+        self.shift_step_impl()
     }
 
     #[inline(always)]
     fn shift_nth(&mut self, n: usize) -> (r: Option<Get<'a, V>>) {
-        let r = self.nth(n);
-        proof {
-            lemma_svs_inj(vals_of::<V::X>(self.slabs@), vals_of::<V::X>(old(self).slabs@));
-            if n < old(self).it.out::<V::X>(old(self).slabs@).len() {
-                let xs = old(self).it.out::<V::X>(old(self).slabs@).take(n + 1);
-                lemma_singles(xs);
-                assert(xs.map_values(|x: Get<'a, V>| Self::shift_spans(x)) =~= xs.map_values(|x: Get<'a, V>| seq![x]));
-            }
-        }
-        r
+        self.shift_nth_impl(n)
     }
 
     #[inline(always)]
     fn dup(&self) -> (r: Self) {
-        proof {
-            use_type_invariant(self);
-        }
-        VerifiedIter { it: self.it.dup(), slabs: self.slabs, col: self.col }
+        self.dup_impl()
     }
 
     #[inline(always)]
@@ -935,118 +572,37 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VShiftable for VerifiedIter<'
 
     #[inline(always)]
     fn get_max(&self) -> (r: usize) {
-        proof {
-            use_type_invariant(&*self);
-        }
-        self.end_pos()
+        self.get_max_impl()
     }
 
     #[inline(always)]
     fn set_max(&mut self, end: usize) {
-        proof {
-            use_type_invariant(&*self);
-        }
-        VerifiedIter::set_max(self, end);
-        proof {
-            use_type_invariant(&*self);
-            lemma_svs_inj(vals_of::<V::X>(self.slabs@), vals_of::<V::X>(old(self).slabs@));
-        }
+        self.set_max_v_shiftable_impl(end)
     }
 
     #[inline(always)]
     fn advance_to(&mut self, target: usize) {
-        proof {
-            use_type_invariant(&*self);
-            <Get<'a, V> as VGet>::lemma_svs(self.it.out::<V::X>(self.slabs@));
-        }
-        VerifiedIter::advance_to(self, target);
-        proof {
-            use_type_invariant(&*self);
-            let k = target - old(self).shift_at();
-            lemma_svs_inj(vals_of::<V::X>(self.slabs@), vals_of::<V::X>(old(self).slabs@));
-            lemma_svs_past(old(self).it.out::<V::X>(old(self).slabs@), k);
-            lemma_svs_inj(self.it.out::<V::X>(self.slabs@), past(old(self).it.out::<V::X>(old(self).slabs@), k));
-        }
+        self.advance_to_v_shiftable_impl(target)
     }
 
     #[inline(always)]
     fn advance_by(&mut self, amount: usize) {
-        proof {
-            use_type_invariant(&*self);
-            <Get<'a, V> as VGet>::lemma_svs(self.it.out::<V::X>(self.slabs@));
-        }
-        VerifiedIter::advance_by(self, amount);
-        proof {
-            use_type_invariant(&*self);
-            lemma_svs_inj(vals_of::<V::X>(self.slabs@), vals_of::<V::X>(old(self).slabs@));
-            lemma_svs_past(old(self).it.out::<V::X>(old(self).slabs@), amount as int);
-            lemma_svs_inj(self.it.out::<V::X>(self.slabs@), past(old(self).it.out::<V::X>(old(self).slabs@), amount as int));
-        }
+        self.advance_by_v_shiftable_impl(amount)
     }
 
     #[inline(always)]
     fn seek_to(&mut self, at: usize) -> (r: Option<Get<'a, V>>) {
-        let p = self.pos();
-        if at >= p {
-            let r = self.nth(at - p);
-            proof {
-                lemma_svs_inj(vals_of::<V::X>(self.slabs@), vals_of::<V::X>(old(self).slabs@));
-                let (o, k) = (old(self).shift_left(), at - p);
-                if k < o.len() {
-                    assert(o.skip(k).take(1) =~= seq![o[k]]);
-                }
-            }
-            r
-        } else {
-            None
-        }
+        self.seek_to_impl(at)
     }
 
     #[inline(always)]
     fn shift(&mut self, range: Range<usize>) {
-        proof {
-            use_type_invariant(&*self);
-        }
-        let ghost (start, end) = (range.start, range.end);
-        VerifiedIter::shift(self, range);
-        proof {
-            use_type_invariant(&*self);
-            let v = vals_of::<V::X>(old(self).slabs@);
-            let a = if start <= old(self).shift_at() {
-                old(self).shift_at()
-            } else {
-                start as int
-            };
-            lemma_svs_inj(vals_of::<V::X>(self.slabs@), v);
-            lemma_svs_window(v, a, end as int);
-            lemma_svs_inj(self.it.out::<V::X>(self.slabs@), window(v, a, end as int));
-            <Get<'a, V> as VGet>::lemma_svs(v);
-        }
+        self.shift_v_shiftable_impl(range)
     }
 
     #[inline(always)]
     fn shift_next(&mut self, range: Range<usize>) -> (r: Option<Get<'a, V>>) {
-        proof {
-            use_type_invariant(&*self);
-        }
-        let ghost (start, end) = (range.start, range.end);
-        let r = VerifiedIter::shift_next(self, range);
-        proof {
-            use_type_invariant(&*self);
-            let v = vals_of::<V::X>(old(self).slabs@);
-            let w = window(v, start as int, end as int);
-            lemma_svs_inj(vals_of::<V::X>(self.slabs@), v);
-            lemma_svs_window(v, start as int, end as int);
-            <Get<'a, V> as VGet>::lemma_svs(w);
-            if w.len() > 0 {
-                let x = r->Some_0;
-                <Get<'a, V> as VGet>::lemma_sv_inj(x, w[0]);
-                assert(seq![x] =~= w.take(1));
-                lemma_svs_sub(w, 1, w.len() as int);
-                lemma_svs_inj(self.it.out::<V::X>(self.slabs@), w.skip(1));
-            }
-        }
-        r
+        self.shift_next_v_shiftable_impl(range)
     }
 }
 
@@ -1063,6 +619,7 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedIter<'a, V, C, K> {
             self.shift_left() == self.items(),
             Self::shift_unit(),
     {
+        self.lemma_shift_model_impl()
     }
 
     /// A lookahead: the iterator wrapped so that the value it gives next
@@ -1074,7 +631,7 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedIter<'a, V, C, K> {
             r.unshift_vals() == self.shift_vals(),
             r.unshift_left() == self.shift_items(),
     {
-        VerifiedUnshift::new(self)
+        self.unshift_impl()
     }
 
     /// The values of each of `ranges` of the column, one range after
@@ -1092,7 +649,7 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedIter<'a, V, C, K> {
             r.ranges_vals() == self.shift_vals(),
             r.ranges_left() == windows(self.shift_vals(), ranges@),
     {
-        VerifiedRanges::new(self, ranges)
+        self.ranges_impl(ranges)
     }
 }
 
@@ -1112,94 +669,6 @@ pub open spec fn run_units<T>(r: Run<T>) -> Seq<Run<T>> {
 /// What each of the runs `rs` stands for.
 pub open spec fn units_of_runs<T>(rs: Seq<Run<T>>) -> Seq<Seq<Run<T>>> {
     rs.map_values(|r: Run<T>| run_units(r))
-}
-
-/// One sequence, concatenated, is itself.
-pub(crate) proof fn lemma_concat_one<V>(x: Seq<V>)
-    ensures
-        concat(seq![x]) == x,
-{
-    assert(seq![x].drop_last() =~= Seq::<Seq<V>>::empty());
-    assert(concat(Seq::<Seq<V>>::empty()) =~= Seq::<V>::empty());
-    assert(concat(seq![x]) =~= x);
-}
-
-/// The runs of `xs` stand for its values, each run for some.
-pub(crate) proof fn lemma_run_units<T>(xs: Seq<T>)
-    requires
-        xs.len() <= usize::MAX,
-    ensures
-        concat(units_of_runs(runs_of(xs))) == unit_runs(xs),
-        forall|k: int| 0 <= k < runs_of(xs).len() ==> (#[trigger] runs_of(xs)[k]).count >= 1,
-    decreases xs.len(),
-{
-    if xs.len() == 0 {
-        assert(unit_runs(xs) =~= Seq::<Run<T>>::empty());
-    } else {
-        let d = xs.drop_first();
-        let r = runs_of(d);
-        lemma_run_units(d);
-        let one = Run { count: 1usize, value: xs[0] };
-        if r.len() > 0 && r[0].value == xs[0] {
-            let h = Run { count: (r[0].count + 1) as usize, value: xs[0] };
-            let rest = units_of_runs(r.drop_first());
-            assert(runs_of(xs) == seq![h] + r.drop_first());
-            assert(units_of_runs(seq![h] + r.drop_first()) =~= seq![run_units(h)] + rest);
-            assert(units_of_runs(r) =~= seq![run_units(r[0])] + rest);
-            lemma_concat_append(seq![run_units(h)], rest);
-            lemma_concat_append(seq![run_units(r[0])], rest);
-            lemma_concat_one(run_units(h));
-            lemma_concat_one(run_units(r[0]));
-            assert(run_units(h) + concat(rest) =~= seq![one] + (run_units(r[0]) + concat(rest)));
-            assert forall|k: int| 0 <= k < runs_of(xs).len() implies (#[trigger] runs_of(xs)[k]).count >= 1 by {}
-        } else {
-            let rest = units_of_runs(r);
-            assert(runs_of(xs) == seq![one] + r);
-            assert(units_of_runs(seq![one] + r) =~= seq![run_units(one)] + rest);
-            lemma_concat_append(seq![run_units(one)], rest);
-            lemma_concat_one(run_units(one));
-            assert forall|k: int| 0 <= k < runs_of(xs).len() implies (#[trigger] runs_of(xs)[k]).count >= 1 by {}
-        }
-    }
-}
-
-
-impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedRuns<'a, V, C, K> {
-    /// The first run of what is left, and the values it stands for.
-    fn take_run(&mut self) -> (r: Option<Run<Get<'a, V>>>)
-        ensures
-            final(self).shift_vals() == old(self).shift_vals(),
-            old(self).shift_left().len() > 0 ==> (r matches Some(x) && {
-                let n = x.count as int;
-                &&& 0 < n <= old(self).shift_left().len()
-                &&& old(self).shift_items().len() > 0
-                &&& x == old(self).shift_items()[0]
-                &&& final(self).shift_items() == old(self).shift_items().skip(1)
-                &&& Self::shift_spans(x) == old(self).shift_left().take(n)
-                &&& final(self).shift_left() == old(self).shift_left().skip(n)
-                &&& final(self).shift_at() == old(self).shift_at() + n
-            }),
-            old(self).shift_left().len() == 0 ==> {
-                &&& r is None
-                &&& old(self).shift_items().len() == 0
-                &&& final(self).shift_items().len() == 0
-                &&& final(self).shift_left().len() == 0
-            },
-    {
-        proof {
-            self.0.lemma_shift_model();
-        }
-        let ghost o = self.0.items();
-        let r = self.0.next_run();
-        proof {
-            self.0.lemma_shift_model();
-            lemma_svs_inj(self.0.shift_vals(), old(self).0.shift_vals());
-            if let Some(x) = r {
-                lemma_runs_of(o, x.value, x.count);
-            }
-        }
-        r
-    }
 }
 
 /// The runs of a column, repositioned as its values are: the model is
@@ -1235,12 +704,7 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VShiftable for VerifiedRuns<'
     }
 
     proof fn lemma_shift(&self) {
-        self.0.lemma_shift();
-        self.0.lemma_shift_model();
-        lemma_run_units(self.0.shift_left());
-        assert(runs_of(self.0.shift_left()).map_values(|x: Run<Get<'a, V>>| Self::shift_spans(x)) =~= units_of_runs(
-            runs_of(self.0.shift_left()),
-        ));
+        self.lemma_shift_impl()
     }
 
     proof fn lemma_shift_unit(x: Run<Get<'a, V>>) {
@@ -1253,40 +717,7 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VShiftable for VerifiedRuns<'
 
     #[inline(always)]
     fn shift_nth(&mut self, n: usize) -> (r: Option<Run<Get<'a, V>>>) {
-        let ghost (o, a) = (self.shift_items(), self.shift_at());
-        let mut i: usize = 0;
-        loop
-            invariant
-                self.shift_vals() == old(self).shift_vals(),
-                o == old(self).shift_items(),
-                a == old(self).shift_at(),
-                i <= n,
-                i <= o.len(),
-                self.shift_items() == o.skip(i as int),
-                self.shift_at() == a + concat(
-                    o.take(i as int).map_values(|x: Run<Get<'a, V>>| Self::shift_spans(x)),
-                ).len(),
-            decreases n - i,
-        {
-            let r = self.take_run();
-            match r {
-                Some(x) => {
-                    proof {
-                        let m = o.take(i as int).map_values(|x: Run<Get<'a, V>>| Self::shift_spans(x));
-                        let m1 = o.take(i + 1).map_values(|x: Run<Get<'a, V>>| Self::shift_spans(x));
-                        assert(m1.drop_last() =~= m);
-                        assert(o.skip(i as int).skip(1) =~= o.skip(i + 1));
-                    }
-                    if i == n {
-                        return Some(x);
-                    }
-                    i = i + 1;
-                },
-                None => {
-                    return None;
-                },
-            }
-        }
+        self.shift_nth_impl(n)
     }
 
     #[inline(always)]
@@ -1321,21 +752,7 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VShiftable for VerifiedRuns<'
 
     #[inline(always)]
     fn seek_to(&mut self, at: usize) -> (r: Option<Run<Get<'a, V>>>) {
-        let p = VShiftable::get_pos(&self.0);
-        if at < p {
-            return None;
-        }
-        VShiftable::advance_to(&mut self.0, at);
-        let r = self.take_run();
-        proof {
-            let (o, k) = (old(self).shift_left(), at - p);
-            if k < o.len() {
-                assert(o.skip(k).skip(Self::shift_spans(r->Some_0).len() as int) =~= o.skip(
-                    k + Self::shift_spans(r->Some_0).len(),
-                ));
-            }
-        }
-        r
+        self.seek_to_impl(at)
     }
 
     #[inline(always)]
@@ -1345,8 +762,7 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VShiftable for VerifiedRuns<'
 
     #[inline(always)]
     fn shift_next(&mut self, range: Range<usize>) -> (r: Option<Run<Get<'a, V>>>) {
-        VShiftable::shift(&mut self.0, range);
-        self.take_run()
+        self.shift_next_impl(range)
     }
 }
 
@@ -1368,8 +784,7 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedRuns<'a, V, C, K> {
             self.shift_left() == unit_runs(self.iter().items()),
             !Self::shift_unit(),
     {
-        self.0.lemma_shift_model();
-        <Get<'a, V> as VGet>::lemma_svs(self.0.shift_vals());
+        self.lemma_shift_model_impl()
     }
 
     /// A lookahead: the runs wrapped so that the run they give next can
@@ -1382,7 +797,7 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedRuns<'a, V, C, K> {
             r.unshift_vals() == self.shift_vals(),
             r.unshift_left() == self.shift_items(),
     {
-        VerifiedUnshift::new(self)
+        self.unshift_impl()
     }
 
     /// The runs of each of `ranges` of the column, one range after
@@ -1400,7 +815,7 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedRuns<'a, V, C, K> {
             r.ranges_vals() == self.shift_vals(),
             r.ranges_left() == windows(self.shift_vals(), ranges@),
     {
-        VerifiedRanges::new(self, ranges)
+        self.ranges_impl(ranges)
     }
 }
 

@@ -1,32 +1,31 @@
 //! Edits of a [`VerifiedColumn`] at a cursor: [`VerifiedEdit`], which
 //! [`VerifiedColumn::edit`] and [`VerifiedColumn::edit_at`] open.
+//!
+//! This file is a specification, to be read as the guide to reviewing
+//! says ([`verified`](crate::verified#reviewing-the-specification)): each
+//! function's body is a call of one of `imp` (`edit/imp.rs`), which has
+//! its contract word for word and is proved there.
 
 use super::kind::Kind;
 use super::model::Model;
 use super::seal;
 #[cfg(verus_keep_ghost)]
-use super::{after_call, lemma_held_runs, lemma_svs_add, lemma_svs_sub, run_values, Held, VGet};
+use super::{after_call, run_values, Held, VGet};
 use super::{Get, LenIndex, RunsFeed, VCodec, VIndex, VValue, VerifiedColumn};
 #[cfg(verus_keep_ghost)]
 use crate::cursor::{Insertable, Slabs};
+#[cfg(verus_keep_ghost)]
 use crate::cursor::{ReadsAgree, RunFeed};
-use crate::edit_core::EditCore;
 use crate::{Leb128, Run};
-use std::marker::PhantomData;
 use vstd::prelude::*;
 #[cfg(verus_keep_ghost)]
 use vstd::std_specs::iter::IteratorSpec;
 
-verus! {
+mod imp;
+#[allow(unused_imports)]
+use imp::*;
 
-/// The shared cursor of an edit of a column of `V` kept with an index of
-/// kind `K`.
-type KEdit<V, C, K> = EditCore<
-    <V as seal::Sealed<C>>::E,
-    <K as Kind<V, C>>::W,
-    <K as Kind<V, C>>::I,
-    <K as Kind<V, C>>::G,
->;
+verus! {
 
 /// An edit of a [`VerifiedColumn`] in progress: a cursor that walks the
 /// column once, front to back, and writes the edited column as it goes.
@@ -83,58 +82,6 @@ pub struct VerifiedEdit<'a, V: VValue<C>, C: VCodec = Leb128, K: VIndex<V, C> = 
     changed: bool,
 }
 
-/// Give the cursor `core` every run `feed` has, until it has no more.
-#[verifier::exec_allows_no_decreases_clause]
-#[inline(always)]
-fn insert_feed<V: VValue<C>, C: VCodec, K: VIndex<V, C>, R: RunFeed<V::E>>(core: &mut KEdit<V, C, K>, feed: &mut R)
-    requires
-        old(core).inv(),
-        old(core).held(),
-        old(feed).inv(),
-        old(feed).given() == Seq::<Held<V, C>>::empty(),
-    ensures
-        final(core).kept(*old(core)),
-        final(core).at() == old(core).at(),
-        final(core).written() == old(core).written() + final(feed).given(),
-        final(feed).inv(),
-        final(feed).key() == old(feed).key(),
-        final(feed).ended(),
-{
-    let ghost w0 = core.written();
-    proof {
-        assert(w0 =~= w0 + feed.given());
-    }
-    loop
-        invariant
-            core.kept(*old(core)),
-            core.at() == old(core).at(),
-            core.written() == w0 + feed.given(),
-            feed.inv(),
-            feed.key() == old(feed).key(),
-        ensures
-            core.kept(*old(core)),
-            core.at() == old(core).at(),
-            core.written() == w0 + feed.given(),
-            feed.inv(),
-            feed.key() == old(feed).key(),
-            feed.ended(),
-    {
-        let ghost g0 = feed.given();
-        match feed.next_run() {
-            None => {
-                break ;
-            },
-            Some((x, n)) => {
-                let ghost run = Seq::new(n as nat, |_i: int| x.val());
-                core.insert(x, n);
-                proof {
-                    assert(w0 + (g0 + run) =~= (w0 + g0) + run);
-                }
-            },
-        }
-    }
-}
-
 impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
     /// A cursor to edit the column with, standing at its first value.
     /// See [`VerifiedEdit`].
@@ -149,11 +96,7 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
             e.began() == old(self).edits(),
             e.result() == *final(self),
     {
-        let e = self.edit_at(0);
-        proof {
-            assert(old(self)@.take(0) =~= Seq::<V::S>::empty());
-        }
-        e
+        self.edit_impl()
     }
 
     /// A cursor to edit the column with, standing at the value at `at`
@@ -163,6 +106,7 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
     /// The cursor's `result()` is the column as it will be when the
     /// borrow of it ends: what `finish` says of that is what is known of
     /// the column afterwards.
+    #[inline(always)]
     pub fn edit_at(&mut self, at: usize) -> (e: VerifiedEdit<'_, V, C, K>)
         requires
             at <= old(self)@.len(),
@@ -175,16 +119,7 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
             e.began() == old(self).edits(),
             e.result() == *final(self),
     {
-        proof {
-            <Held<V, C> as VGet>::lemma_svs(self.core@);
-        }
-        self.core.lemma_column();
-        let counter = self.core.counter();
-        let core = EditCore::begin(&mut self.core, at);
-        proof {
-            lemma_svs_sub(old(self).core@, 0, at as int);
-        }
-        VerifiedEdit { col: self, core, counter, changed: false }
+        self.edit_at_impl(at)
     }
 }
 
@@ -273,8 +208,7 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedEdit<'a, V, C, K> {
         ensures
             0 <= self.at() <= self.orig().len() <= usize::MAX,
     {
-        self.core.lemma_at();
-        <Held<V, C> as VGet>::lemma_svs(self.core.orig_vals());
+        self.lemma_at_impl()
     }
 
     /// The cursor's place among the original values.
@@ -283,7 +217,7 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedEdit<'a, V, C, K> {
         ensures
             r == self.at(),
     {
-        self.core.pos()
+        self.pos_impl()
     }
 
     /// The cursor's place in the column being written: the number of
@@ -295,89 +229,14 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedEdit<'a, V, C, K> {
         ensures
             r == self.written().len(),
     {
-        proof {
-            <Held<V, C> as VGet>::lemma_svs(self.core.written());
-        }
-        self.core.out_pos()
+        self.out_pos_impl()
     }
 
     /// The number of slabs the edit has rewritten so far.
     #[doc(hidden)]
     #[inline(always)]
     pub fn rebuilds(&self) -> usize {
-        self.core.rebuilds()
-    }
-
-    /// One step: keep the next `n` values.
-    #[inline(always)]
-    fn step_advance(&mut self, n: usize)
-        requires
-            old(self).wf(),
-        ensures
-            final(self).kept(*old(self)),
-            final(self).at() == old(self).at() + old(self).step(n),
-            final(self).written() == old(self).written() + old(self).orig().subrange(
-                old(self).at(),
-                old(self).at() + old(self).step(n),
-            ),
-            final(self).changed() == old(self).changed(),
-    {
-        proof {
-            self.lemma_at();
-            <Held<V, C> as VGet>::lemma_svs(self.core.orig_vals());
-        }
-        let mut f = <V::E as Model<V::X>>::blind();
-        let _jumped = self.core.advance_with(n, &mut f);
-        proof {
-            let o = old(self).core;
-            let s = o.step_len(n);
-            lemma_svs_add(o.written(), o.orig_vals().subrange(o.at(), o.at() + s));
-            lemma_svs_sub(o.orig_vals(), o.at(), o.at() + s);
-        }
-    }
-
-    /// One step: write `n` copies of `value`.
-    #[inline(always)]
-    fn step_insert(&mut self, value: Get<'_, V>, n: usize)
-        requires
-            old(self).wf(),
-        ensures
-            final(self).kept(*old(self)),
-            final(self).at() == old(self).at(),
-            final(self).written() == old(self).written() + Seq::new(n as nat, |_i: int| value.sv()),
-            final(self).changed() == (old(self).changed() || n > 0),
-    {
-        let x = <V::E as ReadsAgree<'_, V::X>>::ins(value);
-        let ghost run = Seq::new(n as nat, |_i: int| x.val());
-        self.core.insert(x, n);
-        proof {
-            V::lemma_own(value);
-            lemma_svs_add(old(self).core.written(), run);
-            <Held<V, C> as VGet>::lemma_svs(run);
-            assert(<Held<V, C> as VGet>::svs(run) =~= Seq::new(n as nat, |_i: int| value.sv()));
-        }
-        self.changed = self.changed || n > 0;
-    }
-
-    /// One step: drop the next `n` values.
-    #[inline(always)]
-    fn step_delete(&mut self, n: usize)
-        requires
-            old(self).wf(),
-        ensures
-            final(self).kept(*old(self)),
-            final(self).at() == old(self).at() + old(self).step(n),
-            final(self).written() == old(self).written(),
-            final(self).changed() == (old(self).changed() || old(self).step(n) > 0),
-    {
-        proof {
-            self.lemma_at();
-            <Held<V, C> as VGet>::lemma_svs(self.core.orig_vals());
-        }
-        let left = self.core.remaining();
-        let mut f = <V::E as Model<V::X>>::blind();
-        self.core.delete_with(n, &mut f);
-        self.changed = self.changed || (n > 0 && left > 0);
+        self.rebuilds_impl()
     }
 
     /// Keep the next `n` values: the cursor passes over them, and they
@@ -397,8 +256,7 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedEdit<'a, V, C, K> {
             ),
             r.changed() == old(self).changed(),
     {
-        self.step_advance(n);
-        self
+        self.advance_impl(n)
     }
 
     /// Keep the values up to the one at `to` of the original column, and
@@ -425,12 +283,7 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedEdit<'a, V, C, K> {
             r.written() == old(self).written() + old(self).orig().subrange(old(self).at(), r.at()),
             r.changed() == old(self).changed(),
     {
-        proof {
-            self.lemma_at();
-        }
-        let n = to.checked_sub(self.core.pos()).expect("VerifiedEdit::seek is forward-only");
-        self.step_advance(n);
-        self
+        self.seek_impl(to)
     }
 
     /// Write `value` before the value the cursor stands at.
@@ -445,11 +298,7 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedEdit<'a, V, C, K> {
             r.written() == old(self).written().push(value.sv()),
             r.changed(),
     {
-        self.step_insert(value, 1);
-        proof {
-            assert(self.written() =~= old(self).written().push(value.sv()));
-        }
-        self
+        self.insert_impl(value)
     }
 
     /// Write `n` copies of `value` before the value the cursor stands
@@ -465,8 +314,7 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedEdit<'a, V, C, K> {
             r.written() == old(self).written() + Seq::new(n as nat, |_i: int| value.sv()),
             r.changed() == (old(self).changed() || n > 0),
     {
-        self.step_insert(value, n);
-        self
+        self.insert_run_impl(value, n)
     }
 
     /// Write, before the value the cursor stands at, the runs that
@@ -476,6 +324,7 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedEdit<'a, V, C, K> {
     /// The specification speaks of the iterator as
     /// [`splice_runs`](VerifiedColumn::splice_runs)'s does. The cursor
     /// has changed the column if a value was written.
+    #[inline(always)]
     pub fn insert_runs<'v, I: IntoIterator<Item = Run<Get<'v, V>>>>(&mut self, runs: I) -> (r: &mut Self)
         requires
             old(self).wf(),
@@ -489,39 +338,12 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedEdit<'a, V, C, K> {
                 ).written() + run_values(it.remaining())),
             r.changed() == (old(self).changed() || r.written().len() != old(self).written().len()),
     {
-        proof {
-            <Held<V, C> as VGet>::lemma_svs(self.core.written());
-        }
-        let before = self.core.out_pos();
-        let it = runs.into_iter();
-        let ghost it0 = it;
-        let mut feed = RunsFeed::<V, C, I::IntoIter> {
-            it,
-            init: Ghost(it0),
-            given: Ghost(Seq::empty()),
-            ended: Ghost(false),
-            _c: PhantomData,
-        };
-        proof {
-            assert(feed.given@ + feed.it.remaining() =~= it0.remaining());
-        }
-        insert_feed::<V, C, K, _>(&mut self.core, &mut feed);
-        let after = self.core.out_pos();
-        proof {
-            if it0.obeys_prophetic_iter_laws() {
-                let rs = it0.remaining();
-                assert(feed.given@ =~= feed.given@ + feed.it.remaining());
-                lemma_held_runs::<V, C>(rs);
-            }
-            lemma_svs_add(old(self).core.written(), feed.given());
-            <Held<V, C> as VGet>::lemma_svs(self.core.written());
-        }
-        self.changed = self.changed || after != before;
-        self
+        self.insert_runs_impl::<I>(runs)
     }
 
     /// The value the cursor stands at, or `None` at the end. The cursor
     /// stays where it is.
+    #[inline(always)]
     pub fn peek(&mut self) -> (r: Option<Get<'_, V>>)
         requires
             old(self).wf(),
@@ -532,31 +354,7 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedEdit<'a, V, C, K> {
                 None => old(self).at() == old(self).orig().len(),
             },
     {
-        let ghost (ov, a) = (self.core.orig_vals(), self.core.at());
-        proof {
-            self.core.lemma_at();
-            <Held<V, C> as VGet>::lemma_svs(ov);
-        }
-        let r = if self.core.dirty() {
-            self.core.rebuild_reader()
-        } else {
-            self.core.reader()
-        };
-        match r {
-            Some((st, slab)) => {
-                let ghost k = choose|k: nat|
-                    #![trigger <V::E as Slabs>::st_at(slab.data@, *st, k)]
-                    k < <V::E as Slabs>::vals(*slab).len() && <V::E as Slabs>::st_at(slab.data@, *st, k) && <V::E as Slabs>::vals(
-                        *slab,
-                    )[k as int] == ov[a];
-                let v = <V::E as Model<V::X>>::peek(slab, st, Ghost(k));
-                proof {
-                    V::lemma_own(v);
-                }
-                Some(v)
-            },
-            None => None,
-        }
+        self.peek_impl()
     }
 
     /// Put `value` in the place of the value the cursor stands at, and
@@ -565,6 +363,7 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedEdit<'a, V, C, K> {
     ///
     /// Where the value there is `value` already it is kept, and the
     /// cursor has not changed the column by this.
+    #[inline(always)]
     pub fn replace_with(&mut self, value: Get<'_, V>) -> (r: &mut Self)
         requires
             old(self).wf(),
@@ -581,28 +380,7 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedEdit<'a, V, C, K> {
                 &&& r.changed() == old(self).changed()
             },
     {
-        let (there, same) = match self.peek() {
-            Some(cur) => (true, V::same(cur, value)),
-            None => (false, false),
-        };
-        if there {
-            if same {
-                self.step_advance(1);
-                proof {
-                    let o = *old(self);
-                    o.lemma_at();
-                    assert(o.orig().subrange(o.at(), o.at() + 1) =~= seq![value.sv()]);
-                    assert(self.written() =~= o.written().push(value.sv()));
-                }
-            } else {
-                self.step_delete(1);
-                self.step_insert(value, 1);
-                proof {
-                    assert(self.written() =~= old(self).written().push(value.sv()));
-                }
-            }
-        }
-        self
+        self.replace_with_impl(value)
     }
 
     /// Drop the next `n` values: the cursor passes over them, and they
@@ -619,8 +397,7 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedEdit<'a, V, C, K> {
             r.written() == old(self).written(),
             r.changed() == (old(self).changed() || old(self).step(n) > 0),
     {
-        self.step_delete(n);
-        self
+        self.delete_impl(n)
     }
 
     /// End the edit: the column holds what the cursor has written and
@@ -634,6 +411,7 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedEdit<'a, V, C, K> {
     ///
     /// Where the column's kind of index is not kept for the edited
     /// values (`VKeeps::keeps`), as an edit by `splice` does.
+    #[inline(always)]
     pub fn finish(self)
         requires
             self.wf(),
@@ -641,16 +419,7 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedEdit<'a, V, C, K> {
             self.result()@ == self.now(),
             self.result().edits() == after_call(self.began(), self.changed()),
     {
-        let VerifiedEdit { col: column, core: cursor, counter: before, changed: edit } = self;
-        proof {
-            cursor.lemma_at();
-            let a = cursor.orig_vals();
-            <Held<V, C> as VGet>::lemma_svs(a);
-            lemma_svs_add(cursor.written(), a.skip(cursor.at()));
-            lemma_svs_sub(a, cursor.at(), a.len() as int);
-        }
-        cursor.end(&mut column.core);
-        column.count_call(before, edit);
+        self.finish_impl()
     }
 }
 

@@ -1,5 +1,10 @@
 //! A column's load, run by run ([`VerifiedColumn::load_iter`]), as the
 //! old API's [`Column::load_iter`](crate::Column::load_iter) gives it.
+//!
+//! This file is a specification, to be read as the guide to reviewing
+//! says ([`verified`](crate::verified#reviewing-the-specification)): each
+//! function's body is a call of one of `imp` (`load/imp.rs`), which has
+//! its contract word for word and is proved there.
 
 use super::kind::{Kind, VIndex};
 use super::model::Loading;
@@ -8,30 +13,22 @@ use super::model::Model;
 use super::seal;
 use super::LenIndex;
 #[cfg(verus_keep_ghost)]
-use super::{fill_of, lemma_held, Held, VGet};
+use super::{fill_of, Held, VGet};
 use super::{Get, VCodec, VValue, VerifiedColumn};
 #[cfg(verus_keep_ghost)]
 use crate::cursor::ReadsAgree;
 #[cfg(verus_keep_ghost)]
 use crate::iter_core::{Decode, Decoders};
-use crate::load_core::LoadCore;
 #[cfg(verus_keep_ghost)]
 use crate::load_core::Loads;
 use crate::{Leb128, LoadOpts, MaybeFill, PackError, Run};
 use vstd::prelude::*;
 
-verus! {
+mod imp;
+#[allow(unused_imports)]
+use imp::*;
 
-/// The load core of a column of `V` kept with an index of kind `K`, of
-/// bytes that live for `'a`.
-type KLoad<'a, V, C, K> = LoadCore<
-    'a,
-    <V as seal::Sealed<C>>::E,
-    <V as seal::Sealed<C>>::X,
-    <K as Kind<V, C>>::W,
-    <K as Kind<V, C>>::G,
-    <<V as seal::Sealed<C>>::E as Loading<'a, <V as seal::Sealed<C>>::X>>::Ld,
->;
+verus! {
 
 /// A column's load in progress, run by run, as the old API's
 /// [`ColumnLoadIter`](crate::ColumnLoadIter) is: [`try_next_run`]
@@ -111,6 +108,7 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedLoadIter<'a, V, C, K>
     /// The next run of the saved column, or `None` at its end. A fill
     /// gives all of its values as one run. The bytes are not trusted:
     /// a run is checked before it is given, and an error ends the load.
+    #[inline(always)]
     pub fn try_next_run(&mut self) -> (r: Result<Option<Run<Get<'a, V>>>, PackError>)
         requires
             old(self).wf(),
@@ -127,30 +125,14 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedLoadIter<'a, V, C, K>
             r is Ok ==> !old(self).failed() && !final(self).failed(),
             r is Err ==> final(self).failed(),
     {
-        if let Some((value, len)) = self.fill {
-            if self.emitted || len == 0 {
-                return Ok(None);
-            }
-            self.emitted = true;
-            return Ok(Some(Run { count: len, value }));
-        }
-        let ghost p0 = self.core.ld.pulled();
-        let r = self.core.next_run();
-        proof {
-            if let Ok(Some(run)) = r {
-                let more = Seq::new(run.count as nat, |_j: int| run.value);
-                <Get<'a, V> as VGet>::lemma_svs(p0);
-                <Get<'a, V> as VGet>::lemma_svs(more);
-                <Get<'a, V> as VGet>::lemma_svs(p0 + more);
-            }
-        }
-        r
+        self.try_next_run_impl()
     }
 
     /// Read and check what is left, and give the column: as
     /// [`load_with`](VerifiedColumn::load_with) gives it, and beginning
     /// with the runs given. A fill gives its column. No error unless a
     /// step failed, or the bytes are no column `load_with` takes.
+    #[inline(always)]
     pub fn finalize(self) -> (r: Result<VerifiedColumn<V, C, K>, PackError>)
         requires
             self.wf(),
@@ -173,37 +155,7 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedLoadIter<'a, V, C, K>
                 },
             },
     {
-        if let Some((value, len)) = self.fill {
-            let c = VerifiedColumn::<V, C, K>::filled(len, value, self.max_segments);
-            return Ok(c);
-        }
-        let ghost (data, p) = (self.core.ld.data(), self.core.ld.pulled());
-        proof {
-            let vs = <V::E as Model<V::X>>::values(data);
-            <V::E as Loading<'a, V::X>>::lemma_loader(data);
-            <Held<V, C> as VGet>::lemma_svs(vs);
-            if K::keeps(<Held<V, C> as VGet>::svs(vs)) {
-                K::lemma_refuses(vs);
-            }
-        }
-        match self.core.finish::<K::I>(self.max_segments, self.length, i64::MIN, i64::MAX) {
-            Ok(core) => {
-                let c = VerifiedColumn { core };
-                proof {
-                    // the column begins with what was given
-                    let n = p.len() as int;
-                    let h = p.map_values(
-                        |v: <<V::X as Decoders<'a>>::D as Decode>::Item| <V::E as ReadsAgree<'a, V::X>>::own(v),
-                    );
-                    lemma_held::<V, C>(p);
-                    assert(h =~= super::held::<V, C>(p));
-                    <Held<V, C> as VGet>::lemma_svs(core@);
-                    <Held<V, C> as VGet>::lemma_svs(h);
-                }
-                Ok(c)
-            },
-            Err(e) => Err(e),
-        }
+        self.finalize_impl()
     }
 }
 
@@ -216,6 +168,7 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
     ///
     /// A slab holds two runs or more: [`Column`](crate::Column) panics
     /// when asked for fewer, and here that is a `requires`.
+    #[inline(always)]
     pub fn load_iter<'a, F: MaybeFill<Get<'a, V>>>(bytes: &'a [u8], opts: LoadOpts<F>) -> (r: VerifiedLoadIter<'a, V, C, K>)
         requires
             opts.max_segments() >= 2,
@@ -227,23 +180,7 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
             r.given().len() == 0,
             !r.failed(),
     {
-        let (length, fill, max_segments) = opts.parts();
-        let mut fill_run = None;
-        if bytes.len() == 0 {
-            if let Some(len) = length {
-                if len as u64 <= i64::MAX as u64 && len <= usize::MAX - 3 {
-                    if let Some(v) = fill.fill_value() {
-                        fill_run = Some((v, len));
-                    }
-                }
-            }
-        }
-        let core = LoadCore::start(bytes, max_segments);
-        let r: VerifiedLoadIter<'a, V, C, K> = VerifiedLoadIter { core, fill: fill_run, emitted: false, length, max_segments };
-        proof {
-            <Get<'a, V> as VGet>::lemma_svs(r.core.ld.pulled());
-        }
-        r
+        Self::load_iter_impl::<F>(bytes, opts)
     }
 }
 

@@ -33,32 +33,32 @@
 //! [`VerifiedAccIterState`] ([`VerifiedAccIter::suspend`]), from which
 //! [`VerifiedAccIterState::try_resume`] gives an iterator again: one
 //! whose running sum counts from where the suspended one's did.
+//!
+//! This file is a specification, to be read as the guide to reviewing
+//! says ([`verified`](crate::verified#reviewing-the-specification)): each
+//! function's body is a call of one of `imp` (`acc_iter/imp.rs`), which has
+//! its contract word for word and is proved there.
 
 #[cfg(verus_keep_ghost)]
-use super::acc::{
-    accumulated, lemma_acc_cat, lemma_acc_range, lemma_acc_run, lemma_cancel, lemma_vacc, times,
-    VGroup,
-};
+use super::acc::{accumulated, times, VGroup};
 use super::acc::{AccIndex, AccOf, AccWeight, VAccum, VAccumulated};
-#[cfg(verus_keep_ghost)]
-use super::shift::{lemma_singles, lemma_svs_inj};
 use super::Get;
 #[cfg(verus_keep_ghost)]
-use super::{head_run, lemma_svs_sub, VGet, VSpec};
+use super::{head_run, VGet, VSpec};
 use super::{VCodec, VValue, VerifiedColumn, VerifiedIter, VerifiedIterState, VerifiedRuns};
 use super::{VShiftable, VerifiedRanges, VerifiedUnshift};
 use crate::btree::SlabBTree;
 #[cfg(verus_keep_ghost)]
 use crate::column::Slab;
 #[cfg(verus_keep_ghost)]
-use crate::cursor::{slab_lens, Slabs};
+use crate::cursor::Slabs;
 #[cfg(verus_keep_ghost)]
 use crate::fenwick::total;
-use crate::iter_core::ICore;
 #[cfg(verus_keep_ghost)]
 use crate::iter_core::{past, vals_of, window};
 #[cfg(verus_keep_ghost)]
-use crate::prefix_core::{at_sum, before, index_ok, vsum};
+use crate::prefix_core::before;
+#[cfg(verus_keep_ghost)]
 use crate::prefix_core::{p_delta_nth, p_next, p_next_run_from, p_nth, p_reset};
 #[cfg(verus_keep_ghost)]
 use crate::window::windows;
@@ -66,6 +66,10 @@ use crate::{Leb128, PackError, Run};
 use std::marker::PhantomData;
 use std::ops::Range;
 use vstd::prelude::*;
+
+mod imp;
+#[allow(unused_imports)]
+use imp::*;
 
 verus! {
 
@@ -91,17 +95,6 @@ pub struct VerifiedAccValue<'a, V: VAccumulated> {
     /// them all, so this one is public too; nothing is promised of a
     /// value a client makes itself.)
     pub total: V::Acc,
-}
-
-/// What was added last is taken away again by adding what undoes it:
-/// from the laws of a [`VGroup`] alone.
-proof fn lemma_undo<A: VGroup>(p: A, a: A)
-    ensures
-        A::plus(A::plus(p, a), A::minus(A::zero(), a)) == p,
-{
-    A::lemma_plus(p, a, A::minus(A::zero(), a));
-    A::lemma_minus(A::zero(), a);
-    A::lemma_plus(p, p, p);
 }
 
 impl<'a, V: VAccumulated> VerifiedAccValue<'a, V> {
@@ -130,33 +123,28 @@ impl<'a, V: VAccumulated> VerifiedAccValue<'a, V> {
         ensures
             self.prefix() == p,
     {
-        lemma_undo::<V::Acc>(p, V::adds(self.value.sv()));
+        self.lemma_prefix_impl(p)
     }
 
     /// What the values through this one add up to.
     #[verifier::when_used_as_spec(spec_total)]
-    #[inline]
+    #[inline(always)]
     pub fn total(&self) -> (r: V::Acc)
         ensures
             r == self.total(),
     {
-        self.total.dup()
+        self.total_impl()
     }
 
     /// What the values before this one add up to: `total()` with what
     /// this value adds taken away again.
     #[verifier::when_used_as_spec(spec_prefix)]
-    #[inline]
+    #[inline(always)]
     pub fn prefix(&self) -> (r: V::Acc)
         ensures
             r == self.prefix(),
     {
-        let adds = V::to_acc(self.value);
-        let mut back = <V::Acc as VAccum>::new_zero();
-        back.sub_acc(&adds);
-        let mut r = self.total.dup();
-        r.add_acc(&back);
-        r
+        self.prefix_impl()
     }
 }
 
@@ -187,84 +175,13 @@ pub struct VerifiedAccSeek<'a, V: VAccumulated> {
 }
 
 impl<'a, V: VAccumulated> Clone for VerifiedAccSeek<'a, V> {
+    #[inline(always)]
     fn clone(&self) -> (r: Self)
         ensures
             r == *self,
     {
-        VerifiedAccSeek {
-            pos: self.pos,
-            delta: self.delta.dup(),
-            pv: VerifiedAccValue { value: self.pv.value, total: self.pv.total.dup() },
-        }
+        self.clone_impl()
     }
-}
-
-// ── What the running sum is ─────────────────────────────────────────────────
-/// One more value adds its accumulator after what a range adds up to.
-proof fn lemma_step<V: VAccumulated>(c: Seq<<V as VSpec>::S>, b: int, k: int)
-    requires
-        0 <= b <= k < c.len(),
-    ensures
-        accumulated::<V>(c.subrange(b, k + 1)) == <V::Acc as VGroup>::plus(
-            accumulated::<V>(c.subrange(b, k)),
-            V::adds(c[k]),
-        ),
-{
-    assert(c.subrange(b, k + 1).drop_last() =~= c.subrange(b, k));
-}
-
-/// The running sum of an iterator at `pos` whose sum counts from
-/// `base_at`, as the shared cores keep it, is what the values from
-/// `base_at` up to `pos` add up to.
-proof fn lemma_running<'a, V: VAccumulated + VValue<C>, C: VCodec>(
-    s: Seq<Slab<<V::E as Slabs>::Tail>>,
-    base: V::Acc,
-    sum: V::Acc,
-    base_at: int,
-    pos: int,
-)
-    requires
-        0 <= base_at <= pos <= vals_of::<V::X>(s).len(),
-        base == vsum::<Get<'a, V>, AccOf<V>>(before::<V::X>(s, base_at)),
-        <V::Acc as VGroup>::plus(base, sum) == vsum::<Get<'a, V>, AccOf<V>>(before::<V::X>(s, pos)),
-    ensures
-        sum == accumulated::<V>(<Get<'a, V> as VGet>::svs(vals_of::<V::X>(s)).subrange(base_at, pos)),
-{
-    let o = vals_of::<V::X>(s);
-    let c = <Get<'a, V> as VGet>::svs(o);
-    <Get<'a, V> as VGet>::lemma_svs(o);
-    let b0 = before::<V::X>(s, base_at);
-    let b1 = before::<V::X>(s, pos);
-    assert(b0 =~= o.subrange(0, base_at));
-    assert(b1 =~= o.subrange(0, pos));
-    lemma_svs_sub(o, 0, base_at);
-    lemma_svs_sub(o, 0, pos);
-    assert(c.subrange(0, base_at) =~= c.take(base_at));
-    assert(c.subrange(0, pos) =~= c.take(pos));
-    lemma_vacc::<V>(b0);
-    lemma_vacc::<V>(b1);
-    // what is added after `base` and gives the same is the same
-    lemma_acc_range::<V>(c, base_at, pos);
-    lemma_cancel::<V::Acc>(base, sum, accumulated::<V>(c.subrange(base_at, pos)));
-}
-
-/// What the values before index `i` add up to, as the shared cores
-/// keep it, is `accumulated` of the column's first `i` values.
-proof fn lemma_acc_before<'a, V: VAccumulated + VValue<C>, C: VCodec>(s: Seq<Slab<<V::E as Slabs>::Tail>>, i: int)
-    requires
-        0 <= i <= vals_of::<V::X>(s).len(),
-    ensures
-        vsum::<Get<'a, V>, AccOf<V>>(before::<V::X>(s, i)) == accumulated::<V>(
-            <Get<'a, V> as VGet>::svs(vals_of::<V::X>(s)).take(i),
-        ),
-{
-    let o = vals_of::<V::X>(s);
-    let c = <Get<'a, V> as VGet>::svs(o);
-    let b = before::<V::X>(s, i);
-    assert(b =~= o.subrange(0, i));
-    lemma_svs_sub(o, 0, i);
-    assert(c.subrange(0, i) =~= c.take(i));
-    lemma_vacc::<V>(b);
 }
 
 // ── The iterator ────────────────────────────────────────────────────────────
@@ -300,22 +217,6 @@ pub struct VerifiedAccIter<'a, V: VAccumulated + VValue<C> + 'a, C: VCodec + 'a 
 }
 
 impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
-    /// The running sum is kept as the shared cores ask, over the index
-    /// of the column.
-    #[verifier::type_invariant]
-    spec fn inv(&self) -> bool {
-        self.ok()
-    }
-
-    /// The invariant, for the lemmas to ask for.
-    spec fn ok(&self) -> bool {
-        let s = self.inner.slabs@;
-        &&& at_sum::<V::X, AccOf<V>>(self.inner.it, self.total, self.base, s)
-        &&& index_ok::<V::X, AccOf<V>>(self.ix, s)
-        &&& self.base_at <= self.inner.it.pos <= total(slab_lens(s))
-        &&& self.base == vsum::<Get<'a, V>, AccOf<V>>(before::<V::X>(s, self.base_at as int))
-    }
-
     /// The iterator without its sums: a [`VerifiedIter`] that stands
     /// where this one does, over the same column, with the same values
     /// left.
@@ -381,106 +282,6 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
         )
     }
 
-    /// What the invariant says, in the words of the specifications.
-    proof fn lemma_sums(&self)
-        requires
-            self.ok(),
-        ensures
-            self.spec_pos() == self.inner.it.pos,
-            self.spec_end_pos() == self.inner.it.pos + self.inner.it.items_left,
-            self.base_pos() <= self.spec_pos() <= self.spec_end_pos(),
-            self.spec_pos() <= self.column().len() <= usize::MAX,
-            self.column().len() == total(slab_lens(self.inner.slabs@)),
-            self.spec_total() == self.acc_to(self.spec_pos() as int),
-            self.rest() == window(self.column(), self.spec_pos() as int, self.spec_end_pos() as int),
-            self.rest().len() == self.inner.items().len(),
-            self.items().len() == self.inner.items().len(),
-    {
-        let s = self.inner.slabs@;
-        self.inner.lemma_window();
-        self.inner.it.lemma_out_len::<V::X>(s);
-        <Get<'a, V> as VGet>::lemma_svs(vals_of::<V::X>(s));
-        lemma_running::<V, C>(s, self.base, self.total, self.base_at as int, self.inner.it.pos as int);
-    }
-
-    /// What the `i`th of the values left is given as.
-    proof fn lemma_gives(&self, i: int, pv: VerifiedAccValue<'a, V>)
-        requires
-            self.ok(),
-            0 <= i < self.inner.items().len(),
-            pv.value == self.inner.items()[i],
-            pv.spec_total() == self.acc_to(self.spec_pos() + i + 1),
-        ensures
-            pv == self.items()[i],
-            pv.value.sv() == self.rest()[i],
-            pv.spec_prefix() == self.acc_to(self.spec_pos() + i),
-            pv.spec_total() == <V::Acc as VGroup>::plus(pv.spec_prefix(), V::adds(pv.value.sv())),
-            i == 0 ==> pv.spec_prefix() == self.spec_total(),
-    {
-        self.lemma_sums();
-        let c = self.column();
-        let b = self.base_at as int;
-        let k = self.inner.it.pos + i;
-        <Get<'a, V> as VGet>::lemma_svs(self.inner.items());
-        // the value is the column's at `k`
-        assert(self.rest()[i] == c[k]);
-        lemma_step::<V>(c, b, k);
-        lemma_undo::<V::Acc>(self.acc_to(k), V::adds(c[k]));
-    }
-
-    /// What a move past `k` of the values left leaves.
-    proof fn lemma_moved(&self, after: Self, k: int)
-        requires
-            self.ok(),
-            after.ok(),
-            after.inner.slabs == self.inner.slabs,
-            after.inner.col == self.inner.col,
-            after.base_at == self.base_at,
-            0 <= k <= self.inner.items().len(),
-            after.inner.items() == self.inner.items().skip(k),
-            after.inner.it.pos == self.inner.it.pos + k,
-        ensures
-            after.column() == self.column(),
-            after.source() == self.source(),
-            after.base_pos() == self.base_pos(),
-            after.rest() == self.rest().skip(k),
-            after.items() == self.items().skip(k),
-            after.spec_pos() == self.spec_pos() + k,
-            after.spec_total() == self.acc_to(self.spec_pos() + k),
-    {
-        self.lemma_sums();
-        after.lemma_sums();
-        let o = self.inner.items();
-        <Get<'a, V> as VGet>::lemma_svs(o);
-        <Get<'a, V> as VGet>::lemma_svs(o.skip(k));
-        lemma_svs_sub(o, k, o.len() as int);
-        assert(after.rest() =~= self.rest().skip(k));
-        assert(after.items() =~= self.items().skip(k));
-    }
-
-    /// What the first `k` of the values left add up to is what, added
-    /// after the running sum where the iterator stands, gives it `k`
-    /// values on.
-    proof fn lemma_passed(&self, k: int)
-        requires
-            self.ok(),
-            0 <= k <= self.inner.items().len(),
-        ensures
-            self.rest().take(k) == self.column().subrange(self.spec_pos() as int, self.spec_pos() + k),
-            self.acc_to(self.spec_pos() + k) == <V::Acc as VGroup>::plus(
-                self.acc_to(self.spec_pos() as int),
-                accumulated::<V>(self.rest().take(k)),
-            ),
-    {
-        self.lemma_sums();
-        let c = self.column();
-        let b = self.base_at as int;
-        let p = self.inner.it.pos as int;
-        assert(self.rest().take(k) =~= c.subrange(p, p + k));
-        assert(c.subrange(b, p + k) =~= c.subrange(b, p) + c.subrange(p, p + k));
-        lemma_acc_cat::<V>(c.subrange(b, p), c.subrange(p, p + k));
-    }
-
     /// The iterator stands in the column, at `base_pos()` or after it,
     /// and its running sum is what the column's values from there up to
     /// it add up to.
@@ -489,8 +290,7 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
             self.base_pos() <= self.pos() <= self.column().len(),
             self.total() == self.acc_to(self.pos() as int),
     {
-        use_type_invariant(self);
-        self.lemma_sums();
+        self.lemma_total_impl()
     }
 
     /// What the iterator gives of each value left: the value, what the
@@ -509,16 +309,7 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
                     )
                 },
     {
-        use_type_invariant(self);
-        self.lemma_sums();
-        assert forall|i: int| 0 <= i < self.items().len() implies {
-            &&& (#[trigger] self.items()[i]).value.sv() == self.rest()[i]
-            &&& self.items()[i].total() == self.acc_to(self.pos() + i + 1)
-            &&& self.items()[i].prefix() == self.acc_to(self.pos() + i)
-            &&& self.items()[i].total() == <V::Acc as VGroup>::plus(self.items()[i].prefix(), V::adds(self.rest()[i]))
-        } by {
-            self.lemma_gives(i, self.items()[i]);
-        }
+        self.lemma_items_impl()
     }
 
     /// What the iterator reads is what its column holds: of
@@ -531,49 +322,7 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
                 None => self.column().len() == 0,
             },
     {
-        self.inner.lemma_source();
-    }
-
-    /// An iterator of no column.
-    fn none() -> (r: Self)
-        ensures
-            r.items().len() == 0,
-            r.rest().len() == 0,
-            r.column().len() == 0,
-            r.source() is None,
-            r.pos() == 0,
-            r.end_pos() == 0,
-            r.base_pos() == 0,
-            r.total() == <V::Acc as VGroup>::zero(),
-    {
-        let inner: VerifiedIter<'a, V, C, AccIndex> = VerifiedIter { it: ICore::empty::<V::X>(), slabs: &[], col: None };
-        let zero = <V::Acc as VAccum>::new_zero();
-        let base = <V::Acc as VAccum>::new_zero();
-        proof {
-            let s = inner.slabs@;
-            <Get<'a, V> as VGet>::lemma_svs(inner.items());
-            inner.it.lemma_out_len::<V::X>(s);
-            assert(slab_lens(s) =~= Seq::<nat>::empty());
-            <Get<'a, V> as VGet>::lemma_svs(vals_of::<V::X>(s));
-            assert(before::<V::X>(s, 0) =~= Seq::<Get<'a, V>>::empty());
-            <V::Acc as VGroup>::lemma_plus(zero, zero, zero);
-        }
-        VerifiedAccIter { ix: None, inner, total: zero, base, base_at: 0 }
-    }
-
-    /// The iterator, taken out of its place to be moved: an accumulator
-    /// need not be `Copy`, so a move takes the running sum with the
-    /// rest of the iterator and writes all of it back, the fields being
-    /// tied to one another. Until then an iterator of no column stands
-    /// in its place.
-    #[inline(always)]
-    fn take(&mut self) -> (me: Self)
-        ensures
-            me == *old(self),
-    {
-        let mut me = Self::none();
-        core::mem::swap(self, &mut me);
-        me
+        self.lemma_source_impl()
     }
 
     /// The index in the column of the value `next` gives, if it gives
@@ -584,7 +333,7 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
     /// iterator stands in the column or at its end, and at `base_pos()`
     /// or after it.
     #[verifier::when_used_as_spec(spec_pos)]
-    #[inline]
+    #[inline(always)]
     pub fn pos(&self) -> (r: usize)
         ensures
             r == self.pos(),
@@ -592,17 +341,13 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
             self.pos() <= self.column().len(),
             self.rest() == window(self.column(), self.pos() as int, self.end_pos() as int),
     {
-        proof {
-            use_type_invariant(self);
-            self.lemma_sums();
-        }
-        self.inner.pos()
+        self.pos_impl()
     }
 
     /// Where the iterator's window ends: the index in the column that
     /// its last value comes before ([`VerifiedIter::end_pos`]).
     #[verifier::when_used_as_spec(spec_end_pos)]
-    #[inline]
+    #[inline(always)]
     pub fn end_pos(&self) -> (r: usize)
         ensures
             r == self.end_pos(),
@@ -610,61 +355,50 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
             self.pos() <= self.column().len(),
             self.rest() == window(self.column(), self.pos() as int, self.end_pos() as int),
     {
-        proof {
-            use_type_invariant(self);
-            self.lemma_sums();
-        }
-        self.inner.end_pos()
+        self.end_pos_impl()
     }
 
     /// How far the window reaches from where the iterator stands:
     /// `end_pos() - pos()`. That is how many values are left unless the
     /// window runs past the column's end; `len()` is how many are left.
-    #[inline]
+    #[inline(always)]
     pub fn items_left(&self) -> (r: usize)
         ensures
             r == self.end_pos() - self.pos(),
     {
-        proof {
-            use_type_invariant(self);
-            self.lemma_sums();
-        }
-        self.inner.it.items_left
+        self.items_left_impl()
     }
 
     /// The running sum: what the column's values from `base_pos()` up to
     /// the iterator add up to. It is what the values before the one
     /// `next` gives add up to, if it gives one.
     #[verifier::when_used_as_spec(spec_total)]
-    #[inline]
+    #[inline(always)]
     pub fn total(&self) -> (r: V::Acc)
         ensures
             r == self.total(),
             self.base_pos() <= self.pos() <= self.column().len(),
             self.total() == self.acc_to(self.pos() as int),
     {
-        proof {
-            use_type_invariant(self);
-            self.lemma_sums();
-        }
-        self.total.dup()
+        self.total_impl()
     }
 
     /// The running sum: [`total`](Self::total), by another name.
-    #[inline]
+    #[inline(always)]
     pub fn prefix(&self) -> (r: V::Acc)
         ensures
             r == self.total(),
             self.base_pos() <= self.pos() <= self.column().len(),
             self.total() == self.acc_to(self.pos() as int),
     {
-        self.total()
+        self.prefix_impl()
     }
 
     /// Start the running sum again from where the iterator stands:
     /// [`total`](Self::total) and the sums of the values given from
     /// here on count from this position. The iterator does not move,
     /// and its window stays.
+    #[inline(always)]
     pub fn reset_prefix(&mut self)
         ensures
             final(self).rest() == old(self).rest(),
@@ -675,29 +409,14 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
             final(self).base_pos() == old(self).pos(),
             final(self).total() == <V::Acc as VGroup>::zero(),
     {
-        proof {
-            use_type_invariant(&*self);
-            use_type_invariant(&self.inner);
-            self.lemma_sums();
-        }
-        let own = self.take();
-        let (ix, slabs, col, it) = (own.ix, own.inner.slabs, own.inner.col, own.inner.it);
-        let (mut sum, mut base) = (own.total, own.base);
-        p_reset::<V::X, AccOf<V>>(&it, slabs, &mut sum, &mut base);
-        let at = it.pos;
-        *self = VerifiedAccIter { ix, inner: VerifiedIter { it, slabs, col }, total: sum, base, base_at: at };
-        proof {
-            use_type_invariant(&*self);
-            self.lemma_sums();
-            // nothing is added up yet
-            assert(self.column().subrange(at as int, at as int) =~= Seq::empty());
-        }
+        self.reset_prefix_impl()
     }
 
     /// Make the window end at `end`: the iterator then gives the
     /// column's values from where it stands up to `end`, and none if it
     /// stands at `end` or past it ([`VerifiedIter::set_max`]). The
     /// running sum stays.
+    #[inline(always)]
     pub fn set_max(&mut self, end: usize)
         ensures
             final(self).column() == old(self).column(),
@@ -712,15 +431,7 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
             },
             final(self).rest() == window(old(self).column(), old(self).pos() as int, end as int),
     {
-        proof {
-            use_type_invariant(&*self);
-            use_type_invariant(&self.inner);
-            self.lemma_sums();
-        }
-        self.inner.it.set_max::<V::X>(self.inner.slabs, end);
-        proof {
-            self.inner.lemma_window();
-        }
+        self.set_max_impl(end)
     }
 
     /// Move on so that the value at index `target` of the column comes
@@ -730,6 +441,7 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
     /// that with nothing left.
     ///
     /// Few of the values passed over are looked at ([`nth`](Self::nth)).
+    #[inline(always)]
     pub fn advance_to(&mut self, target: usize)
         ensures
             final(self).column() == old(self).column(),
@@ -750,17 +462,12 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
                 &&& final(self).end_pos() == final(self).pos()
             },
     {
-        proof {
-            use_type_invariant(&*self);
-            self.lemma_sums();
-        }
-        if target > self.inner.it.pos {
-            self.nth(target - self.inner.it.pos - 1);
-        }
+        self.advance_to_impl(target)
     }
 
     /// Move `amount` values on, keeping the running sum: past as many as
     /// the iterator has left, if it has fewer.
+    #[inline(always)]
     pub fn advance_by(&mut self, amount: usize)
         ensures
             final(self).column() == old(self).column(),
@@ -777,13 +484,7 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
                 &&& final(self).end_pos() == final(self).pos()
             },
     {
-        proof {
-            use_type_invariant(&*self);
-            self.lemma_sums();
-        }
-        if amount > 0 {
-            self.nth(amount - 1);
-        }
+        self.advance_by_impl(amount)
     }
 
     /// Move the window to `range`, keeping the running sum: the iterator
@@ -794,6 +495,7 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
     /// If `range` starts past its own end or the column's, the iterator
     /// has nothing left, and stands where `range` ends or the column
     /// does, whichever comes first, if that is ahead of it.
+    #[inline(always)]
     pub fn shift(&mut self, range: Range<usize>)
         ensures
             final(self).column() == old(self).column(),
@@ -832,12 +534,7 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
                 &&& final(self).end_pos() == final(self).pos()
             },
     {
-        proof {
-            use_type_invariant(&*self);
-            self.lemma_sums();
-        }
-        self.set_max(range.end);
-        self.advance_to(range.start);
+        self.shift_impl(range)
     }
 
     /// Move the window to `range` and give its first value, if it has
@@ -846,6 +543,7 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
     ///
     /// If the window has no value, the iterator has nothing left, and
     /// stands where [`shift`](Self::shift) leaves it then.
+    #[inline(always)]
     pub fn shift_next(&mut self, range: Range<usize>) -> (r: Option<VerifiedAccValue<'a, V>>)
         requires
             range.start >= old(self).pos(),
@@ -881,26 +579,7 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
                 }
             }),
     {
-        let ghost (c, p) = (self.column(), self.inner.it.pos as int);
-        proof {
-            use_type_invariant(&*self);
-            self.lemma_sums();
-        }
-        self.set_max(range.end);
-        let ghost o1 = self.rest();
-        proof {
-            use_type_invariant(&*self);
-            self.lemma_sums();
-        }
-        let r = self.nth(range.start - self.inner.it.pos);
-        proof {
-            let (w, n) = (window(c, range.start as int, range.end as int), range.start - p);
-            if n < o1.len() {
-                assert(w =~= o1.skip(n));
-                assert(w.skip(1) =~= o1.skip(n + 1));
-            }
-        }
-        r
+        self.shift_next_impl(range)
     }
 
     /// The next run: the value the iterator gives next, and how many
@@ -911,6 +590,7 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
     /// running sum as it was and then what the value adds, as many times
     /// over as the run is long; and `prefix()` is the sum before the
     /// run's last value.
+    #[inline(always)]
     pub fn next_run(&mut self) -> (r: Option<Run<VerifiedAccValue<'a, V>>>)
         ensures
             final(self).column() == old(self).column(),
@@ -942,65 +622,18 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
                 },
             },
     {
-        let ghost me = *self;
-        proof {
-            use_type_invariant(&*self);
-            use_type_invariant(&self.inner);
-            me.lemma_sums();
-            me.inner.it.lemma_out_len::<V::X>(me.inner.slabs@);
-        }
-        let own = self.take();
-        let (ix, slabs, col, base_at) = (own.ix, own.inner.slabs, own.inner.col, own.base_at);
-        let (mut it, mut sum, base) = (own.inner.it, own.total, own.base);
-        let max = it.items_left;
-        let r = p_next_run_from::<V::X, AccOf<V>>(&mut it, slabs, max, &mut sum, &base);
-        *self = VerifiedAccIter { ix, inner: VerifiedIter { it, slabs, col }, total: sum, base, base_at };
-        proof {
-            use_type_invariant(&*self);
-            self.inner.it.lemma_out_len::<V::X>(self.inner.slabs@);
-        }
-        match r {
-            Some(run) => {
-                let pv = VerifiedAccValue { value: run.value, total: self.total.dup() };
-                proof {
-                    let o = me.inner.items();
-                    let n = run.count as int;
-                    let v = run.value.sv();
-                    me.lemma_moved(*self, n);
-                    assert(o.take(n)[n - 1] == run.value);
-                    me.lemma_gives(n - 1, pv);
-                    me.lemma_passed(n);
-                    <Get<'a, V> as VGet>::lemma_svs(o);
-                    assert forall|i: int| 0 <= i < n implies #[trigger] me.rest()[i] == v by {
-                        assert(o.take(n)[i] == run.value);
-                    }
-                    if n < o.len() && o[n].sv() == v {
-                        <Get<'a, V> as VGet>::lemma_sv_inj(o[n], run.value);
-                    }
-                    // the run adds its value as many times as it is long
-                    assert(me.rest().take(n) =~= Seq::new(n as nat, |_i: int| v));
-                    lemma_acc_run::<V>(n as nat, v);
-                }
-                Some(Run { count: run.count, value: pv })
-            },
-            None => {
-                proof {
-                    assert(self.inner.items() =~= me.inner.items().skip(0));
-                    me.lemma_moved(*self, 0);
-                }
-                None
-            },
-        }
+        self.next_run_impl()
     }
 
     /// An iterator of the runs the iterator has left to give, without
     /// their sums ([`VerifiedIter::runs`]): what
     /// [`splice_runs`](VerifiedColumn::splice_runs) takes.
+    #[inline(always)]
     pub fn runs(self) -> (r: VerifiedRuns<'a, V, C, AccIndex>)
         ensures
             r.iter() == self.plain(),
     {
-        VerifiedRuns(self.inner)
+        self.runs_impl()
     }
 
     /// The `n`th of the values left, counted from 0, as
@@ -1008,6 +641,7 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
     /// values passed over before it add up to (`delta`). It and the
     /// values before it are then given; if there are not that many,
     /// none is left.
+    #[inline(always)]
     pub fn delta_nth(&mut self, n: usize) -> (r: Option<VerifiedAccSeek<'a, V>>)
         ensures
             n < old(self).rest().len() ==> {
@@ -1037,44 +671,7 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
             final(self).base_pos() == old(self).base_pos(),
             final(self).total() == old(self).acc_to(final(self).pos() as int),
     {
-        let ghost me = *self;
-        proof {
-            use_type_invariant(&*self);
-            use_type_invariant(&self.inner);
-            me.lemma_sums();
-            me.inner.it.lemma_out_len::<V::X>(me.inner.slabs@);
-        }
-        let own = self.take();
-        let (ix, slabs, col, base_at) = (own.ix, own.inner.slabs, own.inner.col, own.base_at);
-        let (mut it, mut sum, base) = (own.inner.it, own.total, own.base);
-        let r = p_delta_nth::<V::X, AccOf<V>>(&mut it, slabs, ix, n, &mut sum, &base);
-        *self = VerifiedAccIter { ix, inner: VerifiedIter { it, slabs, col }, total: sum, base, base_at };
-        proof {
-            use_type_invariant(&*self);
-        }
-        match r {
-            Some((value, delta)) => {
-                let pv = VerifiedAccValue { value, total: self.total.dup() };
-                proof {
-                    let s = me.inner.slabs@;
-                    let p = me.inner.it.pos as int;
-                    me.lemma_moved(*self, n + 1);
-                    me.lemma_gives(n as int, pv);
-                    me.lemma_passed(n as int);
-                    // `delta` is what the values passed over add up to
-                    lemma_running::<V, C>(s, vsum::<Get<'a, V>, AccOf<V>>(before::<V::X>(s, p)), delta, p, p + n);
-                }
-                Some(VerifiedAccSeek { pos: self.inner.it.pos - 1, delta, pv })
-            },
-            None => {
-                proof {
-                    let k = me.inner.items().len() as int;
-                    assert(self.inner.items() =~= me.inner.items().skip(k));
-                    me.lemma_moved(*self, k);
-                }
-                None
-            },
-        }
+        self.delta_nth_impl(n)
     }
 
     /// Where the iterator stands, where its window ends and where its
@@ -1085,6 +682,7 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
     /// The state fits the column the iterator reads: resumed on that
     /// column, as it is, it gives an iterator that stands where this one
     /// does, with the same values left and the same running sum.
+    #[inline(always)]
     pub fn suspend(&self) -> (s: VerifiedAccIterState<V>)
         ensures
             s.pos() == self.pos(),
@@ -1096,11 +694,7 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
                 None => true,
             },
     {
-        proof {
-            use_type_invariant(self);
-            self.lemma_sums();
-        }
-        VerifiedAccIterState { inner: self.inner.suspend(), base_at: self.base_at, _phantom: PhantomData }
+        self.suspend_impl()
     }
 }
 
@@ -1167,40 +761,7 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> Iterator for VerifiedAccIter<'a
             final(self).source() == old(self).source(),
             final(self).base_pos() == old(self).base_pos(),
     {
-        let ghost me = *self;
-        proof {
-            use_type_invariant(&*self);
-            use_type_invariant(&self.inner);
-            me.lemma_sums();
-            me.inner.it.lemma_out_len::<V::X>(me.inner.slabs@);
-        }
-        let own = self.take();
-        let (ix, slabs, col, base_at) = (own.ix, own.inner.slabs, own.inner.col, own.base_at);
-        let (mut it, mut sum, base) = (own.inner.it, own.total, own.base);
-        let r = p_next::<V::X, AccOf<V>>(&mut it, slabs, &mut sum, &base);
-        *self = VerifiedAccIter { ix, inner: VerifiedIter { it, slabs, col }, total: sum, base, base_at };
-        proof {
-            use_type_invariant(&*self);
-        }
-        match r {
-            Some(value) => {
-                let pv = VerifiedAccValue { value, total: self.total.dup() };
-                proof {
-                    me.lemma_moved(*self, 1);
-                    me.lemma_gives(0, pv);
-                    assert(me.items().skip(1) =~= me.items().drop_first());
-                }
-                Some(pv)
-            },
-            None => {
-                proof {
-                    assert(self.inner.items() =~= me.inner.items().skip(0));
-                    me.lemma_moved(*self, 0);
-                    assert(me.items().skip(0) =~= me.items());
-                }
-                None
-            },
-        }
+        self.next_impl()
     }
 
     /// The `n`th of the values left, counted from 0, if there are that
@@ -1211,7 +772,7 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> Iterator for VerifiedAccIter<'a
     /// column's index for the slab to go to and for what the slabs
     /// passed over add up to, and within a slab a whole run is passed
     /// over at once.
-    #[inline]
+    #[inline(always)]
     fn nth(&mut self, n: usize) -> (r: Option<VerifiedAccValue<'a, V>>)
         ensures
             n < old(self).rest().len() ==> {
@@ -1238,39 +799,7 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> Iterator for VerifiedAccIter<'a
             final(self).base_pos() == old(self).base_pos(),
             final(self).total() == old(self).acc_to(final(self).pos() as int),
     {
-        let ghost me = *self;
-        proof {
-            use_type_invariant(&*self);
-            use_type_invariant(&self.inner);
-            me.lemma_sums();
-            me.inner.it.lemma_out_len::<V::X>(me.inner.slabs@);
-        }
-        let own = self.take();
-        let (ix, slabs, col, base_at) = (own.ix, own.inner.slabs, own.inner.col, own.base_at);
-        let (mut it, mut sum, base) = (own.inner.it, own.total, own.base);
-        let r = p_nth::<V::X, AccOf<V>>(&mut it, slabs, ix, n, &mut sum, &base);
-        *self = VerifiedAccIter { ix, inner: VerifiedIter { it, slabs, col }, total: sum, base, base_at };
-        proof {
-            use_type_invariant(&*self);
-        }
-        match r {
-            Some(value) => {
-                let pv = VerifiedAccValue { value, total: self.total.dup() };
-                proof {
-                    me.lemma_moved(*self, n + 1);
-                    me.lemma_gives(n as int, pv);
-                }
-                Some(pv)
-            },
-            None => {
-                proof {
-                    let k = me.inner.items().len() as int;
-                    assert(self.inner.items() =~= me.inner.items().skip(k));
-                    me.lemma_moved(*self, k);
-                }
-                None
-            },
-        }
+        self.nth_impl(n)
     }
 
     /// How many values are left: exactly.
@@ -1307,6 +836,7 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> ExactSizeIterator for VerifiedA
 impl<'a, V: VAccumulated + VValue<C>, C: VCodec> Clone for VerifiedAccIter<'a, V, C> {
     /// An iterator of its own that stands where this one does, with the
     /// same values left and the same running sum.
+    #[inline(always)]
     fn clone(&self) -> (r: Self)
         ensures
             r.items() == self.items(),
@@ -1318,21 +848,7 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> Clone for VerifiedAccIter<'a, V
             r.base_pos() == self.base_pos(),
             r.total() == self.total(),
     {
-        proof {
-            use_type_invariant(self);
-            use_type_invariant(&self.inner);
-        }
-        let r = VerifiedAccIter {
-            ix: self.ix,
-            inner: VerifiedIter { it: self.inner.it.dup(), slabs: self.inner.slabs, col: self.inner.col },
-            total: self.total.dup(),
-            base: self.base.dup(),
-            base_at: self.base_at,
-        };
-        proof {
-            assert(r.items() =~= self.items());
-        }
-        r
+        self.clone_impl()
     }
 }
 
@@ -1369,12 +885,6 @@ pub struct VerifiedAccIterState<V: VAccumulated> {
 }
 
 impl<V: VAccumulated> VerifiedAccIterState<V> {
-    /// The sum counts from the iterator's place or before it.
-    #[verifier::type_invariant]
-    spec fn inv(&self) -> bool {
-        self.base_at <= self.inner.pos
-    }
-
     /// The state without where the sum counts from: that of a
     /// [`VerifiedIter`] standing where the iterator stood, with its
     /// window.
@@ -1419,7 +929,7 @@ impl<V: VAccumulated> VerifiedAccIterState<V> {
         ensures
             self.edits() == column.edits(),
     {
-        self.plain().lemma_fits(column);
+        self.lemma_fits_impl::<C>(column)
     }
 
     /// The running sum counts from the iterator's place or before it.
@@ -1427,7 +937,7 @@ impl<V: VAccumulated> VerifiedAccIterState<V> {
         ensures
             self.base_pos() <= self.pos(),
     {
-        use_type_invariant(self);
+        self.lemma_base_impl()
     }
 
     /// An iterator of `column` that stands where the suspended one
@@ -1444,6 +954,7 @@ impl<V: VAccumulated> VerifiedAccIterState<V> {
     /// Panics, as [`PrefixColumn`](crate::PrefixColumn)'s does, where an
     /// edit's panic left `column` without its parts and the state would
     /// fit it.
+    #[inline(always)]
     pub fn try_resume<'a, C: VCodec>(&self, column: &'a VerifiedColumn<V, C, AccIndex>) -> (r: Result<
         VerifiedAccIter<'a, V, C>,
         PackError,
@@ -1461,35 +972,7 @@ impl<V: VAccumulated> VerifiedAccIterState<V> {
                 &&& it.total() == accumulated::<V>(column@.subrange(self.base_pos() as int, self.pos() as int))
             },
     {
-        proof {
-            use_type_invariant(self);
-        }
-        let inner = match self.inner.try_resume(column) {
-            Ok(it) => it,
-            Err(e) => {
-                return Err(e);
-            },
-        };
-        let ix = column.acc_index();
-        let base = column.get_prefix(self.base_at);
-        // what, added after the sum before `base_at`, gives the sum
-        // before the iterator
-        let mut sum = column.get_prefix(self.inner.pos);
-        sum.sub_acc(&base);
-        proof {
-            use_type_invariant(&inner);
-            let s = inner.slabs@;
-            assert(s == column.core.slabs_spec());
-            inner.it.lemma_out_len::<V::X>(s);
-            lemma_acc_before::<V, C>(s, self.base_at as int);
-            lemma_acc_before::<V, C>(s, self.inner.pos as int);
-            <V::Acc as VGroup>::lemma_minus(accumulated::<V>(column@.take(self.inner.pos as int)), base);
-        }
-        let it = VerifiedAccIter { ix, inner, total: sum, base, base_at: self.base_at };
-        proof {
-            it.lemma_sums();
-        }
-        Ok(it)
+        self.try_resume_impl::<C>(column)
     }
 }
 
@@ -1511,18 +994,7 @@ impl<V: VAccumulated + VValue<C>, C: VCodec> VerifiedColumn<V, C, AccIndex> {
             it.base_pos() == 0,
             it.total() == <V::Acc as VGroup>::zero(),
     {
-        let ix = self.acc_index();
-        let inner = self.iter();
-        let zero = <V::Acc as VAccum>::new_zero();
-        let base = <V::Acc as VAccum>::new_zero();
-        proof {
-            use_type_invariant(&inner);
-            let s = inner.slabs@;
-            assert(s == self.core.slabs_spec());
-            assert(before::<V::X>(s, 0) =~= Seq::<Get<'static, V>>::empty());
-            <V::Acc as VGroup>::lemma_plus(zero, zero, zero);
-        }
-        VerifiedAccIter { ix, inner, total: zero, base, base_at: 0 }
+        self.prefix_iter_impl()
     }
 
     /// An iterator over the values `start..end` that keeps the running
@@ -1530,6 +1002,7 @@ impl<V: VAccumulated + VValue<C>, C: VCodec> VerifiedColumn<V, C, AccIndex> {
     /// first value it gives is what the values before `start` add up
     /// to. The index gives that; the values before `start` are not all
     /// read.
+    #[inline(always)]
     pub fn prefix_iter_range(&self, start: usize, end: usize) -> (it: VerifiedAccIter<'_, V, C>)
         requires
             start <= end <= self@.len(),
@@ -1542,14 +1015,12 @@ impl<V: VAccumulated + VValue<C>, C: VCodec> VerifiedColumn<V, C, AccIndex> {
             it.base_pos() == 0,
             it.total() == accumulated::<V>(self@.take(start as int)),
     {
-        let mut it = self.prefix_iter();
-        it.set_max(end);
-        it.advance_to(start);
-        it
+        self.prefix_iter_range_impl(start, end)
     }
 
     /// The value at `index` with what the values through it add up to,
     /// and what those before it do; `None` if `index` is past the end.
+    #[inline(always)]
     pub fn get_prefixed(&self, index: usize) -> (r: Option<VerifiedAccValue<'_, V>>)
         ensures
             index < self@.len() ==> {
@@ -1561,14 +1032,14 @@ impl<V: VAccumulated + VValue<C>, C: VCodec> VerifiedColumn<V, C, AccIndex> {
             },
             index >= self@.len() ==> r is None,
     {
-        let mut it = self.prefix_iter();
-        it.nth(index)
+        self.get_prefixed_impl(index)
     }
 
     /// The value at `to` with its sums, as
     /// [`get_prefixed`](Self::get_prefixed) gives them, and what the
     /// values `from..to` before it add up to (`delta`); `None` if `to`
     /// is past the end. `from` is to be `to` at most.
+    #[inline(always)]
     pub fn delta(&self, from: usize, to: usize) -> (r: Option<VerifiedAccSeek<'_, V>>)
         requires
             from <= to,
@@ -1584,18 +1055,9 @@ impl<V: VAccumulated + VValue<C>, C: VCodec> VerifiedColumn<V, C, AccIndex> {
             },
             to >= self@.len() ==> r is None,
     {
-        let mut it = self.prefix_iter();
-        it.advance_to(from);
-        let r = it.delta_nth(to - from);
-        proof {
-            if to < self@.len() {
-                assert(self@.skip(from as int).take(to - from) =~= self@.subrange(from as int, to as int));
-            }
-        }
-        r
+        self.delta_impl(from, to)
     }
 }
-
 
 // ── Repositioning (`VShiftable`) ───────────────────────────────────────────
 
@@ -1607,29 +1069,7 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
         let o = vals_of::<V::X>(self.inner.slabs@);
         Seq::new(o.len(), |p: int| VerifiedAccValue { value: o[p], total: self.acc_to(p + 1) })
     }
-
-    /// What the iterator has left is a window of those.
-    proof fn lemma_accumulated_items(&self)
-        ensures
-            self.items() == window(self.accumulated_items(), self.inner.it.pos as int, self.inner.it.pos + self.inner.it.items_left),
-    {
-        assert(self.items() =~= window(self.accumulated_items(), self.inner.it.pos as int, self.inner.it.pos + self.inner.it.items_left));
-    }
-
-    /// A move that keeps the column and where the sums start keeps what
-    /// the iterator ranges over.
-    proof fn lemma_same_accumulated_items(&self, o: Self)
-        requires
-            self.column() == o.column(),
-            self.base_pos() == o.base_pos(),
-        ensures
-            self.accumulated_items() == o.accumulated_items(),
-    {
-        lemma_svs_inj(vals_of::<V::X>(self.inner.slabs@), vals_of::<V::X>(o.inner.slabs@));
-        assert(self.accumulated_items() =~= o.accumulated_items());
-    }
 }
-
 
 /// The iterator repositioned as any of the verified ones is: its model
 /// is each value of the column with what the values accumulate to
@@ -1664,11 +1104,7 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VShiftable for VerifiedAccIter<
     }
 
     proof fn lemma_shift(&self) {
-        let xs = self.items();
-        lemma_singles(xs);
-        assert(xs.map_values(|x: VerifiedAccValue<'a, V>| Self::shift_spans(x)) =~= xs.map_values(
-            |x: VerifiedAccValue<'a, V>| seq![x],
-        ));
+        self.lemma_shift_impl()
     }
 
     proof fn lemma_shift_unit(x: VerifiedAccValue<'a, V>) {
@@ -1676,179 +1112,57 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VShiftable for VerifiedAccIter<
 
     #[inline(always)]
     fn shift_step(&mut self) -> (r: Option<VerifiedAccValue<'a, V>>) {
-        proof {
-            use_type_invariant(&*self);
-            self.lemma_sums();
-        }
-        let r = self.nth(0);
-        proof {
-            use_type_invariant(&*self);
-            self.lemma_sums();
-            self.lemma_same_accumulated_items(*old(self));
-        }
-        r
+        self.shift_step_impl()
     }
 
     #[inline(always)]
     fn shift_nth(&mut self, n: usize) -> (r: Option<VerifiedAccValue<'a, V>>) {
-        proof {
-            use_type_invariant(&*self);
-            self.lemma_sums();
-        }
-        let r = self.nth(n);
-        proof {
-            use_type_invariant(&*self);
-            self.lemma_sums();
-            self.lemma_same_accumulated_items(*old(self));
-            if n < old(self).items().len() {
-                let xs = old(self).items().take(n + 1);
-                lemma_singles(xs);
-                assert(xs.map_values(|x: VerifiedAccValue<'a, V>| Self::shift_spans(x)) =~= xs.map_values(
-                    |x: VerifiedAccValue<'a, V>| seq![x],
-                ));
-            }
-        }
-        r
+        self.shift_nth_impl(n)
     }
 
     #[inline(always)]
     fn dup(&self) -> (r: Self) {
-        proof {
-            use_type_invariant(self);
-            use_type_invariant(&self.inner);
-        }
-        let inner = VerifiedIter { it: self.inner.it.dup(), slabs: self.inner.slabs, col: self.inner.col };
-        VerifiedAccIter { ix: self.ix, inner, total: self.total.dup(), base: self.base.dup(), base_at: self.base_at }
+        self.dup_impl()
     }
 
     #[inline(always)]
     fn get_pos(&self) -> (r: usize) {
-        proof {
-            use_type_invariant(self);
-            self.lemma_sums();
-        }
-        self.pos()
+        self.get_pos_impl()
     }
 
     #[inline(always)]
     fn get_max(&self) -> (r: usize) {
-        proof {
-            use_type_invariant(self);
-            self.lemma_sums();
-        }
-        self.end_pos()
+        self.get_max_impl()
     }
 
     #[inline(always)]
     fn set_max(&mut self, end: usize) {
-        proof {
-            use_type_invariant(&*self);
-            self.lemma_sums();
-        }
-        VerifiedAccIter::set_max(self, end);
-        proof {
-            use_type_invariant(&*self);
-            self.lemma_sums();
-            self.lemma_same_accumulated_items(*old(self));
-        }
+        self.set_max_v_shiftable_impl(end)
     }
 
     #[inline(always)]
     fn advance_to(&mut self, target: usize) {
-        proof {
-            use_type_invariant(&*self);
-            self.lemma_sums();
-            self.lemma_accumulated_items();
-        }
-        VerifiedAccIter::advance_to(self, target);
-        proof {
-            use_type_invariant(&*self);
-            self.lemma_sums();
-            self.lemma_accumulated_items();
-            self.lemma_same_accumulated_items(*old(self));
-        }
+        self.advance_to_v_shiftable_impl(target)
     }
 
     #[inline(always)]
     fn advance_by(&mut self, amount: usize) {
-        proof {
-            use_type_invariant(&*self);
-            self.lemma_sums();
-            self.lemma_accumulated_items();
-        }
-        VerifiedAccIter::advance_by(self, amount);
-        proof {
-            use_type_invariant(&*self);
-            self.lemma_sums();
-            self.lemma_accumulated_items();
-            self.lemma_same_accumulated_items(*old(self));
-        }
+        self.advance_by_v_shiftable_impl(amount)
     }
 
     #[inline(always)]
     fn seek_to(&mut self, at: usize) -> (r: Option<VerifiedAccValue<'a, V>>) {
-        proof {
-            use_type_invariant(&*self);
-            self.lemma_sums();
-        }
-        let p = self.pos();
-        if at >= p {
-            let r = self.nth(at - p);
-            proof {
-                use_type_invariant(&*self);
-                self.lemma_sums();
-                self.lemma_same_accumulated_items(*old(self));
-            }
-            r
-        } else {
-            None
-        }
+        self.seek_to_impl(at)
     }
 
     #[inline(always)]
     fn shift(&mut self, range: Range<usize>) {
-        let ghost p = self.shift_at();
-        proof {
-            self.lemma_shift();
-        }
-        // the window's end, and then its start, as the iterator's own
-        // `shift` moves
-        VShiftable::set_max(self, range.end);
-        let ghost p1 = self.shift_at();
-        proof {
-            self.lemma_shift();
-        }
-        VShiftable::advance_to(self, range.start);
-        proof {
-            self.lemma_shift();
-            assert(p1 == p);
-        }
+        self.shift_v_shiftable_impl(range)
     }
 
     #[inline(always)]
     fn shift_next(&mut self, range: Range<usize>) -> (r: Option<VerifiedAccValue<'a, V>>) {
-        let ghost (s, e) = (range.start as int, range.end as int);
-        let ghost (v, p) = (self.accumulated_items(), self.shift_at());
-        VShiftable::set_max(self, range.end);
-        proof {
-            self.lemma_shift();
-        }
-        let q = VShiftable::get_pos(self);
-        let ghost o = self.shift_items();
-        let r = VShiftable::shift_nth(self, range.start - q);
-        proof {
-            let w = window(v, s, e);
-            let k = s - p;
-            if w.len() > 0 {
-                assert(o[k] == w[0]);
-                let xs = o.take(k + 1);
-                lemma_singles(xs);
-                assert(xs.map_values(|x: VerifiedAccValue<'a, V>| Self::shift_spans(x)) =~= xs.map_values(
-                    |x: VerifiedAccValue<'a, V>| seq![x],
-                ));
-            }
-        }
-        r
+        self.shift_next_v_shiftable_impl(range)
     }
 }
 
@@ -1870,7 +1184,7 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
             self.shift_left() == self.items(),
             Self::shift_unit(),
     {
-        <Get<'a, V> as VGet>::lemma_svs(vals_of::<V::X>(self.inner.slabs@));
+        self.lemma_shift_model_impl()
     }
 
     /// A lookahead: the iterator wrapped so that the item it gives next
@@ -1882,7 +1196,7 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
             r.unshift_vals() == self.accumulated_items(),
             r.unshift_left() == self.items(),
     {
-        VerifiedUnshift::new(self)
+        self.unshift_impl()
     }
 
     /// The items of each of `ranges` of the column, one range after
@@ -1900,61 +1214,8 @@ impl<'a, V: VAccumulated + VValue<C>, C: VCodec> VerifiedAccIter<'a, V, C> {
             r.ranges_vals() == self.accumulated_items(),
             r.ranges_left() == windows(self.accumulated_items(), ranges@),
     {
-        VerifiedRanges::new(self, ranges)
+        self.ranges_impl(ranges)
     }
 }
 
 } // verus!
-impl<'a, V: VAccumulated> std::fmt::Debug for VerifiedAccValue<'a, V>
-where
-    Get<'a, V>: std::fmt::Debug,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("VerifiedAccValue")
-            .field("value", &self.value)
-            .field("total", &self.total)
-            .finish()
-    }
-}
-
-impl<'a, V: VAccumulated> PartialEq for VerifiedAccValue<'a, V>
-where
-    Get<'a, V>: PartialEq,
-    V::Acc: PartialEq,
-{
-    fn eq(&self, other: &Self) -> bool {
-        self.value == other.value && self.total == other.total
-    }
-}
-
-impl<'a, V: VAccumulated> std::fmt::Debug for VerifiedAccSeek<'a, V>
-where
-    Get<'a, V>: std::fmt::Debug,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("VerifiedAccSeek")
-            .field("pos", &self.pos)
-            .field("delta", &self.delta)
-            .field("pv", &self.pv)
-            .finish()
-    }
-}
-
-impl<'a, V: VAccumulated> PartialEq for VerifiedAccSeek<'a, V>
-where
-    Get<'a, V>: PartialEq,
-    V::Acc: PartialEq,
-{
-    fn eq(&self, other: &Self) -> bool {
-        self.pos == other.pos && self.delta == other.delta && self.pv == other.pv
-    }
-}
-
-impl<'a, V: VAccumulated + VValue<C>, C: VCodec> std::fmt::Debug for VerifiedAccIter<'a, V, C> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("VerifiedAccIter")
-            .field("total", &self.total)
-            .field("pos", &self.inner.pos())
-            .finish()
-    }
-}

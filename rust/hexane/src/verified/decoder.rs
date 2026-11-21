@@ -6,6 +6,11 @@
 //! [`BoolDecoder`](crate::bool::BoolDecoder) run, on a saved column's bytes as
 //! they are: no column is built, and nothing is assumed that a column
 //! does not assume.
+//!
+//! This file is a specification, to be read as the guide to reviewing
+//! says ([`verified`](crate::verified#reviewing-the-specification)): each
+//! function's body is a call of one of `imp` (`decoder/imp.rs`), which has
+//! its contract word for word and is proved there.
 
 // Verus proofs read more plainly with `x = x + n`.
 #![allow(clippy::len_zero, clippy::assign_op_pattern)]
@@ -14,15 +19,20 @@ use super::model::Model;
 #[cfg(verus_keep_ghost)]
 use super::VerifiedColumn;
 #[cfg(verus_keep_ghost)]
-use super::{held, lemma_held, lemma_svs_none, lemma_svs_sub, past, VGet, VSpec};
+use super::{past, VGet, VSpec};
 use super::{Get, VCodec, VValue};
-use crate::iter_core::{Decode, Decoders};
+#[cfg(verus_keep_ghost)]
+use crate::iter_core::Decode;
+use crate::iter_core::Decoders;
 use crate::Leb128;
 use crate::PackError;
 use crate::Run;
-use std::cmp::Ordering;
 #[allow(unused_imports)]
 use vstd::prelude::*;
+
+mod imp;
+#[allow(unused_imports)]
+use imp::*;
 
 verus! {
 
@@ -45,12 +55,7 @@ pub proof fn lemma_head_run_max<S>(o: Seq<S>, v: S, n: int, w: S, m: int, max: i
         v == w,
         n == m,
 {
-    assert(o[0] == v && o[0] == w);
-    if n < m {
-        assert(o[n] == w);
-    } else if m < n {
-        assert(o[m] == v);
-    }
+    imp::lemma_head_run_max_impl::<S>(o, v, n, w, m, max)
 }
 
 /// How many values the run is of that `o` begins with, counted up to
@@ -68,8 +73,7 @@ pub proof fn lemma_head_len<S>(o: Seq<S>, v: S, n: int, max: int)
         v == o[0],
         head_len(o, max) == n,
 {
-    assert(o[0] == v);
-    lemma_head_run_max(o, v, n, o[0], head_len(o, max), max);
+    imp::lemma_head_len_impl::<S>(o, v, n, max)
 }
 
 /// What [`VerifiedDecoder::scan_for`] returns for the values `o`, the
@@ -138,13 +142,6 @@ pub struct VerifiedDecoder<'a, V: VValue<C>, C: VCodec = Leb128> {
 }
 
 impl<'a, V: VValue<C>, C: VCodec> VerifiedDecoder<'a, V, C> {
-    /// The decoder stands in a saved column's bytes, at a value or at
-    /// the end.
-    #[verifier::type_invariant]
-    spec fn inv(&self) -> bool {
-        self.d.inv()
-    }
-
     /// What the decoder has left to give.
     pub closed spec fn items(&self) -> Seq<Get<'a, V>> {
         self.d.rest()
@@ -161,7 +158,7 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedDecoder<'a, V, C> {
         ensures
             self.rest().len() == self.items().len(),
     {
-        <Get<'a, V> as VGet>::lemma_svs(self.items());
+        self.lemma_items_len_impl()
     }
 
     /// A decoder of the saved column `bytes`, which has all its values
@@ -172,25 +169,20 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedDecoder<'a, V, C> {
     /// keep by itself, and on other bytes the decoder may panic or give
     /// nonsense. For bytes of which it is not known, there is
     /// [`try_new`](Self::try_new).
-    #[inline]
+    #[inline(always)]
     pub fn new(bytes: &'a [u8]) -> (r: Self)
         requires
             VerifiedColumn::<V, C>::valid(bytes@),
         ensures
             r.rest() == VerifiedColumn::<V, C>::values(bytes@),
     {
-        let d = <V::E as Model<V::X>>::decoder(bytes);
-        proof {
-            let o = d.rest();
-            assert(<V::E as Model<V::X>>::values(bytes@) =~= held::<V, C>(o));
-            lemma_held::<V, C>(o);
-        }
-        VerifiedDecoder { d }
+        Self::new_impl(bytes)
     }
 
     /// A decoder of the saved column `bytes`, which are read through
     /// first, as a load does: an error unless they are a saved column,
     /// and no error for one of less than 4 GiB.
+    #[inline(always)]
     pub fn try_new(bytes: &'a [u8]) -> (r: Result<Self, PackError>)
         ensures
             r matches Ok(d) ==> {
@@ -199,39 +191,18 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedDecoder<'a, V, C> {
             },
             VerifiedColumn::<V, C>::valid(bytes@) && bytes@.len() <= u32::MAX ==> r is Ok,
     {
-        match <V::E as Model<V::X>>::validate(bytes) {
-            Ok(_) => Ok(Self::new(bytes)),
-            Err(e) => Err(e),
-        }
+        Self::try_new_impl(bytes)
     }
 
     /// Move `n` values on: past as many as the decoder has left, if it
     /// has fewer.
+    #[inline(always)]
     pub fn advance_by(&mut self, n: usize)
         ensures
             final(self).items() == past(old(self).items(), n as int),
             final(self).rest() == past(old(self).rest(), n as int),
     {
-        proof {
-            use_type_invariant(&*self);
-        }
-        let ghost o = self.d.rest();
-        if n > 0 {
-            let _ = self.d.d_nth(n - 1);
-        }
-        proof {
-            let o1 = self.d.rest();
-            <Get<'a, V> as VGet>::lemma_svs(o);
-            <Get<'a, V> as VGet>::lemma_svs(o1);
-            if n > 0 {
-                if n <= o.len() {
-                    lemma_svs_sub(o, n as int, o.len() as int);
-                } else {
-                    assert(o1 =~= Seq::empty());
-                    lemma_svs_none::<Get<'a, V>>();
-                }
-            }
-        }
+        self.advance_by_impl(n)
     }
 
     /// The next run: the value the decoder gives next, and how many
@@ -240,7 +211,7 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedDecoder<'a, V, C> {
     ///
     /// The count is a `usize`, and a run of more values than
     /// `usize::MAX` is given `usize::MAX` at a time.
-    #[inline]
+    #[inline(always)]
     pub fn next_run(&mut self) -> (r: Option<Run<Get<'a, V>>>)
         ensures
             match r {
@@ -257,17 +228,14 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedDecoder<'a, V, C> {
                 },
             },
     {
-        proof {
-            <Get<'a, V> as VGet>::lemma_svs(self.items());
-        }
-        self.next_run_max(usize::MAX)
+        self.next_run_impl()
     }
 
     /// The next run, of no more than `max` values: where the run is
     /// longer, `max` of it are given and the decoder moves past those
     /// alone. With a `max` of 0 there is no run to give: `None`, and
     /// the decoder does not move.
-    #[inline]
+    #[inline(always)]
     pub fn next_run_max(&mut self, max: usize) -> (r: Option<Run<Get<'a, V>>>)
         ensures
             match r {
@@ -283,28 +251,7 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedDecoder<'a, V, C> {
                 },
             },
     {
-        proof {
-            use_type_invariant(&*self);
-        }
-        if max == 0 {
-            return None;
-        }
-        let ghost o = self.d.rest();
-        let r = self.d.d_run_max(max);
-        proof {
-            <Get<'a, V> as VGet>::lemma_svs(o);
-            if let Some(run) = r {
-                let n = run.count as int;
-                lemma_svs_sub(o, n, o.len() as int);
-                assert forall|i: int| 0 <= i < n implies #[trigger] o[i] == run.value by {
-                    assert(o.take(n)[i] == run.value);
-                }
-                if n < o.len() && o[n].sv() == run.value.sv() {
-                    <Get<'a, V> as VGet>::lemma_sv_inj(o[n], run.value);
-                }
-            }
-        }
-        r
+        self.next_run_max_impl(max)
     }
 
     /// Look for `target` among values in order: pass the runs of values
@@ -316,6 +263,7 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedDecoder<'a, V, C> {
     /// it found a value that comes after the target, it has moved past
     /// that value's run too (`scan_taken`), as the old API's `scan_for`
     /// has.
+    #[inline(always)]
     pub fn scan_for<'b>(&mut self, target: Get<'b, V>, max: usize) -> (r: (usize, usize))
         ensures
             scan_of::<V>(old(self).rest(), target.sv(), max as int, r.0 as int, r.1 as int),
@@ -326,78 +274,7 @@ impl<'a, V: VValue<C>, C: VCodec> VerifiedDecoder<'a, V, C> {
                 scan_taken(old(self).rest(), max as int, r.0 as int, r.1 as int),
             ),
     {
-        let ghost o = self.items();
-        let ghost s = self.rest();
-        let mut skipped: usize = 0;
-        proof {
-            <Get<'a, V> as VGet>::lemma_svs(o);
-            assert(o.skip(0) =~= o);
-        }
-        while skipped < max
-            invariant
-                skipped <= max,
-                skipped <= o.len(),
-                o == old(self).items(),
-                s == old(self).rest(),
-                s == <Get<'a, V> as VGet>::svs(o),
-                s.len() == o.len(),
-                self.items() == o.skip(skipped as int),
-                forall|i: int| 0 <= i < skipped ==> V::below(#[trigger] s[i], target.sv()),
-            decreases max - skipped,
-        {
-            let ghost k = skipped as int;
-            proof {
-                lemma_svs_sub(o, k, o.len() as int);
-                assert(self.rest() == s.skip(k));
-            }
-            match self.next_run_max(max - skipped) {
-                None => {
-                    proof {
-                        assert(o.skip(k).len() == 0);
-                    }
-                    return (skipped, 0);
-                },
-                Some(run) => {
-                    let ghost n = run.count as int;
-                    proof {
-                        assert(o.skip(k).skip(n) =~= o.skip(k + n));
-                        assert(s.skip(k).skip(n) =~= s.skip(k + n));
-                        assert(s.skip(k)[0] == run.value.sv());
-                        assert(s[k] == run.value.sv());
-                    }
-                    match V::compare(run.value, target) {
-                        Ordering::Equal => {
-                            return (skipped, run.count);
-                        },
-                        Ordering::Greater => {
-                            proof {
-                                lemma_head_len(s.skip(k), run.value.sv(), n, max - k);
-                            }
-                            return (skipped, 0);
-                        },
-                        Ordering::Less => {
-                            proof {
-                                assert forall|i: int| 0 <= i < k + n implies V::below(
-                                    #[trigger] s[i],
-                                    target.sv(),
-                                ) by {
-                                    if i >= k {
-                                        assert(s.skip(k)[i - k] == run.value.sv());
-                                    }
-                                }
-                            }
-                            skipped = skipped + run.count;
-                        },
-                    }
-                },
-            }
-        }
-        proof {
-            assert(s.skip(skipped as int) == self.rest()) by {
-                lemma_svs_sub(o, skipped as int, o.len() as int);
-            }
-        }
-        (skipped, 0)
+        self.scan_for_impl(target, max)
     }
 }
 
@@ -434,7 +311,7 @@ impl<'a, V: VValue<C>, C: VCodec> Iterator for VerifiedDecoder<'a, V, C> {
     type Item = Get<'a, V>;
 
     /// The next value, if one is left.
-    #[inline]
+    #[inline(always)]
     fn next(&mut self) -> (r: Option<Get<'a, V>>)
         ensures
             match r {
@@ -446,21 +323,7 @@ impl<'a, V: VValue<C>, C: VCodec> Iterator for VerifiedDecoder<'a, V, C> {
                 None => old(self).rest().len() == 0,
             },
     {
-        proof {
-            use_type_invariant(&*self);
-        }
-        let ghost o = self.d.rest();
-        let r = self.d.d_next();
-        proof {
-            let o1 = self.d.rest();
-            <Get<'a, V> as VGet>::lemma_svs(o);
-            <Get<'a, V> as VGet>::lemma_svs(o1);
-            if r is Some {
-                lemma_svs_sub(o, 1, o.len() as int);
-                assert(o.skip(1) =~= o.drop_first());
-            }
-        }
-        r
+        self.next_impl()
     }
 
     /// The `n`th of the values left, counted from 0, if there are that
@@ -469,7 +332,7 @@ impl<'a, V: VValue<C>, C: VCodec> Iterator for VerifiedDecoder<'a, V, C> {
     ///
     /// Few of the values passed over are looked at: a whole run is
     /// passed over at once.
-    #[inline]
+    #[inline(always)]
     fn nth(&mut self, n: usize) -> (r: Option<Get<'a, V>>)
         ensures
             n < old(self).items().len() ==> {
@@ -484,39 +347,19 @@ impl<'a, V: VValue<C>, C: VCodec> Iterator for VerifiedDecoder<'a, V, C> {
                 &&& final(self).rest().len() == 0
             },
     {
-        proof {
-            use_type_invariant(&*self);
-        }
-        let ghost o = self.d.rest();
-        let r = self.d.d_nth(n);
-        proof {
-            <Get<'a, V> as VGet>::lemma_svs(o);
-            <Get<'a, V> as VGet>::lemma_svs(self.d.rest());
-            if n < o.len() {
-                lemma_svs_sub(o, n + 1, o.len() as int);
-            }
-        }
-        r
+        self.nth_impl(n)
     }
 }
 
 impl<'a, V: VValue<C>, C: VCodec> Clone for VerifiedDecoder<'a, V, C> {
     /// A decoder of its own with the same values left.
+    #[inline(always)]
     fn clone(&self) -> (r: Self)
         ensures
             r.items() == self.items(),
     {
-        proof {
-            use_type_invariant(self);
-        }
-        VerifiedDecoder { d: self.d.dup() }
+        self.clone_impl()
     }
 }
 
 } // verus!
-
-impl<V: VValue<C>, C: VCodec> std::fmt::Debug for VerifiedDecoder<'_, V, C> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("VerifiedDecoder").finish_non_exhaustive()
-    }
-}

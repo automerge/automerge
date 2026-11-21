@@ -32,6 +32,60 @@
 //! ([`finish`](VerifiedEdit::finish)), as it must be. It edits a
 //! column of any kind of index.
 //!
+//! # Reviewing the specification
+//!
+//! What this API promises is its specification, and Verus has checked
+//! that the code keeps it. To review the promises, read the
+//! specification: none of the code that keeps them, and none of the
+//! proofs, need be read.
+//!
+//! The specification is in the files of this module that are not named
+//! `imp.rs` (and but for `client_proof.rs` and `model.rs`, below): this
+//! file, for the value types, the column and its iterator; `value.rs`,
+//! `bytes.rs`, `text.rs`, `codec.rs` and `counts.rs`, for the value types
+//! and the codecs, and `bijou.rs` and `leb128.rs`, which name a codec;
+//! `kind.rs`, for the kinds of index; `encoder.rs`, `decoder.rs`,
+//! `edit.rs`, `load.rs` and `copy.rs`; `prefix.rs`, `prefix_iter.rs` and
+//! `sums.rs`, for prefix columns, and `acc.rs` and `acc_iter.rs`, for
+//! accumulator columns; `shift.rs`; and `delta.rs` and the files of
+//! `delta/`, for delta columns. Of the crate it is in `raw.rs` (the raw
+//! column), `load_opts.rs` (the options of a load), and a few definitions
+//! that the specifications use: `window` and `past` (`iter_core.rs`),
+//! `concat` (`rle/writer.rs`), `windows` (`window.rs`) and those of
+//! `splices.rs` (for `copy_ranges`).
+//!
+//! In those files:
+//!
+//! * a public function is its signature and its contract (`requires`,
+//!   `ensures`). Its body is one call: of the function of the same name
+//!   with `_impl` after it, in the file's module `imp` (`decoder/imp.rs`
+//!   for `decoder.rs`, and `imp.rs` for this file), which has the same
+//!   contract word for word and is proved there. A body that is one
+//!   expression of its own (a call of the codec's, an empty proof) is
+//!   left as it was. No body need be read;
+//! * an open specification function (`open spec fn`) is a definition, to
+//!   be read;
+//! * a closed one (`closed spec fn`) is how the specification speaks of
+//!   the state of a value, as an iterator's `items()` is what it has
+//!   left: its body is the implementation's, which a client cannot see,
+//!   and what it means is what the contracts and lemmas that name it say;
+//! * a lemma (`proof fn`) states a fact that a client may use in its
+//!   proofs. It is proved, and so cannot be wrong: it is there to be
+//!   used, and may help to read what is said of a closed function;
+//! * a trait that a client implements (`VPack`, `VNewtype`, `VCodec`,
+//!   `VAmount`, `VGroup`, `VAccum`, `VAdds`, `VShiftable`) says in its
+//!   methods' contracts what it asks of the client, which Verus proves of
+//!   the client's implementation;
+//! * what is trusted, listed in [What is trusted](#what-is-trusted), is
+//!   marked so: `#[verifier::external_body]`, `assume_specification`, or
+//!   `#[verifier::external_trait_specification]` or
+//!   `#[verifier::external_type_specification]`.
+//!
+//! `client_proof.rs` is a client of this API and no part of it: it shows
+//! what a client can prove with the specification, and is checked again
+//! as a crate outside hexane (`verus-client`). `model.rs` and the `imp`
+//! files are the implementation.
+//!
 //! # Value types
 //!
 //! A `VerifiedColumn<V>` holds values of a type `V` that is a
@@ -470,6 +524,15 @@
 //!
 //! # What is trusted
 //!
+//! Every function that Verus takes on trust on a path of this API is
+//! marked in the source by one of `#[verifier::external_body]`,
+//! `assume_specification`, `#[verifier::external_trait_specification]`
+//! and `#[verifier::external_type_specification]`, so that a `grep` for
+//! those finds them. (Code outside `verus!` is not checked at all. Of
+//! that, this API runs only the functions named below as not checked;
+//! the old API's bridges to a value type's and a codec's own code, such
+//! as `rle::model::Ops` and `rle::state::WOps`, are on no path of it.)
+//!
 //! Verus and its solver Z3, and Verus's specifications of the standard
 //! library: of `Vec` and slices, and for a column of `NonZeroU32` those
 //! of `NonZero`, which Verus keeps behind its feature
@@ -686,38 +749,37 @@ pub use sums::{VAmount, VCount, VSum, VSummed};
 pub use text::{total_str_len, total_str_len_opt};
 pub use value::{refused, VNewtype, VPack};
 
-use crate::bool_edit::{BoolModel, BoolRecoder};
+#[cfg(verus_keep_ghost)]
+use crate::bool_edit::BoolModel;
+#[cfg(verus_keep_ghost)]
 use crate::bool_wire::BoolReads;
+#[cfg(verus_keep_ghost)]
 use crate::btree::SlabAggregate;
 use crate::column::Slab;
-use crate::copy::NoRuns;
+use crate::cursor::Slabs;
 #[cfg(verus_keep_ghost)]
-use crate::cursor::{lemma_lens_ok, lemma_vals_own, lemma_vals_unit, slab_lens, Weigh};
-use crate::cursor::{BoundedFeed, ReadsAgree, RunFeed, Slabs};
+use crate::cursor::{slab_lens, Weigh};
+#[cfg(verus_keep_ghost)]
+use crate::cursor::{BoundedFeed, ReadsAgree, RunFeed};
 #[cfg(verus_keep_ghost)]
 use crate::fenwick::{sum, total};
 #[cfg(verus_keep_ghost)]
-use crate::index::wlens;
 use crate::index::IndexOps;
 #[cfg(verus_keep_ghost)]
-use crate::iter_core::{far_ok, find_ok, found, lemma_from, lens_ok, monotone, vals_of};
-use crate::iter_core::{Decode, Decoders, ICore, Probe, Side};
-use crate::remap::{Encodes, Mapping};
+use crate::iter_core::vals_of;
 #[cfg(verus_keep_ghost)]
-use crate::rle::dec::slab_values;
-use crate::rle::dec::RleReads;
-use crate::rle::edit::RleModel;
-use crate::rle::enc::REncoder;
+use crate::iter_core::{Decode, Probe};
+use crate::iter_core::{Decoders, ICore};
+#[cfg(verus_keep_ghost)]
+use crate::remap::{Encodes, Mapping};
 use crate::{Leb128, LoadOpts, MaybeFill, PackError, Run};
+#[cfg(verus_keep_ghost)]
 use counts::VB;
 use kind::KCore;
+#[cfg(verus_keep_ghost)]
 use model::{Model, Streams};
 use std::cmp::Ordering;
-use std::marker::PhantomData;
 use std::ops::Range;
-#[cfg(verus_keep_ghost)]
-use value::{lemma_opt_sizes, lemma_plain_sizes};
-use value::{VOps, VOptOps, VOptWrite, VWrite};
 #[allow(unused_imports)]
 use vstd::prelude::*;
 #[cfg(verus_keep_ghost)]
@@ -794,11 +856,13 @@ mod seal {
     } // verus!
 }
 
-verus! {
+mod imp;
+#[allow(unused_imports)]
+use imp::*;
+#[allow(unused_imports)]
+pub(crate) use imp::{Items, Owned};
 
-/// A slab's segment budget, where none is given: that of
-/// [`Column`](crate::Column).
-const MAX_SEG: usize = 64;
+verus! {
 
 // ── What a value is to a client ─────────────────────────────────────────────
 
@@ -838,10 +902,6 @@ pub trait VGet: Copy + seal::GetSeal {
     ;
 }
 
-impl<T: VPack> seal::GetSeal for T {
-
-}
-
 impl<T: VPack> VGet for T {
     type S = T;
 
@@ -860,10 +920,6 @@ impl<T: VPack> VGet for T {
     }
 }
 
-impl<T: VPack> seal::GetSeal for Option<T> {
-
-}
-
 impl<T: VPack> VGet for Option<T> {
     type S = Option<T>;
 
@@ -880,10 +936,6 @@ impl<T: VPack> VGet for Option<T> {
 
     proof fn lemma_sv_inj(a: Option<T>, b: Option<T>) {
     }
-}
-
-impl seal::GetSeal for bool {
-
 }
 
 impl VGet for bool {
@@ -957,10 +1009,6 @@ pub trait VForm<'a>: VSpec {
 /// string.
 pub type Get<'a, V> = <V as VForm<'a>>::Get;
 
-impl<T: VPack> seal::SpecSeal for T {
-
-}
-
 impl<T: VPack> VSpec for T {
     type S = T;
 
@@ -981,10 +1029,6 @@ impl<'a, T: VPack> VForm<'a> for T {
     type Get = T;
 }
 
-impl<T: VPack> seal::SpecSeal for Option<T> {
-
-}
-
 impl<T: VPack> VSpec for Option<T> {
     type S = Option<T>;
 
@@ -1001,18 +1045,12 @@ impl<T: VPack> VSpec for Option<T> {
     }
 
     proof fn lemma_below(a: Option<T>, b: Option<T>, c: Option<T>) {
-        if let (Some(x), Some(y)) = (a, b) {
-            T::lemma_num(x, y);
-        }
+        imp::vspec_lemma_below_option_t::<T>(a, b, c)
     }
 }
 
 impl<'a, T: VPack> VForm<'a> for Option<T> {
     type Get = Option<T>;
-}
-
-impl seal::SpecSeal for bool {
-
 }
 
 impl VSpec for bool {
@@ -1034,141 +1072,11 @@ impl<'a> VForm<'a> for bool {
     type Get = bool;
 }
 
-/// What decoders give, as a type of theirs: a bound on it can then
-/// name the lifetime `'a`, which one on `Decode::Item` cannot. Every
-/// `Decoders` has it.
-pub(crate) trait Items<'a>: Decoders<'a, D: Decode<Item = <Self as Items<'a>>::Item>> {
-    type Item: Copy;
-}
-
-impl<'a, X: Decoders<'a>> Items<'a> for X {
-    type Item = <X::D as Decode>::Item;
-}
-
-/// A value as a column of `V` holds it.
-#[cfg(verus_keep_ghost)]
-type Held<V, C> = <<V as seal::Sealed<C>>::E as Slabs>::V;
-
 /// The value `v`, given to a column of `V`, is in a specification the
 /// value the column then holds.
 #[doc(hidden)]
 pub closed spec fn own_kept<'a, V: seal::Sealed<C>, C>(v: Get<'a, V>) -> bool {
     <V::E as ReadsAgree<'a, V::X>>::own(v).sv() == v.sv()
-}
-
-/// `svs` goes through a concatenation.
-proof fn lemma_svs_add<T: VGet>(a: Seq<T>, b: Seq<T>)
-    ensures
-        T::svs(a + b) == T::svs(a) + T::svs(b),
-{
-    T::lemma_svs(a);
-    T::lemma_svs(b);
-    T::lemma_svs(a + b);
-    assert(T::svs(a + b) =~= T::svs(a) + T::svs(b));
-}
-
-/// `svs` goes through a range.
-proof fn lemma_svs_sub<T: VGet>(a: Seq<T>, i: int, j: int)
-    requires
-        0 <= i <= j <= a.len(),
-    ensures
-        T::svs(a.subrange(i, j)) == T::svs(a).subrange(i, j),
-{
-    T::lemma_svs(a);
-    T::lemma_svs(a.subrange(i, j));
-    assert(T::svs(a.subrange(i, j)) =~= T::svs(a).subrange(i, j));
-}
-
-/// `svs` goes through a window.
-proof fn lemma_svs_window<T: VGet>(v: Seq<T>, a: int, b: int)
-    requires
-        0 <= a,
-    ensures
-        T::svs(window(v, a, b)) == window(T::svs(v), a, b),
-{
-    T::lemma_svs(v);
-    if a >= v.len() || b <= a {
-        lemma_svs_none::<T>();
-    } else if b <= v.len() {
-        lemma_svs_sub(v, a, b);
-    } else {
-        lemma_svs_sub(v, a, v.len() as int);
-    }
-}
-
-/// No values are no values.
-proof fn lemma_svs_none<T: VGet>()
-    ensures
-        T::svs(Seq::<T>::empty()) == Seq::<T::S>::empty(),
-{
-    T::lemma_svs(Seq::<T>::empty());
-    assert(T::svs(Seq::<T>::empty()) =~= Seq::<T::S>::empty());
-}
-
-/// One value is that value.
-proof fn lemma_svs_one<T: VGet>(v: T)
-    ensures
-        T::svs(seq![v]) == seq![v.sv()],
-{
-    T::lemma_svs(seq![v]);
-    assert(T::svs(seq![v]) =~= seq![v.sv()]);
-}
-
-/// Values that are the same in a specification are the same.
-proof fn lemma_svs_inj<T: VGet>(a: Seq<T>, b: Seq<T>)
-    requires
-        T::svs(a) == T::svs(b),
-    ensures
-        a == b,
-{
-    T::lemma_svs(a);
-    T::lemma_svs(b);
-    let x = T::svs(a);
-    let y = T::svs(b);
-    assert forall|i: int| 0 <= i < a.len() implies a[i] == b[i] by {
-        assert(x[i] == a[i].sv());
-        assert(y[i] == b[i].sv());
-        T::lemma_sv_inj(a[i], b[i]);
-    }
-    assert(a =~= b);
-}
-
-/// A splice of values is that splice of what they are in a
-/// specification.
-proof fn lemma_svs_spliced<T: VGet>(a: Seq<T>, at: int, del: int, ins: Seq<T>)
-    requires
-        0 <= at <= a.len(),
-        0 <= del <= a.len() - at,
-    ensures
-        T::svs(a.take(at) + ins + a.skip(at + del)) == T::svs(a).take(at) + T::svs(ins) + T::svs(a).skip(at + del),
-{
-    T::lemma_svs(a);
-    lemma_svs_add(a.take(at), ins);
-    lemma_svs_add(a.take(at) + ins, a.skip(at + del));
-    lemma_svs_sub(a, 0, at);
-    lemma_svs_sub(a, at + del, a.len() as int);
-}
-
-/// The values `vs`, given to a column of `V`, as it holds them.
-spec fn held<'v, V: seal::Sealed<C>, C>(vs: Seq<Get<'v, V>>) -> Seq<Held<V, C>> {
-    Seq::new(vs.len(), |i: int| <V::E as ReadsAgree<'v, V::X>>::own(vs[i]))
-}
-
-/// What a column holds for the values given are, in a specification,
-/// those values.
-proof fn lemma_held<'v, V: VValue<C>, C: VCodec>(vs: Seq<Get<'v, V>>)
-    ensures
-        <Held<V, C> as VGet>::svs(held::<V, C>(vs)) == <Get<'v, V> as VGet>::svs(vs),
-{
-    let h = held::<V, C>(vs);
-    let a = <Held<V, C> as VGet>::svs(h);
-    let b = <Get<'v, V> as VGet>::svs(vs);
-    <Held<V, C> as VGet>::lemma_svs(h);
-    <Get<'v, V> as VGet>::lemma_svs(vs);
-    assert forall|i: int| 0 <= i < vs.len() implies a[i] == b[i] by {
-        V::lemma_own(vs[i]);
-    }
-    assert(a =~= b);
 }
 
 // ── The saved form ──────────────────────────────────────────────────────────
@@ -1184,39 +1092,6 @@ pub closed spec fn saved<V: seal::Sealed<C>, C>(d: Seq<u8>) -> bool {
 #[doc(hidden)]
 pub closed spec fn saved_values<V: seal::Sealed<C>, C>(d: Seq<u8>) -> Seq<<V as VSpec>::S> {
     <Held<V, C> as VGet>::svs(<V::E as Model<V::X>>::values(d))
-}
-
-/// What the encoder of values of type `V` takes: a value in the
-/// encoder's own form.
-type Given<'a, V, C> = <<<V as seal::Sealed<C>>::E as Streams<
-    'a,
-    <V as seal::Sealed<C>>::X,
->>::Enc as Encodes<<V as seal::Sealed<C>>::E>>::In;
-
-/// How the values of a type go through a remap: read from a column,
-/// handed to the client's function owned, and what it gives appended.
-pub(crate) trait Owned<C>: seal::Sealed<C> {
-    /// The encoder that a remap of a column appends to.
-    type N: Encodes<Self::E>;
-
-    /// A value read from a column, owned.
-    fn to_owned<'a>(g: <Self as VForm<'a>>::Get) -> (v: Self)
-        ensures
-            Self::sv_of(v) == g.sv(),
-    ;
-
-    /// An owned value, as the encoder appends it.
-    fn owned_in(w: Self) -> (x: <Self::N as Encodes<Self::E>>::In)
-        ensures
-            <Self::N as Encodes<Self::E>>::val(x).sv() == Self::sv_of(w),
-    ;
-
-    /// An owned value, as a [`VerifiedEncoder`] of the lifetime `'a`
-    /// appends it.
-    fn owned_for<'a>(w: Self) -> (x: Given<'a, Self, C>)
-        ensures
-            <<Self::E as Streams<'a, Self::X>>::Enc as Encodes<Self::E>>::val(x).sv() == Self::sv_of(w),
-    ;
 }
 
 /// A value type a [`VerifiedColumn`] can hold, its numbers written with
@@ -1268,31 +1143,6 @@ pub trait VValue<C: VCodec = Leb128>: seal::Sealed<C> + Owned<C> {
     ;
 }
 
-impl<T: VPack, C: VCodec> seal::Sealed<C> for T {
-    type X = RleReads<VOps<T, C>>;
-
-    type E = RleModel<VWrite<T, C>>;
-}
-
-impl<T: VPack, C: VCodec> Owned<C> for T {
-    type N = REncoder<'static, VWrite<T, C>>;
-
-    #[inline(always)]
-    fn to_owned<'a>(g: T) -> (v: T) {
-        g
-    }
-
-    #[inline(always)]
-    fn owned_in(w: T) -> (x: T) {
-        w
-    }
-
-    #[inline(always)]
-    fn owned_for<'a>(w: T) -> (x: Given<'a, T, C>) {
-        w
-    }
-}
-
 impl<T: VPack, C: VCodec> VValue<C> for T {
     /// Ten bytes a value, and a header and a count of ten bytes each.
     open spec fn size_bound(vs: Seq<T>) -> nat {
@@ -1300,8 +1150,7 @@ impl<T: VPack, C: VCodec> VValue<C> for T {
     }
 
     proof fn lemma_size(d: Seq<u8>) {
-        <RleModel<VWrite<T, C>> as Model<RleReads<VOps<T, C>>>>::lemma_size(d);
-        lemma_plain_sizes::<T, C>(slab_values::<VOps<T, C>>(d));
+        imp::vvalue_lemma_size_t::<T, C>(d)
     }
 
     proof fn lemma_own<'a>(v: T) {
@@ -1314,35 +1163,7 @@ impl<T: VPack, C: VCodec> VValue<C> for T {
 
     #[inline(always)]
     fn compare<'a, 'b>(a: T, b: T) -> (r: Ordering) {
-        proof {
-            T::lemma_num(a, b);
-        }
-        <T as VPack>::compare(&a, &b)
-    }
-}
-
-impl<T: VPack, C: VCodec> seal::Sealed<C> for Option<T> {
-    type X = RleReads<VOptOps<T, C>>;
-
-    type E = RleModel<VOptWrite<T, C>>;
-}
-
-impl<T: VPack, C: VCodec> Owned<C> for Option<T> {
-    type N = REncoder<'static, VOptWrite<T, C>>;
-
-    #[inline(always)]
-    fn to_owned<'a>(g: Option<T>) -> (v: Option<T>) {
-        g
-    }
-
-    #[inline(always)]
-    fn owned_in(w: Option<T>) -> (x: Option<T>) {
-        w
-    }
-
-    #[inline(always)]
-    fn owned_for<'a>(w: Option<T>) -> (x: Given<'a, Option<T>, C>) {
-        w
+        imp::vvalue_compare_t::<T>(a, b)
     }
 }
 
@@ -1353,8 +1174,7 @@ impl<T: VPack, C: VCodec> VValue<C> for Option<T> {
     }
 
     proof fn lemma_size(d: Seq<u8>) {
-        <RleModel<VOptWrite<T, C>> as Model<RleReads<VOptOps<T, C>>>>::lemma_size(d);
-        lemma_opt_sizes::<T, C>(slab_values::<VOptOps<T, C>>(d));
+        imp::vvalue_lemma_size_option_t::<T, C>(d)
     }
 
     proof fn lemma_own<'a>(v: Option<T>) {
@@ -1362,51 +1182,12 @@ impl<T: VPack, C: VCodec> VValue<C> for Option<T> {
 
     #[inline(always)]
     fn same<'a, 'b>(a: Option<T>, b: Option<T>) -> (r: bool) {
-        match (a, b) {
-            (Some(x), Some(y)) => <T as VPack>::same(&x, &y),
-            (None, None) => true,
-            _ => false,
-        }
+        imp::vvalue_same_option_t::<T>(a, b)
     }
 
     #[inline(always)]
     fn compare<'a, 'b>(a: Option<T>, b: Option<T>) -> (r: Ordering) {
-        match (a, b) {
-            (Some(x), Some(y)) => {
-                proof {
-                    T::lemma_num(x, y);
-                }
-                <T as VPack>::compare(&x, &y)
-            },
-            (None, None) => Ordering::Equal,
-            (None, Some(_)) => Ordering::Less,
-            (Some(_), None) => Ordering::Greater,
-        }
-    }
-}
-
-impl<C: VCodec> seal::Sealed<C> for bool {
-    type X = BoolReads<VB<C>>;
-
-    type E = BoolModel<VB<C>>;
-}
-
-impl<C: VCodec> Owned<C> for bool {
-    type N = BoolRecoder<VB<C>>;
-
-    #[inline(always)]
-    fn to_owned<'a>(g: bool) -> (v: bool) {
-        g
-    }
-
-    #[inline(always)]
-    fn owned_in(w: bool) -> (x: bool) {
-        w
-    }
-
-    #[inline(always)]
-    fn owned_for<'a>(w: bool) -> (x: Given<'a, bool, C>) {
-        w
+        imp::vvalue_compare_option_t::<T>(a, b)
     }
 }
 
@@ -1430,333 +1211,7 @@ impl<C: VCodec> VValue<C> for bool {
 
     #[inline(always)]
     fn compare<'a, 'b>(a: bool, b: bool) -> (r: Ordering) {
-        if a == b {
-            Ordering::Equal
-        } else if b {
-            Ordering::Less
-        } else {
-            Ordering::Greater
-        }
-    }
-}
-
-// ── Searching ───────────────────────────────────────────────────────────────
-
-/// A search target in a column of `V`: where a value stands to it in
-/// the order of the values. Nothing here is trusted: the comparison is
-/// the value type's own, which is verified.
-#[verifier::reject_recursive_types(C)]
-struct VProbe<'t, V: VValue<C>, C: VCodec> {
-    target: Get<'t, V>,
-    _c: PhantomData<C>,
-}
-
-impl<'a, 't, V: VValue<C>, C: VCodec> Probe<Get<'a, V>> for VProbe<'t, V, C> {
-    closed spec fn side(&self, v: Get<'a, V>) -> int {
-        if V::below(v.sv(), self.target.sv()) {
-            -1
-        } else if V::below(self.target.sv(), v.sv()) {
-            1
-        } else {
-            0
-        }
-    }
-
-    proof fn axiom_at(&self, a: Get<'a, V>, b: Get<'a, V>) {
-        let t = self.target.sv();
-        // neither before the target nor after it: the target's value
-        V::lemma_below(a.sv(), t, t);
-        V::lemma_below(b.sv(), t, t);
-        VGet::lemma_sv_inj(a, b);
-    }
-
-    #[inline(always)]
-    fn side_of(&self, v: &Get<'a, V>) -> Side {
-        proof {
-            // not both before the target and after it
-            V::lemma_below(v.sv(), self.target.sv(), v.sv());
-        }
-        match V::compare(*v, self.target) {
-            Ordering::Less => Side::Below,
-            Ordering::Equal => Side::At,
-            Ordering::Greater => Side::Above,
-        }
-    }
-}
-
-/// The search of [`VerifiedColumn::scope_to_value`] and of
-/// [`VerifiedIter::seek_to_value`], over what the cursor `it` has left
-/// in `slabs`: the range of the places that hold `target`, or the empty
-/// range where it would stand, if the values are in order as far as
-/// `target` can tell. Where they are not, some range of the places the
-/// cursor had left.
-#[inline(always)]
-fn seek_sorted<'a, 't, V: VValue<C>, C: VCodec, W: SlabAggregate, I: IndexOps<W>>(
-    it: ICore<<V::X as Decoders<'a>>::D>,
-    slabs: &'a [Slab<<V::E as Slabs>::Tail>],
-    index: &I,
-    target: Get<'t, V>,
-) -> (r: (usize, usize))
-    requires
-        it.wf::<V::X>(slabs@),
-        index.ok(),
-        wlens::<W, I>(index.ws()) == slab_lens(slabs@),
-    ensures
-        ({
-            let w = <Get<'a, V> as VGet>::svs(it.out::<V::X>(slabs@));
-            let t = target.sv();
-            &&& it.pos <= r.0 <= r.1 <= it.pos + w.len()
-            &&& sorted_for::<V>(w, t) ==> forall|k: int|
-                0 <= k < w.len() ==> {
-                    &&& (it.pos + k < r.0) == V::below(#[trigger] w[k], t)
-                    &&& (it.pos + k < r.1) == !V::below(t, w[k])
-                    &&& (r.0 <= it.pos + k < r.1) == (w[k] == t)
-                }
-        }),
-{
-    let ghost w = it.out::<V::X>(slabs@);
-    let ghost p0 = it.pos;
-    let mut it = it;
-    let probe = VProbe::<V, C> { target, _c: PhantomData };
-    let find = |t: usize| -> (r: (usize, usize))
-        requires
-            index.ok(),
-            wlens::<W, I>(index.ws()) == slab_lens(slabs@),
-        ensures
-            find_ok(slabs@, t, r),
-        {
-            let r = index.ix_find(t);
-            proof {
-                assert(index.ws().map_values(|w: W| I::wlen(w))
-                    =~= wlens::<W, I>(index.ws()));
-            }
-            // past the slabs, the whole position lies beyond them
-            if r.0 >= slabs.len() {
-                (slabs.len(), 0)
-            } else {
-                r
-            }
-        };
-    let start_of = |i: usize| -> (n: usize)
-        requires
-            index.ok(),
-            wlens::<W, I>(index.ws()) == slab_lens(slabs@),
-            i <= slabs@.len(),
-        ensures
-            n == sum(slab_lens(slabs@), 0, i as int),
-        {
-            let n = index.ix_before(i);
-            proof {
-                assert(index.ws().map_values(|w: W| I::wlen(w))
-                    =~= wlens::<W, I>(index.ws()));
-            }
-            n
-        };
-    let r = it.seek_value::<V::X, _, _, _>(slabs, &probe, &find, &start_of);
-    proof {
-        let t = target.sv();
-        let sub = <Get<'a, V> as VGet>::svs(w);
-        <Get<'a, V> as VGet>::lemma_svs(w);
-        if sorted_for::<V>(sub, t) {
-            assert forall|i: int, j: int| 0 <= i <= j < w.len() implies #[trigger] probe.side(w[i])
-                <= #[trigger] probe.side(w[j]) by {
-                assert(sub[i] == w[i].sv());
-                assert(sub[j] == w[j].sv());
-            }
-            assert(monotone(probe, w));
-            assert(found(probe, w, r.0 - p0, r.1 - p0));
-            assert forall|k: int| 0 <= k < sub.len() implies {
-                &&& (p0 + k < r.0) == V::below(#[trigger] sub[k], t)
-                &&& (p0 + k < r.1) == !V::below(t, sub[k])
-                &&& (r.0 <= p0 + k < r.1) == (sub[k] == t)
-            } by {
-                let x = sub[k];
-                assert(w[k].sv() == x);
-                // not both before `t` and after it, and where
-                // neither, `t`
-                V::lemma_below(x, t, x);
-                V::lemma_below(t, t, t);
-            }
-        }
-    }
-    r
-}
-
-// ── Remapping ───────────────────────────────────────────────────────────────
-
-/// A client's function as a remap applies it (`Mapping`): to a value
-/// read from the column, owned, and what it gives in the form the
-/// encoder appends. Nothing is assumed of the function: what it asks of
-/// a value and what it gives are its own `requires` and `ensures`.
-#[verifier::reject_recursive_types(V)]
-#[verifier::reject_recursive_types(C)]
-#[verifier::reject_recursive_types(F)]
-struct VMap<'f, V, C, F> {
-    f: &'f F,
-    _c: PhantomData<(V, C)>,
-}
-
-impl<'a, 'f, V: VValue<C>, C: VCodec, F: Fn(V) -> V> Mapping<Get<'a, V>, <V::N as Encodes<V::E>>::In> for VMap<
-    'f,
-    V,
-    C,
-    F,
-> {
-    closed spec fn pre(&self, g: Get<'a, V>) -> bool {
-        forall|v: V| V::sv_of(v) == g.sv() ==> #[trigger] call_requires(*self.f, (v,))
-    }
-
-    closed spec fn maps(&self, g: Get<'a, V>, x: <V::N as Encodes<V::E>>::In) -> bool {
-        mapped(*self.f, g.sv(), <V::N as Encodes<V::E>>::val(x).sv())
-    }
-
-    #[inline(always)]
-    fn apply(&self, g: Get<'a, V>) -> (x: <V::N as Encodes<V::E>>::In) {
-        let v = V::to_owned(g);
-        let w = (self.f)(v);
-        V::owned_in(w)
-    }
-}
-
-// ── What a splice is given ──────────────────────────────────────────────────
-
-/// The values a splice inserts, from a slice: each a run of one.
-#[verifier::reject_recursive_types(C)]
-struct SliceFeed<'a, 'v, V: VValue<C>, C: VCodec> {
-    values: &'a [Get<'v, V>],
-    /// how many have been given
-    pos: usize,
-    _c: PhantomData<C>,
-}
-
-impl<'a, 'v, V: VValue<C>, C: VCodec> RunFeed<V::E> for SliceFeed<'a, 'v, V, C> {
-    type X = <V::E as ReadsAgree<'v, V::X>>::Ins;
-
-    /// The values to give: a feed keeps its slice.
-    type K = Seq<Get<'v, V>>;
-
-    closed spec fn inv(&self) -> bool {
-        self.pos <= self.values@.len()
-    }
-
-    closed spec fn key(&self) -> Seq<Get<'v, V>> {
-        self.values@
-    }
-
-    closed spec fn given(&self) -> Seq<Held<V, C>> {
-        held::<V, C>(self.values@.take(self.pos as int))
-    }
-
-    closed spec fn ended(&self) -> bool {
-        self.pos == self.values@.len()
-    }
-
-    #[inline(always)]
-    fn next_run(&mut self) -> (r: Option<(<V::E as ReadsAgree<'v, V::X>>::Ins, usize)>) {
-        if self.pos < self.values.len() {
-            let v = self.values[self.pos];
-            proof {
-                let own = <V::E as ReadsAgree<'v, V::X>>::own(v);
-                assert(held::<V, C>(self.values@.take(self.pos + 1)) =~= held::<V, C>(
-                    self.values@.take(self.pos as int),
-                ) + Seq::new(1, |_i: int| own));
-            }
-            self.pos = self.pos + 1;
-            Some((<V::E as ReadsAgree<'v, V::X>>::ins(v), 1))
-        } else {
-            None
-        }
-    }
-}
-
-impl<'a, 'v, V: VValue<C>, C: VCodec> BoundedFeed<V::E> for SliceFeed<'a, 'v, V, C> {
-    /// The values not given yet: each a run.
-    closed spec fn bound(&self) -> nat {
-        (self.values@.len() - self.pos) as nat
-    }
-
-    #[inline(always)]
-    fn next_bounded(&mut self) -> (r: Option<(<V::E as ReadsAgree<'v, V::X>>::Ins, usize)>) {
-        if self.pos < self.values.len() {
-            let v = self.values[self.pos];
-            self.pos = self.pos + 1;
-            Some((<V::E as ReadsAgree<'v, V::X>>::ins(v), 1))
-        } else {
-            None
-        }
-    }
-}
-
-/// The values a splice inserts, from a caller's iterator: each a run of
-/// one.
-#[verifier::reject_recursive_types(C)]
-struct IterFeed<'v, V: VValue<C>, C: VCodec, I: Iterator<Item = Get<'v, V>>> {
-    it: I,
-    /// the iterator as it was handed over
-    #[allow(dead_code)]
-    init: Ghost<I>,
-    /// what it has given since
-    #[allow(dead_code)]
-    given: Ghost<Seq<Get<'v, V>>>,
-    /// it has said that it has no more
-    #[allow(dead_code)]
-    ended: Ghost<bool>,
-    _c: PhantomData<C>,
-}
-
-impl<'v, V: VValue<C>, C: VCodec, I: Iterator<Item = Get<'v, V>>> RunFeed<V::E> for IterFeed<'v, V, C, I> {
-    type X = <V::E as ReadsAgree<'v, V::X>>::Ins;
-
-    /// The iterator as it was handed over: a feed keeps that.
-    type K = I;
-
-    /// Where the iterator keeps to what Verus asks of one, what it has
-    /// given and what it is yet to give are together what it was to give
-    /// when it was handed over.
-    #[verifier::prophetic]
-    closed spec fn inv(&self) -> bool {
-        &&& self.it.obeys_prophetic_iter_laws() == self.init@.obeys_prophetic_iter_laws()
-        &&& self.it.obeys_prophetic_iter_laws() ==> {
-            &&& self.given@ + self.it.remaining() == self.init@.remaining()
-            &&& self.ended@ ==> self.it.remaining().len() == 0
-        }
-    }
-
-    closed spec fn key(&self) -> I {
-        self.init@
-    }
-
-    closed spec fn given(&self) -> Seq<Held<V, C>> {
-        held::<V, C>(self.given@)
-    }
-
-    closed spec fn ended(&self) -> bool {
-        self.ended@
-    }
-
-    #[inline(always)]
-    fn next_run(&mut self) -> (r: Option<(<V::E as ReadsAgree<'v, V::X>>::Ins, usize)>) {
-        let ghost before = self.given@;
-        let ghost rem = self.it.remaining();
-        match self.it.next() {
-            Some(v) => {
-                proof {
-                    let own = <V::E as ReadsAgree<'v, V::X>>::own(v);
-                    self.given@ = before.push(v);
-                    assert(held::<V, C>(before.push(v)) =~= held::<V, C>(before) + Seq::new(1, |_i: int| own));
-                    if self.it.obeys_prophetic_iter_laws() {
-                        assert(self.given@ + self.it.remaining() =~= before + rem);
-                    }
-                }
-                Some((<V::E as ReadsAgree<'v, V::X>>::ins(v), 1))
-            },
-            None => {
-                proof {
-                    self.ended@ = true;
-                }
-                None
-            },
-        }
+        imp::vvalue_compare_bool(a, b)
     }
 }
 
@@ -1778,7 +1233,7 @@ pub proof fn lemma_run_values_push<G: VGet>(rs: Seq<Run<G>>, r: Run<G>)
     ensures
         run_values(rs.push(r)) == run_values(rs) + Seq::new(r.count as nat, |_i: int| r.value.sv()),
 {
-    assert(rs.push(r).drop_last() =~= rs);
+    imp::lemma_run_values_push_impl::<G>(rs, r)
 }
 
 /// The values of runs one after another.
@@ -1787,171 +1242,7 @@ pub proof fn lemma_run_values_add<G: VGet>(a: Seq<Run<G>>, b: Seq<Run<G>>)
         run_values(a + b) == run_values(a) + run_values(b),
     decreases b.len(),
 {
-    if b.len() == 0 {
-        assert(a + b =~= a);
-        assert(run_values(a) + run_values(b) =~= run_values(a));
-    } else {
-        lemma_run_values_add(a, b.drop_last());
-        assert((a + b).drop_last() =~= a + b.drop_last());
-        let run = Seq::new(b.last().count as nat, |_i: int| b.last().value.sv());
-        assert(run_values(a) + run_values(b.drop_last()) + run =~= run_values(a) + (run_values(b.drop_last()) + run));
-    }
-}
-
-/// The values of the runs `rs`, given to a column of `V`, as it holds
-/// them.
-spec fn held_runs<'v, V: seal::Sealed<C>, C>(rs: Seq<Run<Get<'v, V>>>) -> Seq<Held<V, C>>
-    decreases rs.len(),
-{
-    if rs.len() == 0 {
-        Seq::empty()
-    } else {
-        held_runs::<V, C>(rs.drop_last()) + Seq::new(
-            rs.last().count as nat,
-            |_i: int| <V::E as ReadsAgree<'v, V::X>>::own(rs.last().value),
-        )
-    }
-}
-
-/// What a column holds for the runs given are, in a specification, the
-/// runs' values.
-proof fn lemma_held_runs<'v, V: VValue<C>, C: VCodec>(rs: Seq<Run<Get<'v, V>>>)
-    ensures
-        <Held<V, C> as VGet>::svs(held_runs::<V, C>(rs)) == run_values(rs),
-    decreases rs.len(),
-{
-    if rs.len() == 0 {
-        lemma_svs_none::<Held<V, C>>();
-    } else {
-        let r = rs.last();
-        let before = held_runs::<V, C>(rs.drop_last());
-        let own = <V::E as ReadsAgree<'v, V::X>>::own(r.value);
-        let run = Seq::new(r.count as nat, |_i: int| own);
-        lemma_held_runs::<V, C>(rs.drop_last());
-        lemma_svs_add(before, run);
-        <Held<V, C> as VGet>::lemma_svs(run);
-        V::lemma_own(r.value);
-        assert(<Held<V, C> as VGet>::svs(run) =~= Seq::new(r.count as nat, |_i: int| r.value.sv()));
-    }
-}
-
-/// The values a splice inserts, from a caller's iterator of runs.
-#[verifier::reject_recursive_types(C)]
-struct RunsFeed<'v, V: VValue<C>, C: VCodec, I: Iterator<Item = Run<Get<'v, V>>>> {
-    it: I,
-    /// the iterator as it was handed over
-    #[allow(dead_code)]
-    init: Ghost<I>,
-    /// what it has given since
-    #[allow(dead_code)]
-    given: Ghost<Seq<Run<Get<'v, V>>>>,
-    /// it has said that it has no more
-    #[allow(dead_code)]
-    ended: Ghost<bool>,
-    _c: PhantomData<C>,
-}
-
-impl<'v, V: VValue<C>, C: VCodec, I: Iterator<Item = Run<Get<'v, V>>>> RunFeed<V::E> for RunsFeed<'v, V, C, I> {
-    type X = <V::E as ReadsAgree<'v, V::X>>::Ins;
-
-    /// The iterator as it was handed over: a feed keeps that.
-    type K = I;
-
-    /// As [`IterFeed`]'s, of runs.
-    #[verifier::prophetic]
-    closed spec fn inv(&self) -> bool {
-        &&& self.it.obeys_prophetic_iter_laws() == self.init@.obeys_prophetic_iter_laws()
-        &&& self.it.obeys_prophetic_iter_laws() ==> {
-            &&& self.given@ + self.it.remaining() == self.init@.remaining()
-            &&& self.ended@ ==> self.it.remaining().len() == 0
-        }
-    }
-
-    closed spec fn key(&self) -> I {
-        self.init@
-    }
-
-    closed spec fn given(&self) -> Seq<Held<V, C>> {
-        held_runs::<V, C>(self.given@)
-    }
-
-    closed spec fn ended(&self) -> bool {
-        self.ended@
-    }
-
-    #[inline(always)]
-    fn next_run(&mut self) -> (r: Option<(<V::E as ReadsAgree<'v, V::X>>::Ins, usize)>) {
-        let ghost before = self.given@;
-        let ghost rem = self.it.remaining();
-        match self.it.next() {
-            Some(run) => {
-                proof {
-                    self.given@ = before.push(run);
-                    assert(before.push(run).drop_last() =~= before);
-                    if self.it.obeys_prophetic_iter_laws() {
-                        assert(self.given@ + self.it.remaining() =~= before + rem);
-                    }
-                }
-                Some((<V::E as ReadsAgree<'v, V::X>>::ins(run.value), run.count))
-            },
-            None => {
-                proof {
-                    self.ended@ = true;
-                }
-                None
-            },
-        }
-    }
-}
-
-/// What a splice of a slice's values leaves, as a client has it.
-proof fn lemma_spliced<'v, V: VValue<C>, C: VCodec>(
-    a: Seq<Held<V, C>>,
-    at: int,
-    del: int,
-    vs: Seq<Get<'v, V>>,
-    ins: Seq<Held<V, C>>,
-)
-    requires
-        0 <= at <= a.len(),
-        0 <= del <= a.len() - at,
-        held::<V, C>(vs.take(0)) + ins == held::<V, C>(vs.take(vs.len() as int)),
-    ensures
-        <Held<V, C> as VGet>::svs(a.take(at) + ins + a.skip(at + del)) == <Held<V, C> as VGet>::svs(a).take(at)
-            + <Get<'v, V> as VGet>::svs(vs) + <Held<V, C> as VGet>::svs(a).skip(at + del),
-{
-    assert(vs.take(vs.len() as int) =~= vs);
-    assert(ins =~= held::<V, C>(vs));
-    lemma_svs_spliced(a, at, del, ins);
-    lemma_held::<V, C>(vs);
-}
-
-// ── The column ──────────────────────────────────────────────────────────────
-
-/// Slab `k` holds the values of the column that come after those of
-/// the slabs before it.
-proof fn lemma_slab_vals<'a, X: Decoders<'a>>(s: Seq<Slab<X::Tail>>, k: int)
-    requires
-        lens_ok::<X>(s),
-        0 <= k < s.len(),
-    ensures
-        sum(slab_lens(s), 0, k + 1) == sum(slab_lens(s), 0, k) + s[k].len,
-        sum(slab_lens(s), 0, k + 1) <= vals_of::<X>(s).len(),
-        X::vals(s[k]).len() == s[k].len,
-        forall|i: int|
-            0 <= i < s[k].len ==> #[trigger] X::vals(s[k])[i] == vals_of::<X>(s)[sum(
-                slab_lens(s),
-                0,
-                k,
-            ) + i],
-{
-    lemma_from::<X>(s, k, 0);
-    let v = X::vals(s[k]);
-    let base = sum(slab_lens(s), 0, k) as int;
-    assert(v.skip(0) =~= v);
-    assert forall|i: int| 0 <= i < s[k].len implies #[trigger] v[i] == vals_of::<X>(s)[base + i] by {
-        assert(vals_of::<X>(s).skip(base)[i] == v[i]);
-    }
+    imp::lemma_run_values_add_impl::<G>(a, b)
 }
 
 /// The fill that a load makes of the saved bytes `d`, with the length
@@ -2001,14 +1292,7 @@ pub proof fn lemma_sorted<V: VSpec>(vs: Seq<V::S>, t: V::S)
     ensures
         sorted_for::<V>(vs, t),
 {
-    assert forall|i: int, j: int| 0 <= i <= j < vs.len() implies {
-        &&& V::below(#[trigger] vs[j], t) ==> V::below(#[trigger] vs[i], t)
-        &&& V::below(t, vs[i]) ==> V::below(t, vs[j])
-    } by {
-        // `vs[i]` is `vs[j]` or comes before it
-        V::lemma_below(vs[i], vs[j], t);
-        V::lemma_below(t, vs[i], vs[j]);
-    }
+    imp::lemma_sorted_impl::<V>(vs, t)
 }
 
 /// The function `f` gave, for a value that is `a` in a specification,
@@ -2030,69 +1314,6 @@ pub open spec fn sum_of(lens: Seq<usize>) -> nat
     } else {
         sum_of(lens.drop_last()) + lens.last() as nat
     }
-}
-
-/// How many values a slab holds.
-fn len_of<T: Copy + Clone + std::fmt::Debug + Default>(s: &Slab<T>) -> (n: usize)
-    ensures
-        n == s.len,
-{
-    s.len
-}
-
-/// How many runs a slab holds.
-fn segments_in<T: Copy + Clone + std::fmt::Debug + Default>(s: &Slab<T>) -> usize {
-    s.segments
-}
-
-/// The lengths of slabs, collected as [`Column`](crate::Column) collects
-/// them. The functions mapped have names because Verus proves nothing of
-/// a closure here whose argument is of a generic type.
-#[inline]
-fn lens_of<T: Copy + Clone + std::fmt::Debug + Default>(slabs: &[Slab<T>]) -> (r: Vec<usize>)
-    ensures
-        r@.len() == slabs@.len(),
-        forall|k: int| 0 <= k < r@.len() ==> r@[k] == (#[trigger] slabs@[k]).len,
-{
-    let it = slabs.iter();
-    let r: Vec<usize> = it.map(len_of::<T>).collect();
-    proof {
-        assert forall|k: int| 0 <= k < r@.len() implies r@[k] == (#[trigger] slabs@[k]).len by {
-            assert(*it.remaining()[k] == slabs@[k]);
-        }
-    }
-    r
-}
-
-/// The segment counts of slabs, collected likewise.
-#[inline]
-fn segments_of<T: Copy + Clone + std::fmt::Debug + Default>(slabs: &[Slab<T>]) -> Vec<usize> {
-    slabs.iter().map(segments_in::<T>).collect()
-}
-
-/// Numbers that are the lengths of slabs add up as the slabs' lengths do.
-proof fn lemma_sum_of_lens<T: Copy + Clone + std::fmt::Debug + Default>(lens: Seq<usize>, slabs: Seq<Slab<T>>, k: int)
-    requires
-        lens.len() == slabs.len(),
-        forall|i: int| 0 <= i < lens.len() ==> lens[i] == (#[trigger] slabs[i]).len,
-        0 <= k <= lens.len(),
-    ensures
-        sum_of(lens.take(k)) == sum(slab_lens(slabs), 0, k),
-    decreases k,
-{
-    if k > 0 {
-        lemma_sum_of_lens(lens, slabs, k - 1);
-        assert(lens.take(k).drop_last() =~= lens.take(k - 1));
-    }
-}
-
-/// What [`VerifiedColumn::dump_slabs`] prints of a slab: the values and
-/// the runs it counts, its first run and its last.
-struct SlabRuns<G> {
-    len: usize,
-    segments: usize,
-    first: Option<Run<G>>,
-    last: Option<Run<G>>,
 }
 
 /// What a column counts of edits (`VerifiedColumn::edits`) after one
@@ -2146,9 +1367,7 @@ pub proof fn lemma_after_edits(n: usize, k: nat)
         k > 0 ==> after_edits(n, k) != n,
     decreases k,
 {
-    if k > 0 {
-        lemma_after_edits(n, (k - 1) as nat);
-    }
+    imp::lemma_after_edits_impl(n, k)
 }
 
 /// A column of values of type `V`: the sequence `self@`. Its numbers are
@@ -2216,6 +1435,7 @@ impl<'v, V: VValue<C>, C: VCodec, K: VIndex<V, C>> Extend<Get<'v, V>> for Verifi
     /// [`splice_iter`](VerifiedColumn::splice_iter) does at the column's
     /// end, and specified as that is. The column counts an edit more if
     /// it is the longer for it.
+    #[inline(always)]
     fn extend<I: IntoIterator<Item = Get<'v, V>>>(&mut self, iter: I)
         ensures
             exists|it: I::IntoIter| #[trigger]
@@ -2224,16 +1444,7 @@ impl<'v, V: VValue<C>, C: VCodec, K: VIndex<V, C>> Extend<Get<'v, V>> for Verifi
                 )@ + VGet::svs(it.remaining())),
             final(self).edits() == after_call(old(self).edits(), final(self)@.len() != old(self)@.len()),
     {
-        let len = self.len();
-        self.splice_iter(len, 0, iter);
-        proof {
-            let it = choose|it: I::IntoIter| #[trigger]
-                (I::into_iter).ensures((iter,), it) && (it.obeys_prophetic_iter_laws() ==> self@ == old(self)@.take(
-                    len as int,
-                ) + VGet::svs(it.remaining()) + old(self)@.skip(len + 0));
-            let vs = <Get<'v, V> as VGet>::svs(it.remaining());
-            assert(old(self)@.take(len as int) + vs + old(self)@.skip(len + 0) =~= old(self)@ + vs);
-        }
+        self.extend_impl::<I>(iter)
     }
 }
 
@@ -2252,18 +1463,9 @@ impl<'v, V: VValue<C>, C: VCodec, K: VIndex<V, C>> FromIterator<Get<'v, V>> for 
     /// states it for an iterator that keeps to what Verus asks of every
     /// iterator: the column then holds the values the iterator was to
     /// give (`from_iter_ensures`).
+    #[inline(always)]
     fn from_iter<I: IntoIterator<Item = Get<'v, V>>>(iter: I) -> (s: Self) {
-        let mut s = Self::new();
-        s.splice_iter(0, 0, iter);
-        proof {
-            let it = choose|it: I::IntoIter| #[trigger]
-                (I::into_iter).ensures((iter,), it) && (it.obeys_prophetic_iter_laws() ==> s@ == Seq::<
-                    V::S,
-                >::empty().take(0) + VGet::svs(it.remaining()) + Seq::<V::S>::empty().skip(0));
-            let vs = <Get<'v, V> as VGet>::svs(it.remaining());
-            assert(Seq::<V::S>::empty().take(0) + vs + Seq::<V::S>::empty().skip(0) =~= vs);
-        }
-        s
+        Self::from_iter_impl::<I>(iter)
     }
 }
 
@@ -2303,8 +1505,7 @@ impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
         ensures
             x == y,
     {
-        lemma_svs_inj(<V::E as Model<V::X>>::values(x), <V::E as Model<V::X>>::values(y));
-        <V::E as Model<V::X>>::lemma_unique(x, y);
+        Self::lemma_save_unique_impl(x, y)
     }
 
     /// A saved column is the encoding of its values.
@@ -2314,9 +1515,7 @@ impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
         ensures
             Self::encoding(Self::values(d)) == d,
     {
-        let e = Self::encoding(Self::values(d));
-        assert(Self::valid(e) && Self::values(e) == Self::values(d));
-        Self::lemma_save_unique(e, d);
+        Self::lemma_encoding_impl(d)
     }
 
     /// No bytes are a saved column: the one of no values.
@@ -2325,60 +1524,52 @@ impl<V: VValue<C>, C: VCodec> VerifiedColumn<V, C> {
             Self::valid(Seq::<u8>::empty()),
             Self::values(Seq::<u8>::empty()) == Seq::<V::S>::empty(),
     {
-        <V::E as Model<V::X>>::lemma_none();
-        lemma_svs_none::<Held<V, C>>();
+        Self::lemma_no_bytes_impl()
     }
 }
 
 // The constructors.
 impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
     /// An empty column.
+    #[inline(always)]
     pub fn new() -> (r: Self)
         ensures
             r@ == Seq::<V::S>::empty(),
     {
-        Self::with_max_segments(MAX_SEG)
+        Self::new_impl()
     }
 
     /// An empty column whose slabs hold at most `max_segments` runs
     /// each.
+    #[inline(always)]
     pub fn with_max_segments(max_segments: usize) -> (r: Self)
         requires
             max_segments >= 2,
         ensures
             r@ == Seq::<V::S>::empty(),
     {
-        let core = KCore::<V, C, K>::with_budget(max_segments);
-        proof {
-            assert(core@ =~= Seq::empty());
-            lemma_svs_none::<Held<V, C>>();
-        }
-        VerifiedColumn { core }
+        Self::with_max_segments_impl(max_segments)
     }
 
     /// A column of `values`.
+    #[inline(always)]
     pub fn from_values(values: &[Get<'_, V>]) -> (r: Self)
         ensures
             r@ == VGet::svs(values@),
     {
-        Self::from_values_with_max_segments(values, MAX_SEG)
+        Self::from_values_impl(values)
     }
 
     /// A column of `values` whose slabs hold at most `max_segments` runs
     /// each.
+    #[inline(always)]
     pub fn from_values_with_max_segments(values: &[Get<'_, V>], max_segments: usize) -> (r: Self)
         requires
             max_segments >= 2,
         ensures
             r@ == VGet::svs(values@),
     {
-        let mut r = Self::with_max_segments(max_segments);
-        r.splice(0, 0, values);
-        proof {
-            let vs = VGet::svs(values@);
-            assert(Seq::<V::S>::empty().take(0) + vs + Seq::<V::S>::empty().skip(0) =~= vs);
-        }
-        r
+        Self::from_values_with_max_segments_impl(values, max_segments)
     }
 
     /// A column of `len` copies of `value`.
@@ -2386,6 +1577,7 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
     /// The length is one that a column's run can count, and a `usize`
     /// with three to spare (which says more only where a `usize` has 32
     /// bits).
+    #[inline(always)]
     pub fn fill(len: usize, value: Get<'_, V>) -> (r: Self)
         requires
             len <= i64::MAX,
@@ -2393,44 +1585,8 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
         ensures
             r@ == Seq::new(len as nat, |_i: int| value.sv()),
     {
-        Self::filled(len, value, MAX_SEG)
+        Self::fill_impl(len, value)
     }
-
-    /// [`fill`](Self::fill), in slabs of at most `max_segments` runs.
-    #[inline(always)]
-    fn filled(len: usize, value: Get<'_, V>, max_segments: usize) -> (r: Self)
-        requires
-            len <= i64::MAX,
-            len <= usize::MAX - 3,
-            max_segments >= 2,
-        ensures
-            r@ == Seq::new(len as nat, |_i: int| value.sv()),
-    {
-        if len == 0 {
-            let r = Self::with_max_segments(max_segments);
-            proof {
-                assert(r@ =~= Seq::new(len as nat, |_i: int| value.sv()));
-            }
-            return r;
-        }
-        let slab = <V::E as Model<V::X>>::fill(len, value);
-        let ghost s = slab;
-        let mut slabs = Vec::with_capacity(1);
-        slabs.push(slab);
-        proof {
-            assert(slabs@ =~= seq![s]);
-            lemma_vals_unit::<V::E>(s);
-        }
-        let core = KCore::<V, C, K>::from_cut(slabs, max_segments);
-        proof {
-            let vs = Seq::new(len as nat, |_i: int| value.sv());
-            <Held<V, C> as VGet>::lemma_svs(core@);
-            V::lemma_own(value);
-            assert(<Held<V, C> as VGet>::svs(core@) =~= vs);
-        }
-        VerifiedColumn { core }
-    }
-
 }
 
 impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
@@ -2440,10 +1596,7 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
         ensures
             r == self@.len(),
     {
-        proof {
-            <Held<V, C> as VGet>::lemma_svs(self.core@);
-        }
-        self.core.len()
+        self.len_impl()
     }
 
     /// Whether the column holds no value.
@@ -2452,10 +1605,7 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
         ensures
             r == (self@.len() == 0),
     {
-        proof {
-            <Held<V, C> as VGet>::lemma_svs(self.core@);
-        }
-        self.core.len() == 0
+        self.is_empty_impl()
     }
 
     /// The count of the column's edits, which a suspended iterator's
@@ -2467,31 +1617,11 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
         self.core.count()
     }
 
-    /// Set the count of edits after a call: to one more than `before`,
-    /// which the column counted before the call, if the call was an edit
-    /// (`edit`), and to `before` if it was none. The shared cursor moves
-    /// the count as it writes, by a number that depends on the edit;
-    /// this makes it one an edit.
-    #[inline(always)]
-    fn count_call(&mut self, before: usize, edit: bool)
-        ensures
-            final(self)@ == old(self)@,
-            final(self).core@ == old(self).core@,
-            final(self).edits() == after_call(before, edit),
-    {
-        self.core.set_counter(
-            if edit {
-                before.wrapping_add(1)
-            } else {
-                before
-            },
-        );
-    }
-
     /// Delete `del` values at `at` and insert `values` there.
     ///
     /// The column counts an edit more (`after_edit` of its `edits()`),
     /// unless the call deletes no value and inserts none.
+    #[inline(always)]
     pub fn splice(&mut self, at: usize, del: usize, values: &[Get<'_, V>])
         requires
             at <= old(self)@.len(),
@@ -2500,17 +1630,7 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
             final(self)@ == old(self)@.take(at as int) + VGet::svs(values@) + old(self)@.skip(at + del),
             final(self).edits() == after_call(old(self).edits(), del > 0 || values@.len() > 0),
     {
-        proof {
-            <Held<V, C> as VGet>::lemma_svs(self.core@);
-        }
-        let counter = self.core.counter();
-        let mut f = <V::E as Model<V::X>>::blind();
-        let mut feed = SliceFeed::<V, C> { values, pos: 0, _c: PhantomData };
-        let _ins = self.core.splice_bounded(at, del, &mut f, &mut feed);
-        proof {
-            lemma_spliced::<V, C>(old(self).core@, at as int, del as int, values@, _ins@);
-        }
-        self.count_call(counter, del > 0 || values.len() > 0);
+        self.splice_impl(at, del, values)
     }
 
     /// Delete `del` values at `at` and insert there the values that
@@ -2526,6 +1646,7 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
     /// The column counts an edit more unless the call deletes no value
     /// and inserts none, which is where `del` is 0 and the column is as
     /// long as it was. That holds of every iterator.
+    #[inline(always)]
     pub fn splice_iter<'v, I: IntoIterator<Item = Get<'v, V>>>(&mut self, at: usize, del: usize, values: I)
         requires
             at <= old(self)@.len(),
@@ -2537,37 +1658,7 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
                 )@.take(at as int) + VGet::svs(it.remaining()) + old(self)@.skip(at + del)),
             final(self).edits() == after_call(old(self).edits(), del > 0 || final(self)@.len() != old(self)@.len()),
     {
-        proof {
-            <Held<V, C> as VGet>::lemma_svs(self.core@);
-        }
-        let counter = self.core.counter();
-        let len = self.core.len();
-        let it = values.into_iter();
-        let ghost it0 = it;
-        let mut f = <V::E as Model<V::X>>::blind();
-        let mut feed = IterFeed::<V, C, I::IntoIter> {
-            it,
-            init: Ghost(it0),
-            given: Ghost(Seq::empty()),
-            ended: Ghost(false),
-            _c: PhantomData,
-        };
-        proof {
-            assert(feed.given@ + feed.it.remaining() =~= it0.remaining());
-        }
-        let _ins = self.core.splice(at, del, &mut f, &mut feed);
-        proof {
-            if it0.obeys_prophetic_iter_laws() {
-                let vs = it0.remaining();
-                assert(feed.given@ =~= feed.given@ + feed.it.remaining());
-                assert(vs.take(0) =~= Seq::<Get<'v, V>>::empty());
-                assert(vs.take(vs.len() as int) =~= vs);
-                lemma_spliced::<V, C>(old(self).core@, at as int, del as int, vs, _ins@);
-            }
-            <Held<V, C> as VGet>::lemma_svs(self.core@);
-        }
-        let edit = del > 0 || self.core.len() != len;
-        self.count_call(counter, edit);
+        self.splice_iter_impl::<I>(at, del, values)
     }
 
     /// Delete `del` values at `at` and insert there the runs that `runs`
@@ -2582,6 +1673,7 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
     /// The column counts an edit more unless the call deletes no value
     /// and inserts none, as [`splice_iter`](Self::splice_iter)'s does:
     /// runs that are all of count 0 insert none.
+    #[inline(always)]
     pub fn splice_runs<'v, I: IntoIterator<Item = Run<Get<'v, V>>>>(&mut self, at: usize, del: usize, runs: I)
         requires
             at <= old(self)@.len(),
@@ -2593,64 +1685,7 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
                 )@.take(at as int) + run_values(it.remaining()) + old(self)@.skip(at + del)),
             final(self).edits() == after_call(old(self).edits(), del > 0 || final(self)@.len() != old(self)@.len()),
     {
-        proof {
-            <Held<V, C> as VGet>::lemma_svs(self.core@);
-        }
-        let counter = self.core.counter();
-        let len = self.core.len();
-        let it = runs.into_iter();
-        let ghost it0 = it;
-        let mut f = <V::E as Model<V::X>>::blind();
-        let mut feed = RunsFeed::<V, C, I::IntoIter> {
-            it,
-            init: Ghost(it0),
-            given: Ghost(Seq::empty()),
-            ended: Ghost(false),
-            _c: PhantomData,
-        };
-        proof {
-            assert(feed.given@ + feed.it.remaining() =~= it0.remaining());
-        }
-        let _ins = self.core.splice(at, del, &mut f, &mut feed);
-        proof {
-            if it0.obeys_prophetic_iter_laws() {
-                let rs = it0.remaining();
-                assert(feed.given@ =~= feed.given@ + feed.it.remaining());
-                assert(_ins@ =~= Seq::<Held<V, C>>::empty() + _ins@);
-                lemma_svs_spliced(old(self).core@, at as int, del as int, _ins@);
-                lemma_held_runs::<V, C>(rs);
-            }
-            <Held<V, C> as VGet>::lemma_svs(self.core@);
-        }
-        let edit = del > 0 || self.core.len() != len;
-        self.count_call(counter, edit);
-    }
-
-    /// Delete `del` values at `at`, which is an edit unless `del` is 0.
-    fn delete(&mut self, at: usize, del: usize)
-        requires
-            at <= old(self)@.len(),
-            del <= old(self)@.len() - at,
-        ensures
-            final(self)@ == old(self)@.take(at as int) + old(self)@.skip(at + del),
-            final(self).edits() == after_call(old(self).edits(), del > 0),
-    {
-        proof {
-            <Held<V, C> as VGet>::lemma_svs(self.core@);
-        }
-        let counter = self.core.counter();
-        let mut f = <V::E as Model<V::X>>::blind();
-        let mut feed = NoRuns::<<V::E as ReadsAgree<'static, V::X>>::Ins> { none: None };
-        let _ins = self.core.splice_bounded(at, del, &mut f, &mut feed);
-        proof {
-            let a = old(self).core@;
-            let none = Seq::<Held<V, C>>::empty();
-            assert(_ins@ =~= none);
-            lemma_svs_spliced(a, at as int, del as int, none);
-            lemma_svs_none::<Held<V, C>>();
-            assert(self@ =~= old(self)@.take(at as int) + old(self)@.skip(at + del));
-        }
-        self.count_call(counter, del > 0);
+        self.splice_runs_impl::<I>(at, del, runs)
     }
 
     /// Insert `value` before the value at `at`. The column counts an
@@ -2663,46 +1698,7 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
             final(self)@ == old(self)@.insert(at as int, value.sv()),
             final(self).edits() == after_edit(old(self).edits()),
     {
-        // Which of the two it is, is a constant of the column's type: the
-        // other is not compiled.
-        if <V::E as Model<V::X>>::ONE_APART {
-            self.insert_apart(at, value);
-        } else {
-            let one = [value];
-            self.splice(at, 0, one.as_slice());
-            proof {
-                assert(one@ =~= seq![value]);
-                lemma_svs_one(value);
-                assert(self@ =~= old(self)@.insert(at as int, value.sv()));
-            }
-        }
-    }
-
-    /// `insert`, out of line: a splice of one value that deletes none,
-    /// compiled for that alone, apart from `splice`.
-    fn insert_apart(&mut self, at: usize, value: Get<'_, V>)
-        requires
-            at <= old(self)@.len(),
-        ensures
-            final(self)@ == old(self)@.insert(at as int, value.sv()),
-            final(self).edits() == after_edit(old(self).edits()),
-    {
-        proof {
-            <Held<V, C> as VGet>::lemma_svs(self.core@);
-        }
-        let counter = self.core.counter();
-        let one = [value];
-        let values = one.as_slice();
-        let mut f = <V::E as Model<V::X>>::blind();
-        let mut feed = SliceFeed::<V, C> { values, pos: 0, _c: PhantomData };
-        let _ins = self.core.splice_bounded(at, 0, &mut f, &mut feed);
-        proof {
-            lemma_spliced::<V, C>(old(self).core@, at as int, 0, values@, _ins@);
-            assert(one@ =~= seq![value]);
-            lemma_svs_one(value);
-            assert(self@ =~= old(self)@.insert(at as int, value.sv()));
-        }
-        self.count_call(counter, true);
+        self.insert_impl(at, value)
     }
 
     /// Add `value` at the end. The column counts an edit more.
@@ -2712,14 +1708,7 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
             final(self)@ == old(self)@.push(value.sv()),
             final(self).edits() == after_edit(old(self).edits()),
     {
-        proof {
-            <Held<V, C> as VGet>::lemma_svs(self.core@);
-        }
-        let at = self.core.len();
-        self.insert(at, value);
-        proof {
-            assert(self@ =~= old(self)@.push(value.sv()));
-        }
+        self.push_impl(value)
     }
 
     /// Delete the value at `at`. The column counts an edit more.
@@ -2731,10 +1720,7 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
             final(self)@ == old(self)@.remove(at as int),
             final(self).edits() == after_edit(old(self).edits()),
     {
-        self.delete(at, 1);
-        proof {
-            assert(self@ =~= old(self)@.remove(at as int));
-        }
+        self.remove_impl(at)
     }
 
     /// Keep the first `len` values, where there are more: then the
@@ -2750,16 +1736,7 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
             },
             final(self).edits() == after_call(old(self).edits(), len < old(self)@.len()),
     {
-        proof {
-            <Held<V, C> as VGet>::lemma_svs(self.core@);
-        }
-        let n = self.core.len();
-        if len < n {
-            self.delete(len, n - len);
-            proof {
-                assert(self@ =~= old(self)@.take(len as int));
-            }
-        }
+        self.truncate_impl(len)
     }
 
     /// Delete the `n` values at `at`. The column counts an edit more,
@@ -2773,13 +1750,7 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
             final(self)@ == old(self)@.take(at as int) + old(self)@.skip(at + n),
             final(self).edits() == after_call(old(self).edits(), n > 0),
     {
-        if n > 0 {
-            self.delete(at, n);
-        } else {
-            proof {
-                assert(self@ =~= self@.take(at as int) + self@.skip(at as int));
-            }
-        }
+        self.remove_n_impl(at, n)
     }
 
     /// Delete every value. The column keeps its segment budget.
@@ -2788,141 +1759,39 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
     /// [`Column`](crate::Column): the column counts what it did, and
     /// what was suspended of it resumes still. Of any other the column
     /// counts an edit more.
+    #[inline(always)]
     pub fn clear(&mut self)
         ensures
             final(self)@ == Seq::<V::S>::empty(),
             final(self).edits() == after_call(old(self).edits(), old(self)@.len() > 0),
     {
-        if self.core.len() == 0 {
-            proof {
-                <Held<V, C> as VGet>::lemma_svs(self.core@);
-                assert(self@ =~= Seq::empty());
-            }
-            return;
-        }
-        // a new column, and not a delete of every value, which would
-        // leave the last slab to be emptied through a rebuild. The edit
-        // counter goes on from where it is, as after any other edit.
-        proof {
-            // the column has a value
-            <Held<V, C> as VGet>::lemma_svs(self.core@);
-        }
-        self.core.lemma_column();
-        let mut core = KCore::<V, C, K>::with_budget(self.core.max_segments());
-        core.set_counter(self.core.counter().wrapping_add(1));
-        proof {
-            assert(core@ =~= Seq::empty());
-            lemma_svs_none::<Held<V, C>>();
-        }
-        self.core = core;
+        self.clear_impl()
     }
 
     /// How many slabs hold the column. That is a fact of how the column
     /// lies in memory and not of its values: nothing is specified of it.
+    #[inline(always)]
     pub fn slab_count(&self) -> usize {
-        self.core.slabs().len()
+        self.slab_count_impl()
     }
 
     /// How many values each slab holds, slab by slab. They add up to the
     /// column's length (`sum_of`). How the values are spread over the
     /// slabs is a fact of how the column lies in memory: nothing else is
     /// specified of it.
+    #[inline(always)]
     pub fn slab_lens(&self) -> (r: Vec<usize>)
         ensures
             sum_of(r@) == self@.len(),
     {
-        self.core.lemma_column();
-        let slabs = self.core.slabs();
-        proof {
-            <Held<V, C> as VGet>::lemma_svs(self.core@);
-        }
-        let r = lens_of(slabs);
-        proof {
-            lemma_sum_of_lens(r@, slabs@, r@.len() as int);
-            assert(r@.take(r@.len() as int) =~= r@);
-        }
-        r
+        self.slab_lens_impl()
     }
 
     /// How many runs each slab holds, slab by slab. That is a fact of
     /// how the column lies in memory: nothing is specified of it.
-    pub fn slab_segments(&self) -> Vec<usize> {
-        segments_of(self.core.slabs())
-    }
-
-    /// Slab `i` as [`dump_slabs`](Self::dump_slabs) prints it: the
-    /// counts it holds, its first run and its last, which are `None` for
-    /// a slab of no values. `None` if the column has no slab `i`.
-    // a Verus loop with an invariant: `loop` + `match`
-    #[allow(clippy::while_let_loop)]
-    fn slab_runs(&self, i: usize) -> Option<SlabRuns<Get<'_, V>>> {
-        self.core.lemma_column();
-        let slabs = self.core.slabs();
-        if i >= slabs.len() {
-            return None;
-        }
-        proof {
-            lemma_lens_ok::<V::E, V::X>(slabs@);
-        }
-        let s = &slabs[i];
-        let mut d = <V::X as Decoders>::open(s);
-        let first = d.d_run_max(usize::MAX);
-        let mut last = first;
-        if first.is_some() {
-            loop
-                invariant
-                    d.inv(),
-                decreases d.rest().len(),
-            {
-                match d.d_run_max(usize::MAX) {
-                    Some(run) => {
-                        last = Some(run);
-                    },
-                    None => {
-                        break ;
-                    },
-                }
-            }
-        }
-        Some(SlabRuns { len: s.len, segments: s.segments, first, last })
-    }
-
-    /// How many slabs the column's index counts. For a column that
-    /// holds values: an emptied one may be without its index (after a
-    /// panic in an edit), and this panics then.
-    fn index_len(&self) -> usize {
-        self.core.lemma_column();
-        self.core.index().ix_len()
-    }
-
-    /// How many values the column's index counts before slab `i`, or
-    /// `None` if it counts fewer than `i` slabs. For a column that holds
-    /// values, as [`index_len`](Self::index_len).
-    fn index_before(&self, i: usize) -> Option<usize> {
-        self.core.lemma_column();
-        let ix = self.core.index();
-        if i <= ix.ix_len() {
-            Some(ix.ix_before(i))
-        } else {
-            None
-        }
-    }
-
-    /// What the slabs' readers give is, as values, the column's.
     #[inline(always)]
-    fn lemma_read(&self)
-        ensures
-            VGet::svs(vals_of::<V::X>(self.core.slabs_spec())) == self@,
-            self@.len() == total(slab_lens(self.core.slabs_spec())),
-    {
-        self.core.lemma_column();
-        proof {
-            let o = vals_of::<V::X>(self.core.slabs_spec());
-            lemma_vals_own::<V::E, V::X>(self.core.slabs_spec());
-            assert(self.core@ =~= held::<V, C>(o));
-            lemma_held::<V, C>(o);
-            <Held<V, C> as VGet>::lemma_svs(self.core@);
-        }
+    pub fn slab_segments(&self) -> Vec<usize> {
+        self.slab_segments_impl()
     }
 
     /// The column's kind of index is kept for the values the column
@@ -2933,172 +1802,35 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
         ensures
             K::keeps(self@),
     {
-        let s = self.core.slabs_spec();
-        self.core.lemma_view();
-        self.core.lemma_no_parts();
-        if !self.core.ready() {
-            assert(slab_lens(s) =~= Seq::<nat>::empty());
-            <K::G as Weigh<V::E, K::W>>::lemma_dom_empty(s);
-        }
-        K::lemma_kept(s);
-    }
-
-    /// A reader of the values `start..end`.
-    #[inline(always)]
-    fn reader(&self, start: usize, end: usize) -> (it: ICore<<V::X as Decoders<'_>>::D>)
-        requires
-            start <= end <= self@.len(),
-        ensures
-            it.wf::<V::X>(self.core.slabs_spec()),
-            it.pos == start,
-            it.items_left == end - start,
-            VGet::svs(it.out::<V::X>(self.core.slabs_spec())) == self@.subrange(start as int, end as int),
-    {
-        proof {
-            <Held<V, C> as VGet>::lemma_svs(self.core@);
-        }
-        let it = self.core.reader::<V::X>(start, end);
-        proof {
-            let o = it.out::<V::X>(self.core.slabs_spec());
-            let s = self.core@.subrange(start as int, end as int);
-            assert(s =~= held::<V, C>(o));
-            lemma_held::<V, C>(o);
-            lemma_svs_sub(self.core@, start as int, end as int);
-        }
-        it
+        self.lemma_kept_impl()
     }
 
     /// The value at `i`, if the column has one there.
+    #[inline(always)]
     pub fn get(&self, i: usize) -> (r: Option<Get<'_, V>>)
         ensures
             i < self@.len() ==> (r matches Some(v) && v.sv() == self@[i as int]),
             i >= self@.len() ==> r is None,
     {
-        proof {
-            <Held<V, C> as VGet>::lemma_svs(self.core@);
-        }
-        if i >= self.core.len() {
-            return None;
-        }
-        // the column's length is short of `usize::MAX`
-        self.core.lemma_column();
-        let slabs = self.core.slabs();
-        let mut it = self.reader(i, i + 1);
-        proof {
-            let o = it.out::<V::X>(slabs@);
-            let s = VGet::svs(o);
-            VGet::lemma_svs(o);
-            assert(s[0] == self@[i as int]);
-            assert(s[0] == o[0].sv());
-        }
-        it.next::<V::X>(slabs)
+        self.get_impl(i)
     }
 
     /// The values.
+    #[inline(always)]
     pub fn to_vec(&self) -> (r: Vec<Get<'_, V>>)
         ensures
             VGet::svs(r@) == self@,
     {
-        proof {
-            <Held<V, C> as VGet>::lemma_svs(self.core@);
-        }
-        let n = self.core.len();
-        let slabs = self.core.slabs();
-        let mut it = self.reader(0, n);
-        let mut out: Vec<Get<'_, V>> = Vec::with_capacity(n);
-        let ghost o = it.out::<V::X>(slabs@);
-        it.drain_into::<V::X>(slabs, &mut out);
-        proof {
-            assert(out@ =~= o);
-            assert(self@.subrange(0, n as int) =~= self@);
-        }
-        out
+        self.to_vec_impl()
     }
 
     /// Whether every value is `value`: so of an empty column.
+    #[inline(always)]
     pub fn is_only(&self, value: Get<'_, V>) -> (r: bool)
         ensures
             r == only(self@, value.sv()),
     {
-        self.core.lemma_column();
-        let slabs = self.core.slabs();
-        let ghost vs = vals_of::<V::X>(slabs@);
-        proof {
-            lemma_lens_ok::<V::E, V::X>(slabs@);
-            lemma_vals_own::<V::E, V::X>(slabs@);
-            assert(self.core@ =~= held::<V, C>(vs));
-            lemma_held::<V, C>(vs);
-            VGet::lemma_svs(vs);
-        }
-        // slab by slab: a slab of one value is one run of it
-        let mut j: usize = 0;
-        while j < slabs.len()
-            invariant
-                j <= slabs@.len(),
-                lens_ok::<V::X>(slabs@),
-                vs == vals_of::<V::X>(slabs@),
-                vs.len() == self@.len(),
-                vs.len() < usize::MAX,
-                forall|i: int| 0 <= i < vs.len() ==> self@[i] == (#[trigger] vs[i]).sv(),
-                forall|i: int| 0 <= i < sum(slab_lens(slabs@), 0, j as int) ==> self@[i] == value.sv(),
-            decreases slabs@.len() - j,
-        {
-            let s = &slabs[j];
-            let ghost base = sum(slab_lens(slabs@), 0, j as int) as int;
-            let ghost sv = <V::X as Decoders>::vals(*s);
-            proof {
-                lemma_slab_vals::<V::X>(slabs@, j as int);
-            }
-            if !<V::X as Decoders>::maybe_uniform(s) {
-                proof {
-                    // two of the slab's values differ, so one is not
-                    // `value`
-                    let i = choose|i: int| 0 < i < sv.len() && sv[i - 1] != #[trigger] sv[i];
-                    let a = sv[i - 1];
-                    let b = sv[i];
-                    assert(a == vs[base + i - 1]);
-                    assert(b == vs[base + i]);
-                    if a.sv() == b.sv() {
-                        VGet::lemma_sv_inj(a, b);
-                    }
-                    if self@[base + i - 1] == value.sv() {
-                        assert(self@[base + i] != value.sv());
-                    }
-                }
-                return false;
-            }
-            let mut d = <V::X as Decoders>::open(s);
-            if let Some(run) = d.d_run_max(usize::MAX) {
-                if run.count != s.len || !V::same(run.value, value) {
-                    proof {
-                        // the slab's first value is another, or the one
-                        // at which its first run ends
-                        let k: int = if run.value.sv() == value.sv() {
-                            run.count as int
-                        } else {
-                            0
-                        };
-                        let w = sv[k];
-                        assert(sv.take(run.count as int)[0] == run.value);
-                        if w.sv() == run.value.sv() {
-                            VGet::lemma_sv_inj(w, run.value);
-                        }
-                        assert(w == vs[base + k]);
-                        assert(self@[base + k] != value.sv());
-                    }
-                    return false;
-                }
-                proof {
-                    assert forall|i: int| base <= i < base + s.len implies self@[i]
-                        == value.sv() by {
-                        assert(sv.take(run.count as int)[i - base] == run.value);
-                        assert(sv[i - base] == vs[i]);
-                    }
-                }
-            }
-            j += 1;
-        }
-        true
+        self.is_only_impl(value)
     }
 
     /// Where `value` is among the values `start..end`, which are taken
@@ -3111,6 +1843,7 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
     /// `value` can tell (`sorted_for`), which values in order
     /// (`sorted`) are for every `value` (`lemma_sorted`). Where
     /// they are not, the range is some range within `start..end`.
+    #[inline(always)]
     pub fn scope_to_value(&self, value: Get<'_, V>, start: usize, end: usize) -> (r: Range<usize>)
         requires
             start <= end <= self@.len(),
@@ -3123,32 +1856,7 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
                     &&& (r.start <= k < r.end) == (self@[k] == value.sv())
                 },
     {
-        if start == end {
-            // nothing to look at (and a column that an edit's panic left
-            // without its parts has no index to ask)
-            return start..start;
-        }
-        self.core.lemma_column();
-        let slabs = self.core.slabs();
-        let index = self.core.index();
-        let it = self.reader(start, end);
-        let ghost w = it.out::<V::X>(slabs@);
-        let ghost sub = self@.subrange(start as int, end as int);
-        let r = seek_sorted::<V, C, K::W, K::I>(it, slabs, index, value);
-        proof {
-            VGet::lemma_svs(w);
-            assert(VGet::svs(w) == sub);
-            if sorted_for::<V>(sub, value.sv()) {
-                assert forall|k: int| start <= k < end implies {
-                    &&& (k < r.0) == V::below(#[trigger] self@[k], value.sv())
-                    &&& (k < r.1) == !V::below(value.sv(), self@[k])
-                    &&& (r.0 <= k < r.1) == (self@[k] == value.sv())
-                } by {
-                    assert(sub[k - start] == self@[k]);
-                }
-            }
-        }
-        r.0..r.1
+        self.scope_to_value_impl(value, start, end)
     }
 
     /// Replace each value by what `f` gives for it. `f` is called once
@@ -3163,6 +1871,7 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
     /// segment budget, and its slabs are cut anew, as those of a loaded
     /// column are. It counts an edit more, whatever `f` gives and of a
     /// column with no value too.
+    #[inline(always)]
     pub fn remap<F: Fn(V) -> V>(&mut self, f: F)
         requires
             forall|v: V| old(self)@.contains(V::sv_of(v)) ==> #[trigger] call_requires(f, (v,)),
@@ -3171,36 +1880,7 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
             forall|i: int| 0 <= i < old(self)@.len() ==> mapped(f, old(self)@[i], #[trigger] final(self)@[i]),
             final(self).edits() == after_edit(old(self).edits()),
     {
-        let counter = self.core.counter();
-        let m = VMap::<V, C, F> { f: &f, _c: PhantomData };
-        let ghost o = vals_of::<V::X>(self.core.slabs_spec());
-        self.core.lemma_column();
-        proof {
-            // the values read are the column's
-            lemma_vals_own::<V::E, V::X>(self.core.slabs_spec());
-            assert(self.core@ =~= held::<V, C>(o));
-            lemma_held::<V, C>(o);
-            VGet::lemma_svs(o);
-            assert forall|i: int| 0 <= i < self.core@.len() implies m.pre(#[trigger] o[i]) by {
-                assert(self@[i] == o[i].sv());
-            }
-        }
-        let (core, Ghost(ws)) = self.core.remap::<V::X, V::N, VMap<V, C, F>>(&m);
-        proof {
-            <Held<V, C> as VGet>::lemma_svs(core@);
-            assert forall|i: int| 0 <= i < o.len() implies mapped(
-                f,
-                old(self)@[i],
-                #[trigger] <Held<V, C> as VGet>::svs(core@)[i],
-            ) by {
-                assert(m.maps(o[i], ws[i]));
-                assert(old(self)@[i] == o[i].sv());
-            }
-        }
-        self.core = core;
-        // a write like any other: the edit counter goes on from where it
-        // was
-        self.core.set_counter(counter.wrapping_add(1));
+        self.remap_impl::<F>(f)
     }
 
     /// An iterator over the values.
@@ -3213,15 +1893,7 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
             it.pos() == 0,
             it.end_pos() == self@.len(),
     {
-        proof {
-            <Held<V, C> as VGet>::lemma_svs(self.core@);
-        }
-        self.lemma_read();
-        let n = self.core.len();
-        proof {
-            assert(self@.subrange(0, n as int) =~= self@);
-        }
-        VerifiedIter { it: self.reader(0, n), slabs: self.core.slabs(), col: Some(&self.core) }
+        self.iter_impl()
     }
 
     /// An iterator over the values `start..end`.
@@ -3236,11 +1908,11 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
             it.pos() == start,
             it.end_pos() == end,
     {
-        self.lemma_read();
-        VerifiedIter { it: self.reader(start, end), slabs: self.core.slabs(), col: Some(&self.core) }
+        self.iter_range_impl(start, end)
     }
 
     /// The column, saved: the encoding of its values.
+    #[inline(always)]
     pub fn save(&self) -> (r: Vec<u8>)
         ensures
             VerifiedColumn::<V, C>::valid(r@),
@@ -3248,20 +1920,13 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
             r@ == VerifiedColumn::<V, C>::encoding(self@),
             r@.len() <= V::size_bound(self@),
     {
-        self.core.lemma_column();
-        let mut out: Vec<u8> = Vec::new();
-        <V::E as Model<V::X>>::save(self.core.slabs(), self.core.len(), &mut out);
-        proof {
-            assert(out@.skip(0) =~= out@);
-            VerifiedColumn::<V, C>::lemma_encoding(out@);
-            V::lemma_size(out@);
-        }
-        out
+        self.save_impl()
     }
 
     /// Save the column after what `out` holds: `out` is then what it
     /// was, and after that the encoding of the column's values. The
     /// range returned is where in `out` that is.
+    #[inline(always)]
     pub fn save_to(&self, out: &mut Vec<u8>) -> (r: Range<usize>)
         ensures
             final(out)@ == old(out)@ + VerifiedColumn::<V, C>::encoding(self@),
@@ -3271,21 +1936,13 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
             r.start == old(out)@.len(),
             r.end == final(out)@.len(),
     {
-        self.core.lemma_column();
-        let start = out.len();
-        <V::E as Model<V::X>>::save(self.core.slabs(), self.core.len(), out);
-        proof {
-            let d = out@.skip(start as int);
-            VerifiedColumn::<V, C>::lemma_encoding(d);
-            V::lemma_size(d);
-            assert(out@ =~= old(out)@ + d);
-        }
-        start..out.len()
+        self.save_to_impl(out)
     }
 
     /// [`save_to`](Self::save_to), unless every value of the column is
     /// `value`: then nothing is written, and the range is empty. So is
     /// it for an empty column, whatever `value` is.
+    #[inline(always)]
     pub fn save_to_unless(&self, out: &mut Vec<u8>, value: Get<'_, V>) -> (r: Range<usize>)
         ensures
             final(out)@ == if only(self@, value.sv()) {
@@ -3301,11 +1958,7 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
             r.start == old(out)@.len(),
             r.end == final(out)@.len(),
     {
-        if self.is_only(value) {
-            out.len()..out.len()
-        } else {
-            self.save_to(out)
-        }
+        self.save_to_unless_impl(out, value)
     }
 
     /// Save the column and read the bytes through, as a load does: an
@@ -3316,18 +1969,14 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
     /// one does whose values' `size_bound` is less. (A longer column
     /// saves to a saved column too. But its last run may be more bytes
     /// than a slab can count, and the read refuses that.)
+    #[inline(always)]
     pub fn validate_encoding(&self) -> (r: Result<(), PackError>)
         ensures
             VerifiedColumn::<V, C>::encoding(self@).len() <= u32::MAX ==> r is Ok,
             V::size_bound(self@) <= u32::MAX ==> r is Ok,
     {
-        let bytes = self.save();
-        match <V::E as Model<V::X>>::validate(bytes.as_slice()) {
-            Ok(_) => Ok(()),
-            Err(e) => Err(e),
-        }
+        self.validate_encoding_impl()
     }
-
 }
 
 // The loads. What is saved is spoken of as a plain column's, whatever
@@ -3337,22 +1986,13 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
     /// column; and no error for one that is `loadable` and whose values
     /// the column's kind of index is kept for (`VKeeps::keeps`: for a
     /// plain column, any).
+    #[inline(always)]
     pub fn load(bytes: &[u8]) -> (r: Result<Self, PackError>)
         ensures
             VerifiedColumn::<V, C>::loadable(bytes@) && K::keeps(VerifiedColumn::<V, C>::values(bytes@)) ==> r is Ok,
             r matches Ok(c) ==> VerifiedColumn::<V, C>::valid(bytes@) && c@ == VerifiedColumn::<V, C>::values(bytes@),
     {
-        proof {
-            let vs = <V::E as Model<V::X>>::values(bytes@);
-            <Held<V, C> as VGet>::lemma_svs(vs);
-            if K::keeps(<Held<V, C> as VGet>::svs(vs)) {
-                K::lemma_refuses(vs);
-            }
-        }
-        match <V::E as Model<V::X>>::load::<K::W, K::I, K::G>(bytes, MAX_SEG, None, i64::MIN, i64::MAX) {
-            Ok(core) => Ok(VerifiedColumn { core }),
-            Err(e) => Err(e),
-        }
+        Self::load_impl(bytes)
     }
 
     /// [`load`](Self::load) with options ([`LoadOpts`]): how many values
@@ -3370,6 +2010,7 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
     /// when asked for fewer, and here that is a `requires`. The fill
     /// value need not live as long as `bytes` do, nor `bytes` as long as
     /// it: the column owns what it holds.
+    #[inline(always)]
     pub fn load_with<'a, F: MaybeFill<Get<'a, V>>>(bytes: &[u8], opts: LoadOpts<F>) -> (r: Result<Self, PackError>)
         requires
             opts.max_segments() >= 2,
@@ -3388,27 +2029,7 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
                 },
             },
     {
-        let (length, fill, max_segments) = opts.parts();
-        if bytes.len() == 0 {
-            if let Some(len) = length {
-                if len as u64 <= i64::MAX as u64 && len <= usize::MAX - 3 {
-                    if let Some(v) = fill.fill_value() {
-                        return Ok(Self::filled(len, v, max_segments));
-                    }
-                }
-            }
-        }
-        proof {
-            let vs = <V::E as Model<V::X>>::values(bytes@);
-            <Held<V, C> as VGet>::lemma_svs(vs);
-            if K::keeps(<Held<V, C> as VGet>::svs(vs)) {
-                K::lemma_refuses(vs);
-            }
-        }
-        match <V::E as Model<V::X>>::load::<K::W, K::I, K::G>(bytes, max_segments, length, i64::MIN, i64::MAX) {
-            Ok(core) => Ok(VerifiedColumn { core }),
-            Err(e) => Err(e),
-        }
+        Self::load_with_impl::<F>(bytes, opts)
     }
 }
 
@@ -3424,17 +2045,6 @@ pub open spec fn folded<B, T, F: FnMut(B, T) -> B>(f: F, init: B, vs: Seq<T>, r:
     } else {
         exists|b: B| #[trigger] f.ensures((init, vs[0]), b) && folded(f, b, vs.drop_first(), r)
     }
-}
-
-/// A fold of `vs` is `f` on its first value and a fold of the others.
-proof fn lemma_folded_step<B, T, F: FnMut(B, T) -> B>(f: F, a: B, vs: Seq<T>, b: B, r: B)
-    requires
-        vs.len() > 0,
-        f.ensures((a, vs[0]), b),
-        folded(f, b, vs.drop_first(), r),
-    ensures
-        folded(f, a, vs, r),
-{
 }
 
 /// The values `o` begin with a run of `n` values `v`, which ends there:
@@ -3472,9 +2082,7 @@ pub proof fn lemma_runs_first<T>(o: Seq<T>)
         o.len() > 0 ==> runs_of(o)[0].value == o[0] && 1 <= runs_of(o)[0].count <= o.len(),
     decreases o.len(),
 {
-    if o.len() > 0 {
-        lemma_runs_first(o.drop_first());
-    }
+    imp::lemma_runs_first_impl::<T>(o)
 }
 
 /// If `o` begins with a run of `n` values `v` that ends there
@@ -3488,25 +2096,7 @@ pub proof fn lemma_runs_of<T>(o: Seq<T>, v: T, n: usize)
         runs_of(o) == seq![Run { count: n, value: v }] + runs_of(o.skip(n as int)),
     decreases n,
 {
-    let d = o.drop_first();
-    let r = runs_of(d);
-    lemma_runs_first(d);
-    if n == 1 {
-        assert(d =~= o.skip(1));
-        if d.len() > 0 {
-            assert(d[0] == o[1]);
-        }
-    } else {
-        assert forall|i: int| 0 <= i < n - 1 implies #[trigger] d[i] == v by {
-            assert(d[i] == o[i + 1]);
-        }
-        if n - 1 < d.len() {
-            assert(d[n - 1] == o[n as int]);
-        }
-        lemma_runs_of(d, v, (n - 1) as usize);
-        assert(d.skip(n - 1) =~= o.skip(n as int));
-        assert(r.drop_first() =~= runs_of(o.skip(n as int)));
-    }
+    imp::lemma_runs_of_impl::<T>(o, v, n)
 }
 
 /// The values of the runs of `o` are `o`'s.
@@ -3517,44 +2107,7 @@ pub proof fn lemma_runs_of_values<G: VGet>(o: Seq<G>)
         run_values(runs_of(o)) == G::svs(o),
     decreases o.len(),
 {
-    G::lemma_svs(o);
-    if o.len() == 0 {
-        assert(run_values(runs_of(o)) =~= G::svs(o));
-    } else {
-        let d = o.drop_first();
-        let r = runs_of(d);
-        let x = o[0].sv();
-        lemma_runs_of_values(d);
-        lemma_runs_first(d);
-        G::lemma_svs(d);
-        let none = Seq::<Run<G>>::empty();
-        if r.len() > 0 && r[0].value == o[0] {
-            let (a, b) = (Run { count: (r[0].count + 1) as usize, value: o[0] }, r.drop_first());
-            lemma_run_values_push(none, a);
-            lemma_run_values_push(none, r[0]);
-            assert(none.push(a) =~= seq![a]);
-            assert(none.push(r[0]) =~= seq![r[0]]);
-            lemma_run_values_add(seq![a], b);
-            lemma_run_values_add(seq![r[0]], b);
-            assert(seq![r[0]] + b =~= r);
-            let was = Seq::new(r[0].count as nat, |_i: int| x) + run_values(b);
-            let now = Seq::new(a.count as nat, |_i: int| x) + run_values(b);
-            assert(G::svs(d) == was);
-            assert(run_values(runs_of(o)) == now);
-            assert forall|i: int| 0 <= i < o.len() implies now[i] == #[trigger] G::svs(o)[i] by {
-                if i > 0 {
-                    assert(was[i - 1] == d[i - 1].sv());
-                }
-            }
-            assert(now =~= G::svs(o));
-        } else {
-            let a = Run { count: 1, value: o[0] };
-            lemma_run_values_push(none, a);
-            assert(none.push(a) =~= seq![a]);
-            lemma_run_values_add(seq![a], r);
-            assert(run_values(runs_of(o)) =~= G::svs(o));
-        }
-    }
+    imp::lemma_runs_of_values_impl::<G>(o)
 }
 
 /// An iterator over a column's values, which
@@ -3572,18 +2125,6 @@ pub struct VerifiedIter<'a, V: VValue<C>, C: VCodec = Leb128, K: VIndex<V, C> = 
 }
 
 impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedIter<'a, V, C, K> {
-    /// The iterator stands in the slabs of its column, in the column or
-    /// at its end.
-    #[verifier::type_invariant]
-    spec fn inv(&self) -> bool {
-        &&& self.it.wf::<V::X>(self.slabs@)
-        &&& self.it.pos <= total(slab_lens(self.slabs@))
-        &&& match self.col {
-            Some(c) => self.slabs@ == c.slabs_spec(),
-            None => self.slabs@.len() == 0,
-        }
-    }
-
     /// What the iterator has left to give.
     pub closed spec fn items(&self) -> Seq<Get<'a, V>> {
         self.it.out::<V::X>(self.slabs@)
@@ -3629,7 +2170,7 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedIter<'a, V, C, K> {
             self.items().len() <= usize::MAX,
             self.rest().len() == self.items().len(),
     {
-        <Get<'a, V> as VGet>::lemma_svs(self.items());
+        self.lemma_items_len_impl()
     }
 
     /// What the iterator reads is what its column holds: of
@@ -3642,39 +2183,7 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedIter<'a, V, C, K> {
                 None => self.column().len() == 0,
             },
     {
-        use_type_invariant(self);
-        match self.col {
-            Some(c) => {
-                c.lemma_view();
-                let o = vals_of::<V::X>(c.slabs_spec());
-                lemma_vals_own::<V::E, V::X>(c.slabs_spec());
-                assert(c@ =~= held::<V, C>(o));
-                lemma_held::<V, C>(o);
-                <Held<V, C> as VGet>::lemma_svs(c@);
-            },
-            None => {
-                assert(vals_of::<V::X>(self.slabs@) =~= Seq::empty());
-                <Get<'a, V> as VGet>::lemma_svs(vals_of::<V::X>(self.slabs@));
-            },
-        }
-    }
-
-    /// What is left is the column's values in the window.
-    proof fn lemma_window(&self)
-        requires
-            self.it.wf::<V::X>(self.slabs@),
-        ensures
-            self.spec_pos() == self.it.pos,
-            self.spec_end_pos() == self.it.pos + self.it.items_left,
-            self.column().len() == total(slab_lens(self.slabs@)),
-            self.rest().len() == self.items().len(),
-            self.rest() == window(self.column(), self.spec_pos() as int, self.spec_end_pos() as int),
-    {
-        self.it.lemma_out_len::<V::X>(self.slabs@);
-        self.it.lemma_out_window::<V::X>(self.slabs@);
-        <Get<'a, V> as VGet>::lemma_svs(vals_of::<V::X>(self.slabs@));
-        <Get<'a, V> as VGet>::lemma_svs(self.items());
-        lemma_svs_window(vals_of::<V::X>(self.slabs@), self.it.pos as int, self.it.pos + self.it.items_left);
+        self.lemma_source_impl()
     }
 
     /// The index in the column of the value `next` gives, if it gives
@@ -3684,7 +2193,7 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedIter<'a, V, C, K> {
     /// [`end_pos`](Self::end_pos), as far as the column goes. The
     /// iterator stands in the column or at its end.
     #[verifier::when_used_as_spec(spec_pos)]
-    #[inline]
+    #[inline(always)]
     pub fn pos(&self) -> (r: usize)
         ensures
             r == self.pos(),
@@ -3692,11 +2201,7 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedIter<'a, V, C, K> {
             self.pos() <= self.column().len(),
             self.rest() == window(self.column(), self.pos() as int, self.end_pos() as int),
     {
-        proof {
-            use_type_invariant(self);
-            self.lemma_window();
-        }
-        self.it.pos
+        self.pos_impl()
     }
 
     /// Where the iterator's window ends: the index in the column that
@@ -3705,7 +2210,7 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedIter<'a, V, C, K> {
     /// column has. Once the iterator has given all it has, its window
     /// ends where it stands.
     #[verifier::when_used_as_spec(spec_end_pos)]
-    #[inline]
+    #[inline(always)]
     pub fn end_pos(&self) -> (r: usize)
         ensures
             r == self.end_pos(),
@@ -3713,18 +2218,14 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedIter<'a, V, C, K> {
             self.pos() <= self.column().len(),
             self.rest() == window(self.column(), self.pos() as int, self.end_pos() as int),
     {
-        proof {
-            use_type_invariant(self);
-            self.lemma_window();
-        }
-        self.it.pos + self.it.items_left
+        self.end_pos_impl()
     }
 
     /// The index of the slab the iterator stands in. This is how the
     /// column lies in memory, of which no specification speaks.
-    #[inline]
+    #[inline(always)]
     pub fn get_slab(&self) -> usize {
-        self.it.slab_idx
+        self.get_slab_impl()
     }
 
     /// Where the iterator stands and where its window ends, to keep
@@ -3734,6 +2235,7 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedIter<'a, V, C, K> {
     /// The state fits the column the iterator reads: resumed on that
     /// column, as it is, it gives an iterator that stands where this one
     /// does and has the same values left.
+    #[inline(always)]
     pub fn suspend(&self) -> (s: VerifiedIterState)
         ensures
             s.pos() == self.pos(),
@@ -3744,16 +2246,7 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedIter<'a, V, C, K> {
                 None => true,
             },
     {
-        proof {
-            use_type_invariant(self);
-            self.lemma_window();
-        }
-        let (slab_idx, slab_consumed, pos, items_left) = self.it.suspended::<V::X>(self.slabs);
-        let counter = match self.col {
-            Some(c) => c.counter(),
-            None => 0,
-        };
-        VerifiedIterState { counter, num_slabs: self.slabs.len(), slab_idx, pos, items_left, slab_consumed }
+        self.suspend_impl()
     }
 
     /// Make the window end at `end`: the iterator then gives the
@@ -3762,6 +2255,7 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedIter<'a, V, C, K> {
     ///
     /// This can widen the window as well as narrow it. With an `end`
     /// past the column's, the iterator gives what the column has.
+    #[inline(always)]
     pub fn set_max(&mut self, end: usize)
         ensures
             final(self).column() == old(self).column(),
@@ -3774,13 +2268,7 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedIter<'a, V, C, K> {
             },
             final(self).rest() == window(old(self).column(), old(self).pos() as int, end as int),
     {
-        proof {
-            use_type_invariant(&*self);
-        }
-        self.it.set_max::<V::X>(self.slabs, end);
-        proof {
-            self.lemma_window();
-        }
+        self.set_max_impl(end)
     }
 
     /// Move on so that the value at index `target` of the column comes
@@ -3789,6 +2277,7 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedIter<'a, V, C, K> {
     /// gives all it has, and stands at the end of that with nothing left.
     ///
     /// Few of the values passed over are looked at ([`nth`](Self::nth)).
+    #[inline(always)]
     pub fn advance_to(&mut self, target: usize)
         ensures
             final(self).column() == old(self).column(),
@@ -3807,19 +2296,12 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedIter<'a, V, C, K> {
                 &&& final(self).end_pos() == final(self).pos()
             },
     {
-        proof {
-            <Get<'a, V> as VGet>::lemma_svs(self.items());
-        }
-        if target > self.it.pos {
-            self.nth(target - self.it.pos - 1);
-            proof {
-                <Get<'a, V> as VGet>::lemma_svs(self.items());
-            }
-        }
+        self.advance_to_impl(target)
     }
 
     /// Move `amount` values on: past as many as the iterator has left,
     /// if it has fewer.
+    #[inline(always)]
     pub fn advance_by(&mut self, amount: usize)
         ensures
             final(self).column() == old(self).column(),
@@ -3834,12 +2316,7 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedIter<'a, V, C, K> {
                 &&& final(self).end_pos() == final(self).pos()
             },
     {
-        proof {
-            use_type_invariant(&*self);
-            // if the sum saturates, both move past everything left
-            self.lemma_window();
-        }
-        self.advance_to(self.it.pos.saturating_add(amount));
+        self.advance_by_impl(amount)
     }
 
     /// Move the window to `range`: the iterator then gives the column's
@@ -3849,6 +2326,7 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedIter<'a, V, C, K> {
     /// If `range` starts past its own end or the column's, the iterator
     /// has nothing left, and stands where `range` ends or the column
     /// does, whichever comes first, if that is ahead of it.
+    #[inline(always)]
     pub fn shift(&mut self, range: Range<usize>)
         ensures
             final(self).column() == old(self).column(),
@@ -3885,12 +2363,7 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedIter<'a, V, C, K> {
                 &&& final(self).end_pos() == final(self).pos()
             },
     {
-        proof {
-            use_type_invariant(&*self);
-            self.lemma_window();
-        }
-        self.set_max(range.end);
-        self.advance_to(range.start);
+        self.shift_impl(range)
     }
 
     /// Move the window to `range` and give its first value, if it has
@@ -3898,6 +2371,7 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedIter<'a, V, C, K> {
     ///
     /// If the window has no value, the iterator has nothing left, and
     /// stands where [`shift`](Self::shift) leaves it then.
+    #[inline(always)]
     pub fn shift_next(&mut self, range: Range<usize>) -> (r: Option<Get<'a, V>>)
         requires
             range.start >= old(self).pos(),
@@ -3926,26 +2400,7 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedIter<'a, V, C, K> {
                 }
             }),
     {
-        let ghost (c, p) = (self.column(), self.it.pos as int);
-        proof {
-            use_type_invariant(&*self);
-            self.lemma_window();
-        }
-        self.set_max(range.end);
-        let ghost o1 = self.rest();
-        proof {
-            <Get<'a, V> as VGet>::lemma_svs(self.items());
-        }
-        let r = self.nth(range.start - self.it.pos);
-        proof {
-            let (w, n) = (window(c, range.start as int, range.end as int), range.start - p);
-            <Get<'a, V> as VGet>::lemma_svs(self.items());
-            if n < o1.len() {
-                assert(w =~= o1.skip(n));
-                assert(w.skip(1) =~= o1.skip(n + 1));
-            }
-        }
-        r
+        self.shift_next_impl(range)
     }
 
     /// The next run: the value the iterator gives next, and how many
@@ -3978,53 +2433,18 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedIter<'a, V, C, K> {
                 },
             },
     {
-        proof {
-            use_type_invariant(&*self);
-            self.it.lemma_out_len::<V::X>(self.slabs@);
-        }
-        let ghost o = self.it.out::<V::X>(self.slabs@);
-        proof {
-            <Get<'a, V> as VGet>::lemma_svs(o);
-        }
-        let max = self.it.items_left;
-        if max == 0 {
-            return None;
-        }
-        let first = self.it.run_once::<V::X>(self.slabs, max)?;
-        let run = if self.it.slab_remaining == 0 && self.it.items_left > 0 {
-            // The run reaches its slab's end, and may go on in the next.
-            // Whether it does is a comparison of two values, which is not
-            // known to return; so it is made on a copy of where the
-            // iterator stands, and the iterator stands rightly whatever
-            // comes of it.
-            let mut it = self.it.dup();
-            let count = it.merge_on::<V::X>(self.slabs, first.value, first.count, max - first.count, Ghost(o));
-            self.it = it;
-            Run { count, value: first.value }
-        } else {
-            first
-        };
-        proof {
-            let n = run.count as int;
-            lemma_svs_sub(o, n, o.len() as int);
-            assert forall|i: int| 0 <= i < n implies #[trigger] o[i] == run.value by {
-                assert(o.take(n)[i] == run.value);
-            }
-            if n < o.len() && o[n].sv() == run.value.sv() {
-                <Get<'a, V> as VGet>::lemma_sv_inj(o[n], run.value);
-            }
-        }
-        Some(run)
+        self.next_run_impl()
     }
 
     /// An iterator of the runs the iterator has left to give
     /// ([`next_run`](Self::next_run)): what
     /// [`splice_runs`](VerifiedColumn::splice_runs) takes.
+    #[inline(always)]
     pub fn runs(self) -> (r: VerifiedRuns<'a, V, C, K>)
         ensures
             r.iter() == self,
     {
-        VerifiedRuns(self)
+        self.runs_impl()
     }
 
     /// Move on to the first of the values left that is `target`, and
@@ -4035,6 +2455,7 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedIter<'a, V, C, K> {
     /// The values are read a run at a time.
     // a Verus loop with an invariant: `loop` + `match`
     #[allow(clippy::while_let_loop)]
+    #[inline(always)]
     pub fn scan_to_value(&mut self, target: Get<'_, V>) -> (r: Option<usize>)
         ensures
             final(self).column() == old(self).column(),
@@ -4058,62 +2479,7 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedIter<'a, V, C, K> {
                 },
             },
     {
-        let end = self.end_pos();
-        let mut probe = self.clone();
-        let mut pos = probe.pos();
-        let ghost o = self.items();
-        let ghost p0 = self.pos();
-        loop
-            invariant
-                self.items() == o,
-                self.pos() == p0,
-                self.end_pos() == end,
-                self.column() == old(self).column(),
-                self.source() == old(self).source(),
-                o == old(self).items(),
-                p0 == old(self).pos(),
-                end == old(self).end_pos(),
-                p0 <= pos,
-                pos - p0 <= o.len(),
-                probe.pos() == pos,
-                probe.items() == o.skip(pos - p0),
-                forall|i: int| 0 <= i < pos - p0 ==> (#[trigger] o[i]).sv() != target.sv(),
-            ensures
-                forall|i: int| 0 <= i < o.len() ==> (#[trigger] o[i]).sv() != target.sv(),
-            decreases o.len() - (pos - p0),
-        {
-            let ghost left = probe.items();
-            let run = match probe.next_run() {
-                Some(run) => run,
-                None => {
-                    break ;
-                },
-            };
-            proof {
-                assert forall|i: int| pos - p0 <= i < pos - p0 + run.count implies #[trigger] o[i] == run.value by {
-                    assert(left[i - (pos - p0)] == run.value);
-                }
-            }
-            if V::same(run.value, target) {
-                proof {
-                    <Get<'a, V> as VGet>::lemma_svs(o);
-                }
-                if pos == self.it.pos {
-                    // the value is where the iterator stands
-                    self.next();
-                } else {
-                    self.nth(pos - self.it.pos);
-                }
-                return Some(pos);
-            }
-            pos += run.count;
-        }
-        self.advance_to(end);
-        proof {
-            <Get<'a, V> as VGet>::lemma_svs(o);
-            <Get<'a, V> as VGet>::lemma_svs(self.items());
-        }
-        None
+        self.scan_to_value_impl(target)
     }
 
     /// Search the values left for `target`, where they are in order,
@@ -4135,6 +2501,7 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedIter<'a, V, C, K> {
     /// ([`scope_to_value`](VerifiedColumn::scope_to_value)). They need be
     /// in order only as far as `target` can tell (`sorted_for`); where
     /// they are not, the range is some range of the places searched.
+    #[inline(always)]
     pub fn seek_to_value(&mut self, target: Get<'_, V>, range: Range<usize>) -> (r: Range<usize>)
         ensures
             final(self).column() == old(self).column(),
@@ -4167,129 +2534,7 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedIter<'a, V, C, K> {
                     }
             }),
     {
-        let ghost (p, o, c) = (self.pos() as int, self.rest(), self.column());
-        // the iterator cannot leave its window, so neither can the search
-        let end = range.end.min(self.end_pos());
-        if range.start > self.it.pos {
-            self.advance_to(range.start);
-        }
-        proof {
-            use_type_invariant(&*self);
-            self.lemma_window();
-        }
-        let here = self.it.pos;
-        let ghost a = here - p;
-        let slabs = self.slabs;
-        let index = match self.col {
-            Some(col) => {
-                col.lemma_column();
-                match col.index_opt() {
-                    Some(index) => index,
-                    None => {
-                        return here..here;
-                    },
-                }
-            },
-            None => {
-                return here..here;
-            },
-        };
-        // The search is a comparison of values, which is not known to
-        // return; so it is made on a copy of where the iterator stands.
-        let mut it = self.it.dup();
-        it.set_max::<V::X>(slabs, end);
-        let ghost w = <Get<'a, V> as VGet>::svs(it.out::<V::X>(slabs@));
-        proof {
-            it.lemma_out_window::<V::X>(slabs@);
-            lemma_svs_window(vals_of::<V::X>(slabs@), here as int, here + it.items_left);
-            assert(w =~= window(o, a, range.end - p));
-        }
-        let r = seek_sorted::<V, C, K::W, K::I>(it, slabs, index, target);
-        self.advance_to(r.0);
-        proof {
-            assert forall|j: int| a <= j < a + w.len() implies w[j - a] == #[trigger] o[j] by {}
-        }
-        r.0..r.1
-    }
-
-    /// Where item `t` of the column is, as the column's index has it:
-    /// what a long move asks before it goes. (A column that an edit's
-    /// panic left without its parts has no slabs and no index, and every
-    /// item is past its end.)
-    #[inline(always)]
-    fn look(&self, t: usize) -> (far: (usize, usize, usize))
-        ensures
-            far_ok(self.slabs@, t, far),
-    {
-        proof {
-            use_type_invariant(self);
-        }
-        let n = self.slabs.len();
-        match self.col {
-            Some(c) => {
-                c.lemma_column();
-                match c.index_opt() {
-                    Some(ix) => {
-                        let r = ix.ix_find(t);
-                        proof {
-                            assert(ix.ws().map_values(|w: K::W| <K::I as IndexOps<K::W>>::wlen(w))
-                                =~= wlens::<K::W, K::I>(ix.ws()));
-                        }
-                        if r.0 >= n {
-                            // past the slabs, the whole position lies
-                            // beyond them
-                            (n, 0, c.len())
-                        } else {
-                            (r.0, r.1, t - r.1)
-                        }
-                    },
-                    None => (n, 0, 0),
-                }
-            },
-            None => (n, 0, 0),
-        }
-    }
-
-    /// `nth`, for a move that may leave the slab the iterator stands in:
-    /// a function of its own, so that a caller of `nth` has the short
-    /// move inline and calls for the long one.
-    #[inline(never)]
-    fn nth_far(&mut self, n: usize) -> (r: Option<Get<'a, V>>)
-        ensures
-            n < old(self).items().len() ==> {
-                &&& r == Some(old(self).items()[n as int])
-                &&& final(self).items() == old(self).items().skip(n + 1)
-                &&& r matches Some(v) && v.sv() == old(self).rest()[n as int]
-                &&& final(self).rest() == old(self).rest().skip(n + 1)
-                &&& final(self).pos() == old(self).pos() + n + 1
-                &&& final(self).end_pos() == old(self).end_pos()
-            },
-            n >= old(self).items().len() ==> {
-                &&& r is None
-                &&& final(self).items().len() == 0
-                &&& final(self).pos() == old(self).pos() + old(self).items().len()
-                &&& final(self).end_pos() == final(self).pos()
-            },
-            final(self).column() == old(self).column(),
-            final(self).source() == old(self).source(),
-    {
-        proof {
-            use_type_invariant(&*self);
-        }
-        let ghost o = self.it.out::<V::X>(self.slabs@);
-        let far = match self.it.far_target(n) {
-            Some(t) => self.look(t),
-            None => (0, 0, 0),
-        };
-        let r = self.it.nth_at::<V::X>(self.slabs, n, far);
-        proof {
-            <Get<'a, V> as VGet>::lemma_svs(o);
-            <Get<'a, V> as VGet>::lemma_svs(self.it.out::<V::X>(self.slabs@));
-            if n < o.len() {
-                lemma_svs_sub(o, n + 1, o.len() as int);
-            }
-        }
-        r
+        self.seek_to_value_impl(target, range)
     }
 }
 
@@ -4347,24 +2592,7 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> Iterator for VerifiedIter<'a,
             final(self).column() == old(self).column(),
             final(self).source() == old(self).source(),
     {
-        proof {
-            use_type_invariant(&*self);
-            self.it.lemma_out_len::<V::X>(self.slabs@);
-        }
-        let ghost o = self.it.out::<V::X>(self.slabs@);
-        let r = self.it.next_inline::<V::X>(self.slabs);
-        proof {
-            let o1 = self.it.out::<V::X>(self.slabs@);
-            <Get<'a, V> as VGet>::lemma_svs(o);
-            <Get<'a, V> as VGet>::lemma_svs(o1);
-            if r is Some {
-                lemma_svs_sub(o, 1, o.len() as int);
-                assert(o.skip(1) =~= o.drop_first());
-            } else {
-                assert(o1 =~= o);
-            }
-        }
-        r
+        self.next_impl()
     }
 
     /// The `n`th of the values left, counted from 0, if there are that
@@ -4374,7 +2602,7 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> Iterator for VerifiedIter<'a,
     /// Few of the values passed over are looked at: a long move asks the
     /// column's index for the slab to go to, and within a slab a whole
     /// run is passed over at once.
-    #[inline]
+    #[inline(always)]
     fn nth(&mut self, n: usize) -> (r: Option<Get<'a, V>>)
         ensures
             n < old(self).items().len() ==> {
@@ -4394,49 +2622,18 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> Iterator for VerifiedIter<'a,
             final(self).column() == old(self).column(),
             final(self).source() == old(self).source(),
     {
-        proof {
-            use_type_invariant(&*self);
-        }
-        if n < self.it.items_left && n < self.it.slab_remaining {
-            // within the slab the iterator stands in, and its window:
-            // the index is not asked
-            let ghost o = self.it.out::<V::X>(self.slabs@);
-            let r = self.it.nth_at::<V::X>(self.slabs, n, (0, 0, 0));
-            proof {
-                <Get<'a, V> as VGet>::lemma_svs(o);
-                <Get<'a, V> as VGet>::lemma_svs(self.it.out::<V::X>(self.slabs@));
-                if n < o.len() {
-                    lemma_svs_sub(o, n + 1, o.len() as int);
-                }
-            }
-            r
-        } else {
-            self.nth_far(n)
-        }
+        self.nth_impl(n)
     }
 
     /// How many values are left: exactly.
-    #[inline]
+    #[inline(always)]
     fn size_hint(&self) -> (r: (usize, Option<usize>))
         ensures
             r.0 == self.items().len(),
             r.0 == self.rest().len(),
             r.1 == Some(r.0),
     {
-        proof {
-            use_type_invariant(self);
-            self.it.lemma_here::<V::X>(self.slabs@);
-            <Get<'a, V> as VGet>::lemma_svs(self.items());
-        }
-        // the window can run past the column's end
-        let left = match self.col {
-            Some(col) => {
-                col.lemma_column();
-                self.it.items_left.min(col.len().saturating_sub(self.it.pos))
-            },
-            None => 0,
-        };
-        (left, Some(left))
+        self.size_hint_impl()
     }
 
     /// What `f` makes of `init` and each of the values left in turn. `f`
@@ -4446,74 +2643,14 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> Iterator for VerifiedIter<'a,
     /// library reads through `fold` (`count`, `last`, `sum`, `for_each`
     /// among them): faster than a loop over `next` where values come in
     /// runs, and slower where few values repeat.
+    #[inline(always)]
     fn fold<B, F>(self, init: B, f: F) -> (r: B) where F: FnMut(B, Get<'a, V>) -> B
         requires
             forall|b: B, v: Get<'a, V>| #[trigger] f.requires((b, v)),
         ensures
             folded(f, init, self.items(), r),
     {
-        let ghost all = self.it.out::<V::X>(self.slabs@);
-        let ghost f0 = f;
-        let mut me = self;
-        let mut f = f;
-        let mut acc = init;
-        loop
-            invariant
-                f == f0,
-                forall|b: B, v: Get<'a, V>| #[trigger] f.requires((b, v)),
-                forall|r: B| folded(f, acc, me.it.out::<V::X>(me.slabs@), r) ==> folded(f, init, all, r),
-            ensures
-                folded(f, init, all, acc),
-            decreases me.it.items_left,
-        {
-            proof {
-                use_type_invariant(&me);
-            }
-            if me.it.items_left == 0 {
-                proof {
-                    assert(me.it.out::<V::X>(me.slabs@).len() == 0);
-                }
-                break ;
-            }
-            let max = me.it.items_left;
-            let ghost o = me.it.out::<V::X>(me.slabs@);
-            proof {
-                me.it.lemma_out_len::<V::X>(me.slabs@);
-            }
-            match me.it.run_once::<V::X>(me.slabs, max) {
-                Some(run) => {
-                    proof {
-                        assert(o.skip(0) =~= o);
-                    }
-                    let mut k: usize = 0;
-                    while k < run.count
-                        invariant
-                            k <= run.count <= o.len(),
-                            o.take(run.count as int) == Seq::new(run.count as nat, |i: int| run.value),
-                            f == f0,
-                            forall|b: B, v: Get<'a, V>| #[trigger] f.requires((b, v)),
-                            forall|r: B| folded(f, acc, o.skip(k as int), r) ==> folded(f, init, all, r),
-                        decreases run.count - k,
-                    {
-                        let ghost a = acc;
-                        acc = f(acc, run.value);
-                        proof {
-                            let now = o.skip(k as int);
-                            assert(now[0] == o.take(run.count as int)[k as int]);
-                            assert(now.drop_first() =~= o.skip(k + 1));
-                            assert forall|r: B| folded(f, acc, o.skip(k + 1), r) implies folded(f, init, all, r) by {
-                                lemma_folded_step(f, a, now, acc, r);
-                            }
-                        }
-                        k += 1;
-                    }
-                },
-                None => {
-                    break ;
-                },
-            }
-        }
-        acc
+        self.fold_impl::<B, F>(init, f)
     }
 }
 
@@ -4538,6 +2675,7 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> ExactSizeIterator for Verifie
 
 impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> Clone for VerifiedIter<'a, V, C, K> {
     /// An iterator of its own with the same values left.
+    #[inline(always)]
     fn clone(&self) -> (r: Self)
         ensures
             r.items() == self.items(),
@@ -4546,15 +2684,13 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> Clone for VerifiedIter<'a, V,
             r.pos() == self.pos(),
             r.end_pos() == self.end_pos(),
     {
-        proof {
-            use_type_invariant(self);
-        }
-        VerifiedIter { it: self.it.dup(), slabs: self.slabs, col: self.col }
+        self.clone_impl()
     }
 }
 
 impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> Default for VerifiedIter<'a, V, C, K> {
     /// An iterator with nothing to give.
+    #[inline(always)]
     fn default() -> (r: Self)
         ensures
             r.items().len() == 0,
@@ -4564,14 +2700,7 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> Default for VerifiedIter<'a, 
             r.pos() == 0,
             r.end_pos() == 0,
     {
-        let r = VerifiedIter { it: ICore::empty::<V::X>(), slabs: &[], col: None };
-        proof {
-            <Get<'a, V> as VGet>::lemma_svs(r.items());
-            r.it.lemma_out_len::<V::X>(r.slabs@);
-            assert(slab_lens(r.slabs@) =~= Seq::<nat>::empty());
-            <Get<'a, V> as VGet>::lemma_svs(vals_of::<V::X>(r.slabs@));
-        }
-        r
+        Self::default_impl()
     }
 }
 
@@ -4658,6 +2787,7 @@ impl VerifiedIterState {
         ensures
             self.edits() == column.edits(),
     {
+        self.lemma_fits_impl::<V, C, K>(column)
     }
 
     /// An iterator of `column` that stands where the suspended one stood,
@@ -4678,6 +2808,7 @@ impl VerifiedIterState {
     ///
     /// Panics, as [`Column`](crate::Column)'s does, where an edit's panic
     /// left `column` without its parts and the state would fit it.
+    #[inline(always)]
     pub fn try_resume<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>>(&self, column: &'a VerifiedColumn<V, C, K>) -> (r: Result<
         VerifiedIter<'a, V, C, K>,
         PackError,
@@ -4693,31 +2824,7 @@ impl VerifiedIterState {
                 &&& it.end_pos() == self.end_pos() || (self.pos() == column@.len() && it.end_pos() == self.pos())
             },
     {
-        if self.counter != column.core.counter() {
-            return Err(invalid_resume());
-        }
-        let slabs = column.core.slabs();
-        if self.num_slabs != slabs.len() {
-            return Err(invalid_resume());
-        }
-        column.lemma_read();
-        proof {
-            <Held<V, C> as VGet>::lemma_svs(column.core@);
-        }
-        if self.pos > column.core.len() {
-            return Err(invalid_resume());
-        }
-        let it = match column.core.resume::<V::X>(self.slab_idx, self.slab_consumed, self.pos, self.items_left) {
-            Some(it) => it,
-            None => {
-                return Err(invalid_resume());
-            },
-        };
-        let r = VerifiedIter { it, slabs, col: Some(&column.core) };
-        proof {
-            r.lemma_window();
-        }
-        Ok(r)
+        self.try_resume_impl::<V, C, K>(column)
     }
 }
 
@@ -4792,189 +2899,8 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> Iterator for VerifiedRuns<'a,
                 },
             },
     {
-        let ghost o = self.0.items();
-        let r = self.0.next_run();
-        proof {
-            if let Some(run) = r {
-                lemma_runs_of(o, run.value, run.count);
-            }
-        }
-        r
+        self.next_impl()
     }
 }
 
 } // verus!
-
-impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> std::fmt::Debug for VerifiedRuns<'_, V, C, K> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("VerifiedRuns").field(&self.0).finish()
-    }
-}
-
-impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> std::fmt::Debug for VerifiedIter<'_, V, C, K> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("VerifiedIter")
-            .field("pos", &self.it.pos)
-            .field("items_left", &self.it.items_left)
-            .finish()
-    }
-}
-
-// The two functions of this block print and compare, and Verus does not
-// check them. They read the column through checked functions that ask
-// nothing of a caller.
-impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
-    /// Print a line for each slab, as [`Column`](crate::Column) does:
-    /// where in the column the slab starts, how many values and runs it
-    /// holds, its first run and its last.
-    ///
-    /// The numbers and the runs are read by checked code; the printing
-    /// is not checked. Nothing is specified of what is printed: it tells
-    /// how the column lies in memory.
-    pub fn dump_slabs<'a>(&'a self)
-    where
-        Get<'a, V>: std::fmt::Debug,
-    {
-        let mut offset = 0;
-        let mut i = 0;
-        while let Some(s) = self.slab_runs(i) {
-            log!(
-                "  slab[{i}]: offset={offset} len={} segments={} first={:?} last={:?}",
-                s.len,
-                s.segments,
-                s.first,
-                s.last
-            );
-            offset += s.len;
-            i += 1;
-        }
-    }
-
-    /// Check at run time how the column lies in memory, and panic with
-    /// what is wrong, as `Column::check_invariants` does: every slab
-    /// holds values, and no more runs than the budget (but for one value
-    /// too long to share a slab); its bytes read through as the values
-    /// and runs it counts; no two neighbours should have been merged;
-    /// the lengths add up to the column's; and the index counts the
-    /// slabs and their lengths.
-    ///
-    /// A tool for tests. Verus does not check it, and it promises
-    /// nothing. What it compares of the bytes, the lengths and the index
-    /// is proved of every column; the budget and the merging are the
-    /// layout policy, which is not proved.
-    ///
-    /// The merging is the policy of edits, and a load does not keep it:
-    /// it cuts slabs of half the budget, and the last slab holds what is
-    /// left, however little. So this panics for some columns that were
-    /// loaded, with nothing wrong with them, as `Column::check_invariants`
-    /// does for the same columns.
-    #[doc(hidden)]
-    pub fn check_invariants(&self) {
-        let slabs = self.core.slabs();
-        let max = self.core.max_segments();
-        let min = (max / 4).max(1);
-        if self.core.len() == 0 {
-            assert!(slabs.len() <= 1, "empty column holds {} slabs", slabs.len());
-            return;
-        }
-        for (i, slab) in slabs.iter().enumerate() {
-            assert_ne!(slab.len, 0, "slab {i} of {} is empty", slabs.len());
-            assert!(
-                slab.segments <= max || slab.segments == 1,
-                "slab {i} has {} segments, over the budget of {max} \
-                 (only a single oversize value may exceed it)",
-                slab.segments
-            );
-            let (len, segments) = <V::E as Model<V::X>>::validate(&slab.data)
-                .unwrap_or_else(|e| panic!("slab {i} does not parse: {e}"));
-            assert_eq!(len, slab.len, "slab {i} cached len");
-            assert_eq!(segments, slab.segments, "slab {i} cached segments");
-        }
-        for i in 1..slabs.len() {
-            let (a, b) = (slabs[i - 1].segments, slabs[i].segments);
-            assert!(
-                !((a < min || b < min) && a + b <= max),
-                "slabs {} and {i} ({a} and {b} segments) should have been merged \
-                 (min {min}, max {max})",
-                i - 1
-            );
-        }
-        assert_eq!(
-            self.core.len(),
-            slabs.iter().map(|s| s.len).sum::<usize>(),
-            "total_len"
-        );
-        assert_eq!(self.index_len(), slabs.len(), "index length");
-        let mut before = 0usize;
-        for (i, slab) in slabs.iter().enumerate() {
-            assert_eq!(
-                self.index_before(i),
-                Some(before),
-                "index items_before({i})"
-            );
-            before += slab.len;
-        }
-    }
-}
-
-impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> std::fmt::Debug for VerifiedColumn<V, C, K> {
-    /// How many values and how many slabs, as `Column` prints itself.
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("VerifiedColumn")
-            .field("len", &self.core.len())
-            .field("slabs", &self.core.slabs().len())
-            .finish()
-    }
-}
-
-// one budget for both APIs
-const _: () = assert!(MAX_SEG == crate::column::DEFAULT_MAX_SEG);
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// For each window `start..end` of a column of `vals` that lies in
-    /// several slabs: `ICore::drain_into` appends the window's values to
-    /// what the vector held, and leaves nothing to read.
-    macro_rules! windows {
-        ($t:ty, $vals:expr) => {{
-            let vals = $vals;
-            let col = VerifiedColumn::<$t>::from_values_with_max_segments(&vals, 4);
-            let slabs = col.core.slabs();
-            assert!(slabs.len() > 3, "{} slabs", slabs.len());
-            for start in 0..=vals.len() {
-                for end in start..=vals.len() {
-                    let mut out = Vec::new();
-                    let mut it = col.reader(0, start);
-                    it.drain_into::<<$t as seal::Sealed<Leb128>>::X>(slabs, &mut out);
-                    let mut it = col.reader(start, end);
-                    it.drain_into::<<$t as seal::Sealed<Leb128>>::X>(slabs, &mut out);
-                    assert_eq!(out[..], vals[..end], "{start}..{end}");
-                    assert!(it.next::<<$t as seal::Sealed<Leb128>>::X>(slabs).is_none());
-                }
-            }
-        }};
-    }
-
-    /// `to_vec` reads a whole column, and so every slab to its end. Here
-    /// the windows end anywhere, inside a slab and inside a run.
-    #[test]
-    fn drain_into_appends_a_window() {
-        let nums: Vec<u64> = (0..90u64)
-            .map(|i| if i % 9 < 4 { i / 9 } else { i * 1000 })
-            .collect();
-        windows!(u64, nums.clone());
-        let opts: Vec<Option<u64>> = nums
-            .iter()
-            .enumerate()
-            .map(|(i, v)| (i % 5 != 0 && i % 13 != 6).then_some(*v))
-            .collect();
-        windows!(Option<u64>, opts);
-        let bools: Vec<bool> = (0..90).map(|i| i % 7 < 3 || i % 11 == 0).collect();
-        windows!(bool, bools);
-        let owned: Vec<Vec<u8>> = nums.iter().map(|v| v.to_string().into_bytes()).collect();
-        let lent: Vec<&[u8]> = owned.iter().map(|v| &v[..]).collect();
-        windows!(Vec<u8>, lent);
-    }
-}

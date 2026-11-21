@@ -621,6 +621,12 @@ repositioning of every iterator
 (`VShiftable`, which a client's own iterator may implement, with a
 lookahead and a walk over ranges).
 
+Its specification can be read apart from the code and the proofs:
+each file of `src/verified` (and `src/raw.rs`) is the specification of
+what it declares, every body there a call of a function proved in the
+file's module `imp`. The module docs of `hexane::verified` ("Reviewing
+the specification") say which files to read and how.
+
 What it trusts, besides Verus, Z3 and vstd's specifications of the
 standard library:
 
