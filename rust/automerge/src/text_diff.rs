@@ -173,8 +173,12 @@ fn apply_marks_diff(
     new_spans: &[Span],
     config: &crate::marks::UpdateSpansConfig,
 ) -> Result<(), crate::AutomergeError> {
-    // Collect all marks that should exist after the update
-    let mut new_marks = Vec::new();
+    // Collect all marks that should exist after the update. A mark that
+    // carries on into the next text span with the same value is one range,
+    // as `marks_for` resolves it; comparing it as one piece per span would
+    // remove and re-add it on every update.
+    let mut new_marks: Vec<(String, ScalarValue, usize, usize)> = Vec::new();
+    let mut last_by_name: HashMap<&str, usize> = HashMap::new();
     let mut idx = 0;
     for span in new_spans {
         match span {
@@ -186,6 +190,14 @@ fn apply_marks_diff(
 
                 if let Some(mark_set) = marks {
                     for (mark_name, mark_value) in mark_set.iter() {
+                        if let Some(&at) = last_by_name.get(mark_name) {
+                            let previous = &mut new_marks[at];
+                            if previous.3 == idx && previous.1 == *mark_value {
+                                previous.3 = idx + text_width;
+                                continue;
+                            }
+                        }
+                        last_by_name.insert(mark_name, new_marks.len());
                         new_marks.push((
                             mark_name.to_string(),
                             mark_value.clone(),

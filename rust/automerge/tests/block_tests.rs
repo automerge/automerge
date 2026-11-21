@@ -1028,3 +1028,34 @@ fn test_splice_with_mark() {
         ]
     );
 }
+
+#[test]
+fn update_spans_with_a_mark_across_two_runs_writes_nothing_when_unchanged() {
+    let mut doc = automerge::AutoCommit::new();
+    let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+    let spans = || {
+        vec![
+            Span::Text {
+                text: "Step 1: migrate ".into(),
+                marks: markset(vec![("bold", true.into())]),
+            },
+            Span::Text {
+                text: "svc-1".into(),
+                marks: markset(vec![("bold", true.into()), ("code", true.into())]),
+            },
+            Span::Text {
+                text: " then check".into(),
+                marks: None,
+            },
+        ]
+    };
+    doc.update_spans(&text, UpdateSpansConfig::default(), spans())
+        .unwrap();
+    doc.commit();
+    let before = doc.stats().num_ops;
+    doc.update_spans(&text, UpdateSpansConfig::default(), spans())
+        .unwrap();
+    doc.commit();
+    assert_eq!(doc.stats().num_ops, before);
+    assert_eq!(doc.spans(&text).unwrap().collect::<Vec<_>>(), spans());
+}
