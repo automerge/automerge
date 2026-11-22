@@ -528,17 +528,37 @@ impl Doc {
     pub(crate) fn fragments_after_meta(
         &self,
         heads: Option<&Heads>,
+        partial: bool,
     ) -> Result<Array, AutomergeError> {
         Ok(match self {
             Doc::Audit(d) => d
-                .fragments_after_meta(heads.map_or(&[], Heads::hashes))?
+                .fragments_after_meta(heads.map_or(&[], Heads::hashes), partial)?
                 .iter()
                 .map(crate::fragment_to_js)
                 .collect(),
             Doc::Next(d) => d
-                .fragments_after_meta(heads.map_or(&[], Heads::ids))?
+                .fragments_after_meta(heads.map_or(&[], Heads::ids), partial)?
                 .iter()
                 .map(crate::next_fragment_to_js)
+                .collect(),
+        })
+    }
+
+    pub(crate) fn fragments_after(
+        &self,
+        heads: Option<&Heads>,
+        partial: bool,
+    ) -> Result<Array, AutomergeError> {
+        Ok(match self {
+            Doc::Audit(d) => d
+                .fragments_after(heads.map_or(&[], Heads::hashes), partial)?
+                .iter()
+                .map(|f| crate::with_bytes(crate::fragment_to_js(&f.meta), &f.bytes))
+                .collect(),
+            Doc::Next(d) => d
+                .fragments_after(heads.map_or(&[], Heads::ids), partial)?
+                .iter()
+                .map(|f| crate::with_bytes(crate::next_fragment_to_js(&f.meta), &f.bytes))
                 .collect(),
         })
     }

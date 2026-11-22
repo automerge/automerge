@@ -55,7 +55,6 @@ import type {
   Change,
   ChangeMetadata,
   FragmentMeta,
-  Commit,
   Fragment,
   FragmentLevelRange,
   DecodedChange,
@@ -72,7 +71,6 @@ import type {
 export type {
   ChangeMetadata,
   FragmentMeta,
-  Commit,
   Fragment,
   FragmentLevelRange,
   PutPatch,
@@ -1998,79 +1996,109 @@ export const isRawString = isImmutableString
 export const RawString = ImmutableString
 
 /**
- * EXPERIMENTAL: Return the Automerge fragments currently covering the document
- * history.
+ * Which fragments {@link getFragments} lists: those at `levels`, or those
+ * holding a change `after` does not cover. The two cannot be combined.
+ */
+export type FragmentQuery =
+  | { levels?: FragmentLevelRange; after?: undefined; partial?: undefined }
+  | {
+      levels?: undefined
+      /** Heads the document does not know are ignored. */
+      after: Heads
+      /**
+       * List a fragment `after` partly covers as the smaller fragments it
+       * superseded, down to loose commits, so each change is listed once.
+       */
+      partial?: boolean
+    }
+
+/**
+ * EXPERIMENTAL: The fragments, loose commits included, of the document's
+ * history, oldest first, with their bytes unless `bytes` is `false`.
  *
- * Fragments are ordered oldest-to-newest. Passing a number returns only that
- * fragment level. Passing `{ start, end }` returns levels in the half-open range
- * `[start, end)`. Omitting `levels` returns all levels, including loose commits
- * at level 0.
+ * With `levels`, only fragments at those levels: a number is one level and
+ * `{ start, end }` the half-open range `[start, end)`. With `after`, only
+ * those holding a change `after` does not cover, in the order
+ * {@link applyFragments} applies them to bring a document at `after` up to date.
+ *
+ * @throws RangeError if `levels` is given with `after` or `partial`.
  *
  * @experimental
  * @hidden
  */
-export function getFragmentMetadata(
+export function getFragments(
   doc: Doc<unknown>,
-  levels?: FragmentLevelRange,
-): FragmentMeta[] {
-  const state = _state(doc, false)
-  return state.handle.getFragmentMetadata(levels)
+  query?: FragmentQuery & { bytes?: true },
+): Fragment[]
+export function getFragments(
+  doc: Doc<unknown>,
+  query: FragmentQuery & { bytes: false },
+): FragmentMeta[]
+export function getFragments(
+  doc: Doc<unknown>,
+  query?: FragmentQuery & { bytes?: boolean },
+): Fragment[] | FragmentMeta[]
+export function getFragments(
+  doc: Doc<unknown>,
+  query: FragmentQuery & { bytes?: boolean } = {},
+): Fragment[] | FragmentMeta[] {
+  const { levels, after, partial, bytes = true } = query
+  if (levels != null && (after !== undefined || partial !== undefined)) {
+    throw new RangeError("levels cannot be combined with after or partial")
+  }
+  const { handle } = _state(doc, false)
+  if (after !== undefined) {
+    return bytes
+      ? handle.getFragmentsAfter(after, partial)
+      : handle.getFragmentMetadataAfter(after, partial)
+  }
+  const metas = handle.getFragmentMetadata(levels)
+  return bytes ? withBytes(handle, metas) : metas
 }
 
 /**
- * EXPERIMENTAL: Return a fragment by its head hash, or `null` if the hash is
- * unknown or does not identify an available fragment.
+ * EXPERIMENTAL: The fragment headed by `head`, with its bytes unless `bytes`
+ * is `false`, or `null` if no fragment has that head.
  *
  * @experimental
  * @hidden
  */
-export function getFragmentMeta(
+export function getFragment(
   doc: Doc<unknown>,
   head: string,
-): FragmentMeta | null {
-  const state = _state(doc, false)
-  return state.handle.getFragmentMeta(head)
-}
-
-/**
- * EXPERIMENTAL: Return the changes `heads` does not cover, each exactly once,
- * as fragments and loose commits in apply order. A fragment `heads` partly
- * covers is sent as the smaller fragments it superseded, down to loose
- * commits. Heads the document does not know are ignored, so an empty array
- * returns every fragment.
- *
- * @experimental
- * @hidden
- */
-export function getFragmentMetadataAfter(
+  opts?: { bytes?: true },
+): Fragment | null
+export function getFragment(
   doc: Doc<unknown>,
-  heads: Heads,
-): FragmentMeta[] {
-  const state = _state(doc, false)
-  return state.handle.getFragmentMetadataAfter(heads)
+  head: string,
+  opts: { bytes: false },
+): FragmentMeta | null
+export function getFragment(
+  doc: Doc<unknown>,
+  head: string,
+  opts?: { bytes?: boolean },
+): Fragment | FragmentMeta | null
+export function getFragment(
+  doc: Doc<unknown>,
+  head: string,
+  { bytes = true }: { bytes?: boolean } = {},
+): Fragment | FragmentMeta | null {
+  const { handle } = _state(doc, false)
+  const meta = handle.getFragmentMeta(head)
+  if (meta === null || !bytes) {
+    return meta
+  }
+  return withBytes(handle, [meta])[0]
+}
+
+function withBytes(handle: Automerge, metas: FragmentMeta[]): Fragment[] {
+  const bytes = handle.bundleFragmentMetadata(metas)
+  return metas.map((meta, index) => ({ ...meta, bytes: bytes[index] }))
 }
 
 /**
- * EXPERIMENTAL: {@link getFragmentMetadataAfter} with each fragment's bytes,
- * in the shape {@link addFragments} takes. Adding them in the order given
- * brings a document at `heads` up to date with `doc`.
- *
- * @experimental
- * @hidden
- */
-export function getFragmentsAfter(doc: Doc<unknown>, heads: Heads): Fragment[] {
-  const state = _state(doc, false)
-  const fragmentMetadata = state.handle.getFragmentMetadataAfter(heads)
-  const bytes = state.handle.bundleFragmentMetadata(fragmentMetadata)
-  return fragmentMetadata.map((fragment, index) => ({
-    ...fragment,
-    bytes: bytes[index],
-  }))
-}
-
-/**
- * EXPERIMENTAL: Encode fragments as the blob bytes expected by Subduction's
- * `addFragments` path. Level-0 fragments are encoded as individual Automerge
+ * EXPERIMENTAL: Encode fragments as the bytes {@link applyFragments} takes.
+ * Level-0 fragments are encoded as individual Automerge
  * changes; higher level fragments are encoded as Automerge bundles.
  *
  * @experimental
@@ -2085,103 +2113,51 @@ export function bundleFragmentMetadata(
 }
 
 /**
- * EXPERIMENTAL: Return level-0 fragments in the object shape expected by
- * Subduction's `addCommits` path.
+ * EXPERIMENTAL: Apply fragments, as {@link getFragments} returns them, in
+ * any order. A fragment's bytes are authoritative: its metadata is checked
+ * for shape only.
  *
  * @experimental
  * @hidden
  */
-export function getCommits(doc: Doc<unknown>): Commit[] {
-  const state = _state(doc, false)
-  const commits = state.handle.getFragmentMetadata(0)
-  const bytes = state.handle.bundleFragmentMetadata(commits)
-  return commits.map((fragment, index) => ({
-    head: fragment.head,
-    parents: fragment.boundary,
-    bytes: bytes[index],
-  }))
-}
-
-/**
- * EXPERIMENTAL: Return bundled Automerge fragments in the object shape
- * expected by Subduction's `addFragments` path. By default this excludes
- * level-0 loose commits; use {@link getCommits} for those.
- *
- * @experimental
- * @hidden
- */
-export function getFragments(
-  doc: Doc<unknown>,
-  levels?: FragmentLevelRange,
-): Fragment[] {
-  const state = _state(doc, false)
-  const fragmentMetadata = state.handle.getFragmentMetadata(
-    levels ?? { start: 1 },
-  )
-  const bytes = state.handle.bundleFragmentMetadata(fragmentMetadata)
-  return fragmentMetadata.map((fragment, index) => ({
-    ...fragment,
-    bytes: bytes[index],
-  }))
-}
-
-/**
- * EXPERIMENTAL: Add commit-shaped Automerge changes to a document.
- *
- * This mirrors Subduction's `addCommits` shape: each input carries the commit
- * head, its parents, and the encoded change bytes. The encoded bytes are
- * authoritative and are checked against the supplied metadata.
- *
- * @experimental
- * @hidden
- */
-export function addCommits<T>(
-  doc: Doc<T>,
-  commits: Commit[],
-  opts?: ApplyOptions<T>,
-): Doc<T> {
-  const state = _state(doc)
-  if (!opts) {
-    opts = {}
-  }
-  if (state.heads) {
-    throw new RangeError(
-      "Attempting to change an outdated document.  Use Automerge.clone() if you wish to make a writable copy.",
-    )
-  }
-  if (_is_proxy(doc)) {
-    throw new RangeError("Calls to Automerge.change cannot be nested")
-  }
-  const heads = state.handle.getHeads()
-  state.handle.addCommits(commits)
-  state.heads = heads
-  return progressDocument(
-    doc,
-    "addCommits",
-    heads,
-    opts.patchCallback || state.patchCallback,
-  )
-}
-
-/**
- * EXPERIMENTAL: Add fragment-shaped Automerge bundles to a document.
- *
- * This mirrors Subduction's `addFragments` shape: each input contains fragment
- * metadata plus encoded bytes from {@link bundleFragmentMetadata}. Fragment bytes are
- * loaded incrementally, so this can ingest bundles and loose level-0 changes.
- *
- * @experimental
- * @hidden
- */
-export function addFragments<T>(
+export function applyFragments<T>(
   doc: Doc<T>,
   fragments: Fragment[],
   opts?: ApplyOptions<T>,
 ): Doc<T> {
+  return withFragments(doc, "applyFragments", opts, handle =>
+    handle.applyFragments(fragments),
+  )[0]
+}
+
+/**
+ * EXPERIMENTAL: Exchange fragments with a peer. Applies the `fragments` the
+ * peer sent and returns the new document with the fragments to send back:
+ * what this document gained since the last `syncFragments`, or since it was
+ * loaded or cloned, and the whole fragment for each of `fragments` that is
+ * only part of one. Peers that pass each other's output to `syncFragments`
+ * converge.
+ *
+ * @experimental
+ * @hidden
+ */
+export function syncFragments<T>(
+  doc: Doc<T>,
+  fragments: Fragment[],
+  opts?: ApplyOptions<T>,
+): [Doc<T>, Fragment[]] {
+  return withFragments(doc, "syncFragments", opts, handle =>
+    handle.syncFragments(fragments),
+  )
+}
+
+function withFragments<T, R>(
+  doc: Doc<T>,
+  source: "applyFragments" | "syncFragments",
+  opts: ApplyOptions<T> | undefined,
+  apply: (handle: Automerge) => R,
+): [Doc<T>, R] {
   const state = _state(doc)
-  if (!opts) {
-    opts = {}
-  }
   if (state.heads) {
     throw new RangeError(
       "Attempting to change an outdated document.  Use Automerge.clone() if you wish to make a writable copy.",
@@ -2191,14 +2167,15 @@ export function addFragments<T>(
     throw new RangeError("Calls to Automerge.change cannot be nested")
   }
   const heads = state.handle.getHeads()
-  state.handle.addFragments(fragments)
+  const result = apply(state.handle)
   state.heads = heads
-  return progressDocument(
+  const next = progressDocument(
     doc,
-    "addFragments",
+    source,
     heads,
-    opts.patchCallback || state.patchCallback,
+    opts?.patchCallback || state.patchCallback,
   )
+  return [next, result]
 }
 
 /**

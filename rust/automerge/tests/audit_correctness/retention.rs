@@ -184,7 +184,7 @@ fn sync(peers: &mut [Automerge], a: usize, b: usize, how: usize, log: &[String])
         2 => to.load_incremental(&from.save()).map(|_| ()),
         3 => {
             let stack = from
-                .fragments_after(&to.get_heads())
+                .fragments_after(&to.get_heads(), false)
                 .unwrap_or_else(|e| {
                     panic!("bundle_after export failed: {e:?} (log len {})", log.len())
                 })

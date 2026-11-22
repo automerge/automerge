@@ -383,6 +383,22 @@ impl AutoCommit {
         self.__document_mut().apply_fragments(fragments)
     }
 
+    /// EXPERIMENTAL: [`Automerge::sync_fragments`] from the heads the last
+    /// call, load or fork left this document at, moving them to the
+    /// current heads.
+    ///
+    /// This is an experimental API, it may change or be removed without
+    /// warning.
+    #[doc(hidden)]
+    pub fn sync_fragments(
+        &mut self,
+        fragments: &[Fragment],
+    ) -> Result<Vec<Fragment>, AutomergeError> {
+        let (bytes, partial) = super::automerge::sync_parts(fragments);
+        let out = self.0.sync_fragment_bytes(&bytes, partial)?;
+        Ok(self.__document().audited_fragments(out))
+    }
+
     pub fn apply_changes(
         &mut self,
         changes: impl IntoIterator<Item = Change> + Clone,
@@ -540,20 +556,12 @@ impl AutoCommit {
     /// This is an experimental API, it may change or be removed without
     /// warning.
     #[doc(hidden)]
-    pub fn fragments_after(&self, heads: &[ChangeHash]) -> Result<Vec<Fragment>, AutomergeError> {
-        self.__document().fragments_after(heads)
-    }
-
-    /// EXPERIMENTAL: See [`crate::Automerge::fragments_after_full`].
-    ///
-    /// This is an experimental API, it may change or be removed without
-    /// warning.
-    #[doc(hidden)]
-    pub fn fragments_after_full(
+    pub fn fragments_after(
         &self,
         heads: &[ChangeHash],
+        partial: bool,
     ) -> Result<Vec<Fragment>, AutomergeError> {
-        self.__document().fragments_after_full(heads)
+        self.__document().fragments_after(heads, partial)
     }
 
     /// EXPERIMENTAL: See [`crate::Automerge::fragments_after_meta`].
@@ -564,8 +572,9 @@ impl AutoCommit {
     pub fn fragments_after_meta(
         &self,
         heads: &[ChangeHash],
+        partial: bool,
     ) -> Result<Vec<FragmentMeta>, AutomergeError> {
-        self.__document().fragments_after_meta(heads)
+        self.__document().fragments_after_meta(heads, partial)
     }
 
     /// EXPERIMENTAL: Return the fragment with the given head hash, if any.

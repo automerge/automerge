@@ -185,12 +185,6 @@ export type FragmentMeta = {
   members: Heads;
 };
 
-export type Commit = {
-  head: Hash;
-  parents: Heads;
-  bytes: Uint8Array;
-};
-
 export type Fragment = FragmentMeta & {
   bytes: Uint8Array;
 };
@@ -355,10 +349,11 @@ interface Automerge {
 
     getFragmentMetadata(levels?: FragmentLevelRange): FragmentMeta[];
     getFragmentMeta(head: Hash): FragmentMeta | null;
-    getFragmentMetadataAfter(heads: Heads): FragmentMeta[];
+    getFragmentMetadataAfter(heads: Heads, partial?: boolean): FragmentMeta[];
+    getFragmentsAfter(heads: Heads, partial?: boolean): Fragment[];
     bundleFragmentMetadata(fragments: FragmentMeta[]): Uint8Array[];
-    addCommits(commits: Commit[]): void;
-    addFragments(fragments: Fragment[]): void;
+    applyFragments(fragments: Fragment[]): void;
+    syncFragments(fragments: Fragment[]): Fragment[];
 
     getBlock(obj: ObjID, index: number, heads?: Heads): { [key: string]: MaterializeValue } | null;
 
@@ -1491,17 +1486,34 @@ impl Automerge {
         Ok(fragment.unwrap_or(JsValue::null()))
     }
 
-    /// The changes `heads` does not cover, each exactly once, as fragments and
-    /// loose commits in apply order; a fragment `heads` partly covers is sent
-    /// as the smaller fragments it superseded, down to loose commits. Heads
-    /// this document does not know are ignored.
+    /// The fragments, loose commits included, holding a change `heads` does
+    /// not cover, in apply order. Heads this document does not know are
+    /// ignored. A fragment `heads` partly covers is listed whole unless
+    /// `partial`: then it is listed as the smaller fragments it superseded,
+    /// down to loose commits, so each change is listed exactly once.
     #[wasm_bindgen(js_name = getFragmentMetadataAfter, unchecked_return_type = "FragmentMeta[]")]
     pub fn get_fragment_metadata_after(
         &mut self,
         #[wasm_bindgen(unchecked_param_type = "Heads")] heads: JsValue,
+        partial: Option<bool>,
     ) -> Result<Array, error::Get> {
         let heads = self.doc.parse_heads(heads)?;
-        Ok(self.doc.fragments_after_meta(heads.as_ref())?)
+        Ok(self
+            .doc
+            .fragments_after_meta(heads.as_ref(), partial.unwrap_or(false))?)
+    }
+
+    /// [`Self::get_fragment_metadata_after`] with each fragment's bytes.
+    #[wasm_bindgen(js_name = getFragmentsAfter, unchecked_return_type = "Fragment[]")]
+    pub fn get_fragments_after(
+        &mut self,
+        #[wasm_bindgen(unchecked_param_type = "Heads")] heads: JsValue,
+        partial: Option<bool>,
+    ) -> Result<Array, error::Get> {
+        let heads = self.doc.parse_heads(heads)?;
+        Ok(self
+            .doc
+            .fragments_after(heads.as_ref(), partial.unwrap_or(false))?)
     }
 
     #[wasm_bindgen(js_name = bundleFragmentMetadata, unchecked_return_type = "Uint8Array[]")]
@@ -1528,32 +1540,11 @@ impl Automerge {
             .collect())
     }
 
-    #[wasm_bindgen(js_name = addCommits)]
-    pub fn add_commits(
-        &mut self,
-        #[wasm_bindgen(unchecked_param_type = "Commit[]")] commits: JsValue,
-    ) -> Result<(), error::AddCommits> {
-        let commits = Vec::<Commit>::try_from(JS(commits))?;
-        let mut changes = Vec::new();
-        let mut bundles = Vec::new();
-        for commit in commits {
-            match commit.into_bytes()? {
-                CommitBytes::Change(change) => changes.push(*change),
-                CommitBytes::Bundle(bytes) => bundles.extend(bytes),
-            }
-        }
-        self.doc.apply_changes(changes)?;
-        if !bundles.is_empty() {
-            self.doc.load_incremental(&bundles)?;
-        }
-        Ok(())
-    }
-
-    #[wasm_bindgen(js_name = addFragments)]
-    pub fn add_fragments(
+    #[wasm_bindgen(js_name = applyFragments)]
+    pub fn apply_fragments(
         &mut self,
         #[wasm_bindgen(unchecked_param_type = "Fragment[]")] fragments: JsValue,
-    ) -> Result<(), error::AddFragments> {
+    ) -> Result<(), error::ApplyFragments> {
         // the metadata is only validated: the bytes are authoritative
         match &mut self.doc {
             Doc::Audit(d) => d
@@ -1566,6 +1557,34 @@ impl Automerge {
             >(fragments)?)?,
         }
         Ok(())
+    }
+
+    /// Applies `fragments` from a peer and returns the fragments to send it
+    /// back: what this document gained since the last call, load or fork,
+    /// and the whole fragment for each of `fragments` that is only part of
+    /// one.
+    #[wasm_bindgen(js_name = syncFragments, unchecked_return_type = "Fragment[]")]
+    pub fn sync_fragments(
+        &mut self,
+        #[wasm_bindgen(unchecked_param_type = "Fragment[]")] fragments: JsValue,
+    ) -> Result<Array, error::ApplyFragments> {
+        Ok(match &mut self.doc {
+            Doc::Audit(d) => d
+                .sync_fragments(&fragments_from_js::<am::FragmentMeta, am::Fragment>(
+                    fragments,
+                )?)?
+                .iter()
+                .map(|f| with_bytes(fragment_to_js(&f.meta), &f.bytes))
+                .collect(),
+            Doc::Next(d) => d
+                .sync_fragments(&fragments_from_js::<
+                    am::next::FragmentMeta,
+                    am::next::Fragment,
+                >(fragments)?)?
+                .iter()
+                .map(|f| with_bytes(next_fragment_to_js(&f.meta), &f.bytes))
+                .collect(),
+        })
     }
 
     #[wasm_bindgen(js_name = getHeads, unchecked_return_type="Heads")]
@@ -2220,6 +2239,11 @@ fn next_fragment_to_js(fragment: &am::next::FragmentMeta) -> JsValue {
     obj
 }
 
+fn with_bytes(fragment: JsValue, bytes: &[u8]) -> JsValue {
+    js_set(&fragment, "bytes", Uint8Array::from(bytes)).unwrap();
+    fragment
+}
+
 fn fragment_to_js(fragment: &am::FragmentMeta) -> JsValue {
     let obj: JsValue = Object::new().into();
     js_set(&obj, "head", fragment.head.to_string()).unwrap();
@@ -2233,101 +2257,6 @@ fn fragment_to_js(fragment: &am::FragmentMeta) -> JsValue {
     .unwrap();
     js_set(&obj, "members", AR::from(fragment.members.as_slice())).unwrap();
     obj
-}
-
-struct Commit {
-    head: am::ChangeHash,
-    parents: Vec<am::ChangeHash>,
-    bytes: Vec<u8>,
-}
-
-/// A commit's bytes: an encoded change, or the bundle `getCommits` produces
-/// for it. Either way they have been checked against the commit's metadata.
-enum CommitBytes {
-    Change(Box<Change>),
-    Bundle(Vec<u8>),
-}
-
-impl Commit {
-    fn into_bytes(self) -> Result<CommitBytes, error::BadCommitBytes> {
-        if let Ok(bundle) = am::Bundle::try_from(self.bytes.as_slice()) {
-            // validate the bundle against the JS metadata as for a change
-            let heads: Vec<_> = bundle.heads().collect();
-            if heads != [self.head] {
-                return Err(error::BadCommitBytes::HeadMismatch {
-                    expected: self.head.to_string(),
-                    actual: heads
-                        .iter()
-                        .map(|h| h.to_string())
-                        .collect::<Vec<_>>()
-                        .join(","),
-                });
-            }
-            let mut deps = bundle.deps().to_vec();
-            let mut parents = self.parents.clone();
-            deps.sort();
-            parents.sort();
-            if deps != parents {
-                return Err(error::BadCommitBytes::ParentsMismatch);
-            }
-            return Ok(CommitBytes::Bundle(self.bytes));
-        }
-        self.into_change().map(|c| CommitBytes::Change(Box::new(c)))
-    }
-
-    fn into_change(self) -> Result<Change, error::BadCommitBytes> {
-        let change = Change::try_from(self.bytes.as_slice())?;
-        // Validate that JS metadata lines up with the supplied bytes. This keeps
-        // Automerge's API shaped like Subduction's addCommits input while still
-        // treating the encoded change as authoritative.
-        if change.hash() != self.head {
-            return Err(error::BadCommitBytes::HeadMismatch {
-                expected: self.head.to_string(),
-                actual: change.hash().to_string(),
-            });
-        }
-        if change.deps() != self.parents.as_slice() {
-            return Err(error::BadCommitBytes::ParentsMismatch);
-        }
-        Ok(change)
-    }
-}
-
-impl TryFrom<JS> for Commit {
-    type Error = error::BadJSCommit;
-
-    fn try_from(value: JS) -> Result<Self, Self::Error> {
-        let head = js_get(&value.0, "head")?
-            .try_into()
-            .map_err(error::BadJSCommit::BadHead)?;
-        let parents = js_get(&value.0, "parents")?
-            .try_into()
-            .map_err(error::BadJSCommit::BadParents)?;
-        let bytes = js_get(&value.0, "bytes")?
-            .try_into()
-            .map_err(error::BadJSCommit::BadBytes)?;
-        Ok(Self {
-            head,
-            parents,
-            bytes,
-        })
-    }
-}
-
-impl TryFrom<JS> for Vec<Commit> {
-    type Error = error::BadJSCommits;
-
-    fn try_from(value: JS) -> Result<Self, Self::Error> {
-        let value = value
-            .0
-            .dyn_into::<Array>()
-            .map_err(|_| error::BadJSCommits::NotArray)?;
-        value
-            .iter()
-            .enumerate()
-            .map(|(i, v)| Commit::try_from(JS(v)).map_err(|e| error::BadJSCommits::BadElem(i, e)))
-            .collect()
-    }
 }
 
 /// A fragment's bytes, its metadata checked to have the shape the document's
@@ -2622,52 +2551,6 @@ pub mod error {
     }
 
     #[derive(Debug, thiserror::Error)]
-    pub enum BadJSCommit {
-        #[error("bad commit input property: {0}")]
-        Prop(#[from] GetProp),
-        #[error("bad commit head: {0}")]
-        BadHead(BadChangeHash),
-        #[error("bad commit parents: {0}")]
-        BadParents(BadChangeHashes),
-        #[error("bad commit bytes: {0}")]
-        BadBytes(BadUint8Array),
-    }
-
-    #[derive(Debug, thiserror::Error)]
-    pub enum BadJSCommits {
-        #[error("commit inputs must be an array")]
-        NotArray,
-        #[error("bad commit input at index {0}: {1}")]
-        BadElem(usize, BadJSCommit),
-    }
-
-    #[derive(Debug, thiserror::Error)]
-    pub enum BadCommitBytes {
-        #[error("bad commit bytes: {0}")]
-        Load(#[from] automerge::LoadChangeError),
-        #[error("commit input head mismatch: expected {expected}, actual {actual}")]
-        HeadMismatch { expected: String, actual: String },
-        #[error("commit input parents do not match encoded change dependencies")]
-        ParentsMismatch,
-    }
-
-    #[derive(Debug, thiserror::Error)]
-    pub enum AddCommits {
-        #[error(transparent)]
-        BadInputs(#[from] BadJSCommits),
-        #[error(transparent)]
-        BadBytes(#[from] BadCommitBytes),
-        #[error("error applying commits: {0}")]
-        Apply(#[from] AutomergeError),
-    }
-
-    impl From<AddCommits> for JsValue {
-        fn from(e: AddCommits) -> Self {
-            RangeError::new(&e.to_string()).into()
-        }
-    }
-
-    #[derive(Debug, thiserror::Error)]
     pub enum BadJSFragmentInput {
         #[error("bad fragment input property: {0}")]
         Prop(#[from] GetProp),
@@ -2710,15 +2593,15 @@ pub mod error {
     }
 
     #[derive(Debug, thiserror::Error)]
-    pub enum AddFragments {
+    pub enum ApplyFragments {
         #[error(transparent)]
         BadInputs(#[from] BadJSFragmentInputs),
         #[error("error loading fragment bundles: {0}")]
         Load(#[from] AutomergeError),
     }
 
-    impl From<AddFragments> for JsValue {
-        fn from(e: AddFragments) -> Self {
+    impl From<ApplyFragments> for JsValue {
+        fn from(e: ApplyFragments) -> Self {
             RangeError::new(&e.to_string()).into()
         }
     }

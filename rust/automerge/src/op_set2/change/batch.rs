@@ -475,7 +475,8 @@ impl<H: crate::hash_retention::HashRetention> Automerge<H> {
         &mut self,
         changes: I,
     ) -> Result<(), AutomergeError> {
-        self.apply_changes_batch_with(changes, false)
+        self.apply_changes_batch_with(changes, false)?;
+        self.apply_queued_bundles()
     }
 
     /// Outside audit mode nothing is queued: changes that are not ready

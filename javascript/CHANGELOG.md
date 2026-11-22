@@ -15,10 +15,20 @@
   order and grouping can differ from before (for example several splices
   arrive in final-position order, and a conflict may arrive as a put marked
   `conflict: true`), but applying them still takes the old state to the new.
-* `addCommits` also accepts the bundles `getCommits` now produces, and
-  still checks each commit's `head` and `parents` against its bytes.
+* The experimental fragment getters are now `getFragments(doc, query)` and
+  `getFragment(doc, head, opts)`. `query` takes `levels`, or `after` and
+  `partial`, and `bytes: false` returns metadata only. They replace
+  `getFragmentMetadata`, `getFragmentMeta`, `getFragmentMetadataAfter`,
+  `getFragmentsAfter` and `getCommits`: loose commits are level-0
+  fragments, and `getFragments` lists every level unless `levels` is given.
+* `addFragments` is renamed `applyFragments`, and the experimental
+  `syncFragments(doc, fragments)` exchanges fragments with a peer, returning
+  the new document and the fragments to send back.
 
 ### Removed
+
+* The experimental `addCommits` function and `Commit` type: loose commits
+  are level-0 fragments, which `applyFragments` takes.
 
 * The experimental `saveBundle` function. `readBundle` remains but reads only
   the bundles `bundleFragmentMetadata` produces, not the BundleV0 format

@@ -219,7 +219,7 @@ macro_rules! step {
                     .filter(|h| b.has_change_id(h))
                     .collect();
                 for bytes in b
-                    .fragments_after(&heads)
+                    .fragments_after(&heads, false)
                     .unwrap()
                     .into_iter()
                     .map(|f| f.bytes)
@@ -340,10 +340,10 @@ fn history_queries_at_freed_heads_never_panic() {
         .save_after(&old)
         .map(|_| ()));
     probe!("bundle_after", |d: &mut AutoCommit| d
-        .fragments_after(&old)
+        .fragments_after(&old, false)
         .map(|_| ()));
     probe!("fragments_after", |d: &mut AutoCommit| d
-        .fragments_after_meta(&old)
+        .fragments_after_meta(&old, false)
         .map(|_| ()));
     probe!("hydrate at", |d: &mut AutoCommit| d
         .hydrate(ROOT, Some(&old))
@@ -550,7 +550,7 @@ fn mixed_mode_peers_agree_with_audited_peers() {
                     .filter(|h| a.has_change_id(h))
                     .collect();
                 for b in a
-                    .fragments_after(&heads)
+                    .fragments_after(&heads, false)
                     .unwrap_or_else(|e| panic!("{what}: {e}"))
                     .into_iter()
                     .map(|f| f.bytes)
@@ -605,6 +605,73 @@ fn mixed_mode_peers_agree_with_audited_peers() {
     }
 }
 
+/// A fragment is whole exactly when its boundary is no shallower than its
+/// head, so a layer that sees only those hashes can tell whole fragments
+/// from partial ones.
+#[test]
+fn head_and_boundary_tell_whole_fragments_from_partial() {
+    let whole = |f: &automerge::next::Fragment| f.meta.is_whole();
+    let mut peers = history(23, 3000);
+    let doc = AutoCommit::load(&peers[0].save()).unwrap();
+    let all = doc.fragments(..);
+    assert!(all.iter().all(whole), "every indexed fragment is whole");
+    let changes = peers[0].get_changes(&[]).unwrap();
+    let (mut partial, mut total) = (0, 0);
+    for cut in (1..changes.len()).step_by(37) {
+        let mut r = AutoCommit::new().enable_audit_mode().unwrap();
+        r.apply_changes(changes[..cut].to_vec()).unwrap();
+        let heads = r.disable_audit_mode().get_heads();
+        for f in doc.fragments_after(&heads, true).unwrap() {
+            let labelled_whole = f.meta.level == f.meta.head.fragment_level();
+            assert_eq!(whole(&f), labelled_whole, "cut {cut}: {:?}", f.meta);
+            partial += usize::from(!labelled_whole);
+            total += 1;
+        }
+    }
+    assert!(
+        partial > 0 && partial < total,
+        "{partial} of {total} partial"
+    );
+}
+
+/// Two peers exchanging `sync_fragments` converge, sending the same bytes in
+/// both modes.
+#[test]
+fn sync_fragments_converge_and_match_audit_mode() {
+    let base = history(22, 900).swap_remove(0).save();
+    let mut audited = [
+        automerge::AutoCommit::load(&base).unwrap(),
+        automerge::AutoCommit::load(&base).unwrap(),
+    ];
+    let mut next = [
+        AutoCommit::load(&base).unwrap(),
+        AutoCommit::load(&base).unwrap(),
+    ];
+    for (i, seed) in [(0, 1u64), (1, 2), (0, 3), (1, 4)] {
+        let before = next[i].get_heads();
+        next[i].set_actor(actor(i as u8 + 5));
+        for s in 0..700 {
+            edit(&mut next[i], seed * 1000 + s);
+            next[i].commit_with(t0());
+        }
+        let edits = next[i].save_after(&before).unwrap();
+        audited[i].load_incremental(&edits).unwrap();
+        let j = 1 - i;
+        let (mut a, mut n) = (Vec::new(), Vec::new());
+        for k in [i, j, i] {
+            a = audited[k].sync_fragments(&a).unwrap();
+            n = next[k].sync_fragments(&n).unwrap();
+            let mut ab: Vec<_> = a.iter().map(|f| &f.bytes).collect();
+            let mut nb: Vec<_> = n.iter().map(|f| &f.bytes).collect();
+            ab.sort();
+            nb.sort();
+            assert_eq!(ab, nb, "round {seed}, peer {k}");
+        }
+        assert_eq!(audited[0].get_heads(), audited[1].get_heads());
+        assert_eq!(next[0].get_heads(), next[1].get_heads());
+    }
+}
+
 /// A `next` receiver holding a prefix of a peer's history applies the
 /// peer's `bundle_after(its heads)` one bundle at a time, and both modes
 /// of the sender produce the same bundles.
@@ -623,13 +690,13 @@ fn bundle_after_applies_one_at_a_time_and_matches_audit_mode() {
         let mut r = r.disable_audit_mode();
         let _ = r.save();
         let sent = sender
-            .fragments_after_full(&heads)
+            .fragments_after(&heads, false)
             .unwrap()
             .into_iter()
             .map(|f| f.bytes)
             .collect::<Vec<_>>();
         let reference = audited
-            .fragments_after_full(&heads)
+            .fragments_after(&heads, false)
             .unwrap()
             .into_iter()
             .map(|f| f.bytes)
@@ -640,7 +707,7 @@ fn bundle_after_applies_one_at_a_time_and_matches_audit_mode() {
         if ss != rs {
             let fs = normalized(
                 sender
-                    .fragments_after_full(&heads)
+                    .fragments_after(&heads, false)
                     .unwrap()
                     .into_iter()
                     .map(|f| f.meta)
@@ -648,7 +715,7 @@ fn bundle_after_applies_one_at_a_time_and_matches_audit_mode() {
             );
             let fr = normalized(
                 audited
-                    .fragments_after_full(&heads)
+                    .fragments_after(&heads, false)
                     .unwrap()
                     .into_iter()
                     .map(|f| f.meta)
@@ -673,6 +740,28 @@ fn bundle_after_applies_one_at_a_time_and_matches_audit_mode() {
             ss == rs,
             "cut {cut}: bundle_after bytes equal in both modes"
         );
+        // split fragments rebuild the hashes GC freed rather than failing
+        let split = sender.fragments_after(&heads, true).unwrap();
+        let mut split_bytes: Vec<_> = split.iter().map(|f| f.bytes.clone()).collect();
+        let mut reference: Vec<_> = audited
+            .fragments_after(&heads, true)
+            .unwrap()
+            .into_iter()
+            .map(|f| f.bytes)
+            .collect();
+        split_bytes.sort();
+        reference.sort();
+        assert!(
+            split_bytes == reference,
+            "cut {cut}: fragments_after bytes equal in both modes"
+        );
+        let mut split_receiver = r.fork();
+        for (k, f) in split.iter().enumerate() {
+            split_receiver
+                .apply_fragments(std::slice::from_ref(f))
+                .unwrap_or_else(|e| panic!("cut {cut}: fragment {k}/{}: {e}", split.len()));
+        }
+        assert_eq!(split_receiver.get_heads(), sender.get_heads(), "cut {cut}");
         for (k, b) in sent.iter().enumerate() {
             r.load_incremental(b)
                 .unwrap_or_else(|e| panic!("cut {cut}: bundle {k}/{}: {e}", sent.len()));

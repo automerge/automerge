@@ -183,6 +183,15 @@ impl FragmentMeta {
         self.members.is_empty()
     }
 
+    /// Whether this is the whole fragment its head's hash gives rather than
+    /// part of one: no boundary hash has a lower
+    /// [`fragment_level`](ChangeHash::fragment_level) than the head. Reads
+    /// only the head and boundary hashes.
+    pub fn is_whole(&self) -> bool {
+        let level = self.head.fragment_level();
+        self.boundary.iter().all(|b| b.fragment_level() >= level)
+    }
+
     pub(crate) fn into_next(
         self,
         doc: &crate::automerge::Automerge<Full>,
@@ -616,6 +625,27 @@ impl Automerge {
         Ok(())
     }
 
+    /// EXPERIMENTAL: Exchanges fragments with a peer that holds `heads`.
+    /// Applies `fragments` and returns [`Self::fragments_after`]`(heads, true)`
+    /// as it was before them, followed by the whole fragment for each of
+    /// `fragments` that is only part of one, as
+    /// [`FragmentMeta::is_whole`] tells. Encodes each whole fragment it
+    /// returns, so one over a long history costs about as much as saving it.
+    ///
+    /// This is an experimental API, it may change or be removed without
+    /// warning.
+    #[doc(hidden)]
+    pub fn sync_fragments(
+        &mut self,
+        fragments: &[Fragment],
+        heads: &[ChangeHash],
+    ) -> Result<Vec<Fragment>, AutomergeError> {
+        let (bytes, partial) = sync_parts(fragments);
+        let ids = super::known_ids(&self.0, heads);
+        let out = self.0.sync_fragment_bytes(&bytes, partial, &ids)?;
+        Ok(self.audited_fragments(out))
+    }
+
     /// Apply changes to this document.
     ///
     /// This is idempotent in the sense that if a change has already been applied it will be
@@ -734,7 +764,10 @@ impl Automerge {
         self.audited_fragments(self.0.fragments(levels))
     }
 
-    fn audited_fragments(&self, fragments: Vec<crate::change_graph::Fragment>) -> Vec<Fragment> {
+    pub(super) fn audited_fragments(
+        &self,
+        fragments: Vec<crate::change_graph::Fragment>,
+    ) -> Vec<Fragment> {
         fragments
             .into_iter()
             .map(|f| Fragment::from_next(&self.0, f))
@@ -754,34 +787,23 @@ impl Automerge {
             .collect()
     }
 
-    /// EXPERIMENTAL: The changes `heads` does not cover, each exactly once,
-    /// as fragments and loose commits in apply order. A fragment `heads`
-    /// partly covers is sent as the smaller fragments it superseded, down
-    /// to loose commits. Hashes this document does not know are ignored.
-    ///
-    /// This is an experimental API, it may change or be removed without
-    /// warning.
-    #[doc(hidden)]
-    pub fn fragments_after(&self, heads: &[ChangeHash]) -> Result<Vec<Fragment>, AutomergeError> {
-        let ids = super::known_ids(&self.0, heads);
-        Ok(self.audited_fragments(self.0.fragments_after(&ids)?))
-    }
-
     /// EXPERIMENTAL: The fragments, loose commits included, holding a
-    /// change `heads` does not cover, in apply order. Unlike
-    /// [`Self::fragments_after`], a fragment that also holds changes
-    /// `heads` covers is sent whole. Hashes this document does not know
-    /// are ignored.
+    /// change `heads` does not cover, in apply order. Hashes this document
+    /// does not know are ignored. A fragment `heads` partly covers is sent
+    /// whole, so some changes may be sent again, unless `partial`: then it
+    /// is sent as the smaller fragments it superseded, down to loose
+    /// commits, so each change is sent exactly once.
     ///
     /// This is an experimental API, it may change or be removed without
     /// warning.
     #[doc(hidden)]
-    pub fn fragments_after_full(
+    pub fn fragments_after(
         &self,
         heads: &[ChangeHash],
+        partial: bool,
     ) -> Result<Vec<Fragment>, AutomergeError> {
         let ids = super::known_ids(&self.0, heads);
-        Ok(self.audited_fragments(self.0.fragments_after_full(&ids)?))
+        Ok(self.audited_fragments(self.0.fragments_after(&ids, partial)?))
     }
 
     /// EXPERIMENTAL: [`Self::fragments_after`] without encoding them.
@@ -792,11 +814,12 @@ impl Automerge {
     pub fn fragments_after_meta(
         &self,
         heads: &[ChangeHash],
+        partial: bool,
     ) -> Result<Vec<FragmentMeta>, AutomergeError> {
         let ids = super::known_ids(&self.0, heads);
         Ok(self
             .0
-            .fragments_after_meta(&ids)?
+            .fragments_after_meta(&ids, partial)?
             .into_iter()
             .map(|f| FragmentMeta::from_next(&self.0, f))
             .collect())
@@ -981,4 +1004,16 @@ impl crate::automerge::Automerge<Retained> {
     pub fn into_audit(self) -> Result<Automerge, EnableAuditModeError<Self>> {
         self.enable_audit_mode().map(Automerge)
     }
+}
+
+/// The concatenated bytes of `fragments`, and the heads of those that are
+/// only part of the fragment their head's hash gives.
+pub(super) fn sync_parts(fragments: &[Fragment]) -> (Vec<u8>, Vec<ChangeHash>) {
+    let bytes = fragments.iter().flat_map(|f| &f.bytes).copied().collect();
+    let partial = fragments
+        .iter()
+        .filter(|f| !f.meta.is_whole())
+        .map(|f| f.meta.head)
+        .collect();
+    (bytes, partial)
 }

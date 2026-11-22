@@ -448,29 +448,7 @@ impl<H: HashRetention> ChangeGraph<H> {
         let rehashed_on_load = |n: &NodeIdx, h: Option<ChangeHash>| {
             untag_tiny && h.is_none_or(|h| h.fragment_level() == 0) && num_ops(n) <= TINY_CHANGE_OPS
         };
-        let carried: Vec<NodeIdx> = self.leveled_members(members).map(|(n, _)| n).collect();
-        let frontier = self.calculate_clock(carried.clone());
-        let loose = self.loose_members(members, &frontier);
-        let mut required = self.retained_from(carried.into_iter().chain(loose), &frontier);
-        required.extend(self.member_tips(nodes));
-        // a receiver pins these when it caches the fragment, and may have
-        // freed those outside the bundle: a concurrent fragment can cover
-        // them first. A bundle holding only part of the fragment leaves
-        // the rest, and the pins on it, to the receiver's own history.
-        let mut outside = BTreeSet::new();
-        for f in &self.fragments {
-            if members.position(f.head).is_some() {
-                let boundary = self.calculate_clock(f.deps.clone());
-                let carried = self.carries_fragment(members, f, &boundary);
-                for p in self.fragment_pins_within(f, &boundary) {
-                    if members.position(p).is_some() {
-                        required.insert(p);
-                    } else if carried {
-                        outside.insert(p);
-                    }
-                }
-            }
-        }
+        let (required, outside) = self.receiver_pins(members);
         let outside = outside
             .into_iter()
             .map(|n| self.hashes.get(n))
@@ -479,7 +457,6 @@ impl<H: HashRetention> ChangeGraph<H> {
                 count: 1,
                 what: "changes outside the bundle its fragments need",
             })?;
-        required.retain(|n| members.position(*n).is_some());
         let unheld = required
             .iter()
             .filter(|n| self.hashes.get(**n).is_none() && !rehashed_on_load(n, None))
@@ -501,6 +478,36 @@ impl<H: HashRetention> ChangeGraph<H> {
             retained: named,
             outside,
         })
+    }
+
+    /// The members whose hashes a receiver of `members` must keep, and the
+    /// hashes outside them its fragments need.
+    fn receiver_pins(&self, members: &Members<'_>) -> (BTreeSet<NodeIdx>, BTreeSet<NodeIdx>) {
+        let carried: Vec<NodeIdx> = self.leveled_members(members).map(|(n, _)| n).collect();
+        let frontier = self.calculate_clock(carried.clone());
+        let loose = self.loose_members(members, &frontier);
+        let mut required = self.retained_from(carried.into_iter().chain(loose), &frontier);
+        required.extend(self.member_tips(members.nodes()));
+        // a receiver pins these when it caches the fragment, and may have
+        // freed those outside the bundle: a concurrent fragment can cover
+        // them first. A bundle holding only part of the fragment leaves
+        // the rest, and the pins on it, to the receiver's own history.
+        let mut outside = BTreeSet::new();
+        for f in &self.fragments {
+            if members.position(f.head).is_some() {
+                let boundary = self.calculate_clock(f.deps.clone());
+                let carried = self.carries_fragment(members, f, &boundary);
+                for p in self.fragment_pins_within(f, &boundary) {
+                    if members.position(p).is_some() {
+                        required.insert(p);
+                    } else if carried {
+                        outside.insert(p);
+                    }
+                }
+            }
+        }
+        required.retain(|n| members.position(*n).is_some());
+        (required, outside)
     }
 
     /// Each actor's last change among `nodes`: the tip of a receiver that
@@ -1595,7 +1602,7 @@ impl<H: HashRetention> ChangeGraph<H> {
 
     /// The fragments, loose commits included, holding a node `covered`
     /// does not cover, in apply order: as [`Self::fragments_meta`] lists them.
-    pub(crate) fn fragments_after_full(
+    pub(crate) fn fragments_after_whole(
         &self,
         heads: &[ChangeHash],
         covered: &SeqClock,
@@ -1710,7 +1717,8 @@ impl<H: HashRetention> ChangeGraph<H> {
         }
     }
 
-    /// The nodes whose hashes `pieces` name that this graph has freed.
+    /// The nodes whose hashes encoding `pieces` needs that this graph has
+    /// freed.
     pub(crate) fn unhashed_in(&self, pieces: &[Piece]) -> Vec<NodeIdx> {
         // a fragment's head and deps are level > 0, which are never freed,
         // but a member may depend on a level-0 change outside it
@@ -1718,12 +1726,26 @@ impl<H: HashRetention> ChangeGraph<H> {
         for p in pieces {
             match p {
                 Piece::Loose(n) => unhashed.extend(std::iter::once(*n).chain(self.parents(*n))),
-                Piece::Fragment { nodes, .. } => unhashed.extend(
-                    nodes
-                        .iter()
-                        .flat_map(|n| self.parents(*n))
-                        .filter(|p| nodes.binary_search(p).is_err()),
-                ),
+                Piece::Fragment {
+                    head, level, nodes, ..
+                } => {
+                    unhashed.extend(
+                        nodes
+                            .iter()
+                            .flat_map(|n| self.parents(*n))
+                            .filter(|p| nodes.binary_search(p).is_err()),
+                    );
+                    // GC keeps the pins of indexed fragments only
+                    let key = (std::cmp::Reverse(*level), *head);
+                    if self
+                        .fragments
+                        .binary_search_by_key(&key, |f| f.sort_key())
+                        .is_err()
+                    {
+                        let (required, outside) = self.receiver_pins(&self.bundle_members(nodes));
+                        unhashed.extend(required.into_iter().chain(outside));
+                    }
+                }
             }
         }
         unhashed.retain(|n| self.hashes.get(*n).is_none());
@@ -3778,11 +3800,11 @@ mod tests {
     /// once. Returns whether it rebuilt a hash, and how many of the
     /// document's fragments straddle `heads`.
     fn assert_fragments_after(doc: &Automerge, heads: &[ChangeId], at: &[u8]) -> (bool, usize) {
-        let (fragments, rebuilt) = doc.fragments_after_rebuilding(heads).unwrap();
-        assert_eq!(fragments, doc.fragments_after(heads).unwrap());
+        let (fragments, rebuilt) = doc.partial_fragments_after(heads).unwrap();
+        assert_eq!(fragments, doc.fragments_after(heads, true).unwrap());
         assert_eq!(
             fragments.iter().map(|f| &f.meta).collect::<Vec<_>>(),
-            doc.fragments_after_meta(heads)
+            doc.fragments_after_meta(heads, true)
                 .unwrap()
                 .iter()
                 .collect::<Vec<_>>()
@@ -3848,9 +3870,12 @@ mod tests {
             "some fragment straddles heads"
         );
         assert!(results.iter().any(|r| r.0), "some freed hash is rebuilt");
-        assert!(doc.fragments_after(&doc.get_heads()).unwrap().is_empty());
         assert!(doc
-            .fragments_after_meta(&doc.get_heads())
+            .fragments_after(&doc.get_heads(), true)
+            .unwrap()
+            .is_empty());
+        assert!(doc
+            .fragments_after_meta(&doc.get_heads(), true)
             .unwrap()
             .is_empty());
     }
@@ -3954,6 +3979,7 @@ mod tests {
         let mut sent = vec![];
         for _ in 0..2_000 {
             let before = peer.get_heads();
+            let parents = peer.get_head_hashes();
             let key = format!("k{}", rng.random::<u32>() % 32);
             let mut tx = peer.transaction();
             tx.put(ROOT, key, rng.random::<u32>() as i64).unwrap();
@@ -3962,7 +3988,7 @@ mod tests {
                 meta: FragmentMeta {
                     head: peer.get_head_hashes()[0],
                     level: 0,
-                    boundary: vec![],
+                    boundary: parents,
                     checkpoints: vec![],
                     members: vec![],
                 },
@@ -3975,7 +4001,7 @@ mod tests {
 
         let completed: Vec<_> = sent
             .iter()
-            .filter(|f| f.meta.head.fragment_level() > 0)
+            .filter(|f| !f.meta.is_whole())
             .map(|f| peer.fragment_at(f.meta.head).unwrap().unwrap())
             .collect();
         assert!(completed.len() > 1, "some change heads a fragment");
@@ -3985,8 +4011,20 @@ mod tests {
         assert_eq!(as_set(reply), as_set(completed.clone()));
         let indexed = as_set(peer.fragments(1..));
         assert!(!indexed.is_empty());
+        // a loose commit whose parents are as deep as it is already is its
+        // whole fragment, so it is not sent again
+        let sent_whole = |f: &Fragment| {
+            f.len() == 1
+                && sent
+                    .iter()
+                    .any(|s| s.meta.head == f.meta.head && s.meta.is_whole())
+        };
         for f in &indexed {
-            assert!(as_set(completed.clone()).contains(f), "{:?}", f.meta.head);
+            assert!(
+                as_set(completed.clone()).contains(f) || sent_whole(f),
+                "{:?}",
+                f.meta.head
+            );
         }
 
         assert!(doc.sync_fragments(&[]).unwrap().is_empty());
@@ -4042,11 +4080,11 @@ mod tests {
         b.commit();
         b.merge(&mut a).unwrap();
         let doc = b.document();
-        let fragments = doc.fragments_after_meta(&[]).unwrap();
+        let fragments = doc.fragments_after_meta(&[], false).unwrap();
         assert!(fragments.iter().any(|f| f.level > 0));
         let mut z = Automerge::new();
         for (i, bundle) in doc
-            .fragments_after(&[])
+            .fragments_after(&[], false)
             .unwrap()
             .into_iter()
             .map(|f| f.bytes)
@@ -4130,13 +4168,13 @@ mod tests {
         };
         assert!(
             sorted(
-                x.fragments_after(&[])
+                x.fragments_after(&[], false)
                     .unwrap()
                     .into_iter()
                     .map(|f| f.bytes)
                     .collect::<Vec<_>>()
             ) == sorted(
-                y.fragments_after(&[])
+                y.fragments_after(&[], false)
                     .unwrap()
                     .into_iter()
                     .map(|f| f.bytes)
@@ -4145,7 +4183,7 @@ mod tests {
             "bundle_after differs"
         );
         let after = |doc: &Automerge| {
-            let mut f = doc.fragments_after_meta(&[]).unwrap();
+            let mut f = doc.fragments_after_meta(&[], false).unwrap();
             f.sort_by_key(|f| (f.head, f.level));
             for f in &mut f {
                 f.members.sort_by_key(|m| (m.actor().clone(), m.seq()));
@@ -4156,7 +4194,7 @@ mod tests {
         for doc in [x, y] {
             let mut z = Automerge::new();
             for (i, b) in doc
-                .fragments_after(&[])
+                .fragments_after(&[], false)
                 .unwrap()
                 .into_iter()
                 .map(|f| f.bytes)
@@ -4382,6 +4420,27 @@ impl FragmentMeta {
     pub fn is_empty(&self) -> bool {
         self.members.is_empty()
     }
+
+    /// Whether this is the whole fragment its head's hash gives rather than
+    /// part of one: no boundary hash has a lower
+    /// [`fragment_level`](ChangeHash::fragment_level) than the head. Reads
+    /// only the head and boundary hashes.
+    pub fn is_whole(&self) -> bool {
+        let level = self.head.fragment_level();
+        self.boundary.iter().all(|b| b.fragment_level() >= level)
+    }
+}
+
+/// The concatenated bytes of `fragments`, and the heads of those that are
+/// only part of the fragment their head's hash gives.
+pub(crate) fn sync_parts(fragments: &[Fragment]) -> (Vec<u8>, Vec<ChangeHash>) {
+    let bytes = fragments.iter().flat_map(|f| &f.bytes).copied().collect();
+    let partial = fragments
+        .iter()
+        .filter(|f| !f.meta.is_whole())
+        .map(|f| f.meta.head)
+        .collect();
+    (bytes, partial)
 }
 
 /// EXPERIMENTAL: A [`FragmentMeta`] and its changes, encoded as a bundle.

@@ -166,8 +166,7 @@ mod tests {
     use crate::tx::Transactable;
     use crate::types::ChangeHash;
     use crate::{
-        change_graph::FragmentMeta, make_rng, AutomergeError, Bundle, Change, ChangeId, ObjType,
-        ScalarValue, ROOT,
+        change_graph::FragmentMeta, make_rng, Bundle, Change, ChangeId, ObjType, ScalarValue, ROOT,
     };
     use rand::prelude::*;
     use std::collections::HashSet;
@@ -497,7 +496,7 @@ mod tests {
     }
 
     #[test]
-    fn bundle_apply_errors() {
+    fn bundle_apply_out_of_order() {
         let mut rng = make_rng();
         let mut src = AutoCommit::new()
             .with_actor(rng.random())
@@ -517,24 +516,119 @@ mod tests {
 
         let mut dst = Automerge::new();
 
-        // out of order
-        assert!(matches!(
-            dst.apply_bundle(bundles[1].clone()),
-            Err(AutomergeError::MissingDeps)
-        ));
+        // out of order: queued until its dep arrives
+        dst.apply_bundle(bundles[1].clone()).unwrap();
+        assert!(dst.get_heads().is_empty());
 
         dst.apply_bundle(bundles[0].clone()).unwrap();
+        assert!(dst.bundle_queue.is_empty());
 
         let heads = dst.get_heads();
         dst.apply_bundle(bundles[0].clone()).unwrap();
+        dst.apply_bundle(bundles[1].clone()).unwrap();
         assert_eq!(dst.get_heads(), heads);
 
-        dst.apply_bundle(bundles[1].clone()).unwrap();
         dst.apply_bundle(bundles[2].clone()).unwrap();
 
         assert_eq!(dst.get_heads(), src.get_heads());
         let dst = dst.enable_audit_mode().unwrap();
         assert_eq!(dst.save(), src.doc.save());
+    }
+
+    fn bundles_of_three(src: &AutoCommit<crate::hash_retention::Full>) -> Vec<Bundle> {
+        let changes = src.doc.get_changes(&[]).unwrap();
+        changes
+            .chunks(3)
+            .map(|c| src.doc.bundle_for_fragment(&fragment_for(c)).unwrap())
+            .collect()
+    }
+
+    fn audited_src(rng: &mut impl Rng, n: usize) -> AutoCommit<crate::hash_retention::Full> {
+        let mut src = AutoCommit::new()
+            .with_actor(rng.random())
+            .enable_audit_mode()
+            .unwrap();
+        for i in 0..n as i64 {
+            src.put(&ROOT, "key", i).unwrap();
+            src.commit();
+        }
+        src
+    }
+
+    #[test]
+    fn shuffled_bundles_load_into_a_nonempty_doc() {
+        let mut rng = make_rng();
+        let src = audited_src(&mut rng, 12);
+        let bytes: Vec<u8> = bundles_of_three(&src)
+            .iter()
+            .rev()
+            .flat_map(|b| b.bytes())
+            .collect();
+
+        let mut dst = AutoCommit::new().with_actor(rng.random());
+        dst.put(&ROOT, "seed", 0).unwrap();
+        dst.commit();
+        dst.load_incremental(&bytes).unwrap();
+        assert!(dst.doc.bundle_queue.is_empty());
+        assert_eq!(dst.get(&ROOT, "key").unwrap().unwrap().0, 11.into());
+
+        let mut audit = AutoCommit::new()
+            .with_actor(rng.random())
+            .enable_audit_mode()
+            .unwrap();
+        audit.put(&ROOT, "seed", 0).unwrap();
+        audit.commit();
+        audit.load_incremental(&bytes).unwrap();
+        assert!(audit.doc.bundle_queue.is_empty());
+        assert_eq!(audit.get(&ROOT, "key").unwrap().unwrap().0, 11.into());
+    }
+
+    #[test]
+    fn queued_bundle_applies_once_a_change_fills_its_dep() {
+        let mut rng = make_rng();
+        let src = audited_src(&mut rng, 6);
+        let changes = src.doc.get_changes(&[]).unwrap();
+        let bundles = bundles_of_three(&src);
+
+        let mut dst = Automerge::new();
+        dst.apply_bundle(bundles[1].clone()).unwrap();
+        assert!(dst.get_heads().is_empty());
+        dst.apply_changes(changes[..3].to_vec()).unwrap();
+        assert!(dst.bundle_queue.is_empty());
+        assert_eq!(dst.get_heads(), src.doc.get_heads());
+    }
+
+    #[test]
+    fn queued_bundle_survives_save_and_load() {
+        let mut rng = make_rng();
+        let src = audited_src(&mut rng, 9);
+        let bundles = bundles_of_three(&src);
+
+        let mut dst = Automerge::new();
+        dst.apply_bundle(bundles[0].clone()).unwrap();
+        dst.apply_bundle(bundles[2].clone()).unwrap();
+        let mut dst = Automerge::load(&dst.save()).unwrap();
+        assert!(!dst.bundle_queue.is_empty());
+
+        dst.apply_bundle(bundles[1].clone()).unwrap();
+        assert!(dst.bundle_queue.is_empty());
+        assert_eq!(dst.get_heads(), src.doc.get_heads());
+    }
+
+    #[test]
+    fn local_commit_drops_queued_bundles_on_its_seq() {
+        let mut rng = make_rng();
+        let src = audited_src(&mut rng, 6);
+        let bundles = bundles_of_three(&src);
+
+        // the same actor, so the queued bundle's seqs are about to be reused
+        let mut dst = AutoCommit::new().with_actor(src.get_actor().clone());
+        dst.doc.apply_bundle(bundles[1].clone()).unwrap();
+        assert!(!dst.doc.bundle_queue.is_empty());
+        dst.put(&ROOT, "mine", 1).unwrap();
+        dst.commit();
+        assert!(dst.doc.bundle_queue.is_empty());
+        Automerge::load(&dst.save()).unwrap();
     }
 
     #[test]

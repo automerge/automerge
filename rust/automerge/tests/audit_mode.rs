@@ -748,7 +748,7 @@ fn audit_and_manifold_fragment_apply_agree() {
 
 /// An out-of-order bundle errors instead of queueing.
 #[test]
-fn audit_fragment_apply_missing_deps() {
+fn audit_fragment_apply_queues_missing_deps() {
     let mut src = big_doc_in_audit_mode();
 
     let fragments = src.fragments_meta(..);
@@ -758,12 +758,15 @@ fn audit_fragment_apply_missing_deps() {
         .collect();
     assert!(bundles.len() > 1);
 
+    // queued until its deps arrive
     let mut audit = Automerge::new().enable_audit_mode().unwrap();
-    assert!(matches!(
-        audit.apply_bundle(bundles[1].clone()),
-        Err(AutomergeError::MissingDeps)
-    ));
+    audit.apply_bundle(bundles[1].clone()).unwrap();
     assert!(audit.get_heads().is_empty());
+
+    for b in bundles.iter().rev() {
+        audit.apply_bundle(b.clone()).unwrap();
+    }
+    assert_eq!(audit.get_heads(), src.get_heads());
 }
 
 /// A commit whose hash starts with a zero byte becomes a fragment head and frees

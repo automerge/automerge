@@ -271,6 +271,7 @@ mod author;
 mod autocommit;
 pub(crate) mod automerge;
 mod autoserde;
+mod bundle_queue;
 mod change;
 pub(crate) mod change_graph;
 mod change_id;

@@ -329,6 +329,14 @@ fn fuzz(seed: u64, iters: usize) -> Vec<String> {
                         }
                     }
                     Ok((true, Some(mut d))) => {
+                        // queued: harmless if the honest bundle still lands
+                        if d.get_heads() == recv.get_heads() {
+                            let honest = Bundle::try_from(&honest_bytes[..]).unwrap();
+                            if let Err(e) = d.apply_bundle(honest) {
+                                findings.push(format!("QUEUED {tag}: honest bundle fails: {e}"));
+                                continue;
+                            }
+                        }
                         let bad = postconditions(&mut d, &honest_next);
                         if !bad.is_empty() {
                             findings.push(format!("ACCEPTED {tag}: {bad:?}"));

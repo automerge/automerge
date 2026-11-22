@@ -38,8 +38,8 @@ export type PatchSource =
   | "applyChanges"
   | "maskAuthor"
   | "revealAuthor"
-  | "addCommits"
-  | "addFragments"
+  | "applyFragments"
+  | "syncFragments"
   | "receiveSyncMessage"
 export type PatchInfo<T> = {
   before: Doc<T>

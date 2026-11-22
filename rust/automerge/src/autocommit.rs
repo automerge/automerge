@@ -90,11 +90,11 @@ impl Default for AutoCommit<Retained> {
 impl<H: HashRetention> AutoCommit<H> {
     pub(crate) fn from_doc(doc: Automerge<H>, save_cursor: Vec<ChangeId>) -> Self {
         AutoCommit {
+            sync_heads: doc.get_heads(),
             doc,
             transaction: None,
             diff_cursor: Viewpoint::default(),
             diff_cache: None,
-            sync_heads: save_cursor.clone(),
             save_cursor,
             isolation: None,
         }
@@ -621,8 +621,21 @@ impl<H: HashRetention> AutoCommit<H> {
         &mut self,
         fragments: &[Fragment],
     ) -> Result<Vec<Fragment>, AutomergeError> {
+        let (bytes, partial) = crate::change_graph::sync_parts(fragments);
+        self.sync_fragment_bytes(&bytes, partial)
+    }
+
+    /// [`Self::sync_fragments`] of fragments as [`Automerge::sync_fragment_bytes`]
+    /// takes them.
+    pub(crate) fn sync_fragment_bytes(
+        &mut self,
+        bytes: &[u8],
+        partial: impl IntoIterator<Item = ChangeHash>,
+    ) -> Result<Vec<Fragment>, AutomergeError> {
         self.ensure_transaction_closed();
-        let out = self.doc.sync_fragments(fragments, &self.sync_heads)?;
+        let out = self
+            .doc
+            .sync_fragment_bytes(bytes, partial, &self.sync_heads)?;
         self.sync_heads = self.doc.get_heads();
         self.collect_garbage();
         Ok(out)
@@ -768,24 +781,21 @@ impl<H: HashRetention> AutoCommit<H> {
     }
 
     /// See [`Automerge::fragments_after`].
-    pub fn fragments_after(&self, heads: &[ChangeId]) -> Result<Vec<Fragment>, AutomergeError> {
-        self.doc.fragments_after(heads)
-    }
-
-    /// See [`Automerge::fragments_after_full`].
-    pub fn fragments_after_full(
+    pub fn fragments_after(
         &self,
         heads: &[ChangeId],
+        partial: bool,
     ) -> Result<Vec<Fragment>, AutomergeError> {
-        self.doc.fragments_after_full(heads)
+        self.doc.fragments_after(heads, partial)
     }
 
     /// See [`Automerge::fragments_after_meta`].
     pub fn fragments_after_meta(
         &self,
         heads: &[ChangeId],
+        partial: bool,
     ) -> Result<Vec<FragmentMeta>, AutomergeError> {
-        self.doc.fragments_after_meta(heads)
+        self.doc.fragments_after_meta(heads, partial)
     }
 
     /// See [`Automerge::fragments_from_meta`].

@@ -13,14 +13,12 @@ import type {
   DecodedBundle,
   WasmReleaseInfo,
   FragmentMeta,
-  Commit,
   Fragment,
   FragmentLevelRange,
 } from "./wasm_types.js"
 export type {
   ChangeToEncode,
   FragmentMeta,
-  Commit,
   Fragment,
   FragmentLevelRange,
 } from "./wasm_types.js"

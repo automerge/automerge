@@ -1,6 +1,5 @@
-use std::cmp::{Ordering, Reverse};
-use std::collections::binary_heap::PeekMut;
-use std::collections::{BTreeSet, BinaryHeap, HashMap, HashSet};
+use std::cmp::Ordering;
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::env;
 use std::fmt::Debug;
 use std::num::NonZeroU64;
@@ -16,6 +15,7 @@ pub(crate) use crate::op_set2::{
 };
 
 use crate::actor::{ActorInsert, ActorRemoval, ActorShift, HasActorIndices};
+use crate::bundle_queue::BundleQueue;
 use crate::change_graph::{BundleDep, BundleMember, ChangeGraph};
 use crate::change_queue::ChangeQueue;
 use crate::clock::Clock;
@@ -329,6 +329,8 @@ impl std::default::Default for LoadOptions {
 pub struct Automerge<H: HashRetention = Retained> {
     /// The list of unapplied changes that are not causally ready.
     pub(crate) queue: ChangeQueue,
+    /// The bundles that are not causally ready.
+    pub(crate) bundle_queue: BundleQueue,
     /// Graph of changes
     pub(crate) change_graph: ChangeGraph<H>,
     authors: Authors,
@@ -355,6 +357,7 @@ impl<H: HashRetention> Automerge<H> {
         let ops = OpSet::new(encoding);
         Automerge {
             queue: ChangeQueue::new(),
+            bundle_queue: BundleQueue::default(),
             change_graph: ChangeGraph::new(&ops.actors),
             authors: Authors::new(&ops.actors),
             write_frontier: WriteFrontier::new(),
@@ -404,6 +407,7 @@ impl<H: HashRetention> Automerge<H> {
     ) -> Self {
         let mut doc = Automerge {
             queue: ChangeQueue::new(),
+            bundle_queue: BundleQueue::default(),
             change_graph,
             authors,
             write_frontier,
@@ -459,7 +463,7 @@ impl<H: HashRetention> Automerge<H> {
 
     /// Whether this document has any operations
     pub fn is_empty(&self) -> bool {
-        self.change_graph.is_empty() && self.queue.is_empty()
+        self.change_graph.is_empty() && self.queue.is_empty() && self.bundle_queue.is_empty()
     }
 
     pub(crate) fn actor_id(&self) -> &ActorId {
@@ -887,6 +891,7 @@ impl<H: HashRetention> Automerge<H> {
         // retaining it would allow save() to encode duplicate sequence numbers.
         let actor = self.ops.actors[actor_index].clone();
         self.queue.remove_actor_branch_from(&actor, seq);
+        self.bundle_queue.remove_actor_branch_from(&actor, seq);
 
         let start_op = NonZeroU64::MIN.saturating_add(self.change_graph.max_op());
         let author = if seq == 1 { self.author.clone() } else { None };
@@ -1167,7 +1172,7 @@ impl<H: HashRetention> Automerge<H> {
         if !changes.is_empty() {
             am.apply_changes_batch_with(changes, true)?;
         }
-        am.apply_bundles(bundles)?;
+        am.apply_bundles(bundles.into_iter().rev().map(|b| *b).collect())?;
         if !am.queue.is_empty() && !may_lack_deps && !partial_load_ok {
             return Err(AutomergeError::MissingDeps);
         }
@@ -1195,10 +1200,9 @@ impl<H: HashRetention> Automerge<H> {
     /// Unlike [`Self::load()`] this imports changes into an existing document. It will work with
     /// both the output of [`Self::save()`] and [`Self::save_after()`]
     ///
-    /// Into an empty document this is [`Self::load()`], which takes chunks in any order.
-    /// Otherwise chunks apply in the order given: legacy changes whose dependencies are missing
-    /// are queued with [`AuditMode::Enabled`] and dropped without it, and a bundle is rejected as
-    /// by [`Self::apply_bundle`], failing the call with chunks before it applied and none after.
+    /// Chunks may come in any order. A bundle whose dependencies are missing is queued, as by
+    /// [`Self::apply_bundle`]; a legacy change whose dependencies are missing is queued with
+    /// [`AuditMode::Enabled`] and dropped without it.
     ///
     /// The return value is the number of ops which were applied, this is not useful and will
     /// change in future.
@@ -1277,59 +1281,46 @@ impl<H: HashRetention> Automerge<H> {
         if !pending.is_empty() {
             self.apply_changes_batch_with(pending, true)?;
         }
+        self.apply_queued_bundles()
+    }
+
+    /// Applies the bundles in `ready`, last first, queueing any that lack a
+    /// change until it is applied.
+    pub(crate) fn apply_bundles(&mut self, mut ready: Vec<Bundle>) -> Result<(), AutomergeError> {
+        while let Some(b) = ready.pop() {
+            if let Some(missing) = self.missing_bundle_dep(&b) {
+                self.bundle_queue.park(b, missing);
+                continue;
+            }
+            if self.bundle_queue.is_empty() {
+                self.apply_bundle_inner(b)?;
+                continue;
+            }
+            // in audit mode the queued changes it lets apply may be any actor's
+            let advanced = if self.queue.is_empty() {
+                b.actors().to_vec()
+            } else {
+                self.bundle_queue.actors()
+            };
+            self.apply_bundle_inner(b)?;
+            ready.extend(self.take_ready_bundles(advanced));
+        }
         Ok(())
     }
 
-    /// Applies bundles in whatever order they arrive.
-    #[allow(clippy::vec_box)]
-    fn apply_bundles(&mut self, bundles: Vec<Box<Bundle>>) -> Result<(), AutomergeError> {
-        // a bundle waits on one missing change, and is looked at again only
-        // once its actor reaches that seq: rescanning every waiting bundle
-        // after each apply is quadratic in a shuffled load
-        let mut waiting: HashMap<ActorId, BinaryHeap<Reverse<(u64, usize)>>> = HashMap::new();
-        let mut parked: Vec<Option<Box<Bundle>>> = vec![];
-        let mut ready: Vec<Box<Bundle>> = vec![];
-        for bundle in bundles {
-            ready.push(bundle);
-            while let Some(b) = ready.pop() {
-                if let Some((actor, seq)) = self.missing_bundle_dep(&b) {
-                    let heap = waiting.entry(actor).or_default();
-                    heap.push(Reverse((seq, parked.len())));
-                    parked.push(Some(b));
-                    continue;
-                }
-                if waiting.is_empty() {
-                    self.apply_bundle(*b)?;
-                    continue;
-                }
-                // in audit mode the queued changes it lets apply may be any actor's
-                let advanced: Vec<ActorId> = if self.queue.is_empty() {
-                    b.actors().to_vec()
-                } else {
-                    waiting.keys().cloned().collect()
-                };
-                self.apply_bundle(*b)?;
-                for actor in advanced {
-                    let Some(heap) = waiting.get_mut(&actor) else {
-                        continue;
-                    };
-                    let have = self.seq_for_actor_id(&actor);
-                    while let Some(Reverse((_, i))) =
-                        heap.peek_mut().filter(|w| w.0 .0 <= have).map(PeekMut::pop)
-                    {
-                        ready.extend(parked[i].take());
-                    }
-                    if heap.is_empty() {
-                        waiting.remove(&actor);
-                    }
-                }
-            }
+    /// Applies the queued bundles that applied changes have made ready.
+    pub(crate) fn apply_queued_bundles(&mut self) -> Result<(), AutomergeError> {
+        let ready = self.take_ready_bundles(self.bundle_queue.actors());
+        self.apply_bundles(ready)
+    }
+
+    fn take_ready_bundles(&mut self, actors: Vec<ActorId>) -> Vec<Bundle> {
+        let mut ready = vec![];
+        for actor in actors {
+            let have = self.seq_for_actor_id(&actor);
+            ready.extend(self.bundle_queue.take_ready(&actor, have));
         }
-        // what still waits fails as it would have in order
-        for b in parked.into_iter().flatten() {
-            self.apply_bundle(*b)?;
-        }
-        Ok(())
+        ready
     }
 
     /// A change `bundle` names that this document lacks: a dep, or the
@@ -1425,6 +1416,9 @@ impl<H: HashRetention> Automerge<H> {
             for orphaned in self.queue.iter() {
                 bytes.extend(orphaned.raw_bytes());
             }
+            for orphaned in self.bundle_queue.iter() {
+                bytes.extend(orphaned.bytes());
+            }
         }
         bytes
     }
@@ -1470,40 +1464,44 @@ impl<H: HashRetention> Automerge<H> {
         )
     }
 
-    /// The changes `heads` does not cover, each exactly once, as fragments
-    /// and loose commits in apply order. A fragment `heads` partly covers
-    /// is sent as the fragments one level down that it superseded,
-    /// recursively, and a partly covered level-1 fragment as its uncovered
-    /// changes, each a loose commit. Ids this document does not know are
-    /// ignored. Hashes the document has freed are rebuilt, which is slow.
-    pub fn fragments_after(&self, heads: &[ChangeId]) -> Result<Vec<Fragment>, AutomergeError> {
-        Ok(self.fragments_after_rebuilding(heads)?.0)
+    /// The fragments, loose commits included, holding a change `heads` does
+    /// not cover, in apply order. Ids this document does not know are
+    /// ignored. A fragment `heads` partly covers is sent whole, so some
+    /// changes may be sent again, unless `partial`: then it is sent as the
+    /// fragments one level down that it superseded, recursively, and a
+    /// partly covered level-1 fragment as its uncovered changes, each a
+    /// loose commit, so each change is sent exactly once. With `partial`,
+    /// hashes the document has freed are rebuilt, which is slow.
+    pub fn fragments_after(
+        &self,
+        heads: &[ChangeId],
+        partial: bool,
+    ) -> Result<Vec<Fragment>, AutomergeError> {
+        if partial {
+            Ok(self.partial_fragments_after(heads)?.0)
+        } else {
+            Ok(self.own_fragments(self.whole_fragments_after(heads)))
+        }
     }
 
     /// [`Self::fragments_after`] without encoding them.
     pub fn fragments_after_meta(
         &self,
         heads: &[ChangeId],
+        partial: bool,
     ) -> Result<Vec<FragmentMeta>, AutomergeError> {
-        let (_, parts) = self.pieces_after(heads);
-        Ok(parts.into_iter().map(|(meta, _)| meta).collect())
+        if partial {
+            let (_, parts) = self.pieces_after(heads);
+            Ok(parts.into_iter().map(|(meta, _)| meta).collect())
+        } else {
+            Ok(self.whole_fragments_after(heads))
+        }
     }
 
-    /// The fragments, loose commits included, holding a change `heads`
-    /// does not cover, in apply order. Unlike [`Self::fragments_after`], a
-    /// fragment that also holds changes `heads` covers is sent whole, so
-    /// some of them may be sent again, and no hash is ever rebuilt. Ids
-    /// this document does not know are ignored.
-    pub fn fragments_after_full(
-        &self,
-        heads: &[ChangeId],
-    ) -> Result<Vec<Fragment>, AutomergeError> {
+    fn whole_fragments_after(&self, heads: &[ChangeId]) -> Vec<FragmentMeta> {
         let covered = self.seq_clock_for_ids_lossy(heads);
-        Ok(self.own_fragments(self.change_graph.fragments_after_full(
-            &self.get_head_hashes(),
-            &covered,
-            &self.ops.actors,
-        )))
+        self.change_graph
+            .fragments_after_whole(&self.get_head_hashes(), &covered, &self.ops.actors)
     }
 
     /// The fragment at the level `head`'s hash gives it, encoded, whether or
@@ -1513,16 +1511,15 @@ impl<H: HashRetention> Automerge<H> {
         let Some(node) = self.change_graph.node_by_hash(&head) else {
             return Ok(None);
         };
-        let piece = self.change_graph.fragment_piece(node);
-        let part = self.change_graph.piece_meta(&piece, &self.ops.actors);
-        Ok(self.encode_fragments(&self.change_graph, vec![part])?.pop())
+        let (graph, parts) = self.encodable(vec![self.change_graph.fragment_piece(node)]);
+        Ok(self.encode_fragments(&graph, parts)?.pop())
     }
 
     /// EXPERIMENTAL: Exchanges fragments with a peer that holds `heads`.
-    /// Applies `fragments` and returns [`Self::fragments_after`]`(heads)`
+    /// Applies `fragments` and returns [`Self::fragments_after`]`(heads, true)`
     /// as it was before them, followed by the whole fragment for each of
-    /// `fragments` that is only part of one: whose stated level is below
-    /// the one its head's hash gives it. Encodes each whole fragment it
+    /// `fragments` that is only part of one, as
+    /// [`FragmentMeta::is_whole`] tells. Encodes each whole fragment it
     /// returns, so one over a long history costs about as much as saving it.
     ///
     /// This is an experimental API, it may change or be removed without
@@ -1533,20 +1530,32 @@ impl<H: HashRetention> Automerge<H> {
         fragments: &[Fragment],
         heads: &[ChangeId],
     ) -> Result<Vec<Fragment>, AutomergeError> {
-        let mut out = self.fragments_after(heads)?;
-        self.apply_fragments(fragments)?;
-        for f in fragments {
-            let head = f.meta.head;
-            let whole = |o: &Fragment| o.meta.head == head && o.meta.level == head.fragment_level();
-            if f.meta.level < head.fragment_level() && !out.iter().any(whole) {
+        let (bytes, partial) = crate::change_graph::sync_parts(fragments);
+        self.sync_fragment_bytes(&bytes, partial, heads)
+    }
+
+    /// [`Self::sync_fragments`] of fragments given as their concatenated
+    /// bytes and the heads of the partial ones.
+    pub(crate) fn sync_fragment_bytes(
+        &mut self,
+        bytes: &[u8],
+        partial: impl IntoIterator<Item = ChangeHash>,
+        heads: &[ChangeId],
+    ) -> Result<Vec<Fragment>, AutomergeError> {
+        let mut out = self.fragments_after(heads, true)?;
+        self.load_incremental(bytes)?;
+        for head in partial {
+            let whole = |o: &Fragment| o.meta.head == head && o.meta.is_whole();
+            if !out.iter().any(whole) {
                 out.extend(self.fragment_at(head)?);
             }
         }
         Ok(out)
     }
 
-    /// [`Self::fragments_after`], and whether it rebuilt a freed hash.
-    pub(crate) fn fragments_after_rebuilding(
+    /// [`Self::fragments_after`] with `partial`, and whether it rebuilt a
+    /// freed hash.
+    pub(crate) fn partial_fragments_after(
         &self,
         heads: &[ChangeId],
     ) -> Result<(Vec<Fragment>, bool), AutomergeError> {
@@ -1555,8 +1564,6 @@ impl<H: HashRetention> Automerge<H> {
         Ok((self.encode_fragments(&graph, parts)?, rebuilt))
     }
 
-    /// The graph is a copy holding rebuilt hashes when GC freed any the
-    /// pieces need, so the document keeps what GC left it.
     #[allow(clippy::type_complexity)]
     fn pieces_after(
         &self,
@@ -1569,6 +1576,19 @@ impl<H: HashRetention> Automerge<H> {
         let pieces = self
             .change_graph
             .pieces_after(&self.get_head_hashes(), &covered);
+        self.encodable(pieces)
+    }
+
+    /// The graph is a copy holding rebuilt hashes when GC freed any the
+    /// pieces need, so the document keeps what GC left it.
+    #[allow(clippy::type_complexity)]
+    fn encodable(
+        &self,
+        pieces: Vec<crate::change_graph::Piece>,
+    ) -> (
+        std::borrow::Cow<'_, crate::change_graph::ChangeGraph<H>>,
+        Vec<(FragmentMeta, Vec<crate::change_graph::NodeIdx>)>,
+    ) {
         let unhashed = self.change_graph.unhashed_in(&pieces);
         let graph = if unhashed.is_empty() {
             std::borrow::Cow::Borrowed(&self.change_graph)
@@ -2452,11 +2472,10 @@ impl<H: HashRetention> Automerge<H> {
     /// Apply a bundle's changes. To apply one bundle to several documents,
     /// clone it.
     ///
-    /// Bundles are not queued: one depending on a change this document lacks
-    /// fails with [`AutomergeError::MissingDeps`] and changes nothing, and
-    /// must be applied again once its dependencies have been.
+    /// A bundle depending on a change this document lacks is queued, and
+    /// applies once that change has, whichever way it arrives.
     pub fn apply_bundle(&mut self, bundle: Bundle) -> Result<(), AutomergeError> {
-        let result = self.apply_bundle_inner(bundle);
+        let result = self.apply_bundles(vec![bundle]);
         if result.is_ok() {
             self.assert_no_unused_actors(cfg!(debug_assertions));
         }
@@ -2475,7 +2494,7 @@ impl<H: HashRetention> Automerge<H> {
             graph.lookup_change_for_apply(&c.hash(), &c.id(), actors)
                 == crate::change_graph::ApplyLookup::Present
         });
-        self.apply_changes_batch(std::iter::empty())
+        self.apply_changes_batch_with(std::iter::empty(), false)
     }
 
     /// Rebuilds and hashes every member instead of trusting the bundle's
@@ -2991,6 +3010,7 @@ impl<H: HashRetention> Automerge<H> {
     ) -> Automerge<H2> {
         let Automerge {
             queue,
+            bundle_queue,
             change_graph,
             authors,
             write_frontier,
@@ -3004,6 +3024,7 @@ impl<H: HashRetention> Automerge<H> {
         } = self;
         Automerge {
             queue,
+            bundle_queue,
             change_graph: f(change_graph),
             authors,
             write_frontier,
@@ -5451,7 +5472,7 @@ mod actor_hygiene_tests {
     }
 
     #[test]
-    fn failed_bundle_apply_changes_nothing() {
+    fn queued_bundle_changes_nothing() {
         let mut src = AutoCommit::new()
             .with_actor(actor(7))
             .enable_audit_mode()
@@ -5482,15 +5503,19 @@ mod actor_hygiene_tests {
         dst.put(ROOT, "seed", 0).unwrap();
         dst.commit();
         let before = snapshot(&mut dst);
-        let r = dst
-            .doc
-            .apply_bundle(src.doc.bundle_for_fragment(&orphan).unwrap());
-        assert!(matches!(r, Err(AutomergeError::MissingDeps)));
-        assert_unchanged(&mut dst, &before, "missing boundary");
+        dst.doc
+            .apply_bundle(src.doc.bundle_for_fragment(&orphan).unwrap())
+            .unwrap();
+        // the queued bundle is saved as an orphan, so the save differs
+        assert_eq!(dst.doc.ops.actors, before.actors);
+        assert_eq!(dst.doc.ops.len(), before.ops);
+        assert_eq!(dst.get_heads(), before.heads);
+        assert!(!dst.doc.bundle_queue.is_empty());
 
         dst.doc
             .apply_bundle(src.doc.bundle_for_fragment(&whole).unwrap())
             .unwrap();
+        assert!(dst.doc.bundle_queue.is_empty());
     }
 
     #[test]
