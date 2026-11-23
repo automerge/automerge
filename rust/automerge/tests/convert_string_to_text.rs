@@ -5,6 +5,7 @@ use automerge::{
 use test_log::test;
 
 #[test]
+#[allow(deprecated)] // Deterministic identity fixtures and legacy-option regression coverage.
 fn test_strings_in_maps_are_converted_to_text() {
     let mut doc = AutoCommit::new();
     doc.put(ROOT, "somestring", "hello").unwrap();
@@ -31,6 +32,7 @@ fn test_strings_in_maps_are_converted_to_text() {
 }
 
 #[test]
+#[allow(deprecated)] // Deterministic identity fixtures and legacy-option regression coverage.
 fn test_strings_in_lists_are_converted_to_text() {
     let mut doc = AutoCommit::new();
     let list = doc.put_object(ROOT, "list", ObjType::List).unwrap();
@@ -58,6 +60,7 @@ fn test_strings_in_lists_are_converted_to_text() {
 }
 
 #[test]
+#[allow(deprecated)] // Deterministic identity fixtures and legacy-option regression coverage.
 fn test_does_not_add_size_when_strings_are_not_converted() {
     let empty_document = AutoCommit::new().save();
     let mut loaded = AutoCommit::load_with_options(
