@@ -58,8 +58,152 @@ fn assert_readiness_matches_graph(doc: &mut Automerge) {
             hash,
         )
     });
-    expected.prune_covered(signing.graph);
+    let accepted = &signing.state.accepted;
+    expected.prune_covered(signing.graph, |hash| {
+        signing
+            .graph
+            .actor_seq_for_hash(hash)
+            .is_some_and(|(actor, seq)| accepted.is_accepted_actor_seq(actor, seq))
+    });
     assert_eq!(signing.state.fragment_readiness, expected);
+}
+
+fn signature_count(doc: &mut Automerge, hash: &ChangeHash) -> usize {
+    doc.try_signing()
+        .unwrap()
+        .state
+        .signatures
+        .ed25519_entries(hash)
+        .count()
+}
+
+fn is_candidate(doc: &mut Automerge, head: &ChangeHash) -> bool {
+    doc.try_signing()
+        .unwrap()
+        .state
+        .fragment_readiness
+        .required_frontiers()
+        .any(|frontier| frontier == head)
+}
+
+/// Build the probe history: published loose `a` (level 0), an independent
+/// unpublished level-1 `b` by another actor, and `c` (level 1) depending on
+/// both, so that `G = {a, c}` has boundary `{b}` and `F = {a}` is its fallback.
+#[allow(deprecated)] // Deterministic identity fixtures and legacy-option regression coverage.
+fn fallback_and_blocked_cover() -> (Automerge, SigningKey, [ChangeHash; 3]) {
+    let ka = key(7);
+    let mut doc = Automerge::from_config(crate::Config::default().signing(author(&ka)).unwrap())
+        .with_actor(ActorId::from([1]))
+        .unwrap();
+    let a = append_at_level(&mut doc, None, 1, 0);
+    sign_doc(&mut doc, a, &ka);
+    assert!(doc.try_signing().unwrap().is_accepted(&a));
+    doc.set_actor(ActorId::from([2])).unwrap();
+    let b = append_at_level(&mut doc, Some(&[]), 2, 1);
+    doc.set_actor(ActorId::from([1])).unwrap();
+    let c = append_at_level(&mut doc, Some(&[a, b]), 3, 1);
+    (doc, ka, [a, b, c])
+}
+
+#[test]
+fn ready_but_unpublished_cover_keeps_published_fallback_proof() {
+    let (mut doc, ka, [a, b, c]) = fallback_and_blocked_cover();
+    let fallback = doc.get_fragment(a).unwrap();
+    assert_eq!(fallback.members, [a]);
+    assert_eq!(doc.bundle_fragments([fallback.clone()]).len(), 1);
+
+    // Signing c makes G = {a, c} ready and exportable, but b is unpublished so
+    // G is not published: F must remain independently proved.
+    sign_doc(&mut doc, c, &ka);
+    let covering = doc.get_fragment(c).unwrap();
+    assert_eq!(covering.boundary, [b]);
+    let mut members = covering.members.clone();
+    members.sort_unstable();
+    let mut expected = vec![a, c];
+    expected.sort_unstable();
+    assert_eq!(members, expected);
+    {
+        let signing = doc.try_signing().unwrap();
+        assert!(signing.is_accepted(&a));
+        assert!(!signing.is_accepted(&b));
+        assert!(!signing.is_accepted(&c));
+    }
+    assert_eq!(doc.bundle_fragments([covering.clone()]).len(), 1);
+    assert_eq!(doc.get_fragment(a), Some(fallback.clone()));
+    assert_eq!(
+        doc.bundle_fragments([fallback.clone()]).len(),
+        1,
+        "published fallback proof must survive until its cover is published",
+    );
+    assert_eq!(signature_count(&mut doc, &a), 1);
+    assert_eq!(signature_count(&mut doc, &c), 1);
+    assert_readiness_matches_graph(&mut doc);
+
+    // Publishing b publishes G, which then retires F's redundant proof without
+    // any signature being re-inserted for c.
+    sign_doc(&mut doc, b, &ka);
+    {
+        let signing = doc.try_signing().unwrap();
+        assert!(signing.is_accepted(&a));
+        assert!(signing.is_accepted(&b));
+        assert!(signing.is_accepted(&c));
+    }
+    assert_eq!(signature_count(&mut doc, &a), 0);
+    assert_eq!(signature_count(&mut doc, &c), 1);
+    assert_eq!(signature_count(&mut doc, &b), 1);
+    assert!(doc.get_fragment(a).is_none());
+    assert!(doc.bundle_fragments([fallback]).is_empty());
+    assert_eq!(doc.bundle_fragments([covering.clone()]).len(), 1);
+    assert_eq!(doc.fragments(..).len(), 2);
+    assert!(doc.fragments(..).contains(&covering));
+    assert_readiness_matches_graph(&mut doc);
+}
+
+#[test]
+#[allow(deprecated)] // Deterministic identity fixtures and legacy-option regression coverage.
+fn candidate_subscriptions_survive_until_replacement_publishes() {
+    // Hard fallback F1 = {a1} (level 1) is proved and published; a2 is a loose
+    // level-0 member with no candidate of its own. G = {a1, a2, c} covers both
+    // but waits on unpublished boundary b. Candidate a1 may not be forgotten
+    // while G is only ready, and publication-only progress on b must clean up
+    // both the tracker and the store.
+    let ka = key(7);
+    let mut doc = Automerge::from_config(crate::Config::default().signing(author(&ka)).unwrap())
+        .with_actor(ActorId::from([1]))
+        .unwrap();
+    let a1 = append_at_level(&mut doc, None, 1, 1);
+    sign_doc(&mut doc, a1, &ka);
+    assert!(doc.try_signing().unwrap().is_accepted(&a1));
+    doc.set_actor(ActorId::from([2])).unwrap();
+    let b = commit_with_time(&mut doc, Some(&[]), "value", 2, 67_577);
+    assert_eq!(b.fragment_level(), 2);
+    doc.set_actor(ActorId::from([1])).unwrap();
+    let a2 = append_at_level(&mut doc, Some(&[a1]), 3, 0);
+    let c = commit_with_time(&mut doc, Some(&[a2, b]), "value", 4, 21_539);
+    assert_eq!(c.fragment_level(), 2);
+    let covering = doc.change_graph.get_historical_fragment(c).unwrap();
+    assert_eq!(covering.boundary, [b]);
+    assert_eq!(covering.members.len(), 3);
+
+    sign_doc(&mut doc, c, &ka);
+    assert!(is_candidate(&mut doc, &a1));
+    assert!(!doc.try_signing().unwrap().is_accepted(&c));
+    assert_eq!(doc.get_fragment(c), Some(covering.clone()));
+    assert_eq!(signature_count(&mut doc, &a1), 1);
+    assert_eq!(
+        doc.bundle_fragments([doc.get_fragment(a1).unwrap()]).len(),
+        1
+    );
+    assert_readiness_matches_graph(&mut doc);
+
+    sign_doc(&mut doc, b, &ka);
+    assert!(doc.try_signing().unwrap().is_accepted(&c));
+    assert!(!is_candidate(&mut doc, &a1));
+    assert_eq!(signature_count(&mut doc, &a1), 0);
+    assert!(doc.get_fragment(a1).is_none());
+    let boundary = doc.get_fragment(b).unwrap();
+    assert_eq!(doc.fragments(..), [boundary, covering]);
+    assert_readiness_matches_graph(&mut doc);
 }
 
 fn decode_group(bytes: &[u8]) -> (Vec<Change>, SignaturesChunk<'_>) {
