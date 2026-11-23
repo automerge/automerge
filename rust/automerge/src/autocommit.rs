@@ -91,6 +91,19 @@ impl AutoCommit {
         AutoCommit::default()
     }
 
+    /// Create a document from explicit construction-time choices.
+    /// See [`Automerge::from_config`].
+    pub fn from_config(config: crate::Config) -> Self {
+        Self {
+            doc: Automerge::from_config(config),
+            transaction: None,
+            patch_log: PatchLog::inactive(),
+            diff_cursor: Vec::new(),
+            save_cursor: Vec::new(),
+            isolation: None,
+        }
+    }
+
     pub fn diff_opset(&self, other: &AutoCommit) -> Result<(), AutomergeError> {
         self.doc.diff_opset(&other.doc)
     }
