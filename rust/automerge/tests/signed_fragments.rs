@@ -140,11 +140,10 @@ fn public_signing_documents_reject_bare_snapshots_and_unauthenticated_entry_poin
             SigningError::UnauthenticatedChanges
         ))
     ));
+    assert_eq!(receiver.merge(&mut source).unwrap(), source.get_heads());
     assert!(matches!(
-        receiver.merge(&mut source),
-        Err(AutomergeError::Signing(
-            SigningError::UnauthenticatedChanges
-        ))
+        receiver.merge(&mut unsigned_copy),
+        Err(AutomergeError::Signing(SigningError::MergeModeMismatch))
     ));
     assert!(matches!(
         source.fork_at(&[hash]),

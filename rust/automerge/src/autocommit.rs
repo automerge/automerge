@@ -658,6 +658,7 @@ impl AutoCommit {
 
     /// Takes all the changes in `other` which are not in `self` and applies them
     pub fn merge(&mut self, other: &mut AutoCommit) -> Result<Vec<ChangeHash>, AutomergeError> {
+        self.doc.try_guard_mode(&other.doc)?;
         other.ensure_transaction_closed();
         self.with_patch_log(|doc, log| doc.merge_and_log_patches(&mut other.doc, log))
     }

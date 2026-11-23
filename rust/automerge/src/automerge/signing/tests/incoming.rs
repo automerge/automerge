@@ -549,11 +549,10 @@ fn overlaps_forged_orphans_local_boundaries_partial_tails_and_bypasses() {
             SigningError::UnauthenticatedChanges
         ))
     ));
+    assert_eq!(target.merge(&mut source).unwrap(), source.get_heads());
     assert!(matches!(
-        target.merge(&mut source),
-        Err(AutomergeError::Signing(
-            SigningError::UnauthenticatedChanges
-        ))
+        target.merge(&mut unsigned_copy),
+        Err(AutomergeError::Signing(SigningError::MergeModeMismatch))
     ));
     let mut unsigned_peer = Automerge::new().with_actor(ActorId::from([9])).unwrap();
     append_at_level(&mut unsigned_peer, None, "p", 1, 0);
