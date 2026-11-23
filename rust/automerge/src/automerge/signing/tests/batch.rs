@@ -96,9 +96,8 @@ fn mixed_batch_reports_every_owned_pair_and_continues_after_errors() {
         doc.try_signing()
             .unwrap()
             .state
-            .local_unsigned
+            .local_drafts
             .iter()
-            .copied()
             .collect::<Vec<_>>(),
         [b, c]
     );
@@ -347,6 +346,54 @@ fn historical_author_is_verified_not_current_author() {
 }
 
 #[test]
+fn batch_resolves_initial_and_footerless_changes_under_their_historical_author() {
+    let alice = key(7);
+    let bob = key(8);
+    let mut source =
+        Automerge::from_config(crate::Config::default().signing(author(&alice)).unwrap());
+    let first = append_at_level(&mut source, None, 1, 0);
+    let later = append_at_level(&mut source, None, 2, 0);
+    assert_eq!(
+        source.get_change_by_hash(&first).unwrap().author(),
+        Some(author(&alice))
+    );
+    assert!(source
+        .get_change_by_hash(&later)
+        .unwrap()
+        .author()
+        .is_none());
+    source.insert_signatures([(first, sig(&alice, &first)), (later, sig(&alice, &later))]);
+    assert!(!source.has_unpublished_changes());
+
+    let mut doc = source.fork_with_author(Some(author(&bob))).unwrap();
+    let local = append_at_level(&mut doc, None, 3, 0);
+    let inputs = [
+        (later, sig(&bob, &later)),
+        (later, sig(&alice, &later)),
+        (local, sig(&alice, &local)),
+        (first, sig(&alice, &first)),
+        (local, sig(&bob, &local)),
+        (later, sig(&alice, &later)),
+    ];
+    let outcome = doc.insert_signatures(inputs);
+    let results = insertions(&outcome);
+    assert_eq!(results.len(), inputs.len());
+    for (entry, (hash, signature)) in results.iter().zip(inputs) {
+        assert_eq!((entry.hash, entry.signature), (hash, signature));
+    }
+    for index in [0, 2] {
+        assert!(matches!(results[index].result,
+            Err(SignatureInsertError::Verification { change, .. }) if change == inputs[index].0));
+    }
+    for index in [1, 3, 5] {
+        assert!(matches!(results[index].result, Ok(Insert::Duplicate)));
+    }
+    assert!(matches!(results[4].result, Ok(Insert::Stored)));
+    assert!(!doc.has_unpublished_changes());
+    assert_eq!(doc.get_author(), Some(&author(&bob)));
+}
+
+#[test]
 fn missing_or_invalid_historical_author_is_a_per_entry_error() {
     let k = key(7);
     let mut receiver =
@@ -538,9 +585,8 @@ fn completion_continues_after_publication_only_progress_of_pending_group() {
         doc.try_signing()
             .unwrap()
             .state
-            .local_unsigned
+            .local_drafts
             .iter()
-            .copied()
             .collect::<Vec<_>>(),
         [l, a, c]
     );
@@ -558,7 +604,7 @@ fn completion_continues_after_publication_only_progress_of_pending_group() {
     assert_eq!(doc.change_graph.len(), graph_len, "no new history applied");
     assert!(!doc.signing.has_pending_groups());
     assert!(
-        doc.try_signing().unwrap().state.local_unsigned.is_empty(),
+        doc.try_signing().unwrap().state.local_drafts.is_empty(),
         "published local tracking retired in the same call"
     );
     assert!(doc.make_patches(&mut log).is_empty());

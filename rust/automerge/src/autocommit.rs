@@ -12,8 +12,8 @@ use crate::op_set2::{ChangeMetadata, Parents};
 use crate::patches::PatchLog;
 use crate::sync::SyncDoc;
 use crate::transaction::{CommitOptions, Transactable};
-use crate::SignatureBatchOutcome;
 use crate::types::ObjMeta;
+use crate::SignatureBatchOutcome;
 use crate::{hydrate, AnonymizeError, Bundle, Fragment, OnPartialLoad, TextEncoding};
 use crate::{sync, ObjType, Patch, ReadDoc, ScalarValue, ROOT};
 use crate::{
@@ -137,6 +137,22 @@ impl AutoCommit {
             Ok::<_, std::convert::Infallible>(doc.insert_signatures_log_patches(inputs, log))
         })
         .unwrap_or_else(|never| match never {})
+    }
+
+    /// Return owned messages for every unsigned local draft, committing pending
+    /// edits after the mode check. See [`Automerge::signing_requests`].
+    pub fn signing_requests(
+        &mut self,
+    ) -> Result<crate::SigningRequests, crate::signing::error::SigningMode> {
+        self.doc.signing.require()?;
+        self.ensure_transaction_closed();
+        self.doc.signing_requests()
+    }
+
+    /// Whether locally committed drafts await publication; pending operations
+    /// and unapplied incoming groups are excluded. This query never commits.
+    pub fn has_unpublished_changes(&self) -> bool {
+        self.doc.has_unpublished_changes()
     }
 
     /// Borrow this document's [`crate::signing::SigningDocument`] handle.
@@ -357,11 +373,10 @@ impl AutoCommit {
         &mut self,
         author: Option<Author<'static>>,
     ) -> Result<Self, AutomergeError> {
-        let identity = self.doc.signing.fork_identity(
-            author,
-            &self.doc.change_graph,
-            self.pending_ops() > 0,
-        )?;
+        let identity = self
+            .doc
+            .signing
+            .fork_identity(author, self.pending_ops() > 0)?;
         let mut fork = self.fork();
         fork.doc.signing.set_fork_identity(identity);
         Ok(fork)

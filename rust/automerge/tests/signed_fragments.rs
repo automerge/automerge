@@ -183,9 +183,8 @@ fn required_signatures_tracks_locally_authored_commits_under_the_fixed_author() 
         all_hashes.push(hash);
     }
 
-    // Requests cover canonical fragment frontiers only: every requested hash
-    // is a local commit, in hash order, and signing exactly those publishes
-    // the whole local history, interior members included.
+    // Every unsigned local draft is requested, including interior members.
+    // Signing all requests publishes this causally complete local history.
     let required = alice.try_signing().unwrap().required_signatures();
     assert!(!required.is_empty());
     assert!(required.len() <= all_hashes.len());

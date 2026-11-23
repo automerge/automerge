@@ -13,6 +13,7 @@ mod batch;
 mod fragments;
 mod identity;
 mod incoming;
+mod requests;
 
 fn key(seed: u8) -> SigningKey {
     SigningKey::from_bytes(&[seed; 32])
@@ -56,9 +57,11 @@ fn replica(doc: &Automerge, author: Author<'static>, actor: ActorId) -> Automerg
 }
 
 fn requested_hashes(doc: &mut Automerge) -> Vec<ChangeHash> {
-    let mut hashes = doc.try_signing().unwrap().required_signatures();
-    hashes.sort_unstable();
-    hashes
+    doc.signing_requests()
+        .unwrap()
+        .iter()
+        .map(|request| request.hash())
+        .collect()
 }
 
 fn append_at_level(
