@@ -29,14 +29,14 @@ fn assert_chain_complete(doc: &Automerge) {
 fn transaction_at_lists_actor_predecessor() {
     let actor_x = ActorId::from(vec![1]);
     let actor_y = ActorId::from(vec![2]);
-    let mut doc = Automerge::new().with_actor(actor_x.clone());
+    let mut doc = Automerge::new().with_actor(actor_x.clone()).unwrap();
 
     let mut tx = doc.transaction();
     tx.put(ROOT, "a", 1).unwrap();
     let x1 = tx.commit().0.unwrap();
 
     // Y:1 depends on X:1, making X:1 an ancestor but not a head.
-    let mut other = doc.fork().with_actor(actor_y);
+    let mut other = doc.fork().with_actor(actor_y).unwrap();
     let mut tx = other.transaction();
     tx.put(ROOT, "b", 2).unwrap();
     let y1 = tx.commit().0.unwrap();
@@ -66,12 +66,12 @@ fn transaction_at_lists_actor_predecessor() {
 fn isolation_after_empty_change_does_not_reuse_actor_outside_ancestry() {
     let actor_x = ActorId::from(vec![1]);
     let actor_y = ActorId::from(vec![2]);
-    let mut doc = Automerge::new().with_actor(actor_x.clone());
+    let mut doc = Automerge::new().with_actor(actor_x.clone()).unwrap();
     let x1 = doc.empty_commit(Default::default());
     assert!(doc.get_change_by_hash(&x1).unwrap().is_empty());
 
     // Y starts independently: Y:1 has no ancestry linking it to X:1.
-    let mut other = Automerge::new().with_actor(actor_y);
+    let mut other = Automerge::new().with_actor(actor_y).unwrap();
     let mut tx = other.transaction();
     tx.put(ROOT, "b", 2).unwrap();
     let y1 = tx.commit().0.unwrap();
@@ -101,12 +101,12 @@ fn isolation_after_empty_change_does_not_reuse_actor_outside_ancestry() {
 fn isolation_reuses_actor_when_latest_change_is_ancestor() {
     let actor_x = ActorId::from(vec![1]);
     let actor_y = ActorId::from(vec![2]);
-    let mut doc = Automerge::new().with_actor(actor_x.clone());
+    let mut doc = Automerge::new().with_actor(actor_x.clone()).unwrap();
     let x1 = doc.empty_commit(Default::default());
 
     // An empty latest change does not by itself prevent reuse: here Y:1
     // descends from X:1, so X's whole chain is in the requested ancestry.
-    let mut other = doc.fork().with_actor(actor_y);
+    let mut other = doc.fork().with_actor(actor_y).unwrap();
     let mut tx = other.transaction();
     tx.put(ROOT, "b", 2).unwrap();
     let y1 = tx.commit().0.unwrap();
@@ -129,14 +129,14 @@ fn isolation_reuses_actor_when_latest_change_is_ancestor() {
 fn isolation_reuses_derived_actor_and_lists_its_predecessor() {
     let actor_x = ActorId::from(vec![1]);
     let actor_y = ActorId::from(vec![2]);
-    let mut doc = Automerge::new().with_actor(actor_x.clone());
+    let mut doc = Automerge::new().with_actor(actor_x.clone()).unwrap();
 
     let mut tx = doc.transaction();
     tx.put(ROOT, "a", 1).unwrap();
     let x1 = tx.commit().0.unwrap();
 
     // Y starts independently, so X:1 is outside the ancestry of Y:1.
-    let mut other = Automerge::new().with_actor(actor_y.clone());
+    let mut other = Automerge::new().with_actor(actor_y.clone()).unwrap();
     let mut tx = other.transaction();
     tx.put(ROOT, "b", 2).unwrap();
     let y1 = tx.commit().0.unwrap();
@@ -155,7 +155,7 @@ fn isolation_reuses_derived_actor_and_lists_its_predecessor() {
 
     // Z descends from the derived change but not from X:1, so the derived
     // actor's predecessor becomes a transitive ancestor rather than a head.
-    let mut third = doc.fork().with_actor(ActorId::from(vec![3]));
+    let mut third = doc.fork().with_actor(ActorId::from(vec![3])).unwrap();
     let mut tx = third
         .transaction_at(PatchLog::inactive(), &[derived1])
         .unwrap();
@@ -195,12 +195,12 @@ fn isolation_reuses_derived_actor_and_lists_its_predecessor() {
 
 #[test]
 fn legacy_transitive_actor_predecessor_loads_and_round_trips() {
-    let mut doc = Automerge::new().with_actor(ActorId::from(vec![1]));
+    let mut doc = Automerge::new().with_actor(ActorId::from(vec![1])).unwrap();
     let mut tx = doc.transaction();
     tx.put(ROOT, "a", 1).unwrap();
     let x1 = tx.commit().0.unwrap();
 
-    let mut other = doc.fork().with_actor(ActorId::from(vec![2]));
+    let mut other = doc.fork().with_actor(ActorId::from(vec![2])).unwrap();
     let mut tx = other.transaction();
     tx.put(ROOT, "b", 2).unwrap();
     let y1 = tx.commit().0.unwrap();
@@ -334,7 +334,7 @@ mod properties {
 
         #[test]
         fn producer_always_emits_actor_predecessor(actions in actions()) {
-            let mut doc = AutoCommit::new().with_actor(ActorId::from(vec![0]));
+            let mut doc = AutoCommit::new().with_actor(ActorId::from(vec![0])).unwrap();
             let mut historical_heads: Vec<ChangeHash> = Vec::new();
             let mut next_actor = 1u64;
 
@@ -361,7 +361,7 @@ mod properties {
                         // same actor ordering and index shifts.
                         let actor = ActorId::from(next_actor.to_be_bytes().to_vec());
                         next_actor += 1;
-                        let mut fork = doc.fork().with_actor(actor);
+                        let mut fork = doc.fork().with_actor(actor).unwrap();
                         fork.put(ROOT, "fork", 1).unwrap();
                         doc.merge(&mut fork).unwrap();
                     }

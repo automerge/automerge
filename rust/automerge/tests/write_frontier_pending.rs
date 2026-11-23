@@ -30,6 +30,7 @@ impl PendingMask {
         Self::with_later_changes(false)
     }
 
+    #[allow(deprecated)] // Deterministic identity fixtures and legacy-option regression coverage.
     fn with_later_changes(later: bool) -> Self {
         let author = Author::try_from("aaaa").unwrap();
         let mut source = AutoCommit::from_config(
@@ -37,7 +38,8 @@ impl PendingMask {
                 .text_encoding(ENCODING)
                 .author(Some(author.clone())),
         )
-        .with_actor(ActorId::from(vec![0x80]));
+        .with_actor(ActorId::from(vec![0x80]))
+        .unwrap();
         source.put(ROOT, "x", 1).unwrap();
         let original_heads = source.get_heads();
         if later {
@@ -50,7 +52,7 @@ impl PendingMask {
         source = source
             .fork_with_author(Some(Author::try_from("bbbb").unwrap()))
             .unwrap();
-        source.set_actor(ActorId::from(vec![0x10]));
+        source.set_actor(ActorId::from(vec![0x10])).unwrap();
         source.put(ROOT, "ack", true).unwrap();
         let boundary_heads = source.get_heads();
         let boundary = source.get_last_local_change().unwrap();
@@ -276,6 +278,7 @@ fn pending_resolution_updates_current_state_indexes() {
 }
 
 #[test]
+#[allow(deprecated)] // Deterministic identity fixtures and legacy-option regression coverage.
 fn incoming_boundary_change_is_not_logged_as_masked() {
     let author = Author::try_from("aaaa").unwrap();
     let mut source = AutoCommit::from_config(
@@ -283,13 +286,14 @@ fn incoming_boundary_change_is_not_logged_as_masked() {
             .text_encoding(ENCODING)
             .author(Some(Author::try_from("bbbb").unwrap())),
     )
-    .with_actor(ActorId::from(vec![0x80]));
+    .with_actor(ActorId::from(vec![0x80]))
+    .unwrap();
     source.put(ROOT, "base", true).unwrap();
     source.commit();
     let mut target = source.clone();
 
     source = source.fork_with_author(Some(author.clone())).unwrap();
-    source.set_actor(ActorId::from(vec![0x10]));
+    source.set_actor(ActorId::from(vec![0x10])).unwrap();
     source.put(ROOT, "x", 1).unwrap();
     let boundary_heads = source.get_heads();
     let boundary = source.get_last_local_change().unwrap();
@@ -439,10 +443,12 @@ fn isolated_reveal_restores_only_the_pinned_subtree_contents() {
 // ======================= isolated imports =======================
 
 #[test]
+#[allow(deprecated)] // Deterministic identity fixtures and legacy-option regression coverage.
 fn queued_boundary_restores_only_the_isolated_view_when_dependency_arrives() {
     let author = Author::try_from("aaaa").unwrap();
     let mut source = AutoCommit::new_with_encoding(ENCODING)
         .with_actor(ActorId::from(vec![0x80]))
+        .unwrap()
         .fork_with_author(Some(author.clone()))
         .unwrap();
     source.put(ROOT, "x", 1).unwrap();
@@ -451,7 +457,7 @@ fn queued_boundary_restores_only_the_isolated_view_when_dependency_arrives() {
     source.put(ROOT, "x", 2).unwrap();
     source.commit();
     let dependency = source.get_last_local_change().unwrap();
-    source.set_actor(ActorId::from(vec![0x10]));
+    source.set_actor(ActorId::from(vec![0x10])).unwrap();
     source = source
         .fork_with_author(Some(Author::try_from("bbbb").unwrap()))
         .unwrap();
@@ -487,31 +493,33 @@ fn queued_boundary_restores_only_the_isolated_view_when_dependency_arrives() {
 }
 
 #[test]
+#[allow(deprecated)] // Deterministic identity fixtures and legacy-option regression coverage.
 fn restored_subtree_paths_survive_pending_and_subsequent_isolated_edits() {
     let masked = Author::try_from("aaaa").unwrap();
     let allowed = Author::try_from("bbbb").unwrap();
     let mut source = AutoCommit::new_with_encoding(ENCODING)
         .with_actor(ActorId::from(vec![0xe0]))
+        .unwrap()
         .fork_with_author(Some(allowed.clone()))
         .unwrap();
     let list = source.put_object(ROOT, "list", ObjType::List).unwrap();
     source.insert(&list, 0, "base").unwrap();
     source.commit();
 
-    source.set_actor(ActorId::from(vec![0x80]));
+    source.set_actor(ActorId::from(vec![0x80])).unwrap();
     source = source.fork_with_author(Some(masked.clone())).unwrap();
     let text = source.insert_object(&list, 1, ObjType::Text).unwrap();
     source.splice_text(&text, 0, 0, "abc").unwrap();
     source.commit();
 
-    source.set_actor(ActorId::from(vec![0x40]));
+    source.set_actor(ActorId::from(vec![0x40])).unwrap();
     source = source.fork_with_author(Some(allowed.clone())).unwrap();
     source.splice_text(&text, 3, 0, "X").unwrap();
     let pinned = source.get_heads();
 
     // These known operations are later than the pinned view. Restoring them
     // would give the text both the wrong contents and the wrong list path.
-    source.set_actor(ActorId::from(vec![0x80]));
+    source.set_actor(ActorId::from(vec![0x80])).unwrap();
     source = source.fork_with_author(Some(masked.clone())).unwrap();
     source.insert(&list, 0, "future").unwrap();
     source.splice_text(&text, 4, 0, "future").unwrap();
@@ -519,7 +527,7 @@ fn restored_subtree_paths_survive_pending_and_subsequent_isolated_edits() {
     let original = source.get_changes(&[]);
 
     // Inserting this actor reorders the actor table during resolution.
-    source.set_actor(ActorId::from(vec![0x10]));
+    source.set_actor(ActorId::from(vec![0x10])).unwrap();
     source = source.fork_with_author(Some(allowed.clone())).unwrap();
     source.splice_text(&text, 10, 0, "Y").unwrap();
     let boundary_heads = source.get_heads();
@@ -527,6 +535,7 @@ fn restored_subtree_paths_survive_pending_and_subsequent_isolated_edits() {
 
     let mut doc = AutoCommit::new_with_encoding(ENCODING)
         .with_actor(ActorId::from(vec![0xc0]))
+        .unwrap()
         .fork_with_author(Some(allowed))
         .unwrap();
     doc.apply_changes(original).unwrap();
@@ -650,6 +659,7 @@ fn partially_unknown_multi_head_boundary_preserves_known_history() {
 /// missing head can reveal an existing actor's history even while another
 /// head remains pending, but never reveals post-boundary changes.
 #[test]
+#[allow(deprecated)] // Deterministic identity fixtures and legacy-option regression coverage.
 fn partially_known_boundary_expands_per_actor_on_import() {
     for mode in [
         Import::Batch,
@@ -664,12 +674,13 @@ fn partially_known_boundary_expands_per_actor_on_import() {
                 .text_encoding(ENCODING)
                 .author(Some(alice.clone())),
         )
-        .with_actor(ActorId::from(vec![0x80]));
+        .with_actor(ActorId::from(vec![0x80]))
+        .unwrap();
         a.put(ROOT, "x", 1).unwrap();
         let h1 = a.get_heads()[0];
 
         // A second actor for Alice, concurrent with the first actor's later op.
-        let mut b = a.fork().with_actor(ActorId::from(vec![0x90]));
+        let mut b = a.fork().with_actor(ActorId::from(vec![0x90])).unwrap();
         b.put(ROOT, "y", 2).unwrap();
         let before_boundary = b.get_heads();
         let original = b.get_changes(&[]);
@@ -678,11 +689,11 @@ fn partially_known_boundary_expands_per_actor_on_import() {
 
         // Bob's acknowledgement bounds the second actor, but is initially absent.
         b = b.fork_with_author(Some(bob)).unwrap();
-        b.set_actor(ActorId::from(vec![0x10]));
+        b.set_actor(ActorId::from(vec![0x10])).unwrap();
         b.put(ROOT, "ack", true).unwrap();
         let h2 = b.get_heads()[0];
         b = b.fork_with_author(Some(alice.clone())).unwrap();
-        b.set_actor(ActorId::from(vec![0x90]));
+        b.set_actor(ActorId::from(vec![0x90])).unwrap();
         b.put(ROOT, "y_later", true).unwrap();
         b.commit();
 

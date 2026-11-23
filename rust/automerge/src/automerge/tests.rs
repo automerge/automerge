@@ -13,7 +13,7 @@ use test_log::test;
 #[test]
 fn insert_op() -> Result<(), AutomergeError> {
     let mut doc = Automerge::new();
-    doc.set_actor(ActorId::random());
+    doc.set_actor(ActorId::random()).unwrap();
     let mut tx = doc.transaction();
     tx.put(ROOT, "hello", "world")?;
     tx.get(ROOT, "hello")?;
@@ -50,7 +50,7 @@ fn test_set() -> Result<(), AutomergeError> {
 #[test]
 fn test_list() -> Result<(), AutomergeError> {
     let mut doc = Automerge::new();
-    doc.set_actor(ActorId::random());
+    doc.set_actor(ActorId::random()).unwrap();
     let mut tx = doc.transaction();
     let list_id = tx.put_object(ROOT, "items", ObjType::List)?;
     tx.put(ROOT, "zzz", "zzzval")?;
@@ -72,7 +72,7 @@ fn test_list() -> Result<(), AutomergeError> {
 #[test]
 fn test_del() -> Result<(), AutomergeError> {
     let mut doc = Automerge::new();
-    doc.set_actor(ActorId::random());
+    doc.set_actor(ActorId::random()).unwrap();
     let mut tx = doc.transaction();
     tx.put(ROOT, "xxx", "xxx")?;
     assert!(tx.get(ROOT, "xxx")?.is_some());
@@ -475,7 +475,7 @@ fn test_cursors() -> Result<(), AutomergeError> {
 #[test]
 fn test_props_vals_at() -> Result<(), AutomergeError> {
     let mut doc = Automerge::new();
-    doc.set_actor("aaaa".try_into().unwrap());
+    doc.set_actor("aaaa".try_into().unwrap()).unwrap();
     let mut tx = doc.transaction();
     tx.put(ROOT, "prop1", "val1")?;
     tx.commit();
@@ -550,7 +550,7 @@ fn test_props_vals_at() -> Result<(), AutomergeError> {
 #[test]
 fn test_len_at() -> Result<(), AutomergeError> {
     let mut doc = Automerge::new();
-    doc.set_actor("aaaa".try_into().unwrap());
+    doc.set_actor("aaaa".try_into().unwrap()).unwrap();
 
     let mut tx = doc.transaction();
     let list = tx.put_object(ROOT, "list", ObjType::List)?;
@@ -916,7 +916,7 @@ fn map_range_back_and_forth_single() {
 #[test]
 fn map_range_back_and_forth_double() {
     let mut doc1 = AutoCommit::new();
-    doc1.set_actor(ActorId::from([0]));
+    doc1.set_actor(ActorId::from([0])).unwrap();
 
     doc1.put(ROOT, "1", "a").unwrap();
     doc1.put(ROOT, "2", "b").unwrap();
@@ -924,7 +924,7 @@ fn map_range_back_and_forth_double() {
 
     // actor 2 should win in all conflicts here
     let mut doc2 = AutoCommit::new();
-    doc1.set_actor(ActorId::from([1]));
+    doc1.set_actor(ActorId::from([1])).unwrap();
     let actor2 = doc2.get_actor().clone();
     doc2.put(ROOT, "1", "aa").unwrap();
     doc2.put(ROOT, "2", "bb").unwrap();
@@ -1080,7 +1080,7 @@ fn map_range_at_back_and_forth_single() {
 #[test]
 fn map_range_at_back_and_forth_double() {
     let mut doc1 = AutoCommit::new();
-    doc1.set_actor(ActorId::from([0]));
+    doc1.set_actor(ActorId::from([0])).unwrap();
 
     doc1.put(ROOT, "1", "a").unwrap();
     doc1.put(ROOT, "2", "b").unwrap();
@@ -1088,7 +1088,7 @@ fn map_range_at_back_and_forth_double() {
 
     // actor 2 should win in all conflicts here
     let mut doc2 = AutoCommit::new();
-    doc1.set_actor(ActorId::from([1]));
+    doc1.set_actor(ActorId::from([1])).unwrap();
     let actor2 = doc2.get_actor().clone();
     doc2.put(ROOT, "1", "aa").unwrap();
     doc2.put(ROOT, "2", "bb").unwrap();
@@ -1682,9 +1682,9 @@ fn load_broken_list_short() {
 fn compute_list_indexes_correctly_when_list_element_is_split_across_tree_nodes() {
     let max = B as u64 * 2;
     let actor1 = ActorId::from(b"aaaa");
-    let mut doc1 = AutoCommit::new().with_actor(actor1.clone());
+    let mut doc1 = AutoCommit::new().with_actor(actor1.clone()).unwrap();
     let actor2 = ActorId::from(b"bbbb");
-    let mut doc2 = AutoCommit::new().with_actor(actor2.clone());
+    let mut doc2 = AutoCommit::new().with_actor(actor2.clone()).unwrap();
     let list = doc1.put_object(ROOT, "list", ObjType::List).unwrap();
     doc1.insert(&list, 0, 0).unwrap();
     doc2.load_incremental(&doc1.save_incremental()).unwrap();
@@ -1870,12 +1870,12 @@ fn splice_text_uses_unicode_scalars() {
 #[test]
 fn observe_counter_change_application_overwrite() {
     let mut doc1 = AutoCommit::new();
-    doc1.set_actor(ActorId::from([1]));
+    doc1.set_actor(ActorId::from([1])).unwrap();
     doc1.put(ROOT, "counter", ScalarValue::counter(1)).unwrap();
     doc1.commit();
 
     let mut doc2 = doc1.fork();
-    doc2.set_actor(ActorId::from([2]));
+    doc2.set_actor(ActorId::from([2])).unwrap();
     doc2.put(ROOT, "counter", "mystring").unwrap();
     doc2.commit();
 

@@ -19,7 +19,8 @@ fn rollback_discards_a_tentative_masked_author_binding() {
     let actor = ActorId::from([1]);
     let local = Author::from(vec![7]);
     let mut doc = Automerge::from_config(Config::default().author(Some(local.clone())))
-        .with_actor(actor.clone());
+        .with_actor(actor.clone())
+        .unwrap();
     doc.mask_author(local.clone(), &[], &mut PatchLog::inactive())
         .unwrap();
     let mut tx = doc.transaction();

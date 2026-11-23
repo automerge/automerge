@@ -14,7 +14,8 @@ fn fixture(seed: [u8; 32]) -> (Vec<Change>, SigningKey) {
     let key = SigningKey::from_bytes(&seed);
     let author = Author::from(key.verifying_key().to_bytes().to_vec());
     let mut doc = AutoCommit::from_config(crate::Config::default().author(Some(author)))
-        .with_actor(ActorId::from([2]));
+        .with_actor(ActorId::from([2]))
+        .unwrap();
     for value in [1, 2] {
         doc.put(ROOT, "value", value).unwrap();
         doc.commit();

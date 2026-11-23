@@ -19,7 +19,7 @@ impl Site {
     /// Create the same initial map property or existing list element for each
     /// scenario. The map key is explicit so tests retain their original paths.
     pub(super) fn initial(self, key: &str) -> (Automerge, ObjId, Prop) {
-        let mut doc = Automerge::new().with_actor(actor(9));
+        let mut doc = Automerge::new().with_actor(actor(9)).unwrap();
         match self {
             Self::Map => (doc, ROOT, Prop::Map(key.into())),
             Self::List => {

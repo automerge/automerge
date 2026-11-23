@@ -84,14 +84,16 @@ fn framed(chunk_type: ChunkType, body: &[u8]) -> Vec<u8> {
 }
 
 #[test]
+#[allow(deprecated)] // Deterministic identity fixtures and legacy-option regression coverage.
 fn signed_fragment_stream_loads_reexports_and_reclaims_superseded_signatures() {
     let k1 = key(1);
     let mut sender = Automerge::from_config(crate::Config::default().signing(author(&k1)).unwrap())
-        .with_actor(ActorId::from([1]));
+        .with_actor(ActorId::from([1]))
+        .unwrap();
     let a1 = append_at_level(&mut sender, None, "a", 1, 0);
-    sender.set_actor(ActorId::from([2]));
+    sender.set_actor(ActorId::from([2])).unwrap();
     let b1 = append_at_level(&mut sender, None, "b", 2, 1);
-    sender.set_actor(ActorId::from([1]));
+    sender.set_actor(ActorId::from([1])).unwrap();
     let a2 = append_at_level(&mut sender, None, "c", 3, 0);
 
     sign_doc(&mut sender, a1, &k1);
@@ -150,12 +152,14 @@ fn signed_fragment_stream_loads_reexports_and_reclaims_superseded_signatures() {
 }
 
 #[test]
+#[allow(deprecated)] // Deterministic identity fixtures and legacy-option regression coverage.
 fn out_of_order_groups_wait_for_causal_dependencies_and_author_bindings() {
     let k1 = key(1);
     let mut sender = Automerge::from_config(crate::Config::default().signing(author(&k1)).unwrap())
-        .with_actor(ActorId::from([1]));
+        .with_actor(ActorId::from([1]))
+        .unwrap();
     let a1 = append_at_level(&mut sender, None, "a", 1, 0);
-    sender.set_actor(ActorId::from([2]));
+    sender.set_actor(ActorId::from([2])).unwrap();
     let b1 = append_at_level(&mut sender, None, "b", 2, 1);
     let b2 = append_at_level(&mut sender, None, "b2", 3, 1);
 
@@ -201,7 +205,8 @@ fn missing_malformed_or_invalid_proofs_do_not_mutate_state() {
     let k1 = key(1);
     let wrong = key(9);
     let mut sender = Automerge::from_config(crate::Config::default().signing(author(&k1)).unwrap())
-        .with_actor(ActorId::from([1]));
+        .with_actor(ActorId::from([1]))
+        .unwrap();
     let a1 = append_at_level(&mut sender, None, "a", 1, 1);
     let a2 = append_at_level(&mut sender, None, "b", 2, 1);
     sign_doc(&mut sender, a1, &k1);
@@ -258,7 +263,7 @@ fn missing_malformed_or_invalid_proofs_do_not_mutate_state() {
         );
     }
 
-    let mut authorless = Automerge::new().with_actor(ActorId::from([3]));
+    let mut authorless = Automerge::new().with_actor(ActorId::from([3])).unwrap();
     let h_none = append_at_level(&mut authorless, None, "x", 1, 0);
     let raw_none = authorless.get_change_by_hash(&h_none).unwrap();
     let mut receiver = new_receiver();
@@ -271,7 +276,8 @@ fn missing_malformed_or_invalid_proofs_do_not_mutate_state() {
 
     let mut bad_author =
         Automerge::from_config(crate::Config::default().author(Some(Author::from(vec![1, 2, 3]))))
-            .with_actor(ActorId::from([4]));
+            .with_actor(ActorId::from([4]))
+            .unwrap();
     let h_bad = append_at_level(&mut bad_author, None, "y", 1, 0);
     let raw_bad = bad_author.get_change_by_hash(&h_bad).unwrap();
     assert!(matches!(
@@ -283,14 +289,16 @@ fn missing_malformed_or_invalid_proofs_do_not_mutate_state() {
 }
 
 #[test]
+#[allow(deprecated)] // Deterministic identity fixtures and legacy-option regression coverage.
 fn neither_other_groups_nor_resident_evidence_repairs_an_incomplete_proof() {
     let k1 = key(1);
     let mut sender = Automerge::from_config(crate::Config::default().signing(author(&k1)).unwrap())
-        .with_actor(ActorId::from([1]));
+        .with_actor(ActorId::from([1]))
+        .unwrap();
     let a1 = append_at_level(&mut sender, None, "a", 1, 0);
-    sender.set_actor(ActorId::from([2]));
+    sender.set_actor(ActorId::from([2])).unwrap();
     let b1 = append_at_level(&mut sender, None, "b", 2, 1);
-    sender.set_actor(ActorId::from([1]));
+    sender.set_actor(ActorId::from([1])).unwrap();
     let a2 = append_at_level(&mut sender, None, "c", 3, 1);
 
     let f_incomplete = attach_signatures(
@@ -341,6 +349,7 @@ fn neither_other_groups_nor_resident_evidence_repairs_an_incomplete_proof() {
 }
 
 #[test]
+#[allow(deprecated)] // Deterministic identity fixtures and legacy-option regression coverage.
 fn canonical_membership_diamond_boundaries_and_broken_chains_are_enforced() {
     let k1 = key(1);
     let k2 = key(2);
@@ -349,13 +358,14 @@ fn canonical_membership_diamond_boundaries_and_broken_chains_are_enforced() {
     // 1. Non-diamond: independent a1 (L0) and b1 (L1); c1 (L1) depends on [a1, b1].
     let mut non_diamond =
         Automerge::from_config(crate::Config::default().author(Some(author(&k1))))
-            .with_actor(ActorId::from([1]));
+            .with_actor(ActorId::from([1]))
+            .unwrap();
     let a1 = append_at_level(&mut non_diamond, None, "a", 1, 0);
     non_diamond = non_diamond.fork_with_author(Some(author(&k2))).unwrap();
-    non_diamond.set_actor(ActorId::from([2]));
+    non_diamond.set_actor(ActorId::from([2])).unwrap();
     let b1 = append_at_level(&mut non_diamond, Some(&[]), "b", 2, 1);
     non_diamond = non_diamond.fork_with_author(Some(author(&k3))).unwrap();
-    non_diamond.set_actor(ActorId::from([3]));
+    non_diamond.set_actor(ActorId::from([3])).unwrap();
     let c1 = append_at_level(&mut non_diamond, Some(&[a1, b1]), "c", 3, 1);
 
     let a1_loose = attach_signatures(
@@ -385,13 +395,14 @@ fn canonical_membership_diamond_boundaries_and_broken_chains_are_enforced() {
 
     // 2. Honest diamond: db1 (L1) depends on da1 (L0); dc1 (L1) depends on [da1, db1].
     let mut diamond = Automerge::from_config(crate::Config::default().author(Some(author(&k1))))
-        .with_actor(ActorId::from([1]));
+        .with_actor(ActorId::from([1]))
+        .unwrap();
     let da1 = append_at_level(&mut diamond, None, "a", 1, 0);
     diamond = diamond.fork_with_author(Some(author(&k2))).unwrap();
-    diamond.set_actor(ActorId::from([2]));
+    diamond.set_actor(ActorId::from([2])).unwrap();
     let db1 = append_at_level(&mut diamond, Some(&[da1]), "b", 2, 1);
     diamond = diamond.fork_with_author(Some(author(&k3))).unwrap();
-    diamond.set_actor(ActorId::from([3]));
+    diamond.set_actor(ActorId::from([3])).unwrap();
     let dc1 = append_at_level(&mut diamond, Some(&[da1, db1]), "c", 3, 1);
 
     let db1_group = attach_signatures(
@@ -424,7 +435,7 @@ fn canonical_membership_diamond_boundaries_and_broken_chains_are_enforced() {
 
     // 3. Cross-group broken actor chain (X:2 missing direct X:1 predecessor edge).
     diamond = diamond.fork_with_author(Some(author(&k1))).unwrap();
-    diamond.set_actor(ActorId::from([1]));
+    diamond.set_actor(ActorId::from([1])).unwrap();
     let dx2 = append_at_level(&mut diamond, Some(&[db1]), "x2", 4, 0);
     let mut expanded = ExpandedChange::from(&diamond.get_change_by_hash(&dx2).unwrap());
     expanded.deps = vec![db1];
@@ -446,17 +457,19 @@ fn canonical_membership_diamond_boundaries_and_broken_chains_are_enforced() {
 }
 
 #[test]
+#[allow(deprecated)] // Deterministic identity fixtures and legacy-option regression coverage.
 fn overlaps_forged_orphans_local_boundaries_partial_tails_and_bypasses() {
     let k1 = key(1);
     let malloy = key(99);
 
     let mut source = Automerge::from_config(crate::Config::default().signing(author(&k1)).unwrap())
-        .with_actor(ActorId::from([1]));
+        .with_actor(ActorId::from([1]))
+        .unwrap();
     let root = append_at_level(&mut source, None, "root", 0, 1);
     let a1 = append_at_level(&mut source, None, "a1", 1, 0);
-    source.set_actor(ActorId::from([2]));
+    source.set_actor(ActorId::from([2])).unwrap();
     let b1 = append_at_level(&mut source, Some(&[a1]), "b1", 2, 1);
-    source.set_actor(ActorId::from([3]));
+    source.set_actor(ActorId::from([3])).unwrap();
     let c1 = append_at_level(&mut source, Some(&[a1]), "c1", 3, 1);
     for (h, k) in [(root, &k1), (a1, &k1), (b1, &k1), (c1, &k1)] {
         sign_doc(&mut source, h, k);
@@ -470,7 +483,8 @@ fn overlaps_forged_orphans_local_boundaries_partial_tails_and_bypasses() {
 
     // Forged orphan claiming unknown Actor 2 seq 2 is purged once real Actor 2 arrives.
     let mut forged = Automerge::from_config(crate::Config::default().author(Some(author(&malloy))))
-        .with_actor(ActorId::from([2]));
+        .with_actor(ActorId::from([2]))
+        .unwrap();
     append_at_level(&mut forged, None, "f1", 1, 0);
     let forged_seq2 = append_at_level(&mut forged, None, "f2", 2, 0);
     let forged_orphan = attach_signatures(
@@ -529,7 +543,7 @@ fn overlaps_forged_orphans_local_boundaries_partial_tails_and_bypasses() {
             SigningError::UnauthenticatedChanges
         ))
     ));
-    let mut unsigned_peer = Automerge::new().with_actor(ActorId::from([9]));
+    let mut unsigned_peer = Automerge::new().with_actor(ActorId::from([9])).unwrap();
     append_at_level(&mut unsigned_peer, None, "p", 1, 0);
     let mut peer_state = sync::State::new();
     let msg = unsigned_peer

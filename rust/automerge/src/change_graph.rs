@@ -1616,6 +1616,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)] // Deterministic identity fixtures and legacy-option regression coverage.
     fn fragment_merge_bundles_ignore_arrival_order() {
         let [f, _, _] = fragment_fork_changes();
         let mut base = Automerge::new();
@@ -1624,7 +1625,7 @@ mod tests {
             .into_iter()
             .map(|actor| {
                 let mut branch = base.clone();
-                branch.set_actor(ActorId::from(&[actor][..]));
+                branch.set_actor(ActorId::from(&[actor][..])).unwrap();
                 let mut tx = branch.transaction();
                 tx.put(ROOT, "value", actor as i64).unwrap();
                 tx.put(ROOT, format!("branch{actor}"), true).unwrap();
@@ -1896,7 +1897,9 @@ mod tests {
     #[test]
     fn fragment_checkpoints_exclude_head_and_boundary() {
         // Fix the actor and change contents so fragment levels are deterministic.
-        let mut doc = AutoCommit::new().with_actor(ActorId::from(&[1][..]));
+        let mut doc = AutoCommit::new()
+            .with_actor(ActorId::from(&[1][..]))
+            .unwrap();
         for value in 0..1500 {
             doc.put(ROOT, "counter", value).unwrap();
             doc.commit();
@@ -2150,12 +2153,14 @@ mod tests {
     /// `Fragment::members` is in topological iteration order, not start_op
     /// order).
     #[test]
+    #[allow(deprecated)] // Deterministic identity fixtures and legacy-option regression coverage.
     fn bundle_size_is_independent_of_input_hash_order() {
         use crate::transaction::Transactable;
         use crate::ROOT;
 
         let mut doc = Automerge::new();
-        doc.set_actor(crate::ActorId::from(b"alice" as &[u8]));
+        doc.set_actor(crate::ActorId::from(b"alice" as &[u8]))
+            .unwrap();
         let mut tx = doc.transaction();
         tx.put(ROOT, "counter", 0i64).unwrap();
         tx.commit();

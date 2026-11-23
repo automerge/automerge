@@ -153,7 +153,7 @@ fn empty_and_unknown_completion_do_not_retire_unapplied_groups() {
 
     staged.remove_completed(&HashSet::new(), &applied.change_graph);
     assert_unchanged(&staged, &before);
-    let mut other = Automerge::new().with_actor(ActorId::from([2]));
+    let mut other = Automerge::new().with_actor(ActorId::from([2])).unwrap();
     let unknown = at_level(&mut other, 9, 0);
     staged.remove_completed(&HashSet::from([unknown.hash()]), &applied.change_graph);
     assert_unchanged(&staged, &before);

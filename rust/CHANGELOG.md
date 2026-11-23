@@ -1,5 +1,14 @@
 ## Unreleased
 
+### Breaking Changes
+
+* `Automerge::set_actor` and `AutoCommit::set_actor` now return `Result` and
+  are deprecated in favor of configured authors and automatic actor management.
+  `with_actor` also returns `Result`. Established named and anonymous actor
+  identities cannot be changed in either mode; rejection preserves pending edits.
+  After manually selecting an unused actor, importing another identity's history
+  for it makes the next local transaction panic instead of continuing that chain.
+
 ### Fixed
 
 * `ReadDoc::get_marks` is now much faster (a benchmark on a 100,000 character

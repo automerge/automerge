@@ -67,12 +67,13 @@ fn clone_doc(filename: &str) -> Box<dyn FnMut()> {
     })
 }
 
+#[allow(deprecated)] // Benchmark fixtures intentionally choose deterministic actor identities.
 fn fragment_extension(filename: &str) -> (AutoCommit, Change) {
     let doc = AutoCommit::load(&read_file(filename)).unwrap();
     let mut author = doc.clone();
     // Keep the imported change and actor-table insertion position identical
     // across revisions, instead of inheriting the load's random local actor.
-    author.set_actor(ActorId::from(&[0xff; 32][..]));
+    author.set_actor(ActorId::from(&[0xff; 32][..])).unwrap();
     author.empty_change(Default::default());
     let mut expanded: ExpandedChange = (&author.get_last_local_change().unwrap()).into();
     // Hash mining is setup, not measured. Force exactly level 1 so this

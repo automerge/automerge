@@ -20,7 +20,8 @@ fn receiver_author() -> Author<'static> {
 fn signed_history() -> (Automerge, Vec<Vec<u8>>, Vec<ChangeHash>) {
     let key = SigningKey::from_bytes(&[91; 32]);
     let mut doc = Automerge::from_config(automerge::Config::default().signing(author(91)).unwrap())
-        .with_actor(ActorId::from([1]));
+        .with_actor(ActorId::from([1]))
+        .unwrap();
     let mut hashes = Vec::new();
     // Keep both commits loose, so each needs an independent proof.
     for value in 1..=2_i64 {

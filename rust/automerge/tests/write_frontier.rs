@@ -499,13 +499,15 @@ fn regression_masked_mark_does_not_attract_inserts() {
             .text_encoding(TextEncoding::UnicodeCodePoint)
             .author(Some(carol.clone())),
     )
-    .with_actor(ActorId::from(vec![0x01]));
+    .with_actor(ActorId::from(vec![0x01]))
+    .unwrap();
     let text = main.put_object(ROOT, "text", ObjType::Text).unwrap();
     main.commit();
     let mut peer = main
         .fork_with_author(Some(alice.clone()))
         .unwrap()
-        .with_actor(ActorId::from(vec![0xA0]));
+        .with_actor(ActorId::from(vec![0xA0]))
+        .unwrap();
     peer.split_block(&text, 0).unwrap();
     peer.commit();
     let boundary = peer.get_heads();
@@ -613,6 +615,7 @@ fn mask_with_new_actor_same_author() {
 // wrong actors as masked. The slow query path that consults the active
 // write-frontier clock then filters incorrectly.
 #[test]
+#[allow(deprecated)] // Deterministic identity fixtures and legacy-option regression coverage.
 fn write_frontier_mask_survives_actor_reordering() {
     let bad = Author::try_from("ffff").unwrap();
 
@@ -623,14 +626,14 @@ fn write_frontier_mask_survives_actor_reordering() {
     let actor_early = ActorId::try_from("00").unwrap();
 
     let mut doc = AutoCommit::new();
-    doc.set_actor(ActorId::try_from("aa").unwrap()); // doc's own actor, between early and late
+    doc.set_actor(ActorId::try_from("aa").unwrap()).unwrap(); // doc's own actor, between early and late
     doc.put(ROOT, "good_key", "good").unwrap();
 
     let pre_change = doc.get_heads();
 
     // First bad actor publishes a change.
     let mut fork_late = doc.fork_with_author(Some(bad.clone())).unwrap();
-    fork_late.set_actor(actor_late);
+    fork_late.set_actor(actor_late).unwrap();
     fork_late.put(ROOT, "late_actor_key", "from_late").unwrap();
     fork_late.commit();
 
@@ -647,7 +650,7 @@ fn write_frontier_mask_survives_actor_reordering() {
     // bad actor. This forces `insert_actor` to insert at a low index,
     // shifting the existing bad actor (and the doc actor) up.
     let mut fork_early = doc.fork_with_author(Some(bad.clone())).unwrap();
-    fork_early.set_actor(actor_early);
+    fork_early.set_actor(actor_early).unwrap();
     fork_early
         .put(ROOT, "early_actor_key", "from_early")
         .unwrap();
@@ -986,6 +989,7 @@ fn write_frontier_preserves_pending_patch_paths_and_order() {
 }
 
 #[test]
+#[allow(deprecated)] // Deterministic identity fixtures and legacy-option regression coverage.
 fn caller_owned_write_frontier_log_tracks_actor_reordering() {
     let author = Author::try_from("aaaa").unwrap();
     let mut doc = Automerge::from_config(
@@ -993,7 +997,8 @@ fn caller_owned_write_frontier_log_tracks_actor_reordering() {
             .text_encoding(TextEncoding::UnicodeCodePoint)
             .author(Some(author.clone())),
     )
-    .with_actor(ActorId::from(vec![0x80]));
+    .with_actor(ActorId::from(vec![0x80]))
+    .unwrap();
     let mut tx = doc.transaction();
     let text = tx.put_object(ROOT, "text", ObjType::Text).unwrap();
     tx.splice_text(&text, 0, 0, "abc").unwrap();
@@ -1010,7 +1015,7 @@ fn caller_owned_write_frontier_log_tracks_actor_reordering() {
     doc = doc
         .fork_with_author(Some(Author::try_from("bbbb").unwrap()))
         .unwrap();
-    doc.set_actor(ActorId::from(vec![0x00]));
+    doc.set_actor(ActorId::from(vec![0x00])).unwrap();
     let mut tx = doc.transaction_log_patches(log).unwrap();
     tx.put(ROOT, "other", 1).unwrap();
     let (_, mut log) = tx.commit();

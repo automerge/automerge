@@ -27,13 +27,15 @@ fn signing_load() -> LoadOptions<'static> {
 }
 
 #[test]
+#[allow(deprecated)] // Deterministic identity fixtures and legacy-option regression coverage.
 fn public_automerge_and_autocommit_signing_workflow_roundtrips_authenticated_fragments() {
     let (alice_key, alice_author) = key_and_author(11);
     let (bob_key, bob_author) = key_and_author(22);
 
     let mut alice =
         AutoCommit::from_config(automerge::Config::default().signing(alice_author).unwrap())
-            .with_actor(ActorId::from([1]));
+            .with_actor(ActorId::from([1]))
+            .unwrap();
     alice.put(ROOT, "title", "fragments").unwrap();
     let a1 = alice.commit().unwrap();
 
@@ -62,7 +64,7 @@ fn public_automerge_and_autocommit_signing_workflow_roundtrips_authenticated_fra
         Some("fragments")
     );
 
-    bob.set_actor(ActorId::from([2]));
+    bob.set_actor(ActorId::from([2])).unwrap();
     bob.put(ROOT, "count", 2_i64).unwrap();
     let b1 = bob.commit().unwrap();
     let sig_b1 = ed25519::Signature::from_bytes(bob_key.sign(&signing_message(&b1)).to_bytes());
@@ -92,7 +94,8 @@ fn public_automerge_and_autocommit_signing_workflow_roundtrips_authenticated_fra
 fn public_signing_documents_reject_snapshots_and_unauthenticated_entry_points() {
     let (key, author) = key_and_author(33);
     let mut source = Automerge::from_config(automerge::Config::default().signing(author).unwrap())
-        .with_actor(ActorId::from([1]));
+        .with_actor(ActorId::from([1]))
+        .unwrap();
     let mut tx = source.transaction();
     tx.put(ROOT, "k", "v").unwrap();
     let (hash, _) = tx.commit();
@@ -136,7 +139,7 @@ fn public_signing_documents_reject_snapshots_and_unauthenticated_entry_points() 
         Err(AutomergeError::Signing(SigningError::ForkAtNotSupported))
     ));
 
-    let mut unsigned_peer = Automerge::new().with_actor(ActorId::from([9]));
+    let mut unsigned_peer = Automerge::new().with_actor(ActorId::from([9])).unwrap();
     {
         let mut tx = unsigned_peer.transaction();
         tx.put(ROOT, "u", 1).unwrap();
@@ -159,6 +162,7 @@ fn public_signing_documents_reject_snapshots_and_unauthenticated_entry_points() 
 }
 
 #[test]
+#[allow(deprecated)] // Deterministic identity fixtures and legacy-option regression coverage.
 fn required_signatures_tracks_locally_authored_commits_under_the_fixed_author() {
     let (alice_key, alice_author) = key_and_author(44);
     let (bob_key, bob_author) = key_and_author(55);
@@ -168,7 +172,8 @@ fn required_signatures_tracks_locally_authored_commits_under_the_fixed_author() 
             .signing(alice_author.clone())
             .unwrap(),
     )
-    .with_actor(ActorId::from([1]));
+    .with_actor(ActorId::from([1]))
+    .unwrap();
     let mut all_hashes = Vec::with_capacity(400);
     for step in 0..400_i64 {
         alice.put(ROOT, "step", step).unwrap();
@@ -229,7 +234,7 @@ fn required_signatures_tracks_locally_authored_commits_under_the_fixed_author() 
     .unwrap();
     assert!(bob.try_signing().unwrap().required_signatures().is_empty());
 
-    bob.set_actor(ActorId::from([2]));
+    bob.set_actor(ActorId::from([2])).unwrap();
     bob.put(ROOT, "bob", 1_i64).unwrap();
     let b1 = bob.commit().unwrap();
     assert_eq!(bob.try_signing().unwrap().required_signatures(), vec![b1]);
@@ -262,7 +267,8 @@ fn required_signatures_tracks_locally_authored_commits_under_the_fixed_author() 
 fn change_and_fragment_parse_with_signatures_validate_framing_and_metadata() {
     let (key, author) = key_and_author(77);
     let mut doc = AutoCommit::from_config(automerge::Config::default().signing(author).unwrap())
-        .with_actor(ActorId::from([1]));
+        .with_actor(ActorId::from([1]))
+        .unwrap();
 
     let mut step = 0_i64;
     loop {

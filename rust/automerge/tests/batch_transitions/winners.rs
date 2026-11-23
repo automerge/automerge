@@ -28,9 +28,9 @@ fn incoming_replaces_deleted_winner(site: Site) {
     for n in [1, 5] {
         for payload in [Payload::Scalar, Payload::EmptyMap, Payload::PopulatedMap] {
             let (base, obj, prop) = site.initial("b");
-            let mut old = base.clone().with_actor(actor(4));
+            let mut old = base.clone().with_actor(actor(4)).unwrap();
             put(&mut old, &obj, &prop, ScalarValue::Boolean(false));
-            let mut branch = base.with_actor(actor(n));
+            let mut branch = base.with_actor(actor(n)).unwrap();
             let assignment = incoming(&mut branch, &obj, &prop, payload);
             let expected_id = candidates(&branch, &obj, &prop)[0].1.clone();
             let expected = branch.hydrate(None);
@@ -62,17 +62,17 @@ fn exposed_survivor_with_incoming(site: Site) {
     for incoming_actor in [1, 3] {
         for survivor_map in [false, true] {
             let (base, obj, prop) = site.initial("b");
-            let mut old = base.clone().with_actor(actor(4));
+            let mut old = base.clone().with_actor(actor(4)).unwrap();
             put(&mut old, &obj, &prop, ScalarValue::Boolean(false));
             let mut deleting = old.clone();
             let deletion = delete(&mut deleting, &obj, &prop);
-            let mut lower = base.clone().with_actor(actor(2));
+            let mut lower = base.clone().with_actor(actor(2)).unwrap();
             let lower_change = if survivor_map {
                 incoming(&mut lower, &obj, &prop, Payload::PopulatedMap)
             } else {
                 put(&mut lower, &obj, &prop, ScalarValue::Int(42))
             };
-            let mut new = base.with_actor(actor(incoming_actor));
+            let mut new = base.with_actor(actor(incoming_actor)).unwrap();
             let assignment = put(&mut new, &obj, &prop, ScalarValue::Boolean(true));
             let expected_id = if incoming_actor < 2 {
                 candidates(&lower, &obj, &prop)[0].1.clone()
@@ -108,10 +108,10 @@ fn list_exposed_survivor_with_incoming() {
 fn incoming_loser_without_delete_only_adds_conflict() {
     for site in SITES {
         let (base, obj, prop) = site.initial("b");
-        let mut old = base.clone().with_actor(actor(4));
+        let mut old = base.clone().with_actor(actor(4)).unwrap();
         put(&mut old, &obj, &prop, ScalarValue::Boolean(false));
         let before_id = candidates(&old, &obj, &prop)[0].1.clone();
-        let mut lower = base.with_actor(actor(1));
+        let mut lower = base.with_actor(actor(1)).unwrap();
         let assignment = put(&mut lower, &obj, &prop, ScalarValue::Boolean(true));
         let after = replay(old, vec![vec![assignment]], "retained winner");
         let cs = candidates(&after, &obj, &prop);

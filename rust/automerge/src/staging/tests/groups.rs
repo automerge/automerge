@@ -31,7 +31,7 @@ fn at_level(doc: &mut Automerge, value: i64, level: usize) -> Change {
 }
 
 fn history(levels: &[usize]) -> (Automerge, Vec<Change>) {
-    let mut doc = Automerge::new().with_actor(ActorId::from([1]));
+    let mut doc = Automerge::new().with_actor(ActorId::from([1])).unwrap();
     let changes = levels
         .iter()
         .enumerate()
@@ -71,11 +71,11 @@ struct Overlap {
 fn overlap() -> Overlap {
     let (base, prefix) = history(&[0]);
     let a = prefix.into_iter().next().unwrap();
-    let mut left = base.clone().with_actor(ActorId::from([2]));
+    let mut left = base.clone().with_actor(ActorId::from([2])).unwrap();
     let b = at_level(&mut left, 2, 0);
     let c = at_level(&mut left, 3, 1);
     let f = left.get_fragment(c.hash()).unwrap();
-    let mut right = base.with_actor(ActorId::from([3]));
+    let mut right = base.with_actor(ActorId::from([3])).unwrap();
     let d = at_level(&mut right, 4, 0);
     let e = at_level(&mut right, 5, 1);
     let g = right.get_fragment(e.hash()).unwrap();
@@ -316,7 +316,7 @@ fn inconsistent_descriptor_asserts_before_inserting_new_contents() {
     let mut staged = StagedChanges::new();
     staged.extend_with_fragments(batch(&changes), [fragment.clone()], &applied.change_graph);
     let before = staged.clone();
-    let mut other = Automerge::new().with_actor(ActorId::from([2]));
+    let mut other = Automerge::new().with_actor(ActorId::from([2])).unwrap();
     let extra = at_level(&mut other, 9, 0);
     let mut inconsistent = fragment.clone();
     inconsistent

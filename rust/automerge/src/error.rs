@@ -25,6 +25,8 @@ pub(crate) enum SigningAuthorErrorInner {
 
 #[derive(Error, Debug)]
 pub enum AutomergeError {
+    #[error("actor {actor} is associated with a different author identity")]
+    ActorAuthorMismatch { actor: ActorId },
     #[error(transparent)]
     SigningAuthor(#[from] SigningAuthorError),
     #[error(transparent)]

@@ -8,15 +8,17 @@ use automerge::ReadDoc;
 
 use serde::ser::{SerializeMap, SerializeSeq};
 
+#[allow(deprecated)] // Preserve the deterministic actor selection supplied by test clients.
 pub fn new_doc() -> automerge::AutoCommit {
     let mut d = automerge::AutoCommit::new();
-    d.set_actor(automerge::ActorId::random());
+    d.set_actor(automerge::ActorId::random()).unwrap();
     d
 }
 
+#[allow(deprecated)] // Preserve the deterministic actor selection supplied by test clients.
 pub fn new_doc_with_actor(actor: automerge::ActorId) -> automerge::AutoCommit {
     let mut d = automerge::AutoCommit::new();
-    d.set_actor(actor);
+    d.set_actor(actor).unwrap();
     d
 }
 

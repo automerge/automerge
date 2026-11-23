@@ -12,7 +12,9 @@ use std::collections::BTreeMap;
 fn appeared_text_keeps_unchanged_marks_after_concurrent_delete_and_put() {
     for encoding in ENCODINGS {
         for (prefix, replacement) in [("a", "X"), ("é", "🦀")] {
-            let mut base = Automerge::new_with_encoding(encoding).with_actor(actor(9));
+            let mut base = Automerge::new_with_encoding(encoding)
+                .with_actor(actor(9))
+                .unwrap();
             let initial = format!("{prefix}bc");
             let index = units(prefix, encoding).len();
             let mut tx = base.transaction();
@@ -27,9 +29,9 @@ fn appeared_text_keeps_unchanged_marks_after_concurrent_delete_and_put() {
             tx.commit();
 
             // The put sees the original element, not the concurrent deletion.
-            let mut deleting = base.clone().with_actor(actor(1));
+            let mut deleting = base.clone().with_actor(actor(1)).unwrap();
             let deletion = delete(&mut deleting, &text, &Prop::Seq(index));
-            let mut assigning = base.clone().with_actor(actor(2));
+            let mut assigning = base.clone().with_actor(actor(2)).unwrap();
             let assignment = put(&mut assigning, &text, &Prop::Seq(index), replacement.into());
             let winner = assigning.get(&text, index).unwrap().unwrap().1;
 
