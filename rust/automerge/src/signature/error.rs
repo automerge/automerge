@@ -63,6 +63,8 @@ pub enum ProofError {
 /// Failure to import or apply history in required signing mode.
 #[derive(Debug, thiserror::Error)]
 pub enum SigningError {
+    #[error("arbitrary bundling is not supported in signing mode; use fragment export")]
+    BundleNotSupported,
     #[error("cannot merge documents with different signing modes")]
     MergeModeMismatch,
     #[error("rescuing signed history as unsigned is not supported")]
