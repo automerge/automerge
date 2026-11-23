@@ -36,10 +36,8 @@ fn owned_author_input_can_outlive_its_source_buffer() {
 #[test]
 fn malformed_key_lengths_are_rejected() {
     for length in [0, 1, 31, 33, 64] {
-        assert!(matches!(
-            VerifyingAuthor::new(Author::from(vec![7; length])),
-            Err(error::VerifyingAuthor(error::VerifyingAuthorInner::Key(_)))
-        ));
+        let failure = VerifyingAuthor::new(Author::from(vec![7; length])).unwrap_err();
+        assert_eq!(failure.kind(), error::VerifyingAuthorKind::InvalidKey);
     }
 }
 
@@ -49,10 +47,8 @@ fn undecodable_key_bytes_are_rejected() {
         .map(|byte| [byte; 32])
         .find(|bytes| VerifyingKey::from_bytes(bytes).is_err())
         .expect("a repeated-byte encoding is not a curve point");
-    assert!(matches!(
-        VerifyingAuthor::new(Author::from(bytes.as_slice())),
-        Err(error::VerifyingAuthor(error::VerifyingAuthorInner::Key(_)))
-    ));
+    let failure = VerifyingAuthor::new(Author::from(bytes.as_slice())).unwrap_err();
+    assert_eq!(failure.kind(), error::VerifyingAuthorKind::InvalidKey);
 }
 
 #[test]
@@ -60,23 +56,21 @@ fn small_order_key_is_rejected_even_if_dalek_can_decode_it() {
     let mut identity = [0; 32];
     identity[0] = 1;
     assert!(VerifyingKey::from_bytes(&identity).unwrap().is_weak());
-    assert!(matches!(
-        VerifyingAuthor::new(Author::from(identity.as_slice())),
-        Err(error::VerifyingAuthor(error::VerifyingAuthorInner::WeakKey))
-    ));
+    let failure = VerifyingAuthor::new(Author::from(identity.as_slice())).unwrap_err();
+    assert_eq!(failure.kind(), error::VerifyingAuthorKind::WeakKey);
 }
 
 #[test]
 fn key_decoding_error_retains_its_underlying_source() {
     let failure = VerifyingAuthor::new(Author::from(vec![7; 31])).unwrap_err();
-    let reason = std::error::Error::source(&failure)
-        .expect("invalid author retains the reason")
-        .downcast_ref::<error::VerifyingAuthorInner>()
-        .expect("owned error reason");
-    assert!(matches!(reason, error::VerifyingAuthorInner::Key(_)));
-    assert!(std::error::Error::source(reason)
-        .expect("key decoding retains the library error")
-        .is::<ed25519_dalek::SignatureError>());
+    let source = std::error::Error::source(&failure)
+        .expect("key decoding retains the library error directly");
+    assert!(source.is::<ed25519_dalek::SignatureError>());
+    assert_eq!(failure.kind(), error::VerifyingAuthorKind::InvalidKey);
+    assert_eq!(
+        failure.to_string(),
+        format!("author bytes are not a usable Ed25519 public key: failed to parse key, due to {source}")
+    );
 }
 
 #[test]
@@ -84,12 +78,44 @@ fn weak_key_error_has_a_reason_but_no_decoding_failure() {
     let mut identity = [0; 32];
     identity[0] = 1;
     let failure = VerifyingAuthor::new(Author::from(identity.as_slice())).unwrap_err();
-    let reason = std::error::Error::source(&failure)
-        .expect("invalid author retains the reason")
-        .downcast_ref::<error::VerifyingAuthorInner>()
-        .expect("owned error reason");
-    assert!(matches!(reason, error::VerifyingAuthorInner::WeakKey));
-    assert!(std::error::Error::source(reason).is_none());
+    assert_eq!(failure.kind(), error::VerifyingAuthorKind::WeakKey);
+    assert!(std::error::Error::source(&failure).is_none());
+    assert_eq!(
+        failure.to_string(),
+        "author bytes are not a usable Ed25519 public key: the public key is considered weak, i.e., the public key has low order"
+    );
+}
+
+#[test]
+fn key_failure_kind_distinguishes_invalid_and_weak_keys_without_consuming_the_source() {
+    fn assert_copy_clone<T: Copy + Clone>() {}
+    assert_copy_clone::<error::VerifyingAuthorKind>();
+
+    let undecodable = (u8::MIN..=u8::MAX)
+        .map(|byte| [byte; 32])
+        .find(|bytes| VerifyingKey::from_bytes(bytes).is_err())
+        .expect("fixture must not decode as a curve point");
+    let mut identity = [0; 32];
+    identity[0] = 1;
+    assert!(VerifyingKey::from_bytes(&identity).unwrap().is_weak());
+    let cases = [
+        (vec![7; 31], error::VerifyingAuthorKind::InvalidKey),
+        (undecodable.to_vec(), error::VerifyingAuthorKind::InvalidKey),
+        (identity.to_vec(), error::VerifyingAuthorKind::WeakKey),
+    ];
+    for (bytes, expected) in cases {
+        let failure = VerifyingAuthor::new(Author::from(bytes)).unwrap_err();
+        let before = failure.to_string();
+        assert_eq!(failure.kind(), expected);
+        assert_eq!(failure.kind(), expected);
+        assert_eq!(failure.to_string(), before);
+        let source = std::error::Error::source(&failure);
+        if expected == error::VerifyingAuthorKind::InvalidKey {
+            assert!(source.unwrap().is::<ed25519_dalek::SignatureError>());
+        } else {
+            assert!(source.is_none());
+        }
+    }
 }
 
 #[test]

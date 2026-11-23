@@ -10,6 +10,17 @@ use thiserror::Error;
 #[error("patch logs cannot be shared between documents; this probably means a PatchLog created for one document was reused with another")]
 pub struct PatchLogMismatch;
 
+/// A configured signing author cannot supply a usable Ed25519 verifying key.
+#[derive(Error, Debug)]
+#[error("{0}")]
+pub struct SigningAuthorError(#[source] pub(crate) SigningAuthorErrorInner);
+
+#[derive(Error, Debug)]
+pub(crate) enum SigningAuthorErrorInner {
+    #[error("signing author is unusable: {0}")]
+    InvalidKey(#[source] crate::signature::ed25519::error::VerifyingAuthor),
+}
+
 #[derive(Error, Debug)]
 pub enum AutomergeError {
     #[error(transparent)]
