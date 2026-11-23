@@ -21,8 +21,6 @@ pub(super) struct FragmentReadiness {
     candidates_by_head: HashMap<ChangeHash, CandidateFrontiers>,
     /// Reverse index from each unsigned frontier hash to the fragment heads waiting on it.
     heads_waiting_for_frontier: HashMap<ChangeHash, HashSet<ChangeHash>>,
-    /// Set when a candidate newly becomes ready, indicating `prune_covered` has work to do.
-    needs_prune: bool,
 }
 
 impl FragmentReadiness {
@@ -50,9 +48,6 @@ impl FragmentReadiness {
                 missing.insert(frontier);
             }
         }
-        if missing.is_empty() {
-            self.needs_prune = true;
-        }
         self.candidates_by_head
             .insert(head, CandidateFrontiers { required, missing });
     }
@@ -69,15 +64,21 @@ impl FragmentReadiness {
         }
     }
 
-    pub(super) fn needs_prune(&self) -> bool {
-        self.needs_prune
-    }
-
-    /// Reclaim candidates whose complete membership is covered by the outgoing
-    /// proved cover, returning that represented member set.
-    pub(super) fn prune_covered(&mut self, graph: &ChangeGraph) -> HashSet<ChangeHash> {
-        self.needs_prune = false;
-        let (selected, represented) = OutgoingSelection::new(graph, self).select_fragments();
+    /// Forget candidates whose complete membership is represented by the
+    /// *published* proved cover, returning that cover's member set.
+    ///
+    /// A candidate that is merely signature-ready may still be exportable, but
+    /// it cannot retire an older candidate: only a cover whose every member has
+    /// been published (per `is_published`) counts as a replacement. Callers
+    /// invoke this on every reclamation pass, so publication-only progress (no
+    /// new evidence) still prunes.
+    pub(super) fn prune_covered(
+        &mut self,
+        graph: &ChangeGraph,
+        is_published: impl FnMut(&ChangeHash) -> bool,
+    ) -> HashSet<ChangeHash> {
+        let (selected, represented) =
+            OutgoingSelection::new(graph, self).select_cover(is_published);
         let selected_heads: HashSet<_> = selected.iter().map(|fragment| fragment.head).collect();
         let obsolete: Vec<_> = self
             .candidates_by_head
@@ -108,9 +109,6 @@ impl FragmentReadiness {
                 let candidate = self.candidates_by_head.get_mut(&head).unwrap();
                 let removed = candidate.missing.remove(frontier);
                 debug_assert!(removed);
-                if candidate.missing.is_empty() {
-                    self.needs_prune = true;
-                }
             }
         }
     }
@@ -146,17 +144,21 @@ impl<'a> OutgoingSelection<'a> {
         Self { graph, readiness }
     }
 
-    pub(super) fn represented_members(&self) -> HashSet<ChangeHash> {
-        self.select_fragments().1
+    /// Select the signature-ready cover (used for export).
+    fn select_fragments(&self) -> (Vec<Fragment>, HashSet<ChangeHash>) {
+        self.select_cover(|_| true)
     }
 
-    fn select_fragments(&self) -> (Vec<Fragment>, HashSet<ChangeHash>) {
+    fn select_cover(
+        &self,
+        mut eligible: impl FnMut(&ChangeHash) -> bool,
+    ) -> (Vec<Fragment>, HashSet<ChangeHash>) {
         let mut candidates: Vec<_> = self.readiness.candidates_by_head.keys().copied().collect();
         candidates.sort_unstable_by_key(|head| Reverse(self.graph.node_rank(head).unwrap()));
         let mut selected = Vec::new();
         let mut represented = HashSet::new();
         for head in candidates {
-            if !self.readiness.is_ready(&head) {
+            if !self.readiness.is_ready(&head) || !eligible(&head) {
                 continue;
             }
             let fragment = self.graph.get_historical_fragment(head).unwrap();

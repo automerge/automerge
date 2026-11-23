@@ -301,36 +301,21 @@ impl RequiredSigning {
         Some(SignaturesChunk::encode(entries))
     }
 
-    /// Reclaim covered fragment candidates and any signature records that no
-    /// longer have an outgoing, incomplete-candidate, or unaccepted-local obligation.
+    /// Reclaim candidates and proofs only when a published cover replaces them.
+    /// Ready-but-unpublished covers must leave published fallback proof intact.
     pub(super) fn reclaim_covered(&mut self, graph: &ChangeGraph) {
-        let mut represented = self
-            .fragment_readiness
-            .needs_prune()
-            .then(|| self.fragment_readiness.prune_covered(graph));
+        let published = &self.published;
+        let represented = self.fragment_readiness.prune_covered(graph, |hash| {
+            graph
+                .actor_seq_for_hash(hash)
+                .is_some_and(|(actor, seq)| published.is_published_actor_seq(actor, seq))
+        });
         let live_frontiers: HashSet<ChangeHash> = self
             .fragment_readiness
             .required_frontiers()
             .copied()
             .collect();
 
-        if represented.is_none() {
-            let needs_member_cover = self.signatures.verified_hashes().any(|hash| {
-                hash.fragment_level() == 0
-                    && !live_frontiers.contains(hash)
-                    && graph.is_covered_by_fragment_cache(hash)
-                    && graph.actor_seq_for_hash(hash).is_some_and(|(actor, seq)| {
-                        self.published.is_published_actor_seq(actor, seq)
-                    })
-            });
-            if needs_member_cover {
-                represented = Some(
-                    OutgoingSelection::new(graph, &self.fragment_readiness).represented_members(),
-                );
-            }
-        }
-
-        let published = &self.published;
         self.signatures.retain_hashes(|hash| {
             if live_frontiers.contains(hash) {
                 return true;
@@ -345,13 +330,10 @@ impl RequiredSigning {
             if !published.is_published_actor_seq(actor, seq) {
                 return true;
             }
-            if hash.fragment_level() > 0 {
-                return false;
-            }
-            match &represented {
-                Some(represented) => !represented.contains(hash),
-                None => true,
-            }
+            // Published hard heads are no longer candidates, so a published
+            // cover already represents them; published loose fallbacks survive
+            // until a published cover represents them.
+            hash.fragment_level() == 0 && !represented.contains(hash)
         });
     }
 }
