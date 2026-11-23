@@ -40,6 +40,7 @@ export type PatchSource =
   | "revealAuthor"
   | "addCommits"
   | "addFragments"
+  | "insertSignatures"
   | "receiveSyncMessage"
 export type PatchInfo<T> = {
   before: Doc<T>
@@ -62,9 +63,7 @@ import { ImmutableString } from "./immutable_string.js"
 export { ImmutableString } from "./immutable_string.js"
 
 export type AutomergeValue =
-  | ScalarValue
-  | { [key: string]: AutomergeValue }
-  | Array<AutomergeValue>
+  ScalarValue | { [key: string]: AutomergeValue } | Array<AutomergeValue>
 export type MapValue = { [key: string]: AutomergeValue }
 export type ListValue = Array<AutomergeValue>
 export type ScalarValue =
