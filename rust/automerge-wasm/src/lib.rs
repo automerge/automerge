@@ -299,6 +299,8 @@ export type Mark = {
 interface Automerge {
 
     fork(actor?: string, heads?: Heads): Automerge;
+    // Full fork writing as `author` (null removes the author).
+    forkWithAuthor(author: string | null, actor?: string): Automerge;
 
     put(obj: ObjID, prop: Prop, value: Value, datatype?: Datatype): void;
     get(obj: ObjID, prop: Prop, heads?: Heads): Value | undefined;
@@ -370,6 +372,8 @@ export type LoadOptions = {
   unchecked?: boolean;
   allowMissingDeps?: boolean;
   convertImmutableStringsToText?: boolean;
+  // The fixed local author of the loaded document.
+  author?: Author;
 };
 
 // if recursive is false do not diff child objects
@@ -379,6 +383,8 @@ export type DiffOptions = {
 
 export type InitOptions = {
   actor?: Actor;
+  // The fixed local author of the new document.
+  author?: Author;
 };
 
 export function create(options?: InitOptions): Automerge;
@@ -453,7 +459,19 @@ pub struct Automerge {
 #[wasm_bindgen]
 impl Automerge {
     pub fn new(actor: Option<String>) -> Result<Automerge, error::BadActorId> {
-        let mut doc = AutoCommit::new_with_encoding(TextEncoding::Utf16CodeUnit);
+        Self::new_with_author(actor, None)
+    }
+
+    /// Create a document with the given fixed author.
+    fn new_with_author(
+        actor: Option<String>,
+        author: Option<Author<'static>>,
+    ) -> Result<Automerge, error::BadActorId> {
+        let mut doc = AutoCommit::from_config(
+            am::Config::default()
+                .text_encoding(TextEncoding::Utf16CodeUnit)
+                .author(author),
+        );
         if let Some(a) = actor {
             let a = automerge::ActorId::from(hex::decode(a)?.to_vec());
             doc.set_actor(a);
@@ -521,6 +539,30 @@ impl Automerge {
         };
         let mut automerge = Automerge {
             doc,
+            freeze: self.freeze,
+            external_types: self.external_types.clone(),
+        };
+        if let Some(s) = actor {
+            let actor =
+                automerge::ActorId::from(hex::decode(s).map_err(error::BadActorId::from)?.to_vec());
+            automerge.doc.set_actor(actor);
+        }
+        Ok(automerge)
+    }
+
+    // Typed in the `interface Automerge` custom section above.
+    #[wasm_bindgen(js_name = forkWithAuthor, skip_typescript)]
+    pub fn fork_with_author(
+        &mut self,
+        author: Option<String>,
+        actor: Option<String>,
+    ) -> Result<Automerge, error::Fork> {
+        let author = author
+            .map(Author::try_from)
+            .transpose()
+            .map_err(error::BadAuthor::from)?;
+        let mut automerge = Automerge {
+            doc: self.doc.fork_with_author(author)?,
             freeze: self.freeze,
             external_types: self.external_types.clone(),
         };
@@ -1571,16 +1613,6 @@ impl Automerge {
             .collect())
     }
 
-    #[wasm_bindgen(js_name = setAuthor)]
-    pub fn set_author(&mut self, author: Option<String>) -> Result<(), JsValue> {
-        let author = author
-            .map(Author::try_from)
-            .transpose()
-            .map_err(error::BadAuthor::from)?;
-        self.doc.set_author(author);
-        Ok(())
-    }
-
     #[wasm_bindgen(js_name = getLastLocalChange, unchecked_return_type="Change | null")]
     pub fn get_last_local_change(&mut self) -> JsValue {
         if let Some(change) = self.doc.get_last_local_change() {
@@ -1904,12 +1936,23 @@ fn on_start() {
     let _ = wasm_bindgen::__rt::set_on_abort(log_abort);
 }
 
+/// The fixed author requested by `create`/`load` options.
+fn document_author(options: &JsValue) -> Result<Option<Author<'static>>, error::BadAuthor> {
+    js_get(options, "author")
+        .ok()
+        .and_then(|a| a.as_string())
+        .map(Author::try_from)
+        .transpose()
+        .map_err(error::BadAuthor::from)
+}
+
 // skip_typescript as the definition requires an optional argument so we define
 // the function in the typescript custom section at the top of the file
 #[wasm_bindgen(js_name = create, skip_typescript)]
-pub fn init(options: JsValue) -> Result<Automerge, error::BadActorId> {
+pub fn init(options: JsValue) -> Result<Automerge, error::Create> {
     let actor = js_get(&options, "actor").ok().and_then(|a| a.as_string());
-    Automerge::new(actor)
+    let author = document_author(&options)?;
+    Ok(Automerge::new_with_author(actor, author)?)
 }
 
 // skip_typescript as the options argument is optional which can only be typed
@@ -1918,6 +1961,7 @@ pub fn init(options: JsValue) -> Result<Automerge, error::BadActorId> {
 pub fn load(data: Uint8Array, options: JsValue) -> Result<Automerge, error::Load> {
     let data = data.to_vec();
     let actor = js_get(&options, "actor").ok().and_then(|a| a.as_string());
+    let author = document_author(&options)?;
     let unchecked = js_get(&options, "unchecked")
         .ok()
         .and_then(|v1| v1.as_bool())
@@ -1945,14 +1989,15 @@ pub fn load(data: Uint8Array, options: JsValue) -> Result<Automerge, error::Load
     } else {
         StringMigration::NoMigration
     };
-    let mut doc = am::AutoCommit::load_with_options(
-        &data,
-        am::LoadOptions::new()
-            .on_partial_load(on_partial_load)
-            .verification_mode(verification_mode)
-            .migrate_strings(string_migration)
-            .text_encoding(TextEncoding::Utf16CodeUnit),
-    )?;
+    let mut load_options = am::LoadOptions::new()
+        .on_partial_load(on_partial_load)
+        .verification_mode(verification_mode)
+        .migrate_strings(string_migration)
+        .text_encoding(TextEncoding::Utf16CodeUnit);
+    if let Some(author) = author {
+        load_options = load_options.author(author);
+    }
+    let mut doc = am::AutoCommit::load_with_options(&data, load_options)?;
     if let Some(s) = actor {
         let actor =
             automerge::ActorId::from(hex::decode(s).map_err(error::BadActorId::from)?.to_vec());
@@ -2370,6 +2415,20 @@ pub mod error {
     }
 
     #[derive(Debug, thiserror::Error)]
+    pub enum Create {
+        #[error(transparent)]
+        BadActor(#[from] BadActorId),
+        #[error(transparent)]
+        BadAuthor(#[from] BadAuthor),
+    }
+
+    impl From<Create> for JsValue {
+        fn from(e: Create) -> Self {
+            RangeError::new(&e.to_string()).into()
+        }
+    }
+
+    #[derive(Debug, thiserror::Error)]
     pub enum ApplyChangesError {
         #[error(transparent)]
         DecodeChanges(#[from] BadJSChanges),
@@ -2517,6 +2576,8 @@ pub mod error {
     pub enum Fork {
         #[error(transparent)]
         BadActor(#[from] BadActorId),
+        #[error(transparent)]
+        BadAuthor(#[from] BadAuthor),
         #[error(transparent)]
         Automerge(#[from] AutomergeError),
         #[error(transparent)]
@@ -2891,6 +2952,8 @@ pub mod error {
         Automerge(#[from] AutomergeError),
         #[error(transparent)]
         BadActor(#[from] BadActorId),
+        #[error(transparent)]
+        BadAuthor(#[from] BadAuthor),
     }
 
     impl From<Load> for JsValue {

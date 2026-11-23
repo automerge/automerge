@@ -120,23 +120,6 @@ impl AutoCommit {
         }
     }
 
-    /// Create a new empty document in required signing mode.
-    pub fn signing() -> AutoCommit {
-        Self::signing_with_encoding(TextEncoding::platform_default())
-    }
-
-    /// Create a new empty document in required signing mode with an explicit text encoding.
-    pub fn signing_with_encoding(encoding: TextEncoding) -> AutoCommit {
-        AutoCommit {
-            doc: Automerge::signing_with_encoding(encoding),
-            transaction: None,
-            patch_log: PatchLog::inactive(),
-            diff_cursor: Vec::new(),
-            save_cursor: Vec::new(),
-            isolation: None,
-        }
-    }
-
     /// Borrow this document's [`crate::signing::SigningDocument`] handle.
     pub fn try_signing(
         &mut self,
@@ -350,6 +333,21 @@ impl AutoCommit {
         patches
     }
 
+    /// Fork with another local identity, checking before closing pending edits.
+    pub fn fork_with_author(
+        &mut self,
+        author: Option<Author<'static>>,
+    ) -> Result<Self, AutomergeError> {
+        let identity = self.doc.signing.fork_identity(
+            author,
+            &self.doc.change_graph,
+            self.pending_ops() > 0,
+        )?;
+        let mut fork = self.fork();
+        fork.doc.signing.set_fork_identity(identity);
+        Ok(fork)
+    }
+
     pub fn fork(&mut self) -> Self {
         self.ensure_transaction_closed();
         Self {
@@ -390,18 +388,6 @@ impl AutoCommit {
     pub fn set_actor(&mut self, actor: ActorId) -> &mut Self {
         self.ensure_transaction_closed();
         self.doc.set_actor(actor);
-        self
-    }
-
-    pub fn with_author(mut self, author: Option<Author<'static>>) -> Self {
-        self.ensure_transaction_closed();
-        self.doc.set_author(author);
-        self
-    }
-
-    pub fn set_author(&mut self, author: Option<Author<'static>>) -> &mut Self {
-        self.ensure_transaction_closed();
-        self.doc.set_author(author);
         self
     }
 
