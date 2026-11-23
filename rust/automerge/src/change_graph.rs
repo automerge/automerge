@@ -10,7 +10,7 @@ use crate::actor::ActorInsert;
 use crate::actor::{ActorIndexed, ActorRefs, ActorRemoval, ActorShift, ActorTable};
 use crate::storage::BundleMetadata;
 use crate::{
-    author::Authors,
+    author::{Author, Authors},
     clock::{Clock, SeqClock},
     error::AutomergeError,
     op_set2::{change::BuildChangeMetadata, ActorIdx, ValueMeta},
@@ -801,9 +801,12 @@ impl ChangeGraph {
         self.nodes_by_hash.insert(hash, node_idx);
         self.update_heads(change);
 
-        if let Some(author) = change.author() {
-            assert!(change.seq() == 1);
-            authors.assign_author(author.into_owned(), actor)
+        if change.seq() == 1 {
+            authors
+                .assign_identity(change.author().map(Author::into_owned), actor)
+                .expect("initial change must match the actor's author association");
+        } else {
+            assert!(change.author().is_none());
         }
 
         assert!(actor < self.seq_index.len());
@@ -1022,7 +1025,9 @@ impl ChangeGraphCols {
                         c.actor_id().clone(),
                     ));
                 }
-                authors.assign_author(author.into_owned(), graph.actors[idx].into());
+                authors.assign_author(author.into_owned(), graph.actors[idx].into())?;
+            } else if c.seq() == 1 {
+                authors.assign_identity(None, graph.actors[idx].into())?;
             }
         }
 
@@ -1258,6 +1263,39 @@ mod tests {
         assert!(
             matches!(err, LoadError::AuthorOnNonInitialSeq(2, _)),
             "expected AuthorOnNonInitialSeq(2, _), got {err:?}"
+        );
+    }
+
+    #[test]
+    fn finalize_rejects_conflicting_initial_actor_identities() {
+        use crate::storage::{parse::Input, Chunk};
+        use crate::ExpandedChange;
+
+        let mut doc = AutoCommit::new();
+        doc.put(ROOT, "one", 1).unwrap();
+        doc.commit();
+        doc.put(ROOT, "two", 2).unwrap();
+        doc.commit();
+        let saved = doc.save();
+        let (_, Chunk::Document(document)) = Chunk::parse(Input::new(&saved)).unwrap() else {
+            panic!("expected document");
+        };
+        let actors = document.actors().clone().into_table().unwrap();
+        let cols = ChangeGraphCols::load(&document, &actors).unwrap();
+        let mut changes = doc.get_changes(&[]);
+        changes.sort_by_key(Change::seq);
+        let mut forged: ExpandedChange = (&changes[1]).into();
+        forged.seq = 1;
+        forged.extra_bytes = vec![1, 1, 9];
+        changes[1] = forged.into();
+        let mut authors = Authors::new(&actors);
+        assert!(matches!(
+            cols.finalize(&changes, &mut authors),
+            Err(LoadError::AuthorConflict(_))
+        ));
+        assert!(
+            authors.get_authors().is_empty(),
+            "rejected named identity was not inserted"
         );
     }
 
