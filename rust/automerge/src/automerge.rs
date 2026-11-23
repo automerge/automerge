@@ -7,6 +7,7 @@ use std::ops::RangeBounds;
 use itertools::Itertools;
 
 use crate::author::{Author, Authors};
+use crate::config::{Config, DocumentAuthor, ForkOptions};
 pub(crate) use crate::op_set2::change::ChangeCollector;
 pub(crate) use crate::op_set2::types::ScalarValue;
 pub(crate) use crate::op_set2::{
@@ -17,7 +18,6 @@ pub(crate) use crate::read::ReadDoc;
 use crate::actor::{ActorRemoval, ActorShift, ActorTable, HasActorIndices};
 use crate::change_graph::ChangeGraph;
 use crate::clock::{Clock, SeqClock};
-use crate::config::DocumentAuthor;
 use crate::cursor::{CursorPosition, MoveCursor, OpCursor};
 use crate::exid::ExId;
 use crate::hydrate;
@@ -36,7 +36,6 @@ use crate::transaction::{
 use crate::types::{ActorId, ChangeHash, ObjId, ObjMeta, OpId, SequenceType, TextEncoding, Value};
 use crate::write_frontier::WriteFrontier;
 use crate::{AutomergeError, Change, Cursor, Fragment, ObjType, Prop};
-use crate::{Config, ForkOptions};
 use actor::ActorMaintenance;
 use author::AuthorRegistration;
 use history::History;
@@ -187,7 +186,7 @@ impl<'a> LoadOptions<'a> {
     /// an unpublished draft with a signing request, is omitted from saves
     /// until signed, and the loaded history remains published.
     #[deprecated(
-        since = "0.12.0",
+        since = "0.13.0",
         note = "migrate legacy scalar strings explicitly in application code"
     )]
     pub fn migrate_strings(self, migration: StringMigration) -> Self {
@@ -204,6 +203,9 @@ impl<'a> LoadOptions<'a> {
         }
     }
 
+    /// Load in unsigned mode with this local author.
+    ///
+    /// This replaces a previous signing choice without changing historical authors.
     pub fn author(self, author: Author<'static>) -> Self {
         Self {
             author: DocumentAuthor::Set(author),
@@ -224,7 +226,18 @@ impl<'a> LoadOptions<'a> {
     /// Load the stream in required signing mode, admitting only canonical
     /// fragments and loose changes with valid attached proofs.
     ///
-    /// Document snapshot chunks are rejected in signing mode.
+    /// Document snapshots are admitted only with their attached signatures
+    /// chunk (as written by a required-mode [`Automerge::save`]); the
+    /// snapshot's history is reconstructed and its canonical groups verified
+    /// before anything is adopted. Bare snapshots are rejected.
+    ///
+    /// Conversely, loading without this option rejects any stream containing
+    /// a signed group (`load::Error::SignedContent`) under either
+    /// [`OnPartialLoad`] policy; signatures are never silently stripped.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::SigningAuthorError`] if `author` is not a usable Ed25519 key.
     pub fn signing(self, author: Author<'static>) -> Result<Self, crate::SigningAuthorError> {
         Ok(Self {
             author: DocumentAuthor::signing(author)?,
@@ -273,7 +286,7 @@ impl std::default::Default for LoadOptions<'static> {
 ///
 /// ## Sync
 ///
-/// Use [`Self::sync`] to acquire checked access to [`crate::sync::SyncDoc`].
+/// Use [`Self::sync`] to acquire an implementation of [`crate::sync::SyncDoc`]
 ///
 /// ## Authors and Actors
 ///
@@ -330,6 +343,15 @@ impl std::default::Default for LoadOptions<'static> {
 /// Prior to the introduction of author IDs, actor IDs were often used in applications to determine
 /// authorship. New code should migrate to using author IDs. If you do need to map from an actor ID
 /// to an author ID you can use [`Automerge::get_author_for_actor`].
+///
+/// ### Immutable instance author
+///
+/// The local author is fixed when the instance is created: by
+/// [`Config::author`] (unsigned, any author or none),
+/// [`Config::signing`] (required mode, validated Ed25519 author) or
+/// [`LoadOptions::author`]/[`LoadOptions::signing`]. There is no setter. To write under a different
+/// author create a new instance with [`Automerge::fork_with_author`], which in
+/// required mode is only allowed once every local draft has been published.
 #[derive(Debug, Clone)]
 pub struct Automerge {
     /// Unapplied change contents held for possible application.
@@ -365,13 +387,13 @@ pub(crate) struct PreparedFork {
 impl Automerge {
     /// Create a new document with a random actor id.
     pub fn new() -> Self {
-        Self::new_with_encoding(TextEncoding::platform_default())
+        Self::from_config(Config::default())
     }
 
-    /// Create a document from explicit construction-time choices.
+    /// Create a document using its construction-time configuration.
     ///
-    /// [`crate::Config::signing`] validates the public key before construction;
-    /// consuming a configuration is infallible.
+    /// Signing keys are prepared by [`Config::signing`]; consuming the
+    /// configuration cannot fail or change its signing intent.
     pub fn from_config(config: Config) -> Self {
         let ops = OpSet::new(config.text_encoding);
         let change_graph = ChangeGraph::new(&ops.actors);
@@ -398,6 +420,14 @@ impl Automerge {
     }
 
     /// Return a copy of this document with its data anonymized using a fresh random seed.
+    ///
+    /// The result is a diagnostic transformation, not a mode conversion: it is
+    /// always a new **unsigned** document with rewritten change hashes and no
+    /// authors, signatures, publication state or local drafts, regardless of
+    /// whether `self` is in required signing mode. It therefore carries no
+    /// signature or publication guarantee and cannot be merged or loaded into
+    /// a required-mode document. `self` is left unchanged, including any
+    /// unpublished drafts and pending incoming groups.
     ///
     // Anonymization replaces actor IDs, map keys, mark names, scalar values, change metadata, and
     // extra bytes. It retains the change graph, operation and object types, sequence positions,
@@ -531,7 +561,7 @@ impl Automerge {
     /// Returns an error if named or anonymous actor history belongs to a
     /// different local identity. Rejection leaves the selected actor unchanged.
     #[deprecated(
-        since = "0.12.0",
+        since = "0.13.0",
         note = "configure an Author and let Automerge manage actors"
     )]
     pub fn set_actor(&mut self, actor: ActorId) -> Result<&mut Self, AutomergeError> {
@@ -610,6 +640,9 @@ impl Automerge {
     }
 
     /// Get the current author of this document.
+    ///
+    /// The author is fixed for the lifetime of the instance; see
+    /// [`Self::fork_with_author`] to obtain an instance with another author.
     pub fn get_author(&self) -> Option<&Author<'static>> {
         self.signing.author()
     }
@@ -921,6 +954,9 @@ impl Automerge {
             }
         }
 
+        // A previously configured actor may have been bound to another author
+        // by an import since it was chosen; a local change must never
+        // continue that author's chain. Checked before any mutation below.
         self.check_actor_author(actor_index)
             .expect("local actor identity must match the document author");
 
@@ -1086,11 +1122,37 @@ impl Automerge {
         Transaction::empty(self, args, opts)
     }
 
-    /// Fork with another local identity and a fresh actor, preserving history.
+    /// Fork this document at the current point for use by a different actor.
+    ///
+    /// This will create a new actor ID for the forked document
+    pub fn fork(&self) -> Self {
+        let mut f = self.clone();
+        f.actor = Actor::Unused(ActorId::random());
+        f
+    }
+
+    /// Fork this document at the current point for use by `author`.
+    ///
+    /// The fork is a full copy with a fresh actor, like [`Self::fork`], whose
+    /// local author is `author` instead of this document's. Unsigned documents
+    /// accept any author, including `None`. Historical authors, proofs and the
+    /// source document are never changed, and the fork inherits no signing
+    /// eligibility it would not otherwise have.
+    ///
+    /// Requesting the same author as this document behaves exactly like
+    /// [`Self::fork`].
     ///
     /// # Errors
-    /// Required signing mode rejects missing/unusable keys and a changed author
-    /// while any applied history remains unpublished.
+    ///
+    /// In required signing mode the new author must be a usable Ed25519 key
+    /// ([`SigningAuthorError`]), and switching to a *different* author is only
+    /// allowed once no local draft remains unpublished
+    /// ([`SigningError::UnpublishedLocalChanges`]). Signed-but-unpublished
+    /// drafts still block; retained incoming groups do not. Publish the drafts
+    /// first (see [`Self::signing_requests`]) or keep the current author.
+    ///
+    /// [`SigningAuthorError`]: crate::SigningAuthorError
+    /// [`SigningError::UnpublishedLocalChanges`]: crate::signature::error::SigningError::UnpublishedLocalChanges
     pub fn fork_with_author(
         &self,
         author: Option<Author<'static>>,
@@ -1098,12 +1160,12 @@ impl Automerge {
         self.fork_with_options(ForkOptions::default().author(author))
     }
 
-    /// Create a full writable fork after checking author and actor choices.
+    /// Create a full fork after checking all requested identity choices.
+    /// Rejection leaves this document unchanged; signing mode is inherited.
     ///
     /// # Errors
-    /// Rejects incompatible actors, unusable signing keys, or a changed signing
-    /// author while local drafts remain unpublished. Rejection leaves the source
-    /// unchanged; the fork inherits its signing mode.
+    /// Rejects unusable required-mode author keys, incompatible actor identities,
+    /// or changing the signing author while local drafts remain unpublished.
     pub fn fork_with_options(&self, options: ForkOptions) -> Result<Self, AutomergeError> {
         let prepared = self.prepare_fork(options, None)?;
         Ok(self.fork_prepared(prepared))
@@ -1160,13 +1222,6 @@ impl Automerge {
             None => Actor::Unused(prepared.actor),
         };
         fork
-    }
-
-    /// Fork this document at the current point with a fresh actor and the same author.
-    pub fn fork(&self) -> Self {
-        let mut f = self.clone();
-        f.actor = Actor::Unused(ActorId::random());
-        f
     }
 
     /// Fork this document at the given heads
@@ -1366,6 +1421,14 @@ impl Automerge {
     /// Best-effort rescue for documents which fail strict loading.
     ///
     /// This returns only the current hydrated value and does not preserve the original change graph.
+    ///
+    /// Rescue is an unsigned diagnostic: it has no author and performs no
+    /// proof validation, so it refuses bytes carrying attached signatures
+    /// with [`SigningError::RescueNotSupported`] rather than presenting
+    /// signed history as if it had been loaded without its guarantees. Load
+    /// such bytes with [`LoadOptions::signing`] instead.
+    ///
+    /// [`SigningError::RescueNotSupported`]: crate::signature::error::SigningError::RescueNotSupported
     pub fn rescue(data: &[u8]) -> Result<hydrate::Value, AutomergeError> {
         match Self::load_with_options_and_mark_validation(
             data,
@@ -1694,14 +1757,15 @@ impl Automerge {
     /// a document snapshot.
     ///
     /// In signing mode each group must carry its own valid proof; bare changes
-    /// are rejected. In unsigned mode attached signatures are ignored.
+    /// are rejected. In unsigned mode any group carrying attached signatures
+    /// is rejected with a load error rather than silently stripped.
     /// All inputs are converted before any history is applied, so a conversion
     /// error leaves the document unchanged. Already-applied changes are ignored.
     ///
     /// ```
-    /// # use automerge::{Automerge, AutomergeError, LoadedGroup};
-    /// # fn example(encoded_groups: Vec<Vec<u8>>, encoded_group: Vec<u8>) -> Result<(), AutomergeError> {
-    /// let mut doc = Automerge::from_config(automerge::Config::default().signing(automerge::Author::from(vec![0x58].into_iter().chain([0x66; 31]).collect::<Vec<_>>())).unwrap());
+    /// # use automerge::{Author, Automerge, AutomergeError, LoadedGroup};
+    /// # fn example(author: Author<'static>, encoded_groups: Vec<Vec<u8>>, encoded_group: Vec<u8>) -> Result<(), AutomergeError> {
+    /// let mut doc = Automerge::from_config(automerge::Config::default().signing(author)?);
     /// doc.apply_changes(encoded_groups)?;
     ///
     /// // Or inspect decoded contents before admitting the same proof-bearing groups.
@@ -1737,23 +1801,45 @@ impl Automerge {
         self.apply_changes_batch_log_patches(changes, patch_log)
     }
 
-    /// Check document-mode compatibility before either document changes.
-    pub(crate) fn try_guard_mode(&self, other: &Self) -> Result<(), AutomergeError> {
-        if !self.signing.is_same_mode(&other.signing) {
-            return Err(crate::signature::error::SigningError::MergeModeMismatch.into());
-        }
-        Ok(())
-    }
-
-    /// Merge the other document's history. In required mode, transfer only
-    /// published source history and proofs; source drafts and pending groups stay
-    /// local. Mixed modes return an error without mutation.
+    /// Takes all the changes in `other` which are not in `self` and applies them
+    ///
+    /// Both documents must share a signing mode; see
+    /// [`Self::merge_and_log_patches`] for the required-mode contract.
     pub fn merge(&mut self, other: &mut Self) -> Result<Vec<ChangeHash>, AutomergeError> {
         self.merge_and_log_patches(other, &mut PatchLog::inactive())
     }
 
     /// Takes all the changes in `other` which are not in `self` and applies them whilst logging
     /// the resulting changes to the current state of the document to `patch_log`
+    ///
+    /// Unsigned documents merge all applied history as before. When both
+    /// documents are in required signing mode, only the source's *published*
+    /// history is transferred, as complete canonical groups with their proofs,
+    /// through the same admission as [`Self::apply_changes`]: the source's
+    /// unpublished drafts and retained pending groups are left out without
+    /// rejecting the merge, and publication is re-derived by the receiver
+    /// (never copied). Receiver drafts unrelated to the imported groups are
+    /// retained as drafts. A merge can publish history the receiver already
+    /// holds as a draft when the source supplies the proof; on such an actual
+    /// publication the receiver's existing local provenance for that history
+    /// is retired, exactly as a locally completed group would retire it. No
+    /// provenance is imported from the source.
+    ///
+    /// A required-mode merge copies the selected source groups (changes and
+    /// proofs) before admitting them, so its peak memory is bounded by the
+    /// published history being transferred. This is a known limitation of
+    /// the current implementation, recorded rather than optimised.
+    ///
+    /// The returned heads are the receiver's applied heads, so in required
+    /// mode they may include receiver drafts that are not yet published.
+    ///
+    /// # Errors
+    ///
+    /// Mixing an unsigned document with a required-mode document in either
+    /// direction fails with [`SigningError::MergeModeMismatch`] before any
+    /// document or log mutation, even when both documents are empty.
+    ///
+    /// [`SigningError::MergeModeMismatch`]: crate::signature::error::SigningError::MergeModeMismatch
     pub fn merge_and_log_patches(
         &mut self,
         other: &mut Self,
@@ -1789,14 +1875,34 @@ impl Automerge {
         Ok(self.get_heads())
     }
 
+    /// Reject a merge between documents of different signing modes.
+    ///
+    /// Shared with [`crate::AutoCommit`], which must decide before closing
+    /// either document's open transaction.
+    pub(crate) fn try_guard_mode(&self, other: &Self) -> Result<(), AutomergeError> {
+        if !self.signing.is_same_mode(&other.signing) {
+            return Err(crate::signature::error::SigningError::MergeModeMismatch.into());
+        }
+        Ok(())
+    }
+
     /// EXPERIMENTAL: Write the set of changes in `hashes` to a "bundle"
     ///
     /// A "bundle" is a compact representation of a set of changes which uses
     /// the same compression tricks as the document encoding we use in
     /// [`Automerge::save`].
     ///
+    /// Only unsigned documents support arbitrary bundles. In signing mode,
+    /// use [`Self::bundle_fragments`] to transfer complete proof-bearing groups.
+    ///
     /// This is an experimental API, the bundle format is still subject to change
     /// and so should not be used in production just yet.
+    ///
+    /// # Errors
+    /// Returns [`SigningError::BundleNotSupported`] in signing mode, or a
+    /// missing-change error when an unsigned bundle names unknown history.
+    ///
+    /// [`SigningError::BundleNotSupported`]: crate::signature::error::SigningError::BundleNotSupported
     pub fn bundle<I>(&self, hashes: I) -> Result<Bundle, AutomergeError>
     where
         I: IntoIterator<Item = ChangeHash>,
@@ -1807,6 +1913,12 @@ impl Automerge {
     }
 
     /// Save the entirety of this document in a compact form.
+    ///
+    /// In required signing mode only *published* history is saved, as a
+    /// snapshot followed by the signatures chunk proving it; local drafts and
+    /// pending incoming groups stay in the live document. The actor table may
+    /// include IDs used only by drafts; this is not a metadata-privacy boundary.
+    /// See [`Self::save`].
     pub fn save_with_options(&self, options: SaveOptions) -> Vec<u8> {
         self.assert_no_unused_actors(true);
         if self.signing.is_required() {
@@ -1831,15 +1943,29 @@ impl Automerge {
 
     /// Save the entirety of this document in a compact form.
     ///
-    /// Note that document snapshots do not carry detached proof chunks and are
-    /// rejected when loading in required signing mode; use
-    /// [`Automerge::fragments`] and [`Automerge::bundle_fragments`] to export
-    /// proof-bearing fragments.
+    /// Unsigned documents produce a plain snapshot. Required-mode documents
+    /// produce a snapshot of the published projection plus one trailing
+    /// signatures chunk carrying the complete proof of a published cover
+    /// (an empty signatures chunk for an empty document). Unpublished drafts
+    /// and pending groups are not saved and remain in the live document; use
+    /// [`Self::has_unpublished_changes`] before shutdown. Neither the signing
+    /// mode nor the published clock is serialized: load with
+    /// [`LoadOptions::signing`] and a local author, and the loader re-derives
+    /// publication from the proof. Unsigned loaders reject signed bytes.
     pub fn save(&self) -> Vec<u8> {
         self.save_with_options(SaveOptions::default())
     }
 
     /// Save the document and attempt to load it before returning - slow!
+    ///
+    /// In required mode this verifies the published projection with a
+    /// required-mode load, not an unsigned one.
+    pub fn save_and_verify(&self) -> Result<Vec<u8>, AutomergeError> {
+        let bytes = self.save();
+        self.verify_saved(&bytes)?;
+        Ok(bytes)
+    }
+
     pub(crate) fn verify_saved(&self, bytes: &[u8]) -> Result<(), AutomergeError> {
         match self.get_author() {
             Some(_) if self.signing.is_required() => {
@@ -1859,18 +1985,40 @@ impl Automerge {
         Ok(())
     }
 
-    pub fn save_and_verify(&self) -> Result<Vec<u8>, AutomergeError> {
-        let bytes = self.save();
-        self.verify_saved(&bytes)?;
-        Ok(bytes)
-    }
-
     /// Save this document, but don't run it through `DEFLATE` afterwards
     pub fn save_nocompress(&self) -> Vec<u8> {
         self.save_with_options(SaveOptions {
             deflate: false,
             ..Default::default()
         })
+    }
+
+    /// Save the changes since the given heads
+    ///
+    /// The output of this will not be a compressed document format, but a series of individual
+    /// changes. This is useful if you know you have only made a small change since the last
+    /// [`Self::save()`] and you want to immediately send it somewhere (e.g. you've inserted a
+    /// single character in a text object).
+    ///
+    /// In required signing mode the output contains only *published* history,
+    /// as complete canonical groups (a change or bundle chunk followed by its
+    /// signatures chunk). A group is emitted whole whenever any of its members
+    /// lies outside the causal past of `heads`, so already-known members and
+    /// proofs may be resent; receivers ignore duplicates. Unpublished drafts
+    /// are never emitted.
+    pub fn save_after(&self, heads: &[ChangeHash]) -> Vec<u8> {
+        if self.signing.is_required() {
+            let mut groups = self.published_groups(heads);
+            // Oldest first so a receiver can apply in one pass.
+            groups.reverse();
+            return self.encode_published_groups(groups);
+        }
+        let changes = self.get_changes(heads);
+        let mut bytes = vec![];
+        for c in changes {
+            bytes.extend(c.raw_bytes());
+        }
+        bytes
     }
 
     fn encode_published_groups(
@@ -1893,28 +2041,6 @@ impl Automerge {
             bytes.extend_from_slice(
                 storage::signatures::SignaturesChunk::encode(group.signatures).bytes(),
             );
-        }
-        bytes
-    }
-
-    /// Save the changes since the given heads
-    ///
-    /// The output of this will not be a compressed document format, but a series of individual
-    /// changes. This is useful if you know you have only made a small change since the last
-    /// [`Self::save()`] and you want to immediately send it somewhere (e.g. you've inserted a
-    /// single character in a text object).
-
-    pub fn save_after(&self, heads: &[ChangeHash]) -> Vec<u8> {
-        if self.signing.is_required() {
-            let mut groups = self.published_groups(heads);
-            // Oldest first so a receiver can apply in one pass.
-            groups.reverse();
-            return self.encode_published_groups(groups);
-        }
-        let changes = self.get_changes(heads);
-        let mut bytes = vec![];
-        for c in changes {
-            bytes.extend(c.raw_bytes());
         }
         bytes
     }
@@ -2336,6 +2462,8 @@ impl Automerge {
                 let mut bytes = if f.head.fragment_level() == 0 && f.members.len() == 1 {
                     self.get_change_by_hash(&f.head)?.bytes().to_vec()
                 } else {
+                    // The proof (if any) is appended below; encode the bare
+                    // chunk rather than going through the public `bundle`.
                     Bundle::for_hashes(&self.ops, &self.change_graph, f.members)
                         .ok()?
                         .bytes()
@@ -2356,6 +2484,15 @@ impl Automerge {
         deps
     }
 
+    /// Get every applied change that is not a transitive dependency of
+    /// `have_deps`.
+    ///
+    /// This is an *inspector*: it returns raw applied history, including
+    /// unpublished drafts in required signing mode, and carries no proof.
+    /// Raw changes are not authenticated transport and are rejected by a
+    /// required-mode receiver; transfer published history with
+    /// [`Self::save`]/[`Self::save_after`], [`Self::merge`] or
+    /// [`Self::bundle_fragments`] instead.
     pub fn get_changes(&self, have_deps: &[ChangeHash]) -> Vec<Change> {
         ChangeCollector::exclude_hashes(&self.ops, &self.change_graph, have_deps)
     }

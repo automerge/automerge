@@ -236,7 +236,8 @@ impl Incoming<'_> {
         prepared_keys: &mut HashMap<Author<'static>, ed25519::VerifyingAuthor<'static>>,
     ) -> Result<PendingGroup, AutomergeError> {
         let changes = match group.body {
-            // Signed snapshots are expanded and verified before ordinary admission.
+            // Signed snapshots are expanded into verified canonical groups
+            // before admission; a snapshot reaching this point is bare.
             LoadedGroupBody::Document(_) => return Err(SigningError::UnauthenticatedChanges.into()),
             LoadedGroupBody::Changes(changes) => changes,
         };

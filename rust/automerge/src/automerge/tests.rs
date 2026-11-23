@@ -11,6 +11,7 @@ use std::convert::TryInto;
 use test_log::test;
 
 #[test]
+#[allow(deprecated)]
 fn insert_op() -> Result<(), AutomergeError> {
     let mut doc = Automerge::new();
     doc.set_actor(ActorId::random()).unwrap();
@@ -48,6 +49,7 @@ fn test_set() -> Result<(), AutomergeError> {
 }
 
 #[test]
+#[allow(deprecated)]
 fn test_list() -> Result<(), AutomergeError> {
     let mut doc = Automerge::new();
     doc.set_actor(ActorId::random()).unwrap();
@@ -70,6 +72,7 @@ fn test_list() -> Result<(), AutomergeError> {
 }
 
 #[test]
+#[allow(deprecated)]
 fn test_del() -> Result<(), AutomergeError> {
     let mut doc = Automerge::new();
     doc.set_actor(ActorId::random()).unwrap();
@@ -473,6 +476,7 @@ fn test_cursors() -> Result<(), AutomergeError> {
 }
 
 #[test]
+#[allow(deprecated)]
 fn test_props_vals_at() -> Result<(), AutomergeError> {
     let mut doc = Automerge::new();
     doc.set_actor("aaaa".try_into().unwrap()).unwrap();
@@ -548,6 +552,7 @@ fn test_props_vals_at() -> Result<(), AutomergeError> {
 }
 
 #[test]
+#[allow(deprecated)]
 fn test_len_at() -> Result<(), AutomergeError> {
     let mut doc = Automerge::new();
     doc.set_actor("aaaa".try_into().unwrap()).unwrap();
@@ -1868,6 +1873,7 @@ fn splice_text_uses_unicode_scalars() {
 }
 
 #[test]
+#[allow(deprecated)]
 fn observe_counter_change_application_overwrite() {
     let mut doc1 = AutoCommit::new();
     doc1.set_actor(ActorId::from([1])).unwrap();

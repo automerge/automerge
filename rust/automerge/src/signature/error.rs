@@ -63,20 +63,20 @@ pub enum ProofError {
 /// Failure to import or apply history in required signing mode.
 #[derive(Debug, thiserror::Error)]
 pub enum SigningError {
-    #[error("sync is not supported in signing mode")]
-    SyncNotSupported,
-    #[error("arbitrary bundling is not supported in signing mode; use fragment export")]
-    BundleNotSupported,
-    #[error("cannot merge documents with different signing modes")]
-    MergeModeMismatch,
-    #[error("rescuing signed history as unsigned is not supported")]
-    RescueNotSupported,
-    #[error("cannot change author while local history remains unpublished")]
-    UnpublishedLocalChanges,
     #[error("unauthenticated changes cannot be imported in signing mode")]
     UnauthenticatedChanges,
     #[error("fork_at is not supported in signing mode")]
     ForkAtNotSupported,
+    #[error("arbitrary bundling is not supported in signing mode; use fragment export")]
+    BundleNotSupported,
+    #[error("merge requires both documents to be in the same signing mode")]
+    MergeModeMismatch,
+    #[error("the sync protocol is not supported in signing mode; transfer published history with save/load or merge")]
+    SyncNotSupported,
+    #[error("rescue cannot evaluate signed data; load it in signing mode instead")]
+    RescueNotSupported,
+    #[error("local changes are still unpublished; publish or keep the current author before forking with a different author")]
+    UnpublishedLocalChanges,
     #[error("incoming group is not a canonical fragment: {0}")]
     InvalidFragment(#[from] InvalidFragment),
     #[error("incoming group has an invalid or incomplete proof: {0}")]
