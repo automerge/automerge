@@ -14,13 +14,13 @@
 //! 4. **Causal selection & equivocation check** (`plan_group_admission`):
 //!    selects the maximal subset causally closed down to `PublishedClock` and
 //!    orders unapplied changes topologically before any mutation.
-//! 5. **Atomic commit** (`commit_admission_plan`): applies operations, merges
-//!    verified proofs, advances `PublishedClock`, reclaims superseded signatures,
-//!    and purges invalidated pending groups.
+//! 5. **Completion**: the document coordinator applies borrowed selected
+//!    contents, then `PreparedAdmission::complete` merges proofs, publishes
+//!    history and removes completed or invalidated pending groups.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 
-use crate::admission::{self, PublishedHistory};
+use crate::admission::{select_fragments, PublishedHistory};
 use crate::change_graph::ChangeGraph;
 use crate::signature::error::{InvalidFragment, ProofError, SigningError};
 use crate::signature::{
@@ -28,9 +28,9 @@ use crate::signature::{
 };
 use crate::storage::load::{LoadedGroup, LoadedGroupBody};
 use crate::storage::signatures::HashEntries;
-use crate::{ActorId, Author, Automerge, AutomergeError, Change, ChangeHash, Fragment, PatchLog};
+use crate::{ActorId, Author, AutomergeError, Change, ChangeHash, Fragment};
 
-use super::{has_signature, SigningState};
+use super::{has_signature, SigningDocument};
 
 /// An intrinsically validated incoming group waiting for missing causal history.
 #[derive(Clone, Debug)]
@@ -66,8 +66,8 @@ pub(super) struct PendingGroups {
 }
 
 impl PendingGroups {
-    pub(super) fn is_empty(&self) -> bool {
-        self.groups.is_empty()
+    pub(super) fn len(&self) -> usize {
+        self.groups.len()
     }
 
     pub(super) fn queued_changes(&self) -> impl Iterator<Item = &Change> {
@@ -157,47 +157,39 @@ impl PublishedHistory for PublishedGraph<'_> {
     }
 }
 
-impl Automerge {
-    /// Validate and admit decoded chunk groups into a required-mode document.
-    pub(crate) fn admit_loaded_groups(
-        &mut self,
-        groups: Vec<LoadedGroup>,
-        log: &mut PatchLog,
-    ) -> Result<(), AutomergeError> {
-        log.validate(&self.ops.actors)?;
-        if groups.is_empty() {
-            return Ok(());
-        }
+/// Required-mode view for incoming validation and causal planning.
+pub(super) struct Incoming<'a> {
+    pub(super) graph: &'a ChangeGraph,
+    pub(super) ops: &'a crate::op_set2::OpSet,
+    pub(super) authors: &'a crate::author::Authors,
+    pub(super) state: &'a super::RequiredSigning,
+}
 
-        let validated_incoming = self.validate_incoming_batch(groups)?;
-
-        let SigningState::Required(signing) = &mut self.signing else {
-            unreachable!("admit_loaded_groups requires signing mode");
-        };
-        let existing_pending = std::mem::take(&mut signing.pending.groups);
-
-        match self.resolve_and_apply_groups(existing_pending.clone(), validated_incoming, log) {
-            Ok(()) => Ok(()),
-            Err(error) => {
-                if let SigningState::Required(signing) = &mut self.signing {
-                    signing.pending.groups = existing_pending;
-                }
-                Err(error)
-            }
-        }
+impl Incoming<'_> {
+    fn has_actor_seq(&self, change: &Change) -> bool {
+        self.ops
+            .lookup_actor(change.actor_id())
+            .is_some_and(|actor| self.graph.seq_for_actor(actor) >= change.seq())
     }
 
-    fn resolve_and_apply_groups(
-        &mut self,
-        existing_pending: Vec<PendingGroup>,
-        incoming: Vec<PendingGroup>,
-        log: &mut PatchLog,
-    ) -> Result<(), AutomergeError> {
-        let candidates = Self::collect_candidate_groups(existing_pending, incoming);
+    /// Plan without mutating pending history. Blocked groups remain pending;
+    /// disproved old groups are traced and dropped on completion. Invalid new
+    /// input or planning conflicts leave the document's pending owner unchanged.
+    pub(super) fn prepare(
+        &self,
+        groups: Vec<LoadedGroup>,
+    ) -> Result<PreparedAdmission, AutomergeError> {
+        let incoming = self.validate_incoming_batch(groups)?;
+        let candidates =
+            Self::collect_candidate_groups(self.state.pending.groups.clone(), incoming);
         let ancestry = self.resolve_unapplied_ancestry(&candidates);
         let evaluated = self.verify_resolved_groups(&candidates, &ancestry)?;
         let plan = self.plan_group_admission(&candidates, &ancestry, &evaluated)?;
-        self.commit_admission_plan(candidates, evaluated.verified, plan, log)
+        Ok(PreparedAdmission {
+            candidates,
+            verified: evaluated.verified,
+            plan,
+        })
     }
 
     // --- Stage 1: Intrinsic per-group validation ---
@@ -214,7 +206,7 @@ impl Automerge {
         for group in &groups {
             if let LoadedGroupBody::Changes(changes) = &group.body {
                 for change in changes {
-                    if change.seq() == 1 && !self.change_graph.has_change(&change.hash()) {
+                    if change.seq() == 1 && !self.graph.has_change(&change.hash()) {
                         incoming_actor_authors
                             .entry(change.actor_id().clone())
                             .or_insert_with(|| change.author().map(Author::into_owned));
@@ -244,6 +236,7 @@ impl Automerge {
         prepared_keys: &mut HashMap<Author<'static>, ed25519::VerifyingAuthor<'static>>,
     ) -> Result<PendingGroup, AutomergeError> {
         let changes = match group.body {
+            // Snapshots are not admissible in required mode at this boundary.
             LoadedGroupBody::Document => return Err(SigningError::SnapshotNotSupported.into()),
             LoadedGroupBody::Changes(changes) => changes,
         };
@@ -298,7 +291,7 @@ impl Automerge {
             if in_group.insert(hash, change).is_some() {
                 return Err(SigningError::from(InvalidFragment::DuplicateMember(hash)).into());
             }
-            if !self.change_graph.has_change(&hash) && self.has_actor_seq(change) {
+            if !self.graph.has_change(&hash) && self.has_actor_seq(change) {
                 return Err(AutomergeError::duplicate_seq(change));
             }
             let key = (change.actor_id().clone(), seq);
@@ -419,7 +412,7 @@ impl Automerge {
 
             let known_author: Option<Option<Author<'_>>> =
                 if let Some(actor_idx) = self.ops.lookup_actor(actor) {
-                    (self.change_graph.seq_for_actor(actor_idx) > 0)
+                    (self.graph.seq_for_actor(actor_idx) > 0)
                         .then(|| self.authors.get_author_for_actor(actor_idx))
                 } else if let Some(author) = group_seq1_authors.get(actor) {
                     Some(author.clone())
@@ -488,7 +481,7 @@ impl Automerge {
         for candidate in candidates {
             for change in &candidate.group.changes {
                 let hash = change.hash();
-                if self.change_graph.has_change(&hash) {
+                if self.graph.has_change(&hash) {
                     continue;
                 }
                 if self.has_actor_seq(change) {
@@ -529,7 +522,7 @@ impl Automerge {
         for (&hash, &change) in changes_by_hash {
             let mut missing_deps = 0usize;
             for dep in change.deps() {
-                if !self.change_graph.has_change(dep) {
+                if !self.graph.has_change(dep) {
                     missing_deps += 1;
                     if changes_by_hash.contains_key(dep) {
                         dependents.entry(*dep).or_default().push(hash);
@@ -585,7 +578,7 @@ impl Automerge {
                 let already_applied = self
                     .ops
                     .lookup_actor(change.actor_id())
-                    .is_some_and(|idx| self.change_graph.seq_for_actor(idx) > 0);
+                    .is_some_and(|idx| self.graph.seq_for_actor(idx) > 0);
                 if already_applied {
                     broken_chain_cause.insert(hash, hash);
                 } else {
@@ -613,7 +606,7 @@ impl Automerge {
     ) -> Option<Option<Author<'static>>> {
         let target_seq = change.seq() - 1;
         for dep in change.deps() {
-            if let Some((actor_idx, seq)) = self.change_graph.actor_seq_for_hash(dep) {
+            if let Some((actor_idx, seq)) = self.graph.actor_seq_for_hash(dep) {
                 if u64::from(seq) == target_seq && &self.ops.actors[actor_idx] == change.actor_id()
                 {
                     return Some(
@@ -657,7 +650,14 @@ impl Automerge {
                 }
                 Err(error) => match candidate.origin {
                     Origin::IncomingBatch => return Err(error),
-                    Origin::ExistingPending => continue,
+                    Origin::ExistingPending => {
+                        tracing::debug!(
+                            head = %candidate.group.head,
+                            reason = %error,
+                            "dropping disproved pending group"
+                        );
+                        continue;
+                    }
                 },
             }
         }
@@ -684,7 +684,7 @@ impl Automerge {
 
         let all_resolved = group.changes.iter().all(|change| {
             let hash = change.hash();
-            self.change_graph.has_change(&hash) || ancestry.valid_authors.contains_key(&hash)
+            self.graph.has_change(&hash) || ancestry.valid_authors.contains_key(&hash)
         });
         if !all_resolved {
             return Ok(GroupEvaluation::WaitingForAncestry);
@@ -719,7 +719,7 @@ impl Automerge {
                 .map(|c| (c.actor_id(), c.seq(), c.hash())),
         );
         let resolve_author = |hash: &ChangeHash| -> Option<Author<'static>> {
-            if let Some((actor_idx, _)) = self.change_graph.actor_seq_for_hash(hash) {
+            if let Some((actor_idx, _)) = self.graph.actor_seq_for_hash(hash) {
                 self.authors
                     .get_author_for_actor(actor_idx)
                     .map(Author::into_owned)
@@ -762,7 +762,7 @@ impl Automerge {
         let mut actor_seqs: HashMap<(&ActorId, u64), ChangeHash> = HashMap::new();
         let mut stack = vec![*head];
         while let Some(hash) = stack.pop() {
-            if self.change_graph.has_change(&hash) || !seen.insert(hash) {
+            if self.graph.has_change(&hash) || !seen.insert(hash) {
                 continue;
             }
             let change = changes_by_hash[&hash];
@@ -789,8 +789,8 @@ impl Automerge {
         memo: &mut BoundaryPastMemo,
     ) -> Fragment {
         let parents_of = |hash: &ChangeHash| -> Vec<ChangeHash> {
-            if self.change_graph.has_change(hash) {
-                self.change_graph.deps(hash).collect()
+            if self.graph.has_change(hash) {
+                self.graph.deps(hash).collect()
             } else {
                 changes_by_hash[hash].deps().to_vec()
             }
@@ -834,10 +834,10 @@ impl Automerge {
             graph_boundary_seeds.extend(b_seeds);
         }
         let seeds_vec: Vec<ChangeHash> = graph_boundary_seeds.into_iter().collect();
-        let graph_boundary_clock = self.change_graph.seq_clock_for_heads(&seeds_vec);
+        let graph_boundary_clock = self.graph.seq_clock_for_heads(&seeds_vec);
 
         let in_boundary_past = |hash: &ChangeHash| -> bool {
-            if let Some((actor_idx, seq)) = self.change_graph.actor_seq_for_hash(hash) {
+            if let Some((actor_idx, seq)) = self.graph.actor_seq_for_hash(hash) {
                 graph_boundary_clock
                     .get_for_actor(&actor_idx)
                     .is_some_and(|covered| seq <= covered.get())
@@ -885,7 +885,7 @@ impl Automerge {
         if let Some(cached) = memo.by_boundary.get(&boundary_node) {
             return cached.clone();
         }
-        if self.change_graph.has_change(&boundary_node) {
+        if self.graph.has_change(&boundary_node) {
             return (HashMap::new(), BTreeSet::from([boundary_node]));
         }
 
@@ -894,7 +894,7 @@ impl Automerge {
         let mut visited = HashSet::new();
         let mut stack = vec![boundary_node];
         while let Some(node) = stack.pop() {
-            if self.change_graph.has_change(&node) {
+            if self.graph.has_change(&node) {
                 graph_seeds.insert(node);
                 continue;
             }
@@ -931,19 +931,17 @@ impl Automerge {
         ancestry: &ResolvedAncestry<'_>,
         evaluated: &EvaluatedGroups,
     ) -> Result<AdmissionPlan, AutomergeError> {
-        let SigningState::Required(signing) = &self.signing else {
-            unreachable!("signing mode checked");
-        };
+        let signing = self.state;
         let fragments: Vec<Fragment> = evaluated
             .verified
             .iter()
             .map(|v| v.fragment.clone())
             .collect();
         let published_view = PublishedGraph {
-            graph: &self.change_graph,
+            graph: self.graph,
             signing,
         };
-        let selection = admission::select_fragments(&published_view, &fragments);
+        let selection = select_fragments(&published_view, &fragments);
         let selected_verified_indices: Vec<usize> = selection.selected_indices().collect();
 
         let mut selected_unapplied: HashSet<ChangeHash> = HashSet::new();
@@ -954,7 +952,7 @@ impl Automerge {
             for change in &group.changes {
                 let hash = change.hash();
                 published_member_hashes.push(hash);
-                if self.change_graph.has_change(&hash) {
+                if self.graph.has_change(&hash) {
                     continue;
                 }
                 if self.has_actor_seq(change) {
@@ -993,91 +991,10 @@ impl Automerge {
         })
     }
 
-    // --- Stage 5: Atomic op application, proof retention, and pending cleanup ---
-
-    fn commit_admission_plan(
-        &mut self,
-        candidates: Vec<CandidateGroup>,
-        verified: Vec<VerifiedGroup>,
-        plan: AdmissionPlan,
-        log: &mut PatchLog,
-    ) -> Result<(), AutomergeError> {
-        if !plan.ordered_unapplied_hashes.is_empty() {
-            let by_hash: HashMap<ChangeHash, &Change> = candidates
-                .iter()
-                .flat_map(|c| c.group.changes.iter().map(|ch| (ch.hash(), ch)))
-                .collect();
-            let ordered_changes: Vec<&Change> = plan
-                .ordered_unapplied_hashes
-                .iter()
-                .map(|hash| by_hash[hash])
-                .collect();
-            self.apply_prepared_changes(ordered_changes, log)?;
-        }
-
-        {
-            let SigningState::Required(signing) = &mut self.signing else {
-                unreachable!("signing mode checked");
-            };
-            for &v_idx in &plan.selected_verified_indices {
-                let proof = &verified[v_idx].proof;
-                let before: Vec<(ChangeHash, bool)> = proof
-                    .verified_hashes()
-                    .map(|hash| {
-                        (
-                            *hash,
-                            has_signature(
-                                &self.change_graph,
-                                &self.authors,
-                                &signing.signatures,
-                                hash,
-                            ),
-                        )
-                    })
-                    .collect();
-                signing
-                    .signatures
-                    .merge_verified(proof)
-                    .expect("admitted signatures match registered document authors");
-                for (hash, had_before) in before {
-                    if !had_before
-                        && has_signature(
-                            &self.change_graph,
-                            &self.authors,
-                            &signing.signatures,
-                            &hash,
-                        )
-                    {
-                        signing.fragment_readiness.signature_added(&hash);
-                    }
-                }
-            }
-            signing
-                .published
-                .include_hashes(&self.change_graph, plan.published_member_hashes);
-            signing.reclaim_covered(&self.change_graph);
-        }
-
-        let mut next_pending = PendingGroups::default();
-        for (idx, candidate) in candidates.into_iter().enumerate() {
-            if plan.remaining_candidate_indices.contains(&idx)
-                && self.pending_group_remains_viable(&candidate.group)
-            {
-                next_pending.push_dedup(candidate.group);
-            }
-        }
-        if let SigningState::Required(signing) = &mut self.signing {
-            signing.pending = next_pending;
-        }
-        Ok(())
-    }
-
     fn pending_group_remains_viable(&self, group: &PendingGroup) -> bool {
-        let SigningState::Required(signing) = &self.signing else {
-            return false;
-        };
+        let signing = self.state;
         let all_published = group.changes.iter().all(|change| {
-            self.change_graph
+            self.graph
                 .actor_seq_for_hash(&change.hash())
                 .is_some_and(|(actor, seq)| signing.published.is_published_actor_seq(actor, seq))
         });
@@ -1086,7 +1003,7 @@ impl Automerge {
         }
         for change in &group.changes {
             let hash = change.hash();
-            if !self.change_graph.has_change(&hash) && self.has_actor_seq(change) {
+            if !self.graph.has_change(&hash) && self.has_actor_seq(change) {
                 return false;
             }
         }
@@ -1102,7 +1019,7 @@ impl Automerge {
             let Some(actor_idx) = self.ops.lookup_actor(in_group[frontier].actor_id()) else {
                 continue;
             };
-            if self.change_graph.seq_for_actor(actor_idx) == 0 {
+            if self.graph.seq_for_actor(actor_idx) == 0 {
                 continue;
             }
             let Some(author) = self.authors.get_author_for_actor(actor_idx) else {
@@ -1113,5 +1030,80 @@ impl Automerge {
             }
         }
         true
+    }
+}
+
+/// Owned input and plan survive releasing the immutable signing view before apply.
+pub(super) struct PreparedAdmission {
+    candidates: Vec<CandidateGroup>,
+    verified: Vec<VerifiedGroup>,
+    plan: AdmissionPlan,
+}
+
+impl PreparedAdmission {
+    pub(super) fn changes(&self) -> Vec<&Change> {
+        let by_hash: HashMap<ChangeHash, &Change> = self
+            .candidates
+            .iter()
+            .flat_map(|candidate| {
+                candidate
+                    .group
+                    .changes
+                    .iter()
+                    .map(|change| (change.hash(), change))
+            })
+            .collect();
+        self.plan
+            .ordered_unapplied_hashes
+            .iter()
+            .map(|hash| by_hash[hash])
+            .collect()
+    }
+
+    pub(super) fn complete(self, signing: &mut SigningDocument<'_>) {
+        for index in self.plan.selected_verified_indices {
+            let proof = &self.verified[index].proof;
+            let newly_verified: Vec<_> = proof
+                .verified_hashes()
+                .filter(|hash| {
+                    !has_signature(
+                        signing.graph,
+                        signing.authors,
+                        &signing.state.signatures,
+                        hash,
+                    )
+                })
+                .copied()
+                .collect();
+            signing
+                .state
+                .signatures
+                .merge_verified(proof)
+                .expect("admitted proof must match historical authors");
+            for hash in newly_verified {
+                signing.state.fragment_readiness.signature_added(&hash);
+            }
+        }
+        signing
+            .state
+            .published
+            .include_hashes(signing.graph, self.plan.published_member_hashes);
+        signing.state.reclaim_covered(signing.graph);
+        signing.state.remove_published_drafts(signing.graph);
+        let incoming = Incoming {
+            graph: signing.graph,
+            ops: signing.ops,
+            authors: signing.authors,
+            state: signing.state,
+        };
+        let mut pending = PendingGroups::default();
+        for (index, candidate) in self.candidates.into_iter().enumerate() {
+            if self.plan.remaining_candidate_indices.contains(&index)
+                && incoming.pending_group_remains_viable(&candidate.group)
+            {
+                pending.push_dedup(candidate.group);
+            }
+        }
+        signing.state.pending = pending;
     }
 }
