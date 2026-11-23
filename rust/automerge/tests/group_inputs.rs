@@ -7,10 +7,19 @@ use automerge::{
 };
 use ed25519_dalek::{Signer, SigningKey};
 
+fn author(seed: u8) -> Author<'static> {
+    let key = SigningKey::from_bytes(&[seed; 32]);
+    Author::from(key.verifying_key().to_bytes().to_vec())
+}
+
+/// A receiving replica with its own (never signing) author.
+fn receiver_author() -> Author<'static> {
+    author(200)
+}
+
 fn signed_history() -> (Automerge, Vec<Vec<u8>>, Vec<ChangeHash>) {
     let key = SigningKey::from_bytes(&[91; 32]);
-    let mut doc = Automerge::signing()
-        .with_author(Some(Author::from(key.verifying_key().to_bytes().to_vec())))
+    let mut doc = Automerge::from_config(automerge::Config::default().signing(author(91)).unwrap())
         .with_actor(ActorId::from([1]));
     let mut hashes = Vec::new();
     // Keep both commits loose, so each needs an independent proof.
@@ -50,9 +59,17 @@ fn signed_history() -> (Automerge, Vec<Vec<u8>>, Vec<ChangeHash>) {
 #[test]
 fn apply_changes_accepts_owned_borrowed_and_preparsed_groups() {
     let (source, wire, hashes) = signed_history();
-    let mut owned = Automerge::signing();
+    let mut owned = Automerge::from_config(
+        automerge::Config::default()
+            .signing(receiver_author())
+            .unwrap(),
+    );
     owned.apply_changes(wire.clone()).unwrap();
-    let mut borrowed = Automerge::signing();
+    let mut borrowed = Automerge::from_config(
+        automerge::Config::default()
+            .signing(receiver_author())
+            .unwrap(),
+    );
     borrowed
         .apply_changes(wire.iter().map(Vec::as_slice))
         .unwrap();
@@ -60,7 +77,11 @@ fn apply_changes_accepts_owned_borrowed_and_preparsed_groups() {
         .iter()
         .map(|bytes| Change::parse_with_signatures(bytes).unwrap())
         .collect();
-    let mut autocommit = AutoCommit::signing();
+    let mut autocommit = AutoCommit::from_config(
+        automerge::Config::default()
+            .signing(receiver_author())
+            .unwrap(),
+    );
     // No Clone bound on the iterator or the inputs is needed.
     autocommit
         .apply_changes(parsed.into_iter().filter(|_| true))
@@ -96,7 +117,11 @@ fn decoded_groups_keep_boundaries_and_patch_logging() {
         .iter()
         .map(|b| b.as_slice().try_into().unwrap())
         .collect();
-    let mut target = Automerge::signing();
+    let mut target = Automerge::from_config(
+        automerge::Config::default()
+            .signing(receiver_author())
+            .unwrap(),
+    );
     let mut log = PatchLog::active();
     // The child group stays pending, with its own attached evidence, across calls.
     target
@@ -122,7 +147,11 @@ fn decoded_groups_keep_boundaries_and_patch_logging() {
 fn conversion_errors_and_missing_proofs_leave_the_whole_batch_unapplied() {
     let (source, wire, hashes) = signed_history();
     let bare = source.get_change_by_hash(&hashes[1]).unwrap();
-    let mut target = Automerge::signing();
+    let mut target = Automerge::from_config(
+        automerge::Config::default()
+            .signing(receiver_author())
+            .unwrap(),
+    );
     assert!(target.apply_changes([wire[0].clone(), vec![0]]).is_err());
     assert!(target.get_heads().is_empty());
     assert!(!target.try_signing().unwrap().is_accepted(&hashes[0]));

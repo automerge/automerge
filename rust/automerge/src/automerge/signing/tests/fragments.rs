@@ -14,8 +14,7 @@ use crate::Fragment;
 
 fn document() -> (Automerge, SigningKey) {
     let k = key(7);
-    let doc = Automerge::signing()
-        .with_author(Some(author(&k)))
+    let doc = Automerge::from_config(crate::Config::default().signing(author(&k)).unwrap())
         .with_actor(ActorId::from([1]));
     (doc, k)
 }
@@ -232,28 +231,24 @@ fn supersession_and_branch_gc_reclaim_covered_candidates_and_signatures() {
     // 2. Shared frontier a1 stays alive across an incomplete sibling branch c1
     //    until c1 is also covered!
     let k1 = key(1);
-    let k2 = key(2);
-    let k3 = key(3);
-    let mut branched = Automerge::signing()
-        .with_author(Some(author(&k1)))
-        .with_actor(ActorId::from([1]));
+    let k2 = k1.clone();
+    let k3 = k1.clone();
+    let mut branched =
+        Automerge::from_config(crate::Config::default().signing(author(&k1)).unwrap())
+            .with_actor(ActorId::from([1]));
     let a1 = append_at_level(&mut branched, None, 1, 0);
-    branched.set_author(Some(author(&k2)));
     branched.set_actor(ActorId::from([2]));
     let b1 = append_at_level(&mut branched, Some(&[a1]), 2, 1);
-    branched.set_author(Some(author(&k3)));
     branched.set_actor(ActorId::from([3]));
     let c1 = append_at_level(&mut branched, Some(&[a1]), 3, 1);
 
     sign_doc(&mut branched, a1, &k1);
     sign_doc(&mut branched, b1, &k2);
 
-    branched.set_author(Some(author(&k1)));
     branched.set_actor(ActorId::from([1]));
     let a2 = append_at_level(&mut branched, Some(&[b1]), 4, 0);
-    branched.set_author(Some(author(&k2)));
     branched.set_actor(ActorId::from([2]));
-    let b2 = commit_with_time(&mut branched, Some(&[a2]), "b2", 5, 7_197);
+    let b2 = commit_with_time(&mut branched, Some(&[a2]), "b2", 5, 160_300);
     assert_eq!(b2.fragment_level(), 2);
     sign_doc(&mut branched, a2, &k1);
     sign_doc(&mut branched, b2, &k2);
@@ -274,9 +269,8 @@ fn supersession_and_branch_gc_reclaim_covered_candidates_and_signatures() {
 
     // Joining above b2 and c1 at level 2 covers c1 via b2's causal past and
     // drops the last obligation on a1!
-    branched.set_author(Some(author(&k3)));
     branched.set_actor(ActorId::from([3]));
-    let c2 = commit_with_time(&mut branched, Some(&[b2, c1]), "c2", 6, 32_269);
+    let c2 = commit_with_time(&mut branched, Some(&[b2, c1]), "c2", 6, 123_801);
     assert_eq!(c2.fragment_level(), 2);
     sign_doc(&mut branched, c2, &k3);
     assert_eq!(

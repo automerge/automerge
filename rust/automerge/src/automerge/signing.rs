@@ -1,6 +1,7 @@
 //! Document-owned signing state and access to required-mode operations.
 //!
-//! Create an empty required-mode document with [`Automerge::signing`] (or load a
+//! Create a required-mode document with [`crate::Config::signing`] and
+//! [`Automerge::from_config`] (or load a
 //! signed fragment stream with [`crate::LoadOptions::signing`]), then obtain a
 //! [`SigningDocument`] through [`Automerge::try_signing`]. The document retains
 //! its accepted clock, pending groups, and required signatures between borrows.
@@ -13,10 +14,11 @@ use crate::admission::{self, AcceptedHistory};
 use crate::author::Authors;
 use crate::change_graph::ChangeGraph;
 use crate::clock::SeqClock;
+use crate::config::DocumentAuthor;
 use crate::op_set2::OpSet;
 use crate::signature::{ed25519, Insert, Signature, SignatureStore};
 use crate::storage::signatures::{HashEntries, SignaturesChunk};
-use crate::{Author, Change, ChangeHash, Fragment, TextEncoding};
+use crate::{Author, Change, ChangeHash, Fragment};
 
 use super::Automerge;
 
@@ -70,28 +72,93 @@ impl AcceptedClock {
 }
 
 /// The document's signing mode, together with the state required by that mode.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub(crate) enum SigningState {
-    #[default]
-    Unsigned,
+    Unsigned { author: Option<Author<'static>> },
     Required(Box<RequiredSigning>),
 }
 
+impl Default for SigningState {
+    fn default() -> Self {
+        Self::Unsigned { author: None }
+    }
+}
+
 impl SigningState {
+    pub(super) fn new(author: DocumentAuthor<'static>, actors: &ActorTable) -> Self {
+        match author {
+            DocumentAuthor::Unset => Self::default(),
+            DocumentAuthor::Set(author) => Self::Unsigned {
+                author: Some(author),
+            },
+            DocumentAuthor::Verifier(author) => {
+                Self::Required(Box::new(RequiredSigning::new(actors, author)))
+            }
+        }
+    }
+
+    pub(super) fn author(&self) -> Option<&Author<'static>> {
+        match self {
+            Self::Unsigned { author } => author.as_ref(),
+            Self::Required(state) => Some(state.author.author()),
+        }
+    }
+
+    pub(crate) fn fork_identity(
+        &self,
+        author: Option<Author<'static>>,
+        graph: &ChangeGraph,
+        pending: bool,
+    ) -> Result<DocumentAuthor<'static>, crate::AutomergeError> {
+        match self {
+            Self::Unsigned { .. } => Ok(author.into()),
+            Self::Required(state) => {
+                let author = author.ok_or(crate::SigningAuthorError(
+                    crate::error::SigningAuthorErrorInner::MissingAuthor,
+                ))?;
+                if &author == state.author.author() {
+                    return Ok(DocumentAuthor::Verifier(state.author.clone()));
+                }
+                let prepared = DocumentAuthor::signing(author)?;
+                if pending
+                    || graph.get_hashes(&[]).iter().any(|hash| {
+                        !graph.actor_seq_for_hash(hash).is_some_and(|(actor, seq)| {
+                            state.accepted.is_accepted_actor_seq(actor, seq)
+                        })
+                    })
+                {
+                    return Err(
+                        crate::signature::error::SigningError::UnpublishedLocalChanges.into(),
+                    );
+                }
+                Ok(prepared)
+            }
+        }
+    }
+
+    pub(crate) fn set_fork_identity(&mut self, identity: DocumentAuthor<'static>) {
+        match (self, identity) {
+            (Self::Unsigned { author }, DocumentAuthor::Unset) => *author = None,
+            (Self::Unsigned { author }, DocumentAuthor::Set(value)) => *author = Some(value),
+            (Self::Required(state), DocumentAuthor::Verifier(value)) => state.author = value,
+            _ => unreachable!("fork preserves signing mode"),
+        }
+    }
+
     pub(crate) fn is_required(&self) -> bool {
         matches!(self, Self::Required(_))
     }
 
     pub(super) fn has_pending_groups(&self) -> bool {
         match self {
-            Self::Unsigned => false,
+            Self::Unsigned { .. } => false,
             Self::Required(signing) => !signing.pending.is_empty(),
         }
     }
 
     pub(super) fn queued_changes(&self) -> impl Iterator<Item = &Change> {
         match self {
-            Self::Unsigned => None,
+            Self::Unsigned { .. } => None,
             Self::Required(signing) => Some(signing.pending.queued_changes()),
         }
         .into_iter()
@@ -142,7 +209,7 @@ impl SigningState {
         levels: R,
     ) -> Vec<Fragment> {
         match self {
-            Self::Unsigned => graph.fragments(levels).collect(),
+            Self::Unsigned { .. } => graph.fragments(levels).collect(),
             Self::Required(signing) => {
                 let mut fragments = OutgoingSelection::new(graph, &signing.fragment_readiness)
                     .collect(|hash| has_signature(graph, authors, &signing.signatures, hash));
@@ -159,7 +226,7 @@ impl SigningState {
         head: ChangeHash,
     ) -> Option<Fragment> {
         match self {
-            Self::Unsigned => graph.get_fragment(head),
+            Self::Unsigned { .. } => graph.get_fragment(head),
             Self::Required(signing) => {
                 let eligible = graph
                     .fragment_requirements(head)
@@ -177,7 +244,7 @@ impl SigningState {
 
     fn required_mut(&mut self) -> Result<&mut RequiredSigning, error::SigningMode> {
         match self {
-            SigningState::Unsigned => Err(error::SigningMode::Required),
+            SigningState::Unsigned { .. } => Err(error::SigningMode::Required),
             SigningState::Required(signing) => Ok(signing),
         }
     }
@@ -186,6 +253,7 @@ impl SigningState {
 /// Long-lived required-mode data owned by the document.
 #[derive(Clone, Debug)]
 pub(crate) struct RequiredSigning {
+    author: ed25519::VerifyingAuthor<'static>,
     accepted: AcceptedClock,
     signatures: SignatureStore,
     fragment_readiness: FragmentReadiness,
@@ -194,8 +262,9 @@ pub(crate) struct RequiredSigning {
 }
 
 impl RequiredSigning {
-    fn new(actors: &ActorTable) -> Self {
+    fn new(actors: &ActorTable, author: ed25519::VerifyingAuthor<'static>) -> Self {
         Self {
+            author,
             accepted: AcceptedClock::new(actors),
             signatures: SignatureStore::default(),
             fragment_readiness: FragmentReadiness::default(),
@@ -315,7 +384,6 @@ pub struct SigningDocument<'a> {
     graph: &'a ChangeGraph,
     ops: &'a OpSet,
     authors: &'a Authors,
-    current_author: Option<&'a Author<'static>>,
     state: &'a mut RequiredSigning,
 }
 
@@ -390,9 +458,7 @@ impl<'a> SigningDocument<'a> {
     /// Only commits created locally on this document are tracked here; changes
     /// imported from outside the document are never returned.
     pub fn required_signatures(&self) -> Vec<ChangeHash> {
-        let Some(current_author) = self.current_author else {
-            return Vec::new();
-        };
+        let current_author = self.state.author.author();
         let current_author = current_author.as_borrowed();
         self.state
             .local_unsigned
@@ -460,19 +526,6 @@ impl AcceptedHistory for SigningDocument<'_> {
 }
 
 impl Automerge {
-    /// Create a new empty document in required signing mode.
-    pub fn signing() -> Self {
-        Self::signing_with_encoding(TextEncoding::platform_default())
-    }
-
-    /// Create a new empty document in required signing mode with an explicit text encoding.
-    pub fn signing_with_encoding(encoding: TextEncoding) -> Self {
-        let mut doc = Self::new_with_encoding(encoding);
-        let signing = SigningState::Required(Box::new(RequiredSigning::new(doc.actors())));
-        doc.signing = signing;
-        doc
-    }
-
     /// Borrow this document's [`SigningDocument`] handle.
     pub fn try_signing(&mut self) -> Result<SigningDocument<'_>, error::SigningMode> {
         let state = self.signing.required_mut()?;
@@ -480,7 +533,6 @@ impl Automerge {
             graph: &self.change_graph,
             ops: &self.ops,
             authors: &self.authors,
-            current_author: self.author.as_ref(),
             state,
         })
     }

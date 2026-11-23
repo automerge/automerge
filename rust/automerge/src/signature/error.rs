@@ -63,6 +63,8 @@ pub enum ProofError {
 /// Failure to import or apply history in required signing mode.
 #[derive(Debug, thiserror::Error)]
 pub enum SigningError {
+    #[error("cannot change author while local history remains unpublished")]
+    UnpublishedLocalChanges,
     #[error("document snapshots are not supported in signing mode")]
     SnapshotNotSupported,
     #[error("unauthenticated changes cannot be imported in signing mode")]
