@@ -87,7 +87,7 @@ fn same_author_fork_commits_pending_work_and_rotates_only_the_fork_actor() {
     assert_ne!(fork.doc.get_actor(), &actor);
     assert_eq!(fork.get_heads(), doc.get_heads());
     assert_eq!(fork.get_author(), Some(&author(7)));
-    assert_eq!(fork.try_signing().unwrap().required_signatures().len(), 1);
+    assert_eq!(fork.signing_requests().unwrap().len(), 1);
     let changes = doc.doc.get_changes(&[]);
     assert_eq!(changes.len(), 1);
     assert_eq!(changes[0].actor_id(), &actor);

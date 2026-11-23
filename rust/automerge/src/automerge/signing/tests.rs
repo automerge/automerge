@@ -9,12 +9,13 @@ use crate::{ActorId, Author, Automerge, Change, ChangeHash, PatchLog, ReadDoc, R
 use super::error;
 use crate::{SignatureBatchOutcome, SignatureInsertError};
 
+mod actor_binding;
+mod author_invariant;
 mod batch;
-mod bundle;
 mod fork;
 mod fragments;
-mod identity;
 mod incoming;
+mod ingress;
 mod merge;
 mod persistence;
 mod requests;
@@ -266,7 +267,7 @@ fn signature_for_a_pending_incoming_change_is_unknown_change() {
     let (b1, _) = pending_group_from_bob(&mut doc, a1, &bob);
 
     assert!(matches!(
-        doc.try_signing().unwrap().insert_signature(&b1, &sig(&bob, &b1)),
+        insert_one(&mut doc, b1, &sig(&bob, &b1)),
         Err(error::InsertSignature::UnknownChange { change }) if change == b1
     ));
 }
@@ -292,7 +293,7 @@ fn publishing_the_dependency_admits_the_pending_group_under_its_recorded_author(
     );
     // `b1`'s recorded author is Bob, so only Bob's signature verifies it.
     assert!(matches!(
-        doc.try_signing().unwrap().insert_signature(&b1, &sig(&alice, &b1)),
+        insert_one(&mut doc, b1, &sig(&alice, &b1)),
         Err(error::InsertSignature::Verification { change, .. }) if change == b1
     ));
 }
@@ -428,7 +429,8 @@ fn required_signatures_omits_an_injected_non_local_change_with_the_local_author(
     )
     .update(&remote_change);
 
-    assert!(doc.try_signing().unwrap().required_signatures().is_empty());
+    assert!(requested_hashes(&mut doc).is_empty());
+    assert!(!doc.has_unpublished_changes());
 }
 
 #[test]
@@ -440,10 +442,119 @@ fn required_signatures_tracks_a_local_commit_until_it_is_signed() {
 
     let local_hash = append_at_level(&mut doc, None, 10, 0);
 
-    assert_eq!(
-        doc.try_signing().unwrap().required_signatures(),
-        vec![local_hash]
-    );
+    assert_eq!(requested_hashes(&mut doc), [local_hash]);
     sign_doc(&mut doc, local_hash, &k1);
-    assert!(doc.try_signing().unwrap().required_signatures().is_empty());
+    assert!(requested_hashes(&mut doc).is_empty());
+    assert!(is_published(&mut doc, &local_hash));
+}
+
+#[test]
+fn a_local_commit_depending_on_injected_history_is_requested_but_never_publishes() {
+    let k1 = key(1);
+    let alice = author(&k1);
+    let mut remote = Automerge::from_config(crate::Config::default().author(Some(alice.clone())))
+        .with_actor(ActorId::from([9]))
+        .unwrap();
+    let mut tx = remote.transaction();
+    tx.put(ROOT, "sneaky", "forged").unwrap();
+    let remote_hash = tx.commit().0.unwrap();
+    let remote_change = remote.get_change_by_hash(&remote_hash).unwrap();
+    let mut doc = Automerge::from_config(crate::Config::default().signing(alice).unwrap())
+        .with_actor(ActorId::from([1]))
+        .unwrap();
+    doc.put_actor(ActorId::from([9]));
+    let _ = crate::automerge::history::History::new(
+        &mut doc.change_graph,
+        &mut doc.deps,
+        &mut doc.authors,
+        &doc.ops.actors,
+        &doc.visibility,
+        &mut doc.signing,
+    )
+    .update(&remote_change);
+
+    // Local signatures are requested even when publication is blocked by
+    // injected history. The imported hash never becomes eligible.
+    let dependent = append_at_level(&mut doc, Some(&[remote_hash]), 11, 0);
+    let local_hash = append_at_level(&mut doc, Some(&[]), 10, 0);
+    let mut expected = vec![local_hash, dependent];
+    expected.sort_unstable();
+    assert_eq!(requested_hashes(&mut doc), expected);
+
+    sign_doc(&mut doc, local_hash, &k1);
+    assert!(is_published(&mut doc, &local_hash));
+    assert!(!is_published(&mut doc, &dependent));
+    assert_eq!(requested_hashes(&mut doc), [dependent]);
+
+    sign_doc(&mut doc, dependent, &k1);
+    assert!(requested_hashes(&mut doc).is_empty());
+    assert!(!is_published(&mut doc, &dependent));
+    assert!(doc.has_unpublished_changes());
+}
+
+#[test]
+fn with_signing_skips_the_callback_on_an_unsigned_document() {
+    let mut unsigned = Automerge::new();
+    assert!(!unsigned.with_signing::<bool>(|_| panic!("unsigned callback")));
+    assert!(matches!(
+        unsigned.try_with_signing::<()>(|_| panic!("unsigned callback")),
+        Err(error::SigningMode::Required)
+    ));
+}
+
+#[test]
+fn with_signing_runs_the_callback_with_required_access() {
+    let mut doc =
+        Automerge::from_config(crate::Config::default().signing(author(&key(7))).unwrap());
+    let hash = append_at_level(&mut doc, None, 1, 0);
+    let value = doc
+        .try_with_signing(|signing| {
+            assert!(!signing.is_published(&hash));
+            signing
+                .signing_requests()
+                .iter()
+                .any(|request| request.hash() == hash)
+        })
+        .unwrap();
+    assert!(value);
+    assert_eq!(doc.with_signing(|_| 7usize), 7);
+}
+
+#[test]
+fn with_required_skips_the_closure_on_unsigned() {
+    use std::cell::Cell;
+    let unsigned = Automerge::new();
+    let calls = Cell::new(0);
+    assert_eq!(
+        unsigned.signing.with_required(|| {
+            calls.set(calls.get() + 1);
+            Err::<(), &str>("never evaluated")
+        }),
+        Ok(())
+    );
+    assert_eq!(calls.get(), 0);
+}
+
+#[test]
+fn with_required_propagates_ok_and_err_from_the_closure() {
+    use std::cell::Cell;
+    let required =
+        Automerge::from_config(crate::Config::default().signing(author(&key(7))).unwrap());
+    let calls = Cell::new(0);
+    assert_eq!(
+        required.signing.with_required(|| {
+            calls.set(calls.get() + 1);
+            Ok::<(), &str>(())
+        }),
+        Ok(())
+    );
+    assert_eq!(calls.get(), 1);
+    assert_eq!(
+        required.signing.with_required(|| {
+            calls.set(calls.get() + 1);
+            Err::<(), &str>("rejected")
+        }),
+        Err("rejected")
+    );
+    assert_eq!(calls.get(), 2);
 }
