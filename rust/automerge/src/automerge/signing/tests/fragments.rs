@@ -517,7 +517,8 @@ fn bundle_fragments_of_an_unsigned_document_emits_bare_content_chunks() {
     sign_doc(&mut doc, fragment.head, &k);
     sign_doc(&mut doc, other, &k);
 
-    let unsigned = Automerge::load(&doc.save()).unwrap();
+    let mut unsigned = Automerge::new();
+    unsigned.apply_changes(doc.get_changes(&[])).unwrap();
     for bytes in unsigned.bundle_fragments(unsigned.fragments(..)) {
         let (remaining, content) = Chunk::parse(Input::new(&bytes)).unwrap();
         assert!(content.checksum_valid());

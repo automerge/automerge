@@ -28,6 +28,13 @@ mod requests;
 use requests::LocalDrafts;
 pub use requests::{SigningRequest, SigningRequests};
 
+pub(crate) mod persistence;
+use crate::signature::error::SigningError;
+use crate::storage::document::CompressConfig;
+use crate::storage::load::{LoadedGroup, LoadedGroupBody};
+use crate::storage::Document;
+use crate::AutomergeError;
+use persistence::PublishedGroup;
 mod batch;
 mod incoming;
 mod readiness;
@@ -106,6 +113,13 @@ impl SigningState {
             DocumentAuthor::Verifier(author) => {
                 Self::Required(Box::new(RequiredSigning::new(actors, author)))
             }
+        }
+    }
+
+    pub(super) fn document_author(&self) -> DocumentAuthor<'static> {
+        match self {
+            Self::Unsigned { author } => author.clone().into(),
+            Self::Required(signing) => DocumentAuthor::Verifier(signing.author.clone()),
         }
     }
 
@@ -580,6 +594,109 @@ impl PublishedHistory for SigningDocument<'_> {
 }
 
 impl Automerge {
+    pub(crate) fn published_groups(&self, known_heads: &[ChangeHash]) -> Vec<PublishedGroup> {
+        let SigningState::Required(signing) = &self.signing else {
+            return Vec::new();
+        };
+        let known = self.change_graph.seq_clock_for_heads(known_heads);
+        persistence::published_cover(&self.change_graph, &self.authors, signing)
+            .into_iter()
+            .filter(|fragment| {
+                fragment.members.iter().any(|hash| {
+                    let (actor, seq) = self
+                        .change_graph
+                        .actor_seq_for_hash(hash)
+                        .expect("cover member is applied");
+                    known
+                        .get_for_actor(&actor)
+                        .is_none_or(|bound| bound.get() < seq)
+                })
+            })
+            .map(|fragment| {
+                let proof = signing
+                    .fragment_proof(&self.change_graph, &self.authors, &fragment)
+                    .expect("published cover fragments carry complete resident proof");
+                let changes = self
+                    .get_changes_by_hashes(fragment.members.iter().copied())
+                    .expect("published members are applied");
+                PublishedGroup {
+                    fragment,
+                    changes,
+                    signatures: proof.into_entries(),
+                }
+            })
+            .collect()
+    }
+
+    pub(crate) fn published_heads(&self) -> Vec<ChangeHash> {
+        let SigningState::Required(signing) = &self.signing else {
+            return self.get_heads();
+        };
+        self.change_graph.heads_at_clock(&signing.published.clock)
+    }
+
+    pub(crate) fn save_published(&self, compress: CompressConfig) -> Vec<u8> {
+        let SigningState::Required(signing) = &self.signing else {
+            unreachable!("published save requires signing mode");
+        };
+        let cover = persistence::published_cover(&self.change_graph, &self.authors, signing);
+        let entries: Vec<(ChangeHash, Signature)> = cover
+            .iter()
+            .flat_map(|fragment| {
+                let requirements = self
+                    .change_graph
+                    .fragment_requirements(fragment.head)
+                    .expect("cover head is applied");
+                requirements
+                    .hashes()
+                    .map(|hash| {
+                        let signature = signature_for(
+                            &self.change_graph,
+                            &self.authors,
+                            &signing.signatures,
+                            hash,
+                        )
+                        .expect("cover fragment has complete resident proof");
+                        (*hash, Signature::ed25519(*signature))
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        let entries = HashEntries::canonicalize(entries)
+            .expect("one signature per distinct frontier is within wire limits");
+
+        let document = Document::at_clock(
+            &self.ops,
+            &self.change_graph,
+            &signing.published.clock,
+            compress,
+        );
+        let mut bytes = document.into_bytes();
+        bytes.extend_from_slice(SignaturesChunk::encode(entries).bytes());
+        bytes
+    }
+
+    pub(crate) fn expand_signed_snapshots(
+        &self,
+        groups: Vec<LoadedGroup>,
+    ) -> Result<Vec<LoadedGroup>, AutomergeError> {
+        let mut expanded = Vec::with_capacity(groups.len());
+        for group in groups {
+            match group.body {
+                LoadedGroupBody::Document(document) => {
+                    let Some(signatures) = &group.signatures else {
+                        return Err(SigningError::UnauthenticatedChanges.into());
+                    };
+                    let snapshot =
+                        persistence::verify_snapshot(&document, signatures, self.text_encoding())?;
+                    expanded.extend(snapshot.groups);
+                }
+                LoadedGroupBody::Changes(_) => expanded.push(group),
+            }
+        }
+        Ok(expanded)
+    }
+
     /// Owned work for every unsigned local draft; imports never qualify.
     pub fn signing_requests(&mut self) -> Result<SigningRequests, error::SigningMode> {
         self.try_with_signing(|signing| signing.signing_requests())

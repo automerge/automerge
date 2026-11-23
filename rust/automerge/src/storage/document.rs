@@ -15,6 +15,8 @@ use crate::storage::ColumnSpec;
 use crate::{ActorId, Author, Automerge, Change, ChangeHash, TextEncoding};
 
 mod compression;
+#[cfg(test)]
+mod projection_tests;
 
 #[allow(dead_code)]
 pub(crate) enum CompressConfig {
@@ -205,19 +207,57 @@ impl<'a> Document<'a> {
         let mut change_out = Vec::new();
         let change_metadata = change_graph.encode(&mut change_out);
 
-        // The ActorTable is sorted by construction, so the stored order is
-        // canonical and a later load can adopt the columns directly.
-        let actors = ActorList::from_stored(op_set.actors.to_vec());
+        Self::from_encoded(
+            ActorList::from_stored(op_set.actors.to_vec()),
+            change_graph.heads().collect(),
+            change_graph.head_indexes().collect(),
+            (op_metadata, ops_out_b),
+            (change_metadata, change_out),
+            compress,
+        )
+    }
 
+    /// Encode a causal historical projection directly from the stored columns.
+    ///
+    /// The clock must be dependency-closed and aligned with the current actor
+    /// table. Visibility masks do not restrict the encoded historical operations.
+    pub(crate) fn at_clock(
+        op_set: &OpSet,
+        change_graph: &ChangeGraph,
+        clock: &crate::clock::SeqClock,
+        compress: CompressConfig,
+    ) -> Document<'static> {
+        let (op_metadata, ops_out_b) =
+            op_set.export_at_clock(&change_graph.clock_from_seq_clock(clock));
+        let mut change_out = Vec::new();
+        let (change_metadata, heads, head_indexes) =
+            change_graph.encode_at_clock(clock, &mut change_out);
+        Self::from_encoded(
+            ActorList::from_stored(op_set.actors.to_vec()),
+            heads,
+            head_indexes,
+            (op_metadata, ops_out_b),
+            (change_metadata, change_out),
+            compress,
+        )
+    }
+
+    fn from_encoded(
+        actors: ActorList,
+        heads: Vec<ChangeHash>,
+        head_indices: Vec<u64>,
+        ops: (RawColumns<Uncompressed>, Vec<u8>),
+        changes: (RawColumns<Uncompressed>, Vec<u8>),
+        compress: CompressConfig,
+    ) -> Document<'static> {
+        let (op_metadata, ops_out_b) = ops;
+        let (change_metadata, change_out) = changes;
         let mut data = Vec::with_capacity(ops_out_b.len() + change_out.len());
         leb128::write::unsigned(&mut data, actors.len() as u64).unwrap();
         for actor in actors.iter() {
             leb128::write::unsigned(&mut data, actor.to_bytes().len() as u64).unwrap();
             data.extend(actor.to_bytes());
         }
-
-        let heads = change_graph.heads().collect::<Vec<_>>();
-        let head_indices = change_graph.head_indexes().collect::<Vec<_>>();
 
         leb128::write::unsigned(&mut data, heads.len() as u64).unwrap();
         for head in &heads {
@@ -298,6 +338,21 @@ impl<'a> Document<'a> {
 
     pub(crate) fn checksum_valid(&self) -> bool {
         self.header.checksum_valid()
+    }
+
+    /// Detach the parsed snapshot from its input buffer.
+    pub(crate) fn into_owned(self) -> Document<'static> {
+        Document {
+            bytes: Cow::Owned(self.bytes.into_owned()),
+            compressed_bytes: self.compressed_bytes.map(|c| Cow::Owned(c.into_owned())),
+            header: self.header,
+            actors: self.actors,
+            heads: self.heads,
+            op_metadata: self.op_metadata,
+            op_bytes: self.op_bytes,
+            change_metadata: self.change_metadata,
+            change_bytes: self.change_bytes,
+        }
     }
 
     /// The document's actor list, in the order it was stored.

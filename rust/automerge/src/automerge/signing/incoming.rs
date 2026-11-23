@@ -236,8 +236,8 @@ impl Incoming<'_> {
         prepared_keys: &mut HashMap<Author<'static>, ed25519::VerifyingAuthor<'static>>,
     ) -> Result<PendingGroup, AutomergeError> {
         let changes = match group.body {
-            // Snapshots are not admissible in required mode at this boundary.
-            LoadedGroupBody::Document => return Err(SigningError::SnapshotNotSupported.into()),
+            // Signed snapshots are expanded and verified before ordinary admission.
+            LoadedGroupBody::Document(_) => return Err(SigningError::UnauthenticatedChanges.into()),
             LoadedGroupBody::Changes(changes) => changes,
         };
         if changes.is_empty() {

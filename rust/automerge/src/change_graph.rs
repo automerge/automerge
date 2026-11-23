@@ -324,6 +324,125 @@ impl ChangeGraph {
         .collect()
     }
 
+    /// Node-ordered change hashes included in a causally closed sequence clock.
+    pub(crate) fn hashes_at_clock(&self, clock: &SeqClock) -> Vec<ChangeHash> {
+        let mut nodes = Vec::new();
+        for (actor, changes) in self.seq_index.iter().enumerate() {
+            if let Some(seq) = clock.get_for_actor(&actor) {
+                nodes.extend_from_slice(&changes[..seq.get() as usize]);
+            }
+        }
+        nodes.sort_unstable();
+        nodes
+            .into_iter()
+            .map(|n| self.hashes[n.0 as usize])
+            .collect()
+    }
+
+    /// Reduce the latest included change per actor to causal heads, using the
+    /// existing clock cache rather than walking every predecessor unconditionally.
+    pub(crate) fn heads_at_clock(&self, clock: &SeqClock) -> Vec<ChangeHash> {
+        let mut candidates: Vec<_> = self
+            .seq_index
+            .iter()
+            .enumerate()
+            .filter_map(|(actor, nodes)| {
+                let seq = clock.get_for_actor(&actor)?;
+                Some(nodes[seq.get() as usize - 1])
+            })
+            .collect();
+        candidates.sort_unstable_by(|a, b| b.cmp(a));
+        let mut represented = clock.empty_like();
+        let mut heads = Vec::new();
+        for node in candidates {
+            let index = node.0 as usize;
+            let actor: usize = self.actors[index].into();
+            if represented
+                .get_for_actor(&actor)
+                .is_some_and(|seq| seq.get() >= self.seq[index])
+            {
+                continue;
+            }
+            heads.push(self.hashes[index]);
+            SeqClock::merge(
+                &mut represented,
+                &self.calculate_clock(BTreeSet::from([node])),
+            );
+        }
+        heads.sort_unstable();
+        heads
+    }
+
+    /// Encode change columns for an aligned, dependency-closed sequence clock.
+    /// Panics if a selected change depends on history outside that clock.
+    pub(crate) fn encode_at_clock(
+        &self,
+        clock: &SeqClock,
+        out: &mut Vec<u8>,
+    ) -> (RawColumns<Uncompressed>, Vec<ChangeHash>, Vec<u64>) {
+        use hexane::EncoderApi;
+        use ids::*;
+        let hashes = self.hashes_at_clock(clock);
+        let changes = self
+            .get_build_metadata(hashes.iter().copied())
+            .expect("clock changes are applied");
+        let positions: HashMap<usize, usize> = changes
+            .iter()
+            .enumerate()
+            .map(|(i, c)| (c.builder, i))
+            .collect();
+        let actor =
+            hexane::Encoder::<ActorIdx>::encode_to(out, changes.iter().map(|c| c.actor.into()));
+        let seq =
+            hexane::DeltaEncoder::<usize>::encode_to(out, changes.iter().map(|c| c.seq as usize));
+        let max_op = hexane::DeltaEncoder::<usize>::encode_to(
+            out,
+            changes.iter().map(|c| c.max_op as usize),
+        );
+        let time = hexane::DeltaEncoder::<i64>::encode_to(out, changes.iter().map(|c| c.timestamp));
+        let message = hexane::Encoder::<Option<String>>::encode_to_unless(
+            out,
+            changes.iter().map(|c| c.message.as_deref()),
+            None,
+        );
+        let num_deps =
+            hexane::Encoder::<usize>::encode_to(out, changes.iter().map(|c| c.deps.len()));
+        let deps = hexane::DeltaEncoder::<usize>::encode_to(
+            out,
+            changes
+                .iter()
+                .flat_map(|c| c.deps.iter().map(|n| positions[&(*n as usize)])),
+        );
+        let meta = hexane::Encoder::<ValueMeta>::encode_to(
+            out,
+            changes.iter().map(|c| ValueMeta::from(c.extra.as_ref())),
+        );
+        let raw_start = out.len();
+        for c in &changes {
+            out.extend_from_slice(&c.extra);
+        }
+        let raw = raw_start..out.len();
+        let heads = self.heads_at_clock(clock);
+        let head_indexes = heads
+            .iter()
+            .map(|h| positions[&(self.nodes_by_hash[h].0 as usize)] as u64)
+            .collect();
+        let columns = [
+            RawColumn::new(ACTOR_COL_SPEC, actor),
+            RawColumn::new(SEQ_COL_SPEC, seq),
+            RawColumn::new(MAX_OP_COL_SPEC, max_op),
+            RawColumn::new(TIME_COL_SPEC, time),
+            RawColumn::new(MESSAGE_COL_SPEC, message),
+            RawColumn::new(DEPS_COUNT_COL_SPEC, num_deps),
+            RawColumn::new(DEPS_VAL_COL_SPEC, deps),
+            RawColumn::new(EXTRA_META_COL_SPEC, meta),
+            RawColumn::new(EXTRA_VAL_COL_SPEC, raw),
+        ]
+        .into_iter()
+        .collect();
+        (columns, heads, head_indexes)
+    }
+
     pub(crate) fn validate(
         bytes: usize,
         cols: &RawColumns<Uncompressed>,
@@ -551,6 +670,48 @@ impl ChangeGraph {
             .copied()
     }
 
+    /// Overwrite the stored extra bytes of the applied head `old` with those of
+    /// `forged`, which must differ only in its extra bytes (and therefore its
+    /// hash). With `rename` the recorded hash is updated to `forged.hash()`;
+    /// without it the snapshot keeps claiming `old` for a body that no longer
+    /// hashes to it. For forging snapshot fixtures that no honest encoder
+    /// produces. `old` must be a head so no dependency edge names it.
+    #[cfg(test)]
+    pub(crate) fn forge_head_extra_bytes_for_test(
+        &mut self,
+        old: &ChangeHash,
+        forged: &Change,
+        rename: bool,
+    ) {
+        let index = self.hash_to_index(old).expect("hash is applied");
+        assert!(self.heads.contains(old), "only heads can be forged");
+        let extra = forged.extra_bytes();
+        let new_hash = forged.hash();
+        let mut raw = Vec::with_capacity(self.extra_bytes_raw.len() + extra.len());
+        let mut meta = hexane::PrefixColumn::<ValueMeta>::new();
+        for i in 0..self.extra_bytes_meta.len() {
+            let current = self.extra_bytes_meta.get(i).unwrap();
+            let range = current.prefix() as usize..current.total() as usize;
+            let bytes: &[u8] = if i == index {
+                extra
+            } else {
+                &self.extra_bytes_raw[range]
+            };
+            meta.push(ValueMeta::from(bytes));
+            raw.extend_from_slice(bytes);
+        }
+        self.extra_bytes_meta = meta;
+        self.extra_bytes_raw = raw;
+        if !rename {
+            return;
+        }
+        self.hashes[index] = new_hash;
+        let node = self.nodes_by_hash.remove(old).unwrap();
+        self.nodes_by_hash.insert(new_hash, node);
+        self.heads.remove(old);
+        self.heads.insert(new_hash);
+    }
+
     fn update_heads(&mut self, change: &Change) {
         for d in change.deps() {
             self.heads.remove(d);
@@ -636,7 +797,6 @@ impl ChangeGraph {
     }
 
     /// Borrow all applied change hashes in graph order.
-    #[cfg(test)]
     pub(crate) fn applied_hashes(&self) -> &[ChangeHash] {
         &self.hashes
     }
@@ -1165,7 +1325,7 @@ impl ChangeGraphCols {
 
 #[derive(Debug, thiserror::Error)]
 #[error("attempted to derive a clock for a change with dependencies we don't have")]
-pub struct MissingDep(ChangeHash);
+pub struct MissingDep(pub(crate) ChangeHash);
 
 #[cfg(test)]
 mod tests {

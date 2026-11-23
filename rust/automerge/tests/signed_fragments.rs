@@ -184,7 +184,7 @@ fn an_unpublished_draft_blocks_changing_or_removing_the_fixed_author() {
 }
 
 #[test]
-fn a_snapshot_of_a_signing_document_cannot_be_loaded_back_in_signing_mode() {
+fn a_bare_snapshot_of_signed_history_cannot_be_loaded_in_signing_mode() {
     // Public-API smoke test for the entry-point restrictions; the full matrix of
     // rejected entry points is pinned in `automerge::signing::tests::incoming`.
     let (key, author) = key_and_author(33);
@@ -195,11 +195,21 @@ fn a_snapshot_of_a_signing_document_cannot_be_loaded_back_in_signing_mode() {
     source.commit().unwrap();
     sign_all_required(&mut source, &key);
 
-    let snapshot = source.save();
+    // The signed snapshot reloads; the same history saved bare does not.
+    let signed_snapshot = source.save();
+    let mut reloaded = AutoCommit::load_with_options(&signed_snapshot, signing_load()).unwrap();
+    assert_eq!(reloaded.get_heads(), source.get_heads());
+    let mut unsigned_copy = AutoCommit::new();
+    unsigned_copy
+        .apply_changes(source.get_changes(&[]))
+        .unwrap();
+    let bare_snapshot = unsigned_copy.save();
 
     assert!(matches!(
-        AutoCommit::load_with_options(&snapshot, signing_load()),
-        Err(AutomergeError::Signing(SigningError::SnapshotNotSupported))
+        AutoCommit::load_with_options(&bare_snapshot, signing_load()),
+        Err(AutomergeError::Signing(
+            SigningError::UnauthenticatedChanges
+        ))
     ));
 }
 

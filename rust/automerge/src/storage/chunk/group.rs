@@ -107,12 +107,18 @@ impl<'a> ChunkGroup<'a> {
 
 impl ChunkGroup<'_> {
     /// Expand the group into changes for the existing unsigned loading path.
+    ///
+    /// Attached signatures are never silently discarded: a signed group is an
+    /// error for unsigned loading.
     fn into_changes(
         self,
         text_encoding: TextEncoding,
         current: &ChangeGraph,
         mark_order: MarkOrderValidation,
     ) -> Result<Vec<Change>, LoadError> {
+        if self.signatures.is_some() {
+            return Err(LoadError::SignedContent);
+        }
         match *self.body {
             ChunkBody::Change(change) | ChunkBody::CompressedChange(change) => Ok(vec![change]),
             ChunkBody::Bundle(bundle) => bundle
@@ -164,11 +170,13 @@ impl<'a> ReadChunkGroup<'a> {
     /// [`InitialLoad::Document`]. For a change, compressed change, or bundle,
     /// returns [`InitialLoad::Changes`] without invoking the callback.
     ///
-    /// Consumes the group and discards its paired signatures.
+    /// Consumes the group. Paired signatures are rejected, since this is the
+    /// unsigned initialization path.
     ///
     /// # Errors
     ///
-    /// Returns an error if snapshot reconstruction or bundle expansion fails.
+    /// Returns an error if the group carries signatures or if snapshot
+    /// reconstruction or bundle expansion fails.
     pub(crate) fn initialize_with<T, E>(
         self,
         from_document: impl FnOnce(Document<'a>) -> Result<T, E>,
@@ -176,6 +184,9 @@ impl<'a> ReadChunkGroup<'a> {
     where
         E: From<LoadError>,
     {
+        if self.group.signatures.is_some() {
+            return Err(LoadError::SignedContent.into());
+        }
         match *self.group.body {
             ChunkBody::Change(change) | ChunkBody::CompressedChange(change) => {
                 Ok(InitialLoad::Changes(vec![change]))
@@ -212,7 +223,9 @@ impl<'a> ReadChunkGroup<'a> {
                     .map_err(|e| LoadError::InvalidBundleChange(e.into()))?;
                 LoadedGroupBody::Changes(changes)
             }
-            ChunkBody::Document(_) => LoadedGroupBody::Document,
+            ChunkBody::Document(document) => {
+                LoadedGroupBody::Document(Box::new(document.into_owned()))
+            }
         };
         Ok(LoadedGroup { body, signatures })
     }
@@ -252,7 +265,13 @@ pub(crate) enum FailureKind {
     Signatures,
     /// Input ended before the next chunk's type could be identified.
     IncompletePrefix,
-    /// A body chunk, unknown chunk type, or invalid magic failed after any preceding group closed.
+    /// A well-framed chunk whose type tag is not recognised.
+    ///
+    /// Signed streams must never skip such a chunk: it may be a proof format
+    /// the receiver does not understand. Unsigned loaders may still recover
+    /// the preceding groups under a permissive partial-load policy.
+    UnknownChunkType,
+    /// A body chunk or invalid magic failed after any preceding group closed.
     Body,
 }
 
@@ -340,7 +359,8 @@ impl<'a> ChunkGroupReader<'a> {
     /// If body conversion fails, the failure boundary is the group's start,
     /// even if the reader has already read ahead into a subsequent group.
     ///
-    /// Discards paired signatures without cryptographic verification or retention.
+    /// Groups with paired signatures fail with [`LoadError::SignedContent`]
+    /// at their own start; they are never silently stripped.
     #[tracing::instrument(skip(self))]
     pub(crate) fn load_changes(
         self,
@@ -588,14 +608,20 @@ impl<'a> ChunkReader<'a> {
                     &error,
                     parse::ParseError::Error(chunk::error::Header::InvalidMagicBytes)
                 );
-                let kind = if matches!(&error, parse::ParseError::Incomplete(_)) {
-                    FailureKind::IncompletePrefix
-                } else {
-                    FailureKind::Body
+                let (kind, error) = match error {
+                    parse::ParseError::Incomplete(_) => (
+                        FailureKind::IncompletePrefix,
+                        LoadError::Parse(error.into()),
+                    ),
+                    parse::ParseError::Error(chunk::error::Header::UnknownChunkType(tag)) => (
+                        FailureKind::UnknownChunkType,
+                        LoadError::UnknownChunkType(tag),
+                    ),
+                    _ => (FailureKind::Body, LoadError::Parse(error.into())),
                 };
                 let failure = Error {
                     remaining: start,
-                    error: LoadError::Parse(error.into()),
+                    error,
                     kind,
                 };
                 // Preserve the diagnostic category. Neither kind identifies

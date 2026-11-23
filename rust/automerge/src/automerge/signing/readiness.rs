@@ -144,11 +144,6 @@ impl<'a> OutgoingSelection<'a> {
         Self { graph, readiness }
     }
 
-    /// Select the signature-ready cover (used for export).
-    fn select_fragments(&self) -> (Vec<Fragment>, HashSet<ChangeHash>) {
-        self.select_cover(|_| true)
-    }
-
     fn select_cover(
         &self,
         mut eligible: impl FnMut(&ChangeHash) -> bool,
@@ -174,12 +169,20 @@ impl<'a> OutgoingSelection<'a> {
         (selected, represented)
     }
 
-    pub(super) fn collect(
+    pub(super) fn collect(&self, has_signature: impl FnMut(&ChangeHash) -> bool) -> Vec<Fragment> {
+        self.collect_from(self.graph.heads(), |_| true, has_signature)
+    }
+
+    /// Collect a proved cover within an eligibility boundary, starting from its
+    /// heads. Filtering precedes cover selection, preserving published fallbacks.
+    pub(super) fn collect_from(
         &self,
+        heads: impl IntoIterator<Item = ChangeHash>,
+        mut eligible: impl FnMut(&ChangeHash) -> bool,
         mut has_signature: impl FnMut(&ChangeHash) -> bool,
     ) -> Vec<Fragment> {
-        let (mut result, represented) = self.select_fragments();
-        let seeds = self.graph.heads().chain(
+        let (mut result, represented) = self.select_cover(&mut eligible);
+        let seeds = heads.into_iter().chain(
             result
                 .iter()
                 .flat_map(|fragment| fragment.boundary.iter().copied()),
@@ -189,7 +192,7 @@ impl<'a> OutgoingSelection<'a> {
             .collect();
         let mut visited = HashSet::new();
         while let Some((_, hash)) = pending.pop() {
-            if represented.contains(&hash) || !visited.insert(hash) {
+            if !eligible(&hash) || represented.contains(&hash) || !visited.insert(hash) {
                 continue;
             }
             for parent in self.graph.deps(&hash) {
