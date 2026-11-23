@@ -546,8 +546,8 @@ impl<'a, T: VDeltaValue<C>, C: VCodec> VerifiedDeltaIter<'a, T, C> {
                 &&& sorted::<T>(c.subrange(s, t)) ==> forall|k: int|
                     s <= k < t ==> {
                         &&& (k < r.start) == T::below(#[trigger] c[k], target)
-                        &&& (k < r.end) == !T::below(target, c[k])
                         &&& (r.start <= k < r.end) == (c[k] == target)
+                        &&& (r.end <= k) == T::below(target, c[k])
                     }
             }),
     {
@@ -753,8 +753,8 @@ impl<T: VDeltaValue<C>, C: VCodec> VerifiedDeltaColumn<T, C> {
             sorted::<T>(self@.subrange(start as int, end as int)) ==> forall|k: int|
                 start <= k < end ==> {
                     &&& (k < r.start) == T::below(#[trigger] self@[k], value)
-                    &&& (k < r.end) == !T::below(value, self@[k])
                     &&& (r.start <= k < r.end) == (self@[k] == value)
+                    &&& (r.end <= k) == T::below(value, self@[k])
                 },
     {
         self.scope_to_value_impl(value, start, end)

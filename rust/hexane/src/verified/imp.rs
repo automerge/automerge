@@ -1676,8 +1676,8 @@ impl<V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedColumn<V, C, K> {
             sorted_for::<V>(self@.subrange(start as int, end as int), value.sv()) ==> forall|k: int|
                 start <= k < end ==> {
                     &&& (k < r.start) == V::below(#[trigger] self@[k], value.sv())
-                    &&& (k < r.end) == !V::below(value.sv(), self@[k])
                     &&& (r.start <= k < r.end) == (self@[k] == value.sv())
+                    &&& (r.end <= k) == V::below(value.sv(), self@[k])
                 },
     {
         if start == end {
@@ -2494,8 +2494,8 @@ impl<'a, V: VValue<C>, C: VCodec, K: VIndex<V, C>> VerifiedIter<'a, V, C, K> {
                 &&& sorted_for::<V>(w, t) ==> forall|j: int|
                     a <= j < a + w.len() ==> {
                         &&& (p + j < r.start) == V::below(#[trigger] o[j], t)
-                        &&& (p + j < r.end) == !V::below(t, o[j])
                         &&& (r.start <= p + j < r.end) == (o[j] == t)
+                        &&& (r.end <= p + j) == V::below(t, o[j])
                     }
             }),
     {
