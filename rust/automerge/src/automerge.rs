@@ -1728,7 +1728,17 @@ impl Automerge {
         self.apply_changes_batch_log_patches(changes, patch_log)
     }
 
-    /// Takes all the changes in `other` which are not in `self` and applies them
+    /// Check document-mode compatibility before either document changes.
+    pub(crate) fn try_guard_mode(&self, other: &Self) -> Result<(), AutomergeError> {
+        if !self.signing.is_same_mode(&other.signing) {
+            return Err(crate::signature::error::SigningError::MergeModeMismatch.into());
+        }
+        Ok(())
+    }
+
+    /// Merge the other document's history. In required mode, transfer only
+    /// published source history and proofs; source drafts and pending groups stay
+    /// local. Mixed modes return an error without mutation.
     pub fn merge(&mut self, other: &mut Self) -> Result<Vec<ChangeHash>, AutomergeError> {
         self.merge_and_log_patches(other, &mut PatchLog::inactive())
     }
@@ -1740,8 +1750,14 @@ impl Automerge {
         other: &mut Self,
         patch_log: &mut PatchLog,
     ) -> Result<Vec<ChangeHash>, AutomergeError> {
+        self.try_guard_mode(other)?;
         if self.signing.is_required() {
-            return Err(crate::signature::error::SigningError::UnauthenticatedChanges.into());
+            let mut groups = other.published_groups(&self.published_heads());
+            // Oldest first so admission resolves causal context in one pass.
+            groups.reverse();
+            let groups = groups.into_iter().map(crate::LoadedGroup::from).collect();
+            self.admit_loaded_groups(groups, patch_log)?;
+            return Ok(self.get_heads());
         }
         // TODO: Make this fallible and figure out how to do this transactionally
         let changes = self.get_changes_added(other);

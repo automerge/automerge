@@ -63,6 +63,8 @@ pub enum ProofError {
 /// Failure to import or apply history in required signing mode.
 #[derive(Debug, thiserror::Error)]
 pub enum SigningError {
+    #[error("cannot merge documents with different signing modes")]
+    MergeModeMismatch,
     #[error("rescuing signed history as unsigned is not supported")]
     RescueNotSupported,
     #[error("cannot change author while local history remains unpublished")]
