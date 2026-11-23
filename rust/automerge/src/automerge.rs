@@ -181,6 +181,15 @@ impl<'a> LoadOptions<'a> {
     /// library for convenience. The way this works is that after loading the document we iterate
     /// through all visible [`ScalarValue::Str`] values and emit a change which creates a new
     /// [`ObjType::Text`] at the same path with the same content.
+    ///
+    /// Under [`LoadOptions::signing`] the migration change is ordinary new
+    /// local work authored by the configured [`LoadOptions::author`]: it is
+    /// an unpublished draft with a signing request, is omitted from saves
+    /// until signed, and the loaded history remains published.
+    #[deprecated(
+        since = "0.12.0",
+        note = "migrate legacy scalar strings explicitly in application code"
+    )]
     pub fn migrate_strings(self, migration: StringMigration) -> Self {
         Self {
             string_migration: migration,

@@ -9,6 +9,13 @@
   After manually selecting an unused actor, importing another identity's history
   for it makes the next local transaction panic instead of continuing that chain.
 
+### Deprecated
+
+* `LoadOptions::migrate_strings` is deprecated. Applications should migrate
+  legacy scalar strings explicitly. The option still performs the same
+  conversion; in signing mode that local migration remains an unpublished
+  draft until proved and published.
+
 ### Fixed
 
 * `ReadDoc::get_marks` is now much faster (a benchmark on a 100,000 character
