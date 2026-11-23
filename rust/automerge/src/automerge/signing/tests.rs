@@ -4,17 +4,20 @@ use ed25519_dalek::{Signer, SigningKey};
 
 use crate::signature::{ed25519, signing_message, Insert};
 use crate::transaction::{CommitOptions, Transactable};
-use crate::{ActorId, Author, Automerge, Change, ChangeHash, PatchLog, ReadDoc, ROOT};
+use crate::{
+    ActorId, Author, Automerge, Change, ChangeHash, PatchLog, ReadDoc, SignatureBatchOutcome,
+    SignatureInsertError, ROOT,
+};
 
 use super::error;
-use crate::{SignatureBatchOutcome, SignatureInsertError};
 
+mod actor_binding;
+mod author_invariant;
 mod batch;
-mod bundle;
 mod fork;
 mod fragments;
-mod identity;
 mod incoming;
+mod ingress;
 mod merge;
 mod persistence;
 mod requests;
@@ -36,6 +39,8 @@ fn sign_doc(doc: &mut Automerge, hash: ChangeHash, key: &SigningKey) {
     insert_one(doc, hash, sig(key, &hash)).unwrap();
 }
 
+/// Insert a single signature through the public batch API and return its
+/// owned per-entry result (the batch itself must not be rejected).
 fn insert_one(
     doc: &mut Automerge,
     hash: ChangeHash,
@@ -53,20 +58,23 @@ fn insert_one(
     }
 }
 
-fn replica(doc: &Automerge, author: Author<'static>, actor: ActorId) -> Automerge {
-    let mut remote = Automerge::from_config(crate::Config::default().author(Some(author)))
-        .with_actor(actor)
-        .unwrap();
-    remote.apply_changes(doc.get_changes(&[])).unwrap();
-    remote
-}
-
+/// Hashes the fixed author should sign next, in hash order.
 fn requested_hashes(doc: &mut Automerge) -> Vec<ChangeHash> {
     doc.signing_requests()
         .unwrap()
         .iter()
         .map(|request| request.hash())
         .collect()
+}
+
+/// An unsigned replica of `doc`'s applied history writing as `author` with
+/// `actor`, for producing foreign-authored changes to deliver back to `doc`.
+fn replica(doc: &Automerge, author: Author<'static>, actor: ActorId) -> Automerge {
+    let mut remote = Automerge::from_config(crate::Config::default().author(Some(author)))
+        .with_actor(actor)
+        .unwrap();
+    remote.apply_changes(doc.get_changes(&[])).unwrap();
+    remote
 }
 
 fn append_at_level(
@@ -119,10 +127,7 @@ fn local_edits_are_visible_immediately_and_accepted_automatically_when_signed() 
     assert!(!doc.try_signing().unwrap().is_accepted(&a1));
 
     assert_eq!(
-        doc.try_signing()
-            .unwrap()
-            .insert_signature(&a1, &sig(&k, &a1))
-            .unwrap(),
+        insert_one(&mut doc, a1, sig(&k, &a1)).unwrap(),
         Insert::Stored,
     );
     assert!(doc.try_signing().unwrap().is_accepted(&a1));
@@ -159,26 +164,22 @@ fn insertion_enforces_recorded_change_authors_and_rejects_bad_inputs() {
     .concat();
     assert_eq!(doc.load_incremental(&b1_bytes).unwrap(), 0);
 
-    {
-        let mut signing = doc.try_signing().unwrap();
-        assert!(matches!(
-            signing.insert_signature(&a1, &sig(&bob, &a1)),
-            Err(error::InsertSignature::Verification { change, .. }) if change == a1
-        ));
-        let unknown = ChangeHash([0xff; 32]);
-        assert!(matches!(
-            signing.insert_signature(&unknown, &sig(&alice, &unknown)),
-            Err(error::InsertSignature::UnknownChange { change }) if change == unknown
-        ));
-        assert!(matches!(
-            signing.insert_signature(&b1, &sig(&bob, &b1)),
-            Err(error::InsertSignature::UnknownChange { change }) if change == b1
-        ));
-    }
-    // Publish `a1`, then retry delivery (batch retry is introduced later); its
+    assert!(matches!(
+        insert_one(&mut doc, a1, sig(&bob, &a1)),
+        Err(error::InsertSignature::Verification { change, .. }) if change == a1
+    ));
+    let unknown = ChangeHash([0xff; 32]);
+    assert!(matches!(
+        insert_one(&mut doc, unknown, sig(&alice, &unknown)),
+        Err(error::InsertSignature::UnknownChange { change }) if change == unknown
+    ));
+    assert!(matches!(
+        insert_one(&mut doc, b1, sig(&bob, &b1)),
+        Err(error::InsertSignature::UnknownChange { change }) if change == b1
+    ));
+    // Publishing `a1` through the batch API admits Bob's pending group; its
     // recorded author is Bob, so only Bob's signature verifies it.
-    sign_doc(&mut doc, a1, &alice);
-    doc.load_incremental(&b1_bytes).unwrap();
+    doc.insert_signatures([(a1, sig(&alice, &a1))]);
     assert!(doc.try_signing().unwrap().is_accepted(&a1));
     assert!(doc.try_signing().unwrap().is_accepted(&b1));
     assert_eq!(
@@ -186,17 +187,12 @@ fn insertion_enforces_recorded_change_authors_and_rejects_bad_inputs() {
         Some(author(&bob))
     );
     assert!(matches!(
-        doc.try_signing().unwrap().insert_signature(&b1, &sig(&alice, &b1)),
+        insert_one(&mut doc, b1, sig(&alice, &b1)),
         Err(error::InsertSignature::Verification { change, .. }) if change == b1
     ));
 
-    // Signing documents cannot be constructed without a usable author, so the
-    // missing- and invalid-author insertion failures only arise for imported
-    // history; see `incoming`.
-    assert!(crate::Config::default()
-        .signing(Author::from(vec![1, 2, 3]))
-        .map(Automerge::from_config)
-        .is_err());
+    // Missing- and invalid-author insertion failures can only arise for
+    // imported history; see `incoming`. Config owns constructor-key validation.
 }
 
 #[test]
@@ -348,14 +344,84 @@ fn required_signatures_never_returns_non_local_changes_even_with_matching_author
     )
     .update(&remote_change);
 
-    assert!(doc.try_signing().unwrap().required_signatures().is_empty());
+    assert!(requested_hashes(&mut doc).is_empty());
+    assert!(!doc.has_unpublished_changes());
 
-    // A commit actually authored locally on `doc` is tracked and cleared once signed.
-    let local_hash = append_at_level(&mut doc, None, 10, 0);
-    assert_eq!(
-        doc.try_signing().unwrap().required_signatures(),
-        vec![local_hash]
-    );
+    // Local signatures are requested even when publication is blocked by
+    // injected history. The imported hash never becomes eligible.
+    let dependent = append_at_level(&mut doc, Some(&[remote_hash]), 11, 0);
+    let local_hash = append_at_level(&mut doc, Some(&[]), 10, 0);
+    let mut expected = vec![local_hash, dependent];
+    expected.sort_unstable();
+    assert_eq!(requested_hashes(&mut doc), expected);
     sign_doc(&mut doc, local_hash, &k1);
-    assert!(doc.try_signing().unwrap().required_signatures().is_empty());
+    assert!(doc.try_signing().unwrap().is_accepted(&local_hash));
+    assert!(!doc.try_signing().unwrap().is_accepted(&dependent));
+    assert_eq!(requested_hashes(&mut doc), [dependent]);
+    sign_doc(&mut doc, dependent, &k1);
+    assert!(requested_hashes(&mut doc).is_empty());
+    assert!(!doc.try_signing().unwrap().is_accepted(&dependent));
+    assert!(doc.has_unpublished_changes());
+}
+
+#[test]
+fn scoped_signing_access_skips_unsigned_callbacks_and_carries_required_access() {
+    let mut unsigned = Automerge::new();
+    assert_eq!(
+        unsigned.with_signing::<bool>(|_| panic!("unsigned callback")),
+        false
+    );
+    assert!(matches!(
+        unsigned.try_with_signing::<()>(|_| panic!("unsigned callback")),
+        Err(error::SigningMode::Required)
+    ));
+    let mut doc =
+        Automerge::from_config(crate::Config::default().signing(author(&key(7))).unwrap());
+    let hash = append_at_level(&mut doc, None, 1, 0);
+    let value = doc
+        .try_with_signing(|signing| {
+            assert!(!signing.is_accepted(&hash));
+            signing
+                .signing_requests()
+                .iter()
+                .any(|request| request.hash() == hash)
+        })
+        .unwrap();
+    assert!(value);
+    assert_eq!(doc.with_signing(|_| 7usize), 7);
+}
+
+#[test]
+fn with_required_skips_unsigned_and_propagates_required_results() {
+    use std::cell::Cell;
+
+    let unsigned = Automerge::new();
+    let calls = Cell::new(0);
+    assert_eq!(
+        unsigned.signing.with_required(|| {
+            calls.set(calls.get() + 1);
+            Err::<(), &str>("never evaluated")
+        }),
+        Ok(())
+    );
+    assert_eq!(calls.get(), 0);
+
+    let required =
+        Automerge::from_config(crate::Config::default().signing(author(&key(7))).unwrap());
+    assert_eq!(
+        required.signing.with_required(|| {
+            calls.set(calls.get() + 1);
+            Ok::<(), &str>(())
+        }),
+        Ok(())
+    );
+    assert_eq!(calls.get(), 1);
+    assert_eq!(
+        required.signing.with_required(|| {
+            calls.set(calls.get() + 1);
+            Err::<(), &str>("rejected")
+        }),
+        Err("rejected")
+    );
+    assert_eq!(calls.get(), 2);
 }

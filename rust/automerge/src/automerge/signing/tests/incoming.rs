@@ -37,10 +37,7 @@ fn sig(key: &SigningKey, hash: ChangeHash) -> Signature {
 
 fn sign_doc(doc: &mut Automerge, hash: ChangeHash, key: &SigningKey) {
     let raw = ed25519::Signature::from_bytes(key.sign(&signing_message(&hash)).to_bytes());
-    doc.try_signing()
-        .unwrap()
-        .insert_signature(&hash, &raw)
-        .unwrap();
+    super::insert_one(doc, hash, raw).unwrap();
 }
 
 fn append_at_level(
@@ -213,7 +210,13 @@ fn missing_malformed_or_invalid_proofs_do_not_mutate_state() {
     let encoded = sender.bundle_fragments(sender.fragments(..));
     let valid_f = &encoded[0];
     let change_a2 = sender.get_change_by_hash(&a2).unwrap();
-    let bundle_a2 = sender.bundle([a2]).unwrap();
+    // Bare fixtures come from an unsigned replica: a required-mode document
+    // never emits an unauthenticated bundle.
+    let mut unsigned_sender = Automerge::new();
+    unsigned_sender
+        .apply_changes(sender.get_changes(&[]))
+        .unwrap();
+    let bundle_a2 = unsigned_sender.bundle([a2]).unwrap();
 
     for bad_stream in [
         [valid_f.as_slice(), bundle_a2.bytes()].concat(),
@@ -299,13 +302,18 @@ fn neither_other_groups_nor_resident_evidence_repairs_an_incomplete_proof() {
     let b1 = append_at_level(&mut sender, None, "b", 2, 1);
     sender.set_actor(ActorId::from([1])).unwrap();
     let a2 = append_at_level(&mut sender, None, "c", 3, 1);
+    // Hand-rolled proofs need bare bundles, which only unsigned documents emit.
+    let mut unsigned_sender = Automerge::new();
+    unsigned_sender
+        .apply_changes(sender.get_changes(&[]))
+        .unwrap();
 
     let f_incomplete = attach_signatures(
-        sender.bundle([a1, b1]).unwrap().bytes(),
+        unsigned_sender.bundle([a1, b1]).unwrap().bytes(),
         [(b1, sig(&k1, b1))],
     );
     let g_with_extra = attach_signatures(
-        sender.bundle([a2]).unwrap().bytes(),
+        unsigned_sender.bundle([a2]).unwrap().bytes(),
         [(a1, sig(&k1, a1)), (a2, sig(&k1, a2))],
     );
 
@@ -519,25 +527,26 @@ fn overlaps_forged_orphans_local_boundaries_partial_tails_and_bypasses() {
     .unwrap();
     assert!(recovered.get_heads().is_empty());
 
-    // Bare snapshots and unauthenticated entry points reject. Signed snapshots reload.
+    // Entry-point bypasses: bare snapshots, apply_changes, and sync all
+    // reject; merge transfers published history only through admission. The
+    // signed snapshot of the same history loads.
     let signed_snapshot = source.save();
     let from_snapshot = Automerge::load_with_options(&signed_snapshot, signing_load()).unwrap();
     assert_eq!(from_snapshot.get_heads(), source.get_heads());
-    assert!(Automerge::load(&signed_snapshot).is_err());
     let mut unsigned_copy = Automerge::new();
     unsigned_copy
         .apply_changes(source.get_changes(&[]))
         .unwrap();
-    let snapshot = unsigned_copy.save();
+    let bare_snapshot = unsigned_copy.save();
     assert!(matches!(
-        Automerge::load_with_options(&snapshot, signing_load()),
+        Automerge::load_with_options(&bare_snapshot, signing_load()),
         Err(AutomergeError::Signing(
             SigningError::UnauthenticatedChanges
         ))
     ));
     let mut target = new_receiver();
     assert!(matches!(
-        target.load_incremental(&snapshot),
+        target.load_incremental(&bare_snapshot),
         Err(AutomergeError::Signing(
             SigningError::UnauthenticatedChanges
         ))
@@ -548,7 +557,11 @@ fn overlaps_forged_orphans_local_boundaries_partial_tails_and_bypasses() {
             SigningError::UnauthenticatedChanges
         ))
     ));
-    assert_eq!(target.merge(&mut source).unwrap(), source.get_heads());
+    let mut unpublished = source.clone();
+    unpublished.set_actor(ActorId::from([4])).unwrap();
+    let draft = append_at_level(&mut unpublished, None, "draft", 9, 0);
+    assert_eq!(target.merge(&mut unpublished).unwrap(), source.get_heads());
+    assert!(!target.has_change(&draft));
     assert!(matches!(
         target.merge(&mut unsigned_copy),
         Err(AutomergeError::Signing(SigningError::MergeModeMismatch))

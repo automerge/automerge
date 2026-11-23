@@ -2,8 +2,8 @@
 use automerge::signature::{ed25519, signing_message};
 use automerge::transaction::{CommitOptions, Transactable};
 use automerge::{
-    ActorId, Author, AutoCommit, Automerge, AutomergeError, Change, ChangeHash, LoadedGroup,
-    PatchLog, ReadDoc, ROOT,
+    ActorId, Author, AutoCommit, Automerge, AutomergeError, Change, ChangeHash, LoadOptions,
+    LoadedGroup, PatchLog, ReadDoc, ROOT,
 };
 use ed25519_dalek::{Signer, SigningKey};
 
@@ -15,6 +15,19 @@ fn author(seed: u8) -> Author<'static> {
 /// A receiving replica with its own (never signing) author.
 fn receiver_author() -> Author<'static> {
     author(200)
+}
+
+/// Whether `hash` is published: a required-mode save is the published
+/// projection, so the change is published iff a fresh required-mode load of
+/// the saved bytes contains it.
+fn is_published(doc: &Automerge, hash: &ChangeHash) -> bool {
+    Automerge::load_with_options(
+        &doc.save(),
+        LoadOptions::new().signing(receiver_author()).unwrap(),
+    )
+    .expect("a required-mode save reloads in required mode")
+    .get_change_by_hash(hash)
+    .is_some()
 }
 
 fn signed_history() -> (Automerge, Vec<Vec<u8>>, Vec<ChangeHash>) {
@@ -40,13 +53,15 @@ fn signed_history() -> (Automerge, Vec<Vec<u8>>, Vec<ChangeHash>) {
             }
         }
     }
-    for hash in &hashes {
+    let batch = hashes.iter().map(|hash| {
         let sig = ed25519::Signature::from_bytes(key.sign(&signing_message(hash)).to_bytes());
-        doc.try_signing()
-            .unwrap()
-            .insert_signature(hash, &sig)
-            .unwrap();
-    }
+        (*hash, sig)
+    });
+    assert!(matches!(
+        doc.insert_signatures(batch),
+        automerge::SignatureBatchOutcome::Completed { .. }
+    ));
+    assert!(!doc.has_unpublished_changes());
     let wire = hashes
         .iter()
         .map(|hash| {
@@ -90,8 +105,9 @@ fn apply_changes_accepts_owned_borrowed_and_preparsed_groups() {
     for target in [&mut owned, &mut borrowed] {
         assert_eq!(target.get_heads(), source.get_heads());
         for hash in &hashes {
-            assert!(target.try_signing().unwrap().is_accepted(hash));
+            assert!(is_published(target, hash));
         }
+        assert!(!target.has_unpublished_changes());
         // Attached evidence survived parsing, conversion, and admission.
         for (bytes, hash) in wire.iter().zip(&hashes) {
             let fragment = target.get_fragment(*hash).unwrap();
@@ -99,7 +115,7 @@ fn apply_changes_accepts_owned_borrowed_and_preparsed_groups() {
         }
     }
     assert_eq!(autocommit.get_heads(), source.get_heads());
-    assert!(autocommit.try_signing().unwrap().is_accepted(&hashes[1]));
+    assert!(!autocommit.has_unpublished_changes());
 
     // Bare Changes remain supported in unsigned mode, including the batch alias.
     let changes = source.get_changes(&[]);
@@ -135,7 +151,7 @@ fn decoded_groups_keep_boundaries_and_patch_logging() {
         .unwrap();
     assert_eq!(target.get_heads(), source.get_heads());
     assert!(!target.make_patches(&mut log).is_empty());
-    assert!(target.try_signing().unwrap().is_accepted(&hashes[1]));
+    assert!(is_published(&target, &hashes[1]));
     let mut retry_log = PatchLog::active();
     target
         .apply_changes_log_patches(groups, &mut retry_log)
@@ -155,7 +171,7 @@ fn conversion_errors_and_missing_proofs_leave_the_whole_batch_unapplied() {
     );
     assert!(target.apply_changes([wire[0].clone(), vec![0]]).is_err());
     assert!(target.get_heads().is_empty());
-    assert!(!target.try_signing().unwrap().is_accepted(&hashes[0]));
+    assert!(!is_published(&target, &hashes[0]));
 
     let mixed = [
         LoadedGroup::try_from(wire[0].clone()).unwrap(),

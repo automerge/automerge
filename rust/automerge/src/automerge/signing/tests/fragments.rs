@@ -25,6 +25,8 @@ fn append(doc: &mut Automerge, heads: Option<&[ChangeHash]>, level: usize) -> Ch
     append_at_level(doc, heads, value, level)
 }
 
+/// Commit `prop = value` on `heads` at a precomputed `time` chosen so the
+/// change hash reaches fragment level 2 for that deterministic fixture.
 fn commit_with_time(
     doc: &mut Automerge,
     heads: Option<&[ChangeHash]>,
@@ -346,7 +348,6 @@ fn supersession_and_branch_gc_reclaim_covered_candidates_and_signatures() {
     let before = doc.fragments(..);
     assert_eq!(before.len(), 2);
 
-    // Precomputed level-2 commit timestamp for this deterministic fixture.
     let new = commit_with_time(&mut doc, None, "value", 4, 45_260);
     assert_eq!(new.fragment_level(), 2);
     assert!(doc.change_graph.get_fragment(old).is_none());
@@ -356,7 +357,7 @@ fn supersession_and_branch_gc_reclaim_covered_candidates_and_signatures() {
 
     sign_doc(&mut doc, new, &k);
     let replacement = doc.get_fragment(new).unwrap();
-    assert_eq!(doc.fragments(..), [replacement.clone()]);
+    assert_eq!(doc.fragments(..), std::slice::from_ref(&replacement));
     assert!(doc.fragments(0..=1).is_empty());
     assert_eq!(
         doc.change_graph.get_historical_fragment(old),
@@ -378,8 +379,6 @@ fn supersession_and_branch_gc_reclaim_covered_candidates_and_signatures() {
     // 2. Shared frontier a1 stays alive across an incomplete sibling branch c1
     //    until c1 is also covered!
     let k1 = key(1);
-    let k2 = k1.clone();
-    let k3 = k1.clone();
     let mut branched =
         Automerge::from_config(crate::Config::default().signing(author(&k1)).unwrap())
             .with_actor(ActorId::from([1]))
@@ -391,15 +390,14 @@ fn supersession_and_branch_gc_reclaim_covered_candidates_and_signatures() {
     let c1 = append_at_level(&mut branched, Some(&[a1]), 3, 1);
 
     sign_doc(&mut branched, a1, &k1);
-    sign_doc(&mut branched, b1, &k2);
-
+    sign_doc(&mut branched, b1, &k1);
     branched.set_actor(ActorId::from([1])).unwrap();
     let a2 = append_at_level(&mut branched, Some(&[b1]), 4, 0);
     branched.set_actor(ActorId::from([2])).unwrap();
     let b2 = commit_with_time(&mut branched, Some(&[a2]), "b2", 5, 160_300);
     assert_eq!(b2.fragment_level(), 2);
     sign_doc(&mut branched, a2, &k1);
-    sign_doc(&mut branched, b2, &k2);
+    sign_doc(&mut branched, b2, &k1);
 
     assert_eq!(
         branched
@@ -412,7 +410,7 @@ fn supersession_and_branch_gc_reclaim_covered_candidates_and_signatures() {
         1,
         "shared frontier a1 must stay retained for incomplete branch c1",
     );
-    sign_doc(&mut branched, c1, &k3);
+    sign_doc(&mut branched, c1, &k1);
     assert!(branched.get_fragment(c1).is_some());
 
     // Joining above b2 and c1 at level 2 covers c1 via b2's causal past and
@@ -420,7 +418,7 @@ fn supersession_and_branch_gc_reclaim_covered_candidates_and_signatures() {
     branched.set_actor(ActorId::from([3])).unwrap();
     let c2 = commit_with_time(&mut branched, Some(&[b2, c1]), "c2", 6, 123_801);
     assert_eq!(c2.fragment_level(), 2);
-    sign_doc(&mut branched, c2, &k3);
+    sign_doc(&mut branched, c2, &k1);
     assert_eq!(
         branched
             .try_signing()
@@ -467,6 +465,8 @@ fn bundle_fragments_validates_descriptors_and_preserves_unsigned_encoding() {
     assert_eq!(doc.bundle_fragments([reordered]).len(), 1);
 
     // Unsigned documents continue to emit bare content chunks without proofs.
+    // (A signed save is rejected by the unsigned loader, so copy the history.)
+    assert!(Automerge::load(&doc.save()).is_err());
     let mut unsigned = Automerge::new();
     unsigned.apply_changes(doc.get_changes(&[])).unwrap();
     for bytes in unsigned.bundle_fragments(unsigned.fragments(..)) {

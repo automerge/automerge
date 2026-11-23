@@ -29,7 +29,7 @@ fn rejecting_a_changed_signing_author_keeps_the_autocommit_transaction_open() {
     assert_eq!(doc.pending_ops(), 1);
     let mut same = doc.fork_with_author(Some(a)).unwrap();
     assert_eq!(doc.pending_ops(), 0);
-    assert_eq!(same.try_signing().unwrap().required_signatures().len(), 1);
+    assert_eq!(same.signing_requests().unwrap().len(), 1);
 }
 
 #[test]
