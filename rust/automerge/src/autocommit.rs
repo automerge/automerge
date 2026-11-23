@@ -46,7 +46,7 @@ use crate::{LoadOptions, VerificationMode};
 ///
 /// ## Synchronization
 ///
-/// To synchronise call [`Self::sync()`] which returns an implementation of [`SyncDoc`]
+/// To synchronise call [`Self::sync()`], which checks eligibility before returning [`SyncDoc`] access
 ///
 /// ## Patches, maintaining materialized views
 ///
@@ -92,29 +92,21 @@ impl AutoCommit {
         AutoCommit::default()
     }
 
-    /// Create a document from explicit construction-time choices.
-    /// See [`Automerge::from_config`].
-    pub fn from_config(config: crate::Config) -> Self {
-        Self::from_document(Automerge::from_config(config))
-    }
-
-    fn from_document(doc: Automerge) -> Self {
-        Self {
-            doc,
-            transaction: None,
-            patch_log: PatchLog::inactive(),
-            diff_cursor: Vec::new(),
-            save_cursor: Vec::new(),
-            isolation: None,
-        }
-    }
-
     pub fn diff_opset(&self, other: &AutoCommit) -> Result<(), AutomergeError> {
         self.doc.diff_opset(&other.doc)
     }
 
+    /// Create a document from construction-time configuration.
+    pub fn from_config(config: crate::Config) -> AutoCommit {
+        Self::from_document(Automerge::from_config(config))
+    }
+
     pub fn new_with_encoding(encoding: TextEncoding) -> AutoCommit {
-        let doc = Automerge::new_with_encoding(encoding);
+        Self::from_document(Automerge::new_with_encoding(encoding))
+    }
+
+    /// Wrap a fresh document with no transaction, patches or cursors.
+    fn from_document(doc: Automerge) -> AutoCommit {
         AutoCommit {
             doc,
             transaction: None,
@@ -125,9 +117,13 @@ impl AutoCommit {
         }
     }
 
-    /// Commit pending edits, verify a signature batch and complete publication.
-    /// Unsigned documents are rejected before closing their transaction.
-    /// See [`Automerge::insert_signatures`].
+    /// Verify and insert signatures for applied changes, then complete
+    /// publication once. See [`Automerge::insert_signatures`].
+    ///
+    /// The required-mode check runs first: an unsigned document returns
+    /// [`SignatureBatchOutcome::Rejected`] with its pending transaction left
+    /// open. In required mode the pending transaction is committed, then the
+    /// batch runs with this document's patch collection.
     pub fn insert_signatures(
         &mut self,
         inputs: impl IntoIterator<Item = (ChangeHash, crate::signature::ed25519::Signature)>,
@@ -143,8 +139,13 @@ impl AutoCommit {
         .unwrap_or_else(|never| match never {})
     }
 
-    /// Return owned messages for every unsigned local draft, committing pending
-    /// edits after the mode check. See [`Automerge::signing_requests`].
+    /// Discover the signatures the fixed local author should produce next.
+    /// See [`Automerge::signing_requests`].
+    ///
+    /// The required-mode check runs first: an unsigned document fails with its
+    /// pending transaction left open. In required mode the pending
+    /// transaction is committed so its change can be requested, then the
+    /// owned snapshot is returned.
     pub fn signing_requests(
         &mut self,
     ) -> Result<crate::SigningRequests, crate::signing::error::SigningMode> {
@@ -153,13 +154,21 @@ impl AutoCommit {
         self.doc.signing_requests()
     }
 
-    /// Whether locally committed drafts await publication; pending operations
-    /// and unapplied incoming groups are excluded. This query never commits.
+    /// Whether locally committed drafts remain unpublished. See
+    /// [`Automerge::has_unpublished_changes`].
+    ///
+    /// Read-only: an open transaction is neither closed nor counted, since
+    /// its operations are not applied history yet.
     pub fn has_unpublished_changes(&self) -> bool {
         self.doc.has_unpublished_changes()
     }
 
-    /// Return a copy of this document with its data anonymized.
+    /// Return a copy of this document with its data anonymized, committing
+    /// pending edits first.
+    ///
+    /// The copy is always a new unsigned diagnostic document with rewritten
+    /// hashes and no proofs, drafts or publication state; see
+    /// [`Automerge::anonymize`].
     pub fn anonymize(&mut self) -> Result<Self, AnonymizeError> {
         self.ensure_transaction_closed();
         Ok(Self {
@@ -364,7 +373,28 @@ impl AutoCommit {
         patches
     }
 
-    /// Fork with another local identity, checking before closing pending edits.
+    pub fn fork(&mut self) -> Self {
+        self.ensure_transaction_closed();
+        Self {
+            doc: self.doc.fork(),
+            transaction: self.transaction.clone(),
+            patch_log: PatchLog::inactive(),
+            diff_cursor: vec![],
+            save_cursor: vec![],
+            isolation: None,
+        }
+    }
+
+    /// Fork this document for use by `author`. See
+    /// [`Automerge::fork_with_author`].
+    ///
+    /// # Errors
+    ///
+    /// Eligibility is decided before the open transaction is closed: a
+    /// rejected different-author fork leaves pending edits, author and actor
+    /// untouched. Uncommitted edits count as unpublished local changes in
+    /// required mode. An accepted fork first commits pending edits into this
+    /// document, as [`Self::fork`] does.
     pub fn fork_with_author(
         &mut self,
         author: Option<Author<'static>>,
@@ -372,8 +402,11 @@ impl AutoCommit {
         self.fork_with_options(crate::ForkOptions::default().author(author))
     }
 
-    /// Create a full fork after validating all choices before closing pending
-    /// edits. See [`Automerge::fork_with_options`] for mode and identity rules.
+    /// Check all full-fork choices before committing pending source edits.
+    ///
+    /// # Errors
+    /// See [`Automerge::fork_with_options`]. Pending edits also prevent changing
+    /// a signing author or taking their actor under a different identity.
     pub fn fork_with_options(
         &mut self,
         options: crate::ForkOptions,
@@ -388,18 +421,13 @@ impl AutoCommit {
         Ok(Self::from_document(self.doc.fork_prepared(prepared)))
     }
 
-    pub fn fork(&mut self) -> Self {
-        self.ensure_transaction_closed();
-        Self {
-            doc: self.doc.fork(),
-            transaction: self.transaction.clone(),
-            patch_log: PatchLog::inactive(),
-            diff_cursor: vec![],
-            save_cursor: vec![],
-            isolation: None,
-        }
-    }
-
+    /// Fork this document at the given heads, committing pending edits first.
+    ///
+    /// Not supported in required signing mode: the request is rejected with
+    /// [`SigningError::ForkAtNotSupported`] before the open transaction is
+    /// closed, so pending edits stay pending.
+    ///
+    /// [`SigningError::ForkAtNotSupported`]: crate::signature::error::SigningError::ForkAtNotSupported
     pub fn fork_at(&mut self, heads: &[ChangeHash]) -> Result<Self, AutomergeError> {
         self.doc
             .signing
@@ -439,7 +467,7 @@ impl AutoCommit {
     /// Rejects an actor established under a different named or anonymous
     /// identity, leaving the transaction open and the current actor unchanged.
     #[deprecated(
-        since = "0.12.0",
+        since = "0.13.0",
         note = "configure an Author and let Automerge manage actors"
     )]
     pub fn set_actor(&mut self, actor: ActorId) -> Result<&mut Self, AutomergeError> {
@@ -453,17 +481,19 @@ impl AutoCommit {
         Ok(self)
     }
 
-    /// Check actor identity without closing pending edits.
-    pub fn check_actor_binding(&self, actor: &ActorId) -> Result<(), AutomergeError> {
-        self.doc.check_actor_binding(actor)
-    }
-
     pub fn get_actor(&self) -> &ActorId {
         self.doc.get_actor()
     }
 
     pub fn get_actors_for_author(&self, author: &Author<'_>) -> Vec<ActorId> {
         self.doc.get_actors_for_author(author)
+    }
+
+    /// Read-only check that `actor` may be used by this document's fixed
+    /// author; see [`Automerge::check_actor_binding`]. Does not close the
+    /// open transaction.
+    pub fn check_actor_binding(&self, actor: &ActorId) -> Result<(), AutomergeError> {
+        self.doc.check_actor_binding(actor)
     }
 
     pub fn get_author_for_actor(&self, actor: &ActorId) -> Option<Author<'_>> {
@@ -649,6 +679,10 @@ impl AutoCommit {
     }
 
     /// Takes all the changes in `other` which are not in `self` and applies them
+    ///
+    /// See [`Automerge::merge_and_log_patches`] for the signing-mode contract.
+    /// A mode mismatch is rejected before either document's open transaction
+    /// is closed, so pending edits on both sides are left as they were.
     pub fn merge(&mut self, other: &mut AutoCommit) -> Result<Vec<ChangeHash>, AutomergeError> {
         self.doc.try_guard_mode(&other.doc)?;
         other.ensure_transaction_closed();
@@ -660,6 +694,9 @@ impl AutoCommit {
         self.save_with_options(SaveOptions::default())
     }
 
+    /// See [`Automerge::save_with_options`]. In required signing mode the
+    /// incremental cursor advances to the published heads actually emitted,
+    /// not to the document heads.
     pub fn save_with_options(&mut self, options: SaveOptions) -> Vec<u8> {
         self.ensure_transaction_closed();
         self.doc.remove_unused_actors(true);
@@ -671,13 +708,17 @@ impl AutoCommit {
     }
 
     /// Save the document and attempt to load it before returning - slow!
+    ///
+    /// See [`Automerge::save_and_verify`]: required-mode output is verified
+    /// by a required-mode load of the published projection.
     pub fn save_and_verify(&mut self) -> Result<Vec<u8>, AutomergeError> {
         let bytes = self.save();
         self.doc.verify_saved(&bytes)?;
         Ok(bytes)
     }
 
-    /// EXPERIMENTAL: Write the set of changes in `hashes` to a "bundle"
+    /// EXPERIMENTAL: Write the set of changes in `hashes` to a "bundle".
+    /// See [`Automerge::bundle`] for signing-mode rejection.
     ///
     /// A "bundle" is a compact representation of a set of changes which uses
     /// the same compression tricks as the document encoding we use in
@@ -716,6 +757,11 @@ impl AutoCommit {
     /// changes. This is useful if you know you have only made a small change since the last [`Self::save()`]
     /// and you want to immediately send it somewhere (e.g. you've inserted a single character in a
     /// text object).
+    ///
+    /// In required signing mode only published history is emitted (see
+    /// [`Automerge::save_after`]) and the cursor records the published heads
+    /// that were actually emitted, so drafts published later are still
+    /// included by a subsequent call.
     pub fn save_incremental(&mut self) -> Vec<u8> {
         self.ensure_transaction_closed();
         let bytes = self.doc.save_after(&self.save_cursor);
@@ -915,9 +961,14 @@ impl AutoCommit {
         .expect("AutoCommit's patch log always belongs to its document")
     }
 
-    /// Acquire unsigned sync access, committing pending edits on success.
+    /// Acquire borrowed sync access, committing pending edits only after
+    /// checking that this unsigned document can use the protocol.
     ///
-    /// Required signing mode returns an error before closing the transaction.
+    /// # Errors
+    /// Required signing mode returns [`SigningError::SyncNotSupported`]
+    /// without closing the open transaction.
+    ///
+    /// [`SigningError::SyncNotSupported`]: crate::signature::error::SigningError::SyncNotSupported
     pub fn sync(&mut self) -> Result<impl SyncDoc + '_, AutomergeError> {
         self.doc
             .signing
@@ -1533,6 +1584,10 @@ impl SyncDoc for SyncWrapper<'_> {
 }
 
 #[cfg(test)]
+#[path = "autocommit/author_tests.rs"]
+mod author_tests;
+
+#[cfg(test)]
 mod tests {
 
     fn is_send<S: Send>() {}
@@ -1542,7 +1597,3 @@ mod tests {
         is_send::<super::AutoCommit>();
     }
 }
-
-#[cfg(test)]
-#[path = "autocommit/author_tests.rs"]
-mod author_tests;

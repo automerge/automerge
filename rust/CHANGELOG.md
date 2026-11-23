@@ -2,19 +2,73 @@
 
 ### Breaking Changes
 
+* Mutable `set_author`/`with_author` methods are removed; use `Config` at
+  construction and an authored full fork to change local identity.
+* `Automerge` no longer implements `SyncDoc` directly. Acquire checked access
+  with `.sync()?`; generation still returns `Option<Message>`.
 * `Automerge::set_actor` and `AutoCommit::set_actor` now return `Result` and
   are deprecated in favor of configured authors and automatic actor management.
-  `with_actor` also returns `Result`. Established named and anonymous actor
-  identities cannot be changed in either mode; rejection preserves pending edits.
-  After manually selecting an unused actor, importing another identity's history
-  for it makes the next local transaction panic instead of continuing that chain.
+  `with_actor` also returns `Result`.
+  In either signing mode, an established actor can only continue under the same
+  named or anonymous author identity. Rejection preserves the selected actor and
+  any pending AutoCommit transaction. A later import that binds a manually
+  selected actor to another identity makes local transaction entry panic before
+  applying operations. Prefer automatic actor management.
 
+### Added
+
+* `Automerge::from_config` and `AutoCommit::from_config` consume explicit
+  construction-time choices. `LoadOptions::author` fixes the local author of
+  the loaded document. `Config::author` selects an ordinary
+  unsigned identity; `Config::signing` validates and retains the public key for
+  required signing mode. `from_config` consumes either configuration infallibly.
+  Config and LoadOptions remain independent. The author of an instance is
+  immutable; `fork_with_author` creates a full copy for another author with a
+  fresh actor ID (in required signing mode a different author is allowed only
+  once every local draft is published). `ForkOptions` validates author and actor
+  choices together before source mutation or AutoCommit transaction closure.
+* Required signing mode persists published history: `save` writes a snapshot
+  of the published projection followed by a signatures chunk proving it, and
+  `save_after`/`save_incremental` emit complete canonical groups with their
+  proofs. Drafts and pending groups stay in the live document, and the
+  `AutoCommit` incremental cursor tracks what was actually emitted. Loading
+  with `LoadOptions::signing` re-derives publication from the proof; unsigned
+  loaders (`load`, `load_incremental`, `apply_changes`) reject any delivery
+  containing signed groups instead of discarding their signatures, even under
+  `OnPartialLoad::Ignore`.
+* `merge` between two required-mode documents transfers the source's
+  published history (complete canonical groups with proofs) through ordinary
+  receiver admission, leaving source drafts and pending groups behind and
+  preserving receiver drafts. Merging an unsigned document with a required-mode
+  document in either direction fails with `SigningError::MergeModeMismatch`
+  before any mutation.
+* Required signing mode exposes a batch signing surface: `signing_requests`
+  returns an owned `SigningRequests` snapshot (`hash`, exact signing `message`)
+  for every unsigned local draft, even when causal publication is blocked; `insert_signatures` verifies a batch of
+  `(ChangeHash, ed25519::Signature)` pairs under each change's historical
+  author and returns a `SignatureBatchOutcome` with one owned result per
+  entry, and `has_unpublished_changes` reports publication status without
+  committing. Signed-but-unpublished drafts remain tracked. The signing handle
+  is internal; there is no public scalar signing API.
+* `anonymize` documents its contract for signing documents: the copy is a new
+  unsigned diagnostic history (rewritten hashes, no authors, proofs, drafts or
+  publication) that cannot be merged or loaded into a required-mode document.
+* `Automerge::sync` and `AutoCommit::sync` return checked borrowed `SyncDoc`
+  access; `Automerge` no longer implements the trait directly. Required mode
+  fails at acquisition with `SigningError::SyncNotSupported`, before closing
+  an AutoCommit transaction. Generation retains `Option<Message>` and receipt
+  retains `Result`; unsigned protocol behaviour is unchanged.
+  `Automerge::rescue` refuses signed bytes with `SigningError::RescueNotSupported`.
+  Public `Automerge::bundle` rejects signing mode; use authenticated fragment
+  export instead. Signed loads reject unknown chunk types under both
+  partial-load policies (`storage::load::Error::UnknownChunkType`).
 ### Deprecated
 
 * `LoadOptions::migrate_strings` is deprecated. Applications should migrate
   legacy scalar strings explicitly. The option still performs the same
   conversion; in signing mode that local migration remains an unpublished
-  draft until proved and published.
+  draft until proved and published. Migration uses the configured local author
+  in both modes.
 
 ### Fixed
 

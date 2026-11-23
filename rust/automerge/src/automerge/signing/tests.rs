@@ -367,10 +367,7 @@ fn required_signatures_never_returns_non_local_changes_even_with_matching_author
 #[test]
 fn scoped_signing_access_skips_unsigned_callbacks_and_carries_required_access() {
     let mut unsigned = Automerge::new();
-    assert_eq!(
-        unsigned.with_signing::<bool>(|_| panic!("unsigned callback")),
-        false
-    );
+    assert!(!unsigned.with_signing::<bool>(|_| panic!("unsigned callback")));
     assert!(matches!(
         unsigned.try_with_signing::<()>(|_| panic!("unsigned callback")),
         Err(error::SigningMode::Required)

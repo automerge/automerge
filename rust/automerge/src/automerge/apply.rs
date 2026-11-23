@@ -58,6 +58,8 @@ impl Automerge {
             }
             self.admit_loaded_groups(groups, log)
         } else {
+            // Unsigned mode never strips a proof: decoded, parsed and encoded
+            // inputs alike are rejected whole before any member is applied.
             if groups.iter().any(|group| group.signatures.is_some()) {
                 return Err(crate::storage::load::Error::SignedContent.into());
             }
@@ -93,6 +95,8 @@ impl Automerge {
         grouping: Grouping,
         log: &mut PatchLog,
     ) -> Result<(), AutomergeError> {
+        // Unclassified or bundle-grouped contents carry no proofs, so required
+        // mode rejects them outright; unsigned mode skips the check.
         self.signing
             .with_required(|| Err(SigningError::UnauthenticatedChanges))?;
         // Validate the observer before staging or applying incoming changes.
@@ -181,6 +185,21 @@ impl Automerge {
 
     /// Apply causally ordered, validated changes to actors, authors, history,
     /// operations, visibility, and `log`.
+    ///
+    /// # Errors
+    ///
+    /// Fails only if `log` is incompatible with this document, and only before
+    /// any actor, history, operation, or visibility mutation of the document.
+    /// Once that preflight succeeds the log's actors equal the document's;
+    /// every later log operation in this method sees a document whose actor
+    /// table either grew (a superset migrates infallibly) or is unchanged.
+    /// Cleanup cannot shrink it by construction: every actor inserted above
+    /// gains a graph entry from `History::update` before `remove_unused`
+    /// runs, and `remove_unused` only drops actors without one; the debug
+    /// assertions around it check this, they do not enforce it in release
+    /// builds. A log failure after preflight is therefore an internal
+    /// invariant violation and panics after mutation, rather than returning an
+    /// error that would imply the half-applied document is usable.
     pub(super) fn apply_prepared_changes(
         &mut self,
         changes: Vec<&Change>,

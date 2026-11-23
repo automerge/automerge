@@ -427,6 +427,7 @@ export type LoadOptions = {
   actor?: Actor;
   unchecked?: boolean;
   allowMissingDeps?: boolean;
+  /** @deprecated Migrate legacy scalar strings explicitly in application code. */
   convertImmutableStringsToText?: boolean;
   // Load in required signing mode. Requires `author`.
   signing?: boolean;

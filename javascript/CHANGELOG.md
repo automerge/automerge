@@ -1,5 +1,35 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+* The local author is fixed at creation or load. Use an authored `clone` to
+  write with another identity; historical author metadata is preserved.
+
+### Added
+
+* Experimental required signing mode (`init`/`load` with
+  `{ signing: true, author }`): `signingRequests` returns owned
+  `{ hash, message }` entries for every unsigned local draft, even while causal
+  publication is blocked. The application routes messages to the fixed author’s
+  signer. `insertSignatures(doc, inputOrArray, opts?)`
+  returns `{ doc, outcome }` where `outcome` is a `rejected` /
+  `completed` / `publicationFailed` union with an owned result per entry, and
+  `hasUnpublishedChanges` reports publication status. `save` writes only
+  published history with its proofs; `merge` between signing documents moves
+  published history only and mixed-mode merges throw. Signed documents reject
+  `generateSyncMessage`/`receiveSyncMessage` and historical clones. A
+  document in either mode never writes through an actor bound to another
+  identity: `load`/`clone` reject conflicting actor choices. If later imports
+  bind a manually selected actor to another identity, a subsequent local change
+  raises an invariant panic rather than continuing that identity’s chain.
+  Signature insertion and merge reject active change callbacks, including
+  captured outer documents and either merge handle. `anonymize` of a signing document is a new
+  unsigned diagnostic copy with no proofs, drafts or publication state.
+  Malformed `insertSignatures` entries are rejected by length before their
+  bytes are copied.
+
 ## 3.5.0
 
 Changes since 3.4.1.
