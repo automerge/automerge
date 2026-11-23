@@ -646,13 +646,6 @@ impl ChangeGraph {
         self.nodes_by_hash.get(hash).map(|node| node.0)
     }
 
-    /// Whether `hash` lies within the causal past of at least one cached hard-head fragment.
-    pub(crate) fn is_covered_by_fragment_cache(&self, hash: &ChangeHash) -> bool {
-        self.nodes_by_hash
-            .get(hash)
-            .is_some_and(|node| self.fragment_cache.covers(self, *node))
-    }
-
     fn loose_commit(&self, n: NodeIdx) -> Option<Fragment> {
         let head = self.hashes.get(n.0 as usize).copied()?;
         assert_eq!(head.fragment_level(), 0);
