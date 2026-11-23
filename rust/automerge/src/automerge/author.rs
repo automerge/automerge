@@ -51,11 +51,38 @@ impl<'a> AuthorRegistration<'a> {
         let should_derive = pairs.peek().is_some();
         for (author, actor) in pairs {
             debug_assert_eq!(self.graph.seq_for_actor(actor), 0);
-            self.authors.assign_author(author, actor);
+            self.authors
+                .assign_author(author, actor)
+                .expect("new actor must have a compatible author association");
         }
         if should_derive {
             *self.visibility =
                 FrontierVisibility::new(self.policy, self.graph, self.authors, self.actors);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::transaction::Transactable;
+    use crate::{ActorId, Author, Automerge, ROOT};
+
+    #[test]
+    fn anonymous_initial_change_binds_identity_in_live_and_loaded_documents() {
+        let actor = ActorId::from([1]);
+        let mut doc = Automerge::new().with_actor(actor.clone());
+        let mut tx = doc.transaction();
+        tx.put(ROOT, "v", 1).unwrap();
+        tx.commit();
+        let mut loaded = Automerge::load(&doc.save()).unwrap();
+        for document in [&mut doc, &mut loaded] {
+            let index = document.ops.actors.lookup(&actor).unwrap();
+            assert!(document.authors.is_bound(index));
+            assert!(document
+                .authors
+                .assign_author(Author::from(vec![7]), index)
+                .is_err());
+            assert!(document.get_authors().is_empty());
         }
     }
 }

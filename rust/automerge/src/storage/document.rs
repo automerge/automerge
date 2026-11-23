@@ -418,6 +418,8 @@ pub(crate) enum ReconstructError {
     InvalidMaxOp,
     #[error("author provided for change with non-initial sequence number: {0}")]
     AuthorOnNonInitialSeq(u64, ActorId),
+    #[error(transparent)]
+    AuthorConflict(#[from] crate::author::AuthorConflict),
     #[error("invalid mark operation order: {error_message}")]
     InvalidMarkOrderDoc {
         doc: Box<Automerge>,

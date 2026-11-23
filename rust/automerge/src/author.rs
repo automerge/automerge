@@ -13,32 +13,36 @@ use crate::error;
 /// For each author, there will be one or more actors associated with the
 /// author, giving a 1-to-N relationship. [`Authors`] maintains an index of
 /// these relationships.
-///
-/// # Current Author
-///
-/// [`Authors`] will also keep track of the current [`Author`] that is acting on
-/// the document, if set.
+/// An actor's first association is immutable, including an anonymous one.
+/// The document's configured local author is owned separately.
 #[derive(Clone, Debug)]
 pub(crate) struct Authors {
     /// Previously recorded [`Author`]s.
     ///
-    /// The `Vec` must contain unique [`Authors`], and should be indexed by the
-    /// existing actor index of an Automerge document.
-    ///
-    /// Each [`Author`] will have one or more [`ActorId`](crate::ActorId)s related to it, since
-    /// a new [`ActorId`](crate::ActorId) is produced when an [`Author`] changes on a document.
+    /// Sorted unique authors, referenced by the actor association table.
+    /// Multiple actors can share one author without sharing sequence numbers.
     authors: Vec<Author<'static>>,
-    // TODO(finto): This is never actually used. It's set to `None` and
-    // re-assigned in `put_author`.
-    /// The current [`Author`] acting on the document.
-    ///
-    /// Using the [`AuthorIdx`] to index into [`Authors::authors`].
-    current: Option<AuthorIdx>,
+
     /// A mapping from an actor to an author.
     ///
     /// Each index of the `Vec` is the same as the index into an actors set, and
     /// the entry at the index corresponds to an entry in [`Authors::authors`].
-    actor_to_author: ActorIndexed<Option<AuthorIdx>>,
+    actor_to_author: ActorIndexed<ActorAuthor>,
+}
+
+/// An unused actor has no identity yet; anonymous history has a fixed one.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum ActorAuthor {
+    #[default]
+    Unbound,
+    Anonymous,
+    Named(AuthorIdx),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("actor {actor} already has a different author association")]
+pub(crate) struct AuthorConflict {
+    pub(crate) actor: usize,
 }
 
 impl Authors {
@@ -47,7 +51,6 @@ impl Authors {
     pub(crate) fn new(actors: &ActorTable) -> Self {
         Self {
             authors: Vec::default(),
-            current: None,
             actor_to_author: ActorIndexed::new(actors),
         }
     }
@@ -58,8 +61,7 @@ impl Authors {
     pub(crate) fn with_actors(actors: usize) -> Self {
         Self {
             authors: Vec::default(),
-            current: None,
-            actor_to_author: ActorIndexed::from_slots_for_test(vec![None; actors]),
+            actor_to_author: ActorIndexed::from_slots_for_test(vec![ActorAuthor::Unbound; actors]),
         }
     }
 
@@ -70,8 +72,12 @@ impl Authors {
 
     /// Return the [`Author`] that is associated with the given `actor`.
     pub(crate) fn get_author_for_actor(&self, actor: usize) -> Option<Author<'_>> {
-        let author = self.actor_to_author.get(actor)?.as_ref()?.as_usize();
-        self.authors.get(author).map(|author| author.as_borrowed())
+        let ActorAuthor::Named(author) = self.actor_to_author.get(actor)? else {
+            return None;
+        };
+        self.authors
+            .get(author.as_usize())
+            .map(|author| author.as_borrowed())
     }
 
     /// Return the actor indices for the given `author`.
@@ -90,29 +96,62 @@ impl Authors {
                 self.actor_to_author
                     .iter()
                     .enumerate()
-                    .filter_map(move |(i, a)| (a.as_ref()? == &idx).then_some(i))
+                    .filter_map(move |(i, a)| (*a == ActorAuthor::Named(idx)).then_some(i))
             })
             .into_iter()
             .flatten()
     }
 
-    /// Assign the given `actor` to the given `author`.
-    pub(crate) fn assign_author(&mut self, author: Author<'static>, actor: usize) {
-        let author_id = self.put_author(author);
-        self.actor_to_author.as_mut_slice()[actor] = Some(author_id);
+    /// Associate an actor with a named author, without replacing an identity.
+    pub(crate) fn assign_author(
+        &mut self,
+        author: Author<'static>,
+        actor: usize,
+    ) -> Result<(), AuthorConflict> {
+        self.assign_identity(Some(author), actor)
+    }
+
+    /// Establish named or anonymous identity. Repeated matching associations
+    /// are idempotent; a conflict leaves both indexes and author data unchanged.
+    pub(crate) fn assign_identity(
+        &mut self,
+        author: Option<Author<'static>>,
+        actor: usize,
+    ) -> Result<(), AuthorConflict> {
+        if self.is_bound(actor) {
+            return if self
+                .get_author_for_actor(actor)
+                .as_ref()
+                .map(Author::as_bytes)
+                == author.as_ref().map(Author::as_bytes)
+            {
+                Ok(())
+            } else {
+                Err(AuthorConflict { actor })
+            };
+        }
+        let binding = match author {
+            Some(author) => ActorAuthor::Named(self.put_author(author)),
+            None => ActorAuthor::Anonymous,
+        };
+        self.actor_to_author.as_mut_slice()[actor] = binding;
+        Ok(())
+    }
+
+    pub(crate) fn is_bound(&self, actor: usize) -> bool {
+        !matches!(self.actor_to_author[actor], ActorAuthor::Unbound)
     }
 
     /// Make room for an actor just inserted into the document's actor table,
     /// with no author assigned.
     pub(crate) fn insert_actor(&mut self, shift: &ActorShift) {
-        self.actor_to_author.insert(shift, None);
+        self.actor_to_author.insert(shift, ActorAuthor::Unbound);
     }
 
     /// Forget an actor just removed from the document's actor table.
     ///
-    /// Note that this may leave a dangling [`Author`] in the set of authors,
-    /// once the final actor has been removed. In reality, actors are only
-    /// removed as part of rollback semantics, so that should never happen.
+    /// Rollback can discard a tentative actor association. Its author may
+    /// remain in the sorted author set after its final actor is removed.
     pub(crate) fn remove_actor(&mut self, removal: &ActorRemoval) {
         self.actor_to_author.remove(removal);
     }
@@ -126,11 +165,10 @@ impl Authors {
         match self.authors.binary_search(&author) {
             Err(index) => {
                 self.authors.insert(index, author);
-                for a in self.actor_to_author.as_mut_slice().iter_mut().flatten() {
-                    a.with_new_author(index)
-                }
-                if let Some(a) = self.current.as_mut() {
-                    a.with_new_author(index);
+                for binding in self.actor_to_author.as_mut_slice() {
+                    if let ActorAuthor::Named(author) = binding {
+                        author.with_new_author(index);
+                    }
                 }
                 index.into()
             }
@@ -232,7 +270,7 @@ impl<'a> FromStr for Author<'a> {
 }
 
 /// An index into the [`Authors::authors`] field.
-#[derive(PartialEq, Debug, Clone, Copy)]
+#[derive(PartialEq, Eq, Debug, Clone, Copy)]
 struct AuthorIdx(usize);
 
 impl AuthorIdx {
@@ -252,6 +290,9 @@ impl From<usize> for AuthorIdx {
         AuthorIdx(n)
     }
 }
+
+#[cfg(test)]
+mod bindings_tests;
 
 #[cfg(test)]
 mod tests {
@@ -274,6 +315,34 @@ mod tests {
     /// of `Authors::put_author` and the `AuthorIdx` re-indexing.
     fn gen_small_author() -> impl Strategy<Value = Author<'static>> {
         proptest::collection::vec(0u8..4, 0..3).prop_map(Author::from)
+    }
+
+    #[test]
+    fn established_binding_rejects_reassignment_without_inserting_an_author() {
+        let mut authors = Authors::with_actors(1);
+        let alice = Author::from(vec![9]);
+        let bob = Author::from(vec![1]); // would shift every author index
+        authors.assign_author(alice.clone(), 0).unwrap();
+        let before = observe(&authors, 1);
+        assert!(authors.assign_author(bob, 0).is_err());
+        assert_eq!(observe(&authors, 1), before);
+        authors.assign_author(alice, 0).unwrap();
+        assert_eq!(observe(&authors, 1), before);
+    }
+
+    #[test]
+    fn anonymous_history_is_distinct_from_an_unbound_slot() {
+        let mut authors = Authors::with_actors(2);
+        assert!(!authors.is_bound(0));
+        authors.assign_identity(None, 0).unwrap();
+        assert!(authors.is_bound(0));
+        let before = observe(&authors, 2);
+        assert!(authors.assign_author(Author::from(vec![1]), 0).is_err());
+        assert_eq!(observe(&authors, 2), before);
+        authors.assign_identity(None, 0).unwrap();
+        authors.assign_author(Author::from(vec![1]), 1).unwrap();
+        assert!(authors.assign_identity(None, 1).is_err());
+        assert_eq!(authors.get_author_for_actor(1), Some(Author::from(vec![1])));
     }
 
     /// A valid, possibly mixed-case hex string together with the bytes it
@@ -425,8 +494,19 @@ mod tests {
                         continue;
                     }
                     let actor = actor % model.len();
-                    authors.assign_author(author.clone(), actor);
-                    model[actor] = Some(author.clone());
+                    let before = observe(&authors, model.len());
+                    let expected = model[actor]
+                        .as_ref()
+                        .is_none_or(|current| current == author);
+                    assert_eq!(
+                        authors.assign_author(author.clone(), actor).is_ok(),
+                        expected
+                    );
+                    if expected {
+                        model[actor] = Some(author.clone());
+                    } else {
+                        assert_eq!(observe(&authors, model.len()), before);
+                    }
                 }
                 Op::InsertActor { at } => {
                     let at = at % (model.len() + 1);
@@ -551,14 +631,16 @@ mod tests {
             }
             let actor = actor % model.len();
 
-            authors.assign_author(author.clone(), actor);
-            prop_assert_eq!(
-                authors.get_author_for_actor(actor),
-                Some(author.as_borrowed())
-            );
+            let before = observe(&authors, model.len());
+            let expected = model[actor].as_ref().is_none_or(|current| current == &author);
+            prop_assert_eq!(authors.assign_author(author.clone(), actor).is_ok(), expected);
+            if expected {
+                prop_assert_eq!(authors.get_author_for_actor(actor), Some(author.as_borrowed()));
+            } else {
+                prop_assert_eq!(observe(&authors, model.len()), before);
+            }
             let first = observe(&authors, model.len());
-
-            authors.assign_author(author.clone(), actor);
+            prop_assert_eq!(authors.assign_author(author.clone(), actor).is_ok(), expected);
             prop_assert_eq!(observe(&authors, model.len()), first);
         }
 
@@ -578,7 +660,7 @@ mod tests {
         /// Every author the model maps some actor to appears in
         /// `get_authors`.
         ///
-        /// Subset, not equality: re-assignment and `remove_actor` may leave
+        /// Subset, not equality: `remove_actor` may leave
         /// dangling authors, as documented on `Authors::remove_actor`.
         #[test]
         fn get_authors_covers_all_live_authors(init in 0usize..8, ops in gen_ops()) {
