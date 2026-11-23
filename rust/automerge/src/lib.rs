@@ -314,7 +314,7 @@ pub use change::ParsedChange;
 pub use change::{Change, LoadError as LoadChangeError};
 #[doc(hidden)]
 pub use change_graph::{Fragment, InvalidFragmentBytes};
-pub use config::Config;
+pub use config::{Config, ForkOptions};
 pub use cursor::{Cursor, CursorPosition, MoveCursor, OpCursor};
 pub use error::InvalidActorId;
 pub use error::InvalidChangeHashSlice;
