@@ -48,6 +48,7 @@ use wasm_bindgen::JsCast;
 
 mod export_cache;
 mod interop;
+mod signing;
 mod sync;
 mod value;
 
@@ -191,6 +192,49 @@ export type Fragment = FragmentMeta & {
   bytes: Uint8Array;
 };
 
+// One signature the fixed local author should produce. `message` is the
+// exact domain-separated byte string to sign with Ed25519; `hash` is the
+// applied change it covers and `author` the key expected to sign it.
+export type SigningRequest = {
+  hash: Hash;
+  message: Uint8Array;
+};
+
+// One `{message, signature}` entry for `insertSignatures`.
+export type SignatureInput = {
+  message: Uint8Array;
+  signature: Uint8Array;
+};
+
+// How a verified signature was retained.
+export type SignatureInsert =
+  | "stored"
+  | "duplicate"
+  | "droppedOverflow";
+
+// Owned result for one batch entry (duplicates included), in input order.
+export type SignatureInsertion = {
+  hash: Hash;
+  message: Uint8Array;
+  signature: Uint8Array;
+  result: { ok: true; insert: SignatureInsert } | { ok: false; error: string };
+};
+
+// `rejected`: nothing was processed and nothing changed (wrong mode or a
+// malformed batch; `reason` names the offending index). `completed`: every
+// entry has a result and publication settled; this does not mean every
+// change is published. `publicationFailed`: entries were processed and local
+// publication kept, but applying causally enabled incoming groups hit a
+// recoverable conflict described by `error`.
+export type SignatureBatchOutcome =
+  | { status: "rejected"; reason: string }
+  | { status: "completed"; insertions: SignatureInsertion[] }
+  | {
+      status: "publicationFailed";
+      insertions: SignatureInsertion[];
+      error: string;
+    };
+
 type PartialBy<T, K extends keyof T> = Omit<T, K> & Partial<Pick<T, K>>;
 export type ChangeToEncode = PartialBy<DecodedChange, "hash">;
 
@@ -299,7 +343,9 @@ export type Mark = {
 interface Automerge {
 
     fork(actor?: string, heads?: Heads): Automerge;
-    // Full fork writing as `author` (null removes the author).
+    // Full fork writing as `author` (null removes the author in unsigned
+    // documents). In required signing mode a different author is permitted
+    // only once every local draft is published.
     forkWithAuthor(author: string | null, actor?: string): Automerge;
 
     put(obj: ObjID, prop: Prop, value: Value, datatype?: Datatype): void;
@@ -357,6 +403,16 @@ interface Automerge {
     addCommits(commits: Commit[]): void;
     addFragments(fragments: Fragment[]): void;
 
+    // Owned snapshot of the signatures the fixed author should produce next.
+    // Commits any pending transaction first (after the signing-mode check).
+    signingRequests(): SigningRequest[];
+    // Verify and attach signatures, then complete publication once. The whole
+    // batch is parsed before anything is committed or mutated.
+    insertSignatures(inputs: SignatureInput[]): SignatureBatchOutcome;
+    // Whether any applied history is still unpublished (always false when
+    // unsigned). Read-only: never commits a pending transaction.
+    hasUnpublishedChanges(): boolean;
+
     getBlock(obj: ObjID, index: number, heads?: Heads): { [key: string]: MaterializeValue } | null;
 
     getMissingDeps(heads?: Heads): Heads;
@@ -372,6 +428,8 @@ export type LoadOptions = {
   unchecked?: boolean;
   allowMissingDeps?: boolean;
   convertImmutableStringsToText?: boolean;
+  // Load in required signing mode. Requires `author`.
+  signing?: boolean;
   // The fixed local author of the loaded document.
   author?: Author;
 };
@@ -383,6 +441,8 @@ export type DiffOptions = {
 
 export type InitOptions = {
   actor?: Actor;
+  // Create in required signing mode. Requires `author`.
+  signing?: boolean;
   // The fixed local author of the new document.
   author?: Author;
 };
@@ -459,20 +519,21 @@ pub struct Automerge {
 #[wasm_bindgen]
 impl Automerge {
     pub fn new(actor: Option<String>) -> Result<Automerge, error::Create> {
-        Self::new_with_author(actor, None)
+        Self::new_with_author(actor, DocumentAuthor::Unsigned(None))
     }
 
-    /// Create a document with the given fixed author.
+    /// Create a document with the given fixed author and signing mode.
     #[allow(deprecated)]
     fn new_with_author(
         actor: Option<String>,
-        author: Option<Author<'static>>,
+        author: DocumentAuthor,
     ) -> Result<Automerge, error::Create> {
-        let mut doc = AutoCommit::from_config(
-            am::Config::default()
-                .text_encoding(TextEncoding::Utf16CodeUnit)
-                .author(author),
-        );
+        let config = am::Config::default().text_encoding(TextEncoding::Utf16CodeUnit);
+        let config = match author {
+            DocumentAuthor::Signing(author) => config.signing(author)?,
+            DocumentAuthor::Unsigned(author) => config.author(author),
+        };
+        let mut doc = AutoCommit::from_config(config);
         if let Some(a) = actor {
             let a =
                 automerge::ActorId::from(hex::decode(a).map_err(error::BadActorId::from)?.to_vec());
@@ -514,14 +575,18 @@ impl Automerge {
     #[allow(clippy::should_implement_trait)]
     #[allow(deprecated)]
     pub fn clone(&mut self, actor: Option<String>) -> Result<Automerge, error::Fork> {
+        // Parse and check the actor before cloning: in signing mode an actor
+        // bound to another author is rejected without touching the source.
+        let actor = actor
+            .map(|s| hex::decode(s).map(automerge::ActorId::from))
+            .transpose()
+            .map_err(error::BadActorId::from)?;
         let mut automerge = Automerge {
             doc: self.doc.clone(),
             freeze: self.freeze,
             external_types: self.external_types.clone(),
         };
-        if let Some(s) = actor {
-            let actor =
-                automerge::ActorId::from(hex::decode(s).map_err(error::BadActorId::from)?.to_vec());
+        if let Some(actor) = actor {
             automerge.doc.set_actor(actor)?;
         }
         Ok(automerge)
@@ -536,23 +601,33 @@ impl Automerge {
         actor: Option<String>,
         heads: JsValue,
     ) -> Result<Automerge, error::Fork> {
+        let actor = actor
+            .map(|s| hex::decode(s).map(automerge::ActorId::from))
+            .transpose()
+            .map_err(error::BadActorId::from)?;
         let heads: Result<Vec<am::ChangeHash>, _> = JS(heads).try_into();
         let doc = if let Ok(heads) = heads {
-            self.doc.fork_at(&heads)?
+            // Historical forking retains its existing unsigned-only contract.
+            if let Some(actor) = &actor {
+                self.doc.check_actor_binding(actor)?;
+            }
+            let mut doc = self.doc.fork_at(&heads)?;
+            if let Some(actor) = actor {
+                doc.set_actor(actor)?;
+            }
+            doc
         } else {
-            self.doc.fork()
+            let mut options = am::ForkOptions::default();
+            if let Some(actor) = actor {
+                options = options.actor(actor);
+            }
+            self.doc.fork_with_options(options)?
         };
-        let mut automerge = Automerge {
+        Ok(Automerge {
             doc,
             freeze: self.freeze,
             external_types: self.external_types.clone(),
-        };
-        if let Some(s) = actor {
-            let actor =
-                automerge::ActorId::from(hex::decode(s).map_err(error::BadActorId::from)?.to_vec());
-            automerge.doc.set_actor(actor)?;
-        }
-        Ok(automerge)
+        })
     }
 
     // Typed in the `interface Automerge` custom section above.
@@ -1528,17 +1603,54 @@ impl Automerge {
             .collect())
     }
 
+    /// Owned snapshot of the signatures the fixed local author should
+    /// produce next. Typed in the `interface Automerge` custom section.
+    ///
+    /// The signing-mode check runs before the pending transaction is
+    /// committed, so an unsigned document keeps its open transaction.
+    #[wasm_bindgen(js_name = signingRequests, skip_typescript)]
+    pub fn signing_requests(&mut self) -> Result<Array, error::SigningMode> {
+        let requests = self.doc.signing_requests()?;
+        Ok(requests.iter().map(signing::request_to_js).collect())
+    }
+
+    /// Verify and attach a batch of `{message, signature}` entries, then run
+    /// one completion pass. Typed in the `interface Automerge` custom section.
+    ///
+    /// The entire batch is parsed first; any malformed entry yields a
+    /// `rejected` outcome before the pending transaction is committed and
+    /// before any entry is processed. Wrong mode is likewise `rejected`
+    /// without closing the transaction.
+    #[wasm_bindgen(js_name = insertSignatures, skip_typescript)]
+    pub fn insert_signatures(&mut self, inputs: JsValue) -> JsValue {
+        let inputs = match signing::parse_batch(&inputs) {
+            Ok(inputs) => inputs,
+            Err(error) => return signing::rejected_to_js(&error),
+        };
+        let outcome = self
+            .doc
+            .insert_signatures(inputs.iter().map(|input| input.pair()));
+        signing::outcome_to_js(outcome)
+    }
+
+    /// Whether any applied history is still unpublished. Read-only: never
+    /// commits a pending transaction. Always `false` when unsigned.
+    #[wasm_bindgen(js_name = hasUnpublishedChanges, skip_typescript)]
+    pub fn has_unpublished_changes(&self) -> bool {
+        self.doc.has_unpublished_changes()
+    }
+
     #[wasm_bindgen(js_name = addCommits)]
     pub fn add_commits(
         &mut self,
         #[wasm_bindgen(unchecked_param_type = "Commit[]")] commits: JsValue,
     ) -> Result<(), error::AddCommits> {
         let commits = Vec::<Commit>::try_from(JS(commits))?;
-        let changes = commits
+        let groups = commits
             .into_iter()
-            .map(|commit| commit.into_change())
+            .map(Commit::into_loaded_group)
             .collect::<Result<Vec<_>, _>>()?;
-        self.doc.apply_changes(changes)?;
+        self.doc.apply_changes(groups)?;
         Ok(())
     }
 
@@ -1548,14 +1660,11 @@ impl Automerge {
         #[wasm_bindgen(unchecked_param_type = "Fragment[]")] fragments: JsValue,
     ) -> Result<(), error::AddFragments> {
         let fragments = Vec::<FragmentInput>::try_from(JS(fragments))?;
-        let mut bytes = Vec::new();
-        for fragment in fragments {
-            // Touch the metadata so parsing validates the whole input shape even
-            // though the bundle bytes remain the authoritative representation.
-            let _metadata = fragment.fragment;
-            bytes.extend(fragment.bytes);
-        }
-        self.doc.load_incremental(&bytes)?;
+        let groups = fragments
+            .into_iter()
+            .map(|fragment| fragment.fragment.parse_with_signatures(&fragment.bytes))
+            .collect::<Result<Vec<_>, _>>()?;
+        self.doc.apply_changes(groups)?;
         Ok(())
     }
 
@@ -1948,14 +2057,44 @@ fn on_start() {
     let _ = wasm_bindgen::__rt::set_on_abort(log_abort);
 }
 
-/// The fixed author requested by `create`/`load` options.
-fn document_author(options: &JsValue) -> Result<Option<Author<'static>>, error::BadAuthor> {
-    js_get(options, "author")
+fn signing_option(options: &JsValue) -> Result<bool, error::BadSigningOption> {
+    if options.is_null() || options.is_undefined() {
+        return Ok(false);
+    }
+    let Ok(value) = js_get(options, "signing") else {
+        return Ok(false);
+    };
+    if value.0.is_undefined() {
+        return Ok(false);
+    }
+    value.0.as_bool().ok_or(error::BadSigningOption)
+}
+
+/// The fixed author and signing mode requested by `create`/`load` options.
+enum DocumentAuthor {
+    Unsigned(Option<Author<'static>>),
+    Signing(Author<'static>),
+}
+
+/// Resolve the author a document is created or loaded with.
+///
+/// Unsigned documents take any `author` option, or none. In signing mode an
+/// `author` option is required, and the author's bytes must form a usable
+/// Ed25519 key.
+fn document_author(options: &JsValue) -> Result<DocumentAuthor, error::SigningAuthor> {
+    let signing = signing_option(options)?;
+    let author = js_get(options, "author")
         .ok()
         .and_then(|a| a.as_string())
         .map(Author::try_from)
         .transpose()
-        .map_err(error::BadAuthor::from)
+        .map_err(error::BadAuthor::from)?;
+    if !signing {
+        return Ok(DocumentAuthor::Unsigned(author));
+    }
+    Ok(DocumentAuthor::Signing(
+        author.ok_or(error::SigningAuthor::Missing)?,
+    ))
 }
 
 // skip_typescript as the definition requires an optional argument so we define
@@ -2007,9 +2146,13 @@ pub fn load(data: Uint8Array, options: JsValue) -> Result<Automerge, error::Load
         .verification_mode(verification_mode)
         .migrate_strings(string_migration)
         .text_encoding(TextEncoding::Utf16CodeUnit);
-    if let Some(author) = author {
-        load_options = load_options.author(author);
-    }
+    load_options = match author {
+        DocumentAuthor::Signing(author) => load_options
+            .signing(author)
+            .map_err(error::SigningAuthor::from)?,
+        DocumentAuthor::Unsigned(Some(author)) => load_options.author(author),
+        DocumentAuthor::Unsigned(None) => load_options,
+    };
     let mut doc = am::AutoCommit::load_with_options(&data, load_options)?;
     if let Some(s) = actor {
         let actor =
@@ -2217,8 +2360,9 @@ struct Commit {
 }
 
 impl Commit {
-    fn into_change(self) -> Result<Change, error::BadCommitBytes> {
-        let change = Change::try_from(self.bytes.as_slice())?;
+    fn into_loaded_group(self) -> Result<am::LoadedGroup, error::BadCommitBytes> {
+        let parsed = Change::parse_with_signatures(&self.bytes)?;
+        let change = parsed.change();
         // Validate that JS metadata lines up with the supplied bytes. This keeps
         // Automerge's API shaped like Subduction's addCommits input while still
         // treating the encoded change as authoritative.
@@ -2231,7 +2375,7 @@ impl Commit {
         if change.deps() != self.parents.as_slice() {
             return Err(error::BadCommitBytes::ParentsMismatch);
         }
-        Ok(change)
+        Ok(am::LoadedGroup::from(parsed))
     }
 }
 
@@ -2428,23 +2572,6 @@ pub mod error {
     }
 
     #[derive(Debug, thiserror::Error)]
-    pub enum Create {
-        #[error(transparent)]
-        BadActor(#[from] BadActorId),
-        #[error(transparent)]
-        BadAuthor(#[from] BadAuthor),
-        /// The configured actor is bound to another author.
-        #[error(transparent)]
-        Actor(#[from] AutomergeError),
-    }
-
-    impl From<Create> for JsValue {
-        fn from(e: Create) -> Self {
-            RangeError::new(&e.to_string()).into()
-        }
-    }
-
-    #[derive(Debug, thiserror::Error)]
     pub enum ApplyChangesError {
         #[error(transparent)]
         DecodeChanges(#[from] BadJSChanges),
@@ -2506,6 +2633,68 @@ pub mod error {
         NotArray,
         #[error("bad commit input at index {0}: {1}")]
         BadElem(usize, BadJSCommit),
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    #[error("signing option must be a boolean")]
+    pub struct BadSigningOption;
+
+    /// A signing document was created, loaded, or updated without a usable author.
+    #[derive(Debug, thiserror::Error)]
+    pub enum SigningAuthor {
+        #[error(transparent)]
+        BadSigning(#[from] BadSigningOption),
+        #[error(transparent)]
+        BadAuthor(#[from] BadAuthor),
+        #[error("signing documents require an author option")]
+        Missing,
+        #[error(transparent)]
+        Invalid(#[from] automerge::SigningAuthorError),
+    }
+
+    impl From<SigningAuthor> for JsValue {
+        fn from(e: SigningAuthor) -> Self {
+            RangeError::new(&e.to_string()).into()
+        }
+    }
+
+    impl From<BadSigningOption> for JsValue {
+        fn from(e: BadSigningOption) -> Self {
+            RangeError::new(&e.to_string()).into()
+        }
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    pub enum Create {
+        #[error(transparent)]
+        BadActor(#[from] BadActorId),
+        #[error(transparent)]
+        SigningAuthor(#[from] SigningAuthor),
+        /// The configured actor is bound to another author in signing mode.
+        #[error(transparent)]
+        Actor(#[from] AutomergeError),
+    }
+
+    impl From<automerge::SigningAuthorError> for Create {
+        fn from(e: automerge::SigningAuthorError) -> Self {
+            Self::SigningAuthor(SigningAuthor::Invalid(e))
+        }
+    }
+
+    impl From<Create> for JsValue {
+        fn from(e: Create) -> Self {
+            RangeError::new(&e.to_string()).into()
+        }
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    #[error(transparent)]
+    pub struct SigningMode(#[from] automerge::signing::error::SigningMode);
+
+    impl From<SigningMode> for JsValue {
+        fn from(e: SigningMode) -> Self {
+            RangeError::new(&e.to_string()).into()
+        }
     }
 
     #[derive(Debug, thiserror::Error)]
@@ -2578,6 +2767,8 @@ pub mod error {
     pub enum AddFragments {
         #[error(transparent)]
         BadInputs(#[from] BadJSFragmentInputs),
+        #[error(transparent)]
+        BadBytes(#[from] automerge::InvalidFragmentBytes),
         #[error("error loading fragment bundles: {0}")]
         Load(#[from] AutomergeError),
     }
@@ -2979,7 +3170,7 @@ pub mod error {
         #[error(transparent)]
         BadActor(#[from] BadActorId),
         #[error(transparent)]
-        BadAuthor(#[from] BadAuthor),
+        SigningAuthor(#[from] SigningAuthor),
     }
 
     impl From<Load> for JsValue {
