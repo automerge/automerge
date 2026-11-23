@@ -307,6 +307,7 @@ pub use automerge::signing::{
     PublicationError, SignatureBatchOutcome, SignatureInsertError, SignatureInsertOutcome,
     SignatureRejection,
 };
+pub use automerge::signing::{SigningRequest, SigningRequests};
 pub use autoserde::AutoSerde;
 #[doc(hidden)]
 pub use change::ParsedChange;

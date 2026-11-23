@@ -1080,9 +1080,7 @@ impl Automerge {
         &self,
         author: Option<Author<'static>>,
     ) -> Result<Self, AutomergeError> {
-        let identity = self
-            .signing
-            .fork_identity(author, &self.change_graph, false)?;
+        let identity = self.signing.fork_identity(author, false)?;
         let mut fork = self.fork();
         fork.signing.set_fork_identity(identity);
         Ok(fork)

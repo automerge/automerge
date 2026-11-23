@@ -13,6 +13,7 @@ mod batch;
 mod fragments;
 mod identity;
 mod incoming;
+mod requests;
 
 /// A deterministic signing key derived from `seed`.
 pub(super) fn key(seed: u8) -> SigningKey {
@@ -43,9 +44,11 @@ pub(super) fn replica(doc: &Automerge, author: Author<'static>, actor: ActorId) 
 }
 
 pub(super) fn requested_hashes(doc: &mut Automerge) -> Vec<ChangeHash> {
-    let mut hashes = doc.try_signing().unwrap().required_signatures();
-    hashes.sort_unstable();
-    hashes
+    doc.signing_requests()
+        .unwrap()
+        .iter()
+        .map(|request| request.hash())
+        .collect()
 }
 
 /// Whether `doc` has locally published `hash`.
@@ -58,9 +61,8 @@ pub(super) fn drafts(doc: &mut Automerge) -> Vec<ChangeHash> {
     doc.try_signing()
         .unwrap()
         .state
-        .local_unsigned
+        .local_drafts
         .iter()
-        .copied()
         .collect()
 }
 
