@@ -12,6 +12,7 @@ memory = []
 automerge = { path = "../automerge" }
 anyhow = "1.0.98"
 clap = { version = "4.5.42", features = ["derive"] }
+ed25519-dalek = { version = "3.0", default-features = false, features = ["alloc"] }
 getrandom = "0.4"
 rand = "^0.10"
 resvg = "0.48.1"
