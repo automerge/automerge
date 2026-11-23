@@ -157,7 +157,7 @@ mod tests {
         let mut commits = Vec::new();
         let mut value = 0i64;
         for (a, &n) in counts.iter().enumerate() {
-            doc.set_author(Some(author(a)));
+            doc = doc.fork_with_author(Some(author(a))).unwrap();
             for _ in 0..n {
                 value += 1;
                 doc.put(ROOT, "k", value).unwrap();

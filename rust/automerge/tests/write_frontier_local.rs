@@ -18,13 +18,13 @@ use automerge::{
 fn masked_local_edits_do_not_change_the_view_for_any_peer() {
     let alice = Author::try_from("aaaa").unwrap();
     let bob = Author::try_from("bbbb").unwrap();
-    let mut a = AutoCommit::new().with_author(Some(alice.clone()));
+    let mut a = AutoCommit::from_config(automerge::Config::default().author(Some(alice.clone())));
     let text = a.put_object(ROOT, "text", ObjType::Text).unwrap();
     a.splice_text(&text, 0, 0, "hi").unwrap();
     a.put(ROOT, "x", 1).unwrap();
     a.commit();
     let epoch = a.get_heads();
-    let mut b = a.fork().with_author(Some(bob));
+    let mut b = a.fork_with_author(Some(bob)).unwrap();
     b.put(ROOT, "z", 3).unwrap();
     b.commit();
     a.merge(&mut b).unwrap();
@@ -55,7 +55,7 @@ fn masked_local_edits_do_not_change_the_view_for_any_peer() {
 #[test]
 fn masked_local_edits_roll_back_cleanly() {
     let alice = Author::try_from("aaaa").unwrap();
-    let mut doc = Automerge::new().with_author(Some(alice.clone()));
+    let mut doc = Automerge::from_config(automerge::Config::default().author(Some(alice.clone())));
     let text = doc
         .transact(|tx| {
             let text = tx.put_object(ROOT, "text", ObjType::Text)?;
@@ -100,7 +100,7 @@ fn masked_local_edits_roll_back_cleanly() {
 #[test]
 fn masked_local_edits_in_isolation_stay_hidden() {
     let alice = Author::try_from("aaaa").unwrap();
-    let mut doc = AutoCommit::new().with_author(Some(alice.clone()));
+    let mut doc = AutoCommit::from_config(automerge::Config::default().author(Some(alice.clone())));
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
     doc.splice_text(&text, 0, 0, "hi").unwrap();
     doc.commit();
@@ -124,7 +124,7 @@ fn masked_local_edits_in_isolation_stay_hidden() {
 #[test]
 fn reveal_author_reveals_masked_local_edits_with_replaying_patches() {
     let alice = Author::try_from("aaaa").unwrap();
-    let mut doc = AutoCommit::new().with_author(Some(alice.clone()));
+    let mut doc = AutoCommit::from_config(automerge::Config::default().author(Some(alice.clone())));
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
     doc.splice_text(&text, 0, 0, "hi").unwrap();
     doc.commit();
@@ -151,7 +151,7 @@ fn reveal_author_reveals_masked_local_edits_with_replaying_patches() {
 fn local_transaction_by_masked_author_with_new_actor_is_hidden() {
     let alice = Author::try_from("aaaa").unwrap();
     let bob = Author::try_from("bbbb").unwrap();
-    let mut doc = AutoCommit::new().with_author(Some(alice.clone()));
+    let mut doc = AutoCommit::from_config(automerge::Config::default().author(Some(alice.clone())));
     doc.put(ROOT, "x", 1).unwrap();
     doc.commit();
     let epoch = doc.get_heads();
@@ -159,8 +159,8 @@ fn local_transaction_by_masked_author_with_new_actor_is_hidden() {
 
     // Switching authors and back gives alice a brand-new actor: its first
     // (seq == 1) change must still enter the mask at her write-frontier boundary.
-    doc.set_author(Some(bob));
-    doc.set_author(Some(alice));
+    doc = doc.fork_with_author(Some(bob)).unwrap();
+    doc = doc.fork_with_author(Some(alice)).unwrap();
 
     doc.update_diff_cursor();
     doc.put(ROOT, "y", 2).unwrap();
@@ -203,7 +203,7 @@ fn masked_splice_deletes_the_visible_targets() {
 
     // Case 1: multi-delete.
     let alice = Author::try_from("aaaa").unwrap();
-    let mut doc = AutoCommit::new().with_author(Some(alice.clone()));
+    let mut doc = AutoCommit::from_config(automerge::Config::default().author(Some(alice.clone())));
     let list = doc.put_object(ROOT, "list", ObjType::List).unwrap();
     doc.insert(&list, 0, 1).unwrap();
     doc.insert(&list, 1, 2).unwrap();
@@ -222,7 +222,7 @@ fn masked_splice_deletes_the_visible_targets() {
 
     // Case 2: replacement.
     let alice = Author::try_from("aaaa").unwrap();
-    let mut doc = AutoCommit::new().with_author(Some(alice.clone()));
+    let mut doc = AutoCommit::from_config(automerge::Config::default().author(Some(alice.clone())));
     let list = doc.put_object(ROOT, "list", ObjType::List).unwrap();
     doc.insert(&list, 0, 1).unwrap();
     doc.insert(&list, 1, 2).unwrap();
@@ -241,7 +241,7 @@ fn masked_splice_deletes_the_visible_targets() {
 
     // Case 3: text. Masked text splices follow the same rules.
     let alice = Author::try_from("aaaa").unwrap();
-    let mut doc = AutoCommit::new().with_author(Some(alice.clone()));
+    let mut doc = AutoCommit::from_config(automerge::Config::default().author(Some(alice.clone())));
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
     doc.splice_text(&text, 0, 0, "abc").unwrap();
     doc.commit();
@@ -266,7 +266,7 @@ fn masked_splice_deletes_the_visible_targets() {
 #[test]
 fn masked_edit_at_earlier_heads_preserves_actor_chain() {
     let alice = Author::try_from("aaaa").unwrap();
-    let mut doc = AutoCommit::new().with_author(Some(alice.clone()));
+    let mut doc = AutoCommit::from_config(automerge::Config::default().author(Some(alice.clone())));
     doc.put(ROOT, "x", 1).unwrap();
     doc.commit();
     let h1 = doc.get_heads();

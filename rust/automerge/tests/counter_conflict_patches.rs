@@ -2,7 +2,7 @@
 
 use automerge::transaction::Transactable;
 use automerge::{
-    ActorId, Author, AutoCommit, ObjType, Prop, ReadDoc, ScalarValue, TextEncoding, ROOT,
+    ActorId, Author, AutoCommit, Config, ObjType, Prop, ReadDoc, ScalarValue, TextEncoding, ROOT,
 };
 
 #[test]
@@ -10,9 +10,12 @@ fn masking_an_increment_also_reports_a_new_conflict_for_maps_and_lists() {
     for list in [false, true] {
         let alice = Author::from(vec![1]);
         let bob = Author::from(vec![2]);
-        let mut doc = AutoCommit::new_with_encoding(TextEncoding::UnicodeCodePoint)
-            .with_author(Some(bob))
-            .with_actor(ActorId::from([1]));
+        let mut doc = AutoCommit::from_config(
+            Config::default()
+                .author(Some(bob))
+                .text_encoding(TextEncoding::UnicodeCodePoint),
+        )
+        .with_actor(ActorId::from([1]));
         let obj = if list {
             doc.put_object(ROOT, "list", ObjType::List).unwrap()
         } else {
@@ -23,8 +26,8 @@ fn masking_an_increment_also_reports_a_new_conflict_for_maps_and_lists() {
         }
         doc.commit();
         let mut peer = doc
-            .fork()
-            .with_author(Some(alice.clone()))
+            .fork_with_author(Some(alice.clone()))
+            .unwrap()
             .with_actor(ActorId::from([0xa0]));
         let prop = if list {
             Prop::Seq(0)

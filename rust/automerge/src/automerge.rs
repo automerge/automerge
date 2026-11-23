@@ -17,6 +17,7 @@ pub(crate) use crate::read::ReadDoc;
 use crate::actor::{ActorRemoval, ActorShift, ActorTable, HasActorIndices};
 use crate::change_graph::ChangeGraph;
 use crate::clock::{Clock, SeqClock};
+use crate::config::DocumentAuthor;
 use crate::cursor::{CursorPosition, MoveCursor, OpCursor};
 use crate::exid::ExId;
 use crate::hydrate;
@@ -34,6 +35,7 @@ use crate::transaction::{
 };
 use crate::types::{ActorId, ChangeHash, ObjId, ObjMeta, OpId, SequenceType, TextEncoding, Value};
 use crate::write_frontier::WriteFrontier;
+use crate::Config;
 use crate::{AutomergeError, Change, Cursor, Fragment, ObjType, Prop};
 use actor::ActorMaintenance;
 use author::AuthorRegistration;
@@ -123,9 +125,8 @@ pub struct LoadOptions<'a> {
     string_migration: StringMigration,
     patch_log: Option<&'a mut PatchLog>,
     text_encoding: TextEncoding,
-    author: Option<Author<'static>>,
+    author: DocumentAuthor<'static>,
     write_frontier: HashMap<Author<'static>, Vec<ChangeHash>>,
-    signing: bool,
 }
 
 impl<'a> LoadOptions<'a> {
@@ -196,7 +197,7 @@ impl<'a> LoadOptions<'a> {
 
     pub fn author(self, author: Author<'static>) -> Self {
         Self {
-            author: Some(author),
+            author: DocumentAuthor::Set(author),
             ..self
         }
     }
@@ -215,11 +216,11 @@ impl<'a> LoadOptions<'a> {
     /// fragments and loose changes with valid attached proofs.
     ///
     /// Document snapshot chunks are rejected in signing mode.
-    pub fn signing(self) -> Self {
-        Self {
-            signing: true,
+    pub fn signing(self, author: Author<'static>) -> Result<Self, crate::SigningAuthorError> {
+        Ok(Self {
+            author: DocumentAuthor::signing(author)?,
             ..self
-        }
+        })
     }
 }
 
@@ -231,9 +232,8 @@ impl std::default::Default for LoadOptions<'static> {
             patch_log: None,
             string_migration: StringMigration::NoMigration,
             text_encoding: TextEncoding::platform_default(),
-            author: None,
+            author: DocumentAuthor::Unset,
             write_frontier: HashMap::new(),
-            signing: false,
         }
     }
 }
@@ -303,7 +303,7 @@ impl std::default::Default for LoadOptions<'static> {
 /// ```rust
 /// # use automerge::{Author, Automerge, AutomergeError, ROOT, transaction::Transactable};
 /// let author = Author::from(vec![1,2,3]);
-/// let mut doc = Automerge::new().with_author(Some(author.clone()));
+/// let mut doc = Automerge::from_config(automerge::Config::default().author(Some(author.clone())));
 /// doc.transact(|tx| {
 ///     tx.put(ROOT, "foo", "bar")?;
 ///     Ok::<_, AutomergeError>(())
@@ -345,8 +345,6 @@ pub struct Automerge {
     pub(crate) ops: OpSet,
     /// The current actor.
     actor: Actor,
-    /// The current author.
-    author: Option<Author<'static>>,
 }
 
 impl Automerge {
@@ -359,16 +357,28 @@ impl Automerge {
     ///
     /// [`crate::Config::signing`] validates the public key before construction;
     /// consuming a configuration is infallible.
-    pub fn from_config(config: crate::Config) -> Self {
-        use crate::config::DocumentAuthor;
-
-        match config.author {
-            DocumentAuthor::Unset => Self::new_with_encoding(config.text_encoding),
-            DocumentAuthor::Set(author) => {
-                Self::new_with_encoding(config.text_encoding).with_author(Some(author))
-            }
-            DocumentAuthor::Verifier(verifier) => Self::signing_with_encoding(config.text_encoding)
-                .with_author(Some(verifier.author().clone())),
+    pub fn from_config(config: Config) -> Self {
+        let ops = OpSet::new(config.text_encoding);
+        let change_graph = ChangeGraph::new(&ops.actors);
+        let authors = Authors::new(&ops.actors);
+        let write_frontier = WriteFrontier::new();
+        let visibility = visibility::FrontierVisibility::new(
+            &write_frontier,
+            &change_graph,
+            &authors,
+            &ops.actors,
+        );
+        let signing = SigningState::new(config.author, &ops.actors);
+        Self {
+            staged: StagedChanges::new(),
+            change_graph,
+            signing,
+            authors,
+            write_frontier,
+            visibility,
+            ops,
+            deps: Default::default(),
+            actor: Actor::Unused(ActorId::random()),
         }
     }
 
@@ -401,28 +411,7 @@ impl Automerge {
     }
 
     pub fn new_with_encoding(encoding: TextEncoding) -> Self {
-        let ops = OpSet::new(encoding);
-        let change_graph = ChangeGraph::new(&ops.actors);
-        let authors = Authors::new(&ops.actors);
-        let write_frontier = WriteFrontier::new();
-        let visibility = visibility::FrontierVisibility::new(
-            &write_frontier,
-            &change_graph,
-            &authors,
-            &ops.actors,
-        );
-        Automerge {
-            staged: StagedChanges::new(),
-            change_graph,
-            signing: SigningState::Unsigned,
-            authors,
-            write_frontier,
-            visibility,
-            ops,
-            deps: Default::default(),
-            actor: Actor::Unused(ActorId::random()),
-            author: None,
-        }
+        Self::from_config(Config::default().text_encoding(encoding))
     }
 
     // TODO(finto): document that there are various invariants on the
@@ -444,14 +433,13 @@ impl Automerge {
         let mut doc = Automerge {
             staged: StagedChanges::new(),
             change_graph,
-            signing: SigningState::Unsigned,
+            signing: SigningState::default(),
             authors,
             write_frontier,
             visibility,
             ops,
             deps,
             actor: Actor::Unused(ActorId::random()),
-            author: None,
         };
         doc.remove_unused_actors(false);
         if doc.mask_hides_existing_ops() {
@@ -557,32 +545,9 @@ impl Automerge {
         self.republish_mask(log, |policy| *policy = WriteFrontier::from(write_frontier))
     }
 
-    /// Set the actor id for this document.
-    pub fn with_author(mut self, author: Option<Author<'static>>) -> Self {
-        self.set_author(author);
-        self
-    }
-
-    /// Set the author for this document.
-    ///
-    /// The [`Author`] is only changed, if `author` differs from
-    /// [`Automerge::get_author`]. If the author does change then a new
-    /// [`ActorId`] is generated for that author. Notably, this could be a
-    /// different [`ActorId`] compared to previous edits for the same author.
-    ///
-    /// If you are using authors *never* manually manage the [`ActorId`].
-    pub fn set_author(&mut self, author: Option<Author<'static>>) -> &mut Self {
-        if author.as_ref() != self.get_author() {
-            self.author = author;
-            // TODO: re-use old actors
-            self.actor = Actor::Unused(ActorId::random());
-        }
-        self
-    }
-
     /// Get the current author of this document.
     pub fn get_author(&self) -> Option<&Author<'static>> {
-        self.author.as_ref()
+        self.signing.author()
     }
 
     /// Mask all changes made by `author` after the `from` heads.
@@ -906,7 +871,11 @@ impl Automerge {
         self.staged.remove_actor_branch_from(&actor, seq);
 
         let start_op = NonZeroU64::MIN.saturating_add(self.change_graph.max_op());
-        let author = if seq == 1 { self.author.clone() } else { None };
+        let author = if seq == 1 {
+            self.get_author().cloned()
+        } else {
+            None
+        };
         // If the author is part of the write-frontier, assign the actor to the
         // author now, entering the fresh actor into the mask at the author's
         // boundary. Otherwise, no mask entry is needed, and the committed
@@ -1050,9 +1019,24 @@ impl Automerge {
         Transaction::empty(self, args, opts)
     }
 
-    /// Fork this document at the current point for use by a different actor.
+    /// Fork with another local identity and a fresh actor, preserving history.
     ///
-    /// This will create a new actor ID for the forked document
+    /// # Errors
+    /// Required signing mode rejects missing/unusable keys and a changed author
+    /// while any applied history remains unpublished.
+    pub fn fork_with_author(
+        &self,
+        author: Option<Author<'static>>,
+    ) -> Result<Self, AutomergeError> {
+        let identity = self
+            .signing
+            .fork_identity(author, &self.change_graph, false)?;
+        let mut fork = self.fork();
+        fork.signing.set_fork_identity(identity);
+        Ok(fork)
+    }
+
+    /// Fork this document at the current point with a fresh actor and the same author.
     pub fn fork(&self) -> Self {
         let mut f = self.clone();
         f.set_actor(ActorId::random());
@@ -1268,16 +1252,24 @@ impl Automerge {
 
     fn load_with_options_and_mark_validation(
         data: &[u8],
-        options: LoadOptions<'_>,
+        mut options: LoadOptions<'_>,
         mark_order: load::MarkOrderValidation,
     ) -> Result<Self, AutomergeError> {
-        if options.signing {
-            return Self::load_signing_with_options(data, options);
-        }
+        let author = match std::mem::take(&mut options.author) {
+            DocumentAuthor::Verifier(verifier) => {
+                options.author = DocumentAuthor::Verifier(verifier);
+                return Self::load_signing_with_options(data, options);
+            }
+            DocumentAuthor::Unset => None,
+            DocumentAuthor::Set(author) => Some(author),
+        };
         if data.is_empty() {
             tracing::trace!("no data, initializing empty document");
-            let mut doc =
-                Self::new_with_encoding(options.text_encoding).with_author(options.author);
+            let mut doc = Self::from_config(
+                Config::default()
+                    .text_encoding(options.text_encoding)
+                    .author(author),
+            );
             if !options.write_frontier.is_empty() {
                 doc.set_write_frontier(options.write_frontier);
             }
@@ -1339,6 +1331,7 @@ impl Automerge {
                 }
             }
         }
+        document.signing = SigningState::Unsigned { author };
         if let StringMigration::ConvertToText = options.string_migration {
             document.convert_scalar_strings_to_text()?;
         }
@@ -1355,14 +1348,17 @@ impl Automerge {
                 document.log_current_state(ObjMeta::root(), patch_log, true);
             }
         }
-        Ok(document.with_author(options.author))
+        Ok(document)
     }
 
     fn load_signing_with_options(
         data: &[u8],
         options: LoadOptions<'_>,
     ) -> Result<Self, AutomergeError> {
-        let mut document = Self::signing_with_encoding(options.text_encoding);
+        let mut document = Self::from_config(Config {
+            author: options.author,
+            text_encoding: options.text_encoding,
+        });
         if !data.is_empty() {
             let reader = storage::load::ChunkGroupReader::new(parse::Input::new(data));
             match reader.load_groups() {
@@ -1411,7 +1407,7 @@ impl Automerge {
                 document.log_current_state(ObjMeta::root(), patch_log, true);
             }
         }
-        Ok(document.with_author(options.author))
+        Ok(document)
     }
 
     /// Create the patches from a [`PatchLog`]
@@ -1473,7 +1469,7 @@ impl Automerge {
             )?;
             // Ensure that the author, actor, and write-frontier state are carried
             // over for an empty document.
-            doc.set_author(self.get_author().cloned());
+            doc.signing = self.signing.clone();
             doc = doc.with_actor(self.actor_id().clone());
             doc.set_write_frontier(self.get_write_frontier());
             // Finish the log's pending segment against the OLD document
@@ -1551,7 +1547,7 @@ impl Automerge {
     /// ```
     /// # use automerge::{Automerge, AutomergeError, LoadedGroup};
     /// # fn example(encoded_groups: Vec<Vec<u8>>, encoded_group: Vec<u8>) -> Result<(), AutomergeError> {
-    /// let mut doc = Automerge::signing();
+    /// let mut doc = Automerge::from_config(automerge::Config::default().signing(automerge::Author::from(vec![0x58].into_iter().chain([0x66; 31]).collect::<Vec<_>>())).unwrap());
     /// doc.apply_changes(encoded_groups)?;
     ///
     /// // Or inspect decoded contents before admitting the same proof-bearing groups.
@@ -1863,7 +1859,7 @@ impl Automerge {
         let max_op = self.change_graph.max_op_for_actor(actor_index);
         let masked = self.visibility.hides(&OpId::new(max_op + 1, actor_index))
             || (max_op == 0
-                && self.author.as_ref().is_some_and(|a| {
+                && self.get_author().is_some_and(|a| {
                     self.write_frontier
                         .get_write_frontier_for_author(a)
                         .is_some()
@@ -2107,7 +2103,7 @@ impl Automerge {
             .into_iter()
             .filter_map(|f| {
                 let proof = match &self.signing {
-                    SigningState::Unsigned => None,
+                    SigningState::Unsigned { .. } => None,
                     SigningState::Required(signing) => {
                         Some(signing.fragment_proof(&self.change_graph, &self.authors, &f)?)
                     }

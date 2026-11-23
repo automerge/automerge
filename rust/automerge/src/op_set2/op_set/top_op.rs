@@ -386,11 +386,11 @@ mod tests {
     /// A two-author text document, masked at its heads so that nothing is
     /// hidden but a mask is present.
     fn masked_doc() -> AutoCommit {
-        let mut doc = AutoCommit::new().with_author(Some(author(1)));
+        let mut doc = AutoCommit::from_config(crate::Config::default().author(Some(author(1))));
         let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
         doc.splice_text(&text, 0, 0, "one ").unwrap();
         doc.commit();
-        doc.set_author(Some(author(2)));
+        doc = doc.fork_with_author(Some(author(2))).unwrap();
         doc.splice_text(&text, 4, 0, "two").unwrap();
         doc.commit();
         let heads = doc.get_heads();

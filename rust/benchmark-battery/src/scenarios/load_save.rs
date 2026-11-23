@@ -195,7 +195,9 @@ fn author(i: usize) -> Author<'static> {
 fn saved_doc_with_actors(n: usize) -> Vec<u8> {
     let mut bytes = Vec::new();
     for i in 0..n {
-        let mut doc = benchmark_battery::automerge::AutoCommit::new().with_author(Some(author(i)));
+        let mut doc = benchmark_battery::automerge::AutoCommit::from_config(
+            automerge::Config::default().author(Some(author(i))),
+        );
         doc.put(benchmark_battery::ROOT, format!("k{i}"), i as i64)
             .unwrap();
         doc.commit();

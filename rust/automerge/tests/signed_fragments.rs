@@ -25,12 +25,33 @@ fn sign_all_required(doc: &mut AutoCommit, key: &SigningKey) {
     }
 }
 
+/// A receiving replica with its own (never signing) author.
+fn receiver_author() -> Author<'static> {
+    key_and_author(200).1
+}
+
+fn signing_load() -> LoadOptions<'static> {
+    LoadOptions::new().signing(receiver_author()).unwrap()
+}
+
+/// Alice's single published commit, as a fragment wire stream.
+fn published_alice_wire() -> Vec<u8> {
+    let (alice_key, alice_author) = key_and_author(44);
+    let mut alice =
+        AutoCommit::from_config(automerge::Config::default().signing(alice_author).unwrap())
+            .with_actor(ActorId::from([1]));
+    alice.put(ROOT, "step", 1_i64).unwrap();
+    alice.commit().unwrap();
+    sign_all_required(&mut alice, &alice_key);
+    alice.bundle_fragments(alice.fragments(..)).concat()
+}
+
 #[test]
 fn a_signing_autocommit_withholds_fragments_until_the_commit_is_signed() {
     let (alice_key, alice_author) = key_and_author(11);
-    let mut alice = AutoCommit::signing()
-        .with_author(Some(alice_author))
-        .with_actor(ActorId::from([1]));
+    let mut alice =
+        AutoCommit::from_config(automerge::Config::default().signing(alice_author).unwrap())
+            .with_actor(ActorId::from([1]));
     alice.put(ROOT, "title", "fragments").unwrap();
     let a1 = alice.commit().unwrap();
 
@@ -53,15 +74,15 @@ fn a_signing_autocommit_withholds_fragments_until_the_commit_is_signed() {
 #[test]
 fn a_signed_autocommit_fragment_stream_loads_into_another_document() {
     let (alice_key, alice_author) = key_and_author(11);
-    let mut alice = AutoCommit::signing()
-        .with_author(Some(alice_author))
-        .with_actor(ActorId::from([1]));
+    let mut alice =
+        AutoCommit::from_config(automerge::Config::default().signing(alice_author).unwrap())
+            .with_actor(ActorId::from([1]));
     alice.put(ROOT, "title", "fragments").unwrap();
     let a1 = alice.commit().unwrap();
     sign_all_required(&mut alice, &alice_key);
     let wire = alice.bundle_fragments(alice.fragments(..)).concat();
 
-    let mut bob = AutoCommit::load_with_options(&wire, LoadOptions::new().signing()).unwrap();
+    let mut bob = AutoCommit::load_with_options(&wire, signing_load()).unwrap();
 
     assert!(bob.try_signing().unwrap().is_published(&a1));
     assert_eq!(
@@ -74,19 +95,18 @@ fn a_signed_autocommit_fragment_stream_loads_into_another_document() {
 fn a_receiving_document_can_sign_its_own_commit_back_to_the_originator() {
     let (alice_key, alice_author) = key_and_author(11);
     let (bob_key, bob_author) = key_and_author(22);
-    let mut alice = AutoCommit::signing()
-        .with_author(Some(alice_author))
-        .with_actor(ActorId::from([1]));
+    let mut alice =
+        AutoCommit::from_config(automerge::Config::default().signing(alice_author).unwrap())
+            .with_actor(ActorId::from([1]));
     alice.put(ROOT, "title", "fragments").unwrap();
     alice.commit().unwrap();
     sign_all_required(&mut alice, &alice_key);
     let mut bob = AutoCommit::load_with_options(
         &alice.bundle_fragments(alice.fragments(..)).concat(),
-        LoadOptions::new().signing(),
+        LoadOptions::new().signing(bob_author).unwrap(),
     )
     .unwrap();
 
-    bob.set_author(Some(bob_author));
     bob.set_actor(ActorId::from([2]));
     bob.put(ROOT, "count", 2_i64).unwrap();
     let b1 = bob.commit().unwrap();
@@ -104,41 +124,56 @@ fn a_receiving_document_can_sign_its_own_commit_back_to_the_originator() {
 }
 
 #[test]
-fn required_signatures_lists_only_the_current_authors_unsigned_commits() {
-    let (_, alice_author) = key_and_author(44);
+fn a_receiver_with_a_fixed_author_requests_only_its_own_drafts() {
     let (bob_key, bob_author) = key_and_author(55);
-    let mut alice = AutoCommit::signing()
-        .with_author(Some(alice_author.clone()))
-        .with_actor(ActorId::from([1]));
-    alice.put(ROOT, "step", 1_i64).unwrap();
-    alice.commit().unwrap();
-    sign_all_required(&mut alice, &SigningKey::from_bytes(&[44; 32]));
-    let wire = alice.bundle_fragments(alice.fragments(..)).concat();
-
-    let mut bob = AutoCommit::load_with_options(&wire, LoadOptions::new().signing()).unwrap();
-    // Imported history is never a local signing request.
+    let mut bob = AutoCommit::load_with_options(
+        &published_alice_wire(),
+        LoadOptions::new().signing(bob_author).unwrap(),
+    )
+    .unwrap();
     assert!(bob.try_signing().unwrap().required_signatures().is_empty());
 
-    bob.set_author(Some(bob_author));
     bob.set_actor(ActorId::from([2]));
     bob.put(ROOT, "bob", 1_i64).unwrap();
     let b1 = bob.commit().unwrap();
     assert_eq!(bob.try_signing().unwrap().required_signatures(), vec![b1]);
 
-    // Switching the document's current author hides unsigned commits from other authors.
-    bob.set_author(Some(alice_author));
-    assert!(bob.try_signing().unwrap().required_signatures().is_empty());
-    bob.set_author(None);
-    assert!(bob.try_signing().unwrap().required_signatures().is_empty());
-
-    bob.set_author(Some(key_and_author(55).1));
     let sig_b1 = ed25519::Signature::from_bytes(bob_key.sign(&signing_message(&b1)).to_bytes());
     bob.try_signing()
         .unwrap()
         .insert_signature(&b1, &sig_b1)
         .unwrap();
     assert!(bob.try_signing().unwrap().is_published(&b1));
-    assert!(bob.try_signing().unwrap().required_signatures().is_empty());
+}
+
+/// The author is fixed per instance: while a draft is unpublished no other
+/// author may take over this history, and a signing document always needs a
+/// current author.
+#[test]
+fn an_unpublished_draft_blocks_changing_or_removing_the_fixed_author() {
+    let (_, alice_author) = key_and_author(44);
+    let (_, bob_author) = key_and_author(55);
+    let mut bob = AutoCommit::load_with_options(
+        &published_alice_wire(),
+        LoadOptions::new().signing(bob_author.clone()).unwrap(),
+    )
+    .unwrap();
+    bob.set_actor(ActorId::from([2]));
+    bob.put(ROOT, "bob", 1_i64).unwrap();
+    let b1 = bob.commit().unwrap();
+
+    assert!(matches!(
+        bob.fork_with_author(Some(alice_author)),
+        Err(AutomergeError::Signing(
+            SigningError::UnpublishedLocalChanges
+        ))
+    ));
+    assert!(matches!(
+        bob.fork_with_author(None),
+        Err(AutomergeError::SigningAuthor(_))
+    ));
+    assert_eq!(bob.get_author(), Some(&bob_author));
+    assert_eq!(bob.try_signing().unwrap().required_signatures(), vec![b1]);
 }
 
 #[test]
@@ -146,8 +181,7 @@ fn a_snapshot_of_a_signing_document_cannot_be_loaded_back_in_signing_mode() {
     // Public-API smoke test for the entry-point restrictions; the full matrix of
     // rejected entry points is pinned in `automerge::signing::tests::incoming`.
     let (key, author) = key_and_author(33);
-    let mut source = AutoCommit::signing()
-        .with_author(Some(author))
+    let mut source = AutoCommit::from_config(automerge::Config::default().signing(author).unwrap())
         .with_actor(ActorId::from([1]));
     source.put(ROOT, "k", "v").unwrap();
     source.commit().unwrap();
@@ -156,7 +190,7 @@ fn a_snapshot_of_a_signing_document_cannot_be_loaded_back_in_signing_mode() {
     let snapshot = source.save();
 
     assert!(matches!(
-        AutoCommit::load_with_options(&snapshot, LoadOptions::new().signing()),
+        AutoCommit::load_with_options(&snapshot, signing_load()),
         Err(AutomergeError::Signing(SigningError::SnapshotNotSupported))
     ));
 }
@@ -194,8 +228,7 @@ fn parse_signing_message_rejects_a_foreign_prefix_or_a_short_hash() {
 /// one loose tail commit, all signed. Returns `(doc, loose_tail_hash)`.
 fn doc_with_a_bundle_and_a_loose_tail() -> (AutoCommit, ChangeHash) {
     let (key, author) = key_and_author(77);
-    let mut doc = AutoCommit::signing()
-        .with_author(Some(author))
+    let mut doc = AutoCommit::from_config(automerge::Config::default().signing(author).unwrap())
         .with_actor(ActorId::from([1]));
 
     let mut step = 0_i64;
@@ -308,7 +341,11 @@ fn already_parsed_groups_apply_with_their_retained_proofs() {
     let signed_bundle = doc.bundle_fragments([bundle_meta.clone()]).pop().unwrap();
     let parsed_bundle = bundle_meta.parse_with_signatures(&signed_bundle).unwrap();
 
-    let mut target = AutoCommit::signing();
+    let mut target = AutoCommit::from_config(
+        automerge::Config::default()
+            .signing(receiver_author())
+            .unwrap(),
+    );
     target
         .apply_changes([parsed_bundle, LoadedGroup::from(parsed_change)])
         .unwrap();

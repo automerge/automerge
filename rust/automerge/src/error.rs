@@ -17,12 +17,16 @@ pub struct SigningAuthorError(#[source] pub(crate) SigningAuthorErrorInner);
 
 #[derive(Error, Debug)]
 pub(crate) enum SigningAuthorErrorInner {
+    #[error("signing mode needs an author")]
+    MissingAuthor,
     #[error("signing author is unusable: {0}")]
     InvalidKey(#[source] crate::signature::ed25519::error::VerifyingAuthor),
 }
 
 #[derive(Error, Debug)]
 pub enum AutomergeError {
+    #[error(transparent)]
+    SigningAuthor(#[from] SigningAuthorError),
     #[error(transparent)]
     ChangeGraph(#[from] crate::change_graph::MissingDep),
     #[error("failed to load compressed data: {0}")]

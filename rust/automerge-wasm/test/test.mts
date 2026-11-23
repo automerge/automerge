@@ -2708,12 +2708,14 @@ describe("Automerge", () => {
     });
   });
   describe("author", () => {
-    it("author can be assigned", () => {
-      const doc = create();
-      doc.put("/", "key", "val1");
-      doc.commit();
-      const actor1 = doc.getActorId();
-      doc.setAuthor("ffff");
+    it("author is fixed at creation and changed by forking", () => {
+      const source = create();
+      source.put("/", "key", "val1");
+      source.commit();
+      const actor1 = source.getActorId();
+      const doc = source.forkWithAuthor("ffff");
+      assert.equal(source.getAuthor(), null);
+      assert.equal(doc.getAuthor(), "ffff");
       const actor2 = doc.getActorId();
       assert.notEqual(actor1, actor2)
       doc.put("/", "key", "val2");
@@ -2730,11 +2732,10 @@ describe("Automerge", () => {
     });
 
     it("authors can be masked", () => {
-      const doc = create();
-      doc.setAuthor("ffff");
+      let doc = create({ author: "ffff" });
       doc.put("/", "key1", "val1");
 
-      doc.setAuthor("aaaa");
+      doc = doc.forkWithAuthor("aaaa");
       doc.put("/", "key2", "val2");
       let heads1 = doc.getHeads();
       doc.put("/", "key3", "val3");
@@ -2753,7 +2754,7 @@ describe("Automerge", () => {
       assert.deepEqual(patches2, [{action:'put',path:['key3'],value:'val3'}])
 
       let heads2 = doc.getHeads();
-      doc.setAuthor("bbbb");
+      doc = doc.forkWithAuthor("bbbb");
       doc.put("/", "key2", "val2a");
       doc.put("/", "key3", "val3a");
 
@@ -2785,8 +2786,7 @@ describe("Automerge", () => {
         counter: 13, key1: 'val2', list: [ 1, 2, 3, 'cat', 4 ], text: 'hello big world'
       }
 
-      const doc = create();
-      doc.setAuthor("ffff");
+      let doc = create({ author: "ffff" });
       doc.put("/", "key1", "val1");
       doc.put("/", "counter", 10, "counter");
       doc.increment("/", "counter", 1);
@@ -2796,7 +2796,7 @@ describe("Automerge", () => {
 
       assert.deepEqual(doc.materialize(), d1);
 
-      doc.setAuthor("aaaa");
+      doc = doc.forkWithAuthor("aaaa");
       doc.put("/", "key1", "val2");
       doc.increment("/", "counter", 2);
       doc.insert(list, 3, "cat");

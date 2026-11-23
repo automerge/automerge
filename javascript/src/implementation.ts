@@ -275,10 +275,8 @@ export function init<T>(_opts?: ActorId | InitOptions<T>): Doc<T> {
   const freeze = !!opts.freeze
   const patchCallback = opts.patchCallback
   const actor = opts.actor
-  const handle = ApiHandler.create({ actor })
-  if (typeof opts.author == "string") {
-    handle.setAuthor(opts.author)
-  }
+  // The author is fixed at construction.
+  const handle = ApiHandler.create({ actor, author: opts.author })
   handle.enableFreeze(!!opts.freeze)
   registerDatatypes(handle)
   const doc = handle.materialize("/", undefined, {
@@ -337,9 +335,21 @@ export function clone<T>(
   const state = _state(doc)
   const heads = state.heads
   const opts = importOpts(_opts)
-  const handle = state.handle.fork(opts.actor, heads)
+  // A clone inherits the author unless one is requested.
+  let handle
   if (typeof opts.author == "string") {
-    handle.setAuthor(opts.author)
+    if (heads !== undefined) {
+      const historical = state.handle.fork(undefined, heads)
+      try {
+        handle = historical.forkWithAuthor(opts.author, opts.actor)
+      } finally {
+        historical.free()
+      }
+    } else {
+      handle = state.handle.forkWithAuthor(opts.author, opts.actor)
+    }
+  } else {
+    handle = state.handle.fork(opts.actor, heads)
   }
   handle.updateDiffCursor()
 
@@ -770,6 +780,7 @@ export function load<T>(
     unchecked,
     allowMissingDeps,
     convertImmutableStringsToText,
+    author: opts.author,
   })
   handle.enableFreeze(!!opts.freeze)
   registerDatatypes(handle)
