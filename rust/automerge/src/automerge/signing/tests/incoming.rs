@@ -701,21 +701,6 @@ fn a_partial_load_withholds_bare_content_preceding_a_truncated_prefix() {
 }
 
 #[test]
-fn merging_another_document_in_signing_mode_is_rejected_as_unauthenticated() {
-    let (mut source, _, _) = signed_source();
-
-    let mut target = new_receiver();
-
-    assert!(matches!(
-        target.merge(&mut source),
-        Err(AutomergeError::Signing(
-            SigningError::UnauthenticatedChanges
-        ))
-    ));
-    assert!(target.get_heads().is_empty());
-}
-
-#[test]
 fn sync_with_a_signing_document_neither_generates_nor_accepts_messages() {
     let mut unsigned_peer = Automerge::new().with_actor(ActorId::from([9])).unwrap();
     append_at_level(&mut unsigned_peer, None, "p", 1, 0);

@@ -174,6 +174,13 @@ impl SigningState {
         }
     }
 
+    pub(crate) fn is_same_mode(&self, other: &Self) -> bool {
+        matches!(
+            (self, other),
+            (Self::Unsigned { .. }, Self::Unsigned { .. }) | (Self::Required(_), Self::Required(_))
+        )
+    }
+
     pub(crate) fn is_required(&self) -> bool {
         matches!(self, Self::Required(_))
     }

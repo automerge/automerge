@@ -14,6 +14,7 @@ mod fork;
 mod fragments;
 mod identity;
 mod incoming;
+mod merge;
 mod persistence;
 mod requests;
 
