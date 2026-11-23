@@ -228,12 +228,18 @@ fn checkpoint(doc: &mut AutoCommit, target_level: usize, seed: u64) {
 }
 
 fn history(steps: &[Step], higher_checkpoint: usize) -> (Automerge, Vec<Automerge>) {
-    let mut base = AutoCommit::new().with_actor(ActorId::from(&[0][..]));
+    let mut base = AutoCommit::new()
+        .with_actor(ActorId::from(&[0][..]))
+        .unwrap();
     let list = base.put_object(ROOT, "list", ObjType::List).unwrap();
     let text = base.put_object(ROOT, "text", ObjType::Text).unwrap();
     base.commit();
     let mut peers: Vec<_> = (1..=PEER_COUNT)
-        .map(|actor| base.fork().with_actor(ActorId::from(&[actor as u8][..])))
+        .map(|actor| {
+            base.fork()
+                .with_actor(ActorId::from(&[actor as u8][..]))
+                .unwrap()
+        })
         .collect();
 
     for (index, step) in steps.iter().enumerate() {

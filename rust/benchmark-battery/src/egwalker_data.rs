@@ -40,6 +40,7 @@ pub fn generate(inputs: &[impl AsRef<Path>]) -> Result<()> {
     Ok(())
 }
 
+#[allow(deprecated)]
 fn convert(input: &Path) -> Result<()> {
     let file = File::open(input).with_context(|| format!("opening {}", input.display()))?;
     let trace: EditTrace = serde_json::from_reader(BufReader::new(file))
@@ -53,7 +54,7 @@ fn convert(input: &Path) -> Result<()> {
     );
 
     let mut root = AutoCommit::new_with_encoding(TextEncoding::UnicodeCodePoint);
-    root.set_actor(ActorId::from(&[0xff][..]));
+    root.set_actor(ActorId::from(&[0xff][..])).unwrap();
     let text = root
         .put_object(ROOT, "text", ObjType::Text)
         .context("creating the text object")?;
@@ -175,6 +176,7 @@ fn validate(trace: &EditTrace) -> Result<usize> {
     Ok(root_count)
 }
 
+#[allow(deprecated)]
 fn take_branch(branches: &mut Branches, index: usize, agent: Option<usize>) -> Result<AutoCommit> {
     let (parent, remaining_uses) = branches
         .get_mut(&index)
@@ -190,7 +192,8 @@ fn take_branch(branches: &mut Branches, index: usize, agent: Option<usize>) -> R
     if let Some(agent) = agent {
         // The paper's converter used the big-endian bytes of a 64-bit usize. Use u64
         // explicitly so actor IDs are deterministic on every host.
-        doc.set_actor(ActorId::from((agent as u64).to_be_bytes().as_slice()));
+        doc.set_actor(ActorId::from((agent as u64).to_be_bytes().as_slice()))
+            .unwrap();
     }
     Ok(doc)
 }

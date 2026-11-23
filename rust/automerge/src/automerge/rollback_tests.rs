@@ -213,11 +213,12 @@ fn rollback_delete_text_range() {
 }
 
 #[test]
+#[allow(deprecated)]
 fn rollback_delete_conflicted_field() {
     let mut doc1 = Automerge::new();
-    doc1.set_actor(ActorId::from(b"aaaa"));
+    doc1.set_actor(ActorId::from(b"aaaa")).unwrap();
     let mut doc2 = Automerge::new();
-    doc2.set_actor(ActorId::from(b"bbbb"));
+    doc2.set_actor(ActorId::from(b"bbbb")).unwrap();
 
     {
         let mut tx = doc1.transaction();
@@ -255,12 +256,13 @@ fn rollback_delete_conflicted_field() {
 }
 
 #[test]
+#[allow(deprecated)]
 fn rollback_increment_counter_conflicted_by_non_counter() {
     // doc1 gets the higher actor so its counter wins over doc2's string.
     let mut doc1 = Automerge::new();
-    doc1.set_actor(ActorId::from(b"zzzz"));
+    doc1.set_actor(ActorId::from(b"zzzz")).unwrap();
     let mut doc2 = Automerge::new();
-    doc2.set_actor(ActorId::from(b"aaaa"));
+    doc2.set_actor(ActorId::from(b"aaaa")).unwrap();
 
     {
         let mut tx = doc1.transaction();
@@ -331,6 +333,7 @@ fn rollback_delete_object() {
 }
 
 #[test]
+#[allow(deprecated)]
 fn rollback_scoped_transaction_on_conflicted_register() {
     // When we insert an op into the opset we pass an array of op IDs which the
     // new operation succeeds. Overwriting these operation IDs can modify the
@@ -349,9 +352,9 @@ fn rollback_scoped_transaction_on_conflicted_register() {
     // This test exercises the logic required by ensuring that the checkpoints
     // before and after a rollback of a scoped transaction are the same.
     let mut doc1 = Automerge::new();
-    doc1.set_actor(ActorId::from(b"aaaa"));
+    doc1.set_actor(ActorId::from(b"aaaa")).unwrap();
     let mut doc2 = Automerge::new();
-    doc2.set_actor(ActorId::from(b"bbbb"));
+    doc2.set_actor(ActorId::from(b"bbbb")).unwrap();
 
     {
         let mut tx = doc1.transaction();
@@ -392,11 +395,12 @@ fn rollback_scoped_transaction_on_conflicted_register() {
 }
 
 #[test]
+#[allow(deprecated)]
 fn rollback_combined_operations() {
     let mut doc1 = Automerge::new();
-    doc1.set_actor(ActorId::from(b"aaaa"));
+    doc1.set_actor(ActorId::from(b"aaaa")).unwrap();
     let mut doc2 = Automerge::new();
-    doc2.set_actor(ActorId::from(b"bbbb"));
+    doc2.set_actor(ActorId::from(b"bbbb")).unwrap();
 
     let list;
     let text;

@@ -157,15 +157,17 @@ fn authored_doc() -> (Automerge, Author<'static>) {
             .text_encoding(ENCODING)
             .author(Some(author.clone())),
     )
-    .with_actor(ActorId::from(vec![0x80]));
+    .with_actor(ActorId::from(vec![0x80]))
+    .unwrap();
     (doc, author)
 }
 
+#[allow(deprecated)]
 fn other_author(doc: &mut Automerge) {
     *doc = doc
         .fork_with_author(Some(Author::try_from("bbbb").unwrap()))
         .unwrap();
-    doc.set_actor(ActorId::from(vec![0x10]));
+    doc.set_actor(ActorId::from(vec![0x10])).unwrap();
 }
 
 #[test]
@@ -339,8 +341,9 @@ fn historical_diff_restored_siblings_do_not_snapshot_retained_objects() {
 
 #[test]
 fn pending_events_survive_load_incremental_into_empty_document() {
-    let mut other =
-        AutoCommit::new_with_encoding(ENCODING).with_actor(ActorId::try_from("aaaaaa").unwrap());
+    let mut other = AutoCommit::new_with_encoding(ENCODING)
+        .with_actor(ActorId::try_from("aaaaaa").unwrap())
+        .unwrap();
     other.put(ROOT, "a", 1).unwrap();
     other.put(ROOT, "b", 2).unwrap();
     other.commit();
@@ -381,7 +384,8 @@ fn pending_events_survive_load_incremental_into_empty_document() {
     let heads = other.get_heads();
     let mut third = other
         .fork()
-        .with_actor(ActorId::try_from("bbbbbb").unwrap());
+        .with_actor(ActorId::try_from("bbbbbb").unwrap())
+        .unwrap();
     third.put(ROOT, "c", 3).unwrap();
     third.commit();
     let more = third.save_after(&heads);
@@ -405,12 +409,16 @@ fn local_commit_before_merge_does_not_split_the_pending_segment() {
     // must not finalize the pending segment: the local events and the
     // subsequent merge's events must be resolved together at the final view,
     // where an event addressed to a superseded object is dropped.
-    let mut doc1 =
-        AutoCommit::new_with_encoding(ENCODING).with_actor(ActorId::try_from("aaaaaa").unwrap());
+    let mut doc1 = AutoCommit::new_with_encoding(ENCODING)
+        .with_actor(ActorId::try_from("aaaaaa").unwrap())
+        .unwrap();
     let map = doc1.put_object(ROOT, "map", ObjType::Map).unwrap();
     doc1.put(&map, "foo", "bar").unwrap();
     doc1.commit();
-    let mut doc2 = doc1.fork().with_actor(ActorId::try_from("bbbbbb").unwrap());
+    let mut doc2 = doc1
+        .fork()
+        .with_actor(ActorId::try_from("bbbbbb").unwrap())
+        .unwrap();
 
     doc1.update_diff_cursor();
     let foo1 = doc1.put_object(&map, "foo", ObjType::Map).unwrap();

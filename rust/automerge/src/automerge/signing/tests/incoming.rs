@@ -87,14 +87,16 @@ fn rejected_without_state_change(stream: &[u8]) -> AutomergeError {
 
 /// Three signed commits by two authors: `a1` (level 0, key 1), `b1` (level 1,
 /// key 2) and `a2` (level 0, key 1). The sender keeps authoring as key 1.
+#[allow(deprecated)]
 fn mixed_author_source() -> (Automerge, [ChangeHash; 3]) {
     let k1 = key(1);
     let mut sender = Automerge::from_config(crate::Config::default().signing(author(&k1)).unwrap())
-        .with_actor(ActorId::from([1]));
+        .with_actor(ActorId::from([1]))
+        .unwrap();
     let a1 = append_at_level(&mut sender, None, "a", 1, 0);
-    sender.set_actor(ActorId::from([2]));
+    sender.set_actor(ActorId::from([2])).unwrap();
     let b1 = append_at_level(&mut sender, None, "b", 2, 1);
-    sender.set_actor(ActorId::from([1]));
+    sender.set_actor(ActorId::from([1])).unwrap();
     let a2 = append_at_level(&mut sender, None, "c", 3, 0);
 
     sign_doc(&mut sender, a1, &k1);
@@ -169,12 +171,14 @@ fn superseding_delivery_reclaims_resident_signatures_it_covers() {
 
 /// Two groups: `f` holds `a1` (actor 1) and `b1` (actor 2, level 1), `g` holds
 /// the dependent `b2` (actor 2, level 1). Returns `(sender, f_bytes, g_bytes, b1, b2)`.
+#[allow(deprecated)]
 fn two_group_source() -> (Automerge, Vec<u8>, Vec<u8>, ChangeHash, ChangeHash) {
     let k1 = key(1);
     let mut sender = Automerge::from_config(crate::Config::default().signing(author(&k1)).unwrap())
-        .with_actor(ActorId::from([1]));
+        .with_actor(ActorId::from([1]))
+        .unwrap();
     let a1 = append_at_level(&mut sender, None, "a", 1, 0);
-    sender.set_actor(ActorId::from([2]));
+    sender.set_actor(ActorId::from([2])).unwrap();
     let b1 = append_at_level(&mut sender, None, "b", 2, 1);
     let b2 = append_at_level(&mut sender, None, "b2", 3, 1);
 
@@ -248,7 +252,8 @@ fn out_of_order_groups_in_one_stream_are_admitted_in_a_single_call() {
 fn one_valid_group_and_a_detached_commit() -> (Automerge, Vec<u8>, ChangeHash, ChangeHash) {
     let k1 = key(1);
     let mut sender = Automerge::from_config(crate::Config::default().signing(author(&k1)).unwrap())
-        .with_actor(ActorId::from([1]));
+        .with_actor(ActorId::from([1]))
+        .unwrap();
     let a1 = append_at_level(&mut sender, None, "a", 1, 1);
     let a2 = append_at_level(&mut sender, None, "b", 2, 1);
     sign_doc(&mut sender, a1, &k1);
@@ -334,7 +339,7 @@ fn a_truncated_signature_chunk_is_rejected_without_mutating_state() {
 #[test]
 fn a_signed_change_without_any_author_is_rejected_as_missing_author() {
     let k1 = key(1);
-    let mut authorless = Automerge::new().with_actor(ActorId::from([3]));
+    let mut authorless = Automerge::new().with_actor(ActorId::from([3])).unwrap();
     let hash = append_at_level(&mut authorless, None, "x", 1, 0);
     let change = authorless.get_change_by_hash(&hash).unwrap();
     let stream = attach_signatures(change.raw_bytes(), [(hash, sig(&k1, hash))]);
@@ -351,7 +356,8 @@ fn a_signed_change_whose_author_is_not_a_public_key_is_rejected() {
     let k1 = key(1);
     let mut bad_author =
         Automerge::from_config(crate::Config::default().author(Some(Author::from(vec![1, 2, 3]))))
-            .with_actor(ActorId::from([4]));
+            .with_actor(ActorId::from([4]))
+            .unwrap();
     let hash = append_at_level(&mut bad_author, None, "y", 1, 0);
     let change = bad_author.get_change_by_hash(&hash).unwrap();
     let stream = attach_signatures(change.raw_bytes(), [(hash, sig(&k1, hash))]);
@@ -367,14 +373,16 @@ fn a_signed_change_whose_author_is_not_a_public_key_is_rejected() {
 
 /// A group `f` covering `a1` and `b1` but proving only `b1`, alongside a group
 /// `g` for `a2` that carries the signature `f` is missing for `a1`.
+#[allow(deprecated)]
 fn incomplete_group_and_donor_group() -> (Automerge, Vec<u8>, Vec<u8>, ChangeHash) {
     let k1 = key(1);
     let mut sender = Automerge::from_config(crate::Config::default().signing(author(&k1)).unwrap())
-        .with_actor(ActorId::from([1]));
+        .with_actor(ActorId::from([1]))
+        .unwrap();
     let a1 = append_at_level(&mut sender, None, "a", 1, 0);
-    sender.set_actor(ActorId::from([2]));
+    sender.set_actor(ActorId::from([2])).unwrap();
     let b1 = append_at_level(&mut sender, None, "b", 2, 1);
-    sender.set_actor(ActorId::from([1]));
+    sender.set_actor(ActorId::from([1])).unwrap();
     let a2 = append_at_level(&mut sender, None, "c", 3, 1);
 
     let f_incomplete = attach_signatures(
@@ -449,16 +457,18 @@ struct Diamond {
     db1_group: Vec<u8>,
 }
 
+#[allow(deprecated)]
 fn diamond() -> Diamond {
     let (k1, k2, k3) = (key(1), key(2), key(3));
     let mut doc = Automerge::from_config(crate::Config::default().author(Some(author(&k1))))
-        .with_actor(ActorId::from([1]));
+        .with_actor(ActorId::from([1]))
+        .unwrap();
     let da1 = append_at_level(&mut doc, None, "a", 1, 0);
     doc = doc.fork_with_author(Some(author(&k2))).unwrap();
-    doc.set_actor(ActorId::from([2]));
+    doc.set_actor(ActorId::from([2])).unwrap();
     let db1 = append_at_level(&mut doc, Some(&[da1]), "b", 2, 1);
     doc = doc.fork_with_author(Some(author(&k3))).unwrap();
-    doc.set_actor(ActorId::from([3]));
+    doc.set_actor(ActorId::from([3])).unwrap();
     let dc1 = append_at_level(&mut doc, Some(&[da1, db1]), "c", 3, 1);
 
     let db1_group = attach_signatures(
@@ -475,17 +485,19 @@ fn diamond() -> Diamond {
 }
 
 #[test]
+#[allow(deprecated)]
 fn a_group_omitting_an_independent_ancestor_is_non_canonical() {
     let (k1, k2, k3) = (key(1), key(2), key(3));
     // Independent a1 (L0) and b1 (L1); c1 (L1) depends on both.
     let mut doc = Automerge::from_config(crate::Config::default().author(Some(author(&k1))))
-        .with_actor(ActorId::from([1]));
+        .with_actor(ActorId::from([1]))
+        .unwrap();
     let a1 = append_at_level(&mut doc, None, "a", 1, 0);
     doc = doc.fork_with_author(Some(author(&k2))).unwrap();
-    doc.set_actor(ActorId::from([2]));
+    doc.set_actor(ActorId::from([2])).unwrap();
     let b1 = append_at_level(&mut doc, Some(&[]), "b", 2, 1);
     doc = doc.fork_with_author(Some(author(&k3))).unwrap();
-    doc.set_actor(ActorId::from([3]));
+    doc.set_actor(ActorId::from([3])).unwrap();
     let c1 = append_at_level(&mut doc, Some(&[a1, b1]), "c", 3, 1);
 
     let stream = [
@@ -545,12 +557,13 @@ fn a_diamond_tip_restating_an_already_covered_ancestor_is_non_canonical() {
 }
 
 #[test]
+#[allow(deprecated)]
 fn a_change_not_depending_on_its_own_actor_predecessor_breaks_the_actor_chain() {
     let mut d = diamond();
     let k1 = key(1);
     // X:2 rewritten to drop the direct X:1 predecessor edge.
     d.doc = d.doc.fork_with_author(Some(author(&k1))).unwrap();
-    d.doc.set_actor(ActorId::from([1]));
+    d.doc.set_actor(ActorId::from([1])).unwrap();
     let dx2 = append_at_level(&mut d.doc, Some(&[d.db1]), "x2", 4, 0);
     let mut expanded = ExpandedChange::from(&d.doc.get_change_by_hash(&dx2).unwrap());
     expanded.deps = vec![d.db1];
@@ -575,15 +588,17 @@ fn a_change_not_depending_on_its_own_actor_predecessor_breaks_the_actor_chain() 
 /// A signed four-commit fork: `root` (L1, key 1), `a1` (L0, key 1) and two
 /// siblings off `a1` — `b1` (L1, key 2) and `c1` (L1, key 3). Returns the
 /// document, key 1, and `[root, a1, b1, c1]`.
+#[allow(deprecated)]
 fn signed_source() -> (Automerge, SigningKey, [ChangeHash; 4]) {
     let k1 = key(1);
     let mut source = Automerge::from_config(crate::Config::default().signing(author(&k1)).unwrap())
-        .with_actor(ActorId::from([1]));
+        .with_actor(ActorId::from([1]))
+        .unwrap();
     let root = append_at_level(&mut source, None, "root", 0, 1);
     let a1 = append_at_level(&mut source, None, "a1", 1, 0);
-    source.set_actor(ActorId::from([2]));
+    source.set_actor(ActorId::from([2])).unwrap();
     let b1 = append_at_level(&mut source, Some(&[a1]), "b1", 2, 1);
-    source.set_actor(ActorId::from([3]));
+    source.set_actor(ActorId::from([3])).unwrap();
     let c1 = append_at_level(&mut source, Some(&[a1]), "c1", 3, 1);
     for (h, k) in [(root, &k1), (a1, &k1), (b1, &k1), (c1, &k1)] {
         sign_doc(&mut source, h, k);
@@ -638,7 +653,8 @@ fn a_forged_orphan_claiming_an_unknown_actor_is_purged_when_the_real_actor_arriv
 
     // Malloy forges Actor 2 seq 2 under their own key, before the real Actor 2 is known.
     let mut forged = Automerge::from_config(crate::Config::default().author(Some(author(&malloy))))
-        .with_actor(ActorId::from([2]));
+        .with_actor(ActorId::from([2]))
+        .unwrap();
     append_at_level(&mut forged, None, "f1", 1, 0);
     let forged_seq2 = append_at_level(&mut forged, None, "f2", 2, 0);
     let forged_orphan = attach_signatures(
@@ -717,7 +733,7 @@ fn merging_another_document_in_signing_mode_is_rejected_as_unauthenticated() {
 
 #[test]
 fn sync_with_a_signing_document_neither_generates_nor_accepts_messages() {
-    let mut unsigned_peer = Automerge::new().with_actor(ActorId::from([9]));
+    let mut unsigned_peer = Automerge::new().with_actor(ActorId::from([9])).unwrap();
     append_at_level(&mut unsigned_peer, None, "p", 1, 0);
     let mut peer_state = sync::State::new();
     let msg = unsigned_peer

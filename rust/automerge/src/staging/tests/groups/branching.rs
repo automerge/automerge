@@ -73,12 +73,12 @@ fn discarding_one_overlap_preserves_the_other_full_descriptor_and_shared_content
 fn discarding_a_loose_group_preserves_unrelated_groups_and_their_order() {
     let (removed_source, removed_changes) = history(&[0]);
     let removed = &removed_changes[0];
-    let mut first_doc = Automerge::new().with_actor(ActorId::from([2]));
+    let mut first_doc = Automerge::new().with_actor(ActorId::from([2])).unwrap();
     let first = at_level(&mut first_doc, 2, 0);
-    let mut fragment_doc = Automerge::new().with_actor(ActorId::from([3]));
+    let mut fragment_doc = Automerge::new().with_actor(ActorId::from([3])).unwrap();
     let member = at_level(&mut fragment_doc, 3, 1);
     let fragment = fragment_doc.get_fragment(member.hash()).unwrap();
-    let mut last_doc = Automerge::new().with_actor(ActorId::from([4]));
+    let mut last_doc = Automerge::new().with_actor(ActorId::from([4])).unwrap();
     let last = at_level(&mut last_doc, 4, 0);
     let applied = Automerge::new();
     let mut staged = StagedChanges::new();
@@ -113,7 +113,7 @@ fn discarding_a_loose_group_preserves_unrelated_groups_and_their_order() {
 #[test]
 fn transitive_discard_invalidates_a_fragment_on_another_actor() {
     let (base, prefix) = history(&[1]);
-    let mut descendant = base.with_actor(ActorId::from([2]));
+    let mut descendant = base.with_actor(ActorId::from([2])).unwrap();
     let b = at_level(&mut descendant, 2, 0);
     let c = at_level(&mut descendant, 3, 1);
     let fragment = descendant.get_fragment(c.hash()).unwrap();
@@ -122,7 +122,7 @@ fn transitive_discard_invalidates_a_fragment_on_another_actor() {
         HashSet::from([b.hash(), c.hash()])
     );
     assert!(fragment.boundary.contains(&prefix[0].hash()));
-    let mut other = Automerge::new().with_actor(ActorId::from([3]));
+    let mut other = Automerge::new().with_actor(ActorId::from([3])).unwrap();
     let independent = at_level(&mut other, 4, 0);
     let applied = Automerge::new();
     let mut staged = StagedChanges::new();

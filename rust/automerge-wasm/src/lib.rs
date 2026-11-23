@@ -458,23 +458,25 @@ pub struct Automerge {
 
 #[wasm_bindgen]
 impl Automerge {
-    pub fn new(actor: Option<String>) -> Result<Automerge, error::BadActorId> {
+    pub fn new(actor: Option<String>) -> Result<Automerge, error::Create> {
         Self::new_with_author(actor, None)
     }
 
     /// Create a document with the given fixed author.
+    #[allow(deprecated)]
     fn new_with_author(
         actor: Option<String>,
         author: Option<Author<'static>>,
-    ) -> Result<Automerge, error::BadActorId> {
+    ) -> Result<Automerge, error::Create> {
         let mut doc = AutoCommit::from_config(
             am::Config::default()
                 .text_encoding(TextEncoding::Utf16CodeUnit)
                 .author(author),
         );
         if let Some(a) = actor {
-            let a = automerge::ActorId::from(hex::decode(a)?.to_vec());
-            doc.set_actor(a);
+            let a =
+                automerge::ActorId::from(hex::decode(a).map_err(error::BadActorId::from)?.to_vec());
+            doc.set_actor(a)?;
         }
         Ok(Automerge {
             doc,
@@ -510,15 +512,17 @@ impl Automerge {
     }
 
     #[allow(clippy::should_implement_trait)]
-    pub fn clone(&mut self, actor: Option<String>) -> Result<Automerge, error::BadActorId> {
+    #[allow(deprecated)]
+    pub fn clone(&mut self, actor: Option<String>) -> Result<Automerge, error::Fork> {
         let mut automerge = Automerge {
             doc: self.doc.clone(),
             freeze: self.freeze,
             external_types: self.external_types.clone(),
         };
         if let Some(s) = actor {
-            let actor = automerge::ActorId::from(hex::decode(s)?.to_vec());
-            automerge.doc.set_actor(actor);
+            let actor =
+                automerge::ActorId::from(hex::decode(s).map_err(error::BadActorId::from)?.to_vec());
+            automerge.doc.set_actor(actor)?;
         }
         Ok(automerge)
     }
@@ -526,6 +530,7 @@ impl Automerge {
     // We skip typescript here because the function is defined in the `interface Automerge`
     // definition at the top of this file
     #[wasm_bindgen(skip_typescript)]
+    #[allow(deprecated)]
     pub fn fork(
         &mut self,
         actor: Option<String>,
@@ -545,13 +550,14 @@ impl Automerge {
         if let Some(s) = actor {
             let actor =
                 automerge::ActorId::from(hex::decode(s).map_err(error::BadActorId::from)?.to_vec());
-            automerge.doc.set_actor(actor);
+            automerge.doc.set_actor(actor)?;
         }
         Ok(automerge)
     }
 
     // Typed in the `interface Automerge` custom section above.
     #[wasm_bindgen(js_name = forkWithAuthor, skip_typescript)]
+    #[allow(deprecated)]
     pub fn fork_with_author(
         &mut self,
         author: Option<String>,
@@ -569,7 +575,7 @@ impl Automerge {
         if let Some(s) = actor {
             let actor =
                 automerge::ActorId::from(hex::decode(s).map_err(error::BadActorId::from)?.to_vec());
-            automerge.doc.set_actor(actor);
+            automerge.doc.set_actor(actor)?;
         }
         Ok(automerge)
     }
@@ -1952,12 +1958,13 @@ fn document_author(options: &JsValue) -> Result<Option<Author<'static>>, error::
 pub fn init(options: JsValue) -> Result<Automerge, error::Create> {
     let actor = js_get(&options, "actor").ok().and_then(|a| a.as_string());
     let author = document_author(&options)?;
-    Ok(Automerge::new_with_author(actor, author)?)
+    Automerge::new_with_author(actor, author)
 }
 
 // skip_typescript as the options argument is optional which can only be typed
 // in the typescript custom section
 #[wasm_bindgen(js_name = load, skip_typescript)]
+#[allow(deprecated)]
 pub fn load(data: Uint8Array, options: JsValue) -> Result<Automerge, error::Load> {
     let data = data.to_vec();
     let actor = js_get(&options, "actor").ok().and_then(|a| a.as_string());
@@ -2001,7 +2008,7 @@ pub fn load(data: Uint8Array, options: JsValue) -> Result<Automerge, error::Load
     if let Some(s) = actor {
         let actor =
             automerge::ActorId::from(hex::decode(s).map_err(error::BadActorId::from)?.to_vec());
-        doc.set_actor(actor);
+        doc.set_actor(actor)?;
     }
     Ok(Automerge {
         doc,
@@ -2420,6 +2427,9 @@ pub mod error {
         BadActor(#[from] BadActorId),
         #[error(transparent)]
         BadAuthor(#[from] BadAuthor),
+        /// The configured actor is bound to another author.
+        #[error(transparent)]
+        Actor(#[from] AutomergeError),
     }
 
     impl From<Create> for JsValue {

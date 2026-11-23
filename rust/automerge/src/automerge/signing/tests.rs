@@ -117,14 +117,15 @@ pub(super) fn append_at_level(
 /// A required-mode document authored by `key`, plus its first level-0 change.
 fn signed_by(key: &SigningKey) -> (Automerge, ChangeHash) {
     let mut doc = Automerge::from_config(crate::Config::default().signing(author(key)).unwrap())
-        .with_actor(ActorId::from([1]));
+        .with_actor(ActorId::from([1]))
+        .unwrap();
     let first = append_at_level(&mut doc, None, 1, 0);
     (doc, first)
 }
 
 #[test]
 fn unsigned_document_rejects_try_signing_without_converting_mode() {
-    let mut doc = Automerge::new().with_actor(ActorId::from([1]));
+    let mut doc = Automerge::new().with_actor(ActorId::from([1])).unwrap();
     let mut tx = doc.transaction();
     tx.put(ROOT, "value", 1).unwrap();
     tx.commit();
@@ -185,7 +186,8 @@ fn pending_group_from_bob(
     bob: &SigningKey,
 ) -> (ChangeHash, Vec<u8>) {
     let mut bobs = Automerge::from_config(crate::Config::default().author(Some(author(bob))))
-        .with_actor(ActorId::from([2]));
+        .with_actor(ActorId::from([2]))
+        .unwrap();
     bobs.apply_changes([doc.get_change_by_hash(&a1).unwrap()])
         .unwrap();
     let b1 = append_at_level(&mut bobs, None, 2, 0);
@@ -210,7 +212,8 @@ fn signature_for_a_pending_incoming_change_is_unknown_change() {
     let alice = key(7);
     let bob = key(8);
     let mut doc = Automerge::from_config(crate::Config::default().signing(author(&alice)).unwrap())
-        .with_actor(ActorId::from([1]));
+        .with_actor(ActorId::from([1]))
+        .unwrap();
     let a1 = append_at_level(&mut doc, None, 1, 0);
     let (b1, _) = pending_group_from_bob(&mut doc, a1, &bob);
 
@@ -225,7 +228,8 @@ fn publishing_the_dependency_admits_the_pending_group_under_its_recorded_author(
     let alice = key(7);
     let bob = key(8);
     let mut doc = Automerge::from_config(crate::Config::default().signing(author(&alice)).unwrap())
-        .with_actor(ActorId::from([1]));
+        .with_actor(ActorId::from([1]))
+        .unwrap();
     let a1 = append_at_level(&mut doc, None, 1, 0);
     let (b1, b1_bytes) = pending_group_from_bob(&mut doc, a1, &bob);
 
@@ -246,15 +250,17 @@ fn publishing_the_dependency_admits_the_pending_group_under_its_recorded_author(
 }
 
 #[test]
+#[allow(deprecated)]
 fn publication_survives_actor_shift_and_rolled_back_transaction() {
     let k = key(7);
     let mut doc = Automerge::from_config(crate::Config::default().signing(author(&k)).unwrap())
-        .with_actor(ActorId::from([2]));
+        .with_actor(ActorId::from([2]))
+        .unwrap();
     let first = append_at_level(&mut doc, None, 1, 0);
     sign_doc(&mut doc, first, &k);
     assert!(is_published(&mut doc, &first));
 
-    doc.set_actor(ActorId::from([0]));
+    doc.set_actor(ActorId::from([0])).unwrap();
     {
         let mut tx = doc.transaction();
         tx.put(ROOT, "value", 2).unwrap();
@@ -284,7 +290,8 @@ fn clone_copies_publication_and_later_signatures_do_not_leak_between_copies() {
 fn publication_waits_for_the_gap_in_a_partially_signed_chain() {
     let k1 = key(1);
     let mut chain = Automerge::from_config(crate::Config::default().signing(author(&k1)).unwrap())
-        .with_actor(ActorId::from([1]));
+        .with_actor(ActorId::from([1]))
+        .unwrap();
     let c0 = append_at_level(&mut chain, None, 1, 0);
     let c1 = append_at_level(&mut chain, None, 2, 0);
     let c2 = append_at_level(&mut chain, None, 3, 0);
@@ -301,16 +308,18 @@ fn publication_waits_for_the_gap_in_a_partially_signed_chain() {
 }
 
 #[test]
+#[allow(deprecated)]
 fn local_fallback_is_published_while_its_container_waits_on_an_unpublished_boundary() {
     let k1 = key(1);
 
     // `c` contains {a, c} but depends on boundary `b` from another actor.
     let mut doc = Automerge::from_config(crate::Config::default().signing(author(&k1)).unwrap())
-        .with_actor(ActorId::from([1]));
+        .with_actor(ActorId::from([1]))
+        .unwrap();
     let a = append_at_level(&mut doc, None, 1, 0);
-    doc.set_actor(ActorId::from([2]));
+    doc.set_actor(ActorId::from([2])).unwrap();
     let b = append_at_level(&mut doc, Some(&[]), 2, 1);
-    doc.set_actor(ActorId::from([1]));
+    doc.set_actor(ActorId::from([1])).unwrap();
     let c = append_at_level(&mut doc, Some(&[a, b]), 3, 1);
 
     sign_doc(&mut doc, c, &k1);
@@ -347,7 +356,8 @@ fn required_signatures_omits_an_injected_non_local_change_with_the_local_author(
 
     // Build a change on a separate document claiming `alice` as its author.
     let mut remote = Automerge::from_config(crate::Config::default().author(Some(alice.clone())))
-        .with_actor(ActorId::from([9]));
+        .with_actor(ActorId::from([9]))
+        .unwrap();
     let mut tx = remote.transaction();
     tx.put(ROOT, "sneaky", "forged").unwrap();
     let remote_hash = tx.commit().0.unwrap();
@@ -357,7 +367,8 @@ fn required_signatures_omits_an_injected_non_local_change_with_the_local_author(
     // entered `ChangeGraph` directly via `History::update`, it was not locally
     // authored in `doc` and must never be returned by `required_signatures`.
     let mut doc = Automerge::from_config(crate::Config::default().signing(alice).unwrap())
-        .with_actor(ActorId::from([1]));
+        .with_actor(ActorId::from([1]))
+        .unwrap();
     doc.put_actor(ActorId::from([9]));
     let _ = crate::automerge::history::History::new(
         &mut doc.change_graph,
@@ -376,7 +387,8 @@ fn required_signatures_omits_an_injected_non_local_change_with_the_local_author(
 fn required_signatures_tracks_a_local_commit_until_it_is_signed() {
     let k1 = key(1);
     let mut doc = Automerge::from_config(crate::Config::default().signing(author(&k1)).unwrap())
-        .with_actor(ActorId::from([1]));
+        .with_actor(ActorId::from([1]))
+        .unwrap();
 
     let local_hash = append_at_level(&mut doc, None, 10, 0);
 

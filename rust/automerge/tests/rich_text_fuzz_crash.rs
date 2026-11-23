@@ -7,8 +7,9 @@ use automerge::{
     ScalarValue, ROOT,
 };
 
+#[allow(deprecated)]
 fn commit_as(doc: &mut AutoCommit, actor: &[u8]) {
-    doc.set_actor(ActorId::from(actor.to_vec()));
+    doc.set_actor(ActorId::from(actor.to_vec())).unwrap();
     doc.commit();
 }
 

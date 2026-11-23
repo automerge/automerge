@@ -987,13 +987,15 @@ mod tests {
     /// ops into the same column slot.
     #[test]
     fn increment_plus_trailing_insert_keeps_group_order() {
-        let mut doc = AutoCommit::new().with_actor("aa".try_into().unwrap());
+        let mut doc = AutoCommit::new()
+            .with_actor("aa".try_into().unwrap())
+            .unwrap();
         let list = doc.put_object(&ROOT, "list", crate::ObjType::List).unwrap();
         doc.insert(&list, 0, crate::ScalarValue::counter(5))
             .unwrap();
         let heads = doc.get_heads();
 
-        let mut f = doc.fork().with_actor("bb".try_into().unwrap());
+        let mut f = doc.fork().with_actor("bb".try_into().unwrap()).unwrap();
         f.increment(&list, 0, 1).unwrap();
         f.insert(&list, 1, "x").unwrap();
 
@@ -1032,14 +1034,14 @@ mod tests {
         let actor2 = ActorId::try_from("bbbbbb").unwrap();
         let actor1 = ActorId::try_from("cccccc").unwrap();
 
-        let mut doc1 = AutoCommit::new().with_actor(actor1);
+        let mut doc1 = AutoCommit::new().with_actor(actor1).unwrap();
         let map1 = doc1.put_object(&ROOT, "map", ObjType::Map).unwrap();
         doc1.put(&map1, "key1", "val1").unwrap();
         doc1.put(&map1, "key2", "val2").unwrap();
 
         let heads1 = doc1.get_heads();
 
-        let mut doc2 = doc1.fork().with_actor(actor2);
+        let mut doc2 = doc1.fork().with_actor(actor2).unwrap();
         doc2.put(&map1, "key1", "val3a").unwrap();
         doc2.put(&map1, "key1", "val3a.1").unwrap();
         doc2.put(&map1, "key1", "val3a.2").unwrap();
@@ -1052,7 +1054,7 @@ mod tests {
         doc1.put(&map1, "key1", "val6a").unwrap();
         doc1.put(&map3, "key1", "val7a").unwrap();
 
-        let mut doc3 = doc1.fork().with_actor(actor3);
+        let mut doc3 = doc1.fork().with_actor(actor3).unwrap();
         doc3.put(&map1, "key1", "val3b").unwrap();
         doc3.put(&map1, "key3", "val4b").unwrap();
 
@@ -1077,7 +1079,7 @@ mod tests {
         let actor2 = ActorId::try_from("bbbbbb").unwrap();
         let actor1 = ActorId::try_from("cccccc").unwrap();
 
-        let mut doc1 = AutoCommit::new().with_actor(actor1);
+        let mut doc1 = AutoCommit::new().with_actor(actor1).unwrap();
         let list = doc1.put_object(&ROOT, "list", ObjType::List).unwrap();
         doc1.insert(&list, 0, "val1").unwrap();
         doc1.insert(&list, 1, "val2").unwrap();
@@ -1085,7 +1087,7 @@ mod tests {
 
         let heads1 = doc1.get_heads();
 
-        let mut doc2 = doc1.fork().with_actor(actor2);
+        let mut doc2 = doc1.fork().with_actor(actor2).unwrap();
         doc2.insert(&list, 1, "val4a").unwrap();
         doc2.insert(&list, 1, "val4b").unwrap();
         doc2.insert(&list, 2, "val4c").unwrap();
@@ -1093,7 +1095,7 @@ mod tests {
         doc2.insert(&list, 0, "val4e").unwrap();
         doc2.insert(&list, 0, "val4f").unwrap();
 
-        let mut doc3 = doc1.fork().with_actor(actor3);
+        let mut doc3 = doc1.fork().with_actor(actor3).unwrap();
         doc3.insert(&list, 1, "val5a").unwrap();
         doc3.insert(&list, 1, "val5b").unwrap();
         doc3.insert(&list, 2, "val5c").unwrap();
@@ -1124,17 +1126,17 @@ mod tests {
         let actor2 = ActorId::try_from("bbbbbb").unwrap();
         let actor1 = ActorId::try_from("cccccc").unwrap();
 
-        let mut doc1 = AutoCommit::new().with_actor(actor1);
+        let mut doc1 = AutoCommit::new().with_actor(actor1).unwrap();
         let text = doc1.put_object(&ROOT, "text", ObjType::Text).unwrap();
         doc1.splice_text(&text, 0, 0, "the quick fox jumped over the lazy dog")
             .unwrap();
 
         let heads1 = doc1.get_heads();
 
-        let mut doc2 = doc1.fork().with_actor(actor2);
+        let mut doc2 = doc1.fork().with_actor(actor2).unwrap();
         doc2.splice_text(&text, 0, 0, "abc").unwrap();
 
-        let mut doc3 = doc1.fork().with_actor(actor3);
+        let mut doc3 = doc1.fork().with_actor(actor3).unwrap();
         doc3.splice_text(&text, 3, 1, "aalks").unwrap();
 
         let mut doc1_test = doc1.fork();
@@ -1156,16 +1158,16 @@ mod tests {
     #[test]
     fn multi_put_batch_apply() {
         let mut rng = make_rng();
-        let mut doc1 = AutoCommit::new().with_actor(rng.random());
+        let mut doc1 = AutoCommit::new().with_actor(rng.random()).unwrap();
         let list = doc1.put_object(&ROOT, "list", ObjType::List).unwrap();
         doc1.insert(&list, 0, "a").unwrap();
         doc1.insert(&list, 1, "b").unwrap();
         doc1.insert(&list, 2, "c").unwrap();
         let heads = doc1.get_heads();
 
-        let mut doc2 = doc1.fork().with_actor(rng.random());
+        let mut doc2 = doc1.fork().with_actor(rng.random()).unwrap();
         for i in 0..10 {
-            let mut tmp = doc1.fork().with_actor(rng.random());
+            let mut tmp = doc1.fork().with_actor(rng.random()).unwrap();
             tmp.put(&list, 0, i).unwrap();
             doc2.merge(&mut tmp).unwrap();
         }
@@ -1178,17 +1180,17 @@ mod tests {
     #[test]
     fn multi_insert_batch_apply() {
         let mut rng = make_rng();
-        let mut doc1 = AutoCommit::new().with_actor(rng.random());
+        let mut doc1 = AutoCommit::new().with_actor(rng.random()).unwrap();
         let list = doc1.put_object(&ROOT, "list", ObjType::List).unwrap();
         doc1.insert(&list, 0, "a").unwrap();
         doc1.insert(&list, 1, "b").unwrap();
         doc1.insert(&list, 2, "c").unwrap();
         let heads = doc1.get_heads();
 
-        let mut doc2 = doc1.fork().with_actor(rng.random());
+        let mut doc2 = doc1.fork().with_actor(rng.random()).unwrap();
 
         for i in 0..10 {
-            let mut tmp = doc1.fork().with_actor(rng.random());
+            let mut tmp = doc1.fork().with_actor(rng.random()).unwrap();
             tmp.insert(&list, 1, i).unwrap();
             //let change = tmp.get_last_local_change().unwrap();
             doc2.merge(&mut tmp).unwrap();
@@ -1203,17 +1205,17 @@ mod tests {
     #[test]
     fn multi_update_batch_apply() {
         let mut rng = make_rng();
-        let mut doc1 = AutoCommit::new().with_actor(rng.random());
+        let mut doc1 = AutoCommit::new().with_actor(rng.random()).unwrap();
         let list = doc1.put_object(&ROOT, "list", ObjType::List).unwrap();
         doc1.insert(&list, 0, "a").unwrap();
         doc1.insert(&list, 1, "b").unwrap();
         doc1.insert(&list, 2, "c").unwrap();
         let heads = doc1.get_heads();
 
-        let mut doc2 = doc1.fork().with_actor(rng.random());
+        let mut doc2 = doc1.fork().with_actor(rng.random()).unwrap();
 
         for i in 0..3 {
-            let mut tmp = doc1.fork().with_actor(rng.random());
+            let mut tmp = doc1.fork().with_actor(rng.random()).unwrap();
             tmp.put(&list, 2, i).unwrap();
             doc2.merge(&mut tmp).unwrap();
         }
@@ -1227,7 +1229,7 @@ mod tests {
     #[test]
     fn fuzz_batch_list_apply() {
         let mut rng = make_rng();
-        let mut doc1 = AutoCommit::new().with_actor(rng.random());
+        let mut doc1 = AutoCommit::new().with_actor(rng.random()).unwrap();
         let list = doc1.put_object(&ROOT, "list", ObjType::List).unwrap();
         doc1.insert(&list, 0, "a").unwrap();
         doc1.insert(&list, 1, "b").unwrap();
@@ -1239,12 +1241,12 @@ mod tests {
         };
         let heads = doc1.get_heads();
 
-        let mut doc1_tmp = doc1.fork().with_actor(rng.random());
-        let mut doc2 = doc1.fork().with_actor(rng.random());
+        let mut doc1_tmp = doc1.fork().with_actor(rng.random()).unwrap();
+        let mut doc2 = doc1.fork().with_actor(rng.random()).unwrap();
 
         for _ in 0..3 {
             for _ in 0..30 {
-                let mut tmp = doc1_tmp.fork().with_actor(rng.random());
+                let mut tmp = doc1_tmp.fork().with_actor(rng.random()).unwrap();
                 let num_inserts = rng.random::<u32>() % 10 + 1;
                 let num_updates = rng.random::<u32>() % 10 + 1;
                 let num_deletes = rng.random::<u32>() % 2;
@@ -1277,7 +1279,7 @@ mod tests {
     #[test]
     fn fuzz_batch_map1_apply() {
         let mut rng = make_rng();
-        let mut doc1 = AutoCommit::new().with_actor(rng.random());
+        let mut doc1 = AutoCommit::new().with_actor(rng.random()).unwrap();
         let map1 = doc1.put_object(&ROOT, "map1", ObjType::Map).unwrap();
         let map2 = doc1.put_object(&map1, "map2", ObjType::Map).unwrap();
         let map3 = doc1.put_object(&map2, "map3", ObjType::Map).unwrap();
@@ -1289,12 +1291,12 @@ mod tests {
         };
         let heads = doc1.get_heads();
 
-        let mut doc1_tmp = doc1.fork().with_actor(rng.random());
-        let mut doc2 = doc1.fork().with_actor(rng.random());
+        let mut doc1_tmp = doc1.fork().with_actor(rng.random()).unwrap();
+        let mut doc2 = doc1.fork().with_actor(rng.random()).unwrap();
 
         for _ in 0..3 {
             for _ in 0..30 {
-                let mut tmp = doc1_tmp.fork().with_actor(rng.random());
+                let mut tmp = doc1_tmp.fork().with_actor(rng.random()).unwrap();
                 let num_updates = rng.random::<u32>() % 10 + 1;
                 let num_deletes = rng.random::<u32>() % 2;
                 for _ in 0..num_updates {
@@ -1321,7 +1323,7 @@ mod tests {
     #[test]
     fn fuzz_batch_map2_apply() {
         let mut rng = make_rng();
-        let mut doc1 = AutoCommit::new().with_actor(rng.random());
+        let mut doc1 = AutoCommit::new().with_actor(rng.random()).unwrap();
         let map1 = doc1.put_object(&ROOT, "map1", ObjType::Map).unwrap();
         let map2 = doc1.put_object(&map1, "map2", ObjType::Map).unwrap();
         let map3 = doc1.put_object(&map2, "map3", ObjType::Map).unwrap();
@@ -1333,12 +1335,12 @@ mod tests {
         };
         let heads = doc1.get_heads();
 
-        let mut doc1_tmp = doc1.fork().with_actor(rng.random());
-        let mut doc2 = doc1.fork().with_actor(rng.random());
+        let mut doc1_tmp = doc1.fork().with_actor(rng.random()).unwrap();
+        let mut doc2 = doc1.fork().with_actor(rng.random()).unwrap();
 
         for _ in 0..3 {
             for _ in 0..30 {
-                let mut tmp = doc1_tmp.fork().with_actor(rng.random());
+                let mut tmp = doc1_tmp.fork().with_actor(rng.random()).unwrap();
                 let num_updates = rng.random::<u32>() % 10 + 1;
                 let num_deletes = rng.random::<u32>() % 2;
                 for _ in 0..num_updates {
@@ -1391,7 +1393,7 @@ mod tests {
     #[test]
     fn fuzz_batch_map_counter_apply() {
         let mut rng = make_rng();
-        let mut doc1 = AutoCommit::new().with_actor(rng.random());
+        let mut doc1 = AutoCommit::new().with_actor(rng.random()).unwrap();
         let map1 = doc1.put_object(&ROOT, "map1", ObjType::Map).unwrap();
         doc1.put(&map1, "key1", ScalarValue::counter(10)).unwrap();
         doc1.increment(&map1, "key1", 15).unwrap();
@@ -1414,12 +1416,12 @@ mod tests {
         };
         let heads = doc1.get_heads();
 
-        let mut doc1_tmp = doc1.fork().with_actor(rng.random());
-        let mut doc2 = doc1.fork().with_actor(rng.random());
+        let mut doc1_tmp = doc1.fork().with_actor(rng.random()).unwrap();
+        let mut doc2 = doc1.fork().with_actor(rng.random()).unwrap();
 
         for _ in 0..4 {
             for _ in 0..30 {
-                let mut tmp = doc1_tmp.fork().with_actor(rng.random());
+                let mut tmp = doc1_tmp.fork().with_actor(rng.random()).unwrap();
                 let num_updates = rng.random::<u32>() % 10 + 1;
                 let num_deletes = rng.random::<u32>() % 2;
                 for _ in 0..num_updates {
@@ -1487,22 +1489,22 @@ mod tests {
             value += 1;
             value
         };
-        let mut doc1 = AutoCommit::new().with_actor(rng.random());
+        let mut doc1 = AutoCommit::new().with_actor(rng.random()).unwrap();
         let list1 = doc1.put_object(&ROOT, "list1", ObjType::List).unwrap();
         doc1.insert(&list1, 0, ScalarValue::counter(val())).unwrap();
         doc1.insert(&list1, 1, ScalarValue::counter(val())).unwrap();
         doc1.insert(&list1, 2, ScalarValue::counter(val())).unwrap();
 
-        let mut doc1_copy = doc1.fork().with_actor(rng.random());
-        let mut doc2 = doc1.fork().with_actor(rng.random());
-        let mut doc2_copy = doc1.fork().with_actor(rng.random());
+        let mut doc1_copy = doc1.fork().with_actor(rng.random()).unwrap();
+        let mut doc2 = doc1.fork().with_actor(rng.random()).unwrap();
+        let mut doc2_copy = doc1.fork().with_actor(rng.random()).unwrap();
 
         let mut changes = vec![];
         //for _ in 0..3 {
         for _ in 0..2 {
             //for _ in 0..10 {
             for _ in 0..2 {
-                let mut tmp = doc2.fork().with_actor(rng.random());
+                let mut tmp = doc2.fork().with_actor(rng.random()).unwrap();
                 //let num_updates = rng.gen::<usize>() % 10 + 1;
                 let num_updates = 2;
                 //let num_inserts = rng.gen::<usize>() % 10 + 1;
@@ -1541,20 +1543,20 @@ mod tests {
             value += 1;
             value
         };
-        let mut doc1 = AutoCommit::new().with_actor(rng.random());
+        let mut doc1 = AutoCommit::new().with_actor(rng.random()).unwrap();
         let list1 = doc1.put_object(&ROOT, "list1", ObjType::List).unwrap();
         doc1.insert(&list1, 0, val()).unwrap();
         doc1.insert(&list1, 1, val()).unwrap();
         doc1.insert(&list1, 2, val()).unwrap();
 
-        let mut doc1_copy = doc1.fork().with_actor(rng.random());
-        let mut doc2 = doc1.fork().with_actor(rng.random());
-        let mut doc2_copy = doc1.fork().with_actor(rng.random());
+        let mut doc1_copy = doc1.fork().with_actor(rng.random()).unwrap();
+        let mut doc2 = doc1.fork().with_actor(rng.random()).unwrap();
+        let mut doc2_copy = doc1.fork().with_actor(rng.random()).unwrap();
 
         let mut changes = vec![];
         for _ in 0..3 {
             for _ in 0..30 {
-                let mut tmp = doc2.fork().with_actor(rng.random());
+                let mut tmp = doc2.fork().with_actor(rng.random()).unwrap();
                 let num_updates = rng.random::<u32>() % 10 + 1;
                 let num_inserts = rng.random::<u32>() % 10 + 1;
                 let num_deletes = rng.random::<u32>() % 2;
@@ -1589,18 +1591,18 @@ mod tests {
             value += 1;
             value
         };
-        let mut doc1 = AutoCommit::new().with_actor(rng.random());
+        let mut doc1 = AutoCommit::new().with_actor(rng.random()).unwrap();
         let text1 = doc1.put_object(&ROOT, "text1", ObjType::Text).unwrap();
         doc1.splice_text(&text1, 0, 0, "--------").unwrap();
 
-        let mut doc1_copy = doc1.fork().with_actor(rng.random());
-        let mut doc2 = doc1.fork().with_actor(rng.random());
-        let mut doc2_copy = doc1.fork().with_actor(rng.random());
+        let mut doc1_copy = doc1.fork().with_actor(rng.random()).unwrap();
+        let mut doc2 = doc1.fork().with_actor(rng.random()).unwrap();
+        let mut doc2_copy = doc1.fork().with_actor(rng.random()).unwrap();
 
         let mut changes = vec![];
         for _ in 0..10 {
             for _ in 0..5 {
-                let mut tmp = doc2.fork().with_actor(rng.random());
+                let mut tmp = doc2.fork().with_actor(rng.random()).unwrap();
                 let num_splices = rng.random::<u32>() % 10 + 1;
                 for _ in 0..num_splices {
                     let len = tmp.length(&text1) as u32;
@@ -1630,19 +1632,19 @@ mod tests {
             value += 1;
             value
         };
-        let mut doc1 = AutoCommit::new().with_actor(rng.random());
+        let mut doc1 = AutoCommit::new().with_actor(rng.random()).unwrap();
         let text1 = doc1.put_object(&ROOT, "text1", ObjType::Text).unwrap();
         doc1.splice_text(&text1, 0, 0, "---------------------")
             .unwrap();
 
-        let mut doc1_copy = doc1.fork().with_actor(rng.random());
-        let mut doc2 = doc1.fork().with_actor(rng.random());
-        let mut doc2_copy = doc1.fork().with_actor(rng.random());
+        let mut doc1_copy = doc1.fork().with_actor(rng.random()).unwrap();
+        let mut doc2 = doc1.fork().with_actor(rng.random()).unwrap();
+        let mut doc2_copy = doc1.fork().with_actor(rng.random()).unwrap();
 
         let mut changes = vec![];
         for _ in 0..5 {
             for _ in 0..10 {
-                let mut tmp = doc2.fork().with_actor(rng.random());
+                let mut tmp = doc2.fork().with_actor(rng.random()).unwrap();
                 let num_splices = rng.random::<u32>() % 10 + 1;
                 for _ in 0..num_splices {
                     let len = tmp.length(&text1) as u32;
@@ -1716,7 +1718,7 @@ mod tests {
     #[test]
     fn map_key_conflict() {
         let mut rng = make_rng();
-        let mut doc = AutoCommit::new().with_actor(rng.random());
+        let mut doc = AutoCommit::new().with_actor(rng.random()).unwrap();
 
         doc.put(&ROOT, "key1", "value1").unwrap();
 
@@ -1727,7 +1729,7 @@ mod tests {
         let mut docs = vec![];
 
         for _ in 0..DOCS {
-            docs.push(doc.fork().with_actor(rng.random()));
+            docs.push(doc.fork().with_actor(rng.random()).unwrap());
         }
 
         for _ in 0..CYCLES {
@@ -1756,7 +1758,7 @@ mod tests {
     #[test]
     fn list_element_conflict() {
         let mut rng = make_rng();
-        let mut doc = AutoCommit::new().with_actor(rng.random());
+        let mut doc = AutoCommit::new().with_actor(rng.random()).unwrap();
 
         let list = doc.put_object(&ROOT, "list", ObjType::List).unwrap();
 
@@ -1771,7 +1773,7 @@ mod tests {
         let mut docs = vec![];
 
         for _ in 0..DOCS {
-            docs.push(doc.fork().with_actor(rng.random()));
+            docs.push(doc.fork().with_actor(rng.random()).unwrap());
         }
 
         for _ in 0..CYCLES {
@@ -1796,7 +1798,7 @@ mod tests {
     #[test]
     fn conflicts_with_isolate() {
         let mut rng = make_rng();
-        let mut doc = AutoCommit::new().with_actor(rng.random());
+        let mut doc = AutoCommit::new().with_actor(rng.random()).unwrap();
 
         let list = doc.put_object(&ROOT, "list", ObjType::List).unwrap();
         let map = doc.put_object(&ROOT, "map", ObjType::Map).unwrap();
@@ -1810,7 +1812,7 @@ mod tests {
         let mut heads = vec![doc.get_heads()];
 
         for _ in 0..DOCS {
-            docs.push(doc.fork().with_actor(rng.random()));
+            docs.push(doc.fork().with_actor(rng.random()).unwrap());
         }
 
         for _ in 0..CYCLES {

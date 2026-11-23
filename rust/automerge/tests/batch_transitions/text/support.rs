@@ -13,7 +13,9 @@ pub(super) const ENCODINGS: [TextEncoding; 3] = [
 ];
 
 pub(super) fn initial(encoding: TextEncoding) -> (Automerge, ObjId, usize) {
-    let mut doc = Automerge::new_with_encoding(encoding).with_actor(actor(9));
+    let mut doc = Automerge::new_with_encoding(encoding)
+        .with_actor(actor(9))
+        .unwrap();
     let start = units("é", encoding).len();
     let mut tx = doc.transaction();
     let text = tx.put_object(ROOT, "text", ObjType::Text).unwrap();

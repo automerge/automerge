@@ -6,7 +6,9 @@ use automerge::{
 use sha2::{Digest, Sha256};
 
 fn document(actor: u8, key: &str) -> Automerge {
-    let mut doc = Automerge::new().with_actor(ActorId::from(vec![actor]));
+    let mut doc = Automerge::new()
+        .with_actor(ActorId::from(vec![actor]))
+        .unwrap();
     let mut tx = doc.transaction();
     tx.put(ROOT, key, 1).unwrap();
     tx.commit();

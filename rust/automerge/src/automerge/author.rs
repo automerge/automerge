@@ -70,7 +70,7 @@ mod tests {
     #[test]
     fn anonymous_initial_change_binds_identity_in_live_and_loaded_documents() {
         let actor = ActorId::from([1]);
-        let mut doc = Automerge::new().with_actor(actor.clone());
+        let mut doc = Automerge::new().with_actor(actor.clone()).unwrap();
         let mut tx = doc.transaction();
         tx.put(ROOT, "v", 1).unwrap();
         tx.commit();

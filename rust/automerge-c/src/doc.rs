@@ -126,7 +126,7 @@ pub unsafe extern "C" fn AMclone(doc: *const AMdoc) -> *mut AMresult {
 pub unsafe extern "C" fn AMcreate(actor_id: *const AMactorId) -> *mut AMresult {
     to_result(match actor_id.as_ref() {
         Some(actor_id) => am::AutoCommit::new().with_actor(actor_id.as_ref().clone()),
-        None => am::AutoCommit::new(),
+        None => Ok(am::AutoCommit::new()),
     })
 }
 
@@ -874,14 +874,14 @@ pub unsafe extern "C" fn AMsaveIncremental(doc: *mut AMdoc) -> *mut AMresult {
 /// doc must be a valid pointer to an AMdoc
 /// actor_id must be a valid pointer to an AMactorId
 #[no_mangle]
+#[allow(deprecated)]
 pub unsafe extern "C" fn AMsetActorId(
     doc: *mut AMdoc,
     actor_id: *const AMactorId,
 ) -> *mut AMresult {
     let doc = to_doc_mut!(doc);
     let actor_id = to_actor_id!(actor_id);
-    doc.set_actor(actor_id.as_ref().clone());
-    to_result(Ok(()))
+    to_result(doc.set_actor(actor_id.as_ref().clone()).map(|_| ()))
 }
 
 /// \memberof AMdoc

@@ -363,7 +363,8 @@ impl Runner {
                 .text_encoding(ENCODING)
                 .author(Some(carol.clone())),
         )
-        .with_actor(ActorId::from(vec![0x01]));
+        .with_actor(ActorId::from(vec![0x01]))
+        .unwrap();
         // A shared init commit creates the sequence objects, so peer and
         // local write-frontier boundaries (all at or after these heads) never
         // hide the containers themselves — only their contents.
@@ -375,6 +376,7 @@ impl Runner {
             main.fork_with_author(Some(author.clone()))
                 .unwrap()
                 .with_actor(ActorId::from(vec![actor]))
+                .unwrap()
         };
         let peers = [peer(&mut main, &alice, 0xA0), peer(&mut main, &bob, 0xB0)];
         let model = main.hydrate(ROOT, None).unwrap();
@@ -800,7 +802,8 @@ impl Runner {
         .expect("saved document reloads")
         // Same actor as before: this is the same session continuing, and a
         // fixed actor keeps generated runs deterministic.
-        .with_actor(ActorId::from(vec![0x01]));
+        .with_actor(ActorId::from(vec![0x01]))
+        .unwrap();
         prop_assert_eq!(
             &before,
             &doc.document().hydrate(None),
@@ -944,7 +947,8 @@ fn regression_masked_overwrite_keeps_doc_op_a_conflict_candidate() {
             .text_encoding(ENCODING)
             .author(Some(alice)),
     )
-    .with_actor(ActorId::from(vec![0xA0]));
+    .with_actor(ActorId::from(vec![0xA0]))
+    .unwrap();
     let child = a.put_object(ROOT, "k3", ObjType::Map).unwrap();
     a.put(&child, "c0", 0).unwrap();
     a.commit();
@@ -953,14 +957,17 @@ fn regression_masked_overwrite_keeps_doc_op_a_conflict_candidate() {
             .text_encoding(ENCODING)
             .author(Some(bob.clone())),
     )
-    .with_actor(ActorId::from(vec![0xB0]));
+    .with_actor(ActorId::from(vec![0xB0]))
+    .unwrap();
     b.put(ROOT, "k3", 0).unwrap();
     b.commit();
     let boundary = b.get_heads();
     b.put(ROOT, "k3", 1).unwrap();
     b.commit();
 
-    let mut main = AutoCommit::new_with_encoding(ENCODING).with_actor(ActorId::from(vec![0x01]));
+    let mut main = AutoCommit::new_with_encoding(ENCODING)
+        .with_actor(ActorId::from(vec![0x01]))
+        .unwrap();
     main.mask_author(bob, &boundary); // pending until bob's changes arrive
     let mut model = main.hydrate(ROOT, None).unwrap();
     main.update_diff_cursor();
@@ -1051,7 +1058,7 @@ proptest! {
         let alice = Author::try_from("aaaa").unwrap();
         let bob = Author::try_from("bbbb").unwrap();
         let mut a = AutoCommit::from_config(automerge::Config::default().text_encoding(ENCODING).author(Some(alice.clone())))
-            .with_actor(ActorId::from(vec![0xA0]));
+            .with_actor(ActorId::from(vec![0xA0])).unwrap();
         for (i, val) in alice_vals.iter().enumerate() {
             a.put(ROOT, key_name(i as u8), *val).unwrap();
             a.commit();
@@ -1060,7 +1067,7 @@ proptest! {
         let boundary = a.get_heads();
         let mut b = a
             .fork_with_author(Some(bob)).unwrap()
-            .with_actor(ActorId::from(vec![0xB0]));
+            .with_actor(ActorId::from(vec![0xB0])).unwrap();
         for (i, val) in bob_vals.iter().enumerate() {
             b.put(ROOT, key_name(i as u8), *val).unwrap();
             b.commit();
@@ -1154,7 +1161,8 @@ fn regression_reveal_under_visible_mark_carries_the_mark() {
             .text_encoding(ENCODING)
             .author(Some(carol.clone())),
     )
-    .with_actor(ActorId::from(vec![0x01]));
+    .with_actor(ActorId::from(vec![0x01]))
+    .unwrap();
     let text = main.put_object(ROOT, "text", ObjType::Text).unwrap();
     main.commit();
     let boundary = main.get_heads();
@@ -1164,7 +1172,8 @@ fn regression_reveal_under_visible_mark_carries_the_mark() {
     let mut peer = main
         .fork_with_author(Some(alice.clone()))
         .unwrap()
-        .with_actor(ActorId::from(vec![0xA0]));
+        .with_actor(ActorId::from(vec![0xA0]))
+        .unwrap();
     peer.mark(
         &text,
         TextMark::new("bold".into(), 0i64, 1, 2),

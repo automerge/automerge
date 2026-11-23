@@ -340,9 +340,9 @@ mod tests {
     fn test_counters() {
         let actor1 = crate::ActorId::from("aa".as_bytes());
         let actor2 = crate::ActorId::from("bb".as_bytes());
-        let mut doc = crate::AutoCommit::new().with_actor(actor2);
+        let mut doc = crate::AutoCommit::new().with_actor(actor2).unwrap();
 
-        let mut doc2 = doc.fork().with_actor(actor1);
+        let mut doc2 = doc.fork().with_actor(actor1).unwrap();
         doc2.put(crate::ROOT, "key", "someval").unwrap();
 
         doc.put(crate::ROOT, "key", crate::ScalarValue::Counter(1.into()))
@@ -402,11 +402,16 @@ mod tests {
 
     #[test]
     fn test_concurrent_insertions_at_same_index() {
-        let mut doc = crate::AutoCommit::new().with_actor(crate::ActorId::from("aa".as_bytes()));
+        let mut doc = crate::AutoCommit::new()
+            .with_actor(crate::ActorId::from("aa".as_bytes()))
+            .unwrap();
 
         let list = doc.put_object(crate::ROOT, "list", ObjType::List).unwrap();
 
-        let mut doc2 = doc.fork().with_actor(crate::ActorId::from("bb".as_bytes()));
+        let mut doc2 = doc
+            .fork()
+            .with_actor(crate::ActorId::from("bb".as_bytes()))
+            .unwrap();
 
         doc.insert(&list, 0, 1).unwrap();
         doc2.insert(&list, 0, 2).unwrap();
@@ -447,7 +452,9 @@ mod tests {
 
     #[test]
     fn test_insert_objects() {
-        let mut doc = crate::AutoCommit::new().with_actor(crate::ActorId::from("aa".as_bytes()));
+        let mut doc = crate::AutoCommit::new()
+            .with_actor(crate::ActorId::from("aa".as_bytes()))
+            .unwrap();
 
         let list = doc.put_object(crate::ROOT, "list", ObjType::List).unwrap();
 

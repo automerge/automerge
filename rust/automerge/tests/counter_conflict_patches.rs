@@ -15,7 +15,8 @@ fn masking_an_increment_also_reports_a_new_conflict_for_maps_and_lists() {
                 .author(Some(bob))
                 .text_encoding(TextEncoding::UnicodeCodePoint),
         )
-        .with_actor(ActorId::from([1]));
+        .with_actor(ActorId::from([1]))
+        .unwrap();
         let obj = if list {
             doc.put_object(ROOT, "list", ObjType::List).unwrap()
         } else {
@@ -28,7 +29,8 @@ fn masking_an_increment_also_reports_a_new_conflict_for_maps_and_lists() {
         let mut peer = doc
             .fork_with_author(Some(alice.clone()))
             .unwrap()
-            .with_actor(ActorId::from([0xa0]));
+            .with_actor(ActorId::from([0xa0]))
+            .unwrap();
         let prop = if list {
             Prop::Seq(0)
         } else {
