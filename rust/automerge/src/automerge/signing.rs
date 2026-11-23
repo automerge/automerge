@@ -22,6 +22,10 @@ use crate::{Author, Change, ChangeHash, Fragment, PatchLog};
 
 use super::Automerge;
 
+mod requests;
+use requests::LocalDrafts;
+pub use requests::{SigningRequest, SigningRequests};
+
 mod batch;
 mod incoming;
 mod readiness;
@@ -113,7 +117,6 @@ impl SigningState {
     pub(crate) fn fork_identity(
         &self,
         author: Option<Author<'static>>,
-        graph: &ChangeGraph,
         pending: bool,
     ) -> Result<DocumentAuthor<'static>, crate::AutomergeError> {
         match self {
@@ -126,13 +129,7 @@ impl SigningState {
                     return Ok(DocumentAuthor::Verifier(state.author.clone()));
                 }
                 let prepared = DocumentAuthor::signing(author)?;
-                if pending
-                    || graph.get_hashes(&[]).iter().any(|hash| {
-                        !graph.actor_seq_for_hash(hash).is_some_and(|(actor, seq)| {
-                            state.published.is_published_actor_seq(actor, seq)
-                        })
-                    })
-                {
+                if pending || !state.local_drafts.is_empty() {
                     return Err(
                         crate::signature::error::SigningError::UnpublishedLocalChanges.into(),
                     );
@@ -148,6 +145,13 @@ impl SigningState {
             (Self::Unsigned { author }, DocumentAuthor::Set(value)) => *author = Some(value),
             (Self::Required(state), DocumentAuthor::Verifier(value)) => state.author = value,
             _ => unreachable!("fork preserves signing mode"),
+        }
+    }
+
+    pub(super) fn has_local_drafts(&self) -> bool {
+        match self {
+            Self::Unsigned { .. } => false,
+            Self::Required(signing) => !signing.local_drafts.is_empty(),
         }
     }
 
@@ -203,7 +207,7 @@ impl SigningState {
 
     pub(super) fn record_local_change(&mut self, hash: ChangeHash) {
         if let Self::Required(signing) = self {
-            signing.local_unsigned.push(hash);
+            signing.local_drafts.insert(hash);
         }
     }
 
@@ -282,7 +286,7 @@ pub(crate) struct RequiredSigning {
     signatures: SignatureStore,
     fragment_readiness: FragmentReadiness,
     pending: PendingGroups,
-    local_unsigned: Vec<ChangeHash>,
+    local_drafts: LocalDrafts,
 }
 
 impl RequiredSigning {
@@ -293,16 +297,16 @@ impl RequiredSigning {
             signatures: SignatureStore::default(),
             fragment_readiness: FragmentReadiness::default(),
             pending: PendingGroups::default(),
-            local_unsigned: Vec::new(),
+            local_drafts: LocalDrafts::default(),
         }
     }
 
     pub(super) fn remove_published_drafts(&mut self, graph: &ChangeGraph) {
         let published = &self.published;
-        self.local_unsigned.retain(|hash| {
-            !(graph
+        self.local_drafts.remove(|hash| {
+            graph
                 .actor_seq_for_hash(hash)
-                .is_some_and(|(actor, seq)| published.is_published_actor_seq(actor, seq)))
+                .is_some_and(|(actor, seq)| published.is_published_actor_seq(actor, seq))
         });
     }
 
@@ -497,25 +501,26 @@ impl<'a> SigningDocument<'a> {
     }
 
     /// Return the locally authored commit hashes on this document that belong to
-    /// its current [`Author`] and still need a signature, in commit order.
+    /// its current [`Author`] and still need a signature, in hash order.
+    /// Prefer [`Automerge::signing_requests`] for owned messages.
     ///
     /// Only commits created locally on this document are tracked here; changes
     /// imported from outside the document are never returned.
     pub fn required_signatures(&self) -> Vec<ChangeHash> {
-        let current_author = self.state.author.author();
-        let current_author = current_author.as_borrowed();
-        self.state
-            .local_unsigned
-            .iter()
-            .copied()
-            .filter(|hash| {
-                self.graph
+        self.signing_requests().iter().map(|r| r.hash()).collect()
+    }
+
+    fn signing_requests(&self) -> SigningRequests {
+        SigningRequests::for_hashes(self.state.local_drafts.iter().filter(|hash| {
+            !has_signature(self.graph, self.authors, &self.state.signatures, hash)
+                && self
+                    .graph
                     .actor_seq_for_hash(hash)
                     .and_then(|(actor, _)| self.authors.get_author_for_actor(actor))
-                    .is_some_and(|author| author == current_author)
-                    && !has_signature(self.graph, self.authors, &self.state.signatures, hash)
-            })
-            .collect()
+                    .is_some_and(|author| {
+                        author.as_bytes() == self.state.author.author().as_bytes()
+                    })
+        }))
     }
 
     fn publish_proved_local(&mut self) {
@@ -570,6 +575,18 @@ impl PublishedHistory for SigningDocument<'_> {
 }
 
 impl Automerge {
+    /// Owned work for every unsigned local draft; imports never qualify.
+    pub fn signing_requests(&mut self) -> Result<SigningRequests, error::SigningMode> {
+        self.try_with_signing(|signing| signing.signing_requests())
+    }
+
+    /// Whether locally committed drafts await publication, including those with
+    /// signatures but blocked dependencies. False in unsigned mode; ignores
+    /// unapplied incoming groups, uncommitted operations and visibility masks.
+    pub fn has_unpublished_changes(&self) -> bool {
+        self.signing.has_local_drafts()
+    }
+
     pub(crate) fn admit_loaded_groups(
         &mut self,
         groups: Vec<crate::LoadedGroup>,
