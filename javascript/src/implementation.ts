@@ -67,6 +67,9 @@ import type {
   Span,
   DecodedSyncMessage,
   UpdateSpansConfig,
+  SigningRequest,
+  SignatureInput,
+  SignatureBatchOutcome,
 } from "./wasm_types.js"
 export type {
   ChangeMetadata,
@@ -74,6 +77,11 @@ export type {
   Commit,
   Fragment,
   FragmentLevelRange,
+  SigningRequest,
+  SignatureInput,
+  SignatureInsert,
+  SignatureInsertion,
+  SignatureBatchOutcome,
   PutPatch,
   DelPatch,
   DiffOptions,
@@ -204,10 +212,22 @@ export function use(api: API) {
  * @typeParam T - The type of the value the document contains
  */
 export type InitOptions<T> = {
-  /** The actor ID to use for this document, a random one will be generated if `null` is passed */
+  /**
+   * The actor ID to use for this document, a random one will be generated if
+   * `null` is passed. In signing mode an actor already bound to a different
+   * author than `author` is rejected with a `RangeError` (on `load` and
+   * `clone`); a signing document only writes through actors its fixed author
+   * owns.
+   */
   actor?: ActorId
-  /** The author for this document */
+  /** The author for this document. Required when `signing` is enabled. */
   author?: Author
+  /**
+   * Require valid attached Ed25519 proofs on incoming history and sign
+   * outgoing fragments. A signing document always has a current `author`,
+   * whose bytes must form a usable Ed25519 public key.
+   */
+  signing?: boolean
   freeze?: boolean
   /** A callback which will be called with the initial patch once the document has finished loading */
   patchCallback?: PatchCallback<T>
@@ -275,8 +295,12 @@ export function init<T>(_opts?: ActorId | InitOptions<T>): Doc<T> {
   const freeze = !!opts.freeze
   const patchCallback = opts.patchCallback
   const actor = opts.actor
-  // The author is fixed at construction.
-  const handle = ApiHandler.create({ actor, author: opts.author })
+  // The author is fixed at construction in both modes.
+  const handle = ApiHandler.create({
+    actor,
+    signing: opts.signing,
+    author: opts.author,
+  })
   handle.enableFreeze(!!opts.freeze)
   registerDatatypes(handle)
   const doc = handle.materialize("/", undefined, {
@@ -324,6 +348,12 @@ export function view<T>(doc: Doc<T>, heads: Heads): Doc<T> {
  * the actor ID which is generated you can pass the actor ID as the second
  * argument
  *
+ * In signing mode the local author is fixed per document and the requested
+ * actor is checked against it: an actor whose history was recorded under a
+ * different author is rejected with a `RangeError` before the copy is made,
+ * so one author can never continue another author's chain. Actors already
+ * owned by the same author, and brand-new actors, are accepted as before.
+ *
  * @typeParam T - The type of the value contained in the document
  * @param doc - The document to clone
  * @param _opts - Either an actor ID to use for the new doc or an {@link InitOptions}
@@ -335,7 +365,17 @@ export function clone<T>(
   const state = _state(doc)
   const heads = state.heads
   const opts = importOpts(_opts)
-  // A clone inherits the author unless one is requested.
+  if (opts.signing !== undefined) {
+    throw new RangeError(
+      "The signing mode is fixed when a document is created and inherited by clones",
+    )
+  }
+  // A clone inherits the author unless one is requested. A new author goes
+  // through the guarded full fork: in signing mode a different author is
+  // permitted only when no local change is unpublished, and a signed
+  // historical view cannot be cloned at all (historical forks are
+  // unsupported there). Unsigned historical views keep their semantics: fork
+  // the view first, then take the authored full fork of that copy.
   let handle
   if (typeof opts.author == "string") {
     if (heads !== undefined) {
@@ -371,6 +411,13 @@ export function clone<T>(
  *
  * The returned document has an unknown schema because its map keys and values
  * no longer correspond to those of the input document.
+ *
+ * This is a diagnostic transformation, not a mode conversion. The copy is
+ * always a new **unsigned** document: its change hashes are rewritten, and it
+ * carries no authors, signatures, publication state or signing requests, even
+ * when `doc` is a signing document. It therefore has no signature or
+ * publication guarantee and cannot be merged or loaded into a signing
+ * document. `doc` itself is unchanged, unpublished drafts included.
  */
 export function anonymize<T>(doc: Doc<T>): Doc<Record<string, unknown>> {
   const state = _state(doc)
@@ -780,6 +827,7 @@ export function load<T>(
     unchecked,
     allowMissingDeps,
     convertImmutableStringsToText,
+    signing: opts.signing,
     author: opts.author,
   })
   handle.enableFreeze(!!opts.freeze)
@@ -954,9 +1002,15 @@ function applyVisibilityMutation<T>(
  * an error which says "Attempting to change an out of date document". To
  * overcome this call {@link clone} on the argument before passing it to {@link
  * merge}.
+ *
+ * Between two signing documents only `remote`'s *published* history (with its
+ * complete proofs) is merged; `remote`'s unpublished drafts are left out and
+ * `local`'s own drafts are kept. Merging a signing document with an unsigned
+ * one throws in either direction before anything is changed.
  */
 export function merge<T>(local: Doc<T>, remote: Doc<T>): Doc<T> {
   const localState = _state(local)
+  const remoteState = _state(remote)
 
   if (localState.heads) {
     throw new RangeError(
@@ -964,9 +1018,7 @@ export function merge<T>(local: Doc<T>, remote: Doc<T>): Doc<T> {
     )
   }
   const heads = localState.handle.getHeads()
-  const remoteState = _state(remote)
-  const changes = localState.handle.getChangesAdded(remoteState.handle)
-  localState.handle.applyChanges(changes)
+  localState.handle.merge(remoteState.handle)
   return progressDocument(local, "merge", heads, localState.patchCallback)
 }
 
@@ -988,7 +1040,10 @@ export function getAuthors<T>(doc: Doc<T>): Author[] {
   return state.handle.getAuthors()
 }
 
-export function getAuthorForActor<T>(doc: Doc<T>, actor: ActorId): Author | null {
+export function getAuthorForActor<T>(
+  doc: Doc<T>,
+  actor: ActorId,
+): Author | null {
   const state = _state(doc)
   return state.handle.getAuthorForActor(actor)
 }
@@ -1481,6 +1536,7 @@ export type {
   API,
   SyncState,
   ActorId,
+  Author,
   Conflicts,
   Prop,
   Change,
@@ -2170,4 +2226,137 @@ export function readBundle(bundle: Uint8Array): {
   deps: Heads
 } {
   return ApiHandler.readBundle(bundle)
+}
+
+/**
+ * EXPERIMENTAL: The signatures this document's fixed author should produce
+ * next, as an owned snapshot.
+ *
+ * Each {@link SigningRequest} carries the applied change `hash`, the `author`
+ * whose Ed25519 key must sign, and the exact `message` bytes to sign. Sign
+ * `message` externally (the private key never enters Automerge) and hand the
+ * results to {@link insertSignatures}. The snapshot stays valid for its exact
+ * hashes after the document moves on, so late or duplicate responses are
+ * harmless. An empty result does not mean everything is published; see
+ * {@link hasUnpublishedChanges}.
+ *
+ * Throws if `doc` is not a signing document.
+ *
+ * @example
+ * ```ts
+ * // Signing happens outside Automerge, e.g. in a worker holding the key.
+ * const requests = Automerge.signingRequests(doc)
+ * const inputs = await Promise.all(
+ *   requests.map(async r => ({ message: r.message, signature: await sign(r.message) })),
+ * )
+ * ;({ doc } = Automerge.insertSignatures(doc, inputs))
+ * ```
+ *
+ * @experimental
+ */
+export function signingRequests<T>(doc: Doc<T>): SigningRequest[] {
+  const state = _state(doc, false)
+  return state.handle.signingRequests()
+}
+
+/**
+ * EXPERIMENTAL: Verify and attach a batch of signatures, then complete
+ * publication once. Input and output insertions are arrays.
+ *
+ * The whole batch is parsed before anything changes: if any entry is
+ * malformed, or `doc` is not a signing document, the outcome is `rejected`
+ * (with the offending index in `reason`), nothing is processed and the
+ * original `doc` is returned unchanged and still usable. Otherwise every
+ * entry, duplicates included, gets an owned {@link SignatureInsertion} in
+ * input order; a signature that fails verification or names an unknown
+ * change fails individually while later entries continue.
+ *
+ * `completed` means the batch was processed and publication settled, not that
+ * every change is published (missing dependencies or proof are normal waiting
+ * states). `publicationFailed` means inserted evidence and local publication
+ * were kept but applying newly enabled incoming history hit a recoverable
+ * conflict. In both cases the returned `doc` supersedes the input one and any
+ * incoming history applied by completion is reported through the patch
+ * callback with source `"insertSignatures"`.
+ *
+ * @example Shutdown: stop editing, finish signing, then wait with your own
+ * timeout before saving. {@link save} only returns bytes; durability is the
+ * application's job. The saved bytes contain published history only:
+ * unpublished drafts stay in the live document and are still editable and
+ * signable afterwards, but they are not recoverable from the bytes once the
+ * process exits. So a save while {@link hasUnpublishedChanges} is `true` is
+ * fine as a checkpoint, and only exiting afterwards loses the drafts.
+ * No requests plus unpublished history means publication is blocked on
+ * peers (for example a dependency they still have to sign), which only
+ * external progress can unblock: wait for it within the deadline, and
+ * decide explicitly what to do if the deadline passes. The application
+ * owns the signer's timeout as well: Automerge never waits, so a signer
+ * that ignores `remaining` can block the shutdown past the deadline.
+ * ```ts
+ * const deadline = Date.now() + 5_000
+ * while (Automerge.hasUnpublishedChanges(doc)) {
+ *   const remaining = deadline - Date.now()
+ *   if (remaining <= 0) {
+ *     // Still unpublished: exiting now would drop the drafts. Abort the
+ *     // shutdown (or deliberately accept the loss) instead of exiting.
+ *     throw new Error("shutdown timed out with unpublished changes")
+ *   }
+ *   const requests = Automerge.signingRequests(doc)
+ *   if (requests.length > 0) {
+ *     // External signer, bounded by the application's own deadline.
+ *     const inputs = await signAll(requests, { timeoutMs: remaining })
+ *     ;({ doc } = Automerge.insertSignatures(doc, inputs))
+ *   } else {
+ *     // Blocked on peers: let the network deliver their signatures, then
+ *     // re-check, bounded by what is left of the deadline.
+ *     doc = await waitForPeerProgress(doc, Math.min(remaining, 250))
+ *   }
+ * }
+ * await storage.write(Automerge.save(doc)) // complete: nothing unpublished
+ * ```
+ *
+ * @experimental
+ */
+export function insertSignatures<T>(
+  doc: Doc<T>,
+  inputs: SignatureInput[],
+  opts?: ApplyOptions<T>,
+): { doc: Doc<T>; outcome: SignatureBatchOutcome } {
+  const state = _state(doc)
+  if (state.heads) {
+    throw new RangeError(
+      "Attempting to change an outdated document.  Use Automerge.clone() if you wish to make a writable copy.",
+    )
+  }
+  if (_is_proxy(doc)) {
+    throw new RangeError("Calls to Automerge.change cannot be nested")
+  }
+  const heads = state.handle.getHeads()
+  const outcome = state.handle.insertSignatures(inputs)
+  if (outcome.status === "rejected") {
+    // Nothing was processed or mutated: the input document stays current.
+    return { doc, outcome }
+  }
+  state.heads = heads
+  const next = progressDocument(
+    doc,
+    "insertSignatures",
+    heads,
+    opts?.patchCallback || state.patchCallback,
+  )
+  return { doc: next, outcome }
+}
+
+/**
+ * EXPERIMENTAL: Whether any applied history of a signing document is not yet
+ * published. Always `false` for unsigned, empty or fully published documents.
+ *
+ * Read-only: it never commits or triggers publication, and it is not the
+ * same as having signing requests. History blocked on missing proof from
+ * other authors is unpublished with nothing to request.
+ *
+ * @experimental
+ */
+export function hasUnpublishedChanges<T>(doc: Doc<T>): boolean {
+  return _state(doc, false).handle.hasUnpublishedChanges()
 }
