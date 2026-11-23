@@ -11,10 +11,10 @@
 //!   feed gives: the column becomes `applied(dst, src, sps)`.
 //! - [`copy_invert`] starts from the source's slabs: it cuts the gaps
 //!   between the ranges out of them, back to front (`splices::Cuts`, each
-//!   cut a [`splice_feed`]), then puts the destination's items back
-//!   between the ranges kept with one cursor (`splices::Gaps`, the feed
-//!   now over the destination). The column becomes the same
-//!   `applied(dst, src, sps)`.
+//!   cut a [`splice_feed`](crate::cursor::splice_feed)), then puts the
+//!   destination's items back between the ranges kept with one cursor
+//!   (`splices::Gaps`, the feed now over the destination). The column
+//!   becomes the same `applied(dst, src, sps)`.
 //!
 //! Both keep the column invariant, and both end: every loop has a
 //! measure, the feed's included.

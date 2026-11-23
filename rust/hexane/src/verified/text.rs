@@ -11,8 +11,9 @@
 //! characters (`Seq<char>`, Verus's view of a `str`).
 //!
 //! A load refuses bytes that are not UTF-8 where a string should be, with
-//! [`PackError::InvalidUtf8`] as `Column<String>` does. What is read from
-//! a column after that was checked by the load, and is checked again as
+//! [`PackError::InvalidUtf8`](crate::PackError::InvalidUtf8) as
+//! `Column<String>` does. What is read from a column after that was
+//! checked by the load, and is checked again as
 //! it is read: this module has no `unsafe`, so it asks the standard
 //! library for the `str` of the bytes (`core::str::from_utf8`), which
 //! looks at each byte. That it finds them UTF-8 is proved, and the branch

@@ -3,7 +3,8 @@
 //! [`Column`](crate::Column) reaches a value type through the trusted
 //! bridges `Ops` and `WOps`, which state what the type's packing code
 //! does and leave Verus to take it on trust. Here the same contracts
-//! ([`RleOps`], [`WriteOps`], [`Lift`]) are *proved*: for every type that
+//! ([`RleOps`](crate::rle::model::RleOps), [`WriteOps`](crate::rle::model::WriteOps),
+//! [`Lift`](crate::rle::lift::Lift)) are *proved*: for every type that
 //! says how it packs ([`VPack`]), over every codec ([`VCodec`]), and for
 //! `Option`s of them. So a column over these types rests on no trusted
 //! value code.

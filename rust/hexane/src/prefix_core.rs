@@ -15,7 +15,7 @@
 //! `b + (a - b) == a`. A weight proves them, or assumes them.
 //!
 //! Trusted, for the unverified API's weight
-//! ([`PrefixSlabWeight`](crate::prefix::PrefixSlabWeight)): those laws
+//! ([`PrefixSlabWeight`]): those laws
 //! (`axiom_prefix_add`, `axiom_prefix_sub`), as for the wrapping integers
 //! (in debug builds an operation that would wrap panics rather than
 //! return), and that the value type's `accumulate` and `accumulate_run`

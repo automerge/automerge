@@ -4,8 +4,8 @@
 //! A `bool` column is the lengths of its runs, written as numbers of the
 //! column's codec. [`Column`](crate::Column) reaches the codec through a
 //! trusted bridge (`bool_wire::Counts`). Here the same contract
-//! ([`CountOps`]) is *proved*, for every codec of the verified API
-//! ([`VCodec`]).
+//! ([`CountOps`](crate::bool_wire::CountOps)) is *proved*, for every
+//! codec of the verified API ([`VCodec`]).
 //!
 //! This file is a specification, to be read as the guide to reviewing
 //! says ([`verified`](crate::verified#reviewing-the-specification)): each

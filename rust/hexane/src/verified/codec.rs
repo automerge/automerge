@@ -6,8 +6,8 @@
 //! nothing. [`VCodec`] is that trait with specifications: what the bytes
 //! of a number are, that no two numbers' bytes start the same string, and
 //! that the reading and writing functions read and write those bytes.
-//! It is *proved* for [`Leb128`], from the verified LEB128 codec in
-//! `leb128_codec`.
+//! It is *proved* for [`Leb128`](crate::Leb128), from the verified LEB128
+//! codec in `leb128_codec`.
 //!
 //! This file is a specification, to be read as the guide to reviewing
 //! says ([`verified`](crate::verified#reviewing-the-specification)): each

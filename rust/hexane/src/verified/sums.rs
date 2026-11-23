@@ -8,12 +8,12 @@
 //! that on trust. Here the sums are of this crate's integer types
 //! ([`VSum`]), and what the trusted bridge assumes is *proved* of them.
 //!
-//! What a value adds to a sum is an integer ([`VSummed::amount`]), and
-//! the sum of some values is the sum of those integers ([`summed`]): a
+//! What a value adds to a sum is an integer (`VSummed::amount`), and
+//! the sum of some values is the sum of those integers (`summed`): a
 //! mathematical integer, which no arithmetic of a machine type enters.
 //! A column keeps its sums in a machine type all the same, and adds
 //! them with wrapping arithmetic. The two agree wherever the true sums
-//! fit the type ([`sums_fit`]), and a prefix column keeps its values so
+//! fit the type (`sums_fit`), and a prefix column keeps its values so
 //! that they do. For most value types that asks nothing: no column is
 //! long enough for a sum of `u64`s to leave a `u128`. A sum of `u32`s
 //! is kept in a `u64`, which a column of more than 2^32 + 1 of them can

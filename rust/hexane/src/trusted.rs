@@ -670,7 +670,7 @@ pub(crate) fn splice_failed(e: PackError)
 // from src/verified/encoder.rs
 /// Panics: what an encoder saved is no column that loads. A caller has
 /// to show that it is not one a load is sure to take
-/// ([`loadable`](VerifiedColumn::loadable)): that the values `vs` save
+/// (`VerifiedColumn::loadable`): that the values `vs` save
 /// to bytes too long for it, or are more than a column counts. The
 /// words are those of the `unwrap` in
 /// [`EncoderApi::into_column`](crate::EncoderApi::into_column).
@@ -881,8 +881,9 @@ pub fn refused(msg: &'static str) -> PackError {
 }
 
 // from src/verified/mod.rs
-/// The error of a [`VerifiedIterState::try_resume`] on a column that the
-/// state does not fit. Nothing is assumed of it.
+/// The error of a
+/// [`VerifiedIterState::try_resume`](crate::verified::VerifiedIterState::try_resume)
+/// on a column that the state does not fit. Nothing is assumed of it.
 #[verifier::external_body]
 #[cold]
 pub(crate) fn invalid_resume() -> PackError {

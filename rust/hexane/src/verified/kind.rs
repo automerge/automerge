@@ -14,7 +14,7 @@
 //! says of its values does not depend on the kind, nor do its bytes when
 //! saved.
 //! What does is which columns there are: an index is kept for the
-//! columns whose weights it can hold ([`VKeeps::keeps`]), which for a
+//! columns whose weights it can hold (`VKeeps::keeps`), which for a
 //! plain column is every one.
 //!
 //! This file is a specification, to be read as the guide to reviewing

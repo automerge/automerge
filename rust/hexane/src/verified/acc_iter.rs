@@ -18,9 +18,10 @@
 //! said of `accumulated`, which adds values in the order the column
 //! holds them: the running sum *is* `accumulated` of the column's values
 //! from `base_pos()` up to the iterator (`acc_to`). It rests on the laws
-//! the client proves of its accumulator ([`VGroup`]), and on nothing
-//! else of it: the accumulators of two values need not add up to the
-//! same in either order.
+//! the client proves of its accumulator
+//! ([`VGroup`](crate::verified::VGroup)), and on nothing else of it: the
+//! accumulators of two values need not add up to the same in either
+//! order.
 //!
 //! The moves are [`PrefixIter`](crate::PrefixIter)'s, the shared ones of
 //! `prefix_core.rs` (`p_next`, `p_nth`, `p_next_run_from`, `p_delta_nth`,
