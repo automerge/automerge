@@ -684,6 +684,10 @@ function progressDocument<T>(
   return nextDoc
 }
 
+// Track active change callbacks by handle so captured roots and aliases cannot
+// bypass the proxy checks on document-level operations.
+const activeChanges = new WeakSet<Automerge>()
+
 function _change<T>(
   doc: Doc<T>,
   source: PatchSource,
@@ -722,7 +726,12 @@ function _change<T>(
   try {
     state.heads = heads
     const root: T = rootProxy(state.handle)
-    callback(root)
+    activeChanges.add(state.handle)
+    try {
+      callback(root)
+    } finally {
+      activeChanges.delete(state.handle)
+    }
     if (state.handle.pendingOps() === 0) {
       state.heads = undefined
       if (scope) {
@@ -1011,6 +1020,14 @@ function applyVisibilityMutation<T>(
 export function merge<T>(local: Doc<T>, remote: Doc<T>): Doc<T> {
   const localState = _state(local)
   const remoteState = _state(remote)
+  if (
+    _is_proxy(local) ||
+    _is_proxy(remote) ||
+    activeChanges.has(localState.handle) ||
+    activeChanges.has(remoteState.handle)
+  ) {
+    throw new RangeError("Merge cannot run inside an active change callback")
+  }
 
   if (localState.heads) {
     throw new RangeError(
@@ -2261,7 +2278,8 @@ export function signingRequests<T>(doc: Doc<T>): SigningRequest[] {
 
 /**
  * EXPERIMENTAL: Verify and attach a batch of signatures, then complete
- * publication once. Input and output insertions are arrays.
+ * publication once. Accepts one input or an array; both return an array of
+ * insertion results. Cannot run inside an active change callback.
  *
  * The whole batch is parsed before anything changes: if any entry is
  * malformed, or `doc` is not a signing document, the outcome is `rejected`
@@ -2319,7 +2337,7 @@ export function signingRequests<T>(doc: Doc<T>): SigningRequest[] {
  */
 export function insertSignatures<T>(
   doc: Doc<T>,
-  inputs: SignatureInput[],
+  inputs: SignatureInput | SignatureInput[],
   opts?: ApplyOptions<T>,
 ): { doc: Doc<T>; outcome: SignatureBatchOutcome } {
   const state = _state(doc)
@@ -2331,8 +2349,15 @@ export function insertSignatures<T>(
   if (_is_proxy(doc)) {
     throw new RangeError("Calls to Automerge.change cannot be nested")
   }
+  if (activeChanges.has(state.handle)) {
+    throw new RangeError(
+      "Signature insertion cannot run inside an active change callback",
+    )
+  }
   const heads = state.handle.getHeads()
-  const outcome = state.handle.insertSignatures(inputs)
+  const outcome = state.handle.insertSignatures(
+    Array.isArray(inputs) ? inputs : [inputs],
+  )
   if (outcome.status === "rejected") {
     // Nothing was processed or mutated: the input document stays current.
     return { doc, outcome }

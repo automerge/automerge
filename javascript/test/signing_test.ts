@@ -339,7 +339,7 @@ describe("fragment signing API", () => {
       ],
       [[good[0], { message: "text", signature: good[1].signature }], /index 1/],
       [[good[0], 7], /index 1/],
-      ["not an array", /array/],
+      ["not an input", /index 0/],
     ]
     for (const [inputs, reason] of malformed) {
       const result = Automerge.insertSignatures(
@@ -434,6 +434,45 @@ describe("fragment signing API", () => {
       d.counter = 43
     })
     assert.equal(unsigned.counter, 43)
+  })
+
+  it("accepts one input through the batch API and rejects active callback operations", async () => {
+    const alice = await makeSigner()
+    const doc = Automerge.change(
+      Automerge.init<CounterDoc>({ signing: true, author: alice.author }),
+      d => {
+        d.counter = 1
+      },
+    )
+    const [request] = Automerge.signingRequests(doc)
+    const input = {
+      message: request.message,
+      signature: await alice.sign(request.message),
+    }
+    const target = Automerge.clone(doc)
+    Automerge.change(doc, proxy => {
+      assert.throws(() => Automerge.insertSignatures(proxy, input), RangeError)
+      assert.throws(() => Automerge.insertSignatures(doc, input), RangeError)
+      assert.throws(() => Automerge.merge(target, doc), RangeError)
+      assert.throws(() => Automerge.merge(doc, target), RangeError)
+    })
+    const aborted = new Error("abort callback")
+    assert.throws(
+      () =>
+        Automerge.change(doc, proxy => {
+          proxy.title = "rolled back"
+          assert.throws(() => Automerge.merge(target, doc), RangeError)
+          throw aborted
+        }),
+      error => error === aborted,
+    )
+    assert.equal(doc.title, undefined)
+    const result = Automerge.insertSignatures(doc, input)
+    const batch = Automerge.insertSignatures(target, [input])
+    assert.deepEqual(result.outcome, batch.outcome)
+    assert.equal(result.outcome.status, "completed")
+    assert.equal(completed(result.outcome).length, 1)
+    assert.equal(Automerge.hasUnpublishedChanges(result.doc), false)
   })
 
   it("reports publicationFailed when local publication enables equivocating pending groups and keeps the document consistent", async () => {
