@@ -12,6 +12,7 @@ use crate::op_set2::{ChangeMetadata, Parents};
 use crate::patches::PatchLog;
 use crate::sync::SyncDoc;
 use crate::transaction::{CommitOptions, Transactable};
+use crate::SignatureBatchOutcome;
 use crate::types::ObjMeta;
 use crate::{hydrate, AnonymizeError, Bundle, Fragment, OnPartialLoad, TextEncoding};
 use crate::{sync, ObjType, Patch, ReadDoc, ScalarValue, ROOT};
@@ -118,6 +119,24 @@ impl AutoCommit {
             save_cursor: Vec::new(),
             isolation: None,
         }
+    }
+
+    /// Commit pending edits, verify a signature batch and complete publication.
+    /// Unsigned documents are rejected before closing their transaction.
+    /// See [`Automerge::insert_signatures`].
+    pub fn insert_signatures(
+        &mut self,
+        inputs: impl IntoIterator<Item = (ChangeHash, crate::signature::ed25519::Signature)>,
+    ) -> SignatureBatchOutcome {
+        if let Err(error) = self.doc.signing.require() {
+            return SignatureBatchOutcome::Rejected {
+                error: error.into(),
+            };
+        }
+        self.with_patch_log(|doc, log| {
+            Ok::<_, std::convert::Infallible>(doc.insert_signatures_log_patches(inputs, log))
+        })
+        .unwrap_or_else(|never| match never {})
     }
 
     /// Borrow this document's [`crate::signing::SigningDocument`] handle.

@@ -10,7 +10,7 @@ use std::collections::HashSet;
 use std::ops::RangeBounds;
 
 use crate::actor::{ActorRemoval, ActorShift, ActorTable};
-use crate::admission::{self, AcceptedHistory};
+use crate::admission::{select_fragments, AcceptedHistory};
 use crate::author::Authors;
 use crate::change_graph::ChangeGraph;
 use crate::clock::SeqClock;
@@ -18,14 +18,20 @@ use crate::config::DocumentAuthor;
 use crate::op_set2::OpSet;
 use crate::signature::{ed25519, Insert, Signature, SignatureStore};
 use crate::storage::signatures::{HashEntries, SignaturesChunk};
-use crate::{Author, Change, ChangeHash, Fragment};
+use crate::{Author, Change, ChangeHash, Fragment, PatchLog};
 
 use super::Automerge;
 
+mod batch;
 mod incoming;
 mod readiness;
 
-use incoming::PendingGroups;
+pub use batch::{
+    PublicationError, SignatureBatchOutcome, SignatureInsertError, SignatureInsertOutcome,
+    SignatureRejection,
+};
+use error::InsertSignature;
+use incoming::{Incoming, PendingGroups, PreparedAdmission};
 use readiness::{FragmentReadiness, OutgoingSelection};
 
 /// Contiguous accepted change sequences, maintained as a dependency-closed prefix.
@@ -150,9 +156,27 @@ impl SigningState {
     }
 
     pub(super) fn has_pending_groups(&self) -> bool {
+        self.pending_group_count() > 0
+    }
+
+    pub(super) fn pending_group_count(&self) -> usize {
         match self {
-            Self::Unsigned { .. } => false,
-            Self::Required(signing) => !signing.pending.is_empty(),
+            Self::Unsigned { .. } => 0,
+            Self::Required(signing) => signing.pending.len(),
+        }
+    }
+
+    pub(crate) fn require(&self) -> Result<(), error::SigningMode> {
+        match self {
+            Self::Unsigned { .. } => Err(error::SigningMode::Required),
+            Self::Required(_) => Ok(()),
+        }
+    }
+
+    pub(crate) fn with_required<E>(&self, f: impl FnOnce() -> Result<(), E>) -> Result<(), E> {
+        match self {
+            Self::Unsigned { .. } => Ok(()),
+            Self::Required(_) => f(),
         }
     }
 
@@ -273,6 +297,15 @@ impl RequiredSigning {
         }
     }
 
+    pub(super) fn remove_published_drafts(&mut self, graph: &ChangeGraph) {
+        let accepted = &self.accepted;
+        self.local_unsigned.retain(|hash| {
+            !(graph
+                .actor_seq_for_hash(hash)
+                .is_some_and(|(actor, seq)| accepted.is_accepted_actor_seq(actor, seq)))
+        });
+    }
+
     /// Encode the trailing signature chunk for `fragment`, or return `None` to
     /// withhold the fragment if it is non-canonical or lacks a required signature.
     pub(super) fn fragment_proof(
@@ -370,8 +403,22 @@ pub struct SigningDocument<'a> {
 }
 
 impl<'a> SigningDocument<'a> {
+    fn admit_with_pending(
+        &self,
+        groups: Vec<crate::LoadedGroup>,
+    ) -> Result<PreparedAdmission, crate::AutomergeError> {
+        Incoming {
+            graph: self.graph,
+            ops: self.ops,
+            authors: self.authors,
+            state: self.state,
+        }
+        .prepare(groups)
+    }
     /// Verify and insert an Ed25519 signature for an already-applied change.
     ///
+    /// Prefer [`Automerge::insert_signatures`], which also retries pending
+    /// incoming groups. This scalar operation only completes local publication.
     /// Uses the change's recorded author, not the current local author.
     /// Updates outgoing fragment readiness, accepts any local history made
     /// causally admissible by the new proof, and reclaims superseded signatures.
@@ -379,52 +426,67 @@ impl<'a> SigningDocument<'a> {
         &mut self,
         hash: &ChangeHash,
         signature: &ed25519::Signature,
-    ) -> Result<Insert, error::InsertSignature> {
+    ) -> Result<Insert, InsertSignature> {
+        let inserted = self.receive_signature(hash, signature)?;
+        self.publish_local();
+        Ok(inserted)
+    }
+
+    pub(super) fn receive_signature(
+        &mut self,
+        hash: &ChangeHash,
+        signature: &ed25519::Signature,
+    ) -> Result<Insert, InsertSignature> {
         let (actor, _) = self
             .graph
             .actor_seq_for_hash(hash)
-            .ok_or(error::InsertSignature::UnknownChange { change: *hash })?;
+            .ok_or(InsertSignature::UnknownChange { change: *hash })?;
         let actor_id = &self.ops.actors[actor];
         let author = self.authors.get_author_for_actor(actor).ok_or_else(|| {
-            error::InsertSignature::MissingAuthor {
+            InsertSignature::MissingAuthor {
                 change: *hash,
                 actor: actor_id.clone(),
             }
         })?;
-        let verifier = ed25519::VerifyingAuthor::new(author).map_err(|e| {
-            error::InsertSignature::InvalidAuthorKey {
-                change: *hash,
-                actor: actor_id.clone(),
-                source: e,
-            }
-        })?;
-        let witness = verifier.verify_hash(hash, signature).map_err(|e| {
-            error::InsertSignature::Verification {
-                change: *hash,
-                source: e,
-            }
-        })?;
+        let prepared;
+        let verifier = if author.as_bytes() == self.state.author.author().as_bytes() {
+            &self.state.author
+        } else {
+            prepared = ed25519::VerifyingAuthor::new(author).map_err(|source| {
+                InsertSignature::InvalidAuthorKey {
+                    change: *hash,
+                    actor: actor_id.clone(),
+                    source,
+                }
+            })?;
+            &prepared
+        };
+        let witness =
+            verifier
+                .verify_hash(hash, signature)
+                .map_err(|e| InsertSignature::Verification {
+                    change: *hash,
+                    source: e,
+                })?;
         let had_evidence = has_signature(self.graph, self.authors, &self.state.signatures, hash);
-        let inserted = self.state.signatures.insert_ed25519(witness).map_err(|e| {
-            error::InsertSignature::Store {
-                change: *hash,
-                source: e,
-            }
-        })?;
+        let inserted =
+            self.state
+                .signatures
+                .insert_ed25519(witness)
+                .map_err(|e| InsertSignature::Store {
+                    change: *hash,
+                    source: e,
+                })?;
         if !had_evidence && has_signature(self.graph, self.authors, &self.state.signatures, hash) {
             self.state.fragment_readiness.signature_added(hash);
-            self.accept_local();
-            self.state.reclaim_covered(self.graph);
         }
-        let graph = self.graph;
-        let accepted = &self.state.accepted;
-        self.state.local_unsigned.retain(|pending| {
-            pending != hash
-                && !graph
-                    .actor_seq_for_hash(pending)
-                    .is_some_and(|(actor, seq)| accepted.is_accepted_actor_seq(actor, seq))
-        });
         Ok(inserted)
+    }
+
+    pub(super) fn publish_local(&mut self) {
+        self.accept_local();
+        self.state.reclaim_covered(self.graph);
+        self.state.remove_published_drafts(self.graph);
     }
 
     /// Whether this exact applied change belongs to accepted history.
@@ -451,13 +513,14 @@ impl<'a> SigningDocument<'a> {
                     .actor_seq_for_hash(hash)
                     .and_then(|(actor, _)| self.authors.get_author_for_actor(actor))
                     .is_some_and(|author| author == current_author)
+                    && !has_signature(self.graph, self.authors, &self.state.signatures, hash)
             })
             .collect()
     }
 
     fn accept_local(&mut self) {
         let fragments = self.local_candidate_fragments();
-        let selection = admission::select_fragments(&*self, &fragments);
+        let selection = select_fragments(&*self, &fragments);
         self.state.accepted.include_hashes(
             self.graph,
             selection
@@ -487,8 +550,7 @@ impl<'a> SigningDocument<'a> {
                 continue;
             };
             if requirements.is_satisfied_by(|hash| {
-                self.is_accepted(hash)
-                    || has_signature(self.graph, self.authors, &self.state.signatures, hash)
+                has_signature(self.graph, self.authors, &self.state.signatures, hash)
             }) {
                 let fragment = self
                     .graph
@@ -508,6 +570,127 @@ impl AcceptedHistory for SigningDocument<'_> {
 }
 
 impl Automerge {
+    pub(crate) fn admit_loaded_groups(
+        &mut self,
+        groups: Vec<crate::LoadedGroup>,
+        log: &mut PatchLog,
+    ) -> Result<(), crate::AutomergeError> {
+        log.validate(&self.ops.actors)?;
+        if groups.is_empty() {
+            return Ok(());
+        }
+        self.admit_signing_groups(groups, log)
+    }
+
+    fn retry_pending_groups(&mut self, log: &mut PatchLog) -> Result<(), crate::AutomergeError> {
+        if !self.signing.has_pending_groups() {
+            return Ok(());
+        }
+        self.admit_signing_groups(Vec::new(), log)
+    }
+
+    fn admit_signing_groups(
+        &mut self,
+        groups: Vec<crate::LoadedGroup>,
+        log: &mut PatchLog,
+    ) -> Result<(), crate::AutomergeError> {
+        let prepared = self
+            .try_with_signing(|signing| signing.admit_with_pending(groups))
+            .expect("signed admission requires signing mode")?;
+        let changes = prepared.changes();
+        if !changes.is_empty() {
+            self.apply_prepared_changes(changes, log)?;
+        }
+        // Graph/actor mutation ended; use a fresh aligned view for publication.
+        self.try_with_signing(|mut signing| prepared.complete(&mut signing))
+            .expect("application preserves signing mode");
+        Ok(())
+    }
+
+    /// Verify each submitted signature against its change's historical author,
+    /// then complete local publication and retry causally enabled incoming groups.
+    /// Every input occurrence receives an owned outcome; completion does not mean
+    /// all local history is published.
+    pub fn insert_signatures(
+        &mut self,
+        inputs: impl IntoIterator<Item = (ChangeHash, ed25519::Signature)>,
+    ) -> SignatureBatchOutcome {
+        self.insert_signatures_log_patches(inputs, &mut PatchLog::inactive())
+    }
+
+    /// Like [`Self::insert_signatures`], recording incoming application in `log`.
+    /// Wrong mode or an incompatible log rejects before consuming inputs.
+    pub fn insert_signatures_log_patches(
+        &mut self,
+        inputs: impl IntoIterator<Item = (ChangeHash, ed25519::Signature)>,
+        log: &mut PatchLog,
+    ) -> SignatureBatchOutcome {
+        let insertions = match self.try_with_signing(|mut signing| {
+            log.validate(&signing.ops.actors)?;
+            Ok::<_, crate::PatchLogMismatch>(
+                inputs
+                    .into_iter()
+                    .map(|(hash, signature)| SignatureInsertOutcome {
+                        hash,
+                        signature,
+                        result: signing.receive_signature(&hash, &signature),
+                    })
+                    .collect(),
+            )
+        }) {
+            Err(error) => {
+                return SignatureBatchOutcome::Rejected {
+                    error: error.into(),
+                }
+            }
+            Ok(Err(error)) => {
+                return SignatureBatchOutcome::Rejected {
+                    error: error.into(),
+                }
+            }
+            Ok(Ok(insertions)) => insertions,
+        };
+        match self.complete_publication(log) {
+            Ok(()) => SignatureBatchOutcome::Completed { insertions },
+            Err(error) => SignatureBatchOutcome::PublicationFailed { insertions, error },
+        }
+    }
+
+    /// Retry while retained groups settle, including proof-only publication that
+    /// adds no graph nodes. Local publication stays committed on planning errors.
+    /// Every continued iteration removes a group, so the retry is bounded.
+    pub(super) fn complete_publication(
+        &mut self,
+        log: &mut PatchLog,
+    ) -> Result<(), PublicationError> {
+        loop {
+            self.with_signing(|mut signing| signing.publish_local());
+            let before = self.signing.pending_group_count();
+            if before == 0 {
+                return Ok(());
+            }
+            self.retry_pending_groups(log)
+                .map_err(PublicationError::Admission)?;
+            if self.signing.pending_group_count() == before {
+                return Ok(());
+            }
+        }
+    }
+
+    pub(crate) fn with_signing<T: Default>(
+        &mut self,
+        operation: impl FnOnce(SigningDocument<'_>) -> T,
+    ) -> T {
+        self.try_with_signing(operation).unwrap_or_default()
+    }
+
+    pub(crate) fn try_with_signing<T>(
+        &mut self,
+        operation: impl FnOnce(SigningDocument<'_>) -> T,
+    ) -> Result<T, error::SigningMode> {
+        self.try_signing().map(operation)
+    }
+
     /// Borrow this document's [`SigningDocument`] handle.
     pub fn try_signing(&mut self) -> Result<SigningDocument<'_>, error::SigningMode> {
         let state = self.signing.required_mut()?;

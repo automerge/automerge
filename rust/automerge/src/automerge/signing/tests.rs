@@ -7,7 +7,9 @@ use crate::transaction::{CommitOptions, Transactable};
 use crate::{ActorId, Author, Automerge, Change, ChangeHash, PatchLog, ReadDoc, ROOT};
 
 use super::error;
+use crate::{SignatureBatchOutcome, SignatureInsertError};
 
+mod batch;
 mod fragments;
 mod identity;
 mod incoming;
@@ -25,10 +27,38 @@ fn sig(key: &SigningKey, hash: &ChangeHash) -> ed25519::Signature {
 }
 
 fn sign_doc(doc: &mut Automerge, hash: ChangeHash, key: &SigningKey) {
-    doc.try_signing()
-        .unwrap()
-        .insert_signature(&hash, &sig(key, &hash))
+    insert_one(doc, hash, sig(key, &hash)).unwrap();
+}
+
+fn insert_one(
+    doc: &mut Automerge,
+    hash: ChangeHash,
+    signature: ed25519::Signature,
+) -> Result<Insert, SignatureInsertError> {
+    match doc.insert_signatures([(hash, signature)]) {
+        SignatureBatchOutcome::Completed { mut insertions }
+        | SignatureBatchOutcome::PublicationFailed { mut insertions, .. } => {
+            insertions
+                .pop()
+                .expect("one input yields one outcome")
+                .result
+        }
+        SignatureBatchOutcome::Rejected { error } => panic!("batch rejected: {error}"),
+    }
+}
+
+fn replica(doc: &Automerge, author: Author<'static>, actor: ActorId) -> Automerge {
+    let mut remote = Automerge::from_config(crate::Config::default().author(Some(author)))
+        .with_actor(actor)
         .unwrap();
+    remote.apply_changes(doc.get_changes(&[])).unwrap();
+    remote
+}
+
+fn requested_hashes(doc: &mut Automerge) -> Vec<ChangeHash> {
+    let mut hashes = doc.try_signing().unwrap().required_signatures();
+    hashes.sort_unstable();
+    hashes
 }
 
 fn append_at_level(
