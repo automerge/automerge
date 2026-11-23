@@ -557,27 +557,30 @@ impl Automerge {
 
     // Typed in the `interface Automerge` custom section above.
     #[wasm_bindgen(js_name = forkWithAuthor, skip_typescript)]
-    #[allow(deprecated)] // Preserve the existing binding option while native callers migrate.
     pub fn fork_with_author(
         &mut self,
         author: Option<String>,
         actor: Option<String>,
     ) -> Result<Automerge, error::Fork> {
+        // Parse both inputs before forking: the native fork commits the
+        // source's pending transaction, so a malformed actor must fail first.
         let author = author
             .map(Author::try_from)
             .transpose()
             .map_err(error::BadAuthor::from)?;
-        let mut automerge = Automerge {
-            doc: self.doc.fork_with_author(author)?,
+        let actor = actor
+            .map(|s| hex::decode(s).map(automerge::ActorId::from))
+            .transpose()
+            .map_err(error::BadActorId::from)?;
+        let mut options = am::ForkOptions::default().author(author);
+        if let Some(actor) = actor {
+            options = options.actor(actor);
+        }
+        Ok(Automerge {
+            doc: self.doc.fork_with_options(options)?,
             freeze: self.freeze,
             external_types: self.external_types.clone(),
-        };
-        if let Some(s) = actor {
-            let actor =
-                automerge::ActorId::from(hex::decode(s).map_err(error::BadActorId::from)?.to_vec());
-            automerge.doc.set_actor(actor)?;
-        }
-        Ok(automerge)
+        })
     }
 
     #[wasm_bindgen(js_name = pendingOps, unchecked_return_type="number")]

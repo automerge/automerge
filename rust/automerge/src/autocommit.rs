@@ -95,8 +95,12 @@ impl AutoCommit {
     /// Create a document from explicit construction-time choices.
     /// See [`Automerge::from_config`].
     pub fn from_config(config: crate::Config) -> Self {
+        Self::from_document(Automerge::from_config(config))
+    }
+
+    fn from_document(doc: Automerge) -> Self {
         Self {
-            doc: Automerge::from_config(config),
+            doc,
             transaction: None,
             patch_log: PatchLog::inactive(),
             diff_cursor: Vec::new(),
@@ -373,13 +377,23 @@ impl AutoCommit {
         &mut self,
         author: Option<Author<'static>>,
     ) -> Result<Self, AutomergeError> {
-        let identity = self
-            .doc
-            .signing
-            .fork_identity(author, self.pending_ops() > 0)?;
-        let mut fork = self.fork();
-        fork.doc.signing.set_fork_identity(identity);
-        Ok(fork)
+        self.fork_with_options(crate::ForkOptions::default().author(author))
+    }
+
+    /// Create a full fork after validating all choices before closing pending
+    /// edits. See [`Automerge::fork_with_options`] for mode and identity rules.
+    pub fn fork_with_options(
+        &mut self,
+        options: crate::ForkOptions,
+    ) -> Result<Self, AutomergeError> {
+        let pending_actor = self
+            .transaction
+            .as_ref()
+            .filter(|_| self.pending_ops() > 0)
+            .map(|(_, tx)| &self.doc.ops.actors[tx.actor_index()]);
+        let prepared = self.doc.prepare_fork(options, pending_actor)?;
+        self.ensure_transaction_closed();
+        Ok(Self::from_document(self.doc.fork_prepared(prepared)))
     }
 
     pub fn fork(&mut self) -> Self {
@@ -395,6 +409,9 @@ impl AutoCommit {
     }
 
     pub fn fork_at(&mut self, heads: &[ChangeHash]) -> Result<Self, AutomergeError> {
+        self.doc
+            .signing
+            .with_required(|| Err(crate::signature::error::SigningError::ForkAtNotSupported))?;
         self.ensure_transaction_closed();
         Ok(Self {
             doc: self.doc.fork_at(heads)?,
@@ -1531,3 +1548,7 @@ mod tests {
         is_send::<super::AutoCommit>();
     }
 }
+
+#[cfg(test)]
+#[path = "autocommit/author_tests.rs"]
+mod author_tests;

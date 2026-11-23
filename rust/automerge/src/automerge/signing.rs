@@ -15,9 +15,11 @@ use crate::author::Authors;
 use crate::change_graph::ChangeGraph;
 use crate::clock::SeqClock;
 use crate::config::DocumentAuthor;
+use crate::error::SigningAuthorErrorInner;
 use crate::op_set2::OpSet;
 use crate::signature::{ed25519, Insert, Signature, SignatureStore};
 use crate::storage::signatures::{HashEntries, SignaturesChunk};
+use crate::SigningAuthorError;
 use crate::{Author, Change, ChangeHash, Fragment, PatchLog};
 
 use super::Automerge;
@@ -114,37 +116,40 @@ impl SigningState {
         }
     }
 
-    pub(crate) fn fork_identity(
+    pub(super) fn prepare_fork_author(
         &self,
         author: Option<Author<'static>>,
-        pending: bool,
+        has_pending_edits: bool,
     ) -> Result<DocumentAuthor<'static>, crate::AutomergeError> {
         match self {
             Self::Unsigned { .. } => Ok(author.into()),
-            Self::Required(state) => {
-                let author = author.ok_or(crate::SigningAuthorError(
-                    crate::error::SigningAuthorErrorInner::MissingAuthor,
-                ))?;
-                if &author == state.author.author() {
-                    return Ok(DocumentAuthor::Verifier(state.author.clone()));
-                }
-                let prepared = DocumentAuthor::signing(author)?;
-                if pending || !state.local_drafts.is_empty() {
+            Self::Required(signing) => {
+                let author =
+                    author.ok_or(SigningAuthorError(SigningAuthorErrorInner::MissingAuthor))?;
+                let changed = &author != signing.author.author();
+                let prepared = if changed {
+                    ed25519::VerifyingAuthor::new(author).map_err(|error| {
+                        SigningAuthorError(SigningAuthorErrorInner::InvalidKey(error))
+                    })?
+                } else {
+                    signing.author.clone()
+                };
+                if changed && (has_pending_edits || !signing.local_drafts.is_empty()) {
                     return Err(
                         crate::signature::error::SigningError::UnpublishedLocalChanges.into(),
                     );
                 }
-                Ok(prepared)
+                Ok(DocumentAuthor::Verifier(prepared))
             }
         }
     }
 
-    pub(crate) fn set_fork_identity(&mut self, identity: DocumentAuthor<'static>) {
-        match (self, identity) {
+    pub(super) fn replace_fork_author(&mut self, author: DocumentAuthor<'static>) {
+        match (self, author) {
             (Self::Unsigned { author }, DocumentAuthor::Unset) => *author = None,
             (Self::Unsigned { author }, DocumentAuthor::Set(value)) => *author = Some(value),
             (Self::Required(state), DocumentAuthor::Verifier(value)) => state.author = value,
-            _ => unreachable!("fork preserves signing mode"),
+            _ => unreachable!("prepared fork must preserve signing mode"),
         }
     }
 

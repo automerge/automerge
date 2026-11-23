@@ -10,6 +10,7 @@ use super::error;
 use crate::{SignatureBatchOutcome, SignatureInsertError};
 
 mod batch;
+mod fork;
 mod fragments;
 mod identity;
 mod incoming;

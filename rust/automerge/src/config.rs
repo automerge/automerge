@@ -5,7 +5,7 @@ mod tests;
 
 use crate::error::SigningAuthorErrorInner;
 use crate::signature::ed25519::VerifyingAuthor;
-use crate::{Author, SigningAuthorError, TextEncoding};
+use crate::{ActorId, Author, SigningAuthorError, TextEncoding};
 
 /// Construction-time local identity and signing intent.
 #[derive(Clone, Debug, Default)]
@@ -51,6 +51,33 @@ impl Default for Config {
         Self {
             text_encoding: TextEncoding::platform_default(),
             author: DocumentAuthor::Unset,
+        }
+    }
+}
+
+/// Choices for a full writable fork. Omitted values inherit the local author
+/// and generate a fresh actor; explicit `author(None)` chooses anonymous identity
+/// where the document mode permits it. Signing mode is always inherited.
+#[derive(Clone, Debug, Default)]
+pub struct ForkOptions {
+    pub(crate) author: Option<Option<Author<'static>>>,
+    pub(crate) actor: Option<ActorId>,
+}
+
+impl ForkOptions {
+    /// Replace the fork's local author without rewriting historical bindings.
+    pub fn author(self, author: Option<Author<'static>>) -> Self {
+        Self {
+            author: Some(author),
+            ..self
+        }
+    }
+
+    /// Choose an actor compatible with the fork's local author.
+    pub fn actor(self, actor: ActorId) -> Self {
+        Self {
+            actor: Some(actor),
+            ..self
         }
     }
 }
