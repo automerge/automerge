@@ -425,7 +425,7 @@ pub(super) fn has_signature(
 
 /// Access to a document in required signing mode, obtained via [`Automerge::try_signing`].
 #[derive(Debug)]
-pub struct SigningDocument<'a> {
+pub(crate) struct SigningDocument<'a> {
     graph: &'a ChangeGraph,
     ops: &'a OpSet,
     authors: &'a Authors,
@@ -444,22 +444,6 @@ impl<'a> SigningDocument<'a> {
             state: self.state,
         }
         .prepare(groups)
-    }
-    /// Verify and insert an Ed25519 signature for an already-applied change.
-    ///
-    /// Prefer [`Automerge::insert_signatures`], which also retries pending
-    /// incoming groups. This scalar operation only completes local publication.
-    /// Uses the change's recorded author, not the current local author.
-    /// Updates outgoing fragment readiness, accepts any local history made
-    /// causally admissible by the new proof, and reclaims superseded signatures.
-    pub fn insert_signature(
-        &mut self,
-        hash: &ChangeHash,
-        signature: &ed25519::Signature,
-    ) -> Result<Insert, InsertSignature> {
-        let inserted = self.receive_signature(hash, signature)?;
-        self.publish_local();
-        Ok(inserted)
     }
 
     pub(super) fn receive_signature(
@@ -520,20 +504,10 @@ impl<'a> SigningDocument<'a> {
     }
 
     /// Whether this exact applied change belongs to published history.
-    pub fn is_published(&self, hash: &ChangeHash) -> bool {
+    pub(crate) fn is_published(&self, hash: &ChangeHash) -> bool {
         self.graph
             .actor_seq_for_hash(hash)
             .is_some_and(|(actor, seq)| self.state.published.is_published_actor_seq(actor, seq))
-    }
-
-    /// Return the locally authored commit hashes on this document that belong to
-    /// its current [`Author`] and still need a signature, in hash order.
-    /// Prefer [`Automerge::signing_requests`] for owned messages.
-    ///
-    /// Only commits created locally on this document are tracked here; changes
-    /// imported from outside the document are never returned.
-    pub fn required_signatures(&self) -> Vec<ChangeHash> {
-        self.signing_requests().iter().map(|r| r.hash()).collect()
     }
 
     fn signing_requests(&self) -> SigningRequests {
@@ -838,7 +812,7 @@ impl Automerge {
     }
 
     /// Borrow this document's [`SigningDocument`] handle.
-    pub fn try_signing(&mut self) -> Result<SigningDocument<'_>, error::SigningMode> {
+    pub(crate) fn try_signing(&mut self) -> Result<SigningDocument<'_>, error::SigningMode> {
         let state = self.signing.required_mut()?;
         Ok(SigningDocument {
             graph: &self.change_graph,
