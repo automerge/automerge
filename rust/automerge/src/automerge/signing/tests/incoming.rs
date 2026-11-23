@@ -62,6 +62,14 @@ fn attach_signatures(
     [content, chunk.bytes()].concat()
 }
 
+/// A bare (unauthenticated) bundle of `hashes` from `doc`'s history. A required-mode
+/// document never emits one, so it is produced from an unsigned replica.
+fn bare_bundle(doc: &Automerge, hashes: impl IntoIterator<Item = ChangeHash>) -> Vec<u8> {
+    let mut unsigned = Automerge::new();
+    unsigned.apply_changes(doc.get_changes(&[])).unwrap();
+    unsigned.bundle(hashes).unwrap().bytes().to_vec()
+}
+
 fn verified_count(doc: &mut Automerge) -> usize {
     doc.try_signing()
         .unwrap()
@@ -265,8 +273,8 @@ fn one_valid_group_and_a_detached_commit() -> (Automerge, Vec<u8>, ChangeHash, C
 #[test]
 fn a_group_with_no_attached_proof_is_rejected_without_mutating_state() {
     let (sender, f_bytes, _, a2) = one_valid_group_and_a_detached_commit();
-    let bundle_a2 = sender.bundle([a2]).unwrap();
-    let stream = [f_bytes.as_slice(), bundle_a2.bytes()].concat();
+    let bundle_a2 = bare_bundle(&sender, [a2]);
+    let stream = [f_bytes.as_slice(), bundle_a2.as_slice()].concat();
 
     assert!(matches!(
         rejected_without_state_change(&stream),
@@ -282,11 +290,7 @@ fn a_group_signed_by_the_wrong_key_is_rejected_without_mutating_state() {
     let wrong = key(9);
     let stream = [
         f_bytes.as_slice(),
-        attach_signatures(
-            sender.bundle([a2]).unwrap().bytes(),
-            [(a2, sig(&wrong, a2))],
-        )
-        .as_slice(),
+        attach_signatures(&bare_bundle(&sender, [a2]), [(a2, sig(&wrong, a2))]).as_slice(),
     ]
     .concat();
 
@@ -307,7 +311,7 @@ fn a_group_proved_with_an_unsupported_signature_tag_is_rejected_without_mutating
     );
     let stream = [
         f_bytes.as_slice(),
-        attach_signatures(sender.bundle([a2]).unwrap().bytes(), [(a2, unsupported)]).as_slice(),
+        attach_signatures(&bare_bundle(&sender, [a2]), [(a2, unsupported)]).as_slice(),
     ]
     .concat();
 
@@ -385,12 +389,9 @@ fn incomplete_group_and_donor_group() -> (Automerge, Vec<u8>, Vec<u8>, ChangeHas
     sender.set_actor(ActorId::from([1])).unwrap();
     let a2 = append_at_level(&mut sender, None, "c", 3, 1);
 
-    let f_incomplete = attach_signatures(
-        sender.bundle([a1, b1]).unwrap().bytes(),
-        [(b1, sig(&k1, b1))],
-    );
+    let f_incomplete = attach_signatures(&bare_bundle(&sender, [a1, b1]), [(b1, sig(&k1, b1))]);
     let g_with_extra = attach_signatures(
-        sender.bundle([a2]).unwrap().bytes(),
+        &bare_bundle(&sender, [a2]),
         [(a1, sig(&k1, a1)), (a2, sig(&k1, a2))],
     );
     (sender, f_incomplete, g_with_extra, a1)
