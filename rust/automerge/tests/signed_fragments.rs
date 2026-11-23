@@ -3,7 +3,6 @@
 use automerge::signature::error::SigningError;
 use automerge::signature::error::SigningMessage;
 use automerge::signature::{ed25519, parse_signing_message, signing_message, Insert};
-use automerge::sync::{self, SyncDoc};
 use automerge::transaction::{CommitOptions, Transactable};
 use automerge::{
     signing, ActorId, Author, AutoCommit, Automerge, AutomergeError, Change, ChangeHash,
@@ -150,25 +149,9 @@ fn public_signing_documents_reject_bare_snapshots_and_unauthenticated_entry_poin
         Err(AutomergeError::Signing(SigningError::ForkAtNotSupported))
     ));
 
-    let mut unsigned_peer = Automerge::new().with_actor(ActorId::from([9])).unwrap();
-    {
-        let mut tx = unsigned_peer.transaction();
-        tx.put(ROOT, "u", 1).unwrap();
-        tx.commit();
-    }
-    let mut peer_state = sync::State::new();
-    let msg = unsigned_peer
-        .generate_sync_message(&mut peer_state)
-        .unwrap();
-    let mut receiver_state = sync::State::new();
-    assert!(receiver
-        .generate_sync_message(&mut receiver_state)
-        .is_none());
     assert!(matches!(
-        receiver.receive_sync_message(&mut receiver_state, msg),
-        Err(AutomergeError::Signing(
-            SigningError::UnauthenticatedChanges
-        ))
+        receiver.sync(),
+        Err(AutomergeError::Signing(SigningError::SyncNotSupported))
     ));
 }
 

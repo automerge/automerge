@@ -264,7 +264,7 @@ impl std::default::Default for LoadOptions<'static> {
 ///
 /// ## Sync
 ///
-/// This type implements [`crate::sync::SyncDoc`]
+/// Use [`Self::sync`] to acquire checked access to [`crate::sync::SyncDoc`].
 ///
 /// ## Authors and Actors
 ///

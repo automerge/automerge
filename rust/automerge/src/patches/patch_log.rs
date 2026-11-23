@@ -36,7 +36,7 @@ use super::PatchBuilder;
 /// let sync_message: Message = unimplemented!();
 /// let mut sync_state = SyncState::new();
 /// let mut patch_log = PatchLog::active();
-/// doc.sync().receive_sync_message_log_patches(&mut sync_state, sync_message, &mut patch_log);
+/// doc.sync().unwrap().receive_sync_message_log_patches(&mut sync_state, sync_message, &mut patch_log);
 ///
 /// // These patches represent the changes needed to go from the state of the document before the
 /// // sync message was received, to the state after.

@@ -129,11 +129,11 @@ fn single_char_merge() -> Box<dyn FnMut(usize)> {
 
 fn sync_docs(d1: &mut AutoCommit, s1: &mut sync::State, d2: &mut AutoCommit, s2: &mut sync::State) {
     while d1.get_heads() != d2.get_heads() {
-        if let Some(msg) = d1.sync().generate_sync_message(s1) {
-            d2.sync().receive_sync_message(s2, msg).unwrap();
+        if let Some(msg) = d1.sync().unwrap().generate_sync_message(s1) {
+            d2.sync().unwrap().receive_sync_message(s2, msg).unwrap();
         }
-        if let Some(msg) = d2.sync().generate_sync_message(s2) {
-            d1.sync().receive_sync_message(s1, msg).unwrap();
+        if let Some(msg) = d2.sync().unwrap().generate_sync_message(s2) {
+            d1.sync().unwrap().receive_sync_message(s1, msg).unwrap();
         }
     }
 }

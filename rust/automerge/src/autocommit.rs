@@ -923,13 +923,15 @@ impl AutoCommit {
         .expect("AutoCommit's patch log always belongs to its document")
     }
 
-    /// An implementation of [`crate::sync::SyncDoc`] for this autocommit
+    /// Acquire unsigned sync access, committing pending edits on success.
     ///
-    /// This ensures that any outstanding transactions for this document are committed before
-    /// taking part in the sync protocol
-    pub fn sync(&mut self) -> impl SyncDoc + '_ {
+    /// Required signing mode returns an error before closing the transaction.
+    pub fn sync(&mut self) -> Result<impl SyncDoc + '_, AutomergeError> {
+        self.doc
+            .signing
+            .with_required(|| Err(crate::signature::error::SigningError::SyncNotSupported))?;
         self.ensure_transaction_closed();
-        SyncWrapper { inner: self }
+        Ok(SyncWrapper { inner: self })
     }
 
     /// Get the hash of the change that contains the given `opid`.
@@ -1512,7 +1514,7 @@ struct SyncWrapper<'a> {
 
 impl SyncDoc for SyncWrapper<'_> {
     fn generate_sync_message(&self, sync_state: &mut sync::State) -> Option<sync::Message> {
-        self.inner.doc.generate_sync_message(sync_state)
+        self.inner.doc.generate_unsigned_sync_message(sync_state)
     }
 
     fn receive_sync_message(
@@ -1520,9 +1522,8 @@ impl SyncDoc for SyncWrapper<'_> {
         sync_state: &mut sync::State,
         message: sync::Message,
     ) -> Result<(), AutomergeError> {
-        self.inner.with_patch_log(|doc, log| {
-            doc.receive_sync_message_log_patches(sync_state, message, log)
-        })
+        self.inner
+            .with_patch_log(|doc, log| doc.receive_sync_message_inner(sync_state, message, log))
     }
 
     // I dont like this function - it makes sense on automerge but not autocommit
@@ -1535,7 +1536,7 @@ impl SyncDoc for SyncWrapper<'_> {
     ) -> Result<(), AutomergeError> {
         self.inner
             .doc
-            .receive_sync_message_log_patches(sync_state, message, patch_log)
+            .receive_sync_message_inner(sync_state, message, patch_log)
     }
 }
 

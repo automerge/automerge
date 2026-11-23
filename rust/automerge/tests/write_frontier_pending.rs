@@ -103,16 +103,26 @@ fn sync_docs(source: &mut AutoCommit, target: &mut AutoCommit) {
     let mut target_state = State::new();
     for _ in 0..10 {
         let mut exchanged = false;
-        if let Some(message) = source.sync().generate_sync_message(&mut source_state) {
+        if let Some(message) = source
+            .sync()
+            .unwrap()
+            .generate_sync_message(&mut source_state)
+        {
             target
                 .sync()
+                .unwrap()
                 .receive_sync_message(&mut target_state, message)
                 .unwrap();
             exchanged = true;
         }
-        if let Some(message) = target.sync().generate_sync_message(&mut target_state) {
+        if let Some(message) = target
+            .sync()
+            .unwrap()
+            .generate_sync_message(&mut target_state)
+        {
             source
                 .sync()
+                .unwrap()
                 .receive_sync_message(&mut source_state, message)
                 .unwrap();
             exchanged = true;

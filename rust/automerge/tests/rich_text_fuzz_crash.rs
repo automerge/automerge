@@ -78,16 +78,23 @@ fn zero_width_unmark_on_empty_text_sync_from_fuzz_trace() {
 
     let mut left_state = sync::State::new();
     let mut right_state = sync::State::new();
-    let message = left.sync().generate_sync_message(&mut left_state).unwrap();
+    let message = left
+        .sync()
+        .unwrap()
+        .generate_sync_message(&mut left_state)
+        .unwrap();
     right
         .sync()
+        .unwrap()
         .receive_sync_message(&mut right_state, message)
         .unwrap();
     let message = right
         .sync()
+        .unwrap()
         .generate_sync_message(&mut right_state)
         .unwrap();
     left.sync()
+        .unwrap()
         .receive_sync_message(&mut left_state, message)
         .unwrap();
 }
