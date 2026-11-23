@@ -520,16 +520,28 @@ fn overlaps_forged_orphans_local_boundaries_partial_tails_and_bypasses() {
     .unwrap();
     assert!(recovered.get_heads().is_empty());
 
-    // Entry-point bypasses: snapshots, apply_changes, merge, and sync all reject.
-    let snapshot = source.save();
+    // Bare snapshots and unauthenticated entry points reject. Signed snapshots reload.
+    let signed_snapshot = source.save();
+    let from_snapshot = Automerge::load_with_options(&signed_snapshot, signing_load()).unwrap();
+    assert_eq!(from_snapshot.get_heads(), source.get_heads());
+    assert!(Automerge::load(&signed_snapshot).is_err());
+    let mut unsigned_copy = Automerge::new();
+    unsigned_copy
+        .apply_changes(source.get_changes(&[]))
+        .unwrap();
+    let snapshot = unsigned_copy.save();
     assert!(matches!(
         Automerge::load_with_options(&snapshot, signing_load()),
-        Err(AutomergeError::Signing(SigningError::SnapshotNotSupported))
+        Err(AutomergeError::Signing(
+            SigningError::UnauthenticatedChanges
+        ))
     ));
     let mut target = new_receiver();
     assert!(matches!(
         target.load_incremental(&snapshot),
-        Err(AutomergeError::Signing(SigningError::SnapshotNotSupported))
+        Err(AutomergeError::Signing(
+            SigningError::UnauthenticatedChanges
+        ))
     ));
     assert!(matches!(
         target.apply_changes(source.get_changes(&[])),

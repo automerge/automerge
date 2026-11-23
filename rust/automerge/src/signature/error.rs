@@ -63,10 +63,10 @@ pub enum ProofError {
 /// Failure to import or apply history in required signing mode.
 #[derive(Debug, thiserror::Error)]
 pub enum SigningError {
+    #[error("rescuing signed history as unsigned is not supported")]
+    RescueNotSupported,
     #[error("cannot change author while local history remains unpublished")]
     UnpublishedLocalChanges,
-    #[error("document snapshots are not supported in signing mode")]
-    SnapshotNotSupported,
     #[error("unauthenticated changes cannot be imported in signing mode")]
     UnauthenticatedChanges,
     #[error("fork_at is not supported in signing mode")]

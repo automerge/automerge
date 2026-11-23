@@ -14,6 +14,7 @@ mod fork;
 mod fragments;
 mod identity;
 mod incoming;
+mod persistence;
 mod requests;
 
 fn key(seed: u8) -> SigningKey {

@@ -74,20 +74,18 @@ fn changed_author_fork_after_empty_transaction_keeps_aligned_publication() {
             ed25519::Signature::from_bytes(key.sign(r.message()).to_bytes()),
         )
     }));
-    let bytes = peer.bundle_fragments(peer.fragments(..)).concat();
+    let bytes = peer.save();
     let mut source = AutoCommit::from_config(Config::default().signing(author(2)).unwrap());
     source.set_actor(ActorId::from([0; 16])).unwrap();
     source.load_incremental(&bytes).unwrap();
     let _ = source.delete(ROOT, "missing");
     assert_eq!(source.pending_ops(), 0);
-    let fork = source
+    let mut fork = source
         .fork_with_options(ForkOptions::default().author(Some(author(3))))
         .unwrap();
-    let loaded = Automerge::load_with_options(
-        &fork.bundle_fragments(fork.fragments(..)).concat(),
-        LoadOptions::new().signing(author(4)).unwrap(),
-    )
-    .unwrap();
+    let loaded =
+        Automerge::load_with_options(&fork.save(), LoadOptions::new().signing(author(4)).unwrap())
+            .unwrap();
     assert_eq!(
         loaded.get_changes(&[]).len(),
         1,

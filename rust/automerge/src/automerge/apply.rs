@@ -58,9 +58,14 @@ impl Automerge {
             }
             self.admit_loaded_groups(groups, log)
         } else {
+            if groups.iter().any(|group| group.signatures.is_some()) {
+                return Err(crate::storage::load::Error::SignedContent.into());
+            }
             let changes = groups.into_iter().flat_map(|group| match group.body {
                 LoadedGroupBody::Changes(changes) => changes,
-                LoadedGroupBody::Document => unreachable!("apply_changes inputs exclude snapshots"),
+                LoadedGroupBody::Document(_) => {
+                    unreachable!("apply_changes inputs exclude snapshots")
+                }
             });
             self.apply_changes_with_grouping(changes, Grouping::Unclassified, log)
         }

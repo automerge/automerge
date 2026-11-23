@@ -672,7 +672,7 @@ impl AutoCommit {
         self.doc.remove_unused_actors(true);
         let bytes = self.doc.save_with_options(options);
         if !bytes.is_empty() {
-            self.save_cursor = self.doc.get_heads()
+            self.save_cursor = self.doc.published_heads()
         }
         bytes
     }
@@ -680,7 +680,7 @@ impl AutoCommit {
     /// Save the document and attempt to load it before returning - slow!
     pub fn save_and_verify(&mut self) -> Result<Vec<u8>, AutomergeError> {
         let bytes = self.save();
-        Self::load(&bytes)?;
+        self.doc.verify_saved(&bytes)?;
         Ok(bytes)
     }
 
@@ -727,7 +727,7 @@ impl AutoCommit {
         self.ensure_transaction_closed();
         let bytes = self.doc.save_after(&self.save_cursor);
         if !bytes.is_empty() {
-            self.save_cursor = self.doc.get_heads()
+            self.save_cursor = self.doc.published_heads()
         }
         bytes
     }

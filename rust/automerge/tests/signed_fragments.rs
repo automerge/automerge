@@ -91,7 +91,7 @@ fn public_automerge_and_autocommit_signing_workflow_roundtrips_authenticated_fra
 }
 
 #[test]
-fn public_signing_documents_reject_snapshots_and_unauthenticated_entry_points() {
+fn public_signing_documents_reject_bare_snapshots_and_unauthenticated_entry_points() {
     let (key, author) = key_and_author(33);
     let mut source = Automerge::from_config(automerge::Config::default().signing(author).unwrap())
         .with_actor(ActorId::from([1]))
@@ -107,10 +107,20 @@ fn public_signing_documents_reject_snapshots_and_unauthenticated_entry_points() 
         .insert_signature(&hash, &sig)
         .unwrap();
 
-    let snapshot = source.save();
+    let signed_snapshot = source.save();
+    let from_snapshot = Automerge::load_with_options(&signed_snapshot, signing_load()).unwrap();
+    assert_eq!(from_snapshot.get_heads(), source.get_heads());
+    assert!(Automerge::load(&signed_snapshot).is_err());
+    let mut unsigned_copy = Automerge::new();
+    unsigned_copy
+        .apply_changes(source.get_changes(&[]))
+        .unwrap();
+    let snapshot = unsigned_copy.save();
     assert!(matches!(
         Automerge::load_with_options(&snapshot, signing_load()),
-        Err(AutomergeError::Signing(SigningError::SnapshotNotSupported))
+        Err(AutomergeError::Signing(
+            SigningError::UnauthenticatedChanges
+        ))
     ));
 
     let mut receiver = Automerge::from_config(
@@ -120,7 +130,9 @@ fn public_signing_documents_reject_snapshots_and_unauthenticated_entry_points() 
     );
     assert!(matches!(
         receiver.load_incremental(&snapshot),
-        Err(AutomergeError::Signing(SigningError::SnapshotNotSupported))
+        Err(AutomergeError::Signing(
+            SigningError::UnauthenticatedChanges
+        ))
     ));
     assert!(matches!(
         receiver.apply_changes(source.get_changes(&[])),
