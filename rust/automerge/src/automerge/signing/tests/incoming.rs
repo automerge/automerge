@@ -6,7 +6,6 @@ use crate::signature::error::{InvalidFragment, ProofError, SigningError};
 use crate::signature::{ed25519, signing_message, Signature, SignatureBytes, SignatureTag};
 use crate::storage::signatures::{HashEntries, SignaturesChunk};
 use crate::storage::ChunkType;
-use crate::sync::{self, SyncDoc};
 use crate::transaction::{CommitOptions, Transactable};
 use crate::{
     ActorId, Author, Automerge, AutomergeError, Change, ChangeHash, ExpandedChange, LoadOptions,
@@ -699,25 +698,4 @@ fn a_partial_load_withholds_bare_content_preceding_a_truncated_prefix() {
     .unwrap();
 
     assert!(recovered.get_heads().is_empty());
-}
-
-#[test]
-fn sync_with_a_signing_document_neither_generates_nor_accepts_messages() {
-    let mut unsigned_peer = Automerge::new().with_actor(ActorId::from([9])).unwrap();
-    append_at_level(&mut unsigned_peer, None, "p", 1, 0);
-    let mut peer_state = sync::State::new();
-    let msg = unsigned_peer
-        .generate_sync_message(&mut peer_state)
-        .unwrap();
-
-    let mut target = new_receiver();
-    let mut target_state = sync::State::new();
-
-    assert!(target.generate_sync_message(&mut target_state).is_none());
-    assert!(matches!(
-        target.receive_sync_message(&mut target_state, msg),
-        Err(AutomergeError::Signing(
-            SigningError::UnauthenticatedChanges
-        ))
-    ));
 }

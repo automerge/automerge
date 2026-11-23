@@ -68,13 +68,28 @@ struct DocWithSync {
 
 impl DocWithSync {
     fn sync(&mut self, other: &mut DocWithSync) {
-        while let Some(message1) = self.doc.generate_sync_message(&mut self.peer_state) {
+        loop {
+            let message = self
+                .doc
+                .sync()
+                .unwrap()
+                .generate_sync_message(&mut self.peer_state);
+            let Some(message1) = message else { break };
             other
                 .doc
+                .sync()
+                .unwrap()
                 .receive_sync_message(&mut other.peer_state, message1)
                 .unwrap();
-            if let Some(message2) = other.doc.generate_sync_message(&mut other.peer_state) {
+            if let Some(message2) = other
+                .doc
+                .sync()
+                .unwrap()
+                .generate_sync_message(&mut other.peer_state)
+            {
                 self.doc
+                    .sync()
+                    .unwrap()
                     .receive_sync_message(&mut self.peer_state, message2)
                     .unwrap()
             }
@@ -171,7 +186,10 @@ fn big_chunky_sync_message() -> Box<dyn FnMut()> {
         let mut peer_state = sync::State::default();
         let mut doc = Automerge::new();
         let message = Message::decode(&data).unwrap();
-        doc.receive_sync_message(&mut peer_state, message).unwrap();
+        doc.sync()
+            .unwrap()
+            .receive_sync_message(&mut peer_state, message)
+            .unwrap();
     })
 }
 

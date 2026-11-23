@@ -18,6 +18,7 @@ mod incoming;
 mod merge;
 mod persistence;
 mod requests;
+mod sync;
 
 /// A deterministic signing key derived from `seed`.
 pub(super) fn key(seed: u8) -> SigningKey {

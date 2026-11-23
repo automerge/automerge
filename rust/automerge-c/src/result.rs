@@ -144,6 +144,15 @@ impl From<Option<am::sync::Message>> for AMresult {
     }
 }
 
+impl From<Result<Option<am::sync::Message>, am::AutomergeError>> for AMresult {
+    fn from(maybe: Result<Option<am::sync::Message>, am::AutomergeError>) -> Self {
+        match maybe {
+            Ok(maybe) => maybe.into(),
+            Err(e) => Self::error(&e.to_string()),
+        }
+    }
+}
+
 impl From<Result<(), am::AutomergeError>> for AMresult {
     fn from(maybe: Result<(), am::AutomergeError>) -> Self {
         match maybe {
