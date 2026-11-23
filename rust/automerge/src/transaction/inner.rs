@@ -76,6 +76,9 @@ pub(crate) struct TransactionArgs {
 }
 
 impl TransactionInner {
+    pub(crate) fn actor_index(&self) -> usize {
+        self.actor
+    }
     pub(crate) fn new(
         TransactionArgs {
             actor_index: actor,

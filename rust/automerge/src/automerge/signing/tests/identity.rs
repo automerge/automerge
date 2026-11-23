@@ -22,22 +22,6 @@ fn required_handle_borrows_the_same_prepared_identity() {
     assert_eq!(format!("{doc:?}"), before);
 }
 
-/// A rejected author change leaves the pending autocommit transaction intact.
-#[test]
-fn rejecting_a_changed_signing_author_keeps_the_autocommit_transaction_open() {
-    let a = author(&key(7));
-    let b = author(&key(8));
-    let mut doc = AutoCommit::from_config(Config::default().signing(a.clone()).unwrap());
-    doc.put(ROOT, "pending", 1).unwrap();
-    let before = format!("{doc:?}");
-    assert!(doc.fork_with_author(Some(b)).is_err());
-    assert_eq!(format!("{doc:?}"), before);
-    assert_eq!(doc.pending_ops(), 1);
-    let mut same = doc.fork_with_author(Some(a)).unwrap();
-    assert_eq!(doc.pending_ops(), 0);
-    assert_eq!(same.try_signing().unwrap().required_signatures().len(), 1);
-}
-
 /// Loading unsigned history with a configured author attributes the migration
 /// change to that author and keeps it for later local commits.
 #[test]

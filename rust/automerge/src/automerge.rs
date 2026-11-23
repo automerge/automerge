@@ -35,8 +35,8 @@ use crate::transaction::{
 };
 use crate::types::{ActorId, ChangeHash, ObjId, ObjMeta, OpId, SequenceType, TextEncoding, Value};
 use crate::write_frontier::WriteFrontier;
-use crate::Config;
 use crate::{AutomergeError, Change, Cursor, Fragment, ObjType, Prop};
+use crate::{Config, ForkOptions};
 use actor::ActorMaintenance;
 use author::AuthorRegistration;
 use history::History;
@@ -345,6 +345,12 @@ pub struct Automerge {
     pub(crate) ops: OpSet,
     /// The current actor.
     actor: Actor,
+}
+
+/// Validated full-fork identity choices, consumed after pending edits commit.
+pub(crate) struct PreparedFork {
+    author: Option<DocumentAuthor<'static>>,
+    actor: ActorId,
 }
 
 impl Automerge {
@@ -1080,10 +1086,71 @@ impl Automerge {
         &self,
         author: Option<Author<'static>>,
     ) -> Result<Self, AutomergeError> {
-        let identity = self.signing.fork_identity(author, false)?;
-        let mut fork = self.fork();
-        fork.signing.set_fork_identity(identity);
-        Ok(fork)
+        self.fork_with_options(ForkOptions::default().author(author))
+    }
+
+    /// Create a full writable fork after checking author and actor choices.
+    ///
+    /// # Errors
+    /// Rejects incompatible actors, unusable signing keys, or a changed signing
+    /// author while local drafts remain unpublished. Rejection leaves the source
+    /// unchanged; the fork inherits its signing mode.
+    pub fn fork_with_options(&self, options: ForkOptions) -> Result<Self, AutomergeError> {
+        let prepared = self.prepare_fork(options, None)?;
+        Ok(self.fork_prepared(prepared))
+    }
+
+    pub(crate) fn prepare_fork(
+        &self,
+        options: ForkOptions,
+        pending_actor: Option<&ActorId>,
+    ) -> Result<PreparedFork, AutomergeError> {
+        let author = options.author.unwrap_or_else(|| self.get_author().cloned());
+        let changed = author.as_ref() != self.get_author();
+        let prepared_author = if changed {
+            Some(
+                self.signing
+                    .prepare_fork_author(author.clone(), pending_actor.is_some())?,
+            )
+        } else {
+            None
+        };
+        if let Some(actor) = &options.actor {
+            if let Some(index) = self.ops.lookup_actor(actor) {
+                let existing = self.authors.get_author_for_actor(index);
+                if self.authors.is_bound(index)
+                    && existing.as_ref().map(Author::as_bytes)
+                        != author.as_ref().map(Author::as_bytes)
+                {
+                    return Err(AutomergeError::ActorAuthorMismatch {
+                        actor: actor.clone(),
+                    });
+                }
+            }
+        }
+        if let Some(actor) = pending_actor {
+            if changed && options.actor.as_ref() == Some(actor) {
+                return Err(AutomergeError::ActorAuthorMismatch {
+                    actor: actor.clone(),
+                });
+            }
+        }
+        Ok(PreparedFork {
+            author: prepared_author,
+            actor: options.actor.unwrap_or_else(ActorId::random),
+        })
+    }
+
+    pub(crate) fn fork_prepared(&self, prepared: PreparedFork) -> Self {
+        let mut fork = self.clone();
+        if let Some(author) = prepared.author {
+            fork.signing.replace_fork_author(author);
+        }
+        fork.actor = match fork.ops.lookup_actor(&prepared.actor) {
+            Some(index) => Actor::Cached(index),
+            None => Actor::Unused(prepared.actor),
+        };
+        fork
     }
 
     /// Fork this document at the current point with a fresh actor and the same author.
