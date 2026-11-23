@@ -320,6 +320,43 @@ describe("fragment signing API", () => {
         )
       })
     })
+
+    it("throws for the outer document while its change callback is active", async () => {
+      const { doc, inputs } = await draftWithInputs()
+      const [input] = inputs
+      Automerge.change(doc, () => {
+        assert.throws(() => Automerge.insertSignatures(doc, input), RangeError)
+      })
+    })
+
+    it("rejects merge in either direction while a change callback is active", async () => {
+      const { doc } = await draftDoc()
+      const target = Automerge.clone(doc)
+      Automerge.change(doc, () => {
+        assert.throws(() => Automerge.merge(target, doc), RangeError)
+        assert.throws(() => Automerge.merge(doc, target), RangeError)
+      })
+    })
+
+    it("leaves the document usable after a callback that threw", async () => {
+      const { doc, inputs } = await draftWithInputs()
+      const [input] = inputs
+      const target = Automerge.clone(doc)
+      const aborted = new Error("abort callback")
+      assert.throws(
+        () =>
+          Automerge.change(doc, proxy => {
+            proxy.title = "rolled back"
+            assert.throws(() => Automerge.merge(target, doc), RangeError)
+            throw aborted
+          }),
+        error => error === aborted,
+      )
+      assert.equal(doc.title, "v1")
+      const result = Automerge.insertSignatures(doc, input)
+      assert.equal(result.outcome.status, "completed")
+      assert.equal(Automerge.hasUnpublishedChanges(result.doc), false)
+    })
   })
 
   describe("insertSignatures outcome shape", () => {
@@ -391,15 +428,26 @@ describe("fragment signing API", () => {
       assert.match(outcome.reason, /index 1/)
     })
 
-    it("says the batch is not an array when it is not one", async () => {
+    it("accepts a single input as a one-entry batch", async () => {
+      const { doc, inputs } = await draftWithInputs()
+      const [input] = inputs
+      const target = Automerge.clone(doc)
+      const single = Automerge.insertSignatures(doc, input)
+      const batch = Automerge.insertSignatures(target, [input])
+      assert.deepEqual(single.outcome, batch.outcome)
+      assert.equal(completed(single.outcome).length, 1)
+      assert.equal(Automerge.hasUnpublishedChanges(single.doc), false)
+    })
+
+    it("reports a malformed single input at index 0", async () => {
       const { doc } = await draftDoc()
       const { outcome } = Automerge.insertSignatures(
         doc,
-        "not an array" as unknown as Automerge.SignatureInput[],
+        "not an input" as unknown as Automerge.SignatureInput,
       )
       assert.equal(outcome.status, "rejected")
       if (outcome.status !== "rejected") throw new Error("unreachable")
-      assert.match(outcome.reason, /array/)
+      assert.match(outcome.reason, /index 0/)
     })
 
     it("completes an empty batch with no insertions", async () => {
