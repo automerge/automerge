@@ -17,10 +17,10 @@ fn append(document: &mut Automerge, value: i64) -> Change {
 
 // Two dependent changes and an independent root, all with real content hashes.
 fn history() -> (Change, Change, Change) {
-    let mut chain = Automerge::new().with_actor(ActorId::from([1]));
+    let mut chain = Automerge::new().with_actor(ActorId::from([1])).unwrap();
     let a = append(&mut chain, 1);
     let b = append(&mut chain, 2);
-    let mut other = Automerge::new().with_actor(ActorId::from([2]));
+    let mut other = Automerge::new().with_actor(ActorId::from([2])).unwrap();
     let c = append(&mut other, 3);
     assert_eq!(b.deps(), &[a.hash()]);
     assert!(a.deps().is_empty());

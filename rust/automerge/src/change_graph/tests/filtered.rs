@@ -61,13 +61,13 @@ fn check_selections<R: RangeBounds<usize> + Clone>(
 fn filtered_fragments_match_post_export_selection_for_every_subset_and_level_range() {
     // a -> b -> c -> d -> e. Nonzero b/d delimit two fragments; a/c
     // are covered interior nodes. e/f remain loose, with f on another actor.
-    let mut doc = Automerge::new().with_actor(ActorId::from([1]));
+    let mut doc = Automerge::new().with_actor(ActorId::from([1])).unwrap();
     let a = at_level(&mut doc, 1, 0);
     let b = at_level(&mut doc, 2, 1);
     let c = at_level(&mut doc, 3, 0);
     let d = at_level(&mut doc, 4, 1);
     let e = at_level(&mut doc, 5, 0);
-    let mut other = Automerge::new().with_actor(ActorId::from([2]));
+    let mut other = Automerge::new().with_actor(ActorId::from([2])).unwrap();
     let f = at_level(&mut other, 6, 0);
     doc.apply_changes(other.get_changes(&[])).unwrap();
     let graph = &doc.change_graph;
@@ -124,7 +124,7 @@ fn filtered_fragments_match_post_export_selection_for_every_subset_and_level_ran
 
 #[test]
 fn selecting_a_loose_ancestor_does_not_prune_traversal_at_a_rejected_tip() {
-    let mut doc = Automerge::new().with_actor(ActorId::from([1]));
+    let mut doc = Automerge::new().with_actor(ActorId::from([1])).unwrap();
     let a = at_level(&mut doc, 1, 0);
     let b = at_level(&mut doc, 2, 0);
     let c = at_level(&mut doc, 3, 0);
@@ -153,7 +153,7 @@ fn selecting_a_loose_ancestor_does_not_prune_traversal_at_a_rejected_tip() {
 
 #[test]
 fn head_filter_is_not_invoked_for_candidates_outside_the_level_range() {
-    let mut doc = Automerge::new().with_actor(ActorId::from([1]));
+    let mut doc = Automerge::new().with_actor(ActorId::from([1])).unwrap();
     at_level(&mut doc, 1, 1);
     at_level(&mut doc, 2, 0);
     let graph = &doc.change_graph;

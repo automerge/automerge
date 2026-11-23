@@ -22,7 +22,7 @@ fn at_level(doc: &mut Automerge, value: i64, level: usize) -> Change {
 }
 
 fn history(levels: &[usize]) -> (Automerge, Vec<Change>) {
-    let mut source = Automerge::new().with_actor(ActorId::from([1]));
+    let mut source = Automerge::new().with_actor(ActorId::from([1])).unwrap();
     let changes = levels
         .iter()
         .enumerate()
@@ -110,10 +110,10 @@ fn merge_matches_raw_with_an_applied_fragment_prefix_and_repeated_delivery() {
 #[test]
 fn merge_matches_raw_with_concurrent_fragments_and_already_staged_contents() {
     let (base, prefix) = history(&[0]);
-    let mut source = base.clone().with_actor(ActorId::from([2]));
+    let mut source = base.clone().with_actor(ActorId::from([2])).unwrap();
     let b = at_level(&mut source, 2, 0);
     let c = at_level(&mut source, 3, 1);
-    let mut right = base.clone().with_actor(ActorId::from([3]));
+    let mut right = base.clone().with_actor(ActorId::from([3])).unwrap();
     let d = at_level(&mut right, 4, 0);
     let e = at_level(&mut right, 5, 1);
     source.apply_changes([d.clone(), e.clone()]).unwrap();
@@ -175,7 +175,7 @@ fn merge_matches_raw_with_concurrent_fragments_and_already_staged_contents() {
 #[test]
 fn empty_merge_preserves_unrelated_orphan_contents_for_later_delivery() {
     let (mut source, _) = history(&[0, 0, 1]);
-    let mut other = Automerge::new().with_actor(ActorId::from([9]));
+    let mut other = Automerge::new().with_actor(ActorId::from([9])).unwrap();
     let parent = at_level(&mut other, 8, 0);
     let child = at_level(&mut other, 9, 0);
     let mut merged = source.clone();
@@ -216,7 +216,7 @@ fn empty_merge_still_rejects_a_foreign_patch_log_without_mutation() {
     let before = merged.save_nocompress();
     let source_before = source.save_nocompress();
 
-    let mut foreign = Automerge::new().with_actor(ActorId::from([99]));
+    let mut foreign = Automerge::new().with_actor(ActorId::from([99])).unwrap();
     let mut tx = foreign.transaction_log_patches(PatchLog::active()).unwrap();
     tx.put(ROOT, "foreign", 9).unwrap();
     let (_, mut merged_log) = tx.commit();

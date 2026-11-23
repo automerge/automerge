@@ -65,7 +65,7 @@ fn completion_releases_indexes_for_subsequent_staging() {
 #[test]
 fn prepare_apply_complete_keeps_blocked_history_for_a_later_attempt() {
     let (a, b, c) = history();
-    let mut blocked_source = Automerge::new().with_actor(ActorId::from([3]));
+    let mut blocked_source = Automerge::new().with_actor(ActorId::from([3])).unwrap();
     let missing = append(&mut blocked_source, 4);
     let blocked = append(&mut blocked_source, 5);
     let mut staged = stage(&[&blocked, &b, &c, &a]);

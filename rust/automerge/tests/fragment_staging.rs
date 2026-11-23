@@ -14,7 +14,7 @@ fn put(doc: &mut Automerge, value: i64) -> Change {
 }
 
 fn history() -> (Automerge, [Change; 3]) {
-    let mut source = Automerge::new().with_actor(ActorId::from([1]));
+    let mut source = Automerge::new().with_actor(ActorId::from([1])).unwrap();
     let a = put(&mut source, 1);
     let b = put(&mut source, 2);
     let c = put(&mut source, 3);

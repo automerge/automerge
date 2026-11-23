@@ -4,7 +4,7 @@ use super::{append, hashes, stage};
 
 // Each node is a real local commit, made after applying exactly its parents.
 fn node(actor: u8, parents: &[&Change]) -> Change {
-    let mut document = Automerge::new().with_actor(ActorId::from([actor]));
+    let mut document = Automerge::new().with_actor(ActorId::from([actor])).unwrap();
     document
         .apply_changes(parents.iter().map(|c| (*c).clone()).collect::<Vec<_>>())
         .unwrap();

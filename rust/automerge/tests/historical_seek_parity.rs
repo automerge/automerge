@@ -60,11 +60,12 @@ impl Cursors {
 
 fn run(ops: Vec<Op>) -> Result<(), TestCaseError> {
     let mut a = AutoCommit::new_with_encoding(TextEncoding::UnicodeCodePoint)
-        .with_actor(ActorId::from(b"aaaa"));
+        .with_actor(ActorId::from(b"aaaa"))
+        .unwrap();
     let list = a.put_object(ROOT, "list", ObjType::List).unwrap();
     let text = a.put_object(ROOT, "text", ObjType::Text).unwrap();
     a.commit();
-    let mut b = a.fork().with_actor(ActorId::from(b"bbbb"));
+    let mut b = a.fork().with_actor(ActorId::from(b"bbbb")).unwrap();
 
     let mut children = Vec::new();
     let mut list_cursors = Cursors {

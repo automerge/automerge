@@ -1108,10 +1108,11 @@ mod tests {
     use crate::transaction::Transactable;
     use crate::ROOT;
 
+    #[allow(deprecated)]
     fn document(changes: &[(u8, usize)]) -> Automerge {
         let mut doc = Automerge::new();
         for &(actor, ops) in changes {
-            doc.set_actor(ActorId::from(vec![actor]));
+            doc.set_actor(ActorId::from(vec![actor])).unwrap();
             let mut tx = doc.transaction();
             for value in 0..ops {
                 tx.put(ROOT, "key", value as i64).unwrap();

@@ -6,10 +6,10 @@ use automerge::{transaction::Transactable, ObjType, ReadDoc, ScalarValue};
 fn clearing_conflict_keeps_existing_object_contents_and_identity() {
     for site in SITES {
         let (base, obj, prop) = site.initial("key");
-        let mut loser = base.clone().with_actor(actor(1));
+        let mut loser = base.clone().with_actor(actor(1)).unwrap();
         let losing = put(&mut loser, &obj, &prop, false.into());
         let deletion = delete(&mut loser, &obj, &prop);
-        let mut doc = base.with_actor(actor(4));
+        let mut doc = base.with_actor(actor(4)).unwrap();
         let mut tx = doc.transaction();
         let child = tx.put_object(&obj, prop.clone(), ObjType::Map).unwrap();
         let nested = tx.put_object(&child, "nested", ObjType::List).unwrap();
@@ -34,11 +34,11 @@ fn clearing_conflict_keeps_existing_object_contents_and_identity() {
 fn exposed_object_includes_simultaneous_nested_updates_once() {
     for site in SITES {
         let (base, obj, prop) = site.initial("key");
-        let mut doc = base.clone().with_actor(actor(4));
+        let mut doc = base.clone().with_actor(actor(4)).unwrap();
         put(&mut doc, &obj, &prop, false.into());
         let mut deleting = doc.clone();
         let deletion = delete(&mut deleting, &obj, &prop);
-        let mut survivor = base.clone().with_actor(actor(2));
+        let mut survivor = base.clone().with_actor(actor(2)).unwrap();
         let mut tx = survivor.transaction();
         let child = tx.put_object(&obj, prop.clone(), ObjType::Map).unwrap();
         let nested = tx.put_object(&child, "nested", ObjType::List).unwrap();
@@ -51,7 +51,7 @@ fn exposed_object_includes_simultaneous_nested_updates_once() {
         tx.insert(&nested, 1, "new").unwrap();
         tx.commit();
         let edit = survivor.get_last_local_change().unwrap();
-        let mut loser = base.with_actor(actor(1));
+        let mut loser = base.with_actor(actor(1)).unwrap();
         let losing = put(&mut loser, &obj, &prop, true.into());
         let changes = vec![deletion, edit, losing];
         for changes in batch_orders(changes) {

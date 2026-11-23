@@ -39,7 +39,8 @@ fn published_alice_wire() -> Vec<u8> {
     let (alice_key, alice_author) = key_and_author(44);
     let mut alice =
         AutoCommit::from_config(automerge::Config::default().signing(alice_author).unwrap())
-            .with_actor(ActorId::from([1]));
+            .with_actor(ActorId::from([1]))
+            .unwrap();
     alice.put(ROOT, "step", 1_i64).unwrap();
     alice.commit().unwrap();
     sign_all_required(&mut alice, &alice_key);
@@ -51,7 +52,8 @@ fn a_signing_autocommit_withholds_fragments_until_the_commit_is_signed() {
     let (alice_key, alice_author) = key_and_author(11);
     let mut alice =
         AutoCommit::from_config(automerge::Config::default().signing(alice_author).unwrap())
-            .with_actor(ActorId::from([1]));
+            .with_actor(ActorId::from([1]))
+            .unwrap();
     alice.put(ROOT, "title", "fragments").unwrap();
     let a1 = alice.commit().unwrap();
 
@@ -76,7 +78,8 @@ fn a_signed_autocommit_fragment_stream_loads_into_another_document() {
     let (alice_key, alice_author) = key_and_author(11);
     let mut alice =
         AutoCommit::from_config(automerge::Config::default().signing(alice_author).unwrap())
-            .with_actor(ActorId::from([1]));
+            .with_actor(ActorId::from([1]))
+            .unwrap();
     alice.put(ROOT, "title", "fragments").unwrap();
     let a1 = alice.commit().unwrap();
     sign_all_required(&mut alice, &alice_key);
@@ -92,12 +95,14 @@ fn a_signed_autocommit_fragment_stream_loads_into_another_document() {
 }
 
 #[test]
+#[allow(deprecated)]
 fn a_receiving_document_can_sign_its_own_commit_back_to_the_originator() {
     let (alice_key, alice_author) = key_and_author(11);
     let (bob_key, bob_author) = key_and_author(22);
     let mut alice =
         AutoCommit::from_config(automerge::Config::default().signing(alice_author).unwrap())
-            .with_actor(ActorId::from([1]));
+            .with_actor(ActorId::from([1]))
+            .unwrap();
     alice.put(ROOT, "title", "fragments").unwrap();
     alice.commit().unwrap();
     sign_all_required(&mut alice, &alice_key);
@@ -107,7 +112,7 @@ fn a_receiving_document_can_sign_its_own_commit_back_to_the_originator() {
     )
     .unwrap();
 
-    bob.set_actor(ActorId::from([2]));
+    bob.set_actor(ActorId::from([2])).unwrap();
     bob.put(ROOT, "count", 2_i64).unwrap();
     let b1 = bob.commit().unwrap();
     sign_all_required(&mut bob, &bob_key);
@@ -124,6 +129,7 @@ fn a_receiving_document_can_sign_its_own_commit_back_to_the_originator() {
 }
 
 #[test]
+#[allow(deprecated)]
 fn a_receiver_with_a_fixed_author_requests_only_its_own_drafts() {
     let (bob_key, bob_author) = key_and_author(55);
     let mut bob = AutoCommit::load_with_options(
@@ -133,7 +139,7 @@ fn a_receiver_with_a_fixed_author_requests_only_its_own_drafts() {
     .unwrap();
     assert!(bob.try_signing().unwrap().required_signatures().is_empty());
 
-    bob.set_actor(ActorId::from([2]));
+    bob.set_actor(ActorId::from([2])).unwrap();
     bob.put(ROOT, "bob", 1_i64).unwrap();
     let b1 = bob.commit().unwrap();
     assert_eq!(bob.try_signing().unwrap().required_signatures(), vec![b1]);
@@ -150,6 +156,7 @@ fn a_receiver_with_a_fixed_author_requests_only_its_own_drafts() {
 /// author may take over this history, and a signing document always needs a
 /// current author.
 #[test]
+#[allow(deprecated)]
 fn an_unpublished_draft_blocks_changing_or_removing_the_fixed_author() {
     let (_, alice_author) = key_and_author(44);
     let (_, bob_author) = key_and_author(55);
@@ -158,7 +165,7 @@ fn an_unpublished_draft_blocks_changing_or_removing_the_fixed_author() {
         LoadOptions::new().signing(bob_author.clone()).unwrap(),
     )
     .unwrap();
-    bob.set_actor(ActorId::from([2]));
+    bob.set_actor(ActorId::from([2])).unwrap();
     bob.put(ROOT, "bob", 1_i64).unwrap();
     let b1 = bob.commit().unwrap();
 
@@ -182,7 +189,8 @@ fn a_snapshot_of_a_signing_document_cannot_be_loaded_back_in_signing_mode() {
     // rejected entry points is pinned in `automerge::signing::tests::incoming`.
     let (key, author) = key_and_author(33);
     let mut source = AutoCommit::from_config(automerge::Config::default().signing(author).unwrap())
-        .with_actor(ActorId::from([1]));
+        .with_actor(ActorId::from([1]))
+        .unwrap();
     source.put(ROOT, "k", "v").unwrap();
     source.commit().unwrap();
     sign_all_required(&mut source, &key);
@@ -229,7 +237,8 @@ fn parse_signing_message_rejects_a_foreign_prefix_or_a_short_hash() {
 fn doc_with_a_bundle_and_a_loose_tail() -> (AutoCommit, ChangeHash) {
     let (key, author) = key_and_author(77);
     let mut doc = AutoCommit::from_config(automerge::Config::default().signing(author).unwrap())
-        .with_actor(ActorId::from([1]));
+        .with_actor(ActorId::from([1]))
+        .unwrap();
 
     let mut step = 0_i64;
     loop {

@@ -379,16 +379,40 @@ impl AutoCommit {
         &self.doc
     }
 
-    pub fn with_actor(mut self, actor: ActorId) -> Self {
-        self.ensure_transaction_closed();
-        self.doc.set_actor(actor);
-        self
+    /// Choose an actor, consuming this document. See [`Self::set_actor`].
+    pub fn with_actor(mut self, actor: ActorId) -> Result<Self, AutomergeError> {
+        self.select_actor(actor)?;
+        Ok(self)
     }
 
-    pub fn set_actor(&mut self, actor: ActorId) -> &mut Self {
+    /// Choose an actor, checking its identity before committing pending edits.
+    ///
+    /// Prefer automatic actor management. If later imports bind a previously
+    /// unused selected actor to a different identity, the next local edit
+    /// panics; see [`Automerge::set_actor`].
+    ///
+    /// # Errors
+    ///
+    /// Rejects an actor established under a different named or anonymous
+    /// identity, leaving the transaction open and the current actor unchanged.
+    #[deprecated(
+        since = "0.12.0",
+        note = "configure an Author and let Automerge manage actors"
+    )]
+    pub fn set_actor(&mut self, actor: ActorId) -> Result<&mut Self, AutomergeError> {
+        self.select_actor(actor)
+    }
+
+    fn select_actor(&mut self, actor: ActorId) -> Result<&mut Self, AutomergeError> {
+        self.check_actor_binding(&actor)?;
         self.ensure_transaction_closed();
-        self.doc.set_actor(actor);
-        self
+        self.doc.select_actor(actor)?;
+        Ok(self)
+    }
+
+    /// Check actor identity without closing pending edits.
+    pub fn check_actor_binding(&self, actor: &ActorId) -> Result<(), AutomergeError> {
+        self.doc.check_actor_binding(actor)
     }
 
     pub fn get_actor(&self) -> &ActorId {

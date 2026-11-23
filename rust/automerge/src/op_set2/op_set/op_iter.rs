@@ -1117,7 +1117,7 @@ mod tests {
         let actor3 = ActorId::try_from("cccccccc").unwrap();
         let actor4 = ActorId::try_from("dddddddd").unwrap();
 
-        let mut doc = Automerge::new().with_actor(actor1);
+        let mut doc = Automerge::new().with_actor(actor1).unwrap();
         let mut tx = doc.transaction();
         tx.put(&ROOT, "key1", "val1").unwrap();
         tx.put(&ROOT, "key2", "val2").unwrap();
@@ -1130,17 +1130,17 @@ mod tests {
         tx.put(&ROOT, "key9", "val9").unwrap();
         tx.commit();
 
-        let mut doc2 = doc.fork().with_actor(actor2);
+        let mut doc2 = doc.fork().with_actor(actor2).unwrap();
         let mut tx = doc2.transaction();
         tx.put(&ROOT, "key5", "val10B").unwrap(); // 10
         tx.commit();
 
-        let mut doc3 = doc.fork().with_actor(actor3);
+        let mut doc3 = doc.fork().with_actor(actor3).unwrap();
         let mut tx = doc3.transaction();
         tx.delete(&ROOT, "key5").unwrap(); // 10
         tx.commit();
 
-        let mut doc4 = doc.fork().with_actor(actor4);
+        let mut doc4 = doc.fork().with_actor(actor4).unwrap();
         let mut tx = doc4.transaction();
         tx.put(&ROOT, "key5", "val10D").unwrap(); // 10
         tx.commit();

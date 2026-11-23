@@ -185,7 +185,9 @@ mod tests {
     };
 
     fn change(actor: u8) -> Change {
-        let mut doc = Automerge::new().with_actor(ActorId::from(vec![actor]));
+        let mut doc = Automerge::new()
+            .with_actor(ActorId::from(vec![actor]))
+            .unwrap();
         let mut tx = doc.transaction();
         tx.put(ROOT, "a", i64::from(actor)).unwrap();
         let hash = tx.commit().0.unwrap();
@@ -211,7 +213,7 @@ mod tests {
 
     #[test]
     fn initial_document_with_signatures_preserves_snapshot_and_following_changes() {
-        let mut doc = Automerge::new().with_actor(ActorId::from(vec![1]));
+        let mut doc = Automerge::new().with_actor(ActorId::from(vec![1])).unwrap();
         let mut tx = doc.transaction();
         tx.put(ROOT, "snapshot", 1).unwrap();
         tx.commit();

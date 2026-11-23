@@ -493,19 +493,68 @@ impl Automerge {
         }
     }
 
-    /// Set the actor id for this document.
-    pub fn with_actor(mut self, actor: ActorId) -> Self {
-        self.set_actor(actor);
-        self
+    /// Choose an actor for this document, consuming it. See [`Self::set_actor`]
+    /// for the consequences of manually selecting an actor before imports.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the actor's established identity differs from the local author.
+    pub fn with_actor(mut self, actor: ActorId) -> Result<Self, AutomergeError> {
+        self.select_actor(actor)?;
+        Ok(self)
     }
 
-    /// Set the actor id for this document.
-    pub fn set_actor(&mut self, actor: ActorId) -> &mut Self {
+    /// Choose an actor without changing its established author association.
+    ///
+    /// Prefer automatic actor management. If later imports bind a previously
+    /// unused selected actor to a different identity, starting a local
+    /// transaction panics rather than continuing that identity's chain, in
+    /// either mode. Choose a fresh compatible actor before editing.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if named or anonymous actor history belongs to a
+    /// different local identity. Rejection leaves the selected actor unchanged.
+    #[deprecated(
+        since = "0.12.0",
+        note = "configure an Author and let Automerge manage actors"
+    )]
+    pub fn set_actor(&mut self, actor: ActorId) -> Result<&mut Self, AutomergeError> {
+        self.select_actor(actor)
+    }
+
+    pub(crate) fn select_actor(&mut self, actor: ActorId) -> Result<&mut Self, AutomergeError> {
         match self.ops.lookup_actor(&actor) {
-            Some(idx) => self.actor = Actor::Cached(idx),
+            Some(idx) => {
+                self.check_actor_author(idx)?;
+                self.actor = Actor::Cached(idx);
+            }
             None => self.actor = Actor::Unused(actor),
         }
-        self
+        Ok(self)
+    }
+
+    /// Check actor identity without assignment, before other side effects
+    /// such as committing pending edits for a fork.
+    pub fn check_actor_binding(&self, actor: &ActorId) -> Result<(), AutomergeError> {
+        match self.ops.lookup_actor(actor) {
+            Some(index) => self.check_actor_author(index),
+            None => Ok(()),
+        }
+    }
+
+    /// An established named or anonymous actor may only continue under the
+    /// same identity. Unbound slots have no history to attribute yet.
+    fn check_actor_author(&self, index: usize) -> Result<(), AutomergeError> {
+        let bound = self.authors.get_author_for_actor(index);
+        if self.authors.is_bound(index)
+            && bound.as_ref().map(Author::as_bytes) != self.get_author().map(Author::as_bytes)
+        {
+            return Err(AutomergeError::ActorAuthorMismatch {
+                actor: self.ops.actors[index].clone(),
+            });
+        }
+        Ok(())
     }
 
     /// Set the write-frontier for this document.
@@ -857,6 +906,9 @@ impl Automerge {
             }
         }
 
+        self.check_actor_author(actor_index)
+            .expect("local actor identity must match the document author");
+
         if seq > 1 {
             let last_hash = self.get_hash(actor_index, seq - 1).unwrap();
             if !deps.contains(&last_hash) {
@@ -1039,7 +1091,7 @@ impl Automerge {
     /// Fork this document at the current point with a fresh actor and the same author.
     pub fn fork(&self) -> Self {
         let mut f = self.clone();
-        f.set_actor(ActorId::random());
+        f.actor = Actor::Unused(ActorId::random());
         f
     }
 
@@ -1074,7 +1126,6 @@ impl Automerge {
             hashes.push(hash);
         }
         let mut f = Self::new_with_encoding(self.text_encoding());
-        f.set_actor(ActorId::random());
         let changes = self.get_changes_by_hashes(hashes.into_iter().rev())?;
         f.apply_changes(changes)?;
         f.set_write_frontier(self.get_write_frontier());
@@ -1470,7 +1521,7 @@ impl Automerge {
             // Ensure that the author, actor, and write-frontier state are carried
             // over for an empty document.
             doc.signing = self.signing.clone();
-            doc = doc.with_actor(self.actor_id().clone());
+            doc.select_actor(self.actor_id().clone())?;
             doc.set_write_frontier(self.get_write_frontier());
             // Finish the log's pending segment against the OLD document
             // before it is replaced: its observed view and events name this

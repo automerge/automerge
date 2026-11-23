@@ -31,9 +31,10 @@ proptest! {
     }
 }
 
+#[allow(deprecated)]
 fn document_from_program(program: &[u8]) -> Automerge {
     let mut base = AutoCommit::new();
-    base.set_actor(actor(0));
+    base.set_actor(actor(0)).unwrap();
     let list = base.put_object(ROOT, "items", ObjType::List).unwrap();
     let text = base.put_object(ROOT, "notes", ObjType::Text).unwrap();
     base.put(ROOT, "counter", ScalarValue::counter(0)).unwrap();
@@ -46,7 +47,7 @@ fn document_from_program(program: &[u8]) -> Automerge {
     let mut replicas = (0..REPLICA_COUNT)
         .map(|index| {
             let mut replica = base.fork();
-            replica.set_actor(actor(index as u8 + 1));
+            replica.set_actor(actor(index as u8 + 1)).unwrap();
             replica
         })
         .collect::<Vec<_>>();

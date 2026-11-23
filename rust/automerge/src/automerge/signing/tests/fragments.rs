@@ -15,7 +15,8 @@ use crate::Fragment;
 fn document() -> (Automerge, SigningKey) {
     let k = key(7);
     let doc = Automerge::from_config(crate::Config::default().signing(author(&k)).unwrap())
-        .with_actor(ActorId::from([1]));
+        .with_actor(ActorId::from([1]))
+        .unwrap();
     (doc, k)
 }
 
@@ -208,15 +209,16 @@ fn assert_exports_match_graph(
 }
 
 #[test]
+#[allow(deprecated)]
 fn every_signature_order_emits_only_graph_derived_descriptors_and_valid_proofs() {
     let (mut original, k) = document();
     let a1 = append_at_level(&mut original, None, 1, 0);
     let a2 = append_at_level(&mut original, None, 2, 1);
-    original.set_actor(ActorId::from([3]));
+    original.set_actor(ActorId::from([3])).unwrap();
     let b1 = append_at_level(&mut original, Some(&[a1]), 3, 1);
-    original.set_actor(ActorId::from([1]));
+    original.set_actor(ActorId::from([1])).unwrap();
     let a3 = append_at_level(&mut original, None, 4, 1);
-    original.set_actor(ActorId::from([4]));
+    original.set_actor(ActorId::from([4])).unwrap();
     let loose = append_at_level(&mut original, None, 5, 0);
 
     let expectation = GraphExpectation::new(&original);
@@ -270,24 +272,26 @@ fn supersession_reclaims_the_covered_candidate_and_its_signature_bytes() {
 }
 
 #[test]
+#[allow(deprecated)]
 fn shared_frontier_signature_is_retained_until_every_branch_is_covered() {
     let k1 = key(1);
     let k2 = k1.clone();
     let k3 = k1.clone();
     let mut branched =
         Automerge::from_config(crate::Config::default().signing(author(&k1)).unwrap())
-            .with_actor(ActorId::from([1]));
+            .with_actor(ActorId::from([1]))
+            .unwrap();
     let a1 = append_at_level(&mut branched, None, 1, 0);
-    branched.set_actor(ActorId::from([2]));
+    branched.set_actor(ActorId::from([2])).unwrap();
     let b1 = append_at_level(&mut branched, Some(&[a1]), 2, 1);
-    branched.set_actor(ActorId::from([3]));
+    branched.set_actor(ActorId::from([3])).unwrap();
     let c1 = append_at_level(&mut branched, Some(&[a1]), 3, 1);
 
     sign_doc(&mut branched, a1, &k1);
     sign_doc(&mut branched, b1, &k2);
-    branched.set_actor(ActorId::from([1]));
+    branched.set_actor(ActorId::from([1])).unwrap();
     let a2 = append_at_level(&mut branched, Some(&[b1]), 4, 0);
-    branched.set_actor(ActorId::from([2]));
+    branched.set_actor(ActorId::from([2])).unwrap();
     let b2 = commit_with_time(&mut branched, Some(&[a2]), "b2", 5, 160_300);
     assert_eq!(b2.fragment_level(), 2);
     sign_doc(&mut branched, a2, &k1);
@@ -309,7 +313,7 @@ fn shared_frontier_signature_is_retained_until_every_branch_is_covered() {
 
     // Joining above b2 and c1 at level 2 covers c1 via b2's causal past and
     // drops the last obligation on a1.
-    branched.set_actor(ActorId::from([3]));
+    branched.set_actor(ActorId::from([3])).unwrap();
     let c2 = commit_with_time(&mut branched, Some(&[b2, c1]), "c2", 6, 123_801);
     assert_eq!(c2.fragment_level(), 2);
     sign_doc(&mut branched, c2, &k3);
@@ -326,12 +330,13 @@ fn shared_frontier_signature_is_retained_until_every_branch_is_covered() {
 }
 
 /// A two-actor document whose level-1 head fragment covers both members.
+#[allow(deprecated)]
 fn fragment_with_two_members() -> (Automerge, SigningKey, ChangeHash, Fragment) {
     let (mut doc, k) = document();
     append_at_level(&mut doc, None, 1, 0);
-    doc.set_actor(ActorId::from([2]));
+    doc.set_actor(ActorId::from([2])).unwrap();
     let other = append_at_level(&mut doc, None, 2, 0);
-    doc.set_actor(ActorId::from([1]));
+    doc.set_actor(ActorId::from([1])).unwrap();
     let head = append_at_level(&mut doc, None, 3, 1);
     let fragment = doc.change_graph.get_historical_fragment(head).unwrap();
     (doc, k, other, fragment)

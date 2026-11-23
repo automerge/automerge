@@ -24,7 +24,7 @@ fn at_level(doc: &mut Automerge, value: i64, level: usize) -> Change {
 }
 
 fn history(levels: &[usize]) -> (Automerge, Vec<Change>) {
-    let mut source = Automerge::new().with_actor(ActorId::from([1]));
+    let mut source = Automerge::new().with_actor(ActorId::from([1])).unwrap();
     let changes = levels
         .iter()
         .enumerate()
@@ -81,7 +81,7 @@ fn grouped_import_matches_raw_order_and_patches_with_an_applied_prefix() {
 #[test]
 fn grouped_import_keeps_blocked_fragment_while_applying_ready_loose_history() {
     let (mut source, changes) = history(&[1, 0, 1]);
-    let mut independent = Automerge::new().with_actor(ActorId::from([2]));
+    let mut independent = Automerge::new().with_actor(ActorId::from([2])).unwrap();
     let ready = at_level(&mut independent, 4, 0);
     source.apply_changes([ready.clone()]).unwrap();
     let fragment = source.get_fragment(changes[2].hash()).unwrap();
@@ -161,7 +161,7 @@ fn grouped_import_rejects_a_foreign_patch_log_before_mutating_staging() {
     receiver.apply_changes([changes[2].clone()]).unwrap();
     let before = receiver.save_nocompress();
 
-    let mut foreign = Automerge::new().with_actor(ActorId::from([99]));
+    let mut foreign = Automerge::new().with_actor(ActorId::from([99])).unwrap();
     let mut log = PatchLog::active();
     let mut tx = foreign.transaction_log_patches(log).unwrap();
     tx.put(ROOT, "foreign", 9).unwrap();

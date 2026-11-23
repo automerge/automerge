@@ -8,10 +8,10 @@ use automerge::{PatchAction, ReadDoc, ScalarValue};
 fn retained_counter_increment_and_conflict_clear_replays_once() {
     for site in SITES {
         let (base, obj, prop) = site.initial("key");
-        let mut loser = base.clone().with_actor(actor(1));
+        let mut loser = base.clone().with_actor(actor(1)).unwrap();
         let losing = put(&mut loser, &obj, &prop, false.into());
         let deletion = delete(&mut loser, &obj, &prop);
-        let mut doc = base.with_actor(actor(4));
+        let mut doc = base.with_actor(actor(4)).unwrap();
         put(&mut doc, &obj, &prop, ScalarValue::counter(10));
         let counter_id = doc.get(&obj, prop.clone()).unwrap().unwrap().1;
         let mut updater = doc.clone();
@@ -82,11 +82,11 @@ fn retained_counter_increment_and_conflict_clear_replays_once() {
 
 fn exposed_counter_with_increment(site: Site) {
     let (base, obj, prop) = site.initial("b");
-    let mut old = base.clone().with_actor(actor(4));
+    let mut old = base.clone().with_actor(actor(4)).unwrap();
     put(&mut old, &obj, &prop, ScalarValue::Boolean(false));
     let mut deleting = old.clone();
     let deletion = delete(&mut deleting, &obj, &prop);
-    let mut counter = base.with_actor(actor(2));
+    let mut counter = base.with_actor(actor(2)).unwrap();
     let base_change = put(&mut counter, &obj, &prop, ScalarValue::counter(10));
     let base_id = candidates(&counter, &obj, &prop)[0].1.clone();
     let increment = increment(&mut counter, &obj, &prop, 5);
@@ -134,12 +134,12 @@ fn stable_counter_increment_and_duplicate_replay() {
 fn stable_counter_increment_can_also_gain_a_conflict() {
     for site in SITES {
         let (base, obj, prop) = site.initial("key");
-        let mut doc = base.clone().with_actor(actor(4));
+        let mut doc = base.clone().with_actor(actor(4)).unwrap();
         put(&mut doc, &obj, &prop, ScalarValue::counter(10));
         let id = doc.get(&obj, prop.clone()).unwrap().unwrap().1;
         let mut branch = doc.clone();
         let inc = increment(&mut branch, &obj, &prop, 5);
-        let mut loser = base.with_actor(actor(1));
+        let mut loser = base.with_actor(actor(1)).unwrap();
         let losing = put(&mut loser, &obj, &prop, true.into());
         for changes in batch_orders(vec![inc, losing]) {
             let after = replay(doc.clone(), vec![changes], &format!("{site:?}"));
@@ -155,15 +155,15 @@ fn stable_counter_increment_can_also_gain_a_conflict() {
 fn stable_counter_multiple_signed_increments_with_incoming_loser() {
     for site in SITES {
         let (base, obj, prop) = site.initial("key");
-        let mut doc = base.clone().with_actor(actor(4));
+        let mut doc = base.clone().with_actor(actor(4)).unwrap();
         put(&mut doc, &obj, &prop, ScalarValue::counter(10));
         let id = doc.get(&obj, prop.clone()).unwrap().unwrap().1;
         let mut changes = Vec::new();
         for (actor_id, n) in [(5, 7), (6, -11), (7, 3)] {
-            let mut branch = doc.clone().with_actor(actor(actor_id));
+            let mut branch = doc.clone().with_actor(actor(actor_id)).unwrap();
             changes.push(increment(&mut branch, &obj, &prop, n));
         }
-        let mut loser = base.with_actor(actor(1));
+        let mut loser = base.with_actor(actor(1)).unwrap();
         changes.push(put(&mut loser, &obj, &prop, true.into()));
         for changes in batch_orders(changes) {
             let after = replay(doc.clone(), vec![changes], &format!("{site:?}"));
@@ -179,11 +179,11 @@ fn stable_counter_multiple_signed_increments_with_incoming_loser() {
 fn incoming_counter_total_includes_all_batch_increments() {
     for site in SITES {
         let (base, obj, prop) = site.initial("key");
-        let mut doc = base.clone().with_actor(actor(4));
+        let mut doc = base.clone().with_actor(actor(4)).unwrap();
         put(&mut doc, &obj, &prop, false.into());
         let mut deleting = doc.clone();
         let deletion = delete(&mut deleting, &obj, &prop);
-        let mut counter = base.with_actor(actor(1));
+        let mut counter = base.with_actor(actor(1)).unwrap();
         let creation = put(&mut counter, &obj, &prop, ScalarValue::counter(10));
         let id = counter.get(&obj, prop.clone()).unwrap().unwrap().1;
         let mut changes = vec![creation, deletion];

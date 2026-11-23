@@ -181,16 +181,17 @@ mod test {
     /// them in a HashMap. Before `flush_deletes` sorted their IDs, randomized
     /// map iteration could encode the same changes in a different byte order.
     #[test]
+    #[allow(deprecated)]
     fn bundle_concurrent_deletions_are_deterministic() {
         let mut doc = Automerge::new();
-        doc.set_actor(ActorId::from(&[0][..]));
+        doc.set_actor(ActorId::from(&[0][..])).unwrap();
         let mut tx = doc.transaction();
         tx.put(ROOT, "value", 1).unwrap();
         tx.commit();
         let mut left = doc.clone();
-        left.set_actor(ActorId::from(&[1][..]));
+        left.set_actor(ActorId::from(&[1][..])).unwrap();
         let mut right = doc.clone();
-        right.set_actor(ActorId::from(&[2][..]));
+        right.set_actor(ActorId::from(&[2][..])).unwrap();
         for branch in [&mut left, &mut right] {
             let mut tx = branch.transaction();
             tx.delete(ROOT, "value").unwrap();

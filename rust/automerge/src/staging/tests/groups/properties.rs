@@ -73,13 +73,13 @@ fn overlap() -> &'static Fixture {
         // z -> a -> b -> c, with a -> d -> e on another actor, plus root x.
         // z is external to both fragments and can be withheld independently.
         let (base, prefix) = history(&[1, 0]);
-        let mut left = base.clone().with_actor(ActorId::from([2]));
+        let mut left = base.clone().with_actor(ActorId::from([2])).unwrap();
         let b = at_level(&mut left, 3, 0);
         let c = at_level(&mut left, 4, 1);
-        let mut right = base.clone().with_actor(ActorId::from([3]));
+        let mut right = base.clone().with_actor(ActorId::from([3])).unwrap();
         let d = at_level(&mut right, 5, 0);
         let e = at_level(&mut right, 6, 1);
-        let mut independent = Automerge::new().with_actor(ActorId::from([4]));
+        let mut independent = Automerge::new().with_actor(ActorId::from([4])).unwrap();
         let x = at_level(&mut independent, 7, 0);
         let descriptors = vec![
             left.get_fragment(c.hash()).unwrap(),
