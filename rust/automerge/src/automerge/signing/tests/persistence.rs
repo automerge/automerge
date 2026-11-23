@@ -529,6 +529,7 @@ fn author_footer_on_seq_two_is_rejected() {
 /// work: an unpublished draft with a request for the configured author. The
 /// loaded history stays published and saves omit the migration until signed.
 #[test]
+#[allow(deprecated)]
 fn string_migration_under_signing_load_is_new_local_unpublished_work() {
     let k = key(1);
     let mut doc = Automerge::from_config(crate::Config::default().signing(author(&k)).unwrap())

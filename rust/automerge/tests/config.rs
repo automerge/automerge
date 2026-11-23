@@ -92,6 +92,7 @@ fn load_options_establish_signing_without_a_separate_mode_flag() {
 }
 
 #[test]
+#[allow(deprecated)]
 fn unsigned_load_migration_uses_the_configured_identity_before_creating_history() {
     let mut source = AutoCommit::new();
     source.put(ROOT, "legacy", "text").unwrap();
