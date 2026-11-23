@@ -355,6 +355,23 @@ impl Automerge {
         Self::new_with_encoding(TextEncoding::platform_default())
     }
 
+    /// Create a document from explicit construction-time choices.
+    ///
+    /// [`crate::Config::signing`] validates the public key before construction;
+    /// consuming a configuration is infallible.
+    pub fn from_config(config: crate::Config) -> Self {
+        use crate::config::DocumentAuthor;
+
+        match config.author {
+            DocumentAuthor::Unset => Self::new_with_encoding(config.text_encoding),
+            DocumentAuthor::Set(author) => {
+                Self::new_with_encoding(config.text_encoding).with_author(Some(author))
+            }
+            DocumentAuthor::Verifier(verifier) => Self::signing_with_encoding(config.text_encoding)
+                .with_author(Some(verifier.author().clone())),
+        }
+    }
+
     /// Return a copy of this document with its data anonymized using a fresh random seed.
     ///
     // Anonymization replaces actor IDs, map keys, mark names, scalar values, change metadata, and
