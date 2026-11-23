@@ -1792,6 +1792,8 @@ impl Automerge {
     where
         I: IntoIterator<Item = ChangeHash>,
     {
+        self.signing
+            .with_required(|| Err(crate::signature::error::SigningError::BundleNotSupported))?;
         Bundle::for_hashes(&self.ops, &self.change_graph, hashes)
     }
 
@@ -2325,7 +2327,10 @@ impl Automerge {
                 let mut bytes = if f.head.fragment_level() == 0 && f.members.len() == 1 {
                     self.get_change_by_hash(&f.head)?.bytes().to_vec()
                 } else {
-                    self.bundle(f.members).ok()?.bytes().to_vec()
+                    Bundle::for_hashes(&self.ops, &self.change_graph, f.members)
+                        .ok()?
+                        .bytes()
+                        .to_vec()
                 };
                 if let Some(proof) = proof {
                     bytes.extend_from_slice(proof.bytes());
