@@ -303,6 +303,10 @@ pub use crate::automerge::{
 };
 pub use author::Author;
 pub use autocommit::AutoCommit;
+pub use automerge::signing::{
+    PublicationError, SignatureBatchOutcome, SignatureInsertError, SignatureInsertOutcome,
+    SignatureRejection,
+};
 pub use autoserde::AutoSerde;
 #[doc(hidden)]
 pub use change::ParsedChange;

@@ -7,7 +7,9 @@ use crate::transaction::{CommitOptions, Transactable};
 use crate::{ActorId, Author, Automerge, Change, ChangeHash, PatchLog, ReadDoc, ROOT};
 
 use super::error;
+use crate::{SignatureBatchOutcome, SignatureInsertError};
 
+mod batch;
 mod fragments;
 mod identity;
 mod incoming;
@@ -29,15 +31,44 @@ pub(super) fn sig(key: &SigningKey, hash: &ChangeHash) -> ed25519::Signature {
 
 /// Insert `key`'s signature for `hash` into `doc`, panicking if it is rejected.
 pub(super) fn sign_doc(doc: &mut Automerge, hash: ChangeHash, key: &SigningKey) {
-    doc.try_signing()
-        .unwrap()
-        .insert_signature(&hash, &sig(key, &hash))
+    insert_one(doc, hash, &sig(key, &hash)).unwrap();
+}
+
+pub(super) fn replica(doc: &Automerge, author: Author<'static>, actor: ActorId) -> Automerge {
+    let mut remote = Automerge::from_config(crate::Config::default().author(Some(author)))
+        .with_actor(actor)
         .unwrap();
+    remote.apply_changes(doc.get_changes(&[])).unwrap();
+    remote
+}
+
+pub(super) fn requested_hashes(doc: &mut Automerge) -> Vec<ChangeHash> {
+    let mut hashes = doc.try_signing().unwrap().required_signatures();
+    hashes.sort_unstable();
+    hashes
 }
 
 /// Whether `doc` has locally published `hash`.
 pub(super) fn is_published(doc: &mut Automerge, hash: &ChangeHash) -> bool {
     doc.try_signing().unwrap().is_published(hash)
+}
+
+/// The unpublished local drafts `doc` is tracking, in commit order.
+pub(super) fn drafts(doc: &mut Automerge) -> Vec<ChangeHash> {
+    doc.try_signing()
+        .unwrap()
+        .state
+        .local_unsigned
+        .iter()
+        .copied()
+        .collect()
+}
+
+/// A required-mode document authored by `key` with deterministic `actor`.
+pub(super) fn signing_doc(key: &SigningKey, actor: u8) -> Automerge {
+    Automerge::from_config(crate::Config::default().signing(author(key)).unwrap())
+        .with_actor(ActorId::from([actor]))
+        .unwrap()
 }
 
 /// How many Ed25519 signatures `doc` retains for `hash`.
@@ -76,13 +107,23 @@ pub(super) fn sorted(hashes: &[ChangeHash]) -> Vec<ChangeHash> {
     hashes
 }
 
-/// Insert `sig` for `hash` into `doc`, returning the raw insertion outcome.
+/// Insert `sig` for `hash` into `doc` through the batch API, returning that
+/// one entry's insertion outcome.
 pub(super) fn insert_one(
     doc: &mut Automerge,
     hash: ChangeHash,
     sig: &ed25519::Signature,
-) -> Result<Insert, error::InsertSignature> {
-    doc.try_signing().unwrap().insert_signature(&hash, sig)
+) -> Result<Insert, SignatureInsertError> {
+    match doc.insert_signatures([(hash, *sig)]) {
+        SignatureBatchOutcome::Completed { mut insertions }
+        | SignatureBatchOutcome::PublicationFailed { mut insertions, .. } => {
+            insertions
+                .pop()
+                .expect("one input yields one outcome")
+                .result
+        }
+        SignatureBatchOutcome::Rejected { error } => panic!("batch rejected: {error}"),
+    }
 }
 
 /// Commit `put(ROOT, "value", value)` onto `heads` at fragment level `level`.
