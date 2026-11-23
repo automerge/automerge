@@ -701,22 +701,6 @@ fn a_partial_load_withholds_bare_content_preceding_a_truncated_prefix() {
 }
 
 #[test]
-fn loading_a_snapshot_into_signing_mode_is_rejected() {
-    let (source, _, _) = signed_source();
-    let snapshot = source.save();
-
-    assert!(matches!(
-        Automerge::load_with_options(&snapshot, signing_load()),
-        Err(AutomergeError::Signing(SigningError::SnapshotNotSupported))
-    ));
-    let mut target = new_receiver();
-    assert!(matches!(
-        target.load_incremental(&snapshot),
-        Err(AutomergeError::Signing(SigningError::SnapshotNotSupported))
-    ));
-}
-
-#[test]
 fn merging_another_document_in_signing_mode_is_rejected_as_unauthenticated() {
     let (mut source, _, _) = signed_source();
 

@@ -184,6 +184,83 @@ impl Columns {
         (raw, data)
     }
 
+    /// Encode historical rows and successor edges covered by `clock`.
+    /// Visibility indexes do not participate: overwritten operations still belong
+    /// to history, while an unpublished successor must not encode a deletion.
+    pub(crate) fn export_at_clock(
+        &self,
+        clock: &crate::clock::Clock,
+    ) -> (RawColumns<Uncompressed>, Vec<u8>) {
+        let mut selected = Self::default();
+        let mut values = Vec::new();
+        let rows = itertools::izip!(
+            self.id_actor.iter(),
+            self.id_ctr.iter(),
+            self.obj_actor.iter(),
+            self.obj_ctr.iter(),
+            self.key_actor.iter(),
+            self.key_ctr.iter(),
+            self.key_str.iter(),
+            self.insert.iter(),
+            self.action.iter(),
+            self.mark_name.iter(),
+            self.expand.iter(),
+            self.value_meta.iter(),
+            self.succ_count.iter(),
+        );
+        for (
+            actor,
+            counter,
+            obj_actor,
+            obj_ctr,
+            key_actor,
+            key_ctr,
+            key_str,
+            insert,
+            action,
+            mark_name,
+            expand,
+            meta,
+            succ,
+        ) in rows
+        {
+            if !clock.covers(&crate::types::OpId::new(u64::from(counter), actor.into())) {
+                continue;
+            }
+            selected.id_actor.push(actor);
+            selected.id_ctr.push(counter);
+            selected.obj_actor.push(obj_actor);
+            selected.obj_ctr.push(obj_ctr);
+            selected.key_actor.push(key_actor);
+            selected.key_ctr.push(key_ctr);
+            selected.key_str.push(key_str);
+            selected.insert.push(insert.value);
+            selected.action.push(action);
+            selected.mark_name.push(mark_name);
+            selected.expand.push(expand);
+            selected.value_meta.push(meta.value);
+            let start = meta.prefix() as usize;
+            let len = meta.total() as usize - start;
+            values.extend(self.value.iter_at(start).take(len));
+            let mut count = 0;
+            let range = succ.prefix() as usize..succ.total() as usize;
+            for (actor, counter) in self
+                .succ_actor
+                .iter_range(range.clone())
+                .zip(self.succ_ctr.iter_range(range))
+            {
+                if clock.covers(&crate::types::OpId::new(u64::from(counter), actor.into())) {
+                    selected.succ_actor.push(actor);
+                    selected.succ_ctr.push(counter);
+                    count += 1;
+                }
+            }
+            selected.succ_count.push(count);
+        }
+        selected.value.splice_slice(0, 0, &values);
+        selected.export()
+    }
+
     #[cfg(test)]
     pub(crate) fn save_checkpoint(&self) -> std::collections::HashMap<&'static str, Vec<u8>> {
         [

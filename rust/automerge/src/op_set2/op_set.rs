@@ -1316,6 +1316,13 @@ impl OpSet {
         self.cols.export()
     }
 
+    pub(crate) fn export_at_clock(
+        &self,
+        clock: &crate::clock::Clock,
+    ) -> (RawColumns<Uncompressed>, Vec<u8>) {
+        self.cols.export_at_clock(clock)
+    }
+
     pub(crate) fn scope_to_obj(&self, obj: &ObjId) -> Range<usize> {
         let range = self
             .cols

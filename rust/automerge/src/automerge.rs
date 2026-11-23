@@ -1358,12 +1358,17 @@ impl Automerge {
     ///
     /// This returns only the current hydrated value and does not preserve the original change graph.
     pub fn rescue(data: &[u8]) -> Result<hydrate::Value, AutomergeError> {
-        Ok(Self::load_with_options_and_mark_validation(
+        match Self::load_with_options_and_mark_validation(
             data,
             Default::default(),
             load::MarkOrderValidation::AllowInvalid,
-        )?
-        .hydrate(None))
+        ) {
+            Ok(doc) => Ok(doc.hydrate(None)),
+            Err(AutomergeError::Load(load::Error::SignedContent)) => {
+                Err(crate::signature::error::SigningError::RescueNotSupported.into())
+            }
+            Err(error) => Err(error),
+        }
     }
 
     fn load_with_options_and_mark_validation(
@@ -1441,12 +1446,20 @@ impl Automerge {
                     return Err(AutomergeError::MissingDeps);
                 }
             }
+            // Signed content anywhere in an unsigned load is a mode mismatch,
+            // not a damaged tail: never recover the unsigned prefix around it.
+            load::LoadedChanges::Partial {
+                error: error @ load::Error::SignedContent,
+                ..
+            } => return Err(error.into()),
             load::LoadedChanges::Partial { error, .. } => {
                 if options.on_partial_load == OnPartialLoad::Error {
                     return Err(error.into());
                 }
             }
         }
+        // A migration produces local history. Establish the configured identity
+        // first so its initial actor binding agrees with later local changes.
         document.signing = SigningState::Unsigned { author };
         if let StringMigration::ConvertToText = options.string_migration {
             document.convert_scalar_strings_to_text()?;
@@ -1479,6 +1492,7 @@ impl Automerge {
             let reader = storage::load::ChunkGroupReader::new(parse::Input::new(data));
             match reader.load_groups() {
                 load::LoadedGroups::Complete(groups) => {
+                    let groups = document.expand_signed_snapshots(groups)?;
                     document.admit_loaded_groups(groups, &mut PatchLog::inactive())?;
                     if document.signing.has_pending_groups()
                         && options.on_partial_load == OnPartialLoad::Error
@@ -1492,8 +1506,14 @@ impl Automerge {
                     kind,
                     ..
                 } => {
+                    // Damaged proof and unrecognised chunk types are never
+                    // skippable in a signed stream: an unknown chunk may be
+                    // evidence this loader cannot evaluate.
                     if options.on_partial_load == OnPartialLoad::Error
-                        || kind == load::FailureKind::Signatures
+                        || matches!(
+                            kind,
+                            load::FailureKind::Signatures | load::FailureKind::UnknownChunkType
+                        )
                     {
                         return Err(error.into());
                     }
@@ -1501,13 +1521,13 @@ impl Automerge {
                     // signatures chunk before its type was identifiable. Never treat
                     // bare content before that boundary as authenticated.
                     if kind == load::FailureKind::IncompletePrefix
-                        && loaded.last().is_some_and(|group| {
-                            matches!(group.body, load::LoadedGroupBody::Changes(_))
-                                && group.signatures.is_none()
-                        })
+                        && loaded
+                            .last()
+                            .is_some_and(|group| group.signatures.is_none())
                     {
                         loaded.pop();
                     }
+                    let loaded = document.expand_signed_snapshots(loaded)?;
                     document.admit_loaded_groups(loaded, &mut PatchLog::inactive())?;
                 }
             }
@@ -1571,6 +1591,7 @@ impl Automerge {
                     load::LoadedGroups::Complete(groups) => groups,
                     load::LoadedGroups::Partial { error, .. } => return Err(error.into()),
                 };
+            let groups = self.expand_signed_snapshots(groups)?;
             let start = self.ops.len();
             self.admit_loaded_groups(groups, patch_log)?;
             return Ok(self.ops.len() - start);
@@ -1585,7 +1606,9 @@ impl Automerge {
             )?;
             // Ensure that the author, actor, and write-frontier state are carried
             // over for an empty document.
-            doc.signing = self.signing.clone();
+            doc.signing = SigningState::Unsigned {
+                author: self.get_author().cloned(),
+            };
             doc.select_actor(self.actor_id().clone())?;
             doc.set_write_frontier(self.get_write_frontier());
             // Finish the log's pending segment against the OLD document
@@ -1606,6 +1629,12 @@ impl Automerge {
                 load::MarkOrderValidation::Validate,
             ) {
             load::LoadedChanges::Complete(c) => c,
+            // Signed content is a deliberate rejection, not a damaged tail to
+            // recover from: nothing in the delivery is applied.
+            load::LoadedChanges::Partial {
+                error: error @ load::Error::SignedContent,
+                ..
+            } => return Err(error.into()),
             load::LoadedChanges::Partial { error, loaded, .. } => {
                 tracing::warn!(successful_chunks=loaded.len(), err=?error, "partial load");
                 loaded
@@ -1753,6 +1782,9 @@ impl Automerge {
     /// Save the entirety of this document in a compact form.
     pub fn save_with_options(&self, options: SaveOptions) -> Vec<u8> {
         self.assert_no_unused_actors(true);
+        if self.signing.is_required() {
+            return self.save_published(options.compress());
+        }
 
         let doc = Document::new(&self.ops, &self.change_graph, options.compress());
         let mut bytes = doc.into_bytes();
@@ -1781,9 +1813,28 @@ impl Automerge {
     }
 
     /// Save the document and attempt to load it before returning - slow!
+    pub(crate) fn verify_saved(&self, bytes: &[u8]) -> Result<(), AutomergeError> {
+        match self.get_author() {
+            Some(_) if self.signing.is_required() => {
+                Self::load_with_options(
+                    bytes,
+                    LoadOptions {
+                        author: self.signing.document_author(),
+                        text_encoding: self.text_encoding(),
+                        ..LoadOptions::default()
+                    },
+                )?;
+            }
+            _ => {
+                Self::load(bytes)?;
+            }
+        }
+        Ok(())
+    }
+
     pub fn save_and_verify(&self) -> Result<Vec<u8>, AutomergeError> {
         let bytes = self.save();
-        Self::load(&bytes)?;
+        self.verify_saved(&bytes)?;
         Ok(bytes)
     }
 
@@ -1795,13 +1846,44 @@ impl Automerge {
         })
     }
 
+    fn encode_published_groups(
+        &self,
+        groups: Vec<signing::persistence::PublishedGroup>,
+    ) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        for mut group in groups {
+            if group.changes.len() == 1 && group.fragment.head.fragment_level() == 0 {
+                bytes.extend_from_slice(&group.changes[0].bytes());
+            } else {
+                let bundle = Bundle::for_hashes(
+                    &self.ops,
+                    &self.change_graph,
+                    group.fragment.members.iter().copied(),
+                )
+                .expect("published members are applied");
+                bytes.extend_from_slice(bundle.bytes());
+            }
+            bytes.extend_from_slice(
+                storage::signatures::SignaturesChunk::encode(group.signatures).bytes(),
+            );
+        }
+        bytes
+    }
+
     /// Save the changes since the given heads
     ///
     /// The output of this will not be a compressed document format, but a series of individual
     /// changes. This is useful if you know you have only made a small change since the last
     /// [`Self::save()`] and you want to immediately send it somewhere (e.g. you've inserted a
     /// single character in a text object).
+
     pub fn save_after(&self, heads: &[ChangeHash]) -> Vec<u8> {
+        if self.signing.is_required() {
+            let mut groups = self.published_groups(heads);
+            // Oldest first so a receiver can apply in one pass.
+            groups.reverse();
+            return self.encode_published_groups(groups);
+        }
         let changes = self.get_changes(heads);
         let mut bytes = vec![];
         for c in changes {
