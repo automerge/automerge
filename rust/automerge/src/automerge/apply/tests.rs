@@ -261,3 +261,61 @@ fn queued_sequence_conflict_rejects_the_whole_grouped_batch() {
     assert!(receiver.staged.groups().is_empty());
     assert!(receiver.make_patches(&mut log).is_empty());
 }
+
+/// A log bound to a strict prefix of the document's actors must survive every
+/// mutation phase of `apply_prepared_changes`: new actor insertion (which shifts
+/// actor indices), and a write-frontier visibility transition
+/// resolved by the batch. Mismatch is decided before any mutation; later
+/// migrations onto a superset of actors are infallible.
+#[test]
+fn compatible_log_survives_actor_insertion_and_visibility_transition() {
+    use crate::Author;
+
+    let author_a = Author::from(vec![0xaa]);
+    let author_b = Author::from(vec![0xbb]);
+    let mut source =
+        Automerge::from_config(crate::Config::default().author(Some(author_a.clone())))
+            .with_actor(ActorId::from([1]))
+            .unwrap();
+    let a1 = at_level(&mut source, 1, 0);
+
+    // Receiver has only actor 1 applied; its log was bound before actor 2 existed.
+    let mut receiver = Automerge::new();
+    receiver.apply_changes([a1.clone()]).unwrap();
+    let mut log = PatchLog::active();
+    receiver.log_current_state(crate::types::ObjMeta::root(), &mut log, true);
+
+    // Pending boundary: masking author_b from `a1` before author_b's first
+    // change exists makes the incoming batch resolve the boundary.
+    receiver
+        .mask_author(author_b.clone(), &[a1.hash()], &mut log)
+        .unwrap();
+
+    source = source
+        .fork_with_author(Some(author_b))
+        .unwrap()
+        .with_actor(ActorId::from([2]))
+        .unwrap();
+    let b1 = at_level(&mut source, 2, 0);
+    source = source
+        .fork_with_author(Some(author_a))
+        .unwrap()
+        .with_actor(ActorId::from([1]))
+        .unwrap();
+    let a2 = at_level(&mut source, 3, 0);
+
+    // An empty batch is a no-op with a compatible log.
+    receiver
+        .apply_changes_batch_log_patches(Vec::<Change>::new(), &mut log)
+        .unwrap();
+    receiver
+        .apply_changes_batch_log_patches([b1, a2], &mut log)
+        .unwrap();
+    assert_eq!(receiver.get_heads(), source.get_heads());
+    assert_eq!(receiver.actors().len(), 2);
+    receiver.assert_no_unused_actors(true);
+    let patches = receiver.make_patches(&mut log);
+    assert!(!patches.is_empty());
+    // Masked author's contribution is invisible; the visible view is a's.
+    assert_eq!(receiver.get(ROOT, "value").unwrap().unwrap().0, 3.into());
+}
