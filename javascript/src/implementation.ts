@@ -235,7 +235,10 @@ export type InitOptions<T> = {
   unchecked?: boolean
   /** Allow loading a document with missing changes */
   allowMissingChanges?: boolean
-  /** @hidden */
+  /**
+   * @hidden
+   * @deprecated Migrate legacy scalar strings explicitly in application code.
+   */
   convertImmutableStringsToText?: boolean
 }
 
@@ -348,9 +351,9 @@ export function view<T>(doc: Doc<T>, heads: Heads): Doc<T> {
  * the actor ID which is generated you can pass the actor ID as the second
  * argument
  *
- * In signing mode the local author is fixed per document and the requested
+ * The local author is fixed per document and the requested
  * actor is checked against it: an actor whose history was recorded under a
- * different author is rejected with a `RangeError` before the copy is made,
+ * different named or anonymous identity is rejected with a `RangeError` before the copy is made,
  * so one author can never continue another author's chain. Actors already
  * owned by the same author, and brand-new actors, are accepted as before.
  *
@@ -2249,8 +2252,8 @@ export function readBundle(bundle: Uint8Array): {
  * EXPERIMENTAL: The signatures this document's fixed author should produce
  * next, as an owned snapshot.
  *
- * Each {@link SigningRequest} carries the applied change `hash`, the `author`
- * whose Ed25519 key must sign, and the exact `message` bytes to sign. Sign
+ * Each {@link SigningRequest} carries the local change `hash` and exact
+ * `message` bytes to sign. The application supplies the document's signer. Sign
  * `message` externally (the private key never enters Automerge) and hand the
  * results to {@link insertSignatures}. The snapshot stays valid for its exact
  * hashes after the document moves on, so late or duplicate responses are
@@ -2373,8 +2376,8 @@ export function insertSignatures<T>(
 }
 
 /**
- * EXPERIMENTAL: Whether any applied history of a signing document is not yet
- * published. Always `false` for unsigned, empty or fully published documents.
+ * EXPERIMENTAL: Whether any locally committed draft awaits publication.
+ * Always `false` for unsigned documents; excludes unapplied incoming groups.
  *
  * Read-only: it never commits or triggers publication, and it is not the
  * same as having signing requests. History blocked on missing proof from

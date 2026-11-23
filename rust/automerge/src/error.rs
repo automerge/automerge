@@ -10,7 +10,12 @@ use thiserror::Error;
 #[error("patch logs cannot be shared between documents; this probably means a PatchLog created for one document was reused with another")]
 pub struct PatchLogMismatch;
 
-/// A configured signing author cannot supply a usable Ed25519 verifying key.
+/// A signing-mode current author is absent or cannot supply a usable Ed25519 key.
+///
+/// Returned by signing-mode construction, loading and [`Automerge::fork_with_author`].
+/// Rejection leaves the source document unchanged. No signing key is required.
+///
+/// [`Automerge::fork_with_author`]: crate::Automerge::fork_with_author
 #[derive(Error, Debug)]
 #[error("{0}")]
 pub struct SigningAuthorError(#[source] pub(crate) SigningAuthorErrorInner);
@@ -27,8 +32,6 @@ pub(crate) enum SigningAuthorErrorInner {
 pub enum AutomergeError {
     #[error("actor {actor} is associated with a different author identity")]
     ActorAuthorMismatch { actor: ActorId },
-    #[error(transparent)]
-    SigningAuthor(#[from] SigningAuthorError),
     #[error(transparent)]
     ChangeGraph(#[from] crate::change_graph::MissingDep),
     #[error("failed to load compressed data: {0}")]
@@ -92,6 +95,8 @@ pub enum AutomergeError {
     HydrateError(#[from] HydrateError),
     #[error(transparent)]
     PatchLogMismatch(#[from] PatchLogMismatch),
+    #[error(transparent)]
+    SigningAuthor(#[from] SigningAuthorError),
     #[error("{0}")]
     EncodingError(String),
     #[error("failed to unbundle: {0}")]

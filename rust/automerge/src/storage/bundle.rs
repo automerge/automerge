@@ -51,6 +51,10 @@ impl Bundle {
         Ok(Self::from_meta(op_set, changes))
     }
 
+    pub(crate) fn from_storage(storage: BundleStorage<'static, Verified>) -> Self {
+        Self { storage }
+    }
+
     fn from_meta(op_set: &OpSet, changes: Vec<BundleMetadata<'_>>) -> Bundle {
         let min = changes
             .iter()
@@ -109,7 +113,7 @@ impl Bundle {
     /// compressed columns).
     pub fn bytes(&self) -> &[u8] {
         match &self.storage.compressed_bytes {
-            Some(c) => c,
+            Some(bytes) => bytes,
             None => &self.storage.bytes,
         }
     }

@@ -33,8 +33,8 @@ impl<'a> DocumentAuthor<'a> {
     }
 }
 
-/// Configure a document for [`crate::Automerge::from_config`] or
-/// [`crate::AutoCommit::from_config`].
+/// Configure a new document before passing it to [`crate::Automerge::from_config`]
+/// or [`crate::AutoCommit::from_config`].
 ///
 /// The default is unsigned, with no local author and the platform's text encoding.
 /// [`Self::author`] chooses an ordinary unsigned author; [`Self::signing`] prepares

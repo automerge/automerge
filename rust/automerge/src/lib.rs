@@ -298,16 +298,15 @@ mod value;
 mod write_frontier;
 
 pub use crate::anonymize::AnonymizeError;
+pub use crate::automerge::signing::{
+    PublicationError, SignatureBatchOutcome, SignatureInsertError, SignatureInsertOutcome,
+    SignatureRejection, SigningRequest, SigningRequests,
+};
 pub use crate::automerge::{
     signing, Automerge, LoadOptions, OnPartialLoad, SaveOptions, StringMigration,
 };
 pub use author::Author;
 pub use autocommit::AutoCommit;
-pub use automerge::signing::{
-    PublicationError, SignatureBatchOutcome, SignatureInsertError, SignatureInsertOutcome,
-    SignatureRejection,
-};
-pub use automerge::signing::{SigningRequest, SigningRequests};
 pub use autoserde::AutoSerde;
 #[doc(hidden)]
 pub use change::ParsedChange;

@@ -18,7 +18,10 @@ pub(crate) use fragment::{verify_frontier_entry, FragmentRequirements};
 pub(crate) use store::SignatureStore;
 pub use store::{Insert, InsertError};
 
-/// Length of a domain-separated change signing message, including its raw hash.
+/// Exact length in bytes of a message produced by [`signing_message`]: the
+/// domain-separation prefix followed by the 32-byte change hash. Callers that
+/// receive candidate messages from untrusted input can reject other lengths
+/// before copying or parsing them.
 pub const SIGNING_MESSAGE_LEN: usize = SIGNING_MESSAGE_PREFIX.len() + types::HASH_SIZE;
 const SIGNING_MESSAGE_PREFIX: &[u8] = b"automerge-change-signature-v1";
 

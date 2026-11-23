@@ -247,7 +247,7 @@ impl<'a> BundleBuilder<'a> {
             _phantom: PhantomData,
         };
 
-        Bundle { storage }
+        Bundle::from_storage(storage)
     }
 
     fn builders_index(&self, id: OpId) -> Option<usize> {

@@ -2,19 +2,59 @@
 
 ### Breaking Changes
 
-* `Automerge::set_actor` and `AutoCommit::set_actor` now return `Result` and
-  are deprecated in favor of configured authors and automatic actor management.
-  `with_actor` also returns `Result`. Established named and anonymous actor
-  identities cannot be changed in either mode; rejection preserves pending edits.
-  After manually selecting an unused actor, importing another identity's history
-  for it makes the next local transaction panic instead of continuing that chain.
+* The `set_author` and `with_author` methods have been removed. Being able to
+  mutate author's created complexity for introducing change attestation. Authors
+  are now set via `Config` and `Automerge::from_config`, or when using
+  `Automerge::fork_with_options` and `Automerge::fork_with_author`.
+* `Automerge` no longer implements `SyncDoc`. Documents that do not require
+  attestation can still use the sync protocol by first calling
+  `Automerge::sync()?`.
+* `Automerge::set_actor` and `AutoCommit::set_actor` now return `Result`. They
+  are also marked as deprecated to move callers away from managing `ActorId`s
+  themselves.
+  The operations will fail when an `ActorId` becomes associated with more than
+  one author.
 
 ### Deprecated
 
-* `LoadOptions::migrate_strings` is deprecated. Applications should migrate
-  legacy scalar strings explicitly. The option still performs the same
-  conversion; in signing mode that local migration remains an unpublished
-  draft until proved and published.
+* `LoadOptions::migrate_strings` is deprecated. The majority of documents should
+  have migrated and so this option will be removed in another major version.
+
+### Added
+
+* `Automerge::from_config` and `Autocommit::from_config` are introduced to allow
+  the construction of new documents with the given options. Currently the
+  options consist of an opaque `Author` or an ED25519 public key `Author`, and
+  the `TextEncoding`.
+
+#### Automerge Attestation
+
+This release includes major work on introducing attestation to Automerge to
+allow for changes to be signed and verified by ED25519 cryptographic keys. The
+introduction of this feature means the addition and changes of existing APIs.
+
+Documents prior to attestation remain compatible with the existing APIs.
+However, they cannot be upgraded to a document that can be attested. This would
+necessarily require the documents to have authors and signatures for the
+relevant changes.
+
+Certain methods are affected by a document that is being attested:
+* `SyncDoc` is not implemented for these documents, and `Automerge::sync` and
+  `Autocommit::sync` will return an error if it is an attested document.
+* `Automerge::anonymize` will return an `Automerge` document that is no longer
+  attested.
+* `Automerge::merge` requires both documents to be of the same mode, that is
+  either un-attested documents or attested documents.
+* `Automerge::save` and other saving methods will now persist encoded signature
+  data. When loading documents, a `VerificationMode` can be supplied via
+  `LoadOptions::verification_mode`. When `VerificationMode::Check` is used, then
+  signatures are expected to accompany changes to verify them.
+  If signatures are encountered with `VerificationMode::DontCheck`, then the
+  load will fail.
+* An attested document necessarily needs changes to be signed. In order to know
+  what to sign, use `Automerge::signing_requests`. Once signatures have been
+  created, use `Automerge::insert_signatures` which produces a report of the
+  outcome.
 
 ### Fixed
 
