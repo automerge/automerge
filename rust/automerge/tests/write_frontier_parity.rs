@@ -1148,3 +1148,61 @@ fn regression_reveal_under_visible_mark_carries_the_mark() {
         "patch-replayed rich text disagrees with spans() after the reveal"
     );
 }
+
+/// Shrunk from `patches_replay_to_hydrate` (seed `eb795bde…`): a merge
+/// delivered under a *pending* mask resolves the mask and reveals bob's
+/// losing counter put and his increment in one transition. The revealed
+/// increment must carry the conflict flag that the losing put introduces,
+/// so the patch-replayed model agrees with `hydrate()`.
+///
+/// Every ingredient is load-bearing — the test fails to reach the unchanged-winner
+/// counter transition if any is removed:
+/// - a shared init commit that both peers fork from;
+/// - alice's extra `k0` put, which gives her concurrent `k1` counter put
+///   the higher opid so *she* wins the conflict;
+/// - bob merging alice before incrementing, so his increment lands on the
+///   conflicted counter;
+/// - the mask being registered at heads main has not yet seen (pending),
+///   even though the boundary is bob's *latest* heads, so once resolved
+///   the mask hides nothing at all.
+#[test]
+fn regression_pending_empty_mask_drops_counter_conflict() {
+    let alice = Author::try_from("aaaa").unwrap();
+    let bob = Author::try_from("bbbb").unwrap();
+    let mut main = AutoCommit::new_with_encoding(ENCODING).with_actor(ActorId::from(vec![0x01]));
+    main.put(ROOT, "init", 0).unwrap();
+    main.commit();
+    let mut a = main
+        .fork()
+        .with_author(Some(alice))
+        .with_actor(ActorId::from(vec![0xA0]));
+    let mut b = main
+        .fork()
+        .with_author(Some(bob.clone()))
+        .with_actor(ActorId::from(vec![0xB0]));
+    b.put(ROOT, "k1", ScalarValue::counter(0)).unwrap();
+    b.commit();
+    // The extra op gives alice's k1 put the higher opid: she wins.
+    a.put(ROOT, "k0", 0).unwrap();
+    a.commit();
+    a.put(ROOT, "k1", ScalarValue::counter(0)).unwrap();
+    a.commit();
+    b.merge(&mut a).unwrap();
+    b.increment(ROOT, "k1", -1).unwrap();
+    b.commit();
+    let boundary = b.get_heads();
+
+    // Pending until the merge below imports the boundary hash; bob has no
+    // ops after it, so the resolved mask hides nothing.
+    main.mask_author(bob, &boundary);
+    let mut model = main.hydrate(ROOT, None).unwrap();
+    main.update_diff_cursor();
+    main.merge(&mut b).unwrap();
+    let patches = main.diff_incremental();
+    model.apply_patches(ENCODING, patches.clone()).unwrap();
+    assert_eq!(
+        model,
+        main.hydrate(ROOT, None).unwrap(),
+        "patches: {patches:?}"
+    );
+}
