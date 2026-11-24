@@ -2,8 +2,8 @@ use crate::actor::{ActorRefs, ActorRemoval, ActorShift, HasActorIndices};
 use crate::op_set2::op_set::RichTextQueryState;
 use crate::op_set2::MarkData;
 use crate::types::{Clock, OpId};
+use hexane::verified::{AccColumn, AccIndex, VAccum, VAdds, VGroup, VNewtype};
 use hexane::PackError;
-use hexane::{ColumnValue, PrefixColumn, PrefixValue, RleEncoding, RleValue, Run};
 
 use rustc_hash::FxHashSet;
 use std::collections::HashMap;
@@ -71,19 +71,25 @@ impl HasActorIndices for MarkIdx {
 
 // ── v1 hexane column-value traits ────────────────────────────────────────────
 
-impl ColumnValue for MarkIdx {
-    type Encoding<C: hexane::Codec> = RleEncoding<MarkIdx, C>;
-}
+// A mark is stored in a column as the number `as_i64` gives. A number
+// that is no mark's is refused, so that no two encodings load as the same
+// mark.
+impl VNewtype for MarkIdx {
+    type Base = i64;
 
-impl RleValue for MarkIdx {
-    fn try_unpack<C: hexane::Codec>(data: &[u8]) -> Result<(usize, MarkIdx), PackError> {
-        let (n, v) = C::try_read_signed(data)?;
-        Ok((n, MarkIdx::load(v)))
+    fn to_base(self) -> i64 {
+        self.as_i64()
     }
 
-    fn pack<C: hexane::Codec>(value: MarkIdx, out: &mut Vec<u8>) -> bool {
-        out.extend(C::encode_signed(value.as_i64()));
-        true
+    fn from_base(b: i64) -> Result<Self, PackError> {
+        // `load` negates a negative number, which `i64::MIN` has none of
+        if b != i64::MIN {
+            let m = MarkIdx::load(b);
+            if m.as_i64() == b {
+                return Ok(m);
+            }
+        }
+        Err(PackError::InvalidValue(format!("not a mark: {}", b)))
     }
 }
 
@@ -200,21 +206,44 @@ impl Sub for MarkAcc {
     }
 }
 
-impl PrefixValue for MarkIdx {
-    type Prefix = MarkAcc;
+// A mark adds itself to the marks open and closed before it.
+impl VAdds for MarkIdx {
+    type Acc = MarkAcc;
 
-    #[inline]
-    fn accumulate(target: &mut MarkAcc, val: MarkIdx) {
-        target.apply_one(val);
+    fn acc_of(v: MarkIdx) -> MarkAcc {
+        let mut a = MarkAcc::default();
+        a.apply_one(v);
+        a
+    }
+}
+
+// The laws of an accumulator are not proved here: automerge is not
+// checked by Verus.
+impl VGroup for MarkAcc {}
+
+impl VAccum for MarkAcc {
+    fn new_zero() -> Self {
+        MarkAcc::default()
     }
 
-    /// `OpId`s are unique per `Start`/`End`, so a multi-row RLE run of
-    /// the same `MarkIdx` cannot occur in a well-formed column —
-    /// `run.count` is always 1.  Treat any count as 1; the column's
-    /// uniqueness invariant makes this correct.
-    #[inline]
-    fn accumulate_run(target: &mut MarkAcc, run: &Run<MarkIdx>) {
-        target.apply_one(run.value);
+    fn add_acc(&mut self, b: &Self) {
+        *self += b;
+    }
+
+    fn sub_acc(&mut self, b: &Self) {
+        *self -= b.clone();
+    }
+
+    fn dup(&self) -> Self {
+        self.clone()
+    }
+
+    // Each mark's id is in a column once, so a run of a mark is of one;
+    // and adding a mark twice adds it once. So `n` of `b` add as one.
+    fn add_times(&mut self, b: &Self, n: usize) {
+        if n > 0 {
+            *self += b;
+        }
     }
 }
 
@@ -222,14 +251,14 @@ impl PrefixValue for MarkIdx {
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct MarkIndexColumn {
-    data: PrefixColumn<Option<MarkIdx>>,
+    data: AccColumn<Option<MarkIdx>>,
     cache: ActorRefs<HashMap<OpId, MarkData<'static>>>,
 }
 
 impl MarkIndexColumn {
     pub(crate) fn new() -> Self {
         Self {
-            data: PrefixColumn::new(),
+            data: AccColumn::new(),
             cache: ActorRefs::default(),
         }
     }
@@ -238,15 +267,17 @@ impl MarkIndexColumn {
         self.data.len()
     }
 
-    pub(crate) fn iter(&self) -> hexane::Iter<'_, Option<MarkIdx>> {
-        self.data.values().iter()
+    pub(crate) fn iter(
+        &self,
+    ) -> hexane::verified::Iter<'_, Option<MarkIdx>, hexane::Leb128, AccIndex> {
+        self.data.iter()
     }
 
     pub(crate) fn iter_range(
         &self,
         range: std::ops::Range<usize>,
-    ) -> hexane::Iter<'_, Option<MarkIdx>> {
-        self.data.values().iter_range(range)
+    ) -> hexane::verified::Iter<'_, Option<MarkIdx>, hexane::Leb128, AccIndex> {
+        self.data.iter_range(range)
     }
 
     /// Whether any mark exists anywhere in the document: the cache holds
@@ -268,11 +299,11 @@ impl MarkIndexColumn {
     /// run at a time, so an unmarked document (all-null runs) costs a
     /// handful of run headers rather than a per-row materialize.
     fn remap_values(&mut self, f: impl Fn(MarkIdx) -> MarkIdx) {
-        let mut new_data = PrefixColumn::new();
+        let mut new_data = AccColumn::new();
         new_data.splice_runs(
             0,
             0,
-            self.data.values().iter().runs().map(|r| hexane::Run {
+            self.data.iter().runs().map(|r| hexane::Run {
                 count: r.count,
                 value: r.value.map(&f),
             }),
@@ -389,7 +420,6 @@ pub(crate) mod tests {
     /// Find the column positions of Start and End entries for a given OpId.
     fn find_mark_positions(col: &MarkIndexColumn, target: OpId) -> Vec<usize> {
         col.data
-            .values()
             .iter()
             .enumerate()
             .filter_map(|(pos, val)| match val {

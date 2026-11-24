@@ -39,10 +39,10 @@ pub(crate) struct ChangeGraph {
     /// commit.
     max_ops: Vec<u32>,
     max_op: u32,
-    num_ops: hexane::Column<u64>,
-    timestamps: hexane::DeltaColumn<i64>,
-    messages: hexane::Column<Option<String>>,
-    extra_bytes_meta: hexane::PrefixColumn<ValueMeta>,
+    num_ops: hexane::verified::Column<u64>,
+    timestamps: hexane::verified::DeltaColumn<i64>,
+    messages: hexane::verified::Column<Option<String>>,
+    extra_bytes_meta: hexane::verified::PrefixColumn<ValueMeta>,
     extra_bytes_raw: Vec<u8>,
     heads: BTreeSet<ChangeHash>,
     nodes_by_hash: HashMap<ChangeHash, NodeIdx>,
@@ -98,12 +98,12 @@ impl ChangeGraph {
             actors: ActorRefs::default(),
             max_ops: Vec::new(),
             max_op: 0,
-            num_ops: hexane::Column::new(),
+            num_ops: hexane::verified::Column::new(),
             seq: Vec::new(),
             parents: Vec::new(),
-            messages: hexane::Column::new(),
-            timestamps: hexane::DeltaColumn::new(),
-            extra_bytes_meta: hexane::PrefixColumn::new(),
+            messages: hexane::verified::Column::new(),
+            timestamps: hexane::verified::DeltaColumn::new(),
+            extra_bytes_meta: hexane::verified::PrefixColumn::new(),
             extra_bytes_raw: Vec::new(),
             heads: BTreeSet::new(),
             clock_cache: HashMap::new(),
@@ -258,22 +258,28 @@ impl ChangeGraph {
     }
 
     pub(crate) fn encode(&self, out: &mut Vec<u8>) -> RawColumns<Uncompressed> {
-        use hexane::EncoderApi;
         use ids::*;
 
-        let actor = hexane::Encoder::<ActorIdx>::encode_to(out, self.actors.iter().copied());
-        let seq =
-            hexane::DeltaEncoder::<usize>::encode_to(out, self.seq.iter().map(|s| *s as usize));
-        let max_op =
-            hexane::DeltaEncoder::<usize>::encode_to(out, self.max_ops.iter().map(|m| *m as usize));
+        let actor =
+            hexane::verified::Encoder::<ActorIdx>::encode_to(out, self.actors.iter().copied());
+        let seq = hexane::verified::DeltaEncoder::<usize>::encode_to(
+            out,
+            self.seq.iter().map(|s| *s as usize),
+        );
+        let max_op = hexane::verified::DeltaEncoder::<usize>::encode_to(
+            out,
+            self.max_ops.iter().map(|m| *m as usize),
+        );
         let time_start = out.len();
         out.extend_from_slice(&self.timestamps.save());
         let time = time_start..out.len();
         let message = self.messages.save_to_unless(out, None);
 
-        let num_deps = hexane::Encoder::<usize>::encode_to(out, self.num_deps());
-        let deps =
-            hexane::DeltaEncoder::<usize>::encode_to(out, self.deps_iter().map(|n| n.0 as usize));
+        let num_deps = hexane::verified::Encoder::<usize>::encode_to(out, self.num_deps());
+        let deps = hexane::verified::DeltaEncoder::<usize>::encode_to(
+            out,
+            self.deps_iter().map(|n| n.0 as usize),
+        );
 
         // FIXME - we could eliminate this column if empty but meta isnt all null
         let meta = self.extra_bytes_meta.save_to(out);
@@ -367,7 +373,7 @@ impl ChangeGraph {
             let num_ops = self.num_ops.get(i).unwrap_or_default();
             let message = self.messages.get(i).flatten().map(Cow::Borrowed);
 
-            let meta = self.extra_bytes_meta.get(i).unwrap();
+            let meta = self.extra_bytes_meta.get_prefixed(i).unwrap();
             let meta_range = meta.prefix() as usize..meta.total() as usize;
             let extra = Cow::Borrowed(&self.extra_bytes_raw[meta_range]);
 
@@ -424,7 +430,7 @@ impl ChangeGraph {
             messages: self.messages.iter(),
             extra_bytes_meta: self
                 .extra_bytes_meta
-                .iter_range(0..self.extra_bytes_meta.len()),
+                .prefix_iter_range(0..self.extra_bytes_meta.len()),
             graph: self,
         }
     }
@@ -443,7 +449,7 @@ impl ChangeGraph {
                 let num_ops = self.num_ops.get(i).unwrap_or_default();
                 let message = self.messages.get(i).flatten().map(Cow::Borrowed);
 
-                let meta = self.extra_bytes_meta.get(i).unwrap();
+                let meta = self.extra_bytes_meta.get_prefixed(i).unwrap();
                 let meta_range = meta.prefix() as usize..meta.total() as usize;
                 let extra = Cow::Borrowed(&self.extra_bytes_raw[meta_range]);
 
@@ -957,10 +963,11 @@ impl ChangeGraphCols {
         let extra_bytes_raw = meta.bytes(EXTRA_VAL_COL_SPEC, bytes).to_vec();
 
         let actors: ActorRefs<Vec<ActorIdx>> =
-            ActorRefs(hexane::try_decoder::<ActorIdx>(actor_bytes)?.collect());
-        let max_ops: Vec<u32> = hexane::DeltaDecoder::<u32>::try_new(max_op_bytes)?.collect();
+            ActorRefs(hexane::verified::try_decoder::<ActorIdx>(actor_bytes)?.collect());
+        let max_ops: Vec<u32> =
+            hexane::verified::DeltaDecoder::<u32>::try_new(max_op_bytes)?.collect();
         let max_op = max_ops.iter().copied().max().unwrap_or(0);
-        let seq: Vec<u32> = hexane::DeltaDecoder::<u32>::try_new(seq_bytes)?.collect();
+        let seq: Vec<u32> = hexane::verified::DeltaDecoder::<u32>::try_new(seq_bytes)?.collect();
 
         if let Some(a) = actors.iter().copied().map(usize::from).max() {
             if a >= num_actors {
@@ -971,11 +978,14 @@ impl ChangeGraphCols {
         let len = actors.len();
         let opts = hexane::LoadOpts::new().with_length(len);
 
-        let timestamps = hexane::DeltaColumn::<i64>::load_with(time_bytes, opts.with_fill(0i64))?;
-        let messages =
-            hexane::Column::<Option<String>>::load_with(message_bytes, opts.with_fill(None))?;
+        let timestamps =
+            hexane::verified::DeltaColumn::<i64>::load_with(time_bytes, opts.with_fill(0i64))?;
+        let messages = hexane::verified::Column::<Option<String>>::load_with(
+            message_bytes,
+            opts.with_fill(None),
+        )?;
         let extra_bytes_meta =
-            hexane::PrefixColumn::<ValueMeta>::load_with(extra_meta_bytes, opts)?;
+            hexane::verified::PrefixColumn::<ValueMeta>::load_with(extra_meta_bytes, opts)?;
 
         if max_ops.len() != len {
             return Err(LoadError::InvalidColumnLength(MAX_OP_COL_SPEC));
@@ -999,8 +1009,9 @@ impl ChangeGraphCols {
         let mut parents = Vec::with_capacity(len);
         let mut edges = vec![];
 
-        let deps_count: Vec<u32> = hexane::try_decoder::<u32>(deps_count_bytes)?.collect();
-        let mut deps_val_iter = hexane::DeltaDecoder::<u32>::try_new(deps_val_bytes)?;
+        let deps_count: Vec<u32> =
+            hexane::verified::try_decoder::<u32>(deps_count_bytes)?.collect();
+        let mut deps_val_iter = hexane::verified::DeltaDecoder::<u32>::try_new(deps_val_bytes)?;
 
         let mut num_ops_vec = Vec::with_capacity(len);
         for (i, d) in deps_count.iter().enumerate() {
@@ -1028,7 +1039,7 @@ impl ChangeGraphCols {
             }
             num_ops_vec.push(max_ops[i] as u64 - last_max_op as u64);
         }
-        let num_ops: hexane::Column<u64> = num_ops_vec.into_iter().collect();
+        let num_ops: hexane::verified::Column<u64> = num_ops_vec.into_iter().collect();
 
         let heads = doc.heads().iter().copied().collect();
 
@@ -1741,10 +1752,10 @@ pub(crate) struct ChangeIter<'a> {
     actors: std::slice::Iter<'a, ActorIdx>,
     seq: std::slice::Iter<'a, u32>,
     max_ops: std::slice::Iter<'a, u32>,
-    num_ops: hexane::Iter<'a, u64>,
-    timestamps: hexane::DeltaIter<'a, i64>,
-    messages: hexane::Iter<'a, Option<String>>,
-    extra_bytes_meta: hexane::prefix::PrefixIter<'a, ValueMeta>,
+    num_ops: hexane::verified::Iter<'a, u64>,
+    timestamps: hexane::verified::DeltaIter<'a, i64>,
+    messages: hexane::verified::Iter<'a, Option<String>>,
+    extra_bytes_meta: hexane::verified::PrefixIter<'a, ValueMeta>,
     graph: &'a ChangeGraph,
 }
 

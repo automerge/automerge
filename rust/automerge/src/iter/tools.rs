@@ -312,17 +312,26 @@ where
 /// represnting ranges of `false` values in a boolean column. This can then
 /// be used by other iterators to skip past elements for which the boolean
 /// column is false
+///
+/// The column is a plain one, or the values of a prefix column (`K` is the
+/// kind of index the column is kept with).
 #[derive(Clone, Default, Debug)]
-pub(crate) struct BoolColumnSkipper<'a> {
-    iter: hexane::Iter<'a, bool>,
+pub(crate) struct BoolColumnSkipper<
+    'a,
+    K: hexane::verified::VIndex<bool> = hexane::verified::LenIndex,
+> {
+    iter: hexane::verified::Iter<'a, bool, hexane::Leb128, K>,
     range: Range<usize>,
     cursor: usize,
     pending: usize,
     exhausted: bool,
 }
 
-impl<'a> BoolColumnSkipper<'a> {
-    pub(crate) fn new(iter: hexane::Iter<'a, bool>, range: Range<usize>) -> Self {
+impl<'a, K: hexane::verified::VIndex<bool>> BoolColumnSkipper<'a, K> {
+    pub(crate) fn new(
+        iter: hexane::verified::Iter<'a, bool, hexane::Leb128, K>,
+        range: Range<usize>,
+    ) -> Self {
         let cursor = range.start;
         Self {
             iter,
@@ -334,9 +343,9 @@ impl<'a> BoolColumnSkipper<'a> {
     }
 }
 
-impl Skipper for BoolColumnSkipper<'_> {}
+impl<K: hexane::verified::VIndex<bool> + std::fmt::Debug> Skipper for BoolColumnSkipper<'_, K> {}
 
-impl Shiftable for BoolColumnSkipper<'_> {
+impl<K: hexane::verified::VIndex<bool> + std::fmt::Debug> Shiftable for BoolColumnSkipper<'_, K> {
     fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
         self.range = range.clone();
         self.cursor = range.start;
@@ -357,7 +366,7 @@ impl Shiftable for BoolColumnSkipper<'_> {
     }
 }
 
-impl Iterator for BoolColumnSkipper<'_> {
+impl<K: hexane::verified::VIndex<bool>> Iterator for BoolColumnSkipper<'_, K> {
     type Item = usize;
 
     fn next(&mut self) -> Option<Self::Item> {

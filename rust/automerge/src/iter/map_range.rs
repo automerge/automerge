@@ -116,7 +116,7 @@ impl<'a> Iterator for MapRange<'a> {
 #[derive(Clone, Default, Debug)]
 struct MapIter<'a> {
     id: OpIdIter<'a>,
-    key_str: hexane::Iter<'a, Option<String>>,
+    key_str: hexane::verified::Iter<'a, Option<String>>,
     action: ActionIter<'a>,
     value: ValueIter<'a>,
 }

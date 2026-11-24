@@ -727,34 +727,33 @@ impl<'a> ValueRef<'a> {
     }
 }
 
-impl hexane::ColumnValue for ActorIdx {
-    type Encoding<C: hexane::Codec> = hexane::RleEncoding<ActorIdx, C>;
+// An actor index is stored in a column as the number it is. A number
+// that is no `u32` is no actor index: a load refuses it, so that no two
+// encodings load as the same value.
+impl hexane::verified::VNewtype for ActorIdx {
+    type Base = u64;
+
+    fn to_base(self) -> u64 {
+        u64::from(self)
+    }
+
+    fn from_base(b: u64) -> Result<Self, PackError> {
+        u32::try_from(b)
+            .map(ActorIdx)
+            .map_err(|_| PackError::InvalidValue(format!("actor index out of range: {}", b)))
+    }
 }
 
-impl hexane::RleValue for ActorIdx {
-    fn try_unpack<C: hexane::Codec>(data: &[u8]) -> Result<(usize, ActorIdx), PackError> {
-        let (n, v) = C::try_read_unsigned(data)?;
-        Ok((n, ActorIdx::from(v)))
-    }
-    fn pack<C: hexane::Codec>(value: ActorIdx, out: &mut Vec<u8>) -> bool {
-        out.extend(C::encode_unsigned(u64::from(value)));
-        true
-    }
-}
+// An action is stored in a column as its number.
+impl hexane::verified::VNewtype for Action {
+    type Base = u64;
 
-impl hexane::ColumnValue for Action {
-    type Encoding<C: hexane::Codec> = hexane::RleEncoding<Action, C>;
-}
-
-impl hexane::RleValue for Action {
-    fn try_unpack<C: hexane::Codec>(data: &[u8]) -> Result<(usize, Action), PackError> {
-        let (n, v) = C::try_read_unsigned(data)?;
-        let action = Action::try_from(v)?;
-        Ok((n, action))
+    fn to_base(self) -> u64 {
+        u64::from(self)
     }
-    fn pack<C: hexane::Codec>(value: Action, out: &mut Vec<u8>) -> bool {
-        out.extend(C::encode_unsigned(u64::from(value)));
-        true
+
+    fn from_base(b: u64) -> Result<Self, PackError> {
+        Action::try_from(b)
     }
 }
 

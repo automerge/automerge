@@ -266,8 +266,8 @@ impl<'a> KeyRef<'a> {
 
 #[derive(Clone, Default, Debug)]
 pub(crate) struct OpIdIter<'a> {
-    pub(super) actor: hexane::Iter<'a, ActorIdx>,
-    ctr: hexane::DeltaIter<'a, u32>,
+    pub(super) actor: hexane::verified::Iter<'a, ActorIdx>,
+    ctr: hexane::verified::DeltaIter<'a, u32>,
 }
 
 impl OpIdIterState {
@@ -286,16 +286,16 @@ impl OpIdIterState {
 }
 
 pub(crate) struct OpIdIterState {
-    actor_state: hexane::column::IterState,
-    ctr_state: hexane::DeltaIterState,
+    actor_state: hexane::verified::IterState,
+    ctr_state: hexane::verified::DeltaIterState,
 }
 
 pub(crate) struct CtrWalker<'a> {
-    ctr: hexane::FindByRange<'a, u32>,
+    ctr: hexane::verified::FindByRange<'a, u32>,
 }
 
 impl<'a> CtrWalker<'a> {
-    pub(crate) fn new(col: &'a hexane::DeltaColumn<u32>, range: Range<usize>) -> Self {
+    pub(crate) fn new(col: &'a hexane::verified::DeltaColumn<u32>, range: Range<usize>) -> Self {
         let ctr = col.find_by_range(range.start as u32..range.end as u32);
         Self { ctr }
     }
@@ -313,14 +313,14 @@ impl Iterator for CtrWalker<'_> {
 
 pub(crate) struct SuccWalker<'a> {
     acc: usize,
-    count: hexane::PrefixIter<'a, u32>,
+    count: hexane::verified::PrefixIter<'a, u32>,
     ctr: Peekable<CtrWalker<'a>>,
 }
 
 impl<'a> SuccWalker<'a> {
     pub(crate) fn new(op_set: &'a OpSet, range: Range<usize>) -> Self {
         let ctr = CtrWalker::new(&op_set.cols.succ_ctr, range).peekable();
-        let count = op_set.cols.succ_count.iter();
+        let count = op_set.cols.succ_count.prefix_iter();
         Self { acc: 0, count, ctr }
     }
 }
@@ -339,7 +339,10 @@ impl Iterator for SuccWalker<'_> {
 }
 
 impl<'a> OpIdIter<'a> {
-    pub(crate) fn new(actor: hexane::Iter<'a, ActorIdx>, ctr: hexane::DeltaIter<'a, u32>) -> Self {
+    pub(crate) fn new(
+        actor: hexane::verified::Iter<'a, ActorIdx>,
+        ctr: hexane::verified::DeltaIter<'a, u32>,
+    ) -> Self {
         Self { actor, ctr }
     }
 
@@ -408,24 +411,26 @@ impl Iterator for OpIdIter<'_> {
 
 #[derive(Clone, Debug)]
 pub(crate) struct InsertIter<'a> {
-    iter: hexane::Iter<'a, bool>,
+    iter: hexane::verified::Iter<'a, bool, hexane::Leb128, hexane::verified::SumIndex>,
 }
 
-pub(crate) struct InsertIterState(hexane::column::IterState);
+pub(crate) struct InsertIterState(hexane::verified::IterState);
 
 impl InsertIterState {
     fn try_resume<'a>(&self, op_set: &'a OpSet) -> Result<InsertIter<'a>, AutomergeError> {
         Ok(InsertIter {
             iter: self
                 .0
-                .try_resume(op_set.cols.insert.values())
+                .try_resume(&op_set.cols.insert)
                 .map_err(AutomergeError::encoding)?,
         })
     }
 }
 
 impl<'a> InsertIter<'a> {
-    pub(crate) fn new(iter: hexane::Iter<'a, bool>) -> Self {
+    pub(crate) fn new(
+        iter: hexane::verified::Iter<'a, bool, hexane::Leb128, hexane::verified::SumIndex>,
+    ) -> Self {
         Self { iter }
     }
 
@@ -462,15 +467,15 @@ impl Iterator for InsertIter<'_> {
 
 #[derive(Clone, Debug)]
 pub(crate) struct KeyIter<'a> {
-    key_str: hexane::Iter<'a, Option<String>>,
-    key_actor: hexane::Iter<'a, Option<ActorIdx>>,
-    key_ctr: hexane::DeltaIter<'a, Option<u32>>,
+    key_str: hexane::verified::Iter<'a, Option<String>>,
+    key_actor: hexane::verified::Iter<'a, Option<ActorIdx>>,
+    key_ctr: hexane::verified::DeltaIter<'a, Option<u32>>,
 }
 
 pub(crate) struct KeyIterState {
-    key_str: hexane::IterState,
-    key_actor: hexane::column::IterState,
-    key_ctr: hexane::DeltaIterState,
+    key_str: hexane::verified::IterState,
+    key_actor: hexane::verified::IterState,
+    key_ctr: hexane::verified::DeltaIterState,
 }
 
 impl KeyIterState {
@@ -494,9 +499,9 @@ impl KeyIterState {
 
 impl<'a> KeyIter<'a> {
     pub(crate) fn new(
-        key_str: hexane::Iter<'a, Option<String>>,
-        key_actor: hexane::Iter<'a, Option<ActorIdx>>,
-        key_ctr: hexane::DeltaIter<'a, Option<u32>>,
+        key_str: hexane::verified::Iter<'a, Option<String>>,
+        key_actor: hexane::verified::Iter<'a, Option<ActorIdx>>,
+        key_ctr: hexane::verified::DeltaIter<'a, Option<u32>>,
     ) -> Self {
         Self {
             key_str,
@@ -569,13 +574,13 @@ impl<'a> Iterator for KeyIter<'a> {
 
 #[derive(Clone, Default, Debug)]
 pub(crate) struct ObjIdIter<'a> {
-    obj_actor: hexane::Iter<'a, Option<ActorIdx>>,
-    obj_ctr: hexane::Iter<'a, Option<u32>>,
+    obj_actor: hexane::verified::Iter<'a, Option<ActorIdx>>,
+    obj_ctr: hexane::verified::Iter<'a, Option<u32>>,
 }
 
 pub(crate) struct ObjIdIterState {
-    obj_actor: hexane::column::IterState,
-    obj_ctr: hexane::column::IterState,
+    obj_actor: hexane::verified::IterState,
+    obj_ctr: hexane::verified::IterState,
 }
 
 impl ObjIdIterState {
@@ -595,15 +600,15 @@ impl ObjIdIterState {
 
 impl<'a> ObjIdIter<'a> {
     pub(crate) fn new(
-        obj_actor: hexane::Iter<'a, Option<ActorIdx>>,
-        obj_ctr: hexane::Iter<'a, Option<u32>>,
+        obj_actor: hexane::verified::Iter<'a, Option<ActorIdx>>,
+        obj_ctr: hexane::verified::Iter<'a, Option<u32>>,
     ) -> Self {
         Self { obj_actor, obj_ctr }
     }
 
     pub(crate) fn new_range(
-        obj_actor: hexane::Iter<'a, Option<ActorIdx>>,
-        obj_ctr: hexane::Iter<'a, Option<u32>>,
+        obj_actor: hexane::verified::Iter<'a, Option<ActorIdx>>,
+        obj_ctr: hexane::verified::Iter<'a, Option<u32>>,
     ) -> Self {
         Self { obj_actor, obj_ctr }
     }
@@ -676,13 +681,13 @@ impl Iterator for ObjIdIter<'_> {
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct MarkInfoIter<'a> {
-    name: hexane::Iter<'a, Option<String>>,
-    expand: hexane::Iter<'a, bool>,
+    name: hexane::verified::Iter<'a, Option<String>>,
+    expand: hexane::verified::Iter<'a, bool>,
 }
 
 pub(crate) struct MarkInfoIterState {
-    name: hexane::IterState,
-    expand: hexane::column::IterState,
+    name: hexane::verified::IterState,
+    expand: hexane::verified::IterState,
 }
 
 impl MarkInfoIterState {
@@ -710,8 +715,8 @@ impl Shiftable for MarkInfoIter<'_> {
 
 impl<'a> MarkInfoIter<'a> {
     pub(crate) fn new(
-        name: hexane::Iter<'a, Option<String>>,
-        expand: hexane::Iter<'a, bool>,
+        name: hexane::verified::Iter<'a, Option<String>>,
+        expand: hexane::verified::Iter<'a, bool>,
     ) -> Self {
         Self { name, expand }
     }
@@ -806,11 +811,11 @@ impl Shiftable for ActionValueIter<'_> {
 
 #[derive(Clone, Default, Debug)]
 pub(crate) struct ActionIter<'a> {
-    iter: hexane::Iter<'a, Action>,
+    iter: hexane::verified::Iter<'a, Action>,
 }
 
 pub(crate) struct ActionIterState {
-    state: hexane::column::IterState,
+    state: hexane::verified::IterState,
 }
 
 impl ActionIterState {
@@ -831,7 +836,7 @@ impl Shiftable for ActionIter<'_> {
 }
 
 impl<'a> ActionIter<'a> {
-    pub(crate) fn new(iter: hexane::Iter<'a, Action>) -> Self {
+    pub(crate) fn new(iter: hexane::verified::Iter<'a, Action>) -> Self {
         Self { iter }
     }
 
@@ -864,12 +869,12 @@ impl Iterator for ActionIter<'_> {
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct ValueIter<'a> {
-    meta: hexane::PrefixIter<'a, op_set2::meta::ValueMeta>,
-    raw: hexane::RawColumnIter<'a>,
+    meta: hexane::verified::PrefixIter<'a, op_set2::meta::ValueMeta>,
+    raw: hexane::verified::RawColumnIter<'a>,
 }
 
 pub(crate) struct ValueIterState {
-    meta: hexane::PrefixIterState<op_set2::meta::ValueMeta>,
+    meta: hexane::verified::PrefixIterState<op_set2::meta::ValueMeta>,
     raw: usize,
 }
 
@@ -897,8 +902,8 @@ impl Shiftable for ValueIter<'_> {
 
 impl<'a> ValueIter<'a> {
     pub(crate) fn new(
-        meta: hexane::PrefixIter<'a, op_set2::meta::ValueMeta>,
-        raw: hexane::RawColumnIter<'a>,
+        meta: hexane::verified::PrefixIter<'a, op_set2::meta::ValueMeta>,
+        raw: hexane::verified::RawColumnIter<'a>,
     ) -> Self {
         Self { meta, raw }
     }
@@ -952,17 +957,17 @@ impl<'a> Iterator for ValueIter<'a> {
 
 #[derive(Clone, Debug)]
 pub(crate) struct SuccIterIter<'a> {
-    count: hexane::PrefixIter<'a, u32>,
-    actor: hexane::Iter<'a, ActorIdx>,
-    ctr: hexane::DeltaIter<'a, u32>,
-    incs: hexane::Iter<'a, Option<i64>>,
+    count: hexane::verified::PrefixIter<'a, u32>,
+    actor: hexane::verified::Iter<'a, ActorIdx>,
+    ctr: hexane::verified::DeltaIter<'a, u32>,
+    incs: hexane::verified::Iter<'a, Option<i64>>,
 }
 
 pub(crate) struct SuccIterIterState {
-    count: hexane::PrefixIterState<u32>,
-    actor: hexane::column::IterState,
-    ctr: hexane::DeltaIterState,
-    incs: hexane::column::IterState,
+    count: hexane::verified::PrefixIterState<u32>,
+    actor: hexane::verified::IterState,
+    ctr: hexane::verified::DeltaIterState,
+    incs: hexane::verified::IterState,
 }
 
 impl SuccIterIterState {
@@ -1017,10 +1022,10 @@ impl<'a> SuccIterIter<'a> {
     }
 
     pub(crate) fn new(
-        count: hexane::PrefixIter<'a, u32>,
-        actor: hexane::Iter<'a, ActorIdx>,
-        ctr: hexane::DeltaIter<'a, u32>,
-        incs: hexane::Iter<'a, Option<i64>>,
+        count: hexane::verified::PrefixIter<'a, u32>,
+        actor: hexane::verified::Iter<'a, ActorIdx>,
+        ctr: hexane::verified::DeltaIter<'a, u32>,
+        incs: hexane::verified::Iter<'a, Option<i64>>,
     ) -> Self {
         Self {
             count,
@@ -1218,11 +1223,12 @@ mod tests {
         let o31 = ObjId(OpId::new(3, 1));
         let o32 = ObjId(OpId::new(3, 2));
         let objs = [r, r, r, r, o11, o11, o12, o21, o21, o21, o22, o22, o32, o32];
-        let v1_actor = hexane::Column::<Option<ActorIdx>>::from_values(
-            objs.iter().map(|o| o.actor()).collect::<Vec<_>>(),
+        let v1_actor = hexane::verified::Column::<Option<ActorIdx>>::from_values(
+            &objs.iter().map(|o| o.actor()).collect::<Vec<_>>(),
         );
-        let v1_ctr = hexane::Column::<Option<u32>>::from_values(
-            objs.iter()
+        let v1_ctr = hexane::verified::Column::<Option<u32>>::from_values(
+            &objs
+                .iter()
                 .map(|o| o.counter().map(|c| c as u32))
                 .collect::<Vec<_>>(),
         );

@@ -173,7 +173,7 @@ pub(crate) struct TopIter<'a> {
 #[derive(Clone, Debug)]
 enum TopIterInner<'a> {
     Empty,
-    Current(BoolColumnSkipper<'a>),
+    Current(BoolColumnSkipper<'a, hexane::verified::SumIndex>),
     // peekable because the row which terminates one group is the first
     // row of the next
     Scan(Box<PeekShift<ScanTopIter<'a>>>),
@@ -278,7 +278,7 @@ impl Iterator for TopIter<'_> {
 struct ScanTopIter<'a> {
     pos: usize,
     clock: Clock,
-    key_str: hexane::Iter<'a, Option<String>>,
+    key_str: hexane::verified::Iter<'a, Option<String>>,
     id: OpIdIter<'a>,
     insert: InsertIter<'a>,
     action: ActionIter<'a>,
