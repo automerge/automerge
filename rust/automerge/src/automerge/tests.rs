@@ -749,7 +749,7 @@ fn range_iter_map() {
         Some(MapRangeItem::new(
             "b",
             4.into(),
-            ExId::Id(2, actor.clone(), 0),
+            ExId::Id(2, actor.clone(), None),
             false
         ))
     );
@@ -758,7 +758,7 @@ fn range_iter_map() {
         Some(MapRangeItem::new(
             "c",
             5.into(),
-            ExId::Id(3, actor.clone(), 0),
+            ExId::Id(3, actor.clone(), None),
             false
         ))
     );
@@ -770,7 +770,7 @@ fn range_iter_map() {
         Some(MapRangeItem::new(
             "b",
             4.into(),
-            ExId::Id(2, actor.clone(), 0),
+            ExId::Id(2, actor.clone(), None),
             false
         ))
     );
@@ -779,7 +779,7 @@ fn range_iter_map() {
         Some(MapRangeItem::new(
             "c",
             5.into(),
-            ExId::Id(3, actor.clone(), 0),
+            ExId::Id(3, actor.clone(), None),
             false
         ))
     );
@@ -788,7 +788,7 @@ fn range_iter_map() {
         Some(MapRangeItem::new(
             "d",
             9.into(),
-            ExId::Id(7, actor.clone(), 0),
+            ExId::Id(7, actor.clone(), None),
             false
         ))
     );
@@ -800,7 +800,7 @@ fn range_iter_map() {
         Some(MapRangeItem::new(
             "a",
             8.into(),
-            ExId::Id(6, actor.clone(), 0),
+            ExId::Id(6, actor.clone(), None),
             false
         ))
     );
@@ -809,7 +809,7 @@ fn range_iter_map() {
         Some(MapRangeItem::new(
             "b",
             4.into(),
-            ExId::Id(2, actor.clone(), 0),
+            ExId::Id(2, actor.clone(), None),
             false
         ))
     );
@@ -818,7 +818,7 @@ fn range_iter_map() {
         Some(MapRangeItem::new(
             "c",
             5.into(),
-            ExId::Id(3, actor.clone(), 0),
+            ExId::Id(3, actor.clone(), None),
             false
         ))
     );
@@ -828,10 +828,10 @@ fn range_iter_map() {
     assert_eq!(
         range.collect::<Vec<_>>(),
         vec![
-            MapRangeItem::new("a", 8.into(), ExId::Id(6, actor.clone(), 0), false),
-            MapRangeItem::new("b", 4.into(), ExId::Id(2, actor.clone(), 0), false),
-            MapRangeItem::new("c", 5.into(), ExId::Id(3, actor.clone(), 0), false),
-            MapRangeItem::new("d", 9.into(), ExId::Id(7, actor.clone(), 0), false),
+            MapRangeItem::new("a", 8.into(), ExId::Id(6, actor.clone(), None), false),
+            MapRangeItem::new("b", 4.into(), ExId::Id(2, actor.clone(), None), false),
+            MapRangeItem::new("c", 5.into(), ExId::Id(3, actor.clone(), None), false),
+            MapRangeItem::new("d", 9.into(), ExId::Id(7, actor.clone(), None), false),
         ]
     );
 }
@@ -1343,7 +1343,7 @@ fn range_iter_map_rev() {
         Some(MapRangeItem::new(
             "b",
             4.into(),
-            ExId::Id(2, actor.clone(), 0),
+            ExId::Id(2, actor.clone(), None),
             false
         ))
     );
@@ -1352,7 +1352,7 @@ fn range_iter_map_rev() {
         Some(MapRangeItem::new(
             "c",
             5.into(),
-            ExId::Id(3, actor.clone(), 0),
+            ExId::Id(3, actor.clone(), None),
             false
         ))
     );
@@ -1364,7 +1364,7 @@ fn range_iter_map_rev() {
         Some(MapRangeItem::new(
             "b",
             4.into(),
-            ExId::Id(2, actor.clone(), 0),
+            ExId::Id(2, actor.clone(), None),
             false
         ))
     );
@@ -1373,7 +1373,7 @@ fn range_iter_map_rev() {
         Some(MapRangeItem::new(
             "c",
             5.into(),
-            ExId::Id(3, actor.clone(), 0),
+            ExId::Id(3, actor.clone(), None),
             false
         ))
     );
@@ -1382,7 +1382,7 @@ fn range_iter_map_rev() {
         Some(MapRangeItem::new(
             "d",
             9.into(),
-            ExId::Id(7, actor.clone(), 0),
+            ExId::Id(7, actor.clone(), None),
             false
         ))
     );
@@ -1394,7 +1394,7 @@ fn range_iter_map_rev() {
         Some(MapRangeItem::new(
             "a",
             8.into(),
-            ExId::Id(6, actor.clone(), 0),
+            ExId::Id(6, actor.clone(), None),
             false
         ))
     );
@@ -1403,7 +1403,7 @@ fn range_iter_map_rev() {
         Some(MapRangeItem::new(
             "b",
             4.into(),
-            ExId::Id(2, actor.clone(), 0),
+            ExId::Id(2, actor.clone(), None),
             false
         ))
     );
@@ -1412,7 +1412,7 @@ fn range_iter_map_rev() {
         Some(MapRangeItem::new(
             "c",
             5.into(),
-            ExId::Id(3, actor.clone(), 0),
+            ExId::Id(3, actor.clone(), None),
             false
         ))
     );
@@ -1422,10 +1422,10 @@ fn range_iter_map_rev() {
     assert_eq!(
         range.collect::<Vec<_>>(),
         vec![
-            MapRangeItem::new("a", 8.into(), ExId::Id(6, actor.clone(), 0), false),
-            MapRangeItem::new("b", 4.into(), ExId::Id(2, actor.clone(), 0), false),
-            MapRangeItem::new("c", 5.into(), ExId::Id(3, actor.clone(), 0), false),
-            MapRangeItem::new("d", 9.into(), ExId::Id(7, actor.clone(), 0), false),
+            MapRangeItem::new("a", 8.into(), ExId::Id(6, actor.clone(), None), false),
+            MapRangeItem::new("b", 4.into(), ExId::Id(2, actor.clone(), None), false),
+            MapRangeItem::new("c", 5.into(), ExId::Id(3, actor.clone(), None), false),
+            MapRangeItem::new("d", 9.into(), ExId::Id(7, actor.clone(), None), false),
         ]
     );
 }
@@ -1703,15 +1703,15 @@ fn compute_list_indexes_correctly_when_list_element_is_split_across_tree_nodes()
     assert_eq!(
         doc1.get_all(&list, 0).unwrap(),
         vec![
-            (max.into(), ExId::Id(max + 2, actor1.clone(), 0)),
-            (max.into(), ExId::Id(max + 2, actor2.clone(), 1))
+            (max.into(), ExId::Id(max + 2, actor1.clone(), None)),
+            (max.into(), ExId::Id(max + 2, actor2.clone(), None))
         ]
     );
     assert_eq!(
         doc2.get_all(&list, 0).unwrap(),
         vec![
-            (max.into(), ExId::Id(max + 2, actor1, 0)),
-            (max.into(), ExId::Id(max + 2, actor2, 1))
+            (max.into(), ExId::Id(max + 2, actor1, None)),
+            (max.into(), ExId::Id(max + 2, actor2, None))
         ]
     );
     assert!(doc1.get(&list, 1).unwrap().is_none());
@@ -1896,7 +1896,7 @@ fn observe_counter_change_application_overwrite() {
                 key: "counter".into(),
                 value: (
                     ScalarValue::Str("mystring".into()).into(),
-                    ExId::Id(2, doc2.get_actor().clone(), 1)
+                    ExId::Id(2, doc2.get_actor().clone(), None)
                 ),
                 conflict: false,
             }
@@ -1937,7 +1937,7 @@ fn observe_counter_change_application() {
                 key: "counter".into(),
                 value: (
                     ScalarValue::counter(1).into(),
-                    ExId::Id(1, doc.get_actor().clone(), 0)
+                    ExId::Id(1, doc.get_actor().clone(), None)
                 ),
                 conflict: false,
             },

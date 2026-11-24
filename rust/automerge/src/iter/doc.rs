@@ -32,6 +32,8 @@ enum DocIterInner<'a> {
 #[derive(Debug, Clone)]
 struct DocReader<'a> {
     op_set: &'a OpSet,
+    /// The object the last item was in, and its exported ID
+    obj: ObjId,
     obj_export: Arc<ExId>,
     read: ReadAt<'a>,
     walk: DocIterInternal<'a>,
@@ -48,10 +50,12 @@ impl<'a> DocIter<'a> {
     pub(crate) fn new(doc: &'a Automerge, obj: ObjMeta, read: ReadAt<'a>) -> Self {
         let op_set = doc.ops();
         let obj_export = Arc::new(op_set.id_to_exid(obj.id.0));
+        let obj_id = obj.id;
         let walk = DocIterInternal::new(doc, obj, read.clone());
         Self {
             inner: DocIterInner::Reading(Box::new(DocReader {
                 op_set,
+                obj: obj_id,
                 obj_export,
                 read,
                 walk,
@@ -64,8 +68,9 @@ impl<'a> DocIter<'a> {
 impl<'a> DocReader<'a> {
     fn next(&mut self, encoding: TextEncoding) -> Option<DocObjItem<'a>> {
         let DocObjItemInternal { obj, item } = self.walk.next()?;
-        if *self.obj_export != obj {
-            self.obj_export = Arc::new(self.op_set.id_to_exid(self.walk.obj.0));
+        if self.obj != obj {
+            self.obj = obj;
+            self.obj_export = Arc::new(self.op_set.id_to_exid(obj.0));
         }
         Some(DocObjItem {
             obj: self.obj_export.clone(),
