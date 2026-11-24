@@ -27,7 +27,7 @@ use crate::iter_core::{each, lemma_upto, lens_ok, vals_of};
 use crate::iter_core::{Decode, Decoders};
 #[cfg(verus_keep_ghost)]
 use crate::prefix_core::{lemma_vsum_cat, lemma_vsum_run, reps, vsum};
-use crate::prefix_core::{p_slab_sum, PrefixOps, PrefixWeight};
+use crate::prefix_core::{p_slab_sum, PrefixOps, PrefixOpsNu, PrefixWeight};
 #[cfg(verus_keep_ghost)]
 use crate::prefix_search::nsum;
 use crate::prefix_search::PrefixOrd;
@@ -634,6 +634,17 @@ impl<'a, V: PrefixValue> PrefixOps<Get<'a, V>> for SumOf<V> {
 
 }
 
+impl<'a, V: PrefixValue> PrefixOpsNu<Get<'a, V>> for SumOf<V> {
+    #[inline(always)]
+    fn acc_nu(t: &mut V::Sum, v: Get<'a, V>) {
+        let p = V::to_part(v);
+        proof {
+            V::Sum::lemma_as_int(p);
+        }
+        *t = (*t).w_add(p);
+    }
+}
+
 /// The sum the shared proofs speak of is the sum of the values,
 /// wrapped.
 pub(crate) proof fn lemma_vsum<'a, V: PrefixValue>(vs: Seq<Get<'a, V>>)
@@ -1212,6 +1223,7 @@ impl<'a, V: PrefixValue + ColumnValueRef<C>, C: Codec> LoadWeigh<'a, V::E, V::X,
 pub(super) fn vsum_zero_i128() -> (r: i128)
     ensures
         r == <i128 as Sum>::of_int(0),
+    no_unwind
 {
     proof {
         lemma_wrap(0, 0, u128::MAX + 1);
@@ -1223,6 +1235,7 @@ pub(super) fn vsum_zero_i128() -> (r: i128)
 pub(super) fn vsum_w_add_i128(this: i128, b: i128) -> (r: i128)
     ensures
         r == <i128 as Sum>::of_int(<i128 as Sum>::as_int(this) + b.as_int()),
+    no_unwind
 {
     proof {
         lemma_wrap(this + b, 0, u128::MAX + 1);
@@ -1267,6 +1280,7 @@ pub(super) proof fn vamount_lemma_room_i64()
 pub(super) fn vamount_part_of_nonzerou32(v: NonZeroU32) -> (r: u64)
     ensures
         r.as_int() == <NonZeroU32 as Amount>::amount_of(v),
+    no_unwind
 {
     broadcast use vstd::std_specs::nonzero::group_nonzero_axioms;
 
@@ -1288,6 +1302,7 @@ pub(super) proof fn vsummed_lemma_amount_option_t<T: Amount>(v: Option<T>)
 pub(super) fn vsummed_to_part_option_t<T: Amount>(v: Option<T>) -> (r: <T as Amount>::Sum)
     ensures
         r.as_int() == <Option<T> as PrefixValue>::amount(v.sv()),
+    no_unwind
 {
     match v {
         Some(x) => T::part_of(x),
@@ -1305,6 +1320,7 @@ pub(super) fn vsummed_to_part_option_t<T: Amount>(v: Option<T>) -> (r: <T as Amo
 pub(super) fn vsummed_to_part_bool(v: bool) -> (r: usize)
     ensures
         r.as_int() == <bool as PrefixValue>::amount(v.sv()),
+    no_unwind
 {
     if v {
         1

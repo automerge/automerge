@@ -1110,6 +1110,7 @@ impl<D: Decode> ICore<D> {
                 None => old(self).out::<X>(slabs@).len() == 0 && final(self).out::<X>(slabs@).len() == 0
                     && final(self).pos == old(self).pos && final(self).items_left == 0,
             },
+        no_unwind
     {
         self.next_inline::<X>(slabs)
     }

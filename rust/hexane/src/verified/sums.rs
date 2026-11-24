@@ -121,6 +121,7 @@ pub trait Sum: Copy + Default + Debug + AddAssign + SubAssign + Add<Output = Sel
     fn zero() -> (r: Self)
         ensures
             r == Self::of_int(0),
+        no_unwind
     ;
 
     /// `self + b`, wrapping.
@@ -128,6 +129,7 @@ pub trait Sum: Copy + Default + Debug + AddAssign + SubAssign + Add<Output = Sel
     fn w_add(self, b: Self) -> (r: Self)
         ensures
             r == Self::of_int(self.as_int() + b.as_int()),
+        no_unwind
     ;
 
     /// `self - b`, wrapping.
@@ -323,10 +325,12 @@ pub trait Amount: RleValue {
             n == Self::room(),
     ;
 
-    /// What `v` adds, as a sum.
+    /// What `v` adds, as a sum. It does not unwind (`no_unwind`): a
+    /// prefix column's iterator adds it to its sum as it moves, in place.
     fn part_of(v: Self) -> (r: Self::Sum)
         ensures
             r.as_int() == Self::amount_of(v),
+        no_unwind
     ;
 }
 
@@ -522,6 +526,7 @@ pub trait PrefixValue: VSpec + for <'a>Form<'a> + seal::SummedSeal {
     fn to_part<'a>(v: Get<'a, Self>) -> (r: Self::Sum)
         ensures
             r.as_int() == Self::amount(v.sv()),
+        no_unwind
     ;
 }
 

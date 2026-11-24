@@ -119,6 +119,16 @@ pub(crate) trait PrefixOps<V: Copy> {
 
 }
 
+/// Sums whose addition does not unwind: a prefix column's (`SumOf`), not
+/// an accumulator column's, whose addition is its client's. Their
+/// readers can move in place (`p_next_nu`).
+pub(crate) trait PrefixOpsNu<V: Copy>: PrefixOps<V> {
+    /// [`acc`](PrefixOps::acc), which does not unwind.
+    fn acc_nu(t: &mut Self::P, v: V)
+        ensures *final(t) == Self::W::prefix_plus(*old(t), Self::contrib(v)),
+        no_unwind;
+}
+
 /// The sum of the contributions of values `vs`.
 pub(crate) open spec fn vsum<V: Copy, B: PrefixOps<V>>(vs: Seq<V>) -> B::P
     decreases vs.len(),
@@ -282,6 +292,60 @@ pub(crate) open spec fn index_ok<'a, X: Decoders<'a>, B: PrefixOps<<X::D as Deco
         Some(ix) => ix.wf() && ix_ok::<X, B>(ix@, s),
         None => s.len() == 0,
     }
+}
+
+/// [`p_next`] of sums whose addition does not unwind, and which does
+/// not unwind either: an iterator whose type has an invariant can give
+/// it its reader and its total in place (Verus lets a call take fields
+/// of such a value mutably only if the call does not unwind), where
+/// `p_next` needs them copied out and written back.
+#[inline(always)]
+#[allow(unused_variables)] // `base` is for the spec
+pub(crate) fn p_next_nu<'a, X: Decoders<'a>, B: PrefixOpsNu<<X::D as Decode>::Item>>(
+    core: &mut ICore<X::D>,
+    slabs: &'a [Slab<X::Tail>],
+    total: &mut B::P,
+    base: Ghost<B::P>,
+) -> (r: Option<<X::D as Decode>::Item>)
+    requires
+        at_sum::<X, B>(*old(core), *old(total), base@, slabs@),
+    ensures
+        at_sum::<X, B>(*final(core), *final(total), base@, slabs@),
+        match r {
+            Some(v) => {
+                &&& old(core).out::<X>(slabs@).len() > 0
+                &&& v == old(core).out::<X>(slabs@)[0]
+                &&& final(core).out::<X>(slabs@) == old(core).out::<X>(slabs@).skip(1)
+                &&& final(core).pos == old(core).pos + 1
+                &&& final(core).items_left == old(core).items_left - 1
+                &&& *final(total) == B::W::prefix_plus(*old(total), B::contrib(v))
+            },
+            None => {
+                &&& old(core).out::<X>(slabs@).len() == 0
+                &&& final(core).out::<X>(slabs@).len() == 0
+                &&& final(core).pos == old(core).pos
+                &&& final(core).items_left == 0
+                &&& *final(total) == *old(total)
+            },
+        },
+    no_unwind
+{
+    let ghost c0 = *core;
+    let ghost t0 = *total;
+    let ghost base = base@;
+    let r = core.next::<X>(slabs);
+    if let Some(v) = r {
+        B::acc_nu(total, v);
+        proof {
+            assert(c0.out::<X>(slabs@).take(1) =~= Seq::new(1, |_i: int| v));
+            lemma_take::<X, B>(c0, slabs@, 1, v);
+            assert(reps::<B::W>(1, B::contrib(v)) == B::W::prefix_plus(reps::<B::W>(0, B::contrib(v)), B::contrib(v)));
+            assert(reps::<B::W>(0, B::contrib(v)) == B::W::prefix_zero());
+            B::W::lemma_prefix_add(B::contrib(v), B::contrib(v), B::contrib(v));
+            B::W::lemma_prefix_add(base, t0, B::contrib(v));
+        }
+    }
+    r
 }
 
 /// `next`, adding the value to the running total.

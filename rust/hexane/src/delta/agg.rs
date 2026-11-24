@@ -772,6 +772,7 @@ pub(crate) trait DeltaOps<V: Copy> {
     fn to_opt(v: V) -> (r: Option<i64>)
         ensures
             r == Self::dv(v),
+        no_unwind
     ;
 }
 

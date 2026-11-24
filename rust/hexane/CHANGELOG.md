@@ -46,6 +46,11 @@ client:
   panics. So, for now, does a load of an empty column with a fill
   (`LoadOpts::with_fill`) whose sums would not fit: it returned an error.
   A fill of a value that adds nothing (`false`, `None`, `0`) never does.
+  Where a column cannot know its sums fit (it has more values than
+  `Amount::room_len`), an edit reads all of them to check: choose a sum
+  type with room for as many values as a column can hold where you can.
+  `Amount::part_of` must not unwind (`no_unwind`, which Verus proves of
+  a client checked by it).
 * An iterator names the kind of index of its column: `Iter<'a, V, C, K>`,
   with `K` the default `LenIndex` for a plain column and `SumIndex` for a
   prefix column's values. The kinds derive `Clone`, `Copy`, `Debug` and

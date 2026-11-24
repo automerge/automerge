@@ -344,6 +344,9 @@ pub(crate) fn d_next<'a, X: Decoders<'a>, B: DeltaOps<<X::D as Decode>::Item>>(
                 &&& final(core).items_left == 0
             },
         },
+    // so that an iterator whose type has an invariant can give it its
+    // reader and running sum in place
+    no_unwind
 {
     let ghost c0 = *core;
     let ghost p = psum(dbefore::<X, B>(slabs@, c0.pos as int));

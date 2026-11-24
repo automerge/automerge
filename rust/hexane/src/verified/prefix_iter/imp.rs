@@ -33,7 +33,7 @@ use crate::iter_core::{past, vals_of, window};
 use crate::iter_core::{Decoders, ICore};
 #[cfg(verus_keep_ghost)]
 use crate::prefix_core::{at_sum, before, index_ok, vsum, PrefixWeight};
-use crate::prefix_core::{p_delta_nth, p_next, p_next_run_from, p_nth, p_reset};
+use crate::prefix_core::{p_delta_nth, p_next_nu, p_next_run_from, p_nth, p_reset};
 use crate::prefix_search::p_advance;
 #[cfg(verus_keep_ghost)]
 use crate::prefix_search::{nsum, PrefixOrd};
@@ -957,20 +957,19 @@ impl<'a, V: PrefixValue + ColumnValueRef<C>, C: Codec> PrefixIter<'a, V, C> {
         let ghost me = *self;
         proof {
             use_type_invariant(&*self);
+            use_type_invariant(&self.inner);
             me.lemma_sums();
             me.inner.it.lemma_out_len::<V::X>(me.inner.slabs@);
         }
-        let mut it = self.inner.it.dup();
-        let mut sum = self.total;
-        let base = self.base;
-        let r = p_next::<V::X, SumOf<V>>(&mut it, self.inner.slabs, &mut sum, &base);
-        self.put(it, sum, base, self.base_at);
+        // the reader and the sum move in place, together: a copy of the
+        // reader, written back, costs a hot loop a third of its time
+        let r = p_next_nu::<V::X, SumOf<V>>(&mut self.inner.it, self.inner.slabs, &mut self.total, Ghost(self.base));
         proof {
             use_type_invariant(&*self);
         }
         match r {
             Some(value) => {
-                let pv = PrefixedValue { value, total: sum };
+                let pv = PrefixedValue { value, total: self.total };
                 proof {
                     me.lemma_moved(*self, 1);
                     me.lemma_gives(0, pv);

@@ -1168,12 +1168,8 @@ impl<'a, T: DeltaValue<C>, C: Codec> DeltaIter<'a, T, C> {
             me.lemma_window();
             me.it.lemma_out_window::<DX<T, C>>(me.slabs@);
         }
-        // the reader and the sum move together, and are written back
-        // together
-        let mut it = self.it.dup();
-        let mut running = self.running;
-        let r = d_next::<DX<T, C>, DB<T, C>>(&mut it, self.slabs, &mut running);
-        *self = DeltaIter { it, slabs: self.slabs, running, ix: self.ix, col: self.col };
+        // the reader and the sum move in place, together
+        let r = d_next::<DX<T, C>, DB<T, C>>(&mut self.it, self.slabs, &mut self.running);
         proof {
             self.lemma_window();
         }
