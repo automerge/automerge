@@ -82,7 +82,9 @@ impl<'a> MapDiffItem<'a> {
             Diff::Same => {
                 if self.inc != 0 {
                     log.increment_map(obj, self.key, self.inc, self.id);
-                } else if self.conflict {
+                }
+                // Conflict metadata can change alongside the counter value.
+                if self.conflict {
                     log.flag_conflict_map(obj, self.key);
                 }
             }
