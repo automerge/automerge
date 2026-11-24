@@ -2,16 +2,16 @@
 //!
 //! The tests of the verified API once ran the old API's columns beside
 //! the verified ones and checked that both did the same: wrote the same
-//! bytes, loaded the same values, refused the same bytes. Each such check
-//! is an [`agree`] of what the verified API did and what the old API did.
-//! While the old API was there, `agree` checked the two were equal, and a
-//! run of the tests built with `HEXANE_GOLDEN_RECORD` set printed, for each
-//! test, a digest of everything the verified side gave to `agree`. Those
-//! digests are `verified_api.txt`. Now that the old API is gone, [`note`]
-//! takes the place of `agree`: it adds what the verified side gave to the
-//! test's digest, and at the end of the test the digest is checked
-//! against the one recorded. So each test still checks that the verified
-//! API does what the old API did, in every case the test makes.
+//! bytes, loaded the same values, refused the same bytes. While the old
+//! API existed, each such check compared what the verified API did with
+//! what the old API did, and a run of the tests built with
+//! `HEXANE_GOLDEN_RECORD` set printed, for each test, a digest of
+//! everything the verified side gave to those checks. Those digests are
+//! `verified_api.txt`, and they now stand in for the old API: each check
+//! is now a [`note`] of what the verified side gives, which adds it to the
+//! test's digest, and at the end of the test the digest is checked against
+//! the one recorded. So each test still checks that the verified API does
+//! what the old API did, in every case the test makes.
 //!
 //! A digest is kept per test and per pointer width (the tests take other
 //! paths on 32-bit targets). A test with no recorded digest, written
@@ -118,14 +118,6 @@ fn stripped<T: Debug + ?Sized>(x: &T, f: &mut dyn FnMut(&[u8])) {
     (w.f)(&WORD[..w.matched]);
 }
 
-/// That the verified API gave `new` where the old API gave `old`: they are
-/// equal, and `new` is added to the test's digest.
-#[track_caller]
-pub fn agree<T: Debug + PartialEq<U> + ?Sized, U: Debug + ?Sized>(new: &T, old: &U) {
-    assert_eq!(new, old);
-    note(new);
-}
-
 fn width() -> u32 {
     usize::BITS
 }
@@ -151,16 +143,4 @@ impl Drop for Test {
             );
         }
     }
-}
-
-/// [`agree`], with the words of `assert_eq!` should the two differ.
-macro_rules! agree {
-    ($new:expr, $old:expr $(,)?) => {
-        $crate::golden::agree(&$new, &$old)
-    };
-    ($new:expr, $old:expr, $($arg:tt)+) => {{
-        let (new, old) = (&$new, &$old);
-        assert_eq!(new, old, $($arg)+);
-        $crate::golden::note(new);
-    }};
 }
