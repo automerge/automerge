@@ -267,7 +267,9 @@ impl<'a> ListDiffItem<'a> {
             Diff::Same => {
                 if inc != 0 {
                     log.increment_seq(obj, index, inc, id);
-                } else if conflict {
+                }
+                // Conflict metadata can change alongside the counter value.
+                if conflict {
                     log.flag_conflict_seq(obj, index);
                 }
             }
