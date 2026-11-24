@@ -12,6 +12,9 @@
 // `nth(0)` is here for what `nth` does, which is under test
 #![allow(clippy::iter_nth_zero)]
 
+#[macro_use]
+mod golden;
+
 use hexane::column::LenWeight;
 use hexane::delta::DeltaEncoderState;
 use hexane::encoder::{BoolEncoder, BoolEncoderState, RleEncoder, RleEncoderState};
@@ -750,20 +753,21 @@ fn check_with<T: Kind>(v: &VerifiedColumn<T>, c: &Column<T>, model: &[T], built:
     assert!(it.next().is_none());
     assert!(v.get(model.len()).is_none());
     assert!(v.get(usize::MAX).is_none());
-    assert_eq!(v.save(), c.save());
+    agree!(v.save(), c.save());
     // the same slabs, and so the same of what is printed: but for a cleared
     // column, which has no slab where `Column` keeps an empty one
     if model.is_empty() {
+        golden::note(&v.slab_count());
         assert!(v.slab_count() <= c.slab_count() && c.slab_count() <= 1);
     } else {
-        assert_eq!(v.slab_count(), c.slab_count());
+        agree!(v.slab_count(), c.slab_count());
         assert_eq!(format!("{v:?}"), format!("Verified{c:?}"));
     }
     check_layout(v, c, model, built);
     // saved after what a buffer holds: the same bytes, in the same place
     let (mut a, mut b) = (vec![9u8; 3], vec![9u8; 3]);
     let range = v.save_to(&mut a);
-    assert_eq!(range, c.save_to(&mut b));
+    agree!(range, c.save_to(&mut b));
     assert_eq!(a, b);
     assert_eq!(a[..3], [9, 9, 9]);
     assert_eq!(a[range], v.save()[..]);
@@ -787,8 +791,8 @@ fn check_layout<T: Kind>(v: &VerifiedColumn<T>, c: &Column<T>, model: &[T], buil
     if model.is_empty() {
         assert_eq!(segments.iter().sum::<usize>(), 0);
     } else {
-        assert_eq!(lens, c.slab_lens());
-        assert_eq!(segments, c.slab_segments());
+        agree!(lens, c.slab_lens());
+        agree!(segments, c.slab_segments());
         assert!(lens.iter().all(|&n| n > 0));
     }
     if built {
@@ -807,7 +811,7 @@ fn check_layout<T: Kind>(v: &VerifiedColumn<T>, c: &Column<T>, model: &[T], buil
 fn check_invariants_agree<T: Kind>(v: &VerifiedColumn<T>, c: &Column<T>) {
     let new = panic_of(std::panic::AssertUnwindSafe(|| v.check_invariants()));
     let old = panic_of(std::panic::AssertUnwindSafe(|| c.check_invariants()));
-    assert_eq!(new, old);
+    agree!(new, old);
 }
 
 #[cfg(not(panic = "unwind"))]
@@ -820,7 +824,7 @@ fn check_only<T: Kind>(v: &VerifiedColumn<T>, c: &Column<T>, model: &[T], x: &T)
     assert_eq!(c.is_only(x.as_column_ref()), only);
     let (mut a, mut b) = (vec![9u8; 3], vec![9u8; 3]);
     let range = v.save_to_unless(&mut a, x.lend());
-    assert_eq!(range, c.save_to_unless(&mut b, x.as_column_ref()));
+    agree!(range, c.save_to_unless(&mut b, x.as_column_ref()));
     assert_eq!(a, b);
     if only {
         assert_eq!((a, range), (vec![9u8; 3], 3..3));
@@ -832,7 +836,7 @@ fn check_only<T: Kind>(v: &VerifiedColumn<T>, c: &Column<T>, model: &[T], x: &T)
 /// Each API loads the bytes the other saved, as the same values.
 fn check_loads<T: Kind>(v: &VerifiedColumn<T>, c: &Column<T>, model: &[T]) {
     let bytes = v.save();
-    assert_eq!(bytes, c.save());
+    agree!(bytes, c.save());
     let v2 = VerifiedColumn::<T>::load(&c.save()).unwrap();
     let c2 = Column::<T>::load(&bytes).unwrap();
     assert_eq!(new_values(&v2), model);
@@ -871,7 +875,7 @@ fn check_clone<T: Kind>(v: &VerifiedColumn<T>, c: &Column<T>, model: &[T], salt:
     let v3 = v2.clone();
     drop(v2);
     assert_eq!(new_values(&v3), m2);
-    assert_eq!(v3.slab_count(), c2.slab_count());
+    agree!(v3.slab_count(), c2.slab_count());
 }
 
 /// A column of each API with the values `model`.
@@ -936,11 +940,13 @@ fn shapes<T: Kind>() {
 
 #[test]
 fn the_shapes_of_a_column() {
+    let _golden = golden::test(concat!(module_path!(), "::the_shapes_of_a_column"));
     for_each_kind!(shapes);
 }
 
 #[test]
 fn numbers_of_every_size() {
+    let _golden = golden::test(concat!(module_path!(), "::numbers_of_every_size"));
     let model: Vec<u64> = (0..5000u64)
         .map(|i| i.wrapping_mul(0x9e37_79b9_7f4a_7c15) >> (i % 64))
         .chain([0, 0, 1, 2, 2, 2, 3, u64::MAX, u64::MAX, 0])
@@ -960,7 +966,7 @@ fn empty<T: Kind>() {
     let v = VerifiedColumn::<T>::new();
     let d = VerifiedColumn::<T>::default();
     assert!(v.is_empty() && d.is_empty());
-    assert_eq!(v.save(), Column::<T>::new().save());
+    agree!(v.save(), Column::<T>::new().save());
     assert_eq!(v.save(), Vec::<u8>::new());
     assert!(VerifiedColumn::<T>::load(&[]).unwrap().is_empty());
     // a new column has no slab, in either API; one made of no values
@@ -981,6 +987,7 @@ fn empty<T: Kind>() {
 
 #[test]
 fn an_empty_column() {
+    let _golden = golden::test(concat!(module_path!(), "::an_empty_column"));
     for_each_kind!(empty);
 }
 
@@ -1021,6 +1028,7 @@ fn clones<T: Kind>() {
 
 #[test]
 fn a_clone_is_a_column_of_its_own() {
+    let _golden = golden::test(concat!(module_path!(), "::a_clone_is_a_column_of_its_own"));
     for_each_kind!(clones);
 }
 
@@ -1028,6 +1036,7 @@ fn a_clone_is_a_column_of_its_own() {
 /// it was cloned from.
 #[test]
 fn a_clone_owns_its_bytes() {
+    let _golden = golden::test(concat!(module_path!(), "::a_clone_owns_its_bytes"));
     let mut v = VerifiedColumn::<Vec<u8>>::new();
     v.push(b"one");
     v.push(b"two");
@@ -1044,6 +1053,7 @@ fn a_clone_owns_its_bytes() {
 /// them drifting.
 #[test]
 fn the_bytes_of_a_column() {
+    let _golden = golden::test(concat!(module_path!(), "::the_bytes_of_a_column"));
     fn bytes<T: Kind>(model: &[T]) -> Vec<u8> {
         let (v, c) = both(model);
         check(&v, &c, model);
@@ -1110,6 +1120,7 @@ fn the_bytes_of_a_column() {
 /// lives as long as the column is not changed, across other reads.
 #[test]
 fn byte_strings_are_lent() {
+    let _golden = golden::test(concat!(module_path!(), "::byte_strings_are_lent"));
     let mut v = VerifiedColumn::<Vec<u8>>::new();
     v.splice(0, 0, &[b"one", b"two", b"two"]);
     v.push(b"three");
@@ -1210,7 +1221,7 @@ fn edits<T: Kind>() {
                 if !model.is_empty() {
                     let i = rng.below(model.len());
                     assert_eq!(v.get(i).map(T::keep).as_ref(), Some(&model[i]));
-                    assert_eq!(v.get(i).map(T::keep), c.get(i).map(old));
+                    agree!(v.get(i).map(T::keep), c.get(i).map(old));
                 }
                 let start = rng.below(model.len() + 1);
                 let end = start + rng.below(model.len() - start + 1);
@@ -1231,6 +1242,7 @@ fn edits<T: Kind>() {
 
 #[test]
 fn edits_agree() {
+    let _golden = golden::test(concat!(module_path!(), "::edits_agree"));
     for_each_kind!(edits);
 }
 
@@ -1352,6 +1364,7 @@ fn other_forms<T: Kind>() {
 
 #[test]
 fn the_other_forms_agree() {
+    let _golden = golden::test(concat!(module_path!(), "::the_other_forms_agree"));
     for_each_kind!(other_forms);
 }
 
@@ -1400,6 +1413,7 @@ fn fills<T: Kind>() {
 
 #[test]
 fn a_column_filled_with_one_value() {
+    let _golden = golden::test(concat!(module_path!(), "::a_column_filled_with_one_value"));
     for_each_kind!(fills);
 }
 
@@ -1425,6 +1439,7 @@ fn panic_of<R>(f: impl FnOnce() -> R + std::panic::UnwindSafe) -> Option<String>
 #[cfg(target_pointer_width = "64")]
 #[test]
 fn the_longest_runs() {
+    let _golden = golden::test(concat!(module_path!(), "::the_longest_runs"));
     let most = i64::MAX as usize;
     let v = VerifiedColumn::<u64>::fill(most, 7);
     let c = Column::<u64>::fill(most, 7);
@@ -1432,12 +1447,12 @@ fn the_longest_runs() {
         (v.len(), v.get(most - 1), v.get(most)),
         (most, Some(7), None)
     );
-    assert_eq!(v.save(), c.save());
+    agree!(v.save(), c.save());
     assert!(v.is_only(7) && !v.is_only(8));
     let back = VerifiedColumn::<u64>::load(&v.save()).unwrap();
     assert_eq!((back.len(), back.get(most - 1)), (most, Some(7)));
     let nulls = VerifiedColumn::<Option<Vec<u8>>>::fill(most, None);
-    assert_eq!(
+    agree!(
         nulls.save(),
         Column::<Option<Vec<u8>>>::fill(most, None).save()
     );
@@ -1461,7 +1476,7 @@ fn the_longest_runs() {
             }
             (c.len(), c.save())
         });
-        assert_eq!(new, old);
+        agree!(new, old);
         new
     };
     assert_eq!(by_run(most, None), None);
@@ -1489,7 +1504,7 @@ fn the_longest_runs() {
             }
             (c.len(), c.get(count - 1), c.save())
         });
-        assert_eq!(new, old);
+        agree!(new, old);
         new
     };
     assert_eq!(bools(most + 1, Some(true)), None);
@@ -1502,6 +1517,10 @@ fn the_longest_runs() {
 /// An iterator is asked for no value after it has said that it has none.
 #[test]
 fn an_iterator_is_run_to_its_end_once() {
+    let _golden = golden::test(concat!(
+        module_path!(),
+        "::an_iterator_is_run_to_its_end_once"
+    ));
     let items = [3u64, 3, 4];
     let feed = |asked: &mut usize| {
         let at = *asked;
@@ -1628,6 +1647,7 @@ fn one_value_in_many_slabs<T: Kind>() {
 
 #[test]
 fn a_column_of_one_value() {
+    let _golden = golden::test(concat!(module_path!(), "::a_column_of_one_value"));
     for_each_kind!(one_value);
     for_each_kind!(one_value_in_many_slabs);
 }
@@ -1652,7 +1672,7 @@ fn check_scope<T: Kind>(
         start <= r.start && r.start <= r.end && r.end <= end,
         "{r:?} of {start}..{end}"
     );
-    assert_eq!(r, x.old_scope(c, start..end), "{x:?} in {start}..{end}");
+    agree!(r, x.old_scope(c, start..end), "{x:?} in {start}..{end}");
     let sides: Vec<Ordering> = model[start..end].iter().map(|m| m.order(x)).collect();
     let in_order = sides.windows(2).all(|w| w[0] <= w[1]);
     if in_order {
@@ -1779,6 +1799,7 @@ fn scopes<T: Kind>() {
 
 #[test]
 fn a_search_of_values_in_order() {
+    let _golden = golden::test(concat!(module_path!(), "::a_search_of_values_in_order"));
     for_each_kind!(scopes);
 }
 
@@ -1817,6 +1838,7 @@ fn scopes_out_of_order<T: Kind>() {
 
 #[test]
 fn a_search_of_values_in_no_order() {
+    let _golden = golden::test(concat!(module_path!(), "::a_search_of_values_in_no_order"));
     for_each_kind!(scopes_out_of_order);
 }
 
@@ -1825,6 +1847,7 @@ fn a_search_of_values_in_no_order() {
 /// for strings that are long and differ late, or only in their lengths.
 #[test]
 fn a_search_of_long_byte_strings() {
+    let _golden = golden::test(concat!(module_path!(), "::a_search_of_long_byte_strings"));
     let stem: Vec<u8> = (0..400u32).map(|i| (i * 7 % 251) as u8).collect();
     let mut strings: Vec<Vec<u8>> = vec![vec![], vec![0], vec![0, 0], vec![1], vec![255]];
     for cut in [
@@ -1891,6 +1914,10 @@ fn a_search_of_long_byte_strings() {
 /// long the two are.
 #[test]
 fn the_order_of_byte_strings_is_the_order_of_slices() {
+    let _golden = golden::test(concat!(
+        module_path!(),
+        "::the_order_of_byte_strings_is_the_order_of_slices"
+    ));
     fn check(a: &[u8], b: &[u8]) {
         assert_eq!(<Vec<u8> as VValue>::compare(a, b), a.cmp(b), "{a:?} {b:?}");
         assert_eq!(<Vec<u8> as VValue>::compare(b, a), b.cmp(a), "{b:?} {a:?}");
@@ -1952,6 +1979,10 @@ fn the_order_of_byte_strings_is_the_order_of_slices() {
 /// as, whatever order the type has in Rust: here the two are opposite.
 #[test]
 fn a_search_is_in_the_order_of_the_stored_numbers() {
+    let _golden = golden::test(concat!(
+        module_path!(),
+        "::a_search_is_in_the_order_of_the_stored_numbers"
+    ));
     #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
     enum Rank {
         High,
@@ -2154,6 +2185,10 @@ fn remaps<T: Kind>() {
 
 #[test]
 fn a_remap_gives_each_run_what_the_function_gave() {
+    let _golden = golden::test(concat!(
+        module_path!(),
+        "::a_remap_gives_each_run_what_the_function_gave"
+    ));
     for_each_kind!(remaps);
 }
 
@@ -2161,6 +2196,7 @@ fn a_remap_gives_each_run_what_the_function_gave() {
 /// function is not called.
 #[test]
 fn a_remap_of_no_values() {
+    let _golden = golden::test(concat!(module_path!(), "::a_remap_of_no_values"));
     fn none<T: Kind>() {
         let mut rng = Rng(0x0e3a);
         let (mut v, mut c) = both(&rng.values::<T>(200));
@@ -2186,6 +2222,7 @@ fn a_remap_of_no_values() {
 /// and what it hands back is copied into the column.
 #[test]
 fn a_remap_of_byte_strings() {
+    let _golden = golden::test(concat!(module_path!(), "::a_remap_of_byte_strings"));
     let mut rng = Rng(0xb3a9);
     let model: Vec<Vec<u8>> = (0..2000)
         .map(|i| vec![(i / 3 % 251) as u8; rng.below(40)])
@@ -2229,6 +2266,7 @@ fn a_remap_of_byte_strings() {
 #[cfg(any(target_pointer_width = "64", panic = "unwind"))]
 #[test]
 fn a_remap_whose_function_panics() {
+    let _golden = golden::test(concat!(module_path!(), "::a_remap_whose_function_panics"));
     fn stopped<T: Kind>() {
         let mut rng = Rng(0x9a1c);
         let model: Vec<T> = rng.values(1200);
@@ -2276,7 +2314,7 @@ fn check_iters<T: Kind>(
     let same = |x: &VerifiedIter<'_, T>, y: &hexane::Iter<'_, T>, left: usize| {
         assert_eq!((x.len(), y.len()), (left, left));
         assert_eq!(x.size_hint(), (left, Some(left)));
-        assert_eq!(format!("{x:?}"), format!("Verified{y:?}"));
+        agree!(format!("{x:?}"), format!("Verified{y:?}"));
     };
 
     // one value at a time, and nothing after the last
@@ -2469,6 +2507,10 @@ fn iterators<T: Kind>() {
 
 #[test]
 fn an_iterator_reads_as_the_standard_library_has_it() {
+    let _golden = golden::test(concat!(
+        module_path!(),
+        "::an_iterator_reads_as_the_standard_library_has_it"
+    ));
     for_each_kind!(iterators);
 }
 
@@ -2476,6 +2518,7 @@ fn an_iterator_reads_as_the_standard_library_has_it() {
 /// (An iterator borrows its column, so none lives through an edit.)
 #[test]
 fn an_iterator_after_edits() {
+    let _golden = golden::test(concat!(module_path!(), "::an_iterator_after_edits"));
     fn edited<T: Kind>() {
         let mut rng = Rng(0xed17);
         for budget in [2, 5, 64] {
@@ -2514,11 +2557,12 @@ fn an_iterator_after_edits() {
 /// give, however it is asked.
 #[test]
 fn an_iterator_of_no_column() {
+    let _golden = golden::test(concat!(module_path!(), "::an_iterator_of_no_column"));
     fn none<T: Kind>() {
         let mut it = VerifiedIter::<T>::default();
         assert_eq!(format!("{it:?}"), "VerifiedIter { pos: 0, items_left: 0 }");
         let old_it = hexane::Iter::<T>::default();
-        assert_eq!(format!("{it:?}"), format!("Verified{old_it:?}"));
+        agree!(format!("{it:?}"), format!("Verified{old_it:?}"));
         for _ in 0..2 {
             assert_eq!((it.len(), it.size_hint()), (0, (0, Some(0))));
             assert!(it.next().is_none());
@@ -2537,10 +2581,12 @@ fn an_iterator_of_no_column() {
 /// the same place, and count the same number left. And they stand in the
 /// same slab, where their columns lie in the same slabs (`slabs`).
 fn stand<T: Kind>(x: &VerifiedIter<'_, T>, y: &hexane::Iter<'_, T>, slabs: bool) {
-    assert_eq!((x.pos(), x.end_pos()), (y.pos(), y.end_pos()));
-    assert!(!slabs || x.get_slab() == y.get_slab());
-    assert_eq!((x.len(), x.size_hint()), (y.len(), y.size_hint()));
-    assert_eq!(format!("{x:?}"), format!("Verified{y:?}"));
+    agree!((x.pos(), x.end_pos()), (y.pos(), y.end_pos()));
+    if slabs {
+        agree!(x.get_slab(), y.get_slab());
+    }
+    agree!((x.len(), x.size_hint()), (y.len(), y.size_hint()));
+    agree!(format!("{x:?}"), format!("Verified{y:?}"));
 }
 
 /// The values of `model` in the window `a..b`, as the specifications
@@ -2599,7 +2645,7 @@ fn check_pause<'a, T: Kind>(
     assert_eq!(x2.pos(), x.pos());
     assert!(x2.end_pos() == x.end_pos() || (x.pos() == v.len() && x2.end_pos() == x.pos()));
     assert_eq!(rest_of(&x2), rest_of(x));
-    assert_eq!(rest_of(&x2), y2.clone().map(old).collect::<Vec<T>>());
+    agree!(rest_of(&x2), y2.clone().map(old).collect::<Vec<T>>());
     let again = s.try_resume(v).unwrap();
     assert_eq!((again.pos(), again.end_pos()), (x2.pos(), x2.end_pos()));
     (x2, y2)
@@ -2635,6 +2681,9 @@ fn check_moves<T: Kind>(
     // emptied by `clear` has no slab where a `Column` has an empty one
     let slabs = v.slab_lens() == c.slab_lens();
     assert!(slabs || (n == 0 && v.slab_count() == 0));
+    if v.slab_count() > 0 {
+        agree!(v.slab_lens(), c.slab_lens());
+    }
     let left = |x: &VerifiedIter<'_, T>| x.clone().map(T::keep).collect::<Vec<T>>();
     // a place: most often a little ahead of `from`
     let place = |rng: &mut Rng, from: usize| match rng.below(14) {
@@ -2662,11 +2711,11 @@ fn check_moves<T: Kind>(
         // with nothing left, the iterator stands at the end of all it gave
         let spent = (p + had.len(), p + had.len());
         assert_eq!(had, window(model, p, e));
-        assert_eq!(had, y.clone().map(old).collect::<Vec<T>>());
+        agree!(had, y.clone().map(old).collect::<Vec<T>>());
         match rng.below(12) {
             0 => {
                 let r = x.next().map(T::keep);
-                assert_eq!(r, y.next().map(old));
+                agree!(r, y.next().map(old));
                 assert_eq!(r.as_ref(), had.first());
                 match r {
                     Some(_) => assert_eq!((x.pos(), x.end_pos()), (p + 1, e)),
@@ -2681,7 +2730,7 @@ fn check_moves<T: Kind>(
                     _ => rng.below(had.len().min(60) + 1),
                 };
                 let r = x.nth(k).map(T::keep);
-                assert_eq!(r, y.nth(k).map(old));
+                agree!(r, y.nth(k).map(old));
                 assert_eq!(r.as_ref(), had.get(k));
                 if k < had.len() {
                     assert_eq!((x.pos(), x.end_pos()), (p + k + 1, e));
@@ -2749,7 +2798,7 @@ fn check_moves<T: Kind>(
                 let from = place(rng, p).max(p);
                 let to = place(rng, from);
                 let r = x.shift_next(from..to).map(T::keep);
-                assert_eq!(r, y.shift_next(from..to).map(old));
+                agree!(r, y.shift_next(from..to).map(old));
                 let w = window(model, from, to);
                 assert_eq!(r.as_ref(), w.first());
                 if w.is_empty() {
@@ -2763,7 +2812,7 @@ fn check_moves<T: Kind>(
             }
             _ => {
                 let r = x.next_run().map(|r| (r.count, T::keep(r.value)));
-                assert_eq!(r, y.next_run().map(|r| (r.count, old(r.value))));
+                agree!(r, y.next_run().map(|r| (r.count, old(r.value))));
                 match r {
                     // the first value left, as often as it stood at the
                     // front of what was left
@@ -2793,6 +2842,10 @@ fn check_moves<T: Kind>(
 /// does after every move and gives what the specifications say.
 #[test]
 fn an_iterator_moves_as_columns_does() {
+    let _golden = golden::test(concat!(
+        module_path!(),
+        "::an_iterator_moves_as_columns_does"
+    ));
     fn moves<T: Kind>() {
         let mut rng = Rng(0x30fe5);
         let (p, q) = (T::fresh(&mut rng), T::fresh(&mut rng));
@@ -2837,6 +2890,10 @@ fn an_iterator_moves_as_columns_does() {
 /// to, and it stays where it is with nothing to give.
 #[test]
 fn an_iterator_of_no_column_moves_nowhere() {
+    let _golden = golden::test(concat!(
+        module_path!(),
+        "::an_iterator_of_no_column_moves_nowhere"
+    ));
     fn none<T: Kind>() {
         let (mut x, mut y) = (VerifiedIter::<T>::default(), hexane::Iter::<T>::default());
         stand(&x, &y, true);
@@ -2909,6 +2966,7 @@ fn taken<T: Kind>(runs: VerifiedRuns<'_, T>) -> Vec<(usize, T)> {
 /// runs spliced into a column make the window's values.
 #[test]
 fn runs_as_columns_does() {
+    let _golden = golden::test(concat!(module_path!(), "::runs_as_columns_does"));
     fn runs<T: Kind>() {
         let mut rng = Rng(0x4b2);
         let (p, q) = (T::fresh(&mut rng), T::fresh(&mut rng));
@@ -2950,7 +3008,7 @@ fn runs_as_columns_does() {
                     let mut at = a;
                     loop {
                         let r = x.next_run().map(|r| (r.count, T::keep(r.value)));
-                        assert_eq!(r, y.next_run().map(|r| (r.count, old(r.value))));
+                        agree!(r, y.next_run().map(|r| (r.count, old(r.value))));
                         stand(&x, &y, slabs);
                         let Some(run) = r else {
                             assert_eq!((x.pos(), x.end_pos()), (at, at));
@@ -2967,7 +3025,7 @@ fn runs_as_columns_does() {
                     // the iterator of runs, and `Column`'s
                     let rs = v.iter_range(a, b).runs();
                     let old_rs = c.iter_range(a..b).runs();
-                    assert_eq!(
+                    agree!(
                         format!("{rs:?}"),
                         format!("Verified{old_rs:?}").replace("(Iter", "(VerifiedIter")
                     );
@@ -3054,7 +3112,7 @@ fn check_seek<T: Kind>(
     let had = &model[p..e];
     let r = it.seek_to_value(x.lend(), range.clone());
     let case = format!("{x:?} in {range:?} from {p} of {a}..{b}");
-    assert_eq!(r, x.old_seek(&mut old_it, range.clone()), "{case}");
+    agree!(r, x.old_seek(&mut old_it, range.clone()), "{case}");
     stand(&it, &old_it, slabs);
     // how far the iterator moves before it searches, and what it searches
     let skip = if range.start <= p {
@@ -3105,7 +3163,7 @@ fn check_scan<T: Kind>(
         let p = it.pos();
         let had = &model[p..b];
         let r = it.scan_to_value(x.lend());
-        assert_eq!(r, x.old_scan(&mut old_it), "{x:?} from {p} of {a}..{b}");
+        agree!(r, x.old_scan(&mut old_it), "{x:?} from {p} of {a}..{b}");
         stand(&it, &old_it, slabs);
         let Some(at) = r else {
             assert!(!had.contains(x), "{x:?} from {p} of {a}..{b}");
@@ -3166,6 +3224,7 @@ fn windows_into(rng: &mut Rng, n: usize, count: usize) -> Vec<(usize, usize, usi
 /// does, in values in any order.
 #[test]
 fn searches_as_columns_does() {
+    let _golden = golden::test(concat!(module_path!(), "::searches_as_columns_does"));
     fn seeks<T: Kind>() {
         let mut rng = Rng(0x4c);
         for n in [0, 1, 2, 3, 50, 400] {
@@ -3303,6 +3362,7 @@ fn searches_as_columns_does() {
 /// and for byte strings, which are lent.
 #[test]
 fn a_search_then_a_read() {
+    let _golden = golden::test(concat!(module_path!(), "::a_search_then_a_read"));
     // the numbers 0, 3, 6, ... each three times over, in many slabs
     let model: Vec<u64> = (0..600).map(|i| i / 3 * 3).collect();
     let (v, c) = both_with(&model, 3);
@@ -3364,6 +3424,7 @@ fn a_search_then_a_read() {
 /// holds no borrow of its column, which is read between the pages.
 #[test]
 fn a_column_read_in_pages() {
+    let _golden = golden::test(concat!(module_path!(), "::a_column_read_in_pages"));
     fn pages<T: Kind>() {
         let mut rng = Rng(0x9a6e5);
         for n in [0, 1, 50, 400] {
@@ -3516,6 +3577,7 @@ fn an_edit<T: Kind>(
 /// resumes no more.
 #[test]
 fn an_edit_ends_what_was_suspended() {
+    let _golden = golden::test(concat!(module_path!(), "::an_edit_ends_what_was_suspended"));
     fn ends<T: Kind>() {
         let mut rng = Rng(0x4d5e);
         let (mut ended, mut kept) = (0, 0);
@@ -3541,7 +3603,7 @@ fn an_edit_ends_what_was_suspended() {
                 (x.suspend(), y.suspend())
             };
             let first = resumed(&s, &v);
-            assert_eq!(first, old_resumed(&t, &c));
+            agree!(first, old_resumed(&t, &c));
             assert_eq!(first.as_ref().map(|r| r.0), Some(a + k));
             assert_eq!(
                 first.as_ref().map(|r| &r.2[..]),
@@ -3555,7 +3617,7 @@ fn an_edit_ends_what_was_suspended() {
             let slabs = v.slab_count();
             let changed = an_edit(&mut rng, which, &mut v, &mut c, &mut model);
             let (new, old) = (resumed(&s, &v), old_resumed(&t, &c));
-            assert_eq!(new, old, "after edit {which}");
+            agree!(new, old, "after edit {which}");
             if changed {
                 assert!(new.is_none(), "edit {which} at {slabs} slabs");
                 ended += (v.slab_count() == slabs) as usize;
@@ -3599,6 +3661,10 @@ fn an_edit_ends_what_was_suspended() {
 /// `clear`, and refuses its state as well.)
 #[test]
 fn a_cleared_column_refuses_what_was_suspended() {
+    let _golden = golden::test(concat!(
+        module_path!(),
+        "::a_cleared_column_refuses_what_was_suspended"
+    ));
     fn cleared<T: Kind>() {
         let mut rng = Rng(0xc1ea5);
         let mut one_slab = 0;
@@ -3663,6 +3729,7 @@ fn a_cleared_column_refuses_what_was_suspended() {
 /// neither.
 #[test]
 fn a_call_that_changes_no_value() {
+    let _golden = golden::test(concat!(module_path!(), "::a_call_that_changes_no_value"));
     fn quiet<T: Kind>() {
         let mut rng = Rng(0x9017e);
         let mut kept = [0usize; 10];
@@ -3697,7 +3764,7 @@ fn a_call_that_changes_no_value() {
             };
             let first = resumed(&s, &v);
             assert_eq!(first, Some((a + k, b, window(&model, a + k, b).to_vec())));
-            assert_eq!(first, old_resumed(&t, &c));
+            agree!(first, old_resumed(&t, &c));
             let at = rng.below(n + 1);
             let slabs = v.slab_count();
             let none = &model[..0];
@@ -3768,7 +3835,7 @@ fn a_call_that_changes_no_value() {
                 }
             }
             let (new, old) = (resumed(&s, &v), old_resumed(&t, &c));
-            assert_eq!(new, old, "after call {which} of {n} values");
+            agree!(new, old, "after call {which} of {n} values");
             if which < 8 {
                 let first_slab = slabs == 0 && v.slab_count() == 1;
                 assert!(v.slab_count() == slabs || first_slab);
@@ -3796,6 +3863,7 @@ fn a_call_that_changes_no_value() {
 /// stands in its column.
 #[test]
 fn a_state_on_another_column() {
+    let _golden = golden::test(concat!(module_path!(), "::a_state_on_another_column"));
     fn others<T: Kind>() {
         let mut rng = Rng(0x57a7e);
         let mut cols = Vec::new();
@@ -3845,11 +3913,13 @@ fn a_state_on_another_column() {
                 for (j, (vb, cb)) in cols.iter().enumerate() {
                     let (new, old) = (resumed(s, vb), old_resumed(t, cb));
                     if new == old {
+                        agree!(new, old);
                         on_another += (i != j && new.is_some()) as usize;
                         assert!(i != j || new.is_some());
                         continue;
                     }
                     // the one exception
+                    golden::note(&new);
                     let (p, e, rest) = old.unwrap();
                     assert!(new.is_none() && i != j);
                     assert!(p > vb.len() && p == n && e == p && rest.is_empty());
@@ -3869,6 +3939,10 @@ fn a_state_on_another_column() {
 /// a state is plain data, with no borrow in it.
 #[test]
 fn the_state_of_an_iterator_of_no_column() {
+    let _golden = golden::test(concat!(
+        module_path!(),
+        "::the_state_of_an_iterator_of_no_column"
+    ));
     fn plain<S: Send + Sync + 'static>() {}
     plain::<VerifiedIterState>();
 
@@ -3901,7 +3975,7 @@ fn the_state_of_an_iterator_of_no_column() {
         c.clear();
         seen.push((resumed(&s, &v), old_resumed(&t, &c), true));
         for (new, old, bare) in seen {
-            assert_eq!(new, old);
+            agree!(new, old);
             assert_eq!(new, bare.then(|| (0, 0, Vec::new())));
         }
     }
@@ -3913,6 +3987,10 @@ fn the_state_of_an_iterator_of_no_column() {
 /// it was.
 #[test]
 fn a_fold_calls_its_function_for_each_value() {
+    let _golden = golden::test(concat!(
+        module_path!(),
+        "::a_fold_calls_its_function_for_each_value"
+    ));
     let (v, _) = both_with(&[7u64, 7, 7, 8, 8, 9, 7, 7], 3);
     let calls = Cell::new(0);
     let sum = v.iter().fold(0, |s, x| {
@@ -3943,13 +4021,13 @@ fn check_same_load<T: Kind>(bytes: &[u8]) -> bool {
     match (v, c) {
         (Ok(v), Ok(c)) => {
             assert!(decodes, "no decoder of {bytes:?}, which load");
-            assert_eq!(v.len(), c.len());
+            agree!(v.len(), c.len());
             // a few bytes can be a run of billions: read those in places
             if v.len() <= 100_000 {
-                assert_eq!(new_values(&v), old_values(&c));
+                agree!(new_values(&v), old_values(&c));
             } else {
                 for i in [0, 1, v.len() / 2, v.len() - 1] {
-                    assert_eq!(v.get(i).map(T::keep), c.get(i).map(old));
+                    agree!(v.get(i).map(T::keep), c.get(i).map(old));
                 }
             }
             // what loads is canonical: it is what its values save to
@@ -3958,7 +4036,7 @@ fn check_same_load<T: Kind>(bytes: &[u8]) -> bool {
             true
         }
         (Err(v), Err(c)) => {
-            assert_eq!(
+            agree!(
                 v.to_string(),
                 c.to_string(),
                 "the loaders refuse {bytes:?} differently"
@@ -3981,6 +4059,7 @@ fn refusal<T: Kind>(bytes: &[u8]) -> String {
 
 #[test]
 fn loads_refuse_bad_runs() {
+    let _golden = golden::test(concat!(module_path!(), "::loads_refuse_bad_runs"));
     // a run of zero values; a run of one (a literal's place); two runs of
     // the same value; an overlong number; a truncated one; two literal
     // runs in a row; a run with no value
@@ -4024,6 +4103,10 @@ fn loads_refuse_bad_runs() {
 
 #[test]
 fn loads_refuse_what_the_type_has_no_value_for() {
+    let _golden = golden::test(concat!(
+        module_path!(),
+        "::loads_refuse_what_the_type_has_no_value_for"
+    ));
     // a null run in a column with no nulls
     let nulls = both::<Option<u64>>(&[Some(1), None, None, Some(1)])
         .0
@@ -4118,6 +4201,7 @@ fn loads_refuse_what_the_type_has_no_value_for() {
 /// counts must be there.
 #[test]
 fn loads_refuse_bad_byte_strings() {
+    let _golden = golden::test(concat!(module_path!(), "::loads_refuse_bad_byte_strings"));
     let bad_format = PackError::BadFormat.to_string();
     // a length past the data's end: in a run, in a literal run, in the
     // second value of one; as long as a length can be; of no bytes at all
@@ -4216,6 +4300,7 @@ fn fuzz_loads<T: Kind>() {
 
 #[test]
 fn loads_refuse_the_same_bytes() {
+    let _golden = golden::test(concat!(module_path!(), "::loads_refuse_the_same_bytes"));
     for_each_kind!(fuzz_loads);
 }
 
@@ -4223,6 +4308,7 @@ fn loads_refuse_the_same_bytes() {
 /// gives, which is the other type's reading of the numbers or a refusal.
 #[test]
 fn loads_of_another_types_bytes() {
+    let _golden = golden::test(concat!(module_path!(), "::loads_of_another_types_bytes"));
     fn cross<T: Kind>(bytes: &[u8]) {
         check_same_load::<T>(bytes);
     }
@@ -4272,6 +4358,7 @@ fn loads_of_another_types_bytes() {
 /// for is lent for the call alone. What a clone lends is the clone's.
 #[test]
 fn strings_are_lent() {
+    let _golden = golden::test(concat!(module_path!(), "::strings_are_lent"));
     let last = "größer: 日本語 🦀";
     let mut v = VerifiedColumn::<String>::new();
     v.splice(0, 0, &["ant", "bee", "bee"]);
@@ -4316,6 +4403,10 @@ fn strings_are_lent() {
 /// long the two are.
 #[test]
 fn the_order_of_strings_is_the_order_of_str() {
+    let _golden = golden::test(concat!(
+        module_path!(),
+        "::the_order_of_strings_is_the_order_of_str"
+    ));
     fn check(a: &str, b: &str) {
         assert_eq!(<String as VValue>::compare(a, b), a.cmp(b), "{a:?} {b:?}");
         assert_eq!(<String as VValue>::compare(b, a), b.cmp(a), "{b:?} {a:?}");
@@ -4388,6 +4479,7 @@ fn the_order_of_strings_is_the_order_of_str() {
 /// late, or only in their lengths, in characters of every length.
 #[test]
 fn a_search_of_long_strings() {
+    let _golden = golden::test(concat!(module_path!(), "::a_search_of_long_strings"));
     let mut rng = Rng(0x7e47);
     let stem: Vec<char> = (0..200).map(|_| a_char(&mut rng)).collect();
     let text = |cs: &[char]| cs.iter().collect::<String>();
@@ -4443,6 +4535,7 @@ fn a_search_of_long_strings() {
 /// hands back is copied into the column.
 #[test]
 fn a_remap_of_strings() {
+    let _golden = golden::test(concat!(module_path!(), "::a_remap_of_strings"));
     let mut rng = Rng(0x57b3);
     let letters = ['a', 'é', '語', '🦀', '\0'];
     let model: Vec<String> = (0..2000)
@@ -4479,6 +4572,7 @@ fn a_remap_of_strings() {
 /// load as byte strings.
 #[test]
 fn loads_refuse_bad_strings() {
+    let _golden = golden::test(concat!(module_path!(), "::loads_refuse_bad_strings"));
     let invalid = PackError::InvalidUtf8.to_string();
     let bad_format = PackError::BadFormat.to_string();
     assert_ne!(invalid, bad_format);
@@ -4606,13 +4700,13 @@ fn load_both_with<T: Kind>(
     };
     match (v, c) {
         (Ok(v), Ok(c)) => {
-            assert_eq!(v.len(), c.len());
-            assert_eq!(v.slab_count(), c.slab_count());
-            assert_eq!(v.save(), c.save());
+            agree!(v.len(), c.len());
+            agree!(v.slab_count(), c.slab_count());
+            agree!(v.save(), c.save());
             Ok((v, c))
         }
         (Err(v), Err(c)) => {
-            assert_eq!(
+            agree!(
                 v.to_string(),
                 c.to_string(),
                 "the loaders refuse {bytes:?} differently"
@@ -4696,6 +4790,7 @@ fn load_options<T: Kind>() {
 
 #[test]
 fn loads_with_options_agree() {
+    let _golden = golden::test(concat!(module_path!(), "::loads_with_options_agree"));
     for_each_kind!(load_options);
 }
 
@@ -4721,6 +4816,7 @@ fn load_fills<T: Kind>() {
 
 #[test]
 fn loads_of_a_fill_agree() {
+    let _golden = golden::test(concat!(module_path!(), "::loads_of_a_fill_agree"));
     for_each_kind!(load_fills);
 }
 
@@ -4731,6 +4827,7 @@ fn loads_of_a_fill_agree() {
 /// which would end this test binary.)
 #[test]
 fn a_fill_too_long_is_an_error() {
+    let _golden = golden::test(concat!(module_path!(), "::a_fill_too_long_is_an_error"));
     let most = (i64::MAX as u64).min((usize::MAX - 3) as u64) as usize;
     fn longest<T: Kind>(most: usize, x: T) {
         let (v, _) = load_both_with(&[], Some(most), Some(&x), None).unwrap();
@@ -4790,10 +4887,10 @@ fn fuzz_loads_with<T: Kind>() {
                 // a changed byte can make a run of billions: read those
                 // in places
                 if v.len() <= 100_000 {
-                    assert_eq!(new_values(&v), old_values(&c));
+                    agree!(new_values(&v), old_values(&c));
                 } else {
                     for i in [0, 1, v.len() / 2, v.len() - 1] {
-                        assert_eq!(v.get(i).map(T::keep), c.get(i).map(old));
+                        agree!(v.get(i).map(T::keep), c.get(i).map(old));
                     }
                 }
                 if let Some(n) = length {
@@ -4812,6 +4909,10 @@ fn fuzz_loads_with<T: Kind>() {
 
 #[test]
 fn loads_with_options_refuse_the_same_bytes() {
+    let _golden = golden::test(concat!(
+        module_path!(),
+        "::loads_with_options_refuse_the_same_bytes"
+    ));
     for_each_kind!(fuzz_loads_with);
 }
 
@@ -4820,6 +4921,7 @@ fn loads_with_options_refuse_the_same_bytes() {
 /// writes what it wrote before, the one method.
 #[test]
 fn a_fill_state_of_a_clients_own() {
+    let _golden = golden::test(concat!(module_path!(), "::a_fill_state_of_a_clients_own"));
     struct Seven;
     impl MaybeFill<u64> for Seven {
         fn fill_value(self) -> Option<u64> {
@@ -4841,6 +4943,10 @@ fn a_fill_state_of_a_clients_own() {
 /// proved. No `catch_unwind` here either, for wasm32.)
 #[test]
 fn bytes_of_too_many_values_are_an_error() {
+    let _golden = golden::test(concat!(
+        module_path!(),
+        "::bytes_of_too_many_values_are_an_error"
+    ));
     fn uleb(mut n: u128) -> Vec<u8> {
         let mut out = vec![];
         loop {
@@ -5016,7 +5122,7 @@ where
 {
     for (i, (v, c, model, built)) in layouts::<T>().iter().enumerate() {
         check_with(v, c, model, *built);
-        assert_eq!(v.slab_count(), c.slab_count());
+        agree!(v.slab_count(), c.slab_count());
         lines.push(format!("== {} {i}", std::any::type_name::<T>()));
         lines.extend(slab_lines(v, model));
     }
@@ -5049,6 +5155,9 @@ where
 fn dump_slabs_child() {
     if let Ok(api) = std::env::var(DUMP_API) {
         let old = api == "old";
+        // the digest of what the verified API's columns did, run as the
+        // child of `dump_slabs_prints_each_slab`
+        let _golden = (!old).then(|| golden::test(concat!(module_path!(), "::dump_slabs_child")));
         // the test harness has written the test's name on this line
         println!();
         for_each_kind!(dump_layouts, old);
@@ -5064,6 +5173,7 @@ fn dump_slabs_child() {
 #[cfg(not(target_family = "wasm"))]
 #[test]
 fn dump_slabs_prints_each_slab() {
+    let _golden = golden::test(concat!(module_path!(), "::dump_slabs_prints_each_slab"));
     let printed = |api: &str| -> Vec<String> {
         let out = std::process::Command::new(std::env::current_exe().unwrap())
             .args([
@@ -5080,8 +5190,12 @@ fn dump_slabs_prints_each_slab() {
             "{}",
             String::from_utf8_lossy(&out.stderr)
         );
-        String::from_utf8(out.stdout)
-            .unwrap()
+        let stdout = String::from_utf8(out.stdout).unwrap();
+        // the child's digest, when it is recorded
+        for line in stdout.lines().filter(|l| l.starts_with("golden ")) {
+            println!("{line}");
+        }
+        stdout
             .lines()
             .filter(|l| l.starts_with("== ") || l.starts_with("  slab["))
             .map(String::from)
@@ -5106,6 +5220,7 @@ fn dump_slabs_prints_each_slab() {
 /// columns of `layouts` pass every check.
 #[test]
 fn the_layout_of_a_column() {
+    let _golden = golden::test(concat!(module_path!(), "::the_layout_of_a_column"));
     let mut lines = vec![];
     for_each_kind!(layout_lines, &mut lines);
     assert!(lines.iter().any(|l| l.starts_with("  slab[7]")));
@@ -5122,6 +5237,10 @@ fn the_layout_of_a_column() {
 #[cfg(panic = "unwind")]
 #[test]
 fn check_invariants_takes_a_loaded_column_as_edited() {
+    let _golden = golden::test(concat!(
+        module_path!(),
+        "::check_invariants_takes_a_loaded_column_as_edited"
+    ));
     let model: Vec<u64> = (0..70).collect();
     let (v, c) = both(&model);
     assert_eq!(v.slab_segments(), [64, 6]);
@@ -5135,7 +5254,7 @@ fn check_invariants_takes_a_loaded_column_as_edited() {
         new,
         "slabs 1 and 2 (32 and 6 segments) should have been merged (min 16, max 64)"
     );
-    assert_eq!(new, old);
+    agree!(new, old);
     check_loaded(&v, &c, &model);
     // a column of the same values that is loaded in slabs of a size
     // that leaves the last one long enough passes
@@ -5170,6 +5289,10 @@ fn check_invariants_takes_a_loaded_column_as_edited() {
 /// edit was found to leave such.)
 #[test]
 fn neighbours_at_the_edge_of_a_merge() {
+    let _golden = golden::test(concat!(
+        module_path!(),
+        "::neighbours_at_the_edge_of_a_merge"
+    ));
     for (grow, after) in [(26, vec![64]), (27, vec![59, 6])] {
         let mut model: Vec<u64> = (0..70).collect();
         let (v, _) = both(&model);
@@ -5202,6 +5325,10 @@ fn neighbours_at_the_edge_of_a_merge() {
 #[cfg(target_pointer_width = "64")]
 #[test]
 fn the_layout_after_a_panic_in_an_edit() {
+    let _golden = golden::test(concat!(
+        module_path!(),
+        "::the_layout_after_a_panic_in_an_edit"
+    ));
     let most = i64::MAX as usize;
     let mut v = VerifiedColumn::<u64>::new();
     v.splice_runs(
@@ -5230,7 +5357,7 @@ fn the_layout_after_a_panic_in_an_edit() {
     let new = panic_of(std::panic::AssertUnwindSafe(|| v.push(7))).unwrap();
     let old = panic_of(std::panic::AssertUnwindSafe(|| c.push(7))).unwrap();
     assert!(new.contains("is not encodable"), "{new}");
-    assert_eq!(new, old);
+    agree!(new, old);
     assert_eq!((v.len(), c.len()), (0, 0));
     assert_eq!((v.slab_count(), c.slab_count()), (0, 0));
     assert_eq!((v.slab_lens(), v.slab_segments()), (vec![], vec![]));
@@ -5259,12 +5386,12 @@ fn the_layout_after_a_panic_in_an_edit() {
     let new = panic_of(std::panic::AssertUnwindSafe(|| s.try_resume(&v).is_ok())).unwrap();
     let old = panic_of(std::panic::AssertUnwindSafe(|| t.try_resume(&c).is_ok())).unwrap();
     assert!(new.contains("after a panic"), "{new}");
-    assert_eq!(new, old);
+    agree!(new, old);
     // and neither takes an edit any more
     let new = panic_of(std::panic::AssertUnwindSafe(|| v.push(7))).unwrap();
     let old = panic_of(std::panic::AssertUnwindSafe(|| c.push(7))).unwrap();
     assert!(new.contains("after a panic"), "{new}");
-    assert_eq!(new, old);
+    agree!(new, old);
 }
 
 // ── `VerifiedEncoder` ───────────────────────────────────────────────────
@@ -5423,7 +5550,7 @@ impl<'a, T: Kind> Encoders<'a, T> {
             format!("VerifiedEncoder {{ len: {} }}", self.len)
         );
         let bytes = self.new.save();
-        assert_eq!(bytes, self.old.save());
+        agree!(bytes, self.old.save());
         bytes
     }
 
@@ -5432,7 +5559,7 @@ impl<'a, T: Kind> Encoders<'a, T> {
     fn save_to(self, held: &[u8]) -> Vec<u8> {
         let (mut a, mut b) = (held.to_vec(), held.to_vec());
         let range = self.new.save_to(&mut a);
-        assert_eq!(range, self.old.save_to(&mut b));
+        agree!(range, self.old.save_to(&mut b));
         assert_eq!(a, b);
         assert_eq!(range, held.len()..a.len());
         assert_eq!(a[..held.len()], *held);
@@ -5446,8 +5573,8 @@ impl<'a, T: Kind> Encoders<'a, T> {
         let (mut a, mut b) = (held.to_vec(), held.to_vec());
         let range = self.new.save_to_unless(&mut a, x.lend());
         let old = self.old.save_to_unless(&mut b, x.as_column_ref());
-        assert_eq!(range, old);
-        assert_eq!(a, b);
+        agree!(range, old);
+        agree!(a, b);
         assert_eq!(range, held.len()..a.len());
         assert_eq!(a[..held.len()], *held);
         (!range.is_empty()).then(|| a.split_off(held.len()))
@@ -5464,7 +5591,7 @@ impl<'a, T: Kind> Encoders<'a, T> {
 fn check_encoders<T: Kind>(model: &[T], other: &T, rng: &mut Rng) {
     let (v, c) = both(model);
     let bytes = v.save();
-    assert_eq!(bytes, c.save());
+    agree!(bytes, c.save());
     for how in 0..7 {
         let salt = rng.next() | 1;
         let saved = Encoders::given(model, other, how, &mut Rng(salt)).save();
@@ -5522,6 +5649,7 @@ fn encoders<T: Kind>() {
 
 #[test]
 fn encoders_agree() {
+    let _golden = golden::test(concat!(module_path!(), "::encoders_agree"));
     for_each_kind!(encoders);
 }
 
@@ -5555,6 +5683,7 @@ fn literal_runs<T: Kind>() {
 
 #[test]
 fn encoders_agree_on_literal_runs() {
+    let _golden = golden::test(concat!(module_path!(), "::encoders_agree_on_literal_runs"));
     for_each_kind!(literal_runs);
 }
 
@@ -5565,8 +5694,8 @@ fn empty_encoders<T: Kind>() {
     let mut rng = Rng(0xe0);
     let x = T::fresh(&mut rng);
     let none = VerifiedColumn::<T>::new().save();
-    assert_eq!(none, Column::<T>::new().save());
-    assert_eq!(none, old_encoder::<T>().save());
+    agree!(none, Column::<T>::new().save());
+    agree!(none, old_encoder::<T>().save());
     assert_eq!(VerifiedEncoder::<T>::new().save(), none);
     assert_eq!(VerifiedEncoder::<T>::default().save(), none);
     let mut e = VerifiedEncoder::<T>::new();
@@ -5580,11 +5709,12 @@ fn empty_encoders<T: Kind>() {
     assert_eq!(out[1..], none[..]);
     let mut old = vec![5u8];
     assert_eq!(old_encoder::<T>().save_to(&mut old), 1..1 + none.len());
-    assert_eq!(old, out);
+    agree!(out, old);
 }
 
 #[test]
 fn encoders_of_nothing() {
+    let _golden = golden::test(concat!(module_path!(), "::encoders_of_nothing"));
     for_each_kind!(empty_encoders);
 }
 
@@ -5596,6 +5726,7 @@ fn encoders_of_nothing() {
 #[cfg(panic = "unwind")]
 #[test]
 fn encoders_count_to_the_end() {
+    let _golden = golden::test(concat!(module_path!(), "::encoders_count_to_the_end"));
     // each run fits the format's count on any target
     let half = usize::MAX / 2;
 
@@ -5624,7 +5755,7 @@ fn encoders_count_to_the_end() {
             }
             (e.len(), e.save())
         });
-        assert_eq!(new, old);
+        agree!(new, old);
         new
     };
     assert_eq!(numbers(half - 1, &[]), None);
@@ -5674,7 +5805,7 @@ fn encoders_count_to_the_end() {
             }
             (e.len(), e.save())
         });
-        assert_eq!(new, old);
+        agree!(new, old);
         new
     };
     assert_eq!(bools(half - 1, &[]), None);
@@ -5698,7 +5829,7 @@ fn encoders_count_to_the_end() {
             e.append_n(None, more);
             (e.len(), e.save())
         });
-        assert_eq!(new, old);
+        agree!(new, old);
         new
     };
     assert_eq!(nulls(half, half - 1), None);
@@ -5713,6 +5844,7 @@ fn encoders_count_to_the_end() {
 #[cfg(target_pointer_width = "64")]
 #[test]
 fn encoders_of_the_longest_runs() {
+    let _golden = golden::test(concat!(module_path!(), "::encoders_of_the_longest_runs"));
     let most = i64::MAX as usize;
     let run = |count: usize, then: Option<u64>| {
         let new = panic_of(move || {
@@ -5731,7 +5863,7 @@ fn encoders_of_the_longest_runs() {
             }
             (e.len(), e.save())
         });
-        assert_eq!(new, old);
+        agree!(new, old);
         new
     };
     assert_eq!(run(most, None), None);
@@ -5839,6 +5971,7 @@ fn budgeted<T: Kind>() {
 
 #[test]
 fn budgeted_encoders_agree() {
+    let _golden = golden::test(concat!(module_path!(), "::budgeted_encoders_agree"));
     for_each_kind!(budgeted);
 }
 
@@ -5880,6 +6013,7 @@ fn default_budget<T: Kind>() {
 
 #[test]
 fn default_budget_encoders_agree() {
+    let _golden = golden::test(concat!(module_path!(), "::default_budget_encoders_agree"));
     for_each_kind!(default_budget);
 }
 
@@ -5917,6 +6051,10 @@ fn equal_values_cut<T: Kind>() {
 
 #[test]
 fn budgeted_encoders_of_equal_values() {
+    let _golden = golden::test(concat!(
+        module_path!(),
+        "::budgeted_encoders_of_equal_values"
+    ));
     for_each_kind!(equal_values_cut);
 }
 
@@ -5928,6 +6066,10 @@ fn budgeted_encoders_of_equal_values() {
 #[cfg(panic = "unwind")]
 #[test]
 fn encoders_become_columns_to_the_end() {
+    let _golden = golden::test(concat!(
+        module_path!(),
+        "::encoders_become_columns_to_the_end"
+    ));
     // each run fits the format's count on any target
     let half = usize::MAX / 2;
 
@@ -5962,7 +6104,7 @@ fn encoders_become_columns_to_the_end() {
             let ends = [c.get(0), c.get(n - 1), c.get(n)].map(|x| x.map(self::old::<T>));
             (n, ends, c.save())
         });
-        assert_eq!(new, old, "{max:?}");
+        agree!(new, old, "{max:?}");
         new
     }
 
@@ -6011,7 +6153,7 @@ impl<'a, T: Kind> Encoders<'a, T> {
         };
         let seen = seen_new.into_inner();
         if let Some(old) = T::old_remap(self.old, &mut b, &g) {
-            assert_eq!(range, old);
+            agree!(range, old);
             assert_eq!(a, b);
             assert_eq!(seen, seen_old.into_inner());
         }
@@ -6043,7 +6185,7 @@ impl<'a, T: Kind> Encoders<'a, T> {
         };
         let seen = seen_new.into_inner();
         if let Some(old) = T::old_remap_unless(self.old, &mut b, x, &g) {
-            assert_eq!(range, old);
+            agree!(range, old);
             assert_eq!(a, b);
             assert_eq!(seen, seen_old.into_inner());
         }
@@ -6178,6 +6320,7 @@ fn remapping<T: Kind>() {
 
 #[test]
 fn remapping_encoders_agree() {
+    let _golden = golden::test(concat!(module_path!(), "::remapping_encoders_agree"));
     for_each_kind!(remapping);
 }
 
@@ -6222,6 +6365,7 @@ fn remapping_cut_runs<T: Kind>() {
 
 #[test]
 fn remapping_encoders_of_cut_runs() {
+    let _golden = golden::test(concat!(module_path!(), "::remapping_encoders_of_cut_runs"));
     for_each_kind!(remapping_cut_runs);
 }
 
@@ -6246,6 +6390,7 @@ fn remapping_nothing<T: Kind>() {
 
 #[test]
 fn remapping_encoders_of_nothing() {
+    let _golden = golden::test(concat!(module_path!(), "::remapping_encoders_of_nothing"));
     for_each_kind!(remapping_nothing);
 }
 
@@ -6301,6 +6446,10 @@ fn remapping_panics<T: Kind>() {
 #[cfg(panic = "unwind")]
 #[test]
 fn remapping_encoders_leave_the_buffer_at_a_panic() {
+    let _golden = golden::test(concat!(
+        module_path!(),
+        "::remapping_encoders_leave_the_buffer_at_a_panic"
+    ));
     for_each_kind!(remapping_panics);
 }
 
@@ -6604,7 +6753,7 @@ fn old_encode_to_unless<'a, T: Kind>(buf: &mut Vec<u8>, xs: &'a [T], x: &'a T) -
 fn check_streams<T: Kind>(model: &[T], other: &T, rng: &mut Rng) {
     let (v, c) = both(model);
     let bytes = v.save();
-    assert_eq!(bytes, c.save());
+    agree!(bytes, c.save());
     let holds = [vec![], vec![9u8; 3], bytes.clone()];
     for how in 0..7 {
         let held = &holds[rng.below(3)];
@@ -6613,7 +6762,7 @@ fn check_streams<T: Kind>(model: &[T], other: &T, rng: &mut Rng) {
     }
 
     let new = VerifiedEncoder::<T>::encode(model.iter().map(T::lend));
-    assert_eq!(new, old_encode(model));
+    agree!(new, old_encode(model));
     assert_eq!(new, bytes);
     assert_eq!(VerifiedEncoder::<T>::encode(lent(model)), bytes);
     assert_eq!(VerifiedEncoder::<T>::encode(v.iter()), bytes);
@@ -6621,7 +6770,7 @@ fn check_streams<T: Kind>(model: &[T], other: &T, rng: &mut Rng) {
     let held = &holds[rng.below(3)];
     let (mut a, mut b) = (held.clone(), held.clone());
     let range = VerifiedEncoder::<T>::encode_to(&mut a, model.iter().map(T::lend));
-    assert_eq!(range, old_encode_to(&mut b, model));
+    agree!(range, old_encode_to(&mut b, model));
     assert_eq!(a, b);
     assert_eq!(range, held.len()..a.len());
     assert_eq!(a[..held.len()], held[..]);
@@ -6638,7 +6787,7 @@ fn check_streams<T: Kind>(model: &[T], other: &T, rng: &mut Rng) {
         let (mut a, mut b) = (held.clone(), held.clone());
         let range =
             VerifiedEncoder::<T>::encode_to_unless(&mut a, model.iter().map(T::lend), x.lend());
-        assert_eq!(range, old_encode_to_unless(&mut b, model, x));
+        agree!(range, old_encode_to_unless(&mut b, model, x));
         assert_eq!(a, b);
         assert_eq!(range, held.len()..a.len());
         if model.iter().all(|y| y == x) {
@@ -6680,6 +6829,7 @@ fn streams<T: Kind>() {
 
 #[test]
 fn states_and_static_forms_agree() {
+    let _golden = golden::test(concat!(module_path!(), "::states_and_static_forms_agree"));
     for_each_kind!(streams);
 }
 
@@ -6710,6 +6860,7 @@ fn literal_streams<T: Kind>() {
 
 #[test]
 fn states_agree_on_literal_runs() {
+    let _golden = golden::test(concat!(module_path!(), "::states_agree_on_literal_runs"));
     for_each_kind!(literal_streams);
 }
 
@@ -6776,6 +6927,7 @@ fn empty_streams<T: Kind>() {
 
 #[test]
 fn states_of_nothing() {
+    let _golden = golden::test(concat!(module_path!(), "::states_of_nothing"));
     for_each_kind!(empty_streams);
 }
 
@@ -6785,6 +6937,7 @@ fn states_of_nothing() {
 /// What each wrote loads as its values.
 #[test]
 fn states_follow_one_another() {
+    let _golden = golden::test(concat!(module_path!(), "::states_follow_one_another"));
     let mut rng = Rng(0xf0110);
     for round in 0..60 {
         let ids: Vec<u64> = rng.values(300);
@@ -6845,6 +6998,7 @@ fn states_follow_one_another() {
 #[cfg(panic = "unwind")]
 #[test]
 fn states_count_to_the_end() {
+    let _golden = golden::test(concat!(module_path!(), "::states_count_to_the_end"));
     // each run fits the format's count on any target
     let half = usize::MAX / 2;
 
@@ -6879,7 +7033,7 @@ fn states_count_to_the_end() {
             s.finish(&mut buf);
             (len, buf)
         });
-        assert_eq!(new, old);
+        agree!(new, old);
         new
     };
     assert_eq!(numbers(half - 1, &[]), None);
@@ -6942,7 +7096,7 @@ fn states_count_to_the_end() {
             s.finish(&mut buf);
             (len, buf)
         });
-        assert_eq!(new, old);
+        agree!(new, old);
         new
     };
     assert_eq!(bools(half - 1, &[]), None);
@@ -6972,7 +7126,7 @@ fn states_count_to_the_end() {
             s.finish(&mut buf);
             (len, all, buf)
         });
-        assert_eq!(new, old);
+        agree!(new, old);
         new
     };
     assert_eq!(nulls(half, half - 1), None);
@@ -6986,6 +7140,10 @@ fn states_count_to_the_end() {
 /// the form returns, and no more, whether or not anything was written.
 #[test]
 fn static_forms_read_an_iterator_once() {
+    let _golden = golden::test(concat!(
+        module_path!(),
+        "::static_forms_read_an_iterator_once"
+    ));
     let mut rng = Rng(0x17e2);
     for _ in 0..200 {
         let model: Vec<u64> = rng.values(120);
@@ -7084,13 +7242,13 @@ fn check_decoders<T: Kind>(model: &[T], rng: &mut Rng) {
         match rng.below(9) {
             0 | 1 => {
                 let (a, b) = (x.next().map(T::keep), y.next().map(old));
-                assert_eq!(a, b);
+                agree!(a, b);
                 assert_eq!(a.as_ref(), Some(&left[0]));
                 at += 1;
             }
             2 => {
                 let (a, b) = (x.nth(k).map(T::keep), y.nth(k).map(old));
-                assert_eq!(a, b);
+                agree!(a, b);
                 assert_eq!(a.as_ref(), left.get(k));
                 at += left.len().min(k + 1);
             }
@@ -7101,7 +7259,7 @@ fn check_decoders<T: Kind>(model: &[T], rng: &mut Rng) {
             }
             4 => {
                 let (a, b) = (new_run::<T>(x.next_run()), old_run::<T>(y.next_run()));
-                assert_eq!(a, b);
+                agree!(a, b);
                 let n = head_of(left, usize::MAX);
                 assert_eq!(a, Some((n, left[0].clone())));
                 at += n;
@@ -7109,7 +7267,7 @@ fn check_decoders<T: Kind>(model: &[T], rng: &mut Rng) {
             5 | 6 => {
                 let a = new_run::<T>(x.next_run_max(k));
                 let b = old_run::<T>(y.next_run_max(k));
-                assert_eq!(a, b);
+                agree!(a, b);
                 let n = head_of(left, k);
                 assert_eq!(a, (k > 0).then(|| (n, left[0].clone())));
                 at += n;
@@ -7118,7 +7276,7 @@ fn check_decoders<T: Kind>(model: &[T], rng: &mut Rng) {
                 let t = &ts[rng.below(ts.len())];
                 let max = [usize::MAX, usize::MAX, k, left.len()][rng.below(4)];
                 let a = x.scan_for(t.lend(), max);
-                assert_eq!(a, t.old_scan_for(&mut y, max));
+                agree!(a, t.old_scan_for(&mut y, max));
                 let (found, passed) = model_scan(left, t, max);
                 assert_eq!(a, found, "a scan of at most {max} for {t:?} in {left:?}");
                 at += passed;
@@ -7189,6 +7347,7 @@ fn decoders<T: Kind>() {
 /// for a value, for every value type.
 #[test]
 fn decoders_agree() {
+    let _golden = golden::test(concat!(module_path!(), "::decoders_agree"));
     for_each_kind!(decoders);
 }
 
@@ -7201,19 +7360,19 @@ fn check_same_decoder<T: Kind>(bytes: &[u8]) -> bool {
         (Ok(mut x), Ok(mut y)) => {
             for k in [0, 7, usize::MAX] {
                 let a = x.clone().nth(k).map(T::keep);
-                assert_eq!(a, y.clone().nth(k).map(old));
+                agree!(a, y.clone().nth(k).map(old));
             }
             // run by run: a few bytes can be a run of billions
             loop {
                 let (a, b) = (new_run::<T>(x.next_run()), old_run::<T>(y.next_run()));
-                assert_eq!(a, b, "the decoders read {bytes:?} differently");
+                agree!(a, b, "the decoders read {bytes:?} differently");
                 if a.is_none() {
                     return true;
                 }
             }
         }
         (Err(x), Err(y)) => {
-            assert_eq!(
+            agree!(
                 x.to_string(),
                 y.to_string(),
                 "the decoders refuse {bytes:?} differently"
@@ -7232,6 +7391,10 @@ fn check_same_decoder<T: Kind>(bytes: &[u8]) -> bool {
 /// there when the decoder is gone.
 #[test]
 fn a_decoder_lends_what_the_bytes_hold() {
+    let _golden = golden::test(concat!(
+        module_path!(),
+        "::a_decoder_lends_what_the_bytes_hold"
+    ));
     let words = ["pear".to_string(), String::new(), "größer".to_string()];
     let bytes = both(&words).0.save();
     let (first, run) = {
@@ -7259,6 +7422,7 @@ fn a_decoder_lends_what_the_bytes_hold() {
 #[cfg(target_pointer_width = "64")]
 #[test]
 fn decoders_of_the_longest_runs() {
+    let _golden = golden::test(concat!(module_path!(), "::decoders_of_the_longest_runs"));
     // a run of `i64::MAX` sevens, one of eights, a nine
     let mut bytes = vec![0xff; 9];
     bytes.extend([0, 7]);
@@ -7325,6 +7489,7 @@ fn decoders_of_the_longest_runs() {
 /// kind its type says.
 #[test]
 fn the_kind_of_a_plain_column() {
+    let _golden = golden::test(concat!(module_path!(), "::the_kind_of_a_plain_column"));
     let vs: Vec<u64> = (0..2000).map(|i| i / 7).collect();
     let named = VerifiedColumn::<u64, Leb128, LenIndex>::from_values(&vs);
     let short: VerifiedColumn<u64> = named.clone();
@@ -7343,7 +7508,7 @@ fn the_kind_of_a_plain_column() {
     let old: Column<u64> = vs.iter().copied().collect();
     for c in [&named, &short, &collected, &loaded, &with, &budget] {
         assert_eq!(c.to_vec(), vs);
-        assert_eq!(c.save(), old.save());
+        agree!(c.save(), old.save());
     }
     assert!(none.is_empty() && none.save().is_empty());
     assert_eq!(fill.to_vec(), vec![7; 5]);
@@ -7423,14 +7588,14 @@ fn check_sums<T: Summed>(
     assert!(p.get(usize::MAX).is_none());
     let bytes = p.save();
     assert_eq!(bytes, v.save());
-    assert_eq!(bytes, c.save());
+    agree!(bytes, c.save());
 
     assert_eq!(p.slab_count(), v.slab_count());
     assert_eq!(p.slab_lens(), v.slab_lens());
     assert_eq!(p.slab_segments(), v.slab_segments());
     assert_eq!(format!("{p:?}"), format!("{v:?}"));
     if !model.is_empty() {
-        assert_eq!(p.slab_count(), c.slab_count());
+        agree!(p.slab_count(), c.slab_count());
     }
     if built {
         p.check_invariants();
@@ -7441,7 +7606,7 @@ fn check_sums<T: Summed>(
 
     let (mut a, mut b) = (vec![9u8; 3], vec![9u8; 3]);
     let range = p.save_to(&mut a);
-    assert_eq!(range, c.save_to(&mut b));
+    agree!(range, c.save_to(&mut b));
     assert_eq!(a, b);
     assert_eq!(a[range], bytes[..]);
     for x in model.first().into_iter().chain(model.last()) {
@@ -7449,7 +7614,7 @@ fn check_sums<T: Summed>(
         assert_eq!(p.is_only(x.lend()), only);
         let (mut a, mut b) = (vec![9u8; 3], vec![9u8; 3]);
         let range = p.save_to_unless(&mut a, x.lend());
-        assert_eq!(range, c.save_to_unless(&mut b, x.as_column_ref()));
+        agree!(range, c.save_to_unless(&mut b, x.as_column_ref()));
         assert_eq!(a, b);
     }
 }
@@ -7459,7 +7624,7 @@ fn check_sums<T: Summed>(
 /// into.
 fn check_sum_loads<T: Summed>(p: &VerifiedPrefixColumn<T>, c: &PrefixColumn<T>, model: &[T]) {
     let bytes = p.save();
-    assert_eq!(bytes, c.save());
+    agree!(bytes, c.save());
     let p2 = VerifiedPrefixColumn::<T>::load(&c.save()).unwrap();
     let c2 = PrefixColumn::<T>::load(&bytes).unwrap();
     let v2 = VerifiedColumn::<T>::load(&bytes).unwrap();
@@ -7642,6 +7807,7 @@ fn sum_edits<T: Totalled>() {
 /// prefix column loads what the other saved.
 #[test]
 fn a_prefix_column_is_a_column() {
+    let _golden = golden::test(concat!(module_path!(), "::a_prefix_column_is_a_column"));
     for_each_sum!(sum_edits);
 }
 
@@ -7683,7 +7849,7 @@ fn sum_forms<T: Summed>() {
         check_sums(&p2, &v2, &c2, &model, false);
         // of a length the bytes do not have: the same error
         let long = LoadOpts::new().with_length(model.len() + 1);
-        assert_eq!(
+        agree!(
             VerifiedPrefixColumn::<T>::load_with(&p.save(), long)
                 .map(|p| p.len())
                 .map_err(|e| e.to_string()),
@@ -7725,6 +7891,10 @@ fn not_above<T: Kind>(x: &T, a: &T) -> bool {
 /// remap, and `fill`.
 #[test]
 fn the_other_forms_of_a_prefix_column() {
+    let _golden = golden::test(concat!(
+        module_path!(),
+        "::the_other_forms_of_a_prefix_column"
+    ));
     for_each_sum!(sum_forms);
 }
 
@@ -7733,6 +7903,7 @@ fn the_other_forms_of_a_prefix_column() {
 /// written short, and its iterators are the column's.
 #[test]
 fn the_kind_of_a_prefix_column() {
+    let _golden = golden::test(concat!(module_path!(), "::the_kind_of_a_prefix_column"));
     let vs: Vec<u32> = (0..2000).map(|i| i / 7).collect();
     let short = VerifiedPrefixColumn::<u32>::from_values(&vs);
     let named: VerifiedColumn<u32, Leb128, SumIndex> = short.clone();
@@ -7761,6 +7932,10 @@ fn the_kind_of_a_prefix_column() {
 #[cfg(target_pointer_width = "64")]
 #[test]
 fn a_load_refuses_sums_that_do_not_fit() {
+    let _golden = golden::test(concat!(
+        module_path!(),
+        "::a_load_refuses_sums_that_do_not_fit"
+    ));
     fn loads<T: Summed>(bytes: &[u8]) -> Result<usize, String> {
         let new = VerifiedPrefixColumn::<T>::load(bytes).map(|p| (p.len(), p.save()));
         let old = PrefixColumn::<T>::load(bytes).map(|c| (c.len(), c.save()));
@@ -7768,7 +7943,7 @@ fn a_load_refuses_sums_that_do_not_fit() {
             new.map_err(|e| e.to_string()),
             old.map_err(|e| e.to_string()),
         );
-        assert_eq!(new, old);
+        agree!(new, old);
         // with options: the same
         let with =
             VerifiedPrefixColumn::<T>::load_with(bytes, LoadOpts::new().with_max_segments(4));
@@ -7816,7 +7991,7 @@ fn a_load_refuses_sums_that_do_not_fit() {
     let opts = LoadOpts::new().with_max_segments(2);
     let new = VerifiedPrefixColumn::<u32>::load_with(&bytes, opts);
     let old = PrefixColumn::<u32>::load_with(&bytes, opts);
-    assert_eq!(
+    agree!(
         new.err().unwrap().to_string(),
         old.err().unwrap().to_string()
     );
@@ -7868,6 +8043,7 @@ fn a_load_refuses_sums_that_do_not_fit() {
 #[cfg(target_pointer_width = "64")]
 #[test]
 fn an_edit_past_the_sums_panics() {
+    let _golden = golden::test(concat!(module_path!(), "::an_edit_past_the_sums_panics"));
     type P<T> = VerifiedPrefixColumn<T>;
     let run = |value: u32, count: usize| Run { count, value };
     let words = Some("prefix sum overflows its type".to_string());
@@ -7941,7 +8117,7 @@ fn an_edit_past_the_sums_panics() {
     let full = P::<u32>::fill(most, u32::MAX);
     assert_eq!(full.len(), most);
     let old_full = PrefixColumn::<u32>::from_column(Column::fill(most, u32::MAX));
-    assert_eq!(full.save(), old_full.save());
+    agree!(full.save(), old_full.save());
     assert_eq!(panics(&|| full.clone().push(1)), words);
     assert_eq!(panics(&|| old_full.clone().push(1u32)), words);
     assert_eq!(panics(&|| full.clone().insert(5, 1)), words);
@@ -7967,7 +8143,7 @@ fn an_edit_past_the_sums_panics() {
     c.remove_n(0, 2);
     p.splice(0, 0, &[u32::MAX - 1, u32::MAX, 1]);
     c.splice(0, 0, [u32::MAX - 1, u32::MAX, 1]);
-    assert_eq!(p.save(), c.save());
+    agree!(p.save(), c.save());
     assert_eq!(panics(&|| p.clone().push(1)), words);
     assert_eq!(panics(&|| c.clone().push(1u32)), words);
     let loaded = P::<u32>::load(&p.save()).unwrap();
@@ -7985,7 +8161,7 @@ fn an_edit_past_the_sums_panics() {
     c.splice_runs(0, 0, [run(0, 1 << 40)]);
     c.insert(0, u32::MAX);
     assert_eq!((p.slab_count(), c.slab_count()), (2, 2));
-    assert_eq!(p.save(), c.save());
+    agree!(p.save(), c.save());
     assert_eq!(p.len(), (1 << 40) + most);
     assert_eq!(panics(&|| p.clone().push(1)), words);
     assert_eq!(panics(&|| p.clone().insert(1 << 39, 1)), words);
@@ -8314,6 +8490,10 @@ fn sum_searches<T: Counted>() {
 /// `PrefixColumn`'s searches find.
 #[test]
 fn a_prefix_column_is_searched_by_sum() {
+    let _golden = golden::test(concat!(
+        module_path!(),
+        "::a_prefix_column_is_searched_by_sum"
+    ));
     sum_searches::<u64>();
     sum_searches::<u32>();
     sum_searches::<NonZeroU32>();
@@ -8327,6 +8507,7 @@ fn a_prefix_column_is_searched_by_sum() {
 /// of a range, and the places of sums.
 #[test]
 fn the_sums_of_a_prefix_column() {
+    let _golden = golden::test(concat!(module_path!(), "::the_sums_of_a_prefix_column"));
     let p = VerifiedPrefixColumn::<u64>::from_values(&[3, 0, 4, 4, 10]);
     let sums: Vec<u128> = (0..7).map(|i| p.get_prefix(i)).collect();
     assert_eq!(sums, [0, 3, 3, 7, 11, 21, 21]);
@@ -8393,6 +8574,7 @@ fn the_sums_of_a_prefix_column() {
 #[cfg(target_pointer_width = "64")]
 #[test]
 fn the_sums_of_long_runs() {
+    let _golden = golden::test(concat!(module_path!(), "::the_sums_of_long_runs"));
     // `u32::MAX` 2^32 + 1 times adds up to `u64::MAX`
     let most = (1usize << 32) + 1;
     let p = VerifiedPrefixColumn::<u32>::fill(most, u32::MAX);
@@ -8433,24 +8615,24 @@ fn the_sums_of_long_runs() {
         p.splice_runs(at, 0, runs);
         c.splice_runs(at, 0, runs);
     }
-    assert_eq!(p.save(), c.save());
+    agree!(p.save(), c.save());
     assert!(p.slab_count() > 2);
     let len = p.len();
     let mut rng = Rng(0x50f8);
     let mut places = some_places(&mut rng, len);
     places.extend([5, 9, 1 << 20, (1 << 20) + (1 << 50), (1 << 30) + 4, len - 1]);
     for &i in &places {
-        assert_eq!(p.get_prefix(i), c.get_prefix(i));
-        assert_eq!(p.get_total(i), c.get_total(i));
+        agree!(p.get_prefix(i), c.get_prefix(i));
+        agree!(p.get_total(i), c.get_total(i));
         for &j in &places {
-            assert_eq!(p.sum_range(i, j), c.sum_range(i..j));
+            agree!(p.sum_range(i, j), c.sum_range(i..j));
         }
         // the sum before a place, and those beside it, as targets
         let sum = p.get_prefix(i);
         for t in [sum.saturating_sub(1), sum, sum.saturating_add(1)] {
             let place = p.get_index_for_prefix(t);
-            assert_eq!(place, c.get_index_for_prefix(t));
-            assert_eq!(p.get_index_for_total(t), c.get_index_for_total(t));
+            agree!(place, c.get_index_for_prefix(t));
+            agree!(p.get_index_for_total(t), c.get_index_for_total(t));
             if place <= len {
                 assert!(p.get_prefix(place) >= t);
                 assert!(place == 0 || p.get_prefix(place - 1) < t);
@@ -8759,6 +8941,10 @@ fn sum_iters<T: Totalled>() {
 /// load.
 #[test]
 fn a_prefix_column_is_read_with_its_sums() {
+    let _golden = golden::test(concat!(
+        module_path!(),
+        "::a_prefix_column_is_read_with_its_sums"
+    ));
     for_each_sum!(sum_iters);
 }
 
@@ -8767,6 +8953,7 @@ fn a_prefix_column_is_read_with_its_sums() {
 #[allow(clippy::clone_on_copy)]
 #[test]
 fn the_iterator_of_a_prefix_column() {
+    let _golden = golden::test(concat!(module_path!(), "::the_iterator_of_a_prefix_column"));
     let p = VerifiedPrefixColumn::<u64>::from_values(&[3, 0, 4, 4, 10]);
     let got: Vec<(u128, u64, u128)> = p
         .prefix_iter()
@@ -8841,6 +9028,7 @@ fn the_iterator_of_a_prefix_column() {
 #[cfg(target_pointer_width = "64")]
 #[test]
 fn the_iterator_over_long_runs() {
+    let _golden = golden::test(concat!(module_path!(), "::the_iterator_over_long_runs"));
     let long = i64::MAX as usize;
     let each = u128::from(u64::MAX);
     let p = VerifiedPrefixColumn::<u64>::fill(long, u64::MAX);
@@ -8884,9 +9072,9 @@ fn the_iterator_over_long_runs() {
     for &i in &places {
         x.advance_to(i);
         y.advance_to(i);
-        assert_eq!(new_place(&x), old_place(&y));
+        agree!(new_place(&x), old_place(&y));
         assert_eq!(x.total(), p.get_prefix(i));
-        assert_eq!(new_item(x.next()), old_item(y.next()));
+        agree!(new_item(x.next()), old_item(y.next()));
     }
 }
 
@@ -9022,7 +9210,7 @@ fn check_prefix_runs<T: Totalled>(
             .map(|run| (run.count, old(run.value)))
             .collect();
         assert_eq!(run_model(&runs), model[start..end]);
-        assert_eq!(runs, old_runs);
+        agree!(runs, old_runs);
         assert!(runs.windows(2).all(|w| w[0].1 != w[1].1));
         let mut copy = VerifiedColumn::<T>::new();
         copy.splice_runs(0, 0, p.prefix_iter_range(start, end).runs());
@@ -9097,8 +9285,8 @@ fn check_prefix_runs<T: Totalled>(
                     // a copy is an iterator of its own
                     let (mut x2, mut y2) = (x.clone(), y.clone());
                     assert_eq!(new_place(&x2), m.place());
-                    assert_eq!(new_item(x2.nth(1)), old_item(y2.nth(1)));
-                    assert_eq!(new_place(&x2), old_place(&y2));
+                    agree!(new_item(x2.nth(1)), old_item(y2.nth(1)));
+                    agree!(new_place(&x2), old_place(&y2));
                 }
                 _ => {
                     let target = a_place(rng, len);
@@ -9178,6 +9366,10 @@ fn sum_runs<T: Totalled>() {
 /// a load.
 #[test]
 fn a_prefix_column_is_read_by_runs_with_its_sums() {
+    let _golden = golden::test(concat!(
+        module_path!(),
+        "::a_prefix_column_is_read_by_runs_with_its_sums"
+    ));
     for_each_sum!(sum_runs);
 }
 
@@ -9293,6 +9485,10 @@ fn sum_seeks<T: Sought>() {
 /// it had.
 #[test]
 fn a_prefix_iterator_reads_on_to_a_sum() {
+    let _golden = golden::test(concat!(
+        module_path!(),
+        "::a_prefix_iterator_reads_on_to_a_sum"
+    ));
     sum_seeks::<u64>();
     sum_seeks::<u32>();
     sum_seeks::<NonZeroU32>();
@@ -9308,6 +9504,7 @@ fn a_prefix_iterator_reads_on_to_a_sum() {
 #[allow(clippy::clone_on_copy)]
 #[test]
 fn the_seeks_of_a_prefix_iterator() {
+    let _golden = golden::test(concat!(module_path!(), "::the_seeks_of_a_prefix_iterator"));
     let mut p = VerifiedPrefixColumn::<u64>::from_values(&[3, 0, 4, 4, 10]);
     // by runs: the sums are those of each run's last value
     let mut it = p.prefix_iter();
@@ -9569,6 +9766,10 @@ sought!(Meta => u64, Option<Meta> => u64);
 /// type's nulls.
 #[test]
 fn a_prefix_column_of_a_clients_own_type() {
+    let _golden = golden::test(concat!(
+        module_path!(),
+        "::a_prefix_column_of_a_clients_own_type"
+    ));
     macro_rules! each {
         ($($f:ident),*) => {
             $(
@@ -9591,6 +9792,10 @@ fn a_prefix_column_of_a_clients_own_type() {
 /// here the lengths, and nothing for what kind a value is of.
 #[test]
 fn a_clients_values_add_what_it_says() {
+    let _golden = golden::test(concat!(
+        module_path!(),
+        "::a_clients_values_add_what_it_says"
+    ));
     let model = [
         Meta::of(3, 5),
         Meta::of(0, 0),
@@ -9600,7 +9805,7 @@ fn a_clients_values_add_what_it_says() {
     ];
     let p = VerifiedPrefixColumn::<Meta>::from_values(&model);
     let c: PrefixColumn<Meta> = model.iter().copied().collect();
-    assert_eq!(p.save(), c.save());
+    agree!(p.save(), c.save());
     assert_eq!(p.to_vec(), model);
     let sums = [0, 5, 5, 12, 19, 19 + (1 << 40)];
     for (i, &sum) in sums.iter().enumerate() {
@@ -9618,8 +9823,8 @@ fn a_clients_values_add_what_it_says() {
     assert_eq!(p.get_index_for_total(20), 4);
     assert_eq!(p.get_index_for_total(20 + (1 << 40)), 5);
     for target in [0, 1, 5, 6, 12, 13, 19, 20, 19 + (1 << 40), 20 + (1 << 40)] {
-        assert_eq!(p.get_index_for_total(target), c.get_index_for_total(target));
-        assert_eq!(
+        agree!(p.get_index_for_total(target), c.get_index_for_total(target));
+        agree!(
             p.get_index_for_prefix(target),
             c.get_index_for_prefix(target)
         );
@@ -9633,7 +9838,7 @@ fn a_clients_values_add_what_it_says() {
     let nulls = [Some(model[0]), None, Some(model[2]), None, None];
     let p = VerifiedPrefixColumn::<Option<Meta>>::from_values(&nulls);
     let c: PrefixColumn<Option<Meta>> = nulls.iter().copied().collect();
-    assert_eq!(p.save(), c.save());
+    agree!(p.save(), c.save());
     for (i, sum) in [0, 5, 5, 12, 12, 12].into_iter().enumerate() {
         assert_eq!(p.get_prefix(i), sum);
         assert_eq!(c.get_prefix(i), sum);
@@ -9647,6 +9852,10 @@ fn a_clients_values_add_what_it_says() {
 /// refuses them with the error of `PrefixColumn`'s.
 #[test]
 fn a_clients_sums_that_do_not_fit_are_refused() {
+    let _golden = golden::test(concat!(
+        module_path!(),
+        "::a_clients_sums_that_do_not_fit_are_refused"
+    ));
     fn loads<T: Summed>(bytes: &[u8]) -> Result<usize, String> {
         let new = VerifiedPrefixColumn::<T>::load(bytes).map(|p| (p.len(), p.save()));
         let old = PrefixColumn::<T>::load(bytes).map(|c| (c.len(), c.save()));
@@ -9654,7 +9863,7 @@ fn a_clients_sums_that_do_not_fit_are_refused() {
             new.map_err(|e| e.to_string()),
             old.map_err(|e| e.to_string()),
         );
-        assert_eq!(new, old);
+        agree!(new, old);
         // a plain column loads them either way
         let plain = VerifiedColumn::<T>::load(bytes).unwrap();
         assert_eq!(plain.save(), bytes);
@@ -9696,7 +9905,7 @@ fn a_clients_sums_that_do_not_fit_are_refused() {
     let opts = LoadOpts::new().with_max_segments(2);
     let new = VerifiedPrefixColumn::<Meta>::load_with(&bytes, opts);
     let old = PrefixColumn::<Meta>::load_with(&bytes, opts);
-    assert_eq!(
+    agree!(
         new.err().unwrap().to_string(),
         old.err().unwrap().to_string()
     );
@@ -9729,6 +9938,10 @@ fn a_clients_sums_that_do_not_fit_are_refused() {
 #[cfg(panic = "unwind")]
 #[test]
 fn an_edit_past_a_clients_sums_panics() {
+    let _golden = golden::test(concat!(
+        module_path!(),
+        "::an_edit_past_a_clients_sums_panics"
+    ));
     type P<T> = VerifiedPrefixColumn<T>;
     let words = Some("prefix sum overflows its type".to_string());
     let panics = |f: &dyn Fn()| panic_of(std::panic::AssertUnwindSafe(f));
@@ -9751,7 +9964,7 @@ fn an_edit_past_a_clients_sums_panics() {
     old_full.push(Meta::of(0, 15));
     assert_eq!(full.get_prefix(17), u64::MAX);
     assert_eq!(old_full.get_prefix(17), u64::MAX);
-    assert_eq!(full.save(), old_full.save());
+    agree!(full.save(), old_full.save());
     let one = Meta::of(4, 1);
     let none = Meta::of(4, 0);
     assert_eq!(panics(&|| full.clone().push(one)), words);
@@ -9774,7 +9987,7 @@ fn an_edit_past_a_clients_sums_panics() {
     c.remove(0);
     p.push(longest);
     c.push(longest);
-    assert_eq!(p.save(), c.save());
+    agree!(p.save(), c.save());
     assert_eq!(p.get_prefix(p.len()), u64::MAX);
     assert_eq!(panics(&|| p.clone().push(one)), words);
     assert_eq!(panics(&|| c.clone().push(one)), words);
@@ -10211,13 +10424,13 @@ where
     T: Accd + PrefixValue<Prefix = Added<T>>,
 {
     let c = PrefixColumn::<T>::from_values(model.to_vec());
-    assert_eq!(p.save(), c.save());
+    agree!(p.save(), c.save());
     let places = some_places(rng, model.len());
     for (n, &i) in places.iter().enumerate() {
-        assert_eq!(p.get_prefix(i), c.get_prefix(i));
-        assert_eq!(p.get_total(i), c.get_total(i));
+        agree!(p.get_prefix(i), c.get_prefix(i));
+        agree!(p.get_total(i), c.get_total(i));
         for &end in places.iter().skip(n % 3).step_by(3) {
-            assert_eq!(p.sum_range(i, end), c.sum_range(i..end));
+            agree!(p.sum_range(i, end), c.sum_range(i..end));
         }
     }
 }
@@ -10400,6 +10613,10 @@ fn acc_edits<T: Accd>() {
 /// values saves the same bytes and answers the same.
 #[test]
 fn an_accumulator_column_is_a_column() {
+    let _golden = golden::test(concat!(
+        module_path!(),
+        "::an_accumulator_column_is_a_column"
+    ));
     for_each_acc!(acc_edits);
 }
 
@@ -10481,6 +10698,10 @@ fn acc_forms<T: Accd>() {
 /// a remap, and `fill`.
 #[test]
 fn the_other_forms_of_an_accumulator_column() {
+    let _golden = golden::test(concat!(
+        module_path!(),
+        "::the_other_forms_of_an_accumulator_column"
+    ));
     for_each_acc!(acc_forms);
 }
 
@@ -10568,6 +10789,10 @@ fn acc_loads<T: Accd>() {
 /// no run of billions for one.)
 #[test]
 fn an_accumulator_column_loads_what_a_plain_column_loads() {
+    let _golden = golden::test(concat!(
+        module_path!(),
+        "::an_accumulator_column_loads_what_a_plain_column_loads"
+    ));
     for_each_acc!(acc_loads);
 }
 
@@ -10578,6 +10803,10 @@ fn an_accumulator_column_loads_what_a_plain_column_loads() {
 /// `IntoIterator` gives of it, are a column's.
 #[test]
 fn the_kind_of_an_accumulator_column() {
+    let _golden = golden::test(concat!(
+        module_path!(),
+        "::the_kind_of_an_accumulator_column"
+    ));
     let vs: Vec<Mark> = (0..2000).map(|i| Mark(i / 7)).collect();
     let named = VerifiedColumn::<Mark, Leb128, AccIndex>::from_values(&vs);
     let short: VerifiedAccColumn<Mark> = named.clone();
@@ -10600,11 +10829,15 @@ fn the_kind_of_an_accumulator_column() {
 /// of the same values in another order answer differently of.
 #[test]
 fn an_accumulator_adds_what_its_client_says() {
+    let _golden = golden::test(concat!(
+        module_path!(),
+        "::an_accumulator_adds_what_its_client_says"
+    ));
     // of the kinds 3, 5, 3, 5 and 0
     let model = [Mark(3), Mark(5), Mark(67), Mark(5), Mark(64)];
     let p = VerifiedAccColumn::<Mark>::from_values(&model);
     let c: PrefixColumn<Mark> = model.iter().copied().collect();
-    assert_eq!(p.save(), c.save());
+    agree!(p.save(), c.save());
     assert_eq!(p.to_vec(), model);
     for (i, open) in [0, 8, 0x28, 0x20, 0, 1].into_iter().enumerate() {
         assert_eq!(p.get_prefix(i), Flags(open));
@@ -10619,7 +10852,7 @@ fn an_accumulator_adds_what_its_client_says() {
     let nulls = [Some(model[0]), None, Some(model[1]), None, None];
     let p = VerifiedAccColumn::<Option<Mark>>::from_values(&nulls);
     let c: PrefixColumn<Option<Mark>> = nulls.iter().copied().collect();
-    assert_eq!(p.save(), c.save());
+    agree!(p.save(), c.save());
     for (i, open) in [0, 8, 8, 0x28, 0x28, 0x28].into_iter().enumerate() {
         assert_eq!(p.get_prefix(i), Flags(open));
         assert_eq!(c.get_prefix(i), Flags(open));
@@ -10648,6 +10881,7 @@ fn an_accumulator_adds_what_its_client_says() {
 /// that adds as the trait gives it, one time after another (`Board`).
 #[test]
 fn a_run_adds_its_value_times_over() {
+    let _golden = golden::test(concat!(module_path!(), "::a_run_adds_its_value_times_over"));
     let step = Step(1 << 33 | 5);
     for n in [0usize, 1, 2, 3, 64, 1000, 65_537] {
         let mut open = Flags(0xf0);
@@ -11167,6 +11401,10 @@ fn acc_iters<T: Accd>() {
 /// and after a load.
 #[test]
 fn an_accumulator_column_is_read_with_its_sums() {
+    let _golden = golden::test(concat!(
+        module_path!(),
+        "::an_accumulator_column_is_read_with_its_sums"
+    ));
     for_each_acc!(acc_iters);
 }
 
@@ -11183,7 +11421,7 @@ fn check_old_acc_iters<T: OldAccd>(rng: &mut Rng, p: &VerifiedAccColumn<T>, mode
     let was: Vec<AccItem<T>> = c.iter().map(|pv| old_acc_item(Some(pv))).collect();
     assert_eq!(new, was);
     for i in some_places(rng, len) {
-        assert_eq!(acc_item(p.get_prefixed(i)), old_acc_item(c.get(i)));
+        agree!(acc_item(p.get_prefixed(i)), old_acc_item(c.get(i)));
     }
     for _ in 0..3 {
         // the runs of a range, and the value at a place with what a
@@ -11200,10 +11438,10 @@ fn check_old_acc_iters<T: OldAccd>(rng: &mut Rng, p: &VerifiedAccColumn<T>, mode
             .runs()
             .map(|run| (run.count, old(run.value)))
             .collect();
-        assert_eq!(runs, old_runs);
+        agree!(runs, old_runs);
         let to = a_place(rng, len);
         let from = rng.below(to.min(len) + 1);
-        assert_eq!(
+        agree!(
             acc_found(p.delta(from, to)),
             old_acc_found(c.delta(from, to))
         );
@@ -11232,8 +11470,8 @@ fn check_old_acc_iters<T: OldAccd>(rng: &mut Rng, p: &VerifiedAccColumn<T>, mode
             assert_eq!(old_acc_place(&y), m.place(), "{mv:?}");
         }
         // what they have left
-        let rest = x.map(|pv| acc_item(Some(pv)));
-        assert!(rest.eq(y.map(|pv| old_acc_item(Some(pv)))));
+        let rest: Vec<_> = x.map(|pv| acc_item(Some(pv))).collect();
+        agree!(rest, y.map(|pv| old_acc_item(Some(pv))).collect::<Vec<_>>());
     }
 }
 
@@ -11247,6 +11485,10 @@ fn old_acc_iters<T: OldAccd>() {
 /// stand in the same place with the same window after it.
 #[test]
 fn an_accumulator_iterator_moves_as_a_prefix_columns_does() {
+    let _golden = golden::test(concat!(
+        module_path!(),
+        "::an_accumulator_iterator_moves_as_a_prefix_columns_does"
+    ));
     old_acc_iters::<Mark>();
     old_acc_iters::<Option<Mark>>();
 }
@@ -11254,6 +11496,10 @@ fn an_accumulator_iterator_moves_as_a_prefix_columns_does() {
 /// The iterator of a short accumulator column, by hand.
 #[test]
 fn the_iterator_of_an_accumulator_column() {
+    let _golden = golden::test(concat!(
+        module_path!(),
+        "::the_iterator_of_an_accumulator_column"
+    ));
     // of the kinds 3, 5, 3, 5 and 0
     let model = [Mark(3), Mark(5), Mark(67), Mark(5), Mark(64)];
     let open = [0, 8, 0x28, 0x20, 0, 1].map(Flags);
@@ -11381,6 +11627,10 @@ fn the_iterator_of_an_accumulator_column() {
 /// by hand.
 #[test]
 fn the_seeks_of_an_accumulator_iterator() {
+    let _golden = golden::test(concat!(
+        module_path!(),
+        "::the_seeks_of_an_accumulator_iterator"
+    ));
     // three marks of the kind 3, one of the kind 5, two of the kind 0
     let model = [Mark(3), Mark(3), Mark(3), Mark(5), Mark(64), Mark(64)];
     let mut p = VerifiedAccColumn::<Mark>::from_values(&model);
@@ -11503,6 +11753,10 @@ fn the_seeks_of_an_accumulator_iterator() {
 #[cfg(target_pointer_width = "64")]
 #[test]
 fn the_accumulator_iterator_over_long_runs() {
+    let _golden = golden::test(concat!(
+        module_path!(),
+        "::the_accumulator_iterator_over_long_runs"
+    ));
     // an odd count of marks of one kind
     let long = i64::MAX as usize;
     let p = VerifiedAccColumn::<Mark>::fill(long, Mark(5));
@@ -11553,9 +11807,9 @@ fn the_accumulator_iterator_over_long_runs() {
     for &i in &places {
         x.advance_to(i);
         y.advance_to(i);
-        assert_eq!(acc_place(&x), old_acc_place(&y));
+        agree!(acc_place(&x), old_acc_place(&y));
         assert_eq!(x.total(), p.get_prefix(i));
-        assert_eq!(acc_item(x.next()), old_acc_item(y.next()));
+        agree!(acc_item(x.next()), old_acc_item(y.next()));
     }
 }
 
@@ -11566,6 +11820,10 @@ fn the_accumulator_iterator_over_long_runs() {
 #[cfg(panic = "unwind")]
 #[test]
 fn an_accumulator_that_panics_under_an_iterator() {
+    let _golden = golden::test(concat!(
+        module_path!(),
+        "::an_accumulator_that_panics_under_an_iterator"
+    ));
     thread_local! {
         /// How many more times a `Fused` sum adds before it panics: at
         /// the most there is, any number.
@@ -11722,10 +11980,10 @@ deltad!(i64, i64::MIN >> 2, i64::MAX >> 2);
 deltad!(usize, 0, i64::MAX >> 2);
 
 fn delta_agrees<T: Deltad>(new: &VerifiedDeltaColumn<T>, old: &DeltaColumn<T>) {
-    assert_eq!(new.len(), old.len());
-    assert_eq!(new.is_empty(), old.is_empty());
+    agree!(new.len(), old.len());
+    agree!(new.is_empty(), old.is_empty());
     for i in 0..old.len() + 2 {
-        assert_eq!(new.get(i), old.get(i));
+        agree!(new.get(i), old.get(i));
     }
 }
 
@@ -11763,6 +12021,7 @@ fn delta_edits<T: Deltad>(seed: u64) {
 /// the same builds and splices, for every type of value.
 #[test]
 fn delta_columns_agree() {
+    let _golden = golden::test(concat!(module_path!(), "::delta_columns_agree"));
     for seed in 0..12 {
         delta_edits::<u32>(seed);
         delta_edits::<u64>(seed);
@@ -11826,7 +12085,7 @@ fn delta_simple_edits<T: Deltad>(seed: u64, max_segments: Option<usize>) {
                 new.truncate(keep);
                 old.truncate(keep);
             }
-            12..=13 => assert_eq!(new.pop(), old.pop()),
+            12..=13 => agree!(new.pop(), old.pop()),
             14 => {
                 if rng.below(8) == 0 {
                     new.clear();
@@ -11840,18 +12099,19 @@ fn delta_simple_edits<T: Deltad>(seed: u64, max_segments: Option<usize>) {
                 new = other;
             }
         }
-        assert_eq!(new.to_vec(), old.to_vec());
-        assert_eq!(new.len(), old.len());
-        assert_eq!(new.first(), old.first());
-        assert_eq!(new.last(), old.last());
+        agree!(new.to_vec(), old.to_vec());
+        agree!(new.len(), old.len());
+        agree!(new.first(), old.first());
+        agree!(new.last(), old.last());
         // the same slabs, and so the same of what is printed: but for a
         // cleared column, which has no slab where `DeltaColumn` keeps an
         // empty one
         if new.is_empty() {
+            golden::note(&new.slab_count());
             assert!(new.slab_count() <= old.slab_count() && old.slab_count() <= 1);
         } else {
-            assert_eq!(new.slab_count(), old.slab_count());
-            assert_eq!(
+            agree!(new.slab_count(), old.slab_count());
+            agree!(
                 format!("{new:?}"),
                 format!("{old:?}").replace("DeltaColumn", "VerifiedDeltaColumn")
             );
@@ -11865,6 +12125,7 @@ fn delta_simple_edits<T: Deltad>(seed: u64, max_segments: Option<usize>) {
 /// `clear`), for every type of value and with small slabs too.
 #[test]
 fn delta_simple_edits_agree() {
+    let _golden = golden::test(concat!(module_path!(), "::delta_simple_edits_agree"));
     for seed in 0..6 {
         for max_segments in [None, Some(2), Some(5)] {
             delta_simple_edits::<u32>(seed, max_segments);
@@ -11885,6 +12146,7 @@ fn delta_simple_edits_agree() {
 /// one, and a removal past the end changes nothing.
 #[test]
 fn delta_column_ends() {
+    let _golden = golden::test(concat!(module_path!(), "::delta_column_ends"));
     let mut col = VerifiedDeltaColumn::<Option<i64>>::new();
     assert_eq!(col.first(), None);
     assert_eq!(col.last(), None);
@@ -11929,13 +12191,13 @@ fn delta_same_load<T: Deltad>(bytes: &[u8]) -> bool {
         DeltaColumn::<T>::load(bytes),
     ) {
         (Ok(v), Ok(c)) => {
-            assert_eq!(v.len(), c.len());
+            agree!(v.len(), c.len());
             // a few bytes can be a run of billions: read those in places
             if v.len() <= 100_000 {
-                assert_eq!(v.to_vec(), c.to_vec());
+                agree!(v.to_vec(), c.to_vec());
             } else {
                 for i in [0, 1, v.len() / 2, v.len() - 1] {
-                    assert_eq!(v.get(i), c.get(i));
+                    agree!(v.get(i), c.get(i));
                 }
             }
             // what loads is canonical: it is what its values save to
@@ -11944,14 +12206,15 @@ fn delta_same_load<T: Deltad>(bytes: &[u8]) -> bool {
             // and it is laid out in the same slabs: but for no values,
             // which `DeltaColumn` can keep an empty slab for
             if v.is_empty() {
-                assert!(v.slab_count() <= c.slab_count() && c.slab_count() <= 1);
+                agree!(v.slab_count(), c.slab_count());
+                assert!(c.slab_count() <= 1);
             } else {
-                assert_eq!(v.slab_count(), c.slab_count());
+                agree!(v.slab_count(), c.slab_count());
             }
             true
         }
         (Err(v), Err(c)) => {
-            assert_eq!(
+            agree!(
                 v.to_string(),
                 c.to_string(),
                 "the loaders refuse {bytes:?} differently"
@@ -11975,7 +12238,7 @@ fn delta_saves_agree<T: Deltad>(new: &VerifiedDeltaColumn<T>, old: &DeltaColumn<
     assert!(delta_same_load::<T>(&bytes));
 
     let (mut a, mut b) = (vec![1u8, 2, 3], vec![1u8, 2, 3]);
-    assert_eq!(new.save_to(&mut a), old.save_to(&mut b));
+    agree!(new.save_to(&mut a), old.save_to(&mut b));
     assert_eq!(a, b);
     assert_eq!(a[3..], bytes[..]);
 
@@ -12033,6 +12296,7 @@ fn delta_saves<T: Deltad>(seed: u64, max_segments: Option<usize>) {
 /// the edits that made the column and however small its slabs.
 #[test]
 fn delta_columns_save_the_same() {
+    let _golden = golden::test(concat!(module_path!(), "::delta_columns_save_the_same"));
     for seed in 0..8 {
         for m in [None, Some(4), Some(16)] {
             delta_saves::<u32>(seed, m);
@@ -12069,6 +12333,7 @@ fn delta_uniform<T: Deltad>(values: &[T], others: &[T]) {
 /// which is which, and leave the same ones unwritten.
 #[test]
 fn delta_columns_of_one_value() {
+    let _golden = golden::test(concat!(module_path!(), "::delta_columns_of_one_value"));
     delta_uniform::<i64>(&[], &[0, 7]);
     delta_uniform::<i64>(&[7], &[0, 7, 8]);
     delta_uniform::<i64>(&[0; 9], &[0, 1, -1]);
@@ -12124,6 +12389,7 @@ fn delta_loads(bytes: &[u8]) -> [bool; 10] {
 /// one of the narrower type's, by both APIs alike.
 #[test]
 fn delta_loads_keep_to_the_type() {
+    let _golden = golden::test(concat!(module_path!(), "::delta_loads_keep_to_the_type"));
     const Y: bool = true;
     const N: bool = false;
     // where a `usize` is as wide as a `u64`
@@ -12167,6 +12433,7 @@ fn delta_loads_keep_to_the_type() {
 /// refuse the others with the same error.
 #[test]
 fn delta_loads_agree_on_any_bytes() {
+    let _golden = golden::test(concat!(module_path!(), "::delta_loads_agree_on_any_bytes"));
     let mut loaded = 0;
     let mut refused = 0;
     for seed in 0..40u64 {
@@ -12303,7 +12570,7 @@ fn delta_run_too_wide<T: Deltad>(run: hexane::DeltaRun) {
         old.splice_runs(0, 0, [run]);
     });
     assert!(new.is_some(), "the verified API takes {run:?}");
-    assert_eq!(new, old, "{run:?}");
+    agree!(new, old, "{run:?}");
 }
 
 #[cfg(not(any(target_pointer_width = "64", panic = "unwind")))]
@@ -12365,7 +12632,7 @@ fn delta_run_checks<T: Deltad>() {
                     old.splice_runs(0, 0, [run]);
                     delta_agrees(&new, &old);
                     assert_eq!(new.len(), count);
-                    assert_eq!(new.save(), old.save());
+                    agree!(new.save(), old.save());
                 }
             }
         }
@@ -12384,6 +12651,7 @@ fn delta_run_checks<T: Deltad>() {
 /// every type of value.
 #[test]
 fn delta_run_checks_agree() {
+    let _golden = golden::test(concat!(module_path!(), "::delta_run_checks_agree"));
     delta_run_checks::<u32>();
     delta_run_checks::<u64>();
     delta_run_checks::<i32>();
@@ -12464,9 +12732,9 @@ fn delta_run_splices<T: Deltad>(seed: u64, max_segments: Option<usize>) {
         old.splice_runs(at, del, runs.iter().copied());
         delta_agrees(&new, &old);
         assert_eq!(new.len(), len - del + added);
-        assert_eq!(new.save(), old.save());
+        agree!(new.save(), old.save());
         if !old.is_empty() {
-            assert_eq!(new.slab_count(), old.slab_count(), "{runs:?}");
+            agree!(new.slab_count(), old.slab_count(), "{runs:?}");
         }
         // a splice of nothing leaves both as they are
         let at = rng.below(old.len() + 1);
@@ -12475,7 +12743,7 @@ fn delta_run_splices<T: Deltad>(seed: u64, max_segments: Option<usize>) {
         old.splice(at, 0, Vec::<T>::new());
         assert_eq!(new.slab_count(), slabs);
         if !old.is_empty() {
-            assert_eq!(new.slab_count(), old.slab_count());
+            agree!(new.slab_count(), old.slab_count());
         }
     }
     assert!(spliced > 0);
@@ -12485,6 +12753,7 @@ fn delta_run_splices<T: Deltad>(seed: u64, max_segments: Option<usize>) {
 /// type of value and in slabs of several sizes.
 #[test]
 fn delta_columns_take_runs() {
+    let _golden = golden::test(concat!(module_path!(), "::delta_columns_take_runs"));
     for seed in 0..9 {
         let m = [None, Some(2), Some(5)][seed as usize % 3];
         delta_run_splices::<u32>(seed, m);
@@ -12511,23 +12780,23 @@ macro_rules! delta_same_load_with {
             DeltaColumn::<$t>::load_with(bytes, $opts),
         ) {
             (Ok(v), Ok(c)) => {
-                assert_eq!(v.len(), c.len());
+                agree!(v.len(), c.len());
                 // a fill can be a run of billions: read those in places
                 if v.len() <= 10_000 {
-                    assert_eq!(v.to_vec(), c.to_vec());
+                    agree!(v.to_vec(), c.to_vec());
                 } else {
                     for i in [0, 1, v.len() / 2, v.len() - 1] {
-                        assert_eq!(v.get(i), c.get(i));
+                        agree!(v.get(i), c.get(i));
                     }
                 }
-                assert_eq!(v.save(), c.save());
+                agree!(v.save(), c.save());
                 if !c.is_empty() {
-                    assert_eq!(v.slab_count(), c.slab_count());
+                    agree!(v.slab_count(), c.slab_count());
                 }
                 Some(v)
             }
             (Err(v), Err(c)) => {
-                assert_eq!(v.to_string(), c.to_string());
+                agree!(v.to_string(), c.to_string());
                 None
             }
             (v, c) => panic!(
@@ -12588,6 +12857,7 @@ macro_rules! delta_fills {
 /// type of value: as the same values, or refused alike.
 #[test]
 fn delta_fills_agree() {
+    let _golden = golden::test(concat!(module_path!(), "::delta_fills_agree"));
     let nums = [
         0,
         1,
@@ -12696,6 +12966,7 @@ macro_rules! delta_loads_with {
 /// as in the old one, for every type of value.
 #[test]
 fn delta_columns_load_with_options() {
+    let _golden = golden::test(concat!(module_path!(), "::delta_columns_load_with_options"));
     for seed in 0..6 {
         delta_loads_with!(u32, seed, 1);
         delta_loads_with!(u64, seed, 1);
@@ -12922,7 +13193,7 @@ fn delta_pair<T: Deltad>(
         old.insert(at, v);
         model.insert(at, v);
     }
-    assert_eq!(new.slab_count(), old.slab_count());
+    agree!(new.slab_count(), old.slab_count());
     (new, old, model)
 }
 
@@ -12948,8 +13219,8 @@ fn delta_iters<T: Deltad>(seed: u64, max_segments: Option<usize>) {
     assert_eq!(new.iter().collect::<Vec<T>>(), model);
     assert_eq!(new.iter().count(), len);
     assert_eq!(new.iter().last(), model.last().copied());
-    assert_eq!(new.iter().len(), old.iter().len());
-    assert_eq!(
+    agree!(new.iter().len(), old.iter().len());
+    agree!(
         format!("{:?}", new.iter()),
         format!("{:?}", old.iter()).replace("DeltaIter", "VerifiedDeltaIter")
     );
@@ -12960,7 +13231,7 @@ fn delta_iters<T: Deltad>(seed: u64, max_segments: Option<usize>) {
         let x = new.iter_range(start, end);
         let y = old.iter_range(start..end);
         assert_eq!(delta_place(&x), (start, end, end - start));
-        assert_eq!(delta_place(&x), old_delta_place(&y));
+        agree!(delta_place(&x), old_delta_place(&y));
         assert_eq!(x.collect::<Vec<T>>(), model[start..end]);
         assert_eq!(y.collect::<Vec<T>>(), model[start..end]);
     }
@@ -12980,7 +13251,7 @@ fn delta_iters<T: Deltad>(seed: u64, max_segments: Option<usize>) {
             assert_eq!(old_delta_does(&mut y, &mv), want, "{mv:?}");
             assert_eq!(delta_place(&x), m.place(), "{mv:?}");
             assert_eq!(old_delta_place(&y), m.place(), "{mv:?}");
-            assert_eq!(
+            agree!(
                 format!("{x:?}"),
                 format!("{y:?}").replace("DeltaIter", "VerifiedDeltaIter"),
                 "{mv:?}"
@@ -12995,6 +13266,7 @@ fn delta_iters<T: Deltad>(seed: u64, max_segments: Option<usize>) {
 /// small slabs too.
 #[test]
 fn delta_iters_agree() {
+    let _golden = golden::test(concat!(module_path!(), "::delta_iters_agree"));
     for seed in 0..8 {
         for max_segments in [None, Some(2), Some(5)] {
             delta_iters::<u32>(seed, max_segments);
@@ -13016,6 +13288,7 @@ fn delta_iters_agree() {
 /// do, and a read to the end closes the window where it stops.
 #[test]
 fn delta_iter_ends() {
+    let _golden = golden::test(concat!(module_path!(), "::delta_iter_ends"));
     let mut x = hexane::verified::VerifiedDeltaIter::<Option<i64>>::default();
     let mut y = hexane::DeltaIter::<Option<i64>>::default();
     // (a range that ends before it starts, which is no slip here)
@@ -13189,7 +13462,7 @@ fn delta_run_pair<T: DeltaStepped>(
             model.insert(at + i, v);
         }
     }
-    assert_eq!(new.slab_count(), old.slab_count());
+    agree!(new.slab_count(), old.slab_count());
     (new, old, model)
 }
 
@@ -13254,7 +13527,7 @@ fn delta_run_reads<T: DeltaStepped>(seed: u64, max_segments: Option<usize>) {
     let want = delta_runs_model(&model, 0, len);
     assert_eq!(new.iter().runs().collect::<Vec<_>>(), want);
     assert_eq!(old.iter().runs().collect::<Vec<_>>(), want);
-    assert_eq!(
+    agree!(
         format!("{:?}", new.iter().runs()),
         format!("{:?}", old.iter().runs()).replace("Delta", "VerifiedDelta")
     );
@@ -13295,7 +13568,7 @@ fn delta_run_reads<T: DeltaStepped>(seed: u64, max_segments: Option<usize>) {
             }
             assert_eq!(delta_place(&x), m.place());
             assert_eq!(old_delta_place(&y), m.place());
-            assert_eq!(
+            agree!(
                 format!("{x:?}"),
                 format!("{y:?}").replace("DeltaIter", "VerifiedDeltaIter")
             );
@@ -13308,6 +13581,7 @@ fn delta_run_reads<T: DeltaStepped>(seed: u64, max_segments: Option<usize>) {
 /// every type of value, and with small slabs too.
 #[test]
 fn delta_runs_agree() {
+    let _golden = golden::test(concat!(module_path!(), "::delta_runs_agree"));
     for seed in 0..8 {
         for max_segments in [None, Some(2), Some(5)] {
             delta_run_reads::<u32>(seed, max_segments);
@@ -13337,11 +13611,11 @@ fn delta_resumes_alike<T: DeltaStepped>(
 ) -> bool {
     match (s.try_resume(new), t.try_resume(old)) {
         (Ok(x), Ok(y)) => {
-            assert_eq!(
+            agree!(
                 format!("{x:?}"),
                 format!("{y:?}").replace("DeltaIter", "VerifiedDeltaIter")
             );
-            assert_eq!(delta_place(&x), old_delta_place(&y));
+            agree!(delta_place(&x), old_delta_place(&y));
             let (pos, left) = (x.pos(), x.len());
             assert_eq!(x.collect::<Vec<T>>(), model[pos..pos + left]);
             assert_eq!(y.collect::<Vec<T>>(), model[pos..pos + left]);
@@ -13510,6 +13784,7 @@ fn delta_suspends<T: DeltaStepped>(seed: u64, max_segments: Option<usize>) {
 /// slabs too.
 #[test]
 fn delta_states_agree() {
+    let _golden = golden::test(concat!(module_path!(), "::delta_states_agree"));
     for seed in 0..8 {
         for max_segments in [None, Some(2), Some(5)] {
             delta_suspends::<u32>(seed, max_segments);
@@ -13530,6 +13805,7 @@ fn delta_states_agree() {
 /// of another type of value: said out in full.
 #[test]
 fn delta_runs_and_states_told() {
+    let _golden = golden::test(concat!(module_path!(), "::delta_runs_and_states_told"));
     let run = |prefix, delta, count| hexane::DeltaRun {
         prefix,
         delta,
@@ -13620,7 +13896,7 @@ fn delta_runs_and_states_told() {
         let x = s0.try_resume(&none).unwrap();
         let y = t0.try_resume(&old_none).unwrap();
         assert_eq!((x.pos(), x.end_pos(), x.len()), (0, 0, 0));
-        assert_eq!(
+        agree!(
             format!("{x:?}"),
             format!("{y:?}").replace("DeltaIter", "VerifiedDeltaIter")
         );
@@ -13833,7 +14109,7 @@ fn delta_scans<T: DeltaSought>(seed: u64, max_segments: Option<usize>) {
             }
             assert_eq!(delta_place(&x), m.place());
             assert_eq!(old_delta_place(&y), m.place());
-            assert_eq!(
+            agree!(
                 format!("{x:?}"),
                 format!("{y:?}").replace("DeltaIter", "VerifiedDeltaIter")
             );
@@ -13847,6 +14123,7 @@ fn delta_scans<T: DeltaSought>(seed: u64, max_segments: Option<usize>) {
 /// says: for every type of value, and with small slabs too.
 #[test]
 fn delta_scans_agree() {
+    let _golden = golden::test(concat!(module_path!(), "::delta_scans_agree"));
     for seed in 0..8 {
         for max_segments in [None, Some(2), Some(5)] {
             delta_scans::<u32>(seed, max_segments);
@@ -13908,7 +14185,7 @@ fn delta_sorted_pair<T: DeltaSought>(
         held.insert(at, v);
     }
     assert_eq!(held, model);
-    assert_eq!(new.slab_count(), old.slab_count());
+    agree!(new.slab_count(), old.slab_count());
     (new, old, model)
 }
 
@@ -14001,7 +14278,7 @@ fn delta_seeks<T: DeltaSought>(seed: u64, max_segments: Option<usize>, in_order:
         let end = start + rng.below(len - start + 1);
         let value = a_delta_target(&mut rng, &model);
         let r = new.scope_to_value(value, start, end);
-        assert_eq!(old.scope_to_value(value, start..end), r, "{value:?}");
+        agree!(r, old.scope_to_value(value, start..end), "{value:?}");
         delta_sought_rightly(&model, value, start..end, &r);
     }
     // the iterator's, among other moves
@@ -14025,9 +14302,9 @@ fn delta_seeks<T: DeltaSought>(seed: u64, max_segments: Option<usize>, in_order:
                     let target = a_delta_target(&mut rng, &model);
                     let range = a_delta_range(&mut rng, &m);
                     let r = x.seek_to_value(target, range.clone());
-                    assert_eq!(
-                        y.seek_to_value(target, range.clone()),
+                    agree!(
                         r,
+                        y.seek_to_value(target, range.clone()),
                         "{target:?} {range:?}"
                     );
                     let searched = delta_walk_sought(&mut m, target, &range, &r);
@@ -14036,7 +14313,7 @@ fn delta_seeks<T: DeltaSought>(seed: u64, max_segments: Option<usize>, in_order:
             }
             assert_eq!(delta_place(&x), m.place());
             assert_eq!(old_delta_place(&y), m.place());
-            assert_eq!(
+            agree!(
                 format!("{x:?}"),
                 format!("{y:?}").replace("DeltaIter", "VerifiedDeltaIter")
             );
@@ -14051,6 +14328,7 @@ fn delta_seeks<T: DeltaSought>(seed: u64, max_segments: Option<usize>, in_order:
 /// with small slabs too.
 #[test]
 fn delta_seeks_agree() {
+    let _golden = golden::test(concat!(module_path!(), "::delta_seeks_agree"));
     for seed in 0..8 {
         for max_segments in [None, Some(2), Some(5)] {
             for in_order in [true, false] {
@@ -14076,6 +14354,7 @@ fn delta_seeks_agree() {
 /// old iterator is asked the same.
 #[test]
 fn delta_searches_told() {
+    let _golden = golden::test(concat!(module_path!(), "::delta_searches_told"));
     let values: [u64; 6] = [1, 3, 3, 3, 7, 9];
     let mut new = VerifiedDeltaColumn::<u64>::default();
     let mut old = DeltaColumn::<u64>::default();
@@ -14212,7 +14491,7 @@ fn delta_searches_told() {
     }
     for value in [0, 1, 5, 9, 10] {
         let r = new.scope_to_value(value, 1, 6);
-        assert_eq!(old.scope_to_value(value, 1..6), r);
+        agree!(r, old.scope_to_value(value, 1..6));
         assert!(1 <= r.start && r.start <= r.end && r.end <= 6);
     }
 
@@ -14352,6 +14631,7 @@ fn delta_finds<T: DeltaFound>(seed: u64, max_segments: Option<usize>) {
 /// too.
 #[test]
 fn delta_finds_agree() {
+    let _golden = golden::test(concat!(module_path!(), "::delta_finds_agree"));
     for seed in 0..8 {
         for max_segments in [None, Some(2), Some(5)] {
             delta_finds::<u32>(seed, max_segments);
@@ -14373,6 +14653,7 @@ fn delta_finds_agree() {
 /// way round, nulls, and a finder of no column.
 #[test]
 fn delta_finds_told() {
+    let _golden = golden::test(concat!(module_path!(), "::delta_finds_told"));
     // a finder of no column
     let mut none = hexane::verified::VerifiedFindByRange::<u64>::default();
     assert_eq!((none.next(), none.next()), (None, None));
@@ -14530,7 +14811,7 @@ fn delta_encodes<T: Deltad>(seed: u64) {
     let mut new = VerifiedDeltaEncoder::<T>::new();
     let mut old = DeltaEncoder::<T>::new();
     assert_eq!((new.len(), new.is_empty()), (0, true));
-    assert_eq!(format!("{new:?}"), format!("Verified{old:?}"));
+    agree!(format!("{new:?}"), format!("Verified{old:?}"));
     for &(v, n) in &feed {
         match rng.below(4) {
             0 if n == 1 => {
@@ -14550,12 +14831,12 @@ fn delta_encodes<T: Deltad>(seed: u64) {
                 old.append_n(v, n);
             }
         }
-        assert_eq!((new.len(), new.is_empty()), (old.len(), old.is_empty()));
-        assert_eq!(format!("{new:?}"), format!("Verified{old:?}"));
+        agree!((new.len(), new.is_empty()), (old.len(), old.is_empty()));
+        agree!(format!("{new:?}"), format!("Verified{old:?}"));
     }
     assert_eq!(new.len(), values.len());
     let saved = new.save();
-    assert_eq!(saved, old.save());
+    agree!(saved, old.save());
     assert_eq!(saved, bytes);
     assert!(delta_same_load::<T>(&saved));
     let loaded = VerifiedDeltaColumn::<T>::load(&saved).unwrap();
@@ -14565,7 +14846,7 @@ fn delta_encodes<T: Deltad>(seed: u64) {
     let (new, old) = delta_fed(&feed);
     let (mut out, mut out_old) = (prefix.clone(), prefix.clone());
     let r = new.save_to(&mut out);
-    assert_eq!(r, old.save_to(&mut out_old));
+    agree!(r, old.save_to(&mut out_old));
     assert_eq!(r, prefix.len()..prefix.len() + bytes.len());
     assert_eq!(out, out_old);
     assert_eq!(out, after(&prefix, &bytes));
@@ -14574,7 +14855,7 @@ fn delta_encodes<T: Deltad>(seed: u64) {
         let (new, old) = delta_fed(&feed);
         let (mut out, mut out_old) = (prefix.clone(), prefix.clone());
         let r = new.save_to_unless(&mut out, other);
-        assert_eq!(r, old.save_to_unless(&mut out_old, other));
+        agree!(r, old.save_to_unless(&mut out_old, other));
         assert_eq!(r, prefix.len()..prefix.len() + kept.len());
         assert_eq!(out, out_old);
         assert_eq!(out, after(&prefix, kept), "{other:?}");
@@ -14626,7 +14907,7 @@ fn delta_encodes<T: Deltad>(seed: u64) {
         assert_eq!((old.len(), old.is_empty()), (given.len(), given.is_empty()));
         // what the buffer held is kept
         assert_eq!(buf[..prefix.len()], prefix[..]);
-        assert_eq!(buf, buf_old);
+        agree!(buf, buf_old);
         for &other in &others {
             let uniform = given.iter().all(|x| *x == other);
             assert_eq!(new.is_uniform(other), uniform, "{other:?}");
@@ -14645,6 +14926,7 @@ fn delta_encodes<T: Deltad>(seed: u64) {
 /// the state that writes into a buffer of the caller's too.
 #[test]
 fn delta_encoders_agree() {
+    let _golden = golden::test(concat!(module_path!(), "::delta_encoders_agree"));
     for seed in 0..24 {
         delta_encodes::<u32>(seed);
         delta_encodes::<u64>(seed);
@@ -14665,6 +14947,7 @@ fn delta_encoders_agree() {
 /// two states writing one after the other into one buffer.
 #[test]
 fn delta_encoders_told() {
+    let _golden = golden::test(concat!(module_path!(), "::delta_encoders_told"));
     // no values: no bytes
     assert!(VerifiedDeltaEncoder::<u32>::new().save().is_empty());
     assert!(VerifiedDeltaEncoder::<Option<i64>>::default()
@@ -14700,7 +14983,7 @@ fn delta_encoders_told() {
         [-2, i64::MAX - 2],
     ] {
         let bytes = VerifiedDeltaEncoder::<i64>::encode(values);
-        assert_eq!(bytes, DeltaEncoder::<i64>::encode(values), "{values:?}");
+        agree!(bytes, DeltaEncoder::<i64>::encode(values), "{values:?}");
         assert_eq!(bytes, delta_bytes(&values), "{values:?}");
         assert!(delta_same_load::<i64>(&bytes), "{values:?}");
         let loaded = VerifiedDeltaColumn::<i64>::load(&bytes).unwrap();
@@ -14709,7 +14992,7 @@ fn delta_encoders_told() {
     let top = i64::MAX as u64;
     let values = [Some(top), None, Some(0), Some(top)];
     let bytes = VerifiedDeltaEncoder::<Option<u64>>::encode(values);
-    assert_eq!(bytes, DeltaEncoder::<Option<u64>>::encode(values));
+    agree!(bytes, DeltaEncoder::<Option<u64>>::encode(values));
     assert_eq!(bytes, delta_bytes(&values));
     assert!(delta_same_load::<Option<u64>>(&bytes));
 
@@ -14720,12 +15003,12 @@ fn delta_encoders_told() {
     for value in [Some(7), None, Some(7)] {
         new.append_n(value, long);
         old.append_n(value, long);
-        assert_eq!(new.len(), old.len());
+        agree!(new.len(), old.len());
     }
     assert_eq!(new.len(), 3 * long);
-    assert_eq!(format!("{new:?}"), format!("Verified{old:?}"));
+    agree!(format!("{new:?}"), format!("Verified{old:?}"));
     let bytes = new.save();
-    assert_eq!(bytes, old.save());
+    agree!(bytes, old.save());
     assert!(bytes.len() < 40);
     // whether bytes of so many values load, the two APIs agree
     delta_same_load::<Option<u32>>(&bytes);
@@ -14785,6 +15068,10 @@ fn delta_encoders_told() {
 #[cfg(any(target_pointer_width = "64", panic = "unwind"))]
 #[test]
 fn delta_encoders_stop_at_values_too_far_apart() {
+    let _golden = golden::test(concat!(
+        module_path!(),
+        "::delta_encoders_stop_at_values_too_far_apart"
+    ));
     let told = Some("delta values out of domain: they span 2^63 or more".to_string());
     for values in [
         [i64::MIN, 0],
@@ -14881,7 +15168,7 @@ fn delta_decodes<T: Deltad>(seed: u64) {
     // read whole, whichever way the decoder is made
     let new = VerifiedDeltaDecoder::<T>::new(&bytes);
     let old = DeltaDecoder::<T>::new(&bytes);
-    assert_eq!(format!("{new:?}"), format!("Verified{old:?}"));
+    agree!(format!("{new:?}"), format!("Verified{old:?}"));
     assert_eq!(new.collect::<Vec<T>>(), values, "seed {seed}");
     assert_eq!(old.collect::<Vec<T>>(), values, "seed {seed}");
     let mut new = VerifiedDeltaDecoder::<T>::try_new(&bytes).unwrap();
@@ -14894,14 +15181,14 @@ fn delta_decodes<T: Deltad>(seed: u64) {
         match rng.below(6) {
             0 | 1 => {
                 let v = new.next();
-                assert_eq!(v, old.next(), "seed {seed} step {step}");
+                agree!(v, old.next(), "seed {seed} step {step}");
                 assert_eq!(v, values.get(at).copied(), "seed {seed} step {step}");
                 at = (at + 1).min(values.len());
             }
             2 => {
                 let n = rng.below(30);
                 let v = new.nth(n);
-                assert_eq!(v, old.nth(n), "seed {seed} step {step}");
+                agree!(v, old.nth(n), "seed {seed} step {step}");
                 assert_eq!(v, values.get(at + n).copied(), "seed {seed} step {step}");
                 at = (at + n + 1).min(values.len());
             }
@@ -14921,7 +15208,7 @@ fn delta_decodes<T: Deltad>(seed: u64) {
                     _ => 1 + rng.below(40),
                 };
                 let run = new.next_delta_run_max(max);
-                assert_eq!(run, old.next_delta_run_max(max), "seed {seed} step {step}");
+                agree!(run, old.next_delta_run_max(max), "seed {seed} step {step}");
                 assert_eq!(
                     run,
                     delta_head_run(&diffs[at..], max),
@@ -14930,7 +15217,7 @@ fn delta_decodes<T: Deltad>(seed: u64) {
                 at += run.map_or(0, |r| r.count);
             }
         }
-        assert_eq!(
+        agree!(
             format!("{new:?}"),
             format!("Verified{old:?}"),
             "seed {seed} step {step}"
@@ -14948,6 +15235,7 @@ fn delta_decodes<T: Deltad>(seed: u64) {
 /// Decoders of both APIs read saved columns alike, for the ten types.
 #[test]
 fn delta_decoders_agree() {
+    let _golden = golden::test(concat!(module_path!(), "::delta_decoders_agree"));
     for seed in 0..16 {
         delta_decodes::<u32>(seed);
         delta_decodes::<u64>(seed);
@@ -14970,11 +15258,15 @@ fn delta_same_try_new<T: Deltad>(bytes: &[u8]) -> bool {
     match (new, old) {
         (Ok(new), Ok(old)) => {
             // a spoilt count can be of more values than there is time for
-            assert!(new.take(5000).eq(old.take(5000)), "{bytes:?}");
+            agree!(
+                new.take(5000).collect::<Vec<_>>(),
+                old.take(5000).collect::<Vec<_>>(),
+                "{bytes:?}"
+            );
             true
         }
         (Err(new), Err(old)) => {
-            assert_eq!(new.to_string(), old.to_string(), "{bytes:?}");
+            agree!(new.to_string(), old.to_string(), "{bytes:?}");
             false
         }
         (new, old) => panic!("{} but {} of {bytes:?}", new.is_ok(), old.is_ok()),
@@ -15003,6 +15295,10 @@ fn delta_checked_decoders(bytes: &[u8]) -> [bool; 10] {
 /// decoder is made of any bytes a column loads from.
 #[test]
 fn delta_checked_decoders_agree_on_any_bytes() {
+    let _golden = golden::test(concat!(
+        module_path!(),
+        "::delta_checked_decoders_agree_on_any_bytes"
+    ));
     let mut taken = 0;
     let mut refused = 0;
     for seed in 0..40u64 {
@@ -15060,6 +15356,7 @@ fn delta_checked_decoders_agree_on_any_bytes() {
 /// Small cases of the decoder, written out.
 #[test]
 fn delta_decoders_told() {
+    let _golden = golden::test(concat!(module_path!(), "::delta_decoders_told"));
     fn run(count: usize, d: i64) -> Option<Run<Option<i64>>> {
         Some(Run {
             count,
@@ -15160,6 +15457,7 @@ fn delta_decoders_told() {
 /// the two APIs share: both paths name it, and its iterator.
 #[test]
 fn raw_one_type() {
+    let _golden = golden::test(concat!(module_path!(), "::raw_one_type"));
     let mut col: hexane::verified::RawColumn = hexane::RawColumn::new();
     col.splice_slice(0, 0, b"abc");
     let it: hexane::verified::RawColumnIter<'_> = hexane::RawColumn::iter(&col);
@@ -15284,6 +15582,7 @@ fn raw_edits(seed: u64, max_segments: usize) {
 
 #[test]
 fn raw_columns_against_a_model() {
+    let _golden = golden::test(concat!(module_path!(), "::raw_columns_against_a_model"));
     for seed in 0..48 {
         raw_edits(seed, [1, 2, 4, 16, 64, 4096][seed as usize % 6]);
     }
@@ -15294,6 +15593,7 @@ fn raw_columns_against_a_model() {
 /// at the same places.
 #[test]
 fn raw_made_alike() {
+    let _golden = golden::test(concat!(module_path!(), "::raw_made_alike"));
     for seed in 0..8u64 {
         let mut rng = Rng(seed.wrapping_mul(0xc2b2_ae35).wrapping_add(41) | 1);
         let n = if seed == 0 { 0 } else { rng.below(40) };
@@ -15368,6 +15668,7 @@ fn raw_values(seed: u64, max_segments: usize) {
 
 #[test]
 fn raw_values_stay_whole() {
+    let _golden = golden::test(concat!(module_path!(), "::raw_values_stay_whole"));
     for seed in 0..48 {
         raw_values(seed, [1, 2, 4, 16, 64, 4096][seed as usize % 6]);
     }
@@ -15378,6 +15679,10 @@ fn raw_values_stay_whole() {
 #[cfg(any(target_pointer_width = "64", panic = "unwind"))]
 #[test]
 fn raw_get_panics_where_try_get_refuses() {
+    let _golden = golden::test(concat!(
+        module_path!(),
+        "::raw_get_panics_where_try_get_refuses"
+    ));
     let mut col = RawColumn::with_max_segments(2);
     for i in 0..3u8 {
         col.splice_slice(col.len(), 0, &[i; 3]);
@@ -15481,6 +15786,7 @@ fn raw_cut_edits(seed: u64, max_segments: usize) {
 
 #[test]
 fn raw_cuts_follow_splices() {
+    let _golden = golden::test(concat!(module_path!(), "::raw_cuts_follow_splices"));
     for seed in 0..48 {
         raw_cut_edits(seed, [1, 2, 4, 16, 64, 4096][seed as usize % 6]);
     }
@@ -15492,6 +15798,7 @@ fn raw_cuts_follow_splices() {
 /// `hexane::verified` themselves, with LEB128 as their codec.
 #[test]
 fn codec_named_at_the_import() {
+    let _golden = golden::test(concat!(module_path!(), "::codec_named_at_the_import"));
     use hexane::verified::leb128 as l;
     let col: l::VerifiedColumn<u64> = VerifiedColumn::<u64>::from_values(&[1, 2]);
     let bytes = col.save();
@@ -15518,27 +15825,27 @@ fn codec_named_at_the_import() {
 /// same value or refused in the same words, and of the same length.
 fn codec_reads<C: hexane::verified::VCodec + Codec>(data: &[u8]) {
     let (new, old) = (C::read_u(data), C::try_read_unsigned(data));
-    match (&new, &old) {
-        (Ok(a), Ok(b)) => assert_eq!(a, b, "{data:?}"),
-        (Err(a), Err(b)) => assert_eq!(a.to_string(), b.to_string(), "{data:?}"),
-        _ => panic!("{new:?} but {old:?} of {data:?}"),
-    }
+    agree!(
+        new.as_ref().map_err(|e| e.to_string()),
+        old.as_ref().map_err(|e| e.to_string()),
+        "{data:?}"
+    );
     assert_eq!(C::read_u_opt(data), new.as_ref().ok().copied(), "{data:?}");
-    assert_eq!(C::read_u_opt(data), C::read_unsigned(data), "{data:?}");
-    assert_eq!(C::len_u(data), C::unsigned_len(data), "{data:?}");
+    agree!(C::read_u_opt(data), C::read_unsigned(data), "{data:?}");
+    agree!(C::len_u(data), C::unsigned_len(data), "{data:?}");
     if let Ok((n, _)) = new {
         assert_eq!(C::len_u(data), Some(n), "{data:?}");
     }
 
     let (new, old) = (C::read_i(data), C::try_read_signed(data));
-    match (&new, &old) {
-        (Ok(a), Ok(b)) => assert_eq!(a, b, "{data:?}"),
-        (Err(a), Err(b)) => assert_eq!(a.to_string(), b.to_string(), "{data:?}"),
-        _ => panic!("{new:?} but {old:?} of {data:?}"),
-    }
+    agree!(
+        new.as_ref().map_err(|e| e.to_string()),
+        old.as_ref().map_err(|e| e.to_string()),
+        "{data:?}"
+    );
     assert_eq!(C::read_i_opt(data), new.as_ref().ok().copied(), "{data:?}");
-    assert_eq!(C::read_i_opt(data), C::read_signed(data), "{data:?}");
-    assert_eq!(C::len_i(data), C::signed_len(data), "{data:?}");
+    agree!(C::read_i_opt(data), C::read_signed(data), "{data:?}");
+    agree!(C::len_i(data), C::signed_len(data), "{data:?}");
     if let Ok((n, _)) = new {
         assert_eq!(C::len_i(data), Some(n), "{data:?}");
     }
@@ -15556,12 +15863,12 @@ fn codec_numbers<C: hexane::verified::VCodec + Codec>() {
         C::put_u(n, &mut unsigned);
         assert_eq!(unsigned[0], 0xAA);
         unsigned.remove(0);
-        assert_eq!(unsigned, C::encode_unsigned(n).as_bytes(), "{n}");
+        agree!(unsigned, C::encode_unsigned(n).as_bytes());
         let mut signed = vec![0xAA];
         C::put_i(i, &mut signed);
         assert_eq!(signed[0], 0xAA);
         signed.remove(0);
-        assert_eq!(signed, C::encode_signed(i).as_bytes(), "{i}");
+        agree!(signed, C::encode_signed(i).as_bytes());
 
         // read back, whatever comes after
         let data = [&unsigned[..], &rest[..]].concat();
@@ -15623,6 +15930,7 @@ fn codec_headers<C: hexane::verified::VCodec + Codec>() {
 
 #[test]
 fn codecs_agree_leb128() {
+    let _golden = golden::test(concat!(module_path!(), "::codecs_agree_leb128"));
     codec_numbers::<Leb128>();
     codec_headers::<Leb128>();
 }
@@ -15650,6 +15958,7 @@ mod bijou {
 
     #[test]
     fn codecs_agree() {
+        let _golden = golden::test(concat!(module_path!(), "::codecs_agree"));
         codec_numbers::<Bijou64>();
         codec_headers::<Bijou64>();
     }
@@ -15658,6 +15967,7 @@ mod bijou {
     /// in the old API's words, by the codec and by a load.
     #[test]
     fn refusals_in_the_old_words() {
+        let _golden = golden::test(concat!(module_path!(), "::refusals_in_the_old_words"));
         let short: &[u8] = &[0xF9, 0x00];
         let over: &[u8] = &[0xFF; 9];
         for (data, why) in [
@@ -15666,11 +15976,11 @@ mod bijou {
         ] {
             let new = <Bijou64 as VCodec>::read_u(data).unwrap_err().to_string();
             let old = Bijou64::try_read_unsigned(data).unwrap_err().to_string();
-            assert_eq!(new, old);
+            agree!(new, old);
             assert!(new.contains(&format!("bijou64: {why}")), "{new}");
             let new = <Bijou64 as VCodec>::read_i(data).unwrap_err().to_string();
             let old = Bijou64::try_read_signed(data).unwrap_err().to_string();
-            assert_eq!(new, old);
+            agree!(new, old);
             assert!(new.contains(&format!("bijou64s: {why}")), "{new}");
 
             // as the count of a run, and as the value of a run of two
@@ -15688,11 +15998,12 @@ mod bijou {
     /// saves with LEB128.
     #[test]
     fn bytes_are_bijou64() {
+        let _golden = golden::test(concat!(module_path!(), "::bytes_are_bijou64"));
         fn saved<T: BKind>(values: &[T]) -> (Vec<u8>, Vec<u8>) {
             let bytes = vb::VerifiedColumn::<T>::from_values(&lent(values)).save();
-            assert_eq!(bytes, ob::Column::<T>::from_values(values.to_vec()).save());
+            agree!(bytes, ob::Column::<T>::from_values(values.to_vec()).save());
             let leb = VerifiedColumn::<T>::from_values(&lent(values)).save();
-            assert_eq!(leb, Column::<T>::from_values(values.to_vec()).save());
+            agree!(leb, Column::<T>::from_values(values.to_vec()).save());
             (bytes, leb)
         }
         // one value: a run of one unlike value, counted below zero
@@ -15732,8 +16043,8 @@ mod bijou {
         }
         assert!(it.next().is_none(), "{ctx}");
         assert!(v.get(model.len()).is_none(), "{ctx}");
-        assert_eq!(v.save(), c.save(), "{ctx}");
-        assert_eq!(v.slab_count(), c.slab_count(), "{ctx}");
+        agree!(v.save(), c.save(), "{ctx}");
+        agree!(v.slab_count(), c.slab_count(), "{ctx}");
     }
 
     /// Whether both APIs load `bytes`, into columns that are alike; if not,
@@ -15746,11 +16057,15 @@ mod bijou {
             (Ok(x), Ok(y)) => {
                 // a spoilt count can be of more values than there is time for
                 let (x, y) = (x.take(3000).map(T::keep), y.take(3000).map(old));
-                assert!(x.eq(y), "the decoders read {bytes:?} differently");
+                agree!(
+                    x.collect::<Vec<T>>(),
+                    y.collect::<Vec<T>>(),
+                    "the decoders read {bytes:?} differently"
+                );
                 true
             }
             (Err(x), Err(y)) => {
-                assert_eq!(x.to_string(), y.to_string(), "{bytes:?}");
+                agree!(x.to_string(), y.to_string(), "{bytes:?}");
                 false
             }
             (x, y) => panic!("a decoder: {} but {} of {bytes:?}", x.is_ok(), y.is_ok()),
@@ -15760,12 +16075,12 @@ mod bijou {
         match (v, c) {
             (Ok(v), Ok(c)) => {
                 assert!(decodes, "no decoder of {bytes:?}, which load");
-                assert_eq!(v.len(), c.len());
+                agree!(v.len(), c.len());
                 if v.len() <= 20_000 {
-                    assert_eq!(new_vals(&v), old_vals(&c));
+                    agree!(new_vals(&v), old_vals(&c));
                 } else {
                     for i in [0, 1, v.len() / 2, v.len() - 1] {
-                        assert_eq!(v.get(i).map(T::keep), c.get(i).map(old));
+                        agree!(v.get(i).map(T::keep), c.get(i).map(old));
                     }
                 }
                 // what loads is canonical: it is what its values save to
@@ -15774,7 +16089,7 @@ mod bijou {
                 true
             }
             (Err(v), Err(c)) => {
-                assert_eq!(v.to_string(), c.to_string(), "{bytes:?}");
+                agree!(v.to_string(), c.to_string(), "{bytes:?}");
                 false
             }
             (v, c) => panic!(
@@ -15879,6 +16194,7 @@ mod bijou {
     /// under the same edits, for every type of value.
     #[test]
     fn columns_agree() {
+        let _golden = golden::test(concat!(module_path!(), "::columns_agree"));
         for_each_kind!(columns);
     }
 
@@ -15919,6 +16235,7 @@ mod bijou {
     /// APIs take the same of them, and refuse the rest in the same words.
     #[test]
     fn loads_agree() {
+        let _golden = golden::test(concat!(module_path!(), "::loads_agree"));
         for_each_kind!(spoilt);
     }
 
@@ -15941,6 +16258,7 @@ mod bijou {
 
     #[test]
     fn one_codec_to_the_other() {
+        let _golden = golden::test(concat!(module_path!(), "::one_codec_to_the_other"));
         for_each_kind!(across);
     }
 
@@ -15948,6 +16266,7 @@ mod bijou {
     /// `hexane::verified` with the codec named.
     #[test]
     fn named_at_the_import() {
+        let _golden = golden::test(concat!(module_path!(), "::named_at_the_import"));
         use hexane::verified as v;
         let bytes = [];
         let _: vb::VerifiedColumn<u64> = v::VerifiedColumn::<u64, Bijou64>::new();
@@ -15979,7 +16298,7 @@ mod bijou {
                 c.splice(at, del, ins.iter().cloned());
                 model.splice(at..at + del, ins);
 
-                assert_eq!(p.save(), c.save(), "{ctx}");
+                agree!(p.save(), c.save(), "{ctx}");
                 let kept: Vec<T> = p.to_vec().into_iter().map(T::keep).collect();
                 assert_eq!(kept, model, "{ctx}");
                 let before = sums_before(&model);
@@ -16010,6 +16329,7 @@ mod bijou {
 
     #[test]
     fn sums_agree() {
+        let _golden = golden::test(concat!(module_path!(), "::sums_agree"));
         sums::<u64>();
         sums::<i64>();
         sums::<u32>();
@@ -16025,6 +16345,7 @@ mod bijou {
     /// old API's is.
     #[test]
     fn sums_are_searched() {
+        let _golden = golden::test(concat!(module_path!(), "::sums_are_searched"));
         let mut rng = Rng(0x005e_a2c4);
         for _ in 0..20 {
             let model: Vec<u64> = (0..rng.below(80)).map(|_| rng.next() % 5).collect();
@@ -16032,8 +16353,8 @@ mod bijou {
             let c = ob::PrefixColumn::<u64>::from_values(model.clone());
             let all: u128 = model.iter().map(|&m| m as u128).sum();
             for t in 0..all + 3 {
-                assert_eq!(p.get_index_for_prefix(t), c.get_index_for_prefix(t));
-                assert_eq!(p.get_index_for_total(t), c.get_index_for_total(t));
+                agree!(p.get_index_for_prefix(t), c.get_index_for_prefix(t));
+                agree!(p.get_index_for_total(t), c.get_index_for_total(t));
             }
         }
     }
@@ -16064,6 +16385,7 @@ mod bijou {
 
     #[test]
     fn accumulators_agree() {
+        let _golden = golden::test(concat!(module_path!(), "::accumulators_agree"));
         accs::<Mark>();
         accs::<Option<Mark>>();
         accs::<Step>();
@@ -16082,23 +16404,27 @@ mod bijou {
         let x = vb::VerifiedDeltaDecoder::<T>::try_new(bytes);
         let y = ob::DeltaDecoder::<T>::try_new(bytes);
         match (x, y) {
-            (Ok(x), Ok(y)) => assert!(x.take(3000).eq(y.take(3000)), "{bytes:?}"),
-            (Err(x), Err(y)) => assert_eq!(x.to_string(), y.to_string(), "{bytes:?}"),
+            (Ok(x), Ok(y)) => agree!(
+                x.take(3000).collect::<Vec<T>>(),
+                y.take(3000).collect::<Vec<T>>(),
+                "{bytes:?}"
+            ),
+            (Err(x), Err(y)) => agree!(x.to_string(), y.to_string(), "{bytes:?}"),
             (x, y) => panic!("a decoder: {} but {} of {bytes:?}", x.is_ok(), y.is_ok()),
         }
         let new = vb::VerifiedDeltaColumn::<T>::load(bytes);
         let old = ob::DeltaColumn::<T>::load(bytes);
         match (new, old) {
             (Ok(new), Ok(old)) => {
-                assert_eq!(new.len(), old.len(), "{bytes:?}");
+                agree!(new.len(), old.len(), "{bytes:?}");
                 let len = new.len();
                 for i in [0, 1, 2, len / 2, len.saturating_sub(1), len] {
-                    assert_eq!(new.get(i), old.get(i), "{bytes:?}");
+                    agree!(new.get(i), old.get(i), "{bytes:?}");
                 }
                 true
             }
             (Err(new), Err(old)) => {
-                assert_eq!(new.to_string(), old.to_string(), "{bytes:?}");
+                agree!(new.to_string(), old.to_string(), "{bytes:?}");
                 false
             }
             (new, old) => panic!("a load: {} but {} of {bytes:?}", new.is_ok(), old.is_ok()),
@@ -16133,9 +16459,9 @@ mod bijou {
             assert_eq!((new.len(), old.len()), (model.len(), model.len()), "{ctx}");
             assert_eq!(new.to_vec(), model, "{ctx}");
             for i in 0..model.len() + 2 {
-                assert_eq!(new.get(i), old.get(i), "{ctx}");
+                agree!(new.get(i), old.get(i), "{ctx}");
             }
-            assert_eq!(new.save(), old.save(), "{ctx}");
+            agree!(new.save(), old.save(), "{ctx}");
         }
 
         // what the columns save: loaded, written by the encoder at once
@@ -16181,6 +16507,7 @@ mod bijou {
     /// refuse the same bytes, for every type of value.
     #[test]
     fn deltas_agree() {
+        let _golden = golden::test(concat!(module_path!(), "::deltas_agree"));
         for seed in 0..6 {
             deltas::<u32>(seed);
             deltas::<u64>(seed);
@@ -16423,13 +16750,13 @@ fn cursors<T: Kind>() {
                 let place = (told.at, told.out.len());
                 assert_eq!((e.pos(), e.out_pos()), place, "{m:?}");
                 assert_eq!((o.pos(), o.out_pos()), place, "{m:?}");
-                assert_eq!(e.rebuilds(), o.rebuilds(), "{m:?}");
+                agree!(e.rebuilds(), o.rebuilds(), "{m:?}");
                 if rng.below(3) == 0 {
                     // a look at the value there, which moves nothing
                     assert_eq!(e.peek().map(T::keep).as_ref(), told.peek(), "{m:?}");
                     assert_eq!(o.peek().map(old::<T>).as_ref(), told.peek(), "{m:?}");
                     assert_eq!((e.pos(), e.out_pos()), place, "{m:?}");
-                    assert_eq!(e.rebuilds(), o.rebuilds(), "{m:?}");
+                    agree!(e.rebuilds(), o.rebuilds(), "{m:?}");
                 }
             }
             e.finish();
@@ -16462,6 +16789,10 @@ fn cursors<T: Kind>() {
 /// exactly where a step changed it.
 #[test]
 fn a_cursor_edits_as_the_old_one_does() {
+    let _golden = golden::test(concat!(
+        module_path!(),
+        "::a_cursor_edits_as_the_old_one_does"
+    ));
     for_each_kind!(cursors);
 }
 
@@ -16490,7 +16821,7 @@ fn sum_cursors<T: Totalled>() {
                 assert_eq!((e.pos(), e.out_pos()), place, "{m:?}");
                 assert_eq!((f.pos(), f.out_pos()), place, "{m:?}");
                 assert_eq!((o.pos(), o.out_pos()), place, "{m:?}");
-                assert_eq!((e.rebuilds(), f.rebuilds()), (o.rebuilds(), o.rebuilds()));
+                agree!((e.rebuilds(), f.rebuilds()), (o.rebuilds(), o.rebuilds()));
                 assert_eq!(e.peek().map(T::keep).as_ref(), told.peek(), "{m:?}");
             }
             e.finish();
@@ -16514,6 +16845,7 @@ fn sum_cursors<T: Totalled>() {
 /// the edit.
 #[test]
 fn a_cursor_of_a_prefix_column() {
+    let _golden = golden::test(concat!(module_path!(), "::a_cursor_of_a_prefix_column"));
     for_each_sum!(sum_cursors);
 }
 
@@ -16561,12 +16893,17 @@ fn acc_cursors<T: Accd>() {
 /// the values add up to as they are after the edit.
 #[test]
 fn a_cursor_of_an_accumulator_column() {
+    let _golden = golden::test(concat!(
+        module_path!(),
+        "::a_cursor_of_an_accumulator_column"
+    ));
     for_each_acc!(acc_cursors);
 }
 
 /// The steps of a cursor one by one, on a column short enough to read.
 #[test]
 fn a_cursor_step_by_step() {
+    let _golden = golden::test(concat!(module_path!(), "::a_cursor_step_by_step"));
     let mut v = VerifiedColumn::<u64>::from_values(&[1, 2, 3, 4, 5]);
     let mut e = v.edit();
     assert_eq!((e.pos(), e.out_pos(), e.peek()), (0, 0, Some(1)));
@@ -16614,6 +16951,7 @@ fn a_cursor_step_by_step() {
 #[cfg(panic = "unwind")]
 #[test]
 fn a_cursor_dropped_unfinished() {
+    let _golden = golden::test(concat!(module_path!(), "::a_cursor_dropped_unfinished"));
     let lost = "column used after a panic during an edit";
     let mut v = VerifiedColumn::<u64>::from_values(&[1, 2, 3]);
     {
@@ -16650,11 +16988,12 @@ fn a_cursor_dropped_unfinished() {
 #[cfg(panic = "unwind")]
 #[test]
 fn a_cursor_goes_forward_only() {
+    let _golden = golden::test(concat!(module_path!(), "::a_cursor_goes_forward_only"));
     let (mut v, mut c) = both::<u64>(&[1, 2, 3, 4]);
     let new = panic_of(std::panic::AssertUnwindSafe(|| v.edit_at(5).finish()));
     let old = panic_of(std::panic::AssertUnwindSafe(|| c.edit_at(5).finish()));
     assert!(new.is_some());
-    assert_eq!(new, old);
+    agree!(new, old);
     check(&v, &c, &[1, 2, 3, 4]);
     // the end is a place
     v.edit_at(4).finish();
@@ -16681,7 +17020,7 @@ fn a_cursor_goes_forward_only() {
         new.as_deref(),
         Some("column used after a panic during an edit")
     );
-    assert_eq!(new, old);
+    agree!(new, old);
 }
 
 #[cfg(feature = "bijou64")]
@@ -16712,7 +17051,7 @@ mod bijou_cursors {
                     let place = (told.at, told.out.len());
                     assert_eq!((e.pos(), e.out_pos()), place, "{m:?}");
                     assert_eq!((o.pos(), o.out_pos()), place, "{m:?}");
-                    assert_eq!(e.rebuilds(), o.rebuilds(), "{m:?}");
+                    agree!(e.rebuilds(), o.rebuilds(), "{m:?}");
                     assert_eq!(e.peek().map(T::keep).as_ref(), told.peek(), "{m:?}");
                 }
                 e.finish();
@@ -16720,8 +17059,8 @@ mod bijou_cursors {
                 model = told.done();
                 let new: Vec<T> = v.to_vec().into_iter().map(T::keep).collect();
                 assert_eq!(new, model);
-                assert_eq!(v.save(), c.save());
-                assert_eq!(v.slab_count(), c.slab_count());
+                agree!(v.save(), c.save());
+                agree!(v.slab_count(), c.slab_count());
             }
         }
     }
@@ -16730,6 +17069,7 @@ mod bijou_cursors {
     /// what the old API's does of such a column.
     #[test]
     fn a_cursor_with_bijou64() {
+        let _golden = golden::test(concat!(module_path!(), "::a_cursor_with_bijou64"));
         cursors::<u64>();
         cursors::<i64>();
         cursors::<Option<i64>>();
@@ -16972,9 +17312,9 @@ macro_rules! old_delta_move {
 fn delta_cursor_check<T: Deltad>(v: &VerifiedDeltaColumn<T>, c: &DeltaColumn<T>, model: &[T]) {
     assert_eq!(v.to_vec(), model);
     delta_agrees(v, c);
-    assert_eq!(v.save(), c.save());
+    agree!(v.save(), c.save());
     if !model.is_empty() {
-        assert_eq!(v.slab_count(), c.slab_count());
+        agree!(v.slab_count(), c.slab_count());
     }
 }
 
@@ -17048,6 +17388,10 @@ fn delta_cursors<T: Deltad>(seed: u64, max_segments: Option<usize>) {
 /// column counts an edit exactly where a step changed it.
 #[test]
 fn a_delta_cursor_edits_as_the_old_one_does() {
+    let _golden = golden::test(concat!(
+        module_path!(),
+        "::a_delta_cursor_edits_as_the_old_one_does"
+    ));
     for seed in 0..6 {
         let m = [None, Some(2), Some(5)][seed as usize % 3];
         delta_cursors::<u32>(seed, m);
@@ -17065,6 +17409,7 @@ fn a_delta_cursor_edits_as_the_old_one_does() {
 
 #[test]
 fn a_delta_cursor_step_by_step() {
+    let _golden = golden::test(concat!(module_path!(), "::a_delta_cursor_step_by_step"));
     let mut v = VerifiedDeltaColumn::<u64>::from_values(&[10, 20, 30, 40, 50]);
     let mut e = v.edit();
     assert_eq!((e.pos(), e.out_pos(), e.peek()), (0, 0, Some(10)));
@@ -17132,6 +17477,10 @@ fn a_delta_cursor_step_by_step() {
 /// `DeltaColumn`'s cursor finishes when it is dropped.
 #[test]
 fn a_delta_cursor_dropped_unfinished() {
+    let _golden = golden::test(concat!(
+        module_path!(),
+        "::a_delta_cursor_dropped_unfinished"
+    ));
     let mut v = VerifiedDeltaColumn::<u64>::from_values(&[1, 2, 3]);
     {
         let mut e = v.edit();
@@ -17162,12 +17511,16 @@ fn a_delta_cursor_dropped_unfinished() {
 #[cfg(panic = "unwind")]
 #[test]
 fn a_delta_cursor_panics_as_the_old_one_does() {
+    let _golden = golden::test(concat!(
+        module_path!(),
+        "::a_delta_cursor_panics_as_the_old_one_does"
+    ));
     let mut v = VerifiedDeltaColumn::<u64>::from_values(&[1, 2, 3, 4]);
     let mut c = DeltaColumn::<u64>::from_values(vec![1, 2, 3, 4]);
     let new = panic_of(std::panic::AssertUnwindSafe(|| v.edit_at(5).finish()));
     let old = panic_of(std::panic::AssertUnwindSafe(|| c.edit_at(5).finish()));
     assert_eq!(new.as_deref(), Some("edit_at out of bounds"));
-    assert_eq!(new, old);
+    agree!(new, old);
     delta_cursor_check(&v, &c, &[1, 2, 3, 4]);
     // the end is a place
     v.edit_at(4).finish();
@@ -17188,7 +17541,7 @@ fn a_delta_cursor_panics_as_the_old_one_does() {
         new.as_deref(),
         Some("delta values out of domain: they would span 2^63 or more")
     );
-    assert_eq!(new, old);
+    agree!(new, old);
     assert_eq!((v.len(), v.is_empty()), (0, true));
     v.push(5);
     assert_eq!(v.to_vec(), [5]);
@@ -17236,9 +17589,9 @@ mod bijou_delta_cursors {
             drop(o);
             model = told.done();
             assert_eq!(v.to_vec(), model);
-            assert_eq!(v.save(), c.save());
+            agree!(v.save(), c.save());
             if !model.is_empty() {
-                assert_eq!(v.slab_count(), c.slab_count());
+                agree!(v.slab_count(), c.slab_count());
             }
         }
     }
@@ -17247,6 +17600,7 @@ mod bijou_delta_cursors {
     /// does what the old API's does of such a column.
     #[test]
     fn a_delta_cursor_with_bijou64() {
+        let _golden = golden::test(concat!(module_path!(), "::a_delta_cursor_with_bijou64"));
         for seed in 0..3 {
             cursors::<u64>(seed);
             cursors::<i64>(seed);
@@ -17357,6 +17711,7 @@ where
 /// is counted exactly where a splice changes something.
 #[test]
 fn copies_as_the_old_api_does() {
+    let _golden = golden::test(concat!(module_path!(), "::copies_as_the_old_api_does"));
     for_each_kind!(copies);
 }
 
@@ -17401,6 +17756,7 @@ where
 /// sums of the values as they are after the copy.
 #[test]
 fn copies_of_a_prefix_column() {
+    let _golden = golden::test(concat!(module_path!(), "::copies_of_a_prefix_column"));
     for_each_sum!(sum_copies);
 }
 
@@ -17408,6 +17764,7 @@ fn copies_of_a_prefix_column() {
 #[allow(clippy::reversed_empty_ranges)]
 #[test]
 fn copies_step_by_step() {
+    let _golden = golden::test(concat!(module_path!(), "::copies_step_by_step"));
     let mut v = VerifiedColumn::<u64>::from_values(&[1, 2, 3]);
     let src = VerifiedColumn::<u64>::from_values(&[7, 8, 9, 10]);
     let splices = [
@@ -17446,6 +17803,7 @@ fn copies_step_by_step() {
 #[cfg(panic = "unwind")]
 #[test]
 fn copies_out_of_order_panic() {
+    let _golden = golden::test(concat!(module_path!(), "::copies_out_of_order_panic"));
     let bad: [&[Splice]; 3] = [
         &[
             Splice {
@@ -17487,7 +17845,7 @@ fn copies_out_of_order_panic() {
             c.copy_ranges(cs, splices.iter().cloned())
         }));
         assert!(new.is_some(), "{splices:?}");
-        assert_eq!(new, old, "{splices:?}");
+        agree!(new, old, "{splices:?}");
     }
 }
 
@@ -17551,6 +17909,10 @@ fn delta_copies<T: Deltad>(seed: u64, max_segments: Option<usize>) {
 /// something.
 #[test]
 fn delta_copies_as_the_old_api_does() {
+    let _golden = golden::test(concat!(
+        module_path!(),
+        "::delta_copies_as_the_old_api_does"
+    ));
     for seed in 0..6 {
         let m = [None, Some(2), Some(5)][seed as usize % 3];
         delta_copies::<u32>(seed, m);
@@ -17572,6 +17934,10 @@ fn delta_copies_as_the_old_api_does() {
 #[cfg(panic = "unwind")]
 #[test]
 fn delta_copies_panic_as_the_old_ones_do() {
+    let _golden = golden::test(concat!(
+        module_path!(),
+        "::delta_copies_panic_as_the_old_ones_do"
+    ));
     let bad = [
         Splice {
             pos: 2,
@@ -17593,7 +17959,7 @@ fn delta_copies_panic_as_the_old_ones_do() {
         c.copy_ranges(cs, bad.iter().cloned())
     }));
     assert!(new.is_some());
-    assert_eq!(new, old);
+    agree!(new, old);
 
     let mut v = VerifiedDeltaColumn::<i64>::from_values(&[i64::MIN]);
     let mut c = DeltaColumn::<i64>::from_values(vec![i64::MIN]);
@@ -17611,7 +17977,7 @@ fn delta_copies_panic_as_the_old_ones_do() {
         new.as_deref(),
         Some("delta values out of domain: they would span 2^63 or more")
     );
-    assert_eq!(new, old);
+    agree!(new, old);
     assert_eq!((v.len(), v.is_empty()), (0, true));
     v.push(5);
     assert_eq!(v.to_vec(), [5]);
@@ -17685,14 +18051,14 @@ fn shifted<T: Kind>() {
             }
             for _ in 0..8 {
                 match rng.below(3) {
-                    0 => assert_eq!(
+                    0 => agree!(
                         u.peek().map(|g| T::keep(*g)),
                         w.peek().map(|g| old::<T>(*g))
                     ),
-                    1 => assert_eq!(u.next().map(T::keep), w.next().map(old::<T>)),
+                    1 => agree!(u.next().map(T::keep), w.next().map(old::<T>)),
                     _ => {
                         let n = rng.below(5);
-                        assert_eq!(u.nth(n).map(T::keep), w.nth(n).map(old::<T>));
+                        agree!(u.nth(n).map(T::keep), w.nth(n).map(old::<T>));
                     }
                 }
             }
@@ -17702,9 +18068,9 @@ fn shifted<T: Kind>() {
             let mut y = c.iter();
             for _ in 0..6 {
                 let p = VShiftable::get_pos(&x);
-                assert_eq!(p, Shiftable::get_pos(&y));
-                assert_eq!(VShiftable::get_max(&x), Shiftable::get_max(&y));
-                assert_eq!(VShiftable::get_range(&x), Shiftable::get_range(&y));
+                agree!(p, Shiftable::get_pos(&y));
+                agree!(VShiftable::get_max(&x), Shiftable::get_max(&y));
+                agree!(VShiftable::get_range(&x), Shiftable::get_range(&y));
                 let t = p + rng.below(15);
                 match rng.below(6) {
                     0 => {
@@ -17727,14 +18093,14 @@ fn shifted<T: Kind>() {
                     4 => {
                         let r = t..t + rng.below(20);
                         let a = VShiftable::shift_next(&mut x, r.clone()).map(T::keep);
-                        assert_eq!(a, Shiftable::shift_next(&mut y, r).map(old::<T>));
+                        agree!(a, Shiftable::shift_next(&mut y, r).map(old::<T>));
                     }
                     _ => {
                         let a = VShiftable::seek_to(&mut x, t).map(T::keep);
-                        assert_eq!(a, Shiftable::seek_to(&mut y, t).map(old::<T>));
+                        agree!(a, Shiftable::seek_to(&mut y, t).map(old::<T>));
                     }
                 }
-                assert_eq!(x.next().map(T::keep), y.next().map(old::<T>));
+                agree!(x.next().map(T::keep), y.next().map(old::<T>));
             }
         }
     }
@@ -17745,6 +18111,10 @@ fn shifted<T: Kind>() {
 /// (`unshift`), and each move of `VShiftable` beside `Shiftable`'s.
 #[test]
 fn an_iterator_repositions_as_the_old_one_does() {
+    let _golden = golden::test(concat!(
+        module_path!(),
+        "::an_iterator_repositions_as_the_old_one_does"
+    ));
     for_each_kind!(shifted);
 }
 
@@ -17752,6 +18122,7 @@ fn an_iterator_repositions_as_the_old_one_does() {
 #[cfg(panic = "unwind")]
 #[test]
 fn ranges_out_of_order_panic() {
+    let _golden = golden::test(concat!(module_path!(), "::ranges_out_of_order_panic"));
     let (v, c) = both::<u64>(&[1, 2, 3, 4, 5, 6]);
     let bad = [3..4, 1..2];
     let new = panic_of(std::panic::AssertUnwindSafe(|| {
@@ -17764,7 +18135,7 @@ fn ranges_out_of_order_panic() {
         new.as_deref(),
         Some("ranges must be ascending and non-overlapping")
     );
-    assert_eq!(new, old_);
+    agree!(new, old_);
 }
 
 // ── Repositioning the prefix, accumulator and delta iterators ──────────────
@@ -17788,7 +18159,7 @@ fn prefix_shifted<T: Totalled>() {
             Shiftable::advance_to(&mut y, a);
             let new: Vec<Item<T>> = x.ranges(&rs).map(|pv| new_item(Some(pv))).collect();
             let old_: Vec<Item<T>> = y.ranges(rs.clone()).map(|pv| old_item(Some(pv))).collect();
-            assert_eq!(new, old_, "{rs:?}");
+            agree!(new, old_, "{rs:?}");
 
             let (s, e) = (rng.below(len + 2), rng.below(len + 10));
             let mut u = p.prefix_iter().unshift();
@@ -17799,11 +18170,11 @@ fn prefix_shifted<T: Totalled>() {
             }
             for _ in 0..8 {
                 match rng.below(3) {
-                    0 => assert_eq!(new_item(u.peek().cloned()), old_item(w.peek().cloned())),
-                    1 => assert_eq!(new_item(u.next()), old_item(w.next())),
+                    0 => agree!(new_item(u.peek().cloned()), old_item(w.peek().cloned())),
+                    1 => agree!(new_item(u.next()), old_item(w.next())),
                     _ => {
                         let n = rng.below(5);
-                        assert_eq!(new_item(u.nth(n)), old_item(w.nth(n)));
+                        agree!(new_item(u.nth(n)), old_item(w.nth(n)));
                     }
                 }
             }
@@ -17815,6 +18186,10 @@ fn prefix_shifted<T: Totalled>() {
 /// with their sums, of several ranges in turn and through a lookahead.
 #[test]
 fn a_prefix_iterator_repositions_as_the_old_one_does() {
+    let _golden = golden::test(concat!(
+        module_path!(),
+        "::a_prefix_iterator_repositions_as_the_old_one_does"
+    ));
     for_each_sum!(prefix_shifted);
 }
 
@@ -17859,6 +18234,10 @@ fn acc_shifted<T: Accd>() {
 /// through a lookahead moved to a range.
 #[test]
 fn an_accumulator_iterator_repositions() {
+    let _golden = golden::test(concat!(
+        module_path!(),
+        "::an_accumulator_iterator_repositions"
+    ));
     for_each_acc!(acc_shifted);
 }
 
@@ -17910,6 +18289,10 @@ fn delta_shifted<T: Deltad>(seed: u64) {
 /// several ranges in turn, and through a lookahead.
 #[test]
 fn a_delta_iterator_repositions_as_the_old_one_does() {
+    let _golden = golden::test(concat!(
+        module_path!(),
+        "::a_delta_iterator_repositions_as_the_old_one_does"
+    ));
     for seed in 0..4 {
         delta_shifted::<u32>(seed);
         delta_shifted::<i64>(seed);
@@ -17947,7 +18330,7 @@ fn runs_shifted<T: Kind>() {
                 .ranges(rs.clone())
                 .map(|r| (r.count, old::<T>(r.value)))
                 .collect();
-            assert_eq!(new, old_, "{rs:?}");
+            agree!(new, old_, "{rs:?}");
             let flat: Vec<T> = new
                 .iter()
                 .flat_map(|(n, x)| std::iter::repeat_n(x.clone(), *n))
@@ -17959,17 +18342,17 @@ fn runs_shifted<T: Kind>() {
             let mut w = c.iter().runs().unshift();
             for _ in 0..6 {
                 match rng.below(3) {
-                    0 => assert_eq!(
+                    0 => agree!(
                         u.peek().map(|r| (r.count, T::keep(r.value))),
                         w.peek().map(|r| (r.count, old::<T>(r.value)))
                     ),
-                    1 => assert_eq!(
+                    1 => agree!(
                         u.next().map(|r| (r.count, T::keep(r.value))),
                         w.next().map(|r| (r.count, old::<T>(r.value)))
                     ),
                     _ => {
                         let n = rng.below(4);
-                        assert_eq!(
+                        agree!(
                             u.nth(n).map(|r| (r.count, T::keep(r.value))),
                             w.nth(n).map(|r| (r.count, old::<T>(r.value)))
                         );
@@ -17982,9 +18365,9 @@ fn runs_shifted<T: Kind>() {
             let mut y = c.iter().runs();
             for _ in 0..6 {
                 let p = VShiftable::get_pos(&x);
-                assert_eq!(p, Shiftable::get_pos(&y));
-                assert_eq!(VShiftable::get_max(&x), Shiftable::get_max(&y));
-                assert_eq!(VShiftable::get_range(&x), Shiftable::get_range(&y));
+                agree!(p, Shiftable::get_pos(&y));
+                agree!(VShiftable::get_max(&x), Shiftable::get_max(&y));
+                agree!(VShiftable::get_range(&x), Shiftable::get_range(&y));
                 let t = p + rng.below(15);
                 match rng.below(6) {
                     0 => {
@@ -18010,15 +18393,15 @@ fn runs_shifted<T: Kind>() {
                             .map(|r| (r.count, T::keep(r.value)));
                         let b =
                             Shiftable::shift_next(&mut y, r).map(|r| (r.count, old::<T>(r.value)));
-                        assert_eq!(a, b);
+                        agree!(a, b);
                     }
                     _ => {
                         let a = VShiftable::seek_to(&mut x, t).map(|r| (r.count, T::keep(r.value)));
                         let b = Shiftable::seek_to(&mut y, t).map(|r| (r.count, old::<T>(r.value)));
-                        assert_eq!(a, b);
+                        agree!(a, b);
                     }
                 }
-                assert_eq!(
+                agree!(
                     x.next().map(|r| (r.count, T::keep(r.value))),
                     y.next().map(|r| (r.count, old::<T>(r.value)))
                 );
@@ -18032,6 +18415,10 @@ fn runs_shifted<T: Kind>() {
 /// each move of `VShiftable` beside `Shiftable`'s.
 #[test]
 fn runs_reposition_as_the_old_ones_do() {
+    let _golden = golden::test(concat!(
+        module_path!(),
+        "::runs_reposition_as_the_old_ones_do"
+    ));
     for_each_kind!(runs_shifted);
 }
 
@@ -18066,7 +18453,7 @@ fn delta_runs_shifted<T: Deltad>(seed: u64) {
         Shiftable::advance_to(&mut y, a);
         let new: Vec<DeltaRun> = x.ranges(&rs).collect();
         let old_: Vec<DeltaRun> = y.ranges(rs.clone()).collect();
-        assert_eq!(new, old_, "{rs:?}");
+        agree!(new, old_, "{rs:?}");
 
         // a lookahead, looked at and walked
         let mut u = v.iter().runs().unshift();
@@ -18087,9 +18474,9 @@ fn delta_runs_shifted<T: Deltad>(seed: u64) {
         let mut y = c.iter().runs();
         for _ in 0..6 {
             let p = VShiftable::get_pos(&x);
-            assert_eq!(p, Shiftable::get_pos(&y));
-            assert_eq!(VShiftable::get_max(&x), Shiftable::get_max(&y));
-            assert_eq!(VShiftable::get_range(&x), Shiftable::get_range(&y));
+            agree!(p, Shiftable::get_pos(&y));
+            agree!(VShiftable::get_max(&x), Shiftable::get_max(&y));
+            agree!(VShiftable::get_range(&x), Shiftable::get_range(&y));
             let t = p + rng.below(15);
             match rng.below(6) {
                 0 => {
@@ -18112,14 +18499,14 @@ fn delta_runs_shifted<T: Deltad>(seed: u64) {
                 4 => {
                     let r = t..t + rng.below(20);
                     let a = VShiftable::shift_next(&mut x, r.clone());
-                    assert_eq!(a, Shiftable::shift_next(&mut y, r));
+                    agree!(a, Shiftable::shift_next(&mut y, r));
                 }
                 _ => {
                     let a = VShiftable::seek_to(&mut x, t);
-                    assert_eq!(a, Shiftable::seek_to(&mut y, t));
+                    agree!(a, Shiftable::seek_to(&mut y, t));
                 }
             }
-            assert_eq!(x.next(), y.next());
+            agree!(x.next(), y.next());
         }
     }
 }
@@ -18130,6 +18517,10 @@ fn delta_runs_shifted<T: Deltad>(seed: u64) {
 /// beside `Shiftable`'s.
 #[test]
 fn delta_runs_reposition_as_the_old_ones_do() {
+    let _golden = golden::test(concat!(
+        module_path!(),
+        "::delta_runs_reposition_as_the_old_ones_do"
+    ));
     for seed in 0..6 {
         delta_runs_shifted::<u32>(seed);
         delta_runs_shifted::<i64>(seed);
@@ -18183,7 +18574,7 @@ fn loaded_by_runs<T: Kind>() {
             y.try_next_run()
                 .map(|r| r.map(|r| (r.count, old::<T>(r.value))))
         });
-        assert_eq!(a, b);
+        agree!(a, b);
         let xc = x
             .finalize()
             .map(|c| c.iter().map(T::keep).collect::<Vec<T>>())
@@ -18192,7 +18583,7 @@ fn loaded_by_runs<T: Kind>() {
             .finalize()
             .map(|c| c.iter().map(old::<T>).collect::<Vec<T>>())
             .map_err(|e| format!("{e:?}"));
-        assert_eq!(xc, yc);
+        agree!(xc, yc);
         if let Ok(vs) = &xc {
             // the runs pulled are the first of the column's values
             let given: Vec<T> = a
@@ -18211,6 +18602,10 @@ fn loaded_by_runs<T: Kind>() {
 /// the same errors, the same column, which begins with the runs pulled.
 #[test]
 fn a_column_loads_by_runs_as_the_old_one_does() {
+    let _golden = golden::test(concat!(
+        module_path!(),
+        "::a_column_loads_by_runs_as_the_old_one_does"
+    ));
     for_each_kind!(loaded_by_runs);
 }
 
@@ -18235,7 +18630,7 @@ fn prefix_loaded_by_runs<T: Totalled>() {
             y.try_next_run()
                 .map(|r| r.map(|r| (r.count, old::<T>(r.value))))
         });
-        assert_eq!(a, b);
+        agree!(a, b);
         let xc = x.finalize().unwrap();
         let yc = y.finalize().unwrap();
         let xs: Vec<i128> = (0..model.len())
@@ -18251,6 +18646,10 @@ fn prefix_loaded_by_runs<T: Totalled>() {
 /// A verified prefix column loads run by run as `PrefixColumn`'s does.
 #[test]
 fn a_prefix_column_loads_by_runs_as_the_old_one_does() {
+    let _golden = golden::test(concat!(
+        module_path!(),
+        "::a_prefix_column_loads_by_runs_as_the_old_one_does"
+    ));
     for_each_sum!(prefix_loaded_by_runs);
 }
 
@@ -18258,6 +18657,10 @@ fn a_prefix_column_loads_by_runs_as_the_old_one_does() {
 /// many of the value, as `Column`'s do.
 #[test]
 fn a_fill_loads_by_runs_as_the_old_one_does() {
+    let _golden = golden::test(concat!(
+        module_path!(),
+        "::a_fill_loads_by_runs_as_the_old_one_does"
+    ));
     for n in [0usize, 1, 5, 1000] {
         let opts = LoadOpts::new().with_length(n).with_fill(7u64);
         let mut x = VerifiedColumn::<u64>::load_iter(&[], opts);
@@ -18354,6 +18757,7 @@ plain_kind!(Tag, |rng| [Tag::Int, Tag::Str][rng.below(2)]);
 /// with the client's error; and the order of a search is the client's.
 #[test]
 fn a_clients_own_encoding() {
+    let _golden = golden::test(concat!(module_path!(), "::a_clients_own_encoding"));
     let (v, c) = both::<Tag>(&[Tag::Int, Tag::Str, Tag::Str]);
     // a literal run of one `Int` (a count of -1), then a run of two
     // `Str`s; with bijou64 the counts are other bytes, the tags not
@@ -18386,7 +18790,7 @@ fn a_clients_own_encoding() {
         let (v, c) = both::<Tag>(&model);
         for t in [Tag::Int, Tag::Str] {
             let n = model.len();
-            assert_eq!(v.scope_to_value(t, 0, n), c.scope_to_value(t, 0..n));
+            agree!(v.scope_to_value(t, 0, n), c.scope_to_value(t, 0..n));
         }
         assert!(check_same_load::<Tag>(&v.save()));
     }
@@ -18485,7 +18889,7 @@ where
     let mut c = Column::<T, Fixed8>::new();
     c.splice(0, 0, vals.iter().cloned());
     let bytes = v.save();
-    assert_eq!(c.save(), bytes);
+    agree!(bytes, c.save());
     let back = VerifiedColumn::<T, Fixed8>::load(&bytes).unwrap();
     let back: Vec<T> = back.to_vec().into_iter().map(T::keep).collect();
     assert_eq!(back, vals);
@@ -18497,7 +18901,7 @@ where
         let at = vals.len() / 2;
         v.splice(at, 1, &lent(&vals[..2]));
         c.splice(at, 1, vals[..2].iter().cloned());
-        assert_eq!(v.save(), c.save());
+        agree!(v.save(), c.save());
         assert!(VerifiedColumn::<T, Fixed8>::load(&v.save()).is_ok());
     }
 }
@@ -18507,6 +18911,7 @@ where
 /// refused.
 #[test]
 fn a_clients_own_codec() {
+    let _golden = golden::test(concat!(module_path!(), "::a_clients_own_codec"));
     // a literal run of two (a header of -2), then the numbers, eight
     // bytes each
     let v = VerifiedColumn::<u64, Fixed8>::from_values(&[5, 6]);
@@ -18578,6 +18983,10 @@ fn bit_index_agrees<T: Kind>() {
 
 #[test]
 fn a_fenwick_index_keeps_a_plain_column() {
+    let _golden = golden::test(concat!(
+        module_path!(),
+        "::a_fenwick_index_keeps_a_plain_column"
+    ));
     for_each_kind!(bit_index_agrees);
 }
 
@@ -18587,6 +18996,7 @@ fn a_fenwick_index_keeps_a_plain_column() {
 /// codec writes: at every length's edges, and at random.
 #[test]
 fn leb_sizes_agree() {
+    let _golden = golden::test(concat!(module_path!(), "::leb_sizes_agree"));
     let mut us: Vec<u64> = vec![0, u64::MAX];
     let mut is: Vec<i64> = vec![0, -1, i64::MIN, i64::MAX];
     for k in 1..64 {
@@ -18605,12 +19015,12 @@ fn leb_sizes_agree() {
         let mut buf = vec![];
         <Leb128 as hexane::verified::VCodec>::put_u(n, &mut buf);
         assert_eq!(hexane::verified::ulebsize(n), buf.len() as u64, "{n}");
-        assert_eq!(hexane::verified::ulebsize(n), hexane::ulebsize(n), "{n}");
+        agree!(hexane::verified::ulebsize(n), hexane::ulebsize(n), "{n}");
     }
     for i in is {
         let mut buf = vec![];
         <Leb128 as hexane::verified::VCodec>::put_i(i, &mut buf);
         assert_eq!(hexane::verified::lebsize(i), buf.len() as u64, "{i}");
-        assert_eq!(hexane::verified::lebsize(i), hexane::lebsize(i), "{i}");
+        agree!(hexane::verified::lebsize(i), hexane::lebsize(i), "{i}");
     }
 }
