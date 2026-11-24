@@ -521,7 +521,7 @@ mod tests {
         assert!(dst.get_heads().is_empty());
 
         dst.apply_bundle(bundles[0].clone()).unwrap();
-        assert!(dst.bundle_queue.is_empty());
+        assert!(dst.staged_bundles.is_empty());
 
         let heads = dst.get_heads();
         dst.apply_bundle(bundles[0].clone()).unwrap();
@@ -569,7 +569,7 @@ mod tests {
         dst.put(&ROOT, "seed", 0).unwrap();
         dst.commit();
         dst.load_incremental(&bytes).unwrap();
-        assert!(dst.doc.bundle_queue.is_empty());
+        assert!(dst.doc.staged_bundles.is_empty());
         assert_eq!(dst.get(&ROOT, "key").unwrap().unwrap().0, 11.into());
 
         let mut audit = AutoCommit::new()
@@ -579,7 +579,7 @@ mod tests {
         audit.put(&ROOT, "seed", 0).unwrap();
         audit.commit();
         audit.load_incremental(&bytes).unwrap();
-        assert!(audit.doc.bundle_queue.is_empty());
+        assert!(audit.doc.staged_bundles.is_empty());
         assert_eq!(audit.get(&ROOT, "key").unwrap().unwrap().0, 11.into());
     }
 
@@ -594,7 +594,7 @@ mod tests {
         dst.apply_bundle(bundles[1].clone()).unwrap();
         assert!(dst.get_heads().is_empty());
         dst.apply_changes(changes[..3].to_vec()).unwrap();
-        assert!(dst.bundle_queue.is_empty());
+        assert!(dst.staged_bundles.is_empty());
         assert_eq!(dst.get_heads(), src.doc.get_heads());
     }
 
@@ -608,11 +608,37 @@ mod tests {
         dst.apply_bundle(bundles[0].clone()).unwrap();
         dst.apply_bundle(bundles[2].clone()).unwrap();
         let mut dst = Automerge::load(&dst.save()).unwrap();
-        assert!(!dst.bundle_queue.is_empty());
+        assert!(!dst.staged_bundles.is_empty());
 
         dst.apply_bundle(bundles[1].clone()).unwrap();
-        assert!(dst.bundle_queue.is_empty());
+        assert!(dst.staged_bundles.is_empty());
         assert_eq!(dst.get_heads(), src.doc.get_heads());
+    }
+
+    #[test]
+    fn a_failing_staged_bundle_stays_staged_and_the_rest_apply() {
+        let mut rng = make_rng();
+        let src = audited_src(&mut rng, 9);
+        let bundles = bundles_of_three(&src);
+        // audit mode rehashes the members, so a forged head fails to apply
+        let mut forged = bundles[1].clone();
+        forged.heads[0].0 = ChangeHash([7; 32]);
+
+        let mut dst = Automerge::new().enable_audit_mode().unwrap();
+        dst.apply_bundle(forged).unwrap();
+        dst.apply_bundle(bundles[1].clone()).unwrap();
+        dst.apply_bundle(bundles[2].clone()).unwrap();
+        assert!(dst.get_heads().is_empty());
+
+        assert!(dst.apply_bundle(bundles[0].clone()).is_err());
+        assert_eq!(dst.get_heads(), src.doc.get_heads());
+        assert_eq!(dst.staged_bundles.iter().count(), 1);
+        // it is retried, and fails, whenever a later apply drains staging,
+        // though that apply's own changes land
+        assert!(dst.apply_bundle(bundles[0].clone()).is_err());
+        assert!(dst.apply_changes(vec![]).is_err());
+        assert_eq!(dst.get_heads(), src.doc.get_heads());
+        assert_eq!(dst.staged_bundles.iter().count(), 1);
     }
 
     #[test]
@@ -624,10 +650,10 @@ mod tests {
         // the same actor, so the queued bundle's seqs are about to be reused
         let mut dst = AutoCommit::new().with_actor(src.get_actor().clone());
         dst.doc.apply_bundle(bundles[1].clone()).unwrap();
-        assert!(!dst.doc.bundle_queue.is_empty());
+        assert!(!dst.doc.staged_bundles.is_empty());
         dst.put(&ROOT, "mine", 1).unwrap();
         dst.commit();
-        assert!(dst.doc.bundle_queue.is_empty());
+        assert!(dst.doc.staged_bundles.is_empty());
         Automerge::load(&dst.save()).unwrap();
     }
 

@@ -1258,9 +1258,9 @@ mod tests {
         }
         let changes = src.get_changes(&[]).unwrap();
         doc.apply_changes(changes[1..].to_vec()).unwrap();
-        assert!(!doc.queue.is_empty());
+        assert!(!doc.staged.is_empty());
         doc.apply_bundle(src.bundle_document().unwrap()).unwrap();
-        assert!(doc.queue.is_empty());
+        assert!(doc.staged.is_empty());
         doc.apply_changes(changes).unwrap();
         assert_eq!(doc.get_heads(), src.get_heads());
     }

@@ -1,8 +1,8 @@
 use crate::automerge::AuditMode;
 use crate::automerge::Automerge;
 use crate::change_graph::ApplyLookup;
-use crate::change_queue::{ChangeBatch, ChangeQueue};
 use crate::op_set2::types::{KeyRef, ScalarValue as OpScalarValue};
+use crate::staging::{ChangeBatch, StagedChanges};
 use crate::types::{ActorId, Clock, ElemId, ObjId, OpId, SmallHashMap};
 use crate::AutomergeError;
 use crate::Change;
@@ -18,9 +18,9 @@ use std::ops::Range;
 type PredCache = SmallHashMap<OpId, Vec<(OpId, Option<i64>)>>;
 
 #[derive(Debug, Clone, Default)]
-struct BatchApply {
+struct BatchApply<'a> {
     ops: Vec<ChangeOp>,
-    changes: Vec<Change>,
+    changes: Vec<&'a Change>,
 }
 
 /// Document order for map ops; sequence ops still need untangling.
@@ -250,8 +250,8 @@ fn normalize_increment_successors(is_counter: bool, successors: &mut [(OpId, Opt
     }
 }
 
-impl BatchApply {
-    fn new(changes: Vec<Change>) -> Self {
+impl<'a> BatchApply<'a> {
+    fn new(changes: Vec<&'a Change>) -> Self {
         Self {
             ops: Vec::default(),
             changes,
@@ -476,7 +476,7 @@ impl<H: crate::hash_retention::HashRetention> Automerge<H> {
         changes: I,
     ) -> Result<(), AutomergeError> {
         self.apply_changes_batch_with(changes, false)?;
-        self.apply_queued_bundles()
+        self.apply_ready_staged_bundles()
     }
 
     /// Outside audit mode nothing is queued: changes that are not ready
@@ -488,7 +488,7 @@ impl<H: crate::hash_retention::HashRetention> Automerge<H> {
     ) -> Result<(), AutomergeError> {
         let mut batch = ChangeBatch::new();
         let mut actors_with_author: HashSet<ActorId> = self
-            .queue
+            .staged
             .iter()
             .filter(|c| c.author().is_some())
             .map(|c| c.actor_id().clone())
@@ -501,15 +501,15 @@ impl<H: crate::hash_retention::HashRetention> Automerge<H> {
             if lookup == ApplyLookup::Present {
                 continue;
             }
-            if self.queue.has_hash(&hash) || batch.has_hash(&hash) {
+            if self.staged.has_hash(&hash) || batch.has_hash(&hash) {
                 continue;
             }
             if lookup == ApplyLookup::Equivocation {
-                self.queue
+                self.staged
                     .remove_actor_branch_from(c.actor_id(), c.seq().saturating_add(1));
                 return Err(AutomergeError::duplicate_seq(&c));
             }
-            if self.queue.has_actor_seq(&c) {
+            if self.staged.has_actor_seq(&c) {
                 return Err(AutomergeError::duplicate_seq(&c));
             }
             if c.author().is_some()
@@ -524,27 +524,36 @@ impl<H: crate::hash_retention::HashRetention> Automerge<H> {
             batch.push(c)?;
         }
 
-        self.queue.extend(batch);
+        self.staged.extend(batch);
 
-        if self.queue.is_empty() {
+        if self.staged.is_empty() {
             return Ok(());
         }
 
-        let ready = self.queue.pop_topo_sorted_ready(&self.change_graph);
-        if H::AUDIT == AuditMode::Disabled && !self.queue.is_empty() {
-            let unready = std::mem::replace(&mut self.queue, ChangeQueue::new());
-            if !drop_unready {
-                return Err(self.unready_error(&unready));
+        // out of the document while the batch borrows it
+        let staged = std::mem::take(&mut self.staged);
+        let prepared = staged.prepare(&self.change_graph);
+        let ready = prepared.changes();
+        if H::AUDIT == AuditMode::Disabled {
+            // nothing stays staged outside audit mode
+            if ready.len() < staged.len() && !drop_unready {
+                return Err(self.unready_error(&staged));
             }
+            return BatchApply::new(ready.to_vec()).apply(self);
         }
-
-        // on failure the popped changes are not re-queued: one of them
-        // would fail every later apply
-        BatchApply::new(ready).apply(self)
+        let result = BatchApply::new(ready.to_vec()).apply(self);
+        let completed: HashSet<crate::ChangeHash> = match result {
+            Ok(()) => ready.iter().map(|c| c.hash()).collect(),
+            Err(_) => HashSet::new(),
+        };
+        debug_assert!(self.staged.is_empty(), "applying a batch stages nothing");
+        self.staged = staged;
+        self.staged.remove_completed(&completed);
+        result
     }
 
     /// A dep hash this document may have freed cannot be told from a missing one.
-    fn unready_error(&self, unready: &ChangeQueue) -> AutomergeError {
+    fn unready_error(&self, unready: &StagedChanges) -> AutomergeError {
         let undecidable = unready
             .iter()
             .flat_map(|c| c.deps())

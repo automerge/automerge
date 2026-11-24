@@ -168,7 +168,7 @@ impl TransactionInner {
             let ops = change.iter_ops().collect::<Vec<_>>();
             tracing::trace!(commit=?hash, ?ops, deps=?change.deps(), "committing transaction");
         }
-        doc.pin_incoming_boundaries(std::slice::from_ref(&change));
+        doc.pin_incoming_boundaries(&[&change]);
         doc.update_history(&change);
         doc.remove_unused_actors(true);
         doc.debug_assert_mask_indexes();

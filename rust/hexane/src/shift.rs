@@ -47,7 +47,9 @@ pub trait Shiftable: Iterator + Debug {
     }
 
     /// Reposition the window to `range`: iteration yields the items in
-    /// `range` and then stops.
+    /// `range` and then stops. It moves only forwards: if `range` starts
+    /// before [`get_pos`](Self::get_pos), iteration goes on from
+    /// `get_pos()` to `range.end`.
     fn shift(&mut self, range: Range<usize>) {
         self.set_max(range.end);
         self.advance_to(range.start);

@@ -15,9 +15,7 @@ pub(crate) use crate::op_set2::{
 };
 
 use crate::actor::{ActorInsert, ActorRemoval, ActorShift, HasActorIndices};
-use crate::bundle_queue::BundleQueue;
 use crate::change_graph::{BundleDep, BundleMember, ChangeGraph};
-use crate::change_queue::ChangeQueue;
 use crate::clock::Clock;
 use crate::cursor::{CursorPosition, MoveCursor, OpCursor};
 use crate::exid::ExId;
@@ -26,6 +24,8 @@ use crate::iter::{DiffIter, DocIter, Keys, ListRange, MapRange, Spans, Values};
 use crate::marks::{Mark, MarkAccumulator, MarkSet};
 use crate::op_set2::change::bundle::BundleApply;
 use crate::patches::{Patch, PatchAccumulator};
+use crate::staged_bundles::StagedBundles;
+use crate::staging::StagedChanges;
 use crate::storage::change::{self, Verified};
 use crate::storage::document::ReconstructError;
 use crate::storage::load::{
@@ -327,10 +327,10 @@ impl std::default::Default for LoadOptions {
 /// to an author ID you can use [`Automerge::get_author_for_actor`].
 #[derive(Debug, Clone)]
 pub struct Automerge<H: HashRetention = Retained> {
-    /// The list of unapplied changes that are not causally ready.
-    pub(crate) queue: ChangeQueue,
-    /// The bundles that are not causally ready.
-    pub(crate) bundle_queue: BundleQueue,
+    /// Unapplied change contents held for possible application.
+    pub(crate) staged: StagedChanges,
+    /// Bundles held until the changes they lack have applied.
+    pub(crate) staged_bundles: StagedBundles,
     /// Graph of changes
     pub(crate) change_graph: ChangeGraph<H>,
     authors: Authors,
@@ -356,8 +356,8 @@ impl<H: HashRetention> Automerge<H> {
     pub(crate) fn empty(encoding: TextEncoding) -> Self {
         let ops = OpSet::new(encoding);
         Automerge {
-            queue: ChangeQueue::new(),
-            bundle_queue: BundleQueue::default(),
+            staged: StagedChanges::new(),
+            staged_bundles: StagedBundles::default(),
             change_graph: ChangeGraph::new(&ops.actors),
             authors: Authors::new(&ops.actors),
             write_frontier: WriteFrontier::new(),
@@ -406,8 +406,8 @@ impl<H: HashRetention> Automerge<H> {
         write_frontier: WriteFrontier,
     ) -> Self {
         let mut doc = Automerge {
-            queue: ChangeQueue::new(),
-            bundle_queue: BundleQueue::default(),
+            staged: StagedChanges::new(),
+            staged_bundles: StagedBundles::default(),
             change_graph,
             authors,
             write_frontier,
@@ -463,7 +463,7 @@ impl<H: HashRetention> Automerge<H> {
 
     /// Whether this document has any operations
     pub fn is_empty(&self) -> bool {
-        self.change_graph.is_empty() && self.queue.is_empty() && self.bundle_queue.is_empty()
+        self.change_graph.is_empty() && self.staged.is_empty() && self.staged_bundles.is_empty()
     }
 
     pub(crate) fn actor_id(&self) -> &ActorId {
@@ -666,7 +666,7 @@ impl<H: HashRetention> Automerge<H> {
     }
 
     /// Before `changes` reach the change graph, which may free their hashes.
-    pub(crate) fn pin_incoming_boundaries(&mut self, changes: &[Change]) {
+    pub(crate) fn pin_incoming_boundaries(&mut self, changes: &[&Change]) {
         let actors = &self.ops.actors;
         for boundary in self.write_frontier.heads_mut() {
             if let FrontierHead::Hash(hash) = boundary {
@@ -890,8 +890,8 @@ impl<H: HashRetention> Automerge<H> {
         // same or a later sequence belongs to an incompatible actor branch;
         // retaining it would allow save() to encode duplicate sequence numbers.
         let actor = self.ops.actors[actor_index].clone();
-        self.queue.remove_actor_branch_from(&actor, seq);
-        self.bundle_queue.remove_actor_branch_from(&actor, seq);
+        self.staged.remove_actor_branch_from(&actor, seq);
+        self.staged_bundles.remove_actor_branch_from(&actor, seq);
 
         let start_op = NonZeroU64::MIN.saturating_add(self.change_graph.max_op());
         let author = if seq == 1 { self.author.clone() } else { None };
@@ -1172,8 +1172,8 @@ impl<H: HashRetention> Automerge<H> {
         if !changes.is_empty() {
             am.apply_changes_batch_with(changes, true)?;
         }
-        am.apply_bundles(bundles.into_iter().rev().map(|b| *b).collect())?;
-        if !am.queue.is_empty() && !may_lack_deps && !partial_load_ok {
+        am.apply_bundles(bundles.into_iter().map(|b| *b).collect())?;
+        if !am.staged.is_empty() && !may_lack_deps && !partial_load_ok {
             return Err(AutomergeError::MissingDeps);
         }
         if let StringMigration::ConvertToText = options.string_migration {
@@ -1281,46 +1281,84 @@ impl<H: HashRetention> Automerge<H> {
         if !pending.is_empty() {
             self.apply_changes_batch_with(pending, true)?;
         }
-        self.apply_queued_bundles()
+        self.apply_ready_staged_bundles()
     }
 
-    /// Applies the bundles in `ready`, last first, queueing any that lack a
-    /// change until it is applied.
-    pub(crate) fn apply_bundles(&mut self, mut ready: Vec<Bundle>) -> Result<(), AutomergeError> {
-        while let Some(b) = ready.pop() {
+    /// Applies `bundles` in order, staging any that lack a change until it
+    /// has applied.
+    pub(crate) fn apply_bundles(&mut self, bundles: Vec<Bundle>) -> Result<(), AutomergeError> {
+        for b in bundles {
             if let Some(missing) = self.missing_bundle_dep(&b) {
-                self.bundle_queue.park(b, missing);
+                self.staged_bundles.stage(b, missing);
                 continue;
             }
-            if self.bundle_queue.is_empty() {
+            if self.staged_bundles.is_empty() {
                 self.apply_bundle_inner(b)?;
                 continue;
             }
-            // in audit mode the queued changes it lets apply may be any actor's
-            let advanced = if self.queue.is_empty() {
-                b.actors().to_vec()
-            } else {
-                self.bundle_queue.actors()
-            };
+            let advanced = self.advanced_by(&b);
             self.apply_bundle_inner(b)?;
-            ready.extend(self.take_ready_bundles(advanced));
+            self.apply_staged_bundles(advanced)?;
         }
         Ok(())
     }
 
-    /// Applies the queued bundles that applied changes have made ready.
-    pub(crate) fn apply_queued_bundles(&mut self) -> Result<(), AutomergeError> {
-        let ready = self.take_ready_bundles(self.bundle_queue.actors());
-        self.apply_bundles(ready)
+    /// Applies the staged bundles that applied changes have made ready.
+    pub(crate) fn apply_ready_staged_bundles(&mut self) -> Result<(), AutomergeError> {
+        if self.staged_bundles.is_empty() {
+            return Ok(());
+        }
+        self.apply_staged_bundles(self.staged_bundles.actors())
     }
 
-    fn take_ready_bundles(&mut self, actors: Vec<ActorId>) -> Vec<Bundle> {
-        let mut ready = vec![];
-        for actor in actors {
-            let have = self.seq_for_actor_id(&actor);
-            ready.extend(self.bundle_queue.take_ready(&actor, have));
+    /// The actors whose staged bundles applying `bundle` may make ready.
+    fn advanced_by(&self, bundle: &Bundle) -> Vec<ActorId> {
+        // in audit mode the staged changes it lets apply may be any actor's
+        if self.staged.is_empty() {
+            bundle.actors().to_vec()
+        } else {
+            self.staged_bundles.actors()
         }
-        ready
+    }
+
+    /// Applies the staged bundles waiting on `actors` that are now ready, and
+    /// those they make ready in turn. A bundle leaves staging only once it has
+    /// applied: one that fails stays staged, the rest still apply, and the
+    /// first failure is returned.
+    fn apply_staged_bundles(&mut self, mut actors: Vec<ActorId>) -> Result<(), AutomergeError> {
+        let mut failed = HashSet::new();
+        let mut first_err = None;
+        while !actors.is_empty() {
+            let prepared = self
+                .staged_bundles
+                .prepare(&actors, |a| self.seq_for_actor_id(a));
+            actors.clear();
+            for slot in prepared {
+                if failed.contains(&slot) {
+                    continue;
+                }
+                let bundle = self.staged_bundles.get(slot);
+                if let Some(missing) = self.missing_bundle_dep(bundle) {
+                    self.staged_bundles.rewait(slot, missing);
+                    continue;
+                }
+                let advanced = self.advanced_by(bundle);
+                match self.apply_bundle_inner(bundle.clone()) {
+                    Ok(()) => {
+                        self.staged_bundles.remove_completed(slot);
+                        actors.extend(advanced);
+                    }
+                    Err(e) => {
+                        // TODO: drop bundles that fail to apply?
+                        failed.insert(slot);
+                        first_err.get_or_insert(e);
+                    }
+                }
+            }
+            actors.sort();
+            actors.dedup();
+        }
+        first_err.map_or(Ok(()), Err)
     }
 
     /// A change `bundle` names that this document lacks: a dep, or the
@@ -1413,10 +1451,10 @@ impl<H: HashRetention> Automerge<H> {
 
         // a bundle must be causally closed, so orphans follow as change chunks
         if options.retain_orphans {
-            for orphaned in self.queue.iter() {
+            for orphaned in self.staged.iter() {
                 bytes.extend(orphaned.raw_bytes());
             }
-            for orphaned in self.bundle_queue.iter() {
+            for orphaned in self.staged_bundles.iter() {
                 bytes.extend(orphaned.bytes());
             }
         }
@@ -1864,13 +1902,13 @@ impl<H: HashRetention> Automerge<H> {
             .get_hash_for_change_id(id, &self.ops.actors)
     }
 
-    pub(crate) fn update_history_batch(&mut self, changes: &[Change]) {
+    pub(crate) fn update_history_batch(&mut self, changes: &[&Change]) {
         let owes_gc = self
             .change_graph
             .add_changes(
                 changes
                     .iter()
-                    .map(|c| (c, self.ops.lookup_actor(c.actor_id()).unwrap())),
+                    .map(|c| (*c, self.ops.lookup_actor(c.actor_id()).unwrap())),
                 &mut self.authors,
             )
             .unwrap();
@@ -2484,13 +2522,13 @@ impl<H: HashRetention> Automerge<H> {
 
     fn apply_bundle_inner(&mut self, bundle: Bundle) -> Result<(), AutomergeError> {
         H::apply_bundle(self, bundle)?;
-        if self.queue.is_empty() {
+        if self.staged.is_empty() {
             return Ok(());
         }
         // a queued change the bundle delivered would otherwise apply twice
         let graph = &self.change_graph;
         let actors = &self.ops.actors;
-        self.queue.remove_present(|c| {
+        self.staged.remove_present(|c| {
             graph.lookup_change_for_apply(&c.hash(), &c.id(), actors)
                 == crate::change_graph::ApplyLookup::Present
         });
@@ -3009,8 +3047,8 @@ impl<H: HashRetention> Automerge<H> {
         f: impl FnOnce(ChangeGraph<H>) -> ChangeGraph<H2>,
     ) -> Automerge<H2> {
         let Automerge {
-            queue,
-            bundle_queue,
+            staged,
+            staged_bundles,
             change_graph,
             authors,
             write_frontier,
@@ -3023,8 +3061,8 @@ impl<H: HashRetention> Automerge<H> {
             author,
         } = self;
         Automerge {
-            queue,
-            bundle_queue,
+            staged,
+            staged_bundles,
             change_graph: f(change_graph),
             authors,
             write_frontier,
@@ -3858,7 +3896,7 @@ impl<H: HashRetention> Automerge<H> {
         &self,
         from: &[ChangeHash],
     ) -> Result<Vec<ChangeHash>, AutomergeError> {
-        let queued = self.queue.iter().map(|change| change.hash());
+        let queued = self.staged.iter().map(|change| change.hash());
         self.missing_deps_from(queued.chain(from.iter().copied()))
     }
 
@@ -3869,7 +3907,7 @@ impl<H: HashRetention> Automerge<H> {
         start: impl Iterator<Item = ChangeHash>,
     ) -> Result<Vec<ChangeHash>, AutomergeError> {
         let queued_changes = self
-            .queue
+            .staged
             .iter()
             .map(|change| (change.hash(), change))
             .collect::<HashMap<_, _>>();
@@ -3981,7 +4019,7 @@ impl Automerge<Full> {
     pub fn disable_audit_mode(mut self) -> Automerge<Retained> {
         // before interior hashes are freed
         self.pin_resolved_boundaries();
-        self.queue = ChangeQueue::new();
+        self.staged = StagedChanges::new();
         self.map_graph(ChangeGraph::into_retained)
     }
 
@@ -5418,7 +5456,6 @@ mod actor_hygiene_tests {
     }
 
     struct Snapshot {
-        save: Vec<u8>,
         heads: Vec<ChangeId>,
         actors: crate::actor::ActorTable,
         ops: usize,
@@ -5426,13 +5463,13 @@ mod actor_hygiene_tests {
 
     fn snapshot<H: crate::hash_retention::HashRetention>(doc: &mut AutoCommit<H>) -> Snapshot {
         Snapshot {
-            save: doc.save(),
             heads: doc.get_heads(),
             actors: doc.doc.ops.actors.clone(),
             ops: doc.doc.ops.len(),
         }
     }
 
+    /// The saved bytes differ: whatever was staged is saved as an orphan.
     fn assert_unchanged<H: crate::hash_retention::HashRetention>(
         doc: &mut AutoCommit<H>,
         before: &Snapshot,
@@ -5441,7 +5478,6 @@ mod actor_hygiene_tests {
         assert_eq!(doc.doc.ops.actors, before.actors, "{what}: actor table");
         assert_eq!(doc.doc.ops.len(), before.ops, "{what}: op count");
         assert_eq!(doc.get_heads(), before.heads, "{what}: heads");
-        assert_eq!(doc.save(), before.save, "{what}: saved bytes");
         assert_clean(&doc.doc, what);
     }
 
@@ -5506,16 +5542,13 @@ mod actor_hygiene_tests {
         dst.doc
             .apply_bundle(src.doc.bundle_for_fragment(&orphan).unwrap())
             .unwrap();
-        // the queued bundle is saved as an orphan, so the save differs
-        assert_eq!(dst.doc.ops.actors, before.actors);
-        assert_eq!(dst.doc.ops.len(), before.ops);
-        assert_eq!(dst.get_heads(), before.heads);
-        assert!(!dst.doc.bundle_queue.is_empty());
+        assert_unchanged(&mut dst, &before, "queued bundle");
+        assert!(!dst.doc.staged_bundles.is_empty());
 
         dst.doc
             .apply_bundle(src.doc.bundle_for_fragment(&whole).unwrap())
             .unwrap();
-        assert!(dst.doc.bundle_queue.is_empty());
+        assert!(dst.doc.staged_bundles.is_empty());
     }
 
     #[test]
@@ -5584,7 +5617,8 @@ mod actor_hygiene_tests {
             .doc
             .apply_changes(vec![good[0].clone(), broken])
             .is_err());
-        assert_unchanged(&mut dst, &before, "after a rejected batch");
+        assert_unchanged(&mut dst, &before, "rejected batch");
+        assert_eq!(dst.doc.staged.len(), 2);
     }
 
     #[test]

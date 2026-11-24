@@ -324,7 +324,8 @@ pub trait RunDecoder: Iterator {
 
     /// Like [`next_run`](Self::next_run) but consumes at most `max` items
     /// from repeat/null runs.  The remaining items stay in the decoder
-    /// for subsequent calls.
+    /// for subsequent calls. With `max == 0` there is no run to give: it
+    /// returns `None` and consumes nothing.
     fn next_run_max(&mut self, max: usize) -> Option<Run<Self::Item>>;
 
     /// Advance past `n` items in O(runs skipped), decoding no values.

@@ -49,7 +49,7 @@ const BENCHMARKS: [(&str, Workload); 10] = [
 ];
 
 pub fn benchmarks() -> Vec<MemoryBenchmark> {
-    BENCHMARKS
+    let mut benchmarks: Vec<_> = BENCHMARKS
         .into_iter()
         .map(|(name, workload)| {
             #[cfg(feature = "memory")]
@@ -64,7 +64,31 @@ pub fn benchmarks() -> Vec<MemoryBenchmark> {
                 MemoryBenchmark::unavailable("memory", name)
             }
         })
-        .collect()
+        .collect();
+    for filename in super::egwalker_paper::FILES {
+        let label = filename.trim_end_matches(".am");
+        for operation in ["load", "clone"] {
+            let name =
+                Box::leak(format!("memory/{operation}/egwalker_paper/{label}").into_boxed_str());
+            #[cfg(feature = "memory")]
+            benchmarks.push(MemoryBenchmark::new("memory", name, move || {
+                let bytes = super::egwalker_paper::read_file(filename);
+                if operation == "load" {
+                    Box::new(move || {
+                        crate::memory::measure(|| {
+                            benchmark_battery::automerge::AutoCommit::load(&bytes).unwrap()
+                        })
+                    })
+                } else {
+                    let doc = benchmark_battery::automerge::AutoCommit::load(&bytes).unwrap();
+                    Box::new(move || crate::memory::measure(|| doc.clone()))
+                }
+            }));
+            #[cfg(not(feature = "memory"))]
+            benchmarks.push(MemoryBenchmark::unavailable("memory", name));
+        }
+    }
+    benchmarks
 }
 
 #[cfg(feature = "memory")]

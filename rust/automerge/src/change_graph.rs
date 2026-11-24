@@ -3423,6 +3423,7 @@ mod tests {
                     .iter()
                     .any(|m| member_hash(hash_of, m) == *checkpoint));
                 assert!(checkpoint.fragment_level() > 0);
+                assert!(checkpoint.fragment_level() < f.level);
             }
 
             // deps must be equal or higher level than the fragment
