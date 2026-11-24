@@ -16762,3 +16762,78 @@ fn leb_sizes_agree() {
         golden::note(&hexane::verified::lebsize(i));
     }
 }
+
+// ── The old API's forms: ranges, and splices of an iterator ─────────────────
+
+/// A delta column takes the values of an iterator, as the old API's did:
+/// by `splice`, `extend` and `collect()`; and it refuses a value it cannot
+/// keep before it changes, panicking.
+#[test]
+fn a_delta_column_takes_an_iterator() {
+    let mut col: DeltaColumn<u64> = [1u64, 5, 9].into_iter().collect();
+    assert_eq!(col.to_vec(), [1, 5, 9]);
+    col.splice(1, 1, [2u64, 3, 4]);
+    assert_eq!(col.to_vec(), [1, 2, 3, 4, 9]);
+    col.extend([10u64, 11]);
+    assert_eq!(col.to_vec(), [1, 2, 3, 4, 9, 10, 11]);
+    col.splice_slice(0, 2, &[7]);
+    assert_eq!(col.to_vec(), [7, 3, 4, 9, 10, 11]);
+    let mut opt = DeltaColumn::<Option<i64>>::new();
+    opt.extend([Some(-3), None, Some(4)]);
+    assert_eq!(opt.to_vec(), [Some(-3), None, Some(4)]);
+    #[cfg(panic = "unwind")]
+    {
+        // a `u64` past `i64::MAX` is no value of a delta column
+        let before = col.to_vec();
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            col.splice(0, 0, [1u64, u64::MAX]);
+        }));
+        assert!(r.is_err());
+        assert_eq!(col.to_vec(), before);
+        assert!(std::panic::catch_unwind(|| {
+            let _: DeltaColumn<u64> = [u64::MAX].into_iter().collect();
+        })
+        .is_err());
+    }
+}
+
+/// Ranges are taken as the old API took them: `iter_range` clamps a
+/// `Range` to the column, and the searches take any `RangeBounds`.
+#[test]
+// ranges that end before they start, on purpose
+#[allow(clippy::reversed_empty_ranges)]
+fn ranges_are_taken_as_the_old_api_took_them() {
+    let col = Column::<u64>::from_values(&[1, 2, 2, 3, 5, 8]);
+    let all: Vec<u64> = col.iter_range(0..100).collect();
+    assert_eq!(all, [1, 2, 2, 3, 5, 8]);
+    let it = col.iter_range(4..2);
+    assert_eq!((it.pos(), it.end_pos()), (4, 4));
+    let it = col.iter_range(9..12);
+    assert_eq!((it.pos(), it.end_pos()), (6, 6));
+    assert_eq!(col.scope_to_value(2, ..), 1..3);
+    assert_eq!(col.scope_to_value(2, 2..), 2..3);
+    assert_eq!(col.scope_to_value(5, ..=4), 4..5);
+    assert_eq!(
+        col.scope_to_value(5, (Bound::Excluded(1), Bound::Included(100))),
+        4..5
+    );
+    assert_eq!(col.scope_to_value(2, 10..), 6..6);
+    let mut it = col.iter();
+    assert_eq!(it.seek_to_value(3, ..), 3..4);
+    assert_eq!(it.next(), Some(3));
+    let delta = DeltaColumn::<u32>::from_values(&[1, 2, 2, 3, 5, 8]);
+    assert_eq!(delta.scope_to_value(2, ..), 1..3);
+    assert_eq!(delta.iter_range(4..100).collect::<Vec<_>>(), [5, 8]);
+    let mut dit = delta.iter();
+    assert_eq!(dit.seek_to_value(5, 1..), 4..5);
+    let prefix = PrefixColumn::<u32>::from_values(&[1, 2, 3, 4]);
+    assert_eq!(prefix.sum_range(1..3), 5);
+    assert_eq!(prefix.sum_range(3..1), 0);
+    let mut pit = prefix.prefix_iter_range(2..10);
+    assert_eq!(pit.next().map(|pv| pv.total()), Some(6));
+    // the free decoders of the old API's names
+    let bytes = col.save();
+    let read: Vec<u64> = hexane::verified::decoder::<u64>(&bytes).collect();
+    assert_eq!(read, [1, 2, 2, 3, 5, 8]);
+    assert!(hexane::verified::try_decoder::<u64>(&[0x02]).is_err());
+}

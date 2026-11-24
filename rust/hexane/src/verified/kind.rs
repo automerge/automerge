@@ -66,6 +66,7 @@ pub trait VIndex<V: ColumnValueRef<C>, C: Codec = Leb128>: Kind<V, C> {
 }
 
 /// The index of a plain column: of each slab it counts the values.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct LenIndex;
 
 impl<V: ColumnValueRef<C>, C: Codec> VKeeps<V, C> for LenIndex {
@@ -84,6 +85,7 @@ impl<V: ColumnValueRef<C>, C: Codec> VIndex<V, C> for LenIndex {
 /// [`BitIndex`](crate::index::BitIndex)`<usize>` keeps it, in place of
 /// the B-tree of [`LenIndex`]. A column says the same of its values with
 /// either, and saves the same bytes.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct LenBitIndex;
 
 impl<V: ColumnValueRef<C>, C: Codec> VKeeps<V, C> for LenBitIndex {

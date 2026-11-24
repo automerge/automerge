@@ -73,6 +73,8 @@ use crate::{DeltaRun, Leb128, LoadOpts, MaybeFill, PackError};
 use std::ops::Bound;
 use std::ops::Range;
 use vstd::prelude::*;
+#[cfg(verus_keep_ghost)]
+use vstd::std_specs::iter::FromIteratorSpecImpl;
 
 mod imp;
 #[allow(unused_imports)]
@@ -1269,6 +1271,47 @@ impl<T: DeltaValue<C>, C: Codec> DeltaColumn<T, C> {
             r@ == self@,
     {
         self.to_vec_impl()
+    }
+}
+
+impl<T: DeltaValue<C>, C: Codec> Extend<T> for DeltaColumn<T, C> {
+    /// Append the values that `iter` gives: what
+    /// [`splice`](DeltaColumn::splice) does at the column's end, and
+    /// specified as that is. The column counts an edit more if it is the
+    /// longer for it.
+    ///
+    /// # Panics
+    ///
+    /// Where [`splice`](DeltaColumn::splice) panics: on a value the
+    /// column cannot keep, or if two of its values would lie 2^63 or more
+    /// apart.
+    #[inline(always)]
+    fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I)
+        ensures
+            gives(iter, |xs: Seq<T>| all_fit(xs) && final(self)@ == old(self)@ + xs),
+            final(self).edits() == after_call(old(self).edits(), final(self)@.len() != old(self)@.len()),
+    {
+        self.extend_impl::<I>(iter)
+    }
+}
+
+#[cfg(verus_keep_ghost)]
+impl<T: DeltaValue<C>, C: Codec> FromIteratorSpecImpl<T> for DeltaColumn<T, C> {
+    /// A column collected from an iterator holds the values that the
+    /// iterator was to give, each of which it can keep.
+    open spec fn from_iter_ensures(remaining: Seq<T>, will_return_none: bool, s: Self) -> bool {
+        all_fit(remaining) && s@ == remaining
+    }
+}
+
+impl<T: DeltaValue<C>, C: Codec> FromIterator<T> for DeltaColumn<T, C> {
+    /// A column of the values that `iter` gives, which is what
+    /// `collect()` returns, as [`Column`](super::Column)'s is
+    /// (`from_iter_ensures`). It panics where
+    /// [`splice`](DeltaColumn::splice) does.
+    #[inline(always)]
+    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> (s: Self) {
+        Self::from_iter_impl::<I>(iter)
     }
 }
 

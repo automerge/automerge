@@ -1041,6 +1041,39 @@ pub(crate) proof fn lemma_kept<T: VDelta>(vs: Seq<T>)
 }
 
 impl<T: DeltaValue<C>, C: Codec> DeltaColumn<T, C> {
+    pub(super) fn extend_impl<I: IntoIterator<Item = T>>(&mut self, iter: I)
+        ensures
+            gives(iter, |xs: Seq<T>| all_fit(xs) && final(self)@ == old(self)@ + xs),
+            final(self).edits() == after_call(old(self).edits(), final(self)@.len() != old(self)@.len()),
+    {
+        let len = self.len();
+        self.splice(len, 0, iter);
+        proof {
+            let it = choose|it: I::IntoIter| #[trigger]
+                (I::into_iter).ensures((iter,), it) && (it.obeys_prophetic_iter_laws() ==> all_fit(it.remaining())
+                    && self@ == old(self)@.take(len as int) + it.remaining() + old(self)@.skip(len + 0));
+            assert(old(self)@.take(len as int) + it.remaining() + old(self)@.skip(len + 0) =~= old(self)@ + it.remaining());
+        }
+    }
+
+    pub(super) fn from_iter_impl<I: IntoIterator<Item = T>>(iter: I) -> (s: Self)
+        ensures
+            // what Verus asks of every `FromIterator`
+            exists|initial: I::IntoIter| #[trigger] (I::into_iter).ensures((iter,), initial) && (initial.obeys_prophetic_iter_laws() ==> all_fit(initial.remaining()) && s@ == initial.remaining()),
+    {
+        let mut s = Self::new();
+        s.splice(0, 0, iter);
+        proof {
+            let it = choose|it: I::IntoIter| #[trigger]
+                (I::into_iter).ensures((iter,), it) && (it.obeys_prophetic_iter_laws() ==> all_fit(it.remaining())
+                    && s@ == Seq::<T>::empty().take(0) + it.remaining() + Seq::<T>::empty().skip(0));
+            assert(Seq::<T>::empty().take(0) + it.remaining() + Seq::<T>::empty().skip(0) =~= it.remaining());
+        }
+        s
+    }
+}
+
+impl<T: DeltaValue<C>, C: Codec> DeltaColumn<T, C> {
     /// Every value kept is one of the type's.
     #[verifier::type_invariant]
     pub(super) open spec fn inv(&self) -> bool {

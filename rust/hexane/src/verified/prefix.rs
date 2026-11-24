@@ -54,6 +54,7 @@ verus! {
 
 /// The index of a prefix column: of each slab it counts the values and
 /// holds what they add up to.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct SumIndex;
 
 impl<V: PrefixValue + ColumnValueRef<C>, C: Codec> VKeeps<V, C> for SumIndex {

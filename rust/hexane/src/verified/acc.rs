@@ -314,6 +314,7 @@ pub proof fn lemma_acc_range<V: VAccumulated>(vs: Seq<<V as VSpec>::S>, i: int, 
 
 /// The index of an accumulator column: of each slab it counts the
 /// values and holds what they add up to.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct AccIndex;
 
 impl<V: VAccumulated + ColumnValueRef<C>, C: Codec> VKeeps<V, C> for AccIndex {
