@@ -968,6 +968,37 @@ fn regression_masked_overwrite_keeps_doc_op_a_conflict_candidate() {
 }
 
 #[test]
+fn regression_counter_conflict_after_masking() {
+    use Op::*;
+    // Minimal replay of the persisted counter/conflict failure. Both writes
+    // target k3; main's scalar and the peer's counter are initially concurrent.
+    // Keep the patches accumulated across merge and the mask transition.
+    run(
+        vec![
+            LocalEdit { key: 3, val: 0 },
+            PeerCounter {
+                peer: 0,
+                key: 3,
+                delta: 0,
+            },
+            SyncChanges { pair: 2 },
+            PeerCounter {
+                peer: 0,
+                key: 3,
+                delta: -1,
+            },
+            Merge { peer: 0 },
+            MaskAuthor {
+                peer: 0,
+                at_history: 1,
+            },
+        ],
+        &RefCell::new(BTreeMap::new()),
+    )
+    .unwrap();
+}
+
+#[test]
 fn patches_replay_to_hydrate() {
     // An explicit `TestRunner` (rather than the `proptest!` macro) so the
     // per-scenario coverage counters can be asserted over the whole run:
