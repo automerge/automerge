@@ -179,6 +179,9 @@ impl<I: Iterator + Debug + Clone + Shiftable, S: Skipper + Shiftable> Shiftable 
 impl<I: Iterator + Debug + Clone, S: Skipper> Iterator for SkipIter<I, S> {
     type Item = I::Item;
 
+    // in line in the loop that drives it (`seq_length`'s `count`), so
+    // that the inner iterator's moves are too
+    #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         let skip = self.skip.next()?;
         if skip == 0 {
