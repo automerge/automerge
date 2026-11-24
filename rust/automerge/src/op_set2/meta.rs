@@ -112,22 +112,20 @@ impl hexane::Newtype for ValueMeta {
     }
 }
 
-// A prefix column of metadata sums the values' lengths: the sum before a
-// value is where its bytes start in the value column. A length is less
-// than 2^60 (the number's top 60 bits), so that the lengths of as many
-// values as a column can have (`usize::MAX`) add up to less than 2^128:
-// in a `u128` the sums always fit, and the column has nothing to check
-// when it is edited. (In a `u64` only 16 lengths are sure to fit, and a
-// column of more reads all its values after every edit.)
+// A prefix column of metadata sums the values' lengths, in a `u64`: the
+// sum before a value is where its bytes start in the value column.
 impl hexane::Amount for ValueMeta {
-    type Sum = u128;
+    type Sum = u64;
 
+    // a length is less than 2^60 (the number's top 60 bits), so that any
+    // 16 of them add up to less than 2^64; of more, an edit checks that
+    // the sums still fit, from the column's sum and what it puts in
     fn room_len() -> usize {
-        usize::MAX
+        16
     }
 
-    fn part_of(v: ValueMeta) -> u128 {
-        (v.0 >> 4) as u128
+    fn part_of(v: ValueMeta) -> u64 {
+        v.0 >> 4
     }
 }
 
