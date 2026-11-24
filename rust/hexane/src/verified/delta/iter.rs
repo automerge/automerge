@@ -51,7 +51,7 @@ use crate::iter_core::{Decoders, ICore};
 use crate::verified::codec::Codec;
 use crate::verified::IterState;
 #[cfg(verus_keep_ghost)]
-use crate::verified::{head_run, runs_of, sorted};
+use crate::verified::{bound_end, bound_start, bounds_in, head_run, range_in, runs_of, sorted};
 use crate::verified::{Ranges, Shiftable, Unshift};
 #[cfg(verus_keep_ghost)]
 use crate::window::windows;
@@ -496,8 +496,9 @@ impl<'a, T: DeltaValue<C>, C: Codec> DeltaIter<'a, T, C> {
     /// before its end or after it, and the iterator moves on to where
     /// `range` starts ([`advance_to`](Self::advance_to)); a `range`
     /// that starts past its end is taken as the empty one at its
-    /// start. `0..usize::MAX` is all the column has ahead of the
-    /// iterator.
+    /// start. The bounds are read as the old API read them
+    /// (`bound_start`, `bound_end`): `..` is all the window has ahead of
+    /// the iterator.
     ///
     /// Few of the values are looked at: the column's index tells the
     /// part of the column to look in. The values searched are taken to
@@ -506,17 +507,22 @@ impl<'a, T: DeltaValue<C>, C: Codec> DeltaIter<'a, T, C> {
     /// after every value of a column: the iterator then gives all it
     /// has, and its window ends where it stands.
     #[inline(always)]
-    pub fn seek_to_value(&mut self, target: T, range: Range<usize>) -> (r: Range<usize>)
+    pub fn seek_to_value<R: RangeBounds<usize>>(&mut self, target: T, range: R) -> (r: Range<usize>)
         ensures
             final(self).column() == old(self).column(),
             final(self).source() == old(self).source(),
             ({
+                // where the range starts and ends
+                let (rs, re) = (
+                    bound_start(range.spec_start_bound()),
+                    bound_end(range.spec_start_bound(), range.spec_end_bound(), old(self).end_pos() as int),
+                );
                 let (p, c) = (old(self).pos() as int, old(self).column());
                 // where the window is made to end
-                let e = if range.start <= range.end {
-                    range.end as int
+                let e = if rs <= re {
+                    re as int
                 } else {
-                    range.start as int
+                    rs as int
                 };
                 // the places searched are `s..t` of the column
                 let t = if e <= p {
@@ -526,17 +532,17 @@ impl<'a, T: DeltaValue<C>, C: Codec> DeltaIter<'a, T, C> {
                 } else {
                     c.len() as int
                 };
-                let s = if range.start <= p {
+                let s = if rs <= p {
                     p
-                } else if range.start <= t {
-                    range.start as int
+                } else if rs <= t {
+                    rs as int
                 } else {
                     t
                 };
                 &&& p <= s <= r.start <= r.end <= t <= c.len()
                 &&& final(self).pos() == r.start
                 &&& final(self).rest() == c.subrange(r.start as int, t)
-                &&& final(self).end_pos() == if range.start > t || !target.fits() {
+                &&& final(self).end_pos() == if rs > t || !target.fits() {
                     r.start as int
                 } else if e >= p {
                     e
@@ -551,7 +557,7 @@ impl<'a, T: DeltaValue<C>, C: Codec> DeltaIter<'a, T, C> {
                     }
             }),
     {
-        self.seek_to_value_impl(target, range)
+        self.seek_to_value_impl::<R>(target, range)
     }
 }
 
@@ -715,29 +721,34 @@ impl<T: DeltaValue<C>, C: Codec> DeltaColumn<T, C> {
         self.iter_impl()
     }
 
-    /// An iterator over the values `start..end`.
+    /// An iterator over the values of `range`, clamped to the column
+    /// (`range_in`): over `start..end`, as the old API's `iter_range`
+    /// took it.
     ///
     /// The iterator moves from the column's start to `start` as
     /// [`advance_by`](DeltaIter::advance_by) does: the column's
     /// index gives the sum of the differences before `start`.
     #[inline(always)]
-    pub fn iter_range(&self, start: usize, end: usize) -> (it: DeltaIter<'_, T, C>)
-        requires
-            start <= end <= self@.len(),
+    pub fn iter_range(&self, range: Range<usize>) -> (it: DeltaIter<'_, T, C>)
         ensures
-            it.rest() == self@.subrange(start as int, end as int),
-            it.column() == self@,
-            it.source() == Some(*self),
-            it.pos() == start,
-            it.end_pos() == end,
+            ({
+                let (start, end) = range_in(range, self@.len());
+                &&& it.rest() == self@.subrange(start, end)
+                &&& it.column() == self@
+                &&& it.source() == Some(*self)
+                &&& it.pos() == start
+                &&& it.end_pos() == end
+            }),
     {
-        self.iter_range_impl(start, end)
+        self.iter_range_impl(range)
     }
 
-    /// The range of the places in `start..end` that hold `value`, where
-    /// the values there are in order: the first such place and the
-    /// place after the last. If no value there is `value`, the range is
-    /// the empty one at the place where it would stand.
+    /// The range of the places of `range` that hold `value`, where the
+    /// values there are in order: the first such place and the place
+    /// after the last. If no value there is `value`, the range is the
+    /// empty one at the place where it would stand. `range` is clamped to
+    /// the column (`bounds_in`): call `start..end` the places it names
+    /// there.
     ///
     /// Few of the values are looked at: the column's index tells the
     /// part of the column to look in. The values of `start..end` are
@@ -745,19 +756,20 @@ impl<T: DeltaValue<C>, C: Codec> DeltaColumn<T, C> {
     /// some range of the places in `start..end`. A `value` that does not
     /// fit comes after every value of a column.
     #[inline(always)]
-    pub fn scope_to_value(&self, value: T, start: usize, end: usize) -> (r: Range<usize>)
-        requires
-            start <= end <= self@.len(),
+    pub fn scope_to_value<R: RangeBounds<usize>>(&self, value: T, range: R) -> (r: Range<usize>)
         ensures
-            start <= r.start <= r.end <= end,
-            sorted::<T>(self@.subrange(start as int, end as int)) ==> forall|k: int|
-                start <= k < end ==> {
-                    &&& (k < r.start) == T::below(#[trigger] self@[k], value)
-                    &&& (r.start <= k < r.end) == (self@[k] == value)
-                    &&& (r.end <= k) == T::below(value, self@[k])
-                },
+            ({
+                let (start, end) = bounds_in(range.spec_start_bound(), range.spec_end_bound(), self@.len());
+                &&& start <= r.start <= r.end <= end
+                &&& sorted::<T>(self@.subrange(start, end)) ==> forall|k: int|
+                    start <= k < end ==> {
+                        &&& (k < r.start) == T::below(#[trigger] self@[k], value)
+                        &&& (r.start <= k < r.end) == (self@[k] == value)
+                        &&& (r.end <= k) == T::below(value, self@[k])
+                    }
+            }),
     {
-        self.scope_to_value_impl(value, start, end)
+        self.scope_to_value_impl::<R>(value, range)
     }
 }
 

@@ -362,4 +362,58 @@ impl<'a, V: ColumnValueRef<C>, C: Codec> Clone for Decoder<'a, V, C> {
     }
 }
 
+
+/// A decoder of the saved column `bytes`, in LEB128: [`Decoder::new`].
+///
+/// The bytes are not looked at first: that they are a saved column is
+/// required. For bytes of which it is not known, there is
+/// [`try_decoder`].
+#[inline(always)]
+pub fn decoder<'a, V: ColumnValueRef>(bytes: &'a [u8]) -> (r: Decoder<'a, V>)
+    requires
+        Column::<V>::valid(bytes@),
+    ensures
+        r.rest() == Column::<V>::values(bytes@),
+{
+    decoder_impl::<V>(bytes)
+}
+
+/// [`decoder`] in codec `C`.
+#[inline(always)]
+pub fn decoder_in<'a, V: ColumnValueRef<C>, C: Codec>(bytes: &'a [u8]) -> (r: Decoder<'a, V, C>)
+    requires
+        Column::<V, C>::valid(bytes@),
+    ensures
+        r.rest() == Column::<V, C>::values(bytes@),
+{
+    decoder_in_impl::<V, C>(bytes)
+}
+
+/// A decoder of the saved column `bytes`, in LEB128, which are read
+/// through first: [`Decoder::try_new`].
+#[inline(always)]
+pub fn try_decoder<'a, V: ColumnValueRef>(bytes: &'a [u8]) -> (r: Result<Decoder<'a, V>, PackError>)
+    ensures
+        r matches Ok(d) ==> {
+            &&& Column::<V>::valid(bytes@)
+            &&& d.rest() == Column::<V>::values(bytes@)
+        },
+        Column::<V>::valid(bytes@) && bytes@.len() <= u32::MAX ==> r is Ok,
+{
+    try_decoder_impl::<V>(bytes)
+}
+
+/// [`try_decoder`] in codec `C`.
+#[inline(always)]
+pub fn try_decoder_in<'a, V: ColumnValueRef<C>, C: Codec>(bytes: &'a [u8]) -> (r: Result<Decoder<'a, V, C>, PackError>)
+    ensures
+        r matches Ok(d) ==> {
+            &&& Column::<V, C>::valid(bytes@)
+            &&& d.rest() == Column::<V, C>::values(bytes@)
+        },
+        Column::<V, C>::valid(bytes@) && bytes@.len() <= u32::MAX ==> r is Ok,
+{
+    try_decoder_in_impl::<V, C>(bytes)
+}
+
 } // verus!

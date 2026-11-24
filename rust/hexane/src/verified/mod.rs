@@ -295,9 +295,9 @@
 //! `requires`, for every value type and codec. In particular:
 //!
 //! * [`splice`](Column::splice) leaves the values before `at`,
-//!   the values given, then the values from `at + del`;
-//! * [`splice_iter`](Column::splice_iter) does so with the values
-//!   an iterator gives, and [`splice_runs`](Column::splice_runs)
+//!   the values an iterator gives, then the values from `at + del`;
+//! * [`splice_slice`](Column::splice_slice) does so with the values
+//!   of a slice, and [`splice_runs`](Column::splice_runs)
 //!   with runs, each a value and how many times to repeat it (their
 //!   values are `run_values`). `extend` appends what an iterator gives,
 //!   and `collect()` makes a column of it;
@@ -634,18 +634,18 @@
 //! as it has every `requires` of this API.
 //!
 //! That a splice returns is proved where it takes a slice:
-//! [`splice`](Column::splice), `from_values`, `insert`, `push`,
-//! `remove`, `remove_n`, `truncate` and `clear` of every column, every
-//! splice of a delta column (which takes only slices), and
+//! [`splice_slice`](Column::splice_slice), `from_values`, `insert`,
+//! `push`, `remove`, `remove_n`, `truncate` and `clear` of every column,
+//! [`DeltaColumn::splice_slice`] and `splice_runs`, and
 //! `copy_ranges`. (Verus checks that each loop ends; that a function
 //! calls only functions that end, it does not: each loop on these paths
 //! has a measure.) A splice of a caller's iterator or runs runs the
 //! core's loop over the values to insert, which Verus is not asked to
 //! show ends. It ends when the iterator does: with an iterator that
 //! never ends,
-//! [`splice_iter`](Column::splice_iter),
+//! [`splice`](Column::splice),
 //! [`splice_runs`](Column::splice_runs), `extend` and `collect()`
-//! do not return (they run until memory is out, or a column's length is
+//! (and a delta column's [`splice`](DeltaColumn::splice)) do not return (they run until memory is out, or a column's length is
 //! more than it can count, which panics). Nor is it proved that an edit
 //! cursor's [`insert_runs`](Edit::insert_runs) returns, or an
 //! encoder's [`extend`](Encoder::extend), or a state's
@@ -707,7 +707,7 @@ pub use acc_iter::{AccIter, AccIterState, AccSeek, AccValue};
 #[cfg(verus_keep_ghost)]
 pub use bytes::{below_at, bytes_below, total_len, total_len_opt};
 pub use codec::{lebsize, ulebsize, Codec};
-pub use decoder::Decoder;
+pub use decoder::{decoder, decoder_in, try_decoder, try_decoder_in, Decoder};
 #[cfg(verus_keep_ghost)]
 pub use decoder::{
     head_len, head_run_max, lemma_head_len, lemma_head_run_max, scan_of, scan_taken,
@@ -775,11 +775,15 @@ use kind::KCore;
 #[cfg(verus_keep_ghost)]
 use model::{Model, Streams};
 use std::cmp::Ordering;
-use std::ops::Range;
+#[cfg(verus_keep_ghost)]
+use std::ops::Bound;
+use std::ops::{Range, RangeBounds};
 #[allow(unused_imports)]
 use vstd::prelude::*;
 #[cfg(verus_keep_ghost)]
 use vstd::std_specs::iter::{FromIteratorSpecImpl, IteratorSpec};
+#[cfg(verus_keep_ghost)]
+use vstd::std_specs::range::RangeBoundsSpec;
 
 mod seal {
     use super::model::{Flows, Loading, Model, Streams};
@@ -1255,6 +1259,82 @@ pub open spec fn gives<I: IntoIterator>(i: I, p: spec_fn(Seq<I::Item>) -> bool) 
         (I::into_iter).ensures((i,), it) && (it.obeys_prophetic_iter_laws() ==> p(it.remaining()))
 }
 
+/// The places `start..end` of a range of a column of `len` values, as
+/// [`Column::iter_range`] and its kin take it: clamped to the column, as
+/// the old API's `iter_range` did. A range past the end ends there, and
+/// one that ends before it starts is the empty one at its start.
+pub open spec fn range_in(range: Range<usize>, len: nat) -> (int, int) {
+    let s = if range.start <= len {
+        range.start as int
+    } else {
+        len as int
+    };
+    let e = if range.end <= len {
+        range.end as int
+    } else {
+        len as int
+    };
+    (s, if e < s {
+        s
+    } else {
+        e
+    })
+}
+
+/// The first place of a range given by its bounds, as a search takes it
+/// ([`Column::scope_to_value`], [`Iter::seek_to_value`]): an `Excluded`
+/// start is the place after it, but for `usize::MAX`, past which there is
+/// none.
+pub open spec fn bound_start(start: Bound<&usize>) -> int {
+    match start {
+        Bound::Included(n) => *n as int,
+        Bound::Excluded(n) => if *n == usize::MAX {
+            usize::MAX as int
+        } else {
+            *n + 1
+        },
+        Bound::Unbounded => 0,
+    }
+}
+
+/// The place after the last of a range given by its bounds, as a search
+/// takes it: an `Included` end is the place after it (but for
+/// `usize::MAX`), and an `Unbounded` one is `max`, the place after the
+/// last there is. A range that ends before it starts (`bound_start`) is
+/// the empty one at its start. This and `bound_start` are how the old
+/// API read the bounds of a range (`normalize_range_max`).
+pub open spec fn bound_end(start: Bound<&usize>, end: Bound<&usize>, max: int) -> int {
+    let e = match end {
+        Bound::Included(n) => if *n == usize::MAX {
+            usize::MAX as int
+        } else {
+            *n + 1
+        },
+        Bound::Excluded(n) => *n as int,
+        Bound::Unbounded => max,
+    };
+    if e < bound_start(start) {
+        bound_start(start)
+    } else {
+        e
+    }
+}
+
+/// The places `start..end` of a range given by its bounds, within a
+/// column of `len` values ([`Column::scope_to_value`]): `bound_start` and
+/// `bound_end`, each clamped to the column.
+pub open spec fn bounds_in(start: Bound<&usize>, end: Bound<&usize>, len: nat) -> (int, int) {
+    (if bound_start(start) <= len {
+        bound_start(start)
+    } else {
+        len as int
+    }, if bound_end(start, end, len as int) <= len {
+        bound_end(start, end, len as int)
+    } else {
+        len as int
+    })
+}
+
 /// The fill that a load makes of the saved bytes `d`, with the length
 /// and the fill value its options hold: its length and its value, where
 /// `d` is empty, both are given, and a column can be that long (a run
@@ -1430,7 +1510,7 @@ impl<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Clone for Column<V, C, K> 
 
 impl<'v, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Extend<Get<'v, V>> for Column<V, C, K> {
     /// Append the values that `iter` gives: what
-    /// [`splice_iter`](Column::splice_iter) does at the column's
+    /// [`splice`](Column::splice) does at the column's
     /// end, and specified as that is. The column counts an edit more if
     /// it is the longer for it.
     #[inline(always)]
@@ -1612,12 +1692,13 @@ impl<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Column<V, C, K> {
         self.core.count()
     }
 
-    /// Delete `del` values at `at` and insert `values` there.
+    /// Delete `del` values at `at` and insert `values` there: as
+    /// [`splice`](Self::splice) does with the values of a slice.
     ///
     /// The column counts an edit more (`after_edit` of its `edits()`),
     /// unless the call deletes no value and inserts none.
     #[inline(always)]
-    pub fn splice(&mut self, at: usize, del: usize, values: &[Get<'_, V>])
+    pub fn splice_slice(&mut self, at: usize, del: usize, values: &[Get<'_, V>])
         requires
             at <= old(self)@.len(),
             del <= old(self)@.len() - at,
@@ -1625,7 +1706,7 @@ impl<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Column<V, C, K> {
             final(self)@ == old(self)@.take(at as int) + VGet::svs(values@) + old(self)@.skip(at + del),
             final(self).edits() == after_call(old(self).edits(), del > 0 || values@.len() > 0),
     {
-        self.splice_impl(at, del, values)
+        self.splice_slice_impl(at, del, values)
     }
 
     /// Delete `del` values at `at` and insert there the values that
@@ -1640,7 +1721,7 @@ impl<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Column<V, C, K> {
     /// and inserts none, which is where `del` is 0 and the column is as
     /// long as it was. That holds of every iterator.
     #[inline(always)]
-    pub fn splice_iter<'v, I: IntoIterator<Item = Get<'v, V>>>(&mut self, at: usize, del: usize, values: I)
+    pub fn splice<'v, I: IntoIterator<Item = Get<'v, V>>>(&mut self, at: usize, del: usize, values: I)
         requires
             at <= old(self)@.len(),
             del <= old(self)@.len() - at,
@@ -1648,7 +1729,7 @@ impl<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Column<V, C, K> {
             gives(values, |xs: Seq<I::Item>| final(self)@ == old(self)@.take(at as int) + VGet::svs(xs) + old(self)@.skip(at + del)),
             final(self).edits() == after_call(old(self).edits(), del > 0 || final(self)@.len() != old(self)@.len()),
     {
-        self.splice_iter_impl::<I>(at, del, values)
+        self.splice_impl::<I>(at, del, values)
     }
 
     /// Delete `del` values at `at` and insert there the runs that `runs`
@@ -1656,12 +1737,12 @@ impl<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Column<V, C, K> {
     /// count says (`run_values`). A run of count 0 inserts nothing.
     ///
     /// The specification speaks of the iterator as
-    /// [`splice_iter`](Self::splice_iter)'s does. The counts are the
+    /// [`splice`](Self::splice)'s does. The counts are the
     /// caller's: with ones that make the column longer than it can count,
     /// or a run longer than the format can write, this panics.
     ///
     /// The column counts an edit more unless the call deletes no value
-    /// and inserts none, as [`splice_iter`](Self::splice_iter)'s does:
+    /// and inserts none, as [`splice`](Self::splice)'s does:
     /// runs that are all of count 0 insert none.
     #[inline(always)]
     pub fn splice_runs<'v, I: IntoIterator<Item = Run<Get<'v, V>>>>(&mut self, at: usize, del: usize, runs: I)
@@ -1820,9 +1901,11 @@ impl<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Column<V, C, K> {
         self.is_only_impl(value)
     }
 
-    /// Where `value` is among the values `start..end`, which are taken
-    /// to be in order: the range of the places that hold it or, where
-    /// none does, the empty range at the place where it would stand.
+    /// Where `value` is among the values of `range`, which are taken to
+    /// be in order: the range of the places that hold it or, where none
+    /// does, the empty range at the place where it would stand. `range`
+    /// is clamped to the column (`bounds_in`): call `start..end` the
+    /// places it names there.
     ///
     /// The search looks at few of the values: it is a search by halves
     /// over the column's slabs and then a walk along the runs of one or
@@ -1831,19 +1914,20 @@ impl<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Column<V, C, K> {
     /// (`sorted`) are for every `value` (`lemma_sorted`). Where
     /// they are not, the range is some range within `start..end`.
     #[inline(always)]
-    pub fn scope_to_value(&self, value: Get<'_, V>, start: usize, end: usize) -> (r: Range<usize>)
-        requires
-            start <= end <= self@.len(),
+    pub fn scope_to_value<R: RangeBounds<usize>>(&self, value: Get<'_, V>, range: R) -> (r: Range<usize>)
         ensures
-            start <= r.start <= r.end <= end,
-            sorted_for::<V>(self@.subrange(start as int, end as int), value.sv()) ==> forall|k: int|
-                start <= k < end ==> {
-                    &&& (k < r.start) == V::below(#[trigger] self@[k], value.sv())
-                    &&& (r.start <= k < r.end) == (self@[k] == value.sv())
-                    &&& (r.end <= k) == V::below(value.sv(), self@[k])
-                },
+            ({
+                let (start, end) = bounds_in(range.spec_start_bound(), range.spec_end_bound(), self@.len());
+                &&& start <= r.start <= r.end <= end
+                &&& sorted_for::<V>(self@.subrange(start, end), value.sv()) ==> forall|k: int|
+                    start <= k < end ==> {
+                        &&& (k < r.start) == V::below(#[trigger] self@[k], value.sv())
+                        &&& (r.start <= k < r.end) == (self@[k] == value.sv())
+                        &&& (r.end <= k) == V::below(value.sv(), self@[k])
+                    }
+            }),
     {
-        self.scope_to_value_impl(value, start, end)
+        self.scope_to_value_impl::<R>(value, range)
     }
 
     /// Replace each value by what `f` gives for it. `f` is called once
@@ -1883,19 +1967,22 @@ impl<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Column<V, C, K> {
         self.iter_impl()
     }
 
-    /// An iterator over the values `start..end`.
+    /// An iterator over the values of `range`, clamped to the column
+    /// (`range_in`): over `start..end`, as the old API's `iter_range`
+    /// took it.
     #[inline(always)]
-    pub fn iter_range(&self, start: usize, end: usize) -> (it: Iter<'_, V, C, K>)
-        requires
-            start <= end <= self@.len(),
+    pub fn iter_range(&self, range: Range<usize>) -> (it: Iter<'_, V, C, K>)
         ensures
-            it.rest() == self@.subrange(start as int, end as int),
-            it.column() == self@,
-            it.source() == Some(*self),
-            it.pos() == start,
-            it.end_pos() == end,
+            ({
+                let (start, end) = range_in(range, self@.len());
+                &&& it.rest() == self@.subrange(start, end)
+                &&& it.column() == self@
+                &&& it.source() == Some(*self)
+                &&& it.pos() == start
+                &&& it.end_pos() == end
+            }),
     {
-        self.iter_range_impl(start, end)
+        self.iter_range_impl(range)
     }
 
     /// The column, saved: the encoding of its values.
@@ -2489,7 +2576,8 @@ impl<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Iter<'a, V, C, K> {
     /// The search is over `range` of the column, as far as that lies
     /// in what the iterator has left: the iterator moves on to where
     /// `range` starts first ([`advance_to`](Self::advance_to)), and
-    /// looks no further than where it ends. `0..usize::MAX` is all the
+    /// looks no further than where it ends. The bounds are read as the
+    /// old API read them (`bound_start`, `bound_end`): `..` is all the
     /// iterator has left.
     ///
     /// Few of the values are looked at
@@ -2497,26 +2585,31 @@ impl<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Iter<'a, V, C, K> {
     /// in order only as far as `target` can tell (`sorted_for`); where
     /// they are not, the range is some range of the places searched.
     #[inline(always)]
-    pub fn seek_to_value(&mut self, target: Get<'_, V>, range: Range<usize>) -> (r: Range<usize>)
+    pub fn seek_to_value<R: RangeBounds<usize>>(&mut self, target: Get<'_, V>, range: R) -> (r: Range<usize>)
         ensures
             final(self).column() == old(self).column(),
             final(self).source() == old(self).source(),
             ({
                 let (p, o, t) = (old(self).pos(), old(self).rest(), target.sv());
+                // where the range starts and ends
+                let (rs, re) = (
+                    bound_start(range.spec_start_bound()),
+                    bound_end(range.spec_start_bound(), range.spec_end_bound(), old(self).end_pos() as int),
+                );
                 // how far the iterator moves before it searches, and the
                 // values searched
-                let a = if range.start <= p {
+                let a = if rs <= p {
                     0
-                } else if range.start - p <= o.len() {
-                    range.start - p
+                } else if rs - p <= o.len() {
+                    rs - p
                 } else {
                     o.len() as int
                 };
-                let w = window(o, a, range.end - p);
+                let w = window(o, a, re - p);
                 &&& p + a <= r.start <= r.end <= p + a + w.len()
                 &&& final(self).pos() == r.start
                 &&& final(self).rest() == o.skip(r.start - p)
-                &&& final(self).end_pos() == if range.start <= p + o.len() {
+                &&& final(self).end_pos() == if rs <= p + o.len() {
                     old(self).end_pos()
                 } else {
                     final(self).pos()
@@ -2529,7 +2622,7 @@ impl<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Iter<'a, V, C, K> {
                     }
             }),
     {
-        self.seek_to_value_impl(target, range)
+        self.seek_to_value_impl::<R>(target, range)
     }
 }
 

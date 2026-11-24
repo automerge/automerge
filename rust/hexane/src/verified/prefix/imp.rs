@@ -190,14 +190,15 @@ impl<V: PrefixValue + ColumnValueRef<C>, C: Codec> Column<V, C, SumIndex> {
         self.get_prefix(index.saturating_add(1))
     }
 
-    pub(super) fn sum_range_impl(&self, start: usize, end: usize) -> (r: V::Sum)
+    pub(super) fn sum_range_impl(&self, range: Range<usize>) -> (r: V::Sum)
         ensures
-            start <= end <= self@.len() ==> r.as_int() == summed::<V>(self@.subrange(start as int, end as int)),
-            start <= self@.len() <= end ==> r.as_int() == summed::<V>(
-                self@.subrange(start as int, self@.len() as int),
+            range.start <= range.end <= self@.len() ==> r.as_int() == summed::<V>(self@.subrange(range.start as int, range.end as int)),
+            range.start <= self@.len() <= range.end ==> r.as_int() == summed::<V>(
+                self@.subrange(range.start as int, self@.len() as int),
             ),
-            start >= end || start >= self@.len() ==> r.as_int() == 0,
+            range.start >= range.end || range.start >= self@.len() ==> r.as_int() == 0,
     {
+        let (start, end) = (range.start, range.end);
         let ghost n = self@.len() as int;
         let ix = match self.sum_index() {
             Some(ix) => ix,

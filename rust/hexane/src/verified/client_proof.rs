@@ -448,7 +448,7 @@ fn round_trip<'v, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(input: &Vec<G
         input@.len() <= usize::MAX - 3,
 {
     let mut col = Column::<V, C, K>::new();
-    col.splice(0, 0, input.as_slice());
+    col.splice_slice(0, 0, input.as_slice());
     let out = col.to_vec();
     assert(VGet::svs(out@) == VGet::svs(input@));
 
@@ -644,7 +644,7 @@ fn bytes_in_bytes_out(a: &[u8], b: &[u8])
     let back = Column::<Vec<u8>>::load(bytes.as_slice());
     assert(back is Ok);
     let back = back.unwrap();
-    let mut it = back.iter_range(1, 3);
+    let mut it = back.iter_range(1..3);
     let first = it.next();
     let second = it.next();
     let third = it.next();
@@ -731,13 +731,13 @@ fn count_and_cut(input: &Vec<u32>)
     let mut col = Column::<u32>::default();
     let none = col.is_empty();
     assert(none);
-    col.splice(0, 0, input.as_slice());
+    col.splice_slice(0, 0, input.as_slice());
     assert(col@ == input@);
     let n = col.len();
     let none = col.is_empty();
     assert(n == input@.len());
     assert(!none);
-    let mut it = col.iter_range(1, 3);
+    let mut it = col.iter_range(1..3);
     let x = it.next();
     let y = it.next();
     let z = it.next();
@@ -765,9 +765,9 @@ fn two_in_one_buffer<'v, V: ColumnValueRef<C>, C: Codec>(xs: &Vec<Get<'v, V>>, y
         ys@.len() <= usize::MAX - 3,
 {
     let mut a = Column::<V, C>::new();
-    a.splice(0, 0, xs.as_slice());
+    a.splice_slice(0, 0, xs.as_slice());
     let mut b = Column::<V, C>::new();
-    b.splice(0, 0, ys.as_slice());
+    b.splice_slice(0, 0, ys.as_slice());
     proof {
         VGet::lemma_svs(xs@);
         VGet::lemma_svs(ys@);
@@ -882,7 +882,7 @@ fn only_nulls(x: &[u8], none: &[u8])
 #[allow(dead_code)]
 fn clone_then_diverge<'v, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(xs: &Vec<Get<'v, V>>, a: Get<'v, V>) {
     let mut col = Column::<V, C, K>::new();
-    col.splice(0, 0, xs.as_slice());
+    col.splice_slice(0, 0, xs.as_slice());
     let ghost vs = VGet::svs(xs@);
     assert(col@ == vs);
 
@@ -961,7 +961,7 @@ fn collect_then_extend<'v, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(a: V
     assert(col@ == av + bv);
 
     let at = by_slice.len();
-    col.splice_iter(at, 0, c);
+    col.splice(at, 0, c);
     assert(col@ == av + cv + bv) by {
         assert((av + bv).take(at as int) =~= av);
         assert((av + bv).skip(at + 0) =~= bv);
@@ -1094,7 +1094,7 @@ fn load_with_a_length<'v, V: ColumnValueRef<C>, C: Codec>(input: &Vec<Get<'v, V>
         other != input@.len(),
 {
     let mut col = Column::<V, C>::new();
-    col.splice(0, 0, input.as_slice());
+    col.splice_slice(0, 0, input.as_slice());
     let n = col.len();
     let bytes = col.save();
     proof {
@@ -1222,7 +1222,7 @@ fn slabs_and_validation<'v, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(inp
         V::size_bound(VGet::svs(input@)) <= u32::MAX,
 {
     let mut col = Column::<V, C, K>::new();
-    col.splice(0, 0, input.as_slice());
+    col.splice_slice(0, 0, input.as_slice());
     proof {
         VGet::lemma_svs(input@);
     }
@@ -1323,7 +1323,7 @@ fn insert_in_order<'v, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &mu
         lemma_sorted::<V>(before, t);
         assert(before.subrange(0, n as int) =~= before);
     }
-    let r = col.scope_to_value(x, 0, n);
+    let r = col.scope_to_value(x, 0..n);
     let at = r.end;
     col.insert(at, x);
     proof {
@@ -1374,7 +1374,7 @@ fn find_number(col: &Column<u32>, x: u32) -> (r: Range<usize>)
         lemma_sorted::<u32>(col@, x);
         assert(col@.subrange(0, n as int) =~= col@);
     }
-    col.scope_to_value(x, 0, n)
+    col.scope_to_value(x, 0..n)
 }
 
 /// The client's own type is in the order of the numbers it is stored
@@ -1420,7 +1420,7 @@ fn find_action(sets: usize, deletes: usize)
         lemma_sorted::<Action>(col@, Action::Increment);
         assert(col@.subrange(0, n as int) =~= col@);
     }
-    let r = col.scope_to_value(Action::Delete, 0, n);
+    let r = col.scope_to_value(Action::Delete, 0..n);
     proof {
         if sets > 0 {
             assert(col@[sets - 1] == Action::Set);
@@ -1432,7 +1432,7 @@ fn find_action(sets: usize, deletes: usize)
     }
     assert(r.start == sets && r.end == n);
 
-    let r = col.scope_to_value(Action::Increment, 0, n);
+    let r = col.scope_to_value(Action::Increment, 0..n);
     proof {
         if n > 0 {
             assert(col@[n - 1] == Action::Set || col@[n - 1] == Action::Delete);
@@ -1446,7 +1446,7 @@ fn find_action(sets: usize, deletes: usize)
         assert(sorted::<Action>(part));
         lemma_sorted::<Action>(part, Action::Make);
     }
-    let r = col.scope_to_value(Action::Make, sets, n);
+    let r = col.scope_to_value(Action::Make, sets..n);
     proof {
         if deletes > 0 {
             assert(col@[sets as int] == Action::Delete);
@@ -1487,11 +1487,11 @@ fn find_bytes(a: &[u8], b: &[u8])
         assert(col@.subrange(0, 3) =~= col@);
         assert(col@[0] is None && col@[1] == Some(a@) && col@[2] == Some(b@));
     }
-    let r = col.scope_to_value(Some(a), 0, 3);
+    let r = col.scope_to_value(Some(a), 0..3);
     assert(r.start == 1 && r.end == 2);
-    let r = col.scope_to_value(None, 0, 3);
+    let r = col.scope_to_value(None, 0..3);
     assert(r.start == 0 && r.end == 1);
-    let r = col.scope_to_value(Some(b), 0, 3);
+    let r = col.scope_to_value(Some(b), 0..3);
     assert(r.start == 2 && r.end == 3);
 }
 
@@ -1522,9 +1522,9 @@ fn find_by_a_byte(a: &[u8], b: &[u8], i: usize)
         assert(col@.subrange(0, 2) =~= col@);
         assert(col@[0] == a@ && col@[1] == b@);
     }
-    let r = col.scope_to_value(a, 0, 2);
+    let r = col.scope_to_value(a, 0..2);
     assert(r.start == 0 && r.end == 1);
-    let r = col.scope_to_value(b, 0, 2);
+    let r = col.scope_to_value(b, 0..2);
     assert(r.start == 1 && r.end == 2);
 }
 
@@ -1555,7 +1555,7 @@ fn find_flags_and_nulls(falses: usize, trues: usize, x: u32)
         lemma_sorted::<bool>(col@, true);
         assert(col@.subrange(0, n as int) =~= col@);
     }
-    let r = col.scope_to_value(true, 0, n);
+    let r = col.scope_to_value(true, 0..n);
     proof {
         if falses > 0 {
             assert(col@[falses - 1] == false);
@@ -1579,9 +1579,9 @@ fn find_flags_and_nulls(falses: usize, trues: usize, x: u32)
         assert(col@.subrange(0, 3) =~= col@);
         assert(col@[0] is None && col@[1] is None && col@[2] == Some(x));
     }
-    let r = col.scope_to_value(None, 0, 3);
+    let r = col.scope_to_value(None, 0..3);
     assert(r.start == 0 && r.end == 2);
-    let r = col.scope_to_value(Some(x), 0, 3);
+    let r = col.scope_to_value(Some(x), 0..3);
     assert(r.start == 2 && r.end == 3);
 }
 
@@ -1603,7 +1603,7 @@ fn find_the_gap(col: &Column<i64>, x: i64, m: usize) -> (r: Range<usize>)
         assert(col@.subrange(0, n as int) =~= col@);
         assert(sorted_for::<i64>(col@, x));
     }
-    let r = col.scope_to_value(x, 0, n);
+    let r = col.scope_to_value(x, 0..n);
     proof {
         if m > 0 {
             assert(col@[m - 1] < x);
@@ -2049,7 +2049,7 @@ fn where_it_stands(col: &Column<u64>)
     requires
         col@.len() == 10,
 {
-    let mut it = col.iter_range(2, 8);
+    let mut it = col.iter_range(2..8);
     let (p, e) = (it.pos(), it.end_pos());
     assert(p == 2 && e == 8);
     let a = it.next();
@@ -2179,12 +2179,12 @@ fn moved_past(col: &Column<u64>)
         col@.len() == 10,
 {
     // past the window's end: the iterator stands there with nothing left
-    let mut it = col.iter_range(2, 8);
+    let mut it = col.iter_range(2..8);
     it.advance_by(7);
     let (p, e, n) = (it.pos(), it.end_pos(), it.len());
     assert(p == 8 && e == 8 && n == 0);
     // a copy stands where the iterator does, and then moves on its own
-    let mut it = col.iter_range(2, 8);
+    let mut it = col.iter_range(2..8);
     let _ = it.next();
     let mut b = it.clone();
     let (p, e) = (b.pos(), b.end_pos());
@@ -2208,12 +2208,12 @@ fn moved_past(col: &Column<u64>)
     let (p, e) = (it.pos(), it.end_pos());
     assert(v is None && p == 10 && e == 10);
     // a window past the column: the iterator stands at the column's end
-    let mut it = col.iter_range(0, 5);
+    let mut it = col.iter_range(0..5);
     it.shift(12..15);
     let (p, e, n) = (it.pos(), it.end_pos(), it.len());
     assert(p == 10 && e == 10 && n == 0);
     // a window that starts past its own end: where that end is, if ahead
-    let mut it = col.iter_range(1, 5);
+    let mut it = col.iter_range(1..5);
     it.shift(7..4);
     let (p, e) = (it.pos(), it.end_pos());
     assert(p == 4 && e == 4);
@@ -2221,7 +2221,7 @@ fn moved_past(col: &Column<u64>)
     let (p, e) = (it.pos(), it.end_pos());
     assert(p == 4 && e == 4);
     // a window behind the iterator: from where the iterator stands
-    let mut it = col.iter_range(6, 10);
+    let mut it = col.iter_range(6..10);
     it.shift(2..8);
     let (p, e, n) = (it.pos(), it.end_pos(), it.len());
     assert(p == 6 && e == 8 && n == 2);
@@ -2265,7 +2265,7 @@ fn told_by_the_call(col: &Column<u64>)
     assert(d.pos() == 0 && d.end_pos() == 0);
     // a move on, and two moves of the window: to one with values, and
     // to one with none
-    let mut it = col.iter_range(2, 8);
+    let mut it = col.iter_range(2..8);
     it.advance_by(2);
     assert(it.rest() =~= col@.subrange(4, 8));
     let v = it.shift_next(5..7);
@@ -2358,7 +2358,7 @@ fn runs_in_a_window<'v, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(a: Get<
     assert(r is None && p == 5 && e == 5);
 
     // the middle three
-    let mut it = col.iter_range(1, 4);
+    let mut it = col.iter_range(1..4);
     assert(it.rest() =~= seq![a.sv(), a.sv(), b.sv()]);
     let r = it.next_run();
     assert(r matches Some(run) && run.count == 2 && run.value.sv() == a.sv()) by {
@@ -2502,7 +2502,7 @@ fn count_by_runs<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &Column<V
     ensures
         n == b - a,
 {
-    let it = col.iter_range(a, b);
+    let it = col.iter_range(a..b);
     let ghost all = it.items();
     let ghost rs = runs_of(all);
     proof {
@@ -2556,7 +2556,7 @@ fn run_by_run(col: &Column<bool>)
     requires
         col@.len() > 0,
 {
-    let mut rs = col.iter_range(0, col.len()).runs();
+    let mut rs = col.iter_range(0..col.len()).runs();
     assert(rs.iter().pos() == 0 && rs.iter().column() == col@);
     let r = rs.next();
     assert(r matches Some(run) && run.value == col@[0] && rs.iter().pos() == run.count && rs.iter().end_pos()
@@ -2700,7 +2700,7 @@ fn first_place_in<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &Column<
             None => forall|i: int| a <= i < b ==> col@[i] != x.sv(),
         },
 {
-    let mut it = col.iter_range(a, b);
+    let mut it = col.iter_range(a..b);
     let ghost o = it.rest();
     let r = it.scan_to_value(x);
     proof {
@@ -2899,7 +2899,7 @@ fn seek_then_read(col: &Column<u64>, x: u64) -> (r: Range<usize>)
     }
     let mut it = col.iter();
     let r = it.seek_to_value(x, 0..n);
-    let s = col.scope_to_value(x, 0, n);
+    let s = col.scope_to_value(x, 0..n);
     assert(r.start == s.start && r.end == s.end) by {
         if r.start != s.start {
             let k = if r.start < s.start { r.start as int } else { s.start as int };
@@ -3038,7 +3038,7 @@ fn of_a_range<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &Column<V, C
         r.0.fits(col) && r.0.pos() == a && r.0.end_pos() == b,
         r.1.fits(col) && r.1.pos() == 0 && r.1.end_pos() == col@.len(),
 {
-    let s = col.iter_range(a, b).suspend();
+    let s = col.iter_range(a..b).suspend();
     let t = col.into_iter().suspend();
     (s, t)
 }
@@ -4925,7 +4925,7 @@ fn text_in_text_out(a: &str, b: &str)
     let back = Column::<String>::load(bytes.as_slice());
     assert(back is Ok);
     let back = back.unwrap();
-    let mut it = back.iter_range(1, 3);
+    let mut it = back.iter_range(1..3);
     let first = it.next();
     let second = it.next();
     let third = it.next();
@@ -5030,9 +5030,9 @@ fn find_text(a: &str, b: &str)
         assert(col@.subrange(0, 2) =~= col@);
         assert(col@[0] == a@ && col@[1] == b@);
     }
-    let r = col.scope_to_value(a, 0, 2);
+    let r = col.scope_to_value(a, 0..2);
     assert(r.start == 0 && r.end == 1);
-    let r = col.scope_to_value(b, 0, 2);
+    let r = col.scope_to_value(b, 0..2);
     assert(r.start == 1 && r.end == 2);
 }
 
@@ -5194,7 +5194,7 @@ fn opt_text_in_text_out(a: &str)
     let back = Column::<Option<String>>::load(bytes.as_slice());
     assert(back is Ok);
     let back = back.unwrap();
-    let mut it = back.iter_range(1, 3);
+    let mut it = back.iter_range(1..3);
     let first = it.next();
     let second = it.next();
     let third = it.next();
@@ -5227,11 +5227,11 @@ fn find_opt_text(a: &str, b: &str)
         lemma_sorted::<Option<String>>(col@, Some(b@));
         assert(col@.subrange(0, 3) =~= col@);
     }
-    let r = col.scope_to_value(None, 0, 3);
+    let r = col.scope_to_value(None, 0..3);
     assert(r.start == 0 && r.end == 1);
-    let r = col.scope_to_value(Some(a), 0, 3);
+    let r = col.scope_to_value(Some(a), 0..3);
     assert(r.start == 1 && r.end == 2);
-    let r = col.scope_to_value(Some(b), 0, 3);
+    let r = col.scope_to_value(Some(b), 0..3);
     assert(r.start == 2 && r.end == 3);
 }
 
@@ -5343,7 +5343,7 @@ fn ended_by_each_edit<'v, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(
     ensures
         !r,
 {
-    let s = col.iter_range(1, 2).suspend();
+    let s = col.iter_range(1..2).suspend();
     proof {
         s.lemma_fits(&*col);
         VGet::lemma_svs(more@);
@@ -5361,13 +5361,13 @@ fn ended_by_each_edit<'v, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(
     } else if which == 4 {
         col.clear();
     } else if which == 5 {
-        col.splice(0, 1, one.as_slice());
+        col.splice_slice(0, 1, one.as_slice());
     } else if which == 6 {
-        col.splice(n, 0, one.as_slice());
+        col.splice_slice(n, 0, one.as_slice());
     } else if which == 7 {
-        col.splice(1, 1, more.as_slice());
+        col.splice_slice(1, 1, more.as_slice());
     } else if which == 8 {
-        col.splice_iter(0, 1, more);
+        col.splice(0, 1, more);
     } else if which == 9 {
         col.splice_runs(0, 2, runs);
     } else if which == 10 {
@@ -5401,7 +5401,7 @@ fn no_edits<'v, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &mut Colum
     col.truncate(usize::MAX);
     col.remove_n(at, 0);
     assert(col@ =~= old(col)@);
-    col.splice(at, 0, none);
+    col.splice_slice(at, 0, none);
     assert(col@ =~= old(col)@);
     let nothing: Vec<Get<'v, V>> = Vec::new();
     proof {
@@ -5413,7 +5413,7 @@ fn no_edits<'v, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &mut Colum
     proof {
         VGet::lemma_svs(nothing@);
     }
-    col.splice_iter(at, 0, nothing);
+    col.splice(at, 0, nothing);
     assert(col@ =~= old(col)@);
     let no_runs: Vec<Run<Get<'v, V>>> = Vec::new();
     col.splice_runs(at, 0, no_runs);
@@ -5531,7 +5531,7 @@ fn counted_by_a_splice<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(
         del > 0 || values@.len() > 0 ==> final(col).edits() == after_edit(old(col).edits()),
         del == 0 && values@.len() == 0 ==> final(col).edits() == old(col).edits(),
 {
-    col.splice(at, del, values);
+    col.splice_slice(at, del, values);
 }
 
 /// A splice of what an iterator gives, of any iterator, and one of
@@ -5551,7 +5551,7 @@ fn counted_by_a_splice_iter<'v, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>,
         del > 0 || final(col)@.len() != old(col)@.len() ==> final(col).edits() == after_edit(old(col).edits()),
         del == 0 && final(col)@.len() == old(col)@.len() ==> final(col).edits() == old(col).edits(),
 {
-    col.splice_iter(at, del, values);
+    col.splice(at, del, values);
 }
 
 #[allow(dead_code)]
@@ -6155,7 +6155,7 @@ fn scanned_as_searched<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>>(col: &Co
         lemma_sorted::<V>(col@, x.sv());
         assert(col@.subrange(0, n as int) =~= col@);
     }
-    let found = col.scope_to_value(x, 0, n);
+    let found = col.scope_to_value(x, 0..n);
     proof {
         let o = col@;
         let t = x.sv();
@@ -6743,7 +6743,7 @@ fn the_sum_of_a_range<V: PrefixValue + ColumnValueRef<C>, C: Codec>(col: &Prefix
 {
     let a = col.get_prefix(start);
     let b = col.get_prefix(end);
-    let s = col.sum_range(start, end);
+    let s = col.sum_range(start..end);
     proof {
         lemma_sum_range::<V>(col@, start as int, end as int);
     }
@@ -6786,7 +6786,7 @@ fn sums_past_the_end<V: PrefixValue + ColumnValueRef<C>, C: Codec>(col: &PrefixC
     proof {
         assert(col@.subrange(0, col@.len() as int) =~= col@);
     }
-    (col.get_prefix(usize::MAX), col.get_total(n), col.sum_range(0, usize::MAX), col.sum_range(5, 3))
+    (col.get_prefix(usize::MAX), col.get_total(n), col.sum_range(0..usize::MAX), col.sum_range(5..3))
 }
 
 /// A push adds to the sum of a prefix column what the value adds.
@@ -6957,7 +6957,7 @@ fn sums_in_a_range<'a, V: PrefixValue + ColumnValueRef<C>, C: Codec>(col: &'a Pr
                 &&& out@[i].1.as_int() == summed::<V>(col@.take(a + i))
             },
 {
-    let it = col.prefix_iter_range(a, b);
+    let it = col.prefix_iter_range(a..b);
     let ghost all = it.items();
     proof {
         it.lemma_items();
@@ -7072,7 +7072,7 @@ fn summed_by_moving<V: PrefixValue + ColumnValueRef<C>, C: Codec>(col: &PrefixCo
     it.reset_prefix();
     it.advance_to(b);
     let moved = it.total();
-    let asked = col.sum_range(a, b);
+    let asked = col.sum_range(a..b);
     proof {
         V::Sum::lemma_as_int(moved);
         V::Sum::lemma_as_int(asked);
@@ -7152,7 +7152,7 @@ fn moved_with_sums(col: &PrefixColumn<u64>)
 {
     let ghost upto = |k: int| summed::<u64>(col@.take(k));
     // an iterator of a range: its sum counts from the column's start
-    let mut it = col.prefix_iter_range(2, 8);
+    let mut it = col.prefix_iter_range(2..8);
     let (p, e, n, w, t) = (it.pos(), it.end_pos(), it.len(), it.items_left(), it.total());
     assert(p == 2 && e == 8 && n == 6 && w == 6 && t == upto(2));
     // a step
@@ -7197,7 +7197,7 @@ fn moved_with_sums(col: &PrefixColumn<u64>)
     let (p, e, t) = (it.pos(), it.end_pos(), it.total());
     assert(c is None && p == 9 && e == 9 && t == upto(9));
     // the sum started again: it counts from where the iterator stands
-    let mut it = col.prefix_iter_range(4, 10);
+    let mut it = col.prefix_iter_range(4..10);
     it.reset_prefix();
     let (p, e, t) = (it.pos(), it.end_pos(), it.total());
     assert(p == 4 && e == 10 && t == 0);
@@ -7303,7 +7303,7 @@ fn told_by_a_prefix_iter_range<'a, V: PrefixValue + ColumnValueRef<C>, C: Codec>
         it.base_pos() == 0,
         it.total().as_int() == summed::<V>(col@.take(start as int)),
 {
-    col.prefix_iter_range(start, end)
+    col.prefix_iter_range(start..end)
 }
 
 /// What `get_prefixed` says by itself, of any position.
@@ -7715,7 +7715,7 @@ fn sums_copied_by_runs<V: PrefixValue + ColumnValueRef<C>, C: Codec>(col: &Prefi
         r@ == col@.subrange(a as int, b as int),
 {
     let mut r = Column::<V, C, LenIndex>::new();
-    let it = col.prefix_iter_range(a, b);
+    let it = col.prefix_iter_range(a..b);
     proof {
         it.plain().lemma_items_len();
         lemma_runs_of_values(it.plain().items());
@@ -7801,7 +7801,7 @@ fn a_range_two_ways<V: PrefixValue + ColumnValueRef<C>, C: Codec>(col: &PrefixCo
         r.0 == r.1,
 {
     let seek = col.delta(a, b).unwrap();
-    let asked = col.sum_range(a, b);
+    let asked = col.sum_range(a..b);
     proof {
         V::Sum::lemma_as_int(seek.delta);
         V::Sum::lemma_as_int(asked);
@@ -7895,7 +7895,7 @@ fn found_with_sums(col: &PrefixColumn<u64>)
 {
     let ghost upto = |k: int| summed::<u64>(col@.take(k));
     // a value further on, with where it is and what is passed over
-    let mut it = col.prefix_iter_range(2, 9);
+    let mut it = col.prefix_iter_range(2..9);
     let a = it.delta_nth(3).unwrap();
     let (p, e, t) = (it.pos(), it.end_pos(), it.total());
     assert(a.pos == 5 && a.pv.value == col@[5] && p == 6 && e == 9 && t == upto(6));
@@ -8796,7 +8796,7 @@ fn told_by_an_acc_range<V: VAccumulated + ColumnValueRef<C>, C: Codec>(
         start <= col@.len() <= end ==> r == accumulated::<V>(col@.subrange(start as int, col@.len() as int)),
         start >= end || start >= col@.len() ==> r == <V::Acc as VGroup>::zero(),
 {
-    col.sum_range(start, end)
+    col.sum_range(start..end)
 }
 
 /// What `add_times` says, on its own: the accumulator with `b` added
@@ -8896,7 +8896,7 @@ fn a_range_added_after<V: VAccumulated + ColumnValueRef<C>, C: Codec>(
     proof {
         lemma_acc_range::<V>(col@, start as int, end as int);
     }
-    (col.get_prefix(start), col.sum_range(start, end), col.get_prefix(end))
+    (col.get_prefix(start), col.sum_range(start..end), col.get_prefix(end))
 }
 
 /// What a range adds up to, found by taking away: what the values
@@ -9096,7 +9096,7 @@ fn accs_in_a_range<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec>(col: &'a A
                 &&& out@[i].1 == accumulated::<V>(col@.take(a + i))
             },
 {
-    let it = col.prefix_iter_range(a, b);
+    let it = col.prefix_iter_range(a..b);
     let ghost all = it.items();
     proof {
         it.lemma_items();
@@ -9201,7 +9201,7 @@ fn added_by_moving<V: VAccumulated + ColumnValueRef<C>, C: Codec>(col: &AccColum
     it.advance_to(a);
     it.reset_prefix();
     it.advance_to(b);
-    (it.total(), col.sum_range(a, b))
+    (it.total(), col.sum_range(a..b))
 }
 
 /// Two values read with one iterator, which steps over the values
@@ -9254,7 +9254,7 @@ fn moved_with_accs(col: &AccColumn<Step>)
 {
     let ghost upto = |k: int| accumulated::<Step>(col@.take(k));
     // an iterator of a range: its sum counts from the column's start
-    let mut it = col.prefix_iter_range(2, 8);
+    let mut it = col.prefix_iter_range(2..8);
     let (p, e, n, w, t) = (it.pos(), it.end_pos(), it.len(), it.items_left(), it.total());
     assert(p == 2 && e == 8 && n == 6 && w == 6 && t == upto(2));
     // a step
@@ -9299,7 +9299,7 @@ fn moved_with_accs(col: &AccColumn<Step>)
     let (p, e, t) = (it.pos(), it.end_pos(), it.total());
     assert(c is None && p == 9 && e == 9 && t == upto(9));
     // the sum started again: it counts from where the iterator stands
-    let mut it = col.prefix_iter_range(4, 10);
+    let mut it = col.prefix_iter_range(4..10);
     it.reset_prefix();
     let (p, e, t) = (it.pos(), it.end_pos(), it.total());
     assert(p == 4 && e == 10 && t == (Board { lit: 0, turned: false }));
@@ -9403,7 +9403,7 @@ fn told_by_an_acc_iter_range<'a, V: VAccumulated + ColumnValueRef<C>, C: Codec>(
         it.base_pos() == 0,
         it.total() == accumulated::<V>(col@.take(start as int)),
 {
-    col.prefix_iter_range(start, end)
+    col.prefix_iter_range(start..end)
 }
 
 /// What `get_prefixed` says by itself of an accumulator column, of any
@@ -9884,7 +9884,7 @@ fn accs_copied_by_runs<V: VAccumulated + ColumnValueRef<C>, C: Codec>(col: &AccC
         r@ == col@.subrange(a as int, b as int),
 {
     let mut r = Column::<V, C, LenIndex>::new();
-    let it = col.prefix_iter_range(a, b);
+    let it = col.prefix_iter_range(a..b);
     proof {
         it.plain().lemma_items_len();
         lemma_runs_of_values(it.plain().items());
@@ -9908,7 +9908,7 @@ fn a_range_added_two_ways<V: VAccumulated + ColumnValueRef<C>, C: Codec>(col: &A
         r.0 == r.1,
 {
     let seek = col.delta(a, b).unwrap();
-    (seek.delta, col.sum_range(a, b))
+    (seek.delta, col.sum_range(a..b))
 }
 
 /// An accumulator column's iterator handed over, of which no more is
@@ -9990,7 +9990,7 @@ fn found_with_accs(col: &AccColumn<Mark>)
 {
     let ghost upto = |k: int| accumulated::<Mark>(col@.take(k));
     // a value further on, with where it is and what is passed over
-    let mut it = col.prefix_iter_range(2, 9);
+    let mut it = col.prefix_iter_range(2..9);
     let a = it.delta_nth(3).unwrap();
     let (p, e, t) = (it.pos(), it.end_pos(), it.total());
     assert(a.pos == 5 && a.pv.value == col@[5] && p == 6 && e == 9 && t == upto(6));
@@ -10403,7 +10403,7 @@ fn delta_spliced<T: DeltaValue<C>, C: Codec>(col: &mut DeltaColumn<T, C>, at: us
     ensures
         final(col)@ == old(col)@.take(at as int) + values@ + old(col)@.skip(at + del),
 {
-    col.splice(at, del, values);
+    col.splice_slice(at, del, values);
 }
 
 /// One value put in place of another.
@@ -10417,7 +10417,7 @@ fn delta_set<T: DeltaValue<C>, C: Codec>(col: &mut DeltaColumn<T, C>, i: usize, 
 {
     let mut one: Vec<T> = Vec::new();
     one.push(v);
-    col.splice(i, 1, one.as_slice());
+    col.splice_slice(i, 1, one.as_slice());
     assert(col@ =~= old(col)@.update(i as int, v));
 }
 
@@ -10433,7 +10433,7 @@ fn delta_push_u64(col: &mut DeltaColumn<u64>, v: u64)
     let n = col.len();
     let mut one: Vec<u64> = Vec::new();
     one.push(v);
-    col.splice(n, 0, one.as_slice());
+    col.splice_slice(n, 0, one.as_slice());
     assert(col@ =~= old(col)@.push(v));
 }
 
@@ -10446,7 +10446,7 @@ fn delta_push_opt(col: &mut DeltaColumn<Option<i32>>, v: Option<i32>)
     let n = col.len();
     let mut one: Vec<Option<i32>> = Vec::new();
     one.push(v);
-    col.splice(n, 0, one.as_slice());
+    col.splice_slice(n, 0, one.as_slice());
     assert(col@ =~= old(col)@.push(v));
 }
 
@@ -10627,7 +10627,7 @@ fn delta_splice_counts<T: DeltaValue<C>, C: Codec>(
         del == 0 && values@.len() == 0 ==> final(col).edits() == old(col).edits(),
         del > 0 || values@.len() > 0 ==> final(col).edits() != old(col).edits(),
 {
-    col.splice(at, del, values);
+    col.splice_slice(at, del, values);
 }
 
 /// A delta column cleared is empty and can be filled again.
@@ -10639,7 +10639,7 @@ fn delta_cleared<T: DeltaValue<C>, C: Codec>(col: &mut DeltaColumn<T, C>, values
         final(col)@ == values@,
 {
     col.clear();
-    col.splice(0, 0, values);
+    col.splice_slice(0, 0, values);
     assert(Seq::<T>::empty().take(0) + values@ + Seq::<T>::empty().skip(0) =~= values@);
 }
 
@@ -10716,7 +10716,7 @@ fn delta_small_slabs<T: DeltaValue<C>, C: Codec>(values: &[T]) -> (r: DeltaColum
         r@ == values@,
 {
     let mut col = DeltaColumn::<T, C>::with_max_segments(2);
-    col.splice(0, 0, values);
+    col.splice_slice(0, 0, values);
     assert(Seq::<T>::empty().take(0) + values@ + Seq::<T>::empty().skip(0) =~= values@);
     col
 }
@@ -11596,7 +11596,7 @@ fn delta_where_it_stands(col: &DeltaColumn<u64>)
     requires
         col@.len() == 10,
 {
-    let mut it = col.iter_range(2, 8);
+    let mut it = col.iter_range(2..8);
     let (p, e) = (it.pos(), it.end_pos());
     assert(p == 2 && e == 8);
     let a = it.next();
@@ -11721,12 +11721,12 @@ fn delta_moved_past(col: &DeltaColumn<u64>)
         col@.len() == 10,
 {
     // past the window's end: the iterator stands there with nothing left
-    let mut it = col.iter_range(2, 8);
+    let mut it = col.iter_range(2..8);
     it.advance_by(7);
     let (p, e, n) = (it.pos(), it.end_pos(), it.len());
     assert(p == 8 && e == 8 && n == 0);
     // a copy stands where the iterator does, and then moves on its own
-    let mut it = col.iter_range(2, 8);
+    let mut it = col.iter_range(2..8);
     let _ = it.next();
     let mut b = it.clone();
     let (p, e) = (b.pos(), b.end_pos());
@@ -11750,12 +11750,12 @@ fn delta_moved_past(col: &DeltaColumn<u64>)
     let (p, e) = (it.pos(), it.end_pos());
     assert(v is None && p == 10 && e == 10);
     // a window past the column: the iterator stands at the column's end
-    let mut it = col.iter_range(0, 5);
+    let mut it = col.iter_range(0..5);
     it.shift(12..15);
     let (p, e, n) = (it.pos(), it.end_pos(), it.len());
     assert(p == 10 && e == 10 && n == 0);
     // a window that starts past its own end: where that end is, if ahead
-    let mut it = col.iter_range(1, 5);
+    let mut it = col.iter_range(1..5);
     it.shift(7..4);
     let (p, e) = (it.pos(), it.end_pos());
     assert(p == 4 && e == 4);
@@ -11763,7 +11763,7 @@ fn delta_moved_past(col: &DeltaColumn<u64>)
     let (p, e) = (it.pos(), it.end_pos());
     assert(p == 4 && e == 4);
     // a window behind the iterator: from where the iterator stands
-    let mut it = col.iter_range(6, 10);
+    let mut it = col.iter_range(6..10);
     it.shift(2..8);
     let (p, e, n) = (it.pos(), it.end_pos(), it.len());
     assert(p == 6 && e == 8 && n == 2);
@@ -11807,7 +11807,7 @@ fn delta_told_by_the_call(col: &DeltaColumn<u64>)
     assert(d.pos() == 0 && d.end_pos() == 0);
     // a move on, and two moves of the window: to one with values, and
     // to one with none
-    let mut it = col.iter_range(2, 8);
+    let mut it = col.iter_range(2..8);
     it.advance_by(2);
     assert(it.rest() =~= col@.subrange(4, 8));
     let v = it.shift_next(5..7);
@@ -11872,7 +11872,7 @@ fn delta_told_by_iter_range<'a, T: DeltaValue<C>, C: Codec>(col: &'a DeltaColumn
         it.pos() == start,
         it.end_pos() == end,
 {
-    col.iter_range(start, end)
+    col.iter_range(start..end)
 }
 
 /// What `next` says by itself of a delta column's iterator: in the words
@@ -12264,7 +12264,7 @@ fn delta_moved_by_runs<T: DeltaValue<C>, C: Codec>(
     let _n = src.len();
     let ghost rs = delta_runs_at(src@, a as int, runs_of(window(deltas(src@), a as int, b as int)));
     let mut runs: Vec<DeltaRun> = Vec::new();
-    for run in at: src.iter_range(a, b).runs()
+    for run in at: src.iter_range(a..b).runs()
         invariant
             at.seq() == rs,
             runs@ == rs.take(at.index()),
@@ -12433,7 +12433,7 @@ fn delta_the_number_before(col: &DeltaColumn<i64>, i: usize) -> (r: Option<Delta
         }) && run.delta == Some(vstd::wrapping::i64_specs::signed_crop(col@[i as int] - run.prefix)),
 {
     let n = col.len();
-    let mut it = col.iter_range(i, n);
+    let mut it = col.iter_range(i..n);
     let r = it.next_run();
     proof {
         let w = window(deltas(col@), i as int, n as int);
@@ -12600,7 +12600,7 @@ fn delta_resumed<'a, T: DeltaValue<C>, C: Codec>(col: &'a DeltaColumn<T, C>, a: 
         r matches Some(it) && it.pos() == a && it.end_pos() == b && it.rest() == col@.subrange(a as int, b as int)
             && it.source() == Some(*col),
 {
-    let it = col.iter_range(a, b);
+    let it = col.iter_range(a..b);
     let s = it.suspend();
     match s.try_resume(col) {
         Ok(r) => {
@@ -12732,7 +12732,7 @@ fn delta_resumed_at_the_end<T: DeltaValue<C>, C: Codec>(col: &DeltaColumn<T, C>,
     requires
         a <= b <= col@.len(),
 {
-    let mut it = col.iter_range(a, b);
+    let mut it = col.iter_range(a..b);
     it.advance_to(b);
     assert(it.pos() == b && it.rest().len() == 0);
     let s = it.suspend();
@@ -12885,7 +12885,7 @@ fn delta_first_place_in<T: DeltaValue<C>, C: Codec>(col: &DeltaColumn<T, C>, x: 
             None => forall|i: int| a <= i < b ==> col@[i] != x,
         },
 {
-    let mut it = col.iter_range(a, b);
+    let mut it = col.iter_range(a..b);
     let ghost o = it.rest();
     let r = it.scan_to_value(x);
     proof {
@@ -13138,7 +13138,7 @@ fn delta_seek_then_read(col: &DeltaColumn<u64>, x: u64) -> (r: Range<usize>)
     }
     let mut it = col.iter();
     let r = it.seek_to_value(x, 0..n);
-    let s = col.scope_to_value(x, 0, n);
+    let s = col.scope_to_value(x, 0..n);
     assert(r.start == s.start && r.end == s.end) by {
         if r.start != s.start {
             let k = if r.start < s.start { r.start as int } else { s.start as int };
@@ -13177,7 +13177,7 @@ fn delta_sought_between<T: DeltaValue<C>, C: Codec>(col: &DeltaColumn<T, C>, x: 
 {
     let mut it = col.iter();
     let r = it.seek_to_value(x, a..b);
-    let s = col.scope_to_value(x, a, b);
+    let s = col.scope_to_value(x, a..b);
     assert(r.start == s.start && r.end == s.end) by {
         if r.start != s.start {
             let k = if r.start < s.start { r.start as int } else { s.start as int };
@@ -13247,7 +13247,7 @@ fn delta_seek_nulls_first(col: &DeltaColumn<Option<u64>>) -> (r: Range<usize>)
 {
     let n = col.len();
     assert(col@.subrange(0, n as int) =~= col@);
-    let r = col.scope_to_value(None, 0, n);
+    let r = col.scope_to_value(None, 0..n);
     proof {
         if n > 0 {
             assert((0 < r.start) == <Option<u64> as VSpec>::below(col@[0], None));
@@ -13276,7 +13276,7 @@ fn delta_seek_unfitting(col: &DeltaColumn<u64>) -> (r: Range<usize>)
         assert(col@.subrange(0, n as int) =~= col@);
         assert(sorted::<u64>(col@));
     }
-    let r = col.scope_to_value(u64::MAX, 0, n);
+    let r = col.scope_to_value(u64::MAX, 0..n);
     proof {
         if n > 0 {
             assert(col@[n - 1].fits());
@@ -13490,7 +13490,7 @@ fn delta_told_by_scope_to_value<T: DeltaValue<C>, C: Codec>(
         sorted::<T>(col@.subrange(start as int, end as int)) ==> forall|k: int|
             start <= k < end ==> (r.start <= k < r.end) == (#[trigger] col@[k] == x),
 {
-    col.scope_to_value(x, start, end)
+    col.scope_to_value(x, start..end)
 }
 
 // ── Delta columns: the places of values, found by the column's index ────────
@@ -19871,7 +19871,7 @@ fn find_tag(ints: usize, strs: usize)
         j += 1;
     }
     let n = col.len();
-    let r = col.scope_to_value(Tag::Str, 0, n);
+    let r = col.scope_to_value(Tag::Str, 0..n);
     proof {
         if strs > 0 {
             assert(col@[ints as int] == Tag::Str);
@@ -19880,7 +19880,7 @@ fn find_tag(ints: usize, strs: usize)
     }
     assert(r.start == ints && r.end == n);
 
-    let r = col.scope_to_value(Tag::Int, 0, n);
+    let r = col.scope_to_value(Tag::Int, 0..n);
     proof {
         if ints > 0 {
             assert(col@[0] == Tag::Int);

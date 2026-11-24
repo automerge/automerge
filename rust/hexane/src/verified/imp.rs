@@ -39,7 +39,7 @@ use kind::KCore;
 use model::{Model, Streams};
 use std::cmp::Ordering;
 use std::marker::PhantomData;
-use std::ops::Range;
+use std::ops::{Bound, Range, RangeBounds};
 #[cfg(verus_keep_ghost)]
 use value::{lemma_opt_sizes, lemma_plain_sizes};
 use value::{VOps, VOptOps, VOptWrite, VWrite};
@@ -47,12 +47,85 @@ use value::{VOps, VOptOps, VOptWrite, VWrite};
 use vstd::prelude::*;
 #[cfg(verus_keep_ghost)]
 use vstd::std_specs::iter::{FromIteratorSpecImpl, IteratorSpec};
+#[cfg(verus_keep_ghost)]
+use vstd::std_specs::range::RangeBoundsSpec;
 
 verus! {
 
 /// A slab's segment budget, where none is given: that of
 /// [`Column`](crate::Column).
 pub(super) const MAX_SEG: usize = 64;
+
+/// `range_in`: `range` clamped to a column of `len` values.
+pub(crate) fn range_in_exec(range: Range<usize>, len: usize) -> (r: (usize, usize))
+    ensures
+        (r.0 as int, r.1 as int) == range_in(range, len as nat),
+{
+    let start = if range.start <= len {
+        range.start
+    } else {
+        len
+    };
+    let end = if range.end <= len {
+        range.end
+    } else {
+        len
+    };
+    (start, if end < start {
+        start
+    } else {
+        end
+    })
+}
+
+/// `bound_start` and `bound_end` of `range`, where `max` is the
+/// place after the last there is: the old API's `normalize_range_max`.
+pub(crate) fn bounds_exec<R: RangeBounds<usize>>(range: &R, max: usize) -> (r: (usize, usize))
+    ensures
+        r.0 as int == bound_start(range.spec_start_bound()),
+        r.1 as int == bound_end(range.spec_start_bound(), range.spec_end_bound(), max as int),
+{
+    let start = match range.start_bound() {
+        Bound::Included(n) => *n,
+        Bound::Excluded(n) => if *n == usize::MAX {
+            usize::MAX
+        } else {
+            *n + 1
+        },
+        Bound::Unbounded => 0,
+    };
+    let end = match range.end_bound() {
+        Bound::Included(n) => if *n == usize::MAX {
+            usize::MAX
+        } else {
+            *n + 1
+        },
+        Bound::Excluded(n) => *n,
+        Bound::Unbounded => max,
+    };
+    (start, if end < start {
+        start
+    } else {
+        end
+    })
+}
+
+/// `bounds_in`: `range` clamped to a column of `len` values.
+pub(crate) fn bounds_in_exec<R: RangeBounds<usize>>(range: &R, len: usize) -> (r: (usize, usize))
+    ensures
+        (r.0 as int, r.1 as int) == bounds_in(range.spec_start_bound(), range.spec_end_bound(), len as nat),
+{
+    let (start, end) = bounds_exec(range, len);
+    (if start <= len {
+        start
+    } else {
+        len
+    }, if end <= len {
+        end
+    } else {
+        len
+    })
+}
 
 impl<T: RleValue> seal::GetSeal for T {
 
@@ -918,7 +991,7 @@ impl<'v, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Column<V, C, K> {
             final(self).edits() == after_call(old(self).edits(), final(self)@.len() != old(self)@.len()),
     {
         let len = self.len();
-        self.splice_iter(len, 0, iter);
+        self.splice(len, 0, iter);
         proof {
             let it = choose|it: I::IntoIter| #[trigger]
                 (I::into_iter).ensures((iter,), it) && (it.obeys_prophetic_iter_laws() ==> self@ == old(self)@.take(
@@ -937,7 +1010,7 @@ impl<'v, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Column<V, C, K> {
             exists|initial: I::IntoIter| #[trigger] (I::into_iter).ensures((iter,), initial) && (initial.obeys_prophetic_iter_laws() ==> s@ == <Get<'v, V> as VGet>::svs(initial.remaining())),
     {
         let mut s = Self::new();
-        s.splice_iter(0, 0, iter);
+        s.splice(0, 0, iter);
         proof {
             let it = choose|it: I::IntoIter| #[trigger]
                 (I::into_iter).ensures((iter,), it) && (it.obeys_prophetic_iter_laws() ==> s@ == Seq::<
@@ -1020,7 +1093,7 @@ impl<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Column<V, C, K> {
             r@ == VGet::svs(values@),
     {
         let mut r = Self::with_max_segments(max_segments);
-        r.splice(0, 0, values);
+        r.splice_slice(0, 0, values);
         proof {
             let vs = VGet::svs(values@);
             assert(Seq::<V::S>::empty().take(0) + vs + Seq::<V::S>::empty().skip(0) =~= vs);
@@ -1118,7 +1191,7 @@ impl<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Column<V, C, K> {
         );
     }
 
-    pub(super) fn splice_impl(&mut self, at: usize, del: usize, values: &[Get<'_, V>])
+    pub(super) fn splice_slice_impl(&mut self, at: usize, del: usize, values: &[Get<'_, V>])
         requires
             at <= old(self)@.len(),
             del <= old(self)@.len() - at,
@@ -1139,7 +1212,7 @@ impl<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Column<V, C, K> {
         self.count_call(counter, del > 0 || values.len() > 0);
     }
 
-    pub(super) fn splice_iter_impl<'v, I: IntoIterator<Item = Get<'v, V>>>(&mut self, at: usize, del: usize, values: I)
+    pub(super) fn splice_impl<'v, I: IntoIterator<Item = Get<'v, V>>>(&mut self, at: usize, del: usize, values: I)
         requires
             at <= old(self)@.len(),
             del <= old(self)@.len() - at,
@@ -1262,7 +1335,7 @@ impl<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Column<V, C, K> {
             self.insert_apart(at, value);
         } else {
             let one = [value];
-            self.splice(at, 0, one.as_slice());
+            self.splice_slice(at, 0, one.as_slice());
             proof {
                 assert(one@ =~= seq![value]);
                 lemma_svs_one(value);
@@ -1668,7 +1741,26 @@ impl<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Column<V, C, K> {
         true
     }
 
-    pub(super) fn scope_to_value_impl(&self, value: Get<'_, V>, start: usize, end: usize) -> (r: Range<usize>)
+    pub(super) fn scope_to_value_impl<R: RangeBounds<usize>>(&self, value: Get<'_, V>, range: R) -> (r: Range<usize>)
+        ensures
+            ({
+                let (start, end) = bounds_in(range.spec_start_bound(), range.spec_end_bound(), self@.len());
+                &&& start <= r.start <= r.end <= end
+                &&& sorted_for::<V>(self@.subrange(start, end), value.sv()) ==> forall|k: int|
+                    start <= k < end ==> {
+                        &&& (k < r.start) == V::below(#[trigger] self@[k], value.sv())
+                        &&& (r.start <= k < r.end) == (self@[k] == value.sv())
+                        &&& (r.end <= k) == V::below(value.sv(), self@[k])
+                    }
+            }),
+    {
+        let (start, end) = bounds_in_exec(&range, self.len());
+        self.scope_within(value, start, end)
+    }
+
+    /// [`scope_to_value`](Column::scope_to_value) over the places
+    /// `start..end`.
+    fn scope_within(&self, value: Get<'_, V>, start: usize, end: usize) -> (r: Range<usize>)
         requires
             start <= end <= self@.len(),
         ensures
@@ -1769,7 +1861,23 @@ impl<V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Column<V, C, K> {
     }
 
     #[inline(always)]
-    pub(super) fn iter_range_impl(&self, start: usize, end: usize) -> (it: Iter<'_, V, C, K>)
+    pub(super) fn iter_range_impl(&self, range: Range<usize>) -> (it: Iter<'_, V, C, K>)
+        ensures
+            ({
+                let (start, end) = range_in(range, self@.len());
+                &&& it.rest() == self@.subrange(start, end)
+                &&& it.column() == self@
+                &&& it.source() == Some(*self)
+                &&& it.pos() == start
+                &&& it.end_pos() == end
+            }),
+    {
+        let (start, end) = range_in_exec(range, self.len());
+        self.iter_within(start, end)
+    }
+
+    /// An iterator over the values `start..end`.
+    pub(super) fn iter_within(&self, start: usize, end: usize) -> (it: Iter<'_, V, C, K>)
         requires
             start <= end <= self@.len(),
         ensures
@@ -2467,7 +2575,50 @@ impl<'a, V: ColumnValueRef<C>, C: Codec, K: VIndex<V, C>> Iter<'a, V, C, K> {
         None
     }
 
-    pub(super) fn seek_to_value_impl(&mut self, target: Get<'_, V>, range: Range<usize>) -> (r: Range<usize>)
+    pub(super) fn seek_to_value_impl<R: RangeBounds<usize>>(&mut self, target: Get<'_, V>, range: R) -> (r: Range<usize>)
+        ensures
+            final(self).column() == old(self).column(),
+            final(self).source() == old(self).source(),
+            ({
+                let (p, o, t) = (old(self).pos(), old(self).rest(), target.sv());
+                // where the range starts and ends
+                let (rs, re) = (
+                    bound_start(range.spec_start_bound()),
+                    bound_end(range.spec_start_bound(), range.spec_end_bound(), old(self).end_pos() as int),
+                );
+                // how far the iterator moves before it searches, and the
+                // values searched
+                let a = if rs <= p {
+                    0
+                } else if rs - p <= o.len() {
+                    rs - p
+                } else {
+                    o.len() as int
+                };
+                let w = window(o, a, re - p);
+                &&& p + a <= r.start <= r.end <= p + a + w.len()
+                &&& final(self).pos() == r.start
+                &&& final(self).rest() == o.skip(r.start - p)
+                &&& final(self).end_pos() == if rs <= p + o.len() {
+                    old(self).end_pos()
+                } else {
+                    final(self).pos()
+                }
+                &&& sorted_for::<V>(w, t) ==> forall|j: int|
+                    a <= j < a + w.len() ==> {
+                        &&& (p + j < r.start) == V::below(#[trigger] o[j], t)
+                        &&& (r.start <= p + j < r.end) == (o[j] == t)
+                        &&& (r.end <= p + j) == V::below(t, o[j])
+                    }
+            }),
+    {
+        let (start, end) = bounds_exec(&range, self.end_pos());
+        self.seek_within(target, start..end)
+    }
+
+    /// [`seek_to_value`](Iter::seek_to_value) over the places
+    /// `range.start..range.end`.
+    fn seek_within(&mut self, target: Get<'_, V>, range: Range<usize>) -> (r: Range<usize>)
         ensures
             final(self).column() == old(self).column(),
             final(self).source() == old(self).source(),

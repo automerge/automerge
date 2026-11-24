@@ -43,6 +43,7 @@ use crate::prefix_core::{before, PrefixWeight};
 #[cfg(verus_keep_ghost)]
 use crate::prefix_search::PrefixOrd;
 use crate::Leb128;
+use std::ops::Range;
 use vstd::prelude::*;
 
 mod imp;
@@ -107,15 +108,15 @@ impl<V: PrefixValue + ColumnValueRef<C>, C: Codec> Column<V, C, SumIndex> {
     /// It is the sum before `end` less the sum before `start`, found in
     /// one pass.
     #[inline(always)]
-    pub fn sum_range(&self, start: usize, end: usize) -> (r: V::Sum)
+    pub fn sum_range(&self, range: Range<usize>) -> (r: V::Sum)
         ensures
-            start <= end <= self@.len() ==> r.as_int() == summed::<V>(self@.subrange(start as int, end as int)),
-            start <= self@.len() <= end ==> r.as_int() == summed::<V>(
-                self@.subrange(start as int, self@.len() as int),
+            range.start <= range.end <= self@.len() ==> r.as_int() == summed::<V>(self@.subrange(range.start as int, range.end as int)),
+            range.start <= self@.len() <= range.end ==> r.as_int() == summed::<V>(
+                self@.subrange(range.start as int, self@.len() as int),
             ),
-            start >= end || start >= self@.len() ==> r.as_int() == 0,
+            range.start >= range.end || range.start >= self@.len() ==> r.as_int() == 0,
     {
-        self.sum_range_impl(start, end)
+        self.sum_range_impl(range)
     }
 }
 

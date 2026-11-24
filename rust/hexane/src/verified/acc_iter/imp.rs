@@ -14,6 +14,7 @@ use super::super::lemma_svs_sub;
 #[cfg(verus_keep_ghost)]
 use super::super::shift::{lemma_singles, lemma_svs_inj};
 use super::*;
+use crate::verified::imp::range_in_exec;
 
 use crate::btree::SlabBTree;
 #[cfg(verus_keep_ghost)]
@@ -1084,7 +1085,26 @@ impl<V: VAccumulated + ColumnValueRef<C>, C: Codec> Column<V, C, AccIndex> {
         AccIter { ix, inner, total: zero, base, base_at: 0 }
     }
 
-    pub(super) fn prefix_iter_range_impl(&self, start: usize, end: usize) -> (it: AccIter<'_, V, C>)
+    pub(super) fn prefix_iter_range_impl(&self, range: Range<usize>) -> (it: AccIter<'_, V, C>)
+        ensures
+            ({
+                let (start, end) = range_in(range, self@.len());
+                &&& it.rest() == self@.subrange(start, end)
+                &&& it.column() == self@
+                &&& it.source() == Some(*self)
+                &&& it.pos() == start
+                &&& it.end_pos() == end
+                &&& it.base_pos() == 0
+                &&& it.total() == accumulated::<V>(self@.take(start))
+            }),
+    {
+        let (start, end) = range_in_exec(range, self.len());
+        self.prefix_iter_within(start, end)
+    }
+
+    /// An iterator over the values `start..end` that keeps the running
+    /// sum.
+    fn prefix_iter_within(&self, start: usize, end: usize) -> (it: AccIter<'_, V, C>)
         requires
             start <= end <= self@.len(),
         ensures

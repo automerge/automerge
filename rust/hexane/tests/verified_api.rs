@@ -511,7 +511,7 @@ fn check_clone<T: Kind>(v: &Column<T>, model: &[T], salt: u64) {
     let at = rng.below(m2.len() + 1);
     let del = rng.below((m2.len() - at).min(12) + 1);
     let ins: Vec<T> = rng.values(40);
-    v2.splice(at, del, &lent(&ins));
+    v2.splice_slice(at, del, &lent(&ins));
     m2.splice(at..at + del, ins);
     let x = T::fresh(&mut rng);
     v2.push(x.lend());
@@ -529,7 +529,7 @@ fn check_clone<T: Kind>(v: &Column<T>, model: &[T], salt: u64) {
 /// A column with the values `model`.
 fn column_of<T: Kind>(model: &[T]) -> Column<T> {
     let mut v = Column::<T>::new();
-    v.splice(0, 0, &lent(model));
+    v.splice_slice(0, 0, &lent(model));
     v
 }
 
@@ -642,7 +642,7 @@ fn clones<T: Kind>() {
         check_clone(&v, &[], budget as u64);
         let mut v2 = v.clone();
         drop(v);
-        v2.splice(0, 0, &lent(&more));
+        v2.splice_slice(0, 0, &lent(&more));
         check(&v2, &more);
 
         // of a column of many slabs, and then of that column emptied
@@ -653,7 +653,7 @@ fn clones<T: Kind>() {
         v3.clear();
         let mut v4 = v3.clone();
         check(&v4, &[]);
-        v4.splice(0, 0, &lent(&more));
+        v4.splice_slice(0, 0, &lent(&more));
         check(&v4, &more);
         check(&v3, &[]);
     }
@@ -757,11 +757,11 @@ fn the_bytes_of_a_column() {
 fn byte_strings_are_lent() {
     let _golden = golden::test(concat!(module_path!(), "::byte_strings_are_lent"));
     let mut v = Column::<Vec<u8>>::new();
-    v.splice(0, 0, &[b"one", b"two", b"two"]);
+    v.splice_slice(0, 0, &[b"one", b"two", b"two"]);
     v.push(b"three");
     let first: &[u8] = v.get(0).unwrap();
     let all: Vec<&[u8]> = v.to_vec();
-    let mut it = v.iter_range(1, 3);
+    let mut it = v.iter_range(1..3);
     let (x, y) = (it.next().unwrap(), it.next().unwrap());
     assert!(it.next().is_none());
     assert_eq!(first, b"one");
@@ -769,7 +769,7 @@ fn byte_strings_are_lent() {
     assert_eq!((x, y), (&b"two"[..], &b"two"[..]));
 
     let mut o = Column::<Option<Vec<u8>>>::new();
-    o.splice(0, 0, &[Some(b"one"), None]);
+    o.splice_slice(0, 0, &[Some(b"one"), None]);
     o.insert(1, Some(&[]));
     o.push(None);
     let all: Vec<Option<&[u8]>> = o.to_vec();
@@ -790,7 +790,7 @@ fn edits<T: Kind>() {
                     let at = rng.below(model.len() + 1);
                     let del = rng.below((model.len() - at).min(12) + 1);
                     let ins: Vec<T> = rng.values(40);
-                    v.splice(at, del, &lent(&ins));
+                    v.splice_slice(at, del, &lent(&ins));
                     model.splice(at..at + del, ins);
                 }
                 4 | 5 => {
@@ -852,7 +852,7 @@ fn edits<T: Kind>() {
                 }
                 let start = rng.below(model.len() + 1);
                 let end = start + rng.below(model.len() - start + 1);
-                let mut it = v.iter_range(start, end);
+                let mut it = v.iter_range(start..end);
                 for m in &model[start..end] {
                     assert_eq!(it.next().map(T::keep).as_ref(), Some(m));
                 }
@@ -923,12 +923,12 @@ fn other_forms<T: Kind>() {
                     let ins: Vec<T> = rng.values(40);
                     let gets = lent(&ins);
                     match rng.below(6) {
-                        0 => v.splice_iter(at, del, ins.iter().map(T::lend)),
-                        1 => v.splice_iter(at, del, gets),
-                        2 => v.splice_iter(at, del, gets.iter().copied().filter(|_| true)),
+                        0 => v.splice(at, del, ins.iter().map(T::lend)),
+                        1 => v.splice(at, del, gets),
+                        2 => v.splice(at, del, gets.iter().copied().filter(|_| true)),
                         3 => {
                             let (a, b) = gets.split_at(gets.len() / 2);
-                            v.splice_iter(at, del, a.iter().chain(b).copied());
+                            v.splice(at, del, a.iter().chain(b).copied());
                         }
                         4 => {
                             let mut i = 0;
@@ -936,9 +936,9 @@ fn other_forms<T: Kind>() {
                                 i += 1;
                                 gets.get(i - 1).copied()
                             };
-                            v.splice_iter(at, del, std::iter::from_fn(next));
+                            v.splice(at, del, std::iter::from_fn(next));
                         }
-                        _ => v.splice_iter(at, del, gets.iter().rev().rev().copied()),
+                        _ => v.splice(at, del, gets.iter().rev().rev().copied()),
                     }
                     model.splice(at..at + del, ins.iter().cloned());
                 }
@@ -1112,7 +1112,7 @@ fn an_iterator_is_run_to_its_end_once() {
     };
     let mut asked = 0;
     let mut v = Column::<u64>::new();
-    v.splice_iter(0, 0, std::iter::from_fn(|| feed(&mut asked)));
+    v.splice(0, 0, std::iter::from_fn(|| feed(&mut asked)));
     assert_eq!((v.to_vec(), asked), (items.to_vec(), 4));
     asked = 0;
     v.extend(std::iter::from_fn(|| feed(&mut asked)));
@@ -1234,7 +1234,7 @@ fn a_column_of_one_value() {
 /// `x` would stand: by the model, in the order the standard library has
 /// for the type.
 fn check_scope<T: Kind>(v: &Column<T>, model: &[T], x: &T, start: usize, end: usize) -> bool {
-    let r = v.scope_to_value(x.lend(), start, end);
+    let r = v.scope_to_value(x.lend(), start..end);
     assert!(
         start <= r.start && r.start <= r.end && r.end <= end,
         "{r:?} of {start}..{end}"
@@ -1294,7 +1294,7 @@ fn targets<T: Kind>(rng: &mut Rng, model: &[T]) -> Vec<T> {
 /// A column with the values `model`, of slabs of at most `budget` runs.
 fn column_with<T: Kind>(model: &[T], budget: usize) -> Column<T> {
     let mut v = Column::<T>::with_max_segments(budget);
-    v.splice(0, 0, &lent(model));
+    v.splice_slice(0, 0, &lent(model));
     v
 }
 
@@ -1445,7 +1445,7 @@ fn a_search_of_long_byte_strings() {
         absent.extend([0, 0, 0]);
         assert!(!model.contains(&absent));
         let at = model.iter().filter(|m| **m < absent).count();
-        assert_eq!(v.scope_to_value(&absent, 0, model.len()), at..at);
+        assert_eq!(v.scope_to_value(&absent, 0..model.len()), at..at);
         assert!(0 < at && at < model.len());
 
         // with nulls, which come first
@@ -1453,8 +1453,8 @@ fn a_search_of_long_byte_strings() {
         nullable.extend(model.iter().cloned().map(Some));
         let v = column_with(&nullable, budget);
         let n = nullable.len();
-        assert_eq!(v.scope_to_value(None, 0, n), 0..5);
-        assert_eq!(v.scope_to_value(Some(&[]), 0, n), 5..6);
+        assert_eq!(v.scope_to_value(None, 0..n), 0..5);
+        assert_eq!(v.scope_to_value(Some(&[]), 0..n), 5..6);
         for x in strings.iter().cloned().map(Some).chain([None]) {
             for (start, end) in windows(&mut rng, &v.slab_lens(), n) {
                 assert!(check_scope(&v, &nullable, &x, start, end));
@@ -1576,19 +1576,19 @@ fn a_search_is_in_the_order_of_the_stored_numbers() {
     assert!(Rank::High < Rank::Mid && Rank::Mid < Rank::Low);
     let by_number = [Rank::Low, Rank::Low, Rank::Mid, Rank::High, Rank::High];
     let v = Column::<Rank>::from_values(&by_number);
-    assert_eq!(v.scope_to_value(Rank::Low, 0, 5), 0..2);
-    assert_eq!(v.scope_to_value(Rank::Mid, 0, 5), 2..3);
-    assert_eq!(v.scope_to_value(Rank::High, 0, 5), 3..5);
-    assert_eq!(v.scope_to_value(Rank::Mid, 3, 5), 3..3);
-    assert_eq!(v.scope_to_value(Rank::Mid, 0, 2), 2..2);
+    assert_eq!(v.scope_to_value(Rank::Low, 0..5), 0..2);
+    assert_eq!(v.scope_to_value(Rank::Mid, 0..5), 2..3);
+    assert_eq!(v.scope_to_value(Rank::High, 0..5), 3..5);
+    assert_eq!(v.scope_to_value(Rank::Mid, 3..5), 3..3);
+    assert_eq!(v.scope_to_value(Rank::Mid, 0..2), 2..2);
 
     let mut nullable = vec![None, None];
     nullable.extend(by_number.map(Some));
     let v = Column::<Option<Rank>>::from_values(&nullable);
-    assert_eq!(v.scope_to_value(None, 0, 7), 0..2);
-    assert_eq!(v.scope_to_value(Some(Rank::Low), 0, 7), 2..4);
-    assert_eq!(v.scope_to_value(Some(Rank::High), 0, 7), 5..7);
-    assert_eq!(v.scope_to_value(Some(Rank::Mid), 0, 2), 2..2);
+    assert_eq!(v.scope_to_value(None, 0..7), 0..2);
+    assert_eq!(v.scope_to_value(Some(Rank::Low), 0..7), 2..4);
+    assert_eq!(v.scope_to_value(Some(Rank::High), 0..7), 5..7);
+    assert_eq!(v.scope_to_value(Some(Rank::Mid), 0..2), 2..2);
 
     // many of them, in many slabs: made with another value after each,
     // which is then taken out again
@@ -1607,11 +1607,11 @@ fn a_search_is_in_the_order_of_the_stored_numbers() {
         v.to_vec()[998..1002],
         [Rank::Low, Rank::Low, Rank::Mid, Rank::Mid]
     );
-    assert_eq!(v.scope_to_value(Rank::Low, 0, n), 0..1000);
-    assert_eq!(v.scope_to_value(Rank::Mid, 0, n), 1000..2000);
-    assert_eq!(v.scope_to_value(Rank::High, 0, n), 2000..3000);
-    assert_eq!(v.scope_to_value(Rank::Mid, 1500, 2500), 1500..2000);
-    assert_eq!(v.scope_to_value(Rank::Low, 1500, 2500), 1500..1500);
+    assert_eq!(v.scope_to_value(Rank::Low, 0..n), 0..1000);
+    assert_eq!(v.scope_to_value(Rank::Mid, 0..n), 1000..2000);
+    assert_eq!(v.scope_to_value(Rank::High, 0..n), 2000..3000);
+    assert_eq!(v.scope_to_value(Rank::Mid, 1500..2500), 1500..2000);
+    assert_eq!(v.scope_to_value(Rank::Low, 1500..2500), 1500..1500);
 }
 
 /// The runs of equal values of `model`, each as long as it can be: a
@@ -1715,7 +1715,7 @@ fn remaps<T: Kind>() {
                     let at = rng.below(now.len() + 1);
                     let del = rng.below((now.len() - at).min(4) + 1);
                     let put: Vec<T> = rng.values(40);
-                    v.splice(at, del, &lent(&put));
+                    v.splice_slice(at, del, &lent(&put));
                     now.splice(at..at + del, put);
                 }
                 check_loaded(&v, &now);
@@ -1851,7 +1851,7 @@ fn a_remap_whose_function_panics() {
 /// API's iterator printed.
 fn check_iters<T: Kind>(v: &Column<T>, model: &[T], (a, b): (usize, usize), rng: &mut Rng) {
     let want = &model[a..b];
-    let new = || v.iter_range(a, b);
+    let new = || v.iter_range(a..b);
     let same = |x: &Iter<'_, T>, left: usize| {
         assert_eq!(x.len(), left);
         assert_eq!(x.size_hint(), (left, Some(left)));
@@ -2064,7 +2064,7 @@ fn an_iterator_after_edits() {
                 let at = rng.below(model.len() + 1);
                 let del = rng.below((model.len() - at).min(30) + 1);
                 let put: Vec<T> = rng.values(60);
-                v.splice(at, del, &lent(&put));
+                v.splice_slice(at, del, &lent(&put));
                 model.splice(at..at + del, put);
                 if round % 13 == 12 {
                     v.truncate(model.len() / 2);
@@ -2214,7 +2214,7 @@ fn check_moves<T: Kind>(v: &Column<T>, model: &[T], (a, b): (usize, usize), rng:
         7 => from.saturating_add(rng.below(n + 2)),
         _ => from.saturating_add(rng.below(n.saturating_sub(from).min(40) + 2)),
     };
-    let mut x = v.iter_range(a, b);
+    let mut x = v.iter_range(a..b);
     assert_eq!((x.pos(), x.end_pos()), (a, b));
     for step in 0..50 {
         stand(&x, slabs);
@@ -2510,7 +2510,7 @@ fn runs_as_columns_does() {
                 for (a, b) in ws {
                     let want = model_runs(&model[a..b]);
                     // run by run, and where the iterator stands after each
-                    let mut x = v.iter_range(a, b);
+                    let mut x = v.iter_range(a..b);
                     let mut got = Vec::new();
                     let mut at = a;
                     loop {
@@ -2530,25 +2530,25 @@ fn runs_as_columns_does() {
                     assert!(x.next_run().is_none() && x.next().is_none());
 
                     // the iterator of runs
-                    let rs = v.iter_range(a, b).runs();
+                    let rs = v.iter_range(a..b).runs();
                     golden::note(&format!("{rs:?}"));
                     assert_eq!(taken(rs), want);
 
                     // a window that ends past the column: the runs up to
                     // the column's end
-                    let mut x = v.iter_range(a, b);
+                    let mut x = v.iter_range(a..b);
                     x.set_max(usize::MAX - rng.below(2));
                     assert_eq!(taken(x.runs()), model_runs(&model[a..]));
 
                     // from inside a run: the rest of that run comes first
                     let k = rng.below(b - a + 1);
-                    let mut x = v.iter_range(a, b);
+                    let mut x = v.iter_range(a..b);
                     x.advance_by(k);
                     assert_eq!(taken(x.runs()), model_runs(&model[a + k..b]));
 
                     // the runs make the values, in a column of their own
                     let mut w = Column::<T>::new();
-                    w.splice_runs(0, 0, v.iter_range(a, b).runs());
+                    w.splice_runs(0, 0, v.iter_range(a..b).runs());
                     assert_eq!(new_values(&w), &model[a..b]);
                 }
             }
@@ -2603,7 +2603,7 @@ fn check_seek<T: Kind>(
     range: Range<usize>,
 ) -> bool {
     let slabs = same_slabs(v);
-    let mut it = v.iter_range(a, b);
+    let mut it = v.iter_range(a..b);
     it.advance_by(k);
     let (p, e) = (it.pos(), it.end_pos());
     assert_eq!((p, e), (a + k, b));
@@ -2652,7 +2652,7 @@ fn check_scan<T: Kind>(
     (a, b, k): (usize, usize, usize),
 ) -> usize {
     let slabs = same_slabs(v);
-    let mut it = v.iter_range(a, b);
+    let mut it = v.iter_range(a..b);
     it.advance_by(k);
     let mut found = 0;
     loop {
@@ -2882,7 +2882,7 @@ fn a_search_then_a_read() {
     assert_eq!(it.scan_to_value(300), None);
     assert_eq!((it.pos(), it.end_pos(), it.next()), (600, 600, None));
     // a range that starts past the window: so too
-    let mut it = v.iter_range(10, 20);
+    let mut it = v.iter_range(10..20);
     assert_eq!(it.seek_to_value(9, 21..30), 20..20);
     assert_eq!((it.pos(), it.end_pos(), it.next()), (20, 20, None));
 
@@ -2955,12 +2955,12 @@ fn an_edit<T: Kind>(rng: &mut Rng, which: usize, v: &mut Column<T>, model: &mut 
     match which {
         0 => {
             let ins: Vec<T> = rng.values(3);
-            v.splice(at, del, &lent(&ins));
+            v.splice_slice(at, del, &lent(&ins));
             model.splice(at..at + del, ins);
         }
         1 => {
             let ins: Vec<T> = rng.values(3);
-            v.splice_iter(at, del, ins.iter().map(T::lend));
+            v.splice(at, del, ins.iter().map(T::lend));
             model.splice(at..at + del, ins);
         }
         2 => {
@@ -3058,7 +3058,7 @@ fn an_edit_ends_what_was_suspended() {
             let n = model.len();
             let (a, b, k) = windows_into(&mut rng, n, 1)[1];
             let s = {
-                let mut x = v.iter_range(a, b);
+                let mut x = v.iter_range(a..b);
                 if k > 0 {
                     x.nth(k - 1);
                 }
@@ -3134,7 +3134,7 @@ fn a_cleared_column_refuses_what_was_suspended() {
                 v = Column::<T>::load(&bytes).unwrap();
             }
             let (a, b) = [(0, 0), (0, n), (0, 1), (n, n)][round / 3 % 4];
-            let s = v.iter_range(a, b).suspend();
+            let s = v.iter_range(a..b).suspend();
             let first = Some((a, b, window(&model, a, b).to_vec()));
             assert_eq!(resumed(&s, &v), first);
             one_slab += (v.slab_count() == 1) as usize;
@@ -3145,14 +3145,14 @@ fn a_cleared_column_refuses_what_was_suspended() {
             // the first slab again, by a call that changes no value
             let none = &model[..0];
             if round / 12 % 2 == 0 {
-                v.splice(0, 0, &lent(none));
+                v.splice_slice(0, 0, &lent(none));
             } else {
                 v.extend(none.iter().map(T::lend));
             }
             assert_eq!(v.slab_count(), 1);
             assert!(resumed(&s, &v).is_none(), "round {round}");
             // and with values in it again, the old ones
-            v.splice(0, 0, &lent(&model));
+            v.splice_slice(0, 0, &lent(&model));
             assert!(resumed(&s, &v).is_none());
             check_loaded(&v, &model);
         }
@@ -3200,7 +3200,7 @@ fn a_call_that_changes_no_value() {
             }
             let (a, b, k) = windows_into(&mut rng, n, 1)[1];
             let s = {
-                let mut x = v.iter_range(a, b);
+                let mut x = v.iter_range(a..b);
                 if k > 0 {
                     x.nth(k - 1);
                 }
@@ -3221,10 +3221,10 @@ fn a_call_that_changes_no_value() {
             }
             match which {
                 0 => {
-                    v.splice(at, 0, &lent(none));
+                    v.splice_slice(at, 0, &lent(none));
                 }
                 1 => {
-                    v.splice_iter(at, 0, none.iter().map(T::lend));
+                    v.splice(at, 0, none.iter().map(T::lend));
                 }
                 2 | 3 => {
                     v.splice_runs(
@@ -3259,7 +3259,7 @@ fn a_call_that_changes_no_value() {
                     if at == n {
                         continue;
                     }
-                    v.splice(at, 1, &lent(&model[at..at + 1]));
+                    v.splice_slice(at, 1, &lent(&model[at..at + 1]));
                 }
             }
             let new = resumed(&s, &v);
@@ -3311,7 +3311,7 @@ fn a_state_on_another_column() {
             let n = va.len();
             let mut states = Vec::new();
             for (a, b, k) in windows_into(&mut rng, n, 5) {
-                let mut x = va.iter_range(a, b);
+                let mut x = va.iter_range(a..b);
                 if k > 0 {
                     x.nth(k - 1);
                 }
@@ -3331,7 +3331,7 @@ fn a_state_on_another_column() {
             let mut x = va.iter();
             assert!(x.nth(usize::MAX).is_none());
             states.push(held(&x));
-            states.push(held(&va.iter_range(n, n)));
+            states.push(held(&va.iter_range(n..n)));
 
             for (s, p) in &states {
                 for (j, vb) in cols.iter().enumerate() {
@@ -3418,7 +3418,7 @@ fn a_fold_calls_its_function_for_each_value() {
     #[cfg(panic = "unwind")]
     {
         let text = panic_of(std::panic::AssertUnwindSafe(|| {
-            v.iter_range(1, 8).fold(0, |s, x| {
+            v.iter_range(1..8).fold(0, |s, x| {
                 assert!(x != 9, "nine");
                 s + x
             })
@@ -3769,11 +3769,11 @@ fn strings_are_lent() {
     let _golden = golden::test(concat!(module_path!(), "::strings_are_lent"));
     let last = "größer: 日本語 🦀";
     let mut v = Column::<String>::new();
-    v.splice(0, 0, &["ant", "bee", "bee"]);
+    v.splice_slice(0, 0, &["ant", "bee", "bee"]);
     v.push(last);
     let first: &str = v.get(0).unwrap();
     let all: Vec<&str> = v.to_vec();
-    let mut it = v.iter_range(1, 3);
+    let mut it = v.iter_range(1..3);
     let (x, y) = (it.next().unwrap(), it.next().unwrap());
     assert!(it.next().is_none());
     assert_eq!(first, "ant");
@@ -3945,7 +3945,7 @@ fn a_search_of_long_strings() {
         absent.push_str("\0\0\0");
         assert!(!model.contains(&absent));
         let at = model.iter().filter(|m| **m < absent).count();
-        assert_eq!(v.scope_to_value(absent.as_str(), 0, model.len()), at..at);
+        assert_eq!(v.scope_to_value(absent.as_str(), 0..model.len()), at..at);
         assert!(0 < at && at < model.len());
     }
 }
@@ -4171,7 +4171,7 @@ fn load_options<T: Kind>() {
                             let mut m = want;
                             let at = rng.below(m.len() + 1);
                             let ins: Vec<T> = rng.values(20);
-                            v.splice(at, 0, &lent(&ins));
+                            v.splice_slice(at, 0, &lent(&ins));
                             m.splice(at..at, ins);
                             check_loaded(&v, &m);
                         }
@@ -4464,7 +4464,7 @@ fn layouts<T: Kind>() -> Vec<(Column<T>, Vec<T>, bool)> {
             let at = 1 + rng.below(model.len());
             let del = rng.below((model.len() - at).min(8) + 1);
             let ins: Vec<T> = rng.values(20);
-            v.splice(at, del, &lent(&ins));
+            v.splice_slice(at, del, &lent(&ins));
             model.splice(at..at + del, ins);
         }
         let loaded = load_with_options::<T>(&v.save(), None, None, Some(budget)).unwrap();
@@ -4694,7 +4694,7 @@ fn neighbours_at_the_edge_of_a_merge() {
         assert_eq!(v.slab_segments(), [32 + grow, 32, 6]);
         check_loaded(&v, &model);
         let lens = v.slab_lens();
-        v.splice(lens[0], lens[1], &[]);
+        v.splice_slice(lens[0], lens[1], &[]);
         model.drain(lens[0]..lens[0] + lens[1]);
         // the budget is 64 runs, and 16 the least a slab should hold
         assert_eq!(v.slab_segments(), after);
@@ -4738,7 +4738,7 @@ fn the_layout_after_a_panic_in_an_edit() {
     // what the old API's empty column printed, but for the name
     assert_eq!(format!("{v:?}"), "Column { len: 0, slabs: 0 }");
     // a search of no values asks for none of the column's parts
-    assert_eq!(v.scope_to_value(7, 0, 0), 0..0);
+    assert_eq!(v.scope_to_value(7, 0..0), 0..0);
     // and an iterator has nothing to give, however it is asked
     let mut it = v.iter();
     assert_eq!((it.len(), it.next(), it.nth(0)), (0, None, None));
@@ -4747,7 +4747,7 @@ fn the_layout_after_a_panic_in_an_edit() {
         (None, None, 0)
     );
     assert_eq!(v.iter().fold(1, |a, x| a + x), 1);
-    assert_eq!(v.iter_range(0, 0).count(), 0);
+    assert_eq!(v.iter_range(0..0).count(), 0);
     assert_eq!((&v).into_iter().last(), None);
     // a state that counts no edits and no slabs would fit it, and to
     // resume it asks for the column's parts: the resume panics
@@ -4957,10 +4957,10 @@ fn check_encoders<T: Kind>(model: &[T], other: &T, rng: &mut Rng) {
     // and in two parts, with a value of the model's own between
     let cut = rng.below(model.len() + 1);
     let mut e = Encoder::<T>::default();
-    e.extend(v.iter_range(0, cut));
+    e.extend(v.iter_range(0..cut));
     if let Some(x) = model.get(cut) {
         e.append_owned(x.clone());
-        e.extend(v.iter_range(cut + 1, model.len()));
+        e.extend(v.iter_range(cut + 1..model.len()));
     }
     let mut out = vec![1u8, 2];
     assert_eq!(e.save_to(&mut out), 2..2 + bytes.len());
@@ -5232,7 +5232,7 @@ fn check_budgeted<T: Kind>(max: Option<usize>, model: &[T], other: &T, rng: &mut
         check_loaded(&nv, model);
         let at = rng.below(model.len() + 1);
         let del = rng.below((model.len() - at).min(5) + 1);
-        nv.splice(at, del, &[other.lend(), other.lend()]);
+        nv.splice_slice(at, del, &[other.lend(), other.lend()]);
         let mut edited = model.to_vec();
         edited.splice(at..at + del, [other.clone(), other.clone()]);
         check_loaded(&nv, &edited);
@@ -6601,7 +6601,7 @@ fn check_sum_reads<T: Summed>(rng: &mut Rng, p: &PrefixColumn<T>, v: &Column<T>,
         }
         let start = rng.below(model.len() + 1);
         let end = start + rng.below(model.len() - start + 1);
-        let mut it = p.iter_range(start, end);
+        let mut it = p.iter_range(start..end);
         assert_eq!(it.len(), end - start);
         for m in &model[start..end] {
             assert_eq!(it.next().map(T::keep).as_ref(), Some(m));
@@ -6612,11 +6612,11 @@ fn check_sum_reads<T: Summed>(rng: &mut Rng, p: &PrefixColumn<T>, v: &Column<T>,
             None => T::fresh(rng),
         };
         assert_eq!(
-            p.scope_to_value(x.lend(), start, end),
-            v.scope_to_value(x.lend(), start, end)
+            p.scope_to_value(x.lend(), start..end),
+            v.scope_to_value(x.lend(), start..end)
         );
         let runs: Vec<(usize, T)> = p
-            .iter_range(start, end)
+            .iter_range(start..end)
             .runs()
             .map(|r| (r.count, T::keep(r.value)))
             .collect();
@@ -6645,11 +6645,11 @@ fn sum_edits<T: Totalled>() {
                     let del = rng.below((model.len() - at).min(12) + 1);
                     let ins: Vec<T> = rng.values(40);
                     if rng.below(2) == 0 {
-                        p.splice(at, del, &lent(&ins));
+                        p.splice_slice(at, del, &lent(&ins));
                     } else {
-                        p.splice_iter(at, del, ins.iter().map(T::lend));
+                        p.splice(at, del, ins.iter().map(T::lend));
                     }
-                    v.splice(at, del, &lent(&ins));
+                    v.splice_slice(at, del, &lent(&ins));
                     model.splice(at..at + del, ins);
                 }
                 4 | 5 => {
@@ -6840,7 +6840,7 @@ fn the_kind_of_a_prefix_column() {
     assert_eq!(it.count(), vs.len());
     let it = Iter::<u32, Leb128, SumIndex>::default();
     assert_eq!(it.count(), 0);
-    let state: IterState = short.iter_range(5, 900).suspend();
+    let state: IterState = short.iter_range(5..900).suspend();
     let mut it = state.try_resume(&named).unwrap();
     assert_eq!((it.pos(), it.next()), (5, Some(0)));
     // a plain column of the same values is another type, with the same
@@ -7036,20 +7036,23 @@ fn an_edit_past_the_sums_panics() {
     golden::note(&full.save());
     assert_eq!(panics(&|| full.clone().push(1)), words);
     assert_eq!(panics(&|| full.clone().insert(5, 1)), words);
-    assert_eq!(panics(&|| full.clone().splice(most, 0, &[0, 0, 1])), words);
-    assert_eq!(panics(&|| full.clone().splice_iter(0, 0, [0, 1])), words);
+    assert_eq!(
+        panics(&|| full.clone().splice_slice(most, 0, &[0, 0, 1])),
+        words
+    );
+    assert_eq!(panics(&|| full.clone().splice(0, 0, [0, 1])), words);
     assert_eq!(panics(&|| full.clone().extend([0, 0, 1])), words);
     let mut p = full.clone();
     p.push(0);
     p.insert(5, 0);
     p.extend([0, 0]);
-    p.splice(3, 2, &[u32::MAX, u32::MAX]);
+    p.splice_slice(3, 2, &[u32::MAX, u32::MAX]);
     assert_eq!(p.len(), most + 4);
     // and room made by a deletion can be filled again
     p.remove(0);
     p.push(u32::MAX);
     p.remove_n(0, 2);
-    p.splice(0, 0, &[u32::MAX - 1, u32::MAX, 1]);
+    p.splice_slice(0, 0, &[u32::MAX - 1, u32::MAX, 1]);
     golden::note(&p.save());
     assert_eq!(panics(&|| p.clone().push(1)), words);
     let loaded = P::<u32>::load(&p.save()).unwrap();
@@ -7221,10 +7224,10 @@ fn check_prefix_reads<T: Totalled>(rng: &mut Rng, p: &PrefixColumn<T>, model: &[
         // each end with some of the starts
         for &end in places.iter().skip(n % 3).step_by(3) {
             let want = if start < end { at(end) - at(start) } else { 0 };
-            assert_eq!(T::new_sum(p.sum_range(start, end)), want);
+            assert_eq!(T::new_sum(p.sum_range(start..end)), want);
         }
     }
-    assert_eq!(T::new_sum(p.sum_range(0, model.len())), at(model.len()));
+    assert_eq!(T::new_sum(p.sum_range(0..model.len())), at(model.len()));
 }
 
 /// A sum that is never negative, made of a number of these tests.
@@ -7335,7 +7338,7 @@ fn sum_searches<T: Counted>() {
                 model.splice(at..at + del, run_model(&runs));
             } else {
                 let ins: Vec<T> = rng.values(40);
-                p.splice(at, del, &lent(&ins));
+                p.splice_slice(at, del, &lent(&ins));
                 model.splice(at..at + del, ins);
             }
             check_sum_searches(&mut rng, &p, &model);
@@ -7370,6 +7373,8 @@ fn a_prefix_column_is_searched_by_sum() {
 /// The sums of a short column, by hand: before a position, through one,
 /// of a range, and the places of sums.
 #[test]
+// a range that ends before it starts, on purpose
+#[allow(clippy::reversed_empty_ranges)]
 fn the_sums_of_a_prefix_column() {
     let _golden = golden::test(concat!(module_path!(), "::the_sums_of_a_prefix_column"));
     let p = PrefixColumn::<u64>::from_values(&[3, 0, 4, 4, 10]);
@@ -7378,12 +7383,12 @@ fn the_sums_of_a_prefix_column() {
     let sums: Vec<u128> = (0..6).map(|i| p.get_total(i)).collect();
     assert_eq!(sums, [3, 3, 7, 11, 21, 21]);
     assert_eq!(p.get_total(usize::MAX), 21);
-    assert_eq!(p.sum_range(1, 4), 8);
-    assert_eq!(p.sum_range(2, 2), 0);
-    assert_eq!(p.sum_range(4, 2), 0);
-    assert_eq!(p.sum_range(3, 99), 14);
-    assert_eq!(p.sum_range(5, 99), 0);
-    assert_eq!(p.sum_range(usize::MAX, usize::MAX), 0);
+    assert_eq!(p.sum_range(1..4), 8);
+    assert_eq!(p.sum_range(2..2), 0);
+    assert_eq!(p.sum_range(4..2), 0);
+    assert_eq!(p.sum_range(3..99), 14);
+    assert_eq!(p.sum_range(5..99), 0);
+    assert_eq!(p.sum_range(usize::MAX..usize::MAX), 0);
     // the first position the values before it add up to the target
     let places: Vec<usize> = [0, 1, 3, 4, 7, 8, 11, 12, 21, 22]
         .into_iter()
@@ -7401,14 +7406,14 @@ fn the_sums_of_a_prefix_column() {
     let p = PrefixColumn::<Option<i64>>::from_values(&[Some(5), None, Some(-9), Some(i64::MIN)]);
     assert_eq!(p.get_prefix(3), -4);
     assert_eq!(p.get_total(3), -4 + i128::from(i64::MIN));
-    assert_eq!(p.sum_range(1, 3), -9);
-    assert_eq!(p.sum_range(3, 4), i128::from(i64::MIN));
+    assert_eq!(p.sum_range(1..3), -9);
+    assert_eq!(p.sum_range(3..4), i128::from(i64::MIN));
 
     // flags: the sums count those that are set
     let flags = [false, true, true, false, false, true];
     let p = PrefixColumn::<bool>::from_values(&flags);
     assert_eq!(p.get_prefix(6), 3);
-    assert_eq!(p.sum_range(2, 5), 1);
+    assert_eq!(p.sum_range(2..5), 1);
     // the place of the `k`th that is set
     let set: Vec<usize> = (0..4).map(|k| p.get_index_for_total(k + 1)).collect();
     assert_eq!(set, [1, 2, 5, 6]);
@@ -7416,7 +7421,7 @@ fn the_sums_of_a_prefix_column() {
     // no values: no sums, and a place for no sum but zero
     let none = PrefixColumn::<u32>::new();
     assert_eq!((none.get_prefix(0), none.get_prefix(9)), (0, 0));
-    assert_eq!((none.get_total(0), none.sum_range(0, 9)), (0, 0));
+    assert_eq!((none.get_total(0), none.sum_range(0..9)), (0, 0));
     assert_eq!(none.get_index_for_prefix(0), 0);
     assert_eq!(none.get_index_for_prefix(1), 1);
     assert_eq!(none.get_index_for_total(0), 0);
@@ -7441,9 +7446,9 @@ fn the_sums_of_long_runs() {
     assert_eq!(p.get_prefix(usize::MAX), u64::MAX);
     assert_eq!(p.get_total(most - 1), u64::MAX);
     assert_eq!(p.get_prefix(most - 1), u64::MAX - each);
-    assert_eq!(p.sum_range(1, most), u64::MAX - each);
-    assert_eq!(p.sum_range(0, usize::MAX), u64::MAX);
-    assert_eq!(p.sum_range(77, 1 << 32), ((1 << 32) - 77) * each);
+    assert_eq!(p.sum_range(1..most), u64::MAX - each);
+    assert_eq!(p.sum_range(0..usize::MAX), u64::MAX);
+    assert_eq!(p.sum_range(77..1 << 32), ((1 << 32) - 77) * each);
     for t in [
         1,
         each,
@@ -7478,7 +7483,7 @@ fn the_sums_of_long_runs() {
         golden::note(&p.get_prefix(i));
         golden::note(&p.get_total(i));
         for &j in &places {
-            golden::note(&p.sum_range(i, j));
+            golden::note(&p.sum_range(i..j));
         }
         // the sum before a place, and those beside it, as targets
         let sum = p.get_prefix(i);
@@ -7500,7 +7505,7 @@ fn the_sums_of_long_runs() {
     let p = PrefixColumn::<u64>::fill(long, u64::MAX);
     let all = u128::from(u64::MAX) * (long as u128);
     assert_eq!(p.get_prefix(long), all);
-    assert_eq!(p.sum_range(1, long - 1), all - 2 * u128::from(u64::MAX));
+    assert_eq!(p.sum_range(1..long - 1), all - 2 * u128::from(u64::MAX));
     assert_eq!(p.get_index_for_prefix(all), long);
     assert_eq!(p.get_index_for_prefix(all + 1), long + 1);
     assert_eq!(p.get_index_for_total(all + 1), long);
@@ -7509,10 +7514,10 @@ fn the_sums_of_long_runs() {
     let all = i128::from(i64::MIN) * (long as i128);
     assert_eq!(p.get_prefix(long), all);
     assert_eq!(p.get_total(usize::MAX), all);
-    assert_eq!(p.sum_range(long - 3, usize::MAX), 3 * i128::from(i64::MIN));
+    assert_eq!(p.sum_range(long - 3..usize::MAX), 3 * i128::from(i64::MIN));
     let p = PrefixColumn::<bool>::fill(long, true);
     assert_eq!(p.get_prefix(long), long);
-    assert_eq!(p.sum_range(12, long), long - 12);
+    assert_eq!(p.sum_range(12..long), long - 12);
     assert_eq!(p.get_index_for_prefix(long), long);
     assert_eq!(p.get_index_for_prefix(long + 1), long + 1);
     assert_eq!(p.get_index_for_total(1 << 40), (1 << 40) - 1);
@@ -7645,7 +7650,7 @@ fn check_prefix_iters<T: Totalled>(rng: &mut Rng, p: &PrefixColumn<T>, model: &[
     for _ in 0..4 {
         let start = rng.below(len + 1);
         let end = start + rng.below(len - start + 1);
-        let mut x = p.prefix_iter_range(start, end);
+        let mut x = p.prefix_iter_range(start..end);
         let mut m = SumIter {
             model,
             before: &before,
@@ -7728,7 +7733,7 @@ fn sum_iters<T: Totalled>() {
             let at = rng.below(model.len() + 1);
             let del = rng.below((model.len() - at).min(12) + 1);
             let ins: Vec<T> = rng.values(40);
-            p.splice(at, del, &lent(&ins));
+            p.splice_slice(at, del, &lent(&ins));
             model.splice(at..at + del, ins);
             check_prefix_iters(&mut rng, &p, &model);
         }
@@ -7770,7 +7775,7 @@ fn the_iterator_of_a_prefix_column() {
         [(0, 3, 3), (3, 0, 3), (3, 4, 7), (7, 4, 11), (11, 10, 21)]
     );
     // a range: the sum counts from the column's start
-    let mut it = p.prefix_iter_range(1, 4);
+    let mut it = p.prefix_iter_range(1..4);
     assert_eq!((it.pos(), it.end_pos(), it.len(), it.total()), (1, 4, 3, 3));
     let pv = it.next().unwrap();
     assert_eq!(pv, PrefixedValue { value: 0, total: 3 });
@@ -7846,7 +7851,7 @@ fn the_iterator_over_long_runs() {
     // the widest sums of the signed type, from the middle on
     let p = PrefixColumn::<i64>::fill(long, i64::MIN);
     let half = long / 2;
-    let mut it = p.prefix_iter_range(half, long);
+    let mut it = p.prefix_iter_range(half..long);
     assert_eq!(it.total(), half as i128 * i128::from(i64::MIN));
     it.reset_prefix();
     it.advance_to(long);
@@ -7972,7 +7977,7 @@ fn check_prefix_runs<T: Totalled>(rng: &mut Rng, p: &PrefixColumn<T>, model: &[T
         let start = rng.below(len + 1);
         let end = start + rng.below(len - start + 1);
         let runs: Vec<(usize, T)> = p
-            .prefix_iter_range(start, end)
+            .prefix_iter_range(start..end)
             .runs()
             .map(|run| (run.count, T::keep(run.value)))
             .collect();
@@ -7980,7 +7985,7 @@ fn check_prefix_runs<T: Totalled>(rng: &mut Rng, p: &PrefixColumn<T>, model: &[T
         golden::note(&runs);
         assert!(runs.windows(2).all(|w| w[0].1 != w[1].1));
         let mut copy = Column::<T>::new();
-        copy.splice_runs(0, 0, p.prefix_iter_range(start, end).runs());
+        copy.splice_runs(0, 0, p.prefix_iter_range(start..end).runs());
         assert_eq!(new_values(&copy), model[start..end]);
     }
     // the value at a place, with the sum of a range before it
@@ -7994,7 +7999,7 @@ fn check_prefix_runs<T: Totalled>(rng: &mut Rng, p: &PrefixColumn<T>, model: &[T
     for _ in 0..4 {
         let start = rng.below(len + 1);
         let end = start + rng.below(len - start + 1);
-        let mut x = p.prefix_iter_range(start, end);
+        let mut x = p.prefix_iter_range(start..end);
         let mut m = SumIter {
             model,
             before: &before,
@@ -8086,7 +8091,7 @@ fn under_sum_edits<T: Totalled>(salt: u64, check: fn(&mut Rng, &PrefixColumn<T>,
                 model.splice(at..at + del, run_model(&runs));
             } else {
                 let ins: Vec<T> = rng.values(40);
-                p.splice(at, del, &lent(&ins));
+                p.splice_slice(at, del, &lent(&ins));
                 model.splice(at..at + del, ins);
             }
             check(&mut rng, &p, &model);
@@ -8157,7 +8162,7 @@ fn check_prefix_seeks<T: Sought>(rng: &mut Rng, p: &PrefixColumn<T>, model: &[T]
     for _ in 0..4 {
         let start = rng.below(len + 1);
         let end = start + rng.below(len - start + 1);
-        let mut x = p.prefix_iter_range(start, end);
+        let mut x = p.prefix_iter_range(start..end);
         let mut m = SumIter {
             model,
             before: &before,
@@ -8250,13 +8255,13 @@ fn the_seeks_of_a_prefix_iterator() {
     assert_eq!(format!("{it:?}"), "PrefixIter { total: 21, pos: 5 }");
     // the runs of a window, without sums
     let runs: Vec<(usize, u64)> = p
-        .prefix_iter_range(1, 4)
+        .prefix_iter_range(1..4)
         .runs()
         .map(|run| (run.count, run.value))
         .collect();
     assert_eq!(runs, [(1, 0), (2, 4)]);
     // a value by its count from the iterator, with what is passed over
-    let mut it = p.prefix_iter_range(1, 5);
+    let mut it = p.prefix_iter_range(1..5);
     let seek = it.delta_nth(2).unwrap();
     let found = PrefixSeek {
         pos: 3,
@@ -8305,7 +8310,7 @@ fn the_seeks_of_a_prefix_iterator() {
     }
     assert!(units.prefix_iter().advance_prefix(3).is_none());
     // within a window, all of whose values add up to the limit or less
-    let mut it = p.prefix_iter_range(0, 3);
+    let mut it = p.prefix_iter_range(0..3);
     assert!(it.advance_prefix(7).is_none());
     assert_eq!((it.pos(), it.end_pos(), it.total()), (3, 3, 7));
     // flags: on to the second that is set
@@ -8314,7 +8319,7 @@ fn the_seeks_of_a_prefix_iterator() {
     assert_eq!((seek.pos, seek.delta, seek.pv.total()), (3, 1, 2));
 
     // a copy is an iterator of its own
-    let mut it = p.prefix_iter_range(1, 4);
+    let mut it = p.prefix_iter_range(1..4);
     it.next();
     it.reset_prefix();
     let mut twin = it.clone();
@@ -8477,7 +8482,7 @@ fn a_clients_values_add_what_it_says() {
         assert_eq!(p.get_prefix(i), sum);
     }
     assert_eq!(p.get_total(2), 12);
-    assert_eq!(p.sum_range(1, 4), 14);
+    assert_eq!(p.sum_range(1..4), 14);
     // the value in which a place of the whole lies
     assert_eq!(p.get_index_for_total(1), 0);
     assert_eq!(p.get_index_for_total(5), 0);
@@ -8619,7 +8624,7 @@ fn an_edit_past_a_clients_sums_panics() {
     assert_eq!(panics(&|| full.clone().push(one)), words);
     assert_eq!(panics(&|| full.clone().insert(5, one)), words);
     assert_eq!(
-        panics(&|| full.clone().splice(17, 0, &[none, none, one])),
+        panics(&|| full.clone().splice_slice(17, 0, &[none, none, one])),
         words
     );
     assert_eq!(panics(&|| full.clone().extend([none, one])), words);
@@ -8966,10 +8971,10 @@ fn check_acc_reads<T: Accd>(rng: &mut Rng, p: &AccColumn<T>, model: &[T]) {
             } else {
                 0..0
             };
-            assert_eq!(p.sum_range(start, end), T::added(&model[range]));
+            assert_eq!(p.sum_range(start..end), T::added(&model[range]));
         }
     }
-    assert_eq!(p.sum_range(0, len), T::added(model));
+    assert_eq!(p.sum_range(0..len), T::added(model));
 }
 
 /// What an accumulator column saves and answers from its index: the
@@ -8982,7 +8987,7 @@ fn check_acc_noted<T: Accd>(rng: &mut Rng, p: &AccColumn<T>, model: &[T]) {
         golden::note(&p.get_prefix(i));
         golden::note(&p.get_total(i));
         for &end in places.iter().skip(n % 3).step_by(3) {
-            golden::note(&p.sum_range(i, end));
+            golden::note(&p.sum_range(i..end));
         }
     }
 }
@@ -8998,7 +9003,7 @@ fn check_acc_plain_reads<T: Accd>(rng: &mut Rng, p: &AccColumn<T>, v: &Column<T>
         }
         let start = rng.below(model.len() + 1);
         let end = start + rng.below(model.len() - start + 1);
-        let mut it = p.iter_range(start, end);
+        let mut it = p.iter_range(start..end);
         assert_eq!(it.len(), end - start);
         for m in &model[start..end] {
             assert_eq!(it.next().map(T::keep).as_ref(), Some(m));
@@ -9009,11 +9014,11 @@ fn check_acc_plain_reads<T: Accd>(rng: &mut Rng, p: &AccColumn<T>, v: &Column<T>
             None => T::fresh(rng),
         };
         assert_eq!(
-            p.scope_to_value(x.lend(), start, end),
-            v.scope_to_value(x.lend(), start, end)
+            p.scope_to_value(x.lend(), start..end),
+            v.scope_to_value(x.lend(), start..end)
         );
         let runs: Vec<(usize, T)> = p
-            .iter_range(start, end)
+            .iter_range(start..end)
             .runs()
             .map(|r| (r.count, T::keep(r.value)))
             .collect();
@@ -9068,9 +9073,9 @@ fn acc_edits<T: Accd>() {
                     let del = rng.below((model.len() - at).min(12) + 1);
                     let ins: Vec<T> = rng.values(40);
                     if rng.below(2) == 0 {
-                        each!(col => col.splice(at, del, &lent(&ins)));
+                        each!(col => col.splice_slice(at, del, &lent(&ins)));
                     } else {
-                        each!(col => col.splice_iter(at, del, ins.iter().map(T::lend)));
+                        each!(col => col.splice(at, del, ins.iter().map(T::lend)));
                     }
                     model.splice(at..at + del, ins);
                 }
@@ -9281,7 +9286,7 @@ fn same_acc_load<T: Accd>(bytes: &[u8]) -> bool {
         assert_eq!(p.len(), v.len());
         assert_eq!(p.save(), bytes);
         assert_eq!(p.get_prefix(usize::MAX), all);
-        assert_eq!(p.sum_range(0, v.len()), all);
+        assert_eq!(p.sum_range(0..v.len()), all);
         for i in [0, 1, v.len() / 2, v.len() - 1] {
             assert_eq!(p.get(i).map(T::keep), v.get(i).map(T::keep));
         }
@@ -9376,6 +9381,8 @@ fn the_kind_of_an_accumulator_column() {
 /// marks, for nulls, which add nothing, and for steps, which two columns
 /// of the same values in another order answer differently of.
 #[test]
+// a range that ends before it starts, on purpose
+#[allow(clippy::reversed_empty_ranges)]
 fn an_accumulator_adds_what_its_client_says() {
     let _golden = golden::test(concat!(
         module_path!(),
@@ -9390,9 +9397,9 @@ fn an_accumulator_adds_what_its_client_says() {
         assert_eq!(p.get_prefix(i), Flags(open));
     }
     assert_eq!(p.get_total(1), Flags(0x28));
-    assert_eq!(p.sum_range(1, 4), Flags(8));
-    assert_eq!(p.sum_range(3, 99), Flags(0x21));
-    assert_eq!(p.sum_range(4, 1), Flags(0));
+    assert_eq!(p.sum_range(1..4), Flags(8));
+    assert_eq!(p.sum_range(3..99), Flags(0x21));
+    assert_eq!(p.sum_range(4..1), Flags(0));
 
     let nulls = [Some(model[0]), None, Some(model[1]), None, None];
     let p = AccColumn::<Option<Mark>>::from_values(&nulls);
@@ -9415,8 +9422,8 @@ fn an_accumulator_adds_what_its_client_says() {
     assert_eq!(the_other.get_prefix(2), board(3, true));
     assert_eq!(one_way.get_total(0), board(1, true));
     // a range's own steps, of a board that is not turned round
-    assert_eq!(one_way.sum_range(1, 2), board(2, false));
-    assert_eq!(the_other.sum_range(1, 2), board(1, true));
+    assert_eq!(one_way.sum_range(1..2), board(2, false));
+    assert_eq!(the_other.sum_range(1..2), board(1, true));
 }
 
 /// A run adds its value as many times over as it is long: for an
@@ -9780,13 +9787,13 @@ fn check_acc_iters<T: Accd>(rng: &mut Rng, p: &AccColumn<T>, model: &[T]) {
         let start = rng.below(len + 1);
         let end = start + rng.below(len - start + 1);
         let runs: Vec<(usize, T)> = p
-            .prefix_iter_range(start, end)
+            .prefix_iter_range(start..end)
             .runs()
             .map(|run| (run.count, T::keep(run.value)))
             .collect();
         assert_eq!(runs, runs_of(&model[start..end]));
         let mut copy = AccColumn::<T>::new();
-        copy.splice_runs(0, 0, p.prefix_iter_range(start, end).runs());
+        copy.splice_runs(0, 0, p.prefix_iter_range(start..end).runs());
         assert_eq!(acc_values(&copy), model[start..end]);
         assert_eq!(copy.get_prefix(usize::MAX), T::added(&model[start..end]));
     }
@@ -9801,7 +9808,7 @@ fn check_acc_iters<T: Accd>(rng: &mut Rng, p: &AccColumn<T>, model: &[T]) {
     for _ in 0..4 {
         let start = rng.below(len + 1);
         let end = start + rng.below(len - start + 1);
-        let mut x = p.prefix_iter_range(start, end);
+        let mut x = p.prefix_iter_range(start..end);
         let mut m = AccWalk {
             model,
             before: &before,
@@ -9851,7 +9858,7 @@ fn under_acc_edits<T: Accd>(salt: u64, check: fn(&mut Rng, &AccColumn<T>, &[T]))
                 model.splice(at..at + del, run_model(&runs));
             } else {
                 let ins: Vec<T> = rng.values(40);
-                p.splice(at, del, &lent(&ins));
+                p.splice_slice(at, del, &lent(&ins));
                 model.splice(at..at + del, ins);
             }
             check(&mut rng, &p, &model);
@@ -9911,7 +9918,7 @@ fn check_acc_iters_noted<T: Accd>(rng: &mut Rng, p: &AccColumn<T>, model: &[T]) 
         let start = rng.below(len + 1);
         let end = start + rng.below(len - start + 1);
         let runs: Vec<(usize, T)> = p
-            .prefix_iter_range(start, end)
+            .prefix_iter_range(start..end)
             .runs()
             .map(|run| (run.count, T::keep(run.value)))
             .collect();
@@ -9924,7 +9931,7 @@ fn check_acc_iters_noted<T: Accd>(rng: &mut Rng, p: &AccColumn<T>, model: &[T]) 
     for _ in 0..4 {
         let start = rng.below(len + 1);
         let end = start + rng.below(len - start + 1);
-        let mut x = p.prefix_iter_range(start, end);
+        let mut x = p.prefix_iter_range(start..end);
         let mut m = AccWalk {
             model,
             before: &before,
@@ -9983,7 +9990,7 @@ fn the_iterator_of_an_accumulator_column() {
         (0..5).map(|i| (open[i], model[i], open[i + 1])).collect();
     assert_eq!(got, want);
     // a range: the sum counts from the column's start
-    let mut it = p.prefix_iter_range(1, 4);
+    let mut it = p.prefix_iter_range(1..4);
     assert_eq!(
         (it.pos(), it.end_pos(), it.len(), it.total()),
         (1, 4, 3, Flags(8))
@@ -10070,7 +10077,7 @@ fn the_iterator_of_an_accumulator_column() {
     assert_eq!(got, want);
     // a sum started again is of the steps since, on a board of their
     // own: what the column answers of that range
-    let mut it = p.prefix_iter_range(1, 3);
+    let mut it = p.prefix_iter_range(1..3);
     it.reset_prefix();
     let pv = it.next().unwrap();
     assert_eq!(
@@ -10080,7 +10087,7 @@ fn the_iterator_of_an_accumulator_column() {
     let pv = it.next().unwrap();
     assert_eq!((pv.prefix(), pv.total()), (board(2, false), board(3, true)));
     assert_eq!(
-        (it.total(), p.sum_range(1, 3)),
+        (it.total(), p.sum_range(1..3)),
         (board(3, true), board(3, true))
     );
     // a column of nothing
@@ -10124,13 +10131,13 @@ fn the_seeks_of_an_accumulator_iterator() {
     assert_eq!(format!("{it:?}"), "AccIter { total: Flags(40), pos: 6 }");
     // the runs of a window, without sums
     let runs: Vec<(usize, Mark)> = p
-        .prefix_iter_range(1, 5)
+        .prefix_iter_range(1..5)
         .runs()
         .map(|run| (run.count, run.value))
         .collect();
     assert_eq!(runs, [(2, Mark(3)), (1, Mark(5)), (1, Mark(64))]);
     // a value by its count from the iterator, with what is passed over
-    let mut it = p.prefix_iter_range(1, 6);
+    let mut it = p.prefix_iter_range(1..6);
     let seek = it.delta_nth(3).unwrap();
     let found = AccSeek {
         pos: 4,
@@ -10162,7 +10169,7 @@ fn the_seeks_of_an_accumulator_iterator() {
     assert!(p.delta(0, 6).is_none());
 
     // a copy is an iterator of its own
-    let mut it = p.prefix_iter_range(1, 5);
+    let mut it = p.prefix_iter_range(1..5);
     it.next();
     it.reset_prefix();
     let mut twin = it.clone();
@@ -10234,7 +10241,7 @@ fn the_accumulator_iterator_over_long_runs() {
     assert_eq!((it.pos(), it.total()), (long, Flags(0x20)));
     // from the middle on: an odd count before it, an even one after
     let half = long / 2;
-    let mut it = p.prefix_iter_range(half, long);
+    let mut it = p.prefix_iter_range(half..long);
     assert_eq!(it.total(), Flags(0x20));
     it.reset_prefix();
     it.advance_to(long);
@@ -10509,7 +10516,7 @@ fn delta_edits<T: Deltad>(seed: u64) {
         let del = rng.below((new.len() - at).min(6) + 1);
         let n = rng.below(9);
         let values = some(&mut rng, n);
-        new.splice(at, del, &values);
+        new.splice_slice(at, del, &values);
         delta_noted(&new);
     }
     let empty = DeltaColumn::<T>::new();
@@ -10748,7 +10755,7 @@ fn delta_saves<T: Deltad>(seed: u64, max_segments: Option<usize>) {
         let del = rng.below((new.len() - at).min(20) + 1);
         let n = rng.below(40);
         let values = some(&mut rng, n);
-        new.splice(at, del, &values);
+        new.splice_slice(at, del, &values);
         check_delta_saves(&new, &others);
     }
 }
@@ -11137,7 +11144,7 @@ fn delta_run_splices<T: Deltad>(seed: u64, max_segments: Option<usize>) {
     };
     let n = rng.below(40);
     let start = some(&mut rng, n);
-    new.splice(0, 0, &start);
+    new.splice_slice(0, 0, &start);
     let mut spliced = 0;
     for _ in 0..40 {
         let at = rng.below(new.len() + 1);
@@ -11182,7 +11189,7 @@ fn delta_run_splices<T: Deltad>(seed: u64, max_segments: Option<usize>) {
         // a splice of nothing leaves the column as it is
         let at = rng.below(new.len() + 1);
         let slabs = new.slab_count();
-        new.splice(at, 0, &[]);
+        new.splice_slice(at, 0, &[]);
         assert_eq!(new.slab_count(), slabs);
         if !new.is_empty() {
             golden::note(&new.slab_count());
@@ -11628,7 +11635,7 @@ fn delta_iters<T: Deltad>(seed: u64, max_segments: Option<usize>) {
     for _ in 0..4 {
         let start = rng.below(len + 1);
         let end = start + rng.below(len - start + 1);
-        let x = new.iter_range(start, end);
+        let x = new.iter_range(start..end);
         assert_eq!(delta_place(&x), (start, end, end - start));
         golden::note(&delta_place(&x));
         assert_eq!(x.collect::<Vec<T>>(), model[start..end]);
@@ -11718,7 +11725,7 @@ fn delta_iter_ends() {
     }
 
     let new = DeltaColumn::<u64>::from_values(&[3, 5, 5, 9, 2]);
-    let mut it = new.iter_range(1, 4);
+    let mut it = new.iter_range(1..4);
     assert_eq!(it.by_ref().collect::<Vec<u64>>(), vec![5, 5, 9]);
     assert_eq!((it.pos(), it.end_pos(), it.len()), (4, 4, 0));
     assert_eq!(it.next(), None);
@@ -11908,7 +11915,7 @@ fn delta_run_reads<T: DeltaStepped>(seed: u64, max_segments: Option<usize>) {
         let start = rng.below(len + 1);
         let end = start + rng.below(len - start + 1);
         let want = delta_runs_model(&model, start, end);
-        let runs = new.iter_range(start, end).runs().collect::<Vec<_>>();
+        let runs = new.iter_range(start..end).runs().collect::<Vec<_>>();
         assert_eq!(runs, want);
         let mut copy = DeltaColumn::<T>::new();
         copy.splice_runs(0, 0, &runs);
@@ -11918,7 +11925,7 @@ fn delta_run_reads<T: DeltaStepped>(seed: u64, max_segments: Option<usize>) {
     for _ in 0..6 {
         let start = rng.below(len + 1);
         let end = start + rng.below(len - start + 1);
-        let mut x = new.iter_range(start, end);
+        let mut x = new.iter_range(start..end);
         let mut m = DeltaWalk {
             model: &model,
             pos: start,
@@ -12088,7 +12095,7 @@ fn delta_suspends<T: DeltaStepped>(seed: u64, max_segments: Option<usize>) {
     }
     let start = rng.below(count + 1);
     let end = start + rng.below(count - start + 1);
-    let s = a_new.iter_range(start, end).suspend();
+    let s = a_new.iter_range(start..end).suspend();
     let taken = delta_resumed(&s, &b_new, &b_model, true);
     if a_new.slab_count() == 1 && b_new.slab_count() == 1 {
         assert!(taken);
@@ -12139,11 +12146,11 @@ fn delta_runs_and_states_told() {
     // a run cut by the range: the number before it is the one before
     // the range
     assert_eq!(
-        col.iter_range(2, 4).runs().collect::<Vec<_>>(),
+        col.iter_range(2..4).runs().collect::<Vec<_>>(),
         vec![run(7, Some(2), 1), run(9, Some(0), 1)]
     );
     assert_eq!(
-        format!("{:?}", col.iter_range(1, 3).runs()),
+        format!("{:?}", col.iter_range(1..3).runs()),
         "DeltaRuns(DeltaIter { pos: 1, running: 5, items_left: 2 })"
     );
     let mut it = col.iter();
@@ -12376,7 +12383,7 @@ fn delta_scans<T: DeltaSought>(seed: u64, max_segments: Option<usize>) {
                 (start, start + rng.below(len - start + 1))
             }
         };
-        let mut x = new.iter_range(start, end);
+        let mut x = new.iter_range(start..end);
         let mut m = DeltaWalk {
             model: &model,
             pos: start,
@@ -12557,7 +12564,7 @@ fn delta_seeks<T: DeltaSought>(seed: u64, max_segments: Option<usize>, in_order:
         let start = rng.below(len + 1);
         let end = start + rng.below(len - start + 1);
         let value = a_delta_target(&mut rng, &model);
-        let r = new.scope_to_value(value, start, end);
+        let r = new.scope_to_value(value, start..end);
         golden::note(&r);
         delta_sought_rightly(&model, value, start..end, &r);
     }
@@ -12639,7 +12646,7 @@ fn delta_searches_told() {
     }
     assert_eq!(delta_place(&x), (6, 6, 0));
     // a value no column holds is found nowhere
-    let mut x = new.iter_range(2, 5);
+    let mut x = new.iter_range(2..5);
     assert_eq!(x.scan_to_value(unfitting), None);
     assert_eq!(delta_place(&x), (5, 5, 0));
 
@@ -12687,11 +12694,11 @@ fn delta_searches_told() {
     assert_eq!(x.seek_to_value(3, start..end), 5..5);
     assert_eq!(delta_place(&x), (5, 5, 0));
     // the column's own search
-    assert_eq!(new.scope_to_value(3, 0, 6), 1..4);
-    assert_eq!(new.scope_to_value(3, 2, 3), 2..3);
-    assert_eq!(new.scope_to_value(8, 0, 6), 5..5);
-    assert_eq!(new.scope_to_value(unfitting, 0, 4), 4..4);
-    assert_eq!(new.scope_to_value(3, 6, 6), 6..6);
+    assert_eq!(new.scope_to_value(3, 0..6), 1..4);
+    assert_eq!(new.scope_to_value(3, 2..3), 2..3);
+    assert_eq!(new.scope_to_value(8, 0..6), 5..5);
+    assert_eq!(new.scope_to_value(unfitting, 0..4), 4..4);
+    assert_eq!(new.scope_to_value(3, 6..6), 6..6);
 
     // nulls come before every number, are found by a scan for the
     // null, and are within no bounds; a null as a lower bound is below
@@ -12704,8 +12711,8 @@ fn delta_searches_told() {
     let mut x = new.iter();
     assert_eq!(x.seek_to_value(None, 0..5), 0..2);
     assert_eq!(x.seek_to_value(Some(2), 0..5), 3..5);
-    assert_eq!(new.scope_to_value(None, 1, 5), 1..2);
-    assert_eq!(new.scope_to_value(Some(-9), 0, 5), 2..2);
+    assert_eq!(new.scope_to_value(None, 1..5), 1..2);
+    assert_eq!(new.scope_to_value(Some(-9), 0..5), 2..2);
     let mut x = new.iter();
     for want in [Some(0), Some(1), None] {
         assert_eq!(x.scan_to_value(None), want);
@@ -12726,7 +12733,7 @@ fn delta_searches_told() {
         new.insert(i, *v);
     }
     for value in [0, 1, 5, 9, 10] {
-        let r = new.scope_to_value(value, 1, 6);
+        let r = new.scope_to_value(value, 1..6);
         golden::note(&r);
         assert!(1 <= r.start && r.start <= r.end && r.end <= 6);
     }
@@ -14180,7 +14187,7 @@ mod bijou {
                         let at = rng.below(model.len() + 1);
                         let del = rng.below((model.len() - at).min(12) + 1);
                         let ins: Vec<T> = rng.values(30);
-                        v.splice(at, del, &lent(&ins));
+                        v.splice_slice(at, del, &lent(&ins));
                         model.splice(at..at + del, ins);
                     }
                     4 => {
@@ -14328,7 +14335,7 @@ mod bijou {
                 let at = rng.below(model.len() + 1);
                 let del = rng.below((model.len() - at).min(8) + 1);
                 let ins: Vec<T> = rng.values(12);
-                p.splice(at, del, &lent(&ins));
+                p.splice_slice(at, del, &lent(&ins));
                 model.splice(at..at + del, ins);
 
                 golden::note(&p.save());
@@ -14344,7 +14351,7 @@ mod bijou {
                     let start = rng.below(model.len() + 2);
                     let end = rng.below(model.len() + 2);
                     let want = if start < end { at(end) - at(start) } else { 0 };
-                    assert_eq!(T::new_sum(p.sum_range(start, end)), want, "{ctx}");
+                    assert_eq!(T::new_sum(p.sum_range(start..end)), want, "{ctx}");
                 }
             }
             let loaded = vb::PrefixColumn::<T>::load(&p.save()).unwrap();
@@ -14405,7 +14412,7 @@ mod bijou {
                 assert!(a.get_prefix(i) == l.get_prefix(i));
                 assert!(a.get_total(i) == l.get_total(i));
                 let end = i + rng.below(model.len() + 1);
-                assert!(a.sum_range(i, end) == l.sum_range(i, end));
+                assert!(a.sum_range(i..end) == l.sum_range(i..end));
             }
             let loaded = vb::AccColumn::<T>::load(&a.save()).unwrap();
             assert!(loaded.get_prefix(model.len()) == l.get_prefix(model.len()));
@@ -14472,7 +14479,7 @@ mod bijou {
             let del = rng.below((model.len() - at).min(6) + 1);
             let n = rng.below(9);
             let values = some(&mut rng, n);
-            new.splice(at, del, &values);
+            new.splice_slice(at, del, &values);
             model.splice(at..at + del, values);
             assert_eq!(new.len(), model.len(), "{ctx}");
             assert_eq!(new.to_vec(), model, "{ctx}");
@@ -14776,8 +14783,8 @@ fn sum_cursors<T: Totalled>() {
         let mut p = PrefixColumn::<T>::with_max_segments(budget);
         let mut v = Column::<T>::with_max_segments(budget);
         let mut model: Vec<T> = rng.values(200);
-        p.splice(0, 0, &lent(&model));
-        v.splice(0, 0, &lent(&model));
+        p.splice_slice(0, 0, &lent(&model));
+        v.splice_slice(0, 0, &lent(&model));
         for round in 0..30 {
             let at = some_place(&mut rng, model.len());
             let moves = some_moves(&mut rng, &model, at);
@@ -14826,8 +14833,8 @@ fn acc_cursors<T: Accd>() {
         let mut p = AccColumn::<T>::with_max_segments(budget);
         let mut v = Column::<T>::with_max_segments(budget);
         let mut model: Vec<T> = rng.values(200);
-        p.splice(0, 0, &lent(&model));
-        v.splice(0, 0, &lent(&model));
+        p.splice_slice(0, 0, &lent(&model));
+        v.splice_slice(0, 0, &lent(&model));
         for round in 0..30 {
             let at = some_place(&mut rng, model.len());
             let moves = some_moves(&mut rng, &model, at);
@@ -14983,7 +14990,7 @@ mod bijou_cursors {
             let budget = [2, 3, 8, 64][rng.below(4)];
             let mut model: Vec<T> = rng.values(200);
             let mut v = vb::Column::<T>::with_max_segments(budget);
-            v.splice(0, 0, &lent(&model));
+            v.splice_slice(0, 0, &lent(&model));
             for _ in 0..25 {
                 let at = some_place(&mut rng, model.len());
                 let moves = some_moves(&mut rng, &model, at);
@@ -15260,7 +15267,7 @@ fn delta_cursors<T: DeltaStepped>(seed: u64, max_segments: Option<usize>) {
         last = l;
         model.push(x);
     }
-    v.splice(0, 0, &model);
+    v.splice_slice(0, 0, &model);
     for round in 0..30 {
         let at = some_place(&mut rng, model.len());
         let moves = some_delta_moves(&mut rng, &model, at);
@@ -15461,7 +15468,7 @@ mod bijou_delta_cursors {
             last = l;
             model.push(x);
         }
-        v.splice(0, 0, &model);
+        v.splice_slice(0, 0, &model);
         for _ in 0..20 {
             let at = some_place(&mut rng, model.len());
             let moves = some_delta_moves(&mut rng, &model, at);
@@ -15608,15 +15615,15 @@ fn sum_copies<T: Totalled>() {
         let mut p = PrefixColumn::<T>::with_max_segments(budget);
         let mut v = Column::<T>::with_max_segments(budget);
         let mut model: Vec<T> = rng.values(150);
-        p.splice(0, 0, &lent(&model));
-        v.splice(0, 0, &lent(&model));
+        p.splice_slice(0, 0, &lent(&model));
+        v.splice_slice(0, 0, &lent(&model));
         for _ in 0..10 {
             let n = [0, 3, 40, 400][rng.below(4)];
             let src: Vec<T> = rng.values(n);
             let mut ps = PrefixColumn::<T>::with_max_segments(budget);
             let mut vs = Column::<T>::with_max_segments(budget);
-            ps.splice(0, 0, &lent(&src));
-            vs.splice(0, 0, &lent(&src));
+            ps.splice_slice(0, 0, &lent(&src));
+            vs.splice_slice(0, 0, &lent(&src));
             let splices = some_splices(&mut rng, model.len(), src.len());
             p.copy_ranges(ps, &splices);
             v.copy_ranges(vs, &splices);
@@ -15740,7 +15747,7 @@ fn delta_copies<T: Deltad>(seed: u64, max_segments: Option<usize>) {
     let made = |values: &[T], m: Option<usize>| match m {
         Some(m) => {
             let mut v = DeltaColumn::<T>::with_max_segments(m);
-            v.splice(0, 0, values);
+            v.splice_slice(0, 0, values);
             v
         }
         None => DeltaColumn::<T>::from_values(values),
@@ -15981,7 +15988,7 @@ fn prefix_shifted<T: Totalled>() {
         let budget = [2, 3, 8, 64][rng.below(4)];
         let mut p = PrefixColumn::<T>::with_max_segments(budget);
         let model: Vec<T> = rng.values(120);
-        p.splice(0, 0, &lent(&model));
+        p.splice_slice(0, 0, &lent(&model));
         let len = model.len();
         for _ in 0..15 {
             let a = rng.below(len + 2);
@@ -16028,7 +16035,7 @@ fn acc_shifted<T: Accd>() {
         let budget = [2, 3, 8, 64][rng.below(4)];
         let mut p = AccColumn::<T>::with_max_segments(budget);
         let model: Vec<T> = rng.values(120);
-        p.splice(0, 0, &lent(&model));
+        p.splice_slice(0, 0, &lent(&model));
         let len = model.len();
         // every value with what it accumulates to, as the iterator walks
         // them all
@@ -16402,7 +16409,7 @@ fn prefix_loaded_by_runs<T: Totalled>() {
         let n = rng.below(120);
         let model: Vec<T> = rng.values(n);
         let mut p = PrefixColumn::<T>::with_max_segments(budget);
-        p.splice(0, 0, &lent(&model));
+        p.splice_slice(0, 0, &lent(&model));
         let bytes = p.save();
         let opts = LoadOpts::new().with_max_segments(budget);
         let k = rng.below(60);
@@ -16559,7 +16566,7 @@ fn a_clients_own_encoding() {
         let v = column_of::<Tag>(&model);
         for t in [Tag::Int, Tag::Str] {
             let n = model.len();
-            golden::note(&v.scope_to_value(t, 0, n));
+            golden::note(&v.scope_to_value(t, 0..n));
         }
         assert!(check_same_load::<Tag>(&v.save()));
     }
@@ -16627,7 +16634,7 @@ where
     T: Kind + ColumnValueRef<Fixed8>,
 {
     let mut v = Column::<T, Fixed8>::new();
-    v.splice(0, 0, &lent(vals));
+    v.splice_slice(0, 0, &lent(vals));
     let bytes = v.save();
     golden::note(&bytes);
     let back = Column::<T, Fixed8>::load(&bytes).unwrap();
@@ -16636,7 +16643,7 @@ where
     // a literal run grown and cut: its header rewritten
     if vals.len() >= 2 {
         let at = vals.len() / 2;
-        v.splice(at, 1, &lent(&vals[..2]));
+        v.splice_slice(at, 1, &lent(&vals[..2]));
         golden::note(&v.save());
         assert!(Column::<T, Fixed8>::load(&v.save()).is_ok());
     }
@@ -16688,8 +16695,8 @@ fn bit_index_keeps<T: Kind>() {
         let del = rng.below(model.len() - at + 1).min(6);
         let n = rng.below(40);
         let ins = rng.values::<T>(n);
-        v.splice(at, del, &lent(&ins));
-        plain.splice(at, del, &lent(&ins));
+        v.splice_slice(at, del, &lent(&ins));
+        plain.splice_slice(at, del, &lent(&ins));
         model.splice(at..at + del, ins);
         let bytes = v.save();
         assert_eq!(plain.save(), bytes);

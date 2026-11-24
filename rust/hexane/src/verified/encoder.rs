@@ -257,7 +257,7 @@ impl<'a, V: ColumnValueRef<C>, C: Codec> Encoder<'a, V, C> {
     /// Give the encoder the values that `iter` gives, in their order.
     ///
     /// The specification speaks of what the iterator gives (`gives`),
-    /// as [`Column::splice_iter`]'s does: of an iterator that
+    /// as [`Column::splice`]'s does: of an iterator that
     /// keeps to what Verus asks of every iterator. Of another it says
     /// nothing but that the encoder is still one.
     ///

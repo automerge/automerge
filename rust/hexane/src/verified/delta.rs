@@ -46,7 +46,7 @@ use super::value::{RleValue, VOps, VOptOps, VOptWrite, VWrite};
 #[cfg(verus_keep_ghost)]
 use super::VGet;
 #[cfg(verus_keep_ghost)]
-use super::{after_call, after_edit};
+use super::{after_call, after_edit, gives};
 use super::{ColumnValueRef, VSpec, MAX_SEG};
 #[cfg(verus_keep_ghost)]
 use crate::cursor::{ReadsAgree, Slabs, Visitor, Weigh};
@@ -1008,7 +1008,8 @@ impl<T: DeltaValue<C>, C: Codec> DeltaColumn<T, C> {
     }
 
     /// Remove `del` values from index `at` on and put `values` in their
-    /// place.
+    /// place: as [`splice`](Self::splice) does with the values of a
+    /// slice, each of which must be one the column can keep.
     ///
     /// The column counts an edit more (`after_edit` of its `edits()`),
     /// unless the call deletes no value and inserts none.
@@ -1018,7 +1019,7 @@ impl<T: DeltaValue<C>, C: Codec> DeltaColumn<T, C> {
     /// Panics if two of the column's values would lie 2^63 or more
     /// apart.
     #[inline(always)]
-    pub fn splice(&mut self, at: usize, del: usize, values: &[T])
+    pub fn splice_slice(&mut self, at: usize, del: usize, values: &[T])
         requires
             at <= old(self)@.len(),
             del <= old(self)@.len() - at,
@@ -1027,7 +1028,35 @@ impl<T: DeltaValue<C>, C: Codec> DeltaColumn<T, C> {
             final(self)@ == old(self)@.take(at as int) + values@ + old(self)@.skip(at + del),
             final(self).edits() == after_call(old(self).edits(), del > 0 || values@.len() > 0),
     {
-        self.splice_impl(at, del, values)
+        self.splice_slice_impl(at, del, values)
+    }
+
+    /// Remove `del` values from index `at` on and put in their place the
+    /// values that `values` gives, as an iterator.
+    ///
+    /// The specification speaks of what the iterator gives (`gives`), as
+    /// [`Column::splice`](super::Column::splice)'s does: of the values it
+    /// gives, each is one the column can keep (`fits`), and they take the
+    /// place of the deleted ones.
+    ///
+    /// The column counts an edit more unless the call deletes no value
+    /// and inserts none.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the iterator gives a value the column cannot keep (one
+    /// that does not `fit`), before the column is changed, or if two of
+    /// the column's values would lie 2^63 or more apart.
+    #[inline(always)]
+    pub fn splice<I: IntoIterator<Item = T>>(&mut self, at: usize, del: usize, values: I)
+        requires
+            at <= old(self)@.len(),
+            del <= old(self)@.len() - at,
+        ensures
+            gives(values, |xs: Seq<T>| all_fit(xs) && final(self)@ == old(self)@.take(at as int) + xs + old(self)@.skip(at + del)),
+            final(self).edits() == after_call(old(self).edits(), del > 0 || final(self)@.len() != old(self)@.len()),
+    {
+        self.splice_impl::<I>(at, del, values)
     }
 
     /// Whether the run `run` passes the check

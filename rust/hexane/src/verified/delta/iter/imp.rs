@@ -15,6 +15,7 @@ use super::super::diffs::{
 #[cfg(verus_keep_ghost)]
 use super::super::{all_dom, delta_at, in_dom, lemma_bound, lemma_delta_run_at};
 use super::*;
+use crate::verified::imp::{bounds_exec, bounds_in_exec, range_in_exec};
 
 #[cfg(verus_keep_ghost)]
 use crate::btree::in_i64;
@@ -969,7 +970,63 @@ impl<'a, T: DeltaValue<C>, C: Codec> DeltaIter<'a, T, C> {
         }
     }
 
-    pub(super) fn seek_to_value_impl(&mut self, target: T, range: Range<usize>) -> (r: Range<usize>)
+    pub(super) fn seek_to_value_impl<R: RangeBounds<usize>>(&mut self, target: T, range: R) -> (r: Range<usize>)
+        ensures
+            final(self).column() == old(self).column(),
+            final(self).source() == old(self).source(),
+            ({
+                // where the range starts and ends
+                let (rs, re) = (
+                    bound_start(range.spec_start_bound()),
+                    bound_end(range.spec_start_bound(), range.spec_end_bound(), old(self).end_pos() as int),
+                );
+                let (p, c) = (old(self).pos() as int, old(self).column());
+                // where the window is made to end
+                let e = if rs <= re {
+                    re as int
+                } else {
+                    rs as int
+                };
+                // the places searched are `s..t` of the column
+                let t = if e <= p {
+                    p
+                } else if e <= c.len() {
+                    e
+                } else {
+                    c.len() as int
+                };
+                let s = if rs <= p {
+                    p
+                } else if rs <= t {
+                    rs as int
+                } else {
+                    t
+                };
+                &&& p <= s <= r.start <= r.end <= t <= c.len()
+                &&& final(self).pos() == r.start
+                &&& final(self).rest() == c.subrange(r.start as int, t)
+                &&& final(self).end_pos() == if rs > t || !target.fits() {
+                    r.start as int
+                } else if e >= p {
+                    e
+                } else {
+                    p
+                }
+                &&& sorted::<T>(c.subrange(s, t)) ==> forall|k: int|
+                    s <= k < t ==> {
+                        &&& (k < r.start) == T::below(#[trigger] c[k], target)
+                        &&& (r.start <= k < r.end) == (c[k] == target)
+                        &&& (r.end <= k) == T::below(target, c[k])
+                    }
+            }),
+    {
+        let (start, end) = bounds_exec(&range, self.end_pos());
+        self.seek_within(target, start..end)
+    }
+
+    /// [`seek_to_value`](DeltaIter::seek_to_value) over the places
+    /// `range.start..range.end`.
+    fn seek_within(&mut self, target: T, range: Range<usize>) -> (r: Range<usize>)
         ensures
             final(self).column() == old(self).column(),
             final(self).source() == old(self).source(),
@@ -1278,7 +1335,23 @@ impl<T: DeltaValue<C>, C: Codec> DeltaColumn<T, C> {
         r
     }
 
-    pub(super) fn iter_range_impl(&self, start: usize, end: usize) -> (it: DeltaIter<'_, T, C>)
+    pub(super) fn iter_range_impl(&self, range: Range<usize>) -> (it: DeltaIter<'_, T, C>)
+        ensures
+            ({
+                let (start, end) = range_in(range, self@.len());
+                &&& it.rest() == self@.subrange(start, end)
+                &&& it.column() == self@
+                &&& it.source() == Some(*self)
+                &&& it.pos() == start
+                &&& it.end_pos() == end
+            }),
+    {
+        let (start, end) = range_in_exec(range, self.len());
+        self.iter_within(start, end)
+    }
+
+    /// An iterator over the values `start..end`.
+    fn iter_within(&self, start: usize, end: usize) -> (it: DeltaIter<'_, T, C>)
         requires
             start <= end <= self@.len(),
         ensures
@@ -1298,7 +1371,26 @@ impl<T: DeltaValue<C>, C: Codec> DeltaColumn<T, C> {
         it
     }
 
-    pub(super) fn scope_to_value_impl(&self, value: T, start: usize, end: usize) -> (r: Range<usize>)
+    pub(super) fn scope_to_value_impl<R: RangeBounds<usize>>(&self, value: T, range: R) -> (r: Range<usize>)
+        ensures
+            ({
+                let (start, end) = bounds_in(range.spec_start_bound(), range.spec_end_bound(), self@.len());
+                &&& start <= r.start <= r.end <= end
+                &&& sorted::<T>(self@.subrange(start, end)) ==> forall|k: int|
+                    start <= k < end ==> {
+                        &&& (k < r.start) == T::below(#[trigger] self@[k], value)
+                        &&& (r.start <= k < r.end) == (self@[k] == value)
+                        &&& (r.end <= k) == T::below(value, self@[k])
+                    }
+            }),
+    {
+        let (start, end) = bounds_in_exec(&range, self.len());
+        self.scope_within(value, start, end)
+    }
+
+    /// [`scope_to_value`](DeltaColumn::scope_to_value) over the places
+    /// `start..end`.
+    fn scope_within(&self, value: T, start: usize, end: usize) -> (r: Range<usize>)
         requires
             start <= end <= self@.len(),
         ensures
@@ -1311,7 +1403,7 @@ impl<T: DeltaValue<C>, C: Codec> DeltaColumn<T, C> {
                 },
     {
         let mut it = self.iter();
-        it.seek_to_value(value, start..end)
+        it.seek_within(value, start..end)
     }
 }
 

@@ -8,6 +8,8 @@
 #![allow(unused_imports)]
 
 use super::*;
+#[cfg(verus_keep_ghost)]
+use vstd::std_specs::iter::IteratorSpec;
 
 use crate::attrib::weigh_run;
 use crate::btree::{SlabAgg, SlabBTree};
@@ -1105,7 +1107,7 @@ impl<T: DeltaValue<C>, C: Codec> DeltaColumn<T, C> {
         }
     }
 
-    pub(super) fn splice_impl(&mut self, at: usize, del: usize, values: &[T])
+    pub(super) fn splice_slice_impl(&mut self, at: usize, del: usize, values: &[T])
         requires
             at <= old(self)@.len(),
             del <= old(self)@.len() - at,
@@ -1152,6 +1154,59 @@ impl<T: DeltaValue<C>, C: Codec> DeltaColumn<T, C> {
             assert(vals::<T>(k1) =~= vals::<T>(k0).take(at as int) + values@ + vals::<T>(k0).skip(at + del));
         }
         *self = DeltaColumn { core };
+    }
+
+    #[verifier::exec_allows_no_decreases_clause]
+    pub(super) fn splice_impl<I: IntoIterator<Item = T>>(&mut self, at: usize, del: usize, values: I)
+        requires
+            at <= old(self)@.len(),
+            del <= old(self)@.len() - at,
+        ensures
+            gives(values, |xs: Seq<T>| all_fit(xs) && final(self)@ == old(self)@.take(at as int) + xs + old(self)@.skip(at + del)),
+            final(self).edits() == after_call(old(self).edits(), del > 0 || final(self)@.len() != old(self)@.len()),
+    {
+        // the values first, each checked, so that a panic leaves the
+        // column as it was
+        let mut it = values.into_iter();
+        let ghost it0 = it;
+        let mut vals: Vec<T> = Vec::new();
+        // a Verus loop with an invariant: `loop` + `match`
+        #[allow(clippy::while_let_loop)]
+        loop
+            invariant_except_break
+                it.obeys_prophetic_iter_laws() ==> vals@ + it.remaining() == it0.remaining(),
+            invariant
+                it.obeys_prophetic_iter_laws() == it0.obeys_prophetic_iter_laws(),
+                all_fit(vals@),
+            ensures
+                it0.obeys_prophetic_iter_laws() ==> vals@ == it0.remaining(),
+        {
+            let ghost before = vals@;
+            let ghost rem = it.remaining();
+            match it.next() {
+                Some(v) => {
+                    if v.try_i64().is_none() {
+                        crate::trusted::fail("a value a delta column cannot keep", Ghost(!v.fits()));
+                    }
+                    vals.push(v);
+                    proof {
+                        assert(vals@ == before.push(v));
+                        if it.obeys_prophetic_iter_laws() {
+                            assert(vals@ + it.remaining() =~= before + rem);
+                        }
+                    }
+                },
+                None => {
+                    proof {
+                        if it.obeys_prophetic_iter_laws() {
+                            assert(vals@ =~= before + rem);
+                        }
+                    }
+                    break ;
+                },
+            }
+        }
+        self.splice_slice_impl(at, del, vals.as_slice());
     }
 
     pub(super) fn run_fits_impl(run: &DeltaRun) -> (r: bool)
@@ -1319,7 +1374,7 @@ impl<T: DeltaValue<C>, C: Codec> DeltaColumn<T, C> {
             final(self).edits() == after_call(old(self).edits(), del > 0),
     {
         let none: Vec<T> = Vec::new();
-        self.splice(at, del, none.as_slice());
+        self.splice_slice(at, del, none.as_slice());
         proof {
             let (a, b) = (old(self)@.take(at as int), old(self)@.skip(at + del));
             assert(a + none@ + b =~= a + b);
@@ -1338,7 +1393,7 @@ impl<T: DeltaValue<C>, C: Codec> DeltaColumn<T, C> {
         proof {
             assert(one@ =~= seq![value]);
         }
-        self.splice(at, 0, one.as_slice());
+        self.splice_slice(at, 0, one.as_slice());
         proof {
             assert(self@ =~= old(self)@.insert(at as int, value));
         }

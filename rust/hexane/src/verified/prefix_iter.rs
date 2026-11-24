@@ -68,6 +68,8 @@ use crate::prefix_search::p_advance;
 #[cfg(verus_keep_ghost)]
 use crate::prefix_search::PrefixOrd;
 #[cfg(verus_keep_ghost)]
+use crate::verified::range_in;
+#[cfg(verus_keep_ghost)]
 use crate::window::windows;
 use crate::{Leb128, PackError, Run};
 use std::marker::PhantomData;
@@ -1045,25 +1047,27 @@ impl<V: PrefixValue + ColumnValueRef<C>, C: Codec> Column<V, C, SumIndex> {
         self.prefix_iter_impl()
     }
 
-    /// An iterator over the values `start..end` that keeps the running
-    /// sum, which counts from the column's start: the sum before the
-    /// first value it gives is what the values before `start` add up
-    /// to. The index gives that; the values before `start` are not all
+    /// An iterator over the values of `range`, clamped to the column
+    /// (`range_in`) as [`Column::iter_range`](super::Column::iter_range)
+    /// clamps it, that keeps the running sum, which counts from the
+    /// column's start: the sum before the first value it gives is what
+    /// the values before `start` add up to. The index gives that; the values before `start` are not all
     /// read.
     #[inline(always)]
-    pub fn prefix_iter_range(&self, start: usize, end: usize) -> (it: PrefixIter<'_, V, C>)
-        requires
-            start <= end <= self@.len(),
+    pub fn prefix_iter_range(&self, range: Range<usize>) -> (it: PrefixIter<'_, V, C>)
         ensures
-            it.rest() == self@.subrange(start as int, end as int),
-            it.column() == self@,
-            it.source() == Some(*self),
-            it.pos() == start,
-            it.end_pos() == end,
-            it.base_pos() == 0,
-            it.total().as_int() == summed::<V>(self@.take(start as int)),
+            ({
+                let (start, end) = range_in(range, self@.len());
+                &&& it.rest() == self@.subrange(start, end)
+                &&& it.column() == self@
+                &&& it.source() == Some(*self)
+                &&& it.pos() == start
+                &&& it.end_pos() == end
+                &&& it.base_pos() == 0
+                &&& it.total().as_int() == summed::<V>(self@.take(start))
+            }),
     {
-        self.prefix_iter_range_impl(start, end)
+        self.prefix_iter_range_impl(range)
     }
 
     /// The value at `index` with what the values through it add up to,

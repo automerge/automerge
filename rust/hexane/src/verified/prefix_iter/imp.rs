@@ -17,6 +17,7 @@ use super::super::sums::{
     lemma_sums_fit_take, lemma_vsum,
 };
 use super::*;
+use crate::verified::imp::range_in_exec;
 
 #[cfg(verus_keep_ghost)]
 use crate::btree::PrefixAggregate;
@@ -1210,7 +1211,26 @@ impl<V: PrefixValue + ColumnValueRef<C>, C: Codec> Column<V, C, SumIndex> {
         PrefixIter { ix, inner, total: zero, base: zero, base_at: 0 }
     }
 
-    pub(super) fn prefix_iter_range_impl(&self, start: usize, end: usize) -> (it: PrefixIter<'_, V, C>)
+    pub(super) fn prefix_iter_range_impl(&self, range: Range<usize>) -> (it: PrefixIter<'_, V, C>)
+        ensures
+            ({
+                let (start, end) = range_in(range, self@.len());
+                &&& it.rest() == self@.subrange(start, end)
+                &&& it.column() == self@
+                &&& it.source() == Some(*self)
+                &&& it.pos() == start
+                &&& it.end_pos() == end
+                &&& it.base_pos() == 0
+                &&& it.total().as_int() == summed::<V>(self@.take(start))
+            }),
+    {
+        let (start, end) = range_in_exec(range, self.len());
+        self.prefix_iter_within(start, end)
+    }
+
+    /// An iterator over the values `start..end` that keeps the running
+    /// sum.
+    fn prefix_iter_within(&self, start: usize, end: usize) -> (it: PrefixIter<'_, V, C>)
         requires
             start <= end <= self@.len(),
         ensures

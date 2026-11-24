@@ -344,6 +344,47 @@ impl<'a, V: ColumnValueRef<C>, C: Codec> Decoder<'a, V, C> {
     }
 }
 
+
+pub(super) fn decoder_impl<'a, V: ColumnValueRef>(bytes: &'a [u8]) -> (r: Decoder<'a, V>)
+    requires
+        Column::<V>::valid(bytes@),
+    ensures
+        r.rest() == Column::<V>::values(bytes@),
+{
+    Decoder::new(bytes)
+}
+
+pub(super) fn decoder_in_impl<'a, V: ColumnValueRef<C>, C: Codec>(bytes: &'a [u8]) -> (r: Decoder<'a, V, C>)
+    requires
+        Column::<V, C>::valid(bytes@),
+    ensures
+        r.rest() == Column::<V, C>::values(bytes@),
+{
+    Decoder::new(bytes)
+}
+
+pub(super) fn try_decoder_impl<'a, V: ColumnValueRef>(bytes: &'a [u8]) -> (r: Result<Decoder<'a, V>, PackError>)
+    ensures
+        r matches Ok(d) ==> {
+            &&& Column::<V>::valid(bytes@)
+            &&& d.rest() == Column::<V>::values(bytes@)
+        },
+        Column::<V>::valid(bytes@) && bytes@.len() <= u32::MAX ==> r is Ok,
+{
+    Decoder::try_new(bytes)
+}
+
+pub(super) fn try_decoder_in_impl<'a, V: ColumnValueRef<C>, C: Codec>(bytes: &'a [u8]) -> (r: Result<Decoder<'a, V, C>, PackError>)
+    ensures
+        r matches Ok(d) ==> {
+            &&& Column::<V, C>::valid(bytes@)
+            &&& d.rest() == Column::<V, C>::values(bytes@)
+        },
+        Column::<V, C>::valid(bytes@) && bytes@.len() <= u32::MAX ==> r is Ok,
+{
+    Decoder::try_new(bytes)
+}
+
 } // verus!
 
 impl<V: ColumnValueRef<C>, C: Codec> std::fmt::Debug for Decoder<'_, V, C> {

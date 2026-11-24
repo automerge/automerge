@@ -681,12 +681,13 @@ impl<V: VAccumulated + ColumnValueRef<C>, C: Codec> Column<V, C, AccIndex> {
         self.get_prefix(index.saturating_add(1))
     }
 
-    pub(super) fn sum_range_impl(&self, start: usize, end: usize) -> (r: V::Acc)
+    pub(super) fn sum_range_impl(&self, range: Range<usize>) -> (r: V::Acc)
         ensures
-            start <= end <= self@.len() ==> r == accumulated::<V>(self@.subrange(start as int, end as int)),
-            start <= self@.len() <= end ==> r == accumulated::<V>(self@.subrange(start as int, self@.len() as int)),
-            start >= end || start >= self@.len() ==> r == <V::Acc as VGroup>::zero(),
+            range.start <= range.end <= self@.len() ==> r == accumulated::<V>(self@.subrange(range.start as int, range.end as int)),
+            range.start <= self@.len() <= range.end ==> r == accumulated::<V>(self@.subrange(range.start as int, self@.len() as int)),
+            range.start >= range.end || range.start >= self@.len() ==> r == <V::Acc as VGroup>::zero(),
     {
+        let (start, end) = (range.start, range.end);
         let ghost n = self@.len() as int;
         let ix = match self.acc_index() {
             Some(ix) => ix,
