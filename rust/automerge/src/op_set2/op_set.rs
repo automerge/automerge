@@ -57,7 +57,7 @@ pub(crate) use op_query::{FixCounters, OpQuery, OpQueryTerm};
 pub(crate) use top_op::{TopIter, TopOps};
 pub(crate) use visible::{VisIter, VisibleOpIter};
 
-pub(crate) type InsertAcc<'a> = hexane::verified::PrefixIter<'a, bool>;
+pub(crate) type InsertAcc<'a> = hexane::PrefixIter<'a, bool>;
 
 #[derive(Debug, Clone)]
 pub(crate) struct OpSet {
@@ -506,7 +506,7 @@ impl OpSet {
 
     fn scan_for_sticky_marks(
         &self,
-        mut text_iter: hexane::verified::PrefixIter<'_, Option<u32>>,
+        mut text_iter: hexane::PrefixIter<'_, Option<u32>>,
         mut pos: usize,
     ) -> Option<usize> {
         let end = text_iter.end_pos();
@@ -964,7 +964,7 @@ impl OpSet {
     pub(crate) fn top_index_range(
         &self,
         range: &Range<usize>,
-    ) -> hexane::verified::Iter<'_, bool, hexane::Leb128, hexane::verified::SumIndex> {
+    ) -> hexane::Iter<'_, bool, hexane::Leb128, hexane::SumIndex> {
         self.cols.index.top.iter_range(range.clone())
     }
 
@@ -984,7 +984,7 @@ impl OpSet {
     pub(crate) fn key_str_iter_range(
         &self,
         range: &Range<usize>,
-    ) -> hexane::verified::Iter<'_, Option<String>> {
+    ) -> hexane::Iter<'_, Option<String>> {
         self.cols.key_str.iter_range(range.clone())
     }
 
@@ -1641,8 +1641,8 @@ impl ResolvedAction {
 }
 
 pub(crate) struct IterObjIds<'a> {
-    v1_ctr: hexane::verified::Iter<'a, Option<u32>>,
-    v1_actor: hexane::verified::Iter<'a, Option<ActorIdx>>,
+    v1_ctr: hexane::Iter<'a, Option<u32>>,
+    v1_actor: hexane::Iter<'a, Option<ActorIdx>>,
     next_ctr: Option<hexane::Run<Option<u32>>>,
     next_actor: Option<hexane::Run<Option<ActorIdx>>>,
     pos: usize,
@@ -1861,10 +1861,10 @@ pub(crate) mod tests {
             .iter()
             .flat_map(|o| o.succs.iter().map(|s| s.counter() as u32))
             .collect();
-        let group_col = hexane::verified::PrefixColumn::<u32>::from_values(&group_counts);
-        let actor_col = hexane::verified::Column::<ActorIdx>::from_values(&succ_actors);
-        let counter_col = hexane::verified::DeltaColumn::<u32>::from_values(&succ_counters);
-        let inc_col = hexane::verified::Column::<Option<i64>>::fill(actor_col.len(), None);
+        let group_col = hexane::PrefixColumn::<u32>::from_values(&group_counts);
+        let actor_col = hexane::Column::<ActorIdx>::from_values(&succ_actors);
+        let counter_col = hexane::DeltaColumn::<u32>::from_values(&succ_counters);
+        let inc_col = hexane::Column::<Option<i64>>::fill(actor_col.len(), None);
 
         let mut group_iter = group_col.prefix_iter();
         let mut actor_iter = actor_col.iter();

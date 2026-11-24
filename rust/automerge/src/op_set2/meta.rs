@@ -1,6 +1,6 @@
 use super::types::ScalarValue;
-use hexane::verified::{lebsize, ulebsize};
 use hexane::PackError;
+use hexane::{lebsize, ulebsize};
 
 #[derive(Debug)]
 pub(crate) enum ValueType {
@@ -100,7 +100,7 @@ impl From<&[u8]> for ValueMeta {
 }
 
 // A value's metadata is stored in a column as the number it is.
-impl hexane::verified::VNewtype for ValueMeta {
+impl hexane::VNewtype for ValueMeta {
     type Base = u64;
 
     fn to_base(self) -> u64 {
@@ -114,7 +114,7 @@ impl hexane::verified::VNewtype for ValueMeta {
 
 // A prefix column of metadata sums the values' lengths, in a `u64`: the
 // sum before a value is where its bytes start in the value column.
-impl hexane::verified::VAmount for ValueMeta {
+impl hexane::VAmount for ValueMeta {
     type Sum = u64;
 
     // a length is less than 2^60 (the number's top 60 bits), so that any
@@ -132,7 +132,7 @@ impl hexane::verified::VAmount for ValueMeta {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hexane::verified::PrefixColumn;
+    use hexane::PrefixColumn;
 
     #[test]
     fn column_data_meta_group() {

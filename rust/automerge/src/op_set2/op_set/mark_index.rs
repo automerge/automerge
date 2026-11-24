@@ -2,8 +2,8 @@ use crate::actor::{ActorRefs, ActorRemoval, ActorShift, HasActorIndices};
 use crate::op_set2::op_set::RichTextQueryState;
 use crate::op_set2::MarkData;
 use crate::types::{Clock, OpId};
-use hexane::verified::{AccColumn, AccIndex, VAccum, VAdds, VGroup, VNewtype};
 use hexane::PackError;
+use hexane::{AccColumn, AccIndex, VAccum, VAdds, VGroup, VNewtype};
 
 use rustc_hash::FxHashSet;
 use std::collections::HashMap;
@@ -267,16 +267,14 @@ impl MarkIndexColumn {
         self.data.len()
     }
 
-    pub(crate) fn iter(
-        &self,
-    ) -> hexane::verified::Iter<'_, Option<MarkIdx>, hexane::Leb128, AccIndex> {
+    pub(crate) fn iter(&self) -> hexane::Iter<'_, Option<MarkIdx>, hexane::Leb128, AccIndex> {
         self.data.iter()
     }
 
     pub(crate) fn iter_range(
         &self,
         range: std::ops::Range<usize>,
-    ) -> hexane::verified::Iter<'_, Option<MarkIdx>, hexane::Leb128, AccIndex> {
+    ) -> hexane::Iter<'_, Option<MarkIdx>, hexane::Leb128, AccIndex> {
         self.data.iter_range(range)
     }
 
